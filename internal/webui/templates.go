@@ -22,7 +22,7 @@ const pageTemplates = `
 <body class="login-body">
   <button class="theme-toggle login-theme-toggle" type="button" data-theme-toggle aria-label="切换颜色主题"><span data-theme-icon aria-hidden="true">☀</span></button>
   <main class="login-shell compact-login">
-    <section class="login-card"><a href="/login" class="brand login-card-brand"><span class="brand-mark large">RF</span><strong>{{panelName .Settings}}</strong></a><div class="login-card-head"><h1>登录</h1></div>{{if .Error}}<div class="alert error">{{.Error}}</div>{{end}}<form method="post" action="/login" class="stack-form"><input class="visually-hidden" type="text" name="username" value="admin" autocomplete="username" tabindex="-1" aria-hidden="true"><label>管理令牌<input type="password" name="token" autocomplete="current-password" autofocus required></label><button class="button primary" type="submit">登录</button></form></section>
+    <section class="login-card"><a href="/login" class="brand login-card-brand"><span class="brand-mark large">QH</span><strong>{{panelName .Settings}}</strong></a><div class="login-card-head"><h1>登录</h1></div>{{if .Error}}<div class="alert error">{{.Error}}</div>{{end}}<form method="post" action="/login" class="stack-form"><input class="visually-hidden" type="text" name="username" value="admin" autocomplete="username" tabindex="-1" aria-hidden="true"><label>管理令牌<input type="password" name="token" autocomplete="current-password" autofocus required></label><button class="button primary" type="submit">登录</button></form></section>
   </main>
 </body></html>
 {{end}}
@@ -39,7 +39,7 @@ const pageTemplates = `
 <body class="app-body page-{{.Active}}">
 <div class="desktop-app">
   <aside class="app-dock">
-    <a class="dock-logo" href="/" aria-label="{{panelName .Settings}} 总览"><span>RF</span></a>
+    <a class="dock-logo" href="/" aria-label="{{panelName .Settings}} 总览"><span>QH</span></a>
     <nav class="dock-nav" aria-label="主导航">
       <a class="{{if eq .Active "dashboard"}}active{{end}}" href="/" title="总览"><svg viewBox="0 0 24 24"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z"/></svg><span class="dock-label">总览</span></a>
       <a class="{{if or (eq .Active "agents") (eq .Active "agent-config")}}active{{end}}" href="/agents" title="节点"><svg viewBox="0 0 24 24"><rect x="4" y="3.5" width="16" height="6" rx="2"/><rect x="4" y="14.5" width="16" height="6" rx="2"/><path d="M8 6.5h.01M8 17.5h.01M12 6.5h5M12 17.5h5"/></svg><span class="dock-label">节点</span><b data-online-count {{if not .Overview.AgentsOnline}}hidden{{end}}>{{.Overview.AgentsOnline}}</b></a>
@@ -52,7 +52,7 @@ const pageTemplates = `
   </aside>
 
   <aside class="context-sidebar">
-    <header class="context-brand"><a href="/"><span class="brand-mark">RF</span><strong>{{panelName .Settings}}</strong></a></header>
+    <header class="context-brand"><a href="/"><span class="brand-mark">QH</span><strong>{{panelName .Settings}}</strong></a></header>
 
     {{if eq .Active "dashboard"}}
       <nav class="context-menu" aria-label="总览目录"><a class="active" href="#summary"><span>01</span>运行概览</a><a href="#fleet"><span>02</span>节点状态</a><a href="#activity"><span>03</span>最近活动</a></nav>
