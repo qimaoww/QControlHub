@@ -36,6 +36,7 @@ type Config struct {
 	TrustedProxies  []*net.IPNet
 	AgentBinary     []byte
 	WebhookSecret   string
+	SessionTTL      time.Duration
 }
 
 type Server struct {
@@ -49,6 +50,9 @@ type Server struct {
 	agentBinary     []byte
 	notifier        *notify.Client
 	roleTokens      map[[32]byte]core.Role
+	sessionsMu      sync.Mutex
+	sessions        map[string]apiSession
+	sessionTTL      time.Duration
 	connectionsMu   sync.Mutex
 	connections     map[string]liveConnection
 }
@@ -88,6 +92,8 @@ func New(dataStore *store.Store, config Config) *Server {
 		agentBinary:     config.AgentBinary,
 		notifier:        notify.New(config.WebhookSecret, slog.Default()),
 		roleTokens:      roleTokens,
+		sessions:        make(map[string]apiSession),
+		sessionTTL:      sessionTTL(config.SessionTTL),
 		connections:     make(map[string]liveConnection),
 	}
 }
@@ -111,6 +117,9 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.health)
 	mux.HandleFunc("GET /readyz", s.readiness)
+	mux.HandleFunc("POST /api/v1/auth/login", s.login)
+	mux.HandleFunc("GET /api/v1/auth/session", s.session)
+	mux.HandleFunc("POST /api/v1/auth/logout", s.logout)
 
 	mux.Handle("GET /api/v1/overview", s.requireRole(core.RoleReadonly, http.HandlerFunc(s.overview)))
 	mux.Handle("GET /api/v1/agents", s.requireRole(core.RoleReadonly, http.HandlerFunc(s.listAgents)))
@@ -132,6 +141,14 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/enrollment-tokens", s.requireRole(core.RoleReadonly, http.HandlerFunc(s.listEnrollmentTokens)))
 	mux.Handle("POST /api/v1/enrollment-tokens", s.requireRole(core.RoleAdmin, http.HandlerFunc(s.createEnrollmentToken)))
 	mux.Handle("DELETE /api/v1/enrollment-tokens/{id}", s.requireRole(core.RoleAdmin, http.HandlerFunc(s.revokeEnrollmentToken)))
+	mux.Handle("GET /api/v1/settings", s.requireRole(core.RoleReadonly, http.HandlerFunc(s.getSettings)))
+	mux.Handle("PUT /api/v1/settings", s.requireRole(core.RoleAdmin, http.HandlerFunc(s.putSettings)))
+	mux.Handle("GET /api/v1/audit", s.requireRole(core.RoleReadonly, http.HandlerFunc(s.listAudit)))
+	mux.Handle("GET /api/v1/metrics/{id}", s.requireRole(core.RoleReadonly, http.HandlerFunc(s.metricSamples)))
+	mux.Handle("GET /api/v1/templates", s.requireRole(core.RoleReadonly, http.HandlerFunc(s.listTemplates)))
+	mux.Handle("POST /api/v1/templates", s.requireRole(core.RoleOperator, http.HandlerFunc(s.createTemplate)))
+	mux.Handle("DELETE /api/v1/templates/{id}", s.requireRole(core.RoleAdmin, http.HandlerFunc(s.deleteTemplate)))
+	mux.Handle("POST /api/v1/templates/{id}/apply", s.requireRole(core.RoleOperator, http.HandlerFunc(s.applyTemplate)))
 
 	mux.HandleFunc("GET /api/v1/agent-binary", s.serveAgentBinary)
 
@@ -181,6 +198,7 @@ func (s *Server) deleteAgent(w http.ResponseWriter, request *http.Request) {
 		return
 	}
 	s.DisconnectAgent(agentID)
+	s.recordAudit(request, "agent.deleted", agentID, "")
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -243,6 +261,7 @@ func (s *Server) createConfig(w http.ResponseWriter, request *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
+	s.recordAudit(request, "config.created", config.ID, config.Name+" ("+string(config.Engine)+")")
 	writeJSON(w, http.StatusCreated, config)
 }
 
@@ -257,6 +276,7 @@ func (s *Server) updateConfig(w http.ResponseWriter, request *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
+	s.recordAudit(request, "config.updated", config.ID, "v"+strconv.Itoa(config.Version)+" "+config.Name)
 	writeJSON(w, http.StatusOK, config)
 }
 
@@ -265,6 +285,7 @@ func (s *Server) deleteConfig(w http.ResponseWriter, request *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
+	s.recordAudit(request, "config.deleted", request.PathValue("id"), "")
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -322,6 +343,7 @@ func (s *Server) restoreConfigRevision(w http.ResponseWriter, request *http.Requ
 		writeStoreError(w, err)
 		return
 	}
+	s.recordAudit(request, "config.restored", restored.ID, "v"+strconv.Itoa(version)+" -> v"+strconv.Itoa(restored.Version))
 	writeJSON(w, http.StatusOK, restored)
 }
 
@@ -368,6 +390,7 @@ func (s *Server) createTask(w http.ResponseWriter, request *http.Request) {
 		return
 	}
 	task.ConfigContent = ""
+	s.recordAudit(request, "task.created", task.ID, string(task.Action)+" "+string(task.Engine)+" "+task.AgentID)
 	status := http.StatusCreated
 	if task.Reused {
 		status = http.StatusOK
@@ -389,6 +412,7 @@ func (s *Server) cancelTask(w http.ResponseWriter, request *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
+	s.recordAudit(request, "task.canceled", request.PathValue("id"), "")
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -399,6 +423,7 @@ func (s *Server) retryTask(w http.ResponseWriter, request *http.Request) {
 		return
 	}
 	task.ConfigContent = ""
+	s.recordAudit(request, "task.retried", task.ID, "")
 	writeJSON(w, http.StatusCreated, task)
 }
 
@@ -422,6 +447,7 @@ func (s *Server) createEnrollmentToken(w http.ResponseWriter, request *http.Requ
 		writeStoreError(w, err)
 		return
 	}
+	s.recordAudit(request, "enrollment_token.created", created.ID, created.Name)
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusCreated, created)
 }
@@ -431,6 +457,7 @@ func (s *Server) revokeEnrollmentToken(w http.ResponseWriter, request *http.Requ
 		writeStoreError(w, err)
 		return
 	}
+	s.recordAudit(request, "enrollment_token.revoked", request.PathValue("id"), "")
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -693,7 +720,7 @@ func (s *Server) requireRole(minimum core.Role, next http.Handler) http.Handler 
 			writeError(w, http.StatusTooManyRequests, "too many authentication failures")
 			return
 		}
-		role, ok := s.roleForToken(bearerToken(request))
+		role, ok := s.sessionRole(request)
 		if !ok {
 			s.adminLimiter.Failure(key, now)
 			w.Header().Set("WWW-Authenticate", `Bearer realm="QControlHub admin API"`)
@@ -705,6 +732,14 @@ func (s *Server) requireRole(minimum core.Role, next http.Handler) http.Handler 
 			writeError(w, http.StatusForbidden, "token role does not permit this operation")
 			return
 		}
+		if bearerToken(request) == "" && request.Method != http.MethodGet && request.Method != http.MethodHead && request.Method != http.MethodOptions {
+			value, sessionOK := s.sessionForRequest(request)
+			if !sessionOK || !constantEqual(request.Header.Get(csrfHeader), value.CSRF) {
+				writeError(w, http.StatusForbidden, "missing or invalid CSRF token")
+				return
+			}
+		}
+		w.Header().Set("X-QControlHub-Role", string(role))
 		next.ServeHTTP(w, request)
 	})
 }
@@ -782,8 +817,9 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 		if origin != "" {
 			if _, allowed := s.allowedOrigins[origin]; allowed {
 				w.Header().Set("Access-Control-Allow-Origin", origin)
+				w.Header().Set("Access-Control-Allow-Credentials", "true")
 				w.Header().Set("Vary", "Origin")
-				w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-QControlHub-Agent-ID, X-QControlHub-Timestamp, X-QControlHub-Nonce, X-QControlHub-Signature")
+				w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-QControlHub-CSRF, X-QControlHub-Agent-ID, X-QControlHub-Timestamp, X-QControlHub-Nonce, X-QControlHub-Signature")
 				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 			} else if request.Method == http.MethodOptions {
 				writeError(w, http.StatusForbidden, "origin is not allowed")

@@ -15,6 +15,7 @@ services:
       - postgres-data:/var/lib/postgresql/data
     networks:
       - backend
+      - control-host
       - database-host
     security_opt:
       - no-new-privileges:true
@@ -45,16 +46,14 @@ services:
       # PostgreSQL is on this Compose project's isolated internal bridge.
       QCH_ALLOW_INSECURE_DATABASE: ${QCH_ALLOW_INSECURE_DATABASE:-true}
       QCH_CORS_ORIGINS: ${QCH_CORS_ORIGINS:-}
-      # The host-side Nginx reaches the published port through this fixed gateway.
-      QCH_TRUSTED_PROXY_CIDRS: ${QCH_TRUSTED_PROXY_CIDRS:-172.31.254.1/32}
+      # The host-side Nginx reaches qcontrol-web; this is the API's trusted proxy network.
+      QCH_TRUSTED_PROXY_CIDRS: ${QCH_TRUSTED_PROXY_CIDRS:-172.30.254.1/32}
       # Optional capabilities; all default to disabled/empty so Compose keeps
       # working without them.
       QCH_WEBHOOK_SECRET: ${QCH_WEBHOOK_SECRET:-}
       QCH_CONFIG_ENCRYPTION_KEY: ${QCH_CONFIG_ENCRYPTION_KEY:-}
       QCH_OPERATOR_TOKENS: ${QCH_OPERATOR_TOKENS:-}
       QCH_READONLY_TOKENS: ${QCH_READONLY_TOKENS:-}
-    ports:
-      - "${QCH_BIND_ADDRESS:-127.0.0.1}:${QCH_PORT:-8080}:8080"
     networks:
       - backend
       - control-host
@@ -74,6 +73,44 @@ services:
       start_period: 10s
     stop_grace_period: 15s
 
+  qcontrol-web:
+    image: ghcr.io/qimaoww/qcontrol-web:${QCH_IMAGE_TAG:-latest}
+    build:
+      context: .
+      target: qcontrol-web
+      args:
+        VERSION: ${VERSION:-dev}
+    restart: unless-stopped
+    depends_on:
+      control-plane:
+        condition: service_healthy
+    ports:
+      - "${QCH_BIND_ADDRESS:-127.0.0.1}:${QCH_PORT:-8080}:8080"
+    networks:
+      - backend
+      - control-host
+    read_only: true
+    tmpfs:
+      - /tmp:size=8m,mode=1777
+      - /var/cache/nginx:size=8m,mode=1777
+      - /var/run:size=1m,mode=1777
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 64
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 5s
+    stop_grace_period: 10s
+
 volumes:
   postgres-data:
 
@@ -83,6 +120,6 @@ networks:
   control-host:
     ipam:
       config:
-        - subnet: ${QCH_CONTROL_PROXY_SUBNET:-172.31.254.0/24}
-          gateway: ${QCH_CONTROL_PROXY_GATEWAY:-172.31.254.1}
+        - subnet: ${QCH_CONTROL_PROXY_SUBNET:-172.30.254.0/24}
+          gateway: ${QCH_CONTROL_PROXY_GATEWAY:-172.30.254.1}
   database-host:

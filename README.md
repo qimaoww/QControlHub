@@ -1,12 +1,12 @@
 # QControlHub
 
-QControlHub 是一个纯 Go 的 Linux 节点配置与远程运维控制平台。控制面同时提供 JSON API 和服务端渲染的 Web 控制台，将配置与任务保存在 PostgreSQL；远程 Agent 负责校验、原子部署并通过 systemd 管理节点服务。
+QControlHub 是一个纯 Go 的 Linux 节点配置与远程运维控制平台。Go 控制面只提供 JSON API 和 Agent WSS，独立静态 SPA 负责 Web 控制台；配置与任务保存在 PostgreSQL，远程 Agent 负责校验、原子部署并通过 systemd 管理节点服务。
 
 > QControlHub 能下发敏感配置并控制系统服务，属于高权限基础设施。生产环境必须使用 HTTPS、随机长令牌、受限网络和可靠备份；不要把控制面端口直接暴露到公网。
 
 ## 主要能力
 
-- 一个 Go 控制面同时承载后端 API 与 Go SSR 前端，无 Node.js 运行时。
+- 控制面只承载后端 API，独立 `qcontrol-web` 静态 SPA 提供控制台，无 Node.js 运行时。
 - PostgreSQL 持久化节点、配置版本、执行任务、签名 nonce 与审计结果。
 - Agent 通过既有 WSS 心跳上报 CPU、内存、根磁盘、默认路由接口地址、实时上下行速率及累计流量；节点页每 5 秒从带会话鉴权的同源接口刷新最新快照。
 - 支持 `mihomo`、`xray`、`sing-box`、`ss-rust` 四类配置，单份配置上限 2 MiB。
@@ -27,7 +27,8 @@ QControlHub 是一个纯 Go 的 Linux 节点配置与远程运维控制平台。
 
 ```mermaid
 flowchart LR
-    Admin["管理员浏览器 / API"] -->|"HTTPS + 管理员鉴权"| CP["Go 控制面 + SSR Web"]
+    Admin["管理员浏览器 / API"] -->|"HTTPS + 管理员鉴权"| WEB["qcontrol-web SPA"]
+    WEB -->|"同源 JSON API"| CP["Go 控制面 API"]
     CP -->|"pgx"| PG[("PostgreSQL")]
     Agent["远程 Go Agent"] -->|"出站 WSS + Ed25519 握手"| CP
     Agent -->|"固定配置路径"| Engines["Mihomo / Xray / sing-box / Shadowsocks Rust"]
@@ -50,30 +51,25 @@ QControlHub 当前仅支持 Linux 部署。
 ./deploy/quick-start.sh -m bundled
 ./deploy/quick-start.sh -m external \
   -d 'postgresql://user:pass@db.example.com:5432/qcontrolhub?sslmode=verify-full'
-
-# 如果 PostgreSQL 在同一台主机的其他 Compose 项目中，指定它的 Docker 网络，并使用数据库服务名：
-./deploy/quick-start.sh -m external -n 1panel-network \
-  -d 'postgresql://qcontrolhub:URL_ENCODED_PASSWORD@postgresql:5432/qcontrolhub?sslmode=disable'
 ```
-
-`-n` 会为控制面追加一个 external Docker network；容器内的 `127.0.0.1` 指向控制面容器自身，不能用来访问宿主机上的 PostgreSQL。若数据库只绑定宿主机回环地址，应将控制面加入数据库所在的 Docker network，或调整数据库监听地址后再使用宿主机地址。
 
 首次运行会生成随机密钥并写入权限为 `0600` 的 `.env`。重复运行默认复用已有密钥并只补齐缺失项；如需轮换应用密钥，使用 `-f`，脚本会先备份 `.env` 且不会更改内置 PostgreSQL 密码。使用 `-h` 可查看全部选项。
 
-项目发布以下 GHCR 镜像；一键部署默认拉取控制面镜像，Agent 镜像可用于节点侧交付：
+项目发布以下公开 GHCR 镜像；一键部署默认拉取 SPA 和控制面镜像，Agent 镜像可用于节点侧交付：
 
 ```text
 ghcr.io/qimaoww/qcontrol-plane:latest
 ghcr.io/qimaoww/qagent:latest
+ghcr.io/qimaoww/qcontrol-web:latest
 ```
 
-公开镜像可以直接拉取；将 `QCH_IMAGE_TAG=local` 写入 `.env` 时，脚本会改为使用仓库内的 Dockerfile 本地构建。
+私有镜像需要先执行 `docker login ghcr.io`；将 `QCH_IMAGE_TAG=local` 写入 `.env` 时，脚本会改为使用仓库内的 Dockerfile 本地构建。
 
 也可以直接用 Make 目标手动部署。
 
 ### Linux · Docker Compose（推荐）
 
-适用于已安装 Docker Engine、Docker Compose v2 和 OpenSSL 的 Linux 主机。一键拉起 PostgreSQL + 控制面，仅监听回环地址。
+适用于已安装 Docker Engine、Docker Compose v2 和 OpenSSL 的 Linux 主机。一键拉起 PostgreSQL、API 控制面和独立 SPA，仅监听回环地址。
 
 ```bash
 git clone https://github.com/qimaoww/qcontrolhub.git
@@ -82,7 +78,7 @@ make init-env    # 生成 0600 的 .env（含 QCH_ADMIN_TOKEN、数据库密码�
 make dev-up      # 本机体验模式：回环 HTTP，关闭 Secure Cookie
 ```
 
-访问 `http://127.0.0.1:8080`，管理员令牌位于 `.env` 的 `QCH_ADMIN_TOKEN`。停止：`make down`。
+访问 `http://127.0.0.1:8080`，管理员令牌位于 `.env` 的 `QCH_ADMIN_TOKEN`。8080 由 `qcontrol-web` 提供，控制面 API 不直接发布到宿主机。停止：`make down`。
 
 生产环境改用 `make up`（保持 Secure Cookie + `QCH_ALLOW_INSECURE_HTTP=false`），并在前面架设 [Nginx TLS](deploy/nginx/qcontrolhub.conf)。完整步骤见 [生产部署](docs/production.md)。
 
@@ -110,7 +106,7 @@ make init-env
 make dev-up
 ```
 
-然后访问 `http://127.0.0.1:8080`，使用 `.env` 中生成的 `QCH_ADMIN_TOKEN` 登录。`make dev-up` 只为本机体验显式允许容器内的明文 HTTP，并关闭 Secure Cookie；Compose 默认仅发布到回环地址。
+然后访问 `http://127.0.0.1:8080`，使用 `.env` 中生成的 `QCH_ADMIN_TOKEN` 登录。`make dev-up` 只为本机体验显式允许容器内的明文 HTTP，并关闭 Secure Cookie；Compose 默认仅发布 SPA 到回环地址。
 
 停止环境：
 
