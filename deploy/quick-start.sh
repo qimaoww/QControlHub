@@ -9,13 +9,11 @@
 #   ./deploy/quick-start.sh                          # 交互式选择部署方式
 #   ./deploy/quick-start.sh -m bundled               # 全套部署（内置 PostgreSQL + 控制面）
 #   ./deploy/quick-start.sh -m external -d 'postgresql://user:pass@db:5432/qcontrolhub?sslmode=verify-full'
-#   ./deploy/quick-start.sh -m external -n 1panel-network -d 'postgresql://user:pass@postgresql:5432/qcontrolhub?sslmode=disable'
 
 set -euo pipefail
 
 MODE=""
 DATABASE_URL=""
-DATABASE_NETWORK=""
 ADMIN_TOKEN=""
 FORCE=false
 READY_TIMEOUT=60
@@ -32,7 +30,6 @@ usage() {
 选项：
   -m MODE             选择部署模式；省略时交互选择
   -d DATABASE_URL     external 模式使用的 PostgreSQL 连接串
-  -n NETWORK          external 模式加入已有 Docker 网络，便于按服务名连接数据库
   -a ADMIN_TOKEN      管理员令牌（至少 32 字节）
   -f                  轮换应用密钥；执行前备份现有 .env，数据库密码不变
   -t SECONDS          就绪检查超时时间（默认 60 秒）
@@ -52,11 +49,10 @@ if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
     exit 0
 fi
 
-while getopts ':m:d:n:a:ft:h' opt; do
+while getopts ':m:d:a:ft:h' opt; do
     case "$opt" in
         m) MODE="$OPTARG" ;;
         d) DATABASE_URL="$OPTARG" ;;
-        n) DATABASE_NETWORK="$OPTARG" ;;
         a) ADMIN_TOKEN="$OPTARG" ;;
         f) FORCE=true ;;
         t) READY_TIMEOUT="$OPTARG" ;;
@@ -72,7 +68,6 @@ case "$MODE" in
     ""|bundled|external) ;;
     *) die "未知部署模式：$MODE（可选 bundled / external）" ;;
 esac
-[ -z "$DATABASE_NETWORK" ] || [ "$MODE" = "external" ] || die "-n 仅能用于 external 模式"
 if ! [[ "$READY_TIMEOUT" =~ ^[1-9][0-9]*$ ]]; then
     die "就绪检查超时时间必须是正整数"
 fi
@@ -81,7 +76,6 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 ENV_FILE="$REPO_ROOT/.env"
 EXTERNAL_COMPOSE_FILE="$REPO_ROOT/docker-compose.external.yml"
-EXTERNAL_NETWORK_COMPOSE_FILE="$REPO_ROOT/docker-compose.external-network.yml"
 
 require_commands() {
     local command_name
@@ -184,13 +178,6 @@ validate_database_url() {
     esac
 }
 
-validate_network_name() {
-    local network="$1"
-    case "$network" in
-        ''|*[!A-Za-z0-9_.-]*|[.-]*) die "Docker 网络名称无效：$network" ;;
-    esac
-}
-
 write_external_compose() {
     cat > "$EXTERNAL_COMPOSE_FILE" <<'YAML'
 name: qcontrolhub
@@ -217,8 +204,8 @@ services:
       QCH_CONFIG_ENCRYPTION_KEY: ${QCH_CONFIG_ENCRYPTION_KEY:-}
       QCH_OPERATOR_TOKENS: ${QCH_OPERATOR_TOKENS:-}
       QCH_READONLY_TOKENS: ${QCH_READONLY_TOKENS:-}
-    ports:
-      - "${QCH_BIND_ADDRESS:-127.0.0.1}:${QCH_PORT:-8080}:8080"
+    networks:
+      - backend
     read_only: true
     tmpfs:
       - /tmp:size=16m,mode=1777
@@ -234,20 +221,49 @@ services:
       retries: 6
       start_period: 10s
     stop_grace_period: 15s
-YAML
-}
-
-write_external_network_compose() {
-    cat > "$EXTERNAL_NETWORK_COMPOSE_FILE" <<'YAML'
-services:
-  control-plane:
+  qcontrol-web:
+    image: ghcr.io/qimaoww/qcontrol-web:${QCH_IMAGE_TAG:-latest}
+    build:
+      context: .
+      target: qcontrol-web
+      args:
+        VERSION: ${VERSION:-dev}
+    restart: unless-stopped
+    depends_on:
+      control-plane:
+        condition: service_healthy
+    ports:
+      - "${QCH_BIND_ADDRESS:-127.0.0.1}:${QCH_PORT:-8080}:8080"
     networks:
-      - external-database
+      - backend
+      - frontend-host
+    read_only: true
+    tmpfs:
+      - /tmp:size=8m,mode=1777
+      - /var/cache/nginx:size=8m,mode=1777
+      - /var/run:size=1m,mode=1777
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 64
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 5s
+    stop_grace_period: 10s
 
 networks:
-  external-database:
-    external: true
-    name: ${QCH_DATABASE_NETWORK:?external database Docker network required}
+  backend:
+    internal: true
+  frontend-host:
+    driver: bridge
 YAML
 }
 
@@ -266,6 +282,8 @@ show_diagnostics() {
         echo "-> 最近的 PostgreSQL 日志："
         compose logs --tail=40 postgres || true
     fi
+    echo "-> 最近的 SPA 日志："
+    compose logs --tail=40 qcontrol-web || true
 }
 
 start_services() {
@@ -356,7 +374,7 @@ prepare_bundled_env() {
 }
 
 prepare_external_env() {
-    local db_url db_network admin_token webhook_secret config_key
+    local db_url admin_token webhook_secret config_key
     local behind_proxy allow_http allow_database cors_origins bind_address port image_tag version
 
     db_url="${DATABASE_URL:-$(read_env_key QCH_DATABASE_URL)}"
@@ -370,11 +388,6 @@ prepare_external_env() {
     fi
     [ -n "$db_url" ] || die "DATABASE_URL 不能为空"
     validate_database_url "$db_url"
-
-    db_network="${DATABASE_NETWORK:-$(read_env_key QCH_DATABASE_NETWORK)}"
-    if [ -n "$db_network" ]; then
-        validate_network_name "$db_network"
-    fi
 
     if [ "$FORCE" = true ]; then
         backup_env
@@ -405,7 +418,6 @@ prepare_external_env() {
 
     update_env_file \
         "QCH_DATABASE_URL=$db_url" \
-        "QCH_DATABASE_NETWORK=$db_network" \
         "QCH_ADMIN_TOKEN=$admin_token" \
         "QCH_WEBHOOK_SECRET=$webhook_secret" \
         "QCH_CONFIG_ENCRYPTION_KEY=$config_key" \
@@ -417,13 +429,6 @@ prepare_external_env() {
         "QCH_PORT=$port" \
         "QCH_IMAGE_TAG=$image_tag" \
         "VERSION=$version"
-}
-
-local_service_url() {
-    local port
-    port="$(read_env_key QCH_PORT)"
-    [ -n "$port" ] || port=8080
-    printf 'http://127.0.0.1:%s' "$port"
 }
 
 show_result() {
@@ -484,14 +489,13 @@ case "$MODE" in
         start_services
 
         echo "-> 等待控制面就绪..."
-        service_url="$(local_service_url)"
-        if ! wait_ready "$service_url/readyz" "$READY_TIMEOUT"; then
+        if ! wait_ready "http://127.0.0.1:8080/readyz" "$READY_TIMEOUT"; then
             show_diagnostics
             die "控制面未在 ${READY_TIMEOUT} 秒内就绪"
         fi
 
         token="$(read_env_key QCH_ADMIN_TOKEN)"
-        show_result "$token" "$service_url" "docker compose down"
+        show_result "$token" "http://127.0.0.1:8080" "docker compose down"
         ;;
     external)
         if [ -f "$ENV_FILE" ] && [ "$FORCE" = false ]; then
@@ -505,25 +509,15 @@ case "$MODE" in
 
         echo "-> 生成 $EXTERNAL_COMPOSE_FILE"
         write_external_compose
-        if [ -n "$(read_env_key QCH_DATABASE_NETWORK)" ]; then
-            echo "-> 加入外部数据库 Docker 网络：$(read_env_key QCH_DATABASE_NETWORK)"
-            write_external_network_compose
-            COMPOSE_ARGS+=(-f "$EXTERNAL_NETWORK_COMPOSE_FILE")
-        fi
 
         start_services
 
         echo "-> 等待控制面就绪..."
-        service_url="$(local_service_url)"
-        if ! wait_ready "$service_url/readyz" "$READY_TIMEOUT"; then
+        if ! wait_ready "http://127.0.0.1:8080/readyz" "$READY_TIMEOUT"; then
             show_diagnostics
             die "控制面未在 ${READY_TIMEOUT} 秒内就绪"
         fi
 
-        stop_cmd="docker compose -f docker-compose.external.yml"
-        if [ -n "$(read_env_key QCH_DATABASE_NETWORK)" ]; then
-            stop_cmd="$stop_cmd -f docker-compose.external-network.yml"
-        fi
-        show_result "$(read_env_key QCH_ADMIN_TOKEN)" "$service_url" "$stop_cmd down"
+        show_result "$(read_env_key QCH_ADMIN_TOKEN)" "http://127.0.0.1:8080" "docker compose -f docker-compose.external.yml down"
         ;;
 esac

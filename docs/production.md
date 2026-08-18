@@ -1,6 +1,6 @@
 # 生产部署
 
-本文采用“单机 Docker Compose 控制面 + 宿主机 Nginx + 多台 systemd Agent”的基线。控制面容器只发布到回环地址，Nginx 负责公网 TLS；控制面到 PostgreSQL 使用项目内部后端网络，数据库持久化到命名卷。
+本文采用“单机 Docker Compose API 控制面 + 独立 SPA + 宿主机 Nginx + 多台 systemd Agent”的基线。只有 `qcontrol-web` 发布到回环地址，Nginx 负责公网 TLS；控制面 API 只在 Compose 内部网络可达，控制面到 PostgreSQL 使用项目内部后端网络，数据库持久化到命名卷。
 
 ## 1. 准备控制面主机
 
@@ -19,9 +19,9 @@ chmod 600 .env
 QCH_BEHIND_TLS_PROXY=true
 QCH_ALLOW_INSECURE_HTTP=false
 QCH_ALLOW_INSECURE_DATABASE=true
-QCH_CONTROL_PROXY_SUBNET=172.31.254.0/24
-QCH_CONTROL_PROXY_GATEWAY=172.31.254.1
-QCH_TRUSTED_PROXY_CIDRS=172.31.254.1/32
+QCH_CONTROL_PROXY_SUBNET=172.30.254.0/24
+QCH_CONTROL_PROXY_GATEWAY=172.30.254.1
+QCH_TRUSTED_PROXY_CIDRS=172.30.254.1/32
 QCH_BIND_ADDRESS=127.0.0.1
 QCH_PORT=8080
 POSTGRES_PORT=5432
@@ -38,6 +38,7 @@ QCH_CONFIG_ENCRYPTION_KEY=replace-with-a-long-random-secret
 ```bash
 make up
 docker compose ps
+curl --fail http://127.0.0.1:8080/healthz
 curl --fail http://127.0.0.1:8080/readyz
 ```
 
@@ -72,9 +73,9 @@ sudo systemctl reload nginx
 curl --fail https://qcontrolhub.example.com/healthz
 ```
 
-控制面根据 `QCH_BEHIND_TLS_PROXY=true` 把连接视为安全传输，并直接设置 Secure Cookie 与 HSTS，不依赖代理传入的协议头。只有 TLS 确实在本机受信反向代理终止时才能设置该值；不要为“解决登录问题”启用 `QCH_ALLOW_INSECURE_HTTP`。
+控制面根据 `QCH_BEHIND_TLS_PROXY=true` 把连接视为安全传输，并直接设置 Secure Cookie 与 HSTS，不依赖代理传入的协议头。只有 TLS 确实在本机受信反向代理终止时才能设置该值；不要为“解决登录问题”启用 `QCH_ALLOW_INSECURE_HTTP`。SPA 登录调用 `/api/v1/auth/login`，浏览器后续写请求自动携带会话 CSRF 头。
 
-Nginx 示例按真实客户端 IP 对 `/login` 和 `/agent/v1/enroll` 做额外限速。控制面仅在直接 TCP 对端匹配 `QCH_TRUSTED_PROXY_CIDRS` 时解析 `X-Forwarded-For`，并从右向左剥离可信代理；不要把整个私网或 `0.0.0.0/0` 加入该列表。
+Nginx 示例按真实客户端 IP 对 `/api/v1/auth/login` 和 `/agent/v1/enroll` 做额外限速。控制面仅在直接 TCP 对端匹配 `QCH_TRUSTED_PROXY_CIDRS` 时解析 `X-Forwarded-For`，并从右向左剥离可信代理；不要把整个私网或 `0.0.0.0/0` 加入该列表。
 
 Agent 使用 `/agent/v1/connect` 的长期 WSS 会话。Nginx 示例已转发 `Upgrade`/`Connection`，并把上游读取空闲超时提高到一小时；删除这些设置会导致 Agent 无法升级或在无任务时周期性断线。
 

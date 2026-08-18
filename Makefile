@@ -41,9 +41,9 @@ init-env:
 		'QCH_ALLOW_INSECURE_HTTP=false' \
 		'QCH_ALLOW_INSECURE_DATABASE=true' \
 		'QCH_CORS_ORIGINS=https://qcontrolhub.example.com' \
-		'QCH_CONTROL_PROXY_SUBNET=172.31.254.0/24' \
-		'QCH_CONTROL_PROXY_GATEWAY=172.31.254.1' \
-		'QCH_TRUSTED_PROXY_CIDRS=172.31.254.1/32' \
+		'QCH_CONTROL_PROXY_SUBNET=172.30.254.0/24' \
+		'QCH_CONTROL_PROXY_GATEWAY=172.30.254.1' \
+		'QCH_TRUSTED_PROXY_CIDRS=172.30.254.1/32' \
 		'QCH_BIND_ADDRESS=127.0.0.1' \
 		'QCH_PORT=8080' \
 		'QCH_IMAGE_TAG=latest' \
@@ -64,4 +64,4 @@ down:
 	docker compose down
 
 logs:
-	docker compose logs -f control-plane postgres
+	docker compose logs -f qcontrol-web control-plane postgres

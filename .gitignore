@@ -2,7 +2,6 @@
 /.env.bak.*
 /.env.tmp.*
 /docker-compose.external.yml
-/docker-compose.external-network.yml
 /bin/
 /data/
 /.preview/

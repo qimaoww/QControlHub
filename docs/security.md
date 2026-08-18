@@ -12,9 +12,9 @@ QControlHub 的安全边界包括管理员、控制面、PostgreSQL、反向代�
 - 控制面支持 admin（`QCH_ADMIN_TOKEN`）、operator（`QCH_OPERATOR_TOKENS`）与 readonly（`QCH_READONLY_TOKENS`）三级令牌：admin 可执行全部操作；operator 可读写配置与任务但不能管理节点身份、入网码或设置；readonly 只能读取。Bearer API 与 Web 会话共用同一套角色。
 - 没有 OIDC 或 MFA。需要多人操作时，应把访问进一步放在 VPN、零信任网关或带 MFA 的上游访问代理之后。
 
-### Web 控制台
+### 独立 SPA 控制台
 
-- 登录使用同一个管理员令牌，成功后生成随机的 12 小时服务端会话。
+- 登录使用同一个管理员令牌，成功后生成随机的 12 小时服务端会话；页面由独立 `qcontrol-web` 静态容器提供，所有数据通过 `/api/v1` 获取。
 - Cookie 设置 `HttpOnly`、`SameSite=Strict`；原生 TLS 或 `QCH_BEHIND_TLS_PROXY=true` 会启用 `Secure` 并使用 `__Host-` 前缀。
 - 所有写操作要求会话内独立 CSRF token。
 - 登录 POST 校验 Origin/Fetch Metadata；除静态 CSS 外的 Web 响应设置 `Cache-Control: no-store`。

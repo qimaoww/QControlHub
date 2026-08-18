@@ -18,7 +18,6 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/api"
 	"github.com/qimaoww/qcontrolhub/internal/authn"
 	"github.com/qimaoww/qcontrolhub/internal/store"
-	"github.com/qimaoww/qcontrolhub/internal/webui"
 )
 
 var version = "dev"
@@ -90,27 +89,7 @@ func main() {
 		AgentBinary:     agentBinary,
 		WebhookSecret:   strings.TrimSpace(os.Getenv("QCH_WEBHOOK_SECRET")),
 	})
-	webServer, err := webui.New(dataStore, webui.Config{
-		AdminToken:      adminToken,
-		OperatorTokens:  splitList(os.Getenv("QCH_OPERATOR_TOKENS")),
-		ReadonlyTokens:  splitList(os.Getenv("QCH_READONLY_TOKENS")),
-		CookieSecure:    secureTransport,
-		TrustedProxies:  trustedProxies,
-		DisconnectAgent: apiServer.DisconnectAgent,
-		WebhookSecret:   strings.TrimSpace(os.Getenv("QCH_WEBHOOK_SECRET")),
-	})
-	if err != nil {
-		slog.Error("initialize web console", "error", err)
-		os.Exit(1)
-	}
-
-	apiHandler := apiServer.Handler()
-	root := http.NewServeMux()
-	root.Handle("/healthz", apiHandler)
-	root.Handle("/readyz", apiHandler)
-	root.Handle("/api/", apiHandler)
-	root.Handle("/agent/", apiHandler)
-	root.Handle("/", webServer.Handler())
+	root := apiServer.Handler()
 
 	server := &http.Server{
 		Addr:              listenAddress,
@@ -125,7 +104,6 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	go janitor(ctx, dataStore)
-	go webServer.WatchAgentAvailability(ctx)
 	go func() {
 		<-ctx.Done()
 		shutdownContext, cancel := context.WithTimeout(context.Background(), 10*time.Second)
