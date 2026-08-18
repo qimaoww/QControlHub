@@ -1,0 +1,48 @@
+[Unit]
+Description=sing-box proxy core managed by QControlHub
+Documentation=https://github.com/SagerNet/sing-box
+Wants=network-online.target
+After=network-online.target
+ConditionFileIsExecutable=/usr/local/bin/sing-box
+ConditionPathExists=/etc/sing-box/config.json
+
+[Service]
+Type=simple
+User=qcontrolhub-core
+Group=qcontrolhub-core
+WorkingDirectory=/var/lib/qcontrolhub-sing-box
+StateDirectory=qcontrolhub-sing-box
+StateDirectoryMode=0750
+UMask=0027
+ExecStart=/usr/local/bin/sing-box run -c /etc/sing-box/config.json
+Restart=on-failure
+RestartSec=3s
+TimeoutStopSec=20s
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RemoveIPC=true
+ProtectProc=invisible
+ProcSubset=pid
+# sing-box subscribes to Linux route updates through netlink even when every
+# configured listener is local-only.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+SystemCallArchitectures=native
+ReadOnlyPaths=/usr/local/bin/sing-box /etc/sing-box
+ReadWritePaths=/var/lib/qcontrolhub-sing-box
+
+[Install]
+WantedBy=multi-user.target

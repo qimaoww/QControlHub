@@ -1,0 +1,228 @@
+# HTTP API
+
+本机 Compose 默认地址为 `http://127.0.0.1:8080`；生产基线通过 Nginx TLS 对外提供 `https://qcontrolhub.example.com`，下文示例按该生产地址书写。所有请求和响应使用 UTF-8；JSON 请求应发送 `Content-Type: application/json`。
+
+## 鉴权模型
+
+- 管理端点 `/api/v1/*`：`Authorization: Bearer <令牌>`，令牌可为 `QCH_ADMIN_TOKEN` 或 `QCH_OPERATOR_TOKENS` / `QCH_READONLY_TOKENS` 中的角色令牌。
+- 首次注册 `/agent/v1/enroll`：`Authorization: Bearer <一次性 QCH_ENROLLMENT_TOKEN>`。
+- WSS `/agent/v1/connect`：仅供官方 Agent 使用，握手要求 Ed25519 签名头、时间戳和 nonce；不要用管理员令牌调用。
+- `/healthz`：无鉴权，仅返回服务存活状态，不包含数据库详情或秘密。
+- `/readyz`：无鉴权；仅在控制面能连接 PostgreSQL 时返回 200，不暴露数据库错误详情。
+- `GET /api/v1/agent-binary`：无鉴权的静态下载端点，仅在配置 `QCH_AGENT_BINARY_PATH` 后返回 Agent 可执行文件，用于节点一键安装；二进制不包含任何秘密（注册仍需要一次性入网码）。
+
+### 角色令牌
+
+`QCH_OPERATOR_TOKENS` 与 `QCH_READONLY_TOKENS`（逗号分隔列表）提供低于管理员的令牌，Web 登录与管理 API 共用同一套角色：
+
+| 角色 | 读取 | 任务/配置写操作 | 节点移除、注册码、设置、删除配置 |
+| --- | --- | --- | --- |
+| admin（`QCH_ADMIN_TOKEN`） | ✓ | ✓ | ✓ |
+| operator | ✓ | ✓ | — |
+| readonly | ✓ | — | — |
+
+权限不足时返回 `403`。同一令牌在 Web 会话与 Bearer 请求中的角色一致。
+
+失败响应通常是：
+
+```json
+{"error":"message"}
+```
+
+## 管理端点
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `GET` | `/api/v1/overview` | 节点、配置和任务计数 |
+| `GET` | `/api/v1/agents` | 列出未撤销 Agent |
+| `DELETE` | `/api/v1/agents/{id}` | 永久撤销 Agent、立即断开 WSS 并终止其未完成任务 |
+| `GET` | `/api/v1/agents/{id}/configs/{engine}` | 读取节点绑定的内核配置 |
+| `PUT` | `/api/v1/agents/{id}/configs/{engine}` | 以乐观版本锁创建或更新节点配置 |
+| `GET` | `/api/v1/configs` | 列出配置及正文 |
+| `POST` | `/api/v1/configs` | 创建配置 |
+| `PUT` | `/api/v1/configs/{id}` | 更新配置并增加版本号 |
+| `DELETE` | `/api/v1/configs/{id}` | 软删除配置 |
+| `GET` | `/api/v1/configs/{id}/revisions?limit=` | 列出最近 1–100 个配置修订 |
+| `GET` | `/api/v1/configs/{id}/revisions/{version}` | 读取指定修订正文 |
+| `POST` | `/api/v1/configs/{id}/revisions/{version}/restore` | 将指定修订恢复为新的当前修订 |
+| `GET` | `/api/v1/tasks?agent_id=&status=&action=&limit=` | 按节点、状态和动作筛选任务；`limit` 为 1–500，默认 100 |
+| `POST` | `/api/v1/tasks` | 创建远程任务 |
+| `GET` | `/api/v1/tasks/{id}` | 读取单个任务及结果 |
+| `DELETE` | `/api/v1/tasks/{id}` | 取消尚未领取的任务 |
+| `POST` | `/api/v1/tasks/{id}/retry` | 按当前配置重试失败或已取消任务 |
+| `GET` | `/api/v1/enrollment-tokens` | 列出最近的入网码元数据，不返回原始值 |
+| `POST` | `/api/v1/enrollment-tokens` | 签发短期、限次入网码 |
+| `DELETE` | `/api/v1/enrollment-tokens/{id}` | 吊销仍可用的入网码 |
+| `GET` | `/api/v1/agent-binary` | 下载 Agent 可执行文件（未鉴权静态资源，仅在配置 `QCH_AGENT_BINARY_PATH` 时提供） |
+
+`GET /api/v1/overview` 中的 `configs` 只统计可在“配置档案”工作区跨节点下发的全局配置；`node_configs` 单独统计绑定到具体 Agent/内核的节点配置，避免将两类配置混为一个不可解释的总数。为兼容既有调用方，`tasks_pending` 仍表示 `pending + running` 的活动任务总数；`tasks_queued` 和 `tasks_running` 分别给出排队与执行中的精确数量。
+
+删除 Agent 是不可逆的身份吊销：控制面先删除该节点的配置与修订、将其未完成任务标记为失败，再主动关闭当前认证 WSS；相同 Ed25519 身份的后续握手返回 `401`。需要重新接入时必须签发新的入网码并生成新身份。
+
+### 签发入网码
+
+```json
+{
+  "name": "edge-01 bootstrap",
+  "ttl_minutes": 10,
+  "max_uses": 1
+}
+```
+
+`ttl_minutes` 允许 1–1440，`max_uses` 允许 1–50；零值分别使用 15 分钟和 1 次。创建响应中的 `token` 只返回一次，并带有 `Cache-Control: no-store`。控制面数据库只保存摘要，之后的列表接口无法恢复原始值。
+
+### 创建配置
+
+请求字段：
+
+```json
+{
+	"version": 1,
+	"name": "edge-xray",
+  "description": "local smoke test",
+  "engine": "xray",
+  "content": "{\"log\":{\"loglevel\":\"warning\"},\"inbounds\":[],\"outbounds\":[]}"
+}
+```
+
+更新配置时必须提交当前 `version`；版本不匹配会返回 `409`，防止两个编辑器静默覆盖彼此的修改。创建配置时忽略该字段。
+
+`engine` 只能是 `mihomo`、`xray`、`sing-box` 或 `ss-rust`。Mihomo 正文必须是非空 YAML mapping；另外三类必须是非空 JSON object。正文上限 2 MiB。控制面的结构解析不能替代真实内核校验，应先创建 `validate` 任务。`ss-rust` 的结构校验基于官方 JSON 配置格式；由于 `ssserver` 没有非运行检查模式，真实 Agent 的 `validate` 不会启动服务。
+
+使用仓库样例创建配置时，推荐用 `jq` 负责 JSON 转义，避免 shell 插值破坏正文：
+
+```bash
+jq -n \
+  --arg name xray-smoke \
+  --arg engine xray \
+  --rawfile content examples/configs/xray-minimal.json \
+  '{name:$name, engine:$engine, content:$content}' \
+| curl --fail-with-body \
+    -X POST \
+    -H "Authorization: Bearer ${QCH_ADMIN_TOKEN}" \
+    -H 'Content-Type: application/json' \
+    --data-binary @- \
+    https://qcontrolhub.example.com/api/v1/configs
+```
+
+### 配置修订与恢复
+
+全局配置档案和节点绑定配置每次成功创建、更新或恢复时，都会在同一数据库事务中保留一份完整修订。修订列表按版本号倒序返回，默认 20 条，`limit` 可设为 1–100：
+
+```text
+GET /api/v1/configs/cfg_0123456789abcdef/revisions?limit=20
+GET /api/v1/configs/cfg_0123456789abcdef/revisions/2
+```
+
+恢复不会把版本号倒退，也不会覆盖既有历史。调用方必须提交当前配置版本；例如当前为 v3、恢复 v1 时，会创建内容来自 v1 的新 v4：
+
+```http
+POST /api/v1/configs/cfg_0123456789abcdef/revisions/1/restore
+Content-Type: application/json
+
+{"expected_version":3}
+```
+
+`expected_version` 不匹配返回 `409`，无效版本号返回 `400`，配置或修订不存在（包括配置已删除）返回 `404`。升级到带修订历史的版本时，迁移会把每个现有活动配置的当前版本写为第一条可用修订，但无法重建升级前已经被覆盖的旧正文。
+
+修订包含完整配置和代理凭据，应与当前配置正文使用相同的数据库、备份和访问保护。删除配置档案或撤销其所属节点时会永久删除对应修订，避免已删除凭据继续留存在修订表中。
+
+### 列出任务
+
+任务列表筛选条件可组合使用。`agent_id` 接受完整 Agent ID；`status` 允许 `pending`、`running`、`succeeded`、`failed`、`canceled`；`action` 允许 `validate`、`deploy`、`read-config`、`start`、`stop`、`restart`、`status`、`install`。`limit` 默认为 100，最大为 500；无效的 `status` 或 `action` 返回 `400`。
+
+### 创建任务
+
+部署或校验任务需要 `config_id`，且配置内核必须与任务内核相同：
+
+```json
+{
+  "agent_id": "agt_0123456789abcdef",
+  "action": "validate",
+  "engine": "xray",
+  "config_id": "cfg_0123456789abcdef"
+}
+```
+
+`read-config` 不接受 `config_id`。Agent 只会读取该内核启动配置中预先配置的绝对白名单路径，拒绝符号链接、不安全归属或权限、非 UTF-8 以及超过 2 MiB 的文件，并在返回前调用目标节点上的真实内核校验。读取结果作为短期配置快照保存，不出现在普通任务列表响应中；同一节点和内核新的成功读取会清除上一份快照。
+
+服务动作不使用 `config_id`：
+
+```json
+{
+  "agent_id": "agt_0123456789abcdef",
+  "action": "status",
+  "engine": "xray"
+}
+```
+
+安装或切换内核版本同样不使用 `config_id`。`core_version` 可以是 `stable`、`development`，也可以是去掉 `v` 前缀的严格版本号：
+
+```json
+{
+  "agent_id": "agt_0123456789abcdef",
+  "action": "install",
+  "engine": "sing-box",
+  "core_version": "1.14.0-beta.3"
+}
+```
+
+允许的 `action` 为 `validate`、`deploy`、`read-config`、`start`、`stop`、`restart`、`status`、`install`。Agent 必须在注册能力中声明对应内核。版本安装只使用四个内核各自的官方 GitHub Release，不接受 URL；`development` 没有官方 prerelease 时任务会失败而不会降级到稳定版。
+
+任务响应中的 `simulated: true` 表示 Agent 在 dry-run 模式下完成了流程检查，但没有执行对应的系统变更。任务仍以 `succeeded` 结束，Web 控制台会显示“模拟完成”；模拟 `deploy` 不会成为节点的最新部署记录。`read-config` 即使在 dry-run 模式下也会读取白名单中的真实文件并调用真实内核校验，因此不会标记为模拟。
+
+### 状态码
+
+- `200`：查询或更新成功。
+- `101`：Agent WebSocket 升级成功。
+- `201`：配置、任务或 Agent 创建成功。
+- `204`：删除或吊销成功。
+- `400`：JSON、字段、内核或动作无效。
+- `401`：令牌或 Agent 签名无效。
+- `403`：浏览器 Origin 不在 CORS 白名单。
+- `404`：目标不存在。
+- `409`：重复值或任务状态冲突。
+- `429`：鉴权失败次数过多。
+
+## Agent 协议
+
+Agent 协议端点如下：
+
+| 方法 | 路径 | 鉴权 |
+| --- | --- | --- |
+| `POST` | `/agent/v1/enroll` | 注册 Bearer 令牌 |
+| `GET` | `/agent/v1/connect` | Agent 签名的 WebSocket Upgrade |
+
+WSS 握手必须协商子协议 `qcontrolhub.agent.v1`。服务端先发送 `hello`；Agent 定期发送 `heartbeat`，心跳包含内核运行状态以及 CPU、内存、根磁盘、默认路由接口名称与可用单播地址、实时速率和累计流量快照；服务端下发带随机 lease ID 的 `task`，Agent 返回包含 `success`、`simulated` 和结果正文的 `result`，服务端确认 `result_ack`。连接压缩关闭，服务端要求 50 秒内收到消息，官方 Agent 默认每 15 秒心跳并在断线后指数退避重连。
+
+## Webhook 事件
+
+在设置页配置 Webhook 地址后，控制面会在以下时机向该地址 `POST` 一个 JSON 事件（`Content-Type: application/json`）：
+
+| 事件类型 | 触发时机 |
+| --- | --- |
+| `task.failed` | 远程任务以失败结束 |
+| `agent.offline` | 节点超过 2 分钟未心跳 |
+| `agent.online` | 离线节点恢复心跳 |
+
+事件负载示例：
+
+```json
+{
+  "type": "task.failed",
+  "time": "2026-08-14T02:00:00Z",
+  "agent_id": "agt_0123456789abcdef",
+  "agent": "shanghai-edge-01",
+  "engine": "mihomo",
+  "task_id": "tsk_0123456789abcdef",
+  "action": "deploy",
+  "error": "validation failed",
+  "message": "任务失败：mihomo 在节点 shanghai-edge-01 上执行 deploy 失败"
+}
+```
+
+配置了 `QCH_WEBHOOK_SECRET` 时，请求头携带 `X-QControlHub-Signature: sha256=<hex>`，值为 `HMAC-SHA256(secret, body)` 的十六进制摘要；接收端应使用常量时间比较校验签名，并只信任 `2xx` 之外按失败处理。未配置密钥时不带签名头，仅应在可信内网使用。
+
+主机指标不会开放新的 Agent 监听端口。Agent 不上报通配、回环、组播或链路本地地址；控制面用服务器接收时间覆盖 Agent 时间戳，并校验百分比、容量、接口数量、名称和地址边界，只在 PostgreSQL 保存每个节点的最新快照。Web 控制台通过要求有效管理会话的同源 `GET /ui/agents/metrics` 每 5 秒刷新；响应设置 `Cache-Control: no-store`。节点运行区只从实际部署版本生成客户端资料，优先使用受控节点标签中的入口地址，否则自动选择默认路由接口地址；配置编辑器不接受或传播客户端连接地址参数。
+
+握手签名 canonical value 由固定字符串 `qcontrolhub-agent-v1`、大写 HTTP 方法、原始转义路径及查询串、Agent ID、Unix 秒时间戳、随机 nonce、空正文 SHA-256 十六进制摘要以换行连接。握手需要以下头：`X-QControlHub-Agent-ID`、`X-QControlHub-Timestamp`、`X-QControlHub-Nonce`、`X-QControlHub-Signature`。有效时间窗为正负 90 秒，nonce 在窗口内只能使用一次。应直接使用官方 Go Agent，避免自行实现导致编码、代理重写、lease 或防重放错误。

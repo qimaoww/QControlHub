@@ -1,0 +1,85 @@
+# 鉴权与安全基线
+
+QControlHub 的安全边界包括管理员、控制面、PostgreSQL、反向代理、Agent 主机和四个被管理内核。任何一处管理员令牌、未使用的入网码、Agent 私钥或配置数据库泄露，都应按基础设施凭据泄露处理。
+
+## 身份与鉴权
+
+### 管理 API
+
+- `/api/v1/*` 要求 `Authorization: Bearer <QCH_ADMIN_TOKEN>`。
+- 控制面只保存令牌的 SHA-256 摘要用于恒定时间比较，不把令牌写入数据库。
+- 同一来源连续失败会触发内存限速；Nginx 示例额外限制登录和注册入口。
+- 控制面支持 admin（`QCH_ADMIN_TOKEN`）、operator（`QCH_OPERATOR_TOKENS`）与 readonly（`QCH_READONLY_TOKENS`）三级令牌：admin 可执行全部操作；operator 可读写配置与任务但不能管理节点身份、入网码或设置；readonly 只能读取。Bearer API 与 Web 会话共用同一套角色。
+- 没有 OIDC 或 MFA。需要多人操作时，应把访问进一步放在 VPN、零信任网关或带 MFA 的上游访问代理之后。
+
+### Web 控制台
+
+- 登录使用同一个管理员令牌，成功后生成随机的 12 小时服务端会话。
+- Cookie 设置 `HttpOnly`、`SameSite=Strict`；原生 TLS 或 `QCH_BEHIND_TLS_PROXY=true` 会启用 `Secure` 并使用 `__Host-` 前缀。
+- 所有写操作要求会话内独立 CSRF token。
+- 登录 POST 校验 Origin/Fetch Metadata；除静态 CSS 外的 Web 响应设置 `Cache-Control: no-store`。
+- 控制面重启会清空内存会话并要求重新登录。这也意味着当前应运行单实例；多副本会导致会话不一致。
+
+### Agent
+
+1. 管理员先签发一个随机的短期、限次入网码；控制面只保存其 SHA-256 摘要，原始值只在创建响应中显示一次。
+2. Agent 本机生成 Ed25519 密钥对；服务器只保存公钥，私钥以 `0600` 写入 Agent 状态文件。
+3. 后续 WSS 握手签名覆盖协议版本、HTTP 方法、转义后的路径与查询串、Agent ID、Unix 时间、随机 nonce 和空正文 SHA-256，避免跨身份或跨协议复用签名。
+4. 控制面验证握手签名、拒绝超过正负 90 秒的时间戳，并把 nonce 存入 PostgreSQL 以阻止重放；心跳、任务和带 lease ID 的结果在该已认证连接中传输。
+5. Agent 要求服务端协商 `qcontrolhub.agent.v1` 子协议；在控制台删除 Agent 会撤销其公钥身份、终止尚未完成的任务并立即关闭既有连接，原身份之后的握手一律被拒绝。
+
+主机指标复用已认证 WSS 心跳，不开放额外监听端口。Linux Agent 只读取内核提供的 `/proc/stat`、`/proc/meminfo`、路由与网卡字节计数，并读取根文件系统容量；不采集进程列表、文件名或配置正文。控制面会校验指标范围、使用服务器接收时间盖章并仅保存最新快照，前端轮询接口仍要求有效的 HttpOnly 会话。
+
+所有 Agent 主机必须运行可靠的 NTP/chrony。时钟偏差超过 90 秒会导致合法请求被拒绝。
+
+## 密钥要求与轮换
+
+- `QCH_ADMIN_TOKEN` 至少 32 字节，推荐 `openssl rand -hex 32`；入网码由控制面使用 CSPRNG 生成。
+- PostgreSQL 密码和管理员令牌应进入密码管理器或密钥管理服务，不能提交到 Git。
+- 轮换管理员令牌：更新控制面环境并重启；重启同时使现有 Web 会话失效。
+- 入网码默认 15 分钟、1 次使用，可设置为 1–1440 分钟和 1–50 次；生产接入优先逐节点签发单次短期值，并可随时吊销未使用值。
+- Agent 完成首次注册后，从 `/etc/qcontrolhub/agent.env` 删除 `QCH_ENROLLMENT_TOKEN`，降低主机进程环境和备份中的暴露面。
+- 若 Agent 私钥疑似泄露，在控制台撤销该 Agent；清除远端状态文件、重新签发单次入网码后再注册。不要复用旧状态文件。
+
+## 传输与网络
+
+- 远程 Agent 默认要求 WSS。`QCH_ALLOW_HTTP=true` 只应出现在本机或隔离 dry-run 测试网络；非本机明文连接禁止真实任务执行。
+- 私有/自签名 TLS 使用 `QCH_TLS_CA_FILE` 加载受保护的 CA PEM；Agent 仍会执行完整证书链、有效期和主机名校验，不提供 `insecure-skip-verify`。
+- Compose 默认只把控制面和 PostgreSQL绑定到 `127.0.0.1`。公网仅开放 Nginx 的 443 端口。
+- `QCH_CORS_ORIGINS` 是精确、逗号分隔的来源白名单，不支持通配符需求；同源 Web UI 无需配置 CORS。
+- `QCH_TRUSTED_PROXY_CIDRS` 必须只列出真实反向代理地址。控制面仅在 TCP 对端受信时解析 `X-Forwarded-For`，避免公网客户端伪造限流身份。
+- Compose 内部 PostgreSQL URL 使用 `sslmode=disable`，并通过 `QCH_ALLOW_INSECURE_DATABASE=true` 显式豁免，因为流量仅位于单机内部 Docker 网络。外部或托管 PostgreSQL 必须将该开关设为 `false`，使用 `sslmode=verify-full` 并配置可信 CA。
+- 防火墙应只允许管理员可信网络访问控制台；Agent 只需要向控制面发起出站 443 连接，不需要入站端口。
+
+## 主机权限
+
+Agent 需要写入固定内核配置路径并调用 `systemctl`，systemd 示例因此以 root 运行。该单元使用只读系统视图和 `ReadWritePaths` 限定可写目录，但 root Agent 仍然属于高价值进程：
+
+- 只从可信构建产物安装 Agent，限制二进制和环境文件为 root 可写。
+- 只启用实际安装的内核，并核对服务名和绝对配置路径。
+- 初次接入保持 `QCH_AGENT_DRY_RUN=true`，验证节点信息和任务链路后再开启真实执行。
+- QControlHub 不执行控制面提供的任意 shell 命令；动作被限制为固定枚举，内核与目标路径来自本机配置。
+- `read-config` 只读取 Agent 本机为对应内核配置的绝对路径，拒绝符号链接、非普通文件、不安全归属或写权限、非 UTF-8 和超过 2 MiB 的内容，并在返回前调用该内核的配置检查命令。控制面把正文存为不出现在普通任务响应中的短期快照；同一节点和内核的新快照会清除上一份。
+- 内核安装任务只携带 `stable`、`development` 或严格版本号，不接受 URL、路径和命令。Agent 只访问四个硬编码官方 GitHub 仓库，拒绝非 GitHub 跳转，并要求发行资产带有可验证的 SHA-256 摘要。
+- Agent 只执行绝对路径、root 所有且不可由组/其他用户写入的二进制；systemd unit 名必须通过严格字符白名单。
+- Agent 通过 `os.Root` 固定配置目录，拒绝符号链接、非普通文件、非当前 UID 所有或组/其他用户可写的状态/配置目录；部署备份限制为 3 份且服务重启失败会回滚。
+
+## 数据保护
+
+配置正文可能包含 UUID、密码、证书私钥或上游认证信息。当前配置正文在 PostgreSQL 中不是字段级加密，因此必须：
+
+- 加密数据库磁盘、快照和备份，并严格限制数据库账户和备份读取权限。
+- 定期测试备份恢复；备份至少包含 PostgreSQL 数据卷或一致性逻辑备份。
+- 限制管理员终端缓存、浏览器配置粘贴记录和日志采集范围。
+- 不在任务输出中返回秘密。内核校验器输出会进入任务审计，提交配置前确认其错误信息不会泄露敏感值。
+
+## 上线核对表
+
+- [ ] 管理员令牌由 CSPRNG 生成并已安全保存；不存在长期有效的未使用入网码。
+- [ ] `QCH_BEHIND_TLS_PROXY=true`、`QCH_ALLOW_INSECURE_HTTP=false`，控制面只发布到回环地址。
+- [ ] `QCH_ALLOW_INSECURE_DATABASE=true` 只用于同机隔离 Compose 网络；外部数据库设为 `false` 并验证证书。
+- [ ] HTTPS 证书有效，TLS 1.2/1.3 可用，HTTP 自动跳转 HTTPS。
+- [ ] PostgreSQL 不对公网开放；外部数据库使用证书校验。
+- [ ] `.env`、Agent 环境文件和状态文件权限为 `0600`。
+- [ ] Agent 主机时钟同步，入网码已在注册后从环境文件删除。
+- [ ] 防火墙、备份、监控与令牌轮换流程已验证。

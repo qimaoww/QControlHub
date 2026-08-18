@@ -1,0 +1,10 @@
+# Local-only smoke-test configuration. Add authenticated inbounds before exposing it.
+mixed-port: 7890
+bind-address: 127.0.0.1
+allow-lan: false
+mode: rule
+log-level: info
+proxies: []
+proxy-groups: []
+rules:
+  - MATCH,DIRECT

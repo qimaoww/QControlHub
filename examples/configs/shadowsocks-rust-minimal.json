@@ -1,0 +1,9 @@
+{
+  "server": "127.0.0.1",
+  "server_port": 8388,
+  "password": "qcontrolhub-change-this-password",
+  "method": "chacha20-ietf-poly1305",
+  "mode": "tcp_and_udp",
+  "timeout": 300,
+  "no_delay": true
+}

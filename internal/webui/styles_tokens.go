@@ -1,0 +1,10 @@
+package webui
+
+// stylesTokens is the dual-theme design-token block: :root light variables, [data-theme=dark] overrides, and dark-only color fixes.
+// Each const holds one contiguous slice of the stylesheet; the global order is
+// reassembled in styles_desktop_app.go. Keep every const byte-identical to the
+// corresponding line range of the original single-const layout.
+const stylesTokens = `:root,[data-theme=light]{--canvas:#f3f5fa;--surface:#fff;--surface-2:#f8f9fc;--surface-3:#eff1f7;--dock:#12131b;--dock-2:#222431;--ink:#111424;--ink-2:#353a4d;--muted:#697288;--line:#e7e9f2;--line-2:#d7dbe7;--accent:#5755e7;--accent-2:#4338ca;--accent-soft:#eeefff;--on-accent:#fff;--green:#007a61;--green-soft:#e8f8f3;--blue:#0876a8;--blue-soft:#e9f6fc;--amber:#9b5a08;--amber-soft:#fff4df;--red:#b6344b;--red-soft:#fdecef;--code-canvas:#f4f5f8;--code-gutter:#eceff4;--code-line:#d9dde7;--code-ink:#2a3040;--code-muted:#778196;--code-selection:#dfe1ff;--code-caret:#5755e7;--shadow:0 3px 12px rgba(34,39,68,.05),0 20px 48px -38px rgba(79,70,229,.48);--shadow-lift:0 12px 28px -22px rgba(79,70,229,.34),0 3px 10px rgba(30,35,60,.06);--radius-card:16px;--radius-control:10px;color-scheme:light}
+[data-theme=dark]{--canvas:#0d1018;--surface:#171b26;--surface-2:#1d2230;--surface-3:#252b3a;--dock:#080a0f;--dock-2:#171b26;--ink:#f4f6fb;--ink-2:#d4d9e5;--muted:#929bad;--line:#2b3344;--line-2:#3b455a;--accent:#8b8dff;--accent-2:#a9aaff;--accent-soft:#292a52;--on-accent:#11131a;--green:#39c9a2;--green-soft:#123b32;--blue:#48bdec;--blue-soft:#123343;--amber:#f1b64e;--amber-soft:#3b2c13;--red:#f47a8b;--red-soft:#401b24;--code-canvas:#111827;--code-gutter:#0d1424;--code-line:#27324a;--code-ink:#e6ebf5;--code-muted:#74809b;--code-selection:#3730a3;--code-caret:#a5b4fc;--shadow:0 16px 38px -26px rgba(0,0,0,.9);--shadow-lift:0 18px 46px -28px rgba(0,0,0,.95);--radius-card:16px;--radius-control:10px;color-scheme:dark}
+[data-theme=dark] .danger-confirm,[data-theme=dark] .section-number,[data-theme=dark] .client-share-control button:last-child{color:var(--on-accent)}
+`

@@ -1,0 +1,57 @@
+[Unit]
+Description=QControlHub remote engine agent
+Documentation=https://github.com/qimaoww/qcontrolhub
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+EnvironmentFile=/etc/qcontrolhub/agent.env
+WorkingDirectory=/var/lib/qcontrolhub
+StateDirectory=qcontrolhub
+StateDirectoryMode=0700
+UMask=0077
+ExecStart=/usr/local/bin/qagent
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=20s
+
+# The agent needs narrowly scoped writes to engine configuration directories.
+ProtectSystem=strict
+ReadWritePaths=/var/lib/qcontrolhub
+# Version switching creates an atomic candidate and backup beside each core.
+# Keep the Agent itself read-only even though the default cores share this directory.
+ReadWritePaths=-/usr/local/bin
+ReadOnlyPaths=-/usr/local/bin/qagent
+ReadWritePaths=-/etc/mihomo
+ReadWritePaths=-/usr/local/etc/xray
+ReadWritePaths=-/etc/sing-box
+ReadWritePaths=-/etc/shadowsocks-rust
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+NoNewPrivileges=true
+# Atomic replacement preserves a protected existing file's group so non-root
+# core services keep access after deploy, upgrade, and rollback.
+CapabilityBoundingSet=CAP_CHOWN
+AmbientCapabilities=CAP_CHOWN
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RemoveIPC=true
+ProtectProc=invisible
+ProcSubset=pid
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target
