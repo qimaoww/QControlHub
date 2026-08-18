@@ -73,8 +73,8 @@ jobs:
           provenance: mode=max
           sbom: true
           tags: |
-            ghcr.io/qimaoww/qcontrolhub/qcontrol-plane:latest
-            ghcr.io/qimaoww/qcontrolhub/qcontrol-plane:${{ github.sha }}
+            ghcr.io/qimaoww/qcontrol-plane:latest
+            ghcr.io/qimaoww/qcontrol-plane:${{ github.sha }}
       - name: Build and push agent image
         uses: docker/build-push-action@v6
         with:
@@ -87,5 +87,5 @@ jobs:
           provenance: mode=max
           sbom: true
           tags: |
-            ghcr.io/qimaoww/qcontrolhub/qagent:latest
-            ghcr.io/qimaoww/qcontrolhub/qagent:${{ github.sha }}
+            ghcr.io/qimaoww/qagent:latest
+            ghcr.io/qimaoww/qagent:${{ github.sha }}

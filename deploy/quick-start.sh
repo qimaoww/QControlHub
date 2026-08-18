@@ -197,7 +197,7 @@ name: qcontrolhub
 
 services:
   control-plane:
-    image: ghcr.io/qimaoww/qcontrolhub/qcontrol-plane:${QCH_IMAGE_TAG:-latest}
+    image: ghcr.io/qimaoww/qcontrol-plane:${QCH_IMAGE_TAG:-latest}
     build:
       context: .
       target: qcontrol-plane
