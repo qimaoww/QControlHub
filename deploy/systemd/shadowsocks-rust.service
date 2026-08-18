@@ -1,0 +1,46 @@
+[Unit]
+Description=Shadowsocks Rust proxy core managed by QControlHub
+Documentation=https://github.com/shadowsocks/shadowsocks-rust
+Wants=network-online.target
+After=network-online.target
+ConditionFileIsExecutable=/usr/local/bin/ssserver
+ConditionPathExists=/etc/shadowsocks-rust/config.json
+
+[Service]
+Type=simple
+User=qcontrolhub-core
+Group=qcontrolhub-core
+WorkingDirectory=/var/lib/qcontrolhub-shadowsocks-rust
+StateDirectory=qcontrolhub-shadowsocks-rust
+StateDirectoryMode=0750
+UMask=0027
+ExecStart=/usr/local/bin/ssserver -c /etc/shadowsocks-rust/config.json
+Restart=on-failure
+RestartSec=3s
+TimeoutStopSec=20s
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RemoveIPC=true
+ProtectProc=invisible
+ProcSubset=pid
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+ReadOnlyPaths=/usr/local/bin/ssserver /etc/shadowsocks-rust
+ReadWritePaths=/var/lib/qcontrolhub-shadowsocks-rust
+
+[Install]
+WantedBy=multi-user.target

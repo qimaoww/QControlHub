@@ -1,0 +1,91 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  linux:
+    name: linux (gofmt, vet, full tests with PostgreSQL)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: qcontrolhub
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      QCH_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/qcontrolhub?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: gofmt check
+        run: |
+          unformatted="$(gofmt -l cmd internal)"
+          if [ -n "$unformatted" ]; then
+            echo "gofmt required for:"
+            printf '%s\n' "$unformatted"
+            exit 1
+          fi
+      - name: go vet
+        run: go vet ./...
+      - name: go test (unit + PostgreSQL integration)
+        run: go test ./...
+
+  images:
+    name: build and publish GHCR images
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: linux
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push control plane image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: qcontrol-plane
+          push: true
+          build-args: VERSION=${{ github.sha }}
+          cache-from: type=gha,scope=qcontrol-plane
+          cache-to: type=gha,mode=max,scope=qcontrol-plane
+          provenance: mode=max
+          sbom: true
+          tags: |
+            ghcr.io/qimaoww/qcontrolhub/qcontrol-plane:latest
+            ghcr.io/qimaoww/qcontrolhub/qcontrol-plane:${{ github.sha }}
+      - name: Build and push agent image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: qagent
+          push: true
+          build-args: VERSION=${{ github.sha }}
+          cache-from: type=gha,scope=qagent
+          cache-to: type=gha,mode=max,scope=qagent
+          provenance: mode=max
+          sbom: true
+          tags: |
+            ghcr.io/qimaoww/qcontrolhub/qagent:latest
+            ghcr.io/qimaoww/qcontrolhub/qagent:${{ github.sha }}
