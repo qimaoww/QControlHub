@@ -63,8 +63,8 @@ QControlHub 当前仅支持 Linux 部署。
 项目发布以下 GHCR 镜像；一键部署默认拉取控制面镜像，Agent 镜像可用于节点侧交付：
 
 ```text
-ghcr.io/qimaoww/qcontrolhub/qcontrol-plane:latest
-ghcr.io/qimaoww/qcontrolhub/qagent:latest
+ghcr.io/qimaoww/qcontrol-plane:latest
+ghcr.io/qimaoww/qagent:latest
 ```
 
 公开镜像可以直接拉取；将 `QCH_IMAGE_TAG=local` 写入 `.env` 时，脚本会改为使用仓库内的 Dockerfile 本地构建。
