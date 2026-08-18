@@ -50,7 +50,13 @@ QControlHub 当前仅支持 Linux 部署。
 ./deploy/quick-start.sh -m bundled
 ./deploy/quick-start.sh -m external \
   -d 'postgresql://user:pass@db.example.com:5432/qcontrolhub?sslmode=verify-full'
+
+# 如果 PostgreSQL 在同一台主机的其他 Compose 项目中，指定它的 Docker 网络，并使用数据库服务名：
+./deploy/quick-start.sh -m external -n 1panel-network \
+  -d 'postgresql://qcontrolhub:URL_ENCODED_PASSWORD@postgresql:5432/qcontrolhub?sslmode=disable'
 ```
+
+`-n` 会为控制面追加一个 external Docker network；容器内的 `127.0.0.1` 指向控制面容器自身，不能用来访问宿主机上的 PostgreSQL。若数据库只绑定宿主机回环地址，应将控制面加入数据库所在的 Docker network，或调整数据库监听地址后再使用宿主机地址。
 
 首次运行会生成随机密钥并写入权限为 `0600` 的 `.env`。重复运行默认复用已有密钥并只补齐缺失项；如需轮换应用密钥，使用 `-f`，脚本会先备份 `.env` 且不会更改内置 PostgreSQL 密码。使用 `-h` 可查看全部选项。
 
@@ -61,7 +67,7 @@ ghcr.io/qimaoww/qcontrolhub/qcontrol-plane:latest
 ghcr.io/qimaoww/qcontrolhub/qagent:latest
 ```
 
-私有镜像需要先执行 `docker login ghcr.io`；将 `QCH_IMAGE_TAG=local` 写入 `.env` 时，脚本会改为使用仓库内的 Dockerfile 本地构建。
+公开镜像可以直接拉取；将 `QCH_IMAGE_TAG=local` 写入 `.env` 时，脚本会改为使用仓库内的 Dockerfile 本地构建。
 
 也可以直接用 Make 目标手动部署。
 
