@@ -43,6 +43,8 @@ func TestSPAConsoleSurfaceMatchesInitialRelease(t *testing.T) {
 		`data-theme-toggle`, `qcontrolhub-color-theme`, `login-theme-toggle`,
 		`app.style.display = "contents"`, `X-QControlHub-Enrollment`,
 		`/install-agent.sh`, `执行记录`, `手动配置`, `系统设置`,
+		`data-delete-enrollment`, `可重复安装`, `删除添加命令`,
+		`heartbeat, percent`, `serviceActionDisabled, trafficChart, renderConfigDiff`,
 	} {
 		if !strings.Contains(content, required) {
 			t.Errorf("SPA is missing initial visual/installation contract %q", required)
@@ -50,6 +52,11 @@ func TestSPAConsoleSurfaceMatchesInitialRelease(t *testing.T) {
 	}
 	if strings.Contains(content, "/ui/") {
 		t.Error("SPA must use the JSON API instead of legacy HTML form routes")
+	}
+	for _, forbidden := range []string{"注册码", "入网码", "命令有效期"} {
+		if strings.Contains(content, forbidden) {
+			t.Errorf("SPA still exposes deprecated add-node wording %q", forbidden)
+		}
 	}
 }
 

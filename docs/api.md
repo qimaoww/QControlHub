@@ -5,18 +5,18 @@
 ## 鉴权模型
 
 - 管理端点 `/api/v1/*`：自动化调用使用 `Authorization: Bearer <令牌>`；SPA 使用 `/api/v1/auth/login` 建立 HttpOnly 会话 Cookie。令牌可为 `QCH_ADMIN_TOKEN` 或 `QCH_OPERATOR_TOKENS` / `QCH_READONLY_TOKENS` 中的角色令牌。
-- 首次注册 `/agent/v1/enroll`：`Authorization: Bearer <一次性 QCH_ENROLLMENT_TOKEN>`。
+- 添加或重装节点 `/agent/v1/enroll`：`Authorization: Bearer <节点绑定的 QCH_ENROLLMENT_TOKEN>`。
 - WSS `/agent/v1/connect`：仅供官方 Agent 使用，握手要求 Ed25519 签名头、时间戳和 nonce；不要用管理员令牌调用。
 - `/healthz`：无鉴权，仅返回服务存活状态，不包含数据库详情或秘密。
 - `/readyz`：无鉴权；仅在控制面能连接 PostgreSQL 时返回 200，不暴露数据库错误详情。
-- `GET /api/v1/agent-installer`：通过 `X-QControlHub-Enrollment` 头提交有效入网码后返回一键安装脚本；无有效入网码不返回脚本。
-- `GET /api/v1/agent-binary`：通过 `X-QControlHub-Enrollment` 头提交有效入网码后返回 Agent 可执行文件；无有效入网码不返回二进制。
+- `GET /api/v1/agent-installer`：通过 `X-QControlHub-Enrollment` 头提交有效的添加节点凭证后返回一键安装脚本。
+- `GET /api/v1/agent-binary`：通过 `X-QControlHub-Enrollment` 头提交有效的添加节点凭证后返回 Agent 可执行文件。
 
 ### 角色令牌
 
 `QCH_OPERATOR_TOKENS` 与 `QCH_READONLY_TOKENS`（逗号分隔列表）提供低于管理员的令牌，Web 登录与管理 API 共用同一套角色：
 
-| 角色 | 读取 | 任务/配置写操作 | 节点移除、注册码、设置、删除配置 |
+| 角色 | 读取 | 任务/配置写操作 | 节点与添加命令、设置、删除配置 |
 | --- | --- | --- | --- |
 | admin（`QCH_ADMIN_TOKEN`） | ✓ | ✓ | ✓ |
 | operator | ✓ | ✓ | — |
@@ -63,9 +63,9 @@
 | `GET` | `/api/v1/tasks/{id}` | 读取单个任务及结果 |
 | `DELETE` | `/api/v1/tasks/{id}` | 取消尚未领取的任务 |
 | `POST` | `/api/v1/tasks/{id}/retry` | 按当前配置重试失败或已取消任务 |
-| `GET` | `/api/v1/enrollment-tokens` | 列出最近的入网码元数据，不返回原始值（admin） |
-| `POST` | `/api/v1/enrollment-tokens` | 签发短期、限次入网码 |
-| `DELETE` | `/api/v1/enrollment-tokens/{id}` | 吊销仍可用的入网码 |
+| `GET` | `/api/v1/enrollment-tokens` | 列出添加节点记录，不返回原始凭证（admin） |
+| `POST` | `/api/v1/enrollment-tokens` | 创建节点绑定、可重复安装的添加命令 |
+| `DELETE` | `/api/v1/enrollment-tokens/{id}` | 删除添加节点记录并立即使命令失效 |
 | `GET` | `/api/v1/settings` | 读取面板设置 |
 | `PUT` | `/api/v1/settings` | 保存面板设置（admin） |
 | `GET` | `/api/v1/audit?limit=` | 读取最近审计记录 |
@@ -74,24 +74,22 @@
 | `POST` | `/api/v1/templates` | 创建配置模板 |
 | `DELETE` | `/api/v1/templates/{id}` | 删除配置模板（admin） |
 | `POST` | `/api/v1/templates/{id}/apply` | 渲染模板并保存到指定节点 |
-| `GET` | `/api/v1/agent-installer` | 下载入网码保护的一键安装脚本 |
-| `GET` | `/api/v1/agent-binary` | 下载入网码保护的 Agent 可执行文件 |
+| `GET` | `/api/v1/agent-installer` | 下载添加节点凭证保护的一键安装脚本 |
+| `GET` | `/api/v1/agent-binary` | 下载添加节点凭证保护的 Agent 可执行文件 |
 
 `GET /api/v1/overview` 中的 `configs` 只统计可在“配置档案”工作区跨节点下发的全局配置；`node_configs` 单独统计绑定到具体 Agent/内核的节点配置，避免将两类配置混为一个不可解释的总数。为兼容既有调用方，`tasks_pending` 仍表示 `pending + running` 的活动任务总数；`tasks_queued` 和 `tasks_running` 分别给出排队与执行中的精确数量。
 
-删除 Agent 是不可逆的身份吊销：控制面先删除该节点的配置与修订、将其未完成任务标记为失败，再主动关闭当前认证 WSS；相同 Ed25519 身份的后续握手返回 `401`。需要重新接入时必须签发新的入网码并生成新身份。
+删除 Agent 是不可逆的身份吊销：控制面先删除该节点的配置与修订、将其未完成任务标记为失败，再主动关闭当前认证 WSS；相同 Ed25519 身份的后续握手返回 `401`。添加节点记录仍存在时，可重新执行原命令原位注册新身份。
 
-### 签发入网码
+### 添加节点
 
 ```json
 {
-  "name": "edge-01 bootstrap",
-  "ttl_minutes": 10,
-  "max_uses": 1
+  "name": "edge-01"
 }
 ```
 
-`ttl_minutes` 允许 1–1440，`max_uses` 允许 1–50；零值分别使用 15 分钟和 1 次。创建响应中的 `token` 只返回一次，并带有 `Cache-Control: no-store`。控制面数据库只保存摘要，之后的列表接口无法恢复原始值。
+`name` 同时是凭证绑定的节点名称。接口始终创建无有效期、可重复安装的添加节点命令；重复注册会更新原节点的密钥并复用节点 ID。创建响应中的 `token` 只返回一次并带有 `Cache-Control: no-store`，控制面只保存摘要。删除添加记录后，数据库记录被直接删除，原命令立即失效。
 
 ### 创建配置
 
@@ -198,7 +196,7 @@ Content-Type: application/json
 - `200`：查询或更新成功。
 - `101`：Agent WebSocket 升级成功。
 - `201`：配置、任务或 Agent 创建成功。
-- `204`：删除或吊销成功。
+- `204`：删除成功。
 - `400`：JSON、字段、内核或动作无效。
 - `401`：令牌或 Agent 签名无效。
 - `403`：浏览器 Origin 不在 CORS 白名单。

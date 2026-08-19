@@ -107,11 +107,11 @@ sudo deploy/bootstrap-core-services.sh
 
 TLS 入站默认引用 `/etc/qcontrolhub/tls/server.crt` 与 `/etc/qcontrolhub/tls/server.key`。QControlHub 不代替 ACME 或站点证书管理；使用 TLS、TUIC、Hysteria2、Trojan 或 AnyTLS 前，应把适用的证书链和私钥安装到这两个路径（私钥权限建议 `0600`），或在方案表单中改为站点的既有绝对路径。
 
-如果文件是从另一台构建主机复制来的，请把示例文件的本地路径替换为实际路径。先登录控制台，在“远程节点”页签发一个有效期尽量短、最大使用次数为 1 的入网码；原始值只显示一次。然后编辑 `/etc/qcontrolhub/agent.env`：
+如果文件是从另一台构建主机复制来的，请把示例文件的本地路径替换为实际路径。先登录控制台，在“远程节点”页为目标节点生成添加命令；原始凭证只显示一次，可重复安装，直到删除对应的添加记录。然后编辑 `/etc/qcontrolhub/agent.env`：
 
 - `QCH_SERVER_URL` 应使用控制面的 `wss://` origin；Agent 会从同一 origin 派生首次注册所需的 HTTPS 地址。
 - 公网可信证书无需额外配置；私有 CA 或自签名证书必须复制为 root 所有的普通 PEM 文件，并通过 `QCH_TLS_CA_FILE` 指定绝对路径。Agent 不提供跳过证书验证的模式。
-- 首次启动时把刚签发的入网码填入 `QCH_ENROLLMENT_TOKEN`。
+- 安装或重装时临时把该节点的添加凭证填入 `QCH_ENROLLMENT_TOKEN`。
 - 设置有辨识度的节点名与标签。
 - `QCH_AGENT_ENGINES` 只列出本机真实安装的内核。
 - 保持 `QCH_AGENT_DRY_RUN=true` 完成首轮验证。
@@ -155,7 +155,7 @@ sudo systemctl restart qagent
 
 systemd 单元的 `ProtectSystem=strict` 只放行默认的四个配置目录以及 `/usr/local/lib/qagent/cores`，用于在同一文件系统内原子切换内核二进制；`/usr/local/bin` 不可写，`/usr/local/bin/qagent` 也保持只读。四个内核服务统一使用 `qagent-` 前缀，不会控制管理员自行安装的通用服务。自定义二进制或配置路径必须预先创建并精确加入 `ReadWritePaths=`，不要放宽为整个 `/etc` 或 `/usr`。
 
-真实版本切换要求 `QCH_AGENT_DRY_RUN=false`，并且节点已经预置对应配置目录、可通过的初始配置和 systemd 单元。空白 Linux 节点可先运行 `deploy/bootstrap-core-services.sh` 完成这些前置条件；脚本仅创建缺失配置和新的 `qagent-*` unit，绝不覆盖站点已有文件，升级时也只迁移带 QControlHub 标记的旧 unit。稳定版使用官方 latest，开发版只使用官方 prerelease，自定义版本必须是类似 `1.19.29` 或 `1.14.0-beta.3` 的完整版本号；不支持自定义下载地址。Agent 在下载后强制核对 GitHub Release API 给出的 SHA-256，运行候选二进制确认版本，随后原子替换并重启服务；失败时恢复上一二进制。
+真实版本切换要求 `QCH_AGENT_DRY_RUN=false`，并且节点已经预置对应配置目录、可通过的初始配置和 systemd 单元。空白 Linux 节点可先运行 `deploy/bootstrap-core-services.sh` 完成这些前置条件；脚本仅创建缺失配置和新的 `qagent-*` unit，不迁移也不操作旧的通用服务或二进制。稳定版使用官方 latest，开发版只使用官方 prerelease，自定义版本必须是类似 `1.19.29` 或 `1.14.0-beta.3` 的完整版本号；不支持自定义下载地址。Agent 在下载后强制核对 GitHub Release API 给出的 SHA-256，运行候选二进制确认版本，随后原子替换并重启服务；失败时恢复上一二进制。
 
 ## 5. 运维操作
 
@@ -188,7 +188,7 @@ sudo systemctl stop qagent
 sudo rm /var/lib/qcontrolhub/agent-state.json
 ```
 
-然后在控制台重新签发单次入网码，临时写回受保护的 Agent 环境文件，启动完成后再次删除。删除状态文件是不可逆身份操作，必须先确认控制台中旧身份已撤销。
+然后重新执行该节点的添加命令。控制面会复用原节点 ID、替换旧签名密钥并关闭旧连接；若添加记录已删除，则需要重新创建。删除状态文件是不可逆身份操作，必须先确认控制台中旧身份已撤销。
 
 ### 外部 PostgreSQL
 

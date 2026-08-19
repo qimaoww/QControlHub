@@ -56,7 +56,7 @@ go run ./cmd/control-plane
 
 ## 运行本地 Agent
 
-保持控制面运行，登录 Web 控制台，在“远程节点”页签发一个短期单次入网码。在第二个终端加载 `.env`，将该值临时传给 Agent，并使用单独的本地状态文件：
+保持控制面运行，登录 Web 控制台，在“远程节点”页创建一个绑定 `dev-agent` 的添加节点命令。在第二个终端加载 `.env`，将其中的添加凭证临时传给 Agent，并使用单独的本地状态文件：
 
 ```bash
 set -a
@@ -64,7 +64,7 @@ set -a
 set +a
 QCH_SERVER_URL=ws://127.0.0.1:8080 \
 QCH_ALLOW_HTTP=true \
-QCH_ENROLLMENT_TOKEN='刚刚签发且只显示一次的入网码' \
+QCH_ENROLLMENT_TOKEN='刚生成且只显示一次的添加节点凭证' \
 QCH_AGENT_DRY_RUN=true \
 QCH_AGENT_STATE=./data/dev-agent-state.json \
 QCH_AGENT_NAME=dev-agent \

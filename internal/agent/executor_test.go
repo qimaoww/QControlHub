@@ -64,21 +64,21 @@ func TestDefaultSpecsUsePrivateQAgentNamespace(t *testing.T) {
 	}
 }
 
-func TestCoreBootstrapMigratesOnlyOwnedLegacyUnits(t *testing.T) {
+func TestCoreBootstrapDoesNotTouchLegacyInstallations(t *testing.T) {
 	t.Parallel()
 	contents, err := os.ReadFile("../../deploy/bootstrap-core-services.sh")
 	if err != nil {
 		t.Fatal(err)
 	}
 	script := string(contents)
-	for _, required := range []string{
-		"grep -Fq 'managed by QControlHub'",
-		"preserved user-managed legacy symlink",
-		"preserved user-managed legacy unit",
-		"/etc/systemd/system/qagent-$engine.service",
-	} {
+	for _, required := range []string{"/usr/local/lib/qagent/cores", "/etc/systemd/system/qagent-$engine.service"} {
 		if !strings.Contains(script, required) {
-			t.Errorf("core bootstrap is missing migration guard %q", required)
+			t.Errorf("core bootstrap is missing private namespace %q", required)
+		}
+	}
+	for _, forbidden := range []string{"/usr/local/bin/mihomo", "/usr/local/bin/xray", "managed by QControlHub", "legacy_service"} {
+		if strings.Contains(script, forbidden) {
+			t.Errorf("core bootstrap unexpectedly touches legacy installation %q", forbidden)
 		}
 	}
 }

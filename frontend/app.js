@@ -491,7 +491,7 @@ function contextMarkup(title) {
 
 const dashboard = installDashboard({ api, state, esc, engineName, heartbeat, statusTone, ago, short, actionName, shell });
 
-const agentModule = installAgents({ api, optionalAPI, state, engines, can, esc, engineName, statusTone, serviceStatusName, short, date, ago, percent, bytes, conciseVersion, rate, notify, confirmAction, shell });
+const agentModule = installAgents({ api, optionalAPI, state, engines, can, esc, engineName, statusTone, serviceStatusName, short, date, ago, heartbeat, percent, bytes, conciseVersion, rate, actionName, serviceActionDisabled, trafficChart, renderConfigDiff, notify, confirmAction, shell });
 const { agents, submitTask, bindCodeEditors, showCommand } = agentModule;
 
 const clientAccess = installClientAccess({ api, state, engines, esc, engineName, short, shell });
