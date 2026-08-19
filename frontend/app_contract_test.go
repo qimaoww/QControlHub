@@ -94,6 +94,7 @@ func TestSPAModulesArePublished(t *testing.T) {
 		"configs.js",
 		"tasks.js",
 		"settings.js",
+		"../module_smoke.mjs",
 	} {
 		if _, err := os.Stat(filepath.Join("modules", name)); err != nil {
 			t.Errorf("missing SPA module %s: %v", name, err)
