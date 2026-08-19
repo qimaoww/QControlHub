@@ -57,10 +57,10 @@ echo '== 1/6 下载安装资源 =='
 for asset in \
   deploy/bootstrap-core-services.sh \
   deploy/systemd/qagent.service \
-  deploy/systemd/mihomo.service \
-  deploy/systemd/xray.service \
-  deploy/systemd/sing-box.service \
-  deploy/systemd/shadowsocks-rust.service \
+  deploy/systemd/qagent-mihomo.service \
+  deploy/systemd/qagent-xray.service \
+  deploy/systemd/qagent-sing-box.service \
+  deploy/systemd/qagent-shadowsocks-rust.service \
   examples/configs/mihomo-minimal.yaml \
   examples/configs/xray-minimal.json \
   examples/configs/sing-box-minimal.json \

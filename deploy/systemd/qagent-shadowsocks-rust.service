@@ -1,20 +1,20 @@
 [Unit]
-Description=Xray proxy core managed by QControlHub
-Documentation=https://github.com/XTLS/Xray-core
+Description=Shadowsocks Rust core managed by QAgent
+Documentation=https://github.com/shadowsocks/shadowsocks-rust
 Wants=network-online.target
 After=network-online.target
-ConditionFileIsExecutable=/usr/local/bin/xray
-ConditionPathExists=/etc/qagent/xray/config.json
+ConditionFileIsExecutable=/usr/local/lib/qagent/cores/ssserver
+ConditionPathExists=/etc/qagent/shadowsocks-rust/config.json
 
 [Service]
 Type=simple
 User=qcontrolhub-core
 Group=qcontrolhub-core
-WorkingDirectory=/var/lib/qcontrolhub-xray
-StateDirectory=qcontrolhub-xray
+WorkingDirectory=/var/lib/qcontrolhub-shadowsocks-rust
+StateDirectory=qcontrolhub-shadowsocks-rust
 StateDirectoryMode=0750
 UMask=0027
-ExecStart=/usr/local/bin/xray run -config /etc/qagent/xray/config.json
+ExecStart=/usr/local/lib/qagent/cores/ssserver -c /etc/qagent/shadowsocks-rust/config.json
 Restart=on-failure
 RestartSec=3s
 TimeoutStopSec=20s
@@ -39,8 +39,8 @@ ProtectProc=invisible
 ProcSubset=pid
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 SystemCallArchitectures=native
-ReadOnlyPaths=/usr/local/bin/xray /etc/qagent/xray
-ReadWritePaths=/var/lib/qcontrolhub-xray
+ReadOnlyPaths=/usr/local/lib/qagent/cores/ssserver /etc/qagent/shadowsocks-rust
+ReadWritePaths=/var/lib/qcontrolhub-shadowsocks-rust
 
 [Install]
 WantedBy=multi-user.target

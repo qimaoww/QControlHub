@@ -1,11 +1,11 @@
 #!/bin/sh
 # install-core-engines.sh — 下载并安装 mihomo / xray / sing-box / Shadowsocks Rust 官方 linux-amd64 二进制
 # 用法（root）： bash deploy/remote/install-core-engines.sh
-# 安装路径与 agent 默认 EngineSpec 一致：/usr/local/bin/{mihomo,xray,sing-box,ssserver}
+# 安装路径与 agent 默认 EngineSpec 一致：/usr/local/lib/qagent/cores/{mihomo,xray,sing-box,ssserver}
 set -eu
 
 [ "$(id -u)" -eq 0 ] || { printf '%s\n' 'must run as root' >&2; exit 1; }
-for tool in curl gunzip unzip tar xz; do
+for tool in curl find gunzip install tar unzip xz; do
   command -v "$tool" >/dev/null 2>&1 || { printf '%s\n' "missing tool: $tool" >&2; exit 1; }
 done
 
@@ -16,36 +16,39 @@ ssrust_txz="https://github.com/shadowsocks/shadowsocks-rust/releases/download/v1
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
+core_dir=/usr/local/lib/qagent/cores
+install -d -o root -g root -m 0755 "$core_dir"
 
 echo '== mihomo v1.19.29 =='
 curl -fsSL -o "$work/mihomo.gz" "$mihomo_gz"
-gunzip -c "$work/mihomo.gz" > /usr/local/bin/mihomo
-chmod 0755 /usr/local/bin/mihomo
-/usr/local/bin/mihomo -v | head -n1
+gunzip -c "$work/mihomo.gz" > "$work/mihomo"
+install -o root -g root -m 0755 "$work/mihomo" "$core_dir/mihomo"
+"$core_dir/mihomo" -v | head -n1
 
 echo '== xray v26.3.27 =='
 curl -fsSL -o "$work/xray.zip" "$xray_zip"
 mkdir -p "$work/xray"
 unzip -o -q "$work/xray.zip" -d "$work/xray"
-cp "$work/xray/xray" /usr/local/bin/xray
-chmod 0755 /usr/local/bin/xray
-/usr/local/bin/xray version | head -n1
+install -o root -g root -m 0755 "$work/xray/xray" "$core_dir/xray"
+"$core_dir/xray" version | head -n1
 
 echo '== sing-box v1.13.16 =='
 curl -fsSL -o "$work/sing-box.tgz" "$singbox_tgz"
 mkdir -p "$work/sb"
 tar -xzf "$work/sing-box.tgz" -C "$work/sb"
-find "$work/sb" -type f -name sing-box -exec cp {} /usr/local/bin/sing-box \;
-chmod 0755 /usr/local/bin/sing-box
-/usr/local/bin/sing-box version | head -n1
+singbox_binary=$(find "$work/sb" -type f -name sing-box -print -quit)
+[ -n "$singbox_binary" ] || { printf '%s\n' 'sing-box binary is missing from release archive' >&2; exit 1; }
+install -o root -g root -m 0755 "$singbox_binary" "$core_dir/sing-box"
+"$core_dir/sing-box" version | head -n1
 
 echo '== Shadowsocks Rust v1.24.0 =='
 curl -fsSL -o "$work/shadowsocks-rust.txz" "$ssrust_txz"
 mkdir -p "$work/ssrust"
 tar -xJf "$work/shadowsocks-rust.txz" -C "$work/ssrust"
-find "$work/ssrust" -type f -name ssserver -exec cp {} /usr/local/bin/ssserver \;
-chmod 0755 /usr/local/bin/ssserver
-/usr/local/bin/ssserver --version | head -n1
+ssserver_binary=$(find "$work/ssrust" -type f -name ssserver -print -quit)
+[ -n "$ssserver_binary" ] || { printf '%s\n' 'ssserver binary is missing from release archive' >&2; exit 1; }
+install -o root -g root -m 0755 "$ssserver_binary" "$core_dir/ssserver"
+"$core_dir/ssserver" --version | head -n1
 
 echo '== installed =='
-ls -l /usr/local/bin/mihomo /usr/local/bin/xray /usr/local/bin/sing-box /usr/local/bin/ssserver
+ls -l "$core_dir/mihomo" "$core_dir/xray" "$core_dir/sing-box" "$core_dir/ssserver"

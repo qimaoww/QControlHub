@@ -35,10 +35,10 @@ var systemctlPath = "/usr/bin/systemctl"
 
 func DefaultSpecs() map[core.Engine]EngineSpec {
 	return map[core.Engine]EngineSpec{
-		core.EngineMihomo:          {Binary: "/usr/local/bin/mihomo", ConfigPath: "/etc/qagent/mihomo/config.yaml", Service: "mihomo.service"},
-		core.EngineXray:            {Binary: "/usr/local/bin/xray", ConfigPath: "/etc/qagent/xray/config.json", Service: "xray.service"},
-		core.EngineSingBox:         {Binary: "/usr/local/bin/sing-box", ConfigPath: "/etc/qagent/sing-box/config.json", Service: "sing-box.service"},
-		core.EngineShadowsocksRust: {Binary: "/usr/local/bin/ssserver", ConfigPath: "/etc/qagent/shadowsocks-rust/config.json", Service: "shadowsocks-rust.service"},
+		core.EngineMihomo:          {Binary: "/usr/local/lib/qagent/cores/mihomo", ConfigPath: "/etc/qagent/mihomo/config.yaml", Service: "qagent-mihomo.service"},
+		core.EngineXray:            {Binary: "/usr/local/lib/qagent/cores/xray", ConfigPath: "/etc/qagent/xray/config.json", Service: "qagent-xray.service"},
+		core.EngineSingBox:         {Binary: "/usr/local/lib/qagent/cores/sing-box", ConfigPath: "/etc/qagent/sing-box/config.json", Service: "qagent-sing-box.service"},
+		core.EngineShadowsocksRust: {Binary: "/usr/local/lib/qagent/cores/ssserver", ConfigPath: "/etc/qagent/shadowsocks-rust/config.json", Service: "qagent-shadowsocks-rust.service"},
 	}
 }
 

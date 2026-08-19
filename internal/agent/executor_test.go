@@ -24,6 +24,63 @@ func TestProductionAgentUnitAllowsOnlyMetadataOwnershipCapability(t *testing.T) 
 	if strings.Contains(unit, "CapabilityBoundingSet=CAP_CHOWN ") || strings.Contains(unit, "AmbientCapabilities=CAP_CHOWN ") {
 		t.Fatal("production Agent unit grants capabilities beyond CAP_CHOWN")
 	}
+	if !strings.Contains(unit, "ReadWritePaths=-/usr/local/lib/qagent/cores") {
+		t.Fatal("production Agent unit does not allow updates in the private core directory")
+	}
+	if strings.Contains(unit, "ReadWritePaths=-/usr/local/bin\n") {
+		t.Fatal("production Agent unit can modify administrator-managed /usr/local/bin programs")
+	}
+}
+
+func TestDefaultSpecsUsePrivateQAgentNamespace(t *testing.T) {
+	t.Parallel()
+	want := map[core.Engine]EngineSpec{
+		core.EngineMihomo:          {Binary: "/usr/local/lib/qagent/cores/mihomo", ConfigPath: "/etc/qagent/mihomo/config.yaml", Service: "qagent-mihomo.service"},
+		core.EngineXray:            {Binary: "/usr/local/lib/qagent/cores/xray", ConfigPath: "/etc/qagent/xray/config.json", Service: "qagent-xray.service"},
+		core.EngineSingBox:         {Binary: "/usr/local/lib/qagent/cores/sing-box", ConfigPath: "/etc/qagent/sing-box/config.json", Service: "qagent-sing-box.service"},
+		core.EngineShadowsocksRust: {Binary: "/usr/local/lib/qagent/cores/ssserver", ConfigPath: "/etc/qagent/shadowsocks-rust/config.json", Service: "qagent-shadowsocks-rust.service"},
+	}
+	for engine, expected := range want {
+		actual := DefaultSpecs()[engine]
+		if actual != expected {
+			t.Errorf("DefaultSpecs()[%s] = %+v, want %+v", engine, actual, expected)
+		}
+		unitPath := filepath.Join("../../deploy/systemd", expected.Service)
+		contents, err := os.ReadFile(unitPath)
+		if err != nil {
+			t.Errorf("read %s: %v", unitPath, err)
+			continue
+		}
+		unit := string(contents)
+		for _, required := range []string{
+			"ConditionFileIsExecutable=" + expected.Binary,
+			"ConditionPathExists=" + expected.ConfigPath,
+			"ExecStart=" + expected.Binary,
+		} {
+			if !strings.Contains(unit, required) {
+				t.Errorf("%s is missing %q", expected.Service, required)
+			}
+		}
+	}
+}
+
+func TestCoreBootstrapMigratesOnlyOwnedLegacyUnits(t *testing.T) {
+	t.Parallel()
+	contents, err := os.ReadFile("../../deploy/bootstrap-core-services.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(contents)
+	for _, required := range []string{
+		"grep -Fq 'managed by QControlHub'",
+		"preserved user-managed legacy symlink",
+		"preserved user-managed legacy unit",
+		"/etc/systemd/system/qagent-$engine.service",
+	} {
+		if !strings.Contains(script, required) {
+			t.Errorf("core bootstrap is missing migration guard %q", required)
+		}
+	}
 }
 
 func TestServiceVerificationRejectsTransientActiveState(t *testing.T) {
@@ -62,7 +119,7 @@ func TestExecutorDryRunHonorsActionAndEngineWhitelist(t *testing.T) {
 			core.EngineMihomo: {
 				Binary:     "binary-that-must-not-be-invoked",
 				ConfigPath: destination,
-				Service:    "mihomo.service",
+				Service:    "qagent-mihomo.service",
 			},
 		},
 	}

@@ -22,8 +22,9 @@ TimeoutStopSec=20s
 ProtectSystem=strict
 ReadWritePaths=/var/lib/qcontrolhub
 # Version switching creates an atomic candidate and backup beside each core.
-# Keep the Agent itself read-only even though the default cores share this directory.
-ReadWritePaths=-/usr/local/bin
+# Keep every managed core below an application-private directory so binaries
+# installed by the server administrator in /usr/local/bin remain untouched.
+ReadWritePaths=-/usr/local/lib/qagent/cores
 ReadOnlyPaths=-/usr/local/bin/qagent
 ReadWritePaths=-/etc/qagent/mihomo
 ReadWritePaths=-/etc/qagent/xray
