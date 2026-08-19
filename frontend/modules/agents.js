@@ -302,7 +302,9 @@ function bindAgentPage() {
           max_uses: 1,
         }),
       });
-      const command = `curl -fsSL https://raw.githubusercontent.com/qimaoww/qcontrolhub/main/deploy/remote/install-agent.sh | sudo bash -s -- ${location.origin} '${created.token}' '${name.replaceAll("'", "'\\''")}'`;
+      const escapedToken = created.token.replaceAll("'", "'\\''");
+      const escapedName = name.replaceAll("'", "'\\''");
+      const command = `curl -fsSL -H 'X-QControlHub-Enrollment: ${escapedToken}' ${location.origin}/install-agent.sh | sudo bash -s -- ${location.origin} '${escapedToken}' '${escapedName}'`;
       showCommand(command);
     };
   document

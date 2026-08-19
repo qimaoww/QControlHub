@@ -6,6 +6,7 @@ import { installTasks } from "./modules/tasks.js";
 import { installSettings } from "./modules/settings.js";
 
 const app = document.querySelector("#app");
+const themeStorageKey = "qcontrolhub-color-theme";
 const engines = ["mihomo", "xray", "sing-box", "ss-rust"];
 const actions = [
   "validate",
@@ -271,9 +272,43 @@ async function ensureSession() {
   }
 }
 
+function storedTheme() {
+  try {
+    const value = localStorage.getItem(themeStorageKey);
+    return value === "light" || value === "dark" ? value : "";
+  } catch {
+    return "";
+  }
+}
+
+function applyTheme(theme = storedTheme() || (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark")) {
+  document.documentElement.dataset.theme = theme;
+  document.documentElement.style.colorScheme = theme;
+  const nextLabel = theme === "light" ? "切换为深色主题" : "切换为浅色主题";
+  document.querySelectorAll("[data-theme-toggle]").forEach((button) => {
+    button.setAttribute("aria-label", nextLabel);
+    button.setAttribute("title", nextLabel);
+    const icon = button.querySelector("[data-theme-icon]");
+    if (icon) icon.textContent = theme === "light" ? "☾" : "☀";
+  });
+}
+
+function toggleTheme() {
+  const next =
+    document.documentElement.dataset.theme === "light" ? "dark" : "light";
+  try {
+    localStorage.setItem(themeStorageKey, next);
+  } catch {}
+  applyTheme(next);
+}
+
 function renderLogin(message = "") {
   document.body.className = "login-body";
-  app.innerHTML = `<main class="login-shell compact-login"><section class="login-card"><a class="brand login-card-brand" href="#dashboard"><span class="brand-mark large">QH</span><strong>QControlHub</strong></a><div class="login-card-head"><h1>登录</h1></div>${message ? `<div class="alert error">${esc(message)}</div>` : ""}<form id="login-form" class="stack-form"><input class="visually-hidden" type="text" name="username" value="admin" autocomplete="username" tabindex="-1" aria-hidden="true"><label>管理令牌<input name="token" type="password" autocomplete="current-password" autofocus required minlength="32"></label><button class="button primary" type="submit">登录</button></form></section></main>`;
+  document.title = "登录 · QControlHub";
+  app.style.display = "contents";
+  app.innerHTML = `<button class="theme-toggle login-theme-toggle" type="button" data-theme-toggle aria-label="切换颜色主题"><span data-theme-icon aria-hidden="true">☀</span></button><main class="login-shell compact-login"><section class="login-card"><a class="brand login-card-brand" href="#dashboard"><span class="brand-mark large">QH</span><strong>QControlHub</strong></a><div class="login-card-head"><h1>登录</h1></div>${message ? `<div class="alert error">${esc(message)}</div>` : ""}<form id="login-form" class="stack-form"><input class="visually-hidden" type="text" name="username" value="admin" autocomplete="username" tabindex="-1" aria-hidden="true"><label>管理令牌<input name="token" type="password" autocomplete="current-password" autofocus required minlength="32"></label><button class="button primary" type="submit">登录</button></form></section></main>`;
+  applyTheme();
+  document.querySelector("[data-theme-toggle]").onclick = toggleTheme;
   document
     .querySelector("#login-form")
     .addEventListener("submit", async (event) => {
@@ -339,9 +374,9 @@ function shell(content, title) {
       '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3A1.7 1.7 0 0 0 10 3V2.8h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1z"/>',
     ],
   ];
+  app.style.display = "";
   document.body.className = `app-body page-${state.route}`;
-  document.documentElement.dataset.theme =
-    localStorage.getItem("qcontrolhub-theme") || "light";
+  applyTheme();
   const context = contextMarkup(title);
   const overview = state.data.overview || {};
   const panelName = state.data.settings?.panel_name || "QControlHub";
@@ -355,15 +390,16 @@ function shell(content, title) {
         ? `<a class="button small" href="#client-access">客户端配置</a>${can("admin") ? '<a class="button small" href="#enrollment">添加节点</a>' : ""}`
         : state.route === "client-access"
           ? '<a class="button small" href="#agents">返回节点</a>'
-          : state.route === "live-config"
-            ? '<a class="button small" href="#archive-config">配置档案</a>'
-            : state.route === "archive-config"
-              ? '<a class="button small" href="#live-config">节点实际配置</a>'
-              : state.route === "agent-config"
-                ? '<a class="button small" href="#agents">返回节点</a>'
+          : state.route === "archive-config"
+            ? '<a class="button small" href="#live-config">节点实际配置</a>'
+            : state.route === "agent-config"
+              ? '<a class="button small" href="#agents">返回节点</a>'
+              : state.route === "tasks"
+                ? '<button id="refresh" class="button small task-refresh-link" type="button">刷新</button>'
                 : "";
   document.title = `${title} · ${panelName}`;
-  app.innerHTML = `<div class="desktop-app"><aside class="app-dock"><a class="dock-logo" href="#dashboard" aria-label="${esc(panelName)} 总览"><span>QH</span></a><nav class="dock-nav" aria-label="主导航">${links.map(([id, text, icon]) => `<a class="${state.route === id || (state.route === "agent-config" && id === "agents") || (state.route === "archive-config" && id === "live-config") ? "active" : ""}" href="#${id}" title="${text}"><svg viewBox="0 0 24 24">${icon}</svg><span class="dock-label">${text}</span>${id === "agents" ? `<b data-online-count ${overview.agents_online ? "" : "hidden"}>${overview.agents_online || 0}</b>` : ""}${id === "live-config" && overview.node_configs ? `<b>${overview.node_configs}</b>` : ""}${id === "tasks" ? `<b class="hot" data-task-active-count ${overview.tasks_pending ? "" : "hidden"}>${overview.tasks_pending || 0}</b>` : ""}</a>`).join("")}</nav><div class="dock-tools"><button id="theme-toggle" data-theme-toggle type="button" aria-label="切换颜色主题" title="切换主题"><svg viewBox="0 0 24 24"><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6 7 7M17 17l1.4 1.4M18.4 5.6 17 7M7 17l-1.4 1.4"/><circle cx="12" cy="12" r="4"/></svg><span class="dock-label">主题</span></button><button id="logout" type="button" aria-label="退出登录" title="退出登录"><svg viewBox="0 0 24 24"><path d="M10 4H5v16h5M14 8l4 4-4 4M8 12h10"/></svg><span class="dock-label">退出</span></button></div></aside><aside class="context-sidebar"><header class="context-brand"><a href="#dashboard"><span class="brand-mark">QH</span><strong>${esc(panelName)}</strong></a></header>${context}</aside><section class="workspace-shell"><header class="workspace-topbar"><div class="workspace-route"><span>${esc(panelName)}</span><i>/</i><b>${esc(title)}</b><i class="role-badge role-${esc(state.session.role)}">${esc(roleName)}</i></div><div class="workspace-actions"><span class="sync-state ${overview.agents_online ? "" : "inactive"}" data-sync-state><i></i><span data-sync-label>${overview.agents_online ? `${overview.agents_online} 个节点在线` : "等待节点连接"}</span></span>${topAction}<button id="refresh" class="button small" type="button">刷新</button></div></header><main class="workspace-main">${content}</main></section></div><dialog class="confirm-dialog" data-confirm-dialog aria-labelledby="confirm-dialog-title" aria-describedby="confirm-dialog-message"><div class="confirm-dialog-card"><span class="confirm-dialog-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3.5 21 20H3zM12 9v5M12 17.5h.01"/></svg></span><div><p class="eyebrow">操作确认</p><h2 id="confirm-dialog-title">确认继续？</h2><p id="confirm-dialog-message" data-confirm-message></p></div><footer><button class="button" type="button" data-confirm-cancel>取消</button><button class="button danger-confirm" type="button" data-confirm-accept>确认继续</button></footer></div></dialog>`;
+  app.innerHTML = `<div class="desktop-app"><aside class="app-dock"><a class="dock-logo" href="#dashboard" aria-label="${esc(panelName)} 总览"><span>QH</span></a><nav class="dock-nav" aria-label="主导航">${links.map(([id, text, icon]) => `<a class="${state.route === id || (state.route === "agent-config" && id === "agents") || (state.route === "archive-config" && id === "live-config") ? "active" : ""}" href="#${id}" title="${text}"><svg viewBox="0 0 24 24">${icon}</svg><span class="dock-label">${text}</span>${id === "agents" ? `<b data-online-count ${overview.agents_online ? "" : "hidden"}>${overview.agents_online || 0}</b>` : ""}${id === "live-config" && overview.node_configs ? `<b>${overview.node_configs}</b>` : ""}${id === "tasks" ? `<b class="hot" data-task-active-count ${overview.tasks_pending ? "" : "hidden"}>${overview.tasks_pending || 0}</b>` : ""}</a>`).join("")}</nav><div class="dock-tools"><button id="theme-toggle" data-theme-toggle type="button" aria-label="切换颜色主题" title="切换主题"><svg viewBox="0 0 24 24"><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6 7 7M17 17l1.4 1.4M18.4 5.6 17 7M7 17l-1.4 1.4"/><circle cx="12" cy="12" r="4"/></svg><span class="dock-label">主题</span></button><button id="logout" type="button" aria-label="退出登录" title="退出登录"><svg viewBox="0 0 24 24"><path d="M10 4H5v16h5M14 8l4 4-4 4M8 12h10"/></svg><span class="dock-label">退出</span></button></div></aside><aside class="context-sidebar"><header class="context-brand"><a href="#dashboard"><span class="brand-mark">QH</span><strong>${esc(panelName)}</strong></a></header>${context}</aside><section class="workspace-shell"><header class="workspace-topbar"><div class="workspace-route"><span>${esc(panelName)}</span><i>/</i><b>${esc(title)}</b><i class="role-badge role-${esc(state.session.role)}">${esc(roleName)}</i></div><div class="workspace-actions"><span class="sync-state ${overview.agents_online ? "" : "inactive"}" data-sync-state><i></i><span data-sync-label>${overview.agents_online ? `${overview.agents_online} 个节点在线` : "等待节点连接"}</span></span>${topAction}</div></header><main class="workspace-main">${content}</main></section></div><dialog class="confirm-dialog" data-confirm-dialog aria-labelledby="confirm-dialog-title" aria-describedby="confirm-dialog-message"><div class="confirm-dialog-card"><span class="confirm-dialog-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3.5 21 20H3zM12 9v5M12 17.5h.01"/></svg></span><div><p class="eyebrow">操作确认</p><h2 id="confirm-dialog-title">确认继续？</h2><p id="confirm-dialog-message" data-confirm-message></p></div><footer><button class="button" type="button" data-confirm-cancel>取消</button><button class="button danger-confirm" type="button" data-confirm-accept>确认继续</button></footer></div></dialog>`;
+  applyTheme();
   document
     .querySelector(".workspace-actions")
     ?.insertAdjacentHTML(
@@ -377,13 +413,9 @@ function shell(content, title) {
     state.session = null;
     renderLogin();
   };
-  document.querySelector("#refresh").onclick = () => render();
-  document.querySelector("#theme-toggle").onclick = () => {
-    const next =
-      document.documentElement.dataset.theme === "dark" ? "light" : "dark";
-    document.documentElement.dataset.theme = next;
-    localStorage.setItem("qcontrolhub-theme", next);
-  };
+  if (document.querySelector("#refresh"))
+    document.querySelector("#refresh").onclick = () => render();
+  document.querySelector("#theme-toggle").onclick = toggleTheme;
   document.querySelector("#mobile-theme-toggle").onclick =
     document.querySelector("#theme-toggle").onclick;
   document.querySelector("#mobile-logout").onclick =

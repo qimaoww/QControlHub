@@ -87,11 +87,11 @@ make dev-up      # 本机体验模式：回环 HTTP，关闭 Secure Cookie
 在控制面已启动、且已在 Web 控制台签发短期单次入网码后，在远程 Linux 节点执行：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/qimaoww/qcontrolhub/main/deploy/remote/install-agent.sh \
+curl -fsSL -H 'X-QControlHub-Enrollment: <入网码>' https://<面板地址>/install-agent.sh \
   | sudo bash -s -- http://<控制面地址>:8080 <入网码> <节点名>
 ```
 
-脚本会：从控制面 `GET /api/v1/agent-binary` 下载 Agent → 运行 `deploy/bootstrap-core-services.sh` 安装四个内核 systemd 单元和最小配置 → 写入 `/etc/qcontrolhub/agent.env`（`0600`）→ 安装 `qagent.service` 并启动。默认 `QCH_AGENT_DRY_RUN=true`，首轮只做校验不写文件。
+脚本下载端点和 Agent 二进制都要求通过 `X-QControlHub-Enrollment` 提交有效的短期单次入网码；没有入网码不能下载。脚本随后运行核心服务引导、写入 `/etc/qcontrolhub/agent.env`（`0600`）、安装 `qagent.service` 并启动。默认 `QCH_AGENT_DRY_RUN=true`，首轮只做校验不写文件。
 
 > 节点没有预装内核二进制时，先执行 `sudo bash deploy/remote/install-core-engines.sh` 从官方 Release 下载 mihomo / xray / sing-box / ssserver。
 
@@ -132,10 +132,10 @@ make build
 
 | 内核 | 二进制 | 配置路径 | systemd 服务 |
 | --- | --- | --- | --- |
-| Mihomo | `/usr/local/bin/mihomo` | `/etc/mihomo/config.yaml` | `mihomo.service` |
-| Xray | `/usr/local/bin/xray` | `/usr/local/etc/xray/config.json` | `xray.service` |
-| sing-box | `/usr/local/bin/sing-box` | `/etc/sing-box/config.json` | `sing-box.service` |
-| Shadowsocks Rust | `/usr/local/bin/ssserver` | `/etc/shadowsocks-rust/config.json` | `shadowsocks-rust.service` |
+| Mihomo | `/usr/local/bin/mihomo` | `/etc/qagent/mihomo/config.yaml` | `mihomo.service` |
+| Xray | `/usr/local/bin/xray` | `/etc/qagent/xray/config.json` | `xray.service` |
+| sing-box | `/usr/local/bin/sing-box` | `/etc/qagent/sing-box/config.json` | `sing-box.service` |
+| Shadowsocks Rust | `/usr/local/bin/ssserver` | `/etc/qagent/shadowsocks-rust/config.json` | `shadowsocks-rust.service` |
 
 全部映射均可通过 Agent 环境变量覆盖，详见 [生产部署](docs/production.md#安装远程-agent)。
 

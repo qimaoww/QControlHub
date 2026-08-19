@@ -92,7 +92,7 @@ make build VERSION=0.1.0
 ```bash
 sudo install -o root -g root -m 0755 qagent /usr/local/bin/qagent
 sudo install -d -o root -g root -m 0700 /etc/qcontrolhub /var/lib/qcontrolhub
-sudo install -d -o root -g root -m 0750 /etc/mihomo /usr/local/etc/xray /etc/sing-box /etc/shadowsocks-rust /etc/qcontrolhub/tls
+sudo install -d -o root -g root -m 0750 /etc/qagent/mihomo /etc/qagent/xray /etc/qagent/sing-box /etc/qagent/shadowsocks-rust /etc/qcontrolhub/tls
 sudo install -o root -g root -m 0644 \
   deploy/systemd/qagent.service \
   /etc/systemd/system/qagent.service
@@ -120,10 +120,10 @@ TLS 入站默认引用 `/etc/qcontrolhub/tls/server.crt` 与 `/etc/qcontrolhub/t
 
 | 内核 | 默认二进制 | 默认配置路径 | 默认服务 | 覆盖前缀 |
 | --- | --- | --- | --- | --- |
-| Mihomo | `/usr/local/bin/mihomo` | `/etc/mihomo/config.yaml` | `mihomo.service` | `QCH_MIHOMO_*` |
-| Xray | `/usr/local/bin/xray` | `/usr/local/etc/xray/config.json` | `xray.service` | `QCH_XRAY_*` |
-| sing-box | `/usr/local/bin/sing-box` | `/etc/sing-box/config.json` | `sing-box.service` | `QCH_SING_BOX_*` |
-| Shadowsocks Rust | `/usr/local/bin/ssserver` | `/etc/shadowsocks-rust/config.json` | `shadowsocks-rust.service` | `QCH_SS_RUST_*` |
+| Mihomo | `/usr/local/bin/mihomo` | `/etc/qagent/mihomo/config.yaml` | `mihomo.service` | `QCH_MIHOMO_*` |
+| Xray | `/usr/local/bin/xray` | `/etc/qagent/xray/config.json` | `xray.service` | `QCH_XRAY_*` |
+| sing-box | `/usr/local/bin/sing-box` | `/etc/qagent/sing-box/config.json` | `sing-box.service` | `QCH_SING_BOX_*` |
+| Shadowsocks Rust | `/usr/local/bin/ssserver` | `/etc/qagent/shadowsocks-rust/config.json` | `shadowsocks-rust.service` | `QCH_SS_RUST_*` |
 
 私有 CA 示例：
 

@@ -324,7 +324,7 @@ async function liveConfig() {
   if (!agent) {
     shell(
       '<section class="empty large live-config-empty"><strong>没有可读取的节点配置</strong><p>请先让节点上线并安装支持的内核。</p><a class="button primary" href="#agents">前往节点管理</a></section>',
-      "节点实际配置",
+      "手动配置",
     );
     return;
   }
@@ -359,7 +359,7 @@ async function liveConfig() {
   const runtime = agent.runtime?.[engine] || {};
   shell(
     `<article class="live-config-workspace"><header class="editor-toolbar"><h2>${esc(agent.name)} · ${esc(engineName(engine))}</h2><div class="editor-toolbar-state"><span class="engine-badge ${esc(engine)}">${esc(engineName(engine))}</span><b>${saved?.version ? `v${saved.version}` : "未保存"}</b></div></header>${current ? `<form class="live-config-editor" id="live-config-form" data-profile-editor data-new-config="0" data-engine="${esc(engine)}"><section class="code-workspace" data-code-editor data-code-language="${language}" data-code-max-bytes="2097152"><header class="code-editor-toolbar"><div class="code-file-meta"><span class="code-file-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7 3.5h7l4 4V20.5H7zM14 3.5v4h4M10 12h5M10 16h3"/></svg></span><b>${engine === "mihomo" ? "config.yaml" : "config.json"}</b></div><div class="code-editor-meta"><span class="code-language">${language}</span><span data-code-status aria-live="polite">已读取</span><span data-code-bytes>—</span><span data-code-position>行 1，列 1</span></div></header><div class="code-editor-frame"><aside class="code-gutter" aria-hidden="true" data-line-numbers>1</aside><textarea class="code-editor-input" name="content" data-code-input aria-label="${esc(engineName(engine))} 节点配置源码" spellcheck="false" required ${can("operator") ? "" : "readonly"}>${esc(current.content)}</textarea></div><footer><span><i class="code-status-dot" data-code-status-dot></i><span data-code-validation aria-live="polite"></span></span><div><button class="button code-reset" type="button" data-code-reset disabled>恢复原文</button>${can("operator") ? '<button class="button" type="submit" data-live-intent="validate">校验修改</button><button class="button primary" type="submit" data-live-intent="deploy">保存并部署</button>' : ""}</div></footer></section><aside class="live-config-inspector"><dl><div><dt>节点</dt><dd>${esc(agent.name)}</dd></div><div><dt>系统</dt><dd>${esc(agent.os)} / ${esc(agent.arch)}</dd></div><div><dt>内核</dt><dd>${esc(conciseVersion(engine, runtime.version))}</dd></div><div><dt>来源</dt><dd>节点文件</dd></div></dl></aside><input type="hidden" name="name" value="${esc(current.name)}"><input type="hidden" name="description" value="${esc(current.description)}"><input type="hidden" name="version" value="${current.version}"></form>` : agent.status !== "online" ? '<section class="node-config-source"><h2>节点离线</h2><span class="status-label warn">无法读取</span></section>' : source?.error ? `<section class="node-config-source"><h2>读取配置失败</h2><span class="status-label bad">${esc(source.error)}</span><button class="button" type="button" data-read-current>重新读取</button></section>` : '<section class="node-config-source" role="status" aria-live="polite"><h2>正在读取配置</h2><span class="status-label warn">读取中</span><form data-auto-read-current hidden></form></section>'}</article>`,
-    "节点实际配置",
+    "手动配置",
   );
   state.data.liveEngines = installedEngines;
   document.querySelectorAll("[data-live-agent]").forEach(

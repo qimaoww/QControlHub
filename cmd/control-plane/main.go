@@ -78,6 +78,16 @@ func main() {
 		agentBinary = data
 		slog.Info("serving agent binary for one-click install", "path", binaryPath, "bytes", len(data))
 	}
+	var agentInstaller []byte
+	if installerPath := strings.TrimSpace(os.Getenv("QCH_AGENT_INSTALLER_PATH")); installerPath != "" {
+		data, err := os.ReadFile(installerPath)
+		if err != nil {
+			slog.Error("read QCH_AGENT_INSTALLER_PATH", "error", err)
+			os.Exit(1)
+		}
+		agentInstaller = data
+		slog.Info("serving enrollment-protected agent installer", "path", installerPath, "bytes", len(data))
+	}
 
 	apiServer := api.New(dataStore, api.Config{
 		AdminToken:      adminToken,
@@ -87,6 +97,7 @@ func main() {
 		SecureTransport: secureTransport,
 		TrustedProxies:  trustedProxies,
 		AgentBinary:     agentBinary,
+		AgentInstaller:  agentInstaller,
 		WebhookSecret:   strings.TrimSpace(os.Getenv("QCH_WEBHOOK_SECRET")),
 	})
 	root := apiServer.Handler()

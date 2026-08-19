@@ -48,6 +48,11 @@ STOPSIGNAL SIGTERM
 FROM runtime-base AS qcontrol-plane
 
 COPY --from=build-qcontrol-plane /out/qcontrol-plane /usr/local/bin/qcontrol-plane
+COPY --from=build-qagent /out/qagent /usr/local/lib/qcontrolhub/qagent
+COPY deploy/remote/install-agent.sh /usr/local/lib/qcontrolhub/install-agent.sh
+
+ENV QCH_AGENT_BINARY_PATH=/usr/local/lib/qcontrolhub/qagent
+ENV QCH_AGENT_INSTALLER_PATH=/usr/local/lib/qcontrolhub/install-agent.sh
 
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/qcontrol-plane"]
@@ -70,6 +75,9 @@ COPY frontend/index.html /usr/share/nginx/html/index.html
 COPY frontend/app.js /usr/share/nginx/html/assets/app.js
 COPY frontend/modules /usr/share/nginx/html/assets/modules
 COPY frontend/app.css /usr/share/nginx/html/assets/app.css
+COPY deploy/remote/install-agent.sh /usr/share/nginx/html/install-agent.sh
+COPY deploy /usr/share/nginx/html/install-assets/deploy
+COPY examples/configs /usr/share/nginx/html/install-assets/examples/configs
 COPY frontend/nginx.conf /etc/nginx/nginx.conf
 RUN css_version="$(sha256sum /usr/share/nginx/html/assets/app.css | cut -c1-16)" \
     && js_content_version="$(find /usr/share/nginx/html/assets -type f -name '*.js' -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -c1-10)" \

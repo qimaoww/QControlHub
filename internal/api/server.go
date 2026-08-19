@@ -35,6 +35,7 @@ type Config struct {
 	SecureTransport bool
 	TrustedProxies  []*net.IPNet
 	AgentBinary     []byte
+	AgentInstaller  []byte
 	WebhookSecret   string
 	SessionTTL      time.Duration
 }
@@ -48,6 +49,7 @@ type Server struct {
 	agentLimiter    *authn.FailureLimiter
 	trustedProxies  []*net.IPNet
 	agentBinary     []byte
+	agentInstaller  []byte
 	notifier        *notify.Client
 	roleTokens      map[[32]byte]core.Role
 	sessionsMu      sync.Mutex
@@ -90,6 +92,7 @@ func New(dataStore *store.Store, config Config) *Server {
 		agentLimiter:    authn.NewFailureLimiter(20, time.Minute, 5*time.Minute),
 		trustedProxies:  config.TrustedProxies,
 		agentBinary:     config.AgentBinary,
+		agentInstaller:  config.AgentInstaller,
 		notifier:        notify.New(config.WebhookSecret, slog.Default()),
 		roleTokens:      roleTokens,
 		sessions:        make(map[string]apiSession),
@@ -98,19 +101,44 @@ func New(dataStore *store.Store, config Config) *Server {
 	}
 }
 
-// agentBinary serves the statically-extracted agent executable so that a
-// bootstrap one-liner can download it over plain HTTP from the control plane.
-// The binary contains no secrets (enrollment still requires a token), so it is
-// safe to serve publicly on a trusted LAN.
+func (s *Server) enrollmentDownloadAllowed(w http.ResponseWriter, request *http.Request) bool {
+	token := strings.TrimSpace(request.Header.Get("X-QControlHub-Enrollment"))
+	if s.store == nil || !s.store.EnrollmentTokenUsable(request.Context(), token) {
+		writeError(w, http.StatusUnauthorized, "valid enrollment token required")
+		return false
+	}
+	return true
+}
+
+// agentBinary serves the statically-extracted agent executable to a valid
+// one-time enrollment token only.
 func (s *Server) serveAgentBinary(w http.ResponseWriter, r *http.Request) {
 	if len(s.agentBinary) == 0 {
 		http.NotFound(w, r)
+		return
+	}
+	if !s.enrollmentDownloadAllowed(w, r) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Write(s.agentBinary)
+}
+
+func (s *Server) serveAgentInstaller(w http.ResponseWriter, r *http.Request) {
+	if len(s.agentInstaller) == 0 {
+		http.NotFound(w, r)
+		return
+	}
+	if !s.enrollmentDownloadAllowed(w, r) {
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="install-agent.sh"`)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Write(s.agentInstaller)
 }
 
 func (s *Server) Handler() http.Handler {
@@ -120,6 +148,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/auth/login", s.login)
 	mux.HandleFunc("GET /api/v1/auth/session", s.session)
 	mux.HandleFunc("POST /api/v1/auth/logout", s.logout)
+	mux.HandleFunc("GET /api/v1/agent-installer", s.serveAgentInstaller)
 
 	mux.Handle("GET /api/v1/overview", s.requireRole(core.RoleReadonly, http.HandlerFunc(s.overview)))
 	mux.Handle("GET /api/v1/agents", s.requireRole(core.RoleReadonly, http.HandlerFunc(s.listAgents)))

@@ -4,7 +4,7 @@ Documentation=https://github.com/SagerNet/sing-box
 Wants=network-online.target
 After=network-online.target
 ConditionFileIsExecutable=/usr/local/bin/sing-box
-ConditionPathExists=/etc/sing-box/config.json
+ConditionPathExists=/etc/qagent/sing-box/config.json
 
 [Service]
 Type=simple
@@ -14,7 +14,7 @@ WorkingDirectory=/var/lib/qcontrolhub-sing-box
 StateDirectory=qcontrolhub-sing-box
 StateDirectoryMode=0750
 UMask=0027
-ExecStart=/usr/local/bin/sing-box run -c /etc/sing-box/config.json
+ExecStart=/usr/local/bin/sing-box run -c /etc/qagent/sing-box/config.json
 Restart=on-failure
 RestartSec=3s
 TimeoutStopSec=20s
@@ -41,7 +41,7 @@ ProcSubset=pid
 # configured listener is local-only.
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
 SystemCallArchitectures=native
-ReadOnlyPaths=/usr/local/bin/sing-box /etc/sing-box
+ReadOnlyPaths=/usr/local/bin/sing-box /etc/qagent/sing-box
 ReadWritePaths=/var/lib/qcontrolhub-sing-box
 
 [Install]

@@ -39,6 +39,15 @@ func TestSPAConsoleSurfaceMatchesInitialRelease(t *testing.T) {
 			t.Errorf("SPA is missing initial console surface %q", required)
 		}
 	}
+	for _, required := range []string{
+		`data-theme-toggle`, `qcontrolhub-color-theme`, `login-theme-toggle`,
+		`app.style.display = "contents"`, `X-QControlHub-Enrollment`,
+		`/install-agent.sh`, `执行记录`, `手动配置`, `系统设置`,
+	} {
+		if !strings.Contains(content, required) {
+			t.Errorf("SPA is missing initial visual/installation contract %q", required)
+		}
+	}
 	if strings.Contains(content, "/ui/") {
 		t.Error("SPA must use the JSON API instead of legacy HTML form routes")
 	}
