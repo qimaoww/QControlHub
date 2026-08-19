@@ -1,5 +1,5 @@
 export function installClientAccess(ctx) {
-  const { api, state, esc, engineName, short, shell } = ctx;
+  const { api, state, engines, esc, engineName, short, shell } = ctx;
 async function clientAccess() {
   const [entries, agents, overview, settings] = await Promise.all([
     api("/client-access"),
@@ -133,4 +133,3 @@ function bindClientAccessPage() {
 }
   return clientAccess;
 }
-
