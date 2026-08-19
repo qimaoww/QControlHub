@@ -128,14 +128,14 @@ make build
 
 如果控制面使用私有 CA 或局域网自签名证书，先把 CA PEM 安装到远程主机，再设置 `QCH_TLS_CA_FILE=/etc/qcontrolhub/control-plane-ca.pem`；不要使用跳过 TLS 校验的开关。
 
-在使用节点页的“首次安装 / 切换”前，可在空白 Linux 节点的仓库目录执行 `sudo deploy/bootstrap-core-services.sh`。它会创建非 root 的 `qcontrolhub-core` 运行用户，安装四个受限 systemd 单元，并且只在目标配置不存在时写入绑定回环地址的最小配置；已有配置和 unit 不会被覆盖。随后确认 Agent 的引擎路径、服务名与配置目标无误，再将 `QCH_AGENT_DRY_RUN` 改为 `false`。默认映射如下：
+在使用节点页的“首次安装 / 切换”前，可在空白 Linux 节点的仓库目录执行 `sudo deploy/bootstrap-core-services.sh`。它会创建非 root 的 `qcontrolhub-core` 运行用户，在 `/usr/local/lib/qagent/cores` 下准备专用内核目录，安装四个带 `qagent-` 前缀的受限 systemd 单元，并且只在目标配置不存在时写入绑定回环地址的最小配置。用户自行安装的同名二进制和 unit 不会被覆盖；升级时只迁移带 QControlHub 标记的旧 unit。随后确认 Agent 的引擎路径、服务名与配置目标无误，再将 `QCH_AGENT_DRY_RUN` 改为 `false`。默认映射如下：
 
 | 内核 | 二进制 | 配置路径 | systemd 服务 |
 | --- | --- | --- | --- |
-| Mihomo | `/usr/local/bin/mihomo` | `/etc/qagent/mihomo/config.yaml` | `mihomo.service` |
-| Xray | `/usr/local/bin/xray` | `/etc/qagent/xray/config.json` | `xray.service` |
-| sing-box | `/usr/local/bin/sing-box` | `/etc/qagent/sing-box/config.json` | `sing-box.service` |
-| Shadowsocks Rust | `/usr/local/bin/ssserver` | `/etc/qagent/shadowsocks-rust/config.json` | `shadowsocks-rust.service` |
+| Mihomo | `/usr/local/lib/qagent/cores/mihomo` | `/etc/qagent/mihomo/config.yaml` | `qagent-mihomo.service` |
+| Xray | `/usr/local/lib/qagent/cores/xray` | `/etc/qagent/xray/config.json` | `qagent-xray.service` |
+| sing-box | `/usr/local/lib/qagent/cores/sing-box` | `/etc/qagent/sing-box/config.json` | `qagent-sing-box.service` |
+| Shadowsocks Rust | `/usr/local/lib/qagent/cores/ssserver` | `/etc/qagent/shadowsocks-rust/config.json` | `qagent-shadowsocks-rust.service` |
 
 全部映射均可通过 Agent 环境变量覆盖，详见 [生产部署](docs/production.md#安装远程-agent)。
 

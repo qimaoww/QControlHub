@@ -32,7 +32,7 @@ func TestNewClientTrustsConfiguredPrivateCA(t *testing.T) {
 		t.Fatalf("write private CA: %v", err)
 	}
 	executor := &Executor{DryRun: true, Specs: map[core.Engine]EngineSpec{
-		core.EngineMihomo: {Binary: "unused", ConfigPath: "/tmp/config.yaml", Service: "mihomo.service"},
+		core.EngineMihomo: {Binary: "unused", ConfigPath: "/tmp/config.yaml", Service: "qagent-mihomo.service"},
 	}}
 	client, err := NewClient(ClientConfig{
 		ServerURL: "wss" + strings.TrimPrefix(tlsServer.URL, "https"), TLSCAFile: caPath,
@@ -73,7 +73,7 @@ func TestRunStopsRetryingWhenPersistedIdentityIsRejected(t *testing.T) {
 		t.Fatal(err)
 	}
 	executor := &Executor{DryRun: true, Specs: map[core.Engine]EngineSpec{
-		core.EngineMihomo: {Binary: "unused", ConfigPath: "/tmp/config.yaml", Service: "mihomo.service"},
+		core.EngineMihomo: {Binary: "unused", ConfigPath: "/tmp/config.yaml", Service: "qagent-mihomo.service"},
 	}}
 	client, err := NewClient(ClientConfig{ServerURL: server.URL, StatePath: statePath}, executor)
 	if err != nil {
@@ -138,7 +138,7 @@ func TestTaskExecutionSurvivesWebSocketSessionCancellation(t *testing.T) {
 	client := &Client{
 		config: ClientConfig{StatePath: statePath}, creds: loaded,
 		executor: &Executor{DryRun: true, Specs: map[core.Engine]EngineSpec{
-			core.EngineMihomo: {Binary: "unused", ConfigPath: "/tmp/config.yaml", Service: "mihomo.service"},
+			core.EngineMihomo: {Binary: "unused", ConfigPath: "/tmp/config.yaml", Service: "qagent-mihomo.service"},
 		}},
 	}
 	deliveryContext, cancelDelivery := context.WithCancel(context.Background())

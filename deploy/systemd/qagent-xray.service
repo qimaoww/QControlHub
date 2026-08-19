@@ -1,20 +1,20 @@
 [Unit]
-Description=Mihomo proxy core managed by QControlHub
-Documentation=https://github.com/MetaCubeX/mihomo
+Description=Xray core managed by QAgent
+Documentation=https://github.com/XTLS/Xray-core
 Wants=network-online.target
 After=network-online.target
-ConditionFileIsExecutable=/usr/local/bin/mihomo
-ConditionPathExists=/etc/qagent/mihomo/config.yaml
+ConditionFileIsExecutable=/usr/local/lib/qagent/cores/xray
+ConditionPathExists=/etc/qagent/xray/config.json
 
 [Service]
 Type=simple
 User=qcontrolhub-core
 Group=qcontrolhub-core
-WorkingDirectory=/var/lib/qcontrolhub-mihomo
-StateDirectory=qcontrolhub-mihomo
+WorkingDirectory=/var/lib/qcontrolhub-xray
+StateDirectory=qcontrolhub-xray
 StateDirectoryMode=0750
 UMask=0027
-ExecStart=/usr/local/bin/mihomo -d /var/lib/qcontrolhub-mihomo -f /etc/qagent/mihomo/config.yaml
+ExecStart=/usr/local/lib/qagent/cores/xray run -config /etc/qagent/xray/config.json
 Restart=on-failure
 RestartSec=3s
 TimeoutStopSec=20s
@@ -39,8 +39,8 @@ ProtectProc=invisible
 ProcSubset=pid
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 SystemCallArchitectures=native
-ReadOnlyPaths=/usr/local/bin/mihomo /etc/qagent/mihomo
-ReadWritePaths=/var/lib/qcontrolhub-mihomo
+ReadOnlyPaths=/usr/local/lib/qagent/cores/xray /etc/qagent/xray
+ReadWritePaths=/var/lib/qcontrolhub-xray
 
 [Install]
 WantedBy=multi-user.target

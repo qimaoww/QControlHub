@@ -77,7 +77,7 @@ func TestFirstInstallRollbackStopsRestartingService(t *testing.T) {
 	systemctlPath = fakeSystemctl
 	t.Cleanup(func() { systemctlPath = originalSystemctlPath })
 
-	output, err := stopServiceAfterFirstInstallRollback("sing-box.service")
+	output, err := stopServiceAfterFirstInstallRollback("qagent-sing-box.service")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestFirstInstallRollbackStopsRestartingService(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(commands) != "stop sing-box.service\nis-active sing-box.service\n" {
+	if string(commands) != "stop qagent-sing-box.service\nis-active qagent-sing-box.service\n" {
 		t.Fatalf("systemctl commands = %q", commands)
 	}
 }

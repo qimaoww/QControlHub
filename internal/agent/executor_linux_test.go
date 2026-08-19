@@ -150,7 +150,7 @@ func TestExecutorReadsAndValidatesCurrentConfigurationWithoutWriting(t *testing.
 		t.Fatal(err)
 	}
 	executor := &Executor{DryRun: true, Specs: map[core.Engine]EngineSpec{
-		core.EngineMihomo: {Binary: binary, ConfigPath: configPath, Service: "mihomo.service"},
+		core.EngineMihomo: {Binary: binary, ConfigPath: configPath, Service: "qagent-mihomo.service"},
 	}}
 	output, err := executor.Execute(context.Background(), core.Task{Action: core.ActionReadConfig, Engine: core.EngineMihomo})
 	if err != nil {

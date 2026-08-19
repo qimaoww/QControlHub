@@ -12,7 +12,7 @@ import (
 
 func TestNewClientDerivesHTTPSAndWSSOrigins(t *testing.T) {
 	executor := &Executor{DryRun: true, Specs: map[core.Engine]EngineSpec{
-		core.EngineMihomo: {Binary: "unused", ConfigPath: "/tmp/config.yaml", Service: "mihomo.service"},
+		core.EngineMihomo: {Binary: "unused", ConfigPath: "/tmp/config.yaml", Service: "qagent-mihomo.service"},
 	}}
 	client, err := NewClient(ClientConfig{ServerURL: "wss://control.example.com", HeartbeatEvery: 10 * time.Second}, executor)
 	if err != nil {
@@ -28,7 +28,7 @@ func TestNewClientDerivesHTTPSAndWSSOrigins(t *testing.T) {
 
 func TestNewClientRejectsHeartbeatIntervalsOutsideServerDeadline(t *testing.T) {
 	executor := &Executor{DryRun: true, Specs: map[core.Engine]EngineSpec{
-		core.EngineMihomo: {Binary: "unused", ConfigPath: "/tmp/config.yaml", Service: "mihomo.service"},
+		core.EngineMihomo: {Binary: "unused", ConfigPath: "/tmp/config.yaml", Service: "qagent-mihomo.service"},
 	}}
 	for _, interval := range []time.Duration{time.Millisecond, 31 * time.Second, time.Minute} {
 		if _, err := NewClient(ClientConfig{ServerURL: "wss://control.example.com", HeartbeatEvery: interval}, executor); err == nil || !strings.Contains(err.Error(), "between 1s and 30s") {
@@ -39,7 +39,7 @@ func TestNewClientRejectsHeartbeatIntervalsOutsideServerDeadline(t *testing.T) {
 
 func TestNewClientRejectsUnsafeRemoteOrigins(t *testing.T) {
 	dryRun := &Executor{DryRun: true, Specs: map[core.Engine]EngineSpec{
-		core.EngineMihomo: {Binary: "unused", ConfigPath: "/tmp/config.yaml", Service: "mihomo.service"},
+		core.EngineMihomo: {Binary: "unused", ConfigPath: "/tmp/config.yaml", Service: "qagent-mihomo.service"},
 	}}
 	for _, value := range []string{
 		"wss://user:password@control.example.com",

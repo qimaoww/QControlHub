@@ -93,6 +93,7 @@ make build VERSION=0.1.0
 sudo install -o root -g root -m 0755 qagent /usr/local/bin/qagent
 sudo install -d -o root -g root -m 0700 /etc/qcontrolhub /var/lib/qcontrolhub
 sudo install -d -o root -g root -m 0750 /etc/qagent/mihomo /etc/qagent/xray /etc/qagent/sing-box /etc/qagent/shadowsocks-rust /etc/qcontrolhub/tls
+sudo install -d -o root -g root -m 0755 /usr/local/lib/qagent/cores
 sudo install -o root -g root -m 0644 \
   deploy/systemd/qagent.service \
   /etc/systemd/system/qagent.service
@@ -120,10 +121,10 @@ TLS 入站默认引用 `/etc/qcontrolhub/tls/server.crt` 与 `/etc/qcontrolhub/t
 
 | 内核 | 默认二进制 | 默认配置路径 | 默认服务 | 覆盖前缀 |
 | --- | --- | --- | --- | --- |
-| Mihomo | `/usr/local/bin/mihomo` | `/etc/qagent/mihomo/config.yaml` | `mihomo.service` | `QCH_MIHOMO_*` |
-| Xray | `/usr/local/bin/xray` | `/etc/qagent/xray/config.json` | `xray.service` | `QCH_XRAY_*` |
-| sing-box | `/usr/local/bin/sing-box` | `/etc/qagent/sing-box/config.json` | `sing-box.service` | `QCH_SING_BOX_*` |
-| Shadowsocks Rust | `/usr/local/bin/ssserver` | `/etc/qagent/shadowsocks-rust/config.json` | `shadowsocks-rust.service` | `QCH_SS_RUST_*` |
+| Mihomo | `/usr/local/lib/qagent/cores/mihomo` | `/etc/qagent/mihomo/config.yaml` | `qagent-mihomo.service` | `QCH_MIHOMO_*` |
+| Xray | `/usr/local/lib/qagent/cores/xray` | `/etc/qagent/xray/config.json` | `qagent-xray.service` | `QCH_XRAY_*` |
+| sing-box | `/usr/local/lib/qagent/cores/sing-box` | `/etc/qagent/sing-box/config.json` | `qagent-sing-box.service` | `QCH_SING_BOX_*` |
+| Shadowsocks Rust | `/usr/local/lib/qagent/cores/ssserver` | `/etc/qagent/shadowsocks-rust/config.json` | `qagent-shadowsocks-rust.service` | `QCH_SS_RUST_*` |
 
 私有 CA 示例：
 
@@ -152,9 +153,9 @@ sudo journalctl -u qagent -f
 sudo systemctl restart qagent
 ```
 
-systemd 单元的 `ProtectSystem=strict` 放行默认的四个配置目录以及 `/usr/local/bin`，用于在同一文件系统内原子切换内核二进制；`/usr/local/bin/qagent` 会被更具体的只读规则重新保护。若站点把其他程序也放在 `/usr/local/bin`，建议把四个内核迁移到独立的 root 所有、`0755` 目录，并同步修改 `QCH_*_BINARY`、内核 systemd 单元和 QControlHub Agent 的精确 `ReadWritePaths=`。自定义配置路径同样必须预先创建并精确放行，不要放宽为整个 `/etc` 或 `/usr`。
+systemd 单元的 `ProtectSystem=strict` 只放行默认的四个配置目录以及 `/usr/local/lib/qagent/cores`，用于在同一文件系统内原子切换内核二进制；`/usr/local/bin` 不可写，`/usr/local/bin/qagent` 也保持只读。四个内核服务统一使用 `qagent-` 前缀，不会控制管理员自行安装的通用服务。自定义二进制或配置路径必须预先创建并精确加入 `ReadWritePaths=`，不要放宽为整个 `/etc` 或 `/usr`。
 
-真实版本切换要求 `QCH_AGENT_DRY_RUN=false`，并且节点已经预置对应配置目录、可通过的初始配置和 systemd 单元。空白 Linux 节点可先运行 `deploy/bootstrap-core-services.sh` 完成这些前置条件；脚本仅创建缺失文件，绝不覆盖站点已有配置或 unit。稳定版使用官方 latest，开发版只使用官方 prerelease，自定义版本必须是类似 `1.19.29` 或 `1.14.0-beta.3` 的完整版本号；不支持自定义下载地址。Agent 在下载后强制核对 GitHub Release API 给出的 SHA-256，运行候选二进制确认版本，随后原子替换并重启服务；失败时恢复上一二进制。
+真实版本切换要求 `QCH_AGENT_DRY_RUN=false`，并且节点已经预置对应配置目录、可通过的初始配置和 systemd 单元。空白 Linux 节点可先运行 `deploy/bootstrap-core-services.sh` 完成这些前置条件；脚本仅创建缺失配置和新的 `qagent-*` unit，绝不覆盖站点已有文件，升级时也只迁移带 QControlHub 标记的旧 unit。稳定版使用官方 latest，开发版只使用官方 prerelease，自定义版本必须是类似 `1.19.29` 或 `1.14.0-beta.3` 的完整版本号；不支持自定义下载地址。Agent 在下载后强制核对 GitHub Release API 给出的 SHA-256，运行候选二进制确认版本，随后原子替换并重启服务；失败时恢复上一二进制。
 
 ## 5. 运维操作
 
