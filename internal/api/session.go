@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -135,8 +136,8 @@ func (s *Server) pruneSessionsLocked(now time.Time) {
 }
 
 func (s *Server) sessionRole(request *http.Request) (core.Role, bool) {
-	if role, ok := s.roleForToken(bearerToken(request)); ok {
-		return role, true
+	if token := bearerToken(request); token != "" {
+		return s.roleForToken(token)
 	}
 	value, ok := s.sessionForRequest(request)
 	return value.Role, ok
@@ -174,7 +175,19 @@ func (s *Server) sameOrigin(request *http.Request) bool {
 	if _, allowed := s.allowedOrigins[origin]; allowed {
 		return true
 	}
-	return strings.EqualFold(origin, request.URL.Scheme+"://"+request.Host) || strings.HasSuffix(origin, "://"+request.Host)
+	parsed, err := url.Parse(origin)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" || parsed.User != nil || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return false
+	}
+	expectedScheme := request.URL.Scheme
+	if expectedScheme == "" {
+		if s.secureTransport {
+			expectedScheme = "https"
+		} else {
+			expectedScheme = "http"
+		}
+	}
+	return strings.EqualFold(parsed.Scheme, expectedScheme) && strings.EqualFold(parsed.Host, request.Host)
 }
 
 func (s *Server) recordAudit(request *http.Request, action, target, detail string) {

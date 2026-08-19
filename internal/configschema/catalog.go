@@ -15,32 +15,32 @@ import (
 // complete YAML/JSON fragment so nested and newly introduced keys are never
 // discarded by a smaller local struct.
 type Field struct {
-	Key         string
-	Label       string
-	Kind        string
-	Description string
-	Docs        string
+	Key         string `json:"key"`
+	Label       string `json:"label"`
+	Kind        string `json:"kind"`
+	Description string `json:"description"`
+	Docs        string `json:"docs"`
 }
 
 type Topic struct {
-	Label string
-	Docs  string
+	Label string `json:"label"`
+	Docs  string `json:"docs"`
 }
 
 type TopicGroup struct {
-	Name   string
-	Topics []Topic
+	Name   string  `json:"name"`
+	Topics []Topic `json:"topics"`
 }
 
 type Catalog struct {
-	Engine      core.Engine
-	Name        string
-	Format      string
-	Source      string
-	SourceLabel string
-	Fields      []Field
-	TopicGroups []TopicGroup
-	TopicCount  int
+	Engine      core.Engine  `json:"engine"`
+	Name        string       `json:"name"`
+	Format      string       `json:"format"`
+	Source      string       `json:"source"`
+	SourceLabel string       `json:"source_label"`
+	Fields      []Field      `json:"fields"`
+	TopicGroups []TopicGroup `json:"topic_groups"`
+	TopicCount  int          `json:"topic_count"`
 }
 
 // CatalogFor returns a catalog assembled from first-party documentation

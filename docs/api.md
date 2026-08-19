@@ -39,8 +39,17 @@
 | `POST` | `/api/v1/auth/logout` | 注销当前 SPA 会话 |
 | `GET` | `/api/v1/agents` | 列出未撤销 Agent |
 | `DELETE` | `/api/v1/agents/{id}` | 永久撤销 Agent、立即断开 WSS 并终止其未完成任务 |
+| `GET` | `/api/v1/agents/{id}/configs` | 列出节点已有的内核配置 |
 | `GET` | `/api/v1/agents/{id}/configs/{engine}` | 读取节点绑定的内核配置 |
 | `PUT` | `/api/v1/agents/{id}/configs/{engine}` | 以乐观版本锁创建或更新节点配置 |
+| `GET` | `/api/v1/agents/{id}/configs/{engine}/workspace` | 读取服务端入站、字段目录和节点配置工作区数据 |
+| `POST` | `/api/v1/agents/{id}/configs/{engine}/plans` | 生成带安全随机凭据的服务端入站方案 |
+| `POST` | `/api/v1/agents/{id}/configs/{engine}/server-inbounds` | 新增、修改或删除服务端入站并创建校验/部署任务 |
+| `GET` | `/api/v1/agents/{id}/configs/{engine}/fields/{key}` | 读取官方目录中的一个顶级配置字段 |
+| `POST` | `/api/v1/agents/{id}/configs/{engine}/fields/{key}` | 新增、修改或删除顶级配置字段并创建任务 |
+| `GET` | `/api/v1/deployments` | 列出每个节点/内核最近一次真实成功部署 |
+| `GET` | `/api/v1/client-access` | 从已部署入站生成客户端连接资料 |
+| `GET` | `/api/v1/config-catalogs/{engine}` | 读取内核官方配置字段和服务端协议目录 |
 | `GET` | `/api/v1/configs` | 列出配置及正文 |
 | `POST` | `/api/v1/configs` | 创建配置 |
 | `PUT` | `/api/v1/configs/{id}` | 更新配置并增加版本号 |
@@ -53,7 +62,7 @@
 | `GET` | `/api/v1/tasks/{id}` | 读取单个任务及结果 |
 | `DELETE` | `/api/v1/tasks/{id}` | 取消尚未领取的任务 |
 | `POST` | `/api/v1/tasks/{id}/retry` | 按当前配置重试失败或已取消任务 |
-| `GET` | `/api/v1/enrollment-tokens` | 列出最近的入网码元数据，不返回原始值 |
+| `GET` | `/api/v1/enrollment-tokens` | 列出最近的入网码元数据，不返回原始值（admin） |
 | `POST` | `/api/v1/enrollment-tokens` | 签发短期、限次入网码 |
 | `DELETE` | `/api/v1/enrollment-tokens/{id}` | 吊销仍可用的入网码 |
 | `GET` | `/api/v1/settings` | 读取面板设置 |
