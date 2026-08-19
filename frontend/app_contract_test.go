@@ -78,6 +78,9 @@ func TestStaticAssetsUseBuildGeneratedCacheKeys(t *testing.T) {
 			t.Errorf("Dockerfile does not replace %s", placeholder)
 		}
 	}
+	if !strings.Contains(string(dockerfile), `modules/[^\"]+\\.js`) || !strings.Contains(string(dockerfile), `?v=${js_version}`) {
+		t.Error("Dockerfile does not add the aggregate JavaScript cache key to module imports")
+	}
 }
 
 func TestSPAModulesArePublished(t *testing.T) {
