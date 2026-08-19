@@ -1,5 +1,5 @@
 export function installConfigPages(ctx) {
-  const { api, optionalAPI, state, engines, can, esc, engineName, conciseVersion, date, ago, bytes, confirmAction, notify, shell, submitTask, bindCodeEditors, waitForTask } = ctx;
+  const { api, optionalAPI, state, engines, can, esc, engineName, conciseVersion, date, ago, bytes, confirmAction, notify, shell, submitTask, bindCodeEditors } = ctx;
 async function agentConfig() {
   const agents = state.data.agents || (await api("/agents"));
   state.data.agents = agents;
