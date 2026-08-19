@@ -464,7 +464,7 @@ const { agents, submitTask, bindCodeEditors, waitForTask, showCommand } = agentM
 
 const clientAccess = installClientAccess({ api, state, esc, engineName, short, shell });
 
-const configModule = installConfigPages({ api, optionalAPI, state, engines, can, esc, engineName, conciseVersion, date, ago, bytes, confirmAction, notify, shell, submitTask, bindCodeEditors, waitForTask });
+const configModule = installConfigPages({ api, optionalAPI, state, engines, can, esc, engineName, conciseVersion, date, ago, bytes, confirmAction, notify, shell, submitTask, bindCodeEditors });
 const { agentConfig, liveConfig, archiveConfigs } = configModule;
 
 const tasks = installTasks({ api, state, actions, can, esc, statusName, engineName, short, date, ago, actionName, statusTone, notify, confirmAction });
