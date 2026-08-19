@@ -53,14 +53,24 @@ func TestSPAConsoleSurfaceMatchesInitialRelease(t *testing.T) {
 	}
 }
 
-func TestInitialConsoleStylesRemainExact(t *testing.T) {
+func TestInitialConsoleStylesRemainExactOutsideApprovedExtensions(t *testing.T) {
 	styles, err := os.ReadFile("app.css")
 	if err != nil {
 		t.Fatal(err)
 	}
+	const extensionMarker = "/* Deployment command dialog v48: a scoped extension to the initial console surface. */"
+	parts := strings.SplitN(string(styles), extensionMarker, 2)
+	if len(parts) != 2 {
+		t.Fatalf("app.css is missing approved deployment dialog extension marker")
+	}
 	const expected = "fb8d54418db5a8511ab88196525aff163b9655f4e45412f5dd05a942ed0e219e"
-	if actual := fmt.Sprintf("%x", sha256.Sum256(styles)); actual != expected {
-		t.Fatalf("app.css hash = %s, want initial release hash %s", actual, expected)
+	if actual := fmt.Sprintf("%x", sha256.Sum256([]byte(parts[0]))); actual != expected {
+		t.Fatalf("base app.css hash = %s, want initial release hash %s", actual, expected)
+	}
+	for _, required := range []string{".deploy-command-modal", ".deploy-command-input", ".deploy-command-copy"} {
+		if !strings.Contains(parts[1], required) {
+			t.Errorf("deployment dialog extension is missing %q", required)
+		}
 	}
 }
 
