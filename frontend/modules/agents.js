@@ -659,17 +659,50 @@ function bindCodeEditors() {
 }
 
 function showCommand(command) {
+  const previousFocus = document.activeElement;
   const wrap = document.createElement("div");
   wrap.className = "modal-backdrop";
-  wrap.innerHTML = `<section class="modal"><div class="section-head"><div><p class="eyebrow">Linux · systemd</p><h2>一键部署 Agent</h2></div><button class="icon-button" type="button" data-close>×</button></div><p class="enrollment-security-note"><b>仅显示一次</b><span>在目标 Linux 服务器以 root 权限执行。</span></p><textarea class="code-editor-input" rows="7" readonly data-command>${esc(command)}</textarea><div class="form-actions"><button class="button" type="button" data-close>关闭</button><button class="button primary" type="button" data-copy-command>复制命令</button></div></section>`;
+  wrap.innerHTML = `<section class="deploy-command-modal" role="dialog" aria-modal="true" aria-labelledby="deploy-command-title"><header class="deploy-command-head"><span class="deploy-command-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m7 8 4 4-4 4M13 16h4"/></svg></span><div><p class="eyebrow">Linux · systemd</p><h2 id="deploy-command-title">一键部署 QAgent</h2><p>复制命令到目标服务器执行，即可完成安装和节点注册。</p></div><button class="deploy-command-close" type="button" data-close aria-label="关闭弹窗">×</button></header><div class="deploy-command-body"><div class="deploy-command-notice"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.6 2.8 8.1 7 10 4.2-1.9 7-5.4 7-10V6l-7-3Z"/><path d="m9.5 12 1.7 1.7 3.5-3.7"/></svg><span><b>注册码仅显示一次</b><small>命令包含短期单次注册码，请勿转发或保存到公共记录。</small></span></div><section class="deploy-command-shell" aria-label="部署命令"><header><span><i></i>Terminal</span><small>root</small></header><div><span class="deploy-command-prompt" aria-hidden="true">$</span><textarea class="deploy-command-input" rows="5" readonly spellcheck="false" aria-label="一键部署命令" data-command>${esc(command)}</textarea></div></section></div><footer class="deploy-command-actions"><span>请在目标 Linux 服务器上以 root 权限执行</span><div><button class="button" type="button" data-close>关闭</button><button class="button primary deploy-command-copy" type="button" data-copy-command><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg><span data-copy-label>复制命令</span></button></div></footer></section>`;
   document.body.append(wrap);
+  const copyButton = wrap.querySelector("[data-copy-command]");
+  const commandInput = wrap.querySelector("[data-command]");
+  let resetCopyLabel;
+  const close = () => {
+    window.clearTimeout(resetCopyLabel);
+    document.removeEventListener("keydown", onKeydown);
+    wrap.remove();
+    if (previousFocus instanceof HTMLElement && previousFocus.isConnected) {
+      previousFocus.focus();
+    }
+  };
+  const onKeydown = (event) => {
+    if (event.key === "Escape") close();
+  };
   wrap
     .querySelectorAll("[data-close]")
-    .forEach((button) => (button.onclick = () => wrap.remove()));
-  wrap.querySelector("[data-copy-command]").onclick = async () => {
-    await navigator.clipboard.writeText(command);
-    wrap.querySelector("[data-copy-command]").textContent = "已复制";
+    .forEach((button) => (button.onclick = close));
+  wrap.onclick = (event) => {
+    if (event.target === wrap) close();
   };
+  document.addEventListener("keydown", onKeydown);
+  copyButton.onclick = async () => {
+    try {
+      await navigator.clipboard.writeText(command);
+    } catch {
+      commandInput.select();
+      document.execCommand("copy");
+      commandInput.setSelectionRange(0, 0);
+    }
+    const copyLabel = copyButton.querySelector("[data-copy-label]");
+    copyButton.classList.add("copied");
+    copyLabel.textContent = "已复制";
+    window.clearTimeout(resetCopyLabel);
+    resetCopyLabel = window.setTimeout(() => {
+      copyButton.classList.remove("copied");
+      copyLabel.textContent = "复制命令";
+    }, 1800);
+  };
+  copyButton.focus();
 }
   return { agents, submitTask, bindCodeEditors, showCommand };
 }
