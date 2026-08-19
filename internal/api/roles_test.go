@@ -11,6 +11,99 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/store"
 )
 
+func TestManagementAPIRouteAuthorizationMatrix(t *testing.T) {
+	t.Parallel()
+	const (
+		adminToken    = "admin-route-policy-token"
+		operatorToken = "operator-route-policy-token"
+		readonlyToken = "readonly-route-policy-token"
+	)
+	type route struct{ method, path string }
+	managementRoutes := []route{
+		{http.MethodGet, "/api/v1/overview"},
+		{http.MethodGet, "/api/v1/agents"},
+		{http.MethodGet, "/api/v1/deployments"},
+		{http.MethodGet, "/api/v1/client-access"},
+		{http.MethodGet, "/api/v1/config-catalogs/mihomo"},
+		{http.MethodDelete, "/api/v1/agents/agt_0123456789abcdef"},
+		{http.MethodGet, "/api/v1/agents/agt_0123456789abcdef/configs"},
+		{http.MethodGet, "/api/v1/agents/agt_0123456789abcdef/configs/mihomo"},
+		{http.MethodPut, "/api/v1/agents/agt_0123456789abcdef/configs/mihomo"},
+		{http.MethodGet, "/api/v1/agents/agt_0123456789abcdef/configs/mihomo/workspace"},
+		{http.MethodPost, "/api/v1/agents/agt_0123456789abcdef/configs/mihomo/plans"},
+		{http.MethodPost, "/api/v1/agents/agt_0123456789abcdef/configs/mihomo/server-inbounds"},
+		{http.MethodGet, "/api/v1/agents/agt_0123456789abcdef/configs/mihomo/fields/dns"},
+		{http.MethodPost, "/api/v1/agents/agt_0123456789abcdef/configs/mihomo/fields/dns"},
+		{http.MethodGet, "/api/v1/configs"},
+		{http.MethodPost, "/api/v1/configs"},
+		{http.MethodPut, "/api/v1/configs/cfg_test"},
+		{http.MethodDelete, "/api/v1/configs/cfg_test"},
+		{http.MethodGet, "/api/v1/configs/cfg_test/revisions"},
+		{http.MethodGet, "/api/v1/configs/cfg_test/revisions/1"},
+		{http.MethodPost, "/api/v1/configs/cfg_test/revisions/1/restore"},
+		{http.MethodGet, "/api/v1/tasks"},
+		{http.MethodPost, "/api/v1/tasks"},
+		{http.MethodGet, "/api/v1/tasks/tsk_test"},
+		{http.MethodDelete, "/api/v1/tasks/tsk_test"},
+		{http.MethodPost, "/api/v1/tasks/tsk_test/retry"},
+		{http.MethodGet, "/api/v1/enrollment-tokens"},
+		{http.MethodPost, "/api/v1/enrollment-tokens"},
+		{http.MethodDelete, "/api/v1/enrollment-tokens/tok_test"},
+		{http.MethodGet, "/api/v1/settings"},
+		{http.MethodPut, "/api/v1/settings"},
+		{http.MethodGet, "/api/v1/audit"},
+		{http.MethodGet, "/api/v1/metrics/agt_0123456789abcdef"},
+		{http.MethodGet, "/api/v1/templates"},
+		{http.MethodPost, "/api/v1/templates"},
+		{http.MethodDelete, "/api/v1/templates/tpl_test"},
+		{http.MethodPost, "/api/v1/templates/tpl_test/apply"},
+	}
+	status := func(item route, token string) int {
+		handler := New(nil, Config{AdminToken: adminToken, OperatorTokens: []string{operatorToken}, ReadonlyTokens: []string{readonlyToken}}).Handler()
+		request := httptest.NewRequest(item.method, item.path, nil)
+		if token != "" {
+			request.Header.Set("Authorization", "Bearer "+token)
+		}
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		return response.Code
+	}
+	for _, item := range managementRoutes {
+		if got := status(item, ""); got != http.StatusUnauthorized {
+			t.Errorf("%s %s without credentials = %d, want %d", item.method, item.path, got, http.StatusUnauthorized)
+		}
+	}
+	readonlyDenied := []route{
+		{http.MethodDelete, "/api/v1/agents/agt_0123456789abcdef"},
+		{http.MethodPut, "/api/v1/agents/agt_0123456789abcdef/configs/mihomo"},
+		{http.MethodPost, "/api/v1/agents/agt_0123456789abcdef/configs/mihomo/plans"}, {http.MethodPost, "/api/v1/agents/agt_0123456789abcdef/configs/mihomo/server-inbounds"}, {http.MethodPost, "/api/v1/agents/agt_0123456789abcdef/configs/mihomo/fields/dns"},
+		{http.MethodPost, "/api/v1/configs"}, {http.MethodPut, "/api/v1/configs/cfg_test"}, {http.MethodDelete, "/api/v1/configs/cfg_test"},
+		{http.MethodPost, "/api/v1/configs/cfg_test/revisions/1/restore"},
+		{http.MethodPost, "/api/v1/tasks"}, {http.MethodDelete, "/api/v1/tasks/tsk_test"}, {http.MethodPost, "/api/v1/tasks/tsk_test/retry"},
+		{http.MethodGet, "/api/v1/enrollment-tokens"}, {http.MethodPost, "/api/v1/enrollment-tokens"}, {http.MethodDelete, "/api/v1/enrollment-tokens/tok_test"},
+		{http.MethodPut, "/api/v1/settings"},
+		{http.MethodPost, "/api/v1/templates"}, {http.MethodDelete, "/api/v1/templates/tpl_test"}, {http.MethodPost, "/api/v1/templates/tpl_test/apply"},
+	}
+	for _, item := range readonlyDenied {
+		if got := status(item, readonlyToken); got != http.StatusForbidden {
+			t.Errorf("%s %s with readonly token = %d, want %d", item.method, item.path, got, http.StatusForbidden)
+		}
+	}
+	operatorDenied := []route{
+		{http.MethodDelete, "/api/v1/agents/agt_0123456789abcdef"},
+		{http.MethodDelete, "/api/v1/configs/cfg_test"},
+		{http.MethodPost, "/api/v1/configs/cfg_test/revisions/1/restore"},
+		{http.MethodGet, "/api/v1/enrollment-tokens"}, {http.MethodPost, "/api/v1/enrollment-tokens"}, {http.MethodDelete, "/api/v1/enrollment-tokens/tok_test"},
+		{http.MethodPut, "/api/v1/settings"},
+		{http.MethodDelete, "/api/v1/templates/tpl_test"},
+	}
+	for _, item := range operatorDenied {
+		if got := status(item, operatorToken); got != http.StatusForbidden {
+			t.Errorf("%s %s with operator token = %d, want %d", item.method, item.path, got, http.StatusForbidden)
+		}
+	}
+}
+
 // TestManagementAPIRolesEnforceTokenPrivileges verifies that operator and
 // readonly tokens can read but not administer, and that admin keeps every
 // capability.

@@ -1,0 +1,564 @@
+package api
+
+import (
+	"errors"
+	"net"
+	"net/http"
+	"sort"
+	"strings"
+
+	"github.com/qimaoww/qcontrolhub/internal/configschema"
+	"github.com/qimaoww/qcontrolhub/internal/core"
+	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
+	"github.com/qimaoww/qcontrolhub/internal/store"
+)
+
+type clientAccessProfile struct {
+	Tag      string                     `json:"tag"`
+	Protocol string                     `json:"protocol"`
+	Profile  serverconfig.ClientProfile `json:"profile"`
+}
+
+type clientAccessEntry struct {
+	AgentID   string                `json:"agent_id"`
+	AgentName string                `json:"agent_name"`
+	Engine    core.Engine           `json:"engine"`
+	Address   string                `json:"address"`
+	Source    string                `json:"source"`
+	Profiles  []clientAccessProfile `json:"profiles"`
+}
+
+type configCatalogResource struct {
+	Catalog   configschema.Catalog    `json:"catalog"`
+	Protocols []serverconfig.Protocol `json:"protocols"`
+}
+
+type agentConfigWorkspaceResource struct {
+	Agent          core.Agent              `json:"agent"`
+	Config         *core.Config            `json:"config,omitempty"`
+	Catalog        configschema.Catalog    `json:"catalog"`
+	Protocols      []serverconfig.Protocol `json:"protocols"`
+	Inbounds       []serverconfig.Input    `json:"inbounds"`
+	PresentFields  map[string]bool         `json:"present_fields"`
+	RealityPresets []string                `json:"reality_presets"`
+}
+
+type configMutationResult struct {
+	Config core.Config `json:"config"`
+	Task   core.Task   `json:"task"`
+}
+
+func (s *Server) listDeployments(w http.ResponseWriter, request *http.Request) {
+	deployments, err := s.store.LatestDeployments(request.Context())
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, deployments)
+}
+
+func (s *Server) listAgentConfigs(w http.ResponseWriter, request *http.Request) {
+	agentID := request.PathValue("id")
+	if _, err := s.store.GetAgent(request.Context(), agentID); err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	configs, err := s.store.ListAgentConfigs(request.Context())
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
+	result := make([]core.Config, 0, len(configs))
+	for _, config := range configs {
+		if config.AgentID == agentID {
+			result = append(result, config)
+		}
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) configCatalog(w http.ResponseWriter, request *http.Request) {
+	engine, err := core.ParseEngine(request.PathValue("engine"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	catalog, err := configschema.CatalogFor(engine)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, configCatalogResource{Catalog: catalog, Protocols: serverconfig.Protocols(engine)})
+}
+
+func (s *Server) agentConfigWorkspace(w http.ResponseWriter, request *http.Request) {
+	engine, err := core.ParseEngine(request.PathValue("engine"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	agent, err := s.store.GetAgent(request.Context(), request.PathValue("id"))
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	if !agentSupportsEngine(agent, engine) {
+		writeError(w, http.StatusBadRequest, "agent does not support the requested engine")
+		return
+	}
+	catalog, err := configschema.CatalogFor(engine)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	result := agentConfigWorkspaceResource{
+		Agent: agent, Catalog: catalog, Protocols: serverconfig.Protocols(engine),
+		Inbounds: []serverconfig.Input{}, PresentFields: map[string]bool{},
+		RealityPresets: serverconfig.RealityServerNamePresets(),
+	}
+	config, err := s.store.AgentConfig(request.Context(), agent.ID, engine)
+	if err == nil {
+		result.Config = &config
+		result.Inbounds = serverconfig.ParseAll(engine, config.Content)
+		result.PresentFields, err = configschema.RootKeys(engine, config.Content)
+		if err != nil {
+			writeError(w, http.StatusUnprocessableEntity, err.Error())
+			return
+		}
+	} else if !errors.Is(err, store.ErrNotFound) {
+		writeStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) newServerPlan(w http.ResponseWriter, request *http.Request) {
+	engine, agent, ok := s.agentEngineFromPath(w, request)
+	if !ok {
+		return
+	}
+	var input struct {
+		Protocol string `json:"protocol"`
+	}
+	if err := decodeJSON(w, request, &input, 8<<10); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	protocol, found := serverconfig.FindProtocol(engine, strings.TrimSpace(input.Protocol))
+	if !found {
+		writeError(w, http.StatusBadRequest, "unknown server inbound protocol")
+		return
+	}
+	plan, err := serverconfig.NewPlan(protocol)
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
+	s.recordAudit(request, "agent_config.plan_created", agent.ID, string(engine)+" "+protocol.Key)
+	writeJSON(w, http.StatusCreated, plan)
+}
+
+func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request) {
+	engine, agent, ok := s.agentEngineFromPath(w, request)
+	if !ok {
+		return
+	}
+	var input struct {
+		Operation       string             `json:"operation"`
+		OriginalTag     string             `json:"original_tag"`
+		ExpectedVersion int                `json:"expected_version"`
+		Name            string             `json:"name"`
+		Description     string             `json:"description"`
+		Intent          string             `json:"intent"`
+		Input           serverconfig.Input `json:"input"`
+	}
+	if err := decodeJSON(w, request, &input, core.MaxConfigEnvelopeBytes); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if input.Operation != "add" && input.Operation != "modify" && input.Operation != "delete" {
+		writeError(w, http.StatusBadRequest, "operation must be add, modify, or delete")
+		return
+	}
+	if input.Intent != "validate" && input.Intent != "deploy" {
+		writeError(w, http.StatusBadRequest, "intent must be validate or deploy")
+		return
+	}
+	if _, found := serverconfig.FindProtocol(engine, input.Input.Protocol); !found {
+		writeError(w, http.StatusBadRequest, "unknown server inbound protocol")
+		return
+	}
+	if input.Input.RealityEnabled && input.Operation != "delete" {
+		target, err := serverconfig.ProbeRealityTarget(request.Context(), input.Input.RealityServerName)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		input.Input.RealityServerName = target.ServerName
+	}
+	generated, err := serverconfig.Generate(engine, input.Input)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	content := generated
+	current, currentErr := s.store.AgentConfig(request.Context(), agent.ID, engine)
+	if currentErr == nil {
+		content, err = serverconfig.MutateGenerated(engine, current.Content, generated, input.OriginalTag, input.Operation)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	} else if !errors.Is(currentErr, store.ErrNotFound) {
+		writeStoreError(w, currentErr)
+		return
+	} else if input.Operation != "add" {
+		writeError(w, http.StatusConflict, "no saved configuration exists for this operation")
+		return
+	}
+	name := strings.TrimSpace(input.Name)
+	if name == "" {
+		name = agent.Name + " · " + string(engine)
+	}
+	saved, err := s.store.SaveAgentConfig(request.Context(), core.Config{
+		AgentID: agent.ID, Name: name, Description: input.Description, Engine: engine, Content: content,
+	}, input.ExpectedVersion)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	task, ok := s.createConfigMutationTask(w, request, saved, input.Intent)
+	if !ok {
+		return
+	}
+	s.recordAudit(request, "agent_config.server_saved", saved.ID, input.Operation+" "+input.Input.Protocol+" "+agent.ID)
+	writeJSON(w, http.StatusOK, configMutationResult{Config: saved, Task: task})
+}
+
+func (s *Server) saveConfigField(w http.ResponseWriter, request *http.Request) {
+	engine, agent, ok := s.agentEngineFromPath(w, request)
+	if !ok {
+		return
+	}
+	key := strings.TrimSpace(request.PathValue("key"))
+	catalog, err := configschema.CatalogFor(engine)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	known := false
+	for _, field := range catalog.Fields {
+		if field.Key == key {
+			known = true
+			break
+		}
+	}
+	if !known {
+		writeError(w, http.StatusBadRequest, "unknown configuration field")
+		return
+	}
+	var input struct {
+		Mutation        string `json:"mutation"`
+		Fragment        string `json:"fragment"`
+		ExpectedVersion int    `json:"expected_version"`
+		Name            string `json:"name"`
+		Description     string `json:"description"`
+		Intent          string `json:"intent"`
+	}
+	if err := decodeJSON(w, request, &input, core.MaxConfigEnvelopeBytes); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if input.Intent != "validate" && input.Intent != "deploy" {
+		writeError(w, http.StatusBadRequest, "intent must be validate or deploy")
+		return
+	}
+	current, err := s.store.AgentConfig(request.Context(), agent.ID, engine)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	present := false
+	keys, err := configschema.RootKeys(engine, current.Content)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	present = keys[key]
+	switch input.Mutation {
+	case "add":
+		if present {
+			writeError(w, http.StatusConflict, "field already exists")
+			return
+		}
+	case "modify", "delete":
+		if !present {
+			writeError(w, http.StatusConflict, "field does not exist")
+			return
+		}
+	default:
+		writeError(w, http.StatusBadRequest, "mutation must be add, modify, or delete")
+		return
+	}
+	content, err := configschema.MergeFragment(engine, current.Content, key, input.Fragment, input.Mutation == "delete")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	name := strings.TrimSpace(input.Name)
+	if name == "" {
+		name = current.Name
+	}
+	saved, err := s.store.SaveAgentConfig(request.Context(), core.Config{
+		AgentID: agent.ID, Name: name, Description: input.Description, Engine: engine, Content: content,
+	}, input.ExpectedVersion)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	task, ok := s.createConfigMutationTask(w, request, saved, input.Intent)
+	if !ok {
+		return
+	}
+	s.recordAudit(request, "agent_config.field_saved", saved.ID, input.Mutation+" "+key+" "+agent.ID)
+	writeJSON(w, http.StatusOK, configMutationResult{Config: saved, Task: task})
+}
+
+func (s *Server) getConfigField(w http.ResponseWriter, request *http.Request) {
+	engine, agent, ok := s.agentEngineFromPath(w, request)
+	if !ok {
+		return
+	}
+	key := strings.TrimSpace(request.PathValue("key"))
+	catalog, err := configschema.CatalogFor(engine)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	known := false
+	for _, field := range catalog.Fields {
+		if field.Key == key {
+			known = true
+			break
+		}
+	}
+	if !known {
+		writeError(w, http.StatusBadRequest, "unknown configuration field")
+		return
+	}
+	config, err := s.store.AgentConfig(request.Context(), agent.ID, engine)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	fragment, present, err := configschema.Fragment(engine, config.Content, key)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"key": key, "present": present, "fragment": fragment})
+}
+
+func (s *Server) agentEngineFromPath(w http.ResponseWriter, request *http.Request) (core.Engine, core.Agent, bool) {
+	engine, err := core.ParseEngine(request.PathValue("engine"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return "", core.Agent{}, false
+	}
+	agent, err := s.store.GetAgent(request.Context(), request.PathValue("id"))
+	if err != nil {
+		writeStoreError(w, err)
+		return "", core.Agent{}, false
+	}
+	if !agentSupportsEngine(agent, engine) {
+		writeError(w, http.StatusBadRequest, "agent does not support the requested engine")
+		return "", core.Agent{}, false
+	}
+	return engine, agent, true
+}
+
+func agentSupportsEngine(agent core.Agent, engine core.Engine) bool {
+	for _, candidate := range agent.Capabilities {
+		if candidate == engine {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Server) createConfigMutationTask(w http.ResponseWriter, request *http.Request, config core.Config, intent string) (core.Task, bool) {
+	action := core.ActionValidate
+	if intent == "deploy" {
+		action = core.ActionDeploy
+	} else if intent != "validate" {
+		writeError(w, http.StatusBadRequest, "intent must be validate or deploy")
+		return core.Task{}, false
+	}
+	task, err := s.store.CreateTask(request.Context(), core.TaskRequest{
+		AgentID: config.AgentID, Engine: config.Engine, Action: action, ConfigID: config.ID,
+	})
+	if err != nil {
+		writeStoreError(w, err)
+		return core.Task{}, false
+	}
+	task.ConfigContent = ""
+	return task, true
+}
+
+func (s *Server) listClientAccess(w http.ResponseWriter, request *http.Request) {
+	agents, err := s.store.ListAgents(request.Context())
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
+	deployments, err := s.store.LatestDeployments(request.Context())
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
+	agentConfigs, err := s.store.ListAgentConfigs(request.Context())
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
+	archiveConfigs, err := s.store.ListConfigs(request.Context())
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
+
+	agentsByID := make(map[string]core.Agent, len(agents))
+	for _, agent := range agents {
+		agentsByID[agent.ID] = agent
+	}
+	configsByID := make(map[string]core.Config, len(agentConfigs)+len(archiveConfigs))
+	for _, config := range agentConfigs {
+		configsByID[config.ID] = config
+	}
+	for _, config := range archiveConfigs {
+		configsByID[config.ID] = config
+	}
+
+	entries := make([]clientAccessEntry, 0, len(deployments))
+	for _, deployment := range deployments {
+		agent, ok := agentsByID[deployment.AgentID]
+		if !ok {
+			continue
+		}
+		config, ok := configsByID[deployment.ConfigID]
+		if !ok {
+			continue
+		}
+		if config.Version != deployment.ConfigVersion {
+			config, err = s.store.ConfigRevision(request.Context(), deployment.ConfigID, deployment.ConfigVersion)
+			if errors.Is(err, store.ErrNotFound) {
+				continue
+			}
+			if err != nil {
+				writeInternalError(w, err)
+				return
+			}
+		}
+		inputs := serverconfig.ParseAll(deployment.Engine, config.Content)
+		if len(inputs) == 0 {
+			continue
+		}
+		serverName := firstLabel(agent, "tls_server_name", "server_name")
+		for _, candidate := range clientAddressCandidates(agent) {
+			profiles := make([]clientAccessProfile, 0, len(inputs))
+			for _, input := range inputs {
+				profile, profileErr := serverconfig.BuildClientProfile(input, candidate.address, serverName)
+				if profileErr != nil {
+					continue
+				}
+				protocol, found := serverconfig.FindProtocol(deployment.Engine, input.Protocol)
+				if !found {
+					continue
+				}
+				profiles = append(profiles, clientAccessProfile{Tag: input.Tag, Protocol: protocol.Name, Profile: profile})
+			}
+			if len(profiles) > 0 {
+				entries = append(entries, clientAccessEntry{
+					AgentID: agent.ID, AgentName: agent.Name, Engine: deployment.Engine,
+					Address: candidate.address, Source: candidate.source, Profiles: profiles,
+				})
+				break
+			}
+		}
+	}
+	sort.SliceStable(entries, func(i, j int) bool {
+		if entries[i].AgentName != entries[j].AgentName {
+			return entries[i].AgentName < entries[j].AgentName
+		}
+		return entries[i].Engine < entries[j].Engine
+	})
+	writeJSON(w, http.StatusOK, entries)
+}
+
+type clientAddressCandidate struct {
+	address string
+	source  string
+}
+
+func clientAddressCandidates(agent core.Agent) []clientAddressCandidate {
+	result := make([]clientAddressCandidate, 0, 8)
+	seen := make(map[string]struct{})
+	for _, key := range []string{"public_host", "public_ip", "address"} {
+		if value := strings.TrimSpace(agent.Labels[key]); value != "" {
+			if _, exists := seen[value]; !exists {
+				seen[value] = struct{}{}
+				result = append(result, clientAddressCandidate{address: value, source: key})
+			}
+		}
+	}
+	type interfaceAddress struct {
+		address string
+		name    string
+		order   int
+	}
+	addresses := make([]interfaceAddress, 0, 8)
+	for _, networkInterface := range agent.Metrics.NetworkInterfaces {
+		for _, address := range networkInterface.Addresses {
+			ip := net.ParseIP(strings.TrimSpace(address))
+			if ip == nil || !ip.IsGlobalUnicast() || ip.IsUnspecified() || ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+				continue
+			}
+			priority := 2
+			if ip.To4() != nil {
+				priority = 0
+				if ip.IsPrivate() {
+					priority = 1
+				}
+			} else if ip.IsPrivate() {
+				priority = 3
+			}
+			addresses = append(addresses, interfaceAddress{address: ip.String(), name: networkInterface.Name, order: priority})
+		}
+	}
+	sort.SliceStable(addresses, func(i, j int) bool {
+		if addresses[i].order != addresses[j].order {
+			return addresses[i].order < addresses[j].order
+		}
+		if addresses[i].name != addresses[j].name {
+			return addresses[i].name < addresses[j].name
+		}
+		return addresses[i].address < addresses[j].address
+	})
+	for _, item := range addresses {
+		if _, exists := seen[item.address]; exists {
+			continue
+		}
+		seen[item.address] = struct{}{}
+		result = append(result, clientAddressCandidate{address: item.address, source: item.name})
+	}
+	return result
+}
+
+func firstLabel(agent core.Agent, keys ...string) string {
+	for _, key := range keys {
+		if value := strings.TrimSpace(agent.Labels[key]); value != "" {
+			return value
+		}
+	}
+	return ""
+}

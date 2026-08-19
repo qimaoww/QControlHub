@@ -172,6 +172,9 @@ func TestNewPlanRandomizesSensitiveValues(t *testing.T) {
 	if first.Port < 20000 || first.Port > 49151 || second.Port < 20000 || second.Port > 49151 || first.Credential == second.Credential || first.Tag == second.Tag {
 		t.Fatalf("plans were not independently randomized: first=%+v second=%+v", first, second)
 	}
+	if !strings.HasPrefix(first.Username, "qch-") || !strings.HasPrefix(second.Username, "qch-") {
+		t.Fatalf("plans use an unexpected username prefix: first=%q second=%q", first.Username, second.Username)
+	}
 }
 
 func TestEveryPublishedServerPlanGeneratesNativeSyntax(t *testing.T) {
