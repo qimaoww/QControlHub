@@ -1,5 +1,5 @@
 export function installTasks(ctx) {
-  const { api, state, actions, can, esc, statusName, engineName, short, date, ago, actionName, statusTone, notify, confirmAction } = ctx;
+  const { api, state, actions, can, esc, statusName, engineName, short, date, ago, actionName, statusTone, notify, confirmAction, shell } = ctx;
 async function tasks() {
   const filters = state.data.taskFilters || {};
   const query = new URLSearchParams({

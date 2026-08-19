@@ -462,12 +462,12 @@ const dashboard = installDashboard({ api, state, esc, engineName, heartbeat, sta
 const agentModule = installAgents({ api, optionalAPI, state, engines, can, esc, engineName, statusTone, serviceStatusName, short, date, ago, percent, bytes, conciseVersion, rate, notify, confirmAction, shell });
 const { agents, submitTask, bindCodeEditors, showCommand } = agentModule;
 
-const clientAccess = installClientAccess({ api, state, esc, engineName, short, shell });
+const clientAccess = installClientAccess({ api, state, engines, esc, engineName, short, shell });
 
 const configModule = installConfigPages({ api, optionalAPI, state, engines, can, esc, engineName, conciseVersion, date, ago, bytes, confirmAction, notify, shell, submitTask, bindCodeEditors });
 const { agentConfig, liveConfig, archiveConfigs } = configModule;
 
-const tasks = installTasks({ api, state, actions, can, esc, statusName, engineName, short, date, ago, actionName, statusTone, notify, confirmAction });
+const tasks = installTasks({ api, state, actions, can, esc, statusName, engineName, short, date, ago, actionName, statusTone, notify, confirmAction, shell });
 const settings = installSettings({ api, state, esc, date, can, shell, notify, confirmAction });
 
 async function render() {
