@@ -1,6 +1,6 @@
 # 鉴权与安全基线
 
-QControlHub 的安全边界包括管理员、控制面、PostgreSQL、反向代理、Agent 主机和四个被管理内核。任何一处管理员令牌、未使用的入网码、Agent 私钥或配置数据库泄露，都应按基础设施凭据泄露处理。
+QControlHub 的安全边界包括管理员、控制面、PostgreSQL、反向代理、Agent 主机和四个被管理内核。任何一处管理员令牌、添加节点凭证、Agent 私钥或配置数据库泄露，都应按基础设施凭据泄露处理。
 
 ## 身份与鉴权
 
@@ -9,7 +9,7 @@ QControlHub 的安全边界包括管理员、控制面、PostgreSQL、反向代�
 - `/api/v1/*` 要求 `Authorization: Bearer <QCH_ADMIN_TOKEN>`。
 - 控制面只保存令牌的 SHA-256 摘要用于恒定时间比较，不把令牌写入数据库。
 - 同一来源连续失败会触发内存限速；Nginx 示例额外限制登录和注册入口。
-- 控制面支持 admin（`QCH_ADMIN_TOKEN`）、operator（`QCH_OPERATOR_TOKENS`）与 readonly（`QCH_READONLY_TOKENS`）三级令牌：admin 可执行全部操作；operator 可读写配置与任务但不能管理节点身份、入网码或设置；readonly 只能读取。Bearer API 与 Web 会话共用同一套角色。
+- 控制面支持 admin（`QCH_ADMIN_TOKEN`）、operator（`QCH_OPERATOR_TOKENS`）与 readonly（`QCH_READONLY_TOKENS`）三级令牌：admin 可执行全部操作；operator 可读写配置与任务但不能管理节点身份、添加节点记录或设置；readonly 只能读取。Bearer API 与 Web 会话共用同一套角色。
 - 没有 OIDC 或 MFA。需要多人操作时，应把访问进一步放在 VPN、零信任网关或带 MFA 的上游访问代理之后。
 
 ### 独立 SPA 控制台
@@ -22,7 +22,7 @@ QControlHub 的安全边界包括管理员、控制面、PostgreSQL、反向代�
 
 ### Agent
 
-1. 管理员先签发一个随机的短期、限次入网码；控制面只保存其 SHA-256 摘要，原始值只在创建响应中显示一次。
+1. 管理员为节点生成随机的添加凭证；控制面只保存 SHA-256 摘要，原始值只显示一次。凭证绑定节点名称并可重复安装，删除添加记录后立即失效。
 2. Agent 本机生成 Ed25519 密钥对；服务器只保存公钥，私钥以 `0600` 写入 Agent 状态文件。
 3. 后续 WSS 握手签名覆盖协议版本、HTTP 方法、转义后的路径与查询串、Agent ID、Unix 时间、随机 nonce 和空正文 SHA-256，避免跨身份或跨协议复用签名。
 4. 控制面验证握手签名、拒绝超过正负 90 秒的时间戳，并把 nonce 存入 PostgreSQL 以阻止重放；心跳、任务和带 lease ID 的结果在该已认证连接中传输。
@@ -34,12 +34,12 @@ QControlHub 的安全边界包括管理员、控制面、PostgreSQL、反向代�
 
 ## 密钥要求与轮换
 
-- `QCH_ADMIN_TOKEN` 至少 32 字节，推荐 `openssl rand -hex 32`；入网码由控制面使用 CSPRNG 生成。
+- `QCH_ADMIN_TOKEN` 至少 32 字节，推荐 `openssl rand -hex 32`；添加节点凭证由控制面使用 CSPRNG 生成。
 - PostgreSQL 密码和管理员令牌应进入密码管理器或密钥管理服务，不能提交到 Git。
 - 轮换管理员令牌：更新控制面环境并重启；重启同时使现有 Web 会话失效。
-- 入网码默认 15 分钟、1 次使用，可设置为 1–1440 分钟和 1–50 次；生产接入优先逐节点签发单次短期值，并可随时吊销未使用值。
-- Agent 完成首次注册后，从 `/etc/qcontrolhub/agent.env` 删除 `QCH_ENROLLMENT_TOKEN`，降低主机进程环境和备份中的暴露面。
-- 若 Agent 私钥疑似泄露，在控制台撤销该 Agent；清除远端状态文件、重新签发单次入网码后再注册。不要复用旧状态文件。
+- 每个添加节点凭证只能注册它绑定的节点名称；重装会原位替换旧公钥并关闭旧连接。凭证无有效期，必须在不再需要重装时删除添加记录。
+- Agent 完成注册后，从 `/etc/qcontrolhub/agent.env` 删除 `QCH_ENROLLMENT_TOKEN`，降低主机进程环境和备份中的暴露面。
+- 若 Agent 私钥疑似泄露，清除远端状态文件并重新执行该节点的添加命令，控制面会替换旧公钥；若添加凭证也疑似泄露，应先删除添加记录再生成新命令。
 
 ## 传输与网络
 
@@ -75,11 +75,11 @@ Agent 需要写入固定内核配置路径并调用 `systemctl`，systemd 示例
 
 ## 上线核对表
 
-- [ ] 管理员令牌由 CSPRNG 生成并已安全保存；不存在长期有效的未使用入网码。
+- [ ] 管理员令牌由 CSPRNG 生成并已安全保存；不再需要重装的添加节点记录已经删除。
 - [ ] `QCH_BEHIND_TLS_PROXY=true`、`QCH_ALLOW_INSECURE_HTTP=false`，控制面只发布到回环地址。
 - [ ] `QCH_ALLOW_INSECURE_DATABASE=true` 只用于同机隔离 Compose 网络；外部数据库设为 `false` 并验证证书。
 - [ ] HTTPS 证书有效，TLS 1.2/1.3 可用，HTTP 自动跳转 HTTPS。
 - [ ] PostgreSQL 不对公网开放；外部数据库使用证书校验。
 - [ ] `.env`、Agent 环境文件和状态文件权限为 `0600`。
-- [ ] Agent 主机时钟同步，入网码已在注册后从环境文件删除。
+- [ ] Agent 主机时钟同步，添加节点凭证已在注册后从环境文件删除。
 - [ ] 防火墙、备份、监控与令牌轮换流程已验证。

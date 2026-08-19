@@ -2,7 +2,7 @@
 # install-agent.sh — QControlHub agent 一键安装（root 执行，无需预装仓库）
 #
 # 用法：
-#   bash deploy/remote/install-agent.sh <control-plane-url|ip[:port]> <enrollment-token> [agent-name]
+#   bash deploy/remote/install-agent.sh <control-plane-url|ip[:port]> <add-node-credential> [agent-name]
 #
 # 示例：
 #   QCH_TLS_CA_FILE=/etc/qcontrolhub/control-plane-ca.pem \
@@ -15,8 +15,8 @@ set -eu
 
 [ "$(id -u)" -eq 0 ] || { printf '%s\n' 'install-agent.sh must run as root' >&2; exit 1; }
 
-control="${1:?usage: install-agent.sh <control-plane-url|ip[:port]> <enrollment-token> [agent-name]}"
-token="${2:?usage: install-agent.sh <control-plane-url|ip[:port]> <enrollment-token> [agent-name]}"
+control="${1:?usage: install-agent.sh <control-plane-url|ip[:port]> <add-node-credential> [agent-name]}"
+token="${2:?usage: install-agent.sh <control-plane-url|ip[:port]> <add-node-credential> [agent-name]}"
 name="${3:-$(hostname)}"
 ca_file="${QCH_TLS_CA_FILE:-}"
 dry_run="${QCH_AGENT_DRY_RUN:-true}"
@@ -79,8 +79,6 @@ bash "$repository_dir/deploy/bootstrap-core-services.sh"
 echo '== 4/6 写入 agent 环境文件 =='
 install -m 0755 "$work_dir/qagent" /usr/local/bin/qagent
 mkdir -p /etc/qcontrolhub /var/lib/qcontrolhub
-had_state=false
-if [ -s /var/lib/qcontrolhub/agent-state.json ]; then had_state=true; fi
 umask 077
 {
   printf '%s\n' "QCH_SERVER_URL=$server_url"
@@ -102,12 +100,16 @@ install -m 0644 "$repository_dir/deploy/systemd/qagent.service" /etc/systemd/sys
 systemctl daemon-reload
 
 echo '== 6/6 启动 agent =='
-systemctl enable --now qagent.service
+systemctl enable qagent.service >/dev/null
+# restart also starts an inactive unit and guarantees repeated installation
+# replaces the running process with the freshly downloaded binary.
+systemctl restart qagent.service
 sleep 3
 systemctl --no-pager status qagent.service | head -n 10
 
-# 只有本次安装新建身份后才删除一次性注册码；旧身份迁移失败时保留它，便于排查。
-if [ "$had_state" = false ] && [ -s /var/lib/qcontrolhub/agent-state.json ]; then
+# 添加节点凭证只用于下载和注册；无论首次还是覆盖安装，只要身份文件
+# 存在就立即从环境文件移除，避免添加节点凭证残留。
+if [ -s /var/lib/qcontrolhub/agent-state.json ]; then
   sed -i '/^QCH_ENROLLMENT_TOKEN=/d' /etc/qcontrolhub/agent.env
   chmod 0600 /etc/qcontrolhub/agent.env
 fi

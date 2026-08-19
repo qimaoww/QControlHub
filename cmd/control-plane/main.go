@@ -86,7 +86,7 @@ func main() {
 			os.Exit(1)
 		}
 		agentInstaller = data
-		slog.Info("serving enrollment-protected agent installer", "path", installerPath, "bytes", len(data))
+		slog.Info("serving add-node-credential-protected agent installer", "path", installerPath, "bytes", len(data))
 	}
 
 	apiServer := api.New(dataStore, api.Config{

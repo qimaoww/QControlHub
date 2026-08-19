@@ -12,11 +12,10 @@ import (
 func (s *Store) PanelSettings(ctx context.Context) (core.PanelSettings, error) {
 	var settings core.PanelSettings
 	err := s.pool.QueryRow(ctx, `
-		SELECT panel_name,panel_description,enrollment_ttl_minutes,task_page_size,task_poll_interval_ms,webhook_url,updated_at
+		SELECT panel_name,panel_description,task_page_size,task_poll_interval_ms,webhook_url,updated_at
 		FROM panel_settings WHERE id=1`).Scan(
 		&settings.PanelName,
 		&settings.PanelDescription,
-		&settings.EnrollmentTTLMinutes,
 		&settings.TaskPageSize,
 		&settings.TaskPollIntervalMS,
 		&settings.WebhookURL,
@@ -38,20 +37,18 @@ func (s *Store) SavePanelSettings(ctx context.Context, settings core.PanelSettin
 	settings.UpdatedAt = time.Now().UTC()
 	err := s.pool.QueryRow(ctx, `
 		INSERT INTO panel_settings (
-			id,panel_name,panel_description,enrollment_ttl_minutes,task_page_size,task_poll_interval_ms,webhook_url,updated_at
-		) VALUES (1,$1,$2,$3,$4,$5,$6,$7)
+			id,panel_name,panel_description,task_page_size,task_poll_interval_ms,webhook_url,updated_at
+		) VALUES (1,$1,$2,$3,$4,$5,$6)
 		ON CONFLICT (id) DO UPDATE SET
 			panel_name=EXCLUDED.panel_name,
 			panel_description=EXCLUDED.panel_description,
-			enrollment_ttl_minutes=EXCLUDED.enrollment_ttl_minutes,
 			task_page_size=EXCLUDED.task_page_size,
 			task_poll_interval_ms=EXCLUDED.task_poll_interval_ms,
 			webhook_url=EXCLUDED.webhook_url,
 			updated_at=EXCLUDED.updated_at
-		RETURNING panel_name,panel_description,enrollment_ttl_minutes,task_page_size,task_poll_interval_ms,webhook_url,updated_at`,
+		RETURNING panel_name,panel_description,task_page_size,task_poll_interval_ms,webhook_url,updated_at`,
 		settings.PanelName,
 		settings.PanelDescription,
-		settings.EnrollmentTTLMinutes,
 		settings.TaskPageSize,
 		settings.TaskPollIntervalMS,
 		settings.WebhookURL,
@@ -59,7 +56,6 @@ func (s *Store) SavePanelSettings(ctx context.Context, settings core.PanelSettin
 	).Scan(
 		&settings.PanelName,
 		&settings.PanelDescription,
-		&settings.EnrollmentTTLMinutes,
 		&settings.TaskPageSize,
 		&settings.TaskPollIntervalMS,
 		&settings.WebhookURL,

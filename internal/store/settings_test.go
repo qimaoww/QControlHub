@@ -36,7 +36,7 @@ func TestPanelSettingsPersistAndValidate(t *testing.T) {
 
 	want := core.PanelSettings{
 		PanelName: "  Edge Control  ", PanelDescription: "  production fleet  ",
-		EnrollmentTTLMinutes: 30, TaskPageSize: 50, TaskPollIntervalMS: 2000,
+		TaskPageSize: 50, TaskPollIntervalMS: 2000,
 		WebhookURL: "https://hooks.example.com/qcontrolhub?token=abc",
 	}
 	saved, err := dataStore.SavePanelSettings(ctx, want)
@@ -50,7 +50,7 @@ func TestPanelSettingsPersistAndValidate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.PanelName != saved.PanelName || loaded.EnrollmentTTLMinutes != 30 || loaded.TaskPageSize != 50 || loaded.TaskPollIntervalMS != 2000 || loaded.WebhookURL != want.WebhookURL {
+	if loaded.PanelName != saved.PanelName || loaded.TaskPageSize != 50 || loaded.TaskPollIntervalMS != 2000 || loaded.WebhookURL != want.WebhookURL {
 		t.Fatalf("loaded settings = %+v, want %+v", loaded, saved)
 	}
 

@@ -17,11 +17,11 @@ QControlHub 是一个纯 Go 的 Linux 节点配置与远程运维控制平台。
 - Agent 部署前调用真实内核校验，采用受限目录句柄、`fsync` 和重命名完成原子替换；最多保留 3 份 `0600` 备份，重启失败时自动回滚并尝试恢复服务。
 - 内核版本任务只访问 MetaCubeX/mihomo、XTLS/Xray-core、SagerNet/sing-box 与 shadowsocks/shadowsocks-rust 官方 GitHub Release；Agent 固定选择当前 Linux 架构资产，强制核对 GitHub 提供的 SHA-256 后原子替换，重启失败自动恢复上一二进制。
 - 管理 API 使用 Bearer 管理令牌；Web 控制台登录后使用短期服务端会话及 CSRF 防护。支持 `QCH_OPERATOR_TOKENS` 与 `QCH_READONLY_TOKENS` 划分运维/只读角色，API 与界面按角色分级。
-- Agent 首次注册使用管理员签发的短期、限次入网码；后续 WSS 握手使用 Ed25519 签名、时间窗和持久化 nonce 防重放，任务与心跳在已认证长连接中双向传输。
-- 移除节点会立即关闭其现有 WSS、终止未完成任务并永久拒绝原签名身份重连；重新接入必须使用新入网码注册新身份。
+- 管理员为每个节点生成独立的添加节点命令；命令绑定节点名称，可重复安装，删除添加记录后立即失效。后续 WSS 握手使用 Ed25519 签名、时间窗和持久化 nonce 防重放。
+- 重复安装会原位替换节点密钥并关闭旧 WSS，不会产生同名节点；移除节点会终止未完成任务并永久拒绝原签名身份重连。
 - 任务失败、节点离线或恢复在线时，可通过设置页配置的 Webhook 地址接收 HMAC-SHA256 签名的结构化 JSON 事件（`QCH_WEBHOOK_SECRET`）。
 - 节点页提供最近 24 小时流量趋势图（每分钟采样、保留 7 天），并为漂移配置提供行级差异视图。
-- 设置页展示最近操作审计轨迹（登录、配置、任务、节点、注册码、设置）。
+- 设置页展示最近操作审计轨迹（登录、配置、任务、添加节点、设置）。
 - 节点页支持多选批量重启/启停/查状态；配置档案页支持带 `{{node_name}}`、`{{lan_ip}}`、`{{random_port}}` 占位符的模板，一键按节点渲染生成配置。
 - 设置 `QCH_CONFIG_ENCRYPTION_KEY` 后，配置正文与修订使用 AES-256-GCM 加密落盘，旧明文行透明迁移。
 
@@ -84,14 +84,14 @@ make dev-up      # 本机体验模式：回环 HTTP，关闭 Secure Cookie
 
 ### Linux · Agent 一键安装（远程节点）
 
-在控制面已启动、且已在 Web 控制台签发短期单次入网码后，在远程 Linux 节点执行：
+在控制面已启动、且已在 Web 控制台生成添加节点命令后，在远程 Linux 节点执行：
 
 ```bash
-curl -fsSL -H 'X-QControlHub-Enrollment: <入网码>' https://<面板地址>/install-agent.sh \
-  | sudo bash -s -- http://<控制面地址>:8080 <入网码> <节点名>
+curl -fsSL -H 'X-QControlHub-Enrollment: <添加节点凭证>' https://<面板地址>/install-agent.sh \
+  | sudo bash -s -- http://<控制面地址>:8080 <添加节点凭证> <节点名>
 ```
 
-脚本下载端点和 Agent 二进制都要求通过 `X-QControlHub-Enrollment` 提交有效的短期单次入网码；没有入网码不能下载。脚本随后运行核心服务引导、写入 `/etc/qcontrolhub/agent.env`（`0600`）、安装 `qagent.service` 并启动。默认 `QCH_AGENT_DRY_RUN=true`，首轮只做校验不写文件。
+脚本下载端点和 Agent 二进制都要求通过 `X-QControlHub-Enrollment` 提交该节点的添加凭证；删除添加记录后不能继续下载或注册。脚本随后运行核心服务引导、写入 `/etc/qcontrolhub/agent.env`（`0600`）、安装 `qagent.service` 并启动。默认 `QCH_AGENT_DRY_RUN=true`，首轮只做校验不写文件。
 
 > 节点没有预装内核二进制时，先执行 `sudo bash deploy/remote/install-core-engines.sh` 从官方 Release 下载 mihomo / xray / sing-box / ssserver。
 
@@ -124,11 +124,11 @@ Agent 默认是安全的 dry-run 模式。先构建二进制：
 make build
 ```
 
-在 Web 控制台的“远程节点”页签发一个短期、单次入网码。然后在远程节点安装 `bin/qagent`、[systemd 单元](deploy/systemd/qagent.service) 和 [环境文件模板](deploy/systemd/agent.env.example)。首次启动时填入该入网码；成功注册且 `/var/lib/qcontrolhub/agent-state.json` 已生成后，应从环境文件删除它。
+在 Web 控制台的“远程节点”页为节点生成添加命令。然后在远程节点安装 `bin/qagent`、[systemd 单元](deploy/systemd/qagent.service) 和 [环境文件模板](deploy/systemd/agent.env.example)。首次启动时临时填入添加节点凭证；身份文件生成后应立即从环境文件删除它。
 
 如果控制面使用私有 CA 或局域网自签名证书，先把 CA PEM 安装到远程主机，再设置 `QCH_TLS_CA_FILE=/etc/qcontrolhub/control-plane-ca.pem`；不要使用跳过 TLS 校验的开关。
 
-在使用节点页的“首次安装 / 切换”前，可在空白 Linux 节点的仓库目录执行 `sudo deploy/bootstrap-core-services.sh`。它会创建非 root 的 `qcontrolhub-core` 运行用户，在 `/usr/local/lib/qagent/cores` 下准备专用内核目录，安装四个带 `qagent-` 前缀的受限 systemd 单元，并且只在目标配置不存在时写入绑定回环地址的最小配置。用户自行安装的同名二进制和 unit 不会被覆盖；升级时只迁移带 QControlHub 标记的旧 unit。随后确认 Agent 的引擎路径、服务名与配置目标无误，再将 `QCH_AGENT_DRY_RUN` 改为 `false`。默认映射如下：
+在使用节点页的“首次安装 / 切换”前，可在空白 Linux 节点的仓库目录执行 `sudo deploy/bootstrap-core-services.sh`。它会创建非 root 的 `qcontrolhub-core` 运行用户，在 `/usr/local/lib/qagent/cores` 下准备专用内核目录，安装四个带 `qagent-` 前缀的受限 systemd 单元，并且只在目标配置不存在时写入绑定回环地址的最小配置。脚本不读取、停止、移动或删除旧的通用内核服务和二进制；需要重装时先手动卸载旧 QAgent。随后确认 Agent 的引擎路径、服务名与配置目标无误，再将 `QCH_AGENT_DRY_RUN` 改为 `false`。默认映射如下：
 
 | 内核 | 二进制 | 配置路径 | systemd 服务 |
 | --- | --- | --- | --- |

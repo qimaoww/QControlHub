@@ -104,14 +104,14 @@ func New(dataStore *store.Store, config Config) *Server {
 func (s *Server) enrollmentDownloadAllowed(w http.ResponseWriter, request *http.Request) bool {
 	token := strings.TrimSpace(request.Header.Get("X-QControlHub-Enrollment"))
 	if s.store == nil || !s.store.EnrollmentTokenUsable(request.Context(), token) {
-		writeError(w, http.StatusUnauthorized, "valid enrollment token required")
+		writeError(w, http.StatusUnauthorized, "valid add-node credential required")
 		return false
 	}
 	return true
 }
 
-// agentBinary serves the statically-extracted agent executable to a valid
-// one-time enrollment token only.
+// agentBinary serves the statically-extracted agent executable only to a valid
+// node-bound add-node credential.
 func (s *Server) serveAgentBinary(w http.ResponseWriter, r *http.Request) {
 	if len(s.agentBinary) == 0 {
 		http.NotFound(w, r)
@@ -178,7 +178,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/v1/tasks/{id}/retry", s.requireRole(core.RoleOperator, http.HandlerFunc(s.retryTask)))
 	mux.Handle("GET /api/v1/enrollment-tokens", s.requireRole(core.RoleAdmin, http.HandlerFunc(s.listEnrollmentTokens)))
 	mux.Handle("POST /api/v1/enrollment-tokens", s.requireRole(core.RoleAdmin, http.HandlerFunc(s.createEnrollmentToken)))
-	mux.Handle("DELETE /api/v1/enrollment-tokens/{id}", s.requireRole(core.RoleAdmin, http.HandlerFunc(s.revokeEnrollmentToken)))
+	mux.Handle("DELETE /api/v1/enrollment-tokens/{id}", s.requireRole(core.RoleAdmin, http.HandlerFunc(s.deleteEnrollmentToken)))
 	mux.Handle("GET /api/v1/settings", s.requireRole(core.RoleReadonly, http.HandlerFunc(s.getSettings)))
 	mux.Handle("PUT /api/v1/settings", s.requireRole(core.RoleAdmin, http.HandlerFunc(s.putSettings)))
 	mux.Handle("GET /api/v1/audit", s.requireRole(core.RoleReadonly, http.HandlerFunc(s.listAudit)))
@@ -475,12 +475,17 @@ func (s *Server) listEnrollmentTokens(w http.ResponseWriter, request *http.Reque
 }
 
 func (s *Server) createEnrollmentToken(w http.ResponseWriter, request *http.Request) {
-	var input core.EnrollmentTokenRequest
+	var input struct {
+		Name string `json:"name"`
+	}
 	if err := decodeJSON(w, request, &input, 16<<10); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	created, err := s.store.CreateEnrollmentToken(request.Context(), input)
+	created, err := s.store.CreateEnrollmentToken(request.Context(), core.EnrollmentTokenRequest{
+		Name:     input.Name,
+		Reusable: true,
+	})
 	if err != nil {
 		writeStoreError(w, err)
 		return
@@ -490,12 +495,12 @@ func (s *Server) createEnrollmentToken(w http.ResponseWriter, request *http.Requ
 	writeJSON(w, http.StatusCreated, created)
 }
 
-func (s *Server) revokeEnrollmentToken(w http.ResponseWriter, request *http.Request) {
-	if err := s.store.RevokeEnrollmentToken(request.Context(), request.PathValue("id")); err != nil {
+func (s *Server) deleteEnrollmentToken(w http.ResponseWriter, request *http.Request) {
+	if err := s.store.DeleteEnrollmentToken(request.Context(), request.PathValue("id")); err != nil {
 		writeStoreError(w, err)
 		return
 	}
-	s.recordAudit(request, "enrollment_token.revoked", request.PathValue("id"), "")
+	s.recordAudit(request, "enrollment_token.deleted", request.PathValue("id"), "")
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -519,15 +524,22 @@ func (s *Server) enrollAgent(w http.ResponseWriter, request *http.Request) {
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			s.enrollLimiter.Failure(key, now)
-			writeError(w, http.StatusUnauthorized, "invalid, expired, or already-used enrollment token")
+			writeError(w, http.StatusUnauthorized, "invalid, deleted, or mismatched add-node credential")
 			return
 		}
 		writeStoreError(w, err)
 		return
 	}
 	s.enrollLimiter.Success(key)
-	slog.Info("agent enrolled", "agent_id", agent.ID, "name", agent.Name)
-	writeJSON(w, http.StatusCreated, core.EnrollResponse{AgentID: agent.ID})
+	if agent.Reinstalled {
+		s.DisconnectAgent(agent.ID)
+	}
+	status := http.StatusCreated
+	if agent.Reinstalled {
+		status = http.StatusOK
+	}
+	slog.Info("agent enrolled", "agent_id", agent.ID, "name", agent.Name, "reinstalled", agent.Reinstalled)
+	writeJSON(w, status, core.EnrollResponse{AgentID: agent.ID})
 }
 
 func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {

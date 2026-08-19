@@ -158,6 +158,7 @@ type Agent struct {
 	EnrolledAt   time.Time               `json:"enrolled_at"`
 	PublicKey    []byte                  `json:"-"`
 	Status       string                  `json:"status,omitempty"`
+	Reinstalled  bool                    `json:"-"`
 }
 
 type Config struct {
@@ -236,9 +237,10 @@ type EnrollResponse struct {
 type EnrollmentToken struct {
 	ID        string     `json:"id"`
 	Name      string     `json:"name"`
-	ExpiresAt time.Time  `json:"expires_at"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 	MaxUses   int        `json:"max_uses"`
 	UsedCount int        `json:"used_count"`
+	Reusable  bool       `json:"reusable,omitempty"`
 	CreatedAt time.Time  `json:"created_at"`
 	RevokedAt *time.Time `json:"revoked_at,omitempty"`
 }
@@ -247,6 +249,7 @@ type EnrollmentTokenRequest struct {
 	Name       string `json:"name"`
 	TTLMinutes int    `json:"ttl_minutes"`
 	MaxUses    int    `json:"max_uses"`
+	Reusable   bool   `json:"reusable,omitempty"`
 }
 
 type EnrollmentTokenCreated struct {
@@ -335,22 +338,20 @@ type ConfigTemplate struct {
 }
 
 type PanelSettings struct {
-	PanelName            string    `json:"panel_name"`
-	PanelDescription     string    `json:"panel_description"`
-	EnrollmentTTLMinutes int       `json:"enrollment_ttl_minutes"`
-	TaskPageSize         int       `json:"task_page_size"`
-	TaskPollIntervalMS   int       `json:"task_poll_interval_ms"`
-	WebhookURL           string    `json:"webhook_url"`
-	UpdatedAt            time.Time `json:"updated_at"`
+	PanelName          string    `json:"panel_name"`
+	PanelDescription   string    `json:"panel_description"`
+	TaskPageSize       int       `json:"task_page_size"`
+	TaskPollIntervalMS int       `json:"task_poll_interval_ms"`
+	WebhookURL         string    `json:"webhook_url"`
+	UpdatedAt          time.Time `json:"updated_at"`
 }
 
 func DefaultPanelSettings() PanelSettings {
 	return PanelSettings{
-		PanelName:            "QControlHub",
-		PanelDescription:     "可信远程编排",
-		EnrollmentTTLMinutes: 15,
-		TaskPageSize:         100,
-		TaskPollIntervalMS:   600,
+		PanelName:          "QControlHub",
+		PanelDescription:   "可信远程编排",
+		TaskPageSize:       100,
+		TaskPollIntervalMS: 600,
 	}
 }
 
@@ -363,9 +364,6 @@ func (settings PanelSettings) Validate() error {
 	}
 	if utf8.RuneCountInString(settings.PanelDescription) > 120 {
 		return errors.New("panel description must not exceed 120 characters")
-	}
-	if !oneOf(settings.EnrollmentTTLMinutes, 10, 15, 30, 60) {
-		return errors.New("unsupported enrollment token lifetime")
 	}
 	if !oneOf(settings.TaskPageSize, 50, 100, 500) {
 		return errors.New("unsupported task page size")

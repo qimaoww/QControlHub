@@ -33,7 +33,7 @@ type Store struct {
 	taskWakes  map[string]chan struct{}
 }
 
-const currentSchemaVersion = 10
+const currentSchemaVersion = 11
 
 func Open(ctx context.Context, databaseURL string, allowInsecureRemote bool) (*Store, error) {
 	return OpenWithConfigKey(ctx, databaseURL, allowInsecureRemote, "")
@@ -169,22 +169,50 @@ func (s *Store) EnrollAgent(ctx context.Context, request core.EnrollRequest, enr
 		return core.Agent{}, err
 	}
 	defer tx.Rollback(ctx)
-	var enrollmentID string
+	var enrollmentID, enrollmentName string
+	var reusable bool
 	err = tx.QueryRow(ctx, `
 		UPDATE enrollment_tokens SET used_count=used_count+1
-		WHERE token_hash=$1 AND revoked_at IS NULL AND expires_at>now() AND used_count<max_uses
-		RETURNING id`, tokenDigest[:]).Scan(&enrollmentID)
+		WHERE token_hash=$1 AND revoked_at IS NULL
+		  AND (reusable OR (expires_at>now() AND used_count<max_uses))
+		RETURNING id,name,reusable`, tokenDigest[:]).Scan(&enrollmentID, &enrollmentName, &reusable)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return core.Agent{}, ErrNotFound
 	}
 	if err != nil {
 		return core.Agent{}, err
 	}
-	_, err = tx.Exec(ctx, `
-			INSERT INTO agents (id, name, version, os, arch, capabilities, labels, runtime, public_key, last_seen, enrolled_at)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-		id, strings.TrimSpace(request.Name), strings.TrimSpace(request.Version), strings.TrimSpace(request.OS), strings.TrimSpace(request.Arch),
-		capabilities, labels, runtimeState, publicKey, lastSeen, enrolledAt)
+	name := strings.TrimSpace(request.Name)
+	reinstalled := false
+	if reusable {
+		if name != enrollmentName {
+			return core.Agent{}, ErrNotFound
+		}
+		err = tx.QueryRow(ctx, `SELECT id FROM agents WHERE enrollment_id=$1 FOR UPDATE`, enrollmentID).Scan(&id)
+		if errors.Is(err, pgx.ErrNoRows) {
+			err = nil
+		} else if err != nil {
+			return core.Agent{}, err
+		} else {
+			reinstalled = true
+		}
+	}
+	if reinstalled {
+		_, err = tx.Exec(ctx, `
+			UPDATE agents SET name=$2,version=$3,os=$4,arch=$5,capabilities=$6,labels=$7,runtime=$8,
+				metrics='{}'::jsonb,public_key=$9,last_seen=$10,enrolled_at=$11,revoked_at=NULL
+			WHERE id=$1`, id, name, strings.TrimSpace(request.Version), strings.TrimSpace(request.OS), strings.TrimSpace(request.Arch),
+			capabilities, labels, runtimeState, publicKey, lastSeen, enrolledAt)
+		if err == nil {
+			_, err = tx.Exec(ctx, `DELETE FROM agent_nonces WHERE agent_id=$1`, id)
+		}
+	} else {
+		_, err = tx.Exec(ctx, `
+			INSERT INTO agents (id,name,version,os,arch,capabilities,labels,runtime,public_key,last_seen,enrolled_at,enrollment_id)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+			id, name, strings.TrimSpace(request.Version), strings.TrimSpace(request.OS), strings.TrimSpace(request.Arch),
+			capabilities, labels, runtimeState, publicKey, lastSeen, enrolledAt, nullableEnrollmentID(reusable, enrollmentID))
+	}
 	if err != nil {
 		return core.Agent{}, mapError(err)
 	}
@@ -192,11 +220,18 @@ func (s *Store) EnrollAgent(ctx context.Context, request core.EnrollRequest, enr
 		return core.Agent{}, err
 	}
 	return core.Agent{
-		ID: id, Name: strings.TrimSpace(request.Name), Version: request.Version,
+		ID: id, Name: name, Version: request.Version,
 		OS: request.OS, Arch: request.Arch, Capabilities: append([]core.Engine(nil), request.Capabilities...),
 		Labels: cloneLabels(request.Labels), Runtime: map[core.Engine]core.RuntimeState{},
-		LastSeen: lastSeen, EnrolledAt: enrolledAt, Status: "offline",
+		LastSeen: lastSeen, EnrolledAt: enrolledAt, Status: "offline", Reinstalled: reinstalled,
 	}, nil
+}
+
+func nullableEnrollmentID(reusable bool, enrollmentID string) any {
+	if reusable {
+		return enrollmentID
+	}
+	return nil
 }
 
 func (s *Store) AgentPublicKey(ctx context.Context, id string) ([]byte, error) {
@@ -227,22 +262,24 @@ func (s *Store) CleanupNonces(ctx context.Context) error {
 func (s *Store) CreateEnrollmentToken(ctx context.Context, request core.EnrollmentTokenRequest) (core.EnrollmentTokenCreated, error) {
 	name := strings.TrimSpace(request.Name)
 	if name == "" {
-		name = "Agent enrollment"
+		name = "Add node"
 	}
 	if utf8.RuneCountInString(name) > 100 {
-		return core.EnrollmentTokenCreated{}, fmt.Errorf("%w: enrollment token name exceeds 100 characters", ErrInvalid)
+		return core.EnrollmentTokenCreated{}, fmt.Errorf("%w: add-node name exceeds 100 characters", ErrInvalid)
 	}
-	if request.TTLMinutes == 0 {
-		request.TTLMinutes = 15
-	}
-	if request.TTLMinutes < 1 || request.TTLMinutes > 1440 {
-		return core.EnrollmentTokenCreated{}, fmt.Errorf("%w: enrollment token lifetime must be between 1 and 1440 minutes", ErrInvalid)
-	}
-	if request.MaxUses == 0 {
-		request.MaxUses = 1
-	}
-	if request.MaxUses < 1 || request.MaxUses > 50 {
-		return core.EnrollmentTokenCreated{}, fmt.Errorf("%w: enrollment token max uses must be between 1 and 50", ErrInvalid)
+	if !request.Reusable {
+		if request.TTLMinutes == 0 {
+			request.TTLMinutes = 15
+		}
+		if request.TTLMinutes < 1 || request.TTLMinutes > 1440 {
+			return core.EnrollmentTokenCreated{}, fmt.Errorf("%w: enrollment token lifetime must be between 1 and 1440 minutes", ErrInvalid)
+		}
+		if request.MaxUses == 0 {
+			request.MaxUses = 1
+		}
+		if request.MaxUses < 1 || request.MaxUses > 50 {
+			return core.EnrollmentTokenCreated{}, fmt.Errorf("%w: enrollment token max uses must be between 1 and 50", ErrInvalid)
+		}
 	}
 	id, err := core.NewID("enr")
 	if err != nil {
@@ -255,40 +292,43 @@ func (s *Store) CreateEnrollmentToken(ctx context.Context, request core.Enrollme
 	digest := sha256.Sum256([]byte(rawToken))
 	now := time.Now().UTC()
 	value := core.EnrollmentToken{
-		ID: id, Name: name, ExpiresAt: now.Add(time.Duration(request.TTLMinutes) * time.Minute),
-		MaxUses: request.MaxUses, UsedCount: 0, CreatedAt: now,
+		ID: id, Name: name, MaxUses: request.MaxUses, UsedCount: 0, Reusable: request.Reusable, CreatedAt: now,
+	}
+	if !request.Reusable {
+		expiresAt := now.Add(time.Duration(request.TTLMinutes) * time.Minute)
+		value.ExpiresAt = &expiresAt
 	}
 	_, err = s.pool.Exec(ctx, `
-		INSERT INTO enrollment_tokens (id,name,token_hash,expires_at,max_uses,used_count,created_at)
-		VALUES ($1,$2,$3,$4,$5,0,$6)`,
-		value.ID, value.Name, digest[:], value.ExpiresAt, value.MaxUses, value.CreatedAt)
+		INSERT INTO enrollment_tokens (id,name,token_hash,expires_at,max_uses,used_count,reusable,created_at)
+		VALUES ($1,$2,$3,$4,$5,0,$6,$7)`,
+		value.ID, value.Name, digest[:], value.ExpiresAt, value.MaxUses, value.Reusable, value.CreatedAt)
 	if err != nil {
 		return core.EnrollmentTokenCreated{}, mapError(err)
 	}
 	return core.EnrollmentTokenCreated{EnrollmentToken: value, Token: rawToken}, nil
 }
 
-// EnrollmentTokenUsable checks a raw one-time enrollment token without
-// consuming it. Bootstrap downloads use this gate before serving installer
-// material or the agent binary.
+// EnrollmentTokenUsable checks an add-node credential without consuming it.
+// Reusable node credentials remain valid until explicitly deleted.
 func (s *Store) EnrollmentTokenUsable(ctx context.Context, rawToken string) bool {
 	rawToken = strings.TrimSpace(rawToken)
 	if len(rawToken) < 32 {
 		return false
 	}
 	digest := sha256.Sum256([]byte(rawToken))
-	var expiresAt time.Time
+	var expiresAt *time.Time
 	var maxUses, usedCount int
+	var reusable bool
 	var revokedAt *time.Time
 	err := s.pool.QueryRow(ctx, `
-		SELECT expires_at,max_uses,used_count,revoked_at
-		FROM enrollment_tokens WHERE token_hash=$1`, digest[:]).Scan(&expiresAt, &maxUses, &usedCount, &revokedAt)
-	return err == nil && revokedAt == nil && usedCount < maxUses && time.Now().Before(expiresAt)
+		SELECT expires_at,max_uses,used_count,reusable,revoked_at
+		FROM enrollment_tokens WHERE token_hash=$1`, digest[:]).Scan(&expiresAt, &maxUses, &usedCount, &reusable, &revokedAt)
+	return err == nil && revokedAt == nil && (reusable || (expiresAt != nil && usedCount < maxUses && time.Now().Before(*expiresAt)))
 }
 
 func (s *Store) ListEnrollmentTokens(ctx context.Context) ([]core.EnrollmentToken, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id,name,expires_at,max_uses,used_count,created_at,revoked_at
+		SELECT id,name,expires_at,max_uses,used_count,reusable,created_at,revoked_at
 		FROM enrollment_tokens ORDER BY created_at DESC LIMIT 100`)
 	if err != nil {
 		return nil, err
@@ -297,7 +337,7 @@ func (s *Store) ListEnrollmentTokens(ctx context.Context) ([]core.EnrollmentToke
 	result := make([]core.EnrollmentToken, 0)
 	for rows.Next() {
 		var value core.EnrollmentToken
-		if err := rows.Scan(&value.ID, &value.Name, &value.ExpiresAt, &value.MaxUses, &value.UsedCount, &value.CreatedAt, &value.RevokedAt); err != nil {
+		if err := rows.Scan(&value.ID, &value.Name, &value.ExpiresAt, &value.MaxUses, &value.UsedCount, &value.Reusable, &value.CreatedAt, &value.RevokedAt); err != nil {
 			return nil, err
 		}
 		result = append(result, value)
@@ -305,10 +345,8 @@ func (s *Store) ListEnrollmentTokens(ctx context.Context) ([]core.EnrollmentToke
 	return result, rows.Err()
 }
 
-func (s *Store) RevokeEnrollmentToken(ctx context.Context, id string) error {
-	command, err := s.pool.Exec(ctx, `
-		UPDATE enrollment_tokens SET revoked_at=now()
-		WHERE id=$1 AND revoked_at IS NULL AND used_count<max_uses AND expires_at>now()`, id)
+func (s *Store) DeleteEnrollmentToken(ctx context.Context, id string) error {
+	command, err := s.pool.Exec(ctx, `DELETE FROM enrollment_tokens WHERE id=$1`, id)
 	if err != nil {
 		return err
 	}
@@ -1176,12 +1214,24 @@ CREATE TABLE IF NOT EXISTS enrollment_tokens (
     id text PRIMARY KEY,
     name varchar(100) NOT NULL,
     token_hash bytea NOT NULL UNIQUE CHECK (octet_length(token_hash) = 32),
-    expires_at timestamptz NOT NULL,
-    max_uses integer NOT NULL CHECK (max_uses BETWEEN 1 AND 50),
-    used_count integer NOT NULL DEFAULT 0 CHECK (used_count >= 0),
-    created_at timestamptz NOT NULL,
-    revoked_at timestamptz
+	    expires_at timestamptz,
+	    max_uses integer NOT NULL CHECK (max_uses BETWEEN 0 AND 50),
+	    used_count integer NOT NULL DEFAULT 0 CHECK (used_count >= 0),
+	    reusable boolean NOT NULL DEFAULT false,
+	    created_at timestamptz NOT NULL,
+	    revoked_at timestamptz
 );
+
+ALTER TABLE enrollment_tokens ADD COLUMN IF NOT EXISTS reusable boolean NOT NULL DEFAULT false;
+ALTER TABLE enrollment_tokens ALTER COLUMN expires_at DROP NOT NULL;
+ALTER TABLE enrollment_tokens DROP CONSTRAINT IF EXISTS enrollment_tokens_max_uses_check;
+ALTER TABLE enrollment_tokens ADD CONSTRAINT enrollment_tokens_max_uses_check CHECK (max_uses BETWEEN 0 AND 50);
+CREATE UNIQUE INDEX IF NOT EXISTS enrollment_tokens_reusable_name_unique_idx ON enrollment_tokens(lower(name)) WHERE reusable;
+
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS enrollment_id text;
+ALTER TABLE agents DROP CONSTRAINT IF EXISTS agents_enrollment_id_fkey;
+ALTER TABLE agents ADD CONSTRAINT agents_enrollment_id_fkey FOREIGN KEY (enrollment_id) REFERENCES enrollment_tokens(id) ON DELETE SET NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS agents_enrollment_id_unique_idx ON agents(enrollment_id) WHERE enrollment_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS agent_nonces (
     agent_id text NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
@@ -1194,17 +1244,17 @@ CREATE TABLE IF NOT EXISTS panel_settings (
     id smallint PRIMARY KEY CHECK (id = 1),
     panel_name varchar(40) NOT NULL,
     panel_description varchar(120) NOT NULL DEFAULT '',
-    enrollment_ttl_minutes integer NOT NULL CHECK (enrollment_ttl_minutes IN (10,15,30,60)),
     task_page_size integer NOT NULL CHECK (task_page_size IN (50,100,500)),
     task_poll_interval_ms integer NOT NULL CHECK (task_poll_interval_ms IN (600,1000,2000,5000)),
     webhook_url varchar(500) NOT NULL DEFAULT '',
     updated_at timestamptz NOT NULL
 );
 ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS webhook_url varchar(500) NOT NULL DEFAULT '';
+ALTER TABLE panel_settings DROP COLUMN IF EXISTS enrollment_ttl_minutes;
 
 INSERT INTO panel_settings (
-    id,panel_name,panel_description,enrollment_ttl_minutes,task_page_size,task_poll_interval_ms,updated_at
-) VALUES (1,'QControlHub','可信远程编排',15,100,600,now())
+    id,panel_name,panel_description,task_page_size,task_poll_interval_ms,updated_at
+) VALUES (1,'QControlHub','可信远程编排',100,600,now())
 ON CONFLICT (id) DO NOTHING;
 
 CREATE INDEX IF NOT EXISTS agents_active_seen_idx ON agents(last_seen DESC) WHERE revoked_at IS NULL;

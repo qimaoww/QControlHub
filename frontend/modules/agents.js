@@ -1,5 +1,5 @@
 export function installAgents(ctx) {
-  const { api, optionalAPI, state, engines, can, esc, engineName, statusTone, serviceStatusName, short, date, ago, percent, bytes, conciseVersion, rate, notify, confirmAction, shell } = ctx;
+  const { api, optionalAPI, state, engines, can, esc, engineName, statusTone, serviceStatusName, short, date, ago, heartbeat, percent, bytes, conciseVersion, rate, actionName, serviceActionDisabled, trafficChart, renderConfigDiff, notify, confirmAction, shell } = ctx;
 async function agents() {
   const [agents, deployments, accessEntries, settings, tokens] =
     await Promise.all([
@@ -58,7 +58,7 @@ async function agents() {
     tokens
       .map(
         (token) =>
-          `<article><div><strong>${esc(token.name)}</strong><small>${token.revoked_at ? "已吊销" : token.used_count >= token.max_uses ? "已使用" : `有效至 ${date(token.expires_at)}`} · 已用 ${token.used_count}/${token.max_uses} 次</small></div>${!token.revoked_at && token.used_count < token.max_uses ? `<button type="button" data-revoke="${esc(token.id)}">吊销</button>` : ""}</article>`,
+          `<article><div><strong>${esc(token.name)}</strong><small>${token.reusable ? `可重复安装 · 已安装 ${token.used_count} 次` : `旧版添加命令 · 已安装 ${token.used_count} 次`}</small></div><button class="access-history-delete" type="button" data-delete-enrollment="${esc(token.id)}">删除</button></article>`,
       )
       .join("") || "";
 
@@ -106,7 +106,7 @@ async function agents() {
     .join("");
 
   const enrollment = can("admin")
-    ? `<details class="enrollment-sheet" id="enrollment" data-has-agents="${agents.length ? 1 : 0}" ${agents.length ? "" : "open"}><summary><b>＋ 添加节点</b><i>＋</i></summary><div class="enrollment-sheet-body"><form class="access-form" id="enrollment-form"><label>节点名称<input name="name" maxlength="100" required autocomplete="off" placeholder="例如 shanghai-edge-01"></label><label>命令有效期<select name="ttl_minutes">${[10, 15, 30, 60].map((value) => `<option value="${value}" ${value === settings.enrollment_ttl_minutes ? "selected" : ""}>${value === 60 ? "1 小时" : `${value} 分钟`}</option>`).join("")}</select></label><button class="button primary" type="submit">生成一键部署命令</button></form><p class="enrollment-security-note"><b>命令只显示一次</b><span>命令包含短期单次注册码，请只在目标 Linux 服务器上执行。</span></p>${tokenRows ? `<details class="access-history"><summary>添加记录（${tokens.length}）</summary><div>${tokenRows}</div></details>` : ""}</div></details>`
+    ? `<details class="enrollment-sheet" id="enrollment" data-has-agents="${agents.length ? 1 : 0}" ${agents.length ? "" : "open"}><summary><b>＋ 添加节点</b><i>＋</i></summary><div class="enrollment-sheet-body"><form class="access-form add-node-form" id="enrollment-form"><label>节点名称<input name="name" maxlength="100" required autocomplete="off" placeholder="例如 shanghai-edge-01"></label><button class="button primary" type="submit">生成添加节点命令</button></form><p class="enrollment-security-note"><b>添加节点命令只显示一次</b><span>命令绑定该节点，可重复安装；删除添加记录后立即失效。</span></p>${tokenRows ? `<details class="access-history"><summary>添加记录（${tokens.length}）</summary><div>${tokenRows}</div></details>` : ""}</div></details>`
     : "";
   const batch =
     agents.length && can("operator")
@@ -239,12 +239,12 @@ function bindAgentPage() {
       await agents();
     };
   });
-  document.querySelectorAll("[data-revoke]").forEach((button) => {
+  document.querySelectorAll("[data-delete-enrollment]").forEach((button) => {
     button.onclick = async () => {
-      if (!(await confirmAction("确定吊销这个添加命令？", "吊销命令")))
+      if (!(await confirmAction("确定删除这个添加节点命令？删除后命令立即失效。", "删除添加命令")))
         return;
       await api(
-        `/enrollment-tokens/${encodeURIComponent(button.dataset.revoke)}`,
+        `/enrollment-tokens/${encodeURIComponent(button.dataset.deleteEnrollment)}`,
         {
           method: "DELETE",
         },
@@ -298,8 +298,6 @@ function bindAgentPage() {
         method: "POST",
         body: JSON.stringify({
           name,
-          ttl_minutes: Number(values.get("ttl_minutes")),
-          max_uses: 1,
         }),
       });
       const escapedToken = created.token.replaceAll("'", "'\\''");
@@ -662,7 +660,7 @@ function showCommand(command) {
   const previousFocus = document.activeElement;
   const wrap = document.createElement("div");
   wrap.className = "modal-backdrop";
-  wrap.innerHTML = `<section class="deploy-command-modal" role="dialog" aria-modal="true" aria-labelledby="deploy-command-title"><header class="deploy-command-head"><span class="deploy-command-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m7 8 4 4-4 4M13 16h4"/></svg></span><div><p class="eyebrow">Linux · systemd</p><h2 id="deploy-command-title">一键部署 QAgent</h2><p>复制命令到目标服务器执行，即可完成安装和节点注册。</p></div><button class="deploy-command-close" type="button" data-close aria-label="关闭弹窗">×</button></header><div class="deploy-command-body"><div class="deploy-command-notice"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.6 2.8 8.1 7 10 4.2-1.9 7-5.4 7-10V6l-7-3Z"/><path d="m9.5 12 1.7 1.7 3.5-3.7"/></svg><span><b>注册码仅显示一次</b><small>命令包含短期单次注册码，请勿转发或保存到公共记录。</small></span></div><section class="deploy-command-shell" aria-label="部署命令"><header><span><i></i>Terminal</span><small>root</small></header><div><span class="deploy-command-prompt" aria-hidden="true">$</span><textarea class="deploy-command-input" rows="5" readonly spellcheck="false" aria-label="一键部署命令" data-command>${esc(command)}</textarea></div></section></div><footer class="deploy-command-actions"><span>请在目标 Linux 服务器上以 root 权限执行</span><div><button class="button" type="button" data-close>关闭</button><button class="button primary deploy-command-copy" type="button" data-copy-command><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg><span data-copy-label>复制命令</span></button></div></footer></section>`;
+  wrap.innerHTML = `<section class="deploy-command-modal" role="dialog" aria-modal="true" aria-labelledby="deploy-command-title"><header class="deploy-command-head"><span class="deploy-command-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m7 8 4 4-4 4M13 16h4"/></svg></span><div><p class="eyebrow">Linux · systemd</p><h2 id="deploy-command-title">一键添加 QAgent 节点</h2><p>复制命令到目标服务器执行，即可完成安装和节点注册。</p></div><button class="deploy-command-close" type="button" data-close aria-label="关闭弹窗">×</button></header><div class="deploy-command-body"><div class="deploy-command-notice"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.6 2.8 8.1 7 10 4.2-1.9 7-5.4 7-10V6l-7-3Z"/><path d="m9.5 12 1.7 1.7 3.5-3.7"/></svg><span><b>添加节点命令仅显示一次</b><small>命令绑定当前节点，可重复安装；从添加记录中删除后立即失效。</small></span></div><section class="deploy-command-shell" aria-label="添加节点命令"><header><span><i></i>Terminal</span><small>root</small></header><div><span class="deploy-command-prompt" aria-hidden="true">$</span><textarea class="deploy-command-input" rows="5" readonly spellcheck="false" aria-label="添加节点命令" data-command>${esc(command)}</textarea></div></section></div><footer class="deploy-command-actions"><span>请在目标 Linux 服务器上以 root 权限执行</span><div><button class="button" type="button" data-close>关闭</button><button class="button primary deploy-command-copy" type="button" data-copy-command><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg><span data-copy-label>复制添加命令</span></button></div></footer></section>`;
   document.body.append(wrap);
   const copyButton = wrap.querySelector("[data-copy-command]");
   const commandInput = wrap.querySelector("[data-command]");
@@ -699,7 +697,7 @@ function showCommand(command) {
     window.clearTimeout(resetCopyLabel);
     resetCopyLabel = window.setTimeout(() => {
       copyButton.classList.remove("copied");
-      copyLabel.textContent = "复制命令";
+      copyLabel.textContent = "复制添加命令";
     }, 1800);
   };
   copyButton.focus();
