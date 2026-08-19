@@ -70,6 +70,12 @@ COPY frontend/index.html /usr/share/nginx/html/index.html
 COPY frontend/app.js /usr/share/nginx/html/assets/app.js
 COPY frontend/app.css /usr/share/nginx/html/assets/app.css
 COPY frontend/nginx.conf /etc/nginx/nginx.conf
+RUN css_version="$(sha256sum /usr/share/nginx/html/assets/app.css | cut -c1-16)" \
+    && js_version="$(sha256sum /usr/share/nginx/html/assets/app.js | cut -c1-16)" \
+    && sed -i \
+      -e "s/__QCH_CSS_VERSION__/${css_version}/g" \
+      -e "s/__QCH_JS_VERSION__/${js_version}/g" \
+      /usr/share/nginx/html/index.html
 
 EXPOSE 8080
 HEALTHCHECK --interval=10s --timeout=3s --retries=6 CMD wget -q -O - http://127.0.0.1:8080/healthz || exit 1
