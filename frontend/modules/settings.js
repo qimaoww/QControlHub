@@ -6,11 +6,27 @@ async function settings() {
     api("/audit?limit=100"),
   ]);
   state.data.settings = item;
+  const auditAction = {
+    "login.succeeded": "登录成功",
+    "login.failed": "登录失败",
+    "config.created": "创建配置",
+    "config.updated": "更新配置",
+    "config.deleted": "删除配置",
+    "config.restored": "恢复修订",
+    "agent_config.saved": "保存节点配置",
+    "task.created": "提交任务",
+    "task.canceled": "取消任务",
+    "task.retried": "重试任务",
+    "agent.deleted": "移除节点",
+    "enrollment_token.created": "签发入网码",
+    "enrollment_token.revoked": "吊销入网码",
+    "settings.saved": "更新设置",
+  };
   const auditRows =
     auditLogs
       .map(
         (entry) =>
-          `<li><time>${date(entry.acted_at)}</time><span class="audit-action">${esc(({ "login.succeeded": "登录成功", "login.failed": "登录失败", "config.created": "创建配置", "config.updated": "更新配置", "config.deleted": "删除配置", "config.restored": "恢复修订", "agent_config.saved": "保存节点配置", "task.created": "提交任务", "task.canceled": "取消任务", "task.retried": "重试任务", "agent.deleted": "移除节点", "enrollment_token.created": "签发入网码", "enrollment_token.revoked": "吊销入网码", "settings.saved": "更新设置" }[entry.action] || entry.action)}</span>${entry.target ? `<code>${esc(entry.target)}</code>` : ""}${entry.detail ? `<small>${esc(entry.detail)}</small>` : ""}<em>${esc(entry.remote_ip || "-")}</em></li>`,
+          `<li><time>${date(entry.acted_at)}</time><span class="audit-action">${esc(auditAction[entry.action] || entry.action)}</span>${entry.target ? `<code>${esc(entry.target)}</code>` : ""}${entry.detail ? `<small>${esc(entry.detail)}</small>` : ""}<em>${esc(entry.remote_ip || "-")}</em></li>`,
       )
       .join("") || '<li class="muted">暂无操作记录</li>';
   const readOnly = can("admin") ? "" : "disabled";
@@ -58,4 +74,3 @@ async function settings() {
 }
   return settings;
 }
-
