@@ -16,44 +16,44 @@ const (
 )
 
 type Protocol struct {
-	Key                 string
-	Name                string
-	Badge               string
-	Description         string
-	Docs                string
-	DefaultPort         int
-	Credential          string
-	SecondaryCredential string
-	IgnoresUsername     bool
-	Methods             []string
-	Transports          []string
-	SupportsTLS         bool
-	RequiresTLS         bool
-	DefaultTLS          bool
-	TransportConfig     bool
-	UsesReality         bool
+	Key                 string   `json:"key"`
+	Name                string   `json:"name"`
+	Badge               string   `json:"badge"`
+	Description         string   `json:"description"`
+	Docs                string   `json:"docs"`
+	DefaultPort         int      `json:"default_port"`
+	Credential          string   `json:"credential_label"`
+	SecondaryCredential string   `json:"secondary_credential_label"`
+	IgnoresUsername     bool     `json:"ignores_username"`
+	Methods             []string `json:"methods"`
+	Transports          []string `json:"transports"`
+	SupportsTLS         bool     `json:"supports_tls"`
+	RequiresTLS         bool     `json:"requires_tls"`
+	DefaultTLS          bool     `json:"default_tls"`
+	TransportConfig     bool     `json:"transport_config"`
+	UsesReality         bool     `json:"uses_reality"`
 }
 
 type Input struct {
-	Protocol            string
-	Tag                 string
-	Listen              string
-	Port                int
-	Username            string
-	Credential          string
-	SecondaryCredential string
-	Method              string
-	Flow                string
-	Transport           string
-	TransportPath       string
-	TLSEnabled          bool
-	CertificatePath     string
-	PrivateKeyPath      string
-	RealityEnabled      bool
-	RealityPrivateKey   string
-	RealityPublicKey    string
-	RealityShortID      string
-	RealityServerName   string
+	Protocol            string `json:"protocol"`
+	Tag                 string `json:"tag"`
+	Listen              string `json:"listen"`
+	Port                int    `json:"port"`
+	Username            string `json:"username"`
+	Credential          string `json:"credential"`
+	SecondaryCredential string `json:"secondary_credential"`
+	Method              string `json:"method"`
+	Flow                string `json:"flow"`
+	Transport           string `json:"transport"`
+	TransportPath       string `json:"transport_path"`
+	TLSEnabled          bool   `json:"tls_enabled"`
+	CertificatePath     string `json:"certificate_path"`
+	PrivateKeyPath      string `json:"private_key_path"`
+	RealityEnabled      bool   `json:"reality_enabled"`
+	RealityPrivateKey   string `json:"reality_private_key"`
+	RealityPublicKey    string `json:"reality_public_key"`
+	RealityShortID      string `json:"reality_short_id"`
+	RealityServerName   string `json:"reality_server_name"`
 }
 
 func Protocols(engine core.Engine) []Protocol {

@@ -184,7 +184,7 @@ name: qcontrolhub
 
 services:
   control-plane:
-    image: ghcr.io/qimaoww/qcontrolhub/qcontrol-plane:${QCH_IMAGE_TAG:-latest}
+    image: ghcr.io/qimaoww/qcontrol-plane:${QCH_IMAGE_TAG:-latest}
     build:
       context: .
       target: qcontrol-plane
@@ -204,8 +204,8 @@ services:
       QCH_CONFIG_ENCRYPTION_KEY: ${QCH_CONFIG_ENCRYPTION_KEY:-}
       QCH_OPERATOR_TOKENS: ${QCH_OPERATOR_TOKENS:-}
       QCH_READONLY_TOKENS: ${QCH_READONLY_TOKENS:-}
-    ports:
-      - "${QCH_BIND_ADDRESS:-127.0.0.1}:${QCH_PORT:-8080}:8080"
+    networks:
+      - backend
     read_only: true
     tmpfs:
       - /tmp:size=16m,mode=1777
@@ -221,6 +221,49 @@ services:
       retries: 6
       start_period: 10s
     stop_grace_period: 15s
+  qcontrol-web:
+    image: ghcr.io/qimaoww/qcontrol-web:${QCH_IMAGE_TAG:-latest}
+    build:
+      context: .
+      target: qcontrol-web
+      args:
+        VERSION: ${VERSION:-dev}
+    restart: unless-stopped
+    depends_on:
+      control-plane:
+        condition: service_healthy
+    ports:
+      - "${QCH_BIND_ADDRESS:-127.0.0.1}:${QCH_PORT:-8080}:8080"
+    networks:
+      - backend
+      - frontend-host
+    read_only: true
+    tmpfs:
+      - /tmp:size=8m,mode=1777
+      - /var/cache/nginx:size=8m,mode=1777
+      - /var/run:size=1m,mode=1777
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 64
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 5s
+    stop_grace_period: 10s
+
+networks:
+  backend:
+    internal: true
+  frontend-host:
+    driver: bridge
 YAML
 }
 
@@ -239,6 +282,8 @@ show_diagnostics() {
         echo "-> 最近的 PostgreSQL 日志："
         compose logs --tail=40 postgres || true
     fi
+    echo "-> 最近的 SPA 日志："
+    compose logs --tail=40 qcontrol-web || true
 }
 
 start_services() {

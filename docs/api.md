@@ -4,7 +4,7 @@
 
 ## 鉴权模型
 
-- 管理端点 `/api/v1/*`：`Authorization: Bearer <令牌>`，令牌可为 `QCH_ADMIN_TOKEN` 或 `QCH_OPERATOR_TOKENS` / `QCH_READONLY_TOKENS` 中的角色令牌。
+- 管理端点 `/api/v1/*`：自动化调用使用 `Authorization: Bearer <令牌>`；SPA 使用 `/api/v1/auth/login` 建立 HttpOnly 会话 Cookie。令牌可为 `QCH_ADMIN_TOKEN` 或 `QCH_OPERATOR_TOKENS` / `QCH_READONLY_TOKENS` 中的角色令牌。
 - 首次注册 `/agent/v1/enroll`：`Authorization: Bearer <一次性 QCH_ENROLLMENT_TOKEN>`。
 - WSS `/agent/v1/connect`：仅供官方 Agent 使用，握手要求 Ed25519 签名头、时间戳和 nonce；不要用管理员令牌调用。
 - `/healthz`：无鉴权，仅返回服务存活状态，不包含数据库详情或秘密。
@@ -34,10 +34,22 @@
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | `GET` | `/api/v1/overview` | 节点、配置和任务计数 |
+| `POST` | `/api/v1/auth/login` | 使用管理令牌创建 SPA 会话，返回角色和 CSRF token |
+| `GET` | `/api/v1/auth/session` | 读取当前 SPA 会话 |
+| `POST` | `/api/v1/auth/logout` | 注销当前 SPA 会话 |
 | `GET` | `/api/v1/agents` | 列出未撤销 Agent |
 | `DELETE` | `/api/v1/agents/{id}` | 永久撤销 Agent、立即断开 WSS 并终止其未完成任务 |
+| `GET` | `/api/v1/agents/{id}/configs` | 列出节点已有的内核配置 |
 | `GET` | `/api/v1/agents/{id}/configs/{engine}` | 读取节点绑定的内核配置 |
 | `PUT` | `/api/v1/agents/{id}/configs/{engine}` | 以乐观版本锁创建或更新节点配置 |
+| `GET` | `/api/v1/agents/{id}/configs/{engine}/workspace` | 读取服务端入站、字段目录和节点配置工作区数据 |
+| `POST` | `/api/v1/agents/{id}/configs/{engine}/plans` | 生成带安全随机凭据的服务端入站方案 |
+| `POST` | `/api/v1/agents/{id}/configs/{engine}/server-inbounds` | 新增、修改或删除服务端入站并创建校验/部署任务 |
+| `GET` | `/api/v1/agents/{id}/configs/{engine}/fields/{key}` | 读取官方目录中的一个顶级配置字段 |
+| `POST` | `/api/v1/agents/{id}/configs/{engine}/fields/{key}` | 新增、修改或删除顶级配置字段并创建任务 |
+| `GET` | `/api/v1/deployments` | 列出每个节点/内核最近一次真实成功部署 |
+| `GET` | `/api/v1/client-access` | 从已部署入站生成客户端连接资料 |
+| `GET` | `/api/v1/config-catalogs/{engine}` | 读取内核官方配置字段和服务端协议目录 |
 | `GET` | `/api/v1/configs` | 列出配置及正文 |
 | `POST` | `/api/v1/configs` | 创建配置 |
 | `PUT` | `/api/v1/configs/{id}` | 更新配置并增加版本号 |
@@ -50,9 +62,17 @@
 | `GET` | `/api/v1/tasks/{id}` | 读取单个任务及结果 |
 | `DELETE` | `/api/v1/tasks/{id}` | 取消尚未领取的任务 |
 | `POST` | `/api/v1/tasks/{id}/retry` | 按当前配置重试失败或已取消任务 |
-| `GET` | `/api/v1/enrollment-tokens` | 列出最近的入网码元数据，不返回原始值 |
+| `GET` | `/api/v1/enrollment-tokens` | 列出最近的入网码元数据，不返回原始值（admin） |
 | `POST` | `/api/v1/enrollment-tokens` | 签发短期、限次入网码 |
 | `DELETE` | `/api/v1/enrollment-tokens/{id}` | 吊销仍可用的入网码 |
+| `GET` | `/api/v1/settings` | 读取面板设置 |
+| `PUT` | `/api/v1/settings` | 保存面板设置（admin） |
+| `GET` | `/api/v1/audit?limit=` | 读取最近审计记录 |
+| `GET` | `/api/v1/metrics/{agent_id}` | 读取节点最近 24 小时资源样本 |
+| `GET` | `/api/v1/templates` | 列出配置模板 |
+| `POST` | `/api/v1/templates` | 创建配置模板 |
+| `DELETE` | `/api/v1/templates/{id}` | 删除配置模板（admin） |
+| `POST` | `/api/v1/templates/{id}/apply` | 渲染模板并保存到指定节点 |
 | `GET` | `/api/v1/agent-binary` | 下载 Agent 可执行文件（未鉴权静态资源，仅在配置 `QCH_AGENT_BINARY_PATH` 时提供） |
 
 `GET /api/v1/overview` 中的 `configs` 只统计可在“配置档案”工作区跨节点下发的全局配置；`node_configs` 单独统计绑定到具体 Agent/内核的节点配置，避免将两类配置混为一个不可解释的总数。为兼容既有调用方，`tasks_pending` 仍表示 `pending + running` 的活动任务总数；`tasks_queued` 和 `tasks_running` 分别给出排队与执行中的精确数量。
@@ -223,6 +243,6 @@ WSS 握手必须协商子协议 `qcontrolhub.agent.v1`。服务端先发送 `hel
 
 配置了 `QCH_WEBHOOK_SECRET` 时，请求头携带 `X-QControlHub-Signature: sha256=<hex>`，值为 `HMAC-SHA256(secret, body)` 的十六进制摘要；接收端应使用常量时间比较校验签名，并只信任 `2xx` 之外按失败处理。未配置密钥时不带签名头，仅应在可信内网使用。
 
-主机指标不会开放新的 Agent 监听端口。Agent 不上报通配、回环、组播或链路本地地址；控制面用服务器接收时间覆盖 Agent 时间戳，并校验百分比、容量、接口数量、名称和地址边界，只在 PostgreSQL 保存每个节点的最新快照。Web 控制台通过要求有效管理会话的同源 `GET /ui/agents/metrics` 每 5 秒刷新；响应设置 `Cache-Control: no-store`。节点运行区只从实际部署版本生成客户端资料，优先使用受控节点标签中的入口地址，否则自动选择默认路由接口地址；配置编辑器不接受或传播客户端连接地址参数。
+主机指标不会开放新的 Agent 监听端口。Agent 不上报通配、回环、组播或链路本地地址；控制面用服务器接收时间覆盖 Agent 时间戳，并校验百分比、容量、接口数量、名称和地址边界，只在 PostgreSQL 保存每个节点的最新快照。SPA 通过要求有效管理会话的 `GET /api/v1/metrics/{agent_id}` 获取历史样本；响应设置 `Cache-Control: no-store`。节点运行区只从实际部署版本生成客户端资料，优先使用受控节点标签中的入口地址，否则自动选择默认路由接口地址；配置编辑器不接受或传播客户端连接地址参数。
 
 握手签名 canonical value 由固定字符串 `qcontrolhub-agent-v1`、大写 HTTP 方法、原始转义路径及查询串、Agent ID、Unix 秒时间戳、随机 nonce、空正文 SHA-256 十六进制摘要以换行连接。握手需要以下头：`X-QControlHub-Agent-ID`、`X-QControlHub-Timestamp`、`X-QControlHub-Nonce`、`X-QControlHub-Signature`。有效时间窗为正负 90 秒，nonce 在窗口内只能使用一次。应直接使用官方 Go Agent，避免自行实现导致编码、代理重写、lease 或防重放错误。

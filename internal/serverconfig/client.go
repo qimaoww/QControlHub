@@ -14,18 +14,18 @@ import (
 // Secret fields must remain masked by callers until the administrator reveals
 // or copies them.
 type ClientField struct {
-	Label  string
-	Value  string
-	Secret bool
+	Label  string `json:"label"`
+	Value  string `json:"value"`
+	Secret bool   `json:"secret"`
 }
 
 // ClientProfile contains a common client import URI plus the same connection
 // data as explicit fields. The explicit fields remain useful when a particular
 // client does not implement the URI scheme.
 type ClientProfile struct {
-	Format string
-	URI    string
-	Fields []ClientField
+	Format string        `json:"format"`
+	URI    string        `json:"uri"`
+	Fields []ClientField `json:"fields"`
 }
 
 // BuildClientProfile converts a generated inbound into client-facing access

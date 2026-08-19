@@ -37,7 +37,7 @@ func NewPlan(protocol Protocol) (Input, error) {
 	}
 	input := Input{
 		Protocol: protocol.Key, Tag: protocol.Key + "-" + suffix, Listen: "0.0.0.0",
-		Port: 20000 + int(portOffset.Int64()), Username: "rf-" + suffix,
+		Port: 20000 + int(portOffset.Int64()), Username: "qch-" + suffix,
 		Credential: credential, Method: method, Transport: transport, TransportPath: transportPath,
 		TLSEnabled: protocol.DefaultTLS, CertificatePath: "/etc/qcontrolhub/tls/server.crt", PrivateKeyPath: "/etc/qcontrolhub/tls/server.key",
 	}
