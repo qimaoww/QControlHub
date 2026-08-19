@@ -3,17 +3,33 @@ package frontend
 import (
 	"crypto/sha256"
 	"fmt"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
 
 func TestSPAConsoleSurfaceMatchesInitialRelease(t *testing.T) {
-	script, err := os.ReadFile("app.js")
+	var scripts strings.Builder
+	err := filepath.WalkDir(".", func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() || filepath.Ext(path) != ".js" {
+			return nil
+		}
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		scripts.Write(data)
+		return nil
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	content := string(script)
+	content := scripts.String()
 	for _, required := range []string{
 		`"client-access"`, `"live-config"`, `"archive-config"`,
 		`machine-workspace`, `server-plan-form`, `field-form`,
@@ -60,6 +76,21 @@ func TestStaticAssetsUseBuildGeneratedCacheKeys(t *testing.T) {
 	for _, placeholder := range []string{"__QCH_CSS_VERSION__", "__QCH_JS_VERSION__"} {
 		if !strings.Contains(string(dockerfile), placeholder) {
 			t.Errorf("Dockerfile does not replace %s", placeholder)
+		}
+	}
+}
+
+func TestSPAModulesArePublished(t *testing.T) {
+	for _, name := range []string{
+		"dashboard.js",
+		"agents.js",
+		"client-access.js",
+		"configs.js",
+		"tasks.js",
+		"settings.js",
+	} {
+		if _, err := os.Stat(filepath.Join("modules", name)); err != nil {
+			t.Errorf("missing SPA module %s: %v", name, err)
 		}
 	}
 }
