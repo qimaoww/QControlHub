@@ -669,5 +669,5 @@ function showCommand(command) {
     wrap.querySelector("[data-copy-command]").textContent = "已复制";
   };
 }
-  return { agents, submitTask, bindCodeEditors, waitForTask, showCommand };
+  return { agents, submitTask, bindCodeEditors, showCommand };
 }
