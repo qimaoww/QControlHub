@@ -25,10 +25,10 @@ ReadWritePaths=/var/lib/qcontrolhub
 # Keep the Agent itself read-only even though the default cores share this directory.
 ReadWritePaths=-/usr/local/bin
 ReadOnlyPaths=-/usr/local/bin/qagent
-ReadWritePaths=-/etc/mihomo
-ReadWritePaths=-/usr/local/etc/xray
-ReadWritePaths=-/etc/sing-box
-ReadWritePaths=-/etc/shadowsocks-rust
+ReadWritePaths=-/etc/qagent/mihomo
+ReadWritePaths=-/etc/qagent/xray
+ReadWritePaths=-/etc/qagent/sing-box
+ReadWritePaths=-/etc/qagent/shadowsocks-rust
 ProtectHome=true
 PrivateTmp=true
 PrivateDevices=true

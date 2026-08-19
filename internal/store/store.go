@@ -268,6 +268,24 @@ func (s *Store) CreateEnrollmentToken(ctx context.Context, request core.Enrollme
 	return core.EnrollmentTokenCreated{EnrollmentToken: value, Token: rawToken}, nil
 }
 
+// EnrollmentTokenUsable checks a raw one-time enrollment token without
+// consuming it. Bootstrap downloads use this gate before serving installer
+// material or the agent binary.
+func (s *Store) EnrollmentTokenUsable(ctx context.Context, rawToken string) bool {
+	rawToken = strings.TrimSpace(rawToken)
+	if len(rawToken) < 32 {
+		return false
+	}
+	digest := sha256.Sum256([]byte(rawToken))
+	var expiresAt time.Time
+	var maxUses, usedCount int
+	var revokedAt *time.Time
+	err := s.pool.QueryRow(ctx, `
+		SELECT expires_at,max_uses,used_count,revoked_at
+		FROM enrollment_tokens WHERE token_hash=$1`, digest[:]).Scan(&expiresAt, &maxUses, &usedCount, &revokedAt)
+	return err == nil && revokedAt == nil && usedCount < maxUses && time.Now().Before(expiresAt)
+}
+
 func (s *Store) ListEnrollmentTokens(ctx context.Context) ([]core.EnrollmentToken, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id,name,expires_at,max_uses,used_count,created_at,revoked_at

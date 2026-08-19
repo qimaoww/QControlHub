@@ -4,7 +4,7 @@ Documentation=https://github.com/MetaCubeX/mihomo
 Wants=network-online.target
 After=network-online.target
 ConditionFileIsExecutable=/usr/local/bin/mihomo
-ConditionPathExists=/etc/mihomo/config.yaml
+ConditionPathExists=/etc/qagent/mihomo/config.yaml
 
 [Service]
 Type=simple
@@ -14,7 +14,7 @@ WorkingDirectory=/var/lib/qcontrolhub-mihomo
 StateDirectory=qcontrolhub-mihomo
 StateDirectoryMode=0750
 UMask=0027
-ExecStart=/usr/local/bin/mihomo -d /var/lib/qcontrolhub-mihomo -f /etc/mihomo/config.yaml
+ExecStart=/usr/local/bin/mihomo -d /var/lib/qcontrolhub-mihomo -f /etc/qagent/mihomo/config.yaml
 Restart=on-failure
 RestartSec=3s
 TimeoutStopSec=20s
@@ -39,7 +39,7 @@ ProtectProc=invisible
 ProcSubset=pid
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 SystemCallArchitectures=native
-ReadOnlyPaths=/usr/local/bin/mihomo /etc/mihomo
+ReadOnlyPaths=/usr/local/bin/mihomo /etc/qagent/mihomo
 ReadWritePaths=/var/lib/qcontrolhub-mihomo
 
 [Install]

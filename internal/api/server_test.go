@@ -78,6 +78,22 @@ func TestValidateEnrollmentRejectsDatabaseOverflowFields(t *testing.T) {
 	}
 }
 
+func TestAgentDownloadsRequireEnrollmentToken(t *testing.T) {
+	handler := New(nil, Config{
+		AdminToken:     strings.Repeat("a", 48),
+		AgentBinary:    []byte("binary"),
+		AgentInstaller: []byte("#!/bin/sh\n"),
+	}).Handler()
+	for _, path := range []string{"/api/v1/agent-installer", "/api/v1/agent-binary"} {
+		request := httptest.NewRequest(http.MethodGet, path, nil)
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusUnauthorized {
+			t.Fatalf("GET %s without enrollment token = %d, want %d", path, response.Code, http.StatusUnauthorized)
+		}
+	}
+}
+
 func TestConfigRevisionRoutesRejectInvalidRequestsBeforeStoreAccess(t *testing.T) {
 	t.Parallel()
 	adminToken := strings.Repeat("a", 48)

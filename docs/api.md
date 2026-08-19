@@ -9,7 +9,8 @@
 - WSS `/agent/v1/connect`：仅供官方 Agent 使用，握手要求 Ed25519 签名头、时间戳和 nonce；不要用管理员令牌调用。
 - `/healthz`：无鉴权，仅返回服务存活状态，不包含数据库详情或秘密。
 - `/readyz`：无鉴权；仅在控制面能连接 PostgreSQL 时返回 200，不暴露数据库错误详情。
-- `GET /api/v1/agent-binary`：无鉴权的静态下载端点，仅在配置 `QCH_AGENT_BINARY_PATH` 后返回 Agent 可执行文件，用于节点一键安装；二进制不包含任何秘密（注册仍需要一次性入网码）。
+- `GET /api/v1/agent-installer`：通过 `X-QControlHub-Enrollment` 头提交有效入网码后返回一键安装脚本；无有效入网码不返回脚本。
+- `GET /api/v1/agent-binary`：通过 `X-QControlHub-Enrollment` 头提交有效入网码后返回 Agent 可执行文件；无有效入网码不返回二进制。
 
 ### 角色令牌
 
@@ -73,7 +74,8 @@
 | `POST` | `/api/v1/templates` | 创建配置模板 |
 | `DELETE` | `/api/v1/templates/{id}` | 删除配置模板（admin） |
 | `POST` | `/api/v1/templates/{id}/apply` | 渲染模板并保存到指定节点 |
-| `GET` | `/api/v1/agent-binary` | 下载 Agent 可执行文件（未鉴权静态资源，仅在配置 `QCH_AGENT_BINARY_PATH` 时提供） |
+| `GET` | `/api/v1/agent-installer` | 下载入网码保护的一键安装脚本 |
+| `GET` | `/api/v1/agent-binary` | 下载入网码保护的 Agent 可执行文件 |
 
 `GET /api/v1/overview` 中的 `configs` 只统计可在“配置档案”工作区跨节点下发的全局配置；`node_configs` 单独统计绑定到具体 Agent/内核的节点配置，避免将两类配置混为一个不可解释的总数。为兼容既有调用方，`tasks_pending` 仍表示 `pending + running` 的活动任务总数；`tasks_queued` 和 `tasks_running` 分别给出排队与执行中的精确数量。
 

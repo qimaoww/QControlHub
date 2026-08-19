@@ -56,15 +56,15 @@ install_if_missing() {
   printf '%s\n' "installed: $destination"
 }
 
-ensure_directory /etc/mihomo
-ensure_directory /usr/local/etc/xray
-ensure_directory /etc/sing-box
-ensure_directory /etc/shadowsocks-rust
+ensure_directory /etc/qagent/mihomo
+ensure_directory /etc/qagent/xray
+ensure_directory /etc/qagent/sing-box
+ensure_directory /etc/qagent/shadowsocks-rust
 
-install_if_missing "$repository_dir/examples/configs/mihomo-minimal.yaml" /etc/mihomo/config.yaml root "$service_group" 0640
-install_if_missing "$repository_dir/examples/configs/xray-minimal.json" /usr/local/etc/xray/config.json root "$service_group" 0640
-install_if_missing "$repository_dir/examples/configs/sing-box-minimal.json" /etc/sing-box/config.json root "$service_group" 0640
-install_if_missing "$repository_dir/examples/configs/shadowsocks-rust-minimal.json" /etc/shadowsocks-rust/config.json root "$service_group" 0640
+install_if_missing "$repository_dir/examples/configs/mihomo-minimal.yaml" /etc/qagent/mihomo/config.yaml root "$service_group" 0640
+install_if_missing "$repository_dir/examples/configs/xray-minimal.json" /etc/qagent/xray/config.json root "$service_group" 0640
+install_if_missing "$repository_dir/examples/configs/sing-box-minimal.json" /etc/qagent/sing-box/config.json root "$service_group" 0640
+install_if_missing "$repository_dir/examples/configs/shadowsocks-rust-minimal.json" /etc/qagent/shadowsocks-rust/config.json root "$service_group" 0640
 
 for engine in mihomo xray sing-box shadowsocks-rust; do
   install_if_missing "$script_dir/systemd/$engine.service" "/etc/systemd/system/$engine.service" root root 0644
