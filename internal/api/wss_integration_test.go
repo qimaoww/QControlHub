@@ -293,6 +293,23 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 			if snapshotErr != nil || snapshot != config.Content {
 				t.Fatalf("read-config snapshot = %q, %v", snapshot, snapshotErr)
 			}
+			snapshotRequest, requestErr := http.NewRequestWithContext(ctx, http.MethodGet, httpServer.URL+"/api/v1/tasks/"+created.ID+"/config-snapshot", nil)
+			if requestErr != nil {
+				t.Fatalf("create read-config snapshot request: %v", requestErr)
+			}
+			snapshotRequest.Header.Set("Authorization", "Bearer "+adminToken)
+			snapshotResponse, requestErr := http.DefaultClient.Do(snapshotRequest)
+			if requestErr != nil {
+				t.Fatalf("read-config snapshot request: %v", requestErr)
+			}
+			var snapshotPayload struct {
+				Content string `json:"content"`
+			}
+			decodeErr := json.NewDecoder(snapshotResponse.Body).Decode(&snapshotPayload)
+			_ = snapshotResponse.Body.Close()
+			if snapshotResponse.StatusCode != http.StatusOK || decodeErr != nil || snapshotPayload.Content != config.Content {
+				t.Fatalf("read-config snapshot API status=%d content=%q decode=%v", snapshotResponse.StatusCode, snapshotPayload.Content, decodeErr)
+			}
 		}
 	}
 	deployments, err := dataStore.LatestDeployments(ctx)

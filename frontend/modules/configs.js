@@ -481,10 +481,11 @@ async function readCurrentConfig(agent, engine, sourceKey) {
     const finished = await waitForTask(task.id);
     if (finished.status !== "succeeded")
       throw new Error(finished.error || "节点未能读取当前配置");
-    if (!finished.config_content)
+    const snapshot = await api(`/tasks/${encodeURIComponent(finished.id)}/config-snapshot`);
+    if (!snapshot.content)
       throw new Error("节点返回的配置快照已失效，请重新读取");
     state.data.liveSources[sourceKey] = {
-      content: finished.config_content,
+      content: snapshot.content,
       taskId: finished.id,
       reading: false,
     };

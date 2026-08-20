@@ -45,6 +45,7 @@ func TestManagementAPIRouteAuthorizationMatrix(t *testing.T) {
 		{http.MethodGet, "/api/v1/tasks"},
 		{http.MethodPost, "/api/v1/tasks"},
 		{http.MethodGet, "/api/v1/tasks/tsk_test"},
+		{http.MethodGet, "/api/v1/tasks/tsk_test/config-snapshot"},
 		{http.MethodDelete, "/api/v1/tasks/tsk_test"},
 		{http.MethodPost, "/api/v1/tasks/tsk_test/retry"},
 		{http.MethodGet, "/api/v1/enrollment-tokens"},
