@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -35,7 +36,11 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 	defer dataStore.Close()
 
 	adminToken := strings.Repeat("a", 48)
-	httpServer := httptest.NewServer(New(dataStore, Config{AdminToken: adminToken}).Handler())
+	httpServer := httptest.NewServer(New(dataStore, Config{
+		AdminToken:   adminToken,
+		AgentBinary:  []byte("test-agent-binary"),
+		AgentVersion: "test-version",
+	}).Handler())
 	defer httpServer.Close()
 
 	enrollment, err := dataStore.CreateEnrollmentToken(ctx, core.EnrollmentTokenRequest{Name: "integration", TTLMinutes: 5, MaxUses: 1})
@@ -74,6 +79,32 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 		t.Fatalf("decode enrollment: %v", err)
 	}
 	enrolledAgentID = enrolled.AgentID
+
+	// An enrolled Agent can fetch the control-plane's exact binary only with
+	// its own fresh Ed25519 request signature. The response is checksummed so
+	// the Agent can verify it before replacing its executable.
+	binaryRequest, err := http.NewRequestWithContext(ctx, http.MethodGet, httpServer.URL+"/agent/v1/binary", nil)
+	if err != nil {
+		t.Fatalf("create signed binary request: %v", err)
+	}
+	if err := authn.SignRequest(binaryRequest, nil, enrolled.AgentID, privateKey, time.Now().UTC()); err != nil {
+		t.Fatalf("sign binary request: %v", err)
+	}
+	binaryResponse, err := http.DefaultClient.Do(binaryRequest)
+	if err != nil {
+		t.Fatalf("download signed Agent binary: %v", err)
+	}
+	defer binaryResponse.Body.Close()
+	if binaryResponse.StatusCode != http.StatusOK {
+		t.Fatalf("signed Agent binary status = %s", binaryResponse.Status)
+	}
+	binaryContents, err := io.ReadAll(binaryResponse.Body)
+	if err != nil {
+		t.Fatalf("read signed Agent binary: %v", err)
+	}
+	if string(binaryContents) != "test-agent-binary" || binaryResponse.Header.Get("X-QControlHub-Agent-Version") != "test-version" || binaryResponse.Header.Get("X-QControlHub-Agent-SHA256") == "" {
+		t.Fatalf("signed Agent binary response = body %q headers version=%q checksum=%q", string(binaryContents), binaryResponse.Header.Get("X-QControlHub-Agent-Version"), binaryResponse.Header.Get("X-QControlHub-Agent-SHA256"))
+	}
 
 	websocketURL := "ws" + strings.TrimPrefix(httpServer.URL, "http") + "/agent/v1/connect"
 	handshake, _ := http.NewRequestWithContext(ctx, http.MethodGet, websocketURL, nil)

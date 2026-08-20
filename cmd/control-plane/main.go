@@ -97,6 +97,7 @@ func main() {
 		SecureTransport: secureTransport,
 		TrustedProxies:  trustedProxies,
 		AgentBinary:     agentBinary,
+		AgentVersion:    version,
 		AgentInstaller:  agentInstaller,
 		WebhookSecret:   strings.TrimSpace(os.Getenv("QCH_WEBHOOK_SECRET")),
 	})

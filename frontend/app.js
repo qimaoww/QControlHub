@@ -17,6 +17,7 @@ const actions = [
   "status",
   "install",
   "read-config",
+  "upgrade-agent",
 ];
 const state = {
   session: null,
@@ -57,6 +58,7 @@ const actionName = (value) =>
     status: "查询状态",
     install: "安装或升级内核",
     "read-config": "读取当前配置",
+    "upgrade-agent": "升级 Agent",
   })[value] || label(value);
 const statusName = (value) =>
   ({

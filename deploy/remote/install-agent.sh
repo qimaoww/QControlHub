@@ -77,7 +77,9 @@ echo '== 3/6 引导核心服务（mihomo/xray/sing-box/ss-rust 单元与最小�
 bash "$repository_dir/deploy/bootstrap-core-services.sh"
 
 echo '== 4/6 写入 agent 环境文件 =='
-install -m 0755 "$work_dir/qagent" /usr/local/bin/qagent
+mkdir -p /usr/local/lib/qagent
+install -m 0755 "$work_dir/qagent" /usr/local/lib/qagent/qagent
+ln -sfn /usr/local/lib/qagent/qagent /usr/local/bin/qagent
 mkdir -p /etc/qcontrolhub /var/lib/qcontrolhub
 umask 077
 {

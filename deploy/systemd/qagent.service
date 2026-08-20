@@ -18,14 +18,17 @@ Restart=on-failure
 RestartSec=5s
 TimeoutStopSec=20s
 
-# The agent needs narrowly scoped writes to engine configuration directories.
+# The agent needs narrowly scoped writes to engine configuration directories and
+# to its own private executable so a signed panel upgrade can replace it
+# atomically. The installer keeps /usr/local/bin/qagent as a compatibility
+# symlink; administrator-managed programs in that directory remain read-only.
 ProtectSystem=strict
 ReadWritePaths=/var/lib/qcontrolhub
 # Version switching creates an atomic candidate and backup beside each core.
 # Keep every managed core below an application-private directory so binaries
 # installed by the server administrator in /usr/local/bin remain untouched.
 ReadWritePaths=-/usr/local/lib/qagent/cores
-ReadOnlyPaths=-/usr/local/bin/qagent
+ReadWritePaths=-/usr/local/lib/qagent
 ReadWritePaths=-/etc/qagent/mihomo
 ReadWritePaths=-/etc/qagent/xray
 ReadWritePaths=-/etc/qagent/sing-box

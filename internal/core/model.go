@@ -92,19 +92,20 @@ func ParseEngine(value string) (Engine, error) {
 type Action string
 
 const (
-	ActionValidate   Action = "validate"
-	ActionDeploy     Action = "deploy"
-	ActionStart      Action = "start"
-	ActionStop       Action = "stop"
-	ActionRestart    Action = "restart"
-	ActionStatus     Action = "status"
-	ActionInstall    Action = "install"
-	ActionReadConfig Action = "read-config"
+	ActionValidate     Action = "validate"
+	ActionDeploy       Action = "deploy"
+	ActionStart        Action = "start"
+	ActionStop         Action = "stop"
+	ActionRestart      Action = "restart"
+	ActionStatus       Action = "status"
+	ActionInstall      Action = "install"
+	ActionReadConfig   Action = "read-config"
+	ActionUpgradeAgent Action = "upgrade-agent"
 )
 
 func (a Action) Valid() bool {
 	switch a {
-	case ActionValidate, ActionDeploy, ActionStart, ActionStop, ActionRestart, ActionStatus, ActionInstall, ActionReadConfig:
+	case ActionValidate, ActionDeploy, ActionStart, ActionStop, ActionRestart, ActionStatus, ActionInstall, ActionReadConfig, ActionUpgradeAgent:
 		return true
 	default:
 		return false
