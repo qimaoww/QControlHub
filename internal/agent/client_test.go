@@ -11,9 +11,7 @@ import (
 )
 
 func TestNewClientDerivesHTTPSAndWSSOrigins(t *testing.T) {
-	executor := &Executor{DryRun: true, Specs: map[core.Engine]EngineSpec{
-		core.EngineMihomo: {Binary: "unused", ConfigPath: "/tmp/config.yaml", Service: "qagent-mihomo.service"},
-	}}
+	executor := &Executor{}
 	client, err := NewClient(ClientConfig{ServerURL: "wss://control.example.com", HeartbeatEvery: 10 * time.Second}, executor)
 	if err != nil {
 		t.Fatalf("NewClient() error = %v", err)
@@ -27,9 +25,7 @@ func TestNewClientDerivesHTTPSAndWSSOrigins(t *testing.T) {
 }
 
 func TestNewClientRejectsHeartbeatIntervalsOutsideServerDeadline(t *testing.T) {
-	executor := &Executor{DryRun: true, Specs: map[core.Engine]EngineSpec{
-		core.EngineMihomo: {Binary: "unused", ConfigPath: "/tmp/config.yaml", Service: "qagent-mihomo.service"},
-	}}
+	executor := &Executor{}
 	for _, interval := range []time.Duration{time.Millisecond, 31 * time.Second, time.Minute} {
 		if _, err := NewClient(ClientConfig{ServerURL: "wss://control.example.com", HeartbeatEvery: interval}, executor); err == nil || !strings.Contains(err.Error(), "between 1s and 30s") {
 			t.Fatalf("NewClient(HeartbeatEvery=%s) error = %v", interval, err)
@@ -38,21 +34,18 @@ func TestNewClientRejectsHeartbeatIntervalsOutsideServerDeadline(t *testing.T) {
 }
 
 func TestNewClientRejectsUnsafeRemoteOrigins(t *testing.T) {
-	dryRun := &Executor{DryRun: true, Specs: map[core.Engine]EngineSpec{
-		core.EngineMihomo: {Binary: "unused", ConfigPath: "/tmp/config.yaml", Service: "qagent-mihomo.service"},
-	}}
+	executor := &Executor{}
 	for _, value := range []string{
 		"wss://user:password@control.example.com",
 		"wss://control.example.com/base",
 		"wss://control.example.com?token=secret",
 		"ftp://control.example.com",
 	} {
-		if _, err := NewClient(ClientConfig{ServerURL: value}, dryRun); err == nil {
+		if _, err := NewClient(ClientConfig{ServerURL: value}, executor); err == nil {
 			t.Fatalf("NewClient() accepted unsafe URL %q", value)
 		}
 	}
-	live := &Executor{DryRun: false, Specs: map[core.Engine]EngineSpec{}}
-	if _, err := NewClient(ClientConfig{ServerURL: "ws://192.0.2.10", AllowHTTP: true}, live); err == nil {
+	if _, err := NewClient(ClientConfig{ServerURL: "ws://192.0.2.10", AllowHTTP: true}, executor); err == nil {
 		t.Fatal("NewClient() allowed live execution over remote ws://")
 	}
 }
@@ -66,7 +59,7 @@ func TestReconnectedSessionJoinsInFlightTaskExecution(t *testing.T) {
 	var calls atomic.Int32
 	client := &Client{
 		creds:    credentials{AgentID: "agt_0123456789abcdef"},
-		executor: &Executor{DryRun: true},
+		executor: &Executor{},
 		executeFunc: func(context.Context, core.Task) (string, error) {
 			if calls.Add(1) == 1 {
 				close(started)
@@ -97,7 +90,7 @@ func TestReconnectedSessionJoinsInFlightTaskExecution(t *testing.T) {
 	for index, outgoing := range []chan core.WireMessage{first, second} {
 		select {
 		case message := <-outgoing:
-			if message.Result == nil || !message.Result.Result.Success || message.Result.Result.Simulated || message.Result.Result.Output != "current configuration" || message.Result.Result.LeaseID != task.LeaseID {
+			if message.Result == nil || !message.Result.Result.Success || message.Result.Result.Output != "current configuration" || message.Result.Result.LeaseID != task.LeaseID {
 				t.Fatalf("session %d result = %+v", index+1, message)
 			}
 		case <-ctx.Done():

@@ -9,7 +9,7 @@ async function agents() {
       api("/deployments"),
       api("/client-access"),
       api("/settings"),
-      can("admin") ? api("/enrollment-tokens") : Promise.resolve([]),
+      can("enrollment.manage") ? api("/enrollment-tokens") : Promise.resolve([]),
     ]);
   state.data.agents = agents;
   state.data.settings = settings;
@@ -105,7 +105,7 @@ async function agents() {
               <div class="service-primary-action">${drift ? `<button class="button service-config" type="button" data-config="${esc(agent.id)}" data-engine="${esc(engine)}">查看配置</button><button class="button primary" type="button" data-deploy="${esc(agent.id)}" data-engine="${esc(engine)}" data-config-id="${esc(saved.id)}">部署 v${saved.version}</button>` : `<button class="button primary service-config" type="button" data-config="${esc(agent.id)}" data-engine="${esc(engine)}">配置 <span>→</span></button>`}</div>
             </div>
             ${serviceManagement}
-            <details class="runtime-drawer version-drawer"><summary><span><b>${installed ? "版本切换" : "安装内核"}</b><small>${installed ? "升级或切换内核版本" : "从官方 Release 安装"}</small></span><i>＋</i></summary><div class="runtime-drawer-body"><form class="core-version-form" data-version-agent="${esc(agent.id)}" data-version-engine="${esc(engine)}"><fieldset class="release-channel-fieldset"><legend>版本来源</legend><div class="release-channel-options"><label><input type="radio" name="release_channel" value="stable" checked><span>最新稳定版</span></label><label><input type="radio" name="release_channel" value="development"><span>最新开发版</span></label><label><input type="radio" name="release_channel" value="custom"><span>指定版本</span></label></div></fieldset><label class="custom-version-field"><span>指定版本</span><input name="custom_version" maxlength="64" autocomplete="off" placeholder="例如 1.19.29"></label><button class="button small" type="submit" ${agent.status !== "online" || !can("operator") ? "disabled" : ""}>${installed ? "升级或切换版本" : runtime.service_status === "dry-run" ? "模拟安装" : "安装内核"}</button><small>${installed ? "官方 Release · SHA-256 校验" : "安装至 QAgent 专用目录，不影响系统已有内核"}</small></form></div></details>
+            <details class="runtime-drawer version-drawer"><summary><span><b>${installed ? "版本切换" : "安装内核"}</b><small>${installed ? "升级或切换内核版本" : "从官方 Release 安装"}</small></span><i>＋</i></summary><div class="runtime-drawer-body"><form class="core-version-form" data-version-agent="${esc(agent.id)}" data-version-engine="${esc(engine)}"><fieldset class="release-channel-fieldset"><legend>版本来源</legend><div class="release-channel-options"><label><input type="radio" name="release_channel" value="stable" checked><span>最新稳定版</span></label><label><input type="radio" name="release_channel" value="development"><span>最新开发版</span></label><label><input type="radio" name="release_channel" value="custom"><span>指定版本</span></label></div></fieldset><label class="custom-version-field"><span>指定版本</span><input name="custom_version" maxlength="64" autocomplete="off" placeholder="例如 1.19.29"></label><button class="button small" type="submit" ${agent.status !== "online" || !can("operator") ? "disabled" : ""}>${installed ? "升级或切换版本" : "安装内核"}</button><small>${installed ? "官方 Release · SHA-256 校验" : "安装至 QAgent 专用目录，不影响系统已有内核"}</small></form></div></details>
             ${access?.profiles?.length ? `<a class="service-client-access" href="#client-access" data-client-agent="${esc(agent.id)}" data-client-engine="${esc(engine)}"><span><b>客户端配置</b><small>${esc(access.source)} · ${esc(access.address)}</small></span><strong>${access.profiles.length} 个入站 <i>→</i></strong></a>` : ""}
           </article>`;
         })
@@ -117,7 +117,7 @@ async function agents() {
     })
     .join("");
 
-  const enrollment = can("admin")
+  const enrollment = can("enrollment.manage")
     ? `<details class="enrollment-sheet" id="enrollment" data-has-agents="${agents.length ? 1 : 0}" ${(enrollmentOpen ?? !agents.length) ? "open" : ""}><summary><b>＋ 添加节点</b><i>＋</i></summary><div class="enrollment-sheet-body"><form class="access-form add-node-form" id="enrollment-form"><label>节点名称<input name="name" maxlength="100" required autocomplete="off" placeholder="例如 shanghai-edge-01"></label><button class="button primary" type="submit">生成添加节点命令</button></form><p class="enrollment-security-note"><b>添加节点命令只显示一次</b><span>命令绑定该节点，可重复安装；删除添加记录后立即失效。</span></p>${tokenRows ? `<details class="access-history" ${historyOpen ? "open" : ""}><summary>添加记录（${tokens.length}）</summary><div>${tokenRows}</div></details>` : ""}</div></details>`
     : "";
   const batch =
@@ -143,18 +143,15 @@ function bindAgentPage(agentItems) {
       serviceCount.textContent = installedCount
         ? `${installedCount} 个已安装 · ${(agent?.capabilities || []).length} 个可用`
         : "尚未安装内核";
-    if (
-      Object.values(agent?.runtime || {}).some(
-        (runtime) => runtime.service_status === "dry-run",
-      )
-    )
-      item
-        .querySelector(".service-canvas-head")
-        ?.insertAdjacentHTML(
-          "afterend",
-          '<aside class="node-execution-mode"><b>演练模式</b><span>当前只验证操作，不会安装内核、写入配置或启停服务。正式使用前请设置 <code>QCH_AGENT_DRY_RUN=false</code> 并重启 QAgent。</span></aside>',
-        );
     const machineFooter = item.querySelector(".machine-footer");
+    item.querySelectorAll("[data-upgrade-agent]").forEach((button) => {
+      const supported = (agent?.features || []).includes("agent-self-upgrade-v1");
+      if (!supported) {
+        button.disabled = true;
+        button.title = "当前 Agent 不支持远程升级，请重新执行一次添加节点命令";
+        button.textContent = "需重新安装 Agent";
+      }
+    });
     const deleteButton = machineFooter?.querySelector("[data-delete]");
     if (deleteButton) {
       const danger = document.createElement("section");

@@ -9,7 +9,7 @@ QControlHub 的安全边界包括管理员、控制面、PostgreSQL、反向代�
 - `/api/v1/*` 要求 `Authorization: Bearer <QCH_ADMIN_TOKEN>`。
 - 控制面只保存令牌的 SHA-256 摘要用于恒定时间比较，不把令牌写入数据库。
 - 同一来源连续失败会触发内存限速；Nginx 示例额外限制登录和注册入口。
-- 控制面支持 admin（`QCH_ADMIN_TOKEN`）、operator（`QCH_OPERATOR_TOKENS`）与 readonly（`QCH_READONLY_TOKENS`）三级令牌：admin 可执行全部操作；operator 可读写配置与任务但不能管理节点身份、添加节点记录或设置；readonly 只能读取。Bearer API 与 Web 会话共用同一套角色。
+- 控制面支持 admin（`QCH_ADMIN_TOKEN`）、operator（`QCH_OPERATOR_TOKENS`）、auditor（`QCH_AUDITOR_TOKENS`）与 readonly（`QCH_READONLY_TOKENS`）四级令牌：admin 可执行全部操作；operator 可读写配置并执行节点任务，但不能管理节点身份、添加节点记录、用户或系统设置；auditor 只能查看运行状态、任务与审计记录；readonly 可读取面板数据、配置和审计记录，但不能执行变更。Bearer API 与 Web 会话共用同一套角色。
 - 没有 OIDC 或 MFA。需要多人操作时，应把访问进一步放在 VPN、零信任网关或带 MFA 的上游访问代理之后。
 
 ### 独立 SPA 控制台
@@ -43,7 +43,7 @@ QControlHub 的安全边界包括管理员、控制面、PostgreSQL、反向代�
 
 ## 传输与网络
 
-- 远程 Agent 默认要求 WSS。`QCH_ALLOW_HTTP=true` 只应出现在本机或隔离 dry-run 测试网络；非本机明文连接禁止真实任务执行。
+- 远程 Agent 默认要求 WSS。`QCH_ALLOW_HTTP=true` 只应出现在本机或隔离测试网络；非本机明文连接必须额外设置 `QCH_ALLOW_INSECURE_LIVE=true`，否则拒绝连接。
 - 私有/自签名 TLS 使用 `QCH_TLS_CA_FILE` 加载受保护的 CA PEM；Agent 仍会执行完整证书链、有效期和主机名校验，不提供 `insecure-skip-verify`。
 - Compose 默认只把控制面和 PostgreSQL绑定到 `127.0.0.1`。公网仅开放 Nginx 的 443 端口。
 - `QCH_CORS_ORIGINS` 是精确、逗号分隔的来源白名单，不支持通配符需求；同源 Web UI 无需配置 CORS。
@@ -57,7 +57,7 @@ Agent 需要写入固定内核配置路径并调用 `systemctl`，systemd 示例
 
 - 只从可信构建产物安装 Agent，限制二进制和环境文件为 root 可写。
 - 只启用实际安装的内核，并核对服务名和绝对配置路径。
-- 初次接入保持 `QCH_AGENT_DRY_RUN=true`，验证节点信息和任务链路后再开启真实执行。
+- Agent 接入后所有校验、部署和服务操作均为真实执行；请先确认节点权限、内核路径和 systemd 单元，再从面板提交任务。
 - QControlHub 不执行控制面提供的任意 shell 命令；动作被限制为固定枚举，内核与目标路径来自本机配置。
 - `read-config` 只读取 Agent 本机为对应内核配置的绝对路径，拒绝符号链接、非普通文件、不安全归属或写权限、非 UTF-8 和超过 2 MiB 的内容，并在返回前调用该内核的配置检查命令。控制面把正文存为不出现在普通任务响应中的短期快照；同一节点和内核的新快照会清除上一份。
 - 内核安装任务只携带 `stable`、`development` 或严格版本号，不接受 URL、路径和命令。Agent 只访问四个硬编码官方 GitHub 仓库，拒绝非 GitHub 跳转，并要求发行资产带有可验证的 SHA-256 摘要。

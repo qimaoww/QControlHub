@@ -92,6 +92,7 @@ func main() {
 	apiServer := api.New(dataStore, api.Config{
 		AdminToken:      adminToken,
 		OperatorTokens:  splitList(os.Getenv("QCH_OPERATOR_TOKENS")),
+		AuditorTokens:   splitList(os.Getenv("QCH_AUDITOR_TOKENS")),
 		ReadonlyTokens:  splitList(os.Getenv("QCH_READONLY_TOKENS")),
 		AllowedOrigins:  splitList(os.Getenv("QCH_CORS_ORIGINS")),
 		SecureTransport: secureTransport,

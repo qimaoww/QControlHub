@@ -4,7 +4,7 @@ export function installDashboard(ctx) {
     const groups = [];
     for (const task of items) {
       const previous = groups.at(-1);
-      if (previous && previous.task.action === task.action && previous.task.agent_id === task.agent_id && previous.task.engine === task.engine && previous.task.status === task.status && Boolean(previous.task.simulated) === Boolean(task.simulated)) previous.count += 1;
+      if (previous && previous.task.action === task.action && previous.task.agent_id === task.agent_id && previous.task.engine === task.engine && previous.task.status === task.status) previous.count += 1;
       else groups.push({ task, count: 1 });
       if (groups.length >= limit) break;
     }
@@ -32,7 +32,7 @@ async function dashboard() {
       .map(
         ({ task, count }) => {
           const taskEngineLabel = task.action === "upgrade-agent" ? "QAgent" : engineName(task.engine);
-          return `<a href="#tasks" data-dashboard-task="${esc(task.id)}"><i class="status-dot ${statusTone(task.status, task.simulated)}"></i><span><strong>${esc(actionName(task.action))}</strong><small>${esc(taskEngineLabel)} · ${task.simulated && task.status === "succeeded" ? "模拟完成" : esc(short(task.agent_id))}${count > 1 ? ` · 连续 ${count} 次` : ""}</small></span><time>${esc(ago(task.created_at))}</time><b>›</b></a>`;
+          return `<a href="#tasks" data-dashboard-task="${esc(task.id)}"><i class="status-dot ${statusTone(task.status)}"></i><span><strong>${esc(actionName(task.action))}</strong><small>${esc(taskEngineLabel)} · ${esc(short(task.agent_id))}${count > 1 ? ` · 连续 ${count} 次` : ""}</small></span><time>${esc(ago(task.created_at))}</time><b>›</b></a>`;
         },
       )
       .join("") ||

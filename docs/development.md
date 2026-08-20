@@ -65,13 +65,12 @@ set +a
 QCH_SERVER_URL=ws://127.0.0.1:8080 \
 QCH_ALLOW_HTTP=true \
 QCH_ENROLLMENT_TOKEN='刚生成且只显示一次的添加节点凭证' \
-QCH_AGENT_DRY_RUN=true \
 QCH_AGENT_STATE=./data/dev-agent-state.json \
 QCH_AGENT_NAME=dev-agent \
 go run ./cmd/agent
 ```
 
-`QCH_ALLOW_HTTP=true` 只应用于本机回环测试。Agent 默认为 dry-run，不调用内核二进制、不写配置文件，也不执行 systemctl。Agent 通过 `ws://127.0.0.1:8080/agent/v1/connect` 保持长连接；删除 `data/dev-agent-state.json` 会创建一套新 Ed25519 身份并再次消耗注册流程。
+`QCH_ALLOW_HTTP=true` 只应用于本机回环测试。Agent 会调用固定内核二进制、写入受保护配置并执行 systemctl；Agent 通过 `ws://127.0.0.1:8080/agent/v1/connect` 保持长连接。删除 `data/dev-agent-state.json` 会创建一套新 Ed25519 身份并再次消耗注册流程。
 
 ## 质量检查
 

@@ -86,17 +86,15 @@ const serviceStatusName = (value) =>
     inactive: "已停止",
     activating: "启动中",
     deactivating: "停止中",
-    "dry-run": "演练模式",
     failed: "失败",
   })[value] ||
   value ||
   "未知";
 const short = (value) => String(value || "").slice(0, 12);
-const statusTone = (value, simulated = false) => {
-  if (simulated && value === "succeeded") return "warn";
+const statusTone = (value) => {
   if (["online", "succeeded", "active"].includes(value)) return "ok";
   if (
-    ["pending", "running", "activating", "deactivating", "dry-run"].includes(
+    ["pending", "running", "activating", "deactivating"].includes(
       value,
     )
   )
@@ -134,8 +132,7 @@ const taskActivity = (items, limit = 7) => {
       previous.task.action === task.action &&
       previous.task.agent_id === task.agent_id &&
       previous.task.engine === task.engine &&
-      previous.task.status === task.status &&
-      Boolean(previous.task.simulated) === Boolean(task.simulated)
+      previous.task.status === task.status
     )
       previous.count += 1;
     else groups.push({ task, count: 1 });
@@ -144,7 +141,7 @@ const taskActivity = (items, limit = 7) => {
   return groups;
 };
 const serviceActionDisabled = (action, online, installed, serviceStatus) => {
-  if (!online || !installed || !can("operator")) return true;
+  if (!online || !installed || !can("tasks.execute")) return true;
   if (action === "start")
     return ["active", "activating"].includes(serviceStatus);
   if (action === "stop")
@@ -221,9 +218,38 @@ function renderConfigDiff(savedContent, deployedContent) {
   );
   return `<pre class="config-diff" aria-label="配置差异">${rows.join("\n")}\n</pre>`;
 }
-const can = (role) =>
-  (({ readonly: 1, operator: 2, admin: 3 })[state.session?.role] || 0) >=
-  ({ readonly: 1, operator: 2, admin: 3 }[role] || 0);
+const rolePermissions = {
+  admin: new Set([
+    "overview.read", "agents.read", "agents.manage", "client-access.read",
+    "deployments.read", "catalogs.read", "agent-config.read", "agent-config.write",
+    "configs.read", "configs.write", "configs.delete", "configs.restore",
+    "tasks.read", "tasks.execute", "enrollment.manage", "settings.read",
+    "settings.manage", "audit.read", "metrics.read", "users.manage",
+    "templates.read", "templates.write", "templates.delete",
+  ]),
+  operator: new Set([
+    "overview.read", "agents.read", "deployments.read", "client-access.read",
+    "catalogs.read", "agent-config.read", "agent-config.write", "configs.read",
+    "configs.write", "tasks.read", "tasks.execute", "settings.read", "audit.read",
+    "metrics.read", "templates.read", "templates.write",
+  ]),
+  auditor: new Set([
+    "overview.read", "agents.read", "deployments.read", "tasks.read",
+    "settings.read", "audit.read", "metrics.read",
+  ]),
+  readonly: new Set([
+    "overview.read", "agents.read", "deployments.read", "client-access.read",
+    "catalogs.read", "agent-config.read", "configs.read", "tasks.read",
+    "settings.read", "audit.read", "metrics.read", "templates.read",
+  ]),
+};
+const roleRanks = { readonly: 1, auditor: 1, operator: 2, admin: 3 };
+const can = (capability) => {
+  const role = state.session?.role;
+  if (capability in roleRanks)
+    return (roleRanks[role] || 0) >= (roleRanks[capability] || 0);
+  return Boolean(rolePermissions[role]?.has(capability));
+};
 
 async function api(path, options = {}) {
   const headers = {
@@ -383,20 +409,29 @@ function shell(content, title) {
       '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3A1.7 1.7 0 0 0 10 3V2.8h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1z"/>',
     ],
   ];
+  const linkPermissions = {
+    dashboard: "overview.read",
+    agents: "agents.read",
+    "client-access": "client-access.read",
+    "live-config": "agent-config.read",
+    tasks: "tasks.read",
+    settings: "settings.read",
+  };
+  links.splice(0, links.length, ...links.filter(([id]) => can(linkPermissions[id])));
   app.style.display = "";
   document.body.className = `app-body page-${state.route}`;
   applyTheme();
   const context = contextMarkup(title);
   const overview = state.data.overview || {};
   const panelName = state.data.settings?.panel_name || "QControlHub";
-  const roleName = { admin: "管理员", operator: "操作员", readonly: "只读" }[
+  const roleName = { admin: "管理员", operator: "运维人员", auditor: "审计人员", readonly: "只读用户" }[
     state.session.role
   ];
   const topAction =
     state.route === "dashboard"
       ? '<a class="button small" href="#agents">管理节点</a>'
       : state.route === "agents"
-        ? `<a class="button small" href="#client-access">客户端配置</a>${can("admin") ? '<a class="button small" href="#enrollment">添加节点</a>' : ""}`
+        ? `<a class="button small" href="#client-access">客户端配置</a>${can("enrollment.manage") ? '<a class="button small" href="#enrollment">添加节点</a>' : ""}`
         : state.route === "client-access"
           ? '<a class="button small" href="#agents">返回节点</a>'
           : state.route === "archive-config"
@@ -475,7 +510,7 @@ function contextMarkup(title) {
   }
   if (state.route === "archive-config") {
     const items = state.data.configs || [];
-    return `${can("operator") ? '<a class="context-primary" id="new-config" href="#new-config">＋ 新建配置档案</a>' : ""}<div class="context-section-label"><span>配置档案</span><b>${items.length}</b></div><nav class="context-list config-context-list">${items.map((item) => `<a class="${item.id === state.data.archiveConfigId ? "active" : ""}" href="#archive-config" data-archive-config="${esc(item.id)}"><span class="context-engine ${esc(item.engine)}">${esc(engineName(item.engine))}</span><span><strong>${esc(item.name)}</strong><small>v${item.version} · ${esc(ago(item.updated_at))}</small></span></a>`).join("") || "<p>还没有保存的配置</p>"}</nav><a class="context-primary" href="#live-config">← 节点实际配置</a>`;
+    return `${can("configs.write") ? '<a class="context-primary" id="new-config" href="#new-config">＋ 新建配置档案</a>' : ""}<div class="context-section-label"><span>配置档案</span><b>${items.length}</b></div><nav class="context-list config-context-list">${items.map((item) => `<a class="${item.id === state.data.archiveConfigId ? "active" : ""}" href="#archive-config" data-archive-config="${esc(item.id)}"><span class="context-engine ${esc(item.engine)}">${esc(engineName(item.engine))}</span><span><strong>${esc(item.name)}</strong><small>v${item.version} · ${esc(ago(item.updated_at))}</small></span></a>`).join("") || "<p>还没有保存的配置</p>"}</nav><a class="context-primary" href="#live-config">← 节点实际配置</a>`;
   }
   if (state.route === "tasks")
     return `<nav class="context-menu task-context-menu" aria-label="任务状态">${[

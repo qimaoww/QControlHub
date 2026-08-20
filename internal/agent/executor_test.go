@@ -116,51 +116,17 @@ func TestServiceVerificationRequiresStableActiveState(t *testing.T) {
 	}
 }
 
-func TestExecutorDryRunHonorsActionAndEngineWhitelist(t *testing.T) {
+func TestExecutorRejectsUnsafeTasksAndPaths(t *testing.T) {
 	t.Parallel()
-	destination := filepath.Join(t.TempDir(), "config.yaml")
 	executor := &Executor{
-		DryRun: true,
 		Specs: map[core.Engine]EngineSpec{
 			core.EngineMihomo: {
-				Binary:     "binary-that-must-not-be-invoked",
-				ConfigPath: destination,
+				Binary:     "relative-binary",
+				ConfigPath: filepath.Join(t.TempDir(), "config.yaml"),
 				Service:    "qagent-mihomo.service",
 			},
 		},
 	}
-	validConfig := "mixed-port: 7890\nproxies: []\n"
-	for _, action := range []core.Action{
-		core.ActionValidate,
-		core.ActionDeploy,
-		core.ActionStart,
-		core.ActionStop,
-		core.ActionRestart,
-		core.ActionStatus,
-		core.ActionInstall,
-	} {
-		t.Run(string(action), func(t *testing.T) {
-			task := core.Task{
-				Action:        action,
-				Engine:        core.EngineMihomo,
-				ConfigContent: validConfig,
-			}
-			if action == core.ActionInstall {
-				task.CoreVersion = core.CoreVersionStable
-			}
-			output, err := executor.Execute(context.Background(), task)
-			if err != nil {
-				t.Fatalf("Execute() error = %v", err)
-			}
-			if !strings.Contains(output, "dry-run") {
-				t.Fatalf("Execute() output = %q, want dry-run marker", output)
-			}
-		})
-	}
-	if _, err := os.Stat(destination); !os.IsNotExist(err) {
-		t.Fatalf("dry-run deployment touched destination: stat error = %v", err)
-	}
-
 	rejected := []core.Task{
 		{Action: core.Action("restart; rm -rf /"), Engine: core.EngineMihomo},
 		{Action: core.ActionStatus, Engine: core.Engine("mihomo;evil")},
@@ -171,22 +137,5 @@ func TestExecutorDryRunHonorsActionAndEngineWhitelist(t *testing.T) {
 		if _, err := executor.Execute(context.Background(), task); err == nil {
 			t.Fatalf("Execute() accepted non-whitelisted task: action=%q engine=%q", task.Action, task.Engine)
 		}
-	}
-}
-
-func TestExecutorDryRunStillValidatesDeploymentContent(t *testing.T) {
-	t.Parallel()
-	executor := &Executor{
-		DryRun: true,
-		Specs: map[core.Engine]EngineSpec{
-			core.EngineXray: {Binary: "xray", ConfigPath: filepath.Join(t.TempDir(), "config.json"), Service: "xray"},
-		},
-	}
-	if _, err := executor.Execute(context.Background(), core.Task{
-		Action:        core.ActionDeploy,
-		Engine:        core.EngineXray,
-		ConfigContent: `{"inbounds":`,
-	}); err == nil {
-		t.Fatal("dry-run deployment accepted malformed configuration")
 	}
 }

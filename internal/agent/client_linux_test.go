@@ -31,9 +31,7 @@ func TestNewClientTrustsConfiguredPrivateCA(t *testing.T) {
 	if err := os.WriteFile(caPath, certificate, 0o600); err != nil {
 		t.Fatalf("write private CA: %v", err)
 	}
-	executor := &Executor{DryRun: true, Specs: map[core.Engine]EngineSpec{
-		core.EngineMihomo: {Binary: "unused", ConfigPath: "/tmp/config.yaml", Service: "qagent-mihomo.service"},
-	}}
+	executor := &Executor{}
 	client, err := NewClient(ClientConfig{
 		ServerURL: "wss" + strings.TrimPrefix(tlsServer.URL, "https"), TLSCAFile: caPath,
 	}, executor)
@@ -72,9 +70,7 @@ func TestRunStopsRetryingWhenPersistedIdentityIsRejected(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	executor := &Executor{DryRun: true, Specs: map[core.Engine]EngineSpec{
-		core.EngineMihomo: {Binary: "unused", ConfigPath: "/tmp/config.yaml", Service: "qagent-mihomo.service"},
-	}}
+	executor := &Executor{}
 	client, err := NewClient(ClientConfig{ServerURL: server.URL, StatePath: statePath}, executor)
 	if err != nil {
 		t.Fatal(err)
@@ -99,7 +95,7 @@ func TestCompletedTaskResultsPersistAndReuseCurrentLease(t *testing.T) {
 	want := credentials{
 		AgentID: "agt_0123456789abcdef", PrivateKey: authn.EncodePrivateKey(privateKey),
 		CompletedTasks: map[string]completedTask{
-			"tsk_0123456789abcdef": {Success: true, Output: "dry-run: configuration was not written", CompletedAt: time.Now().UTC()},
+			"tsk_0123456789abcdef": {Success: true, Output: "configuration applied", CompletedAt: time.Now().UTC()},
 		},
 	}
 	if err := saveCredentials(statePath, want); err != nil {
@@ -115,7 +111,7 @@ func TestCompletedTaskResultsPersistAndReuseCurrentLease(t *testing.T) {
 		ID: "tsk_0123456789abcdef", LeaseID: "new-lease-identifier-that-is-long-enough",
 	}, outgoing)
 	message := <-outgoing
-	if message.Result == nil || message.Result.Result.LeaseID != "new-lease-identifier-that-is-long-enough" || !message.Result.Result.Simulated || message.Result.Result.Output != "dry-run: configuration was not written" {
+	if message.Result == nil || message.Result.Result.LeaseID != "new-lease-identifier-that-is-long-enough" || !message.Result.Result.Success || message.Result.Result.Output != "configuration applied" {
 		t.Fatalf("cached result = %+v", message)
 	}
 }
@@ -137,7 +133,7 @@ func TestTaskExecutionSurvivesWebSocketSessionCancellation(t *testing.T) {
 	}
 	client := &Client{
 		config: ClientConfig{StatePath: statePath}, creds: loaded,
-		executor: &Executor{DryRun: true, Specs: map[core.Engine]EngineSpec{
+		executor: &Executor{Specs: map[core.Engine]EngineSpec{
 			core.EngineMihomo: {Binary: "unused", ConfigPath: "/tmp/config.yaml", Service: "qagent-mihomo.service"},
 		}},
 	}
@@ -149,7 +145,7 @@ func TestTaskExecutionSurvivesWebSocketSessionCancellation(t *testing.T) {
 	}
 	client.executeTaskForSession(context.Background(), deliveryContext, task, make(chan core.WireMessage))
 	result, ok := client.cachedTaskResult(task)
-	if !ok || !result.Success || !result.Simulated || !strings.Contains(result.Output, "dry-run") {
+	if !ok || !result.Success || result.Output == "" {
 		t.Fatalf("result after delivery session cancellation = %+v, cached=%t", result, ok)
 	}
 }

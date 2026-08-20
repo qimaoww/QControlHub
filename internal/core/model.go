@@ -14,6 +14,12 @@ import (
 
 type Engine string
 
+// AgentFeatureSelfUpgrade identifies the signed task protocol needed for a
+// running Agent to replace its own executable and reconnect. Older Agents do
+// not advertise this feature and must be reinstalled once before remote
+// upgrades can be used.
+const AgentFeatureSelfUpgrade = "agent-self-upgrade-v1"
+
 // Role is the privilege level bound to an authentication token. Roles are
 // ordered: admin can do everything, operator can operate nodes/configs/tasks
 // but not manage the panel, readonly can only observe.
@@ -22,6 +28,7 @@ type Role string
 const (
 	RoleAdmin    Role = "admin"
 	RoleOperator Role = "operator"
+	RoleAuditor  Role = "auditor"
 	RoleReadonly Role = "readonly"
 )
 
@@ -33,6 +40,8 @@ func (role Role) AtLeast(minimum Role) bool {
 			return 3
 		case RoleOperator:
 			return 2
+		case RoleAuditor:
+			return 1
 		default:
 			return 1
 		}
@@ -42,7 +51,7 @@ func (role Role) AtLeast(minimum Role) bool {
 
 func (role Role) Valid() bool {
 	switch role {
-	case RoleAdmin, RoleOperator, RoleReadonly:
+	case RoleAdmin, RoleOperator, RoleAuditor, RoleReadonly:
 		return true
 	default:
 		return false
@@ -179,6 +188,7 @@ type Agent struct {
 	OS           string                  `json:"os"`
 	Arch         string                  `json:"arch"`
 	Capabilities []Engine                `json:"capabilities"`
+	Features     []string                `json:"features,omitempty"`
 	Labels       map[string]string       `json:"labels,omitempty"`
 	Runtime      map[Engine]RuntimeState `json:"runtime,omitempty"`
 	Metrics      HostMetrics             `json:"metrics,omitempty"`
@@ -221,7 +231,6 @@ type Task struct {
 	ConfigContent string     `json:"config_content,omitempty"`
 	CoreVersion   string     `json:"core_version,omitempty"`
 	Status        TaskStatus `json:"status"`
-	Simulated     bool       `json:"simulated,omitempty"`
 	Attempt       int        `json:"attempt"`
 	LeaseID       string     `json:"lease_id,omitempty"`
 	Output        string     `json:"output,omitempty"`
@@ -254,6 +263,7 @@ type EnrollRequest struct {
 	OS           string            `json:"os"`
 	Arch         string            `json:"arch"`
 	Capabilities []Engine          `json:"capabilities"`
+	Features     []string          `json:"features,omitempty"`
 	Labels       map[string]string `json:"labels,omitempty"`
 	PublicKey    string            `json:"public_key"`
 }
@@ -286,17 +296,17 @@ type EnrollmentTokenCreated struct {
 }
 
 type HeartbeatRequest struct {
-	Version string                  `json:"version,omitempty"`
-	Runtime map[Engine]RuntimeState `json:"runtime,omitempty"`
-	Metrics *HostMetrics            `json:"metrics,omitempty"`
+	Version  string                  `json:"version,omitempty"`
+	Runtime  map[Engine]RuntimeState `json:"runtime,omitempty"`
+	Metrics  *HostMetrics            `json:"metrics,omitempty"`
+	Features []string                `json:"features,omitempty"`
 }
 
 type TaskResultRequest struct {
-	LeaseID   string `json:"lease_id"`
-	Success   bool   `json:"success"`
-	Simulated bool   `json:"simulated,omitempty"`
-	Output    string `json:"output,omitempty"`
-	Error     string `json:"error,omitempty"`
+	LeaseID string `json:"lease_id"`
+	Success bool   `json:"success"`
+	Output  string `json:"output,omitempty"`
+	Error   string `json:"error,omitempty"`
 }
 
 const (
