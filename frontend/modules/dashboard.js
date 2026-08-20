@@ -30,8 +30,10 @@ async function dashboard() {
   const activity =
     taskActivity(tasks)
       .map(
-        ({ task, count }) =>
-          `<a href="#tasks" data-dashboard-task="${esc(task.id)}"><i class="status-dot ${statusTone(task.status, task.simulated)}"></i><span><strong>${esc(actionName(task.action))}</strong><small>${esc(engineName(task.engine))} · ${task.simulated && task.status === "succeeded" ? "模拟完成" : esc(short(task.agent_id))}${count > 1 ? ` · 连续 ${count} 次` : ""}</small></span><time>${esc(ago(task.created_at))}</time><b>›</b></a>`,
+        ({ task, count }) => {
+          const taskEngineLabel = task.action === "upgrade-agent" ? "QAgent" : engineName(task.engine);
+          return `<a href="#tasks" data-dashboard-task="${esc(task.id)}"><i class="status-dot ${statusTone(task.status, task.simulated)}"></i><span><strong>${esc(actionName(task.action))}</strong><small>${esc(taskEngineLabel)} · ${task.simulated && task.status === "succeeded" ? "模拟完成" : esc(short(task.agent_id))}${count > 1 ? ` · 连续 ${count} 次` : ""}</small></span><time>${esc(ago(task.created_at))}</time><b>›</b></a>`;
+        },
       )
       .join("") ||
     '<div class="empty compact"><strong>还没有任务</strong></div>';
@@ -57,4 +59,3 @@ async function dashboard() {
 }
   return dashboard;
 }
-

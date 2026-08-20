@@ -35,6 +35,7 @@ type Config struct {
 	SecureTransport bool
 	TrustedProxies  []*net.IPNet
 	AgentBinary     []byte
+	AgentVersion    string
 	AgentInstaller  []byte
 	WebhookSecret   string
 	SessionTTL      time.Duration
@@ -49,6 +50,7 @@ type Server struct {
 	agentLimiter    *authn.FailureLimiter
 	trustedProxies  []*net.IPNet
 	agentBinary     []byte
+	agentVersion    string
 	agentInstaller  []byte
 	notifier        *notify.Client
 	roleTokens      map[[32]byte]core.Role
@@ -92,6 +94,7 @@ func New(dataStore *store.Store, config Config) *Server {
 		agentLimiter:    authn.NewFailureLimiter(20, time.Minute, 5*time.Minute),
 		trustedProxies:  config.TrustedProxies,
 		agentBinary:     config.AgentBinary,
+		agentVersion:    strings.TrimSpace(config.AgentVersion),
 		agentInstaller:  config.AgentInstaller,
 		notifier:        notify.New(config.WebhookSecret, slog.Default()),
 		roleTokens:      roleTokens,
@@ -124,6 +127,26 @@ func (s *Server) serveAgentBinary(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Write(s.agentBinary)
+}
+
+// serveAgentBinaryForAgent serves the same immutable binary as the installer,
+// but authenticates an already-enrolled Agent with its Ed25519 request
+// signature. This keeps the enrollment credential out of long-lived Agent
+// state while allowing an operator to upgrade it from the panel.
+func (s *Server) serveAgentBinaryForAgent(w http.ResponseWriter, r *http.Request) {
+	if len(s.agentBinary) == 0 {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Length", strconv.Itoa(len(s.agentBinary)))
+	w.Header().Set("X-QControlHub-Agent-SHA256", fmt.Sprintf("%x", sha256.Sum256(s.agentBinary)))
+	if s.agentVersion != "" {
+		w.Header().Set("X-QControlHub-Agent-Version", s.agentVersion)
+	}
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write(s.agentBinary)
 }
 
 func (s *Server) serveAgentInstaller(w http.ResponseWriter, r *http.Request) {
@@ -189,6 +212,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/v1/templates/{id}/apply", s.requireRole(core.RoleOperator, http.HandlerFunc(s.applyTemplate)))
 
 	mux.HandleFunc("GET /api/v1/agent-binary", s.serveAgentBinary)
+	mux.Handle("GET /agent/v1/binary", s.agent(http.HandlerFunc(s.serveAgentBinaryForAgent)))
 
 	mux.HandleFunc("POST /agent/v1/enroll", s.enrollAgent)
 	mux.Handle("GET /agent/v1/connect", s.agent(http.HandlerFunc(s.agentConnect)))

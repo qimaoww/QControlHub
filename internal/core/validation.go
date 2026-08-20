@@ -13,6 +13,7 @@ import (
 const (
 	MaxConfigBytes         = 2 << 20
 	MaxConfigEnvelopeBytes = MaxConfigBytes*6 + 512<<10
+	MaxAgentBinaryBytes    = 32 << 20
 )
 
 func ValidateConfig(engine Engine, content string) error {

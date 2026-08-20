@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
@@ -20,6 +21,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/coder/websocket"
@@ -57,16 +59,17 @@ type completedTask struct {
 }
 
 type Client struct {
-	config        ClientConfig
-	executor      *Executor
-	http          *http.Client
-	creds         credentials
-	websocketURL  string
-	metrics       *MetricsCollector
-	credentialsMu sync.Mutex
-	executionsMu  sync.Mutex
-	executions    map[string]*taskExecution
-	executeFunc   func(context.Context, core.Task) (string, error)
+	config           ClientConfig
+	executor         *Executor
+	http             *http.Client
+	creds            credentials
+	websocketURL     string
+	metrics          *MetricsCollector
+	credentialsMu    sync.Mutex
+	executionsMu     sync.Mutex
+	executions       map[string]*taskExecution
+	restartAfterTask string
+	executeFunc      func(context.Context, core.Task) (string, error)
 }
 
 type taskExecution struct {
@@ -408,10 +411,21 @@ func (c *Client) resultForTask(ctx context.Context, task core.Task) core.TaskRes
 
 	slog.Info("executing task", "task_id", task.ID, "action", task.Action, "engine", task.Engine)
 	execute := c.executeFunc
-	if execute == nil {
-		execute = c.executor.Execute
+	var output string
+	var executionErr error
+	if task.Action == core.ActionUpgradeAgent {
+		output, executionErr = c.upgradeAgent(ctx)
+		if executionErr == nil && !c.executor.DryRun {
+			c.executionsMu.Lock()
+			c.restartAfterTask = task.ID
+			c.executionsMu.Unlock()
+		}
+	} else {
+		if execute == nil {
+			execute = c.executor.Execute
+		}
+		output, executionErr = execute(ctx, task)
 	}
-	output, executionErr := execute(ctx, task)
 	result := core.TaskResultRequest{
 		LeaseID: task.LeaseID, Success: executionErr == nil, Output: output,
 		Simulated: c.executor != nil && c.executor.DryRun && task.Action != core.ActionReadConfig,
@@ -461,9 +475,17 @@ func (c *Client) pruneExecutionsLocked(now time.Time) {
 }
 
 func (c *Client) acknowledgeTaskResult(taskID string) {
+	restart := false
 	c.executionsMu.Lock()
 	delete(c.executions, taskID)
+	if c.restartAfterTask == taskID {
+		c.restartAfterTask = ""
+		restart = true
+	}
 	c.executionsMu.Unlock()
+	if restart {
+		go c.reexecAfterUpgrade()
+	}
 }
 
 func (c *Client) cachedTaskResult(task core.Task) (core.TaskResultRequest, bool) {
@@ -516,8 +538,136 @@ func limitStateValue(value string, limit int) string {
 }
 
 func (c *Client) validTask(task core.Task) bool {
+	engineValid := task.Engine.Valid()
+	if task.Action == core.ActionUpgradeAgent {
+		engineValid = task.Engine == ""
+	}
 	return task.AgentID == c.creds.AgentID && validTaskID(task.ID) && len(task.LeaseID) >= 32 &&
-		task.Status == core.TaskRunning && task.Action.Valid() && task.Engine.Valid()
+		task.Status == core.TaskRunning && task.Action.Valid() && engineValid
+}
+
+func (c *Client) upgradeAgent(ctx context.Context) (string, error) {
+	executable := ""
+	if !c.executor.DryRun {
+		var err error
+		executable, err = os.Executable()
+		if err != nil {
+			return "", fmt.Errorf("resolve running Agent executable: %w", err)
+		}
+		executable, err = filepath.EvalSymlinks(executable)
+		if err != nil {
+			return "", fmt.Errorf("resolve running Agent executable path: %w", err)
+		}
+	}
+	downloadDirectory := ""
+	if executable != "" {
+		downloadDirectory = filepath.Dir(executable)
+	}
+	temporary, version, size, err := c.downloadAgentBinary(ctx, downloadDirectory)
+	if err != nil {
+		return "", err
+	}
+	if c.executor.DryRun {
+		_ = os.Remove(temporary)
+		return fmt.Sprintf("dry-run: downloaded Agent %s (%d bytes), executable was not replaced", versionLabel(version), size), nil
+	}
+	defer os.Remove(temporary)
+	info, err := os.Lstat(executable)
+	if err != nil {
+		return "", fmt.Errorf("inspect running Agent executable: %w", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 {
+		return "", errors.New("running Agent executable is not a regular executable file")
+	}
+	if err := os.Chmod(temporary, info.Mode().Perm()); err != nil {
+		return "", fmt.Errorf("set upgraded Agent permissions: %w", err)
+	}
+	if err := os.Rename(temporary, executable); err != nil {
+		return "", fmt.Errorf("replace Agent executable atomically: %w", err)
+	}
+	return fmt.Sprintf("Agent binary replaced with %s (%d bytes); reconnecting with the upgraded process", versionLabel(version), size), nil
+}
+
+func (c *Client) downloadAgentBinary(ctx context.Context, directory string) (string, string, int64, error) {
+	privateKey, err := authn.DecodePrivateKey(c.creds.PrivateKey)
+	if err != nil {
+		return "", "", 0, err
+	}
+	requestContext, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	request, err := http.NewRequestWithContext(requestContext, http.MethodGet, c.config.ServerURL+"/agent/v1/binary", nil)
+	if err != nil {
+		return "", "", 0, err
+	}
+	if err := authn.SignRequest(request, nil, c.creds.AgentID, privateKey, time.Now().UTC()); err != nil {
+		return "", "", 0, err
+	}
+	response, err := c.http.Do(request)
+	if err != nil {
+		return "", "", 0, explainTLSError(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		contents, _ := io.ReadAll(io.LimitReader(response.Body, 8<<10))
+		return "", "", 0, fmt.Errorf("control plane returned %s: %s", response.Status, strings.TrimSpace(string(contents)))
+	}
+	limit := int64(core.MaxAgentBinaryBytes)
+	if response.ContentLength > limit {
+		return "", "", 0, fmt.Errorf("Agent binary exceeds %d bytes", limit)
+	}
+	temporary, err := os.CreateTemp(directory, "qagent-upgrade-*")
+	if err != nil {
+		return "", "", 0, fmt.Errorf("create temporary Agent binary: %w", err)
+	}
+	temporaryPath := temporary.Name()
+	cleanup := func() { _ = temporary.Close(); _ = os.Remove(temporaryPath) }
+	hash := sha256.New()
+	written, err := io.Copy(io.MultiWriter(temporary, hash), io.LimitReader(response.Body, limit+1))
+	if err != nil {
+		cleanup()
+		return "", "", 0, fmt.Errorf("download Agent binary: %w", err)
+	}
+	if written == 0 || written > limit {
+		cleanup()
+		return "", "", 0, errors.New("downloaded Agent binary has an invalid size")
+	}
+	if expected := strings.TrimSpace(response.Header.Get("X-QControlHub-Agent-SHA256")); expected != "" && !strings.EqualFold(expected, fmt.Sprintf("%x", hash.Sum(nil))) {
+		cleanup()
+		return "", "", 0, errors.New("downloaded Agent binary checksum mismatch")
+	}
+	if err := temporary.Sync(); err != nil {
+		cleanup()
+		return "", "", 0, fmt.Errorf("sync downloaded Agent binary: %w", err)
+	}
+	if err := temporary.Close(); err != nil {
+		_ = os.Remove(temporaryPath)
+		return "", "", 0, fmt.Errorf("close downloaded Agent binary: %w", err)
+	}
+	return temporaryPath, strings.TrimSpace(response.Header.Get("X-QControlHub-Agent-Version")), written, nil
+}
+
+func (c *Client) reexecAfterUpgrade() {
+	time.Sleep(150 * time.Millisecond)
+	executable, err := os.Executable()
+	if err != nil {
+		slog.Error("resolve upgraded Agent executable for restart", "error", err)
+		return
+	}
+	executable, err = filepath.EvalSymlinks(executable)
+	if err != nil {
+		slog.Error("resolve upgraded Agent executable path for restart", "error", err)
+		return
+	}
+	if err := syscall.Exec(executable, os.Args, os.Environ()); err != nil {
+		slog.Error("restart upgraded Agent", "error", err)
+	}
+}
+
+func versionLabel(value string) string {
+	if value == "" {
+		return "the current control-plane build"
+	}
+	return value
 }
 
 func validTaskID(value string) bool {

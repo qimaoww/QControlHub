@@ -629,7 +629,11 @@ func (s *Store) CreateTask(ctx context.Context, request core.TaskRequest) (core.
 	if !request.Action.Valid() {
 		return core.Task{}, fmt.Errorf("%w: unsupported action %q", ErrInvalid, request.Action)
 	}
-	if !request.Engine.Valid() {
+	if request.Action == core.ActionUpgradeAgent {
+		if request.Engine != "" || request.ConfigID != "" || request.CoreVersion != "" {
+			return core.Task{}, fmt.Errorf("%w: agent upgrade tasks cannot reference an engine, configuration, or core version", ErrInvalid)
+		}
+	} else if !request.Engine.Valid() {
 		return core.Task{}, fmt.Errorf("%w: unsupported engine %q", ErrInvalid, request.Engine)
 	}
 	if request.Action == core.ActionInstall {
@@ -660,7 +664,7 @@ func (s *Store) CreateTask(ctx context.Context, request core.TaskRequest) (core.
 	if err := json.Unmarshal(capabilitiesJSON, &capabilities); err != nil {
 		return core.Task{}, err
 	}
-	if !containsEngine(capabilities, request.Engine) {
+	if request.Action != core.ActionUpgradeAgent && !containsEngine(capabilities, request.Engine) {
 		return core.Task{}, fmt.Errorf("%w: agent does not advertise the requested engine", ErrInvalid)
 	}
 

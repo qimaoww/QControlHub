@@ -11,6 +11,7 @@ import (
 	"math"
 	"net"
 	"os"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -29,6 +30,7 @@ func collectHostMetrics(ctx context.Context, previous metricSample) (core.HostMe
 	next := previous
 	problems := make([]error, 0, 4)
 
+	cpuRead := false
 	if contents, err := readMetricFile("/proc/stat", 256<<10); err == nil {
 		total, idle, parseErr := parseCPUTimes(string(contents))
 		if parseErr != nil {
@@ -43,11 +45,32 @@ func collectHostMetrics(ctx context.Context, previous metricSample) (core.HostMe
 					metrics.CPUPercent = float64(totalDelta-idleDelta) * 100 / float64(totalDelta)
 				}
 			}
+			cpuRead = true
 		}
 	} else {
 		problems = append(problems, fmt.Errorf("read CPU metrics: %w", err))
 	}
+	if !cpuRead {
+		usage, err := cgroupCPUUsage()
+		if err == nil {
+			next.cgroupCPU, next.cgroupCPUAt, next.cgroupCPUValid = usage, now, true
+			if previous.cgroupCPUValid && usage >= previous.cgroupCPU && now.After(previous.cgroupCPUAt) {
+				quota := cgroupCPUQuota()
+				seconds := now.Sub(previous.cgroupCPUAt).Seconds()
+				if seconds > 0 && quota > 0 {
+					metrics.CPUAvailable = true
+					metrics.CPUPercent = float64(usage-previous.cgroupCPU) / (seconds * 1_000_000 * quota) * 100
+					if metrics.CPUPercent > 100 {
+						metrics.CPUPercent = 100
+					}
+				}
+			}
+		} else {
+			problems = append(problems, fmt.Errorf("read cgroup CPU metrics: %w", err))
+		}
+	}
 
+	memoryRead := false
 	if contents, err := readMetricFile("/proc/meminfo", 256<<10); err == nil {
 		used, total, parseErr := parseMemoryUsage(string(contents))
 		if parseErr != nil {
@@ -56,9 +79,20 @@ func collectHostMetrics(ctx context.Context, previous metricSample) (core.HostMe
 			metrics.MemoryAvailable = true
 			metrics.MemoryUsedBytes = used
 			metrics.MemoryTotalBytes = total
+			memoryRead = true
 		}
 	} else {
 		problems = append(problems, fmt.Errorf("read memory metrics: %w", err))
+	}
+	if !memoryRead {
+		used, total, err := fallbackMemoryUsage()
+		if err != nil {
+			problems = append(problems, fmt.Errorf("read fallback memory metrics: %w", err))
+		} else {
+			metrics.MemoryAvailable = true
+			metrics.MemoryUsedBytes = used
+			metrics.MemoryTotalBytes = total
+		}
 	}
 
 	if used, total, err := rootDiskUsage(); err != nil {
@@ -286,10 +320,14 @@ func routedNetworkInterfaces() ([]string, error) {
 	}
 	if len(result) == 0 {
 		contents, err := readMetricFile("/proc/net/dev", 1<<20)
-		if err != nil {
-			return nil, fmt.Errorf("find network interfaces: %w", err)
+		if err == nil {
+			parseNetworkDeviceNames(string(contents), result)
 		}
-		parseNetworkDeviceNames(string(contents), result)
+	}
+	if len(result) == 0 {
+		for _, entry := range fallbackNetworkInterfaces() {
+			result[entry] = struct{}{}
+		}
 	}
 	interfaces := make([]string, 0, len(result))
 	for name := range result {
@@ -302,6 +340,84 @@ func routedNetworkInterfaces() ([]string, error) {
 		return nil, errors.New("no safe default-route network interface found")
 	}
 	return interfaces, nil
+}
+
+func cgroupCPUUsage() (uint64, error) {
+	if contents, err := readMetricFile("/sys/fs/cgroup/cpu.stat", 16<<10); err == nil {
+		for _, line := range strings.Split(string(contents), "\n") {
+			fields := strings.Fields(line)
+			if len(fields) == 2 && fields[0] == "usage_usec" {
+				return strconv.ParseUint(fields[1], 10, 64)
+			}
+		}
+	}
+	contents, err := readMetricFile("/sys/fs/cgroup/cpuacct/cpuacct.usage", 128)
+	if err != nil {
+		return 0, err
+	}
+	nanoseconds, err := strconv.ParseUint(strings.TrimSpace(string(contents)), 10, 64)
+	if err != nil {
+		return 0, err
+	}
+	return nanoseconds / 1000, nil
+}
+
+func cgroupCPUQuota() float64 {
+	if contents, err := readMetricFile("/sys/fs/cgroup/cpu.max", 128); err == nil {
+		fields := strings.Fields(string(contents))
+		if len(fields) == 2 && fields[0] != "max" {
+			quota, quotaErr := strconv.ParseFloat(fields[0], 64)
+			period, periodErr := strconv.ParseFloat(fields[1], 64)
+			if quotaErr == nil && periodErr == nil && quota > 0 && period > 0 {
+				return quota / period
+			}
+		}
+		return float64(runtime.NumCPU())
+	}
+	return float64(runtime.NumCPU())
+}
+
+func fallbackMemoryUsage() (uint64, uint64, error) {
+	current, currentErr := readUintMetric("/sys/fs/cgroup/memory.current")
+	limitContents, limitErr := readMetricFile("/sys/fs/cgroup/memory.max", 128)
+	if currentErr == nil && limitErr == nil {
+		limitText := strings.TrimSpace(string(limitContents))
+		if limitText != "max" {
+			limit, parseErr := strconv.ParseUint(limitText, 10, 64)
+			if parseErr == nil && limit > 0 {
+				if current > limit {
+					current = limit
+				}
+				return current, limit, nil
+			}
+		}
+	}
+	var info syscall.Sysinfo_t
+	if err := syscall.Sysinfo(&info); err != nil {
+		return 0, 0, err
+	}
+	unit := uint64(info.Unit)
+	total := uint64(info.Totalram) * unit
+	free := uint64(info.Freeram) * unit
+	if total == 0 || free > total {
+		return 0, 0, errors.New("system memory counters are invalid")
+	}
+	return total - free, total, nil
+}
+
+func fallbackNetworkInterfaces() []string {
+	entries, err := os.ReadDir("/sys/class/net")
+	if err != nil {
+		return nil
+	}
+	result := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() && safeNetworkInterfaceName(entry.Name()) && entry.Name() != "lo" {
+			result = append(result, entry.Name())
+		}
+	}
+	sort.Strings(result)
+	return result
 }
 
 func parseIPv4DefaultRoutes(contents string, result map[string]struct{}) {
