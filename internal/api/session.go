@@ -22,6 +22,8 @@ type apiSession struct {
 	CSRF      string
 	ExpiresAt time.Time
 	Role      core.Role
+	UserID    string
+	Username  string
 }
 
 func sessionTTL(value time.Duration) time.Duration {
@@ -53,13 +55,29 @@ func (s *Server) login(w http.ResponseWriter, request *http.Request) {
 		return
 	}
 	var input struct {
-		Token string `json:"token"`
+		Username string `json:"username"`
+		Token    string `json:"token"`
 	}
 	if err := decodeJSON(w, request, &input, 8<<10); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	role, ok := s.roleForToken(strings.TrimSpace(input.Token))
+	username := strings.TrimSpace(input.Username)
+	secret := strings.TrimSpace(input.Token)
+	role, ok := core.Role(""), false
+	userID := ""
+	if username != "" && secret != "" && s.store != nil {
+		if user, hash, err := s.store.UserForLogin(request.Context(), strings.ToLower(username)); err == nil && authn.CheckPassword(hash, secret) {
+			role, ok, userID = user.Role, true, user.ID
+			username = user.Username
+		}
+	}
+	// Keep the environment token as a break-glass administrator credential.
+	// It remains compatible with existing installations while durable users
+	// provide named access for day-to-day panel work.
+	if !ok && (username == "" || strings.EqualFold(username, "admin")) {
+		role, ok = s.roleForToken(secret)
+	}
 	if !ok {
 		s.adminLimiter.Failure(key, now)
 		writeError(w, http.StatusUnauthorized, "invalid admin token")
@@ -79,7 +97,7 @@ func (s *Server) login(w http.ResponseWriter, request *http.Request) {
 	expires := now.Add(s.sessionTTL)
 	s.sessionsMu.Lock()
 	s.pruneSessionsLocked(now)
-	s.sessions[token] = apiSession{CSRF: csrf, ExpiresAt: expires, Role: role}
+	s.sessions[token] = apiSession{CSRF: csrf, ExpiresAt: expires, Role: role, UserID: userID, Username: username}
 	s.sessionsMu.Unlock()
 	http.SetCookie(w, &http.Cookie{
 		Name: s.cookieName(), Value: token, Path: "/", Expires: expires,
@@ -88,7 +106,10 @@ func (s *Server) login(w http.ResponseWriter, request *http.Request) {
 	})
 	s.recordAudit(request, "login.succeeded", "", string(role))
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, http.StatusOK, map[string]any{"role": role, "csrf_token": csrf, "expires_at": expires})
+	if userID != "" && s.store != nil {
+		_ = s.store.RecordUserLogin(request.Context(), userID)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"role": role, "user_id": userID, "username": username, "csrf_token": csrf, "expires_at": expires})
 }
 
 func (s *Server) session(w http.ResponseWriter, request *http.Request) {
@@ -98,7 +119,7 @@ func (s *Server) session(w http.ResponseWriter, request *http.Request) {
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, http.StatusOK, map[string]any{"role": value.Role, "csrf_token": value.CSRF, "expires_at": value.ExpiresAt})
+	writeJSON(w, http.StatusOK, map[string]any{"role": value.Role, "user_id": value.UserID, "username": value.Username, "csrf_token": value.CSRF, "expires_at": value.ExpiresAt})
 }
 
 func (s *Server) logout(w http.ResponseWriter, request *http.Request) {
@@ -141,6 +162,30 @@ func (s *Server) sessionRole(request *http.Request) (core.Role, bool) {
 	}
 	value, ok := s.sessionForRequest(request)
 	return value.Role, ok
+}
+
+func (s *Server) sessionUserID(request *http.Request) string {
+	if bearerToken(request) != "" {
+		return ""
+	}
+	value, ok := s.sessionForRequest(request)
+	if !ok {
+		return ""
+	}
+	return value.UserID
+}
+
+func (s *Server) revokeUserSessions(userID string) {
+	if userID == "" {
+		return
+	}
+	s.sessionsMu.Lock()
+	defer s.sessionsMu.Unlock()
+	for token, session := range s.sessions {
+		if session.UserID == userID {
+			delete(s.sessions, token)
+		}
+	}
 }
 
 func (s *Server) requireCSRF(w http.ResponseWriter, request *http.Request) (core.Role, bool) {
@@ -196,6 +241,9 @@ func (s *Server) recordAudit(request *http.Request, action, target, detail strin
 	}
 	role, _ := s.sessionRole(request)
 	actor := string(role)
+	if value, ok := s.sessionForRequest(request); ok && value.Username != "" {
+		actor = value.Username
+	}
 	if actor == "" {
 		actor = "api"
 	}

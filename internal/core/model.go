@@ -49,6 +49,33 @@ func (role Role) Valid() bool {
 	}
 }
 
+// User is a durable panel login identity. Password hashes are intentionally
+// never included in this public model.
+type User struct {
+	ID          string     `json:"id"`
+	Username    string     `json:"username"`
+	DisplayName string     `json:"display_name,omitempty"`
+	Role        Role       `json:"role"`
+	Disabled    bool       `json:"disabled"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
+	LastLoginAt *time.Time `json:"last_login_at,omitempty"`
+}
+
+type UserRequest struct {
+	Username    string `json:"username"`
+	DisplayName string `json:"display_name"`
+	Role        Role   `json:"role"`
+	Password    string `json:"password"`
+}
+
+type UserUpdate struct {
+	DisplayName *string `json:"display_name"`
+	Role        *Role   `json:"role"`
+	Password    *string `json:"password"`
+	Disabled    *bool   `json:"disabled"`
+}
+
 const (
 	EngineMihomo          Engine = "mihomo"
 	EngineXray            Engine = "xray"
