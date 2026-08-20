@@ -1,6 +1,8 @@
 export function installAgents(ctx) {
   const { api, optionalAPI, state, engines, can, esc, engineName, statusTone, serviceStatusName, short, date, ago, heartbeat, percent, bytes, conciseVersion, rate, actionName, serviceActionDisabled, trafficChart, renderConfigDiff, notify, confirmAction, shell } = ctx;
 async function agents() {
+  const enrollmentOpen = document.querySelector("#enrollment")?.open;
+  const historyOpen = document.querySelector("#enrollment .access-history")?.open;
   const [agents, deployments, accessEntries, settings, tokens] =
     await Promise.all([
       api("/agents"),
@@ -116,7 +118,7 @@ async function agents() {
     .join("");
 
   const enrollment = can("admin")
-    ? `<details class="enrollment-sheet" id="enrollment" data-has-agents="${agents.length ? 1 : 0}" ${agents.length ? "" : "open"}><summary><b>＋ 添加节点</b><i>＋</i></summary><div class="enrollment-sheet-body"><form class="access-form add-node-form" id="enrollment-form"><label>节点名称<input name="name" maxlength="100" required autocomplete="off" placeholder="例如 shanghai-edge-01"></label><button class="button primary" type="submit">生成添加节点命令</button></form><p class="enrollment-security-note"><b>添加节点命令只显示一次</b><span>命令绑定该节点，可重复安装；删除添加记录后立即失效。</span></p>${tokenRows ? `<details class="access-history"><summary>添加记录（${tokens.length}）</summary><div>${tokenRows}</div></details>` : ""}</div></details>`
+    ? `<details class="enrollment-sheet" id="enrollment" data-has-agents="${agents.length ? 1 : 0}" ${(enrollmentOpen ?? !agents.length) ? "open" : ""}><summary><b>＋ 添加节点</b><i>＋</i></summary><div class="enrollment-sheet-body"><form class="access-form add-node-form" id="enrollment-form"><label>节点名称<input name="name" maxlength="100" required autocomplete="off" placeholder="例如 shanghai-edge-01"></label><button class="button primary" type="submit">生成添加节点命令</button></form><p class="enrollment-security-note"><b>添加节点命令只显示一次</b><span>命令绑定该节点，可重复安装；删除添加记录后立即失效。</span></p>${tokenRows ? `<details class="access-history" ${historyOpen ? "open" : ""}><summary>添加记录（${tokens.length}）</summary><div>${tokenRows}</div></details>` : ""}</div></details>`
     : "";
   const batch =
     agents.length > 1 && can("operator")
@@ -374,6 +376,11 @@ function bindAgentPage(agentItems) {
       const escapedToken = created.token.replaceAll("'", "'\\''");
       const escapedName = name.replaceAll("'", "'\\''");
       const command = `curl -fsSL -H 'X-QControlHub-Enrollment: ${escapedToken}' ${location.origin}/install-agent.sh | sudo bash -s -- ${location.origin} '${escapedToken}' '${escapedName}'`;
+      // Refresh the history before opening the modal so the newly-created
+      // enrollment is already visible when the one-time command is closed.
+      // Rendering first also avoids a race with the modal close callback and
+      // keeps the history count/list in sync without requiring a page reload.
+      await agents();
       showCommand(command);
     };
   document
@@ -738,7 +745,7 @@ function bindCodeEditors() {
   });
 }
 
-function showCommand(command) {
+function showCommand(command, onClose) {
   const previousFocus = document.activeElement;
   const wrap = document.createElement("div");
   wrap.className = "modal-backdrop";
@@ -747,13 +754,17 @@ function showCommand(command) {
   const copyButton = wrap.querySelector("[data-copy-command]");
   const commandInput = wrap.querySelector("[data-command]");
   let resetCopyLabel;
+  let closed = false;
   const close = () => {
+    if (closed) return;
+    closed = true;
     window.clearTimeout(resetCopyLabel);
     document.removeEventListener("keydown", onKeydown);
     wrap.remove();
     if (previousFocus instanceof HTMLElement && previousFocus.isConnected) {
       previousFocus.focus();
     }
+    onClose?.();
   };
   const onKeydown = (event) => {
     if (event.key === "Escape") close();

@@ -24,6 +24,7 @@ const state = {
   data: {},
   busy: false,
   confirmResolver: null,
+  confirmOpen: false,
 };
 
 const esc = (value) =>
@@ -351,6 +352,7 @@ function confirmAction(message, label = "确认继续") {
   if (!dialog?.showModal) return Promise.resolve(window.confirm(message));
   dialog.querySelector("[data-confirm-message]").textContent = message;
   dialog.querySelector("[data-confirm-accept]").textContent = label;
+  state.confirmOpen = true;
   dialog.showModal();
   return new Promise((resolve) => {
     state.confirmResolver = resolve;
@@ -434,6 +436,7 @@ function shell(content, title) {
     if (!state.confirmResolver) return;
     const resolve = state.confirmResolver;
     state.confirmResolver = null;
+    state.confirmOpen = false;
     confirmDialog.close();
     resolve(accepted);
   };
