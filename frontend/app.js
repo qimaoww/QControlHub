@@ -567,6 +567,7 @@ async function render() {
     defaults: "settings",
     synchronization: "settings",
     notifications: "settings",
+    users: "settings",
     "new-config": "archive-config",
     templates: "archive-config",
     archive: "archive-config",
