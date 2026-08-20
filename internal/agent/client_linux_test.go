@@ -22,6 +22,7 @@ import (
 )
 
 func TestNewClientTrustsConfiguredPrivateCA(t *testing.T) {
+	requireAgentRoot(t)
 	tlsServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
@@ -49,6 +50,7 @@ func TestNewClientTrustsConfiguredPrivateCA(t *testing.T) {
 }
 
 func TestRunStopsRetryingWhenPersistedIdentityIsRejected(t *testing.T) {
+	requireAgentRoot(t)
 	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)

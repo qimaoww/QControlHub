@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -10,7 +11,15 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
+func requireAgentRoot(t *testing.T) {
+	t.Helper()
+	if os.Geteuid() != 0 {
+		t.Skip("agent execution tests require root")
+	}
+}
+
 func TestNewClientDerivesHTTPSAndWSSOrigins(t *testing.T) {
+	requireAgentRoot(t)
 	executor := &Executor{}
 	client, err := NewClient(ClientConfig{ServerURL: "wss://control.example.com", HeartbeatEvery: 10 * time.Second}, executor)
 	if err != nil {
@@ -25,6 +34,7 @@ func TestNewClientDerivesHTTPSAndWSSOrigins(t *testing.T) {
 }
 
 func TestNewClientRejectsHeartbeatIntervalsOutsideServerDeadline(t *testing.T) {
+	requireAgentRoot(t)
 	executor := &Executor{}
 	for _, interval := range []time.Duration{time.Millisecond, 31 * time.Second, time.Minute} {
 		if _, err := NewClient(ClientConfig{ServerURL: "wss://control.example.com", HeartbeatEvery: interval}, executor); err == nil || !strings.Contains(err.Error(), "between 1s and 30s") {
@@ -34,6 +44,7 @@ func TestNewClientRejectsHeartbeatIntervalsOutsideServerDeadline(t *testing.T) {
 }
 
 func TestNewClientRejectsUnsafeRemoteOrigins(t *testing.T) {
+	requireAgentRoot(t)
 	executor := &Executor{}
 	for _, value := range []string{
 		"wss://user:password@control.example.com",
