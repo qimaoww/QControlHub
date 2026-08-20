@@ -60,6 +60,7 @@
 | `GET` | `/api/v1/tasks?agent_id=&status=&action=&limit=` | 按节点、状态和动作筛选任务；`limit` 为 1–500，默认 100 |
 | `POST` | `/api/v1/tasks` | 创建远程任务 |
 | `GET` | `/api/v1/tasks/{id}` | 读取单个任务及结果 |
+| `GET` | `/api/v1/tasks/{id}/config-snapshot` | 读取已成功 `read-config` 任务的短期配置快照 |
 | `DELETE` | `/api/v1/tasks/{id}` | 取消尚未领取的任务 |
 | `POST` | `/api/v1/tasks/{id}/retry` | 按当前配置重试失败或已取消任务 |
 | `GET` | `/api/v1/enrollment-tokens` | 列出添加节点记录，不返回原始凭证（admin） |
@@ -189,6 +190,8 @@ Content-Type: application/json
 允许的 `action` 为 `validate`、`deploy`、`read-config`、`start`、`stop`、`restart`、`status`、`install`。Agent 必须在注册能力中声明对应内核。版本安装只使用四个内核各自的官方 GitHub Release，不接受 URL；`development` 没有官方 prerelease 时任务会失败而不会降级到稳定版。
 
 任务成功响应表示目标节点已完成对应操作；失败响应会保留节点返回的错误信息。部署任务只有在目标节点真实写入配置并成功重启服务后，才会进入节点的最新部署记录。
+
+成功的 `read-config` 任务不会在普通任务列表或任务详情中返回配置正文。读取完成后，使用 `GET /api/v1/tasks/{id}/config-snapshot` 获取 `{ "content": "..." }`；当快照已被同一节点和内核的后续成功读取清理时返回 `404`。
 
 ### 状态码
 

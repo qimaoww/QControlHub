@@ -208,6 +208,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/tasks", s.requirePermission(core.PermissionTasksRead, http.HandlerFunc(s.listTasks)))
 	mux.Handle("POST /api/v1/tasks", s.requirePermission(core.PermissionTasksExecute, http.HandlerFunc(s.createTask)))
 	mux.Handle("GET /api/v1/tasks/{id}", s.requirePermission(core.PermissionTasksRead, http.HandlerFunc(s.getTask)))
+	mux.Handle("GET /api/v1/tasks/{id}/config-snapshot", s.requirePermission(core.PermissionTasksRead, http.HandlerFunc(s.getTaskConfigSnapshot)))
 	mux.Handle("DELETE /api/v1/tasks/{id}", s.requirePermission(core.PermissionTasksExecute, http.HandlerFunc(s.cancelTask)))
 	mux.Handle("POST /api/v1/tasks/{id}/retry", s.requirePermission(core.PermissionTasksExecute, http.HandlerFunc(s.retryTask)))
 	mux.Handle("GET /api/v1/enrollment-tokens", s.requirePermission(core.PermissionEnrollmentManage, http.HandlerFunc(s.listEnrollmentTokens)))
@@ -482,6 +483,24 @@ func (s *Server) getTask(w http.ResponseWriter, request *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, task)
+}
+
+func (s *Server) getTaskConfigSnapshot(w http.ResponseWriter, request *http.Request) {
+	task, err := s.store.GetTask(request.Context(), request.PathValue("id"))
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	if task.Action != core.ActionReadConfig || task.Status != core.TaskSucceeded {
+		writeStoreError(w, store.ErrNotFound)
+		return
+	}
+	content, err := s.store.ReadTaskConfigSnapshot(request.Context(), task.ID, task.AgentID, task.Engine)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"content": content})
 }
 
 func (s *Server) cancelTask(w http.ResponseWriter, request *http.Request) {
