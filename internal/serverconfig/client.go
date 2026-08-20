@@ -32,7 +32,7 @@ type ClientProfile struct {
 // data. address is deliberately separate from Input.Listen: wildcard listener
 // addresses such as 0.0.0.0 and :: are never valid remote destinations.
 func BuildClientProfile(input Input, address, serverName string) (ClientProfile, error) {
-	address, err := normalizeClientAddress(address)
+	address, err := NormalizeClientAddress(address)
 	if err != nil {
 		return ClientProfile{}, err
 	}
@@ -53,7 +53,7 @@ func BuildClientProfile(input Input, address, serverName string) (ClientProfile,
 		serverName = ""
 	}
 	if serverName != "" {
-		serverName, err = normalizeClientAddress(serverName)
+		serverName, err = NormalizeClientAddress(serverName)
 		if err != nil {
 			return ClientProfile{}, errors.New("TLS ServerName 必须是有效域名或 IP 地址")
 		}
@@ -158,7 +158,10 @@ func BuildClientProfile(input Input, address, serverName string) (ClientProfile,
 	return profile, nil
 }
 
-func normalizeClientAddress(value string) (string, error) {
+// NormalizeClientAddress validates and canonicalizes the address that will be
+// embedded in a client connection profile. Wildcard and loopback listeners
+// are deliberately rejected because they are not reachable client targets.
+func NormalizeClientAddress(value string) (string, error) {
 	value = strings.TrimSpace(value)
 	if strings.HasPrefix(value, "[") && strings.HasSuffix(value, "]") {
 		value = strings.TrimSuffix(strings.TrimPrefix(value, "["), "]")

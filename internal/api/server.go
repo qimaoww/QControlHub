@@ -24,6 +24,7 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/authn"
 	"github.com/qimaoww/qcontrolhub/internal/core"
 	"github.com/qimaoww/qcontrolhub/internal/notify"
+	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
 	"github.com/qimaoww/qcontrolhub/internal/store"
 )
 
@@ -188,6 +189,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/agents", s.requirePermission(core.PermissionAgentsRead, http.HandlerFunc(s.listAgents)))
 	mux.Handle("GET /api/v1/deployments", s.requirePermission(core.PermissionDeploymentsRead, http.HandlerFunc(s.listDeployments)))
 	mux.Handle("GET /api/v1/client-access", s.requirePermission(core.PermissionClientAccessRead, http.HandlerFunc(s.listClientAccess)))
+	mux.Handle("PUT /api/v1/agents/{id}/client-address", s.requirePermission(core.PermissionAgentsManage, http.HandlerFunc(s.putAgentClientAddress)))
 	mux.Handle("GET /api/v1/config-catalogs/{engine}", s.requirePermission(core.PermissionCatalogsRead, http.HandlerFunc(s.configCatalog)))
 	mux.Handle("DELETE /api/v1/agents/{id}", s.requirePermission(core.PermissionAgentsManage, http.HandlerFunc(s.deleteAgent)))
 	mux.Handle("GET /api/v1/agents/{id}/configs", s.requirePermission(core.PermissionAgentConfigRead, http.HandlerFunc(s.listAgentConfigs)))
@@ -530,6 +532,31 @@ func (s *Server) listEnrollmentTokens(w http.ResponseWriter, request *http.Reque
 		return
 	}
 	writeJSON(w, http.StatusOK, tokens)
+}
+
+func (s *Server) putAgentClientAddress(w http.ResponseWriter, request *http.Request) {
+	var input struct {
+		Address string `json:"address"`
+	}
+	if err := decodeJSON(w, request, &input, 8<<10); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	address := strings.TrimSpace(input.Address)
+	if address != "" {
+		var err error
+		address, err = serverconfig.NormalizeClientAddress(address)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+	if err := s.store.SetAgentClientAddress(request.Context(), request.PathValue("id"), address); err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	s.recordAudit(request, "agent.client_address.updated", request.PathValue("id"), address)
+	writeJSON(w, http.StatusOK, map[string]string{"address": address})
 }
 
 func (s *Server) createEnrollmentToken(w http.ResponseWriter, request *http.Request) {

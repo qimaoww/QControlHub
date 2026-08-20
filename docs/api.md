@@ -49,6 +49,7 @@
 | `POST` | `/api/v1/agents/{id}/configs/{engine}/fields/{key}` | 新增、修改或删除顶级配置字段并创建任务 |
 | `GET` | `/api/v1/deployments` | 列出每个节点/内核最近一次真实成功部署 |
 | `GET` | `/api/v1/client-access` | 从已部署入站生成客户端连接资料 |
+| `PUT` | `/api/v1/agents/{id}/client-address` | 设置或清除客户端访问节点时使用的域名/IP（agents.manage） |
 | `GET` | `/api/v1/config-catalogs/{engine}` | 读取内核官方配置字段和服务端协议目录 |
 | `GET` | `/api/v1/configs` | 列出配置及正文 |
 | `POST` | `/api/v1/configs` | 创建配置 |
