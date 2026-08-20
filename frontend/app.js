@@ -140,8 +140,8 @@ const taskActivity = (items, limit = 7) => {
   }
   return groups;
 };
-const serviceActionDisabled = (action, online, serviceStatus) => {
-  if (!online || !can("operator")) return true;
+const serviceActionDisabled = (action, online, installed, serviceStatus) => {
+  if (!online || !installed || !can("operator")) return true;
   if (action === "start")
     return ["active", "activating"].includes(serviceStatus);
   if (action === "stop")
@@ -150,6 +150,10 @@ const serviceActionDisabled = (action, online, serviceStatus) => {
     return ["inactive", "activating", "deactivating"].includes(serviceStatus);
   return false;
 };
+const installedEngineCount = (agent) =>
+  (agent?.capabilities || []).filter(
+    (engine) => agent.runtime?.[engine]?.installed,
+  ).length;
 const rate = (value) => `${bytes(value)}/s`;
 
 function trafficChart(samples) {
@@ -452,7 +456,8 @@ function contextMarkup(title) {
   }
   if (state.route === "client-access") {
     const items = state.data.agents || [];
-    return `<a class="context-back" href="#agents">← 返回节点</a><a class="context-primary ${state.data.accessAgent ? "" : "active"}" href="#client-access" data-access-agent="">全部客户端配置</a><div class="context-section-label"><span>按节点查看</span><b>${items.length}</b></div><nav class="context-list" aria-label="客户端配置节点">${items.map((agent) => `<a class="${state.data.accessAgent === agent.id ? "active" : ""}" href="#client-access" data-access-agent="${esc(agent.id)}"><i class="status-dot ${agent.status === "online" ? "ok" : ""}"></i><span><strong>${esc(agent.name)}</strong><small>${(agent.capabilities || []).length} 个支持内核</small></span><em>${agent.status === "online" ? "在线" : "离线"}</em></a>`).join("") || "<p>还没有节点</p>"}</nav>`;
+    const entries = state.data.clientAccessEntries || [];
+    return `<a class="context-back" href="#agents">← 返回节点</a><a class="context-primary ${state.data.accessAgent ? "" : "active"}" href="#client-access" data-access-agent="">全部客户端配置</a><div class="context-section-label"><span>按节点查看</span><b>${items.length}</b></div><nav class="context-list" aria-label="客户端配置节点">${items.map((agent) => { const profiles = entries.filter((entry) => entry.agent_id === agent.id).reduce((total, entry) => total + (entry.profiles || []).length, 0); return `<a class="${state.data.accessAgent === agent.id ? "active" : ""}" href="#client-access" data-access-agent="${esc(agent.id)}"><i class="status-dot ${agent.status === "online" ? "ok" : ""}"></i><span><strong>${esc(agent.name)}</strong><small>${profiles ? `${profiles} 个客户端入站` : "尚无客户端配置"}</small></span><em>${agent.status === "online" ? "在线" : "离线"}</em></a>`; }).join("") || "<p>还没有节点</p>"}</nav>`;
   }
   if (state.route === "live-config") {
     const items = state.data.agents || [];
@@ -460,7 +465,7 @@ function contextMarkup(title) {
     const capabilities = (selected?.capabilities || []).filter(
       (engine) => selected.runtime?.[engine]?.installed,
     );
-    return `<div class="context-section-label"><span>选择节点</span><b>${items.length}</b></div><nav class="context-list" aria-label="配置节点">${items.map((agent) => `<a class="${agent.id === state.data.liveAgent ? "active" : ""}" href="#live-config" data-live-agent="${esc(agent.id)}"><i class="status-dot ${agent.status === "online" ? "ok" : ""}"></i><span><strong>${esc(agent.name)}</strong><small>${(agent.capabilities || []).length} 个支持内核</small></span><em>${agent.status === "online" ? "在线" : "离线"}</em></a>`).join("") || "<p>还没有节点</p>"}</nav>${selected ? `<div class="context-section-label"><span>选择内核</span><b>${capabilities.length}</b></div><nav class="context-list config-context-list">${capabilities.map((engine) => `<a class="${engine === state.data.liveEngine ? "active" : ""}" href="#live-config" data-live-engine="${esc(engine)}"><span class="context-engine ${esc(engine)}">${esc(engineName(engine))}</span><span><strong>${esc(engineName(engine))}</strong><small>节点实际文件</small></span></a>`).join("")}</nav>` : ""}<a class="context-primary" href="#archive-config">配置档案 →</a>`;
+    return `<div class="context-section-label"><span>选择节点</span><b>${items.length}</b></div><nav class="context-list" aria-label="配置节点">${items.map((agent) => { const installed = installedEngineCount(agent); return `<a class="${agent.id === state.data.liveAgent ? "active" : ""}" href="#live-config" data-live-agent="${esc(agent.id)}"><i class="status-dot ${agent.status === "online" ? "ok" : ""}"></i><span><strong>${esc(agent.name)}</strong><small>${installed ? `${installed} 个已安装内核` : "尚未安装内核"}</small></span><em>${agent.status === "online" ? "在线" : "离线"}</em></a>`; }).join("") || "<p>还没有节点</p>"}</nav>${selected ? `<div class="context-section-label"><span>选择内核</span><b>${capabilities.length}</b></div><nav class="context-list config-context-list">${capabilities.map((engine) => `<a class="${engine === state.data.liveEngine ? "active" : ""}" href="#live-config" data-live-engine="${esc(engine)}"><span class="context-engine ${esc(engine)}">${esc(engineName(engine))}</span><span><strong>${esc(engineName(engine))}</strong><small>节点实际文件</small></span></a>`).join("")}</nav>` : ""}<a class="context-primary" href="#archive-config">配置档案 →</a>`;
   }
   if (state.route === "archive-config") {
     const items = state.data.configs || [];
@@ -486,7 +491,8 @@ function contextMarkup(title) {
     (item) => item.id === state.data.agentId,
   );
   const caps = agent?.capabilities || engines;
-  return `<a class="context-back" href="#agents">← 返回节点</a><div class="context-section-label"><span>选择内核</span><b>${caps.length}</b></div><nav class="context-list engine-context-list">${caps.map((engine) => `<a class="${state.data.engine === engine ? "active" : ""}" href="#agent-config" data-engine-select="${esc(engine)}"><span class="context-engine ${esc(engine)}">${esc(engineName(engine))}</span><span><strong>${esc(engineName(engine))}</strong><small>服务端入站</small></span></a>`).join("")}</nav><ol class="context-steps"><li class="active"><b>1</b><span>选择入站</span></li><li><b>2</b><span>编辑参数</span></li><li><b>3</b><span>校验或部署</span></li></ol>`;
+  const installed = installedEngineCount(agent);
+  return `<a class="context-back" href="#agents">← 返回节点</a><div class="context-section-label"><span>选择内核</span><b>${installed}/${caps.length}</b></div><nav class="context-list engine-context-list">${caps.map((engine) => `<a class="${state.data.engine === engine ? "active" : ""}" href="#agent-config" data-engine-select="${esc(engine)}"><span class="context-engine ${esc(engine)}">${esc(engineName(engine))}</span><span><strong>${esc(engineName(engine))}</strong><small>${agent?.runtime?.[engine]?.installed ? "服务端入站" : "尚未安装"}</small></span></a>`).join("")}</nav><ol class="context-steps"><li class="active"><b>1</b><span>选择入站</span></li><li><b>2</b><span>编辑参数</span></li><li><b>3</b><span>校验或部署</span></li></ol>`;
 }
 
 const dashboard = installDashboard({ api, state, esc, engineName, heartbeat, statusTone, ago, short, actionName, shell });

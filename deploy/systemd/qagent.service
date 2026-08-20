@@ -49,8 +49,8 @@ MemoryDenyWriteExecute=true
 RestrictNamespaces=true
 RestrictRealtime=true
 RemoveIPC=true
+# Hide process command details without hiding host-wide /proc metrics.
 ProtectProc=invisible
-ProcSubset=pid
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 SystemCallArchitectures=native
 

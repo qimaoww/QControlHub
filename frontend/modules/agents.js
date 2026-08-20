@@ -86,14 +86,24 @@ async function agents() {
             access && port
               ? `${access.address}:${port}`
               : access?.address || "";
-          return `<article class="service-card service-${esc(engine)}">
+          const installed = Boolean(runtime.installed);
+          const serviceState = installed
+            ? serviceStatusName(runtime.service_status)
+            : "未安装";
+          const serviceTone = installed
+            ? statusTone(runtime.service_status)
+            : "muted";
+          const serviceManagement = installed
+            ? `<details class="runtime-drawer"><summary><span><b>管理服务</b></span><i>＋</i></summary><div class="runtime-drawer-body"><div class="service-actions">${["status", "start", "restart", "stop"].map((action) => `<button class="button small ${action === "stop" ? "danger-button" : ""}" type="button" data-task-agent="${esc(agent.id)}" data-task-engine="${esc(engine)}" data-task-action="${action}" data-service-action="${action}" ${serviceActionDisabled(action, agent.status === "online", installed, runtime.service_status) ? "disabled" : ""}>${esc(actionName(action))}</button>`).join("")}</div></div></details>`
+            : '<div class="service-management-unavailable"><b>服务管理</b><small>安装内核后可用</small></div>';
+          return `<article class="service-card service-${esc(engine)}" data-core-installed="${installed ? 1 : 0}">
             <div class="service-card-main">
-              <div class="service-overview"><header><span class="engine-badge ${esc(engine)}">${esc(engineName(engine))}</span><span class="engine-state ${statusTone(runtime.service_status)}"><i></i><b data-core-service="${esc(engine)}">${esc(serviceStatusName(runtime.service_status))}</b></span></header><div class="service-version"><span class="service-version-label"><small>已安装版本</small><button class="service-version-toggle" type="button" data-open-version-form aria-label="打开 ${esc(engineName(engine))} 版本切换">切换版本</button></span><strong data-core-version="${esc(engine)}" title="${esc(runtime.version || "未检测到二进制")}">${esc(runtime.installed ? conciseVersion(engine, runtime.version) : "未检测到二进制")}</strong></div></div>
+              <div class="service-overview"><header><span class="engine-badge ${esc(engine)}">${esc(engineName(engine))}</span><span class="engine-state ${serviceTone}"><i></i><b data-core-service="${esc(engine)}">${esc(serviceState)}</b></span></header><div class="service-version"><span class="service-version-label"><small>内核版本</small><button class="service-version-toggle" type="button" data-open-version-form aria-label="打开 ${esc(engineName(engine))} ${installed ? "版本切换" : "安装内核"}">${installed ? "切换版本" : "安装内核"}</button></span><strong data-core-version="${esc(engine)}" title="${esc(installed ? runtime.version || "版本未知" : "尚未安装")}">${esc(installed ? conciseVersion(engine, runtime.version) : "尚未安装")}</strong></div></div>
               <div class="service-deployment"><dl class="service-facts"><div><dt>已部署配置</dt><dd>${deployed?.config_version ? `v${deployed.config_version}` : "—"}</dd></div><div><dt>已保存配置</dt><dd>${saved?.version ? `v${saved.version}` : "—"}</dd></div></dl>${drift ? `<div class="deployment-drift"><span>${deployed ? "已保存版本尚未部署" : "已保存配置尚未部署"}</span><b>待部署 v${saved.version}</b></div>` : ""}${configDiff ? `<details class="config-diff-drawer"><summary>查看配置差异 <i>＋</i></summary>${configDiff}</details>` : ""}<div class="service-endpoint ${endpoint ? "" : "empty"}">${endpoint ? `<span><b>${esc(firstProfile?.protocol || "客户端入站")}</b><small>${esc(firstProfile?.profile?.format || "已部署配置")}</small></span><code>${esc(endpoint)}</code>` : `<b>${deployed ? "自定义配置" : saved ? "尚未部署" : "尚未配置"}</b>`}</div></div>
               <div class="service-primary-action">${drift ? `<button class="button service-config" type="button" data-config="${esc(agent.id)}" data-engine="${esc(engine)}">查看配置</button><button class="button primary" type="button" data-deploy="${esc(agent.id)}" data-engine="${esc(engine)}" data-config-id="${esc(saved.id)}">部署 v${saved.version}</button>` : `<button class="button primary service-config" type="button" data-config="${esc(agent.id)}" data-engine="${esc(engine)}">配置 <span>→</span></button>`}</div>
             </div>
-            <details class="runtime-drawer"><summary><span><b>管理服务</b></span><i>＋</i></summary><div class="runtime-drawer-body"><div class="service-actions">${["status", "start", "restart", "stop"].map((action) => `<button class="button small ${action === "stop" ? "danger-button" : ""}" type="button" data-task-agent="${esc(agent.id)}" data-task-engine="${esc(engine)}" data-task-action="${action}" data-service-action="${action}" ${serviceActionDisabled(action, agent.status === "online", runtime.service_status) ? "disabled" : ""}>${esc(actionName(action))}</button>`).join("")}</div></div></details>
-            <details class="runtime-drawer version-drawer"><summary><span><b>版本切换</b><small>安装或切换内核版本</small></span><i>＋</i></summary><div class="runtime-drawer-body"><form class="core-version-form" data-version-agent="${esc(agent.id)}" data-version-engine="${esc(engine)}"><fieldset class="release-channel-fieldset"><legend>版本来源</legend><div class="release-channel-options"><label><input type="radio" name="release_channel" value="stable" checked><span>最新稳定版</span></label><label><input type="radio" name="release_channel" value="development"><span>最新开发版</span></label><label><input type="radio" name="release_channel" value="custom"><span>指定版本</span></label></div></fieldset><label class="custom-version-field"><span>指定版本</span><input name="custom_version" maxlength="64" autocomplete="off" placeholder="例如 1.19.29"></label><button class="button small" type="submit" ${agent.status !== "online" || !can("operator") ? "disabled" : ""}>${runtime.installed ? "升级或切换版本" : "安装内核"}</button><small>${runtime.installed ? "官方 Release · SHA-256 校验" : "首次安装前需准备安全目录与 systemd 单元"}</small></form></div></details>
+            ${serviceManagement}
+            <details class="runtime-drawer version-drawer"><summary><span><b>${installed ? "版本切换" : "安装内核"}</b><small>${installed ? "升级或切换内核版本" : "从官方 Release 安装"}</small></span><i>＋</i></summary><div class="runtime-drawer-body"><form class="core-version-form" data-version-agent="${esc(agent.id)}" data-version-engine="${esc(engine)}"><fieldset class="release-channel-fieldset"><legend>版本来源</legend><div class="release-channel-options"><label><input type="radio" name="release_channel" value="stable" checked><span>最新稳定版</span></label><label><input type="radio" name="release_channel" value="development"><span>最新开发版</span></label><label><input type="radio" name="release_channel" value="custom"><span>指定版本</span></label></div></fieldset><label class="custom-version-field"><span>指定版本</span><input name="custom_version" maxlength="64" autocomplete="off" placeholder="例如 1.19.29"></label><button class="button small" type="submit" ${agent.status !== "online" || !can("operator") ? "disabled" : ""}>${installed ? "升级或切换版本" : runtime.service_status === "dry-run" ? "模拟安装" : "安装内核"}</button><small>${installed ? "官方 Release · SHA-256 校验" : "安装至 QAgent 专用目录，不影响系统已有内核"}</small></form></div></details>
             ${access?.profiles?.length ? `<a class="service-client-access" href="#client-access" data-client-agent="${esc(agent.id)}" data-client-engine="${esc(engine)}"><span><b>客户端配置</b><small>${esc(access.source)} · ${esc(access.address)}</small></span><strong>${access.profiles.length} 个入站 <i>→</i></strong></a>` : ""}
           </article>`;
         })
@@ -109,18 +119,53 @@ async function agents() {
     ? `<details class="enrollment-sheet" id="enrollment" data-has-agents="${agents.length ? 1 : 0}" ${agents.length ? "" : "open"}><summary><b>＋ 添加节点</b><i>＋</i></summary><div class="enrollment-sheet-body"><form class="access-form add-node-form" id="enrollment-form"><label>节点名称<input name="name" maxlength="100" required autocomplete="off" placeholder="例如 shanghai-edge-01"></label><button class="button primary" type="submit">生成添加节点命令</button></form><p class="enrollment-security-note"><b>添加节点命令只显示一次</b><span>命令绑定该节点，可重复安装；删除添加记录后立即失效。</span></p>${tokenRows ? `<details class="access-history"><summary>添加记录（${tokens.length}）</summary><div>${tokenRows}</div></details>` : ""}</div></details>`
     : "";
   const batch =
-    agents.length && can("operator")
+    agents.length > 1 && can("operator")
       ? `<form class="batch-toolbar" id="batch-form"><span class="batch-toolbar-title">批量操作</span><label>内核<select name="engine">${engines.map((engine) => `<option value="${engine}">${esc(engineName(engine))}</option>`).join("")}</select></label><label>动作<select name="action"><option value="restart">重启服务</option><option value="status">查询状态</option><option value="start">启动服务</option><option value="stop">停止服务</option></select></label><button class="button small" type="submit" disabled>执行</button><small data-batch-count>未选择节点</small></form>`
       : "";
   shell(
     `${enrollment}${batch}${nodeCards ? `<section class="machine-stack">${nodeCards}</section>` : '<div class="empty large"><strong>还没有节点</strong><p>请先添加节点。</p></div>'}`,
     "节点",
   );
-  bindAgentPage();
+  bindAgentPage(agents);
 }
 
-function bindAgentPage() {
+function bindAgentPage(agentItems) {
+  const agentsByID = new Map(agentItems.map((agent) => [agent.id, agent]));
   document.querySelectorAll(".machine-workspace").forEach((item) => {
+    const agent = agentsByID.get(item.dataset.agentNode);
+    const installedCount = (agent?.capabilities || []).filter(
+      (engine) => agent.runtime?.[engine]?.installed,
+    ).length;
+    const serviceCount = item.querySelector(".service-canvas-head > span");
+    if (serviceCount)
+      serviceCount.textContent = installedCount
+        ? `${installedCount} 个已安装 · ${(agent?.capabilities || []).length} 个可用`
+        : "尚未安装内核";
+    if (
+      Object.values(agent?.runtime || {}).some(
+        (runtime) => runtime.service_status === "dry-run",
+      )
+    )
+      item
+        .querySelector(".service-canvas-head")
+        ?.insertAdjacentHTML(
+          "afterend",
+          '<aside class="node-execution-mode"><b>演练模式</b><span>当前只验证操作，不会安装内核、写入配置或启停服务。正式使用前请设置 <code>QCH_AGENT_DRY_RUN=false</code> 并重启 QAgent。</span></aside>',
+        );
+    const machineFooter = item.querySelector(".machine-footer");
+    const deleteButton = machineFooter?.querySelector("[data-delete]");
+    if (deleteButton) {
+      const danger = document.createElement("section");
+      danger.className = "node-danger-zone";
+      danger.innerHTML =
+        "<span><b>删除节点</b><small>删除后会断开此节点并清理关联配置；以后仍可通过添加节点命令重新安装。</small></span>";
+      deleteButton.className = "button small danger-button";
+      deleteButton.textContent = "删除节点";
+      danger.append(deleteButton);
+      item.querySelector(".node-inspector-body")?.append(danger);
+    }
+    machineFooter?.remove();
+    if (agent) updateAgentMetrics(agent);
     item.addEventListener("toggle", () => {
       if (item.open) {
         state.data.selectedAgent = item.id.replace(/^node-/, "");
@@ -228,8 +273,8 @@ function bindAgentPage() {
     button.onclick = async () => {
       if (
         !(await confirmAction(
-          "确定移除此节点并永久吊销其身份？移除后 Agent 将无法再次连接。",
-          "移除节点",
+          "确定删除此节点？控制面会断开连接并清理关联配置，节点上的 QAgent 不会被远程卸载；以后可通过新的添加节点命令重新安装。",
+          "删除节点",
         ))
       )
         return;
@@ -254,8 +299,20 @@ function bindAgentPage() {
   });
   const batchForm = document.querySelector("#batch-form");
   const updateBatch = () => {
+    if (!batchForm) return;
+    const engine = batchForm.elements.engine.value;
+    document.querySelectorAll("[data-batch-checkbox]").forEach((input) => {
+      const agent = agentsByID.get(input.value);
+      const eligible =
+        agent?.status === "online" && Boolean(agent.runtime?.[engine]?.installed);
+      input.disabled = !eligible;
+      input.closest(".batch-select").title = eligible
+        ? "选择此节点参与批量操作"
+        : `节点离线或未安装 ${engineName(engine)}`;
+      if (!eligible) input.checked = false;
+    });
     const count = document.querySelectorAll(
-      "[data-batch-checkbox]:checked",
+      "[data-batch-checkbox]:checked:not(:disabled)",
     ).length;
     const button = batchForm?.querySelector("button[type=submit]");
     if (button) button.disabled = count === 0;
@@ -266,21 +323,35 @@ function bindAgentPage() {
   document
     .querySelectorAll("[data-batch-checkbox]")
     .forEach((input) => (input.onchange = updateBatch));
+  batchForm?.elements.engine.addEventListener("change", updateBatch);
+  updateBatch();
   if (batchForm)
     batchForm.onsubmit = async (event) => {
       event.preventDefault();
       const values = new FormData(batchForm);
       const selected = [
-        ...document.querySelectorAll("[data-batch-checkbox]:checked"),
+        ...document.querySelectorAll(
+          "[data-batch-checkbox]:checked:not(:disabled)",
+        ),
       ];
+      if (!selected.length) return;
+      const action = String(values.get("action"));
+      const engine = String(values.get("engine"));
+      if (
+        !(await confirmAction(
+          `确定在 ${selected.length} 个节点上执行 ${engineName(engine)} ${actionName(action)}？`,
+          "提交批量任务",
+        ))
+      )
+        return;
       await Promise.all(
         selected.map((input) =>
           api("/tasks", {
             method: "POST",
             body: JSON.stringify({
               agent_id: input.value,
-              engine: values.get("engine"),
-              action: values.get("action"),
+              engine,
+              action,
             }),
           }),
         ),
@@ -372,6 +443,7 @@ function updateAgentMetrics(item) {
     element.dataset.available = available ? "1" : "0";
   };
   const online = item.status === "online";
+  const unavailable = metrics.collected_at ? "不可用" : "等待采集";
   root.dataset.available = metrics.collected_at ? "1" : "0";
   const dot = root.querySelector("[data-agent-status-dot]");
   if (dot) dot.className = `status-dot ${statusTone(item.status)}`;
@@ -390,14 +462,14 @@ function updateAgentMetrics(item) {
     "cpu",
     metrics.cpu_available
       ? `${Number(metrics.cpu_percent).toFixed(1)}%`
-      : "等待采集",
+      : unavailable,
   );
   setProgress("cpu", metrics.cpu_available, Number(metrics.cpu_percent || 0));
   setText(
     "memory",
     metrics.memory_available
       ? `${bytes(metrics.memory_used_bytes)} / ${bytes(metrics.memory_total_bytes)}`
-      : "等待采集",
+      : unavailable,
   );
   setProgress(
     "memory",
@@ -408,7 +480,7 @@ function updateAgentMetrics(item) {
     "disk",
     metrics.disk_available
       ? `${bytes(metrics.disk_used_bytes)} / ${bytes(metrics.disk_total_bytes)}`
-      : "等待采集",
+      : unavailable,
   );
   setProgress(
     "disk",
@@ -417,11 +489,11 @@ function updateAgentMetrics(item) {
   );
   setText(
     "download-rate",
-    metrics.network_available ? rate(metrics.network_rx_bps) : "等待采集",
+    metrics.network_available ? rate(metrics.network_rx_bps) : unavailable,
   );
   setText(
     "upload-rate",
-    metrics.network_available ? rate(metrics.network_tx_bps) : "等待采集",
+    metrics.network_available ? rate(metrics.network_tx_bps) : unavailable,
   );
   setText(
     "download-total",
@@ -432,20 +504,29 @@ function updateAgentMetrics(item) {
     metrics.network_available ? bytes(metrics.network_tx_bytes) : "—",
   );
   Object.entries(item.runtime || {}).forEach(([engine, runtime]) => {
+    const card = root.querySelector(`.service-${CSS.escape(engine)}`);
+    const installed = Boolean(runtime.installed);
+    if (card && card.dataset.coreInstalled !== (installed ? "1" : "0")) {
+      card.dataset.coreInstalled = installed ? "1" : "0";
+      agents();
+      return;
+    }
     const version = root.querySelector(
       `[data-core-version="${CSS.escape(engine)}"]`,
     );
     if (version)
       version.textContent = runtime.installed
         ? conciseVersion(engine, runtime.version)
-        : "未检测到二进制";
+        : "尚未安装";
     const service = root.querySelector(
       `[data-core-service="${CSS.escape(engine)}"]`,
     );
     if (service) {
-      service.textContent = serviceStatusName(runtime.service_status);
+      service.textContent = installed
+        ? serviceStatusName(runtime.service_status)
+        : "未安装";
       service.closest(".engine-state").className =
-        `engine-state ${statusTone(runtime.service_status)}`;
+        `engine-state ${installed ? statusTone(runtime.service_status) : "muted"}`;
       service
         .closest(".service-card")
         .querySelectorAll("[data-service-action]")
@@ -453,6 +534,7 @@ function updateAgentMetrics(item) {
           button.disabled = serviceActionDisabled(
             button.dataset.serviceAction,
             online,
+            installed,
             runtime.service_status,
           );
         });
