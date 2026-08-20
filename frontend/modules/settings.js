@@ -33,7 +33,9 @@ async function settings() {
     "系统设置",
   );
   if (userSection) {
-    document.querySelector(".settings-savebar")?.insertAdjacentHTML("beforebegin", userSection);
+    // 用户管理是设置页的第五个区块，与左侧目录保持一致。
+    const userSectionMarkup = userSection.replace('class="settings-section-number">06', 'class="settings-section-number">05');
+    document.querySelector(".settings-savebar")?.insertAdjacentHTML("beforebegin", userSectionMarkup);
   }
   const togglePermissionEditor = (select, editor) => {
     if (!select || !editor) return;
