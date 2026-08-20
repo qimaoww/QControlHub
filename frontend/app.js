@@ -313,20 +313,21 @@ function renderLogin(message = "") {
   document.body.className = "login-body";
   document.title = "登录 · QControlHub";
   app.style.display = "contents";
-  app.innerHTML = `<button class="theme-toggle login-theme-toggle" type="button" data-theme-toggle aria-label="切换颜色主题"><span data-theme-icon aria-hidden="true">☀</span></button><main class="login-shell compact-login"><section class="login-card"><a class="brand login-card-brand" href="#dashboard"><span class="brand-mark large">QH</span><strong>QControlHub</strong></a><div class="login-card-head"><h1>登录</h1></div>${message ? `<div class="alert error">${esc(message)}</div>` : ""}<form id="login-form" class="stack-form"><input class="visually-hidden" type="text" name="username" value="admin" autocomplete="username" tabindex="-1" aria-hidden="true"><label>管理令牌<input name="token" type="password" autocomplete="current-password" autofocus required minlength="32"></label><button class="button primary" type="submit">登录</button></form></section></main>`;
+  app.innerHTML = `<button class="theme-toggle login-theme-toggle" type="button" data-theme-toggle aria-label="切换颜色主题"><span data-theme-icon aria-hidden="true">☀</span></button><main class="login-shell compact-login"><section class="login-card"><a class="brand login-card-brand" href="#dashboard"><span class="brand-mark large">QH</span><strong>QControlHub</strong></a><div class="login-card-head"><h1>登录</h1></div>${message ? `<div class="alert error">${esc(message)}</div>` : ""}<form id="login-form" class="stack-form"><label>用户名<input name="username" type="text" value="admin" autocomplete="username" autofocus required maxlength="64" pattern="[A-Za-z0-9._-]+"></label><label>密码 / 管理令牌<input name="token" type="password" autocomplete="current-password" required minlength="12"></label><small class="settings-hint">可使用管理员令牌，或使用管理员创建的个人账号密码登录。</small><button class="button primary" type="submit">登录</button></form></section></main>`;
   applyTheme();
   document.querySelector("[data-theme-toggle]").onclick = toggleTheme;
   document
     .querySelector("#login-form")
     .addEventListener("submit", async (event) => {
       event.preventDefault();
-      const token = new FormData(event.currentTarget).get("token");
+      const form = new FormData(event.currentTarget);
+      const token = form.get("token");
       const button = event.currentTarget.querySelector("button");
       button.disabled = true;
       try {
         state.session = await api("/auth/login", {
           method: "POST",
-          body: JSON.stringify({ token }),
+          body: JSON.stringify({ username: form.get("username"), token }),
         });
         location.hash = "#dashboard";
         await render();
