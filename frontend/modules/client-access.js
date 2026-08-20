@@ -50,6 +50,7 @@ async function clientAccess() {
       .map((entry, entryIndex) => {
         const agent = agents.find((item) => item.id === entry.agent_id) || {};
         const agentStatus = agent.status || "unknown";
+        const managedAddress = Boolean(agent.labels?.client_address);
         const profiles = (entry.profiles || [])
           .map((item, profileIndex) => {
             const inputID = `client-share-${entryIndex}-${profileIndex}`;
@@ -62,11 +63,14 @@ async function clientAccess() {
             return `<article class="client-profile-card"><header><span><b>${esc(item.protocol)}</b><small>${esc(item.tag)} · ${esc(item.profile?.format)}</small></span><span class="status-label warn">含凭据</span></header><form class="secret-value-control client-share-control" action="#"><input id="${inputID}" type="password" readonly autocomplete="off" spellcheck="false" value="${esc(item.profile?.uri)}"><button type="button" data-secret-visibility>显示</button><button type="button" data-copy-target="#${inputID}">复制</button></form><details class="client-parameter-menu"><summary>逐项参数 <i>展开</i></summary><div class="client-parameters">${fields}</div></details></article>`;
           })
           .join("");
+        const addressForm = `<form class="client-address-form" data-client-address-agent="${esc(entry.agent_id)}"><label><span>客户端连接地址</span><input name="address" required maxlength="253" autocomplete="off" value="${esc(entry.address || "")}" placeholder="例如 203.0.113.10 或 node.example.com"><small>填写客户端实际访问节点的域名或 IP，不要填写 0.0.0.0。</small></label><div><button class="button primary" type="submit">保存并生成配置</button>${managedAddress ? `<button class="button" type="button" data-clear-client-address="${esc(entry.agent_id)}">恢复自动识别</button>` : ""}</div></form>`;
         const addressSetup = entry.address_required
           ? can("agents.manage")
-            ? `<form class="client-address-form" data-client-address-agent="${esc(entry.agent_id)}"><label><span>客户端连接地址</span><input name="address" required maxlength="253" autocomplete="off" placeholder="例如 203.0.113.10 或 node.example.com"><small>填写客户端实际访问节点的域名或 IP，不要填写 0.0.0.0。</small></label><button class="button primary" type="submit">保存并生成配置</button></form>`
+            ? addressForm
             : `<p class="client-address-missing">管理员尚未设置客户端连接地址，请联系节点管理员。</p>`
-          : "";
+          : can("agents.manage")
+            ? `<details class="client-address-editor"><summary>修改连接地址 <i>＋</i></summary>${addressForm}</details>`
+            : "";
         const statusLabel = entry.address_required
           ? "待设置地址"
           : agentStatus === "online"
@@ -172,6 +176,22 @@ function bindClientAccessPage() {
       } catch (error) {
         notify(error.message, "error");
         if (button) button.disabled = false;
+      }
+    });
+  });
+  document.querySelectorAll("[data-clear-client-address]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+      try {
+        await api(`/agents/${encodeURIComponent(button.dataset.clearClientAddress)}/client-address`, {
+          method: "PUT",
+          body: JSON.stringify({ address: "" }),
+        });
+        notify("已恢复自动识别连接地址");
+        await clientAccess();
+      } catch (error) {
+        notify(error.message, "error");
+        button.disabled = false;
       }
     });
   });
