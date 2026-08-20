@@ -374,7 +374,9 @@ function bindAgentPage(agentItems) {
       const escapedToken = created.token.replaceAll("'", "'\\''");
       const escapedName = name.replaceAll("'", "'\\''");
       const command = `curl -fsSL -H 'X-QControlHub-Enrollment: ${escapedToken}' ${location.origin}/install-agent.sh | sudo bash -s -- ${location.origin} '${escapedToken}' '${escapedName}'`;
-      showCommand(command);
+      showCommand(command, () => {
+        void agents();
+      });
     };
   document
     .querySelectorAll("[data-agent-refresh]")
@@ -738,7 +740,7 @@ function bindCodeEditors() {
   });
 }
 
-function showCommand(command) {
+function showCommand(command, onClose) {
   const previousFocus = document.activeElement;
   const wrap = document.createElement("div");
   wrap.className = "modal-backdrop";
@@ -747,13 +749,17 @@ function showCommand(command) {
   const copyButton = wrap.querySelector("[data-copy-command]");
   const commandInput = wrap.querySelector("[data-command]");
   let resetCopyLabel;
+  let closed = false;
   const close = () => {
+    if (closed) return;
+    closed = true;
     window.clearTimeout(resetCopyLabel);
     document.removeEventListener("keydown", onKeydown);
     wrap.remove();
     if (previousFocus instanceof HTMLElement && previousFocus.isConnected) {
       previousFocus.focus();
     }
+    onClose?.();
   };
   const onKeydown = (event) => {
     if (event.key === "Escape") close();
