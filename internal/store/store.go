@@ -33,7 +33,7 @@ type Store struct {
 	taskWakes  map[string]chan struct{}
 }
 
-const currentSchemaVersion = 11
+const currentSchemaVersion = 12
 
 func Open(ctx context.Context, databaseURL string, allowInsecureRemote bool) (*Store, error) {
 	return OpenWithConfigKey(ctx, databaseURL, allowInsecureRemote, "")
@@ -1182,8 +1182,8 @@ ALTER TABLE configs ADD CONSTRAINT configs_content_check CHECK (octet_length(con
 CREATE TABLE IF NOT EXISTS tasks (
     id text PRIMARY KEY,
     agent_id text NOT NULL REFERENCES agents(id),
-	    action varchar(20) NOT NULL CHECK (action IN ('validate','deploy','read-config','start','stop','restart','status','install')),
-	    engine varchar(20) NOT NULL CHECK (engine IN ('mihomo','xray','sing-box','ss-rust')),
+    action varchar(20) NOT NULL CHECK (action IN ('validate','deploy','read-config','start','stop','restart','status','install','upgrade-agent')),
+	    engine varchar(20) NOT NULL CHECK (engine IN ('mihomo','xray','sing-box','ss-rust') OR (action='upgrade-agent' AND engine='')),
     config_id text REFERENCES configs(id),
     config_version integer,
 	    config_content text,
@@ -1204,7 +1204,7 @@ ALTER TABLE tasks ADD COLUMN IF NOT EXISTS lease_id text;
 	UPDATE tasks SET simulated=true
 	WHERE action<>'read-config' AND status='succeeded' AND simulated=false AND lower(COALESCE(output,'')) LIKE '%dry-run%';
 	ALTER TABLE tasks DROP CONSTRAINT IF EXISTS tasks_action_check;
-	ALTER TABLE tasks ADD CONSTRAINT tasks_action_check CHECK (action IN ('validate','deploy','read-config','start','stop','restart','status','install'));
+	ALTER TABLE tasks ADD CONSTRAINT tasks_action_check CHECK (action IN ('validate','deploy','read-config','start','stop','restart','status','install','upgrade-agent'));
 	ALTER TABLE tasks DROP CONSTRAINT IF EXISTS tasks_status_check;
 	ALTER TABLE tasks ADD CONSTRAINT tasks_status_check CHECK (status IN ('pending','running','succeeded','failed','canceled'));
 	ALTER TABLE configs DROP CONSTRAINT IF EXISTS configs_engine_check;
@@ -1212,7 +1212,7 @@ ALTER TABLE tasks ADD COLUMN IF NOT EXISTS lease_id text;
 	ALTER TABLE config_revisions DROP CONSTRAINT IF EXISTS config_revisions_engine_check;
 	ALTER TABLE config_revisions ADD CONSTRAINT config_revisions_engine_check CHECK (engine IN ('mihomo','xray','sing-box','ss-rust'));
 	ALTER TABLE tasks DROP CONSTRAINT IF EXISTS tasks_engine_check;
-	ALTER TABLE tasks ADD CONSTRAINT tasks_engine_check CHECK (engine IN ('mihomo','xray','sing-box','ss-rust'));
+	ALTER TABLE tasks ADD CONSTRAINT tasks_engine_check CHECK (engine IN ('mihomo','xray','sing-box','ss-rust') OR (action='upgrade-agent' AND engine=''));
 
 CREATE TABLE IF NOT EXISTS enrollment_tokens (
     id text PRIMARY KEY,
@@ -1255,6 +1255,20 @@ CREATE TABLE IF NOT EXISTS panel_settings (
 );
 ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS webhook_url varchar(500) NOT NULL DEFAULT '';
 ALTER TABLE panel_settings DROP COLUMN IF EXISTS enrollment_ttl_minutes;
+
+CREATE TABLE IF NOT EXISTS panel_users (
+    id text PRIMARY KEY,
+    username varchar(64) NOT NULL,
+    display_name varchar(100) NOT NULL DEFAULT '',
+    role varchar(20) NOT NULL CHECK (role IN ('admin','operator','readonly')),
+    password_hash varchar(100) NOT NULL,
+    disabled boolean NOT NULL DEFAULT false,
+    created_at timestamptz NOT NULL,
+    updated_at timestamptz NOT NULL,
+    last_login_at timestamptz
+);
+CREATE UNIQUE INDEX IF NOT EXISTS panel_users_username_unique_idx ON panel_users(lower(username));
+CREATE INDEX IF NOT EXISTS panel_users_status_idx ON panel_users(disabled,username);
 
 INSERT INTO panel_settings (
     id,panel_name,panel_description,task_page_size,task_poll_interval_ms,updated_at

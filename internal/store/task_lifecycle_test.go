@@ -44,6 +44,13 @@ func TestTaskCancelRetryAndFiltersWithPostgreSQL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load baseline overview: %v", err)
 	}
+	upgrade, err := dataStore.CreateTask(ctx, core.TaskRequest{AgentID: agent.ID, Action: core.ActionUpgradeAgent})
+	if err != nil || upgrade.Engine != "" {
+		t.Fatalf("create Agent upgrade task = %+v, %v", upgrade, err)
+	}
+	if err := dataStore.CancelTask(ctx, upgrade.ID); err != nil {
+		t.Fatalf("cancel Agent upgrade task: %v", err)
+	}
 	original, err := dataStore.CreateTask(ctx, core.TaskRequest{
 		AgentID: agent.ID, Action: core.ActionValidate, Engine: core.EngineMihomo, ConfigID: config.ID,
 	})
