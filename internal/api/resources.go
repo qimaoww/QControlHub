@@ -513,11 +513,21 @@ type clientAddressCandidate struct {
 func clientAddressCandidates(agent core.Agent) []clientAddressCandidate {
 	result := make([]clientAddressCandidate, 0, 8)
 	seen := make(map[string]struct{})
-	for _, key := range []string{"client_address", "public_host", "public_ip", "address"} {
+	labelSources := []struct {
+		key    string
+		source string
+	}{
+		{key: "client_address", source: "手动设置"},
+		{key: "public_host", source: "节点公网域名"},
+		{key: "public_ip", source: "节点公网 IP"},
+		{key: "address", source: "节点地址"},
+	}
+	for _, item := range labelSources {
+		key := item.key
 		if value := strings.TrimSpace(agent.Labels[key]); value != "" {
 			if _, exists := seen[value]; !exists {
 				seen[value] = struct{}{}
-				result = append(result, clientAddressCandidate{address: value, source: key})
+				result = append(result, clientAddressCandidate{address: value, source: item.source})
 			}
 		}
 	}
@@ -559,7 +569,7 @@ func clientAddressCandidates(agent core.Agent) []clientAddressCandidate {
 			continue
 		}
 		seen[item.address] = struct{}{}
-		result = append(result, clientAddressCandidate{address: item.address, source: item.name})
+		result = append(result, clientAddressCandidate{address: item.address, source: "节点网络接口 " + item.name})
 	}
 	return result
 }
