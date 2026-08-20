@@ -1,16 +1,12 @@
 export function installClientAccess(ctx) {
-  const { api, state, engines, esc, engineName, short, shell } = ctx;
+  const { api, state, engines, esc, engineName, short, shell, can, notify } = ctx;
 async function clientAccess() {
-  const [entries, agents, overview, settings] = await Promise.all([
+  const [entries, agents] = await Promise.all([
     api("/client-access"),
-    api("/agents"),
-    api("/overview"),
-    api("/settings"),
+    can("agents.read") ? api("/agents") : Promise.resolve([]),
   ]);
   state.data.agents = agents;
   state.data.clientAccessEntries = entries;
-  state.data.overview = overview;
-  state.data.settings = settings;
   const selectedAgent = state.data.accessAgent || "";
   const selectedEngine = state.data.accessEngine || "";
   const query = String(state.data.accessQuery || "")
@@ -44,11 +40,16 @@ async function clientAccess() {
     (total, entry) => total + (entry.profiles || []).length,
     0,
   );
-  const totalNodes = new Set(entries.map((entry) => entry.agent_id)).size;
+  const totalNodes = new Set(
+    entries
+      .filter((entry) => (entry.profiles || []).length > 0)
+      .map((entry) => entry.agent_id),
+  ).size;
   const results =
     filtered
       .map((entry, entryIndex) => {
         const agent = agents.find((item) => item.id === entry.agent_id) || {};
+        const agentStatus = agent.status || "unknown";
         const profiles = (entry.profiles || [])
           .map((item, profileIndex) => {
             const inputID = `client-share-${entryIndex}-${profileIndex}`;
@@ -61,7 +62,19 @@ async function clientAccess() {
             return `<article class="client-profile-card"><header><span><b>${esc(item.protocol)}</b><small>${esc(item.tag)} · ${esc(item.profile?.format)}</small></span><span class="status-label warn">含凭据</span></header><form class="secret-value-control client-share-control" action="#"><input id="${inputID}" type="password" readonly autocomplete="off" spellcheck="false" value="${esc(item.profile?.uri)}"><button type="button" data-secret-visibility>显示</button><button type="button" data-copy-target="#${inputID}">复制</button></form><details class="client-parameter-menu"><summary>逐项参数 <i>展开</i></summary><div class="client-parameters">${fields}</div></details></article>`;
           })
           .join("");
-        return `<article class="client-access-entry"><header class="client-access-entry-head"><div class="client-access-node"><span class="node-avatar">●</span><span><strong>${esc(entry.agent_name)}</strong><small>${esc(agent.os)} / ${esc(agent.arch)} · ${esc(short(entry.agent_id))}</small></span></div><div class="client-access-engine"><span class="engine-badge ${esc(entry.engine)}">${esc(engineName(entry.engine))}</span><span class="status-label ${agent.status === "online" ? "ok" : "muted"}">${agent.status === "online" ? "在线" : "离线"}</span></div></header><div class="client-access-entry-meta"><span><small>连接地址</small><code>${esc(entry.address)}</code></span><span><small>地址来源</small><strong>${esc(entry.source)}</strong></span><a href="#agent-config" data-config-agent="${esc(entry.agent_id)}" data-config-engine="${esc(entry.engine)}">服务端配置 →</a></div><div class="client-access-profile-grid">${profiles}</div></article>`;
+        const addressSetup = entry.address_required
+          ? can("agents.manage")
+            ? `<form class="client-address-form" data-client-address-agent="${esc(entry.agent_id)}"><label><span>客户端连接地址</span><input name="address" required maxlength="253" autocomplete="off" placeholder="例如 203.0.113.10 或 node.example.com"><small>填写客户端实际访问节点的域名或 IP，不要填写 0.0.0.0。</small></label><button class="button primary" type="submit">保存并生成配置</button></form>`
+            : `<p class="client-address-missing">管理员尚未设置客户端连接地址，请联系节点管理员。</p>`
+          : "";
+        const statusLabel = entry.address_required
+          ? "待设置地址"
+          : agentStatus === "online"
+            ? "在线"
+            : agentStatus === "offline"
+              ? "离线"
+              : "状态未知";
+        return `<article class="client-access-entry"><header class="client-access-entry-head"><div class="client-access-node"><span class="node-avatar">●</span><span><strong>${esc(entry.agent_name)}</strong><small>${esc(agent.os || "节点")} / ${esc(agent.arch || "")}${agent.os || agent.arch ? ` · ${esc(short(entry.agent_id))}` : ""}</small></span></div><div class="client-access-engine"><span class="engine-badge ${esc(entry.engine)}">${esc(engineName(entry.engine))}</span><span class="status-label ${entry.address_required ? "warn" : agentStatus === "online" ? "ok" : "muted"}">${statusLabel}</span></div></header><div class="client-access-entry-meta"><span><small>连接地址</small><code>${esc(entry.address || "未设置")}</code></span><span><small>地址来源</small><strong>${esc(entry.source || "需要管理员设置")}</strong></span><a href="#agent-config" data-config-agent="${esc(entry.agent_id)}" data-config-engine="${esc(entry.engine)}">服务端配置 →</a></div>${addressSetup}<div class="client-access-profile-grid">${profiles || `<div class="client-access-entry-empty"><b>暂时无法生成客户端配置</b><span>配置已部署，但需要一个可访问的节点地址。</span></div>`}</div></article>`;
       })
       .join("") ||
     `<section class="client-access-empty-state"><span>⌁</span><h2>${entries.length ? "没有匹配的客户端配置" : "尚未生成客户端配置"}</h2><p>${entries.length ? "请调整搜索或筛选条件。" : "安装内核并成功部署可解析的服务端入站后，客户端连接信息会自动出现在这里。"}</p><a class="button primary" href="#agents">前往节点管理</a></section>`;
@@ -142,6 +155,25 @@ function bindClientAccessPage() {
       state.data.agentId = link.dataset.configAgent;
       state.data.engine = link.dataset.configEngine;
     };
+  });
+  document.querySelectorAll("[data-client-address-agent]").forEach((form) => {
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const button = form.querySelector("button[type=submit]");
+      const address = new FormData(form).get("address");
+      if (button) button.disabled = true;
+      try {
+        await api(`/agents/${encodeURIComponent(form.dataset.clientAddressAgent)}/client-address`, {
+          method: "PUT",
+          body: JSON.stringify({ address }),
+        });
+        notify("客户端连接地址已保存");
+        await clientAccess();
+      } catch (error) {
+        notify(error.message, "error");
+        if (button) button.disabled = false;
+      }
+    });
   });
 }
   return clientAccess;

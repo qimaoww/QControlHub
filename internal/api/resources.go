@@ -20,12 +20,13 @@ type clientAccessProfile struct {
 }
 
 type clientAccessEntry struct {
-	AgentID   string                `json:"agent_id"`
-	AgentName string                `json:"agent_name"`
-	Engine    core.Engine           `json:"engine"`
-	Address   string                `json:"address"`
-	Source    string                `json:"source"`
-	Profiles  []clientAccessProfile `json:"profiles"`
+	AgentID         string                `json:"agent_id"`
+	AgentName       string                `json:"agent_name"`
+	Engine          core.Engine           `json:"engine"`
+	Address         string                `json:"address"`
+	Source          string                `json:"source"`
+	AddressRequired bool                  `json:"address_required,omitempty"`
+	Profiles        []clientAccessProfile `json:"profiles"`
 }
 
 type configCatalogResource struct {
@@ -464,7 +465,9 @@ func (s *Server) listClientAccess(w http.ResponseWriter, request *http.Request) 
 			continue
 		}
 		serverName := firstLabel(agent, "tls_server_name", "server_name")
-		for _, candidate := range clientAddressCandidates(agent) {
+		profileGenerated := false
+		candidates := clientAddressCandidates(agent)
+		for _, candidate := range candidates {
 			profiles := make([]clientAccessProfile, 0, len(inputs))
 			for _, input := range inputs {
 				profile, profileErr := serverconfig.BuildClientProfile(input, candidate.address, serverName)
@@ -482,8 +485,15 @@ func (s *Server) listClientAccess(w http.ResponseWriter, request *http.Request) 
 					AgentID: agent.ID, AgentName: agent.Name, Engine: deployment.Engine,
 					Address: candidate.address, Source: candidate.source, Profiles: profiles,
 				})
+				profileGenerated = true
 				break
 			}
+		}
+		if !profileGenerated && len(candidates) == 0 {
+			entries = append(entries, clientAccessEntry{
+				AgentID: agent.ID, AgentName: agent.Name, Engine: deployment.Engine,
+				AddressRequired: true, Profiles: []clientAccessProfile{},
+			})
 		}
 	}
 	sort.SliceStable(entries, func(i, j int) bool {
@@ -503,7 +513,7 @@ type clientAddressCandidate struct {
 func clientAddressCandidates(agent core.Agent) []clientAddressCandidate {
 	result := make([]clientAddressCandidate, 0, 8)
 	seen := make(map[string]struct{})
-	for _, key := range []string{"public_host", "public_ip", "address"} {
+	for _, key := range []string{"client_address", "public_host", "public_ip", "address"} {
 		if value := strings.TrimSpace(agent.Labels[key]); value != "" {
 			if _, exists := seen[value]; !exists {
 				seen[value] = struct{}{}

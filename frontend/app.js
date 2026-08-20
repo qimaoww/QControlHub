@@ -559,7 +559,7 @@ const dashboard = installDashboard({ api, state, esc, engineName, heartbeat, sta
 const agentModule = installAgents({ api, optionalAPI, state, engines, can, esc, engineName, statusTone, serviceStatusName, short, date, ago, heartbeat, percent, bytes, conciseVersion, rate, actionName, serviceActionDisabled, trafficChart, renderConfigDiff, notify, confirmAction, shell });
 const { agents, submitTask, bindCodeEditors, showCommand } = agentModule;
 
-const clientAccess = installClientAccess({ api, state, engines, esc, engineName, short, shell });
+const clientAccess = installClientAccess({ api, state, engines, esc, engineName, short, can, notify, shell });
 
 const configModule = installConfigPages({ api, optionalAPI, state, engines, can, esc, engineName, conciseVersion, date, ago, bytes, confirmAction, notify, shell, submitTask, bindCodeEditors });
 const { agentConfig, liveConfig, archiveConfigs } = configModule;
@@ -613,8 +613,8 @@ async function render() {
       return;
     }
     [state.data.overview, state.data.settings] = await Promise.all([
-      api("/overview"),
-      api("/settings"),
+      can("overview.read") ? api("/overview") : Promise.resolve(state.data.overview || {}),
+      can("settings.read") ? api("/settings") : Promise.resolve(state.data.settings || {}),
     ]);
     const pages = {
       dashboard,
