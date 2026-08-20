@@ -32,7 +32,7 @@ func main() {
 		enabledSpecs[engine] = specs[engine]
 	}
 
-	executor := &agent.Executor{DryRun: envBool("QCH_AGENT_DRY_RUN", true), Specs: enabledSpecs}
+	executor := &agent.Executor{Specs: enabledSpecs}
 	client, err := agent.NewClient(agent.ClientConfig{
 		ServerURL:         env("QCH_SERVER_URL", "http://localhost:8080"),
 		EnrollmentToken:   os.Getenv("QCH_ENROLLMENT_TOKEN"),
@@ -53,7 +53,7 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	slog.Info("QControlHub agent starting", "version", version, "dry_run", executor.DryRun)
+	slog.Info("QControlHub agent starting", "version", version)
 	if err := client.Run(ctx); err != nil {
 		if errors.Is(err, agent.ErrIdentityRejected) {
 			slog.Error("agent identity is no longer valid; remove the state file and enroll again", "error", err)

@@ -12,11 +12,11 @@ QControlHub 是一个纯 Go 的 Linux 节点配置与远程运维控制平台。
 - 支持 `mihomo`、`xray`、`sing-box`、`ss-rust` 四类配置，单份配置上限 2 MiB。
 - 远程节点以服务端入站方案为主：可随机生成并自定义端口、PSK、密码、UUID、WebSocket 路径、Reality X25519 密钥与 Short ID，再生成完整原生配置；部署后由节点运行区直接使用 Agent 上报的默认路由接口地址，生成带安全遮罩的分享 URI 和逐项接入参数，配置编辑器不再混入客户端导出表单。
 - 支持 `validate`、`deploy`、`read-config`、`start`、`stop`、`restart`、`status` 与 `install` 八类远程任务；配置工作区可从 Agent 白名单路径读取节点实际文件，经目标内核校验后载入手动编辑器。已预置 systemd 单元和初始配置的内核可选择官方稳定版、开发版或严格版本号安全升级。
-- dry-run 结果会以结构化 `simulated` 状态保存并在界面标为“模拟完成”；模拟部署不会更新“已部署配置”，避免把未写入节点的版本误报为真实生效。
+- 面板任务均由目标节点真实执行，执行结果、服务状态和已部署配置保持一致，不提供“模拟执行”分支。
 - 节点结构化编辑明确区分增加、修改和删除：增加拒绝重名，修改/删除要求目标真实存在，所有操作都保留其他入站与未知字段，并强制进入节点内核校验或部署流程。
 - Agent 部署前调用真实内核校验，采用受限目录句柄、`fsync` 和重命名完成原子替换；最多保留 3 份 `0600` 备份，重启失败时自动回滚并尝试恢复服务。
 - 内核版本任务只访问 MetaCubeX/mihomo、XTLS/Xray-core、SagerNet/sing-box 与 shadowsocks/shadowsocks-rust 官方 GitHub Release；Agent 固定选择当前 Linux 架构资产，强制核对 GitHub 提供的 SHA-256 后原子替换，重启失败自动恢复上一二进制。
-- 管理 API 使用 Bearer 管理令牌；Web 控制台登录后使用短期服务端会话及 CSRF 防护。支持 `QCH_OPERATOR_TOKENS` 与 `QCH_READONLY_TOKENS` 划分运维/只读角色，API 与界面按角色分级。
+- 管理 API 使用 Bearer 管理令牌；Web 控制台登录后使用短期服务端会话及 CSRF 防护。支持 `QCH_OPERATOR_TOKENS`、`QCH_AUDITOR_TOKENS` 与 `QCH_READONLY_TOKENS` 划分运维、审计和只读角色，API 与界面按权限分级。
 - 管理员为每个节点生成独立的添加节点命令；命令绑定节点名称，可重复安装，删除添加记录后立即失效。后续 WSS 握手使用 Ed25519 签名、时间窗和持久化 nonce 防重放。
 - 重复安装会原位替换节点密钥并关闭旧 WSS，不会产生同名节点；移除节点会终止未完成任务并永久拒绝原签名身份重连。
 - 任务失败、节点离线或恢复在线时，可通过设置页配置的 Webhook 地址接收 HMAC-SHA256 签名的结构化 JSON 事件（`QCH_WEBHOOK_SECRET`）。
@@ -91,7 +91,7 @@ curl -fsSL -H 'X-QControlHub-Enrollment: <添加节点凭证>' https://<面板�
   | sudo bash -s -- http://<控制面地址>:8080 <添加节点凭证> <节点名>
 ```
 
-脚本下载端点和 Agent 二进制都要求通过 `X-QControlHub-Enrollment` 提交该节点的添加凭证；删除添加记录后不能继续下载或注册。脚本随后运行核心服务引导、写入 `/etc/qcontrolhub/agent.env`（`0600`）、安装 `qagent.service` 并启动。默认 `QCH_AGENT_DRY_RUN=true`，首轮只做校验不写文件。
+脚本下载端点和 Agent 二进制都要求通过 `X-QControlHub-Enrollment` 提交该节点的添加凭证；删除添加记录后不能继续下载或注册。脚本随后运行核心服务引导、写入 `/etc/qcontrolhub/agent.env`（`0600`）、安装 `qagent.service` 并启动。节点任务安装后即可真实执行。
 
 > 节点没有预装内核二进制时，先执行 `sudo bash deploy/remote/install-core-engines.sh` 从官方 Release 下载 mihomo / xray / sing-box / ssserver。
 
@@ -118,7 +118,7 @@ make down
 
 ## 接入 Agent
 
-Agent 默认是安全的 dry-run 模式。先构建二进制：
+Agent 以受限 root 服务运行，所有任务都会在目标节点真实执行。先构建二进制：
 
 ```bash
 make build
@@ -128,7 +128,7 @@ make build
 
 如果控制面使用私有 CA 或局域网自签名证书，先把 CA PEM 安装到远程主机，再设置 `QCH_TLS_CA_FILE=/etc/qcontrolhub/control-plane-ca.pem`；不要使用跳过 TLS 校验的开关。
 
-在使用节点页的“首次安装 / 切换”前，可在空白 Linux 节点的仓库目录执行 `sudo deploy/bootstrap-core-services.sh`。它会创建非 root 的 `qcontrolhub-core` 运行用户，在 `/usr/local/lib/qagent/cores` 下准备专用内核目录，安装四个带 `qagent-` 前缀的受限 systemd 单元，并且只在目标配置不存在时写入绑定回环地址的最小配置。脚本不读取、停止、移动或删除旧的通用内核服务和二进制；需要重装时先手动卸载旧 QAgent。随后确认 Agent 的引擎路径、服务名与配置目标无误，再将 `QCH_AGENT_DRY_RUN` 改为 `false`。默认映射如下：
+在使用节点页的“首次安装 / 切换”前，可在空白 Linux 节点的仓库目录执行 `sudo deploy/bootstrap-core-services.sh`。它会创建非 root 的 `qcontrolhub-core` 运行用户，在 `/usr/local/lib/qagent/cores` 下准备专用内核目录，安装四个带 `qagent-` 前缀的受限 systemd 单元，并且只在目标配置不存在时写入绑定回环地址的最小配置。脚本不读取、停止、移动或删除旧的通用内核服务和二进制；需要重装时先手动卸载旧 QAgent。随后确认 Agent 的引擎路径、服务名与配置目标无误。默认映射如下：
 
 | 内核 | 二进制 | 配置路径 | systemd 服务 |
 | --- | --- | --- | --- |

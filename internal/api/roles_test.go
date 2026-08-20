@@ -16,6 +16,7 @@ func TestManagementAPIRouteAuthorizationMatrix(t *testing.T) {
 	const (
 		adminToken    = "admin-route-policy-token"
 		operatorToken = "operator-route-policy-token"
+		auditorToken  = "auditor-route-policy-token"
 		readonlyToken = "readonly-route-policy-token"
 	)
 	type route struct{ method, path string }
@@ -59,7 +60,7 @@ func TestManagementAPIRouteAuthorizationMatrix(t *testing.T) {
 		{http.MethodPost, "/api/v1/templates/tpl_test/apply"},
 	}
 	status := func(item route, token string) int {
-		handler := New(nil, Config{AdminToken: adminToken, OperatorTokens: []string{operatorToken}, ReadonlyTokens: []string{readonlyToken}}).Handler()
+		handler := New(nil, Config{AdminToken: adminToken, OperatorTokens: []string{operatorToken}, AuditorTokens: []string{auditorToken}, ReadonlyTokens: []string{readonlyToken}}).Handler()
 		request := httptest.NewRequest(item.method, item.path, nil)
 		if token != "" {
 			request.Header.Set("Authorization", "Bearer "+token)
@@ -100,6 +101,16 @@ func TestManagementAPIRouteAuthorizationMatrix(t *testing.T) {
 	for _, item := range operatorDenied {
 		if got := status(item, operatorToken); got != http.StatusForbidden {
 			t.Errorf("%s %s with operator token = %d, want %d", item.method, item.path, got, http.StatusForbidden)
+		}
+	}
+	auditorDenied := []route{
+		{http.MethodPost, "/api/v1/tasks"},
+		{http.MethodPost, "/api/v1/configs"},
+		{http.MethodGet, "/api/v1/settings"},
+	}
+	for _, item := range auditorDenied {
+		if got := status(item, auditorToken); got != http.StatusForbidden {
+			t.Errorf("%s %s with auditor token = %d, want %d", item.method, item.path, got, http.StatusForbidden)
 		}
 	}
 }

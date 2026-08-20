@@ -33,7 +33,7 @@ type Store struct {
 	taskWakes  map[string]chan struct{}
 }
 
-const currentSchemaVersion = 12
+const currentSchemaVersion = 15
 
 func Open(ctx context.Context, databaseURL string, allowInsecureRemote bool) (*Store, error) {
 	return OpenWithConfigKey(ctx, databaseURL, allowInsecureRemote, "")
@@ -156,6 +156,10 @@ func (s *Store) EnrollAgent(ctx context.Context, request core.EnrollRequest, enr
 		return core.Agent{}, fmt.Errorf("%w: invalid Ed25519 public key", ErrInvalid)
 	}
 	capabilities, _ := json.Marshal(request.Capabilities)
+	features, _ := json.Marshal(request.Features)
+	if len(request.Features) == 0 {
+		features = []byte(`[]`)
+	}
 	labels, _ := json.Marshal(request.Labels)
 	runtimeState := []byte(`{}`)
 	enrolledAt := time.Now().UTC()
@@ -199,19 +203,19 @@ func (s *Store) EnrollAgent(ctx context.Context, request core.EnrollRequest, enr
 	}
 	if reinstalled {
 		_, err = tx.Exec(ctx, `
-			UPDATE agents SET name=$2,version=$3,os=$4,arch=$5,capabilities=$6,labels=$7,runtime=$8,
-				metrics='{}'::jsonb,public_key=$9,last_seen=$10,enrolled_at=$11,revoked_at=NULL
+			UPDATE agents SET name=$2,version=$3,os=$4,arch=$5,capabilities=$6,features=$7,labels=$8,runtime=$9,
+				metrics='{}'::jsonb,public_key=$10,last_seen=$11,enrolled_at=$12,revoked_at=NULL
 			WHERE id=$1`, id, name, strings.TrimSpace(request.Version), strings.TrimSpace(request.OS), strings.TrimSpace(request.Arch),
-			capabilities, labels, runtimeState, publicKey, lastSeen, enrolledAt)
+			capabilities, features, labels, runtimeState, publicKey, lastSeen, enrolledAt)
 		if err == nil {
 			_, err = tx.Exec(ctx, `DELETE FROM agent_nonces WHERE agent_id=$1`, id)
 		}
 	} else {
 		_, err = tx.Exec(ctx, `
-			INSERT INTO agents (id,name,version,os,arch,capabilities,labels,runtime,public_key,last_seen,enrolled_at,enrollment_id)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+			INSERT INTO agents (id,name,version,os,arch,capabilities,features,labels,runtime,public_key,last_seen,enrolled_at,enrollment_id)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
 			id, name, strings.TrimSpace(request.Version), strings.TrimSpace(request.OS), strings.TrimSpace(request.Arch),
-			capabilities, labels, runtimeState, publicKey, lastSeen, enrolledAt, nullableEnrollmentID(reusable, enrollmentID))
+			capabilities, features, labels, runtimeState, publicKey, lastSeen, enrolledAt, nullableEnrollmentID(reusable, enrollmentID))
 	}
 	if err != nil {
 		return core.Agent{}, mapError(err)
@@ -221,7 +225,7 @@ func (s *Store) EnrollAgent(ctx context.Context, request core.EnrollRequest, enr
 	}
 	return core.Agent{
 		ID: id, Name: name, Version: request.Version,
-		OS: request.OS, Arch: request.Arch, Capabilities: append([]core.Engine(nil), request.Capabilities...),
+		OS: request.OS, Arch: request.Arch, Capabilities: append([]core.Engine(nil), request.Capabilities...), Features: append([]string(nil), request.Features...),
 		Labels: cloneLabels(request.Labels), Runtime: map[core.Engine]core.RuntimeState{},
 		LastSeen: lastSeen, EnrolledAt: enrolledAt, Status: "offline", Reinstalled: reinstalled,
 	}, nil
@@ -369,10 +373,17 @@ func (s *Store) Heartbeat(ctx context.Context, id string, heartbeat core.Heartbe
 	if err != nil {
 		return err
 	}
+	featuresState, err := json.Marshal(heartbeat.Features)
+	if err != nil {
+		return err
+	}
+	if len(heartbeat.Features) == 0 {
+		featuresState = []byte(`[]`)
+	}
 	command, err := s.pool.Exec(ctx, `
 			UPDATE agents SET last_seen=now(), version=CASE WHEN $2='' THEN version ELSE $2 END, runtime=$3,
-			                  metrics=COALESCE($4::jsonb,metrics)
-			WHERE id=$1 AND revoked_at IS NULL`, id, heartbeat.Version, runtimeState, metricsState)
+			                  metrics=COALESCE($4::jsonb,metrics), features=CASE WHEN jsonb_array_length($5::jsonb)=0 THEN features ELSE $5::jsonb END
+			WHERE id=$1 AND revoked_at IS NULL`, id, heartbeat.Version, runtimeState, metricsState, featuresState)
 	if err != nil {
 		return err
 	}
@@ -384,7 +395,7 @@ func (s *Store) Heartbeat(ctx context.Context, id string, heartbeat core.Heartbe
 
 func (s *Store) ListAgents(ctx context.Context) ([]core.Agent, error) {
 	rows, err := s.pool.Query(ctx, `
-			SELECT id,name,version,os,arch,capabilities,labels,runtime,metrics,last_seen,enrolled_at
+			SELECT id,name,version,os,arch,capabilities,features,labels,runtime,metrics,last_seen,enrolled_at
 		FROM agents WHERE revoked_at IS NULL ORDER BY enrolled_at DESC`)
 	if err != nil {
 		return nil, err
@@ -394,11 +405,14 @@ func (s *Store) ListAgents(ctx context.Context) ([]core.Agent, error) {
 	now := time.Now().UTC()
 	for rows.Next() {
 		var agent core.Agent
-		var capabilities, labels, runtimeState, metricsState []byte
-		if err := rows.Scan(&agent.ID, &agent.Name, &agent.Version, &agent.OS, &agent.Arch, &capabilities, &labels, &runtimeState, &metricsState, &agent.LastSeen, &agent.EnrolledAt); err != nil {
+		var capabilities, features, labels, runtimeState, metricsState []byte
+		if err := rows.Scan(&agent.ID, &agent.Name, &agent.Version, &agent.OS, &agent.Arch, &capabilities, &features, &labels, &runtimeState, &metricsState, &agent.LastSeen, &agent.EnrolledAt); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal(capabilities, &agent.Capabilities); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(features, &agent.Features); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal(labels, &agent.Labels); err != nil {
@@ -653,8 +667,8 @@ func (s *Store) CreateTask(ctx context.Context, request core.TaskRequest) (core.
 		return core.Task{}, err
 	}
 	defer tx.Rollback(ctx)
-	var capabilitiesJSON []byte
-	if err := tx.QueryRow(ctx, `SELECT capabilities FROM agents WHERE id=$1 AND revoked_at IS NULL FOR UPDATE`, request.AgentID).Scan(&capabilitiesJSON); err != nil {
+	var capabilitiesJSON, featuresJSON []byte
+	if err := tx.QueryRow(ctx, `SELECT capabilities,features FROM agents WHERE id=$1 AND revoked_at IS NULL FOR UPDATE`, request.AgentID).Scan(&capabilitiesJSON, &featuresJSON); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return core.Task{}, fmt.Errorf("agent: %w", ErrNotFound)
 		}
@@ -663,6 +677,13 @@ func (s *Store) CreateTask(ctx context.Context, request core.TaskRequest) (core.
 	var capabilities []core.Engine
 	if err := json.Unmarshal(capabilitiesJSON, &capabilities); err != nil {
 		return core.Task{}, err
+	}
+	var features []string
+	if err := json.Unmarshal(featuresJSON, &features); err != nil {
+		return core.Task{}, err
+	}
+	if request.Action == core.ActionUpgradeAgent && !containsFeature(features, core.AgentFeatureSelfUpgrade) {
+		return core.Task{}, fmt.Errorf("%w: this Agent does not support remote upgrades; run the current one-click installation once", ErrConflict)
 	}
 	if request.Action != core.ActionUpgradeAgent && !containsEngine(capabilities, request.Engine) {
 		return core.Task{}, fmt.Errorf("%w: agent does not advertise the requested engine", ErrInvalid)
@@ -696,7 +717,7 @@ func (s *Store) CreateTask(ctx context.Context, request core.TaskRequest) (core.
 		task.ConfigID = ""
 	}
 	existing, existingErr := scanTask(tx.QueryRow(ctx, `
-		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),COALESCE(core_version,''),status,simulated,attempt,
+		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),COALESCE(core_version,''),status,attempt,
 		       COALESCE(output,''),COALESCE(error,''),created_at,started_at,finished_at
 		FROM tasks
 		WHERE agent_id=$1 AND action=$2 AND engine=$3
@@ -775,7 +796,7 @@ func (s *Store) ListTasksFiltered(ctx context.Context, agentID string, status co
 		limit = 500
 	}
 	rows, err := s.pool.Query(ctx, `
-		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),COALESCE(core_version,''),status,simulated,attempt,
+		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),COALESCE(core_version,''),status,attempt,
 		       COALESCE(output,''),COALESCE(error,''),created_at,started_at,finished_at
 		FROM tasks
 		WHERE ($1='' OR agent_id=$1) AND ($2='' OR status=$2) AND ($3='' OR action=$3)
@@ -797,7 +818,7 @@ func (s *Store) ListTasksFiltered(ctx context.Context, agentID string, status co
 
 func (s *Store) GetTask(ctx context.Context, id string) (core.Task, error) {
 	row := s.pool.QueryRow(ctx, `
-		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),COALESCE(core_version,''),status,simulated,attempt,
+		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),COALESCE(core_version,''),status,attempt,
 		       COALESCE(output,''),COALESCE(error,''),created_at,started_at,finished_at
 		FROM tasks WHERE id=$1`, id)
 	task, err := scanTask(row, false)
@@ -846,7 +867,7 @@ func (s *Store) RetryTask(ctx context.Context, id string) (core.Task, error) {
 func (s *Store) RunningTask(ctx context.Context, agentID string) (*core.Task, error) {
 	row := s.pool.QueryRow(ctx, `
 		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),
-		       COALESCE(config_content,''),COALESCE(core_version,''),status,simulated,attempt,COALESCE(lease_id,''),
+		       COALESCE(config_content,''),COALESCE(core_version,''),status,attempt,COALESCE(lease_id,''),
 		       COALESCE(output,''),COALESCE(error,''),created_at,started_at,finished_at
 		FROM tasks WHERE agent_id=$1 AND status='running'
 		ORDER BY started_at DESC LIMIT 1`, agentID)
@@ -881,7 +902,7 @@ func (s *Store) ClaimTask(ctx context.Context, agentID string) (*core.Task, erro
 		UPDATE tasks t SET status='running',started_at=now(),attempt=attempt+1,lease_id=$2
 		FROM next_task n WHERE t.id=n.id
 		RETURNING t.id,t.agent_id,t.action,t.engine,COALESCE(t.config_id,''),COALESCE(t.config_version,0),
-		          COALESCE(t.config_content,''),COALESCE(t.core_version,''),t.status,t.simulated,t.attempt,COALESCE(t.lease_id,''),COALESCE(t.output,''),COALESCE(t.error,''),
+		          COALESCE(t.config_content,''),COALESCE(t.core_version,''),t.status,t.attempt,COALESCE(t.lease_id,''),COALESCE(t.output,''),COALESCE(t.error,''),
 		          t.created_at,t.started_at,t.finished_at`, agentID, leaseID)
 	task, err := scanTask(row, true)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -958,9 +979,9 @@ func (s *Store) CompleteTask(ctx context.Context, agentID, taskID string, result
 		return err
 	}
 	_, err = tx.Exec(ctx, `
-		UPDATE tasks SET status=$4,output=$5,error=$6,finished_at=now(),config_content=NULLIF($7,''),simulated=$8,lease_id=NULL
+		UPDATE tasks SET status=$4,output=$5,error=$6,finished_at=now(),config_content=NULLIF($7,''),lease_id=NULL
 		WHERE id=$1 AND agent_id=$2 AND lease_id=$3 AND status='running'`,
-		taskID, agentID, result.LeaseID, status, storedOutput, storedError, storedContent, result.Simulated)
+		taskID, agentID, result.LeaseID, status, storedOutput, storedError, storedContent)
 	if err != nil {
 		return err
 	}
@@ -995,7 +1016,7 @@ func (s *Store) RecentReadTask(ctx context.Context, agentID string, engine core.
 		return core.Task{}, ErrNotFound
 	}
 	row := s.pool.QueryRow(ctx, `
-		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),COALESCE(core_version,''),status,simulated,attempt,
+		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),COALESCE(core_version,''),status,attempt,
 		       COALESCE(output,''),COALESCE(error,''),created_at,started_at,finished_at
 		FROM tasks
 		WHERE agent_id=$1 AND engine=$2 AND action=$3 AND status='succeeded'
@@ -1051,11 +1072,11 @@ func scanTask(row rowScanner, includeContent bool) (core.Task, error) {
 	var err error
 	if includeContent {
 		err = row.Scan(&task.ID, &task.AgentID, &task.Action, &task.Engine, &task.ConfigID, &task.ConfigVersion,
-			&task.ConfigContent, &task.CoreVersion, &task.Status, &task.Simulated, &task.Attempt, &task.LeaseID, &task.Output, &task.Error,
+			&task.ConfigContent, &task.CoreVersion, &task.Status, &task.Attempt, &task.LeaseID, &task.Output, &task.Error,
 			&task.CreatedAt, &task.StartedAt, &task.FinishedAt)
 	} else {
 		err = row.Scan(&task.ID, &task.AgentID, &task.Action, &task.Engine, &task.ConfigID, &task.ConfigVersion,
-			&task.CoreVersion, &task.Status, &task.Simulated, &task.Attempt, &task.Output, &task.Error,
+			&task.CoreVersion, &task.Status, &task.Attempt, &task.Output, &task.Error,
 			&task.CreatedAt, &task.StartedAt, &task.FinishedAt)
 	}
 	return task, err
@@ -1085,6 +1106,15 @@ func validateConfigMetadata(rawName, rawDescription string) (string, string, err
 }
 
 func containsEngine(values []core.Engine, expected core.Engine) bool {
+	for _, value := range values {
+		if value == expected {
+			return true
+		}
+	}
+	return false
+}
+
+func containsFeature(values []string, expected string) bool {
 	for _, value := range values {
 		if value == expected {
 			return true
@@ -1132,6 +1162,7 @@ CREATE TABLE IF NOT EXISTS agents (
     os varchar(50) NOT NULL,
     arch varchar(50) NOT NULL,
     capabilities jsonb NOT NULL,
+	features jsonb NOT NULL DEFAULT '[]'::jsonb,
     labels jsonb NOT NULL DEFAULT '{}'::jsonb,
 	    runtime jsonb NOT NULL DEFAULT '{}'::jsonb,
 	    metrics jsonb NOT NULL DEFAULT '{}'::jsonb,
@@ -1142,6 +1173,7 @@ CREATE TABLE IF NOT EXISTS agents (
 	);
 
 	ALTER TABLE agents ADD COLUMN IF NOT EXISTS metrics jsonb NOT NULL DEFAULT '{}'::jsonb;
+	ALTER TABLE agents ADD COLUMN IF NOT EXISTS features jsonb NOT NULL DEFAULT '[]'::jsonb;
 
 CREATE TABLE IF NOT EXISTS configs (
     id text PRIMARY KEY,
@@ -1189,8 +1221,7 @@ CREATE TABLE IF NOT EXISTS tasks (
 	    config_content text,
 	    core_version varchar(64),
 	    status varchar(20) NOT NULL CHECK (status IN ('pending','running','succeeded','failed','canceled')),
-	    simulated boolean NOT NULL DEFAULT false,
-    attempt integer NOT NULL DEFAULT 0,
+	    attempt integer NOT NULL DEFAULT 0,
     output text,
     error text,
     created_at timestamptz NOT NULL,
@@ -1200,9 +1231,8 @@ CREATE TABLE IF NOT EXISTS tasks (
 
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS lease_id text;
 	ALTER TABLE tasks ADD COLUMN IF NOT EXISTS core_version varchar(64);
-	ALTER TABLE tasks ADD COLUMN IF NOT EXISTS simulated boolean NOT NULL DEFAULT false;
-	UPDATE tasks SET simulated=true
-	WHERE action<>'read-config' AND status='succeeded' AND simulated=false AND lower(COALESCE(output,'')) LIKE '%dry-run%';
+	DROP INDEX IF EXISTS tasks_latest_deployment_idx;
+	ALTER TABLE tasks DROP COLUMN IF EXISTS simulated;
 	ALTER TABLE tasks DROP CONSTRAINT IF EXISTS tasks_action_check;
 	ALTER TABLE tasks ADD CONSTRAINT tasks_action_check CHECK (action IN ('validate','deploy','read-config','start','stop','restart','status','install','upgrade-agent'));
 	ALTER TABLE tasks DROP CONSTRAINT IF EXISTS tasks_status_check;
@@ -1260,13 +1290,15 @@ CREATE TABLE IF NOT EXISTS panel_users (
     id text PRIMARY KEY,
     username varchar(64) NOT NULL,
     display_name varchar(100) NOT NULL DEFAULT '',
-    role varchar(20) NOT NULL CHECK (role IN ('admin','operator','readonly')),
+    role varchar(20) NOT NULL CHECK (role IN ('admin','operator','auditor','readonly')),
     password_hash varchar(100) NOT NULL,
     disabled boolean NOT NULL DEFAULT false,
     created_at timestamptz NOT NULL,
     updated_at timestamptz NOT NULL,
     last_login_at timestamptz
 );
+ALTER TABLE panel_users DROP CONSTRAINT IF EXISTS panel_users_role_check;
+ALTER TABLE panel_users ADD CONSTRAINT panel_users_role_check CHECK (role IN ('admin','operator','auditor','readonly'));
 CREATE UNIQUE INDEX IF NOT EXISTS panel_users_username_unique_idx ON panel_users(lower(username));
 CREATE INDEX IF NOT EXISTS panel_users_status_idx ON panel_users(disabled,username);
 
@@ -1282,7 +1314,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS agents_public_key_unique_idx ON agents(public_
 	CREATE INDEX IF NOT EXISTS config_revisions_recent_idx ON config_revisions(config_id,version DESC);
 CREATE INDEX IF NOT EXISTS tasks_agent_queue_idx ON tasks(agent_id, status, created_at);
 CREATE INDEX IF NOT EXISTS tasks_created_idx ON tasks(created_at DESC);
-CREATE INDEX IF NOT EXISTS tasks_latest_deployment_idx ON tasks(agent_id,engine,finished_at DESC) WHERE action='deploy' AND status='succeeded' AND simulated=false;
+CREATE INDEX IF NOT EXISTS tasks_latest_deployment_idx ON tasks(agent_id,engine,finished_at DESC) WHERE action='deploy' AND status='succeeded';
 CREATE UNIQUE INDEX IF NOT EXISTS tasks_one_running_per_agent_idx ON tasks(agent_id) WHERE status='running';
 CREATE TABLE IF NOT EXISTS metric_samples (
     agent_id text NOT NULL REFERENCES agents(id) ON DELETE CASCADE,

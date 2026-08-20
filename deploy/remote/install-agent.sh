@@ -6,7 +6,6 @@
 #
 # 示例：
 #   QCH_TLS_CA_FILE=/etc/qcontrolhub/control-plane-ca.pem \
-#   QCH_AGENT_DRY_RUN=true \
 #   bash deploy/remote/install-agent.sh https://192.168.31.205:8443 <token> shanghai-edge-01
 #
 # 从控制面 GET /api/v1/agent-binary 下载 agent 可执行文件，引导核心服务，
@@ -19,8 +18,7 @@ control="${1:?usage: install-agent.sh <control-plane-url|ip[:port]> <add-node-cr
 token="${2:?usage: install-agent.sh <control-plane-url|ip[:port]> <add-node-credential> [agent-name]}"
 name="${3:-$(hostname)}"
 ca_file="${QCH_TLS_CA_FILE:-}"
-dry_run="${QCH_AGENT_DRY_RUN:-true}"
-allow_insecure_live="${QCH_ALLOW_INSECURE_LIVE:-true}"
+allow_insecure_live="${QCH_ALLOW_INSECURE_LIVE:-false}"
 
 case "$control" in
   http://*|https://*|ws://*|wss://*) server_url="$control" ;;
@@ -31,11 +29,6 @@ case "$server_url" in
   wss://*) http_origin="https://${server_url#wss://}" ;;
   http://*|https://*) http_origin="$server_url" ;;
   *) printf '%s\n' 'invalid control-plane URL' >&2; exit 1 ;;
-esac
-
-case "$dry_run" in
-  true|false) ;;
-  *) printf '%s\n' 'QCH_AGENT_DRY_RUN must be true or false' >&2; exit 1 ;;
 esac
 
 work_dir=$(mktemp -d "${TMPDIR:-/tmp}/qcontrolhub-agent.XXXXXX")
@@ -93,7 +86,6 @@ umask 077
   printf '%s\n' 'QCH_AGENT_LABELS=region=cn-east'
   printf '%s\n' 'QCH_AGENT_STATE=/var/lib/qcontrolhub/agent-state.json'
   printf '%s\n' 'QCH_AGENT_ENGINES=mihomo,xray,sing-box,ss-rust'
-  printf '%s\n' "QCH_AGENT_DRY_RUN=$dry_run"
 } > /etc/qcontrolhub/agent.env
 chmod 0600 /etc/qcontrolhub/agent.env
 

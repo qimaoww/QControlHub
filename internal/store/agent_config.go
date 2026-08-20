@@ -13,11 +13,11 @@ import (
 
 func (s *Store) GetAgent(ctx context.Context, id string) (core.Agent, error) {
 	var agent core.Agent
-	var capabilities, labels, runtimeState, metricsState []byte
+	var capabilities, features, labels, runtimeState, metricsState []byte
 	err := s.pool.QueryRow(ctx, `
-			SELECT id,name,version,os,arch,capabilities,labels,runtime,metrics,last_seen,enrolled_at
+			SELECT id,name,version,os,arch,capabilities,features,labels,runtime,metrics,last_seen,enrolled_at
 			FROM agents WHERE id=$1 AND revoked_at IS NULL`, id).Scan(
-		&agent.ID, &agent.Name, &agent.Version, &agent.OS, &agent.Arch, &capabilities, &labels, &runtimeState, &metricsState, &agent.LastSeen, &agent.EnrolledAt)
+		&agent.ID, &agent.Name, &agent.Version, &agent.OS, &agent.Arch, &capabilities, &features, &labels, &runtimeState, &metricsState, &agent.LastSeen, &agent.EnrolledAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return core.Agent{}, ErrNotFound
 	}
@@ -25,6 +25,9 @@ func (s *Store) GetAgent(ctx context.Context, id string) (core.Agent, error) {
 		return core.Agent{}, err
 	}
 	if err := json.Unmarshal(capabilities, &agent.Capabilities); err != nil {
+		return core.Agent{}, err
+	}
+	if err := json.Unmarshal(features, &agent.Features); err != nil {
 		return core.Agent{}, err
 	}
 	if err := json.Unmarshal(labels, &agent.Labels); err != nil {
@@ -97,7 +100,7 @@ func (s *Store) LatestDeployments(ctx context.Context) ([]core.Deployment, error
 	rows, err := s.pool.Query(ctx, `
 		SELECT DISTINCT ON (agent_id,engine) agent_id,engine,COALESCE(config_id,''),COALESCE(config_version,0),finished_at
 		FROM tasks
-		WHERE action='deploy' AND status='succeeded' AND simulated=false AND finished_at IS NOT NULL
+		WHERE action='deploy' AND status='succeeded' AND finished_at IS NOT NULL
 		ORDER BY agent_id,engine,finished_at DESC`)
 	if err != nil {
 		return nil, err

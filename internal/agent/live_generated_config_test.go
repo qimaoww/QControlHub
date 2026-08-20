@@ -21,7 +21,7 @@ func TestEveryGeneratedServerConfigurationWithLiveCores(t *testing.T) {
 	if root == "" || certificate == "" || privateKey == "" {
 		t.Fatal("QCH_LIVE_CORE_ROOT, QCH_LIVE_TLS_CERTIFICATE, and QCH_LIVE_TLS_PRIVATE_KEY are required")
 	}
-	executor := &Executor{DryRun: false, Specs: map[core.Engine]EngineSpec{
+	executor := &Executor{Specs: map[core.Engine]EngineSpec{
 		core.EngineMihomo: {
 			Binary: filepath.Join(root, "bin", "mihomo"), ConfigPath: filepath.Join(root, "configs", "mihomo", "config.yaml"), Service: "unused-mihomo.service",
 		},

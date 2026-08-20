@@ -30,6 +30,7 @@ import (
 type Config struct {
 	AdminToken      string
 	OperatorTokens  []string
+	AuditorTokens   []string
 	ReadonlyTokens  []string
 	AllowedOrigins  []string
 	SecureTransport bool
@@ -78,6 +79,11 @@ func New(dataStore *store.Store, config Config) *Server {
 	for _, token := range config.OperatorTokens {
 		if token = strings.TrimSpace(token); token != "" {
 			roleTokens[sha256.Sum256([]byte(token))] = core.RoleOperator
+		}
+	}
+	for _, token := range config.AuditorTokens {
+		if token = strings.TrimSpace(token); token != "" {
+			roleTokens[sha256.Sum256([]byte(token))] = core.RoleAuditor
 		}
 	}
 	for _, token := range config.ReadonlyTokens {
@@ -173,47 +179,47 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/auth/logout", s.logout)
 	mux.HandleFunc("GET /api/v1/agent-installer", s.serveAgentInstaller)
 
-	mux.Handle("GET /api/v1/overview", s.requireRole(core.RoleReadonly, http.HandlerFunc(s.overview)))
-	mux.Handle("GET /api/v1/agents", s.requireRole(core.RoleReadonly, http.HandlerFunc(s.listAgents)))
-	mux.Handle("GET /api/v1/deployments", s.requireRole(core.RoleReadonly, http.HandlerFunc(s.listDeployments)))
-	mux.Handle("GET /api/v1/client-access", s.requireRole(core.RoleReadonly, http.HandlerFunc(s.listClientAccess)))
-	mux.Handle("GET /api/v1/config-catalogs/{engine}", s.requireRole(core.RoleReadonly, http.HandlerFunc(s.configCatalog)))
-	mux.Handle("DELETE /api/v1/agents/{id}", s.requireRole(core.RoleAdmin, http.HandlerFunc(s.deleteAgent)))
-	mux.Handle("GET /api/v1/agents/{id}/configs", s.requireRole(core.RoleReadonly, http.HandlerFunc(s.listAgentConfigs)))
-	mux.Handle("GET /api/v1/agents/{id}/configs/{engine}", s.requireRole(core.RoleReadonly, http.HandlerFunc(s.getAgentConfig)))
-	mux.Handle("PUT /api/v1/agents/{id}/configs/{engine}", s.requireRole(core.RoleOperator, http.HandlerFunc(s.putAgentConfig)))
-	mux.Handle("GET /api/v1/agents/{id}/configs/{engine}/workspace", s.requireRole(core.RoleReadonly, http.HandlerFunc(s.agentConfigWorkspace)))
-	mux.Handle("POST /api/v1/agents/{id}/configs/{engine}/plans", s.requireRole(core.RoleOperator, http.HandlerFunc(s.newServerPlan)))
-	mux.Handle("POST /api/v1/agents/{id}/configs/{engine}/server-inbounds", s.requireRole(core.RoleOperator, http.HandlerFunc(s.saveServerInbound)))
-	mux.Handle("GET /api/v1/agents/{id}/configs/{engine}/fields/{key}", s.requireRole(core.RoleReadonly, http.HandlerFunc(s.getConfigField)))
-	mux.Handle("POST /api/v1/agents/{id}/configs/{engine}/fields/{key}", s.requireRole(core.RoleOperator, http.HandlerFunc(s.saveConfigField)))
-	mux.Handle("GET /api/v1/configs", s.requireRole(core.RoleReadonly, http.HandlerFunc(s.listConfigs)))
-	mux.Handle("POST /api/v1/configs", s.requireRole(core.RoleOperator, http.HandlerFunc(s.createConfig)))
-	mux.Handle("PUT /api/v1/configs/{id}", s.requireRole(core.RoleOperator, http.HandlerFunc(s.updateConfig)))
-	mux.Handle("DELETE /api/v1/configs/{id}", s.requireRole(core.RoleAdmin, http.HandlerFunc(s.deleteConfig)))
-	mux.Handle("GET /api/v1/configs/{id}/revisions", s.requireRole(core.RoleReadonly, http.HandlerFunc(s.listConfigRevisions)))
-	mux.Handle("GET /api/v1/configs/{id}/revisions/{version}", s.requireRole(core.RoleReadonly, http.HandlerFunc(s.getConfigRevision)))
-	mux.Handle("POST /api/v1/configs/{id}/revisions/{version}/restore", s.requireRole(core.RoleAdmin, http.HandlerFunc(s.restoreConfigRevision)))
-	mux.Handle("GET /api/v1/tasks", s.requireRole(core.RoleReadonly, http.HandlerFunc(s.listTasks)))
-	mux.Handle("POST /api/v1/tasks", s.requireRole(core.RoleOperator, http.HandlerFunc(s.createTask)))
-	mux.Handle("GET /api/v1/tasks/{id}", s.requireRole(core.RoleReadonly, http.HandlerFunc(s.getTask)))
-	mux.Handle("DELETE /api/v1/tasks/{id}", s.requireRole(core.RoleOperator, http.HandlerFunc(s.cancelTask)))
-	mux.Handle("POST /api/v1/tasks/{id}/retry", s.requireRole(core.RoleOperator, http.HandlerFunc(s.retryTask)))
-	mux.Handle("GET /api/v1/enrollment-tokens", s.requireRole(core.RoleAdmin, http.HandlerFunc(s.listEnrollmentTokens)))
-	mux.Handle("POST /api/v1/enrollment-tokens", s.requireRole(core.RoleAdmin, http.HandlerFunc(s.createEnrollmentToken)))
-	mux.Handle("DELETE /api/v1/enrollment-tokens/{id}", s.requireRole(core.RoleAdmin, http.HandlerFunc(s.deleteEnrollmentToken)))
-	mux.Handle("GET /api/v1/settings", s.requireRole(core.RoleReadonly, http.HandlerFunc(s.getSettings)))
-	mux.Handle("PUT /api/v1/settings", s.requireRole(core.RoleAdmin, http.HandlerFunc(s.putSettings)))
-	mux.Handle("GET /api/v1/audit", s.requireRole(core.RoleReadonly, http.HandlerFunc(s.listAudit)))
-	mux.Handle("GET /api/v1/users", s.requireRole(core.RoleAdmin, http.HandlerFunc(s.listUsers)))
-	mux.Handle("POST /api/v1/users", s.requireRole(core.RoleAdmin, http.HandlerFunc(s.createUser)))
-	mux.Handle("PUT /api/v1/users/{id}", s.requireRole(core.RoleAdmin, http.HandlerFunc(s.updateUser)))
-	mux.Handle("DELETE /api/v1/users/{id}", s.requireRole(core.RoleAdmin, http.HandlerFunc(s.deleteUser)))
-	mux.Handle("GET /api/v1/metrics/{id}", s.requireRole(core.RoleReadonly, http.HandlerFunc(s.metricSamples)))
-	mux.Handle("GET /api/v1/templates", s.requireRole(core.RoleReadonly, http.HandlerFunc(s.listTemplates)))
-	mux.Handle("POST /api/v1/templates", s.requireRole(core.RoleOperator, http.HandlerFunc(s.createTemplate)))
-	mux.Handle("DELETE /api/v1/templates/{id}", s.requireRole(core.RoleAdmin, http.HandlerFunc(s.deleteTemplate)))
-	mux.Handle("POST /api/v1/templates/{id}/apply", s.requireRole(core.RoleOperator, http.HandlerFunc(s.applyTemplate)))
+	mux.Handle("GET /api/v1/overview", s.requirePermission(core.PermissionOverviewRead, http.HandlerFunc(s.overview)))
+	mux.Handle("GET /api/v1/agents", s.requirePermission(core.PermissionAgentsRead, http.HandlerFunc(s.listAgents)))
+	mux.Handle("GET /api/v1/deployments", s.requirePermission(core.PermissionDeploymentsRead, http.HandlerFunc(s.listDeployments)))
+	mux.Handle("GET /api/v1/client-access", s.requirePermission(core.PermissionClientAccessRead, http.HandlerFunc(s.listClientAccess)))
+	mux.Handle("GET /api/v1/config-catalogs/{engine}", s.requirePermission(core.PermissionCatalogsRead, http.HandlerFunc(s.configCatalog)))
+	mux.Handle("DELETE /api/v1/agents/{id}", s.requirePermission(core.PermissionAgentsManage, http.HandlerFunc(s.deleteAgent)))
+	mux.Handle("GET /api/v1/agents/{id}/configs", s.requirePermission(core.PermissionAgentConfigRead, http.HandlerFunc(s.listAgentConfigs)))
+	mux.Handle("GET /api/v1/agents/{id}/configs/{engine}", s.requirePermission(core.PermissionAgentConfigRead, http.HandlerFunc(s.getAgentConfig)))
+	mux.Handle("PUT /api/v1/agents/{id}/configs/{engine}", s.requirePermission(core.PermissionAgentConfigWrite, http.HandlerFunc(s.putAgentConfig)))
+	mux.Handle("GET /api/v1/agents/{id}/configs/{engine}/workspace", s.requirePermission(core.PermissionAgentConfigRead, http.HandlerFunc(s.agentConfigWorkspace)))
+	mux.Handle("POST /api/v1/agents/{id}/configs/{engine}/plans", s.requirePermission(core.PermissionAgentConfigWrite, http.HandlerFunc(s.newServerPlan)))
+	mux.Handle("POST /api/v1/agents/{id}/configs/{engine}/server-inbounds", s.requirePermission(core.PermissionAgentConfigWrite, http.HandlerFunc(s.saveServerInbound)))
+	mux.Handle("GET /api/v1/agents/{id}/configs/{engine}/fields/{key}", s.requirePermission(core.PermissionAgentConfigRead, http.HandlerFunc(s.getConfigField)))
+	mux.Handle("POST /api/v1/agents/{id}/configs/{engine}/fields/{key}", s.requirePermission(core.PermissionAgentConfigWrite, http.HandlerFunc(s.saveConfigField)))
+	mux.Handle("GET /api/v1/configs", s.requirePermission(core.PermissionConfigsRead, http.HandlerFunc(s.listConfigs)))
+	mux.Handle("POST /api/v1/configs", s.requirePermission(core.PermissionConfigsWrite, http.HandlerFunc(s.createConfig)))
+	mux.Handle("PUT /api/v1/configs/{id}", s.requirePermission(core.PermissionConfigsWrite, http.HandlerFunc(s.updateConfig)))
+	mux.Handle("DELETE /api/v1/configs/{id}", s.requirePermission(core.PermissionConfigsDelete, http.HandlerFunc(s.deleteConfig)))
+	mux.Handle("GET /api/v1/configs/{id}/revisions", s.requirePermission(core.PermissionConfigsRead, http.HandlerFunc(s.listConfigRevisions)))
+	mux.Handle("GET /api/v1/configs/{id}/revisions/{version}", s.requirePermission(core.PermissionConfigsRead, http.HandlerFunc(s.getConfigRevision)))
+	mux.Handle("POST /api/v1/configs/{id}/revisions/{version}/restore", s.requirePermission(core.PermissionConfigsRestore, http.HandlerFunc(s.restoreConfigRevision)))
+	mux.Handle("GET /api/v1/tasks", s.requirePermission(core.PermissionTasksRead, http.HandlerFunc(s.listTasks)))
+	mux.Handle("POST /api/v1/tasks", s.requirePermission(core.PermissionTasksExecute, http.HandlerFunc(s.createTask)))
+	mux.Handle("GET /api/v1/tasks/{id}", s.requirePermission(core.PermissionTasksRead, http.HandlerFunc(s.getTask)))
+	mux.Handle("DELETE /api/v1/tasks/{id}", s.requirePermission(core.PermissionTasksExecute, http.HandlerFunc(s.cancelTask)))
+	mux.Handle("POST /api/v1/tasks/{id}/retry", s.requirePermission(core.PermissionTasksExecute, http.HandlerFunc(s.retryTask)))
+	mux.Handle("GET /api/v1/enrollment-tokens", s.requirePermission(core.PermissionEnrollmentManage, http.HandlerFunc(s.listEnrollmentTokens)))
+	mux.Handle("POST /api/v1/enrollment-tokens", s.requirePermission(core.PermissionEnrollmentManage, http.HandlerFunc(s.createEnrollmentToken)))
+	mux.Handle("DELETE /api/v1/enrollment-tokens/{id}", s.requirePermission(core.PermissionEnrollmentManage, http.HandlerFunc(s.deleteEnrollmentToken)))
+	mux.Handle("GET /api/v1/settings", s.requirePermission(core.PermissionSettingsRead, http.HandlerFunc(s.getSettings)))
+	mux.Handle("PUT /api/v1/settings", s.requirePermission(core.PermissionSettingsManage, http.HandlerFunc(s.putSettings)))
+	mux.Handle("GET /api/v1/audit", s.requirePermission(core.PermissionAuditRead, http.HandlerFunc(s.listAudit)))
+	mux.Handle("GET /api/v1/users", s.requirePermission(core.PermissionUsersManage, http.HandlerFunc(s.listUsers)))
+	mux.Handle("POST /api/v1/users", s.requirePermission(core.PermissionUsersManage, http.HandlerFunc(s.createUser)))
+	mux.Handle("PUT /api/v1/users/{id}", s.requirePermission(core.PermissionUsersManage, http.HandlerFunc(s.updateUser)))
+	mux.Handle("DELETE /api/v1/users/{id}", s.requirePermission(core.PermissionUsersManage, http.HandlerFunc(s.deleteUser)))
+	mux.Handle("GET /api/v1/metrics/{id}", s.requirePermission(core.PermissionMetricsRead, http.HandlerFunc(s.metricSamples)))
+	mux.Handle("GET /api/v1/templates", s.requirePermission(core.PermissionTemplatesRead, http.HandlerFunc(s.listTemplates)))
+	mux.Handle("POST /api/v1/templates", s.requirePermission(core.PermissionTemplatesWrite, http.HandlerFunc(s.createTemplate)))
+	mux.Handle("DELETE /api/v1/templates/{id}", s.requirePermission(core.PermissionTemplatesDelete, http.HandlerFunc(s.deleteTemplate)))
+	mux.Handle("POST /api/v1/templates/{id}/apply", s.requirePermission(core.PermissionTemplatesWrite, http.HandlerFunc(s.applyTemplate)))
 
 	mux.HandleFunc("GET /api/v1/agent-binary", s.serveAgentBinary)
 	mux.Handle("GET /agent/v1/binary", s.agent(http.HandlerFunc(s.serveAgentBinaryForAgent)))
@@ -787,10 +793,10 @@ func writeWire(parent context.Context, connection *websocket.Conn, message core.
 	return wsjson.Write(ctx, connection, message)
 }
 
-// requireRole guards the management API: the bearer token must map to a role
-// with at least the requested privilege level. The admin limiter applies to
-// every management call regardless of role.
-func (s *Server) requireRole(minimum core.Role, next http.Handler) http.Handler {
+// requirePermission guards the management API. Every route declares one
+// explicit capability and roles are deny-by-default; the admin limiter applies
+// to every management call regardless of role.
+func (s *Server) requirePermission(permission core.Permission, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		key := authn.ClientIP(request, s.trustedProxies)
 		now := time.Now().UTC()
@@ -806,7 +812,7 @@ func (s *Server) requireRole(minimum core.Role, next http.Handler) http.Handler 
 			return
 		}
 		s.adminLimiter.Success(key)
-		if !role.AtLeast(minimum) {
+		if !role.Allows(permission) {
 			writeError(w, http.StatusForbidden, "token role does not permit this operation")
 			return
 		}
@@ -820,6 +826,22 @@ func (s *Server) requireRole(minimum core.Role, next http.Handler) http.Handler 
 		w.Header().Set("X-QControlHub-Role", string(role))
 		next.ServeHTTP(w, request)
 	})
+}
+
+// requireRole is kept for package-level compatibility with older integrations.
+// New routes must use requirePermission so a role cannot accidentally inherit
+// an unrelated capability by rank.
+func (s *Server) requireRole(minimum core.Role, next http.Handler) http.Handler {
+	permission := core.PermissionOverviewRead
+	switch minimum {
+	case core.RoleAdmin:
+		permission = core.PermissionUsersManage
+	case core.RoleOperator:
+		permission = core.PermissionTasksExecute
+	case core.RoleAuditor, core.RoleReadonly:
+		permission = core.PermissionOverviewRead
+	}
+	return s.requirePermission(permission, next)
 }
 
 func (s *Server) roleForToken(token string) (core.Role, bool) {

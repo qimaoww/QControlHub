@@ -114,7 +114,7 @@ TLS 入站默认引用 `/etc/qcontrolhub/tls/server.crt` 与 `/etc/qcontrolhub/t
 - 安装或重装时临时把该节点的添加凭证填入 `QCH_ENROLLMENT_TOKEN`。
 - 设置有辨识度的节点名与标签。
 - `QCH_AGENT_ENGINES` 只列出本机真实安装的内核。
-- 保持 `QCH_AGENT_DRY_RUN=true` 完成首轮验证。
+- 先核对节点权限、内核路径和 systemd 单元，再从面板提交校验任务；Agent 任务均为真实执行。
 - 核对每个内核的 binary、config、service 三项覆盖值。
 
 默认值与覆盖变量：
@@ -146,8 +146,8 @@ sudo journalctl -u qagent -f
 1. 从 `/etc/qcontrolhub/agent.env` 删除 `QCH_ENROLLMENT_TOKEN` 行。
 2. 通过控制台下发四种内核的 `validate` 与 `status` 测试。
 3. 等待两个心跳周期，确认节点卡片显示 CPU、内存、根磁盘、实时上下行速率和累计流量；网速首个样本为 0，第二个样本开始按计数器差值计算。
-4. 核实 dry-run 输出及每个固定目标路径；在节点卡片尝试稳定版、开发版或自定义版本任务时，dry-run 不会下载或替换文件。
-5. 只有需要真实部署时才设置 `QCH_AGENT_DRY_RUN=false` 并重启 Agent。
+4. 核实任务结果及每个固定目标路径；在节点卡片执行稳定版、开发版或自定义版本任务时，Agent 会下载、校验并原子替换文件。
+5. 变更内核或服务前确认目标节点处于在线状态，并保留可回滚的上一版本。
 
 ```bash
 sudo systemctl restart qagent
@@ -155,7 +155,7 @@ sudo systemctl restart qagent
 
 systemd 单元的 `ProtectSystem=strict` 只放行默认的四个配置目录以及 `/usr/local/lib/qagent/cores`，用于在同一文件系统内原子切换内核二进制；`/usr/local/bin` 不可写，`/usr/local/bin/qagent` 也保持只读。四个内核服务统一使用 `qagent-` 前缀，不会控制管理员自行安装的通用服务。自定义二进制或配置路径必须预先创建并精确加入 `ReadWritePaths=`，不要放宽为整个 `/etc` 或 `/usr`。
 
-真实版本切换要求 `QCH_AGENT_DRY_RUN=false`，并且节点已经预置对应配置目录、可通过的初始配置和 systemd 单元。空白 Linux 节点可先运行 `deploy/bootstrap-core-services.sh` 完成这些前置条件；脚本仅创建缺失配置和新的 `qagent-*` unit，不迁移也不操作旧的通用服务或二进制。稳定版使用官方 latest，开发版只使用官方 prerelease，自定义版本必须是类似 `1.19.29` 或 `1.14.0-beta.3` 的完整版本号；不支持自定义下载地址。Agent 在下载后强制核对 GitHub Release API 给出的 SHA-256，运行候选二进制确认版本，随后原子替换并重启服务；失败时恢复上一二进制。
+版本切换要求节点已经预置对应配置目录、可通过的初始配置和 systemd 单元。空白 Linux 节点可先运行 `deploy/bootstrap-core-services.sh` 完成这些前置条件；脚本仅创建缺失配置和新的 `qagent-*` unit，不迁移也不操作旧的通用服务或二进制。稳定版使用官方 latest，开发版只使用官方 prerelease，自定义版本必须是类似 `1.19.29` 或 `1.14.0-beta.3` 的完整版本号；不支持自定义下载地址。Agent 在下载后强制核对 GitHub Release API 给出的 SHA-256，运行候选二进制确认版本，随后原子替换并重启服务；失败时恢复上一二进制。
 
 ## 5. 运维操作
 
@@ -171,7 +171,7 @@ docker compose ps
 
 ### 更新 Agent
 
-先在少量节点保留 dry-run 进行验证，再原子替换二进制并重启：
+先在少量节点执行校验任务确认路径和权限，再原子替换二进制并重启：
 
 ```bash
 sudo install -o root -g root -m 0755 qagent /usr/local/bin/qagent

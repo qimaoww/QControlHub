@@ -222,7 +222,7 @@ func TestCreateTaskCoalescesEquivalentActiveRequestsWithPostgreSQL(t *testing.T)
 	assertTaskOverview(t, ctx, dataStore, baseline, 3, 3, 0)
 }
 
-func TestSimulatedDeployDoesNotAdvanceLatestDeploymentWithPostgreSQL(t *testing.T) {
+func TestDeployAdvancesLatestDeploymentWithPostgreSQL(t *testing.T) {
 	databaseURL := os.Getenv("QCH_TEST_DATABASE_URL")
 	if databaseURL == "" {
 		t.Skip("QCH_TEST_DATABASE_URL is not configured")
@@ -238,13 +238,13 @@ func TestSimulatedDeployDoesNotAdvanceLatestDeploymentWithPostgreSQL(t *testing.
 	agent, enrollmentID := enrollTaskTestAgent(t, ctx, dataStore)
 	defer cleanupTaskTestAgent(dataStore, agent.ID, enrollmentID)
 	config, err := dataStore.SaveAgentConfig(ctx, core.Config{
-		AgentID: agent.ID, Name: "simulation-safe deployment", Engine: core.EngineMihomo,
+		AgentID: agent.ID, Name: "deployment target", Engine: core.EngineMihomo,
 		Content: "mixed-port: 7890\nmode: rule\nrules:\n  - MATCH,DIRECT\n",
 	}, 0)
 	if err != nil {
 		t.Fatalf("save deployment configuration: %v", err)
 	}
-	completeDeploy := func(simulated bool) core.Task {
+	completeDeploy := func() core.Task {
 		t.Helper()
 		created, createErr := dataStore.CreateTask(ctx, core.TaskRequest{
 			AgentID: agent.ID, Action: core.ActionDeploy, Engine: core.EngineMihomo, ConfigID: config.ID,
@@ -257,28 +257,23 @@ func TestSimulatedDeployDoesNotAdvanceLatestDeploymentWithPostgreSQL(t *testing.
 			t.Fatalf("claim deployment task = %+v, %v", claimed, claimErr)
 		}
 		if completeErr := dataStore.CompleteTask(ctx, agent.ID, claimed.ID, core.TaskResultRequest{
-			LeaseID: claimed.LeaseID, Success: true, Simulated: simulated, Output: "deployment result",
+			LeaseID: claimed.LeaseID, Success: true, Output: "deployment result",
 		}); completeErr != nil {
 			t.Fatalf("complete deployment task: %v", completeErr)
 		}
 		stored, getErr := dataStore.GetTask(ctx, claimed.ID)
-		if getErr != nil || stored.Simulated != simulated {
+		if getErr != nil || stored.Status != core.TaskSucceeded {
 			t.Fatalf("stored deployment task = %+v, %v", stored, getErr)
 		}
 		return stored
 	}
 
-	simulated := completeDeploy(true)
+	completeDeploy()
 	deployments, err := dataStore.LatestDeployments(ctx)
 	if err != nil {
-		t.Fatalf("list deployments after simulation: %v", err)
+		t.Fatalf("list deployments after deployment: %v", err)
 	}
-	for _, deployment := range deployments {
-		if deployment.AgentID == agent.ID {
-			t.Fatalf("simulated task %s was treated as deployment: %+v", simulated.ID, deployment)
-		}
-	}
-	real := completeDeploy(false)
+	real := completeDeploy()
 	deployments, err = dataStore.LatestDeployments(ctx)
 	if err != nil {
 		t.Fatalf("list deployments after real completion: %v", err)
@@ -291,7 +286,7 @@ func TestSimulatedDeployDoesNotAdvanceLatestDeploymentWithPostgreSQL(t *testing.
 		}
 	}
 	if actual.ConfigID != config.ID || actual.ConfigVersion != config.Version {
-		t.Fatalf("real task %s deployment = %+v", real.ID, deployments)
+		t.Fatalf("deployment task %s deployment = %+v", real.ID, deployments)
 	}
 }
 
@@ -539,6 +534,7 @@ func enrollTaskTestAgent(t *testing.T, ctx context.Context, dataStore *Store) (c
 	agent, err := dataStore.EnrollAgent(ctx, core.EnrollRequest{
 		Name: "task-lifecycle-agent", OS: "linux", Arch: "amd64",
 		Capabilities: []core.Engine{core.EngineMihomo},
+		Features:     []string{core.AgentFeatureSelfUpgrade},
 		PublicKey:    base64.RawURLEncoding.EncodeToString(publicKey),
 	}, enrollment.Token)
 	if err != nil {

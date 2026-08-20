@@ -26,7 +26,6 @@ type EngineSpec struct {
 }
 
 type Executor struct {
-	DryRun  bool
 	Specs   map[core.Engine]EngineSpec
 	Updater *CoreUpdater
 }
@@ -46,13 +45,11 @@ func (e *Executor) Validate() error {
 	if e == nil {
 		return errors.New("agent executor is required")
 	}
-	if !e.DryRun {
-		if os.Geteuid() != 0 {
-			return errors.New("live Agent execution must run as root; use dry-run mode for unprivileged operation")
-		}
-		if err := validatePrivilegedExecutable(systemctlPath); err != nil {
-			return fmt.Errorf("unsafe systemctl binary: %w", err)
-		}
+	if os.Geteuid() != 0 {
+		return errors.New("Agent execution must run as root")
+	}
+	if err := validatePrivilegedExecutable(systemctlPath); err != nil {
+		return fmt.Errorf("unsafe systemctl binary: %w", err)
 	}
 	for engine, spec := range e.Specs {
 		if !engine.Valid() {
@@ -61,17 +58,15 @@ func (e *Executor) Validate() error {
 		if !safeServiceName(spec.Service) {
 			return fmt.Errorf("unsafe systemd service name %q", spec.Service)
 		}
-		if !e.DryRun && (!filepath.IsAbs(spec.Binary) || !filepath.IsAbs(spec.ConfigPath)) {
+		if !filepath.IsAbs(spec.Binary) || !filepath.IsAbs(spec.ConfigPath) {
 			return fmt.Errorf("live executor paths for %s must be absolute", engine)
 		}
-		if !e.DryRun {
-			if err := validatePrivilegedExecutable(spec.Binary); err != nil {
-				if !errors.Is(err, os.ErrNotExist) {
-					return fmt.Errorf("unsafe %s binary: %w", engine, err)
-				}
-				if err := validateCoreInstallDestination(spec.Binary); err != nil {
-					return fmt.Errorf("unsafe %s install destination: %w", engine, err)
-				}
+		if err := validatePrivilegedExecutable(spec.Binary); err != nil {
+			if !errors.Is(err, os.ErrNotExist) {
+				return fmt.Errorf("unsafe %s binary: %w", engine, err)
+			}
+			if err := validateCoreInstallDestination(spec.Binary); err != nil {
+				return fmt.Errorf("unsafe %s install destination: %w", engine, err)
 			}
 		}
 	}
@@ -136,9 +131,6 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (string, erro
 		if err != nil {
 			return validation, err
 		}
-		if e.DryRun {
-			return validation + "\ndry-run: configuration was not written and the service was not restarted", nil
-		}
 		backup, err := atomicDeploy(spec.ConfigPath, task.ConfigContent)
 		if err != nil {
 			return validation, err
@@ -172,22 +164,13 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (string, erro
 		}
 		return output, nil
 	case core.ActionStart, core.ActionStop, core.ActionRestart:
-		if e.DryRun {
-			return fmt.Sprintf("dry-run: would run systemctl %s %s", task.Action, spec.Service), nil
-		}
 		return serviceCommandAndVerify(ctx, spec.Service, task.Action)
 	case core.ActionStatus:
-		if e.DryRun {
-			return "dry-run", nil
-		}
 		return serviceStatus(ctx, spec.Service)
 	case core.ActionInstall:
 		version, err := core.NormalizeCoreVersionSelector(task.CoreVersion)
 		if err != nil {
 			return "", err
-		}
-		if e.DryRun {
-			return fmt.Sprintf("dry-run: would install %s %s from its official GitHub release", task.Engine, version), nil
 		}
 		updater := e.Updater
 		if updater == nil {
@@ -300,9 +283,7 @@ func (e *Executor) Runtime(ctx context.Context) map[core.Engine]core.RuntimeStat
 			state.Installed = true
 			state.Version = binaryVersion(ctx, engine, path)
 		}
-		if e.DryRun {
-			state.ServiceStatus = "dry-run"
-		} else if status, err := serviceStatus(ctx, spec.Service); err == nil {
+		if status, err := serviceStatus(ctx, spec.Service); err == nil {
 			state.ServiceStatus = strings.TrimSpace(status)
 		} else {
 			state.ServiceStatus = "unknown"
@@ -315,9 +296,6 @@ func (e *Executor) Runtime(ctx context.Context) map[core.Engine]core.RuntimeStat
 func (e *Executor) validate(ctx context.Context, engine core.Engine, spec EngineSpec, content string) (string, error) {
 	if err := core.ValidateConfig(engine, content); err != nil {
 		return "", err
-	}
-	if e.DryRun {
-		return "syntax validation passed (dry-run; engine binary was not invoked)", nil
 	}
 	if _, err := exec.LookPath(spec.Binary); err != nil {
 		return "", fmt.Errorf("%s binary not found in PATH", spec.Binary)

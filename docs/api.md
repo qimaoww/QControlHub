@@ -4,7 +4,7 @@
 
 ## 鉴权模型
 
-- 管理端点 `/api/v1/*`：自动化调用使用 `Authorization: Bearer <令牌>`；SPA 使用 `/api/v1/auth/login` 建立 HttpOnly 会话 Cookie。令牌可为 `QCH_ADMIN_TOKEN` 或 `QCH_OPERATOR_TOKENS` / `QCH_READONLY_TOKENS` 中的角色令牌。
+- 管理端点 `/api/v1/*`：自动化调用使用 `Authorization: Bearer <令牌>`；SPA 使用 `/api/v1/auth/login` 建立 HttpOnly 会话 Cookie。令牌可为 `QCH_ADMIN_TOKEN` 或 `QCH_OPERATOR_TOKENS` / `QCH_AUDITOR_TOKENS` / `QCH_READONLY_TOKENS` 中的角色令牌。
 - 添加或重装节点 `/agent/v1/enroll`：`Authorization: Bearer <节点绑定的 QCH_ENROLLMENT_TOKEN>`。
 - WSS `/agent/v1/connect`：仅供官方 Agent 使用，握手要求 Ed25519 签名头、时间戳和 nonce；不要用管理员令牌调用。
 - `/healthz`：无鉴权，仅返回服务存活状态，不包含数据库详情或秘密。
@@ -14,13 +14,14 @@
 
 ### 角色令牌
 
-`QCH_OPERATOR_TOKENS` 与 `QCH_READONLY_TOKENS`（逗号分隔列表）提供低于管理员的令牌，Web 登录与管理 API 共用同一套角色：
+`QCH_OPERATOR_TOKENS`、`QCH_AUDITOR_TOKENS` 与 `QCH_READONLY_TOKENS`（逗号分隔列表）提供低于管理员的令牌，Web 登录与管理 API 共用同一套角色：
 
 | 角色 | 读取 | 任务/配置写操作 | 节点与添加命令、设置、删除配置 |
 | --- | --- | --- | --- |
 | admin（`QCH_ADMIN_TOKEN`） | ✓ | ✓ | ✓ |
-| operator | ✓ | ✓ | — |
-| readonly | ✓ | — | — |
+| operator（运维人员） | ✓ | ✓ | — |
+| auditor（审计人员） | ✓（含审计记录） | — | — |
+| readonly（只读用户） | ✓ | — | — |
 
 权限不足时返回 `403`。同一令牌在 Web 会话与 Bearer 请求中的角色一致。
 
@@ -189,7 +190,7 @@ Content-Type: application/json
 
 允许的 `action` 为 `validate`、`deploy`、`read-config`、`start`、`stop`、`restart`、`status`、`install`。Agent 必须在注册能力中声明对应内核。版本安装只使用四个内核各自的官方 GitHub Release，不接受 URL；`development` 没有官方 prerelease 时任务会失败而不会降级到稳定版。
 
-任务响应中的 `simulated: true` 表示 Agent 在 dry-run 模式下完成了流程检查，但没有执行对应的系统变更。任务仍以 `succeeded` 结束，Web 控制台会显示“模拟完成”；模拟 `deploy` 不会成为节点的最新部署记录。`read-config` 即使在 dry-run 模式下也会读取白名单中的真实文件并调用真实内核校验，因此不会标记为模拟。
+任务成功响应表示目标节点已完成对应操作；失败响应会保留节点返回的错误信息。部署任务只有在目标节点真实写入配置并成功重启服务后，才会进入节点的最新部署记录。
 
 ### 状态码
 
@@ -213,7 +214,7 @@ Agent 协议端点如下：
 | `POST` | `/agent/v1/enroll` | 注册 Bearer 令牌 |
 | `GET` | `/agent/v1/connect` | Agent 签名的 WebSocket Upgrade |
 
-WSS 握手必须协商子协议 `qcontrolhub.agent.v1`。服务端先发送 `hello`；Agent 定期发送 `heartbeat`，心跳包含内核运行状态以及 CPU、内存、根磁盘、默认路由接口名称与可用单播地址、实时速率和累计流量快照；服务端下发带随机 lease ID 的 `task`，Agent 返回包含 `success`、`simulated` 和结果正文的 `result`，服务端确认 `result_ack`。连接压缩关闭，服务端要求 50 秒内收到消息，官方 Agent 默认每 15 秒心跳并在断线后指数退避重连。
+WSS 握手必须协商子协议 `qcontrolhub.agent.v1`。服务端先发送 `hello`；Agent 定期发送 `heartbeat`，心跳包含内核运行状态以及 CPU、内存、根磁盘、默认路由接口名称与可用单播地址、实时速率和累计流量快照；服务端下发带随机 lease ID 的 `task`，Agent 返回包含 `success` 和结果正文的 `result`，服务端确认 `result_ack`。连接压缩关闭，服务端要求 50 秒内收到消息，官方 Agent 默认每 15 秒心跳并在断线后指数退避重连。
 
 ## Webhook 事件
 

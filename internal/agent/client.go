@@ -52,7 +52,6 @@ type credentials struct {
 
 type completedTask struct {
 	Success     bool      `json:"success"`
-	Simulated   bool      `json:"simulated,omitempty"`
 	Output      string    `json:"output,omitempty"`
 	Error       string    `json:"error,omitempty"`
 	CompletedAt time.Time `json:"completed_at"`
@@ -107,9 +106,9 @@ func NewClient(config ClientConfig, executor *Executor) (*Client, error) {
 	if !secureWebSocket {
 		isLocal := parsed.Hostname() == "localhost" || parsed.Hostname() == "127.0.0.1" || parsed.Hostname() == "::1"
 		if !config.AllowHTTP && !isLocal {
-			return nil, errors.New("remote control-plane URL must use WSS; set QCH_ALLOW_HTTP=true only for a dry-run test network")
+			return nil, errors.New("remote control-plane URL must use WSS; set QCH_ALLOW_HTTP=true only on a trusted local network")
 		}
-		if !isLocal && executor != nil && !executor.DryRun && !config.AllowInsecureLive {
+		if !isLocal && executor != nil && !config.AllowInsecureLive {
 			return nil, errors.New("live task execution is forbidden over remote cleartext HTTP; set QCH_ALLOW_INSECURE_LIVE=true to explicitly allow it on a trusted network")
 		}
 	}
@@ -206,6 +205,7 @@ func (c *Client) enroll(ctx context.Context, publicKey ed25519.PublicKey, privat
 		OS:           runtime.GOOS,
 		Arch:         runtime.GOARCH,
 		Capabilities: c.config.Capabilities,
+		Features:     []string{core.AgentFeatureSelfUpgrade},
 		Labels:       c.config.Labels,
 		PublicKey:    authn.EncodePublicKey(publicKey),
 	}
@@ -354,7 +354,10 @@ func (c *Client) queueHeartbeat(ctx context.Context, outgoing chan<- core.WireMe
 	if metricsErr != nil {
 		slog.Debug("host metrics collection was partial", "error", metricsErr)
 	}
-	heartbeat := &core.HeartbeatRequest{Version: c.config.Version, Runtime: runtimeState}
+	heartbeat := &core.HeartbeatRequest{
+		Version: c.config.Version, Runtime: runtimeState,
+		Features: []string{core.AgentFeatureSelfUpgrade},
+	}
 	if metricsHaveData(metrics) {
 		heartbeat.Metrics = &metrics
 	}
@@ -415,7 +418,7 @@ func (c *Client) resultForTask(ctx context.Context, task core.Task) core.TaskRes
 	var executionErr error
 	if task.Action == core.ActionUpgradeAgent {
 		output, executionErr = c.upgradeAgent(ctx)
-		if executionErr == nil && !c.executor.DryRun {
+		if executionErr == nil {
 			c.executionsMu.Lock()
 			c.restartAfterTask = task.ID
 			c.executionsMu.Unlock()
@@ -428,7 +431,6 @@ func (c *Client) resultForTask(ctx context.Context, task core.Task) core.TaskRes
 	}
 	result := core.TaskResultRequest{
 		LeaseID: task.LeaseID, Success: executionErr == nil, Output: output,
-		Simulated: c.executor != nil && c.executor.DryRun && task.Action != core.ActionReadConfig,
 	}
 	if executionErr != nil {
 		result.Error = executionErr.Error()
@@ -495,14 +497,8 @@ func (c *Client) cachedTaskResult(task core.Task) (core.TaskResultRequest, bool)
 	if !ok {
 		return core.TaskResultRequest{}, false
 	}
-	simulated := cached.Simulated
-	if !simulated && task.Action != core.ActionReadConfig && strings.Contains(strings.ToLower(cached.Output), "dry-run") {
-		// Credentials written before the structured simulated flag still carry
-		// the Agent's stable dry-run marker in their bounded result output.
-		simulated = true
-	}
 	return core.TaskResultRequest{
-		LeaseID: task.LeaseID, Success: cached.Success, Simulated: simulated, Output: cached.Output, Error: cached.Error,
+		LeaseID: task.LeaseID, Success: cached.Success, Output: cached.Output, Error: cached.Error,
 	}, true
 }
 
@@ -523,7 +519,7 @@ func (c *Client) rememberTaskResult(taskID string, result core.TaskResultRequest
 		delete(c.creds.CompletedTasks, oldestID)
 	}
 	c.creds.CompletedTasks[taskID] = completedTask{
-		Success: result.Success, Simulated: result.Simulated, Output: limitStateValue(result.Output, 4<<10),
+		Success: result.Success, Output: limitStateValue(result.Output, 4<<10),
 		Error: limitStateValue(result.Error, 2<<10), CompletedAt: time.Now().UTC(),
 	}
 	return saveCredentials(c.config.StatePath, c.creds)
@@ -548,16 +544,14 @@ func (c *Client) validTask(task core.Task) bool {
 
 func (c *Client) upgradeAgent(ctx context.Context) (string, error) {
 	executable := ""
-	if !c.executor.DryRun {
-		var err error
-		executable, err = os.Executable()
-		if err != nil {
-			return "", fmt.Errorf("resolve running Agent executable: %w", err)
-		}
-		executable, err = filepath.EvalSymlinks(executable)
-		if err != nil {
-			return "", fmt.Errorf("resolve running Agent executable path: %w", err)
-		}
+	var err error
+	executable, err = os.Executable()
+	if err != nil {
+		return "", fmt.Errorf("resolve running Agent executable: %w", err)
+	}
+	executable, err = filepath.EvalSymlinks(executable)
+	if err != nil {
+		return "", fmt.Errorf("resolve running Agent executable path: %w", err)
 	}
 	downloadDirectory := ""
 	if executable != "" {
@@ -566,10 +560,6 @@ func (c *Client) upgradeAgent(ctx context.Context) (string, error) {
 	temporary, version, size, err := c.downloadAgentBinary(ctx, downloadDirectory)
 	if err != nil {
 		return "", err
-	}
-	if c.executor.DryRun {
-		_ = os.Remove(temporary)
-		return fmt.Sprintf("dry-run: downloaded Agent %s (%d bytes), executable was not replaced", versionLabel(version), size), nil
 	}
 	defer os.Remove(temporary)
 	info, err := os.Lstat(executable)

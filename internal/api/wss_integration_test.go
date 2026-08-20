@@ -160,7 +160,7 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 	}
 	result := core.WireMessage{Type: core.WireResult, Result: &core.TaskResultEnvelope{
 		TaskID: queued.ID,
-		Result: core.TaskResultRequest{LeaseID: taskMessage.Task.LeaseID, Success: true, Simulated: true, Output: "validated"},
+		Result: core.TaskResultRequest{LeaseID: taskMessage.Task.LeaseID, Success: true, Output: "validated"},
 	}}
 	if err := wsjson.Write(ctx, connection, result); err != nil {
 		t.Fatalf("write result: %v", err)
@@ -214,7 +214,7 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 	}
 	resumedResult := core.WireMessage{Type: core.WireResult, Result: &core.TaskResultEnvelope{
 		TaskID: resumable.ID,
-		Result: core.TaskResultRequest{LeaseID: resumedTask.Task.LeaseID, Success: true, Simulated: true, Output: "resumed status"},
+		Result: core.TaskResultRequest{LeaseID: resumedTask.Task.LeaseID, Success: true, Output: "resumed status"},
 	}}
 	if err := wsjson.Write(ctx, resumedConnection, resumedResult); err != nil {
 		t.Fatalf("write resumed result: %v", err)
@@ -224,7 +224,7 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 		t.Fatalf("read resumed acknowledgment: message=%+v error=%v", resumedAcknowledgment, err)
 	}
 	completedResumed, err := dataStore.GetTask(ctx, resumable.ID)
-	if err != nil || completedResumed.Status != core.TaskSucceeded || !completedResumed.Simulated || completedResumed.Attempt != 1 {
+	if err != nil || completedResumed.Status != core.TaskSucceeded || completedResumed.Attempt != 1 {
 		t.Fatalf("resumed task completion = %+v, %v", completedResumed, err)
 	}
 	connection = resumedConnection
@@ -243,7 +243,7 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 	}
 	result = core.WireMessage{Type: core.WireResult, Result: &core.TaskResultEnvelope{
 		TaskID: installTask.ID,
-		Result: core.TaskResultRequest{LeaseID: taskMessage.Task.LeaseID, Success: true, Simulated: true, Output: "dry-run install"},
+		Result: core.TaskResultRequest{LeaseID: taskMessage.Task.LeaseID, Success: true, Output: "installed"},
 	}}
 	if err := wsjson.Write(ctx, connection, result); err != nil {
 		t.Fatalf("write core install result: %v", err)
@@ -253,7 +253,7 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 		t.Fatalf("read core install acknowledgment: message=%+v error=%v", acknowledgment, err)
 	}
 	tasks, err := dataStore.ListTasks(ctx, enrolled.AgentID, 10)
-	if err != nil || len(tasks) < 2 || tasks[0].Status != core.TaskSucceeded || !tasks[0].Simulated || tasks[0].CoreVersion != core.CoreVersionDevelopment {
+	if err != nil || len(tasks) < 2 || tasks[0].Status != core.TaskSucceeded || tasks[0].CoreVersion != core.CoreVersionDevelopment {
 		t.Fatalf("completed task not persisted: tasks=%+v error=%v", tasks, err)
 	}
 	for _, action := range []core.Action{core.ActionDeploy, core.ActionReadConfig, core.ActionStart, core.ActionStop, core.ActionRestart} {
@@ -269,14 +269,13 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 		if readErr := wsjson.Read(ctx, connection, &dispatched); readErr != nil || dispatched.Task == nil || dispatched.Task.ID != created.ID || dispatched.Task.Action != action {
 			t.Fatalf("read %s task: message=%+v error=%v", action, dispatched, readErr)
 		}
-		simulated := action != core.ActionReadConfig
-		output := "dry-run " + string(action)
+		output := "completed " + string(action)
 		if action == core.ActionReadConfig {
 			output = config.Content
 		}
 		completed := core.WireMessage{Type: core.WireResult, Result: &core.TaskResultEnvelope{
 			TaskID: created.ID,
-			Result: core.TaskResultRequest{LeaseID: dispatched.Task.LeaseID, Success: true, Simulated: simulated, Output: output},
+			Result: core.TaskResultRequest{LeaseID: dispatched.Task.LeaseID, Success: true, Output: output},
 		}}
 		if writeErr := wsjson.Write(ctx, connection, completed); writeErr != nil {
 			t.Fatalf("write %s result: %v", action, writeErr)
@@ -286,7 +285,7 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 			t.Fatalf("read %s acknowledgment: message=%+v error=%v", action, ack, readErr)
 		}
 		stored, getErr := dataStore.GetTask(ctx, created.ID)
-		if getErr != nil || stored.Status != core.TaskSucceeded || stored.Simulated != simulated {
+		if getErr != nil || stored.Status != core.TaskSucceeded {
 			t.Fatalf("stored %s task = %+v, %v", action, stored, getErr)
 		}
 		if action == core.ActionReadConfig {
@@ -298,12 +297,17 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 	}
 	deployments, err := dataStore.LatestDeployments(ctx)
 	if err != nil {
-		t.Fatalf("list deployments after simulated matrix: %v", err)
+		t.Fatalf("list deployments after task matrix: %v", err)
 	}
+	foundDeployment := false
 	for _, deployment := range deployments {
 		if deployment.AgentID == enrolled.AgentID {
-			t.Fatalf("simulated deployment advanced node state: %+v", deployment)
+			foundDeployment = true
+			break
 		}
+	}
+	if !foundDeployment {
+		t.Fatal("successful deployment task did not update the latest deployment")
 	}
 	agent, err := dataStore.GetAgent(ctx, enrolled.AgentID)
 	if err != nil || agent.Metrics.CollectedAt.IsZero() || agent.Metrics.CPUPercent != 12.5 || agent.Metrics.NetworkRXBPS != 100 || len(agent.Metrics.NetworkInterfaces) != 1 {
