@@ -30,6 +30,12 @@ func TestProductionAgentUnitAllowsOnlyMetadataOwnershipCapability(t *testing.T) 
 	if strings.Contains(unit, "ReadWritePaths=-/usr/local/bin\n") {
 		t.Fatal("production Agent unit can modify administrator-managed /usr/local/bin programs")
 	}
+	if !strings.Contains(unit, "ProtectProc=invisible") {
+		t.Fatal("production Agent unit must hide process details")
+	}
+	if strings.Contains(unit, "ProcSubset=pid") {
+		t.Fatal("production Agent unit hides /proc/stat, /proc/meminfo, and /proc/net metrics")
+	}
 }
 
 func TestDefaultSpecsUsePrivateQAgentNamespace(t *testing.T) {
