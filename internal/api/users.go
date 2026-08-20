@@ -37,6 +37,15 @@ func (s *Server) createUser(w http.ResponseWriter, request *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	normalizedPermissions := core.NormalizePermissions(input.Permissions)
+	if len(normalizedPermissions) != len(input.Permissions) {
+		writeError(w, http.StatusBadRequest, "invalid user permission")
+		return
+	}
+	input.Permissions = normalizedPermissions
+	if input.Role == core.RoleAdmin {
+		input.Permissions = core.AllPermissions()
+	}
 	hash, err := authn.HashPassword(input.Password)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -68,6 +77,17 @@ func (s *Server) updateUser(w http.ResponseWriter, request *http.Request) {
 	if input.Role != nil && !input.Role.Valid() {
 		writeError(w, http.StatusBadRequest, "invalid user role")
 		return
+	}
+	if input.Permissions != nil {
+		normalized := core.NormalizePermissions(*input.Permissions)
+		if len(normalized) != len(*input.Permissions) {
+			writeError(w, http.StatusBadRequest, "invalid user permission")
+			return
+		}
+		if input.Role != nil && *input.Role == core.RoleAdmin {
+			normalized = core.AllPermissions()
+		}
+		input.Permissions = &normalized
 	}
 	if input.DisplayName != nil && utf8.RuneCountInString(strings.TrimSpace(*input.DisplayName)) > 100 {
 		writeError(w, http.StatusBadRequest, "display name must be at most 100 characters")

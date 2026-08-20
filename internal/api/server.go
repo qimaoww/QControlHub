@@ -54,12 +54,17 @@ type Server struct {
 	agentVersion    string
 	agentInstaller  []byte
 	notifier        *notify.Client
-	roleTokens      map[[32]byte]core.Role
+	roleTokens      map[[32]byte]tokenPrincipal
 	sessionsMu      sync.Mutex
 	sessions        map[string]apiSession
 	sessionTTL      time.Duration
 	connectionsMu   sync.Mutex
 	connections     map[string]liveConnection
+}
+
+type tokenPrincipal struct {
+	Role        core.Role
+	Permissions []core.Permission
 }
 
 type liveConnection struct {
@@ -75,20 +80,20 @@ func New(dataStore *store.Store, config Config) *Server {
 			origins[origin] = struct{}{}
 		}
 	}
-	roleTokens := map[[32]byte]core.Role{sha256.Sum256([]byte(config.AdminToken)): core.RoleAdmin}
+	roleTokens := map[[32]byte]tokenPrincipal{sha256.Sum256([]byte(config.AdminToken)): {Role: core.RoleAdmin, Permissions: core.AllPermissions()}}
 	for _, token := range config.OperatorTokens {
 		if token = strings.TrimSpace(token); token != "" {
-			roleTokens[sha256.Sum256([]byte(token))] = core.RoleOperator
+			roleTokens[sha256.Sum256([]byte(token))] = tokenPrincipal{Role: core.RoleUser, Permissions: legacyOperatorPermissions()}
 		}
 	}
 	for _, token := range config.AuditorTokens {
 		if token = strings.TrimSpace(token); token != "" {
-			roleTokens[sha256.Sum256([]byte(token))] = core.RoleAuditor
+			roleTokens[sha256.Sum256([]byte(token))] = tokenPrincipal{Role: core.RoleUser, Permissions: legacyAuditorPermissions()}
 		}
 	}
 	for _, token := range config.ReadonlyTokens {
 		if token = strings.TrimSpace(token); token != "" {
-			roleTokens[sha256.Sum256([]byte(token))] = core.RoleReadonly
+			roleTokens[sha256.Sum256([]byte(token))] = tokenPrincipal{Role: core.RoleUser, Permissions: legacyReadonlyPermissions()}
 		}
 	}
 	return &Server{
@@ -812,7 +817,8 @@ func (s *Server) requirePermission(permission core.Permission, next http.Handler
 			return
 		}
 		s.adminLimiter.Success(key)
-		if !role.Allows(permission) {
+		permissions, permissionsOK := s.sessionPermissions(request)
+		if !permissionsOK || (!role.Allows(permission) && !core.HasPermission(permissions, permission)) {
 			writeError(w, http.StatusForbidden, "token role does not permit this operation")
 			return
 		}
@@ -836,17 +842,30 @@ func (s *Server) requireRole(minimum core.Role, next http.Handler) http.Handler 
 	switch minimum {
 	case core.RoleAdmin:
 		permission = core.PermissionUsersManage
-	case core.RoleOperator:
-		permission = core.PermissionTasksExecute
-	case core.RoleAuditor, core.RoleReadonly:
+	case core.RoleUser:
 		permission = core.PermissionOverviewRead
 	}
 	return s.requirePermission(permission, next)
 }
 
 func (s *Server) roleForToken(token string) (core.Role, bool) {
-	role, ok := s.roleTokens[sha256.Sum256([]byte(token))]
-	return role, ok
+	principal, ok := s.roleTokens[sha256.Sum256([]byte(token))]
+	return principal.Role, ok
+}
+
+func (s *Server) principalForToken(token string) (tokenPrincipal, bool) {
+	principal, ok := s.roleTokens[sha256.Sum256([]byte(token))]
+	return principal, ok
+}
+
+func legacyOperatorPermissions() []core.Permission {
+	return []core.Permission{core.PermissionOverviewRead, core.PermissionAgentsRead, core.PermissionDeploymentsRead, core.PermissionClientAccessRead, core.PermissionCatalogsRead, core.PermissionAgentConfigRead, core.PermissionAgentConfigWrite, core.PermissionConfigsRead, core.PermissionConfigsWrite, core.PermissionTasksRead, core.PermissionTasksExecute, core.PermissionSettingsRead, core.PermissionAuditRead, core.PermissionMetricsRead, core.PermissionTemplatesRead, core.PermissionTemplatesWrite}
+}
+func legacyAuditorPermissions() []core.Permission {
+	return []core.Permission{core.PermissionOverviewRead, core.PermissionAgentsRead, core.PermissionDeploymentsRead, core.PermissionTasksRead, core.PermissionAuditRead, core.PermissionMetricsRead}
+}
+func legacyReadonlyPermissions() []core.Permission {
+	return []core.Permission{core.PermissionOverviewRead, core.PermissionAgentsRead, core.PermissionDeploymentsRead, core.PermissionClientAccessRead, core.PermissionCatalogsRead, core.PermissionAgentConfigRead, core.PermissionConfigsRead, core.PermissionTasksRead, core.PermissionSettingsRead, core.PermissionAuditRead, core.PermissionMetricsRead, core.PermissionTemplatesRead}
 }
 
 func (s *Server) agent(next http.Handler) http.Handler {

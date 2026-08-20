@@ -31,78 +31,46 @@ const (
 	PermissionTemplatesDelete  Permission = "templates.delete"
 )
 
-var rolePermissions = map[Role]map[Permission]struct{}{
-	RoleAuditor: permissionSet(
-		PermissionOverviewRead,
-		PermissionAgentsRead,
-		PermissionDeploymentsRead,
-		PermissionTasksRead,
-		PermissionAuditRead,
-		PermissionMetricsRead,
-	),
-	RoleReadonly: permissionSet(
-		PermissionOverviewRead,
-		PermissionAgentsRead,
-		PermissionDeploymentsRead,
-		PermissionClientAccessRead,
-		PermissionCatalogsRead,
-		PermissionAgentConfigRead,
-		PermissionConfigsRead,
-		PermissionTasksRead,
-		PermissionSettingsRead,
-		PermissionAuditRead,
-		PermissionMetricsRead,
-		PermissionTemplatesRead,
-	),
-	RoleOperator: permissionSet(
-		PermissionOverviewRead,
-		PermissionAgentsRead,
-		PermissionDeploymentsRead,
-		PermissionClientAccessRead,
-		PermissionCatalogsRead,
-		PermissionAgentConfigRead,
-		PermissionAgentConfigWrite,
-		PermissionConfigsRead,
-		PermissionConfigsWrite,
-		PermissionTasksRead,
-		PermissionTasksExecute,
-		PermissionSettingsRead,
-		PermissionAuditRead,
-		PermissionMetricsRead,
-		PermissionTemplatesRead,
-		PermissionTemplatesWrite,
-	),
+var allPermissions = []Permission{
+	PermissionOverviewRead, PermissionAgentsRead, PermissionAgentsManage,
+	PermissionClientAccessRead, PermissionDeploymentsRead, PermissionCatalogsRead,
+	PermissionAgentConfigRead, PermissionAgentConfigWrite, PermissionConfigsRead,
+	PermissionConfigsWrite, PermissionConfigsDelete, PermissionConfigsRestore,
+	PermissionTasksRead, PermissionTasksExecute, PermissionEnrollmentManage,
+	PermissionSettingsRead, PermissionSettingsManage, PermissionAuditRead,
+	PermissionMetricsRead, PermissionUsersManage, PermissionTemplatesRead,
+	PermissionTemplatesWrite, PermissionTemplatesDelete,
+}
+
+var rolePermissions = map[Role]map[Permission]struct{}{}
+
+func AllPermissions() []Permission { return append([]Permission(nil), allPermissions...) }
+
+func NormalizePermissions(values []Permission) []Permission {
+	allowed := make(map[Permission]struct{}, len(allPermissions))
+	for _, value := range allPermissions {
+		allowed[value] = struct{}{}
+	}
+	seen := make(map[Permission]struct{}, len(values))
+	result := make([]Permission, 0, len(values))
+	for _, value := range values {
+		if _, ok := allowed[value]; !ok {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
 }
 
 // Admin is intentionally built from the union of every declared capability.
 // New capabilities must be listed here so the administrator remains the
 // complete break-glass role while lower roles stay deny-by-default.
 func init() {
-	rolePermissions[RoleAdmin] = permissionSet(
-		PermissionOverviewRead,
-		PermissionAgentsRead,
-		PermissionAgentsManage,
-		PermissionClientAccessRead,
-		PermissionDeploymentsRead,
-		PermissionCatalogsRead,
-		PermissionAgentConfigRead,
-		PermissionAgentConfigWrite,
-		PermissionConfigsRead,
-		PermissionConfigsWrite,
-		PermissionConfigsDelete,
-		PermissionConfigsRestore,
-		PermissionTasksRead,
-		PermissionTasksExecute,
-		PermissionEnrollmentManage,
-		PermissionSettingsRead,
-		PermissionSettingsManage,
-		PermissionAuditRead,
-		PermissionMetricsRead,
-		PermissionUsersManage,
-		PermissionTemplatesRead,
-		PermissionTemplatesWrite,
-		PermissionTemplatesDelete,
-	)
+	rolePermissions[RoleAdmin] = permissionSet(allPermissions...)
 }
 
 func permissionSet(values ...Permission) map[Permission]struct{} {
@@ -118,4 +86,13 @@ func permissionSet(values ...Permission) map[Permission]struct{} {
 func (role Role) Allows(permission Permission) bool {
 	_, ok := rolePermissions[role][permission]
 	return ok
+}
+
+func HasPermission(values []Permission, wanted Permission) bool {
+	for _, value := range values {
+		if value == wanted {
+			return true
+		}
+	}
+	return false
 }

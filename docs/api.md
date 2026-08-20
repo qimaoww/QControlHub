@@ -4,7 +4,7 @@
 
 ## 鉴权模型
 
-- 管理端点 `/api/v1/*`：自动化调用使用 `Authorization: Bearer <令牌>`；SPA 使用 `/api/v1/auth/login` 建立 HttpOnly 会话 Cookie。令牌可为 `QCH_ADMIN_TOKEN` 或 `QCH_OPERATOR_TOKENS` / `QCH_AUDITOR_TOKENS` / `QCH_READONLY_TOKENS` 中的角色令牌。
+- 管理端点 `/api/v1/*`：自动化调用使用 `Authorization: Bearer <令牌>`；SPA 使用 `/api/v1/auth/login` 建立 HttpOnly 会话 Cookie。个人账号只有 admin/user 两种身份，user 的能力由 `permissions` 列表决定；旧版低权限令牌仅作为兼容入口。
 - 添加或重装节点 `/agent/v1/enroll`：`Authorization: Bearer <节点绑定的 QCH_ENROLLMENT_TOKEN>`。
 - WSS `/agent/v1/connect`：仅供官方 Agent 使用，握手要求 Ed25519 签名头、时间戳和 nonce；不要用管理员令牌调用。
 - `/healthz`：无鉴权，仅返回服务存活状态，不包含数据库详情或秘密。
@@ -12,16 +12,14 @@
 - `GET /api/v1/agent-installer`：通过 `X-QControlHub-Enrollment` 头提交有效的添加节点凭证后返回一键安装脚本。
 - `GET /api/v1/agent-binary`：通过 `X-QControlHub-Enrollment` 头提交有效的添加节点凭证后返回 Agent 可执行文件。
 
-### 角色令牌
+### 身份与权限
 
-`QCH_OPERATOR_TOKENS`、`QCH_AUDITOR_TOKENS` 与 `QCH_READONLY_TOKENS`（逗号分隔列表）提供低于管理员的令牌，Web 登录与管理 API 共用同一套角色：
+用户管理只保留两种身份；管理员拥有全部能力，用户按 `permissions` 逐项授权。旧版低权限令牌仍兼容映射到能力集合：
 
 | 角色 | 读取 | 任务/配置写操作 | 节点与添加命令、设置、删除配置 |
 | --- | --- | --- | --- |
-| admin（`QCH_ADMIN_TOKEN`） | ✓ | ✓ | ✓ |
-| operator（运维人员） | ✓ | ✓ | — |
-| auditor（审计人员） | ✓（含审计记录） | — | — |
-| readonly（只读用户） | ✓ | — | — |
+| user（用户，按 permissions） | 按授权能力 | 按授权能力 | — |
+| admin（管理员） | ✓ | ✓ | ✓ |
 
 权限不足时返回 `403`。同一令牌在 Web 会话与 Bearer 请求中的角色一致。
 

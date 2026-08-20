@@ -245,7 +245,10 @@ const rolePermissions = {
 };
 const roleRanks = { readonly: 1, auditor: 1, operator: 2, admin: 3 };
 const can = (capability) => {
+  if (capability === "operator") capability = "tasks.execute";
   const role = state.session?.role;
+  if (role === "admin") return true;
+  if (role === "user") return (state.session?.permissions || []).includes(capability);
   if (capability in roleRanks)
     return (roleRanks[role] || 0) >= (roleRanks[capability] || 0);
   return Boolean(rolePermissions[role]?.has(capability));
@@ -424,7 +427,7 @@ function shell(content, title) {
   const context = contextMarkup(title);
   const overview = state.data.overview || {};
   const panelName = state.data.settings?.panel_name || "QControlHub";
-  const roleName = { admin: "管理员", operator: "运维人员", auditor: "审计人员", readonly: "只读用户" }[
+  const roleName = { admin: "管理员", user: "用户", operator: "用户", auditor: "用户", readonly: "用户" }[
     state.session.role
   ];
   const topAction =
@@ -527,7 +530,7 @@ function contextMarkup(title) {
       )
       .join("")}</nav>`;
   if (state.route === "settings")
-    return `<nav class="context-menu" aria-label="设置目录"><a class="active" href="#identity"><span>01</span>面板标识</a><a href="#defaults"><span>02</span>操作默认值</a><a href="#synchronization"><span>03</span>状态同步</a><a href="#notifications"><span>04</span>事件通知</a><a href="#audit"><span>05</span>最近操作</a></nav>`;
+    return `<nav class="context-menu" aria-label="设置目录"><a class="active" href="#identity"><span>01</span>面板标识</a><a href="#defaults"><span>02</span>操作默认值</a><a href="#synchronization"><span>03</span>状态同步</a><a href="#notifications"><span>04</span>事件通知</a>${can("users.manage") ? '<a href="#users"><span>05</span>用户管理</a>' : ""}</nav>`;
   const agent = (state.data.agents || []).find(
     (item) => item.id === state.data.agentId,
   );
