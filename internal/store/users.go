@@ -111,6 +111,9 @@ func (s *Store) UpdateUser(ctx context.Context, id string, update core.UserUpdat
 	disabled := current.User.Disabled
 	displayName := current.User.DisplayName
 	permissions := append([]core.Permission(nil), current.User.Permissions...)
+	if permissions == nil {
+		permissions = []core.Permission{}
+	}
 	if update.Role != nil {
 		if !update.Role.Valid() {
 			return core.User{}, fmt.Errorf("%w: invalid user role", ErrInvalid)
