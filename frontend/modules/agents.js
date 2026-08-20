@@ -374,9 +374,12 @@ function bindAgentPage(agentItems) {
       const escapedToken = created.token.replaceAll("'", "'\\''");
       const escapedName = name.replaceAll("'", "'\\''");
       const command = `curl -fsSL -H 'X-QControlHub-Enrollment: ${escapedToken}' ${location.origin}/install-agent.sh | sudo bash -s -- ${location.origin} '${escapedToken}' '${escapedName}'`;
-      showCommand(command, () => {
-        void agents();
-      });
+      // Refresh the history before opening the modal so the newly-created
+      // enrollment is already visible when the one-time command is closed.
+      // Rendering first also avoids a race with the modal close callback and
+      // keeps the history count/list in sync without requiring a page reload.
+      await agents();
+      showCommand(command);
     };
   document
     .querySelectorAll("[data-agent-refresh]")
