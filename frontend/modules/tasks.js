@@ -1,6 +1,11 @@
 export function installTasks(ctx) {
   const { api, state, actions, can, esc, statusName, engineName, short, date, ago, actionName, statusTone, notify, confirmAction, shell } = ctx;
 async function tasks() {
+  if (state.confirmOpen) {
+    clearTimeout(state.taskPollTimer);
+    state.taskPollTimer = setTimeout(() => tasks(), 300);
+    return;
+  }
   const filters = state.data.taskFilters || {};
   const query = new URLSearchParams({
     limit: String(filters.limit || 100),
