@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -18,7 +19,7 @@ type userRecord struct {
 
 func (s *Store) ListUsers(ctx context.Context) ([]core.User, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id,username,display_name,role,disabled,created_at,updated_at,last_login_at
+		SELECT id,username,display_name,role,permissions,disabled,created_at,updated_at,last_login_at
 		FROM panel_users ORDER BY disabled ASC, username ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("list users: %w", err)
@@ -37,7 +38,7 @@ func (s *Store) ListUsers(ctx context.Context) ([]core.User, error) {
 
 func (s *Store) UserForLogin(ctx context.Context, username string) (core.User, string, error) {
 	row := s.pool.QueryRow(ctx, `
-		SELECT id,username,display_name,role,disabled,created_at,updated_at,last_login_at,password_hash
+		SELECT id,username,display_name,role,permissions,disabled,created_at,updated_at,last_login_at,password_hash
 		FROM panel_users WHERE username=$1 AND disabled=false`, username)
 	var record userRecord
 	if err := scanUserWithHash(row, &record); errors.Is(err, pgx.ErrNoRows) {
@@ -69,12 +70,16 @@ func (s *Store) CreateUser(ctx context.Context, request core.UserRequest, passwo
 	}
 	username := strings.TrimSpace(request.Username)
 	displayName := strings.TrimSpace(request.DisplayName)
+	permissions, _ := json.Marshal(core.NormalizePermissions(request.Permissions))
+	if request.Role == core.RoleAdmin {
+		permissions, _ = json.Marshal(core.AllPermissions())
+	}
 	now := time.Now().UTC()
 	row := s.pool.QueryRow(ctx, `
-		INSERT INTO panel_users (id,username,display_name,role,password_hash,created_at,updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$6)
-		RETURNING id,username,display_name,role,disabled,created_at,updated_at,last_login_at`,
-		id, username, displayName, request.Role, passwordHash, now)
+		INSERT INTO panel_users (id,username,display_name,role,permissions,password_hash,created_at,updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$7)
+		RETURNING id,username,display_name,role,permissions,disabled,created_at,updated_at,last_login_at`,
+		id, username, displayName, request.Role, permissions, passwordHash, now)
 	user, err := scanUser(row)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -94,7 +99,7 @@ func (s *Store) UpdateUser(ctx context.Context, id string, update core.UserUpdat
 	}
 	defer tx.Rollback(ctx)
 	row := tx.QueryRow(ctx, `
-		SELECT id,username,display_name,role,disabled,created_at,updated_at,last_login_at,password_hash
+		SELECT id,username,display_name,role,permissions,disabled,created_at,updated_at,last_login_at,password_hash
 		FROM panel_users WHERE id=$1 FOR UPDATE`, id)
 	var current userRecord
 	if err := scanUserWithHash(row, &current); errors.Is(err, pgx.ErrNoRows) {
@@ -105,6 +110,10 @@ func (s *Store) UpdateUser(ctx context.Context, id string, update core.UserUpdat
 	role := current.User.Role
 	disabled := current.User.Disabled
 	displayName := current.User.DisplayName
+	permissions := append([]core.Permission(nil), current.User.Permissions...)
+	if permissions == nil {
+		permissions = []core.Permission{}
+	}
 	if update.Role != nil {
 		if !update.Role.Valid() {
 			return core.User{}, fmt.Errorf("%w: invalid user role", ErrInvalid)
@@ -116,6 +125,12 @@ func (s *Store) UpdateUser(ctx context.Context, id string, update core.UserUpdat
 	}
 	if update.DisplayName != nil {
 		displayName = strings.TrimSpace(*update.DisplayName)
+	}
+	if update.Permissions != nil {
+		permissions = core.NormalizePermissions(*update.Permissions)
+	}
+	if role == core.RoleAdmin {
+		permissions = core.AllPermissions()
 	}
 	if current.User.Role == core.RoleAdmin && (!current.User.Disabled && (role != core.RoleAdmin || disabled)) {
 		var otherAdmins int
@@ -129,13 +144,17 @@ func (s *Store) UpdateUser(ctx context.Context, id string, update core.UserUpdat
 	if strings.TrimSpace(passwordHash) == "" {
 		passwordHash = current.PasswordHash
 	}
+	var updatedPermissions []byte
 	err = tx.QueryRow(ctx, `
-		UPDATE panel_users SET display_name=$2,role=$3,disabled=$4,password_hash=$5,updated_at=now()
+		UPDATE panel_users SET display_name=$2,role=$3,permissions=$4,disabled=$5,password_hash=$6,updated_at=now()
 		WHERE id=$1
-		RETURNING id,username,display_name,role,disabled,created_at,updated_at,last_login_at`,
-		id, displayName, role, disabled, passwordHash).Scan(
-		&current.User.ID, &current.User.Username, &current.User.DisplayName, &current.User.Role,
+		RETURNING id,username,display_name,role,permissions,disabled,created_at,updated_at,last_login_at`,
+		id, displayName, role, permissions, disabled, passwordHash).Scan(
+		&current.User.ID, &current.User.Username, &current.User.DisplayName, &current.User.Role, &updatedPermissions,
 		&current.User.Disabled, &current.User.CreatedAt, &current.User.UpdatedAt, &current.User.LastLoginAt)
+	if err == nil {
+		err = json.Unmarshal(updatedPermissions, &current.User.Permissions)
+	}
 	if err != nil {
 		return core.User{}, err
 	}
@@ -151,11 +170,20 @@ func (s *Store) SetUserDisabled(ctx context.Context, id string, disabled bool) (
 
 func scanUser(row pgx.Row) (core.User, error) {
 	var user core.User
-	err := row.Scan(&user.ID, &user.Username, &user.DisplayName, &user.Role, &user.Disabled, &user.CreatedAt, &user.UpdatedAt, &user.LastLoginAt)
+	var permissions []byte
+	err := row.Scan(&user.ID, &user.Username, &user.DisplayName, &user.Role, &permissions, &user.Disabled, &user.CreatedAt, &user.UpdatedAt, &user.LastLoginAt)
+	if err == nil {
+		err = json.Unmarshal(permissions, &user.Permissions)
+	}
 	return user, err
 }
 
 func scanUserWithHash(row pgx.Row, record *userRecord) error {
-	return row.Scan(&record.User.ID, &record.User.Username, &record.User.DisplayName, &record.User.Role, &record.User.Disabled,
+	var permissions []byte
+	err := row.Scan(&record.User.ID, &record.User.Username, &record.User.DisplayName, &record.User.Role, &permissions, &record.User.Disabled,
 		&record.User.CreatedAt, &record.User.UpdatedAt, &record.User.LastLoginAt, &record.PasswordHash)
+	if err == nil {
+		err = json.Unmarshal(permissions, &record.User.Permissions)
+	}
+	return err
 }

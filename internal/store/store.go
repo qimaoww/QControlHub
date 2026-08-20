@@ -33,7 +33,7 @@ type Store struct {
 	taskWakes  map[string]chan struct{}
 }
 
-const currentSchemaVersion = 15
+const currentSchemaVersion = 16
 
 func Open(ctx context.Context, databaseURL string, allowInsecureRemote bool) (*Store, error) {
 	return OpenWithConfigKey(ctx, databaseURL, allowInsecureRemote, "")
@@ -1290,7 +1290,8 @@ CREATE TABLE IF NOT EXISTS panel_users (
     id text PRIMARY KEY,
     username varchar(64) NOT NULL,
     display_name varchar(100) NOT NULL DEFAULT '',
-    role varchar(20) NOT NULL CHECK (role IN ('admin','operator','auditor','readonly')),
+    role varchar(20) NOT NULL CHECK (role IN ('admin','user')),
+    permissions jsonb NOT NULL DEFAULT '[]'::jsonb,
     password_hash varchar(100) NOT NULL,
     disabled boolean NOT NULL DEFAULT false,
     created_at timestamptz NOT NULL,
@@ -1298,7 +1299,16 @@ CREATE TABLE IF NOT EXISTS panel_users (
     last_login_at timestamptz
 );
 ALTER TABLE panel_users DROP CONSTRAINT IF EXISTS panel_users_role_check;
-ALTER TABLE panel_users ADD CONSTRAINT panel_users_role_check CHECK (role IN ('admin','operator','auditor','readonly'));
+ALTER TABLE panel_users ADD COLUMN IF NOT EXISTS permissions jsonb NOT NULL DEFAULT '[]'::jsonb;
+UPDATE panel_users SET permissions = CASE role
+    WHEN 'admin' THEN '[]'::jsonb
+    WHEN 'operator' THEN '["overview.read","agents.read","deployments.read","client-access.read","catalogs.read","agent-config.read","agent-config.write","configs.read","configs.write","tasks.read","tasks.execute","settings.read","audit.read","metrics.read","templates.read","templates.write"]'::jsonb
+    WHEN 'auditor' THEN '["overview.read","agents.read","deployments.read","tasks.read","audit.read","metrics.read"]'::jsonb
+    WHEN 'readonly' THEN '["overview.read","agents.read","deployments.read","client-access.read","catalogs.read","agent-config.read","configs.read","tasks.read","settings.read","audit.read","metrics.read","templates.read"]'::jsonb
+    ELSE permissions END
+    WHERE role IN ('operator','auditor','readonly');
+UPDATE panel_users SET role='user' WHERE role IN ('operator','auditor','readonly');
+ALTER TABLE panel_users ADD CONSTRAINT panel_users_role_check CHECK (role IN ('admin','user'));
 CREATE UNIQUE INDEX IF NOT EXISTS panel_users_username_unique_idx ON panel_users(lower(username));
 CREATE INDEX IF NOT EXISTS panel_users_status_idx ON panel_users(disabled,username);
 

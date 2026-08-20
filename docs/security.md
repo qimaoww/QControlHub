@@ -9,7 +9,7 @@ QControlHub 的安全边界包括管理员、控制面、PostgreSQL、反向代�
 - `/api/v1/*` 要求 `Authorization: Bearer <QCH_ADMIN_TOKEN>`。
 - 控制面只保存令牌的 SHA-256 摘要用于恒定时间比较，不把令牌写入数据库。
 - 同一来源连续失败会触发内存限速；Nginx 示例额外限制登录和注册入口。
-- 控制面支持 admin（`QCH_ADMIN_TOKEN`）、operator（`QCH_OPERATOR_TOKENS`）、auditor（`QCH_AUDITOR_TOKENS`）与 readonly（`QCH_READONLY_TOKENS`）四级令牌：admin 可执行全部操作；operator 可读写配置并执行节点任务，但不能管理节点身份、添加节点记录、用户或系统设置；auditor 只能查看运行状态、任务与审计记录；readonly 可读取面板数据、配置和审计记录，但不能执行变更。Bearer API 与 Web 会话共用同一套角色。
+- 控制面个人账号只有 admin（管理员）和 user（用户）两种身份。管理员拥有全部能力；用户通过 `permissions` 能力集合逐项授权，Bearer API 与 Web 会话使用同一套能力校验。旧版 operator/auditor/readonly 令牌仅作为兼容入口映射为用户能力集合。
 - 没有 OIDC 或 MFA。需要多人操作时，应把访问进一步放在 VPN、零信任网关或带 MFA 的上游访问代理之后。
 
 ### 独立 SPA 控制台

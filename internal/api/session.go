@@ -19,11 +19,12 @@ const (
 )
 
 type apiSession struct {
-	CSRF      string
-	ExpiresAt time.Time
-	Role      core.Role
-	UserID    string
-	Username  string
+	CSRF        string
+	ExpiresAt   time.Time
+	Role        core.Role
+	UserID      string
+	Username    string
+	Permissions []core.Permission
 }
 
 func sessionTTL(value time.Duration) time.Duration {
@@ -65,10 +66,11 @@ func (s *Server) login(w http.ResponseWriter, request *http.Request) {
 	username := strings.TrimSpace(input.Username)
 	secret := strings.TrimSpace(input.Token)
 	role, ok := core.Role(""), false
+	permissions := []core.Permission(nil)
 	userID := ""
 	if username != "" && secret != "" && s.store != nil {
 		if user, hash, err := s.store.UserForLogin(request.Context(), strings.ToLower(username)); err == nil && authn.CheckPassword(hash, secret) {
-			role, ok, userID = user.Role, true, user.ID
+			role, ok, userID, permissions = user.Role, true, user.ID, user.Permissions
 			username = user.Username
 		}
 	}
@@ -76,7 +78,9 @@ func (s *Server) login(w http.ResponseWriter, request *http.Request) {
 	// It remains compatible with existing installations while durable users
 	// provide named access for day-to-day panel work.
 	if !ok && (username == "" || strings.EqualFold(username, "admin")) {
-		role, ok = s.roleForToken(secret)
+		if principal, found := s.principalForToken(secret); found {
+			role, ok, permissions = principal.Role, true, principal.Permissions
+		}
 	}
 	if !ok {
 		s.adminLimiter.Failure(key, now)
@@ -97,7 +101,7 @@ func (s *Server) login(w http.ResponseWriter, request *http.Request) {
 	expires := now.Add(s.sessionTTL)
 	s.sessionsMu.Lock()
 	s.pruneSessionsLocked(now)
-	s.sessions[token] = apiSession{CSRF: csrf, ExpiresAt: expires, Role: role, UserID: userID, Username: username}
+	s.sessions[token] = apiSession{CSRF: csrf, ExpiresAt: expires, Role: role, UserID: userID, Username: username, Permissions: append([]core.Permission(nil), permissions...)}
 	s.sessionsMu.Unlock()
 	http.SetCookie(w, &http.Cookie{
 		Name: s.cookieName(), Value: token, Path: "/", Expires: expires,
@@ -109,7 +113,7 @@ func (s *Server) login(w http.ResponseWriter, request *http.Request) {
 	if userID != "" && s.store != nil {
 		_ = s.store.RecordUserLogin(request.Context(), userID)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"role": role, "user_id": userID, "username": username, "csrf_token": csrf, "expires_at": expires})
+	writeJSON(w, http.StatusOK, map[string]any{"role": role, "user_id": userID, "username": username, "permissions": permissions, "csrf_token": csrf, "expires_at": expires})
 }
 
 func (s *Server) session(w http.ResponseWriter, request *http.Request) {
@@ -119,7 +123,7 @@ func (s *Server) session(w http.ResponseWriter, request *http.Request) {
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, http.StatusOK, map[string]any{"role": value.Role, "user_id": value.UserID, "username": value.Username, "csrf_token": value.CSRF, "expires_at": value.ExpiresAt})
+	writeJSON(w, http.StatusOK, map[string]any{"role": value.Role, "user_id": value.UserID, "username": value.Username, "permissions": value.Permissions, "csrf_token": value.CSRF, "expires_at": value.ExpiresAt})
 }
 
 func (s *Server) logout(w http.ResponseWriter, request *http.Request) {
@@ -162,6 +166,15 @@ func (s *Server) sessionRole(request *http.Request) (core.Role, bool) {
 	}
 	value, ok := s.sessionForRequest(request)
 	return value.Role, ok
+}
+
+func (s *Server) sessionPermissions(request *http.Request) ([]core.Permission, bool) {
+	if token := bearerToken(request); token != "" {
+		principal, ok := s.principalForToken(token)
+		return principal.Permissions, ok
+	}
+	value, ok := s.sessionForRequest(request)
+	return value.Permissions, ok
 }
 
 func (s *Server) sessionUserID(request *http.Request) string {

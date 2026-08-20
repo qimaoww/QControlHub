@@ -16,12 +16,12 @@ QControlHub 是一个纯 Go 的 Linux 节点配置与远程运维控制平台。
 - 节点结构化编辑明确区分增加、修改和删除：增加拒绝重名，修改/删除要求目标真实存在，所有操作都保留其他入站与未知字段，并强制进入节点内核校验或部署流程。
 - Agent 部署前调用真实内核校验，采用受限目录句柄、`fsync` 和重命名完成原子替换；最多保留 3 份 `0600` 备份，重启失败时自动回滚并尝试恢复服务。
 - 内核版本任务只访问 MetaCubeX/mihomo、XTLS/Xray-core、SagerNet/sing-box 与 shadowsocks/shadowsocks-rust 官方 GitHub Release；Agent 固定选择当前 Linux 架构资产，强制核对 GitHub 提供的 SHA-256 后原子替换，重启失败自动恢复上一二进制。
-- 管理 API 使用 Bearer 管理令牌；Web 控制台登录后使用短期服务端会话及 CSRF 防护。支持 `QCH_OPERATOR_TOKENS`、`QCH_AUDITOR_TOKENS` 与 `QCH_READONLY_TOKENS` 划分运维、审计和只读角色，API 与界面按权限分级。
+- 管理 API 使用 Bearer 管理令牌；Web 控制台登录后使用短期服务端会话及 CSRF 防护。个人账号只有“管理员”和“用户”两种身份，用户权限在用户管理中逐项配置；旧版 operator/auditor/readonly 令牌仅作为兼容入口映射为用户权限。
 - 管理员为每个节点生成独立的添加节点命令；命令绑定节点名称，可重复安装，删除添加记录后立即失效。后续 WSS 握手使用 Ed25519 签名、时间窗和持久化 nonce 防重放。
 - 重复安装会原位替换节点密钥并关闭旧 WSS，不会产生同名节点；移除节点会终止未完成任务并永久拒绝原签名身份重连。
 - 任务失败、节点离线或恢复在线时，可通过设置页配置的 Webhook 地址接收 HMAC-SHA256 签名的结构化 JSON 事件（`QCH_WEBHOOK_SECRET`）。
 - 节点页提供最近 24 小时流量趋势图（每分钟采样、保留 7 天），并为漂移配置提供行级差异视图。
-- 设置页展示最近操作审计轨迹（登录、配置、任务、添加节点、设置）。
+- 审计记录由独立审计接口提供，不混入系统设置表单。
 - 节点页支持多选批量重启/启停/查状态；配置档案页支持带 `{{node_name}}`、`{{lan_ip}}`、`{{random_port}}` 占位符的模板，一键按节点渲染生成配置。
 - 设置 `QCH_CONFIG_ENCRYPTION_KEY` 后，配置正文与修订使用 AES-256-GCM 加密落盘，旧明文行透明迁移。
 
@@ -169,4 +169,4 @@ make logs           # 查看控制面与 PostgreSQL 日志
 - [服务端入站方案](docs/server-plans.md)
 - [HTTP API](docs/api.md)
 
-管理 API 与 Web 控制台共用 admin（`QCH_ADMIN_TOKEN`）、operator（`QCH_OPERATOR_TOKENS`）与 readonly（`QCH_READONLY_TOKENS`）三级令牌，按角色分级授予读取、操作与管理权限。Web 会话保存在控制面进程内存中；生产环境建议先以单控制面实例运行。配置正文会以明文存入 PostgreSQL，因此数据库、备份和管理员终端都应按机密系统保护。设置 `QCH_CONFIG_ENCRYPTION_KEY`（任意非空字符串）后，配置正文与修订会改用 AES-256-GCM 加密落盘（密钥经 SHA-256 派生）；旧明文行无需迁移即可透明读取，新写入自动加密——但密钥一旦丢失将无法解密数据，务必妥善备份。
+管理 API 与 Web 控制台共用 admin（`QCH_ADMIN_TOKEN`）和用户账号。用户账号只有“用户/管理员”身份，实际访问由 `permissions` 能力集合决定；旧版低权限令牌仍兼容映射到对应能力集合。Web 会话保存在控制面进程内存中；生产环境建议先以单控制面实例运行。配置正文会以明文存入 PostgreSQL，因此数据库、备份和管理员终端都应按机密系统保护。设置 `QCH_CONFIG_ENCRYPTION_KEY`（任意非空字符串）后，配置正文与修订会改用 AES-256-GCM 加密落盘（密钥经 SHA-256 派生）；旧明文行无需迁移即可透明读取，新写入自动加密——但密钥一旦丢失将无法解密数据，务必妥善备份。
