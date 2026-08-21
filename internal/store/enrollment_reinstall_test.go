@@ -114,6 +114,57 @@ func TestReusableAddNodeCredentialReinstallsOneBoundNode(t *testing.T) {
 	}
 }
 
+func TestDeleteAgentInvalidatesBoundReusableCredential(t *testing.T) {
+	databaseURL := os.Getenv("QCH_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("QCH_TEST_DATABASE_URL is not configured")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	dataStore, err := Open(ctx, databaseURL, true)
+	if err != nil {
+		t.Fatalf("open PostgreSQL: %v", err)
+	}
+	defer dataStore.Close()
+
+	credential, err := dataStore.CreateEnrollmentToken(ctx, core.EnrollmentTokenRequest{
+		Name: "deleted-bound-node", Reusable: true,
+	})
+	if err != nil {
+		t.Fatalf("create reusable add-node credential: %v", err)
+	}
+	var agentID string
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cleanupCancel()
+		if agentID != "" {
+			_, _ = dataStore.pool.Exec(cleanupCtx, `DELETE FROM agents WHERE id=$1`, agentID)
+		}
+		_, _ = dataStore.pool.Exec(cleanupCtx, `DELETE FROM enrollment_tokens WHERE id=$1`, credential.ID)
+	})
+	agent, err := dataStore.EnrollAgent(ctx, core.EnrollRequest{
+		Name: "deleted-bound-node", OS: "linux", Arch: "amd64",
+		Capabilities: []core.Engine{core.EngineMihomo}, PublicKey: base64.RawURLEncoding.EncodeToString(testEnrollmentPublicKey(t)),
+	}, credential.Token)
+	if err != nil {
+		t.Fatalf("enroll agent: %v", err)
+	}
+	agentID = agent.ID
+
+	if err := dataStore.DeleteAgent(ctx, agent.ID); err != nil {
+		t.Fatalf("delete agent: %v", err)
+	}
+	if dataStore.EnrollmentTokenUsable(ctx, credential.Token) {
+		t.Fatal("deleted agent's reusable credential remains usable")
+	}
+	if _, err := dataStore.EnrollAgent(ctx, core.EnrollRequest{
+		Name: "deleted-bound-node", OS: "linux", Arch: "amd64",
+		Capabilities: []core.Engine{core.EngineMihomo}, PublicKey: base64.RawURLEncoding.EncodeToString(testEnrollmentPublicKey(t)),
+	}, credential.Token); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("deleted agent credential enrollment error = %v, want not found", err)
+	}
+}
+
 func testEnrollmentPublicKey(t *testing.T) []byte {
 	t.Helper()
 	value := make([]byte, 32)

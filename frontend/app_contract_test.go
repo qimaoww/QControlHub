@@ -34,6 +34,7 @@ func TestSPAConsoleSurfaceMatchesInitialRelease(t *testing.T) {
 		`"client-access"`, `"live-config"`, `"archive-config"`,
 		`machine-workspace`, `server-plan-form`, `field-form`,
 		`revision-timeline`, `task-timeline`, `settings-section`,
+		`node-settings`, `内核配置预设`, `实时采样`, `复制 Agent 安装命令`,
 	} {
 		if !strings.Contains(content, required) {
 			t.Errorf("SPA is missing initial console surface %q", required)
@@ -44,6 +45,7 @@ func TestSPAConsoleSurfaceMatchesInitialRelease(t *testing.T) {
 		`app.style.display = "contents"`, `X-QControlHub-Enrollment`,
 		`/install-agent.sh`, `执行记录`, `手动配置`, `系统设置`,
 		`data-delete-enrollment`, `可重复安装`, `删除添加命令`,
+		`enrollment-token`, `重新生成这个节点的 Agent 安装命令`,
 		`heartbeat, percent`, `serviceActionDisabled, trafficChart, renderConfigDiff`,
 	} {
 		if !strings.Contains(content, required) {

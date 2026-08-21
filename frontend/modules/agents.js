@@ -1,29 +1,38 @@
 export function installAgents(ctx) {
   const { api, optionalAPI, state, engines, can, esc, engineName, statusTone, serviceStatusName, short, date, ago, heartbeat, percent, bytes, conciseVersion, rate, actionName, serviceActionDisabled, trafficChart, renderConfigDiff, notify, confirmAction, shell } = ctx;
 async function agents() {
+  return nodeSettings(true);
+}
+
+async function nodeSettings(presetMode = false) {
   const enrollmentOpen = document.querySelector("#enrollment")?.open;
   const historyOpen = document.querySelector("#enrollment .access-history")?.open;
   const [agents, deployments, accessEntries, settings, tokens] =
     await Promise.all([
       api("/agents"),
-      api("/deployments"),
-      api("/client-access"),
-      api("/settings"),
+      can("deployments.read") ? api("/deployments") : Promise.resolve([]),
+      can("client-access.read") ? api("/client-access") : Promise.resolve([]),
+      can("settings.read") ? api("/settings") : Promise.resolve({}),
       can("enrollment.manage") ? api("/enrollment-tokens") : Promise.resolve([]),
     ]);
   state.data.agents = agents;
   state.data.settings = settings;
-  state.data.selectedAgent ||= agents[0]?.id || "";
-  const overview = await api("/overview");
+  if (!agents.some((agent) => agent.id === state.data.selectedAgent))
+    state.data.selectedAgent = agents[0]?.id || "";
+  const overview = can("overview.read")
+    ? await api("/overview")
+    : {};
   state.data.overview = overview;
 
-  const savedConfigs = (
-    await Promise.all(
-      agents.map((agent) =>
-        api(`/agents/${encodeURIComponent(agent.id)}/configs`),
-      ),
-    )
-  ).flat();
+  const savedConfigs = can("agent-config.read")
+    ? (
+        await Promise.all(
+          agents.map((agent) =>
+            api(`/agents/${encodeURIComponent(agent.id)}/configs`),
+          ),
+        )
+      ).flat()
+    : [];
   const configByService = new Map(
     savedConfigs.map((config) => [
       `${config.agent_id}|${config.engine}`,
@@ -66,7 +75,7 @@ async function agents() {
 
   const nodeCards = agents
     .map((agent) => {
-      const metrics = agent.metrics || {};
+      const metrics = can("metrics.read") ? agent.metrics || {} : {};
       const services = (agent.capabilities || [])
         .map((engine) => {
           const key = `${agent.id}|${engine}`;
@@ -98,11 +107,17 @@ async function agents() {
           const serviceManagement = installed
             ? `<details class="runtime-drawer"><summary><span><b>管理服务</b></span><i>＋</i></summary><div class="runtime-drawer-body"><div class="service-actions">${["status", "start", "restart", "stop"].map((action) => `<button class="button small ${action === "stop" ? "danger-button" : ""}" type="button" data-task-agent="${esc(agent.id)}" data-task-engine="${esc(engine)}" data-task-action="${action}" data-service-action="${action}" ${serviceActionDisabled(action, agent.status === "online", installed, runtime.service_status) ? "disabled" : ""}>${esc(actionName(action))}</button>`).join("")}</div></div></details>`
             : '<div class="service-management-unavailable"><b>服务管理</b><small>安装内核后可用</small></div>';
+          let primaryActions = "";
+          if (can("agent-config.read")) {
+            primaryActions = drift
+              ? `<button class="button service-config" type="button" data-config="${esc(agent.id)}" data-engine="${esc(engine)}">查看配置</button>${can("tasks.execute") ? `<button class="button primary" type="button" data-deploy="${esc(agent.id)}" data-engine="${esc(engine)}" data-config-id="${esc(saved.id)}">部署 v${saved.version}</button>` : ""}`
+              : `<button class="button primary service-config" type="button" data-config="${esc(agent.id)}" data-engine="${esc(engine)}">配置 <span>→</span></button>`;
+          }
           return `<article class="service-card service-${esc(engine)}" data-core-installed="${installed ? 1 : 0}">
             <div class="service-card-main">
               <div class="service-overview"><header><span class="engine-badge ${esc(engine)}">${esc(engineName(engine))}</span><span class="engine-state ${serviceTone}"><i></i><b data-core-service="${esc(engine)}">${esc(serviceState)}</b></span></header><div class="service-version"><span class="service-version-label"><small>内核版本</small><button class="service-version-toggle" type="button" data-open-version-form aria-label="打开 ${esc(engineName(engine))} ${installed ? "版本切换" : "安装内核"}">${installed ? "切换版本" : "安装内核"}</button></span><strong data-core-version="${esc(engine)}" title="${esc(installed ? runtime.version || "版本未知" : "尚未安装")}">${esc(installed ? conciseVersion(engine, runtime.version) : "尚未安装")}</strong></div></div>
               <div class="service-deployment"><dl class="service-facts"><div><dt>已部署配置</dt><dd>${deployed?.config_version ? `v${deployed.config_version}` : "—"}</dd></div><div><dt>已保存配置</dt><dd>${saved?.version ? `v${saved.version}` : "—"}</dd></div></dl>${drift ? `<div class="deployment-drift"><span>${deployed ? "已保存版本尚未部署" : "已保存配置尚未部署"}</span><b>待部署 v${saved.version}</b></div>` : ""}${configDiff ? `<details class="config-diff-drawer"><summary>查看配置差异 <i>＋</i></summary>${configDiff}</details>` : ""}<div class="service-endpoint ${endpoint ? "" : "empty"}">${endpoint ? `<span><b>${esc(firstProfile?.protocol || "客户端入站")}</b><small>${esc(firstProfile?.profile?.format || "已部署配置")}</small></span><code>${esc(endpoint)}</code>` : `<b>${deployed ? "自定义配置" : saved ? "尚未部署" : "尚未配置"}</b>`}</div></div>
-              <div class="service-primary-action">${drift ? `<button class="button service-config" type="button" data-config="${esc(agent.id)}" data-engine="${esc(engine)}">查看配置</button><button class="button primary" type="button" data-deploy="${esc(agent.id)}" data-engine="${esc(engine)}" data-config-id="${esc(saved.id)}">部署 v${saved.version}</button>` : `<button class="button primary service-config" type="button" data-config="${esc(agent.id)}" data-engine="${esc(engine)}">配置 <span>→</span></button>`}</div>
+              ${primaryActions ? `<div class="service-primary-action">${primaryActions}</div>` : ""}
             </div>
             ${serviceManagement}
             <details class="runtime-drawer version-drawer"><summary><span><b>${installed ? "版本切换" : "安装内核"}</b><small>${installed ? "升级或切换内核版本" : "从官方 Release 安装"}</small></span><i>＋</i></summary><div class="runtime-drawer-body"><form class="core-version-form" data-version-agent="${esc(agent.id)}" data-version-engine="${esc(engine)}"><fieldset class="release-channel-fieldset"><legend>版本来源</legend><div class="release-channel-options"><label><input type="radio" name="release_channel" value="stable" checked><span>最新稳定版</span></label><label><input type="radio" name="release_channel" value="development"><span>最新开发版</span></label><label><input type="radio" name="release_channel" value="custom"><span>指定版本</span></label></div></fieldset><label class="custom-version-field"><span>指定版本</span><input name="custom_version" maxlength="64" autocomplete="off" placeholder="例如 1.19.29"></label><button class="button small" type="submit" ${agent.status !== "online" || !can("operator") ? "disabled" : ""}>${installed ? "升级或切换版本" : "安装内核"}</button><small>${installed ? "官方 Release · SHA-256 校验" : "安装至 QAgent 专用目录，不影响系统已有内核"}</small></form></div></details>
@@ -124,14 +139,44 @@ async function agents() {
     agents.length > 1 && can("operator")
       ? `<form class="batch-toolbar" id="batch-form"><span class="batch-toolbar-title">批量操作</span><label>内核<select name="engine">${engines.map((engine) => `<option value="${engine}">${esc(engineName(engine))}</option>`).join("")}</select></label><label>动作<select name="action"><option value="restart">重启服务</option><option value="status">查询状态</option><option value="start">启动服务</option><option value="stop">停止服务</option></select></label><button class="button small" type="submit" disabled>执行</button><small data-batch-count>未选择节点</small></form>`
       : "";
+  const pageIntro = presetMode
+    ? `<header class="node-page-intro"><div><p class="eyebrow">节点配置</p><h2>内核配置预设</h2><p>按节点查看已安装内核与配置入口；实际配置文件仍在手动配置页维护。</p></div><span>${agents.length} 个节点</span></header>`
+    : `<header class="node-page-intro node-settings-intro"><div><p class="eyebrow">节点运维</p><h2>节点设置</h2><p>集中管理节点接入、运行状态、性能指标、内核安装与 Agent。</p></div><span><i></i>${can("metrics.read") ? "实时采样 · 2 秒" : "节点状态"}</span></header>`;
   shell(
-    `${enrollment}${batch}${nodeCards ? `<section class="machine-stack">${nodeCards}</section>` : '<div class="empty large"><strong>还没有节点</strong><p>请先添加节点。</p></div>'}`,
-    "节点",
+    `${pageIntro}${enrollment}${batch}${nodeCards ? `<section class="machine-stack">${nodeCards}</section>` : '<div class="empty large"><strong>还没有节点</strong><p>请先添加节点。</p></div>'}`,
+    presetMode ? "内核配置预设" : "节点设置",
   );
-  bindAgentPage(agents);
+  document.querySelectorAll(".machine-workspace").forEach((item) => {
+    const prefix = presetMode ? "preset-node" : "settings-node";
+    item.id = `${prefix}-${item.dataset.agentNode}`;
+  });
+  document.querySelectorAll("[data-context-agent]").forEach((link) => {
+    const prefix = presetMode ? "preset-node" : "settings-node";
+    link.href = `#${prefix}-${link.dataset.contextAgent}`;
+  });
+  if (presetMode) compactPresetPage();
+  bindAgentPage(agents, presetMode);
 }
 
-function bindAgentPage(agentItems) {
+function refreshAgentPage() {
+  return state.route === "agents" ? agents() : nodeSettings();
+}
+
+function compactPresetPage() {
+  document.querySelector("#enrollment")?.remove();
+  document.querySelector("#batch-form")?.remove();
+  document.querySelectorAll(".machine-workspace").forEach((item) => {
+    item.querySelector(".machine-resource-summary")?.remove();
+    item.querySelector(".machine-state")?.remove();
+    item.querySelector(".node-inspector")?.remove();
+    item.querySelector(".machine-footer")?.remove();
+    item.querySelectorAll(".runtime-drawer, .service-management-unavailable, [data-upgrade-agent]").forEach((element) => element.remove());
+    item.querySelectorAll(".service-version-toggle").forEach((element) => element.remove());
+    item.querySelectorAll("[data-batch-checkbox]").forEach((element) => element.closest("label")?.remove());
+  });
+}
+
+function bindAgentPage(agentItems, presetMode = false) {
   const agentsByID = new Map(agentItems.map((agent) => [agent.id, agent]));
   document.querySelectorAll(".machine-workspace").forEach((item) => {
     const agent = agentsByID.get(item.dataset.agentNode);
@@ -152,8 +197,20 @@ function bindAgentPage(agentItems) {
         button.textContent = "需重新安装 Agent";
       }
     });
-    const deleteButton = machineFooter?.querySelector("[data-delete]");
+    if (!presetMode && can("enrollment.manage")) {
+      const actions = item.querySelector(".node-identity-refresh > div");
+      if (actions && !actions.querySelector("[data-reinstall-agent]")) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "button small";
+        button.dataset.reinstallAgent = agent.id;
+        button.textContent = "复制 Agent 安装命令";
+        actions.append(button);
+      }
+    }
+    const deleteButton = machineFooter?.querySelector("[data-delete]") || (can("agents.manage") && !presetMode ? Object.assign(document.createElement("button"), { type: "button", textContent: "删除节点" }) : null);
     if (deleteButton) {
+      if (!deleteButton.dataset.delete) deleteButton.dataset.delete = agent.id;
       const danger = document.createElement("section");
       danger.className = "node-danger-zone";
       danger.innerHTML =
@@ -167,11 +224,12 @@ function bindAgentPage(agentItems) {
     if (agent) updateAgentMetrics(agent);
     item.addEventListener("toggle", () => {
       if (item.open) {
-        state.data.selectedAgent = item.id.replace(/^node-/, "");
-        loadMetricHistory(state.data.selectedAgent);
+        state.data.selectedAgent = item.dataset.agentNode;
+        if (can("metrics.read")) loadMetricHistory(state.data.selectedAgent);
       }
     });
-    if (item.open) loadMetricHistory(item.dataset.agentNode);
+    if (item.open && can("metrics.read"))
+      loadMetricHistory(item.dataset.agentNode);
   });
   document.querySelectorAll("[data-config]").forEach((button) => {
     button.onclick = () => {
@@ -280,7 +338,7 @@ function bindAgentPage(agentItems) {
       await api(`/agents/${encodeURIComponent(button.dataset.delete)}`, {
         method: "DELETE",
       });
-      await agents();
+      await refreshAgentPage();
     };
   });
   document.querySelectorAll("[data-delete-enrollment]").forEach((button) => {
@@ -293,7 +351,7 @@ function bindAgentPage(agentItems) {
           method: "DELETE",
         },
       );
-      await agents();
+      await refreshAgentPage();
     };
   });
   const batchForm = document.querySelector("#batch-form");
@@ -377,7 +435,7 @@ function bindAgentPage(agentItems) {
       // enrollment is already visible when the one-time command is closed.
       // Rendering first also avoids a race with the modal close callback and
       // keeps the history count/list in sync without requiring a page reload.
-      await agents();
+      await refreshAgentPage();
       showCommand(command);
     };
   document
@@ -399,8 +457,32 @@ function bindAgentPage(agentItems) {
       if (task) location.hash = "#tasks";
     };
   });
+  document.querySelectorAll("[data-reinstall-agent]").forEach((button) => {
+    button.onclick = async () => {
+      if (
+        !(await confirmAction(
+          "确定重新生成这个节点的 Agent 安装命令？旧安装命令会立即失效。",
+          "生成安装命令",
+        ))
+      )
+        return;
+      try {
+        const created = await api(
+          `/agents/${encodeURIComponent(button.dataset.reinstallAgent)}/enrollment-token`,
+          { method: "POST" },
+        );
+        const escapedToken = created.token.replaceAll("'", "'\\''");
+        const escapedName = created.name.replaceAll("'", "'\\''");
+        const command = `curl -fsSL -H 'X-QControlHub-Enrollment: ${escapedToken}' ${location.origin}/install-agent.sh | sudo bash -s -- ${location.origin} '${escapedToken}' '${escapedName}'`;
+        showCommand(command, undefined, "复制 Agent 安装命令");
+      } catch (error) {
+        notify(error.message, "error");
+      }
+    };
+  });
   clearTimeout(state.agentPollTimer);
-  state.agentPollTimer = setTimeout(pollAgentMetrics, 2000);
+  if (!presetMode && can("metrics.read"))
+    state.agentPollTimer = setTimeout(pollAgentMetrics, 2000);
 }
 
 async function submitTask(payload) {
@@ -528,7 +610,7 @@ function updateAgentMetrics(item) {
     const installed = Boolean(runtime.installed);
     if (card && card.dataset.coreInstalled !== (installed ? "1" : "0")) {
       card.dataset.coreInstalled = installed ? "1" : "0";
-      agents();
+      refreshAgentPage();
       return;
     }
     const version = root.querySelector(
@@ -566,7 +648,12 @@ function updateAgentMetrics(item) {
 }
 
 async function pollAgentMetrics() {
-  if (state.route !== "agents" || document.hidden) return;
+  if (state.route !== "node-settings" || !can("metrics.read")) return;
+  if (document.hidden) {
+    clearTimeout(state.agentPollTimer);
+    state.agentPollTimer = setTimeout(pollAgentMetrics, 2000);
+    return;
+  }
   const indicators = document.querySelectorAll("[data-metric-poll]");
   indicators.forEach((element) => (element.textContent = "正在刷新…"));
   try {
@@ -592,8 +679,8 @@ async function pollAgentMetrics() {
     );
   } finally {
     clearTimeout(state.agentPollTimer);
-    if (state.route === "agents")
-      state.agentPollTimer = setTimeout(pollAgentMetrics, 5000);
+    if (state.route === "node-settings")
+      state.agentPollTimer = setTimeout(pollAgentMetrics, 2000);
   }
 }
 
@@ -758,11 +845,11 @@ function bindCodeEditors() {
   });
 }
 
-function showCommand(command, onClose) {
+function showCommand(command, onClose, heading = "一键添加 QAgent 节点") {
   const previousFocus = document.activeElement;
   const wrap = document.createElement("div");
   wrap.className = "modal-backdrop";
-  wrap.innerHTML = `<section class="deploy-command-modal" role="dialog" aria-modal="true" aria-labelledby="deploy-command-title"><header class="deploy-command-head"><span class="deploy-command-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m7 8 4 4-4 4M13 16h4"/></svg></span><div><p class="eyebrow">Linux · systemd</p><h2 id="deploy-command-title">一键添加 QAgent 节点</h2><p>复制命令到目标服务器执行，即可完成安装和节点注册。</p></div><button class="deploy-command-close" type="button" data-close aria-label="关闭弹窗">×</button></header><div class="deploy-command-body"><div class="deploy-command-notice"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.6 2.8 8.1 7 10 4.2-1.9 7-5.4 7-10V6l-7-3Z"/><path d="m9.5 12 1.7 1.7 3.5-3.7"/></svg><span><b>添加节点命令仅显示一次</b><small>命令绑定当前节点，可重复安装；从添加记录中删除后立即失效。</small></span></div><section class="deploy-command-shell" aria-label="添加节点命令"><header><span><i></i>Terminal</span><small>root</small></header><div><span class="deploy-command-prompt" aria-hidden="true">$</span><textarea class="deploy-command-input" rows="5" readonly spellcheck="false" aria-label="添加节点命令" data-command>${esc(command)}</textarea></div></section></div><footer class="deploy-command-actions"><span>请在目标 Linux 服务器上以 root 权限执行</span><div><button class="button" type="button" data-close>关闭</button><button class="button primary deploy-command-copy" type="button" data-copy-command><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg><span data-copy-label>复制添加命令</span></button></div></footer></section>`;
+  wrap.innerHTML = `<section class="deploy-command-modal" role="dialog" aria-modal="true" aria-labelledby="deploy-command-title"><header class="deploy-command-head"><span class="deploy-command-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m7 8 4 4-4 4M13 16h4"/></svg></span><div><p class="eyebrow">Linux · systemd</p><h2 id="deploy-command-title">${esc(heading)}</h2><p>复制命令到目标服务器执行，即可完成安装和节点注册。</p></div><button class="deploy-command-close" type="button" data-close aria-label="关闭弹窗">×</button></header><div class="deploy-command-body"><div class="deploy-command-notice"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.6 2.8 8.1 7 10 4.2-1.9 7-5.4 7-10V6l-7-3Z"/><path d="m9.5 12 1.7 1.7 3.5-3.7"/></svg><span><b>安装命令仅显示一次</b><small>命令绑定当前节点，可重复安装；重新生成后旧命令立即失效。</small></span></div><section class="deploy-command-shell" aria-label="Agent 安装命令"><header><span><i></i>Terminal</span><small>root</small></header><div><span class="deploy-command-prompt" aria-hidden="true">$</span><textarea class="deploy-command-input" rows="5" readonly spellcheck="false" aria-label="Agent 安装命令" data-command>${esc(command)}</textarea></div></section></div><footer class="deploy-command-actions"><span>请在目标 Linux 服务器上以 root 权限执行</span><div><button class="button" type="button" data-close>关闭</button><button class="button primary deploy-command-copy" type="button" data-copy-command><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2v8a2 2 0 0 0 2 2h2"/></svg><span data-copy-label>复制安装命令</span></button></div></footer></section>`;
   document.body.append(wrap);
   const copyButton = wrap.querySelector("[data-copy-command]");
   const commandInput = wrap.querySelector("[data-command]");
@@ -803,10 +890,10 @@ function showCommand(command, onClose) {
     window.clearTimeout(resetCopyLabel);
     resetCopyLabel = window.setTimeout(() => {
       copyButton.classList.remove("copied");
-      copyLabel.textContent = "复制添加命令";
+      copyLabel.textContent = "复制安装命令";
     }, 1800);
   };
   copyButton.focus();
 }
-  return { agents, submitTask, bindCodeEditors, showCommand };
+  return { agents, nodeSettings, submitTask, bindCodeEditors, showCommand };
 }

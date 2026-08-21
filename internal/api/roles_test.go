@@ -28,6 +28,7 @@ func TestManagementAPIRouteAuthorizationMatrix(t *testing.T) {
 		{http.MethodPut, "/api/v1/agents/agt_0123456789abcdef/client-address"},
 		{http.MethodGet, "/api/v1/config-catalogs/mihomo"},
 		{http.MethodDelete, "/api/v1/agents/agt_0123456789abcdef"},
+		{http.MethodPost, "/api/v1/agents/agt_0123456789abcdef/enrollment-token"},
 		{http.MethodGet, "/api/v1/agents/agt_0123456789abcdef/configs"},
 		{http.MethodGet, "/api/v1/agents/agt_0123456789abcdef/configs/mihomo"},
 		{http.MethodPut, "/api/v1/agents/agt_0123456789abcdef/configs/mihomo"},
@@ -78,6 +79,7 @@ func TestManagementAPIRouteAuthorizationMatrix(t *testing.T) {
 	}
 	readonlyDenied := []route{
 		{http.MethodDelete, "/api/v1/agents/agt_0123456789abcdef"},
+		{http.MethodPost, "/api/v1/agents/agt_0123456789abcdef/enrollment-token"},
 		{http.MethodPut, "/api/v1/agents/agt_0123456789abcdef/client-address"},
 		{http.MethodPut, "/api/v1/agents/agt_0123456789abcdef/configs/mihomo"},
 		{http.MethodPost, "/api/v1/agents/agt_0123456789abcdef/configs/mihomo/plans"}, {http.MethodPost, "/api/v1/agents/agt_0123456789abcdef/configs/mihomo/server-inbounds"}, {http.MethodPost, "/api/v1/agents/agt_0123456789abcdef/configs/mihomo/fields/dns"},
@@ -95,6 +97,7 @@ func TestManagementAPIRouteAuthorizationMatrix(t *testing.T) {
 	}
 	operatorDenied := []route{
 		{http.MethodDelete, "/api/v1/agents/agt_0123456789abcdef"},
+		{http.MethodPost, "/api/v1/agents/agt_0123456789abcdef/enrollment-token"},
 		{http.MethodPut, "/api/v1/agents/agt_0123456789abcdef/client-address"},
 		{http.MethodDelete, "/api/v1/configs/cfg_test"},
 		{http.MethodPost, "/api/v1/configs/cfg_test/revisions/1/restore"},

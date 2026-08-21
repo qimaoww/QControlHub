@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -82,6 +83,78 @@ func TestAddNodeAPICreatesReusableCredentialAndSupportsReinstall(t *testing.T) {
 	} else {
 		agentID = id
 	}
+	if err := dataStore.Heartbeat(ctx, agentID, core.HeartbeatRequest{
+		Metrics: &core.HostMetrics{CPUAvailable: true, CPUPercent: 12.5},
+	}); err != nil {
+		t.Fatalf("store heartbeat metrics: %v", err)
+	}
+	agentsOnlyToken := strings.Repeat("r", 48)
+	server.roleTokens[sha256.Sum256([]byte(agentsOnlyToken))] = tokenPrincipal{
+		Role: core.RoleUser, Permissions: []core.Permission{core.PermissionAgentsRead},
+	}
+	agentsRequest := httptest.NewRequest(http.MethodGet, "/api/v1/agents", nil)
+	agentsRequest.Header.Set("Authorization", "Bearer "+agentsOnlyToken)
+	agentsResponse := httptest.NewRecorder()
+	handler.ServeHTTP(agentsResponse, agentsRequest)
+	if agentsResponse.Code != http.StatusOK {
+		t.Fatalf("agents-only list status=%d body=%s", agentsResponse.Code, agentsResponse.Body.String())
+	}
+	var visibleAgents []core.Agent
+	if err := json.NewDecoder(agentsResponse.Body).Decode(&visibleAgents); err != nil {
+		t.Fatalf("decode agents-only list: %v", err)
+	}
+	var visibleAgent *core.Agent
+	for index := range visibleAgents {
+		if visibleAgents[index].ID == agentID {
+			visibleAgent = &visibleAgents[index]
+			break
+		}
+	}
+	if visibleAgent == nil {
+		t.Fatalf("agents-only response omitted enrolled agent %s", agentID)
+	}
+	if visibleAgent.Metrics.CPUAvailable || visibleAgent.Metrics.CPUPercent != 0 {
+		t.Fatalf("agents-only response exposed metrics: %+v", visibleAgent.Metrics)
+	}
+	adminAgentsRequest := httptest.NewRequest(http.MethodGet, "/api/v1/agents", nil)
+	adminAgentsRequest.Header.Set("Authorization", "Bearer "+adminToken)
+	adminAgentsResponse := httptest.NewRecorder()
+	handler.ServeHTTP(adminAgentsResponse, adminAgentsRequest)
+	if adminAgentsResponse.Code != http.StatusOK {
+		t.Fatalf("admin list agents status=%d body=%s", adminAgentsResponse.Code, adminAgentsResponse.Body.String())
+	}
+	var adminAgents []core.Agent
+	if err := json.NewDecoder(adminAgentsResponse.Body).Decode(&adminAgents); err != nil {
+		t.Fatalf("decode admin agents list: %v", err)
+	}
+	metricsVisible := false
+	for _, item := range adminAgents {
+		if item.ID == agentID && item.Metrics.CPUAvailable && item.Metrics.CPUPercent == 12.5 {
+			metricsVisible = true
+			break
+		}
+	}
+	if !metricsVisible {
+		t.Fatal("admin agents response omitted authorized metrics")
+	}
+	rotateRequest := httptest.NewRequest(http.MethodPost, "/api/v1/agents/"+agentID+"/enrollment-token", nil)
+	rotateRequest.Header.Set("Authorization", "Bearer "+adminToken)
+	rotateResponse := httptest.NewRecorder()
+	handler.ServeHTTP(rotateResponse, rotateRequest)
+	if rotateResponse.Code != http.StatusCreated {
+		t.Fatalf("rotate Agent install command status=%d body=%s", rotateResponse.Code, rotateResponse.Body.String())
+	}
+	var rotated core.EnrollmentTokenCreated
+	if err := json.NewDecoder(rotateResponse.Body).Decode(&rotated); err != nil {
+		t.Fatalf("decode rotated Agent install command: %v", err)
+	}
+	if rotated.ID != created.ID || rotated.Name != created.Name || rotated.Token == "" {
+		t.Fatalf("rotated Agent install command = %+v", rotated)
+	}
+	if dataStore.EnrollmentTokenUsable(ctx, created.Token) {
+		t.Fatal("previous Agent install command remains usable after rotation")
+	}
+	created = rotated
 	secondStatus, secondID := enroll(randomEnrollmentKey(t))
 	if secondStatus != http.StatusOK || secondID != agentID {
 		t.Fatalf("repeat enrollment status=%d id=%q, want 200 and %q", secondStatus, secondID, agentID)
