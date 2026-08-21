@@ -114,6 +114,96 @@ func TestReusableAddNodeCredentialReinstallsOneBoundNode(t *testing.T) {
 	}
 }
 
+func TestAdditionalAgentCredentialsRemainIndependentlyUsable(t *testing.T) {
+	databaseURL := os.Getenv("QCH_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("QCH_TEST_DATABASE_URL is not configured")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	dataStore, err := Open(ctx, databaseURL, true)
+	if err != nil {
+		t.Fatalf("open PostgreSQL: %v", err)
+	}
+	defer dataStore.Close()
+
+	firstCredential, err := dataStore.CreateEnrollmentToken(ctx, core.EnrollmentTokenRequest{
+		Name: "multiple-install-commands", Reusable: true,
+	})
+	if err != nil {
+		t.Fatalf("create first credential: %v", err)
+	}
+	var agentID string
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cleanupCancel()
+		if agentID != "" {
+			_, _ = dataStore.pool.Exec(cleanupCtx, `DELETE FROM agents WHERE id=$1`, agentID)
+		}
+		_, _ = dataStore.pool.Exec(cleanupCtx, `DELETE FROM enrollment_tokens WHERE id=$1`, firstCredential.ID)
+	})
+
+	first, err := dataStore.EnrollAgent(ctx, core.EnrollRequest{
+		Name: "multiple-install-commands", OS: "linux", Arch: "amd64",
+		Capabilities: []core.Engine{core.EngineMihomo}, PublicKey: base64.RawURLEncoding.EncodeToString(testEnrollmentPublicKey(t)),
+	}, firstCredential.Token)
+	if err != nil {
+		t.Fatalf("first enrollment: %v", err)
+	}
+	agentID = first.ID
+	additional, err := dataStore.CreateAgentEnrollmentToken(ctx, first.ID)
+	if err != nil {
+		t.Fatalf("create additional credential: %v", err)
+	}
+	if additional.ID == firstCredential.ID || additional.AgentID != first.ID || additional.Token == "" {
+		t.Fatalf("additional credential = %+v", additional)
+	}
+	if !dataStore.EnrollmentTokenUsable(ctx, firstCredential.Token) || !dataStore.EnrollmentTokenUsable(ctx, additional.Token) {
+		t.Fatal("creating another install command invalidated a credential")
+	}
+	credentials, err := dataStore.ListEnrollmentTokens(ctx)
+	if err != nil {
+		t.Fatalf("list credentials: %v", err)
+	}
+	bound := 0
+	for _, credential := range credentials {
+		if (credential.ID == firstCredential.ID || credential.ID == additional.ID) && credential.AgentID == first.ID {
+			bound++
+		}
+	}
+	if bound != 2 {
+		t.Fatalf("credentials bound to agent %s = %d, want 2", first.ID, bound)
+	}
+
+	reinstalled, err := dataStore.EnrollAgent(ctx, core.EnrollRequest{
+		Name: "multiple-install-commands", OS: "linux", Arch: "amd64",
+		Capabilities: []core.Engine{core.EngineMihomo, core.EngineXray}, PublicKey: base64.RawURLEncoding.EncodeToString(testEnrollmentPublicKey(t)),
+	}, additional.Token)
+	if err != nil {
+		t.Fatalf("enroll with additional credential: %v", err)
+	}
+	if !reinstalled.Reinstalled || reinstalled.ID != first.ID {
+		t.Fatalf("additional credential enrollment = %+v, want agent %s", reinstalled, first.ID)
+	}
+	if err := dataStore.DeleteEnrollmentToken(ctx, additional.ID); err != nil {
+		t.Fatalf("delete additional credential: %v", err)
+	}
+	if dataStore.EnrollmentTokenUsable(ctx, additional.Token) {
+		t.Fatal("deleted additional credential remains usable")
+	}
+	if !dataStore.EnrollmentTokenUsable(ctx, firstCredential.Token) {
+		t.Fatal("deleting one install command invalidated the original command")
+	}
+
+	reinstalled, err = dataStore.EnrollAgent(ctx, core.EnrollRequest{
+		Name: "multiple-install-commands", OS: "linux", Arch: "amd64",
+		Capabilities: []core.Engine{core.EngineMihomo}, PublicKey: base64.RawURLEncoding.EncodeToString(testEnrollmentPublicKey(t)),
+	}, firstCredential.Token)
+	if err != nil || !reinstalled.Reinstalled || reinstalled.ID != first.ID {
+		t.Fatalf("original credential after deleting additional = %+v, %v", reinstalled, err)
+	}
+}
+
 func TestDeleteAgentInvalidatesBoundReusableCredential(t *testing.T) {
 	databaseURL := os.Getenv("QCH_TEST_DATABASE_URL")
 	if databaseURL == "" {
@@ -150,12 +240,19 @@ func TestDeleteAgentInvalidatesBoundReusableCredential(t *testing.T) {
 		t.Fatalf("enroll agent: %v", err)
 	}
 	agentID = agent.ID
+	additional, err := dataStore.CreateAgentEnrollmentToken(ctx, agent.ID)
+	if err != nil {
+		t.Fatalf("create additional credential: %v", err)
+	}
 
 	if err := dataStore.DeleteAgent(ctx, agent.ID); err != nil {
 		t.Fatalf("delete agent: %v", err)
 	}
 	if dataStore.EnrollmentTokenUsable(ctx, credential.Token) {
 		t.Fatal("deleted agent's reusable credential remains usable")
+	}
+	if dataStore.EnrollmentTokenUsable(ctx, additional.Token) {
+		t.Fatal("deleted agent's additional credential remains usable")
 	}
 	if _, err := dataStore.EnrollAgent(ctx, core.EnrollRequest{
 		Name: "deleted-bound-node", OS: "linux", Arch: "amd64",

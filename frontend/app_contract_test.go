@@ -45,7 +45,7 @@ func TestSPAConsoleSurfaceMatchesInitialRelease(t *testing.T) {
 		`app.style.display = "contents"`, `X-QControlHub-Enrollment`,
 		`/install-agent.sh`, `执行记录`, `手动配置`, `系统设置`,
 		`data-delete-enrollment`, `可重复安装`, `删除添加命令`,
-		`enrollment-token`, `重新生成这个节点的 Agent 安装命令`,
+		`enrollment-token`, `生成新安装命令`,
 		`heartbeat, percent`, `serviceActionDisabled, trafficChart, renderConfigDiff`,
 	} {
 		if !strings.Contains(content, required) {
@@ -59,6 +59,12 @@ func TestSPAConsoleSurfaceMatchesInitialRelease(t *testing.T) {
 		if strings.Contains(content, forbidden) {
 			t.Errorf("SPA still exposes deprecated add-node wording %q", forbidden)
 		}
+	}
+	if strings.Contains(content, "旧安装命令会立即失效") || strings.Contains(content, "重新生成后旧命令立即失效") {
+		t.Error("SPA must keep existing Agent install commands valid when another command is generated")
+	}
+	if !strings.Contains(content, "已有安装命令会继续有效") || !strings.Contains(content, "已有命令继续有效") {
+		t.Error("SPA does not explain that existing Agent install commands remain valid")
 	}
 }
 

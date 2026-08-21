@@ -33,7 +33,7 @@ type Store struct {
 	taskWakes  map[string]chan struct{}
 }
 
-const currentSchemaVersion = 18
+const currentSchemaVersion = 19
 
 func Open(ctx context.Context, databaseURL string, allowInsecureRemote bool) (*Store, error) {
 	return OpenWithConfigKey(ctx, databaseURL, allowInsecureRemote, "")
@@ -174,12 +174,13 @@ func (s *Store) EnrollAgent(ctx context.Context, request core.EnrollRequest, enr
 	}
 	defer tx.Rollback(ctx)
 	var enrollmentID, enrollmentName string
+	var enrollmentAgentID *string
 	var reusable bool
 	err = tx.QueryRow(ctx, `
 		UPDATE enrollment_tokens SET used_count=used_count+1
 		WHERE token_hash=$1 AND revoked_at IS NULL
 		  AND (reusable OR (expires_at>now() AND used_count<max_uses))
-		RETURNING id,name,reusable`, tokenDigest[:]).Scan(&enrollmentID, &enrollmentName, &reusable)
+		RETURNING id,name,reusable,agent_id`, tokenDigest[:]).Scan(&enrollmentID, &enrollmentName, &reusable, &enrollmentAgentID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return core.Agent{}, ErrNotFound
 	}
@@ -192,8 +193,19 @@ func (s *Store) EnrollAgent(ctx context.Context, request core.EnrollRequest, enr
 		if name != enrollmentName {
 			return core.Agent{}, ErrNotFound
 		}
-		err = tx.QueryRow(ctx, `SELECT id FROM agents WHERE enrollment_id=$1 FOR UPDATE`, enrollmentID).Scan(&id)
+		boundAgentID := ""
+		if enrollmentAgentID != nil {
+			boundAgentID = strings.TrimSpace(*enrollmentAgentID)
+		}
+		if boundAgentID != "" {
+			err = tx.QueryRow(ctx, `SELECT id FROM agents WHERE id=$1 AND revoked_at IS NULL FOR UPDATE`, boundAgentID).Scan(&id)
+		} else {
+			err = tx.QueryRow(ctx, `SELECT id FROM agents WHERE enrollment_id=$1 AND revoked_at IS NULL FOR UPDATE`, enrollmentID).Scan(&id)
+		}
 		if errors.Is(err, pgx.ErrNoRows) {
+			if boundAgentID != "" {
+				return core.Agent{}, ErrNotFound
+			}
 			err = nil
 		} else if err != nil {
 			return core.Agent{}, err
@@ -219,6 +231,17 @@ func (s *Store) EnrollAgent(ctx context.Context, request core.EnrollRequest, enr
 	}
 	if err != nil {
 		return core.Agent{}, mapError(err)
+	}
+	if reusable {
+		result, bindErr := tx.Exec(ctx, `
+			UPDATE enrollment_tokens SET agent_id=$2
+			WHERE id=$1 AND (agent_id IS NULL OR agent_id=$2)`, enrollmentID, id)
+		if bindErr != nil {
+			return core.Agent{}, mapError(bindErr)
+		}
+		if result.RowsAffected() == 0 {
+			return core.Agent{}, ErrConflict
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return core.Agent{}, err
@@ -285,6 +308,22 @@ func (s *Store) CreateEnrollmentToken(ctx context.Context, request core.Enrollme
 			return core.EnrollmentTokenCreated{}, fmt.Errorf("%w: enrollment token max uses must be between 1 and 50", ErrInvalid)
 		}
 	}
+	if request.Reusable {
+		var exists bool
+		if err := s.pool.QueryRow(ctx, `
+			SELECT EXISTS(
+				SELECT 1 FROM enrollment_tokens
+				WHERE reusable=TRUE AND revoked_at IS NULL AND lower(name)=lower($1)
+				UNION ALL
+				SELECT 1 FROM agents
+				WHERE revoked_at IS NULL AND lower(name)=lower($1)
+			)`, name).Scan(&exists); err != nil {
+			return core.EnrollmentTokenCreated{}, err
+		}
+		if exists {
+			return core.EnrollmentTokenCreated{}, ErrConflict
+		}
+	}
 	id, err := core.NewID("enr")
 	if err != nil {
 		return core.EnrollmentTokenCreated{}, err
@@ -312,10 +351,9 @@ func (s *Store) CreateEnrollmentToken(ctx context.Context, request core.Enrollme
 	return core.EnrollmentTokenCreated{EnrollmentToken: value, Token: rawToken}, nil
 }
 
-// RotateAgentEnrollmentToken issues a fresh reusable credential while keeping
-// the credential bound to the existing agent identity. The previous command
-// stops working immediately and the plaintext token is returned only once.
-func (s *Store) RotateAgentEnrollmentToken(ctx context.Context, agentID string) (core.EnrollmentTokenCreated, error) {
+// CreateAgentEnrollmentToken adds a reusable credential for an existing agent.
+// Existing credentials remain valid and the plaintext token is returned once.
+func (s *Store) CreateAgentEnrollmentToken(ctx context.Context, agentID string) (core.EnrollmentTokenCreated, error) {
 	agentID = strings.TrimSpace(agentID)
 	if agentID == "" {
 		return core.EnrollmentTokenCreated{}, ErrInvalid
@@ -333,10 +371,9 @@ func (s *Store) RotateAgentEnrollmentToken(ctx context.Context, agentID string) 
 	defer tx.Rollback(ctx)
 
 	var name string
-	var enrollmentID *string
 	if err := tx.QueryRow(ctx, `
-		SELECT name,enrollment_id FROM agents
-		WHERE id=$1 AND revoked_at IS NULL FOR UPDATE`, agentID).Scan(&name, &enrollmentID); err != nil {
+		SELECT name FROM agents
+		WHERE id=$1 AND revoked_at IS NULL FOR UPDATE`, agentID).Scan(&name); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return core.EnrollmentTokenCreated{}, ErrNotFound
 		}
@@ -344,40 +381,22 @@ func (s *Store) RotateAgentEnrollmentToken(ctx context.Context, agentID string) 
 	}
 
 	value := core.EnrollmentToken{
-		Name: strings.TrimSpace(name), MaxUses: 0, UsedCount: 0,
+		AgentID: agentID, Name: strings.TrimSpace(name), MaxUses: 0, UsedCount: 0,
 		Reusable: true, CreatedAt: now,
 	}
 	if value.Name == "" {
 		return core.EnrollmentTokenCreated{}, fmt.Errorf("%w: agent name is empty", ErrInvalid)
 	}
-	if enrollmentID != nil && strings.TrimSpace(*enrollmentID) != "" {
-		value.ID = strings.TrimSpace(*enrollmentID)
-		result, updateErr := tx.Exec(ctx, `
-			UPDATE enrollment_tokens
-			SET name=$2,token_hash=$3,expires_at=NULL,max_uses=0,used_count=0,
-				reusable=TRUE,created_at=$4,revoked_at=NULL
-			WHERE id=$1`, value.ID, value.Name, digest[:], now)
-		if updateErr != nil {
-			return core.EnrollmentTokenCreated{}, mapError(updateErr)
-		}
-		if result.RowsAffected() == 0 {
-			return core.EnrollmentTokenCreated{}, ErrNotFound
-		}
-	} else {
-		value.ID, err = core.NewID("enr")
-		if err != nil {
-			return core.EnrollmentTokenCreated{}, err
-		}
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO enrollment_tokens
-				(id,name,token_hash,expires_at,max_uses,used_count,reusable,created_at)
-			VALUES ($1,$2,$3,NULL,0,0,TRUE,$4)`,
-			value.ID, value.Name, digest[:], now); err != nil {
-			return core.EnrollmentTokenCreated{}, mapError(err)
-		}
-		if _, err := tx.Exec(ctx, `UPDATE agents SET enrollment_id=$2 WHERE id=$1`, agentID, value.ID); err != nil {
-			return core.EnrollmentTokenCreated{}, err
-		}
+	value.ID, err = core.NewID("enr")
+	if err != nil {
+		return core.EnrollmentTokenCreated{}, err
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO enrollment_tokens
+			(id,agent_id,name,token_hash,expires_at,max_uses,used_count,reusable,created_at)
+		VALUES ($1,$2,$3,$4,NULL,0,0,TRUE,$5)`,
+		value.ID, value.AgentID, value.Name, digest[:], now); err != nil {
+		return core.EnrollmentTokenCreated{}, mapError(err)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return core.EnrollmentTokenCreated{}, err
@@ -405,7 +424,7 @@ func (s *Store) EnrollmentTokenUsable(ctx context.Context, rawToken string) bool
 
 func (s *Store) ListEnrollmentTokens(ctx context.Context) ([]core.EnrollmentToken, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id,name,expires_at,max_uses,used_count,reusable,created_at,revoked_at
+		SELECT id,COALESCE(agent_id,''),name,expires_at,max_uses,used_count,reusable,created_at,revoked_at
 		FROM enrollment_tokens ORDER BY created_at DESC LIMIT 100`)
 	if err != nil {
 		return nil, err
@@ -414,7 +433,7 @@ func (s *Store) ListEnrollmentTokens(ctx context.Context) ([]core.EnrollmentToke
 	result := make([]core.EnrollmentToken, 0)
 	for rows.Next() {
 		var value core.EnrollmentToken
-		if err := rows.Scan(&value.ID, &value.Name, &value.ExpiresAt, &value.MaxUses, &value.UsedCount, &value.Reusable, &value.CreatedAt, &value.RevokedAt); err != nil {
+		if err := rows.Scan(&value.ID, &value.AgentID, &value.Name, &value.ExpiresAt, &value.MaxUses, &value.UsedCount, &value.Reusable, &value.CreatedAt, &value.RevokedAt); err != nil {
 			return nil, err
 		}
 		result = append(result, value)
@@ -539,10 +558,14 @@ func (s *Store) DeleteAgent(ctx context.Context, id string) error {
 	if _, err := tx.Exec(ctx, `DELETE FROM config_revisions WHERE config_id IN (SELECT id FROM configs WHERE agent_id=$1)`, id); err != nil {
 		return err
 	}
-	if enrollmentID != nil && strings.TrimSpace(*enrollmentID) != "" {
-		if _, err := tx.Exec(ctx, `DELETE FROM enrollment_tokens WHERE id=$1`, strings.TrimSpace(*enrollmentID)); err != nil {
-			return err
-		}
+	legacyEnrollmentID := ""
+	if enrollmentID != nil {
+		legacyEnrollmentID = strings.TrimSpace(*enrollmentID)
+	}
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM enrollment_tokens
+		WHERE agent_id=$1 OR id=NULLIF($2,'')`, id, legacyEnrollmentID); err != nil {
+		return err
 	}
 	return tx.Commit(ctx)
 }
@@ -1367,12 +1390,22 @@ ALTER TABLE enrollment_tokens ADD COLUMN IF NOT EXISTS reusable boolean NOT NULL
 ALTER TABLE enrollment_tokens ALTER COLUMN expires_at DROP NOT NULL;
 ALTER TABLE enrollment_tokens DROP CONSTRAINT IF EXISTS enrollment_tokens_max_uses_check;
 ALTER TABLE enrollment_tokens ADD CONSTRAINT enrollment_tokens_max_uses_check CHECK (max_uses BETWEEN 0 AND 50);
-CREATE UNIQUE INDEX IF NOT EXISTS enrollment_tokens_reusable_name_unique_idx ON enrollment_tokens(lower(name)) WHERE reusable;
+ALTER TABLE enrollment_tokens ADD COLUMN IF NOT EXISTS agent_id text;
+DROP INDEX IF EXISTS enrollment_tokens_reusable_name_unique_idx;
 
 ALTER TABLE agents ADD COLUMN IF NOT EXISTS enrollment_id text;
 ALTER TABLE agents DROP CONSTRAINT IF EXISTS agents_enrollment_id_fkey;
 ALTER TABLE agents ADD CONSTRAINT agents_enrollment_id_fkey FOREIGN KEY (enrollment_id) REFERENCES enrollment_tokens(id) ON DELETE SET NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS agents_enrollment_id_unique_idx ON agents(enrollment_id) WHERE enrollment_id IS NOT NULL;
+
+UPDATE enrollment_tokens AS token
+SET agent_id=agent.id
+FROM agents AS agent
+WHERE agent.enrollment_id=token.id AND token.agent_id IS NULL;
+ALTER TABLE enrollment_tokens DROP CONSTRAINT IF EXISTS enrollment_tokens_agent_id_fkey;
+ALTER TABLE enrollment_tokens ADD CONSTRAINT enrollment_tokens_agent_id_fkey FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE;
+CREATE INDEX IF NOT EXISTS enrollment_tokens_agent_id_idx ON enrollment_tokens(agent_id,created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS enrollment_tokens_reusable_unbound_name_unique_idx ON enrollment_tokens(lower(name)) WHERE reusable AND agent_id IS NULL;
 
 CREATE TABLE IF NOT EXISTS agent_nonces (
     agent_id text NOT NULL REFERENCES agents(id) ON DELETE CASCADE,

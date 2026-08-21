@@ -193,7 +193,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("PUT /api/v1/agents/{id}/client-address", s.requirePermission(core.PermissionAgentsManage, http.HandlerFunc(s.putAgentClientAddress)))
 	mux.Handle("GET /api/v1/config-catalogs/{engine}", s.requirePermission(core.PermissionCatalogsRead, http.HandlerFunc(s.configCatalog)))
 	mux.Handle("DELETE /api/v1/agents/{id}", s.requirePermission(core.PermissionAgentsManage, http.HandlerFunc(s.deleteAgent)))
-	mux.Handle("POST /api/v1/agents/{id}/enrollment-token", s.requirePermission(core.PermissionEnrollmentManage, http.HandlerFunc(s.rotateAgentEnrollmentToken)))
+	mux.Handle("POST /api/v1/agents/{id}/enrollment-token", s.requirePermission(core.PermissionEnrollmentManage, http.HandlerFunc(s.createAgentEnrollmentToken)))
 	mux.Handle("GET /api/v1/agents/{id}/configs", s.requirePermission(core.PermissionAgentConfigRead, http.HandlerFunc(s.listAgentConfigs)))
 	mux.Handle("GET /api/v1/agents/{id}/configs/{engine}", s.requirePermission(core.PermissionAgentConfigRead, http.HandlerFunc(s.getAgentConfig)))
 	mux.Handle("PUT /api/v1/agents/{id}/configs/{engine}", s.requirePermission(core.PermissionAgentConfigWrite, http.HandlerFunc(s.putAgentConfig)))
@@ -603,13 +603,13 @@ func (s *Server) deleteEnrollmentToken(w http.ResponseWriter, request *http.Requ
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *Server) rotateAgentEnrollmentToken(w http.ResponseWriter, request *http.Request) {
-	created, err := s.store.RotateAgentEnrollmentToken(request.Context(), request.PathValue("id"))
+func (s *Server) createAgentEnrollmentToken(w http.ResponseWriter, request *http.Request) {
+	created, err := s.store.CreateAgentEnrollmentToken(request.Context(), request.PathValue("id"))
 	if err != nil {
 		writeStoreError(w, err)
 		return
 	}
-	s.recordAudit(request, "agent.enrollment_token.rotated", request.PathValue("id"), "")
+	s.recordAudit(request, "agent.enrollment_token.created", request.PathValue("id"), created.ID)
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusCreated, created)
 }

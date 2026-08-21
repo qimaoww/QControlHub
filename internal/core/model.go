@@ -285,6 +285,7 @@ type EnrollResponse struct {
 
 type EnrollmentToken struct {
 	ID        string     `json:"id"`
+	AgentID   string     `json:"agent_id,omitempty"`
 	Name      string     `json:"name"`
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 	MaxUses   int        `json:"max_uses"`
