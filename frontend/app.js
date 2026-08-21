@@ -449,18 +449,20 @@ function shell(content, title) {
     state.route === "dashboard"
       ? '<a class="button small" href="#node-settings">节点设置</a>'
       : state.route === "agents"
-        ? '<a class="button small" href="#node-settings">节点设置</a>'
+        ? ""
         : state.route === "node-settings"
-          ? `<a class="button small" href="#agents">内核配置预设</a>${can("enrollment.manage") ? '<a class="button small" href="#enrollment">添加节点</a>' : ""}`
-        : state.route === "client-access"
-          ? '<a class="button small" href="#node-settings">返回节点设置</a>'
-          : state.route === "archive-config"
-            ? '<a class="button small" href="#live-config">节点实际配置</a>'
+          ? can("enrollment.manage")
+            ? '<a class="button small" href="#enrollment">添加节点</a>'
+            : ""
+          : state.route === "client-access"
+            ? '<a class="button small" href="#node-settings">返回节点设置</a>'
+            : state.route === "archive-config"
+              ? '<a class="button small" href="#live-config">节点实际配置</a>'
               : state.route === "agent-config"
-              ? '<a class="button small" href="#agents">返回内核预设</a>'
-              : state.route === "tasks"
-                ? '<button id="refresh" class="button small task-refresh-link" type="button">刷新</button>'
-                : "";
+                ? '<a class="button small" href="#agents">返回内核预设</a>'
+                : state.route === "tasks"
+                  ? '<button id="refresh" class="button small task-refresh-link" type="button">刷新</button>'
+                  : "";
   document.title = `${title} · ${panelName}`;
   app.innerHTML = `<div class="desktop-app"><aside class="app-dock"><a class="dock-logo" href="#dashboard" aria-label="${esc(panelName)} 总览"><span>QH</span></a><nav class="dock-nav" aria-label="主导航">${links.map(([id, text, icon]) => `<a class="${state.route === id || (state.route === "agent-config" && id === "agents") || (state.route === "archive-config" && id === "live-config") ? "active" : ""}" href="#${id}" title="${text}"><svg viewBox="0 0 24 24">${icon}</svg><span class="dock-label">${text}</span>${id === "agents" ? `<b data-online-count ${overview.agents_online ? "" : "hidden"}>${overview.agents_online || 0}</b>` : ""}${id === "live-config" && overview.node_configs ? `<b>${overview.node_configs}</b>` : ""}${id === "tasks" ? `<b class="hot" data-task-active-count ${overview.tasks_pending ? "" : "hidden"}>${overview.tasks_pending || 0}</b>` : ""}</a>`).join("")}</nav><div class="dock-tools"><button id="theme-toggle" data-theme-toggle type="button" aria-label="切换颜色主题" title="切换主题"><svg viewBox="0 0 24 24"><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6 7 7M17 17l1.4 1.4M18.4 5.6 17 7M7 17l-1.4 1.4"/><circle cx="12" cy="12" r="4"/></svg><span class="dock-label">主题</span></button><button id="logout" type="button" aria-label="退出登录" title="退出登录"><svg viewBox="0 0 24 24"><path d="M10 4H5v16h5M14 8l4 4-4 4M8 12h10"/></svg><span class="dock-label">退出</span></button></div></aside><aside class="context-sidebar"><header class="context-brand"><a href="#dashboard"><span class="brand-mark">QH</span><strong>${esc(panelName)}</strong></a></header>${context}</aside><section class="workspace-shell"><header class="workspace-topbar"><div class="workspace-route"><span>${esc(panelName)}</span><i>/</i><b>${esc(title)}</b><i class="role-badge role-${esc(state.session.role)}">${esc(roleName)}</i></div><div class="workspace-actions"><span class="sync-state ${overview.agents_online ? "" : "inactive"}" data-sync-state><i></i><span data-sync-label>${overview.agents_online ? `${overview.agents_online} 个节点在线` : "等待节点连接"}</span></span>${topAction}</div></header><main class="workspace-main">${content}</main></section></div><dialog class="confirm-dialog" data-confirm-dialog aria-labelledby="confirm-dialog-title" aria-describedby="confirm-dialog-message"><div class="confirm-dialog-card"><span class="confirm-dialog-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3.5 21 20H3zM12 9v5M12 17.5h.01"/></svg></span><div><p class="eyebrow">操作确认</p><h2 id="confirm-dialog-title">确认继续？</h2><p id="confirm-dialog-message" data-confirm-message></p></div><footer><button class="button" type="button" data-confirm-cancel>取消</button><button class="button danger-confirm" type="button" data-confirm-accept>确认继续</button></footer></div></dialog>`;
   if (preservedScroll) {
@@ -524,11 +526,11 @@ function contextMarkup(title) {
     return `<nav class="context-menu" aria-label="总览目录"><a class="active" href="#summary"><span>01</span>运行概览</a><a href="#fleet"><span>02</span>节点状态</a><a href="#activity"><span>03</span>最近活动</a></nav><section class="context-metrics"><div><span>在线 / 全部节点</span><b>${state.data.overview?.agents_online || 0} / ${state.data.overview?.agents || 0}</b></div><div><span>节点版本 / 独立档案</span><b>${state.data.overview?.node_configs || 0} / ${state.data.overview?.configs || 0}</b></div><div><span>准备中 / 执行中</span><b>${state.data.overview?.tasks_queued || 0} / ${state.data.overview?.tasks_running || 0}</b></div></section>`;
   if (state.route === "agents") {
     const items = state.data.agents || [];
-    return `<a class="context-primary" href="#node-settings">节点设置 →</a><div class="context-section-label"><span>内核配置预设</span><b>${items.length}</b></div><nav class="context-list" aria-label="节点内核预设">${items.map((agent) => `<a class="${state.data.selectedAgent === agent.id ? "active" : ""}" href="#node-${esc(agent.id)}" data-context-agent="${esc(agent.id)}"><span class="context-engine">${(agent.capabilities || []).length}</span><span><strong>${esc(agent.name)}</strong><small>${esc(agent.os)} / ${esc(agent.arch)}</small></span><em>${agent.status === "online" ? "在线" : "离线"}</em></a>`).join("") || "<p>还没有节点</p>"}</nav>`;
+    return `<div class="context-section-label"><span>内核配置预设</span><b>${items.length}</b></div><nav class="context-list" aria-label="节点内核预设">${items.map((agent) => `<a class="${state.data.selectedAgent === agent.id ? "active" : ""}" href="#node-${esc(agent.id)}" data-context-agent="${esc(agent.id)}"><span class="context-engine">${(agent.capabilities || []).length}</span><span><strong>${esc(agent.name)}</strong><small>${esc(agent.os)} / ${esc(agent.arch)}</small></span><em>${agent.status === "online" ? "在线" : "离线"}</em></a>`).join("") || "<p>还没有节点</p>"}</nav>`;
   }
   if (state.route === "node-settings") {
     const items = state.data.agents || [];
-    return `<a class="context-primary" href="#agents">内核配置预设 →</a><div class="context-section-label"><span>节点设置</span><b>${items.length}</b></div><nav class="context-list" aria-label="节点设置列表">${items.map((agent) => `<a class="${state.data.selectedAgent === agent.id ? "active" : ""}" href="#node-${esc(agent.id)}" data-context-agent="${esc(agent.id)}"><i class="status-dot ${statusTone(agent.status)}" data-context-agent-dot></i><span><strong>${esc(agent.name)}</strong><small>${esc(agent.os)} / ${esc(agent.arch)}</small></span><em>${agent.status === "online" ? "在线" : "离线"}</em></a>`).join("") || "<p>还没有节点</p>"}</nav>`;
+    return `<div class="context-section-label"><span>节点设置</span><b>${items.length}</b></div><nav class="context-list" aria-label="节点设置列表">${items.map((agent) => `<a class="${state.data.selectedAgent === agent.id ? "active" : ""}" href="#node-${esc(agent.id)}" data-context-agent="${esc(agent.id)}"><i class="status-dot ${statusTone(agent.status)}" data-context-agent-dot></i><span><strong>${esc(agent.name)}</strong><small>${esc(agent.os)} / ${esc(agent.arch)}</small></span><em>${agent.status === "online" ? "在线" : "离线"}</em></a>`).join("") || "<p>还没有节点</p>"}</nav>`;
   }
   if (state.route === "client-access") {
     const items = state.data.agents || [];
