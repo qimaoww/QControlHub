@@ -225,6 +225,11 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("PUT /api/v1/users/{id}", s.requirePermission(core.PermissionUsersManage, http.HandlerFunc(s.updateUser)))
 	mux.Handle("DELETE /api/v1/users/{id}", s.requirePermission(core.PermissionUsersManage, http.HandlerFunc(s.deleteUser)))
 	mux.Handle("GET /api/v1/metrics/{id}", s.requirePermission(core.PermissionMetricsRead, http.HandlerFunc(s.metricSamples)))
+	mux.Handle("GET /api/v1/traffic-policies", s.requirePermission(core.PermissionTrafficRead, http.HandlerFunc(s.listPortTrafficPolicies)))
+	mux.Handle("POST /api/v1/traffic-policies", s.requirePermission(core.PermissionTrafficManage, http.HandlerFunc(s.createPortTrafficPolicy)))
+	mux.Handle("PUT /api/v1/traffic-policies/{id}", s.requirePermission(core.PermissionTrafficManage, http.HandlerFunc(s.updatePortTrafficPolicy)))
+	mux.Handle("POST /api/v1/traffic-policies/{id}/reset", s.requirePermission(core.PermissionTrafficManage, http.HandlerFunc(s.resetPortTrafficPolicy)))
+	mux.Handle("DELETE /api/v1/traffic-policies/{id}", s.requirePermission(core.PermissionTrafficManage, http.HandlerFunc(s.deletePortTrafficPolicy)))
 	mux.Handle("GET /api/v1/templates", s.requirePermission(core.PermissionTemplatesRead, http.HandlerFunc(s.listTemplates)))
 	mux.Handle("POST /api/v1/templates", s.requirePermission(core.PermissionTemplatesWrite, http.HandlerFunc(s.createTemplate)))
 	mux.Handle("DELETE /api/v1/templates/{id}", s.requirePermission(core.PermissionTemplatesDelete, http.HandlerFunc(s.deleteTemplate)))
@@ -688,7 +693,12 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 		}
 	}()
 
-	if err := writeWire(ctx, connection, core.WireMessage{Type: core.WireHello}); err != nil {
+	trafficPolicies, err := s.store.AgentPortTrafficPolicies(ctx, id)
+	if err != nil {
+		slog.Error("load agent traffic policies", "agent_id", id, "error", err)
+		return
+	}
+	if err := writeWire(ctx, connection, core.WireMessage{Type: core.WireHello, TrafficPolicies: trafficPolicies}); err != nil {
 		return
 	}
 	taskTicker := time.NewTicker(2 * time.Second)
@@ -924,13 +934,13 @@ func (s *Server) principalForToken(token string) (tokenPrincipal, bool) {
 }
 
 func legacyOperatorPermissions() []core.Permission {
-	return []core.Permission{core.PermissionOverviewRead, core.PermissionAgentsRead, core.PermissionDeploymentsRead, core.PermissionClientAccessRead, core.PermissionCatalogsRead, core.PermissionAgentConfigRead, core.PermissionAgentConfigWrite, core.PermissionConfigsRead, core.PermissionConfigsWrite, core.PermissionTasksRead, core.PermissionTasksExecute, core.PermissionSettingsRead, core.PermissionAuditRead, core.PermissionMetricsRead, core.PermissionTemplatesRead, core.PermissionTemplatesWrite}
+	return []core.Permission{core.PermissionOverviewRead, core.PermissionAgentsRead, core.PermissionDeploymentsRead, core.PermissionClientAccessRead, core.PermissionCatalogsRead, core.PermissionAgentConfigRead, core.PermissionAgentConfigWrite, core.PermissionConfigsRead, core.PermissionConfigsWrite, core.PermissionTasksRead, core.PermissionTasksExecute, core.PermissionSettingsRead, core.PermissionAuditRead, core.PermissionMetricsRead, core.PermissionTrafficRead, core.PermissionTrafficManage, core.PermissionTemplatesRead, core.PermissionTemplatesWrite}
 }
 func legacyAuditorPermissions() []core.Permission {
-	return []core.Permission{core.PermissionOverviewRead, core.PermissionAgentsRead, core.PermissionDeploymentsRead, core.PermissionTasksRead, core.PermissionAuditRead, core.PermissionMetricsRead}
+	return []core.Permission{core.PermissionOverviewRead, core.PermissionAgentsRead, core.PermissionDeploymentsRead, core.PermissionTasksRead, core.PermissionAuditRead, core.PermissionMetricsRead, core.PermissionTrafficRead}
 }
 func legacyReadonlyPermissions() []core.Permission {
-	return []core.Permission{core.PermissionOverviewRead, core.PermissionAgentsRead, core.PermissionDeploymentsRead, core.PermissionClientAccessRead, core.PermissionCatalogsRead, core.PermissionAgentConfigRead, core.PermissionConfigsRead, core.PermissionTasksRead, core.PermissionSettingsRead, core.PermissionAuditRead, core.PermissionMetricsRead, core.PermissionTemplatesRead}
+	return []core.Permission{core.PermissionOverviewRead, core.PermissionAgentsRead, core.PermissionDeploymentsRead, core.PermissionClientAccessRead, core.PermissionCatalogsRead, core.PermissionAgentConfigRead, core.PermissionConfigsRead, core.PermissionTasksRead, core.PermissionSettingsRead, core.PermissionAuditRead, core.PermissionMetricsRead, core.PermissionTrafficRead, core.PermissionTemplatesRead}
 }
 
 func (s *Server) agent(next http.Handler) http.Handler {

@@ -4,6 +4,7 @@ import { installConfigPages } from "./modules/configs.js";
 import { installDashboard } from "./modules/dashboard.js";
 import { installSettings } from "./modules/settings.js";
 import { installTasks } from "./modules/tasks.js";
+import { installTraffic } from "./modules/traffic.js";
 
 const state = { data: {}, session: { role: "admin" } };
 const noop = () => {};
@@ -19,6 +20,7 @@ for (const install of [
   installDashboard,
   installSettings,
   installTasks,
+  installTraffic,
 ]) {
   const page = install(ctx);
   if (typeof page !== "function" && (typeof page !== "object" || !page)) {

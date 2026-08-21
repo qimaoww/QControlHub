@@ -174,6 +174,9 @@ func scanUser(row pgx.Row) (core.User, error) {
 	err := row.Scan(&user.ID, &user.Username, &user.DisplayName, &user.Role, &permissions, &user.Disabled, &user.CreatedAt, &user.UpdatedAt, &user.LastLoginAt)
 	if err == nil {
 		err = json.Unmarshal(permissions, &user.Permissions)
+		if err == nil && user.Role == core.RoleAdmin {
+			user.Permissions = core.AllPermissions()
+		}
 	}
 	return user, err
 }
@@ -184,6 +187,9 @@ func scanUserWithHash(row pgx.Row, record *userRecord) error {
 		&record.User.CreatedAt, &record.User.UpdatedAt, &record.User.LastLoginAt, &record.PasswordHash)
 	if err == nil {
 		err = json.Unmarshal(permissions, &record.User.Permissions)
+		if err == nil && record.User.Role == core.RoleAdmin {
+			record.User.Permissions = core.AllPermissions()
+		}
 	}
 	return err
 }

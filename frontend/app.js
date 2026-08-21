@@ -3,6 +3,7 @@ import { installAgents } from "./modules/agents.js";
 import { installClientAccess } from "./modules/client-access.js";
 import { installConfigPages } from "./modules/configs.js";
 import { installTasks } from "./modules/tasks.js";
+import { installTraffic } from "./modules/traffic.js";
 import { installSettings } from "./modules/settings.js";
 
 const app = document.querySelector("#app");
@@ -224,23 +225,23 @@ const rolePermissions = {
     "deployments.read", "catalogs.read", "agent-config.read", "agent-config.write",
     "configs.read", "configs.write", "configs.delete", "configs.restore",
     "tasks.read", "tasks.execute", "enrollment.manage", "settings.read",
-    "settings.manage", "audit.read", "metrics.read", "users.manage",
+    "settings.manage", "audit.read", "metrics.read", "traffic.read", "traffic.manage", "users.manage",
     "templates.read", "templates.write", "templates.delete",
   ]),
   operator: new Set([
     "overview.read", "agents.read", "deployments.read", "client-access.read",
     "catalogs.read", "agent-config.read", "agent-config.write", "configs.read",
     "configs.write", "tasks.read", "tasks.execute", "settings.read", "audit.read",
-    "metrics.read", "templates.read", "templates.write",
+    "metrics.read", "traffic.read", "traffic.manage", "templates.read", "templates.write",
   ]),
   auditor: new Set([
     "overview.read", "agents.read", "deployments.read", "tasks.read",
-    "settings.read", "audit.read", "metrics.read",
+    "settings.read", "audit.read", "metrics.read", "traffic.read",
   ]),
   readonly: new Set([
     "overview.read", "agents.read", "deployments.read", "client-access.read",
     "catalogs.read", "agent-config.read", "configs.read", "tasks.read",
-    "settings.read", "audit.read", "metrics.read", "templates.read",
+    "settings.read", "audit.read", "metrics.read", "traffic.read", "templates.read",
   ]),
 };
 const roleRanks = { readonly: 1, auditor: 1, operator: 2, admin: 3 };
@@ -420,6 +421,7 @@ function shell(content, title) {
     ],
     ["live-config", "配置", '<path d="M7 3.5h7l4 4V20.5H7zM14 3.5v4h4M10 12h5M10 16h5"/>'],
     ["tasks", "任务", '<path d="M13 2.5 5.5 13H11l-1 8.5L18.5 11H13z"/>'],
+    ["traffic", "流量", '<path d="M4 17V7M8 14V5M12 19V9M16 15V3M20 18V11"/><path d="M3 20.5h18"/>'],
     [
       "settings",
       "设置",
@@ -433,6 +435,7 @@ function shell(content, title) {
     "client-access": "client-access.read",
     "live-config": "agent-config.read",
     tasks: "tasks.read",
+    traffic: "traffic.read",
     settings: "settings.read",
   };
   links.splice(0, links.length, ...links.filter(([id]) => can(linkPermissions[id])));
@@ -462,6 +465,8 @@ function shell(content, title) {
                 ? '<a class="button small" href="#agents">返回内核预设</a>'
                 : state.route === "tasks"
                   ? '<button id="refresh" class="button small task-refresh-link" type="button">刷新</button>'
+                  : state.route === "traffic" && can("traffic.manage")
+                    ? '<a class="button small" href="#traffic-new">添加端口配额</a>'
                   : "";
   document.title = `${title} · ${panelName}`;
   app.innerHTML = `<div class="desktop-app"><aside class="app-dock"><a class="dock-logo" href="#dashboard" aria-label="${esc(panelName)} 总览"><span>QH</span></a><nav class="dock-nav" aria-label="主导航">${links.map(([id, text, icon]) => `<a class="${state.route === id || (state.route === "agent-config" && id === "agents") || (state.route === "archive-config" && id === "live-config") ? "active" : ""}" href="#${id}" title="${text}"><svg viewBox="0 0 24 24">${icon}</svg><span class="dock-label">${text}</span>${id === "agents" ? `<b data-online-count ${overview.agents_online ? "" : "hidden"}>${overview.agents_online || 0}</b>` : ""}${id === "live-config" && overview.node_configs ? `<b>${overview.node_configs}</b>` : ""}${id === "tasks" ? `<b class="hot" data-task-active-count ${overview.tasks_pending ? "" : "hidden"}>${overview.tasks_pending || 0}</b>` : ""}</a>`).join("")}</nav><div class="dock-tools"><button id="theme-toggle" data-theme-toggle type="button" aria-label="切换颜色主题" title="切换主题"><svg viewBox="0 0 24 24"><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6 7 7M17 17l1.4 1.4M18.4 5.6 17 7M7 17l-1.4 1.4"/><circle cx="12" cy="12" r="4"/></svg><span class="dock-label">主题</span></button><button id="logout" type="button" aria-label="退出登录" title="退出登录"><svg viewBox="0 0 24 24"><path d="M10 4H5v16h5M14 8l4 4-4 4M8 12h10"/></svg><span class="dock-label">退出</span></button></div></aside><aside class="context-sidebar"><header class="context-brand"><a href="#dashboard"><span class="brand-mark">QH</span><strong>${esc(panelName)}</strong></a></header>${context}</aside><section class="workspace-shell"><header class="workspace-topbar"><div class="workspace-route"><span>${esc(panelName)}</span><i>/</i><b>${esc(title)}</b><i class="role-badge role-${esc(state.session.role)}">${esc(roleName)}</i></div><div class="workspace-actions"><span class="sync-state ${overview.agents_online ? "" : "inactive"}" data-sync-state><i></i><span data-sync-label>${overview.agents_online ? `${overview.agents_online} 个节点在线` : "等待节点连接"}</span></span>${topAction}</div></header><main class="workspace-main">${content}</main></section></div><dialog class="confirm-dialog" data-confirm-dialog aria-labelledby="confirm-dialog-title" aria-describedby="confirm-dialog-message"><div class="confirm-dialog-card"><span class="confirm-dialog-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3.5 21 20H3zM12 9v5M12 17.5h.01"/></svg></span><div><p class="eyebrow">操作确认</p><h2 id="confirm-dialog-title">确认继续？</h2><p id="confirm-dialog-message" data-confirm-message></p></div><footer><button class="button" type="button" data-confirm-cancel>取消</button><button class="button danger-confirm" type="button" data-confirm-accept>确认继续</button></footer></div></dialog>`;
@@ -563,6 +568,11 @@ function contextMarkup(title) {
           `<a class="${(state.data.taskFilters?.status || "") === status ? "active" : ""}" href="#tasks" data-task-status-filter="${status}">${text}</a>`,
       )
       .join("")}</nav>`;
+  if (state.route === "traffic") {
+    const agents = state.data.agents || [];
+    const policies = state.data.trafficPolicies || [];
+    return `${can("traffic.manage") ? '<a class="context-primary" href="#traffic-new">＋ 添加端口配额</a>' : ""}<div class="context-section-label"><span>按节点查看</span><b>${agents.length}</b></div><nav class="context-list" aria-label="端口流量节点">${agents.map((agent) => { const count = policies.filter((policy) => policy.agent_id === agent.id).length; const blocked = policies.filter((policy) => policy.agent_id === agent.id && policy.blocked).length; return `<a href="#traffic-agent-${esc(agent.id)}" data-context-traffic-agent="${esc(agent.id)}"><i class="status-dot ${blocked ? "bad" : agent.status === "online" ? "ok" : ""}"></i><span><strong>${esc(agent.name)}</strong><small>${count ? `${count} 个端口${blocked ? ` · ${blocked} 个封禁` : ""}` : "尚未监控端口"}</small></span></a>`; }).join("") || "<p>还没有节点</p>"}</nav>`;
+  }
   if (state.route === "settings")
     return `<nav class="context-menu" aria-label="设置目录"><a class="active" href="#identity"><span>01</span>面板标识</a><a href="#defaults"><span>02</span>操作默认值</a><a href="#synchronization"><span>03</span>状态同步</a><a href="#notifications"><span>04</span>事件通知</a>${can("users.manage") ? '<a href="#users"><span>05</span>用户管理</a>' : ""}</nav>`;
   const agent = (state.data.agents || []).find(
@@ -584,11 +594,13 @@ const configModule = installConfigPages({ api, optionalAPI, state, engines, can,
 const { agentConfig, liveConfig, archiveConfigs } = configModule;
 
 const tasks = installTasks({ api, state, actions, can, esc, statusName, engineName, short, date, ago, actionName, statusTone, notify, confirmAction, shell });
+const traffic = installTraffic({ api, state, can, esc, engineName, bytes, rate, percent, ago, shell, notify, confirmAction });
 const settings = installSettings({ api, state, esc, date, can, shell, notify, confirmAction });
 
 async function render() {
   if (state.busy) return;
   clearTimeout(state.taskPollTimer);
+  clearTimeout(state.trafficPollTimer);
   state.busy = true;
   const hash = location.hash.slice(1);
   const routeMap = {
@@ -607,6 +619,7 @@ async function render() {
     "new-config": "archive-config",
     templates: "archive-config",
     archive: "archive-config",
+    "traffic-new": "traffic",
   };
   state.route = [
     "dashboard",
@@ -617,6 +630,7 @@ async function render() {
     "live-config",
     "archive-config",
     "tasks",
+    "traffic",
     "settings",
   ].includes(hash)
     ? hash
@@ -625,8 +639,10 @@ async function render() {
         ? "agents"
         : hash.startsWith("settings-node-")
           ? "node-settings"
-          : hash.startsWith("node-")
-            ? "node-settings"
+            : hash.startsWith("node-")
+              ? "node-settings"
+              : hash.startsWith("traffic-agent-")
+                ? "traffic"
             : hash.startsWith("config-")
               ? "archive-config"
               : "dashboard");
@@ -653,6 +669,7 @@ async function render() {
       "live-config": liveConfig,
       "archive-config": archiveConfigs,
       tasks,
+      traffic,
       settings,
     };
     await (pages[state.route] || dashboard)();

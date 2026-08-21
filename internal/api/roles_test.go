@@ -57,6 +57,11 @@ func TestManagementAPIRouteAuthorizationMatrix(t *testing.T) {
 		{http.MethodPut, "/api/v1/settings"},
 		{http.MethodGet, "/api/v1/audit"},
 		{http.MethodGet, "/api/v1/metrics/agt_0123456789abcdef"},
+		{http.MethodGet, "/api/v1/traffic-policies"},
+		{http.MethodPost, "/api/v1/traffic-policies"},
+		{http.MethodPut, "/api/v1/traffic-policies/trf_test"},
+		{http.MethodPost, "/api/v1/traffic-policies/trf_test/reset"},
+		{http.MethodDelete, "/api/v1/traffic-policies/trf_test"},
 		{http.MethodGet, "/api/v1/templates"},
 		{http.MethodPost, "/api/v1/templates"},
 		{http.MethodDelete, "/api/v1/templates/tpl_test"},
@@ -88,6 +93,7 @@ func TestManagementAPIRouteAuthorizationMatrix(t *testing.T) {
 		{http.MethodPost, "/api/v1/tasks"}, {http.MethodDelete, "/api/v1/tasks/tsk_test"}, {http.MethodPost, "/api/v1/tasks/tsk_test/retry"},
 		{http.MethodGet, "/api/v1/enrollment-tokens"}, {http.MethodPost, "/api/v1/enrollment-tokens"}, {http.MethodDelete, "/api/v1/enrollment-tokens/tok_test"},
 		{http.MethodPut, "/api/v1/settings"},
+		{http.MethodPost, "/api/v1/traffic-policies"}, {http.MethodPut, "/api/v1/traffic-policies/trf_test"}, {http.MethodPost, "/api/v1/traffic-policies/trf_test/reset"}, {http.MethodDelete, "/api/v1/traffic-policies/trf_test"},
 		{http.MethodPost, "/api/v1/templates"}, {http.MethodDelete, "/api/v1/templates/tpl_test"}, {http.MethodPost, "/api/v1/templates/tpl_test/apply"},
 	}
 	for _, item := range readonlyDenied {

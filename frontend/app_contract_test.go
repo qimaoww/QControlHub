@@ -121,6 +121,7 @@ func TestSPAModulesArePublished(t *testing.T) {
 		"client-access.js",
 		"configs.js",
 		"tasks.js",
+		"traffic.js",
 		"settings.js",
 		"../module_smoke.mjs",
 	} {

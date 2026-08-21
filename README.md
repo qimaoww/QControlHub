@@ -9,6 +9,7 @@ QControlHub 是一个纯 Go 的 Linux 节点配置与远程运维控制平台。
 - 控制面只承载后端 API，独立 `qcontrol-web` 静态 SPA 提供控制台，无 Node.js 运行时。
 - PostgreSQL 持久化节点、配置版本、执行任务、签名 nonce 与审计结果。
 - Agent 通过既有 WSS 心跳上报 CPU、内存、根磁盘、默认路由接口地址、实时上下行速率及累计流量；节点页每 5 秒从带会话鉴权的同源接口刷新最新快照。
+- 端口流量页可为每个节点端口设置按月或按年额度及自定义周期起始日期；Agent 通过独立 nftables 表统一统计四种内核的收发流量，超额后约 2 秒内封禁端口，并在新周期自动清零解封。
 - 支持 `mihomo`、`xray`、`sing-box`、`ss-rust` 四类配置，单份配置上限 2 MiB。
 - 远程节点以服务端入站方案为主：可随机生成并自定义端口、PSK、密码、UUID、WebSocket 路径、Reality X25519 密钥与 Short ID，再生成完整原生配置；部署后由节点运行区直接使用 Agent 上报的默认路由接口地址，生成带安全遮罩的分享 URI 和逐项接入参数，配置编辑器不再混入客户端导出表单。
 - 支持 `validate`、`deploy`、`read-config`、`start`、`stop`、`restart`、`status` 与 `install` 八类远程任务；配置工作区可从 Agent 白名单路径读取节点实际文件，经目标内核校验后载入手动编辑器。已预置 systemd 单元和初始配置的内核可选择官方稳定版、开发版或严格版本号安全升级。
@@ -33,6 +34,7 @@ flowchart LR
     Agent["远程 Go Agent"] -->|"出站 WSS + Ed25519 握手"| CP
     Agent -->|"固定配置路径"| Engines["Mihomo / Xray / sing-box / Shadowsocks Rust"]
     Agent -->|"受限 systemctl 动作"| Systemd["systemd"]
+    Agent -->|"独立端口计数与封禁"| NFT["nftables"]
 ```
 
 ## 一键部署

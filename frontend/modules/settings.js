@@ -9,8 +9,8 @@ async function settings() {
   const readOnly = can("settings.manage") ? "" : "disabled";
   const roleName = { admin: "管理员", user: "用户" };
   const permissionGroups = [
-    ["查看", [["overview.read", "查看总览"], ["agents.read", "查看节点"], ["deployments.read", "查看部署记录"], ["client-access.read", "查看客户端配置"], ["catalogs.read", "查看内核目录"], ["agent-config.read", "读取节点配置"], ["configs.read", "查看配置档案"], ["tasks.read", "查看任务记录"], ["settings.read", "查看系统设置"], ["audit.read", "查看审计记录"], ["metrics.read", "查看指标"]]],
-    ["操作", [["agent-config.write", "编辑节点配置"], ["configs.write", "管理配置档案"], ["tasks.execute", "执行节点任务"], ["templates.read", "查看配置模板"], ["templates.write", "管理配置模板"]]],
+    ["查看", [["overview.read", "查看总览"], ["agents.read", "查看节点"], ["deployments.read", "查看部署记录"], ["client-access.read", "查看客户端配置"], ["catalogs.read", "查看内核目录"], ["agent-config.read", "读取节点配置"], ["configs.read", "查看配置档案"], ["tasks.read", "查看任务记录"], ["settings.read", "查看系统设置"], ["audit.read", "查看审计记录"], ["metrics.read", "查看指标"], ["traffic.read", "查看端口流量"]]],
+    ["操作", [["agent-config.write", "编辑节点配置"], ["configs.write", "管理配置档案"], ["tasks.execute", "执行节点任务"], ["traffic.manage", "管理流量配额"], ["templates.read", "查看配置模板"], ["templates.write", "管理配置模板"]]],
     ["管理", [["agents.manage", "管理节点身份"], ["enrollment.manage", "添加节点"], ["configs.delete", "删除配置档案"], ["configs.restore", "恢复配置版本"], ["templates.delete", "删除配置模板"], ["settings.manage", "修改系统设置"], ["users.manage", "管理用户"]]],
   ];
   const permissionEditor = (permissions, options = {}) => {

@@ -11,18 +11,20 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
-func TestProductionAgentUnitAllowsOnlyMetadataOwnershipCapability(t *testing.T) {
+func TestProductionAgentUnitAllowsOnlyRequiredCapabilities(t *testing.T) {
 	t.Parallel()
 	contents, err := os.ReadFile("../../deploy/systemd/qagent.service")
 	if err != nil {
 		t.Fatal(err)
 	}
 	unit := string(contents)
-	if !strings.Contains(unit, "CapabilityBoundingSet=CAP_CHOWN") || !strings.Contains(unit, "AmbientCapabilities=CAP_CHOWN") {
-		t.Fatal("production Agent unit does not retain CAP_CHOWN for atomic metadata preservation")
+	if !strings.Contains(unit, "CapabilityBoundingSet=CAP_CHOWN CAP_NET_ADMIN") || !strings.Contains(unit, "AmbientCapabilities=CAP_CHOWN CAP_NET_ADMIN") {
+		t.Fatal("production Agent unit does not retain the metadata and traffic-accounting capabilities")
 	}
-	if strings.Contains(unit, "CapabilityBoundingSet=CAP_CHOWN ") || strings.Contains(unit, "AmbientCapabilities=CAP_CHOWN ") {
-		t.Fatal("production Agent unit grants capabilities beyond CAP_CHOWN")
+	for _, forbidden := range []string{"CAP_SYS_ADMIN", "CAP_SYS_PTRACE", "CAP_DAC_OVERRIDE", "CAP_NET_RAW"} {
+		if strings.Contains(unit, forbidden) {
+			t.Fatalf("production Agent unit grants unnecessary capability %s", forbidden)
+		}
 	}
 	if !strings.Contains(unit, "ReadWritePaths=-/usr/local/lib/qagent/cores") {
 		t.Fatal("production Agent unit does not allow updates in the private core directory")
@@ -35,6 +37,9 @@ func TestProductionAgentUnitAllowsOnlyMetadataOwnershipCapability(t *testing.T) 
 	}
 	if strings.Contains(unit, "ProcSubset=pid") {
 		t.Fatal("production Agent unit hides /proc/stat, /proc/meminfo, and /proc/net metrics")
+	}
+	if !strings.Contains(unit, "RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK") {
+		t.Fatal("production Agent unit does not allow the nftables netlink transport")
 	}
 }
 
