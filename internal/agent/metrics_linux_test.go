@@ -22,12 +22,34 @@ func TestParseCPUTimes(t *testing.T) {
 	}
 }
 
-func TestParseMemoryUsageUsesMemAvailable(t *testing.T) {
+func TestParseMemoryUsageExcludesReclaimableCaches(t *testing.T) {
 	t.Parallel()
-	contents := "MemTotal: 8192 kB\nMemFree: 1024 kB\nMemAvailable: 3072 kB\nBuffers: 512 kB\nCached: 2048 kB\n"
+	contents := "MemTotal: 8192 kB\nMemFree: 1024 kB\nMemAvailable: 3072 kB\nBuffers: 512 kB\nCached: 2048 kB\nSReclaimable: 256 kB\nShmem: 128 kB\n"
 	used, total, err := parseMemoryUsage(contents)
-	if err != nil || total != 8192*1024 || used != 5120*1024 {
+	if err != nil || total != 8192*1024 || used != 4480*1024 {
 		t.Fatalf("parseMemoryUsage() = used %d total %d error %v", used, total, err)
+	}
+}
+
+func TestParseMemoryUsageKeepsSharedMemoryUsed(t *testing.T) {
+	t.Parallel()
+	contents := "MemTotal: 4096 kB\nMemFree: 512 kB\nBuffers: 128 kB\nCached: 1024 kB\nSReclaimable: 128 kB\nShmem: 256 kB\n"
+	used, total, err := parseMemoryUsage(contents)
+	if err != nil || total != 4096*1024 || used != 2560*1024 {
+		t.Fatalf("parseMemoryUsage() = used %d total %d error %v", used, total, err)
+	}
+}
+
+func TestParseMemoryUsageRequiresCoreCounters(t *testing.T) {
+	t.Parallel()
+	for _, contents := range []string{
+		"MemTotal: 4096 kB\nBuffers: 128 kB\nCached: 1024 kB\n",
+		"MemTotal: 4096 kB\nMemFree: 512 kB\nCached: 1024 kB\n",
+		"MemTotal: 4096 kB\nMemFree: 512 kB\nBuffers: 128 kB\n",
+	} {
+		if _, _, err := parseMemoryUsage(contents); err == nil {
+			t.Fatalf("parseMemoryUsage accepted incomplete meminfo %q", contents)
+		}
 	}
 }
 
