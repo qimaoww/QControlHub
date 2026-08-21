@@ -75,7 +75,7 @@ func xrayStream(input Input) map[string]any {
 	if input.RealityEnabled {
 		stream["security"] = "reality"
 		stream["realitySettings"] = map[string]any{
-			"show": false, "target": input.RealityServerName + ":443", "xver": 0,
+			"show": false, "target": input.RealityServerName + ":443", "xver": 0, "minClientVer": "0.0.0",
 			"serverNames": []string{input.RealityServerName}, "privateKey": input.RealityPrivateKey,
 			"shortIds": []string{input.RealityShortID},
 		}
