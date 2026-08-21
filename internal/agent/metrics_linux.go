@@ -260,6 +260,7 @@ func parseCPUTimes(contents string) (uint64, uint64, error) {
 
 func parseMemoryUsage(contents string) (uint64, uint64, error) {
 	values := make(map[string]uint64)
+	present := make(map[string]bool)
 	scanner := bufio.NewScanner(strings.NewReader(contents))
 	for scanner.Scan() {
 		fields := strings.Fields(scanner.Text())
@@ -268,12 +269,13 @@ func parseMemoryUsage(contents string) (uint64, uint64, error) {
 		}
 		key := strings.TrimSuffix(fields[0], ":")
 		switch key {
-		case "MemTotal", "MemAvailable", "MemFree", "Buffers", "Cached", "SReclaimable":
+		case "MemTotal", "MemFree", "Buffers", "Cached", "SReclaimable", "Shmem":
 			value, err := strconv.ParseUint(fields[1], 10, 64)
 			if err != nil || value > math.MaxUint64/1024 {
 				return 0, 0, errors.New("/proc/meminfo contains an invalid counter")
 			}
 			values[key] = value * 1024
+			present[key] = true
 		}
 	}
 	if err := scanner.Err(); err != nil {
@@ -283,14 +285,30 @@ func parseMemoryUsage(contents string) (uint64, uint64, error) {
 	if total == 0 {
 		return 0, 0, errors.New("/proc/meminfo has no MemTotal")
 	}
-	available := values["MemAvailable"]
-	if available == 0 {
-		available = values["MemFree"] + values["Buffers"] + values["Cached"] + values["SReclaimable"]
+	for _, key := range []string{"MemFree", "Buffers", "Cached"} {
+		if !present[key] {
+			return 0, 0, fmt.Errorf("/proc/meminfo has no %s", key)
+		}
 	}
-	if available > total {
-		available = total
+	// Cached includes tmpfs/shared-memory pages. Keep Shmem in used memory and
+	// exclude only the file-backed portion that can act as reclaimable cache.
+	cached := values["Cached"]
+	if shmem := values["Shmem"]; shmem < cached {
+		cached -= shmem
+	} else {
+		cached = 0
 	}
-	return total - available, total, nil
+	reclaimable := values["MemFree"]
+	for _, value := range []uint64{values["Buffers"], cached, values["SReclaimable"]} {
+		if math.MaxUint64-reclaimable < value {
+			return 0, 0, errors.New("/proc/meminfo reclaimable memory overflow")
+		}
+		reclaimable += value
+	}
+	if reclaimable > total {
+		reclaimable = total
+	}
+	return total - reclaimable, total, nil
 }
 
 func rootDiskUsage() (uint64, uint64, error) {
