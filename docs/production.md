@@ -154,7 +154,9 @@ sudo journalctl -u qagent -f
 sudo systemctl restart qagent
 ```
 
-systemd 单元的 `ProtectSystem=strict` 只放行默认的四个配置目录以及 `/usr/local/lib/qagent/cores`，用于在同一文件系统内原子切换内核二进制；`/usr/local/bin` 不可写，`/usr/local/bin/qagent` 也保持只读。单元只保留原子部署所需的 `CAP_CHOWN` 与端口计数/封禁所需的 `CAP_NET_ADMIN`。四个内核服务统一使用 `qagent-` 前缀，不会控制管理员自行安装的通用服务。自定义二进制或配置路径必须预先创建并精确加入 `ReadWritePaths=`，不要放宽为整个 `/etc` 或 `/usr`。
+systemd 单元的 `ProtectSystem=strict` 只放行默认的四个配置目录以及 `/usr/local/lib/qagent/cores`，用于在同一文件系统内原子切换内核二进制；`/usr/local/bin` 不可写，`/usr/local/bin/qagent` 也保持只读。Agent 单元只保留原子部署所需的 `CAP_CHOWN` 与端口计数/封禁所需的 `CAP_NET_ADMIN`；四个非 root 内核单元只保留监听 1-1023 端口所需的 `CAP_NET_BIND_SERVICE`。四个内核服务统一使用 `qagent-` 前缀，不会控制管理员自行安装的通用服务。自定义二进制或配置路径必须预先创建并精确加入 `ReadWritePaths=`，不要放宽为整个 `/etc` 或 `/usr`。
+
+现有节点首次通过新版 Agent 启动、重启、部署或升级专用内核时，会为固定的四个 `qagent-*` 单元同步低端口能力 drop-in 并执行 `daemon-reload`；自定义服务名不会被修改。重复运行一键安装脚本也只更新带 `managed by QAgent` 标记的单元，已有配置文件和管理员自建单元继续保留。
 
 端口配额只管理 `inet qcontrolhub` 表，不刷新或改写管理员已有的 nftables 表。每个策略分别统计发往监听端口的接收字节和从该端口发出的发送字节；达到额度后，两条方向规则都切换为 `drop`。计数状态以 `0600` 原子保存在 `/var/lib/qcontrolhub/traffic-state.json`，Agent 或控制面短暂重启不会清零当前周期。
 

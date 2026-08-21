@@ -67,9 +67,16 @@ func TestDefaultSpecsUsePrivateQAgentNamespace(t *testing.T) {
 			"ConditionFileIsExecutable=" + expected.Binary,
 			"ConditionPathExists=" + expected.ConfigPath,
 			"ExecStart=" + expected.Binary,
+			"CapabilityBoundingSet=CAP_NET_BIND_SERVICE",
+			"AmbientCapabilities=CAP_NET_BIND_SERVICE",
 		} {
 			if !strings.Contains(unit, required) {
 				t.Errorf("%s is missing %q", expected.Service, required)
+			}
+		}
+		for _, forbidden := range []string{"CAP_NET_ADMIN", "CAP_NET_RAW", "CAP_SYS_ADMIN", "CAP_DAC_OVERRIDE"} {
+			if strings.Contains(unit, forbidden) {
+				t.Errorf("%s grants unnecessary capability %s", expected.Service, forbidden)
 			}
 		}
 	}
@@ -82,7 +89,7 @@ func TestCoreBootstrapDoesNotTouchLegacyInstallations(t *testing.T) {
 		t.Fatal(err)
 	}
 	script := string(contents)
-	for _, required := range []string{"/usr/local/lib/qagent/cores", "/etc/systemd/system/qagent-$engine.service"} {
+	for _, required := range []string{"/usr/local/lib/qagent/cores", "/etc/systemd/system/qagent-$engine.service", "install_managed_unit", "preserved non-QAgent unit"} {
 		if !strings.Contains(script, required) {
 			t.Errorf("core bootstrap is missing private namespace %q", required)
 		}
