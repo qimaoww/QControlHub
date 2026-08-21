@@ -143,7 +143,7 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 		t.Fatal(err)
 	}
 	heartbeat := core.WireMessage{Type: core.WireHeartbeat, Heartbeat: &core.HeartbeatRequest{
-		Version: "test", Features: []string{core.AgentFeatureSelfUpgrade, core.AgentFeaturePortTraffic},
+		Version: "test", Features: []string{core.AgentFeatureSelfUpgrade, core.AgentFeaturePortTraffic, core.AgentFeatureCoreLogs},
 		TrafficUsage: []core.PortTrafficUsage{{
 			PolicyID: trafficPolicy.ID, ResetGeneration: trafficPolicy.ResetGeneration,
 			ReceivedBytes: 2048, SentBytes: 1024, UsedBytes: 3072,
@@ -169,6 +169,32 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 			t.Fatalf("traffic heartbeat was not stored: policies=%+v error=%v", policies, listErr)
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+	logBatch := core.CoreLogBatch{ID: "log_0123456789abcdef", Entries: []core.CoreLogEntry{{
+		Engine: core.EngineMihomo, Level: "info", Message: "integration core log", LoggedAt: time.Now().UTC(),
+	}}}
+	if err := wsjson.Write(ctx, connection, core.WireMessage{Type: core.WireCoreLogs, CoreLogs: &logBatch}); err != nil {
+		t.Fatalf("write core log batch: %v", err)
+	}
+	var logAcknowledgment core.WireMessage
+	if err := wsjson.Read(ctx, connection, &logAcknowledgment); err != nil || logAcknowledgment.Type != core.WireCoreLogsAck || logAcknowledgment.BatchID != logBatch.ID {
+		t.Fatalf("core log acknowledgment = %+v, %v", logAcknowledgment, err)
+	}
+	storedLogs, err := dataStore.ListCoreLogs(ctx, store.CoreLogQuery{AgentID: enrolled.AgentID, Limit: 10})
+	if err != nil || len(storedLogs) != 1 || storedLogs[0].Message != logBatch.Entries[0].Message {
+		t.Fatalf("stored core logs = %+v, %v", storedLogs, err)
+	}
+	largeBatch := core.CoreLogBatch{ID: "log_fedcba9876543210", Entries: make([]core.CoreLogEntry, core.MaxCoreLogBatchEntries)}
+	for index := range largeBatch.Entries {
+		largeBatch.Entries[index] = core.CoreLogEntry{
+			Engine: core.EngineXray, Level: "debug", Message: strings.Repeat("\x01", core.MaxCoreLogMessageBytes), LoggedAt: time.Now().UTC(),
+		}
+	}
+	if err := wsjson.Write(ctx, connection, core.WireMessage{Type: core.WireCoreLogs, CoreLogs: &largeBatch}); err != nil {
+		t.Fatalf("write maximum encoded core log batch: %v", err)
+	}
+	if err := wsjson.Read(ctx, connection, &logAcknowledgment); err != nil || logAcknowledgment.Type != core.WireCoreLogsAck || logAcknowledgment.BatchID != largeBatch.ID {
+		t.Fatalf("maximum core log acknowledgment = %+v, %v", logAcknowledgment, err)
 	}
 
 	config, err := dataStore.SaveAgentConfig(ctx, core.Config{

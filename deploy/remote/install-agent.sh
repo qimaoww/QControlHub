@@ -50,6 +50,7 @@ echo '== 1/6 下载安装资源 =='
 for asset in \
   deploy/bootstrap-core-services.sh \
   deploy/systemd/qagent.service \
+  deploy/systemd/qagent-core-journal.conf \
   deploy/systemd/qagent-mihomo.service \
   deploy/systemd/qagent-xray.service \
   deploy/systemd/qagent-sing-box.service \

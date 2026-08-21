@@ -24,6 +24,10 @@ const AgentFeatureSelfUpgrade = "agent-self-upgrade-v1"
 // per-port traffic quotas independently of the managed proxy engine.
 const AgentFeaturePortTraffic = "port-traffic-v1"
 
+// AgentFeatureCoreLogs identifies Agents that stream managed core logs to the
+// control plane without persisting them on the node.
+const AgentFeatureCoreLogs = "core-logs-v1"
+
 // Role identifies the account class. Fine-grained access is carried by the
 // explicit Permissions field on a user; only admin/user are persisted.
 type Role string
@@ -318,13 +322,40 @@ type TaskResultRequest struct {
 }
 
 const (
-	WireHello     = "hello"
-	WireHeartbeat = "heartbeat"
-	WireTask      = "task"
-	WireResult    = "result"
-	WireResultAck = "result_ack"
-	WireError     = "error"
+	WireHello       = "hello"
+	WireHeartbeat   = "heartbeat"
+	WireTask        = "task"
+	WireResult      = "result"
+	WireResultAck   = "result_ack"
+	WireCoreLogs    = "core_logs"
+	WireCoreLogsAck = "core_logs_ack"
+	WireError       = "error"
 )
+
+const (
+	MaxCoreLogBatchEntries = 32
+	MaxCoreLogMessageBytes = 4096
+	// JSON escaping can expand a batch of control-character-heavy messages to
+	// nearly six times the raw message size.
+	MaxCoreLogWireBytes = 1 << 20
+)
+
+// CoreLogEntry is one line emitted by a managed proxy core. AgentID and ID are
+// assigned by the control plane; Agents only submit the remaining fields.
+type CoreLogEntry struct {
+	ID         int64     `json:"id,omitempty"`
+	AgentID    string    `json:"agent_id,omitempty"`
+	Engine     Engine    `json:"engine"`
+	Level      string    `json:"level"`
+	Message    string    `json:"message"`
+	LoggedAt   time.Time `json:"logged_at"`
+	ReceivedAt time.Time `json:"received_at,omitempty"`
+}
+
+type CoreLogBatch struct {
+	ID      string         `json:"id"`
+	Entries []CoreLogEntry `json:"entries"`
+}
 
 type TaskResultEnvelope struct {
 	TaskID string            `json:"task_id"`
@@ -336,8 +367,10 @@ type WireMessage struct {
 	Heartbeat       *HeartbeatRequest   `json:"heartbeat,omitempty"`
 	Task            *Task               `json:"task,omitempty"`
 	Result          *TaskResultEnvelope `json:"result,omitempty"`
+	CoreLogs        *CoreLogBatch       `json:"core_logs,omitempty"`
 	TrafficPolicies []PortTrafficPolicy `json:"traffic_policies,omitempty"`
 	TaskID          string              `json:"task_id,omitempty"`
+	BatchID         string              `json:"batch_id,omitempty"`
 	Error           string              `json:"error,omitempty"`
 }
 

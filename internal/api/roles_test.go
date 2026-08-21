@@ -25,6 +25,7 @@ func TestManagementAPIRouteAuthorizationMatrix(t *testing.T) {
 		{http.MethodGet, "/api/v1/agents"},
 		{http.MethodGet, "/api/v1/deployments"},
 		{http.MethodGet, "/api/v1/client-access"},
+		{http.MethodGet, "/api/v1/core-logs"},
 		{http.MethodPut, "/api/v1/agents/agt_0123456789abcdef/client-address"},
 		{http.MethodGet, "/api/v1/config-catalogs/mihomo"},
 		{http.MethodDelete, "/api/v1/agents/agt_0123456789abcdef"},

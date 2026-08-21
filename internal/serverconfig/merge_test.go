@@ -76,6 +76,40 @@ func TestMergeGeneratedRemovesStaleManagedInboundFields(t *testing.T) {
 	}
 }
 
+func TestMergeGeneratedForcesCentralLogOutput(t *testing.T) {
+	t.Parallel()
+	credential, err := NewCredential(ProtocolSS2022, "2022-blake3-aes-256-gcm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := Input{
+		Protocol: ProtocolSS2022, Tag: "managed", Listen: "0.0.0.0", Port: 8388,
+		Method: "2022-blake3-aes-256-gcm", Credential: credential, Transport: "raw",
+	}
+	fixtures := []struct {
+		engine  core.Engine
+		current string
+		want    string
+	}{
+		{core.EngineMihomo, "log-level: error\nlisteners: []\nrules: []\n", "log-level: info"},
+		{core.EngineXray, `{"log":{"loglevel":"error","access":"/var/log/xray-access.log"},"inbounds":[],"outbounds":[]}`, `"loglevel": "info"`},
+		{core.EngineSingBox, `{"log":{"level":"error","output":"/var/log/sing-box.log"},"inbounds":[],"outbounds":[]}`, `"level": "info"`},
+	}
+	for _, fixture := range fixtures {
+		generated, err := Generate(fixture.engine, input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		merged, err := MergeGenerated(fixture.engine, fixture.current, generated)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(merged, fixture.want) || strings.Contains(merged, "/var/log/") {
+			t.Fatalf("%s centralized log configuration = %s", fixture.engine, merged)
+		}
+	}
+}
+
 func TestMutateGeneratedEnforcesAddModifyDeleteForEveryEngine(t *testing.T) {
 	t.Parallel()
 	credential, err := NewCredential(ProtocolSS2022, "2022-blake3-aes-256-gcm")

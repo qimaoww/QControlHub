@@ -33,7 +33,7 @@ type Store struct {
 	taskWakes  map[string]chan struct{}
 }
 
-const currentSchemaVersion = 17
+const currentSchemaVersion = 18
 
 func Open(ctx context.Context, databaseURL string, allowInsecureRemote bool) (*Store, error) {
 	return OpenWithConfigKey(ctx, databaseURL, allowInsecureRemote, "")
@@ -1258,6 +1258,30 @@ CREATE TABLE IF NOT EXISTS agents (
 	ALTER TABLE agents ADD COLUMN IF NOT EXISTS metrics jsonb NOT NULL DEFAULT '{}'::jsonb;
 	ALTER TABLE agents ADD COLUMN IF NOT EXISTS features jsonb NOT NULL DEFAULT '[]'::jsonb;
 
+CREATE TABLE IF NOT EXISTS core_log_batches (
+    id text PRIMARY KEY,
+    agent_id text NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    received_at timestamptz NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS core_logs (
+    id bigserial PRIMARY KEY,
+    batch_id text NOT NULL REFERENCES core_log_batches(id) ON DELETE CASCADE,
+    entry_index smallint NOT NULL CHECK (entry_index >= 0),
+    agent_id text NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    engine varchar(20) NOT NULL CHECK (engine IN ('mihomo','xray','sing-box','ss-rust')),
+    level varchar(10) NOT NULL CHECK (level IN ('debug','info','warning','error','critical')),
+    message text NOT NULL CHECK (octet_length(message) BETWEEN 1 AND 4096),
+    logged_at timestamptz NOT NULL,
+    received_at timestamptz NOT NULL,
+    UNIQUE (batch_id,entry_index)
+);
+
+CREATE INDEX IF NOT EXISTS core_logs_agent_recent_idx ON core_logs(agent_id,id DESC);
+CREATE INDEX IF NOT EXISTS core_logs_engine_recent_idx ON core_logs(engine,id DESC);
+CREATE INDEX IF NOT EXISTS core_logs_received_idx ON core_logs(received_at);
+CREATE INDEX IF NOT EXISTS core_log_batches_received_idx ON core_log_batches(received_at);
+
 CREATE TABLE IF NOT EXISTS configs (
     id text PRIMARY KEY,
     agent_id text REFERENCES agents(id),
@@ -1385,9 +1409,9 @@ ALTER TABLE panel_users DROP CONSTRAINT IF EXISTS panel_users_role_check;
 ALTER TABLE panel_users ADD COLUMN IF NOT EXISTS permissions jsonb NOT NULL DEFAULT '[]'::jsonb;
 UPDATE panel_users SET permissions = CASE role
     WHEN 'admin' THEN '[]'::jsonb
-    WHEN 'operator' THEN '["overview.read","agents.read","deployments.read","client-access.read","catalogs.read","agent-config.read","agent-config.write","configs.read","configs.write","tasks.read","tasks.execute","settings.read","audit.read","metrics.read","templates.read","templates.write"]'::jsonb
-    WHEN 'auditor' THEN '["overview.read","agents.read","deployments.read","tasks.read","audit.read","metrics.read"]'::jsonb
-    WHEN 'readonly' THEN '["overview.read","agents.read","deployments.read","client-access.read","catalogs.read","agent-config.read","configs.read","tasks.read","settings.read","audit.read","metrics.read","templates.read"]'::jsonb
+    WHEN 'operator' THEN '["overview.read","agents.read","deployments.read","client-access.read","catalogs.read","agent-config.read","agent-config.write","configs.read","configs.write","tasks.read","tasks.execute","settings.read","audit.read","metrics.read","core-logs.read","templates.read","templates.write"]'::jsonb
+    WHEN 'auditor' THEN '["overview.read","agents.read","deployments.read","tasks.read","audit.read","metrics.read","core-logs.read"]'::jsonb
+    WHEN 'readonly' THEN '["overview.read","agents.read","deployments.read","client-access.read","catalogs.read","agent-config.read","configs.read","tasks.read","settings.read","audit.read","metrics.read","core-logs.read","templates.read"]'::jsonb
     ELSE permissions END
     WHERE role IN ('operator','auditor','readonly');
 UPDATE panel_users SET role='user' WHERE role IN ('operator','auditor','readonly');

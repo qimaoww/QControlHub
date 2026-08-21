@@ -165,6 +165,9 @@ func janitor(ctx context.Context, dataStore *store.Store) {
 				if _, err := dataStore.PruneAuditLogs(operationContext, time.Now().UTC().Add(-90*24*time.Hour)); err != nil {
 					slog.Warn("prune old audit logs", "error", err)
 				}
+				if _, err := dataStore.PruneCoreLogs(operationContext, time.Now().UTC().Add(-7*24*time.Hour)); err != nil {
+					slog.Warn("prune old core logs", "error", err)
+				}
 			}
 			cancel()
 		}

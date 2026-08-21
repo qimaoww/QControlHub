@@ -67,7 +67,26 @@ func mutateGenerated(engine core.Engine, currentContent, generatedContent, match
 	if err != nil {
 		return "", fmt.Errorf("合并服务端入站失败：%w", err)
 	}
+	if operation != "delete" {
+		merged, err = enforceCentralLogging(engine, merged)
+		if err != nil {
+			return "", fmt.Errorf("启用集中内核日志失败：%w", err)
+		}
+	}
 	return merged, nil
+}
+
+func enforceCentralLogging(engine core.Engine, content string) (string, error) {
+	switch engine {
+	case core.EngineMihomo:
+		return configschema.MergeFragment(engine, content, "log-level", "info", false)
+	case core.EngineXray:
+		return configschema.MergeFragment(engine, content, "log", `{"loglevel":"info"}`, false)
+	case core.EngineSingBox:
+		return configschema.MergeFragment(engine, content, "log", `{"level":"info"}`, false)
+	default:
+		return content, nil
+	}
 }
 
 func mutateShadowsocksRust(currentContent, generatedContent, matchValue, operation string) (string, error) {

@@ -189,6 +189,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/agents", s.requirePermission(core.PermissionAgentsRead, http.HandlerFunc(s.listAgents)))
 	mux.Handle("GET /api/v1/deployments", s.requirePermission(core.PermissionDeploymentsRead, http.HandlerFunc(s.listDeployments)))
 	mux.Handle("GET /api/v1/client-access", s.requirePermission(core.PermissionClientAccessRead, http.HandlerFunc(s.listClientAccess)))
+	mux.Handle("GET /api/v1/core-logs", s.requirePermission(core.PermissionCoreLogsRead, http.HandlerFunc(s.listCoreLogs)))
 	mux.Handle("PUT /api/v1/agents/{id}/client-address", s.requirePermission(core.PermissionAgentsManage, http.HandlerFunc(s.putAgentClientAddress)))
 	mux.Handle("GET /api/v1/config-catalogs/{engine}", s.requirePermission(core.PermissionCatalogsRead, http.HandlerFunc(s.configCatalog)))
 	mux.Handle("DELETE /api/v1/agents/{id}", s.requirePermission(core.PermissionAgentsManage, http.HandlerFunc(s.deleteAgent)))
@@ -665,7 +666,7 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 		_ = connection.Close(websocket.StatusPolicyViolation, "required subprotocol was not negotiated")
 		return
 	}
-	connection.SetReadLimit(192 << 10)
+	connection.SetReadLimit(core.MaxCoreLogWireBytes)
 
 	id := agentID(request)
 	ctx, cancelConnection := context.WithCancel(request.Context())
@@ -752,13 +753,6 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 			_ = connection.Close(websocket.StatusPolicyViolation, "heartbeat timeout")
 			return
 		case message := <-incoming:
-			if !heartbeatDeadline.Stop() {
-				select {
-				case <-heartbeatDeadline.C:
-				default:
-				}
-			}
-			heartbeatDeadline.Reset(50 * time.Second)
 			switch message.Type {
 			case core.WireHeartbeat:
 				if message.Heartbeat == nil {
@@ -767,6 +761,26 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 				}
 				if err := s.store.Heartbeat(ctx, id, *message.Heartbeat); err != nil {
 					slog.Error("store agent heartbeat", "agent_id", id, "error", err)
+					return
+				}
+				if !heartbeatDeadline.Stop() {
+					select {
+					case <-heartbeatDeadline.C:
+					default:
+					}
+				}
+				heartbeatDeadline.Reset(50 * time.Second)
+			case core.WireCoreLogs:
+				if message.CoreLogs == nil {
+					_ = connection.Close(websocket.StatusPolicyViolation, "invalid core log batch")
+					return
+				}
+				if err := s.store.StoreCoreLogs(ctx, id, *message.CoreLogs); err != nil {
+					slog.Warn("store core log batch", "agent_id", id, "batch_id", message.CoreLogs.ID, "error", err)
+					_ = connection.Close(websocket.StatusPolicyViolation, "core log batch rejected")
+					return
+				}
+				if err := writeWire(ctx, connection, core.WireMessage{Type: core.WireCoreLogsAck, BatchID: message.CoreLogs.ID}); err != nil {
 					return
 				}
 			case core.WireResult:
@@ -934,13 +948,13 @@ func (s *Server) principalForToken(token string) (tokenPrincipal, bool) {
 }
 
 func legacyOperatorPermissions() []core.Permission {
-	return []core.Permission{core.PermissionOverviewRead, core.PermissionAgentsRead, core.PermissionDeploymentsRead, core.PermissionClientAccessRead, core.PermissionCatalogsRead, core.PermissionAgentConfigRead, core.PermissionAgentConfigWrite, core.PermissionConfigsRead, core.PermissionConfigsWrite, core.PermissionTasksRead, core.PermissionTasksExecute, core.PermissionSettingsRead, core.PermissionAuditRead, core.PermissionMetricsRead, core.PermissionTrafficRead, core.PermissionTrafficManage, core.PermissionTemplatesRead, core.PermissionTemplatesWrite}
+	return []core.Permission{core.PermissionOverviewRead, core.PermissionAgentsRead, core.PermissionDeploymentsRead, core.PermissionClientAccessRead, core.PermissionCatalogsRead, core.PermissionAgentConfigRead, core.PermissionAgentConfigWrite, core.PermissionConfigsRead, core.PermissionConfigsWrite, core.PermissionTasksRead, core.PermissionTasksExecute, core.PermissionSettingsRead, core.PermissionAuditRead, core.PermissionMetricsRead, core.PermissionCoreLogsRead, core.PermissionTrafficRead, core.PermissionTrafficManage, core.PermissionTemplatesRead, core.PermissionTemplatesWrite}
 }
 func legacyAuditorPermissions() []core.Permission {
-	return []core.Permission{core.PermissionOverviewRead, core.PermissionAgentsRead, core.PermissionDeploymentsRead, core.PermissionTasksRead, core.PermissionAuditRead, core.PermissionMetricsRead, core.PermissionTrafficRead}
+	return []core.Permission{core.PermissionOverviewRead, core.PermissionAgentsRead, core.PermissionDeploymentsRead, core.PermissionTasksRead, core.PermissionAuditRead, core.PermissionMetricsRead, core.PermissionCoreLogsRead, core.PermissionTrafficRead}
 }
 func legacyReadonlyPermissions() []core.Permission {
-	return []core.Permission{core.PermissionOverviewRead, core.PermissionAgentsRead, core.PermissionDeploymentsRead, core.PermissionClientAccessRead, core.PermissionCatalogsRead, core.PermissionAgentConfigRead, core.PermissionConfigsRead, core.PermissionTasksRead, core.PermissionSettingsRead, core.PermissionAuditRead, core.PermissionMetricsRead, core.PermissionTrafficRead, core.PermissionTemplatesRead}
+	return []core.Permission{core.PermissionOverviewRead, core.PermissionAgentsRead, core.PermissionDeploymentsRead, core.PermissionClientAccessRead, core.PermissionCatalogsRead, core.PermissionAgentConfigRead, core.PermissionConfigsRead, core.PermissionTasksRead, core.PermissionSettingsRead, core.PermissionAuditRead, core.PermissionMetricsRead, core.PermissionCoreLogsRead, core.PermissionTrafficRead, core.PermissionTemplatesRead}
 }
 
 func (s *Server) agent(next http.Handler) http.Handler {

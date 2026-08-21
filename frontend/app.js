@@ -2,6 +2,7 @@ import { installDashboard } from "./modules/dashboard.js";
 import { installAgents } from "./modules/agents.js";
 import { installClientAccess } from "./modules/client-access.js";
 import { installConfigPages } from "./modules/configs.js";
+import { installCoreLogs } from "./modules/core-logs.js";
 import { installTasks } from "./modules/tasks.js";
 import { installTraffic } from "./modules/traffic.js";
 import { installSettings } from "./modules/settings.js";
@@ -226,6 +227,7 @@ const rolePermissions = {
     "configs.read", "configs.write", "configs.delete", "configs.restore",
     "tasks.read", "tasks.execute", "enrollment.manage", "settings.read",
     "settings.manage", "audit.read", "metrics.read", "traffic.read", "traffic.manage", "users.manage",
+    "core-logs.read",
     "templates.read", "templates.write", "templates.delete",
   ]),
   operator: new Set([
@@ -233,15 +235,18 @@ const rolePermissions = {
     "catalogs.read", "agent-config.read", "agent-config.write", "configs.read",
     "configs.write", "tasks.read", "tasks.execute", "settings.read", "audit.read",
     "metrics.read", "traffic.read", "traffic.manage", "templates.read", "templates.write",
+    "core-logs.read",
   ]),
   auditor: new Set([
     "overview.read", "agents.read", "deployments.read", "tasks.read",
     "settings.read", "audit.read", "metrics.read", "traffic.read",
+    "core-logs.read",
   ]),
   readonly: new Set([
     "overview.read", "agents.read", "deployments.read", "client-access.read",
     "catalogs.read", "agent-config.read", "configs.read", "tasks.read",
     "settings.read", "audit.read", "metrics.read", "traffic.read", "templates.read",
+    "core-logs.read",
   ]),
 };
 const roleRanks = { readonly: 1, auditor: 1, operator: 2, admin: 3 };
@@ -421,6 +426,7 @@ function shell(content, title) {
     ],
     ["live-config", "配置", '<path d="M7 3.5h7l4 4V20.5H7zM14 3.5v4h4M10 12h5M10 16h5"/>'],
     ["tasks", "任务", '<path d="M13 2.5 5.5 13H11l-1 8.5L18.5 11H13z"/>'],
+    ["core-logs", "日志", '<path d="M4 5h16M4 10h16M4 15h10M4 20h7"/>'],
     ["traffic", "流量", '<path d="M4 17V7M8 14V5M12 19V9M16 15V3M20 18V11"/><path d="M3 20.5h18"/>'],
     [
       "settings",
@@ -435,6 +441,7 @@ function shell(content, title) {
     "client-access": "client-access.read",
     "live-config": "agent-config.read",
     tasks: "tasks.read",
+    "core-logs": "core-logs.read",
     traffic: "traffic.read",
     settings: "settings.read",
   };
@@ -568,6 +575,11 @@ function contextMarkup(title) {
           `<a class="${(state.data.taskFilters?.status || "") === status ? "active" : ""}" href="#tasks" data-task-status-filter="${status}">${text}</a>`,
       )
       .join("")}</nav>`;
+  if (state.route === "core-logs") {
+    const agents = state.data.agents || [];
+    const selected = state.data.coreLogFilters?.agent_id || "";
+    return `<a class="context-primary ${selected ? "" : "active"}" href="#core-logs" data-core-log-agent="">全部节点日志</a><div class="context-section-label"><span>按节点查看</span><b>${agents.length}</b></div><nav class="context-list" aria-label="内核日志节点">${agents.map((agent) => `<a class="${selected === agent.id ? "active" : ""}" href="#core-logs" data-core-log-agent="${esc(agent.id)}"><i class="status-dot ${agent.status === "online" ? "ok" : ""}"></i><span><strong>${esc(agent.name)}</strong><small>${(agent.features || []).includes("core-logs-v1") ? "集中日志已启用" : "需升级 Agent"}</small></span><em>${agent.status === "online" ? "在线" : "离线"}</em></a>`).join("") || "<p>还没有节点</p>"}</nav>`;
+  }
   if (state.route === "traffic") {
     const agents = state.data.agents || [];
     const policies = state.data.trafficPolicies || [];
@@ -594,6 +606,7 @@ const configModule = installConfigPages({ api, optionalAPI, state, engines, can,
 const { agentConfig, liveConfig, archiveConfigs } = configModule;
 
 const tasks = installTasks({ api, state, actions, can, esc, statusName, engineName, short, date, ago, actionName, statusTone, notify, confirmAction, shell });
+const coreLogs = installCoreLogs({ api, state, engines, can, esc, engineName, date, shell });
 const traffic = installTraffic({ api, state, can, esc, engineName, bytes, rate, percent, ago, shell, notify, confirmAction });
 const settings = installSettings({ api, state, esc, date, can, shell, notify, confirmAction });
 
@@ -601,6 +614,7 @@ async function render() {
   if (state.busy) return;
   clearTimeout(state.taskPollTimer);
   clearTimeout(state.trafficPollTimer);
+  clearTimeout(state.coreLogPollTimer);
   state.busy = true;
   const hash = location.hash.slice(1);
   const routeMap = {
@@ -630,6 +644,7 @@ async function render() {
     "live-config",
     "archive-config",
     "tasks",
+    "core-logs",
     "traffic",
     "settings",
   ].includes(hash)
@@ -669,6 +684,7 @@ async function render() {
       "live-config": liveConfig,
       "archive-config": archiveConfigs,
       tasks,
+      "core-logs": coreLogs,
       traffic,
       settings,
     };

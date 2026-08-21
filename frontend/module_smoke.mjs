@@ -1,6 +1,7 @@
 import { installAgents } from "./modules/agents.js";
 import { installClientAccess } from "./modules/client-access.js";
 import { installConfigPages } from "./modules/configs.js";
+import { installCoreLogs } from "./modules/core-logs.js";
 import { installDashboard } from "./modules/dashboard.js";
 import { installSettings } from "./modules/settings.js";
 import { installTasks } from "./modules/tasks.js";
@@ -17,6 +18,7 @@ for (const install of [
   installAgents,
   installClientAccess,
   installConfigPages,
+  installCoreLogs,
   installDashboard,
   installSettings,
   installTasks,
