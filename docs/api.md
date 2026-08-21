@@ -39,6 +39,7 @@
 | `POST` | `/api/v1/auth/logout` | 注销当前 SPA 会话 |
 | `GET` | `/api/v1/agents` | 列出未撤销 Agent |
 | `DELETE` | `/api/v1/agents/{id}` | 永久撤销 Agent、立即断开 WSS 并终止其未完成任务 |
+| `POST` | `/api/v1/agents/{id}/enrollment-token` | 轮换该节点绑定的 Agent 安装凭据并返回一次性安装命令所需凭据（enrollment.manage） |
 | `GET` | `/api/v1/agents/{id}/configs` | 列出节点已有的内核配置 |
 | `GET` | `/api/v1/agents/{id}/configs/{engine}` | 读取节点绑定的内核配置 |
 | `PUT` | `/api/v1/agents/{id}/configs/{engine}` | 以乐观版本锁创建或更新节点配置 |

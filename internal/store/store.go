@@ -312,6 +312,79 @@ func (s *Store) CreateEnrollmentToken(ctx context.Context, request core.Enrollme
 	return core.EnrollmentTokenCreated{EnrollmentToken: value, Token: rawToken}, nil
 }
 
+// RotateAgentEnrollmentToken issues a fresh reusable credential while keeping
+// the credential bound to the existing agent identity. The previous command
+// stops working immediately and the plaintext token is returned only once.
+func (s *Store) RotateAgentEnrollmentToken(ctx context.Context, agentID string) (core.EnrollmentTokenCreated, error) {
+	agentID = strings.TrimSpace(agentID)
+	if agentID == "" {
+		return core.EnrollmentTokenCreated{}, ErrInvalid
+	}
+	rawToken, err := core.NewToken()
+	if err != nil {
+		return core.EnrollmentTokenCreated{}, err
+	}
+	digest := sha256.Sum256([]byte(rawToken))
+	now := time.Now().UTC()
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return core.EnrollmentTokenCreated{}, err
+	}
+	defer tx.Rollback(ctx)
+
+	var name string
+	var enrollmentID *string
+	if err := tx.QueryRow(ctx, `
+		SELECT name,enrollment_id FROM agents
+		WHERE id=$1 AND revoked_at IS NULL FOR UPDATE`, agentID).Scan(&name, &enrollmentID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return core.EnrollmentTokenCreated{}, ErrNotFound
+		}
+		return core.EnrollmentTokenCreated{}, err
+	}
+
+	value := core.EnrollmentToken{
+		Name: strings.TrimSpace(name), MaxUses: 0, UsedCount: 0,
+		Reusable: true, CreatedAt: now,
+	}
+	if value.Name == "" {
+		return core.EnrollmentTokenCreated{}, fmt.Errorf("%w: agent name is empty", ErrInvalid)
+	}
+	if enrollmentID != nil && strings.TrimSpace(*enrollmentID) != "" {
+		value.ID = strings.TrimSpace(*enrollmentID)
+		result, updateErr := tx.Exec(ctx, `
+			UPDATE enrollment_tokens
+			SET name=$2,token_hash=$3,expires_at=NULL,max_uses=0,used_count=0,
+				reusable=TRUE,created_at=$4,revoked_at=NULL
+			WHERE id=$1`, value.ID, value.Name, digest[:], now)
+		if updateErr != nil {
+			return core.EnrollmentTokenCreated{}, mapError(updateErr)
+		}
+		if result.RowsAffected() == 0 {
+			return core.EnrollmentTokenCreated{}, ErrNotFound
+		}
+	} else {
+		value.ID, err = core.NewID("enr")
+		if err != nil {
+			return core.EnrollmentTokenCreated{}, err
+		}
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO enrollment_tokens
+				(id,name,token_hash,expires_at,max_uses,used_count,reusable,created_at)
+			VALUES ($1,$2,$3,NULL,0,0,TRUE,$4)`,
+			value.ID, value.Name, digest[:], now); err != nil {
+			return core.EnrollmentTokenCreated{}, mapError(err)
+		}
+		if _, err := tx.Exec(ctx, `UPDATE agents SET enrollment_id=$2 WHERE id=$1`, agentID, value.ID); err != nil {
+			return core.EnrollmentTokenCreated{}, err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return core.EnrollmentTokenCreated{}, err
+	}
+	return core.EnrollmentTokenCreated{EnrollmentToken: value, Token: rawToken}, nil
+}
+
 // EnrollmentTokenUsable checks an add-node credential without consuming it.
 // Reusable node credentials remain valid until explicitly deleted.
 func (s *Store) EnrollmentTokenUsable(ctx context.Context, rawToken string) bool {
@@ -440,12 +513,16 @@ func (s *Store) DeleteAgent(ctx context.Context, id string) error {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	command, err := tx.Exec(ctx, `UPDATE agents SET revoked_at=now() WHERE id=$1 AND revoked_at IS NULL`, id)
+	var enrollmentID *string
+	err = tx.QueryRow(ctx, `
+		UPDATE agents SET revoked_at=now()
+		WHERE id=$1 AND revoked_at IS NULL
+		RETURNING enrollment_id`, id).Scan(&enrollmentID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	}
 	if err != nil {
 		return err
-	}
-	if command.RowsAffected() == 0 {
-		return ErrNotFound
 	}
 	_, err = tx.Exec(ctx, `
 		UPDATE tasks SET status='failed', error='agent identity was revoked', finished_at=now(), config_content=NULL, lease_id=NULL
@@ -460,6 +537,11 @@ func (s *Store) DeleteAgent(ctx context.Context, id string) error {
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM config_revisions WHERE config_id IN (SELECT id FROM configs WHERE agent_id=$1)`, id); err != nil {
 		return err
+	}
+	if enrollmentID != nil && strings.TrimSpace(*enrollmentID) != "" {
+		if _, err := tx.Exec(ctx, `DELETE FROM enrollment_tokens WHERE id=$1`, strings.TrimSpace(*enrollmentID)); err != nil {
+			return err
+		}
 	}
 	return tx.Commit(ctx)
 }

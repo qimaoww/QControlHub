@@ -273,6 +273,7 @@ async function api(path, options = {}) {
   });
   if (response.status === 401) {
     state.session = null;
+    state.data = {};
     renderLogin();
     throw new Error("登录已失效");
   }
@@ -304,6 +305,7 @@ async function ensureSession() {
     return true;
   } catch {
     state.session = null;
+    state.data = {};
     return false;
   }
 }
@@ -354,10 +356,12 @@ function renderLogin(message = "") {
       const button = event.currentTarget.querySelector("button");
       button.disabled = true;
       try {
-        state.session = await api("/auth/login", {
+        const session = await api("/auth/login", {
           method: "POST",
           body: JSON.stringify({ username: form.get("username"), token }),
         });
+        state.data = {};
+        state.session = session;
         location.hash = "#dashboard";
         await render();
       } catch (error) {
@@ -401,8 +405,13 @@ function shell(content, title) {
     ["dashboard", "总览", '<path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z"/>'],
     [
       "agents",
-      "节点",
+      "内核预设",
       '<rect x="4" y="3.5" width="16" height="6" rx="2"/><rect x="4" y="14.5" width="16" height="6" rx="2"/><path d="M8 6.5h.01M8 17.5h.01M12 6.5h5M12 17.5h5"/>',
+    ],
+    [
+      "node-settings",
+      "节点设置",
+      '<path d="M12 3.5a2 2 0 0 1 2 2v.4a6.8 6.8 0 0 1 1.6.9l.4-.2a2 2 0 1 1 2 3.5l-.4.2a7 7 0 0 1 0 1.8l.4.2a2 2 0 1 1-2 3.5l-.4-.2a6.8 6.8 0 0 1-1.6.9v.4a2 2 0 1 1-4 0v-.4a6.8 6.8 0 0 1-1.6-.9l-.4.2a2 2 0 1 1-2-3.5l.4-.2a7 7 0 0 1 0-1.8l-.4-.2a2 2 0 1 1 2-3.5l.4.2a6.8 6.8 0 0 1 1.6-.9v-.4a2 2 0 0 1 2-2Z"/><circle cx="12" cy="12" r="2.4"/>',
     ],
     [
       "client-access",
@@ -420,6 +429,7 @@ function shell(content, title) {
   const linkPermissions = {
     dashboard: "overview.read",
     agents: "agents.read",
+    "node-settings": "agents.read",
     "client-access": "client-access.read",
     "live-config": "agent-config.read",
     tasks: "tasks.read",
@@ -427,7 +437,7 @@ function shell(content, title) {
   };
   links.splice(0, links.length, ...links.filter(([id]) => can(linkPermissions[id])));
   app.style.display = "";
-  document.body.className = `app-body page-${state.route}`;
+  document.body.className = `app-body page-${state.route}${state.route === "node-settings" ? " page-agents" : ""}`;
   applyTheme();
   const context = contextMarkup(title);
   const overview = state.data.overview || {};
@@ -437,15 +447,17 @@ function shell(content, title) {
   ];
   const topAction =
     state.route === "dashboard"
-      ? '<a class="button small" href="#agents">管理节点</a>'
+      ? '<a class="button small" href="#node-settings">节点设置</a>'
       : state.route === "agents"
-        ? `<a class="button small" href="#client-access">客户端配置</a>${can("enrollment.manage") ? '<a class="button small" href="#enrollment">添加节点</a>' : ""}`
+        ? '<a class="button small" href="#node-settings">节点设置</a>'
+        : state.route === "node-settings"
+          ? `<a class="button small" href="#agents">内核配置预设</a>${can("enrollment.manage") ? '<a class="button small" href="#enrollment">添加节点</a>' : ""}`
         : state.route === "client-access"
-          ? '<a class="button small" href="#agents">返回节点</a>'
+          ? '<a class="button small" href="#node-settings">返回节点设置</a>'
           : state.route === "archive-config"
             ? '<a class="button small" href="#live-config">节点实际配置</a>'
-            : state.route === "agent-config"
-              ? '<a class="button small" href="#agents">返回节点</a>'
+              : state.route === "agent-config"
+              ? '<a class="button small" href="#agents">返回内核预设</a>'
               : state.route === "tasks"
                 ? '<button id="refresh" class="button small task-refresh-link" type="button">刷新</button>'
                 : "";
@@ -473,6 +485,7 @@ function shell(content, title) {
       await api("/auth/logout", { method: "POST" });
     } catch {}
     state.session = null;
+    state.data = {};
     renderLogin();
   };
   if (document.querySelector("#refresh"))
@@ -511,12 +524,16 @@ function contextMarkup(title) {
     return `<nav class="context-menu" aria-label="总览目录"><a class="active" href="#summary"><span>01</span>运行概览</a><a href="#fleet"><span>02</span>节点状态</a><a href="#activity"><span>03</span>最近活动</a></nav><section class="context-metrics"><div><span>在线 / 全部节点</span><b>${state.data.overview?.agents_online || 0} / ${state.data.overview?.agents || 0}</b></div><div><span>节点版本 / 独立档案</span><b>${state.data.overview?.node_configs || 0} / ${state.data.overview?.configs || 0}</b></div><div><span>准备中 / 执行中</span><b>${state.data.overview?.tasks_queued || 0} / ${state.data.overview?.tasks_running || 0}</b></div></section>`;
   if (state.route === "agents") {
     const items = state.data.agents || [];
-    return `<a class="context-primary" href="#client-access">客户端配置 →</a><div class="context-section-label"><span>已接入节点</span><b>${items.length}</b></div><nav class="context-list" aria-label="节点列表">${items.map((agent) => `<a class="${state.data.selectedAgent === agent.id ? "active" : ""}" href="#node-${esc(agent.id)}" data-context-agent="${esc(agent.id)}"><i class="status-dot ${statusTone(agent.status)}" data-context-agent-dot></i><span><strong>${esc(agent.name)}</strong><small>${esc(agent.os)} / ${esc(agent.arch)}</small></span><em>${agent.status === "online" ? "在线" : "离线"}</em></a>`).join("") || "<p>还没有节点</p>"}</nav>`;
+    return `<a class="context-primary" href="#node-settings">节点设置 →</a><div class="context-section-label"><span>内核配置预设</span><b>${items.length}</b></div><nav class="context-list" aria-label="节点内核预设">${items.map((agent) => `<a class="${state.data.selectedAgent === agent.id ? "active" : ""}" href="#node-${esc(agent.id)}" data-context-agent="${esc(agent.id)}"><span class="context-engine">${(agent.capabilities || []).length}</span><span><strong>${esc(agent.name)}</strong><small>${esc(agent.os)} / ${esc(agent.arch)}</small></span><em>${agent.status === "online" ? "在线" : "离线"}</em></a>`).join("") || "<p>还没有节点</p>"}</nav>`;
+  }
+  if (state.route === "node-settings") {
+    const items = state.data.agents || [];
+    return `<a class="context-primary" href="#agents">内核配置预设 →</a><div class="context-section-label"><span>节点设置</span><b>${items.length}</b></div><nav class="context-list" aria-label="节点设置列表">${items.map((agent) => `<a class="${state.data.selectedAgent === agent.id ? "active" : ""}" href="#node-${esc(agent.id)}" data-context-agent="${esc(agent.id)}"><i class="status-dot ${statusTone(agent.status)}" data-context-agent-dot></i><span><strong>${esc(agent.name)}</strong><small>${esc(agent.os)} / ${esc(agent.arch)}</small></span><em>${agent.status === "online" ? "在线" : "离线"}</em></a>`).join("") || "<p>还没有节点</p>"}</nav>`;
   }
   if (state.route === "client-access") {
     const items = state.data.agents || [];
     const entries = state.data.clientAccessEntries || [];
-    return `<a class="context-back" href="#agents">← 返回节点</a><a class="context-primary ${state.data.accessAgent ? "" : "active"}" href="#client-access" data-access-agent="">全部客户端配置</a><div class="context-section-label"><span>按节点查看</span><b>${items.length}</b></div><nav class="context-list" aria-label="客户端配置节点">${items.map((agent) => { const profiles = entries.filter((entry) => entry.agent_id === agent.id).reduce((total, entry) => total + (entry.profiles || []).length, 0); return `<a class="${state.data.accessAgent === agent.id ? "active" : ""}" href="#client-access" data-access-agent="${esc(agent.id)}"><i class="status-dot ${agent.status === "online" ? "ok" : ""}"></i><span><strong>${esc(agent.name)}</strong><small>${profiles ? `${profiles} 个客户端入站` : "尚无客户端配置"}</small></span><em>${agent.status === "online" ? "在线" : "离线"}</em></a>`; }).join("") || "<p>还没有节点</p>"}</nav>`;
+    return `<a class="context-back" href="#node-settings">← 返回节点设置</a><a class="context-primary ${state.data.accessAgent ? "" : "active"}" href="#client-access" data-access-agent="">全部客户端配置</a><div class="context-section-label"><span>按节点查看</span><b>${items.length}</b></div><nav class="context-list" aria-label="客户端配置节点">${items.map((agent) => { const profiles = entries.filter((entry) => entry.agent_id === agent.id).reduce((total, entry) => total + (entry.profiles || []).length, 0); return `<a class="${state.data.accessAgent === agent.id ? "active" : ""}" href="#client-access" data-access-agent="${esc(agent.id)}"><i class="status-dot ${agent.status === "online" ? "ok" : ""}"></i><span><strong>${esc(agent.name)}</strong><small>${profiles ? `${profiles} 个客户端入站` : "尚无客户端配置"}</small></span><em>${agent.status === "online" ? "在线" : "离线"}</em></a>`; }).join("") || "<p>还没有节点</p>"}</nav>`;
   }
   if (state.route === "live-config") {
     const items = state.data.agents || [];
@@ -551,13 +568,13 @@ function contextMarkup(title) {
   );
   const caps = agent?.capabilities || engines;
   const installed = installedEngineCount(agent);
-  return `<a class="context-back" href="#agents">← 返回节点</a><div class="context-section-label"><span>选择内核</span><b>${installed}/${caps.length}</b></div><nav class="context-list engine-context-list">${caps.map((engine) => `<a class="${state.data.engine === engine ? "active" : ""}" href="#agent-config" data-engine-select="${esc(engine)}"><span class="context-engine ${esc(engine)}">${esc(engineName(engine))}</span><span><strong>${esc(engineName(engine))}</strong><small>${agent?.runtime?.[engine]?.installed ? "服务端入站" : "尚未安装"}</small></span></a>`).join("")}</nav><ol class="context-steps"><li class="active"><b>1</b><span>选择入站</span></li><li><b>2</b><span>编辑参数</span></li><li><b>3</b><span>校验或部署</span></li></ol>`;
+  return `<a class="context-back" href="#agents">← 返回内核预设</a><div class="context-section-label"><span>选择内核</span><b>${installed}/${caps.length}</b></div><nav class="context-list engine-context-list">${caps.map((engine) => `<a class="${state.data.engine === engine ? "active" : ""}" href="#agent-config" data-engine-select="${esc(engine)}"><span class="context-engine ${esc(engine)}">${esc(engineName(engine))}</span><span><strong>${esc(engineName(engine))}</strong><small>${agent?.runtime?.[engine]?.installed ? "服务端入站" : "尚未安装"}</small></span></a>`).join("")}</nav><ol class="context-steps"><li class="active"><b>1</b><span>选择入站</span></li><li><b>2</b><span>编辑参数</span></li><li><b>3</b><span>校验或部署</span></li></ol>`;
 }
 
 const dashboard = installDashboard({ api, state, esc, engineName, heartbeat, statusTone, ago, short, actionName, shell });
 
 const agentModule = installAgents({ api, optionalAPI, state, engines, can, esc, engineName, statusTone, serviceStatusName, short, date, ago, heartbeat, percent, bytes, conciseVersion, rate, actionName, serviceActionDisabled, trafficChart, renderConfigDiff, notify, confirmAction, shell });
-const { agents, submitTask, bindCodeEditors, showCommand } = agentModule;
+const { agents, nodeSettings, submitTask, bindCodeEditors, showCommand } = agentModule;
 
 const clientAccess = installClientAccess({ api, state, engines, esc, engineName, short, can, notify, shell });
 
@@ -576,13 +593,15 @@ async function render() {
     summary: "dashboard",
     fleet: "dashboard",
     activity: "dashboard",
-    enrollment: "agents",
+    enrollment: "node-settings",
     "client-access": "client-access",
     identity: "settings",
     defaults: "settings",
     synchronization: "settings",
     notifications: "settings",
     users: "settings",
+    "preset-node": "agents",
+    "settings-node": "node-settings",
     "new-config": "archive-config",
     templates: "archive-config",
     archive: "archive-config",
@@ -590,6 +609,7 @@ async function render() {
   state.route = [
     "dashboard",
     "agents",
+    "node-settings",
     "agent-config",
     "client-access",
     "live-config",
@@ -599,12 +619,18 @@ async function render() {
   ].includes(hash)
     ? hash
     : routeMap[hash] ||
-      (hash.startsWith("node-")
+      (hash.startsWith("preset-node-")
         ? "agents"
-        : hash.startsWith("config-")
-          ? "archive-config"
-          : "dashboard");
+        : hash.startsWith("settings-node-")
+          ? "node-settings"
+          : hash.startsWith("node-")
+            ? "node-settings"
+            : hash.startsWith("config-")
+              ? "archive-config"
+              : "dashboard");
   state.anchor = hash;
+  if (hash.startsWith("preset-node-")) state.data.selectedAgent = hash.slice(12);
+  if (hash.startsWith("settings-node-")) state.data.selectedAgent = hash.slice(14);
   if (hash.startsWith("node-")) state.data.selectedAgent = hash.slice(5);
   if (hash.startsWith("config-")) state.data.archiveConfigId = hash.slice(7);
   try {
@@ -613,12 +639,13 @@ async function render() {
       return;
     }
     [state.data.overview, state.data.settings] = await Promise.all([
-      can("overview.read") ? api("/overview") : Promise.resolve(state.data.overview || {}),
-      can("settings.read") ? api("/settings") : Promise.resolve(state.data.settings || {}),
+      can("overview.read") ? api("/overview") : Promise.resolve({}),
+      can("settings.read") ? api("/settings") : Promise.resolve({}),
     ]);
     const pages = {
       dashboard,
       agents,
+      "node-settings": nodeSettings,
       "client-access": clientAccess,
       "agent-config": agentConfig,
       "live-config": liveConfig,
