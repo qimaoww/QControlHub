@@ -1,6 +1,7 @@
 package serverconfig
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -213,6 +214,17 @@ func TestVLESSRealityPlansGenerateAndRoundTripKeys(t *testing.T) {
 		content, err := Generate(engine, input)
 		if err != nil {
 			t.Fatalf("Generate(%s): %v", engine, err)
+		}
+		if engine == core.EngineXray {
+			var root map[string]any
+			if err := json.Unmarshal([]byte(content), &root); err != nil {
+				t.Fatal(err)
+			}
+			inbound := firstMap(root["inbounds"])
+			reality := mapValue(mapValue(inbound["streamSettings"])["realitySettings"])
+			if got := stringValue(reality["minClientVer"]); got != "0.0.0" {
+				t.Fatalf("Xray Reality minClientVer = %q", got)
+			}
 		}
 		parsed, ok := Parse(engine, content)
 		if !ok || !parsed.RealityEnabled || parsed.RealityPublicKey != input.RealityPublicKey || parsed.RealityShortID != input.RealityShortID {
