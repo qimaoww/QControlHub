@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -308,6 +309,9 @@ func (e *Executor) validate(ctx context.Context, engine core.Engine, spec Engine
 	if err := core.ValidateConfig(engine, content); err != nil {
 		return "", err
 	}
+	if err := validateNoPersistentCoreLogs(engine, content); err != nil {
+		return "", err
+	}
 	if _, err := exec.LookPath(spec.Binary); err != nil {
 		return "", fmt.Errorf("%s binary not found in PATH", spec.Binary)
 	}
@@ -372,6 +376,32 @@ func (e *Executor) validate(ctx context.Context, engine core.Engine, spec Engine
 		output = fmt.Sprintf("%s validation passed", engine)
 	}
 	return output, nil
+}
+
+func validateNoPersistentCoreLogs(engine core.Engine, content string) error {
+	if engine != core.EngineXray && engine != core.EngineSingBox {
+		return nil
+	}
+	var root map[string]any
+	if err := json.Unmarshal([]byte(content), &root); err != nil {
+		return err
+	}
+	logging, _ := root["log"].(map[string]any)
+	if logging == nil {
+		return nil
+	}
+	keys := []string{"output"}
+	if engine == core.EngineXray {
+		keys = []string{"access", "error"}
+	}
+	for _, key := range keys {
+		value, _ := logging[key].(string)
+		value = strings.TrimSpace(value)
+		if value != "" && (engine != core.EngineXray || !strings.EqualFold(value, "none")) {
+			return fmt.Errorf("persistent %s log output %q is disabled; managed core logs are stored by the control plane", engine, key)
+		}
+	}
+	return nil
 }
 
 func serviceCommand(ctx context.Context, service string, action core.Action) (string, error) {

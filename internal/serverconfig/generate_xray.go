@@ -43,7 +43,7 @@ func generateXray(input Input) (string, error) {
 		inbound["streamSettings"] = stream
 	}
 	root := map[string]any{
-		"log":      map[string]any{"loglevel": "warning"},
+		"log":      map[string]any{"loglevel": "info"},
 		"inbounds": []any{inbound},
 		"outbounds": []any{
 			map[string]any{"protocol": "freedom", "tag": "direct"},

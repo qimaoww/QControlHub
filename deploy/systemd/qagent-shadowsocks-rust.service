@@ -15,6 +15,10 @@ StateDirectory=qcontrolhub-shadowsocks-rust
 StateDirectoryMode=0750
 UMask=0027
 ExecStart=/usr/local/lib/qagent/cores/ssserver -c /etc/qagent/shadowsocks-rust/config.json
+Environment=RUST_LOG=info
+LogNamespace=qagent-cores
+StandardOutput=journal
+StandardError=journal
 Restart=on-failure
 RestartSec=3s
 TimeoutStopSec=20s

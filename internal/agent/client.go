@@ -65,6 +65,7 @@ type Client struct {
 	websocketURL     string
 	metrics          *MetricsCollector
 	traffic          *TrafficManager
+	logs             *CoreLogCollector
 	credentialsMu    sync.Mutex
 	executionsMu     sync.Mutex
 	executions       map[string]*taskExecution
@@ -138,6 +139,7 @@ func NewClient(config ClientConfig, executor *Executor) (*Client, error) {
 		websocketURL: websocketScheme + "://" + parsed.Host + "/agent/v1/connect",
 		metrics:      NewMetricsCollector(),
 		traffic:      NewTrafficManager(config.StatePath),
+		logs:         NewCoreLogCollector(),
 		http: &http.Client{
 			Transport: transport,
 			CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
@@ -169,6 +171,10 @@ func (c *Client) Run(ctx context.Context) error {
 		}
 	}
 	c.creds = loaded
+	if err := ensureManagedCoreLogStreaming(ctx, c.executor.Specs); err != nil {
+		slog.Warn("prepare volatile managed core logs", "error", err)
+	}
+	go c.logs.Run(ctx)
 	c.traffic.Start(ctx)
 	slog.Info("agent identity loaded", "agent_id", c.creds.AgentID, "server", c.websocketURL)
 	backoff := time.Second
@@ -266,7 +272,7 @@ func (c *Client) runWebSocket(ctx context.Context) error {
 	sessionContext, cancel := context.WithCancel(ctx)
 	defer cancel()
 	incoming := make(chan core.WireMessage, 1)
-	outgoing := make(chan core.WireMessage, 8)
+	outgoing := make(chan core.WireMessage, 16)
 	readErrors := make(chan error, 1)
 	writeErrors := make(chan error, 1)
 	go func() {
@@ -308,10 +314,13 @@ func (c *Client) runWebSocket(ctx context.Context) error {
 
 	heartbeatTicker := time.NewTicker(c.config.HeartbeatEvery)
 	defer heartbeatTicker.Stop()
+	logTicker := time.NewTicker(500 * time.Millisecond)
+	defer logTicker.Stop()
 	if err := c.queueHeartbeat(sessionContext, outgoing); err != nil {
 		return err
 	}
 	var activeTask string
+	var sentLogBatch string
 	for {
 		select {
 		case <-ctx.Done():
@@ -323,6 +332,16 @@ func (c *Client) runWebSocket(ctx context.Context) error {
 		case <-heartbeatTicker.C:
 			if err := c.queueHeartbeat(sessionContext, outgoing); err != nil {
 				return err
+			}
+		case <-logTicker.C:
+			if sentLogBatch == "" {
+				if batch := c.logs.NextBatch(); batch != nil {
+					select {
+					case outgoing <- core.WireMessage{Type: core.WireCoreLogs, CoreLogs: batch}:
+						sentLogBatch = batch.ID
+					default:
+					}
+				}
 			}
 		case message := <-incoming:
 			switch message.Type {
@@ -348,6 +367,11 @@ func (c *Client) runWebSocket(ctx context.Context) error {
 				slog.Info("task result acknowledged", "task_id", message.TaskID)
 				c.acknowledgeTaskResult(message.TaskID)
 				activeTask = ""
+			case core.WireCoreLogsAck:
+				if message.BatchID == "" || message.BatchID != sentLogBatch || !c.logs.Acknowledge(message.BatchID) {
+					return errors.New("control plane acknowledged an unexpected core log batch")
+				}
+				sentLogBatch = ""
 			case core.WireError:
 				return fmt.Errorf("control plane WSS error: %s", message.Error)
 			default:
@@ -382,7 +406,7 @@ func (c *Client) queueHeartbeat(ctx context.Context, outgoing chan<- core.WireMe
 }
 
 func advertisedAgentFeatures() []string {
-	return []string{core.AgentFeatureSelfUpgrade, core.AgentFeaturePortTraffic}
+	return []string{core.AgentFeatureSelfUpgrade, core.AgentFeaturePortTraffic, core.AgentFeatureCoreLogs}
 }
 
 func (c *Client) executeTask(ctx context.Context, task core.Task, outgoing chan<- core.WireMessage) {

@@ -97,6 +97,19 @@ for engine in mihomo xray sing-box shadowsocks-rust; do
   install_managed_unit "$script_dir/systemd/qagent-$engine.service" "/etc/systemd/system/qagent-$engine.service"
 done
 
+journal_config_dir=/etc/systemd/journald@qagent-cores.conf.d
+if [ -L "$journal_config_dir" ]; then
+  printf '%s\n' "refusing symlinked journal configuration directory: $journal_config_dir" >&2
+  exit 1
+fi
+install -d -o root -g root -m 0755 "$journal_config_dir"
+journal_config=$journal_config_dir/10-qcontrolhub-volatile.conf
+if [ -L "$journal_config" ]; then
+  printf '%s\n' "refusing symlinked journal configuration: $journal_config" >&2
+  exit 1
+fi
+install -o root -g root -m 0644 "$script_dir/systemd/qagent-core-journal.conf" "$journal_config"
+
 systemctl daemon-reload
 systemctl enable qagent-mihomo.service qagent-xray.service qagent-sing-box.service qagent-shadowsocks-rust.service >/dev/null
 printf '%s\n' 'core services are bootstrapped; install each official binary from the QControlHub node page'

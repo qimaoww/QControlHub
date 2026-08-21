@@ -69,6 +69,9 @@ func TestDefaultSpecsUsePrivateQAgentNamespace(t *testing.T) {
 			"ExecStart=" + expected.Binary,
 			"CapabilityBoundingSet=CAP_NET_BIND_SERVICE",
 			"AmbientCapabilities=CAP_NET_BIND_SERVICE",
+			"LogNamespace=qagent-cores",
+			"StandardOutput=journal",
+			"StandardError=journal",
 		} {
 			if !strings.Contains(unit, required) {
 				t.Errorf("%s is missing %q", expected.Service, required)
@@ -78,6 +81,15 @@ func TestDefaultSpecsUsePrivateQAgentNamespace(t *testing.T) {
 			if strings.Contains(unit, forbidden) {
 				t.Errorf("%s grants unnecessary capability %s", expected.Service, forbidden)
 			}
+		}
+	}
+	journalConfig, err := os.ReadFile("../../deploy/systemd/qagent-core-journal.conf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, required := range []string{"Storage=volatile", "RuntimeMaxUse=16M", "MaxRetentionSec=15min"} {
+		if !strings.Contains(string(journalConfig), required) {
+			t.Errorf("core journal configuration is missing %q", required)
 		}
 	}
 }
@@ -98,6 +110,29 @@ func TestCoreBootstrapDoesNotTouchLegacyInstallations(t *testing.T) {
 		if strings.Contains(script, forbidden) {
 			t.Errorf("core bootstrap unexpectedly touches legacy installation %q", forbidden)
 		}
+	}
+}
+
+func TestPersistentCoreLogOutputsAreRejected(t *testing.T) {
+	t.Parallel()
+	fixtures := []struct {
+		engine  core.Engine
+		content string
+	}{
+		{core.EngineXray, `{"log":{"loglevel":"info","access":"/var/log/xray.log"}}`},
+		{core.EngineSingBox, `{"log":{"level":"info","output":"/var/log/sing-box.log"}}`},
+		{core.EngineSingBox, `{"log":{"level":"info","output":"none"}}`},
+	}
+	for _, fixture := range fixtures {
+		if err := validateNoPersistentCoreLogs(fixture.engine, fixture.content); err == nil {
+			t.Errorf("%s persistent log output was accepted", fixture.engine)
+		}
+	}
+	if err := validateNoPersistentCoreLogs(core.EngineXray, `{"log":{"loglevel":"info"}}`); err != nil {
+		t.Fatalf("stdout Xray logging was rejected: %v", err)
+	}
+	if err := validateNoPersistentCoreLogs(core.EngineXray, `{"log":{"loglevel":"info","access":"none"}}`); err != nil {
+		t.Fatalf("disabled Xray file logging was rejected: %v", err)
 	}
 }
 
