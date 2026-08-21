@@ -39,7 +39,7 @@
 | `POST` | `/api/v1/auth/logout` | 注销当前 SPA 会话 |
 | `GET` | `/api/v1/agents` | 列出未撤销 Agent |
 | `DELETE` | `/api/v1/agents/{id}` | 永久撤销 Agent、立即断开 WSS 并终止其未完成任务 |
-| `POST` | `/api/v1/agents/{id}/enrollment-token` | 轮换该节点绑定的 Agent 安装凭据并返回一次性安装命令所需凭据（enrollment.manage） |
+| `POST` | `/api/v1/agents/{id}/enrollment-token` | 为该节点新增一条独立、可重复使用的 Agent 安装凭据；已有凭据继续有效（enrollment.manage） |
 | `GET` | `/api/v1/agents/{id}/configs` | 列出节点已有的内核配置 |
 | `GET` | `/api/v1/agents/{id}/configs/{engine}` | 读取节点绑定的内核配置 |
 | `PUT` | `/api/v1/agents/{id}/configs/{engine}` | 以乐观版本锁创建或更新节点配置 |
@@ -116,7 +116,7 @@
 }
 ```
 
-`name` 同时是凭证绑定的节点名称。接口始终创建无有效期、可重复安装的添加节点命令；重复注册会更新原节点的密钥并复用节点 ID。创建响应中的 `token` 只返回一次并带有 `Cache-Control: no-store`，控制面只保存摘要。删除添加记录后，数据库记录被直接删除，原命令立即失效。
+`name` 同时是凭证绑定的节点名称。接口始终创建无有效期、可重复安装的添加节点命令；重复注册会更新原节点的密钥并复用节点 ID。为已有节点再次生成命令时会新增独立凭据，不会删除或覆盖已有凭据。创建响应中的 `token` 只返回一次并带有 `Cache-Control: no-store`，控制面只保存摘要。删除某条添加记录后，仅对应命令立即失效；删除节点会使该节点的全部安装命令失效。
 
 ### 创建配置
 

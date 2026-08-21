@@ -192,7 +192,7 @@ async function nodeSettings(presetMode = false) {
     .join("");
 
   const enrollment = !presetMode && can("enrollment.manage")
-    ? `<details class="enrollment-sheet" id="enrollment" data-has-agents="${agents.length ? 1 : 0}" ${state.anchor === "enrollment" || (!agents.length && (enrollmentOpen ?? true)) ? "open" : ""}><summary><b>添加节点</b><i>＋</i></summary><div class="enrollment-sheet-body"><form class="access-form add-node-form" id="enrollment-form"><label>节点名称<input name="name" maxlength="100" required autocomplete="off" placeholder="例如 shanghai-edge-01"></label><button class="button primary" type="submit">生成添加节点命令</button></form><p class="enrollment-security-note"><b>添加节点命令只显示一次</b><span>命令绑定该节点，可重复安装；删除添加记录后立即失效。</span></p>${tokenRows ? `<details class="access-history" ${historyOpen ? "open" : ""}><summary>添加记录（${tokens.length}）</summary><div>${tokenRows}</div></details>` : ""}</div></details>`
+    ? `<details class="enrollment-sheet" id="enrollment" data-has-agents="${agents.length ? 1 : 0}" ${state.anchor === "enrollment" || (!agents.length && (enrollmentOpen ?? true)) ? "open" : ""}><summary><b>添加节点</b><i>＋</i></summary><div class="enrollment-sheet-body"><form class="access-form add-node-form" id="enrollment-form"><label>节点名称<input name="name" maxlength="100" required autocomplete="off" placeholder="例如 shanghai-edge-01"></label><button class="button primary" type="submit">生成添加节点命令</button></form><p class="enrollment-security-note"><b>每条安装命令只显示一次</b><span>命令绑定节点，可重复安装；已有命令继续有效，删除对应添加记录后才会失效。</span></p>${tokenRows ? `<details class="access-history" ${historyOpen ? "open" : ""}><summary>添加记录（${tokens.length}）</summary><div>${tokenRows}</div></details>` : ""}</div></details>`
     : "";
   const batch =
     !presetMode && agents.length > 1 && can("operator")
@@ -274,7 +274,7 @@ function bindAgentPage(agentItems, presetMode = false) {
           button.type = "button";
           button.className = "button small";
           button.dataset.reinstallAgent = agent.id;
-          button.textContent = "复制 Agent 安装命令";
+          button.textContent = "生成新安装命令";
           actions.append(button);
         }
       }
@@ -560,7 +560,7 @@ function bindAgentPage(agentItems, presetMode = false) {
     button.onclick = async () => {
       if (
         !(await confirmAction(
-          "确定重新生成这个节点的 Agent 安装命令？旧安装命令会立即失效。",
+          "确定为这个节点生成一条新的 Agent 安装命令？已有安装命令会继续有效，可在添加记录中单独删除。",
           "生成安装命令",
         ))
       )
@@ -573,6 +573,7 @@ function bindAgentPage(agentItems, presetMode = false) {
         const escapedToken = created.token.replaceAll("'", "'\\''");
         const escapedName = created.name.replaceAll("'", "'\\''");
         const command = `curl -fsSL -H 'X-QControlHub-Enrollment: ${escapedToken}' ${location.origin}/install-agent.sh | sudo bash -s -- ${location.origin} '${escapedToken}' '${escapedName}'`;
+        await refreshAgentPage();
         showCommand(command, undefined, "复制 Agent 安装命令");
       } catch (error) {
         notify(error.message, "error");
@@ -948,7 +949,7 @@ function showCommand(command, onClose, heading = "一键添加 QAgent 节点") {
   const previousFocus = document.activeElement;
   const wrap = document.createElement("div");
   wrap.className = "modal-backdrop";
-  wrap.innerHTML = `<section class="deploy-command-modal" role="dialog" aria-modal="true" aria-labelledby="deploy-command-title"><header class="deploy-command-head"><span class="deploy-command-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m7 8 4 4-4 4M13 16h4"/></svg></span><div><p class="eyebrow">Linux · systemd</p><h2 id="deploy-command-title">${esc(heading)}</h2><p>复制命令到目标服务器执行，即可完成安装和节点注册。</p></div><button class="deploy-command-close" type="button" data-close aria-label="关闭弹窗">×</button></header><div class="deploy-command-body"><div class="deploy-command-notice"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.6 2.8 8.1 7 10 4.2-1.9 7-5.4 7-10V6l-7-3Z"/><path d="m9.5 12 1.7 1.7 3.5-3.7"/></svg><span><b>安装命令仅显示一次</b><small>命令绑定当前节点，可重复安装；重新生成后旧命令立即失效。</small></span></div><section class="deploy-command-shell" aria-label="Agent 安装命令"><header><span><i></i>Terminal</span><small>root</small></header><div><span class="deploy-command-prompt" aria-hidden="true">$</span><textarea class="deploy-command-input" rows="5" readonly spellcheck="false" aria-label="Agent 安装命令" data-command>${esc(command)}</textarea></div></section></div><footer class="deploy-command-actions"><span>请在目标 Linux 服务器上以 root 权限执行</span><div><button class="button" type="button" data-close>关闭</button><button class="button primary deploy-command-copy" type="button" data-copy-command><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2v8a2 2 0 0 0 2 2h2"/></svg><span data-copy-label>复制安装命令</span></button></div></footer></section>`;
+  wrap.innerHTML = `<section class="deploy-command-modal" role="dialog" aria-modal="true" aria-labelledby="deploy-command-title"><header class="deploy-command-head"><span class="deploy-command-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m7 8 4 4-4 4M13 16h4"/></svg></span><div><p class="eyebrow">Linux · systemd</p><h2 id="deploy-command-title">${esc(heading)}</h2><p>复制命令到目标服务器执行，即可完成安装和节点注册。</p></div><button class="deploy-command-close" type="button" data-close aria-label="关闭弹窗">×</button></header><div class="deploy-command-body"><div class="deploy-command-notice"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.6 2.8 8.1 7 10 4.2-1.9 7-5.4 7-10V6l-7-3Z"/><path d="m9.5 12 1.7 1.7 3.5-3.7"/></svg><span><b>安装命令仅显示一次</b><small>每条命令独立生效；已有命令继续有效，可在添加记录中单独删除。</small></span></div><section class="deploy-command-shell" aria-label="Agent 安装命令"><header><span><i></i>Terminal</span><small>root</small></header><div><span class="deploy-command-prompt" aria-hidden="true">$</span><textarea class="deploy-command-input" rows="5" readonly spellcheck="false" aria-label="Agent 安装命令" data-command>${esc(command)}</textarea></div></section></div><footer class="deploy-command-actions"><span>请在目标 Linux 服务器上以 root 权限执行</span><div><button class="button" type="button" data-close>关闭</button><button class="button primary deploy-command-copy" type="button" data-copy-command><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2v8a2 2 0 0 0 2 2h2"/></svg><span data-copy-label>复制安装命令</span></button></div></footer></section>`;
   document.body.append(wrap);
   const copyButton = wrap.querySelector("[data-copy-command]");
   const commandInput = wrap.querySelector("[data-command]");

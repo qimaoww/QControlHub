@@ -58,13 +58,13 @@ func TestAddNodeAPICreatesReusableCredentialAndSupportsReinstall(t *testing.T) {
 		_ = dataStore.DeleteEnrollmentToken(context.Background(), created.ID)
 	})
 
-	enroll := func(publicKey []byte) (int, string) {
+	enroll := func(token string, publicKey []byte) (int, string) {
 		payload, _ := json.Marshal(core.EnrollRequest{
 			Name: "api-reinstall-node", OS: "linux", Arch: "amd64",
 			Capabilities: []core.Engine{core.EngineMihomo}, PublicKey: authn.EncodePublicKey(publicKey),
 		})
 		request := httptest.NewRequest(http.MethodPost, "/agent/v1/enroll", bytes.NewReader(payload))
-		request.Header.Set("Authorization", "Bearer "+created.Token)
+		request.Header.Set("Authorization", "Bearer "+token)
 		request.Header.Set("Content-Type", "application/json")
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, request)
@@ -78,7 +78,7 @@ func TestAddNodeAPICreatesReusableCredentialAndSupportsReinstall(t *testing.T) {
 	}
 
 	firstKey := randomEnrollmentKey(t)
-	if status, id := enroll(firstKey); status != http.StatusCreated || id == "" {
+	if status, id := enroll(created.Token, firstKey); status != http.StatusCreated || id == "" {
 		t.Fatalf("first enrollment status=%d id=%q", status, id)
 	} else {
 		agentID = id
@@ -137,30 +137,29 @@ func TestAddNodeAPICreatesReusableCredentialAndSupportsReinstall(t *testing.T) {
 	if !metricsVisible {
 		t.Fatal("admin agents response omitted authorized metrics")
 	}
-	rotateRequest := httptest.NewRequest(http.MethodPost, "/api/v1/agents/"+agentID+"/enrollment-token", nil)
-	rotateRequest.Header.Set("Authorization", "Bearer "+adminToken)
-	rotateResponse := httptest.NewRecorder()
-	handler.ServeHTTP(rotateResponse, rotateRequest)
-	if rotateResponse.Code != http.StatusCreated {
-		t.Fatalf("rotate Agent install command status=%d body=%s", rotateResponse.Code, rotateResponse.Body.String())
+	additionalRequest := httptest.NewRequest(http.MethodPost, "/api/v1/agents/"+agentID+"/enrollment-token", nil)
+	additionalRequest.Header.Set("Authorization", "Bearer "+adminToken)
+	additionalResponse := httptest.NewRecorder()
+	handler.ServeHTTP(additionalResponse, additionalRequest)
+	if additionalResponse.Code != http.StatusCreated {
+		t.Fatalf("create additional Agent install command status=%d body=%s", additionalResponse.Code, additionalResponse.Body.String())
 	}
-	var rotated core.EnrollmentTokenCreated
-	if err := json.NewDecoder(rotateResponse.Body).Decode(&rotated); err != nil {
-		t.Fatalf("decode rotated Agent install command: %v", err)
+	var additional core.EnrollmentTokenCreated
+	if err := json.NewDecoder(additionalResponse.Body).Decode(&additional); err != nil {
+		t.Fatalf("decode additional Agent install command: %v", err)
 	}
-	if rotated.ID != created.ID || rotated.Name != created.Name || rotated.Token == "" {
-		t.Fatalf("rotated Agent install command = %+v", rotated)
+	if additional.ID == created.ID || additional.AgentID != agentID || additional.Name != created.Name || additional.Token == "" {
+		t.Fatalf("additional Agent install command = %+v", additional)
 	}
-	if dataStore.EnrollmentTokenUsable(ctx, created.Token) {
-		t.Fatal("previous Agent install command remains usable after rotation")
+	if !dataStore.EnrollmentTokenUsable(ctx, created.Token) || !dataStore.EnrollmentTokenUsable(ctx, additional.Token) {
+		t.Fatal("creating another Agent install command invalidated a credential")
 	}
-	created = rotated
-	secondStatus, secondID := enroll(randomEnrollmentKey(t))
+	secondStatus, secondID := enroll(additional.Token, randomEnrollmentKey(t))
 	if secondStatus != http.StatusOK || secondID != agentID {
 		t.Fatalf("repeat enrollment status=%d id=%q, want 200 and %q", secondStatus, secondID, agentID)
 	}
 
-	deleteRequest := httptest.NewRequest(http.MethodDelete, "/api/v1/enrollment-tokens/"+created.ID, nil)
+	deleteRequest := httptest.NewRequest(http.MethodDelete, "/api/v1/enrollment-tokens/"+additional.ID, nil)
 	deleteRequest.Header.Set("Authorization", "Bearer "+adminToken)
 	deleteResponse := httptest.NewRecorder()
 	handler.ServeHTTP(deleteResponse, deleteRequest)
@@ -168,11 +167,21 @@ func TestAddNodeAPICreatesReusableCredentialAndSupportsReinstall(t *testing.T) {
 		t.Fatalf("delete add-node command status=%d body=%s", deleteResponse.Code, deleteResponse.Body.String())
 	}
 	installerRequest := httptest.NewRequest(http.MethodGet, "/api/v1/agent-installer", nil)
-	installerRequest.Header.Set("X-QControlHub-Enrollment", created.Token)
+	installerRequest.Header.Set("X-QControlHub-Enrollment", additional.Token)
 	installerResponse := httptest.NewRecorder()
 	handler.ServeHTTP(installerResponse, installerRequest)
 	if installerResponse.Code != http.StatusUnauthorized {
 		t.Fatalf("deleted add-node command installer status=%d, want 401", installerResponse.Code)
+	}
+	previousInstallerRequest := httptest.NewRequest(http.MethodGet, "/api/v1/agent-installer", nil)
+	previousInstallerRequest.Header.Set("X-QControlHub-Enrollment", created.Token)
+	previousInstallerResponse := httptest.NewRecorder()
+	handler.ServeHTTP(previousInstallerResponse, previousInstallerRequest)
+	if previousInstallerResponse.Code != http.StatusOK {
+		t.Fatalf("previous add-node command installer status=%d, want 200", previousInstallerResponse.Code)
+	}
+	if _, err := dataStore.AgentPublicKey(ctx, agentID); err != nil {
+		t.Fatalf("deleting one add-node command removed the Agent: %v", err)
 	}
 }
 
