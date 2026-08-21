@@ -7,16 +7,20 @@ async function agents() {
 async function nodeSettings(presetMode = false) {
   const enrollmentOpen = document.querySelector("#enrollment")?.open;
   const historyOpen = document.querySelector("#enrollment .access-history")?.open;
-  const [agents, deployments, accessEntries, settings, tokens] =
+  const [agents, deployments, accessEntries, tokens] =
     await Promise.all([
       api("/agents"),
-      can("deployments.read") ? api("/deployments") : Promise.resolve([]),
-      can("client-access.read") ? api("/client-access") : Promise.resolve([]),
-      can("settings.read") ? api("/settings") : Promise.resolve({}),
-      can("enrollment.manage") ? api("/enrollment-tokens") : Promise.resolve([]),
+      presetMode && can("deployments.read")
+        ? api("/deployments")
+        : Promise.resolve([]),
+      presetMode && can("client-access.read")
+        ? api("/client-access")
+        : Promise.resolve([]),
+      !presetMode && can("enrollment.manage")
+        ? api("/enrollment-tokens")
+        : Promise.resolve([]),
     ]);
   state.data.agents = agents;
-  state.data.settings = settings;
   if (!agents.some((agent) => agent.id === state.data.selectedAgent))
     state.data.selectedAgent = agents[0]?.id || "";
   const overview = can("overview.read")
@@ -24,7 +28,7 @@ async function nodeSettings(presetMode = false) {
     : {};
   state.data.overview = overview;
 
-  const savedConfigs = can("agent-config.read")
+  const savedConfigs = presetMode && can("agent-config.read")
     ? (
         await Promise.all(
           agents.map((agent) =>
@@ -104,24 +108,26 @@ async function nodeSettings(presetMode = false) {
           const serviceTone = installed
             ? statusTone(runtime.service_status)
             : "muted";
-          const serviceManagement = installed
-            ? `<details class="runtime-drawer"><summary><span><b>管理服务</b></span><i>＋</i></summary><div class="runtime-drawer-body"><div class="service-actions">${["status", "start", "restart", "stop"].map((action) => `<button class="button small ${action === "stop" ? "danger-button" : ""}" type="button" data-task-agent="${esc(agent.id)}" data-task-engine="${esc(engine)}" data-task-action="${action}" data-service-action="${action}" ${serviceActionDisabled(action, agent.status === "online", installed, runtime.service_status) ? "disabled" : ""}>${esc(actionName(action))}</button>`).join("")}</div></div></details>`
-            : '<div class="service-management-unavailable"><b>服务管理</b><small>安装内核后可用</small></div>';
+          const serviceManagement = presetMode
+            ? ""
+            : installed
+              ? `<details class="runtime-drawer"><summary><span><b>管理服务</b></span><i>＋</i></summary><div class="runtime-drawer-body"><div class="service-actions">${["status", "start", "restart", "stop"].map((action) => `<button class="button small ${action === "stop" ? "danger-button" : ""}" type="button" data-task-agent="${esc(agent.id)}" data-task-engine="${esc(engine)}" data-task-action="${action}" data-service-action="${action}" ${serviceActionDisabled(action, agent.status === "online", installed, runtime.service_status) ? "disabled" : ""}>${esc(actionName(action))}</button>`).join("")}</div></div></details>`
+              : '<div class="service-management-unavailable"><b>服务管理</b><small>安装内核后可用</small></div>';
           let primaryActions = "";
-          if (can("agent-config.read")) {
+          if (presetMode && can("agent-config.read")) {
             primaryActions = drift
               ? `<button class="button service-config" type="button" data-config="${esc(agent.id)}" data-engine="${esc(engine)}">查看配置</button>${can("tasks.execute") ? `<button class="button primary" type="button" data-deploy="${esc(agent.id)}" data-engine="${esc(engine)}" data-config-id="${esc(saved.id)}">部署 v${saved.version}</button>` : ""}`
               : `<button class="button primary service-config" type="button" data-config="${esc(agent.id)}" data-engine="${esc(engine)}">配置 <span>→</span></button>`;
           }
           return `<article class="service-card service-${esc(engine)}" data-core-installed="${installed ? 1 : 0}">
-            <div class="service-card-main">
+            <div class="service-card-main ${presetMode ? "" : "operations-only"}">
               <div class="service-overview"><header><span class="engine-badge ${esc(engine)}">${esc(engineName(engine))}</span><span class="engine-state ${serviceTone}"><i></i><b data-core-service="${esc(engine)}">${esc(serviceState)}</b></span></header><div class="service-version"><span class="service-version-label"><small>内核版本</small><button class="service-version-toggle" type="button" data-open-version-form aria-label="打开 ${esc(engineName(engine))} ${installed ? "版本切换" : "安装内核"}">${installed ? "切换版本" : "安装内核"}</button></span><strong data-core-version="${esc(engine)}" title="${esc(installed ? runtime.version || "版本未知" : "尚未安装")}">${esc(installed ? conciseVersion(engine, runtime.version) : "尚未安装")}</strong></div></div>
-              <div class="service-deployment"><dl class="service-facts"><div><dt>已部署配置</dt><dd>${deployed?.config_version ? `v${deployed.config_version}` : "—"}</dd></div><div><dt>已保存配置</dt><dd>${saved?.version ? `v${saved.version}` : "—"}</dd></div></dl>${drift ? `<div class="deployment-drift"><span>${deployed ? "已保存版本尚未部署" : "已保存配置尚未部署"}</span><b>待部署 v${saved.version}</b></div>` : ""}${configDiff ? `<details class="config-diff-drawer"><summary>查看配置差异 <i>＋</i></summary>${configDiff}</details>` : ""}<div class="service-endpoint ${endpoint ? "" : "empty"}">${endpoint ? `<span><b>${esc(firstProfile?.protocol || "客户端入站")}</b><small>${esc(firstProfile?.profile?.format || "已部署配置")}</small></span><code>${esc(endpoint)}</code>` : `<b>${deployed ? "自定义配置" : saved ? "尚未部署" : "尚未配置"}</b>`}</div></div>
+              ${presetMode ? `<div class="service-deployment"><dl class="service-facts"><div><dt>已部署配置</dt><dd>${deployed?.config_version ? `v${deployed.config_version}` : "—"}</dd></div><div><dt>已保存配置</dt><dd>${saved?.version ? `v${saved.version}` : "—"}</dd></div></dl>${drift ? `<div class="deployment-drift"><span>${deployed ? "已保存版本尚未部署" : "已保存配置尚未部署"}</span><b>待部署 v${saved.version}</b></div>` : ""}${configDiff ? `<details class="config-diff-drawer"><summary>查看配置差异 <i>＋</i></summary>${configDiff}</details>` : ""}<div class="service-endpoint ${endpoint ? "" : "empty"}">${endpoint ? `<span><b>${esc(firstProfile?.protocol || "客户端入站")}</b><small>${esc(firstProfile?.profile?.format || "已部署配置")}</small></span><code>${esc(endpoint)}</code>` : `<b>${deployed ? "自定义配置" : saved ? "尚未部署" : "尚未配置"}</b>`}</div></div>` : ""}
               ${primaryActions ? `<div class="service-primary-action">${primaryActions}</div>` : ""}
             </div>
             ${serviceManagement}
-            <details class="runtime-drawer version-drawer"><summary><span><b>${installed ? "版本切换" : "安装内核"}</b><small>${installed ? "升级或切换内核版本" : "从官方 Release 安装"}</small></span><i>＋</i></summary><div class="runtime-drawer-body"><form class="core-version-form" data-version-agent="${esc(agent.id)}" data-version-engine="${esc(engine)}"><fieldset class="release-channel-fieldset"><legend>版本来源</legend><div class="release-channel-options"><label><input type="radio" name="release_channel" value="stable" checked><span>最新稳定版</span></label><label><input type="radio" name="release_channel" value="development"><span>最新开发版</span></label><label><input type="radio" name="release_channel" value="custom"><span>指定版本</span></label></div></fieldset><label class="custom-version-field"><span>指定版本</span><input name="custom_version" maxlength="64" autocomplete="off" placeholder="例如 1.19.29"></label><button class="button small" type="submit" ${agent.status !== "online" || !can("operator") ? "disabled" : ""}>${installed ? "升级或切换版本" : "安装内核"}</button><small>${installed ? "官方 Release · SHA-256 校验" : "安装至 QAgent 专用目录，不影响系统已有内核"}</small></form></div></details>
-            ${access?.profiles?.length ? `<a class="service-client-access" href="#client-access" data-client-agent="${esc(agent.id)}" data-client-engine="${esc(engine)}"><span><b>客户端配置</b><small>${esc(access.source)} · ${esc(access.address)}</small></span><strong>${access.profiles.length} 个入站 <i>→</i></strong></a>` : ""}
+            ${presetMode ? "" : `<details class="runtime-drawer version-drawer"><summary><span><b>${installed ? "版本切换" : "安装内核"}</b><small>${installed ? "升级或切换内核版本" : "从官方 Release 安装"}</small></span><i>＋</i></summary><div class="runtime-drawer-body"><form class="core-version-form" data-version-agent="${esc(agent.id)}" data-version-engine="${esc(engine)}"><fieldset class="release-channel-fieldset"><legend>版本来源</legend><div class="release-channel-options"><label><input type="radio" name="release_channel" value="stable" checked><span>最新稳定版</span></label><label><input type="radio" name="release_channel" value="development"><span>最新开发版</span></label><label><input type="radio" name="release_channel" value="custom"><span>指定版本</span></label></div></fieldset><label class="custom-version-field"><span>指定版本</span><input name="custom_version" maxlength="64" autocomplete="off" placeholder="例如 1.19.29"></label><button class="button small" type="submit" ${agent.status !== "online" || !can("operator") ? "disabled" : ""}>${installed ? "升级或切换版本" : "安装内核"}</button><small>${installed ? "官方 Release · SHA-256 校验" : "安装至 QAgent 专用目录，不影响系统已有内核"}</small></form></div></details>`}
+            ${presetMode && access?.profiles?.length ? `<a class="service-client-access" href="#client-access" data-client-agent="${esc(agent.id)}" data-client-engine="${esc(engine)}"><span><b>客户端配置</b><small>${esc(access.source)} · ${esc(access.address)}</small></span><strong>${access.profiles.length} 个入站 <i>→</i></strong></a>` : ""}
           </article>`;
         })
         .join("");
@@ -132,11 +138,11 @@ async function nodeSettings(presetMode = false) {
     })
     .join("");
 
-  const enrollment = can("enrollment.manage")
+  const enrollment = !presetMode && can("enrollment.manage")
     ? `<details class="enrollment-sheet" id="enrollment" data-has-agents="${agents.length ? 1 : 0}" ${(enrollmentOpen ?? !agents.length) ? "open" : ""}><summary><b>＋ 添加节点</b><i>＋</i></summary><div class="enrollment-sheet-body"><form class="access-form add-node-form" id="enrollment-form"><label>节点名称<input name="name" maxlength="100" required autocomplete="off" placeholder="例如 shanghai-edge-01"></label><button class="button primary" type="submit">生成添加节点命令</button></form><p class="enrollment-security-note"><b>添加节点命令只显示一次</b><span>命令绑定该节点，可重复安装；删除添加记录后立即失效。</span></p>${tokenRows ? `<details class="access-history" ${historyOpen ? "open" : ""}><summary>添加记录（${tokens.length}）</summary><div>${tokenRows}</div></details>` : ""}</div></details>`
     : "";
   const batch =
-    agents.length > 1 && can("operator")
+    !presetMode && agents.length > 1 && can("operator")
       ? `<form class="batch-toolbar" id="batch-form"><span class="batch-toolbar-title">批量操作</span><label>内核<select name="engine">${engines.map((engine) => `<option value="${engine}">${esc(engineName(engine))}</option>`).join("")}</select></label><label>动作<select name="action"><option value="restart">重启服务</option><option value="status">查询状态</option><option value="start">启动服务</option><option value="stop">停止服务</option></select></label><button class="button small" type="submit" disabled>执行</button><small data-batch-count>未选择节点</small></form>`
       : "";
   const pageIntro = presetMode
