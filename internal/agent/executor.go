@@ -131,6 +131,9 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (string, erro
 		if err != nil {
 			return validation, err
 		}
+		if err := ensureManagedCoreServiceCapabilities(ctx, task.Engine, spec); err != nil {
+			return validation, err
+		}
 		backup, err := atomicDeploy(spec.ConfigPath, task.ConfigContent)
 		if err != nil {
 			return validation, err
@@ -163,13 +166,21 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (string, erro
 			return output, fmt.Errorf("configuration restart failed and the previous configuration was restored: %w", err)
 		}
 		return output, nil
-	case core.ActionStart, core.ActionStop, core.ActionRestart:
+	case core.ActionStart, core.ActionRestart:
+		if err := ensureManagedCoreServiceCapabilities(ctx, task.Engine, spec); err != nil {
+			return "", err
+		}
+		return serviceCommandAndVerify(ctx, spec.Service, task.Action)
+	case core.ActionStop:
 		return serviceCommandAndVerify(ctx, spec.Service, task.Action)
 	case core.ActionStatus:
 		return serviceStatus(ctx, spec.Service)
 	case core.ActionInstall:
 		version, err := core.NormalizeCoreVersionSelector(task.CoreVersion)
 		if err != nil {
+			return "", err
+		}
+		if err := ensureManagedCoreServiceCapabilities(ctx, task.Engine, spec); err != nil {
 			return "", err
 		}
 		updater := e.Updater

@@ -55,7 +55,7 @@ QControlHub 的安全边界包括管理员、控制面、PostgreSQL、反向代�
 
 ## 主机权限
 
-Agent 需要写入固定内核配置路径、调用 `systemctl`，并用 `CAP_NET_ADMIN` 管理专用端口配额表，systemd 示例因此以 root 运行。该单元使用只读系统视图和 `ReadWritePaths` 限定可写目录，但 root Agent 仍然属于高价值进程：
+Agent 需要写入固定内核配置路径、调用 `systemctl`，并用 `CAP_NET_ADMIN` 管理专用端口配额表，systemd 示例因此以 root 运行。该单元使用只读系统视图和 `ReadWritePaths` 限定可写目录，但 root Agent 仍然属于高价值进程。四个内核继续以专用非 root 用户运行，只获得监听低端口所需的 `CAP_NET_BIND_SERVICE`；Agent 只会为固定 `qagent-*` 服务名同步这一项能力，不修改自定义服务：
 
 - 只从可信构建产物安装 Agent，限制二进制和环境文件为 root 可写。
 - 只启用实际安装的内核，并核对服务名和绝对配置路径。
