@@ -34,7 +34,7 @@ func TestSPAConsoleSurfaceMatchesInitialRelease(t *testing.T) {
 		`"client-access"`, `"live-config"`, `"archive-config"`,
 		`machine-workspace`, `server-plan-form`, `field-form`,
 		`revision-timeline`, `task-timeline`, `settings-section`,
-		`node-settings`, `内核配置预设`, `实时采样`, `复制 Agent 安装命令`,
+		`node-settings`, `内核配置预设`, `node-settings-tabs`, `复制 Agent 安装命令`,
 	} {
 		if !strings.Contains(content, required) {
 			t.Errorf("SPA is missing initial console surface %q", required)
