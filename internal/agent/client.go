@@ -64,6 +64,7 @@ type Client struct {
 	creds            credentials
 	websocketURL     string
 	metrics          *MetricsCollector
+	traffic          *TrafficManager
 	credentialsMu    sync.Mutex
 	executionsMu     sync.Mutex
 	executions       map[string]*taskExecution
@@ -136,6 +137,7 @@ func NewClient(config ClientConfig, executor *Executor) (*Client, error) {
 		executor:     executor,
 		websocketURL: websocketScheme + "://" + parsed.Host + "/agent/v1/connect",
 		metrics:      NewMetricsCollector(),
+		traffic:      NewTrafficManager(config.StatePath),
 		http: &http.Client{
 			Transport: transport,
 			CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
@@ -167,6 +169,7 @@ func (c *Client) Run(ctx context.Context) error {
 		}
 	}
 	c.creds = loaded
+	c.traffic.Start(ctx)
 	slog.Info("agent identity loaded", "agent_id", c.creds.AgentID, "server", c.websocketURL)
 	backoff := time.Second
 	for {
@@ -176,6 +179,11 @@ func (c *Client) Run(ctx context.Context) error {
 			return nil
 		}
 		if errors.Is(err, ErrIdentityRejected) {
+			cleanupContext, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			if cleanupErr := c.traffic.ClearPolicies(cleanupContext); cleanupErr != nil {
+				slog.Warn("remove traffic rules for rejected Agent identity", "error", cleanupErr)
+			}
+			cleanupCancel()
 			return err
 		}
 		slog.Warn("WSS connection lost", "error", err, "reconnect_in", backoff)
@@ -205,7 +213,7 @@ func (c *Client) enroll(ctx context.Context, publicKey ed25519.PublicKey, privat
 		OS:           runtime.GOOS,
 		Arch:         runtime.GOARCH,
 		Capabilities: c.config.Capabilities,
-		Features:     []string{core.AgentFeatureSelfUpgrade},
+		Features:     advertisedAgentFeatures(),
 		Labels:       c.config.Labels,
 		PublicKey:    authn.EncodePublicKey(publicKey),
 	}
@@ -319,6 +327,9 @@ func (c *Client) runWebSocket(ctx context.Context) error {
 		case message := <-incoming:
 			switch message.Type {
 			case core.WireHello:
+				if err := c.traffic.SetPolicies(sessionContext, message.TrafficPolicies, c.creds.AgentID); err != nil {
+					return fmt.Errorf("apply control-plane traffic policies: %w", err)
+				}
 				continue
 			case core.WireTask:
 				if message.Task == nil || activeTask != "" || !c.validTask(*message.Task) {
@@ -356,7 +367,7 @@ func (c *Client) queueHeartbeat(ctx context.Context, outgoing chan<- core.WireMe
 	}
 	heartbeat := &core.HeartbeatRequest{
 		Version: c.config.Version, Runtime: runtimeState,
-		Features: []string{core.AgentFeatureSelfUpgrade},
+		Features: advertisedAgentFeatures(), TrafficUsage: c.traffic.Snapshot(),
 	}
 	if metricsHaveData(metrics) {
 		heartbeat.Metrics = &metrics
@@ -368,6 +379,10 @@ func (c *Client) queueHeartbeat(ctx context.Context, outgoing chan<- core.WireMe
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+func advertisedAgentFeatures() []string {
+	return []string{core.AgentFeatureSelfUpgrade, core.AgentFeaturePortTraffic}
 }
 
 func (c *Client) executeTask(ctx context.Context, task core.Task, outgoing chan<- core.WireMessage) {

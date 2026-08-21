@@ -33,7 +33,7 @@ type Store struct {
 	taskWakes  map[string]chan struct{}
 }
 
-const currentSchemaVersion = 16
+const currentSchemaVersion = 17
 
 func Open(ctx context.Context, databaseURL string, allowInsecureRemote bool) (*Store, error) {
 	return OpenWithConfigKey(ctx, databaseURL, allowInsecureRemote, "")
@@ -434,6 +434,7 @@ func (s *Store) DeleteEnrollmentToken(ctx context.Context, id string) error {
 }
 
 func (s *Store) Heartbeat(ctx context.Context, id string, heartbeat core.HeartbeatRequest) error {
+	receivedAt := time.Now().UTC()
 	heartbeat.Version = strings.TrimSpace(heartbeat.Version)
 	if utf8.RuneCountInString(heartbeat.Version) > 100 {
 		return fmt.Errorf("%w: agent version exceeds 100 characters", ErrInvalid)
@@ -442,7 +443,7 @@ func (s *Store) Heartbeat(ctx context.Context, id string, heartbeat core.Heartbe
 	if err != nil {
 		return err
 	}
-	metricsState, err := encodeHeartbeatMetrics(heartbeat.Metrics, time.Now().UTC())
+	metricsState, err := encodeHeartbeatMetrics(heartbeat.Metrics, receivedAt)
 	if err != nil {
 		return err
 	}
@@ -463,7 +464,7 @@ func (s *Store) Heartbeat(ctx context.Context, id string, heartbeat core.Heartbe
 	if command.RowsAffected() == 0 {
 		return ErrNotFound
 	}
-	return nil
+	return s.UpdatePortTrafficUsage(ctx, id, heartbeat.TrafficUsage, receivedAt)
 }
 
 func (s *Store) ListAgents(ctx context.Context) ([]core.Agent, error) {
@@ -1418,6 +1419,34 @@ CREATE TABLE IF NOT EXISTS metric_samples (
     PRIMARY KEY (agent_id, sampled_at)
 );
 CREATE INDEX IF NOT EXISTS metric_samples_recent_idx ON metric_samples(agent_id, sampled_at DESC);
+
+CREATE TABLE IF NOT EXISTS port_traffic_policies (
+    id text PRIMARY KEY,
+    agent_id text NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    name varchar(100) NOT NULL,
+    engine varchar(20) NOT NULL CHECK (engine IN ('mihomo','xray','sing-box','ss-rust')),
+    port integer NOT NULL CHECK (port BETWEEN 1 AND 65535),
+    protocol varchar(8) NOT NULL CHECK (protocol IN ('tcp','udp','both')),
+    cycle varchar(8) NOT NULL CHECK (cycle IN ('monthly','yearly')),
+    cycle_anchor date NOT NULL,
+    limit_bytes bigint NOT NULL CHECK (limit_bytes > 0),
+    reset_generation bigint NOT NULL DEFAULT 1 CHECK (reset_generation > 0),
+    received_bytes bigint NOT NULL DEFAULT 0 CHECK (received_bytes >= 0),
+    sent_bytes bigint NOT NULL DEFAULT 0 CHECK (sent_bytes >= 0),
+    used_bytes bigint NOT NULL DEFAULT 0 CHECK (used_bytes >= 0),
+    receive_bps bigint NOT NULL DEFAULT 0 CHECK (receive_bps >= 0),
+    send_bps bigint NOT NULL DEFAULT 0 CHECK (send_bps >= 0),
+    period_start timestamptz,
+    period_end timestamptz,
+    blocked boolean NOT NULL DEFAULT false,
+    enforcement_available boolean NOT NULL DEFAULT false,
+    enforcement_error varchar(500) NOT NULL DEFAULT '',
+    last_reported_at timestamptz,
+    created_at timestamptz NOT NULL,
+    updated_at timestamptz NOT NULL,
+    UNIQUE (agent_id,port)
+);
+CREATE INDEX IF NOT EXISTS port_traffic_policies_agent_idx ON port_traffic_policies(agent_id,port);
 
 CREATE TABLE IF NOT EXISTS audit_logs (
     id bigserial PRIMARY KEY,

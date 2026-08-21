@@ -61,7 +61,9 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 	}
 	enrollmentBody, _ := json.Marshal(core.EnrollRequest{
 		Name: "integration-agent", OS: "linux", Arch: "amd64",
-		Capabilities: []core.Engine{core.EngineMihomo}, PublicKey: authn.EncodePublicKey(publicKey),
+		Capabilities: []core.Engine{core.EngineMihomo},
+		Features:     []string{core.AgentFeatureSelfUpgrade, core.AgentFeaturePortTraffic},
+		PublicKey:    authn.EncodePublicKey(publicKey),
 	})
 	request, _ := http.NewRequestWithContext(ctx, http.MethodPost, httpServer.URL+"/agent/v1/enroll", bytes.NewReader(enrollmentBody))
 	request.Header.Set("Authorization", "Bearer "+enrollment.Token)
@@ -79,6 +81,14 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 		t.Fatalf("decode enrollment: %v", err)
 	}
 	enrolledAgentID = enrolled.AgentID
+	trafficPolicy, err := dataStore.CreatePortTrafficPolicy(ctx, core.PortTrafficPolicyRequest{
+		AgentID: enrolled.AgentID, Name: "integration port", Engine: core.EngineMihomo,
+		Port: 24443, Protocol: core.TrafficProtocolBoth, Cycle: core.TrafficCycleMonthly,
+		CycleAnchor: core.UTCDate(time.Now().UTC()), LimitBytes: 100 << 30,
+	})
+	if err != nil {
+		t.Fatalf("create traffic policy: %v", err)
+	}
 
 	// An enrolled Agent can fetch the control-plane's exact binary only with
 	// its own fresh Ed25519 request signature. The response is checksummed so
@@ -125,8 +135,21 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 	if err := wsjson.Read(ctx, connection, &hello); err != nil || hello.Type != core.WireHello {
 		t.Fatalf("read hello: message=%+v error=%v", hello, err)
 	}
+	if len(hello.TrafficPolicies) != 1 || hello.TrafficPolicies[0].ID != trafficPolicy.ID {
+		t.Fatalf("hello traffic policies = %+v", hello.TrafficPolicies)
+	}
+	periodStart, periodEnd, err := core.TrafficPeriodAt(trafficPolicy.CycleAnchor, trafficPolicy.Cycle, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
 	heartbeat := core.WireMessage{Type: core.WireHeartbeat, Heartbeat: &core.HeartbeatRequest{
-		Version: "test", Metrics: &core.HostMetrics{
+		Version: "test", Features: []string{core.AgentFeatureSelfUpgrade, core.AgentFeaturePortTraffic},
+		TrafficUsage: []core.PortTrafficUsage{{
+			PolicyID: trafficPolicy.ID, ResetGeneration: trafficPolicy.ResetGeneration,
+			ReceivedBytes: 2048, SentBytes: 1024, UsedBytes: 3072,
+			ReceiveBPS: 128, SendBPS: 64, PeriodStart: periodStart, PeriodEnd: periodEnd,
+			EnforcementAvailable: true,
+		}}, Metrics: &core.HostMetrics{
 			CPUAvailable: true, CPUPercent: 12.5,
 			MemoryAvailable: true, MemoryUsedBytes: 2 << 30, MemoryTotalBytes: 4 << 30,
 			DiskAvailable: true, DiskUsedBytes: 8 << 30, DiskTotalBytes: 16 << 30,
@@ -136,6 +159,16 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 	}}
 	if err := wsjson.Write(ctx, connection, heartbeat); err != nil {
 		t.Fatalf("write heartbeat: %v", err)
+	}
+	for attempt := 0; attempt < 50; attempt++ {
+		policies, listErr := dataStore.AgentPortTrafficPolicies(ctx, enrolled.AgentID)
+		if listErr == nil && len(policies) == 1 && policies[0].UsedBytes == 3072 && policies[0].EnforcementAvailable {
+			break
+		}
+		if attempt == 49 {
+			t.Fatalf("traffic heartbeat was not stored: policies=%+v error=%v", policies, listErr)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 
 	config, err := dataStore.SaveAgentConfig(ctx, core.Config{

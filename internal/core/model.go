@@ -20,6 +20,10 @@ type Engine string
 // upgrades can be used.
 const AgentFeatureSelfUpgrade = "agent-self-upgrade-v1"
 
+// AgentFeaturePortTraffic identifies Agents that can account and enforce
+// per-port traffic quotas independently of the managed proxy engine.
+const AgentFeaturePortTraffic = "port-traffic-v1"
+
 // Role identifies the account class. Fine-grained access is carried by the
 // explicit Permissions field on a user; only admin/user are persisted.
 type Role string
@@ -299,10 +303,11 @@ type EnrollmentTokenCreated struct {
 }
 
 type HeartbeatRequest struct {
-	Version  string                  `json:"version,omitempty"`
-	Runtime  map[Engine]RuntimeState `json:"runtime,omitempty"`
-	Metrics  *HostMetrics            `json:"metrics,omitempty"`
-	Features []string                `json:"features,omitempty"`
+	Version      string                  `json:"version,omitempty"`
+	Runtime      map[Engine]RuntimeState `json:"runtime,omitempty"`
+	Metrics      *HostMetrics            `json:"metrics,omitempty"`
+	TrafficUsage []PortTrafficUsage      `json:"traffic_usage,omitempty"`
+	Features     []string                `json:"features,omitempty"`
 }
 
 type TaskResultRequest struct {
@@ -327,12 +332,13 @@ type TaskResultEnvelope struct {
 }
 
 type WireMessage struct {
-	Type      string              `json:"type"`
-	Heartbeat *HeartbeatRequest   `json:"heartbeat,omitempty"`
-	Task      *Task               `json:"task,omitempty"`
-	Result    *TaskResultEnvelope `json:"result,omitempty"`
-	TaskID    string              `json:"task_id,omitempty"`
-	Error     string              `json:"error,omitempty"`
+	Type            string              `json:"type"`
+	Heartbeat       *HeartbeatRequest   `json:"heartbeat,omitempty"`
+	Task            *Task               `json:"task,omitempty"`
+	Result          *TaskResultEnvelope `json:"result,omitempty"`
+	TrafficPolicies []PortTrafficPolicy `json:"traffic_policies,omitempty"`
+	TaskID          string              `json:"task_id,omitempty"`
+	Error           string              `json:"error,omitempty"`
 }
 
 type Overview struct {

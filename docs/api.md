@@ -72,6 +72,11 @@
 | `PUT` | `/api/v1/settings` | 保存面板设置（admin） |
 | `GET` | `/api/v1/audit?limit=` | 读取最近审计记录 |
 | `GET` | `/api/v1/metrics/{agent_id}` | 读取节点最近 24 小时资源样本 |
+| `GET` | `/api/v1/traffic-policies` | 读取所有端口流量配额及 Agent 最新计数（traffic.read） |
+| `POST` | `/api/v1/traffic-policies` | 创建端口流量配额（traffic.manage） |
+| `PUT` | `/api/v1/traffic-policies/{id}` | 更新端口、协议、周期或额度（traffic.manage） |
+| `POST` | `/api/v1/traffic-policies/{id}/reset` | 立即清零当前周期并解封端口（traffic.manage） |
+| `DELETE` | `/api/v1/traffic-policies/{id}` | 停止监控并移除该端口的 QControlHub 封禁规则（traffic.manage） |
 | `GET` | `/api/v1/templates` | 列出配置模板 |
 | `POST` | `/api/v1/templates` | 创建配置模板 |
 | `DELETE` | `/api/v1/templates/{id}` | 删除配置模板（admin） |
@@ -80,6 +85,25 @@
 | `GET` | `/api/v1/agent-binary` | 下载添加节点凭证保护的 Agent 可执行文件 |
 
 `GET /api/v1/overview` 中的 `configs` 只统计可在“配置档案”工作区跨节点下发的全局配置；`node_configs` 单独统计绑定到具体 Agent/内核的节点配置，避免将两类配置混为一个不可解释的总数。为兼容既有调用方，`tasks_pending` 仍表示 `pending + running` 的活动任务总数；`tasks_queued` 和 `tasks_running` 分别给出排队与执行中的精确数量。
+
+### 端口流量配额
+
+创建与更新请求使用相同结构：
+
+```json
+{
+  "agent_id": "agt_0123456789abcdef",
+  "name": "Reality 入口",
+  "engine": "xray",
+  "port": 443,
+  "protocol": "both",
+  "cycle": "monthly",
+  "cycle_anchor": "2026-08-01T00:00:00Z",
+  "limit_bytes": 107374182400
+}
+```
+
+`protocol` 为 `tcp`、`udp` 或 `both`，`cycle` 为 `monthly` 或 `yearly`。`cycle_anchor` 必须是当天或过去的 UTC 日期；月末和闰年按日历末日自动对齐。额度是接收与发送字节之和，同一节点同一端口只能配置一次。修改端口、协议、周期或起始日期会开始新的计数；只调整名称、内核归属或额度会保留当前已用流量。响应中的 `enforcement_available`、`enforcement_error`、`blocked`、当前周期与收发计数均来自 Agent 最新心跳。
 
 删除 Agent 是不可逆的身份吊销：控制面先删除该节点的配置与修订、将其未完成任务标记为失败，再主动关闭当前认证 WSS；相同 Ed25519 身份的后续握手返回 `401`。添加节点记录仍存在时，可重新执行原命令原位注册新身份。
 
@@ -217,7 +241,7 @@ Agent 协议端点如下：
 | `POST` | `/agent/v1/enroll` | 注册 Bearer 令牌 |
 | `GET` | `/agent/v1/connect` | Agent 签名的 WebSocket Upgrade |
 
-WSS 握手必须协商子协议 `qcontrolhub.agent.v1`。服务端先发送 `hello`；Agent 定期发送 `heartbeat`，心跳包含内核运行状态以及 CPU、内存、根磁盘、默认路由接口名称与可用单播地址、实时速率和累计流量快照；服务端下发带随机 lease ID 的 `task`，Agent 返回包含 `success` 和结果正文的 `result`，服务端确认 `result_ack`。连接压缩关闭，服务端要求 50 秒内收到消息，官方 Agent 默认每 15 秒心跳并在断线后指数退避重连。
+WSS 握手必须协商子协议 `qcontrolhub.agent.v1`。服务端先发送 `hello` 及该节点的端口流量策略；Agent 定期发送 `heartbeat`，心跳包含内核运行状态、主机资源以及端口配额的收发计数和封禁状态；服务端下发带随机 lease ID 的 `task`，Agent 返回包含 `success` 和结果正文的 `result`，服务端确认 `result_ack`。连接压缩关闭，服务端要求 50 秒内收到消息，官方 Agent 默认每 15 秒心跳并在断线后指数退避重连。
 
 ## Webhook 事件
 

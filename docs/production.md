@@ -146,14 +146,17 @@ sudo journalctl -u qagent -f
 1. 从 `/etc/qcontrolhub/agent.env` 删除 `QCH_ENROLLMENT_TOKEN` 行。
 2. 通过控制台下发四种内核的 `validate` 与 `status` 测试。
 3. 等待两个心跳周期，确认节点卡片显示 CPU、内存、根磁盘、实时上下行速率和累计流量；网速首个样本为 0，第二个样本开始按计数器差值计算。
-4. 核实任务结果及每个固定目标路径；在节点卡片执行稳定版、开发版或自定义版本任务时，Agent 会下载、校验并原子替换文件。
-5. 变更内核或服务前确认目标节点处于在线状态，并保留可回滚的上一版本。
+4. 确认主机已安装 `nft`；在端口流量页创建一个小额度测试策略，验证收发计数、手动清零和自动封禁后再配置正式额度。
+5. 核实任务结果及每个固定目标路径；在节点卡片执行稳定版、开发版或自定义版本任务时，Agent 会下载、校验并原子替换文件。
+6. 变更内核或服务前确认目标节点处于在线状态，并保留可回滚的上一版本。
 
 ```bash
 sudo systemctl restart qagent
 ```
 
-systemd 单元的 `ProtectSystem=strict` 只放行默认的四个配置目录以及 `/usr/local/lib/qagent/cores`，用于在同一文件系统内原子切换内核二进制；`/usr/local/bin` 不可写，`/usr/local/bin/qagent` 也保持只读。四个内核服务统一使用 `qagent-` 前缀，不会控制管理员自行安装的通用服务。自定义二进制或配置路径必须预先创建并精确加入 `ReadWritePaths=`，不要放宽为整个 `/etc` 或 `/usr`。
+systemd 单元的 `ProtectSystem=strict` 只放行默认的四个配置目录以及 `/usr/local/lib/qagent/cores`，用于在同一文件系统内原子切换内核二进制；`/usr/local/bin` 不可写，`/usr/local/bin/qagent` 也保持只读。单元只保留原子部署所需的 `CAP_CHOWN` 与端口计数/封禁所需的 `CAP_NET_ADMIN`。四个内核服务统一使用 `qagent-` 前缀，不会控制管理员自行安装的通用服务。自定义二进制或配置路径必须预先创建并精确加入 `ReadWritePaths=`，不要放宽为整个 `/etc` 或 `/usr`。
+
+端口配额只管理 `inet qcontrolhub` 表，不刷新或改写管理员已有的 nftables 表。每个策略分别统计发往监听端口的接收字节和从该端口发出的发送字节；达到额度后，两条方向规则都切换为 `drop`。计数状态以 `0600` 原子保存在 `/var/lib/qcontrolhub/traffic-state.json`，Agent 或控制面短暂重启不会清零当前周期。
 
 版本切换要求节点已经预置对应配置目录、可通过的初始配置和 systemd 单元。空白 Linux 节点可先运行 `deploy/bootstrap-core-services.sh` 完成这些前置条件；脚本仅创建缺失配置和新的 `qagent-*` unit，不迁移也不操作旧的通用服务或二进制。稳定版使用官方 latest，开发版只使用官方 prerelease，自定义版本必须是类似 `1.19.29` 或 `1.14.0-beta.3` 的完整版本号；不支持自定义下载地址。Agent 在下载后强制核对 GitHub Release API 给出的 SHA-256，运行候选二进制确认版本，随后原子替换并重启服务；失败时恢复上一二进制。
 

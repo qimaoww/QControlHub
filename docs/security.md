@@ -30,6 +30,8 @@ QControlHub 的安全边界包括管理员、控制面、PostgreSQL、反向代�
 
 主机指标复用已认证 WSS 心跳，不开放额外监听端口。Linux Agent 只读取内核提供的 `/proc/stat`、`/proc/meminfo`、路由与网卡字节计数，并读取根文件系统容量；不采集进程列表、文件名或配置正文。控制面会校验指标范围、使用服务器接收时间盖章并仅保存最新快照，前端轮询接口仍要求有效的 HttpOnly 会话。
 
+端口流量配额同样通过已认证 WSS 同步，不开放管理端口。QAgent 只在专用 `inet qcontrolhub` nftables 表中创建带策略 ID 注释的计数/丢弃规则，不接受控制面传入 nftables 表达式，也不刷新管理员已有规则。生产单元的 `CAP_NET_ADMIN` 用于这一固定操作；端口、协议、策略数量、计数范围及策略归属会在控制面和 Agent 两端校验。配额状态写入 QAgent 私有状态目录并使用原子替换。
+
 所有 Agent 主机必须运行可靠的 NTP/chrony。时钟偏差超过 90 秒会导致合法请求被拒绝。
 
 ## 密钥要求与轮换
@@ -53,7 +55,7 @@ QControlHub 的安全边界包括管理员、控制面、PostgreSQL、反向代�
 
 ## 主机权限
 
-Agent 需要写入固定内核配置路径并调用 `systemctl`，systemd 示例因此以 root 运行。该单元使用只读系统视图和 `ReadWritePaths` 限定可写目录，但 root Agent 仍然属于高价值进程：
+Agent 需要写入固定内核配置路径、调用 `systemctl`，并用 `CAP_NET_ADMIN` 管理专用端口配额表，systemd 示例因此以 root 运行。该单元使用只读系统视图和 `ReadWritePaths` 限定可写目录，但 root Agent 仍然属于高价值进程：
 
 - 只从可信构建产物安装 Agent，限制二进制和环境文件为 root 可写。
 - 只启用实际安装的内核，并核对服务名和绝对配置路径。
