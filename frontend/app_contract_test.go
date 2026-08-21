@@ -130,3 +130,28 @@ func TestSPAModulesArePublished(t *testing.T) {
 		}
 	}
 }
+
+func TestTaskPollingKeepsTheScrollContainerStable(t *testing.T) {
+	tasks, err := os.ReadFile("modules/tasks.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(tasks)
+	for _, required := range []string{
+		`tasks({ background: true })`,
+		`reconcileTaskTimeline`,
+		`captureTaskAnchor`,
+		`restoreTaskAnchor`,
+		`taskRenderSignature`,
+		`syncTaskAgentFilter`,
+		`data-task-age`,
+		`data-task-timing`,
+	} {
+		if !strings.Contains(content, required) {
+			t.Errorf("task polling is missing in-place refresh contract %q", required)
+		}
+	}
+	if strings.Contains(content, `setTimeout(() => tasks(),`) {
+		t.Error("task polling must not rebuild the complete application shell")
+	}
+}
