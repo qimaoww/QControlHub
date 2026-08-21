@@ -77,7 +77,25 @@ async function nodeSettings(presetMode = false) {
       )
       .join("") || "";
 
-  const nodeCards = agents
+  const selectedAgent = agents.find(
+    (agent) => agent.id === state.data.selectedAgent,
+  );
+  const visibleAgents = presetMode
+    ? agents
+    : selectedAgent
+      ? [selectedAgent]
+      : [];
+  const serviceActionIcons = {
+    status:
+      '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h3l2-5 4 10 2-5h5"/></svg>',
+    start:
+      '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 11 7-11 7z"/></svg>',
+    restart:
+      '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5"/><path d="M18.5 16a8 8 0 1 1 .8-7.2L20 12"/></svg>',
+    stop:
+      '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1"/></svg>',
+  };
+  const nodeCards = visibleAgents
     .map((agent) => {
       const metrics = can("metrics.read") ? agent.metrics || {} : {};
       const services = (agent.capabilities || [])
@@ -108,16 +126,29 @@ async function nodeSettings(presetMode = false) {
           const serviceTone = installed
             ? statusTone(runtime.service_status)
             : "muted";
-          const serviceManagement = presetMode
-            ? ""
-            : installed
-              ? `<details class="runtime-drawer"><summary><span><b>管理服务</b></span><i>＋</i></summary><div class="runtime-drawer-body"><div class="service-actions">${["status", "start", "restart", "stop"].map((action) => `<button class="button small ${action === "stop" ? "danger-button" : ""}" type="button" data-task-agent="${esc(agent.id)}" data-task-engine="${esc(engine)}" data-task-action="${action}" data-service-action="${action}" ${serviceActionDisabled(action, agent.status === "online", installed, runtime.service_status) ? "disabled" : ""}>${esc(actionName(action))}</button>`).join("")}</div></div></details>`
-              : '<div class="service-management-unavailable"><b>服务管理</b><small>安装内核后可用</small></div>';
           let primaryActions = "";
           if (presetMode && can("agent-config.read")) {
             primaryActions = drift
               ? `<button class="button service-config" type="button" data-config="${esc(agent.id)}" data-engine="${esc(engine)}">查看配置</button>${can("tasks.execute") ? `<button class="button primary" type="button" data-deploy="${esc(agent.id)}" data-engine="${esc(engine)}" data-config-id="${esc(saved.id)}">部署 v${saved.version}</button>` : ""}`
               : `<button class="button primary service-config" type="button" data-config="${esc(agent.id)}" data-engine="${esc(engine)}">配置 <span>→</span></button>`;
+          }
+          if (!presetMode) {
+            const runtimeActions = installed
+              ? ["status", "start", "restart", "stop"]
+                  .map(
+                    (action) =>
+                      `<button class="core-action ${action === "stop" ? "danger" : ""}" type="button" data-task-agent="${esc(agent.id)}" data-task-engine="${esc(engine)}" data-task-action="${action}" data-service-action="${action}" aria-label="${esc(`${actionName(action)} ${engineName(engine)}`)}" title="${esc(actionName(action))}" ${serviceActionDisabled(action, agent.status === "online", installed, runtime.service_status) ? "disabled" : ""}>${serviceActionIcons[action]}</button>`,
+                  )
+                  .join("")
+              : "";
+            return `<article class="service-card core-runtime-row service-${esc(engine)}" data-core-installed="${installed ? 1 : 0}">
+              <div class="core-runtime-summary">
+                <div class="core-runtime-name"><span class="engine-badge ${esc(engine)}">${esc(engineName(engine))}</span><span class="engine-state ${serviceTone}"><i></i><b data-core-service="${esc(engine)}">${esc(serviceState)}</b></span></div>
+                <div class="core-runtime-version"><small>当前版本</small><strong data-core-version="${esc(engine)}" title="${esc(installed ? runtime.version || "版本未知" : "尚未安装")}">${esc(installed ? conciseVersion(engine, runtime.version) : "尚未安装")}</strong></div>
+                <div class="core-runtime-actions">${runtimeActions ? `<div class="core-action-group" aria-label="${esc(engineName(engine))} 服务操作">${runtimeActions}</div>` : ""}<button class="button small ${installed ? "" : "primary"}" type="button" data-open-version-form>${installed ? "版本" : "安装"}</button></div>
+              </div>
+              <details class="core-version-panel version-drawer"><summary><b>${installed ? "版本管理" : `安装 ${esc(engineName(engine))}`}</b><span>收起</span></summary><div class="runtime-drawer-body"><form class="core-version-form" data-version-agent="${esc(agent.id)}" data-version-engine="${esc(engine)}"><fieldset class="release-channel-fieldset"><legend>版本来源</legend><div class="release-channel-options"><label><input type="radio" name="release_channel" value="stable" checked><span>最新稳定版</span></label><label><input type="radio" name="release_channel" value="development"><span>最新开发版</span></label><label><input type="radio" name="release_channel" value="custom"><span>指定版本</span></label></div></fieldset><label class="custom-version-field"><span>指定版本</span><input name="custom_version" maxlength="64" autocomplete="off" placeholder="例如 1.19.29"></label><button class="button small" type="submit" ${agent.status !== "online" || !can("operator") ? "disabled" : ""}>${installed ? "升级或切换版本" : "安装内核"}</button><small>${installed ? "官方 Release · SHA-256 校验" : "安装至 QAgent 专用目录，不影响系统已有内核"}</small></form></div></details>
+            </article>`;
           }
           return `<article class="service-card service-${esc(engine)}" data-core-installed="${installed ? 1 : 0}">
             <div class="service-card-main ${presetMode ? "" : "operations-only"}">
@@ -125,7 +156,6 @@ async function nodeSettings(presetMode = false) {
               ${presetMode ? `<div class="service-deployment"><dl class="service-facts"><div><dt>已部署配置</dt><dd>${deployed?.config_version ? `v${deployed.config_version}` : "—"}</dd></div><div><dt>已保存配置</dt><dd>${saved?.version ? `v${saved.version}` : "—"}</dd></div></dl>${drift ? `<div class="deployment-drift"><span>${deployed ? "已保存版本尚未部署" : "已保存配置尚未部署"}</span><b>待部署 v${saved.version}</b></div>` : ""}${configDiff ? `<details class="config-diff-drawer"><summary>查看配置差异 <i>＋</i></summary>${configDiff}</details>` : ""}<div class="service-endpoint ${endpoint ? "" : "empty"}">${endpoint ? `<span><b>${esc(firstProfile?.protocol || "客户端入站")}</b><small>${esc(firstProfile?.profile?.format || "已部署配置")}</small></span><code>${esc(endpoint)}</code>` : `<b>${deployed ? "自定义配置" : saved ? "尚未部署" : "尚未配置"}</b>`}</div></div>` : ""}
               ${primaryActions ? `<div class="service-primary-action">${primaryActions}</div>` : ""}
             </div>
-            ${serviceManagement}
             ${presetMode ? "" : `<details class="runtime-drawer version-drawer"><summary><span><b>${installed ? "版本切换" : "安装内核"}</b><small>${installed ? "升级或切换内核版本" : "从官方 Release 安装"}</small></span><i>＋</i></summary><div class="runtime-drawer-body"><form class="core-version-form" data-version-agent="${esc(agent.id)}" data-version-engine="${esc(engine)}"><fieldset class="release-channel-fieldset"><legend>版本来源</legend><div class="release-channel-options"><label><input type="radio" name="release_channel" value="stable" checked><span>最新稳定版</span></label><label><input type="radio" name="release_channel" value="development"><span>最新开发版</span></label><label><input type="radio" name="release_channel" value="custom"><span>指定版本</span></label></div></fieldset><label class="custom-version-field"><span>指定版本</span><input name="custom_version" maxlength="64" autocomplete="off" placeholder="例如 1.19.29"></label><button class="button small" type="submit" ${agent.status !== "online" || !can("operator") ? "disabled" : ""}>${installed ? "升级或切换版本" : "安装内核"}</button><small>${installed ? "官方 Release · SHA-256 校验" : "安装至 QAgent 专用目录，不影响系统已有内核"}</small></form></div></details>`}
             ${presetMode && access?.profiles?.length ? `<a class="service-client-access" href="#client-access" data-client-agent="${esc(agent.id)}" data-client-engine="${esc(engine)}"><span><b>客户端配置</b><small>${esc(access.source)} · ${esc(access.address)}</small></span><strong>${access.profiles.length} 个入站 <i>→</i></strong></a>` : ""}
           </article>`;
@@ -134,22 +164,45 @@ async function nodeSettings(presetMode = false) {
       const labels = Object.entries(agent.labels || {})
         .map(([key, value]) => `<span>${esc(key)}=${esc(value)}</span>`)
         .join("");
+      if (!presetMode) {
+        const installedCount = (agent.capabilities || []).filter(
+          (engine) => agent.runtime?.[engine]?.installed,
+        ).length;
+        const activeTab = ["cores", "metrics", "agent"].includes(
+          state.data.nodeSettingsTab,
+        )
+          ? state.data.nodeSettingsTab
+          : "cores";
+        const tabID = (name) => `node-${agent.id}-${name}`;
+        const tabButton = (name, label, count = "") =>
+          `<button id="${esc(tabID(`${name}-tab`))}" type="button" role="tab" data-node-tab="${name}" aria-controls="${esc(tabID(`${name}-panel`))}" aria-selected="${activeTab === name}" tabindex="${activeTab === name ? 0 : -1}">${label}${count ? `<span>${count}</span>` : ""}</button>`;
+        return `<section class="node-operations-workspace" id="settings-node-${esc(agent.id)}" data-agent-node="${esc(agent.id)}" data-agent-metrics="${esc(agent.id)}" data-available="${metrics.collected_at ? 1 : 0}">
+          <header class="node-operations-header"><div class="node-operations-title"><span class="machine-avatar">●</span><div><span class="node-live-state"><i class="status-dot ${statusTone(agent.status)}" data-agent-status-dot></i><b data-agent-status-label>${agent.status === "online" ? "在线" : "离线"}</b><small data-agent-heartbeat>${esc(heartbeat(agent.last_seen))}</small></span><h2>${esc(agent.name)}</h2><code>${esc(agent.os)} / ${esc(agent.arch)} · ${esc(short(agent.id))}</code></div></div><div class="node-operations-actions">${can("metrics.read") ? `<button class="button small" type="button" data-agent-refresh title="刷新节点状态">刷新</button>` : ""}${can("operator") ? `<button type="button" class="button primary small" data-upgrade-agent="${esc(agent.id)}">升级 Agent</button>` : ""}</div></header>
+          <section class="node-resource-strip" aria-label="节点资源"><div><span>CPU</span><strong data-metric-text="cpu">${metrics.cpu_available ? `${Number(metrics.cpu_percent).toFixed(1)}%` : "等待采集"}</strong><progress aria-label="CPU 使用率" data-metric-progress="cpu" max="100" value="${metrics.cpu_available ? Number(metrics.cpu_percent) : 0}"></progress></div><div><span>内存</span><strong data-metric-text="memory">${metrics.memory_available ? `${bytes(metrics.memory_used_bytes)} / ${bytes(metrics.memory_total_bytes)}` : "等待采集"}</strong><progress aria-label="内存使用率" data-metric-progress="memory" max="100" value="${percent(metrics.memory_used_bytes, metrics.memory_total_bytes)}"></progress></div><div><span>磁盘</span><strong data-metric-text="disk">${metrics.disk_available ? `${bytes(metrics.disk_used_bytes)} / ${bytes(metrics.disk_total_bytes)}` : "等待采集"}</strong><progress aria-label="根磁盘使用率" data-metric-progress="disk" max="100" value="${percent(metrics.disk_used_bytes, metrics.disk_total_bytes)}"></progress></div><div class="node-resource-network"><span>网络</span><strong>↓ <i data-metric-text="download-rate">${metrics.network_available ? rate(metrics.network_rx_bps) : "等待采集"}</i> · ↑ <i data-metric-text="upload-rate">${metrics.network_available ? rate(metrics.network_tx_bps) : "等待采集"}</i></strong><small>累计 ↓ <b data-metric-text="download-total">${metrics.network_available ? bytes(metrics.network_rx_bytes) : "—"}</b> · ↑ <b data-metric-text="upload-total">${metrics.network_available ? bytes(metrics.network_tx_bytes) : "—"}</b></small></div><span class="machine-resource-live" data-metric-poll role="status" aria-label="资源自动更新"></span></section>
+          <nav class="node-settings-tabs" role="tablist" aria-label="节点设置分区">${tabButton("cores", "内核", `${installedCount}/${(agent.capabilities || []).length}`)}${tabButton("metrics", "监控")}${tabButton("agent", "Agent")}</nav>
+          <div class="node-settings-panels">
+            <section id="${esc(tabID("cores-panel"))}" class="node-tab-panel node-cores-panel" data-node-panel="cores" role="tabpanel" aria-labelledby="${esc(tabID("cores-tab"))}" ${activeTab === "cores" ? "" : "hidden"}><header class="node-panel-heading"><div><h3>内核管理</h3><small>服务状态与版本</small></div><span data-installed-summary>${installedCount ? `${installedCount} 个已安装` : "尚未安装内核"}</span></header><div class="core-runtime-list">${services}</div></section>
+            <section id="${esc(tabID("metrics-panel"))}" class="node-tab-panel node-metrics-panel" data-node-panel="metrics" role="tabpanel" aria-labelledby="${esc(tabID("metrics-tab"))}" ${activeTab === "metrics" ? "" : "hidden"}><header class="node-panel-heading"><div><h3>流量趋势</h3><small>最近 24 小时</small></div><span data-metric-text="stamp">${metrics.collected_at ? `采集于 ${ago(metrics.collected_at)}` : "等待资源数据"}</span></header><section class="metric-trend-empty" data-metric-history="${esc(agent.id)}" aria-label="暂无指标趋势"><span>⌁</span><b>正在载入指标趋势</b><small>节点上报指标后显示最近 24 小时的上下行速率。</small></section></section>
+            <section id="${esc(tabID("agent-panel"))}" class="node-tab-panel node-agent-panel" data-node-panel="agent" role="tabpanel" aria-labelledby="${esc(tabID("agent-tab"))}" ${activeTab === "agent" ? "" : "hidden"}><header class="node-panel-heading"><div><h3>Agent 与身份</h3><small>注册信息和安全通道</small></div><span data-agent-version>${esc(agent.version || "未知")}</span></header><dl class="identity-list node-identity-list"><div><dt>节点 ID</dt><dd><code>${esc(agent.id)}</code></dd></div><div><dt>系统平台</dt><dd>${esc(agent.os)} / ${esc(agent.arch)}</dd></div><div><dt>Agent 版本</dt><dd data-agent-version>${esc(agent.version || "未知")}</dd></div><div><dt>注册时间</dt><dd>${date(agent.enrolled_at)}</dd></div><div><dt>安全通道</dt><dd>WSS · Ed25519 签名</dd></div></dl>${labels ? `<div class="labels">${labels}</div>` : ""}<footer class="node-identity-refresh"><span>节点身份已验证</span><div></div></footer>${can("agents.manage") ? `<section class="node-danger-zone"><span><b>删除节点</b><small>断开节点并清理关联配置；QAgent 不会被远程卸载。</small></span><button class="button small danger-button" type="button" data-delete="${esc(agent.id)}">删除节点</button></section>` : ""}</section>
+          </div>
+        </section>`;
+      }
       return `<details class="machine-workspace" id="node-${esc(agent.id)}" name="node-workspace" data-agent-node="${esc(agent.id)}" data-agent-metrics="${esc(agent.id)}" data-available="${metrics.collected_at ? 1 : 0}" ${agent.id === state.data.selectedAgent ? "open" : ""}><summary class="machine-header"><div class="machine-identity">${can("operator") ? `<label class="batch-select" title="选择此节点参与批量操作"><input type="checkbox" data-batch-checkbox value="${esc(agent.id)}" aria-label="选择 ${esc(agent.name)} 参与批量操作"><span></span></label>` : ""}<span class="machine-avatar">●</span><span><strong>${esc(agent.name)}</strong><code>${esc(agent.os)} / ${esc(agent.arch)} · ${esc(short(agent.id))}</code></span></div><section class="machine-resource-summary" aria-label="资源监控"><div><span>CPU</span><strong data-metric-text="cpu">${metrics.cpu_available ? `${Number(metrics.cpu_percent).toFixed(1)}%` : "等待采集"}</strong><progress aria-label="CPU 使用率" data-metric-progress="cpu" max="100" value="${metrics.cpu_available ? Number(metrics.cpu_percent) : 0}"></progress></div><div><span>内存</span><strong data-metric-text="memory">${metrics.memory_available ? `${bytes(metrics.memory_used_bytes)} / ${bytes(metrics.memory_total_bytes)}` : "等待采集"}</strong><progress aria-label="内存使用率" data-metric-progress="memory" max="100" value="${percent(metrics.memory_used_bytes, metrics.memory_total_bytes)}"></progress></div><div><span>磁盘</span><strong data-metric-text="disk">${metrics.disk_available ? `${bytes(metrics.disk_used_bytes)} / ${bytes(metrics.disk_total_bytes)}` : "等待采集"}</strong><progress aria-label="根磁盘使用率" data-metric-progress="disk" max="100" value="${percent(metrics.disk_used_bytes, metrics.disk_total_bytes)}"></progress></div><div class="machine-resource-network"><span>网络</span><strong>↓ <i data-metric-text="download-rate">${metrics.network_available ? rate(metrics.network_rx_bps) : "等待采集"}</i> · ↑ <i data-metric-text="upload-rate">${metrics.network_available ? rate(metrics.network_tx_bps) : "等待采集"}</i></strong><small>累计 ↓ <span data-metric-text="download-total">${metrics.network_available ? bytes(metrics.network_rx_bytes) : "—"}</span> · ↑ <span data-metric-text="upload-total">${metrics.network_available ? bytes(metrics.network_tx_bytes) : "—"}</span></small></div><span class="machine-resource-live" data-metric-poll role="status" aria-label="资源自动更新"></span></section><div class="machine-state"><span class="status-dot ${statusTone(agent.status)}" data-agent-status-dot></span><span><b data-agent-status-label>${agent.status === "online" ? "在线" : "离线"}</b><small data-agent-heartbeat>${esc(heartbeat(agent.last_seen))}</small></span></div><i class="machine-chevron" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></svg></i></summary><div class="machine-body"><section class="service-canvas"><header class="service-canvas-head"><h2>节点内核</h2><span>${(agent.capabilities || []).length} 个内核</span></header><div class="service-grid">${services}</div></section><details class="machine-profile node-inspector"><summary class="node-inspector-summary"><span><b>节点身份</b><small>身份信息 · 指标趋势</small></span><i>＋</i></summary><div class="node-inspector-body"><section class="node-identity-panel"><h2>${esc(agent.name)}</h2><dl class="identity-list"><div><dt>节点 ID</dt><dd><code>${esc(agent.id)}</code></dd></div><div><dt>系统平台</dt><dd>${esc(agent.os)} / ${esc(agent.arch)}</dd></div><div><dt>Agent 版本</dt><dd data-agent-version>${esc(agent.version || "未知")}</dd></div><div><dt>注册时间</dt><dd>${date(agent.enrolled_at)}</dd></div><div><dt>安全通道</dt><dd>WSS · Ed25519 签名</dd></div></dl>${labels ? `<div class="labels">${labels}</div>` : ""}<footer class="node-identity-refresh"><span data-metric-text="stamp">${metrics.collected_at ? `采集于 ${ago(metrics.collected_at)}` : "等待资源数据"}</span><div><button type="button" data-agent-refresh>刷新</button>${can("operator") ? `<button type="button" class="button primary small" data-upgrade-agent="${esc(agent.id)}">升级 Agent</button>` : ""}</div></footer></section><section class="metric-trend-empty" data-metric-history="${esc(agent.id)}" aria-label="暂无指标趋势"><span>⌁</span><b>正在载入指标趋势</b><small>打开节点详情后载入最近 24 小时的上下行速率。</small></section></div></details><footer class="machine-footer"><span><i>●</i><b>节点身份已验证</b></span>${can("admin") ? `<details><summary>节点管理</summary><button type="button" data-delete="${esc(agent.id)}">移除节点并吊销身份</button></details>` : ""}</footer></div></details>`;
     })
     .join("");
 
   const enrollment = !presetMode && can("enrollment.manage")
-    ? `<details class="enrollment-sheet" id="enrollment" data-has-agents="${agents.length ? 1 : 0}" ${(enrollmentOpen ?? !agents.length) ? "open" : ""}><summary><b>＋ 添加节点</b><i>＋</i></summary><div class="enrollment-sheet-body"><form class="access-form add-node-form" id="enrollment-form"><label>节点名称<input name="name" maxlength="100" required autocomplete="off" placeholder="例如 shanghai-edge-01"></label><button class="button primary" type="submit">生成添加节点命令</button></form><p class="enrollment-security-note"><b>添加节点命令只显示一次</b><span>命令绑定该节点，可重复安装；删除添加记录后立即失效。</span></p>${tokenRows ? `<details class="access-history" ${historyOpen ? "open" : ""}><summary>添加记录（${tokens.length}）</summary><div>${tokenRows}</div></details>` : ""}</div></details>`
+    ? `<details class="enrollment-sheet" id="enrollment" data-has-agents="${agents.length ? 1 : 0}" ${state.anchor === "enrollment" || (!agents.length && (enrollmentOpen ?? true)) ? "open" : ""}><summary><b>添加节点</b><i>＋</i></summary><div class="enrollment-sheet-body"><form class="access-form add-node-form" id="enrollment-form"><label>节点名称<input name="name" maxlength="100" required autocomplete="off" placeholder="例如 shanghai-edge-01"></label><button class="button primary" type="submit">生成添加节点命令</button></form><p class="enrollment-security-note"><b>添加节点命令只显示一次</b><span>命令绑定该节点，可重复安装；删除添加记录后立即失效。</span></p>${tokenRows ? `<details class="access-history" ${historyOpen ? "open" : ""}><summary>添加记录（${tokens.length}）</summary><div>${tokenRows}</div></details>` : ""}</div></details>`
     : "";
   const batch =
     !presetMode && agents.length > 1 && can("operator")
-      ? `<form class="batch-toolbar" id="batch-form"><span class="batch-toolbar-title">批量操作</span><label>内核<select name="engine">${engines.map((engine) => `<option value="${engine}">${esc(engineName(engine))}</option>`).join("")}</select></label><label>动作<select name="action"><option value="restart">重启服务</option><option value="status">查询状态</option><option value="start">启动服务</option><option value="stop">停止服务</option></select></label><button class="button small" type="submit" disabled>执行</button><small data-batch-count>未选择节点</small></form>`
+      ? `<details class="node-batch-panel"><summary><span><b>批量操作</b><small>跨节点执行内核服务动作</small></span><i>＋</i></summary><form class="batch-toolbar" id="batch-form"><div class="batch-node-options">${agents.map((agent) => `<label class="batch-select" title="选择此节点参与批量操作"><input type="checkbox" data-batch-checkbox value="${esc(agent.id)}" aria-label="选择 ${esc(agent.name)} 参与批量操作"><span><b>${esc(agent.name)}</b><small>${agent.status === "online" ? "在线" : "离线"}</small></span></label>`).join("")}</div><div class="batch-controls"><label>内核<select name="engine">${engines.map((engine) => `<option value="${engine}">${esc(engineName(engine))}</option>`).join("")}</select></label><label>动作<select name="action"><option value="restart">重启服务</option><option value="status">查询状态</option><option value="start">启动服务</option><option value="stop">停止服务</option></select></label><button class="button small" type="submit" disabled>执行</button><small data-batch-count>未选择节点</small></div></form></details>`
       : "";
   const pageIntro = presetMode
     ? `<header class="node-page-intro"><div><p class="eyebrow">节点配置</p><h2>内核配置预设</h2><p>按节点查看已安装内核与配置入口；实际配置文件仍在手动配置页维护。</p></div><span>${agents.length} 个节点</span></header>`
-    : `<header class="node-page-intro node-settings-intro"><div><p class="eyebrow">节点运维</p><h2>节点设置</h2><p>集中管理节点接入、运行状态、性能指标、内核安装与 Agent。</p></div><span><i></i>${can("metrics.read") ? "实时采样 · 2 秒" : "节点状态"}</span></header>`;
+    : "";
   shell(
-    `${pageIntro}${enrollment}${batch}${nodeCards ? `<section class="machine-stack">${nodeCards}</section>` : '<div class="empty large"><strong>还没有节点</strong><p>请先添加节点。</p></div>'}`,
+    `${pageIntro}${presetMode ? enrollment : `<div class="node-settings-page">${enrollment}${batch}`}${nodeCards ? `<section class="${presetMode ? "machine-stack" : "node-settings-stack"}">${nodeCards}</section>` : '<div class="empty large"><strong>还没有节点</strong><p>请先添加节点。</p></div>'}${presetMode ? "" : "</div>"}`,
     presetMode ? "内核配置预设" : "节点设置",
   );
   document.querySelectorAll(".machine-workspace").forEach((item) => {
@@ -184,58 +237,98 @@ function compactPresetPage() {
 
 function bindAgentPage(agentItems, presetMode = false) {
   const agentsByID = new Map(agentItems.map((agent) => [agent.id, agent]));
-  document.querySelectorAll(".machine-workspace").forEach((item) => {
-    const agent = agentsByID.get(item.dataset.agentNode);
-    const installedCount = (agent?.capabilities || []).filter(
-      (engine) => agent.runtime?.[engine]?.installed,
-    ).length;
-    const serviceCount = item.querySelector(".service-canvas-head > span");
-    if (serviceCount)
-      serviceCount.textContent = installedCount
-        ? `${installedCount} 个已安装 · ${(agent?.capabilities || []).length} 个可用`
-        : "尚未安装内核";
-    const machineFooter = item.querySelector(".machine-footer");
-    item.querySelectorAll("[data-upgrade-agent]").forEach((button) => {
-      const supported = (agent?.features || []).includes("agent-self-upgrade-v1");
-      if (!supported) {
-        button.disabled = true;
-        button.title = "当前 Agent 不支持远程升级，请重新执行一次添加节点命令";
-        button.textContent = "需重新安装 Agent";
+  document
+    .querySelectorAll(".machine-workspace, .node-operations-workspace")
+    .forEach((item) => {
+      const agent = agentsByID.get(item.dataset.agentNode);
+      const installedCount = (agent?.capabilities || []).filter(
+        (engine) => agent.runtime?.[engine]?.installed,
+      ).length;
+      const serviceCount = item.querySelector(
+        ".service-canvas-head > span, [data-installed-summary]",
+      );
+      if (serviceCount) {
+        const compact = serviceCount.hasAttribute("data-installed-summary");
+        serviceCount.textContent = installedCount
+          ? compact
+            ? `${installedCount} 个已安装`
+            : `${installedCount} 个已安装 · ${(agent?.capabilities || []).length} 个可用`
+          : "尚未安装内核";
+      }
+      const machineFooter = item.querySelector(".machine-footer");
+      item.querySelectorAll("[data-upgrade-agent]").forEach((button) => {
+        const supported = (agent?.features || []).includes(
+          "agent-self-upgrade-v1",
+        );
+        if (!supported) {
+          button.disabled = true;
+          button.title =
+            "当前 Agent 不支持远程升级，请重新执行一次添加节点命令";
+          button.textContent = "需重新安装 Agent";
+        }
+      });
+      if (!presetMode && can("enrollment.manage")) {
+        const actions = item.querySelector(".node-identity-refresh > div");
+        if (actions && !actions.querySelector("[data-reinstall-agent]")) {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "button small";
+          button.dataset.reinstallAgent = agent.id;
+          button.textContent = "复制 Agent 安装命令";
+          actions.append(button);
+        }
+      }
+      machineFooter?.remove();
+      if (agent) updateAgentMetrics(agent);
+      if (item instanceof HTMLDetailsElement) {
+        item.addEventListener("toggle", () => {
+          if (item.open) {
+            state.data.selectedAgent = item.dataset.agentNode;
+            if (can("metrics.read")) loadMetricHistory(state.data.selectedAgent);
+          }
+        });
+        if (item.open && can("metrics.read"))
+          loadMetricHistory(item.dataset.agentNode);
+      } else if (
+        can("metrics.read") &&
+        item.querySelector('[data-node-panel="metrics"]:not([hidden])')
+      ) {
+        loadMetricHistory(item.dataset.agentNode);
       }
     });
-    if (!presetMode && can("enrollment.manage")) {
-      const actions = item.querySelector(".node-identity-refresh > div");
-      if (actions && !actions.querySelector("[data-reinstall-agent]")) {
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "button small";
-        button.dataset.reinstallAgent = agent.id;
-        button.textContent = "复制 Agent 安装命令";
-        actions.append(button);
-      }
-    }
-    const deleteButton = machineFooter?.querySelector("[data-delete]") || (can("agents.manage") && !presetMode ? Object.assign(document.createElement("button"), { type: "button", textContent: "删除节点" }) : null);
-    if (deleteButton) {
-      if (!deleteButton.dataset.delete) deleteButton.dataset.delete = agent.id;
-      const danger = document.createElement("section");
-      danger.className = "node-danger-zone";
-      danger.innerHTML =
-        "<span><b>删除节点</b><small>删除后会断开此节点并清理关联配置；以后仍可通过添加节点命令重新安装。</small></span>";
-      deleteButton.className = "button small danger-button";
-      deleteButton.textContent = "删除节点";
-      danger.append(deleteButton);
-      item.querySelector(".node-inspector-body")?.append(danger);
-    }
-    machineFooter?.remove();
-    if (agent) updateAgentMetrics(agent);
-    item.addEventListener("toggle", () => {
-      if (item.open) {
-        state.data.selectedAgent = item.dataset.agentNode;
-        if (can("metrics.read")) loadMetricHistory(state.data.selectedAgent);
-      }
-    });
-    if (item.open && can("metrics.read"))
-      loadMetricHistory(item.dataset.agentNode);
+  document.querySelectorAll("[data-node-tab]").forEach((button) => {
+    button.onclick = () => {
+      const workspace = button.closest(".node-operations-workspace");
+      if (!workspace) return;
+      const tab = button.dataset.nodeTab;
+      state.data.nodeSettingsTab = tab;
+      workspace.querySelectorAll("[data-node-tab]").forEach((candidate) => {
+        const selected = candidate === button;
+        candidate.setAttribute("aria-selected", String(selected));
+        candidate.tabIndex = selected ? 0 : -1;
+      });
+      workspace.querySelectorAll("[data-node-panel]").forEach((panel) => {
+        panel.hidden = panel.dataset.nodePanel !== tab;
+      });
+      if (tab === "metrics" && can("metrics.read"))
+        loadMetricHistory(workspace.dataset.agentNode);
+    };
+    button.onkeydown = (event) => {
+      if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key))
+        return;
+      event.preventDefault();
+      const tabs = [...button.closest("[role=tablist]").querySelectorAll("[role=tab]")];
+      const current = tabs.indexOf(button);
+      const next =
+        event.key === "Home"
+          ? 0
+          : event.key === "End"
+            ? tabs.length - 1
+            : (current + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) %
+              tabs.length;
+      tabs[next].focus();
+      tabs[next].click();
+    };
   });
   document.querySelectorAll("[data-config]").forEach((button) => {
     button.onclick = () => {
