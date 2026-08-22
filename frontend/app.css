@@ -277,14 +277,14 @@ a.node-card{display:flex;flex-direction:column;min-width:0;border:1px solid var(
 a.node-card:hover{border-color:color-mix(in srgb,var(--accent) 32%,var(--line));box-shadow:var(--shadow-lift);transform:translateY(-1px)}
 a.node-card:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .node-card-head{display:flex;align-items:center;gap:9px;padding:12px 14px;border-bottom:1px solid var(--line)}
-.node-card-grip{display:grid;place-items:center;width:22px;height:30px;flex:0 0 22px;margin-left:-4px;border-radius:6px;color:var(--line-2);cursor:grab;touch-action:none}
+.node-card-grip{display:grid;place-items:center;width:24px;height:28px;flex:0 0 24px;margin-right:-6px;border-radius:6px;color:var(--line-2);cursor:grab;touch-action:none}
 .node-card-grip:hover{color:var(--muted);background:var(--surface-2)}
 .node-card-grip svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2.6;stroke-linecap:round}
-.node-card.dragging{position:relative;z-index:5;opacity:.94;box-shadow:var(--shadow-lift);transform:scale(.99) rotate(.3deg);cursor:grabbing}
+.node-card.dragging{position:relative;z-index:5;opacity:.4;cursor:grabbing}
 body.node-card-dragging{cursor:grabbing;user-select:none}
 body.node-card-dragging a.node-card{transform:none}
-body.node-card-dragging a.node-card:hover{border-color:var(--line);box-shadow:var(--shadow)}
-body.node-card-dragging a.node-card.dragging{border-color:color-mix(in srgb,var(--accent) 32%,var(--line));box-shadow:var(--shadow-lift);opacity:.94;transform:scale(.99) rotate(.3deg)}
+body.node-card-dragging a.node-card:hover{border-color:var(--line);box-shadow:var(--shadow);transform:none}
+a.node-card.node-card-ghost{position:fixed;z-index:60;margin:0;pointer-events:none;opacity:.96;box-shadow:var(--shadow-lift);border-color:color-mix(in srgb,var(--accent) 32%,var(--line));cursor:grabbing;will-change:transform;transform-origin:top left}
 .node-card-head .machine-avatar{width:38px;height:38px;flex:0 0 38px}
 .node-card-title{min-width:0;flex:1}
 .node-card-title strong,.node-card-title small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

@@ -217,7 +217,7 @@ async function nodeSettings(presetMode = false) {
           })
           .join("");
         return `<a class="node-card" href="#settings-node-${esc(agent.id)}" data-agent-node="${esc(agent.id)}" data-agent-metrics="${esc(agent.id)}" data-state="${agent.status === "online" ? "online" : "offline"}" data-available="${metrics.collected_at ? 1 : 0}">
-              <header class="node-card-head"><span class="node-card-grip" title="拖动调整顺序" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 6h.01M9 12h.01M9 18h.01M15 6h.01M15 12h.01M15 18h.01"/></svg></span><span class="machine-avatar" aria-hidden="true">●</span><div class="node-card-title"><strong>${esc(agent.name)}</strong><small>${esc(agent.os)} / ${esc(agent.arch)} · ${installedCount ? `${installedCount}/${(agent.capabilities || []).length} 内核已安装` : "尚未安装内核"}</small></div><span class="node-card-state"><i class="status-dot ${statusTone(agent.status)}" data-agent-status-dot></i><b data-agent-status-label>${agent.status === "online" ? "在线" : "离线"}</b><small data-agent-heartbeat>${esc(heartbeat(agent.last_seen))}</small></span></header>
+              <header class="node-card-head"><span class="machine-avatar" aria-hidden="true">●</span><div class="node-card-title"><strong>${esc(agent.name)}</strong><small>${esc(agent.os)} / ${esc(agent.arch)} · ${installedCount ? `${installedCount}/${(agent.capabilities || []).length} 内核已安装` : "尚未安装内核"}</small></div><span class="node-card-state"><i class="status-dot ${statusTone(agent.status)}" data-agent-status-dot></i><b data-agent-status-label>${agent.status === "online" ? "在线" : "离线"}</b><small data-agent-heartbeat>${esc(heartbeat(agent.last_seen))}</small></span><span class="node-card-grip" title="拖动调整顺序" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 6h.01M9 12h.01M9 18h.01M15 6h.01M15 12h.01M15 18h.01"/></svg></span></header>
               <section class="node-card-resources" aria-label="节点资源"><div><span>CPU</span><strong data-metric-text="cpu">${metrics.cpu_available ? `${Number(metrics.cpu_percent).toFixed(1)}%` : "等待采集"}</strong><progress aria-label="CPU 使用率" data-metric-progress="cpu" max="100" value="${metrics.cpu_available ? Number(metrics.cpu_percent) : 0}"></progress></div><div><span>内存</span><strong data-metric-text="memory">${metrics.memory_available ? `${bytes(metrics.memory_used_bytes)} / ${bytes(metrics.memory_total_bytes)}` : "等待采集"}</strong><progress aria-label="内存使用率" data-metric-progress="memory" max="100" value="${percent(metrics.memory_used_bytes, metrics.memory_total_bytes)}"></progress></div><div><span>磁盘</span><strong data-metric-text="disk">${metrics.disk_available ? `${bytes(metrics.disk_used_bytes)} / ${bytes(metrics.disk_total_bytes)}` : "等待采集"}</strong><progress aria-label="根磁盘使用率" data-metric-progress="disk" max="100" value="${percent(metrics.disk_used_bytes, metrics.disk_total_bytes)}"></progress></div><div><span>网络</span><strong>↓ <i data-metric-text="download-rate">${metrics.network_available ? rate(metrics.network_rx_bps) : "等待采集"}</i> · ↑ <i data-metric-text="upload-rate">${metrics.network_available ? rate(metrics.network_tx_bps) : "等待采集"}</i></strong><small>累计 ↓ <b data-metric-text="download-total">${metrics.network_available ? bytes(metrics.network_rx_bytes) : "—"}</b> · ↑ <b data-metric-text="upload-total">${metrics.network_available ? bytes(metrics.network_tx_bytes) : "—"}</b></small></div><span class="machine-resource-live" data-metric-poll role="status" aria-label="资源自动更新"></span></section>
               <section class="node-card-cores" aria-label="内核状态">${coreChips}</section>
               <footer class="node-card-foot"><small><i></i><span data-agent-version>${esc(agent.version || "未知")}</span></small><span class="node-card-stamp" data-metric-text="stamp">${metrics.collected_at ? `采集于 ${ago(metrics.collected_at)}` : "等待资源数据"}</span><span class="node-card-open">管理节点 <i aria-hidden="true">→</i></span></footer>
@@ -291,10 +291,10 @@ function orderAgents(agents) {
 }
 
 // Pointer-based drag reordering of the overview cards. The grip captures the
-// pointer so the surrounding card link never navigates mid-drag; live preview
-// reorders cards through the CSS order property because moving DOM nodes
-// mid-drag would implicitly release the pointer capture. The DOM order and
-// localStorage are only committed on release.
+// pointer so the card link never navigates mid-drag. The source card stays in
+// the grid as a translucent placeholder reflowed through the CSS order
+// property while a cloned ghost follows the cursor; DOM order and localStorage
+// are only committed on release.
 function enableCardDrag(grid) {
   let drag = null;
   const applyVisualOrder = (pointerX, pointerY) => {
@@ -315,14 +315,73 @@ function enableCardDrag(grid) {
     }
     const sequence = [...rest];
     sequence.splice(insertAt, 0, drag.card);
+    drag.insertAt = insertAt;
+    const changed = sequence.some(
+      (card, index) => card.style.order !== String(index),
+    );
+    if (!changed) return;
+    const oldRects = new Map(
+      sequence.map((card) => [card, card.getBoundingClientRect()]),
+    );
     sequence.forEach((card, index) => (card.style.order = String(index)));
+    sequence.forEach((card) => {
+      const prev = oldRects.get(card);
+      const next = card.getBoundingClientRect();
+      const dx = prev.left - next.left;
+      const dy = prev.top - next.top;
+      if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return;
+      const invert = `translate(${dx}px, ${dy}px)`;
+      card.style.transition = "none";
+      card.style.transform = invert;
+      void card.offsetWidth;
+      requestAnimationFrame(() => {
+        if (card.style.transform !== invert) return;
+        card.style.transition = "";
+        card.style.transform = "";
+      });
+    });
   };
-  const reset = () => {
+  const clearStyles = () => {
     drag.card.classList.remove("dragging");
     document.body.classList.remove("node-card-dragging");
     grid
       .querySelectorAll(".node-card")
-      .forEach((card) => (card.style.order = ""));
+      .forEach((card) => {
+        card.style.order = "";
+        card.style.transform = "";
+        card.style.transition = "";
+      });
+    drag.ghost?.remove();
+    drag.ghost = null;
+  };
+  const reset = () => {
+    if (!drag) return;
+    clearStyles();
+    drag = null;
+  };
+  const finish = (event) => {
+    if (!drag || event.pointerId !== drag.pointerId) return;
+    const { card, moved, insertAt } = drag;
+    if (moved) {
+      const rest = [...grid.querySelectorAll(".node-card")].filter(
+        (item) => item !== card,
+      );
+      const target = insertAt == null ? null : rest[insertAt];
+      if (target) target.before(card);
+      else grid.append(card);
+      const ids = [...grid.querySelectorAll(".node-card")].map(
+        (item) => item.dataset.agentNode,
+      );
+      try {
+        localStorage.setItem(nodeCardOrderKey, JSON.stringify(ids));
+      } catch {}
+    }
+    clearStyles();
+    drag = null;
+  };
+  const cancel = (event) => {
+    if (!drag || event.pointerId !== drag.pointerId) return;
+    clearStyles();
     drag = null;
   };
   grid.querySelectorAll(".node-card-grip").forEach((grip) => {
@@ -331,13 +390,17 @@ function enableCardDrag(grid) {
       const card = grip.closest(".node-card");
       if (!card) return;
       event.preventDefault();
+      const rect = card.getBoundingClientRect();
       drag = {
         card,
         pointerId: event.pointerId,
         startX: event.clientX,
         startY: event.clientY,
+        rect,
         started: false,
         moved: false,
+        insertAt: null,
+        ghost: null,
       };
       grip.setPointerCapture(event.pointerId);
     });
@@ -345,35 +408,32 @@ function enableCardDrag(grid) {
       if (!drag || event.pointerId !== drag.pointerId) return;
       if (!drag.started) {
         if (
-          Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 6
+          Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 4
         )
           return;
         drag.started = true;
         drag.card.classList.add("dragging");
         document.body.classList.add("node-card-dragging");
+        const ghost = drag.card.cloneNode(true);
+        ghost.classList.remove("dragging");
+        ghost.classList.add("node-card-ghost");
+        ghost.removeAttribute("href");
+        ghost.removeAttribute("data-agent-node");
+        ghost.removeAttribute("data-agent-metrics");
+        ghost.removeAttribute("data-metric-poll");
+        ghost.style.position = "fixed";
+        ghost.style.left = `${drag.rect.left}px`;
+        ghost.style.top = `${drag.rect.top}px`;
+        ghost.style.width = `${drag.rect.width}px`;
+        drag.ghost = ghost;
+        document.body.appendChild(ghost);
       }
       drag.moved = true;
+      const dx = event.clientX - drag.startX;
+      const dy = event.clientY - drag.startY;
+      drag.ghost.style.transform = `translate(${dx}px, ${dy}px) scale(.99) rotate(.3deg)`;
       applyVisualOrder(event.clientX, event.clientY);
     });
-    const finish = (event) => {
-      if (!drag || event.pointerId !== drag.pointerId) return;
-      if (drag.moved) {
-        [...grid.querySelectorAll(".node-card")]
-          .sort((a, b) => Number(a.style.order) - Number(b.style.order))
-          .forEach((card) => grid.append(card));
-        const ids = [...grid.querySelectorAll(".node-card")].map(
-          (card) => card.dataset.agentNode,
-        );
-        try {
-          localStorage.setItem(nodeCardOrderKey, JSON.stringify(ids));
-        } catch {}
-      }
-      reset();
-    };
-    const cancel = (event) => {
-      if (!drag || event.pointerId !== drag.pointerId) return;
-      reset();
-    };
     grip.addEventListener("pointerup", finish);
     grip.addEventListener("pointercancel", cancel);
     grip.addEventListener("click", (event) => {
