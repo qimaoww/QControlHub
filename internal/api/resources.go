@@ -1,11 +1,14 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"net"
 	"net/http"
 	"sort"
 	"strings"
+
+	"golang.org/x/sync/errgroup"
 
 	"github.com/qimaoww/qcontrolhub/internal/authn"
 	"github.com/qimaoww/qcontrolhub/internal/configschema"
@@ -28,6 +31,46 @@ type clientAccessEntry struct {
 	Source          string                `json:"source"`
 	AddressRequired bool                  `json:"address_required,omitempty"`
 	Profiles        []clientAccessProfile `json:"profiles"`
+}
+
+type clientAccessDataSource interface {
+	ListAgents(context.Context) ([]core.Agent, error)
+	LatestDeployments(context.Context) ([]core.Deployment, error)
+	ListAgentConfigs(context.Context) ([]core.Config, error)
+	ListConfigs(context.Context) ([]core.Config, error)
+}
+
+type clientAccessSnapshot struct {
+	agents         []core.Agent
+	deployments    []core.Deployment
+	agentConfigs   []core.Config
+	archiveConfigs []core.Config
+}
+
+func loadClientAccessSnapshot(ctx context.Context, source clientAccessDataSource) (clientAccessSnapshot, error) {
+	var snapshot clientAccessSnapshot
+	group, groupContext := errgroup.WithContext(ctx)
+	group.Go(func() error {
+		var err error
+		snapshot.agents, err = source.ListAgents(groupContext)
+		return err
+	})
+	group.Go(func() error {
+		var err error
+		snapshot.deployments, err = source.LatestDeployments(groupContext)
+		return err
+	})
+	group.Go(func() error {
+		var err error
+		snapshot.agentConfigs, err = source.ListAgentConfigs(groupContext)
+		return err
+	})
+	group.Go(func() error {
+		var err error
+		snapshot.archiveConfigs, err = source.ListConfigs(groupContext)
+		return err
+	})
+	return snapshot, group.Wait()
 }
 
 type configCatalogResource struct {
@@ -408,26 +451,15 @@ func (s *Server) createConfigMutationTask(w http.ResponseWriter, request *http.R
 }
 
 func (s *Server) listClientAccess(w http.ResponseWriter, request *http.Request) {
-	agents, err := s.store.ListAgents(request.Context())
+	snapshot, err := loadClientAccessSnapshot(request.Context(), s.store)
 	if err != nil {
 		writeInternalError(w, err)
 		return
 	}
-	deployments, err := s.store.LatestDeployments(request.Context())
-	if err != nil {
-		writeInternalError(w, err)
-		return
-	}
-	agentConfigs, err := s.store.ListAgentConfigs(request.Context())
-	if err != nil {
-		writeInternalError(w, err)
-		return
-	}
-	archiveConfigs, err := s.store.ListConfigs(request.Context())
-	if err != nil {
-		writeInternalError(w, err)
-		return
-	}
+	agents := snapshot.agents
+	deployments := snapshot.deployments
+	agentConfigs := snapshot.agentConfigs
+	archiveConfigs := snapshot.archiveConfigs
 
 	agentsByID := make(map[string]core.Agent, len(agents))
 	for _, agent := range agents {

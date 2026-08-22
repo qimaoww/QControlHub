@@ -13,6 +13,7 @@ import { installDashboard } from "./modules/dashboard.js";
 import { installSettings } from "./modules/settings.js";
 import { installTasks } from "./modules/tasks.js";
 import { installTraffic } from "./modules/traffic.js";
+import { createLatestRenderScheduler } from "./modules/render-scheduler.js";
 
 const state = { data: {}, session: { role: "admin" } };
 const noop = () => {};
@@ -36,6 +37,36 @@ for (const install of [
     throw new TypeError(`${install.name} returned an invalid page module`);
   }
 }
+
+let requestedRoute = "dashboard";
+let releaseFirstRender;
+const firstRenderGate = new Promise((resolve) => {
+  releaseFirstRender = resolve;
+});
+const renderedRoutes = [];
+let activeRenders = 0;
+let maximumActiveRenders = 0;
+const scheduleRender = createLatestRenderScheduler(async () => {
+  const route = requestedRoute;
+  renderedRoutes.push(route);
+  activeRenders += 1;
+  maximumActiveRenders = Math.max(maximumActiveRenders, activeRenders);
+  if (renderedRoutes.length === 1) await firstRenderGate;
+  activeRenders -= 1;
+});
+const firstRender = scheduleRender();
+requestedRoute = "node-settings";
+scheduleRender();
+requestedRoute = "tasks";
+scheduleRender();
+releaseFirstRender();
+await firstRender;
+assert.deepEqual(
+  renderedRoutes,
+  ["dashboard", "tasks"],
+  "in-flight navigation coalesces to one render of the latest route",
+);
+assert.equal(maximumActiveRenders, 1, "route renders never overlap");
 
 const cardSlots = [
   { left: 0, right: 100, top: 0, bottom: 160 },
@@ -303,7 +334,8 @@ try {
         assert.fail(`unexpected preset smoke API path ${path}`);
       },
       optionalAPI: async () => null,
-      can: (capability) => capability === "agent-config.read",
+      can: (capability) =>
+        capability === "agent-config.read" || capability === "overview.read",
       esc: (value) => String(value ?? ""),
       engineName: (value) => value,
       serviceStatusName: (value) => value,
@@ -314,7 +346,7 @@ try {
     { get: (target, key) => target[key] ?? noop },
   );
   const { agents: renderPresetAgents } = installAgents(presetCtx);
-  await renderPresetAgents();
+  await renderPresetAgents({ overview: { agents: 2, agents_online: 2 } });
 
   const assertFocusedPreset = (selected, excluded) => {
     assert.equal(presetState.route, "agents", "preset selection stays on agents");
@@ -378,7 +410,7 @@ try {
 
   presetState.anchor = "preset-node-beta";
   presetState.data.selectedAgent = "beta";
-  await renderPresetAgents();
+  await renderPresetAgents({ overview: { agents: 2, agents_online: 2 } });
   assertFocusedPreset("beta", "alpha");
 } finally {
   if (previousDocument === undefined) delete globalThis.document;
@@ -387,6 +419,107 @@ try {
   else globalThis.HTMLDetailsElement = previousDetailsElement;
   if (previousCSS === undefined) delete globalThis.CSS;
   else globalThis.CSS = previousCSS;
+}
+
+const routeDataDocument = globalThis.document;
+globalThis.document = {
+  querySelector: () => null,
+  querySelectorAll: () => [],
+};
+try {
+  const dashboardCalls = [];
+  const dashboardState = { route: "dashboard", data: {} };
+  const renderDashboard = installDashboard(
+    new Proxy(
+      {
+        state: dashboardState,
+        api: async (path) => {
+          dashboardCalls.push(path);
+          if (path === "/agents" || path.startsWith("/tasks?")) return [];
+          assert.fail(`unexpected dashboard preload API path ${path}`);
+        },
+        shell: noop,
+      },
+      { get: (target, key) => target[key] ?? noop },
+    ),
+  );
+  await renderDashboard({
+    overview: { agents: 3, agents_online: 3, tasks_pending: 0 },
+  });
+  assert.deepEqual(
+    dashboardCalls,
+    ["/agents", "/tasks?limit=7"],
+    "dashboard reuses the route bootstrap overview",
+  );
+
+  const taskCalls = [];
+  const taskTimers = new Map();
+  let nextTaskTimer = 1;
+  let taskNow = 1_000;
+  const taskState = { route: "tasks", data: {} };
+  const renderTasks = installTasks(
+    new Proxy(
+      {
+        state: taskState,
+        actions: [],
+        api: async (path) => {
+          taskCalls.push(path);
+          if (path === "/agents" || path.startsWith("/tasks?")) return [];
+          if (path === "/settings") return { task_poll_interval_ms: 600 };
+          assert.fail(`unexpected task polling API path ${path}`);
+        },
+        shell: noop,
+        setTimer: (callback) => {
+          const id = nextTaskTimer++;
+          taskTimers.set(id, callback);
+          return id;
+        },
+        clearTimer: (id) => taskTimers.delete(id),
+        now: () => taskNow,
+      },
+      { get: (target, key) => target[key] ?? noop },
+    ),
+  );
+  await renderTasks({ settings: { task_poll_interval_ms: 600 } });
+  assert.equal(
+    taskCalls.filter((path) => path === "/settings").length,
+    0,
+    "initial task render reuses bootstrap settings",
+  );
+  assert.equal(taskTimers.size, 1, "task page schedules one polling timer");
+  const poll = [...taskTimers.values()][0];
+  taskTimers.clear();
+  await poll();
+  assert.equal(
+    taskCalls.filter((path) => path === "/settings").length,
+    0,
+    "background task polling does not refetch unchanged settings",
+  );
+  assert.equal(
+    taskCalls.filter((path) => path.startsWith("/tasks?")).length,
+    2,
+    "each task refresh issues one task request",
+  );
+  assert.equal(
+    taskCalls.filter((path) => path === "/agents").length,
+    2,
+    "each task refresh issues one agent request",
+  );
+  assert.equal(taskTimers.size, 1, "task polling keeps a single timer");
+  const expiredPoll = [...taskTimers.values()][0];
+  taskTimers.clear();
+  taskNow += 30_001;
+  await expiredPoll();
+  assert.equal(
+    taskCalls.filter((path) => path === "/settings").length,
+    1,
+    "task polling refreshes cached settings after the bounded interval",
+  );
+  assert.equal(taskTimers.size, 1, "expired settings refresh keeps one timer");
+  taskTimers.clear();
+} finally {
+  if (routeDataDocument === undefined) delete globalThis.document;
+  else globalThis.document = routeDataDocument;
 }
 
 const accessEntries = [

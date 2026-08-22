@@ -1,8 +1,8 @@
 export function installSettings(ctx) {
   const { api, state, esc, date, can, shell, notify, confirmAction } = ctx;
-async function settings() {
+async function settings({ settings: preloadedSettings } = {}) {
   const [item, users] = await Promise.all([
-    api("/settings"),
+    preloadedSettings || api("/settings"),
     can("users.manage") ? api("/users") : Promise.resolve([]),
   ]);
   state.data.settings = item;
