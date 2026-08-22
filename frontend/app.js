@@ -310,6 +310,7 @@ function combineAbortSignals(...values) {
 }
 
 async function api(path, options = {}) {
+  const method = String(options.method || "GET").toUpperCase();
   const headers = {
     Accept: "application/json",
     ...(options.body ? { "Content-Type": "application/json" } : {}),
@@ -317,11 +318,13 @@ async function api(path, options = {}) {
   };
   if (
     state.session?.csrf_token &&
-    options.method &&
-    !["GET", "HEAD", "OPTIONS"].includes(options.method)
+    !["GET", "HEAD", "OPTIONS"].includes(method)
   )
     headers["X-QControlHub-CSRF"] = state.session.csrf_token;
-  const request = combineAbortSignals(options.signal, state.routeSignal);
+  const routeSignal = ["GET", "HEAD", "OPTIONS"].includes(method)
+    ? state.routeSignal
+    : null;
+  const request = combineAbortSignals(options.signal, routeSignal);
   try {
     const response = await fetch(`/api/v1${path}`, {
       ...options,
@@ -778,6 +781,7 @@ async function renderOnce() {
       );
   } catch (error) {
     if (error?.name === "AbortError") return;
+    if (!state.session || state.route === "login") return;
     const renderedRoute = document.body.className.match(
       /(?:^|\s)page-([^\s]+)/,
     )?.[1];

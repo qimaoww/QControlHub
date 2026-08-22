@@ -133,13 +133,15 @@ func TestRefreshPathsUseStableViewsAndScopedCoordinators(t *testing.T) {
 	app := read("app.js")
 	refresh := read("modules/refresh.js")
 	for _, required := range []string{
-		"combineAbortSignals(options.signal, state.routeSignal)",
+		"combineAbortSignals(options.signal, routeSignal)",
+		"[\"GET\", \"HEAD\", \"OPTIONS\"].includes(method)",
 		"reconcileView(currentView, template.content.firstElementChild",
 		"state.navigationEpoch += 1",
 		"cancelActive: () => routeController?.abort()",
 		"agentModule.cancelAgentInteractions()",
 		"confirmResolver?.(false)",
 		"state.route = \"login\"",
+		"if (!state.session || state.route === \"login\") return",
 		"if (renderedRoute === state.route) notify(error.message",
 	} {
 		if !strings.Contains(app, required) {
