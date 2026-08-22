@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import "./refresh_smoke.mjs";
 
 import {
   animateNodeCardDrop,
@@ -16,7 +17,7 @@ import { installDashboard } from "./modules/dashboard.js";
 import { installSettings } from "./modules/settings.js";
 import { installTasks } from "./modules/tasks.js";
 import { installTraffic } from "./modules/traffic.js";
-import { createLatestRenderScheduler } from "./modules/render-scheduler.js";
+import { createLatestRenderScheduler } from "./modules/refresh.js";
 
 const state = { data: {}, session: { role: "admin" } };
 const noop = () => {};
@@ -49,14 +50,18 @@ const firstRenderGate = new Promise((resolve) => {
 const renderedRoutes = [];
 let activeRenders = 0;
 let maximumActiveRenders = 0;
-const scheduleRender = createLatestRenderScheduler(async () => {
-  const route = requestedRoute;
-  renderedRoutes.push(route);
-  activeRenders += 1;
-  maximumActiveRenders = Math.max(maximumActiveRenders, activeRenders);
-  if (renderedRoutes.length === 1) await firstRenderGate;
-  activeRenders -= 1;
-});
+let canceledRenders = 0;
+const scheduleRender = createLatestRenderScheduler(
+  async () => {
+    const route = requestedRoute;
+    renderedRoutes.push(route);
+    activeRenders += 1;
+    maximumActiveRenders = Math.max(maximumActiveRenders, activeRenders);
+    if (renderedRoutes.length === 1) await firstRenderGate;
+    activeRenders -= 1;
+  },
+  { cancelActive: () => (canceledRenders += 1) },
+);
 const firstRender = scheduleRender();
 requestedRoute = "node-settings";
 scheduleRender();
@@ -70,6 +75,7 @@ assert.deepEqual(
   "in-flight navigation coalesces to one render of the latest route",
 );
 assert.equal(maximumActiveRenders, 1, "route renders never overlap");
+assert.equal(canceledRenders, 2, "new navigation cancels the stale route work");
 
 const previousFormData = globalThis.FormData;
 const planControls = Object.fromEntries(
@@ -905,4 +911,166 @@ try {
 } finally {
   if (previousDocument === undefined) delete globalThis.document;
   else globalThis.document = previousDocument;
+}
+
+const pollingDocument = globalThis.document;
+globalThis.document = {
+  hidden: false,
+  activeElement: null,
+  querySelector: () => null,
+  querySelectorAll: () => [],
+};
+try {
+  const coreTimers = new Map();
+  let nextCoreTimer = 1;
+  let coreRequests = 0;
+  let coreRenders = 0;
+  let coreMarkup = "";
+  let coreFailure = false;
+  const coreState = {
+    route: "core-logs",
+    navigationEpoch: 1,
+    data: {},
+  };
+  const renderCoreLogs = installCoreLogs({
+    state: coreState,
+    engines: ["mihomo"],
+    can: () => true,
+    esc: (value) => String(value ?? ""),
+    engineName: (value) => value,
+    date: (value) => value,
+    api: async (path) => {
+      coreRequests += 1;
+      if (path.startsWith("/core-logs?") && coreFailure)
+        throw new Error("temporary log failure");
+      if (path.startsWith("/core-logs?"))
+        return [{ id: 1, agent_id: "alpha", engine: "mihomo", level: "info", message: "ready", logged_at: "now" }];
+      if (path === "/agents") return [{ id: "alpha", name: "Alpha" }];
+      assert.fail(`unexpected core-log polling path ${path}`);
+    },
+    shell: (markup) => {
+      coreMarkup = markup;
+      coreRenders += 1;
+    },
+    setTimer: (callback) => {
+      const id = nextCoreTimer++;
+      coreTimers.set(id, callback);
+      return id;
+    },
+    clearTimer: (id) => coreTimers.delete(id),
+  });
+  await renderCoreLogs();
+  assert.equal(coreRequests, 2, "log refresh uses two parallel data requests");
+  assert.equal(coreRenders, 1);
+  assert.equal(coreTimers.size, 1, "log polling owns one timer");
+  assert.equal(coreMarkup.includes('data-refresh-key="core-log-1"'), true);
+  const corePoll = [...coreTimers.values()][0];
+  coreTimers.clear();
+  await corePoll();
+  assert.equal(coreRequests, 4, "one log poll issues one request per data source");
+  assert.equal(coreRenders, 2);
+  assert.equal(coreTimers.size, 1, "log polling reschedules exactly one timer");
+  coreFailure = true;
+  const failedCorePoll = [...coreTimers.values()][0];
+  coreTimers.clear();
+  await failedCorePoll();
+  assert.equal(coreRenders, 2, "a log error preserves the current view");
+  assert.equal(coreTimers.size, 1, "a log error keeps recovery polling alive");
+  coreFailure = false;
+  const recoveredCorePoll = [...coreTimers.values()][0];
+  coreTimers.clear();
+  await recoveredCorePoll();
+  assert.equal(coreRenders, 3, "log polling recovers without clearing state");
+  assert.equal(coreTimers.size, 1);
+
+  const trafficTimers = new Map();
+  let nextTrafficTimer = 1;
+  let trafficRequests = 0;
+  let trafficRenders = 0;
+  let trafficMarkup = "";
+  const trafficState = {
+    route: "traffic",
+    navigationEpoch: 1,
+    anchor: "traffic",
+    data: {},
+  };
+  const renderTraffic = installTraffic({
+    state: trafficState,
+    can: () => false,
+    esc: (value) => String(value ?? ""),
+    engineName: (value) => value,
+    bytes: (value) => `${value || 0} B`,
+    rate: (value) => `${value || 0} B/s`,
+    percent: (used, limit) => (limit ? Number(used || 0) * 100 / Number(limit) : 0),
+    ago: () => "刚刚",
+    api: async (path) => {
+      trafficRequests += 1;
+      if (path === "/agents")
+        return [{ id: "alpha", name: "Alpha", features: ["port-traffic-v1"], capabilities: ["mihomo"] }];
+      if (path === "/traffic-policies")
+        return [{ id: "policy-a", agent_id: "alpha", engine: "mihomo", name: "Primary", port: 443, protocol: "tcp", cycle: "monthly", cycle_anchor: "2026-01-01T00:00:00Z", used_bytes: 10, limit_bytes: 100, received_bytes: 6, sent_bytes: 4, receive_bps: 1, send_bps: 1, enforcement_available: true, last_reported_at: "now" }];
+      assert.fail(`unexpected traffic polling path ${path}`);
+    },
+    shell: (markup) => {
+      trafficMarkup = markup;
+      trafficRenders += 1;
+    },
+    setTimer: (callback) => {
+      const id = nextTrafficTimer++;
+      trafficTimers.set(id, callback);
+      return id;
+    },
+    clearTimer: (id) => trafficTimers.delete(id),
+  });
+  await renderTraffic();
+  assert.equal(trafficRequests, 2, "traffic refresh uses two parallel requests");
+  assert.equal(trafficRenders, 1);
+  assert.equal(trafficTimers.size, 1, "traffic polling owns one timer");
+  assert.equal(
+    trafficMarkup.includes('data-refresh-key="traffic-policy-policy-a"'),
+    true,
+  );
+  const trafficPoll = [...trafficTimers.values()][0];
+  trafficTimers.clear();
+  await trafficPoll();
+  assert.equal(trafficRequests, 4);
+  assert.equal(trafficRenders, 2);
+  assert.equal(trafficTimers.size, 1, "traffic polling reschedules one timer");
+
+  let metricRequests = 0;
+  const metricState = {
+    route: "node-settings",
+    navigationEpoch: 1,
+    data: {},
+  };
+  const { pollAgentMetrics } = installAgents(
+    new Proxy(
+      {
+        state: metricState,
+        api: async (path) => {
+          assert.equal(path, "/agents");
+          metricRequests += 1;
+          return ["alpha", "beta", "gamma"].map((id) => ({
+            id,
+            status: "online",
+            metrics: {},
+            runtime: {},
+          }));
+        },
+        can: (capability) => capability === "metrics.read",
+      },
+      { get: (target, key) => target[key] ?? noop },
+    ),
+  );
+  globalThis.document.hidden = true;
+  await pollAgentMetrics();
+  clearTimeout(metricState.agentPollTimer);
+  assert.equal(metricRequests, 0, "hidden node page defers metrics requests");
+  globalThis.document.hidden = false;
+  await pollAgentMetrics();
+  clearTimeout(metricState.agentPollTimer);
+  assert.equal(metricRequests, 1, "three-node metrics patch uses one fleet request");
+} finally {
+  if (pollingDocument === undefined) delete globalThis.document;
+  else globalThis.document = pollingDocument;
 }

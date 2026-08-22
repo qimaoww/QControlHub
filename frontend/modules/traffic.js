@@ -1,5 +1,23 @@
+import {
+  bindEvent,
+  createPoller,
+  createRefreshChannel,
+} from "./refresh.js";
+
 export function installTraffic(ctx) {
-  const { api, state, can, esc, engineName, bytes, rate, percent, ago, shell, notify, confirmAction } = ctx;
+  const {
+    api, state, can, esc, engineName, bytes, rate, percent, ago, shell,
+    notify, confirmAction,
+    setTimer = (callback, delay) => {
+      state.trafficPollTimer = setTimeout(callback, delay);
+      return state.trafficPollTimer;
+    },
+    clearTimer = (timer) => clearTimeout(timer),
+  } = ctx;
+  const refresh = createRefreshChannel({
+    isCurrent: () => state.route === "traffic",
+    getScope: () => state.navigationEpoch,
+  });
   const gibibyte = 1024 ** 3;
   const dateInputValue = (value = new Date()) => {
     const date = new Date(value);
@@ -52,9 +70,7 @@ export function installTraffic(ctx) {
     };
   };
 
-  async function traffic() {
-    clearTimeout(state.trafficPollTimer);
-    const [agents, policies] = await Promise.all([api("/agents"), api("/traffic-policies")]);
+  const renderTraffic = (agents, policies, resetCreate) => {
     state.data.agents = agents;
     state.data.trafficPolicies = policies;
     const agentByID = new Map(agents.map((agent) => [agent.id, agent]));
@@ -72,7 +88,7 @@ export function installTraffic(ctx) {
       const period = policy.period_start && policy.period_end
         ? `${dateInputValue(policy.period_start)} 至 ${dateInputValue(policy.period_end)}`
         : `从 ${dateInputValue(policy.cycle_anchor)} 开始${cycleName(policy.cycle)}重置`;
-      return `<article class="traffic-policy-card ${policy.blocked ? "is-blocked" : ""}" id="traffic-${esc(policy.id)}" data-traffic-agent-card="${esc(policy.agent_id)}">
+      return `<article class="traffic-policy-card ${policy.blocked ? "is-blocked" : ""}" id="traffic-${esc(policy.id)}" data-refresh-key="traffic-policy-${esc(policy.id)}" data-traffic-agent-card="${esc(policy.agent_id)}">
         <header><div><span class="engine-badge ${esc(policy.engine)}">${esc(engineName(policy.engine))}</span><strong>${esc(policy.name)}</strong><code>:${esc(policy.port)} / ${esc(protocolName(policy.protocol))}</code></div><span class="traffic-policy-status ${tone}"><i></i>${esc(status)}</span></header>
         <section class="traffic-usage"><div><b>${bytes(policy.used_bytes)}</b><span>/ ${bytes(policy.limit_bytes)}</span></div><progress max="100" value="${usedPercent}"></progress><small>${usedPercent.toFixed(1)}% · ${esc(period)}</small></section>
         <dl class="traffic-directions"><div><dt>接收</dt><dd>${bytes(policy.received_bytes)}</dd><small>${rate(policy.receive_bps)}</small></div><div><dt>发送</dt><dd>${bytes(policy.sent_bytes)}</dd><small>${rate(policy.send_bps)}</small></div><div><dt>节点</dt><dd>${esc(agent?.name || policy.agent_id)}</dd><small>${policy.last_reported_at ? `${ago(policy.last_reported_at)}更新` : "尚未上报"}</small></div></dl>
@@ -80,8 +96,9 @@ export function installTraffic(ctx) {
         ${can("traffic.manage") ? `<footer><button class="button small" type="button" data-traffic-reset="${esc(policy.id)}">立即清零并解封</button><details class="traffic-edit"><summary>编辑</summary><form data-traffic-edit-form="${esc(policy.id)}">${policyFields(policy, agents, `edit-${policy.id}`)}<div><button class="button small" type="submit">保存</button><button class="button small danger-button" type="button" data-traffic-delete="${esc(policy.id)}">删除</button></div></form></details></footer>` : ""}
       </article>`;
     }).join("");
-    shell(`<header class="traffic-hero"><div><p class="eyebrow">端口流量</p><h2>流量配额与自动封禁</h2><p>四种内核统一按系统端口统计，接收和发送流量都计入额度。</p></div><section><div><span>监控端口</span><b>${policies.length}</b></div><div><span>正常上报</span><b>${available}</b></div><div class="${blocked ? "bad" : ""}"><span>已封禁</span><b>${blocked}</b></div></section></header><section class="traffic-total"><span>全部端口当前周期</span><strong>${bytes(totalUsed)} / ${bytes(totalLimit)}</strong><progress max="100" value="${percent(totalUsed, totalLimit)}"></progress></section>${createForm}${cards ? `<section class="traffic-policy-grid">${cards}</section>` : '<div class="empty large"><strong>还没有端口流量配额</strong><p>添加一个端口后，Agent 会开始统计并在超额时自动封禁。</p></div>'}`, "流量配额");
+    shell(`<header class="traffic-hero"><div><p class="eyebrow">端口流量</p><h2>流量配额与自动封禁</h2><p>四种内核统一按系统端口统计，接收和发送流量都计入额度。</p></div><section><div><span>监控端口</span><b>${policies.length}</b></div><div><span>正常上报</span><b>${available}</b></div><div class="${blocked ? "bad" : ""}"><span>已封禁</span><b>${blocked}</b></div></section></header><section class="traffic-total"><span data-traffic-refresh-label>全部端口当前周期</span><strong>${bytes(totalUsed)} / ${bytes(totalLimit)}</strong><progress max="100" value="${percent(totalUsed, totalLimit)}"></progress></section>${createForm}${cards ? `<section class="traffic-policy-grid">${cards}</section>` : '<div class="empty large"><strong>还没有端口流量配额</strong><p>添加一个端口后，Agent 会开始统计并在超额时自动封禁。</p></div>'}`, "流量配额");
     bindTrafficForms(agents);
+    if (resetCreate) document.querySelector("#traffic-policy-form")?.reset();
     if (state.anchor === "traffic-new") {
       const create = document.querySelector("#traffic-new");
       if (create) create.open = true;
@@ -92,15 +109,41 @@ export function installTraffic(ctx) {
       requestAnimationFrame(() => document.querySelector(`[data-traffic-agent-card="${CSS.escape(agentID)}"]`)?.scrollIntoView({ block: "start" }));
       state.anchor = "traffic";
     }
-    const poll = () => {
-      if (state.route !== "traffic") return;
-      if (document.querySelector("#traffic-new[open], .traffic-edit[open]")) {
-        state.trafficPollTimer = setTimeout(poll, 5000);
-        return;
+  };
+
+  const poller = createPoller({
+    run: () => traffic({ background: true }),
+    isActive: () => state.route === "traffic",
+    delay: () => 5000,
+    setTimer,
+    clearTimer,
+  });
+
+  async function traffic({ background = false, resetCreate = false } = {}) {
+    poller.stop();
+    try {
+      const applied = await refresh.run(
+        (signal) =>
+          Promise.all([
+            api("/agents", { signal }),
+            api("/traffic-policies", { signal }),
+          ]),
+        ([agents, policies]) => renderTraffic(agents, policies, resetCreate),
+      );
+      if (applied) poller.start();
+      return applied;
+    } catch (error) {
+      const status = document.querySelector(".traffic-total");
+      if (!status && !background) throw error;
+      if (status) {
+        status.dataset.refreshError = "1";
+        status.title = error.message;
+        const label = status.querySelector("[data-traffic-refresh-label]");
+        if (label) label.textContent = "刷新失败，保留上次数据";
       }
-      traffic().catch((error) => notify(error.message, "error"));
-    };
-    state.trafficPollTimer = setTimeout(poll, 5000);
+      poller.start();
+      return false;
+    }
   }
 
   function bindTrafficForms(agents) {
@@ -119,16 +162,16 @@ export function installTraffic(ctx) {
         if (engineSelect) engineSelect.innerHTML = engineOptions(agent);
       };
     });
-    document.querySelector("#traffic-policy-form")?.addEventListener("submit", async (event) => {
+    bindEvent(document.querySelector("#traffic-policy-form"), "submit", async (event) => {
       event.preventDefault();
       try {
         await api("/traffic-policies", { method: "POST", body: JSON.stringify(requestFromForm(event.currentTarget)) });
         notify("端口流量配额已创建，正在同步到 Agent");
-        await traffic();
+        await traffic({ resetCreate: true });
       } catch (error) { notify(error.message, "error"); }
     });
     document.querySelectorAll("[data-traffic-edit-form]").forEach((form) => {
-      form.addEventListener("submit", async (event) => {
+      bindEvent(form, "submit", async (event) => {
         event.preventDefault();
         try {
           await api(`/traffic-policies/${encodeURIComponent(form.dataset.trafficEditForm)}`, { method: "PUT", body: JSON.stringify(requestFromForm(form)) });

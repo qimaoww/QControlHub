@@ -6,7 +6,11 @@ import { installCoreLogs } from "./modules/core-logs.js";
 import { installTasks } from "./modules/tasks.js";
 import { installTraffic } from "./modules/traffic.js";
 import { installSettings } from "./modules/settings.js";
-import { createLatestRenderScheduler } from "./modules/render-scheduler.js";
+import {
+  bindEvent,
+  createLatestRenderScheduler,
+  reconcileView,
+} from "./modules/refresh.js";
 
 const app = document.querySelector("#app");
 const themeStorageKey = "qcontrolhub-color-theme";
@@ -26,9 +30,11 @@ const state = {
   session: null,
   route: location.hash.slice(1) || "dashboard",
   data: {},
+  navigationEpoch: 0,
   confirmResolver: null,
   confirmOpen: false,
 };
+let routeController = null;
 const dockIcons = Object.freeze({
   layoutDashboard:
     '<rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/>',
@@ -286,7 +292,25 @@ const can = (capability) => {
   return Boolean(rolePermissions[role]?.has(capability));
 };
 
+function combineAbortSignals(...values) {
+  const signals = [...new Set(values.filter(Boolean))];
+  if (signals.length < 2)
+    return { signal: signals[0], release: () => {} };
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  signals.forEach((signal) => {
+    if (signal.aborted) abort();
+    else signal.addEventListener("abort", abort, { once: true });
+  });
+  return {
+    signal: controller.signal,
+    release: () =>
+      signals.forEach((signal) => signal.removeEventListener("abort", abort)),
+  };
+}
+
 async function api(path, options = {}) {
+  const method = String(options.method || "GET").toUpperCase();
   const headers = {
     Accept: "application/json",
     ...(options.body ? { "Content-Type": "application/json" } : {}),
@@ -294,32 +318,40 @@ async function api(path, options = {}) {
   };
   if (
     state.session?.csrf_token &&
-    options.method &&
-    !["GET", "HEAD", "OPTIONS"].includes(options.method)
+    !["GET", "HEAD", "OPTIONS"].includes(method)
   )
     headers["X-QControlHub-CSRF"] = state.session.csrf_token;
-  const response = await fetch(`/api/v1${path}`, {
-    ...options,
-    headers,
-    credentials: "same-origin",
-  });
-  if (response.status === 401) {
-    state.session = null;
-    state.data = {};
-    renderLogin();
-    throw new Error("登录已失效");
+  const routeSignal = ["GET", "HEAD", "OPTIONS"].includes(method)
+    ? state.routeSignal
+    : null;
+  const request = combineAbortSignals(options.signal, routeSignal);
+  try {
+    const response = await fetch(`/api/v1${path}`, {
+      ...options,
+      signal: request.signal,
+      headers,
+      credentials: "same-origin",
+    });
+    if (response.status === 401) {
+      state.session = null;
+      state.data = {};
+      renderLogin();
+      throw new Error("登录已失效");
+    }
+    if (!response.ok) {
+      let body = {};
+      try {
+        body = await response.json();
+      } catch {}
+      const error = new Error(body.error || `请求失败 (${response.status})`);
+      error.status = response.status;
+      throw error;
+    }
+    if (response.status === 204) return null;
+    return await response.json();
+  } finally {
+    request.release();
   }
-  if (!response.ok) {
-    let body = {};
-    try {
-      body = await response.json();
-    } catch {}
-    const error = new Error(body.error || `请求失败 (${response.status})`);
-    error.status = response.status;
-    throw error;
-  }
-  if (response.status === 204) return null;
-  return response.json();
 }
 
 async function optionalAPI(path) {
@@ -373,6 +405,20 @@ function toggleTheme() {
 }
 
 function renderLogin(message = "") {
+  if (state.route === "node-settings") agentModule.cancelAgentInteractions();
+  const confirmResolver = state.confirmResolver;
+  state.confirmResolver = null;
+  state.confirmOpen = false;
+  confirmResolver?.(false);
+  routeController?.abort();
+  routeController = null;
+  state.routeSignal = null;
+  state.navigationEpoch += 1;
+  state.route = "login";
+  clearTimeout(state.taskPollTimer);
+  clearTimeout(state.trafficPollTimer);
+  clearTimeout(state.coreLogPollTimer);
+  clearTimeout(state.agentPollTimer);
   document.body.className = "login-body";
   document.title = "登录 · QControlHub";
   app.style.display = "contents";
@@ -405,14 +451,15 @@ function renderLogin(message = "") {
 function notify(message, tone = "success") {
   const main = document.querySelector(".workspace-main");
   if (!main) return;
-  main.querySelector("[data-spa-notice]")?.remove();
-  const notice = document.createElement("div");
+  const notice =
+    main.querySelector(":scope > [data-spa-notice]") ||
+    document.createElement("div");
   notice.className = `alert ${tone}`;
   notice.dataset.spaNotice = "";
+  notice.dataset.refreshKey = "spa-notice";
   notice.setAttribute("role", tone === "error" ? "alert" : "status");
   notice.textContent = message;
-  main.prepend(notice);
-  notice.scrollIntoView({ block: "nearest" });
+  if (!notice.isConnected) main.prepend(notice);
 }
 
 function confirmAction(message, label = "确认继续") {
@@ -427,12 +474,9 @@ function confirmAction(message, label = "确认继续") {
   });
 }
 
-function shell(content, title) {
+function shell(content, title, { viewKey = state.route } = {}) {
   const previousMain = document.querySelector(".workspace-main");
   const previousRoute = document.body.className.match(/(?:^|\s)page-([^\s]+)/)?.[1];
-  const preservedScroll = previousMain && previousRoute === state.route
-    ? { top: previousMain.scrollTop, left: previousMain.scrollLeft }
-    : null;
   const links = [
     ["dashboard", "总览", dockIcons.layoutDashboard],
     ["node-settings", "节点设置", dockIcons.server],
@@ -508,25 +552,21 @@ function shell(content, title) {
     .filter(([id]) => can(linkPermissions[id]))
     .map(([id, text]) => `<a class="${activeDockRoute(id) ? "active" : ""}" href="#${id}" ${activeDockRoute(id) ? 'aria-current="page"' : ""}>${text}</a>`)
     .join("");
+  const mobileAccountMarkup = `<details class="mobile-account-menu"><summary class="${mobileMoreActive ? "active" : ""}" aria-label="打开更多导航与账户操作" title="更多"><svg viewBox="0 0 24 24" aria-hidden="true">${dockIcons.more}</svg></summary><div>${mobileMoreLinks}<button type="button" id="mobile-theme-toggle">切换主题</button><button type="button" id="mobile-logout">退出登录</button></div></details>`;
   document.title = `${title} · ${panelName}`;
-  app.innerHTML = `<div class="desktop-app"><aside class="app-dock"><a class="dock-logo" href="#dashboard" aria-label="${esc(panelName)} 总览"><span>QH</span></a><nav class="dock-nav" aria-label="主导航">${navigationMarkup}</nav><div class="dock-tools">${settingsDockLink}<button id="theme-toggle" data-theme-toggle type="button" aria-label="切换颜色主题" title="切换主题"><svg viewBox="0 0 24 24" aria-hidden="true">${dockIcons.sun}</svg><span class="dock-label">主题</span></button><button id="logout" type="button" aria-label="退出登录" title="退出登录"><svg viewBox="0 0 24 24" aria-hidden="true">${dockIcons.logOut}</svg><span class="dock-label">退出</span></button></div></aside><aside class="context-sidebar"><header class="context-brand"><a href="#dashboard"><span class="brand-mark">QH</span><strong>${esc(panelName)}</strong></a></header>${context}</aside><section class="workspace-shell"><header class="workspace-topbar"><div class="workspace-route"><span>${esc(panelName)}</span><i>/</i><b>${esc(title)}</b><i class="role-badge role-${esc(state.session.role)}">${esc(roleName)}</i></div><div class="workspace-actions"><span class="sync-state ${overview.agents_online ? "" : "inactive"}" data-sync-state><i></i><span data-sync-label>${overview.agents_online ? `${overview.agents_online} 个节点在线` : "等待节点连接"}</span></span>${topAction}</div></header><main class="workspace-main">${content}</main></section></div><dialog class="confirm-dialog" data-confirm-dialog aria-labelledby="confirm-dialog-title" aria-describedby="confirm-dialog-message"><div class="confirm-dialog-card"><span class="confirm-dialog-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3.5 21 20H3zM12 9v5M12 17.5h.01"/></svg></span><div><p class="eyebrow">操作确认</p><h2 id="confirm-dialog-title">确认继续？</h2><p id="confirm-dialog-message" data-confirm-message></p></div><footer><button class="button" type="button" data-confirm-cancel>取消</button><button class="button danger-confirm" type="button" data-confirm-accept>确认继续</button></footer></div></dialog>`;
-  if (preservedScroll) {
-    const nextMain = document.querySelector(".workspace-main");
-    requestAnimationFrame(() => {
-      nextMain?.scrollTo({
-        top: preservedScroll.top,
-        left: preservedScroll.left,
-        behavior: "auto",
-      });
-    });
+  const markup = `<div class="desktop-app"><aside class="app-dock"><a class="dock-logo" href="#dashboard" aria-label="${esc(panelName)} 总览"><span>QH</span></a><nav class="dock-nav" aria-label="主导航">${navigationMarkup}</nav><div class="dock-tools">${settingsDockLink}<button id="theme-toggle" data-theme-toggle type="button" aria-label="切换颜色主题" title="切换主题"><svg viewBox="0 0 24 24" aria-hidden="true">${dockIcons.sun}</svg><span class="dock-label">主题</span></button><button id="logout" type="button" aria-label="退出登录" title="退出登录"><svg viewBox="0 0 24 24" aria-hidden="true">${dockIcons.logOut}</svg><span class="dock-label">退出</span></button></div></aside><aside class="context-sidebar"><header class="context-brand"><a href="#dashboard"><span class="brand-mark">QH</span><strong>${esc(panelName)}</strong></a></header>${context}</aside><section class="workspace-shell"><header class="workspace-topbar"><div class="workspace-route"><span>${esc(panelName)}</span><i>/</i><b>${esc(title)}</b><i class="role-badge role-${esc(state.session.role)}">${esc(roleName)}</i></div><div class="workspace-actions"><span class="sync-state ${overview.agents_online ? "" : "inactive"}" data-sync-state><i></i><span data-sync-label>${overview.agents_online ? `${overview.agents_online} 个节点在线` : "等待节点连接"}</span></span>${topAction}${mobileAccountMarkup}</div></header><main class="workspace-main" data-refresh-key="workspace-${esc(viewKey)}">${content}</main></section></div><dialog class="confirm-dialog" data-confirm-dialog aria-labelledby="confirm-dialog-title" aria-describedby="confirm-dialog-message"><div class="confirm-dialog-card"><span class="confirm-dialog-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3.5 21 20H3zM12 9v5M12 17.5h.01"/></svg></span><div><p class="eyebrow">操作确认</p><h2 id="confirm-dialog-title">确认继续？</h2><p id="confirm-dialog-message" data-confirm-message></p></div><footer><button class="button" type="button" data-confirm-cancel>取消</button><button class="button danger-confirm" type="button" data-confirm-accept>确认继续</button></footer></div></dialog>`;
+  const currentView = app.querySelector(":scope > .desktop-app");
+  if (previousMain && previousRoute === state.route && currentView) {
+    const template = document.createElement("template");
+    template.innerHTML = markup;
+    const metrics = { inserted: 0, removed: 0, replaced: 0, updated: 0 };
+    reconcileView(currentView, template.content.firstElementChild, { metrics });
+    state.data.refreshMetrics ||= {};
+    state.data.refreshMetrics[state.route] = metrics;
+  } else {
+    app.innerHTML = markup;
   }
   applyTheme();
-  document
-    .querySelector(".workspace-actions")
-    ?.insertAdjacentHTML(
-      "beforeend",
-      `<details class="mobile-account-menu"><summary class="${mobileMoreActive ? "active" : ""}" aria-label="打开更多导航与账户操作" title="更多"><svg viewBox="0 0 24 24" aria-hidden="true">${dockIcons.more}</svg></summary><div>${mobileMoreLinks}<button type="button" id="mobile-theme-toggle">切换主题</button><button type="button" id="mobile-logout">退出登录</button></div></details>`,
-    );
   document.querySelector("#logout").onclick = async () => {
     try {
       await api("/auth/logout", { method: "POST" });
@@ -560,7 +600,7 @@ function shell(content, title) {
     finishConfirm(false);
   confirmDialog.querySelector("[data-confirm-accept]").onclick = () =>
     finishConfirm(true);
-  confirmDialog.addEventListener("cancel", (event) => {
+  bindEvent(confirmDialog, "cancel", (event) => {
     event.preventDefault();
     finishConfirm(false);
   });
@@ -645,9 +685,14 @@ const traffic = installTraffic({ api, state, can, esc, engineName, bytes, rate, 
 const settings = installSettings({ api, state, esc, date, can, shell, notify, confirmAction });
 
 async function renderOnce() {
+  const previousRoute = state.route;
+  routeController?.abort();
+  routeController = new AbortController();
+  state.routeSignal = routeController.signal;
   clearTimeout(state.taskPollTimer);
   clearTimeout(state.trafficPollTimer);
   clearTimeout(state.coreLogPollTimer);
+  clearTimeout(state.agentPollTimer);
   const hash = location.hash.slice(1);
   const routeMap = {
     summary: "dashboard",
@@ -694,6 +739,8 @@ async function renderOnce() {
               ? "archive-config"
               : "dashboard");
   state.anchor = hash;
+  if (previousRoute === "node-settings" && state.route !== previousRoute)
+    agentModule.cancelAgentInteractions();
   if (hash.startsWith("preset-node-")) state.data.selectedAgent = hash.slice(12);
   if (hash.startsWith("settings-node-")) state.data.selectedAgent = hash.slice(14);
   if (hash.startsWith("node-")) state.data.selectedAgent = hash.slice(5);
@@ -733,12 +780,25 @@ async function renderOnce() {
           ?.scrollIntoView({ block: "start" }),
       );
   } catch (error) {
-    shell(
-      `<section class="section"><div class="alert error">${esc(error.message)}</div></section>`,
-      "错误",
-    );
+    if (error?.name === "AbortError") return;
+    if (!state.session || state.route === "login") return;
+    const renderedRoute = document.body.className.match(
+      /(?:^|\s)page-([^\s]+)/,
+    )?.[1];
+    if (renderedRoute === state.route) notify(error.message, "error");
+    else
+      shell(
+        `<section class="section"><div class="alert error">${esc(error.message)}</div></section>`,
+        "错误",
+      );
   }
 }
-const render = createLatestRenderScheduler(renderOnce);
+const scheduleRender = createLatestRenderScheduler(renderOnce, {
+  cancelActive: () => routeController?.abort(),
+});
+const render = () => {
+  state.navigationEpoch += 1;
+  return scheduleRender();
+};
 window.addEventListener("hashchange", render);
 render();

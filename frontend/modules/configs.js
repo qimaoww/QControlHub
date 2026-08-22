@@ -1,3 +1,5 @@
+import { bindEvent } from "./refresh.js";
+
 const generatedPlanFields = Object.freeze([
   "tag",
   "port",
@@ -54,7 +56,7 @@ function installGeneratedFieldButtons(form) {
       const updateVisibility = () => {
         button.hidden = transport?.value === "raw";
       };
-      transport?.addEventListener("change", updateVisibility);
+      bindEvent(transport, "change", updateVisibility);
       updateVisibility();
     }
   });
@@ -107,10 +109,10 @@ export function bindServerPlanRegeneration({
   const markChanged = () => {
     formRevision += 1;
   };
-  form.addEventListener("input", markChanged);
-  form.addEventListener("change", markChanged);
+  bindEvent(form, "input", markChanged);
+  bindEvent(form, "change", markChanged);
   buttons.forEach((button) => {
-    button.addEventListener("click", async () => {
+    bindEvent(button, "click", async () => {
       const request = ++latestRequest;
       const requestedRevision = formRevision;
       const input = readServerPlanInput(form, protocol);
@@ -162,8 +164,14 @@ export function bindServerPlanRegeneration({
 
 export function installConfigPages(ctx) {
   const { api, optionalAPI, state, engines, can, esc, engineName, conciseVersion, date, ago, bytes, confirmAction, notify, shell, submitTask, bindCodeEditors } = ctx;
+let agentConfigRequest = 0;
+let liveConfigRequest = 0;
+let liveReadRequest = 0;
+let archiveConfigRequest = 0;
 async function agentConfig() {
+  const request = ++agentConfigRequest;
   const agents = state.data.agents || (await api("/agents"));
+  if (request !== agentConfigRequest || state.route !== "agent-config") return;
   state.data.agents = agents;
   const agent = agents.find((item) => item.id === state.data.agentId);
   if (!agent) return void (location.hash = "#node-settings");
@@ -172,6 +180,7 @@ async function agentConfig() {
   const engineInstalled = Boolean(agent.runtime?.[engine]?.installed);
   const base = `/agents/${encodeURIComponent(agent.id)}/configs/${encodeURIComponent(engine)}`;
   const workspace = await api(`${base}/workspace`);
+  if (request !== agentConfigRequest || state.route !== "agent-config") return;
   const config = workspace.config;
   let selectedInbound = (workspace.inbounds || []).find(
     (input) => input.tag === state.data.inboundTag,
@@ -193,6 +202,7 @@ async function agentConfig() {
         method: "POST",
         body: JSON.stringify({ protocol: selectedProtocolKey }),
       });
+      if (request !== agentConfigRequest || state.route !== "agent-config") return;
       state.data.serverPlans[planKey] = plan;
     }
   }
@@ -212,9 +222,11 @@ async function agentConfig() {
     fieldValue = await api(
       `${base}/fields/${encodeURIComponent(selectedField.key)}`,
     );
+  if (request !== agentConfigRequest || state.route !== "agent-config") return;
   const revisions = config
     ? await api(`/configs/${encodeURIComponent(config.id)}/revisions?limit=50`)
     : [];
+  if (request !== agentConfigRequest || state.route !== "agent-config") return;
   const inboundNav = (workspace.inbounds || [])
     .map(
       (input) =>
@@ -254,8 +266,11 @@ async function agentConfig() {
     ? `<aside class="config-execution-callout"><span><b>${esc(engineName(engine))} 尚未安装</b><small>可以编辑方案，但校验、部署和服务操作需要先在节点设置中安装该内核。</small></span><a class="button small" href="#node-settings">前往安装内核</a></aside>`
     : "";
   shell(
-    `<section class="config-command-bar loaded"><header class="config-command-head"><div class="config-command-title"><span class="engine-badge ${esc(engine)}">${esc(engineName(engine))}</span><div><p class="eyebrow">Server recipe</p><h2>${esc(protocol?.name || "Protocol")} · ${selectedInbound ? esc(selectedInbound.tag) : "新入站"}</h2><small>${esc(agent.name)} · ${esc(workspace.catalog.name)}</small></div></div><div class="config-command-state"><span class="status-label ${!engineInstalled ? "muted" : config ? "ok" : "warn"}">${!engineInstalled ? "内核未安装" : config ? "已读取" : "新方案"}</span><span class="recipe-version"><b>${config ? `v${config.version}` : "草稿"}</b><small>${esc(workspace.catalog.format)}</small></span><a href="${esc(protocol?.docs)}" target="_blank" rel="noopener noreferrer">文档 ↗</a></div></header><details class="config-hierarchy-menu" open><summary><b>切换入站 / 协议</b><i>＋</i></summary><div class="config-command-selectors">${inboundNav ? `<section class="inbound-browser config-selector"><header><span><b>入站</b><small>${workspace.inbounds.length} 个</small></span><button class="button small" type="button" data-new-inbound>＋ 新增</button></header><nav>${inboundNav}</nav></section>` : ""}<section class="protocol-browser config-selector"><header><span><b>协议</b><small>${workspace.protocols.length} 种</small></span></header><nav>${protocolNav}</nav></section></div></details></section>${executionCallout}<article class="recipe-workspace"><form class="server-form" id="server-plan-form"><div class="config-mutation"><label>操作<select name="operation">${selectedInbound ? `<option value="modify">修改 · ${esc(selectedInbound.tag)}</option><option value="add">新增入站</option><option value="delete">删除 · ${esc(selectedInbound.tag)}</option>` : '<option value="add">新增入站</option>'}</select></label></div><div class="builder-layout" data-builder-workbench><nav class="builder-index"><a href="#listen" data-builder-step="listen"><b>01</b><strong>监听</strong></a><a href="#identity" data-builder-step="identity"><b>02</b><strong>认证</strong></a>${protocol?.transport_config ? '<a href="#transport" data-builder-step="transport"><b>03</b><strong>传输</strong></a>' : ""}${protocol?.uses_reality || protocol?.supports_tls ? '<a href="#security" data-builder-step="security"><b>04</b><strong>安全</strong></a>' : ""}</nav><div class="builder-sections"><section class="builder-section" id="listen"><header><span class="section-number">01</span><strong>监听</strong></header><div class="plan-fields three"><label>入站标签<input name="tag" maxlength="64" required value="${esc(plan.tag)}"></label><label>监听地址<input name="listen" required value="${esc(plan.listen)}"></label><label>监听端口<input type="number" name="port" min="1" max="65535" required value="${Number(plan.port)}"></label></div></section><section class="builder-section" id="identity"><header><span class="section-number">02</span><strong>认证</strong></header><div><div class="plan-fields two">${protocol?.ignores_username ? '<input type="hidden" name="username" value="default">' : `<label>用户名或备注<input name="username" maxlength="64" required value="${esc(plan.username)}"></label>`}<label class="secret-input">${esc(protocol?.credential_label || "凭据")}<span class="secret-value-control"><input type="password" name="credential" required value="${esc(plan.credential)}"><button type="button" data-secret-visibility>显示</button></span></label>${protocol?.secondary_credential_label ? `<label class="secret-input">${esc(protocol.secondary_credential_label)}<span class="secret-value-control"><input type="password" name="secondary_credential" required value="${esc(plan.secondary_credential)}"><button type="button" data-secret-visibility>显示</button></span></label>` : '<input type="hidden" name="secondary_credential" value="">'}</div>${methods ? `<div class="plan-fields one"><label>加密方式<select name="method">${methods}</select></label></div>` : '<input type="hidden" name="method" value="">'}</div></section>${protocol?.transport_config ? `<section class="builder-section" id="transport"><header><span class="section-number">03</span><strong>传输</strong></header><div class="plan-fields two"><label>传输<select name="transport">${transports}</select></label><label>路径 / ServiceName<input name="transport_path" value="${esc(plan.transport_path)}"></label></div></section>` : '<input type="hidden" name="transport" value="raw"><input type="hidden" name="transport_path" value="">'}${security}</div></div><footer class="builder-actions compact"><span class="builder-regenerate-status" data-regenerate-status role="status" aria-live="polite"></span><div><button class="button" type="button" data-regenerate>重新生成参数</button><button class="button" type="submit" data-plan-intent="validate" ${agent.status !== "online" || !engineInstalled ? "disabled" : ""}>保存并校验</button><button class="button primary" type="submit" data-plan-intent="deploy" ${agent.status !== "online" || !engineInstalled ? "disabled" : ""}>保存并部署</button></div></footer></form></article>${revisionTimeline}<details class="advanced-studio" id="advanced"><summary><b>全局字段与源码</b><i>＋</i></summary><div class="advanced-studio-body"><nav class="field-rail"><header><b>全局配置项</b><small>${fields.length}</small></header>${fields.map((field) => `<a class="${field.key === selectedField?.key ? "active" : ""}" href="#agent-config" data-config-field="${esc(field.key)}"><i class="${workspace.present_fields[field.key] ? "present" : ""}"></i><span><strong>${esc(field.label)}</strong><code>${esc(field.key)}</code></span><small>${esc(field.kind)}</small></a>`).join("")}</nav><section class="field-canvas"><header><div><h2>${esc(selectedField?.label)}</h2><code>${esc(selectedField?.key)}</code></div><a href="${esc(selectedField?.docs)}" target="_blank" rel="noopener noreferrer">文档 ↗</a></header>${config && selectedField ? `<form id="field-form"><div class="field-mutation"><label>操作<select name="mutation">${fieldValue.present ? '<option value="modify">修改字段</option><option value="delete">删除字段</option>' : '<option value="add">新增字段</option>'}</select></label></div><label>${esc(workspace.catalog.format)} 字段值<textarea name="fragment" spellcheck="false">${esc(fieldValue.fragment)}</textarea></label><footer><div><button class="button" type="submit" data-field-intent="validate">保存并校验</button><button class="button primary" type="submit" data-field-intent="deploy">保存并部署</button></div></footer></form>${sourceStudio}` : '<div class="empty compact"><strong>先创建一个服务端入站</strong></div>'}</section><aside class="official-rail"><header><b>官方文档</b><small>${workspace.catalog.topic_count}</small></header>${workspace.catalog.topic_groups.map((group) => `<details><summary>${esc(group.name)} <b>${group.topics.length}</b></summary><div>${group.topics.map((topic) => `<a href="${esc(topic.docs)}" target="_blank" rel="noopener noreferrer">${esc(topic.label)} ↗</a>`).join("")}</div></details>`).join("")}</aside></div></details>`,
+    `<section class="config-command-bar loaded"><header class="config-command-head"><div class="config-command-title"><span class="engine-badge ${esc(engine)}">${esc(engineName(engine))}</span><div><p class="eyebrow">Server recipe</p><h2>${esc(protocol?.name || "Protocol")} · ${selectedInbound ? esc(selectedInbound.tag) : "新入站"}</h2><small>${esc(agent.name)} · ${esc(workspace.catalog.name)}</small></div></div><div class="config-command-state"><span class="status-label ${!engineInstalled ? "muted" : config ? "ok" : "warn"}">${!engineInstalled ? "内核未安装" : config ? "已读取" : "新方案"}</span><span class="recipe-version"><b>${config ? `v${config.version}` : "草稿"}</b><small>${esc(workspace.catalog.format)}</small></span><a href="${esc(protocol?.docs)}" target="_blank" rel="noopener noreferrer">文档 ↗</a></div></header><details class="config-hierarchy-menu" open><summary><b>切换入站 / 协议</b><i>＋</i></summary><div class="config-command-selectors">${inboundNav ? `<section class="inbound-browser config-selector"><header><span><b>入站</b><small>${workspace.inbounds.length} 个</small></span><button class="button small" type="button" data-new-inbound>＋ 新增</button></header><nav>${inboundNav}</nav></section>` : ""}<section class="protocol-browser config-selector"><header><span><b>协议</b><small>${workspace.protocols.length} 种</small></span></header><nav>${protocolNav}</nav></section></div></details></section>${executionCallout}<article class="recipe-workspace"><form class="server-form" id="server-plan-form"><div class="config-mutation"><label>操作<select name="operation">${selectedInbound ? `<option value="modify">修改 · ${esc(selectedInbound.tag)}</option><option value="add">新增入站</option><option value="delete">删除 · ${esc(selectedInbound.tag)}</option>` : '<option value="add">新增入站</option>'}</select></label></div><div class="builder-layout" data-builder-workbench><nav class="builder-index"><a href="#listen" data-builder-step="listen"><b>01</b><strong>监听</strong></a><a href="#identity" data-builder-step="identity"><b>02</b><strong>认证</strong></a>${protocol?.transport_config ? '<a href="#transport" data-builder-step="transport"><b>03</b><strong>传输</strong></a>' : ""}${protocol?.uses_reality || protocol?.supports_tls ? '<a href="#security" data-builder-step="security"><b>04</b><strong>安全</strong></a>' : ""}</nav><div class="builder-sections"><section class="builder-section" id="listen"><header><span class="section-number">01</span><strong>监听</strong></header><div class="plan-fields three"><label>入站标签<input name="tag" maxlength="64" required value="${esc(plan.tag)}"></label><label>监听地址<input name="listen" required value="${esc(plan.listen)}"></label><label>监听端口<input type="number" name="port" min="1" max="65535" required value="${Number(plan.port)}"></label></div></section><section class="builder-section" id="identity"><header><span class="section-number">02</span><strong>认证</strong></header><div><div class="plan-fields two">${protocol?.ignores_username ? '<input type="hidden" name="username" value="default">' : `<label>用户名或备注<input name="username" maxlength="64" required value="${esc(plan.username)}"></label>`}<label class="secret-input">${esc(protocol?.credential_label || "凭据")}<span class="secret-value-control"><input type="password" name="credential" required value="${esc(plan.credential)}"><button type="button" data-secret-visibility>显示</button></span></label>${protocol?.secondary_credential_label ? `<label class="secret-input">${esc(protocol.secondary_credential_label)}<span class="secret-value-control"><input type="password" name="secondary_credential" required value="${esc(plan.secondary_credential)}"><button type="button" data-secret-visibility>显示</button></span></label>` : '<input type="hidden" name="secondary_credential" value="">'}</div>${methods ? `<div class="plan-fields one"><label>加密方式<select name="method">${methods}</select></label></div>` : '<input type="hidden" name="method" value="">'}</div></section>${protocol?.transport_config ? `<section class="builder-section" id="transport"><header><span class="section-number">03</span><strong>传输</strong></header><div class="plan-fields two"><label>传输<select name="transport">${transports}</select></label><label>路径 / ServiceName<input name="transport_path" value="${esc(plan.transport_path)}"></label></div></section>` : '<input type="hidden" name="transport" value="raw"><input type="hidden" name="transport_path" value="">'}${security}</div></div><footer class="builder-actions compact"><span class="builder-regenerate-status" data-regenerate-status role="status" aria-live="polite"></span><div><button class="button" type="button" data-regenerate>重新生成参数</button><button class="button" type="submit" data-plan-intent="validate" ${agent.status !== "online" || !engineInstalled ? "disabled" : ""}>保存并校验</button><button class="button primary" type="submit" data-plan-intent="deploy" ${agent.status !== "online" || !engineInstalled ? "disabled" : ""}>保存并部署</button></div></footer></form></article>${revisionTimeline}<details class="advanced-studio" id="advanced"><summary><b>全局字段与源码</b><i>＋</i></summary><div class="advanced-studio-body"><nav class="field-rail"><header><b>全局配置项</b><small>${fields.length}</small></header>${fields.map((field) => `<a class="${field.key === selectedField?.key ? "active" : ""}" href="#agent-config" data-config-field="${esc(field.key)}"><i class="${workspace.present_fields[field.key] ? "present" : ""}"></i><span><strong>${esc(field.label)}</strong><code>${esc(field.key)}</code></span><small>${esc(field.kind)}</small></a>`).join("")}</nav><section class="field-canvas" data-refresh-key="config-field-${esc(selectedField?.key || "empty")}"><header><div><h2>${esc(selectedField?.label)}</h2><code>${esc(selectedField?.key)}</code></div><a href="${esc(selectedField?.docs)}" target="_blank" rel="noopener noreferrer">文档 ↗</a></header>${config && selectedField ? `<form id="field-form"><div class="field-mutation"><label>操作<select name="mutation">${fieldValue.present ? '<option value="modify">修改字段</option><option value="delete">删除字段</option>' : '<option value="add">新增字段</option>'}</select></label></div><label>${esc(workspace.catalog.format)} 字段值<textarea name="fragment" spellcheck="false">${esc(fieldValue.fragment)}</textarea></label><footer><div><button class="button" type="submit" data-field-intent="validate">保存并校验</button><button class="button primary" type="submit" data-field-intent="deploy">保存并部署</button></div></footer></form>${sourceStudio}` : '<div class="empty compact"><strong>先创建一个服务端入站</strong></div>'}</section><aside class="official-rail"><header><b>官方文档</b><small>${workspace.catalog.topic_count}</small></header>${workspace.catalog.topic_groups.map((group) => `<details><summary>${esc(group.name)} <b>${group.topics.length}</b></summary><div>${group.topics.map((topic) => `<a href="${esc(topic.docs)}" target="_blank" rel="noopener noreferrer">${esc(topic.label)} ↗</a>`).join("")}</div></details>`).join("")}</aside></div></details>`,
     "节点配置",
+    {
+      viewKey: `agent-config-${agent.id}-${engine}-${selectedProtocolKey}-${selectedInbound?.tag || "new"}`,
+    },
   );
   bindAgentConfigPage({
     agent,
@@ -309,13 +324,11 @@ function bindAgentConfigPage(ctx) {
         agentConfig();
       }),
   );
-  document
-    .querySelector("[data-new-inbound]")
-    ?.addEventListener("click", () => {
+  bindEvent(document.querySelector("[data-new-inbound]"), "click", () => {
       state.data.inboundTag = "";
       state.data.protocol = ctx.workspace.protocols[0]?.key;
       agentConfig();
-    });
+  });
   document.querySelectorAll("[data-config-field]").forEach(
     (link) =>
       (link.onclick = (event) => {
@@ -362,9 +375,7 @@ function bindAgentConfigPage(ctx) {
       },
     });
   }
-  document
-    .querySelector("#server-plan-form")
-    ?.addEventListener("submit", async (event) => {
+  bindEvent(document.querySelector("#server-plan-form"), "submit", async (event) => {
       event.preventDefault();
       if (!ctx.engineInstalled) {
         notify("请先安装当前内核，再提交校验或部署任务", "error");
@@ -393,10 +404,8 @@ function bindAgentConfigPage(ctx) {
       } catch (error) {
         notify(error.message, "error");
       }
-    });
-  document
-    .querySelector("#field-form")
-    ?.addEventListener("submit", async (event) => {
+  });
+  bindEvent(document.querySelector("#field-form"), "submit", async (event) => {
       event.preventDefault();
       if (!ctx.engineInstalled) {
         notify("请先安装当前内核，再提交校验或部署任务", "error");
@@ -423,10 +432,8 @@ function bindAgentConfigPage(ctx) {
       } catch (error) {
         notify(error.message, "error");
       }
-    });
-  document
-    .querySelector("#source-config-form")
-    ?.addEventListener("submit", async (event) => {
+  });
+  bindEvent(document.querySelector("#source-config-form"), "submit", async (event) => {
       event.preventDefault();
       if (!ctx.engineInstalled) {
         notify("请先安装当前内核，再提交校验或部署任务", "error");
@@ -459,7 +466,7 @@ function bindAgentConfigPage(ctx) {
       } catch (error) {
         notify(error.message, "error");
       }
-    });
+  });
   document.querySelectorAll("[data-builder-workbench]").forEach((workbench) => {
     const links = [...workbench.querySelectorAll("[data-builder-step]")];
     const sections = [...workbench.querySelectorAll(".builder-sections > .builder-section")];
@@ -480,7 +487,7 @@ function bindAgentConfigPage(ctx) {
         link.tabIndex = active ? 0 : -1;
       });
     };
-    links.forEach((link) => link.addEventListener("click", (event) => {
+    links.forEach((link) => bindEvent(link, "click", (event) => {
       event.preventDefault();
       activate(link.dataset.builderStep);
     }));
@@ -489,7 +496,9 @@ function bindAgentConfigPage(ctx) {
 }
 
 async function liveConfig() {
+  const request = ++liveConfigRequest;
   const agents = state.data.agents || (await api("/agents"));
+  if (request !== liveConfigRequest || state.route !== "live-config") return;
   state.data.agents = agents;
   const eligibleAgents = agents.filter((item) =>
     (item.capabilities || []).some((engine) => item.runtime?.[engine]?.installed),
@@ -526,6 +535,7 @@ async function liveConfig() {
   const configWorkspace = await api(
     `/agents/${encodeURIComponent(agent.id)}/configs/${encodeURIComponent(engine)}/workspace`,
   );
+  if (request !== liveConfigRequest || state.route !== "live-config") return;
   const saved = configWorkspace.config || null;
   const sourceKey = `${agent.id}|${engine}`;
   state.data.liveSources ||= {};
@@ -545,6 +555,7 @@ async function liveConfig() {
   shell(
     `<article class="live-config-workspace"><header class="editor-toolbar"><h2>${esc(agent.name)} · ${esc(engineName(engine))}</h2><div class="editor-toolbar-state"><span class="engine-badge ${esc(engine)}">${esc(engineName(engine))}</span><b>${saved?.version ? `v${saved.version}` : "未保存"}</b></div></header>${current ? `<form class="live-config-editor" id="live-config-form" data-profile-editor data-new-config="0" data-engine="${esc(engine)}"><section class="code-workspace" data-code-editor data-code-language="${language}" data-code-max-bytes="2097152"><header class="code-editor-toolbar"><div class="code-file-meta"><span class="code-file-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7 3.5h7l4 4V20.5H7zM14 3.5v4h4M10 12h5M10 16h3"/></svg></span><b>${engine === "mihomo" ? "config.yaml" : "config.json"}</b></div><div class="code-editor-meta"><span class="code-language">${language}</span><span data-code-status aria-live="polite">已读取</span><span data-code-bytes>—</span><span data-code-position>行 1，列 1</span></div></header><div class="code-editor-frame"><aside class="code-gutter" aria-hidden="true" data-line-numbers>1</aside><textarea class="code-editor-input" name="content" data-code-input aria-label="${esc(engineName(engine))} 节点配置源码" spellcheck="false" required ${can("operator") ? "" : "readonly"}>${esc(current.content)}</textarea></div><footer><span><i class="code-status-dot" data-code-status-dot></i><span data-code-validation aria-live="polite"></span></span><div><button class="button code-reset" type="button" data-code-reset disabled>恢复原文</button>${can("operator") ? '<button class="button" type="submit" data-live-intent="validate">校验修改</button><button class="button primary" type="submit" data-live-intent="deploy">保存并部署</button>' : ""}</div></footer></section><aside class="live-config-inspector"><dl><div><dt>节点</dt><dd>${esc(agent.name)}</dd></div><div><dt>系统</dt><dd>${esc(agent.os)} / ${esc(agent.arch)}</dd></div><div><dt>内核</dt><dd>${esc(conciseVersion(engine, runtime.version))}</dd></div><div><dt>来源</dt><dd>节点文件</dd></div></dl></aside><input type="hidden" name="name" value="${esc(current.name)}"><input type="hidden" name="description" value="${esc(current.description)}"><input type="hidden" name="version" value="${current.version}"></form>` : agent.status !== "online" ? '<section class="node-config-source"><h2>节点离线</h2><span class="status-label warn">无法读取</span></section>' : source?.error ? `<section class="node-config-source"><h2>读取配置失败</h2><span class="status-label bad">${esc(source.error)}</span><button class="button" type="button" data-read-current>重新读取</button></section>` : '<section class="node-config-source" role="status" aria-live="polite"><h2>正在读取配置</h2><span class="status-label warn">读取中</span><form data-auto-read-current hidden></form></section>'}</article>`,
     "手动配置",
+    { viewKey: `live-config-${agent.id}-${engine}` },
   );
   state.data.liveEngines = installedEngines;
   document.querySelectorAll("[data-live-agent]").forEach(
@@ -564,16 +575,12 @@ async function liveConfig() {
         liveConfig();
       }),
   );
-  document
-    .querySelector("[data-read-current]")
-    ?.addEventListener("click", async () => {
+  bindEvent(document.querySelector("[data-read-current]"), "click", async () => {
       delete state.data.liveSources[sourceKey];
       await readCurrentConfig(agent, engine, sourceKey);
-    });
+  });
   bindCodeEditors();
-  document
-    .querySelector("#live-config-form")
-    ?.addEventListener("submit", async (event) => {
+  bindEvent(document.querySelector("#live-config-form"), "submit", async (event) => {
       event.preventDefault();
       const form = new FormData(event.currentTarget);
       const intent = event.submitter?.dataset.liveIntent || "validate";
@@ -622,13 +629,23 @@ async function liveConfig() {
       } catch (error) {
         notify(error.message, "error");
       }
-    });
+  });
   if (!current && agent.status === "online" && !source?.error)
     void readCurrentConfig(agent, engine, sourceKey);
 }
 
 async function readCurrentConfig(agent, engine, sourceKey) {
   if (state.data.liveSources?.[sourceKey]?.reading) return;
+  const request = ++liveReadRequest;
+  const isCurrent = () =>
+    request === liveReadRequest &&
+    state.route === "live-config" &&
+    state.data.liveAgent === agent.id &&
+    state.data.liveEngine === engine;
+  const discardReading = () => {
+    if (state.data.liveSources?.[sourceKey]?.reading)
+      delete state.data.liveSources[sourceKey];
+  };
   state.data.liveSources ||= {};
   state.data.liveSources[sourceKey] = { reading: true };
   try {
@@ -640,10 +657,13 @@ async function readCurrentConfig(agent, engine, sourceKey) {
         action: "read-config",
       }),
     });
-    const finished = await waitForTask(task.id);
+    if (!isCurrent()) return discardReading();
+    const finished = await waitForTask(task.id, isCurrent);
+    if (!finished || !isCurrent()) return discardReading();
     if (finished.status !== "succeeded")
       throw new Error(finished.error || "节点未能读取当前配置");
     const snapshot = await api(`/tasks/${encodeURIComponent(finished.id)}/config-snapshot`);
+    if (!isCurrent()) return discardReading();
     if (!snapshot.content)
       throw new Error("节点返回的配置快照已失效，请重新读取");
     state.data.liveSources[sourceKey] = {
@@ -652,6 +672,8 @@ async function readCurrentConfig(agent, engine, sourceKey) {
       reading: false,
     };
   } catch (error) {
+    if (error?.name === "AbortError" || !isCurrent())
+      return discardReading();
     state.data.liveSources[sourceKey] = {
       error: error.message,
       reading: false,
@@ -665,9 +687,11 @@ async function readCurrentConfig(agent, engine, sourceKey) {
     await liveConfig();
 }
 
-async function waitForTask(taskID) {
+async function waitForTask(taskID, isCurrent = () => true) {
   for (let attempt = 0; attempt < 200; attempt += 1) {
+    if (!isCurrent()) return null;
     const task = await api(`/tasks/${encodeURIComponent(taskID)}`);
+    if (!isCurrent()) return null;
     if (["succeeded", "failed", "canceled"].includes(task.status)) return task;
     await new Promise((resolve) => setTimeout(resolve, 600));
   }
@@ -675,11 +699,13 @@ async function waitForTask(taskID) {
 }
 
 async function archiveConfigs() {
+  const request = ++archiveConfigRequest;
   const [items, templates, agents] = await Promise.all([
     api("/configs"),
     api("/templates"),
     api("/agents"),
   ]);
+  if (request !== archiveConfigRequest || state.route !== "archive-config") return;
   state.data.configs = items;
   state.data.agents = agents;
   const isNew = state.data.newConfig || items.length === 0;
@@ -700,12 +726,14 @@ async function archiveConfigs() {
         `/configs/${encodeURIComponent(formConfig.id)}/revisions?limit=50`,
       )
     : [];
+  if (request !== archiveConfigRequest || state.route !== "archive-config") return;
   let preview = null;
   if (formConfig.id && state.data.revisionVersion) {
     preview = await optionalAPI(
       `/configs/${encodeURIComponent(formConfig.id)}/revisions/${state.data.revisionVersion}`,
     );
   }
+  if (request !== archiveConfigRequest || state.route !== "archive-config") return;
   const deployAgents = agents.filter(
     (agent) =>
       agent.status === "online" &&
@@ -721,7 +749,7 @@ async function archiveConfigs() {
             (agent.capabilities || []).includes(item.engine) &&
             agent.runtime?.[item.engine]?.installed,
         );
-        return `<article class="template-card"><header><span class="engine-badge ${esc(item.engine)}">${esc(engineName(item.engine))}</span><h4>${esc(item.name)}</h4><small>${ago(item.updated_at)}</small></header><pre>${esc(item.content)}</pre>${
+        return `<article class="template-card" data-refresh-key="template-${esc(item.id)}"><header><span class="engine-badge ${esc(item.engine)}">${esc(engineName(item.engine))}</span><h4>${esc(item.name)}</h4><small>${ago(item.updated_at)}</small></header><pre>${esc(item.content)}</pre>${
             can("operator")
               ? `<footer><form data-template-apply="${esc(item.id)}"><label>应用至<select name="agent_id" required><option value="">${eligibleAgents.length ? "选择在线且已安装内核的节点" : "没有可用节点"}</option>${eligibleAgents
                   .map(
@@ -745,6 +773,9 @@ async function archiveConfigs() {
   shell(
     `<article class="config-workspace"><header class="editor-toolbar"><h2>${esc(formConfig.name)}</h2><div class="editor-toolbar-state"><span class="engine-badge ${esc(formConfig.engine)}">${esc(engineName(formConfig.engine))}</span><b>${isNew ? "草稿" : `v${formConfig.version}`}</b></div></header><form class="config-editor-grid" id="archive-form" data-profile-editor data-new-config="${isNew ? 1 : 0}" data-engine="${esc(formConfig.engine)}"><section class="code-workspace" data-code-editor data-code-language="${formConfig.engine === "mihomo" ? "YAML" : "JSON"}" data-code-max-bytes="2097152"><header class="code-editor-toolbar"><div class="code-file-meta"><span class="code-file-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7 3.5h7l4 4V20.5H7zM14 3.5v4h4M10 12h5M10 16h3"/></svg></span><b>${formConfig.engine === "mihomo" ? "config.yaml" : "config.json"}</b></div><div class="code-editor-meta"><span class="code-language">${formConfig.engine === "mihomo" ? "YAML" : "JSON"}</span><span data-code-status aria-live="polite">${isNew ? "草稿" : "已保存"}</span><span data-code-bytes>—</span><span data-code-position>行 1，列 1</span></div></header><div class="code-editor-frame"><aside class="code-gutter" aria-hidden="true" data-line-numbers>1</aside><textarea class="code-editor-input" name="content" data-code-input aria-label="${esc(engineName(formConfig.engine))} 配置档案源码" spellcheck="false" required ${can("operator") ? "" : "readonly"}>${esc(formConfig.content)}</textarea></div><footer><span><i class="code-status-dot" data-code-status-dot></i><span data-code-validation aria-live="polite"></span></span><div><button class="button code-reset" type="button" data-code-reset data-archive-reset disabled>恢复原文</button>${can("operator") ? `<button class="button primary" type="submit">${isNew ? "创建配置档案" : "保存新版本"}</button>` : ""}</div></footer></section><aside class="config-inspector"><header><h3>属性</h3></header><label>名称<input name="name" maxlength="100" required value="${esc(formConfig.name)}" ${can("operator") ? "" : "readonly"}></label><label>内核<select name="engine" ${isNew && can("operator") ? "" : "disabled"}>${engines.map((engine) => `<option value="${engine}" ${engine === formConfig.engine ? "selected" : ""}>${esc(engineName(engine))} · ${engine === "mihomo" ? "YAML" : "JSON"}</option>`).join("")}</select></label><label>说明<textarea class="description-input" name="description" maxlength="300" placeholder="填写用途、节点或变更说明" ${can("operator") ? "" : "readonly"}>${esc(formConfig.description || "")}</textarea></label></aside></form>${delivery}${revisionTimeline}${can("admin") && formConfig.id ? '<footer class="config-danger"><span><b>删除配置档案</b><small>相关任务记录会保留，配置档案删除后无法恢复。</small></span><button type="button" data-remove="' + esc(formConfig.id) + '">删除配置</button></footer>' : ""}</article><section class="template-workspace" id="templates"><header class="template-head"><h3>配置模板</h3><span>用 {{node_name}}、{{node_id}}、{{lan_ip}}、{{random_port}} 占位符，按节点批量生成配置。</span></header>${can("operator") ? '<details class="template-create" ' + (!templates.length ? "open" : "") + '><summary><b>＋ 新建模板</b></summary><form id="template-form"><label>模板名称<input name="name" maxlength="100" required></label><label>内核<select name="engine">' + engines.map((engine) => `<option value="${engine}">${esc(engineName(engine))}</option>`).join("") + '</select></label><label class="template-content-field">模板正文<textarea name="content" spellcheck="false" required></textarea></label><button class="button primary" type="submit">保存模板</button></form></details>' : ""}<div class="template-grid">${templateCards}</div></section>`,
     "配置档案",
+    {
+      viewKey: `archive-config-${formConfig.id || "new"}-${state.data.revisionVersion || "current"}`,
+    },
   );
   document.querySelectorAll("[data-archive-config]").forEach((link) => {
     link.onclick = (event) => {
@@ -755,16 +786,14 @@ async function archiveConfigs() {
       archiveConfigs();
     };
   });
-  document.querySelector("#new-config")?.addEventListener("click", () => {
+  bindEvent(document.querySelector("#new-config"), "click", () => {
     state.data.newConfig = true;
     state.data.archiveConfigId = "";
     state.data.revisionVersion = 0;
     archiveConfigs();
   });
   bindCodeEditors();
-  document
-    .querySelector("#archive-form")
-    ?.addEventListener("submit", async (event) => {
+  bindEvent(document.querySelector("#archive-form"), "submit", async (event) => {
       event.preventDefault();
       const form = new FormData(event.currentTarget);
       const payload = {
@@ -790,10 +819,8 @@ async function archiveConfigs() {
       } catch (error) {
         notify(error.message, "error");
       }
-    });
-  document
-    .querySelector("#archive-delivery")
-    ?.addEventListener("submit", async (event) => {
+  });
+  bindEvent(document.querySelector("#archive-delivery"), "submit", async (event) => {
       event.preventDefault();
       const form = new FormData(event.currentTarget);
       if (
@@ -811,7 +838,7 @@ async function archiveConfigs() {
         config_id: formConfig.id,
       });
       location.hash = "#tasks";
-    });
+  });
   document.querySelectorAll("[data-revision]").forEach(
     (button) =>
       (button.onclick = () => {
@@ -819,9 +846,7 @@ async function archiveConfigs() {
         archiveConfigs();
       }),
   );
-  document
-    .querySelector("[data-restore-revision]")
-    ?.addEventListener("click", async (event) => {
+  bindEvent(document.querySelector("[data-restore-revision]"), "click", async (event) => {
       if (!(await confirmAction(
         `确定以 v${event.currentTarget.dataset.restoreRevision} 的内容创建新版本？`,
         "创建新版本",
@@ -836,7 +861,7 @@ async function archiveConfigs() {
       );
       state.data.revisionVersion = 0;
       await archiveConfigs();
-    });
+  });
   document.querySelectorAll("[data-remove]").forEach(
     (button) =>
       (button.onclick = async () => {
@@ -851,9 +876,7 @@ async function archiveConfigs() {
         }
       }),
   );
-  document
-    .querySelector("#template-form")
-    ?.addEventListener("submit", async (event) => {
+  bindEvent(document.querySelector("#template-form"), "submit", async (event) => {
       event.preventDefault();
       const form = new FormData(event.currentTarget);
       try {
@@ -869,7 +892,7 @@ async function archiveConfigs() {
       } catch (error) {
         notify(error.message, "error");
       }
-    });
+  });
   document.querySelectorAll("[data-delete-template]").forEach(
     (button) =>
       (button.onclick = async () => {

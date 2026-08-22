@@ -1,3 +1,9 @@
+import {
+  bindEvent,
+  createRefreshChannel,
+  reconcileView,
+} from "./refresh.js";
+
 export function installTasks(ctx) {
   const {
     api,
@@ -19,7 +25,10 @@ export function installTasks(ctx) {
     clearTimer = (timer) => clearTimeout(timer),
     now = () => Date.now(),
   } = ctx;
-  let latestRequest = 0;
+  const refresh = createRefreshChannel({
+    isCurrent: () => state.route === "tasks",
+    getScope: () => state.navigationEpoch,
+  });
   const settingsCacheDuration = 30_000;
 
   function scheduleTaskRefresh(delay) {
@@ -89,15 +98,6 @@ export function installTasks(ctx) {
     );
   }
 
-  function normalizedTaskMarkup(node) {
-    const clone = node.cloneNode(true);
-    clone.hidden = false;
-    clone
-      .querySelectorAll("[data-task-age], [data-task-timing]")
-      .forEach((label) => (label.textContent = ""));
-    return clone.outerHTML;
-  }
-
   function reconcileTaskTimeline(timeline, taskCards) {
     const template = document.createElement("template");
     template.innerHTML = taskCards;
@@ -115,13 +115,7 @@ export function installTasks(ctx) {
     );
     const nextCards = freshCards.map((freshCard) => {
       const existingCard = existingCards.get(freshCard.dataset.taskId);
-      if (
-        existingCard &&
-        normalizedTaskMarkup(existingCard) ===
-          normalizedTaskMarkup(freshCard)
-      ) {
-        return existingCard;
-      }
+      if (existingCard) return reconcileView(existingCard, freshCard);
       return freshCard;
     });
 
@@ -204,14 +198,14 @@ export function installTasks(ctx) {
       agents.map((agent) => [agent.id, agent.name]),
     );
     if (field.dataset.agentSignature === signature) return;
-    const selected = field.value;
-    field.innerHTML = `<option value="">全部节点</option>${agents
+    const fresh = field.cloneNode(false);
+    fresh.innerHTML = `<option value="">全部节点</option>${agents
       .map(
         (agent) =>
           `<option value="${esc(agent.id)}">${esc(agent.name)}</option>`,
       )
       .join("")}`;
-    field.value = selected;
+    reconcileView(field, fresh);
     field.dataset.agentSignature = signature;
   }
 
@@ -279,14 +273,17 @@ export function installTasks(ctx) {
     );
   }
 
-  async function tasks({ background = false, settings: preloadedSettings } = {}) {
+  async function tasks({
+    background = false,
+    settings: preloadedSettings,
+    syncFilters = false,
+  } = {}) {
     clearTimer(state.taskPollTimer);
     if (state.confirmOpen) {
       scheduleTaskRefresh(300);
       return;
     }
 
-    const requestID = ++latestRequest;
     const filters = state.data.taskFilters || {};
     const query = new URLSearchParams({
       limit: String(filters.limit || 100),
@@ -294,8 +291,9 @@ export function installTasks(ctx) {
       ...(filters.status ? { status: filters.status } : {}),
       ...(filters.action ? { action: filters.action } : {}),
     });
+    const existingTaskPage = document.querySelector("[data-task-page]");
     const currentTimeline = background
-      ? document.querySelector("[data-task-page] .task-timeline")
+      ? existingTaskPage?.querySelector(".task-timeline")
       : null;
     const settingsCacheAge = now() - Number(state.data.taskSettingsLoadedAt || 0);
     const cachedSettings =
@@ -305,12 +303,45 @@ export function installTasks(ctx) {
       settingsCacheAge < settingsCacheDuration
         ? state.data.settings
         : null;
-    const [items, agents, settings] = await Promise.all([
-      api(`/tasks?${query}`),
-      api("/agents"),
-      preloadedSettings || cachedSettings || api("/settings"),
-    ]);
-    if (requestID !== latestRequest || state.route !== "tasks") return;
+    let payload;
+    let applied;
+    try {
+      applied = await refresh.run(
+        (signal) =>
+          Promise.all([
+            api(`/tasks?${query}`, { signal }),
+            api("/agents", { signal }),
+            preloadedSettings ||
+              cachedSettings ||
+              api("/settings", { signal }),
+          ]),
+        (value) => {
+          payload = value;
+        },
+      );
+    } catch (error) {
+      const status = document.querySelector("[data-task-refresh-status]");
+      if (!status && !background) throw error;
+      if (status) {
+        status.dataset.refreshError = "1";
+        status.classList.add("poll-error");
+        status.title = error.message;
+        const label = status.querySelector("[data-task-refresh-label]");
+        if (label) label.textContent = "刷新失败，保留上次数据";
+      }
+      scheduleTaskRefresh(
+        state.data.settings?.task_poll_interval_ms || 1000,
+      );
+      return false;
+    }
+    if (!applied) return;
+    const refreshStatus = document.querySelector("[data-task-refresh-status]");
+    refreshStatus?.removeAttribute("data-refresh-error");
+    refreshStatus?.removeAttribute("title");
+    refreshStatus?.classList.remove("poll-error");
+    const refreshLabel = refreshStatus?.querySelector("[data-task-refresh-label]");
+    if (refreshLabel) refreshLabel.textContent = "自动更新";
+    const [items, agents, settings] = payload;
 
     const taskCards = renderTaskCards(items, agents, openResultTaskIds());
     const signature = taskRenderSignature(items, agents);
@@ -338,7 +369,7 @@ export function installTasks(ctx) {
     }
 
     shell(
-      `<div class="task-workspace" data-task-page><details class="task-filter-panel" open><summary><b>筛选</b><i>⌄</i></summary><div class="audit-query"><label>节点<select id="task-agent"><option value="">全部节点</option>${agents.map((agent) => `<option value="${esc(agent.id)}">${esc(agent.name)}</option>`).join("")}</select></label><label>状态<select id="task-status"><option value="">全部状态</option>${["pending", "running", "succeeded", "failed", "canceled"].map((status) => `<option value="${status}">${esc(statusName(status))}</option>`).join("")}</select></label><label>动作<select id="task-action"><option value="">全部动作</option>${actions.map((action) => `<option value="${action}">${esc(actionName(action))}</option>`).join("")}</select></label><label>每页数量<select id="task-limit"><option value="50">50 条</option><option value="100">100 条</option><option value="500">500 条</option></select></label><button class="button primary" type="button" data-apply-task-filter>应用筛选</button></div></details><div class="audit-live syncing" data-task-refresh-status role="status"><i></i>自动更新</div><section class="task-timeline" aria-label="任务时间线">${taskCards}</section></div>`,
+      `<div class="task-workspace" data-task-page><details class="task-filter-panel" open><summary><b>筛选</b><i>⌄</i></summary><div class="audit-query"><label>节点<select id="task-agent"><option value="">全部节点</option>${agents.map((agent) => `<option value="${esc(agent.id)}">${esc(agent.name)}</option>`).join("")}</select></label><label>状态<select id="task-status"><option value="">全部状态</option>${["pending", "running", "succeeded", "failed", "canceled"].map((status) => `<option value="${status}">${esc(statusName(status))}</option>`).join("")}</select></label><label>动作<select id="task-action"><option value="">全部动作</option>${actions.map((action) => `<option value="${action}">${esc(actionName(action))}</option>`).join("")}</select></label><label>每页数量<select id="task-limit"><option value="50">50 条</option><option value="100">100 条</option><option value="500">500 条</option></select></label><button class="button primary" type="button" data-apply-task-filter>应用筛选</button></div></details><div class="audit-live syncing" data-task-refresh-status role="status"><i></i><span data-task-refresh-label>自动更新</span></div><section class="task-timeline" aria-label="任务时间线">${taskCards}</section></div>`,
       "执行记录",
     );
     document
@@ -347,28 +378,28 @@ export function installTasks(ctx) {
         "afterend",
         '<a class="task-filter-reset" href="#tasks" data-reset-task-filter>重置筛选</a>',
       );
-    const filterValues = state.data.taskFilters || {};
-    ["agent", "status", "action"].forEach((name) => {
-      const field = document.querySelector(`#task-${name}`);
-      if (field) {
-        field.value =
-          filterValues[name === "agent" ? "agent_id" : name] || "";
-      }
-    });
-    const limitField = document.querySelector("#task-limit");
-    if (limitField) limitField.value = String(filterValues.limit || 100);
-    syncTaskAgentFilter(agents);
-    document
-      .querySelector("[data-apply-task-filter]")
-      ?.addEventListener("click", () => {
-        state.data.taskFilters = {
-          agent_id: document.querySelector("#task-agent")?.value || "",
-          status: document.querySelector("#task-status")?.value || "",
-          action: document.querySelector("#task-action")?.value || "",
-          limit: Number(document.querySelector("#task-limit")?.value || 100),
-        };
-        tasks();
+    if (!existingTaskPage || syncFilters) {
+      const filterValues = state.data.taskFilters || {};
+      ["agent", "status", "action"].forEach((name) => {
+        const field = document.querySelector(`#task-${name}`);
+        if (field) {
+          field.value =
+            filterValues[name === "agent" ? "agent_id" : name] || "";
+        }
       });
+      const limitField = document.querySelector("#task-limit");
+      if (limitField) limitField.value = String(filterValues.limit || 100);
+    }
+    syncTaskAgentFilter(agents);
+    bindEvent(document.querySelector("[data-apply-task-filter]"), "click", () => {
+      state.data.taskFilters = {
+        agent_id: document.querySelector("#task-agent")?.value || "",
+        status: document.querySelector("#task-status")?.value || "",
+        action: document.querySelector("#task-action")?.value || "",
+        limit: Number(document.querySelector("#task-limit")?.value || 100),
+      };
+      tasks({ syncFilters: true });
+    });
     document.querySelectorAll("[data-task-status-filter]").forEach((link) => {
       link.onclick = (event) => {
         event.preventDefault();
@@ -376,16 +407,14 @@ export function installTasks(ctx) {
           ...(state.data.taskFilters || {}),
           status: link.dataset.taskStatusFilter,
         };
-        tasks();
+        tasks({ syncFilters: true });
       };
     });
-    document
-      .querySelector("[data-reset-task-filter]")
-      ?.addEventListener("click", (event) => {
-        event.preventDefault();
-        state.data.taskFilters = {};
-        tasks();
-      });
+    bindEvent(document.querySelector("[data-reset-task-filter]"), "click", (event) => {
+      event.preventDefault();
+      state.data.taskFilters = {};
+      tasks({ syncFilters: true });
+    });
     const timeline = document.querySelector(".task-timeline");
     if (timeline) {
       setupTaskPagination(timeline);
