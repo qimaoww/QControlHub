@@ -706,6 +706,15 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 	defer taskTicker.Stop()
 	heartbeatDeadline := time.NewTimer(50 * time.Second)
 	defer heartbeatDeadline.Stop()
+	resetHeartbeatDeadline := func() {
+		if !heartbeatDeadline.Stop() {
+			select {
+			case <-heartbeatDeadline.C:
+			default:
+			}
+		}
+		heartbeatDeadline.Reset(50 * time.Second)
+	}
 	var inFlightTask string
 	resumeRunning := true
 	dispatchTask := func() error {
@@ -763,13 +772,17 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 					slog.Error("store agent heartbeat", "agent_id", id, "error", err)
 					return
 				}
-				if !heartbeatDeadline.Stop() {
-					select {
-					case <-heartbeatDeadline.C:
-					default:
-					}
+				resetHeartbeatDeadline()
+			case core.WireMetrics:
+				if message.Metrics == nil {
+					_ = connection.Close(websocket.StatusPolicyViolation, "invalid metrics")
+					return
 				}
-				heartbeatDeadline.Reset(50 * time.Second)
+				if err := s.store.UpdateAgentMetrics(ctx, id, *message.Metrics); err != nil {
+					slog.Error("store agent metrics", "agent_id", id, "error", err)
+					return
+				}
+				resetHeartbeatDeadline()
 			case core.WireCoreLogs:
 				if message.CoreLogs == nil {
 					_ = connection.Close(websocket.StatusPolicyViolation, "invalid core log batch")

@@ -39,6 +39,7 @@ type ClientConfig struct {
 	Labels            map[string]string
 	Capabilities      []core.Engine
 	HeartbeatEvery    time.Duration
+	MetricsEvery      time.Duration
 	AllowHTTP         bool
 	AllowInsecureLive bool
 	TLSCAFile         string
@@ -83,6 +84,11 @@ const (
 	defaultHeartbeatInterval = 15 * time.Second
 	minHeartbeatInterval     = time.Second
 	maxHeartbeatInterval     = 30 * time.Second
+	// Metrics pushes are lightweight /proc snapshots on a dedicated wire
+	// message so the panel's live card values refresh without waiting for the
+	// full heartbeat cycle.
+	defaultMetricsInterval = time.Second
+	minMetricsInterval     = time.Second
 )
 
 // ErrIdentityRejected means the control plane permanently rejected the
@@ -118,6 +124,11 @@ func NewClient(config ClientConfig, executor *Executor) (*Client, error) {
 		config.HeartbeatEvery = defaultHeartbeatInterval
 	} else if config.HeartbeatEvery < minHeartbeatInterval || config.HeartbeatEvery > maxHeartbeatInterval {
 		return nil, errors.New("QCH_HEARTBEAT_INTERVAL must be between 1s and 30s")
+	}
+	if config.MetricsEvery <= 0 {
+		config.MetricsEvery = defaultMetricsInterval
+	} else if config.MetricsEvery < minMetricsInterval || config.MetricsEvery > maxHeartbeatInterval {
+		return nil, errors.New("QCH_METRICS_INTERVAL must be between 1s and 30s")
 	}
 	httpScheme, websocketScheme := "http", "ws"
 	if secureWebSocket {
@@ -314,6 +325,8 @@ func (c *Client) runWebSocket(ctx context.Context) error {
 
 	heartbeatTicker := time.NewTicker(c.config.HeartbeatEvery)
 	defer heartbeatTicker.Stop()
+	metricsTicker := time.NewTicker(c.config.MetricsEvery)
+	defer metricsTicker.Stop()
 	logTicker := time.NewTicker(500 * time.Millisecond)
 	defer logTicker.Stop()
 	if err := c.queueHeartbeat(sessionContext, outgoing); err != nil {
@@ -331,6 +344,10 @@ func (c *Client) runWebSocket(ctx context.Context) error {
 			return err
 		case <-heartbeatTicker.C:
 			if err := c.queueHeartbeat(sessionContext, outgoing); err != nil {
+				return err
+			}
+		case <-metricsTicker.C:
+			if err := c.queueMetrics(sessionContext, outgoing); err != nil {
 				return err
 			}
 		case <-logTicker.C:
@@ -397,6 +414,26 @@ func (c *Client) queueHeartbeat(ctx context.Context, outgoing chan<- core.WireMe
 		heartbeat.Metrics = &metrics
 	}
 	message := core.WireMessage{Type: core.WireHeartbeat, Heartbeat: heartbeat}
+	select {
+	case outgoing <- message:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// queueMetrics sends a lightweight metrics-only push between full heartbeats
+// so the panel's live resource values refresh at the configured cadence
+// instead of waiting for the heartbeat cycle.
+func (c *Client) queueMetrics(ctx context.Context, outgoing chan<- core.WireMessage) error {
+	metrics, metricsErr := c.metrics.Collect(ctx)
+	if metricsErr != nil {
+		slog.Debug("host metrics collection was partial", "error", metricsErr)
+	}
+	if !metricsHaveData(metrics) {
+		return nil
+	}
+	message := core.WireMessage{Type: core.WireMetrics, Metrics: &metrics}
 	select {
 	case outgoing <- message:
 		return nil

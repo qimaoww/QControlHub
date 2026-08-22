@@ -170,6 +170,30 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+	// A high-frequency metrics-only push must refresh the live snapshot
+	// without clobbering version, runtime, or features from the heartbeat.
+	metricsPush := core.WireMessage{Type: core.WireMetrics, Metrics: &core.HostMetrics{
+		CPUAvailable: true, CPUPercent: 42.5,
+		MemoryAvailable: true, MemoryUsedBytes: 1 << 30, MemoryTotalBytes: 4 << 30,
+		DiskAvailable: true, DiskUsedBytes: 2 << 30, DiskTotalBytes: 16 << 30,
+		NetworkAvailable: true, NetworkRXBytes: 2000, NetworkTXBytes: 900, NetworkRXBPS: 300, NetworkTXBPS: 120,
+	}}
+	if err := wsjson.Write(ctx, connection, metricsPush); err != nil {
+		t.Fatalf("write metrics push: %v", err)
+	}
+	for attempt := 0; attempt < 50; attempt++ {
+		pushed, pushErr := dataStore.GetAgent(ctx, enrolled.AgentID)
+		if pushErr == nil && pushed.Metrics.CPUPercent == 42.5 && pushed.Metrics.NetworkRXBPS == 300 {
+			if pushed.Version != "test" || len(pushed.Features) == 0 {
+				t.Fatalf("metrics push clobbered heartbeat state: agent=%+v", pushed)
+			}
+			break
+		}
+		if attempt == 49 {
+			t.Fatalf("metrics push was not stored: agent=%+v error=%v", pushed, pushErr)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	logBatch := core.CoreLogBatch{ID: "log_0123456789abcdef", Entries: []core.CoreLogEntry{{
 		Engine: core.EngineMihomo, Level: "info", Message: "integration core log", LoggedAt: time.Now().UTC(),
 	}}}
@@ -386,8 +410,8 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 		t.Fatal("successful deployment task did not update the latest deployment")
 	}
 	agent, err := dataStore.GetAgent(ctx, enrolled.AgentID)
-	if err != nil || agent.Metrics.CollectedAt.IsZero() || agent.Metrics.CPUPercent != 12.5 || agent.Metrics.NetworkRXBPS != 100 || len(agent.Metrics.NetworkInterfaces) != 1 {
-		t.Fatalf("heartbeat metrics not persisted: agent=%+v error=%v", agent, err)
+	if err != nil || agent.Metrics.CollectedAt.IsZero() || agent.Metrics.CPUPercent != 42.5 || agent.Metrics.NetworkRXBPS != 300 || agent.Version != "test" || len(agent.Features) == 0 {
+		t.Fatalf("live metrics snapshot not persisted: agent=%+v error=%v", agent, err)
 	}
 	revokedTask, err := dataStore.CreateTask(ctx, core.TaskRequest{
 		AgentID: enrolled.AgentID, Action: core.ActionStatus, Engine: core.EngineMihomo,

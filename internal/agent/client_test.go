@@ -43,6 +43,23 @@ func TestNewClientRejectsHeartbeatIntervalsOutsideServerDeadline(t *testing.T) {
 	}
 }
 
+func TestNewClientDefaultsAndValidatesMetricsInterval(t *testing.T) {
+	requireAgentRoot(t)
+	executor := &Executor{}
+	client, err := NewClient(ClientConfig{ServerURL: "wss://control.example.com", HeartbeatEvery: 10 * time.Second}, executor)
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+	if client.config.MetricsEvery != time.Second {
+		t.Fatalf("default MetricsEvery = %s", client.config.MetricsEvery)
+	}
+	for _, interval := range []time.Duration{time.Millisecond, 31 * time.Second, time.Minute} {
+		if _, err := NewClient(ClientConfig{ServerURL: "wss://control.example.com", HeartbeatEvery: 10 * time.Second, MetricsEvery: interval}, executor); err == nil || !strings.Contains(err.Error(), "QCH_METRICS_INTERVAL") {
+			t.Fatalf("NewClient(MetricsEvery=%s) error = %v", interval, err)
+		}
+	}
+}
+
 func TestNewClientRejectsUnsafeRemoteOrigins(t *testing.T) {
 	requireAgentRoot(t)
 	executor := &Executor{}
