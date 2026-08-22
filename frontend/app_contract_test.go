@@ -203,6 +203,140 @@ func TestPresetSidebarShowsOnlySelectedNodeContent(t *testing.T) {
 	}
 }
 
+func TestClientAccessUsesContextSidebarAsOnlyNodeFilter(t *testing.T) {
+	app, err := os.ReadFile("app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	clientAccess, err := os.ReadFile("modules/client-access.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	styles, err := os.ReadFile("app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, required := range []string{
+		`data-access-agent=""`,
+		`data-access-agent="${esc(agent.id)}"`,
+		`state.data.accessAgent === agent.id ? "active" : ""`,
+	} {
+		if !strings.Contains(string(app), required) {
+			t.Errorf("client access context sidebar is missing %q", required)
+		}
+	}
+	for _, required := range []string{
+		`if (selectedAgent && entry.agent_id !== selectedAgent) return false;`,
+		`data-filter-engine=""`,
+		`aria-label="按内核筛选"`,
+		`.querySelectorAll("[data-access-agent]")`,
+		`client-access-results-head`,
+	} {
+		if !strings.Contains(string(clientAccess), required) {
+			t.Errorf("client access filtering is missing %q", required)
+		}
+	}
+	for _, forbidden := range []string{`data-filter-agent`, `aria-label="按节点筛选"`, `filterAgentIDs`} {
+		if strings.Contains(string(clientAccess), forbidden) {
+			t.Errorf("client access main workspace still contains duplicate node filtering %q", forbidden)
+		}
+	}
+	if strings.Count(string(clientAccess), `<div class="client-access-filter-row">`) != 1 {
+		t.Error("client access main filter panel must contain only the engine filter row")
+	}
+	const narrowSidebarRule = `@media(max-width:820px) and (pointer:coarse){.page-client-access .context-sidebar{display:flex}}`
+	if !strings.Contains(string(styles), narrowSidebarRule) {
+		t.Error("client access context sidebar must remain available on narrow screens")
+	}
+	if !strings.Contains(string(styles), `.context-menu,.context-list{display:flex;overflow:auto;`) {
+		t.Error("narrow context navigation must keep overflow inside its own scroll container")
+	}
+}
+
+func TestAgentWebSocketProxyForwardsSourceChain(t *testing.T) {
+	nginx, err := os.ReadFile("nginx.conf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const agentProxy = `location /agent/ { proxy_http_version 1.1; proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection "upgrade"; proxy_set_header Host $http_host; proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; proxy_pass $control_plane; }`
+	if !strings.Contains(string(nginx), agentProxy) {
+		t.Error("Agent WebSocket proxy must forward the existing trusted source chain")
+	}
+}
+
+func TestOfficialDeploymentsTrustTheExactTwoHopProxyChain(t *testing.T) {
+	compose, err := os.ReadFile("../docker-compose.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	quickStart, err := os.ReadFile("../deploy/quick-start.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	makefile, err := os.ReadFile("../Makefile")
+	if err != nil {
+		t.Fatal(err)
+	}
+	production, err := os.ReadFile("../docs/production.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, source := range []struct {
+		name    string
+		content string
+	}{
+		{name: "bundled compose", content: string(compose)},
+		{name: "external quick-start compose", content: string(quickStart)},
+	} {
+		for _, required := range []string{
+			`QCH_TRUSTED_PROXY_CIDRS: ${QCH_TRUSTED_PROXY_CIDRS:-172.30.254.2/32,172.30.254.1/32}`,
+			`ipv4_address: ${QCH_WEB_PROXY_ADDRESS:-172.30.254.2}`,
+			`ipv4_address: ${QCH_CONTROL_PLANE_PROXY_ADDRESS:-172.30.254.3}`,
+			`subnet: ${QCH_CONTROL_PROXY_SUBNET:-172.30.254.0/24}`,
+			`gateway: ${QCH_CONTROL_PROXY_GATEWAY:-172.30.254.1}`,
+		} {
+			if !strings.Contains(source.content, required) {
+				t.Errorf("%s does not close the exact proxy chain with %q", source.name, required)
+			}
+		}
+	}
+
+	qcontrolWeb := strings.SplitN(string(compose), "\n  qcontrol-web:", 2)
+	if len(qcontrolWeb) != 2 {
+		t.Fatal("bundled compose is missing qcontrol-web")
+	}
+	qcontrolWebBlock := strings.SplitN(qcontrolWeb[1], "\nvolumes:", 2)[0]
+	if strings.Contains(qcontrolWebBlock, "\n      - backend") || strings.Contains(qcontrolWebBlock, "\n      backend:") {
+		t.Error("qcontrol-web must reach control-plane only through its fixed proxy-chain address")
+	}
+
+	for _, required := range []string{
+		`'QCH_WEB_PROXY_ADDRESS=172.30.254.2'`,
+		`'QCH_CONTROL_PLANE_PROXY_ADDRESS=172.30.254.3'`,
+		`'QCH_TRUSTED_PROXY_CIDRS=172.30.254.2/32,172.30.254.1/32'`,
+	} {
+		if !strings.Contains(string(makefile), required) {
+			t.Errorf("make init-env is missing %q", required)
+		}
+	}
+	for _, required := range []string{
+		`trusted_proxy_cidrs="$(append_trusted_proxy "$trusted_proxy_cidrs" "$web_proxy_address/32")"`,
+		`trusted_proxy_cidrs="$(append_trusted_proxy "$trusted_proxy_cidrs" "$proxy_gateway/32")"`,
+		`"QCH_TRUSTED_PROXY_CIDRS=$trusted_proxy_cidrs"`,
+	} {
+		if strings.Count(string(quickStart), required) != 2 {
+			t.Errorf("bundled and external env preparation must both preserve %q", required)
+		}
+	}
+	for _, required := range []string{"宿主 Nginx 与 `qcontrol-web` 两跳代理", "两个精确 `/32` 端点", "禁止改成整个私网"} {
+		if !strings.Contains(string(production), required) {
+			t.Errorf("production proxy documentation is missing %q", required)
+		}
+	}
+}
+
 func TestInitialConsoleStylesRemainExactOutsideApprovedExtensions(t *testing.T) {
 	styles, err := os.ReadFile("app.css")
 	if err != nil {

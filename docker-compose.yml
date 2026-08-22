@@ -15,7 +15,6 @@ services:
       - postgres-data:/var/lib/postgresql/data
     networks:
       - backend
-      - control-host
       - database-host
     security_opt:
       - no-new-privileges:true
@@ -46,8 +45,8 @@ services:
       # PostgreSQL is on this Compose project's isolated internal bridge.
       QCH_ALLOW_INSECURE_DATABASE: ${QCH_ALLOW_INSECURE_DATABASE:-true}
       QCH_CORS_ORIGINS: ${QCH_CORS_ORIGINS:-}
-      # The host-side Nginx reaches qcontrol-web; this is the API's trusted proxy network.
-      QCH_TRUSTED_PROXY_CIDRS: ${QCH_TRUSTED_PROXY_CIDRS:-172.30.254.1/32}
+      # Trust only the fixed qcontrol-web peer and the host-side Nginx gateway.
+      QCH_TRUSTED_PROXY_CIDRS: ${QCH_TRUSTED_PROXY_CIDRS:-172.30.254.2/32,172.30.254.1/32}
       # Optional capabilities; all default to disabled/empty so Compose keeps
       # working without them.
       QCH_WEBHOOK_SECRET: ${QCH_WEBHOOK_SECRET:-}
@@ -55,8 +54,9 @@ services:
       QCH_OPERATOR_TOKENS: ${QCH_OPERATOR_TOKENS:-}
       QCH_READONLY_TOKENS: ${QCH_READONLY_TOKENS:-}
     networks:
-      - backend
-      - control-host
+      backend:
+      control-host:
+        ipv4_address: ${QCH_CONTROL_PLANE_PROXY_ADDRESS:-172.30.254.3}
     read_only: true
     tmpfs:
       - /tmp:size=16m,mode=1777
@@ -87,8 +87,8 @@ services:
     ports:
       - "${QCH_BIND_ADDRESS:-127.0.0.1}:${QCH_PORT:-8080}:8080"
     networks:
-      - backend
-      - control-host
+      control-host:
+        ipv4_address: ${QCH_WEB_PROXY_ADDRESS:-172.30.254.2}
     read_only: true
     tmpfs:
       - /tmp:size=8m,mode=1777

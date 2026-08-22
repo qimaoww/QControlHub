@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/qimaoww/qcontrolhub/internal/authn"
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
@@ -60,6 +61,14 @@ func encodeHeartbeatMetrics(input *core.HostMetrics, receivedAt time.Time) ([]by
 				return nil, errors.New("agent reported invalid network interface address")
 			}
 		}
+	}
+	if value := strings.TrimSpace(metrics.ObservedPublicIP); value != "" {
+		metrics.ObservedPublicIP = authn.NormalizePublicIP(value)
+		if metrics.ObservedPublicIP == "" {
+			return nil, errors.New("control plane observed invalid public agent address")
+		}
+	} else {
+		metrics.ObservedPublicIP = ""
 	}
 	return json.Marshal(metrics)
 }

@@ -21,7 +21,9 @@ QCH_ALLOW_INSECURE_HTTP=false
 QCH_ALLOW_INSECURE_DATABASE=true
 QCH_CONTROL_PROXY_SUBNET=172.30.254.0/24
 QCH_CONTROL_PROXY_GATEWAY=172.30.254.1
-QCH_TRUSTED_PROXY_CIDRS=172.30.254.1/32
+QCH_WEB_PROXY_ADDRESS=172.30.254.2
+QCH_CONTROL_PLANE_PROXY_ADDRESS=172.30.254.3
+QCH_TRUSTED_PROXY_CIDRS=172.30.254.2/32,172.30.254.1/32
 QCH_BIND_ADDRESS=127.0.0.1
 QCH_PORT=8080
 POSTGRES_PORT=5432
@@ -31,7 +33,7 @@ QCH_CORS_ORIGINS=https://qcontrolhub.example.com
 QCH_CONFIG_ENCRYPTION_KEY=replace-with-a-long-random-secret
 ```
 
-`QCH_CORS_ORIGINS` 仅在浏览器从另一个 origin 调用 JSON API 时需要；使用同域 Web 控制台可以留空。`QCH_TRUSTED_PROXY_CIDRS` 必须只包含实际 Nginx 对端，基础 Compose 因此为控制面发布网络固定了一个可覆盖的网段与 gateway；若网段冲突，三个相关值必须一起修改。若手工设置 PostgreSQL 密码，必须对 URL 保留字符进行百分号编码；`make init-env` 生成的十六进制密码可直接用于 Compose URL。
+`QCH_CORS_ORIGINS` 仅在浏览器从另一个 origin 调用 JSON API 时需要；使用同域 Web 控制台可以留空。官方拓扑包含宿主 Nginx 与 `qcontrol-web` 两跳代理：控制面直接看到固定的 `QCH_WEB_PROXY_ADDRESS`，转发链中真实客户端右侧还包含固定的 `QCH_CONTROL_PROXY_GATEWAY`。`QCH_TRUSTED_PROXY_CIDRS` 必须只列出这两个精确 `/32` 端点，控制面才能从右向左安全剥离完整代理链，同时忽略客户端伪造在链左侧的值。若网段冲突，subnet、gateway、两个容器地址及信任列表必须一起修改，禁止改成整个私网或任意来源网段。若手工设置 PostgreSQL 密码，必须对 URL 保留字符进行百分号编码；`make init-env` 生成的十六进制密码可直接用于 Compose URL。
 
 ## 2. 启动 PostgreSQL 与控制面
 
@@ -75,7 +77,7 @@ curl --fail https://qcontrolhub.example.com/healthz
 
 控制面根据 `QCH_BEHIND_TLS_PROXY=true` 把连接视为安全传输，并直接设置 Secure Cookie 与 HSTS，不依赖代理传入的协议头。只有 TLS 确实在本机受信反向代理终止时才能设置该值；不要为“解决登录问题”启用 `QCH_ALLOW_INSECURE_HTTP`。SPA 登录调用 `/api/v1/auth/login`，浏览器后续写请求自动携带会话 CSRF 头。
 
-Nginx 示例按真实客户端 IP 对 `/api/v1/auth/login` 和 `/agent/v1/enroll` 做额外限速。控制面仅在直接 TCP 对端匹配 `QCH_TRUSTED_PROXY_CIDRS` 时解析 `X-Forwarded-For`，并从右向左剥离可信代理；不要把整个私网或 `0.0.0.0/0` 加入该列表。
+Nginx 示例按真实客户端 IP 对 `/api/v1/auth/login` 和 `/agent/v1/enroll` 做额外限速。控制面仅在直接 TCP 对端匹配 `QCH_TRUSTED_PROXY_CIDRS` 时解析 `X-Forwarded-For`，并从右向左剥离可信代理。官方 Compose 将 `qcontrol-web` 和宿主入口各自固定为一个精确信任端点；不要删除其中任何一跳，也不要把整个私网或 `0.0.0.0/0` 加入该列表。
 
 Agent 使用 `/agent/v1/connect` 的长期 WSS 会话。Nginx 示例已转发 `Upgrade`/`Connection`，并把上游读取空闲超时提高到一小时；删除这些设置会导致 Agent 无法升级或在无任务时周期性断线。
 
@@ -196,6 +198,8 @@ sudo rm /var/lib/qcontrolhub/agent-state.json
 然后重新执行该节点的添加命令。控制面会复用原节点 ID、替换旧签名密钥并关闭旧连接；若添加记录已删除，则需要重新创建。删除状态文件是不可逆身份操作，必须先确认控制台中旧身份已撤销。
 
 ### 外部 PostgreSQL
+
+`deploy/quick-start.sh -m external` 生成的 Compose 仍使用与 bundled 模式相同的专用代理网络、固定 `qcontrol-web`/控制面地址和两项精确信任列表；数据库改为外部连接不会改变 WSS 来源地址解析边界。重复运行脚本会保留自定义代理网络值，并为旧环境补齐缺失的 `qcontrol-web` 精确信任项。
 
 使用外部数据库时，不应把密码直接写入可读命令行。通过受保护环境或密钥注入设置完整 `QCH_DATABASE_URL`，并使用类似以下参数：
 

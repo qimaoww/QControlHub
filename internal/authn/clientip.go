@@ -4,7 +4,10 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/netip"
 	"strings"
+
+	"github.com/qimaoww/qcontrolhub/internal/netpolicy"
 )
 
 func ParseTrustedProxies(values []string) ([]*net.IPNet, error) {
@@ -60,6 +63,26 @@ func ClientIP(request *http.Request, trustedProxies []*net.IPNet) string {
 		return chain[0].String()
 	}
 	return remoteHost
+}
+
+// PublicClientIP applies the same trusted-proxy chain used for authentication
+// rate limits, then returns only a canonical, publicly routable source IP.
+func PublicClientIP(request *http.Request, trustedProxies []*net.IPNet) string {
+	return NormalizePublicIP(ClientIP(request, trustedProxies))
+}
+
+// NormalizePublicIP canonicalizes publicly routable IPv4 and IPv6 addresses.
+// Private and IANA special-purpose values are rejected.
+func NormalizePublicIP(value string) string {
+	address, err := netip.ParseAddr(strings.Trim(strings.TrimSpace(value), "[]"))
+	if err != nil {
+		return ""
+	}
+	address = address.Unmap()
+	if !netpolicy.IsPublicAddress(address) {
+		return ""
+	}
+	return address.String()
 }
 
 func ipTrusted(address net.IP, networks []*net.IPNet) bool {

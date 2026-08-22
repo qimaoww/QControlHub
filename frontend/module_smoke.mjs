@@ -388,3 +388,105 @@ try {
   if (previousCSS === undefined) delete globalThis.CSS;
   else globalThis.CSS = previousCSS;
 }
+
+const accessEntries = [
+  {
+    agent_id: "alpha",
+    agent_name: "Alpha node",
+    engine: "mihomo",
+    address: "alpha.example.test",
+    source: "test",
+    profiles: [
+      {
+        tag: "alpha-in",
+        protocol: "test",
+        profile: { format: "URI", uri: "test-alpha", fields: [] },
+      },
+    ],
+  },
+  {
+    agent_id: "beta",
+    agent_name: "Beta node",
+    engine: "xray",
+    address: "beta.example.test",
+    source: "test",
+    profiles: [
+      {
+        tag: "beta-in",
+        protocol: "test",
+        profile: { format: "URI", uri: "test-beta", fields: [] },
+      },
+    ],
+  },
+];
+const accessAgents = [
+  { id: "alpha", name: "Alpha node", labels: {}, status: "online" },
+  { id: "beta", name: "Beta node", labels: {}, status: "online" },
+];
+const accessState = {
+  route: "client-access",
+  data: { accessAgent: "beta", accessEngine: "", accessQuery: "" },
+};
+const accessSidebarLinks = [
+  { dataset: { accessAgent: "" }, onclick: null },
+  { dataset: { accessAgent: "alpha" }, onclick: null },
+  { dataset: { accessAgent: "beta" }, onclick: null },
+];
+let accessMarkup = "";
+globalThis.document = {
+  querySelector: () => null,
+  querySelectorAll(selector) {
+    if (selector === "[data-access-agent]") return accessSidebarLinks;
+    return [];
+  },
+};
+
+try {
+  const accessCtx = new Proxy(
+    {
+      state: accessState,
+      engines: ["mihomo", "xray"],
+      api: async (path) => {
+        if (path === "/client-access") return accessEntries;
+        if (path === "/agents") return accessAgents;
+        assert.fail(`unexpected client access smoke API path ${path}`);
+      },
+      can: (capability) => capability === "agents.read",
+      esc: (value) => String(value ?? ""),
+      engineName: (value) => value,
+      short: (value) => value,
+      shell: (markup) => {
+        accessMarkup = markup;
+      },
+    },
+    { get: (target, key) => target[key] ?? noop },
+  );
+  const renderClientAccess = installClientAccess(accessCtx);
+  await renderClientAccess();
+
+  assert.equal(accessMarkup.includes("Alpha node"), false);
+  assert.equal(accessMarkup.includes("Beta node"), true);
+  assert.equal(accessMarkup.includes("data-filter-agent"), false);
+  assert.equal(accessMarkup.includes("按节点筛选"), false);
+  assert.equal(accessMarkup.includes('data-filter-engine=""'), true);
+  assert.equal(accessMarkup.includes("按内核筛选"), true);
+  assert.equal(accessMarkup.includes("client-access-results-head"), true);
+  assert.equal(
+    accessSidebarLinks.every((link) => typeof link.onclick === "function"),
+    true,
+    "context sidebar remains the executable node filter",
+  );
+
+  await accessSidebarLinks[0].onclick({ preventDefault: noop });
+  assert.equal(accessState.data.accessAgent, "");
+  assert.equal(accessMarkup.includes("Alpha node"), true);
+  assert.equal(accessMarkup.includes("Beta node"), true);
+
+  accessState.data.accessEngine = "xray";
+  await renderClientAccess();
+  assert.equal(accessMarkup.includes("Alpha node"), false);
+  assert.equal(accessMarkup.includes("Beta node"), true);
+} finally {
+  if (previousDocument === undefined) delete globalThis.document;
+  else globalThis.document = previousDocument;
+}

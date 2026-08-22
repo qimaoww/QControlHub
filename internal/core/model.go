@@ -181,6 +181,9 @@ type HostMetrics struct {
 	NetworkRXBPS      uint64                 `json:"network_rx_bps"`
 	NetworkTXBPS      uint64                 `json:"network_tx_bps"`
 	NetworkInterfaces []HostNetworkInterface `json:"network_interfaces,omitempty"`
+	// ObservedPublicIP is assigned by the control plane from the authenticated
+	// WSS source. Agent-provided values are never trusted.
+	ObservedPublicIP string `json:"observed_public_ip,omitempty"`
 }
 
 // HostNetworkInterface describes addresses assigned to an interface that

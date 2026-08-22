@@ -49,7 +49,7 @@ QControlHub 的安全边界包括管理员、控制面、PostgreSQL、反向代�
 - 私有/自签名 TLS 使用 `QCH_TLS_CA_FILE` 加载受保护的 CA PEM；Agent 仍会执行完整证书链、有效期和主机名校验，不提供 `insecure-skip-verify`。
 - Compose 默认只把控制面和 PostgreSQL绑定到 `127.0.0.1`。公网仅开放 Nginx 的 443 端口。
 - `QCH_CORS_ORIGINS` 是精确、逗号分隔的来源白名单，不支持通配符需求；同源 Web UI 无需配置 CORS。
-- `QCH_TRUSTED_PROXY_CIDRS` 必须只列出真实反向代理地址。控制面仅在 TCP 对端受信时解析 `X-Forwarded-For`，避免公网客户端伪造限流身份。
+- `QCH_TRUSTED_PROXY_CIDRS` 必须精确列出完整反向代理链：控制面直接看到的 `qcontrol-web` 固定地址，以及转发链中位于真实客户端右侧的宿主 Nginx gateway。控制面仅在直接 TCP 对端受信时解析 `X-Forwarded-For`，再从右向左剥离其余受信跳点，避免公网客户端伪造限流或 Agent 来源身份；禁止信任整个私网。
 - Compose 内部 PostgreSQL URL 使用 `sslmode=disable`，并通过 `QCH_ALLOW_INSECURE_DATABASE=true` 显式豁免，因为流量仅位于单机内部 Docker 网络。外部或托管 PostgreSQL 必须将该开关设为 `false`，使用 `sslmode=verify-full` 并配置可信 CA。
 - 防火墙应只允许管理员可信网络访问控制台；Agent 只需要向控制面发起出站 443 连接，不需要入站端口。
 

@@ -653,6 +653,7 @@ func (s *Server) enrollAgent(w http.ResponseWriter, request *http.Request) {
 }
 
 func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
+	observedPublicIP := authn.PublicClientIP(request, s.trustedProxies)
 	connection, err := websocket.Accept(w, request, &websocket.AcceptOptions{
 		CompressionMode: websocket.CompressionDisabled,
 		Subprotocols:    []string{"qcontrolhub.agent.v1"},
@@ -677,6 +678,11 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 	}
 	s.registerConnection(id, connectionID, cancelConnection)
 	defer s.unregisterConnection(id, connectionID)
+	if err := s.store.UpdateAgentObservedPublicIP(ctx, id, observedPublicIP); err != nil {
+		// Address discovery is best-effort and must never take an authenticated
+		// Agent offline. Do not log the observed address.
+		slog.Warn("update agent WSS address observation", "agent_id", id, "error", err)
+	}
 	incoming := make(chan core.WireMessage, 1)
 	readErrors := make(chan error, 1)
 	go func() {
@@ -768,6 +774,9 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 					_ = connection.Close(websocket.StatusPolicyViolation, "invalid heartbeat")
 					return
 				}
+				if message.Heartbeat.Metrics != nil {
+					message.Heartbeat.Metrics.ObservedPublicIP = observedPublicIP
+				}
 				if err := s.store.Heartbeat(ctx, id, *message.Heartbeat); err != nil {
 					slog.Error("store agent heartbeat", "agent_id", id, "error", err)
 					return
@@ -778,6 +787,7 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 					_ = connection.Close(websocket.StatusPolicyViolation, "invalid metrics")
 					return
 				}
+				message.Metrics.ObservedPublicIP = observedPublicIP
 				if err := s.store.UpdateAgentMetrics(ctx, id, *message.Metrics); err != nil {
 					slog.Error("store agent metrics", "agent_id", id, "error", err)
 					return
