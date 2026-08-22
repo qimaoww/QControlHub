@@ -447,7 +447,7 @@ function shell(content, title) {
   };
   links.splice(0, links.length, ...links.filter(([id]) => can(linkPermissions[id])));
   app.style.display = "";
-  document.body.className = `app-body page-${state.route}${state.route === "node-settings" ? " page-agents" : ""}`;
+  document.body.className = `app-body page-${state.route}${state.route === "node-settings" ? " page-agents no-context" : ""}`;
   applyTheme();
   const context = contextMarkup(title);
   const overview = state.data.overview || {};
@@ -541,8 +541,9 @@ function contextMarkup(title) {
     return `<div class="context-section-label"><span>内核配置预设</span><b>${items.length}</b></div><nav class="context-list" aria-label="节点内核预设">${items.map((agent) => `<a class="${state.data.selectedAgent === agent.id ? "active" : ""}" href="#node-${esc(agent.id)}" data-context-agent="${esc(agent.id)}"><span class="context-engine">${(agent.capabilities || []).length}</span><span><strong>${esc(agent.name)}</strong><small>${esc(agent.os)} / ${esc(agent.arch)}</small></span><em>${agent.status === "online" ? "在线" : "离线"}</em></a>`).join("") || "<p>还没有节点</p>"}</nav>`;
   }
   if (state.route === "node-settings") {
-    const items = state.data.agents || [];
-    return `<div class="context-section-label"><span>节点设置</span><b>${items.length}</b></div><nav class="context-list" aria-label="节点设置列表">${items.map((agent) => `<a class="${state.data.selectedAgent === agent.id ? "active" : ""}" href="#node-${esc(agent.id)}" data-context-agent="${esc(agent.id)}"><i class="status-dot ${statusTone(agent.status)}" data-context-agent-dot></i><span><strong>${esc(agent.name)}</strong><small>${esc(agent.os)} / ${esc(agent.arch)}</small></span><em>${agent.status === "online" ? "在线" : "离线"}</em></a>`).join("") || "<p>还没有节点</p>"}</nav>`;
+    // The node overview cards replace the per-node sidebar list; the whole
+    // context column is hidden on this route via the no-context body class.
+    return "";
   }
   if (state.route === "client-access") {
     const items = state.data.agents || [];

@@ -23,6 +23,16 @@ async function nodeSettings(presetMode = false) {
   state.data.agents = agents;
   if (!agents.some((agent) => agent.id === state.data.selectedAgent))
     state.data.selectedAgent = agents[0]?.id || "";
+  const anchor = String(state.anchor || "");
+  if (!presetMode) {
+    if (
+      anchor.startsWith("settings-node-") ||
+      (anchor.startsWith("node-") && anchor !== "node-settings")
+    )
+      state.data.nodeView = "detail";
+    else if (anchor === "node-settings" || anchor === "enrollment")
+      state.data.nodeView = "overview";
+  }
   const overview = can("overview.read")
     ? await api("/overview")
     : {};
@@ -80,11 +90,13 @@ async function nodeSettings(presetMode = false) {
   const selectedAgent = agents.find(
     (agent) => agent.id === state.data.selectedAgent,
   );
-  const visibleAgents = presetMode
-    ? agents
-    : selectedAgent
-      ? [selectedAgent]
-      : [];
+  const detailMode =
+    !presetMode && state.data.nodeView === "detail" && selectedAgent;
+  const visibleAgents = detailMode
+    ? [selectedAgent]
+    : presetMode
+      ? agents
+      : orderAgents(agents);
   const serviceActionIcons = {
     status:
       '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h3l2-5 4 10 2-5h5"/></svg>',
@@ -164,7 +176,7 @@ async function nodeSettings(presetMode = false) {
       const labels = Object.entries(agent.labels || {})
         .map(([key, value]) => `<span>${esc(key)}=${esc(value)}</span>`)
         .join("");
-      if (!presetMode) {
+      if (detailMode) {
         const installedCount = (agent.capabilities || []).filter(
           (engine) => agent.runtime?.[engine]?.installed,
         ).length;
@@ -187,6 +199,30 @@ async function nodeSettings(presetMode = false) {
           </div>
         </section>`;
       }
+      if (!presetMode) {
+        const installedCount = (agent.capabilities || []).filter(
+          (engine) => agent.runtime?.[engine]?.installed,
+        ).length;
+        const coreChips = (agent.capabilities || [])
+          .map((engine) => {
+            const runtime = agent.runtime?.[engine] || {};
+            const installed = Boolean(runtime.installed);
+            const serviceState = installed
+              ? serviceStatusName(runtime.service_status)
+              : "未安装";
+            const tone = installed
+              ? statusTone(runtime.service_status)
+              : "muted";
+            return `<span class="core-chip service-${esc(engine)}" data-core-installed="${installed ? 1 : 0}"><span class="engine-badge ${esc(engine)}">${esc(engineName(engine))}</span><span class="engine-state ${tone}"><i></i><b data-core-service="${esc(engine)}">${esc(serviceState)}</b></span></span>`;
+          })
+          .join("");
+        return `<a class="node-card" href="#settings-node-${esc(agent.id)}" data-agent-node="${esc(agent.id)}" data-agent-metrics="${esc(agent.id)}" data-state="${agent.status === "online" ? "online" : "offline"}" data-available="${metrics.collected_at ? 1 : 0}">
+              <header class="node-card-head"><span class="node-card-grip" title="拖动调整顺序" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 6h.01M9 12h.01M9 18h.01M15 6h.01M15 12h.01M15 18h.01"/></svg></span><span class="machine-avatar" aria-hidden="true">●</span><div class="node-card-title"><strong>${esc(agent.name)}</strong><small>${esc(agent.os)} / ${esc(agent.arch)} · ${installedCount ? `${installedCount}/${(agent.capabilities || []).length} 内核已安装` : "尚未安装内核"}</small></div><span class="node-card-state"><i class="status-dot ${statusTone(agent.status)}" data-agent-status-dot></i><b data-agent-status-label>${agent.status === "online" ? "在线" : "离线"}</b><small data-agent-heartbeat>${esc(heartbeat(agent.last_seen))}</small></span></header>
+              <section class="node-card-resources" aria-label="节点资源"><div><span>CPU</span><strong data-metric-text="cpu">${metrics.cpu_available ? `${Number(metrics.cpu_percent).toFixed(1)}%` : "等待采集"}</strong><progress aria-label="CPU 使用率" data-metric-progress="cpu" max="100" value="${metrics.cpu_available ? Number(metrics.cpu_percent) : 0}"></progress></div><div><span>内存</span><strong data-metric-text="memory">${metrics.memory_available ? `${bytes(metrics.memory_used_bytes)} / ${bytes(metrics.memory_total_bytes)}` : "等待采集"}</strong><progress aria-label="内存使用率" data-metric-progress="memory" max="100" value="${percent(metrics.memory_used_bytes, metrics.memory_total_bytes)}"></progress></div><div><span>磁盘</span><strong data-metric-text="disk">${metrics.disk_available ? `${bytes(metrics.disk_used_bytes)} / ${bytes(metrics.disk_total_bytes)}` : "等待采集"}</strong><progress aria-label="根磁盘使用率" data-metric-progress="disk" max="100" value="${percent(metrics.disk_used_bytes, metrics.disk_total_bytes)}"></progress></div><div><span>网络</span><strong>↓ <i data-metric-text="download-rate">${metrics.network_available ? rate(metrics.network_rx_bps) : "等待采集"}</i> · ↑ <i data-metric-text="upload-rate">${metrics.network_available ? rate(metrics.network_tx_bps) : "等待采集"}</i></strong><small>累计 ↓ <b data-metric-text="download-total">${metrics.network_available ? bytes(metrics.network_rx_bytes) : "—"}</b> · ↑ <b data-metric-text="upload-total">${metrics.network_available ? bytes(metrics.network_tx_bytes) : "—"}</b></small></div><span class="machine-resource-live" data-metric-poll role="status" aria-label="资源自动更新"></span></section>
+              <section class="node-card-cores" aria-label="内核状态">${coreChips}</section>
+              <footer class="node-card-foot"><small><i></i><span data-agent-version>${esc(agent.version || "未知")}</span></small><span class="node-card-stamp" data-metric-text="stamp">${metrics.collected_at ? `采集于 ${ago(metrics.collected_at)}` : "等待资源数据"}</span><span class="node-card-open">管理节点 <i aria-hidden="true">→</i></span></footer>
+            </a>`;
+      }
       return `<details class="machine-workspace" id="node-${esc(agent.id)}" name="node-workspace" data-agent-node="${esc(agent.id)}" data-agent-metrics="${esc(agent.id)}" data-available="${metrics.collected_at ? 1 : 0}" ${agent.id === state.data.selectedAgent ? "open" : ""}><summary class="machine-header"><div class="machine-identity">${can("operator") ? `<label class="batch-select" title="选择此节点参与批量操作"><input type="checkbox" data-batch-checkbox value="${esc(agent.id)}" aria-label="选择 ${esc(agent.name)} 参与批量操作"><span></span></label>` : ""}<span class="machine-avatar">●</span><span><strong>${esc(agent.name)}</strong><code>${esc(agent.os)} / ${esc(agent.arch)} · ${esc(short(agent.id))}</code></span></div><section class="machine-resource-summary" aria-label="资源监控"><div><span>CPU</span><strong data-metric-text="cpu">${metrics.cpu_available ? `${Number(metrics.cpu_percent).toFixed(1)}%` : "等待采集"}</strong><progress aria-label="CPU 使用率" data-metric-progress="cpu" max="100" value="${metrics.cpu_available ? Number(metrics.cpu_percent) : 0}"></progress></div><div><span>内存</span><strong data-metric-text="memory">${metrics.memory_available ? `${bytes(metrics.memory_used_bytes)} / ${bytes(metrics.memory_total_bytes)}` : "等待采集"}</strong><progress aria-label="内存使用率" data-metric-progress="memory" max="100" value="${percent(metrics.memory_used_bytes, metrics.memory_total_bytes)}"></progress></div><div><span>磁盘</span><strong data-metric-text="disk">${metrics.disk_available ? `${bytes(metrics.disk_used_bytes)} / ${bytes(metrics.disk_total_bytes)}` : "等待采集"}</strong><progress aria-label="根磁盘使用率" data-metric-progress="disk" max="100" value="${percent(metrics.disk_used_bytes, metrics.disk_total_bytes)}"></progress></div><div class="machine-resource-network"><span>网络</span><strong>↓ <i data-metric-text="download-rate">${metrics.network_available ? rate(metrics.network_rx_bps) : "等待采集"}</i> · ↑ <i data-metric-text="upload-rate">${metrics.network_available ? rate(metrics.network_tx_bps) : "等待采集"}</i></strong><small>累计 ↓ <span data-metric-text="download-total">${metrics.network_available ? bytes(metrics.network_rx_bytes) : "—"}</span> · ↑ <span data-metric-text="upload-total">${metrics.network_available ? bytes(metrics.network_tx_bytes) : "—"}</span></small></div><span class="machine-resource-live" data-metric-poll role="status" aria-label="资源自动更新"></span></section><div class="machine-state"><span class="status-dot ${statusTone(agent.status)}" data-agent-status-dot></span><span><b data-agent-status-label>${agent.status === "online" ? "在线" : "离线"}</b><small data-agent-heartbeat>${esc(heartbeat(agent.last_seen))}</small></span></div><i class="machine-chevron" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></svg></i></summary><div class="machine-body"><section class="service-canvas"><header class="service-canvas-head"><h2>节点内核</h2><span>${(agent.capabilities || []).length} 个内核</span></header><div class="service-grid">${services}</div></section><details class="machine-profile node-inspector"><summary class="node-inspector-summary"><span><b>节点身份</b><small>身份信息 · 指标趋势</small></span><i>＋</i></summary><div class="node-inspector-body"><section class="node-identity-panel"><h2>${esc(agent.name)}</h2><dl class="identity-list"><div><dt>节点 ID</dt><dd><code>${esc(agent.id)}</code></dd></div><div><dt>系统平台</dt><dd>${esc(agent.os)} / ${esc(agent.arch)}</dd></div><div><dt>Agent 版本</dt><dd data-agent-version>${esc(agent.version || "未知")}</dd></div><div><dt>注册时间</dt><dd>${date(agent.enrolled_at)}</dd></div><div><dt>安全通道</dt><dd>WSS · Ed25519 签名</dd></div></dl>${labels ? `<div class="labels">${labels}</div>` : ""}<footer class="node-identity-refresh"><span data-metric-text="stamp">${metrics.collected_at ? `采集于 ${ago(metrics.collected_at)}` : "等待资源数据"}</span><div><button type="button" data-agent-refresh>刷新</button>${can("operator") ? `<button type="button" class="button primary small" data-upgrade-agent="${esc(agent.id)}">升级 Agent</button>` : ""}</div></footer></section><section class="metric-trend-empty" data-metric-history="${esc(agent.id)}" aria-label="暂无指标趋势"><span>⌁</span><b>正在载入指标趋势</b><small>打开节点详情后载入最近 24 小时的上下行速率。</small></section></div></details><footer class="machine-footer"><span><i>●</i><b>节点身份已验证</b></span>${can("admin") ? `<details><summary>节点管理</summary><button type="button" data-delete="${esc(agent.id)}">移除节点并吊销身份</button></details>` : ""}</footer></div></details>`;
     })
     .join("");
@@ -198,11 +234,23 @@ async function nodeSettings(presetMode = false) {
     !presetMode && agents.length > 1 && can("operator")
       ? `<details class="node-batch-panel"><summary><span><b>批量操作</b><small>跨节点执行内核服务动作</small></span><i>＋</i></summary><form class="batch-toolbar" id="batch-form"><div class="batch-node-options">${agents.map((agent) => `<label class="batch-select" title="选择此节点参与批量操作"><input type="checkbox" data-batch-checkbox value="${esc(agent.id)}" aria-label="选择 ${esc(agent.name)} 参与批量操作"><span><b>${esc(agent.name)}</b><small>${agent.status === "online" ? "在线" : "离线"}</small></span></label>`).join("")}</div><div class="batch-controls"><label>内核<select name="engine">${engines.map((engine) => `<option value="${engine}">${esc(engineName(engine))}</option>`).join("")}</select></label><label>动作<select name="action"><option value="restart">重启服务</option><option value="status">查询状态</option><option value="start">启动服务</option><option value="stop">停止服务</option></select></label><button class="button small" type="submit" disabled>执行</button><small data-batch-count>未选择节点</small></div></form></details>`
       : "";
+  const onlineAgents = agents.filter(
+    (agent) => agent.status === "online",
+  ).length;
+  const introTone = agents.length
+    ? onlineAgents === agents.length
+      ? "ok"
+      : onlineAgents
+        ? "warn"
+        : "bad"
+    : "";
   const pageIntro = presetMode
     ? `<header class="node-page-intro"><div><p class="eyebrow">节点配置</p><h2>内核配置预设</h2><p>按节点查看已安装内核与配置入口；实际配置文件仍在手动配置页维护。</p></div><span>${agents.length} 个节点</span></header>`
-    : "";
+    : !detailMode && agents.length
+      ? `<header class="node-page-intro"><div><p class="eyebrow">节点设置</p><h2>全部节点</h2><p>每个节点的资源占用与内核状态一屏总览；点击卡片进入管理台，拖动卡片左侧手柄调整顺序。</p></div><span class="node-intro-live"><i class="status-dot ${introTone}"></i>${agents.length} 个节点 · ${onlineAgents} 在线</span></header>`
+      : "";
   shell(
-    `${pageIntro}${presetMode ? enrollment : `<div class="node-settings-page">${enrollment}${batch}`}${nodeCards ? `<section class="${presetMode ? "machine-stack" : "node-settings-stack"}">${nodeCards}</section>` : '<div class="empty large"><strong>还没有节点</strong><p>请先添加节点。</p></div>'}${presetMode ? "" : "</div>"}`,
+    `${pageIntro}${presetMode ? enrollment : `<div class="node-settings-page">${enrollment}${batch}${detailMode ? `<a class="node-back-link" href="#node-settings">← 全部节点</a>` : ""}`}${nodeCards ? `<section class="${presetMode ? "machine-stack" : detailMode ? "node-settings-stack" : "node-card-grid"}">${nodeCards}</section>` : '<div class="empty large"><strong>还没有节点</strong><p>请先添加节点。</p></div>'}${presetMode ? "" : "</div>"}`,
     presetMode ? "内核配置预设" : "节点设置",
   );
   document.querySelectorAll(".machine-workspace").forEach((item) => {
@@ -219,6 +267,120 @@ async function nodeSettings(presetMode = false) {
 
 function refreshAgentPage() {
   return state.route === "agents" ? agents() : nodeSettings();
+}
+
+const nodeCardOrderKey = "qcontrolhub:node-card-order";
+
+function savedCardOrder() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(nodeCardOrderKey));
+    return Array.isArray(parsed) ? parsed.filter((id) => typeof id === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function orderAgents(agents) {
+  const saved = savedCardOrder();
+  if (!saved.length) return agents;
+  const position = new Map(saved.map((id, index) => [id, index]));
+  return [...agents].sort(
+    (a, b) =>
+      (position.get(a.id) ?? saved.length) - (position.get(b.id) ?? saved.length),
+  );
+}
+
+// Pointer-based drag reordering of the overview cards. The grip captures the
+// pointer so the surrounding card link never navigates mid-drag; live preview
+// reorders cards through the CSS order property because moving DOM nodes
+// mid-drag would implicitly release the pointer capture. The DOM order and
+// localStorage are only committed on release.
+function enableCardDrag(grid) {
+  let drag = null;
+  const applyVisualOrder = (pointerX, pointerY) => {
+    const cards = [...grid.querySelectorAll(".node-card")];
+    const rest = cards.filter((card) => card !== drag.card);
+    let insertAt = rest.length;
+    for (let index = 0; index < rest.length; index += 1) {
+      const rect = rest[index].getBoundingClientRect();
+      const centerX = rect.left + rect.width / 2;
+      const centerY = rect.top + rect.height / 2;
+      if (
+        pointerY < centerY ||
+        (pointerY <= rect.bottom && pointerX < centerX)
+      ) {
+        insertAt = index;
+        break;
+      }
+    }
+    const sequence = [...rest];
+    sequence.splice(insertAt, 0, drag.card);
+    sequence.forEach((card, index) => (card.style.order = String(index)));
+  };
+  const reset = () => {
+    drag.card.classList.remove("dragging");
+    document.body.classList.remove("node-card-dragging");
+    grid
+      .querySelectorAll(".node-card")
+      .forEach((card) => (card.style.order = ""));
+    drag = null;
+  };
+  grid.querySelectorAll(".node-card-grip").forEach((grip) => {
+    grip.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0 || drag) return;
+      const card = grip.closest(".node-card");
+      if (!card) return;
+      event.preventDefault();
+      drag = {
+        card,
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        started: false,
+        moved: false,
+      };
+      grip.setPointerCapture(event.pointerId);
+    });
+    grip.addEventListener("pointermove", (event) => {
+      if (!drag || event.pointerId !== drag.pointerId) return;
+      if (!drag.started) {
+        if (
+          Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 6
+        )
+          return;
+        drag.started = true;
+        drag.card.classList.add("dragging");
+        document.body.classList.add("node-card-dragging");
+      }
+      drag.moved = true;
+      applyVisualOrder(event.clientX, event.clientY);
+    });
+    const finish = (event) => {
+      if (!drag || event.pointerId !== drag.pointerId) return;
+      if (drag.moved) {
+        [...grid.querySelectorAll(".node-card")]
+          .sort((a, b) => Number(a.style.order) - Number(b.style.order))
+          .forEach((card) => grid.append(card));
+        const ids = [...grid.querySelectorAll(".node-card")].map(
+          (card) => card.dataset.agentNode,
+        );
+        try {
+          localStorage.setItem(nodeCardOrderKey, JSON.stringify(ids));
+        } catch {}
+      }
+      reset();
+    };
+    const cancel = (event) => {
+      if (!drag || event.pointerId !== drag.pointerId) return;
+      reset();
+    };
+    grip.addEventListener("pointerup", finish);
+    grip.addEventListener("pointercancel", cancel);
+    grip.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+    });
+  });
 }
 
 function compactPresetPage() {
@@ -580,6 +742,8 @@ function bindAgentPage(agentItems, presetMode = false) {
       }
     };
   });
+  const cardGrid = document.querySelector(".node-card-grid");
+  if (cardGrid) enableCardDrag(cardGrid);
   clearTimeout(state.agentPollTimer);
   if (!presetMode && can("metrics.read"))
     state.agentPollTimer = setTimeout(pollAgentMetrics, 2000);
@@ -731,7 +895,7 @@ function updateAgentMetrics(item) {
         `engine-state ${installed ? statusTone(runtime.service_status) : "muted"}`;
       service
         .closest(".service-card")
-        .querySelectorAll("[data-service-action]")
+        ?.querySelectorAll("[data-service-action]")
         .forEach((button) => {
           button.disabled = serviceActionDisabled(
             button.dataset.serviceAction,
