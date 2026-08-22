@@ -49,14 +49,19 @@ func (s *Store) GetAgent(ctx context.Context, id string) (core.Agent, error) {
 
 // SetAgentClientAddress stores the operator-provided address used when
 // building client connection profiles. It lives in the agent labels so the
-// value survives Agent reconnects and can still be overridden by the Agent's
-// public_host/public_ip labels when those are available.
+// value survives Agent reconnects. Older enrollments may have stored a JSON
+// null instead of an empty labels object, so normalize that shape on update.
 func (s *Store) SetAgentClientAddress(ctx context.Context, id, address string) error {
 	command, err := s.pool.Exec(ctx, `
 		UPDATE agents
 		SET labels = CASE
-			WHEN $2 = '' THEN labels - 'client_address'
-			ELSE jsonb_set(COALESCE(labels, '{}'::jsonb), '{client_address}', to_jsonb($2::text), true)
+			WHEN $2 = '' THEN COALESCE(NULLIF(labels, 'null'::jsonb), '{}'::jsonb) - 'client_address'
+			ELSE jsonb_set(
+				COALESCE(NULLIF(labels, 'null'::jsonb), '{}'::jsonb),
+				'{client_address}',
+				to_jsonb($2::text),
+				true
+			)
 		END
 		WHERE id=$1 AND revoked_at IS NULL`, id, address)
 	if err != nil {
