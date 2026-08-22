@@ -42,6 +42,7 @@ func main() {
 		Labels:            parseLabels(os.Getenv("QCH_AGENT_LABELS")),
 		Capabilities:      capabilities,
 		HeartbeatEvery:    envDuration("QCH_HEARTBEAT_INTERVAL", 15*time.Second),
+		MetricsEvery:      envDuration("QCH_METRICS_INTERVAL", time.Second),
 		AllowHTTP:         envBool("QCH_ALLOW_HTTP", false),
 		AllowInsecureLive: envBool("QCH_ALLOW_INSECURE_LIVE", false),
 		TLSCAFile:         strings.TrimSpace(os.Getenv("QCH_TLS_CA_FILE")),

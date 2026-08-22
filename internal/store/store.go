@@ -486,6 +486,26 @@ func (s *Store) Heartbeat(ctx context.Context, id string, heartbeat core.Heartbe
 	return s.UpdatePortTrafficUsage(ctx, id, heartbeat.TrafficUsage, receivedAt)
 }
 
+// UpdateAgentMetrics refreshes only the live metrics snapshot from the
+// high-frequency metrics pushes. The push proves liveness, so last_seen is
+// refreshed as well, while version, runtime, and features stay untouched.
+func (s *Store) UpdateAgentMetrics(ctx context.Context, id string, metrics core.HostMetrics) error {
+	metricsState, err := encodeHeartbeatMetrics(&metrics, time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	command, err := s.pool.Exec(ctx, `
+			UPDATE agents SET last_seen=now(), metrics=COALESCE($2::jsonb,metrics)
+			WHERE id=$1 AND revoked_at IS NULL`, id, metricsState)
+	if err != nil {
+		return err
+	}
+	if command.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (s *Store) ListAgents(ctx context.Context) ([]core.Agent, error) {
 	rows, err := s.pool.Query(ctx, `
 			SELECT id,name,version,os,arch,capabilities,features,labels,runtime,metrics,last_seen,enrolled_at
