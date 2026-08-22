@@ -290,99 +290,102 @@ function orderAgents(agents) {
   );
 }
 
-// Pointer-based drag reordering of the overview cards. The grip captures the
-// pointer so the card link never navigates mid-drag. The source card stays in
-// the grid as a translucent placeholder reflowed through the CSS order
-// property while a cloned ghost follows the cursor; DOM order and localStorage
-// are only committed on release.
+// Drag reordering of the overview cards. A cloned ghost follows the cursor and
+// the target card is highlighted, while the grid itself does not reflow
+// mid-drag; on release the cards FLIP-animate to their new layout and the
+// order is committed to localStorage.
 function enableCardDrag(grid) {
   let drag = null;
-  const applyVisualOrder = (pointerX, pointerY) => {
-    const cards = [...grid.querySelectorAll(".node-card")];
-    const rest = cards.filter((card) => card !== drag.card);
-    let insertAt = rest.length;
-    for (let index = 0; index < rest.length; index += 1) {
-      const rect = rest[index].getBoundingClientRect();
+  const dropIndex = (pointerX, pointerY) => {
+    const cards = [...grid.querySelectorAll(".node-card")].filter(
+      (card) => card !== drag.card,
+    );
+    let index = cards.length;
+    for (let i = 0; i < cards.length; i += 1) {
+      const rect = cards[i].getBoundingClientRect();
       const centerX = rect.left + rect.width / 2;
       const centerY = rect.top + rect.height / 2;
       if (
         pointerY < centerY ||
-        (pointerY <= rect.bottom && pointerX < centerX)
+        (pointerY <= rect.bottom && pointerX <= centerX)
       ) {
-        insertAt = index;
+        index = i;
         break;
       }
     }
-    const sequence = [...rest];
-    sequence.splice(insertAt, 0, drag.card);
-    drag.insertAt = insertAt;
-    const changed = sequence.some(
-      (card, index) => card.style.order !== String(index),
-    );
-    if (!changed) return;
-    const oldRects = new Map(
-      sequence.map((card) => [card, card.getBoundingClientRect()]),
-    );
-    sequence.forEach((card, index) => (card.style.order = String(index)));
-    sequence.forEach((card) => {
-      const prev = oldRects.get(card);
-      const next = card.getBoundingClientRect();
-      const dx = prev.left - next.left;
-      const dy = prev.top - next.top;
-      if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return;
-      const invert = `translate(${dx}px, ${dy}px)`;
-      card.style.transition = "none";
-      card.style.transform = invert;
-      void card.offsetWidth;
-      requestAnimationFrame(() => {
-        if (card.style.transform !== invert) return;
-        card.style.transition = "";
-        card.style.transform = "";
-      });
-    });
+    return index;
   };
-  const clearStyles = () => {
-    drag.card.classList.remove("dragging");
-    document.body.classList.remove("node-card-dragging");
+  const highlight = (index) => {
     grid
       .querySelectorAll(".node-card")
-      .forEach((card) => {
-        card.style.order = "";
-        card.style.transform = "";
-        card.style.transition = "";
-      });
-    drag.ghost?.remove();
-    drag.ghost = null;
+      .forEach((card) => card.classList.remove("drop-target"));
+    if (index == null) return;
+    const rest = [...grid.querySelectorAll(".node-card")].filter(
+      (card) => card !== drag.card,
+    );
+    rest[index]?.classList.add("drop-target");
   };
   const reset = () => {
     if (!drag) return;
-    clearStyles();
+    drag.card.classList.remove("dragging");
+    document.body.classList.remove("node-card-dragging");
+    grid.querySelectorAll(".node-card").forEach((card) => {
+      card.classList.remove("drop-target");
+      card.style.order = "";
+      card.style.transform = "";
+      card.style.transition = "";
+    });
+    drag.ghost?.remove();
     drag = null;
   };
   const finish = (event) => {
     if (!drag || event.pointerId !== drag.pointerId) return;
-    const { card, moved, insertAt } = drag;
-    if (moved) {
+    const { card, moved, drop } = drag;
+    if (moved && grid.contains(card)) {
       const rest = [...grid.querySelectorAll(".node-card")].filter(
         (item) => item !== card,
       );
-      const target = insertAt == null ? null : rest[insertAt];
+      const ghostRect = drag.ghost
+        ? drag.ghost.getBoundingClientRect()
+        : card.getBoundingClientRect();
+      const oldRects = new Map(
+        [card, ...rest].map((item) => [
+          item,
+          item === card
+            ? ghostRect
+            : item.getBoundingClientRect(),
+        ]),
+      );
+      const target = drop == null || drop >= rest.length ? null : rest[drop];
       if (target) target.before(card);
       else grid.append(card);
-      const ids = [...grid.querySelectorAll(".node-card")].map(
-        (item) => item.dataset.agentNode,
-      );
+      const next = [...grid.querySelectorAll(".node-card")];
+      next.forEach((item) => {
+        const prev = oldRects.get(item);
+        if (!prev) return;
+        const rect = item.getBoundingClientRect();
+        const dx = prev.left - rect.left;
+        const dy = prev.top - rect.top;
+        if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return;
+        const invert = `translate(${dx}px, ${dy}px)`;
+        item.style.transition = "none";
+        item.style.transform = invert;
+        void item.offsetWidth;
+        requestAnimationFrame(() => {
+          item.style.transition = "";
+          item.style.transform = "";
+        });
+      });
+      const ids = next.map((item) => item.dataset.agentNode);
       try {
         localStorage.setItem(nodeCardOrderKey, JSON.stringify(ids));
       } catch {}
     }
-    clearStyles();
-    drag = null;
+    reset();
   };
   const cancel = (event) => {
     if (!drag || event.pointerId !== drag.pointerId) return;
-    clearStyles();
-    drag = null;
+    reset();
   };
   grid.querySelectorAll(".node-card-grip").forEach((grip) => {
     grip.addEventListener("pointerdown", (event) => {
@@ -399,13 +402,17 @@ function enableCardDrag(grid) {
         rect,
         started: false,
         moved: false,
-        insertAt: null,
+        drop: null,
         ghost: null,
       };
       grip.setPointerCapture(event.pointerId);
     });
     grip.addEventListener("pointermove", (event) => {
       if (!drag || event.pointerId !== drag.pointerId) return;
+      if (!drag.card.isConnected) {
+        reset();
+        return;
+      }
       if (!drag.started) {
         if (
           Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 4
@@ -432,7 +439,9 @@ function enableCardDrag(grid) {
       const dx = event.clientX - drag.startX;
       const dy = event.clientY - drag.startY;
       drag.ghost.style.transform = `translate(${dx}px, ${dy}px) scale(.99) rotate(.3deg)`;
-      applyVisualOrder(event.clientX, event.clientY);
+      const index = dropIndex(event.clientX, event.clientY);
+      drag.drop = index;
+      highlight(index);
     });
     grip.addEventListener("pointerup", finish);
     grip.addEventListener("pointercancel", cancel);
