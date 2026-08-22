@@ -68,6 +68,59 @@ func TestSPAConsoleSurfaceMatchesInitialRelease(t *testing.T) {
 	}
 }
 
+func TestServerPlanRegenerationStaysLocalAndUsesCurrentFormState(t *testing.T) {
+	configs, err := os.ReadFile("modules/configs.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(configs)
+	start := strings.Index(content, "export function bindServerPlanRegeneration")
+	end := strings.Index(content, "export function installConfigPages")
+	if start < 0 || end <= start {
+		t.Fatal("configs.js is missing the isolated server-plan regeneration handler")
+	}
+	handler := content[start:end]
+	for _, required := range []string{
+		"readServerPlanInput(form, protocol)",
+		"JSON.stringify({ protocol: protocol.key, input })",
+		"form.elements.namedItem(name)",
+		"request !== latestRequest",
+		"requestedRevision !== formRevision",
+		`buttons.forEach((item)`,
+		`item.disabled = true`,
+		`button.setAttribute("aria-busy", "true")`,
+		"生成参数失败",
+	} {
+		if !strings.Contains(handler, required) {
+			t.Errorf("server-plan regeneration handler is missing %q", required)
+		}
+	}
+	for _, forbidden := range []string{
+		"agentConfig(", "location.", "state.data.inboundTag", "shell(", "notify(",
+	} {
+		if strings.Contains(handler, forbidden) {
+			t.Errorf("server-plan regeneration handler must not use %q", forbidden)
+		}
+	}
+	if strings.Contains(content, "delete state.data.serverPlans[") {
+		t.Error("server-plan regeneration must not discard the current local plan before the request succeeds")
+	}
+	if !strings.Contains(content, "data-regenerate-status") {
+		t.Error("server-plan regeneration needs a local status region that does not scroll the page")
+	}
+	for _, required := range []string{
+		`["port", "port", "生成监听端口"]`,
+		`["credential", "credential", "生成凭据"]`,
+		`["secondary_credential", "secondary_credential", "生成次凭据"]`,
+		`"reality_private_key,reality_public_key"`,
+		`["reality_short_id", "reality_short_id", "生成 Short ID"]`,
+	} {
+		if !strings.Contains(content, required) {
+			t.Errorf("server-plan field generation is missing %q", required)
+		}
+	}
+}
+
 func TestSidebarNavigationUsesWorkflowOrderAndResponsiveGrouping(t *testing.T) {
 	app, err := os.ReadFile("app.js")
 	if err != nil {

@@ -5,8 +5,14 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
+	"fmt"
 	"math/big"
+	"slices"
+	"strings"
 )
+
+var ErrInvalidPlanInput = errors.New("invalid server plan input")
 
 // NewPlan creates a complete randomized server plan. Ports are selected from
 // the dynamic/private range; the remote core remains the authority that checks
@@ -70,4 +76,53 @@ func NewPlan(protocol Protocol) (Input, error) {
 		input.RealityServerName = DefaultRealityServerName
 	}
 	return input, nil
+}
+
+// RegeneratePlan creates fresh random plan values while retaining the current
+// operator-selected settings that are not themselves generated parameters.
+func RegeneratePlan(protocol Protocol, current Input) (Input, error) {
+	plan, err := NewPlan(protocol)
+	if err != nil {
+		return Input{}, err
+	}
+
+	if len(protocol.Methods) > 0 {
+		method := strings.TrimSpace(current.Method)
+		if method == "" {
+			method = plan.Method
+		}
+		if !slices.Contains(protocol.Methods, method) {
+			return Input{}, fmt.Errorf("%w: unsupported method %q for %s", ErrInvalidPlanInput, method, protocol.Key)
+		}
+		plan.Method = method
+		plan.Credential, err = NewCredential(protocol.Key, method)
+		if err != nil {
+			return Input{}, err
+		}
+	}
+
+	plan.Listen = current.Listen
+	if protocol.IgnoresUsername {
+		plan.Username = current.Username
+	}
+	randomTransportPath := plan.TransportPath
+	plan.Transport = current.Transport
+	plan.TransportPath = current.TransportPath
+	if current.Transport == "websocket" || current.Transport == "grpc" {
+		pathSuffix := strings.TrimPrefix(randomTransportPath, "/")
+		if pathSuffix == "" {
+			pathSuffix = strings.TrimPrefix(plan.Tag, protocol.Key+"-")
+		}
+		if current.Transport == "websocket" {
+			plan.TransportPath = "/" + pathSuffix
+		} else {
+			plan.TransportPath = pathSuffix
+		}
+	}
+	plan.TLSEnabled = current.TLSEnabled
+	plan.CertificatePath = current.CertificatePath
+	plan.PrivateKeyPath = current.PrivateKeyPath
+	plan.RealityEnabled = current.RealityEnabled
+	plan.RealityServerName = current.RealityServerName
+	return plan, nil
 }
