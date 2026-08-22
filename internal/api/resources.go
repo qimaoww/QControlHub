@@ -183,7 +183,8 @@ func (s *Server) newServerPlan(w http.ResponseWriter, request *http.Request) {
 		return
 	}
 	var input struct {
-		Protocol string `json:"protocol"`
+		Protocol string              `json:"protocol"`
+		Input    *serverconfig.Input `json:"input"`
 	}
 	if err := decodeJSON(w, request, &input, 8<<10); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -194,8 +195,21 @@ func (s *Server) newServerPlan(w http.ResponseWriter, request *http.Request) {
 		writeError(w, http.StatusBadRequest, "unknown server inbound protocol")
 		return
 	}
-	plan, err := serverconfig.NewPlan(protocol)
+	var (
+		plan serverconfig.Input
+		err  error
+	)
+	if input.Input == nil {
+		plan, err = serverconfig.NewPlan(protocol)
+	} else {
+		input.Input.Protocol = protocol.Key
+		plan, err = serverconfig.RegeneratePlan(protocol, *input.Input)
+	}
 	if err != nil {
+		if errors.Is(err, serverconfig.ErrInvalidPlanInput) {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		writeInternalError(w, err)
 		return
 	}

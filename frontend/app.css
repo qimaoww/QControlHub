@@ -337,3 +337,6 @@ a.node-card[data-state="offline"] .node-card-foot>small i{background:var(--muted
 .preset-node-workspace>.service-canvas>.service-grid{grid-template-columns:minmax(0,1fr)}
 /* Client access: keep the context sidebar as the sole node filter on narrow screens. */
 @media(max-width:820px) and (pointer:coarse){.page-client-access .context-sidebar{display:flex}}
+/* Server plans: report local regeneration results without moving the workspace scroll position. */
+.builder-regenerate-status{min-width:0;margin-right:auto;overflow:hidden;color:var(--green);font-size:9px;text-overflow:ellipsis;white-space:nowrap}.builder-regenerate-status.error{color:var(--red)}
+.generated-input-control{display:flex;margin-top:4px}.generated-input-control input{flex:1;margin-top:0;border-radius:7px 0 0 7px}.generated-input-control .field-generate-button{border:1px solid var(--line-2);border-left:0;border-radius:0 7px 7px 0;background:var(--surface-2);padding:0 10px;color:var(--accent);font-size:9px;white-space:nowrap}.server-form .secret-value-control button{border-radius:0}.server-form .secret-value-control button:last-child{border-radius:0 7px 7px 0}.server-form .field-generate-button{min-width:52px;padding-inline:8px}

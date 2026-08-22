@@ -7,7 +7,10 @@ import {
   nodeCardDropIndex,
 } from "./modules/agents.js";
 import { installClientAccess } from "./modules/client-access.js";
-import { installConfigPages } from "./modules/configs.js";
+import {
+  bindServerPlanRegeneration,
+  installConfigPages,
+} from "./modules/configs.js";
 import { installCoreLogs } from "./modules/core-logs.js";
 import { installDashboard } from "./modules/dashboard.js";
 import { installSettings } from "./modules/settings.js";
@@ -67,6 +70,286 @@ assert.deepEqual(
   "in-flight navigation coalesces to one render of the latest route",
 );
 assert.equal(maximumActiveRenders, 1, "route renders never overlap");
+
+const previousFormData = globalThis.FormData;
+const planControls = Object.fromEntries(
+  Object.entries({
+    operation: "modify",
+    tag: "unsaved-tag",
+    listen: "127.0.0.1",
+    port: "24443",
+    username: "unsaved-user",
+    credential: "unsaved-credential",
+    secondary_credential: "unsaved-secondary",
+    method: "2022-blake3-aes-128-gcm",
+    transport: "grpc",
+    transport_path: "unsaved-service",
+    tls_enabled: "1",
+    certificate_path: "/unsaved/certificate.pem",
+    private_key_path: "/unsaved/private-key.pem",
+    reality_enabled: "0",
+    reality_private_key: "",
+    reality_public_key: "",
+    reality_short_id: "",
+    reality_server_name: "unsaved.example.test",
+  }).map(([name, value]) => [name, { name, value }]),
+);
+const planFormListeners = new Map();
+const planForm = {
+  isConnected: true,
+  elements: {
+    namedItem(name) {
+      return planControls[name] || null;
+    },
+  },
+  addEventListener(type, listener) {
+    const listeners = planFormListeners.get(type) || [];
+    listeners.push(listener);
+    planFormListeners.set(type, listeners);
+  },
+  async dispatch(type) {
+    await Promise.all(
+      (planFormListeners.get(type) || []).map((listener) =>
+        listener({ currentTarget: this }),
+      ),
+    );
+  },
+};
+const fakePlanButton = (textContent, dataset) => {
+  const listeners = [];
+  const attributes = new Map();
+  return {
+    attributes,
+    dataset,
+    disabled: false,
+    textContent,
+    addEventListener(type, listener) {
+      if (type === "click") listeners.push(listener);
+    },
+    setAttribute(name, value) {
+      attributes.set(name, value);
+    },
+    removeAttribute(name) {
+      attributes.delete(name);
+    },
+    dispatchClick() {
+      return Promise.all(
+        listeners.map((listener) =>
+          listener({ currentTarget: this, preventDefault: noop }),
+        ),
+      );
+    },
+  };
+};
+const planButton = fakePlanButton("重新生成参数", { regenerate: "all" });
+const credentialPlanButton = fakePlanButton("生成", {
+  regenerate: "credential",
+  regenerateSuccess: "凭据已生成",
+});
+const realityKeyPlanButton = fakePlanButton("生成密钥对", {
+  regenerate: "reality_private_key,reality_public_key",
+  regenerateSuccess: "Reality 密钥对已生成",
+});
+const deferredPlan = () => {
+  let resolve;
+  let reject;
+  const promise = new Promise((accept, fail) => {
+    resolve = accept;
+    reject = fail;
+  });
+  return { promise, resolve, reject };
+};
+const planRequests = [];
+const planNotifications = [];
+const appliedPlans = [];
+const pageState = {
+  route: "#agent-config",
+  node: "node-current",
+  engine: "ss-rust",
+  tab: "transport",
+  expanded: true,
+  scrollY: 720,
+};
+globalThis.FormData = class {
+  constructor(form) {
+    this.form = form;
+  }
+
+  get(name) {
+    return this.form.elements.namedItem(name)?.value ?? null;
+  }
+};
+
+try {
+  bindServerPlanRegeneration({
+    form: planForm,
+    buttons: [planButton, credentialPlanButton, realityKeyPlanButton],
+    api: async (path, options) => {
+      const pending = deferredPlan();
+      planRequests.push({ path, options, pending });
+      return pending.promise;
+    },
+    base: "/agents/node-current/configs/ss-rust",
+    protocol: {
+      key: "ss2022",
+      requires_tls: false,
+      uses_reality: false,
+    },
+    report: (...message) => planNotifications.push(message),
+    onApplied: (plan) => appliedPlans.push(plan),
+  });
+
+  const firstClick = planButton.dispatchClick();
+  assert.equal(planButton.disabled, true, "regeneration disables its button");
+  assert.equal(credentialPlanButton.disabled, true);
+  assert.equal(planButton.textContent, "生成中…");
+  assert.equal(planButton.attributes.get("aria-busy"), "true");
+  assert.equal(planRequests.length, 1);
+  assert.equal(
+    planRequests[0].path,
+    "/agents/node-current/configs/ss-rust/plans",
+    "regeneration stays scoped to the selected node and engine",
+  );
+  const firstPayload = JSON.parse(planRequests[0].options.body);
+  assert.equal(
+    firstPayload.input.method,
+    "2022-blake3-aes-128-gcm",
+    "regeneration uses the current unsaved method",
+  );
+  assert.equal(firstPayload.input.transport, "grpc");
+  assert.equal(firstPayload.input.listen, "127.0.0.1");
+  assert.equal(firstPayload.input.certificate_path, "/unsaved/certificate.pem");
+  planRequests[0].pending.resolve({
+    tag: "regenerated-tag",
+    port: 35555,
+    username: "regenerated-user",
+    credential: "regenerated-credential",
+    secondary_credential: "regenerated-secondary",
+    transport_path: "regenerated-service",
+    method: "server-default-method",
+    transport: "websocket",
+    listen: "0.0.0.0",
+    certificate_path: "/server/default.pem",
+  });
+  await firstClick;
+  assert.equal(planControls.tag.value, "regenerated-tag");
+  assert.equal(planControls.port.value, "35555");
+  assert.equal(planControls.credential.value, "regenerated-credential");
+  assert.equal(
+    planControls.method.value,
+    "2022-blake3-aes-128-gcm",
+    "local updates preserve current selections",
+  );
+  assert.equal(planControls.transport.value, "grpc");
+  assert.equal(planControls.listen.value, "127.0.0.1");
+  assert.equal(planControls.operation.value, "modify");
+  assert.deepEqual(pageState, {
+    route: "#agent-config",
+    node: "node-current",
+    engine: "ss-rust",
+    tab: "transport",
+    expanded: true,
+    scrollY: 720,
+  });
+  assert.equal(appliedPlans.length, 1);
+  assert.equal(planButton.disabled, false);
+  assert.equal(planButton.textContent, "重新生成参数");
+  assert.equal(planButton.attributes.has("aria-busy"), false);
+
+  const fullTag = planControls.tag.value;
+  const fullPort = planControls.port.value;
+  const credentialClick = credentialPlanButton.dispatchClick();
+  assert.equal(planButton.disabled, true);
+  assert.equal(credentialPlanButton.textContent, "生成中…");
+  planRequests[1].pending.resolve({
+    tag: "must-not-apply",
+    port: 38888,
+    credential: "credential-only-result",
+  });
+  await credentialClick;
+  assert.equal(
+    planControls.credential.value,
+    "credential-only-result",
+    "a field action updates its requested result",
+  );
+  assert.equal(planControls.tag.value, fullTag);
+  assert.equal(planControls.port.value, fullPort);
+  assert.deepEqual(planNotifications.at(-1), ["凭据已生成"]);
+  assert.equal(credentialPlanButton.textContent, "生成");
+
+  const previousShortID = planControls.reality_short_id.value;
+  const realityKeyClick = realityKeyPlanButton.dispatchClick();
+  planRequests[2].pending.resolve({
+    reality_private_key: "regenerated-private-key",
+    reality_public_key: "regenerated-public-key",
+    reality_short_id: "must-not-apply",
+  });
+  await realityKeyClick;
+  assert.equal(
+    planControls.reality_private_key.value,
+    "regenerated-private-key",
+  );
+  assert.equal(planControls.reality_public_key.value, "regenerated-public-key");
+  assert.equal(
+    planControls.reality_short_id.value,
+    previousShortID,
+    "Reality key generation updates the pair without changing Short ID",
+  );
+
+  const failedCredential = planControls.credential.value;
+  const failedClick = planButton.dispatchClick();
+  planRequests[3].pending.reject(new Error("generation unavailable"));
+  await failedClick;
+  assert.equal(
+    planControls.credential.value,
+    failedCredential,
+    "a failed request preserves the current form",
+  );
+  assert.deepEqual(planNotifications.at(-1), [
+    "生成参数失败：generation unavailable",
+    "error",
+  ]);
+  assert.equal(planButton.disabled, false);
+
+  const olderClick = planButton.dispatchClick();
+  planControls.method.value = "2022-blake3-aes-256-gcm";
+  await planForm.dispatch("change");
+  const newerClick = planButton.dispatchClick();
+  assert.equal(planRequests.length, 6, "rapid clicks can be ordered safely");
+  assert.equal(
+    JSON.parse(planRequests[5].options.body).input.method,
+    "2022-blake3-aes-256-gcm",
+    "the newer request captures the newer unsaved selection",
+  );
+  planRequests[5].pending.resolve({
+    tag: "newer-tag",
+    port: 36666,
+    credential: "newer-credential",
+  });
+  await newerClick;
+  assert.equal(planControls.credential.value, "newer-credential");
+  assert.equal(
+    planButton.disabled,
+    true,
+    "the button stays disabled until every pending request settles",
+  );
+  planRequests[4].pending.resolve({
+    tag: "older-tag",
+    port: 37777,
+    credential: "older-credential",
+  });
+  await olderClick;
+  assert.equal(
+    planControls.credential.value,
+    "newer-credential",
+    "an out-of-order response cannot overwrite the newer result",
+  );
+  assert.equal(planControls.method.value, "2022-blake3-aes-256-gcm");
+  assert.equal(planButton.disabled, false);
+} finally {
+  if (previousFormData === undefined) delete globalThis.FormData;
+  else globalThis.FormData = previousFormData;
+}
 
 const cardSlots = [
   { left: 0, right: 100, top: 0, bottom: 160 },
