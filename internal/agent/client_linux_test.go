@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -149,5 +150,50 @@ func TestTaskExecutionSurvivesWebSocketSessionCancellation(t *testing.T) {
 	result, ok := client.cachedTaskResult(task)
 	if !ok || !result.Success || result.Output == "" {
 		t.Fatalf("result after delivery session cancellation = %+v, cached=%t", result, ok)
+	}
+}
+
+func TestUnsupportedExistingServiceTasksFailClosedInWebSocketResults(t *testing.T) {
+	t.Parallel()
+	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	statePath := filepath.Join(t.TempDir(), "agent-state.json")
+	want := credentials{AgentID: "agt_0123456789abcdef", PrivateKey: authn.EncodePrivateKey(privateKey)}
+	if err := saveCredentials(statePath, want); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := loadCredentials(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &Client{
+		config: ClientConfig{StatePath: statePath}, creds: loaded,
+		executor: &Executor{
+			Specs: map[core.Engine]EngineSpec{
+				core.EngineSingBox: {Binary: "/unused/sing-box", ConfigPath: "/unused/config.json", Service: "qagent-sing-box.service"},
+			},
+			ExistingDiscoveryIssues: map[core.Engine]string{core.EngineSingBox: "unsupported executable wrapper"},
+		},
+	}
+	for index, action := range []core.Action{
+		core.ActionValidate, core.ActionDeploy, core.ActionStart, core.ActionStop,
+		core.ActionRestart, core.ActionStatus, core.ActionInstall, core.ActionReadConfig,
+		core.ActionImportExisting,
+	} {
+		t.Run(string(action), func(t *testing.T) {
+			outgoing := make(chan core.WireMessage, 1)
+			task := core.Task{
+				ID: fmt.Sprintf("tsk_%016d", index+1), AgentID: want.AgentID,
+				LeaseID: fmt.Sprintf("lease-identifier-%016d", index+1),
+				Action:  action, Engine: core.EngineSingBox, Status: core.TaskRunning,
+			}
+			client.executeTaskForSession(context.Background(), context.Background(), task, outgoing)
+			message := <-outgoing
+			if message.Result == nil || message.Result.Result.Success || !strings.Contains(message.Result.Result.Error, "core tasks are disabled") {
+				t.Fatalf("websocket result for %s = %+v", action, message)
+			}
+		})
 	}
 }

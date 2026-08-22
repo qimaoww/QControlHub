@@ -829,8 +829,8 @@ func (s *Store) CreateTask(ctx context.Context, request core.TaskRequest) (core.
 		return core.Task{}, err
 	}
 	defer tx.Rollback(ctx)
-	var capabilitiesJSON, featuresJSON []byte
-	if err := tx.QueryRow(ctx, `SELECT capabilities,features FROM agents WHERE id=$1 AND revoked_at IS NULL FOR UPDATE`, request.AgentID).Scan(&capabilitiesJSON, &featuresJSON); err != nil {
+	var capabilitiesJSON, featuresJSON, runtimeJSON []byte
+	if err := tx.QueryRow(ctx, `SELECT capabilities,features,runtime FROM agents WHERE id=$1 AND revoked_at IS NULL FOR UPDATE`, request.AgentID).Scan(&capabilitiesJSON, &featuresJSON, &runtimeJSON); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return core.Task{}, fmt.Errorf("agent: %w", ErrNotFound)
 		}
@@ -844,18 +844,27 @@ func (s *Store) CreateTask(ctx context.Context, request core.TaskRequest) (core.
 	if err := json.Unmarshal(featuresJSON, &features); err != nil {
 		return core.Task{}, err
 	}
+	var runtime map[core.Engine]core.RuntimeState
+	if err := json.Unmarshal(runtimeJSON, &runtime); err != nil {
+		return core.Task{}, err
+	}
 	if request.Action == core.ActionUpgradeAgent && !containsFeature(features, core.AgentFeatureSelfUpgrade) {
 		return core.Task{}, fmt.Errorf("%w: this Agent does not support remote upgrades; run the current one-click installation once", ErrConflict)
 	}
 	if request.Action != core.ActionUpgradeAgent && !containsEngine(capabilities, request.Engine) {
 		return core.Task{}, fmt.Errorf("%w: agent does not advertise the requested engine", ErrInvalid)
 	}
+	if request.Action != core.ActionUpgradeAgent {
+		if reason := strings.TrimSpace(runtime[request.Engine].ExistingConfigUnsupportedReason); reason != "" {
+			return core.Task{}, fmt.Errorf("%w: %s core tasks are disabled because an existing service could not be mapped safely: %s", ErrConflict, request.Engine, reason)
+		}
+	}
 
 	task := core.Task{
 		AgentID: request.AgentID, Action: request.Action, Engine: request.Engine,
 		ConfigID: request.ConfigID, CoreVersion: request.CoreVersion, Status: core.TaskPending, CreatedAt: time.Now().UTC(),
 	}
-	if request.Action == core.ActionDeploy || request.Action == core.ActionValidate {
+	if request.Action == core.ActionDeploy || request.Action == core.ActionValidate || request.Action == core.ActionImportExisting {
 		var configEngine core.Engine
 		var configAgentID string
 		err := tx.QueryRow(ctx, `SELECT engine,content,version,COALESCE(agent_id,'') FROM configs WHERE id=$1 AND deleted_at IS NULL FOR UPDATE`, request.ConfigID).Scan(&configEngine, &task.ConfigContent, &task.ConfigVersion, &configAgentID)
@@ -867,6 +876,9 @@ func (s *Store) CreateTask(ctx context.Context, request core.TaskRequest) (core.
 		}
 		if configEngine != request.Engine {
 			return core.Task{}, fmt.Errorf("%w: task engine does not match configuration engine", ErrInvalid)
+		}
+		if request.Action == core.ActionImportExisting && configAgentID != request.AgentID {
+			return core.Task{}, fmt.Errorf("%w: existing service migration requires this agent's saved snapshot", ErrInvalid)
 		}
 		if configAgentID != "" && configAgentID != request.AgentID {
 			return core.Task{}, fmt.Errorf("%w: node-owned configuration cannot be deployed to another agent", ErrInvalid)
@@ -1400,7 +1412,7 @@ ALTER TABLE configs ADD CONSTRAINT configs_content_check CHECK (octet_length(con
 CREATE TABLE IF NOT EXISTS tasks (
     id text PRIMARY KEY,
     agent_id text NOT NULL REFERENCES agents(id),
-    action varchar(20) NOT NULL CHECK (action IN ('validate','deploy','read-config','start','stop','restart','status','install','upgrade-agent')),
+    action varchar(20) NOT NULL CHECK (action IN ('validate','deploy','import-existing','read-config','start','stop','restart','status','install','upgrade-agent')),
 	    engine varchar(20) NOT NULL CHECK (engine IN ('mihomo','xray','sing-box','ss-rust') OR (action='upgrade-agent' AND engine='')),
     config_id text REFERENCES configs(id),
     config_version integer,
@@ -1420,7 +1432,7 @@ ALTER TABLE tasks ADD COLUMN IF NOT EXISTS lease_id text;
 	DROP INDEX IF EXISTS tasks_latest_deployment_idx;
 	ALTER TABLE tasks DROP COLUMN IF EXISTS simulated;
 	ALTER TABLE tasks DROP CONSTRAINT IF EXISTS tasks_action_check;
-	ALTER TABLE tasks ADD CONSTRAINT tasks_action_check CHECK (action IN ('validate','deploy','read-config','start','stop','restart','status','install','upgrade-agent'));
+	ALTER TABLE tasks ADD CONSTRAINT tasks_action_check CHECK (action IN ('validate','deploy','import-existing','read-config','start','stop','restart','status','install','upgrade-agent'));
 	ALTER TABLE tasks DROP CONSTRAINT IF EXISTS tasks_status_check;
 	ALTER TABLE tasks ADD CONSTRAINT tasks_status_check CHECK (status IN ('pending','running','succeeded','failed','canceled'));
 	ALTER TABLE configs DROP CONSTRAINT IF EXISTS configs_engine_check;
@@ -1520,7 +1532,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS agents_public_key_unique_idx ON agents(public_
 	CREATE INDEX IF NOT EXISTS config_revisions_recent_idx ON config_revisions(config_id,version DESC);
 CREATE INDEX IF NOT EXISTS tasks_agent_queue_idx ON tasks(agent_id, status, created_at);
 CREATE INDEX IF NOT EXISTS tasks_created_idx ON tasks(created_at DESC);
-CREATE INDEX IF NOT EXISTS tasks_latest_deployment_idx ON tasks(agent_id,engine,finished_at DESC) WHERE action='deploy' AND status='succeeded';
+CREATE INDEX IF NOT EXISTS tasks_latest_deployment_idx ON tasks(agent_id,engine,finished_at DESC) WHERE action IN ('deploy','import-existing') AND status='succeeded';
 CREATE UNIQUE INDEX IF NOT EXISTS tasks_one_running_per_agent_idx ON tasks(agent_id) WHERE status='running';
 CREATE TABLE IF NOT EXISTS metric_samples (
     agent_id text NOT NULL REFERENCES agents(id) ON DELETE CASCADE,

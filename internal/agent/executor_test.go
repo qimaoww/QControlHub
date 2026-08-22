@@ -113,6 +113,32 @@ func TestCoreBootstrapDoesNotTouchLegacyInstallations(t *testing.T) {
 	}
 }
 
+func TestOneClickInstallerMapsOnlyValidatedExistingCorePaths(t *testing.T) {
+	t.Parallel()
+	contents, err := os.ReadFile("../../deploy/remote/install-agent.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mapping, err := os.ReadFile("../../deploy/existing-core-mapping.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(contents) + string(mapping)
+	for _, required := range []string{
+		"discover_existing_xray", "discover_existing_singbox", "systemctl is-active --quiet",
+		"existing-core-mapping.sh", "QCH_EXISTING_XRAY_CONFIG", "QCH_EXISTING_SING_BOX_CONFIG",
+	} {
+		if !strings.Contains(script, required) {
+			t.Errorf("one-click installer is missing inherited-core guard %q", required)
+		}
+	}
+	for _, forbidden := range []string{"systemctl stop xray.service", "systemctl stop sing-box.service", "QCH_INHERIT_CONFIGS", "validate-inherited"} {
+		if strings.Contains(script, forbidden) {
+			t.Errorf("one-click installer stops an existing service via %q", forbidden)
+		}
+	}
+}
+
 func TestPersistentCoreLogOutputsAreRejected(t *testing.T) {
 	t.Parallel()
 	fixtures := []struct {
@@ -133,6 +159,31 @@ func TestPersistentCoreLogOutputsAreRejected(t *testing.T) {
 	}
 	if err := validateNoPersistentCoreLogs(core.EngineXray, `{"log":{"loglevel":"info","access":"none"}}`); err != nil {
 		t.Fatalf("disabled Xray file logging was rejected: %v", err)
+	}
+}
+
+func TestUnsupportedExistingServiceBlocksEveryCoreAction(t *testing.T) {
+	t.Parallel()
+	reason := "multiple active sing-box services were detected"
+	executor := &Executor{
+		Specs: map[core.Engine]EngineSpec{
+			core.EngineSingBox: {Binary: "/unused/sing-box", ConfigPath: "/unused/config.json", Service: "qagent-sing-box.service"},
+		},
+		ExistingDiscoveryIssues: map[core.Engine]string{core.EngineSingBox: reason},
+	}
+	for _, action := range []core.Action{
+		core.ActionValidate, core.ActionDeploy, core.ActionStart, core.ActionStop,
+		core.ActionRestart, core.ActionStatus, core.ActionInstall, core.ActionReadConfig,
+		core.ActionImportExisting,
+	} {
+		t.Run(string(action), func(t *testing.T) {
+			_, err := executor.Execute(context.Background(), core.Task{
+				Action: action, Engine: core.EngineSingBox, ConfigContent: `{"inbounds":[]}`,
+			})
+			if err == nil || !strings.Contains(err.Error(), "core tasks are disabled") || !strings.Contains(err.Error(), reason) {
+				t.Fatalf("Execute(%s) error = %v", action, err)
+			}
+		})
 	}
 }
 

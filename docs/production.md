@@ -128,6 +128,37 @@ TLS 入站默认引用 `/etc/qcontrolhub/tls/server.crt` 与 `/etc/qcontrolhub/t
 | sing-box | `/usr/local/lib/qagent/cores/sing-box` | `/etc/qagent/sing-box/config.json` | `qagent-sing-box.service` | `QCH_SING_BOX_*` |
 | Shadowsocks Rust | `/usr/local/lib/qagent/cores/ssserver` | `/etc/qagent/shadowsocks-rust/config.json` | `qagent-shadowsocks-rust.service` | `QCH_SS_RUST_*` |
 
+### 已有 Xray / sing-box VPS 映射
+
+一键安装脚本会尝试识别下列常见组合：
+
+| 内核 | 活动服务 | 二进制候选 | 配置候选 |
+| --- | --- | --- | --- |
+| Xray | `xray.service` | `/usr/local/bin/xray`、`/usr/bin/xray` | `/usr/local/etc/xray/config.json`、`/etc/xray/config.json` |
+| sing-box | `sing-box.service`、`singbox.service` | `/usr/local/bin/sing-box`、`/usr/bin/sing-box`、`/etc/sing-box/bin/sing-box` | `/etc/sing-box/config.json`、`/usr/local/etc/sing-box/config.json` |
+
+只有同时满足以下条件才会映射：通用服务当前为 active；systemd 只有一个明确的 `ExecStart`，其实际 executable token 与发现信息完全相同；Xray 使用受支持的单文件参数，sing-box 使用 `run -c <file>`、`run --config <file>`，或产品确认的固定顺序 `run -c <file> -C <directory>`；二进制、配置源及父链均为 root 所有、不是符号链接且不可被组/其他用户写入；全部配置源与合并快照均不超过 2 MiB；QAgent 对完整合并快照执行结构和真实内核校验；对应的 `qagent-*` 专用单元不存在或处于 inactive/failed。未知附加参数、相似路径前缀、多个 `-c`/`-C`、其他参数顺序、多个启动命令和活动的专用单元都会安全回退。
+
+sing-box 的 `-C` 表示配置目录，而不是工作目录。QAgent 按 sing-box 的路径排序、对象递归合并、数组追加和“较早标量优先”规则读取主文件及目录中全部 `.json`，拒绝符号链接、非普通 JSON 条目、权限不安全或读取期间发生变化的目录，并分别用原始 `-c/-C` 参数和合并后的单文件快照执行真实内核校验。这样页面展示并迁移的是完整生效配置，不会遗漏目录片段。
+
+二进制路径默认仍必须是受保护的普通文件。`/etc/sing-box/bin/sing-box` 只接受 root 所有、父链不可写且不是符号链接的原生可执行文件。对于常见的 `/usr/local/bin/sing-box` 符号链接，只额外接受两种可证明的形式：直接解析到受保护真实二进制，或解析到内容严格等于 `#!/bin/sh` 加 `exec <受保护真实二进制> "$@"` 的固定转发器。QAgent 记录 systemd 使用的 executable token，但只校验、复制真实二进制；包含条件、环境展开、前后置命令或其他 shell 逻辑的任意 wrapper 不会显示为可迁移入口，也绝不会被复制成内核。
+
+脚本只把核验后的 binary、config、可选 config-directory、service executable 和 service 写成精确的 `QCH_EXISTING_*` 只读发现信息，并同时清除、核验对应 `qagent-*` 空白单元的 persistent/runtime enable 状态；不会停止、禁用、替换或修改原通用服务。无法精确映射的活动候选会在引导专用单元前中止安装，不能与“没有活动候选”混同。注册请求不包含配置正文，也不会创建配置、修订或部署记录。节点上线后，管理员在 Web 控制台“手动配置”页查看只读的实时节点快照，再显式选择“手动导入并迁移”；迁移完成后才能编辑托管配置。
+
+已有节点通过控制面“升级 Agent”替换二进制并重启后，即使环境文件中没有 `QCH_EXISTING_*`，新版 Agent 也会在启动阶段执行同一套只读发现与真实内核校验。自动发现结果原子保存到 Agent state 文件旁的 `0600` 状态文件，只使用 `/var/lib/qcontrolhub` 既有受保护写权限；每次重启都会按当前 service/ExecStart/配置源刷新，不写原服务配置、二进制或任意 `/etc` 路径。显式配置的 `QCH_EXISTING_*` 始终优先，不会被自动结果覆盖；`migrating` 和 `migrated` marker 对应的持久映射会继续保留，用于崩溃恢复或在每次重启时重新证明完成状态仍安全。
+
+如果标准服务及 `-c`/`-C` 配置形式已被检测到，但 executable 是复杂 wrapper、多跳 symlink、路径/权限不安全，或多个标准服务同时 active，Agent 不会执行 wrapper、读取不完整快照或创建迁移映射。该状态及原因会随心跳上报；控制面拒绝创建该内核的全部任务，Agent 执行器也会独立拒绝经旧页面或既有 WSS 会话送达的任务。节点页与“手动配置”页显示“检测到但不可迁移”。管理员应先把单元调整为直接真实二进制、一跳真实二进制链接或前述固定两行转发器，再重启 Agent 触发刷新。
+
+迁移任务只接受 enable 状态为 `enabled`、`enabled-runtime` 或 `disabled` 的原服务和 QAgent 专用服务；`static`、`indirect` 等无法可靠持久禁用或精确恢复的状态会在任何文件或服务变更前安全拒绝，原服务继续运行。QAgent 专用 managed service 必须为 `inactive` 或 `failed`：Agent 在任何临时校验/drop-in/托管文件/marker 变更前检查一次，并在准备完成、停原服务前再次检查；`active`、`activating`、`reloading`、`deactivating` 或期间漂移都会安全拒绝，回滚已准备文件且不把既有进程误报为迁移成功。Agent 还会在准备开始前和停服切换前分别重新读取活动原单元的结构化 `ExecStart`，只有实际 executable token、固定转发关系和受支持的配置参数仍精确匹配发现信息时才继续；同时会重新读取全部配置源并要求合并结果与管理员保存的快照完全相同。
+
+通过这些检查后，Agent 会先把原 managed binary/config（包括“原先不存在”状态）快照到 Agent state 文件旁的受保护目录，记录备份和待导入二进制的 SHA-256，并 fsync durable `migrating-v2` intent；在此之前不会覆盖任何 managed 目标。随后才把受保护的现有真实内核二进制复制到 QAgent 私有目录并写入 QAgent 专用单文件配置。若进程在 marker 落盘后、仅覆盖一个文件后或全部文件准备完成后退出，重启恢复只接受目标仍等于已记录的原始摘要或 staging 摘要；备份缺失、权限不安全、摘要不符或出现第三方内容时会保留 marker 并 fail closed，不会猜测覆盖。原文件存在时恢复其精确内容和权限，原文件不存在时删除迁移新建的目标。旧版本 5 字段 `migrating` marker 因没有可证明的文件回滚信息，只会恢复安全的服务对、保留 marker 并禁用相关内核任务，等待管理员处理。
+
+只有文件准备全部成功后，Agent 才停止原通用服务并启动、稳定验证对应的 `qagent-*` 服务；随后启用新服务，并同时清除原服务的 persistent/runtime enable 链接。正常迁移和崩溃恢复共用最后完成门禁：在紧邻 `migrated` marker 前的同一个持续窗口内，反复确认原服务为 `inactive + disabled`、新服务为 `active + persistent enabled`。瞬态、未知、服务退出、enable/disable 空成功或链接残留都会进入完整回滚；回滚始终先停止并持续确认新服务 inactive，再恢复双方原 enable 层级和 managed 文件、启动原服务并持续确认安全服务对，只有服务和文件均恢复且最后核验通过才删除 `migrating-v2` marker。任何启动、enable/disable、文件或状态落盘步骤失败，都会恢复原二进制与配置并保持可恢复状态。迁移成功是一次真实部署，控制面会把导入版本记录为当前部署。
+
+自动识别失败时不会降级为猜测式映射。需要手工提供发现信息时，必须同时核对 `QCH_EXISTING_*_BINARY`、`QCH_EXISTING_*_CONFIG` 与 `QCH_EXISTING_*_SERVICE`；sing-box 目录模式还必须核对 `QCH_EXISTING_SING_BOX_CONFIG_DIRECTORY`，转发器布局必须核对 `QCH_EXISTING_SING_BOX_SERVICE_BINARY`。任意 wrapper 无法安全证明时不会提供自动迁移入口，应先由管理员把 systemd 单元改为直接执行受保护真实二进制或上述固定转发形式，再重启 Agent 触发发现；配置仍由管理员在“手动配置”页显式迁移。
+
+迁移前，Agent 不会获得原配置目录或原核心二进制目录的写权限，也会拒绝部署、启停和内核安装任务。迁移后运行的是复制到 QAgent 私有目录的二进制与专用配置，原服务保持 disabled；后续升级和配置管理只作用于 QAgent 专用服务。每次 Agent 重启都会重新核对 completed marker 的当前服务状态和 enable 层级；若原服务再次 active、托管服务停止或任一 enable 层级漂移，运行态会报告不可安全接管，控制面与 Agent 执行器同时禁用该内核的全部任务，而不是静默复用旧 marker。
+
 私有 CA 示例：
 
 ```bash
@@ -156,7 +187,7 @@ sudo journalctl -u qagent -f
 sudo systemctl restart qagent
 ```
 
-systemd 单元的 `ProtectSystem=strict` 只放行默认的四个配置目录以及 `/usr/local/lib/qagent/cores`，用于在同一文件系统内原子切换内核二进制；`/usr/local/bin` 不可写，`/usr/local/bin/qagent` 也保持只读。Agent 单元只保留原子部署所需的 `CAP_CHOWN` 与端口计数/封禁所需的 `CAP_NET_ADMIN`；四个非 root 内核单元只保留监听 1-1023 端口所需的 `CAP_NET_BIND_SERVICE`。四个内核服务统一使用 `qagent-` 前缀，不会控制管理员自行安装的通用服务。自定义二进制或配置路径必须预先创建并精确加入 `ReadWritePaths=`，不要放宽为整个 `/etc` 或 `/usr`。
+systemd 单元的 `ProtectSystem=strict` 只放行默认的四个配置目录以及 `/usr/local/lib/qagent/cores`，用于在同一文件系统内原子切换配置和私有内核二进制；原服务的配置与二进制路径保持只读，`/usr/local/bin` 不可写，`/usr/local/bin/qagent` 也保持只读。Agent 单元只保留原子部署所需的 `CAP_CHOWN` 与端口计数/封禁所需的 `CAP_NET_ADMIN`；四个非 root 内核单元只保留监听 1-1023 端口所需的 `CAP_NET_BIND_SERVICE`。迁移完成后所有托管内核服务统一使用 `qagent-` 前缀。
 
 现有节点首次通过新版 Agent 启动、重启、部署或升级专用内核时，会为固定的四个 `qagent-*` 单元同步低端口能力 drop-in 并执行 `daemon-reload`；自定义服务名不会被修改。重复运行一键安装脚本也只更新带 `managed by QAgent` 标记的单元，已有配置文件和管理员自建单元继续保留。
 

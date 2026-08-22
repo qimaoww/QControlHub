@@ -212,7 +212,10 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/tasks", s.requirePermission(core.PermissionTasksRead, http.HandlerFunc(s.listTasks)))
 	mux.Handle("POST /api/v1/tasks", s.requirePermission(core.PermissionTasksExecute, http.HandlerFunc(s.createTask)))
 	mux.Handle("GET /api/v1/tasks/{id}", s.requirePermission(core.PermissionTasksRead, http.HandlerFunc(s.getTask)))
-	mux.Handle("GET /api/v1/tasks/{id}/config-snapshot", s.requirePermission(core.PermissionTasksRead, http.HandlerFunc(s.getTaskConfigSnapshot)))
+	mux.Handle("GET /api/v1/tasks/{id}/config-snapshot", s.requireAllPermissions(
+		[]core.Permission{core.PermissionTasksRead, core.PermissionAgentConfigRead},
+		http.HandlerFunc(s.getTaskConfigSnapshot),
+	))
 	mux.Handle("DELETE /api/v1/tasks/{id}", s.requirePermission(core.PermissionTasksExecute, http.HandlerFunc(s.cancelTask)))
 	mux.Handle("POST /api/v1/tasks/{id}/retry", s.requirePermission(core.PermissionTasksExecute, http.HandlerFunc(s.retryTask)))
 	mux.Handle("GET /api/v1/enrollment-tokens", s.requirePermission(core.PermissionEnrollmentManage, http.HandlerFunc(s.listEnrollmentTokens)))
@@ -910,10 +913,16 @@ func writeWire(parent context.Context, connection *websocket.Conn, message core.
 	return wsjson.Write(ctx, connection, message)
 }
 
-// requirePermission guards the management API. Every route declares one
-// explicit capability and roles are deny-by-default; the admin limiter applies
-// to every management call regardless of role.
+// requirePermission guards a management API route with one explicit
+// capability. Roles are deny-by-default; the admin limiter applies to every
+// management call regardless of role.
 func (s *Server) requirePermission(permission core.Permission, next http.Handler) http.Handler {
+	return s.requireAllPermissions([]core.Permission{permission}, next)
+}
+
+// requireAllPermissions guards sensitive compound operations whose resource
+// visibility and content access are separate capabilities.
+func (s *Server) requireAllPermissions(permissions []core.Permission, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		key := authn.ClientIP(request, s.trustedProxies)
 		now := time.Now().UTC()
@@ -929,10 +938,16 @@ func (s *Server) requirePermission(permission core.Permission, next http.Handler
 			return
 		}
 		s.adminLimiter.Success(key)
-		permissions, permissionsOK := s.sessionPermissions(request)
-		if !permissionsOK || (!role.Allows(permission) && !core.HasPermission(permissions, permission)) {
+		granted, permissionsOK := s.sessionPermissions(request)
+		if !permissionsOK {
 			writeError(w, http.StatusForbidden, "token role does not permit this operation")
 			return
+		}
+		for _, permission := range permissions {
+			if !role.Allows(permission) && !core.HasPermission(granted, permission) {
+				writeError(w, http.StatusForbidden, "token role does not permit this operation")
+				return
+			}
 		}
 		if bearerToken(request) == "" && request.Method != http.MethodGet && request.Method != http.MethodHead && request.Method != http.MethodOptions {
 			value, sessionOK := s.sessionForRequest(request)
