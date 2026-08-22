@@ -290,32 +290,18 @@ function orderAgents(agents) {
   );
 }
 
-// Pointer-based drag reordering of the overview cards. The grip captures the
-// pointer so the card link never navigates mid-drag. The source card stays in
-// the grid as a translucent placeholder reflowed through the CSS order
-// property while a cloned ghost follows the cursor; DOM order and localStorage
-// are only committed on release.
+// Drag reordering of the overview cards, restricted to the front slot. The
+// grip captures the pointer so the card link never navigates mid-drag. The
+// source card stays in the grid as a translucent placeholder that always
+// reflows to index 0 through the CSS order property, while a cloned ghost
+// follows the cursor; DOM order and localStorage are only committed on release.
 function enableCardDrag(grid) {
   let drag = null;
-  const applyVisualOrder = (pointerX, pointerY) => {
+  const applyVisualOrder = () => {
     const cards = [...grid.querySelectorAll(".node-card")];
     const rest = cards.filter((card) => card !== drag.card);
-    let insertAt = rest.length;
-    for (let index = 0; index < rest.length; index += 1) {
-      const rect = rest[index].getBoundingClientRect();
-      const centerX = rect.left + rect.width / 2;
-      const centerY = rect.top + rect.height / 2;
-      if (
-        pointerY < centerY ||
-        (pointerY <= rect.bottom && pointerX < centerX)
-      ) {
-        insertAt = index;
-        break;
-      }
-    }
-    const sequence = [...rest];
-    sequence.splice(insertAt, 0, drag.card);
-    drag.insertAt = insertAt;
+    const sequence = [drag.card, ...rest];
+    drag.insertAt = 0;
     const changed = sequence.some(
       (card, index) => card.style.order !== String(index),
     );
@@ -432,7 +418,7 @@ function enableCardDrag(grid) {
       const dx = event.clientX - drag.startX;
       const dy = event.clientY - drag.startY;
       drag.ghost.style.transform = `translate(${dx}px, ${dy}px) scale(.99) rotate(.3deg)`;
-      applyVisualOrder(event.clientX, event.clientY);
+      applyVisualOrder();
     });
     grip.addEventListener("pointerup", finish);
     grip.addEventListener("pointercancel", cancel);
