@@ -138,6 +138,7 @@ func TestRefreshPathsUseStableViewsAndScopedCoordinators(t *testing.T) {
 		"state.navigationEpoch += 1",
 		"cancelActive: () => routeController?.abort()",
 		"agentModule.cancelAgentInteractions()",
+		"confirmResolver?.(false)",
 		"state.route = \"login\"",
 		"if (renderedRoute === state.route) notify(error.message",
 	} {

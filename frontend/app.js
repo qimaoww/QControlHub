@@ -403,6 +403,10 @@ function toggleTheme() {
 
 function renderLogin(message = "") {
   if (state.route === "node-settings") agentModule.cancelAgentInteractions();
+  const confirmResolver = state.confirmResolver;
+  state.confirmResolver = null;
+  state.confirmOpen = false;
+  confirmResolver?.(false);
   routeController?.abort();
   routeController = null;
   state.routeSignal = null;
