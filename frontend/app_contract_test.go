@@ -142,6 +142,10 @@ func TestPresetSidebarShowsOnlySelectedNodeContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	styles, err := os.ReadFile("app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	const sidebarPresetLink = `href="#node-${esc(agent.id)}" data-context-agent="${esc(agent.id)}"`
 	if !strings.Contains(string(app), sidebarPresetLink) {
@@ -184,6 +188,17 @@ func TestPresetSidebarShowsOnlySelectedNodeContent(t *testing.T) {
 	} {
 		if strings.Contains(string(agents), forbidden) {
 			t.Errorf("focused preset workspace still renders node accordion contract %q", forbidden)
+		}
+	}
+
+	const presetSingleColumnRule = `.preset-node-workspace>.service-canvas>.service-grid{grid-template-columns:minmax(0,1fr)}`
+	if strings.Count(string(styles), presetSingleColumnRule) != 1 {
+		t.Error("selected preset workspace must define one scoped, shrinkable service-grid column")
+	}
+	const globalSingleColumnRule = `.service-grid{grid-template-columns:minmax(0,1fr)}`
+	for _, line := range strings.Split(string(styles), "\n") {
+		if strings.TrimSpace(line) == globalSingleColumnRule {
+			t.Error("preset layout must not force every service grid into one column")
 		}
 	}
 }
