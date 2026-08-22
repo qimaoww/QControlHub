@@ -34,7 +34,7 @@ FROM alpine:3.22 AS runtime-base
 ARG VERSION=dev
 LABEL org.opencontainers.image.source="https://github.com/qimaoww/qcontrolhub" \
       org.opencontainers.image.version="${VERSION}" \
-      org.opencontainers.image.licenses="Proprietary"
+      org.opencontainers.image.licenses="GPL-3.0-only"
 
 RUN apk add --no-cache ca-certificates tzdata \
     && addgroup -S qcontrolhub \
@@ -69,7 +69,7 @@ FROM nginx:1.27-alpine AS qcontrol-web
 ARG VERSION=dev
 LABEL org.opencontainers.image.source="https://github.com/qimaoww/qcontrolhub" \
       org.opencontainers.image.version="${VERSION}" \
-      org.opencontainers.image.licenses="Proprietary"
+      org.opencontainers.image.licenses="GPL-3.0-only"
 
 COPY frontend/index.html /usr/share/nginx/html/index.html
 COPY frontend/app.js /usr/share/nginx/html/assets/app.js
