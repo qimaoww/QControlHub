@@ -144,11 +144,18 @@ func NewClient(config ClientConfig, executor *Executor) (*Client, error) {
 		}
 		transport.TLSClientConfig.RootCAs = rootCAs
 	}
+	// Seed the CPU and network baselines so the first heartbeat and metrics
+	// push after a process start already report usage values instead of a
+	// one-sample "unavailable" reading.
+	metricsCollector := NewMetricsCollector()
+	warmupContext, warmupCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	_, _ = metricsCollector.Collect(warmupContext)
+	warmupCancel()
 	return &Client{
 		config:       config,
 		executor:     executor,
 		websocketURL: websocketScheme + "://" + parsed.Host + "/agent/v1/connect",
-		metrics:      NewMetricsCollector(),
+		metrics:      metricsCollector,
 		traffic:      NewTrafficManager(config.StatePath),
 		logs:         NewCoreLogCollector(),
 		http: &http.Client{
@@ -424,13 +431,15 @@ func (c *Client) queueHeartbeat(ctx context.Context, outgoing chan<- core.WireMe
 
 // queueMetrics sends a lightweight metrics-only push between full heartbeats
 // so the panel's live resource values refresh at the configured cadence
-// instead of waiting for the heartbeat cycle.
+// instead of waiting for the heartbeat cycle. Samples without a CPU reading
+// are skipped so one partial collection never overwrites the last complete
+// snapshot stored on the control plane.
 func (c *Client) queueMetrics(ctx context.Context, outgoing chan<- core.WireMessage) error {
 	metrics, metricsErr := c.metrics.Collect(ctx)
 	if metricsErr != nil {
 		slog.Debug("host metrics collection was partial", "error", metricsErr)
 	}
-	if !metricsHaveData(metrics) {
+	if !metricsHaveData(metrics) || !metrics.CPUAvailable {
 		return nil
 	}
 	message := core.WireMessage{Type: core.WireMetrics, Metrics: &metrics}

@@ -106,6 +106,22 @@ func TestBytesPerSecond(t *testing.T) {
 	}
 }
 
+func TestCPUUsagePercentZeroDeltaReportsIdleZero(t *testing.T) {
+	t.Parallel()
+	if percent, ok := cpuUsagePercent(1000, 800, 1000, 800); !ok || percent != 0 {
+		t.Fatalf("identical counters = (%v, %v), want (0, true)", percent, ok)
+	}
+	if percent, ok := cpuUsagePercent(1000, 800, 1100, 850); !ok || percent != 50 {
+		t.Fatalf("normal delta = (%v, %v), want (50, true)", percent, ok)
+	}
+	if _, ok := cpuUsagePercent(1100, 850, 1000, 800); ok {
+		t.Fatal("backwards counters were accepted")
+	}
+	if _, ok := cpuUsagePercent(1000, 800, 1000, 900); ok {
+		t.Fatal("idle exceeding its own delta was accepted")
+	}
+}
+
 func TestMetricsCollectorReadsLiveLinuxHost(t *testing.T) {
 	collector := NewMetricsCollector()
 	first, err := collector.Collect(context.Background())
