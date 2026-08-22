@@ -208,3 +208,128 @@ clearNodeCardDragState(
 );
 assert.equal(releaseCard.style.transition, "");
 assert.equal(releaseCard.style.transform, "");
+
+const previousDocument = globalThis.document;
+const previousDetailsElement = globalThis.HTMLDetailsElement;
+const previousCSS = globalThis.CSS;
+class PresetWorkspace {
+  constructor(agentID, open) {
+    this.dataset = { agentNode: agentID };
+    this.id = `node-${agentID}`;
+    this.open = open;
+  }
+  querySelector() {
+    return null;
+  }
+  querySelectorAll() {
+    return [];
+  }
+  addEventListener() {}
+}
+
+const presetAgents = [
+  {
+    id: "alpha",
+    name: "Alpha",
+    os: "linux",
+    arch: "amd64",
+    status: "online",
+    capabilities: [],
+    runtime: {},
+  },
+  {
+    id: "beta",
+    name: "Beta",
+    os: "linux",
+    arch: "arm64",
+    status: "online",
+    capabilities: [],
+    runtime: {},
+  },
+];
+const presetState = {
+  route: "agents",
+  anchor: "preset-node-beta",
+  data: { selectedAgent: "beta" },
+};
+const presetLinks = presetAgents.map((agent) => ({
+  dataset: { contextAgent: agent.id },
+  href: `#node-${agent.id}`,
+}));
+let presetWorkspaces = [];
+
+globalThis.HTMLDetailsElement = PresetWorkspace;
+globalThis.CSS = { escape: (value) => String(value) };
+globalThis.document = {
+  querySelector: () => null,
+  querySelectorAll(selector) {
+    if (selector === ".machine-workspace") return presetWorkspaces;
+    if (selector === "[data-context-agent]") return presetLinks;
+    if (selector === ".machine-workspace, .node-operations-workspace")
+      return presetWorkspaces;
+    return [];
+  },
+};
+
+try {
+  const presetShell = (markup) => {
+    presetWorkspaces = presetAgents.map((agent) => {
+      const marker = `<details class="machine-workspace" id="node-${agent.id}"`;
+      const start = markup.indexOf(marker);
+      assert.notEqual(start, -1, `preset markup contains ${agent.id}`);
+      const end = markup.indexOf("<summary", start);
+      return new PresetWorkspace(
+        agent.id,
+        /\sopen>$/.test(markup.slice(start, end)),
+      );
+    });
+  };
+  const presetCtx = new Proxy(
+    {
+      state: presetState,
+      engines: [],
+      api: async (path) => {
+        assert.equal(path, "/agents");
+        return presetAgents;
+      },
+      optionalAPI: async () => null,
+      can: () => false,
+      esc: (value) => String(value ?? ""),
+      shell: presetShell,
+    },
+    { get: (target, key) => target[key] ?? noop },
+  );
+  const { agents: renderPresetAgents } = installAgents(presetCtx);
+  await renderPresetAgents();
+
+  assert.equal(presetState.route, "agents", "preset selection stays on agents");
+  assert.deepEqual(
+    presetLinks.map((link) => link.href),
+    ["#preset-node-alpha", "#preset-node-beta"],
+    "preset sidebar links target per-node preset anchors",
+  );
+  assert.deepEqual(
+    presetWorkspaces.map((workspace) => workspace.id),
+    ["preset-node-alpha", "preset-node-beta"],
+    "preset workspaces expose matching per-node anchors",
+  );
+  assert.deepEqual(
+    presetWorkspaces
+      .filter((workspace) => workspace.open)
+      .map((workspace) => workspace.dataset.agentNode),
+    ["beta"],
+    "preset selection opens only the selected node workspace",
+  );
+  assert.equal(
+    presetLinks.some((link) => link.href.startsWith("#settings-node-")),
+    false,
+    "preset sidebar never enters node settings",
+  );
+} finally {
+  if (previousDocument === undefined) delete globalThis.document;
+  else globalThis.document = previousDocument;
+  if (previousDetailsElement === undefined) delete globalThis.HTMLDetailsElement;
+  else globalThis.HTMLDetailsElement = previousDetailsElement;
+  if (previousCSS === undefined) delete globalThis.CSS;
+  else globalThis.CSS = previousCSS;
+}
