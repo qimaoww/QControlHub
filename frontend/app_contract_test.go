@@ -133,6 +133,43 @@ func TestSidebarNavigationUsesWorkflowOrderAndResponsiveGrouping(t *testing.T) {
 	}
 }
 
+func TestPresetSidebarNodesStayInPresetWorkflow(t *testing.T) {
+	app, err := os.ReadFile("app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	agents, err := os.ReadFile("modules/agents.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const sidebarPresetLink = `href="#node-${esc(agent.id)}" data-context-agent="${esc(agent.id)}"`
+	if !strings.Contains(string(app), sidebarPresetLink) {
+		t.Error("preset sidebar nodes must start from the per-node preset anchor")
+	}
+	const settingsDetailLink = `href="#settings-node-${esc(agent.id)}" data-context-agent="${esc(agent.id)}"`
+	if strings.Contains(string(app), settingsDetailLink) {
+		t.Error("preset sidebar nodes must not enter the node settings workflow")
+	}
+	for _, required := range []string{
+		"hash.startsWith(\"preset-node-\")\n        ? \"agents\"",
+		`if (hash.startsWith("preset-node-")) state.data.selectedAgent = hash.slice(12);`,
+	} {
+		if !strings.Contains(string(app), required) {
+			t.Errorf("preset sidebar routing is missing %q", required)
+		}
+	}
+	for _, required := range []string{
+		`const prefix = presetMode ? "preset-node" : "settings-node";`,
+		"link.href = `#${prefix}-${link.dataset.contextAgent}`;",
+		`agent.id === state.data.selectedAgent ? "open" : ""`,
+	} {
+		if !strings.Contains(string(agents), required) {
+			t.Errorf("preset workspace selection is missing %q", required)
+		}
+	}
+}
+
 func TestInitialConsoleStylesRemainExactOutsideApprovedExtensions(t *testing.T) {
 	styles, err := os.ReadFile("app.css")
 	if err != nil {
