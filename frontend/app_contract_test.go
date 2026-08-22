@@ -265,6 +265,78 @@ func TestAgentWebSocketProxyForwardsSourceChain(t *testing.T) {
 	}
 }
 
+func TestOfficialDeploymentsTrustTheExactTwoHopProxyChain(t *testing.T) {
+	compose, err := os.ReadFile("../docker-compose.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	quickStart, err := os.ReadFile("../deploy/quick-start.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	makefile, err := os.ReadFile("../Makefile")
+	if err != nil {
+		t.Fatal(err)
+	}
+	production, err := os.ReadFile("../docs/production.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, source := range []struct {
+		name    string
+		content string
+	}{
+		{name: "bundled compose", content: string(compose)},
+		{name: "external quick-start compose", content: string(quickStart)},
+	} {
+		for _, required := range []string{
+			`QCH_TRUSTED_PROXY_CIDRS: ${QCH_TRUSTED_PROXY_CIDRS:-172.30.254.2/32,172.30.254.1/32}`,
+			`ipv4_address: ${QCH_WEB_PROXY_ADDRESS:-172.30.254.2}`,
+			`ipv4_address: ${QCH_CONTROL_PLANE_PROXY_ADDRESS:-172.30.254.3}`,
+			`subnet: ${QCH_CONTROL_PROXY_SUBNET:-172.30.254.0/24}`,
+			`gateway: ${QCH_CONTROL_PROXY_GATEWAY:-172.30.254.1}`,
+		} {
+			if !strings.Contains(source.content, required) {
+				t.Errorf("%s does not close the exact proxy chain with %q", source.name, required)
+			}
+		}
+	}
+
+	qcontrolWeb := strings.SplitN(string(compose), "\n  qcontrol-web:", 2)
+	if len(qcontrolWeb) != 2 {
+		t.Fatal("bundled compose is missing qcontrol-web")
+	}
+	qcontrolWebBlock := strings.SplitN(qcontrolWeb[1], "\nvolumes:", 2)[0]
+	if strings.Contains(qcontrolWebBlock, "\n      - backend") || strings.Contains(qcontrolWebBlock, "\n      backend:") {
+		t.Error("qcontrol-web must reach control-plane only through its fixed proxy-chain address")
+	}
+
+	for _, required := range []string{
+		`'QCH_WEB_PROXY_ADDRESS=172.30.254.2'`,
+		`'QCH_CONTROL_PLANE_PROXY_ADDRESS=172.30.254.3'`,
+		`'QCH_TRUSTED_PROXY_CIDRS=172.30.254.2/32,172.30.254.1/32'`,
+	} {
+		if !strings.Contains(string(makefile), required) {
+			t.Errorf("make init-env is missing %q", required)
+		}
+	}
+	for _, required := range []string{
+		`trusted_proxy_cidrs="$(append_trusted_proxy "$trusted_proxy_cidrs" "$web_proxy_address/32")"`,
+		`trusted_proxy_cidrs="$(append_trusted_proxy "$trusted_proxy_cidrs" "$proxy_gateway/32")"`,
+		`"QCH_TRUSTED_PROXY_CIDRS=$trusted_proxy_cidrs"`,
+	} {
+		if strings.Count(string(quickStart), required) != 2 {
+			t.Errorf("bundled and external env preparation must both preserve %q", required)
+		}
+	}
+	for _, required := range []string{"宿主 Nginx 与 `qcontrol-web` 两跳代理", "两个精确 `/32` 端点", "禁止改成整个私网"} {
+		if !strings.Contains(string(production), required) {
+			t.Errorf("production proxy documentation is missing %q", required)
+		}
+	}
+}
+
 func TestInitialConsoleStylesRemainExactOutsideApprovedExtensions(t *testing.T) {
 	styles, err := os.ReadFile("app.css")
 	if err != nil {

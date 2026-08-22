@@ -84,7 +84,7 @@ func TestAddNodeAPICreatesReusableCredentialAndSupportsReinstall(t *testing.T) {
 		agentID = id
 	}
 	if err := dataStore.Heartbeat(ctx, agentID, core.HeartbeatRequest{
-		Metrics: &core.HostMetrics{CPUAvailable: true, CPUPercent: 12.5, ObservedPublicIP: "198.51.100.9"},
+		Metrics: &core.HostMetrics{CPUAvailable: true, CPUPercent: 12.5, ObservedPublicIP: "93.184.216.34"},
 	}); err != nil {
 		t.Fatalf("store heartbeat metrics: %v", err)
 	}
@@ -129,7 +129,7 @@ func TestAddNodeAPICreatesReusableCredentialAndSupportsReinstall(t *testing.T) {
 	}
 	metricsVisible := false
 	for _, item := range adminAgents {
-		if item.ID == agentID && item.Metrics.CPUAvailable && item.Metrics.CPUPercent == 12.5 && item.Metrics.ObservedPublicIP == "198.51.100.9" {
+		if item.ID == agentID && item.Metrics.CPUAvailable && item.Metrics.CPUPercent == 12.5 && item.Metrics.ObservedPublicIP == "93.184.216.34" {
 			metricsVisible = true
 			break
 		}

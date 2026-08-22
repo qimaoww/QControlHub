@@ -178,6 +178,15 @@ validate_database_url() {
     esac
 }
 
+append_trusted_proxy() {
+    local current="$1" cidr="$2"
+    case ",$current," in
+        *",$cidr,"*) printf '%s' "$current" ;;
+        ",,") printf '%s' "$cidr" ;;
+        *) printf '%s,%s' "$current" "$cidr" ;;
+    esac
+}
+
 write_external_compose() {
     cat > "$EXTERNAL_COMPOSE_FILE" <<'YAML'
 name: qcontrolhub
@@ -199,14 +208,15 @@ services:
       QCH_ALLOW_INSECURE_HTTP: ${QCH_ALLOW_INSECURE_HTTP:-false}
       QCH_ALLOW_INSECURE_DATABASE: ${QCH_ALLOW_INSECURE_DATABASE:-false}
       QCH_CORS_ORIGINS: ${QCH_CORS_ORIGINS:-}
-      QCH_TRUSTED_PROXY_CIDRS: ${QCH_TRUSTED_PROXY_CIDRS:-}
+      QCH_TRUSTED_PROXY_CIDRS: ${QCH_TRUSTED_PROXY_CIDRS:-172.30.254.2/32,172.30.254.1/32}
       QCH_WEBHOOK_SECRET: ${QCH_WEBHOOK_SECRET:-}
       QCH_CONFIG_ENCRYPTION_KEY: ${QCH_CONFIG_ENCRYPTION_KEY:-}
       QCH_OPERATOR_TOKENS: ${QCH_OPERATOR_TOKENS:-}
       QCH_AUDITOR_TOKENS: ${QCH_AUDITOR_TOKENS:-}
       QCH_READONLY_TOKENS: ${QCH_READONLY_TOKENS:-}
     networks:
-      - backend
+      control-host:
+        ipv4_address: ${QCH_CONTROL_PLANE_PROXY_ADDRESS:-172.30.254.3}
     read_only: true
     tmpfs:
       - /tmp:size=16m,mode=1777
@@ -236,8 +246,8 @@ services:
     ports:
       - "${QCH_BIND_ADDRESS:-127.0.0.1}:${QCH_PORT:-8080}:8080"
     networks:
-      - backend
-      - frontend-host
+      control-host:
+        ipv4_address: ${QCH_WEB_PROXY_ADDRESS:-172.30.254.2}
     read_only: true
     tmpfs:
       - /tmp:size=8m,mode=1777
@@ -261,10 +271,11 @@ services:
     stop_grace_period: 10s
 
 networks:
-  backend:
-    internal: true
-  frontend-host:
-    driver: bridge
+  control-host:
+    ipam:
+      config:
+        - subnet: ${QCH_CONTROL_PROXY_SUBNET:-172.30.254.0/24}
+          gateway: ${QCH_CONTROL_PROXY_GATEWAY:-172.30.254.1}
 YAML
 }
 
@@ -320,6 +331,7 @@ wait_ready() {
 prepare_bundled_env() {
     local postgres_password admin_token webhook_secret config_key
     local behind_proxy allow_http allow_database cors_origins bind_address port image_tag version
+    local proxy_subnet proxy_gateway web_proxy_address control_plane_proxy_address trusted_proxy_cidrs
 
     if [ "$FORCE" = true ]; then
         backup_env
@@ -350,6 +362,13 @@ prepare_bundled_env() {
     port="$(read_env_key QCH_PORT)"; [ -n "$port" ] || port=8080
     image_tag="$(read_env_key QCH_IMAGE_TAG)"; [ -n "$image_tag" ] || image_tag=latest
     version="$(read_env_key VERSION)"; [ -n "$version" ] || version=dev
+    proxy_subnet="$(read_env_key QCH_CONTROL_PROXY_SUBNET)"; [ -n "$proxy_subnet" ] || proxy_subnet=172.30.254.0/24
+    proxy_gateway="$(read_env_key QCH_CONTROL_PROXY_GATEWAY)"; [ -n "$proxy_gateway" ] || proxy_gateway=172.30.254.1
+    web_proxy_address="$(read_env_key QCH_WEB_PROXY_ADDRESS)"; [ -n "$web_proxy_address" ] || web_proxy_address=172.30.254.2
+    control_plane_proxy_address="$(read_env_key QCH_CONTROL_PLANE_PROXY_ADDRESS)"; [ -n "$control_plane_proxy_address" ] || control_plane_proxy_address=172.30.254.3
+    trusted_proxy_cidrs="$(read_env_key QCH_TRUSTED_PROXY_CIDRS)"
+    trusted_proxy_cidrs="$(append_trusted_proxy "$trusted_proxy_cidrs" "$web_proxy_address/32")"
+    trusted_proxy_cidrs="$(append_trusted_proxy "$trusted_proxy_cidrs" "$proxy_gateway/32")"
 
     local postgres_db postgres_user postgres_port
     postgres_db="$(read_env_key POSTGRES_DB)"; [ -n "$postgres_db" ] || postgres_db=qcontrolhub
@@ -368,6 +387,11 @@ prepare_bundled_env() {
         "QCH_ALLOW_INSECURE_HTTP=$allow_http" \
         "QCH_ALLOW_INSECURE_DATABASE=$allow_database" \
         "QCH_CORS_ORIGINS=$cors_origins" \
+        "QCH_CONTROL_PROXY_SUBNET=$proxy_subnet" \
+        "QCH_CONTROL_PROXY_GATEWAY=$proxy_gateway" \
+        "QCH_WEB_PROXY_ADDRESS=$web_proxy_address" \
+        "QCH_CONTROL_PLANE_PROXY_ADDRESS=$control_plane_proxy_address" \
+        "QCH_TRUSTED_PROXY_CIDRS=$trusted_proxy_cidrs" \
         "QCH_BIND_ADDRESS=$bind_address" \
         "QCH_PORT=$port" \
         "QCH_IMAGE_TAG=$image_tag" \
@@ -377,6 +401,7 @@ prepare_bundled_env() {
 prepare_external_env() {
     local db_url admin_token webhook_secret config_key
     local behind_proxy allow_http allow_database cors_origins bind_address port image_tag version
+    local proxy_subnet proxy_gateway web_proxy_address control_plane_proxy_address trusted_proxy_cidrs
 
     db_url="${DATABASE_URL:-$(read_env_key QCH_DATABASE_URL)}"
     if [ -z "$db_url" ]; then
@@ -416,6 +441,13 @@ prepare_external_env() {
     port="$(read_env_key QCH_PORT)"; [ -n "$port" ] || port=8080
     image_tag="$(read_env_key QCH_IMAGE_TAG)"; [ -n "$image_tag" ] || image_tag=latest
     version="$(read_env_key VERSION)"; [ -n "$version" ] || version=dev
+    proxy_subnet="$(read_env_key QCH_CONTROL_PROXY_SUBNET)"; [ -n "$proxy_subnet" ] || proxy_subnet=172.30.254.0/24
+    proxy_gateway="$(read_env_key QCH_CONTROL_PROXY_GATEWAY)"; [ -n "$proxy_gateway" ] || proxy_gateway=172.30.254.1
+    web_proxy_address="$(read_env_key QCH_WEB_PROXY_ADDRESS)"; [ -n "$web_proxy_address" ] || web_proxy_address=172.30.254.2
+    control_plane_proxy_address="$(read_env_key QCH_CONTROL_PLANE_PROXY_ADDRESS)"; [ -n "$control_plane_proxy_address" ] || control_plane_proxy_address=172.30.254.3
+    trusted_proxy_cidrs="$(read_env_key QCH_TRUSTED_PROXY_CIDRS)"
+    trusted_proxy_cidrs="$(append_trusted_proxy "$trusted_proxy_cidrs" "$web_proxy_address/32")"
+    trusted_proxy_cidrs="$(append_trusted_proxy "$trusted_proxy_cidrs" "$proxy_gateway/32")"
 
     update_env_file \
         "QCH_DATABASE_URL=$db_url" \
@@ -426,6 +458,11 @@ prepare_external_env() {
         "QCH_ALLOW_INSECURE_HTTP=$allow_http" \
         "QCH_ALLOW_INSECURE_DATABASE=$allow_database" \
         "QCH_CORS_ORIGINS=$cors_origins" \
+        "QCH_CONTROL_PROXY_SUBNET=$proxy_subnet" \
+        "QCH_CONTROL_PROXY_GATEWAY=$proxy_gateway" \
+        "QCH_WEB_PROXY_ADDRESS=$web_proxy_address" \
+        "QCH_CONTROL_PLANE_PROXY_ADDRESS=$control_plane_proxy_address" \
+        "QCH_TRUSTED_PROXY_CIDRS=$trusted_proxy_cidrs" \
         "QCH_BIND_ADDRESS=$bind_address" \
         "QCH_PORT=$port" \
         "QCH_IMAGE_TAG=$image_tag" \

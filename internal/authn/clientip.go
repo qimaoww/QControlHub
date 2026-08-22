@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/netip"
 	"strings"
+
+	"github.com/qimaoww/qcontrolhub/internal/netpolicy"
 )
 
 func ParseTrustedProxies(values []string) ([]*net.IPNet, error) {
@@ -69,16 +71,15 @@ func PublicClientIP(request *http.Request, trustedProxies []*net.IPNet) string {
 	return NormalizePublicIP(ClientIP(request, trustedProxies))
 }
 
-// NormalizePublicIP canonicalizes public global-unicast IPv4 and IPv6
-// addresses. Private, loopback, link-local, multicast, unspecified, and
-// malformed values are rejected.
+// NormalizePublicIP canonicalizes publicly routable IPv4 and IPv6 addresses.
+// Private and IANA special-purpose values are rejected.
 func NormalizePublicIP(value string) string {
 	address, err := netip.ParseAddr(strings.Trim(strings.TrimSpace(value), "[]"))
 	if err != nil {
 		return ""
 	}
 	address = address.Unmap()
-	if !address.IsGlobalUnicast() || address.IsPrivate() || address.IsLoopback() || address.IsLinkLocalUnicast() || address.IsMulticast() || address.IsUnspecified() {
+	if !netpolicy.IsPublicAddress(address) {
 		return ""
 	}
 	return address.String()

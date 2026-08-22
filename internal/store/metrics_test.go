@@ -18,7 +18,7 @@ func TestEncodeHeartbeatMetricsValidatesAndServerStamps(t *testing.T) {
 		DiskAvailable: true, DiskUsedBytes: 10 << 30, DiskTotalBytes: 20 << 30,
 		NetworkAvailable: true, NetworkRXBytes: 1000, NetworkTXBytes: 500, NetworkRXBPS: 20, NetworkTXBPS: 10,
 		NetworkInterfaces: []core.HostNetworkInterface{{Name: "eth0", Addresses: []string{"192.0.2.20"}}},
-		ObservedPublicIP:  "::ffff:198.51.100.9",
+		ObservedPublicIP:  "::ffff:93.184.216.34",
 	}, receivedAt)
 	if err != nil {
 		t.Fatal(err)
@@ -27,7 +27,7 @@ func TestEncodeHeartbeatMetricsValidatesAndServerStamps(t *testing.T) {
 	if err := json.Unmarshal(encoded, &decoded); err != nil {
 		t.Fatal(err)
 	}
-	if !decoded.CollectedAt.Equal(receivedAt) || decoded.CPUPercent != 23.5 || decoded.MemoryUsedBytes != 2<<30 || len(decoded.NetworkInterfaces) != 1 || decoded.ObservedPublicIP != "198.51.100.9" {
+	if !decoded.CollectedAt.Equal(receivedAt) || decoded.CPUPercent != 23.5 || decoded.MemoryUsedBytes != 2<<30 || len(decoded.NetworkInterfaces) != 1 || decoded.ObservedPublicIP != "93.184.216.34" {
 		t.Fatalf("encoded metrics = %+v", decoded)
 	}
 
@@ -40,6 +40,12 @@ func TestEncodeHeartbeatMetricsValidatesAndServerStamps(t *testing.T) {
 		{NetworkInterfaces: []core.HostNetworkInterface{{Name: "../eth0", Addresses: []string{"192.0.2.20"}}}},
 		{NetworkInterfaces: []core.HostNetworkInterface{{Name: "eth0", Addresses: []string{"0.0.0.0"}}}},
 		{ObservedPublicIP: "10.0.0.8"},
+		{ObservedPublicIP: "100.64.0.8"},
+		{ObservedPublicIP: "192.0.2.8"},
+		{ObservedPublicIP: "198.18.0.8"},
+		{ObservedPublicIP: "198.51.100.8"},
+		{ObservedPublicIP: "203.0.113.8"},
+		{ObservedPublicIP: "2001:db8::8"},
 		{ObservedPublicIP: "not-an-address"},
 	}
 	for _, metrics := range invalid {
