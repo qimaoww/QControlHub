@@ -15,13 +15,17 @@ export function installTasks(ctx) {
     notify,
     confirmAction,
     shell,
+    setTimer = (callback, delay) => setTimeout(callback, delay),
+    clearTimer = (timer) => clearTimeout(timer),
+    now = () => Date.now(),
   } = ctx;
   let latestRequest = 0;
+  const settingsCacheDuration = 30_000;
 
   function scheduleTaskRefresh(delay) {
-    clearTimeout(state.taskPollTimer);
+    clearTimer(state.taskPollTimer);
     if (state.route === "tasks") {
-      state.taskPollTimer = setTimeout(
+      state.taskPollTimer = setTimer(
         () => tasks({ background: true }),
         delay,
       );
@@ -275,8 +279,8 @@ export function installTasks(ctx) {
     );
   }
 
-  async function tasks({ background = false } = {}) {
-    clearTimeout(state.taskPollTimer);
+  async function tasks({ background = false, settings: preloadedSettings } = {}) {
+    clearTimer(state.taskPollTimer);
     if (state.confirmOpen) {
       scheduleTaskRefresh(300);
       return;
@@ -293,16 +297,26 @@ export function installTasks(ctx) {
     const currentTimeline = background
       ? document.querySelector("[data-task-page] .task-timeline")
       : null;
+    const settingsCacheAge = now() - Number(state.data.taskSettingsLoadedAt || 0);
+    const cachedSettings =
+      background &&
+      state.data.settings &&
+      settingsCacheAge >= 0 &&
+      settingsCacheAge < settingsCacheDuration
+        ? state.data.settings
+        : null;
     const [items, agents, settings] = await Promise.all([
       api(`/tasks?${query}`),
       api("/agents"),
-      api("/settings"),
+      preloadedSettings || cachedSettings || api("/settings"),
     ]);
     if (requestID !== latestRequest || state.route !== "tasks") return;
 
     const taskCards = renderTaskCards(items, agents, openResultTaskIds());
     const signature = taskRenderSignature(items, agents);
     const pollInterval = settings.task_poll_interval_ms || 1000;
+    state.data.settings = settings;
+    if (settings !== cachedSettings) state.data.taskSettingsLoadedAt = now();
     if (state.confirmOpen) {
       scheduleTaskRefresh(300);
       return;

@@ -10,9 +10,9 @@ export function installDashboard(ctx) {
     }
     return groups;
   };
-async function dashboard() {
+async function dashboard({ overview: preloadedOverview } = {}) {
   const [overview, agents, tasks] = await Promise.all([
-    api("/overview"),
+    preloadedOverview || api("/overview"),
     api("/agents"),
     api("/tasks?limit=7"),
   ]);

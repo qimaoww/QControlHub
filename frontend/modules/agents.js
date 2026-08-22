@@ -135,11 +135,11 @@ export function clearNodeCardDragState(
 
 export function installAgents(ctx) {
   const { api, optionalAPI, state, engines, can, esc, engineName, statusTone, serviceStatusName, short, date, ago, heartbeat, percent, bytes, conciseVersion, rate, actionName, serviceActionDisabled, trafficChart, renderConfigDiff, notify, confirmAction, shell } = ctx;
-async function agents() {
-  return nodeSettings(true);
+async function agents(options = {}) {
+  return nodeSettings(true, options);
 }
 
-async function nodeSettings(presetMode = false) {
+async function nodeSettings(presetMode = false, { overview: preloadedOverview } = {}) {
   const enrollmentOpen = document.querySelector("#enrollment")?.open;
   const historyOpen = document.querySelector("#enrollment .access-history")?.open;
   const [agents, deployments, accessEntries, tokens] =
@@ -169,7 +169,7 @@ async function nodeSettings(presetMode = false) {
       state.data.nodeView = "overview";
   }
   const overview = can("overview.read")
-    ? await api("/overview")
+    ? preloadedOverview || await api("/overview")
     : {};
   state.data.overview = overview;
 

@@ -6,6 +6,7 @@ import { installCoreLogs } from "./modules/core-logs.js";
 import { installTasks } from "./modules/tasks.js";
 import { installTraffic } from "./modules/traffic.js";
 import { installSettings } from "./modules/settings.js";
+import { createLatestRenderScheduler } from "./modules/render-scheduler.js";
 
 const app = document.querySelector("#app");
 const themeStorageKey = "qcontrolhub-color-theme";
@@ -25,7 +26,6 @@ const state = {
   session: null,
   route: location.hash.slice(1) || "dashboard",
   data: {},
-  busy: false,
   confirmResolver: null,
   confirmOpen: false,
 };
@@ -644,12 +644,10 @@ const coreLogs = installCoreLogs({ api, state, engines, can, esc, engineName, da
 const traffic = installTraffic({ api, state, can, esc, engineName, bytes, rate, percent, ago, shell, notify, confirmAction });
 const settings = installSettings({ api, state, esc, date, can, shell, notify, confirmAction });
 
-async function render() {
-  if (state.busy) return;
+async function renderOnce() {
   clearTimeout(state.taskPollTimer);
   clearTimeout(state.trafficPollTimer);
   clearTimeout(state.coreLogPollTimer);
-  state.busy = true;
   const hash = location.hash.slice(1);
   const routeMap = {
     summary: "dashboard",
@@ -712,7 +710,7 @@ async function render() {
     const pages = {
       dashboard,
       agents,
-      "node-settings": nodeSettings,
+      "node-settings": (options) => nodeSettings(false, options),
       "client-access": clientAccess,
       "agent-config": agentConfig,
       "live-config": liveConfig,
@@ -722,7 +720,10 @@ async function render() {
       traffic,
       settings,
     };
-    await (pages[state.route] || dashboard)();
+    await (pages[state.route] || dashboard)({
+      overview: state.data.overview,
+      settings: state.data.settings,
+    });
     if (state.anchor === "new-config")
       document.querySelector("#new-config")?.click();
     else if (state.anchor && state.anchor !== state.route)
@@ -736,9 +737,8 @@ async function render() {
       `<section class="section"><div class="alert error">${esc(error.message)}</div></section>`,
       "错误",
     );
-  } finally {
-    state.busy = false;
   }
 }
+const render = createLatestRenderScheduler(renderOnce);
 window.addEventListener("hashchange", render);
 render();
