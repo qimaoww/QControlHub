@@ -1,3 +1,9 @@
+import {
+  bindEvent,
+  createInteractionGate,
+  createRefreshChannel,
+} from "./refresh.js";
+
 export function nodeCardDropIndex(rects, pointer, grabOffset = { x: 0, y: 0 }) {
   if (!rects.length) return 0;
   const x = pointer.x - grabOffset.x;
@@ -55,9 +61,11 @@ export function animateNodeCardDrop(
     setTimer = (callback, delay) => setTimeout(callback, delay),
     clearTimer = (timer) => clearTimeout(timer),
     fallbackDelay = 240,
+    onSettled = () => {},
   } = {},
 ) {
   let active = true;
+  let settled = false;
   let frame = null;
   let timer = null;
   const animated = new Set();
@@ -79,6 +87,10 @@ export function animateNodeCardDrop(
       item.style.transition = "";
       item.style.transform = "";
     });
+    if (!settled) {
+      settled = true;
+      onSettled();
+    }
   };
   items.forEach((item) => {
     const prev = oldRects.get(item);
@@ -92,7 +104,10 @@ export function animateNodeCardDrop(
     void item.offsetWidth;
     animated.add(item);
   });
-  if (!animated.size) return clear;
+  if (!animated.size) {
+    clear();
+    return () => {};
+  }
   animated.forEach((item) => {
     const listener = (event) => {
       if (event.target !== item || event.propertyName !== "transform") return;
@@ -135,11 +150,48 @@ export function clearNodeCardDragState(
 
 export function installAgents(ctx) {
   const { api, optionalAPI, state, engines, can, esc, engineName, statusTone, serviceStatusName, short, date, ago, heartbeat, percent, bytes, conciseVersion, rate, actionName, serviceActionDisabled, trafficChart, renderConfigDiff, notify, confirmAction, shell } = ctx;
+  const metricsRefresh = createRefreshChannel({
+    isCurrent: () => state.route === "node-settings",
+    getScope: () => state.navigationEpoch,
+  });
+  const cardInteractions = createInteractionGate();
+  let cancelCardDrag = () => {};
+  let agentPageRequest = 0;
+  let structureRefreshQueued = false;
+  let structureRefreshRunning = false;
+  const requestAgentStructureRefresh = () => {
+    structureRefreshQueued = true;
+    cardInteractions.defer(() => void flushAgentStructureRefresh(), "structure");
+  };
+  async function flushAgentStructureRefresh() {
+    if (
+      structureRefreshRunning ||
+      !structureRefreshQueued ||
+      state.route !== "node-settings"
+    )
+      return;
+    structureRefreshQueued = false;
+    structureRefreshRunning = true;
+    try {
+      await renderAgentPage();
+    } catch (error) {
+      notify(error.message, "error");
+    } finally {
+      structureRefreshRunning = false;
+      if (structureRefreshQueued)
+        cardInteractions.defer(
+          () => void flushAgentStructureRefresh(),
+          "structure",
+        );
+    }
+  }
 async function agents(options = {}) {
   return nodeSettings(true, options);
 }
 
 async function nodeSettings(presetMode = false, { overview: preloadedOverview } = {}) {
+  const request = ++agentPageRequest;
+  const expectedRoute = presetMode ? "agents" : "node-settings";
   const enrollmentOpen = document.querySelector("#enrollment")?.open;
   const historyOpen = document.querySelector("#enrollment .access-history")?.open;
   const [agents, deployments, accessEntries, tokens] =
@@ -155,6 +207,7 @@ async function nodeSettings(presetMode = false, { overview: preloadedOverview } 
         ? api("/enrollment-tokens")
         : Promise.resolve([]),
     ]);
+  if (request !== agentPageRequest || state.route !== expectedRoute) return;
   state.data.agents = agents;
   if (!agents.some((agent) => agent.id === state.data.selectedAgent))
     state.data.selectedAgent = agents[0]?.id || "";
@@ -171,6 +224,7 @@ async function nodeSettings(presetMode = false, { overview: preloadedOverview } 
   const overview = can("overview.read")
     ? preloadedOverview || await api("/overview")
     : {};
+  if (request !== agentPageRequest || state.route !== expectedRoute) return;
   state.data.overview = overview;
 
   const savedConfigs = presetMode && can("agent-config.read")
@@ -182,6 +236,7 @@ async function nodeSettings(presetMode = false, { overview: preloadedOverview } 
         )
       ).flat()
     : [];
+  if (request !== agentPageRequest || state.route !== expectedRoute) return;
   const configByService = new Map(
     savedConfigs.map((config) => [
       `${config.agent_id}|${config.engine}`,
@@ -213,6 +268,7 @@ async function nodeSettings(presetMode = false, { overview: preloadedOverview } 
       if (diff) configDiffByService.set(key, diff);
     }),
   );
+  if (request !== agentPageRequest || state.route !== expectedRoute) return;
 
   const tokenRows =
     tokens
@@ -299,7 +355,7 @@ async function nodeSettings(presetMode = false, { overview: preloadedOverview } 
               <details class="core-version-panel version-drawer"><summary><b>${installed ? "版本管理" : `安装 ${esc(engineName(engine))}`}</b><span>收起</span></summary><div class="runtime-drawer-body"><form class="core-version-form" data-version-agent="${esc(agent.id)}" data-version-engine="${esc(engine)}"><fieldset class="release-channel-fieldset"><legend>版本来源</legend><div class="release-channel-options"><label><input type="radio" name="release_channel" value="stable" checked><span>最新稳定版</span></label><label><input type="radio" name="release_channel" value="development"><span>最新开发版</span></label><label><input type="radio" name="release_channel" value="custom"><span>指定版本</span></label></div></fieldset><label class="custom-version-field"><span>指定版本</span><input name="custom_version" maxlength="64" autocomplete="off" placeholder="例如 1.19.29"></label><button class="button small" type="submit" ${agent.status !== "online" || !can("operator") ? "disabled" : ""}>${installed ? "升级或切换版本" : "安装内核"}</button><small>${installed ? "官方 Release · SHA-256 校验" : "安装至 QAgent 专用目录，不影响系统已有内核"}</small></form></div></details>
             </article>`;
           }
-          return `<article class="service-card service-${esc(engine)}" data-core-installed="${installed ? 1 : 0}">
+          return `<article class="service-card service-${esc(engine)}" data-refresh-key="service-${esc(engine)}" data-core-installed="${installed ? 1 : 0}">
             <div class="service-card-main ${presetMode ? "" : "operations-only"}">
               <div class="service-overview"><header><span class="engine-badge ${esc(engine)}">${esc(engineName(engine))}</span><span class="engine-state ${serviceTone}"><i></i><b data-core-service="${esc(engine)}">${esc(serviceState)}</b></span></header><div class="service-version"><span class="service-version-label"><small>内核版本</small><button class="service-version-toggle" type="button" data-open-version-form aria-label="打开 ${esc(engineName(engine))} ${installed ? "版本切换" : "安装内核"}">${installed ? "切换版本" : "安装内核"}</button></span><strong data-core-version="${esc(engine)}" title="${esc(installed ? runtime.version || "版本未知" : "尚未安装")}">${esc(installed ? conciseVersion(engine, runtime.version) : "尚未安装")}</strong></div></div>
               ${presetMode ? `<div class="service-deployment"><dl class="service-facts"><div><dt>已部署配置</dt><dd>${deployed?.config_version ? `v${deployed.config_version}` : "—"}</dd></div><div><dt>已保存配置</dt><dd>${saved?.version ? `v${saved.version}` : "—"}</dd></div></dl>${drift ? `<div class="deployment-drift"><span>${deployed ? "已保存版本尚未部署" : "已保存配置尚未部署"}</span><b>待部署 v${saved.version}</b></div>` : ""}${configDiff ? `<details class="config-diff-drawer"><summary>查看配置差异 <i>＋</i></summary>${configDiff}</details>` : ""}<div class="service-endpoint ${endpoint ? "" : "empty"}">${endpoint ? `<span><b>${esc(firstProfile?.protocol || "客户端入站")}</b><small>${esc(firstProfile?.profile?.format || "已部署配置")}</small></span><code>${esc(endpoint)}</code>` : `<b>${deployed ? "自定义配置" : saved ? "尚未部署" : "尚未配置"}</b>`}</div></div>` : ""}
@@ -325,7 +381,7 @@ async function nodeSettings(presetMode = false, { overview: preloadedOverview } 
         const tabID = (name) => `node-${agent.id}-${name}`;
         const tabButton = (name, label, count = "") =>
           `<button id="${esc(tabID(`${name}-tab`))}" type="button" role="tab" data-node-tab="${name}" aria-controls="${esc(tabID(`${name}-panel`))}" aria-selected="${activeTab === name}" tabindex="${activeTab === name ? 0 : -1}">${label}${count ? `<span>${count}</span>` : ""}</button>`;
-        return `<section class="node-operations-workspace" id="settings-node-${esc(agent.id)}" data-agent-node="${esc(agent.id)}" data-agent-metrics="${esc(agent.id)}" data-available="${metrics.collected_at ? 1 : 0}">
+        return `<section class="node-operations-workspace" id="settings-node-${esc(agent.id)}" data-refresh-key="agent-${esc(agent.id)}" data-agent-node="${esc(agent.id)}" data-agent-metrics="${esc(agent.id)}" data-available="${metrics.collected_at ? 1 : 0}">
           <header class="node-operations-header"><div class="node-operations-title"><span class="machine-avatar">●</span><div><span class="node-live-state"><i class="status-dot ${statusTone(agent.status)}" data-agent-status-dot></i><b data-agent-status-label>${agent.status === "online" ? "在线" : "离线"}</b><small data-agent-heartbeat>${esc(heartbeat(agent.last_seen))}</small></span><h2>${esc(agent.name)}</h2><code>${esc(agent.os)} / ${esc(agent.arch)} · ${esc(short(agent.id))}</code></div></div><div class="node-operations-actions">${can("metrics.read") ? `<button class="button small" type="button" data-agent-refresh title="刷新节点状态">刷新</button>` : ""}${can("operator") ? `<button type="button" class="button primary small" data-upgrade-agent="${esc(agent.id)}">升级 Agent</button>` : ""}</div></header>
           <section class="node-resource-strip" aria-label="节点资源"><div><span>CPU</span><strong data-metric-text="cpu">${metrics.cpu_available ? `${Number(metrics.cpu_percent).toFixed(1)}%` : "等待采集"}</strong><progress aria-label="CPU 使用率" data-metric-progress="cpu" max="100" value="${metrics.cpu_available ? Number(metrics.cpu_percent) : 0}"></progress></div><div><span>内存</span><strong data-metric-text="memory">${metrics.memory_available ? `${bytes(metrics.memory_used_bytes)} / ${bytes(metrics.memory_total_bytes)}` : "等待采集"}</strong><progress aria-label="内存使用率" data-metric-progress="memory" max="100" value="${percent(metrics.memory_used_bytes, metrics.memory_total_bytes)}"></progress></div><div><span>磁盘</span><strong data-metric-text="disk">${metrics.disk_available ? `${bytes(metrics.disk_used_bytes)} / ${bytes(metrics.disk_total_bytes)}` : "等待采集"}</strong><progress aria-label="根磁盘使用率" data-metric-progress="disk" max="100" value="${percent(metrics.disk_used_bytes, metrics.disk_total_bytes)}"></progress></div><div class="node-resource-network"><span>网络</span><strong>↓ <i data-metric-text="download-rate">${metrics.network_available ? rate(metrics.network_rx_bps) : "等待采集"}</i> · ↑ <i data-metric-text="upload-rate">${metrics.network_available ? rate(metrics.network_tx_bps) : "等待采集"}</i></strong><small>累计 ↓ <b data-metric-text="download-total">${metrics.network_available ? bytes(metrics.network_rx_bytes) : "—"}</b> · ↑ <b data-metric-text="upload-total">${metrics.network_available ? bytes(metrics.network_tx_bytes) : "—"}</b></small></div><span class="machine-resource-live" data-metric-poll role="status" aria-label="资源自动更新"></span></section>
           <nav class="node-settings-tabs" role="tablist" aria-label="节点设置分区">${tabButton("cores", "内核", `${installedCount}/${(agent.capabilities || []).length}`)}${tabButton("metrics", "监控")}${tabButton("agent", "Agent")}</nav>
@@ -353,14 +409,14 @@ async function nodeSettings(presetMode = false, { overview: preloadedOverview } 
             return `<span class="core-chip service-${esc(engine)}" data-core-installed="${installed ? 1 : 0}"><span class="engine-badge ${esc(engine)}">${esc(engineName(engine))}</span><span class="engine-state ${tone}"><i></i><b data-core-service="${esc(engine)}">${esc(serviceState)}</b></span></span>`;
           })
           .join("");
-        return `<a class="node-card" href="#settings-node-${esc(agent.id)}" data-agent-node="${esc(agent.id)}" data-agent-metrics="${esc(agent.id)}" data-state="${agent.status === "online" ? "online" : "offline"}" data-available="${metrics.collected_at ? 1 : 0}">
+        return `<a class="node-card" href="#settings-node-${esc(agent.id)}" data-refresh-key="agent-${esc(agent.id)}" data-agent-node="${esc(agent.id)}" data-agent-metrics="${esc(agent.id)}" data-state="${agent.status === "online" ? "online" : "offline"}" data-available="${metrics.collected_at ? 1 : 0}">
               <header class="node-card-head"><span class="machine-avatar" aria-hidden="true">●</span><div class="node-card-title"><strong>${esc(agent.name)}</strong><small>${esc(agent.os)} / ${esc(agent.arch)} · ${installedCount ? `${installedCount}/${(agent.capabilities || []).length} 内核已安装` : "尚未安装内核"}</small></div><span class="node-card-state"><i class="status-dot ${statusTone(agent.status)}" data-agent-status-dot></i><b data-agent-status-label>${agent.status === "online" ? "在线" : "离线"}</b><small data-agent-heartbeat>${esc(heartbeat(agent.last_seen))}</small></span><span class="node-card-grip" title="拖动调整顺序" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 6h.01M9 12h.01M9 18h.01M15 6h.01M15 12h.01M15 18h.01"/></svg></span></header>
               <section class="node-card-resources" aria-label="节点资源"><div><span>CPU</span><strong data-metric-text="cpu">${metrics.cpu_available ? `${Number(metrics.cpu_percent).toFixed(1)}%` : "等待采集"}</strong><progress aria-label="CPU 使用率" data-metric-progress="cpu" max="100" value="${metrics.cpu_available ? Number(metrics.cpu_percent) : 0}"></progress></div><div><span>内存</span><strong data-metric-text="memory">${metrics.memory_available ? `${bytes(metrics.memory_used_bytes)} / ${bytes(metrics.memory_total_bytes)}` : "等待采集"}</strong><progress aria-label="内存使用率" data-metric-progress="memory" max="100" value="${percent(metrics.memory_used_bytes, metrics.memory_total_bytes)}"></progress></div><div><span>磁盘</span><strong data-metric-text="disk">${metrics.disk_available ? `${bytes(metrics.disk_used_bytes)} / ${bytes(metrics.disk_total_bytes)}` : "等待采集"}</strong><progress aria-label="根磁盘使用率" data-metric-progress="disk" max="100" value="${percent(metrics.disk_used_bytes, metrics.disk_total_bytes)}"></progress></div><div><span>网络</span><strong>↓ <i data-metric-text="download-rate">${metrics.network_available ? rate(metrics.network_rx_bps) : "等待采集"}</i> · ↑ <i data-metric-text="upload-rate">${metrics.network_available ? rate(metrics.network_tx_bps) : "等待采集"}</i></strong><small>累计 ↓ <b data-metric-text="download-total">${metrics.network_available ? bytes(metrics.network_rx_bytes) : "—"}</b> · ↑ <b data-metric-text="upload-total">${metrics.network_available ? bytes(metrics.network_tx_bytes) : "—"}</b></small></div><span class="machine-resource-live" data-metric-poll role="status" aria-label="资源自动更新"></span></section>
               <section class="node-card-cores" aria-label="内核状态">${coreChips}</section>
               <footer class="node-card-foot"><small><i></i><span data-agent-version>${esc(agent.version || "未知")}</span></small><span class="node-card-stamp" data-metric-text="stamp">${metrics.collected_at ? `采集于 ${ago(metrics.collected_at)}` : "等待资源数据"}</span><span class="node-card-open">管理节点 <i aria-hidden="true">→</i></span></footer>
             </a>`;
       }
-      return `<section class="preset-node-workspace workspace-panel machine-body" id="preset-node-${esc(agent.id)}" data-agent-node="${esc(agent.id)}" data-agent-metrics="${esc(agent.id)}" data-available="${metrics.collected_at ? 1 : 0}" aria-label="选中节点的内核预设"><section class="service-canvas"><header class="service-canvas-head"><h2>节点内核</h2><span>${(agent.capabilities || []).length} 个内核</span></header><div class="service-grid">${services}</div></section></section>`;
+      return `<section class="preset-node-workspace workspace-panel machine-body" id="preset-node-${esc(agent.id)}" data-refresh-key="agent-${esc(agent.id)}" data-agent-node="${esc(agent.id)}" data-agent-metrics="${esc(agent.id)}" data-available="${metrics.collected_at ? 1 : 0}" aria-label="选中节点的内核预设"><section class="service-canvas"><header class="service-canvas-head"><h2>节点内核</h2><span>${(agent.capabilities || []).length} 个内核</span></header><div class="service-grid">${services}</div></section></section>`;
     })
     .join("");
 
@@ -389,6 +445,13 @@ async function nodeSettings(presetMode = false, { overview: preloadedOverview } 
   shell(
     `${pageIntro}${presetMode ? enrollment : `<div class="node-settings-page">${enrollment}${batch}${detailMode ? `<a class="node-back-link" href="#node-settings">← 全部节点</a>` : ""}`}${nodeCards ? `<section class="${presetMode ? "machine-stack" : detailMode ? "node-settings-stack" : "node-card-grid"}">${nodeCards}</section>` : '<div class="empty large"><strong>还没有节点</strong><p>请先添加节点。</p></div>'}${presetMode ? "" : "</div>"}`,
     presetMode ? "内核配置预设" : "节点设置",
+    {
+      viewKey: presetMode
+        ? `preset-${state.data.selectedAgent || "empty"}`
+        : detailMode
+          ? `node-settings-${state.data.selectedAgent || "empty"}`
+          : "node-settings-overview",
+    },
   );
   document.querySelectorAll("[data-context-agent]").forEach((link) => {
     const prefix = presetMode ? "preset-node" : "settings-node";
@@ -398,8 +461,25 @@ async function nodeSettings(presetMode = false, { overview: preloadedOverview } 
   bindAgentPage(agents, presetMode);
 }
 
-function refreshAgentPage() {
+function renderAgentPage() {
   return state.route === "agents" ? agents() : nodeSettings();
+}
+
+function refreshAgentPage() {
+  if (
+    state.route === "node-settings" &&
+    cardInteractions.activeCount() > 0
+  ) {
+    requestAgentStructureRefresh();
+    return Promise.resolve(false);
+  }
+  return renderAgentPage();
+}
+
+function cancelAgentInteractions() {
+  cardInteractions.cancel();
+  cancelCardDrag();
+  cancelCardDrag = () => {};
 }
 
 const nodeCardOrderKey = "qcontrolhub:node-card-order";
@@ -458,13 +538,17 @@ function enableCardDrag(grid) {
     drag = null;
   };
   const reset = () => {
-    cancelLanding?.();
+    const landing = cancelLanding;
     cancelLanding = null;
+    const releaseInteraction = drag?.releaseInteraction;
+    landing?.();
     clearDragState(true);
+    if (!landing) releaseInteraction?.();
   };
+  cancelCardDrag = reset;
   const finish = (event) => {
     if (!drag || event.pointerId !== drag.pointerId) return;
-    const { card, moved, drop } = drag;
+    const { card, moved, drop, releaseInteraction } = drag;
     if (!moved || !grid.contains(card)) return reset();
     const rest = [...grid.querySelectorAll(".node-card")].filter(
       (item) => item !== card,
@@ -482,24 +566,36 @@ function enableCardDrag(grid) {
     if (target) target.before(card);
     else grid.append(card);
     const next = [...grid.querySelectorAll(".node-card")];
-    cancelLanding = animateNodeCardDrop(next, oldRects);
     const ids = next.map((item) => item.dataset.agentNode);
+    clearDragState(false);
+    let settled = false;
+    const cancelAnimation = animateNodeCardDrop(next, oldRects, {
+      onSettled: () => {
+        settled = true;
+        cancelLanding = null;
+        releaseInteraction();
+      },
+    });
+    if (!settled) cancelLanding = cancelAnimation;
     try {
       localStorage.setItem(nodeCardOrderKey, JSON.stringify(ids));
     } catch {}
-    clearDragState(false);
   };
   const cancel = (event) => {
     if (!drag || event.pointerId !== drag.pointerId) return;
     reset();
   };
   grid.querySelectorAll(".node-card-grip").forEach((grip) => {
-    grip.addEventListener("pointerdown", (event) => {
+    bindEvent(grip, "pointerdown", (event) => {
       if (event.button !== 0 || drag) return;
+      const releaseInteraction = cardInteractions.begin();
       cancelLanding?.();
       cancelLanding = null;
       const card = grip.closest(".node-card");
-      if (!card) return;
+      if (!card) {
+        releaseInteraction();
+        return;
+      }
       event.preventDefault();
       const rect = card.getBoundingClientRect();
       drag = {
@@ -516,10 +612,11 @@ function enableCardDrag(grid) {
         moved: false,
         drop: null,
         ghost: null,
+        releaseInteraction,
       };
       grip.setPointerCapture(event.pointerId);
     });
-    grip.addEventListener("pointermove", (event) => {
+    bindEvent(grip, "pointermove", (event) => {
       if (!drag || event.pointerId !== drag.pointerId) return;
       if (!drag.card.isConnected) {
         reset();
@@ -555,9 +652,10 @@ function enableCardDrag(grid) {
       drag.drop = index;
       highlight(index);
     });
-    grip.addEventListener("pointerup", finish);
-    grip.addEventListener("pointercancel", cancel);
-    grip.addEventListener("click", (event) => {
+    bindEvent(grip, "pointerup", finish);
+    bindEvent(grip, "pointercancel", cancel);
+    bindEvent(grip, "lostpointercapture", cancel);
+    bindEvent(grip, "click", (event) => {
       event.preventDefault();
       event.stopPropagation();
     });
@@ -626,7 +724,7 @@ function bindAgentPage(agentItems, presetMode = false) {
       machineFooter?.remove();
       if (agent) updateAgentMetrics(agent);
       if (item instanceof HTMLDetailsElement) {
-        item.addEventListener("toggle", () => {
+        bindEvent(item, "toggle", () => {
           if (item.open) {
             state.data.selectedAgent = item.dataset.agentNode;
             if (can("metrics.read")) loadMetricHistory(state.data.selectedAgent);
@@ -767,7 +865,7 @@ function bindAgentPage(agentItems, presetMode = false) {
     };
     form
       .querySelectorAll('input[name="release_channel"]')
-      .forEach((radio) => radio.addEventListener("change", sync));
+      .forEach((radio) => bindEvent(radio, "change", sync));
     sync();
   });
   document.querySelectorAll("[data-delete]").forEach((button) => {
@@ -824,7 +922,7 @@ function bindAgentPage(agentItems, presetMode = false) {
   document
     .querySelectorAll("[data-batch-checkbox]")
     .forEach((input) => (input.onchange = updateBatch));
-  batchForm?.elements.engine.addEventListener("change", updateBatch);
+  bindEvent(batchForm?.elements.engine, "change", updateBatch);
   updateBatch();
   if (batchForm)
     batchForm.onsubmit = async (event) => {
@@ -1057,7 +1155,7 @@ function updateAgentMetrics(item) {
     const installed = Boolean(runtime.installed);
     if (card && card.dataset.coreInstalled !== (installed ? "1" : "0")) {
       card.dataset.coreInstalled = installed ? "1" : "0";
-      refreshAgentPage();
+      requestAgentStructureRefresh();
       return;
     }
     const version = root.querySelector(
@@ -1096,33 +1194,47 @@ function updateAgentMetrics(item) {
 
 async function pollAgentMetrics() {
   if (state.route !== "node-settings" || !can("metrics.read")) return;
+  clearTimeout(state.agentPollTimer);
+  state.agentPollTimer = null;
   if (document.hidden) {
     clearTimeout(state.agentPollTimer);
     state.agentPollTimer = setTimeout(pollAgentMetrics, 2000);
     return;
   }
   const indicators = document.querySelectorAll("[data-metric-poll]");
-  indicators.forEach((element) => (element.textContent = "正在刷新…"));
+  cardInteractions.defer(
+    () =>
+      indicators.forEach((element) => (element.textContent = "正在刷新…")),
+    "metrics",
+  );
   try {
-    const items = await api("/agents");
-    items.forEach(updateAgentMetrics);
-    const online = items.filter((item) => item.status === "online").length;
-    const count = document.querySelector("[data-online-count]");
-    if (count) {
-      count.textContent = String(online);
-      count.hidden = online === 0;
-    }
-    const sync = document.querySelector("[data-sync-state]");
-    sync?.classList.toggle("inactive", online === 0);
-    const syncLabel = document.querySelector("[data-sync-label]");
-    if (syncLabel)
-      syncLabel.textContent = online
-        ? `${online} 个节点在线`
-        : "等待节点连接";
-    indicators.forEach((element) => (element.textContent = "刚刚更新"));
+    await metricsRefresh.run(
+      (signal) => api("/agents", { signal }),
+      (items) => cardInteractions.defer(() => {
+        items.forEach(updateAgentMetrics);
+        const online = items.filter((item) => item.status === "online").length;
+        const count = document.querySelector("[data-online-count]");
+        if (count) {
+          count.textContent = String(online);
+          count.hidden = online === 0;
+        }
+        const sync = document.querySelector("[data-sync-state]");
+        sync?.classList.toggle("inactive", online === 0);
+        const syncLabel = document.querySelector("[data-sync-label]");
+        if (syncLabel)
+          syncLabel.textContent = online
+            ? `${online} 个节点在线`
+            : "等待节点连接";
+        indicators.forEach((element) => (element.textContent = "刚刚更新"));
+      }, "metrics"),
+    );
   } catch {
-    indicators.forEach(
-      (element) => (element.textContent = "刷新失败，保留上次数据"),
+    cardInteractions.defer(
+      () =>
+        indicators.forEach(
+          (element) => (element.textContent = "刷新失败，保留上次数据"),
+        ),
+      "metrics",
     );
   } finally {
     clearTimeout(state.agentPollTimer);
@@ -1236,14 +1348,14 @@ function bindCodeEditors() {
       blockSubmit(!result.valid);
       updatePosition();
     };
-    input.addEventListener("input", update);
-    input.addEventListener("scroll", () => {
+    bindEvent(input, "input", update);
+    bindEvent(input, "scroll", () => {
       gutter.scrollTop = input.scrollTop;
     });
     ["click", "keyup", "select"].forEach((name) =>
-      input.addEventListener(name, updatePosition),
+      bindEvent(input, name, updatePosition),
     );
-    input.addEventListener("keydown", (event) => {
+    bindEvent(input, "keydown", (event) => {
       if (
         event.key !== "Tab" ||
         event.altKey ||
@@ -1272,13 +1384,14 @@ function bindCodeEditors() {
       }
       input.dispatchEvent(new Event("input", { bubbles: true }));
     });
-    reset?.addEventListener("click", () => {
+    bindEvent(reset, "click", () => {
       input.value = original;
       input.setSelectionRange(0, 0);
       update();
       input.focus();
     });
-    form?.addEventListener(
+    bindEvent(
+      form,
       "submit",
       (event) => {
         if (inspect().valid) return;
@@ -1342,5 +1455,13 @@ function showCommand(command, onClose, heading = "一键添加 QAgent 节点") {
   };
   copyButton.focus();
 }
-  return { agents, nodeSettings, submitTask, bindCodeEditors, showCommand };
+  return {
+    agents,
+    nodeSettings,
+    submitTask,
+    bindCodeEditors,
+    showCommand,
+    pollAgentMetrics,
+    cancelAgentInteractions,
+  };
 }

@@ -121,6 +121,81 @@ func TestServerPlanRegenerationStaysLocalAndUsesCurrentFormState(t *testing.T) {
 	}
 }
 
+func TestRefreshPathsUseStableViewsAndScopedCoordinators(t *testing.T) {
+	read := func(path string) string {
+		t.Helper()
+		content, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(content)
+	}
+	app := read("app.js")
+	refresh := read("modules/refresh.js")
+	for _, required := range []string{
+		"combineAbortSignals(options.signal, state.routeSignal)",
+		"reconcileView(currentView, template.content.firstElementChild",
+		"state.navigationEpoch += 1",
+		"cancelActive: () => routeController?.abort()",
+		"agentModule.cancelAgentInteractions()",
+		"state.route = \"login\"",
+		"if (renderedRoute === state.route) notify(error.message",
+	} {
+		if !strings.Contains(app, required) {
+			t.Errorf("app refresh coordination is missing %q", required)
+		}
+	}
+	for _, required := range []string{
+		"export function reconcileView",
+		"export function createRefreshChannel",
+		"export function createPoller",
+		"export function createInteractionGate",
+		"scope !== getScope()",
+		"state.active.focus({ preventScroll: true })",
+	} {
+		if !strings.Contains(refresh, required) {
+			t.Errorf("shared refresh runtime is missing %q", required)
+		}
+	}
+	contracts := map[string][]string{
+		"modules/agents.js": {
+			"createInteractionGate()",
+			"requestAgentStructureRefresh()",
+			"cardInteractions.activeCount() > 0",
+			"cardInteractions.cancel()",
+			"data-refresh-key=\"agent-${esc(agent.id)}\"",
+		},
+		"modules/client-access.js": {
+			"createRefreshChannel({",
+			"getScope: () => state.navigationEpoch",
+		},
+		"modules/core-logs.js": {
+			"createPoller({",
+			"data-refresh-key=\"core-log-${esc(entry.id)}\"",
+			"data-refresh-scroll",
+		},
+		"modules/tasks.js": {
+			"return reconcileView(existingCard, freshCard)",
+			"api(`/tasks?${query}`, { signal })",
+		},
+		"modules/traffic.js": {
+			"createPoller({",
+			"data-refresh-key=\"traffic-policy-${esc(policy.id)}\"",
+		},
+	}
+	for path, markers := range contracts {
+		content := read(path)
+		for _, marker := range markers {
+			if !strings.Contains(content, marker) {
+				t.Errorf("%s refresh contract is missing %q", path, marker)
+			}
+		}
+	}
+	if !strings.Contains(read("module_smoke.mjs"), `import "./refresh_smoke.mjs"`) {
+		t.Error("frontend smoke must execute the refresh interaction runtime")
+	}
+}
+
 func TestSidebarNavigationUsesWorkflowOrderAndResponsiveGrouping(t *testing.T) {
 	app, err := os.ReadFile("app.js")
 	if err != nil {
