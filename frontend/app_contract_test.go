@@ -133,7 +133,7 @@ func TestSidebarNavigationUsesWorkflowOrderAndResponsiveGrouping(t *testing.T) {
 	}
 }
 
-func TestPresetSidebarNodesStayInPresetWorkflow(t *testing.T) {
+func TestPresetSidebarShowsOnlySelectedNodeContent(t *testing.T) {
 	app, err := os.ReadFile("app.js")
 	if err != nil {
 		t.Fatal(err)
@@ -142,10 +142,17 @@ func TestPresetSidebarNodesStayInPresetWorkflow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	styles, err := os.ReadFile("app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	const sidebarPresetLink = `href="#node-${esc(agent.id)}" data-context-agent="${esc(agent.id)}"`
 	if !strings.Contains(string(app), sidebarPresetLink) {
 		t.Error("preset sidebar nodes must start from the per-node preset anchor")
+	}
+	if !strings.Contains(string(app), `state.data.selectedAgent === agent.id ? "active" : ""`) {
+		t.Error("preset sidebar must retain the selected node active state")
 	}
 	const settingsDetailLink = `href="#settings-node-${esc(agent.id)}" data-context-agent="${esc(agent.id)}"`
 	if strings.Contains(string(app), settingsDetailLink) {
@@ -160,12 +167,38 @@ func TestPresetSidebarNodesStayInPresetWorkflow(t *testing.T) {
 		}
 	}
 	for _, required := range []string{
+		`? selectedAgent`,
+		`? [selectedAgent]`,
+		`class="preset-node-workspace workspace-panel machine-body"`,
+		`id="preset-node-${esc(agent.id)}"`,
+		`<h2>节点内核</h2>`,
+		"const pageIntro = presetMode\n    ? \"\"",
 		`const prefix = presetMode ? "preset-node" : "settings-node";`,
 		"link.href = `#${prefix}-${link.dataset.contextAgent}`;",
-		`agent.id === state.data.selectedAgent ? "open" : ""`,
 	} {
 		if !strings.Contains(string(agents), required) {
-			t.Errorf("preset workspace selection is missing %q", required)
+			t.Errorf("focused preset workspace is missing %q", required)
+		}
+	}
+	for _, forbidden := range []string{
+		`<details class="machine-workspace"`,
+		`<summary class="machine-header"`,
+		`<header class="node-page-intro"><div><p class="eyebrow">节点配置</p>`,
+		`agent.id === state.data.selectedAgent ? "open" : ""`,
+	} {
+		if strings.Contains(string(agents), forbidden) {
+			t.Errorf("focused preset workspace still renders node accordion contract %q", forbidden)
+		}
+	}
+
+	const presetSingleColumnRule = `.preset-node-workspace>.service-canvas>.service-grid{grid-template-columns:minmax(0,1fr)}`
+	if strings.Count(string(styles), presetSingleColumnRule) != 1 {
+		t.Error("selected preset workspace must define one scoped, shrinkable service-grid column")
+	}
+	const globalSingleColumnRule = `.service-grid{grid-template-columns:minmax(0,1fr)}`
+	for _, line := range strings.Split(string(styles), "\n") {
+		if strings.TrimSpace(line) == globalSingleColumnRule {
+			t.Error("preset layout must not force every service grid into one column")
 		}
 	}
 }

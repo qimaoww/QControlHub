@@ -230,7 +230,9 @@ async function nodeSettings(presetMode = false) {
   const visibleAgents = detailMode
     ? [selectedAgent]
     : presetMode
-      ? agents
+      ? selectedAgent
+        ? [selectedAgent]
+        : []
       : orderAgents(agents);
   const serviceActionIcons = {
     status:
@@ -358,7 +360,7 @@ async function nodeSettings(presetMode = false) {
               <footer class="node-card-foot"><small><i></i><span data-agent-version>${esc(agent.version || "未知")}</span></small><span class="node-card-stamp" data-metric-text="stamp">${metrics.collected_at ? `采集于 ${ago(metrics.collected_at)}` : "等待资源数据"}</span><span class="node-card-open">管理节点 <i aria-hidden="true">→</i></span></footer>
             </a>`;
       }
-      return `<details class="machine-workspace" id="node-${esc(agent.id)}" name="node-workspace" data-agent-node="${esc(agent.id)}" data-agent-metrics="${esc(agent.id)}" data-available="${metrics.collected_at ? 1 : 0}" ${agent.id === state.data.selectedAgent ? "open" : ""}><summary class="machine-header"><div class="machine-identity">${can("operator") ? `<label class="batch-select" title="选择此节点参与批量操作"><input type="checkbox" data-batch-checkbox value="${esc(agent.id)}" aria-label="选择 ${esc(agent.name)} 参与批量操作"><span></span></label>` : ""}<span class="machine-avatar">●</span><span><strong>${esc(agent.name)}</strong><code>${esc(agent.os)} / ${esc(agent.arch)} · ${esc(short(agent.id))}</code></span></div><section class="machine-resource-summary" aria-label="资源监控"><div><span>CPU</span><strong data-metric-text="cpu">${metrics.cpu_available ? `${Number(metrics.cpu_percent).toFixed(1)}%` : "等待采集"}</strong><progress aria-label="CPU 使用率" data-metric-progress="cpu" max="100" value="${metrics.cpu_available ? Number(metrics.cpu_percent) : 0}"></progress></div><div><span>内存</span><strong data-metric-text="memory">${metrics.memory_available ? `${bytes(metrics.memory_used_bytes)} / ${bytes(metrics.memory_total_bytes)}` : "等待采集"}</strong><progress aria-label="内存使用率" data-metric-progress="memory" max="100" value="${percent(metrics.memory_used_bytes, metrics.memory_total_bytes)}"></progress></div><div><span>磁盘</span><strong data-metric-text="disk">${metrics.disk_available ? `${bytes(metrics.disk_used_bytes)} / ${bytes(metrics.disk_total_bytes)}` : "等待采集"}</strong><progress aria-label="根磁盘使用率" data-metric-progress="disk" max="100" value="${percent(metrics.disk_used_bytes, metrics.disk_total_bytes)}"></progress></div><div class="machine-resource-network"><span>网络</span><strong>↓ <i data-metric-text="download-rate">${metrics.network_available ? rate(metrics.network_rx_bps) : "等待采集"}</i> · ↑ <i data-metric-text="upload-rate">${metrics.network_available ? rate(metrics.network_tx_bps) : "等待采集"}</i></strong><small>累计 ↓ <span data-metric-text="download-total">${metrics.network_available ? bytes(metrics.network_rx_bytes) : "—"}</span> · ↑ <span data-metric-text="upload-total">${metrics.network_available ? bytes(metrics.network_tx_bytes) : "—"}</span></small></div><span class="machine-resource-live" data-metric-poll role="status" aria-label="资源自动更新"></span></section><div class="machine-state"><span class="status-dot ${statusTone(agent.status)}" data-agent-status-dot></span><span><b data-agent-status-label>${agent.status === "online" ? "在线" : "离线"}</b><small data-agent-heartbeat>${esc(heartbeat(agent.last_seen))}</small></span></div><i class="machine-chevron" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></svg></i></summary><div class="machine-body"><section class="service-canvas"><header class="service-canvas-head"><h2>节点内核</h2><span>${(agent.capabilities || []).length} 个内核</span></header><div class="service-grid">${services}</div></section><details class="machine-profile node-inspector"><summary class="node-inspector-summary"><span><b>节点身份</b><small>身份信息 · 指标趋势</small></span><i>＋</i></summary><div class="node-inspector-body"><section class="node-identity-panel"><h2>${esc(agent.name)}</h2><dl class="identity-list"><div><dt>节点 ID</dt><dd><code>${esc(agent.id)}</code></dd></div><div><dt>系统平台</dt><dd>${esc(agent.os)} / ${esc(agent.arch)}</dd></div><div><dt>Agent 版本</dt><dd data-agent-version>${esc(agent.version || "未知")}</dd></div><div><dt>注册时间</dt><dd>${date(agent.enrolled_at)}</dd></div><div><dt>安全通道</dt><dd>WSS · Ed25519 签名</dd></div></dl>${labels ? `<div class="labels">${labels}</div>` : ""}<footer class="node-identity-refresh"><span data-metric-text="stamp">${metrics.collected_at ? `采集于 ${ago(metrics.collected_at)}` : "等待资源数据"}</span><div><button type="button" data-agent-refresh>刷新</button>${can("operator") ? `<button type="button" class="button primary small" data-upgrade-agent="${esc(agent.id)}">升级 Agent</button>` : ""}</div></footer></section><section class="metric-trend-empty" data-metric-history="${esc(agent.id)}" aria-label="暂无指标趋势"><span>⌁</span><b>正在载入指标趋势</b><small>打开节点详情后载入最近 24 小时的上下行速率。</small></section></div></details><footer class="machine-footer"><span><i>●</i><b>节点身份已验证</b></span>${can("admin") ? `<details><summary>节点管理</summary><button type="button" data-delete="${esc(agent.id)}">移除节点并吊销身份</button></details>` : ""}</footer></div></details>`;
+      return `<section class="preset-node-workspace workspace-panel machine-body" id="preset-node-${esc(agent.id)}" data-agent-node="${esc(agent.id)}" data-agent-metrics="${esc(agent.id)}" data-available="${metrics.collected_at ? 1 : 0}" aria-label="选中节点的内核预设"><section class="service-canvas"><header class="service-canvas-head"><h2>节点内核</h2><span>${(agent.capabilities || []).length} 个内核</span></header><div class="service-grid">${services}</div></section></section>`;
     })
     .join("");
 
@@ -380,7 +382,7 @@ async function nodeSettings(presetMode = false) {
         : "bad"
     : "";
   const pageIntro = presetMode
-    ? `<header class="node-page-intro"><div><p class="eyebrow">节点配置</p><h2>内核配置预设</h2><p>按节点查看已安装内核与配置入口；实际配置文件仍在手动配置页维护。</p></div><span>${agents.length} 个节点</span></header>`
+    ? ""
     : !detailMode && agents.length
       ? `<header class="node-page-intro"><div><p class="eyebrow">节点设置</p><h2>全部节点</h2><p>每个节点的资源占用与内核状态一屏总览；点击卡片进入管理台，拖动卡片左侧手柄调整顺序。</p></div><span class="node-intro-live"><i class="status-dot ${introTone}"></i>${agents.length} 个节点 · ${onlineAgents} 在线</span></header>`
       : "";
@@ -388,10 +390,6 @@ async function nodeSettings(presetMode = false) {
     `${pageIntro}${presetMode ? enrollment : `<div class="node-settings-page">${enrollment}${batch}${detailMode ? `<a class="node-back-link" href="#node-settings">← 全部节点</a>` : ""}`}${nodeCards ? `<section class="${presetMode ? "machine-stack" : detailMode ? "node-settings-stack" : "node-card-grid"}">${nodeCards}</section>` : '<div class="empty large"><strong>还没有节点</strong><p>请先添加节点。</p></div>'}${presetMode ? "" : "</div>"}`,
     presetMode ? "内核配置预设" : "节点设置",
   );
-  document.querySelectorAll(".machine-workspace").forEach((item) => {
-    const prefix = presetMode ? "preset-node" : "settings-node";
-    item.id = `${prefix}-${item.dataset.agentNode}`;
-  });
   document.querySelectorAll("[data-context-agent]").forEach((link) => {
     const prefix = presetMode ? "preset-node" : "settings-node";
     link.href = `#${prefix}-${link.dataset.contextAgent}`;
@@ -569,7 +567,7 @@ function enableCardDrag(grid) {
 function compactPresetPage() {
   document.querySelector("#enrollment")?.remove();
   document.querySelector("#batch-form")?.remove();
-  document.querySelectorAll(".machine-workspace").forEach((item) => {
+  document.querySelectorAll(".preset-node-workspace").forEach((item) => {
     item.querySelector(".machine-resource-summary")?.remove();
     item.querySelector(".machine-state")?.remove();
     item.querySelector(".node-inspector")?.remove();
@@ -583,7 +581,9 @@ function compactPresetPage() {
 function bindAgentPage(agentItems, presetMode = false) {
   const agentsByID = new Map(agentItems.map((agent) => [agent.id, agent]));
   document
-    .querySelectorAll(".machine-workspace, .node-operations-workspace")
+    .querySelectorAll(
+      ".preset-node-workspace, .machine-workspace, .node-operations-workspace",
+    )
     .forEach((item) => {
       const agent = agentsByID.get(item.dataset.agentNode);
       const installedCount = (agent?.capabilities || []).filter(
