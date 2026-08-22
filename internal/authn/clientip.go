@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/netip"
 	"strings"
 )
 
@@ -60,6 +61,27 @@ func ClientIP(request *http.Request, trustedProxies []*net.IPNet) string {
 		return chain[0].String()
 	}
 	return remoteHost
+}
+
+// PublicClientIP applies the same trusted-proxy chain used for authentication
+// rate limits, then returns only a canonical, publicly routable source IP.
+func PublicClientIP(request *http.Request, trustedProxies []*net.IPNet) string {
+	return NormalizePublicIP(ClientIP(request, trustedProxies))
+}
+
+// NormalizePublicIP canonicalizes public global-unicast IPv4 and IPv6
+// addresses. Private, loopback, link-local, multicast, unspecified, and
+// malformed values are rejected.
+func NormalizePublicIP(value string) string {
+	address, err := netip.ParseAddr(strings.Trim(strings.TrimSpace(value), "[]"))
+	if err != nil {
+		return ""
+	}
+	address = address.Unmap()
+	if !address.IsGlobalUnicast() || address.IsPrivate() || address.IsLoopback() || address.IsLinkLocalUnicast() || address.IsMulticast() || address.IsUnspecified() {
+		return ""
+	}
+	return address.String()
 }
 
 func ipTrusted(address net.IP, networks []*net.IPNet) bool {

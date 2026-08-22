@@ -84,7 +84,7 @@ func TestAddNodeAPICreatesReusableCredentialAndSupportsReinstall(t *testing.T) {
 		agentID = id
 	}
 	if err := dataStore.Heartbeat(ctx, agentID, core.HeartbeatRequest{
-		Metrics: &core.HostMetrics{CPUAvailable: true, CPUPercent: 12.5},
+		Metrics: &core.HostMetrics{CPUAvailable: true, CPUPercent: 12.5, ObservedPublicIP: "198.51.100.9"},
 	}); err != nil {
 		t.Fatalf("store heartbeat metrics: %v", err)
 	}
@@ -113,7 +113,7 @@ func TestAddNodeAPICreatesReusableCredentialAndSupportsReinstall(t *testing.T) {
 	if visibleAgent == nil {
 		t.Fatalf("agents-only response omitted enrolled agent %s", agentID)
 	}
-	if visibleAgent.Metrics.CPUAvailable || visibleAgent.Metrics.CPUPercent != 0 {
+	if visibleAgent.Metrics.CPUAvailable || visibleAgent.Metrics.CPUPercent != 0 || visibleAgent.Metrics.ObservedPublicIP != "" {
 		t.Fatalf("agents-only response exposed metrics: %+v", visibleAgent.Metrics)
 	}
 	adminAgentsRequest := httptest.NewRequest(http.MethodGet, "/api/v1/agents", nil)
@@ -129,7 +129,7 @@ func TestAddNodeAPICreatesReusableCredentialAndSupportsReinstall(t *testing.T) {
 	}
 	metricsVisible := false
 	for _, item := range adminAgents {
-		if item.ID == agentID && item.Metrics.CPUAvailable && item.Metrics.CPUPercent == 12.5 {
+		if item.ID == agentID && item.Metrics.CPUAvailable && item.Metrics.CPUPercent == 12.5 && item.Metrics.ObservedPublicIP == "198.51.100.9" {
 			metricsVisible = true
 			break
 		}

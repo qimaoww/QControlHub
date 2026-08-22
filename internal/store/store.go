@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/qimaoww/qcontrolhub/internal/authn"
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
@@ -475,7 +476,12 @@ func (s *Store) Heartbeat(ctx context.Context, id string, heartbeat core.Heartbe
 	}
 	command, err := s.pool.Exec(ctx, `
 			UPDATE agents SET last_seen=now(), version=CASE WHEN $2='' THEN version ELSE $2 END, runtime=$3,
-			                  metrics=COALESCE($4::jsonb,metrics), features=CASE WHEN jsonb_array_length($5::jsonb)=0 THEN features ELSE $5::jsonb END
+			                  metrics=CASE
+			                    WHEN $4::jsonb IS NULL THEN metrics
+			                    WHEN $4::jsonb ? 'network_interfaces' OR NOT (metrics ? 'network_interfaces') THEN $4::jsonb
+			                    ELSE $4::jsonb || jsonb_build_object('network_interfaces', metrics->'network_interfaces')
+			                  END,
+			                  features=CASE WHEN jsonb_array_length($5::jsonb)=0 THEN features ELSE $5::jsonb END
 			WHERE id=$1 AND revoked_at IS NULL`, id, heartbeat.Version, runtimeState, metricsState, featuresState)
 	if err != nil {
 		return err
@@ -495,8 +501,38 @@ func (s *Store) UpdateAgentMetrics(ctx context.Context, id string, metrics core.
 		return err
 	}
 	command, err := s.pool.Exec(ctx, `
-			UPDATE agents SET last_seen=now(), metrics=COALESCE($2::jsonb,metrics)
+			UPDATE agents SET last_seen=now(), metrics=CASE
+			  WHEN $2::jsonb ? 'network_interfaces' OR NOT (metrics ? 'network_interfaces') THEN $2::jsonb
+			  ELSE $2::jsonb || jsonb_build_object('network_interfaces', metrics->'network_interfaces')
+			END
 			WHERE id=$1 AND revoked_at IS NULL`, id, metricsState)
+	if err != nil {
+		return err
+	}
+	if command.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// UpdateAgentObservedPublicIP stores the authenticated WSS peer address in
+// the existing metrics snapshot without disturbing Agent-reported counters or
+// default-route interfaces. An empty value removes a stale observation so the
+// client address resolver falls back to the current interface snapshot.
+func (s *Store) UpdateAgentObservedPublicIP(ctx context.Context, id, address string) error {
+	address = strings.TrimSpace(address)
+	if address != "" {
+		address = authn.NormalizePublicIP(address)
+		if address == "" {
+			return fmt.Errorf("%w: invalid observed public agent address", ErrInvalid)
+		}
+	}
+	command, err := s.pool.Exec(ctx, `
+		UPDATE agents SET metrics=CASE
+			WHEN $2='' THEN metrics - 'observed_public_ip'
+			ELSE jsonb_set(metrics, '{observed_public_ip}', to_jsonb($2::text), true)
+		END
+		WHERE id=$1 AND revoked_at IS NULL`, id, address)
 	if err != nil {
 		return err
 	}

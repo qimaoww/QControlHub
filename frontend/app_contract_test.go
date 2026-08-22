@@ -203,6 +203,68 @@ func TestPresetSidebarShowsOnlySelectedNodeContent(t *testing.T) {
 	}
 }
 
+func TestClientAccessUsesContextSidebarAsOnlyNodeFilter(t *testing.T) {
+	app, err := os.ReadFile("app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	clientAccess, err := os.ReadFile("modules/client-access.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	styles, err := os.ReadFile("app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, required := range []string{
+		`data-access-agent=""`,
+		`data-access-agent="${esc(agent.id)}"`,
+		`state.data.accessAgent === agent.id ? "active" : ""`,
+	} {
+		if !strings.Contains(string(app), required) {
+			t.Errorf("client access context sidebar is missing %q", required)
+		}
+	}
+	for _, required := range []string{
+		`if (selectedAgent && entry.agent_id !== selectedAgent) return false;`,
+		`data-filter-engine=""`,
+		`aria-label="按内核筛选"`,
+		`.querySelectorAll("[data-access-agent]")`,
+		`client-access-results-head`,
+	} {
+		if !strings.Contains(string(clientAccess), required) {
+			t.Errorf("client access filtering is missing %q", required)
+		}
+	}
+	for _, forbidden := range []string{`data-filter-agent`, `aria-label="按节点筛选"`, `filterAgentIDs`} {
+		if strings.Contains(string(clientAccess), forbidden) {
+			t.Errorf("client access main workspace still contains duplicate node filtering %q", forbidden)
+		}
+	}
+	if strings.Count(string(clientAccess), `<div class="client-access-filter-row">`) != 1 {
+		t.Error("client access main filter panel must contain only the engine filter row")
+	}
+	const narrowSidebarRule = `@media(max-width:820px) and (pointer:coarse){.page-client-access .context-sidebar{display:flex}}`
+	if !strings.Contains(string(styles), narrowSidebarRule) {
+		t.Error("client access context sidebar must remain available on narrow screens")
+	}
+	if !strings.Contains(string(styles), `.context-menu,.context-list{display:flex;overflow:auto;`) {
+		t.Error("narrow context navigation must keep overflow inside its own scroll container")
+	}
+}
+
+func TestAgentWebSocketProxyForwardsSourceChain(t *testing.T) {
+	nginx, err := os.ReadFile("nginx.conf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const agentProxy = `location /agent/ { proxy_http_version 1.1; proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection "upgrade"; proxy_set_header Host $http_host; proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; proxy_pass $control_plane; }`
+	if !strings.Contains(string(nginx), agentProxy) {
+		t.Error("Agent WebSocket proxy must forward the existing trusted source chain")
+	}
+}
+
 func TestInitialConsoleStylesRemainExactOutsideApprovedExtensions(t *testing.T) {
 	styles, err := os.ReadFile("app.css")
 	if err != nil {

@@ -82,14 +82,6 @@ async function clientAccess() {
       })
       .join("") ||
     `<section class="client-access-empty-state"><span>⌁</span><h2>${entries.length ? "没有匹配的客户端配置" : "尚未生成客户端配置"}</h2><p>${entries.length ? "请调整搜索或筛选条件。" : "安装内核并成功部署可解析的服务端入站后，客户端连接信息会自动出现在这里。"}</p><a class="button primary" href="#node-settings">前往节点设置</a></section>`;
-  const filterAgentIDs = new Set(entries.map((entry) => entry.agent_id));
-  const agentFilters = agents
-    .filter((agent) => filterAgentIDs.has(agent.id))
-    .map(
-      (agent) =>
-        `<a class="${selectedAgent === agent.id ? "active" : ""}" href="#client-access" data-filter-agent="${esc(agent.id)}">${esc(agent.name)}</a>`,
-    )
-    .join("");
   const filterEngines = new Set(entries.map((entry) => entry.engine));
   const engineFilters = engines
     .filter((engine) => filterEngines.has(engine))
@@ -99,7 +91,7 @@ async function clientAccess() {
     )
     .join("");
   const filters = entries.length
-    ? `<section class="client-access-filter-panel" aria-label="客户端配置筛选"><form class="client-access-search" id="client-search"><label><span>搜索入站</span><input type="search" name="q" value="${esc(state.data.accessQuery || "")}" placeholder="节点、地址、协议或入站名称" autocomplete="off"></label><button class="button primary" type="submit">搜索</button>${query ? '<button class="button" type="button" data-clear-search>清除搜索</button>' : ""}</form><div class="client-access-filter-row"><span>节点</span><nav aria-label="按节点筛选"><a class="${selectedAgent ? "" : "active"}" href="#client-access" data-filter-agent="">全部节点</a>${agentFilters}</nav></div><div class="client-access-filter-row"><span>内核</span><nav aria-label="按内核筛选"><a class="${selectedEngine ? "" : "active"}" href="#client-access" data-filter-engine="">全部内核</a>${engineFilters}</nav></div></section><div class="client-access-results-head"><span>当前结果</span><strong>${filtered.length} 组内核配置 · ${filteredProfiles} 个入站</strong></div>`
+    ? `<section class="client-access-filter-panel" aria-label="客户端配置筛选"><form class="client-access-search" id="client-search"><label><span>搜索入站</span><input type="search" name="q" value="${esc(state.data.accessQuery || "")}" placeholder="节点、地址、协议或入站名称" autocomplete="off"></label><button class="button primary" type="submit">搜索</button>${query ? '<button class="button" type="button" data-clear-search>清除搜索</button>' : ""}</form><div class="client-access-filter-row"><span>内核</span><nav aria-label="按内核筛选"><a class="${selectedEngine ? "" : "active"}" href="#client-access" data-filter-engine="">全部内核</a>${engineFilters}</nav></div></section><div class="client-access-results-head"><span>当前结果</span><strong>${filtered.length} 组内核配置 · ${filteredProfiles} 个入站</strong></div>`
     : "";
   shell(
     `<section class="client-access-workspace"><header class="client-access-hero"><div><p class="eyebrow">Client access</p><h1>客户端配置</h1><p>集中查看已部署入站生成的客户端连接信息。凭据默认隐藏，只在本页按需显示或复制。</p></div><dl class="client-access-summary"><div><dt>可用节点</dt><dd>${totalNodes}</dd></div><div><dt>客户端入站</dt><dd>${totalProfiles}</dd></div></dl></header>${filters}<div class="client-access-entry-grid">${results}</div></section>`,
@@ -110,13 +102,12 @@ async function clientAccess() {
 
 function bindClientAccessPage() {
   document
-    .querySelectorAll("[data-filter-agent], [data-access-agent]")
+    .querySelectorAll("[data-access-agent]")
     .forEach((button) => {
       button.onclick = (event) => {
         event.preventDefault();
-        state.data.accessAgent =
-          button.dataset.filterAgent ?? button.dataset.accessAgent;
-        clientAccess();
+        state.data.accessAgent = button.dataset.accessAgent;
+        return clientAccess();
       };
     });
   document.querySelectorAll("[data-filter-engine]").forEach((button) => {

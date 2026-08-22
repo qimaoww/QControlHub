@@ -36,10 +36,15 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 	defer dataStore.Close()
 
 	adminToken := strings.Repeat("a", 48)
+	trustedProxies, err := authn.ParseTrustedProxies([]string{"127.0.0.0/8"})
+	if err != nil {
+		t.Fatalf("parse trusted proxy fixture: %v", err)
+	}
 	httpServer := httptest.NewServer(New(dataStore, Config{
-		AdminToken:   adminToken,
-		AgentBinary:  []byte("test-agent-binary"),
-		AgentVersion: "test-version",
+		AdminToken:     adminToken,
+		TrustedProxies: trustedProxies,
+		AgentBinary:    []byte("test-agent-binary"),
+		AgentVersion:   "test-version",
 	}).Handler())
 	defer httpServer.Close()
 
@@ -121,6 +126,7 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 	if err := authn.SignRequest(handshake, nil, enrolled.AgentID, privateKey, time.Now().UTC()); err != nil {
 		t.Fatalf("sign WSS handshake: %v", err)
 	}
+	handshake.Header.Set("X-Forwarded-For", "2001:db8:0:0:0:0:0:9")
 	connection, dialResponse, err := websocket.Dial(ctx, websocketURL, &websocket.DialOptions{
 		HTTPHeader: handshake.Header, Subprotocols: []string{"qcontrolhub.agent.v1"},
 	})
@@ -138,6 +144,10 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 	if len(hello.TrafficPolicies) != 1 || hello.TrafficPolicies[0].ID != trafficPolicy.ID {
 		t.Fatalf("hello traffic policies = %+v", hello.TrafficPolicies)
 	}
+	connectedAgent, err := dataStore.GetAgent(ctx, enrolled.AgentID)
+	if err != nil || connectedAgent.Metrics.ObservedPublicIP != "2001:db8::9" {
+		t.Fatalf("trusted WSS public source was not normalized and stored: agent=%+v error=%v", connectedAgent, err)
+	}
 	periodStart, periodEnd, err := core.TrafficPeriodAt(trafficPolicy.CycleAnchor, trafficPolicy.Cycle, time.Now().UTC())
 	if err != nil {
 		t.Fatal(err)
@@ -154,7 +164,8 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 			MemoryAvailable: true, MemoryUsedBytes: 2 << 30, MemoryTotalBytes: 4 << 30,
 			DiskAvailable: true, DiskUsedBytes: 8 << 30, DiskTotalBytes: 16 << 30,
 			NetworkAvailable: true, NetworkRXBytes: 1000, NetworkTXBytes: 500, NetworkRXBPS: 100, NetworkTXBPS: 50,
-			NetworkInterfaces: []core.HostNetworkInterface{{Name: "eth0", Addresses: []string{"192.168.31.205"}}},
+			NetworkInterfaces: []core.HostNetworkInterface{{Name: "eth0", Addresses: []string{"192.0.2.20"}}},
+			ObservedPublicIP:  "203.0.113.99",
 		},
 	}}
 	if err := wsjson.Write(ctx, connection, heartbeat); err != nil {
@@ -177,6 +188,7 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 		MemoryAvailable: true, MemoryUsedBytes: 1 << 30, MemoryTotalBytes: 4 << 30,
 		DiskAvailable: true, DiskUsedBytes: 2 << 30, DiskTotalBytes: 16 << 30,
 		NetworkAvailable: true, NetworkRXBytes: 2000, NetworkTXBytes: 900, NetworkRXBPS: 300, NetworkTXBPS: 120,
+		ObservedPublicIP: "10.0.0.8",
 	}}
 	if err := wsjson.Write(ctx, connection, metricsPush); err != nil {
 		t.Fatalf("write metrics push: %v", err)
@@ -186,6 +198,9 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 		if pushErr == nil && pushed.Metrics.CPUPercent == 42.5 && pushed.Metrics.NetworkRXBPS == 300 {
 			if pushed.Version != "test" || len(pushed.Features) == 0 {
 				t.Fatalf("metrics push clobbered heartbeat state: agent=%+v", pushed)
+			}
+			if pushed.Metrics.ObservedPublicIP != "2001:db8::9" || len(pushed.Metrics.NetworkInterfaces) != 1 || pushed.Metrics.NetworkInterfaces[0].Addresses[0] != "192.0.2.20" {
+				t.Fatalf("metrics push did not preserve server-observed and last usable address state: %+v", pushed.Metrics)
 			}
 			break
 		}
@@ -274,6 +289,7 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 	if err := authn.SignRequest(resumedHandshake, nil, enrolled.AgentID, privateKey, time.Now().UTC()); err != nil {
 		t.Fatalf("sign resumed WSS handshake: %v", err)
 	}
+	resumedHandshake.Header.Set("X-Forwarded-For", "198.51.100.10")
 	resumedConnection, resumedResponse, err := websocket.Dial(ctx, websocketURL, &websocket.DialOptions{
 		HTTPHeader: resumedHandshake.Header, Subprotocols: []string{"qcontrolhub.agent.v1"},
 	})
@@ -287,6 +303,10 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 	var resumedHello core.WireMessage
 	if err := wsjson.Read(ctx, resumedConnection, &resumedHello); err != nil || resumedHello.Type != core.WireHello {
 		t.Fatalf("read resumed hello: message=%+v error=%v", resumedHello, err)
+	}
+	reconnectedAgent, err := dataStore.GetAgent(ctx, enrolled.AgentID)
+	if err != nil || reconnectedAgent.Metrics.ObservedPublicIP != "198.51.100.10" {
+		t.Fatalf("reconnected WSS public source did not replace the previous observation: agent=%+v error=%v", reconnectedAgent, err)
 	}
 	var resumedTask core.WireMessage
 	if err := wsjson.Read(ctx, resumedConnection, &resumedTask); err != nil {
@@ -410,8 +430,29 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 		t.Fatal("successful deployment task did not update the latest deployment")
 	}
 	agent, err := dataStore.GetAgent(ctx, enrolled.AgentID)
-	if err != nil || agent.Metrics.CollectedAt.IsZero() || agent.Metrics.CPUPercent != 42.5 || agent.Metrics.NetworkRXBPS != 300 || agent.Version != "test" || len(agent.Features) == 0 {
+	if err != nil || agent.Metrics.CollectedAt.IsZero() || agent.Metrics.CPUPercent != 42.5 || agent.Metrics.NetworkRXBPS != 300 || agent.Metrics.ObservedPublicIP != "198.51.100.10" || agent.Version != "test" || len(agent.Features) == 0 {
 		t.Fatalf("live metrics snapshot not persisted: agent=%+v error=%v", agent, err)
+	}
+	if err := dataStore.SetAgentClientAddress(ctx, enrolled.AgentID, "managed.example.test"); err != nil {
+		t.Fatalf("set managed client address: %v", err)
+	}
+	managedAgent, err := dataStore.GetAgent(ctx, enrolled.AgentID)
+	if candidates := clientAddressCandidates(managedAgent); err != nil || len(candidates) == 0 || candidates[0].address != "managed.example.test" || candidates[0].source != "手动设置" {
+		t.Fatalf("managed client address did not take priority: candidates=%+v error=%v", candidates, err)
+	}
+	if err := dataStore.SetAgentClientAddress(ctx, enrolled.AgentID, ""); err != nil {
+		t.Fatalf("restore automatic client address: %v", err)
+	}
+	automaticAgent, err := dataStore.GetAgent(ctx, enrolled.AgentID)
+	if candidates := clientAddressCandidates(automaticAgent); err != nil || len(candidates) == 0 || candidates[0].address != "198.51.100.10" || candidates[0].source != "控制面实时观测公网地址" {
+		t.Fatalf("automatic client address did not resume the WSS observation: candidates=%+v error=%v", candidates, err)
+	}
+	if err := dataStore.UpdateAgentObservedPublicIP(ctx, enrolled.AgentID, ""); err != nil {
+		t.Fatalf("clear unavailable WSS public observation: %v", err)
+	}
+	fallbackAgent, err := dataStore.GetAgent(ctx, enrolled.AgentID)
+	if candidates := clientAddressCandidates(fallbackAgent); err != nil || len(candidates) == 0 || candidates[0].address != "192.0.2.20" || candidates[0].source != "Agent 默认路由接口 eth0" {
+		t.Fatalf("unavailable public source did not retain the default-route fallback: candidates=%+v error=%v", candidates, err)
 	}
 	revokedTask, err := dataStore.CreateTask(ctx, core.TaskRequest{
 		AgentID: enrolled.AgentID, Action: core.ActionStatus, Engine: core.EngineMihomo,

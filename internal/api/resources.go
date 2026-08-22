@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/qimaoww/qcontrolhub/internal/authn"
 	"github.com/qimaoww/qcontrolhub/internal/configschema"
 	"github.com/qimaoww/qcontrolhub/internal/core"
 	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
@@ -520,7 +521,6 @@ func clientAddressCandidates(agent core.Agent) []clientAddressCandidate {
 		{key: "client_address", source: "手动设置"},
 		{key: "public_host", source: "节点公网域名"},
 		{key: "public_ip", source: "节点公网 IP"},
-		{key: "address", source: "节点地址"},
 	}
 	for _, item := range labelSources {
 		key := item.key
@@ -529,6 +529,12 @@ func clientAddressCandidates(agent core.Agent) []clientAddressCandidate {
 				seen[value] = struct{}{}
 				result = append(result, clientAddressCandidate{address: value, source: item.source})
 			}
+		}
+	}
+	if address := authn.NormalizePublicIP(agent.Metrics.ObservedPublicIP); address != "" {
+		if _, exists := seen[address]; !exists {
+			seen[address] = struct{}{}
+			result = append(result, clientAddressCandidate{address: address, source: "控制面实时观测公网地址"})
 		}
 	}
 	type interfaceAddress struct {
@@ -569,7 +575,7 @@ func clientAddressCandidates(agent core.Agent) []clientAddressCandidate {
 			continue
 		}
 		seen[item.address] = struct{}{}
-		result = append(result, clientAddressCandidate{address: item.address, source: "节点网络接口 " + item.name})
+		result = append(result, clientAddressCandidate{address: item.address, source: "Agent 默认路由接口 " + item.name})
 	}
 	return result
 }
