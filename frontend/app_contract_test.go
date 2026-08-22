@@ -78,7 +78,10 @@ func TestInitialConsoleStylesRemainExactOutsideApprovedExtensions(t *testing.T) 
 	if len(parts) != 2 {
 		t.Fatalf("app.css is missing approved deployment dialog extension marker")
 	}
-	const expected = "fb8d54418db5a8511ab88196525aff163b9655f4e45412f5dd05a942ed0e219e"
+	// Base hash covers the initial release plus the approved v56 revision that
+	// reserved the compact media queries for coarse-pointer devices so desktop
+	// zoom keeps one fixed layout.
+	const expected = "b967be66daf4078b69fdc204cf88105800f424dae4aed74ec3e5807b47a3ff4c"
 	if actual := fmt.Sprintf("%x", sha256.Sum256([]byte(parts[0]))); actual != expected {
 		t.Fatalf("base app.css hash = %s, want initial release hash %s", actual, expected)
 	}
