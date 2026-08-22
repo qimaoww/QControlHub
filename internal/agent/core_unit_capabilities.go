@@ -41,9 +41,18 @@ func defaultCoreUnitCapabilitySyncer() coreUnitCapabilitySyncer {
 	}
 }
 
-func ensureManagedCoreServiceCapabilities(ctx context.Context, engine core.Engine, spec EngineSpec) error {
-	defaultSpec, exists := DefaultSpecs()[engine]
+func ensureManagedCoreServiceCapabilities(ctx context.Context, engine core.Engine, spec EngineSpec, managers ...*ServiceManager) error {
+	manager := defaultSystemdServiceManager()
+	if len(managers) > 0 && managers[0] != nil {
+		manager = managers[0]
+	}
+	defaultSpec, exists := DefaultSpecsForServiceManager(manager.Kind())[engine]
 	if !exists || spec != defaultSpec {
+		return nil
+	}
+	// Alpine's managed OpenRC scripts grant CAP_NET_BIND_SERVICE when they
+	// launch the non-root core. No unit drop-in is needed or available there.
+	if manager.Kind() == ServiceManagerOpenRC {
 		return nil
 	}
 	syncer := defaultCoreUnitCapabilitySyncer()

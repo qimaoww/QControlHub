@@ -1,0 +1,22 @@
+#!/sbin/openrc-run
+# QControlHub managed OpenRC service: qagent-shadowsocks-rust
+
+description="Shadowsocks Rust core managed by QAgent"
+command="/usr/local/lib/qagent/cores/ssserver"
+command_args="-c /etc/qagent/shadowsocks-rust/config.json"
+command_user="qcontrolhub-core:qcontrolhub-core"
+directory="/var/lib/qcontrolhub-shadowsocks-rust"
+supervisor="supervise-daemon"
+respawn_delay=3
+respawn_max=0
+capabilities="^cap_net_bind_service"
+no_new_privs=true
+umask=0027
+export RUST_LOG="info"
+
+depend() { need net; }
+
+start_pre() {
+	[ -x "$command" ] || { eerror "missing Shadowsocks Rust binary: $command"; return 1; }
+	[ -f /etc/qagent/shadowsocks-rust/config.json ] || { eerror "missing Shadowsocks Rust configuration"; return 1; }
+}

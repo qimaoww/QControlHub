@@ -35,6 +35,7 @@ type Executor struct {
 	ExistingDiscoveryIssues map[core.Engine]string
 	MigrationMarkerPrefix   string
 	Updater                 *CoreUpdater
+	Services                *ServiceManager
 	specsMu                 sync.RWMutex
 	migrationMu             sync.Mutex
 }
@@ -50,6 +51,24 @@ func DefaultSpecs() map[core.Engine]EngineSpec {
 	}
 }
 
+func DefaultSpecsForServiceManager(kind string) map[core.Engine]EngineSpec {
+	specs := DefaultSpecs()
+	if strings.EqualFold(strings.TrimSpace(kind), ServiceManagerOpenRC) {
+		for engine, spec := range specs {
+			spec.Service = strings.TrimSuffix(spec.Service, ".service")
+			specs[engine] = spec
+		}
+	}
+	return specs
+}
+
+func (e *Executor) serviceManager() *ServiceManager {
+	if e != nil && e.Services != nil {
+		return e.Services
+	}
+	return defaultSystemdServiceManager()
+}
+
 func (e *Executor) Validate() error {
 	if e == nil {
 		return errors.New("agent executor is required")
@@ -57,8 +76,8 @@ func (e *Executor) Validate() error {
 	if os.Geteuid() != 0 {
 		return errors.New("Agent execution must run as root")
 	}
-	if err := validatePrivilegedExecutable(systemctlPath); err != nil {
-		return fmt.Errorf("unsafe systemctl binary: %w", err)
+	if err := e.serviceManager().validate(); err != nil {
+		return err
 	}
 	if len(e.ExistingSpecs) > 0 && strings.TrimSpace(e.MigrationMarkerPrefix) == "" {
 		return errors.New("existing core mappings require a migration state path")
@@ -68,7 +87,7 @@ func (e *Executor) Validate() error {
 			return fmt.Errorf("invalid executor engine %q", engine)
 		}
 		if !safeServiceName(spec.Service) {
-			return fmt.Errorf("unsafe systemd service name %q", spec.Service)
+			return fmt.Errorf("unsafe service name %q", spec.Service)
 		}
 		if !filepath.IsAbs(spec.Binary) || !filepath.IsAbs(spec.ConfigPath) {
 			return fmt.Errorf("live executor paths for %s must be absolute", engine)
@@ -86,7 +105,7 @@ func (e *Executor) Validate() error {
 		if _, enabled := e.Specs[engine]; !enabled {
 			return fmt.Errorf("existing %s mapping is not an enabled engine", engine)
 		}
-		if !supportedExistingService(engine, spec.Service) {
+		if !supportedExistingServiceForManager(e.serviceManager(), engine, spec.Service) {
 			return fmt.Errorf("unsupported existing %s service %q", engine, spec.Service)
 		}
 		if !filepath.IsAbs(spec.Binary) || !filepath.IsAbs(spec.ConfigPath) {
@@ -117,6 +136,14 @@ func (e *Executor) Validate() error {
 }
 
 func supportedExistingService(engine core.Engine, service string) bool {
+	return supportedExistingServiceForManager(defaultSystemdServiceManager(), engine, service)
+}
+
+func supportedExistingServiceForManager(manager *ServiceManager, engine core.Engine, service string) bool {
+	if manager != nil && manager.Kind() == ServiceManagerOpenRC {
+		return (engine == core.EngineXray && service == "xray") ||
+			(engine == core.EngineSingBox && (service == "sing-box" || service == "singbox"))
+	}
 	return (engine == core.EngineXray && service == "xray.service") ||
 		(engine == core.EngineSingBox && (service == "sing-box.service" || service == "singbox.service"))
 }
@@ -302,7 +329,7 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (string, erro
 		return "", fmt.Errorf("%s core tasks are disabled because an existing service could not be mapped safely: %s", task.Engine, discoveryIssue)
 	}
 	if !safeServiceName(spec.Service) {
-		return "", errors.New("configured systemd service name is unsafe")
+		return "", errors.New("configured service name is unsafe")
 	}
 	timeout := 45 * time.Second
 	if task.Action == core.ActionInstall {
@@ -342,14 +369,14 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (string, erro
 		if err != nil {
 			return validation, err
 		}
-		if err := ensureManagedCoreServiceCapabilities(ctx, task.Engine, spec); err != nil {
+		if err := ensureManagedCoreServiceCapabilities(ctx, task.Engine, spec, e.serviceManager()); err != nil {
 			return validation, err
 		}
 		backup, err := atomicDeploy(spec.ConfigPath, task.ConfigContent)
 		if err != nil {
 			return validation, err
 		}
-		restartOutput, err := serviceCommandAndVerify(ctx, spec.Service, core.ActionRestart)
+		restartOutput, err := serviceCommandAndVerifyWithManager(ctx, e.serviceManager(), spec.Service, core.ActionRestart)
 		output := validation + "\ndeployed to " + spec.ConfigPath
 		if backup != "" {
 			output += "\nbackup: " + backup
@@ -366,7 +393,7 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (string, erro
 				return output, fmt.Errorf("configuration deployed but service restart failed (%v); rollback also failed: %w", err, rollbackErr)
 			}
 			recoveryContext, recoveryCancel := context.WithTimeout(context.Background(), 30*time.Second)
-			recoveryOutput, recoveryErr := serviceCommandAndVerify(recoveryContext, spec.Service, core.ActionRestart)
+			recoveryOutput, recoveryErr := serviceCommandAndVerifyWithManager(recoveryContext, e.serviceManager(), spec.Service, core.ActionRestart)
 			recoveryCancel()
 			if recoveryOutput != "" {
 				output += "\nrollback restart: " + recoveryOutput
@@ -381,20 +408,20 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (string, erro
 		if hasExisting {
 			return "", errors.New("import the existing configuration before starting the QAgent service")
 		}
-		if err := ensureManagedCoreServiceCapabilities(ctx, task.Engine, spec); err != nil {
+		if err := ensureManagedCoreServiceCapabilities(ctx, task.Engine, spec, e.serviceManager()); err != nil {
 			return "", err
 		}
-		return serviceCommandAndVerify(ctx, spec.Service, task.Action)
+		return serviceCommandAndVerifyWithManager(ctx, e.serviceManager(), spec.Service, task.Action)
 	case core.ActionStop:
 		if hasExisting {
 			return "", errors.New("import the existing configuration before changing service state")
 		}
-		return serviceCommandAndVerify(ctx, spec.Service, task.Action)
+		return serviceCommandAndVerifyWithManager(ctx, e.serviceManager(), spec.Service, task.Action)
 	case core.ActionStatus:
 		if hasExisting {
-			return serviceStatus(ctx, existing.Service)
+			return serviceStatusWithManager(ctx, e.serviceManager(), existing.Service)
 		}
-		return serviceStatus(ctx, spec.Service)
+		return serviceStatusWithManager(ctx, e.serviceManager(), spec.Service)
 	case core.ActionInstall:
 		if hasExisting {
 			return "", errors.New("import the existing configuration before installing a managed core")
@@ -403,14 +430,14 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (string, erro
 		if err != nil {
 			return "", err
 		}
-		if err := ensureManagedCoreServiceCapabilities(ctx, task.Engine, spec); err != nil {
+		if err := ensureManagedCoreServiceCapabilities(ctx, task.Engine, spec, e.serviceManager()); err != nil {
 			return "", err
 		}
 		updater := e.Updater
 		if updater == nil {
 			updater = NewCoreUpdater()
 		}
-		return updater.Install(ctx, task.Engine, spec, version)
+		return updater.Install(ctx, task.Engine, spec, version, e.serviceManager())
 	default:
 		return "", fmt.Errorf("unsupported action %q", task.Action)
 	}
@@ -710,7 +737,7 @@ func (e *Executor) Runtime(ctx context.Context) map[core.Engine]core.RuntimeStat
 			state.Installed = true
 			state.Version = binaryVersion(ctx, engine, path)
 		}
-		if status, err := serviceStatus(ctx, spec.Service); err == nil {
+		if status, err := serviceStatusWithManager(ctx, e.serviceManager(), spec.Service); err == nil {
 			state.ServiceStatus = strings.TrimSpace(status)
 		} else {
 			state.ServiceStatus = "unknown"
@@ -827,24 +854,15 @@ func validateNoPersistentCoreLogs(engine core.Engine, content string) error {
 }
 
 func serviceCommand(ctx context.Context, service string, action core.Action) (string, error) {
-	if service == "" {
-		return "", errors.New("service name is not configured")
-	}
-	if action != core.ActionStart && action != core.ActionStop && action != core.ActionRestart {
-		return "", errors.New("unsupported service action")
-	}
-	output, err := run(ctx, systemctlPath, string(action), service)
-	if err != nil {
-		return output, fmt.Errorf("systemctl %s %s: %w", action, service, err)
-	}
-	if output == "" {
-		output = fmt.Sprintf("systemctl %s %s completed", action, service)
-	}
-	return output, nil
+	return defaultSystemdServiceManager().command(ctx, service, action)
 }
 
 func serviceCommandAndVerify(ctx context.Context, service string, action core.Action) (string, error) {
-	output, err := serviceCommand(ctx, service, action)
+	return serviceCommandAndVerifyWithManager(ctx, defaultSystemdServiceManager(), service, action)
+}
+
+func serviceCommandAndVerifyWithManager(ctx context.Context, manager *ServiceManager, service string, action core.Action) (string, error) {
+	output, err := manager.command(ctx, service, action)
 	if err != nil {
 		return output, err
 	}
@@ -856,14 +874,14 @@ func serviceCommandAndVerify(ctx context.Context, service string, action core.Ac
 	}
 	verifyContext, verifyCancel := context.WithTimeout(ctx, 5*time.Second)
 	status, statusErr := waitForServiceState(verifyContext, expected, stableFor, 100*time.Millisecond, func(probeContext context.Context) (string, error) {
-		return serviceStatus(probeContext, service)
+		return manager.status(probeContext, service)
 	})
 	verifyCancel()
 	if statusErr != nil {
-		return output, fmt.Errorf("verify systemd service %s after %s: %w", service, action, statusErr)
+		return output, fmt.Errorf("verify %s service %s after %s: %w", manager.Kind(), service, action, statusErr)
 	}
 	if status != expected {
-		return output + "\nservice status: " + status, fmt.Errorf("systemd service %s is %s after %s, expected %s", service, status, action, expected)
+		return output + "\nservice status: " + status, fmt.Errorf("%s service %s is %s after %s, expected %s", manager.Kind(), service, status, action, expected)
 	}
 	return output + "\nservice status: " + status, nil
 }
@@ -909,18 +927,11 @@ func waitForServiceState(ctx context.Context, expected string, stableFor, pollEv
 }
 
 func serviceStatus(ctx context.Context, service string) (string, error) {
-	if !safeServiceName(service) {
-		return "", errors.New("configured systemd service name is unsafe")
-	}
-	output, err := run(ctx, systemctlPath, "is-active", service)
-	if err != nil {
-		trimmed := strings.TrimSpace(output)
-		if trimmed == "inactive" || trimmed == "failed" || trimmed == "activating" || trimmed == "deactivating" || trimmed == "reloading" {
-			return trimmed, nil
-		}
-		return output, err
-	}
-	return strings.TrimSpace(output), nil
+	return serviceStatusWithManager(ctx, defaultSystemdServiceManager(), service)
+}
+
+func serviceStatusWithManager(ctx context.Context, manager *ServiceManager, service string) (string, error) {
+	return manager.status(ctx, service)
 }
 
 func binaryVersion(ctx context.Context, engine core.Engine, binary string) string {

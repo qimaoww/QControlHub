@@ -22,13 +22,19 @@ var version = "dev"
 
 func main() {
 	hostname, _ := os.Hostname()
-	specs := agent.DefaultSpecs()
+	serviceManagerName := env("QCH_SERVICE_MANAGER", agent.ServiceManagerSystemd)
+	serviceManager, err := agent.NewServiceManager(serviceManagerName)
+	if err != nil {
+		slog.Error("invalid service manager", "error", err)
+		os.Exit(1)
+	}
+	specs := agent.DefaultSpecsForServiceManager(serviceManager.Kind())
 	specs[core.EngineMihomo] = overrideSpec(specs[core.EngineMihomo], "MIHOMO")
 	specs[core.EngineXray] = overrideSpec(specs[core.EngineXray], "XRAY")
 	specs[core.EngineSingBox] = overrideSpec(specs[core.EngineSingBox], "SING_BOX")
 	specs[core.EngineShadowsocksRust] = overrideSpec(specs[core.EngineShadowsocksRust], "SS_RUST")
 	if len(os.Args) > 1 {
-		if err := runUtilityCommand(specs, os.Args[1:]); err != nil {
+		if err := runUtilityCommand(specs, os.Args[1:], serviceManager); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
@@ -54,6 +60,7 @@ func main() {
 		statePath+".core-migration",
 		enabledSpecs,
 		manualExistingSpecs,
+		serviceManager,
 	)
 	discoveryCancel()
 	if err != nil {
@@ -65,6 +72,7 @@ func main() {
 		Specs: enabledSpecs, ExistingSpecs: existingSpecs,
 		ExistingDiscoveryIssues: discoveryIssues,
 		MigrationMarkerPrefix:   statePath + ".core-migration",
+		Services:                serviceManager,
 	}
 	client, err := agent.NewClient(agent.ClientConfig{
 		ServerURL:         env("QCH_SERVER_URL", "http://localhost:8080"),
@@ -118,7 +126,14 @@ func existingSpec(prefix string) (agent.EngineSpec, bool) {
 	}, true
 }
 
-func runUtilityCommand(specs map[core.Engine]agent.EngineSpec, arguments []string) error {
+func runUtilityCommand(specs map[core.Engine]agent.EngineSpec, arguments []string, serviceManagers ...*agent.ServiceManager) error {
+	serviceManager, err := agent.NewServiceManager(agent.ServiceManagerSystemd)
+	if err != nil {
+		return err
+	}
+	if len(serviceManagers) > 0 && serviceManagers[0] != nil {
+		serviceManager = serviceManagers[0]
+	}
 	if len(arguments) != 2 || arguments[0] != "inspect-existing" {
 		return errors.New("usage: qagent inspect-existing <xray|sing-box>")
 	}
@@ -137,6 +152,7 @@ func runUtilityCommand(specs map[core.Engine]agent.EngineSpec, arguments []strin
 	executor := &agent.Executor{
 		Specs:         map[core.Engine]agent.EngineSpec{engine: managed},
 		ExistingSpecs: map[core.Engine]agent.EngineSpec{engine: existing},
+		Services:      serviceManager,
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

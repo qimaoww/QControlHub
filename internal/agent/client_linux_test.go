@@ -33,7 +33,7 @@ func TestNewClientTrustsConfiguredPrivateCA(t *testing.T) {
 	if err := os.WriteFile(caPath, certificate, 0o600); err != nil {
 		t.Fatalf("write private CA: %v", err)
 	}
-	executor := &Executor{}
+	executor := testClientExecutor(t)
 	client, err := NewClient(ClientConfig{
 		ServerURL: "wss" + strings.TrimPrefix(tlsServer.URL, "https"), TLSCAFile: caPath,
 	}, executor)
@@ -73,7 +73,7 @@ func TestRunStopsRetryingWhenPersistedIdentityIsRejected(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	executor := &Executor{}
+	executor := testClientExecutor(t)
 	client, err := NewClient(ClientConfig{ServerURL: server.URL, StatePath: statePath}, executor)
 	if err != nil {
 		t.Fatal(err)

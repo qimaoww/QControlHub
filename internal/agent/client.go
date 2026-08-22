@@ -166,7 +166,7 @@ func NewClient(config ClientConfig, executor *Executor) (*Client, error) {
 		websocketURL: websocketScheme + "://" + parsed.Host + "/agent/v1/connect",
 		metrics:      metricsCollector,
 		traffic:      NewTrafficManager(config.StatePath),
-		logs:         NewCoreLogCollector(executor.Specs, executor.ExistingSpecs),
+		logs:         NewCoreLogCollectorForServiceManager(executor.serviceManager(), executor.Specs, executor.ExistingSpecs),
 		http: &http.Client{
 			Transport: transport,
 			CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
@@ -198,7 +198,7 @@ func (c *Client) Run(ctx context.Context) error {
 		}
 	}
 	c.creds = loaded
-	if err := ensureManagedCoreLogStreaming(ctx, c.executor.Specs); err != nil {
+	if err := ensureManagedCoreLogStreaming(ctx, c.executor.Specs, c.executor.serviceManager()); err != nil {
 		slog.Warn("prepare volatile managed core logs", "error", err)
 	}
 	go c.logs.Run(ctx)

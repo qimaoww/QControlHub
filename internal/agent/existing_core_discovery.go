@@ -82,14 +82,16 @@ func RefreshExistingCoreDiscovery(
 	migrationMarkerPrefix string,
 	managedSpecs map[core.Engine]EngineSpec,
 	manualSpecs map[core.Engine]EngineSpec,
+	managers ...*ServiceManager,
 ) (map[core.Engine]EngineSpec, map[core.Engine]string, error) {
+	manager := selectedServiceManager(managers...)
 	if err := os.MkdirAll(filepath.Dir(discoveryStatePath), 0o700); err != nil {
 		return nil, nil, fmt.Errorf("create existing-core discovery state directory: %w", err)
 	}
 	if err := validateStateDirectory(filepath.Dir(discoveryStatePath)); err != nil {
 		return nil, nil, err
 	}
-	previous, err := loadExistingCoreDiscoveryState(discoveryStatePath)
+	previous, err := loadExistingCoreDiscoveryState(discoveryStatePath, manager)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, nil, fmt.Errorf("load existing-core discovery state: %w", err)
 	}
@@ -124,7 +126,7 @@ func RefreshExistingCoreDiscovery(
 			automatic[engine] = previousSpec.engineSpec()
 			continue
 		}
-		spec, found, issue := discoverExistingCoreService(ctx, engine, managed, filepath.Join(validationRoot, string(engine)))
+		spec, found, issue := discoverExistingCoreService(ctx, engine, managed, filepath.Join(validationRoot, string(engine)), manager)
 		if ctx.Err() != nil {
 			return nil, nil, fmt.Errorf("discover existing %s service: %w", engine, ctx.Err())
 		}
@@ -160,11 +162,19 @@ func RefreshExistingCoreDiscovery(
 	return result, issues, nil
 }
 
-func discoverExistingCoreService(ctx context.Context, engine core.Engine, managed EngineSpec, validationDirectory string) (EngineSpec, bool, string) {
+func discoverExistingCoreService(ctx context.Context, engine core.Engine, managed EngineSpec, validationDirectory string, managers ...*ServiceManager) (EngineSpec, bool, string) {
+	manager := selectedServiceManager(managers...)
 	candidates := existingDiscoveryCandidates[engine]
-	activeServices := make([]string, 0, len(candidates.services))
-	for _, service := range candidates.services {
-		status, err := serviceStatus(ctx, service)
+	services := candidates.services
+	if manager.Kind() == ServiceManagerOpenRC {
+		services = make([]string, 0, len(candidates.services))
+		for _, service := range candidates.services {
+			services = append(services, strings.TrimSuffix(service, ".service"))
+		}
+	}
+	activeServices := make([]string, 0, len(services))
+	for _, service := range services {
+		status, err := serviceStatusWithManager(ctx, manager, service)
 		if err != nil {
 			continue
 		}
@@ -179,6 +189,13 @@ func discoverExistingCoreService(ctx context.Context, engine core.Engine, manage
 		return EngineSpec{}, false, fmt.Sprintf("检测到多个活动的标准 %s 服务，自动迁移已安全禁用", engine)
 	}
 	service := activeServices[0]
+	if manager.Kind() == ServiceManagerOpenRC {
+		spec, err := discoverOpenRCExistingSpec(ctx, engine, service, candidates)
+		if err != nil {
+			return EngineSpec{}, false, fmt.Sprintf("检测到活动的 %s OpenRC 服务，但无法将其唯一进程精确映射到受支持的二进制和配置", engine)
+		}
+		return validateDiscoveredExistingSpec(ctx, engine, managed, spec, validationDirectory, manager)
+	}
 	execStart, err := run(ctx, systemctlPath, "show", service, "--property=ExecStart", "--value")
 	if err != nil {
 		return EngineSpec{}, false, fmt.Sprintf("检测到活动的 %s 服务，但无法读取其唯一 ExecStart", engine)
@@ -210,38 +227,137 @@ func discoverExistingCoreService(ctx context.Context, engine core.Engine, manage
 			return EngineSpec{}, false, fmt.Sprintf("检测到活动的 %s 服务和配置，但 executable wrapper 不在安全支持范围；请改为真实二进制、一跳二进制链接或固定 exec 转发器", engine)
 		}
 	}
-	if err := validateManagedServiceForExistingDiscovery(ctx, engine, managed); err != nil {
-		return EngineSpec{}, false, fmt.Sprintf("检测到活动的 %s 服务，但 QAgent 专用服务不是受支持的安全非活动 unit", engine)
-	}
 	spec := EngineSpec{
 		Binary: realBinary, ConfigPath: configPath, ConfigDirectory: configDirectory,
 		ServiceBinary: executable, Service: service,
 	}
-	if err := verifyExistingServiceMapping(ctx, engine, spec); err != nil {
+	return validateDiscoveredExistingSpec(ctx, engine, managed, spec, validationDirectory, manager)
+}
+
+func validateDiscoveredExistingSpec(ctx context.Context, engine core.Engine, managed, spec EngineSpec, validationDirectory string, manager *ServiceManager) (EngineSpec, bool, string) {
+	if err := validateManagedServiceForExistingDiscovery(ctx, engine, managed, manager); err != nil {
+		return EngineSpec{}, false, fmt.Sprintf("检测到活动的 %s 服务，但 QAgent 专用服务不是受支持的安全非活动服务", engine)
+	}
+	if err := verifyExistingServiceMapping(ctx, engine, spec, manager); err != nil {
 		return EngineSpec{}, false, fmt.Sprintf("检测到活动的 %s 服务，但映射在核验期间发生变化", engine)
 	}
 	validationSpec := managed
 	validationSpec.ConfigPath = filepath.Join(validationDirectory, "config.json")
-	probe := &Executor{Specs: map[core.Engine]EngineSpec{engine: validationSpec}, ExistingSpecs: map[core.Engine]EngineSpec{engine: spec}}
+	probe := &Executor{Specs: map[core.Engine]EngineSpec{engine: validationSpec}, ExistingSpecs: map[core.Engine]EngineSpec{engine: spec}, Services: manager}
 	if _, err := probe.readExistingConfig(ctx, engine, validationSpec, spec); err != nil {
 		return EngineSpec{}, false, fmt.Sprintf("检测到活动的 %s 服务，但配置源未通过受保护路径与真实内核校验", engine)
 	}
-	if err := verifyExistingServiceMapping(ctx, engine, spec); err != nil {
+	if err := verifyExistingServiceMapping(ctx, engine, spec, manager); err != nil {
 		return EngineSpec{}, false, fmt.Sprintf("检测到活动的 %s 服务，但映射在配置核验期间发生变化", engine)
 	}
 	return spec, true, ""
 }
 
-func validateManagedServiceForExistingDiscovery(ctx context.Context, engine core.Engine, managed EngineSpec) error {
-	defaultSpec, ok := DefaultSpecs()[engine]
+func discoverOpenRCExistingSpec(ctx context.Context, engine core.Engine, service string, candidates existingDiscoveryCandidateSet) (EngineSpec, error) {
+	entries, err := os.ReadDir(openRCProcRoot)
+	if err != nil {
+		return EngineSpec{}, err
+	}
+	matches := make([]EngineSpec, 0, 1)
+	for _, entry := range entries {
+		if ctx.Err() != nil {
+			return EngineSpec{}, ctx.Err()
+		}
+		if !entry.IsDir() || !decimalProcessID(entry.Name()) {
+			continue
+		}
+		processRoot := filepath.Join(openRCProcRoot, entry.Name())
+		executable, err := os.Readlink(filepath.Join(processRoot, "exe"))
+		if err != nil {
+			continue
+		}
+		argv, err := readOpenRCProcessArgv(filepath.Join(processRoot, "cmdline"))
+		if err != nil || len(argv) == 0 {
+			continue
+		}
+		serviceBinary, realBinary, ok := matchDiscoveredOpenRCExecutable(executable, argv[0], candidates.executables)
+		if !ok {
+			continue
+		}
+		configPath, configDirectory, ok := parseDiscoveredOpenRCArgv(engine, argv, candidates.configs)
+		if !ok {
+			continue
+		}
+		matches = append(matches, EngineSpec{
+			Binary: realBinary, ConfigPath: configPath, ConfigDirectory: configDirectory,
+			ServiceBinary: serviceBinary, Service: service,
+		})
+	}
+	if len(matches) != 1 {
+		return EngineSpec{}, fmt.Errorf("found %d matching OpenRC processes", len(matches))
+	}
+	return matches[0], nil
+}
+
+func matchDiscoveredOpenRCExecutable(processExecutable, argv0 string, candidates []string) (string, string, bool) {
+	type resolvedCandidate struct {
+		serviceBinary string
+		realBinary    string
+	}
+	resolved := make([]resolvedCandidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		realBinary, err := resolveDiscoveredExistingBinary(candidate)
+		if err == nil && realBinary == filepath.Clean(processExecutable) {
+			resolved = append(resolved, resolvedCandidate{serviceBinary: candidate, realBinary: realBinary})
+		}
+	}
+	for _, candidate := range resolved {
+		if argv0 == candidate.serviceBinary {
+			return candidate.serviceBinary, candidate.realBinary, true
+		}
+	}
+	if len(resolved) == 1 && argv0 == resolved[0].realBinary {
+		return resolved[0].serviceBinary, resolved[0].realBinary, true
+	}
+	return "", "", false
+}
+
+func parseDiscoveredOpenRCArgv(engine core.Engine, argv, configs []string) (string, string, bool) {
+	for _, configPath := range configs {
+		spec := EngineSpec{ConfigPath: configPath}
+		if len(argv) == 4 {
+			spec.Binary = argv[0]
+			spec.ServiceBinary = argv[0]
+			if openRCProcessArgvMatches(engine, spec, argv) {
+				return configPath, "", true
+			}
+		}
+		if engine == core.EngineSingBox && len(argv) == 6 && filepath.IsAbs(argv[5]) && !strings.ContainsAny(argv[5], " \t\r\n") {
+			spec.Binary = argv[0]
+			spec.ServiceBinary = argv[0]
+			spec.ConfigDirectory = argv[5]
+			if openRCProcessArgvMatches(engine, spec, argv) {
+				return configPath, argv[5], true
+			}
+		}
+	}
+	return "", "", false
+}
+
+func validateManagedServiceForExistingDiscovery(ctx context.Context, engine core.Engine, managed EngineSpec, managers ...*ServiceManager) error {
+	manager := selectedServiceManager(managers...)
+	defaultSpec, ok := DefaultSpecsForServiceManager(manager.Kind())[engine]
 	if !ok || managed != defaultSpec {
 		return errors.New("managed service mapping is not the QAgent default")
+	}
+	if manager.Kind() == ServiceManagerOpenRC {
+		status, err := serviceStatusWithManager(ctx, manager, managed.Service)
+		if err != nil || (status != "inactive" && status != "failed") {
+			return errors.New("managed OpenRC service is not inactive or failed")
+		}
+		marker := "# QControlHub managed OpenRC service: " + managed.Service
+		return validateOpenRCServiceScript(managed.Service, marker)
 	}
 	loadState, err := run(ctx, systemctlPath, "show", managed.Service, "--property=LoadState", "--value")
 	if err != nil || strings.TrimSpace(loadState) != "loaded" {
 		return errors.New("managed service unit is not loaded")
 	}
-	status, err := serviceStatus(ctx, managed.Service)
+	status, err := serviceStatusWithManager(ctx, manager, managed.Service)
 	if err != nil || (status != "inactive" && status != "failed") {
 		return errors.New("managed service is not inactive or failed")
 	}
@@ -389,7 +505,8 @@ func limitDiscoveryIssue(value string) string {
 	return strings.ToValidUTF8(value[:512], "�")
 }
 
-func loadExistingCoreDiscoveryState(path string) (existingCoreDiscoveryState, error) {
+func loadExistingCoreDiscoveryState(path string, managers ...*ServiceManager) (existingCoreDiscoveryState, error) {
+	manager := selectedServiceManager(managers...)
 	if err := validateStateDirectory(filepath.Dir(path)); err != nil {
 		return existingCoreDiscoveryState{}, err
 	}
@@ -434,7 +551,7 @@ func loadExistingCoreDiscoveryState(path string) (existingCoreDiscoveryState, er
 	}
 	for engine, stored := range state.Specs {
 		spec := stored.engineSpec()
-		if !supportedExistingService(engine, spec.Service) || !filepath.IsAbs(spec.Binary) || !filepath.IsAbs(spec.ConfigPath) ||
+		if !supportedExistingServiceForManager(manager, engine, spec.Service) || !filepath.IsAbs(spec.Binary) || !filepath.IsAbs(spec.ConfigPath) ||
 			(spec.ConfigDirectory != "" && !filepath.IsAbs(spec.ConfigDirectory)) || !filepath.IsAbs(existingServiceBinary(spec)) {
 			return existingCoreDiscoveryState{}, errors.New("existing-core discovery mapping is invalid")
 		}

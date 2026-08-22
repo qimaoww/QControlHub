@@ -1,0 +1,21 @@
+#!/sbin/openrc-run
+# QControlHub managed OpenRC service: qagent-sing-box
+
+description="sing-box core managed by QAgent"
+command="/usr/local/lib/qagent/cores/sing-box"
+command_args="run -c /etc/qagent/sing-box/config.json"
+command_user="qcontrolhub-core:qcontrolhub-core"
+directory="/var/lib/qcontrolhub-sing-box"
+supervisor="supervise-daemon"
+respawn_delay=3
+respawn_max=0
+capabilities="^cap_net_bind_service"
+no_new_privs=true
+umask=0027
+
+depend() { need net; }
+
+start_pre() {
+	[ -x "$command" ] || { eerror "missing sing-box binary: $command"; return 1; }
+	[ -f /etc/qagent/sing-box/config.json ] || { eerror "missing sing-box configuration"; return 1; }
+}

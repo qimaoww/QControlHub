@@ -94,6 +94,35 @@ func TestDefaultSpecsUsePrivateQAgentNamespace(t *testing.T) {
 	}
 }
 
+func TestOpenRCSpecsAndServicesUsePrivateQAgentNamespace(t *testing.T) {
+	t.Parallel()
+	for engine, spec := range DefaultSpecsForServiceManager(ServiceManagerOpenRC) {
+		if strings.HasSuffix(spec.Service, ".service") {
+			t.Errorf("OpenRC service for %s retains systemd suffix: %s", engine, spec.Service)
+		}
+		contents, err := os.ReadFile(filepath.Join("../../deploy/openrc", spec.Service))
+		if err != nil {
+			t.Errorf("read OpenRC service %s: %v", spec.Service, err)
+			continue
+		}
+		script := string(contents)
+		for _, required := range []string{"#!/sbin/openrc-run", "# QControlHub managed OpenRC service:", "supervisor=\"supervise-daemon\"", "capabilities=\"^cap_net_bind_service\"", spec.Binary} {
+			if !strings.Contains(script, required) {
+				t.Errorf("OpenRC service %s is missing %q", spec.Service, required)
+			}
+		}
+	}
+	agentService, err := os.ReadFile("../../deploy/openrc/qagent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, required := range []string{"command=\"/usr/local/lib/qagent/qagent\"", "command_user=\"root:root\"", "respawn_delay=5", "capabilities=\"^cap_chown,^cap_net_admin\"", "no_new_privs=true"} {
+		if !strings.Contains(string(agentService), required) {
+			t.Errorf("OpenRC Agent service is missing %q", required)
+		}
+	}
+}
+
 func TestCoreBootstrapDoesNotTouchLegacyInstallations(t *testing.T) {
 	t.Parallel()
 	contents, err := os.ReadFile("../../deploy/bootstrap-core-services.sh")
@@ -101,7 +130,7 @@ func TestCoreBootstrapDoesNotTouchLegacyInstallations(t *testing.T) {
 		t.Fatal(err)
 	}
 	script := string(contents)
-	for _, required := range []string{"/usr/local/lib/qagent/cores", "/etc/systemd/system/qagent-$engine.service", "install_managed_unit", "preserved non-QAgent unit"} {
+	for _, required := range []string{"/usr/local/lib/qagent/cores", "/etc/systemd/system/$managed_service", "install_managed_unit", "preserved non-QAgent unit", "install_managed_openrc_service", "rc-update add"} {
 		if !strings.Contains(script, required) {
 			t.Errorf("core bootstrap is missing private namespace %q", required)
 		}
@@ -127,6 +156,8 @@ func TestOneClickInstallerMapsOnlyValidatedExistingCorePaths(t *testing.T) {
 	for _, required := range []string{
 		"discover_existing_xray", "discover_existing_singbox", "systemctl is-active --quiet",
 		"existing-core-mapping.sh", "QCH_EXISTING_XRAY_CONFIG", "QCH_EXISTING_SING_BOX_CONFIG",
+		"rc-service \"$service\" status", "/proc/[0-9]*",
+		"QCH_SERVICE_MANAGER", "apk add --no-cache", "deploy/openrc",
 	} {
 		if !strings.Contains(script, required) {
 			t.Errorf("one-click installer is missing inherited-core guard %q", required)

@@ -33,6 +33,7 @@ type CoreLogCollector struct {
 	sources     []coreLogJournalSource
 	seenCursors map[string]struct{}
 	cursorOrder []string
+	disabled    bool
 }
 
 type coreLogJournalSource struct {
@@ -41,13 +42,25 @@ type coreLogJournalSource struct {
 }
 
 func NewCoreLogCollector(specs ...map[core.Engine]EngineSpec) *CoreLogCollector {
+	return NewCoreLogCollectorForServiceManager(defaultSystemdServiceManager(), specs...)
+}
+
+func NewCoreLogCollectorForServiceManager(manager *ServiceManager, specs ...map[core.Engine]EngineSpec) *CoreLogCollector {
 	if len(specs) == 0 {
 		specs = []map[core.Engine]EngineSpec{DefaultSpecs()}
 	}
-	return &CoreLogCollector{sources: coreLogJournalSources(specs...)}
+	collector := &CoreLogCollector{sources: coreLogJournalSources(specs...)}
+	if manager != nil && manager.Kind() == ServiceManagerOpenRC {
+		collector.disabled = true
+	}
+	return collector
 }
 
 func (collector *CoreLogCollector) Run(ctx context.Context) {
+	if collector.disabled {
+		slog.Info("managed core journal streaming is disabled on OpenRC")
+		return
+	}
 	if err := validatePrivilegedExecutable(journalctlPath); err != nil {
 		slog.Warn("managed core log streaming is unavailable", "error", err)
 		return

@@ -1,0 +1,21 @@
+#!/sbin/openrc-run
+# QControlHub managed OpenRC service: qagent-mihomo
+
+description="Mihomo core managed by QAgent"
+command="/usr/local/lib/qagent/cores/mihomo"
+command_args="-d /var/lib/qcontrolhub-mihomo -f /etc/qagent/mihomo/config.yaml"
+command_user="qcontrolhub-core:qcontrolhub-core"
+directory="/var/lib/qcontrolhub-mihomo"
+supervisor="supervise-daemon"
+respawn_delay=3
+respawn_max=0
+capabilities="^cap_net_bind_service"
+no_new_privs=true
+umask=0027
+
+depend() { need net; }
+
+start_pre() {
+	[ -x "$command" ] || { eerror "missing Mihomo binary: $command"; return 1; }
+	[ -f /etc/qagent/mihomo/config.yaml ] || { eerror "missing Mihomo configuration"; return 1; }
+}

@@ -998,7 +998,7 @@ function bindAgentPage(agentItems, presetMode = false) {
       });
       const escapedToken = created.token.replaceAll("'", "'\\''");
       const escapedName = name.replaceAll("'", "'\\''");
-      const command = `curl -fsSL -H 'X-QControlHub-Enrollment: ${escapedToken}' ${location.origin}/install-agent.sh | sudo bash -s -- ${location.origin} '${escapedToken}' '${escapedName}'`;
+      const command = `curl -fsSL -H 'X-QControlHub-Enrollment: ${escapedToken}' ${location.origin}/install-agent.sh | sudo sh -s -- ${location.origin} '${escapedToken}' '${escapedName}'`;
       // Refresh the history before opening the modal so the newly-created
       // enrollment is already visible when the one-time command is closed.
       // Rendering first also avoids a race with the modal close callback and
@@ -1041,7 +1041,7 @@ function bindAgentPage(agentItems, presetMode = false) {
         );
         const escapedToken = created.token.replaceAll("'", "'\\''");
         const escapedName = created.name.replaceAll("'", "'\\''");
-        const command = `curl -fsSL -H 'X-QControlHub-Enrollment: ${escapedToken}' ${location.origin}/install-agent.sh | sudo bash -s -- ${location.origin} '${escapedToken}' '${escapedName}'`;
+        const command = `curl -fsSL -H 'X-QControlHub-Enrollment: ${escapedToken}' ${location.origin}/install-agent.sh | sudo sh -s -- ${location.origin} '${escapedToken}' '${escapedName}'`;
         await refreshAgentPage();
         showCommand(command, undefined, "复制 Agent 安装命令");
       } catch (error) {

@@ -18,9 +18,21 @@ func requireAgentRoot(t *testing.T) {
 	}
 }
 
+func testClientExecutor(t *testing.T) *Executor {
+	t.Helper()
+	manager := defaultSystemdServiceManager()
+	if _, err := os.Stat("/etc/alpine-release"); err == nil {
+		manager, err = NewServiceManager(ServiceManagerOpenRC)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	return &Executor{Services: manager}
+}
+
 func TestNewClientDerivesHTTPSAndWSSOrigins(t *testing.T) {
 	requireAgentRoot(t)
-	executor := &Executor{}
+	executor := testClientExecutor(t)
 	client, err := NewClient(ClientConfig{ServerURL: "wss://control.example.com", HeartbeatEvery: 10 * time.Second}, executor)
 	if err != nil {
 		t.Fatalf("NewClient() error = %v", err)
@@ -35,7 +47,7 @@ func TestNewClientDerivesHTTPSAndWSSOrigins(t *testing.T) {
 
 func TestNewClientRejectsHeartbeatIntervalsOutsideServerDeadline(t *testing.T) {
 	requireAgentRoot(t)
-	executor := &Executor{}
+	executor := testClientExecutor(t)
 	for _, interval := range []time.Duration{time.Millisecond, 31 * time.Second, time.Minute} {
 		if _, err := NewClient(ClientConfig{ServerURL: "wss://control.example.com", HeartbeatEvery: interval}, executor); err == nil || !strings.Contains(err.Error(), "between 1s and 30s") {
 			t.Fatalf("NewClient(HeartbeatEvery=%s) error = %v", interval, err)
@@ -45,7 +57,7 @@ func TestNewClientRejectsHeartbeatIntervalsOutsideServerDeadline(t *testing.T) {
 
 func TestNewClientDefaultsAndValidatesMetricsInterval(t *testing.T) {
 	requireAgentRoot(t)
-	executor := &Executor{}
+	executor := testClientExecutor(t)
 	client, err := NewClient(ClientConfig{ServerURL: "wss://control.example.com", HeartbeatEvery: 10 * time.Second}, executor)
 	if err != nil {
 		t.Fatalf("NewClient() error = %v", err)
@@ -62,7 +74,7 @@ func TestNewClientDefaultsAndValidatesMetricsInterval(t *testing.T) {
 
 func TestNewClientRejectsUnsafeRemoteOrigins(t *testing.T) {
 	requireAgentRoot(t)
-	executor := &Executor{}
+	executor := testClientExecutor(t)
 	for _, value := range []string{
 		"wss://user:password@control.example.com",
 		"wss://control.example.com/base",

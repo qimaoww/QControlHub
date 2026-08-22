@@ -39,6 +39,7 @@ func TestSelectCoreReleaseAssetUsesGenericOfficialBuilds(t *testing.T) {
 		name    string
 		engine  core.Engine
 		arch    string
+		libc    string
 		release githubRelease
 		want    string
 	}{
@@ -78,11 +79,18 @@ func TestSelectCoreReleaseAssetUsesGenericOfficialBuilds(t *testing.T) {
 			}},
 			want: "shadowsocks-v1.24.0.x86_64-unknown-linux-gnu.tar.xz",
 		},
+		{
+			name: "Shadowsocks Rust Alpine musl", engine: core.EngineShadowsocksRust, arch: "arm64", libc: "musl",
+			release: githubRelease{TagName: "v1.24.0", Assets: []githubReleaseAsset{
+				asset("shadowsocks/shadowsocks-rust", "shadowsocks-v1.24.0.aarch64-unknown-linux-musl.tar.xz"),
+			}},
+			want: "shadowsocks-v1.24.0.aarch64-unknown-linux-musl.tar.xz",
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := selectCoreReleaseAsset(test.engine, test.arch, test.release)
+			got, err := selectCoreReleaseAsset(test.engine, test.arch, test.release, test.libc)
 			if err != nil || got.Name != test.want {
 				t.Fatalf("selectCoreReleaseAsset() = %q, %v; want %q", got.Name, err, test.want)
 			}

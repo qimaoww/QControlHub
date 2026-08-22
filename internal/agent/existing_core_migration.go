@@ -15,6 +15,12 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
+var (
+	openRCProcRoot      = "/proc"
+	openRCRunlevelsRoot = "/etc/runlevels"
+	openRCInitRoot      = "/etc/init.d"
+)
+
 func (e *Executor) LoadCoreMigrationState() error {
 	if e == nil || e.MigrationMarkerPrefix == "" || len(e.ExistingSpecs) == 0 {
 		return nil
@@ -43,7 +49,7 @@ func (e *Executor) LoadCoreMigrationState() error {
 			e.specsMu.Unlock()
 		}
 		if record.State == coreMigrationComplete && record.SourceDigest == coreMigrationSourceDigest(existing) {
-			completionErr := verifyCoreMigrationCompletionState(loadContext, existing, managedSpecs[engine])
+			completionErr := verifyCoreMigrationCompletionState(loadContext, existing, managedSpecs[engine], e.serviceManager())
 			e.specsMu.Lock()
 			if completionErr == nil {
 				_ = cleanupCoreMigrationBackups(e.MigrationMarkerPrefix, engine)
@@ -101,15 +107,16 @@ func (e *Executor) ReconcileExistingCoreServices(ctx context.Context) error {
 			}
 			e.ExistingDiscoveryIssues[engine] = fmt.Sprintf("检测到旧版未完成的 %s 服务迁移记录；缺少可验证的托管文件回滚信息，相关内核任务已禁用", engine)
 			e.specsMu.Unlock()
-			if err := restoreLegacyInterruptedCoreMigration(ctx, e.MigrationMarkerPrefix, engine, existing, managed[engine], migrationRecord); err != nil {
+			if err := restoreLegacyInterruptedCoreMigration(ctx, e.MigrationMarkerPrefix, engine, existing, managed[engine], migrationRecord, e.serviceManager()); err != nil {
 				return err
 			}
 			continue
 		}
-		managedStatus, managedStatusErr := serviceStatus(ctx, managed[engine].Service)
-		existingStatus, existingStatusErr := serviceStatus(ctx, existing.Service)
+		manager := e.serviceManager()
+		managedStatus, managedStatusErr := serviceStatusWithManager(ctx, manager, managed[engine].Service)
+		existingStatus, existingStatusErr := serviceStatusWithManager(ctx, manager, existing.Service)
 		rollback := func(cause error) error {
-			restoreErr := restoreInterruptedCoreMigration(ctx, e.MigrationMarkerPrefix, engine, existing, managed[engine], migrationRecord)
+			restoreErr := restoreInterruptedCoreMigration(ctx, e.MigrationMarkerPrefix, engine, existing, managed[engine], migrationRecord, manager)
 			return errors.Join(cause, restoreErr)
 		}
 		if managedStatusErr != nil || existingStatusErr != nil {
@@ -127,7 +134,7 @@ func (e *Executor) ReconcileExistingCoreServices(ctx context.Context) error {
 			}
 			continue
 		}
-		existingStatus, managedStatus, err = waitForCoreMigrationServicePairStable(ctx, existing.Service, managed[engine].Service)
+		existingStatus, managedStatus, err = waitForCoreMigrationServicePairStable(ctx, existing.Service, managed[engine].Service, manager)
 		if err != nil || existingStatus != "inactive" || managedStatus != "active" {
 			if rollbackErr := rollback(err); rollbackErr != nil {
 				return rollbackErr
@@ -137,13 +144,13 @@ func (e *Executor) ReconcileExistingCoreServices(ctx context.Context) error {
 		if err := verifyCoreMigrationStagedFiles(managed[engine], migrationRecord); err != nil {
 			return rollback(fmt.Errorf("verify staged managed files before migration completion: %w", err))
 		}
-		if err := setServiceEnabled(ctx, managed[engine].Service, true); err != nil {
+		if err := setServiceEnabled(ctx, managed[engine].Service, true, manager); err != nil {
 			return rollback(err)
 		}
-		if err := disableServiceCompletely(ctx, existing.Service); err != nil {
+		if err := disableServiceCompletely(ctx, existing.Service, manager); err != nil {
 			return rollback(err)
 		}
-		if err := verifyCoreMigrationCompletionState(ctx, existing, managed[engine]); err != nil {
+		if err := verifyCoreMigrationCompletionState(ctx, existing, managed[engine], manager); err != nil {
 			return rollback(fmt.Errorf("verify service state before migration completion: %w", err))
 		}
 		if err := writeCoreMigrationMarker(e.MigrationMarkerPrefix, engine, coreMigrationComplete, migrationRecord.ConfigDigest, migrationRecord.SourceDigest, migrationRecord.ExistingEnableState, migrationRecord.ManagedEnableState); err != nil {
@@ -157,18 +164,19 @@ func (e *Executor) ReconcileExistingCoreServices(ctx context.Context) error {
 	return nil
 }
 
-func waitForCoreMigrationServicePairStable(ctx context.Context, existingService, managedService string) (string, string, error) {
+func waitForCoreMigrationServicePairStable(ctx context.Context, existingService, managedService string, managers ...*ServiceManager) (string, string, error) {
+	manager := selectedServiceManager(managers...)
 	stableContext, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 	var stableSince time.Time
 	for {
-		existingStatus, err := serviceStatus(stableContext, existingService)
+		existingStatus, err := serviceStatusWithManager(stableContext, manager, existingService)
 		if err != nil {
 			return existingStatus, "", err
 		}
-		managedStatus, err := serviceStatus(stableContext, managedService)
+		managedStatus, err := serviceStatusWithManager(stableContext, manager, managedService)
 		if err != nil {
 			return existingStatus, managedStatus, err
 		}
@@ -189,30 +197,31 @@ func waitForCoreMigrationServicePairStable(ctx context.Context, existingService,
 	}
 }
 
-func verifyCoreMigrationCompletionState(ctx context.Context, existing, managed EngineSpec) error {
-	return waitForCoreMigrationState(ctx, existing.Service, managed.Service, "inactive", "active", "disabled", "enabled")
+func verifyCoreMigrationCompletionState(ctx context.Context, existing, managed EngineSpec, managers ...*ServiceManager) error {
+	return waitForCoreMigrationState(ctx, existing.Service, managed.Service, "inactive", "active", "disabled", "enabled", managers...)
 }
 
-func waitForCoreMigrationState(ctx context.Context, existingService, managedService, expectedExistingStatus, expectedManagedStatus, expectedExistingEnableState, expectedManagedEnableState string) error {
+func waitForCoreMigrationState(ctx context.Context, existingService, managedService, expectedExistingStatus, expectedManagedStatus, expectedExistingEnableState, expectedManagedEnableState string, managers ...*ServiceManager) error {
+	manager := selectedServiceManager(managers...)
 	stableContext, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 	var stableSince time.Time
 	for {
-		existingStatus, err := serviceStatus(stableContext, existingService)
+		existingStatus, err := serviceStatusWithManager(stableContext, manager, existingService)
 		if err != nil {
 			return fmt.Errorf("query existing service state: %w", err)
 		}
-		managedStatus, err := serviceStatus(stableContext, managedService)
+		managedStatus, err := serviceStatusWithManager(stableContext, manager, managedService)
 		if err != nil {
 			return fmt.Errorf("query managed service state: %w", err)
 		}
-		existingEnableState, err := serviceEnableState(stableContext, existingService)
+		existingEnableState, err := serviceEnableState(stableContext, existingService, manager)
 		if err != nil {
 			return err
 		}
-		managedEnableState, err := serviceEnableState(stableContext, managedService)
+		managedEnableState, err := serviceEnableState(stableContext, managedService, manager)
 		if err != nil {
 			return err
 		}
@@ -263,31 +272,32 @@ func coreMigrationMarked(prefix string, engine core.Engine) (bool, error) {
 	return record.State == coreMigrationComplete, err
 }
 
-func restoreInterruptedCoreMigration(ctx context.Context, prefix string, engine core.Engine, existing, managed EngineSpec, record coreMigrationRecord) error {
+func restoreInterruptedCoreMigration(ctx context.Context, prefix string, engine core.Engine, existing, managed EngineSpec, record coreMigrationRecord, managers ...*ServiceManager) error {
 	if !record.HasFileRollback {
 		return errors.New("legacy core migration marker has no durable managed-file rollback information")
 	}
-	return restoreCoreMigrationServicesAndFiles(ctx, prefix, engine, existing, managed, record, true)
+	return restoreCoreMigrationServicesAndFiles(ctx, prefix, engine, existing, managed, record, true, managers...)
 }
 
-func restoreLegacyInterruptedCoreMigration(ctx context.Context, prefix string, engine core.Engine, existing, managed EngineSpec, record coreMigrationRecord) error {
-	return restoreCoreMigrationServicesAndFiles(ctx, prefix, engine, existing, managed, record, false)
+func restoreLegacyInterruptedCoreMigration(ctx context.Context, prefix string, engine core.Engine, existing, managed EngineSpec, record coreMigrationRecord, managers ...*ServiceManager) error {
+	return restoreCoreMigrationServicesAndFiles(ctx, prefix, engine, existing, managed, record, false, managers...)
 }
 
-func restoreCoreMigrationServicesAndFiles(ctx context.Context, prefix string, engine core.Engine, existing, managed EngineSpec, record coreMigrationRecord, restoreFiles bool) error {
-	if _, err := serviceCommandAndVerify(ctx, managed.Service, core.ActionStop); err != nil {
+func restoreCoreMigrationServicesAndFiles(ctx context.Context, prefix string, engine core.Engine, existing, managed EngineSpec, record coreMigrationRecord, restoreFiles bool, managers ...*ServiceManager) error {
+	manager := selectedServiceManager(managers...)
+	if _, err := serviceCommandAndVerifyWithManager(ctx, manager, managed.Service, core.ActionStop); err != nil {
 		return fmt.Errorf("restore existing %s service after interrupted migration: stop managed service: %w", engine, err)
 	}
-	if err := waitForSingleMigrationServiceStable(ctx, managed.Service, "inactive"); err != nil {
+	if err := waitForSingleMigrationServiceStable(ctx, managed.Service, "inactive", manager); err != nil {
 		return fmt.Errorf("restore existing %s service after interrupted migration: verify managed service is stopped: %w", engine, err)
 	}
-	if err := restoreServiceEnableState(ctx, managed.Service, record.ManagedEnableState); err != nil {
+	if err := restoreServiceEnableState(ctx, managed.Service, record.ManagedEnableState, manager); err != nil {
 		return fmt.Errorf("restore existing %s service after interrupted migration: %w", engine, err)
 	}
-	if err := restoreServiceEnableState(ctx, existing.Service, record.ExistingEnableState); err != nil {
+	if err := restoreServiceEnableState(ctx, existing.Service, record.ExistingEnableState, manager); err != nil {
 		return fmt.Errorf("restore existing %s service after interrupted migration: %w", engine, err)
 	}
-	if err := waitForSingleMigrationServiceStable(ctx, managed.Service, "inactive"); err != nil {
+	if err := waitForSingleMigrationServiceStable(ctx, managed.Service, "inactive", manager); err != nil {
 		return fmt.Errorf("restore existing %s service after interrupted migration: managed service restarted before original recovery: %w", engine, err)
 	}
 	if restoreFiles {
@@ -295,14 +305,14 @@ func restoreCoreMigrationServicesAndFiles(ctx context.Context, prefix string, en
 			return fmt.Errorf("restore existing %s service after interrupted migration: restore managed files: %w", engine, err)
 		}
 	}
-	if _, err := serviceCommandAndVerify(ctx, existing.Service, core.ActionStart); err != nil {
+	if _, err := serviceCommandAndVerifyWithManager(ctx, manager, existing.Service, core.ActionStart); err != nil {
 		return fmt.Errorf("restore existing %s service after interrupted migration: start original service: %w", engine, err)
 	}
-	if err := waitForCoreMigrationState(ctx, existing.Service, managed.Service, "active", "inactive", record.ExistingEnableState, record.ManagedEnableState); err != nil {
+	if err := waitForCoreMigrationState(ctx, existing.Service, managed.Service, "active", "inactive", record.ExistingEnableState, record.ManagedEnableState, manager); err != nil {
 		cleanupContext, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		_, stopErr := serviceCommandAndVerify(cleanupContext, managed.Service, core.ActionStop)
-		stopErr = errors.Join(stopErr, waitForSingleMigrationServiceStable(cleanupContext, managed.Service, "inactive"))
+		_, stopErr := serviceCommandAndVerifyWithManager(cleanupContext, manager, managed.Service, core.ActionStop)
+		stopErr = errors.Join(stopErr, waitForSingleMigrationServiceStable(cleanupContext, managed.Service, "inactive", manager))
 		return fmt.Errorf("restore existing %s service after interrupted migration: final safety check failed: %w", engine, errors.Join(err, stopErr))
 	}
 	if restoreFiles {
@@ -316,11 +326,12 @@ func restoreCoreMigrationServicesAndFiles(ctx context.Context, prefix string, en
 	return nil
 }
 
-func waitForSingleMigrationServiceStable(ctx context.Context, service, expected string) error {
+func waitForSingleMigrationServiceStable(ctx context.Context, service, expected string, managers ...*ServiceManager) error {
+	manager := selectedServiceManager(managers...)
 	stableContext, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	status, err := waitForServiceState(stableContext, expected, 500*time.Millisecond, 100*time.Millisecond, func(probeContext context.Context) (string, error) {
-		return serviceStatus(probeContext, service)
+		return serviceStatusWithManager(probeContext, manager, service)
 	})
 	if err != nil {
 		return err
@@ -854,6 +865,7 @@ func cleanupCoreMigrationBackups(prefix string, engine core.Engine) error {
 func (e *Executor) importExistingConfig(ctx context.Context, engine core.Engine, managed, existing EngineSpec, content string) (string, error) {
 	e.migrationMu.Lock()
 	defer e.migrationMu.Unlock()
+	manager := e.serviceManager()
 
 	e.specsMu.RLock()
 	currentExisting, stillPending := e.ExistingSpecs[engine]
@@ -861,10 +873,10 @@ func (e *Executor) importExistingConfig(ctx context.Context, engine core.Engine,
 	if !stillPending || currentExisting != existing {
 		return "", fmt.Errorf("%s existing service migration is no longer pending", engine)
 	}
-	if err := verifyExistingServiceMapping(ctx, engine, existing); err != nil {
+	if err := verifyExistingServiceMapping(ctx, engine, existing, manager); err != nil {
 		return "", err
 	}
-	if err := requireManagedServiceSafeInactive(ctx, engine, managed); err != nil {
+	if err := requireManagedServiceSafeInactive(ctx, engine, managed, manager); err != nil {
 		return "", err
 	}
 	currentContent, err := e.readExistingConfig(ctx, engine, managed, existing)
@@ -874,16 +886,16 @@ func (e *Executor) importExistingConfig(ctx context.Context, engine core.Engine,
 	if currentContent != content {
 		return "", fmt.Errorf("existing %s configuration sources changed after the saved snapshot; both services were left unchanged", engine)
 	}
-	existingEnableState, err := serviceEnableState(ctx, existing.Service)
+	existingEnableState, err := serviceEnableState(ctx, existing.Service, manager)
 	if err != nil {
 		return "", err
 	}
-	managedEnableState, err := serviceEnableState(ctx, managed.Service)
+	managedEnableState, err := serviceEnableState(ctx, managed.Service, manager)
 	if err != nil {
 		return "", err
 	}
 	if !migrationEnableStatesSupported(existingEnableState, managedEnableState) {
-		return "", fmt.Errorf("systemd enable states cannot be migrated safely: existing %s is %s and managed %s is %s; both services were left unchanged", existing.Service, existingEnableState, managed.Service, managedEnableState)
+		return "", fmt.Errorf("%s enable states cannot be migrated safely: existing %s is %s and managed %s is %s; both services were left unchanged", manager.Kind(), existing.Service, existingEnableState, managed.Service, managedEnableState)
 	}
 
 	validationSpec := managed
@@ -891,7 +903,7 @@ func (e *Executor) importExistingConfig(ctx context.Context, engine core.Engine,
 	if _, err := e.validate(ctx, engine, validationSpec, content); err != nil {
 		return "", fmt.Errorf("existing %s configuration is not safe for managed deployment: %w", engine, err)
 	}
-	if err := requireManagedServiceSafeInactive(ctx, engine, managed); err != nil {
+	if err := requireManagedServiceSafeInactive(ctx, engine, managed, manager); err != nil {
 		return "", err
 	}
 
@@ -918,6 +930,7 @@ func (e *Executor) importExistingConfig(ctx context.Context, engine core.Engine,
 		defer cancel()
 		rollbackErr := restoreInterruptedCoreMigration(
 			rollbackContext, e.MigrationMarkerPrefix, engine, existing, managed, migrationRecord,
+			manager,
 		)
 		if rollbackErr != nil {
 			return "migration failed and rollback was incomplete", fmt.Errorf("%v; rollback: %w", cause, rollbackErr)
@@ -938,18 +951,18 @@ func (e *Executor) importExistingConfig(ctx context.Context, engine core.Engine,
 	if err := verifyCoreMigrationStagedFiles(managed, migrationRecord); err != nil {
 		return rollbackMigration(err)
 	}
-	currentExistingEnableState, err := serviceEnableState(ctx, existing.Service)
+	currentExistingEnableState, err := serviceEnableState(ctx, existing.Service, manager)
 	if err != nil {
 		return rollbackMigration(err)
 	}
-	currentManagedEnableState, err := serviceEnableState(ctx, managed.Service)
+	currentManagedEnableState, err := serviceEnableState(ctx, managed.Service, manager)
 	if err != nil {
 		return rollbackMigration(err)
 	}
 	if currentExistingEnableState != existingEnableState || currentManagedEnableState != managedEnableState {
-		return rollbackMigration(fmt.Errorf("systemd enable states changed during migration preparation: existing %s changed from %s to %s and managed %s changed from %s to %s; both services were left unchanged", existing.Service, existingEnableState, currentExistingEnableState, managed.Service, managedEnableState, currentManagedEnableState))
+		return rollbackMigration(fmt.Errorf("%s enable states changed during migration preparation: existing %s changed from %s to %s and managed %s changed from %s to %s; both services were left unchanged", manager.Kind(), existing.Service, existingEnableState, currentExistingEnableState, managed.Service, managedEnableState, currentManagedEnableState))
 	}
-	if err := verifyExistingServiceMapping(ctx, engine, existing); err != nil {
+	if err := verifyExistingServiceMapping(ctx, engine, existing, manager); err != nil {
 		return rollbackMigration(err)
 	}
 	currentContent, err = e.readExistingConfig(ctx, engine, managed, existing)
@@ -959,29 +972,29 @@ func (e *Executor) importExistingConfig(ctx context.Context, engine core.Engine,
 	if currentContent != content {
 		return rollbackMigration(fmt.Errorf("existing %s configuration sources changed during migration preparation; both services were left unchanged", engine))
 	}
-	if err := requireManagedServiceSafeInactive(ctx, engine, managed); err != nil {
+	if err := requireManagedServiceSafeInactive(ctx, engine, managed, manager); err != nil {
 		return rollbackMigration(err)
 	}
-	if err := ensureManagedCoreServiceCapabilities(ctx, engine, managed); err != nil {
+	if err := ensureManagedCoreServiceCapabilities(ctx, engine, managed, manager); err != nil {
 		return rollbackMigration(err)
 	}
-	if err := requireManagedServiceSafeInactive(ctx, engine, managed); err != nil {
+	if err := requireManagedServiceSafeInactive(ctx, engine, managed, manager); err != nil {
 		return rollbackMigration(err)
 	}
 
-	if _, err := serviceCommandAndVerify(ctx, existing.Service, core.ActionStop); err != nil {
+	if _, err := serviceCommandAndVerifyWithManager(ctx, manager, existing.Service, core.ActionStop); err != nil {
 		return rollbackMigration(fmt.Errorf("stop existing %s service: %w", engine, err))
 	}
-	if _, err := serviceCommandAndVerify(ctx, managed.Service, core.ActionStart); err != nil {
+	if _, err := serviceCommandAndVerifyWithManager(ctx, manager, managed.Service, core.ActionStart); err != nil {
 		return rollbackMigration(fmt.Errorf("start QAgent %s service: %w", engine, err))
 	}
-	if err := setServiceEnabled(ctx, managed.Service, true); err != nil {
+	if err := setServiceEnabled(ctx, managed.Service, true, manager); err != nil {
 		return rollbackMigration(err)
 	}
-	if err := disableServiceCompletely(ctx, existing.Service); err != nil {
+	if err := disableServiceCompletely(ctx, existing.Service, manager); err != nil {
 		return rollbackMigration(err)
 	}
-	if err := verifyCoreMigrationCompletionState(ctx, existing, managed); err != nil {
+	if err := verifyCoreMigrationCompletionState(ctx, existing, managed, manager); err != nil {
 		return rollbackMigration(fmt.Errorf("verify service state before migration completion: %w", err))
 	}
 	if err := writeCoreMigrationMarker(e.MigrationMarkerPrefix, engine, coreMigrationComplete, configDigest, sourceDigest, existingEnableState, managedEnableState); err != nil {
@@ -995,8 +1008,15 @@ func (e *Executor) importExistingConfig(ctx context.Context, engine core.Engine,
 	return fmt.Sprintf("imported %s configuration; stopped and disabled %s; started and enabled %s", engine, existing.Service, managed.Service), nil
 }
 
-func requireManagedServiceSafeInactive(ctx context.Context, engine core.Engine, managed EngineSpec) error {
-	status, err := serviceStatus(ctx, managed.Service)
+func requireManagedServiceSafeInactive(ctx context.Context, engine core.Engine, managed EngineSpec, managers ...*ServiceManager) error {
+	manager := selectedServiceManager(managers...)
+	if manager.Kind() == ServiceManagerOpenRC {
+		marker := "# QControlHub managed OpenRC service: " + managed.Service
+		if err := validateOpenRCServiceScript(managed.Service, marker); err != nil {
+			return fmt.Errorf("QAgent %s OpenRC service script is unsafe: %w", engine, err)
+		}
+	}
+	status, err := serviceStatusWithManager(ctx, manager, managed.Service)
 	if err != nil {
 		return fmt.Errorf("query QAgent %s service before migration: %w", engine, err)
 	}
@@ -1069,31 +1089,152 @@ func copyExistingCoreBinary(source, destination string) (string, error) {
 	return replaceCoreBinary(destinationRoot, filepath.Base(destination), tempName)
 }
 
-func verifyExistingServiceMapping(ctx context.Context, engine core.Engine, existing EngineSpec) error {
-	status, err := serviceStatus(ctx, existing.Service)
+func verifyExistingServiceMapping(ctx context.Context, engine core.Engine, existing EngineSpec, managers ...*ServiceManager) error {
+	manager := selectedServiceManager(managers...)
+	status, err := serviceStatusWithManager(ctx, manager, existing.Service)
 	if err != nil {
 		return fmt.Errorf("query existing %s service before migration: %w", engine, err)
 	}
 	if status != "active" {
 		return fmt.Errorf("existing %s service must remain active before migration (status %q)", engine, status)
 	}
-	output, err := run(ctx, systemctlPath, "show", existing.Service, "--property=ExecStart", "--value")
-	if err != nil {
-		return fmt.Errorf("query existing %s service ExecStart before migration: %w", engine, err)
-	}
-	executable, argv, err := parseSingleSystemdExecStart(output)
-	if err != nil || executable != existingServiceBinary(existing) || !supportedExistingExecStart(engine, existing, argv) {
-		return fmt.Errorf("existing %s service ExecStart no longer matches the exact discovered binary and single configuration", engine)
+	if manager.Kind() == ServiceManagerOpenRC {
+		if err := validateOpenRCServiceScript(existing.Service, ""); err != nil {
+			return fmt.Errorf("existing %s OpenRC service script is unsafe: %w", engine, err)
+		}
+		matches, err := matchingOpenRCServiceProcesses(ctx, engine, existing)
+		if err != nil {
+			return fmt.Errorf("inspect existing %s OpenRC process before migration: %w", engine, err)
+		}
+		if matches != 1 {
+			return fmt.Errorf("existing %s OpenRC service no longer has exactly one process matching the discovered binary and configuration", engine)
+		}
+	} else {
+		output, err := run(ctx, systemctlPath, "show", existing.Service, "--property=ExecStart", "--value")
+		if err != nil {
+			return fmt.Errorf("query existing %s service ExecStart before migration: %w", engine, err)
+		}
+		executable, argv, err := parseSingleSystemdExecStart(output)
+		if err != nil || executable != existingServiceBinary(existing) || !supportedExistingExecStart(engine, existing, argv) {
+			return fmt.Errorf("existing %s service ExecStart no longer matches the exact discovered binary and single configuration", engine)
+		}
 	}
 	if err := validateExistingServiceExecutable(existing); err != nil {
 		return fmt.Errorf("existing %s service executable mapping is no longer safe: %w", engine, err)
 	}
-	status, err = serviceStatus(ctx, existing.Service)
+	status, err = serviceStatusWithManager(ctx, manager, existing.Service)
 	if err != nil {
 		return fmt.Errorf("recheck existing %s service before migration: %w", engine, err)
 	}
 	if status != "active" {
 		return fmt.Errorf("existing %s service changed to %q while its mapping was checked", engine, status)
+	}
+	return nil
+}
+
+func matchingOpenRCServiceProcesses(ctx context.Context, engine core.Engine, existing EngineSpec) (int, error) {
+	entries, err := os.ReadDir(openRCProcRoot)
+	if err != nil {
+		return 0, err
+	}
+	matches := 0
+	for _, entry := range entries {
+		if ctx.Err() != nil {
+			return 0, ctx.Err()
+		}
+		if !entry.IsDir() || !decimalProcessID(entry.Name()) {
+			continue
+		}
+		processRoot := filepath.Join(openRCProcRoot, entry.Name())
+		executable, err := os.Readlink(filepath.Join(processRoot, "exe"))
+		if err != nil || filepath.Clean(executable) != existing.Binary {
+			continue
+		}
+		argv, err := readOpenRCProcessArgv(filepath.Join(processRoot, "cmdline"))
+		if err != nil || !openRCProcessArgvMatches(engine, existing, argv) {
+			continue
+		}
+		matches++
+	}
+	return matches, nil
+}
+
+func decimalProcessID(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, character := range value {
+		if character < '0' || character > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func readOpenRCProcessArgv(path string) ([]string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	contents, err := io.ReadAll(io.LimitReader(file, (64<<10)+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(contents) == 0 || len(contents) > 64<<10 {
+		return nil, errors.New("OpenRC process command line is empty or too large")
+	}
+	if contents[len(contents)-1] == 0 {
+		contents = contents[:len(contents)-1]
+	}
+	fields := strings.Split(string(contents), "\x00")
+	for _, field := range fields {
+		if field == "" || strings.ContainsAny(field, "\r\n") {
+			return nil, errors.New("OpenRC process command line is malformed")
+		}
+	}
+	return fields, nil
+}
+
+func openRCProcessArgvMatches(engine core.Engine, existing EngineSpec, argv []string) bool {
+	if len(argv) == 0 || (argv[0] != existingServiceBinary(existing) && argv[0] != existing.Binary) {
+		return false
+	}
+	switch engine {
+	case core.EngineXray:
+		return existing.ConfigDirectory == "" && len(argv) == 4 && argv[1] == "run" &&
+			(argv[2] == "-config" || argv[2] == "-c") && argv[3] == existing.ConfigPath
+	case core.EngineSingBox:
+		if len(argv) == 4 && existing.ConfigDirectory == "" {
+			return argv[1] == "run" && (argv[2] == "-c" || argv[2] == "--config") && argv[3] == existing.ConfigPath
+		}
+		return len(argv) == 6 && existing.ConfigDirectory != "" && argv[1] == "run" && argv[2] == "-c" &&
+			argv[3] == existing.ConfigPath && argv[4] == "-C" && argv[5] == existing.ConfigDirectory
+	default:
+		return false
+	}
+}
+
+func validateOpenRCServiceScript(service, ownershipMarker string) error {
+	if !safeServiceName(service) || strings.Contains(service, ".service") {
+		return errors.New("OpenRC service name is unsafe")
+	}
+	path := filepath.Join(openRCInitRoot, service)
+	if err := validateProtectedDirectoryChain(filepath.Dir(path)); err != nil {
+		return err
+	}
+	if err := validatePrivilegedExecutable(path); err != nil {
+		return err
+	}
+	if ownershipMarker == "" {
+		return nil
+	}
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	if !strings.Contains(string(contents), ownershipMarker+"\n") {
+		return errors.New("OpenRC service script lacks the QAgent ownership marker")
 	}
 	return nil
 }
@@ -1146,8 +1287,15 @@ func supportedExistingExecStart(engine core.Engine, existing EngineSpec, argv st
 	}
 }
 
-func serviceEnableState(ctx context.Context, service string) (string, error) {
-	output, err := run(ctx, systemctlPath, "is-enabled", service)
+func serviceEnableState(ctx context.Context, service string, managers ...*ServiceManager) (string, error) {
+	manager := selectedServiceManager(managers...)
+	if !safeServiceName(service) {
+		return "", errors.New("configured service name is unsafe")
+	}
+	if manager.Kind() == ServiceManagerOpenRC {
+		return openRCServiceEnableState(ctx, service)
+	}
+	output, err := run(ctx, manager.enableHelper(), "is-enabled", service)
 	state := strings.TrimSpace(output)
 	if ctx.Err() != nil {
 		return "", ctx.Err()
@@ -1172,39 +1320,70 @@ func migrationEnableStatesSupported(existing, managed string) bool {
 	return supported(existing) && supported(managed)
 }
 
-func setServiceEnabled(ctx context.Context, service string, enabled bool) error {
+func setServiceEnabled(ctx context.Context, service string, enabled bool, managers ...*ServiceManager) error {
+	manager := selectedServiceManager(managers...)
+	if !safeServiceName(service) {
+		return errors.New("configured service name is unsafe")
+	}
+	if manager.Kind() == ServiceManagerOpenRC {
+		action := "del"
+		want := "disabled"
+		if enabled {
+			action = "add"
+			want = "enabled"
+		}
+		if output, err := run(ctx, manager.enableHelper(), action, service, "default"); err != nil {
+			return fmt.Errorf("openrc rc-update %s %s: %w: %s", action, service, err, output)
+		}
+		state, err := openRCServiceEnableState(ctx, service)
+		if err != nil {
+			return err
+		}
+		if state != want {
+			return fmt.Errorf("OpenRC service %s enable state is %s after rc-update %s", service, state, action)
+		}
+		return nil
+	}
 	action := "disable"
 	if enabled {
 		action = "enable"
 	}
-	if output, err := run(ctx, systemctlPath, action, service); err != nil {
+	if output, err := run(ctx, manager.enableHelper(), action, service); err != nil {
 		return fmt.Errorf("systemctl %s %s: %w: %s", action, service, err, output)
 	}
 	return nil
 }
 
-func disableServiceCompletely(ctx context.Context, service string) error {
-	if err := setServiceEnabled(ctx, service, false); err != nil {
+func disableServiceCompletely(ctx context.Context, service string, managers ...*ServiceManager) error {
+	manager := selectedServiceManager(managers...)
+	if err := setServiceEnabled(ctx, service, false, manager); err != nil {
 		return err
 	}
-	if output, err := run(ctx, systemctlPath, "disable", "--runtime", service); err != nil {
+	if manager.Kind() == ServiceManagerOpenRC {
+		return nil
+	}
+	if output, err := run(ctx, manager.enableHelper(), "disable", "--runtime", service); err != nil {
 		return fmt.Errorf("systemctl disable --runtime %s: %w: %s", service, err, output)
 	}
 	return nil
 }
 
-func restoreServiceEnableState(ctx context.Context, service, state string) error {
+func restoreServiceEnableState(ctx context.Context, service, state string, managers ...*ServiceManager) error {
+	manager := selectedServiceManager(managers...)
 	switch state {
 	case "enabled":
-		return setServiceEnabled(ctx, service, true)
+		return setServiceEnabled(ctx, service, true, manager)
 	case "enabled-runtime":
-		if err := disableServiceCompletely(ctx, service); err != nil {
+		if manager.Kind() == ServiceManagerOpenRC {
+			return errors.New("OpenRC does not support runtime-only enablement")
+		}
+		if err := disableServiceCompletely(ctx, service, manager); err != nil {
 			return err
 		}
-		if output, err := run(ctx, systemctlPath, "enable", "--runtime", service); err != nil {
+		if output, err := run(ctx, manager.enableHelper(), "enable", "--runtime", service); err != nil {
 			return fmt.Errorf("systemctl enable --runtime %s: %w: %s", service, err, output)
 		}
-		restored, err := serviceEnableState(ctx, service)
+		restored, err := serviceEnableState(ctx, service, manager)
 		if err != nil {
 			return err
 		}
@@ -1213,12 +1392,64 @@ func restoreServiceEnableState(ctx context.Context, service, state string) error
 		}
 		return nil
 	case "disabled":
-		return disableServiceCompletely(ctx, service)
+		return disableServiceCompletely(ctx, service, manager)
 	case "static", "indirect":
+		if manager.Kind() == ServiceManagerOpenRC {
+			return errors.New("OpenRC does not support static or indirect enablement")
+		}
 		return nil
 	default:
 		return errors.New("invalid original systemd enable state")
 	}
+}
+
+func openRCServiceEnableState(ctx context.Context, service string) (string, error) {
+	if !safeServiceName(service) || strings.Contains(service, ".service") {
+		return "", errors.New("OpenRC service name is unsafe")
+	}
+	entries, err := os.ReadDir(openRCRunlevelsRoot)
+	if err != nil {
+		return "", fmt.Errorf("read OpenRC runlevels: %w", err)
+	}
+	enabledRunlevel := ""
+	expectedTarget := filepath.Join(openRCInitRoot, service)
+	for _, entry := range entries {
+		if ctx.Err() != nil {
+			return "", ctx.Err()
+		}
+		if !entry.IsDir() {
+			continue
+		}
+		linkPath := filepath.Join(openRCRunlevelsRoot, entry.Name(), service)
+		info, err := os.Lstat(linkPath)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return "", fmt.Errorf("inspect OpenRC runlevel link %s: %w", linkPath, err)
+		}
+		if info.Mode()&os.ModeSymlink == 0 {
+			return "", fmt.Errorf("OpenRC runlevel entry %s is not a symbolic link", linkPath)
+		}
+		target, err := os.Readlink(linkPath)
+		if err != nil {
+			return "", err
+		}
+		if !filepath.IsAbs(target) {
+			target = filepath.Join(filepath.Dir(linkPath), target)
+		}
+		if filepath.Clean(target) != expectedTarget {
+			return "", fmt.Errorf("OpenRC runlevel entry %s has an unexpected target", linkPath)
+		}
+		if entry.Name() != "default" || enabledRunlevel != "" {
+			return "", fmt.Errorf("OpenRC service %s is enabled outside the single supported default runlevel", service)
+		}
+		enabledRunlevel = entry.Name()
+	}
+	if enabledRunlevel == "default" {
+		return "enabled", nil
+	}
+	return "disabled", nil
 }
 
 func writeCoreMigrationMarker(prefix string, engine core.Engine, state coreMigrationState, configDigest, sourceDigest, existingEnableState, managedEnableState string) error {

@@ -10,10 +10,18 @@ mapped_singbox_config_directory=""
 mapped_singbox_service_binary=""
 mapped_singbox_service=""
 
-xray_service_candidates="xray.service"
+case "${service_manager:-systemd}" in
+  openrc)
+    xray_service_candidates="xray"
+    singbox_service_candidates="sing-box singbox"
+    ;;
+  *)
+    xray_service_candidates="xray.service"
+    singbox_service_candidates="sing-box.service singbox.service"
+    ;;
+esac
 xray_binary_candidates="/usr/local/bin/xray /usr/bin/xray"
 xray_config_candidates="/usr/local/etc/xray/config.json /etc/xray/config.json"
-singbox_service_candidates="sing-box.service singbox.service"
 singbox_binary_candidates="/usr/local/bin/sing-box /usr/bin/sing-box /etc/sing-box/bin/sing-box"
 singbox_direct_binary_candidates="/etc/sing-box/bin/sing-box"
 singbox_config_candidates="/etc/sing-box/config.json /usr/local/etc/sing-box/config.json"
@@ -141,6 +149,52 @@ service_uses_paths() {
   binary=$2
   config=$3
   engine=$4
+  real_binary=${5:-$binary}
+  if [ "${service_manager:-systemd}" = openrc ]; then
+    protected_directory_chain /etc/init.d || return 1
+    protected_regular_file "/etc/init.d/$service" true || return 1
+    rc-service "$service" status >/dev/null 2>&1 || return 1
+    matched_processes=0
+    matched_config_directory=""
+    for process_dir in /proc/[0-9]*; do
+      [ -e "$process_dir/exe" ] || continue
+      process_binary=$(readlink "$process_dir/exe" 2>/dev/null) || continue
+      [ "$process_binary" = "$real_binary" ] || continue
+      command_line=$(tr '\000' ' ' < "$process_dir/cmdline" 2>/dev/null) || continue
+      process_config_directory=""
+      case "$engine:$command_line" in
+        "xray:$binary run -config $config "|"xray:$binary run -c $config "|\
+        "xray:$real_binary run -config $config "|"xray:$real_binary run -c $config "|\
+        "sing-box:$binary run -c $config "|"sing-box:$binary run --config $config "|\
+        "sing-box:$real_binary run -c $config "|"sing-box:$real_binary run --config $config ") ;;
+        *)
+          [ "$engine" = sing-box ] || continue
+          process_config_directory=""
+          for process_prefix in \
+            "$binary run -c $config -C " \
+            "$real_binary run -c $config -C "
+          do
+            case "$command_line" in
+              "$process_prefix"*' ')
+                process_config_directory=${command_line#"$process_prefix"}
+                process_config_directory=${process_config_directory% }
+                ;;
+              *) continue ;;
+            esac
+            break
+          done
+          [ -n "$process_config_directory" ] || continue
+          case "$process_config_directory" in /*) ;; *) continue ;; esac
+          case "$process_config_directory" in *[[:space:]]*) continue ;; esac
+          protected_config_directory "$process_config_directory" "$config" || continue
+          ;;
+      esac
+      matched_processes=$((matched_processes + 1))
+      matched_config_directory=$process_config_directory
+    done
+    [ "$matched_processes" -eq 1 ]
+    return
+  fi
   systemctl is-active --quiet "$service" 2>/dev/null || return 1
   exec_start=$(systemctl show "$service" --property=ExecStart --value 2>/dev/null) || return 1
   parsed=$(single_exec_start_argv "$exec_start") || return 1
@@ -166,6 +220,17 @@ service_uses_paths() {
 
 qagent_core_service_is_safe_to_disable() {
   engine=$1
+  if [ "${service_manager:-systemd}" = openrc ]; then
+    service="qagent-$engine"
+    expected_fragment=${2:-/etc/init.d/$service}
+    [ -e "$expected_fragment" ] || return 0
+    [ ! -L "$expected_fragment" ] && [ -f "$expected_fragment" ] || return 1
+    protected_directory_chain /etc/init.d || return 1
+    protected_regular_file "$expected_fragment" true || return 1
+    grep -q "^# QControlHub managed OpenRC service: $service$" "$expected_fragment" || return 1
+    if rc-service "$service" status >/dev/null 2>&1; then return 1; fi
+    return
+  fi
   service="qagent-$engine.service"
   expected_fragment=${2:-/etc/systemd/system/$service}
   load_state=$(systemctl show "$service" --property=LoadState --value 2>/dev/null) || return 1
@@ -190,14 +255,41 @@ skip_core_service() {
 require_skipped_core_service_inactive() {
   engine=$1
   skip_core_service "$engine" || return 0
-  if systemctl is-active --quiet "qagent-$engine.service"; then
-    printf '%s\n' "refusing to alter active qagent-$engine.service while mapping another service" >&2
+  if [ "${service_manager:-systemd}" = openrc ]; then service="qagent-$engine"; else service="qagent-$engine.service"; fi
+  if service_is_active "$service"; then
+    printf '%s\n' "refusing to alter active $service while mapping another service" >&2
     return 1
   fi
 }
 
 disable_skipped_core_service() {
   engine=$1
+  if [ "${service_manager:-systemd}" = openrc ]; then
+    expected_fragment=${2:-/etc/init.d/qagent-$engine}
+    service="qagent-$engine"
+    require_skipped_core_service_inactive "$engine" || return 1
+    qagent_core_service_is_safe_to_disable "$engine" "$expected_fragment" || {
+      printf '%s\n' "refusing to disable an unrecognized $service" >&2
+      return 1
+    }
+    for runlevel_link in /etc/runlevels/*/"$service"; do
+      [ -e "$runlevel_link" ] || [ -L "$runlevel_link" ] || continue
+      [ -L "$runlevel_link" ] || {
+        printf '%s\n' "refusing non-symlinked OpenRC runlevel entry: $runlevel_link" >&2
+        return 1
+      }
+      runlevel=$(basename -- "$(dirname -- "$runlevel_link")")
+      rc-update del "$service" "$runlevel" >/dev/null 2>&1 || return 1
+    done
+    for runlevel_link in /etc/runlevels/*/"$service"; do
+      [ ! -e "$runlevel_link" ] && [ ! -L "$runlevel_link" ] || {
+        printf '%s\n' "$service remains enabled after rc-update del" >&2
+        return 1
+      }
+    done
+    require_skipped_core_service_inactive "$engine"
+    return
+  fi
   expected_fragment=${2:-/etc/systemd/system/qagent-$engine.service}
   service="qagent-$engine.service"
   require_skipped_core_service_inactive "$engine" || return 1
@@ -227,7 +319,13 @@ find_single_active_service() {
   active_service_candidate=""
   active_service_count=0
   for candidate in $candidates; do
-    if systemctl is-active --quiet "$candidate" 2>/dev/null; then
+    if [ "${service_manager:-systemd}" = openrc ] && [ -e "/etc/init.d/$candidate" ]; then
+      protected_directory_chain /etc/init.d && protected_regular_file "/etc/init.d/$candidate" true || {
+        printf '%s\n' "unsafe OpenRC service script: /etc/init.d/$candidate" >&2
+        return 2
+      }
+    fi
+    if service_is_active "$candidate"; then
       active_service_count=$((active_service_count + 1))
       active_service_candidate=$candidate
     fi
@@ -239,17 +337,28 @@ find_single_active_service() {
   fi
 }
 
+service_is_active() {
+  service=$1
+  if [ "${service_manager:-systemd}" = openrc ]; then
+    protected_directory_chain /etc/init.d || return 1
+    protected_regular_file "/etc/init.d/$service" true || return 1
+    rc-service "$service" status >/dev/null 2>&1
+  else
+    systemctl is-active --quiet "$service" 2>/dev/null
+  fi
+}
+
 inspect_existing_candidate() {
   engine=$1
   binary=$2
   config=$3
   case "$engine" in
     xray)
-      QCH_XRAY_BINARY=$binary QCH_XRAY_CONFIG=$config \
+      QCH_SERVICE_MANAGER=${service_manager:-systemd} QCH_XRAY_BINARY=$binary QCH_XRAY_CONFIG=$config \
         "$work_dir/qagent" inspect-existing xray >/dev/null 2>&1
       ;;
     sing-box)
-      QCH_SING_BOX_BINARY=$binary QCH_SING_BOX_CONFIG=$config \
+      QCH_SERVICE_MANAGER=${service_manager:-systemd} QCH_SING_BOX_BINARY=$binary QCH_SING_BOX_CONFIG=$config \
         QCH_SING_BOX_CONFIG_DIRECTORY=${4:-} QCH_SING_BOX_SERVICE_BINARY=${5:-$binary} \
         "$work_dir/qagent" inspect-existing sing-box >/dev/null 2>&1
       ;;
@@ -287,7 +396,7 @@ discover_existing_xray() {
     return 2
   }
   if ! qagent_core_service_is_safe_to_disable xray; then
-    printf '%s\n' 'refusing installation while qagent-xray.service is active or ambiguous' >&2
+    printf '%s\n' 'refusing installation while the managed qagent-xray service is active or ambiguous' >&2
     return 2
   fi
   mapped_xray_binary=$found_binary
@@ -318,7 +427,7 @@ discover_existing_singbox() {
       for config in $singbox_config_candidates; do
         protected_regular_file "$config" false || continue
         [ "$(wc -c < "$config")" -le 2097152 ] || continue
-        service_uses_paths "$service" "$service_binary" "$config" sing-box || continue
+        service_uses_paths "$service" "$service_binary" "$config" sing-box "$resolved_binary" || continue
         config_directory=$matched_config_directory
         inspect_existing_candidate sing-box "$resolved_binary" "$config" "$config_directory" "$service_binary" || continue
         match_count=$((match_count + 1))
@@ -335,7 +444,7 @@ discover_existing_singbox() {
     return 2
   }
   if ! qagent_core_service_is_safe_to_disable sing-box; then
-    printf '%s\n' 'refusing installation while qagent-sing-box.service is active or ambiguous' >&2
+    printf '%s\n' 'refusing installation while the managed qagent-sing-box service is active or ambiguous' >&2
     return 2
   fi
   mapped_singbox_binary=$found_binary

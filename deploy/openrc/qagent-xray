@@ -1,0 +1,21 @@
+#!/sbin/openrc-run
+# QControlHub managed OpenRC service: qagent-xray
+
+description="Xray core managed by QAgent"
+command="/usr/local/lib/qagent/cores/xray"
+command_args="run -config /etc/qagent/xray/config.json"
+command_user="qcontrolhub-core:qcontrolhub-core"
+directory="/var/lib/qcontrolhub-xray"
+supervisor="supervise-daemon"
+respawn_delay=3
+respawn_max=0
+capabilities="^cap_net_bind_service"
+no_new_privs=true
+umask=0027
+
+depend() { need net; }
+
+start_pre() {
+	[ -x "$command" ] || { eerror "missing Xray binary: $command"; return 1; }
+	[ -f /etc/qagent/xray/config.json ] || { eerror "missing Xray configuration"; return 1; }
+}

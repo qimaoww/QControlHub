@@ -28,7 +28,10 @@ MaxRetentionSec=15min
 `
 )
 
-func ensureManagedCoreLogStreaming(ctx context.Context, specs map[core.Engine]EngineSpec) error {
+func ensureManagedCoreLogStreaming(ctx context.Context, specs map[core.Engine]EngineSpec, managers ...*ServiceManager) error {
+	if len(managers) > 0 && managers[0] != nil && managers[0].Kind() == ServiceManagerOpenRC {
+		return nil
+	}
 	ensureContext, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	base := defaultCoreUnitCapabilitySyncer()

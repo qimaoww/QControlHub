@@ -1,0 +1,23 @@
+#!/sbin/openrc-run
+# QControlHub managed OpenRC service: qagent
+
+description="QControlHub remote engine agent"
+command="/usr/local/lib/qagent/qagent"
+command_user="root:root"
+directory="/var/lib/qcontrolhub"
+supervisor="supervise-daemon"
+respawn_delay=5
+respawn_max=0
+capabilities="^cap_chown,^cap_net_admin"
+no_new_privs=true
+umask=0077
+
+depend() {
+	need net
+	after firewall nftables
+}
+
+start_pre() {
+	checkpath --directory --owner root:root --mode 0700 /var/lib/qcontrolhub
+	[ -x "$command" ] || { eerror "missing QAgent binary: $command"; return 1; }
+}
