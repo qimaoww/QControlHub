@@ -150,6 +150,11 @@ function bindClientAccessPage() {
   });
   bindEvent(document.querySelector("[data-clear-search]"), "click", () => {
     state.data.accessQuery = "";
+    const input = document.querySelector("#client-search [name=q]");
+    if (input) {
+      input.value = "";
+      input.defaultValue = "";
+    }
     clientAccess();
   });
   document.querySelectorAll("[data-secret-visibility]").forEach((button) => {
@@ -184,6 +189,8 @@ function bindClientAccessPage() {
           method: "PUT",
           body: JSON.stringify({ address }),
         });
+        const input = form.elements.namedItem("address");
+        if (input) input.defaultValue = input.value;
         notify("客户端连接地址已保存");
         await clientAccess();
       } catch (error) {
@@ -200,6 +207,11 @@ function bindClientAccessPage() {
           method: "PUT",
           body: JSON.stringify({ address: "" }),
         });
+        const input = button.form?.elements.namedItem("address");
+        if (input) {
+          input.value = "";
+          input.defaultValue = "";
+        }
         notify("已恢复自动识别连接地址");
         await clientAccess();
       } catch (error) {

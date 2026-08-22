@@ -1,10 +1,10 @@
 # Data refresh model
 
 QControlHub separates data acquisition from view application. Route changes
-cancel the active route request immediately, and refresh channels reject
-responses whose request sequence, route epoch, or route ownership is stale.
-Same-route renders reconcile the existing DOM instead of replacing the
-application tree.
+cancel active reads immediately while allowing already submitted mutations to
+finish, and refresh channels reject responses whose request sequence, route
+epoch, or route ownership is stale. Same-route renders reconcile the existing
+DOM instead of replacing the application tree.
 
 ## Refresh inventory
 

@@ -171,6 +171,8 @@ func TestRefreshPathsUseStableViewsAndScopedCoordinators(t *testing.T) {
 		"modules/client-access.js": {
 			"createRefreshChannel({",
 			"getScope: () => state.navigationEpoch",
+			"if (input) input.defaultValue = input.value",
+			`button.form?.elements.namedItem("address")`,
 		},
 		"modules/core-logs.js": {
 			"createPoller({",
