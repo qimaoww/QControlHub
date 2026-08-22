@@ -68,6 +68,71 @@ func TestSPAConsoleSurfaceMatchesInitialRelease(t *testing.T) {
 	}
 }
 
+func TestSidebarNavigationUsesWorkflowOrderAndResponsiveGrouping(t *testing.T) {
+	app, err := os.ReadFile("app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(app)
+	start := strings.Index(content, "  const links = [")
+	if start < 0 {
+		t.Fatal("app.js is missing the sidebar navigation list")
+	}
+	end := strings.Index(content[start:], "  ];\n  const linkPermissions")
+	if end < 0 {
+		t.Fatal("app.js sidebar navigation list has no closing boundary")
+	}
+	navigation := content[start : start+end]
+	previous := -1
+	for _, route := range []string{
+		"dashboard", "node-settings", "agents", "live-config",
+		"client-access", "traffic", "core-logs", "tasks",
+	} {
+		position := strings.Index(navigation, `"`+route+`"`)
+		if position < 0 {
+			t.Errorf("sidebar navigation is missing route %q", route)
+			continue
+		}
+		if position <= previous {
+			t.Errorf("sidebar route %q is outside the expected workflow order", route)
+		}
+		previous = position
+	}
+	if strings.Contains(navigation, `"settings"`) {
+		t.Error("settings must remain separated from the primary desktop navigation")
+	}
+	for _, required := range []string{
+		`const dockIcons = Object.freeze({`,
+		`["node-settings", "节点设置", dockIcons.server]`,
+		`["agents", "内核预设", dockIcons.layers]`,
+		`["live-config", "配置", dockIcons.fileCode]`,
+		`["client-access", "客户端", dockIcons.monitorSmartphone]`,
+		`["traffic", "流量", dockIcons.chart, true]`,
+		`["core-logs", "日志", dockIcons.logs, true]`,
+		`["tasks", "任务", dockIcons.listChecks]`,
+		`class="dock-settings`,
+		`mobileMoreRoutes.some(([id]) => activeDockRoute(id))`,
+		`summary class="${mobileMoreActive ? "active" : ""}"`,
+	} {
+		if !strings.Contains(content, required) {
+			t.Errorf("sidebar navigation is missing responsive icon contract %q", required)
+		}
+	}
+	styles, err := os.ReadFile("app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, required := range []string{
+		`.dock-nav .dock-mobile-secondary{display:none}`,
+		`.mobile-account-menu>summary.active`,
+		`.mobile-account-menu a,.mobile-account-menu button`,
+	} {
+		if !strings.Contains(string(styles), required) {
+			t.Errorf("sidebar styles are missing responsive grouping contract %q", required)
+		}
+	}
+}
+
 func TestInitialConsoleStylesRemainExactOutsideApprovedExtensions(t *testing.T) {
 	styles, err := os.ReadFile("app.css")
 	if err != nil {

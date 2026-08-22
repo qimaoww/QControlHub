@@ -325,3 +325,10 @@ a.node-card[data-state="offline"] .node-card-foot>small i{background:var(--muted
    whole page uniformly and narrower windows scroll instead of reflowing into
    the compact layout, which stays reserved for coarse-pointer devices. */
 @media (pointer:fine){.app-body .desktop-app{min-width:1404px}}
+/* Sidebar navigation: distinct workflow icons and compact mobile overflow. */
+.dock-tools .dock-settings{position:relative;width:46px;min-height:46px;display:grid;place-items:center;margin:0 auto;border:0;border-radius:10px;background:transparent;color:#7e8597}
+.dock-tools .dock-settings:hover{background:color-mix(in srgb,var(--dock-2) 84%,var(--accent));color:#fff}
+.dock-tools .dock-settings.active{background:var(--accent);color:var(--on-accent)}
+.dock-tools .dock-settings.active::before{content:"";position:absolute;left:-7px;top:50%;width:3px;height:22px;border-radius:3px;background:var(--accent);transform:translateY(-50%)}
+.dock-tools .dock-settings:hover .dock-label{opacity:1;transform:translate(0,-50%)}
+@media(max-width:820px) and (pointer:coarse){.dock-nav{grid-template-columns:repeat(6,minmax(0,1fr))}.dock-nav .dock-mobile-secondary{display:none}.mobile-account-menu>summary svg{width:18px;height:18px;fill:currentColor}.mobile-account-menu>summary.active{border-color:color-mix(in srgb,var(--accent) 36%,var(--line-2));background:var(--accent-soft);color:var(--accent)}.mobile-account-menu a,.mobile-account-menu button{width:100%;min-height:42px;display:flex;align-items:center;border:0;border-radius:7px;background:transparent;padding:7px 10px;color:var(--ink);text-align:left}.mobile-account-menu a:hover,.mobile-account-menu button:hover{background:var(--surface-2)}.mobile-account-menu a.active{background:var(--accent-soft);color:var(--accent);font-weight:700}}
