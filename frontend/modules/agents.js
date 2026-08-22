@@ -327,7 +327,7 @@ function enableCardDrag(grid) {
   };
   grid.querySelectorAll(".node-card-grip").forEach((grip) => {
     grip.addEventListener("pointerdown", (event) => {
-      if (event.button !== 0) return;
+      if (event.button !== 0 || drag) return;
       const card = grip.closest(".node-card");
       if (!card) return;
       event.preventDefault();
