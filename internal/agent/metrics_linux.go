@@ -21,6 +21,25 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
+// cpuUsagePercent converts two aggregate /proc/stat readings into a busy
+// percentage. Identical counters mean a tickless idle host consumed no CPU
+// time in the window, which reports as 0% rather than unavailable; counters
+// moving backwards cannot produce a trustworthy value.
+func cpuUsagePercent(previousTotal, previousIdle, total, idle uint64) (float64, bool) {
+	if total < previousTotal || idle < previousIdle {
+		return 0, false
+	}
+	totalDelta := total - previousTotal
+	idleDelta := idle - previousIdle
+	if idleDelta > totalDelta {
+		return 0, false
+	}
+	if totalDelta == 0 {
+		return 0, true
+	}
+	return float64(totalDelta-idleDelta) * 100 / float64(totalDelta), true
+}
+
 func collectHostMetrics(ctx context.Context, previous metricSample) (core.HostMetrics, metricSample, error) {
 	if err := ctx.Err(); err != nil {
 		return core.HostMetrics{}, previous, err
@@ -37,12 +56,10 @@ func collectHostMetrics(ctx context.Context, previous metricSample) (core.HostMe
 			problems = append(problems, parseErr)
 		} else {
 			next.cpuTotal, next.cpuIdle, next.cpuValid = total, idle, true
-			if previous.cpuValid && total >= previous.cpuTotal && idle >= previous.cpuIdle {
-				totalDelta := total - previous.cpuTotal
-				idleDelta := idle - previous.cpuIdle
-				if totalDelta > 0 && idleDelta <= totalDelta {
+			if previous.cpuValid {
+				if percent, ok := cpuUsagePercent(previous.cpuTotal, previous.cpuIdle, total, idle); ok {
 					metrics.CPUAvailable = true
-					metrics.CPUPercent = float64(totalDelta-idleDelta) * 100 / float64(totalDelta)
+					metrics.CPUPercent = percent
 				}
 			}
 			cpuRead = true
@@ -121,7 +138,10 @@ func collectHostMetrics(ctx context.Context, previous metricSample) (core.HostMe
 			metrics.NetworkTXBytes = tx
 			if previous.networkValid && previous.networkKey == key && rx >= previous.networkRX && tx >= previous.networkTX {
 				seconds := now.Sub(previous.networkAt).Seconds()
-				if seconds > 0 {
+				// Windows shorter than half the sampling cadence (for example
+				// between the startup warm-up and the first heartbeat) would
+				// inflate byte-per-second rates; they report zero instead.
+				if seconds >= 0.5 {
 					metrics.NetworkRXBPS = bytesPerSecond(rx-previous.networkRX, seconds)
 					metrics.NetworkTXBPS = bytesPerSecond(tx-previous.networkTX, seconds)
 				}
