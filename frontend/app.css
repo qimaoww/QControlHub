@@ -323,3 +323,10 @@ a.node-card[data-state="offline"] .node-card-foot>small i{background:var(--muted
    whole page uniformly and narrower windows scroll instead of reflowing into
    the compact layout, which stays reserved for coarse-pointer devices. */
 @media (pointer:fine){.app-body .desktop-app{min-width:1404px}}
+/* Window scaling: the console lays out at one fixed design width and scales
+   as a whole when the desktop window is larger, so maximizing enlarges the
+   identical composition instead of reflowing it. */
+@media (pointer:fine) and (min-width:1441px){
+  body.app-body{zoom:calc(100vw / 1440px)}
+  .app-body .desktop-app{height:calc(100vh / (100vw / 1440px))}
+}
