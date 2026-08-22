@@ -319,3 +319,6 @@ a.node-card[data-state="offline"] .node-card-foot>small i{background:var(--muted
 .node-back-link:hover{color:var(--accent)}
 @media(max-width:820px){.node-card-grid{grid-template-columns:1fr}.node-back-link{margin-bottom:8px}}
 @media(prefers-reduced-motion:reduce){a.node-card,a.node-card-open i{transition:none}}
+/* Widen the node settings container so maximizing the browser adds card
+   columns instead of leaving the capped 1280px layout unchanged. */
+.page-node-settings .node-settings-page,.page-node-settings .node-settings-stack{max-width:1600px}
