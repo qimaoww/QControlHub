@@ -214,7 +214,31 @@ Content-Type: application/json
 }
 ```
 
-允许的 `action` 为 `validate`、`deploy`、`read-config`、`start`、`stop`、`restart`、`status`、`install`。Agent 必须在注册能力中声明对应内核。版本安装只使用四个内核各自的官方 GitHub Release，不接受 URL；`development` 没有官方 prerelease 时任务会失败而不会降级到稳定版。
+Mihomo `development` 安装额外接受 `core_source`，取值为 `official`（默认、推荐，省略该字段等价于 `official`）或 `mirror`（显式选择第三方 `vernesong/mihomo` Alpha 镜像）：
+
+```json
+{
+  "agent_id": "agt_0123456789abcdef",
+  "action": "install",
+  "engine": "mihomo",
+  "core_version": "development",
+  "core_source": "official"
+}
+```
+
+```json
+{
+  "agent_id": "agt_0123456789abcdef",
+  "action": "install",
+  "engine": "mihomo",
+  "core_version": "development",
+  "core_source": "mirror"
+}
+```
+
+`core_source` 仅接受 Mihomo `development` 的 `official` 或 `mirror`。其他内核或版本通道携带 `core_source` 时返回 `400`；未声明 `mihomo-development-source-v1` 的旧 Agent 请求 `mirror` 时返回 `409`。每个来源独立解析并 fail-closed，不使用另一来源或稳定版兜底。
+
+允许的 `action` 为 `validate`、`deploy`、`read-config`、`start`、`stop`、`restart`、`status`、`install`。Agent 必须在注册能力中声明对应内核。稳定版和自定义版本使用对应内核的官方 GitHub Release，不接受自定义 URL；某来源没有可用二进制时，对应任务失败而不会降级到另一来源或稳定版。
 
 任务成功响应表示目标节点已完成对应操作；失败响应会保留节点返回的错误信息。部署任务只有在目标节点真实写入配置并成功重启服务后，才会进入节点的最新部署记录。
 
