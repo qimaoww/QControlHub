@@ -209,31 +209,70 @@ function recordPendingDeploy(taskID, agentId, engine) {
   state.data.pendingDeployTasks[key] = { taskId: taskID };
 }
 
-function clearPendingDeploy(agentId, engine) {
+// CAS clear: only remove if the tracked taskId still matches.
+function clearPendingDeploy(agentId, engine, expectedTaskID) {
   const key = liveSourceKey(agentId, engine);
-  if (state.data.pendingDeployTasks?.[key])
+  const entry = state.data.pendingDeployTasks?.[key];
+  if (entry && (!expectedTaskID || entry.taskId === expectedTaskID))
     delete state.data.pendingDeployTasks[key];
+  return entry?.taskId === expectedTaskID;
 }
 
-// Fire-and-forget active monitor. If aborted by route navigation,
-// the persistent pending entry survives for reconciliation.
+function handleDeployTerminal(result, taskID, agentId, engine) {
+  // CAS claim: only process if this is still the tracked task.
+  if (!clearPendingDeploy(agentId, engine, taskID)) return;
+
+  if (result.status === "succeeded") {
+    invalidateLiveSnapshot(agentId, engine);
+  } else {
+    notify(
+      result.error ||
+        `部署${result.status === "canceled" ? "已取消" : "失败"}`,
+      "error",
+    );
+  }
+  // If user is currently viewing this key's live-config, refresh DOM.
+  maybeRerenderLiveConfig(agentId, engine);
+}
+
+function maybeRerenderLiveConfig(agentId, engine) {
+  if (
+    state.route === "live-config" &&
+    state.data.liveAgent === agentId &&
+    state.data.liveEngine === engine
+  )
+    void liveConfig();
+}
+
+const activeReconcilers = new Set();
+
+// Fire-and-forget monitor for a newly submitted deploy task.
 function monitorDeployTask(taskID, agentId, engine) {
   void (async () => {
     try {
       const result = await waitForDeployTerminal(taskID);
-      if (result.status === "succeeded") {
-        invalidateLiveSnapshot(agentId, engine);
-      } else {
-        notify(
-          result.error ||
-            `部署${result.status === "canceled" ? "已取消" : "失败"}`,
-          "error",
-        );
-      }
-      clearPendingDeploy(agentId, engine);
+      handleDeployTerminal(result, taskID, agentId, engine);
     } catch {
-      // Aborted by navigation or transient failure — the persistent
-      // pending entry ensures convergence on next page visit.
+      // Aborted — pending entry persists for reconciliation.
+    }
+  })();
+}
+
+// Single-instance recovery poller per key. Survives while the page is open;
+// cleans up on abort so a future visit can restart it.
+function startRecoveryPoller(taskID, agentId, engine) {
+  const key = liveSourceKey(agentId, engine);
+  if (activeReconcilers.has(key)) return;
+  activeReconcilers.add(key);
+  void (async () => {
+    try {
+      const result = await waitForDeployTerminal(taskID);
+      handleDeployTerminal(result, taskID, agentId, engine);
+    } catch {
+      // Aborted by navigation or transient failure — leave pending for
+      // reconciliation on next visit.
+    } finally {
+      activeReconcilers.delete(key);
     }
   })();
 }
@@ -246,20 +285,11 @@ async function reconcilePendingDeploy(agentId, engine) {
   if (!pending?.taskId) return;
   try {
     const task = await api(`/tasks/${encodeURIComponent(pending.taskId)}`);
-    if (task.status === "succeeded") {
-      invalidateLiveSnapshot(agentId, engine);
-      clearPendingDeploy(agentId, engine);
-    } else if (["failed", "canceled"].includes(task.status)) {
-      notify(
-        task.error ||
-          `部署${task.status === "canceled" ? "已取消" : "失败"}`,
-        "error",
-      );
-      clearPendingDeploy(agentId, engine);
-    }
-    // Still pending/running → leave for next reconciliation.
+    if (["succeeded", "failed", "canceled"].includes(task.status))
+      handleDeployTerminal(task, pending.taskId, agentId, engine);
+    else startRecoveryPoller(pending.taskId, agentId, engine);
   } catch {
-    // Network error or abort — retry on next visit.
+    // Network error or abort — retry on next visit; keep pending entry.
   }
 }
 
