@@ -453,6 +453,12 @@ func (s *Store) DeleteEnrollmentToken(ctx context.Context, id string) error {
 	return nil
 }
 
+// Heartbeat records a complete authenticated Agent heartbeat. The advertised
+// features are authoritative: an empty, omitted, or [] feature list clears any
+// stale value (for example a previous session's mihomo-development-source-v1),
+// so a legacy Agent that reconnects cannot inherit a stale capability the
+// control plane would otherwise use to dispatch a mirror task. Metrics-only
+// refreshes go through UpdateAgentMetrics, which never touches features.
 func (s *Store) Heartbeat(ctx context.Context, id string, heartbeat core.HeartbeatRequest) error {
 	receivedAt := time.Now().UTC()
 	heartbeat.Version = strings.TrimSpace(heartbeat.Version)
@@ -478,10 +484,10 @@ func (s *Store) Heartbeat(ctx context.Context, id string, heartbeat core.Heartbe
 			UPDATE agents SET last_seen=now(), version=CASE WHEN $2='' THEN version ELSE $2 END, runtime=$3,
 			                  metrics=CASE
 			                    WHEN $4::jsonb IS NULL THEN metrics
-			                    WHEN $4::jsonb ? 'network_interfaces' OR NOT (metrics ? 'network_interfaces') THEN $4::jsonb
+					WHEN $4::jsonb ? 'network_interfaces' OR NOT (metrics ? 'network_interfaces') THEN $4::jsonb
 			                    ELSE $4::jsonb || jsonb_build_object('network_interfaces', metrics->'network_interfaces')
 			                  END,
-			                  features=CASE WHEN jsonb_array_length($5::jsonb)=0 THEN features ELSE $5::jsonb END
+			                  features=$5::jsonb
 			WHERE id=$1 AND revoked_at IS NULL`, id, heartbeat.Version, runtimeState, metricsState, featuresState)
 	if err != nil {
 		return err

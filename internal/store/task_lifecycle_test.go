@@ -773,6 +773,53 @@ func TestEffectiveSourceReuseWithPostgreSQL(t *testing.T) {
 	}
 }
 
+func TestHeartbeatClearsStaleFeaturesWithPostgreSQL(t *testing.T) {
+	databaseURL := os.Getenv("QCH_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("QCH_TEST_DATABASE_URL is not configured")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	dataStore, err := Open(ctx, databaseURL, true)
+	if err != nil {
+		t.Fatalf("open PostgreSQL: %v", err)
+	}
+	defer dataStore.Close()
+
+	agent, enrollmentID := enrollTaskTestAgentWithSource(t, ctx, dataStore)
+	defer cleanupTaskTestAgent(dataStore, agent.ID, enrollmentID)
+	current, err := dataStore.GetAgent(ctx, agent.ID)
+	if err != nil || !containsFeature(current.Features, core.AgentFeatureMihomoDevelopmentSource) {
+		t.Fatalf("agent did not start advertising the source feature: %+v, %v", current.Features, err)
+	}
+
+	// A complete heartbeat with an omitted/empty feature list must clear the
+	// stale capability; it must not inherit a previous session's value.
+	if err := dataStore.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Version: "legacy"}); err != nil {
+		t.Fatalf("legacy empty-feature heartbeat: %v", err)
+	}
+	current, err = dataStore.GetAgent(ctx, agent.ID)
+	if err != nil || len(current.Features) != 0 {
+		t.Fatalf("agent features after empty-feature heartbeat = %+v, %v; want empty", current.Features, err)
+	}
+
+	// Re-advertising a non-empty feature set and then a metrics-only refresh
+	// must preserve those features.
+	if err := dataStore.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{
+		Version:  "v2",
+		Features: []string{core.AgentFeatureSelfUpgrade, core.AgentFeaturePortTraffic},
+	}); err != nil {
+		t.Fatalf("re-advertise feature heartbeat: %v", err)
+	}
+	if err := dataStore.UpdateAgentMetrics(ctx, agent.ID, core.HostMetrics{CPUAvailable: true, CPUPercent: 10}); err != nil {
+		t.Fatalf("metrics-only refresh: %v", err)
+	}
+	current, err = dataStore.GetAgent(ctx, agent.ID)
+	if err != nil || !containsFeature(current.Features, core.AgentFeatureSelfUpgrade) || containsFeature(current.Features, core.AgentFeatureMihomoDevelopmentSource) {
+		t.Fatalf("metrics-only refresh clobbered features: %+v, %v", current.Features, err)
+	}
+}
+
 func enrollTaskTestAgent(t *testing.T, ctx context.Context, dataStore *Store) (core.Agent, string) {
 	t.Helper()
 	enrollment, err := dataStore.CreateEnrollmentToken(ctx, core.EnrollmentTokenRequest{

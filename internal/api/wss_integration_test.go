@@ -590,6 +590,7 @@ func TestWSSMirrorFeatureDowngradeWithPostgreSQL(t *testing.T) {
 		t.Fatalf("expected official task %s after heartbeat, got %s (source %q)", official.ID, dispatchedA.Task.ID, dispatchedA.Task.CoreSource)
 	}
 	assertRawTaskTerminalCleanAPI(t, ctx, databaseURL, running.ID)
+	assertEmptyAgentFeaturesAndMirrorBlocked(t, ctx, dataStore, a)
 	connA.Close(websocket.StatusNormalClosure, "scenario complete")
 
 	// Agent B holds only a pending mirror install that must stay pending and
@@ -609,7 +610,25 @@ func TestWSSMirrorFeatureDowngradeWithPostgreSQL(t *testing.T) {
 	if got, err := dataStore.GetTask(ctx, pending.ID); err != nil || got.Status != core.TaskPending {
 		t.Fatalf("pending mirror after downgraded heartbeat = %+v, %v; want pending", got, err)
 	}
+	assertEmptyAgentFeaturesAndMirrorBlocked(t, ctx, dataStore, b)
 	connB.Close(websocket.StatusNormalClosure, "scenario complete")
+}
+
+// assertEmptyAgentFeaturesAndMirrorBlocked verifies that an empty-feature
+// heartbeat cleared the stale source capability and that the API mirror gate
+// now rejects a mirror install.
+func assertEmptyAgentFeaturesAndMirrorBlocked(t *testing.T, ctx context.Context, dataStore *store.Store, agentID string) {
+	t.Helper()
+	current, err := dataStore.GetAgent(ctx, agentID)
+	if err != nil || len(current.Features) != 0 {
+		t.Fatalf("agent features after empty-feature heartbeat = %+v, %v; want empty", current.Features, err)
+	}
+	if _, err := dataStore.CreateTask(ctx, core.TaskRequest{
+		AgentID: agentID, Action: core.ActionInstall, Engine: core.EngineMihomo,
+		CoreVersion: core.CoreVersionDevelopment, CoreSource: string(core.CoreSourceMirror),
+	}); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("mirror create after empty-feature heartbeat = %v, want ErrConflict", err)
+	}
 }
 
 // enrollWSSTestSourceAgent enrolls a Mihomo-capable Agent advertising the
@@ -678,8 +697,7 @@ func downgradeReconnect(t *testing.T, ctx context.Context, base, agentID string,
 		preHeartbeat()
 	}
 	if err := wsjson.Write(ctx, connection, core.WireMessage{Type: core.WireHeartbeat, Heartbeat: &core.HeartbeatRequest{
-		Version:  "downgraded",
-		Features: []string{core.AgentFeatureSelfUpgrade, core.AgentFeaturePortTraffic, core.AgentFeatureCoreLogs},
+		Version: "downgraded",
 	}}); err != nil {
 		t.Fatalf("write downgraded heartbeat: %v", err)
 	}
