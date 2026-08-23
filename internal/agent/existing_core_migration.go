@@ -269,6 +269,7 @@ type coreMigrationRecord struct {
 	SourceDigest        string
 	ExistingEnableState string
 	ManagedEnableState  string
+	ManagedInitialState string
 	HasFileRollback     bool
 	BinaryBackupDigest  string
 	ConfigBackupDigest  string
@@ -276,11 +277,12 @@ type coreMigrationRecord struct {
 }
 
 const (
-	coreMigrationNone          coreMigrationState = ""
-	coreMigrationInProgress    coreMigrationState = "migrating"
-	coreMigrationComplete      coreMigrationState = "migrated"
-	coreMigrationPreparedToken                    = "migrating-v2"
-	coreMigrationMissingBackup                    = "-"
+	coreMigrationNone                coreMigrationState = ""
+	coreMigrationInProgress          coreMigrationState = "migrating"
+	coreMigrationComplete            coreMigrationState = "migrated"
+	coreMigrationPreparedToken                          = "migrating-v3"
+	coreMigrationLegacyPreparedToken                    = "migrating-v2"
+	coreMigrationMissingBackup                          = "-"
 )
 
 func coreMigrationMarked(prefix string, engine core.Engine) (bool, error) {
@@ -324,7 +326,14 @@ func restoreCoreMigrationServicesAndFiles(ctx context.Context, prefix string, en
 	if _, err := serviceCommandAndVerifyWithManager(ctx, manager, existing.Service, core.ActionStart); err != nil {
 		return fmt.Errorf("restore existing %s service after interrupted migration: start original service: %w", engine, err)
 	}
-	if err := waitForCoreMigrationState(ctx, existing.Service, managed.Service, "active", "inactive", record.ExistingEnableState, record.ManagedEnableState, manager); err != nil {
+	managedExpectedStatus := "inactive"
+	if record.ManagedInitialState == "active" {
+		if _, err := serviceCommandAndVerifyWithManager(ctx, manager, managed.Service, core.ActionStart); err != nil {
+			return fmt.Errorf("restore existing %s service after interrupted migration: restart originally active managed service: %w", engine, err)
+		}
+		managedExpectedStatus = "active"
+	}
+	if err := waitForCoreMigrationState(ctx, existing.Service, managed.Service, "active", managedExpectedStatus, record.ExistingEnableState, record.ManagedEnableState, manager); err != nil {
 		cleanupContext, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		_, stopErr := serviceCommandAndVerifyWithManager(cleanupContext, manager, managed.Service, core.ActionStop)
@@ -388,20 +397,30 @@ func readCoreMigrationRecord(prefix string, engine core.Engine) (coreMigrationRe
 		return coreMigrationRecord{}, err
 	}
 	fields := strings.Fields(string(contents))
-	if len(fields) != 5 && len(fields) != 8 {
+	if len(fields) != 5 && len(fields) != 8 && len(fields) != 9 {
 		return coreMigrationRecord{}, errors.New("core migration marker is invalid")
 	}
 	state := coreMigrationState(fields[0])
 	hasFileRollback := false
+	managedInitialState := "inactive"
 	if fields[0] == coreMigrationPreparedToken {
+		state = coreMigrationInProgress
+		hasFileRollback = true
+		if len(fields) == 9 {
+			managedInitialState = fields[8]
+		}
+	} else if fields[0] == coreMigrationLegacyPreparedToken {
 		state = coreMigrationInProgress
 		hasFileRollback = true
 	}
 	if state != coreMigrationInProgress && state != coreMigrationComplete {
 		return coreMigrationRecord{}, errors.New("core migration marker is invalid")
 	}
-	if hasFileRollback != (len(fields) == 8) || state == coreMigrationComplete && len(fields) != 5 {
+	if (fields[0] == coreMigrationPreparedToken && len(fields) != 9) || (fields[0] == coreMigrationLegacyPreparedToken && len(fields) != 8) || state == coreMigrationComplete && len(fields) != 5 {
 		return coreMigrationRecord{}, errors.New("core migration marker version is invalid")
+	}
+	if managedInitialState != "active" && managedInitialState != "inactive" {
+		return coreMigrationRecord{}, errors.New("core migration managed initial state is invalid")
 	}
 	if decoded, err := hex.DecodeString(fields[1]); err != nil || len(decoded) != sha256.Size {
 		return coreMigrationRecord{}, errors.New("core migration configuration digest is invalid")
@@ -415,7 +434,8 @@ func readCoreMigrationRecord(prefix string, engine core.Engine) (coreMigrationRe
 	record := coreMigrationRecord{
 		State: state, ConfigDigest: fields[1], SourceDigest: fields[2],
 		ExistingEnableState: fields[3], ManagedEnableState: fields[4],
-		HasFileRollback: hasFileRollback,
+		ManagedInitialState: managedInitialState,
+		HasFileRollback:     hasFileRollback,
 	}
 	if hasFileRollback {
 		for _, digest := range fields[5:8] {
@@ -520,6 +540,9 @@ func prepareCoreMigrationFileRollback(prefix string, engine core.Engine, existin
 		return coreMigrationRecord{}, errors.New("existing core binary disappeared while preparing migration")
 	}
 	record.HasFileRollback = true
+	if record.ManagedInitialState == "" {
+		record.ManagedInitialState = "inactive"
+	}
 	record.BinaryBackupDigest = binaryBackupDigest
 	record.ConfigBackupDigest = configBackupDigest
 	record.StagedBinaryDigest = stagedBinaryDigest
@@ -1760,6 +1783,12 @@ func writePreparedCoreMigrationMarker(prefix string, engine core.Engine, record 
 	if record.State != coreMigrationInProgress || !record.HasFileRollback {
 		return errors.New("invalid prepared core migration record")
 	}
+	if record.ManagedInitialState == "" {
+		record.ManagedInitialState = "inactive"
+	}
+	if record.ManagedInitialState != "active" && record.ManagedInitialState != "inactive" {
+		return errors.New("invalid core migration managed initial state")
+	}
 	if decoded, err := hex.DecodeString(record.ConfigDigest); err != nil || len(decoded) != sha256.Size {
 		return errors.New("invalid core migration configuration digest")
 	}
@@ -1789,6 +1818,7 @@ func writePreparedCoreMigrationMarker(prefix string, engine core.Engine, record 
 		record.BinaryBackupDigest,
 		record.ConfigBackupDigest,
 		record.StagedBinaryDigest,
+		record.ManagedInitialState,
 	}, " ") + "\n"
 	return writeCoreMigrationMarkerContents(prefix, engine, contents)
 }

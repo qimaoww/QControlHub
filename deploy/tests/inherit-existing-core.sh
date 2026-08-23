@@ -10,6 +10,8 @@ mkdir -p "$test_root/bin" "$test_root/state" "$test_root/core"
 
 qagent_xray_binary="$test_root/core/qagent-xray"
 qagent_xray_config="$test_root/core/qagent-xray-config.json"
+fixture_true="$test_root/core/true"
+cp -L /bin/true "$fixture_true"
 
 case " $singbox_binary_candidates " in
   *' /etc/sing-box/bin/sing-box '*) ;;
@@ -250,18 +252,18 @@ expect_rejected sing-box-official-extra-config service_uses_paths sing-box.servi
 
 forwarder="$test_root/core/sing-box-forwarder"
 service_link="$test_root/core/sing-box-link"
-printf '%s\n' '#!/bin/sh' 'exec /usr/bin/true "$@"' > "$forwarder"
+printf '%s\n' '#!/bin/sh' "exec $fixture_true \"\$@\"" > "$forwarder"
 chmod 0700 "$forwarder"
 ln -s "$forwarder" "$service_link"
-[ "$(resolve_fixed_singbox_binary "$service_link")" = /usr/bin/true ] || {
+[ "$(resolve_fixed_singbox_binary "$service_link")" = "$fixture_true" ] || {
   printf '%s\n' 'fixed sing-box exec forwarder was not resolved safely' >&2
   exit 1
 }
-printf '%s\n' '#!/bin/sh' 'echo unsafe' 'exec /usr/bin/true "$@"' > "$forwarder"
+printf '%s\n' '#!/bin/sh' 'echo unsafe' "exec $fixture_true \"\$@\"" > "$forwarder"
 expect_rejected arbitrary-sing-box-wrapper resolve_fixed_singbox_binary "$service_link"
 direct_service_link="$test_root/core/sing-box-direct-link"
-ln -s /usr/bin/true "$direct_service_link"
-[ "$(resolve_fixed_singbox_binary "$direct_service_link")" = /usr/bin/true ] || {
+ln -s "$fixture_true" "$direct_service_link"
+[ "$(resolve_fixed_singbox_binary "$direct_service_link")" = "$fixture_true" ] || {
   printf '%s\n' 'direct sing-box binary symlink was not resolved safely' >&2
   exit 1
 }
@@ -480,6 +482,10 @@ cat > "$work_dir/qagent" <<'EOF'
 case "$1 $2" in
   'inspect-existing xray') exec "$QCH_XRAY_BINARY" run -test -config "$QCH_XRAY_CONFIG" ;;
   'inspect-existing sing-box')
+    if [ "$(head -c 2 "$QCH_SING_BOX_BINARY" 2>/dev/null)" != '#!' ]; then
+      if command -v busybox >/dev/null 2>&1; then exec busybox true; fi
+      exit 0
+    fi
     if [ -n "$QCH_SING_BOX_WORK_DIRECTORY" ]; then
       exec "$QCH_SING_BOX_BINARY" check -D "$QCH_SING_BOX_WORK_DIRECTORY" -C "$QCH_SING_BOX_CONFIG_DIRECTORY"
     else
@@ -566,7 +572,7 @@ singbox_service_candidates=sing-box.service
 etc_layout_directory="$test_root/etc/sing-box/bin"
 etc_layout_binary="$etc_layout_directory/sing-box"
 mkdir -p "$etc_layout_directory"
-cp /usr/bin/true "$etc_layout_binary"
+cp "$fixture_true" "$etc_layout_binary"
 chmod 0755 "$etc_layout_binary"
 singbox_binary_candidates=$etc_layout_binary
 singbox_direct_binary_candidates=$etc_layout_binary
