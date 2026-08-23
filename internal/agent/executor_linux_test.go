@@ -4,6 +4,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -435,6 +436,51 @@ func TestExistingSingBoxExtendedJSONRejectsMalformedSources(t *testing.T) {
 	}
 	if _, _, err := readExistingConfigurationSources(existing); err == nil || !strings.Contains(err.Error(), "trailing data") {
 		t.Fatalf("non-comment trailing source error = %v", err)
+	}
+}
+
+func TestExtendedJSONClosedBlockCommentParses(t *testing.T) {
+	decoded, err := decodeExtendedJSON(`{"a": 1 /* closed */ , "b": [1 /* inline */, 2]}`)
+	if err != nil {
+		t.Fatalf("decodeExtendedJSON() with closed block comment error = %v", err)
+	}
+	object, ok := decoded.(map[string]any)
+	if !ok {
+		t.Fatalf("decoded value = %T, want object", decoded)
+	}
+	b, ok := object["b"].([]any)
+	if !ok || len(b) != 2 || b[0] != json.Number("1") || b[1] != json.Number("2") {
+		t.Fatalf("closed block comment structure was corrupted: %v", object["b"])
+	}
+}
+
+func TestExtendedJSONRejectsUnterminatedBlockComments(t *testing.T) {
+	for _, content := range []string{
+		`{"a":1} /* unterminated`,
+		`{"a": /* unterminated`,
+		`{"a": 1, /* unterminated`,
+	} {
+		if _, err := decodeExtendedJSON(content); err == nil {
+			t.Errorf("decodeExtendedJSON(%q) unexpectedly accepted an unterminated block comment", content)
+		} else if !strings.Contains(err.Error(), "unexpected end of JSON comment") {
+			t.Errorf("decodeExtendedJSON(%q) error = %v, want unexpected end of JSON comment", content, err)
+		}
+	}
+
+	root := t.TempDir()
+	configDirectory := filepath.Join(root, "conf.d")
+	if err := os.MkdirAll(configDirectory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "config.json"), []byte(`{"inbounds": []}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(configDirectory, "10-fragment.json"), []byte(`{"outbounds": []} /* unterminated`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	existing := EngineSpec{ConfigPath: filepath.Join(root, "config.json"), ConfigDirectory: configDirectory}
+	if _, _, err := readExistingConfigurationSources(existing); err == nil || !strings.Contains(err.Error(), "unexpected end of JSON comment") {
+		t.Fatalf("directory fragment with unterminated block comment error = %v", err)
 	}
 }
 

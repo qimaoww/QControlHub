@@ -569,7 +569,10 @@ func readExistingConfigurationSources(spec EngineSpec) (string, string, error) {
 // outside string literals. It rejects trailing non-whitespace so malformed or
 // ambiguous sources still fail closed.
 func decodeExtendedJSON(content string) (any, error) {
-	cleaned := stripExtendedJSONComments(content)
+	cleaned, err := stripExtendedJSONComments(content)
+	if err != nil {
+		return nil, err
+	}
 	decoder := json.NewDecoder(strings.NewReader(cleaned))
 	decoder.UseNumber()
 	var decoded any
@@ -584,8 +587,9 @@ func decodeExtendedJSON(content string) (any, error) {
 
 // stripExtendedJSONComments removes sing-box extended JSON comments such as
 // //, # and /* */ outside string literals. It is string-aware, so comment
-// shaped text inside a JSON string is preserved byte for byte.
-func stripExtendedJSONComments(content string) string {
+// shaped text inside a JSON string is preserved byte for byte. An unterminated
+// block comment fails closed instead of being treated as legal trailing data.
+func stripExtendedJSONComments(content string) (string, error) {
 	out := make([]byte, 0, len(content))
 	for i := 0; i < len(content); {
 		switch content[i] {
@@ -620,9 +624,10 @@ func stripExtendedJSONComments(content string) string {
 				for commentEnd+1 < len(content) && !(content[commentEnd] == '*' && content[commentEnd+1] == '/') {
 					commentEnd++
 				}
-				if commentEnd+1 < len(content) {
-					commentEnd += 2
+				if commentEnd+1 >= len(content) {
+					return "", errors.New("unexpected end of JSON comment")
 				}
+				commentEnd += 2
 				i = commentEnd
 				out = append(out, ' ')
 			} else {
@@ -639,7 +644,7 @@ func stripExtendedJSONComments(content string) string {
 			i++
 		}
 	}
-	return string(out)
+	return string(out), nil
 }
 
 type existingConfigSource struct {
