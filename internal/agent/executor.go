@@ -430,6 +430,10 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (string, erro
 		if err != nil {
 			return "", err
 		}
+		source, err := core.NormalizeCoreSource(task.Engine, version, task.CoreSource)
+		if err != nil {
+			return "", err
+		}
 		if err := ensureManagedCoreServiceCapabilities(ctx, task.Engine, spec, e.serviceManager()); err != nil {
 			return "", err
 		}
@@ -437,7 +441,7 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (string, erro
 		if updater == nil {
 			updater = NewCoreUpdater()
 		}
-		return updater.Install(ctx, task.Engine, spec, version, e.serviceManager())
+		return updater.Install(ctx, task.Engine, spec, version, source, e.serviceManager())
 	default:
 		return "", fmt.Errorf("unsupported action %q", task.Action)
 	}

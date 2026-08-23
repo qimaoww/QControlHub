@@ -73,8 +73,9 @@ type githubReleaseAsset struct {
 }
 
 type resolvedCoreRelease struct {
-	Tag   string
-	Asset githubReleaseAsset
+	Tag        string
+	Asset      githubReleaseAsset
+	Repository string
 }
 
 func NewCoreUpdater() *CoreUpdater {
@@ -102,7 +103,7 @@ func NewCoreUpdater() *CoreUpdater {
 	}
 }
 
-func (updater *CoreUpdater) Install(ctx context.Context, engine core.Engine, spec EngineSpec, selector string, manager *ServiceManager) (string, error) {
+func (updater *CoreUpdater) Install(ctx context.Context, engine core.Engine, spec EngineSpec, selector, source string, manager *ServiceManager) (string, error) {
 	if updater == nil {
 		return "", errors.New("core updater is required")
 	}
@@ -110,23 +111,30 @@ func (updater *CoreUpdater) Install(ctx context.Context, engine core.Engine, spe
 	if err != nil {
 		return "", err
 	}
+	source, err = core.NormalizeCoreSource(engine, selector, source)
+	if err != nil {
+		return "", err
+	}
 	if !engine.Valid() {
 		return "", errors.New("unsupported core engine")
 	}
 	if updater.goarch != "amd64" && updater.goarch != "arm64" && !(engine == core.EngineXray && updater.goarch == "386") {
-		return "", fmt.Errorf("official %s installer does not support agent architecture %s", engine, updater.goarch)
+		return "", fmt.Errorf("%s release installer does not support agent architecture %s", engine, updater.goarch)
 	}
 	if err := validateCoreInstallDestination(spec.Binary); err != nil {
 		return "", fmt.Errorf("unsafe core install destination: %w", err)
 	}
 
-	release, err := updater.resolveRelease(ctx, engine, selector)
+	release, err := updater.resolveRelease(ctx, engine, selector, source)
 	if err != nil {
+		if label := coreSourceLabel(engine, selector, source); label != "" {
+			return "", fmt.Errorf("resolve %s %s from %s: %w", engine, selector, label, err)
+		}
 		return "", err
 	}
 	downloadPath, err := updater.downloadAsset(ctx, release.Asset)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("download %s from %s: %w", release.Asset.Name, release.Repository, err)
 	}
 	defer os.Remove(downloadPath)
 
@@ -169,6 +177,9 @@ func (updater *CoreUpdater) Install(ctx context.Context, engine core.Engine, spe
 
 	restartOutput, restartErr := serviceCommandAndVerifyWithManager(ctx, manager, spec.Service, core.ActionRestart)
 	output := fmt.Sprintf("installed %s release %s\nverified asset SHA-256: %s\nbinary: %s", engine, release.Tag, release.Asset.Digest, spec.Binary)
+	if label := coreSourceLabel(engine, selector, source); label != "" {
+		output += "\nsource: " + label
+	}
 	if versionOutput != "" {
 		output += "\nversion: " + versionOutput
 	}
@@ -221,8 +232,8 @@ func stopServiceAfterFirstInstallRollback(service string, managers ...*ServiceMa
 	return serviceCommandAndVerifyWithManager(stopContext, manager, service, core.ActionStop)
 }
 
-func (updater *CoreUpdater) resolveRelease(ctx context.Context, engine core.Engine, selector string) (resolvedCoreRelease, error) {
-	repository, err := officialCoreRepository(engine)
+func (updater *CoreUpdater) resolveRelease(ctx context.Context, engine core.Engine, selector, source string) (resolvedCoreRelease, error) {
+	repository, err := officialCoreRepository(engine, selector, source)
 	if err != nil {
 		return resolvedCoreRelease{}, err
 	}
@@ -234,10 +245,11 @@ func (updater *CoreUpdater) resolveRelease(ctx context.Context, engine core.Engi
 			return resolvedCoreRelease{}, fmt.Errorf("resolve latest stable %s release: %w", engine, err)
 		}
 		if release.Draft || release.Prerelease {
-			return resolvedCoreRelease{}, errors.New("official latest endpoint returned a non-stable release")
+			return resolvedCoreRelease{}, errors.New("latest endpoint returned a non-stable release")
 		}
 	case core.CoreVersionDevelopment:
 		found := false
+		var inspected []string
 		for page := 1; page <= 10 && !found; page++ {
 			var releases []githubRelease
 			endpoint := fmt.Sprintf("%s?per_page=5&page=%d", base, page)
@@ -245,18 +257,40 @@ func (updater *CoreUpdater) resolveRelease(ctx context.Context, engine core.Engi
 				return resolvedCoreRelease{}, fmt.Errorf("resolve latest development %s release: %w", engine, err)
 			}
 			for _, candidate := range releases {
-				if !candidate.Draft && candidate.Prerelease {
-					release = candidate
-					found = true
-					break
+				if candidate.Draft || !candidate.Prerelease {
+					continue
 				}
+				inspected = append(inspected, candidate.TagName)
+				if _, err := selectCoreReleaseAsset(engine, updater.goarch, candidate); err != nil {
+					var missing missingCoreReleaseAssetError
+					if errors.As(err, &missing) {
+						// A prerelease without a compatible binary (for example
+						// Mihomo's toolchain-only Alpha release) is not a usable
+						// development build; keep searching so a real prerelease
+						// is selected instead of failing on the first match.
+						continue
+					}
+					return resolvedCoreRelease{}, err
+				}
+				release = candidate
+				found = true
+				// Stop at the first usable candidate: GitHub returns releases
+				// newest-to-oldest, so continuing would let a later (older)
+				// candidate overwrite the selected release.
+				break
 			}
 			if len(releases) < 5 {
 				break
 			}
 		}
 		if !found {
-			return resolvedCoreRelease{}, errors.New("官方仓库当前没有可用的开发版 prerelease")
+			if len(inspected) > 0 {
+				if engine == core.EngineMihomo {
+					return resolvedCoreRelease{}, fmt.Errorf("%s upstream publishes no installable Linux %s development binary (inspected prereleases: %s; expected asset naming: mihomo-linux-%s-<version>.gz or mihomo-linux-%s-<variant>-<version>.gz); the development channel is unavailable until the selected source publishes a build or a different verifiable source is configured", engine, updater.goarch, strings.Join(inspected, ", "), updater.goarch, updater.goarch)
+				}
+				return resolvedCoreRelease{}, fmt.Errorf("%s upstream publishes no installable Linux %s development binary (inspected prereleases: %s); the development channel is unavailable", engine, updater.goarch, strings.Join(inspected, ", "))
+			}
+			return resolvedCoreRelease{}, errors.New("所选来源当前没有可用的开发版 prerelease")
 		}
 	default:
 		tag := "v" + selector
@@ -264,23 +298,43 @@ func (updater *CoreUpdater) resolveRelease(ctx context.Context, engine core.Engi
 			return resolvedCoreRelease{}, fmt.Errorf("resolve exact %s release %s: %w", engine, tag, err)
 		}
 		if release.Draft || strings.TrimPrefix(release.TagName, "v") != selector {
-			return resolvedCoreRelease{}, errors.New("官方仓库返回的版本与请求不一致")
+			return resolvedCoreRelease{}, errors.New("所选来源返回的版本与请求不一致")
 		}
 	}
 	if strings.TrimSpace(release.TagName) == "" || len(release.TagName) > 80 {
-		return resolvedCoreRelease{}, errors.New("official release has an invalid tag")
+		return resolvedCoreRelease{}, errors.New("release has an invalid tag")
 	}
 	asset, err := selectCoreReleaseAsset(engine, updater.goarch, release, updater.libc)
 	if err != nil {
 		return resolvedCoreRelease{}, err
 	}
-	return resolvedCoreRelease{Tag: release.TagName, Asset: asset}, nil
+	return resolvedCoreRelease{Tag: release.TagName, Asset: asset, Repository: repository}, nil
 }
 
-func officialCoreRepository(engine core.Engine) (string, error) {
+// officialCoreRepository returns the GitHub repository that publishes releases
+// for the requested engine, version channel, and explicit source. Mihomo
+// development accepts an explicit source: the official MetaCubeX repository
+// (default and recommended, also used when source is omitted) or the public
+// vernesong/mihomo Alpha mirror (third-party, explicit opt-in). Any other engine
+// or stable/custom install must not carry a source, so an inapplicable value is
+// rejected fail-closed instead of silently switching repositories.
+func officialCoreRepository(engine core.Engine, selector, source string) (string, error) {
+	if engine != core.EngineMihomo && source != "" {
+		return "", errors.New("core source is not applicable to this engine")
+	}
 	switch engine {
 	case core.EngineMihomo:
-		return "MetaCubeX/mihomo", nil
+		if source != "" && selector != core.CoreVersionDevelopment {
+			return "", errors.New("core source is only applicable to Mihomo development installs")
+		}
+		switch source {
+		case string(core.CoreSourceMirror):
+			return "vernesong/mihomo", nil
+		case "", string(core.CoreSourceOfficial):
+			return "MetaCubeX/mihomo", nil
+		default:
+			return "", fmt.Errorf("unsupported Mihomo core source %q", source)
+		}
 	case core.EngineXray:
 		return "XTLS/Xray-core", nil
 	case core.EngineSingBox:
@@ -292,26 +346,83 @@ func officialCoreRepository(engine core.Engine) (string, error) {
 	}
 }
 
+// coreSourceLabel returns a user-facing, allowlisted description of a Mihomo
+// development source. It is empty for any engine/channel where no user-selectable
+// source exists, so callers can omit source attribution rather than mislabel an
+// unrelated repository as official.
+func coreSourceLabel(engine core.Engine, selector, source string) string {
+	if engine != core.EngineMihomo || selector != core.CoreVersionDevelopment {
+		return ""
+	}
+	if source == string(core.CoreSourceMirror) {
+		return "vernesong/mihomo (third-party mirror)"
+	}
+	return "MetaCubeX/mihomo (official)"
+}
+
+type missingCoreReleaseAssetError struct {
+	engine core.Engine
+	arch   string
+	asset  string
+}
+
+func (err missingCoreReleaseAssetError) Error() string {
+	if err.asset == "" {
+		return fmt.Sprintf("%s release has no supported Linux %s asset", err.engine, err.arch)
+	}
+	return fmt.Sprintf("%s release does not contain expected asset %s", err.engine, err.asset)
+}
+
+// matchMihomoLinuxAsset returns the single viable generic linux binary for the
+// requested mihomo architecture. found is false when the release carries no
+// usable platform binary (for example Mihomo's toolchain-only Alpha release).
+// A non-nil error is returned only for ambiguous or invalid releases and must
+// be treated as fail-closed.
+func matchMihomoLinuxAsset(arch string, release githubRelease) (githubReleaseAsset, bool, error) {
+	prefix := "mihomo-linux-" + arch + "-"
+	var matched githubReleaseAsset
+	for _, asset := range release.Assets {
+		if !strings.HasPrefix(asset.Name, prefix) || !strings.HasSuffix(asset.Name, ".gz") {
+			continue
+		}
+		variant := strings.TrimSuffix(strings.TrimPrefix(asset.Name, prefix), ".gz")
+		if strings.HasPrefix(variant, "v1-") || strings.HasPrefix(variant, "v2-") || strings.HasPrefix(variant, "v3-") {
+			continue
+		}
+		if strings.Contains(variant, "compatible") || strings.Contains(variant, "go1") {
+			continue
+		}
+		if err := validateReleaseAssetMetadata(asset); err != nil {
+			return githubReleaseAsset{}, false, err
+		}
+		if matched.Name != "" {
+			return githubReleaseAsset{}, false, errors.New("Mihomo release contains multiple generic Linux assets")
+		}
+		matched = asset
+	}
+	if matched.Name == "" {
+		return githubReleaseAsset{}, false, nil
+	}
+	return matched, true, nil
+}
+
 func selectCoreReleaseAsset(engine core.Engine, arch string, release githubRelease, libcValues ...string) (githubReleaseAsset, error) {
 	libc := "gnu"
 	if len(libcValues) > 0 && strings.TrimSpace(libcValues[0]) != "" {
 		libc = strings.ToLower(strings.TrimSpace(libcValues[0]))
 	}
+	if engine == core.EngineMihomo {
+		asset, found, err := matchMihomoLinuxAsset(arch, release)
+		if err != nil {
+			return githubReleaseAsset{}, err
+		}
+		if !found {
+			return githubReleaseAsset{}, missingCoreReleaseAssetError{engine: engine, arch: arch}
+		}
+		return asset, nil
+	}
 	wanted := ""
 	switch engine {
-	case core.EngineMihomo:
-		prefix := "mihomo-linux-" + arch + "-"
-		for _, asset := range release.Assets {
-			if strings.HasPrefix(asset.Name, prefix) && strings.HasSuffix(asset.Name, ".gz") {
-				variant := strings.TrimSuffix(strings.TrimPrefix(asset.Name, prefix), ".gz")
-				if !strings.Contains(variant, "compatible") && !strings.HasPrefix(variant, "v1-") && !strings.HasPrefix(variant, "v2-") && !strings.HasPrefix(variant, "v3-") && !strings.Contains(variant, "go12") {
-					if wanted != "" {
-						return githubReleaseAsset{}, errors.New("official Mihomo release contains multiple generic Linux assets")
-					}
-					wanted = asset.Name
-				}
-			}
-		}
 	case core.EngineXray:
 		switch arch {
 		case "amd64":
@@ -336,7 +447,7 @@ func selectCoreReleaseAsset(engine core.Engine, arch string, release githubRelea
 		}
 	}
 	if wanted == "" {
-		return githubReleaseAsset{}, fmt.Errorf("official %s release has no supported Linux %s asset", engine, arch)
+		return githubReleaseAsset{}, missingCoreReleaseAssetError{engine: engine, arch: arch}
 	}
 	for _, asset := range release.Assets {
 		if asset.Name == wanted {
@@ -346,7 +457,7 @@ func selectCoreReleaseAsset(engine core.Engine, arch string, release githubRelea
 			return asset, nil
 		}
 	}
-	return githubReleaseAsset{}, fmt.Errorf("official %s release does not contain expected asset %s", engine, wanted)
+	return githubReleaseAsset{}, missingCoreReleaseAssetError{engine: engine, arch: arch, asset: wanted}
 }
 
 func detectLinuxLibc() string {
@@ -358,16 +469,16 @@ func detectLinuxLibc() string {
 
 func validateReleaseAssetMetadata(asset githubReleaseAsset) error {
 	if asset.Size < 1<<20 || asset.Size > maxReleaseAssetSize {
-		return errors.New("official release asset size is outside the accepted range")
+		return errors.New("release asset size is outside the accepted range")
 	}
 	digest := strings.TrimPrefix(strings.ToLower(asset.Digest), "sha256:")
 	decoded, err := hex.DecodeString(digest)
 	if err != nil || len(decoded) != sha256.Size || !strings.HasPrefix(strings.ToLower(asset.Digest), "sha256:") {
-		return errors.New("official release asset is missing a valid GitHub SHA-256 digest")
+		return errors.New("release asset is missing a valid GitHub SHA-256 digest")
 	}
 	parsed, err := url.Parse(asset.BrowserDownloadURL)
 	if err != nil || parsed.RawQuery != "" || parsed.Fragment != "" || !trustedCoreReleaseURL(parsed) {
-		return errors.New("official release asset has an untrusted download URL")
+		return errors.New("release asset has an untrusted download URL")
 	}
 	return nil
 }

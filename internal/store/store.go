@@ -34,7 +34,7 @@ type Store struct {
 	taskWakes  map[string]chan struct{}
 }
 
-const currentSchemaVersion = 20
+const currentSchemaVersion = 21
 
 func Open(ctx context.Context, databaseURL string, allowInsecureRemote bool) (*Store, error) {
 	return OpenWithConfigKey(ctx, databaseURL, allowInsecureRemote, "")
@@ -453,6 +453,12 @@ func (s *Store) DeleteEnrollmentToken(ctx context.Context, id string) error {
 	return nil
 }
 
+// Heartbeat records a complete authenticated Agent heartbeat. The advertised
+// features are authoritative: an empty, omitted, or [] feature list clears any
+// stale value (for example a previous session's mihomo-development-source-v1),
+// so a legacy Agent that reconnects cannot inherit a stale capability the
+// control plane would otherwise use to dispatch a mirror task. Metrics-only
+// refreshes go through UpdateAgentMetrics, which never touches features.
 func (s *Store) Heartbeat(ctx context.Context, id string, heartbeat core.HeartbeatRequest) error {
 	receivedAt := time.Now().UTC()
 	heartbeat.Version = strings.TrimSpace(heartbeat.Version)
@@ -478,10 +484,10 @@ func (s *Store) Heartbeat(ctx context.Context, id string, heartbeat core.Heartbe
 			UPDATE agents SET last_seen=now(), version=CASE WHEN $2='' THEN version ELSE $2 END, runtime=$3,
 			                  metrics=CASE
 			                    WHEN $4::jsonb IS NULL THEN metrics
-			                    WHEN $4::jsonb ? 'network_interfaces' OR NOT (metrics ? 'network_interfaces') THEN $4::jsonb
+					WHEN $4::jsonb ? 'network_interfaces' OR NOT (metrics ? 'network_interfaces') THEN $4::jsonb
 			                    ELSE $4::jsonb || jsonb_build_object('network_interfaces', metrics->'network_interfaces')
 			                  END,
-			                  features=CASE WHEN jsonb_array_length($5::jsonb)=0 THEN features ELSE $5::jsonb END
+			                  features=$5::jsonb
 			WHERE id=$1 AND revoked_at IS NULL`, id, heartbeat.Version, runtimeState, metricsState, featuresState)
 	if err != nil {
 		return err
@@ -818,10 +824,19 @@ func (s *Store) CreateTask(ctx context.Context, request core.TaskRequest) (core.
 			return core.Task{}, fmt.Errorf("%w: %v", ErrInvalid, versionErr)
 		}
 		request.CoreVersion = normalizedVersion
+		source, sourceErr := core.NormalizeCoreSource(request.Engine, normalizedVersion, request.CoreSource)
+		if sourceErr != nil {
+			return core.Task{}, fmt.Errorf("%w: %v", ErrInvalid, sourceErr)
+		}
+		request.CoreSource = source
 		if request.ConfigID != "" {
 			return core.Task{}, fmt.Errorf("%w: install tasks cannot reference a configuration", ErrInvalid)
 		}
 	} else {
+		if request.CoreSource != "" {
+			return core.Task{}, fmt.Errorf("%w: core source is only applicable to Mihomo development installs", ErrInvalid)
+		}
+		request.CoreSource = ""
 		request.CoreVersion = ""
 	}
 	tx, err := s.pool.Begin(ctx)
@@ -859,10 +874,17 @@ func (s *Store) CreateTask(ctx context.Context, request core.TaskRequest) (core.
 			return core.Task{}, fmt.Errorf("%w: %s core tasks are disabled because an existing service could not be mapped safely: %s", ErrConflict, request.Engine, reason)
 		}
 	}
+	if request.Action == core.ActionInstall && request.Engine == core.EngineMihomo &&
+		request.CoreVersion == core.CoreVersionDevelopment &&
+		request.CoreSource == string(core.CoreSourceMirror) &&
+		!containsFeature(features, core.AgentFeatureMihomoDevelopmentSource) {
+		return core.Task{}, fmt.Errorf("%w: this Agent does not support the Mihomo Alpha mirror source; upgrade the Agent through the panel first", ErrConflict)
+	}
 
 	task := core.Task{
 		AgentID: request.AgentID, Action: request.Action, Engine: request.Engine,
-		ConfigID: request.ConfigID, CoreVersion: request.CoreVersion, Status: core.TaskPending, CreatedAt: time.Now().UTC(),
+		ConfigID: request.ConfigID, CoreVersion: request.CoreVersion, CoreSource: request.CoreSource,
+		Status: core.TaskPending, CreatedAt: time.Now().UTC(),
 	}
 	if request.Action == core.ActionDeploy || request.Action == core.ActionValidate || request.Action == core.ActionImportExisting {
 		var configEngine core.Engine
@@ -891,14 +913,18 @@ func (s *Store) CreateTask(ctx context.Context, request core.TaskRequest) (core.
 		task.ConfigID = ""
 	}
 	existing, existingErr := scanTask(tx.QueryRow(ctx, `
-		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),COALESCE(core_version,''),status,attempt,
+		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),COALESCE(core_version,''),COALESCE(core_source,''),status,attempt,
 		       COALESCE(output,''),COALESCE(error,''),created_at,started_at,finished_at
 		FROM tasks
 		WHERE agent_id=$1 AND action=$2 AND engine=$3
 		  AND COALESCE(config_id,'')=$4 AND COALESCE(config_version,0)=$5 AND COALESCE(core_version,'')=$6
+		  AND (CASE WHEN $2='install' AND $3='mihomo' AND $6='development' AND COALESCE($7,'') IN ('','official')
+		            THEN 'official' ELSE COALESCE($7,'') END)
+		    = (CASE WHEN action='install' AND engine='mihomo' AND core_version='development' AND COALESCE(core_source,'') IN ('','official')
+		            THEN 'official' ELSE COALESCE(core_source,'') END)
 		  AND status IN ('pending','running')
 		ORDER BY created_at DESC LIMIT 1`,
-		task.AgentID, task.Action, task.Engine, task.ConfigID, task.ConfigVersion, task.CoreVersion), false)
+		task.AgentID, task.Action, task.Engine, task.ConfigID, task.ConfigVersion, task.CoreVersion, task.CoreSource), false)
 	if existingErr == nil {
 		if err := tx.Commit(ctx); err != nil {
 			return core.Task{}, err
@@ -918,9 +944,9 @@ func (s *Store) CreateTask(ctx context.Context, request core.TaskRequest) (core.
 		return core.Task{}, err
 	}
 	_, err = tx.Exec(ctx, `
-			INSERT INTO tasks (id,agent_id,action,engine,config_id,config_version,config_content,core_version,status,attempt,created_at)
-			VALUES ($1,$2,$3,$4,NULLIF($5,''),NULLIF($6,0),NULLIF($7,''),NULLIF($8,''),$9,0,$10)`,
-		task.ID, task.AgentID, task.Action, task.Engine, task.ConfigID, task.ConfigVersion, storedConfigContent, task.CoreVersion, task.Status, task.CreatedAt)
+			INSERT INTO tasks (id,agent_id,action,engine,config_id,config_version,config_content,core_version,core_source,status,attempt,created_at)
+			VALUES ($1,$2,$3,$4,NULLIF($5,''),NULLIF($6,0),NULLIF($7,''),NULLIF($8,''),NULLIF($9,''),$10,0,$11)`,
+		task.ID, task.AgentID, task.Action, task.Engine, task.ConfigID, task.ConfigVersion, storedConfigContent, task.CoreVersion, task.CoreSource, task.Status, task.CreatedAt)
 	if err != nil {
 		return core.Task{}, mapError(err)
 	}
@@ -970,7 +996,7 @@ func (s *Store) ListTasksFiltered(ctx context.Context, agentID string, status co
 		limit = 500
 	}
 	rows, err := s.pool.Query(ctx, `
-		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),COALESCE(core_version,''),status,attempt,
+		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),COALESCE(core_version,''),COALESCE(core_source,''),status,attempt,
 		       COALESCE(output,''),COALESCE(error,''),created_at,started_at,finished_at
 		FROM tasks
 		WHERE ($1='' OR agent_id=$1) AND ($2='' OR status=$2) AND ($3='' OR action=$3)
@@ -992,7 +1018,7 @@ func (s *Store) ListTasksFiltered(ctx context.Context, agentID string, status co
 
 func (s *Store) GetTask(ctx context.Context, id string) (core.Task, error) {
 	row := s.pool.QueryRow(ctx, `
-		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),COALESCE(core_version,''),status,attempt,
+		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),COALESCE(core_version,''),COALESCE(core_source,''),status,attempt,
 		       COALESCE(output,''),COALESCE(error,''),created_at,started_at,finished_at
 		FROM tasks WHERE id=$1`, id)
 	task, err := scanTask(row, false)
@@ -1032,25 +1058,63 @@ func (s *Store) RetryTask(ctx context.Context, id string) (core.Task, error) {
 	}
 	return s.CreateTask(ctx, core.TaskRequest{
 		AgentID: previous.AgentID, Action: previous.Action, Engine: previous.Engine,
-		ConfigID: previous.ConfigID, CoreVersion: previous.CoreVersion,
+		ConfigID: previous.ConfigID, CoreVersion: previous.CoreVersion, CoreSource: previous.CoreSource,
 	})
 }
 
 // RunningTask returns the task lease currently owned by an agent. A reconnecting
 // Agent can resume result delivery without waiting for the stale-lease janitor.
+// If the Agent no longer advertises the protocol required by the running task
+// (for example a Mihomo development mirror install after the Agent was
+// downgraded), the task is failed atomically instead of being delivered to an
+// Agent that would silently fall back to the official repository.
 func (s *Store) RunningTask(ctx context.Context, agentID string) (*core.Task, error) {
-	row := s.pool.QueryRow(ctx, `
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+	var featuresJSON []byte
+	if err := tx.QueryRow(ctx, `SELECT features FROM agents WHERE id=$1 AND revoked_at IS NULL FOR UPDATE`, agentID).Scan(&featuresJSON); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var features []string
+	if err := json.Unmarshal(featuresJSON, &features); err != nil {
+		return nil, err
+	}
+	row := tx.QueryRow(ctx, `
 		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),
-		       COALESCE(config_content,''),COALESCE(core_version,''),status,attempt,COALESCE(lease_id,''),
+		       COALESCE(config_content,''),COALESCE(core_version,''),COALESCE(core_source,''),status,attempt,COALESCE(lease_id,''),
 		       COALESCE(output,''),COALESCE(error,''),created_at,started_at,finished_at
 		FROM tasks WHERE agent_id=$1 AND status='running'
 		ORDER BY started_at DESC LIMIT 1`, agentID)
 	task, err := scanTask(row, true)
 	if errors.Is(err, pgx.ErrNoRows) {
+		if commitErr := tx.Commit(ctx); commitErr != nil {
+			return nil, commitErr
+		}
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
+	}
+	if isMihomoMirrorTask(task) && !containsFeature(features, core.AgentFeatureMihomoDevelopmentSource) {
+		if _, updateErr := tx.Exec(ctx, `
+			UPDATE tasks SET status='failed', error=$2, finished_at=now(), config_content=NULL, lease_id=NULL
+			WHERE id=$1 AND status='running'`, task.ID,
+			"Agent no longer advertises mihomo-development-source-v1; the mirror development task cannot be safely resumed and it is unknown whether the previous Agent executed it before the connection was lost"); updateErr != nil {
+			return nil, updateErr
+		}
+		if commitErr := tx.Commit(ctx); commitErr != nil {
+			return nil, commitErr
+		}
+		return nil, nil
+	}
+	if commitErr := tx.Commit(ctx); commitErr != nil {
+		return nil, commitErr
 	}
 	if task.ConfigContent != "" {
 		task.ConfigContent, err = s.decryptContent(task.ConfigContent)
@@ -1066,19 +1130,40 @@ func (s *Store) ClaimTask(ctx context.Context, agentID string) (*core.Task, erro
 	if err != nil {
 		return nil, err
 	}
-	row := s.pool.QueryRow(ctx, `
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+	var featuresJSON []byte
+	if err := tx.QueryRow(ctx, `SELECT features FROM agents WHERE id=$1 AND revoked_at IS NULL FOR UPDATE`, agentID).Scan(&featuresJSON); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var features []string
+	if err := json.Unmarshal(featuresJSON, &features); err != nil {
+		return nil, err
+	}
+	mirrorSupported := containsFeature(features, core.AgentFeatureMihomoDevelopmentSource)
+	row := tx.QueryRow(ctx, `
 		WITH next_task AS (
-			SELECT t.id FROM tasks t JOIN agents a ON a.id=t.agent_id
-			WHERE t.agent_id=$1 AND t.status='pending' AND a.revoked_at IS NULL
+			SELECT t.id FROM tasks t
+			WHERE t.agent_id=$1 AND t.status='pending'
 			  AND NOT EXISTS (SELECT 1 FROM tasks running WHERE running.agent_id=$1 AND running.status='running')
+			  AND ($3::boolean OR NOT (t.action='install' AND t.engine='mihomo' AND t.core_version='development' AND COALESCE(t.core_source,'')='mirror'))
 			ORDER BY t.created_at ASC FOR UPDATE OF t SKIP LOCKED LIMIT 1
 		)
 		UPDATE tasks t SET status='running',started_at=now(),attempt=attempt+1,lease_id=$2
 		FROM next_task n WHERE t.id=n.id
 		RETURNING t.id,t.agent_id,t.action,t.engine,COALESCE(t.config_id,''),COALESCE(t.config_version,0),
-		          COALESCE(t.config_content,''),COALESCE(t.core_version,''),t.status,t.attempt,COALESCE(t.lease_id,''),COALESCE(t.output,''),COALESCE(t.error,''),
-		          t.created_at,t.started_at,t.finished_at`, agentID, leaseID)
+		          COALESCE(t.config_content,''),COALESCE(t.core_version,''),COALESCE(t.core_source,''),t.status,t.attempt,COALESCE(t.lease_id,''),COALESCE(t.output,''),COALESCE(t.error,''),
+		          t.created_at,t.started_at,t.finished_at`, agentID, leaseID, mirrorSupported)
 	task, err := scanTask(row, true)
+	if commitErr := tx.Commit(ctx); commitErr != nil {
+		return nil, commitErr
+	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -1092,6 +1177,15 @@ func (s *Store) ClaimTask(ctx context.Context, agentID string) (*core.Task, erro
 		}
 	}
 	return &task, nil
+}
+
+// isMihomoMirrorTask reports whether a task is the explicit third-party
+// vernesong/mihomo mirror install that requires mihomo-development-source-v1.
+func isMihomoMirrorTask(task core.Task) bool {
+	return task.Action == core.ActionInstall &&
+		task.Engine == core.EngineMihomo &&
+		task.CoreVersion == core.CoreVersionDevelopment &&
+		task.CoreSource == string(core.CoreSourceMirror)
 }
 
 func (s *Store) CompleteTask(ctx context.Context, agentID, taskID string, result core.TaskResultRequest) error {
@@ -1190,7 +1284,7 @@ func (s *Store) RecentReadTask(ctx context.Context, agentID string, engine core.
 		return core.Task{}, ErrNotFound
 	}
 	row := s.pool.QueryRow(ctx, `
-		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),COALESCE(core_version,''),status,attempt,
+		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),COALESCE(core_version,''),COALESCE(core_source,''),status,attempt,
 		       COALESCE(output,''),COALESCE(error,''),created_at,started_at,finished_at
 		FROM tasks
 		WHERE agent_id=$1 AND engine=$2 AND action=$3 AND status='succeeded'
@@ -1246,11 +1340,11 @@ func scanTask(row rowScanner, includeContent bool) (core.Task, error) {
 	var err error
 	if includeContent {
 		err = row.Scan(&task.ID, &task.AgentID, &task.Action, &task.Engine, &task.ConfigID, &task.ConfigVersion,
-			&task.ConfigContent, &task.CoreVersion, &task.Status, &task.Attempt, &task.LeaseID, &task.Output, &task.Error,
+			&task.ConfigContent, &task.CoreVersion, &task.CoreSource, &task.Status, &task.Attempt, &task.LeaseID, &task.Output, &task.Error,
 			&task.CreatedAt, &task.StartedAt, &task.FinishedAt)
 	} else {
 		err = row.Scan(&task.ID, &task.AgentID, &task.Action, &task.Engine, &task.ConfigID, &task.ConfigVersion,
-			&task.CoreVersion, &task.Status, &task.Attempt, &task.Output, &task.Error,
+			&task.CoreVersion, &task.CoreSource, &task.Status, &task.Attempt, &task.Output, &task.Error,
 			&task.CreatedAt, &task.StartedAt, &task.FinishedAt)
 	}
 	return task, err
@@ -1418,6 +1512,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     config_version integer,
 	    config_content text,
 	    core_version varchar(64),
+	    core_source varchar(32),
 	    status varchar(20) NOT NULL CHECK (status IN ('pending','running','succeeded','failed','canceled')),
 	    attempt integer NOT NULL DEFAULT 0,
     output text,
@@ -1429,6 +1524,7 @@ CREATE TABLE IF NOT EXISTS tasks (
 
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS lease_id text;
 	ALTER TABLE tasks ADD COLUMN IF NOT EXISTS core_version varchar(64);
+	ALTER TABLE tasks ADD COLUMN IF NOT EXISTS core_source varchar(32);
 	DROP INDEX IF EXISTS tasks_latest_deployment_idx;
 	ALTER TABLE tasks DROP COLUMN IF EXISTS simulated;
 	ALTER TABLE tasks DROP CONSTRAINT IF EXISTS tasks_action_check;

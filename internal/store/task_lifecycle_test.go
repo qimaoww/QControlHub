@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"os"
 	"strings"
@@ -13,6 +14,130 @@ import (
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
+
+func TestClaimAndResumeFeatureDowngradeWithPostgreSQL(t *testing.T) {
+	databaseURL := os.Getenv("QCH_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("QCH_TEST_DATABASE_URL is not configured")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	dataStore, err := Open(ctx, databaseURL, true)
+	if err != nil {
+		t.Fatalf("open PostgreSQL: %v", err)
+	}
+	defer dataStore.Close()
+	downgradeFeatures := func(ctx context.Context, agentID string) {
+		t.Helper()
+		features := []string{core.AgentFeatureSelfUpgrade, core.AgentFeaturePortTraffic, core.AgentFeatureCoreLogs}
+		encoded, _ := json.Marshal(features)
+		if _, err := dataStore.pool.Exec(ctx, `UPDATE agents SET features=$2 WHERE id=$1`, agentID, encoded); err != nil {
+			t.Fatalf("downgrade agent features: %v", err)
+		}
+	}
+
+	// A downgraded Agent must not have a pending mirror task claimed, while an
+	// explicit official or omitted source task stays dispatchable.
+	source, sourceEnrollment := enrollTaskTestAgentWithSource(t, ctx, dataStore)
+	defer cleanupTaskTestAgent(dataStore, source.ID, sourceEnrollment)
+	mirror, err := dataStore.CreateTask(ctx, core.TaskRequest{
+		AgentID: source.ID, Action: core.ActionInstall, Engine: core.EngineMihomo,
+		CoreVersion: core.CoreVersionDevelopment, CoreSource: string(core.CoreSourceMirror),
+	})
+	if err != nil {
+		t.Fatalf("create mirror task: %v", err)
+	}
+	official, err := dataStore.CreateTask(ctx, core.TaskRequest{
+		AgentID: source.ID, Action: core.ActionInstall, Engine: core.EngineMihomo,
+		CoreVersion: core.CoreVersionDevelopment, CoreSource: string(core.CoreSourceOfficial),
+	})
+	if err != nil {
+		t.Fatalf("create official task: %v", err)
+	}
+	downgradeFeatures(ctx, source.ID)
+	claimed, err := dataStore.ClaimTask(ctx, source.ID)
+	if err != nil {
+		t.Fatalf("claim after downgrade: %v", err)
+	}
+	if claimed == nil || claimed.ID != official.ID {
+		t.Fatalf("ClaimTask after downgrade = %+v, want official task %s", claimed, official.ID)
+	}
+	if got, err := dataStore.GetTask(ctx, mirror.ID); err != nil || got.Status != core.TaskPending {
+		t.Fatalf("mirror task after downgrade = %+v, %v; want pending", got, err)
+	}
+
+	// A downgraded Agent that reconnects must not resume a running mirror task;
+	// the running task is failed atomically with a feature reason.
+	source2, source2Enrollment := enrollTaskTestAgentWithSource(t, ctx, dataStore)
+	defer cleanupTaskTestAgent(dataStore, source2.ID, source2Enrollment)
+	runningMirror, err := dataStore.CreateTask(ctx, core.TaskRequest{
+		AgentID: source2.ID, Action: core.ActionInstall, Engine: core.EngineMihomo,
+		CoreVersion: core.CoreVersionDevelopment, CoreSource: string(core.CoreSourceMirror),
+	})
+	if err != nil {
+		t.Fatalf("create running mirror task: %v", err)
+	}
+	claimedRunning, err := dataStore.ClaimTask(ctx, source2.ID)
+	if err != nil || claimedRunning == nil || claimedRunning.ID != runningMirror.ID {
+		t.Fatalf("claim running mirror = %+v, %v; want %s", claimedRunning, err, runningMirror.ID)
+	}
+	downgradeFeatures(ctx, source2.ID)
+	resumed, err := dataStore.RunningTask(ctx, source2.ID)
+	if err != nil {
+		t.Fatalf("RunningTask after downgrade: %v", err)
+	}
+	if resumed != nil {
+		t.Fatalf("RunningTask delivered a downgraded mirror task: %+v", resumed)
+	}
+	failed, err := dataStore.GetTask(ctx, runningMirror.ID)
+	if err != nil || failed.Status != core.TaskFailed {
+		t.Fatalf("downgraded running mirror task = %+v, %v; want failed", failed, err)
+	}
+	assertRawTaskTerminalCleaned(t, ctx, dataStore, runningMirror.ID)
+
+	// Cross-agent claims must never pick another Agent's pending mirror task.
+	legacy, legacyEnrollment := enrollTaskTestAgent(t, ctx, dataStore)
+	defer cleanupTaskTestAgent(dataStore, legacy.ID, legacyEnrollment)
+	if claimed, err := dataStore.ClaimTask(ctx, legacy.ID); err != nil || claimed != nil {
+		t.Fatalf("ClaimTask(legacy) = %+v, %v; want nil", claimed, err)
+	}
+}
+
+// assertRawTaskTerminalCleaned reads the underlying tasks row directly and
+// asserts the terminal-state cleanup and unknown-outcome wording. GetTask does
+// not expose lease_id or config_content, so the raw columns must be checked
+// here to avoid a false positive during the downgrade-fail regression.
+func assertRawTaskTerminalCleaned(t *testing.T, ctx context.Context, dataStore *Store, taskID string) {
+	t.Helper()
+	var status string
+	var finishedAt *time.Time
+	var leaseID *string
+	var configContent *string
+	var errMsg string
+	if err := dataStore.pool.QueryRow(ctx, `
+		SELECT status, finished_at, lease_id, config_content, COALESCE(error,'')
+		FROM tasks WHERE id=$1`, taskID).Scan(&status, &finishedAt, &leaseID, &configContent, &errMsg); err != nil {
+		t.Fatalf("read raw terminal task: %v", err)
+	}
+	if status != string(core.TaskFailed) {
+		t.Fatalf("raw terminal task status = %q, want %q", status, core.TaskFailed)
+	}
+	if finishedAt == nil {
+		t.Fatalf("raw terminal task finished_at is NULL")
+	}
+	if leaseID != nil {
+		t.Fatalf("raw terminal task lease must be NULL, got %q", *leaseID)
+	}
+	if configContent != nil {
+		t.Fatalf("raw terminal task config_content must be NULL, got %q", *configContent)
+	}
+	if !strings.Contains(errMsg, core.AgentFeatureMihomoDevelopmentSource) || !strings.Contains(errMsg, "cannot be safely resumed") || !strings.Contains(errMsg, "unknown whether the previous Agent executed it") {
+		t.Fatalf("raw terminal task error = %q, want feature + safe-resume + unknown-outcome wording", errMsg)
+	}
+	if strings.Contains(errMsg, "was not executed") {
+		t.Fatalf("raw terminal task error must not claim the task was never executed: %q", errMsg)
+	}
+}
 
 func TestTaskCancelRetryAndFiltersWithPostgreSQL(t *testing.T) {
 	databaseURL := os.Getenv("QCH_TEST_DATABASE_URL")
@@ -531,6 +656,182 @@ func TestEnrollmentStaysOfflineUntilFirstHeartbeat(t *testing.T) {
 	}
 }
 
+func TestCreateTaskValidatesCoreSourceWithPostgreSQL(t *testing.T) {
+	databaseURL := os.Getenv("QCH_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("QCH_TEST_DATABASE_URL is not configured")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	dataStore, err := Open(ctx, databaseURL, true)
+	if err != nil {
+		t.Fatalf("open PostgreSQL: %v", err)
+	}
+	defer dataStore.Close()
+	// legacyAgent advertises only self-upgrade, so it is an older Agent that
+	// cannot negotiate core_source and must be refused the mirror task.
+	legacyAgent, legacyEnrollment := enrollTaskTestAgent(t, ctx, dataStore)
+	defer cleanupTaskTestAgent(dataStore, legacyAgent.ID, legacyEnrollment)
+	if _, err := dataStore.CreateTask(ctx, core.TaskRequest{
+		AgentID: legacyAgent.ID, Action: core.ActionInstall, Engine: core.EngineMihomo,
+		CoreVersion: core.CoreVersionDevelopment, CoreSource: string(core.CoreSourceMirror),
+	}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("legacy Agent mirror task error = %v, want ErrConflict", err)
+	}
+	official, err := dataStore.CreateTask(ctx, core.TaskRequest{
+		AgentID: legacyAgent.ID, Action: core.ActionInstall, Engine: core.EngineMihomo,
+		CoreVersion: core.CoreVersionDevelopment, CoreSource: string(core.CoreSourceOfficial),
+	})
+	if err != nil || official.CoreSource != string(core.CoreSourceOfficial) {
+		t.Fatalf("legacy official install task = %+v, %v", official, err)
+	}
+	defaulted, err := dataStore.CreateTask(ctx, core.TaskRequest{
+		AgentID: legacyAgent.ID, Action: core.ActionInstall, Engine: core.EngineMihomo,
+		CoreVersion: core.CoreVersionDevelopment,
+	})
+	if err != nil || defaulted.CoreSource != string(core.CoreSourceOfficial) {
+		t.Fatalf("legacy default install task = %+v, %v", defaulted, err)
+	}
+	if defaulted.ID != official.ID || !defaulted.Reused {
+		t.Fatalf("omitted development install must reuse the explicit official task: %+v, want reuse of %s", defaulted, official.ID)
+	}
+
+	// sourceAgent advertises the negotiated feature and accepts mirror, which is
+	// persisted and preserved on retry.
+	sourceAgent, sourceEnrollment := enrollTaskTestAgentWithSource(t, ctx, dataStore)
+	defer cleanupTaskTestAgent(dataStore, sourceAgent.ID, sourceEnrollment)
+	mirror, err := dataStore.CreateTask(ctx, core.TaskRequest{
+		AgentID: sourceAgent.ID, Action: core.ActionInstall, Engine: core.EngineMihomo,
+		CoreVersion: core.CoreVersionDevelopment, CoreSource: string(core.CoreSourceMirror),
+	})
+	if err != nil || mirror.CoreSource != string(core.CoreSourceMirror) {
+		t.Fatalf("source Agent mirror install task = %+v, %v", mirror, err)
+	}
+	persisted, err := dataStore.GetTask(ctx, mirror.ID)
+	if err != nil || persisted.CoreSource != string(core.CoreSourceMirror) {
+		t.Fatalf("persisted mirror source = %+v, %v", persisted, err)
+	}
+	if err := dataStore.CancelTask(ctx, mirror.ID); err != nil {
+		t.Fatalf("cancel mirror task: %v", err)
+	}
+	retried, err := dataStore.RetryTask(ctx, mirror.ID)
+	if err != nil || retried.CoreSource != string(core.CoreSourceMirror) {
+		t.Fatalf("retried mirror task = %+v, %v", retried, err)
+	}
+
+	invalidRequests := []core.TaskRequest{
+		{AgentID: sourceAgent.ID, Action: core.ActionInstall, Engine: core.EngineMihomo, CoreVersion: core.CoreVersionStable, CoreSource: string(core.CoreSourceMirror)},
+		{AgentID: sourceAgent.ID, Action: core.ActionInstall, Engine: core.EngineXray, CoreVersion: core.CoreVersionDevelopment, CoreSource: string(core.CoreSourceMirror)},
+		{AgentID: sourceAgent.ID, Action: core.ActionInstall, Engine: core.EngineMihomo, CoreVersion: core.CoreVersionDevelopment, CoreSource: "private"},
+		{AgentID: legacyAgent.ID, Action: core.ActionStatus, Engine: core.EngineMihomo, CoreSource: string(core.CoreSourceMirror)},
+	}
+	for _, request := range invalidRequests {
+		if _, err := dataStore.CreateTask(ctx, request); !errors.Is(err, ErrInvalid) {
+			t.Fatalf("CreateTask(%+v) error = %v, want ErrInvalid", request, err)
+		}
+	}
+}
+
+func TestEffectiveSourceReuseWithPostgreSQL(t *testing.T) {
+	databaseURL := os.Getenv("QCH_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("QCH_TEST_DATABASE_URL is not configured")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	dataStore, err := Open(ctx, databaseURL, true)
+	if err != nil {
+		t.Fatalf("open PostgreSQL: %v", err)
+	}
+	defer dataStore.Close()
+
+	// An explicit official request must reuse an existing legacy row whose
+	// core_source is empty (NULL), i.e. a legacy omitted-source install.
+	legacy, legacyEnrollment := enrollTaskTestAgent(t, ctx, dataStore)
+	defer cleanupTaskTestAgent(dataStore, legacy.ID, legacyEnrollment)
+	legacyID, err := core.NewID("tsk")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := dataStore.pool.Exec(ctx, `
+		INSERT INTO tasks (id,agent_id,action,engine,core_version,status,created_at)
+		VALUES ($1,$2,'install','mihomo','development','pending',now())`, legacyID, legacy.ID); err != nil {
+		t.Fatalf("insert legacy empty-source task: %v", err)
+	}
+	official, err := dataStore.CreateTask(ctx, core.TaskRequest{
+		AgentID: legacy.ID, Action: core.ActionInstall, Engine: core.EngineMihomo,
+		CoreVersion: core.CoreVersionDevelopment, CoreSource: string(core.CoreSourceOfficial),
+	})
+	if err != nil || official.ID != legacyID || !official.Reused {
+		t.Fatalf("explicit official must reuse legacy empty-source task: %+v, %v; want reuse of %s", official, err, legacyID)
+	}
+
+	// An omitted source request must reuse an existing explicit-official row.
+	agent, enrollmentID := enrollTaskTestAgent(t, ctx, dataStore)
+	defer cleanupTaskTestAgent(dataStore, agent.ID, enrollmentID)
+	explicit, err := dataStore.CreateTask(ctx, core.TaskRequest{
+		AgentID: agent.ID, Action: core.ActionInstall, Engine: core.EngineMihomo,
+		CoreVersion: core.CoreVersionDevelopment, CoreSource: string(core.CoreSourceOfficial),
+	})
+	if err != nil {
+		t.Fatalf("create explicit official task: %v", err)
+	}
+	omitted, err := dataStore.CreateTask(ctx, core.TaskRequest{
+		AgentID: agent.ID, Action: core.ActionInstall, Engine: core.EngineMihomo,
+		CoreVersion: core.CoreVersionDevelopment,
+	})
+	if err != nil || omitted.ID != explicit.ID || !omitted.Reused || omitted.CoreSource != string(core.CoreSourceOfficial) {
+		t.Fatalf("omitted source must reuse explicit official task: %+v, %v; want reuse of %s", omitted, err, explicit.ID)
+	}
+}
+
+func TestHeartbeatClearsStaleFeaturesWithPostgreSQL(t *testing.T) {
+	databaseURL := os.Getenv("QCH_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("QCH_TEST_DATABASE_URL is not configured")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	dataStore, err := Open(ctx, databaseURL, true)
+	if err != nil {
+		t.Fatalf("open PostgreSQL: %v", err)
+	}
+	defer dataStore.Close()
+
+	agent, enrollmentID := enrollTaskTestAgentWithSource(t, ctx, dataStore)
+	defer cleanupTaskTestAgent(dataStore, agent.ID, enrollmentID)
+	current, err := dataStore.GetAgent(ctx, agent.ID)
+	if err != nil || !containsFeature(current.Features, core.AgentFeatureMihomoDevelopmentSource) {
+		t.Fatalf("agent did not start advertising the source feature: %+v, %v", current.Features, err)
+	}
+
+	// A complete heartbeat with an omitted/empty feature list must clear the
+	// stale capability; it must not inherit a previous session's value.
+	if err := dataStore.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Version: "legacy"}); err != nil {
+		t.Fatalf("legacy empty-feature heartbeat: %v", err)
+	}
+	current, err = dataStore.GetAgent(ctx, agent.ID)
+	if err != nil || len(current.Features) != 0 {
+		t.Fatalf("agent features after empty-feature heartbeat = %+v, %v; want empty", current.Features, err)
+	}
+
+	// Re-advertising a non-empty feature set and then a metrics-only refresh
+	// must preserve those features.
+	if err := dataStore.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{
+		Version:  "v2",
+		Features: []string{core.AgentFeatureSelfUpgrade, core.AgentFeaturePortTraffic},
+	}); err != nil {
+		t.Fatalf("re-advertise feature heartbeat: %v", err)
+	}
+	if err := dataStore.UpdateAgentMetrics(ctx, agent.ID, core.HostMetrics{CPUAvailable: true, CPUPercent: 10}); err != nil {
+		t.Fatalf("metrics-only refresh: %v", err)
+	}
+	current, err = dataStore.GetAgent(ctx, agent.ID)
+	if err != nil || !containsFeature(current.Features, core.AgentFeatureSelfUpgrade) || containsFeature(current.Features, core.AgentFeatureMihomoDevelopmentSource) {
+		t.Fatalf("metrics-only refresh clobbered features: %+v, %v", current.Features, err)
+	}
+}
+
 func enrollTaskTestAgent(t *testing.T, ctx context.Context, dataStore *Store) (core.Agent, string) {
 	t.Helper()
 	enrollment, err := dataStore.CreateEnrollmentToken(ctx, core.EnrollmentTokenRequest{
@@ -551,6 +852,30 @@ func enrollTaskTestAgent(t *testing.T, ctx context.Context, dataStore *Store) (c
 	}, enrollment.Token)
 	if err != nil {
 		t.Fatalf("enroll task test agent: %v", err)
+	}
+	return agent, enrollment.ID
+}
+
+func enrollTaskTestAgentWithSource(t *testing.T, ctx context.Context, dataStore *Store) (core.Agent, string) {
+	t.Helper()
+	enrollment, err := dataStore.CreateEnrollmentToken(ctx, core.EnrollmentTokenRequest{
+		Name: "task lifecycle source candidate", TTLMinutes: 30, MaxUses: 1,
+	})
+	if err != nil {
+		t.Fatalf("create source enrollment token: %v", err)
+	}
+	publicKey := make([]byte, 32)
+	if _, err := rand.Read(publicKey); err != nil {
+		t.Fatal(err)
+	}
+	agent, err := dataStore.EnrollAgent(ctx, core.EnrollRequest{
+		Name: "task-lifecycle-source-agent", OS: "linux", Arch: "amd64",
+		Capabilities: []core.Engine{core.EngineMihomo},
+		Features:     []string{core.AgentFeatureSelfUpgrade, core.AgentFeatureMihomoDevelopmentSource},
+		PublicKey:    base64.RawURLEncoding.EncodeToString(publicKey),
+	}, enrollment.Token)
+	if err != nil {
+		t.Fatalf("enroll source agent: %v", err)
 	}
 	return agent, enrollment.ID
 }

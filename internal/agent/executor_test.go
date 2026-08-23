@@ -261,6 +261,9 @@ func TestExecutorRejectsUnsafeTasksAndPaths(t *testing.T) {
 		{Action: core.ActionStatus, Engine: core.Engine("mihomo;evil")},
 		{Action: core.ActionStatus, Engine: core.EngineXray},
 		{Action: core.ActionInstall, Engine: core.EngineMihomo, CoreVersion: "https://evil.example/core"},
+		{Action: core.ActionInstall, Engine: core.EngineMihomo, CoreVersion: core.CoreVersionStable, CoreSource: string(core.CoreSourceMirror)},
+		{Action: core.ActionInstall, Engine: core.EngineXray, CoreVersion: core.CoreVersionDevelopment, CoreSource: string(core.CoreSourceMirror)},
+		{Action: core.ActionInstall, Engine: core.EngineMihomo, CoreVersion: core.CoreVersionDevelopment, CoreSource: "private"},
 	}
 	for _, task := range rejected {
 		if _, err := executor.Execute(context.Background(), task); err == nil {

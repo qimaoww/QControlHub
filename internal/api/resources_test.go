@@ -51,3 +51,35 @@ func TestClientAddressCandidatesFollowManagedObservedAndInterfacePriority(t *tes
 		t.Fatalf("private observation did not fall back to interface = %+v", candidates)
 	}
 }
+
+func TestClientAddressCandidatesIncludeProbedDualStackAddresses(t *testing.T) {
+	agent := core.Agent{
+		Metrics: core.HostMetrics{
+			// The control plane only ever observes the family the connection
+			// used; the probed pair must still surface both.
+			ObservedPublicIP: "93.184.216.34",
+			PublicIPv4:       "198.35.26.96",
+			PublicIPv6:       "2606:4700:4700::1111",
+		},
+	}
+	candidates := clientAddressCandidates(agent)
+	if len(candidates) != 3 {
+		t.Fatalf("probed candidates = %+v", candidates)
+	}
+	if candidates[0].address != "198.35.26.96" || candidates[0].source != "节点公网探测 · IPv4" {
+		t.Fatalf("probed IPv4 candidate = %+v", candidates[0])
+	}
+	if candidates[1].address != "2606:4700:4700::1111" || candidates[1].source != "节点公网探测 · IPv6" {
+		t.Fatalf("probed IPv6 candidate = %+v", candidates[1])
+	}
+	if candidates[2].address != "93.184.216.34" || candidates[2].source != "控制面实时观测公网地址" {
+		t.Fatalf("observed candidate = %+v", candidates[2])
+	}
+
+	// A probed address that equals the observation must not duplicate it.
+	agent.Metrics.PublicIPv4 = "93.184.216.34"
+	candidates = clientAddressCandidates(agent)
+	if len(candidates) != 2 {
+		t.Fatalf("deduplicated candidates = %+v", candidates)
+	}
+}

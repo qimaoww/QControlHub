@@ -47,10 +47,51 @@ func TestEncodeHeartbeatMetricsValidatesAndServerStamps(t *testing.T) {
 		{ObservedPublicIP: "203.0.113.8"},
 		{ObservedPublicIP: "2001:db8::8"},
 		{ObservedPublicIP: "not-an-address"},
+		{PublicIPv4: "2606:4700:4700::1111"},
+		{PublicIPv4: "10.0.0.8"},
+		{PublicIPv4: "203.0.113.8"},
+		{PublicIPv4: "not-an-address"},
+		{PublicIPv6: "93.184.216.34"},
+		{PublicIPv6: "::ffff:93.184.216.34"},
+		{PublicIPv6: "fc00::8"},
+		{PublicIPv6: "2001:db8::8"},
+		{PublicIPv6: "not-an-address"},
 	}
 	for _, metrics := range invalid {
 		if _, err := encodeHeartbeatMetrics(&metrics, receivedAt); err == nil {
 			t.Errorf("encodeHeartbeatMetrics(%+v) unexpectedly succeeded", metrics)
 		}
+	}
+}
+
+func TestEncodeHeartbeatMetricsAcceptsDualStackProbedAddresses(t *testing.T) {
+	t.Parallel()
+	receivedAt := time.Date(2026, 7, 31, 5, 0, 0, 0, time.UTC)
+	encoded, err := encodeHeartbeatMetrics(&core.HostMetrics{
+		ObservedPublicIP: "93.184.216.34",
+		PublicIPv4:       "198.35.26.96",
+	}, receivedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(encoded) == "" {
+		t.Fatal("expected encoded payload")
+	}
+	encoded, err = encodeHeartbeatMetrics(&core.HostMetrics{
+		PublicIPv6: "2606:4700:4700::1111",
+	}, receivedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded core.HostMetrics
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.PublicIPv6 != "2606:4700:4700::1111" || decoded.PublicIPv4 != "" {
+		t.Fatalf("encoded probed addresses = %+v", decoded)
+	}
+	// Older Agents never probe; empty fields must keep encoding successfully.
+	if _, err := encodeHeartbeatMetrics(&core.HostMetrics{}, receivedAt); err != nil {
+		t.Fatal(err)
 	}
 }

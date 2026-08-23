@@ -3,7 +3,7 @@ SHELL := /bin/sh
 VERSION ?= dev
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
-.PHONY: build test vet fmt-check frontend-check installer-test web-image-test check init-env compose-config up dev-up down logs
+.PHONY: build test vet fmt-check frontend-check installer-test web-image-test docs-check check init-env compose-config up dev-up down logs
 
 build:
 	mkdir -p bin
@@ -28,7 +28,10 @@ installer-test:
 web-image-test:
 	docker build --target qcontrol-web --build-arg VERSION='$(VERSION)' .
 
-check: fmt-check frontend-check installer-test vet test
+docs-check:
+	node docs/check_docs.mjs
+
+check: fmt-check frontend-check installer-test docs-check vet test
 
 init-env:
 	@command -v openssl >/dev/null 2>&1 || { printf '%s\n' 'openssl is required'; exit 1; }

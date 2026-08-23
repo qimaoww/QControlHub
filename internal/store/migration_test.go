@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/qimaoww/qcontrolhub/internal/core"
 	"github.com/qimaoww/qcontrolhub/internal/testdb"
 )
@@ -203,5 +204,128 @@ func TestConcurrentOpenSkipsAppliedSchemaDuringCRUD(t *testing.T) {
 	current, err := dataStore.AgentConfig(ctx, agent.ID, core.EngineMihomo)
 	if err != nil || current.Version != 16 {
 		t.Fatalf("configuration after concurrent opens = %+v, %v", current, err)
+	}
+}
+
+// TestMigrateAddsCoreSourceToLegacyTasks advances a database whose tasks table
+// predates core_source (schema version 19) to the current version and verifies
+// existing rows survive with an empty (official-default) core_source value.
+func TestMigrateAddsCoreSourceToLegacyTasks(t *testing.T) {
+	databaseURL := os.Getenv("QCH_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("QCH_TEST_DATABASE_URL is not configured")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	schemaID, err := core.NewID("migration")
+	if err != nil {
+		t.Fatal(err)
+	}
+	schemaName := pgx.Identifier{schemaID}.Sanitize()
+	setup, err := pgx.Connect(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("connect for legacy migration fixture: %v", err)
+	}
+	defer setup.Close(ctx)
+	if _, err := setup.Exec(ctx, `CREATE SCHEMA `+schemaName); err != nil {
+		t.Fatalf("create legacy migration schema: %v", err)
+	}
+	defer func() {
+		cleanupContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, err := setup.Exec(cleanupContext, `DROP SCHEMA `+schemaName+` CASCADE`); err != nil {
+			t.Errorf("drop legacy migration schema: %v", err)
+		}
+	}()
+	if _, err := setup.Exec(ctx, `SET search_path TO `+schemaName); err != nil {
+		t.Fatalf("select legacy migration schema: %v", err)
+	}
+	if _, err := setup.Exec(ctx, `
+		CREATE TABLE qcontrolhub_schema_migrations (
+			version integer PRIMARY KEY CHECK (version > 0),
+			applied_at timestamptz NOT NULL DEFAULT now()
+		);
+		INSERT INTO qcontrolhub_schema_migrations (version) VALUES (19);
+		CREATE TABLE agents (
+			id text PRIMARY KEY,
+			name varchar(100) NOT NULL,
+			version varchar(100) NOT NULL DEFAULT '',
+			os varchar(50) NOT NULL,
+			arch varchar(50) NOT NULL,
+			capabilities jsonb NOT NULL,
+			labels jsonb NOT NULL DEFAULT '{}'::jsonb,
+			runtime jsonb NOT NULL DEFAULT '{}'::jsonb,
+			public_key bytea NOT NULL CHECK (octet_length(public_key) = 32),
+			last_seen timestamptz NOT NULL,
+			enrolled_at timestamptz NOT NULL,
+			revoked_at timestamptz
+		);
+		CREATE TABLE tasks (
+			id text PRIMARY KEY,
+			agent_id text NOT NULL REFERENCES agents(id),
+			action varchar(20) NOT NULL,
+			engine varchar(20) NOT NULL,
+			config_id text,
+			config_version integer,
+			config_content text,
+			core_version varchar(64),
+			status varchar(20) NOT NULL,
+			attempt integer NOT NULL DEFAULT 0,
+			output text,
+			error text,
+			created_at timestamptz NOT NULL,
+			started_at timestamptz,
+			finished_at timestamptz
+		)`); err != nil {
+		t.Fatalf("create legacy schema without core_source: %v", err)
+	}
+	agentID, err := core.NewID("agt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	taskID, err := core.NewID("tsk")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	if _, err := setup.Exec(ctx, `
+		INSERT INTO agents (id,name,version,os,arch,capabilities,runtime,public_key,last_seen,enrolled_at)
+		VALUES ($1,'legacy-agent','1.0.0','linux','amd64','["mihomo"]'::jsonb,'{}'::jsonb,decode(repeat('01',32),'hex'),$2,$2)`,
+		agentID, now); err != nil {
+		t.Fatalf("insert legacy agent: %v", err)
+	}
+	if _, err := setup.Exec(ctx, `
+		INSERT INTO tasks (id,agent_id,action,engine,core_version,status,created_at)
+		VALUES ($1,$2,'install','mihomo','stable','succeeded',$3)`,
+		taskID, agentID, now); err != nil {
+		t.Fatalf("insert legacy task: %v", err)
+	}
+	poolConfig, err := pgxpool.ParseConfig(databaseURL)
+	if err != nil {
+		t.Fatalf("parse legacy migration database URL: %v", err)
+	}
+	poolConfig.ConnConfig.RuntimeParams["search_path"] = schemaID
+	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
+	if err != nil {
+		t.Fatalf("open legacy migration pool: %v", err)
+	}
+	dataStore := &Store{pool: pool}
+	defer dataStore.Close()
+	if err := dataStore.migrate(ctx); err != nil {
+		t.Fatalf("migrate legacy schema: %v", err)
+	}
+	var version int
+	if err := dataStore.pool.QueryRow(ctx, `SELECT COALESCE(max(version),0) FROM qcontrolhub_schema_migrations`).Scan(&version); err != nil {
+		t.Fatalf("read schema version: %v", err)
+	}
+	if version != currentSchemaVersion {
+		t.Fatalf("schema version = %d, want %d", version, currentSchemaVersion)
+	}
+	var coreSource string
+	if err := dataStore.pool.QueryRow(ctx, `SELECT COALESCE(core_source,'') FROM tasks WHERE id=$1`, taskID).Scan(&coreSource); err != nil {
+		t.Fatalf("read migrated core_source: %v", err)
+	}
+	if coreSource != "" {
+		t.Fatalf("legacy task core_source = %q, want empty (official default)", coreSource)
 	}
 }

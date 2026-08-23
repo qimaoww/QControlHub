@@ -12,6 +12,7 @@ const (
 	minPasswordBytes = 12
 	maxPasswordBytes = 72
 	passwordCost     = 12
+	dummySeed        = "qcontrolhub-login-timing-equalizer"
 )
 
 // ValidatePassword applies the panel's password policy before hashing. The
@@ -46,6 +47,35 @@ func CheckPassword(hash, password string) bool {
 		return false
 	}
 	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) == nil
+}
+
+// compareBcrypt isolates the comparison primitive so tests can count the exact
+// number of bcrypt operations a login path performs without relying on a
+// wall-clock threshold.
+var compareBcrypt = bcrypt.CompareHashAndPassword
+
+// dummyHash is generated once at package init so the first unknown-username
+// login after a process restart pays exactly one bcrypt comparison, matching a
+// wrong-password login. Generating it lazily inside a once block would make the
+// very first request pay two bcrypt operations and stay distinguishable by
+// timing.
+var dummyHash = func() string {
+	hash, err := bcrypt.GenerateFromPassword([]byte(dummySeed), passwordCost)
+	if err != nil {
+		panic("authn: build dummy password hash: " + err.Error())
+	}
+	return string(hash)
+}()
+
+// CheckPasswordDummy spends the same bcrypt cost as CheckPassword against a
+// throwaway hash so callers can keep the response time of an unknown username
+// indistinguishable from a wrong password. The comparison result is discarded
+// and the function always reports failure.
+func CheckPasswordDummy(password string) {
+	if password == "" {
+		return
+	}
+	_ = compareBcrypt([]byte(dummyHash), []byte(password))
 }
 
 func NormalizeUsername(value string) (string, error) {

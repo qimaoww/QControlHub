@@ -69,9 +69,16 @@ func (s *Server) login(w http.ResponseWriter, request *http.Request) {
 	permissions := []core.Permission(nil)
 	userID := ""
 	if username != "" && secret != "" && s.store != nil {
-		if user, hash, err := s.store.UserForLogin(request.Context(), strings.ToLower(username)); err == nil && authn.CheckPassword(hash, secret) {
-			role, ok, userID, permissions = user.Role, true, user.ID, user.Permissions
-			username = user.Username
+		user, hash, lookupErr := s.store.UserForLogin(request.Context(), strings.ToLower(username))
+		if lookupErr == nil {
+			if authn.CheckPassword(hash, secret) {
+				role, ok, userID, permissions = user.Role, true, user.ID, user.Permissions
+				username = user.Username
+			}
+		} else {
+			// An unknown username must pay the same bcrypt cost as a wrong
+			// password so logins cannot be timed to enumerate valid users.
+			authn.CheckPasswordDummy(secret)
 		}
 	}
 	// Keep the environment token as a break-glass administrator credential.

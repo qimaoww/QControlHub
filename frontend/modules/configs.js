@@ -190,6 +190,7 @@ export async function submitLiveConfigChange({
   source,
   existingAvailable,
   savedConfig,
+  onDeployTask,
 }) {
   const editor = liveConfigEditorState({
     existingAvailable,
@@ -221,13 +222,24 @@ export async function submitLiveConfigChange({
     );
   }
   if (intent === "deploy" || intent === "validate") {
-    await submitTask({
+    if (intent === "validate") {
+      await submitTask({
+        agent_id: agent.id,
+        engine,
+        action: "validate",
+        config_id: saved.id,
+      });
+      return { saved, content: editor.content };
+    }
+    const task = await submitTask({
       agent_id: agent.id,
       engine,
-      action: intent,
+      action: "deploy",
       config_id: saved.id,
     });
-    return { saved, content: editor.content };
+    if (!task?.id) throw new Error("部署任务未创建");
+    onDeployTask?.(task.id);
+    return { saved, content: editor.content, task };
   }
   const task = await api("/tasks", {
     method: "POST",
@@ -250,6 +262,145 @@ let liveReadRequest = 0;
 let archiveConfigRequest = 0;
 let liveAgentRuntimeScope;
 let liveAgentRuntimeLoaded = false;
+
+function liveSourceKey(agentId, engine) {
+  return `${agentId}|${engine}`;
+}
+
+function markStaleReadTask(agentId, engine) {
+  const key = `${agentId}|${engine}`;
+  const entry = state.data.liveSources?.[key];
+  const staleId = entry?.pendingTaskId || entry?.taskId;
+  if (staleId) {
+    state.data.staleReadTasks ||= {};
+    state.data.staleReadTasks[key] = staleId;
+  }
+}
+
+function invalidateLiveSnapshot(agentId, engine) {
+  const key = liveSourceKey(agentId, engine);
+  markStaleReadTask(agentId, engine);
+  liveReadRequest += 1;
+  if (state.data.liveSources?.[key]) delete state.data.liveSources[key];
+}
+
+async function waitForDeployTerminal(taskID, signal = () => true) {
+  for (let attempt = 0; attempt < 600; attempt += 1) {
+    if (!signal()) throw new DOMException("Aborted", "AbortError");
+    const task = await api(`/tasks/${encodeURIComponent(taskID)}`);
+    if (!signal()) throw new DOMException("Aborted", "AbortError");
+    if (["succeeded", "failed", "canceled"].includes(task.status))
+      return task;
+    await new Promise((resolve) => setTimeout(resolve, 600));
+  }
+  throw new Error("等待部署结果超时");
+}
+
+
+function recordPendingDeploy(taskID, agentId, engine) {
+  const key = liveSourceKey(agentId, engine);
+  state.data.pendingDeployTasks ||= {};
+  state.data.pendingDeployTasks[key] = { taskId: taskID };
+}
+
+// CAS clear: only remove if the tracked taskId still matches.
+function clearPendingDeploy(agentId, engine, expectedTaskID) {
+  const key = liveSourceKey(agentId, engine);
+  const entry = state.data.pendingDeployTasks?.[key];
+  if (entry && (!expectedTaskID || entry.taskId === expectedTaskID))
+    delete state.data.pendingDeployTasks[key];
+  return entry?.taskId === expectedTaskID;
+}
+
+function handleDeployTerminal(result, taskID, agentId, engine) {
+  if (result.status === "succeeded") {
+    // Every successful deploy changes the node file — always invalidate,
+    // even if this task is no longer the latest pending record. This is
+    // idempotent (deleting a non-existent key is a no-op).
+    invalidateLiveSnapshot(agentId, engine);
+    maybeRerenderLiveConfig(agentId, engine);
+    // Clean up pending only if this is still the tracked task.
+    clearPendingDeploy(agentId, engine, taskID);
+  } else {
+    // Failed/canceled: notify and clear only if still current pending.
+    if (clearPendingDeploy(agentId, engine, taskID)) {
+      notify(
+        result.error ||
+          `部署${result.status === "canceled" ? "已取消" : "失败"}`,
+        "error",
+      );
+      maybeRerenderLiveConfig(agentId, engine);
+    }
+    // Old failed/canceled tasks do NOT clear newer pending records.
+  }
+}
+
+function maybeRerenderLiveConfig(agentId, engine) {
+  if (
+    state.route === "live-config" &&
+    state.data.liveAgent === agentId &&
+    state.data.liveEngine === engine
+  )
+    void liveConfig();
+}
+
+// Track active reconcilers: Map<key, Set<taskID>> so multiple tasks
+// for the same key can each have their own poller.
+const activeReconcilers = new Map();
+
+// Fire-and-forget monitor for a newly submitted deploy task.
+function monitorDeployTask(taskID, agentId, engine) {
+  void (async () => {
+    try {
+      const result = await waitForDeployTerminal(taskID);
+      handleDeployTerminal(result, taskID, agentId, engine);
+    } catch {
+      // Aborted
+    }
+  })();
+}
+
+// Single-instance recovery poller per key. Survives while the page is open;
+// cleans up on abort so a future visit can restart it.
+function startRecoveryPoller(taskID, agentId, engine) {
+  const key = liveSourceKey(agentId, engine);
+  if (!activeReconcilers.has(key))
+    activeReconcilers.set(key, new Set());
+  const watchers = activeReconcilers.get(key);
+  if (watchers.has(taskID)) return; // already watching this exact task
+  watchers.add(taskID);
+
+  void (async () => {
+    try {
+      const result = await waitForDeployTerminal(taskID);
+      handleDeployTerminal(result, taskID, agentId, engine);
+    } catch {
+    } finally {
+      const s = activeReconcilers.get(key);
+      if (s) {
+        s.delete(taskID);
+        if (!s.size) activeReconcilers.delete(key);
+      }
+    }
+  })();
+}
+
+// Called when entering live-config to resolve any pending deploy that
+// outlived navigation. Uses the current (route-scoped) api context.
+async function reconcilePendingDeploy(agentId, engine) {
+  const key = liveSourceKey(agentId, engine);
+  const pending = state.data.pendingDeployTasks?.[key];
+  if (!pending?.taskId) return;
+  try {
+    const task = await api(`/tasks/${encodeURIComponent(pending.taskId)}`);
+    if (["succeeded", "failed", "canceled"].includes(task.status))
+      handleDeployTerminal(task, pending.taskId, agentId, engine);
+    else startRecoveryPoller(pending.taskId, agentId, engine);
+  } catch {
+    // Network error or abort — retry on next visit; keep pending entry.
+  }
+}
+
 async function agentConfig() {
   const request = ++agentConfigRequest;
   const agents = state.data.agents || (await api("/agents"));
@@ -466,7 +617,7 @@ function bindAgentConfigPage(ctx) {
       const form = new FormData(event.currentTarget);
       const input = readServerPlanInput(event.currentTarget, ctx.protocol);
       try {
-        await api(`${ctx.base}/server-inbounds`, {
+        const result = await api(`${ctx.base}/server-inbounds`, {
           method: "POST",
           body: JSON.stringify({
             operation: form.get("operation"),
@@ -482,6 +633,11 @@ function bindAgentConfigPage(ctx) {
         });
         state.data.inboundTag = input.tag;
         notify("配置已保存，任务已提交");
+        if ((event.submitter?.dataset.planIntent || "validate") === "deploy" && result?.task?.id)
+          {
+            recordPendingDeploy(result.task.id, ctx.agent.id, ctx.engine);
+            monitorDeployTask(result.task.id, ctx.agent.id, ctx.engine);
+          }
         await agentConfig();
       } catch (error) {
         notify(error.message, "error");
@@ -495,7 +651,7 @@ function bindAgentConfigPage(ctx) {
       }
       const form = new FormData(event.currentTarget);
       try {
-        await api(
+        const result = await api(
           `${ctx.base}/fields/${encodeURIComponent(ctx.selectedField.key)}`,
           {
             method: "POST",
@@ -510,6 +666,11 @@ function bindAgentConfigPage(ctx) {
           },
         );
         notify("字段已保存，任务已提交");
+        if ((event.submitter?.dataset.fieldIntent || "validate") === "deploy" && result?.task?.id)
+          {
+            recordPendingDeploy(result.task.id, ctx.agent.id, ctx.engine);
+            monitorDeployTask(result.task.id, ctx.agent.id, ctx.engine);
+          }
         await agentConfig();
       } catch (error) {
         notify(error.message, "error");
@@ -534,7 +695,7 @@ function bindAgentConfigPage(ctx) {
             version: ctx.workspace.config.version,
           }),
         });
-        await api("/tasks", {
+        const task = await api("/tasks", {
           method: "POST",
           body: JSON.stringify({
             agent_id: ctx.agent.id,
@@ -544,6 +705,11 @@ function bindAgentConfigPage(ctx) {
           }),
         });
         notify("源码已保存，任务已提交");
+        if ((event.submitter?.dataset.sourceIntent || "validate") === "deploy" && task?.id)
+          {
+            recordPendingDeploy(task.id, ctx.agent.id, ctx.engine);
+            monitorDeployTask(task.id, ctx.agent.id, ctx.engine);
+          }
         await agentConfig();
       } catch (error) {
         notify(error.message, "error");
@@ -623,6 +789,7 @@ async function liveConfig() {
     state.data.liveEngine = installedEngines[0];
   }
   const engine = state.data.liveEngine;
+  await reconcilePendingDeploy(agent.id, engine);
   const configWorkspace = await api(
     `/agents/${encodeURIComponent(agent.id)}/configs/${encodeURIComponent(engine)}/workspace`,
   );
@@ -660,7 +827,7 @@ async function liveConfig() {
       ? '<button class="button primary" type="submit" data-live-intent="import">手动导入并迁移</button>'
       : '<button class="button" type="submit" data-live-intent="validate">保存并校验</button><button class="button primary" type="submit" data-live-intent="deploy">保存并部署</button>';
   shell(
-    `<article class="live-config-workspace"><header class="editor-toolbar"><h2>${esc(agent.name)} · ${esc(engineName(engine))}</h2><div class="editor-toolbar-state"><span class="engine-badge ${esc(engine)}">${esc(engineName(engine))}</span><b>${unsupportedReason ? "不可自动迁移" : saved?.version ? `v${saved.version}` : existingAvailable ? "待导入" : "未保存"}</b></div></header>${current ? `<form class="live-config-editor" id="live-config-form" data-profile-editor data-new-config="0" data-engine="${esc(engine)}"><section class="code-workspace" data-code-editor data-code-language="${language}" data-code-max-bytes="2097152"><header class="code-editor-toolbar"><div class="code-file-meta"><span class="code-file-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7 3.5h7l4 4V20.5H7zM14 3.5v4h4M10 12h5M10 16h3"/></svg></span><b>${engine === "mihomo" ? "config.yaml" : "config.json"}</b></div><div class="code-editor-meta"><span class="code-language">${language}</span><span data-code-status aria-live="polite">${existingAvailable ? "只读迁移快照" : "节点快照"}</span><span data-code-bytes>—</span><span data-code-position>行 1，列 1</span></div></header><div class="code-editor-frame"><aside class="code-gutter" aria-hidden="true" data-line-numbers>1</aside><textarea class="code-editor-input" name="content" data-code-input aria-label="${esc(engineName(engine))} 节点配置源码" spellcheck="false" required ${editorState.readOnly ? "readonly" : ""}>${esc(current.content)}</textarea></div><footer><span><i class="code-status-dot" data-code-status-dot></i><span data-code-validation aria-live="polite">${existingAvailable ? "请先原样导入；迁移完成后再编辑托管配置。" : ""}</span></span><div><button class="button code-reset" type="button" data-code-reset disabled>恢复原文</button>${liveActions}</div></footer></section><aside class="live-config-inspector"><dl><div><dt>节点</dt><dd>${esc(agent.name)}</dd></div><div><dt>系统</dt><dd>${esc(agent.os)} / ${esc(agent.arch)}</dd></div><div><dt>内核</dt><dd>${esc(conciseVersion(engine, runtime.version))}</dd></div><div><dt>来源</dt><dd>${existingAvailable ? "待迁移的现有服务快照（只读）" : "QAgent 管理配置快照"}</dd></div></dl></aside><input type="hidden" name="name" value="${esc(current.name)}"><input type="hidden" name="description" value="${esc(current.description)}"><input type="hidden" name="version" value="${current.version}"></form>` : agent.status !== "online" ? '<section class="node-config-source"><h2>节点离线</h2><span class="status-label warn">无法读取</span></section>' : unsupportedReason ? `<section class="node-config-source" role="status"><h2>检测到现有服务，但不可自动迁移</h2><span class="status-label bad">${esc(unsupportedReason)}</span><p>QAgent 未执行或接管该服务。所有相关内核任务均已禁用；请按提示调整为受支持的精确布局并重启 Agent 重新发现。</p></section>` : source?.error ? `<section class="node-config-source"><h2>读取配置失败</h2><span class="status-label bad">${esc(source.error)}</span><button class="button" type="button" data-read-current>重新读取</button></section>` : '<section class="node-config-source" role="status" aria-live="polite"><h2>正在读取配置</h2><span class="status-label warn">读取中</span><form data-auto-read-current hidden></form></section>'}</article>`,
+    `<article class="live-config-workspace"><header class="editor-toolbar"><h2>${esc(agent.name)} · ${esc(engineName(engine))}</h2><div class="editor-toolbar-state"><span class="engine-badge ${esc(engine)}">${esc(engineName(engine))}</span><b>${unsupportedReason ? "不可自动迁移" : saved?.version ? `v${saved.version}` : existingAvailable ? "待导入" : "未保存"}</b></div></header>${current ? `<form class="live-config-editor" id="live-config-form" data-profile-editor data-new-config="0" data-engine="${esc(engine)}"><section class="code-workspace" data-code-editor data-code-language="${language}" data-code-max-bytes="2097152"><header class="code-editor-toolbar"><div class="code-file-meta"><span class="code-file-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7 3.5h7l4 4V20.5H7zM14 3.5v4h4M10 12h5M10 16h3"/></svg></span><b>${engine === "mihomo" ? "config.yaml" : "config.json"}</b></div><div class="code-editor-meta"><span class="code-language">${language}</span><span data-code-status aria-live="polite">${existingAvailable ? "只读迁移快照" : "节点快照"}</span><span data-code-bytes>—</span><span data-code-position>行 1，列 1</span></div></header><div class="code-editor-frame"><aside class="code-gutter" aria-hidden="true" data-line-numbers>1</aside><textarea class="code-editor-input" name="content" data-code-input aria-label="${esc(engineName(engine))} 节点配置源码" spellcheck="false" required ${editorState.readOnly ? "readonly" : ""}>${esc(current.content)}</textarea></div><footer><span><i class="code-status-dot" data-code-status-dot></i><span data-code-validation aria-live="polite">${existingAvailable ? "请先原样导入；迁移完成后再编辑托管配置。" : ""}</span></span><div><button class="button code-reset" type="button" data-code-reset disabled>恢复原文</button>${can("operator") && !editorState.readOnly ? '<button class="button code-format" type="button" data-code-format>格式化配置</button>' : ""}${liveActions}</div></footer></section><aside class="live-config-inspector"><dl><div><dt>节点</dt><dd>${esc(agent.name)}</dd></div><div><dt>系统</dt><dd>${esc(agent.os)} / ${esc(agent.arch)}</dd></div><div><dt>内核</dt><dd>${esc(conciseVersion(engine, runtime.version))}</dd></div><div><dt>来源</dt><dd>${existingAvailable ? "待迁移的现有服务快照（只读）" : "QAgent 管理配置快照"}</dd></div></dl></aside><input type="hidden" name="name" value="${esc(current.name)}"><input type="hidden" name="description" value="${esc(current.description)}"><input type="hidden" name="version" value="${current.version}"></form>` : agent.status !== "online" ? '<section class="node-config-source"><h2>节点离线</h2><span class="status-label warn">无法读取</span></section>' : unsupportedReason ? `<section class="node-config-source" role="status"><h2>检测到现有服务，但不可自动迁移</h2><span class="status-label bad">${esc(unsupportedReason)}</span><p>QAgent 未执行或接管该服务。所有相关内核任务均已禁用；请按提示调整为受支持的精确布局并重启 Agent 重新发现。</p></section>` : source?.error ? `<section class="node-config-source"><h2>读取配置失败</h2><span class="status-label bad">${esc(source.error)}</span><button class="button" type="button" data-read-current>重新读取</button></section>` : '<section class="node-config-source" role="status" aria-live="polite"><h2>正在读取配置</h2><span class="status-label warn">读取中</span><form data-auto-read-current hidden></form></section>'}</article>`,
     "手动配置",
     { viewKey: `live-config-${agent.id}-${engine}` },
   );
@@ -718,6 +885,10 @@ async function liveConfig() {
           source,
           existingAvailable,
           savedConfig: saved,
+          onDeployTask: (taskId) => {
+            recordPendingDeploy(taskId, agent.id, engine);
+            monitorDeployTask(taskId, agent.id, engine);
+          },
         });
         if (intent === "import") {
           notify("配置已保存，服务迁移任务已提交");
@@ -753,6 +924,21 @@ async function readCurrentConfig(agent, engine, sourceKey) {
     if (state.data.liveSources?.[sourceKey]?.reading)
       delete state.data.liveSources[sourceKey];
   };
+  state.data.staleReadTasks ||= {};
+  const staleTaskId = state.data.staleReadTasks[sourceKey];
+  if (staleTaskId) {
+    delete state.data.staleReadTasks[sourceKey];
+    try {
+      for (let attempt = 0; attempt < 600; attempt += 1) {
+        if (!isCurrent()) return;
+        const staleTask = await api(`/tasks/${encodeURIComponent(staleTaskId)}`);
+        if (!isCurrent()) return;
+        if (["succeeded", "failed", "canceled"].includes(staleTask.status)) break;
+        await new Promise((resolve) => setTimeout(resolve, 600));
+      }
+    } catch { /* best effort drain */ }
+    if (!isCurrent()) return;
+  }
   state.data.liveSources ||= {};
   state.data.liveSources[sourceKey] = { reading: true };
   try {
@@ -765,6 +951,7 @@ async function readCurrentConfig(agent, engine, sourceKey) {
       }),
     });
     if (!isCurrent()) return discardReading();
+    state.data.liveSources[sourceKey].pendingTaskId = task.id;
     const finished = await waitForTask(task.id, isCurrent);
     if (!finished || !isCurrent()) return discardReading();
     if (finished.status !== "succeeded")
@@ -878,7 +1065,7 @@ async function archiveConfigs() {
     ? `<section class="delivery-bar"><div><span class="delivery-icon"><svg viewBox="0 0 24 24"><path d="M13 2.5 5.5 13H11l-1 8.5L18.5 11H13z"/></svg></span><h3>校验或部署</h3></div><form id="archive-delivery"><label>目标节点<select name="agent_id" required><option value="">${deployAgents.length ? `选择在线且已安装 ${esc(engineName(formConfig.engine))} 的节点` : `没有在线且已安装 ${esc(engineName(formConfig.engine))} 的节点`}</option>${deployAgents.map((agent) => `<option value="${esc(agent.id)}">${esc(agent.name)} · 在线 · 已安装</option>`).join("")}</select></label><label>执行方式<select name="action"><option value="validate">仅校验，不写入</option><option value="deploy">部署并重启</option></select></label><button class="button primary" type="submit" ${!deployAgents.length || !can("operator") ? "disabled" : ""}>提交任务</button></form></section>`
     : "";
   shell(
-    `<article class="config-workspace"><header class="editor-toolbar"><h2>${esc(formConfig.name)}</h2><div class="editor-toolbar-state"><span class="engine-badge ${esc(formConfig.engine)}">${esc(engineName(formConfig.engine))}</span><b>${isNew ? "草稿" : `v${formConfig.version}`}</b></div></header><form class="config-editor-grid" id="archive-form" data-profile-editor data-new-config="${isNew ? 1 : 0}" data-engine="${esc(formConfig.engine)}"><section class="code-workspace" data-code-editor data-code-language="${formConfig.engine === "mihomo" ? "YAML" : "JSON"}" data-code-max-bytes="2097152"><header class="code-editor-toolbar"><div class="code-file-meta"><span class="code-file-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7 3.5h7l4 4V20.5H7zM14 3.5v4h4M10 12h5M10 16h3"/></svg></span><b>${formConfig.engine === "mihomo" ? "config.yaml" : "config.json"}</b></div><div class="code-editor-meta"><span class="code-language">${formConfig.engine === "mihomo" ? "YAML" : "JSON"}</span><span data-code-status aria-live="polite">${isNew ? "草稿" : "已保存"}</span><span data-code-bytes>—</span><span data-code-position>行 1，列 1</span></div></header><div class="code-editor-frame"><aside class="code-gutter" aria-hidden="true" data-line-numbers>1</aside><textarea class="code-editor-input" name="content" data-code-input aria-label="${esc(engineName(formConfig.engine))} 配置档案源码" spellcheck="false" required ${can("operator") ? "" : "readonly"}>${esc(formConfig.content)}</textarea></div><footer><span><i class="code-status-dot" data-code-status-dot></i><span data-code-validation aria-live="polite"></span></span><div><button class="button code-reset" type="button" data-code-reset data-archive-reset disabled>恢复原文</button>${can("operator") ? `<button class="button primary" type="submit">${isNew ? "创建配置档案" : "保存新版本"}</button>` : ""}</div></footer></section><aside class="config-inspector"><header><h3>属性</h3></header><label>名称<input name="name" maxlength="100" required value="${esc(formConfig.name)}" ${can("operator") ? "" : "readonly"}></label><label>内核<select name="engine" ${isNew && can("operator") ? "" : "disabled"}>${engines.map((engine) => `<option value="${engine}" ${engine === formConfig.engine ? "selected" : ""}>${esc(engineName(engine))} · ${engine === "mihomo" ? "YAML" : "JSON"}</option>`).join("")}</select></label><label>说明<textarea class="description-input" name="description" maxlength="300" placeholder="填写用途、节点或变更说明" ${can("operator") ? "" : "readonly"}>${esc(formConfig.description || "")}</textarea></label></aside></form>${delivery}${revisionTimeline}${can("admin") && formConfig.id ? '<footer class="config-danger"><span><b>删除配置档案</b><small>相关任务记录会保留，配置档案删除后无法恢复。</small></span><button type="button" data-remove="' + esc(formConfig.id) + '">删除配置</button></footer>' : ""}</article><section class="template-workspace" id="templates"><header class="template-head"><h3>配置模板</h3><span>用 {{node_name}}、{{node_id}}、{{lan_ip}}、{{random_port}} 占位符，按节点批量生成配置。</span></header>${can("operator") ? '<details class="template-create" ' + (!templates.length ? "open" : "") + '><summary><b>＋ 新建模板</b></summary><form id="template-form"><label>模板名称<input name="name" maxlength="100" required></label><label>内核<select name="engine">' + engines.map((engine) => `<option value="${engine}">${esc(engineName(engine))}</option>`).join("") + '</select></label><label class="template-content-field">模板正文<textarea name="content" spellcheck="false" required></textarea></label><button class="button primary" type="submit">保存模板</button></form></details>' : ""}<div class="template-grid">${templateCards}</div></section>`,
+    `<article class="config-workspace"><header class="editor-toolbar"><h2>${esc(formConfig.name)}</h2><div class="editor-toolbar-state"><span class="engine-badge ${esc(formConfig.engine)}">${esc(engineName(formConfig.engine))}</span><b>${isNew ? "草稿" : `v${formConfig.version}`}</b></div></header><form class="config-editor-grid" id="archive-form" data-profile-editor data-new-config="${isNew ? 1 : 0}" data-engine="${esc(formConfig.engine)}"><section class="code-workspace" data-code-editor data-code-language="${formConfig.engine === "mihomo" ? "YAML" : "JSON"}" data-code-max-bytes="2097152"><header class="code-editor-toolbar"><div class="code-file-meta"><span class="code-file-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7 3.5h7l4 4V20.5H7zM14 3.5v4h4M10 12h5M10 16h3"/></svg></span><b>${formConfig.engine === "mihomo" ? "config.yaml" : "config.json"}</b></div><div class="code-editor-meta"><span class="code-language">${formConfig.engine === "mihomo" ? "YAML" : "JSON"}</span><span data-code-status aria-live="polite">${isNew ? "草稿" : "已保存"}</span><span data-code-bytes>—</span><span data-code-position>行 1，列 1</span></div></header><div class="code-editor-frame"><aside class="code-gutter" aria-hidden="true" data-line-numbers>1</aside><textarea class="code-editor-input" name="content" data-code-input aria-label="${esc(engineName(formConfig.engine))} 配置档案源码" spellcheck="false" required ${can("operator") ? "" : "readonly"}>${esc(formConfig.content)}</textarea></div><footer><span><i class="code-status-dot" data-code-status-dot></i><span data-code-validation aria-live="polite"></span></span><div><button class="button code-reset" type="button" data-code-reset data-archive-reset disabled>恢复原文</button>${can("operator") ? `<button class="button code-format" type="button" data-code-format>格式化配置</button><button class="button primary" type="submit">${isNew ? "创建配置档案" : "保存新版本"}</button>` : ""}</div></footer></section><aside class="config-inspector"><header><h3>属性</h3></header><label>名称<input name="name" maxlength="100" required value="${esc(formConfig.name)}" ${can("operator") ? "" : "readonly"}></label><label>内核<select name="engine" ${isNew && can("operator") ? "" : "disabled"}>${engines.map((engine) => `<option value="${engine}" ${engine === formConfig.engine ? "selected" : ""}>${esc(engineName(engine))} · ${engine === "mihomo" ? "YAML" : "JSON"}</option>`).join("")}</select></label><label>说明<textarea class="description-input" name="description" maxlength="300" placeholder="填写用途、节点或变更说明" ${can("operator") ? "" : "readonly"}>${esc(formConfig.description || "")}</textarea></label></aside></form>${delivery}${revisionTimeline}${can("admin") && formConfig.id ? '<footer class="config-danger"><span><b>删除配置档案</b><small>相关任务记录会保留，配置档案删除后无法恢复。</small></span><button type="button" data-remove="' + esc(formConfig.id) + '">删除配置</button></footer>' : ""}</article><section class="template-workspace" id="templates"><header class="template-head"><h3>配置模板</h3><span>用 {{node_name}}、{{node_id}}、{{lan_ip}}、{{random_port}} 占位符，按节点批量生成配置。</span></header>${can("operator") ? '<details class="template-create" ' + (!templates.length ? "open" : "") + '><summary><b>＋ 新建模板</b></summary><form id="template-form"><label>模板名称<input name="name" maxlength="100" required></label><label>内核<select name="engine">' + engines.map((engine) => `<option value="${engine}">${esc(engineName(engine))}</option>`).join("") + '</select></label><label class="template-content-field">模板正文<textarea name="content" spellcheck="false" required></textarea></label><button class="button primary" type="submit">保存模板</button></form></details>' : ""}<div class="template-grid">${templateCards}</div></section>`,
     "配置档案",
     {
       viewKey: `archive-config-${formConfig.id || "new"}-${state.data.revisionVersion || "current"}`,
@@ -900,6 +1087,24 @@ async function archiveConfigs() {
     archiveConfigs();
   });
   bindCodeEditors();
+  const archiveForm = document.querySelector("#archive-form");
+  const archiveEngine = archiveForm?.querySelector('select[name="engine"]');
+  if (archiveEngine && !archiveEngine.disabled) {
+    bindEvent(archiveEngine, "change", () => {
+      const editor = archiveForm.querySelector("[data-code-editor]");
+      if (!editor) return;
+      const engine = archiveEngine.value;
+      const language = engine === "mihomo" ? "YAML" : "JSON";
+      editor.dataset.codeLanguage = language;
+      const languageLabel = editor.querySelector(".code-language");
+      if (languageLabel) languageLabel.textContent = language;
+      const fileLabel = editor.querySelector(".code-file-meta b");
+      if (fileLabel)
+        fileLabel.textContent = engine === "mihomo" ? "config.yaml" : "config.json";
+      const input = editor.querySelector("[data-code-input]");
+      if (input) input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  }
   bindEvent(document.querySelector("#archive-form"), "submit", async (event) => {
       event.preventDefault();
       const form = new FormData(event.currentTarget);

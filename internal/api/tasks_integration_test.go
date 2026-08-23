@@ -268,6 +268,105 @@ func enrollTaskAPIAgent(t *testing.T, ctx context.Context, dataStore *store.Stor
 	return agent
 }
 
+func enrollTaskAPIAgentWithSource(t *testing.T, ctx context.Context, dataStore *store.Store, enrollmentToken, name string) core.Agent {
+	t.Helper()
+	publicKey := make([]byte, 32)
+	if _, err := rand.Read(publicKey); err != nil {
+		t.Fatalf("generate public key: %v", err)
+	}
+	agent, err := dataStore.EnrollAgent(ctx, core.EnrollRequest{
+		Name: name, OS: "linux", Arch: "amd64",
+		Capabilities: []core.Engine{core.EngineMihomo},
+		Features:     []string{core.AgentFeatureSelfUpgrade, core.AgentFeatureMihomoDevelopmentSource},
+		PublicKey:    base64.RawURLEncoding.EncodeToString(publicKey),
+	}, enrollmentToken)
+	if err != nil {
+		t.Fatalf("enroll %s: %v", name, err)
+	}
+	return agent
+}
+
+func TestTaskAPICoreSourceWithPostgreSQL(t *testing.T) {
+	databaseURL := os.Getenv("QCH_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("QCH_TEST_DATABASE_URL is not configured")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	dataStore, err := store.Open(ctx, databaseURL, true)
+	if err != nil {
+		t.Fatalf("open PostgreSQL: %v", err)
+	}
+	defer dataStore.Close()
+	legacyEnrollment, err := dataStore.CreateEnrollmentToken(ctx, core.EnrollmentTokenRequest{
+		Name: "task API source legacy", TTLMinutes: 5, MaxUses: 1,
+	})
+	if err != nil {
+		t.Fatalf("create legacy enrollment token: %v", err)
+	}
+	legacy := enrollTaskAPIAgent(t, ctx, dataStore, legacyEnrollment.Token, "task-api-legacy")
+	t.Cleanup(func() { cleanupTaskAPIFixture(t, databaseURL, legacyEnrollment.ID, []string{legacy.ID}) })
+	sourceEnrollment, err := dataStore.CreateEnrollmentToken(ctx, core.EnrollmentTokenRequest{
+		Name: "task API source", TTLMinutes: 5, MaxUses: 1,
+	})
+	if err != nil {
+		t.Fatalf("create source enrollment token: %v", err)
+	}
+	source := enrollTaskAPIAgentWithSource(t, ctx, dataStore, sourceEnrollment.Token, "task-api-source")
+	t.Cleanup(func() { cleanupTaskAPIFixture(t, databaseURL, sourceEnrollment.ID, []string{source.ID}) })
+
+	adminToken := strings.Repeat("t", 48)
+	handler := New(dataStore, Config{AdminToken: adminToken}).Handler()
+	post := func(payload core.TaskRequest) *httptest.ResponseRecorder {
+		t.Helper()
+		encoded, err := json.Marshal(payload)
+		if err != nil {
+			t.Fatalf("encode task request: %v", err)
+		}
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/tasks", bytes.NewReader(encoded))
+		request.Header.Set("Authorization", "Bearer "+adminToken)
+		request.Header.Set("Content-Type", "application/json")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		return response
+	}
+
+	if response := post(core.TaskRequest{
+		AgentID: legacy.ID, Action: core.ActionInstall, Engine: core.EngineMihomo,
+		CoreVersion: core.CoreVersionDevelopment, CoreSource: string(core.CoreSourceMirror),
+	}); response.Code != http.StatusConflict {
+		t.Fatalf("legacy mirror status=%d body=%s", response.Code, response.Body.String())
+	}
+	legacyOfficial := post(core.TaskRequest{
+		AgentID: legacy.ID, Action: core.ActionInstall, Engine: core.EngineMihomo,
+		CoreVersion: core.CoreVersionDevelopment, CoreSource: string(core.CoreSourceOfficial),
+	})
+	if legacyOfficial.Code != http.StatusCreated {
+		t.Fatalf("legacy official status=%d body=%s", legacyOfficial.Code, legacyOfficial.Body.String())
+	}
+	mirrorResponse := post(core.TaskRequest{
+		AgentID: source.ID, Action: core.ActionInstall, Engine: core.EngineMihomo,
+		CoreVersion: core.CoreVersionDevelopment, CoreSource: string(core.CoreSourceMirror),
+	})
+	if mirrorResponse.Code != http.StatusCreated {
+		t.Fatalf("mirror install status=%d body=%s", mirrorResponse.Code, mirrorResponse.Body.String())
+	}
+	var mirrorTask core.Task
+	if err := json.Unmarshal(mirrorResponse.Body.Bytes(), &mirrorTask); err != nil || mirrorTask.CoreSource != string(core.CoreSourceMirror) {
+		t.Fatalf("mirror task = %+v, %v", mirrorTask, err)
+	}
+
+	for name, payload := range map[string]core.TaskRequest{
+		"stable rejects mirror": {AgentID: source.ID, Action: core.ActionInstall, Engine: core.EngineMihomo, CoreVersion: core.CoreVersionStable, CoreSource: string(core.CoreSourceMirror)},
+		"unknown source":        {AgentID: source.ID, Action: core.ActionInstall, Engine: core.EngineMihomo, CoreVersion: core.CoreVersionDevelopment, CoreSource: "private"},
+		"status rejects source": {AgentID: legacy.ID, Action: core.ActionStatus, Engine: core.EngineMihomo, CoreSource: string(core.CoreSourceMirror)},
+	} {
+		if response := post(payload); response.Code != http.StatusBadRequest {
+			t.Fatalf("%s status=%d body=%s", name, response.Code, response.Body.String())
+		}
+	}
+}
+
 func createTaskAPIFixture(t *testing.T, ctx context.Context, dataStore *store.Store, request core.TaskRequest) core.Task {
 	t.Helper()
 	task, err := dataStore.CreateTask(ctx, request)

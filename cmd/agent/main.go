@@ -87,6 +87,13 @@ func main() {
 		AllowHTTP:         envBool("QCH_ALLOW_HTTP", false),
 		AllowInsecureLive: envBool("QCH_ALLOW_INSECURE_LIVE", false),
 		TLSCAFile:         strings.TrimSpace(os.Getenv("QCH_TLS_CA_FILE")),
+		// Dual-stack egress probing is opt-in because it queries operator
+		// supplied echo endpoints and adds an outbound dependency. Keep it off
+		// unless a control-plane-owned echo service is configured.
+		PublicIPProbe:              envBool("QCH_PUBLIC_IP_PROBE", false),
+		PublicIPProbeEvery:         envDuration("QCH_PUBLIC_IP_PROBE_INTERVAL", 5*time.Minute),
+		PublicIPProbeIPv4Endpoints: envList("QCH_PUBLIC_IP_PROBE_IPV4_ENDPOINTS"),
+		PublicIPProbeIPv6Endpoints: envList("QCH_PUBLIC_IP_PROBE_IPV6_ENDPOINTS"),
 	}, executor)
 	if err != nil {
 		slog.Error("invalid agent configuration", "error", err)
@@ -236,4 +243,22 @@ func envDuration(key string, fallback time.Duration) time.Duration {
 		os.Exit(1)
 	}
 	return parsed
+}
+
+// envList parses a comma-separated environment variable into a list, dropping
+// blank entries. An empty variable yields nil so no default probe endpoint is
+// ever applied on the agent's behalf.
+func envList(key string) []string {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return nil
+	}
+	parts := strings.Split(value, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part = strings.TrimSpace(part); part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
 }
