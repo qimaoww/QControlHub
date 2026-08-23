@@ -48,6 +48,570 @@ for (const install of [
   }
 }
 
+// Manual-config deploy-cache regression tests (round 5).
+// Tests drive actual production form-submit handlers with controlled
+// async timing to verify:
+// A. Route abort on monitor -> reconcile sees running -> recovery poller
+//    detects succeeded -> cache invalidated -> fresh read fires.
+// B. Field deploy failure does NOT invalidate (real handler).
+// C. Validate-only preserves cache and records no pending.
+// D. Different agent|engine keys do not cross-contaminate.
+// E. ABA: old deploy A succeeds while B is pending -> cache IS
+//    invalidated (node changed!), B's pending NOT cleared by A.
+// F. Live-config editor deploy while on page -> auto-converges,
+//    editorReadCount >= 1 proves fresh read fired.
+// G. Source-config deploy success path uses same terminal mechanism.
+{
+  const previousDocument = globalThis.document;
+  const previousFormData = globalThis.FormData;
+  const previousSetTimeout = globalThis.setTimeout;
+  globalThis.location ??= { hash: "" };
+
+  class FakeForm {
+    constructor(elements = {}) {
+      this.isConnected = true;
+      this.querySelector = () => null;
+      this.querySelectorAll = () => [];
+      this._el = new Map(
+        Object.entries(elements).map(([k, v]) => [
+          k,
+          { name: k, value: v, type: "text", hidden: false,
+            addEventListener() {}, replaceWith() {},
+            parentElement: { classList: { contains: () => false }, append() {} } },
+        ]),
+      );
+      this._l = new Map();
+    }
+    get elements() { return { namedItem: (n) => this._el.get(n) ?? null }; }
+    addEventListener(type, listener) {
+      const list = this._l.get(type) || [];
+      list.push(listener);
+      this._l.set(type, list);
+    }
+    async dispatchSubmit(ds = {}) {
+      await Promise.all(
+        (this._l.get("submit") || []).map((fn) =>
+          fn({ currentTarget: this, preventDefault() {},
+               submitter: { dataset: ds } }),
+        ),
+      );
+    }
+  }
+
+  const deferred = () => {
+    let resolve, reject;
+    return { promise: new Promise((res, rej) => { resolve = res; reject = rej; }),
+             resolve, reject };
+  };
+
+  globalThis.setTimeout = (cb) => { cb(); return 1; };
+  globalThis.FormData = class {
+    constructor(f) { this.f = f; }
+    get(n) { return this.f.elements.namedItem(n)?.value ?? null; }
+  };
+
+  const AGENT_ID = "test-agent";
+  const ENGINE = "xray";
+  const KEY = `${AGENT_ID}|${ENGINE}`;
+  const OLD_CONTENT = '{"inbounds":[{"tag":"old-inbound"}]}';
+  const NEW_CONTENT = '{"inbounds":[]}';
+
+  const makeAgent = (id = AGENT_ID) => ({
+    id, name: `Agent-${id}`, os: "linux", arch: "amd64",
+    status: "online", capabilities: [ENGINE],
+    runtime: { [ENGINE]: { installed: true } },
+  });
+
+  const workspaceWithConfig = (overrides = {}) => ({
+    config: { id: "cfg-1", version: 1, name: "cfg", description: "", ...overrides },
+    inbounds: [{ tag: "old-inbound", listen: "0.0.0.0", port: 443 }],
+    protocols: [{ key: "ss2022", badge: "SS", name: "SS 2022", docs: "",
+      methods: [], transports: ["raw"], default_port: 443 }],
+    catalog: { fields: [{ key: "log", label: "Log", kind: "object", docs: "" }],
+      name: "", format: "JSON", topic_count: 0, topic_groups: [] },
+    present_fields: {},
+  });
+
+  const emptyWorkspace = {
+    config: null, inbounds: [],
+    protocols: [{ key: "ss2022", badge: "SS", name: "SS 2022", docs: "",
+      methods: [], transports: ["raw"], default_port: 443 }],
+    catalog: { fields: [], name: "", format: "JSON", topic_count: 0,
+      topic_groups: [] }, present_fields: {},
+  };
+
+  const buildContext = (testState, handlers) => {
+    const apiLog = [];
+    let markup = "";
+    const noopFn = () => {};
+    const match = (method, path) => {
+      for (const [key, value] of Object.entries(handlers)) {
+        if (key.startsWith(method + " ")) {
+          try {
+            if (new RegExp(`^${key.slice(method.length + 1)}$`).test(path))
+              return value;
+          } catch {}
+        }
+      }
+      return undefined;
+    };
+    const ctx = new Proxy({
+      state: testState, engines: [ENGINE],
+      api: async (path, options = {}) => {
+        const method = options.method || "GET";
+        apiLog.push({ method, path });
+        const h = match(method, path);
+        if (h === undefined) throw new Error(`unmocked ${method} ${path}`);
+        return typeof h === "function" ? h(options, path) : h;
+      },
+      optionalAPI: async () => null,
+      can: () => true, esc: (v) => String(v ?? ""),
+      engineName: (v) => v, conciseVersion: (_e, v) => v,
+      notify: noopFn, confirmAction: async () => true,
+      shell: (m) => { markup = m; },
+      submitTask: async (payload) => {
+        const h = match("POST", "/tasks");
+        if (h === undefined) return null;
+        return typeof h === "function"
+          ? h({ body: JSON.stringify(payload) }, "/tasks") : h;
+      },
+      bindCodeEditors: noopFn,
+    }, { get: (t, k) => t[k] ?? noopFn });
+    return { ctx, apiLog, markup: () => markup };
+  };
+
+  const installForms = (ctx, forms = {}) => {
+    globalThis.document = {
+      querySelector: (sel) => forms[sel] ?? null,
+      querySelectorAll: () => [],
+      createElement: () => ({
+        className: "", type: "", dataset: {}, textContent: "",
+        setAttribute() {}, removeAttribute() {}, append() {}, addEventListener() {},
+        parentElement: { classList: { contains: () => false }, append() {} },
+      }),
+    };
+    return installConfigPages(ctx);
+  };
+
+  const drain = async () => {
+    for (let i = 0; i < 300; i++) await new Promise((r) => setImmediate(r));
+  };
+
+  // --- Test A: Route abort on monitor -> reconcile sees running ->
+  // recovery poller detects succeeded -> cache invalidated -> fresh read.
+  {
+    const state = {
+      route: "agent-config",
+      data: {
+        agents: [makeAgent()], agentId: AGENT_ID, engine: ENGINE,
+        liveAgent: AGENT_ID, liveEngine: ENGINE,
+        liveSources: { [KEY]: { content: OLD_CONTENT, reading: false } },
+      },
+      session: { role: "admin" },
+    };
+    let freshReadCount = 0;
+
+    const planForm = new FakeForm({
+      operation: "delete", tag: "old-inbound", listen: "0.0.0.0",
+      port: "443", username: "", credential: "", secondary_credential: "",
+      method: "", transport: "raw", transport_path: "",
+      tls_enabled: "0", certificate_path: "", private_key_path: "",
+      reality_enabled: "0", reality_private_key: "", reality_public_key: "",
+      reality_short_id: "", reality_server_name: "",
+    });
+
+    const { ctx } = buildContext(state, {
+      "GET /agents": () => [makeAgent()],
+      "GET /agents/test-agent/configs/xray/workspace": workspaceWithConfig(),
+      "POST /agents/test-agent/configs/xray/plans": {
+        protocol: "ss2022", listen: "0.0.0.0", port: 443, transport: "raw" },
+      "GET /configs/cfg-1/revisions.*": [],
+      "GET /agents/test-agent/configs/xray/fields/.*": { present: false, fragment: "" },
+      "POST /agents/test-agent/configs/xray/server-inbounds": () => ({
+        config: { id: "cfg-new", version: 2 },
+        task: { id: "deploy-t1", status: "pending" },
+      }),
+      "GET /tasks/deploy-t1": (() => {
+        let calls = 0;
+        return () => {
+          calls += 1;
+          if (calls <= 1) throw new DOMException("route abort", "AbortError");
+          return { status: "succeeded", id: "deploy-t1" };
+        };
+      })(),
+      "POST /tasks": (options) => {
+        const body = JSON.parse(options?.body || "{}");
+        if (body.action === "read-config") {
+          freshReadCount += 1;
+          return { id: `read-${freshReadCount}` };
+        }
+        return { id: "other" };
+      },
+      "GET /tasks/read-\\d+": (_o, p) => ({ status: "succeeded", id: p.split("/").pop() }),
+      "GET /tasks/read-\\d+/config-snapshot": { content: NEW_CONTENT },
+    });
+
+    const pages = installForms(ctx, { "#server-plan-form": planForm });
+    state.data.inboundTag = "old-inbound";
+    await pages.agentConfig();
+    await planForm.dispatchSubmit({ planIntent: "deploy" });
+    await drain();
+
+    assert.equal(state.data.pendingDeployTasks?.[KEY]?.taskId, "deploy-t1",
+      "[A] pending recorded despite monitor abort");
+
+    state.route = "live-config";
+    await pages.liveConfig();
+    await drain();
+
+    assert.equal(state.data.pendingDeployTasks?.[KEY], undefined,
+      "[A] pending cleared after recovery poller saw succeeded");
+    assert.ok(freshReadCount >= 1,
+      "[A] fresh read fired after convergence");
+    if (state.data.liveSources?.[KEY]?.content)
+      assert.notEqual(state.data.liveSources[KEY].content, OLD_CONTENT,
+        "[A] old content not persisted after convergence");
+  }
+
+  // --- Test B: Field deploy failure does NOT invalidate (real handler).
+  {
+    const state = {
+      route: "agent-config",
+      data: {
+        agents: [makeAgent()], agentId: AGENT_ID, engine: ENGINE,
+        liveSources: { [KEY]: { content: OLD_CONTENT, reading: false } },
+      },
+      session: { role: "admin" },
+    };
+    let failPollCount = 0;
+    let fieldPostCalled = false;
+
+    const fieldForm = new FakeForm({ mutation: "modify", fragment: '{"level":"info"}' });
+
+    const { ctx } = buildContext(state, {
+      "GET /agents": () => [makeAgent()],
+      "GET /agents/test-agent/configs/xray/workspace": workspaceWithConfig({ version: 3, name: "existing-cfg" }),
+      "POST /agents/test-agent/configs/xray/plans": {
+        protocol: "ss2022", listen: "0.0.0.0", port: 443, transport: "raw" },
+      "GET /configs/cfg-1/revisions.*": [],
+      "GET /agents/test-agent/configs/xray/fields/log": { present: true, fragment: "{}" },
+      "POST /agents/test-agent/configs/xray/fields/log": () => {
+        fieldPostCalled = true;
+        return { config: { version: 4 }, task: { id: "field-deploy-fail", status: "pending" } };
+      },
+      "GET /tasks/field-deploy-fail": () => {
+        failPollCount += 1;
+        return failPollCount <= 2
+          ? { status: "running", id: "field-deploy-fail" }
+          : { status: "failed", id: "field-deploy-fail", error: "node down" };
+      },
+    });
+
+    const pages = installForms(ctx, { "#field-form": fieldForm });
+    await pages.agentConfig();
+    await fieldForm.dispatchSubmit({ fieldIntent: "deploy" });
+    await drain();
+
+    assert.ok(fieldPostCalled, "[B] field POST was called");
+    assert.ok(failPollCount > 0, "[B] deploy terminal was polled");
+    assert.equal(state.data.liveSources?.[KEY]?.content, OLD_CONTENT,
+      "[B] cache NOT invalidated after deploy failed");
+    assert.equal(state.data.pendingDeployTasks?.[KEY], undefined,
+      "[B] pending entry cleared after failed terminal");
+  }
+
+  // --- Test C: Validate-only preserves cache and records no pending.
+  {
+    const state = {
+      route: "agent-config",
+      data: {
+        agents: [makeAgent()], agentId: AGENT_ID, engine: ENGINE,
+        liveSources: { [KEY]: { content: OLD_CONTENT, reading: false } },
+      },
+      session: { role: "admin" },
+    };
+
+    const planForm = new FakeForm({
+      operation: "modify", tag: "t", listen: "127.0.0.1", port: "8443",
+      username: "u", credential: "c", secondary_credential: "",
+      method: "", transport: "raw", transport_path: "",
+      tls_enabled: "0", certificate_path: "", private_key_path: "",
+      reality_enabled: "0", reality_private_key: "", reality_public_key: "",
+      reality_short_id: "", reality_server_name: "",
+    });
+
+    const { ctx } = buildContext(state, {
+      "GET /agents": () => [makeAgent()],
+      "GET /agents/test-agent/configs/xray/workspace": workspaceWithConfig(),
+      "POST /agents/test-agent/configs/xray/plans": {
+        protocol: "ss2022", listen: "0.0.0.0", port: 443, transport: "raw" },
+      "GET /configs/cfg-1/revisions.*": [],
+      "GET /agents/test-agent/configs/xray/fields/.*": { present: false, fragment: "" },
+      "POST /agents/test-agent/configs/xray/server-inbounds": {
+        config: { version: 2 }, task: { id: "v-only-task" } },
+    });
+
+    installForms(ctx, { "#server-plan-form": planForm });
+    const p = installConfigPages(ctx);
+    await p.agentConfig();
+    await planForm.dispatchSubmit({ planIntent: "validate" });
+    await drain();
+
+    assert.equal(state.data.liveSources?.[KEY]?.content, OLD_CONTENT,
+      "[C] validate-only preserves cached content");
+    assert.equal(state.data.pendingDeployTasks?.[KEY], undefined,
+      "[C] no pending deploy recorded for validate-only");
+  }
+
+  // --- Test D: Different agent|engine keys do not cross-contaminate.
+  {
+    const OTHER_AGENT = "other-agent";
+    const OTHER_KEY = `${OTHER_AGENT}|${ENGINE}`;
+    const state = {
+      route: "live-config",
+      data: {
+        agents: [makeAgent(), makeAgent(OTHER_AGENT)],
+        agentId: AGENT_ID, engine: ENGINE,
+        liveAgent: AGENT_ID, liveEngine: ENGINE,
+        liveSources: {
+          [KEY]: { content: OLD_CONTENT, reading: false },
+          [OTHER_KEY]: { content: '{"other":true}', reading: false },
+        },
+        pendingDeployTasks: { [KEY]: { taskId: "dep-a" } },
+      },
+      session: { role: "admin" },
+    };
+
+    const { ctx } = buildContext(state, {
+      "GET /agents": () => state.data.agents,
+      "GET /agents/test-agent/configs/xray/workspace": emptyWorkspace,
+      "GET /tasks/dep-a": { status: "succeeded", id: "dep-a" },
+      "POST /tasks": { id: "r-x" },
+      "GET /tasks/r-x": { status: "succeeded", id: "r-x" },
+      "GET /tasks/r-x/config-snapshot": { content: NEW_CONTENT },
+    });
+
+    installForms(ctx, {});
+    const pages = installConfigPages(ctx);
+    await pages.liveConfig();
+    await drain();
+
+    assert.equal(state.data.pendingDeployTasks?.[KEY], undefined,
+      "[D] pending deploy cleared for target agent");
+    assert.notEqual(state.data.liveSources?.[KEY]?.content, OLD_CONTENT,
+      "[D] target agent's old content replaced after reconciliation");
+    assert.equal(state.data.liveSources?.[OTHER_KEY]?.content, '{"other":true}',
+      "[D] other agent's cache NOT affected");
+    assert.equal(state.data.pendingDeployTasks?.[OTHER_KEY], undefined,
+      "[D] other agent has no pending to clear (was never set)");
+  }
+
+  // --- Test E (ABA): Old deploy A succeeds -> cache invalidated.
+  // Then B overwrites pending; B fails later -> only B's pending cleared.
+  {
+    const state = {
+      route: "agent-config",
+      data: {
+        agents: [makeAgent()], agentId: AGENT_ID, engine: ENGINE,
+        liveAgent: AGENT_ID, liveEngine: ENGINE,
+        liveSources: { [KEY]: { content: OLD_CONTENT, reading: false } },
+      },
+      session: { role: "admin" },
+    };
+
+    const gateA = deferred();
+    const gateB = deferred();
+    let editorReadCountE = 0;
+
+
+    const planForm = new FakeForm({
+      operation: "modify", tag: "t", listen: "0.0.0.0", port: "443",
+      username: "", credential: "", secondary_credential: "",
+      method: "", transport: "raw", transport_path: "",
+      tls_enabled: "0", certificate_path: "", private_key_path: "",
+      reality_enabled: "0", reality_private_key: "", reality_public_key: "",
+      reality_short_id: "", reality_server_name: "",
+    });
+
+    const { ctx } = buildContext(state, {
+      "GET /agents": () => [makeAgent()],
+      "GET /agents/test-agent/configs/xray/workspace": workspaceWithConfig(),
+      "POST /agents/test-agent/configs/xray/plans": {
+        protocol: "ss2022", listen: "0.0.0.0", port: 443, transport: "raw" },
+      "GET /configs/cfg-1/revisions.*": [],
+      "GET /agents/test-agent/configs/xray/fields/.*": { present: false, fragment: "" },
+      "POST /agents/test-agent/configs/xray/server-inbounds": () => ({
+        config: { id: "cfg-a", version: 2 },
+        task: { id: "dep-A", status: "pending" },
+      }),
+      "GET /tasks/dep-A": () => gateA.promise,
+      "GET /tasks/dep-B": (() => {
+        let bCalls = 0;
+        return async () => {
+          bCalls += 1;
+          if (bCalls <= 1) return { status: "running", id: "dep-B" };
+          return await gateB.promise;
+        };
+      })(),
+      "POST /tasks": (options) => {
+        const body = JSON.parse(options?.body || "{}");
+        if (body.action === "read-config") {
+          editorReadCountE += 1;
+          return { id: "read-e1" };
+        }
+        return { id: "other-e" };
+      },
+      "GET /tasks/read-e1": { status: "succeeded", id: "read-e1" },
+      "GET /tasks/read-e1/config-snapshot": { content: NEW_CONTENT },
+    });
+
+    const pages = installForms(ctx, { "#server-plan-form": planForm });
+    await pages.agentConfig();
+
+    // Submit deploy A via form handler (starts monitor A).
+    await planForm.dispatchSubmit({ planIntent: "deploy" });
+    await drain();
+
+    assert.equal(state.data.pendingDeployTasks?.[KEY]?.taskId, "dep-A",
+      "[E] dep-A recorded as pending");
+
+    // Simulate deploy B overwriting A in the pending map
+    // (happens when a second mutation fires before A completes).
+    state.data.pendingDeployTasks[KEY] = { taskId: "dep-B" };
+
+    // Release gate A -> old dep-A succeeds.
+    gateA.resolve({ status: "succeeded", id: "dep-A" });
+    await drain();
+
+    // Cache IS invalidated because A succeeded and changed the node file.
+    assert.equal(state.data.liveSources?.[KEY], undefined,
+      "[E] cache invalidated by old deploy A's success");
+
+    // Pending still holds dep-B (A did NOT clear it via CAS).
+    assert.equal(state.data.pendingDeployTasks?.[KEY]?.taskId, "dep-B",
+      "[E] newer dep-B pending NOT cleared by old dep-A completion");
+
+    // Step 4: Start B's recovery poller by entering live-config.
+    // reconcilePendingDeploy sees dep-B running -> starts recovery poller.
+    state.route = "live-config";
+    await pages.liveConfig();
+    await drain();
+
+    // Step 5: Release gate B -> dep-B fails.
+    gateB.resolve({ status: "failed", id: "dep-B", error: "conflict" });
+    await drain();
+
+    // Assert: B's failure cleared its own pending record.
+    assert.equal(state.data.pendingDeployTasks?.[KEY], undefined,
+      "[E] dep-B pending cleared after B's own terminal failure");
+
+    // Strict: post-A fresh read completed and cached NEW_CONTENT.
+    assert.ok(editorReadCountE >= 1,
+      "[E] post-A fresh read-config fired");
+    assert.equal(state.data.liveSources?.[KEY]?.content, NEW_CONTENT,
+      "[E] cache contains post-deploy content (not OLD_CONTENT) after B failed");
+  }
+
+
+  // --- Test F: Live-config editor deploy -> terminal success ->
+  // pending cleanup + cache invalidation + guarded re-render.
+  {
+    const state = {
+      route: "live-config",
+      data: {
+        agents: [makeAgent()], agentId: AGENT_ID, engine: ENGINE,
+        liveAgent: AGENT_ID, liveEngine: ENGINE,
+        liveSources: { [KEY]: { content: OLD_CONTENT, reading: false } },
+      },
+      session: { role: "admin" },
+    };
+    let editorReadCount = 0;
+
+    const liveForm = new FakeForm({
+      content: NEW_CONTENT, name: "e", description: "d", version: "1",
+    });
+
+    const { ctx } = buildContext(state, {
+      "GET /agents": () => [makeAgent()],
+      "GET /agents/test-agent/configs/xray/workspace": emptyWorkspace,
+      "PUT /agents/test-agent/configs/xray": { config: { id: "lc", version: 2 } },
+      "POST /tasks": (options) => {
+        const body = JSON.parse(options?.body || "{}");
+        if (body.action === "deploy") return { id: "lc-deploy-task" };
+        editorReadCount += 1;
+        return { id: `editor-read-${editorReadCount}` };
+      },
+      "GET /tasks/lc-deploy-task": () => ({
+        status: "succeeded", id: "lc-deploy-task",
+      }),
+      "GET /tasks/editor-read-\\d+": (_o, p) => ({
+        status: "succeeded", id: p.split("/").pop(),
+      }),
+      "GET /tasks/editor-read-\\d+/config-snapshot": { content: NEW_CONTENT },
+    });
+
+    const pages = installForms(ctx, { "#live-config-form": liveForm });
+    await pages.liveConfig();
+    await liveForm.dispatchSubmit({ liveIntent: "deploy" });
+    await drain();
+
+    assert.equal(state.data.pendingDeployTasks?.[KEY], undefined,
+      "[F] pending cleared after editor deploy succeeded");
+    assert.ok(editorReadCount >= 1,
+      "[F] fresh read-config fired after editor deploy succeeded");
+    assert.equal(state.data.liveSources?.[KEY]?.content, NEW_CONTENT,
+      "[F] cache contains post-deploy content after convergence");
+  }
+
+  // --- Test G: Source-config deploy success uses same terminal mechanism.
+  {
+    const state = {
+      route: "agent-config",
+      data: {
+        agents: [makeAgent()], agentId: AGENT_ID, engine: ENGINE,
+        liveSources: { [KEY]: { content: OLD_CONTENT, reading: false } },
+      },
+      session: { role: "admin" },
+    };
+    let srcPollCount = 0;
+
+    const srcForm = new FakeForm({ name: "s", description: "d", content: NEW_CONTENT });
+
+    const { ctx } = buildContext(state, {
+      "GET /agents": () => [makeAgent()],
+      "GET /agents/test-agent/configs/xray/workspace": workspaceWithConfig(),
+      "POST /agents/test-agent/configs/xray/plans": {
+        protocol: "ss2022", listen: "0.0.0.0", port: 443, transport: "raw" },
+      "GET /configs/cfg-1/revisions.*": [],
+      "GET /agents/test-agent/configs/xray/fields/log": { present: false, fragment: "" },
+      "PUT /agents/test-agent/configs/xray": { config: { id: "sc", version: 2 } },
+      "POST /tasks": { id: "src-deploy-task" },
+      "GET /tasks/src-deploy-task": () => {
+        srcPollCount += 1;
+        return { status: "succeeded", id: "src-deploy-task" };
+      },
+    });
+
+    const pages = installForms(ctx, { "#source-config-form": srcForm });
+    await pages.agentConfig();
+    await srcForm.dispatchSubmit({ sourceIntent: "deploy" });
+    await drain();
+
+    assert.ok(srcPollCount > 0,
+      "[G] source-config deploy terminal was checked");
+    assert.equal(state.data.pendingDeployTasks?.[KEY], undefined,
+      "[G] source-config pending cleared after deploy succeeded");
+    assert.equal(state.data.liveSources?.[KEY], undefined,
+      "[G] source-config cache invalidated after deploy succeeded");
+  }
+
+  if (previousSetTimeout === undefined) delete globalThis.setTimeout;
+  else globalThis.setTimeout = previousSetTimeout;
+  if (previousFormData === undefined) delete globalThis.FormData;
+  else globalThis.FormData = previousFormData;
+  if (previousDocument === undefined) delete globalThis.document;
+  else globalThis.document = previousDocument;
+}
 assert.equal(developmentSourceVisible("mihomo", "development"), true, "mihomo development shows source choice");
 assert.equal(developmentSourceVisible("mihomo", "stable"), false, "stable hides source choice");
 assert.equal(developmentSourceVisible("xray", "development"), false, "non-mihomo hides source choice");

@@ -168,6 +168,145 @@ let agentConfigRequest = 0;
 let liveConfigRequest = 0;
 let liveReadRequest = 0;
 let archiveConfigRequest = 0;
+
+function liveSourceKey(agentId, engine) {
+  return `${agentId}|${engine}`;
+}
+
+function markStaleReadTask(agentId, engine) {
+  const key = `${agentId}|${engine}`;
+  const entry = state.data.liveSources?.[key];
+  const staleId = entry?.pendingTaskId || entry?.taskId;
+  if (staleId) {
+    state.data.staleReadTasks ||= {};
+    state.data.staleReadTasks[key] = staleId;
+  }
+}
+
+function invalidateLiveSnapshot(agentId, engine) {
+  const key = liveSourceKey(agentId, engine);
+  markStaleReadTask(agentId, engine);
+  liveReadRequest += 1;
+  if (state.data.liveSources?.[key]) delete state.data.liveSources[key];
+}
+
+async function waitForDeployTerminal(taskID, signal = () => true) {
+  for (let attempt = 0; attempt < 600; attempt += 1) {
+    if (!signal()) throw new DOMException("Aborted", "AbortError");
+    const task = await api(`/tasks/${encodeURIComponent(taskID)}`);
+    if (!signal()) throw new DOMException("Aborted", "AbortError");
+    if (["succeeded", "failed", "canceled"].includes(task.status))
+      return task;
+    await new Promise((resolve) => setTimeout(resolve, 600));
+  }
+  throw new Error("等待部署结果超时");
+}
+
+
+function recordPendingDeploy(taskID, agentId, engine) {
+  const key = liveSourceKey(agentId, engine);
+  state.data.pendingDeployTasks ||= {};
+  state.data.pendingDeployTasks[key] = { taskId: taskID };
+}
+
+// CAS clear: only remove if the tracked taskId still matches.
+function clearPendingDeploy(agentId, engine, expectedTaskID) {
+  const key = liveSourceKey(agentId, engine);
+  const entry = state.data.pendingDeployTasks?.[key];
+  if (entry && (!expectedTaskID || entry.taskId === expectedTaskID))
+    delete state.data.pendingDeployTasks[key];
+  return entry?.taskId === expectedTaskID;
+}
+
+function handleDeployTerminal(result, taskID, agentId, engine) {
+  if (result.status === "succeeded") {
+    // Every successful deploy changes the node file — always invalidate,
+    // even if this task is no longer the latest pending record. This is
+    // idempotent (deleting a non-existent key is a no-op).
+    invalidateLiveSnapshot(agentId, engine);
+    maybeRerenderLiveConfig(agentId, engine);
+    // Clean up pending only if this is still the tracked task.
+    clearPendingDeploy(agentId, engine, taskID);
+  } else {
+    // Failed/canceled: notify and clear only if still current pending.
+    if (clearPendingDeploy(agentId, engine, taskID)) {
+      notify(
+        result.error ||
+          `部署${result.status === "canceled" ? "已取消" : "失败"}`,
+        "error",
+      );
+      maybeRerenderLiveConfig(agentId, engine);
+    }
+    // Old failed/canceled tasks do NOT clear newer pending records.
+  }
+}
+
+function maybeRerenderLiveConfig(agentId, engine) {
+  if (
+    state.route === "live-config" &&
+    state.data.liveAgent === agentId &&
+    state.data.liveEngine === engine
+  )
+    void liveConfig();
+}
+
+// Track active reconcilers: Map<key, Set<taskID>> so multiple tasks
+// for the same key can each have their own poller.
+const activeReconcilers = new Map();
+
+// Fire-and-forget monitor for a newly submitted deploy task.
+function monitorDeployTask(taskID, agentId, engine) {
+  void (async () => {
+    try {
+      const result = await waitForDeployTerminal(taskID);
+      handleDeployTerminal(result, taskID, agentId, engine);
+    } catch {
+      // Aborted
+    }
+  })();
+}
+
+// Single-instance recovery poller per key. Survives while the page is open;
+// cleans up on abort so a future visit can restart it.
+function startRecoveryPoller(taskID, agentId, engine) {
+  const key = liveSourceKey(agentId, engine);
+  if (!activeReconcilers.has(key))
+    activeReconcilers.set(key, new Set());
+  const watchers = activeReconcilers.get(key);
+  if (watchers.has(taskID)) return; // already watching this exact task
+  watchers.add(taskID);
+
+  void (async () => {
+    try {
+      const result = await waitForDeployTerminal(taskID);
+      handleDeployTerminal(result, taskID, agentId, engine);
+    } catch {
+    } finally {
+      const s = activeReconcilers.get(key);
+      if (s) {
+        s.delete(taskID);
+        if (!s.size) activeReconcilers.delete(key);
+      }
+    }
+  })();
+}
+
+// Called when entering live-config to resolve any pending deploy that
+// outlived navigation. Uses the current (route-scoped) api context.
+async function reconcilePendingDeploy(agentId, engine) {
+  const key = liveSourceKey(agentId, engine);
+  const pending = state.data.pendingDeployTasks?.[key];
+  if (!pending?.taskId) return;
+  try {
+    const task = await api(`/tasks/${encodeURIComponent(pending.taskId)}`);
+    if (["succeeded", "failed", "canceled"].includes(task.status))
+      handleDeployTerminal(task, pending.taskId, agentId, engine);
+    else startRecoveryPoller(pending.taskId, agentId, engine);
+  } catch {
+    // Network error or abort — retry on next visit; keep pending entry.
+  }
+}
+
 async function agentConfig() {
   const request = ++agentConfigRequest;
   const agents = state.data.agents || (await api("/agents"));
@@ -384,7 +523,7 @@ function bindAgentConfigPage(ctx) {
       const form = new FormData(event.currentTarget);
       const input = readServerPlanInput(event.currentTarget, ctx.protocol);
       try {
-        await api(`${ctx.base}/server-inbounds`, {
+        const result = await api(`${ctx.base}/server-inbounds`, {
           method: "POST",
           body: JSON.stringify({
             operation: form.get("operation"),
@@ -400,6 +539,11 @@ function bindAgentConfigPage(ctx) {
         });
         state.data.inboundTag = input.tag;
         notify("配置已保存，任务已提交");
+        if ((event.submitter?.dataset.planIntent || "validate") === "deploy" && result?.task?.id)
+          {
+            recordPendingDeploy(result.task.id, ctx.agent.id, ctx.engine);
+            monitorDeployTask(result.task.id, ctx.agent.id, ctx.engine);
+          }
         await agentConfig();
       } catch (error) {
         notify(error.message, "error");
@@ -413,7 +557,7 @@ function bindAgentConfigPage(ctx) {
       }
       const form = new FormData(event.currentTarget);
       try {
-        await api(
+        const result = await api(
           `${ctx.base}/fields/${encodeURIComponent(ctx.selectedField.key)}`,
           {
             method: "POST",
@@ -428,6 +572,11 @@ function bindAgentConfigPage(ctx) {
           },
         );
         notify("字段已保存，任务已提交");
+        if ((event.submitter?.dataset.fieldIntent || "validate") === "deploy" && result?.task?.id)
+          {
+            recordPendingDeploy(result.task.id, ctx.agent.id, ctx.engine);
+            monitorDeployTask(result.task.id, ctx.agent.id, ctx.engine);
+          }
         await agentConfig();
       } catch (error) {
         notify(error.message, "error");
@@ -452,7 +601,7 @@ function bindAgentConfigPage(ctx) {
             version: ctx.workspace.config.version,
           }),
         });
-        await api("/tasks", {
+        const task = await api("/tasks", {
           method: "POST",
           body: JSON.stringify({
             agent_id: ctx.agent.id,
@@ -462,6 +611,11 @@ function bindAgentConfigPage(ctx) {
           }),
         });
         notify("源码已保存，任务已提交");
+        if ((event.submitter?.dataset.sourceIntent || "validate") === "deploy" && task?.id)
+          {
+            recordPendingDeploy(task.id, ctx.agent.id, ctx.engine);
+            monitorDeployTask(task.id, ctx.agent.id, ctx.engine);
+          }
         await agentConfig();
       } catch (error) {
         notify(error.message, "error");
@@ -532,6 +686,7 @@ async function liveConfig() {
     state.data.liveEngine = installedEngines[0];
   }
   const engine = state.data.liveEngine;
+  await reconcilePendingDeploy(agent.id, engine);
   const configWorkspace = await api(
     `/agents/${encodeURIComponent(agent.id)}/configs/${encodeURIComponent(engine)}/workspace`,
   );
@@ -607,24 +762,24 @@ async function liveConfig() {
             }),
           },
         );
-        if (intent === "deploy")
-          await submitTask({
+        if (intent === "deploy") {
+          const task = await submitTask({
             agent_id: agent.id,
             engine,
             action: "deploy",
             config_id: saved.id,
           });
-        else
+          if (!task?.id) return; // deploy creation failed; do not fake success
+          recordPendingDeploy(task.id, agent.id, engine);
+          monitorDeployTask(task.id, agent.id, engine);
+        } else {
           await submitTask({
             agent_id: agent.id,
             engine,
             action: "validate",
             config_id: saved.id,
           });
-        state.data.liveSources[sourceKey] = {
-          ...source,
-          content: form.get("content"),
-        };
+        }
         await liveConfig();
       } catch (error) {
         notify(error.message, "error");
@@ -646,6 +801,21 @@ async function readCurrentConfig(agent, engine, sourceKey) {
     if (state.data.liveSources?.[sourceKey]?.reading)
       delete state.data.liveSources[sourceKey];
   };
+  state.data.staleReadTasks ||= {};
+  const staleTaskId = state.data.staleReadTasks[sourceKey];
+  if (staleTaskId) {
+    delete state.data.staleReadTasks[sourceKey];
+    try {
+      for (let attempt = 0; attempt < 600; attempt += 1) {
+        if (!isCurrent()) return;
+        const staleTask = await api(`/tasks/${encodeURIComponent(staleTaskId)}`);
+        if (!isCurrent()) return;
+        if (["succeeded", "failed", "canceled"].includes(staleTask.status)) break;
+        await new Promise((resolve) => setTimeout(resolve, 600));
+      }
+    } catch { /* best effort drain */ }
+    if (!isCurrent()) return;
+  }
   state.data.liveSources ||= {};
   state.data.liveSources[sourceKey] = { reading: true };
   try {
@@ -658,6 +828,7 @@ async function readCurrentConfig(agent, engine, sourceKey) {
       }),
     });
     if (!isCurrent()) return discardReading();
+    state.data.liveSources[sourceKey].pendingTaskId = task.id;
     const finished = await waitForTask(task.id, isCurrent);
     if (!finished || !isCurrent()) return discardReading();
     if (finished.status !== "succeeded")
