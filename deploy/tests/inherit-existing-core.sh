@@ -173,6 +173,16 @@ sing_config_directory="$test_root/core/conf.d"
 mkdir -m 0700 "$sing_config_directory"
 cat > "$sing_binary" <<'EOF'
 #!/bin/sh
+if [ "$1 $2" = "check -D" ]; then
+  [ -d "$3" ] || exit 1
+  [ "$4" = -C ] || exit 1
+  [ -d "$5" ] || exit 1
+  for config_file in "$5"/*.json; do
+    [ -e "$config_file" ] || continue
+    grep -q '"inbounds"' "$config_file" || exit 1
+  done
+  exit 0
+fi
 [ "$1 $2" = "check -c" ]
 grep -q '"inbounds"' "$3"
 if [ "$#" -eq 5 ]; then [ "$4" = -C ] && [ -d "$5" ]; fi
@@ -314,7 +324,13 @@ cat > "$work_dir/qagent" <<'EOF'
 [ "${QCH_TEST_REJECT_INSPECTION:-}" != 1 ] || exit 1
 case "$1 $2" in
   'inspect-existing xray') exec "$QCH_XRAY_BINARY" run -test -config "$QCH_XRAY_CONFIG" ;;
-  'inspect-existing sing-box') exec "$QCH_SING_BOX_BINARY" check -c "$QCH_SING_BOX_CONFIG" -C "$QCH_SING_BOX_CONFIG_DIRECTORY" ;;
+  'inspect-existing sing-box')
+    if [ -n "$QCH_SING_BOX_WORK_DIRECTORY" ]; then
+      exec "$QCH_SING_BOX_BINARY" check -D "$QCH_SING_BOX_WORK_DIRECTORY" -C "$QCH_SING_BOX_CONFIG_DIRECTORY"
+    else
+      exec "$QCH_SING_BOX_BINARY" check -c "$QCH_SING_BOX_CONFIG" -C "$QCH_SING_BOX_CONFIG_DIRECTORY"
+    fi
+    ;;
   *) exit 1 ;;
 esac
 EOF
@@ -366,6 +382,30 @@ fi
   printf '%s\n' 'unsafe discovery changed an original service' >&2
   exit 1
 }
+
+singbox_binary_candidates=$direct_service_link
+singbox_config_candidates=$official_config
+write_exec_start "$direct_service_link" "$direct_service_link" -D "$official_work_directory" -C "$official_config_directory" run
+discover_existing_singbox || {
+  printf '%s\n' 'safe official sing-box -D/-C installation discovery failed' >&2
+  exit 1
+}
+[ "$mapped_singbox_config" = "$official_config" ] &&
+  [ "$mapped_singbox_config_directory" = "$official_config_directory" ] &&
+  [ "$mapped_singbox_work_directory" = "$official_work_directory" ] || {
+  printf '%s\n' 'official sing-box working-directory mapping was not captured exactly' >&2
+  exit 1
+}
+write_exec_start "$direct_service_link" "$direct_service_link" -D relative-work -C "$official_config_directory" run
+if discover_existing_singbox >/dev/null 2>&1; then
+  printf '%s\n' 'official sing-box relative work-directory was accepted during discovery' >&2
+  exit 1
+fi
+write_exec_start "$direct_service_link" "$direct_service_link" -D "$official_work_directory" -C "$official_config_directory"
+if discover_existing_singbox >/dev/null 2>&1; then
+  printf '%s\n' 'official sing-box argv without run was accepted during discovery' >&2
+  exit 1
+fi
 
 singbox_service_candidates=sing-box.service
 etc_layout_directory="$test_root/etc/sing-box/bin"

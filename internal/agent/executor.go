@@ -22,11 +22,12 @@ import (
 )
 
 type EngineSpec struct {
-	Binary          string
-	ConfigPath      string
-	ConfigDirectory string
-	ServiceBinary   string
-	Service         string
+	Binary           string
+	ConfigPath       string
+	ConfigDirectory  string
+	WorkingDirectory string
+	ServiceBinary    string
+	Service          string
 }
 
 type Executor struct {
@@ -114,6 +115,7 @@ func (e *Executor) Validate() error {
 		for label, path := range map[string]string{
 			"binary": spec.Binary, "configuration": spec.ConfigPath,
 			"configuration directory": spec.ConfigDirectory, "service executable": existingServiceBinary(spec),
+			"working directory": spec.WorkingDirectory,
 		} {
 			if strings.ContainsAny(path, " \t\r\n") {
 				return fmt.Errorf("existing %s %s path contains unsupported whitespace", engine, label)
@@ -121,6 +123,9 @@ func (e *Executor) Validate() error {
 		}
 		if spec.ConfigDirectory != "" && (engine != core.EngineSingBox || !filepath.IsAbs(spec.ConfigDirectory)) {
 			return fmt.Errorf("existing %s configuration directory is unsupported or not absolute", engine)
+		}
+		if spec.WorkingDirectory != "" && (engine != core.EngineSingBox || !filepath.IsAbs(spec.WorkingDirectory)) {
+			return fmt.Errorf("existing %s working directory is unsupported or not absolute", engine)
 		}
 		if err := validatePrivilegedExecutable(spec.Binary); err != nil {
 			return fmt.Errorf("unsafe existing %s binary: %w", engine, err)
@@ -467,6 +472,11 @@ func (e *Executor) readExistingConfig(ctx context.Context, engine core.Engine, m
 	if err != nil {
 		return "", fmt.Errorf("read existing %s configuration: %w", engine, err)
 	}
+	if existing.WorkingDirectory != "" {
+		if err := validateNoRelativeSingBoxResources(content); err != nil {
+			return "", fmt.Errorf("existing %s configuration has a resource that cannot be migrated safely: %w", engine, err)
+		}
+	}
 	validationSpec := managed
 	validationSpec.Binary = existing.Binary
 	if err := validatePrivilegedExecutable(existing.Binary); err != nil {
@@ -700,13 +710,62 @@ func validateExistingSourceInvocation(ctx context.Context, engine core.Engine, s
 		return nil
 	}
 	args := []string{"check"}
+	runDirectory := filepath.Dir(spec.ConfigPath)
+	if spec.WorkingDirectory != "" {
+		args = append(args, "-D", spec.WorkingDirectory)
+		runDirectory = spec.WorkingDirectory
+	}
 	if filepath.Clean(spec.ConfigPath) == filepath.Clean(filepath.Join(spec.ConfigDirectory, "config.json")) {
 		args = append(args, "-C", spec.ConfigDirectory)
 	} else {
 		args = append(args, "-c", spec.ConfigPath, "-C", spec.ConfigDirectory)
 	}
-	_, err := runInDirectory(ctx, filepath.Dir(spec.ConfigPath), spec.Binary, args...)
+	_, err := runInDirectory(ctx, runDirectory, spec.Binary, args...)
 	return err
+}
+
+// validateNoRelativeSingBoxResources fails closed when a migrated sing-box
+// source uses a relative resource path. The official service form (-D dir)
+// changes the working directory before sing-box resolves such paths, so a
+// relative path that happens to resolve in the QAgent managed context would
+// silently change semantics instead of matching the original service.
+func validateNoRelativeSingBoxResources(content string) error {
+	var root map[string]any
+	if err := json.Unmarshal([]byte(content), &root); err != nil {
+		return err
+	}
+	var walk func(map[string]any) error
+	walk = func(node map[string]any) error {
+		for key, value := range node {
+			switch key {
+			case "output":
+				// log.output accepts stdout, stderr, or an absolute file path.
+				if path, ok := value.(string); ok && path != "" && path != "stdout" && path != "stderr" && !filepath.IsAbs(path) {
+					return errors.New("relative sing-box resource path in log.output cannot be migrated safely")
+				}
+			case "certificate_path", "private_key_path", "key_path", "cert_path", "certificate":
+				if path, ok := value.(string); ok && path != "" && !filepath.IsAbs(path) {
+					return fmt.Errorf("relative sing-box resource path in %s cannot be migrated safely", key)
+				}
+			}
+			switch child := value.(type) {
+			case map[string]any:
+				if err := walk(child); err != nil {
+					return err
+				}
+			case []any:
+				for _, item := range child {
+					if object, ok := item.(map[string]any); ok {
+						if err := walk(object); err != nil {
+							return err
+						}
+					}
+				}
+			}
+		}
+		return nil
+	}
+	return walk(root)
 }
 
 // ReadCurrentConfig returns an exact, real-core-validated snapshot for explicit

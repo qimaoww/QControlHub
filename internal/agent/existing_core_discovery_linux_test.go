@@ -76,6 +76,32 @@ func main() {
 		}
 		return
 	}
+	if arguments[1] == "-D" {
+		if len(arguments) != 5 || arguments[3] != "-C" || !filepath.IsAbs(arguments[2]) || !filepath.IsAbs(arguments[4]) {
+			os.Exit(2)
+		}
+		if outputPath := os.Getenv("QCH_TEST_ARGS_OUT"); outputPath != "" {
+			_ = os.WriteFile(outputPath, []byte(strings.Join(arguments, "\x00")), 0o600)
+		}
+		info, err := os.Stat(arguments[2])
+		if err != nil || !info.IsDir() {
+			os.Exit(1)
+		}
+		entries, err := os.ReadDir(arguments[4])
+		if err != nil {
+			os.Exit(1)
+		}
+		for _, entry := range entries {
+			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+				continue
+			}
+			contents, err := os.ReadFile(filepath.Join(arguments[4], entry.Name()))
+			if err != nil || !json.Valid(contents) {
+				os.Exit(1)
+			}
+		}
+		return
+	}
 	if arguments[1] != "-c" || !filepath.IsAbs(arguments[2]) {
 		os.Exit(2)
 	}
@@ -122,7 +148,7 @@ func TestExistingCoreDiscoveryFindsAndRefreshesAfterAgentRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("initial discovery after upgraded Agent restart: %v", err)
 	}
-	assertDiscoveredSingBoxSpec(t, specs[core.EngineSingBox], fixture.realBinary, fixture.serviceBinary, fixture.configPath, fixture.configDirectory)
+	assertDiscoveredSingBoxSpec(t, specs[core.EngineSingBox], fixture.realBinary, fixture.serviceBinary, fixture.configPath, fixture.configDirectory, "")
 	if len(issues) != 0 {
 		t.Fatalf("initial discovery issues = %+v", issues)
 	}
@@ -149,7 +175,7 @@ func TestExistingCoreDiscoveryFindsAndRefreshesAfterAgentRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("refresh discovery after restart: %v", err)
 	}
-	assertDiscoveredSingBoxSpec(t, specs[core.EngineSingBox], fixture.realBinary, fixture.serviceBinary, fixture.configPath, refreshedDirectory)
+	assertDiscoveredSingBoxSpec(t, specs[core.EngineSingBox], fixture.realBinary, fixture.serviceBinary, fixture.configPath, refreshedDirectory, "")
 	if len(issues) != 0 {
 		t.Fatalf("refreshed discovery issues = %+v", issues)
 	}
@@ -178,7 +204,7 @@ func TestExistingCoreDiscoverySupportsProtectedEtcSingBoxBinaryLayout(t *testing
 		t.Fatalf("discover protected /etc-style sing-box binary: %v", err)
 	}
 	spec := specs[core.EngineSingBox]
-	assertDiscoveredSingBoxSpec(t, spec, serviceBinary, serviceBinary, fixture.configPath, fixture.configDirectory)
+	assertDiscoveredSingBoxSpec(t, spec, serviceBinary, serviceBinary, fixture.configPath, fixture.configDirectory, "")
 	if len(issues) != 0 {
 		t.Fatalf("protected /etc-style discovery issues = %+v", issues)
 	}
@@ -228,7 +254,7 @@ func TestExistingCoreDiscoverySupportsOfficialSingBoxWorkingDirectoryArgv(t *tes
 	if len(issues) != 0 {
 		t.Fatalf("official sing-box discovery issues = %+v", issues)
 	}
-	assertDiscoveredSingBoxSpec(t, specs[core.EngineSingBox], fixture.realBinary, fixture.serviceBinary, configPath, configDirectory)
+	assertDiscoveredSingBoxSpec(t, specs[core.EngineSingBox], fixture.realBinary, fixture.serviceBinary, configPath, configDirectory, workDirectory)
 
 	managed := fixture.managedSpecs[core.EngineSingBox]
 	content, err := (&Executor{}).readExistingConfig(context.Background(), core.EngineSingBox, managed, specs[core.EngineSingBox])
@@ -237,6 +263,76 @@ func TestExistingCoreDiscoverySupportsOfficialSingBoxWorkingDirectoryArgv(t *tes
 	}
 	if !strings.Contains(content, `"inbounds"`) || !strings.Contains(content, `"outbounds"`) {
 		t.Fatalf("official sing-box merged snapshot omitted a source: %s", content)
+	}
+}
+
+func TestValidateExistingSourceInvocationPassesOriginalWorkingDirectory(t *testing.T) {
+	root := t.TempDir()
+	work := filepath.Join(root, "work")
+	config := filepath.Join(root, "config")
+	for _, directory := range []string{work, config} {
+		if err := os.MkdirAll(directory, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	recorded := filepath.Join(root, "args")
+	script := filepath.Join(root, "record-check")
+	contents := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"" + recorded + "\"\n"
+	if err := os.WriteFile(script, []byte(contents), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	spec := EngineSpec{
+		Binary: script, ConfigPath: filepath.Join(config, "config.json"),
+		ConfigDirectory: config, WorkingDirectory: work,
+	}
+	if err := validateExistingSourceInvocation(context.Background(), core.EngineSingBox, spec); err != nil {
+		t.Fatalf("validateExistingSourceInvocation error: %v", err)
+	}
+	value, err := os.ReadFile(recorded)
+	if err != nil {
+		t.Fatalf("read recorded source check arguments: %v", err)
+	}
+	args := strings.Fields(string(value))
+	if len(args) != 5 || args[0] != "check" || args[1] != "-D" ||
+		args[2] != work || args[3] != "-C" || args[4] != config {
+		t.Fatalf("source check did not receive the original -D context: %q", args)
+	}
+}
+
+func TestExistingCoreDiscoveryRejectsOfficialSingBoxRelativeResource(t *testing.T) {
+	fixture := newExistingCoreDiscoveryFixture(t)
+	workDirectory := filepath.Join(fixture.root, "work")
+	configDirectory := filepath.Join(fixture.root, "etc-sing-box")
+	for _, directory := range []string{workDirectory, configDirectory} {
+		if err := os.MkdirAll(directory, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	configPath := filepath.Join(configDirectory, "config.json")
+	if err := os.WriteFile(configPath, []byte(`{"inbounds":[]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(configDirectory, "10-log.json"), []byte(`{"log":{"output":"relative.log"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	existingDiscoveryCandidates[core.EngineSingBox] = existingDiscoveryCandidateSet{
+		services:    []string{"sing-box.service", "singbox.service"},
+		executables: []string{fixture.serviceBinary},
+		configs:     []string{configPath},
+	}
+	official := fixture.serviceBinary + " -D " + workDirectory + " -C " + configDirectory + " run"
+	fixture.writeExecStart(t, "sing-box.service", systemdExecStart(fixture.serviceBinary, official))
+	fixture.writeExecStart(t, "singbox.service", systemdExecStart(fixture.serviceBinary, official))
+
+	specs, issues, err := RefreshExistingCoreDiscovery(
+		context.Background(), fixture.discoveryStatePath, fixture.markerPrefix,
+		fixture.managedSpecs, nil,
+	)
+	if err != nil {
+		t.Fatalf("reject official sing-box relative resource: %v", err)
+	}
+	if len(specs) != 0 || issues[core.EngineSingBox] == "" {
+		t.Fatalf("relative official sing-box resource was not rejected: specs=%+v issues=%+v", specs, issues)
 	}
 }
 
@@ -693,10 +789,10 @@ func (fixture existingCoreDiscoveryFixture) writeExecStart(t *testing.T, service
 	}
 }
 
-func assertDiscoveredSingBoxSpec(t *testing.T, spec EngineSpec, realBinary, serviceBinary, configPath, configDirectory string) {
+func assertDiscoveredSingBoxSpec(t *testing.T, spec EngineSpec, realBinary, serviceBinary, configPath, configDirectory, workDirectory string) {
 	t.Helper()
 	if spec.Binary != realBinary || spec.ServiceBinary != serviceBinary || spec.ConfigPath != configPath ||
-		spec.ConfigDirectory != configDirectory || spec.Service != "sing-box.service" {
+		spec.ConfigDirectory != configDirectory || spec.WorkingDirectory != workDirectory || spec.Service != "sing-box.service" {
 		t.Fatalf("discovered sing-box spec = %+v", spec)
 	}
 }

@@ -50,24 +50,25 @@ type existingCoreDiscoveryState struct {
 }
 
 type existingDiscoverySpec struct {
-	Binary          string `json:"binary"`
-	ConfigPath      string `json:"config_path"`
-	ConfigDirectory string `json:"config_directory,omitempty"`
-	ServiceBinary   string `json:"service_binary,omitempty"`
-	Service         string `json:"service"`
+	Binary           string `json:"binary"`
+	ConfigPath       string `json:"config_path"`
+	ConfigDirectory  string `json:"config_directory,omitempty"`
+	WorkingDirectory string `json:"working_directory,omitempty"`
+	ServiceBinary    string `json:"service_binary,omitempty"`
+	Service          string `json:"service"`
 }
 
 func discoverySpecFromEngineSpec(spec EngineSpec) existingDiscoverySpec {
 	return existingDiscoverySpec{
 		Binary: spec.Binary, ConfigPath: spec.ConfigPath, ConfigDirectory: spec.ConfigDirectory,
-		ServiceBinary: spec.ServiceBinary, Service: spec.Service,
+		WorkingDirectory: spec.WorkingDirectory, ServiceBinary: spec.ServiceBinary, Service: spec.Service,
 	}
 }
 
 func (spec existingDiscoverySpec) engineSpec() EngineSpec {
 	return EngineSpec{
 		Binary: spec.Binary, ConfigPath: spec.ConfigPath, ConfigDirectory: spec.ConfigDirectory,
-		ServiceBinary: spec.ServiceBinary, Service: spec.Service,
+		WorkingDirectory: spec.WorkingDirectory, ServiceBinary: spec.ServiceBinary, Service: spec.Service,
 	}
 }
 
@@ -207,7 +208,7 @@ func discoverExistingCoreService(ctx context.Context, engine core.Engine, manage
 	if !stringInSlice(executable, candidates.executables) {
 		return EngineSpec{}, false, fmt.Sprintf("检测到活动的 %s 服务，但 executable 不在受支持的标准路径", engine)
 	}
-	configPath, configDirectory, ok := parseDiscoveredExistingArgv(engine, executable, argv, candidates.configs)
+	configPath, configDirectory, workDirectory, ok := parseDiscoveredExistingArgv(engine, executable, argv, candidates.configs)
 	if !ok {
 		return EngineSpec{}, false, fmt.Sprintf("检测到活动的 %s 服务，但 ExecStart 参数不属于受支持的精确配置形式", engine)
 	}
@@ -229,7 +230,7 @@ func discoverExistingCoreService(ctx context.Context, engine core.Engine, manage
 	}
 	spec := EngineSpec{
 		Binary: realBinary, ConfigPath: configPath, ConfigDirectory: configDirectory,
-		ServiceBinary: executable, Service: service,
+		WorkingDirectory: workDirectory, ServiceBinary: executable, Service: service,
 	}
 	return validateDiscoveredExistingSpec(ctx, engine, managed, spec, validationDirectory, manager)
 }
@@ -379,25 +380,25 @@ func engineDisplayName(engine core.Engine) string {
 	}
 }
 
-func parseDiscoveredExistingArgv(engine core.Engine, executable, argv string, configs []string) (string, string, bool) {
+func parseDiscoveredExistingArgv(engine core.Engine, executable, argv string, configs []string) (string, string, string, bool) {
 	if engine == core.EngineXray {
 		for _, configPath := range configs {
 			if argv == executable+" run -config "+configPath || argv == executable+" run -c "+configPath {
-				return configPath, "", true
+				return configPath, "", "", true
 			}
 		}
-		return "", "", false
+		return "", "", "", false
 	}
-	configPath, configDirectory, ok := parseSingBoxExistingArgv(executable, argv)
+	configPath, configDirectory, workDirectory, ok := parseSingBoxExistingArgv(executable, argv)
 	if !ok {
-		return "", "", false
+		return "", "", "", false
 	}
 	for _, candidate := range configs {
 		if configPath == candidate {
-			return configPath, configDirectory, true
+			return configPath, configDirectory, workDirectory, true
 		}
 	}
-	return "", "", false
+	return "", "", "", false
 }
 
 // parseSingBoxExistingArgv recognizes the exact sing-box invocation shapes
@@ -407,10 +408,10 @@ func parseDiscoveredExistingArgv(engine core.Engine, executable, argv string, co
 // (-D <working-directory> -C <config-directory> run). Every path must be
 // absolute and free of whitespace, and the argument list must be exact;
 // unknown flags, repeated -D/-C, or an ambiguous relative path fail closed.
-func parseSingBoxExistingArgv(executable, argv string) (string, string, bool) {
+func parseSingBoxExistingArgv(executable, argv string) (string, string, string, bool) {
 	fields := strings.Fields(argv)
 	if len(fields) < 2 || fields[0] != executable {
-		return "", "", false
+		return "", "", "", false
 	}
 	args := fields[1:]
 	switch args[0] {
@@ -418,30 +419,30 @@ func parseSingBoxExistingArgv(executable, argv string) (string, string, bool) {
 		if len(args) == 3 && (args[1] == "-c" || args[1] == "--config") {
 			configPath := args[2]
 			if !safeExistingAbsolutePath(configPath) {
-				return "", "", false
+				return "", "", "", false
 			}
-			return configPath, "", true
+			return configPath, "", "", true
 		}
 		if len(args) == 5 && (args[1] == "-c" || args[1] == "--config") && args[3] == "-C" {
 			configPath := args[2]
 			configDirectory := args[4]
 			if !safeExistingAbsolutePath(configPath) || !safeExistingAbsolutePath(configDirectory) {
-				return "", "", false
+				return "", "", "", false
 			}
-			return configPath, configDirectory, true
+			return configPath, configDirectory, "", true
 		}
 	case "-D":
 		if len(args) != 5 || args[2] != "-C" || args[4] != "run" {
-			return "", "", false
+			return "", "", "", false
 		}
 		workDirectory := args[1]
 		configDirectory := args[3]
 		if !safeExistingAbsolutePath(workDirectory) || !safeExistingAbsolutePath(configDirectory) {
-			return "", "", false
+			return "", "", "", false
 		}
-		return filepath.Join(configDirectory, "config.json"), configDirectory, true
+		return filepath.Join(configDirectory, "config.json"), configDirectory, workDirectory, true
 	}
-	return "", "", false
+	return "", "", "", false
 }
 
 func safeExistingAbsolutePath(path string) bool {

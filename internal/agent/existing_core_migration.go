@@ -455,8 +455,8 @@ func coreMigrationConfigDigest(content string) string {
 
 func coreMigrationSourceDigest(existing EngineSpec) string {
 	source := existing.Binary + "\x00" + existing.ConfigPath + "\x00" + existing.Service
-	if existing.ConfigDirectory != "" || existingServiceBinary(existing) != existing.Binary {
-		source = existing.Binary + "\x00" + existing.ConfigPath + "\x00" + existing.ConfigDirectory + "\x00" + existingServiceBinary(existing) + "\x00" + existing.Service
+	if existing.ConfigDirectory != "" || existing.WorkingDirectory != "" || existingServiceBinary(existing) != existing.Binary {
+		source = existing.Binary + "\x00" + existing.ConfigPath + "\x00" + existing.ConfigDirectory + "\x00" + existing.WorkingDirectory + "\x00" + existingServiceBinary(existing) + "\x00" + existing.Service
 	}
 	digest := sha256.Sum256([]byte(source))
 	return hex.EncodeToString(digest[:])
@@ -1558,8 +1558,8 @@ func supportedExistingExecStart(engine core.Engine, existing EngineSpec, argv st
 		return existing.ConfigDirectory == "" && (argv == serviceBinary+" run -config "+existing.ConfigPath ||
 			argv == serviceBinary+" run -c "+existing.ConfigPath)
 	case core.EngineSingBox:
-		configPath, configDirectory, ok := parseSingBoxExistingArgv(serviceBinary, argv)
-		return ok && configPath == existing.ConfigPath && configDirectory == existing.ConfigDirectory
+		configPath, configDirectory, workDirectory, ok := parseSingBoxExistingArgv(serviceBinary, argv)
+		return ok && configPath == existing.ConfigPath && configDirectory == existing.ConfigDirectory && workDirectory == existing.WorkingDirectory
 	default:
 		return false
 	}

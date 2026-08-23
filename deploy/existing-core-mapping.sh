@@ -7,6 +7,7 @@ mapped_xray_service=""
 mapped_singbox_binary=""
 mapped_singbox_config=""
 mapped_singbox_config_directory=""
+mapped_singbox_work_directory=""
 mapped_singbox_service_binary=""
 mapped_singbox_service=""
 
@@ -291,6 +292,7 @@ service_uses_paths() {
   argv=$(printf '%s\n' "$parsed" | sed -n '2p')
   [ "$executable" = "$binary" ] || return 1
   matched_config_directory=""
+  matched_work_directory=""
   case "$engine" in
     xray)
       case "$argv" in
@@ -306,6 +308,10 @@ service_uses_paths() {
       if [ -n "$matched_config_directory" ]; then
         protected_config_directory "$matched_config_directory" "$config" || return 1
       fi
+      if [ -n "$matched_work_directory" ]; then
+        case "$matched_work_directory" in /*) ;; *) return 1 ;; esac
+        case "$matched_work_directory" in *[[:space:]]*) return 1 ;; esac
+      fi
       return 0
       ;;
   esac
@@ -316,6 +322,7 @@ singbox_config_path_from_argv() {
   binary=$1
   argv=$2
   matched_config_directory=""
+  matched_work_directory=""
   set -- $argv
   [ "$1" = "$binary" ] || return 1
   shift
@@ -336,6 +343,7 @@ singbox_config_path_from_argv() {
         config_directory=$4
         case "$workdir" in /*) ;; *) return 1 ;; esac
         config_path="$config_directory/config.json"
+        matched_work_directory=$workdir
       else
         return 1
       fi
@@ -493,7 +501,8 @@ inspect_existing_candidate() {
       ;;
     sing-box)
       QCH_SERVICE_MANAGER=${service_manager:-systemd} QCH_SING_BOX_BINARY=$binary QCH_SING_BOX_CONFIG=$config \
-        QCH_SING_BOX_CONFIG_DIRECTORY=${4:-} QCH_SING_BOX_SERVICE_BINARY=${5:-$binary} \
+        QCH_SING_BOX_CONFIG_DIRECTORY=${4:-} QCH_SING_BOX_WORK_DIRECTORY=${6:-} \
+        QCH_SING_BOX_SERVICE_BINARY=${5:-$binary} \
         "$work_dir/qagent" inspect-existing sing-box >/dev/null 2>&1
       ;;
     *) return 1 ;;
@@ -550,6 +559,7 @@ discover_existing_singbox() {
   found_binary=""
   found_config=""
   found_config_directory=""
+  found_work_directory=""
   found_service_binary=""
   found_service=""
   for service in "$active_service_candidate"; do
@@ -563,11 +573,13 @@ discover_existing_singbox() {
         [ "$(wc -c < "$config")" -le 2097152 ] || continue
         service_uses_paths "$service" "$service_binary" "$config" sing-box "$resolved_binary" || continue
         config_directory=$matched_config_directory
-        inspect_existing_candidate sing-box "$resolved_binary" "$config" "$config_directory" "$service_binary" || continue
+        work_directory=$matched_work_directory
+        inspect_existing_candidate sing-box "$resolved_binary" "$config" "$config_directory" "$service_binary" "$work_directory" || continue
         match_count=$((match_count + 1))
         found_binary=$resolved_binary
         found_config=$config
         found_config_directory=$config_directory
+        found_work_directory=$work_directory
         found_service_binary=$service_binary
         found_service=$service
       done
@@ -584,6 +596,7 @@ discover_existing_singbox() {
   mapped_singbox_binary=$found_binary
   mapped_singbox_config=$found_config
   mapped_singbox_config_directory=$found_config_directory
+  mapped_singbox_work_directory=$found_work_directory
   mapped_singbox_service_binary=$found_service_binary
   mapped_singbox_service=$found_service
   mapped_engines=$(append_csv "$mapped_engines" sing-box)
