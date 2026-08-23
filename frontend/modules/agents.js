@@ -1327,25 +1327,17 @@ function updateAgentMetrics(item) {
     const existingUnsupportedReason = String(
       runtime.existing_config_unsupported_reason || "",
     );
-    if (card && card.dataset.coreInstalled !== (installed ? "1" : "0")) {
-      card.dataset.coreInstalled = installed ? "1" : "0";
+    // Structure transitions go through the interaction-aware, coalesced
+    // refresh path and must not commit the comparison marker first: if the
+    // render rejects, the next poll still sees the mismatch and retries
+    // instead of leaving the DOM permanently stale.
+    if (
+      card &&
+      (card.dataset.coreInstalled !== (installed ? "1" : "0") ||
+        card.dataset.existingPending !== (existingPending ? "1" : "0") ||
+        card.dataset.existingUnsupported !== existingUnsupportedReason)
+    ) {
       requestAgentStructureRefresh();
-      return;
-    }
-    if (
-      card &&
-      card.dataset.existingPending !== (existingPending ? "1" : "0")
-    ) {
-      card.dataset.existingPending = existingPending ? "1" : "0";
-      refreshAgentPage();
-      return;
-    }
-    if (
-      card &&
-      card.dataset.existingUnsupported !== existingUnsupportedReason
-    ) {
-      card.dataset.existingUnsupported = existingUnsupportedReason;
-      refreshAgentPage();
       return;
     }
     const version = root.querySelector(
