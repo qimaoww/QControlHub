@@ -540,14 +540,9 @@ func readExistingConfigurationSources(spec EngineSpec) (string, string, error) {
 		digest.Write([]byte{0})
 		digest.Write([]byte(source.content))
 		digest.Write([]byte{0})
-		var decoded any
-		decoder := json.NewDecoder(strings.NewReader(source.content))
-		decoder.UseNumber()
-		if err := decoder.Decode(&decoded); err != nil {
+		decoded, err := decodeExtendedJSON(source.content)
+		if err != nil {
 			return "", "", fmt.Errorf("decode configuration source %q: %w", source.path, err)
-		}
-		if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-			return "", "", fmt.Errorf("decode configuration source %q: trailing data", source.path)
 		}
 		if merged == nil {
 			merged = decoded
@@ -567,6 +562,84 @@ func readExistingConfigurationSources(spec EngineSpec) (string, string, error) {
 		return "", "", fmt.Errorf("merged configuration exceeds %d bytes", core.MaxConfigBytes)
 	}
 	return string(contents), hex.EncodeToString(digest.Sum(nil)), nil
+}
+
+// decodeExtendedJSON decodes exactly one JSON value from content while
+// tolerating sing-box extended JSON comments (//, # and /* */) that appear
+// outside string literals. It rejects trailing non-whitespace so malformed or
+// ambiguous sources still fail closed.
+func decodeExtendedJSON(content string) (any, error) {
+	cleaned := stripExtendedJSONComments(content)
+	decoder := json.NewDecoder(strings.NewReader(cleaned))
+	decoder.UseNumber()
+	var decoded any
+	if err := decoder.Decode(&decoded); err != nil {
+		return nil, err
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return nil, errors.New("trailing data")
+	}
+	return decoded, nil
+}
+
+// stripExtendedJSONComments removes sing-box extended JSON comments such as
+// //, # and /* */ outside string literals. It is string-aware, so comment
+// shaped text inside a JSON string is preserved byte for byte.
+func stripExtendedJSONComments(content string) string {
+	out := make([]byte, 0, len(content))
+	for i := 0; i < len(content); {
+		switch content[i] {
+		case '"':
+			out = append(out, content[i])
+			i++
+			for i < len(content) {
+				out = append(out, content[i])
+				if content[i] == '\\' {
+					i++
+					if i < len(content) {
+						out = append(out, content[i])
+						i++
+					}
+					continue
+				}
+				if content[i] == '"' {
+					i++
+					break
+				}
+				i++
+			}
+		case '/':
+			if i+1 < len(content) && content[i+1] == '/' {
+				for i < len(content) && content[i] != '\n' {
+					i++
+				}
+				out = append(out, ' ')
+			} else if i+1 < len(content) && content[i+1] == '*' {
+				i += 2
+				commentEnd := i
+				for commentEnd+1 < len(content) && !(content[commentEnd] == '*' && content[commentEnd+1] == '/') {
+					commentEnd++
+				}
+				if commentEnd+1 < len(content) {
+					commentEnd += 2
+				}
+				i = commentEnd
+				out = append(out, ' ')
+			} else {
+				out = append(out, content[i])
+				i++
+			}
+		case '#':
+			for i < len(content) && content[i] != '\n' {
+				i++
+			}
+			out = append(out, ' ')
+		default:
+			out = append(out, content[i])
+			i++
+		}
+	}
+	return string(out)
 }
 
 type existingConfigSource struct {
