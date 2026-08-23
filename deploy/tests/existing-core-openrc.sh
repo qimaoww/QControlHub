@@ -41,6 +41,12 @@ init_script="$test_root/openrc-init/qch-test-openrc"
 printf '%s\n' '#!/sbin/openrc-run' 'command=/bin/true' 'supervisor=supervise-daemon' > "$init_script"
 chmod 0755 "$init_script"
 
+# Emit a /proc/<pid>/stat line with the 17 state fields between ppid and
+# starttime so the stripped positional fields place starttime at ${20}.
+openrc_stat_line() {
+  printf '%s (%s) S %s 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 %s\n' "$1" "$2" "$3" "$4"
+}
+
 write_openrc_proc() {
   pid=$1
   comm=$2
@@ -48,7 +54,7 @@ write_openrc_proc() {
   start_time=$4
   executable=$5
   shift 5
-  printf '%s (%s) S %s 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 %s\n' "$pid" "$comm" "$ppid" "$start_time" > "$test_root/proc/$pid/stat"
+  openrc_stat_line "$pid" "$comm" "$ppid" "$start_time" > "$test_root/proc/$pid/stat"
   ln -sfn "$executable" "$test_root/proc/$pid/exe"
   :
 }
@@ -101,6 +107,38 @@ expect_status 0 supervised-core service_uses_paths qch-test-openrc "$core" "$con
 ln -sfn /bin/echo "$test_root/proc/200/exe"
 expect_status 1 child-executable-drift service_uses_paths qch-test-openrc "$core" "$config" xray "$core"
 ln -sfn "$core" "$test_root/proc/200/exe"
+
+# A stable supervisor/child identity is accepted (the fail-closed path).
+expect_status 0 stable-identity service_uses_paths qch-test-openrc "$core" "$config" xray "$core"
+
+# If the child starttime drifts between the two /proc stat reads the helper must
+# fail closed: this is the PID-reuse gate that the supervisor binding relies on.
+# The stat file is a FIFO so the two reads deterministically observe different
+# values.
+rm -f "$test_root/proc/200/stat"
+mkfifo "$test_root/proc/200/stat"
+(
+  openrc_stat_line 200 xray 100 5000 > "$test_root/proc/200/stat"
+  sleep 0.5
+  openrc_stat_line 200 xray 100 6000 > "$test_root/proc/200/stat"
+) &
+expect_status 1 child-starttime-drift service_uses_paths qch-test-openrc "$core" "$config" xray "$core"
+wait
+rm -f "$test_root/proc/200/stat"
+write_openrc_proc 200 xray 100 5000 "$core"
+
+# A child PPID that drifts between the two /proc stat reads must also fail closed.
+rm -f "$test_root/proc/200/stat"
+mkfifo "$test_root/proc/200/stat"
+(
+  openrc_stat_line 200 xray 100 5000 > "$test_root/proc/200/stat"
+  sleep 0.5
+  openrc_stat_line 200 xray 999 5000 > "$test_root/proc/200/stat"
+) &
+expect_status 1 child-ppid-drift service_uses_paths qch-test-openrc "$core" "$config" xray "$core"
+wait
+rm -f "$test_root/proc/200/stat"
+write_openrc_proc 200 xray 100 5000 "$core"
 
 # A missing supervise-daemon child PID means the layout cannot be proven owned;
 # discovery must fail closed rather than guess from a global process scan.
