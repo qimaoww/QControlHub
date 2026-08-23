@@ -199,6 +199,33 @@ write_exec_start "$sing_binary" "$sing_binary" run -c "$sing_config" -C "$sing_c
 expect_rejected sing-box-symlinked-directory-entry service_uses_paths sing-box.service "$sing_binary" "$sing_config" sing-box
 rm "$sing_config_directory/20-linked.json"
 
+official_config_directory="$test_root/core/conf.d-official"
+official_work_directory="$test_root/core/work"
+mkdir -m 0700 "$official_config_directory" "$official_work_directory"
+official_config="$official_config_directory/config.json"
+printf '%s\n' '{"inbounds":[]}' > "$official_config"
+printf '%s\n' '{"outbounds":[]}' > "$official_config_directory/10-outbounds.json"
+chmod 0600 "$official_config" "$official_config_directory/10-outbounds.json"
+write_exec_start "$sing_binary" "$sing_binary" -D "$official_work_directory" -C "$official_config_directory" run
+service_uses_paths sing-box.service "$sing_binary" "$official_config" sing-box || {
+  printf '%s\n' 'safe sing-box official -D/-C ExecStart was rejected' >&2
+  exit 1
+}
+[ "$matched_config_directory" = "$official_config_directory" ] || {
+  printf '%s\n' 'sing-box official config directory was not captured exactly' >&2
+  exit 1
+}
+write_exec_start "$sing_binary" "$sing_binary" -D relative -C "$official_config_directory" run
+expect_rejected sing-box-official-relative-workdir service_uses_paths sing-box.service "$sing_binary" "$official_config" sing-box
+write_exec_start "$sing_binary" "$sing_binary" -D "$official_work_directory" -C "$official_config_directory"
+expect_rejected sing-box-official-missing-run service_uses_paths sing-box.service "$sing_binary" "$official_config" sing-box
+write_exec_start "$sing_binary" "$sing_binary" -D "$official_work_directory" -C "$official_config_directory" run --unknown
+expect_rejected sing-box-official-unknown service_uses_paths sing-box.service "$sing_binary" "$official_config" sing-box
+write_exec_start "$sing_binary" "$sing_binary" -D "$official_work_directory" -C "$official_config_directory" -C "$official_config_directory" run
+expect_rejected sing-box-official-duplicate-config service_uses_paths sing-box.service "$sing_binary" "$official_config" sing-box
+write_exec_start "$sing_binary" "$sing_binary" -D "$official_work_directory" -C "$official_config_directory" run -c "$official_config"
+expect_rejected sing-box-official-extra-config service_uses_paths sing-box.service "$sing_binary" "$official_config" sing-box
+
 forwarder="$test_root/core/sing-box-forwarder"
 service_link="$test_root/core/sing-box-link"
 printf '%s\n' '#!/bin/sh' 'exec /usr/bin/true "$@"' > "$forwarder"

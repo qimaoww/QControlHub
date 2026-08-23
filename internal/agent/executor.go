@@ -503,29 +503,34 @@ func readExistingConfigurationSources(spec EngineSpec) (string, string, error) {
 		digest := sha256.Sum256([]byte(spec.ConfigPath + "\x00" + primary))
 		return primary, hex.EncodeToString(digest[:]), nil
 	}
-	sources := []existingConfigSource{{path: spec.ConfigPath, content: primary}}
-	if spec.ConfigDirectory != "" {
-		if err := validateProtectedDirectoryChain(spec.ConfigDirectory); err != nil {
-			return "", "", fmt.Errorf("configuration directory parent chain is unsafe: %w", err)
+	if err := validateProtectedDirectoryChain(spec.ConfigDirectory); err != nil {
+		return "", "", fmt.Errorf("configuration directory parent chain is unsafe: %w", err)
+	}
+	entries, err := os.ReadDir(spec.ConfigDirectory)
+	if err != nil {
+		return "", "", err
+	}
+	// A sing-box config directory is authoritative on its own: when the primary
+	// file is the directory's own config.json, it is a fragment of that
+	// directory and must not be merged twice (sing-box reads it once).
+	directoryPrimary := filepath.Clean(spec.ConfigPath) == filepath.Clean(filepath.Join(spec.ConfigDirectory, "config.json"))
+	sources := make([]existingConfigSource, 0, len(entries)+1)
+	if !directoryPrimary {
+		sources = append(sources, existingConfigSource{path: spec.ConfigPath, content: primary})
+	}
+	for _, entry := range entries {
+		if !strings.HasSuffix(entry.Name(), ".json") {
+			continue
 		}
-		entries, err := os.ReadDir(spec.ConfigDirectory)
+		if entry.Type()&os.ModeSymlink != 0 || entry.IsDir() {
+			return "", "", fmt.Errorf("configuration directory entry %q is not a regular non-symlink JSON file", entry.Name())
+		}
+		path := filepath.Join(spec.ConfigDirectory, entry.Name())
+		contents, err := readConfigurationFile(path)
 		if err != nil {
-			return "", "", err
+			return "", "", fmt.Errorf("read configuration directory entry %q: %w", entry.Name(), err)
 		}
-		for _, entry := range entries {
-			if !strings.HasSuffix(entry.Name(), ".json") {
-				continue
-			}
-			if entry.Type()&os.ModeSymlink != 0 || entry.IsDir() {
-				return "", "", fmt.Errorf("configuration directory entry %q is not a regular non-symlink JSON file", entry.Name())
-			}
-			path := filepath.Join(spec.ConfigDirectory, entry.Name())
-			contents, err := readConfigurationFile(path)
-			if err != nil {
-				return "", "", fmt.Errorf("read configuration directory entry %q: %w", entry.Name(), err)
-			}
-			sources = append(sources, existingConfigSource{path: path, content: contents})
-		}
+		sources = append(sources, existingConfigSource{path: path, content: contents})
 	}
 	sort.SliceStable(sources, func(i, j int) bool { return sources[i].path < sources[j].path })
 	total := 0
@@ -694,8 +699,13 @@ func validateExistingSourceInvocation(ctx context.Context, engine core.Engine, s
 	if engine != core.EngineSingBox || spec.ConfigDirectory == "" {
 		return nil
 	}
-	_, err := runInDirectory(ctx, filepath.Dir(spec.ConfigPath), spec.Binary,
-		"check", "-c", spec.ConfigPath, "-C", spec.ConfigDirectory)
+	args := []string{"check"}
+	if filepath.Clean(spec.ConfigPath) == filepath.Clean(filepath.Join(spec.ConfigDirectory, "config.json")) {
+		args = append(args, "-C", spec.ConfigDirectory)
+	} else {
+		args = append(args, "-c", spec.ConfigPath, "-C", spec.ConfigDirectory)
+	}
+	_, err := runInDirectory(ctx, filepath.Dir(spec.ConfigPath), spec.Binary, args...)
 	return err
 }
 

@@ -447,7 +447,7 @@ async function nodeSettings(presetMode = false, { overview: preloadedOverview } 
           let primaryActions = "";
           if (presetMode && can("agent-config.read")) {
             primaryActions = existingBlocked
-              ? `<button class="button primary" type="button" data-manual-import data-manual-agent="${esc(agent.id)}" data-manual-engine="${esc(engine)}">查看不可迁移原因</button>`
+              ? `<button class="button service-config" type="button" data-config="${esc(agent.id)}" data-engine="${esc(engine)}">查看配置</button><button class="button primary" type="button" data-manual-import data-manual-agent="${esc(agent.id)}" data-manual-engine="${esc(engine)}">查看不可迁移原因</button>`
               : existingPending
               ? `<button class="button primary" type="button" data-manual-import data-manual-agent="${esc(agent.id)}" data-manual-engine="${esc(engine)}">前往手动导入</button>`
               : drift

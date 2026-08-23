@@ -380,26 +380,72 @@ func engineDisplayName(engine core.Engine) string {
 }
 
 func parseDiscoveredExistingArgv(engine core.Engine, executable, argv string, configs []string) (string, string, bool) {
-	for _, configPath := range configs {
-		switch engine {
-		case core.EngineXray:
+	if engine == core.EngineXray {
+		for _, configPath := range configs {
 			if argv == executable+" run -config "+configPath || argv == executable+" run -c "+configPath {
 				return configPath, "", true
 			}
-		case core.EngineSingBox:
-			if argv == executable+" run -c "+configPath || argv == executable+" run --config "+configPath {
-				return configPath, "", true
-			}
-			prefix := executable + " run -c " + configPath + " -C "
-			if strings.HasPrefix(argv, prefix) {
-				directory := strings.TrimPrefix(argv, prefix)
-				if filepath.IsAbs(directory) && directory != "" && !strings.ContainsAny(directory, " \t\r\n") {
-					return configPath, directory, true
-				}
-			}
+		}
+		return "", "", false
+	}
+	configPath, configDirectory, ok := parseSingBoxExistingArgv(executable, argv)
+	if !ok {
+		return "", "", false
+	}
+	for _, candidate := range configs {
+		if configPath == candidate {
+			return configPath, configDirectory, true
 		}
 	}
 	return "", "", false
+}
+
+// parseSingBoxExistingArgv recognizes the exact sing-box invocation shapes
+// that can be mapped safely. It supports the legacy run-then-flag forms
+// (run -c <file>, run --config <file>, run -c <file> -C <dir> and the
+// --config spelling of the same directory form) and the official package form
+// (-D <working-directory> -C <config-directory> run). Every path must be
+// absolute and free of whitespace, and the argument list must be exact;
+// unknown flags, repeated -D/-C, or an ambiguous relative path fail closed.
+func parseSingBoxExistingArgv(executable, argv string) (string, string, bool) {
+	fields := strings.Fields(argv)
+	if len(fields) < 2 || fields[0] != executable {
+		return "", "", false
+	}
+	args := fields[1:]
+	switch args[0] {
+	case "run":
+		if len(args) == 3 && (args[1] == "-c" || args[1] == "--config") {
+			configPath := args[2]
+			if !safeExistingAbsolutePath(configPath) {
+				return "", "", false
+			}
+			return configPath, "", true
+		}
+		if len(args) == 5 && (args[1] == "-c" || args[1] == "--config") && args[3] == "-C" {
+			configPath := args[2]
+			configDirectory := args[4]
+			if !safeExistingAbsolutePath(configPath) || !safeExistingAbsolutePath(configDirectory) {
+				return "", "", false
+			}
+			return configPath, configDirectory, true
+		}
+	case "-D":
+		if len(args) != 5 || args[2] != "-C" || args[4] != "run" {
+			return "", "", false
+		}
+		workDirectory := args[1]
+		configDirectory := args[3]
+		if !safeExistingAbsolutePath(workDirectory) || !safeExistingAbsolutePath(configDirectory) {
+			return "", "", false
+		}
+		return filepath.Join(configDirectory, "config.json"), configDirectory, true
+	}
+	return "", "", false
+}
+
+func safeExistingAbsolutePath(path string) bool {
+	return filepath.IsAbs(path) && path != "" && !strings.ContainsAny(path, " \t\r\n")
 }
 
 func resolveDiscoveredExistingBinary(serviceBinary string) (string, error) {

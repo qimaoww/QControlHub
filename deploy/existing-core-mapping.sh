@@ -291,20 +291,65 @@ service_uses_paths() {
   argv=$(printf '%s\n' "$parsed" | sed -n '2p')
   [ "$executable" = "$binary" ] || return 1
   matched_config_directory=""
-  case "$engine:$argv" in
-    "xray:$binary run -config $config"|"xray:$binary run -c $config"|\
-    "sing-box:$binary run -c $config"|"sing-box:$binary run --config $config") return 0 ;;
+  case "$engine" in
+    xray)
+      case "$argv" in
+        "$binary run -config $config"|"$binary run -c $config") return 0 ;;
+      esac
+      return 1
+      ;;
+    sing-box)
+      matched_config_path=""
+      matched_config_directory=""
+      singbox_config_path_from_argv "$binary" "$argv" || return 1
+      [ "$matched_config_path" = "$config" ] || return 1
+      if [ -n "$matched_config_directory" ]; then
+        protected_config_directory "$matched_config_directory" "$config" || return 1
+      fi
+      return 0
+      ;;
   esac
-  if [ "$engine" = sing-box ]; then
-    prefix="$binary run -c $config -C "
-    case "$argv" in "$prefix"*) directory=${argv#"$prefix"} ;; *) return 1 ;; esac
-    case "$directory" in /*) ;; *) return 1 ;; esac
-    case "$directory" in *[[:space:]]*) return 1 ;; esac
-    protected_config_directory "$directory" "$config" || return 1
-    matched_config_directory=$directory
-    return 0
-  fi
   return 1
+}
+
+singbox_config_path_from_argv() {
+  binary=$1
+  argv=$2
+  matched_config_directory=""
+  set -- $argv
+  [ "$1" = "$binary" ] || return 1
+  shift
+  config_path=""
+  config_directory=""
+  case "$#" in
+    3)
+      [ "$1" = run ] || return 1
+      case "$2" in -c|--config) ;; *) return 1 ;; esac
+      config_path=$3
+      ;;
+    5)
+      if [ "$1" = run ] && { [ "$2" = "-c" ] || [ "$2" = "--config" ]; } && [ "$4" = "-C" ]; then
+        config_path=$3
+        config_directory=$5
+      elif [ "$1" = "-D" ] && [ "$3" = "-C" ] && [ "$5" = run ]; then
+        workdir=$2
+        config_directory=$4
+        case "$workdir" in /*) ;; *) return 1 ;; esac
+        config_path="$config_directory/config.json"
+      else
+        return 1
+      fi
+      ;;
+    *) return 1 ;;
+  esac
+  case "$config_path" in /*) ;; *) return 1 ;; esac
+  case "$config_path" in *[[:space:]]*) return 1 ;; esac
+  if [ -n "$config_directory" ]; then
+    case "$config_directory" in /*) ;; *) return 1 ;; esac
+    case "$config_directory" in *[[:space:]]*) return 1 ;; esac
+    matched_config_directory=$config_directory
+  fi
+  matched_config_path=$config_path
 }
 
 qagent_core_service_is_safe_to_disable() {

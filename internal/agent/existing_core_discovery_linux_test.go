@@ -42,6 +42,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 func main() {
@@ -49,7 +50,33 @@ func main() {
 	if len(arguments) != 3 && len(arguments) != 5 {
 		os.Exit(2)
 	}
-	if arguments[0] != "check" || arguments[1] != "-c" || !filepath.IsAbs(arguments[2]) {
+	if arguments[0] != "check" {
+		os.Exit(2)
+	}
+	if arguments[1] == "-C" {
+		if len(arguments) != 3 || !filepath.IsAbs(arguments[2]) {
+			os.Exit(2)
+		}
+		info, err := os.Stat(arguments[2])
+		if err != nil || !info.IsDir() {
+			os.Exit(1)
+		}
+		entries, err := os.ReadDir(arguments[2])
+		if err != nil {
+			os.Exit(1)
+		}
+		for _, entry := range entries {
+			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+				continue
+			}
+			contents, err := os.ReadFile(filepath.Join(arguments[2], entry.Name()))
+			if err != nil || !json.Valid(contents) {
+				os.Exit(1)
+			}
+		}
+		return
+	}
+	if arguments[1] != "-c" || !filepath.IsAbs(arguments[2]) {
 		os.Exit(2)
 	}
 	contents, err := os.ReadFile(arguments[2])
@@ -163,6 +190,99 @@ func TestExistingCoreDiscoverySupportsProtectedEtcSingBoxBinaryLayout(t *testing
 	}
 	if !strings.Contains(content, `"inbounds"`) || !strings.Contains(content, `"outbounds"`) {
 		t.Fatalf("merged /etc-style sing-box snapshot omitted a source: %s", content)
+	}
+}
+
+func TestExistingCoreDiscoverySupportsOfficialSingBoxWorkingDirectoryArgv(t *testing.T) {
+	fixture := newExistingCoreDiscoveryFixture(t)
+	workDirectory := filepath.Join(fixture.root, "work")
+	configDirectory := filepath.Join(fixture.root, "etc-sing-box")
+	for _, directory := range []string{workDirectory, configDirectory} {
+		if err := os.MkdirAll(directory, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	configPath := filepath.Join(configDirectory, "config.json")
+	if err := os.WriteFile(configPath, []byte(`{"inbounds":[]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(configDirectory, "10-outbounds.json"), []byte(`{"outbounds":[]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	existingDiscoveryCandidates[core.EngineSingBox] = existingDiscoveryCandidateSet{
+		services:    []string{"sing-box.service", "singbox.service"},
+		executables: []string{fixture.serviceBinary},
+		configs:     []string{configPath},
+	}
+	official := fixture.serviceBinary + " -D " + workDirectory + " -C " + configDirectory + " run"
+	fixture.writeExecStart(t, "sing-box.service", systemdExecStart(fixture.serviceBinary, official))
+	fixture.writeExecStart(t, "singbox.service", systemdExecStart(fixture.serviceBinary, official))
+
+	specs, issues, err := RefreshExistingCoreDiscovery(
+		context.Background(), fixture.discoveryStatePath, fixture.markerPrefix,
+		fixture.managedSpecs, nil,
+	)
+	if err != nil {
+		t.Fatalf("discover official sing-box argv: %v", err)
+	}
+	if len(issues) != 0 {
+		t.Fatalf("official sing-box discovery issues = %+v", issues)
+	}
+	assertDiscoveredSingBoxSpec(t, specs[core.EngineSingBox], fixture.realBinary, fixture.serviceBinary, configPath, configDirectory)
+
+	managed := fixture.managedSpecs[core.EngineSingBox]
+	content, err := (&Executor{}).readExistingConfig(context.Background(), core.EngineSingBox, managed, specs[core.EngineSingBox])
+	if err != nil {
+		t.Fatalf("read official sing-box merged snapshot: %v", err)
+	}
+	if !strings.Contains(content, `"inbounds"`) || !strings.Contains(content, `"outbounds"`) {
+		t.Fatalf("official sing-box merged snapshot omitted a source: %s", content)
+	}
+}
+
+func TestExistingCoreDiscoveryRejectsUnsupportedOfficialSingBoxArgv(t *testing.T) {
+	fixture := newExistingCoreDiscoveryFixture(t)
+	workDirectory := filepath.Join(fixture.root, "work")
+	configDirectory := filepath.Join(fixture.root, "etc-sing-box")
+	for _, directory := range []string{workDirectory, configDirectory} {
+		if err := os.MkdirAll(directory, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	configPath := filepath.Join(configDirectory, "config.json")
+	if err := os.WriteFile(configPath, []byte(`{"inbounds":[]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	existingDiscoveryCandidates[core.EngineSingBox] = existingDiscoveryCandidateSet{
+		services:    []string{"sing-box.service", "singbox.service"},
+		executables: []string{fixture.serviceBinary},
+		configs:     []string{configPath},
+	}
+	variants := map[string]string{
+		"relative working":  fixture.serviceBinary + " -D work -C " + configDirectory + " run",
+		"relative config":   fixture.serviceBinary + " -D " + workDirectory + " -C etc-sing-box run",
+		"missing run":       fixture.serviceBinary + " -D " + workDirectory + " -C " + configDirectory,
+		"unknown flag":      fixture.serviceBinary + " -D " + workDirectory + " -C " + configDirectory + " run --unknown",
+		"duplicate config":  fixture.serviceBinary + " -D " + workDirectory + " -C " + configDirectory + " -C " + configDirectory + " run",
+		"repeated working":  fixture.serviceBinary + " -D " + workDirectory + " -D " + workDirectory + " -C " + configDirectory + " run",
+		"wrong config file": fixture.serviceBinary + " -D " + workDirectory + " -C " + configDirectory + " run -c " + configPath,
+		"wrapper command":   fixture.serviceBinary + " -D " + workDirectory + " -C " + configDirectory + " run; /bin/true",
+	}
+	for name, argv := range variants {
+		t.Run(name, func(t *testing.T) {
+			fixture.writeExecStart(t, "sing-box.service", systemdExecStart(fixture.serviceBinary, argv))
+			fixture.writeExecStart(t, "singbox.service", systemdExecStart(fixture.serviceBinary, argv))
+			specs, issues, err := RefreshExistingCoreDiscovery(
+				context.Background(), fixture.discoveryStatePath, fixture.markerPrefix,
+				fixture.managedSpecs, nil,
+			)
+			if err != nil {
+				t.Fatalf("reject unsupported official sing-box argv: %v", err)
+			}
+			if len(specs) != 0 || issues[core.EngineSingBox] == "" {
+				t.Fatalf("unsupported official sing-box argv was accepted: specs=%+v issues=%+v", specs, issues)
+			}
+		})
 	}
 }
 

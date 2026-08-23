@@ -1817,10 +1817,21 @@ const presetAgents = [
     status: "online",
     capabilities: presetEngines,
     runtime: Object.fromEntries(
-      presetEngines.map((engine) => [
-        engine,
-        { installed: true, service_status: "active", version: "1.0.0" },
-      ]),
+      presetEngines.map((engine) =>
+        engine === "sing-box"
+          ? [
+              engine,
+              {
+                installed: false,
+                existing_config_available: false,
+                existing_config_unsupported_reason: "unsupported wrapper",
+              },
+            ]
+          : [
+              engine,
+              { installed: true, service_status: "active", version: "1.0.0" },
+            ],
+      ),
     ),
   },
   {
@@ -1979,6 +1990,16 @@ try {
   presetState.data.selectedAgent = "beta";
   await renderPresetAgents({ overview: { agents: 2, agents_online: 2 } });
   assertFocusedPreset("beta", "alpha");
+  assert.equal(
+    presetMarkup.includes('data-config="beta" data-engine="sing-box"'),
+    true,
+    "unsupported preset engine keeps a config entry",
+  );
+  assert.equal(
+    presetMarkup.includes("查看不可迁移原因"),
+    true,
+    "unsupported preset engine still explains why migration is blocked",
+  );
 
   presetState.anchor = "preset-node-gamma";
   presetState.data.selectedAgent = "gamma";

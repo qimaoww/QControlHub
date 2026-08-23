@@ -1558,11 +1558,8 @@ func supportedExistingExecStart(engine core.Engine, existing EngineSpec, argv st
 		return existing.ConfigDirectory == "" && (argv == serviceBinary+" run -config "+existing.ConfigPath ||
 			argv == serviceBinary+" run -c "+existing.ConfigPath)
 	case core.EngineSingBox:
-		if existing.ConfigDirectory != "" {
-			return argv == serviceBinary+" run -c "+existing.ConfigPath+" -C "+existing.ConfigDirectory
-		}
-		return argv == serviceBinary+" run -c "+existing.ConfigPath ||
-			argv == serviceBinary+" run --config "+existing.ConfigPath
+		configPath, configDirectory, ok := parseSingBoxExistingArgv(serviceBinary, argv)
+		return ok && configPath == existing.ConfigPath && configDirectory == existing.ConfigDirectory
 	default:
 		return false
 	}

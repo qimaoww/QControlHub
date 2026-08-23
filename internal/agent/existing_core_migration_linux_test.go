@@ -550,6 +550,7 @@ func TestExistingCoreMigrationAcceptsExactSupportedExecStartForms(t *testing.T) 
 		{name: "sing-box config", engine: core.EngineSingBox, binary: "/usr/bin/sing-box", config: "/etc/sing-box/config.json", argv: "/usr/bin/sing-box run --config /etc/sing-box/config.json"},
 		{name: "sing-box short config", engine: core.EngineSingBox, binary: "/usr/bin/sing-box", config: "/etc/sing-box/config.json", argv: "/usr/bin/sing-box run -c /etc/sing-box/config.json"},
 		{name: "sing-box config directory", engine: core.EngineSingBox, binary: "/usr/lib/sing-box/sing-box", serviceBinary: "/usr/local/bin/sing-box", config: "/etc/sing-box/config.json", configDirectory: "/etc/sing-box/conf.d", argv: "/usr/local/bin/sing-box run -c /etc/sing-box/config.json -C /etc/sing-box/conf.d"},
+		{name: "sing-box official directory", engine: core.EngineSingBox, binary: "/usr/bin/sing-box", config: "/etc/sing-box/config.json", configDirectory: "/etc/sing-box", argv: "/usr/bin/sing-box -D /var/lib/sing-box -C /etc/sing-box run"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -596,6 +597,30 @@ func TestExistingCoreMigrationRejectsUnsupportedSingBoxConfigDirectoryArgv(t *te
 		t.Run(name, func(t *testing.T) {
 			if supportedExistingExecStart(core.EngineSingBox, existing, argv) {
 				t.Fatalf("unsupported sing-box argv was accepted: %s", argv)
+			}
+		})
+	}
+}
+
+func TestExistingCoreMigrationRejectsUnsupportedSingBoxOfficialArgv(t *testing.T) {
+	existing := EngineSpec{
+		Binary: "/usr/bin/sing-box", ConfigPath: "/etc/sing-box/config.json",
+		ConfigDirectory: "/etc/sing-box",
+	}
+	for name, argv := range map[string]string{
+		"missing run":         "/usr/bin/sing-box -D /var/lib/sing-box -C /etc/sing-box",
+		"missing directory":   "/usr/bin/sing-box -D /var/lib/sing-box run",
+		"missing config flag": "/usr/bin/sing-box -D /var/lib/sing-box -C run",
+		"duplicate directory": "/usr/bin/sing-box -D /var/lib/sing-box -C /etc/sing-box -C /etc/sing-box run",
+		"repeated working":    "/usr/bin/sing-box -D /var/lib/sing-box -D /var/lib/sing-box -C /etc/sing-box run",
+		"relative working":    "/usr/bin/sing-box -D var/lib/sing-box -C /etc/sing-box run",
+		"relative config":     "/usr/bin/sing-box -D /var/lib/sing-box -C etc/sing-box run",
+		"unknown flag":        "/usr/bin/sing-box -D /var/lib/sing-box -C /etc/sing-box run --verbose",
+		"extra argument":      "/usr/bin/sing-box -D /var/lib/sing-box -C /etc/sing-box run stop",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if supportedExistingExecStart(core.EngineSingBox, existing, argv) {
+				t.Fatalf("unsupported sing-box official argv was accepted: %s", argv)
 			}
 		})
 	}
