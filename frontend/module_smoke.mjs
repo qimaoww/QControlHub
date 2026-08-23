@@ -3443,6 +3443,70 @@ assert.equal(
   "手动连接地址：::ffff:001.001.001.001",
 );
 
+// IPv4-mapped IPv6 has the same family and IANA policy as its unmapped IPv4.
+// Hexadecimal and dotted spellings must therefore converge before display or
+// copy eligibility is decided.
+const mappedHexRows = publicAddressRows(
+  {},
+  { client_address: "::ffff:c000:201", public_ip: "::ffff:0a00:1" },
+);
+assert.equal(mappedHexRows[0].value, "");
+assert.equal(mappedHexRows[0].ok, false);
+assert.equal(mappedHexRows[1].value, "");
+assert.equal(mappedHexRows[1].ok, false);
+
+const mappedGlobalRows = publicAddressRows(
+  {},
+  { client_address: "::ffff:0101:0101" },
+);
+assert.equal(mappedGlobalRows[0].value, "1.1.1.1");
+assert.equal(mappedGlobalRows[0].source, "手动设置");
+assert.equal(mappedGlobalRows[1].value, "");
+
+const embeddedIPv4Rows = publicAddressRows(
+  {},
+  { client_address: "2001:4860::192.0.2.1" },
+);
+assert.equal(embeddedIPv4Rows[0].value, "");
+assert.equal(embeddedIPv4Rows[1].value, "2001:4860::192.0.2.1");
+assert.equal(embeddedIPv4Rows[1].source, "手动设置");
+const embeddedLeadingZeroRows = publicAddressRows(
+  {},
+  { client_address: "2001:4860::192.0.2.001" },
+);
+assert.equal(embeddedLeadingZeroRows[0].value, "");
+assert.equal(embeddedLeadingZeroRows[1].value, "");
+
+const normalizedProbeRows = publicAddressRows(
+  {
+    public_ipv4: "::ffff:0101:0101",
+    public_ipv6: "2001:4860::192.0.2.1",
+  },
+  {},
+  ["public-ip-probe-v1"],
+);
+assert.equal(normalizedProbeRows[0].value, "1.1.1.1");
+assert.equal(normalizedProbeRows[0].source, "公网探测");
+assert.equal(normalizedProbeRows[1].value, "2001:4860::192.0.2.1");
+assert.equal(normalizedProbeRows[1].source, "公网探测");
+
+const normalizedObservedRows = publicAddressRows({
+  observed_public_ip: "::ffff:0101:0101",
+});
+assert.equal(normalizedObservedRows[0].value, "1.1.1.1");
+assert.equal(normalizedObservedRows[0].source, "已验证连接来源");
+assert.equal(normalizedObservedRows[1].value, "");
+
+const mappedInterfaceRows = publicAddressRows({
+  network_interfaces: [
+    { name: "eth0", addresses: ["::ffff:0101:0101", "2001:4860::192.0.2.1"] },
+  ],
+});
+assert.equal(mappedInterfaceRows[0].value, "1.1.1.1");
+assert.equal(mappedInterfaceRows[0].source, "默认路由接口 eth0");
+assert.equal(mappedInterfaceRows[1].value, "2001:4860::192.0.2.1");
+assert.equal(mappedInterfaceRows[1].source, "默认路由接口 eth0");
+
 const canonicalManualRows = publicAddressRows(
   {},
   { client_address: "1.1.1.1" },
@@ -3931,6 +3995,24 @@ assert.equal(formatHostPort("", "443"), "");
     assert.equal(publicSmallV4.textContent, "公网探测");
     assert.equal(connectionNote.textContent, "");
     assert.equal(connectionNote.hidden, true);
+
+    updateAgentMetrics({
+      id: "alpha",
+      status: "online",
+      metrics: { public_ipv4: "::ffff:0101:0101", public_ipv6: "" },
+      labels: {},
+      features: ["public-ip-probe-v1"],
+      runtime: {},
+      version: "1.2.3",
+      last_seen: "now",
+    });
+    assert.equal(cardCodeV4.textContent, "1.1.1.1");
+    assert.equal(cardLineV4.dataset.ipSource, "公网探测");
+    assert.equal(copyV4.dataset.copyIp, "1.1.1.1");
+    assert.equal(publicCodeV4.textContent, "1.1.1.1");
+    assert.equal(publicSmallV4.textContent, "公网探测");
+    assert.equal(cardContainer.querySelector('.card-ip-row[data-ip-family="v4"]'), cardLineV4);
+    assert.equal(publicContainer.querySelector('.public-ip-row[data-ip-family="v4"]'), publicLineV4);
   } finally {
     if (previousSetTimeout === undefined) delete globalThis.setTimeout;
     else globalThis.setTimeout = previousSetTimeout;

@@ -19,28 +19,23 @@ function mihomoDevelopmentSourceFieldset(canMirror) {
   return `<fieldset class="release-channel-fieldset development-source-field" data-development-source hidden><legend>开发版来源</legend><div class="release-channel-options"><label><input type="radio" name="core_source" value="official" checked><span>MetaCubeX 官方（默认，推荐）</span></label><label><input type="radio" name="core_source" value="mirror" ${canMirror ? "" : "disabled"}><span>vernesong/mihomo Alpha 镜像（第三方）${canMirror ? "" : "（需升级 Agent）"}</span></label></div>${canMirror ? "" : `<p class="source-upgrade-note">当前 Agent 尚未声明 mihomo-development-source-v1，镜像来源不可用；请先在面板升级 Agent。</p>`}</fieldset>`;
 }
 
-function normalizeInterfaceAddress(raw) {
-  let value = String(raw || "").trim();
-  if (!value) return "";
-  if (value.startsWith("[") && value.endsWith("]")) value = value.slice(1, -1);
-  // A zone identifier means the address is scoped, not a global unicast value
-  // netpolicy would accept; fail closed rather than silently stripping it.
-  if (value.indexOf("%") >= 0) return "";
-  const mapped = value.match(/^::ffff:(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-  if (mapped) return `IPv4:${mapped.slice(1).join(".")}`;
-  return value.includes(":") ? `IPv6:${value.toLowerCase()}` : `IPv4:${value}`;
-}
-
-function isGloballyRoutableIPv4(value) {
+function parseCanonicalIPv4(value) {
   const match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(value);
-  if (!match) return false;
+  if (!match) return null;
   // Match netip.ParseAddr: dotted-quad octets are canonical decimal, so a
   // leading zero is invalid even when its numeric value fits in one byte.
   const octets = match.slice(1);
   if (octets.some((octet) => octet.length > 1 && octet.startsWith("0")))
-    return false;
-  const [a, b, c, d] = octets.map(Number);
-  if ([a, b, c, d].some((octet) => octet > 255)) return false;
+    return null;
+  const parsed = octets.map(Number);
+  if (parsed.some((octet) => octet > 255)) return null;
+  return parsed;
+}
+
+function isGloballyRoutableIPv4(value) {
+  const parsed = parseCanonicalIPv4(value);
+  if (!parsed) return false;
+  const [a, b, c] = parsed;
   if (a === 0 || a === 10 || a === 127 || a === 255) return false;
   if (a === 100 && b >= 64 && b <= 127) return false;
   if (a === 169 && b === 254) return false;
@@ -63,26 +58,60 @@ function parseIPv6Bytes(value) {
   if (cleaned.includes("%")) return null;
   const parts = cleaned.split("::");
   if (parts.length > 2) return null;
-  const parseGroups = (groups) => {
+  const parseGroups = (groups, allowDottedTail) => {
     const out = [];
-    for (const group of groups) {
+    for (const [index, group] of groups.entries()) {
+      if (group.includes(".")) {
+        if (!allowDottedTail || index !== groups.length - 1) return null;
+        const octets = parseCanonicalIPv4(group);
+        if (!octets) return null;
+        out.push(...octets);
+        continue;
+      }
       if (!group || group.length > 4 || !/^[0-9a-f]+$/.test(group)) return null;
       const hextet = parseInt(group, 16);
       out.push(hextet >> 8, hextet & 0xff);
     }
     return out;
   };
-  const left = parts[0] ? parseGroups(parts[0].split(":")) : [];
-  if (!left) return null;
-  const right = parts.length === 2 && parts[1] ? parseGroups(parts[1].split(":")) : [];
-  if (right === null) return null;
   if (parts.length === 1) {
-    if (left.length !== 16) return null;
-    return left;
+    const full = parseGroups(parts[0].split(":"), true);
+    return full && full.length === 16 ? full : null;
   }
+  const left = parts[0] ? parseGroups(parts[0].split(":"), false) : [];
+  if (!left) return null;
+  const right = parts.length === 2 && parts[1]
+    ? parseGroups(parts[1].split(":"), true)
+    : [];
+  if (right === null) return null;
   const missing = 16 - left.length - right.length;
   if (missing < 2 || missing % 2 !== 0) return null;
   return [...left, ...new Array(missing).fill(0), ...right];
+}
+
+function isIPv4Mapped(bytes) {
+  return (
+    bytes.length === 16 &&
+    bytes.slice(0, 10).every((byte) => byte === 0) &&
+    bytes[10] === 0xff &&
+    bytes[11] === 0xff
+  );
+}
+
+function normalizeInterfaceAddress(raw) {
+  let value = String(raw || "").trim();
+  if (!value) return "";
+  if (value.startsWith("[") && value.endsWith("]")) value = value.slice(1, -1);
+  // A zone identifier means the address is scoped, not a global unicast value
+  // netpolicy would accept; fail closed rather than silently stripping it.
+  if (value.indexOf("%") >= 0) return "";
+  const ipv4 = parseCanonicalIPv4(value);
+  if (ipv4) return `IPv4:${ipv4.join(".")}`;
+  if (!value.includes(":")) return "";
+  const bytes = parseIPv6Bytes(value);
+  if (!bytes) return "";
+  if (isIPv4Mapped(bytes)) return `IPv4:${bytes.slice(12).join(".")}`;
+  return `IPv6:${value.toLowerCase()}`;
 }
 
 // Mirrors internal/netpolicy.IsPublicAddress. Prefixes are listed as significant
@@ -127,8 +156,7 @@ function isGloballyRoutableIPv6(value) {
   return true;
 }
 
-function isGloballyRoutable(value) {
-  const normalized = normalizeInterfaceAddress(value);
+function isGloballyRoutableNormalized(normalized) {
   if (!normalized) return false;
   if (normalized.startsWith("IPv4:")) {
     return isGloballyRoutableIPv4(normalized.slice(5));
@@ -147,8 +175,7 @@ function normalizedPublicLiteral(raw) {
   if (!normalized) return null;
   const isIPv4 = normalized.startsWith("IPv4:");
   const value = normalized.slice(5);
-  if (isIPv4 ? !isGloballyRoutableIPv4(value) : !isGloballyRoutableIPv6(value))
-    return null;
+  if (!isGloballyRoutableNormalized(normalized)) return null;
   return { value, isIPv4 };
 }
 
@@ -193,7 +220,7 @@ function interfacePublicAddress(metrics, wantIPv4) {
       if (!normalized) continue;
       const isV4 = normalized.startsWith("IPv4:");
       if (isV4 !== wantIPv4) continue;
-      if (!isGloballyRoutable(raw)) continue;
+      if (!isGloballyRoutableNormalized(normalized)) continue;
       return { value: normalized.slice(5), name: networkInterface.name || "" };
     }
   }
@@ -208,11 +235,11 @@ function interfacePublicAddress(metrics, wantIPv4) {
 export function publicAddressRows(metrics = {}, labels = {}, features = []) {
   const observed = normalizeInterfaceAddress(metrics.observed_public_ip || "");
   const observedIPv4 =
-    observed.startsWith("IPv4:") && isGloballyRoutableIPv4(observed.slice(5))
+    observed.startsWith("IPv4:") && isGloballyRoutableNormalized(observed)
       ? observed.slice(5)
       : "";
   const observedIPv6 =
-    observed.startsWith("IPv6:") && isGloballyRoutableIPv6(observed.slice(5))
+    observed.startsWith("IPv6:") && isGloballyRoutableNormalized(observed)
       ? observed.slice(5)
       : "";
   const families = [
@@ -242,9 +269,14 @@ export function publicAddressRows(metrics = {}, labels = {}, features = []) {
         ok: true,
       };
     }
-    const probed = String(family.probed || "");
-    if (probed && isGloballyRoutable(probed)) {
-      return { ...family, value: probed, source: "公网探测", ok: true };
+    const probed = normalizeInterfaceAddress(family.probed || "");
+    const probedIsIPv4 = probed.startsWith("IPv4:");
+    if (
+      probed &&
+      probedIsIPv4 === (family.label === "IPv4") &&
+      isGloballyRoutableNormalized(probed)
+    ) {
+      return { ...family, value: probed.slice(5), source: "公网探测", ok: true };
     }
     if (family.interfaceSource) {
       return {
