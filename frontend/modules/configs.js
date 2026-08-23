@@ -202,17 +202,65 @@ async function waitForDeployTerminal(taskID, signal = () => true) {
   throw new Error("等待部署结果超时");
 }
 
-async function deployThenInvalidate(taskID, agentId, engine) {
-  const result = await waitForDeployTerminal(taskID);
-  if (result.status === "succeeded") {
-    invalidateLiveSnapshot(agentId, engine);
-    return true;
+
+function recordPendingDeploy(taskID, agentId, engine) {
+  const key = liveSourceKey(agentId, engine);
+  state.data.pendingDeployTasks ||= {};
+  state.data.pendingDeployTasks[key] = { taskId: taskID };
+}
+
+function clearPendingDeploy(agentId, engine) {
+  const key = liveSourceKey(agentId, engine);
+  if (state.data.pendingDeployTasks?.[key])
+    delete state.data.pendingDeployTasks[key];
+}
+
+// Fire-and-forget active monitor. If aborted by route navigation,
+// the persistent pending entry survives for reconciliation.
+function monitorDeployTask(taskID, agentId, engine) {
+  void (async () => {
+    try {
+      const result = await waitForDeployTerminal(taskID);
+      if (result.status === "succeeded") {
+        invalidateLiveSnapshot(agentId, engine);
+      } else {
+        notify(
+          result.error ||
+            `部署${result.status === "canceled" ? "已取消" : "失败"}`,
+          "error",
+        );
+      }
+      clearPendingDeploy(agentId, engine);
+    } catch {
+      // Aborted by navigation or transient failure — the persistent
+      // pending entry ensures convergence on next page visit.
+    }
+  })();
+}
+
+// Called when entering live-config to resolve any pending deploy that
+// outlived navigation. Uses the current (route-scoped) api context.
+async function reconcilePendingDeploy(agentId, engine) {
+  const key = liveSourceKey(agentId, engine);
+  const pending = state.data.pendingDeployTasks?.[key];
+  if (!pending?.taskId) return;
+  try {
+    const task = await api(`/tasks/${encodeURIComponent(pending.taskId)}`);
+    if (task.status === "succeeded") {
+      invalidateLiveSnapshot(agentId, engine);
+      clearPendingDeploy(agentId, engine);
+    } else if (["failed", "canceled"].includes(task.status)) {
+      notify(
+        task.error ||
+          `部署${task.status === "canceled" ? "已取消" : "失败"}`,
+        "error",
+      );
+      clearPendingDeploy(agentId, engine);
+    }
+    // Still pending/running → leave for next reconciliation.
+  } catch {
+    // Network error or abort — retry on next visit.
   }
-  notify(
-    result.error || `部署${result.status === "canceled" ? "已取消" : "失败"}`,
-    "error",
-  );
-  return false;
 }
 
 async function agentConfig() {
@@ -448,7 +496,10 @@ function bindAgentConfigPage(ctx) {
         state.data.inboundTag = input.tag;
         notify("配置已保存，任务已提交");
         if ((event.submitter?.dataset.planIntent || "validate") === "deploy" && result?.task?.id)
-          await deployThenInvalidate(result.task.id, ctx.agent.id, ctx.engine);
+          {
+            recordPendingDeploy(result.task.id, ctx.agent.id, ctx.engine);
+            monitorDeployTask(result.task.id, ctx.agent.id, ctx.engine);
+          }
         await agentConfig();
       } catch (error) {
         notify(error.message, "error");
@@ -478,7 +529,10 @@ function bindAgentConfigPage(ctx) {
         );
         notify("字段已保存，任务已提交");
         if ((event.submitter?.dataset.fieldIntent || "validate") === "deploy" && result?.task?.id)
-          await deployThenInvalidate(result.task.id, ctx.agent.id, ctx.engine);
+          {
+            recordPendingDeploy(result.task.id, ctx.agent.id, ctx.engine);
+            monitorDeployTask(result.task.id, ctx.agent.id, ctx.engine);
+          }
         await agentConfig();
       } catch (error) {
         notify(error.message, "error");
@@ -514,7 +568,10 @@ function bindAgentConfigPage(ctx) {
         });
         notify("源码已保存，任务已提交");
         if ((event.submitter?.dataset.sourceIntent || "validate") === "deploy" && task?.id)
-          await deployThenInvalidate(task.id, ctx.agent.id, ctx.engine);
+          {
+            recordPendingDeploy(task.id, ctx.agent.id, ctx.engine);
+            monitorDeployTask(task.id, ctx.agent.id, ctx.engine);
+          }
         await agentConfig();
       } catch (error) {
         notify(error.message, "error");
@@ -585,6 +642,7 @@ async function liveConfig() {
     state.data.liveEngine = installedEngines[0];
   }
   const engine = state.data.liveEngine;
+  await reconcilePendingDeploy(agent.id, engine);
   const configWorkspace = await api(
     `/agents/${encodeURIComponent(agent.id)}/configs/${encodeURIComponent(engine)}/workspace`,
   );
@@ -668,7 +726,8 @@ async function liveConfig() {
             config_id: saved.id,
           });
           if (!task?.id) return; // deploy creation failed; do not fake success
-          await deployThenInvalidate(task.id, agent.id, engine);
+          recordPendingDeploy(task.id, agent.id, engine);
+          monitorDeployTask(task.id, agent.id, engine);
         } else {
           await submitTask({
             agent_id: agent.id,
