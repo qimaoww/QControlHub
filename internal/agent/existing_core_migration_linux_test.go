@@ -4,6 +4,8 @@ package agent
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -607,6 +609,75 @@ func TestExistingCoreSourceDigestKeepsDirectSingleFileCompatibility(t *testing.T
 	explicit.ConfigDirectory = "/etc/sing-box/conf.d"
 	if coreMigrationSourceDigest(legacy) == coreMigrationSourceDigest(explicit) {
 		t.Fatal("config-directory source was not included in the migration marker digest")
+	}
+}
+
+func TestCoreMigrationSourceDigestKeepsLegacyConfigDirectoryMarker(t *testing.T) {
+	legacy := EngineSpec{
+		Binary: "/usr/lib/sing-box/sing-box", ConfigPath: "/etc/sing-box/config.json",
+		ConfigDirectory: "/etc/sing-box/conf.d", ServiceBinary: "/usr/local/bin/sing-box",
+		Service: "sing-box.service",
+	}
+	// The pre-WorkingDirectory marker digest for a run -c FILE -C DIR mapping had
+	// exactly five NUL-separated fields and must remain byte-for-byte stable so
+	// an existing migrating/completed marker still matches after upgrade.
+	oldSource := legacy.Binary + "\x00" + legacy.ConfigPath + "\x00" + legacy.ConfigDirectory +
+		"\x00" + legacy.ServiceBinary + "\x00" + legacy.Service
+	oldDigest := sha256.Sum256([]byte(oldSource))
+	if got := coreMigrationSourceDigest(legacy); got != hex.EncodeToString(oldDigest[:]) {
+		t.Fatalf("legacy config-directory digest changed: got %s want %s", got, hex.EncodeToString(oldDigest[:]))
+	}
+
+	official := legacy
+	official.WorkingDirectory = "/var/lib/sing-box"
+	if coreMigrationSourceDigest(official) == coreMigrationSourceDigest(legacy) {
+		t.Fatal("official working-directory mapping must be bound in the source digest")
+	}
+	drifted := official
+	drifted.WorkingDirectory = "/var/lib/sing-box-drifted"
+	if coreMigrationSourceDigest(drifted) == coreMigrationSourceDigest(official) {
+		t.Fatal("working-directory drift must change the source digest")
+	}
+}
+
+func TestRefreshExistingCoreDiscoveryAcceptsLegacyCompletedMarker(t *testing.T) {
+	fixture := newExistingCoreMigrationFixture(t, false)
+	discoveryStatePath := filepath.Join(filepath.Dir(fixture.markerPrefix), "agent-state.json.existing-cores")
+	legacy := EngineSpec{
+		Binary: "/usr/lib/sing-box/sing-box", ConfigPath: "/etc/sing-box/config.json",
+		ConfigDirectory: "/etc/sing-box/conf.d", ServiceBinary: "/usr/local/bin/sing-box",
+		Service: "sing-box.service",
+	}
+	legacySource := legacy.Binary + "\x00" + legacy.ConfigPath + "\x00" + legacy.ConfigDirectory +
+		"\x00" + legacy.ServiceBinary + "\x00" + legacy.Service
+	legacyDigest := sha256.Sum256([]byte(legacySource))
+	configDigest := sha256.Sum256([]byte(`{"inbounds":[],"outbounds":[]}`))
+	if err := saveExistingCoreDiscoveryState(discoveryStatePath, existingCoreDiscoveryState{
+		Version: existingCoreDiscoveryStateVersion,
+		Specs: map[core.Engine]existingDiscoverySpec{
+			core.EngineSingBox: discoverySpecFromEngineSpec(legacy),
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(coreMigrationMarkerPath(fixture.markerPrefix, core.EngineSingBox), []byte(
+		"migrated "+hex.EncodeToString(configDigest[:])+" "+hex.EncodeToString(legacyDigest[:])+" enabled disabled\n",
+	), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	specs, issues, err := RefreshExistingCoreDiscovery(
+		context.Background(), discoveryStatePath, fixture.markerPrefix,
+		map[core.Engine]EngineSpec{core.EngineSingBox: fixture.managed},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("refresh discovery with legacy completed marker: %v", err)
+	}
+	if len(issues) != 0 {
+		t.Fatalf("legacy completed marker discovery issues = %+v", issues)
+	}
+	if got, ok := specs[core.EngineSingBox]; !ok || got != legacy {
+		t.Fatalf("legacy completed marker mapping = %+v, want %+v", specs[core.EngineSingBox], legacy)
 	}
 }
 

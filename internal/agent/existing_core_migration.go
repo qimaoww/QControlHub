@@ -455,8 +455,12 @@ func coreMigrationConfigDigest(content string) string {
 
 func coreMigrationSourceDigest(existing EngineSpec) string {
 	source := existing.Binary + "\x00" + existing.ConfigPath + "\x00" + existing.Service
-	if existing.ConfigDirectory != "" || existing.WorkingDirectory != "" || existingServiceBinary(existing) != existing.Binary {
-		source = existing.Binary + "\x00" + existing.ConfigPath + "\x00" + existing.ConfigDirectory + "\x00" + existing.WorkingDirectory + "\x00" + existingServiceBinary(existing) + "\x00" + existing.Service
+	if existing.ConfigDirectory != "" || existingServiceBinary(existing) != existing.Binary || existing.WorkingDirectory != "" {
+		source = existing.Binary + "\x00" + existing.ConfigPath + "\x00" + existing.ConfigDirectory
+		if existing.WorkingDirectory != "" {
+			source += "\x00" + existing.WorkingDirectory
+		}
+		source += "\x00" + existingServiceBinary(existing) + "\x00" + existing.Service
 	}
 	digest := sha256.Sum256([]byte(source))
 	return hex.EncodeToString(digest[:])

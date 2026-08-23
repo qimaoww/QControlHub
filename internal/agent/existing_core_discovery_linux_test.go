@@ -257,6 +257,11 @@ func TestExistingCoreDiscoverySupportsOfficialSingBoxWorkingDirectoryArgv(t *tes
 	assertDiscoveredSingBoxSpec(t, specs[core.EngineSingBox], fixture.realBinary, fixture.serviceBinary, configPath, configDirectory, workDirectory)
 
 	managed := fixture.managedSpecs[core.EngineSingBox]
+	managedConfigDirectory := filepath.Join(fixture.root, "managed-config")
+	if err := os.Mkdir(managedConfigDirectory, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	managed.ConfigPath = filepath.Join(managedConfigDirectory, "config.json")
 	content, err := (&Executor{}).readExistingConfig(context.Background(), core.EngineSingBox, managed, specs[core.EngineSingBox])
 	if err != nil {
 		t.Fatalf("read official sing-box merged snapshot: %v", err)

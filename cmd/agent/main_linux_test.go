@@ -50,6 +50,7 @@ func TestExistingSingBoxSpecCarriesConfigDirectoryAndServiceExecutable(t *testin
 	t.Setenv("QCH_EXISTING_SING_BOX_BINARY", "/usr/lib/sing-box/sing-box")
 	t.Setenv("QCH_EXISTING_SING_BOX_CONFIG", "/etc/sing-box/config.json")
 	t.Setenv("QCH_EXISTING_SING_BOX_CONFIG_DIRECTORY", "/etc/sing-box/conf.d")
+	t.Setenv("QCH_EXISTING_SING_BOX_WORK_DIRECTORY", "/var/lib/sing-box")
 	t.Setenv("QCH_EXISTING_SING_BOX_SERVICE_BINARY", "/usr/local/bin/sing-box")
 	t.Setenv("QCH_EXISTING_SING_BOX_SERVICE", "sing-box.service")
 	spec, ok := existingSpec("SING_BOX")
@@ -58,11 +59,34 @@ func TestExistingSingBoxSpecCarriesConfigDirectoryAndServiceExecutable(t *testin
 	}
 	want := agent.EngineSpec{
 		Binary: "/usr/lib/sing-box/sing-box", ConfigPath: "/etc/sing-box/config.json",
-		ConfigDirectory: "/etc/sing-box/conf.d", ServiceBinary: "/usr/local/bin/sing-box",
-		Service: "sing-box.service",
+		ConfigDirectory: "/etc/sing-box/conf.d", WorkingDirectory: "/var/lib/sing-box",
+		ServiceBinary: "/usr/local/bin/sing-box",
+		Service:       "sing-box.service",
 	}
 	if spec != want {
 		t.Fatalf("existing sing-box spec = %+v, want %+v", spec, want)
+	}
+}
+
+func TestExistingSingBoxSpecRejectsRelativeWorkingDirectory(t *testing.T) {
+	t.Setenv("QCH_EXISTING_SING_BOX_BINARY", "/usr/bin/sing-box")
+	t.Setenv("QCH_EXISTING_SING_BOX_CONFIG", "/etc/sing-box/config.json")
+	t.Setenv("QCH_EXISTING_SING_BOX_CONFIG_DIRECTORY", "/etc/sing-box")
+	t.Setenv("QCH_EXISTING_SING_BOX_WORK_DIRECTORY", "var/lib/sing-box")
+	t.Setenv("QCH_EXISTING_SING_BOX_SERVICE", "sing-box.service")
+	spec, ok := existingSpec("SING_BOX")
+	if !ok {
+		t.Fatal("sing-box mapping was not loaded")
+	}
+	executor := &agent.Executor{
+		Specs: agent.DefaultSpecs(),
+		ExistingSpecs: map[core.Engine]agent.EngineSpec{
+			core.EngineSingBox: spec,
+		},
+		MigrationMarkerPrefix: filepath.Join(t.TempDir(), "marker"),
+	}
+	if err := executor.Validate(); err == nil || !strings.Contains(err.Error(), "working directory") {
+		t.Fatalf("relative sing-box working directory validation error = %v", err)
 	}
 }
 
