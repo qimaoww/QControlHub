@@ -421,6 +421,8 @@ for (const install of [
 
     const gateA = deferred();
     const gateB = deferred();
+    let editorReadCountE = 0;
+
 
     const planForm = new FakeForm({
       operation: "modify", tag: "t", listen: "0.0.0.0", port: "443",
@@ -453,7 +455,10 @@ for (const install of [
       })(),
       "POST /tasks": (options) => {
         const body = JSON.parse(options?.body || "{}");
-        if (body.action === "read-config") return { id: "read-e1" };
+        if (body.action === "read-config") {
+          editorReadCountE += 1;
+          return { id: "read-e1" };
+        }
         return { id: "other-e" };
       },
       "GET /tasks/read-e1": { status: "succeeded", id: "read-e1" },
@@ -500,12 +505,11 @@ for (const install of [
     assert.equal(state.data.pendingDeployTasks?.[KEY], undefined,
       "[E] dep-B pending cleared after B's own terminal failure");
 
-    // Cache was refreshed by the post-A-invalidation read-config.
-    // B's failure does NOT change the node file, so content is from the
-    // last successful deploy (A). Verify it's not OLD_CONTENT.
-    if (state.data.liveSources?.[KEY]?.content)
-      assert.notEqual(state.data.liveSources[KEY].content, OLD_CONTENT,
-        "[E] old pre-deploy content not restored after B failed");
+    // Strict: post-A fresh read completed and cached NEW_CONTENT.
+    assert.ok(editorReadCountE >= 1,
+      "[E] post-A fresh read-config fired");
+    assert.equal(state.data.liveSources?.[KEY]?.content, NEW_CONTENT,
+      "[E] cache contains post-deploy content (not OLD_CONTENT) after B failed");
   }
 
 
