@@ -43,9 +43,13 @@ case "$command" in
     done
     case "$property" in
 	    ExecStart) if [ "$service" = qagent-xray.service ]; then cat "$FAKE_SYSTEMCTL_QAGENT_EXEC_START"; else cat "$FAKE_SYSTEMCTL_EXEC_START"; fi ;;
-      LoadState) cat "$FAKE_SYSTEMCTL_LOAD_STATE" ;;
-      ActiveState) cat "$FAKE_SYSTEMCTL_QAGENT_ACTIVE_STATE" ;;
-      FragmentPath) cat "$FAKE_SYSTEMCTL_FRAGMENT_PATH" ;;
+	      LoadState) cat "$FAKE_SYSTEMCTL_LOAD_STATE" ;;
+	      ActiveState) cat "$FAKE_SYSTEMCTL_QAGENT_ACTIVE_STATE" ;;
+	      FragmentPath) cat "$FAKE_SYSTEMCTL_FRAGMENT_PATH" ;;
+	      Description) cat "$FAKE_SYSTEMCTL_QAGENT_DESCRIPTION" ;;
+	      User) cat "$FAKE_SYSTEMCTL_QAGENT_USER" ;;
+	      Group) cat "$FAKE_SYSTEMCTL_QAGENT_GROUP" ;;
+	      ExecCondition|ExecStartPre|ExecStartPost|ExecReload|ExecStop|ExecStopPost) cat "$FAKE_SYSTEMCTL_STATE/qagent-$property" ;;
       *) exit 1 ;;
     esac
     ;;
@@ -87,6 +91,9 @@ export FAKE_SYSTEMCTL_LOG="$test_root/state/commands.log"
 export FAKE_SYSTEMCTL_ACTIVE="$test_root/state/active"
 export FAKE_SYSTEMCTL_EXEC_START="$test_root/state/exec-start"
 export FAKE_SYSTEMCTL_QAGENT_EXEC_START="$test_root/state/qagent-exec-start"
+export FAKE_SYSTEMCTL_QAGENT_DESCRIPTION="$test_root/state/qagent-description"
+export FAKE_SYSTEMCTL_QAGENT_USER="$test_root/state/qagent-user"
+export FAKE_SYSTEMCTL_QAGENT_GROUP="$test_root/state/qagent-group"
 export FAKE_SYSTEMCTL_LOAD_STATE="$test_root/state/load-state"
 export FAKE_SYSTEMCTL_QAGENT_ACTIVE_STATE="$test_root/state/qagent-active-state"
 export FAKE_SYSTEMCTL_FRAGMENT_PATH="$test_root/state/fragment-path"
@@ -267,14 +274,23 @@ printf '%s\n' loaded > "$FAKE_SYSTEMCTL_LOAD_STATE"
 printf '%s\n' inactive > "$FAKE_SYSTEMCTL_QAGENT_ACTIVE_STATE"
 managed_unit="$test_root/core/qagent-xray.service"
 printf '%s\n' \
+  '[Unit]' \
   'Description=Xray core managed by QAgent' \
+  '[Service]' \
   'User=qcontrolhub-core' \
   'Group=qcontrolhub-core' \
-  "ExecStart=$qagent_xray_binary run -config $qagent_xray_config" > "$managed_unit"
+  "ExecStart=$qagent_xray_binary run -config $qagent_xray_config" \
+  '[Install]' > "$managed_unit"
 chmod 0644 "$managed_unit"
 printf '%s\n' "$managed_unit" > "$FAKE_SYSTEMCTL_FRAGMENT_PATH"
 write_exec_start "$qagent_xray_binary" "$qagent_xray_binary" run -config "$qagent_xray_config"
 cp "$FAKE_SYSTEMCTL_EXEC_START" "$FAKE_SYSTEMCTL_QAGENT_EXEC_START"
+printf '%s\n' 'Xray core managed by QAgent' > "$FAKE_SYSTEMCTL_QAGENT_DESCRIPTION"
+printf '%s\n' qcontrolhub-core > "$FAKE_SYSTEMCTL_QAGENT_USER"
+printf '%s\n' qcontrolhub-core > "$FAKE_SYSTEMCTL_QAGENT_GROUP"
+for hook in ExecCondition ExecStartPre ExecStartPost ExecReload ExecStop ExecStopPost; do
+  : > "$FAKE_SYSTEMCTL_STATE/qagent-$hook"
+done
 qagent_core_service_is_safe_to_disable xray "$managed_unit" || {
   printf '%s\n' 'repeat install with an inactive dedicated unit was rejected' >&2
   exit 1
@@ -291,6 +307,35 @@ qagent_core_service_is_safe_owned xray "$managed_unit" || {
   printf '%s\n' 'safe active dedicated unit was not recognized as QAgent-owned' >&2
   exit 1
 }
+printf '%s\n' root > "$FAKE_SYSTEMCTL_QAGENT_USER"
+expect_rejected effective-user-override qagent_core_service_is_safe_owned xray "$managed_unit"
+printf '%s\n' qcontrolhub-core > "$FAKE_SYSTEMCTL_QAGENT_USER"
+printf '%s\n' /bin/true > "$FAKE_SYSTEMCTL_STATE/qagent-ExecStartPre"
+expect_rejected effective-start-pre-hook qagent_core_service_is_safe_owned xray "$managed_unit"
+: > "$FAKE_SYSTEMCTL_STATE/qagent-ExecStartPre"
+cp "$managed_unit" "$managed_unit.original"
+printf '%s\n' \
+  '[Unit]' \
+  '#Description=Xray core managed by QAgent' \
+  '[Service]' \
+  'User=qcontrolhub-core' \
+  'Group=qcontrolhub-core' \
+  "ExecStart=$qagent_xray_binary run -config $qagent_xray_config" \
+  '[Install]' > "$managed_unit"
+expect_rejected commented-ownership-marker qagent_core_service_is_safe_owned xray "$managed_unit"
+cp "$managed_unit.original" "$managed_unit"
+printf '%s\n' \
+  '[Unit]' \
+  'Description=Xray core managed by QAgent' \
+  'Description=Xray core managed by QAgent' \
+  '[Service]' \
+  'User=qcontrolhub-core' \
+  'Group=qcontrolhub-core' \
+  "ExecStart=$qagent_xray_binary run -config $qagent_xray_config" \
+  '[Install]' > "$managed_unit"
+expect_rejected duplicate-ownership-marker qagent_core_service_is_safe_owned xray "$managed_unit"
+cp "$managed_unit.original" "$managed_unit"
+rm "$managed_unit.original"
 
 export QCH_SKIP_CORE_SERVICES=xray
 printf '%s\n' inactive > "$FAKE_SYSTEMCTL_ACTIVE"

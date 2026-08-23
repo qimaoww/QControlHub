@@ -174,6 +174,7 @@ func overrideSpec(spec agent.EngineSpec, prefix string) agent.EngineSpec {
 	spec.Binary = env("QCH_"+prefix+"_BINARY", spec.Binary)
 	spec.ConfigPath = env("QCH_"+prefix+"_CONFIG", spec.ConfigPath)
 	spec.ConfigDirectory = strings.TrimSpace(os.Getenv("QCH_" + prefix + "_CONFIG_DIRECTORY"))
+	spec.WorkingDirectory = strings.TrimSpace(os.Getenv("QCH_" + prefix + "_WORK_DIRECTORY"))
 	spec.ServiceBinary = strings.TrimSpace(os.Getenv("QCH_" + prefix + "_SERVICE_BINARY"))
 	spec.Service = env("QCH_"+prefix+"_SERVICE", spec.Service)
 	return spec
