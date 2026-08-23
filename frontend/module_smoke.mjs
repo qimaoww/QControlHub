@@ -9,7 +9,7 @@ import {
   installAgents,
   nodeCardDropIndex,
 } from "./modules/agents.js";
-import { coreSourceName } from "./modules/tasks.js";
+import { coreSourceLabel, coreSourceName } from "./modules/tasks.js";
 import { installClientAccess } from "./modules/client-access.js";
 import {
   bindServerPlanRegeneration,
@@ -55,6 +55,11 @@ assert.equal(coreSourceForInstall("xray", "development", "mirror"), undefined, "
 assert.equal(coreSourceName("mirror"), "vernesong/mihomo 镜像（第三方）", "mirror audited label");
 assert.equal(coreSourceName("official"), "MetaCubeX/mihomo 官方", "official audited label");
 assert.equal(coreSourceName(""), "", "no source has no label");
+assert.equal(coreSourceLabel("mihomo", "development", ""), "MetaCubeX/mihomo 官方", "omitted mihomo development audits as official");
+assert.equal(coreSourceLabel("mihomo", "development", "official"), "MetaCubeX/mihomo 官方", "explicit official audits as official");
+assert.equal(coreSourceLabel("mihomo", "development", "mirror"), "vernesong/mihomo 镜像（第三方）", "mirror audits as third party");
+assert.equal(coreSourceLabel("mihomo", "stable", ""), "", "stable has no source label");
+assert.equal(coreSourceLabel("xray", "development", ""), "", "non-mihomo has no source label");
 
 let requestedRoute = "dashboard";
 let releaseFirstRender;

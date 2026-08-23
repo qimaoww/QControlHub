@@ -29,7 +29,7 @@ func TestNormalizeCoreSource(t *testing.T) {
 		want     string
 		wantErr  bool
 	}{
-		{name: "omitted defaults to official", engine: EngineMihomo, selector: CoreVersionDevelopment, source: "", want: ""},
+		{name: "omitted defaults to official", engine: EngineMihomo, selector: CoreVersionDevelopment, source: "", want: string(CoreSourceOfficial)},
 		{name: "mihomo development official", engine: EngineMihomo, selector: CoreVersionDevelopment, source: string(CoreSourceOfficial), want: string(CoreSourceOfficial)},
 		{name: "mihomo development mirror", engine: EngineMihomo, selector: CoreVersionDevelopment, source: string(CoreSourceMirror), want: string(CoreSourceMirror)},
 		{name: "mirror rejected for stable", engine: EngineMihomo, selector: CoreVersionStable, source: string(CoreSourceMirror), wantErr: true},

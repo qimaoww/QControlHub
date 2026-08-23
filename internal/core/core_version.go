@@ -46,17 +46,22 @@ func (source CoreSource) Valid() bool {
 	return source == CoreSourceOfficial || source == CoreSourceMirror
 }
 
-// NormalizeCoreSource validates a release source choice. An empty value is the
-// legacy documented default (official MetaCubeX). A non-empty value is only
-// accepted for Mihomo development builds; any other combination is rejected so
-// the Agent can fail closed instead of silently switching repositories.
+// NormalizeCoreSource validates a release source choice. For Mihomo development
+// an omitted value is the legacy documented default and is collapsed to the
+// explicit official source so persistence, reuse, retry, and display share one
+// effective-source semantic. A source value is only accepted for Mihomo
+// development builds; any other combination is rejected so the Agent can fail
+// closed instead of silently switching repositories.
 func NormalizeCoreSource(engine Engine, selector, raw string) (string, error) {
 	raw = strings.TrimSpace(raw)
-	if raw == "" {
+	if engine != EngineMihomo || selector != CoreVersionDevelopment {
+		if raw != "" {
+			return "", errors.New("内核来源仅适用于 Mihomo 开发版安装")
+		}
 		return "", nil
 	}
-	if engine != EngineMihomo || selector != CoreVersionDevelopment {
-		return "", errors.New("内核来源仅适用于 Mihomo 开发版安装")
+	if raw == "" {
+		return string(CoreSourceOfficial), nil
 	}
 	if !CoreSource(raw).Valid() {
 		return "", fmt.Errorf("不支持的内核来源 %q", raw)

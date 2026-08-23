@@ -125,7 +125,7 @@ func assertRawTaskTerminalCleaned(t *testing.T, ctx context.Context, dataStore *
 	if finishedAt == nil {
 		t.Fatalf("raw terminal task finished_at is NULL")
 	}
-	if leaseID != nil && *leaseID != "" {
+	if leaseID != nil {
 		t.Fatalf("raw terminal task lease must be NULL, got %q", *leaseID)
 	}
 	if configContent != nil {
@@ -677,8 +677,11 @@ func TestCreateTaskValidatesCoreSourceWithPostgreSQL(t *testing.T) {
 		AgentID: legacyAgent.ID, Action: core.ActionInstall, Engine: core.EngineMihomo,
 		CoreVersion: core.CoreVersionDevelopment,
 	})
-	if err != nil || defaulted.CoreSource != "" {
+	if err != nil || defaulted.CoreSource != string(core.CoreSourceOfficial) {
 		t.Fatalf("legacy default install task = %+v, %v", defaulted, err)
+	}
+	if defaulted.ID != official.ID || !defaulted.Reused {
+		t.Fatalf("omitted development install must reuse the explicit official task: %+v, want reuse of %s", defaulted, official.ID)
 	}
 
 	// sourceAgent advertises the negotiated feature and accepts mirror, which is
@@ -714,6 +717,59 @@ func TestCreateTaskValidatesCoreSourceWithPostgreSQL(t *testing.T) {
 		if _, err := dataStore.CreateTask(ctx, request); !errors.Is(err, ErrInvalid) {
 			t.Fatalf("CreateTask(%+v) error = %v, want ErrInvalid", request, err)
 		}
+	}
+}
+
+func TestEffectiveSourceReuseWithPostgreSQL(t *testing.T) {
+	databaseURL := os.Getenv("QCH_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("QCH_TEST_DATABASE_URL is not configured")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	dataStore, err := Open(ctx, databaseURL, true)
+	if err != nil {
+		t.Fatalf("open PostgreSQL: %v", err)
+	}
+	defer dataStore.Close()
+
+	// An explicit official request must reuse an existing legacy row whose
+	// core_source is empty (NULL), i.e. a legacy omitted-source install.
+	legacy, legacyEnrollment := enrollTaskTestAgent(t, ctx, dataStore)
+	defer cleanupTaskTestAgent(dataStore, legacy.ID, legacyEnrollment)
+	legacyID, err := core.NewID("tsk")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := dataStore.pool.Exec(ctx, `
+		INSERT INTO tasks (id,agent_id,action,engine,core_version,status,created_at)
+		VALUES ($1,$2,'install','mihomo','development','pending',now())`, legacyID, legacy.ID); err != nil {
+		t.Fatalf("insert legacy empty-source task: %v", err)
+	}
+	official, err := dataStore.CreateTask(ctx, core.TaskRequest{
+		AgentID: legacy.ID, Action: core.ActionInstall, Engine: core.EngineMihomo,
+		CoreVersion: core.CoreVersionDevelopment, CoreSource: string(core.CoreSourceOfficial),
+	})
+	if err != nil || official.ID != legacyID || !official.Reused {
+		t.Fatalf("explicit official must reuse legacy empty-source task: %+v, %v; want reuse of %s", official, err, legacyID)
+	}
+
+	// An omitted source request must reuse an existing explicit-official row.
+	agent, enrollmentID := enrollTaskTestAgent(t, ctx, dataStore)
+	defer cleanupTaskTestAgent(dataStore, agent.ID, enrollmentID)
+	explicit, err := dataStore.CreateTask(ctx, core.TaskRequest{
+		AgentID: agent.ID, Action: core.ActionInstall, Engine: core.EngineMihomo,
+		CoreVersion: core.CoreVersionDevelopment, CoreSource: string(core.CoreSourceOfficial),
+	})
+	if err != nil {
+		t.Fatalf("create explicit official task: %v", err)
+	}
+	omitted, err := dataStore.CreateTask(ctx, core.TaskRequest{
+		AgentID: agent.ID, Action: core.ActionInstall, Engine: core.EngineMihomo,
+		CoreVersion: core.CoreVersionDevelopment,
+	})
+	if err != nil || omitted.ID != explicit.ID || !omitted.Reused || omitted.CoreSource != string(core.CoreSourceOfficial) {
+		t.Fatalf("omitted source must reuse explicit official task: %+v, %v; want reuse of %s", omitted, err, explicit.ID)
 	}
 }
 

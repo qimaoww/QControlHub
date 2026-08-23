@@ -900,7 +900,10 @@ func (s *Store) CreateTask(ctx context.Context, request core.TaskRequest) (core.
 		FROM tasks
 		WHERE agent_id=$1 AND action=$2 AND engine=$3
 		  AND COALESCE(config_id,'')=$4 AND COALESCE(config_version,0)=$5 AND COALESCE(core_version,'')=$6
-		  AND COALESCE(core_source,'')=$7
+		  AND (CASE WHEN $2='install' AND $3='mihomo' AND $6='development' AND COALESCE($7,'') IN ('','official')
+		            THEN 'official' ELSE COALESCE($7,'') END)
+		    = (CASE WHEN action='install' AND engine='mihomo' AND core_version='development' AND COALESCE(core_source,'') IN ('','official')
+		            THEN 'official' ELSE COALESCE(core_source,'') END)
 		  AND status IN ('pending','running')
 		ORDER BY created_at DESC LIMIT 1`,
 		task.AgentID, task.Action, task.Engine, task.ConfigID, task.ConfigVersion, task.CoreVersion, task.CoreSource), false)
