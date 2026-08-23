@@ -3,6 +3,7 @@ import {
   createInteractionGate,
   createRefreshChannel,
 } from "./refresh.js";
+import { ConfigFormatError, formatConfigContent } from "./code-format.js";
 
 export function developmentSourceVisible(engine, channel) {
   return engine === "mihomo" && channel === "development";
@@ -1402,6 +1403,7 @@ function bindCodeEditors() {
     const statusDot = editor.querySelector("[data-code-status-dot]");
     const validation = editor.querySelector("[data-code-validation]");
     const reset = editor.querySelector("[data-code-reset]");
+    const format = editor.querySelector("[data-code-format]");
     if (!input || !gutter) return;
     const form = input.closest("form");
     const maxBytes = Number(editor.dataset.codeMaxBytes) || 2 * 1024 * 1024;
@@ -1534,6 +1536,64 @@ function bindCodeEditors() {
       update();
       input.focus();
     });
+    const runFormat = () => {
+      if (!format || input.readOnly || input.disabled) return;
+      const selectionStart = input.selectionStart;
+      const selectionEnd = input.selectionEnd;
+      const scrollTop = input.scrollTop;
+      const scrollLeft = input.scrollLeft;
+      if (new Blob([input.value]).size > maxBytes) {
+        if (validation) validation.textContent = "配置源码超过 2 MiB 上限，无法格式化。";
+        if (status) status.textContent = "内容过大";
+        if (statusDot) statusDot.style.background = "var(--red)";
+        return;
+      }
+      try {
+        const formatted = formatConfigContent(
+          input.value,
+          editor.dataset.codeLanguage || "",
+        );
+        if (formatted === input.value) {
+          if (validation)
+            validation.textContent = "内容已符合排版格式。";
+          return;
+        }
+        if (new Blob([formatted]).size > maxBytes) {
+          if (validation)
+            validation.textContent = "格式化后超过 2 MiB 上限，已保留原文。";
+          if (status) status.textContent = "内容过大";
+          if (statusDot) statusDot.style.background = "var(--red)";
+          return;
+        }
+        input.value = formatted;
+        const nextLength = input.value.length;
+        input.setSelectionRange(
+          Math.min(selectionStart, nextLength),
+          Math.min(selectionEnd, nextLength),
+        );
+        input.scrollTop = scrollTop;
+        input.scrollLeft = scrollLeft;
+        update();
+        if (validation)
+          validation.textContent = "已格式化；内容未保存，需提交校验。";
+        input.focus();
+      } catch (error) {
+        input.setSelectionRange(
+          Math.min(selectionStart, input.value.length),
+          Math.min(selectionEnd, input.value.length),
+        );
+        input.scrollTop = scrollTop;
+        input.scrollLeft = scrollLeft;
+        if (validation)
+          validation.textContent =
+            error instanceof ConfigFormatError
+              ? error.message
+              : "当前内容无法安全格式化。";
+        if (status) status.textContent = "无法格式化";
+        if (statusDot) statusDot.style.background = "var(--red)";
+      }
+    };
+    bindEvent(format, "click", runFormat);
     bindEvent(
       form,
       "submit",

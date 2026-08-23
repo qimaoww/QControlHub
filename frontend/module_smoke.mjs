@@ -14,6 +14,7 @@ import {
 } from "./modules/agents.js";
 import { coreSourceLabel, coreSourceName } from "./modules/tasks.js";
 import { installClientAccess } from "./modules/client-access.js";
+import { ConfigFormatError, formatConfigContent } from "./modules/code-format.js";
 import {
   bindServerPlanRegeneration,
   installConfigPages,
@@ -627,6 +628,93 @@ assert.equal(coreSourceLabel("mihomo", "development", "official"), "MetaCubeX/mi
 assert.equal(coreSourceLabel("mihomo", "development", "mirror"), "vernesong/mihomo 镜像（第三方）", "mirror audits as third party");
 assert.equal(coreSourceLabel("mihomo", "stable", ""), "", "stable has no source label");
 assert.equal(coreSourceLabel("xray", "development", ""), "", "non-mihomo has no source label");
+
+const formattedJson = formatConfigContent(
+  '{"proxies":[],"mode":"rule","port":7890,"enabled":true,"empty":null}',
+  "JSON",
+);
+assert.equal(
+  formattedJson,
+  '{\n  "proxies": [],\n  "mode": "rule",\n  "port": 7890,\n  "enabled": true,\n  "empty": null\n}\n',
+  "JSON format applies two-space indentation, preserves order and types, and ends with one newline",
+);
+assert.equal(
+  formatConfigContent('[1,{"nested":[2,3]}]', "JSON"),
+  '[\n  1,\n  {\n    "nested": [\n      2,\n      3\n    ]\n  }\n]\n',
+  "JSON format keeps array order and nesting",
+);
+assert.ok(
+  formatConfigContent('{"a":1,\n\n\n "b":2}', "JSON").startsWith('{\n  "a": 1'),
+  "JSON format is syntax-aware and idempotent across whitespace",
+);
+assert.throws(
+  () => formatConfigContent('{"a":1,}', "JSON"),
+  ConfigFormatError,
+  "JSON with a trailing comma fails closed",
+);
+assert.throws(
+  () => formatConfigContent('{"a":1} // sing-box comment', "JSON"),
+  ConfigFormatError,
+  "sing-box extended JSON comments fail closed",
+);
+assert.throws(
+  () =>
+    formatConfigContent(
+      '{"a":1,"a":2}',
+      "JSON",
+    ),
+  ConfigFormatError,
+  "duplicate JSON keys fail closed",
+);
+assert.equal(
+  formatConfigContent('{"big":9007199254740993}', "JSON"),
+  '{\n  "big": 9007199254740993\n}\n',
+  "unsafe integers are preserved verbatim, never rounded",
+);
+assert.equal(
+  formatConfigContent('{"x":1e400}', "JSON"),
+  '{\n  "x": 1e400\n}\n',
+  "overflowing exponents are preserved verbatim",
+);
+assert.equal(
+  formatConfigContent('{"x":9.007199254740993e15}', "JSON"),
+  '{\n  "x": 9.007199254740993e15\n}\n',
+  "high-precision decimals keep their full token",
+);
+assert.equal(
+  formatConfigContent('{"x":0.100000000000000005}', "JSON"),
+  '{\n  "x": 0.100000000000000005\n}\n',
+  "high-precision decimal literals are not collapsed",
+);
+assert.equal(
+  formatConfigContent('{"x":-0}', "JSON"),
+  '{\n  "x": -0\n}\n',
+  "negative zero keeps its sign",
+);
+assert.equal(
+  formatConfigContent('{"10":"ten","2":"two","a":1}', "JSON"),
+  '{\n  "10": "ten",\n  "2": "two",\n  "a": 1\n}\n',
+  "object member order is preserved, including integer-like keys",
+);
+assert.equal(
+  formatConfigContent('{"a\\u0041":1,"b\\n":2}', "JSON"),
+  '{\n  "a\\u0041": 1,\n  "b\\n": 2\n}\n',
+  "escaped object keys and string escapes are preserved",
+);
+assert.throws(
+  () =>
+    formatConfigContent(
+      "mixed-port: 7890\n# keep me\nproxies: []\n",
+      "YAML",
+    ),
+  ConfigFormatError,
+  "Mihomo YAML with comments fails closed without a comment-preserving parser",
+);
+assert.throws(
+  () => formatConfigContent("   ", "JSON"),
+  ConfigFormatError,
+  "empty content fails closed",
+);
 
 let requestedRoute = "dashboard";
 let releaseFirstRender;
@@ -2011,6 +2099,637 @@ try {
     else globalThis.HTMLDetailsElement = presetDomDetails;
     if (presetDomCSS === undefined) delete globalThis.CSS;
     else globalThis.CSS = presetDomCSS;
+  }
+}
+
+// The manual config code editor formats JSON in place and fails closed on
+// YAML/comments/lossy or readonly content, without re-rendering the page.
+{
+  const formatDocument = globalThis.document;
+  const makeTextNode = () => {
+    const listeners = new Map();
+    return {
+      textContent: "",
+      style: {},
+      disabled: false,
+      hidden: false,
+      value: "",
+      addEventListener(type, listener) {
+        const list = listeners.get(type) || [];
+        list.push(listener);
+        listeners.set(type, list);
+      },
+      dispatch(type, event = {}) {
+        (listeners.get(type) || []).forEach((listener) => listener(event));
+      },
+      _listeners: listeners,
+    };
+  };
+  const makeCodeInput = (initialValue, { readOnly = false } = {}) => {
+    const listeners = new Map();
+    const input = {
+      value: initialValue,
+      readOnly,
+      disabled: false,
+      selectionStart: initialValue.length,
+      selectionEnd: initialValue.length,
+      scrollTop: 0,
+      scrollLeft: 0,
+      classList: { toggle() {} },
+      setAttribute() {},
+      dispatchEvent() {},
+      focus() {},
+      closest: () => ({
+        querySelectorAll: () => [],
+        addEventListener: () => {},
+      }),
+      setSelectionRange(start, end) {
+        input.selectionStart = start;
+        input.selectionEnd = end;
+      },
+      addEventListener(type, listener) {
+        const list = listeners.get(type) || [];
+        list.push(listener);
+        listeners.set(type, list);
+      },
+      dispatch(type, event = {}) {
+        (listeners.get(type) || []).forEach((listener) => listener(event));
+      },
+      _listeners: listeners,
+    };
+    return input;
+  };
+  const buildEditor = (initialValue, language, readOnly = false) => {
+    const input = makeCodeInput(initialValue, { readOnly });
+    const gutter = makeTextNode();
+    const byteLabel = makeTextNode();
+    const position = makeTextNode();
+    const status = makeTextNode();
+    const statusDot = makeTextNode();
+    const validation = makeTextNode();
+    const reset = makeTextNode();
+    const format = makeTextNode();
+    const editor = {
+      dataset: {
+        codeLanguage: language,
+        codeMaxBytes: "2097152",
+        dirty: "0",
+        codeValid: "1",
+      },
+      querySelector(selector) {
+        if (selector === "[data-code-input]") return input;
+        if (selector === "[data-line-numbers]") return gutter;
+        if (selector === "[data-code-bytes]") return byteLabel;
+        if (selector === "[data-code-position]") return position;
+        if (selector === "[data-code-status]") return status;
+        if (selector === "[data-code-status-dot]") return statusDot;
+        if (selector === "[data-code-validation]") return validation;
+        if (selector === "[data-code-reset]") return reset;
+        if (selector === "[data-code-format]") return format;
+        return null;
+      },
+      input,
+      gutter,
+      byteLabel,
+      position,
+      status,
+      statusDot,
+      validation,
+      reset,
+      format,
+    };
+    return editor;
+  };
+
+  const { bindCodeEditors } = installAgents(
+    new Proxy(
+      {
+        state: { route: "live-config", data: {} },
+        engines: ["mihomo", "xray", "sing-box", "ss-rust"],
+      },
+      { get: (target, key) => target[key] ?? noop },
+    ),
+  );
+
+  const unformatted = '{"tag":"demo","port":443,"tls":{"enabled":true}}';
+  const editor = buildEditor(unformatted, "JSON");
+  const readonlyEditor = buildEditor(unformatted, "JSON", true);
+  const brokenEditor = buildEditor('{"tag":"demo",}', "JSON");
+  const largeEditor = buildEditor(
+    JSON.stringify(Array(840001).fill(0)),
+    "JSON",
+  );
+  const deepEditor = buildEditor("[".repeat(600000), "JSON");
+  let editorQueryCalls = 0;
+
+  globalThis.document = {
+    querySelector: () => null,
+    querySelectorAll(selector) {
+      if (selector === "[data-code-editor]") {
+        editorQueryCalls += 1;
+        return [editor, readonlyEditor, brokenEditor, largeEditor, deepEditor];
+      }
+      return [];
+    },
+  };
+
+  try {
+    bindCodeEditors();
+    assert.equal(
+      editorQueryCalls,
+      1,
+      "binding queries the editor list exactly once",
+    );
+    assert.equal(
+      editor.dataset.dirty,
+      "0",
+      "unmodified editor starts clean",
+    );
+
+    editor.format.dispatch("click", {});
+    assert.equal(
+      editorQueryCalls,
+      1,
+      "formatting does not re-query or re-render the editor page",
+    );
+    assert.equal(
+      editor.input.value,
+      '{\n  "tag": "demo",\n  "port": 443,\n  "tls": {\n    "enabled": true\n  }\n}\n',
+      "JSON is formatted in place with two-space indentation and a final newline",
+    );
+    assert.equal(editor.dataset.dirty, "1", "formatting marks the editor dirty");
+    assert.equal(editor.reset.disabled, false, "reset is enabled after formatting");
+    assert.equal(
+      editor.input.value.includes("  \"tag\": \"demo\""),
+      true,
+      "two-space indentation applied",
+    );
+
+    const firstSnapshot = editor.input.value;
+    editor.format.dispatch("click", {});
+    assert.equal(
+      editor.input.value,
+      firstSnapshot,
+      "repeated formatting is idempotent",
+    );
+
+    readonlyEditor.format.dispatch("click", {});
+    assert.equal(
+      readonlyEditor.input.value,
+      unformatted,
+      "readonly editor is never rewritten",
+    );
+    assert.equal(
+      readonlyEditor.dataset.dirty,
+      "0",
+      "readonly editor stays clean",
+    );
+
+    brokenEditor.format.dispatch("click", {});
+    assert.equal(
+      brokenEditor.input.value,
+      '{"tag":"demo",}',
+      "syntax-error content is preserved on failure",
+    );
+    assert.equal(
+      brokenEditor.dataset.dirty,
+      "0",
+      "failure keeps the dirty baseline unchanged",
+    );
+    assert.equal(
+      /无法安全格式化|JSON 语法错误/.test(brokenEditor.validation.textContent),
+      true,
+      "failure surfaces a local, explicit message",
+    );
+    assert.equal(
+      brokenEditor.statusDot.style.background,
+      "var(--red)",
+      "failure marks the status dot red",
+    );
+
+    const deepSnapshot = deepEditor.input.value;
+    deepEditor.format.dispatch("click", {});
+    assert.equal(
+      deepEditor.input.value,
+      deepSnapshot,
+      "over-deep content is preserved on failure",
+    );
+    assert.equal(
+      deepEditor.dataset.dirty,
+      "0",
+      "over-deep failure keeps the dirty baseline unchanged",
+    );
+    assert.equal(
+      deepEditor.validation.textContent,
+      "当前内容无法安全格式化。",
+      "internal formatter errors fall back to a generic local message",
+    );
+    assert.equal(
+      deepEditor.statusDot.style.background,
+      "var(--red)",
+      "over-deep failure marks the status dot red",
+    );
+
+    const largeSnapshot = largeEditor.input.value;
+    largeEditor.format.dispatch("click", {});
+    assert.equal(
+      largeEditor.input.value,
+      largeSnapshot,
+      "over-limit formatted output keeps the original text",
+    );
+    assert.equal(
+      largeEditor.dataset.dirty,
+      "0",
+      "over-limit result keeps the dirty baseline unchanged",
+    );
+    assert.equal(
+      /超过 2 MiB 上限/.test(largeEditor.validation.textContent),
+      true,
+      "over-limit result shows a local error without submitting",
+    );
+    assert.equal(
+      largeEditor.statusDot.style.background,
+      "var(--red)",
+      "over-limit result marks the status dot red",
+    );
+  } finally {
+    if (formatDocument === undefined) delete globalThis.document;
+    else globalThis.document = formatDocument;
+  }
+}
+
+// The archive new-config engine selector syncs the source editor language,
+// file/language labels, and formatter on change without rebuilding the DOM.
+{
+  const archiveDocument = globalThis.document;
+  const archiveEvent = globalThis.Event;
+  globalThis.Event = class {
+    constructor(type, options) {
+      this.type = type;
+      this.bubbles = options?.bubbles;
+    }
+  };
+
+  const makeTarget = () => {
+    const listeners = new Map();
+    return {
+      textContent: "",
+      style: {},
+      disabled: false,
+      hidden: false,
+      value: "",
+      addEventListener(type, listener) {
+        const list = listeners.get(type) || [];
+        list.push(listener);
+        listeners.set(type, list);
+      },
+      dispatch(type, event = {}) {
+        (listeners.get(type) || []).forEach((listener) => listener(event));
+      },
+      _listeners: listeners,
+    };
+  };
+  const makeInput = (initialValue) => {
+    const listeners = new Map();
+    const input = {
+      value: initialValue,
+      readOnly: false,
+      disabled: false,
+      selectionStart: initialValue.length,
+      selectionEnd: initialValue.length,
+      scrollTop: 0,
+      scrollLeft: 0,
+      classList: { toggle() {} },
+      setAttribute() {},
+      focus() {},
+      closest: () => ({
+        querySelectorAll: () => [],
+        addEventListener: () => {},
+      }),
+      setSelectionRange(start, end) {
+        input.selectionStart = start;
+        input.selectionEnd = end;
+      },
+      addEventListener(type, listener) {
+        const list = listeners.get(type) || [];
+        list.push(listener);
+        listeners.set(type, list);
+      },
+      dispatch(type, event = {}) {
+        (listeners.get(type) || []).forEach((listener) => listener(event));
+      },
+      dispatchEvent(event) {
+        input.dispatch(event?.type || "input", event);
+      },
+    };
+    return input;
+  };
+  const makeArchiveEditor = (initialValue, engine) => {
+    const input = makeInput(initialValue);
+    const gutter = makeTarget();
+    const byteLabel = makeTarget();
+    const position = makeTarget();
+    const status = makeTarget();
+    const statusDot = makeTarget();
+    const validation = makeTarget();
+    const reset = makeTarget();
+    const format = makeTarget();
+    const languageLabel = makeTarget();
+    const fileLabel = makeTarget();
+    const editor = {
+      dataset: {
+        codeLanguage: engine === "mihomo" ? "YAML" : "JSON",
+        codeMaxBytes: "2097152",
+        dirty: "0",
+        codeValid: "1",
+      },
+      querySelector(selector) {
+        if (selector === "[data-code-input]") return input;
+        if (selector === "[data-line-numbers]") return gutter;
+        if (selector === "[data-code-bytes]") return byteLabel;
+        if (selector === "[data-code-position]") return position;
+        if (selector === "[data-code-status]") return status;
+        if (selector === "[data-code-status-dot]") return statusDot;
+        if (selector === "[data-code-validation]") return validation;
+        if (selector === "[data-code-reset]") return reset;
+        if (selector === "[data-code-format]") return format;
+        if (selector === ".code-language") return languageLabel;
+        if (selector === ".code-file-meta b") return fileLabel;
+        return null;
+      },
+      input,
+      gutter,
+      byteLabel,
+      position,
+      status,
+      statusDot,
+      validation,
+      reset,
+      format,
+      languageLabel,
+      fileLabel,
+    };
+    return editor;
+  };
+
+  const engineSelect = makeTarget();
+  engineSelect.value = "mihomo";
+  const archiveForm = {
+    querySelector(selector) {
+      if (selector === 'select[name="engine"]') return engineSelect;
+      if (selector === "[data-code-editor]") return archiveEditor;
+      return null;
+    },
+    addEventListener() {},
+  };
+  const archiveEditor = makeArchiveEditor(
+    "mixed-port: 7890\nproxies: []\n",
+    "mihomo",
+  );
+
+  globalThis.document = {
+    querySelector(selector) {
+      if (selector === "#archive-form") return archiveForm;
+      if (selector === "[data-code-editor]") return archiveEditor;
+      return null;
+    },
+    querySelectorAll(selector) {
+      if (selector === "[data-code-editor]") return [archiveEditor];
+      return [];
+    },
+  };
+
+  const archiveState = { route: "archive-config", data: { newConfig: true } };
+  const { bindCodeEditors } = installAgents(
+    new Proxy(
+      {
+        state: { route: "archive-config", data: {} },
+        engines: ["mihomo", "xray", "sing-box", "ss-rust"],
+      },
+      { get: (target, key) => target[key] ?? noop },
+    ),
+  );
+  const { archiveConfigs } = installConfigPages(
+    new Proxy(
+      {
+        state: archiveState,
+        engines: ["mihomo", "xray", "sing-box", "ss-rust"],
+        api: async () => [],
+        optionalAPI: async () => null,
+        can: () => true,
+        esc: (value) => String(value ?? ""),
+        engineName: (value) => value,
+        ago: () => "now",
+        date: () => "now",
+        conciseVersion: () => "1.0.0",
+        bytes: () => "0 B",
+        confirmAction: async () => true,
+        notify: () => {},
+        shell: () => {},
+        submitTask: async () => {},
+        bindCodeEditors,
+      },
+      { get: (target, key) => target[key] ?? noop },
+    ),
+  );
+
+  try {
+    await archiveConfigs();
+    assert.equal(
+      archiveEditor.dataset.codeLanguage,
+      "YAML",
+      "new archive config starts with YAML editor language",
+    );
+
+    engineSelect.value = "xray";
+    engineSelect.dispatch("change", {});
+    assert.equal(
+      archiveEditor.dataset.codeLanguage,
+      "JSON",
+      "engine switch updates the editor language to JSON",
+    );
+    assert.equal(
+      archiveEditor.languageLabel.textContent,
+      "JSON",
+      "engine switch updates the language badge",
+    );
+    assert.equal(
+      archiveEditor.fileLabel.textContent,
+      "config.json",
+      "engine switch updates the file name label",
+    );
+
+    archiveEditor.input.value = '{"a":1,"b":[2,3]}';
+    archiveEditor.format.dispatch("click", {});
+    assert.equal(
+      archiveEditor.input.value,
+      '{\n  "a": 1,\n  "b": [\n    2,\n    3\n  ]\n}\n',
+      "formatter uses the switched JSON language without rebuilding the editor",
+    );
+    assert.equal(
+      archiveEditor.dataset.dirty,
+      "1",
+      "engine switch preserves dirty state after formatting",
+    );
+
+    engineSelect.value = "mihomo";
+    engineSelect.dispatch("change", {});
+    assert.equal(
+      archiveEditor.dataset.codeLanguage,
+      "YAML",
+      "engine switch back updates the editor language to YAML",
+    );
+    const beforeYaml = archiveEditor.input.value;
+    archiveEditor.format.dispatch("click", {});
+    assert.equal(
+      archiveEditor.input.value,
+      beforeYaml,
+      "YAML fail-closed keeps the original editor text",
+    );
+    assert.equal(
+      /无法安全格式化|保留原文/.test(archiveEditor.validation.textContent),
+      true,
+      "YAML fail-closed shows a local message",
+    );
+  } finally {
+    if (archiveDocument === undefined) delete globalThis.document;
+    else globalThis.document = archiveDocument;
+    if (archiveEvent === undefined) delete globalThis.Event;
+    else globalThis.Event = archiveEvent;
+  }
+}
+
+// A non-operator archive new-config never renders the format action and does
+// not bind an engine-sync handler, so the readonly snapshot is untouched.
+{
+  const readonlyDocument = globalThis.document;
+  const readonlyEvent = globalThis.Event;
+  globalThis.Event = class {
+    constructor(type, options) {
+      this.type = type;
+      this.bubbles = options?.bubbles;
+    }
+  };
+  const makeTarget = () => {
+    const listeners = new Map();
+    return {
+      textContent: "",
+      style: {},
+      disabled: false,
+      list: listeners,
+      addEventListener(type, listener) {
+        const list = listeners.get(type) || [];
+        list.push(listener);
+        listeners.set(type, list);
+      },
+      dispatch(type, event = {}) {
+        (listeners.get(type) || []).forEach((listener) => listener(event));
+      },
+    };
+  };
+  const engine = makeTarget();
+  engine.value = "mihomo";
+  engine.disabled = true;
+  const form = {
+    querySelector(selector) {
+      if (selector === 'select[name="engine"]') return engine;
+      return null;
+    },
+    addEventListener() {},
+  };
+  const editor = {
+    dataset: {
+      codeLanguage: "YAML",
+      codeMaxBytes: "2097152",
+      dirty: "0",
+      codeValid: "1",
+    },
+    querySelector(selector) {
+      if (selector === "[data-code-format]") return null;
+      if (selector === "[data-code-input]")
+        return {
+          value: "",
+          readOnly: true,
+          disabled: false,
+          selectionStart: 0,
+          selectionEnd: 0,
+          scrollTop: 0,
+          scrollLeft: 0,
+          classList: { toggle() {} },
+          setAttribute() {},
+          focus() {},
+          closest: () => ({ querySelectorAll: () => [], addEventListener: () => {} }),
+          setSelectionRange() {},
+          addEventListener() {},
+          dispatchEvent() {},
+        };
+      if (selector === "[data-line-numbers]")
+        return { textContent: "", scrollTop: 0 };
+      return null;
+    },
+  };
+  globalThis.document = {
+    querySelector(selector) {
+      if (selector === "#archive-form") return form;
+      if (selector === "[data-code-editor]") return editor;
+      return null;
+    },
+    querySelectorAll(selector) {
+      if (selector === "[data-code-editor]") return [editor];
+      return [];
+    },
+  };
+  const { bindCodeEditors } = installAgents(
+    new Proxy(
+      { state: { route: "archive-config", data: {} } },
+      { get: (target, key) => target[key] ?? noop },
+    ),
+  );
+  const { archiveConfigs } = installConfigPages(
+    new Proxy(
+      {
+        state: { route: "archive-config", data: { newConfig: true } },
+        engines: ["mihomo", "xray"],
+        api: async () => [],
+        optionalAPI: async () => null,
+        can: () => false,
+        esc: (value) => String(value ?? ""),
+        engineName: (value) => value,
+        ago: () => "now",
+        date: () => "now",
+        conciseVersion: () => "1.0.0",
+        bytes: () => "0 B",
+        confirmAction: async () => true,
+        notify: () => {},
+        shell: () => {},
+        submitTask: async () => {},
+        bindCodeEditors,
+      },
+      { get: (target, key) => target[key] ?? noop },
+    ),
+  );
+  try {
+    await archiveConfigs();
+    assert.equal(
+      engine.disabled,
+      true,
+      "readonly archive keeps the engine selector disabled",
+    );
+    assert.equal(
+      editor.querySelector("[data-code-format]"),
+      null,
+      "readonly archive has no format action",
+    );
+    assert.equal(
+      (engine.list.get("change") || []).length,
+      0,
+      "readonly archive does not bind an engine-sync change handler",
+    );
+  } finally {
+    if (readonlyDocument === undefined) delete globalThis.document;
+    else globalThis.document = readonlyDocument;
+    if (readonlyEvent === undefined) delete globalThis.Event;
+    else globalThis.Event = readonlyEvent;
   }
 }
 
