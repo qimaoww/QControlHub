@@ -219,20 +219,26 @@ function clearPendingDeploy(agentId, engine, expectedTaskID) {
 }
 
 function handleDeployTerminal(result, taskID, agentId, engine) {
-  // CAS claim: only process if this is still the tracked task.
-  if (!clearPendingDeploy(agentId, engine, taskID)) return;
-
   if (result.status === "succeeded") {
+    // Every successful deploy changes the node file — always invalidate,
+    // even if this task is no longer the latest pending record. This is
+    // idempotent (deleting a non-existent key is a no-op).
     invalidateLiveSnapshot(agentId, engine);
+    maybeRerenderLiveConfig(agentId, engine);
+    // Clean up pending only if this is still the tracked task.
+    clearPendingDeploy(agentId, engine, taskID);
   } else {
-    notify(
-      result.error ||
-        `部署${result.status === "canceled" ? "已取消" : "失败"}`,
-      "error",
-    );
+    // Failed/canceled: notify and clear only if still current pending.
+    if (clearPendingDeploy(agentId, engine, taskID)) {
+      notify(
+        result.error ||
+          `部署${result.status === "canceled" ? "已取消" : "失败"}`,
+        "error",
+      );
+      maybeRerenderLiveConfig(agentId, engine);
+    }
+    // Old failed/canceled tasks do NOT clear newer pending records.
   }
-  // If user is currently viewing this key's live-config, refresh DOM.
-  maybeRerenderLiveConfig(agentId, engine);
 }
 
 function maybeRerenderLiveConfig(agentId, engine) {
@@ -244,7 +250,9 @@ function maybeRerenderLiveConfig(agentId, engine) {
     void liveConfig();
 }
 
-const activeReconcilers = new Set();
+// Track active reconcilers: Map<key, Set<taskID>> so multiple tasks
+// for the same key can each have their own poller.
+const activeReconcilers = new Map();
 
 // Fire-and-forget monitor for a newly submitted deploy task.
 function monitorDeployTask(taskID, agentId, engine) {
@@ -253,7 +261,7 @@ function monitorDeployTask(taskID, agentId, engine) {
       const result = await waitForDeployTerminal(taskID);
       handleDeployTerminal(result, taskID, agentId, engine);
     } catch {
-      // Aborted — pending entry persists for reconciliation.
+      // Aborted
     }
   })();
 }
@@ -262,17 +270,23 @@ function monitorDeployTask(taskID, agentId, engine) {
 // cleans up on abort so a future visit can restart it.
 function startRecoveryPoller(taskID, agentId, engine) {
   const key = liveSourceKey(agentId, engine);
-  if (activeReconcilers.has(key)) return;
-  activeReconcilers.add(key);
+  if (!activeReconcilers.has(key))
+    activeReconcilers.set(key, new Set());
+  const watchers = activeReconcilers.get(key);
+  if (watchers.has(taskID)) return; // already watching this exact task
+  watchers.add(taskID);
+
   void (async () => {
     try {
       const result = await waitForDeployTerminal(taskID);
       handleDeployTerminal(result, taskID, agentId, engine);
     } catch {
-      // Aborted by navigation or transient failure — leave pending for
-      // reconciliation on next visit.
     } finally {
-      activeReconcilers.delete(key);
+      const s = activeReconcilers.get(key);
+      if (s) {
+        s.delete(taskID);
+        if (!s.size) activeReconcilers.delete(key);
+      }
     }
   })();
 }
