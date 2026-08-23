@@ -471,6 +471,56 @@ for (const install of [
       "[E] newer dep-B pending NOT cleared by old dep-A completion");
   }
 
+
+  // --- Test F: Live-config editor deploy -> terminal success ->
+  // pending cleanup + cache invalidation + guarded re-render.
+  {
+    const state = {
+      route: "live-config",
+      data: {
+        agents: [makeAgent()], agentId: AGENT_ID, engine: ENGINE,
+        liveAgent: AGENT_ID, liveEngine: ENGINE,
+        liveSources: { [KEY]: { content: OLD_CONTENT, reading: false } },
+      },
+      session: { role: "admin" },
+    };
+    let editorReadCount = 0;
+
+    const liveForm = new FakeForm({
+      content: NEW_CONTENT, name: "e", description: "d", version: "1",
+    });
+
+    const { ctx } = buildContext(state, {
+      "GET /agents": () => [makeAgent()],
+      "GET /agents/test-agent/configs/xray/workspace": emptyWorkspace,
+      "PUT /agents/test-agent/configs/xray": { config: { id: "lc", version: 2 } },
+      "POST /tasks": (options) => {
+        const body = JSON.parse(options?.body || "{}");
+        if (body.action === "deploy") return { id: "lc-deploy-task" };
+        editorReadCount += 1;
+        return { id: `editor-read-${editorReadCount}` };
+      },
+      "GET /tasks/lc-deploy-task": () => ({
+        status: "succeeded", id: "lc-deploy-task",
+      }),
+      "GET /tasks/editor-read-\\d+": (_o, p) => ({
+        status: "succeeded", id: p.split("/").pop(),
+      }),
+      "GET /tasks/editor-read-\\d+/config-snapshot": { content: NEW_CONTENT },
+    });
+
+    const pages = installForms(ctx, { "#live-config-form": liveForm });
+    await pages.liveConfig();
+    await liveForm.dispatchSubmit({ liveIntent: "deploy" });
+    await drain();
+
+    assert.equal(state.data.pendingDeployTasks?.[KEY], undefined,
+      "[F] pending cleared after editor deploy succeeded");
+    if (state.data.liveSources?.[KEY]?.content)
+      assert.notEqual(state.data.liveSources[KEY].content, OLD_CONTENT,
+        "[F] old content replaced after editor deploy succeeded");
+  }
+
   // --- Test G: Source-config deploy success uses same terminal mechanism.
   {
     const state = {
