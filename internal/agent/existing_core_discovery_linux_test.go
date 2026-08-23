@@ -605,8 +605,33 @@ func TestExistingCoreDiscoveryReportsAmbiguousAndUnsupportedServices(t *testing.
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(specs) != 0 || !strings.Contains(issues[core.EngineSingBox], "QAgent 专用服务") {
-			t.Fatalf("active managed unit discovery = specs %+v issues %+v", specs, issues)
+		if len(issues) != 0 || specs[core.EngineSingBox].Service != "sing-box.service" {
+			t.Fatalf("safe active managed unit discovery = specs %+v issues %+v", specs, issues)
+		}
+		activeState, readErr := os.ReadFile(filepath.Join(fixture.stateDirectory, "qagent-sing-box.service.active"))
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if got := strings.TrimSpace(string(activeState)); got != "active" {
+			t.Fatalf("discovery mutated active managed unit to %q", got)
+		}
+	})
+
+	t.Run("active managed ExecStart drift", func(t *testing.T) {
+		fixture := newExistingCoreDiscoveryFixture(t)
+		fixture.writeStatus(t, "qagent-sing-box.service", "active")
+		if err := os.WriteFile(filepath.Join(fixture.stateDirectory, "qagent-sing-box.service.managed-exec-start"), []byte(systemdExecStart(
+			DefaultSpecs()[core.EngineSingBox].Binary,
+			DefaultSpecs()[core.EngineSingBox].Binary+" run -c /etc/qagent/sing-box/changed.json",
+		)), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		specs, issues, err := RefreshExistingCoreDiscovery(context.Background(), fixture.discoveryStatePath, fixture.markerPrefix, fixture.managedSpecs, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(specs) != 0 || !strings.Contains(issues[core.EngineSingBox], "安全 unit") {
+			t.Fatalf("drifted active managed unit discovery = specs %+v issues %+v", specs, issues)
 		}
 	})
 }
@@ -717,7 +742,7 @@ func newExistingCoreDiscoveryFixture(t *testing.T) existingCoreDiscoveryFixture 
 		t.Fatal(err)
 	}
 	fakeSystemctl := filepath.Join(root, "fake-systemctl")
-	script := "#!/bin/sh\nset -eu\nstate=" + shellQuote(stateDirectory) + "\ncommand=$1\nshift\nservice=$1\nshift\ncase \"$command\" in\n  is-active) value=$(cat \"$state/$service.active\"); printf '%s\\n' \"$value\"; [ \"$value\" = active ] ;;\n  is-enabled) value=$(cat \"$state/$service.enabled\"); printf '%s\\n' \"$value\"; [ \"$value\" = enabled ] ;;\n  show) property=ExecStart; for argument in \"$@\"; do case \"$argument\" in --property=*) property=${argument#--property=} ;; esac; done; case \"$property\" in ExecStart) cat \"$state/$service.exec-start\" ;; LoadState) cat \"$state/$service.load-state\" ;; FragmentPath) cat \"$state/$service.fragment-path\" ;; *) exit 1 ;; esac ;;\n  *) exit 1 ;;\nesac\n"
+	script := "#!/bin/sh\nset -eu\nstate=" + shellQuote(stateDirectory) + "\ncommand=$1\nshift\nservice=$1\nshift\ncase \"$command\" in\n  is-active) value=$(cat \"$state/$service.active\"); printf '%s\\n' \"$value\"; [ \"$value\" = active ] ;;\n  is-enabled) value=$(cat \"$state/$service.enabled\"); printf '%s\\n' \"$value\"; [ \"$value\" = enabled ] ;;\n  show) property=ExecStart; for argument in \"$@\"; do case \"$argument\" in --property=*) property=${argument#--property=} ;; esac; done; case \"$property\" in ExecStart) if [ \"$service\" = qagent-sing-box.service ]; then cat \"$state/$service.managed-exec-start\"; else cat \"$state/$service.exec-start\"; fi ;; LoadState) cat \"$state/$service.load-state\" ;; FragmentPath) cat \"$state/$service.fragment-path\" ;; *) exit 1 ;; esac ;;\n  *) exit 1 ;;\nesac\n"
 	if err := os.WriteFile(fakeSystemctl, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -747,13 +772,21 @@ func newExistingCoreDiscoveryFixture(t *testing.T) existingCoreDiscoveryFixture 
 		managedSpecs: map[core.Engine]EngineSpec{core.EngineSingBox: DefaultSpecs()[core.EngineSingBox]},
 	}
 	managedUnitPath := filepath.Join(managedUnitDirectory, "qagent-sing-box.service")
-	if err := os.WriteFile(managedUnitPath, []byte("[Unit]\nDescription=sing-box core managed by QAgent\n"), 0o600); err != nil {
+	managedSpec := DefaultSpecs()[core.EngineSingBox]
+	managedUnitContents := "[Unit]\nDescription=sing-box core managed by QAgent\n[Service]\nUser=qcontrolhub-core\nGroup=qcontrolhub-core\nExecStart=" + managedSpec.Binary + " run -c " + managedSpec.ConfigPath + "\n"
+	if err := os.WriteFile(managedUnitPath, []byte(managedUnitContents), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(stateDirectory, "qagent-sing-box.service.load-state"), []byte("loaded\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(stateDirectory, "qagent-sing-box.service.fragment-path"), []byte(managedUnitPath+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stateDirectory, "qagent-sing-box.service.managed-exec-start"), []byte(systemdExecStart(
+		DefaultSpecs()[core.EngineSingBox].Binary,
+		DefaultSpecs()[core.EngineSingBox].Binary+" run -c "+DefaultSpecs()[core.EngineSingBox].ConfigPath,
+	)), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	fixture.writeStatus(t, "sing-box.service", "active")

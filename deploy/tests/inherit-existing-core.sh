@@ -8,6 +8,9 @@ mkdir -p "$test_root/bin" "$test_root/state" "$test_root/core"
 # shellcheck source=../existing-core-mapping.sh
 . "$(dirname -- "$0")/../existing-core-mapping.sh"
 
+qagent_xray_binary="$test_root/core/qagent-xray"
+qagent_xray_config="$test_root/core/qagent-xray-config.json"
+
 case " $singbox_binary_candidates " in
   *' /etc/sing-box/bin/sing-box '*) ;;
   *) printf '%s\n' 'installer candidates omit /etc/sing-box/bin/sing-box' >&2; exit 1 ;;
@@ -39,7 +42,7 @@ case "$command" in
       case "$argument" in --property=*) property=${argument#--property=} ;; esac
     done
     case "$property" in
-      ExecStart) cat "$FAKE_SYSTEMCTL_EXEC_START" ;;
+	    ExecStart) if [ "$service" = qagent-xray.service ]; then cat "$FAKE_SYSTEMCTL_QAGENT_EXEC_START"; else cat "$FAKE_SYSTEMCTL_EXEC_START"; fi ;;
       LoadState) cat "$FAKE_SYSTEMCTL_LOAD_STATE" ;;
       ActiveState) cat "$FAKE_SYSTEMCTL_QAGENT_ACTIVE_STATE" ;;
       FragmentPath) cat "$FAKE_SYSTEMCTL_FRAGMENT_PATH" ;;
@@ -83,6 +86,7 @@ export FAKE_SYSTEMCTL_STATE="$test_root/state"
 export FAKE_SYSTEMCTL_LOG="$test_root/state/commands.log"
 export FAKE_SYSTEMCTL_ACTIVE="$test_root/state/active"
 export FAKE_SYSTEMCTL_EXEC_START="$test_root/state/exec-start"
+export FAKE_SYSTEMCTL_QAGENT_EXEC_START="$test_root/state/qagent-exec-start"
 export FAKE_SYSTEMCTL_LOAD_STATE="$test_root/state/load-state"
 export FAKE_SYSTEMCTL_QAGENT_ACTIVE_STATE="$test_root/state/qagent-active-state"
 export FAKE_SYSTEMCTL_FRAGMENT_PATH="$test_root/state/fragment-path"
@@ -262,9 +266,15 @@ qagent_core_service_is_safe_to_disable xray || {
 printf '%s\n' loaded > "$FAKE_SYSTEMCTL_LOAD_STATE"
 printf '%s\n' inactive > "$FAKE_SYSTEMCTL_QAGENT_ACTIVE_STATE"
 managed_unit="$test_root/core/qagent-xray.service"
-printf '%s\n' 'Description=Xray core managed by QAgent' > "$managed_unit"
+printf '%s\n' \
+  'Description=Xray core managed by QAgent' \
+  'User=qcontrolhub-core' \
+  'Group=qcontrolhub-core' \
+  "ExecStart=$qagent_xray_binary run -config $qagent_xray_config" > "$managed_unit"
 chmod 0644 "$managed_unit"
 printf '%s\n' "$managed_unit" > "$FAKE_SYSTEMCTL_FRAGMENT_PATH"
+write_exec_start "$qagent_xray_binary" "$qagent_xray_binary" run -config "$qagent_xray_config"
+cp "$FAKE_SYSTEMCTL_EXEC_START" "$FAKE_SYSTEMCTL_QAGENT_EXEC_START"
 qagent_core_service_is_safe_to_disable xray "$managed_unit" || {
   printf '%s\n' 'repeat install with an inactive dedicated unit was rejected' >&2
   exit 1
@@ -277,16 +287,20 @@ expect_rejected custom-dedicated-unit qagent_core_service_is_safe_to_disable xra
 printf '%s\n' "$managed_unit" > "$FAKE_SYSTEMCTL_FRAGMENT_PATH"
 printf '%s\n' active > "$FAKE_SYSTEMCTL_QAGENT_ACTIVE_STATE"
 expect_rejected active-dedicated-unit qagent_core_service_is_safe_to_disable xray "$managed_unit"
+qagent_core_service_is_safe_owned xray "$managed_unit" || {
+  printf '%s\n' 'safe active dedicated unit was not recognized as QAgent-owned' >&2
+  exit 1
+}
 
 export QCH_SKIP_CORE_SERVICES=xray
 printf '%s\n' inactive > "$FAKE_SYSTEMCTL_ACTIVE"
-require_skipped_core_service_inactive xray || {
+require_skipped_core_service_inactive xray "$managed_unit" || {
   printf '%s\n' 'bootstrap rejected an inactive dedicated unit' >&2
   exit 1
 }
 # Repeated installation must make the same inactive check without starting or
 # stopping either unit.
-require_skipped_core_service_inactive xray || {
+require_skipped_core_service_inactive xray "$managed_unit" || {
   printf '%s\n' 'bootstrap rejected a repeated inactive-unit check' >&2
   exit 1
 }
@@ -313,7 +327,25 @@ touch "$FAKE_SYSTEMCTL_STATE/qagent-xray.service.runtime" "$FAKE_SYSTEMCTL_STATE
 expect_rejected bootstrap-enabled-runtime-residue disable_skipped_core_service xray "$managed_unit"
 rm "$FAKE_SYSTEMCTL_STATE/qagent-xray.service.runtime" "$FAKE_SYSTEMCTL_STATE/keep-runtime"
 printf '%s\n' active > "$FAKE_SYSTEMCTL_ACTIVE"
-expect_rejected bootstrap-active-dedicated-unit require_skipped_core_service_inactive xray
+: > "$FAKE_SYSTEMCTL_LOG"
+touch "$FAKE_SYSTEMCTL_STATE/qagent-xray.service.persistent" "$FAKE_SYSTEMCTL_STATE/qagent-xray.service.runtime"
+disable_skipped_core_service xray "$managed_unit" || {
+  printf '%s\n' 'bootstrap did not retain a safe active dedicated unit' >&2
+  exit 1
+}
+[ -e "$FAKE_SYSTEMCTL_STATE/qagent-xray.service.persistent" ] &&
+  [ -e "$FAKE_SYSTEMCTL_STATE/qagent-xray.service.runtime" ] || {
+  printf '%s\n' 'bootstrap changed active dedicated-unit enablement' >&2
+  exit 1
+}
+if grep -Eq '^disable ' "$FAKE_SYSTEMCTL_LOG"; then
+  printf '%s\n' 'bootstrap disabled an active dedicated unit' >&2
+  exit 1
+fi
+require_skipped_core_service_inactive xray "$managed_unit" || {
+  printf '%s\n' 'bootstrap rejected a safe active dedicated unit before explicit import' >&2
+  exit 1
+}
 unset QCH_SKIP_CORE_SERVICES
 printf '%s\n' active > "$FAKE_SYSTEMCTL_ACTIVE"
 

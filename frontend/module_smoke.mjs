@@ -223,6 +223,7 @@ try {
     capabilities: ["sing-box"],
     runtime: {
       "sing-box": {
+        service_status: "active",
         installed: !unsupportedReason,
         existing_config_available: !unsupportedReason,
         existing_config_unsupported_reason: unsupportedReason,

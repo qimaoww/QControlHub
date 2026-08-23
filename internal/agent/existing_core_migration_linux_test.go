@@ -640,6 +640,55 @@ func TestCoreMigrationSourceDigestKeepsLegacyConfigDirectoryMarker(t *testing.T)
 	}
 }
 
+func TestCoreMigrationPreparedMarkerTracksManagedInitialStateAndReadsLegacy(t *testing.T) {
+	requireAgentRoot(t)
+	fixture := newExistingCoreMigrationFixture(t, false)
+	writeMigrationServiceState(t, fixture.stateDirectory, "qagent-xray.service", "active", "enabled")
+	record, err := prepareCoreMigrationFileRollback(
+		fixture.markerPrefix,
+		core.EngineXray,
+		fixture.existing,
+		fixture.managed,
+		coreMigrationRecord{
+			State: coreMigrationInProgress, ConfigDigest: coreMigrationConfigDigest(fixture.importedConfig),
+			SourceDigest: coreMigrationSourceDigest(fixture.existing), ExistingEnableState: "enabled",
+			ManagedEnableState: "enabled", ManagedInitialState: "active",
+		},
+	)
+	if err != nil {
+		t.Fatalf("write active managed prepared marker: %v", err)
+	}
+	if record.ManagedInitialState != "active" {
+		t.Fatalf("prepared record initial managed state = %q", record.ManagedInitialState)
+	}
+	readBack, err := readCoreMigrationRecord(fixture.markerPrefix, core.EngineXray)
+	if err != nil || readBack.ManagedInitialState != "active" {
+		t.Fatalf("read active managed prepared marker = %+v, %v", readBack, err)
+	}
+	if err := removeCoreMigrationMarker(fixture.markerPrefix, core.EngineXray); err != nil {
+		t.Fatal(err)
+	}
+	if err := cleanupCoreMigrationBackups(fixture.markerPrefix, core.EngineXray); err != nil {
+		t.Fatal(err)
+	}
+
+	stagedDigest, exists, err := protectedCoreMigrationFileDigest(fixture.existing.Binary, maxReleaseAssetSize)
+	if err != nil || !exists {
+		t.Fatalf("digest legacy staged binary: %q, %v, exists=%v", stagedDigest, err, exists)
+	}
+	legacyContents := fmt.Sprintf(
+		"migrating-v2 %s %s enabled disabled - - %s\n",
+		coreMigrationConfigDigest(fixture.importedConfig), coreMigrationSourceDigest(fixture.existing), stagedDigest,
+	)
+	if err := writeCoreMigrationMarkerContents(fixture.markerPrefix, core.EngineXray, legacyContents); err != nil {
+		t.Fatalf("write legacy prepared marker: %v", err)
+	}
+	legacy, err := readCoreMigrationRecord(fixture.markerPrefix, core.EngineXray)
+	if err != nil || legacy.ManagedInitialState != "inactive" || !legacy.HasFileRollback {
+		t.Fatalf("legacy prepared marker compatibility = %+v, %v", legacy, err)
+	}
+}
+
 func TestRefreshExistingCoreDiscoveryAcceptsLegacyCompletedMarker(t *testing.T) {
 	fixture := newExistingCoreMigrationFixture(t, false)
 	discoveryStatePath := filepath.Join(filepath.Dir(fixture.markerPrefix), "agent-state.json.existing-cores")
@@ -972,6 +1021,26 @@ func TestExistingCoreReconcileRestoresOriginalAfterInterruptedStop(t *testing.T)
 	}
 }
 
+func TestExistingCoreReconcileRestoresOriginallyActiveManagedService(t *testing.T) {
+	requireAgentRoot(t)
+	fixture := newExistingCoreMigrationFixture(t, false)
+	writeMigrationServiceState(t, fixture.stateDirectory, "xray.service", "active", "enabled")
+	writeMigrationServiceState(t, fixture.stateDirectory, "qagent-xray.service", "active", "enabled")
+	prepareAndStageMigrationFixtureWithManagedState(t, fixture, "enabled", "enabled", "active")
+	if err := fixture.executor.ReconcileExistingCoreServices(context.Background()); err != nil {
+		t.Fatalf("reconcile active managed service: %v", err)
+	}
+	fixture.assertServiceState(t, "xray.service", "active", "enabled")
+	fixture.assertServiceState(t, "qagent-xray.service", "active", "enabled")
+	assertFileContentAndMode(t, fixture.managed.ConfigPath, fixture.originalManagedConfig, 0o600)
+	if _, err := os.Stat(fixture.managed.Binary); !os.IsNotExist(err) {
+		t.Fatalf("originally absent managed binary was not removed: %v", err)
+	}
+	if record, err := readCoreMigrationRecord(fixture.markerPrefix, core.EngineXray); err != nil || record.State != coreMigrationNone {
+		t.Fatalf("active managed recovery marker = %+v, %v", record, err)
+	}
+}
+
 func TestExistingCoreReconcileFinalizesStartedManagedService(t *testing.T) {
 	requireAgentRoot(t)
 	fixture := newExistingCoreMigrationFixture(t, false)
@@ -1140,6 +1209,10 @@ type existingCoreMigrationFixture struct {
 }
 
 func prepareAndStageMigrationFixture(t *testing.T, fixture existingCoreMigrationFixture, existingEnableState, managedEnableState string) coreMigrationRecord {
+	return prepareAndStageMigrationFixtureWithManagedState(t, fixture, existingEnableState, managedEnableState, "inactive")
+}
+
+func prepareAndStageMigrationFixtureWithManagedState(t *testing.T, fixture existingCoreMigrationFixture, existingEnableState, managedEnableState, managedInitialState string) coreMigrationRecord {
 	t.Helper()
 	record, err := prepareCoreMigrationFileRollback(
 		fixture.markerPrefix,
@@ -1150,6 +1223,7 @@ func prepareAndStageMigrationFixture(t *testing.T, fixture existingCoreMigration
 			State: coreMigrationInProgress, ConfigDigest: coreMigrationConfigDigest(fixture.importedConfig),
 			SourceDigest:        coreMigrationSourceDigest(fixture.existing),
 			ExistingEnableState: existingEnableState, ManagedEnableState: managedEnableState,
+			ManagedInitialState: managedInitialState,
 		},
 	)
 	if err != nil {
