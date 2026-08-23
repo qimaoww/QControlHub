@@ -687,8 +687,7 @@ function compactPresetPage() {
     item.querySelector(".machine-state")?.remove();
     item.querySelector(".node-inspector")?.remove();
     item.querySelector(".machine-footer")?.remove();
-    item.querySelectorAll(".runtime-drawer, .service-management-unavailable, [data-upgrade-agent]").forEach((element) => element.remove());
-    item.querySelectorAll(".service-version-toggle").forEach((element) => element.remove());
+    item.querySelectorAll(".service-management-unavailable, [data-upgrade-agent]").forEach((element) => element.remove());
     item.querySelectorAll("[data-batch-checkbox]").forEach((element) => element.closest("label")?.remove());
   });
 }
@@ -1497,5 +1496,6 @@ function showCommand(command, onClose, heading = "一键添加 QAgent 节点") {
     showCommand,
     pollAgentMetrics,
     cancelAgentInteractions,
+    compactPresetPage,
   };
 }
