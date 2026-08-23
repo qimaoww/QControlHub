@@ -109,23 +109,8 @@ func (e *Executor) Validate() error {
 		if !supportedExistingServiceForManager(e.serviceManager(), engine, spec.Service) {
 			return fmt.Errorf("unsupported existing %s service %q", engine, spec.Service)
 		}
-		if !filepath.IsAbs(spec.Binary) || !filepath.IsAbs(spec.ConfigPath) {
-			return fmt.Errorf("existing %s paths must be absolute", engine)
-		}
-		for label, path := range map[string]string{
-			"binary": spec.Binary, "configuration": spec.ConfigPath,
-			"configuration directory": spec.ConfigDirectory, "service executable": existingServiceBinary(spec),
-			"working directory": spec.WorkingDirectory,
-		} {
-			if strings.ContainsAny(path, " \t\r\n") {
-				return fmt.Errorf("existing %s %s path contains unsupported whitespace", engine, label)
-			}
-		}
-		if spec.ConfigDirectory != "" && (engine != core.EngineSingBox || !filepath.IsAbs(spec.ConfigDirectory)) {
-			return fmt.Errorf("existing %s configuration directory is unsupported or not absolute", engine)
-		}
-		if spec.WorkingDirectory != "" && (engine != core.EngineSingBox || !filepath.IsAbs(spec.WorkingDirectory)) {
-			return fmt.Errorf("existing %s working directory is unsupported or not absolute", engine)
+		if err := validateExistingSpecPaths(engine, spec); err != nil {
+			return err
 		}
 		if err := validatePrivilegedExecutable(spec.Binary); err != nil {
 			return fmt.Errorf("unsafe existing %s binary: %w", engine, err)
@@ -316,6 +301,33 @@ func validateProtectedDirectoryChain(directory string) error {
 		}
 		directory = parent
 	}
+}
+
+// validateExistingSpecPaths checks the pure structural path constraints of an
+// existing core mapping: absolute executable and configuration paths, no
+// whitespace anywhere, and an absolute configuration/working directory for
+// sing-box. It is independent of the running UID so the same fail-closed rule
+// can be asserted by tests running as root or as an unprivileged CI user.
+func validateExistingSpecPaths(engine core.Engine, spec EngineSpec) error {
+	if !filepath.IsAbs(spec.Binary) || !filepath.IsAbs(spec.ConfigPath) {
+		return fmt.Errorf("existing %s paths must be absolute", engine)
+	}
+	for label, path := range map[string]string{
+		"binary": spec.Binary, "configuration": spec.ConfigPath,
+		"configuration directory": spec.ConfigDirectory, "service executable": existingServiceBinary(spec),
+		"working directory": spec.WorkingDirectory,
+	} {
+		if strings.ContainsAny(path, " \t\r\n") {
+			return fmt.Errorf("existing %s %s path contains unsupported whitespace", engine, label)
+		}
+	}
+	if spec.ConfigDirectory != "" && (engine != core.EngineSingBox || !filepath.IsAbs(spec.ConfigDirectory)) {
+		return fmt.Errorf("existing %s configuration directory is unsupported or not absolute", engine)
+	}
+	if spec.WorkingDirectory != "" && (engine != core.EngineSingBox || !filepath.IsAbs(spec.WorkingDirectory)) {
+		return fmt.Errorf("existing %s working directory is unsupported or not absolute", engine)
+	}
+	return nil
 }
 
 func (e *Executor) Execute(parent context.Context, task core.Task) (string, error) {

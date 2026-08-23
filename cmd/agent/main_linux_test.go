@@ -68,7 +68,7 @@ func TestExistingSingBoxSpecCarriesConfigDirectoryAndServiceExecutable(t *testin
 	}
 }
 
-func TestExistingSingBoxSpecRejectsRelativeWorkingDirectory(t *testing.T) {
+func TestExistingSingBoxSpecCapturesRelativeWorkingDirectory(t *testing.T) {
 	t.Setenv("QCH_EXISTING_SING_BOX_BINARY", "/usr/bin/sing-box")
 	t.Setenv("QCH_EXISTING_SING_BOX_CONFIG", "/etc/sing-box/config.json")
 	t.Setenv("QCH_EXISTING_SING_BOX_CONFIG_DIRECTORY", "/etc/sing-box")
@@ -78,15 +78,8 @@ func TestExistingSingBoxSpecRejectsRelativeWorkingDirectory(t *testing.T) {
 	if !ok {
 		t.Fatal("sing-box mapping was not loaded")
 	}
-	executor := &agent.Executor{
-		Specs: agent.DefaultSpecs(),
-		ExistingSpecs: map[core.Engine]agent.EngineSpec{
-			core.EngineSingBox: spec,
-		},
-		MigrationMarkerPrefix: filepath.Join(t.TempDir(), "marker"),
-	}
-	if err := executor.Validate(); err == nil || !strings.Contains(err.Error(), "working directory") {
-		t.Fatalf("relative sing-box working directory validation error = %v", err)
+	if spec.WorkingDirectory != "var/lib/sing-box" {
+		t.Fatalf("relative sing-box working directory was not captured: %+v", spec)
 	}
 }
 

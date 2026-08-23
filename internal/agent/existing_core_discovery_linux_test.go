@@ -805,3 +805,13 @@ func assertDiscoveredSingBoxSpec(t *testing.T, spec EngineSpec, realBinary, serv
 func shellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
 }
+
+func TestValidateExistingSpecPathsRejectsRelativeSingBoxWorkingDirectory(t *testing.T) {
+	spec := EngineSpec{
+		Binary: "/usr/bin/sing-box", ConfigPath: "/etc/sing-box/config.json",
+		ConfigDirectory: "/etc/sing-box", WorkingDirectory: "var/lib/sing-box",
+	}
+	if err := validateExistingSpecPaths(core.EngineSingBox, spec); err == nil || !strings.Contains(err.Error(), "working directory") {
+		t.Fatalf("relative sing-box working directory was not rejected: %v", err)
+	}
+}
