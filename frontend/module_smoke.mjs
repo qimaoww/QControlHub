@@ -3353,6 +3353,68 @@ assert.equal(fallbackRows[0].source, "已验证连接来源");
 assert.equal(fallbackRows[1].value, "");
 assert.equal(fallbackRows[1].ok, false);
 
+const manualRows = publicAddressRows(
+  {
+    public_ipv4: "198.35.26.96",
+    public_ipv6: "2606:4700:4700::1111",
+  },
+  {
+    client_address: "198.35.26.10",
+    public_ip: "93.184.216.34",
+  },
+  ["public-ip-probe-v1"],
+);
+assert.equal(manualRows[0].value, "198.35.26.10");
+assert.equal(manualRows[0].source, "手动设置");
+assert.equal(manualRows[1].value, "2606:4700:4700::1111");
+assert.equal(manualRows[1].source, "公网探测");
+
+// A hostname remains the highest-priority client connection setting, while a
+// supported public_ip literal may still fill its own family without DNS
+// inference or pretending that the hostname is an IP address.
+const manualDomainRows = publicAddressRows(
+  { public_ipv4: "198.35.26.96" },
+  { client_address: "node.example.com", public_ip: "93.184.216.34" },
+);
+assert.equal(manualDomainRows[0].value, "93.184.216.34");
+assert.equal(manualDomainRows[0].source, "节点公网 IP");
+assert.equal(manualDomainRows[1].value, "");
+assert.equal(manualDomainRows[1].source, "公网探测未启用 · 可手动设置");
+
+assert.equal(
+  publicAddressRows({}, {}, [])[0].source,
+  "公网探测未启用 · 可手动设置",
+);
+assert.equal(
+  publicAddressRows({}, {}, ["public-ip-probe-v1"])[0].source,
+  "公网探测已启用 · 等待结果",
+);
+assert.equal(
+  publicAddressRows({ collected_at: "now" }, {}, ["public-ip-probe-v1"])[0].source,
+  "无可验证公网地址 · 可手动设置",
+);
+
+const manualIPv6Rows = publicAddressRows(
+  { public_ipv6: "2620:4f:8001::1" },
+  { client_address: "[2606:4700:4700::1111]" },
+);
+assert.equal(manualIPv6Rows[1].value, "2606:4700:4700::1111");
+assert.equal(manualIPv6Rows[1].source, "手动设置");
+
+const invalidManualRows = publicAddressRows(
+  { public_ipv4: "198.35.26.96" },
+  {
+    client_address: "100.64.0.8",
+    public_ip: "198.19.0.1",
+    public_host: "2606:4700:4700::1111%eth0",
+  },
+  ["public-ip-probe-v1"],
+);
+assert.equal(invalidManualRows[0].value, "198.35.26.96");
+assert.equal(invalidManualRows[0].source, "公网探测");
+assert.equal(invalidManualRows[1].value, "");
+assert.equal(invalidManualRows[1].ok, false);
+
 // An observed relay (e.g. a Cloudflare edge) must never beat a genuine
 // default-route interface address that reports the same family.
 const relayRows = publicAddressRows({
@@ -3360,7 +3422,7 @@ const relayRows = publicAddressRows({
   network_interfaces: [{ name: "eth0", addresses: ["2606:4700:4700::1111"] }],
 });
 assert.equal(relayRows[0].value, "");
-assert.equal(relayRows[0].source, "等待节点上报");
+assert.equal(relayRows[0].source, "公网探测未启用 · 可手动设置");
 assert.equal(relayRows[0].ok, false);
 assert.equal(relayRows[1].value, "2606:4700:4700::1111");
 assert.equal(relayRows[1].source, "默认路由接口 eth0");
@@ -3390,10 +3452,10 @@ const boundaryRows = publicAddressRows({
   ],
 });
 assert.equal(boundaryRows[0].value, "");
-assert.equal(boundaryRows[0].source, "等待节点上报");
+assert.equal(boundaryRows[0].source, "公网探测未启用 · 可手动设置");
 assert.equal(boundaryRows[0].ok, false);
 assert.equal(boundaryRows[1].value, "");
-assert.equal(boundaryRows[1].source, "等待节点上报");
+assert.equal(boundaryRows[1].source, "公网探测未启用 · 可手动设置");
 assert.equal(boundaryRows[1].ok, false);
 
 const outsideBoundaryRows = publicAddressRows({
@@ -3417,10 +3479,10 @@ const staleSourceRows = publicAddressRows({
   public_ipv6: "2606:4700:4700::1111%eth0",
 });
 assert.equal(staleSourceRows[0].value, "");
-assert.equal(staleSourceRows[0].source, "等待节点上报");
+assert.equal(staleSourceRows[0].source, "公网探测未启用 · 可手动设置");
 assert.equal(staleSourceRows[0].ok, false);
 assert.equal(staleSourceRows[1].value, "");
-assert.equal(staleSourceRows[1].source, "等待节点上报");
+assert.equal(staleSourceRows[1].source, "公网探测未启用 · 可手动设置");
 assert.equal(staleSourceRows[1].ok, false);
 
 // CSS contract: the IPv4/IPv6 badge must override the <i> default italic and
@@ -3565,6 +3627,7 @@ assert.equal(formatHostPort("", "443"), "");
       version: "1.2.3",
       capabilities: ["mihomo"],
       features: [],
+      labels: { client_address: "node.example.com" },
       metrics: {
         public_ipv4: "198.35.26.96",
         public_ipv6: "",
@@ -3636,6 +3699,39 @@ assert.equal(formatHostPort("", "443"), "");
     true,
     "node-settings card keeps a copy button",
   );
+  assert.equal(
+    overviewMarkup.includes("手动连接地址：node.example.com"),
+    true,
+    "node-settings card keeps a non-IP manual connection address separate",
+  );
+
+  overviewState.nodeView = "detail";
+  overviewState.anchor = "settings-node-alpha";
+  overviewAgents[0].labels = {
+    client_address: "198.35.26.10",
+    public_ip: "2606:4700:4700::1111",
+  };
+  await renderOverview(false, { overview: { agents: 1, agents_online: 1 } });
+  assert.equal(
+    overviewMarkup.includes('class="node-public-ips"'),
+    true,
+    "node-settings detail renders the public-address section",
+  );
+  assert.equal(
+    overviewMarkup.includes("198.35.26.10"),
+    true,
+    "node-settings detail renders a manually configured IPv4",
+  );
+  assert.equal(
+    overviewMarkup.includes("2606:4700:4700::1111"),
+    true,
+    "node-settings detail renders a manually configured IPv6",
+  );
+  assert.equal(
+    overviewMarkup.includes('data-ip-source="手动设置"'),
+    true,
+    "node-settings detail marks manual literal addresses explicitly",
+  );
   } finally {
     if (previousSetTimeout === undefined) delete globalThis.setTimeout;
     else globalThis.setTimeout = previousSetTimeout;
@@ -3675,6 +3771,7 @@ assert.equal(formatHostPort("", "443"), "");
     },
   };
   const cardLineV4 = {
+    dataset: {},
     querySelector(sel) {
       if (sel === "code") return cardCodeV4;
       if (sel === "[data-copy-ip]") return copyV4;
@@ -3691,6 +3788,7 @@ assert.equal(formatHostPort("", "443"), "");
   const publicCodeV4 = { textContent: "", title: "" };
   const publicSmallV4 = { textContent: "" };
   const publicLineV4 = {
+    dataset: {},
     querySelector(sel) {
       if (sel === "code") return publicCodeV4;
       if (sel === "small") return publicSmallV4;
@@ -3704,6 +3802,7 @@ assert.equal(formatHostPort("", "443"), "");
       return sel === '.public-ip-row[data-ip-family="v4"]' ? publicLineV4 : null;
     },
   };
+  const connectionNote = { textContent: "旧手动地址", hidden: false };
   const root = {
     dataset: { available: "0" },
     querySelector() { return null; },
@@ -3711,6 +3810,7 @@ assert.equal(formatHostPort("", "443"), "");
       if (sel === ".node-card-ips, .node-public-ips") {
         return [cardContainer, publicContainer];
       }
+      if (sel === "[data-node-connection-address]") return [connectionNote];
       return [];
     },
   };
@@ -3756,23 +3856,45 @@ assert.equal(formatHostPort("", "443"), "");
       id: "alpha",
       status: "online",
       metrics: { public_ipv4: "198.35.26.96", public_ipv6: "" },
+      labels: { client_address: "93.184.216.34" },
+      features: ["public-ip-probe-v1"],
       runtime: {},
       version: "1.2.3",
       last_seen: "now",
     });
     // The one in-place refresh must update the card text and hover title, the
     // copy target/title/aria, and the detail source, without replacing the DOM.
-    assert.equal(cardCodeV4.textContent, "198.35.26.96");
-    assert.equal(cardCodeV4.title, "198.35.26.96");
-    assert.equal(copyV4.dataset.copyIp, "198.35.26.96");
+    assert.equal(cardCodeV4.textContent, "93.184.216.34");
+    assert.equal(cardCodeV4.title, "93.184.216.34");
+    assert.equal(cardLineV4.dataset.ipSource, "手动设置");
+    assert.equal(copyV4.dataset.copyIp, "93.184.216.34");
     assert.equal(copyV4.title, "复制 IPv4 地址");
-    assert.equal(copyV4.attrs["aria-label"], "复制 IPv4 公网地址 198.35.26.96");
+    assert.equal(copyV4.attrs["aria-label"], "复制 IPv4 公网地址 93.184.216.34");
     assert.equal(copyV4.hidden, false);
-    assert.equal(publicCodeV4.textContent, "198.35.26.96");
-    assert.equal(publicCodeV4.title, "198.35.26.96");
-    assert.equal(publicSmallV4.textContent, "公网探测");
+    assert.equal(publicCodeV4.textContent, "93.184.216.34");
+    assert.equal(publicCodeV4.title, "93.184.216.34");
+    assert.equal(publicLineV4.dataset.ipSource, "手动设置");
+    assert.equal(publicSmallV4.textContent, "手动设置");
+    assert.equal(connectionNote.textContent, "");
+    assert.equal(connectionNote.hidden, true);
     assert.equal(cardContainer.querySelector('.card-ip-row[data-ip-family="v4"]'), cardLineV4);
     assert.equal(publicContainer.querySelector('.public-ip-row[data-ip-family="v4"]'), publicLineV4);
+
+    updateAgentMetrics({
+      id: "alpha",
+      status: "online",
+      metrics: { public_ipv4: "198.35.26.96", public_ipv6: "" },
+      labels: {},
+      features: ["public-ip-probe-v1"],
+      runtime: {},
+      version: "1.2.3",
+      last_seen: "now",
+    });
+    assert.equal(cardCodeV4.textContent, "198.35.26.96");
+    assert.equal(cardLineV4.dataset.ipSource, "公网探测");
+    assert.equal(publicSmallV4.textContent, "公网探测");
+    assert.equal(connectionNote.textContent, "");
+    assert.equal(connectionNote.hidden, true);
   } finally {
     if (previousSetTimeout === undefined) delete globalThis.setTimeout;
     else globalThis.setTimeout = previousSetTimeout;
