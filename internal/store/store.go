@@ -1043,8 +1043,28 @@ func (s *Store) RetryTask(ctx context.Context, id string) (core.Task, error) {
 
 // RunningTask returns the task lease currently owned by an agent. A reconnecting
 // Agent can resume result delivery without waiting for the stale-lease janitor.
+// If the Agent no longer advertises the protocol required by the running task
+// (for example a Mihomo development mirror install after the Agent was
+// downgraded), the task is failed atomically instead of being delivered to an
+// Agent that would silently fall back to the official repository.
 func (s *Store) RunningTask(ctx context.Context, agentID string) (*core.Task, error) {
-	row := s.pool.QueryRow(ctx, `
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+	var featuresJSON []byte
+	if err := tx.QueryRow(ctx, `SELECT features FROM agents WHERE id=$1 AND revoked_at IS NULL FOR UPDATE`, agentID).Scan(&featuresJSON); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var features []string
+	if err := json.Unmarshal(featuresJSON, &features); err != nil {
+		return nil, err
+	}
+	row := tx.QueryRow(ctx, `
 		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),
 		       COALESCE(config_content,''),COALESCE(core_version,''),COALESCE(core_source,''),status,attempt,COALESCE(lease_id,''),
 		       COALESCE(output,''),COALESCE(error,''),created_at,started_at,finished_at
@@ -1052,10 +1072,28 @@ func (s *Store) RunningTask(ctx context.Context, agentID string) (*core.Task, er
 		ORDER BY started_at DESC LIMIT 1`, agentID)
 	task, err := scanTask(row, true)
 	if errors.Is(err, pgx.ErrNoRows) {
+		if commitErr := tx.Commit(ctx); commitErr != nil {
+			return nil, commitErr
+		}
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
+	}
+	if isMihomoMirrorTask(task) && !containsFeature(features, core.AgentFeatureMihomoDevelopmentSource) {
+		if _, updateErr := tx.Exec(ctx, `
+			UPDATE tasks SET status='failed', error=$2, finished_at=now()
+			WHERE id=$1 AND status='running'`, task.ID,
+			"Agent no longer advertises mihomo-development-source-v1; the selected vernesong/mihomo mirror install was not executed"); updateErr != nil {
+			return nil, updateErr
+		}
+		if commitErr := tx.Commit(ctx); commitErr != nil {
+			return nil, commitErr
+		}
+		return nil, nil
+	}
+	if commitErr := tx.Commit(ctx); commitErr != nil {
+		return nil, commitErr
 	}
 	if task.ConfigContent != "" {
 		task.ConfigContent, err = s.decryptContent(task.ConfigContent)
@@ -1071,19 +1109,40 @@ func (s *Store) ClaimTask(ctx context.Context, agentID string) (*core.Task, erro
 	if err != nil {
 		return nil, err
 	}
-	row := s.pool.QueryRow(ctx, `
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+	var featuresJSON []byte
+	if err := tx.QueryRow(ctx, `SELECT features FROM agents WHERE id=$1 AND revoked_at IS NULL FOR UPDATE`, agentID).Scan(&featuresJSON); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var features []string
+	if err := json.Unmarshal(featuresJSON, &features); err != nil {
+		return nil, err
+	}
+	mirrorSupported := containsFeature(features, core.AgentFeatureMihomoDevelopmentSource)
+	row := tx.QueryRow(ctx, `
 		WITH next_task AS (
-			SELECT t.id FROM tasks t JOIN agents a ON a.id=t.agent_id
-			WHERE t.agent_id=$1 AND t.status='pending' AND a.revoked_at IS NULL
+			SELECT t.id FROM tasks t
+			WHERE t.agent_id=$1 AND t.status='pending'
 			  AND NOT EXISTS (SELECT 1 FROM tasks running WHERE running.agent_id=$1 AND running.status='running')
+			  AND ($3::boolean OR NOT (t.action='install' AND t.engine='mihomo' AND t.core_version='development' AND COALESCE(t.core_source,'')='mirror'))
 			ORDER BY t.created_at ASC FOR UPDATE OF t SKIP LOCKED LIMIT 1
 		)
 		UPDATE tasks t SET status='running',started_at=now(),attempt=attempt+1,lease_id=$2
 		FROM next_task n WHERE t.id=n.id
 		RETURNING t.id,t.agent_id,t.action,t.engine,COALESCE(t.config_id,''),COALESCE(t.config_version,0),
 		          COALESCE(t.config_content,''),COALESCE(t.core_version,''),COALESCE(t.core_source,''),t.status,t.attempt,COALESCE(t.lease_id,''),COALESCE(t.output,''),COALESCE(t.error,''),
-		          t.created_at,t.started_at,t.finished_at`, agentID, leaseID)
+		          t.created_at,t.started_at,t.finished_at`, agentID, leaseID, mirrorSupported)
 	task, err := scanTask(row, true)
+	if commitErr := tx.Commit(ctx); commitErr != nil {
+		return nil, commitErr
+	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -1097,6 +1156,15 @@ func (s *Store) ClaimTask(ctx context.Context, agentID string) (*core.Task, erro
 		}
 	}
 	return &task, nil
+}
+
+// isMihomoMirrorTask reports whether a task is the explicit third-party
+// vernesong/mihomo mirror install that requires mihomo-development-source-v1.
+func isMihomoMirrorTask(task core.Task) bool {
+	return task.Action == core.ActionInstall &&
+		task.Engine == core.EngineMihomo &&
+		task.CoreVersion == core.CoreVersionDevelopment &&
+		task.CoreSource == string(core.CoreSourceMirror)
 }
 
 func (s *Store) CompleteTask(ctx context.Context, agentID, taskID string, result core.TaskResultRequest) error {

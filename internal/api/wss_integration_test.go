@@ -512,3 +512,122 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 	}
 	rejectedResponse.Body.Close()
 }
+
+// TestWSSMirrorFeatureDowngradeWithPostgreSQL verifies that an Agent whose
+// advertised features were downgraded below mihomo-development-source-v1 never
+// receives a pending mirror development install over the websocket. The task
+// stays pending instead of being silently delivered to an Agent that would fall
+// back to the official repository.
+func TestWSSMirrorFeatureDowngradeWithPostgreSQL(t *testing.T) {
+	databaseURL := os.Getenv("QCH_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("QCH_TEST_DATABASE_URL is not configured")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	dataStore, err := store.Open(ctx, databaseURL, true)
+	if err != nil {
+		t.Fatalf("open PostgreSQL: %v", err)
+	}
+	defer dataStore.Close()
+
+	adminToken := strings.Repeat("d", 48)
+	trustedProxies, err := authn.ParseTrustedProxies([]string{"127.0.0.1/32"})
+	if err != nil {
+		t.Fatalf("parse trusted proxy fixture: %v", err)
+	}
+	httpServer := httptest.NewServer(New(dataStore, Config{
+		AdminToken:     adminToken,
+		TrustedProxies: trustedProxies,
+		AgentBinary:    []byte("test-agent-binary"),
+		AgentVersion:   "test-version",
+	}).Handler())
+	defer httpServer.Close()
+
+	enrollment, err := dataStore.CreateEnrollmentToken(ctx, core.EnrollmentTokenRequest{Name: "wss downgrade", TTLMinutes: 5, MaxUses: 1})
+	if err != nil {
+		t.Fatalf("create enrollment token: %v", err)
+	}
+	var enrolledAgentID string
+	t.Cleanup(func() {
+		ids := []string{}
+		if enrolledAgentID != "" {
+			ids = append(ids, enrolledAgentID)
+		}
+		cleanupTaskAPIFixture(t, databaseURL, enrollment.ID, ids)
+	})
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	enrollmentBody, _ := json.Marshal(core.EnrollRequest{
+		Name: "wss-downgrade", OS: "linux", Arch: "amd64",
+		Capabilities: []core.Engine{core.EngineMihomo},
+		Features:     []string{core.AgentFeatureSelfUpgrade, core.AgentFeatureMihomoDevelopmentSource},
+		PublicKey:    authn.EncodePublicKey(publicKey),
+	})
+	request, _ := http.NewRequestWithContext(ctx, http.MethodPost, httpServer.URL+"/agent/v1/enroll", bytes.NewReader(enrollmentBody))
+	request.Header.Set("Authorization", "Bearer "+enrollment.Token)
+	request.Header.Set("Content-Type", "application/json")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatalf("enroll request: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusCreated {
+		t.Fatalf("enroll status = %s", response.Status)
+	}
+	var enrolled core.EnrollResponse
+	if err := json.NewDecoder(response.Body).Decode(&enrolled); err != nil {
+		t.Fatalf("decode enrollment: %v", err)
+	}
+	enrolledAgentID = enrolled.AgentID
+
+	mirror, err := dataStore.CreateTask(ctx, core.TaskRequest{
+		AgentID: enrolled.AgentID, Action: core.ActionInstall, Engine: core.EngineMihomo,
+		CoreVersion: core.CoreVersionDevelopment, CoreSource: string(core.CoreSourceMirror),
+	})
+	if err != nil {
+		t.Fatalf("create mirror task: %v", err)
+	}
+	// Simulate an older Agent/older heartbeat overwriting features without the
+	// negotiated source feature before the websocket reconnects.
+	if err := dataStore.Heartbeat(ctx, enrolled.AgentID, core.HeartbeatRequest{
+		Version:  "downgraded",
+		Features: []string{core.AgentFeatureSelfUpgrade, core.AgentFeaturePortTraffic, core.AgentFeatureCoreLogs},
+	}); err != nil {
+		t.Fatalf("downgrade features: %v", err)
+	}
+
+	websocketURL := "ws" + strings.TrimPrefix(httpServer.URL, "http") + "/agent/v1/connect"
+	handshake, _ := http.NewRequestWithContext(ctx, http.MethodGet, websocketURL, nil)
+	if err := authn.SignRequest(handshake, nil, enrolled.AgentID, privateKey, time.Now().UTC()); err != nil {
+		t.Fatalf("sign WSS handshake: %v", err)
+	}
+	handshake.Header.Set("X-Forwarded-For", "192.0.2.44")
+	connection, dialResponse, err := websocket.Dial(ctx, websocketURL, &websocket.DialOptions{
+		HTTPHeader: handshake.Header, Subprotocols: []string{"qcontrolhub.agent.v1"},
+	})
+	if err != nil {
+		if dialResponse != nil {
+			t.Fatalf("dial WSS: %v (%s)", err, dialResponse.Status)
+		}
+		t.Fatalf("dial WSS: %v", err)
+	}
+	defer connection.Close(websocket.StatusNormalClosure, "test complete")
+	var hello core.WireMessage
+	if err := wsjson.Read(ctx, connection, &hello); err != nil || hello.Type != core.WireHello {
+		t.Fatalf("read hello: message=%+v error=%v", hello, err)
+	}
+	// The downgraded Agent must not receive the mirror task; assert no WireTask
+	// within the read window while the pending task remains untouched.
+	readCtx, cancelRead := context.WithTimeout(ctx, 400*time.Millisecond)
+	defer cancelRead()
+	var unexpected core.WireMessage
+	if err := wsjson.Read(readCtx, connection, &unexpected); err == nil {
+		t.Fatalf("downgraded Agent received unexpected message: %+v", unexpected)
+	}
+	if got, err := dataStore.GetTask(ctx, mirror.ID); err != nil || got.Status != core.TaskPending {
+		t.Fatalf("mirror task after downgraded WSS connect = %+v, %v; want pending", got, err)
+	}
+}
