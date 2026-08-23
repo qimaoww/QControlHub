@@ -156,14 +156,14 @@ func TestOneClickInstallerMapsOnlyValidatedExistingCorePaths(t *testing.T) {
 	for _, required := range []string{
 		"discover_existing_xray", "discover_existing_singbox", "systemctl is-active --quiet",
 		"existing-core-mapping.sh", "QCH_EXISTING_XRAY_CONFIG", "QCH_EXISTING_SING_BOX_CONFIG",
-		"rc-service \"$service\" status", "/proc/[0-9]*",
+		"rc-service \"$service\" status", "openrc_supervised_child_pid",
 		"QCH_SERVICE_MANAGER", "apk add --no-cache", "deploy/openrc",
 	} {
 		if !strings.Contains(script, required) {
 			t.Errorf("one-click installer is missing inherited-core guard %q", required)
 		}
 	}
-	for _, forbidden := range []string{"systemctl stop xray.service", "systemctl stop sing-box.service", "QCH_INHERIT_CONFIGS", "validate-inherited"} {
+	for _, forbidden := range []string{"systemctl stop xray.service", "systemctl stop sing-box.service", "QCH_INHERIT_CONFIGS", "validate-inherited", "/proc/[0-9]*"} {
 		if strings.Contains(script, forbidden) {
 			t.Errorf("one-click installer stops an existing service via %q", forbidden)
 		}

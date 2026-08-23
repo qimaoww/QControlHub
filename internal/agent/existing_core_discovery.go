@@ -192,7 +192,7 @@ func discoverExistingCoreService(ctx context.Context, engine core.Engine, manage
 	if manager.Kind() == ServiceManagerOpenRC {
 		spec, err := discoverOpenRCExistingSpec(ctx, engine, service, candidates)
 		if err != nil {
-			return EngineSpec{}, false, fmt.Sprintf("检测到活动的 %s OpenRC 服务，但无法将其唯一进程精确映射到受支持的二进制和配置", engine)
+			return EngineSpec{}, false, fmt.Sprintf("检测到活动的 %s OpenRC 服务，但缺少可证明归属该服务的受保护 supervise-daemon 进程身份，或其二进制与参数不受支持", engine)
 		}
 		return validateDiscoveredExistingSpec(ctx, engine, managed, spec, validationDirectory, manager)
 	}
@@ -254,44 +254,22 @@ func validateDiscoveredExistingSpec(ctx context.Context, engine core.Engine, man
 }
 
 func discoverOpenRCExistingSpec(ctx context.Context, engine core.Engine, service string, candidates existingDiscoveryCandidateSet) (EngineSpec, error) {
-	entries, err := os.ReadDir(openRCProcRoot)
+	identity, err := boundOpenRCServiceProcess(ctx, service)
 	if err != nil {
 		return EngineSpec{}, err
 	}
-	matches := make([]EngineSpec, 0, 1)
-	for _, entry := range entries {
-		if ctx.Err() != nil {
-			return EngineSpec{}, ctx.Err()
-		}
-		if !entry.IsDir() || !decimalProcessID(entry.Name()) {
-			continue
-		}
-		processRoot := filepath.Join(openRCProcRoot, entry.Name())
-		executable, err := os.Readlink(filepath.Join(processRoot, "exe"))
-		if err != nil {
-			continue
-		}
-		argv, err := readOpenRCProcessArgv(filepath.Join(processRoot, "cmdline"))
-		if err != nil || len(argv) == 0 {
-			continue
-		}
-		serviceBinary, realBinary, ok := matchDiscoveredOpenRCExecutable(executable, argv[0], candidates.executables)
-		if !ok {
-			continue
-		}
-		configPath, configDirectory, ok := parseDiscoveredOpenRCArgv(engine, argv, candidates.configs)
-		if !ok {
-			continue
-		}
-		matches = append(matches, EngineSpec{
-			Binary: realBinary, ConfigPath: configPath, ConfigDirectory: configDirectory,
-			ServiceBinary: serviceBinary, Service: service,
-		})
+	serviceBinary, realBinary, ok := matchDiscoveredOpenRCExecutable(identity.Child.Executable, identity.Child.Argv[0], candidates.executables)
+	if !ok {
+		return EngineSpec{}, errors.New("service-bound OpenRC process executable is not supported")
 	}
-	if len(matches) != 1 {
-		return EngineSpec{}, fmt.Errorf("found %d matching OpenRC processes", len(matches))
+	configPath, configDirectory, ok := parseDiscoveredOpenRCArgv(engine, identity.Child.Argv, candidates.configs)
+	if !ok {
+		return EngineSpec{}, errors.New("service-bound OpenRC process arguments are not supported")
 	}
-	return matches[0], nil
+	return EngineSpec{
+		Binary: realBinary, ConfigPath: configPath, ConfigDirectory: configDirectory,
+		ServiceBinary: serviceBinary, Service: service,
+	}, nil
 }
 
 func matchDiscoveredOpenRCExecutable(processExecutable, argv0 string, candidates []string) (string, string, bool) {

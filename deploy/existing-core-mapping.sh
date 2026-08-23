@@ -10,6 +10,12 @@ mapped_singbox_config_directory=""
 mapped_singbox_service_binary=""
 mapped_singbox_service=""
 
+openrc_init_root=${OPENRC_INIT_ROOT:-/etc/init.d}
+openrc_state_root=${OPENRC_STATE_ROOT:-/run/openrc}
+openrc_run_root=${OPENRC_RUN_ROOT:-/run}
+openrc_supervisor_executable=${OPENRC_SUPERVISOR_EXECUTABLE:-/sbin/supervise-daemon}
+proc_root=${QCH_PROC_ROOT:-/proc}
+
 case "${service_manager:-systemd}" in
   openrc)
     xray_service_candidates="xray"
@@ -34,6 +40,58 @@ append_csv() {
   else
     printf '%s' "$value"
   fi
+}
+
+# Resolve the single child process that an OpenRC supervise-daemon provably owns
+# for the named service. Prints "supervisor_pid child_pid" on success and fails
+# closed for any layout that is not backed by protected supervise-daemon state.
+openrc_supervised_child_pid() {
+  service=$1
+  [ -n "$service" ] || return 1
+  case "$service" in *[!A-Za-z0-9_-]*) return 1 ;; esac
+  protected_directory_chain "$openrc_init_root" || return 1
+  protected_regular_file "$openrc_init_root/$service" true || return 1
+  rc-service "$service" status >/dev/null 2>&1 || return 1
+  options_dir="$openrc_state_root/options/$service"
+  protected_directory_chain "$options_dir" || return 1
+  protected_regular_file "$options_dir/child_pid" false || return 1
+  child_pid=$(cat "$options_dir/child_pid") || return 1
+  case "$child_pid" in *[!0-9]*) return 1 ;; esac
+  [ "$child_pid" -gt 1 ] || return 1
+  protected_regular_file "$options_dir/pidfile" false || return 1
+  pidfile_value=$(cat "$options_dir/pidfile") || return 1
+  case "$pidfile_value" in
+    "$openrc_run_root/supervise-$service.pid"|"/var/run/supervise-$service.pid") ;;
+    *) return 1 ;;
+  esac
+  supervisor_pidfile="$openrc_run_root/supervise-$service.pid"
+  protected_directory_chain "$(dirname -- "$supervisor_pidfile")" || return 1
+  protected_regular_file "$supervisor_pidfile" false || return 1
+  supervisor_pid=$(cat "$supervisor_pidfile") || return 1
+  case "$supervisor_pid" in *[!0-9]*) return 1 ;; esac
+  [ "$supervisor_pid" -gt 1 ] || return 1
+  # The supervisor must itself be the protected OpenRC helper invoked for this
+  # service, not merely a same-named binary that is executing elsewhere.
+  supervisor_exe=$(readlink "$proc_root/$supervisor_pid/exe" 2>/dev/null) || return 1
+  [ -n "$supervisor_exe" ] || return 1
+  case "$openrc_supervisor_executable" in /*) ;; *) return 1 ;; esac
+  protected_directory_chain "$(dirname -- "$openrc_supervisor_executable")" || return 1
+  protected_regular_file "$openrc_supervisor_executable" true || return 1
+  case "$supervisor_exe" in
+    "$openrc_supervisor_executable") ;;
+    *) return 1 ;;
+  esac
+  supervisor_cmdline=$(tr '\000' ' ' < "$proc_root/$supervisor_pid/cmdline" 2>/dev/null) || return 1
+  case " $supervisor_cmdline " in *" $service "*) ;; *) return 1 ;; esac
+  case " $supervisor_cmdline " in *" --start "*) ;; *) return 1 ;; esac
+  child_info=$(sed 's/^.*) //' "$proc_root/$child_pid/stat" 2>/dev/null) || return 1
+  set -- $child_info
+  [ "$2" -eq "$supervisor_pid" ] || return 1
+  child_starttime=$20
+  child_info_again=$(sed 's/^.*) //' "$proc_root/$child_pid/stat" 2>/dev/null) || return 1
+  set -- $child_info_again
+  [ "$child_starttime" = "$20" ] || return 1
+  printf '%s %s\n' "$supervisor_pid" "$child_pid"
 }
 
 protected_regular_file() {
@@ -151,48 +209,41 @@ service_uses_paths() {
   engine=$4
   real_binary=${5:-$binary}
   if [ "${service_manager:-systemd}" = openrc ]; then
-    protected_directory_chain /etc/init.d || return 1
-    protected_regular_file "/etc/init.d/$service" true || return 1
-    rc-service "$service" status >/dev/null 2>&1 || return 1
-    matched_processes=0
+    supervised=$(openrc_supervised_child_pid "$service") || return 1
+    set -- $supervised
+    supervisor_pid=$1
+    child_pid=$2
+    process_binary=$(readlink "$proc_root/$child_pid/exe" 2>/dev/null) || return 1
+    [ "$process_binary" = "$real_binary" ] || return 1
+    command_line=$(tr '\000' ' ' < "$proc_root/$child_pid/cmdline" 2>/dev/null) || return 1
     matched_config_directory=""
-    for process_dir in /proc/[0-9]*; do
-      [ -e "$process_dir/exe" ] || continue
-      process_binary=$(readlink "$process_dir/exe" 2>/dev/null) || continue
-      [ "$process_binary" = "$real_binary" ] || continue
-      command_line=$(tr '\000' ' ' < "$process_dir/cmdline" 2>/dev/null) || continue
-      process_config_directory=""
-      case "$engine:$command_line" in
-        "xray:$binary run -config $config "|"xray:$binary run -c $config "|\
-        "xray:$real_binary run -config $config "|"xray:$real_binary run -c $config "|\
-        "sing-box:$binary run -c $config "|"sing-box:$binary run --config $config "|\
-        "sing-box:$real_binary run -c $config "|"sing-box:$real_binary run --config $config ") ;;
-        *)
-          [ "$engine" = sing-box ] || continue
-          process_config_directory=""
-          for process_prefix in \
-            "$binary run -c $config -C " \
-            "$real_binary run -c $config -C "
-          do
-            case "$command_line" in
-              "$process_prefix"*' ')
-                process_config_directory=${command_line#"$process_prefix"}
-                process_config_directory=${process_config_directory% }
-                ;;
-              *) continue ;;
-            esac
-            break
-          done
-          [ -n "$process_config_directory" ] || continue
-          case "$process_config_directory" in /*) ;; *) continue ;; esac
-          case "$process_config_directory" in *[[:space:]]*) continue ;; esac
-          protected_config_directory "$process_config_directory" "$config" || continue
-          ;;
-      esac
-      matched_processes=$((matched_processes + 1))
-      matched_config_directory=$process_config_directory
-    done
-    [ "$matched_processes" -eq 1 ]
+    case "$engine:$command_line" in
+      "xray:$binary run -config $config "|"xray:$binary run -c $config "|\
+      "xray:$real_binary run -config $config "|"xray:$real_binary run -c $config "|\
+      "sing-box:$binary run -c $config "|"sing-box:$binary run --config $config "|\
+      "sing-box:$real_binary run -c $config "|"sing-box:$real_binary run --config $config ") ;;
+      *)
+        [ "$engine" = sing-box ] || return 1
+        for process_prefix in \
+          "$binary run -c $config -C " \
+          "$real_binary run -c $config -C "
+        do
+          case "$command_line" in
+            "$process_prefix"*' ')
+              process_config_directory=${command_line#"$process_prefix"}
+              process_config_directory=${process_config_directory% }
+              ;;
+            *) continue ;;
+          esac
+          case "$process_config_directory" in /*) ;; *) return 1 ;; esac
+          case "$process_config_directory" in *[[:space:]]*) return 1 ;; esac
+          protected_config_directory "$process_config_directory" "$config" || return 1
+          matched_config_directory=$process_config_directory
+          return 0
+        done
+        return 1
+        ;;
+    esac
     return
   fi
   systemctl is-active --quiet "$service" 2>/dev/null || return 1
@@ -222,10 +273,10 @@ qagent_core_service_is_safe_to_disable() {
   engine=$1
   if [ "${service_manager:-systemd}" = openrc ]; then
     service="qagent-$engine"
-    expected_fragment=${2:-/etc/init.d/$service}
+    expected_fragment=${2:-$openrc_init_root/$service}
     [ -e "$expected_fragment" ] || return 0
     [ ! -L "$expected_fragment" ] && [ -f "$expected_fragment" ] || return 1
-    protected_directory_chain /etc/init.d || return 1
+    protected_directory_chain "$openrc_init_root" || return 1
     protected_regular_file "$expected_fragment" true || return 1
     grep -q "^# QControlHub managed OpenRC service: $service$" "$expected_fragment" || return 1
     if rc-service "$service" status >/dev/null 2>&1; then return 1; fi
@@ -265,7 +316,7 @@ require_skipped_core_service_inactive() {
 disable_skipped_core_service() {
   engine=$1
   if [ "${service_manager:-systemd}" = openrc ]; then
-    expected_fragment=${2:-/etc/init.d/qagent-$engine}
+    expected_fragment=${2:-$openrc_init_root/qagent-$engine}
     service="qagent-$engine"
     require_skipped_core_service_inactive "$engine" || return 1
     qagent_core_service_is_safe_to_disable "$engine" "$expected_fragment" || {
@@ -319,8 +370,8 @@ find_single_active_service() {
   active_service_candidate=""
   active_service_count=0
   for candidate in $candidates; do
-    if [ "${service_manager:-systemd}" = openrc ] && [ -e "/etc/init.d/$candidate" ]; then
-      protected_directory_chain /etc/init.d && protected_regular_file "/etc/init.d/$candidate" true || {
+    if [ "${service_manager:-systemd}" = openrc ] && [ -e "$openrc_init_root/$candidate" ]; then
+      protected_directory_chain "$openrc_init_root" && protected_regular_file "$openrc_init_root/$candidate" true || {
         printf '%s\n' "unsafe OpenRC service script: /etc/init.d/$candidate" >&2
         return 2
       }
@@ -340,8 +391,8 @@ find_single_active_service() {
 service_is_active() {
   service=$1
   if [ "${service_manager:-systemd}" = openrc ]; then
-    protected_directory_chain /etc/init.d || return 1
-    protected_regular_file "/etc/init.d/$service" true || return 1
+    protected_directory_chain "$openrc_init_root" || return 1
+    protected_regular_file "$openrc_init_root/$service" true || return 1
     rc-service "$service" status >/dev/null 2>&1
   else
     systemctl is-active --quiet "$service" 2>/dev/null

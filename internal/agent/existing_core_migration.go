@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,9 +17,12 @@ import (
 )
 
 var (
-	openRCProcRoot      = "/proc"
-	openRCRunlevelsRoot = "/etc/runlevels"
-	openRCInitRoot      = "/etc/init.d"
+	openRCProcRoot             = "/proc"
+	openRCStateRoot            = "/run/openrc"
+	openRCSupervisorRoot       = "/run"
+	openRCRunlevelsRoot        = "/etc/runlevels"
+	openRCInitRoot             = "/etc/init.d"
+	openRCSupervisorExecutable = openRCHelperExecutable("supervise-daemon", "/sbin/supervise-daemon")
 )
 
 func (e *Executor) LoadCoreMigrationState() error {
@@ -198,7 +202,19 @@ func waitForCoreMigrationServicePairStable(ctx context.Context, existingService,
 }
 
 func verifyCoreMigrationCompletionState(ctx context.Context, existing, managed EngineSpec, managers ...*ServiceManager) error {
-	return waitForCoreMigrationState(ctx, existing.Service, managed.Service, "inactive", "active", "disabled", "enabled", managers...)
+	manager := selectedServiceManager(managers...)
+	if err := waitForCoreMigrationState(ctx, existing.Service, managed.Service, "inactive", "active", "disabled", "enabled", manager); err != nil {
+		return err
+	}
+	if manager.Kind() == ServiceManagerOpenRC {
+		if _, err := boundOpenRCServiceProcess(ctx, existing.Service); !errors.Is(err, errOpenRCServiceProcessUnbound) {
+			if err == nil {
+				return errors.New("existing OpenRC service still owns a supervised process after migration")
+			}
+			return fmt.Errorf("existing OpenRC service process state is not safely absent after migration: %w", err)
+		}
+	}
+	return nil
 }
 
 func waitForCoreMigrationState(ctx context.Context, existingService, managedService, expectedExistingStatus, expectedManagedStatus, expectedExistingEnableState, expectedManagedEnableState string, managers ...*ServiceManager) error {
@@ -982,8 +998,21 @@ func (e *Executor) importExistingConfig(ctx context.Context, engine core.Engine,
 		return rollbackMigration(err)
 	}
 
+	var stoppedOpenRCProcess *openRCServiceProcessIdentity
+	if manager.Kind() == ServiceManagerOpenRC {
+		identity, err := verifyOpenRCExistingServiceProcess(ctx, engine, existing)
+		if err != nil {
+			return rollbackMigration(fmt.Errorf("revalidate service-bound %s OpenRC process immediately before stop: %w", engine, err))
+		}
+		stoppedOpenRCProcess = &identity
+	}
 	if _, err := serviceCommandAndVerifyWithManager(ctx, manager, existing.Service, core.ActionStop); err != nil {
 		return rollbackMigration(fmt.Errorf("stop existing %s service: %w", engine, err))
+	}
+	if stoppedOpenRCProcess != nil {
+		if err := waitForOpenRCServiceProcessExit(ctx, *stoppedOpenRCProcess); err != nil {
+			return rollbackMigration(fmt.Errorf("confirm stopped %s OpenRC service process exited: %w", engine, err))
+		}
 	}
 	if _, err := serviceCommandAndVerifyWithManager(ctx, manager, managed.Service, core.ActionStart); err != nil {
 		return rollbackMigration(fmt.Errorf("start QAgent %s service: %w", engine, err))
@@ -1102,12 +1131,8 @@ func verifyExistingServiceMapping(ctx context.Context, engine core.Engine, exist
 		if err := validateOpenRCServiceScript(existing.Service, ""); err != nil {
 			return fmt.Errorf("existing %s OpenRC service script is unsafe: %w", engine, err)
 		}
-		matches, err := matchingOpenRCServiceProcesses(ctx, engine, existing)
-		if err != nil {
+		if _, err := verifyOpenRCExistingServiceProcess(ctx, engine, existing); err != nil {
 			return fmt.Errorf("inspect existing %s OpenRC process before migration: %w", engine, err)
-		}
-		if matches != 1 {
-			return fmt.Errorf("existing %s OpenRC service no longer has exactly one process matching the discovered binary and configuration", engine)
 		}
 	} else {
 		output, err := run(ctx, systemctlPath, "show", existing.Service, "--property=ExecStart", "--value")
@@ -1132,31 +1157,287 @@ func verifyExistingServiceMapping(ctx context.Context, engine core.Engine, exist
 	return nil
 }
 
-func matchingOpenRCServiceProcesses(ctx context.Context, engine core.Engine, existing EngineSpec) (int, error) {
+var errOpenRCServiceProcessUnbound = errors.New("OpenRC service has no protected supervise-daemon process metadata")
+
+type openRCProcessIdentity struct {
+	PID        int
+	ParentPID  int
+	StartTime  string
+	Executable string
+	Argv       []string
+}
+
+type openRCServiceProcessIdentity struct {
+	Service    string
+	Supervisor openRCProcessIdentity
+	Child      openRCProcessIdentity
+}
+
+func verifyOpenRCExistingServiceProcess(ctx context.Context, engine core.Engine, existing EngineSpec) (openRCServiceProcessIdentity, error) {
+	identity, err := boundOpenRCServiceProcess(ctx, existing.Service)
+	if err != nil {
+		return openRCServiceProcessIdentity{}, err
+	}
+	if filepath.Clean(identity.Child.Executable) != filepath.Clean(existing.Binary) || !openRCProcessArgvMatches(engine, existing, identity.Child.Argv) {
+		return openRCServiceProcessIdentity{}, errors.New("service-bound process executable or arguments no longer match the discovered core mapping")
+	}
+	matches, err := matchingOpenRCCoreProcessIDs(ctx, engine, existing)
+	if err != nil {
+		return openRCServiceProcessIdentity{}, err
+	}
+	if len(matches) != 1 || matches[0] != identity.Child.PID {
+		return openRCServiceProcessIdentity{}, errors.New("existing OpenRC core process is ambiguous or is not uniquely owned by the reported service")
+	}
+	identityAgain, err := boundOpenRCServiceProcess(ctx, existing.Service)
+	if err != nil || identityAgain.Supervisor.PID != identity.Supervisor.PID || identityAgain.Supervisor.StartTime != identity.Supervisor.StartTime ||
+		identityAgain.Child.PID != identity.Child.PID || identityAgain.Child.StartTime != identity.Child.StartTime {
+		return openRCServiceProcessIdentity{}, errors.New("service-bound OpenRC process identity changed during mapping verification")
+	}
+	return identity, nil
+}
+
+func matchingOpenRCCoreProcessIDs(ctx context.Context, engine core.Engine, existing EngineSpec) ([]int, error) {
 	entries, err := os.ReadDir(openRCProcRoot)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	matches := 0
+	matches := make([]int, 0, 1)
 	for _, entry := range entries {
-		if ctx.Err() != nil {
-			return 0, ctx.Err()
+		if err := ctx.Err(); err != nil {
+			return nil, err
 		}
 		if !entry.IsDir() || !decimalProcessID(entry.Name()) {
 			continue
 		}
-		processRoot := filepath.Join(openRCProcRoot, entry.Name())
-		executable, err := os.Readlink(filepath.Join(processRoot, "exe"))
-		if err != nil || filepath.Clean(executable) != existing.Binary {
+		pid, err := strconv.Atoi(entry.Name())
+		if err != nil {
 			continue
 		}
-		argv, err := readOpenRCProcessArgv(filepath.Join(processRoot, "cmdline"))
-		if err != nil || !openRCProcessArgvMatches(engine, existing, argv) {
+		identity, err := readOpenRCProcessIdentity(pid)
+		if err != nil || filepath.Clean(identity.Executable) != filepath.Clean(existing.Binary) || !openRCProcessArgvMatches(engine, existing, identity.Argv) {
 			continue
 		}
-		matches++
+		matches = append(matches, pid)
 	}
 	return matches, nil
+}
+
+func boundOpenRCServiceProcess(ctx context.Context, service string) (openRCServiceProcessIdentity, error) {
+	if !safeServiceName(service) || strings.Contains(service, ".service") {
+		return openRCServiceProcessIdentity{}, errors.New("OpenRC service name is unsafe")
+	}
+	if err := ctx.Err(); err != nil {
+		return openRCServiceProcessIdentity{}, err
+	}
+	optionsDirectory := filepath.Join(openRCStateRoot, "options", service)
+	childPIDPath := filepath.Join(optionsDirectory, "child_pid")
+	pidfileMetadataPath := filepath.Join(optionsDirectory, "pidfile")
+	childPIDText, childPIDInfo, err := readProtectedOpenRCMetadata(childPIDPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return openRCServiceProcessIdentity{}, errOpenRCServiceProcessUnbound
+	}
+	if err != nil {
+		return openRCServiceProcessIdentity{}, fmt.Errorf("read supervise-daemon child PID metadata: %w", err)
+	}
+	childPID, err := parseOpenRCProcessID(childPIDText)
+	if err != nil {
+		return openRCServiceProcessIdentity{}, fmt.Errorf("parse supervise-daemon child PID metadata: %w", err)
+	}
+	pidfileValue, pidfileMetadataInfo, err := readProtectedOpenRCMetadata(pidfileMetadataPath)
+	if err != nil {
+		return openRCServiceProcessIdentity{}, fmt.Errorf("read supervise-daemon pidfile metadata: %w", err)
+	}
+	expectedPIDFileName := "supervise-" + service + ".pid"
+	if pidfileValue != filepath.Join("/run", expectedPIDFileName) && pidfileValue != filepath.Join("/var/run", expectedPIDFileName) {
+		return openRCServiceProcessIdentity{}, errors.New("OpenRC service uses an unsupported supervise-daemon pidfile")
+	}
+	supervisorPIDPath := filepath.Join(openRCSupervisorRoot, expectedPIDFileName)
+	supervisorPIDText, supervisorPIDInfo, err := readProtectedOpenRCMetadata(supervisorPIDPath)
+	if err != nil {
+		return openRCServiceProcessIdentity{}, fmt.Errorf("read supervise-daemon supervisor PID: %w", err)
+	}
+	supervisorPID, err := parseOpenRCProcessID(supervisorPIDText)
+	if err != nil {
+		return openRCServiceProcessIdentity{}, fmt.Errorf("parse supervise-daemon supervisor PID: %w", err)
+	}
+
+	supervisor, err := readOpenRCProcessIdentity(supervisorPID)
+	if err != nil {
+		return openRCServiceProcessIdentity{}, fmt.Errorf("read supervise-daemon supervisor identity: %w", err)
+	}
+	child, err := readOpenRCProcessIdentity(childPID)
+	if err != nil {
+		return openRCServiceProcessIdentity{}, fmt.Errorf("read supervise-daemon child identity: %w", err)
+	}
+	if child.ParentPID != supervisor.PID {
+		return openRCServiceProcessIdentity{}, errors.New("OpenRC service child is not owned by its supervise-daemon process")
+	}
+	if err := validatePrivilegedExecutable(openRCSupervisorExecutable); err != nil {
+		return openRCServiceProcessIdentity{}, fmt.Errorf("unsafe supervise-daemon executable: %w", err)
+	}
+	expectedSupervisorExecutable, err := filepath.EvalSymlinks(openRCSupervisorExecutable)
+	if err != nil {
+		return openRCServiceProcessIdentity{}, fmt.Errorf("resolve supervise-daemon executable: %w", err)
+	}
+	if filepath.Clean(supervisor.Executable) != filepath.Clean(expectedSupervisorExecutable) ||
+		len(supervisor.Argv) < 3 || filepath.Base(supervisor.Argv[0]) != "supervise-daemon" || supervisor.Argv[1] != service || !stringInSlice("--start", supervisor.Argv) {
+		return openRCServiceProcessIdentity{}, errors.New("OpenRC supervisor identity does not match this service's supervise-daemon invocation")
+	}
+
+	childPIDAgain, childPIDInfoAgain, err := readProtectedOpenRCMetadata(childPIDPath)
+	if err != nil || !os.SameFile(childPIDInfo, childPIDInfoAgain) || childPIDAgain != childPIDText {
+		return openRCServiceProcessIdentity{}, errors.New("OpenRC child PID metadata changed during process verification")
+	}
+	pidfileValueAgain, pidfileMetadataInfoAgain, err := readProtectedOpenRCMetadata(pidfileMetadataPath)
+	if err != nil || !os.SameFile(pidfileMetadataInfo, pidfileMetadataInfoAgain) || pidfileValueAgain != pidfileValue {
+		return openRCServiceProcessIdentity{}, errors.New("OpenRC pidfile metadata changed during process verification")
+	}
+	supervisorPIDAgain, supervisorPIDInfoAgain, err := readProtectedOpenRCMetadata(supervisorPIDPath)
+	if err != nil || !os.SameFile(supervisorPIDInfo, supervisorPIDInfoAgain) || supervisorPIDAgain != supervisorPIDText {
+		return openRCServiceProcessIdentity{}, errors.New("OpenRC supervisor PID changed during process verification")
+	}
+	if alive, err := openRCProcessIdentityAlive(supervisor); err != nil || !alive {
+		return openRCServiceProcessIdentity{}, errors.New("OpenRC supervise-daemon identity changed during process verification")
+	}
+	if alive, err := openRCProcessIdentityAlive(child); err != nil || !alive {
+		return openRCServiceProcessIdentity{}, errors.New("OpenRC service child identity changed during process verification")
+	}
+	return openRCServiceProcessIdentity{Service: service, Supervisor: supervisor, Child: child}, nil
+}
+
+func readProtectedOpenRCMetadata(path string) (string, os.FileInfo, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return "", nil, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() || info.Mode().Perm()&0o022 != 0 || info.Size() <= 0 || info.Size() > 4096 {
+		return "", nil, errors.New("OpenRC process metadata is not a protected small regular file")
+	}
+	if err := validateOwner(info, "OpenRC process metadata"); err != nil {
+		return "", nil, err
+	}
+	directory := filepath.Dir(path)
+	if err := validateProtectedDirectoryChain(directory); err != nil {
+		return "", nil, err
+	}
+	root, err := os.OpenRoot(directory)
+	if err != nil {
+		return "", nil, err
+	}
+	defer root.Close()
+	file, err := root.Open(filepath.Base(path))
+	if err != nil {
+		return "", nil, err
+	}
+	defer file.Close()
+	openedInfo, err := file.Stat()
+	if err != nil || !os.SameFile(info, openedInfo) || openedInfo.Size() != info.Size() {
+		return "", nil, errors.New("OpenRC process metadata changed while it was opened")
+	}
+	contents, err := io.ReadAll(io.LimitReader(file, 4097))
+	if err != nil || len(contents) == 0 || len(contents) > 4096 {
+		return "", nil, errors.New("OpenRC process metadata is empty or too large")
+	}
+	value := strings.TrimSuffix(strings.TrimSuffix(string(contents), "\n"), "\r")
+	if value == "" || strings.ContainsAny(value, "\x00\r\n") {
+		return "", nil, errors.New("OpenRC process metadata is malformed")
+	}
+	return value, openedInfo, nil
+}
+
+func parseOpenRCProcessID(value string) (int, error) {
+	if !decimalProcessID(value) {
+		return 0, errors.New("process ID is not decimal")
+	}
+	pid, err := strconv.Atoi(value)
+	if err != nil || pid <= 1 {
+		return 0, errors.New("process ID is outside the supported range")
+	}
+	return pid, nil
+}
+
+func readOpenRCProcessIdentity(pid int) (openRCProcessIdentity, error) {
+	processRoot := filepath.Join(openRCProcRoot, strconv.Itoa(pid))
+	parentPID, startTime, err := readOpenRCProcessStat(filepath.Join(processRoot, "stat"))
+	if err != nil {
+		return openRCProcessIdentity{}, err
+	}
+	executable, err := os.Readlink(filepath.Join(processRoot, "exe"))
+	if err != nil {
+		return openRCProcessIdentity{}, err
+	}
+	argv, err := readOpenRCProcessArgv(filepath.Join(processRoot, "cmdline"))
+	if err != nil {
+		return openRCProcessIdentity{}, err
+	}
+	parentPIDAgain, startTimeAgain, err := readOpenRCProcessStat(filepath.Join(processRoot, "stat"))
+	if err != nil || parentPIDAgain != parentPID || startTimeAgain != startTime {
+		return openRCProcessIdentity{}, errors.New("process identity changed while executable and arguments were read")
+	}
+	return openRCProcessIdentity{PID: pid, ParentPID: parentPID, StartTime: startTime, Executable: filepath.Clean(executable), Argv: argv}, nil
+}
+
+func readOpenRCProcessStat(path string) (int, string, error) {
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		return 0, "", err
+	}
+	separator := strings.LastIndex(string(contents), ") ")
+	if separator < 0 {
+		return 0, "", errors.New("process stat is malformed")
+	}
+	fields := strings.Fields(string(contents)[separator+2:])
+	if len(fields) < 20 || !decimalProcessID(fields[19]) {
+		return 0, "", errors.New("process stat lacks a valid start time")
+	}
+	parentPID, err := strconv.Atoi(fields[1])
+	if err != nil || parentPID < 0 {
+		return 0, "", errors.New("process stat lacks a valid parent PID")
+	}
+	return parentPID, fields[19], nil
+}
+
+func openRCProcessIdentityAlive(identity openRCProcessIdentity) (bool, error) {
+	_, startTime, err := readOpenRCProcessStat(filepath.Join(openRCProcRoot, strconv.Itoa(identity.PID), "stat"))
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return startTime == identity.StartTime, nil
+}
+
+func waitForOpenRCServiceProcessExit(ctx context.Context, identity openRCServiceProcessIdentity) error {
+	stableContext, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	var stableSince time.Time
+	for {
+		supervisorAlive, supervisorErr := openRCProcessIdentityAlive(identity.Supervisor)
+		childAlive, childErr := openRCProcessIdentityAlive(identity.Child)
+		if supervisorErr != nil || childErr != nil {
+			return errors.Join(supervisorErr, childErr)
+		}
+		_, boundErr := boundOpenRCServiceProcess(stableContext, identity.Service)
+		unbound := errors.Is(boundErr, errOpenRCServiceProcessUnbound)
+		if !supervisorAlive && !childAlive && unbound {
+			if stableSince.IsZero() {
+				stableSince = time.Now()
+			}
+			if time.Since(stableSince) >= 500*time.Millisecond {
+				return nil
+			}
+		} else {
+			stableSince = time.Time{}
+		}
+		select {
+		case <-stableContext.Done():
+			return fmt.Errorf("OpenRC service-bound process remained alive or supervised after stop: %w", stableContext.Err())
+		case <-ticker.C:
+		}
+	}
 }
 
 func decimalProcessID(value string) bool {

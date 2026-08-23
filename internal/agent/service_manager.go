@@ -56,7 +56,7 @@ func openRCHelperExecutable(name, legacyPath string) string {
 			return candidate
 		}
 	}
-	return rcServicePath
+	return legacyPath
 }
 
 func (manager *ServiceManager) Kind() string {

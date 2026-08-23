@@ -56,6 +56,7 @@ jobs:
           docker run --rm -v "$PWD:/src" -w /src golang:1.25-alpine sh -euxc '
             apk add --no-cache coreutils libcap nftables openrc
             go test ./internal/agent -run "^(TestOpenRC|TestDiscoverOpenRC)"
+            sh deploy/tests/existing-core-openrc.sh
             sh -n deploy/remote/install-agent.sh
             sh -n deploy/bootstrap-core-services.sh
             for service in deploy/openrc/*; do sh -n "$service"; done
