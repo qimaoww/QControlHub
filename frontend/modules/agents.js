@@ -23,8 +23,9 @@ function normalizeInterfaceAddress(raw) {
   let value = String(raw || "").trim();
   if (!value) return "";
   if (value.startsWith("[") && value.endsWith("]")) value = value.slice(1, -1);
-  const zone = value.indexOf("%");
-  if (zone >= 0) value = value.slice(0, zone);
+  // A zone identifier means the address is scoped, not a global unicast value
+  // netpolicy would accept; fail closed rather than silently stripping it.
+  if (value.indexOf("%") >= 0) return "";
   const mapped = value.match(/^::ffff:(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
   if (mapped) return `IPv4:${mapped.slice(1).join(".")}`;
   return value.includes(":") ? `IPv6:${value.toLowerCase()}` : `IPv4:${value}`;
@@ -46,56 +47,78 @@ function isGloballyRoutableIPv4(value) {
   if (a === 192 && b === 88 && c === 99) return false;
   if (a === 192 && b === 168) return false;
   if (a === 192 && b === 175 && c === 48) return false;
-  if (a === 198 && b === 18) return false;
+  if (a === 198 && (b === 18 || b === 19)) return false;
   if (a === 198 && b === 51 && c === 100) return false;
   if (a === 203 && b === 0 && c === 113) return false;
   return a <= 223;
 }
 
-function expandIPv6Hextets(value) {
-  const cleaned = value.replace(/^::ffff:/, "").replace(/%[^:]*$/, "");
-  if (cleaned === "::") return [0, 0, 0, 0, 0, 0, 0, 0];
+function parseIPv6Bytes(value) {
+  const cleaned = value.toLowerCase();
+  if (cleaned.includes("%")) return null;
   const parts = cleaned.split("::");
   if (parts.length > 2) return null;
-  const left = parts[0] ? parts[0].split(":") : [];
-  const right = parts.length === 2 && parts[1] ? parts[1].split(":") : [];
-  const leftHextets = [];
-  const rightHextets = [];
-  for (const group of left) {
-    if (!group || group.length > 4 || !/^[0-9a-f]+$/i.test(group)) return null;
-    leftHextets.push(parseInt(group, 16));
-  }
-  for (const group of right) {
-    if (!group || group.length > 4 || !/^[0-9a-f]+$/i.test(group)) return null;
-    rightHextets.push(parseInt(group, 16));
-  }
+  const parseGroups = (groups) => {
+    const out = [];
+    for (const group of groups) {
+      if (!group || group.length > 4 || !/^[0-9a-f]+$/.test(group)) return null;
+      const hextet = parseInt(group, 16);
+      out.push(hextet >> 8, hextet & 0xff);
+    }
+    return out;
+  };
+  const left = parts[0] ? parseGroups(parts[0].split(":")) : [];
+  if (!left) return null;
+  const right = parts.length === 2 && parts[1] ? parseGroups(parts[1].split(":")) : [];
+  if (right === null) return null;
   if (parts.length === 1) {
-    if (leftHextets.length !== 8) return null;
-    return leftHextets;
+    if (left.length !== 16) return null;
+    return left;
   }
-  const missing = 8 - leftHextets.length - rightHextets.length;
-  if (missing < 1) return null;
-  return [...leftHextets, ...Array(missing).fill(0), ...rightHextets];
+  const missing = 16 - left.length - right.length;
+  if (missing < 2 || missing % 2 !== 0) return null;
+  return [...left, ...new Array(missing).fill(0), ...right];
+}
+
+// Mirrors internal/netpolicy.IsPublicAddress. Prefixes are listed as significant
+// bytes; mask entries narrow a final byte when the prefix length is not a whole
+// byte boundary (everything else is masked at 0xff).
+const ipv6SpecialPrefixes = [
+  { bytes: [0x00, 0x64, 0xff, 0x9b, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00] }, // 64:ff9b::/96
+  { bytes: [0x00, 0x64, 0xff, 0x9b, 0x00, 0x01] }, // 64:ff9b:1::/48
+  { bytes: [0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00] }, // 100::/64
+  { bytes: [0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01] }, // 100:0:0:1::/64
+  { bytes: [0x20, 0x01, 0x00], mask: [0xff, 0xff, 0xfe] }, // 2001::/23
+  { bytes: [0x20, 0x01, 0x0d, 0xb8] }, // 2001:db8::/32
+  { bytes: [0x20, 0x02] }, // 2002::/16
+  { bytes: [0x26, 0x20, 0x00, 0x4f, 0x80, 0x00] }, // 2620:4f:8000::/48
+  { bytes: [0x3f, 0xff, 0x00], mask: [0xff, 0xff, 0xf0] }, // 3fff::/20
+  { bytes: [0x5f, 0x00] }, // 5f00::/16
+];
+
+function ipv6PrefixMatches(bytes, prefix) {
+  for (let index = 0; index < prefix.bytes.length; index++) {
+    const mask = (prefix.mask && prefix.mask[index]) || 0xff;
+    if ((bytes[index] & mask) !== (prefix.bytes[index] & mask)) return false;
+  }
+  return true;
 }
 
 function isGloballyRoutableIPv6(value) {
-  const hextets = expandIPv6Hextets(value);
-  if (!hextets) return false;
-  const [h0, h1] = hextets;
-  if (value === "::" || value === "::1") return false;
-  if (h0 === 0 && h1 === 0 && hextets.slice(2).every((h) => h === 0)) return false;
-  if ((h0 & 0xfe00) === 0xfc00) return false;
-  if (h0 >= 0xfe80 && h0 <= 0xfebf) return false;
-  if ((h0 & 0xff00) === 0xff00) return false;
-  if (h0 === 0x0064 && h1 === 0xff9b) return false;
-  if (h0 === 0x0100 && h1 === 0x0000) return false;
-  if (h0 === 0x0100 && h1 === 0x0000 && hextets[2] === 0x0001) return false;
-  if (h0 === 0x2001 && h1 >= 0x0000 && h1 <= 0x01ff) return false;
-  if (h0 === 0x2001 && h1 === 0x0db8) return false;
-  if (h0 === 0x2002) return false;
-  if (h0 === 0x2620 && h1 === 0x4f80 && (hextets[2] & 0xfffc) === 0) return false;
-  if (h0 === 0x3fff) return false;
-  if (h0 === 0x5f00) return false;
+  const bytes = parseIPv6Bytes(value);
+  if (!bytes) return false;
+  // :: (unspecified) and ::1 (loopback).
+  if (bytes.every((byte) => byte === 0)) return false;
+  if (bytes.slice(0, 15).every((byte) => byte === 0) && bytes[15] === 1) return false;
+  // fe80::/10 link-local unicast.
+  if (bytes[0] === 0xfe && (bytes[1] & 0xc0) === 0x80) return false;
+  // ff00::/8 multicast includes link-local and site-local multicast.
+  if (bytes[0] === 0xff) return false;
+  // fc00::/7 unique-local.
+  if ((bytes[0] & 0xfe) === 0xfc) return false;
+  for (const prefix of ipv6SpecialPrefixes) {
+    if (ipv6PrefixMatches(bytes, prefix)) return false;
+  }
   return true;
 }
 
@@ -129,8 +152,14 @@ function interfacePublicAddress(metrics, wantIPv4) {
 // same family, then the verified WSS connection source as a last resort.
 export function publicAddressRows(metrics = {}) {
   const observed = normalizeInterfaceAddress(metrics.observed_public_ip || "");
-  const observedIPv4 = observed.startsWith("IPv4:") ? observed.slice(5) : "";
-  const observedIPv6 = observed.startsWith("IPv6:") ? observed.slice(5) : "";
+  const observedIPv4 =
+    observed.startsWith("IPv4:") && isGloballyRoutableIPv4(observed.slice(5))
+      ? observed.slice(5)
+      : "";
+  const observedIPv6 =
+    observed.startsWith("IPv6:") && isGloballyRoutableIPv6(observed.slice(5))
+      ? observed.slice(5)
+      : "";
   const families = [
     {
       label: "IPv4",
@@ -149,7 +178,7 @@ export function publicAddressRows(metrics = {}) {
   ];
   return families.map((family) => {
     const probed = String(family.probed || "");
-    if (probed) {
+    if (probed && isGloballyRoutable(probed)) {
       return { ...family, value: probed, source: "公网探测", ok: true };
     }
     if (family.interfaceSource) {
@@ -194,7 +223,10 @@ export function updatePublicIPDisplays(root, metrics) {
       const line = container.querySelector(selector);
       if (!line) continue;
       const code = line.querySelector("code");
-      if (code) code.textContent = row.value || "未探测到";
+      if (code) {
+        code.textContent = row.value || "未探测到";
+        code.title = row.value || "";
+      }
       line.classList.toggle("empty", !row.value);
       if (!isCard) {
         const source = line.querySelector("small");

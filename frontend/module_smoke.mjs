@@ -3380,6 +3380,49 @@ assert.equal(filteredRows[0].source, "默认路由接口 eth0");
 assert.equal(filteredRows[1].value, "2606:4700:4700::1111");
 assert.equal(filteredRows[1].source, "默认路由接口 eth0");
 
+// The frontend IANA special-purpose policy must stay equivalent to Go
+// internal/netpolicy instead of the loose IsGlobalUnicast. These are exact
+// boundary cases: the benchmark /15 covers both 198.18 and 198.19, the /48
+// special range covers 2620:4f:8000, and a zoned global address is scoped.
+const boundaryRows = publicAddressRows({
+  network_interfaces: [
+    { name: "eth0", addresses: ["198.19.0.1", "198.18.0.1", "2620:4f:8000::1", "2606:4700:4700::1111%eth0"] },
+  ],
+});
+assert.equal(boundaryRows[0].value, "");
+assert.equal(boundaryRows[0].source, "等待节点上报");
+assert.equal(boundaryRows[0].ok, false);
+assert.equal(boundaryRows[1].value, "");
+assert.equal(boundaryRows[1].source, "等待节点上报");
+assert.equal(boundaryRows[1].ok, false);
+
+const outsideBoundaryRows = publicAddressRows({
+  network_interfaces: [
+    { name: "eth0", addresses: ["198.20.0.1", "2620:4f:8001::1"] },
+  ],
+});
+assert.equal(outsideBoundaryRows[0].value, "198.20.0.1");
+assert.equal(outsideBoundaryRows[0].source, "默认路由接口 eth0");
+assert.equal(outsideBoundaryRows[0].ok, true);
+assert.equal(outsideBoundaryRows[1].value, "2620:4f:8001::1");
+assert.equal(outsideBoundaryRows[1].source, "默认路由接口 eth0");
+assert.equal(outsideBoundaryRows[1].ok, true);
+
+// The same denylist also guards probed and verified-WSS fallbacks, so a
+// special-purpose or zoned value can never be shown or copied even if a stale
+// value reaches the metrics payload.
+const staleSourceRows = publicAddressRows({
+  observed_public_ip: "2620:4f:8000::1",
+  public_ipv4: "198.19.0.1",
+  public_ipv6: "2606:4700:4700::1111%eth0",
+});
+assert.equal(staleSourceRows[0].value, "");
+assert.equal(staleSourceRows[0].source, "等待节点上报");
+assert.equal(staleSourceRows[0].ok, false);
+assert.equal(staleSourceRows[1].value, "");
+assert.equal(staleSourceRows[1].source, "等待节点上报");
+assert.equal(staleSourceRows[1].ok, false);
+
 // CSS contract: the IPv4/IPv6 badge must override the <i> default italic and
 // must not regress to the old tiny sizes; card and detail address text must
 // keep the readability floor while staying on a single ellipsizing line.
@@ -3619,32 +3662,55 @@ assert.equal(formatHostPort("", "443"), "");
     navigationEpoch: 1,
     data: {},
   };
-  const codeV4 = { textContent: "" };
+  // Pre-populate with a stale address so the refresh must update every field
+  // (text, title, copy dataset, copy aria, and the detail source) in place.
+  const cardCodeV4 = { textContent: "2400:cb00::1", title: "2400:cb00::1" };
   const copyV4 = {
-    dataset: { copyIp: "" },
-    hidden: true,
-    title: "",
-    setAttribute() {},
+    dataset: { copyIp: "2400:cb00::1" },
+    hidden: false,
+    title: "复制 IPv4 地址",
+    attrs: {},
+    setAttribute(name, value) {
+      this.attrs[name] = value;
+    },
   };
-  const lineV4 = {
+  const cardLineV4 = {
     querySelector(sel) {
-      if (sel === "code") return codeV4;
+      if (sel === "code") return cardCodeV4;
       if (sel === "[data-copy-ip]") return copyV4;
       return null;
     },
     classList: { toggle() {} },
   };
-  const container = {
+  const cardContainer = {
     classList: { contains(cls) { return cls === "node-card-ips"; } },
     querySelector(sel) {
-      return sel === '.card-ip-row[data-ip-family="v4"]' ? lineV4 : null;
+      return sel === '.card-ip-row[data-ip-family="v4"]' ? cardLineV4 : null;
+    },
+  };
+  const publicCodeV4 = { textContent: "", title: "" };
+  const publicSmallV4 = { textContent: "" };
+  const publicLineV4 = {
+    querySelector(sel) {
+      if (sel === "code") return publicCodeV4;
+      if (sel === "small") return publicSmallV4;
+      return null;
+    },
+    classList: { toggle() {} },
+  };
+  const publicContainer = {
+    classList: { contains(cls) { return cls === "node-public-ips"; } },
+    querySelector(sel) {
+      return sel === '.public-ip-row[data-ip-family="v4"]' ? publicLineV4 : null;
     },
   };
   const root = {
     dataset: { available: "0" },
     querySelector() { return null; },
     querySelectorAll(sel) {
-      if (sel === ".node-card-ips, .node-public-ips") return [container];
+      if (sel === ".node-card-ips, .node-public-ips") {
+        return [cardContainer, publicContainer];
+      }
       return [];
     },
   };
@@ -3689,14 +3755,24 @@ assert.equal(formatHostPort("", "443"), "");
     updateAgentMetrics({
       id: "alpha",
       status: "online",
-      metrics: { public_ipv4: "198.35.26.10", public_ipv6: "" },
+      metrics: { public_ipv4: "198.35.26.96", public_ipv6: "" },
       runtime: {},
       version: "1.2.3",
       last_seen: "now",
     });
-    assert.equal(codeV4.textContent, "198.35.26.10");
-    assert.equal(copyV4.dataset.copyIp, "198.35.26.10");
+    // The one in-place refresh must update the card text and hover title, the
+    // copy target/title/aria, and the detail source, without replacing the DOM.
+    assert.equal(cardCodeV4.textContent, "198.35.26.96");
+    assert.equal(cardCodeV4.title, "198.35.26.96");
+    assert.equal(copyV4.dataset.copyIp, "198.35.26.96");
+    assert.equal(copyV4.title, "复制 IPv4 地址");
+    assert.equal(copyV4.attrs["aria-label"], "复制 IPv4 公网地址 198.35.26.96");
     assert.equal(copyV4.hidden, false);
+    assert.equal(publicCodeV4.textContent, "198.35.26.96");
+    assert.equal(publicCodeV4.title, "198.35.26.96");
+    assert.equal(publicSmallV4.textContent, "公网探测");
+    assert.equal(cardContainer.querySelector('.card-ip-row[data-ip-family="v4"]'), cardLineV4);
+    assert.equal(publicContainer.querySelector('.public-ip-row[data-ip-family="v4"]'), publicLineV4);
   } finally {
     if (previousSetTimeout === undefined) delete globalThis.setTimeout;
     else globalThis.setTimeout = previousSetTimeout;
