@@ -420,6 +420,7 @@ for (const install of [
     };
 
     const gateA = deferred();
+    const gateB = deferred();
 
     const planForm = new FakeForm({
       operation: "modify", tag: "t", listen: "0.0.0.0", port: "443",
@@ -442,6 +443,21 @@ for (const install of [
         task: { id: "dep-A", status: "pending" },
       }),
       "GET /tasks/dep-A": () => gateA.promise,
+      "GET /tasks/dep-B": (() => {
+        let bCalls = 0;
+        return async () => {
+          bCalls += 1;
+          if (bCalls <= 1) return { status: "running", id: "dep-B" };
+          return await gateB.promise;
+        };
+      })(),
+      "POST /tasks": (options) => {
+        const body = JSON.parse(options?.body || "{}");
+        if (body.action === "read-config") return { id: "read-e1" };
+        return { id: "other-e" };
+      },
+      "GET /tasks/read-e1": { status: "succeeded", id: "read-e1" },
+      "GET /tasks/read-e1/config-snapshot": { content: NEW_CONTENT },
     });
 
     const pages = installForms(ctx, { "#server-plan-form": planForm });
@@ -469,6 +485,27 @@ for (const install of [
     // Pending still holds dep-B (A did NOT clear it via CAS).
     assert.equal(state.data.pendingDeployTasks?.[KEY]?.taskId, "dep-B",
       "[E] newer dep-B pending NOT cleared by old dep-A completion");
+
+    // Step 4: Start B's recovery poller by entering live-config.
+    // reconcilePendingDeploy sees dep-B running -> starts recovery poller.
+    state.route = "live-config";
+    await pages.liveConfig();
+    await drain();
+
+    // Step 5: Release gate B -> dep-B fails.
+    gateB.resolve({ status: "failed", id: "dep-B", error: "conflict" });
+    await drain();
+
+    // Assert: B's failure cleared its own pending record.
+    assert.equal(state.data.pendingDeployTasks?.[KEY], undefined,
+      "[E] dep-B pending cleared after B's own terminal failure");
+
+    // Cache was refreshed by the post-A-invalidation read-config.
+    // B's failure does NOT change the node file, so content is from the
+    // last successful deploy (A). Verify it's not OLD_CONTENT.
+    if (state.data.liveSources?.[KEY]?.content)
+      assert.notEqual(state.data.liveSources[KEY].content, OLD_CONTENT,
+        "[E] old pre-deploy content not restored after B failed");
   }
 
 
@@ -516,9 +553,10 @@ for (const install of [
 
     assert.equal(state.data.pendingDeployTasks?.[KEY], undefined,
       "[F] pending cleared after editor deploy succeeded");
-    if (state.data.liveSources?.[KEY]?.content)
-      assert.notEqual(state.data.liveSources[KEY].content, OLD_CONTENT,
-        "[F] old content replaced after editor deploy succeeded");
+    assert.ok(editorReadCount >= 1,
+      "[F] fresh read-config fired after editor deploy succeeded");
+    assert.equal(state.data.liveSources?.[KEY]?.content, NEW_CONTENT,
+      "[F] cache contains post-deploy content after convergence");
   }
 
   // --- Test G: Source-config deploy success uses same terminal mechanism.
