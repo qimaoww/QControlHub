@@ -167,7 +167,7 @@ func TestOpenMigratesAppliedV20Schema(t *testing.T) {
 	if err := setup.QueryRow(ctx, `
 		SELECT EXISTS (
 			SELECT 1 FROM information_schema.columns
-			WHERE table_name='tasks' AND column_name='core_source'
+			WHERE table_schema=current_schema() AND table_name='tasks' AND column_name='core_source'
 		)
 	`).Scan(&hasCoreSource); err != nil {
 		t.Fatalf("read v20 core_source presence: %v", err)
@@ -191,7 +191,7 @@ func TestOpenMigratesAppliedV20Schema(t *testing.T) {
 	if err := dataStore.pool.QueryRow(ctx, `
 		SELECT EXISTS (
 			SELECT 1 FROM information_schema.columns
-			WHERE table_name='tasks' AND column_name='core_source'
+			WHERE table_schema=current_schema() AND table_name='tasks' AND column_name='core_source'
 		)
 	`).Scan(&hasCoreSource); err != nil {
 		t.Fatalf("read migrated core_source presence: %v", err)
