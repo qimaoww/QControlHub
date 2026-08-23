@@ -736,11 +736,12 @@ func validateExistingSourceInvocation(ctx context.Context, engine core.Engine, s
 	return err
 }
 
-// validateNoRelativeSingBoxResources fails closed when a migrated sing-box
-// source uses a relative resource path. The official service form (-D dir)
-// changes the working directory before sing-box resolves such paths, so a
-// relative path that happens to resolve in the QAgent managed context would
-// silently change semantics instead of matching the original service.
+// validateNoRelativeSingBoxResources fails closed for sing-box file-bearing
+// resource forms. The official service form (-D dir) changes the working
+// directory before sing-box resolves such paths, so a relative path that
+// happens to resolve in the QAgent managed context would silently change
+// semantics instead of matching the original service. Typed local resources
+// are checked generically rather than by enumerating individual sections.
 func validateNoRelativeSingBoxResources(content string) error {
 	var root map[string]any
 	if err := json.Unmarshal([]byte(content), &root); err != nil {
@@ -748,6 +749,12 @@ func validateNoRelativeSingBoxResources(content string) error {
 	}
 	var walk func(map[string]any) error
 	walk = func(node map[string]any) error {
+		if resourceType, ok := node["type"].(string); ok && resourceType == "local" {
+			path, hasPath := node["path"].(string)
+			if hasPath && path != "" && !filepath.IsAbs(path) {
+				return fmt.Errorf("relative sing-box local resource path %q cannot be migrated safely", path)
+			}
+		}
 		for key, value := range node {
 			switch key {
 			case "output":
@@ -755,9 +762,15 @@ func validateNoRelativeSingBoxResources(content string) error {
 				if path, ok := value.(string); ok && path != "" && path != "stdout" && path != "stderr" && !filepath.IsAbs(path) {
 					return errors.New("relative sing-box resource path in log.output cannot be migrated safely")
 				}
-			case "certificate_path", "private_key_path", "key_path", "cert_path", "certificate":
+			case "path":
 				if path, ok := value.(string); ok && path != "" && !filepath.IsAbs(path) {
 					return fmt.Errorf("relative sing-box resource path in %s cannot be migrated safely", key)
+				}
+			default:
+				if strings.HasSuffix(key, "_path") {
+					if path, ok := value.(string); ok && path != "" && !filepath.IsAbs(path) {
+						return fmt.Errorf("relative sing-box resource path in %s cannot be migrated safely", key)
+					}
 				}
 			}
 			switch child := value.(type) {

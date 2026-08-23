@@ -49,6 +49,7 @@ case "$command" in
 	      Description) cat "$FAKE_SYSTEMCTL_QAGENT_DESCRIPTION" ;;
 	      User) cat "$FAKE_SYSTEMCTL_QAGENT_USER" ;;
 	      Group) cat "$FAKE_SYSTEMCTL_QAGENT_GROUP" ;;
+	      Type|WorkingDirectory|RootDirectory|RootImage|BindPaths|BindReadOnlyPaths|Environment|EnvironmentFile|DropInPaths) cat "$FAKE_SYSTEMCTL_STATE/qagent-$property" ;;
 	      ExecCondition|ExecStartPre|ExecStartPost|ExecReload|ExecStop|ExecStopPost) cat "$FAKE_SYSTEMCTL_STATE/qagent-$property" ;;
       *) exit 1 ;;
     esac
@@ -276,11 +277,52 @@ managed_unit="$test_root/core/qagent-xray.service"
 printf '%s\n' \
   '[Unit]' \
   'Description=Xray core managed by QAgent' \
+  'Documentation=https://github.com/XTLS/Xray-core' \
+  'Wants=network-online.target' \
+  'After=network-online.target' \
+  "ConditionFileIsExecutable=$qagent_xray_binary" \
+  "ConditionPathExists=$qagent_xray_config" \
   '[Service]' \
+  'Type=simple' \
   'User=qcontrolhub-core' \
   'Group=qcontrolhub-core' \
+  'WorkingDirectory=/var/lib/qcontrolhub-xray' \
+  'StateDirectory=qcontrolhub-xray' \
+  'StateDirectoryMode=0750' \
+  'UMask=0027' \
   "ExecStart=$qagent_xray_binary run -config $qagent_xray_config" \
-  '[Install]' > "$managed_unit"
+  'LogNamespace=qagent-cores' \
+  'StandardOutput=journal' \
+  'StandardError=journal' \
+  'Restart=on-failure' \
+  'RestartSec=3s' \
+  'TimeoutStopSec=20s' \
+  'NoNewPrivileges=true' \
+  'CapabilityBoundingSet=CAP_NET_BIND_SERVICE' \
+  'AmbientCapabilities=CAP_NET_BIND_SERVICE' \
+  'ProtectSystem=strict' \
+  'ProtectHome=true' \
+  'PrivateTmp=true' \
+  'PrivateDevices=true' \
+  'ProtectKernelTunables=true' \
+  'ProtectKernelModules=true' \
+  'ProtectKernelLogs=true' \
+  'ProtectControlGroups=true' \
+  'ProtectClock=true' \
+  'RestrictSUIDSGID=true' \
+  'LockPersonality=true' \
+  'MemoryDenyWriteExecute=true' \
+  'RestrictNamespaces=true' \
+  'RestrictRealtime=true' \
+  'RemoveIPC=true' \
+  'ProtectProc=invisible' \
+  'ProcSubset=pid' \
+  'RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6' \
+  'SystemCallArchitectures=native' \
+  "ReadOnlyPaths=$qagent_xray_binary $(dirname -- "$qagent_xray_config")" \
+  'ReadWritePaths=/var/lib/qcontrolhub-xray' \
+  '[Install]' \
+  'WantedBy=multi-user.target' > "$managed_unit"
 chmod 0644 "$managed_unit"
 printf '%s\n' "$managed_unit" > "$FAKE_SYSTEMCTL_FRAGMENT_PATH"
 write_exec_start "$qagent_xray_binary" "$qagent_xray_binary" run -config "$qagent_xray_config"
@@ -290,6 +332,11 @@ printf '%s\n' qcontrolhub-core > "$FAKE_SYSTEMCTL_QAGENT_USER"
 printf '%s\n' qcontrolhub-core > "$FAKE_SYSTEMCTL_QAGENT_GROUP"
 for hook in ExecCondition ExecStartPre ExecStartPost ExecReload ExecStop ExecStopPost; do
   : > "$FAKE_SYSTEMCTL_STATE/qagent-$hook"
+done
+printf '%s\n' simple > "$FAKE_SYSTEMCTL_STATE/qagent-Type"
+printf '%s\n' /var/lib/qcontrolhub-xray > "$FAKE_SYSTEMCTL_STATE/qagent-WorkingDirectory"
+for property in RootDirectory RootImage BindPaths BindReadOnlyPaths Environment EnvironmentFile DropInPaths; do
+  : > "$FAKE_SYSTEMCTL_STATE/qagent-$property"
 done
 qagent_core_service_is_safe_to_disable xray "$managed_unit" || {
   printf '%s\n' 'repeat install with an inactive dedicated unit was rejected' >&2
@@ -313,6 +360,34 @@ printf '%s\n' qcontrolhub-core > "$FAKE_SYSTEMCTL_QAGENT_USER"
 printf '%s\n' /bin/true > "$FAKE_SYSTEMCTL_STATE/qagent-ExecStartPre"
 expect_rejected effective-start-pre-hook qagent_core_service_is_safe_owned xray "$managed_unit"
 : > "$FAKE_SYSTEMCTL_STATE/qagent-ExecStartPre"
+for property in RootDirectory BindReadOnlyPaths Environment EnvironmentFile; do
+  printf '%s\n' unexpected > "$FAKE_SYSTEMCTL_STATE/qagent-$property"
+  expect_rejected "effective-$property" qagent_core_service_is_safe_owned xray "$managed_unit"
+  : > "$FAKE_SYSTEMCTL_STATE/qagent-$property"
+done
+printf '%s\n' /var/lib/other > "$FAKE_SYSTEMCTL_STATE/qagent-WorkingDirectory"
+expect_rejected effective-working-directory qagent_core_service_is_safe_owned xray "$managed_unit"
+printf '%s\n' /var/lib/qcontrolhub-xray > "$FAKE_SYSTEMCTL_STATE/qagent-WorkingDirectory"
+printf '%s\n' oneshot > "$FAKE_SYSTEMCTL_STATE/qagent-Type"
+expect_rejected effective-service-type qagent_core_service_is_safe_owned xray "$managed_unit"
+printf '%s\n' simple > "$FAKE_SYSTEMCTL_STATE/qagent-Type"
+drop_in_directory="$test_root/core/qagent-xray.service.d"
+mkdir -p "$drop_in_directory"
+capability_drop_in="$drop_in_directory/10-qcontrolhub-bind-low-ports.conf"
+log_drop_in="$drop_in_directory/20-qcontrolhub-volatile-logs.conf"
+printf '%s\n' '[Service]' 'CapabilityBoundingSet=CAP_NET_BIND_SERVICE' 'AmbientCapabilities=CAP_NET_BIND_SERVICE' > "$capability_drop_in"
+printf '%s\n' '[Service]' 'LogNamespace=qagent-cores' 'StandardOutput=journal' 'StandardError=journal' > "$log_drop_in"
+printf '%s %s\n' "$capability_drop_in" "$log_drop_in" > "$FAKE_SYSTEMCTL_STATE/qagent-DropInPaths"
+qagent_core_service_is_safe_owned xray "$managed_unit" || {
+  printf '%s\n' 'project-managed capability/log drop-ins were rejected' >&2
+  exit 1
+}
+unknown_drop_in="$drop_in_directory/99-unknown.conf"
+printf '%s\n' '[Service]' 'Environment=QCH_UNEXPECTED=1' > "$unknown_drop_in"
+printf '%s\n' "$unknown_drop_in" > "$FAKE_SYSTEMCTL_STATE/qagent-DropInPaths"
+expect_rejected unknown-drop-in qagent_core_service_is_safe_owned xray "$managed_unit"
+: > "$FAKE_SYSTEMCTL_STATE/qagent-DropInPaths"
+rm -f "$unknown_drop_in" "$capability_drop_in" "$log_drop_in"
 cp "$managed_unit" "$managed_unit.original"
 printf '%s\n' \
   '[Unit]' \

@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -188,6 +189,34 @@ func TestExistingCoreDiscoveryFindsAndRefreshesAfterAgentRestart(t *testing.T) {
 	}
 }
 
+func TestManagedCoreUnitPolicyMatchesProjectUnits(t *testing.T) {
+	_, sourceFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("could not locate discovery test source")
+	}
+	repositoryRoot := filepath.Clean(filepath.Join(filepath.Dir(sourceFile), "../.."))
+	for engine, fileName := range map[core.Engine]string{
+		core.EngineXray:    "qagent-xray.service",
+		core.EngineSingBox: "qagent-sing-box.service",
+	} {
+		spec := DefaultSpecs()[engine]
+		contents, err := os.ReadFile(filepath.Join(repositoryRoot, "deploy", "systemd", fileName))
+		if err != nil {
+			t.Fatal(err)
+		}
+		actual := make([]string, 0)
+		for _, line := range strings.Split(strings.ReplaceAll(string(contents), "\r\n", "\n"), "\n") {
+			if line != "" && !strings.HasPrefix(line, "#") && !strings.HasPrefix(line, ";") {
+				actual = append(actual, line)
+			}
+		}
+		expected := managedCoreUnitLines(engine, spec)
+		if strings.Join(actual, "\n") != strings.Join(expected, "\n") {
+			t.Fatalf("%s project unit does not match the supported execution policy", engine)
+		}
+	}
+}
+
 func TestExistingCoreDiscoverySupportsProtectedEtcSingBoxBinaryLayout(t *testing.T) {
 	if candidates := existingDiscoveryCandidates[core.EngineSingBox]; !stringInSlice(protectedEtcSingBoxExecutable, candidates.executables) ||
 		!stringInSlice(protectedEtcSingBoxExecutable, candidates.directExecutables) {
@@ -305,6 +334,51 @@ func TestValidateExistingSourceInvocationPassesOriginalWorkingDirectory(t *testi
 }
 
 func TestExistingCoreDiscoveryRejectsOfficialSingBoxRelativeResource(t *testing.T) {
+	tests := map[string]string{
+		"log output":     `{"log":{"output":"relative.log"}}`,
+		"local rule set": `{"route":{"rule_set":[{"type":"local","tag":"geo","format":"binary","path":"ruleset.srs"}]}}`,
+	}
+	for name, fragment := range tests {
+		t.Run(name, func(t *testing.T) {
+			fixture := newExistingCoreDiscoveryFixture(t)
+			workDirectory := filepath.Join(fixture.root, "work")
+			configDirectory := filepath.Join(fixture.root, "etc-sing-box")
+			for _, directory := range []string{workDirectory, configDirectory} {
+				if err := os.MkdirAll(directory, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			configPath := filepath.Join(configDirectory, "config.json")
+			if err := os.WriteFile(configPath, []byte(`{"inbounds":[]}`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(configDirectory, "10-resource.json"), []byte(fragment), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			existingDiscoveryCandidates[core.EngineSingBox] = existingDiscoveryCandidateSet{
+				services:    []string{"sing-box.service", "singbox.service"},
+				executables: []string{fixture.serviceBinary},
+				configs:     []string{configPath},
+			}
+			official := fixture.serviceBinary + " -D " + workDirectory + " -C " + configDirectory + " run"
+			fixture.writeExecStart(t, "sing-box.service", systemdExecStart(fixture.serviceBinary, official))
+			fixture.writeExecStart(t, "singbox.service", systemdExecStart(fixture.serviceBinary, official))
+
+			specs, issues, err := RefreshExistingCoreDiscovery(
+				context.Background(), fixture.discoveryStatePath, fixture.markerPrefix,
+				fixture.managedSpecs, nil,
+			)
+			if err != nil {
+				t.Fatalf("reject official sing-box relative resource: %v", err)
+			}
+			if len(specs) != 0 || issues[core.EngineSingBox] == "" {
+				t.Fatalf("relative official sing-box resource was not rejected: specs=%+v issues=%+v", specs, issues)
+			}
+		})
+	}
+}
+
+func TestExistingCoreDiscoveryAcceptsOfficialSingBoxAbsoluteLocalResource(t *testing.T) {
 	fixture := newExistingCoreDiscoveryFixture(t)
 	workDirectory := filepath.Join(fixture.root, "work")
 	configDirectory := filepath.Join(fixture.root, "etc-sing-box")
@@ -313,11 +387,15 @@ func TestExistingCoreDiscoveryRejectsOfficialSingBoxRelativeResource(t *testing.
 			t.Fatal(err)
 		}
 	}
+	localResource := filepath.Join(workDirectory, "ruleset.srs")
+	if err := os.WriteFile(localResource, []byte("ruleset"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	configPath := filepath.Join(configDirectory, "config.json")
 	if err := os.WriteFile(configPath, []byte(`{"inbounds":[]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(configDirectory, "10-log.json"), []byte(`{"log":{"output":"relative.log"}}`), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(configDirectory, "10-resource.json"), []byte(fmt.Sprintf(`{"route":{"rule_set":[{"type":"local","tag":"geo","format":"binary","path":%q}]}}`, localResource)), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	existingDiscoveryCandidates[core.EngineSingBox] = existingDiscoveryCandidateSet{
@@ -334,10 +412,10 @@ func TestExistingCoreDiscoveryRejectsOfficialSingBoxRelativeResource(t *testing.
 		fixture.managedSpecs, nil,
 	)
 	if err != nil {
-		t.Fatalf("reject official sing-box relative resource: %v", err)
+		t.Fatalf("accept official sing-box absolute local resource: %v", err)
 	}
-	if len(specs) != 0 || issues[core.EngineSingBox] == "" {
-		t.Fatalf("relative official sing-box resource was not rejected: specs=%+v issues=%+v", specs, issues)
+	if len(issues) != 0 || specs[core.EngineSingBox].Service != "sing-box.service" {
+		t.Fatalf("absolute official sing-box local resource was rejected: specs=%+v issues=%+v", specs, issues)
 	}
 }
 
@@ -669,6 +747,103 @@ func TestExistingCoreDiscoveryReportsAmbiguousAndUnsupportedServices(t *testing.
 			})
 		}
 	})
+
+	t.Run("effective execution context and drop-ins", func(t *testing.T) {
+		tests := map[string]func(existingCoreDiscoveryFixture) error{
+			"root directory": func(fixture existingCoreDiscoveryFixture) error {
+				return os.WriteFile(filepath.Join(fixture.stateDirectory, "qagent-sing-box.service.RootDirectory"), []byte("/sandbox\n"), 0o600)
+			},
+			"bind read-only paths": func(fixture existingCoreDiscoveryFixture) error {
+				return os.WriteFile(filepath.Join(fixture.stateDirectory, "qagent-sing-box.service.BindReadOnlyPaths"), []byte("/source:/target\n"), 0o600)
+			},
+			"environment": func(fixture existingCoreDiscoveryFixture) error {
+				return os.WriteFile(filepath.Join(fixture.stateDirectory, "qagent-sing-box.service.Environment"), []byte("QCH_UNEXPECTED=1\n"), 0o600)
+			},
+			"environment file": func(fixture existingCoreDiscoveryFixture) error {
+				return os.WriteFile(filepath.Join(fixture.stateDirectory, "qagent-sing-box.service.EnvironmentFile"), []byte("/etc/qagent/unexpected.env\n"), 0o600)
+			},
+			"working directory": func(fixture existingCoreDiscoveryFixture) error {
+				return os.WriteFile(filepath.Join(fixture.stateDirectory, "qagent-sing-box.service.WorkingDirectory"), []byte("/other\n"), 0o600)
+			},
+			"type": func(fixture existingCoreDiscoveryFixture) error {
+				return os.WriteFile(filepath.Join(fixture.stateDirectory, "qagent-sing-box.service.Type"), []byte("oneshot\n"), 0o600)
+			},
+			"unknown fragment context": func(fixture existingCoreDiscoveryFixture) error {
+				unitPath := filepath.Join(existingDiscoveryManagedUnitRoot, "qagent-sing-box.service")
+				contents, err := os.ReadFile(unitPath)
+				if err != nil {
+					return err
+				}
+				contents = []byte(strings.Replace(string(contents), "WorkingDirectory=/var/lib/qcontrolhub-sing-box\n", "RootDirectory=/sandbox\nWorkingDirectory=/var/lib/qcontrolhub-sing-box\n", 1))
+				return os.WriteFile(unitPath, contents, 0o600)
+			},
+			"unknown drop-in": func(fixture existingCoreDiscoveryFixture) error {
+				path := filepath.Join(existingDiscoveryManagedUnitRoot, "qagent-sing-box.service.d", "99-unknown.conf")
+				if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+					return err
+				}
+				if err := os.WriteFile(path, []byte("[Service]\nEnvironment=QCH_UNEXPECTED=1\n"), 0o600); err != nil {
+					return err
+				}
+				return os.WriteFile(filepath.Join(fixture.stateDirectory, "qagent-sing-box.service.DropInPaths"), []byte(path+"\n"), 0o600)
+			},
+			"modified project drop-in": func(fixture existingCoreDiscoveryFixture) error {
+				path := filepath.Join(existingDiscoveryManagedUnitRoot, "qagent-sing-box.service.d", "10-qcontrolhub-bind-low-ports.conf")
+				if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+					return err
+				}
+				if err := os.WriteFile(path, []byte("[Service]\nEnvironment=QCH_UNEXPECTED=1\n"), 0o600); err != nil {
+					return err
+				}
+				return os.WriteFile(filepath.Join(fixture.stateDirectory, "qagent-sing-box.service.DropInPaths"), []byte(path+"\n"), 0o600)
+			},
+		}
+		for name, mutate := range tests {
+			t.Run(name, func(t *testing.T) {
+				fixture := newExistingCoreDiscoveryFixture(t)
+				fixture.writeStatus(t, "qagent-sing-box.service", "active")
+				if err := mutate(fixture); err != nil {
+					t.Fatal(err)
+				}
+				specs, issues, err := RefreshExistingCoreDiscovery(context.Background(), fixture.discoveryStatePath, fixture.markerPrefix, fixture.managedSpecs, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(specs) != 0 || !strings.Contains(issues[core.EngineSingBox], "安全 unit") {
+					t.Fatalf("unsafe execution context discovery = specs %+v issues %+v", specs, issues)
+				}
+			})
+		}
+	})
+
+	t.Run("project-managed capability and log drop-ins", func(t *testing.T) {
+		fixture := newExistingCoreDiscoveryFixture(t)
+		fixture.writeStatus(t, "qagent-sing-box.service", "active")
+		dropInDirectory := filepath.Join(existingDiscoveryManagedUnitRoot, "qagent-sing-box.service.d")
+		if err := os.MkdirAll(dropInDirectory, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		paths := []string{
+			filepath.Join(dropInDirectory, "10-qcontrolhub-bind-low-ports.conf"),
+			filepath.Join(dropInDirectory, "20-qcontrolhub-volatile-logs.conf"),
+		}
+		contents := [][]byte{[]byte(managedCoreCapabilityDropIn), []byte(managedCoreLogDropIn)}
+		for index, path := range paths {
+			if err := os.WriteFile(path, contents[index], 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := os.WriteFile(filepath.Join(fixture.stateDirectory, "qagent-sing-box.service.DropInPaths"), []byte(strings.Join(paths, " ")+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		specs, issues, err := RefreshExistingCoreDiscovery(context.Background(), fixture.discoveryStatePath, fixture.markerPrefix, fixture.managedSpecs, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(issues) != 0 || specs[core.EngineSingBox].Service != "sing-box.service" {
+			t.Fatalf("project-managed drop-ins were rejected: specs=%+v issues=%+v", specs, issues)
+		}
+	})
 }
 
 func TestExistingCoreDiscoveryManualMappingWinsAndStatePermissionsFailClosed(t *testing.T) {
@@ -777,7 +952,7 @@ func newExistingCoreDiscoveryFixture(t *testing.T) existingCoreDiscoveryFixture 
 		t.Fatal(err)
 	}
 	fakeSystemctl := filepath.Join(root, "fake-systemctl")
-	script := "#!/bin/sh\nset -eu\nstate=" + shellQuote(stateDirectory) + "\ncommand=$1\nshift\nservice=$1\nshift\ncase \"$command\" in\n  is-active) value=$(cat \"$state/$service.active\"); printf '%s\\n' \"$value\"; [ \"$value\" = active ] ;;\n  is-enabled) value=$(cat \"$state/$service.enabled\"); printf '%s\\n' \"$value\"; [ \"$value\" = enabled ] ;;\n  show) property=ExecStart; for argument in \"$@\"; do case \"$argument\" in --property=*) property=${argument#--property=} ;; esac; done; case \"$property\" in ExecStart) if [ \"$service\" = qagent-sing-box.service ]; then cat \"$state/$service.managed-exec-start\"; else cat \"$state/$service.exec-start\"; fi ;; LoadState) cat \"$state/$service.load-state\" ;; FragmentPath) cat \"$state/$service.fragment-path\" ;; Description|User|Group) cat \"$state/$service.$(printf '%s' \"$property\" | tr '[:upper:]' '[:lower:]')\" ;; ExecCondition|ExecStartPre|ExecStartPost|ExecReload|ExecStop|ExecStopPost) cat \"$state/$service.$property\" ;; *) exit 1 ;; esac ;;\n  *) exit 1 ;;\nesac\n"
+	script := "#!/bin/sh\nset -eu\nstate=" + shellQuote(stateDirectory) + "\ncommand=$1\nshift\nservice=$1\nshift\ncase \"$command\" in\n  is-active) value=$(cat \"$state/$service.active\"); printf '%s\\n' \"$value\"; [ \"$value\" = active ] ;;\n  is-enabled) value=$(cat \"$state/$service.enabled\"); printf '%s\\n' \"$value\"; [ \"$value\" = enabled ] ;;\n  show) property=ExecStart; for argument in \"$@\"; do case \"$argument\" in --property=*) property=${argument#--property=} ;; esac; done; case \"$property\" in ExecStart) if [ \"$service\" = qagent-sing-box.service ]; then cat \"$state/$service.managed-exec-start\"; else cat \"$state/$service.exec-start\"; fi ;; LoadState) cat \"$state/$service.load-state\" ;; FragmentPath) cat \"$state/$service.fragment-path\" ;; Description|User|Group) cat \"$state/$service.$(printf '%s' \"$property\" | tr '[:upper:]' '[:lower:]')\" ;; Type|WorkingDirectory|RootDirectory|RootImage|BindPaths|BindReadOnlyPaths|Environment|EnvironmentFile|DropInPaths) cat \"$state/$service.$property\" ;; ExecCondition|ExecStartPre|ExecStartPost|ExecReload|ExecStop|ExecStopPost) cat \"$state/$service.$property\" ;; *) exit 1 ;; esac ;;\n  *) exit 1 ;;\nesac\n"
 	if err := os.WriteFile(fakeSystemctl, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -808,7 +983,7 @@ func newExistingCoreDiscoveryFixture(t *testing.T) existingCoreDiscoveryFixture 
 	}
 	managedUnitPath := filepath.Join(managedUnitDirectory, "qagent-sing-box.service")
 	managedSpec := DefaultSpecs()[core.EngineSingBox]
-	managedUnitContents := "[Unit]\nDescription=sing-box core managed by QAgent\n[Service]\nUser=qcontrolhub-core\nGroup=qcontrolhub-core\nExecStart=" + managedSpec.Binary + " run -c " + managedSpec.ConfigPath + "\n"
+	managedUnitContents := strings.Join(managedCoreUnitLines(core.EngineSingBox, managedSpec), "\n") + "\n"
 	if err := os.WriteFile(managedUnitPath, []byte(managedUnitContents), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -835,6 +1010,21 @@ func newExistingCoreDiscoveryFixture(t *testing.T) existingCoreDiscoveryFixture 
 	}
 	for _, hook := range []string{"ExecCondition", "ExecStartPre", "ExecStartPost", "ExecReload", "ExecStop", "ExecStopPost"} {
 		if err := os.WriteFile(filepath.Join(stateDirectory, "qagent-sing-box.service."+hook), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for property, value := range map[string]string{
+		"Type":              "simple\n",
+		"WorkingDirectory":  "/var/lib/qcontrolhub-sing-box\n",
+		"RootDirectory":     "\n",
+		"RootImage":         "\n",
+		"BindPaths":         "\n",
+		"BindReadOnlyPaths": "\n",
+		"Environment":       "\n",
+		"EnvironmentFile":   "\n",
+		"DropInPaths":       "\n",
+	} {
+		if err := os.WriteFile(filepath.Join(stateDirectory, "qagent-sing-box.service."+property), []byte(value), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
