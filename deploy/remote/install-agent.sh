@@ -6,7 +6,7 @@
 #
 # 示例：
 #   QCH_TLS_CA_FILE=/etc/qcontrolhub/control-plane-ca.pem \
-#   sh deploy/remote/install-agent.sh https://192.168.31.205:8443 <token> shanghai-edge-01
+#   sh deploy/remote/install-agent.sh https://qcontrolhub.example.com <token> shanghai-edge-01
 #
 # 从控制面 GET /api/v1/agent-binary 下载 agent 可执行文件，引导核心服务，
 # 写入 /etc/qcontrolhub/agent.env，安装 systemd 或 OpenRC 服务并启动。
