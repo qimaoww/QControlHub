@@ -18,6 +18,9 @@ import { ConfigFormatError, formatConfigContent } from "./modules/code-format.js
 import {
   bindServerPlanRegeneration,
   installConfigPages,
+  liveConfigEngineEligible,
+  liveConfigEditorState,
+  submitLiveConfigChange,
 } from "./modules/configs.js";
 import { installCoreLogs } from "./modules/core-logs.js";
 import { installDashboard } from "./modules/dashboard.js";
@@ -28,6 +31,394 @@ import { createLatestRenderScheduler } from "./modules/refresh.js";
 
 const state = { data: {}, session: { role: "admin" } };
 const noop = () => {};
+
+const pendingMigrationSource = {
+  content: '{"inbounds":[{"tag":"original"}]}',
+  taskId: "tsk_snapshot",
+};
+const migrationEditor = liveConfigEditorState({
+  existingAvailable: true,
+  canOperate: true,
+  sourceContent: pendingMigrationSource.content,
+  formContent: '{"inbounds":[{"tag":"edited"}]}',
+});
+assert.equal(migrationEditor.readOnly, true, "pending migration snapshots are read-only");
+assert.equal(
+  migrationEditor.content,
+  pendingMigrationSource.content,
+  "migration submission keeps the exact node snapshot bytes",
+);
+const migrationForm = new Map([
+  ["name", "existing snapshot"],
+  ["description", "pending migration"],
+  ["content", '{"inbounds":[{"tag":"edited"}]}'],
+  ["version", "0"],
+]);
+let savedMigrationConfig;
+let migrationTaskAttempts = 0;
+await assert.rejects(
+  submitLiveConfigChange({
+    api: async (path, options) => {
+      if (path === "/tasks") {
+        migrationTaskAttempts += 1;
+        throw new Error("temporary task failure");
+      }
+      const input = JSON.parse(options.body);
+      savedMigrationConfig = { id: "cfg_snapshot", ...input };
+      return savedMigrationConfig;
+    },
+    submitTask: noop,
+    agent: { id: "agt_snapshot" },
+    engine: "sing-box",
+    intent: "import",
+    form: migrationForm,
+    source: pendingMigrationSource,
+    existingAvailable: true,
+    savedConfig: null,
+  }),
+  /temporary task failure/,
+);
+assert.equal(savedMigrationConfig.content, pendingMigrationSource.content);
+assert.deepEqual(
+  pendingMigrationSource,
+  { content: '{"inbounds":[{"tag":"original"}]}', taskId: "tsk_snapshot" },
+  "failed import does not replace the pending migration source",
+);
+await submitLiveConfigChange({
+  api: async (path) => {
+    if (path !== "/tasks") throw new Error("retry unexpectedly rewrote snapshot");
+    migrationTaskAttempts += 1;
+    return { id: "tsk_retry" };
+  },
+  submitTask: noop,
+  agent: { id: "agt_snapshot" },
+  engine: "sing-box",
+  intent: "import",
+  form: migrationForm,
+  source: pendingMigrationSource,
+  existingAvailable: true,
+  savedConfig: savedMigrationConfig,
+});
+assert.equal(migrationTaskAttempts, 2, "failed import remains retryable without another revision");
+
+assert.equal(liveConfigEngineEligible({ installed: true }), true);
+assert.equal(
+  liveConfigEngineEligible({
+    existing_config_unsupported_reason: "unsupported wrapper",
+  }),
+  true,
+  "unsupported existing services remain eligible for the reason page and sidebar",
+);
+assert.equal(liveConfigEngineEligible({ installed: false }), false);
+
+const unsupportedDocument = globalThis.document;
+const unsupportedState = {
+  route: "live-config",
+  navigationEpoch: 1,
+  data: {
+    liveAgent: "unsupported-node",
+    liveEngine: "xray",
+    agents: [
+      {
+        id: "unsupported-node",
+        name: "Unsupported node",
+        os: "linux",
+        arch: "amd64",
+        status: "online",
+        capabilities: ["xray"],
+        runtime: {
+          xray: {
+            installed: false,
+            existing_config_unsupported_reason: "complex wrapper is unsupported",
+          },
+        },
+      },
+    ],
+  },
+};
+let unsupportedMarkup = "";
+globalThis.document = {
+  querySelector: () => null,
+  querySelectorAll: () => [],
+};
+try {
+  const pages = installConfigPages({
+    api: async (path) => {
+      if (path === "/agents") return unsupportedState.data.agents;
+      assert.equal(
+        path,
+        "/agents/unsupported-node/configs/xray/workspace",
+      );
+      return { config: null };
+    },
+    optionalAPI: async () => null,
+    state: unsupportedState,
+    engines: ["xray"],
+    can: () => true,
+    esc: (value) => String(value ?? ""),
+    engineName: (value) => value,
+    conciseVersion: (engine, version) => version || engine,
+    date: (value) => value,
+    ago: (value) => value,
+    bytes: (value) => value,
+    confirmAction: async () => true,
+    notify: noop,
+    shell: (markup) => {
+      unsupportedMarkup = markup;
+    },
+    submitTask: noop,
+    bindCodeEditors: noop,
+  });
+  await pages.liveConfig();
+  assert.deepEqual(unsupportedState.data.liveEngines, ["xray"]);
+  assert.equal(unsupportedState.data.liveEngine, "xray");
+  assert.equal(
+    unsupportedMarkup.includes("检测到现有服务，但不可自动迁移"),
+    true,
+  );
+  assert.equal(
+    unsupportedMarkup.includes("complex wrapper is unsupported"),
+    true,
+  );
+  assert.equal(
+    unsupportedMarkup.includes("data-live-intent"),
+    false,
+    "unsupported reason pages expose no executable action",
+  );
+} finally {
+  if (unsupportedDocument === undefined) delete globalThis.document;
+  else globalThis.document = unsupportedDocument;
+}
+
+const runtimeRefreshDocument = globalThis.document;
+globalThis.document = {
+  querySelector: () => null,
+  querySelectorAll: () => [],
+};
+try {
+  const runtimeState = {
+    route: "live-config",
+    navigationEpoch: 10,
+    data: {
+      liveAgent: "upgraded-node",
+      liveEngine: "sing-box",
+      agents: [],
+      liveSources: {},
+    },
+  };
+  const runtimeSnapshots = [
+    "executable is not in a supported standard path",
+    "standard executable did not pass protected native binary validation",
+    "",
+  ];
+  let runtimeAgentRequests = 0;
+  let runtimeWorkspaceRequests = 0;
+  let runtimeMarkup = "";
+  const runtimeAgent = (unsupportedReason = "") => ({
+    id: "upgraded-node",
+    name: "Upgraded node",
+    os: "linux",
+    arch: "amd64",
+    status: "online",
+    capabilities: ["sing-box"],
+    runtime: {
+      "sing-box": {
+        installed: !unsupportedReason,
+        existing_config_available: !unsupportedReason,
+        existing_config_unsupported_reason: unsupportedReason,
+      },
+    },
+  });
+  const pages = installConfigPages({
+    api: async (path) => {
+      if (path === "/agents") {
+        const reason = runtimeSnapshots[runtimeAgentRequests++];
+        return [runtimeAgent(reason)];
+      }
+      if (
+        path ===
+        "/agents/upgraded-node/configs/sing-box/workspace"
+      ) {
+        runtimeWorkspaceRequests += 1;
+        return { config: null };
+      }
+      assert.fail(`unexpected live runtime refresh path ${path}`);
+    },
+    optionalAPI: async () => null,
+    state: runtimeState,
+    engines: ["sing-box"],
+    can: () => true,
+    esc: (value) => String(value ?? ""),
+    engineName: (value) => value,
+    conciseVersion: (engine, version) => version || engine,
+    date: (value) => value,
+    ago: (value) => value,
+    bytes: (value) => value,
+    confirmAction: async () => true,
+    notify: noop,
+    shell: (markup) => {
+      runtimeMarkup = markup;
+    },
+    submitTask: noop,
+    bindCodeEditors: noop,
+  });
+
+  await pages.liveConfig();
+  assert.equal(
+    runtimeMarkup.includes(runtimeSnapshots[0]),
+    true,
+    "the first live-config visit renders the then-current unsupported reason",
+  );
+
+  runtimeState.route = "tasks";
+  runtimeState.navigationEpoch += 1;
+  runtimeState.route = "live-config";
+  runtimeState.navigationEpoch += 1;
+  await pages.liveConfig();
+  assert.equal(
+    runtimeMarkup.includes(runtimeSnapshots[1]),
+    true,
+    "upgrade to tasks to live-config refreshes the Agent runtime without a hard reload",
+  );
+  assert.equal(runtimeMarkup.includes(runtimeSnapshots[0]), false);
+
+  const migrationSnapshot =
+    '{"inbounds":[{"tag":"complete-existing-snapshot"}]}';
+  runtimeState.data.liveSources["upgraded-node|sing-box"] = {
+    content: migrationSnapshot,
+    taskId: "read-after-upgrade",
+  };
+  runtimeState.route = "tasks";
+  runtimeState.navigationEpoch += 1;
+  runtimeState.route = "live-config";
+  runtimeState.navigationEpoch += 1;
+  await pages.liveConfig();
+  assert.equal(runtimeMarkup.includes(migrationSnapshot), true);
+  assert.equal(
+    runtimeMarkup.includes("readonly"),
+    true,
+    "a newly available migration snapshot is rendered read-only",
+  );
+  assert.equal(
+    (runtimeMarkup.match(/data-live-intent="import"/g) || []).length,
+    1,
+    "a newly available migration exposes exactly one import action",
+  );
+  assert.equal(
+    runtimeAgentRequests,
+    3,
+    "each cross-route visit refreshes runtime once",
+  );
+  await pages.liveConfig();
+  assert.equal(
+    runtimeAgentRequests,
+    3,
+    "same-route live-config renders reuse the current scoped runtime",
+  );
+  assert.equal(runtimeWorkspaceRequests, 4);
+} finally {
+  if (runtimeRefreshDocument === undefined) delete globalThis.document;
+  else globalThis.document = runtimeRefreshDocument;
+}
+
+const staleRuntimeDocument = globalThis.document;
+globalThis.document = {
+  querySelector: () => null,
+  querySelectorAll: () => [],
+};
+try {
+  const staleState = {
+    route: "live-config",
+    navigationEpoch: 20,
+    data: {
+      liveAgent: "race-node",
+      liveEngine: "sing-box",
+      agents: [],
+      liveSources: {
+        "race-node|sing-box": { content: '{"log":{"level":"info"}}' },
+      },
+    },
+  };
+  let resolveOldAgents;
+  const oldAgents = new Promise((resolve) => {
+    resolveOldAgents = resolve;
+  });
+  let staleAgentRequests = 0;
+  let staleWorkspaceRequests = 0;
+  let staleMarkup = "";
+  const raceAgent = (runtime) => ({
+    id: "race-node",
+    name: "Race node",
+    os: "linux",
+    arch: "amd64",
+    status: "online",
+    capabilities: ["sing-box"],
+    runtime: { "sing-box": runtime },
+  });
+  const pages = installConfigPages({
+    api: async (path) => {
+      if (path === "/agents") {
+        staleAgentRequests += 1;
+        if (staleAgentRequests === 1) return oldAgents;
+        return [
+          raceAgent({
+            installed: true,
+            existing_config_available: true,
+          }),
+        ];
+      }
+      if (path === "/agents/race-node/configs/sing-box/workspace") {
+        staleWorkspaceRequests += 1;
+        return { config: null };
+      }
+      assert.fail(`unexpected stale runtime path ${path}`);
+    },
+    optionalAPI: async () => null,
+    state: staleState,
+    engines: ["sing-box"],
+    can: () => true,
+    esc: (value) => String(value ?? ""),
+    engineName: (value) => value,
+    conciseVersion: (engine, version) => version || engine,
+    date: (value) => value,
+    ago: (value) => value,
+    bytes: (value) => value,
+    confirmAction: async () => true,
+    notify: noop,
+    shell: (markup) => {
+      staleMarkup = markup;
+    },
+    submitTask: noop,
+    bindCodeEditors: noop,
+  });
+
+  const staleRender = pages.liveConfig();
+  staleState.navigationEpoch += 1;
+  const currentRender = pages.liveConfig();
+  await currentRender;
+  resolveOldAgents([
+    raceAgent({
+      installed: false,
+      existing_config_unsupported_reason: "stale unsupported reason",
+    }),
+  ]);
+  await staleRender;
+  assert.equal(
+    staleState.data.agents[0].runtime["sing-box"].existing_config_available,
+    true,
+  );
+  assert.equal(staleMarkup.includes("stale unsupported reason"), false);
+  assert.equal(staleMarkup.includes('data-live-intent="import"'), true);
+  assert.equal(
+    staleWorkspaceRequests,
+    1,
+    "the superseded runtime never loads a workspace",
+  );
+} finally {
+  if (staleRuntimeDocument === undefined) delete globalThis.document;
+  else globalThis.document = staleRuntimeDocument;
+}
+
 const ctx = new Proxy(
   { state, engines: [], actions: [] },
   { get: (target, key) => target[key] ?? noop },
@@ -1803,6 +2194,11 @@ try {
   await pollAgentMetrics();
   clearTimeout(metricState.agentPollTimer);
   assert.equal(metricRequests, 1, "three-node metrics patch uses one fleet request");
+  assert.deepEqual(
+    metricState.data.agents.map((agent) => agent.id),
+    ["alpha", "beta", "gamma"],
+    "metrics polling synchronizes the shared Agent runtime snapshot",
+  );
 } finally {
   if (pollingDocument === undefined) delete globalThis.document;
   else globalThis.document = pollingDocument;

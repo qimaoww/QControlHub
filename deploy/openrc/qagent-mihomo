@@ -1,0 +1,25 @@
+#!/sbin/openrc-run
+# QControlHub managed OpenRC service: qagent-mihomo
+
+description="Mihomo core managed by QAgent"
+command="/bin/sh"
+command_args="-c 'exec /usr/local/lib/qagent/cores/mihomo -d /var/lib/qcontrolhub-mihomo -f /etc/qagent/mihomo/config.yaml >>/var/log/qagent/qagent-mihomo.log 2>&1'"
+command_user="qcontrolhub-core:qcontrolhub-core"
+directory="/var/lib/qcontrolhub-mihomo"
+supervisor="supervise-daemon"
+respawn_delay=3
+respawn_max=10000
+capabilities="^cap_net_bind_service"
+no_new_privs=true
+umask=0027
+depend() { need net; }
+
+start_pre() {
+	# supervise-daemon drops privileges before opening output files, so the
+	# log file is pre-created with the service user as its owner and the
+	# core itself appends through the exec redirect above.
+	checkpath --directory --owner root:qcontrolhub-core --mode 0750 /var/log/qagent
+	checkpath --file --owner qcontrolhub-core:qcontrolhub-core --mode 0640 /var/log/qagent/qagent-mihomo.log
+	[ -x "/usr/local/lib/qagent/cores/mihomo" ] || { eerror "missing Mihomo binary: /usr/local/lib/qagent/cores/mihomo"; return 1; }
+	[ -f "/etc/qagent/mihomo/config.yaml" ] || { eerror "missing Mihomo configuration"; return 1; }
+}

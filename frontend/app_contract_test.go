@@ -542,6 +542,76 @@ func TestSPAModulesArePublished(t *testing.T) {
 	}
 }
 
+func TestManualConfigRequiresExplicitImportOfNodeSnapshot(t *testing.T) {
+	configs, err := os.ReadFile("modules/configs.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(configs)
+	for _, required := range []string{
+		`data-live-intent="import">手动导入并迁移`,
+		`迁移任一步失败都会自动恢复原服务`,
+		`action: "import-existing"`,
+		`existing_config_unsupported_reason`,
+		`检测到现有服务，但不可自动迁移`,
+		`只读迁移快照`,
+		`请先原样导入；迁移完成后再编辑托管配置`,
+		`submitLiveConfigChange`,
+		`!unsupportedReason`,
+		`esc(unsupportedReason)`,
+	} {
+		if !strings.Contains(content, required) {
+			t.Errorf("manual configuration flow is missing %q", required)
+		}
+	}
+	agents, err := os.ReadFile("modules/agents.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, required := range []string{
+		`data-existing-pending`, `data-existing-unsupported`, `data-manual-import`,
+		`现有服务待迁移`, `检测到但不可迁移`, `查看不可迁移原因`,
+		`existing_config_unsupported_reason`, `esc(existingUnsupportedReason)`,
+	} {
+		if !strings.Contains(string(agents), required) {
+			t.Errorf("node service controls do not represent pending migration state %q", required)
+		}
+	}
+	app, err := os.ReadFile("app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, required := range []string{
+		`liveConfigEngineEligible,`,
+		`(engine) => liveConfigEngineEligible(selected.runtime?.[engine])`,
+		`class="${engine === state.data.liveEngine ? "active" : ""}"`,
+	} {
+		if !strings.Contains(string(app), required) {
+			t.Errorf("manual configuration context sidebar is missing %q", required)
+		}
+	}
+}
+
+func TestCoreLogsLabelFollowsAdvertisedFeature(t *testing.T) {
+	app, err := os.ReadFile("app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(app)
+	for _, required := range []string{
+		`(agent.features || []).includes("core-logs-v1")`,
+		`"集中日志已启用"`,
+		`"需升级 Agent"`,
+	} {
+		if !strings.Contains(content, required) {
+			t.Errorf("core-logs sidebar is missing %q", required)
+		}
+	}
+	if strings.Contains(content, `agent.features.includes("core-logs-v1") ? "需升级 Agent"`) {
+		t.Error("core-logs sidebar must enable streaming only when core-logs-v1 is advertised")
+	}
+}
+
 func TestTaskPollingKeepsTheScrollContainerStable(t *testing.T) {
 	tasks, err := os.ReadFile("modules/tasks.js")
 	if err != nil {

@@ -2,14 +2,14 @@
 # install-agent.sh — QControlHub agent 一键安装（root 执行，无需预装仓库）
 #
 # 用法：
-#   bash deploy/remote/install-agent.sh <control-plane-url|ip[:port]> <add-node-credential> [agent-name]
+#   sh deploy/remote/install-agent.sh <control-plane-url|ip[:port]> <add-node-credential> [agent-name]
 #
 # 示例：
 #   QCH_TLS_CA_FILE=/etc/qcontrolhub/control-plane-ca.pem \
-#   bash deploy/remote/install-agent.sh https://192.168.31.205:8443 <token> shanghai-edge-01
+#   sh deploy/remote/install-agent.sh https://qcontrolhub.example.com <token> shanghai-edge-01
 #
 # 从控制面 GET /api/v1/agent-binary 下载 agent 可执行文件，引导核心服务，
-# 写入 /etc/qcontrolhub/agent.env，安装 systemd 单元并启动。
+# 写入 /etc/qcontrolhub/agent.env，安装 systemd 或 OpenRC 服务并启动。
 set -eu
 
 [ "$(id -u)" -eq 0 ] || { printf '%s\n' 'install-agent.sh must run as root' >&2; exit 1; }
@@ -20,6 +20,32 @@ name="${3:-$(hostname)}"
 ca_file="${QCH_TLS_CA_FILE:-}"
 allow_insecure_live="${QCH_ALLOW_INSECURE_LIVE:-false}"
 
+validate_environment_value() {
+  environment_key=$1
+  environment_value=$2
+  sanitized_value=$(printf '%s' "$environment_value" | tr -d '\r\n')
+  [ "$sanitized_value" = "$environment_value" ] || {
+    printf '%s\n' "refusing multiline Agent environment value: $environment_key" >&2
+    exit 1
+  }
+}
+
+validate_environment_value QCH_SERVER_URL "$control"
+validate_environment_value QCH_ENROLLMENT_TOKEN "$token"
+validate_environment_value QCH_AGENT_NAME "$name"
+validate_environment_value QCH_TLS_CA_FILE "$ca_file"
+validate_environment_value QCH_ALLOW_INSECURE_LIVE "$allow_insecure_live"
+
+if [ -f /etc/alpine-release ]; then
+  command -v apk >/dev/null 2>&1 || { printf '%s\n' 'Alpine apk is unavailable' >&2; exit 1; }
+  apk add --no-cache ca-certificates coreutils curl libcap nftables openrc >/dev/null
+  service_manager=openrc
+elif command -v systemctl >/dev/null 2>&1; then
+  service_manager=systemd
+else
+  printf '%s\n' 'unsupported init system: systemd or Alpine OpenRC is required' >&2
+  exit 1
+fi
 case "$control" in
   http://*|https://*|ws://*|wss://*) server_url="$control" ;;
   *) server_url="http://$control" ;;
@@ -34,7 +60,7 @@ esac
 work_dir=$(mktemp -d "${TMPDIR:-/tmp}/qcontrolhub-agent.XXXXXX")
 trap 'rm -rf "$work_dir"' EXIT HUP INT TERM
 repository_dir="$work_dir/qcontrolhub"
-mkdir -p "$repository_dir/deploy/systemd" "$repository_dir/examples/configs"
+mkdir -p "$repository_dir/deploy/$service_manager" "$repository_dir/examples/configs"
 
 download() {
   source_path=$1
@@ -49,12 +75,7 @@ download() {
 echo '== 1/6 下载安装资源 =='
 for asset in \
   deploy/bootstrap-core-services.sh \
-  deploy/systemd/qagent.service \
-  deploy/systemd/qagent-core-journal.conf \
-  deploy/systemd/qagent-mihomo.service \
-  deploy/systemd/qagent-xray.service \
-  deploy/systemd/qagent-sing-box.service \
-  deploy/systemd/qagent-shadowsocks-rust.service \
+  deploy/existing-core-mapping.sh \
   examples/configs/mihomo-minimal.yaml \
   examples/configs/xray-minimal.json \
   examples/configs/sing-box-minimal.json \
@@ -62,13 +83,41 @@ for asset in \
 do
   download "/install-assets/$asset" "$repository_dir/$asset"
 done
+if [ "$service_manager" = openrc ]; then
+  service_assets="qagent qagent-mihomo qagent-xray qagent-sing-box qagent-shadowsocks-rust"
+  for service_asset in $service_assets; do
+    download "/install-assets/deploy/openrc/$service_asset" "$repository_dir/deploy/openrc/$service_asset"
+  done
+else
+  service_assets="qagent.service qagent-core-journal.conf qagent-mihomo.service qagent-xray.service qagent-sing-box.service qagent-shadowsocks-rust.service"
+  for service_asset in $service_assets; do
+    download "/install-assets/deploy/systemd/$service_asset" "$repository_dir/deploy/systemd/$service_asset"
+  done
+fi
+. "$repository_dir/deploy/existing-core-mapping.sh"
 
 echo "== 2/6 下载 agent 二进制（控制面 GET /api/v1/agent-binary）=="
 download /api/v1/agent-binary "$work_dir/qagent"
 [ -s "$work_dir/qagent" ] || { printf '%s\n' 'downloaded agent binary is empty' >&2; exit 1; }
+chmod 0755 "$work_dir/qagent"
 
-echo '== 3/6 引导核心服务（mihomo/xray/sing-box/ss-rust 单元与最小配置）=='
-bash "$repository_dir/deploy/bootstrap-core-services.sh"
+echo '== 3/6 检测现有核心并引导其余服务 =='
+run_discovery() {
+  label=$1
+  shift
+  if "$@"; then
+    return 0
+  else
+    result=$?
+  fi
+  [ "$result" -eq 1 ] || {
+    printf '%s\n' "unsafe $label service state; installation stopped without changing services" >&2
+    exit "$result"
+  }
+}
+run_discovery Xray discover_existing_xray
+run_discovery sing-box discover_existing_singbox
+QCH_SERVICE_MANAGER="$service_manager" QCH_SKIP_CORE_SERVICES="$mapped_engines" sh "$repository_dir/deploy/bootstrap-core-services.sh"
 
 echo '== 4/6 写入 agent 环境文件 =='
 mkdir -p /usr/local/lib/qagent
@@ -87,24 +136,72 @@ umask 077
   printf '%s\n' 'QCH_AGENT_LABELS=region=cn-east'
   printf '%s\n' 'QCH_AGENT_STATE=/var/lib/qcontrolhub/agent-state.json'
   printf '%s\n' 'QCH_AGENT_ENGINES=mihomo,xray,sing-box,ss-rust'
+  printf '%s\n' "QCH_SERVICE_MANAGER=$service_manager"
+  if [ -n "$mapped_xray_config" ]; then
+    printf '%s\n' \
+      "QCH_EXISTING_XRAY_BINARY=$mapped_xray_binary" \
+      "QCH_EXISTING_XRAY_CONFIG=$mapped_xray_config" \
+      "QCH_EXISTING_XRAY_SERVICE=$mapped_xray_service"
+  fi
+  if [ -n "$mapped_singbox_config" ]; then
+    printf '%s\n' \
+      "QCH_EXISTING_SING_BOX_BINARY=$mapped_singbox_binary" \
+      "QCH_EXISTING_SING_BOX_CONFIG=$mapped_singbox_config" \
+      "QCH_EXISTING_SING_BOX_CONFIG_DIRECTORY=$mapped_singbox_config_directory" \
+      "QCH_EXISTING_SING_BOX_SERVICE_BINARY=$mapped_singbox_service_binary" \
+      "QCH_EXISTING_SING_BOX_SERVICE=$mapped_singbox_service"
+  fi
 } > /etc/qcontrolhub/agent.env
 chmod 0600 /etc/qcontrolhub/agent.env
 
-echo '== 5/6 安装 systemd 单元 =='
-install -m 0644 "$repository_dir/deploy/systemd/qagent.service" /etc/systemd/system/qagent.service
-systemctl daemon-reload
+openrc_conf=/etc/conf.d/qagent
+write_openrc_environment() {
+  : > "$work_dir/qagent.openrc.conf"
+  while IFS='=' read -r environment_key environment_value; do
+    case "$environment_key" in
+      QCH_*) case "$environment_key" in *[!A-Z0-9_]*) printf '%s\n' "refusing invalid Agent environment key: $environment_key" >&2; exit 1 ;; esac ;;
+      *) printf '%s\n' "refusing invalid Agent environment key: $environment_key" >&2; exit 1 ;;
+    esac
+    escaped_value=$(printf '%s' "$environment_value" | sed "s/'/'\\\\''/g")
+    printf "export %s='%s'\n" "$environment_key" "$escaped_value" >> "$work_dir/qagent.openrc.conf"
+  done < /etc/qcontrolhub/agent.env
+  install -d -o root -g root -m 0755 /etc/conf.d
+  install -o root -g root -m 0600 "$work_dir/qagent.openrc.conf" "$openrc_conf"
+}
+
+echo "== 5/6 安装 $service_manager 服务 =="
+if [ "$service_manager" = openrc ]; then
+  install -o root -g root -m 0755 "$repository_dir/deploy/openrc/qagent" /etc/init.d/qagent
+  write_openrc_environment
+  rc-update add qagent default >/dev/null
+else
+  install -m 0644 "$repository_dir/deploy/systemd/qagent.service" /etc/systemd/system/qagent.service
+  systemctl daemon-reload
+fi
 
 echo '== 6/6 启动 agent =='
-systemctl enable qagent.service >/dev/null
-# restart also starts an inactive unit and guarantees repeated installation
-# replaces the running process with the freshly downloaded binary.
-systemctl restart qagent.service
+if [ "$service_manager" = openrc ]; then
+  if rc-service qagent status >/dev/null 2>&1; then rc-service qagent restart; else rc-service qagent start; fi
+else
+  systemctl enable qagent.service >/dev/null
+  # restart also starts an inactive unit and guarantees repeated installation
+  # replaces the running process with the freshly downloaded binary.
+  systemctl restart qagent.service
+fi
 sleep 3
-systemctl --no-pager status qagent.service | head -n 10
+if [ "$service_manager" = openrc ]; then
+  rc-service qagent status
+else
+  systemctl --no-pager status qagent.service | head -n 10
+fi
 
 # 添加节点凭证只用于下载和注册；无论首次还是覆盖安装，只要身份文件
 # 存在就立即从环境文件移除，避免添加节点凭证残留。
 if [ -s /var/lib/qcontrolhub/agent-state.json ]; then
   sed -i '/^QCH_ENROLLMENT_TOKEN=/d' /etc/qcontrolhub/agent.env
   chmod 0600 /etc/qcontrolhub/agent.env
+  if [ "$service_manager" = openrc ]; then
+    sed -i '/^export QCH_ENROLLMENT_TOKEN=/d' "$openrc_conf"
+    chmod 0600 "$openrc_conf"
+  fi
 fi

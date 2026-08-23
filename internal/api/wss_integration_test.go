@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"io"
@@ -37,16 +38,31 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 	defer dataStore.Close()
 
 	adminToken := strings.Repeat("a", 48)
+	auditorToken := strings.Repeat("u", 48)
+	tasksReadToken := strings.Repeat("r", 48)
+	configSnapshotReadToken := strings.Repeat("c", 48)
 	trustedProxies, err := authn.ParseTrustedProxies([]string{"127.0.0.1/32"})
 	if err != nil {
 		t.Fatalf("parse trusted proxy fixture: %v", err)
 	}
-	httpServer := httptest.NewServer(New(dataStore, Config{
+	apiServer := New(dataStore, Config{
 		AdminToken:     adminToken,
+		AuditorTokens:  []string{auditorToken},
 		TrustedProxies: trustedProxies,
 		AgentBinary:    []byte("test-agent-binary"),
 		AgentVersion:   "test-version",
-	}).Handler())
+	})
+	apiServer.roleTokens[sha256.Sum256([]byte(tasksReadToken))] = tokenPrincipal{
+		Role: core.RoleUser, Permissions: []core.Permission{core.PermissionTasksRead},
+	}
+	apiServer.roleTokens[sha256.Sum256([]byte(configSnapshotReadToken))] = tokenPrincipal{
+		Role: core.RoleUser,
+		Permissions: []core.Permission{
+			core.PermissionTasksRead,
+			core.PermissionAgentConfigRead,
+		},
+	}
+	httpServer := httptest.NewServer(apiServer.Handler())
 	defer httpServer.Close()
 
 	enrollment, err := dataStore.CreateEnrollmentToken(ctx, core.EnrollmentTokenRequest{Name: "integration", TTLMinutes: 5, MaxUses: 1})
@@ -369,9 +385,9 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 	if err != nil || len(tasks) < 2 || tasks[0].Status != core.TaskSucceeded || tasks[0].CoreVersion != core.CoreVersionDevelopment {
 		t.Fatalf("completed task not persisted: tasks=%+v error=%v", tasks, err)
 	}
-	for _, action := range []core.Action{core.ActionDeploy, core.ActionReadConfig, core.ActionStart, core.ActionStop, core.ActionRestart} {
+	for _, action := range []core.Action{core.ActionDeploy, core.ActionImportExisting, core.ActionReadConfig, core.ActionStart, core.ActionStop, core.ActionRestart} {
 		request := core.TaskRequest{AgentID: enrolled.AgentID, Action: action, Engine: core.EngineMihomo}
-		if action == core.ActionDeploy {
+		if action == core.ActionDeploy || action == core.ActionImportExisting {
 			request.ConfigID = config.ID
 		}
 		created, createErr := dataStore.CreateTask(ctx, request)
@@ -406,22 +422,52 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 			if snapshotErr != nil || snapshot != config.Content {
 				t.Fatalf("read-config snapshot = %q, %v", snapshot, snapshotErr)
 			}
-			snapshotRequest, requestErr := http.NewRequestWithContext(ctx, http.MethodGet, httpServer.URL+"/api/v1/tasks/"+created.ID+"/config-snapshot", nil)
-			if requestErr != nil {
-				t.Fatalf("create read-config snapshot request: %v", requestErr)
-			}
-			snapshotRequest.Header.Set("Authorization", "Bearer "+adminToken)
-			snapshotResponse, requestErr := http.DefaultClient.Do(snapshotRequest)
-			if requestErr != nil {
-				t.Fatalf("read-config snapshot request: %v", requestErr)
-			}
-			var snapshotPayload struct {
-				Content string `json:"content"`
-			}
-			decodeErr := json.NewDecoder(snapshotResponse.Body).Decode(&snapshotPayload)
-			_ = snapshotResponse.Body.Close()
-			if snapshotResponse.StatusCode != http.StatusOK || decodeErr != nil || snapshotPayload.Content != config.Content {
-				t.Fatalf("read-config snapshot API status=%d content=%q decode=%v", snapshotResponse.StatusCode, snapshotPayload.Content, decodeErr)
+			for _, testCase := range []struct {
+				name, token string
+				wantStatus  int
+				wantContent bool
+			}{
+				{name: "admin", token: adminToken, wantStatus: http.StatusOK, wantContent: true},
+				{name: "explicit snapshot reader", token: configSnapshotReadToken, wantStatus: http.StatusOK, wantContent: true},
+				{name: "default auditor", token: auditorToken, wantStatus: http.StatusForbidden},
+				{name: "tasks read only", token: tasksReadToken, wantStatus: http.StatusForbidden},
+			} {
+				t.Run("read-config snapshot authorization/"+testCase.name, func(t *testing.T) {
+					snapshotRequest, requestErr := http.NewRequestWithContext(ctx, http.MethodGet, httpServer.URL+"/api/v1/tasks/"+created.ID+"/config-snapshot", nil)
+					if requestErr != nil {
+						t.Fatalf("create read-config snapshot request: %v", requestErr)
+					}
+					snapshotRequest.Header.Set("Authorization", "Bearer "+testCase.token)
+					snapshotResponse, requestErr := http.DefaultClient.Do(snapshotRequest)
+					if requestErr != nil {
+						t.Fatalf("read-config snapshot request: %v", requestErr)
+					}
+					body, readErr := io.ReadAll(snapshotResponse.Body)
+					_ = snapshotResponse.Body.Close()
+					if readErr != nil {
+						t.Fatalf("read read-config snapshot response: %v", readErr)
+					}
+					if snapshotResponse.StatusCode != testCase.wantStatus {
+						t.Fatalf("read-config snapshot API status=%d body=%q, want %d", snapshotResponse.StatusCode, body, testCase.wantStatus)
+					}
+					if !testCase.wantContent {
+						var deniedPayload map[string]any
+						if decodeErr := json.Unmarshal(body, &deniedPayload); decodeErr != nil {
+							t.Fatalf("decode forbidden read-config snapshot response: %v", decodeErr)
+						}
+						_, exposedContent := deniedPayload["content"]
+						if exposedContent || bytes.Contains(body, []byte("mixed-port")) {
+							t.Fatalf("forbidden read-config snapshot exposed plaintext: %q", body)
+						}
+						return
+					}
+					var snapshotPayload struct {
+						Content string `json:"content"`
+					}
+					if decodeErr := json.Unmarshal(body, &snapshotPayload); decodeErr != nil || snapshotPayload.Content != config.Content {
+						t.Fatalf("read-config snapshot API content=%q decode=%v", snapshotPayload.Content, decodeErr)
+					}
+				})
 			}
 		}
 	}

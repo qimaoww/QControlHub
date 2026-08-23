@@ -63,7 +63,7 @@
 | `GET` | `/api/v1/tasks?agent_id=&status=&action=&limit=` | 按节点、状态和动作筛选任务；`limit` 为 1–500，默认 100 |
 | `POST` | `/api/v1/tasks` | 创建远程任务 |
 | `GET` | `/api/v1/tasks/{id}` | 读取单个任务及结果 |
-| `GET` | `/api/v1/tasks/{id}/config-snapshot` | 读取已成功 `read-config` 任务的短期配置快照 |
+| `GET` | `/api/v1/tasks/{id}/config-snapshot` | 读取已成功 `read-config` 任务的短期配置快照（同时需要 `tasks.read` 与 `agent-config.read`） |
 | `DELETE` | `/api/v1/tasks/{id}` | 取消尚未领取的任务 |
 | `POST` | `/api/v1/tasks/{id}/retry` | 按当前配置重试失败或已取消任务 |
 | `GET` | `/api/v1/enrollment-tokens` | 列出添加节点记录，不返回原始凭证（admin） |
@@ -176,7 +176,7 @@ Content-Type: application/json
 
 ### 列出任务
 
-任务列表筛选条件可组合使用。`agent_id` 接受完整 Agent ID；`status` 允许 `pending`、`running`、`succeeded`、`failed`、`canceled`；`action` 允许 `validate`、`deploy`、`read-config`、`start`、`stop`、`restart`、`status`、`install`。`limit` 默认为 100，最大为 500；无效的 `status` 或 `action` 返回 `400`。
+任务列表筛选条件可组合使用。`agent_id` 接受完整 Agent ID；`status` 允许 `pending`、`running`、`succeeded`、`failed`、`canceled`；`action` 允许 `validate`、`deploy`、`import-existing`、`read-config`、`start`、`stop`、`restart`、`status`、`install`。`limit` 默认为 100，最大为 500；无效的 `status` 或 `action` 返回 `400`。
 
 ### 创建任务
 
@@ -214,6 +214,8 @@ Content-Type: application/json
 }
 ```
 
+允许的 `action` 为 `validate`、`deploy`、`import-existing`、`read-config`、`start`、`stop`、`restart`、`status`、`install`。Agent 必须在注册能力中声明对应内核。若心跳报告某内核检测到现有服务但无法安全映射，或 completed migration 在重启时不再满足原服务 inactive/disabled、托管服务 active/persistent-enabled 的完成态，控制面会对该内核的全部 action 返回 `409`，Agent 执行器也会独立拒绝已在途任务。`import-existing` 只接受该节点自己保存的配置快照，并且只在 Agent 已精确识别、仍等待管理员确认的现有 Xray 或 sing-box 服务上执行；常规使用应从“手动配置”页提交。稳定版和自定义版本使用对应内核的官方 GitHub Release，不接受自定义 URL；某来源没有可用二进制时，对应任务失败而不会降级到另一来源或稳定版。
+
 Mihomo `development` 安装额外接受 `core_source`，取值为 `official`（默认、推荐，省略该字段等价于 `official`）或 `mirror`（显式选择第三方 `vernesong/mihomo` Alpha 镜像）：
 
 ```json
@@ -238,11 +240,9 @@ Mihomo `development` 安装额外接受 `core_source`，取值为 `official`（�
 
 `core_source` 仅接受 Mihomo `development` 的 `official` 或 `mirror`。其他内核或版本通道携带 `core_source` 时返回 `400`；未声明 `mihomo-development-source-v1` 的旧 Agent 请求 `mirror` 时返回 `409`。每个来源独立解析并 fail-closed，不使用另一来源或稳定版兜底。
 
-允许的 `action` 为 `validate`、`deploy`、`read-config`、`start`、`stop`、`restart`、`status`、`install`。Agent 必须在注册能力中声明对应内核。稳定版和自定义版本使用对应内核的官方 GitHub Release，不接受自定义 URL；某来源没有可用二进制时，对应任务失败而不会降级到另一来源或稳定版。
-
 任务成功响应表示目标节点已完成对应操作；失败响应会保留节点返回的错误信息。部署任务只有在目标节点真实写入配置并成功重启服务后，才会进入节点的最新部署记录。
 
-成功的 `read-config` 任务不会在普通任务列表或任务详情中返回配置正文。读取完成后，使用 `GET /api/v1/tasks/{id}/config-snapshot` 获取 `{ "content": "..." }`；当快照已被同一节点和内核的后续成功读取清理时返回 `404`。
+成功的 `read-config` 任务不会在普通任务列表或任务详情中返回配置正文。读取完成后，同时具备 `tasks.read` 与 `agent-config.read` 的用户可使用 `GET /api/v1/tasks/{id}/config-snapshot` 获取 `{ "content": "..." }`；仅有 `tasks.read` 仍可查看任务记录，但读取快照会返回 `403`。当快照已被同一节点和内核的后续成功读取清理时返回 `404`。
 
 ### 状态码
 
@@ -266,7 +266,7 @@ Agent 协议端点如下：
 | `POST` | `/agent/v1/enroll` | 注册 Bearer 令牌 |
 | `GET` | `/agent/v1/connect` | Agent 签名的 WebSocket Upgrade |
 
-WSS 握手必须协商子协议 `qcontrolhub.agent.v1`。服务端先发送 `hello` 及该节点的端口流量策略；Agent 定期发送 `heartbeat`，心跳包含内核运行状态、主机资源以及端口配额的收发计数和封禁状态；服务端下发带随机 lease ID 的 `task`，Agent 返回包含 `success` 和结果正文的 `result`，服务端确认 `result_ack`。连接压缩关闭，服务端要求 50 秒内收到消息，官方 Agent 默认每 15 秒心跳并在断线后指数退避重连。
+WSS 握手必须协商子协议 `qcontrolhub.agent.v1`。服务端先发送 `hello` 及该节点的端口流量策略；Agent 定期发送 `heartbeat`，心跳包含内核运行状态、主机资源以及端口配额的收发计数和封禁状态；`runtime.<engine>.existing_config_available` 表示已有服务可在手动配置页读取并迁移，`existing_config_unsupported_reason` 表示检测到已有服务但精确 argv、路径、歧义或 wrapper 安全边界不允许自动读取/接管，控制面只展示该原因并禁用相关操作。服务端下发带随机 lease ID 的 `task`，Agent 返回包含 `success` 和结果正文的 `result`，服务端确认 `result_ack`。连接压缩关闭，服务端要求 50 秒内收到消息，官方 Agent 默认每 15 秒心跳并在断线后指数退避重连。
 
 ## Webhook 事件
 

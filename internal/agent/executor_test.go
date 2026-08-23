@@ -94,6 +94,35 @@ func TestDefaultSpecsUsePrivateQAgentNamespace(t *testing.T) {
 	}
 }
 
+func TestOpenRCSpecsAndServicesUsePrivateQAgentNamespace(t *testing.T) {
+	t.Parallel()
+	for engine, spec := range DefaultSpecsForServiceManager(ServiceManagerOpenRC) {
+		if strings.HasSuffix(spec.Service, ".service") {
+			t.Errorf("OpenRC service for %s retains systemd suffix: %s", engine, spec.Service)
+		}
+		contents, err := os.ReadFile(filepath.Join("../../deploy/openrc", spec.Service))
+		if err != nil {
+			t.Errorf("read OpenRC service %s: %v", spec.Service, err)
+			continue
+		}
+		script := string(contents)
+		for _, required := range []string{"#!/sbin/openrc-run", "# QControlHub managed OpenRC service:", "supervisor=\"supervise-daemon\"", "capabilities=\"^cap_net_bind_service\"", spec.Binary} {
+			if !strings.Contains(script, required) {
+				t.Errorf("OpenRC service %s is missing %q", spec.Service, required)
+			}
+		}
+	}
+	agentService, err := os.ReadFile("../../deploy/openrc/qagent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, required := range []string{"command=\"/usr/local/lib/qagent/qagent\"", "command_user=\"root:root\"", "respawn_delay=5", "capabilities=\"^cap_chown,^cap_net_admin\"", "no_new_privs=true"} {
+		if !strings.Contains(string(agentService), required) {
+			t.Errorf("OpenRC Agent service is missing %q", required)
+		}
+	}
+}
+
 func TestCoreBootstrapDoesNotTouchLegacyInstallations(t *testing.T) {
 	t.Parallel()
 	contents, err := os.ReadFile("../../deploy/bootstrap-core-services.sh")
@@ -101,7 +130,7 @@ func TestCoreBootstrapDoesNotTouchLegacyInstallations(t *testing.T) {
 		t.Fatal(err)
 	}
 	script := string(contents)
-	for _, required := range []string{"/usr/local/lib/qagent/cores", "/etc/systemd/system/qagent-$engine.service", "install_managed_unit", "preserved non-QAgent unit"} {
+	for _, required := range []string{"/usr/local/lib/qagent/cores", "/etc/systemd/system/$managed_service", "install_managed_unit", "preserved non-QAgent unit", "install_managed_openrc_service", "rc-update add"} {
 		if !strings.Contains(script, required) {
 			t.Errorf("core bootstrap is missing private namespace %q", required)
 		}
@@ -109,6 +138,34 @@ func TestCoreBootstrapDoesNotTouchLegacyInstallations(t *testing.T) {
 	for _, forbidden := range []string{"/usr/local/bin/mihomo", "/usr/local/bin/xray", "managed by QControlHub", "legacy_service"} {
 		if strings.Contains(script, forbidden) {
 			t.Errorf("core bootstrap unexpectedly touches legacy installation %q", forbidden)
+		}
+	}
+}
+
+func TestOneClickInstallerMapsOnlyValidatedExistingCorePaths(t *testing.T) {
+	t.Parallel()
+	contents, err := os.ReadFile("../../deploy/remote/install-agent.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mapping, err := os.ReadFile("../../deploy/existing-core-mapping.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(contents) + string(mapping)
+	for _, required := range []string{
+		"discover_existing_xray", "discover_existing_singbox", "systemctl is-active --quiet",
+		"existing-core-mapping.sh", "QCH_EXISTING_XRAY_CONFIG", "QCH_EXISTING_SING_BOX_CONFIG",
+		"rc-service \"$service\" status", "openrc_supervised_child_pid",
+		"QCH_SERVICE_MANAGER", "apk add --no-cache", "deploy/openrc",
+	} {
+		if !strings.Contains(script, required) {
+			t.Errorf("one-click installer is missing inherited-core guard %q", required)
+		}
+	}
+	for _, forbidden := range []string{"systemctl stop xray.service", "systemctl stop sing-box.service", "QCH_INHERIT_CONFIGS", "validate-inherited", "/proc/[0-9]*"} {
+		if strings.Contains(script, forbidden) {
+			t.Errorf("one-click installer stops an existing service via %q", forbidden)
 		}
 	}
 }
@@ -133,6 +190,31 @@ func TestPersistentCoreLogOutputsAreRejected(t *testing.T) {
 	}
 	if err := validateNoPersistentCoreLogs(core.EngineXray, `{"log":{"loglevel":"info","access":"none"}}`); err != nil {
 		t.Fatalf("disabled Xray file logging was rejected: %v", err)
+	}
+}
+
+func TestUnsupportedExistingServiceBlocksEveryCoreAction(t *testing.T) {
+	t.Parallel()
+	reason := "multiple active sing-box services were detected"
+	executor := &Executor{
+		Specs: map[core.Engine]EngineSpec{
+			core.EngineSingBox: {Binary: "/unused/sing-box", ConfigPath: "/unused/config.json", Service: "qagent-sing-box.service"},
+		},
+		ExistingDiscoveryIssues: map[core.Engine]string{core.EngineSingBox: reason},
+	}
+	for _, action := range []core.Action{
+		core.ActionValidate, core.ActionDeploy, core.ActionStart, core.ActionStop,
+		core.ActionRestart, core.ActionStatus, core.ActionInstall, core.ActionReadConfig,
+		core.ActionImportExisting,
+	} {
+		t.Run(string(action), func(t *testing.T) {
+			_, err := executor.Execute(context.Background(), core.Task{
+				Action: action, Engine: core.EngineSingBox, ConfigContent: `{"inbounds":[]}`,
+			})
+			if err == nil || !strings.Contains(err.Error(), "core tasks are disabled") || !strings.Contains(err.Error(), reason) {
+				t.Fatalf("Execute(%s) error = %v", action, err)
+			}
+		})
 	}
 }
 

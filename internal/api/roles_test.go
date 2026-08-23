@@ -119,6 +119,7 @@ func TestManagementAPIRouteAuthorizationMatrix(t *testing.T) {
 	}
 	auditorDenied := []route{
 		{http.MethodPost, "/api/v1/tasks"},
+		{http.MethodGet, "/api/v1/tasks/tsk_test/config-snapshot"},
 		{http.MethodPost, "/api/v1/configs"},
 		{http.MethodGet, "/api/v1/settings"},
 	}

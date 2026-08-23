@@ -844,8 +844,8 @@ func (s *Store) CreateTask(ctx context.Context, request core.TaskRequest) (core.
 		return core.Task{}, err
 	}
 	defer tx.Rollback(ctx)
-	var capabilitiesJSON, featuresJSON []byte
-	if err := tx.QueryRow(ctx, `SELECT capabilities,features FROM agents WHERE id=$1 AND revoked_at IS NULL FOR UPDATE`, request.AgentID).Scan(&capabilitiesJSON, &featuresJSON); err != nil {
+	var capabilitiesJSON, featuresJSON, runtimeJSON []byte
+	if err := tx.QueryRow(ctx, `SELECT capabilities,features,runtime FROM agents WHERE id=$1 AND revoked_at IS NULL FOR UPDATE`, request.AgentID).Scan(&capabilitiesJSON, &featuresJSON, &runtimeJSON); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return core.Task{}, fmt.Errorf("agent: %w", ErrNotFound)
 		}
@@ -859,11 +859,20 @@ func (s *Store) CreateTask(ctx context.Context, request core.TaskRequest) (core.
 	if err := json.Unmarshal(featuresJSON, &features); err != nil {
 		return core.Task{}, err
 	}
+	var runtime map[core.Engine]core.RuntimeState
+	if err := json.Unmarshal(runtimeJSON, &runtime); err != nil {
+		return core.Task{}, err
+	}
 	if request.Action == core.ActionUpgradeAgent && !containsFeature(features, core.AgentFeatureSelfUpgrade) {
 		return core.Task{}, fmt.Errorf("%w: this Agent does not support remote upgrades; run the current one-click installation once", ErrConflict)
 	}
 	if request.Action != core.ActionUpgradeAgent && !containsEngine(capabilities, request.Engine) {
 		return core.Task{}, fmt.Errorf("%w: agent does not advertise the requested engine", ErrInvalid)
+	}
+	if request.Action != core.ActionUpgradeAgent {
+		if reason := strings.TrimSpace(runtime[request.Engine].ExistingConfigUnsupportedReason); reason != "" {
+			return core.Task{}, fmt.Errorf("%w: %s core tasks are disabled because an existing service could not be mapped safely: %s", ErrConflict, request.Engine, reason)
+		}
 	}
 	if request.Action == core.ActionInstall && request.Engine == core.EngineMihomo &&
 		request.CoreVersion == core.CoreVersionDevelopment &&
@@ -877,7 +886,7 @@ func (s *Store) CreateTask(ctx context.Context, request core.TaskRequest) (core.
 		ConfigID: request.ConfigID, CoreVersion: request.CoreVersion, CoreSource: request.CoreSource,
 		Status: core.TaskPending, CreatedAt: time.Now().UTC(),
 	}
-	if request.Action == core.ActionDeploy || request.Action == core.ActionValidate {
+	if request.Action == core.ActionDeploy || request.Action == core.ActionValidate || request.Action == core.ActionImportExisting {
 		var configEngine core.Engine
 		var configAgentID string
 		err := tx.QueryRow(ctx, `SELECT engine,content,version,COALESCE(agent_id,'') FROM configs WHERE id=$1 AND deleted_at IS NULL FOR UPDATE`, request.ConfigID).Scan(&configEngine, &task.ConfigContent, &task.ConfigVersion, &configAgentID)
@@ -889,6 +898,9 @@ func (s *Store) CreateTask(ctx context.Context, request core.TaskRequest) (core.
 		}
 		if configEngine != request.Engine {
 			return core.Task{}, fmt.Errorf("%w: task engine does not match configuration engine", ErrInvalid)
+		}
+		if request.Action == core.ActionImportExisting && configAgentID != request.AgentID {
+			return core.Task{}, fmt.Errorf("%w: existing service migration requires this agent's saved snapshot", ErrInvalid)
 		}
 		if configAgentID != "" && configAgentID != request.AgentID {
 			return core.Task{}, fmt.Errorf("%w: node-owned configuration cannot be deployed to another agent", ErrInvalid)

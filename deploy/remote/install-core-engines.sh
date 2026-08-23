@@ -1,10 +1,16 @@
 #!/bin/sh
 # install-core-engines.sh — 下载并安装 mihomo / xray / sing-box / Shadowsocks Rust 官方 linux-amd64 二进制
-# 用法（root）： bash deploy/remote/install-core-engines.sh
+# 用法（root）： sh deploy/remote/install-core-engines.sh
 # 安装路径与 agent 默认 EngineSpec 一致：/usr/local/lib/qagent/cores/{mihomo,xray,sing-box,ssserver}
 set -eu
 
 [ "$(id -u)" -eq 0 ] || { printf '%s\n' 'must run as root' >&2; exit 1; }
+if [ -f /etc/alpine-release ]; then
+  apk add --no-cache coreutils curl findutils gzip tar unzip xz >/dev/null
+  linux_libc=musl
+else
+  linux_libc=gnu
+fi
 for tool in curl find gunzip install tar unzip xz; do
   command -v "$tool" >/dev/null 2>&1 || { printf '%s\n' "missing tool: $tool" >&2; exit 1; }
 done
@@ -12,7 +18,7 @@ done
 mihomo_gz="https://github.com/MetaCubeX/mihomo/releases/download/v1.19.29/mihomo-linux-amd64-v1-v1.19.29.gz"
 xray_zip="https://github.com/XTLS/Xray-core/releases/download/v26.3.27/Xray-linux-64.zip"
 singbox_tgz="https://github.com/SagerNet/sing-box/releases/download/v1.13.16/sing-box-1.13.16-linux-amd64.tar.gz"
-ssrust_txz="https://github.com/shadowsocks/shadowsocks-rust/releases/download/v1.24.0/shadowsocks-v1.24.0.x86_64-unknown-linux-gnu.tar.xz"
+ssrust_txz="https://github.com/shadowsocks/shadowsocks-rust/releases/download/v1.24.0/shadowsocks-v1.24.0.x86_64-unknown-linux-${linux_libc}.tar.xz"
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT

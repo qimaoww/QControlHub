@@ -1,8 +1,8 @@
 # QControlHub
 
-QControlHub 是面向 Linux 节点的配置与远程运维平台，由 Go 控制面、Go Agent、静态 Web 控制台和 PostgreSQL 组成，用于集中管理代理内核、配置、任务与运行状态。
+QControlHub 是面向 Linux 节点的配置与远程运维平台，由 Go 控制面、Go Agent、静态 Web 控制台和 PostgreSQL 组成，用于集中管理代理内核、配置、任务与运行状态。节点服务支持 systemd 和 Alpine OpenRC。
 
-> **安全提示：** QControlHub 可以下发敏感配置、控制 systemd 服务并管理端口流量规则，属于高权限基础设施。生产环境必须使用 HTTPS、限制管理入口、妥善保管凭据并定期验证备份。
+> **安全提示：** QControlHub 可以下发敏感配置、控制系统服务并管理端口流量规则，属于高权限基础设施。生产环境必须使用 HTTPS、限制管理入口、妥善保管凭据并定期验证备份。
 
 ## 核心能力
 
@@ -16,11 +16,11 @@ QControlHub 是面向 Linux 节点的配置与远程运维平台，由 Go 控制
 
 - 管理 Mihomo、Xray、sing-box 和 Shadowsocks Rust 的节点配置、版本修订、差异与模板。
 - 提供服务端入站方案和源码编辑入口，配置在控制面检查结构后仍由目标内核完成真实校验。
-- Agent 通过受限路径、原子替换、备份和失败回滚部署配置与内核二进制，并通过专用 systemd 单元管理服务。
+- Agent 通过受限路径、原子替换、备份和失败回滚部署配置与内核二进制，并通过专用 systemd/OpenRC 服务管理进程。
 
 ### 接入、日志与流量
 
-- 汇集托管内核日志，并从已认证的 Agent 通道刷新运行指标和服务状态。
+- systemd 节点从 volatile journal namespace 汇集托管内核日志，OpenRC 节点从 `supervise-daemon` 日志文件跟踪同样的实时日志流。两种节点都从已认证的 Agent 通道刷新运行指标和服务状态。
 - 根据节点配置生成带遮罩的客户端分享 URI 与逐项接入参数。
 - 使用 QAgent 专用 nftables 表统计端口收发流量，支持按月或按年额度、周期重置和超额封禁。
 
@@ -72,9 +72,15 @@ Linux 控制面主机可以运行 [`deploy/quick-start.sh`](deploy/quick-start.s
 
 ### Agent 接入
 
-控制面可用后，在 Web 控制台为目标节点生成添加命令，并在受控 Linux 节点执行该命令。安装流程会下载受凭据保护的 Agent 与配套资源，写入受限环境文件，安装 systemd 单元并启动 QAgent。
+控制面可用后，在 Web 控制台为目标节点生成添加命令，并在受控 Linux 节点执行。安装器使用 POSIX `sh`，会下载受凭据保护的 Agent 与配套资源、写入受限环境文件，并安装 systemd `qagent.service` 或 Alpine OpenRC `qagent`。
 
-Agent 以受限的 root 服务运行，远程任务会真实修改配置、服务、内核二进制或 QAgent 专用流量规则。接入前请核对证书、权限、内核路径和服务名；完整步骤见 [安装远程 Agent](docs/production.md#4-安装远程-agent)。
+Alpine 会自动安装 `ca-certificates`、`coreutils`、`curl`、`libcap`、`nftables` 与 `openrc`，使用 `/etc/init.d/qagent*`、`/etc/conf.d/qagent` 和 default runlevel。没有 `sudo` 的 Alpine 主机应先切换为 root，再执行控制台生成的同一条 `sh` 命令。Alpine 上的 Shadowsocks Rust 版本切换会选择官方 musl 资产。
+
+一键安装器可以识别符合严格安全检查的标准 Xray 或 sing-box 服务：systemd 核验唯一 `ExecStart`，OpenRC 核验活动服务对应的 `/proc` 实际二进制和精确参数。现有配置不会在注册时自动切换服务，管理员可在“手动配置”页查看节点快照并显式迁移到 QAgent 专用服务；迁移失败会恢复原服务，无法精确识别时则保留隔离式 QAgent 配置。
+
+空白节点也可先运行 `sudo sh deploy/bootstrap-core-services.sh`。该脚本创建非 root 的 `qcontrolhub-core` 用户、四个 `qagent-*` 服务和只在缺失时写入的最小回环配置，不会迁移通用服务或覆盖已有配置。
+
+Agent 以高权限 root 服务运行，远程任务会真实修改配置、服务、内核二进制或 QAgent 专用流量规则。systemd unit 提供更强的文件系统沙箱；OpenRC 没有同等级的 `ProtectSystem` 隔离，应只在专用节点使用。完整步骤和支持边界见 [安装远程 Agent](docs/production.md#4-安装远程-agent)。
 
 ## 开发与验证
 

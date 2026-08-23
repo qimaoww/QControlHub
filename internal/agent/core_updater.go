@@ -39,6 +39,7 @@ type CoreUpdater struct {
 	client                 *http.Client
 	apiBase                string
 	goarch                 string
+	libc                   string
 	trustedURL             func(*url.URL) bool
 	downloadAttempts       int
 	downloadAttemptTimeout time.Duration
@@ -96,13 +97,13 @@ func NewCoreUpdater() *CoreUpdater {
 		},
 	}
 	return &CoreUpdater{
-		client: client, apiBase: githubAPIBase, goarch: runtime.GOARCH,
+		client: client, apiBase: githubAPIBase, goarch: runtime.GOARCH, libc: detectLinuxLibc(),
 		trustedURL: trustedCoreReleaseURL, downloadAttempts: defaultDownloadAttempts,
 		downloadAttemptTimeout: defaultDownloadTimeout, downloadRetryDelay: defaultDownloadRetryDelay,
 	}
 }
 
-func (updater *CoreUpdater) Install(ctx context.Context, engine core.Engine, spec EngineSpec, selector, source string) (string, error) {
+func (updater *CoreUpdater) Install(ctx context.Context, engine core.Engine, spec EngineSpec, selector, source string, manager *ServiceManager) (string, error) {
 	if updater == nil {
 		return "", errors.New("core updater is required")
 	}
@@ -174,7 +175,7 @@ func (updater *CoreUpdater) Install(ctx context.Context, engine core.Engine, spe
 		return "", err
 	}
 
-	restartOutput, restartErr := serviceCommandAndVerify(ctx, spec.Service, core.ActionRestart)
+	restartOutput, restartErr := serviceCommandAndVerifyWithManager(ctx, manager, spec.Service, core.ActionRestart)
 	output := fmt.Sprintf("installed %s release %s\nverified asset SHA-256: %s\nbinary: %s", engine, release.Tag, release.Asset.Digest, spec.Binary)
 	if label := coreSourceLabel(engine, selector, source); label != "" {
 		output += "\nsource: " + label
@@ -196,10 +197,10 @@ func (updater *CoreUpdater) Install(ctx context.Context, engine core.Engine, spe
 		return output, fmt.Errorf("core installed but service restart failed (%v); binary rollback also failed: %w", restartErr, rollbackErr)
 	}
 	if backup == "" {
-		// A first-install unit commonly uses Restart=on-failure. Once the new
-		// binary is removed, systemd can otherwise keep retrying a now-missing
-		// executable even though the installation was rolled back.
-		stopOutput, stopErr := stopServiceAfterFirstInstallRollback(spec.Service)
+		// A first-install service commonly uses automatic respawn. Once the new
+		// binary is removed, its supervisor can otherwise keep retrying a
+		// now-missing executable even though the installation was rolled back.
+		stopOutput, stopErr := stopServiceAfterFirstInstallRollback(spec.Service, manager)
 		if stopOutput != "" {
 			output += "\nrollback stop: " + stopOutput
 		}
@@ -209,7 +210,7 @@ func (updater *CoreUpdater) Install(ctx context.Context, engine core.Engine, spe
 	}
 	if backup != "" {
 		recoveryContext, recoveryCancel := context.WithTimeout(context.Background(), 30*time.Second)
-		recoveryOutput, recoveryErr := serviceCommandAndVerify(recoveryContext, spec.Service, core.ActionRestart)
+		recoveryOutput, recoveryErr := serviceCommandAndVerifyWithManager(recoveryContext, manager, spec.Service, core.ActionRestart)
 		recoveryCancel()
 		if recoveryOutput != "" {
 			output += "\nrollback restart: " + recoveryOutput
@@ -221,10 +222,14 @@ func (updater *CoreUpdater) Install(ctx context.Context, engine core.Engine, spe
 	return output, fmt.Errorf("new core restart failed and the binary change was rolled back: %w", restartErr)
 }
 
-func stopServiceAfterFirstInstallRollback(service string) (string, error) {
+func stopServiceAfterFirstInstallRollback(service string, managers ...*ServiceManager) (string, error) {
 	stopContext, stopCancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer stopCancel()
-	return serviceCommandAndVerify(stopContext, service, core.ActionStop)
+	manager := defaultSystemdServiceManager()
+	if len(managers) > 0 && managers[0] != nil {
+		manager = managers[0]
+	}
+	return serviceCommandAndVerifyWithManager(stopContext, manager, service, core.ActionStop)
 }
 
 func (updater *CoreUpdater) resolveRelease(ctx context.Context, engine core.Engine, selector, source string) (resolvedCoreRelease, error) {
@@ -299,7 +304,7 @@ func (updater *CoreUpdater) resolveRelease(ctx context.Context, engine core.Engi
 	if strings.TrimSpace(release.TagName) == "" || len(release.TagName) > 80 {
 		return resolvedCoreRelease{}, errors.New("release has an invalid tag")
 	}
-	asset, err := selectCoreReleaseAsset(engine, updater.goarch, release)
+	asset, err := selectCoreReleaseAsset(engine, updater.goarch, release, updater.libc)
 	if err != nil {
 		return resolvedCoreRelease{}, err
 	}
@@ -401,7 +406,11 @@ func matchMihomoLinuxAsset(arch string, release githubRelease) (githubReleaseAss
 	return matched, true, nil
 }
 
-func selectCoreReleaseAsset(engine core.Engine, arch string, release githubRelease) (githubReleaseAsset, error) {
+func selectCoreReleaseAsset(engine core.Engine, arch string, release githubRelease, libcValues ...string) (githubReleaseAsset, error) {
+	libc := "gnu"
+	if len(libcValues) > 0 && strings.TrimSpace(libcValues[0]) != "" {
+		libc = strings.ToLower(strings.TrimSpace(libcValues[0]))
+	}
 	if engine == core.EngineMihomo {
 		asset, found, err := matchMihomoLinuxAsset(arch, release)
 		if err != nil {
@@ -412,7 +421,6 @@ func selectCoreReleaseAsset(engine core.Engine, arch string, release githubRelea
 		}
 		return asset, nil
 	}
-
 	wanted := ""
 	switch engine {
 	case core.EngineXray:
@@ -428,7 +436,11 @@ func selectCoreReleaseAsset(engine core.Engine, arch string, release githubRelea
 		version := strings.TrimPrefix(release.TagName, "v")
 		wanted = "sing-box-" + version + "-linux-" + arch + ".tar.gz"
 	case core.EngineShadowsocksRust:
-		target := map[string]string{"amd64": "x86_64-unknown-linux-gnu", "arm64": "aarch64-unknown-linux-gnu"}[arch]
+		targets := map[string]map[string]string{
+			"gnu":  {"amd64": "x86_64-unknown-linux-gnu", "arm64": "aarch64-unknown-linux-gnu"},
+			"musl": {"amd64": "x86_64-unknown-linux-musl", "arm64": "aarch64-unknown-linux-musl"},
+		}
+		target := targets[libc][arch]
 		if target != "" {
 			version := strings.TrimPrefix(release.TagName, "v")
 			wanted = "shadowsocks-v" + version + "." + target + ".tar.xz"
@@ -446,6 +458,13 @@ func selectCoreReleaseAsset(engine core.Engine, arch string, release githubRelea
 		}
 	}
 	return githubReleaseAsset{}, missingCoreReleaseAssetError{engine: engine, arch: arch, asset: wanted}
+}
+
+func detectLinuxLibc() string {
+	if _, err := os.Stat("/etc/alpine-release"); err == nil {
+		return "musl"
+	}
+	return "gnu"
 }
 
 func validateReleaseAssetMetadata(asset githubReleaseAsset) error {

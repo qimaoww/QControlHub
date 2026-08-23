@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -21,14 +22,22 @@ import (
 )
 
 type EngineSpec struct {
-	Binary     string
-	ConfigPath string
-	Service    string
+	Binary          string
+	ConfigPath      string
+	ConfigDirectory string
+	ServiceBinary   string
+	Service         string
 }
 
 type Executor struct {
-	Specs   map[core.Engine]EngineSpec
-	Updater *CoreUpdater
+	Specs                   map[core.Engine]EngineSpec
+	ExistingSpecs           map[core.Engine]EngineSpec
+	ExistingDiscoveryIssues map[core.Engine]string
+	MigrationMarkerPrefix   string
+	Updater                 *CoreUpdater
+	Services                *ServiceManager
+	specsMu                 sync.RWMutex
+	migrationMu             sync.Mutex
 }
 
 var systemctlPath = "/usr/bin/systemctl"
@@ -42,6 +51,24 @@ func DefaultSpecs() map[core.Engine]EngineSpec {
 	}
 }
 
+func DefaultSpecsForServiceManager(kind string) map[core.Engine]EngineSpec {
+	specs := DefaultSpecs()
+	if strings.EqualFold(strings.TrimSpace(kind), ServiceManagerOpenRC) {
+		for engine, spec := range specs {
+			spec.Service = strings.TrimSuffix(spec.Service, ".service")
+			specs[engine] = spec
+		}
+	}
+	return specs
+}
+
+func (e *Executor) serviceManager() *ServiceManager {
+	if e != nil && e.Services != nil {
+		return e.Services
+	}
+	return defaultSystemdServiceManager()
+}
+
 func (e *Executor) Validate() error {
 	if e == nil {
 		return errors.New("agent executor is required")
@@ -49,15 +76,18 @@ func (e *Executor) Validate() error {
 	if os.Geteuid() != 0 {
 		return errors.New("Agent execution must run as root")
 	}
-	if err := validatePrivilegedExecutable(systemctlPath); err != nil {
-		return fmt.Errorf("unsafe systemctl binary: %w", err)
+	if err := e.serviceManager().validate(); err != nil {
+		return err
+	}
+	if len(e.ExistingSpecs) > 0 && strings.TrimSpace(e.MigrationMarkerPrefix) == "" {
+		return errors.New("existing core mappings require a migration state path")
 	}
 	for engine, spec := range e.Specs {
 		if !engine.Valid() {
 			return fmt.Errorf("invalid executor engine %q", engine)
 		}
 		if !safeServiceName(spec.Service) {
-			return fmt.Errorf("unsafe systemd service name %q", spec.Service)
+			return fmt.Errorf("unsafe service name %q", spec.Service)
 		}
 		if !filepath.IsAbs(spec.Binary) || !filepath.IsAbs(spec.ConfigPath) {
 			return fmt.Errorf("live executor paths for %s must be absolute", engine)
@@ -71,7 +101,51 @@ func (e *Executor) Validate() error {
 			}
 		}
 	}
+	for engine, spec := range e.ExistingSpecs {
+		if _, enabled := e.Specs[engine]; !enabled {
+			return fmt.Errorf("existing %s mapping is not an enabled engine", engine)
+		}
+		if !supportedExistingServiceForManager(e.serviceManager(), engine, spec.Service) {
+			return fmt.Errorf("unsupported existing %s service %q", engine, spec.Service)
+		}
+		if !filepath.IsAbs(spec.Binary) || !filepath.IsAbs(spec.ConfigPath) {
+			return fmt.Errorf("existing %s paths must be absolute", engine)
+		}
+		for label, path := range map[string]string{
+			"binary": spec.Binary, "configuration": spec.ConfigPath,
+			"configuration directory": spec.ConfigDirectory, "service executable": existingServiceBinary(spec),
+		} {
+			if strings.ContainsAny(path, " \t\r\n") {
+				return fmt.Errorf("existing %s %s path contains unsupported whitespace", engine, label)
+			}
+		}
+		if spec.ConfigDirectory != "" && (engine != core.EngineSingBox || !filepath.IsAbs(spec.ConfigDirectory)) {
+			return fmt.Errorf("existing %s configuration directory is unsupported or not absolute", engine)
+		}
+		if err := validatePrivilegedExecutable(spec.Binary); err != nil {
+			return fmt.Errorf("unsafe existing %s binary: %w", engine, err)
+		}
+		if err := validateProtectedDirectoryChain(filepath.Dir(spec.Binary)); err != nil {
+			return fmt.Errorf("unsafe existing %s binary parent chain: %w", engine, err)
+		}
+		if err := validateExistingServiceExecutable(spec); err != nil {
+			return fmt.Errorf("unsafe existing %s service executable: %w", engine, err)
+		}
+	}
 	return nil
+}
+
+func supportedExistingService(engine core.Engine, service string) bool {
+	return supportedExistingServiceForManager(defaultSystemdServiceManager(), engine, service)
+}
+
+func supportedExistingServiceForManager(manager *ServiceManager, engine core.Engine, service string) bool {
+	if manager != nil && manager.Kind() == ServiceManagerOpenRC {
+		return (engine == core.EngineXray && service == "xray") ||
+			(engine == core.EngineSingBox && (service == "sing-box" || service == "singbox"))
+	}
+	return (engine == core.EngineXray && service == "xray.service") ||
+		(engine == core.EngineSingBox && (service == "sing-box.service" || service == "singbox.service"))
 }
 
 func validatePrivilegedExecutable(path string) error {
@@ -104,16 +178,158 @@ func validatePrivilegedExecutable(path string) error {
 	return validateOwner(directoryInfo, "executable directory")
 }
 
+func existingServiceBinary(spec EngineSpec) string {
+	if spec.ServiceBinary != "" {
+		return spec.ServiceBinary
+	}
+	return spec.Binary
+}
+
+// validateExistingServiceExecutable accepts the real core directly, a symlink
+// to that core, or one narrowly defined forwarding script. The forwarding
+// script must contain exactly a /bin/sh shebang and an unconditional
+// `exec <protected-real-core> "$@"`; arbitrary wrappers are never invoked or
+// copied into the managed core namespace.
+func validateExistingServiceExecutable(spec EngineSpec) error {
+	serviceBinary := existingServiceBinary(spec)
+	if strings.ContainsAny(serviceBinary+spec.Binary, " \t\r\n") {
+		return errors.New("service executable mapping contains unsupported whitespace")
+	}
+	if serviceBinary == spec.Binary {
+		if err := validateProtectedDirectoryChain(filepath.Dir(spec.Binary)); err != nil {
+			return fmt.Errorf("service executable parent chain: %w", err)
+		}
+		return validatePrivilegedExecutable(spec.Binary)
+	}
+	if !filepath.IsAbs(serviceBinary) {
+		return errors.New("service executable path is not absolute")
+	}
+	if err := validateProtectedDirectoryChain(filepath.Dir(serviceBinary)); err != nil {
+		return fmt.Errorf("service executable parent chain: %w", err)
+	}
+	serviceInfo, err := os.Lstat(serviceBinary)
+	if err != nil {
+		return err
+	}
+	if serviceInfo.Mode()&os.ModeSymlink == 0 {
+		return errors.New("alternate service executable must be a symlink")
+	}
+	resolved, err := os.Readlink(serviceBinary)
+	if err != nil {
+		return err
+	}
+	if !filepath.IsAbs(resolved) {
+		resolved = filepath.Join(filepath.Dir(serviceBinary), resolved)
+	}
+	resolved = filepath.Clean(resolved)
+	resolvedInfo, err := os.Lstat(resolved)
+	if err != nil {
+		return err
+	}
+	if resolvedInfo.Mode()&os.ModeSymlink != 0 {
+		return errors.New("service executable must use at most one symlink")
+	}
+	if resolved == spec.Binary {
+		if err := validateProtectedDirectoryChain(filepath.Dir(spec.Binary)); err != nil {
+			return fmt.Errorf("real core parent chain: %w", err)
+		}
+		return validateNativeCoreExecutable(spec.Binary)
+	}
+	if err := validateProtectedDirectoryChain(filepath.Dir(resolved)); err != nil {
+		return fmt.Errorf("forwarder parent chain: %w", err)
+	}
+	if err := validatePrivilegedExecutable(resolved); err != nil {
+		return fmt.Errorf("forwarder script: %w", err)
+	}
+	contents, err := os.ReadFile(resolved)
+	if err != nil {
+		return err
+	}
+	if len(contents) > 1024 {
+		return errors.New("forwarder script exceeds the supported fixed form")
+	}
+	want := "#!/bin/sh\nexec " + spec.Binary + " \"$@\"\n"
+	if string(contents) != want {
+		return errors.New("service wrapper is not the supported fixed exec forwarder")
+	}
+	if err := validateProtectedDirectoryChain(filepath.Dir(spec.Binary)); err != nil {
+		return fmt.Errorf("real core parent chain: %w", err)
+	}
+	return validateNativeCoreExecutable(spec.Binary)
+}
+
+func validateNativeCoreExecutable(path string) error {
+	if err := validatePrivilegedExecutable(path); err != nil {
+		return err
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	prefix := make([]byte, 2)
+	if _, err := io.ReadFull(file, prefix); err != nil {
+		return err
+	}
+	if string(prefix) == "#!" {
+		return errors.New("real core executable must not be a script")
+	}
+	return nil
+}
+
+func validateProtectedDirectoryChain(directory string) error {
+	if !filepath.IsAbs(directory) {
+		return errors.New("path is not absolute")
+	}
+	for {
+		info, err := os.Lstat(directory)
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+			return fmt.Errorf("%s is not a real directory", directory)
+		}
+		if info.Mode().Perm()&0o022 != 0 {
+			// A sticky directory is a safe traversal boundary: another user
+			// cannot replace a protected child entry. This keeps tests and
+			// deliberately staged installations below /tmp safe without
+			// accepting a writable non-sticky parent.
+			if info.Mode()&os.ModeSticky != 0 {
+				if err := validateOwnerOrRoot(info, "sticky protected path parent"); err != nil {
+					return err
+				}
+				return nil
+			}
+			return fmt.Errorf("%s is writable by group or others", directory)
+		}
+		if err := validateOwner(info, "protected path parent"); err != nil {
+			return err
+		}
+		parent := filepath.Dir(directory)
+		if parent == directory {
+			return nil
+		}
+		directory = parent
+	}
+}
+
 func (e *Executor) Execute(parent context.Context, task core.Task) (string, error) {
 	if !task.Action.Valid() || !task.Engine.Valid() {
 		return "", errors.New("task contains an unsupported action or engine")
 	}
+	e.specsMu.RLock()
 	spec, ok := e.Specs[task.Engine]
+	existing, hasExisting := e.ExistingSpecs[task.Engine]
+	discoveryIssue := strings.TrimSpace(e.ExistingDiscoveryIssues[task.Engine])
+	e.specsMu.RUnlock()
 	if !ok {
 		return "", fmt.Errorf("engine %s is not enabled on this agent", task.Engine)
 	}
+	if discoveryIssue != "" {
+		return "", fmt.Errorf("%s core tasks are disabled because an existing service could not be mapped safely: %s", task.Engine, discoveryIssue)
+	}
 	if !safeServiceName(spec.Service) {
-		return "", errors.New("configured systemd service name is unsafe")
+		return "", errors.New("configured service name is unsafe")
 	}
 	timeout := 45 * time.Second
 	if task.Action == core.ActionInstall {
@@ -124,22 +340,43 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (string, erro
 
 	switch task.Action {
 	case core.ActionReadConfig:
+		if hasExisting {
+			return e.readExistingConfig(ctx, task.Engine, spec, existing)
+		}
 		return e.readCurrentConfig(ctx, task.Engine, spec)
+	case core.ActionImportExisting:
+		if !hasExisting {
+			completed, err := completedCoreMigrationMatches(e.MigrationMarkerPrefix, task.Engine, task.ConfigContent)
+			if err != nil {
+				return "", fmt.Errorf("check completed %s migration: %w", task.Engine, err)
+			}
+			if completed {
+				return fmt.Sprintf("%s existing service migration was already completed with this configuration", task.Engine), nil
+			}
+			return "", fmt.Errorf("%s has no existing service pending manual import", task.Engine)
+		}
+		return e.importExistingConfig(ctx, task.Engine, spec, existing, task.ConfigContent)
 	case core.ActionValidate:
+		if hasExisting {
+			return "", errors.New("import the existing configuration before validating managed changes")
+		}
 		return e.validate(ctx, task.Engine, spec, task.ConfigContent)
 	case core.ActionDeploy:
+		if hasExisting {
+			return "", errors.New("import the existing configuration before deploying managed changes")
+		}
 		validation, err := e.validate(ctx, task.Engine, spec, task.ConfigContent)
 		if err != nil {
 			return validation, err
 		}
-		if err := ensureManagedCoreServiceCapabilities(ctx, task.Engine, spec); err != nil {
+		if err := ensureManagedCoreServiceCapabilities(ctx, task.Engine, spec, e.serviceManager()); err != nil {
 			return validation, err
 		}
 		backup, err := atomicDeploy(spec.ConfigPath, task.ConfigContent)
 		if err != nil {
 			return validation, err
 		}
-		restartOutput, err := serviceCommandAndVerify(ctx, spec.Service, core.ActionRestart)
+		restartOutput, err := serviceCommandAndVerifyWithManager(ctx, e.serviceManager(), spec.Service, core.ActionRestart)
 		output := validation + "\ndeployed to " + spec.ConfigPath
 		if backup != "" {
 			output += "\nbackup: " + backup
@@ -156,7 +393,7 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (string, erro
 				return output, fmt.Errorf("configuration deployed but service restart failed (%v); rollback also failed: %w", err, rollbackErr)
 			}
 			recoveryContext, recoveryCancel := context.WithTimeout(context.Background(), 30*time.Second)
-			recoveryOutput, recoveryErr := serviceCommandAndVerify(recoveryContext, spec.Service, core.ActionRestart)
+			recoveryOutput, recoveryErr := serviceCommandAndVerifyWithManager(recoveryContext, e.serviceManager(), spec.Service, core.ActionRestart)
 			recoveryCancel()
 			if recoveryOutput != "" {
 				output += "\nrollback restart: " + recoveryOutput
@@ -168,15 +405,27 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (string, erro
 		}
 		return output, nil
 	case core.ActionStart, core.ActionRestart:
-		if err := ensureManagedCoreServiceCapabilities(ctx, task.Engine, spec); err != nil {
+		if hasExisting {
+			return "", errors.New("import the existing configuration before starting the QAgent service")
+		}
+		if err := ensureManagedCoreServiceCapabilities(ctx, task.Engine, spec, e.serviceManager()); err != nil {
 			return "", err
 		}
-		return serviceCommandAndVerify(ctx, spec.Service, task.Action)
+		return serviceCommandAndVerifyWithManager(ctx, e.serviceManager(), spec.Service, task.Action)
 	case core.ActionStop:
-		return serviceCommandAndVerify(ctx, spec.Service, task.Action)
+		if hasExisting {
+			return "", errors.New("import the existing configuration before changing service state")
+		}
+		return serviceCommandAndVerifyWithManager(ctx, e.serviceManager(), spec.Service, task.Action)
 	case core.ActionStatus:
-		return serviceStatus(ctx, spec.Service)
+		if hasExisting {
+			return serviceStatusWithManager(ctx, e.serviceManager(), existing.Service)
+		}
+		return serviceStatusWithManager(ctx, e.serviceManager(), spec.Service)
 	case core.ActionInstall:
+		if hasExisting {
+			return "", errors.New("import the existing configuration before installing a managed core")
+		}
 		version, err := core.NormalizeCoreVersionSelector(task.CoreVersion)
 		if err != nil {
 			return "", err
@@ -185,14 +434,14 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (string, erro
 		if err != nil {
 			return "", err
 		}
-		if err := ensureManagedCoreServiceCapabilities(ctx, task.Engine, spec); err != nil {
+		if err := ensureManagedCoreServiceCapabilities(ctx, task.Engine, spec, e.serviceManager()); err != nil {
 			return "", err
 		}
 		updater := e.Updater
 		if updater == nil {
 			updater = NewCoreUpdater()
 		}
-		return updater.Install(ctx, task.Engine, spec, version, source)
+		return updater.Install(ctx, task.Engine, spec, version, source, e.serviceManager())
 	default:
 		return "", fmt.Errorf("unsupported action %q", task.Action)
 	}
@@ -203,17 +452,183 @@ func (e *Executor) readCurrentConfig(ctx context.Context, engine core.Engine, sp
 	if err != nil {
 		return "", fmt.Errorf("read current %s configuration: %w", engine, err)
 	}
-	if err := core.ValidateConfig(engine, content); err != nil {
-		return "", fmt.Errorf("current %s configuration is structurally invalid: %w", engine, err)
-	}
 	if err := validatePrivilegedExecutable(spec.Binary); err != nil {
 		return "", fmt.Errorf("cannot safely invoke %s for current configuration validation: %w", engine, err)
 	}
-	_, err = validateConfigurationPath(ctx, engine, spec.Binary, spec.ConfigPath)
+	_, err = e.validateSnapshot(ctx, engine, spec, content)
 	if err != nil {
 		return "", fmt.Errorf("current %s configuration failed real core validation: %w", engine, err)
 	}
 	return content, nil
+}
+
+func (e *Executor) readExistingConfig(ctx context.Context, engine core.Engine, managed, existing EngineSpec) (string, error) {
+	content, sourceDigest, err := readExistingConfigurationSources(existing)
+	if err != nil {
+		return "", fmt.Errorf("read existing %s configuration: %w", engine, err)
+	}
+	validationSpec := managed
+	validationSpec.Binary = existing.Binary
+	if err := validatePrivilegedExecutable(existing.Binary); err != nil {
+		return "", fmt.Errorf("cannot safely invoke existing %s binary: %w", engine, err)
+	}
+	if err := validateProtectedDirectoryChain(filepath.Dir(existing.Binary)); err != nil {
+		return "", fmt.Errorf("cannot safely traverse existing %s binary path: %w", engine, err)
+	}
+	if err := validateExistingServiceExecutable(existing); err != nil {
+		return "", fmt.Errorf("cannot safely map existing %s service executable: %w", engine, err)
+	}
+	if err := validateExistingSourceInvocation(ctx, engine, existing); err != nil {
+		return "", fmt.Errorf("existing %s configuration sources failed real core validation: %w", engine, err)
+	}
+	if _, err := e.validateSnapshot(ctx, engine, validationSpec, content); err != nil {
+		return "", fmt.Errorf("existing %s configuration failed real core validation: %w", engine, err)
+	}
+	_, currentDigest, err := readExistingConfigurationSources(existing)
+	if err != nil || currentDigest != sourceDigest {
+		if err == nil {
+			err = errors.New("configuration sources changed while the snapshot was validated")
+		}
+		return "", fmt.Errorf("recheck existing %s configuration sources: %w", engine, err)
+	}
+	return content, nil
+}
+
+func readExistingConfigurationSources(spec EngineSpec) (string, string, error) {
+	primary, err := readConfigurationFile(spec.ConfigPath)
+	if err != nil {
+		return "", "", err
+	}
+	if spec.ConfigDirectory == "" {
+		digest := sha256.Sum256([]byte(spec.ConfigPath + "\x00" + primary))
+		return primary, hex.EncodeToString(digest[:]), nil
+	}
+	sources := []existingConfigSource{{path: spec.ConfigPath, content: primary}}
+	if spec.ConfigDirectory != "" {
+		if err := validateProtectedDirectoryChain(spec.ConfigDirectory); err != nil {
+			return "", "", fmt.Errorf("configuration directory parent chain is unsafe: %w", err)
+		}
+		entries, err := os.ReadDir(spec.ConfigDirectory)
+		if err != nil {
+			return "", "", err
+		}
+		for _, entry := range entries {
+			if !strings.HasSuffix(entry.Name(), ".json") {
+				continue
+			}
+			if entry.Type()&os.ModeSymlink != 0 || entry.IsDir() {
+				return "", "", fmt.Errorf("configuration directory entry %q is not a regular non-symlink JSON file", entry.Name())
+			}
+			path := filepath.Join(spec.ConfigDirectory, entry.Name())
+			contents, err := readConfigurationFile(path)
+			if err != nil {
+				return "", "", fmt.Errorf("read configuration directory entry %q: %w", entry.Name(), err)
+			}
+			sources = append(sources, existingConfigSource{path: path, content: contents})
+		}
+	}
+	sort.SliceStable(sources, func(i, j int) bool { return sources[i].path < sources[j].path })
+	total := 0
+	digest := sha256.New()
+	var merged any
+	for _, source := range sources {
+		total += len(source.content)
+		if total > core.MaxConfigBytes {
+			return "", "", fmt.Errorf("combined configuration sources exceed %d bytes", core.MaxConfigBytes)
+		}
+		digest.Write([]byte(source.path))
+		digest.Write([]byte{0})
+		digest.Write([]byte(source.content))
+		digest.Write([]byte{0})
+		var decoded any
+		decoder := json.NewDecoder(strings.NewReader(source.content))
+		decoder.UseNumber()
+		if err := decoder.Decode(&decoded); err != nil {
+			return "", "", fmt.Errorf("decode configuration source %q: %w", source.path, err)
+		}
+		if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+			return "", "", fmt.Errorf("decode configuration source %q: trailing data", source.path)
+		}
+		if merged == nil {
+			merged = decoded
+		} else {
+			merged, err = mergeSingBoxJSON(decoded, merged)
+			if err != nil {
+				return "", "", fmt.Errorf("merge configuration source %q: %w", source.path, err)
+			}
+		}
+	}
+	contents, err := json.MarshalIndent(merged, "", "  ")
+	if err != nil {
+		return "", "", err
+	}
+	contents = append(contents, '\n')
+	if len(contents) > core.MaxConfigBytes {
+		return "", "", fmt.Errorf("merged configuration exceeds %d bytes", core.MaxConfigBytes)
+	}
+	return string(contents), hex.EncodeToString(digest.Sum(nil)), nil
+}
+
+type existingConfigSource struct {
+	path    string
+	content string
+}
+
+// mergeSingBoxJSON mirrors sing-box's ordered badjson merge: an existing
+// destination wins scalar conflicts, objects merge recursively, and source
+// arrays append after the destination array. Paths are sorted before this
+// function is called.
+func mergeSingBoxJSON(source, destination any) (any, error) {
+	if source == nil {
+		return destination, nil
+	}
+	if destination == nil {
+		return source, nil
+	}
+	switch current := destination.(type) {
+	case []any:
+		if values, ok := source.([]any); ok {
+			return append(current, values...), nil
+		}
+		return append(current, source), nil
+	case map[string]any:
+		values, ok := source.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("cannot merge JSON object with %T", source)
+		}
+		for key, value := range values {
+			if previous, exists := current[key]; exists {
+				var err error
+				value, err = mergeSingBoxJSON(value, previous)
+				if err != nil {
+					return nil, err
+				}
+			}
+			current[key] = value
+		}
+		return current, nil
+	default:
+		return destination, nil
+	}
+}
+
+func validateExistingSourceInvocation(ctx context.Context, engine core.Engine, spec EngineSpec) error {
+	if engine != core.EngineSingBox || spec.ConfigDirectory == "" {
+		return nil
+	}
+	_, err := runInDirectory(ctx, filepath.Dir(spec.ConfigPath), spec.Binary,
+		"check", "-c", spec.ConfigPath, "-C", spec.ConfigDirectory)
+	return err
+}
+
+// ReadCurrentConfig returns an exact, real-core-validated snapshot for explicit
+// inspection in the manual configuration page. It does not save or deploy it.
+func (e *Executor) ReadCurrentConfig(ctx context.Context, engine core.Engine) (string, error) {
+	spec, ok := e.Specs[engine]
+	if !ok {
+		return "", fmt.Errorf("engine %s is not enabled", engine)
+	}
+	return e.readCurrentConfig(ctx, engine, spec)
 }
 
 func readConfigurationFile(path string) (string, error) {
@@ -234,6 +649,9 @@ func readConfigurationFile(path string) (string, error) {
 		return "", err
 	}
 	directory := filepath.Dir(path)
+	if err := validateProtectedDirectoryChain(directory); err != nil {
+		return "", fmt.Errorf("configuration parent chain is unsafe: %w", err)
+	}
 	directoryInfo, err := os.Lstat(directory)
 	if err != nil {
 		return "", err
@@ -292,14 +710,38 @@ func validateConfigurationPath(ctx context.Context, engine core.Engine, binary, 
 }
 
 func (e *Executor) Runtime(ctx context.Context) map[core.Engine]core.RuntimeState {
-	result := make(map[core.Engine]core.RuntimeState, len(e.Specs))
+	e.specsMu.RLock()
+	specs := make(map[core.Engine]EngineSpec, len(e.Specs))
+	existingSpecs := make(map[core.Engine]EngineSpec, len(e.ExistingSpecs))
+	discoveryIssues := make(map[core.Engine]string, len(e.ExistingDiscoveryIssues))
 	for engine, spec := range e.Specs {
+		specs[engine] = spec
+	}
+	for engine, spec := range e.ExistingSpecs {
+		existingSpecs[engine] = spec
+	}
+	for engine, issue := range e.ExistingDiscoveryIssues {
+		discoveryIssues[engine] = issue
+	}
+	e.specsMu.RUnlock()
+	result := make(map[core.Engine]core.RuntimeState, len(specs))
+	for engine, spec := range specs {
 		state := core.RuntimeState{}
+		if issue := discoveryIssues[engine]; issue != "" {
+			state.ServiceStatus = "active"
+			state.ExistingConfigUnsupportedReason = issue
+			result[engine] = state
+			continue
+		}
+		if existing, ok := existingSpecs[engine]; ok {
+			spec = existing
+			state.ExistingConfigAvailable = true
+		}
 		if path, err := exec.LookPath(spec.Binary); err == nil {
 			state.Installed = true
 			state.Version = binaryVersion(ctx, engine, path)
 		}
-		if status, err := serviceStatus(ctx, spec.Service); err == nil {
+		if status, err := serviceStatusWithManager(ctx, e.serviceManager(), spec.Service); err == nil {
 			state.ServiceStatus = strings.TrimSpace(status)
 		} else {
 			state.ServiceStatus = "unknown"
@@ -314,6 +756,13 @@ func (e *Executor) validate(ctx context.Context, engine core.Engine, spec Engine
 		return "", err
 	}
 	if err := validateNoPersistentCoreLogs(engine, content); err != nil {
+		return "", err
+	}
+	return e.validateSnapshot(ctx, engine, spec, content)
+}
+
+func (e *Executor) validateSnapshot(ctx context.Context, engine core.Engine, spec EngineSpec, content string) (string, error) {
+	if err := core.ValidateConfig(engine, content); err != nil {
 		return "", err
 	}
 	if _, err := exec.LookPath(spec.Binary); err != nil {
@@ -409,24 +858,15 @@ func validateNoPersistentCoreLogs(engine core.Engine, content string) error {
 }
 
 func serviceCommand(ctx context.Context, service string, action core.Action) (string, error) {
-	if service == "" {
-		return "", errors.New("service name is not configured")
-	}
-	if action != core.ActionStart && action != core.ActionStop && action != core.ActionRestart {
-		return "", errors.New("unsupported service action")
-	}
-	output, err := run(ctx, systemctlPath, string(action), service)
-	if err != nil {
-		return output, fmt.Errorf("systemctl %s %s: %w", action, service, err)
-	}
-	if output == "" {
-		output = fmt.Sprintf("systemctl %s %s completed", action, service)
-	}
-	return output, nil
+	return defaultSystemdServiceManager().command(ctx, service, action)
 }
 
 func serviceCommandAndVerify(ctx context.Context, service string, action core.Action) (string, error) {
-	output, err := serviceCommand(ctx, service, action)
+	return serviceCommandAndVerifyWithManager(ctx, defaultSystemdServiceManager(), service, action)
+}
+
+func serviceCommandAndVerifyWithManager(ctx context.Context, manager *ServiceManager, service string, action core.Action) (string, error) {
+	output, err := manager.command(ctx, service, action)
 	if err != nil {
 		return output, err
 	}
@@ -438,14 +878,14 @@ func serviceCommandAndVerify(ctx context.Context, service string, action core.Ac
 	}
 	verifyContext, verifyCancel := context.WithTimeout(ctx, 5*time.Second)
 	status, statusErr := waitForServiceState(verifyContext, expected, stableFor, 100*time.Millisecond, func(probeContext context.Context) (string, error) {
-		return serviceStatus(probeContext, service)
+		return manager.status(probeContext, service)
 	})
 	verifyCancel()
 	if statusErr != nil {
-		return output, fmt.Errorf("verify systemd service %s after %s: %w", service, action, statusErr)
+		return output, fmt.Errorf("verify %s service %s after %s: %w", manager.Kind(), service, action, statusErr)
 	}
 	if status != expected {
-		return output + "\nservice status: " + status, fmt.Errorf("systemd service %s is %s after %s, expected %s", service, status, action, expected)
+		return output + "\nservice status: " + status, fmt.Errorf("%s service %s is %s after %s, expected %s", manager.Kind(), service, status, action, expected)
 	}
 	return output + "\nservice status: " + status, nil
 }
@@ -478,7 +918,7 @@ func waitForServiceState(ctx context.Context, expected string, stableFor, pollEv
 			}
 		} else {
 			stableSince = time.Time{}
-			if status == "failed" || status == "inactive" {
+			if status == "failed" || status == "inactive" || (expected == "inactive" && status == "active") {
 				return status, nil
 			}
 		}
@@ -491,18 +931,11 @@ func waitForServiceState(ctx context.Context, expected string, stableFor, pollEv
 }
 
 func serviceStatus(ctx context.Context, service string) (string, error) {
-	if !safeServiceName(service) {
-		return "", errors.New("configured systemd service name is unsafe")
-	}
-	output, err := run(ctx, systemctlPath, "is-active", service)
-	if err != nil {
-		trimmed := strings.TrimSpace(output)
-		if trimmed == "inactive" || trimmed == "failed" || trimmed == "activating" || trimmed == "deactivating" {
-			return trimmed, nil
-		}
-		return output, err
-	}
-	return strings.TrimSpace(output), nil
+	return serviceStatusWithManager(ctx, defaultSystemdServiceManager(), service)
+}
+
+func serviceStatusWithManager(ctx context.Context, manager *ServiceManager, service string) (string, error) {
+	return manager.status(ctx, service)
 }
 
 func binaryVersion(ctx context.Context, engine core.Engine, binary string) string {

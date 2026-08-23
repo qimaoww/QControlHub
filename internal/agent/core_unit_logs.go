@@ -28,7 +28,10 @@ MaxRetentionSec=15min
 `
 )
 
-func ensureManagedCoreLogStreaming(ctx context.Context, specs map[core.Engine]EngineSpec) error {
+func ensureManagedCoreLogStreaming(ctx context.Context, specs map[core.Engine]EngineSpec, managers ...*ServiceManager) error {
+	if len(managers) > 0 && managers[0] != nil && managers[0].Kind() == ServiceManagerOpenRC {
+		return ensureOpenRCCoreLogDirectory()
+	}
 	ensureContext, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	base := defaultCoreUnitCapabilitySyncer()
@@ -67,6 +70,30 @@ func ensureManagedCoreLogStreaming(ctx context.Context, specs map[core.Engine]En
 		}
 	}
 	if err := startManagedCoreJournal(ensureContext, base.systemctlPath); err != nil {
+		return err
+	}
+	return nil
+}
+
+// ensureOpenRCCoreLogDirectory prepares the root that supervise-daemon
+// output_log files for managed core services live under. The OpenRC service
+// scripts recreate it through checkpath on every start; this keeps the
+// collector working even when a service has not been started yet.
+func ensureOpenRCCoreLogDirectory() error {
+	if err := os.MkdirAll(openRCCoreLogRoot, 0o750); err != nil {
+		return fmt.Errorf("create managed OpenRC core log directory: %w", err)
+	}
+	info, err := os.Lstat(openRCCoreLogRoot)
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return errors.New("managed OpenRC core log path is not a real directory")
+	}
+	if info.Mode().Perm()&0o022 != 0 {
+		return errors.New("managed OpenRC core log directory is writable by group or others")
+	}
+	if err := validateOwner(info, "managed OpenRC core log directory"); err != nil {
 		return err
 	}
 	return nil

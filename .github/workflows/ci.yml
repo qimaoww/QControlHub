@@ -43,11 +43,35 @@ jobs:
         run: go vet ./...
       - name: go test (unit + PostgreSQL integration)
         run: go test ./...
+      - name: Build web image release target
+        run: make web-image-test VERSION="${{ github.sha }}"
+
+  alpine:
+    name: alpine (OpenRC bootstrap and Agent tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Alpine/OpenRC node support
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src golang:1.25-alpine sh -euxc '
+            apk add --no-cache coreutils libcap nftables openrc
+            go test ./internal/agent -run "^(TestOpenRC|TestDiscoverOpenRC)"
+            sh deploy/tests/existing-core-openrc.sh
+            sh -n deploy/remote/install-agent.sh
+            sh -n deploy/bootstrap-core-services.sh
+            for service in deploy/openrc/*; do sh -n "$service"; done
+            QCH_SERVICE_MANAGER=openrc sh deploy/bootstrap-core-services.sh
+            for service in qagent-mihomo qagent-xray qagent-sing-box qagent-shadowsocks-rust; do
+              test -x "/etc/init.d/$service"
+              "/etc/init.d/$service" describe >/dev/null
+              rc-update show default | grep -q "$service"
+            done
+          '
 
   images:
     name: build and publish GHCR images
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: linux
+    needs: [linux, alpine]
     runs-on: ubuntu-latest
     permissions:
       contents: read
