@@ -2,21 +2,25 @@
 # QControlHub managed OpenRC service: qagent-shadowsocks-rust
 
 description="Shadowsocks Rust core managed by QAgent"
-command="/usr/local/lib/qagent/cores/ssserver"
-command_args="-c /etc/qagent/shadowsocks-rust/config.json"
+command="/bin/sh"
+command_args="-c 'exec /usr/local/lib/qagent/cores/ssserver -c /etc/qagent/shadowsocks-rust/config.json >>/var/log/qagent/qagent-shadowsocks-rust.log 2>&1'"
 command_user="qcontrolhub-core:qcontrolhub-core"
 directory="/var/lib/qcontrolhub-shadowsocks-rust"
 supervisor="supervise-daemon"
 respawn_delay=3
-respawn_max=0
+respawn_max=10000
 capabilities="^cap_net_bind_service"
 no_new_privs=true
 umask=0027
 export RUST_LOG="info"
-
 depend() { need net; }
 
 start_pre() {
-	[ -x "$command" ] || { eerror "missing Shadowsocks Rust binary: $command"; return 1; }
-	[ -f /etc/qagent/shadowsocks-rust/config.json ] || { eerror "missing Shadowsocks Rust configuration"; return 1; }
+	# supervise-daemon drops privileges before opening output files, so the
+	# log file is pre-created with the service user as its owner and the
+	# core itself appends through the exec redirect above.
+	checkpath --directory --owner root:qcontrolhub-core --mode 0750 /var/log/qagent
+	checkpath --file --owner qcontrolhub-core:qcontrolhub-core --mode 0640 /var/log/qagent/qagent-shadowsocks-rust.log
+	[ -x "/usr/local/lib/qagent/cores/ssserver" ] || { eerror "missing Shadowsocks Rust binary: /usr/local/lib/qagent/cores/ssserver"; return 1; }
+	[ -f "/etc/qagent/shadowsocks-rust/config.json" ] || { eerror "missing Shadowsocks Rust configuration"; return 1; }
 }

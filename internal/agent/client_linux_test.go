@@ -167,7 +167,7 @@ func TestClientEnrollAdvertisesCoreLogsPerServiceManager(t *testing.T) {
 	}
 
 	t.Run("systemd", func(t *testing.T) { run(t, ServiceManagerSystemd, true) })
-	t.Run("openrc", func(t *testing.T) { run(t, ServiceManagerOpenRC, false) })
+	t.Run("openrc", func(t *testing.T) { run(t, ServiceManagerOpenRC, true) })
 }
 
 func TestClientHeartbeatAdvertisesCoreLogsPerServiceManager(t *testing.T) {
@@ -203,7 +203,7 @@ func TestClientHeartbeatAdvertisesCoreLogsPerServiceManager(t *testing.T) {
 	}
 
 	t.Run("systemd", func(t *testing.T) { run(t, ServiceManagerSystemd, true) })
-	t.Run("openrc", func(t *testing.T) { run(t, ServiceManagerOpenRC, false) })
+	t.Run("openrc", func(t *testing.T) { run(t, ServiceManagerOpenRC, true) })
 }
 
 func TestTaskExecutionSurvivesWebSocketSessionCancellation(t *testing.T) {

@@ -460,12 +460,11 @@ func (c *Client) queueMetrics(ctx context.Context, outgoing chan<- core.WireMess
 	}
 }
 
+// advertisedAgentFeatures is identical on every supported service manager:
+// OpenRC nodes stream managed core logs from supervise-daemon output_log
+// files while systemd nodes stream them from the volatile journal namespace.
 func advertisedAgentFeatures(manager *ServiceManager) []string {
-	features := []string{core.AgentFeatureSelfUpgrade, core.AgentFeaturePortTraffic}
-	if manager.Kind() != ServiceManagerOpenRC {
-		features = append(features, core.AgentFeatureCoreLogs)
-	}
-	return features
+	return []string{core.AgentFeatureSelfUpgrade, core.AgentFeaturePortTraffic, core.AgentFeatureCoreLogs}
 }
 
 func (c *Client) executeTask(ctx context.Context, task core.Task, outgoing chan<- core.WireMessage) {

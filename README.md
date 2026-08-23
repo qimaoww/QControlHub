@@ -20,7 +20,7 @@ QControlHub 是面向 Linux 节点的配置与远程运维平台，由 Go 控制
 
 ### 接入、日志与流量
 
-- systemd 节点会汇集托管内核日志；OpenRC 节点当前不提供 systemd journal 实时日志流。两种节点都从已认证的 Agent 通道刷新运行指标和服务状态。
+- systemd 节点从 volatile journal namespace 汇集托管内核日志，OpenRC 节点从 `supervise-daemon` 日志文件跟踪同样的实时日志流。两种节点都从已认证的 Agent 通道刷新运行指标和服务状态。
 - 根据节点配置生成带遮罩的客户端分享 URI 与逐项接入参数。
 - 使用 QAgent 专用 nftables 表统计端口收发流量，支持按月或按年额度、周期重置和超额封禁。
 

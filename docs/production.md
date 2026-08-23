@@ -85,7 +85,7 @@ Agent 使用 `/agent/v1/connect` 的长期 WSS 会话。Nginx 示例已转发 `U
 
 控制台生成的一键安装命令使用 POSIX `sh`。在 Alpine Linux 上，安装器会通过 `apk` 补齐 `ca-certificates`、`coreutils`、`curl`、`libcap`、`nftables` 与 `openrc`，自动写入 `/etc/init.d/qagent*`、`/etc/conf.d/qagent` 并加入 default runlevel；没有 `sudo` 的主机应先切换为 root。普通 systemd 主机继续使用原来的受限 unit。
 
-OpenRC 模式设置 `QCH_SERVICE_MANAGER=openrc`，默认核心服务名去掉 `.service` 后缀。四个专用核心仍以 `qcontrolhub-core` 用户运行，并由 OpenRC 的 `supervise-daemon` 提供重启和 `CAP_NET_BIND_SERVICE`。由于 Alpine/OpenRC 没有 systemd journal namespace，当前 OpenRC 节点不提供四个核心的面板实时日志流；配置校验、部署、启停、状态、版本切换、升级回滚、指标及 nftables 流量配额不受此限制。OpenRC 也没有 `ProtectSystem=strict` 等 systemd 沙箱，Agent 仍必须作为高权限 root 服务管理。
+OpenRC 模式设置 `QCH_SERVICE_MANAGER=openrc`，默认核心服务名去掉 `.service` 后缀。四个专用核心仍以 `qcontrolhub-core` 用户运行，并由 OpenRC 的 `supervise-daemon` 提供重启和 `CAP_NET_BIND_SERVICE`。核心面板实时日志流与 systemd 节点一致：`supervise-daemon` 将托管核心输出写入 `/var/log/qagent/<服务名>.log`，Agent 从文件尾持续跟踪新行并经由同一 `core-logs-v1` 通道上报；文件超过上限时轮转为单个 `.old` 副本，与 systemd 侧 volatile journal 的容量约束对齐。OpenRC 也没有 `ProtectSystem=strict` 等 systemd 沙箱，Agent 仍必须作为高权限 root 服务管理。
 
 在受控构建主机执行：
 

@@ -7,10 +7,12 @@ command_user="root:root"
 directory="/var/lib/qcontrolhub"
 supervisor="supervise-daemon"
 respawn_delay=5
-respawn_max=0
+respawn_max=10000
 capabilities="^cap_chown,^cap_net_admin"
 no_new_privs=true
 umask=0077
+output_log=/var/log/qagent/qagent.log
+error_log=/var/log/qagent/qagent.log
 
 depend() {
 	need net
@@ -19,5 +21,6 @@ depend() {
 
 start_pre() {
 	checkpath --directory --owner root:root --mode 0700 /var/lib/qcontrolhub
+	checkpath --directory --owner root:qcontrolhub-core --mode 0750 /var/log/qagent
 	[ -x "$command" ] || { eerror "missing QAgent binary: $command"; return 1; }
 }

@@ -4,12 +4,16 @@ package agent
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -23,7 +27,16 @@ import (
 const (
 	coreLogQueueLimit = 2048
 	journalctlPath    = "/usr/bin/journalctl"
+	// Align the volatile budget with the journald Storage=volatile cap by
+	// rotating to a single .old copy once the live file grows past this size.
+	coreLogFileRotateBytes = 8 << 20
+	coreLogFileMaxLine     = 256 << 10
 )
+
+// Managed OpenRC services log through supervise-daemon output_log files below
+// this root, one file per service, named after the service itself. It is a
+// variable so tests can stage the tree in a temporary directory.
+var openRCCoreLogRoot = "/var/log/qagent"
 
 type CoreLogCollector struct {
 	mu          sync.Mutex
@@ -31,14 +44,19 @@ type CoreLogCollector struct {
 	pending     *core.CoreLogBatch
 	dropped     uint64
 	sources     []coreLogJournalSource
+	fileSources []coreLogFileSource
 	seenCursors map[string]struct{}
 	cursorOrder []string
-	disabled    bool
 }
 
 type coreLogJournalSource struct {
 	arguments   []string
 	unitEngines map[string]core.Engine
+}
+
+type coreLogFileSource struct {
+	path   string
+	engine core.Engine
 }
 
 func NewCoreLogCollector(specs ...map[core.Engine]EngineSpec) *CoreLogCollector {
@@ -49,32 +67,58 @@ func NewCoreLogCollectorForServiceManager(manager *ServiceManager, specs ...map[
 	if len(specs) == 0 {
 		specs = []map[core.Engine]EngineSpec{DefaultSpecs()}
 	}
-	collector := &CoreLogCollector{sources: coreLogJournalSources(specs...)}
+	collector := &CoreLogCollector{}
 	if manager != nil && manager.Kind() == ServiceManagerOpenRC {
-		collector.disabled = true
+		collector.fileSources = coreLogFileSources(specs...)
+		return collector
 	}
+	collector.sources = coreLogJournalSources(specs...)
 	return collector
 }
 
 func (collector *CoreLogCollector) Run(ctx context.Context) {
-	if collector.disabled {
-		slog.Info("managed core journal streaming is disabled on OpenRC")
-		return
-	}
-	if err := validatePrivilegedExecutable(journalctlPath); err != nil {
-		slog.Warn("managed core log streaming is unavailable", "error", err)
-		return
-	}
 	var readers sync.WaitGroup
-	for _, source := range collector.sources {
+	if len(collector.sources) > 0 {
+		if err := validatePrivilegedExecutable(journalctlPath); err != nil {
+			slog.Warn("managed core log streaming is unavailable", "error", err)
+		} else {
+			for _, source := range collector.sources {
+				source := source
+				readers.Add(1)
+				go func() {
+					defer readers.Done()
+					collector.runSource(ctx, source)
+				}()
+			}
+		}
+	}
+	for _, source := range collector.fileSources {
 		source := source
 		readers.Add(1)
 		go func() {
 			defer readers.Done()
-			collector.runSource(ctx, source)
+			collector.runFileSource(ctx, source)
 		}()
 	}
 	readers.Wait()
+}
+
+// runFileSource keeps one tail reader alive per managed OpenRC log file with
+// the same retry cadence as the journal readers.
+func (collector *CoreLogCollector) runFileSource(ctx context.Context, source coreLogFileSource) {
+	for ctx.Err() == nil {
+		err := collector.followFile(ctx, source)
+		if ctx.Err() == nil {
+			slog.Warn("managed core log file reader stopped", "path", source.path, "error", err)
+		}
+		timer := time.NewTimer(2 * time.Second)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+	}
 }
 
 func (collector *CoreLogCollector) runSource(ctx context.Context, source coreLogJournalSource) {
@@ -130,6 +174,207 @@ func (collector *CoreLogCollector) follow(ctx context.Context, source coreLogJou
 		return waitErr
 	}
 	return io.EOF
+}
+
+// followFile tails one supervise-daemon log file. Like journalctl --follow
+// --lines=0, it starts at the current end of the file and only streams lines
+// appended after the collector started.
+func (collector *CoreLogCollector) followFile(ctx context.Context, source coreLogFileSource) error {
+	var file *os.File
+	for file == nil {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		opened, err := os.Open(source.path)
+		if err == nil {
+			info, statErr := opened.Stat()
+			if statErr != nil || !info.Mode().IsRegular() {
+				opened.Close()
+				return fmt.Errorf("managed core log file %s is not a regular file", source.path)
+			}
+			file = opened
+			break
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		timer := time.NewTimer(2 * time.Second)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+	defer file.Close()
+	if _, err := file.Seek(0, io.SeekEnd); err != nil {
+		return err
+	}
+	offset := int64(0)
+	if size, err := file.Seek(0, io.SeekCurrent); err == nil {
+		offset = size
+	}
+	buffer := make([]byte, 16<<10)
+	var partial []byte
+	for ctx.Err() == nil {
+		read, readErr := file.Read(buffer)
+		if read > 0 {
+			chunk := buffer[:read]
+			for {
+				index := bytes.IndexByte(chunk, '\n')
+				if index < 0 {
+					partial = append(partial, chunk...)
+					if len(partial) > coreLogFileMaxLine {
+						collector.appendFileEntry(source.engine, partial)
+						offset += int64(len(partial))
+						partial = nil
+					}
+					break
+				}
+				line := append(partial, chunk[:index]...)
+				partial = nil
+				offset += int64(index) + 1
+				chunk = chunk[index+1:]
+				collector.appendFileEntry(source.engine, line)
+			}
+		}
+		if readErr == nil {
+			continue
+		}
+		if !errors.Is(readErr, io.EOF) {
+			return readErr
+		}
+		info, statErr := file.Stat()
+		if statErr != nil {
+			return statErr
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("managed core log file %s was replaced by a non-regular file", source.path)
+		}
+		pathInfo, pathErr := os.Stat(source.path)
+		if pathErr == nil && !os.SameFile(info, pathInfo) {
+			// The file was replaced under us (external rename rotation or a
+			// service reinstall). Everything in the new inode is unread, so
+			// reopen it and stream from its start.
+			replacement, openErr := os.Open(source.path)
+			if openErr != nil {
+				return openErr
+			}
+			replacementInfo, replacementStatErr := replacement.Stat()
+			if replacementStatErr != nil || !replacementInfo.Mode().IsRegular() {
+				replacement.Close()
+				return fmt.Errorf("managed core log file %s was replaced by a non-regular file", source.path)
+			}
+			file.Close()
+			file = replacement
+			if _, err := file.Seek(0, io.SeekStart); err != nil {
+				return err
+			}
+			offset = 0
+			partial = nil
+			continue
+		}
+		if info.Size() < offset {
+			// The file was truncated (rotation); re-read from the start so the
+			// freshly written prefix is not missed.
+			if _, err := file.Seek(0, io.SeekStart); err != nil {
+				return err
+			}
+			offset = 0
+			partial = nil
+			continue
+		}
+		if info.Size() >= coreLogFileRotateBytes {
+			collector.rotateFile(source)
+		}
+		timer := time.NewTimer(time.Second)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return ctx.Err()
+}
+
+// rotateFile copies the live file beside itself as a single .old snapshot
+// and truncates the original. supervise-daemon keeps writing with O_APPEND,
+// so truncation is seamless for the writer and bounds the volatile log
+// footprint like the journald RuntimeMaxUse cap does on systemd. A failed
+// snapshot only costs the archived copy; truncation still proceeds so a
+// persistently failing copy can never let the live file grow unbounded.
+func (collector *CoreLogCollector) rotateFile(source coreLogFileSource) {
+	contents, err := os.ReadFile(source.path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		slog.Warn("managed core log rotation snapshot failed", "path", source.path, "error", err)
+	}
+	if len(contents) > 0 {
+		if err := os.WriteFile(source.path+".old", contents, 0o600); err != nil {
+			slog.Warn("managed core log rotation snapshot failed", "path", source.path, "error", err)
+		}
+	}
+	if err := os.Truncate(source.path, 0); err != nil {
+		slog.Warn("managed core log rotation failed", "path", source.path, "error", err)
+	}
+}
+
+func (collector *CoreLogCollector) appendFileEntry(engine core.Engine, line []byte) {
+	message := strings.TrimSpace(strings.ToValidUTF8(string(line), "�"))
+	message = strings.ReplaceAll(message, "\x00", "�")
+	if message == "" {
+		return
+	}
+	if len(message) > core.MaxCoreLogMessageBytes {
+		message = message[:core.MaxCoreLogMessageBytes]
+		for !utf8.ValidString(message) {
+			message = message[:len(message)-1]
+		}
+	}
+	collector.append(core.CoreLogEntry{Engine: engine, Level: "info", Message: message, LoggedAt: time.Now().UTC()})
+}
+
+// managedOpenRCCoreServiceName matches the fixed OpenRC service names
+// installed by bootstrap-core-services.sh (same names as systemd without the
+// .service suffix).
+func managedOpenRCCoreServiceName(service string) bool {
+	switch service {
+	case "qagent-mihomo", "qagent-xray", "qagent-sing-box", "qagent-shadowsocks-rust":
+		return true
+	default:
+		return false
+	}
+}
+
+// coreLogFileSources maps managed OpenRC services to their supervise-daemon
+// output_log files. Pre-existing (non-managed) services are skipped: their
+// log destination is not installed by QAgent and cannot be trusted.
+func coreLogFileSources(specSets ...map[core.Engine]EngineSpec) []coreLogFileSource {
+	engines := make(map[string]core.Engine)
+	ambiguous := make(map[string]bool)
+	for _, specs := range specSets {
+		for engine, spec := range specs {
+			if !managedOpenRCCoreServiceName(spec.Service) {
+				continue
+			}
+			path := filepath.Join(openRCCoreLogRoot, spec.Service+".log")
+			if ambiguous[path] {
+				continue
+			}
+			if existing, ok := engines[path]; ok && existing != engine {
+				delete(engines, path)
+				ambiguous[path] = true
+				continue
+			}
+			engines[path] = engine
+		}
+	}
+	sources := make([]coreLogFileSource, 0, len(engines))
+	for path, engine := range engines {
+		sources = append(sources, coreLogFileSource{path: path, engine: engine})
+	}
+	sort.Slice(sources, func(i, j int) bool { return sources[i].path < sources[j].path })
+	return sources
 }
 
 func coreLogJournalSources(specSets ...map[core.Engine]EngineSpec) []coreLogJournalSource {
