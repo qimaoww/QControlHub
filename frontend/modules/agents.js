@@ -34,7 +34,12 @@ function normalizeInterfaceAddress(raw) {
 function isGloballyRoutableIPv4(value) {
   const match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(value);
   if (!match) return false;
-  const [a, b, c, d] = match.slice(1).map(Number);
+  // Match netip.ParseAddr: dotted-quad octets are canonical decimal, so a
+  // leading zero is invalid even when its numeric value fits in one byte.
+  const octets = match.slice(1);
+  if (octets.some((octet) => octet.length > 1 && octet.startsWith("0")))
+    return false;
+  const [a, b, c, d] = octets.map(Number);
   if ([a, b, c, d].some((octet) => octet > 255)) return false;
   if (a === 0 || a === 10 || a === 127 || a === 255) return false;
   if (a === 100 && b >= 64 && b <= 127) return false;
@@ -166,7 +171,7 @@ function manualPublicAddress(labels, wantIPv4) {
 
 // A manually managed hostname or non-public address remains a valid client
 // connection setting, but it must never be presented as either IP family.
-function manualConnectionAddressNote(labels) {
+export function manualConnectionAddressNote(labels) {
   const first = manualAddressEntries(labels)[0];
   if (!first || normalizedPublicLiteral(first.value)) return "";
   return `手动连接地址：${first.value}`;

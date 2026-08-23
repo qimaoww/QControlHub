@@ -9,6 +9,7 @@ import {
   developmentSourceVisible,
   formatHostPort,
   installAgents,
+  manualConnectionAddressNote,
   nodeCardDropIndex,
   publicAddressRows,
   updatePublicIPDisplays,
@@ -3414,6 +3415,41 @@ assert.equal(invalidManualRows[0].value, "198.35.26.96");
 assert.equal(invalidManualRows[0].source, "公网探测");
 assert.equal(invalidManualRows[1].value, "");
 assert.equal(invalidManualRows[1].ok, false);
+
+const leadingZeroRows = publicAddressRows(
+  {},
+  { client_address: "001.001.001.001", public_ip: "01.2.3.4" },
+);
+assert.equal(leadingZeroRows[0].value, "");
+assert.equal(leadingZeroRows[0].ok, false);
+assert.equal(leadingZeroRows[1].value, "");
+assert.equal(
+  manualConnectionAddressNote({ client_address: "001.001.001.001" }),
+  "手动连接地址：001.001.001.001",
+);
+assert.equal(
+  manualConnectionAddressNote({ public_ip: "01.2.3.4" }),
+  "手动连接地址：01.2.3.4",
+);
+
+const mappedLeadingZeroRows = publicAddressRows(
+  {},
+  { client_address: "::ffff:001.001.001.001", public_ip: "::ffff:1.2.3.004" },
+);
+assert.equal(mappedLeadingZeroRows[0].value, "");
+assert.equal(mappedLeadingZeroRows[0].ok, false);
+assert.equal(
+  manualConnectionAddressNote({ client_address: "::ffff:001.001.001.001" }),
+  "手动连接地址：::ffff:001.001.001.001",
+);
+
+const canonicalManualRows = publicAddressRows(
+  {},
+  { client_address: "1.1.1.1" },
+);
+assert.equal(canonicalManualRows[0].value, "1.1.1.1");
+assert.equal(canonicalManualRows[0].source, "手动设置");
+assert.equal(manualConnectionAddressNote({ client_address: "1.1.1.1" }), "");
 
 // An observed relay (e.g. a Cloudflare edge) must never beat a genuine
 // default-route interface address that reports the same family.
