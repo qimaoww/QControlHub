@@ -4,9 +4,12 @@ import "./refresh_smoke.mjs";
 import {
   animateNodeCardDrop,
   clearNodeCardDragState,
+  coreSourceForInstall,
+  developmentSourceVisible,
   installAgents,
   nodeCardDropIndex,
 } from "./modules/agents.js";
+import { coreSourceName } from "./modules/tasks.js";
 import { installClientAccess } from "./modules/client-access.js";
 import {
   bindServerPlanRegeneration,
@@ -41,6 +44,17 @@ for (const install of [
     throw new TypeError(`${install.name} returned an invalid page module`);
   }
 }
+
+assert.equal(developmentSourceVisible("mihomo", "development"), true, "mihomo development shows source choice");
+assert.equal(developmentSourceVisible("mihomo", "stable"), false, "stable hides source choice");
+assert.equal(developmentSourceVisible("xray", "development"), false, "non-mihomo hides source choice");
+assert.equal(coreSourceForInstall("mihomo", "development", "mirror"), "mirror", "mirror carries through");
+assert.equal(coreSourceForInstall("mihomo", "development", ""), "official", "omitted source defaults to official");
+assert.equal(coreSourceForInstall("mihomo", "stable", "mirror"), undefined, "stable omits source");
+assert.equal(coreSourceForInstall("xray", "development", "mirror"), undefined, "non-mihomo omits source");
+assert.equal(coreSourceName("mirror"), "vernesong/mihomo 镜像（第三方）", "mirror audited label");
+assert.equal(coreSourceName("official"), "MetaCubeX/mihomo 官方", "official audited label");
+assert.equal(coreSourceName(""), "", "no source has no label");
 
 let requestedRoute = "dashboard";
 let releaseFirstRender;

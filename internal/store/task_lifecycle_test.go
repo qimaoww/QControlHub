@@ -519,6 +519,79 @@ func TestEnrollmentStaysOfflineUntilFirstHeartbeat(t *testing.T) {
 	}
 }
 
+func TestCreateTaskValidatesCoreSourceWithPostgreSQL(t *testing.T) {
+	databaseURL := os.Getenv("QCH_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("QCH_TEST_DATABASE_URL is not configured")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	dataStore, err := Open(ctx, databaseURL, true)
+	if err != nil {
+		t.Fatalf("open PostgreSQL: %v", err)
+	}
+	defer dataStore.Close()
+	// legacyAgent advertises only self-upgrade, so it is an older Agent that
+	// cannot negotiate core_source and must be refused the mirror task.
+	legacyAgent, legacyEnrollment := enrollTaskTestAgent(t, ctx, dataStore)
+	defer cleanupTaskTestAgent(dataStore, legacyAgent.ID, legacyEnrollment)
+	if _, err := dataStore.CreateTask(ctx, core.TaskRequest{
+		AgentID: legacyAgent.ID, Action: core.ActionInstall, Engine: core.EngineMihomo,
+		CoreVersion: core.CoreVersionDevelopment, CoreSource: string(core.CoreSourceMirror),
+	}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("legacy Agent mirror task error = %v, want ErrConflict", err)
+	}
+	official, err := dataStore.CreateTask(ctx, core.TaskRequest{
+		AgentID: legacyAgent.ID, Action: core.ActionInstall, Engine: core.EngineMihomo,
+		CoreVersion: core.CoreVersionDevelopment, CoreSource: string(core.CoreSourceOfficial),
+	})
+	if err != nil || official.CoreSource != string(core.CoreSourceOfficial) {
+		t.Fatalf("legacy official install task = %+v, %v", official, err)
+	}
+	defaulted, err := dataStore.CreateTask(ctx, core.TaskRequest{
+		AgentID: legacyAgent.ID, Action: core.ActionInstall, Engine: core.EngineMihomo,
+		CoreVersion: core.CoreVersionDevelopment,
+	})
+	if err != nil || defaulted.CoreSource != "" {
+		t.Fatalf("legacy default install task = %+v, %v", defaulted, err)
+	}
+
+	// sourceAgent advertises the negotiated feature and accepts mirror, which is
+	// persisted and preserved on retry.
+	sourceAgent, sourceEnrollment := enrollTaskTestAgentWithSource(t, ctx, dataStore)
+	defer cleanupTaskTestAgent(dataStore, sourceAgent.ID, sourceEnrollment)
+	mirror, err := dataStore.CreateTask(ctx, core.TaskRequest{
+		AgentID: sourceAgent.ID, Action: core.ActionInstall, Engine: core.EngineMihomo,
+		CoreVersion: core.CoreVersionDevelopment, CoreSource: string(core.CoreSourceMirror),
+	})
+	if err != nil || mirror.CoreSource != string(core.CoreSourceMirror) {
+		t.Fatalf("source Agent mirror install task = %+v, %v", mirror, err)
+	}
+	persisted, err := dataStore.GetTask(ctx, mirror.ID)
+	if err != nil || persisted.CoreSource != string(core.CoreSourceMirror) {
+		t.Fatalf("persisted mirror source = %+v, %v", persisted, err)
+	}
+	if err := dataStore.CancelTask(ctx, mirror.ID); err != nil {
+		t.Fatalf("cancel mirror task: %v", err)
+	}
+	retried, err := dataStore.RetryTask(ctx, mirror.ID)
+	if err != nil || retried.CoreSource != string(core.CoreSourceMirror) {
+		t.Fatalf("retried mirror task = %+v, %v", retried, err)
+	}
+
+	invalidRequests := []core.TaskRequest{
+		{AgentID: sourceAgent.ID, Action: core.ActionInstall, Engine: core.EngineMihomo, CoreVersion: core.CoreVersionStable, CoreSource: string(core.CoreSourceMirror)},
+		{AgentID: sourceAgent.ID, Action: core.ActionInstall, Engine: core.EngineXray, CoreVersion: core.CoreVersionDevelopment, CoreSource: string(core.CoreSourceMirror)},
+		{AgentID: sourceAgent.ID, Action: core.ActionInstall, Engine: core.EngineMihomo, CoreVersion: core.CoreVersionDevelopment, CoreSource: "private"},
+		{AgentID: legacyAgent.ID, Action: core.ActionStatus, Engine: core.EngineMihomo, CoreSource: string(core.CoreSourceMirror)},
+	}
+	for _, request := range invalidRequests {
+		if _, err := dataStore.CreateTask(ctx, request); !errors.Is(err, ErrInvalid) {
+			t.Fatalf("CreateTask(%+v) error = %v, want ErrInvalid", request, err)
+		}
+	}
+}
+
 func enrollTaskTestAgent(t *testing.T, ctx context.Context, dataStore *Store) (core.Agent, string) {
 	t.Helper()
 	enrollment, err := dataStore.CreateEnrollmentToken(ctx, core.EnrollmentTokenRequest{
@@ -539,6 +612,30 @@ func enrollTaskTestAgent(t *testing.T, ctx context.Context, dataStore *Store) (c
 	}, enrollment.Token)
 	if err != nil {
 		t.Fatalf("enroll task test agent: %v", err)
+	}
+	return agent, enrollment.ID
+}
+
+func enrollTaskTestAgentWithSource(t *testing.T, ctx context.Context, dataStore *Store) (core.Agent, string) {
+	t.Helper()
+	enrollment, err := dataStore.CreateEnrollmentToken(ctx, core.EnrollmentTokenRequest{
+		Name: "task lifecycle source candidate", TTLMinutes: 30, MaxUses: 1,
+	})
+	if err != nil {
+		t.Fatalf("create source enrollment token: %v", err)
+	}
+	publicKey := make([]byte, 32)
+	if _, err := rand.Read(publicKey); err != nil {
+		t.Fatal(err)
+	}
+	agent, err := dataStore.EnrollAgent(ctx, core.EnrollRequest{
+		Name: "task-lifecycle-source-agent", OS: "linux", Arch: "amd64",
+		Capabilities: []core.Engine{core.EngineMihomo},
+		Features:     []string{core.AgentFeatureSelfUpgrade, core.AgentFeatureMihomoDevelopmentSource},
+		PublicKey:    base64.RawURLEncoding.EncodeToString(publicKey),
+	}, enrollment.Token)
+	if err != nil {
+		t.Fatalf("enroll source agent: %v", err)
 	}
 	return agent, enrollment.ID
 }

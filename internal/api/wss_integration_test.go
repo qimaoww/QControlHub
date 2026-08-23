@@ -67,7 +67,7 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 	enrollmentBody, _ := json.Marshal(core.EnrollRequest{
 		Name: "integration-agent", OS: "linux", Arch: "amd64",
 		Capabilities: []core.Engine{core.EngineMihomo},
-		Features:     []string{core.AgentFeatureSelfUpgrade, core.AgentFeaturePortTraffic},
+		Features:     []string{core.AgentFeatureSelfUpgrade, core.AgentFeaturePortTraffic, core.AgentFeatureMihomoDevelopmentSource},
 		PublicKey:    authn.EncodePublicKey(publicKey),
 	})
 	request, _ := http.NewRequestWithContext(ctx, http.MethodPost, httpServer.URL+"/agent/v1/enroll", bytes.NewReader(enrollmentBody))
@@ -153,7 +153,7 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 		t.Fatal(err)
 	}
 	heartbeat := core.WireMessage{Type: core.WireHeartbeat, Heartbeat: &core.HeartbeatRequest{
-		Version: "test", Features: []string{core.AgentFeatureSelfUpgrade, core.AgentFeaturePortTraffic, core.AgentFeatureCoreLogs},
+		Version: "test", Features: []string{core.AgentFeatureSelfUpgrade, core.AgentFeaturePortTraffic, core.AgentFeatureCoreLogs, core.AgentFeatureMihomoDevelopmentSource},
 		TrafficUsage: []core.PortTrafficUsage{{
 			PolicyID: trafficPolicy.ID, ResetGeneration: trafficPolicy.ResetGeneration,
 			ReceivedBytes: 2048, SentBytes: 1024, UsedBytes: 3072,
@@ -332,7 +332,8 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 	}
 	connection = resumedConnection
 	installTask, err := dataStore.CreateTask(ctx, core.TaskRequest{
-		AgentID: enrolled.AgentID, Action: core.ActionInstall, Engine: core.EngineMihomo, CoreVersion: core.CoreVersionDevelopment,
+		AgentID: enrolled.AgentID, Action: core.ActionInstall, Engine: core.EngineMihomo,
+		CoreVersion: core.CoreVersionDevelopment, CoreSource: string(core.CoreSourceMirror),
 	})
 	if err != nil {
 		t.Fatalf("create core install task: %v", err)
@@ -341,7 +342,7 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 	if err := wsjson.Read(ctx, connection, &taskMessage); err != nil {
 		t.Fatalf("read core install task: %v", err)
 	}
-	if taskMessage.Task == nil || taskMessage.Task.ID != installTask.ID || taskMessage.Task.CoreVersion != core.CoreVersionDevelopment || taskMessage.Task.ConfigContent != "" {
+	if taskMessage.Task == nil || taskMessage.Task.ID != installTask.ID || taskMessage.Task.CoreVersion != core.CoreVersionDevelopment || taskMessage.Task.CoreSource != string(core.CoreSourceMirror) || taskMessage.Task.ConfigContent != "" {
 		t.Fatalf("invalid core install task message: %+v", taskMessage)
 	}
 	result = core.WireMessage{Type: core.WireResult, Result: &core.TaskResultEnvelope{

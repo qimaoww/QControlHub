@@ -18,3 +18,37 @@ func TestNormalizeCoreVersionSelector(t *testing.T) {
 		}
 	}
 }
+
+func TestNormalizeCoreSource(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		engine   Engine
+		selector string
+		source   string
+		want     string
+		wantErr  bool
+	}{
+		{name: "omitted defaults to official", engine: EngineMihomo, selector: CoreVersionDevelopment, source: "", want: ""},
+		{name: "mihomo development official", engine: EngineMihomo, selector: CoreVersionDevelopment, source: string(CoreSourceOfficial), want: string(CoreSourceOfficial)},
+		{name: "mihomo development mirror", engine: EngineMihomo, selector: CoreVersionDevelopment, source: string(CoreSourceMirror), want: string(CoreSourceMirror)},
+		{name: "mirror rejected for stable", engine: EngineMihomo, selector: CoreVersionStable, source: string(CoreSourceMirror), wantErr: true},
+		{name: "mirror rejected for xray", engine: EngineXray, selector: CoreVersionDevelopment, source: string(CoreSourceMirror), wantErr: true},
+		{name: "unknown source rejected", engine: EngineMihomo, selector: CoreVersionDevelopment, source: "private", wantErr: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := NormalizeCoreSource(test.engine, test.selector, test.source)
+			if test.wantErr {
+				if err == nil {
+					t.Fatalf("NormalizeCoreSource() = %q, nil; want error", got)
+				}
+				return
+			}
+			if err != nil || got != test.want {
+				t.Fatalf("NormalizeCoreSource() = %q, %v; want %q", got, err, test.want)
+			}
+		})
+	}
+}

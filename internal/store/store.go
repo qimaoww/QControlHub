@@ -34,7 +34,7 @@ type Store struct {
 	taskWakes  map[string]chan struct{}
 }
 
-const currentSchemaVersion = 19
+const currentSchemaVersion = 21
 
 func Open(ctx context.Context, databaseURL string, allowInsecureRemote bool) (*Store, error) {
 	return OpenWithConfigKey(ctx, databaseURL, allowInsecureRemote, "")
@@ -818,10 +818,19 @@ func (s *Store) CreateTask(ctx context.Context, request core.TaskRequest) (core.
 			return core.Task{}, fmt.Errorf("%w: %v", ErrInvalid, versionErr)
 		}
 		request.CoreVersion = normalizedVersion
+		source, sourceErr := core.NormalizeCoreSource(request.Engine, normalizedVersion, request.CoreSource)
+		if sourceErr != nil {
+			return core.Task{}, fmt.Errorf("%w: %v", ErrInvalid, sourceErr)
+		}
+		request.CoreSource = source
 		if request.ConfigID != "" {
 			return core.Task{}, fmt.Errorf("%w: install tasks cannot reference a configuration", ErrInvalid)
 		}
 	} else {
+		if request.CoreSource != "" {
+			return core.Task{}, fmt.Errorf("%w: core source is only applicable to Mihomo development installs", ErrInvalid)
+		}
+		request.CoreSource = ""
 		request.CoreVersion = ""
 	}
 	tx, err := s.pool.Begin(ctx)
@@ -850,10 +859,17 @@ func (s *Store) CreateTask(ctx context.Context, request core.TaskRequest) (core.
 	if request.Action != core.ActionUpgradeAgent && !containsEngine(capabilities, request.Engine) {
 		return core.Task{}, fmt.Errorf("%w: agent does not advertise the requested engine", ErrInvalid)
 	}
+	if request.Action == core.ActionInstall && request.Engine == core.EngineMihomo &&
+		request.CoreVersion == core.CoreVersionDevelopment &&
+		request.CoreSource == string(core.CoreSourceMirror) &&
+		!containsFeature(features, core.AgentFeatureMihomoDevelopmentSource) {
+		return core.Task{}, fmt.Errorf("%w: this Agent does not support the Mihomo Alpha mirror source; upgrade the Agent through the panel first", ErrConflict)
+	}
 
 	task := core.Task{
 		AgentID: request.AgentID, Action: request.Action, Engine: request.Engine,
-		ConfigID: request.ConfigID, CoreVersion: request.CoreVersion, Status: core.TaskPending, CreatedAt: time.Now().UTC(),
+		ConfigID: request.ConfigID, CoreVersion: request.CoreVersion, CoreSource: request.CoreSource,
+		Status: core.TaskPending, CreatedAt: time.Now().UTC(),
 	}
 	if request.Action == core.ActionDeploy || request.Action == core.ActionValidate {
 		var configEngine core.Engine
@@ -879,14 +895,15 @@ func (s *Store) CreateTask(ctx context.Context, request core.TaskRequest) (core.
 		task.ConfigID = ""
 	}
 	existing, existingErr := scanTask(tx.QueryRow(ctx, `
-		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),COALESCE(core_version,''),status,attempt,
+		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),COALESCE(core_version,''),COALESCE(core_source,''),status,attempt,
 		       COALESCE(output,''),COALESCE(error,''),created_at,started_at,finished_at
 		FROM tasks
 		WHERE agent_id=$1 AND action=$2 AND engine=$3
 		  AND COALESCE(config_id,'')=$4 AND COALESCE(config_version,0)=$5 AND COALESCE(core_version,'')=$6
+		  AND COALESCE(core_source,'')=$7
 		  AND status IN ('pending','running')
 		ORDER BY created_at DESC LIMIT 1`,
-		task.AgentID, task.Action, task.Engine, task.ConfigID, task.ConfigVersion, task.CoreVersion), false)
+		task.AgentID, task.Action, task.Engine, task.ConfigID, task.ConfigVersion, task.CoreVersion, task.CoreSource), false)
 	if existingErr == nil {
 		if err := tx.Commit(ctx); err != nil {
 			return core.Task{}, err
@@ -906,9 +923,9 @@ func (s *Store) CreateTask(ctx context.Context, request core.TaskRequest) (core.
 		return core.Task{}, err
 	}
 	_, err = tx.Exec(ctx, `
-			INSERT INTO tasks (id,agent_id,action,engine,config_id,config_version,config_content,core_version,status,attempt,created_at)
-			VALUES ($1,$2,$3,$4,NULLIF($5,''),NULLIF($6,0),NULLIF($7,''),NULLIF($8,''),$9,0,$10)`,
-		task.ID, task.AgentID, task.Action, task.Engine, task.ConfigID, task.ConfigVersion, storedConfigContent, task.CoreVersion, task.Status, task.CreatedAt)
+			INSERT INTO tasks (id,agent_id,action,engine,config_id,config_version,config_content,core_version,core_source,status,attempt,created_at)
+			VALUES ($1,$2,$3,$4,NULLIF($5,''),NULLIF($6,0),NULLIF($7,''),NULLIF($8,''),NULLIF($9,''),$10,0,$11)`,
+		task.ID, task.AgentID, task.Action, task.Engine, task.ConfigID, task.ConfigVersion, storedConfigContent, task.CoreVersion, task.CoreSource, task.Status, task.CreatedAt)
 	if err != nil {
 		return core.Task{}, mapError(err)
 	}
@@ -958,7 +975,7 @@ func (s *Store) ListTasksFiltered(ctx context.Context, agentID string, status co
 		limit = 500
 	}
 	rows, err := s.pool.Query(ctx, `
-		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),COALESCE(core_version,''),status,attempt,
+		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),COALESCE(core_version,''),COALESCE(core_source,''),status,attempt,
 		       COALESCE(output,''),COALESCE(error,''),created_at,started_at,finished_at
 		FROM tasks
 		WHERE ($1='' OR agent_id=$1) AND ($2='' OR status=$2) AND ($3='' OR action=$3)
@@ -980,7 +997,7 @@ func (s *Store) ListTasksFiltered(ctx context.Context, agentID string, status co
 
 func (s *Store) GetTask(ctx context.Context, id string) (core.Task, error) {
 	row := s.pool.QueryRow(ctx, `
-		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),COALESCE(core_version,''),status,attempt,
+		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),COALESCE(core_version,''),COALESCE(core_source,''),status,attempt,
 		       COALESCE(output,''),COALESCE(error,''),created_at,started_at,finished_at
 		FROM tasks WHERE id=$1`, id)
 	task, err := scanTask(row, false)
@@ -1020,7 +1037,7 @@ func (s *Store) RetryTask(ctx context.Context, id string) (core.Task, error) {
 	}
 	return s.CreateTask(ctx, core.TaskRequest{
 		AgentID: previous.AgentID, Action: previous.Action, Engine: previous.Engine,
-		ConfigID: previous.ConfigID, CoreVersion: previous.CoreVersion,
+		ConfigID: previous.ConfigID, CoreVersion: previous.CoreVersion, CoreSource: previous.CoreSource,
 	})
 }
 
@@ -1029,7 +1046,7 @@ func (s *Store) RetryTask(ctx context.Context, id string) (core.Task, error) {
 func (s *Store) RunningTask(ctx context.Context, agentID string) (*core.Task, error) {
 	row := s.pool.QueryRow(ctx, `
 		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),
-		       COALESCE(config_content,''),COALESCE(core_version,''),status,attempt,COALESCE(lease_id,''),
+		       COALESCE(config_content,''),COALESCE(core_version,''),COALESCE(core_source,''),status,attempt,COALESCE(lease_id,''),
 		       COALESCE(output,''),COALESCE(error,''),created_at,started_at,finished_at
 		FROM tasks WHERE agent_id=$1 AND status='running'
 		ORDER BY started_at DESC LIMIT 1`, agentID)
@@ -1064,7 +1081,7 @@ func (s *Store) ClaimTask(ctx context.Context, agentID string) (*core.Task, erro
 		UPDATE tasks t SET status='running',started_at=now(),attempt=attempt+1,lease_id=$2
 		FROM next_task n WHERE t.id=n.id
 		RETURNING t.id,t.agent_id,t.action,t.engine,COALESCE(t.config_id,''),COALESCE(t.config_version,0),
-		          COALESCE(t.config_content,''),COALESCE(t.core_version,''),t.status,t.attempt,COALESCE(t.lease_id,''),COALESCE(t.output,''),COALESCE(t.error,''),
+		          COALESCE(t.config_content,''),COALESCE(t.core_version,''),COALESCE(t.core_source,''),t.status,t.attempt,COALESCE(t.lease_id,''),COALESCE(t.output,''),COALESCE(t.error,''),
 		          t.created_at,t.started_at,t.finished_at`, agentID, leaseID)
 	task, err := scanTask(row, true)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -1178,7 +1195,7 @@ func (s *Store) RecentReadTask(ctx context.Context, agentID string, engine core.
 		return core.Task{}, ErrNotFound
 	}
 	row := s.pool.QueryRow(ctx, `
-		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),COALESCE(core_version,''),status,attempt,
+		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),COALESCE(core_version,''),COALESCE(core_source,''),status,attempt,
 		       COALESCE(output,''),COALESCE(error,''),created_at,started_at,finished_at
 		FROM tasks
 		WHERE agent_id=$1 AND engine=$2 AND action=$3 AND status='succeeded'
@@ -1234,11 +1251,11 @@ func scanTask(row rowScanner, includeContent bool) (core.Task, error) {
 	var err error
 	if includeContent {
 		err = row.Scan(&task.ID, &task.AgentID, &task.Action, &task.Engine, &task.ConfigID, &task.ConfigVersion,
-			&task.ConfigContent, &task.CoreVersion, &task.Status, &task.Attempt, &task.LeaseID, &task.Output, &task.Error,
+			&task.ConfigContent, &task.CoreVersion, &task.CoreSource, &task.Status, &task.Attempt, &task.LeaseID, &task.Output, &task.Error,
 			&task.CreatedAt, &task.StartedAt, &task.FinishedAt)
 	} else {
 		err = row.Scan(&task.ID, &task.AgentID, &task.Action, &task.Engine, &task.ConfigID, &task.ConfigVersion,
-			&task.CoreVersion, &task.Status, &task.Attempt, &task.Output, &task.Error,
+			&task.CoreVersion, &task.CoreSource, &task.Status, &task.Attempt, &task.Output, &task.Error,
 			&task.CreatedAt, &task.StartedAt, &task.FinishedAt)
 	}
 	return task, err
@@ -1400,12 +1417,13 @@ ALTER TABLE configs ADD CONSTRAINT configs_content_check CHECK (octet_length(con
 CREATE TABLE IF NOT EXISTS tasks (
     id text PRIMARY KEY,
     agent_id text NOT NULL REFERENCES agents(id),
-    action varchar(20) NOT NULL CHECK (action IN ('validate','deploy','read-config','start','stop','restart','status','install','upgrade-agent')),
+    action varchar(20) NOT NULL CHECK (action IN ('validate','deploy','import-existing','read-config','start','stop','restart','status','install','upgrade-agent')),
 	    engine varchar(20) NOT NULL CHECK (engine IN ('mihomo','xray','sing-box','ss-rust') OR (action='upgrade-agent' AND engine='')),
     config_id text REFERENCES configs(id),
     config_version integer,
 	    config_content text,
 	    core_version varchar(64),
+	    core_source varchar(32),
 	    status varchar(20) NOT NULL CHECK (status IN ('pending','running','succeeded','failed','canceled')),
 	    attempt integer NOT NULL DEFAULT 0,
     output text,
@@ -1417,10 +1435,11 @@ CREATE TABLE IF NOT EXISTS tasks (
 
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS lease_id text;
 	ALTER TABLE tasks ADD COLUMN IF NOT EXISTS core_version varchar(64);
+	ALTER TABLE tasks ADD COLUMN IF NOT EXISTS core_source varchar(32);
 	DROP INDEX IF EXISTS tasks_latest_deployment_idx;
 	ALTER TABLE tasks DROP COLUMN IF EXISTS simulated;
 	ALTER TABLE tasks DROP CONSTRAINT IF EXISTS tasks_action_check;
-	ALTER TABLE tasks ADD CONSTRAINT tasks_action_check CHECK (action IN ('validate','deploy','read-config','start','stop','restart','status','install','upgrade-agent'));
+	ALTER TABLE tasks ADD CONSTRAINT tasks_action_check CHECK (action IN ('validate','deploy','import-existing','read-config','start','stop','restart','status','install','upgrade-agent'));
 	ALTER TABLE tasks DROP CONSTRAINT IF EXISTS tasks_status_check;
 	ALTER TABLE tasks ADD CONSTRAINT tasks_status_check CHECK (status IN ('pending','running','succeeded','failed','canceled'));
 	ALTER TABLE configs DROP CONSTRAINT IF EXISTS configs_engine_check;
@@ -1520,7 +1539,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS agents_public_key_unique_idx ON agents(public_
 	CREATE INDEX IF NOT EXISTS config_revisions_recent_idx ON config_revisions(config_id,version DESC);
 CREATE INDEX IF NOT EXISTS tasks_agent_queue_idx ON tasks(agent_id, status, created_at);
 CREATE INDEX IF NOT EXISTS tasks_created_idx ON tasks(created_at DESC);
-CREATE INDEX IF NOT EXISTS tasks_latest_deployment_idx ON tasks(agent_id,engine,finished_at DESC) WHERE action='deploy' AND status='succeeded';
+CREATE INDEX IF NOT EXISTS tasks_latest_deployment_idx ON tasks(agent_id,engine,finished_at DESC) WHERE action IN ('deploy','import-existing') AND status='succeeded';
 CREATE UNIQUE INDEX IF NOT EXISTS tasks_one_running_per_agent_idx ON tasks(agent_id) WHERE status='running';
 CREATE TABLE IF NOT EXISTS metric_samples (
     agent_id text NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
