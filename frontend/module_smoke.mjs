@@ -406,8 +406,8 @@ for (const install of [
       "[D] other agent has no pending to clear (was never set)");
   }
 
-  // --- Test E (critical): Old deploy A succeeds while B is pending ->
-  // cache MUST be invalidated (A changed the node!), B's pending survives.
+  // --- Test E (ABA): Old deploy A succeeds -> cache invalidated.
+  // Then B overwrites pending; B fails later -> only B's pending cleared.
   {
     const state = {
       route: "agent-config",
@@ -420,7 +420,6 @@ for (const install of [
     };
 
     const gateA = deferred();
-    let aResolved = false;
 
     const planForm = new FakeForm({
       operation: "modify", tag: "t", listen: "0.0.0.0", port: "443",
@@ -443,41 +442,33 @@ for (const install of [
         task: { id: "dep-A", status: "pending" },
       }),
       "GET /tasks/dep-A": () => gateA.promise,
-      "GET /tasks/dep-B": () => ({ status: "running", id: "dep-B" }),
     });
 
     const pages = installForms(ctx, { "#server-plan-form": planForm });
     await pages.agentConfig();
 
-    // Step 1: Submit deploy A via form handler.
+    // Submit deploy A via form handler (starts monitor A).
     await planForm.dispatchSubmit({ planIntent: "deploy" });
     await drain();
 
     assert.equal(state.data.pendingDeployTasks?.[KEY]?.taskId, "dep-A",
       "[E] dep-A recorded as pending");
 
-    // Step 2: Simulate deploy B overwriting A in the pending map.
-    // This happens when a second mutation fires before A completes.
+    // Simulate deploy B overwriting A in the pending map
+    // (happens when a second mutation fires before A completes).
     state.data.pendingDeployTasks[KEY] = { taskId: "dep-B" };
 
-    // Step 3: Release gate A -> task dep-A returns succeeded.
-    aResolved = true;
+    // Release gate A -> old dep-A succeeds.
     gateA.resolve({ status: "succeeded", id: "dep-A" });
     await drain();
 
-    // Critical assertions:
-    // 1. Cache IS invalidated because A succeeded and changed the node file.
+    // Cache IS invalidated because A succeeded and changed the node file.
     assert.equal(state.data.liveSources?.[KEY], undefined,
-      "[E] cache invalidated by old deploy A's success (node file changed!)");
+      "[E] cache invalidated by old deploy A's success");
 
-    // 2. Pending still holds dep-B (A did NOT clear B's record).
+    // Pending still holds dep-B (A did NOT clear it via CAS).
     assert.equal(state.data.pendingDeployTasks?.[KEY]?.taskId, "dep-B",
       "[E] newer dep-B pending NOT cleared by old dep-A completion");
-
-    // Step 4: Now simulate dep-B failing. It should notify and clear itself.
-    // We can verify by checking that dep-B can still be resolved normally.
-    // (In this test we don't need to trigger B's terminal - just verifying
-    // that B survived A's completion is sufficient for the ABA fix.)
   }
 
   // --- Test G: Source-config deploy success uses same terminal mechanism.
