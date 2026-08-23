@@ -592,6 +592,26 @@ func TestManualConfigRequiresExplicitImportOfNodeSnapshot(t *testing.T) {
 	}
 }
 
+func TestCoreLogsLabelFollowsAdvertisedFeature(t *testing.T) {
+	app, err := os.ReadFile("app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(app)
+	for _, required := range []string{
+		`(agent.features || []).includes("core-logs-v1")`,
+		`"集中日志已启用"`,
+		`"需升级 Agent"`,
+	} {
+		if !strings.Contains(content, required) {
+			t.Errorf("core-logs sidebar is missing %q", required)
+		}
+	}
+	if strings.Contains(content, `agent.features.includes("core-logs-v1") ? "需升级 Agent"`) {
+		t.Error("core-logs sidebar must enable streaming only when core-logs-v1 is advertised")
+	}
+}
+
 func TestTaskPollingKeepsTheScrollContainerStable(t *testing.T) {
 	tasks, err := os.ReadFile("modules/tasks.js")
 	if err != nil {

@@ -246,7 +246,7 @@ func (c *Client) enroll(ctx context.Context, publicKey ed25519.PublicKey, privat
 		OS:           runtime.GOOS,
 		Arch:         runtime.GOARCH,
 		Capabilities: c.config.Capabilities,
-		Features:     advertisedAgentFeatures(),
+		Features:     advertisedAgentFeatures(c.executor.serviceManager()),
 		Labels:       c.config.Labels,
 		PublicKey:    authn.EncodePublicKey(publicKey),
 	}
@@ -424,7 +424,7 @@ func (c *Client) queueHeartbeat(ctx context.Context, outgoing chan<- core.WireMe
 	}
 	heartbeat := &core.HeartbeatRequest{
 		Version: c.config.Version, Runtime: runtimeState,
-		Features: advertisedAgentFeatures(), TrafficUsage: c.traffic.Snapshot(),
+		Features: advertisedAgentFeatures(c.executor.serviceManager()), TrafficUsage: c.traffic.Snapshot(),
 	}
 	if metricsHaveData(metrics) {
 		heartbeat.Metrics = &metrics
@@ -460,8 +460,12 @@ func (c *Client) queueMetrics(ctx context.Context, outgoing chan<- core.WireMess
 	}
 }
 
-func advertisedAgentFeatures() []string {
-	return []string{core.AgentFeatureSelfUpgrade, core.AgentFeaturePortTraffic, core.AgentFeatureCoreLogs}
+func advertisedAgentFeatures(manager *ServiceManager) []string {
+	features := []string{core.AgentFeatureSelfUpgrade, core.AgentFeaturePortTraffic}
+	if manager.Kind() != ServiceManagerOpenRC {
+		features = append(features, core.AgentFeatureCoreLogs)
+	}
+	return features
 }
 
 func (c *Client) executeTask(ctx context.Context, task core.Task, outgoing chan<- core.WireMessage) {
