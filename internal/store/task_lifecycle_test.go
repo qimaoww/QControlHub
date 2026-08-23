@@ -93,30 +93,49 @@ func TestClaimAndResumeFeatureDowngradeWithPostgreSQL(t *testing.T) {
 	if err != nil || failed.Status != core.TaskFailed {
 		t.Fatalf("downgraded running mirror task = %+v, %v; want failed", failed, err)
 	}
-	if failed.FinishedAt.IsZero() {
-		t.Fatalf("downgraded running mirror task has no finished_at: %+v", failed)
-	}
-	if failed.LeaseID != "" {
-		t.Fatalf("downgraded running mirror task lease must be released, got %q", failed.LeaseID)
-	}
-	if failed.ConfigContent != "" {
-		t.Fatalf("downgraded running mirror task left config_content = %q, want terminal empty", failed.ConfigContent)
-	}
-	if !strings.Contains(failed.Error, core.AgentFeatureMihomoDevelopmentSource) {
-		t.Fatalf("downgraded running mirror error = %q, want feature reason", failed.Error)
-	}
-	if !strings.Contains(failed.Error, "cannot be safely resumed") || !strings.Contains(failed.Error, "unknown whether the previous Agent executed it") {
-		t.Fatalf("downgraded running mirror error = %q, want safe-resume/unknown-outcome wording", failed.Error)
-	}
-	if strings.Contains(failed.Error, "was not executed") {
-		t.Fatalf("downgraded running mirror error must not claim the task was never executed: %q", failed.Error)
-	}
+	assertRawTaskTerminalCleaned(t, ctx, dataStore, runningMirror.ID)
 
 	// Cross-agent claims must never pick another Agent's pending mirror task.
 	legacy, legacyEnrollment := enrollTaskTestAgent(t, ctx, dataStore)
 	defer cleanupTaskTestAgent(dataStore, legacy.ID, legacyEnrollment)
 	if claimed, err := dataStore.ClaimTask(ctx, legacy.ID); err != nil || claimed != nil {
 		t.Fatalf("ClaimTask(legacy) = %+v, %v; want nil", claimed, err)
+	}
+}
+
+// assertRawTaskTerminalCleaned reads the underlying tasks row directly and
+// asserts the terminal-state cleanup and unknown-outcome wording. GetTask does
+// not expose lease_id or config_content, so the raw columns must be checked
+// here to avoid a false positive during the downgrade-fail regression.
+func assertRawTaskTerminalCleaned(t *testing.T, ctx context.Context, dataStore *Store, taskID string) {
+	t.Helper()
+	var status string
+	var finishedAt *time.Time
+	var leaseID *string
+	var configContent *string
+	var errMsg string
+	if err := dataStore.pool.QueryRow(ctx, `
+		SELECT status, finished_at, lease_id, config_content, COALESCE(error,'')
+		FROM tasks WHERE id=$1`, taskID).Scan(&status, &finishedAt, &leaseID, &configContent, &errMsg); err != nil {
+		t.Fatalf("read raw terminal task: %v", err)
+	}
+	if status != string(core.TaskFailed) {
+		t.Fatalf("raw terminal task status = %q, want %q", status, core.TaskFailed)
+	}
+	if finishedAt == nil {
+		t.Fatalf("raw terminal task finished_at is NULL")
+	}
+	if leaseID != nil && *leaseID != "" {
+		t.Fatalf("raw terminal task lease must be NULL, got %q", *leaseID)
+	}
+	if configContent != nil {
+		t.Fatalf("raw terminal task config_content must be NULL, got %q", *configContent)
+	}
+	if !strings.Contains(errMsg, core.AgentFeatureMihomoDevelopmentSource) || !strings.Contains(errMsg, "cannot be safely resumed") || !strings.Contains(errMsg, "unknown whether the previous Agent executed it") {
+		t.Fatalf("raw terminal task error = %q, want feature + safe-resume + unknown-outcome wording", errMsg)
+	}
+	if strings.Contains(errMsg, "was not executed") {
+		t.Fatalf("raw terminal task error must not claim the task was never executed: %q", errMsg)
 	}
 }
 

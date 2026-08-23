@@ -17,6 +17,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
+	"github.com/jackc/pgx/v5"
 	"github.com/qimaoww/qcontrolhub/internal/authn"
 	"github.com/qimaoww/qcontrolhub/internal/core"
 	"github.com/qimaoww/qcontrolhub/internal/store"
@@ -513,11 +514,12 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 	rejectedResponse.Body.Close()
 }
 
-// TestWSSMirrorFeatureDowngradeWithPostgreSQL verifies that an Agent whose
-// advertised features were downgraded below mihomo-development-source-v1 never
-// receives a pending mirror development install over the websocket. The task
-// stays pending instead of being silently delivered to an Agent that would fall
-// back to the official repository.
+// TestWSSMirrorFeatureDowngradeWithPostgreSQL verifies that a running mirror
+// development install, after the Agent's features are downgraded below
+// mihomo-development-source-v1, is neither resumed nor delivered over the
+// websocket. The running task is failed atomically with an unknown-outcome
+// reason and its lease released, instead of being sent to an Agent that would
+// fall back to the official repository.
 func TestWSSMirrorFeatureDowngradeWithPostgreSQL(t *testing.T) {
 	databaseURL := os.Getenv("QCH_TEST_DATABASE_URL")
 	if databaseURL == "" {
@@ -638,19 +640,46 @@ func TestWSSMirrorFeatureDowngradeWithPostgreSQL(t *testing.T) {
 	if err != nil || got.Status != core.TaskFailed {
 		t.Fatalf("mirror task after downgraded WSS connect = %+v, %v; want failed", got, err)
 	}
-	if got.FinishedAt.IsZero() {
-		t.Fatalf("mirror task after downgraded WSS connect has no finished_at: %+v", got)
+	assertRawTaskTerminalCleanAPI(t, ctx, databaseURL, mirror.ID)
+}
+
+// assertRawTaskTerminalCleanAPI reads the underlying tasks row directly and
+// asserts the terminal-state cleanup and unknown-outcome wording. GetTask does
+// not expose lease_id or config_content, so the raw columns must be checked
+// here to avoid a false positive during the downgrade-fail regression.
+func assertRawTaskTerminalCleanAPI(t *testing.T, ctx context.Context, databaseURL, taskID string) {
+	t.Helper()
+	connection, err := pgx.Connect(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("connect for raw terminal task: %v", err)
 	}
-	if got.LeaseID != "" {
-		t.Fatalf("mirror task after downgraded WSS connect still holds lease %q", got.LeaseID)
+	defer connection.Close(ctx)
+	var status string
+	var finishedAt *time.Time
+	var leaseID *string
+	var configContent *string
+	var errMsg string
+	if err := connection.QueryRow(ctx, `
+		SELECT status, finished_at, lease_id, config_content, COALESCE(error,'')
+		FROM tasks WHERE id=$1`, taskID).Scan(&status, &finishedAt, &leaseID, &configContent, &errMsg); err != nil {
+		t.Fatalf("read raw terminal task: %v", err)
 	}
-	if got.ConfigContent != "" {
-		t.Fatalf("mirror task after downgraded WSS connect left config_content = %q, want empty", got.ConfigContent)
+	if status != string(core.TaskFailed) {
+		t.Fatalf("raw terminal task status = %q, want %q", status, core.TaskFailed)
 	}
-	if !strings.Contains(got.Error, core.AgentFeatureMihomoDevelopmentSource) || !strings.Contains(got.Error, "cannot be safely resumed") || !strings.Contains(got.Error, "unknown whether the previous Agent executed it") {
-		t.Fatalf("mirror task after downgraded WSS connect error = %q, want feature + safe-resume + unknown-outcome wording", got.Error)
+	if finishedAt == nil {
+		t.Fatalf("raw terminal task finished_at is NULL")
 	}
-	if strings.Contains(got.Error, "was not executed") {
-		t.Fatalf("mirror task after downgraded WSS connect error must not claim never executed: %q", got.Error)
+	if leaseID != nil && *leaseID != "" {
+		t.Fatalf("raw terminal task lease must be NULL, got %q", *leaseID)
+	}
+	if configContent != nil {
+		t.Fatalf("raw terminal task config_content must be NULL, got %q", *configContent)
+	}
+	if !strings.Contains(errMsg, core.AgentFeatureMihomoDevelopmentSource) || !strings.Contains(errMsg, "cannot be safely resumed") || !strings.Contains(errMsg, "unknown whether the previous Agent executed it") {
+		t.Fatalf("raw terminal task error = %q, want feature + safe-resume + unknown-outcome wording", errMsg)
+	}
+	if strings.Contains(errMsg, "was not executed") {
+		t.Fatalf("raw terminal task error must not claim the task was never executed: %q", errMsg)
 	}
 }
