@@ -594,6 +594,21 @@ const presetAgents = [
       ]),
     ),
   },
+  {
+    id: "gamma",
+    name: "Gamma",
+    os: "linux",
+    arch: "amd64",
+    status: "online",
+    capabilities: presetEngines,
+    features: ["mihomo-development-source-v1"],
+    runtime: Object.fromEntries(
+      presetEngines.map((engine) => [
+        engine,
+        { installed: true, service_status: "active", version: "1.0.0" },
+      ]),
+    ),
+  },
 ];
 const presetState = {
   route: "agents",
@@ -684,6 +699,21 @@ try {
       "focused preset content has no redundant page introduction",
     );
     assert.equal(
+      presetMarkup.includes("data-development-source"),
+      true,
+      "preset version drawer exposes the Mihomo development source fieldset",
+    );
+    assert.equal(
+      presetMarkup.includes('value="mirror" disabled'),
+      true,
+      "legacy Agent mirror stays disabled",
+    );
+    assert.equal(
+      presetMarkup.includes("source-upgrade-note"),
+      true,
+      "legacy Agent shows the upgrade-source explanation",
+    );
+    assert.equal(
       (presetMarkup.match(/<article class="service-card service-/g) || [])
         .length,
       presetEngines.length,
@@ -707,7 +737,7 @@ try {
   assert.equal(presetState.route, "agents", "preset selection stays on agents");
   assert.deepEqual(
     presetLinks.map((link) => link.href),
-    ["#preset-node-alpha", "#preset-node-beta"],
+    ["#preset-node-alpha", "#preset-node-beta", "#preset-node-gamma"],
     "preset sidebar links target per-node preset anchors",
   );
   assert.equal(
@@ -720,6 +750,35 @@ try {
   presetState.data.selectedAgent = "beta";
   await renderPresetAgents({ overview: { agents: 2, agents_online: 2 } });
   assertFocusedPreset("beta", "alpha");
+
+  presetState.anchor = "preset-node-gamma";
+  presetState.data.selectedAgent = "gamma";
+  await renderPresetAgents({ overview: { agents: 3, agents_online: 3 } });
+  assert.equal(
+    presetWorkspaces.map((workspace) => workspace.id)[0],
+    "preset-node-gamma",
+    "feature-capable preset node is selected",
+  );
+  assert.equal(
+    presetMarkup.includes('value="mirror" disabled'),
+    false,
+    "source-capable Agent mirror is not disabled",
+  );
+  assert.equal(
+    presetMarkup.includes("source-upgrade-note"),
+    false,
+    "source-capable Agent hides the upgrade-source explanation",
+  );
+  assert.equal(
+    presetMarkup.includes('value="mirror"'),
+    true,
+    "source-capable Agent exposes the mirror option",
+  );
+  assert.equal(
+    presetMarkup.includes("data-development-source"),
+    true,
+    "source-capable Agent still exposes the source fieldset",
+  );
 } finally {
   if (previousDocument === undefined) delete globalThis.document;
   else globalThis.document = previousDocument;
