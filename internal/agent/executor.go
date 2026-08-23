@@ -736,61 +736,198 @@ func validateExistingSourceInvocation(ctx context.Context, engine core.Engine, s
 	return err
 }
 
-// validateNoRelativeSingBoxResources fails closed for sing-box file-bearing
-// resource forms. The official service form (-D dir) changes the working
-// directory before sing-box resolves such paths, so a relative path that
-// happens to resolve in the QAgent managed context would silently change
-// semantics instead of matching the original service. Typed local resources
-// are checked generically rather than by enumerating individual sections.
+// singBoxResourceKind distinguishes sing-box configuration fields whose value
+// is a regular file from fields whose value is a directory. The official sing-box
+// service form (-D dir) chdirs before it resolves any of these paths, so after
+// migration the QAgent managed unit runs with a different working directory and
+// a relative resource would silently resolve elsewhere.
+type singBoxResourceKind int
+
+const (
+	singBoxFileResource singBoxResourceKind = iota
+	singBoxDirectoryResource
+)
+
+func (k singBoxResourceKind) String() string {
+	if k == singBoxDirectoryResource {
+		return "directory"
+	}
+	return "file"
+}
+
+type singBoxResourceField struct {
+	key string
+	// kind is the kind of filesystem resource the field carries.
+	kind singBoxResourceKind
+	// allowLogSpecial permits the log.output literals stdout and stderr.
+	allowLogSpecial bool
+}
+
+// singBoxResourceFieldsByParent is the set of sing-box JSON fields that are
+// resolved as filesystem resources at runtime. The parent key identifies the
+// enclosing sing-box option object rather than relying on a suffix heuristic,
+// which would both miss fields such as experimental.clash_api.external_ui and
+// acme.data_directory and incorrectly treat URL fields named path as files.
+var singBoxResourceFieldsByParent = map[string][]singBoxResourceField{
+	"log": {
+		{key: "output", kind: singBoxFileResource, allowLogSpecial: true},
+	},
+	"tls": {
+		{key: "certificate_path", kind: singBoxFileResource},
+		{key: "key_path", kind: singBoxFileResource},
+		{key: "client_certificate_path", kind: singBoxFileResource},
+		{key: "client_key_path", kind: singBoxFileResource},
+	},
+	"acme": {
+		{key: "data_directory", kind: singBoxDirectoryResource},
+	},
+	"ech": {
+		{key: "key_path", kind: singBoxFileResource},
+		{key: "config_path", kind: singBoxFileResource},
+	},
+	"geoip": {
+		{key: "path", kind: singBoxFileResource},
+	},
+	"geosite": {
+		{key: "path", kind: singBoxFileResource},
+	},
+	"cache_file": {
+		{key: "path", kind: singBoxFileResource},
+	},
+	"clash_api": {
+		{key: "external_ui", kind: singBoxDirectoryResource},
+		{key: "cache_file", kind: singBoxFileResource},
+	},
+}
+
+// singBoxTypeResourceFields covers sing-box option objects that are identified
+// by their type discriminator rather than by a stable parent key, such as the
+// local rule set and the SSH and Tor outbounds.
+func singBoxTypeResourceFields(nodeType string) []singBoxResourceField {
+	switch nodeType {
+	case "local":
+		return []singBoxResourceField{{key: "path", kind: singBoxFileResource}}
+	case "ssh":
+		return []singBoxResourceField{{key: "private_key_path", kind: singBoxFileResource}}
+	case "tor":
+		return []singBoxResourceField{
+			{key: "executable_path", kind: singBoxFileResource},
+			{key: "data_directory", kind: singBoxDirectoryResource},
+		}
+	default:
+		return nil
+	}
+}
+
+// singBoxGlobalResourceFields are unambiguous filesystem resources wherever
+// they appear in a sing-box option object, such as a dialer protect socket.
+var singBoxGlobalResourceFields = []singBoxResourceField{
+	{key: "protect_path", kind: singBoxFileResource},
+}
+
+// validateNoRelativeSingBoxResources fails closed for every sing-box option field
+// that sing-box resolves against its working directory. By enumerating the
+// official option contract by enclosing object instead of matching a *_path
+// suffix, it also catches directory resources (external_ui, acme/tor
+// data_directory) and the string-list forms that sing-box accepts for client
+// certificates. A value may be a single string or an array of strings; every
+// path must be absolute or migration cannot preserve the original semantics.
 func validateNoRelativeSingBoxResources(content string) error {
-	var root map[string]any
+	var root any
 	if err := json.Unmarshal([]byte(content), &root); err != nil {
 		return err
 	}
-	var walk func(map[string]any) error
-	walk = func(node map[string]any) error {
-		if resourceType, ok := node["type"].(string); ok && resourceType == "local" {
-			path, hasPath := node["path"].(string)
-			if hasPath && path != "" && !filepath.IsAbs(path) {
-				return fmt.Errorf("relative sing-box local resource path %q cannot be migrated safely", path)
+	return validateSingBoxResourceNodes(root, "", "")
+}
+
+func validateSingBoxResourceNodes(value any, parentKey, nodeType string) error {
+	switch node := value.(type) {
+	case map[string]any:
+		if nodeType == "" {
+			if resourceType, ok := node["type"].(string); ok {
+				nodeType = resourceType
 			}
 		}
-		for key, value := range node {
-			switch key {
-			case "output":
-				// log.output accepts stdout, stderr, or an absolute file path.
-				if path, ok := value.(string); ok && path != "" && path != "stdout" && path != "stderr" && !filepath.IsAbs(path) {
-					return errors.New("relative sing-box resource path in log.output cannot be migrated safely")
-				}
-			case "path":
-				if path, ok := value.(string); ok && path != "" && !filepath.IsAbs(path) {
-					return fmt.Errorf("relative sing-box resource path in %s cannot be migrated safely", key)
-				}
-			default:
-				if strings.HasSuffix(key, "_path") {
-					if path, ok := value.(string); ok && path != "" && !filepath.IsAbs(path) {
-						return fmt.Errorf("relative sing-box resource path in %s cannot be migrated safely", key)
-					}
-				}
+		if nodeType == "inbounds" || nodeType == "outbounds" || nodeType == "rule_set" ||
+			nodeType == "endpoints" || nodeType == "http_clients" ||
+			nodeType == "certificate_providers" || nodeType == "services" {
+			// A map that is an array element of a named option collection must
+			// derive its discriminator from its own type field, not from the
+			// collection key passed down from its parent.
+			nodeType = ""
+			if resourceType, ok := node["type"].(string); ok {
+				nodeType = resourceType
 			}
-			switch child := value.(type) {
-			case map[string]any:
-				if err := walk(child); err != nil {
+		}
+		for _, field := range singBoxResourceFieldsByParent[parentKey] {
+			if raw, ok := node[field.key]; ok {
+				if err := checkSingBoxResourceField(field, raw); err != nil {
 					return err
 				}
-			case []any:
-				for _, item := range child {
-					if object, ok := item.(map[string]any); ok {
-						if err := walk(object); err != nil {
-							return err
-						}
-					}
+			}
+		}
+		for _, field := range singBoxTypeResourceFields(nodeType) {
+			if raw, ok := node[field.key]; ok {
+				if err := checkSingBoxResourceField(field, raw); err != nil {
+					return err
 				}
+			}
+		}
+		for _, field := range singBoxGlobalResourceFields {
+			if raw, ok := node[field.key]; ok {
+				if err := checkSingBoxResourceField(field, raw); err != nil {
+					return err
+				}
+			}
+		}
+		for key, child := range node {
+			if err := validateSingBoxResourceNodes(child, key, ""); err != nil {
+				return err
+			}
+		}
+	case []any:
+		for _, item := range node {
+			if err := validateSingBoxResourceNodes(item, parentKey, ""); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func checkSingBoxResourceField(field singBoxResourceField, value any) error {
+	check := func(path string) error {
+		if path == "" {
+			return nil
+		}
+		if field.allowLogSpecial && (path == "stdout" || path == "stderr") {
+			return nil
+		}
+		if filepath.IsAbs(path) {
+			return nil
+		}
+		return fmt.Errorf("relative sing-box %s resource path in %s (%q) cannot be migrated safely", field.kind, field.key, path)
+	}
+	switch raw := value.(type) {
+	case string:
+		return check(raw)
+	case []any:
+		for _, item := range raw {
+			path, ok := item.(string)
+			if !ok {
+				return fmt.Errorf("sing-box resource field %q contains a non-string element", field.key)
+			}
+			if err := check(path); err != nil {
+				return err
 			}
 		}
 		return nil
+	default:
+		// A non-string value is a type error caught by sing-box's own strict
+		// option unmarshal; it is not a path that can drift with the working
+		// directory, so it is left for the real core validation to reject.
+		return nil
 	}
-	return walk(root)
 }
 
 // ReadCurrentConfig returns an exact, real-core-validated snapshot for explicit

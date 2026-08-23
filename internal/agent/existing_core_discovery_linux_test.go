@@ -335,8 +335,14 @@ func TestValidateExistingSourceInvocationPassesOriginalWorkingDirectory(t *testi
 
 func TestExistingCoreDiscoveryRejectsOfficialSingBoxRelativeResource(t *testing.T) {
 	tests := map[string]string{
-		"log output":     `{"log":{"output":"relative.log"}}`,
-		"local rule set": `{"route":{"rule_set":[{"type":"local","tag":"geo","format":"binary","path":"ruleset.srs"}]}}`,
+		"log output":               `{"log":{"output":"relative.log"}}`,
+		"local rule set":           `{"route":{"rule_set":[{"type":"local","tag":"geo","format":"binary","path":"ruleset.srs"}]}}`,
+		"clash external ui":        `{"experimental":{"clash_api":{"external_ui":"dashboard"}}}`,
+		"acme data directory":      `{"inbounds":[{"type":"trojan","listen":"127.0.0.1","listen_port":443,"users":[{"password":"testpw"}],"tls":{"enabled":true,"certificate_path":"/etc/cert.pem","key_path":"/etc/key.pem","acme":{"data_directory":"acme-data"}}}]}`,
+		"client cert path array":   `{"inbounds":[{"type":"trojan","listen":"127.0.0.1","listen_port":443,"users":[{"password":"testpw"}],"tls":{"enabled":true,"certificate_path":"/etc/cert.pem","key_path":"/etc/key.pem","client_certificate_path":["client.pem"]}}]}`,
+		"ssh private key path":     `{"outbounds":[{"type":"ssh","server":"example.com","server_port":22,"user":"root","private_key_path":"id_ed25519"}]}`,
+		"tor data directory":       `{"outbounds":[{"type":"tor","server":"127.0.0.1","server_port":9050,"data_directory":"tor-data"}]}`,
+		"outbound ech config path": `{"outbounds":[{"type":"vless","server":"example.com","server_port":443,"uuid":"abc","tls":{"enabled":true,"ech":{"config_path":"ech.json"}}}]}`,
 	}
 	for name, fragment := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -379,43 +385,52 @@ func TestExistingCoreDiscoveryRejectsOfficialSingBoxRelativeResource(t *testing.
 }
 
 func TestExistingCoreDiscoveryAcceptsOfficialSingBoxAbsoluteLocalResource(t *testing.T) {
-	fixture := newExistingCoreDiscoveryFixture(t)
-	workDirectory := filepath.Join(fixture.root, "work")
-	configDirectory := filepath.Join(fixture.root, "etc-sing-box")
-	for _, directory := range []string{workDirectory, configDirectory} {
-		if err := os.MkdirAll(directory, 0o700); err != nil {
-			t.Fatal(err)
-		}
+	tests := map[string]string{
+		"absolute local rule set path":      `{"route":{"rule_set":[{"type":"local","tag":"geo","format":"binary","path":"/etc/sing-box/ruleset.srs"}]}}`,
+		"absolute clash external ui":        `{"experimental":{"clash_api":{"external_ui":"/srv/sing-box/dashboard"}}}`,
+		"absolute acme data directory":      `{"inbounds":[{"type":"trojan","listen":"127.0.0.1","listen_port":443,"users":[{"password":"testpw"}],"tls":{"enabled":true,"certificate_path":"/etc/cert.pem","key_path":"/etc/key.pem","acme":{"data_directory":"/var/lib/acme"}}}]}`,
+		"absolute client cert path array":   `{"inbounds":[{"type":"trojan","listen":"127.0.0.1","listen_port":443,"users":[{"password":"testpw"}],"tls":{"enabled":true,"certificate_path":"/etc/cert.pem","key_path":"/etc/key.pem","client_certificate_path":["/etc/client.pem"]}}]}`,
+		"absolute ssh private key path":     `{"outbounds":[{"type":"ssh","server":"example.com","server_port":22,"user":"root","private_key_path":"/etc/sing-box/id_ed25519"}]}`,
+		"absolute tor data directory":       `{"outbounds":[{"type":"tor","server":"127.0.0.1","server_port":9050,"data_directory":"/var/lib/tor"}]}`,
+		"absolute outbound ech config path": `{"outbounds":[{"type":"vless","server":"example.com","server_port":443,"uuid":"abc","tls":{"enabled":true,"ech":{"config_path":"/etc/sing-box/ech.json"}}}]}`,
 	}
-	localResource := filepath.Join(workDirectory, "ruleset.srs")
-	if err := os.WriteFile(localResource, []byte("ruleset"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	configPath := filepath.Join(configDirectory, "config.json")
-	if err := os.WriteFile(configPath, []byte(`{"inbounds":[]}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(configDirectory, "10-resource.json"), []byte(fmt.Sprintf(`{"route":{"rule_set":[{"type":"local","tag":"geo","format":"binary","path":%q}]}}`, localResource)), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	existingDiscoveryCandidates[core.EngineSingBox] = existingDiscoveryCandidateSet{
-		services:    []string{"sing-box.service", "singbox.service"},
-		executables: []string{fixture.serviceBinary},
-		configs:     []string{configPath},
-	}
-	official := fixture.serviceBinary + " -D " + workDirectory + " -C " + configDirectory + " run"
-	fixture.writeExecStart(t, "sing-box.service", systemdExecStart(fixture.serviceBinary, official))
-	fixture.writeExecStart(t, "singbox.service", systemdExecStart(fixture.serviceBinary, official))
+	for name, fragment := range tests {
+		t.Run(name, func(t *testing.T) {
+			fixture := newExistingCoreDiscoveryFixture(t)
+			workDirectory := filepath.Join(fixture.root, "work")
+			configDirectory := filepath.Join(fixture.root, "etc-sing-box")
+			for _, directory := range []string{workDirectory, configDirectory} {
+				if err := os.MkdirAll(directory, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			configPath := filepath.Join(configDirectory, "config.json")
+			if err := os.WriteFile(configPath, []byte(`{"inbounds":[]}`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(configDirectory, "10-resource.json"), []byte(fragment), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			existingDiscoveryCandidates[core.EngineSingBox] = existingDiscoveryCandidateSet{
+				services:    []string{"sing-box.service", "singbox.service"},
+				executables: []string{fixture.serviceBinary},
+				configs:     []string{configPath},
+			}
+			official := fixture.serviceBinary + " -D " + workDirectory + " -C " + configDirectory + " run"
+			fixture.writeExecStart(t, "sing-box.service", systemdExecStart(fixture.serviceBinary, official))
+			fixture.writeExecStart(t, "singbox.service", systemdExecStart(fixture.serviceBinary, official))
 
-	specs, issues, err := RefreshExistingCoreDiscovery(
-		context.Background(), fixture.discoveryStatePath, fixture.markerPrefix,
-		fixture.managedSpecs, nil,
-	)
-	if err != nil {
-		t.Fatalf("accept official sing-box absolute local resource: %v", err)
-	}
-	if len(issues) != 0 || specs[core.EngineSingBox].Service != "sing-box.service" {
-		t.Fatalf("absolute official sing-box local resource was rejected: specs=%+v issues=%+v", specs, issues)
+			specs, issues, err := RefreshExistingCoreDiscovery(
+				context.Background(), fixture.discoveryStatePath, fixture.markerPrefix,
+				fixture.managedSpecs, nil,
+			)
+			if err != nil {
+				t.Fatalf("accept official sing-box absolute resource: %v", err)
+			}
+			if len(issues) != 0 || specs[core.EngineSingBox].Service != "sing-box.service" {
+				t.Fatalf("absolute official sing-box resource was rejected: specs=%+v issues=%+v", specs, issues)
+			}
+		})
 	}
 }
 
@@ -760,7 +775,7 @@ func TestExistingCoreDiscoveryReportsAmbiguousAndUnsupportedServices(t *testing.
 				return os.WriteFile(filepath.Join(fixture.stateDirectory, "qagent-sing-box.service.Environment"), []byte("QCH_UNEXPECTED=1\n"), 0o600)
 			},
 			"environment file": func(fixture existingCoreDiscoveryFixture) error {
-				return os.WriteFile(filepath.Join(fixture.stateDirectory, "qagent-sing-box.service.EnvironmentFile"), []byte("/etc/qagent/unexpected.env\n"), 0o600)
+				return os.WriteFile(filepath.Join(fixture.stateDirectory, "qagent-sing-box.service.EnvironmentFiles"), []byte("/etc/qagent/unexpected.env\n"), 0o600)
 			},
 			"working directory": func(fixture existingCoreDiscoveryFixture) error {
 				return os.WriteFile(filepath.Join(fixture.stateDirectory, "qagent-sing-box.service.WorkingDirectory"), []byte("/other\n"), 0o600)
@@ -844,6 +859,38 @@ func TestExistingCoreDiscoveryReportsAmbiguousAndUnsupportedServices(t *testing.
 			t.Fatalf("project-managed drop-ins were rejected: specs=%+v issues=%+v", specs, issues)
 		}
 	})
+}
+
+func TestExistingCoreDiscoveryRejectsEnvironmentFileDropIn(t *testing.T) {
+	fixture := newExistingCoreDiscoveryFixture(t)
+	fixture.writeStatus(t, "qagent-sing-box.service", "active")
+	dropInPath := filepath.Join(existingDiscoveryManagedUnitRoot, "qagent-sing-box.service.d", "50-unexpected-env.conf")
+	if err := os.MkdirAll(filepath.Dir(dropInPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dropInPath, []byte("[Service]\nEnvironmentFile=/etc/qagent/unexpected.env\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// daemon-reload applies the drop-in, so systemd's effective EnvironmentFiles
+	// property becomes non-empty even though the singular EnvironmentFile property
+	// does not exist in systemd's D-Bus interface.
+	if err := os.WriteFile(filepath.Join(fixture.stateDirectory, "qagent-sing-box.service.DropInPaths"), []byte(dropInPath+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(fixture.stateDirectory, "qagent-sing-box.service.EnvironmentFiles"), []byte("/etc/qagent/unexpected.env\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	specs, issues, err := RefreshExistingCoreDiscovery(
+		context.Background(), fixture.discoveryStatePath, fixture.markerPrefix,
+		fixture.managedSpecs, nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(specs) != 0 || !strings.Contains(issues[core.EngineSingBox], "安全 unit") {
+		t.Fatalf("EnvironmentFile= drop-in discovery = specs %+v issues %+v", specs, issues)
+	}
 }
 
 func TestExistingCoreDiscoveryManualMappingWinsAndStatePermissionsFailClosed(t *testing.T) {
@@ -952,7 +999,7 @@ func newExistingCoreDiscoveryFixture(t *testing.T) existingCoreDiscoveryFixture 
 		t.Fatal(err)
 	}
 	fakeSystemctl := filepath.Join(root, "fake-systemctl")
-	script := "#!/bin/sh\nset -eu\nstate=" + shellQuote(stateDirectory) + "\ncommand=$1\nshift\nservice=$1\nshift\ncase \"$command\" in\n  is-active) value=$(cat \"$state/$service.active\"); printf '%s\\n' \"$value\"; [ \"$value\" = active ] ;;\n  is-enabled) value=$(cat \"$state/$service.enabled\"); printf '%s\\n' \"$value\"; [ \"$value\" = enabled ] ;;\n  show) property=ExecStart; for argument in \"$@\"; do case \"$argument\" in --property=*) property=${argument#--property=} ;; esac; done; case \"$property\" in ExecStart) if [ \"$service\" = qagent-sing-box.service ]; then cat \"$state/$service.managed-exec-start\"; else cat \"$state/$service.exec-start\"; fi ;; LoadState) cat \"$state/$service.load-state\" ;; FragmentPath) cat \"$state/$service.fragment-path\" ;; Description|User|Group) cat \"$state/$service.$(printf '%s' \"$property\" | tr '[:upper:]' '[:lower:]')\" ;; Type|WorkingDirectory|RootDirectory|RootImage|BindPaths|BindReadOnlyPaths|Environment|EnvironmentFile|DropInPaths) cat \"$state/$service.$property\" ;; ExecCondition|ExecStartPre|ExecStartPost|ExecReload|ExecStop|ExecStopPost) cat \"$state/$service.$property\" ;; *) exit 1 ;; esac ;;\n  *) exit 1 ;;\nesac\n"
+	script := "#!/bin/sh\nset -eu\nstate=" + shellQuote(stateDirectory) + "\ncommand=$1\nshift\nservice=$1\nshift\ncase \"$command\" in\n  is-active) value=$(cat \"$state/$service.active\"); printf '%s\\n' \"$value\"; [ \"$value\" = active ] ;;\n  is-enabled) value=$(cat \"$state/$service.enabled\"); printf '%s\\n' \"$value\"; [ \"$value\" = enabled ] ;;\n  show) property=ExecStart; for argument in \"$@\"; do case \"$argument\" in --property=*) property=${argument#--property=} ;; esac; done; case \"$property\" in ExecStart) if [ \"$service\" = qagent-sing-box.service ]; then cat \"$state/$service.managed-exec-start\"; else cat \"$state/$service.exec-start\"; fi ;; LoadState) cat \"$state/$service.load-state\" ;; FragmentPath) cat \"$state/$service.fragment-path\" ;; Description|User|Group) cat \"$state/$service.$(printf '%s' \"$property\" | tr '[:upper:]' '[:lower:]')\" ;; Type|WorkingDirectory|RootDirectory|RootImage|BindPaths|BindReadOnlyPaths|Environment|EnvironmentFiles|DropInPaths) cat \"$state/$service.$property\" ;; ExecCondition|ExecStartPre|ExecStartPost|ExecReload|ExecStop|ExecStopPost) cat \"$state/$service.$property\" ;; *) exit 1 ;; esac ;;\n  *) exit 1 ;;\nesac\n"
 	if err := os.WriteFile(fakeSystemctl, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -1021,7 +1068,7 @@ func newExistingCoreDiscoveryFixture(t *testing.T) existingCoreDiscoveryFixture 
 		"BindPaths":         "\n",
 		"BindReadOnlyPaths": "\n",
 		"Environment":       "\n",
-		"EnvironmentFile":   "\n",
+		"EnvironmentFiles":  "\n",
 		"DropInPaths":       "\n",
 	} {
 		if err := os.WriteFile(filepath.Join(stateDirectory, "qagent-sing-box.service."+property), []byte(value), 0o600); err != nil {

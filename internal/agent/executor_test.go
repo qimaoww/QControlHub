@@ -271,3 +271,103 @@ func TestExecutorRejectsUnsafeTasksAndPaths(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateNoRelativeSingBoxResourcesContract(t *testing.T) {
+	t.Parallel()
+	tests := map[string]struct {
+		contents string
+		wantErr  bool
+	}{
+		"relative clash external ui": {
+			contents: `{"experimental":{"clash_api":{"external_ui":"dashboard"}}}`,
+			wantErr:  true,
+		},
+		"absolute clash external ui": {
+			contents: `{"experimental":{"clash_api":{"external_ui":"/srv/sing-box/dashboard"}}}`,
+			wantErr:  false,
+		},
+		"relative acme data directory": {
+			contents: `{"inbounds":[{"type":"trojan","listen":"127.0.0.1","listen_port":443,"users":[{"password":"testpw"}],"tls":{"enabled":true,"certificate_path":"/etc/cert.pem","key_path":"/etc/key.pem","acme":{"data_directory":"acme-data"}}}]}`,
+			wantErr:  true,
+		},
+		"absolute acme data directory": {
+			contents: `{"inbounds":[{"type":"trojan","listen":"127.0.0.1","listen_port":443,"users":[{"password":"testpw"}],"tls":{"enabled":true,"certificate_path":"/etc/cert.pem","key_path":"/etc/key.pem","acme":{"data_directory":"/var/lib/acme"}}}]}`,
+			wantErr:  false,
+		},
+		"relative client certificate path array": {
+			contents: `{"inbounds":[{"type":"trojan","listen":"127.0.0.1","listen_port":443,"users":[{"password":"testpw"}],"tls":{"enabled":true,"certificate_path":"/etc/cert.pem","key_path":"/etc/key.pem","client_certificate_path":["client.pem","ca.pem"]}}]}`,
+			wantErr:  true,
+		},
+		"absolute client certificate path array": {
+			contents: `{"inbounds":[{"type":"trojan","listen":"127.0.0.1","listen_port":443,"users":[{"password":"testpw"}],"tls":{"enabled":true,"certificate_path":"/etc/cert.pem","key_path":"/etc/key.pem","client_certificate_path":["/etc/client.pem","/etc/ca.pem"]}}]}`,
+			wantErr:  false,
+		},
+		"relative inbound certificate path": {
+			contents: `{"inbounds":[{"type":"trojan","listen":"127.0.0.1","listen_port":443,"users":[{"password":"testpw"}],"tls":{"enabled":true,"certificate_path":"cert.pem","key_path":"/etc/key.pem"}}]}`,
+			wantErr:  true,
+		},
+		"relative outbound ech config path": {
+			contents: `{"outbounds":[{"type":"vless","server":"example.com","server_port":443,"uuid":"abc","tls":{"enabled":true,"ech":{"config_path":"ech.json"}}}]}`,
+			wantErr:  true,
+		},
+		"relative local rule set path": {
+			contents: `{"route":{"rule_set":[{"type":"local","tag":"geo","format":"binary","path":"ruleset.srs"}]}}`,
+			wantErr:  true,
+		},
+		"absolute local rule set path": {
+			contents: `{"route":{"rule_set":[{"type":"local","tag":"geo","format":"binary","path":"/etc/sing-box/ruleset.srs"}]}}`,
+			wantErr:  false,
+		},
+		"relative ssh private key": {
+			contents: `{"outbounds":[{"type":"ssh","server":"example.com","server_port":22,"user":"root","private_key_path":"id_ed25519"}]}`,
+			wantErr:  true,
+		},
+		"relative tor executable": {
+			contents: `{"outbounds":[{"type":"tor","server":"127.0.0.1","server_port":9050,"executable_path":"./tor"}]}`,
+			wantErr:  true,
+		},
+		"relative dialer protect path": {
+			contents: `{"outbounds":[{"type":"direct","protect_path":"protect.sock"}]}`,
+			wantErr:  true,
+		},
+		"relative geoip path": {
+			contents: `{"route":{"geoip":{"path":"geoip.db"}}}`,
+			wantErr:  true,
+		},
+		"relative cache file path": {
+			contents: `{"experimental":{"cache_file":{"enabled":true,"path":"cache.db"}}}`,
+			wantErr:  true,
+		},
+		"log output stdout accepted": {
+			contents: `{"log":{"output":"stdout"}}`,
+			wantErr:  false,
+		},
+		"log output stderr accepted": {
+			contents: `{"log":{"output":"stderr"}}`,
+			wantErr:  false,
+		},
+		"log output relative rejected": {
+			contents: `{"log":{"output":"relative.log"}}`,
+			wantErr:  true,
+		},
+		"log output absolute accepted": {
+			contents: `{"log":{"output":"/var/log/sing-box.log"}}`,
+			wantErr:  false,
+		},
+		"http transport url path not treated as file": {
+			contents: `{"outbounds":[{"type":"http","server":"example.com","server_port":8080,"path":"/proxy"}]}`,
+			wantErr:  false,
+		},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			err := validateNoRelativeSingBoxResources(tt.contents)
+			if tt.wantErr && err == nil {
+				t.Fatalf("validateNoRelativeSingBoxResources() accepted a relative resource:\n%s", tt.contents)
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("validateNoRelativeSingBoxResources() rejected an absolute resource: %v\n%s", err, tt.contents)
+			}
+		})
+	}
+}

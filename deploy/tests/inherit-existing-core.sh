@@ -49,7 +49,7 @@ case "$command" in
 	      Description) cat "$FAKE_SYSTEMCTL_QAGENT_DESCRIPTION" ;;
 	      User) cat "$FAKE_SYSTEMCTL_QAGENT_USER" ;;
 	      Group) cat "$FAKE_SYSTEMCTL_QAGENT_GROUP" ;;
-	      Type|WorkingDirectory|RootDirectory|RootImage|BindPaths|BindReadOnlyPaths|Environment|EnvironmentFile|DropInPaths) cat "$FAKE_SYSTEMCTL_STATE/qagent-$property" ;;
+	      Type|WorkingDirectory|RootDirectory|RootImage|BindPaths|BindReadOnlyPaths|Environment|EnvironmentFiles|DropInPaths) cat "$FAKE_SYSTEMCTL_STATE/qagent-$property" ;;
 	      ExecCondition|ExecStartPre|ExecStartPost|ExecReload|ExecStop|ExecStopPost) cat "$FAKE_SYSTEMCTL_STATE/qagent-$property" ;;
       *) exit 1 ;;
     esac
@@ -335,7 +335,7 @@ for hook in ExecCondition ExecStartPre ExecStartPost ExecReload ExecStop ExecSto
 done
 printf '%s\n' simple > "$FAKE_SYSTEMCTL_STATE/qagent-Type"
 printf '%s\n' /var/lib/qcontrolhub-xray > "$FAKE_SYSTEMCTL_STATE/qagent-WorkingDirectory"
-for property in RootDirectory RootImage BindPaths BindReadOnlyPaths Environment EnvironmentFile DropInPaths; do
+for property in RootDirectory RootImage BindPaths BindReadOnlyPaths Environment EnvironmentFiles DropInPaths; do
   : > "$FAKE_SYSTEMCTL_STATE/qagent-$property"
 done
 qagent_core_service_is_safe_to_disable xray "$managed_unit" || {
@@ -360,7 +360,7 @@ printf '%s\n' qcontrolhub-core > "$FAKE_SYSTEMCTL_QAGENT_USER"
 printf '%s\n' /bin/true > "$FAKE_SYSTEMCTL_STATE/qagent-ExecStartPre"
 expect_rejected effective-start-pre-hook qagent_core_service_is_safe_owned xray "$managed_unit"
 : > "$FAKE_SYSTEMCTL_STATE/qagent-ExecStartPre"
-for property in RootDirectory BindReadOnlyPaths Environment EnvironmentFile; do
+for property in RootDirectory BindReadOnlyPaths Environment EnvironmentFiles; do
   printf '%s\n' unexpected > "$FAKE_SYSTEMCTL_STATE/qagent-$property"
   expect_rejected "effective-$property" qagent_core_service_is_safe_owned xray "$managed_unit"
   : > "$FAKE_SYSTEMCTL_STATE/qagent-$property"
@@ -382,6 +382,9 @@ qagent_core_service_is_safe_owned xray "$managed_unit" || {
   printf '%s\n' 'project-managed capability/log drop-ins were rejected' >&2
   exit 1
 }
+printf '%s\n' '/etc/qcontrolhub/unexpected.env' > "$FAKE_SYSTEMCTL_STATE/qagent-EnvironmentFiles"
+expect_rejected effective-environment-files-drop-in qagent_core_service_is_safe_owned xray "$managed_unit"
+: > "$FAKE_SYSTEMCTL_STATE/qagent-EnvironmentFiles"
 unknown_drop_in="$drop_in_directory/99-unknown.conf"
 printf '%s\n' '[Service]' 'Environment=QCH_UNEXPECTED=1' > "$unknown_drop_in"
 printf '%s\n' "$unknown_drop_in" > "$FAKE_SYSTEMCTL_STATE/qagent-DropInPaths"
