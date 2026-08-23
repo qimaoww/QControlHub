@@ -4,6 +4,16 @@ import {
   createRefreshChannel,
 } from "./refresh.js";
 
+export function developmentSourceVisible(engine, channel) {
+  return engine === "mihomo" && channel === "development";
+}
+
+export function coreSourceForInstall(engine, channel, rawSource) {
+  return developmentSourceVisible(engine, channel)
+    ? rawSource || "official"
+    : undefined;
+}
+
 export function nodeCardDropIndex(rects, pointer, grabOffset = { x: 0, y: 0 }) {
   if (!rects.length) return 0;
   const x = pointer.x - grabOffset.x;
@@ -325,6 +335,9 @@ async function nodeSettings(presetMode = false, { overview: preloadedOverview } 
               ? `${access.address}:${port}`
               : access?.address || "";
           const installed = Boolean(runtime.installed);
+          const canMirror = (agent.features || []).includes(
+            "mihomo-development-source-v1",
+          );
           const serviceState = installed
             ? serviceStatusName(runtime.service_status)
             : "未安装";
@@ -352,7 +365,7 @@ async function nodeSettings(presetMode = false, { overview: preloadedOverview } 
                 <div class="core-runtime-version"><small>当前版本</small><strong data-core-version="${esc(engine)}" title="${esc(installed ? runtime.version || "版本未知" : "尚未安装")}">${esc(installed ? conciseVersion(engine, runtime.version) : "尚未安装")}</strong></div>
                 <div class="core-runtime-actions">${runtimeActions ? `<div class="core-action-group" aria-label="${esc(engineName(engine))} 服务操作">${runtimeActions}</div>` : ""}<button class="button small ${installed ? "" : "primary"}" type="button" data-open-version-form>${installed ? "版本" : "安装"}</button></div>
               </div>
-              <details class="core-version-panel version-drawer"><summary><b>${installed ? "版本管理" : `安装 ${esc(engineName(engine))}`}</b><span>收起</span></summary><div class="runtime-drawer-body"><form class="core-version-form" data-version-agent="${esc(agent.id)}" data-version-engine="${esc(engine)}"><fieldset class="release-channel-fieldset"><legend>版本来源</legend><div class="release-channel-options"><label><input type="radio" name="release_channel" value="stable" checked><span>最新稳定版</span></label><label><input type="radio" name="release_channel" value="development"><span>最新开发版</span></label><label><input type="radio" name="release_channel" value="custom"><span>指定版本</span></label></div></fieldset><label class="custom-version-field"><span>指定版本</span><input name="custom_version" maxlength="64" autocomplete="off" placeholder="例如 1.19.29"></label><button class="button small" type="submit" ${agent.status !== "online" || !can("operator") ? "disabled" : ""}>${installed ? "升级或切换版本" : "安装内核"}</button><small>${installed ? "官方 Release · SHA-256 校验" : "安装至 QAgent 专用目录，不影响系统已有内核"}</small></form></div></details>
+              <details class="core-version-panel version-drawer"><summary><b>${installed ? "版本管理" : `安装 ${esc(engineName(engine))}`}</b><span>收起</span></summary><div class="runtime-drawer-body"><form class="core-version-form" data-version-agent="${esc(agent.id)}" data-version-engine="${esc(engine)}"><fieldset class="release-channel-fieldset"><legend>版本来源</legend><div class="release-channel-options"><label><input type="radio" name="release_channel" value="stable" checked><span>最新稳定版</span></label><label><input type="radio" name="release_channel" value="development"><span>最新开发版</span></label><label><input type="radio" name="release_channel" value="custom"><span>指定版本</span></label></div></fieldset><fieldset class="release-channel-fieldset development-source-field" data-development-source hidden><legend>开发版来源</legend><div class="release-channel-options"><label><input type="radio" name="core_source" value="official" checked><span>MetaCubeX 官方（默认，推荐）</span></label><label><input type="radio" name="core_source" value="mirror" ${canMirror ? "" : "disabled"}><span>vernesong/mihomo Alpha 镜像（第三方）${canMirror ? "" : "（需升级 Agent）"}</span></label></div></fieldset><label class="custom-version-field"><span>指定版本</span><input name="custom_version" maxlength="64" autocomplete="off" placeholder="例如 1.19.29"></label><button class="button small" type="submit" ${agent.status !== "online" || !can("operator") ? "disabled" : ""}>${installed ? "升级或切换版本" : "安装内核"}</button><small>${installed ? "Release · SHA-256 校验" : "安装至 QAgent 专用目录，不影响系统已有内核 · Release · SHA-256 校验"}</small></form></div></details>
             </article>`;
           }
           return `<article class="service-card service-${esc(engine)}" data-refresh-key="service-${esc(engine)}" data-core-installed="${installed ? 1 : 0}">
@@ -361,7 +374,7 @@ async function nodeSettings(presetMode = false, { overview: preloadedOverview } 
               ${presetMode ? `<div class="service-deployment"><dl class="service-facts"><div><dt>已部署配置</dt><dd>${deployed?.config_version ? `v${deployed.config_version}` : "—"}</dd></div><div><dt>已保存配置</dt><dd>${saved?.version ? `v${saved.version}` : "—"}</dd></div></dl>${drift ? `<div class="deployment-drift"><span>${deployed ? "已保存版本尚未部署" : "已保存配置尚未部署"}</span><b>待部署 v${saved.version}</b></div>` : ""}${configDiff ? `<details class="config-diff-drawer"><summary>查看配置差异 <i>＋</i></summary>${configDiff}</details>` : ""}<div class="service-endpoint ${endpoint ? "" : "empty"}">${endpoint ? `<span><b>${esc(firstProfile?.protocol || "客户端入站")}</b><small>${esc(firstProfile?.profile?.format || "已部署配置")}</small></span><code>${esc(endpoint)}</code>` : `<b>${deployed ? "自定义配置" : saved ? "尚未部署" : "尚未配置"}</b>`}</div></div>` : ""}
               ${primaryActions ? `<div class="service-primary-action">${primaryActions}</div>` : ""}
             </div>
-            ${presetMode ? "" : `<details class="runtime-drawer version-drawer"><summary><span><b>${installed ? "版本切换" : "安装内核"}</b><small>${installed ? "升级或切换内核版本" : "从官方 Release 安装"}</small></span><i>＋</i></summary><div class="runtime-drawer-body"><form class="core-version-form" data-version-agent="${esc(agent.id)}" data-version-engine="${esc(engine)}"><fieldset class="release-channel-fieldset"><legend>版本来源</legend><div class="release-channel-options"><label><input type="radio" name="release_channel" value="stable" checked><span>最新稳定版</span></label><label><input type="radio" name="release_channel" value="development"><span>最新开发版</span></label><label><input type="radio" name="release_channel" value="custom"><span>指定版本</span></label></div></fieldset><label class="custom-version-field"><span>指定版本</span><input name="custom_version" maxlength="64" autocomplete="off" placeholder="例如 1.19.29"></label><button class="button small" type="submit" ${agent.status !== "online" || !can("operator") ? "disabled" : ""}>${installed ? "升级或切换版本" : "安装内核"}</button><small>${installed ? "官方 Release · SHA-256 校验" : "安装至 QAgent 专用目录，不影响系统已有内核"}</small></form></div></details>`}
+            ${presetMode ? "" : `<details class="runtime-drawer version-drawer"><summary><span><b>${installed ? "版本切换" : "安装内核"}</b><small>${installed ? "升级或切换内核版本" : "从 Release 安装"}</small></span><i>＋</i></summary><div class="runtime-drawer-body"><form class="core-version-form" data-version-agent="${esc(agent.id)}" data-version-engine="${esc(engine)}"><fieldset class="release-channel-fieldset"><legend>版本来源</legend><div class="release-channel-options"><label><input type="radio" name="release_channel" value="stable" checked><span>最新稳定版</span></label><label><input type="radio" name="release_channel" value="development"><span>最新开发版</span></label><label><input type="radio" name="release_channel" value="custom"><span>指定版本</span></label></div></fieldset><fieldset class="release-channel-fieldset development-source-field" data-development-source hidden><legend>开发版来源</legend><div class="release-channel-options"><label><input type="radio" name="core_source" value="official" checked><span>MetaCubeX 官方（默认，推荐）</span></label><label><input type="radio" name="core_source" value="mirror" ${canMirror ? "" : "disabled"}><span>vernesong/mihomo Alpha 镜像（第三方）${canMirror ? "" : "（需升级 Agent）"}</span></label></div></fieldset><label class="custom-version-field"><span>指定版本</span><input name="custom_version" maxlength="64" autocomplete="off" placeholder="例如 1.19.29"></label><button class="button small" type="submit" ${agent.status !== "online" || !can("operator") ? "disabled" : ""}>${installed ? "升级或切换版本" : "安装内核"}</button><small>${installed ? "Release · SHA-256 校验" : "安装至 QAgent 专用目录，不影响系统已有内核 · Release · SHA-256 校验"}</small></form></div></details>`}
             ${presetMode && access?.profiles?.length ? `<a class="service-client-access" href="#client-access" data-client-agent="${esc(agent.id)}" data-client-engine="${esc(engine)}"><span><b>客户端配置</b><small>${esc(access.source)} · ${esc(access.address)}</small></span><strong>${access.profiles.length} 个入站 <i>→</i></strong></a>` : ""}
           </article>`;
         })
@@ -825,21 +838,31 @@ function bindAgentPage(agentItems, presetMode = false) {
       event.preventDefault();
       const values = new FormData(form);
       const channel = values.get("release_channel");
+      const engine = form.dataset.versionEngine;
       const version =
         channel === "custom" ? values.get("custom_version") : channel;
+      const payload = {
+        agent_id: form.dataset.versionAgent,
+        engine,
+        action: "install",
+        core_version: version,
+      };
+      const source = coreSourceForInstall(engine, channel, values.get("core_source"));
+      if (source !== undefined) payload.core_source = source;
+      const sourceNote =
+        payload.core_source === "mirror"
+          ? "来源：vernesong/mihomo Alpha 镜像（第三方）。"
+          : payload.core_source === "official"
+            ? "来源：MetaCubeX/mihomo 官方（默认）。"
+            : "";
       if (
         !(await confirmAction(
-          "确定提交内核安装或版本切换任务？下载和校验完成后，目标服务会重启。",
+          `确定提交内核安装或版本切换任务？${sourceNote}下载和校验完成后，目标服务会重启。`,
           "提交任务",
         ))
       )
         return;
-      await submitTask({
-        agent_id: form.dataset.versionAgent,
-        engine: form.dataset.versionEngine,
-        action: "install",
-        core_version: version,
-      });
+      await submitTask(payload);
     };
   });
   document.querySelectorAll("[data-open-version-form]").forEach((button) => {
@@ -853,14 +876,21 @@ function bindAgentPage(agentItems, presetMode = false) {
   document.querySelectorAll(".core-version-form").forEach((form) => {
     const custom = form.querySelector(".custom-version-field");
     const input = custom?.querySelector("input");
+    const developmentSource = form.querySelector("[data-development-source]");
     const sync = () => {
-      const enabled =
-        form.querySelector('input[name="release_channel"]:checked')?.value ===
-        "custom";
+      const checked = form.querySelector('input[name="release_channel"]:checked');
+      const channel = checked?.value;
+      const enabled = channel === "custom";
       custom?.classList.toggle("is-disabled", !enabled);
       if (input) {
         input.disabled = !enabled;
         input.required = enabled;
+      }
+      if (developmentSource) {
+        developmentSource.hidden = !developmentSourceVisible(
+          form.dataset.versionEngine,
+          channel,
+        );
       }
     };
     form

@@ -452,7 +452,12 @@ func (c *Client) queueMetrics(ctx context.Context, outgoing chan<- core.WireMess
 }
 
 func advertisedAgentFeatures() []string {
-	return []string{core.AgentFeatureSelfUpgrade, core.AgentFeaturePortTraffic, core.AgentFeatureCoreLogs}
+	return []string{
+		core.AgentFeatureSelfUpgrade,
+		core.AgentFeaturePortTraffic,
+		core.AgentFeatureCoreLogs,
+		core.AgentFeatureMihomoDevelopmentSource,
+	}
 }
 
 func (c *Client) executeTask(ctx context.Context, task core.Task, outgoing chan<- core.WireMessage) {

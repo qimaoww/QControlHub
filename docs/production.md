@@ -162,7 +162,7 @@ systemd 单元的 `ProtectSystem=strict` 只放行默认的四个配置目录以
 
 端口配额只管理 `inet qcontrolhub` 表，不刷新或改写管理员已有的 nftables 表。每个策略分别统计发往监听端口的接收字节和从该端口发出的发送字节；达到额度后，两条方向规则都切换为 `drop`。计数状态以 `0600` 原子保存在 `/var/lib/qcontrolhub/traffic-state.json`，Agent 或控制面短暂重启不会清零当前周期。
 
-版本切换要求节点已经预置对应配置目录、可通过的初始配置和 systemd 单元。空白 Linux 节点可先运行 `deploy/bootstrap-core-services.sh` 完成这些前置条件；脚本仅创建缺失配置和新的 `qagent-*` unit，不迁移也不操作旧的通用服务或二进制。稳定版使用官方 latest，开发版只使用官方 prerelease，自定义版本必须是类似 `1.19.29` 或 `1.14.0-beta.3` 的完整版本号；不支持自定义下载地址。Agent 在下载后强制核对 GitHub Release API 给出的 SHA-256，运行候选二进制确认版本，随后原子替换并重启服务；失败时恢复上一二进制。
+版本切换要求节点已经预置对应配置目录、可通过的初始配置和 systemd 单元。空白 Linux 节点可先运行 `deploy/bootstrap-core-services.sh` 完成这些前置条件；脚本仅创建缺失配置和新的 `qagent-*` unit，不迁移也不操作旧的通用服务或二进制。稳定版和自定义版本使用对应内核的官方 GitHub Release，不接受自定义下载地址；自定义版本必须是类似 `1.19.29` 或 `1.14.0-beta.3` 的完整版本号。Mihomo `development` 支持显式来源：官方 MetaCubeX（默认、推荐，省略 `core_source` 即官方）与第三方 `vernesong/mihomo` Alpha 镜像（仅显式选择，信任锚为镜像仓库所有者身份）；各来源独立解析并 fail-closed，不使用另一来源或稳定版兜底，且不会把镜像描述为官方或自动 fallback。Agent 必须完整心跳声明 `mihomo-development-source-v1`，控制面才会为其派发镜像任务。Agent 在下载后强制核对 GitHub Release API 给出的 SHA-256（`checksums.txt` 不作为已验证输入，完整性来自 GitHub 资产 `digest`，信任锚随发布仓库所有者身份变化），运行候选二进制确认版本，随后原子替换并重启服务；失败时恢复上一二进制。
 
 ## 5. 运维操作
 

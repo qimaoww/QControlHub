@@ -28,6 +28,13 @@ const AgentFeaturePortTraffic = "port-traffic-v1"
 // control plane without persisting them on the node.
 const AgentFeatureCoreLogs = "core-logs-v1"
 
+// AgentFeatureMihomoDevelopmentSource identifies Agents that understand the
+// negotiated Mihomo development source. Older Agents ignore an unknown
+// core_source field during JSON/WSS decoding and would silently fall back to
+// the official repository, so the control plane must refuse a mirror task for
+// an Agent that does not advertise this feature.
+const AgentFeatureMihomoDevelopmentSource = "mihomo-development-source-v1"
+
 // Role identifies the account class. Fine-grained access is carried by the
 // explicit Permissions field on a user; only admin/user are persisted.
 type Role string
@@ -244,6 +251,7 @@ type Task struct {
 	ConfigVersion int        `json:"config_version,omitempty"`
 	ConfigContent string     `json:"config_content,omitempty"`
 	CoreVersion   string     `json:"core_version,omitempty"`
+	CoreSource    string     `json:"core_source,omitempty"`
 	Status        TaskStatus `json:"status"`
 	Attempt       int        `json:"attempt"`
 	LeaseID       string     `json:"lease_id,omitempty"`
@@ -261,6 +269,7 @@ type TaskRequest struct {
 	Engine      Engine `json:"engine"`
 	ConfigID    string `json:"config_id,omitempty"`
 	CoreVersion string `json:"core_version,omitempty"`
+	CoreSource  string `json:"core_source,omitempty"`
 }
 
 type Deployment struct {

@@ -722,9 +722,16 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 		heartbeatDeadline.Reset(50 * time.Second)
 	}
 	var inFlightTask string
+	// Dispatch is deferred until this connection has supplied a heartbeat that
+	// was persisted. Reading the stored features before the first heartbeat
+	// could observe a stale mihomo-development-source-v1 left by a previous
+	// session and deliver a mirror task to an older Agent that ignores the
+	// unknown core_source. Once the heartbeat is committed, ClaimTask and
+	// RunningTask see the connection's real features and gate mirror work.
+	var heartbeatReceived bool
 	resumeRunning := true
 	dispatchTask := func() error {
-		if inFlightTask != "" {
+		if inFlightTask != "" || !heartbeatReceived {
 			return nil
 		}
 		var task *core.Task
@@ -782,6 +789,13 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 					return
 				}
 				resetHeartbeatDeadline()
+				if !heartbeatReceived {
+					heartbeatReceived = true
+					if err := dispatchTask(); err != nil {
+						slog.Error("dispatch after first heartbeat", "agent_id", id, "error", err)
+						return
+					}
+				}
 			case core.WireMetrics:
 				if message.Metrics == nil {
 					_ = connection.Close(websocket.StatusPolicyViolation, "invalid metrics")
