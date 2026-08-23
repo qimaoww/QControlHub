@@ -93,8 +93,23 @@ func TestClaimAndResumeFeatureDowngradeWithPostgreSQL(t *testing.T) {
 	if err != nil || failed.Status != core.TaskFailed {
 		t.Fatalf("downgraded running mirror task = %+v, %v; want failed", failed, err)
 	}
+	if failed.FinishedAt.IsZero() {
+		t.Fatalf("downgraded running mirror task has no finished_at: %+v", failed)
+	}
+	if failed.LeaseID != "" {
+		t.Fatalf("downgraded running mirror task lease must be released, got %q", failed.LeaseID)
+	}
+	if failed.ConfigContent != "" {
+		t.Fatalf("downgraded running mirror task left config_content = %q, want terminal empty", failed.ConfigContent)
+	}
 	if !strings.Contains(failed.Error, core.AgentFeatureMihomoDevelopmentSource) {
 		t.Fatalf("downgraded running mirror error = %q, want feature reason", failed.Error)
+	}
+	if !strings.Contains(failed.Error, "cannot be safely resumed") || !strings.Contains(failed.Error, "unknown whether the previous Agent executed it") {
+		t.Fatalf("downgraded running mirror error = %q, want safe-resume/unknown-outcome wording", failed.Error)
+	}
+	if strings.Contains(failed.Error, "was not executed") {
+		t.Fatalf("downgraded running mirror error must not claim the task was never executed: %q", failed.Error)
 	}
 
 	// Cross-agent claims must never pick another Agent's pending mirror task.

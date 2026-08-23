@@ -590,6 +590,12 @@ func TestWSSMirrorFeatureDowngradeWithPostgreSQL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create mirror task: %v", err)
 	}
+	// The Agent still advertises the source feature, so the mirror task is
+	// claimed and enters the running lease before the downgrade below.
+	claimed, err := dataStore.ClaimTask(ctx, enrolled.AgentID)
+	if err != nil || claimed == nil || claimed.ID != mirror.ID {
+		t.Fatalf("claim mirror task before downgrade = %+v, %v; want %s", claimed, err, mirror.ID)
+	}
 	// Simulate an older Agent/older heartbeat overwriting features without the
 	// negotiated source feature before the websocket reconnects.
 	if err := dataStore.Heartbeat(ctx, enrolled.AgentID, core.HeartbeatRequest{
@@ -620,14 +626,31 @@ func TestWSSMirrorFeatureDowngradeWithPostgreSQL(t *testing.T) {
 		t.Fatalf("read hello: message=%+v error=%v", hello, err)
 	}
 	// The downgraded Agent must not receive the mirror task; assert no WireTask
-	// within the read window while the pending task remains untouched.
+	// within the read window. The running lease is released and the task failed
+	// atomically with an unknown-outcome reason instead of being delivered.
 	readCtx, cancelRead := context.WithTimeout(ctx, 400*time.Millisecond)
 	defer cancelRead()
 	var unexpected core.WireMessage
 	if err := wsjson.Read(readCtx, connection, &unexpected); err == nil {
 		t.Fatalf("downgraded Agent received unexpected message: %+v", unexpected)
 	}
-	if got, err := dataStore.GetTask(ctx, mirror.ID); err != nil || got.Status != core.TaskPending {
-		t.Fatalf("mirror task after downgraded WSS connect = %+v, %v; want pending", got, err)
+	got, err := dataStore.GetTask(ctx, mirror.ID)
+	if err != nil || got.Status != core.TaskFailed {
+		t.Fatalf("mirror task after downgraded WSS connect = %+v, %v; want failed", got, err)
+	}
+	if got.FinishedAt.IsZero() {
+		t.Fatalf("mirror task after downgraded WSS connect has no finished_at: %+v", got)
+	}
+	if got.LeaseID != "" {
+		t.Fatalf("mirror task after downgraded WSS connect still holds lease %q", got.LeaseID)
+	}
+	if got.ConfigContent != "" {
+		t.Fatalf("mirror task after downgraded WSS connect left config_content = %q, want empty", got.ConfigContent)
+	}
+	if !strings.Contains(got.Error, core.AgentFeatureMihomoDevelopmentSource) || !strings.Contains(got.Error, "cannot be safely resumed") || !strings.Contains(got.Error, "unknown whether the previous Agent executed it") {
+		t.Fatalf("mirror task after downgraded WSS connect error = %q, want feature + safe-resume + unknown-outcome wording", got.Error)
+	}
+	if strings.Contains(got.Error, "was not executed") {
+		t.Fatalf("mirror task after downgraded WSS connect error must not claim never executed: %q", got.Error)
 	}
 }

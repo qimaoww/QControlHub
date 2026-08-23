@@ -1082,9 +1082,9 @@ func (s *Store) RunningTask(ctx context.Context, agentID string) (*core.Task, er
 	}
 	if isMihomoMirrorTask(task) && !containsFeature(features, core.AgentFeatureMihomoDevelopmentSource) {
 		if _, updateErr := tx.Exec(ctx, `
-			UPDATE tasks SET status='failed', error=$2, finished_at=now()
+			UPDATE tasks SET status='failed', error=$2, finished_at=now(), config_content=NULL, lease_id=NULL
 			WHERE id=$1 AND status='running'`, task.ID,
-			"Agent no longer advertises mihomo-development-source-v1; the selected vernesong/mihomo mirror install was not executed"); updateErr != nil {
+			"Agent no longer advertises mihomo-development-source-v1; the mirror development task cannot be safely resumed and it is unknown whether the previous Agent executed it before the connection was lost"); updateErr != nil {
 			return nil, updateErr
 		}
 		if commitErr := tx.Commit(ctx); commitErr != nil {
