@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"errors"
-	"net"
 	"net/http"
 	"sort"
 	"strings"
@@ -594,53 +593,77 @@ func clientAddressCandidates(agent core.Agent) []clientAddressCandidate {
 			result = append(result, clientAddressCandidate{address: probed.value, source: probed.source})
 		}
 	}
-	if address := authn.NormalizePublicIP(agent.Metrics.ObservedPublicIP); address != "" {
-		if _, exists := seen[address]; !exists {
-			seen[address] = struct{}{}
-			result = append(result, clientAddressCandidate{address: address, source: "控制面实时观测公网地址"})
+	// Default-route interface addresses are the next fallback per family. Only
+	// actual globally routable unicast addresses are accepted; private, CGNAT,
+	// documentation, reserved, link-local, zoned and invalid values are dropped
+	// so a non-routable interface can never be surfaced as a node address.
+	for _, item := range publicInterfaceAddresses(agent.Metrics.NetworkInterfaces) {
+		if _, exists := seen[item.address]; !exists {
+			seen[item.address] = struct{}{}
+			result = append(result, clientAddressCandidate{address: item.address, source: "Agent 默认路由接口 " + item.name})
 		}
 	}
-	type interfaceAddress struct {
-		address string
-		name    string
-		order   int
+	// The WSS observation is now only populated when the proxy chain resolved
+	// unambiguously, so it is a strictly verified fallback; an ambiguous chain
+	// clears the value on reconnect, never surfacing a relay as the node.
+	if address := authn.NormalizePublicIP(agent.Metrics.ObservedPublicIP); address != "" {
+		family := "IPv4"
+		if strings.Contains(address, ":") {
+			family = "IPv6"
+		}
+		if _, exists := seen[address]; !exists {
+			seen[address] = struct{}{}
+			result = append(result, clientAddressCandidate{address: address, source: "已验证连接来源 · " + family})
+		}
 	}
-	addresses := make([]interfaceAddress, 0, 8)
-	for _, networkInterface := range agent.Metrics.NetworkInterfaces {
-		for _, address := range networkInterface.Addresses {
-			ip := net.ParseIP(strings.TrimSpace(address))
-			if ip == nil || !ip.IsGlobalUnicast() || ip.IsUnspecified() || ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+	return result
+}
+
+type publicInterfaceAddress struct {
+	address string
+	name    string
+	family  int
+}
+
+// publicInterfaceAddresses returns the globally routable unicast addresses of
+// the reported default-route interfaces, IPv4 before IPv6, de-duplicated and
+// sorted. authn.NormalizePublicIP reuses the IANA special-purpose denylist so
+// private, CGNAT, documentation, reserved, link-local and invalid values never
+// become node address candidates.
+func publicInterfaceAddresses(interfaces []core.HostNetworkInterface) []publicInterfaceAddress {
+	addresses := make([]publicInterfaceAddress, 0, 8)
+	for _, networkInterface := range interfaces {
+		for _, raw := range networkInterface.Addresses {
+			normalized := authn.NormalizePublicIP(raw)
+			if normalized == "" {
 				continue
 			}
-			priority := 2
-			if ip.To4() != nil {
-				priority = 0
-				if ip.IsPrivate() {
-					priority = 1
-				}
-			} else if ip.IsPrivate() {
-				priority = 3
+			family := 1
+			if !strings.Contains(normalized, ":") {
+				family = 0
 			}
-			addresses = append(addresses, interfaceAddress{address: ip.String(), name: networkInterface.Name, order: priority})
+			addresses = append(addresses, publicInterfaceAddress{address: normalized, name: networkInterface.Name, family: family})
 		}
 	}
 	sort.SliceStable(addresses, func(i, j int) bool {
-		if addresses[i].order != addresses[j].order {
-			return addresses[i].order < addresses[j].order
+		if addresses[i].family != addresses[j].family {
+			return addresses[i].family < addresses[j].family
 		}
 		if addresses[i].name != addresses[j].name {
 			return addresses[i].name < addresses[j].name
 		}
 		return addresses[i].address < addresses[j].address
 	})
-	for _, item := range addresses {
-		if _, exists := seen[item.address]; exists {
+	deduped := addresses[:0]
+	seen := make(map[string]struct{}, len(addresses))
+	for _, address := range addresses {
+		if _, exists := seen[address.address]; exists {
 			continue
 		}
-		seen[item.address] = struct{}{}
-		result = append(result, clientAddressCandidate{address: item.address, source: "Agent 默认路由接口 " + item.name})
+		seen[address.address] = struct{}{}
+		deduped = append(deduped, address)
 	}
-	return result
+	return deduped
 }
 
 func firstLabel(agent core.Agent, keys ...string) string {

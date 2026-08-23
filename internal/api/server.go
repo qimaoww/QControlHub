@@ -656,7 +656,11 @@ func (s *Server) enrollAgent(w http.ResponseWriter, request *http.Request) {
 }
 
 func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
-	observedPublicIP := authn.PublicClientIP(request, s.trustedProxies)
+	// A proxy chain that cannot be unambiguously resolved (for example a CDN
+	// edge followed by another untrusted hop) must never be stored or shown as
+	// the Agent public address; VerifiedAgentPublicIP returns "" then, which
+	// clears any stale observation.
+	observedPublicIP := authn.VerifiedAgentPublicIP(request, s.trustedProxies)
 	connection, err := websocket.Accept(w, request, &websocket.AcceptOptions{
 		CompressionMode: websocket.CompressionDisabled,
 		Subprotocols:    []string{"qcontrolhub.agent.v1"},

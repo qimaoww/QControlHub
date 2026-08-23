@@ -181,7 +181,7 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 			MemoryAvailable: true, MemoryUsedBytes: 2 << 30, MemoryTotalBytes: 4 << 30,
 			DiskAvailable: true, DiskUsedBytes: 8 << 30, DiskTotalBytes: 16 << 30,
 			NetworkAvailable: true, NetworkRXBytes: 1000, NetworkTXBytes: 500, NetworkRXBPS: 100, NetworkTXBPS: 50,
-			NetworkInterfaces: []core.HostNetworkInterface{{Name: "eth0", Addresses: []string{"192.0.2.20"}}},
+			NetworkInterfaces: []core.HostNetworkInterface{{Name: "eth0", Addresses: []string{"198.35.26.96"}}},
 			ObservedPublicIP:  "203.0.113.99",
 		},
 	}}
@@ -216,7 +216,7 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 			if pushed.Version != "test" || len(pushed.Features) == 0 {
 				t.Fatalf("metrics push clobbered heartbeat state: agent=%+v", pushed)
 			}
-			if pushed.Metrics.ObservedPublicIP != "2606:4700:4700::1111" || len(pushed.Metrics.NetworkInterfaces) != 1 || pushed.Metrics.NetworkInterfaces[0].Addresses[0] != "192.0.2.20" {
+			if pushed.Metrics.ObservedPublicIP != "2606:4700:4700::1111" || len(pushed.Metrics.NetworkInterfaces) != 1 || pushed.Metrics.NetworkInterfaces[0].Addresses[0] != "198.35.26.96" {
 				t.Fatalf("metrics push did not preserve server-observed and last usable address state: %+v", pushed.Metrics)
 			}
 			break
@@ -500,15 +500,41 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 		t.Fatalf("restore automatic client address: %v", err)
 	}
 	automaticAgent, err := dataStore.GetAgent(ctx, enrolled.AgentID)
-	if candidates := clientAddressCandidates(automaticAgent); err != nil || len(candidates) == 0 || candidates[0].address != "93.184.216.34" || candidates[0].source != "控制面实时观测公网地址" {
-		t.Fatalf("automatic client address did not resume the WSS observation: candidates=%+v error=%v", candidates, err)
+	if candidates := clientAddressCandidates(automaticAgent); err != nil || len(candidates) != 2 || candidates[0].address != "198.35.26.96" || candidates[0].source != "Agent 默认路由接口 eth0" || candidates[1].address != "93.184.216.34" || candidates[1].source != "已验证连接来源 · IPv4" {
+		t.Fatalf("automatic client address did not prefer route interface then verified WSS: candidates=%+v error=%v", candidates, err)
 	}
 	if err := dataStore.UpdateAgentObservedPublicIP(ctx, enrolled.AgentID, ""); err != nil {
 		t.Fatalf("clear unavailable WSS public observation: %v", err)
 	}
 	fallbackAgent, err := dataStore.GetAgent(ctx, enrolled.AgentID)
-	if candidates := clientAddressCandidates(fallbackAgent); err != nil || len(candidates) == 0 || candidates[0].address != "192.0.2.20" || candidates[0].source != "Agent 默认路由接口 eth0" {
+	if candidates := clientAddressCandidates(fallbackAgent); err != nil || len(candidates) == 0 || candidates[0].address != "198.35.26.96" || candidates[0].source != "Agent 默认路由接口 eth0" {
 		t.Fatalf("unavailable public source did not retain the default-route fallback: candidates=%+v error=%v", candidates, err)
+	}
+	// An ambiguous proxy chain (a public relay with a real client to its left)
+	// must never be stored as the Agent address. Reconnecting through such a
+	// chain clears the stale observation instead of surfacing the relay.
+	ambiguousHandshake, _ := http.NewRequestWithContext(ctx, http.MethodGet, websocketURL, nil)
+	if err := authn.SignRequest(ambiguousHandshake, nil, enrolled.AgentID, privateKey, time.Now().UTC()); err != nil {
+		t.Fatalf("sign ambiguous WSS handshake: %v", err)
+	}
+	ambiguousHandshake.Header.Set("X-Forwarded-For", "93.184.216.34, 2400:cb00::1")
+	ambiguousConnection, ambiguousResponse, err := websocket.Dial(ctx, websocketURL, &websocket.DialOptions{
+		HTTPHeader: ambiguousHandshake.Header, Subprotocols: []string{"qcontrolhub.agent.v1"},
+	})
+	if err != nil {
+		if ambiguousResponse != nil {
+			t.Fatalf("dial ambiguous WSS: %v (%s)", err, ambiguousResponse.Status)
+		}
+		t.Fatalf("dial ambiguous WSS: %v", err)
+	}
+	defer ambiguousConnection.Close(websocket.StatusNormalClosure, "test complete")
+	var ambiguousHello core.WireMessage
+	if err := wsjson.Read(ctx, ambiguousConnection, &ambiguousHello); err != nil || ambiguousHello.Type != core.WireHello {
+		t.Fatalf("read ambiguous hello: message=%+v error=%v", ambiguousHello, err)
+	}
+	ambiguousAgent, err := dataStore.GetAgent(ctx, enrolled.AgentID)
+	if err != nil || ambiguousAgent.Metrics.ObservedPublicIP != "" {
+		t.Fatalf("ambiguous WSS source was stored as the Agent address: agent=%+v error=%v", ambiguousAgent, err)
 	}
 	revokedTask, err := dataStore.CreateTask(ctx, core.TaskRequest{
 		AgentID: enrolled.AgentID, Action: core.ActionStatus, Engine: core.EngineMihomo,

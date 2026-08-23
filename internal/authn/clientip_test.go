@@ -90,3 +90,83 @@ func TestPublicClientIPNormalizesOnlyTrustedPublicSources(t *testing.T) {
 		}
 	}
 }
+
+func TestVerifiedAgentPublicIPResolvesOnlyUnambiguousPublicClients(t *testing.T) {
+	outerProxy := "10.80.0.1"
+	webProxy := "10.80.0.2"
+	proxies, err := ParseTrustedProxies([]string{outerProxy + "/32", webProxy + "/32"})
+	if err != nil {
+		t.Fatalf("ParseTrustedProxies() error = %v", err)
+	}
+
+	// A trusted two-hop chain with a single untrusted client resolves to it.
+	clean := httptest.NewRequest("GET", "https://qcontrolhub.example", nil)
+	clean.RemoteAddr = webProxy + ":443"
+	clean.Header.Set("X-Forwarded-For", "93.184.216.34, "+outerProxy)
+	if got := VerifiedAgentPublicIP(clean, proxies); got != "93.184.216.34" {
+		t.Fatalf("clean two-hop VerifiedAgentPublicIP() = %q", got)
+	}
+
+	// A public relay mixed with a real client to its left is proxy ambiguity,
+	// so the relay must never be stored as the Agent address.
+	relay := httptest.NewRequest("GET", "https://qcontrolhub.example", nil)
+	relay.RemoteAddr = webProxy + ":443"
+	relay.Header.Set("X-Forwarded-For", "93.184.216.34, 2400:cb00::1")
+	if got := VerifiedAgentPublicIP(relay, proxies); got != "" {
+		t.Fatalf("untrusted relay resolved as Agent source %q", got)
+	}
+
+	// Once the CDN public prefix is explicitly trusted the full chain resolves
+	// the real client rather than the edge hop.
+	cdnConfigured, err := ParseTrustedProxies([]string{outerProxy + "/32", webProxy + "/32", "2400:cb00::/32"})
+	if err != nil {
+		t.Fatalf("ParseTrustedProxies() CDN error = %v", err)
+	}
+	resolved := httptest.NewRequest("GET", "https://qcontrolhub.example", nil)
+	resolved.RemoteAddr = webProxy + ":443"
+	resolved.Header.Set("X-Forwarded-For", "93.184.216.34, 2400:cb00::1")
+	if got := VerifiedAgentPublicIP(resolved, cdnConfigured); got != "93.184.216.34" {
+		t.Fatalf("CDN-configured VerifiedAgentPublicIP() = %q", got)
+	}
+
+	// An attacker-forged left value still means the rightmost untrusted hop
+	// forwarded the request: fail closed rather than trusting a relay.
+	forged := httptest.NewRequest("GET", "https://qcontrolhub.example", nil)
+	forged.RemoteAddr = webProxy + ":443"
+	forged.Header.Set("X-Forwarded-For", "1.1.1.1, 93.184.216.34, "+outerProxy)
+	if got := VerifiedAgentPublicIP(forged, proxies); got != "" {
+		t.Fatalf("forged left edge resolved as Agent source %q", got)
+	}
+
+	// A direct untrusted public peer is accepted, but its attacker-controlled
+	// forwarding header is never honored.
+	direct := httptest.NewRequest("GET", "https://qcontrolhub.example", nil)
+	direct.RemoteAddr = "93.184.216.34:443"
+	direct.Header.Set("X-Forwarded-For", "1.1.1.1")
+	if got := VerifiedAgentPublicIP(direct, proxies); got != "93.184.216.34" {
+		t.Fatalf("direct public VerifiedAgentPublicIP() = %q", got)
+	}
+
+	// Untrusted direct peers that are not globally routable are empty.
+	private := httptest.NewRequest("GET", "https://qcontrolhub.example", nil)
+	private.RemoteAddr = "10.0.0.8:443"
+	if got := VerifiedAgentPublicIP(private, nil); got != "" {
+		t.Fatalf("private direct peer normalized as %q", got)
+	}
+
+	// A fully trusted chain carries no provable client and is ambiguous.
+	allTrusted := httptest.NewRequest("GET", "https://qcontrolhub.example", nil)
+	allTrusted.RemoteAddr = webProxy + ":443"
+	allTrusted.Header.Set("X-Forwarded-For", outerProxy)
+	if got := VerifiedAgentPublicIP(allTrusted, proxies); got != "" {
+		t.Fatalf("all-trusted chain resolved as %q", got)
+	}
+
+	// A malformed X-Forwarded-For entry must not be silently skipped.
+	malformed := httptest.NewRequest("GET", "https://qcontrolhub.example", nil)
+	malformed.RemoteAddr = webProxy + ":443"
+	malformed.Header.Set("X-Forwarded-For", "not-an-address")
+	if got := VerifiedAgentPublicIP(malformed, proxies); got != "" {
+		t.Fatalf("malformed chain resolved as %q", got)
+	}
+}

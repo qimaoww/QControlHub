@@ -19,26 +19,132 @@ function mihomoDevelopmentSourceFieldset(canMirror) {
   return `<fieldset class="release-channel-fieldset development-source-field" data-development-source hidden><legend>开发版来源</legend><div class="release-channel-options"><label><input type="radio" name="core_source" value="official" checked><span>MetaCubeX 官方（默认，推荐）</span></label><label><input type="radio" name="core_source" value="mirror" ${canMirror ? "" : "disabled"}><span>vernesong/mihomo Alpha 镜像（第三方）${canMirror ? "" : "（需升级 Agent）"}</span></label></div>${canMirror ? "" : `<p class="source-upgrade-note">当前 Agent 尚未声明 mihomo-development-source-v1，镜像来源不可用；请先在面板升级 Agent。</p>`}</fieldset>`;
 }
 
+function normalizeInterfaceAddress(raw) {
+  let value = String(raw || "").trim();
+  if (!value) return "";
+  if (value.startsWith("[") && value.endsWith("]")) value = value.slice(1, -1);
+  const zone = value.indexOf("%");
+  if (zone >= 0) value = value.slice(0, zone);
+  const mapped = value.match(/^::ffff:(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (mapped) return `IPv4:${mapped.slice(1).join(".")}`;
+  return value.includes(":") ? `IPv6:${value.toLowerCase()}` : `IPv4:${value}`;
+}
+
+function isGloballyRoutableIPv4(value) {
+  const match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(value);
+  if (!match) return false;
+  const [a, b, c, d] = match.slice(1).map(Number);
+  if ([a, b, c, d].some((octet) => octet > 255)) return false;
+  if (a === 0 || a === 10 || a === 127 || a === 255) return false;
+  if (a === 100 && b >= 64 && b <= 127) return false;
+  if (a === 169 && b === 254) return false;
+  if (a === 172 && b >= 16 && b <= 31) return false;
+  if (a === 192 && b === 0 && c === 0) return false;
+  if (a === 192 && b === 0 && c === 2) return false;
+  if (a === 192 && b === 31 && c === 196) return false;
+  if (a === 192 && b === 52 && c === 193) return false;
+  if (a === 192 && b === 88 && c === 99) return false;
+  if (a === 192 && b === 168) return false;
+  if (a === 192 && b === 175 && c === 48) return false;
+  if (a === 198 && b === 18) return false;
+  if (a === 198 && b === 51 && c === 100) return false;
+  if (a === 203 && b === 0 && c === 113) return false;
+  return a <= 223;
+}
+
+function expandIPv6Hextets(value) {
+  const cleaned = value.replace(/^::ffff:/, "").replace(/%[^:]*$/, "");
+  if (cleaned === "::") return [0, 0, 0, 0, 0, 0, 0, 0];
+  const parts = cleaned.split("::");
+  if (parts.length > 2) return null;
+  const left = parts[0] ? parts[0].split(":") : [];
+  const right = parts.length === 2 && parts[1] ? parts[1].split(":") : [];
+  const leftHextets = [];
+  const rightHextets = [];
+  for (const group of left) {
+    if (!group || group.length > 4 || !/^[0-9a-f]+$/i.test(group)) return null;
+    leftHextets.push(parseInt(group, 16));
+  }
+  for (const group of right) {
+    if (!group || group.length > 4 || !/^[0-9a-f]+$/i.test(group)) return null;
+    rightHextets.push(parseInt(group, 16));
+  }
+  if (parts.length === 1) {
+    if (leftHextets.length !== 8) return null;
+    return leftHextets;
+  }
+  const missing = 8 - leftHextets.length - rightHextets.length;
+  if (missing < 1) return null;
+  return [...leftHextets, ...Array(missing).fill(0), ...rightHextets];
+}
+
+function isGloballyRoutableIPv6(value) {
+  const hextets = expandIPv6Hextets(value);
+  if (!hextets) return false;
+  const [h0, h1] = hextets;
+  if (value === "::" || value === "::1") return false;
+  if (h0 === 0 && h1 === 0 && hextets.slice(2).every((h) => h === 0)) return false;
+  if ((h0 & 0xfe00) === 0xfc00) return false;
+  if (h0 >= 0xfe80 && h0 <= 0xfebf) return false;
+  if ((h0 & 0xff00) === 0xff00) return false;
+  if (h0 === 0x0064 && h1 === 0xff9b) return false;
+  if (h0 === 0x0100 && h1 === 0x0000) return false;
+  if (h0 === 0x0100 && h1 === 0x0000 && hextets[2] === 0x0001) return false;
+  if (h0 === 0x2001 && h1 >= 0x0000 && h1 <= 0x01ff) return false;
+  if (h0 === 0x2001 && h1 === 0x0db8) return false;
+  if (h0 === 0x2002) return false;
+  if (h0 === 0x2620 && h1 === 0x4f80 && (hextets[2] & 0xfffc) === 0) return false;
+  if (h0 === 0x3fff) return false;
+  if (h0 === 0x5f00) return false;
+  return true;
+}
+
+function isGloballyRoutable(value) {
+  const normalized = normalizeInterfaceAddress(value);
+  if (!normalized) return false;
+  if (normalized.startsWith("IPv4:")) {
+    return isGloballyRoutableIPv4(normalized.slice(5));
+  }
+  return isGloballyRoutableIPv6(normalized.slice(5));
+}
+
+function interfacePublicAddress(metrics, wantIPv4) {
+  const interfaces = Array.isArray(metrics.network_interfaces) ? metrics.network_interfaces : [];
+  for (const networkInterface of interfaces) {
+    const addresses = Array.isArray(networkInterface.addresses) ? networkInterface.addresses : [];
+    for (const raw of addresses) {
+      const normalized = normalizeInterfaceAddress(raw);
+      if (!normalized) continue;
+      const isV4 = normalized.startsWith("IPv4:");
+      if (isV4 !== wantIPv4) continue;
+      if (!isGloballyRoutable(raw)) continue;
+      return { value: normalized.slice(5), name: networkInterface.name || "" };
+    }
+  }
+  return null;
+}
+
 // Resolves the display rows for the node's dual-stack public addresses.
-// Probed egress addresses win; the control-plane observation only ever sees
-// the family the WSS connection used, so it is a fallback per family.
+// Probed egress addresses win, then a default-route interface address of the
+// same family, then the verified WSS connection source as a last resort.
 export function publicAddressRows(metrics = {}) {
-  const observed = String(metrics.observed_public_ip || "");
-  const observedIsV4 = observed !== "" && !observed.includes(":");
+  const observed = normalizeInterfaceAddress(metrics.observed_public_ip || "");
+  const observedIPv4 = observed.startsWith("IPv4:") ? observed.slice(5) : "";
+  const observedIPv6 = observed.startsWith("IPv6:") ? observed.slice(5) : "";
   const families = [
     {
       label: "IPv4",
       cls: "v4",
       probed: metrics.public_ipv4,
-      fallback: observedIsV4 ? observed : "",
-      fallbackSource: "控制面观测",
+      interfaceSource: interfacePublicAddress(metrics, true),
+      fallback: observedIPv4,
     },
     {
       label: "IPv6",
       cls: "v6",
       probed: metrics.public_ipv6,
-      fallback: !observedIsV4 ? observed : "",
-      fallbackSource: "控制面观测",
+      interfaceSource: interfacePublicAddress(metrics, false),
+      fallback: observedIPv6,
     },
   ];
   return families.map((family) => {
@@ -46,8 +152,18 @@ export function publicAddressRows(metrics = {}) {
     if (probed) {
       return { ...family, value: probed, source: "公网探测", ok: true };
     }
+    if (family.interfaceSource) {
+      return {
+        ...family,
+        value: family.interfaceSource.value,
+        source: family.interfaceSource.name
+          ? `默认路由接口 ${family.interfaceSource.name}`
+          : "默认路由接口",
+        ok: true,
+      };
+    }
     if (family.fallback) {
-      return { ...family, value: family.fallback, source: family.fallbackSource, ok: true };
+      return { ...family, value: family.fallback, source: "已验证连接来源", ok: true };
     }
     return { ...family, value: "", source: "等待节点上报", ok: false };
   });
@@ -505,7 +621,7 @@ async function nodeSettings(presetMode = false, { overview: preloadedOverview } 
           <div class="node-settings-panels">
             <section id="${esc(tabID("cores-panel"))}" class="node-tab-panel node-cores-panel" data-node-panel="cores" role="tabpanel" aria-labelledby="${esc(tabID("cores-tab"))}" ${activeTab === "cores" ? "" : "hidden"}><header class="node-panel-heading"><div><h3>内核管理</h3><small>服务状态与版本</small></div><span data-installed-summary>${installedCount ? `${installedCount} 个已安装` : "尚未安装内核"}</span></header><div class="core-runtime-list">${services}</div></section>
             <section id="${esc(tabID("metrics-panel"))}" class="node-tab-panel node-metrics-panel" data-node-panel="metrics" role="tabpanel" aria-labelledby="${esc(tabID("metrics-tab"))}" ${activeTab === "metrics" ? "" : "hidden"}><header class="node-panel-heading"><div><h3>流量趋势</h3><small>最近 24 小时</small></div><span data-metric-text="stamp">${metrics.collected_at ? `采集于 ${ago(metrics.collected_at)}` : "等待资源数据"}</span></header><section class="metric-trend-empty" data-metric-history="${esc(agent.id)}" aria-label="暂无指标趋势"><span>⌁</span><b>正在载入指标趋势</b><small>节点上报指标后显示最近 24 小时的上下行速率。</small></section></section>
-            <section id="${esc(tabID("agent-panel"))}" class="node-tab-panel node-agent-panel" data-node-panel="agent" role="tabpanel" aria-labelledby="${esc(tabID("agent-tab"))}" ${activeTab === "agent" ? "" : "hidden"}><header class="node-panel-heading"><div><h3>Agent 与身份</h3><small>注册信息和安全通道</small></div><span data-agent-version>${esc(agent.version || "未知")}</span></header><dl class="identity-list node-identity-list"><div><dt>节点 ID</dt><dd><code>${esc(agent.id)}</code></dd></div><div><dt>系统平台</dt><dd>${esc(agent.os)} / ${esc(agent.arch)}</dd></div><div><dt>Agent 版本</dt><dd data-agent-version>${esc(agent.version || "未知")}</dd></div><div><dt>注册时间</dt><dd>${date(agent.enrolled_at)}</dd></div><div><dt>安全通道</dt><dd>WSS · Ed25519 签名</dd></div></dl><section class="node-public-ips" aria-label="公网地址"><header><b>公网地址 · 双栈</b><small>出口探测优先 · 控制面观测兜底</small></header>${publicAddressRows(metrics).map((row) => `<div class="public-ip-row ${row.ok ? "" : "empty"}" data-ip-family="${row.cls}"><span class="ip-family ${row.cls}">${row.label}</span><code>${esc(row.value || "未探测到")}</code><small>${esc(row.source)}</small></div>`).join("")}</section>${labels ? `<div class="labels">${labels}</div>` : ""}<footer class="node-identity-refresh"><span>节点身份已验证</span><div></div></footer>${can("agents.manage") ? `<section class="node-danger-zone"><span><b>删除节点</b><small>断开节点并清理关联配置；QAgent 不会被远程卸载。</small></span><button class="button small danger-button" type="button" data-delete="${esc(agent.id)}">删除节点</button></section>` : ""}</section>
+            <section id="${esc(tabID("agent-panel"))}" class="node-tab-panel node-agent-panel" data-node-panel="agent" role="tabpanel" aria-labelledby="${esc(tabID("agent-tab"))}" ${activeTab === "agent" ? "" : "hidden"}><header class="node-panel-heading"><div><h3>Agent 与身份</h3><small>注册信息和安全通道</small></div><span data-agent-version>${esc(agent.version || "未知")}</span></header><dl class="identity-list node-identity-list"><div><dt>节点 ID</dt><dd><code>${esc(agent.id)}</code></dd></div><div><dt>系统平台</dt><dd>${esc(agent.os)} / ${esc(agent.arch)}</dd></div><div><dt>Agent 版本</dt><dd data-agent-version>${esc(agent.version || "未知")}</dd></div><div><dt>注册时间</dt><dd>${date(agent.enrolled_at)}</dd></div><div><dt>安全通道</dt><dd>WSS · Ed25519 签名</dd></div></dl><section class="node-public-ips" aria-label="公网地址"><header><b>公网地址 · 双栈</b><small>出口探测优先 · 默认路由兜底 · 已验证连接来源兜底</small></header>${publicAddressRows(metrics).map((row) => `<div class="public-ip-row ${row.ok ? "" : "empty"}" data-ip-family="${row.cls}"><span class="ip-family ${row.cls}">${row.label}</span><code>${esc(row.value || "未探测到")}</code><small>${esc(row.source)}</small></div>`).join("")}</section>${labels ? `<div class="labels">${labels}</div>` : ""}<footer class="node-identity-refresh"><span>节点身份已验证</span><div></div></footer>${can("agents.manage") ? `<section class="node-danger-zone"><span><b>删除节点</b><small>断开节点并清理关联配置；QAgent 不会被远程卸载。</small></span><button class="button small danger-button" type="button" data-delete="${esc(agent.id)}">删除节点</button></section>` : ""}</section>
           </div>
         </section>`;
       }

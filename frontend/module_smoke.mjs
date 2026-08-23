@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import "./refresh_smoke.mjs";
 
 import {
@@ -3348,9 +3349,71 @@ assert.equal(ipRows[1].value, "2606:4700:4700::1111");
 
 const fallbackRows = publicAddressRows({ observed_public_ip: "93.184.216.34" });
 assert.equal(fallbackRows[0].value, "93.184.216.34");
-assert.equal(fallbackRows[0].source, "控制面观测");
+assert.equal(fallbackRows[0].source, "已验证连接来源");
 assert.equal(fallbackRows[1].value, "");
 assert.equal(fallbackRows[1].ok, false);
+
+// An observed relay (e.g. a Cloudflare edge) must never beat a genuine
+// default-route interface address that reports the same family.
+const relayRows = publicAddressRows({
+  observed_public_ip: "2400:cb00::1",
+  network_interfaces: [{ name: "eth0", addresses: ["2606:4700:4700::1111"] }],
+});
+assert.equal(relayRows[0].value, "");
+assert.equal(relayRows[0].source, "等待节点上报");
+assert.equal(relayRows[0].ok, false);
+assert.equal(relayRows[1].value, "2606:4700:4700::1111");
+assert.equal(relayRows[1].source, "默认路由接口 eth0");
+assert.equal(relayRows[1].ok, true);
+
+// Interface fallback is strictly filtered: private, CGNAT, documentation and
+// link-local addresses are dropped while a truly routable address surfaces.
+const filteredRows = publicAddressRows({
+  network_interfaces: [
+    { name: "tailscale0", addresses: ["100.64.0.8", "fd00::8"] },
+    { name: "docker0", addresses: ["172.17.0.1"] },
+    { name: "eth0", addresses: ["192.0.2.9", "198.35.26.96", "2001:db8::8", "2606:4700:4700::1111", "fe80::1%eth0"] },
+  ],
+});
+assert.equal(filteredRows[0].value, "198.35.26.96");
+assert.equal(filteredRows[0].source, "默认路由接口 eth0");
+assert.equal(filteredRows[1].value, "2606:4700:4700::1111");
+assert.equal(filteredRows[1].source, "默认路由接口 eth0");
+
+// CSS contract: the IPv4/IPv6 badge must override the <i> default italic and
+// must not regress to the old tiny sizes; card and detail address text must
+// keep the readability floor while staying on a single ellipsizing line.
+{
+  const css = readFileSync(new URL("app.css", import.meta.url), "utf8");
+  const badge = /\.ip-family\{[^}]*\}/.exec(css)?.[0] || "";
+  assert.equal(
+    badge.includes("font-style:normal"),
+    true,
+    ".ip-family must override the <i> default italic",
+  );
+  assert.equal(
+    /\.ip-family\{[^}]*font-size:8px/.test(css),
+    false,
+    ".ip-family badge size must not regress to 8px",
+  );
+  const cardCode = /\.card-ip-row code\{[^}]*\}/.exec(css)?.[0] || "";
+  const publicCode = /\.public-ip-row code\{[^}]*\}/.exec(css)?.[0] || "";
+  assert.equal(
+    /\bfont-size:11px/.test(cardCode),
+    true,
+    "card address text must be at least 11px",
+  );
+  assert.equal(
+    /\bfont-size:12px/.test(publicCode),
+    true,
+    "detail address text must be at least 12px",
+  );
+  assert.equal(
+    /\.card-ip-row code\{[^}]*font-size:9px/.test(css),
+    false,
+    "card address size must not regress to 9px",
+  );
+}
 
 assert.equal(
   formatHostPort("2606:4700:4700::1111", "443"),
