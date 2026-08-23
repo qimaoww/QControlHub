@@ -343,6 +343,11 @@ func TestExistingCoreDiscoveryRejectsOfficialSingBoxRelativeResource(t *testing.
 		"ssh private key path":     `{"outbounds":[{"type":"ssh","server":"example.com","server_port":22,"user":"root","private_key_path":"id_ed25519"}]}`,
 		"tor data directory":       `{"outbounds":[{"type":"tor","server":"127.0.0.1","server_port":9050,"data_directory":"tor-data"}]}`,
 		"outbound ech config path": `{"outbounds":[{"type":"vless","server":"example.com","server_port":443,"uuid":"abc","tls":{"enabled":true,"ech":{"config_path":"ech.json"}}}]}`,
+		"certificate directory":    `{"certificate":{"certificate_directory_path":["certs"]}}`,
+		"tailscale state dir":      `{"endpoints":[{"type":"tailscale","tag":"ts","state_directory":"state"}]}`,
+		"ccm credential path":      `{"services":[{"type":"ccm","tag":"ccm","credential_path":"creds.json"}]}`,
+		"derp config path":         `{"services":[{"type":"derp","tag":"derp","config_path":"derp.json"}]}`,
+		"hysteria2 masquerade dir": `{"inbounds":[{"type":"hysteria2","listen":"127.0.0.1","listen_port":443,"users":[{"password":"testpw"}],"masquerade":[{"type":"file","directory":"webroot"}]}]}`,
 	}
 	for name, fragment := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -393,6 +398,11 @@ func TestExistingCoreDiscoveryAcceptsOfficialSingBoxAbsoluteLocalResource(t *tes
 		"absolute ssh private key path":     `{"outbounds":[{"type":"ssh","server":"example.com","server_port":22,"user":"root","private_key_path":"/etc/sing-box/id_ed25519"}]}`,
 		"absolute tor data directory":       `{"outbounds":[{"type":"tor","server":"127.0.0.1","server_port":9050,"data_directory":"/var/lib/tor"}]}`,
 		"absolute outbound ech config path": `{"outbounds":[{"type":"vless","server":"example.com","server_port":443,"uuid":"abc","tls":{"enabled":true,"ech":{"config_path":"/etc/sing-box/ech.json"}}}]}`,
+		"absolute certificate directory":    `{"certificate":{"certificate_directory_path":["/etc/sing-box/certs"]}}`,
+		"absolute tailscale state dir":      `{"endpoints":[{"type":"tailscale","tag":"ts","state_directory":"/var/lib/tailscale"}]}`,
+		"absolute ccm credential path":      `{"services":[{"type":"ccm","tag":"ccm","credential_path":"/etc/sing-box/creds.json"}]}`,
+		"absolute derp config path":         `{"services":[{"type":"derp","tag":"derp","config_path":"/etc/sing-box/derp.json"}]}`,
+		"absolute hysteria2 masquerade dir": `{"inbounds":[{"type":"hysteria2","listen":"127.0.0.1","listen_port":443,"users":[{"password":"testpw"}],"masquerade":[{"type":"file","directory":"/var/www/sing-box"}]}]}`,
 	}
 	for name, fragment := range tests {
 		t.Run(name, func(t *testing.T) {

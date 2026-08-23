@@ -358,6 +358,94 @@ func TestValidateNoRelativeSingBoxResourcesContract(t *testing.T) {
 			contents: `{"outbounds":[{"type":"http","server":"example.com","server_port":8080,"path":"/proxy"}]}`,
 			wantErr:  false,
 		},
+		"relative certificate directory path": {
+			contents: `{"certificate":{"certificate_directory_path":["certs"]}}`,
+			wantErr:  true,
+		},
+		"absolute certificate directory path": {
+			contents: `{"certificate":{"certificate_directory_path":["/etc/sing-box/certs"]}}`,
+			wantErr:  false,
+		},
+		"relative certificate path list": {
+			contents: `{"certificate":{"certificate_path":["cert.pem"]}}`,
+			wantErr:  true,
+		},
+		"absolute certificate path list": {
+			contents: `{"certificate":{"certificate_path":["/etc/sing-box/cert.pem"]}}`,
+			wantErr:  false,
+		},
+		"relative tailscale state directory": {
+			contents: `{"endpoints":[{"type":"tailscale","tag":"ts","state_directory":"state"}]}`,
+			wantErr:  true,
+		},
+		"absolute tailscale state directory": {
+			contents: `{"endpoints":[{"type":"tailscale","tag":"ts","state_directory":"/var/lib/tailscale"}]}`,
+			wantErr:  false,
+		},
+		"relative ccm credential path": {
+			contents: `{"services":[{"type":"ccm","tag":"ccm","credential_path":"creds.json"}]}`,
+			wantErr:  true,
+		},
+		"absolute ccm credential path": {
+			contents: `{"services":[{"type":"ccm","tag":"ccm","credential_path":"/etc/sing-box/creds.json"}]}`,
+			wantErr:  false,
+		},
+		"relative ocm usages path": {
+			contents: `{"services":[{"type":"ocm","tag":"ocm","usages_path":"usages.json"}]}`,
+			wantErr:  true,
+		},
+		"absolute ocm usages path": {
+			contents: `{"services":[{"type":"ocm","tag":"ocm","usages_path":"/etc/sing-box/usages.json"}]}`,
+			wantErr:  false,
+		},
+		"relative derp config path": {
+			contents: `{"services":[{"type":"derp","tag":"derp","config_path":"derp.json"}]}`,
+			wantErr:  true,
+		},
+		"absolute derp config path": {
+			contents: `{"services":[{"type":"derp","tag":"derp","config_path":"/etc/sing-box/derp.json"}]}`,
+			wantErr:  false,
+		},
+		"relative derp mesh psk file": {
+			contents: `{"services":[{"type":"derp","tag":"derp","mesh_psk_file":"psk.txt"}]}`,
+			wantErr:  true,
+		},
+		"absolute derp mesh psk file": {
+			contents: `{"services":[{"type":"derp","tag":"derp","mesh_psk_file":"/etc/sing-box/psk.txt"}]}`,
+			wantErr:  false,
+		},
+		"relative ssmapi cache path": {
+			contents: `{"services":[{"type":"ssm-api","tag":"ssm","cache_path":"cache.db"}]}`,
+			wantErr:  true,
+		},
+		"absolute ssmapi cache path": {
+			contents: `{"services":[{"type":"ssm-api","tag":"ssm","cache_path":"/var/lib/sing-box/cache.db"}]}`,
+			wantErr:  false,
+		},
+		"relative hysteria2 masquerade file directory": {
+			contents: `{"inbounds":[{"type":"hysteria2","listen":"127.0.0.1","listen_port":443,"users":[{"password":"testpw"}],"masquerade":[{"type":"file","directory":"webroot"}]}]}`,
+			wantErr:  true,
+		},
+		"absolute hysteria2 masquerade file directory": {
+			contents: `{"inbounds":[{"type":"hysteria2","listen":"127.0.0.1","listen_port":443,"users":[{"password":"testpw"}],"masquerade":[{"type":"file","directory":"/var/www/sing-box"}]}]}`,
+			wantErr:  false,
+		},
+		"future resource named path rejected by fallback": {
+			contents: `{"inbounds":[{"type":"hysteria2","listen":"127.0.0.1","listen_port":443,"users":[{"password":"testpw"}],"some_future_path":"data.db"}]}`,
+			wantErr:  true,
+		},
+		"future resource named file rejected by fallback": {
+			contents: `{"inbounds":[{"type":"hysteria2","listen":"127.0.0.1","listen_port":443,"users":[{"password":"testpw"}],"some_future_file":"data.db"}]}`,
+			wantErr:  true,
+		},
+		"rule process path matching not treated as resource": {
+			contents: `{"route":{"rules":[{"type":"default","process_path":"sbin/nginx","action":"direct"}]}}`,
+			wantErr:  false,
+		},
+		"http transport relative path not treated as resource": {
+			contents: `{"outbounds":[{"type":"http","server":"example.com","server_port":8080,"path":"proxy"}]}`,
+			wantErr:  false,
+		},
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {

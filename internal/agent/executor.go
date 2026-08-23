@@ -764,13 +764,20 @@ type singBoxResourceField struct {
 }
 
 // singBoxResourceFieldsByParent is the set of sing-box JSON fields that are
-// resolved as filesystem resources at runtime. The parent key identifies the
-// enclosing sing-box option object rather than relying on a suffix heuristic,
-// which would both miss fields such as experimental.clash_api.external_ui and
-// acme.data_directory and incorrectly treat URL fields named path as files.
+// resolved as filesystem resources at runtime, keyed by the enclosing option
+// object. It is derived from the sing-box v1.13.19 option package, which is the
+// version used by the real deployment target, and covers every field that
+// sing-box opens, reads, creates, or persists through its working directory.
+// The parent key is used instead of a suffix heuristic so URL fields named path
+// (HTTP/transport) are not mistaken for files while directory resources such as
+// acme.data_directory, external_ui, and certificate_directory_path are caught.
 var singBoxResourceFieldsByParent = map[string][]singBoxResourceField{
 	"log": {
 		{key: "output", kind: singBoxFileResource, allowLogSpecial: true},
+	},
+	"certificate": {
+		{key: "certificate_path", kind: singBoxFileResource},
+		{key: "certificate_directory_path", kind: singBoxDirectoryResource},
 	},
 	"tls": {
 		{key: "certificate_path", kind: singBoxFileResource},
@@ -798,11 +805,16 @@ var singBoxResourceFieldsByParent = map[string][]singBoxResourceField{
 		{key: "external_ui", kind: singBoxDirectoryResource},
 		{key: "cache_file", kind: singBoxFileResource},
 	},
+	"masquerade": {
+		// Hysteria2 masquerade type=file serves a directory.
+		{key: "directory", kind: singBoxDirectoryResource},
+	},
 }
 
 // singBoxTypeResourceFields covers sing-box option objects that are identified
-// by their type discriminator rather than by a stable parent key, such as the
-// local rule set and the SSH and Tor outbounds.
+// by their type discriminator rather than by a stable parent key, including
+// the local rule set, SSH/Tor outbounds, Tailscale endpoints, and the CCM, OCM,
+// DERP, and SSM-API services from the v1.13.19 option package.
 func singBoxTypeResourceFields(nodeType string) []singBoxResourceField {
 	switch nodeType {
 	case "local":
@@ -814,6 +826,29 @@ func singBoxTypeResourceFields(nodeType string) []singBoxResourceField {
 			{key: "executable_path", kind: singBoxFileResource},
 			{key: "data_directory", kind: singBoxDirectoryResource},
 		}
+	case "tailscale":
+		// Tailscale endpoint and tailscale DNS server persist state in this
+		// directory; the DERP service uses config_path and mesh_psk_file.
+		return []singBoxResourceField{
+			{key: "state_directory", kind: singBoxDirectoryResource},
+			{key: "config_path", kind: singBoxFileResource},
+			{key: "mesh_psk_file", kind: singBoxFileResource},
+		}
+	case "ccm", "ocm":
+		return []singBoxResourceField{
+			{key: "credential_path", kind: singBoxFileResource},
+			{key: "usages_path", kind: singBoxFileResource},
+		}
+	case "derp":
+		return []singBoxResourceField{
+			{key: "config_path", kind: singBoxFileResource},
+			{key: "mesh_psk_file", kind: singBoxFileResource},
+		}
+	case "ssm-api":
+		return []singBoxResourceField{{key: "cache_path", kind: singBoxFileResource}}
+	case "hosts":
+		// DNS hosts server reads one or more hosts files.
+		return []singBoxResourceField{{key: "path", kind: singBoxFileResource}}
 	default:
 		return nil
 	}
@@ -825,13 +860,36 @@ var singBoxGlobalResourceFields = []singBoxResourceField{
 	{key: "protect_path", kind: singBoxFileResource},
 }
 
+// singBoxResourceNameSuffixes is a conservative, non-ambiguous fallback for
+// sing-box fields whose JSON key ends in a filesystem-resource naming
+// convention. It deliberately excludes the bare URL-valued path field on
+// HTTP/transport objects and the process_path/process_path_regex rule matching
+// patterns, which are not files opened from the configuration. Any future
+// sing-box resource field that follows these conventions is still rejected
+// when its value is relative, instead of silently drifting with the working
+// directory.
+var singBoxResourceNameSuffixes = []string{
+	"_path",
+	"_file",
+	"_dir",
+	"_directory",
+	"_ui",
+}
+
+// singBoxResourceNameExceptions are keys that match a resource suffix but are
+// not filesystem resources read from the working directory.
+var singBoxResourceNameExceptions = map[string]struct{}{
+	"process_path":       {},
+	"process_path_regex": {},
+}
+
 // validateNoRelativeSingBoxResources fails closed for every sing-box option field
 // that sing-box resolves against its working directory. By enumerating the
-// official option contract by enclosing object instead of matching a *_path
-// suffix, it also catches directory resources (external_ui, acme/tor
-// data_directory) and the string-list forms that sing-box accepts for client
-// certificates. A value may be a single string or an array of strings; every
-// path must be absolute or migration cannot preserve the original semantics.
+// official option contract by enclosing object and type discriminator, then
+// applying a non-ambiguous resource-name fallback, it catches every current
+// file and directory resource (including string-array forms) without treating
+// URL path fields as files. Every path must be absolute or migration cannot
+// preserve the original semantics.
 func validateNoRelativeSingBoxResources(content string) error {
 	var root any
 	if err := json.Unmarshal([]byte(content), &root); err != nil {
@@ -880,6 +938,27 @@ func validateSingBoxResourceNodes(value any, parentKey, nodeType string) error {
 				}
 			}
 		}
+		for key, raw := range node {
+			field, ok := singBoxResourceFieldForName(key)
+			if !ok {
+				continue
+			}
+			alreadyChecked := false
+			for _, explicit := range append(append([]singBoxResourceField{},
+				singBoxResourceFieldsByParent[parentKey]...),
+				append(singBoxTypeResourceFields(nodeType), singBoxGlobalResourceFields...)...) {
+				if explicit.key == key {
+					alreadyChecked = true
+					break
+				}
+			}
+			if alreadyChecked {
+				continue
+			}
+			if err := checkSingBoxResourceField(field, raw); err != nil {
+				return err
+			}
+		}
 		for key, child := range node {
 			if err := validateSingBoxResourceNodes(child, key, ""); err != nil {
 				return err
@@ -893,6 +972,32 @@ func validateSingBoxResourceNodes(value any, parentKey, nodeType string) error {
 		}
 	}
 	return nil
+}
+
+// singBoxResourceFieldForName maps a key to a filesystem-resource field when it
+// follows a resource naming convention and is not a process-path or URL field.
+func singBoxResourceFieldForName(key string) (singBoxResourceField, bool) {
+	if _, exception := singBoxResourceNameExceptions[key]; exception {
+		return singBoxResourceField{}, false
+	}
+	if key == "path" {
+		// Bare path is URL-valued on HTTP/transport objects and only a resource
+		// in the explicit parent/type contract (geoip, geosite, cache_file,
+		// hosts, local rule set).
+		return singBoxResourceField{}, false
+	}
+	for _, suffix := range singBoxResourceNameSuffixes {
+		if strings.HasSuffix(key, suffix) {
+			kind := singBoxFileResource
+			if strings.HasSuffix(key, "_directory") || strings.HasSuffix(key, "_dir") ||
+				strings.HasSuffix(key, "data_directory") || strings.HasSuffix(key, "state_directory") ||
+				strings.HasSuffix(key, "_ui") || key == "certificate_directory_path" {
+				kind = singBoxDirectoryResource
+			}
+			return singBoxResourceField{key: key, kind: kind}, true
+		}
+	}
+	return singBoxResourceField{}, false
 }
 
 func checkSingBoxResourceField(field singBoxResourceField, value any) error {
