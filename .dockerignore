@@ -14,6 +14,8 @@ deploy/*
 !deploy/remote/install-agent.sh
 !deploy/bootstrap-core-services.sh
 !deploy/existing-core-mapping.sh
+!deploy/openrc/
+!deploy/openrc/*
 !deploy/systemd/
 !deploy/systemd/*.service
 examples/*
