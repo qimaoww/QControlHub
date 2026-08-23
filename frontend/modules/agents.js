@@ -3,7 +3,7 @@ import {
   createInteractionGate,
   createRefreshChannel,
 } from "./refresh.js";
-import { formatConfigContent } from "./code-format.js";
+import { ConfigFormatError, formatConfigContent } from "./code-format.js";
 
 export function developmentSourceVisible(engine, channel) {
   return engine === "mihomo" && channel === "development";
@@ -1545,6 +1545,7 @@ function bindCodeEditors() {
       if (new Blob([input.value]).size > maxBytes) {
         if (validation) validation.textContent = "配置源码超过 2 MiB 上限，无法格式化。";
         if (status) status.textContent = "内容过大";
+        if (statusDot) statusDot.style.background = "var(--red)";
         return;
       }
       try {
@@ -1561,6 +1562,7 @@ function bindCodeEditors() {
           if (validation)
             validation.textContent = "格式化后超过 2 MiB 上限，已保留原文。";
           if (status) status.textContent = "内容过大";
+          if (statusDot) statusDot.style.background = "var(--red)";
           return;
         }
         input.value = formatted;
@@ -1584,8 +1586,11 @@ function bindCodeEditors() {
         input.scrollLeft = scrollLeft;
         if (validation)
           validation.textContent =
-            error?.message || "当前内容无法安全格式化。";
+            error instanceof ConfigFormatError
+              ? error.message
+              : "当前内容无法安全格式化。";
         if (status) status.textContent = "无法格式化";
+        if (statusDot) statusDot.style.background = "var(--red)";
       }
     };
     bindEvent(format, "click", runFormat);

@@ -968,7 +968,7 @@ async function archiveConfigs() {
   const archiveEngine = archiveForm?.querySelector('select[name="engine"]');
   if (archiveEngine && !archiveEngine.disabled) {
     bindEvent(archiveEngine, "change", () => {
-      const editor = document.querySelector("[data-code-editor]");
+      const editor = archiveForm.querySelector("[data-code-editor]");
       if (!editor) return;
       const engine = archiveEngine.value;
       const language = engine === "mihomo" ? "YAML" : "JSON";

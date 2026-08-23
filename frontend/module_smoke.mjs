@@ -2219,6 +2219,7 @@ try {
     JSON.stringify(Array(840001).fill(0)),
     "JSON",
   );
+  const deepEditor = buildEditor("[".repeat(600000), "JSON");
   let editorQueryCalls = 0;
 
   globalThis.document = {
@@ -2226,7 +2227,7 @@ try {
     querySelectorAll(selector) {
       if (selector === "[data-code-editor]") {
         editorQueryCalls += 1;
-        return [editor, readonlyEditor, brokenEditor, largeEditor];
+        return [editor, readonlyEditor, brokenEditor, largeEditor, deepEditor];
       }
       return [];
     },
@@ -2300,6 +2301,34 @@ try {
       true,
       "failure surfaces a local, explicit message",
     );
+    assert.equal(
+      brokenEditor.statusDot.style.background,
+      "var(--red)",
+      "failure marks the status dot red",
+    );
+
+    const deepSnapshot = deepEditor.input.value;
+    deepEditor.format.dispatch("click", {});
+    assert.equal(
+      deepEditor.input.value,
+      deepSnapshot,
+      "over-deep content is preserved on failure",
+    );
+    assert.equal(
+      deepEditor.dataset.dirty,
+      "0",
+      "over-deep failure keeps the dirty baseline unchanged",
+    );
+    assert.equal(
+      deepEditor.validation.textContent,
+      "当前内容无法安全格式化。",
+      "internal formatter errors fall back to a generic local message",
+    );
+    assert.equal(
+      deepEditor.statusDot.style.background,
+      "var(--red)",
+      "over-deep failure marks the status dot red",
+    );
 
     const largeSnapshot = largeEditor.input.value;
     largeEditor.format.dispatch("click", {});
@@ -2317,6 +2346,11 @@ try {
       /超过 2 MiB 上限/.test(largeEditor.validation.textContent),
       true,
       "over-limit result shows a local error without submitting",
+    );
+    assert.equal(
+      largeEditor.statusDot.style.background,
+      "var(--red)",
+      "over-limit result marks the status dot red",
     );
   } finally {
     if (formatDocument === undefined) delete globalThis.document;
@@ -2443,6 +2477,7 @@ try {
   const archiveForm = {
     querySelector(selector) {
       if (selector === 'select[name="engine"]') return engineSelect;
+      if (selector === "[data-code-editor]") return archiveEditor;
       return null;
     },
     addEventListener() {},
