@@ -5,6 +5,7 @@ import (
 	"errors"
 	"math"
 	"net"
+	"net/netip"
 	"strings"
 	"time"
 
@@ -70,7 +71,36 @@ func encodeHeartbeatMetrics(input *core.HostMetrics, receivedAt time.Time) ([]by
 	} else {
 		metrics.ObservedPublicIP = ""
 	}
+	if err := validateProbedPublicAddress(&metrics.PublicIPv4, true); err != nil {
+		return nil, err
+	}
+	if err := validateProbedPublicAddress(&metrics.PublicIPv6, false); err != nil {
+		return nil, err
+	}
 	return json.Marshal(metrics)
+}
+
+// validateProbedPublicAddress normalizes an Agent-probed egress address and
+// verifies it belongs to the expected family. Empty stays empty so older
+// Agents that never probe keep working.
+func validateProbedPublicAddress(value *string, wantIPv4 bool) error {
+	if strings.TrimSpace(*value) == "" {
+		*value = ""
+		return nil
+	}
+	normalized := authn.NormalizePublicIP(*value)
+	if normalized == "" {
+		return errors.New("agent reported an invalid probed public address")
+	}
+	address, err := netip.ParseAddr(normalized)
+	if err != nil || address.Is4() != wantIPv4 {
+		if wantIPv4 {
+			return errors.New("agent reported a non-IPv4 public IPv4 address")
+		}
+		return errors.New("agent reported a non-IPv6 public IPv6 address")
+	}
+	*value = normalized
+	return nil
 }
 
 func validReportedInterfaceName(name string) bool {

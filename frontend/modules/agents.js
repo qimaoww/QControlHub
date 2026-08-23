@@ -18,6 +18,83 @@ function mihomoDevelopmentSourceFieldset(canMirror) {
   return `<fieldset class="release-channel-fieldset development-source-field" data-development-source hidden><legend>开发版来源</legend><div class="release-channel-options"><label><input type="radio" name="core_source" value="official" checked><span>MetaCubeX 官方（默认，推荐）</span></label><label><input type="radio" name="core_source" value="mirror" ${canMirror ? "" : "disabled"}><span>vernesong/mihomo Alpha 镜像（第三方）${canMirror ? "" : "（需升级 Agent）"}</span></label></div>${canMirror ? "" : `<p class="source-upgrade-note">当前 Agent 尚未声明 mihomo-development-source-v1，镜像来源不可用；请先在面板升级 Agent。</p>`}</fieldset>`;
 }
 
+// Resolves the display rows for the node's dual-stack public addresses.
+// Probed egress addresses win; the control-plane observation only ever sees
+// the family the WSS connection used, so it is a fallback per family.
+export function publicAddressRows(metrics = {}) {
+  const observed = String(metrics.observed_public_ip || "");
+  const observedIsV4 = observed !== "" && !observed.includes(":");
+  const families = [
+    {
+      label: "IPv4",
+      cls: "v4",
+      probed: metrics.public_ipv4,
+      fallback: observedIsV4 ? observed : "",
+      fallbackSource: "控制面观测",
+    },
+    {
+      label: "IPv6",
+      cls: "v6",
+      probed: metrics.public_ipv6,
+      fallback: !observedIsV4 ? observed : "",
+      fallbackSource: "控制面观测",
+    },
+  ];
+  return families.map((family) => {
+    const probed = String(family.probed || "");
+    if (probed) {
+      return { ...family, value: probed, source: "公网探测", ok: true };
+    }
+    if (family.fallback) {
+      return { ...family, value: family.fallback, source: family.fallbackSource, ok: true };
+    }
+    return { ...family, value: "", source: "等待节点上报", ok: false };
+  });
+}
+
+// Builds a host:port display string. An IPv6 literal must be bracketed before
+// appending the port; a raw "2606:...:443" is not a usable address preview.
+export function formatHostPort(address, port) {
+  const raw = String(address || "").trim();
+  if (!raw) return "";
+  let host = raw;
+  if (raw.startsWith("[") && raw.endsWith("]")) {
+    const inner = raw.slice(1, -1);
+    if (inner.includes(":")) host = inner;
+  }
+  if (!port) return host;
+  return host.includes(":") ? `[${host}]:${port}` : `${host}:${port}`;
+}
+
+export function updatePublicIPDisplays(root, metrics) {
+  const rows = publicAddressRows(metrics || {});
+  for (const container of root.querySelectorAll(".node-card-ips, .node-public-ips")) {
+    const isCard = container.classList.contains("node-card-ips");
+    for (const row of rows) {
+      const selector = isCard
+        ? `.card-ip-row[data-ip-family="${row.cls}"]`
+        : `.public-ip-row[data-ip-family="${row.cls}"]`;
+      const line = container.querySelector(selector);
+      if (!line) continue;
+      const code = line.querySelector("code");
+      if (code) code.textContent = row.value || "未探测到";
+      line.classList.toggle("empty", !row.value);
+      if (!isCard) {
+        const source = line.querySelector("small");
+        if (source) source.textContent = row.source;
+        continue;
+      }
+      const copy = line.querySelector("[data-copy-ip]");
+      if (copy) {
+        copy.dataset.copyIp = row.value || "";
+        copy.title = row.value ? `复制 ${row.label} 地址` : "暂无地址";
+        copy.hidden = !row.value;
+        copy.setAttribute("aria-label", `复制 ${row.label} 公网地址 ${row.value || ""}`);
+      }
+    }
+  }
+}
+
 export function nodeCardDropIndex(rects, pointer, grabOffset = { x: 0, y: 0 }) {
   if (!rects.length) return 0;
   const x = pointer.x - grabOffset.x;
@@ -164,6 +241,12 @@ export function clearNodeCardDragState(
 
 export function installAgents(ctx) {
   const { api, optionalAPI, state, engines, can, esc, engineName, statusTone, serviceStatusName, short, date, ago, heartbeat, percent, bytes, conciseVersion, rate, actionName, serviceActionDisabled, trafficChart, renderConfigDiff, notify, confirmAction, shell } = ctx;
+  const cardIPRow = (row) => {
+    const value = row.value || "";
+    const title = value ? `复制 ${row.label} 地址` : "暂无地址";
+    const aria = `复制 ${row.label} 公网地址 ${value}`;
+    return `<span class="card-ip-row ${value ? "" : "empty"}" data-ip-family="${row.cls}"><i class="ip-family ${row.cls}">${row.label}</i><code title="${esc(value)}">${esc(value || "未探测到")}</code><button type="button" class="card-ip-copy" data-copy-ip="${esc(value)}" aria-label="${esc(aria)}" title="${esc(title)}" ${value ? "" : "hidden"}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/><path class="copy-check" d="m9.5 13.5 2 2 4-4.5"/></svg></button></span>`;
+  };
   const metricsRefresh = createRefreshChannel({
     isCurrent: () => state.route === "node-settings",
     getScope: () => state.navigationEpoch,
@@ -334,10 +417,7 @@ async function nodeSettings(presetMode = false, { overview: preloadedOverview } 
           const port = firstProfile?.profile?.fields?.find(
             (field) => field.label === "端口",
           )?.value;
-          const endpoint =
-            access && port
-              ? `${access.address}:${port}`
-              : access?.address || "";
+          const endpoint = access ? formatHostPort(access.address, port) : "";
           const installed = Boolean(runtime.installed);
           const canMirror = (agent.features || []).includes(
             "mihomo-development-source-v1",
@@ -405,7 +485,7 @@ async function nodeSettings(presetMode = false, { overview: preloadedOverview } 
           <div class="node-settings-panels">
             <section id="${esc(tabID("cores-panel"))}" class="node-tab-panel node-cores-panel" data-node-panel="cores" role="tabpanel" aria-labelledby="${esc(tabID("cores-tab"))}" ${activeTab === "cores" ? "" : "hidden"}><header class="node-panel-heading"><div><h3>内核管理</h3><small>服务状态与版本</small></div><span data-installed-summary>${installedCount ? `${installedCount} 个已安装` : "尚未安装内核"}</span></header><div class="core-runtime-list">${services}</div></section>
             <section id="${esc(tabID("metrics-panel"))}" class="node-tab-panel node-metrics-panel" data-node-panel="metrics" role="tabpanel" aria-labelledby="${esc(tabID("metrics-tab"))}" ${activeTab === "metrics" ? "" : "hidden"}><header class="node-panel-heading"><div><h3>流量趋势</h3><small>最近 24 小时</small></div><span data-metric-text="stamp">${metrics.collected_at ? `采集于 ${ago(metrics.collected_at)}` : "等待资源数据"}</span></header><section class="metric-trend-empty" data-metric-history="${esc(agent.id)}" aria-label="暂无指标趋势"><span>⌁</span><b>正在载入指标趋势</b><small>节点上报指标后显示最近 24 小时的上下行速率。</small></section></section>
-            <section id="${esc(tabID("agent-panel"))}" class="node-tab-panel node-agent-panel" data-node-panel="agent" role="tabpanel" aria-labelledby="${esc(tabID("agent-tab"))}" ${activeTab === "agent" ? "" : "hidden"}><header class="node-panel-heading"><div><h3>Agent 与身份</h3><small>注册信息和安全通道</small></div><span data-agent-version>${esc(agent.version || "未知")}</span></header><dl class="identity-list node-identity-list"><div><dt>节点 ID</dt><dd><code>${esc(agent.id)}</code></dd></div><div><dt>系统平台</dt><dd>${esc(agent.os)} / ${esc(agent.arch)}</dd></div><div><dt>Agent 版本</dt><dd data-agent-version>${esc(agent.version || "未知")}</dd></div><div><dt>注册时间</dt><dd>${date(agent.enrolled_at)}</dd></div><div><dt>安全通道</dt><dd>WSS · Ed25519 签名</dd></div></dl>${labels ? `<div class="labels">${labels}</div>` : ""}<footer class="node-identity-refresh"><span>节点身份已验证</span><div></div></footer>${can("agents.manage") ? `<section class="node-danger-zone"><span><b>删除节点</b><small>断开节点并清理关联配置；QAgent 不会被远程卸载。</small></span><button class="button small danger-button" type="button" data-delete="${esc(agent.id)}">删除节点</button></section>` : ""}</section>
+            <section id="${esc(tabID("agent-panel"))}" class="node-tab-panel node-agent-panel" data-node-panel="agent" role="tabpanel" aria-labelledby="${esc(tabID("agent-tab"))}" ${activeTab === "agent" ? "" : "hidden"}><header class="node-panel-heading"><div><h3>Agent 与身份</h3><small>注册信息和安全通道</small></div><span data-agent-version>${esc(agent.version || "未知")}</span></header><dl class="identity-list node-identity-list"><div><dt>节点 ID</dt><dd><code>${esc(agent.id)}</code></dd></div><div><dt>系统平台</dt><dd>${esc(agent.os)} / ${esc(agent.arch)}</dd></div><div><dt>Agent 版本</dt><dd data-agent-version>${esc(agent.version || "未知")}</dd></div><div><dt>注册时间</dt><dd>${date(agent.enrolled_at)}</dd></div><div><dt>安全通道</dt><dd>WSS · Ed25519 签名</dd></div></dl><section class="node-public-ips" aria-label="公网地址"><header><b>公网地址 · 双栈</b><small>出口探测优先 · 控制面观测兜底</small></header>${publicAddressRows(metrics).map((row) => `<div class="public-ip-row ${row.ok ? "" : "empty"}" data-ip-family="${row.cls}"><span class="ip-family ${row.cls}">${row.label}</span><code>${esc(row.value || "未探测到")}</code><small>${esc(row.source)}</small></div>`).join("")}</section>${labels ? `<div class="labels">${labels}</div>` : ""}<footer class="node-identity-refresh"><span>节点身份已验证</span><div></div></footer>${can("agents.manage") ? `<section class="node-danger-zone"><span><b>删除节点</b><small>断开节点并清理关联配置；QAgent 不会被远程卸载。</small></span><button class="button small danger-button" type="button" data-delete="${esc(agent.id)}">删除节点</button></section>` : ""}</section>
           </div>
         </section>`;
       }
@@ -428,6 +508,7 @@ async function nodeSettings(presetMode = false, { overview: preloadedOverview } 
           .join("");
         return `<a class="node-card" href="#settings-node-${esc(agent.id)}" data-refresh-key="agent-${esc(agent.id)}" data-agent-node="${esc(agent.id)}" data-agent-metrics="${esc(agent.id)}" data-state="${agent.status === "online" ? "online" : "offline"}" data-available="${metrics.collected_at ? 1 : 0}">
               <header class="node-card-head"><span class="machine-avatar" aria-hidden="true">●</span><div class="node-card-title"><strong>${esc(agent.name)}</strong><small>${esc(agent.os)} / ${esc(agent.arch)} · ${installedCount ? `${installedCount}/${(agent.capabilities || []).length} 内核已安装` : "尚未安装内核"}</small></div><span class="node-card-state"><i class="status-dot ${statusTone(agent.status)}" data-agent-status-dot></i><b data-agent-status-label>${agent.status === "online" ? "在线" : "离线"}</b><small data-agent-heartbeat>${esc(heartbeat(agent.last_seen))}</small></span><span class="node-card-grip" title="拖动调整顺序" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 6h.01M9 12h.01M9 18h.01M15 6h.01M15 12h.01M15 18h.01"/></svg></span></header>
+              <div class="node-card-ips" aria-label="公网地址">${publicAddressRows(metrics).map(cardIPRow).join("")}</div>
               <section class="node-card-resources" aria-label="节点资源"><div><span>CPU</span><strong data-metric-text="cpu">${metrics.cpu_available ? `${Number(metrics.cpu_percent).toFixed(1)}%` : "等待采集"}</strong><progress aria-label="CPU 使用率" data-metric-progress="cpu" max="100" value="${metrics.cpu_available ? Number(metrics.cpu_percent) : 0}"></progress></div><div><span>内存</span><strong data-metric-text="memory">${metrics.memory_available ? `${bytes(metrics.memory_used_bytes)} / ${bytes(metrics.memory_total_bytes)}` : "等待采集"}</strong><progress aria-label="内存使用率" data-metric-progress="memory" max="100" value="${percent(metrics.memory_used_bytes, metrics.memory_total_bytes)}"></progress></div><div><span>磁盘</span><strong data-metric-text="disk">${metrics.disk_available ? `${bytes(metrics.disk_used_bytes)} / ${bytes(metrics.disk_total_bytes)}` : "等待采集"}</strong><progress aria-label="根磁盘使用率" data-metric-progress="disk" max="100" value="${percent(metrics.disk_used_bytes, metrics.disk_total_bytes)}"></progress></div><div><span>网络</span><strong>↓ <i data-metric-text="download-rate">${metrics.network_available ? rate(metrics.network_rx_bps) : "等待采集"}</i> · ↑ <i data-metric-text="upload-rate">${metrics.network_available ? rate(metrics.network_tx_bps) : "等待采集"}</i></strong><small>累计 ↓ <b data-metric-text="download-total">${metrics.network_available ? bytes(metrics.network_rx_bytes) : "—"}</b> · ↑ <b data-metric-text="upload-total">${metrics.network_available ? bytes(metrics.network_tx_bytes) : "—"}</b></small></div><span class="machine-resource-live" data-metric-poll role="status" aria-label="资源自动更新"></span></section>
               <section class="node-card-cores" aria-label="内核状态">${coreChips}</section>
               <footer class="node-card-foot"><small><i></i><span data-agent-version>${esc(agent.version || "未知")}</span></small><span class="node-card-stamp" data-metric-text="stamp">${metrics.collected_at ? `采集于 ${ago(metrics.collected_at)}` : "等待资源数据"}</span><span class="node-card-open">管理节点 <i aria-hidden="true">→</i></span></footer>
@@ -1058,6 +1139,35 @@ function bindAgentPage(agentItems, presetMode = false) {
   });
   const cardGrid = document.querySelector(".node-card-grid");
   if (cardGrid) enableCardDrag(cardGrid);
+  document.querySelectorAll("[data-copy-ip]").forEach((button) => {
+    bindEvent(button, "click", async (event) => {
+      // The card itself is a link to the node workspace; copying must not
+      // navigate away from the overview.
+      event.preventDefault();
+      event.stopPropagation();
+      const value = button.dataset.copyIp;
+      if (!value) return;
+      try {
+        await navigator.clipboard.writeText(value);
+      } catch {
+        const fallback = document.createElement("textarea");
+        fallback.value = value;
+        fallback.style.position = "fixed";
+        fallback.style.opacity = "0";
+        document.body.append(fallback);
+        fallback.select();
+        document.execCommand("copy");
+        fallback.remove();
+      }
+      const originalTitle = button.title;
+      button.classList.add("copied");
+      button.title = "已复制";
+      window.setTimeout(() => {
+        button.classList.remove("copied");
+        if (button.isConnected) button.title = originalTitle;
+      }, 1600);
+    });
+  });
   clearTimeout(state.agentPollTimer);
   if (!presetMode && can("metrics.read"))
     state.agentPollTimer = setTimeout(pollAgentMetrics, 2000);
@@ -1223,6 +1333,7 @@ function updateAgentMetrics(item) {
   root.querySelectorAll(".core-version-form button[type=submit]").forEach(
     (button) => (button.disabled = !online || !can("operator")),
   );
+  updatePublicIPDisplays(root, metrics);
 }
 
 async function pollAgentMetrics() {
@@ -1495,6 +1606,7 @@ function showCommand(command, onClose, heading = "一键添加 QAgent 节点") {
     bindCodeEditors,
     showCommand,
     pollAgentMetrics,
+    updateAgentMetrics,
     cancelAgentInteractions,
     compactPresetPage,
   };

@@ -6,8 +6,11 @@ import {
   clearNodeCardDragState,
   coreSourceForInstall,
   developmentSourceVisible,
+  formatHostPort,
   installAgents,
   nodeCardDropIndex,
+  publicAddressRows,
+  updatePublicIPDisplays,
 } from "./modules/agents.js";
 import { coreSourceLabel, coreSourceName } from "./modules/tasks.js";
 import { installClientAccess } from "./modules/client-access.js";
@@ -1444,5 +1447,317 @@ try {
     else globalThis.HTMLDetailsElement = presetDomDetails;
     if (presetDomCSS === undefined) delete globalThis.CSS;
     else globalThis.CSS = presetDomCSS;
+  }
+}
+
+// Dual-stack public address display regressions.
+const ipRows = publicAddressRows({
+  observed_public_ip: "93.184.216.34",
+  public_ipv4: "198.35.26.96",
+  public_ipv6: "2606:4700:4700::1111",
+});
+assert.equal(ipRows.length, 2);
+assert.equal(ipRows[0].value, "198.35.26.96");
+assert.equal(ipRows[0].source, "公网探测");
+assert.equal(ipRows[0].ok, true);
+assert.equal(ipRows[1].value, "2606:4700:4700::1111");
+
+const fallbackRows = publicAddressRows({ observed_public_ip: "93.184.216.34" });
+assert.equal(fallbackRows[0].value, "93.184.216.34");
+assert.equal(fallbackRows[0].source, "控制面观测");
+assert.equal(fallbackRows[1].value, "");
+assert.equal(fallbackRows[1].ok, false);
+
+assert.equal(
+  formatHostPort("2606:4700:4700::1111", "443"),
+  "[2606:4700:4700::1111]:443",
+);
+assert.equal(
+  formatHostPort("[2606:4700:4700::1111]", "443"),
+  "[2606:4700:4700::1111]:443",
+);
+assert.equal(formatHostPort("[::1]", "443"), "[::1]:443");
+assert.equal(formatHostPort("93.184.216.34", "443"), "93.184.216.34:443");
+assert.equal(formatHostPort("node.example.com", "8443"), "node.example.com:8443");
+assert.equal(formatHostPort("", "443"), "");
+
+{
+  const codeV4 = { textContent: "" };
+  const copyV4 = {
+    dataset: { copyIp: "" },
+    hidden: true,
+    title: "",
+    setAttribute() {},
+  };
+  const lineV4 = {
+    querySelector(sel) {
+      if (sel === "code") return codeV4;
+      if (sel === "[data-copy-ip]") return copyV4;
+      return null;
+    },
+    classList: { toggle() {} },
+  };
+  const container = {
+    classList: { contains(cls) { return cls === "node-card-ips"; } },
+    querySelector(sel) {
+      return sel === '.card-ip-row[data-ip-family="v4"]' ? lineV4 : null;
+    },
+  };
+  const root = {
+    dataset: {},
+    querySelector() { return null; },
+    querySelectorAll(sel) {
+      return sel === ".node-card-ips, .node-public-ips" ? [container] : [];
+    },
+  };
+  updatePublicIPDisplays(root, { public_ipv4: "198.35.26.10", public_ipv6: "" });
+  assert.equal(codeV4.textContent, "198.35.26.10");
+  assert.equal(copyV4.dataset.copyIp, "198.35.26.10");
+  assert.equal(copyV4.hidden, false);
+}
+
+{
+  const code = { textContent: "" };
+  const small = { textContent: "" };
+  const line = {
+    querySelector(sel) {
+      if (sel === "code") return code;
+      if (sel === "small") return small;
+      return null;
+    },
+    classList: { toggle() {} },
+  };
+  const container = {
+    classList: { contains(cls) { return cls === "node-public-ips"; } },
+    querySelector(sel) {
+      return sel === '.public-ip-row[data-ip-family="v6"]' ? line : null;
+    },
+  };
+  const root = {
+    dataset: {},
+    querySelector() { return null; },
+    querySelectorAll(sel) {
+      return sel === ".node-card-ips, .node-public-ips" ? [container] : [];
+    },
+  };
+  updatePublicIPDisplays(root, { public_ipv6: "2606:4700:4700::1111" });
+  assert.equal(code.textContent, "2606:4700:4700::1111");
+  assert.equal(small.textContent, "公网探测");
+}
+
+// Runtime smoke: a normal node-settings overview render must not throw
+// ReferenceError for esc inside cardIPRow, and must emit the probe rows.
+{
+  const previousDocument = globalThis.document;
+  const previousSetTimeout = globalThis.setTimeout;
+  const previousClearTimeout = globalThis.clearTimeout;
+  globalThis.setTimeout = () => 0;
+  globalThis.clearTimeout = () => {};
+  globalThis.document = {
+    querySelector: () => null,
+    querySelectorAll: () => [],
+  };
+  try {
+  const overviewState = {
+    route: "node-settings",
+    navigationEpoch: 1,
+    anchor: "node-settings",
+    data: {},
+  };
+  let overviewMarkup = "";
+  const overviewAgents = [
+    {
+      id: "alpha",
+      name: "Alpha",
+      os: "linux",
+      arch: "amd64",
+      status: "online",
+      version: "1.2.3",
+      capabilities: ["mihomo"],
+      features: [],
+      metrics: {
+        public_ipv4: "198.35.26.96",
+        public_ipv6: "",
+        collected_at: "now",
+      },
+      runtime: {
+        mihomo: {
+          installed: true,
+          version: "1.19.0",
+          service_status: "running",
+        },
+      },
+      last_seen: "now",
+      enrolled_at: "now",
+    },
+  ];
+  const overviewCtx = new Proxy(
+    {
+      state: overviewState,
+      engines: ["mihomo"],
+      api: async (path) => {
+        if (path === "/agents") return overviewAgents;
+        if (path === "/overview") return { agents: 1, agents_online: 1 };
+        if (path === "/enrollment-tokens") return [];
+        if (path.endsWith("/configs")) return [];
+        if (path === "/deployments" || path === "/client-access") return [];
+        return [];
+      },
+      optionalAPI: async () => null,
+      can: () => true,
+      esc: (value) => String(value ?? ""),
+      engineName: (value) => value,
+      serviceStatusName: (value) => value,
+      statusTone: (value) => value,
+      conciseVersion: (_engine, value) => value,
+      ago: () => "刚刚",
+      heartbeat: () => "刚刚",
+      bytes: (value) => `${value || 0} B`,
+      percent: (used, limit) => (limit ? Number(used || 0) / limit : 0),
+      rate: (value) => `${value || 0} B/s`,
+      actionName: (value) => value,
+      serviceActionDisabled: () => false,
+      trafficChart: () => "",
+      renderConfigDiff: () => "",
+      notify: () => {},
+      confirmAction: () => {},
+      short: (value) => value,
+      date: (value) => value,
+      shell: (markup) => {
+        overviewMarkup = markup;
+      },
+    },
+    { get: (target, key) => target[key] ?? noop },
+  );
+  const { nodeSettings: renderOverview } = installAgents(overviewCtx);
+  await renderOverview(false, { overview: { agents: 1, agents_online: 1 } });
+  assert.equal(
+    overviewMarkup.includes('class="node-card-ips"'),
+    true,
+    "node-settings overview card renders the public-address strip",
+  );
+  assert.equal(
+    overviewMarkup.includes("198.35.26.96"),
+    true,
+    "node-settings card prints the probed IPv4 address",
+  );
+  assert.equal(
+    overviewMarkup.includes("data-copy-ip"),
+    true,
+    "node-settings card keeps a copy button",
+  );
+  } finally {
+    if (previousSetTimeout === undefined) delete globalThis.setTimeout;
+    else globalThis.setTimeout = previousSetTimeout;
+    if (previousClearTimeout === undefined) delete globalThis.clearTimeout;
+    else globalThis.clearTimeout = previousClearTimeout;
+    if (previousDocument === undefined) delete globalThis.document;
+    else globalThis.document = previousDocument;
+  }
+}
+
+// Runtime smoke: the real metrics patch path (pollAgentMetrics ->
+// updateAgentMetrics -> updatePublicIPDisplays) updates the card rows and
+// copy-button state instead of only the direct helper.
+{
+  const previousDocument = globalThis.document;
+  const previousCSS = globalThis.CSS;
+  const previousSetTimeout = globalThis.setTimeout;
+  const previousClearTimeout = globalThis.clearTimeout;
+  globalThis.setTimeout = () => 0;
+  globalThis.clearTimeout = () => {};
+  globalThis.CSS = { escape: (value) => String(value) };
+  const metricState = {
+    route: "node-settings",
+    navigationEpoch: 1,
+    data: {},
+  };
+  const codeV4 = { textContent: "" };
+  const copyV4 = {
+    dataset: { copyIp: "" },
+    hidden: true,
+    title: "",
+    setAttribute() {},
+  };
+  const lineV4 = {
+    querySelector(sel) {
+      if (sel === "code") return codeV4;
+      if (sel === "[data-copy-ip]") return copyV4;
+      return null;
+    },
+    classList: { toggle() {} },
+  };
+  const container = {
+    classList: { contains(cls) { return cls === "node-card-ips"; } },
+    querySelector(sel) {
+      return sel === '.card-ip-row[data-ip-family="v4"]' ? lineV4 : null;
+    },
+  };
+  const root = {
+    dataset: { available: "0" },
+    querySelector() { return null; },
+    querySelectorAll(sel) {
+      if (sel === ".node-card-ips, .node-public-ips") return [container];
+      return [];
+    },
+  };
+  globalThis.document = {
+    hidden: false,
+    querySelector(sel) {
+      return sel.includes("data-agent-metrics") ? root : null;
+    },
+    querySelectorAll() { return []; },
+  };
+  try {
+    const { updateAgentMetrics } = installAgents(
+      new Proxy(
+        {
+          state: metricState,
+          engines: [],
+          api: async () => [],
+          optionalAPI: async () => null,
+          can: () => true,
+          esc: (value) => String(value ?? ""),
+          engineName: (value) => value,
+          serviceStatusName: (value) => value,
+          statusTone: (value) => value,
+          conciseVersion: (_engine, value) => value,
+          ago: () => "刚刚",
+          heartbeat: () => "刚刚",
+          bytes: (value) => `${value || 0} B`,
+          percent: (used, limit) => (limit ? Number(used || 0) / limit : 0),
+          rate: (value) => `${value || 0} B/s`,
+          actionName: (value) => value,
+          serviceActionDisabled: () => false,
+          trafficChart: () => "",
+          renderConfigDiff: () => "",
+          notify: () => {},
+          confirmAction: () => {},
+          short: (value) => value,
+          date: (value) => value,
+        },
+        { get: (target, key) => target[key] ?? noop },
+      ),
+    );
+    updateAgentMetrics({
+      id: "alpha",
+      status: "online",
+      metrics: { public_ipv4: "198.35.26.10", public_ipv6: "" },
+      runtime: {},
+      version: "1.2.3",
+      last_seen: "now",
+    });
+    assert.equal(codeV4.textContent, "198.35.26.10");
+    assert.equal(copyV4.dataset.copyIp, "198.35.26.10");
+    assert.equal(copyV4.hidden, false);
+  } finally {
+    if (previousSetTimeout === undefined) delete globalThis.setTimeout;
+    else globalThis.setTimeout = previousSetTimeout;
+    if (previousClearTimeout === undefined) delete globalThis.clearTimeout;
+    else globalThis.clearTimeout = previousClearTimeout;
+    if (previousCSS === undefined) delete globalThis.CSS;
+    else globalThis.CSS = previousCSS;
+    if (previousDocument === undefined) delete globalThis.document;
+    else globalThis.document = previousDocument;
   }
 }

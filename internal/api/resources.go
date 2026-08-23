@@ -577,6 +577,23 @@ func clientAddressCandidates(agent core.Agent) []clientAddressCandidate {
 			}
 		}
 	}
+	// The Agent probes each family outbound, so both routable egress addresses
+	// are known even when the control-plane connection itself used only one.
+	for _, probed := range []struct {
+		value  string
+		source string
+	}{
+		{agent.Metrics.PublicIPv4, "节点公网探测 · IPv4"},
+		{agent.Metrics.PublicIPv6, "节点公网探测 · IPv6"},
+	} {
+		if probed.value == "" {
+			continue
+		}
+		if _, exists := seen[probed.value]; !exists {
+			seen[probed.value] = struct{}{}
+			result = append(result, clientAddressCandidate{address: probed.value, source: probed.source})
+		}
+	}
 	if address := authn.NormalizePublicIP(agent.Metrics.ObservedPublicIP); address != "" {
 		if _, exists := seen[address]; !exists {
 			seen[address] = struct{}{}
