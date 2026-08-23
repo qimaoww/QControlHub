@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -970,6 +971,38 @@ func validateSingBoxResourceNodes(value any, parentKey, nodeType string) error {
 				return err
 			}
 		}
+	case string:
+		// The Hysteria2 masquerade option is polymorphic: a JSON string is a
+		// URL that sing-box parses into a file, proxy, or string masquerade.
+		if parentKey != "masquerade" {
+			return nil
+		}
+		return validateSingBoxMasqueradeURL(node)
+	}
+	return nil
+}
+
+// validateSingBoxMasqueradeURL applies the sing-box v1.13.19 URL semantics for
+// the Hysteria2 masquerade string form. A file: URL is served by http.Dir on
+// its path, so a relative path would resolve against the process working
+// directory and drift after migration; it is rejected unless the directory is
+// absolute. http/https URLs are network proxies and are not filesystem
+// resources. Unknown or malformed schemes are left to the real core to reject
+// strictly.
+func validateSingBoxMasqueradeURL(raw string) error {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return nil
+	}
+	switch parsed.Scheme {
+	case "file":
+		if parsed.Path == "" || !filepath.IsAbs(parsed.Path) {
+			return fmt.Errorf("relative sing-box directory resource path in masquerade (%q) cannot be migrated safely", raw)
+		}
+	case "http", "https":
+		// Network proxy URL, not a filesystem resource.
+	default:
+		// Unknown scheme: let the real core reject it.
 	}
 	return nil
 }

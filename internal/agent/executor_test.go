@@ -423,11 +423,27 @@ func TestValidateNoRelativeSingBoxResourcesContract(t *testing.T) {
 			wantErr:  false,
 		},
 		"relative hysteria2 masquerade file directory": {
-			contents: `{"inbounds":[{"type":"hysteria2","listen":"127.0.0.1","listen_port":443,"users":[{"password":"testpw"}],"masquerade":[{"type":"file","directory":"webroot"}]}]}`,
+			contents: `{"inbounds":[{"type":"hysteria2","listen":"127.0.0.1","listen_port":443,"users":[{"password":"testpw"}],"masquerade":{"type":"file","directory":"webroot"}}]}`,
 			wantErr:  true,
 		},
 		"absolute hysteria2 masquerade file directory": {
-			contents: `{"inbounds":[{"type":"hysteria2","listen":"127.0.0.1","listen_port":443,"users":[{"password":"testpw"}],"masquerade":[{"type":"file","directory":"/var/www/sing-box"}]}]}`,
+			contents: `{"inbounds":[{"type":"hysteria2","listen":"127.0.0.1","listen_port":443,"users":[{"password":"testpw"}],"masquerade":{"type":"file","directory":"/var/www/sing-box"}}]}`,
+			wantErr:  false,
+		},
+		"relative hysteria2 masquerade file url": {
+			contents: `{"inbounds":[{"type":"hysteria2","listen":"127.0.0.1","listen_port":443,"users":[{"password":"testpw"}],"masquerade":"file:webroot"}]}`,
+			wantErr:  true,
+		},
+		"absolute hysteria2 masquerade file url": {
+			contents: `{"inbounds":[{"type":"hysteria2","listen":"127.0.0.1","listen_port":443,"users":[{"password":"testpw"}],"masquerade":"file:///var/www/sing-box"}]}`,
+			wantErr:  false,
+		},
+		"http hysteria2 masquerade url accepted": {
+			contents: `{"inbounds":[{"type":"hysteria2","listen":"127.0.0.1","listen_port":443,"users":[{"password":"testpw"}],"masquerade":"https://example.com/ui"}]}`,
+			wantErr:  false,
+		},
+		"unknown masquerade scheme left to core": {
+			contents: `{"inbounds":[{"type":"hysteria2","listen":"127.0.0.1","listen_port":443,"users":[{"password":"testpw"}],"masquerade":"ftp://example.com/ui"}]}`,
 			wantErr:  false,
 		},
 		"future resource named path rejected by fallback": {
