@@ -168,11 +168,51 @@ let agentConfigRequest = 0;
 let liveConfigRequest = 0;
 let liveReadRequest = 0;
 let archiveConfigRequest = 0;
-function invalidateLiveSnapshot(agentId, engine) {
+
+function liveSourceKey(agentId, engine) {
+  return `${agentId}|${engine}`;
+}
+
+function markStaleReadTask(agentId, engine) {
   const key = `${agentId}|${engine}`;
-  if (!state.data.liveSources?.[key]) return;
+  const entry = state.data.liveSources?.[key];
+  const staleId = entry?.pendingTaskId || entry?.taskId;
+  if (staleId) {
+    state.data.staleReadTasks ||= {};
+    state.data.staleReadTasks[key] = staleId;
+  }
+}
+
+function invalidateLiveSnapshot(agentId, engine) {
+  const key = liveSourceKey(agentId, engine);
+  markStaleReadTask(agentId, engine);
   liveReadRequest += 1;
-  delete state.data.liveSources[key];
+  if (state.data.liveSources?.[key]) delete state.data.liveSources[key];
+}
+
+async function waitForDeployTerminal(taskID, signal = () => true) {
+  for (let attempt = 0; attempt < 600; attempt += 1) {
+    if (!signal()) throw new DOMException("Aborted", "AbortError");
+    const task = await api(`/tasks/${encodeURIComponent(taskID)}`);
+    if (!signal()) throw new DOMException("Aborted", "AbortError");
+    if (["succeeded", "failed", "canceled"].includes(task.status))
+      return task;
+    await new Promise((resolve) => setTimeout(resolve, 600));
+  }
+  throw new Error("等待部署结果超时");
+}
+
+async function deployThenInvalidate(taskID, agentId, engine) {
+  const result = await waitForDeployTerminal(taskID);
+  if (result.status === "succeeded") {
+    invalidateLiveSnapshot(agentId, engine);
+    return true;
+  }
+  notify(
+    result.error || `部署${result.status === "canceled" ? "已取消" : "失败"}`,
+    "error",
+  );
+  return false;
 }
 
 async function agentConfig() {
@@ -391,7 +431,7 @@ function bindAgentConfigPage(ctx) {
       const form = new FormData(event.currentTarget);
       const input = readServerPlanInput(event.currentTarget, ctx.protocol);
       try {
-        await api(`${ctx.base}/server-inbounds`, {
+        const result = await api(`${ctx.base}/server-inbounds`, {
           method: "POST",
           body: JSON.stringify({
             operation: form.get("operation"),
@@ -407,8 +447,8 @@ function bindAgentConfigPage(ctx) {
         });
         state.data.inboundTag = input.tag;
         notify("配置已保存，任务已提交");
-        if ((event.submitter?.dataset.planIntent || "validate") === "deploy")
-          invalidateLiveSnapshot(ctx.agent.id, ctx.engine);
+        if ((event.submitter?.dataset.planIntent || "validate") === "deploy" && result?.task?.id)
+          await deployThenInvalidate(result.task.id, ctx.agent.id, ctx.engine);
         await agentConfig();
       } catch (error) {
         notify(error.message, "error");
@@ -422,7 +462,7 @@ function bindAgentConfigPage(ctx) {
       }
       const form = new FormData(event.currentTarget);
       try {
-        await api(
+        const result = await api(
           `${ctx.base}/fields/${encodeURIComponent(ctx.selectedField.key)}`,
           {
             method: "POST",
@@ -437,8 +477,8 @@ function bindAgentConfigPage(ctx) {
           },
         );
         notify("字段已保存，任务已提交");
-        if ((event.submitter?.dataset.fieldIntent || "validate") === "deploy")
-          invalidateLiveSnapshot(ctx.agent.id, ctx.engine);
+        if ((event.submitter?.dataset.fieldIntent || "validate") === "deploy" && result?.task?.id)
+          await deployThenInvalidate(result.task.id, ctx.agent.id, ctx.engine);
         await agentConfig();
       } catch (error) {
         notify(error.message, "error");
@@ -463,7 +503,7 @@ function bindAgentConfigPage(ctx) {
             version: ctx.workspace.config.version,
           }),
         });
-        await api("/tasks", {
+        const task = await api("/tasks", {
           method: "POST",
           body: JSON.stringify({
             agent_id: ctx.agent.id,
@@ -473,8 +513,8 @@ function bindAgentConfigPage(ctx) {
           }),
         });
         notify("源码已保存，任务已提交");
-        if ((event.submitter?.dataset.sourceIntent || "validate") === "deploy")
-          invalidateLiveSnapshot(ctx.agent.id, ctx.engine);
+        if ((event.submitter?.dataset.sourceIntent || "validate") === "deploy" && task?.id)
+          await deployThenInvalidate(task.id, ctx.agent.id, ctx.engine);
         await agentConfig();
       } catch (error) {
         notify(error.message, "error");
@@ -620,21 +660,23 @@ async function liveConfig() {
             }),
           },
         );
-        if (intent === "deploy")
-          await submitTask({
+        if (intent === "deploy") {
+          const task = await submitTask({
             agent_id: agent.id,
             engine,
             action: "deploy",
             config_id: saved.id,
           });
-        else
+          if (!task?.id) return; // deploy creation failed; do not fake success
+          await deployThenInvalidate(task.id, agent.id, engine);
+        } else {
           await submitTask({
             agent_id: agent.id,
             engine,
             action: "validate",
             config_id: saved.id,
           });
-        if (intent === "deploy") delete state.data.liveSources[sourceKey];
+        }
         await liveConfig();
       } catch (error) {
         notify(error.message, "error");
@@ -656,6 +698,21 @@ async function readCurrentConfig(agent, engine, sourceKey) {
     if (state.data.liveSources?.[sourceKey]?.reading)
       delete state.data.liveSources[sourceKey];
   };
+  state.data.staleReadTasks ||= {};
+  const staleTaskId = state.data.staleReadTasks[sourceKey];
+  if (staleTaskId) {
+    delete state.data.staleReadTasks[sourceKey];
+    try {
+      for (let attempt = 0; attempt < 600; attempt += 1) {
+        if (!isCurrent()) return;
+        const staleTask = await api(`/tasks/${encodeURIComponent(staleTaskId)}`);
+        if (!isCurrent()) return;
+        if (["succeeded", "failed", "canceled"].includes(staleTask.status)) break;
+        await new Promise((resolve) => setTimeout(resolve, 600));
+      }
+    } catch { /* best effort drain */ }
+    if (!isCurrent()) return;
+  }
   state.data.liveSources ||= {};
   state.data.liveSources[sourceKey] = { reading: true };
   try {
@@ -668,6 +725,7 @@ async function readCurrentConfig(agent, engine, sourceKey) {
       }),
     });
     if (!isCurrent()) return discardReading();
+    state.data.liveSources[sourceKey].pendingTaskId = task.id;
     const finished = await waitForTask(task.id, isCurrent);
     if (!finished || !isCurrent()) return discardReading();
     if (finished.status !== "succeeded")
