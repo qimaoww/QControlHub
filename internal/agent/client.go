@@ -43,6 +43,15 @@ type ClientConfig struct {
 	AllowHTTP         bool
 	AllowInsecureLive bool
 	TLSCAFile         string
+	// PublicIPProbe enables the outbound dual-stack egress probe; the interval
+	// is clamped to between one minute and one day.
+	PublicIPProbe      bool
+	PublicIPProbeEvery time.Duration
+	// PublicIPProbeIPv4Endpoints and PublicIPProbeIPv6Endpoints are the probe
+	// echo URLs supplied by the operator. No third-party default is applied;
+	// both empty disables the probe in NewClient.
+	PublicIPProbeIPv4Endpoints []string
+	PublicIPProbeIPv6Endpoints []string
 }
 
 type credentials struct {
@@ -67,6 +76,7 @@ type Client struct {
 	metrics          *MetricsCollector
 	traffic          *TrafficManager
 	logs             *CoreLogCollector
+	publicIP         *PublicIPProber
 	credentialsMu    sync.Mutex
 	executionsMu     sync.Mutex
 	executions       map[string]*taskExecution
@@ -151,6 +161,14 @@ func NewClient(config ClientConfig, executor *Executor) (*Client, error) {
 	warmupContext, warmupCancel := context.WithTimeout(context.Background(), 3*time.Second)
 	_, _ = metricsCollector.Collect(warmupContext)
 	warmupCancel()
+	var publicIP *PublicIPProber
+	if config.PublicIPProbe {
+		publicIP = NewPublicIPProber(
+			config.PublicIPProbeEvery,
+			config.PublicIPProbeIPv4Endpoints,
+			config.PublicIPProbeIPv6Endpoints,
+		)
+	}
 	return &Client{
 		config:       config,
 		executor:     executor,
@@ -158,6 +176,7 @@ func NewClient(config ClientConfig, executor *Executor) (*Client, error) {
 		metrics:      metricsCollector,
 		traffic:      NewTrafficManager(config.StatePath),
 		logs:         NewCoreLogCollector(),
+		publicIP:     publicIP,
 		http: &http.Client{
 			Transport: transport,
 			CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
@@ -193,6 +212,7 @@ func (c *Client) Run(ctx context.Context) error {
 		slog.Warn("prepare volatile managed core logs", "error", err)
 	}
 	go c.logs.Run(ctx)
+	go c.publicIP.Run(ctx)
 	c.traffic.Start(ctx)
 	slog.Info("agent identity loaded", "agent_id", c.creds.AgentID, "server", c.websocketURL)
 	backoff := time.Second
@@ -237,7 +257,7 @@ func (c *Client) enroll(ctx context.Context, publicKey ed25519.PublicKey, privat
 		OS:           runtime.GOOS,
 		Arch:         runtime.GOARCH,
 		Capabilities: c.config.Capabilities,
-		Features:     advertisedAgentFeatures(),
+		Features:     c.advertisedFeatures(),
 		Labels:       c.config.Labels,
 		PublicKey:    authn.EncodePublicKey(publicKey),
 	}
@@ -413,9 +433,10 @@ func (c *Client) queueHeartbeat(ctx context.Context, outgoing chan<- core.WireMe
 	if metricsErr != nil {
 		slog.Debug("host metrics collection was partial", "error", metricsErr)
 	}
+	metrics.PublicIPv4, metrics.PublicIPv6 = c.publicIP.Snapshot()
 	heartbeat := &core.HeartbeatRequest{
 		Version: c.config.Version, Runtime: runtimeState,
-		Features: advertisedAgentFeatures(), TrafficUsage: c.traffic.Snapshot(),
+		Features: c.advertisedFeatures(), TrafficUsage: c.traffic.Snapshot(),
 	}
 	if metricsHaveData(metrics) {
 		heartbeat.Metrics = &metrics
@@ -442,6 +463,7 @@ func (c *Client) queueMetrics(ctx context.Context, outgoing chan<- core.WireMess
 	if !metricsHaveData(metrics) || !metrics.CPUAvailable {
 		return nil
 	}
+	metrics.PublicIPv4, metrics.PublicIPv6 = c.publicIP.Snapshot()
 	message := core.WireMessage{Type: core.WireMetrics, Metrics: &metrics}
 	select {
 	case outgoing <- message:
@@ -451,13 +473,17 @@ func (c *Client) queueMetrics(ctx context.Context, outgoing chan<- core.WireMess
 	}
 }
 
-func advertisedAgentFeatures() []string {
-	return []string{
+func (c *Client) advertisedFeatures() []string {
+	features := []string{
 		core.AgentFeatureSelfUpgrade,
 		core.AgentFeaturePortTraffic,
 		core.AgentFeatureCoreLogs,
 		core.AgentFeatureMihomoDevelopmentSource,
 	}
+	if c.publicIP != nil {
+		features = append(features, core.AgentFeaturePublicIPProbe)
+	}
+	return features
 }
 
 func (c *Client) executeTask(ctx context.Context, task core.Task, outgoing chan<- core.WireMessage) {

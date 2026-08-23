@@ -35,6 +35,10 @@ const AgentFeatureCoreLogs = "core-logs-v1"
 // an Agent that does not advertise this feature.
 const AgentFeatureMihomoDevelopmentSource = "mihomo-development-source-v1"
 
+// AgentFeaturePublicIPProbe identifies Agents that actively probe their public
+// IPv4 and IPv6 egress addresses and report both families in metrics.
+const AgentFeaturePublicIPProbe = "public-ip-probe-v1"
+
 // Role identifies the account class. Fine-grained access is carried by the
 // explicit Permissions field on a user; only admin/user are persisted.
 type Role string
@@ -189,8 +193,15 @@ type HostMetrics struct {
 	NetworkTXBPS      uint64                 `json:"network_tx_bps"`
 	NetworkInterfaces []HostNetworkInterface `json:"network_interfaces,omitempty"`
 	// ObservedPublicIP is assigned by the control plane from the authenticated
-	// WSS source. Agent-provided values are never trusted.
+	// WSS source. Agent-provided values are never trusted. It only ever
+	// reflects the address family the WSS connection itself used.
 	ObservedPublicIP string `json:"observed_public_ip,omitempty"`
+	// PublicIPv4 and PublicIPv6 are the egress addresses the Agent probed
+	// outbound over each family. Together with ObservedPublicIP they close the
+	// single-family blind spot: a node that connects over IPv4 still reports
+	// its routable IPv6, and vice versa.
+	PublicIPv4 string `json:"public_ipv4,omitempty"`
+	PublicIPv6 string `json:"public_ipv6,omitempty"`
 }
 
 // HostNetworkInterface describes addresses assigned to an interface that
