@@ -168,6 +168,13 @@ let agentConfigRequest = 0;
 let liveConfigRequest = 0;
 let liveReadRequest = 0;
 let archiveConfigRequest = 0;
+function invalidateLiveSnapshot(agentId, engine) {
+  const key = `${agentId}|${engine}`;
+  if (!state.data.liveSources?.[key]) return;
+  liveReadRequest += 1;
+  delete state.data.liveSources[key];
+}
+
 async function agentConfig() {
   const request = ++agentConfigRequest;
   const agents = state.data.agents || (await api("/agents"));
@@ -400,6 +407,8 @@ function bindAgentConfigPage(ctx) {
         });
         state.data.inboundTag = input.tag;
         notify("配置已保存，任务已提交");
+        if ((event.submitter?.dataset.planIntent || "validate") === "deploy")
+          invalidateLiveSnapshot(ctx.agent.id, ctx.engine);
         await agentConfig();
       } catch (error) {
         notify(error.message, "error");
@@ -428,6 +437,8 @@ function bindAgentConfigPage(ctx) {
           },
         );
         notify("字段已保存，任务已提交");
+        if ((event.submitter?.dataset.fieldIntent || "validate") === "deploy")
+          invalidateLiveSnapshot(ctx.agent.id, ctx.engine);
         await agentConfig();
       } catch (error) {
         notify(error.message, "error");
@@ -462,6 +473,8 @@ function bindAgentConfigPage(ctx) {
           }),
         });
         notify("源码已保存，任务已提交");
+        if ((event.submitter?.dataset.sourceIntent || "validate") === "deploy")
+          invalidateLiveSnapshot(ctx.agent.id, ctx.engine);
         await agentConfig();
       } catch (error) {
         notify(error.message, "error");
@@ -621,10 +634,7 @@ async function liveConfig() {
             action: "validate",
             config_id: saved.id,
           });
-        state.data.liveSources[sourceKey] = {
-          ...source,
-          content: form.get("content"),
-        };
+        if (intent === "deploy") delete state.data.liveSources[sourceKey];
         await liveConfig();
       } catch (error) {
         notify(error.message, "error");

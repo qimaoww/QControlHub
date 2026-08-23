@@ -48,6 +48,140 @@ for (const install of [
   }
 }
 
+// Manual config page must re-read the node file after deploy invalidates
+// the liveSources cache; stale cached content must not persist.
+{
+  const previousDocument = globalThis.document;
+  const previousSetTimeout = globalThis.setTimeout;
+  globalThis.setTimeout = (callback) => { callback(); return 0; };
+
+  const agent = {
+    id: "live-agent-1",
+    name: "Live Test",
+    os: "linux",
+    arch: "amd64",
+    status: "online",
+    capabilities: ["xray"],
+    runtime: { xray: { installed: true } },
+  };
+  const sourceKey = `${agent.id}|xray`;
+
+  const makeState = (cached) => ({
+    route: "live-config",
+    data: {
+      agents: [agent],
+      liveAgent: agent.id,
+      liveEngine: "xray",
+      ...(cached !== undefined && {
+        liveSources: { [sourceKey]: { content: cached, reading: false } },
+      }),
+    },
+  });
+
+  const runLiveConfig = async (testState, apiHandler) => {
+    const apiCalls = [];
+    let markup = "";
+    const ctx = new Proxy(
+      {
+        state: testState,
+        engines: ["xray"],
+        api: async (path, options) => {
+          apiCalls.push({ path, method: options?.method || "GET" });
+          return apiHandler(path, options);
+        },
+        can: () => true,
+        esc: (v) => String(v ?? ""),
+        engineName: (v) => v,
+        conciseVersion: (_e, v) => v,
+        notify: () => {},
+        confirmAction: async () => true,
+        shell: (m) => { markup = m; },
+        submitTask: async () => ({ id: "t1" }),
+        bindCodeEditors: () => {},
+      },
+      { get: (target, key) => target[key] ?? noop },
+    );
+    globalThis.document = {
+      querySelector: () => null,
+      querySelectorAll: () => [],
+    };
+    const { liveConfig } = installConfigPages(ctx);
+    await liveConfig();
+    // Drain microtasks so fire-and-forget readCurrentConfig settles.
+    for (let i = 0; i < 50; i++)
+      await new Promise((resolve) => setImmediate(resolve));
+    return { apiCalls, markup };
+  };
+
+  // Cached content renders without firing a redundant read-config.
+  {
+    const state = makeState('{"inbounds":[{"tag":"kept"}]}');
+    const { apiCalls } = await runLiveConfig(state, async () => ({}));
+    assert.equal(
+      apiCalls.some((c) => c.method === "POST" && c.path === "/tasks"),
+      false,
+      "cached snapshot skips redundant read-config",
+    );
+  }
+
+  // After deploy invalidates the cache, a fresh read fires and shows
+  // actual node content (deleted inbound gone).
+  {
+    const state = makeState('{"inbounds":[{"tag":"removed-inbound"}]}');
+    delete state.data.liveSources[sourceKey]; // simulate deploy invalidation
+    let readCount = 0;
+    const { apiCalls, markup } = await runLiveConfig(state, async (path, options) => {
+      if (path === "/tasks" && options?.method === "POST") {
+        readCount += 1;
+        return { id: `r${readCount}` };
+      }
+      if (/^\/tasks\/r\d+$/.test(path))
+        return { id: path.split("/").pop(), status: "succeeded" };
+      if (path.includes("/config-snapshot"))
+        return { content: '{"inbounds":[]}' };
+      return {};
+    });
+    assert.equal(readCount, 1, "invalidated cache triggers one read-config");
+    assert.equal(
+      apiCalls.some((c) => c.method === "POST" && c.path === "/tasks"),
+      true,
+      "deploy invalidation causes POST /tasks read-config",
+    );
+    assert.equal(
+      markup.includes("removed-inbound"),
+      false,
+      "fresh read omits deleted inbound",
+    );
+    assert.equal(
+      state.data.liveSources?.[sourceKey]?.content,
+      '{"inbounds":[]}',
+      "cache refreshed with node-actual content",
+    );
+  }
+
+  // Validate-only must NOT invalidate the cache (node file unchanged).
+  {
+    const state = makeState('{"inbounds":[{"tag":"still-here"}]}');
+    // Simulate validate-only: no invalidation happens.
+    // Cache entry survives.
+    const { apiCalls } = await runLiveConfig(state, async () => ({}));
+    assert.equal(
+      state.data.liveSources?.[sourceKey]?.content,
+      '{"inbounds":[{"tag":"still-here"}]}',
+      "validate-only preserves cached node content",
+    );
+    assert.equal(
+      apiCalls.some((c) => c.method === "POST" && c.path === "/tasks"),
+      false,
+      "validate-only does not trigger a redundant read",
+    );
+  }
+
+  globalThis.setTimeout = previousSetTimeout;
+  globalThis.document = previousDocument;
+}
+
+
 assert.equal(developmentSourceVisible("mihomo", "development"), true, "mihomo development shows source choice");
 assert.equal(developmentSourceVisible("mihomo", "stable"), false, "stable hides source choice");
 assert.equal(developmentSourceVisible("xray", "development"), false, "non-mihomo hides source choice");
