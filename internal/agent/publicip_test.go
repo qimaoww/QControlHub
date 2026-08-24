@@ -3,7 +3,12 @@ package agent
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"errors"
+	"io"
+	"log"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -159,8 +164,89 @@ func TestPublicIPProbeFamilyRedactsEndpointFromDebugLog(t *testing.T) {
 	if !strings.Contains(logged, "public IP probe endpoint failed") {
 		t.Fatalf("expected a bounded probe failure debug record: %s", logged)
 	}
-	if !strings.Contains(logged, "error=") {
-		t.Fatalf("expected a bounded error category in debug record: %s", logged)
+	if !strings.Contains(logged, "error=network") {
+		t.Fatalf("expected a bounded network error category in debug record: %s", logged)
+	}
+}
+
+func TestPublicIPProbeFamilyLogsTimeoutCategory(t *testing.T) {
+	var logBytes bytes.Buffer
+	previous := slog.Default()
+	defer slog.SetDefault(previous)
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logBytes, &slog.HandlerOptions{Level: slog.LevelDebug})))
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		<-request.Context().Done()
+	}))
+	defer server.Close()
+
+	const secretPath = "/vendor-timeout-probe-path-8c1"
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if got := probePublicIPFamily(ctx, server.Client(), []string{server.URL + secretPath}, true); got != "" {
+		t.Fatalf("deadline endpoint must fail, got %q", got)
+	}
+	logged := logBytes.String()
+	if !strings.Contains(logged, "error=timeout") {
+		t.Fatalf("expected a bounded timeout category in debug record: %s", logged)
+	}
+	for _, secret := range []string{secretPath, "127.0.0.1"} {
+		if strings.Contains(logged, secret) {
+			t.Fatalf("debug log leaked probe endpoint detail %q: %s", secret, logged)
+		}
+	}
+}
+
+func TestPublicIPProbeFamilyLogsTLSCategory(t *testing.T) {
+	var logBytes bytes.Buffer
+	previous := slog.Default()
+	defer slog.SetDefault(previous)
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logBytes, &slog.HandlerOptions{Level: slog.LevelDebug})))
+
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("198.35.26.96"))
+	}))
+	server.Config.ErrorLog = log.New(io.Discard, "", 0)
+	defer server.Close()
+
+	const secretPath = "/vendor-tls-probe-path-9d2"
+	if got := probePublicIPFamily(context.Background(), publicIPProbeClient("tcp4"), []string{server.URL + secretPath}, true); got != "" {
+		t.Fatalf("untrusted TLS endpoint must fail, got %q", got)
+	}
+	logged := logBytes.String()
+	if !strings.Contains(logged, "error=tls") {
+		t.Fatalf("expected a bounded TLS category in debug record: %s", logged)
+	}
+	for _, secret := range []string{secretPath, "127.0.0.1"} {
+		if strings.Contains(logged, secret) {
+			t.Fatalf("debug log leaked probe endpoint detail %q: %s", secret, logged)
+		}
+	}
+}
+
+func TestPublicIPProbeErrorCategoryPreservedThroughSafeError(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{name: "canceled", err: context.Canceled, want: "canceled"},
+		{name: "deadline", err: context.DeadlineExceeded, want: "timeout"},
+		{name: "tls certificate", err: &tls.CertificateVerificationError{Err: errors.New("x509: unknown authority")}, want: "tls"},
+		{name: "network", err: &net.OpError{Op: "dial", Err: errors.New("connection refused")}, want: "network"},
+		{name: "network timeout", err: &net.OpError{Op: "dial", Err: &net.DNSError{IsTimeout: true}}, want: "timeout"},
+		{name: "http", err: errors.New("probe endpoint returned HTTP status 502"), want: "http"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			safe := publicIPProbeSafeError(testCase.err)
+			if safe == nil {
+				t.Fatalf("publicIPProbeSafeError(%v) returned nil", testCase.err)
+			}
+			if got := publicIPProbeErrorCategory(safe); got != testCase.want {
+				t.Fatalf("category after safe error = %q, want %q", got, testCase.want)
+			}
+		})
 	}
 }
 
