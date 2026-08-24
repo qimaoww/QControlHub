@@ -432,7 +432,7 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (string, erro
 		return serviceCommandAndVerifyWithManager(ctx, e.serviceManager(), spec.Service, task.Action)
 	case core.ActionStop:
 		if hasExisting {
-			return "", errors.New("import the existing configuration before changing service state")
+			return "", errors.New("existing service migration is pending; retry the import-existing task to coordinate the protected service transition")
 		}
 		return serviceCommandAndVerifyWithManager(ctx, e.serviceManager(), spec.Service, task.Action)
 	case core.ActionStatus:

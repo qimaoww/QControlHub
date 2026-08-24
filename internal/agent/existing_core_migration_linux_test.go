@@ -275,23 +275,31 @@ func TestExistingCoreMigrationRestoresOriginalServiceWhenNewServiceFails(t *test
 	}
 }
 
-func TestExistingCoreMigrationRejectsActiveManagedServiceBeforeChanges(t *testing.T) {
+func TestExistingCoreMigrationCoordinatesActiveManagedService(t *testing.T) {
 	requireAgentRoot(t)
 	fixture := newExistingCoreMigrationFixture(t, false)
-	writeMigrationServiceState(t, fixture.stateDirectory, "qagent-xray.service", "active", "disabled")
-	if _, err := fixture.executor.Execute(context.Background(), core.Task{
+	writeMigrationServiceState(t, fixture.stateDirectory, "qagent-xray.service", "active", "enabled-runtime")
+	writeMigrationTrigger(t, fixture.stateDirectory, "respawn-managed-on-runtime-stop")
+	output, err := fixture.executor.Execute(context.Background(), core.Task{
 		Action: core.ActionImportExisting, Engine: core.EngineXray, ConfigContent: fixture.importedConfig,
-	}); err == nil || !strings.Contains(err.Error(), `must remain inactive or failed`) || !strings.Contains(err.Error(), `status "active"`) {
-		t.Fatalf("active managed service error = %v", err)
+	})
+	if err != nil {
+		t.Fatalf("active managed service migration = %q, %v", output, err)
 	}
-	fixture.assertServiceState(t, "xray.service", "active", "enabled")
-	fixture.assertServiceState(t, "qagent-xray.service", "active", "disabled")
-	assertFileContentAndMode(t, fixture.managed.ConfigPath, fixture.originalManagedConfig, 0o600)
-	if _, err := os.Stat(fixture.managed.Binary); !os.IsNotExist(err) {
-		t.Fatalf("rejected migration installed managed binary: %v", err)
+	if !strings.Contains(output, "stopped and disabled") {
+		t.Fatalf("migration output did not describe coordinated stop: %q", output)
 	}
-	if _, err := os.Stat(coreMigrationMarkerPath(fixture.markerPrefix, core.EngineXray)); !os.IsNotExist(err) {
-		t.Fatalf("rejected migration left marker: %v", err)
+	fixture.assertServiceState(t, "xray.service", "inactive", "disabled")
+	fixture.assertServiceState(t, "qagent-xray.service", "active", "enabled")
+	commands, err := os.ReadFile(filepath.Join(fixture.stateDirectory, "commands.log"))
+	if err != nil {
+		t.Fatalf("read service command log: %v", err)
+	}
+	log := string(commands)
+	runtimeDisable := strings.Index(log, "disable --runtime qagent-xray.service")
+	stop := strings.Index(log, "stop qagent-xray.service")
+	if runtimeDisable < 0 || stop < 0 || runtimeDisable > stop {
+		t.Fatalf("runtime enablement was not cleared before managed stop: %q", log)
 	}
 }
 
@@ -1352,6 +1360,7 @@ state=%q
 command=$1
 shift
 service=${1:-}
+printf '%%s %%s\n' "$command" "$*" >> "$state/commands.log"
 active_file="$state/$service.active"
 case "$command" in
   is-active)
@@ -1381,6 +1390,10 @@ case "$command" in
     ;;
   stop)
     printf 'inactive\n' > "$active_file"
+    if [ "$service" = qagent-xray.service ] && [ "$(cat "$state/$service.runtime")" = 1 ] && [ -f "$state/respawn-managed-on-runtime-stop" ] && [ ! -f "$state/managed-respawned" ]; then
+      printf 'active\n' > "$active_file"
+      : > "$state/managed-respawned"
+    fi
     ;;
   start|restart)
     if [ "$service" = qagent-xray.service ] && [ -f "$state/fail-managed-start" ]; then
