@@ -625,9 +625,11 @@ func TestWSSManagedPublicIPProbeUsesCurrentSessionCapabilityWithPostgreSQL(t *te
 		AdminToken: strings.Repeat("p", 48), TrustedProxies: trustedProxies,
 		AgentBinary: []byte("test-agent-binary"), AgentVersion: "test-version",
 		PublicIPProbe: core.PublicIPProbeConfig{
-			IPv4Endpoint:    core.DefaultPublicIPProbeIPv4Endpoint,
-			IPv6Endpoint:    core.DefaultPublicIPProbeIPv6Endpoint,
-			IntervalSeconds: 300,
+			IPv4Endpoint:         core.DefaultPublicIPProbeIPv4Endpoint,
+			IPv4FallbackEndpoint: core.DefaultPublicIPProbeIPv4Fallback,
+			IPv6Endpoint:         core.DefaultPublicIPProbeIPv6Endpoint,
+			IPv6FallbackEndpoint: core.DefaultPublicIPProbeIPv6Fallback,
+			IntervalSeconds:      300,
 		},
 	}).Handler())
 	defer httpServer.Close()
