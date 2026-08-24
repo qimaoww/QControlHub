@@ -570,6 +570,20 @@ func TestAgentBatchAndEnrollmentSafetyContracts(t *testing.T) {
 	}
 }
 
+func TestEnrollmentEntryRemainsVisibleInNodeSettings(t *testing.T) {
+	module := string(mustReadFrontendFile(t, "modules/agents.js"))
+	css := string(mustReadFrontendFile(t, "app.css"))
+	if !strings.Contains(module, `<section class="enrollment-sheet" id="enrollment"`) || !strings.Contains(module, `data-open-enrollment`) {
+		t.Fatal("normal node-settings render must expose a clickable enrollment entry")
+	}
+	if !strings.Contains(css, `.page-agents .node-settings-page>.enrollment-sheet{display:block}`) {
+		t.Fatal("node-settings enrollment entry must override stale closed-details hiding")
+	}
+	if !strings.Contains(module, `data-has-agents="${agents.length ? 1 : 0}"`) {
+		t.Fatal("enrollment entry must render for both populated and empty node states")
+	}
+}
+
 func mustReadFrontendFile(t *testing.T, name string) []byte {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join(".", name))
