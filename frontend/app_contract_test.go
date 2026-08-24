@@ -542,6 +542,62 @@ func TestSPAModulesArePublished(t *testing.T) {
 	}
 }
 
+func TestAgentBatchAndEnrollmentSafetyContracts(t *testing.T) {
+	content := string(mustReadFrontendFile(t, "modules/agents.js"))
+	for _, marker := range []string{
+		`agent-self-upgrade-v1`,
+		`当前 Agent 不支持远程升级，请先重新安装或升级 Agent`,
+		`batchForm.dataset.busy === "1"`,
+		`for (const input of selected)`,
+		`data-batch-retry`,
+		`命令仅供复制；关闭页面不会连接、安装或重启任何节点。`,
+		`showCommand(command, async () =>`,
+		`不会自动执行`,
+	} {
+		if !strings.Contains(content, marker) {
+			t.Errorf("agent batch/enrollment safety contract is missing %q", marker)
+		}
+	}
+	created := strings.Index(content, `const created = await api("/enrollment-tokens"`)
+	shown := strings.Index(content[created:], `showCommand(command`)
+	if created < 0 || shown < 0 {
+		t.Fatal("enrollment flow must show the generated command")
+	}
+	shown += created
+	refreshed := strings.Index(content[created:], `await refreshAgentPage()`)
+	if refreshed >= 0 && created+refreshed < shown {
+		t.Error("enrollment flow must display the command before refresh can lose it")
+	}
+}
+
+func TestEnrollmentEntryRemainsVisibleInNodeSettings(t *testing.T) {
+	module := string(mustReadFrontendFile(t, "modules/agents.js"))
+	css := string(mustReadFrontendFile(t, "app.css"))
+	if !strings.Contains(module, `<section class="enrollment-sheet" id="enrollment"`) || !strings.Contains(module, `data-open-enrollment`) {
+		t.Fatal("normal node-settings render must expose a clickable enrollment entry")
+	}
+	if !strings.Contains(css, `.page-agents .node-settings-page>.enrollment-sheet{display:block}`) {
+		t.Fatal("node-settings enrollment entry must override stale closed-details hiding")
+	}
+	hide := strings.LastIndex(css, `.page-agents .node-settings-page>.enrollment-sheet:not([open]){display:none}`)
+	show := strings.LastIndex(css, `.page-agents .node-settings-page>.enrollment-sheet:not([open]){display:block}`)
+	if hide < 0 || show <= hide {
+		t.Fatalf("effective cascade must end with visible enrollment rule (hide=%d show=%d)", hide, show)
+	}
+	if !strings.Contains(module, `data-has-agents="${agents.length ? 1 : 0}"`) {
+		t.Fatal("enrollment entry must render for both populated and empty node states")
+	}
+}
+
+func mustReadFrontendFile(t *testing.T, name string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(".", name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
+
 func TestManualConfigRequiresExplicitImportOfNodeSnapshot(t *testing.T) {
 	configs, err := os.ReadFile("modules/configs.js")
 	if err != nil {
