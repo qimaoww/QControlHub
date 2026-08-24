@@ -634,6 +634,117 @@ func TestImportedSingBoxLogSourceRejectsHardLinks(t *testing.T) {
 	}
 }
 
+func TestImportedSingBoxActiveSourceRejectsHardLinkBeforePublish(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		token   string
+		payload string
+	}{
+		{name: "complete line", token: "external-complete-line", payload: "external-complete-line\n"},
+		{name: "partial line", token: "external-partial-line", payload: "external-partial-line"},
+		{
+			name:    "oversized partial line",
+			token:   "external-oversized-partial",
+			payload: strings.Repeat("external-oversized-partial", coreLogFileMaxLine/len("external-oversized-partial")+2),
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			logRoot := t.TempDir()
+			previous := importedSingBoxLogRoot
+			importedSingBoxLogRoot = logRoot
+			t.Cleanup(func() { importedSingBoxLogRoot = previous })
+
+			content := `{"log":{"output":"runtime.log"}}`
+			executor := newImportedSingBoxLogExecutor(t, content)
+			path := filepath.Join(logRoot, "runtime.log")
+			if err := os.WriteFile(path, nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			collector := NewCoreLogCollectorForServiceManager(defaultSystemdServiceManager(), executor.Specs)
+			if err := collector.PrepareImportedSingBoxSource(context.Background(), executor, content); err != nil {
+				t.Fatal(err)
+			}
+			if err := collector.RefreshImportedSingBoxSource(executor); err != nil {
+				t.Fatal(err)
+			}
+
+			ctx, cancel := context.WithCancel(context.Background())
+			done := make(chan struct{})
+			go func() { collector.Run(ctx); close(done) }()
+			deadline := time.Now().Add(5 * time.Second)
+			for time.Now().Before(deadline) && collector.Status()[core.EngineSingBox].Status != "active" {
+				time.Sleep(25 * time.Millisecond)
+			}
+			if status := collector.Status()[core.EngineSingBox]; status.Status != "active" {
+				cancel()
+				<-done
+				t.Fatalf("file source did not become active: %+v", status)
+			}
+
+			// Let the active reader settle at EOF so the link and write happen
+			// before its next read. The write still comes through the external
+			// hard link to the inode that is already open by the collector.
+			time.Sleep(100 * time.Millisecond)
+			externalLink := filepath.Join(t.TempDir(), "external.log")
+			if err := os.Link(path, externalLink); err != nil {
+				t.Fatal(err)
+			}
+			file, err := os.OpenFile(externalLink, os.O_APPEND|os.O_WRONLY, 0o600)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := file.WriteString(test.payload); err != nil {
+				_ = file.Close()
+				t.Fatal(err)
+			}
+			if err := file.Close(); err != nil {
+				t.Fatal(err)
+			}
+
+			deadline = time.Now().Add(5 * time.Second)
+			for time.Now().Before(deadline) && collector.Status()[core.EngineSingBox].Status != "failed" {
+				time.Sleep(25 * time.Millisecond)
+			}
+			if status := collector.Status()[core.EngineSingBox]; status.Status != "failed" {
+				cancel()
+				<-done
+				t.Fatalf("active hard-linked source status = %+v", status)
+			}
+
+			// The reader retries after two seconds. Leaving the hard link in
+			// place must keep the source failed without publishing any bytes
+			// from the rejected read, including partial and oversized records.
+			time.Sleep(2200 * time.Millisecond)
+			if status := collector.Status()[core.EngineSingBox]; status.Status != "failed" {
+				cancel()
+				<-done
+				t.Fatalf("hard-linked source did not remain failed: %+v", status)
+			}
+			for batch := collector.NextBatch(); batch != nil; batch = collector.NextBatch() {
+				for _, entry := range batch.Entries {
+					if strings.Contains(entry.Message, test.token) {
+						cancel()
+						<-done
+						t.Fatalf("external hard-link content reached batch before rejection: %+v", entry)
+					}
+				}
+				if !collector.Acknowledge(batch.ID) {
+					cancel()
+					<-done
+					t.Fatalf("failed to acknowledge batch %q", batch.ID)
+				}
+			}
+
+			cancel()
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+				t.Fatal("active hard-link rejection leaked collector")
+			}
+		})
+	}
+}
+
 func TestImportedSingBoxSourceRegistrationIsConcurrentAndCancelable(t *testing.T) {
 	collector := NewCoreLogCollectorForServiceManager(defaultSystemdServiceManager(), map[core.Engine]EngineSpec{})
 	ctx, cancel := context.WithCancel(context.Background())
@@ -745,18 +856,31 @@ func TestDecodeJournalCoreLogBoundsMessages(t *testing.T) {
 
 func TestCoreLogSourcesMixManagedAndExactGenericUnits(t *testing.T) {
 	t.Parallel()
-	sources := coreLogJournalSources(map[core.Engine]EngineSpec{
-		core.EngineMihomo:  {Service: "qagent-mihomo.service"},
-		core.EngineXray:    {Service: "xray.service"},
-		core.EngineSingBox: {Service: "sing-box.service"},
-	})
+	sources := coreLogJournalSources(
+		map[core.Engine]EngineSpec{
+			core.EngineMihomo:          {Service: "qagent-mihomo.service"},
+			core.EngineXray:            {Service: "qagent-xray.service"},
+			core.EngineSingBox:         {Service: "qagent-sing-box.service"},
+			core.EngineShadowsocksRust: {Service: "qagent-shadowsocks-rust.service"},
+		},
+		map[core.Engine]EngineSpec{
+			core.EngineXray:    {Service: "xray.service"},
+			core.EngineSingBox: {Service: "sing-box.service"},
+		},
+	)
 	if len(sources) != 2 {
 		t.Fatalf("source count = %d, want 2", len(sources))
 	}
 	managed, generic := sources[0], sources[1]
-	if !containsArgument(managed.arguments, "--namespace=qagent-cores") ||
-		!containsArgument(managed.arguments, "--unit=qagent-mihomo.service") {
-		t.Fatalf("managed journal arguments = %v", managed.arguments)
+	if !containsArgument(managed.arguments, "--namespace=qagent-cores") {
+		t.Fatalf("managed journal namespace arguments = %v", managed.arguments)
+	}
+	for _, unit := range []string{
+		"qagent-mihomo.service", "qagent-xray.service", "qagent-sing-box.service", "qagent-shadowsocks-rust.service",
+	} {
+		if !containsArgument(managed.arguments, "--unit="+unit) {
+			t.Fatalf("managed journal arguments omit %s: %v", unit, managed.arguments)
+		}
 	}
 	if containsArgument(generic.arguments, "--namespace=qagent-cores") ||
 		!containsArgument(generic.arguments, "--unit=xray.service") ||
@@ -804,11 +928,12 @@ func containsArgument(arguments []string, expected string) bool {
 
 func TestCoreLogFileSourcesMapOnlyManagedServices(t *testing.T) {
 	sources := coreLogFileSources(map[core.Engine]EngineSpec{
-		core.EngineXray:    {Service: "qagent-xray"},
-		core.EngineSingBox: {Service: "sing-box"},
-		core.EngineMihomo:  {Service: "qagent-mihomo"},
+		core.EngineXray:            {Service: "qagent-xray"},
+		core.EngineSingBox:         {Service: "qagent-sing-box"},
+		core.EngineMihomo:          {Service: "qagent-mihomo"},
+		core.EngineShadowsocksRust: {Service: "qagent-shadowsocks-rust"},
 	})
-	if len(sources) != 2 {
+	if len(sources) != 4 {
 		t.Fatalf("managed file sources = %+v", sources)
 	}
 	found := map[core.Engine]string{}
@@ -816,11 +941,15 @@ func TestCoreLogFileSourcesMapOnlyManagedServices(t *testing.T) {
 		found[source.engine] = source.path
 	}
 	if found[core.EngineXray] != filepath.Join(openRCCoreLogRoot, "qagent-xray.log") ||
-		found[core.EngineMihomo] != filepath.Join(openRCCoreLogRoot, "qagent-mihomo.log") {
+		found[core.EngineMihomo] != filepath.Join(openRCCoreLogRoot, "qagent-mihomo.log") ||
+		found[core.EngineSingBox] != filepath.Join(openRCCoreLogRoot, "qagent-sing-box.log") ||
+		found[core.EngineShadowsocksRust] != filepath.Join(openRCCoreLogRoot, "qagent-shadowsocks-rust.log") {
 		t.Fatalf("managed file source paths = %+v", found)
 	}
-	if _, ok := found[core.EngineSingBox]; ok {
-		t.Fatalf("unmanaged service should not produce a file source: %+v", found)
+	if unmanaged := coreLogFileSources(map[core.Engine]EngineSpec{
+		core.EngineSingBox: {Service: "sing-box"},
+	}); len(unmanaged) != 0 {
+		t.Fatalf("unmanaged service produced file sources: %+v", unmanaged)
 	}
 }
 

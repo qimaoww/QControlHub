@@ -410,7 +410,7 @@ func (collector *CoreLogCollector) followFile(ctx context.Context, source coreLo
 		case <-timer.C:
 		}
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	initialWhence := io.SeekEnd
 	initialOffset := int64(0)
 	if missingBeforeOpen {
@@ -433,13 +433,29 @@ func (collector *CoreLogCollector) followFile(ctx context.Context, source coreLo
 	if size, err := file.Seek(0, io.SeekCurrent); err == nil {
 		offset = size
 	}
-	buffer := make([]byte, 16<<10)
+	openedIdentity, err := file.Stat()
+	if err != nil {
+		return err
+	}
+	openedMetadata := metadataFromFileInfo(openedIdentity)
+	// A single Fstat gates every block before any byte can enter partial state or
+	// the shared queue. A 64 KiB block keeps that fail-closed check bounded
+	// without imposing one metadata syscall per small log line.
+	buffer := make([]byte, 64<<10)
 	var partial []byte
 	bytesSinceValidation := int64(0)
 	nextValidation := time.Now().Add(coreLogRevalidateEvery)
 	for ctx.Err() == nil {
 		read, readErr := file.Read(buffer)
 		if read > 0 {
+			openedInfo, statErr := file.Stat()
+			if statErr != nil {
+				return statErr
+			}
+			if !os.SameFile(openedIdentity, openedInfo) || !openedInfo.Mode().IsRegular() ||
+				!coreLogFileHasSingleLink(openedInfo) || metadataFromFileInfo(openedInfo) != openedMetadata {
+				return errors.New("managed core log file link identity drifted before publish")
+			}
 			offset += int64(read)
 			bytesSinceValidation += int64(read)
 			chunk := buffer[:read]
@@ -499,6 +515,8 @@ func (collector *CoreLogCollector) followFile(ctx context.Context, source coreLo
 			if _, err := file.Seek(0, io.SeekStart); err != nil {
 				return err
 			}
+			openedIdentity = pathInfo
+			openedMetadata = metadataFromFileInfo(pathInfo)
 			offset = 0
 			partial = nil
 			continue
