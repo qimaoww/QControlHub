@@ -524,7 +524,7 @@ function shell(content, title, { viewKey = state.route } = {}) {
         ? ""
         : state.route === "node-settings"
           ? can("enrollment.manage")
-            ? '<a class="button small" href="#enrollment">添加节点</a>'
+            ? '<button class="button small" type="button" data-open-enrollment>添加节点</button>'
             : ""
           : state.route === "client-access"
             ? '<a class="button small" href="#node-settings">返回节点设置</a>'

@@ -15,6 +15,36 @@ export function coreSourceForInstall(engine, channel, rawSource) {
     : undefined;
 }
 
+export function batchAgentEligibility(agent, action, engine) {
+  if (!agent || agent.status !== "online")
+    return { eligible: false, reason: "节点离线，不能执行当前动作" };
+  if (action === "upgrade-agent") {
+    if (!(agent.features || []).includes("agent-self-upgrade-v1"))
+      return {
+        eligible: false,
+        reason: "旧版 Agent 缺少远程升级能力，请先重新安装或单独升级",
+      };
+    return { eligible: true, reason: "在线 · 支持远程升级" };
+  }
+  if (!agent.runtime?.[engine]?.installed)
+    return {
+      eligible: false,
+      reason: `未安装 ${engine || "所选内核"}，不能执行当前动作`,
+    };
+  return { eligible: true, reason: "在线 · 已安装所选内核" };
+}
+
+export function batchSelectAllState(inputs) {
+  const eligible = [...inputs].filter((input) => !input.disabled);
+  const selected = eligible.filter((input) => input.checked);
+  return {
+    eligible: eligible.length,
+    selected: selected.length,
+    checked: eligible.length > 0 && selected.length === eligible.length,
+    indeterminate: selected.length > 0 && selected.length < eligible.length,
+  };
+}
+
 function mihomoDevelopmentSourceFieldset(canMirror) {
   return `<fieldset class="release-channel-fieldset development-source-field" data-development-source hidden><legend>开发版来源</legend><div class="release-channel-options"><label><input type="radio" name="core_source" value="official" checked><span>MetaCubeX 官方（默认，推荐）</span></label><label><input type="radio" name="core_source" value="mirror" ${canMirror ? "" : "disabled"}><span>vernesong/mihomo Alpha 镜像（第三方）${canMirror ? "" : "（需升级 Agent）"}</span></label></div>${canMirror ? "" : `<p class="source-upgrade-note">当前 Agent 尚未声明 mihomo-development-source-v1，镜像来源不可用；请先在面板升级 Agent。</p>`}</fieldset>`;
 }
@@ -607,8 +637,6 @@ async function agents(options = {}) {
 async function nodeSettings(presetMode = false, { overview: preloadedOverview } = {}) {
   const request = ++agentPageRequest;
   const expectedRoute = presetMode ? "agents" : "node-settings";
-  const enrollmentOpen = document.querySelector("#enrollment")?.open;
-  const historyOpen = document.querySelector("#enrollment .access-history")?.open;
   const [agents, deployments, accessEntries, tokens] =
     await Promise.all([
       api("/agents"),
@@ -689,7 +717,7 @@ async function nodeSettings(presetMode = false, { overview: preloadedOverview } 
     tokens
       .map(
         (token) =>
-          `<article><div><strong>${esc(token.name)}</strong><small>${token.reusable ? `可重复安装 · 已安装 ${token.used_count} 次` : `旧版添加命令 · 已安装 ${token.used_count} 次`}</small></div><button class="access-history-delete" type="button" data-delete-enrollment="${esc(token.id)}">删除</button></article>`,
+          `<article><div><strong>${esc(token.name)}</strong><small>${token.reusable ? `可重复安装 · 删除前长期有效 · 已安装 ${token.used_count} 次` : `有效至 ${date(token.expires_at)} · 已使用 ${token.used_count}/${token.max_uses} 次`}</small></div><button class="access-history-delete" type="button" data-delete-enrollment="${esc(token.id)}" aria-label="删除添加命令 ${esc(token.name)}">删除</button></article>`,
       )
       .join("") || "";
 
@@ -861,12 +889,9 @@ async function nodeSettings(presetMode = false, { overview: preloadedOverview } 
     })
     .join("");
 
-  const enrollment = !presetMode && can("enrollment.manage")
-    ? `<section class="enrollment-sheet" id="enrollment" data-has-agents="${agents.length ? 1 : 0}"><div class="enrollment-sheet-body enrollment-launcher"><div><b>添加节点</b><small>为当前节点生成 Agent 部署命令，仅复制，不会自动执行；已有命令继续有效，已有安装命令会继续有效。</small></div><button class="button primary" type="button" data-open-enrollment>生成部署命令</button></div>${tokenRows ? `<details class="access-history" ${historyOpen ? "open" : ""}><summary>添加记录（${tokens.length}）</summary><div>${tokenRows}</div></details>` : ""}</section>`
-    : "";
   const batch =
-    !presetMode && agents.length > 1 && can("operator")
-      ? `<details class="node-batch-panel"><summary><span><b>批量操作</b><small>先选择节点，再执行普通服务动作或批量更新 Agent</small></span><i>＋</i></summary><form class="batch-toolbar" id="batch-form"><fieldset class="batch-node-options"><legend>选择节点</legend>${agents.map((agent) => `<label class="batch-select" title="选择此节点参与批量操作"><input type="checkbox" data-batch-checkbox value="${esc(agent.id)}" aria-label="选择 ${esc(agent.name)} 参与批量操作"><span><b>${esc(agent.name)}</b><small>${agent.status === "online" ? "在线" : "离线"}</small></span></label>`).join("")}</fieldset><div class="batch-controls"><label>动作<select name="action"><option value="upgrade-agent">批量更新 Agent</option><option value="restart">重启服务</option><option value="status">查询状态</option><option value="start">启动服务</option><option value="stop">停止服务</option></select></label><label data-batch-engine-wrap>内核<select name="engine">${engines.map((engine) => `<option value="${engine}">${esc(engineName(engine))}</option>`).join("")}</select></label><button class="button small" type="submit" disabled>执行</button><small data-batch-count>未选择节点</small></div><section class="batch-results" data-batch-results aria-live="polite" hidden></section></form></details>`
+    !presetMode && !detailMode && agents.length > 1 && can("operator")
+      ? `<details class="node-batch-panel"><summary><span><b>批量操作</b><small>全选仅包含当前列表中可执行所选动作的节点</small></span><i>＋</i></summary><form class="batch-toolbar" id="batch-form"><div class="batch-selection-head"><label class="batch-select-all"><input type="checkbox" data-batch-select-all aria-label="全选当前合格节点" aria-checked="false"><span data-batch-select-all-label>全选</span></label><strong data-batch-count aria-live="polite">已选择 0 个节点</strong></div><fieldset class="batch-node-options"><legend>当前节点范围</legend>${agents.map((agent) => `<label class="batch-select" title="选择此节点参与批量操作"><input type="checkbox" data-batch-checkbox value="${esc(agent.id)}" aria-label="选择 ${esc(agent.name)} 参与批量操作"><span><b>${esc(agent.name)}</b><small data-batch-eligibility>${agent.status === "online" ? "在线" : "离线"}</small></span></label>`).join("")}</fieldset><div class="batch-controls"><label>动作<select name="action"><option value="upgrade-agent">批量更新 Agent</option><option value="restart">重启服务</option><option value="status">查询状态</option><option value="start">启动服务</option><option value="stop">停止服务</option></select></label><label data-batch-engine-wrap>内核<select name="engine">${engines.map((engine) => `<option value="${engine}">${esc(engineName(engine))}</option>`).join("")}</select></label><button class="button small" type="submit" disabled>执行</button><button class="button small" type="button" data-batch-clear disabled>清空选择</button></div><section class="batch-results" data-batch-results aria-live="polite" hidden></section></form></details>`
       : "";
   const onlineAgents = agents.filter(
     (agent) => agent.status === "online",
@@ -882,9 +907,11 @@ async function nodeSettings(presetMode = false, { overview: preloadedOverview } 
     ? ""
     : !detailMode && agents.length
       ? `<header class="node-page-intro"><div><p class="eyebrow">节点设置</p><h2>全部节点</h2><p>每个节点的资源占用与内核状态一屏总览；点击卡片进入管理台，拖动卡片左侧手柄调整顺序。</p></div><span class="node-intro-live"><i class="status-dot ${introTone}"></i>${agents.length} 个节点 · ${onlineAgents} 在线</span></header>`
+      : !detailMode
+        ? `<header class="node-page-intro"><div><p class="eyebrow">节点设置</p><h2>全部节点</h2><p>${can("enrollment.manage") ? "使用页面顶栏的“添加节点”生成部署命令；" : "当前账号没有添加节点权限；"}节点上线后即可在这里管理 Agent、内核与运行状态。</p></div></header>`
       : "";
   shell(
-    `${pageIntro}${presetMode ? enrollment : `<div class="node-settings-page">${enrollment}${batch}${detailMode ? `<a class="node-back-link" href="#node-settings">← 全部节点</a>` : ""}`}${nodeCards ? `<section class="${presetMode ? "machine-stack" : detailMode ? "node-settings-stack" : "node-card-grid"}">${nodeCards}</section>` : '<div class="empty large"><strong>还没有节点</strong><p>请先添加节点。</p></div>'}${presetMode ? "" : "</div>"}`,
+    `${pageIntro}${presetMode ? "" : `<div class="node-settings-page">${batch}${detailMode ? `<a class="node-back-link" href="#node-settings">← 全部节点</a>` : ""}`}${nodeCards ? `<section class="${presetMode ? "machine-stack" : detailMode ? "node-settings-stack" : "node-card-grid"}">${nodeCards}</section>` : '<div class="empty large"><strong>还没有节点</strong><p>点击上方“添加节点”生成部署命令。</p></div>'}${presetMode ? "" : "</div>"}`,
     presetMode ? "内核配置预设" : "节点设置",
     {
       viewKey: presetMode
@@ -899,7 +926,7 @@ async function nodeSettings(presetMode = false, { overview: preloadedOverview } 
     link.href = `#${prefix}-${link.dataset.contextAgent}`;
   });
   if (presetMode) compactPresetPage();
-  bindAgentPage(agents, presetMode);
+  bindAgentPage(agents, presetMode, { tokenRows, tokenCount: tokens.length });
 }
 
 function renderAgentPage() {
@@ -1116,7 +1143,7 @@ function compactPresetPage() {
   });
 }
 
-function bindAgentPage(agentItems, presetMode = false) {
+function bindAgentPage(agentItems, presetMode = false, enrollmentHistory = {}) {
   const agentsByID = new Map(agentItems.map((agent) => [agent.id, agent]));
   document
     .querySelectorAll(
@@ -1347,55 +1374,73 @@ function bindAgentPage(agentItems, presetMode = false) {
       await refreshAgentPage();
     };
   });
-  document.querySelectorAll("[data-delete-enrollment]").forEach((button) => {
-    button.onclick = async () => {
-      if (!(await confirmAction("确定删除这个添加节点命令？删除后命令立即失效。", "删除添加命令")))
-        return;
-      await api(
-        `/enrollment-tokens/${encodeURIComponent(button.dataset.deleteEnrollment)}`,
-        {
-          method: "DELETE",
-        },
-      );
-      await refreshAgentPage();
-    };
-  });
   const batchForm = document.querySelector("#batch-form");
   const updateBatch = () => {
     if (!batchForm) return;
     const engine = batchForm.elements.engine.value;
     const action = batchForm.elements.action.value;
-    document.querySelectorAll("[data-batch-checkbox]").forEach((input) => {
+    const busy = batchForm.dataset.busy === "1";
+    const inputs = [...batchForm.querySelectorAll("[data-batch-checkbox]")];
+    inputs.forEach((input) => {
       const agent = agentsByID.get(input.value);
-      const eligible =
-        agent?.status === "online" &&
-        (action === "upgrade-agent"
-          ? (agent.features || []).includes("agent-self-upgrade-v1")
-          : Boolean(agent.runtime?.[engine]?.installed));
-      input.disabled = !eligible;
-      input.closest(".batch-select").title = eligible
-        ? "选择此节点参与批量操作"
-        : action === "upgrade-agent"
-          ? agent?.status !== "online"
-            ? "节点离线"
-            : "当前 Agent 不支持远程升级，请先重新安装或升级 Agent"
-          : `节点离线或未安装 ${engineName(engine)}`;
-      if (!eligible) input.checked = false;
+      const eligibility = batchAgentEligibility(agent, action, engine);
+      input.disabled = busy || !eligibility.eligible;
+      input.closest(".batch-select").title = eligibility.reason;
+      const reason = input.closest(".batch-select").querySelector(
+        "[data-batch-eligibility]",
+      );
+      if (reason) reason.textContent = eligibility.reason;
+      if (!eligibility.eligible) input.checked = false;
     });
-    const count = document.querySelectorAll(
-      "[data-batch-checkbox]:checked:not(:disabled)",
-    ).length;
+    const selection = batchSelectAllState(inputs);
+    const selectAll = batchForm.querySelector("[data-batch-select-all]");
+    if (selectAll) {
+      selectAll.disabled = busy || selection.eligible === 0;
+      selectAll.checked = selection.checked;
+      selectAll.indeterminate = selection.indeterminate;
+      selectAll.setAttribute(
+        "aria-checked",
+        selection.indeterminate ? "mixed" : String(selection.checked),
+      );
+    }
+    const selectAllLabel = batchForm.querySelector(
+      "[data-batch-select-all-label]",
+    );
+    if (selectAllLabel)
+      selectAllLabel.textContent = selection.checked ? "取消全选" : "全选";
     const button = batchForm?.querySelector("button[type=submit]");
-    if (button) button.disabled = count === 0;
+    if (button)
+      button.disabled = selection.selected === 0 || batchForm.dataset.busy === "1";
+    const clear = batchForm.querySelector("[data-batch-clear]");
+    if (clear) clear.disabled = selection.selected === 0;
     const label = batchForm?.querySelector("[data-batch-count]");
     if (label)
-      label.textContent = count ? `已选择 ${count} 个节点` : "未选择节点";
+      label.textContent = `已选择 ${selection.selected} 个节点 · 当前可选 ${selection.eligible} 个`;
     const engineWrap = batchForm.querySelector("[data-batch-engine-wrap]");
     if (engineWrap) engineWrap.hidden = action === "upgrade-agent";
+    batchForm.elements.action.disabled = busy;
+    batchForm.elements.engine.disabled = busy;
   };
-  document
-    .querySelectorAll("[data-batch-checkbox]")
+  batchForm
+    ?.querySelectorAll("[data-batch-checkbox]")
     .forEach((input) => (input.onchange = updateBatch));
+  const selectAll = batchForm?.querySelector("[data-batch-select-all]");
+  if (selectAll)
+    selectAll.onchange = () => {
+      const shouldSelect = selectAll.checked;
+      batchForm
+        .querySelectorAll("[data-batch-checkbox]:not(:disabled)")
+        .forEach((input) => (input.checked = shouldSelect));
+      updateBatch();
+    };
+  const clearBatch = batchForm?.querySelector("[data-batch-clear]");
+  if (clearBatch)
+    clearBatch.onclick = () => {
+      batchForm
+        .querySelectorAll("[data-batch-checkbox]")
+        .forEach((input) => (input.checked = false));
+      updateBatch();
+    };
   bindEvent(batchForm?.elements.engine, "change", updateBatch);
   bindEvent(batchForm?.elements.action, "change", updateBatch);
   updateBatch();
@@ -1403,26 +1448,32 @@ function bindAgentPage(agentItems, presetMode = false) {
     batchForm.onsubmit = async (event) => {
       event.preventDefault();
       const values = new FormData(batchForm);
-      const selected = [
-        ...document.querySelectorAll(
-          "[data-batch-checkbox]:checked:not(:disabled)",
-        ),
-      ];
-      if (!selected.length) return;
       const action = String(values.get("action"));
       const engine = String(values.get("engine"));
-      if (batchForm.dataset.busy === "1" ||
-        !(await confirmAction(
+      const selected = [
+        ...batchForm.querySelectorAll("[data-batch-checkbox]:checked"),
+      ].filter((input) =>
+        batchAgentEligibility(agentsByID.get(input.value), action, engine)
+          .eligible,
+      );
+      if (!selected.length || batchForm.dataset.busy === "1" || batchForm.dataset.confirming === "1")
+        return;
+      batchForm.dataset.confirming = "1";
+      let confirmed = false;
+      try {
+        confirmed = await confirmAction(
           action === "upgrade-agent"
             ? `确定在 ${selected.length} 个在线节点上批量更新 Agent？升级期间节点会短暂离线。`
             : `确定在 ${selected.length} 个节点上执行 ${engineName(engine)} ${actionName(action)}？`,
           "提交批量任务",
-        ))
-      )
+        );
+      } finally {
+        batchForm.dataset.confirming = "";
+      }
+      if (!confirmed || batchForm.dataset.busy === "1")
         return;
       batchForm.dataset.busy = "1";
-      const submit = batchForm.querySelector("button[type=submit]");
-      if (submit) submit.disabled = true;
+      updateBatch();
       const results = batchForm.querySelector("[data-batch-results]");
       const settled = [];
       for (const input of selected) {
@@ -1452,39 +1503,39 @@ function bindAgentPage(agentItems, presetMode = false) {
       bindBatchRetries(batchForm, action, engine, agentsByID);
     };
   document.querySelectorAll("[data-open-enrollment]").forEach((button) => {
-    button.onclick = () => showEnrollmentDialog(async (name, close) => {
-      const created = await api("/enrollment-tokens", { method: "POST", body: JSON.stringify({ name }) });
-      const escapedToken = created.token.replaceAll("'", "'\\''");
-      const escapedName = name.replaceAll("'", "'\\''");
-      const command = `curl -fsSL -H 'X-QControlHub-Enrollment: ${escapedToken}' ${location.origin}/install-agent.sh | sudo sh -s -- ${location.origin} '${escapedToken}' '${escapedName}'`;
-      close();
-      showCommand(command, async () => {
-        try { await refreshAgentPage(); } catch (error) { notify(error.message, "error"); }
+    button.onclick = () =>
+      showEnrollmentDialog({
+        tokenRows: enrollmentHistory.tokenRows || "",
+        tokenCount: enrollmentHistory.tokenCount || 0,
+        onDelete: async (id) => {
+          await api(`/enrollment-tokens/${encodeURIComponent(id)}`, {
+            method: "DELETE",
+          });
+          try {
+            await refreshAgentPage();
+          } catch (error) {
+            notify(`添加记录刷新失败：${error.message}`, "error");
+          }
+        },
+        onSubmit: async (name, close) => {
+          const created = await api("/enrollment-tokens", {
+            method: "POST",
+            body: JSON.stringify({ name }),
+          });
+          const escapedToken = created.token.replaceAll("'", "'\\''");
+          const escapedName = name.replaceAll("'", "'\\''");
+          const command = `curl -fsSL -H 'X-QControlHub-Enrollment: ${escapedToken}' ${location.origin}/install-agent.sh | sudo sh -s -- ${location.origin} '${escapedToken}' '${escapedName}'`;
+          close();
+          showCommand(command, async () => {
+            try {
+              await refreshAgentPage();
+            } catch (error) {
+              notify(`添加记录刷新失败，部署命令未受影响：${error.message}`, "error");
+            }
+          });
+        },
       });
-    });
   });
-  const enrollmentForm = document.querySelector("#enrollment-form");
-  if (enrollmentForm)
-    enrollmentForm.onsubmit = async (event) => {
-      event.preventDefault();
-      const values = new FormData(enrollmentForm);
-      const name = String(values.get("name") || "").trim();
-      const created = await api("/enrollment-tokens", {
-        method: "POST",
-        body: JSON.stringify({
-          name,
-        }),
-      });
-      const escapedToken = created.token.replaceAll("'", "'\\''");
-      const escapedName = name.replaceAll("'", "'\\''");
-      const command = `curl -fsSL -H 'X-QControlHub-Enrollment: ${escapedToken}' ${location.origin}/install-agent.sh | sudo sh -s -- ${location.origin} '${escapedToken}' '${escapedName}'`;
-      // Refresh the history before opening the modal so the newly-created
-      // enrollment is already visible when the one-time command is closed.
-      // Rendering first also avoids a race with the modal close callback and
-      // keeps the history count/list in sync without requiring a page reload.
-      await refreshAgentPage();
-      showCommand(command);
-    };
   document
     .querySelectorAll("[data-agent-refresh]")
     .forEach((button) => (button.onclick = () => pollAgentMetrics()));
@@ -1572,6 +1623,11 @@ function bindBatchRetries(form, action, engine, agentsByID) {
       const agentID = button.dataset.batchRetry;
       const agent = agentsByID.get(agentID);
       if (!agent) return;
+      const eligibility = batchAgentEligibility(agent, action, engine);
+      if (!eligibility.eligible) {
+        notify(`无法重试：${eligibility.reason}`, "error");
+        return;
+      }
       button.disabled = true;
       try {
         const task = await api("/tasks", {
@@ -2058,16 +2114,122 @@ function bindCodeEditors() {
   });
 }
 
-function showEnrollmentDialog(onSubmit) {
+function bindModalLifecycle(wrap, onClose) {
+  const previousFocus = document.activeElement;
+  const restoreEnrollmentEntry = previousFocus?.matches?.(
+    "[data-open-enrollment]",
+  );
+  const inertRoots = new Map();
+  const lockBackground = () => {
+    document.querySelectorAll(".desktop-app").forEach((root) => {
+      if (!inertRoots.has(root)) inertRoots.set(root, root.inert || false);
+      root.inert = true;
+    });
+  };
+  const observer = new MutationObserver(lockBackground);
+  const previousOverflow = document.body.style.overflow;
+  let closed = false;
+  lockBackground();
+  observer.observe(document.body, { childList: true, subtree: true });
+  document.body.style.overflow = "hidden";
+  const focusable = () => [
+    ...wrap.querySelectorAll(
+      'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [href], [tabindex]:not([tabindex="-1"])',
+    ),
+  ].filter((element) => !element.hidden);
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    observer.disconnect();
+    document.removeEventListener("keydown", onKeydown);
+    inertRoots.forEach((inert, root) => {
+      if (root.isConnected) root.inert = inert;
+    });
+    document.body.style.overflow = previousOverflow;
+    wrap.remove();
+    const restoreTarget = previousFocus instanceof HTMLElement && previousFocus.isConnected
+      ? previousFocus
+      : restoreEnrollmentEntry
+        ? document.querySelector("[data-open-enrollment]")
+        : null;
+    restoreTarget?.focus();
+    onClose?.();
+  };
+  const onKeydown = (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      close();
+      return;
+    }
+    if (event.key !== "Tab") return;
+    const items = focusable();
+    if (!items.length) {
+      event.preventDefault();
+      return;
+    }
+    const first = items[0];
+    const last = items[items.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
+  document.addEventListener("keydown", onKeydown);
+  wrap.querySelectorAll("[data-close]").forEach((button) => {
+    button.onclick = close;
+  });
+  wrap.onclick = (event) => {
+    if (event.target === wrap) close();
+  };
+  return close;
+}
+
+function showEnrollmentDialog({ tokenRows, tokenCount, onDelete, onSubmit }) {
   const wrap = document.createElement("div");
   wrap.className = "modal-backdrop";
-  wrap.innerHTML = `<section class="deploy-command-modal enrollment-dialog" role="dialog" aria-modal="true" aria-labelledby="enrollment-dialog-title"><header class="deploy-command-head"><span class="deploy-command-icon" aria-hidden="true">＋</span><div><p class="eyebrow">添加节点</p><h2 id="enrollment-dialog-title">生成 Agent 部署命令</h2><p>只生成当前节点的动态 enrollment 命令，控制台不会自动连接或安装。</p></div><button class="deploy-command-close" type="button" data-close aria-label="关闭弹窗">×</button></header><form class="deploy-command-body enrollment-dialog-form"><label>节点名称<input name="name" maxlength="100" required autocomplete="off" placeholder="例如 shanghai-edge-01"></label><p class="enrollment-security-note"><b>凭据只显示一次</b><span>请在安全环境复制命令；关闭弹窗不会执行任何操作。</span></p><footer class="deploy-command-actions"><span>可稍后在添加记录中查看状态</span><div><button class="button" type="button" data-close>取消</button><button class="button primary" type="submit">生成并复制命令</button></div></footer></form></section>`;
+  wrap.innerHTML = `<section class="deploy-command-modal enrollment-dialog" role="dialog" aria-modal="true" aria-labelledby="enrollment-dialog-title" aria-describedby="enrollment-dialog-description"><header class="deploy-command-head"><span class="deploy-command-icon" aria-hidden="true">＋</span><div><p class="eyebrow">添加节点</p><h2 id="enrollment-dialog-title">生成 Agent 部署命令</h2><p id="enrollment-dialog-description">为一台新节点生成长期有效的 enrollment 凭据；命令只会显示供复制，浏览器绝不会执行。</p></div><button class="deploy-command-close" type="button" data-close aria-label="关闭添加节点弹窗">×</button></header><div class="deploy-command-body enrollment-dialog-body"><form class="enrollment-dialog-form"><label>节点名称<input name="name" maxlength="100" required autocomplete="off" placeholder="例如 shanghai-edge-01"></label><p class="enrollment-security-note"><b>凭据仅在生成后显示一次</b><span>新命令在删除前长期有效；生成新命令后，已有安装命令会继续有效，已有命令继续有效。</span></p><footer class="enrollment-form-actions"><button class="button" type="button" data-close>取消</button><button class="button primary" type="submit">生成部署命令</button></footer></form><section class="enrollment-history" aria-labelledby="enrollment-history-title"><header><div><b id="enrollment-history-title">添加记录</b><small>删除记录只会立即撤销对应凭据，不会删除已注册节点或卸载 Agent。</small></div><span data-enrollment-history-count>${tokenCount || 0}</span></header><div data-enrollment-history-list>${tokenRows || '<p class="enrollment-history-empty">暂无添加记录</p>'}</div></section></div></section>`;
   document.body.append(wrap);
-  const close = () => { document.removeEventListener("keydown", onKeydown); wrap.remove(); };
-  const onKeydown = (event) => { if (event.key === "Escape") close(); };
-  document.addEventListener("keydown", onKeydown);
-  wrap.querySelectorAll("[data-close]").forEach((button) => (button.onclick = close));
-  wrap.onclick = (event) => { if (event.target === wrap) close(); };
+  const close = bindModalLifecycle(wrap);
+  wrap.querySelectorAll("[data-delete-enrollment]").forEach((button) => {
+    button.onclick = async () => {
+      if (button.dataset.confirmDelete !== "1") {
+        button.dataset.confirmDelete = "1";
+        button.dataset.defaultAriaLabel = button.getAttribute("aria-label") || "";
+        button.textContent = "再次点击确认删除";
+        button.setAttribute(
+          "aria-label",
+          "再次点击确认删除；凭据会失效，已注册节点和 Agent 不受影响",
+        );
+        window.setTimeout(() => {
+          if (!button.isConnected || button.disabled) return;
+          button.dataset.confirmDelete = "";
+          button.textContent = "删除";
+          if (button.dataset.defaultAriaLabel)
+            button.setAttribute("aria-label", button.dataset.defaultAriaLabel);
+          else button.removeAttribute("aria-label");
+        }, 5000);
+        return;
+      }
+      button.disabled = true;
+      try {
+        await onDelete(button.dataset.deleteEnrollment);
+        button.closest("article")?.remove();
+        const list = wrap.querySelector("[data-enrollment-history-list]");
+        const count = list?.querySelectorAll("article").length || 0;
+        const countLabel = wrap.querySelector("[data-enrollment-history-count]");
+        if (countLabel) countLabel.textContent = String(count);
+        if (list && count === 0)
+          list.innerHTML = '<p class="enrollment-history-empty">暂无添加记录</p>';
+        notify("添加节点凭据已删除");
+      } catch (error) {
+        button.disabled = false;
+        notify(error.message, "error");
+      }
+    };
+  });
   wrap.querySelector("form").onsubmit = async (event) => {
     event.preventDefault();
     const submit = event.currentTarget.querySelector("button[type=submit]");
@@ -2079,36 +2241,17 @@ function showEnrollmentDialog(onSubmit) {
 }
 
 function showCommand(command, onClose, heading = "一键添加 QAgent 节点") {
-  const previousFocus = document.activeElement;
   const wrap = document.createElement("div");
   wrap.className = "modal-backdrop";
-  wrap.innerHTML = `<section class="deploy-command-modal" role="dialog" aria-modal="true" aria-labelledby="deploy-command-title"><header class="deploy-command-head"><span class="deploy-command-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m7 8 4 4-4 4M13 16h4"/></svg></span><div><p class="eyebrow">Agent 部署命令</p><h2 id="deploy-command-title">${esc(heading)}</h2><p>命令仅供复制；关闭页面不会连接、安装或重启任何节点。</p></div><button class="deploy-command-close" type="button" data-close aria-label="关闭弹窗">×</button></header><div class="deploy-command-body"><div class="deploy-command-notice"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.6 2.8 8.1 7 10 4.2-1.9 7-5.4 7-10V6l-7-3Z"/><path d="m9.5 12 1.7 1.7 3.5-3.7"/></svg><span><b>凭据仅在此处短时显示</b><small>请安全复制并妥善保存；控制台不会自动执行命令，也不会记录命令正文。</small></span></div><section class="deploy-command-shell" aria-label="Agent 安装命令"><header><span><i></i>Terminal</span><small>复制模式</small></header><div><span class="deploy-command-prompt" aria-hidden="true">$</span><textarea class="deploy-command-input" rows="5" readonly spellcheck="false" aria-label="Agent 安装命令" data-command>${esc(command)}</textarea></div></section></div><footer class="deploy-command-actions"><span>复制后请在目标 Linux 节点自行执行</span><div><button class="button" type="button" data-close>关闭</button><button class="button primary deploy-command-copy" type="button" data-copy-command><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2v8a2 2 0 0 0 2 2h2"/></svg><span data-copy-label>复制部署命令</span></button></div></footer></section>`;
+  wrap.innerHTML = `<section class="deploy-command-modal" role="dialog" aria-modal="true" aria-labelledby="deploy-command-title" aria-describedby="deploy-command-description"><header class="deploy-command-head"><span class="deploy-command-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m7 8 4 4-4 4M13 16h4"/></svg></span><div><p class="eyebrow">Agent 部署命令</p><h2 id="deploy-command-title">${esc(heading)}</h2><p id="deploy-command-description">命令仅供复制；关闭页面不会连接、安装或重启任何节点。</p></div><button class="deploy-command-close" type="button" data-close aria-label="关闭部署命令弹窗">×</button></header><div class="deploy-command-body"><div class="deploy-command-notice"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.6 2.8 8.1 7 10 4.2-1.9 7-5.4 7-10V6l-7-3Z"/><path d="m9.5 12 1.7 1.7 3.5-3.7"/></svg><span><b>凭据仅在此处显示一次</b><small>请安全复制并妥善保存；命令在对应添加记录被删除前长期有效，控制台不会自动执行或保存命令正文。</small></span></div><section class="deploy-command-shell" aria-label="Agent 安装命令"><header><span><i></i>Terminal</span><small>只读复制模式</small></header><div><span class="deploy-command-prompt" aria-hidden="true">$</span><textarea class="deploy-command-input" rows="5" readonly spellcheck="false" aria-label="Agent 安装命令" data-command>${esc(command)}</textarea></div></section></div><footer class="deploy-command-actions"><span>复制后请在目标 Linux 节点自行执行</span><div><button class="button" type="button" data-close>关闭</button><button class="button primary deploy-command-copy" type="button" data-copy-command><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2v8a2 2 0 0 0 2 2h2"/></svg><span data-copy-label>复制部署命令</span></button></div></footer></section>`;
   document.body.append(wrap);
   const copyButton = wrap.querySelector("[data-copy-command]");
   const commandInput = wrap.querySelector("[data-command]");
   let resetCopyLabel;
-  let closed = false;
-  const close = () => {
-    if (closed) return;
-    closed = true;
+  bindModalLifecycle(wrap, () => {
     window.clearTimeout(resetCopyLabel);
-    document.removeEventListener("keydown", onKeydown);
-    wrap.remove();
-    if (previousFocus instanceof HTMLElement && previousFocus.isConnected) {
-      previousFocus.focus();
-    }
     onClose?.();
-  };
-  const onKeydown = (event) => {
-    if (event.key === "Escape") close();
-  };
-  wrap
-    .querySelectorAll("[data-close]")
-    .forEach((button) => (button.onclick = close));
-  wrap.onclick = (event) => {
-    if (event.target === wrap) close();
-  };
-  document.addEventListener("keydown", onKeydown);
+  });
   copyButton.onclick = async () => {
     try {
       await navigator.clipboard.writeText(command);

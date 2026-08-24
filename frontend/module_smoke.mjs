@@ -4,6 +4,8 @@ import "./refresh_smoke.mjs";
 
 import {
   animateNodeCardDrop,
+  batchAgentEligibility,
+  batchSelectAllState,
   clearNodeCardDragState,
   coreSourceForInstall,
   developmentSourceVisible,
@@ -33,6 +35,61 @@ import { createLatestRenderScheduler } from "./modules/refresh.js";
 
 const state = { data: {}, session: { role: "admin" } };
 const noop = () => {};
+
+assert.deepEqual(
+  batchAgentEligibility(
+    { status: "online", features: ["agent-self-upgrade-v1"] },
+    "upgrade-agent",
+    "",
+  ),
+  { eligible: true, reason: "在线 · 支持远程升级" },
+);
+assert.match(
+  batchAgentEligibility({ status: "offline" }, "upgrade-agent", "").reason,
+  /离线/,
+);
+assert.match(
+  batchAgentEligibility({ status: "online", features: [] }, "upgrade-agent", "")
+    .reason,
+  /旧版 Agent/,
+);
+assert.equal(
+  batchAgentEligibility(
+    { status: "online", runtime: { mihomo: { installed: true } } },
+    "restart",
+    "mihomo",
+  ).eligible,
+  true,
+);
+assert.equal(
+  batchAgentEligibility(
+    { status: "online", runtime: { mihomo: { installed: false } } },
+    "restart",
+    "mihomo",
+  ).eligible,
+  false,
+);
+assert.deepEqual(
+  batchSelectAllState([
+    { disabled: false, checked: true },
+    { disabled: false, checked: false },
+    { disabled: true, checked: true },
+  ]),
+  { eligible: 2, selected: 1, checked: false, indeterminate: true },
+);
+assert.deepEqual(
+  batchSelectAllState([
+    { disabled: false, checked: true },
+    { disabled: false, checked: true },
+  ]),
+  { eligible: 2, selected: 2, checked: true, indeterminate: false },
+);
+assert.deepEqual(batchSelectAllState([]), {
+  eligible: 0,
+  selected: 0,
+  checked: false,
+  indeterminate: false,
+});
 
 const pendingMigrationSource = {
   content: '{"inbounds":[{"tag":"original"}]}',

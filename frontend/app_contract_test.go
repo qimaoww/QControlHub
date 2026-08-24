@@ -546,13 +546,22 @@ func TestAgentBatchAndEnrollmentSafetyContracts(t *testing.T) {
 	content := string(mustReadFrontendFile(t, "modules/agents.js"))
 	for _, marker := range []string{
 		`agent-self-upgrade-v1`,
-		`当前 Agent 不支持远程升级，请先重新安装或升级 Agent`,
+		`旧版 Agent 缺少远程升级能力`,
 		`batchForm.dataset.busy === "1"`,
+		`batchForm.dataset.confirming === "1"`,
 		`for (const input of selected)`,
 		`data-batch-retry`,
+		`data-batch-select-all`,
+		`selectAll.indeterminate = selection.indeterminate`,
+		`selection.indeterminate ? "mixed"`,
 		`命令仅供复制；关闭页面不会连接、安装或重启任何节点。`,
 		`showCommand(command, async () =>`,
-		`不会自动执行`,
+		`浏览器绝不会执行`,
+		`document.body.style.overflow = "hidden"`,
+		`root.inert = true`,
+		`new MutationObserver(lockBackground)`,
+		`event.key !== "Tab"`,
+		`button.dataset.confirmDelete !== "1"`,
 	} {
 		if !strings.Contains(content, marker) {
 			t.Errorf("agent batch/enrollment safety contract is missing %q", marker)
@@ -570,22 +579,33 @@ func TestAgentBatchAndEnrollmentSafetyContracts(t *testing.T) {
 	}
 }
 
-func TestEnrollmentEntryRemainsVisibleInNodeSettings(t *testing.T) {
+func TestEnrollmentUsesARealDialogWithoutPersistentPanel(t *testing.T) {
 	module := string(mustReadFrontendFile(t, "modules/agents.js"))
 	css := string(mustReadFrontendFile(t, "app.css"))
-	if !strings.Contains(module, `<section class="enrollment-sheet" id="enrollment"`) || !strings.Contains(module, `data-open-enrollment`) {
-		t.Fatal("normal node-settings render must expose a clickable enrollment entry")
+	app := string(mustReadFrontendFile(t, "app.js"))
+	if strings.Contains(app, `href="#enrollment"`) || !strings.Contains(app, `type="button" data-open-enrollment`) {
+		t.Fatal("populated and empty node settings must expose a top dialog button without changing routes")
 	}
-	if !strings.Contains(css, `.page-agents .node-settings-page>.enrollment-sheet{display:block}`) {
-		t.Fatal("node-settings enrollment entry must override stale closed-details hiding")
+	if strings.Contains(module, `class="enrollment-sheet"`) {
+		t.Fatal("node settings must not retain the persistent enrollment sheet")
 	}
-	hide := strings.LastIndex(css, `.page-agents .node-settings-page>.enrollment-sheet:not([open]){display:none}`)
-	show := strings.LastIndex(css, `.page-agents .node-settings-page>.enrollment-sheet:not([open]){display:block}`)
-	if hide < 0 || show <= hide {
-		t.Fatalf("effective cascade must end with visible enrollment rule (hide=%d show=%d)", hide, show)
+	if strings.Contains(css, `.node-settings-page>.enrollment-sheet{display:block}`) || strings.Contains(css, `.node-settings-page>.enrollment-sheet:not([open]){display:block}`) {
+		t.Fatal("effective CSS must not force a persistent enrollment sheet visible")
 	}
-	if !strings.Contains(module, `data-has-agents="${agents.length ? 1 : 0}"`) {
-		t.Fatal("enrollment entry must render for both populated and empty node states")
+	for _, marker := range []string{
+		`role="dialog" aria-modal="true"`,
+		`aria-labelledby="enrollment-dialog-title"`,
+		`aria-describedby="enrollment-dialog-description"`,
+		`data-enrollment-history-list`,
+		`删除记录只会立即撤销对应凭据`,
+		`添加记录刷新失败，部署命令未受影响`,
+	} {
+		if !strings.Contains(module, marker) {
+			t.Errorf("enrollment dialog contract is missing %q", marker)
+		}
+	}
+	if !strings.Contains(css, `.modal-backdrop{position:fixed`) || !strings.Contains(css, `.enrollment-history`) {
+		t.Fatal("effective CSS must render the dialog backdrop and enrollment history")
 	}
 }
 
