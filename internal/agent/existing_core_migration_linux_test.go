@@ -279,6 +279,7 @@ func TestExistingCoreMigrationCoordinatesActiveManagedService(t *testing.T) {
 	requireAgentRoot(t)
 	fixture := newExistingCoreMigrationFixture(t, false)
 	writeMigrationServiceState(t, fixture.stateDirectory, "qagent-xray.service", "active", "enabled-runtime")
+	writeMigrationTrigger(t, fixture.stateDirectory, "respawn-managed-on-runtime-stop")
 	output, err := fixture.executor.Execute(context.Background(), core.Task{
 		Action: core.ActionImportExisting, Engine: core.EngineXray, ConfigContent: fixture.importedConfig,
 	})
@@ -1389,8 +1390,9 @@ case "$command" in
     ;;
   stop)
     printf 'inactive\n' > "$active_file"
-    if [ "$service" = qagent-xray.service ] && [ "$(cat "$state/$service.runtime")" = 1 ]; then
+    if [ "$service" = qagent-xray.service ] && [ "$(cat "$state/$service.runtime")" = 1 ] && [ -f "$state/respawn-managed-on-runtime-stop" ] && [ ! -f "$state/managed-respawned" ]; then
       printf 'active\n' > "$active_file"
+      : > "$state/managed-respawned"
     fi
     ;;
   start|restart)
