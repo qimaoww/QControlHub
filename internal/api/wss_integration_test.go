@@ -625,8 +625,9 @@ func TestWSSManagedPublicIPProbeUsesCurrentSessionCapabilityWithPostgreSQL(t *te
 		AdminToken: strings.Repeat("p", 48), TrustedProxies: trustedProxies,
 		AgentBinary: []byte("test-agent-binary"), AgentVersion: "test-version",
 		PublicIPProbe: core.PublicIPProbeConfig{
-			IPv4Endpoint: "https://probe.example.test/v4",
-			IPv6Endpoint: "https://probe.example.test/v6", IntervalSeconds: 300,
+			IPv4Endpoint:    core.DefaultPublicIPProbeIPv4Endpoint,
+			IPv6Endpoint:    core.DefaultPublicIPProbeIPv6Endpoint,
+			IntervalSeconds: 300,
 		},
 	}).Handler())
 	defer httpServer.Close()
@@ -658,7 +659,7 @@ func TestWSSManagedPublicIPProbeUsesCurrentSessionCapabilityWithPostgreSQL(t *te
 	if err := wsjson.Read(ctx, connection, &probeConfig); err != nil {
 		t.Fatalf("read managed probe config: %v", err)
 	}
-	if probeConfig.Type != core.WirePublicIPProbe || probeConfig.PublicIPProbe == nil || probeConfig.PublicIPProbe.IPv4Endpoint != "https://probe.example.test/v4" || probeConfig.PublicIPProbe.IPv6Endpoint != "https://probe.example.test/v6" {
+	if probeConfig.Type != core.WirePublicIPProbe || probeConfig.PublicIPProbe == nil || probeConfig.PublicIPProbe.IPv4Endpoint != core.DefaultPublicIPProbeIPv4Endpoint || probeConfig.PublicIPProbe.IPv6Endpoint != core.DefaultPublicIPProbeIPv6Endpoint {
 		t.Fatalf("managed probe message = %+v", probeConfig)
 	}
 	waitRawPublicIPProbeRowAPI(t, ctx, databaseURL, agentID, "", "", "", "", []string{core.AgentFeatureManagedPublicIPProbe})

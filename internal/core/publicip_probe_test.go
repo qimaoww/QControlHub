@@ -24,3 +24,17 @@ func TestPublicIPProbeConfigValidation(t *testing.T) {
 		})
 	}
 }
+
+func TestDefaultPublicIPProbeEndpointsAreFamilyBoundAndValid(t *testing.T) {
+	config := PublicIPProbeConfig{
+		IPv4Endpoint:    DefaultPublicIPProbeIPv4Endpoint,
+		IPv6Endpoint:    DefaultPublicIPProbeIPv6Endpoint,
+		IntervalSeconds: 300,
+	}
+	if err := config.Validate(); err != nil {
+		t.Fatalf("default ident.me probe config is invalid: %v", err)
+	}
+	if config.IPv4Endpoint != "https://4.ident.me" || config.IPv6Endpoint != "https://6.ident.me" {
+		t.Fatalf("default probe endpoints = %+v, want family-specific ident.me endpoints", config)
+	}
+}

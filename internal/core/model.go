@@ -51,8 +51,10 @@ const AgentFeaturePublicIPProbe = "public-ip-probe-v1"
 const AgentFeatureManagedPublicIPProbe = "managed-public-ip-probe-v1"
 
 const (
-	PublicIPProbeSourceAgent        = "agent-config"
-	PublicIPProbeSourceControlPlane = "control-plane-config"
+	PublicIPProbeSourceAgent         = "agent-config"
+	PublicIPProbeSourceControlPlane  = "control-plane-config"
+	DefaultPublicIPProbeIPv4Endpoint = "https://4.ident.me"
+	DefaultPublicIPProbeIPv6Endpoint = "https://6.ident.me"
 )
 
 // PublicIPProbeConfig is an operator-controlled, per-family direct egress

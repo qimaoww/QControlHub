@@ -17,7 +17,6 @@ import (
 
 	"github.com/qimaoww/qcontrolhub/internal/api"
 	"github.com/qimaoww/qcontrolhub/internal/authn"
-	"github.com/qimaoww/qcontrolhub/internal/core"
 	"github.com/qimaoww/qcontrolhub/internal/store"
 )
 
@@ -57,11 +56,7 @@ func main() {
 		slog.Error("QCH_AGENT_PUBLIC_IP_PROBE_INTERVAL must be between 1m and 24h")
 		os.Exit(1)
 	}
-	publicIPProbe := core.PublicIPProbeConfig{
-		IPv4Endpoint:    strings.TrimSpace(os.Getenv("QCH_AGENT_PUBLIC_IP_PROBE_IPV4_ENDPOINT")),
-		IPv6Endpoint:    strings.TrimSpace(os.Getenv("QCH_AGENT_PUBLIC_IP_PROBE_IPV6_ENDPOINT")),
-		IntervalSeconds: uint32(probeInterval / time.Second),
-	}
+	publicIPProbe := publicIPProbeConfigFromEnv(probeInterval)
 	if err := publicIPProbe.Validate(); err != nil {
 		slog.Error("invalid managed public IP probe configuration", "error", err)
 		os.Exit(1)

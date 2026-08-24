@@ -84,7 +84,9 @@ Nginx 示例按真实客户端 IP 对 `/api/v1/auth/login` 和 `/agent/v1/enroll
 
 Agent 使用 `/agent/v1/connect` 的长期 WSS 会话。Nginx 示例已转发 `Upgrade`/`Connection`，并把上游读取空闲超时提高到一小时；删除这些设置会导致 Agent 无法升级或在无任务时周期性断线。
 
-双栈节点若某一族只在 NAT 后提供私网接口地址，控制面无法从经 CDN/反向代理的 WSS 跳点安全推断该族出口。可在控制面显式设置 `QCH_AGENT_PUBLIC_IP_PROBE_IPV4_ENDPOINT`、`QCH_AGENT_PUBLIC_IP_PROBE_IPV6_ENDPOINT`（按需设置其中一个或两个）及 `QCH_AGENT_PUBLIC_IP_PROBE_INTERVAL`（`1m`–`24h`，默认 `5m`）。端点必须是运维方明确选择的、返回单个纯文本 IP 的 HTTPS echo 服务；项目不内置第三方端点。当前已认证 WSS 会话的首次完整心跳声明 `managed-public-ip-probe-v1` 后，控制面才以独立消息下发配置，并只接受该会话中已配置地址族的 `control-plane-config` 结果；旧 Agent、空 feature、metrics-only 首包和降级会话均不能继承历史能力或来源。Agent 对每族只使用一个端点，以 `tcp4`/`tcp6` 直连且不读取 `HTTP_PROXY`/`HTTPS_PROXY`，不跟随重定向；失败只清除该族旧值，不会改用另一信任锚或污染另一族。若同时配置 Agent 本机 `QCH_PUBLIC_IP_PROBE_*`，本机选择优先且控制面不能覆盖。
+双栈节点若某一族只在 NAT 后提供私网接口地址，控制面无法从经 CDN/反向代理的 WSS 跳点安全推断该族出口。默认 managed probe 使用逐族端点 `https://4.ident.me` 与 `https://6.ident.me`；它们返回服务端看到的真实 TCP 对端地址，ident.me 会为少量运行诊断和统计保留/采样请求来源信息，不能宣称零日志。其公开说明见 [ident.me API](https://api.ident.me/) 及 [开源 HTTP handler](https://github.com/xmit-co/ident.me/blob/main/backend/http/main.go)。若运维不允许向公共 echo 服务发出节点出口请求，可将控制面 `QCH_AGENT_PUBLIC_IP_PROBE_ENABLED=false` 全局关闭；关闭后两族 endpoint 均为空、不会发起探测，并按既有语义清除 stale 值。也可显式设置 `QCH_AGENT_PUBLIC_IP_PROBE_IPV4_ENDPOINT`、`QCH_AGENT_PUBLIC_IP_PROBE_IPV6_ENDPOINT` 覆盖任一族，及 `QCH_AGENT_PUBLIC_IP_PROBE_INTERVAL`（`1m`–`24h`，默认 `5m`）。未设置或设为空的 endpoint 使用对应 ident.me 默认值；`false`/`0` 关闭值在直接运行和 Compose 中语义一致。所有 endpoint 必须是运维明确选择的、返回单个纯文本 IP 的 HTTPS echo 服务；项目不会在 ident.me 失败后静默切换 ipify、Cloudflare trace、ip.sb、控制面/WSS/CDN、中继或其他公共 API。
+
+当前已认证 WSS 会话的首次完整心跳声明 `managed-public-ip-probe-v1` 后，控制面才以独立消息下发配置，并只接受该会话中已配置地址族的 `control-plane-config` 结果；旧 Agent、空 feature、metrics-only 首包和降级会话均不能继承历史能力或来源。Agent 对每族只使用一个端点，以 `tcp4`/`tcp6` 直连且不读取 `HTTP_PROXY`/`HTTPS_PROXY`，不跟随重定向；失败只清除该族旧值，不会改用另一信任锚或污染另一族。若同时配置 Agent 本机 `QCH_PUBLIC_IP_PROBE_*`，本机选择优先且控制面不能覆盖。
 
 ## 4. 安装远程 Agent
 
