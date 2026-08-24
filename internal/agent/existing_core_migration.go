@@ -979,11 +979,21 @@ func (e *Executor) importExistingConfig(ctx context.Context, engine core.Engine,
 		return "migration failed; original configuration, binary, and service were restored", cause
 	}
 	if managedInitialState == "active" {
+		// Temporarily remove the unit from the enablement target before stopping
+		// it. This prevents systemd/OpenRC supervision from immediately
+		// respawning the managed service during the migration critical section;
+		// the recorded enable state is restored while it remains stopped.
+		if err := setServiceEnabled(ctx, managed.Service, false, manager); err != nil {
+			return rollbackMigration(fmt.Errorf("temporarily disable QAgent %s service before migration: %w", engine, err))
+		}
 		if _, err := serviceCommandAndVerifyWithManager(ctx, manager, managed.Service, core.ActionStop); err != nil {
 			return rollbackMigration(fmt.Errorf("stop QAgent %s service before migration: %w", engine, err))
 		}
 		if err := waitForSingleMigrationServiceStable(ctx, managed.Service, "inactive", manager); err != nil {
 			return rollbackMigration(fmt.Errorf("confirm stopped QAgent %s service before migration: %w", engine, err))
+		}
+		if err := restoreServiceEnableState(ctx, managed.Service, migrationRecord.ManagedEnableState, manager); err != nil {
+			return rollbackMigration(fmt.Errorf("restore QAgent %s enable state before migration: %w", engine, err))
 		}
 	}
 
