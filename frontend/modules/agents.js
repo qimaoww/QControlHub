@@ -606,6 +606,7 @@ export function installAgents(ctx) {
   const cardInteractions = createInteractionGate();
   let cancelCardDrag = () => {};
   let agentPageRequest = 0;
+  let syncActiveBatchSnapshot = null;
   let structureRefreshQueued = false;
   let structureRefreshRunning = false;
   const requestAgentStructureRefresh = () => {
@@ -1149,6 +1150,7 @@ function compactPresetPage() {
 
 function bindAgentPage(agentItems, presetMode = false, enrollmentHistory = {}) {
   const agentsByID = new Map(agentItems.map((agent) => [agent.id, agent]));
+  syncActiveBatchSnapshot = null;
   document
     .querySelectorAll(
       ".preset-node-workspace, .machine-workspace, .node-operations-workspace",
@@ -1425,6 +1427,28 @@ function bindAgentPage(agentItems, presetMode = false, enrollmentHistory = {}) {
     if (engineWrap) engineWrap.hidden = action === "upgrade-agent";
     batchForm.elements.action.disabled = busy;
     batchForm.elements.engine.disabled = busy;
+    batchForm
+      .querySelectorAll("[data-batch-retry]")
+      .forEach((retry) => {
+        const eligibility = batchAgentEligibility(
+          agentsByID.get(retry.dataset.batchRetry),
+          retry.dataset.batchRetryAction,
+          retry.dataset.batchRetryEngine,
+        );
+        retry.disabled = busy || !eligibility.eligible;
+        retry.title = eligibility.eligible ? "重试失败任务" : eligibility.reason;
+      });
+  };
+  const setBatchBusy = (busy) => {
+    if (!batchForm) return;
+    batchForm.dataset.busy = busy ? "1" : "";
+    updateBatch();
+  };
+  syncActiveBatchSnapshot = (items) => {
+    if (!batchForm?.isConnected) return;
+    agentsByID.clear();
+    items.forEach((agent) => agentsByID.set(agent.id, agent));
+    updateBatch();
   };
   batchForm
     ?.querySelectorAll("[data-batch-checkbox]")
@@ -1455,7 +1479,7 @@ function bindAgentPage(agentItems, presetMode = false, enrollmentHistory = {}) {
       const values = new FormData(batchForm);
       const action = String(values.get("action"));
       const engine = String(values.get("engine"));
-      const selected = [
+      let selected = [
         ...batchForm.querySelectorAll("[data-batch-checkbox]:checked"),
       ].filter((input) =>
         batchAgentEligibility(agentsByID.get(input.value), action, engine)
@@ -1477,12 +1501,28 @@ function bindAgentPage(agentItems, presetMode = false, enrollmentHistory = {}) {
       }
       if (!confirmed || batchForm.dataset.busy === "1")
         return;
-      batchForm.dataset.busy = "1";
       updateBatch();
+      selected = [
+        ...batchForm.querySelectorAll("[data-batch-checkbox]:checked"),
+      ].filter((input) =>
+        batchAgentEligibility(agentsByID.get(input.value), action, engine)
+          .eligible,
+      );
+      if (!selected.length) return;
+      setBatchBusy(true);
       const results = batchForm.querySelector("[data-batch-results]");
       const settled = [];
       for (const input of selected) {
         const agent = agentsByID.get(input.value);
+        const eligibility = batchAgentEligibility(agent, action, engine);
+        if (!eligibility.eligible) {
+          settled.push({
+            agent,
+            error: new Error(`节点状态已变化：${eligibility.reason}`),
+            ok: false,
+          });
+          continue;
+        }
         try {
           const task = await api("/tasks", {
             method: "POST",
@@ -1499,13 +1539,18 @@ function bindAgentPage(agentItems, presetMode = false, enrollmentHistory = {}) {
       }
       if (results) {
         results.hidden = false;
-        results.innerHTML = `<header><b>批量结果</b><small>${settled.filter((item) => item.ok).length}/${settled.length} 成功</small></header>${settled.map((item) => `<div class="batch-result-row ${item.ok ? "ok" : "error"}"><span><b>${esc(item.agent?.name || item.agent?.id || "节点")}</b><small>${item.ok ? `任务 ${esc(item.task?.id || "已提交")}` : esc(item.error?.message || "提交失败")}</small></span>${item.ok ? "" : `<button type="button" class="button small" data-batch-retry="${esc(item.agent?.id || "")}">重试</button>`}</div>`).join("")}`;
+        results.innerHTML = `<header><b>批量结果</b><small>${settled.filter((item) => item.ok).length}/${settled.length} 成功</small></header>${settled.map((item) => `<div class="batch-result-row ${item.ok ? "ok" : "error"}"><span><b>${esc(item.agent?.name || item.agent?.id || "节点")}</b><small>${item.ok ? `任务 ${esc(item.task?.id || "已提交")}` : esc(item.error?.message || "提交失败")}</small></span>${item.ok ? "" : `<button type="button" class="button small" data-batch-retry="${esc(item.agent?.id || "")}" data-batch-retry-action="${esc(action)}" data-batch-retry-engine="${esc(engine)}">重试</button>`}</div>`).join("")}`;
       }
-      batchForm.dataset.busy = "";
-      updateBatch();
+      setBatchBusy(false);
       const success = settled.filter((item) => item.ok).length;
       notify(success === settled.length ? `已提交 ${success} 个任务` : `已提交 ${success}/${settled.length} 个任务`, success === settled.length ? "success" : "error");
-      bindBatchRetries(batchForm, action, engine, agentsByID);
+      bindBatchRetries(
+        batchForm,
+        action,
+        engine,
+        agentsByID,
+        setBatchBusy,
+      );
     };
   document.querySelectorAll("[data-open-enrollment]").forEach((button) => {
     button.onclick = () =>
@@ -1621,7 +1666,7 @@ function bindAgentPage(agentItems, presetMode = false, enrollmentHistory = {}) {
     state.agentPollTimer = setTimeout(pollAgentMetrics, 2000);
 }
 
-function bindBatchRetries(form, action, engine, agentsByID) {
+function bindBatchRetries(form, action, engine, agentsByID, setBatchBusy) {
   form.querySelectorAll("[data-batch-retry]").forEach((button) => {
     button.onclick = async () => {
       if (form.dataset.busy === "1") return;
@@ -1633,8 +1678,18 @@ function bindBatchRetries(form, action, engine, agentsByID) {
         notify(`无法重试：${eligibility.reason}`, "error");
         return;
       }
-      button.disabled = true;
+      setBatchBusy(true);
       try {
+        const currentAgent = agentsByID.get(agentID);
+        const currentEligibility = batchAgentEligibility(
+          currentAgent,
+          action,
+          engine,
+        );
+        if (!currentEligibility.eligible) {
+          notify(`无法重试：${currentEligibility.reason}`, "error");
+          return;
+        }
         const task = await api("/tasks", {
           method: "POST",
           body: JSON.stringify({
@@ -1648,8 +1703,9 @@ function bindBatchRetries(form, action, engine, agentsByID) {
         button.remove();
         notify("重试任务已提交");
       } catch (error) {
-        button.disabled = false;
         notify(error.message, "error");
+      } finally {
+        setBatchBusy(false);
       }
     };
   });
@@ -1864,6 +1920,7 @@ async function pollAgentMetrics() {
         // interaction defers DOM patches. Other routes (notably live-config)
         // must not inherit the stale state that preceded an Agent upgrade.
         state.data.agents = items;
+        syncActiveBatchSnapshot?.(items);
         cardInteractions.defer(() => {
           items.forEach(updateAgentMetrics);
           const online = items.filter((item) => item.status === "online").length;

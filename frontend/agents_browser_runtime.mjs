@@ -47,6 +47,7 @@ const testAPI = {
   pendingTasks: [],
   enrollmentFailure: false,
   taskMode: "immediate",
+  agents: populatedAgents,
 };
 window.__agentsBrowserTestAPI = testAPI;
 
@@ -74,7 +75,7 @@ window.fetch = async (input, options = {}) => {
   if (method === "GET" && path === "/settings")
     return json({ panel_name: "QControlHub Browser Smoke" });
   if (method === "GET" && path === "/agents")
-    return json(mode === "empty" ? [] : populatedAgents);
+    return json(mode === "empty" ? [] : testAPI.agents);
   if (method === "GET" && path === "/enrollment-tokens") return json([]);
   if (method === "GET" && /^\/agents\/[^/]+\/configs$/.test(path)) return json([]);
   if (method === "GET" && path.startsWith("/metrics/")) return json([]);
@@ -101,7 +102,7 @@ window.fetch = async (input, options = {}) => {
 const delay = (milliseconds = 0) =>
   new Promise((resolve) => setTimeout(resolve, milliseconds));
 async function waitFor(predicate, message) {
-  for (let attempt = 0; attempt < 200; attempt += 1) {
+  for (let attempt = 0; attempt < 400; attempt += 1) {
     const value = predicate();
     if (value) return value;
     await delay(10);
@@ -195,11 +196,34 @@ async function testAdminRuntime() {
   testAPI.enrollmentFailure = false;
   enrollment.querySelector("[data-close]").click();
 
-  const form = document.querySelector("#batch-form");
-  const all = form.querySelector("[data-batch-select-all]");
-  const inputs = [...form.querySelectorAll("[data-batch-checkbox]")];
-  const [alpha, bravo, charlie, delta] = inputs;
-  const count = form.querySelector("[data-batch-count]");
+  let form = document.querySelector("#batch-form");
+  let all = form.querySelector("[data-batch-select-all]");
+  let inputs = [...form.querySelectorAll("[data-batch-checkbox]")];
+  let [alpha, bravo, charlie, delta] = inputs;
+  let count = form.querySelector("[data-batch-count]");
+  let submit = form.querySelector('button[type="submit"]');
+  const readCurrentBatchDOM = () => {
+    form = document.querySelector("#batch-form");
+    all = form.querySelector("[data-batch-select-all]");
+    inputs = [...form.querySelectorAll("[data-batch-checkbox]")];
+    [alpha, bravo, charlie, delta] = inputs;
+    count = form.querySelector("[data-batch-count]");
+    submit = form.querySelector('button[type="submit"]');
+  };
+  const replaceAgent = (agentID, update) => {
+    testAPI.agents = testAPI.agents.map((agent) =>
+      agent.id === agentID ? update(agent) : agent,
+    );
+  };
+  const refreshAgents = async (predicate, message) => {
+    document.querySelector("[data-agent-refresh]")?.click();
+    await waitFor(predicate, message);
+    await delay(50);
+    if (document.querySelector("#batch-form") !== form) {
+      readCurrentBatchDOM();
+      await waitFor(predicate, message);
+    }
+  };
   assert.equal(charlie.disabled, true);
   assert.match(charlie.closest("label").textContent, /离线/);
   assert.equal(delta.disabled, true);
@@ -223,10 +247,74 @@ async function testAdminRuntime() {
   all.click();
 
   testAPI.taskMode = "deferred";
-  const submit = form.querySelector('button[type="submit"]');
+
+  replaceAgent("alpha", (agent) => ({ ...agent, status: "offline" }));
+  await refreshAgents(
+    () => alpha.disabled && !alpha.checked,
+    "刷新后没有撤销刚变离线的节点",
+  );
+  assert.equal(bravo.checked, true, "刷新不应清除仍合格节点的选择");
+  assert.equal(count.textContent, "已选择 1 个节点 · 当前可选 1 个");
+  assert.equal(all.checked, true);
+  assert.equal(all.indeterminate, false);
+  assert.equal(all.getAttribute("aria-checked"), "true");
+  replaceAgent("alpha", () => onlineAgent("alpha"));
+  await refreshAgents(() => !alpha.disabled, "恢复在线快照后节点仍不可选");
+
+  bravo.click();
+  alpha.click();
+  form.requestSubmit(submit);
+  let confirmDialog = await waitFor(() => document.querySelector("[data-confirm-dialog][open]"), "离线二次校验没有进入确认流程");
+  replaceAgent("alpha", (agent) => ({ ...agent, status: "offline" }));
+  await refreshAgents(
+    () => alpha.disabled && !alpha.checked && /离线/.test(alpha.closest("label").textContent),
+    "刷新后没有立即撤销已离线节点的选择",
+  );
+  confirmDialog.querySelector("[data-confirm-accept]").click();
+  await delay(30);
+  assert.equal(testAPI.pendingTasks.length, 0, "确认后仍向已离线节点提交任务");
+
+  replaceAgent("alpha", () => onlineAgent("alpha"));
+  await refreshAgents(() => !alpha.disabled, "恢复在线快照后节点仍不可选");
+  bravo.click();
+  form.requestSubmit(submit);
+  confirmDialog = await waitFor(() => document.querySelector("[data-confirm-dialog][open]"), "feature 二次校验没有进入确认流程");
+  replaceAgent("bravo", (agent) => ({ ...agent, features: [] }));
+  await refreshAgents(
+    () => bravo.disabled && !bravo.checked && /旧版 Agent/.test(bravo.closest("label").textContent),
+    "刷新后没有立即撤销缺少升级 feature 的节点选择",
+  );
+  confirmDialog.querySelector("[data-confirm-accept]").click();
+  await delay(30);
+  assert.equal(testAPI.pendingTasks.length, 0, "确认后仍向缺少升级 feature 的节点提交任务");
+
+  replaceAgent("bravo", () => onlineAgent("bravo"));
+  await refreshAgents(() => !bravo.disabled, "恢复 feature 后节点仍不可选");
+  form.elements.action.value = "restart";
+  form.elements.action.dispatchEvent(new Event("change", { bubbles: true }));
+  alpha.click();
+  form.requestSubmit(submit);
+  confirmDialog = await waitFor(() => document.querySelector("[data-confirm-dialog][open]"), "runtime 二次校验没有进入确认流程");
+  replaceAgent("alpha", (agent) => ({
+    ...agent,
+    runtime: { ...agent.runtime, mihomo: { installed: false, service_status: "stopped" } },
+  }));
+  await refreshAgents(
+    () => alpha.disabled && !alpha.checked && /未安装/.test(alpha.closest("label").textContent),
+    "刷新后没有立即撤销 runtime 不可用节点的选择",
+  );
+  confirmDialog.querySelector("[data-confirm-accept]").click();
+  await delay(30);
+  assert.equal(testAPI.pendingTasks.length, 0, "确认后仍向 runtime 不可用节点提交任务");
+
+  replaceAgent("alpha", () => onlineAgent("alpha"));
+  await refreshAgents(() => !alpha.disabled, "恢复 runtime 后节点仍不可选");
+  form.elements.action.value = "upgrade-agent";
+  form.elements.action.dispatchEvent(new Event("change", { bubbles: true }));
+  all.click();
   form.requestSubmit(submit);
   form.requestSubmit(submit);
-  const confirmDialog = await waitFor(() => document.querySelector("[data-confirm-dialog][open]"), "批量提交没有进入确认流程");
+  confirmDialog = await waitFor(() => document.querySelector("[data-confirm-dialog][open]"), "批量提交没有进入确认流程");
   assert.equal(testAPI.pendingTasks.length, 0, "确认前不应提交任务");
   confirmDialog.querySelector("[data-confirm-accept]").click();
   await waitFor(() => testAPI.pendingTasks.length === 1, "首个串行任务未提交");
@@ -248,17 +336,59 @@ async function testAdminRuntime() {
   assert.equal(testAPI.pendingTasks[1].payload.agent_id, "bravo");
   testAPI.pendingTasks[1].fail("bravo temporary failure");
   await waitFor(() => form.dataset.busy !== "1", "部分失败后 busy 未恢复");
-  const rows = [...form.querySelectorAll(".batch-result-row")];
+  let rows = [...form.querySelectorAll(".batch-result-row")];
   assert.equal(rows.length, 2);
   assert.equal(rows.filter((row) => row.classList.contains("ok")).length, 1);
   assert.equal(rows.filter((row) => row.classList.contains("error")).length, 1);
-  const retry = form.querySelector("[data-batch-retry]");
-  assert.equal(retry.dataset.batchRetry, "bravo", "只能重试失败节点");
+  let retry = form.querySelector("[data-batch-retry]");
+  assert.equal(retry.dataset.batchRetry, "bravo", "部分失败只应重试失败节点");
   retry.click();
-  await waitFor(() => testAPI.pendingTasks.length === 3, "失败项重试未提交");
-  assert.equal(testAPI.pendingTasks[2].payload.agent_id, "bravo");
+  await waitFor(() => testAPI.pendingTasks.length === 3, "部分失败项重试未提交");
   testAPI.pendingTasks[2].ok({ id: "task-bravo-retry" });
   await waitFor(() => !form.querySelector("[data-batch-retry]"), "成功重试后仍残留重试入口");
+
+  form.requestSubmit(submit);
+  confirmDialog = await waitFor(() => document.querySelector("[data-confirm-dialog][open]"), "第二轮批量提交没有进入确认流程");
+  confirmDialog.querySelector("[data-confirm-accept]").click();
+  await waitFor(() => testAPI.pendingTasks.length === 4, "第二轮首个任务未提交");
+  testAPI.pendingTasks[3].fail("alpha temporary failure");
+  await waitFor(() => testAPI.pendingTasks.length === 5, "第二轮任务没有串行提交");
+  testAPI.pendingTasks[4].fail("bravo temporary failure");
+  await waitFor(() => form.dataset.busy !== "1", "全部失败后 busy 未恢复");
+  rows = [...form.querySelectorAll(".batch-result-row")];
+  assert.equal(rows.filter((row) => row.classList.contains("error")).length, 2);
+  let retries = [...form.querySelectorAll("[data-batch-retry]")];
+  assert.equal(retries.length, 2, "两个失败节点均应保留重试入口");
+  retries[0].click();
+  retries[1].click();
+  form.requestSubmit(submit);
+  alpha.click();
+  await waitFor(() => testAPI.pendingTasks.length === 6, "失败项重试未提交");
+  await delay(30);
+  assert.equal(testAPI.pendingTasks.length, 6, "共享 busy 未阻止并行 retry 或主提交");
+  assert.equal(retries.every((button) => button.disabled), true, "retry busy 未锁定全部重试控件");
+  assert.equal(alpha.disabled && bravo.disabled && all.disabled, true, "retry busy 未锁定选择控件");
+  assert.equal(form.querySelector("[data-batch-clear]").disabled, true, "retry busy 未锁定清空控件");
+  assert.equal(submit.disabled && form.elements.action.disabled && form.elements.engine.disabled, true, "retry busy 未锁定动作控件");
+  assert.equal(count.textContent, "已选择 2 个节点 · 当前可选 2 个");
+  assert.equal(all.checked, true);
+  assert.equal(all.getAttribute("aria-checked"), "true");
+  testAPI.pendingTasks[5].fail("alpha retry still failing");
+  await waitFor(() => form.dataset.busy !== "1", "retry 失败后共享 busy 未释放");
+  retries = [...form.querySelectorAll("[data-batch-retry]")];
+  assert.equal(retries.every((button) => !button.disabled), true, "retry 失败后控件未恢复");
+
+  retries[0].click();
+  await waitFor(() => testAPI.pendingTasks.length === 7, "失败 retry 未允许再次重试");
+  testAPI.pendingTasks[6].ok({ id: "task-alpha-retry" });
+  await waitFor(() => form.querySelectorAll("[data-batch-retry]").length === 1, "成功 retry 后失败项未原位更新");
+
+  const remainingRetry = form.querySelector("[data-batch-retry]");
+  replaceAgent("bravo", (agent) => ({ ...agent, status: "offline" }));
+  await refreshAgents(() => remainingRetry.disabled, "刷新后不合格 retry 未禁用");
+  const pendingBeforeRetry = testAPI.pendingTasks.length;
+  await remainingRetry.onclick();
+  assert.equal(testAPI.pendingTasks.length, pendingBeforeRetry, "retry 实际 POST 前未使用最新离线快照 fail closed");
 }
 
 async function testEmptyRuntime() {

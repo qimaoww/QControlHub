@@ -120,7 +120,7 @@ async function observeSmokeResult(webSocketURL) {
     });
 
   try {
-    const deadline = Date.now() + 30000;
+    const deadline = Date.now() + 45000;
     let evaluation;
     while (!evaluation && Date.now() < deadline) {
       try {
