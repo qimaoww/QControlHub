@@ -3340,13 +3340,13 @@ try {
 const ipRows = publicAddressRows({
   observed_public_ip: "93.184.216.34",
   public_ipv4: "198.35.26.96",
-  public_ipv6: "2606:4700:4700::1111",
+  public_ipv6: "2001:4860:4860::8888",
 });
 assert.equal(ipRows.length, 2);
 assert.equal(ipRows[0].value, "198.35.26.96");
 assert.equal(ipRows[0].source, "公网探测");
 assert.equal(ipRows[0].ok, true);
-assert.equal(ipRows[1].value, "2606:4700:4700::1111");
+assert.equal(ipRows[1].value, "2001:4860:4860::8888");
 
 const fallbackRows = publicAddressRows({ observed_public_ip: "93.184.216.34" });
 assert.equal(fallbackRows[0].value, "93.184.216.34");
@@ -3357,7 +3357,7 @@ assert.equal(fallbackRows[1].ok, false);
 const manualRows = publicAddressRows(
   {
     public_ipv4: "198.35.26.96",
-    public_ipv6: "2606:4700:4700::1111",
+    public_ipv6: "2001:4860:4860::8888",
   },
   {
     client_address: "198.35.26.10",
@@ -3367,7 +3367,7 @@ const manualRows = publicAddressRows(
 );
 assert.equal(manualRows[0].value, "198.35.26.10");
 assert.equal(manualRows[0].source, "手动设置");
-assert.equal(manualRows[1].value, "2606:4700:4700::1111");
+assert.equal(manualRows[1].value, "2001:4860:4860::8888");
 assert.equal(manualRows[1].source, "公网探测");
 
 // A hostname remains the highest-priority client connection setting, while a
@@ -3543,6 +3543,25 @@ const mappedRelayRows = publicAddressRows({ observed_public_ip: "::ffff:172.69.1
 assert.equal(mappedRelayRows[0].value, "", "mapped Cloudflare relay must be filtered");
 const cloudflareIPv6Rows = publicAddressRows({ observed_public_ip: "2606:4700::1111" });
 assert.equal(cloudflareIPv6Rows[1].value, "", "Cloudflare IPv6 relay must be filtered");
+const relayProbeFallbackRows = publicAddressRows({
+  collected_at: "now",
+  public_ipv4: "172.69.135.152",
+  public_ipv6: "::ffff:172.69.135.152",
+  network_interfaces: [
+    { name: "eth0", addresses: ["198.35.26.96", "2001:4860:4860::8888"] },
+  ],
+});
+assert.equal(relayProbeFallbackRows[0].value, "198.35.26.96");
+assert.equal(relayProbeFallbackRows[0].source, "默认路由接口 eth0");
+assert.equal(relayProbeFallbackRows[1].value, "2001:4860:4860::8888");
+assert.equal(relayProbeFallbackRows[1].source, "默认路由接口 eth0");
+const relayProbeVerifiedFallbackRows = publicAddressRows({
+  collected_at: "now",
+  public_ipv4: "104.22.17.83",
+  observed_public_ip: "93.184.216.34",
+});
+assert.equal(relayProbeVerifiedFallbackRows[0].value, "93.184.216.34");
+assert.equal(relayProbeVerifiedFallbackRows[0].source, "已验证连接来源");
 const realObservedRows = publicAddressRows({ observed_public_ip: "93.184.216.34" });
 assert.equal(realObservedRows[0].value, "93.184.216.34");
 assert.equal(realObservedRows[0].source, "已验证连接来源");
@@ -3720,12 +3739,63 @@ assert.equal(formatHostPort("", "443"), "");
       return sel === ".node-card-ips, .node-public-ips" ? [container] : [];
     },
   };
-  updatePublicIPDisplays(root, { public_ipv6: "2606:4700:4700::1111" });
+  updatePublicIPDisplays(root, { public_ipv6: "2001:4860:4860::8888" });
   assert.equal(line.hidden, false);
-  assert.equal(code.textContent, "2606:4700:4700::1111");
+  assert.equal(code.textContent, "2001:4860:4860::8888");
   assert.equal(small.textContent, "公网探测");
   updatePublicIPDisplays(root, { public_ipv6: "" });
   assert.equal(line.hidden, true, "undetected IPv6 row is hidden in place");
+}
+
+{
+  const code = { textContent: "", title: "" };
+  const copy = {
+    dataset: { copyIp: "" },
+    hidden: true,
+    title: "",
+    attrs: {},
+    setAttribute(name, value) {
+      this.attrs[name] = value;
+    },
+  };
+  const line = {
+    hidden: false,
+    dataset: {},
+    querySelector(sel) {
+      if (sel === "code") return code;
+      if (sel === "[data-copy-ip]") return copy;
+      return null;
+    },
+    classList: { toggle() {} },
+  };
+  const container = {
+    classList: { contains(cls) { return cls === "node-card-ips"; } },
+    querySelector(sel) {
+      return sel === '.card-ip-row[data-ip-family="v4"]' ? line : null;
+    },
+  };
+  const root = {
+    querySelectorAll(sel) {
+      return sel === ".node-card-ips, .node-public-ips" ? [container] : [];
+    },
+  };
+  updatePublicIPDisplays(root, {
+    collected_at: "now",
+    public_ipv4: "172.69.135.152",
+    observed_public_ip: "93.184.216.34",
+  });
+  assert.equal(line.hidden, false, "relay probe falls back to verified WSS in place");
+  assert.equal(code.textContent, "93.184.216.34");
+  assert.equal(copy.dataset.copyIp, "93.184.216.34");
+  assert.equal(copy.hidden, false);
+  updatePublicIPDisplays(root, { collected_at: "now", public_ipv4: "104.22.17.83" });
+  assert.equal(line.hidden, true, "relay-only probe hides the IPv4 row");
+  assert.equal(copy.hidden, true, "relay-only probe removes the copy target");
+  updatePublicIPDisplays(root, { public_ipv4: "198.35.26.96" });
+  assert.equal(line.hidden, false, "a later genuine probe restores the same row");
+  assert.equal(code.textContent, "198.35.26.96");
+  assert.equal(copy.dataset.copyIp, "198.35.26.96");
+  assert.equal(copy.hidden, false);
 }
 
 // Runtime smoke: a normal node-settings overview render must not throw

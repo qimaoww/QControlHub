@@ -75,7 +75,7 @@ func TestClientAddressCandidatesIncludeProbedDualStackAddresses(t *testing.T) {
 			// used; the probed pair must still surface both.
 			ObservedPublicIP: "93.184.216.34",
 			PublicIPv4:       "198.35.26.96",
-			PublicIPv6:       "2606:4700:4700::1111",
+			PublicIPv6:       "2001:4860:4860::8888",
 		},
 	}
 	candidates := clientAddressCandidates(agent)
@@ -85,7 +85,7 @@ func TestClientAddressCandidatesIncludeProbedDualStackAddresses(t *testing.T) {
 	if candidates[0].address != "198.35.26.96" || candidates[0].source != "节点公网探测 · IPv4" {
 		t.Fatalf("probed IPv4 candidate = %+v", candidates[0])
 	}
-	if candidates[1].address != "2606:4700:4700::1111" || candidates[1].source != "节点公网探测 · IPv6" {
+	if candidates[1].address != "2001:4860:4860::8888" || candidates[1].source != "节点公网探测 · IPv6" {
 		t.Fatalf("probed IPv6 candidate = %+v", candidates[1])
 	}
 	if candidates[2].address != "93.184.216.34" || candidates[2].source != "已验证连接来源 · IPv4" {
@@ -97,6 +97,30 @@ func TestClientAddressCandidatesIncludeProbedDualStackAddresses(t *testing.T) {
 	candidates = clientAddressCandidates(agent)
 	if len(candidates) != 2 {
 		t.Fatalf("deduplicated candidates = %+v", candidates)
+	}
+}
+
+func TestClientAddressCandidatesRejectCloudflareProbesAndKeepFallbacks(t *testing.T) {
+	agent := core.Agent{Metrics: core.HostMetrics{
+		PublicIPv4:       "172.69.135.152",
+		PublicIPv6:       "::ffff:172.69.135.152",
+		ObservedPublicIP: "93.184.216.34",
+		NetworkInterfaces: []core.HostNetworkInterface{{
+			Name: "eth0", Addresses: []string{"198.35.26.96", "2001:4860:4860::8888"},
+		}},
+	}}
+	candidates := clientAddressCandidates(agent)
+	if len(candidates) != 3 {
+		t.Fatalf("Cloudflare probes did not fall back cleanly: %+v", candidates)
+	}
+	if candidates[0].address != "198.35.26.96" || candidates[0].source != "Agent 默认路由接口 eth0" {
+		t.Fatalf("IPv4 interface fallback = %+v", candidates[0])
+	}
+	if candidates[1].address != "2001:4860:4860::8888" || candidates[1].source != "Agent 默认路由接口 eth0" {
+		t.Fatalf("IPv6 interface fallback = %+v", candidates[1])
+	}
+	if candidates[2].address != "93.184.216.34" || candidates[2].source != "已验证连接来源 · IPv4" {
+		t.Fatalf("verified WSS fallback = %+v", candidates[2])
 	}
 }
 
@@ -165,7 +189,7 @@ func TestClientAddressCandidatesPriorityAndDedup(t *testing.T) {
 	agent := core.Agent{
 		Metrics: core.HostMetrics{
 			PublicIPv4:       "198.35.26.96",
-			PublicIPv6:       "2606:4700:4700::1111",
+			PublicIPv6:       "2001:4860:4860::8888",
 			ObservedPublicIP: "93.184.216.34",
 			NetworkInterfaces: []core.HostNetworkInterface{{
 				Name: "eth0", Addresses: []string{"8.8.8.8"},
@@ -181,7 +205,7 @@ func TestClientAddressCandidatesPriorityAndDedup(t *testing.T) {
 	if candidates[0].address != "198.35.26.96" || candidates[0].source != "节点公网探测 · IPv4" {
 		t.Fatalf("probe IPv4 candidate = %+v", candidates[0])
 	}
-	if candidates[1].address != "2606:4700:4700::1111" || candidates[1].source != "节点公网探测 · IPv6" {
+	if candidates[1].address != "2001:4860:4860::8888" || candidates[1].source != "节点公网探测 · IPv6" {
 		t.Fatalf("probe IPv6 candidate = %+v", candidates[1])
 	}
 	if candidates[2].address != "8.8.8.8" || candidates[2].source != "Agent 默认路由接口 eth0" {

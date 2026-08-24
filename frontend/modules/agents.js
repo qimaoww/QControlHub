@@ -333,7 +333,8 @@ export function publicAddressRows(metrics = {}, labels = {}, features = []) {
     if (
       probed &&
       probedIsIPv4 === (family.label === "IPv4") &&
-      isGloballyRoutableNormalized(probed)
+      isGloballyRoutableNormalized(probed) &&
+      !isCloudflareRelayNormalized(probed)
     ) {
       return { ...family, value: probed.slice(5), source: "公网探测", ok: true };
     }

@@ -96,3 +96,62 @@ func TestMetricSamplesRecordQueryAndPrune(t *testing.T) {
 		t.Fatalf("samples after prune = %d, %v; want none", len(remaining), err)
 	}
 }
+
+func TestHeartbeatAndMetricsClearCloudflareProbesWithPostgreSQL(t *testing.T) {
+	databaseURL := os.Getenv("QCH_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("QCH_TEST_DATABASE_URL is not configured")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	dataStore, err := Open(ctx, databaseURL, true)
+	if err != nil {
+		t.Fatalf("open PostgreSQL: %v", err)
+	}
+	defer dataStore.Close()
+
+	agent, enrollmentID := enrollTaskTestAgent(t, ctx, dataStore)
+	defer cleanupTaskTestAgent(dataStore, agent.ID, enrollmentID)
+
+	if err := dataStore.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Metrics: &core.HostMetrics{
+		PublicIPv4: "172.69.135.152",
+		PublicIPv6: "2400:cb00::1",
+	}}); err != nil {
+		t.Fatalf("heartbeat with relay probes: %v", err)
+	}
+	current, err := dataStore.GetAgent(ctx, agent.ID)
+	if err != nil {
+		t.Fatalf("read heartbeat relay probes: %v", err)
+	}
+	if current.Metrics.PublicIPv4 != "" || current.Metrics.PublicIPv6 != "" {
+		t.Fatalf("heartbeat persisted relay probes: %+v", current.Metrics)
+	}
+
+	if err := dataStore.UpdateAgentMetrics(ctx, agent.ID, core.HostMetrics{
+		PublicIPv4: "::ffff:172.69.135.152",
+		PublicIPv6: "2606:4700::1",
+	}); err != nil {
+		t.Fatalf("metrics-only update with relay probes: %v", err)
+	}
+	current, err = dataStore.GetAgent(ctx, agent.ID)
+	if err != nil {
+		t.Fatalf("read metrics-only relay probes: %v", err)
+	}
+	if current.Metrics.PublicIPv4 != "" || current.Metrics.PublicIPv6 != "" {
+		t.Fatalf("metrics-only update persisted relay probes: %+v", current.Metrics)
+	}
+
+	if err := dataStore.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Metrics: &core.HostMetrics{
+		PublicIPv4: "93.184.216.34",
+		PublicIPv6: "2001:4860:4860::8888",
+	}}); err != nil {
+		t.Fatalf("heartbeat with genuine probes: %v", err)
+	}
+	current, err = dataStore.GetAgent(ctx, agent.ID)
+	if err != nil {
+		t.Fatalf("read genuine probes: %v", err)
+	}
+	if current.Metrics.PublicIPv4 != "93.184.216.34" || current.Metrics.PublicIPv6 != "2001:4860:4860::8888" {
+		t.Fatalf("genuine probes were not retained: %+v", current.Metrics)
+	}
+}

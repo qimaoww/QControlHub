@@ -78,7 +78,7 @@ func TestEncodeHeartbeatMetricsAcceptsDualStackProbedAddresses(t *testing.T) {
 		t.Fatal("expected encoded payload")
 	}
 	encoded, err = encodeHeartbeatMetrics(&core.HostMetrics{
-		PublicIPv6: "2606:4700:4700::1111",
+		PublicIPv6: "2001:4860:4860::8888",
 	}, receivedAt)
 	if err != nil {
 		t.Fatal(err)
@@ -87,11 +87,50 @@ func TestEncodeHeartbeatMetricsAcceptsDualStackProbedAddresses(t *testing.T) {
 	if err := json.Unmarshal(encoded, &decoded); err != nil {
 		t.Fatal(err)
 	}
-	if decoded.PublicIPv6 != "2606:4700:4700::1111" || decoded.PublicIPv4 != "" {
+	if decoded.PublicIPv6 != "2001:4860:4860::8888" || decoded.PublicIPv4 != "" {
 		t.Fatalf("encoded probed addresses = %+v", decoded)
 	}
 	// Older Agents never probe; empty fields must keep encoding successfully.
 	if _, err := encodeHeartbeatMetrics(&core.HostMetrics{}, receivedAt); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestEncodeHeartbeatMetricsClearsCloudflareProbes(t *testing.T) {
+	t.Parallel()
+	receivedAt := time.Date(2026, 8, 24, 5, 0, 0, 0, time.UTC)
+	for _, test := range []struct {
+		name    string
+		metrics core.HostMetrics
+	}{
+		{name: "IPv4", metrics: core.HostMetrics{PublicIPv4: "172.69.135.152"}},
+		{name: "IPv6", metrics: core.HostMetrics{PublicIPv6: "2400:cb00::1"}},
+		{name: "mapped IPv4", metrics: core.HostMetrics{PublicIPv4: "::ffff:172.69.135.152"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			encoded, err := encodeHeartbeatMetrics(&test.metrics, receivedAt)
+			if err != nil {
+				t.Fatalf("encode relay probe: %v", err)
+			}
+			var decoded core.HostMetrics
+			if err := json.Unmarshal(encoded, &decoded); err != nil {
+				t.Fatalf("decode cleared relay probe: %v", err)
+			}
+			if decoded.PublicIPv4 != "" || decoded.PublicIPv6 != "" {
+				t.Fatalf("relay probe was persisted: %+v", decoded)
+			}
+		})
+	}
+
+	encoded, err := encodeHeartbeatMetrics(&core.HostMetrics{PublicIPv4: "93.184.216.34", PublicIPv6: "2001:4860:4860::8888"}, receivedAt)
+	if err != nil {
+		t.Fatalf("encode genuine probes: %v", err)
+	}
+	var decoded core.HostMetrics
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatalf("decode genuine probes: %v", err)
+	}
+	if decoded.PublicIPv4 != "93.184.216.34" || decoded.PublicIPv6 != "2001:4860:4860::8888" {
+		t.Fatalf("genuine probes were not retained: %+v", decoded)
 	}
 }
