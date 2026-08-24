@@ -32,14 +32,22 @@ type EngineSpec struct {
 }
 
 type Executor struct {
-	Specs                   map[core.Engine]EngineSpec
-	ExistingSpecs           map[core.Engine]EngineSpec
-	ExistingDiscoveryIssues map[core.Engine]string
-	MigrationMarkerPrefix   string
-	Updater                 *CoreUpdater
-	Services                *ServiceManager
-	specsMu                 sync.RWMutex
-	migrationMu             sync.Mutex
+	Specs                    map[core.Engine]EngineSpec
+	ExistingSpecs            map[core.Engine]EngineSpec
+	ExistingDiscoveryIssues  map[core.Engine]string
+	MigrationMarkerPrefix    string
+	Updater                  *CoreUpdater
+	Services                 *ServiceManager
+	specsMu                  sync.RWMutex
+	migrationMu              sync.Mutex
+	completedMigrations      map[core.Engine]completedCoreMigration
+	verifyCompletedMigration func(context.Context, EngineSpec, EngineSpec, *ServiceManager) error
+}
+
+type completedCoreMigration struct {
+	Existing     EngineSpec
+	Managed      EngineSpec
+	SourceDigest string
 }
 
 var systemctlPath = "/usr/bin/systemctl"
@@ -760,7 +768,9 @@ type singBoxResourceField struct {
 	key string
 	// kind is the kind of filesystem resource the field carries.
 	kind singBoxResourceKind
-	// allowLogSpecial permits the log.output literals stdout and stderr.
+	// allowLogSpecial permits log.output console literals and relative file
+	// names. The import-specific validator separately resolves file names into
+	// the protected managed sing-box state directory.
 	allowLogSpecial bool
 }
 
@@ -1038,7 +1048,7 @@ func checkSingBoxResourceField(field singBoxResourceField, value any) error {
 		if path == "" {
 			return nil
 		}
-		if field.allowLogSpecial && (path == "stdout" || path == "stderr") {
+		if field.allowLogSpecial {
 			return nil
 		}
 		if filepath.IsAbs(path) {
@@ -1202,10 +1212,30 @@ func (e *Executor) validate(ctx context.Context, engine core.Engine, spec Engine
 	if err := core.ValidateConfig(engine, content); err != nil {
 		return "", err
 	}
-	if err := validateNoPersistentCoreLogs(engine, content); err != nil {
+	if err := e.validateManagedLogPolicy(ctx, engine, spec, content); err != nil {
 		return "", err
 	}
 	return e.validateSnapshot(ctx, engine, spec, content)
+}
+
+func (e *Executor) validateManagedLogPolicy(ctx context.Context, engine core.Engine, spec EngineSpec, content string) error {
+	if engine != core.EngineSingBox {
+		return validateNoPersistentCoreLogs(engine, content)
+	}
+	output, destination, err := singBoxLogOutput(content)
+	if err != nil {
+		return err
+	}
+	if destination != singBoxLogDestinationFile {
+		return nil
+	}
+	if _, err := e.completedMigrationOwnership(ctx, engine, spec); err != nil {
+		return validateNoPersistentCoreLogs(engine, content)
+	}
+	if _, err := importedSingBoxLogPath(output); err != nil {
+		return fmt.Errorf("imported sing-box log output is unsafe: %w", err)
+	}
+	return nil
 }
 
 func (e *Executor) validateSnapshot(ctx context.Context, engine core.Engine, spec EngineSpec, content string) (string, error) {

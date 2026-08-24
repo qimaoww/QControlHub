@@ -335,7 +335,6 @@ func TestValidateExistingSourceInvocationPassesOriginalWorkingDirectory(t *testi
 
 func TestExistingCoreDiscoveryRejectsOfficialSingBoxRelativeResource(t *testing.T) {
 	tests := map[string]string{
-		"log output":                    `{"log":{"output":"relative.log"}}`,
 		"local rule set":                `{"route":{"rule_set":[{"type":"local","tag":"geo","format":"binary","path":"ruleset.srs"}]}}`,
 		"clash external ui":             `{"experimental":{"clash_api":{"external_ui":"dashboard"}}}`,
 		"acme data directory":           `{"inbounds":[{"type":"trojan","listen":"127.0.0.1","listen_port":443,"users":[{"password":"testpw"}],"tls":{"enabled":true,"certificate_path":"/etc/cert.pem","key_path":"/etc/key.pem","acme":{"data_directory":"acme-data"}}}]}`,

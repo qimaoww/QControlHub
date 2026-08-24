@@ -87,6 +87,8 @@ Agent 使用 `/agent/v1/connect` 的长期 WSS 会话。Nginx 示例已转发 `U
 
 OpenRC 模式设置 `QCH_SERVICE_MANAGER=openrc`，默认核心服务名去掉 `.service` 后缀。四个专用核心仍以 `qcontrolhub-core` 用户运行，并由 OpenRC 的 `supervise-daemon` 提供重启和 `CAP_NET_BIND_SERVICE`。核心面板实时日志流与 systemd 节点一致：`supervise-daemon` 将托管核心输出写入 `/var/log/qagent/<服务名>.log`，Agent 从文件尾持续跟踪新行并经由同一 `core-logs-v1` 通道上报；文件超过上限时轮转为单个 `.old` 副本，与 systemd 侧 volatile journal 的容量约束对齐。OpenRC 也没有 `ProtectSystem=strict` 等 systemd 沙箱，Agent 仍必须作为高权限 root 服务管理。
 
+已完成迁移的 sing-box 配置会保留原始 `log` 对象。未设置 `log.output`，或显式设置为 `stdout`/`stderr` 时，systemd 继续采集 journal，OpenRC 继续采集托管服务输出文件；服务切换前 systemd 读取器会先记录 journal 尾游标（空 namespace 使用当前微秒时间作为有界起点），OpenRC 读取器会先在受保护 FD 上完成 Seek、身份复核和进度初始化，随后才报告就绪，避免把导入启动日志误作旧历史跳过。设置文件形式的 `log.output` 时，路径相对 `/var/lib/qcontrolhub-sing-box` 解析，也可直接使用该目录内的绝对路径。为避免 Agent 被配置成任意文件读取器，目录外路径会在迁移时拒绝，采集时还会重新验证迁移 ownership、配置摘要、当前 engine 与服务完成态、逐级 owner/mode、无符号链接和普通文件身份；安全打开时记录的 inode、owner、mode 和 link-count 是不可变信任基线，初始游标、每个读取块及 rename/reopen 接管都必须在入队前再次匹配该基线，漂移字节不会进入日志批次。文件尚未创建时等待，创建、截断或 rename 轮转后自动续传。导入或部署切换会在同一发布边界暂停旧读取器并记录受保护 inode/offset；任务成功后只交给目标配置来源继续消费，失败回滚后只交给恢复配置来源继续消费，因此启动内容既不会与旧读取器重复，也不会在失败重启后被跳过。该窗口不读取更早的历史文件。Agent 不会改写或轮转该用户配置的输出文件。支持 `core-log-status-v1` 的在线 Agent 会把等待、可用或采集失败状态报告给面板；旧 Agent 的日志状态明确显示为不可验证，离线 Agent 的持久化状态也不会冒充当前来源正常。
+
 在受控构建主机执行：
 
 ```bash

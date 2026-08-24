@@ -301,6 +301,266 @@ func TestOpenRCHelperExecutableDoesNotFallBackAcrossHelpers(t *testing.T) {
 	}
 }
 
+func useOpenRCTestRunlevels(t *testing.T) (string, string) {
+	t.Helper()
+	root := t.TempDir()
+	runlevels := filepath.Join(root, "runlevels")
+	initRoot := filepath.Join(root, "init.d")
+	for _, directory := range []string{filepath.Join(runlevels, "default"), filepath.Join(runlevels, "boot"), initRoot} {
+		if err := os.MkdirAll(directory, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	previousRunlevelsRoot := openRCRunlevelsRoot
+	previousInitRoot := openRCInitRoot
+	openRCRunlevelsRoot = runlevels
+	openRCInitRoot = initRoot
+	t.Cleanup(func() {
+		openRCRunlevelsRoot = previousRunlevelsRoot
+		openRCInitRoot = previousInitRoot
+	})
+	return runlevels, initRoot
+}
+
+func writeOpenRCTestService(t *testing.T, initRoot, service string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(initRoot, service), []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeOpenRCTestActiveState(t *testing.T, stateRoot, service, state string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(stateRoot, service+".active"), []byte(state+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func newOpenRCTestManager(t *testing.T, stateRoot, runlevels, initRoot string) (*ServiceManager, string) {
+	t.Helper()
+	rcService := filepath.Join(filepath.Dir(stateRoot), "rc-service")
+	serviceScript := fmt.Sprintf(`#!/bin/sh
+set -eu
+state=%q
+service=$1
+action=$2
+printf 'rc-service %%s %%s\n' "$service" "$action" >> "$state/commands.log"
+active_file="$state/$service.active"
+case "$action" in
+  status)
+    value=$(cat "$active_file")
+    if [ "$value" = active ]; then
+      printf 'started\n'
+      exit 0
+    fi
+    printf 'stopped\n'
+    exit 3
+    ;;
+  stop)
+    if [ "$service" = qagent-sing-box ] && [ -f "$state/fail-managed-stop-once" ]; then
+      rm -f "$state/fail-managed-stop-once"
+      printf 'stop timed out\n'
+      exit 1
+    fi
+    printf 'inactive\n' > "$active_file"
+    ;;
+  start|restart)
+    printf 'active\n' > "$active_file"
+    ;;
+  *) exit 1 ;;
+esac
+`, stateRoot)
+	if err := os.WriteFile(rcService, []byte(serviceScript), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	rcUpdate := filepath.Join(filepath.Dir(stateRoot), "rc-update")
+	updateScript := fmt.Sprintf(`#!/bin/sh
+set -eu
+state=%q
+runlevels=%q
+init_root=%q
+action=$1
+service=$2
+runlevel=$3
+printf 'rc-update %%s %%s %%s\n' "$action" "$service" "$runlevel" >> "$state/commands.log"
+link="$runlevels/$runlevel/$service"
+case "$action" in
+  add)
+    [ ! -e "$link" ] && [ ! -L "$link" ] || exit 1
+    ln -s "$init_root/$service" "$link"
+    ;;
+  del)
+    if [ ! -L "$link" ]; then
+      printf 'service is not in the runlevel %%s\n' "$runlevel"
+      exit 1
+    fi
+    rm -f "$link"
+    ;;
+  *) exit 1 ;;
+esac
+`, stateRoot, runlevels, initRoot)
+	if err := os.WriteFile(rcUpdate, []byte(updateScript), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return &ServiceManager{kind: ServiceManagerOpenRC, executable: rcService, enableExecutable: rcUpdate}, filepath.Join(stateRoot, "commands.log")
+}
+
+func TestOpenRCRestoreEnableStateSkipsOnlyVerifiedCurrentState(t *testing.T) {
+	runlevels, initRoot := useOpenRCTestRunlevels(t)
+	stateRoot := filepath.Join(t.TempDir(), "state")
+	if err := os.MkdirAll(stateRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, service := range []string{"sing-box", "qagent-sing-box"} {
+		writeOpenRCTestService(t, initRoot, service)
+	}
+	if err := os.Symlink(filepath.Join(initRoot, "sing-box"), filepath.Join(runlevels, "default", "sing-box")); err != nil {
+		t.Fatal(err)
+	}
+	manager, commandLog := newOpenRCTestManager(t, stateRoot, runlevels, initRoot)
+
+	if err := restoreServiceEnableState(context.Background(), "qagent-sing-box", "disabled", manager); err != nil {
+		t.Fatalf("restore already-disabled managed service: %v", err)
+	}
+	if err := restoreServiceEnableState(context.Background(), "sing-box", "enabled", manager); err != nil {
+		t.Fatalf("restore already-enabled existing service: %v", err)
+	}
+	if contents, err := os.ReadFile(commandLog); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("idempotent restore invoked rc-update: %q, %v", contents, err)
+	}
+
+	if err := os.Symlink(filepath.Join(initRoot, "qagent-sing-box"), filepath.Join(runlevels, "boot", "qagent-sing-box")); err != nil {
+		t.Fatal(err)
+	}
+	if err := restoreServiceEnableState(context.Background(), "qagent-sing-box", "disabled", manager); err == nil ||
+		!strings.Contains(err.Error(), "outside the single supported default runlevel") {
+		t.Fatalf("unsafe non-default enable state was accepted: %v", err)
+	}
+	if contents, err := os.ReadFile(commandLog); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("unsafe runlevel state invoked rc-update: %q, %v", contents, err)
+	}
+	if err := os.Remove(filepath.Join(runlevels, "boot", "qagent-sing-box")); err != nil {
+		t.Fatal(err)
+	}
+	if err := restoreServiceEnableState(context.Background(), "qagent-sing-box", "enabled", manager); err != nil {
+		t.Fatalf("enable disabled managed service: %v", err)
+	}
+	if err := restoreServiceEnableState(context.Background(), "sing-box", "disabled", manager); err != nil {
+		t.Fatalf("disable enabled existing service: %v", err)
+	}
+	commands, err := os.ReadFile(commandLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantCommands := "rc-update add qagent-sing-box default\nrc-update del sing-box default\n"
+	if string(commands) != wantCommands {
+		t.Fatalf("state-changing rc-update commands = %q; want %q", commands, wantCommands)
+	}
+}
+
+func TestOpenRCMigrationStopFailureRollbackClosesOnFreshReconcile(t *testing.T) {
+	requireAgentRoot(t)
+	runlevels, initRoot := useOpenRCTestRunlevels(t)
+	fixture := newExistingCoreMigrationFixture(t, false)
+	fixture.existing.Service = "sing-box"
+	fixture.managed.Service = "qagent-sing-box"
+	fixture.executor.Specs = map[core.Engine]EngineSpec{core.EngineSingBox: fixture.managed}
+	fixture.executor.ExistingSpecs = map[core.Engine]EngineSpec{core.EngineSingBox: fixture.existing}
+	for _, service := range []string{fixture.existing.Service, fixture.managed.Service} {
+		writeOpenRCTestService(t, initRoot, service)
+	}
+	if err := os.Symlink(filepath.Join(initRoot, fixture.existing.Service), filepath.Join(runlevels, "default", fixture.existing.Service)); err != nil {
+		t.Fatal(err)
+	}
+	writeOpenRCTestActiveState(t, fixture.stateDirectory, fixture.existing.Service, "active")
+	writeOpenRCTestActiveState(t, fixture.stateDirectory, fixture.managed.Service, "inactive")
+	manager, commandLog := newOpenRCTestManager(t, fixture.stateDirectory, runlevels, initRoot)
+	fixture.executor.Services = manager
+
+	record, err := prepareCoreMigrationFileRollback(
+		fixture.markerPrefix,
+		core.EngineSingBox,
+		fixture.existing,
+		fixture.managed,
+		coreMigrationRecord{
+			State: coreMigrationInProgress, ConfigDigest: coreMigrationConfigDigest(fixture.importedConfig),
+			SourceDigest:        coreMigrationSourceDigest(fixture.existing),
+			ExistingEnableState: "enabled", ManagedEnableState: "disabled", ManagedInitialState: "inactive",
+		},
+	)
+	if err != nil {
+		t.Fatalf("prepare durable OpenRC migration: %v", err)
+	}
+	if _, err := copyExistingCoreBinary(fixture.existing.Binary, fixture.managed.Binary); err != nil {
+		t.Fatalf("stage managed binary: %v", err)
+	}
+	if _, err := atomicDeploy(fixture.managed.ConfigPath, fixture.importedConfig); err != nil {
+		t.Fatalf("stage managed configuration: %v", err)
+	}
+	if err := verifyCoreMigrationStagedFiles(fixture.managed, record); err != nil {
+		t.Fatalf("verify staged OpenRC migration: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(fixture.stateDirectory, "fail-managed-stop-once"), []byte("1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := restoreInterruptedCoreMigration(context.Background(), fixture.markerPrefix, core.EngineSingBox, fixture.existing, fixture.managed, record, manager); err == nil ||
+		!strings.Contains(err.Error(), "stop managed service") {
+		t.Fatalf("initial stop failure did not leave an interrupted rollback: %v", err)
+	}
+	if current, err := readCoreMigrationRecord(fixture.markerPrefix, core.EngineSingBox); err != nil || current.State != coreMigrationInProgress {
+		t.Fatalf("interrupted OpenRC migration marker = %+v, %v", current, err)
+	}
+
+	restarted := &Executor{
+		Specs:                   map[core.Engine]EngineSpec{core.EngineSingBox: fixture.managed},
+		ExistingSpecs:           map[core.Engine]EngineSpec{core.EngineSingBox: fixture.existing},
+		ExistingDiscoveryIssues: make(map[core.Engine]string),
+		MigrationMarkerPrefix:   fixture.markerPrefix,
+		Services:                manager,
+	}
+	if err := restarted.LoadCoreMigrationState(); err != nil {
+		t.Fatalf("load interrupted OpenRC migration: %v", err)
+	}
+	if err := restarted.ReconcileExistingCoreServices(context.Background()); err != nil {
+		t.Fatalf("fresh Agent reconcile interrupted OpenRC rollback: %v", err)
+	}
+	if current, err := readCoreMigrationRecord(fixture.markerPrefix, core.EngineSingBox); err != nil || current.State != coreMigrationNone {
+		t.Fatalf("reconciled OpenRC migration marker = %+v, %v", current, err)
+	}
+	for service, want := range map[string]string{fixture.existing.Service: "active", fixture.managed.Service: "inactive"} {
+		contents, err := os.ReadFile(filepath.Join(fixture.stateDirectory, service+".active"))
+		if err != nil || strings.TrimSpace(string(contents)) != want {
+			t.Fatalf("%s state = %q, %v; want %s", service, contents, err, want)
+		}
+	}
+	if state, err := openRCServiceEnableState(context.Background(), fixture.existing.Service); err != nil || state != "enabled" {
+		t.Fatalf("existing service enable state = %q, %v", state, err)
+	}
+	if state, err := openRCServiceEnableState(context.Background(), fixture.managed.Service); err != nil || state != "disabled" {
+		t.Fatalf("managed service enable state = %q, %v", state, err)
+	}
+	assertFileContentAndMode(t, fixture.managed.ConfigPath, fixture.originalManagedConfig, 0o600)
+	if _, err := os.Lstat(fixture.managed.Binary); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("originally absent managed binary remained after reconcile: %v", err)
+	}
+	for _, kind := range []string{"binary", "config"} {
+		if _, err := os.Lstat(coreMigrationBackupPath(fixture.markerPrefix, core.EngineSingBox, kind)); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("%s OpenRC rollback backup remained: %v", kind, err)
+		}
+	}
+	commands, err := os.ReadFile(commandLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(commands), "rc-update del qagent-sing-box default") {
+		t.Fatalf("reconcile invoked non-idempotent runlevel deletion: %s", commands)
+	}
+	collector := NewCoreLogCollectorForExecutor(restarted)
+	if batch := collector.NextBatch(); batch != nil {
+		t.Fatalf("rollback-only reconcile produced a core log batch: %+v", batch)
+	}
+}
+
 // TestOpenRCBoundServiceProcessRealSupervisedService runs only where a real
 // OpenRC supervisor exists: it spins up a supervised service, proves the
 // process binding, and confirms the completion wait only succeeds once the

@@ -170,7 +170,8 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 		t.Fatal(err)
 	}
 	heartbeat := core.WireMessage{Type: core.WireHeartbeat, Heartbeat: &core.HeartbeatRequest{
-		Version: "test", Features: []string{core.AgentFeatureSelfUpgrade, core.AgentFeaturePortTraffic, core.AgentFeatureCoreLogs, core.AgentFeatureMihomoDevelopmentSource},
+		Version: "test", Features: []string{core.AgentFeatureSelfUpgrade, core.AgentFeaturePortTraffic, core.AgentFeatureCoreLogs, core.AgentFeatureCoreLogStatus, core.AgentFeatureMihomoDevelopmentSource},
+		Runtime: map[core.Engine]core.RuntimeState{core.EngineSingBox: {Installed: true, ServiceStatus: "active", CoreLogStatus: "waiting", CoreLogError: "source-missing"}},
 		TrafficUsage: []core.PortTrafficUsage{{
 			PolicyID: trafficPolicy.ID, ResetGeneration: trafficPolicy.ResetGeneration,
 			ReceivedBytes: 2048, SentBytes: 1024, UsedBytes: 3072,
@@ -213,7 +214,7 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 	for attempt := 0; attempt < 50; attempt++ {
 		pushed, pushErr := dataStore.GetAgent(ctx, enrolled.AgentID)
 		if pushErr == nil && pushed.Metrics.CPUPercent == 42.5 && pushed.Metrics.NetworkRXBPS == 300 {
-			if pushed.Version != "test" || len(pushed.Features) == 0 {
+			if pushed.Version != "test" || len(pushed.Features) == 0 || pushed.Runtime[core.EngineSingBox].CoreLogStatus != "waiting" {
 				t.Fatalf("metrics push clobbered heartbeat state: agent=%+v", pushed)
 			}
 			if pushed.Metrics.ObservedPublicIP != "2001:4860:4860::8888" || len(pushed.Metrics.NetworkInterfaces) != 1 || pushed.Metrics.NetworkInterfaces[0].Addresses[0] != "198.35.26.96" {

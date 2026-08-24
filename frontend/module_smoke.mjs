@@ -2441,6 +2441,8 @@ try {
   let coreRenders = 0;
   let coreMarkup = "";
   let coreFailure = false;
+  let coreEntries = [{ id: 1, agent_id: "alpha", engine: "mihomo", level: "info", message: "ready", logged_at: "now" }];
+  let coreAgents = [{ id: "alpha", name: "Alpha" }];
   const coreState = {
     route: "core-logs",
     navigationEpoch: 1,
@@ -2457,9 +2459,8 @@ try {
       coreRequests += 1;
       if (path.startsWith("/core-logs?") && coreFailure)
         throw new Error("temporary log failure");
-      if (path.startsWith("/core-logs?"))
-        return [{ id: 1, agent_id: "alpha", engine: "mihomo", level: "info", message: "ready", logged_at: "now" }];
-      if (path === "/agents") return [{ id: "alpha", name: "Alpha" }];
+      if (path.startsWith("/core-logs?")) return coreEntries;
+      if (path === "/agents") return coreAgents;
       assert.fail(`unexpected core-log polling path ${path}`);
     },
     shell: (markup) => {
@@ -2496,6 +2497,122 @@ try {
   await recoveredCorePoll();
   assert.equal(coreRenders, 3, "log polling recovers without clearing state");
   assert.equal(coreTimers.size, 1);
+  coreEntries = [];
+  coreAgents = [{ id: "alpha", name: "Alpha", status: "online", features: ["core-logs-v1", "core-log-status-v1"], runtime: { "sing-box": { core_log_status: "failed", core_log_error: "permission-denied" } } }];
+  coreState.data.coreLogFilters = { agent_id: "alpha", engine: "sing-box" };
+  await renderCoreLogs({ syncFilters: true });
+  assert.equal(coreMarkup.includes("日志采集失败"), true, "collector failures are distinct from a genuinely empty stream");
+  coreAgents = [{ id: "alpha", name: "Alpha", status: "online", features: [], runtime: {} }];
+  await renderCoreLogs({ syncFilters: true });
+  assert.equal(coreMarkup.includes("此节点不支持集中日志"), true, "legacy unsupported Agents have a distinct empty state");
+  coreAgents = [{ id: "alpha", name: "Alpha", status: "online", features: ["core-logs-v1"], runtime: {} }];
+  await renderCoreLogs({ syncFilters: true });
+  assert.equal(coreMarkup.includes("日志状态能力不可用"), true, "legacy log-capable Agents do not claim an unverifiable healthy source");
+  coreEntries = [{ id: "historical", agent_id: "alpha", engine: "sing-box", level: "info", message: "historical entry", logged_at: "2026-08-24T00:00:00Z" }];
+  coreAgents = [{ id: "alpha", name: "Alpha", status: "online", features: ["core-logs-v1", "core-log-status-v1"], runtime: { "sing-box": { core_log_status: "failed", core_log_error: "collector-failed" } } }];
+  await renderCoreLogs({ syncFilters: true });
+  assert.equal(coreMarkup.includes("historical entry"), true, "historical results remain visible during a current failure");
+  assert.equal(coreMarkup.includes("日志采集失败"), true, "current failure remains visible beside historical results");
+  coreAgents = [{ id: "alpha", name: "Alpha", status: "online", features: ["core-logs-v1", "core-log-status-v1"], runtime: { xray: { core_log_status: "failed" }, "sing-box": { core_log_status: "active" } } }];
+  await renderCoreLogs({ syncFilters: true });
+  assert.equal(coreMarkup.includes("日志采集失败"), false, "another engine failure does not contaminate the selected engine status");
+  coreEntries = [];
+  coreAgents = [{ id: "alpha", name: "Alpha", status: "online", features: ["core-logs-v1", "core-log-status-v1"], runtime: { "sing-box": { installed: false } } }];
+  await renderCoreLogs({ syncFilters: true });
+  assert.equal(coreMarkup.includes("内核尚未安装"), true, "an uninstalled engine is distinct from collection failure and an empty active source");
+
+  coreEntries = [];
+  coreAgents = [{ id: "alpha", name: "Alpha", status: "offline", features: ["core-logs-v1", "core-log-status-v1"], runtime: { "sing-box": { installed: true, core_log_status: "active" } } }];
+  await renderCoreLogs({ syncFilters: true });
+  assert.equal(coreMarkup.includes("节点离线"), true, "persisted runtime state is not trusted after an Agent goes offline");
+  assert.equal(coreMarkup.includes("当前来源工作正常"), false, "offline runtime state is not presented as current health");
+  coreEntries = [{ id: "offline-history", agent_id: "alpha", engine: "sing-box", level: "info", message: "offline historical entry", logged_at: "2026-08-24T00:00:00Z" }];
+  await renderCoreLogs({ syncFilters: true });
+  assert.equal(coreMarkup.includes("offline historical entry"), true, "offline Agents retain historical log rows");
+  assert.equal(coreMarkup.includes("节点离线"), true, "offline notice remains visible beside historical rows");
+
+  coreEntries = [];
+  coreAgents = [{ id: "alpha", name: "Alpha", status: "online", features: ["core-logs-v1", "core-log-status-v1"], runtime: { "sing-box": { installed: true, core_log_status: "active" } } }];
+  coreState.data.coreLogFilters = {};
+  await renderCoreLogs({ syncFilters: true });
+  assert.equal(coreMarkup.includes("尚未收到符合当前筛选条件的运行记录"), true, "aggregate empty state remains neutral");
+  assert.equal(coreMarkup.includes("当前来源工作正常"), false, "aggregate filters do not claim every source is healthy");
+
+  let releaseStaleCoreLogs;
+  const staleCoreLogs = new Promise((resolve) => { releaseStaleCoreLogs = resolve; });
+  let staleCoreMarkup = "";
+  const staleCoreState = {
+    route: "core-logs",
+    navigationEpoch: 7,
+    data: { coreLogFilters: { agent_id: "alpha", engine: "sing-box" } },
+  };
+  const renderStaleCoreLogs = installCoreLogs({
+    state: staleCoreState,
+    engines: ["sing-box"],
+    can: () => true,
+    esc: (value) => String(value ?? ""),
+    engineName: (value) => value,
+    date: (value) => value,
+    api: async (path) => {
+      if (path.startsWith("/core-logs?") && path.includes("agent_id=alpha")) return staleCoreLogs;
+      if (path.startsWith("/core-logs?") && path.includes("agent_id=beta"))
+        return [{ id: "newest", agent_id: "beta", engine: "sing-box", level: "info", message: "newest selected node", logged_at: "now" }];
+      if (path === "/agents") return [
+        { id: "alpha", name: "Alpha", status: "offline", features: ["core-logs-v1", "core-log-status-v1"], runtime: {} },
+        { id: "beta", name: "Beta", status: "online", features: ["core-logs-v1", "core-log-status-v1"], runtime: { "sing-box": { core_log_status: "active" } } },
+      ];
+      assert.fail(`unexpected stale core-log path ${path}`);
+    },
+    shell: (markup) => { staleCoreMarkup = markup; },
+    setTimer: () => 1,
+    clearTimer: () => {},
+  });
+  const oldCoreRender = renderStaleCoreLogs({ syncFilters: true });
+  staleCoreState.data.coreLogFilters = { agent_id: "beta", engine: "sing-box" };
+  await renderStaleCoreLogs({ syncFilters: true });
+  assert.equal(staleCoreMarkup.includes("newest selected node"), true, "new node selection renders immediately");
+  releaseStaleCoreLogs([{ id: "stale", agent_id: "alpha", engine: "sing-box", level: "info", message: "stale offline node", logged_at: "old" }]);
+  await oldCoreRender;
+  assert.equal(staleCoreMarkup.includes("newest selected node"), true, "older node response cannot overwrite the new selection");
+  assert.equal(staleCoreMarkup.includes("stale offline node"), false, "stale offline response remains discarded");
+
+  coreEntries = [{ id: "historical", agent_id: "alpha", engine: "sing-box", level: "info", message: "historical entry", logged_at: "2026-08-24T00:00:00Z" }];
+  let noAgentDataMarkup = "";
+  const renderWithoutAgentData = installCoreLogs({
+    state: { route: "core-logs", navigationEpoch: 1, data: { coreLogFilters: { agent_id: "alpha", engine: "sing-box" } } },
+    engines: ["sing-box"],
+    can: () => false,
+    esc: (value) => String(value ?? ""),
+    engineName: (value) => value,
+    date: (value) => value,
+    api: async (path) => path.startsWith("/core-logs?") ? coreEntries : assert.fail(`unexpected no-agent-data path ${path}`),
+    shell: (markup) => { noAgentDataMarkup = markup; },
+    setTimer: () => 1,
+    clearTimer: () => {},
+  });
+  await renderWithoutAgentData();
+  assert.equal(noAgentDataMarkup.includes("historical entry"), true, "log permission can retain historical results without agents.read");
+  assert.equal(noAgentDataMarkup.includes("无法核验采集状态"), true, "missing agents.read data is not presented as a healthy source");
+
+  let deniedMarkup = "";
+  const renderDeniedCoreLogs = installCoreLogs({
+    state: { route: "core-logs", navigationEpoch: 1, data: {} },
+    engines: ["sing-box"],
+    can: () => false,
+    esc: (value) => String(value ?? ""),
+    engineName: (value) => value,
+    date: (value) => value,
+    api: async () => {
+      const error = new Error("forbidden");
+      error.status = 403;
+      throw error;
+    },
+    shell: (markup) => { deniedMarkup = markup; },
+    setTimer: () => 1,
+    clearTimer: () => {},
+  });
+  await renderDeniedCoreLogs();
+  assert.equal(deniedMarkup.includes("无权查看内核日志"), true, "permission failures have a distinct initial state");
 
   const trafficTimers = new Map();
   let nextTrafficTimer = 1;

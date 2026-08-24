@@ -184,7 +184,7 @@ func NewClient(config ClientConfig, executor *Executor) (*Client, error) {
 		websocketURL: websocketScheme + "://" + parsed.Host + "/agent/v1/connect",
 		metrics:      metricsCollector,
 		traffic:      NewTrafficManager(config.StatePath),
-		logs:         NewCoreLogCollectorForServiceManager(executor.serviceManager(), executor.Specs, executor.ExistingSpecs),
+		logs:         NewCoreLogCollectorForExecutor(executor),
 		publicIP:     publicIP,
 		http: &http.Client{
 			Transport: transport,
@@ -438,6 +438,14 @@ func (c *Client) queueHeartbeat(ctx context.Context, outgoing chan<- core.WireMe
 	runtimeContext, cancel := context.WithTimeout(ctx, 10*time.Second)
 	runtimeState := c.executor.Runtime(runtimeContext)
 	cancel()
+	if c.logs != nil {
+		for engine, logState := range c.logs.Status() {
+			state := runtimeState[engine]
+			state.CoreLogStatus = logState.Status
+			state.CoreLogError = logState.Error
+			runtimeState[engine] = state
+		}
+	}
 	metrics, metricsErr := c.metrics.Collect(ctx)
 	if metricsErr != nil {
 		slog.Debug("host metrics collection was partial", "error", metricsErr)
@@ -490,6 +498,7 @@ func (c *Client) advertisedFeatures() []string {
 		core.AgentFeatureSelfUpgrade,
 		core.AgentFeaturePortTraffic,
 		core.AgentFeatureCoreLogs,
+		core.AgentFeatureCoreLogStatus,
 		core.AgentFeatureMihomoDevelopmentSource,
 	}
 	if c.publicIP != nil {
@@ -513,6 +522,11 @@ func (c *Client) executeTaskForSession(executionContext, deliveryContext context
 
 func (c *Client) resultForTask(ctx context.Context, task core.Task) core.TaskResultRequest {
 	if cached, ok := c.cachedTaskResult(task); ok {
+		if c.logs != nil && cached.Success && task.Action == core.ActionImportExisting && task.Engine == core.EngineSingBox {
+			if err := c.logs.RefreshImportedSingBoxSource(c.executor); err != nil {
+				slog.Warn("refresh cached imported sing-box log source", "error", err)
+			}
+		}
 		slog.Info("returning cached task result", "task_id", task.ID)
 		return cached
 	}
@@ -544,6 +558,7 @@ func (c *Client) resultForTask(ctx context.Context, task core.Task) core.TaskRes
 	execute := c.executeFunc
 	var output string
 	var executionErr error
+	preparedLogTransition := false
 	if task.Action == core.ActionUpgradeAgent {
 		output, executionErr = c.upgradeAgent(ctx)
 		if executionErr == nil {
@@ -555,7 +570,34 @@ func (c *Client) resultForTask(ctx context.Context, task core.Task) core.TaskRes
 		if execute == nil {
 			execute = c.executor.Execute
 		}
+		if c.logs != nil && task.Engine == core.EngineSingBox &&
+			(task.Action == core.ActionImportExisting || task.Action == core.ActionDeploy) {
+			if err := c.logs.PrepareImportedSingBoxSource(ctx, c.executor, task.ConfigContent); err != nil {
+				slog.Warn("prepare managed sing-box log capture window", "error", err)
+			} else {
+				preparedLogTransition = true
+			}
+		} else if c.logs != nil && task.Engine == core.EngineSingBox &&
+			(task.Action == core.ActionInstall || task.Action == core.ActionStart || task.Action == core.ActionRestart) {
+			if err := c.logs.waitForConsoleSource(ctx, core.EngineSingBox); err != nil {
+				slog.Warn("wait for managed sing-box console log source", "error", err)
+			}
+		}
 		output, executionErr = execute(ctx, task)
+		if preparedLogTransition {
+			if err := c.logs.CompleteImportedSingBoxSource(c.executor, executionErr == nil); err != nil {
+				slog.Warn("complete managed sing-box log source transition", "error", err)
+			}
+		}
+	}
+	if c.logs != nil && task.Engine == core.EngineSingBox && coreLogSourceMayChange(task.Action) {
+		collectorTransitionComplete := preparedLogTransition &&
+			(task.Action == core.ActionImportExisting || task.Action == core.ActionDeploy)
+		if !collectorTransitionComplete {
+			if err := c.logs.RefreshImportedSingBoxSource(c.executor); err != nil {
+				slog.Warn("refresh managed sing-box log source", "error", err)
+			}
+		}
 	}
 	result := core.TaskResultRequest{
 		LeaseID: task.LeaseID, Success: executionErr == nil, Output: output,
@@ -577,6 +619,15 @@ func (c *Client) resultForTask(ctx context.Context, task core.Task) core.TaskRes
 	close(execution.done)
 	c.executionsMu.Unlock()
 	return result
+}
+
+func coreLogSourceMayChange(action core.Action) bool {
+	switch action {
+	case core.ActionImportExisting, core.ActionDeploy, core.ActionInstall, core.ActionStart, core.ActionRestart:
+		return true
+	default:
+		return false
+	}
 }
 
 func (c *Client) pruneExecutionsLocked(now time.Time) {

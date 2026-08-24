@@ -56,6 +56,12 @@ func (e *Executor) LoadCoreMigrationState() error {
 			completionErr := verifyCoreMigrationCompletionState(loadContext, existing, managedSpecs[engine], e.serviceManager())
 			e.specsMu.Lock()
 			if completionErr == nil {
+				if e.completedMigrations == nil {
+					e.completedMigrations = make(map[core.Engine]completedCoreMigration)
+				}
+				e.completedMigrations[engine] = completedCoreMigration{
+					Existing: existing, Managed: managedSpecs[engine], SourceDigest: record.SourceDigest,
+				}
 				_ = cleanupCoreMigrationBackups(e.MigrationMarkerPrefix, engine)
 				delete(e.ExistingSpecs, engine)
 				delete(e.ExistingDiscoveryIssues, engine)
@@ -162,6 +168,12 @@ func (e *Executor) ReconcileExistingCoreServices(ctx context.Context) error {
 		}
 		_ = cleanupCoreMigrationBackups(e.MigrationMarkerPrefix, engine)
 		e.specsMu.Lock()
+		if e.completedMigrations == nil {
+			e.completedMigrations = make(map[core.Engine]completedCoreMigration)
+		}
+		e.completedMigrations[engine] = completedCoreMigration{
+			Existing: existing, Managed: managed[engine], SourceDigest: migrationRecord.SourceDigest,
+		}
 		delete(e.ExistingSpecs, engine)
 		e.specsMu.Unlock()
 	}
@@ -944,7 +956,7 @@ func (e *Executor) importExistingConfig(ctx context.Context, engine core.Engine,
 
 	validationSpec := managed
 	validationSpec.Binary = existing.Binary
-	if _, err := e.validate(ctx, engine, validationSpec, content); err != nil {
+	if _, err := e.validateImportedSnapshot(ctx, engine, validationSpec, content); err != nil {
 		return "", fmt.Errorf("existing %s configuration is not safe for managed deployment: %w", engine, err)
 	}
 	configDigest := coreMigrationConfigDigest(content)
@@ -1000,7 +1012,7 @@ func (e *Executor) importExistingConfig(ctx context.Context, engine core.Engine,
 	if _, err := copyExistingCoreBinary(existing.Binary, managed.Binary); err != nil {
 		return rollbackMigration(fmt.Errorf("copy existing %s binary into the QAgent namespace: %w", engine, err))
 	}
-	if _, err := e.validate(ctx, engine, managed, content); err != nil {
+	if _, err := e.validateImportedSnapshot(ctx, engine, managed, content); err != nil {
 		return rollbackMigration(fmt.Errorf("copied %s binary rejected the configuration: %w", engine, err))
 	}
 
@@ -1075,9 +1087,31 @@ func (e *Executor) importExistingConfig(ctx context.Context, engine core.Engine,
 	_ = cleanupCoreMigrationBackups(e.MigrationMarkerPrefix, engine)
 
 	e.specsMu.Lock()
+	if e.completedMigrations == nil {
+		e.completedMigrations = make(map[core.Engine]completedCoreMigration)
+	}
+	e.completedMigrations[engine] = completedCoreMigration{
+		Existing: existing, Managed: managed, SourceDigest: sourceDigest,
+	}
 	delete(e.ExistingSpecs, engine)
 	e.specsMu.Unlock()
 	return fmt.Sprintf("imported %s configuration; stopped and disabled %s; started and enabled %s", engine, existing.Service, managed.Service), nil
+}
+
+func (e *Executor) validateImportedSnapshot(ctx context.Context, engine core.Engine, spec EngineSpec, content string) (string, error) {
+	if engine != core.EngineSingBox {
+		return e.validate(ctx, engine, spec, content)
+	}
+	output, destination, err := singBoxLogOutput(content)
+	if err != nil {
+		return "", err
+	}
+	if destination == singBoxLogDestinationFile {
+		if _, err := importedSingBoxLogPath(output); err != nil {
+			return "", fmt.Errorf("imported sing-box log output is unsafe: %w", err)
+		}
+	}
+	return e.validateSnapshot(ctx, engine, spec, content)
 }
 
 func requireManagedServiceSafeInactive(ctx context.Context, engine core.Engine, managed EngineSpec, managers ...*ServiceManager) error {
@@ -1679,6 +1713,17 @@ func setServiceEnabled(ctx context.Context, service string, enabled bool, manage
 		if enabled {
 			action = "add"
 			want = "enabled"
+		}
+		current, err := openRCServiceEnableState(ctx, service)
+		if err != nil {
+			return err
+		}
+		// rc-update returns a failure when deleting a service that is already
+		// absent from the runlevel. Rollback and restart reconciliation must be
+		// idempotent, but only after the protected runlevel tree has proved that
+		// the service is already in the exact requested state.
+		if current == want {
+			return nil
 		}
 		if output, err := run(ctx, manager.enableHelper(), action, service, "default"); err != nil {
 			return fmt.Errorf("openrc rc-update %s %s: %w: %s", action, service, err, output)

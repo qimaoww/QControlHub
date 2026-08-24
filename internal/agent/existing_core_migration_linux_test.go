@@ -47,6 +47,9 @@ func TestExistingCoreMigrationSwitchesServicesAndPersistsCompletion(t *testing.T
 	if _, pending := fixture.executor.ExistingSpecs[core.EngineXray]; pending {
 		t.Fatal("completed migration remained pending in memory")
 	}
+	if ownership, ok := fixture.executor.completedMigrations[core.EngineXray]; !ok || ownership.Existing != fixture.existing || ownership.Managed != fixture.managed {
+		t.Fatalf("completed migration ownership = %+v, present=%v", ownership, ok)
+	}
 	output, err = fixture.executor.Execute(context.Background(), core.Task{
 		Action: core.ActionImportExisting, Engine: core.EngineXray, ConfigContent: fixture.importedConfig,
 	})
@@ -69,6 +72,9 @@ func TestExistingCoreMigrationSwitchesServicesAndPersistsCompletion(t *testing.T
 	}
 	if _, pending := restarted.ExistingSpecs[core.EngineXray]; pending {
 		t.Fatal("completed migration returned after Agent restart")
+	}
+	if _, ok := restarted.completedMigrations[core.EngineXray]; !ok {
+		t.Fatal("verified migration ownership was not restored after Agent restart")
 	}
 	changedSource := fixture.existing
 	changedSource.ConfigPath = filepath.Join(filepath.Dir(changedSource.ConfigPath), "replacement.json")
@@ -115,6 +121,9 @@ func TestCompletedCoreMigrationStateDriftBlocksExplicitMappingTasksAfterRestart(
 			}
 			if _, pending := restarted.ExistingSpecs[core.EngineXray]; !pending {
 				t.Fatal("unsafe completed migration suppressed the existing mapping")
+			}
+			if _, ok := restarted.completedMigrations[core.EngineXray]; ok {
+				t.Fatal("unsafe completion state was recorded as verified ownership")
 			}
 			issue := restarted.ExistingDiscoveryIssues[core.EngineXray]
 			if !strings.Contains(issue, "迁移状态不再安全") {
@@ -166,6 +175,123 @@ func TestExistingSingBoxConfigDirectoryMigrationSucceeds(t *testing.T) {
 	assertFileContentAndMode(t, fixture.managed.ConfigPath, content, 0o600)
 	if _, pending := fixture.executor.ExistingSpecs[core.EngineSingBox]; pending {
 		t.Fatal("completed sing-box directory migration remained pending")
+	}
+}
+
+func TestExistingSingBoxOfficialRelativeLogOutputMigrationSucceeds(t *testing.T) {
+	requireAgentRoot(t)
+	logRoot := t.TempDir()
+	previousLogRoot := importedSingBoxLogRoot
+	importedSingBoxLogRoot = logRoot
+	t.Cleanup(func() { importedSingBoxLogRoot = previousLogRoot })
+	fixture, _ := configureSingBoxOfficialFixture(t, newExistingCoreMigrationFixture(t, false))
+	if err := os.WriteFile(filepath.Join(fixture.existing.ConfigDirectory, "20-log.json"),
+		[]byte(`{"log":{"level":"info","timestamp":true,"output":"runtime.log"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	content, _, err := readExistingConfigurationSources(fixture.existing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.executor.Execute(context.Background(), core.Task{
+		Action: core.ActionImportExisting, Engine: core.EngineSingBox, ConfigContent: content,
+	}); err != nil {
+		t.Fatalf("official -D/-C relative log.output migration failed: %v", err)
+	}
+	fixture.assertServiceState(t, "sing-box.service", "inactive", "disabled")
+	fixture.assertServiceState(t, "qagent-sing-box.service", "active", "enabled")
+	restarted := &Executor{
+		Specs:                   map[core.Engine]EngineSpec{core.EngineSingBox: fixture.managed},
+		ExistingSpecs:           map[core.Engine]EngineSpec{core.EngineSingBox: fixture.existing},
+		ExistingDiscoveryIssues: make(map[core.Engine]string),
+		MigrationMarkerPrefix:   fixture.markerPrefix, Services: fixture.executor.Services,
+	}
+	if err := restarted.LoadCoreMigrationState(); err != nil {
+		t.Fatalf("reload official sing-box migration: %v", err)
+	}
+	collector := NewCoreLogCollectorForExecutor(restarted)
+	collector.mu.Lock()
+	fileSources := 0
+	for _, source := range collector.fileSources {
+		if source.engine == core.EngineSingBox && source.kind == "file" {
+			fileSources++
+		}
+	}
+	collector.mu.Unlock()
+	if fileSources != 1 {
+		t.Fatalf("restarted imported sing-box file sources = %d", fileSources)
+	}
+	if _, err := restarted.Execute(context.Background(), core.Task{
+		Action: core.ActionValidate, Engine: core.EngineSingBox, ConfigContent: content,
+	}); err != nil {
+		t.Fatalf("validate unchanged imported file log configuration: %v", err)
+	}
+	replacementConfig := `{"log":{"level":"info","output":"replacement.log"},"inbounds":[],"outbounds":[]}`
+	if _, err := restarted.Execute(context.Background(), core.Task{
+		Action: core.ActionDeploy, Engine: core.EngineSingBox, ConfigContent: replacementConfig,
+	}); err != nil {
+		t.Fatalf("deploy imported file-to-file log configuration: %v", err)
+	}
+	if err := collector.RefreshImportedSingBoxSource(restarted); err != nil {
+		t.Fatalf("refresh imported file-to-file source: %v", err)
+	}
+	collector.mu.Lock()
+	filePath := ""
+	for _, source := range collector.fileSources {
+		if source.engine == core.EngineSingBox && source.kind == "file" {
+			filePath = source.path
+		}
+	}
+	collector.mu.Unlock()
+	if filePath != filepath.Join(logRoot, "replacement.log") {
+		t.Fatalf("file-to-file source path = %q", filePath)
+	}
+	failedConfig := `{"log":{"level":"info","output":"failed.log"},"inbounds":[],"outbounds":[]}`
+	if err := os.WriteFile(filepath.Join(fixture.stateDirectory, "fail-managed-restart"), []byte("1"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := restarted.Execute(context.Background(), core.Task{
+		Action: core.ActionDeploy, Engine: core.EngineSingBox, ConfigContent: failedConfig,
+	}); err == nil {
+		t.Fatal("failed imported file deploy unexpectedly succeeded")
+	}
+	if err := os.Remove(filepath.Join(fixture.stateDirectory, "fail-managed-restart")); err != nil && !errors.Is(err, os.ErrNotExist) {
+		t.Fatal(err)
+	}
+	if err := collector.RefreshImportedSingBoxSource(restarted); err != nil {
+		t.Fatalf("refresh rolled-back imported file source: %v", err)
+	}
+	collector.mu.Lock()
+	filePath = ""
+	for _, source := range collector.fileSources {
+		if source.engine == core.EngineSingBox && source.kind == "file" {
+			filePath = source.path
+		}
+	}
+	collector.mu.Unlock()
+	if filePath != filepath.Join(logRoot, "replacement.log") {
+		t.Fatalf("rollback source path = %q", filePath)
+	}
+	consoleConfig := `{"log":{"level":"info","timestamp":true},"inbounds":[],"outbounds":[]}`
+	if _, err := restarted.Execute(context.Background(), core.Task{
+		Action: core.ActionDeploy, Engine: core.EngineSingBox, ConfigContent: consoleConfig,
+	}); err != nil {
+		t.Fatalf("deploy imported file-to-console log configuration: %v", err)
+	}
+	if err := collector.RefreshImportedSingBoxSource(restarted); err != nil {
+		t.Fatalf("switch restarted import to console source: %v", err)
+	}
+	collector.mu.Lock()
+	preferred := collector.preferredKind[core.EngineSingBox]
+	fileSources = 0
+	for _, source := range collector.fileSources {
+		if source.engine == core.EngineSingBox && source.kind == "file" {
+			fileSources++
+		}
+	}
+	collector.mu.Unlock()
+	if preferred != "journal" || fileSources != 0 {
+		t.Fatalf("restarted source switch preferred=%q file count=%d", preferred, fileSources)
 	}
 }
 
@@ -1255,7 +1381,7 @@ func configureSingBoxDirectoryFixture(t *testing.T, fixture existingCoreMigratio
 	if err := os.Mkdir(configDirectory, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(fixture.existing.ConfigPath, []byte(`{"inbounds":[{"tag":"primary"}]}`), 0o600); err != nil {
+	if err := os.WriteFile(fixture.existing.ConfigPath, []byte(`{"log":{"output":"runtime.log"},"inbounds":[{"tag":"primary"}]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	overlay := filepath.Join(configDirectory, "10-outbounds.json")
@@ -1396,6 +1522,11 @@ case "$command" in
     fi
     ;;
   start|restart)
+	if [ "$command" = restart ] && [ "$service" = qagent-sing-box.service ] && [ -f "$state/fail-managed-restart" ]; then
+	  rm -f "$state/fail-managed-restart"
+	  printf 'failed\n' > "$active_file"
+	  exit 1
+	fi
     if [ "$service" = qagent-xray.service ] && [ -f "$state/fail-managed-start" ]; then
       printf 'failed\n' > "$active_file"
       exit 1

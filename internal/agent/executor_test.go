@@ -193,6 +193,23 @@ func TestPersistentCoreLogOutputsAreRejected(t *testing.T) {
 	}
 }
 
+func TestImportedSingBoxPreservesManagedFileLogOutput(t *testing.T) {
+	root := t.TempDir()
+	previous := importedSingBoxLogRoot
+	importedSingBoxLogRoot = root
+	t.Cleanup(func() { importedSingBoxLogRoot = previous })
+	executor := &Executor{}
+	spec := EngineSpec{Binary: "/usr/bin/true", ConfigPath: filepath.Join(t.TempDir(), "config.json")}
+	content := `{"log":{"output":"runtime.log"},"inbounds":[],"outbounds":[]}`
+	if _, err := executor.validateImportedSnapshot(context.Background(), core.EngineSingBox, spec, content); err != nil {
+		t.Fatalf("safe imported log.output was rejected: %v", err)
+	}
+	unsafe := `{"log":{"output":"/etc/shadow"},"inbounds":[],"outbounds":[]}`
+	if _, err := executor.validateImportedSnapshot(context.Background(), core.EngineSingBox, spec, unsafe); err == nil {
+		t.Fatal("imported log.output outside the managed boundary was accepted")
+	}
+}
+
 func TestUnsupportedExistingServiceBlocksEveryCoreAction(t *testing.T) {
 	t.Parallel()
 	reason := "multiple active sing-box services were detected"
@@ -346,9 +363,9 @@ func TestValidateNoRelativeSingBoxResourcesContract(t *testing.T) {
 			contents: `{"log":{"output":"stderr"}}`,
 			wantErr:  false,
 		},
-		"log output relative rejected": {
+		"log output relative deferred to import boundary": {
 			contents: `{"log":{"output":"relative.log"}}`,
-			wantErr:  true,
+			wantErr:  false,
 		},
 		"log output absolute accepted": {
 			contents: `{"log":{"output":"/var/log/sing-box.log"}}`,

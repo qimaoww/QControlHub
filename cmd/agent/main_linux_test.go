@@ -83,7 +83,7 @@ func TestExistingSingBoxSpecCapturesRelativeWorkingDirectory(t *testing.T) {
 	}
 }
 
-func TestInspectExistingOfficialSingBoxUsesWorkingDirectoryAndRejectsRelativeResources(t *testing.T) {
+func TestInspectExistingOfficialSingBoxAllowsBoundedRelativeLogAndRejectsOtherRelativeResources(t *testing.T) {
 	root := t.TempDir()
 	workingDirectory := filepath.Join(root, "work")
 	configDirectory := filepath.Join(root, "config")
@@ -131,8 +131,14 @@ func TestInspectExistingOfficialSingBoxUsesWorkingDirectoryAndRejectsRelativeRes
 	if err := os.WriteFile(fragmentPath, []byte(`{"log":{"output":"relative.log"}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	if err := runUtilityCommand(map[core.Engine]agent.EngineSpec{core.EngineSingBox: spec}, []string{"inspect-existing", "sing-box"}); err != nil {
+		t.Fatalf("bounded relative official sing-box log output was rejected: %v", err)
+	}
+	if err := os.WriteFile(fragmentPath, []byte(`{"route":{"rule_set":[{"type":"local","tag":"blocked","path":"relative.srs"}]}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	if err := runUtilityCommand(map[core.Engine]agent.EngineSpec{core.EngineSingBox: spec}, []string{"inspect-existing", "sing-box"}); err == nil || !strings.Contains(err.Error(), "cannot be migrated safely") {
-		t.Fatalf("relative official sing-box resource was accepted: %v", err)
+		t.Fatalf("unrelated relative official sing-box resource was accepted: %v", err)
 	}
 }
 
