@@ -27,7 +27,6 @@ import (
 
 const (
 	coreLogQueueLimit = 2048
-	journalctlPath    = "/usr/bin/journalctl"
 	// Align the volatile budget with the journald Storage=volatile cap by
 	// rotating to a single .old copy once the live file grows past this size.
 	coreLogFileRotateBytes = 8 << 20
@@ -40,6 +39,7 @@ const (
 // this root, one file per service, named after the service itself. It is a
 // variable so tests can stage the tree in a temporary directory.
 var (
+	journalctlPath         = "/usr/bin/journalctl"
 	openRCCoreLogRoot      = "/var/log/qagent"
 	importedSingBoxLogRoot = "/var/lib/qcontrolhub-sing-box"
 )
@@ -108,6 +108,9 @@ type coreLogFileSource struct {
 	ownership    completedCoreMigration
 	initial      *coreLogImportWindow
 	epoch        uint64
+	// beforeInitialCursor is an internal test seam used to prove that readiness
+	// is not published before an existing file's no-history cursor is fixed.
+	beforeInitialCursor func()
 }
 
 type CoreLogSourceStatus struct {
@@ -362,8 +365,12 @@ func (collector *CoreLogCollector) runFileSource(ctx context.Context, source cor
 }
 
 func (collector *CoreLogCollector) runSource(ctx context.Context, source coreLogJournalSource) {
+	resume := ""
 	for ctx.Err() == nil {
-		err := collector.follow(ctx, source)
+		nextResume, err := collector.follow(ctx, source, resume)
+		if nextResume != "" {
+			resume = nextResume
+		}
 		if ctx.Err() != nil {
 			return
 		}
@@ -381,25 +388,39 @@ func (collector *CoreLogCollector) runSource(ctx context.Context, source coreLog
 	}
 }
 
-func (collector *CoreLogCollector) follow(ctx context.Context, source coreLogJournalSource) error {
-	command := exec.CommandContext(ctx, journalctlPath, source.arguments...)
+func (collector *CoreLogCollector) follow(ctx context.Context, source coreLogJournalSource, resume string) (string, error) {
+	if resume == "" {
+		var err error
+		resume, err = captureJournalPosition(ctx, source)
+		if err != nil {
+			return "", err
+		}
+	}
+	command := exec.CommandContext(ctx, journalctlPath, journalFollowArguments(source.arguments, resume)...)
 	configureCommand(command)
 	stdout, err := command.StdoutPipe()
 	if err != nil {
-		return err
+		return resume, err
 	}
 	output := &boundedOutput{limit: 8 << 10}
 	command.Stderr = output
 	if err := command.Start(); err != nil {
-		return err
+		return resume, err
 	}
+	// The separately captured tail position makes this readiness declaration
+	// safe: records written after that cursor (or the bounded timestamp used for
+	// an empty journal) remain readable while journalctl completes its startup.
 	for _, engine := range source.unitEngines {
 		collector.setSourceStatus(engine, "journal", "active", "")
 	}
+	lastResume := resume
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 16<<10), 256<<10)
 	for scanner.Scan() {
 		entry, cursor, ok := decodeJournalCoreLog(scanner.Bytes(), source.unitEngines)
+		if validJournalCursor(cursor) {
+			lastResume = "--after-cursor=" + cursor
+		}
 		if ok {
 			collector.appendJournal(entry, cursor)
 		}
@@ -407,19 +428,94 @@ func (collector *CoreLogCollector) follow(ctx context.Context, source coreLogJou
 	scanErr := scanner.Err()
 	waitErr := command.Wait()
 	if ctx.Err() != nil {
-		return ctx.Err()
+		return lastResume, ctx.Err()
 	}
 	if scanErr != nil {
-		return scanErr
+		return lastResume, scanErr
 	}
 	if waitErr != nil {
 		message := strings.TrimSpace(output.String())
 		if message != "" {
-			return errors.New(message)
+			return lastResume, errors.New(message)
 		}
-		return waitErr
+		return lastResume, waitErr
 	}
-	return io.EOF
+	return lastResume, io.EOF
+}
+
+func captureJournalPosition(ctx context.Context, source coreLogJournalSource) (string, error) {
+	// Record the bounded fallback before probing the journal tail. A fresh
+	// namespace may not contain any entry and therefore cannot return a cursor;
+	// --since still covers every record created while the follower is starting.
+	capturedAt := time.Now().UTC()
+	command := exec.CommandContext(ctx, journalctlPath, journalCursorArguments(source.arguments)...)
+	configureCommand(command)
+	stdout := &boundedOutput{limit: 16 << 10}
+	stderr := &boundedOutput{limit: 8 << 10}
+	command.Stdout = stdout
+	command.Stderr = stderr
+	if err := command.Run(); err != nil {
+		message := strings.TrimSpace(stderr.String())
+		if message != "" {
+			return "", errors.New(message)
+		}
+		return "", err
+	}
+	if stdout.Truncated() || stderr.Truncated() {
+		return "", errors.New("journal cursor response exceeded the output limit")
+	}
+	lines := strings.Split(stdout.String(), "\n")
+	for index := len(lines) - 1; index >= 0; index-- {
+		line := strings.TrimSpace(lines[index])
+		if !strings.HasPrefix(line, "-- cursor:") {
+			continue
+		}
+		cursor := strings.TrimSpace(strings.TrimPrefix(line, "-- cursor:"))
+		if validJournalCursor(cursor) {
+			return "--after-cursor=" + cursor, nil
+		}
+		return "", errors.New("journal cursor response was invalid")
+	}
+	seconds := capturedAt.Unix()
+	microseconds := capturedAt.Nanosecond() / int(time.Microsecond)
+	return fmt.Sprintf("--since=@%d.%06d", seconds, microseconds), nil
+}
+
+func journalCursorArguments(arguments []string) []string {
+	result := make([]string, 0, len(arguments)+4)
+	for _, argument := range arguments {
+		if argument == "--follow" || strings.HasPrefix(argument, "--lines") ||
+			strings.HasPrefix(argument, "--output") || strings.HasPrefix(argument, "--after-cursor=") ||
+			strings.HasPrefix(argument, "--since=") || strings.HasPrefix(argument, "--unit=") {
+			continue
+		}
+		result = append(result, argument)
+	}
+	return append(result, "--no-pager", "--quiet", "--lines=0", "--show-cursor")
+}
+
+func journalFollowArguments(arguments []string, resume string) []string {
+	result := make([]string, 0, len(arguments)+1)
+	for _, argument := range arguments {
+		if strings.HasPrefix(argument, "--lines") || strings.HasPrefix(argument, "--after-cursor=") ||
+			strings.HasPrefix(argument, "--since=") {
+			continue
+		}
+		result = append(result, argument)
+	}
+	return append(result, resume)
+}
+
+func validJournalCursor(cursor string) bool {
+	if cursor == "" || len(cursor) > 4096 {
+		return false
+	}
+	for _, character := range cursor {
+		if character < 0x21 || character > 0x7e {
+			return false
+		}
+	}
+	return true
 }
 
 // followFile tails one supervise-daemon log file. Like journalctl --follow
@@ -435,7 +531,6 @@ func (collector *CoreLogCollector) followFile(ctx context.Context, source coreLo
 		opened, err := openValidatedCoreLogFileContext(ctx, source)
 		if err == nil {
 			file = opened
-			collector.setFileSourceStatus(source, "active", "")
 			break
 		}
 		if !errors.Is(err, os.ErrNotExist) {
@@ -452,6 +547,9 @@ func (collector *CoreLogCollector) followFile(ctx context.Context, source coreLo
 		}
 	}
 	defer func() { _ = file.Close() }()
+	if source.beforeInitialCursor != nil {
+		source.beforeInitialCursor()
+	}
 	initialWhence := io.SeekEnd
 	initialOffset := int64(0)
 	if missingBeforeOpen {
@@ -478,6 +576,9 @@ func (collector *CoreLogCollector) followFile(ctx context.Context, source coreLo
 	if err != nil {
 		return err
 	}
+	if !openedIdentity.Mode().IsRegular() || !coreLogFileHasSingleLink(openedIdentity) {
+		return errors.New("managed core log file identity drifted before cursor readiness")
+	}
 	openedMetadata := metadataFromFileInfo(openedIdentity)
 	collector.filePublishMu.Lock()
 	if err := ctx.Err(); err != nil {
@@ -485,6 +586,7 @@ func (collector *CoreLogCollector) followFile(ctx context.Context, source coreLo
 		return err
 	}
 	setCoreLogFileRunProgress(run, source.path, openedIdentity, offset)
+	collector.setFileSourceStatus(source, "active", "")
 	collector.filePublishMu.Unlock()
 	// A single Fstat gates every block before any byte can enter partial state or
 	// the shared queue. A 64 KiB block keeps that fail-closed check bounded
@@ -1497,18 +1599,19 @@ func decodeJournalCoreLog(value []byte, unitEngines map[string]core.Engine) (cor
 	if json.Unmarshal(value, &record) != nil {
 		return core.CoreLogEntry{}, "", false
 	}
+	cursor := stringField(record["__CURSOR"])
 	engine, ok := coreLogEngineForUnit(stringField(record["_SYSTEMD_UNIT"]), unitEngines)
 	if !ok {
-		return core.CoreLogEntry{}, "", false
+		return core.CoreLogEntry{}, cursor, false
 	}
 	messageValue, ok := journalMessageField(record["MESSAGE"])
 	if !ok {
-		return core.CoreLogEntry{}, "", false
+		return core.CoreLogEntry{}, cursor, false
 	}
 	message := strings.TrimSpace(strings.ToValidUTF8(messageValue, "�"))
 	message = strings.ReplaceAll(message, "\x00", "�")
 	if message == "" {
-		return core.CoreLogEntry{}, "", false
+		return core.CoreLogEntry{}, cursor, false
 	}
 	if len(message) > core.MaxCoreLogMessageBytes {
 		message = message[:core.MaxCoreLogMessageBytes]
@@ -1524,7 +1627,7 @@ func decodeJournalCoreLog(value []byte, unitEngines map[string]core.Engine) (cor
 	if err != nil {
 		priority = 6
 	}
-	return core.CoreLogEntry{Engine: engine, Level: coreLogLevelForPriority(priority), Message: message, LoggedAt: loggedAt}, stringField(record["__CURSOR"]), true
+	return core.CoreLogEntry{Engine: engine, Level: coreLogLevelForPriority(priority), Message: message, LoggedAt: loggedAt}, cursor, true
 }
 
 func stringField(value any) string {

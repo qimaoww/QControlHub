@@ -194,6 +194,221 @@ func TestImportedSingBoxConsoleTransitionWaitsForCollectorReadiness(t *testing.T
 	}
 }
 
+func TestSystemdConsoleReadinessCapturesLogsAfterTailPosition(t *testing.T) {
+	for _, test := range []struct {
+		name, cursor string
+	}{
+		{name: "existing journal cursor", cursor: "fixture-cursor"},
+		{name: "empty journal bounded timestamp"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			feed := filepath.Join(t.TempDir(), "journal-feed")
+			if err := os.WriteFile(feed, nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			helper := filepath.Join(t.TempDir(), "journalctl-fixture")
+			script := `#!/bin/sh
+set -eu
+show_cursor=0
+after_cursor=0
+for argument in "$@"; do
+	case "$argument" in
+		--show-cursor) show_cursor=1 ;;
+		--after-cursor=fixture-cursor|--since=@*) after_cursor=1 ;;
+	esac
+done
+if [ "$show_cursor" = 1 ]; then
+	if [ -n "$QCH_TEST_JOURNAL_CURSOR" ]; then
+		printf '%s\n' "-- cursor: $QCH_TEST_JOURNAL_CURSOR"
+	fi
+	exit 0
+fi
+sleep 1
+if [ "$after_cursor" = 1 ]; then
+	exec tail -n +1 -f "$QCH_TEST_JOURNAL_FEED"
+fi
+exec tail -n 0 -f "$QCH_TEST_JOURNAL_FEED"
+`
+			if err := os.WriteFile(helper, []byte(script), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			previousJournalctl := journalctlPath
+			journalctlPath = helper
+			t.Cleanup(func() { journalctlPath = previousJournalctl })
+			t.Setenv("QCH_TEST_JOURNAL_FEED", feed)
+			t.Setenv("QCH_TEST_JOURNAL_CURSOR", test.cursor)
+
+			collector := NewCoreLogCollector(map[core.Engine]EngineSpec{
+				core.EngineSingBox: {Service: "qagent-sing-box.service"},
+			})
+			ctx, cancel := context.WithCancel(context.Background())
+			done := make(chan struct{})
+			go func() { collector.Run(ctx); close(done) }()
+			defer func() {
+				cancel()
+				select {
+				case <-done:
+				case <-time.After(5 * time.Second):
+					t.Error("systemd reader-ready fixture leaked")
+				}
+			}()
+
+			content := `{"log":{"level":"info","timestamp":true}}`
+			if err := collector.PrepareImportedSingBoxSource(context.Background(), nil, content); err != nil {
+				t.Fatal(err)
+			}
+			line := `{"MESSAGE":"startup after ready","_SYSTEMD_UNIT":"qagent-sing-box.service","PRIORITY":"6","__CURSOR":"fixture-entry-cursor"}` + "\n"
+			file, err := os.OpenFile(feed, os.O_APPEND|os.O_WRONLY, 0o600)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := file.WriteString(line); err != nil {
+				_ = file.Close()
+				t.Fatal(err)
+			}
+			if err := file.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if entry, ok := waitForLine(t, collector, "startup after ready"); !ok || entry.Engine != core.EngineSingBox {
+				t.Fatalf("systemd startup entry after reader readiness = %+v, ok=%v", entry, ok)
+			}
+		})
+	}
+}
+
+func TestSystemdJournalReaderReconnectsAfterLastCursor(t *testing.T) {
+	helper := filepath.Join(t.TempDir(), "journalctl-reconnect-fixture")
+	script := `#!/bin/sh
+set -eu
+mode=unknown
+for argument in "$@"; do
+	case "$argument" in
+		--show-cursor) mode=capture ;;
+		--after-cursor=fixture-cursor-0) mode=first ;;
+		--after-cursor=fixture-cursor-1) mode=second ;;
+	esac
+done
+case "$mode" in
+	capture)
+		printf '%s\n' '-- cursor: fixture-cursor-0'
+		;;
+	first)
+		printf '%s\n' '{"MESSAGE":"before journal reconnect","_SYSTEMD_UNIT":"qagent-sing-box.service","PRIORITY":"6","__CURSOR":"fixture-cursor-1"}'
+		;;
+	second)
+		printf '%s\n' '{"MESSAGE":"after journal reconnect","_SYSTEMD_UNIT":"qagent-sing-box.service","PRIORITY":"6","__CURSOR":"fixture-cursor-2"}'
+		while :; do sleep 1; done
+		;;
+	*) exit 2 ;;
+esac
+`
+	if err := os.WriteFile(helper, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	previousJournalctl := journalctlPath
+	journalctlPath = helper
+	t.Cleanup(func() { journalctlPath = previousJournalctl })
+	collector := NewCoreLogCollector(map[core.Engine]EngineSpec{
+		core.EngineSingBox: {Service: "qagent-sing-box.service"},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { collector.Run(ctx); close(done) }()
+	defer func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Error("systemd reconnect fixture leaked")
+		}
+	}()
+	if entry, ok := waitForLine(t, collector, "before journal reconnect"); !ok || entry.Engine != core.EngineSingBox {
+		t.Fatalf("journal entry before reconnect = %+v, ok=%v", entry, ok)
+	}
+	if entry, ok := waitForLine(t, collector, "after journal reconnect"); !ok || entry.Engine != core.EngineSingBox {
+		t.Fatalf("journal entry after reconnect = %+v, ok=%v", entry, ok)
+	}
+}
+
+func TestOpenRCConsoleReadinessFollowsInitializedFileCursor(t *testing.T) {
+	logRoot := t.TempDir()
+	previous := openRCCoreLogRoot
+	openRCCoreLogRoot = logRoot
+	t.Cleanup(func() { openRCCoreLogRoot = previous })
+	path := filepath.Join(logRoot, "qagent-sing-box.log")
+	if err := os.WriteFile(path, []byte("history before collector\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	manager, err := NewServiceManager(ServiceManagerOpenRC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	collector := NewCoreLogCollectorForServiceManager(manager, map[core.Engine]EngineSpec{
+		core.EngineSingBox: {Service: "qagent-sing-box"},
+	})
+	opened := make(chan struct{})
+	releaseCursor := make(chan struct{})
+	var openedOnce sync.Once
+	collector.fileSources[0].beforeInitialCursor = func() {
+		openedOnce.Do(func() {
+			close(opened)
+			<-releaseCursor
+		})
+	}
+	t.Cleanup(func() {
+		select {
+		case <-releaseCursor:
+		default:
+			close(releaseCursor)
+		}
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { collector.Run(ctx); close(done) }()
+	defer func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Error("OpenRC reader-ready fixture leaked")
+		}
+	}()
+	ready := make(chan error, 1)
+	go func() {
+		ready <- collector.PrepareImportedSingBoxSource(context.Background(), nil,
+			`{"log":{"level":"info","timestamp":true}}`)
+	}()
+	select {
+	case <-opened:
+	case <-time.After(5 * time.Second):
+		t.Fatal("OpenRC reader did not reach initial cursor setup")
+	}
+	select {
+	case err := <-ready:
+		t.Fatalf("OpenRC reported readiness before its no-history cursor was initialized: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(releaseCursor)
+	if err := <-ready; err != nil {
+		t.Fatal(err)
+	}
+	file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.WriteString("startup immediately after ready\n"); err != nil {
+		_ = file.Close()
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if entry, ok := waitForLine(t, collector, "startup immediately after ready"); !ok || entry.Engine != core.EngineSingBox {
+		t.Fatalf("OpenRC startup entry after reader readiness = %+v, ok=%v", entry, ok)
+	}
+}
+
 func TestImportedSingBoxFileSourceCapturesOnlyMigrationWindow(t *testing.T) {
 	logRoot := t.TempDir()
 	previous := importedSingBoxLogRoot
@@ -881,6 +1096,19 @@ func TestCoreLogSourcesMixManagedAndExactGenericUnits(t *testing.T) {
 		if !containsArgument(managed.arguments, "--unit="+unit) {
 			t.Fatalf("managed journal arguments omit %s: %v", unit, managed.arguments)
 		}
+	}
+	cursorArguments := journalCursorArguments(managed.arguments)
+	if !containsArgument(cursorArguments, "--namespace=qagent-cores") ||
+		!containsArgument(cursorArguments, "--show-cursor") ||
+		containsArgument(cursorArguments, "--unit=qagent-sing-box.service") {
+		t.Fatalf("managed journal tail-position arguments = %v", cursorArguments)
+	}
+	followArguments := journalFollowArguments(managed.arguments, "--since=@1787583894.445332")
+	if !containsArgument(followArguments, "--follow") ||
+		!containsArgument(followArguments, "--unit=qagent-sing-box.service") ||
+		!containsArgument(followArguments, "--since=@1787583894.445332") ||
+		containsArgument(followArguments, "--lines=0") {
+		t.Fatalf("managed journal bounded follower arguments = %v", followArguments)
 	}
 	if containsArgument(generic.arguments, "--namespace=qagent-cores") ||
 		!containsArgument(generic.arguments, "--unit=xray.service") ||
