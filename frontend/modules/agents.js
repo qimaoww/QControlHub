@@ -35,7 +35,11 @@ export function batchAgentEligibility(agent, action, engine) {
 }
 
 export function batchSelectAllState(inputs) {
-  const eligible = [...inputs].filter((input) => !input.disabled);
+  const eligible = [...inputs].filter((input) =>
+    input.dataset?.batchEligible === undefined
+      ? !input.disabled
+      : input.dataset.batchEligible === "1",
+  );
   const selected = eligible.filter((input) => input.checked);
   return {
     eligible: eligible.length,
@@ -1384,6 +1388,7 @@ function bindAgentPage(agentItems, presetMode = false, enrollmentHistory = {}) {
     inputs.forEach((input) => {
       const agent = agentsByID.get(input.value);
       const eligibility = batchAgentEligibility(agent, action, engine);
+      input.dataset.batchEligible = eligibility.eligible ? "1" : "0";
       input.disabled = busy || !eligibility.eligible;
       input.closest(".batch-select").title = eligibility.reason;
       const reason = input.closest(".batch-select").querySelector(
@@ -1412,7 +1417,7 @@ function bindAgentPage(agentItems, presetMode = false, enrollmentHistory = {}) {
     if (button)
       button.disabled = selection.selected === 0 || batchForm.dataset.busy === "1";
     const clear = batchForm.querySelector("[data-batch-clear]");
-    if (clear) clear.disabled = selection.selected === 0;
+    if (clear) clear.disabled = busy || selection.selected === 0;
     const label = batchForm?.querySelector("[data-batch-count]");
     if (label)
       label.textContent = `已选择 ${selection.selected} 个节点 · 当前可选 ${selection.eligible} 个`;
@@ -1428,8 +1433,8 @@ function bindAgentPage(agentItems, presetMode = false, enrollmentHistory = {}) {
   if (selectAll)
     selectAll.onchange = () => {
       const shouldSelect = selectAll.checked;
-      batchForm
-        .querySelectorAll("[data-batch-checkbox]:not(:disabled)")
+      [...batchForm.querySelectorAll("[data-batch-checkbox]")]
+        .filter((input) => input.dataset.batchEligible === "1")
         .forEach((input) => (input.checked = shouldSelect));
       updateBatch();
     };

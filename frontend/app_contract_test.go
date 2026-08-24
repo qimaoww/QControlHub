@@ -5,10 +5,19 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestAgentBrowserRuntimeSmoke(t *testing.T) {
+	command := exec.Command("node", "agents_browser_smoke.mjs")
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("agent browser runtime smoke failed: %v\n%s", err, output)
+	}
+}
 
 func TestSPAConsoleSurfaceMatchesInitialRelease(t *testing.T) {
 	var scripts strings.Builder

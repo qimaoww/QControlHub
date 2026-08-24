@@ -84,6 +84,15 @@ assert.deepEqual(
   ]),
   { eligible: 2, selected: 2, checked: true, indeterminate: false },
 );
+assert.deepEqual(
+  batchSelectAllState([
+    { disabled: true, checked: true, dataset: { batchEligible: "1" } },
+    { disabled: true, checked: true, dataset: { batchEligible: "1" } },
+    { disabled: true, checked: false, dataset: { batchEligible: "0" } },
+  ]),
+  { eligible: 2, selected: 2, checked: true, indeterminate: false },
+  "busy interaction locks do not erase the qualified selection state",
+);
 assert.deepEqual(batchSelectAllState([]), {
   eligible: 0,
   selected: 0,
