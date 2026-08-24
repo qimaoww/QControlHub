@@ -290,6 +290,16 @@ func TestExistingCoreMigrationCoordinatesActiveManagedService(t *testing.T) {
 	}
 	fixture.assertServiceState(t, "xray.service", "inactive", "disabled")
 	fixture.assertServiceState(t, "qagent-xray.service", "active", "enabled")
+	commands, err := os.ReadFile(filepath.Join(fixture.stateDirectory, "commands.log"))
+	if err != nil {
+		t.Fatalf("read service command log: %v", err)
+	}
+	log := string(commands)
+	runtimeDisable := strings.Index(log, "disable --runtime qagent-xray.service")
+	stop := strings.Index(log, "stop qagent-xray.service")
+	if runtimeDisable < 0 || stop < 0 || runtimeDisable > stop {
+		t.Fatalf("runtime enablement was not cleared before managed stop: %q", log)
+	}
 }
 
 func TestExistingCoreMigrationRejectsManagedTransientStatesBeforeChanges(t *testing.T) {
@@ -1349,6 +1359,7 @@ state=%q
 command=$1
 shift
 service=${1:-}
+printf '%%s %%s\n' "$command" "$*" >> "$state/commands.log"
 active_file="$state/$service.active"
 case "$command" in
   is-active)
@@ -1378,6 +1389,9 @@ case "$command" in
     ;;
   stop)
     printf 'inactive\n' > "$active_file"
+    if [ "$service" = qagent-xray.service ] && [ "$(cat "$state/$service.runtime")" = 1 ]; then
+      printf 'active\n' > "$active_file"
+    fi
     ;;
   start|restart)
     if [ "$service" = qagent-xray.service ] && [ -f "$state/fail-managed-start" ]; then
