@@ -1,9 +1,12 @@
 package agent
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -129,6 +132,60 @@ func TestPublicIPProbeClientIgnoresEnvironmentProxy(t *testing.T) {
 	defer server.Close()
 	if got, err := probePublicIPEndpoint(context.Background(), publicIPProbeClient("tcp4"), server.URL, true); err != nil || got != "198.35.26.96" {
 		t.Fatalf("direct probe used environment proxy: address=%q error=%v", got, err)
+	}
+}
+
+func TestPublicIPProbeFamilyRedactsEndpointFromDebugLog(t *testing.T) {
+	var logBytes bytes.Buffer
+	previous := slog.Default()
+	defer slog.SetDefault(previous)
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logBytes, &slog.HandlerOptions{Level: slog.LevelDebug})))
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("198.35.26.96"))
+	}))
+	const secretPath = "/vendor-private-probe-path-7f3"
+	endpoint := server.URL + secretPath
+	server.Close()
+	if got := probePublicIPFamily(context.Background(), publicIPProbeClient("tcp4"), []string{endpoint}, true); got != "" {
+		t.Fatalf("closed endpoint must fail, got %q", got)
+	}
+	logged := logBytes.String()
+	for _, secret := range []string{endpoint, secretPath, "127.0.0.1"} {
+		if strings.Contains(logged, secret) {
+			t.Fatalf("debug log leaked probe endpoint detail %q: %s", secret, logged)
+		}
+	}
+	if !strings.Contains(logged, "public IP probe endpoint failed") {
+		t.Fatalf("expected a bounded probe failure debug record: %s", logged)
+	}
+	if !strings.Contains(logged, "error=") {
+		t.Fatalf("expected a bounded error category in debug record: %s", logged)
+	}
+}
+
+func TestProbePublicIPEndpointRedactsMalformedEndpoint(t *testing.T) {
+	const secret = "https://[private-vendor-host:bad"
+	_, err := probePublicIPEndpoint(context.Background(), publicIPProbeClient("tcp4"), secret, true)
+	if err == nil {
+		t.Fatalf("expected malformed endpoint to fail")
+	}
+	if strings.Contains(err.Error(), "private-vendor-host") || strings.Contains(err.Error(), "https://") {
+		t.Fatalf("returned error leaked endpoint: %v", err)
+	}
+}
+
+func TestProbePublicIPEndpointRedactsResponseAddress(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("999.999.999.999"))
+	}))
+	defer server.Close()
+	_, err := probePublicIPEndpoint(context.Background(), server.Client(), server.URL, true)
+	if err == nil {
+		t.Fatalf("expected invalid response address to fail")
+	}
+	if strings.Contains(err.Error(), "999.999.999.999") {
+		t.Fatalf("returned error leaked response address: %v", err)
 	}
 }
 

@@ -360,9 +360,11 @@ func probePublicIPFamily(ctx context.Context, client *http.Client, endpoints []s
 		if err == nil {
 			return address
 		}
-		// Do not log configured URLs: an operator-controlled path can contain
-		// deployment detail even though credentials and query strings are rejected.
-		slog.Debug("public IP probe endpoint failed", "family_ipv4", wantIPv4, "provider_index", index, "error", err)
+		// Only a bounded category reaches the log. A raw transport error formats
+		// the configured endpoint URL and its underlying network address, which
+		// could expose operator host/path detail even though credentials and
+		// query strings are rejected before a request is built.
+		slog.Debug("public IP probe endpoint failed", "family_ipv4", wantIPv4, "provider_index", index, "error", publicIPProbeErrorCategory(err))
 		if familyContext.Err() != nil {
 			break
 		}
@@ -375,21 +377,21 @@ func probePublicIPEndpoint(ctx context.Context, client *http.Client, endpoint st
 	defer cancel()
 	request, err := http.NewRequestWithContext(requestContext, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return "", err
+		return "", publicIPProbeSafeError(err)
 	}
 	request.Header.Set("User-Agent", publicIPProbeUserAgent)
 	request.Header.Set("Accept", "text/plain")
 	response, err := client.Do(request)
 	if err != nil {
-		return "", err
+		return "", publicIPProbeSafeError(err)
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("probe endpoint returned %s", response.Status)
+		return "", fmt.Errorf("probe endpoint returned HTTP status %d", response.StatusCode)
 	}
 	body, err := io.ReadAll(io.LimitReader(response.Body, publicIPProbeMaxBodyBytes+1))
 	if err != nil {
-		return "", err
+		return "", publicIPProbeSafeError(err)
 	}
 	if len(body) > publicIPProbeMaxBodyBytes {
 		return "", errors.New("probe response exceeds the size limit")
@@ -400,7 +402,7 @@ func probePublicIPEndpoint(ctx context.Context, client *http.Client, endpoint st
 	}
 	address, err := netip.ParseAddr(string(match[1]))
 	if err != nil {
-		return "", fmt.Errorf("parse probe response: %w", err)
+		return "", errors.New("probe response contained an invalid address")
 	}
 	address = address.Unmap()
 	if !netpolicy.IsPublicAddress(address) || netpolicy.IsCloudflareAddress(address) {
@@ -414,4 +416,42 @@ func probePublicIPEndpoint(ctx context.Context, client *http.Client, endpoint st
 		return "", fmt.Errorf("probe endpoint answered with the wrong family for %s", family)
 	}
 	return address.String(), nil
+}
+
+// publicIPProbeErrorCategory maps an endpoint failure to a bounded, log-safe
+// label. A raw *url.Error formats the full endpoint URL and any underlying
+// network address, so it must never be logged directly; only the category is
+// retained alongside the family and provider index.
+func publicIPProbeErrorCategory(err error) string {
+	if err == nil {
+		return ""
+	}
+	if errors.Is(err, context.Canceled) {
+		return "canceled"
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "timeout"
+	}
+	var certificateErr *tls.CertificateVerificationError
+	if errors.As(err, &certificateErr) {
+		return "tls"
+	}
+	var networkErr net.Error
+	if errors.As(err, &networkErr) {
+		if networkErr.Timeout() {
+			return "timeout"
+		}
+		return "network"
+	}
+	return "http"
+}
+
+// publicIPProbeSafeError collapses a transport or parse failure into a bounded
+// error that never carries the configured endpoint URL, an addressed host or
+// path, or a response address.
+func publicIPProbeSafeError(err error) error {
+	if err == nil {
+		return nil
+	}
+	return errors.New(publicIPProbeErrorCategory(err))
 }
