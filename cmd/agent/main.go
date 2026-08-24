@@ -117,9 +117,10 @@ func existingSpec(prefix string) (agent.EngineSpec, bool) {
 	binary := strings.TrimSpace(os.Getenv("QCH_EXISTING_" + prefix + "_BINARY"))
 	configPath := strings.TrimSpace(os.Getenv("QCH_EXISTING_" + prefix + "_CONFIG"))
 	configDirectory := strings.TrimSpace(os.Getenv("QCH_EXISTING_" + prefix + "_CONFIG_DIRECTORY"))
+	workingDirectory := strings.TrimSpace(os.Getenv("QCH_EXISTING_" + prefix + "_WORK_DIRECTORY"))
 	serviceBinary := strings.TrimSpace(os.Getenv("QCH_EXISTING_" + prefix + "_SERVICE_BINARY"))
 	service := strings.TrimSpace(os.Getenv("QCH_EXISTING_" + prefix + "_SERVICE"))
-	configured := binary != "" || configPath != "" || configDirectory != "" || serviceBinary != "" || service != ""
+	configured := binary != "" || configPath != "" || configDirectory != "" || workingDirectory != "" || serviceBinary != "" || service != ""
 	if !configured {
 		return agent.EngineSpec{}, false
 	}
@@ -129,7 +130,7 @@ func existingSpec(prefix string) (agent.EngineSpec, bool) {
 	}
 	return agent.EngineSpec{
 		Binary: binary, ConfigPath: configPath, ConfigDirectory: configDirectory,
-		ServiceBinary: serviceBinary, Service: service,
+		WorkingDirectory: workingDirectory, ServiceBinary: serviceBinary, Service: service,
 	}, true
 }
 
@@ -173,6 +174,7 @@ func overrideSpec(spec agent.EngineSpec, prefix string) agent.EngineSpec {
 	spec.Binary = env("QCH_"+prefix+"_BINARY", spec.Binary)
 	spec.ConfigPath = env("QCH_"+prefix+"_CONFIG", spec.ConfigPath)
 	spec.ConfigDirectory = strings.TrimSpace(os.Getenv("QCH_" + prefix + "_CONFIG_DIRECTORY"))
+	spec.WorkingDirectory = strings.TrimSpace(os.Getenv("QCH_" + prefix + "_WORK_DIRECTORY"))
 	spec.ServiceBinary = strings.TrimSpace(os.Getenv("QCH_" + prefix + "_SERVICE_BINARY"))
 	spec.Service = env("QCH_"+prefix+"_SERVICE", spec.Service)
 	return spec

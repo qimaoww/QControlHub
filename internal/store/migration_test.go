@@ -122,6 +122,85 @@ func TestOpenMigratesAppliedV19TaskActionConstraint(t *testing.T) {
 	}
 }
 
+func TestOpenMigratesAppliedV20Schema(t *testing.T) {
+	databaseURL := os.Getenv("QCH_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("QCH_TEST_DATABASE_URL is not configured")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	schema, err := testdb.IsolatePostgres(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("create isolated v20 schema: %v", err)
+	}
+	defer func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cleanupCancel()
+		if err := schema.Close(cleanupCtx); err != nil {
+			t.Errorf("drop isolated v20 schema: %v", err)
+		}
+	}()
+
+	setup, err := pgx.Connect(ctx, schema.URL)
+	if err != nil {
+		t.Fatalf("connect to isolated v20 schema: %v", err)
+	}
+	defer func() {
+		if err := setup.Close(context.Background()); err != nil {
+			t.Errorf("close applied v20 fixture connection: %v", err)
+		}
+	}()
+	if _, err := setup.Exec(ctx, schemaSQL); err != nil {
+		t.Fatalf("create current v21 schema fixture: %v", err)
+	}
+	if _, err := setup.Exec(ctx, `
+		CREATE TABLE qcontrolhub_schema_migrations (
+			version integer PRIMARY KEY CHECK (version > 0),
+			applied_at timestamptz NOT NULL DEFAULT now()
+		);
+		INSERT INTO qcontrolhub_schema_migrations (version) VALUES (20);
+		ALTER TABLE tasks DROP COLUMN IF EXISTS core_source;
+	`); err != nil {
+		t.Fatalf("restore applied v20 schema fixture: %v", err)
+	}
+	var hasCoreSource bool
+	if err := setup.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM information_schema.columns
+			WHERE table_schema=current_schema() AND table_name='tasks' AND column_name='core_source'
+		)
+	`).Scan(&hasCoreSource); err != nil {
+		t.Fatalf("read v20 core_source presence: %v", err)
+	}
+	if hasCoreSource {
+		t.Fatal("v20 fixture unexpectedly already has core_source")
+	}
+
+	dataStore, err := Open(ctx, schema.URL, true)
+	if err != nil {
+		t.Fatalf("open and migrate applied v20 schema: %v", err)
+	}
+	defer dataStore.Close()
+	var schemaVersion int
+	if err := dataStore.pool.QueryRow(ctx, `SELECT COALESCE(max(version),0) FROM qcontrolhub_schema_migrations`).Scan(&schemaVersion); err != nil {
+		t.Fatalf("read migrated schema version: %v", err)
+	}
+	if schemaVersion != currentSchemaVersion {
+		t.Fatalf("migrated schema version = %d, want %d", schemaVersion, currentSchemaVersion)
+	}
+	if err := dataStore.pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM information_schema.columns
+			WHERE table_schema=current_schema() AND table_name='tasks' AND column_name='core_source'
+		)
+	`).Scan(&hasCoreSource); err != nil {
+		t.Fatalf("read migrated core_source presence: %v", err)
+	}
+	if !hasCoreSource {
+		t.Fatal("v21 migration did not add the core_source column")
+	}
+}
+
 func TestConcurrentOpenSkipsAppliedSchemaDuringCRUD(t *testing.T) {
 	databaseURL := os.Getenv("QCH_TEST_DATABASE_URL")
 	if databaseURL == "" {

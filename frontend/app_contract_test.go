@@ -612,6 +612,40 @@ func TestCoreLogsLabelFollowsAdvertisedFeature(t *testing.T) {
 	}
 }
 
+func TestAgentStructureRefreshDoesNotPrecommitComparisonMarkers(t *testing.T) {
+	agents, err := os.ReadFile("modules/agents.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(agents)
+	start := strings.Index(content, "function updateAgentMetrics")
+	end := strings.Index(content, "async function pollAgentMetrics")
+	if start < 0 || end <= start {
+		t.Fatal("agents.js is missing the updateAgentMetrics body boundary")
+	}
+	body := content[start:end]
+	for _, required := range []string{
+		`requestAgentStructureRefresh();`,
+		`card.dataset.coreInstalled !== (installed ? "1" : "0")`,
+		`card.dataset.existingPending !== (existingPending ? "1" : "0")`,
+		`card.dataset.existingUnsupported !== existingUnsupportedReason`,
+	} {
+		if !strings.Contains(body, required) {
+			t.Errorf("updateAgentMetrics structural comparison is missing %q", required)
+		}
+	}
+	for _, forbidden := range []string{
+		`card.dataset.coreInstalled =`,
+		`card.dataset.existingPending =`,
+		`card.dataset.existingUnsupported =`,
+		`refreshAgentPage();`,
+	} {
+		if strings.Contains(body, forbidden) {
+			t.Errorf("updateAgentMetrics must not precommit structure markers or bypass the coalesced refresh path (%q)", forbidden)
+		}
+	}
+}
+
 func TestTaskPollingKeepsTheScrollContainerStable(t *testing.T) {
 	tasks, err := os.ReadFile("modules/tasks.js")
 	if err != nil {

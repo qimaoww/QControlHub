@@ -150,6 +150,9 @@ umask 077
       "QCH_EXISTING_SING_BOX_CONFIG_DIRECTORY=$mapped_singbox_config_directory" \
       "QCH_EXISTING_SING_BOX_SERVICE_BINARY=$mapped_singbox_service_binary" \
       "QCH_EXISTING_SING_BOX_SERVICE=$mapped_singbox_service"
+    if [ -n "$mapped_singbox_work_directory" ]; then
+      printf '%s\n' "QCH_EXISTING_SING_BOX_WORK_DIRECTORY=$mapped_singbox_work_directory"
+    fi
   fi
 } > /etc/qcontrolhub/agent.env
 chmod 0600 /etc/qcontrolhub/agent.env

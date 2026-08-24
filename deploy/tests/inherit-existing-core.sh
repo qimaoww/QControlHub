@@ -8,6 +8,11 @@ mkdir -p "$test_root/bin" "$test_root/state" "$test_root/core"
 # shellcheck source=../existing-core-mapping.sh
 . "$(dirname -- "$0")/../existing-core-mapping.sh"
 
+qagent_xray_binary="$test_root/core/qagent-xray"
+qagent_xray_config="$test_root/core/qagent-xray-config.json"
+fixture_true="$test_root/core/true"
+cp -L /bin/true "$fixture_true"
+
 case " $singbox_binary_candidates " in
   *' /etc/sing-box/bin/sing-box '*) ;;
   *) printf '%s\n' 'installer candidates omit /etc/sing-box/bin/sing-box' >&2; exit 1 ;;
@@ -39,10 +44,15 @@ case "$command" in
       case "$argument" in --property=*) property=${argument#--property=} ;; esac
     done
     case "$property" in
-      ExecStart) cat "$FAKE_SYSTEMCTL_EXEC_START" ;;
-      LoadState) cat "$FAKE_SYSTEMCTL_LOAD_STATE" ;;
-      ActiveState) cat "$FAKE_SYSTEMCTL_QAGENT_ACTIVE_STATE" ;;
-      FragmentPath) cat "$FAKE_SYSTEMCTL_FRAGMENT_PATH" ;;
+	    ExecStart) if [ "$service" = qagent-xray.service ]; then cat "$FAKE_SYSTEMCTL_QAGENT_EXEC_START"; else cat "$FAKE_SYSTEMCTL_EXEC_START"; fi ;;
+	      LoadState) cat "$FAKE_SYSTEMCTL_LOAD_STATE" ;;
+	      ActiveState) cat "$FAKE_SYSTEMCTL_QAGENT_ACTIVE_STATE" ;;
+	      FragmentPath) cat "$FAKE_SYSTEMCTL_FRAGMENT_PATH" ;;
+	      Description) cat "$FAKE_SYSTEMCTL_QAGENT_DESCRIPTION" ;;
+	      User) cat "$FAKE_SYSTEMCTL_QAGENT_USER" ;;
+	      Group) cat "$FAKE_SYSTEMCTL_QAGENT_GROUP" ;;
+	      Type|WorkingDirectory|RootDirectory|RootImage|BindPaths|BindReadOnlyPaths|Environment|EnvironmentFiles|DropInPaths) cat "$FAKE_SYSTEMCTL_STATE/qagent-$property" ;;
+	      ExecCondition|ExecStartPre|ExecStartPost|ExecReload|ExecStop|ExecStopPost) cat "$FAKE_SYSTEMCTL_STATE/qagent-$property" ;;
       *) exit 1 ;;
     esac
     ;;
@@ -83,6 +93,10 @@ export FAKE_SYSTEMCTL_STATE="$test_root/state"
 export FAKE_SYSTEMCTL_LOG="$test_root/state/commands.log"
 export FAKE_SYSTEMCTL_ACTIVE="$test_root/state/active"
 export FAKE_SYSTEMCTL_EXEC_START="$test_root/state/exec-start"
+export FAKE_SYSTEMCTL_QAGENT_EXEC_START="$test_root/state/qagent-exec-start"
+export FAKE_SYSTEMCTL_QAGENT_DESCRIPTION="$test_root/state/qagent-description"
+export FAKE_SYSTEMCTL_QAGENT_USER="$test_root/state/qagent-user"
+export FAKE_SYSTEMCTL_QAGENT_GROUP="$test_root/state/qagent-group"
 export FAKE_SYSTEMCTL_LOAD_STATE="$test_root/state/load-state"
 export FAKE_SYSTEMCTL_QAGENT_ACTIVE_STATE="$test_root/state/qagent-active-state"
 export FAKE_SYSTEMCTL_FRAGMENT_PATH="$test_root/state/fragment-path"
@@ -173,6 +187,16 @@ sing_config_directory="$test_root/core/conf.d"
 mkdir -m 0700 "$sing_config_directory"
 cat > "$sing_binary" <<'EOF'
 #!/bin/sh
+if [ "$1 $2" = "check -D" ]; then
+  [ -d "$3" ] || exit 1
+  [ "$4" = -C ] || exit 1
+  [ -d "$5" ] || exit 1
+  for config_file in "$5"/*.json; do
+    [ -e "$config_file" ] || continue
+    grep -q '"inbounds"' "$config_file" || exit 1
+  done
+  exit 0
+fi
 [ "$1 $2" = "check -c" ]
 grep -q '"inbounds"' "$3"
 if [ "$#" -eq 5 ]; then [ "$4" = -C ] && [ -d "$5" ]; fi
@@ -199,20 +223,47 @@ write_exec_start "$sing_binary" "$sing_binary" run -c "$sing_config" -C "$sing_c
 expect_rejected sing-box-symlinked-directory-entry service_uses_paths sing-box.service "$sing_binary" "$sing_config" sing-box
 rm "$sing_config_directory/20-linked.json"
 
+official_config_directory="$test_root/core/conf.d-official"
+official_work_directory="$test_root/core/work"
+mkdir -m 0700 "$official_config_directory" "$official_work_directory"
+official_config="$official_config_directory/config.json"
+printf '%s\n' '{"inbounds":[]}' > "$official_config"
+printf '%s\n' '{"outbounds":[]}' > "$official_config_directory/10-outbounds.json"
+chmod 0600 "$official_config" "$official_config_directory/10-outbounds.json"
+write_exec_start "$sing_binary" "$sing_binary" -D "$official_work_directory" -C "$official_config_directory" run
+service_uses_paths sing-box.service "$sing_binary" "$official_config" sing-box || {
+  printf '%s\n' 'safe sing-box official -D/-C ExecStart was rejected' >&2
+  exit 1
+}
+[ "$matched_config_directory" = "$official_config_directory" ] || {
+  printf '%s\n' 'sing-box official config directory was not captured exactly' >&2
+  exit 1
+}
+write_exec_start "$sing_binary" "$sing_binary" -D relative -C "$official_config_directory" run
+expect_rejected sing-box-official-relative-workdir service_uses_paths sing-box.service "$sing_binary" "$official_config" sing-box
+write_exec_start "$sing_binary" "$sing_binary" -D "$official_work_directory" -C "$official_config_directory"
+expect_rejected sing-box-official-missing-run service_uses_paths sing-box.service "$sing_binary" "$official_config" sing-box
+write_exec_start "$sing_binary" "$sing_binary" -D "$official_work_directory" -C "$official_config_directory" run --unknown
+expect_rejected sing-box-official-unknown service_uses_paths sing-box.service "$sing_binary" "$official_config" sing-box
+write_exec_start "$sing_binary" "$sing_binary" -D "$official_work_directory" -C "$official_config_directory" -C "$official_config_directory" run
+expect_rejected sing-box-official-duplicate-config service_uses_paths sing-box.service "$sing_binary" "$official_config" sing-box
+write_exec_start "$sing_binary" "$sing_binary" -D "$official_work_directory" -C "$official_config_directory" run -c "$official_config"
+expect_rejected sing-box-official-extra-config service_uses_paths sing-box.service "$sing_binary" "$official_config" sing-box
+
 forwarder="$test_root/core/sing-box-forwarder"
 service_link="$test_root/core/sing-box-link"
-printf '%s\n' '#!/bin/sh' 'exec /usr/bin/true "$@"' > "$forwarder"
+printf '%s\n' '#!/bin/sh' "exec $fixture_true \"\$@\"" > "$forwarder"
 chmod 0700 "$forwarder"
 ln -s "$forwarder" "$service_link"
-[ "$(resolve_fixed_singbox_binary "$service_link")" = /usr/bin/true ] || {
+[ "$(resolve_fixed_singbox_binary "$service_link")" = "$fixture_true" ] || {
   printf '%s\n' 'fixed sing-box exec forwarder was not resolved safely' >&2
   exit 1
 }
-printf '%s\n' '#!/bin/sh' 'echo unsafe' 'exec /usr/bin/true "$@"' > "$forwarder"
+printf '%s\n' '#!/bin/sh' 'echo unsafe' "exec $fixture_true \"\$@\"" > "$forwarder"
 expect_rejected arbitrary-sing-box-wrapper resolve_fixed_singbox_binary "$service_link"
 direct_service_link="$test_root/core/sing-box-direct-link"
-ln -s /usr/bin/true "$direct_service_link"
-[ "$(resolve_fixed_singbox_binary "$direct_service_link")" = /usr/bin/true ] || {
+ln -s "$fixture_true" "$direct_service_link"
+[ "$(resolve_fixed_singbox_binary "$direct_service_link")" = "$fixture_true" ] || {
   printf '%s\n' 'direct sing-box binary symlink was not resolved safely' >&2
   exit 1
 }
@@ -225,9 +276,70 @@ qagent_core_service_is_safe_to_disable xray || {
 printf '%s\n' loaded > "$FAKE_SYSTEMCTL_LOAD_STATE"
 printf '%s\n' inactive > "$FAKE_SYSTEMCTL_QAGENT_ACTIVE_STATE"
 managed_unit="$test_root/core/qagent-xray.service"
-printf '%s\n' 'Description=Xray core managed by QAgent' > "$managed_unit"
+printf '%s\n' \
+  '[Unit]' \
+  'Description=Xray core managed by QAgent' \
+  'Documentation=https://github.com/XTLS/Xray-core' \
+  'Wants=network-online.target' \
+  'After=network-online.target' \
+  "ConditionFileIsExecutable=$qagent_xray_binary" \
+  "ConditionPathExists=$qagent_xray_config" \
+  '[Service]' \
+  'Type=simple' \
+  'User=qcontrolhub-core' \
+  'Group=qcontrolhub-core' \
+  'WorkingDirectory=/var/lib/qcontrolhub-xray' \
+  'StateDirectory=qcontrolhub-xray' \
+  'StateDirectoryMode=0750' \
+  'UMask=0027' \
+  "ExecStart=$qagent_xray_binary run -config $qagent_xray_config" \
+  'LogNamespace=qagent-cores' \
+  'StandardOutput=journal' \
+  'StandardError=journal' \
+  'Restart=on-failure' \
+  'RestartSec=3s' \
+  'TimeoutStopSec=20s' \
+  'NoNewPrivileges=true' \
+  'CapabilityBoundingSet=CAP_NET_BIND_SERVICE' \
+  'AmbientCapabilities=CAP_NET_BIND_SERVICE' \
+  'ProtectSystem=strict' \
+  'ProtectHome=true' \
+  'PrivateTmp=true' \
+  'PrivateDevices=true' \
+  'ProtectKernelTunables=true' \
+  'ProtectKernelModules=true' \
+  'ProtectKernelLogs=true' \
+  'ProtectControlGroups=true' \
+  'ProtectClock=true' \
+  'RestrictSUIDSGID=true' \
+  'LockPersonality=true' \
+  'MemoryDenyWriteExecute=true' \
+  'RestrictNamespaces=true' \
+  'RestrictRealtime=true' \
+  'RemoveIPC=true' \
+  'ProtectProc=invisible' \
+  'ProcSubset=pid' \
+  'RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6' \
+  'SystemCallArchitectures=native' \
+  "ReadOnlyPaths=$qagent_xray_binary $(dirname -- "$qagent_xray_config")" \
+  'ReadWritePaths=/var/lib/qcontrolhub-xray' \
+  '[Install]' \
+  'WantedBy=multi-user.target' > "$managed_unit"
 chmod 0644 "$managed_unit"
 printf '%s\n' "$managed_unit" > "$FAKE_SYSTEMCTL_FRAGMENT_PATH"
+write_exec_start "$qagent_xray_binary" "$qagent_xray_binary" run -config "$qagent_xray_config"
+cp "$FAKE_SYSTEMCTL_EXEC_START" "$FAKE_SYSTEMCTL_QAGENT_EXEC_START"
+printf '%s\n' 'Xray core managed by QAgent' > "$FAKE_SYSTEMCTL_QAGENT_DESCRIPTION"
+printf '%s\n' qcontrolhub-core > "$FAKE_SYSTEMCTL_QAGENT_USER"
+printf '%s\n' qcontrolhub-core > "$FAKE_SYSTEMCTL_QAGENT_GROUP"
+for hook in ExecCondition ExecStartPre ExecStartPost ExecReload ExecStop ExecStopPost; do
+  : > "$FAKE_SYSTEMCTL_STATE/qagent-$hook"
+done
+printf '%s\n' simple > "$FAKE_SYSTEMCTL_STATE/qagent-Type"
+printf '%s\n' /var/lib/qcontrolhub-xray > "$FAKE_SYSTEMCTL_STATE/qagent-WorkingDirectory"
+for property in RootDirectory RootImage BindPaths BindReadOnlyPaths Environment EnvironmentFiles DropInPaths; do
+  : > "$FAKE_SYSTEMCTL_STATE/qagent-$property"
+done
 qagent_core_service_is_safe_to_disable xray "$managed_unit" || {
   printf '%s\n' 'repeat install with an inactive dedicated unit was rejected' >&2
   exit 1
@@ -240,16 +352,80 @@ expect_rejected custom-dedicated-unit qagent_core_service_is_safe_to_disable xra
 printf '%s\n' "$managed_unit" > "$FAKE_SYSTEMCTL_FRAGMENT_PATH"
 printf '%s\n' active > "$FAKE_SYSTEMCTL_QAGENT_ACTIVE_STATE"
 expect_rejected active-dedicated-unit qagent_core_service_is_safe_to_disable xray "$managed_unit"
+qagent_core_service_is_safe_owned xray "$managed_unit" || {
+  printf '%s\n' 'safe active dedicated unit was not recognized as QAgent-owned' >&2
+  exit 1
+}
+printf '%s\n' root > "$FAKE_SYSTEMCTL_QAGENT_USER"
+expect_rejected effective-user-override qagent_core_service_is_safe_owned xray "$managed_unit"
+printf '%s\n' qcontrolhub-core > "$FAKE_SYSTEMCTL_QAGENT_USER"
+printf '%s\n' /bin/true > "$FAKE_SYSTEMCTL_STATE/qagent-ExecStartPre"
+expect_rejected effective-start-pre-hook qagent_core_service_is_safe_owned xray "$managed_unit"
+: > "$FAKE_SYSTEMCTL_STATE/qagent-ExecStartPre"
+for property in RootDirectory BindReadOnlyPaths Environment EnvironmentFiles; do
+  printf '%s\n' unexpected > "$FAKE_SYSTEMCTL_STATE/qagent-$property"
+  expect_rejected "effective-$property" qagent_core_service_is_safe_owned xray "$managed_unit"
+  : > "$FAKE_SYSTEMCTL_STATE/qagent-$property"
+done
+printf '%s\n' /var/lib/other > "$FAKE_SYSTEMCTL_STATE/qagent-WorkingDirectory"
+expect_rejected effective-working-directory qagent_core_service_is_safe_owned xray "$managed_unit"
+printf '%s\n' /var/lib/qcontrolhub-xray > "$FAKE_SYSTEMCTL_STATE/qagent-WorkingDirectory"
+printf '%s\n' oneshot > "$FAKE_SYSTEMCTL_STATE/qagent-Type"
+expect_rejected effective-service-type qagent_core_service_is_safe_owned xray "$managed_unit"
+printf '%s\n' simple > "$FAKE_SYSTEMCTL_STATE/qagent-Type"
+drop_in_directory="$test_root/core/qagent-xray.service.d"
+mkdir -p "$drop_in_directory"
+capability_drop_in="$drop_in_directory/10-qcontrolhub-bind-low-ports.conf"
+log_drop_in="$drop_in_directory/20-qcontrolhub-volatile-logs.conf"
+printf '%s\n' '[Service]' 'CapabilityBoundingSet=CAP_NET_BIND_SERVICE' 'AmbientCapabilities=CAP_NET_BIND_SERVICE' > "$capability_drop_in"
+printf '%s\n' '[Service]' 'LogNamespace=qagent-cores' 'StandardOutput=journal' 'StandardError=journal' > "$log_drop_in"
+printf '%s %s\n' "$capability_drop_in" "$log_drop_in" > "$FAKE_SYSTEMCTL_STATE/qagent-DropInPaths"
+qagent_core_service_is_safe_owned xray "$managed_unit" || {
+  printf '%s\n' 'project-managed capability/log drop-ins were rejected' >&2
+  exit 1
+}
+printf '%s\n' '/etc/qcontrolhub/unexpected.env' > "$FAKE_SYSTEMCTL_STATE/qagent-EnvironmentFiles"
+expect_rejected effective-environment-files-drop-in qagent_core_service_is_safe_owned xray "$managed_unit"
+: > "$FAKE_SYSTEMCTL_STATE/qagent-EnvironmentFiles"
+unknown_drop_in="$drop_in_directory/99-unknown.conf"
+printf '%s\n' '[Service]' 'Environment=QCH_UNEXPECTED=1' > "$unknown_drop_in"
+printf '%s\n' "$unknown_drop_in" > "$FAKE_SYSTEMCTL_STATE/qagent-DropInPaths"
+expect_rejected unknown-drop-in qagent_core_service_is_safe_owned xray "$managed_unit"
+: > "$FAKE_SYSTEMCTL_STATE/qagent-DropInPaths"
+rm -f "$unknown_drop_in" "$capability_drop_in" "$log_drop_in"
+cp "$managed_unit" "$managed_unit.original"
+printf '%s\n' \
+  '[Unit]' \
+  '#Description=Xray core managed by QAgent' \
+  '[Service]' \
+  'User=qcontrolhub-core' \
+  'Group=qcontrolhub-core' \
+  "ExecStart=$qagent_xray_binary run -config $qagent_xray_config" \
+  '[Install]' > "$managed_unit"
+expect_rejected commented-ownership-marker qagent_core_service_is_safe_owned xray "$managed_unit"
+cp "$managed_unit.original" "$managed_unit"
+printf '%s\n' \
+  '[Unit]' \
+  'Description=Xray core managed by QAgent' \
+  'Description=Xray core managed by QAgent' \
+  '[Service]' \
+  'User=qcontrolhub-core' \
+  'Group=qcontrolhub-core' \
+  "ExecStart=$qagent_xray_binary run -config $qagent_xray_config" \
+  '[Install]' > "$managed_unit"
+expect_rejected duplicate-ownership-marker qagent_core_service_is_safe_owned xray "$managed_unit"
+cp "$managed_unit.original" "$managed_unit"
+rm "$managed_unit.original"
 
 export QCH_SKIP_CORE_SERVICES=xray
 printf '%s\n' inactive > "$FAKE_SYSTEMCTL_ACTIVE"
-require_skipped_core_service_inactive xray || {
+require_skipped_core_service_inactive xray "$managed_unit" || {
   printf '%s\n' 'bootstrap rejected an inactive dedicated unit' >&2
   exit 1
 }
 # Repeated installation must make the same inactive check without starting or
 # stopping either unit.
-require_skipped_core_service_inactive xray || {
+require_skipped_core_service_inactive xray "$managed_unit" || {
   printf '%s\n' 'bootstrap rejected a repeated inactive-unit check' >&2
   exit 1
 }
@@ -276,7 +452,25 @@ touch "$FAKE_SYSTEMCTL_STATE/qagent-xray.service.runtime" "$FAKE_SYSTEMCTL_STATE
 expect_rejected bootstrap-enabled-runtime-residue disable_skipped_core_service xray "$managed_unit"
 rm "$FAKE_SYSTEMCTL_STATE/qagent-xray.service.runtime" "$FAKE_SYSTEMCTL_STATE/keep-runtime"
 printf '%s\n' active > "$FAKE_SYSTEMCTL_ACTIVE"
-expect_rejected bootstrap-active-dedicated-unit require_skipped_core_service_inactive xray
+: > "$FAKE_SYSTEMCTL_LOG"
+touch "$FAKE_SYSTEMCTL_STATE/qagent-xray.service.persistent" "$FAKE_SYSTEMCTL_STATE/qagent-xray.service.runtime"
+disable_skipped_core_service xray "$managed_unit" || {
+  printf '%s\n' 'bootstrap did not retain a safe active dedicated unit' >&2
+  exit 1
+}
+[ -e "$FAKE_SYSTEMCTL_STATE/qagent-xray.service.persistent" ] &&
+  [ -e "$FAKE_SYSTEMCTL_STATE/qagent-xray.service.runtime" ] || {
+  printf '%s\n' 'bootstrap changed active dedicated-unit enablement' >&2
+  exit 1
+}
+if grep -Eq '^disable ' "$FAKE_SYSTEMCTL_LOG"; then
+  printf '%s\n' 'bootstrap disabled an active dedicated unit' >&2
+  exit 1
+fi
+require_skipped_core_service_inactive xray "$managed_unit" || {
+  printf '%s\n' 'bootstrap rejected a safe active dedicated unit before explicit import' >&2
+  exit 1
+}
 unset QCH_SKIP_CORE_SERVICES
 printf '%s\n' active > "$FAKE_SYSTEMCTL_ACTIVE"
 
@@ -287,7 +481,17 @@ cat > "$work_dir/qagent" <<'EOF'
 [ "${QCH_TEST_REJECT_INSPECTION:-}" != 1 ] || exit 1
 case "$1 $2" in
   'inspect-existing xray') exec "$QCH_XRAY_BINARY" run -test -config "$QCH_XRAY_CONFIG" ;;
-  'inspect-existing sing-box') exec "$QCH_SING_BOX_BINARY" check -c "$QCH_SING_BOX_CONFIG" -C "$QCH_SING_BOX_CONFIG_DIRECTORY" ;;
+  'inspect-existing sing-box')
+    if [ "$(head -c 2 "$QCH_SING_BOX_BINARY" 2>/dev/null)" != '#!' ]; then
+      if command -v busybox >/dev/null 2>&1; then exec busybox true; fi
+      exit 0
+    fi
+    if [ -n "$QCH_SING_BOX_WORK_DIRECTORY" ]; then
+      exec "$QCH_SING_BOX_BINARY" check -D "$QCH_SING_BOX_WORK_DIRECTORY" -C "$QCH_SING_BOX_CONFIG_DIRECTORY"
+    else
+      exec "$QCH_SING_BOX_BINARY" check -c "$QCH_SING_BOX_CONFIG" -C "$QCH_SING_BOX_CONFIG_DIRECTORY"
+    fi
+    ;;
   *) exit 1 ;;
 esac
 EOF
@@ -340,11 +544,35 @@ fi
   exit 1
 }
 
+singbox_binary_candidates=$direct_service_link
+singbox_config_candidates=$official_config
+write_exec_start "$direct_service_link" "$direct_service_link" -D "$official_work_directory" -C "$official_config_directory" run
+discover_existing_singbox || {
+  printf '%s\n' 'safe official sing-box -D/-C installation discovery failed' >&2
+  exit 1
+}
+[ "$mapped_singbox_config" = "$official_config" ] &&
+  [ "$mapped_singbox_config_directory" = "$official_config_directory" ] &&
+  [ "$mapped_singbox_work_directory" = "$official_work_directory" ] || {
+  printf '%s\n' 'official sing-box working-directory mapping was not captured exactly' >&2
+  exit 1
+}
+write_exec_start "$direct_service_link" "$direct_service_link" -D relative-work -C "$official_config_directory" run
+if discover_existing_singbox >/dev/null 2>&1; then
+  printf '%s\n' 'official sing-box relative work-directory was accepted during discovery' >&2
+  exit 1
+fi
+write_exec_start "$direct_service_link" "$direct_service_link" -D "$official_work_directory" -C "$official_config_directory"
+if discover_existing_singbox >/dev/null 2>&1; then
+  printf '%s\n' 'official sing-box argv without run was accepted during discovery' >&2
+  exit 1
+fi
+
 singbox_service_candidates=sing-box.service
 etc_layout_directory="$test_root/etc/sing-box/bin"
 etc_layout_binary="$etc_layout_directory/sing-box"
 mkdir -p "$etc_layout_directory"
-cp /usr/bin/true "$etc_layout_binary"
+cp "$fixture_true" "$etc_layout_binary"
 chmod 0755 "$etc_layout_binary"
 singbox_binary_candidates=$etc_layout_binary
 singbox_direct_binary_candidates=$etc_layout_binary

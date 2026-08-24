@@ -223,6 +223,7 @@ try {
     capabilities: ["sing-box"],
     runtime: {
       "sing-box": {
+        service_status: "active",
         installed: !unsupportedReason,
         existing_config_available: !unsupportedReason,
         existing_config_unsupported_reason: unsupportedReason,
@@ -1004,6 +1005,189 @@ for (const install of [
   if (previousDocument === undefined) delete globalThis.document;
   else globalThis.document = previousDocument;
 }
+const structureDocument = globalThis.document;
+const structureCSS = globalThis.CSS;
+const flushMicrotasks = () => new Promise((resolve) => setImmediate(resolve));
+class StructureElement {
+  constructor() {
+    this.dataset = {};
+    this.textContent = "";
+    this.className = "";
+    this.value = "";
+    this.disabled = false;
+    this.hasAttribute = () => false;
+    this.setAttribute = () => {};
+    this.removeAttribute = () => {};
+    this.closest = () => null;
+    this.querySelector = () => null;
+    this.querySelectorAll = () => [];
+  }
+}
+const structureCards = {
+  "sing-box": new StructureElement(),
+  xray: new StructureElement(),
+};
+for (const card of Object.values(structureCards)) {
+  card.dataset.coreInstalled = "0";
+  card.dataset.existingPending = "0";
+  card.dataset.existingUnsupported = "";
+}
+const structureRoot = new StructureElement();
+structureRoot.querySelector = (selector) => {
+  const match = selector.match(/^\.service-(.+)$/);
+  return match ? structureCards[match[1]] || null : null;
+};
+globalThis.CSS = { escape: (value) => String(value) };
+globalThis.document = {
+  hidden: false,
+  activeElement: null,
+  querySelector: (selector) =>
+    selector === '[data-agent-metrics="alpha"]' ? structureRoot : null,
+  querySelectorAll: () => [],
+};
+try {
+  let structureRequests = 0;
+  let structureRenders = 0;
+  let structureMarkup = "";
+  const structureNotifications = [];
+  let controlledRender = null;
+  const structureState = {
+    route: "node-settings",
+    anchor: "settings-node-alpha",
+    navigationEpoch: 1,
+    data: { nodeView: "detail", selectedAgent: "alpha" },
+  };
+  const singleEngine = (unsupported = false) => [
+    {
+      id: "alpha",
+      status: "online",
+      metrics: {},
+      capabilities: ["sing-box"],
+      runtime: {
+        "sing-box": {
+          installed: !unsupported,
+          existing_config_available: true,
+          ...(unsupported ? { existing_config_unsupported_reason: "unsupported" } : {}),
+        },
+      },
+    },
+  ];
+  const twoEngine = [
+    {
+      id: "alpha",
+      status: "online",
+      metrics: {},
+      capabilities: ["sing-box", "xray"],
+      runtime: {
+        "sing-box": { installed: false, existing_config_available: true },
+        xray: { installed: false, existing_config_available: true },
+      },
+    },
+  ];
+  let structurePayload = singleEngine;
+  const { pollAgentMetrics } = installAgents(
+    new Proxy(
+      {
+        state: structureState,
+        api: async (path) => {
+          assert.equal(path, "/agents");
+          structureRequests += 1;
+          if (structureRequests % 2 === 1) return structurePayload();
+          structureRenders += 1;
+          if (controlledRender && !controlledRender.used) {
+            controlledRender.used = true;
+            return controlledRender.promise;
+          }
+          if (structureRenders === 1)
+            throw new Error("temporary structure render failure");
+          return singleEngine(true);
+        },
+        can: (capability) => capability === "metrics.read",
+        esc: (value) => String(value ?? ""),
+        engineName: (value) => value,
+        serviceStatusName: (value) => value,
+        statusTone: (value) => value,
+        conciseVersion: (_engine, value) => value,
+        notify: (message) => structureNotifications.push(message),
+        shell: (markup) => {
+          structureMarkup = markup;
+        },
+      },
+      { get: (target, key) => target[key] ?? noop },
+    ),
+  );
+
+  // The first structure render rejects: the marker is not committed, so the
+  // next poll retries and applies the new state instead of going permanently stale.
+  structurePayload = singleEngine;
+  await pollAgentMetrics();
+  clearTimeout(structureState.agentPollTimer);
+  await flushMicrotasks();
+  assert.equal(structureRenders, 1, "first structure render is attempted");
+  assert.equal(
+    structureCards["sing-box"].dataset.existingPending,
+    "0",
+    "a rejected structure render must not precommit the pending marker",
+  );
+  assert.deepEqual(
+    structureNotifications,
+    ["temporary structure render failure"],
+    "the rejected structure render is handled (no unhandled rejection)",
+  );
+
+  await pollAgentMetrics();
+  clearTimeout(structureState.agentPollTimer);
+  await flushMicrotasks();
+  assert.equal(structureRenders, 2, "render is retried after the transient failure");
+  assert.equal(
+    structureState.data.agents[0].runtime["sing-box"].existing_config_unsupported_reason,
+    "unsupported",
+    "the retried render applies the new unsupported runtime",
+  );
+  assert.equal(
+    structureMarkup.includes('data-existing-pending="1"'),
+    true,
+    "the retried render applies the pending marker",
+  );
+  assert.equal(
+    structureMarkup.includes('data-existing-unsupported="unsupported"'),
+    true,
+    "the retried render applies the unsupported marker",
+  );
+  assert.equal(
+    structureNotifications.length,
+    1,
+    "the successful retry does not raise another error",
+  );
+
+  // Multiple engine transitions in one poll are coalesced into one in-flight
+  // structure render rather than launching concurrent duplicate renders.
+  structureRequests = 0;
+  structureRenders = 0;
+  structureNotifications.length = 0;
+  structurePayload = () => twoEngine;
+  let finishControlledRender;
+  controlledRender = {
+    used: false,
+    promise: new Promise((resolve) => {
+      finishControlledRender = resolve;
+    }),
+  };
+  await pollAgentMetrics();
+  clearTimeout(structureState.agentPollTimer);
+  await flushMicrotasks();
+  assert.equal(structureRenders, 1, "one poll coalesces several engine transitions into one render");
+  assert.equal(structureRequests, 2, "coalescing keeps one metrics poll and one structure render request");
+  finishControlledRender(twoEngine);
+  await flushMicrotasks();
+  clearTimeout(structureState.agentPollTimer);
+} finally {
+  if (structureDocument === undefined) delete globalThis.document;
+  else globalThis.document = structureDocument;
+  if (structureCSS === undefined) delete globalThis.CSS;
+  else globalThis.CSS = structureCSS;
+}
+
 assert.equal(developmentSourceVisible("mihomo", "development"), true, "mihomo development shows source choice");
 assert.equal(developmentSourceVisible("mihomo", "stable"), false, "stable hides source choice");
 assert.equal(developmentSourceVisible("xray", "development"), false, "non-mihomo hides source choice");
@@ -1634,10 +1818,21 @@ const presetAgents = [
     status: "online",
     capabilities: presetEngines,
     runtime: Object.fromEntries(
-      presetEngines.map((engine) => [
-        engine,
-        { installed: true, service_status: "active", version: "1.0.0" },
-      ]),
+      presetEngines.map((engine) =>
+        engine === "sing-box"
+          ? [
+              engine,
+              {
+                installed: false,
+                existing_config_available: false,
+                existing_config_unsupported_reason: "unsupported wrapper",
+              },
+            ]
+          : [
+              engine,
+              { installed: true, service_status: "active", version: "1.0.0" },
+            ],
+      ),
     ),
   },
   {
@@ -1796,6 +1991,16 @@ try {
   presetState.data.selectedAgent = "beta";
   await renderPresetAgents({ overview: { agents: 2, agents_online: 2 } });
   assertFocusedPreset("beta", "alpha");
+  assert.equal(
+    presetMarkup.includes('data-config="beta" data-engine="sing-box"'),
+    true,
+    "unsupported preset engine keeps a config entry",
+  );
+  assert.equal(
+    presetMarkup.includes("查看不可迁移原因"),
+    true,
+    "unsupported preset engine still explains why migration is blocked",
+  );
 
   presetState.anchor = "preset-node-gamma";
   presetState.data.selectedAgent = "gamma";

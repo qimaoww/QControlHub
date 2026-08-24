@@ -447,7 +447,7 @@ async function nodeSettings(presetMode = false, { overview: preloadedOverview } 
           let primaryActions = "";
           if (presetMode && can("agent-config.read")) {
             primaryActions = existingBlocked
-              ? `<button class="button primary" type="button" data-manual-import data-manual-agent="${esc(agent.id)}" data-manual-engine="${esc(engine)}">查看不可迁移原因</button>`
+              ? `<button class="button service-config" type="button" data-config="${esc(agent.id)}" data-engine="${esc(engine)}">查看配置</button><button class="button primary" type="button" data-manual-import data-manual-agent="${esc(agent.id)}" data-manual-engine="${esc(engine)}">查看不可迁移原因</button>`
               : existingPending
               ? `<button class="button primary" type="button" data-manual-import data-manual-agent="${esc(agent.id)}" data-manual-engine="${esc(engine)}">前往手动导入</button>`
               : drift
@@ -1327,25 +1327,17 @@ function updateAgentMetrics(item) {
     const existingUnsupportedReason = String(
       runtime.existing_config_unsupported_reason || "",
     );
-    if (card && card.dataset.coreInstalled !== (installed ? "1" : "0")) {
-      card.dataset.coreInstalled = installed ? "1" : "0";
+    // Structure transitions go through the interaction-aware, coalesced
+    // refresh path and must not commit the comparison marker first: if the
+    // render rejects, the next poll still sees the mismatch and retries
+    // instead of leaving the DOM permanently stale.
+    if (
+      card &&
+      (card.dataset.coreInstalled !== (installed ? "1" : "0") ||
+        card.dataset.existingPending !== (existingPending ? "1" : "0") ||
+        card.dataset.existingUnsupported !== existingUnsupportedReason)
+    ) {
       requestAgentStructureRefresh();
-      return;
-    }
-    if (
-      card &&
-      card.dataset.existingPending !== (existingPending ? "1" : "0")
-    ) {
-      card.dataset.existingPending = existingPending ? "1" : "0";
-      refreshAgentPage();
-      return;
-    }
-    if (
-      card &&
-      card.dataset.existingUnsupported !== existingUnsupportedReason
-    ) {
-      card.dataset.existingUnsupported = existingUnsupportedReason;
-      refreshAgentPage();
       return;
     }
     const version = root.querySelector(

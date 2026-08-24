@@ -4,6 +4,8 @@ package agent
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -221,6 +223,32 @@ func TestExistingSingBoxConfigDirectoryArgvDriftRollsBackPreparation(t *testing.
 	assertFileContentAndMode(t, fixture.managed.ConfigPath, fixture.originalManagedConfig, 0o600)
 	if _, err := os.Stat(fixture.managed.Binary); !os.IsNotExist(err) {
 		t.Fatalf("argv drift left managed binary: %v", err)
+	}
+}
+
+func TestExistingSingBoxOfficialWorkDirectoryDriftRejectsBeforeChanges(t *testing.T) {
+	requireAgentRoot(t)
+	fixture, content := configureSingBoxOfficialFixture(t, newExistingCoreMigrationFixture(t, false))
+	replacementWork := fixture.existing.WorkingDirectory + "-replacement"
+	drifted := systemdExecStart(fixture.existing.Binary,
+		fixture.existing.Binary+" -D "+replacementWork+" -C "+fixture.existing.ConfigDirectory+" run")
+	script := fmt.Sprintf("#!/bin/sh\nprintf '%%s\\n' %q > %q\nexit 0\n", drifted, filepath.Join(fixture.stateDirectory, fixture.existing.Service+".exec-start"))
+	if err := os.WriteFile(fixture.existing.Binary, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.executor.Execute(context.Background(), core.Task{
+		Action: core.ActionImportExisting, Engine: core.EngineSingBox, ConfigContent: content,
+	}); err == nil || !strings.Contains(err.Error(), "ExecStart no longer matches") {
+		t.Fatalf("official working-directory drift error = %v", err)
+	}
+	fixture.assertServiceState(t, "sing-box.service", "active", "enabled")
+	fixture.assertServiceState(t, "qagent-sing-box.service", "inactive", "disabled")
+	assertFileContentAndMode(t, fixture.managed.ConfigPath, fixture.originalManagedConfig, 0o600)
+	if _, err := os.Stat(fixture.managed.Binary); !os.IsNotExist(err) {
+		t.Fatalf("working-directory drift left managed binary: %v", err)
+	}
+	if _, err := os.Stat(coreMigrationMarkerPath(fixture.markerPrefix, core.EngineSingBox)); !os.IsNotExist(err) {
+		t.Fatalf("working-directory drift left marker: %v", err)
 	}
 }
 
@@ -537,19 +565,21 @@ func TestExistingCoreMigrationRejectsExecStartDriftDuringPreparation(t *testing.
 
 func TestExistingCoreMigrationAcceptsExactSupportedExecStartForms(t *testing.T) {
 	tests := []struct {
-		name            string
-		engine          core.Engine
-		binary          string
-		config          string
-		configDirectory string
-		serviceBinary   string
-		argv            string
+		name             string
+		engine           core.Engine
+		binary           string
+		config           string
+		configDirectory  string
+		workingDirectory string
+		serviceBinary    string
+		argv             string
 	}{
 		{name: "xray config", engine: core.EngineXray, binary: "/usr/bin/xray", config: "/etc/xray/config.json", argv: "/usr/bin/xray run -config /etc/xray/config.json"},
 		{name: "xray short config", engine: core.EngineXray, binary: "/usr/bin/xray", config: "/etc/xray/config.json", argv: "/usr/bin/xray run -c /etc/xray/config.json"},
 		{name: "sing-box config", engine: core.EngineSingBox, binary: "/usr/bin/sing-box", config: "/etc/sing-box/config.json", argv: "/usr/bin/sing-box run --config /etc/sing-box/config.json"},
 		{name: "sing-box short config", engine: core.EngineSingBox, binary: "/usr/bin/sing-box", config: "/etc/sing-box/config.json", argv: "/usr/bin/sing-box run -c /etc/sing-box/config.json"},
 		{name: "sing-box config directory", engine: core.EngineSingBox, binary: "/usr/lib/sing-box/sing-box", serviceBinary: "/usr/local/bin/sing-box", config: "/etc/sing-box/config.json", configDirectory: "/etc/sing-box/conf.d", argv: "/usr/local/bin/sing-box run -c /etc/sing-box/config.json -C /etc/sing-box/conf.d"},
+		{name: "sing-box official directory", engine: core.EngineSingBox, binary: "/usr/bin/sing-box", config: "/etc/sing-box/config.json", configDirectory: "/etc/sing-box", workingDirectory: "/var/lib/sing-box", argv: "/usr/bin/sing-box -D /var/lib/sing-box -C /etc/sing-box run"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -561,7 +591,7 @@ func TestExistingCoreMigrationAcceptsExactSupportedExecStartForms(t *testing.T) 
 			if err != nil {
 				t.Fatalf("parse exact ExecStart: %v", err)
 			}
-			existing := EngineSpec{Binary: test.binary, ServiceBinary: test.serviceBinary, ConfigPath: test.config, ConfigDirectory: test.configDirectory}
+			existing := EngineSpec{Binary: test.binary, ServiceBinary: test.serviceBinary, ConfigPath: test.config, ConfigDirectory: test.configDirectory, WorkingDirectory: test.workingDirectory}
 			if executable != serviceBinary || !supportedExistingExecStart(test.engine, existing, argv) {
 				t.Fatalf("exact ExecStart rejected: executable=%q argv=%q", executable, argv)
 			}
@@ -582,6 +612,124 @@ func TestExistingCoreSourceDigestKeepsDirectSingleFileCompatibility(t *testing.T
 	}
 }
 
+func TestCoreMigrationSourceDigestKeepsLegacyConfigDirectoryMarker(t *testing.T) {
+	legacy := EngineSpec{
+		Binary: "/usr/lib/sing-box/sing-box", ConfigPath: "/etc/sing-box/config.json",
+		ConfigDirectory: "/etc/sing-box/conf.d", ServiceBinary: "/usr/local/bin/sing-box",
+		Service: "sing-box.service",
+	}
+	// The pre-WorkingDirectory marker digest for a run -c FILE -C DIR mapping had
+	// exactly five NUL-separated fields and must remain byte-for-byte stable so
+	// an existing migrating/completed marker still matches after upgrade.
+	oldSource := legacy.Binary + "\x00" + legacy.ConfigPath + "\x00" + legacy.ConfigDirectory +
+		"\x00" + legacy.ServiceBinary + "\x00" + legacy.Service
+	oldDigest := sha256.Sum256([]byte(oldSource))
+	if got := coreMigrationSourceDigest(legacy); got != hex.EncodeToString(oldDigest[:]) {
+		t.Fatalf("legacy config-directory digest changed: got %s want %s", got, hex.EncodeToString(oldDigest[:]))
+	}
+
+	official := legacy
+	official.WorkingDirectory = "/var/lib/sing-box"
+	if coreMigrationSourceDigest(official) == coreMigrationSourceDigest(legacy) {
+		t.Fatal("official working-directory mapping must be bound in the source digest")
+	}
+	drifted := official
+	drifted.WorkingDirectory = "/var/lib/sing-box-drifted"
+	if coreMigrationSourceDigest(drifted) == coreMigrationSourceDigest(official) {
+		t.Fatal("working-directory drift must change the source digest")
+	}
+}
+
+func TestCoreMigrationPreparedMarkerTracksManagedInitialStateAndReadsLegacy(t *testing.T) {
+	requireAgentRoot(t)
+	fixture := newExistingCoreMigrationFixture(t, false)
+	writeMigrationServiceState(t, fixture.stateDirectory, "qagent-xray.service", "active", "enabled")
+	record, err := prepareCoreMigrationFileRollback(
+		fixture.markerPrefix,
+		core.EngineXray,
+		fixture.existing,
+		fixture.managed,
+		coreMigrationRecord{
+			State: coreMigrationInProgress, ConfigDigest: coreMigrationConfigDigest(fixture.importedConfig),
+			SourceDigest: coreMigrationSourceDigest(fixture.existing), ExistingEnableState: "enabled",
+			ManagedEnableState: "enabled", ManagedInitialState: "active",
+		},
+	)
+	if err != nil {
+		t.Fatalf("write active managed prepared marker: %v", err)
+	}
+	if record.ManagedInitialState != "active" {
+		t.Fatalf("prepared record initial managed state = %q", record.ManagedInitialState)
+	}
+	readBack, err := readCoreMigrationRecord(fixture.markerPrefix, core.EngineXray)
+	if err != nil || readBack.ManagedInitialState != "active" {
+		t.Fatalf("read active managed prepared marker = %+v, %v", readBack, err)
+	}
+	if err := removeCoreMigrationMarker(fixture.markerPrefix, core.EngineXray); err != nil {
+		t.Fatal(err)
+	}
+	if err := cleanupCoreMigrationBackups(fixture.markerPrefix, core.EngineXray); err != nil {
+		t.Fatal(err)
+	}
+
+	stagedDigest, exists, err := protectedCoreMigrationFileDigest(fixture.existing.Binary, maxReleaseAssetSize)
+	if err != nil || !exists {
+		t.Fatalf("digest legacy staged binary: %q, %v, exists=%v", stagedDigest, err, exists)
+	}
+	legacyContents := fmt.Sprintf(
+		"migrating-v2 %s %s enabled disabled - - %s\n",
+		coreMigrationConfigDigest(fixture.importedConfig), coreMigrationSourceDigest(fixture.existing), stagedDigest,
+	)
+	if err := writeCoreMigrationMarkerContents(fixture.markerPrefix, core.EngineXray, legacyContents); err != nil {
+		t.Fatalf("write legacy prepared marker: %v", err)
+	}
+	legacy, err := readCoreMigrationRecord(fixture.markerPrefix, core.EngineXray)
+	if err != nil || legacy.ManagedInitialState != "inactive" || !legacy.HasFileRollback {
+		t.Fatalf("legacy prepared marker compatibility = %+v, %v", legacy, err)
+	}
+}
+
+func TestRefreshExistingCoreDiscoveryAcceptsLegacyCompletedMarker(t *testing.T) {
+	fixture := newExistingCoreMigrationFixture(t, false)
+	discoveryStatePath := filepath.Join(filepath.Dir(fixture.markerPrefix), "agent-state.json.existing-cores")
+	legacy := EngineSpec{
+		Binary: "/usr/lib/sing-box/sing-box", ConfigPath: "/etc/sing-box/config.json",
+		ConfigDirectory: "/etc/sing-box/conf.d", ServiceBinary: "/usr/local/bin/sing-box",
+		Service: "sing-box.service",
+	}
+	legacySource := legacy.Binary + "\x00" + legacy.ConfigPath + "\x00" + legacy.ConfigDirectory +
+		"\x00" + legacy.ServiceBinary + "\x00" + legacy.Service
+	legacyDigest := sha256.Sum256([]byte(legacySource))
+	configDigest := sha256.Sum256([]byte(`{"inbounds":[],"outbounds":[]}`))
+	if err := saveExistingCoreDiscoveryState(discoveryStatePath, existingCoreDiscoveryState{
+		Version: existingCoreDiscoveryStateVersion,
+		Specs: map[core.Engine]existingDiscoverySpec{
+			core.EngineSingBox: discoverySpecFromEngineSpec(legacy),
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(coreMigrationMarkerPath(fixture.markerPrefix, core.EngineSingBox), []byte(
+		"migrated "+hex.EncodeToString(configDigest[:])+" "+hex.EncodeToString(legacyDigest[:])+" enabled disabled\n",
+	), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	specs, issues, err := RefreshExistingCoreDiscovery(
+		context.Background(), discoveryStatePath, fixture.markerPrefix,
+		map[core.Engine]EngineSpec{core.EngineSingBox: fixture.managed},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("refresh discovery with legacy completed marker: %v", err)
+	}
+	if len(issues) != 0 {
+		t.Fatalf("legacy completed marker discovery issues = %+v", issues)
+	}
+	if got, ok := specs[core.EngineSingBox]; !ok || got != legacy {
+		t.Fatalf("legacy completed marker mapping = %+v, want %+v", specs[core.EngineSingBox], legacy)
+	}
+}
+
 func TestExistingCoreMigrationRejectsUnsupportedSingBoxConfigDirectoryArgv(t *testing.T) {
 	existing := EngineSpec{
 		Binary: "/usr/bin/sing-box", ConfigPath: "/etc/sing-box/config.json",
@@ -596,6 +744,32 @@ func TestExistingCoreMigrationRejectsUnsupportedSingBoxConfigDirectoryArgv(t *te
 		t.Run(name, func(t *testing.T) {
 			if supportedExistingExecStart(core.EngineSingBox, existing, argv) {
 				t.Fatalf("unsupported sing-box argv was accepted: %s", argv)
+			}
+		})
+	}
+}
+
+func TestExistingCoreMigrationRejectsUnsupportedSingBoxOfficialArgv(t *testing.T) {
+	existing := EngineSpec{
+		Binary: "/usr/bin/sing-box", ConfigPath: "/etc/sing-box/config.json",
+		ConfigDirectory: "/etc/sing-box", WorkingDirectory: "/var/lib/sing-box",
+	}
+	for name, argv := range map[string]string{
+		"missing run":         "/usr/bin/sing-box -D /var/lib/sing-box -C /etc/sing-box",
+		"missing directory":   "/usr/bin/sing-box -D /var/lib/sing-box run",
+		"missing config flag": "/usr/bin/sing-box -D /var/lib/sing-box -C run",
+		"duplicate directory": "/usr/bin/sing-box -D /var/lib/sing-box -C /etc/sing-box -C /etc/sing-box run",
+		"repeated working":    "/usr/bin/sing-box -D /var/lib/sing-box -D /var/lib/sing-box -C /etc/sing-box run",
+		"relative working":    "/usr/bin/sing-box -D var/lib/sing-box -C /etc/sing-box run",
+		"relative config":     "/usr/bin/sing-box -D /var/lib/sing-box -C etc/sing-box run",
+		"unknown flag":        "/usr/bin/sing-box -D /var/lib/sing-box -C /etc/sing-box run --verbose",
+		"extra argument":      "/usr/bin/sing-box -D /var/lib/sing-box -C /etc/sing-box run stop",
+		"workdir drift":       "/usr/bin/sing-box -D /var/lib/sing-box-drifted -C /etc/sing-box run",
+	} {
+		existing := existing
+		t.Run(name, func(t *testing.T) {
+			if supportedExistingExecStart(core.EngineSingBox, existing, argv) {
+				t.Fatalf("unsupported sing-box official argv was accepted: %s", argv)
 			}
 		})
 	}
@@ -847,6 +1021,26 @@ func TestExistingCoreReconcileRestoresOriginalAfterInterruptedStop(t *testing.T)
 	}
 }
 
+func TestExistingCoreReconcileRestoresOriginallyActiveManagedService(t *testing.T) {
+	requireAgentRoot(t)
+	fixture := newExistingCoreMigrationFixture(t, false)
+	writeMigrationServiceState(t, fixture.stateDirectory, "xray.service", "active", "enabled")
+	writeMigrationServiceState(t, fixture.stateDirectory, "qagent-xray.service", "active", "enabled")
+	prepareAndStageMigrationFixtureWithManagedState(t, fixture, "enabled", "enabled", "active")
+	if err := fixture.executor.ReconcileExistingCoreServices(context.Background()); err != nil {
+		t.Fatalf("reconcile active managed service: %v", err)
+	}
+	fixture.assertServiceState(t, "xray.service", "active", "enabled")
+	fixture.assertServiceState(t, "qagent-xray.service", "active", "enabled")
+	assertFileContentAndMode(t, fixture.managed.ConfigPath, fixture.originalManagedConfig, 0o600)
+	if _, err := os.Stat(fixture.managed.Binary); !os.IsNotExist(err) {
+		t.Fatalf("originally absent managed binary was not removed: %v", err)
+	}
+	if record, err := readCoreMigrationRecord(fixture.markerPrefix, core.EngineXray); err != nil || record.State != coreMigrationNone {
+		t.Fatalf("active managed recovery marker = %+v, %v", record, err)
+	}
+}
+
 func TestExistingCoreReconcileFinalizesStartedManagedService(t *testing.T) {
 	requireAgentRoot(t)
 	fixture := newExistingCoreMigrationFixture(t, false)
@@ -1015,6 +1209,10 @@ type existingCoreMigrationFixture struct {
 }
 
 func prepareAndStageMigrationFixture(t *testing.T, fixture existingCoreMigrationFixture, existingEnableState, managedEnableState string) coreMigrationRecord {
+	return prepareAndStageMigrationFixtureWithManagedState(t, fixture, existingEnableState, managedEnableState, "inactive")
+}
+
+func prepareAndStageMigrationFixtureWithManagedState(t *testing.T, fixture existingCoreMigrationFixture, existingEnableState, managedEnableState, managedInitialState string) coreMigrationRecord {
 	t.Helper()
 	record, err := prepareCoreMigrationFileRollback(
 		fixture.markerPrefix,
@@ -1025,6 +1223,7 @@ func prepareAndStageMigrationFixture(t *testing.T, fixture existingCoreMigration
 			State: coreMigrationInProgress, ConfigDigest: coreMigrationConfigDigest(fixture.importedConfig),
 			SourceDigest:        coreMigrationSourceDigest(fixture.existing),
 			ExistingEnableState: existingEnableState, ManagedEnableState: managedEnableState,
+			ManagedInitialState: managedInitialState,
 		},
 	)
 	if err != nil {
@@ -1072,6 +1271,44 @@ func configureSingBoxDirectoryFixture(t *testing.T, fixture existingCoreMigratio
 	fixture.executor.Specs = map[core.Engine]EngineSpec{core.EngineSingBox: fixture.managed}
 	fixture.executor.ExistingSpecs = map[core.Engine]EngineSpec{core.EngineSingBox: fixture.existing}
 	return fixture, content, overlay
+}
+
+func configureSingBoxOfficialFixture(t *testing.T, fixture existingCoreMigrationFixture) (existingCoreMigrationFixture, string) {
+	t.Helper()
+	baseDirectory := filepath.Dir(fixture.existing.ConfigPath)
+	workDirectory := filepath.Join(baseDirectory, "work")
+	configDirectory := filepath.Join(baseDirectory, "etc-sing-box")
+	for _, directory := range []string{workDirectory, configDirectory} {
+		if err := os.Mkdir(directory, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	officialConfig := filepath.Join(configDirectory, "config.json")
+	if err := os.WriteFile(officialConfig, []byte(`{"inbounds":[{"tag":"primary"}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(configDirectory, "10-outbounds.json"), []byte(`{"outbounds":[{"tag":"direct"}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writeMigrationServiceState(t, fixture.stateDirectory, "sing-box.service", "active", "enabled")
+	writeMigrationServiceState(t, fixture.stateDirectory, "qagent-sing-box.service", "inactive", "disabled")
+	fixture.existing.ConfigPath = officialConfig
+	fixture.existing.ConfigDirectory = configDirectory
+	fixture.existing.WorkingDirectory = workDirectory
+	fixture.existing.Service = "sing-box.service"
+	fixture.managed.Service = "qagent-sing-box.service"
+	writeMigrationExecStart(t, fixture.stateDirectory, fixture.existing.Service, systemdExecStart(
+		fixture.existing.Binary,
+		fixture.existing.Binary+" -D "+workDirectory+" -C "+configDirectory+" run",
+	))
+	content, _, err := readExistingConfigurationSources(fixture.existing)
+	if err != nil {
+		t.Fatalf("build merged official sing-box fixture: %v", err)
+	}
+	fixture.importedConfig = content
+	fixture.executor.Specs = map[core.Engine]EngineSpec{core.EngineSingBox: fixture.managed}
+	fixture.executor.ExistingSpecs = map[core.Engine]EngineSpec{core.EngineSingBox: fixture.existing}
+	return fixture, content
 }
 
 func newExistingCoreMigrationFixture(t *testing.T, failManagedStart bool) existingCoreMigrationFixture {

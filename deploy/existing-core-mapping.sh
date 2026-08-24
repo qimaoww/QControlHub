@@ -7,6 +7,7 @@ mapped_xray_service=""
 mapped_singbox_binary=""
 mapped_singbox_config=""
 mapped_singbox_config_directory=""
+mapped_singbox_work_directory=""
 mapped_singbox_service_binary=""
 mapped_singbox_service=""
 
@@ -291,20 +292,144 @@ service_uses_paths() {
   argv=$(printf '%s\n' "$parsed" | sed -n '2p')
   [ "$executable" = "$binary" ] || return 1
   matched_config_directory=""
-  case "$engine:$argv" in
-    "xray:$binary run -config $config"|"xray:$binary run -c $config"|\
-    "sing-box:$binary run -c $config"|"sing-box:$binary run --config $config") return 0 ;;
+  matched_work_directory=""
+  case "$engine" in
+    xray)
+      case "$argv" in
+        "$binary run -config $config"|"$binary run -c $config") return 0 ;;
+      esac
+      return 1
+      ;;
+    sing-box)
+      matched_config_path=""
+      matched_config_directory=""
+      singbox_config_path_from_argv "$binary" "$argv" || return 1
+      [ "$matched_config_path" = "$config" ] || return 1
+      if [ -n "$matched_config_directory" ]; then
+        protected_config_directory "$matched_config_directory" "$config" || return 1
+      fi
+      if [ -n "$matched_work_directory" ]; then
+        case "$matched_work_directory" in /*) ;; *) return 1 ;; esac
+        case "$matched_work_directory" in *[[:space:]]*) return 1 ;; esac
+      fi
+      return 0
+      ;;
   esac
-  if [ "$engine" = sing-box ]; then
-    prefix="$binary run -c $config -C "
-    case "$argv" in "$prefix"*) directory=${argv#"$prefix"} ;; *) return 1 ;; esac
-    case "$directory" in /*) ;; *) return 1 ;; esac
-    case "$directory" in *[[:space:]]*) return 1 ;; esac
-    protected_config_directory "$directory" "$config" || return 1
-    matched_config_directory=$directory
+  return 1
+}
+
+singbox_config_path_from_argv() {
+  binary=$1
+  argv=$2
+  matched_config_directory=""
+  matched_work_directory=""
+  set -- $argv
+  [ "$1" = "$binary" ] || return 1
+  shift
+  config_path=""
+  config_directory=""
+  case "$#" in
+    3)
+      [ "$1" = run ] || return 1
+      case "$2" in -c|--config) ;; *) return 1 ;; esac
+      config_path=$3
+      ;;
+    5)
+      if [ "$1" = run ] && { [ "$2" = "-c" ] || [ "$2" = "--config" ]; } && [ "$4" = "-C" ]; then
+        config_path=$3
+        config_directory=$5
+      elif [ "$1" = "-D" ] && [ "$3" = "-C" ] && [ "$5" = run ]; then
+        workdir=$2
+        config_directory=$4
+        case "$workdir" in /*) ;; *) return 1 ;; esac
+        config_path="$config_directory/config.json"
+        matched_work_directory=$workdir
+      else
+        return 1
+      fi
+      ;;
+    *) return 1 ;;
+  esac
+  case "$config_path" in /*) ;; *) return 1 ;; esac
+  case "$config_path" in *[[:space:]]*) return 1 ;; esac
+  if [ -n "$config_directory" ]; then
+    case "$config_directory" in /*) ;; *) return 1 ;; esac
+    case "$config_directory" in *[[:space:]]*) return 1 ;; esac
+    matched_config_directory=$config_directory
+  fi
+  matched_config_path=$config_path
+}
+
+qagent_core_service_is_safe_owned() {
+  engine=$1
+  if [ "${service_manager:-systemd}" = openrc ]; then
+    service="qagent-$engine"
+    expected_fragment=${2:-$openrc_init_root/$service}
+    [ -e "$expected_fragment" ] || return 0
+    [ ! -L "$expected_fragment" ] && [ -f "$expected_fragment" ] || return 1
+    protected_directory_chain "$openrc_init_root" || return 1
+    protected_regular_file "$expected_fragment" true || return 1
+    grep -q "^# QControlHub managed OpenRC service: $service$" "$expected_fragment" || return 1
     return 0
   fi
-  return 1
+  service="qagent-$engine.service"
+  expected_fragment=${2:-/etc/systemd/system/$service}
+  load_state=$(systemctl show "$service" --property=LoadState --value 2>/dev/null) || return 1
+  [ "$load_state" = not-found ] && return 0
+  [ "$load_state" = loaded ] || return 1
+  active_state=$(systemctl show "$service" --property=ActiveState --value 2>/dev/null) || return 1
+  case "$active_state" in active|inactive|failed) ;; *) return 1 ;; esac
+  fragment_path=$(systemctl show "$service" --property=FragmentPath --value 2>/dev/null) || return 1
+  [ "$fragment_path" = "$expected_fragment" ] || return 1
+  protected_regular_file "$fragment_path" false || return 1
+  case "$engine" in
+    xray)
+      expected_binary=$qagent_xray_binary
+      expected_config=$qagent_xray_config
+      expected_argv="$expected_binary run -config $expected_config"
+      expected_description='Xray core managed by QAgent'
+      ;;
+    sing-box)
+      expected_binary=$qagent_singbox_binary
+      expected_config=$qagent_singbox_config
+      expected_argv="$expected_binary run -c $expected_config"
+      expected_description='sing-box core managed by QAgent'
+      ;;
+    *) return 1 ;;
+  esac
+  [ "$(grep -c "^Description=$expected_description$" "$fragment_path")" -eq 1 ] || return 1
+  [ "$(grep -c '^User=qcontrolhub-core$' "$fragment_path")" -eq 1 ] || return 1
+  [ "$(grep -c '^Group=qcontrolhub-core$' "$fragment_path")" -eq 1 ] || return 1
+  [ "$(grep -c "^ExecStart=$expected_argv$" "$fragment_path")" -eq 1 ] || return 1
+  exec_start=$(systemctl show "$service" --property=ExecStart --value 2>/dev/null) || return 1
+  parsed=$(single_exec_start_argv "$exec_start") || return 1
+  parsed_executable=$(printf '%s\n' "$parsed" | sed -n '1p')
+  parsed_argv=$(printf '%s\n' "$parsed" | sed -n '2p')
+  [ "$parsed_executable" = "$expected_binary" ] || return 1
+  [ "$parsed_argv" = "$expected_argv" ] || return 1
+  [ "$(systemctl show "$service" --property=Description --value 2>/dev/null)" = "$expected_description" ] || return 1
+  [ "$(systemctl show "$service" --property=User --value 2>/dev/null)" = qcontrolhub-core ] || return 1
+  [ "$(systemctl show "$service" --property=Group --value 2>/dev/null)" = qcontrolhub-core ] || return 1
+  [ "$(systemctl show "$service" --property=Type --value 2>/dev/null)" = simple ] || return 1
+  [ "$(systemctl show "$service" --property=WorkingDirectory --value 2>/dev/null)" = "/var/lib/qcontrolhub-$engine" ] || return 1
+  for property in RootDirectory RootImage BindPaths BindReadOnlyPaths Environment EnvironmentFiles; do
+    [ -z "$(systemctl show "$service" --property="$property" --value 2>/dev/null)" ] || return 1
+  done
+  for hook in ExecCondition ExecStartPre ExecStartPost ExecReload ExecStop ExecStopPost; do
+    [ -z "$(systemctl show "$service" --property="$hook" --value 2>/dev/null)" ] || return 1
+  done
+  drop_in_paths=$(systemctl show "$service" --property=DropInPaths --value 2>/dev/null) || return 1
+  for drop_in in $drop_in_paths; do
+    case "$drop_in" in
+      */10-qcontrolhub-bind-low-ports.conf)
+        [ "$(cat "$drop_in" 2>/dev/null)" = "$(printf '%s\n' '[Service]' 'CapabilityBoundingSet=CAP_NET_BIND_SERVICE' 'AmbientCapabilities=CAP_NET_BIND_SERVICE')" ] || return 1
+        ;;
+      */20-qcontrolhub-volatile-logs.conf)
+        [ "$(cat "$drop_in" 2>/dev/null)" = "$(printf '%s\n' '[Service]' 'LogNamespace=qagent-cores' 'StandardOutput=journal' 'StandardError=journal')" ] || return 1
+        ;;
+      *) return 1 ;;
+    esac
+  done
 }
 
 qagent_core_service_is_safe_to_disable() {
@@ -322,6 +447,7 @@ qagent_core_service_is_safe_to_disable() {
   fi
   service="qagent-$engine.service"
   expected_fragment=${2:-/etc/systemd/system/$service}
+  qagent_core_service_is_safe_owned "$engine" "$expected_fragment" || return 1
   load_state=$(systemctl show "$service" --property=LoadState --value 2>/dev/null) || return 1
   [ "$load_state" = not-found ] && return 0
   [ "$load_state" = loaded ] || return 1
@@ -346,8 +472,17 @@ require_skipped_core_service_inactive() {
   skip_core_service "$engine" || return 0
   if [ "${service_manager:-systemd}" = openrc ]; then service="qagent-$engine"; else service="qagent-$engine.service"; fi
   if service_is_active "$service"; then
-    printf '%s\n' "refusing to alter active $service while mapping another service" >&2
-    return 1
+    if [ -n "${2:-}" ]; then
+      qagent_core_service_is_safe_owned "$engine" "$2" || {
+        printf '%s\n' "refusing to alter active unrecognized $service while mapping another service" >&2
+        return 1
+      }
+    else
+      qagent_core_service_is_safe_owned "$engine" || {
+        printf '%s\n' "refusing to alter active unrecognized $service while mapping another service" >&2
+        return 1
+      }
+    fi
   fi
 }
 
@@ -356,7 +491,7 @@ disable_skipped_core_service() {
   if [ "${service_manager:-systemd}" = openrc ]; then
     expected_fragment=${2:-$openrc_init_root/qagent-$engine}
     service="qagent-$engine"
-    require_skipped_core_service_inactive "$engine" || return 1
+    require_skipped_core_service_inactive "$engine" "$expected_fragment" || return 1
     qagent_core_service_is_safe_to_disable "$engine" "$expected_fragment" || {
       printf '%s\n' "refusing to disable an unrecognized $service" >&2
       return 1
@@ -376,12 +511,16 @@ disable_skipped_core_service() {
         return 1
       }
     done
-    require_skipped_core_service_inactive "$engine"
+    require_skipped_core_service_inactive "$engine" "$expected_fragment"
     return
   fi
   expected_fragment=${2:-/etc/systemd/system/qagent-$engine.service}
   service="qagent-$engine.service"
-  require_skipped_core_service_inactive "$engine" || return 1
+  require_skipped_core_service_inactive "$engine" "$expected_fragment" || return 1
+  if systemctl is-active --quiet "$service" 2>/dev/null; then
+    printf '%s\n' "kept safely owned active $service pending explicit import" >&2
+    return 0
+  fi
   qagent_core_service_is_safe_to_disable "$engine" "$expected_fragment" || {
     printf '%s\n' "refusing to disable an unrecognized $service" >&2
     return 1
@@ -399,7 +538,7 @@ disable_skipped_core_service() {
     printf '%s\n' "$service remains enabled after disable (state: ${enable_state:-unknown})" >&2
     return 1
   }
-  require_skipped_core_service_inactive "$engine"
+  require_skipped_core_service_inactive "$engine" "$expected_fragment"
 }
 
 find_single_active_service() {
@@ -448,7 +587,8 @@ inspect_existing_candidate() {
       ;;
     sing-box)
       QCH_SERVICE_MANAGER=${service_manager:-systemd} QCH_SING_BOX_BINARY=$binary QCH_SING_BOX_CONFIG=$config \
-        QCH_SING_BOX_CONFIG_DIRECTORY=${4:-} QCH_SING_BOX_SERVICE_BINARY=${5:-$binary} \
+        QCH_SING_BOX_CONFIG_DIRECTORY=${4:-} QCH_SING_BOX_WORK_DIRECTORY=${6:-} \
+        QCH_SING_BOX_SERVICE_BINARY=${5:-$binary} \
         "$work_dir/qagent" inspect-existing sing-box >/dev/null 2>&1
       ;;
     *) return 1 ;;
@@ -505,6 +645,7 @@ discover_existing_singbox() {
   found_binary=""
   found_config=""
   found_config_directory=""
+  found_work_directory=""
   found_service_binary=""
   found_service=""
   for service in "$active_service_candidate"; do
@@ -518,11 +659,13 @@ discover_existing_singbox() {
         [ "$(wc -c < "$config")" -le 2097152 ] || continue
         service_uses_paths "$service" "$service_binary" "$config" sing-box "$resolved_binary" || continue
         config_directory=$matched_config_directory
-        inspect_existing_candidate sing-box "$resolved_binary" "$config" "$config_directory" "$service_binary" || continue
+        work_directory=$matched_work_directory
+        inspect_existing_candidate sing-box "$resolved_binary" "$config" "$config_directory" "$service_binary" "$work_directory" || continue
         match_count=$((match_count + 1))
         found_binary=$resolved_binary
         found_config=$config
         found_config_directory=$config_directory
+        found_work_directory=$work_directory
         found_service_binary=$service_binary
         found_service=$service
       done
@@ -539,6 +682,7 @@ discover_existing_singbox() {
   mapped_singbox_binary=$found_binary
   mapped_singbox_config=$found_config
   mapped_singbox_config_directory=$found_config_directory
+  mapped_singbox_work_directory=$found_work_directory
   mapped_singbox_service_binary=$found_service_binary
   mapped_singbox_service=$found_service
   mapped_engines=$(append_csv "$mapped_engines" sing-box)

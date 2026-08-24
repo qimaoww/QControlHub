@@ -50,24 +50,25 @@ type existingCoreDiscoveryState struct {
 }
 
 type existingDiscoverySpec struct {
-	Binary          string `json:"binary"`
-	ConfigPath      string `json:"config_path"`
-	ConfigDirectory string `json:"config_directory,omitempty"`
-	ServiceBinary   string `json:"service_binary,omitempty"`
-	Service         string `json:"service"`
+	Binary           string `json:"binary"`
+	ConfigPath       string `json:"config_path"`
+	ConfigDirectory  string `json:"config_directory,omitempty"`
+	WorkingDirectory string `json:"working_directory,omitempty"`
+	ServiceBinary    string `json:"service_binary,omitempty"`
+	Service          string `json:"service"`
 }
 
 func discoverySpecFromEngineSpec(spec EngineSpec) existingDiscoverySpec {
 	return existingDiscoverySpec{
 		Binary: spec.Binary, ConfigPath: spec.ConfigPath, ConfigDirectory: spec.ConfigDirectory,
-		ServiceBinary: spec.ServiceBinary, Service: spec.Service,
+		WorkingDirectory: spec.WorkingDirectory, ServiceBinary: spec.ServiceBinary, Service: spec.Service,
 	}
 }
 
 func (spec existingDiscoverySpec) engineSpec() EngineSpec {
 	return EngineSpec{
 		Binary: spec.Binary, ConfigPath: spec.ConfigPath, ConfigDirectory: spec.ConfigDirectory,
-		ServiceBinary: spec.ServiceBinary, Service: spec.Service,
+		WorkingDirectory: spec.WorkingDirectory, ServiceBinary: spec.ServiceBinary, Service: spec.Service,
 	}
 }
 
@@ -207,7 +208,7 @@ func discoverExistingCoreService(ctx context.Context, engine core.Engine, manage
 	if !stringInSlice(executable, candidates.executables) {
 		return EngineSpec{}, false, fmt.Sprintf("检测到活动的 %s 服务，但 executable 不在受支持的标准路径", engine)
 	}
-	configPath, configDirectory, ok := parseDiscoveredExistingArgv(engine, executable, argv, candidates.configs)
+	configPath, configDirectory, workDirectory, ok := parseDiscoveredExistingArgv(engine, executable, argv, candidates.configs)
 	if !ok {
 		return EngineSpec{}, false, fmt.Sprintf("检测到活动的 %s 服务，但 ExecStart 参数不属于受支持的精确配置形式", engine)
 	}
@@ -229,14 +230,15 @@ func discoverExistingCoreService(ctx context.Context, engine core.Engine, manage
 	}
 	spec := EngineSpec{
 		Binary: realBinary, ConfigPath: configPath, ConfigDirectory: configDirectory,
-		ServiceBinary: executable, Service: service,
+		WorkingDirectory: workDirectory, ServiceBinary: executable, Service: service,
 	}
 	return validateDiscoveredExistingSpec(ctx, engine, managed, spec, validationDirectory, manager)
 }
 
 func validateDiscoveredExistingSpec(ctx context.Context, engine core.Engine, managed, spec EngineSpec, validationDirectory string, manager *ServiceManager) (EngineSpec, bool, string) {
-	if err := validateManagedServiceForExistingDiscovery(ctx, engine, managed, manager); err != nil {
-		return EngineSpec{}, false, fmt.Sprintf("检测到活动的 %s 服务，但 QAgent 专用服务不是受支持的安全非活动服务", engine)
+	managedStatus, err := validateManagedServiceForExistingDiscovery(ctx, engine, managed, manager)
+	if err != nil {
+		return EngineSpec{}, false, fmt.Sprintf("检测到活动的 %s 服务，但 QAgent 专用服务不是受支持的安全 unit", engine)
 	}
 	if err := verifyExistingServiceMapping(ctx, engine, spec, manager); err != nil {
 		return EngineSpec{}, false, fmt.Sprintf("检测到活动的 %s 服务，但映射在核验期间发生变化", engine)
@@ -249,6 +251,10 @@ func validateDiscoveredExistingSpec(ctx context.Context, engine core.Engine, man
 	}
 	if err := verifyExistingServiceMapping(ctx, engine, spec, manager); err != nil {
 		return EngineSpec{}, false, fmt.Sprintf("检测到活动的 %s 服务，但映射在配置核验期间发生变化", engine)
+	}
+	managedStatusAfter, err := validateManagedServiceForExistingDiscovery(ctx, engine, managed, manager)
+	if err != nil || managedStatusAfter != managedStatus {
+		return EngineSpec{}, false, fmt.Sprintf("检测到活动的 %s 服务，但 QAgent 专用服务在配置核验期间发生变化", engine)
 	}
 	return spec, true, ""
 }
@@ -317,55 +323,200 @@ func parseDiscoveredOpenRCArgv(engine core.Engine, argv, configs []string) (stri
 	return "", "", false
 }
 
-func validateManagedServiceForExistingDiscovery(ctx context.Context, engine core.Engine, managed EngineSpec, managers ...*ServiceManager) error {
+func validateManagedServiceForExistingDiscovery(ctx context.Context, engine core.Engine, managed EngineSpec, managers ...*ServiceManager) (string, error) {
 	manager := selectedServiceManager(managers...)
 	defaultSpec, ok := DefaultSpecsForServiceManager(manager.Kind())[engine]
 	if !ok || managed != defaultSpec {
-		return errors.New("managed service mapping is not the QAgent default")
+		return "", errors.New("managed service mapping is not the QAgent default")
 	}
 	if manager.Kind() == ServiceManagerOpenRC {
 		status, err := serviceStatusWithManager(ctx, manager, managed.Service)
 		if err != nil || (status != "inactive" && status != "failed") {
-			return errors.New("managed OpenRC service is not inactive or failed")
+			return "", errors.New("managed OpenRC service is not inactive or failed")
 		}
 		marker := "# QControlHub managed OpenRC service: " + managed.Service
-		return validateOpenRCServiceScript(managed.Service, marker)
+		if err := validateOpenRCServiceScript(managed.Service, marker); err != nil {
+			return "", err
+		}
+		return status, nil
 	}
 	loadState, err := run(ctx, systemctlPath, "show", managed.Service, "--property=LoadState", "--value")
 	if err != nil || strings.TrimSpace(loadState) != "loaded" {
-		return errors.New("managed service unit is not loaded")
+		return "", errors.New("managed service unit is not loaded")
 	}
 	status, err := serviceStatusWithManager(ctx, manager, managed.Service)
-	if err != nil || (status != "inactive" && status != "failed") {
-		return errors.New("managed service is not inactive or failed")
+	if err != nil || (status != "active" && status != "inactive" && status != "failed") {
+		return "", errors.New("managed service has an unsupported state")
 	}
 	fragmentPath, err := run(ctx, systemctlPath, "show", managed.Service, "--property=FragmentPath", "--value")
 	expectedFragmentPath := filepath.Join(existingDiscoveryManagedUnitRoot, managed.Service)
 	if err != nil || strings.TrimSpace(fragmentPath) != expectedFragmentPath {
-		return errors.New("managed service fragment path is not the QAgent-owned location")
+		return "", errors.New("managed service fragment path is not the QAgent-owned location")
 	}
 	fragmentPath = strings.TrimSpace(fragmentPath)
 	if err := validateProtectedDirectoryChain(filepath.Dir(fragmentPath)); err != nil {
-		return err
+		return "", err
 	}
 	info, err := os.Lstat(fragmentPath)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() || info.Mode().Perm()&0o022 != 0 {
-		return errors.New("managed service unit file is unsafe")
+		return "", errors.New("managed service unit file is unsafe")
 	}
 	if err := validateOwner(info, "managed service unit file"); err != nil {
-		return err
+		return "", err
 	}
 	contents, err := os.ReadFile(fragmentPath)
 	if err != nil {
-		return err
+		return "", err
 	}
-	if !strings.Contains(string(contents), "Description="+engineDisplayName(engine)+" core managed by QAgent\n") {
-		return errors.New("managed service unit lacks the QAgent ownership marker")
+	if err := validateManagedUnitFragment(contents, engine, managed); err != nil {
+		return "", err
+	}
+	if err := validateManagedServiceExecutionContext(ctx, engine, managed); err != nil {
+		return "", err
+	}
+	if err := validateManagedUnitDropIns(ctx, managed.Service); err != nil {
+		return "", err
+	}
+	for property, expected := range map[string]string{"Description": engineDisplayName(engine) + " core managed by QAgent", "User": "qcontrolhub-core", "Group": "qcontrolhub-core"} {
+		value, err := systemdUnitProperty(ctx, managed.Service, property)
+		if err != nil || value != expected {
+			return "", fmt.Errorf("managed service effective %s is not %q", property, expected)
+		}
+	}
+	for _, property := range []string{"ExecCondition", "ExecStartPre", "ExecStartPost", "ExecReload", "ExecStop", "ExecStopPost"} {
+		value, err := systemdUnitProperty(ctx, managed.Service, property)
+		if err != nil || value != "" {
+			return "", fmt.Errorf("managed service has an unsupported effective %s hook", property)
+		}
+	}
+	execStart, err := run(ctx, systemctlPath, "show", managed.Service, "--property=ExecStart", "--value")
+	if err != nil {
+		return "", errors.New("managed service ExecStart cannot be read")
+	}
+	executable, argv, err := parseSingleSystemdExecStart(execStart)
+	if err != nil || !supportedManagedExecStart(engine, managed, executable, argv) {
+		return "", errors.New("managed service ExecStart is not the exact QAgent-owned command")
+	}
+	return status, nil
+}
+
+func managedCoreUnitLines(engine core.Engine, managed EngineSpec) []string {
+	addressFamilies := "AF_UNIX AF_INET AF_INET6"
+	documentation := "https://github.com/XTLS/Xray-core"
+	execStart := managed.Binary + " run -config " + managed.ConfigPath
+	if engine == core.EngineSingBox {
+		addressFamilies += " AF_NETLINK"
+		documentation = "https://github.com/SagerNet/sing-box"
+		execStart = managed.Binary + " run -c " + managed.ConfigPath
+	}
+	stateDirectory := "/var/lib/qcontrolhub-" + string(engine)
+	return []string{
+		"[Unit]", "Description=" + engineDisplayName(engine) + " core managed by QAgent",
+		"Documentation=" + documentation, "Wants=network-online.target", "After=network-online.target",
+		"ConditionFileIsExecutable=" + managed.Binary, "ConditionPathExists=" + managed.ConfigPath,
+		"[Service]", "Type=simple", "User=qcontrolhub-core", "Group=qcontrolhub-core",
+		"WorkingDirectory=" + stateDirectory, "StateDirectory=qcontrolhub-" + string(engine),
+		"StateDirectoryMode=0750", "UMask=0027", "ExecStart=" + execStart,
+		"LogNamespace=qagent-cores", "StandardOutput=journal", "StandardError=journal",
+		"Restart=on-failure", "RestartSec=3s", "TimeoutStopSec=20s", "NoNewPrivileges=true",
+		"CapabilityBoundingSet=CAP_NET_BIND_SERVICE", "AmbientCapabilities=CAP_NET_BIND_SERVICE",
+		"ProtectSystem=strict", "ProtectHome=true", "PrivateTmp=true", "PrivateDevices=true",
+		"ProtectKernelTunables=true", "ProtectKernelModules=true", "ProtectKernelLogs=true",
+		"ProtectControlGroups=true", "ProtectClock=true", "RestrictSUIDSGID=true",
+		"LockPersonality=true", "MemoryDenyWriteExecute=true", "RestrictNamespaces=true",
+		"RestrictRealtime=true", "RemoveIPC=true", "ProtectProc=invisible", "ProcSubset=pid",
+		"RestrictAddressFamilies=" + addressFamilies, "SystemCallArchitectures=native",
+		"ReadOnlyPaths=" + managed.Binary + " " + filepath.Dir(managed.ConfigPath),
+		"ReadWritePaths=" + stateDirectory, "[Install]", "WantedBy=multi-user.target",
+	}
+}
+
+func validateManagedUnitFragment(contents []byte, engine core.Engine, managed EngineSpec) error {
+	expected := managedCoreUnitLines(engine, managed)
+	actual := make([]string, 0, len(expected))
+	for _, rawLine := range strings.Split(strings.ReplaceAll(string(contents), "\r\n", "\n"), "\n") {
+		line := strings.TrimSuffix(rawLine, "\r")
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
+			continue
+		}
+		actual = append(actual, line)
+	}
+	if len(actual) != len(expected) {
+		return errors.New("managed service unit contains an unknown, missing, or duplicate directive")
+	}
+	for index := range expected {
+		if actual[index] != expected[index] {
+			return errors.New("managed service unit execution context is not the supported QAgent unit")
+		}
 	}
 	return nil
+}
+
+func validateManagedServiceExecutionContext(ctx context.Context, engine core.Engine, managed EngineSpec) error {
+	workingDirectory := "/var/lib/qcontrolhub-" + string(engine)
+	for property, expected := range map[string]string{
+		"Type": "simple", "WorkingDirectory": workingDirectory, "RootDirectory": "",
+		"RootImage": "", "BindPaths": "", "BindReadOnlyPaths": "", "Environment": "", "EnvironmentFiles": "",
+	} {
+		value, err := systemdUnitProperty(ctx, managed.Service, property)
+		if err != nil || value != expected {
+			return fmt.Errorf("managed service effective %s is not %q", property, expected)
+		}
+	}
+	return nil
+}
+
+func validateManagedUnitDropIns(ctx context.Context, service string) error {
+	dropInValue, err := systemdUnitProperty(ctx, service, "DropInPaths")
+	if err != nil {
+		return fmt.Errorf("managed service effective DropInPaths cannot be read: %w", err)
+	}
+	allowed := map[string][]byte{
+		filepath.Join(existingDiscoveryManagedUnitRoot, service+".d", "10-qcontrolhub-bind-low-ports.conf"): []byte(managedCoreCapabilityDropIn),
+		filepath.Join(existingDiscoveryManagedUnitRoot, service+".d", "20-qcontrolhub-volatile-logs.conf"):  []byte(managedCoreLogDropIn),
+	}
+	for _, path := range strings.Fields(dropInValue) {
+		expected, ok := allowed[path]
+		if !ok {
+			return fmt.Errorf("managed service has an unknown drop-in %q", path)
+		}
+		if err := validateProtectedDirectoryChain(filepath.Dir(path)); err != nil {
+			return err
+		}
+		if err := validateManagedUnitFile(path); err != nil {
+			return err
+		}
+		contents, err := os.ReadFile(path)
+		if err != nil || string(contents) != string(expected) {
+			return fmt.Errorf("managed service drop-in %q is not project-managed", path)
+		}
+	}
+	return nil
+}
+
+func supportedManagedExecStart(engine core.Engine, managed EngineSpec, executable, argv string) bool {
+	if executable != managed.Binary {
+		return false
+	}
+	switch engine {
+	case core.EngineXray:
+		return argv == managed.Binary+" run -config "+managed.ConfigPath
+	case core.EngineSingBox:
+		return argv == managed.Binary+" run -c "+managed.ConfigPath
+	default:
+		return false
+	}
+}
+
+func systemdUnitProperty(ctx context.Context, service, property string) (string, error) {
+	output, err := run(ctx, systemctlPath, "show", service, "--property="+property, "--value")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(output), nil
 }
 
 func engineDisplayName(engine core.Engine) string {
@@ -379,27 +530,73 @@ func engineDisplayName(engine core.Engine) string {
 	}
 }
 
-func parseDiscoveredExistingArgv(engine core.Engine, executable, argv string, configs []string) (string, string, bool) {
-	for _, configPath := range configs {
-		switch engine {
-		case core.EngineXray:
+func parseDiscoveredExistingArgv(engine core.Engine, executable, argv string, configs []string) (string, string, string, bool) {
+	if engine == core.EngineXray {
+		for _, configPath := range configs {
 			if argv == executable+" run -config "+configPath || argv == executable+" run -c "+configPath {
-				return configPath, "", true
-			}
-		case core.EngineSingBox:
-			if argv == executable+" run -c "+configPath || argv == executable+" run --config "+configPath {
-				return configPath, "", true
-			}
-			prefix := executable + " run -c " + configPath + " -C "
-			if strings.HasPrefix(argv, prefix) {
-				directory := strings.TrimPrefix(argv, prefix)
-				if filepath.IsAbs(directory) && directory != "" && !strings.ContainsAny(directory, " \t\r\n") {
-					return configPath, directory, true
-				}
+				return configPath, "", "", true
 			}
 		}
+		return "", "", "", false
 	}
-	return "", "", false
+	configPath, configDirectory, workDirectory, ok := parseSingBoxExistingArgv(executable, argv)
+	if !ok {
+		return "", "", "", false
+	}
+	for _, candidate := range configs {
+		if configPath == candidate {
+			return configPath, configDirectory, workDirectory, true
+		}
+	}
+	return "", "", "", false
+}
+
+// parseSingBoxExistingArgv recognizes the exact sing-box invocation shapes
+// that can be mapped safely. It supports the legacy run-then-flag forms
+// (run -c <file>, run --config <file>, run -c <file> -C <dir> and the
+// --config spelling of the same directory form) and the official package form
+// (-D <working-directory> -C <config-directory> run). Every path must be
+// absolute and free of whitespace, and the argument list must be exact;
+// unknown flags, repeated -D/-C, or an ambiguous relative path fail closed.
+func parseSingBoxExistingArgv(executable, argv string) (string, string, string, bool) {
+	fields := strings.Fields(argv)
+	if len(fields) < 2 || fields[0] != executable {
+		return "", "", "", false
+	}
+	args := fields[1:]
+	switch args[0] {
+	case "run":
+		if len(args) == 3 && (args[1] == "-c" || args[1] == "--config") {
+			configPath := args[2]
+			if !safeExistingAbsolutePath(configPath) {
+				return "", "", "", false
+			}
+			return configPath, "", "", true
+		}
+		if len(args) == 5 && (args[1] == "-c" || args[1] == "--config") && args[3] == "-C" {
+			configPath := args[2]
+			configDirectory := args[4]
+			if !safeExistingAbsolutePath(configPath) || !safeExistingAbsolutePath(configDirectory) {
+				return "", "", "", false
+			}
+			return configPath, configDirectory, "", true
+		}
+	case "-D":
+		if len(args) != 5 || args[2] != "-C" || args[4] != "run" {
+			return "", "", "", false
+		}
+		workDirectory := args[1]
+		configDirectory := args[3]
+		if !safeExistingAbsolutePath(workDirectory) || !safeExistingAbsolutePath(configDirectory) {
+			return "", "", "", false
+		}
+		return filepath.Join(configDirectory, "config.json"), configDirectory, workDirectory, true
+	}
+	return "", "", "", false
+}
+
+func safeExistingAbsolutePath(path string) bool {
+	return filepath.IsAbs(path) && path != "" && !strings.ContainsAny(path, " \t\r\n")
 }
 
 func resolveDiscoveredExistingBinary(serviceBinary string) (string, error) {
