@@ -88,6 +88,10 @@ Agent 使用 `/agent/v1/connect` 的长期 WSS 会话。Nginx 示例已转发 `U
 
 当前已认证 WSS 会话的首次完整心跳声明 `managed-public-ip-probe-v1` 后，控制面才以独立消息下发配置，并只接受该会话中已配置地址族的 `control-plane-config` 结果；旧 Agent、空 feature、metrics-only 首包和降级会话均不能继承历史能力或来源。Agent 对每族只使用一个端点，以 `tcp4`/`tcp6` 直连且不读取 `HTTP_PROXY`/`HTTPS_PROXY`，不跟随重定向；失败只清除该族旧值，不会改用另一信任锚或污染另一族。若同时配置 Agent 本机 `QCH_PUBLIC_IP_PROBE_*`，本机选择优先且控制面不能覆盖。
 
+### Managed public-IP probe disclosure
+
+By default, capable Agents receive `https://4.ident.me` and `https://6.ident.me` after the first complete capability-bearing heartbeat. Each family is probed by a direct `tcp4` or `tcp6` HTTPS connection, and only the single canonical address returned by that family-specific endpoint can be displayed. ident.me observes the node's public source address and may retain or sample source IP information for limited operational diagnostics and statistics; this product therefore makes no zero-logging claim. Operators who do not authorize public-echo traffic must set `QCH_AGENT_PUBLIC_IP_PROBE_ENABLED=false` (or `0`), which sends empty managed endpoints, prevents probing, and clears stale managed values. Explicit per-family endpoints remain supported and are not silently replaced by another service after failure.
+
 ## 4. 安装远程 Agent
 
 控制台生成的一键安装命令使用 POSIX `sh`。在 Alpine Linux 上，安装器会通过 `apk` 补齐 `ca-certificates`、`coreutils`、`curl`、`libcap`、`nftables` 与 `openrc`，自动写入 `/etc/init.d/qagent*`、`/etc/conf.d/qagent` 并加入 default runlevel；没有 `sudo` 的主机应先切换为 root。普通 systemd 主机继续使用原来的受限 unit。
