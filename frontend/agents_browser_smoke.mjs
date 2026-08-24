@@ -127,23 +127,15 @@ async function observeSmokeResult(webSocketURL) {
         evaluation = await Promise.race([
           send("Runtime.evaluate", {
             expression: `new Promise((resolve) => {
-          const read = () => {
-            const status = document.documentElement.dataset.browserSmoke;
-            if (!status) return false;
+          const timer = setInterval(() => {
+            const status = document.documentElement?.dataset.browserSmoke;
+            if (!status) return;
+            clearInterval(timer);
             resolve({
               status,
               detail: document.querySelector("#browser-smoke-result")?.textContent || "",
             });
-            return true;
-          };
-          if (!read()) {
-            new MutationObserver((observer) => {
-              if (read()) observer.disconnect();
-            }).observe(document.documentElement, {
-              attributes: true,
-              attributeFilter: ["data-browser-smoke"],
-            });
-          }
+          }, 10);
         })`,
             awaitPromise: true,
             returnByValue: true,
