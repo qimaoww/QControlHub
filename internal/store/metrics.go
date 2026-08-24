@@ -11,6 +11,7 @@ import (
 
 	"github.com/qimaoww/qcontrolhub/internal/authn"
 	"github.com/qimaoww/qcontrolhub/internal/core"
+	"github.com/qimaoww/qcontrolhub/internal/netpolicy"
 )
 
 const maxReportedMetricBytes = uint64(1 << 60)
@@ -98,6 +99,13 @@ func validateProbedPublicAddress(value *string, wantIPv4 bool) error {
 			return errors.New("agent reported a non-IPv4 public IPv4 address")
 		}
 		return errors.New("agent reported a non-IPv6 public IPv6 address")
+	}
+	if netpolicy.IsCloudflareAddress(address) {
+		// A relay can be globally routable but is not the Agent's egress. Clear
+		// it so callers retain the interface or verified-WSS fallback instead of
+		// rejecting the entire heartbeat/metrics update or surfacing the relay.
+		*value = ""
+		return nil
 	}
 	*value = normalized
 	return nil
