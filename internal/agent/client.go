@@ -184,7 +184,7 @@ func NewClient(config ClientConfig, executor *Executor) (*Client, error) {
 		websocketURL: websocketScheme + "://" + parsed.Host + "/agent/v1/connect",
 		metrics:      metricsCollector,
 		traffic:      NewTrafficManager(config.StatePath),
-		logs:         NewCoreLogCollectorForServiceManager(executor.serviceManager(), executor.Specs, executor.ExistingSpecs),
+		logs:         NewCoreLogCollectorForExecutor(executor),
 		publicIP:     publicIP,
 		http: &http.Client{
 			Transport: transport,
@@ -438,6 +438,14 @@ func (c *Client) queueHeartbeat(ctx context.Context, outgoing chan<- core.WireMe
 	runtimeContext, cancel := context.WithTimeout(ctx, 10*time.Second)
 	runtimeState := c.executor.Runtime(runtimeContext)
 	cancel()
+	if c.logs != nil {
+		for engine, logState := range c.logs.Status() {
+			state := runtimeState[engine]
+			state.CoreLogStatus = logState.Status
+			state.CoreLogError = logState.Error
+			runtimeState[engine] = state
+		}
+	}
 	metrics, metricsErr := c.metrics.Collect(ctx)
 	if metricsErr != nil {
 		slog.Debug("host metrics collection was partial", "error", metricsErr)
@@ -490,6 +498,7 @@ func (c *Client) advertisedFeatures() []string {
 		core.AgentFeatureSelfUpgrade,
 		core.AgentFeaturePortTraffic,
 		core.AgentFeatureCoreLogs,
+		core.AgentFeatureCoreLogStatus,
 		core.AgentFeatureMihomoDevelopmentSource,
 	}
 	if c.publicIP != nil {
@@ -513,6 +522,11 @@ func (c *Client) executeTaskForSession(executionContext, deliveryContext context
 
 func (c *Client) resultForTask(ctx context.Context, task core.Task) core.TaskResultRequest {
 	if cached, ok := c.cachedTaskResult(task); ok {
+		if c.logs != nil && cached.Success && task.Action == core.ActionImportExisting && task.Engine == core.EngineSingBox {
+			if err := c.logs.RefreshImportedSingBoxSource(c.executor); err != nil {
+				slog.Warn("refresh cached imported sing-box log source", "error", err)
+			}
+		}
 		slog.Info("returning cached task result", "task_id", task.ID)
 		return cached
 	}
@@ -556,6 +570,11 @@ func (c *Client) resultForTask(ctx context.Context, task core.Task) core.TaskRes
 			execute = c.executor.Execute
 		}
 		output, executionErr = execute(ctx, task)
+	}
+	if c.logs != nil && executionErr == nil && task.Action == core.ActionImportExisting && task.Engine == core.EngineSingBox {
+		if err := c.logs.RefreshImportedSingBoxSource(c.executor); err != nil {
+			slog.Warn("refresh imported sing-box log source", "error", err)
+		}
 	}
 	result := core.TaskResultRequest{
 		LeaseID: task.LeaseID, Success: executionErr == nil, Output: output,

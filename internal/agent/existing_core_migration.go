@@ -944,7 +944,7 @@ func (e *Executor) importExistingConfig(ctx context.Context, engine core.Engine,
 
 	validationSpec := managed
 	validationSpec.Binary = existing.Binary
-	if _, err := e.validate(ctx, engine, validationSpec, content); err != nil {
+	if _, err := e.validateImportedSnapshot(ctx, engine, validationSpec, content); err != nil {
 		return "", fmt.Errorf("existing %s configuration is not safe for managed deployment: %w", engine, err)
 	}
 	configDigest := coreMigrationConfigDigest(content)
@@ -1000,7 +1000,7 @@ func (e *Executor) importExistingConfig(ctx context.Context, engine core.Engine,
 	if _, err := copyExistingCoreBinary(existing.Binary, managed.Binary); err != nil {
 		return rollbackMigration(fmt.Errorf("copy existing %s binary into the QAgent namespace: %w", engine, err))
 	}
-	if _, err := e.validate(ctx, engine, managed, content); err != nil {
+	if _, err := e.validateImportedSnapshot(ctx, engine, managed, content); err != nil {
 		return rollbackMigration(fmt.Errorf("copied %s binary rejected the configuration: %w", engine, err))
 	}
 
@@ -1078,6 +1078,22 @@ func (e *Executor) importExistingConfig(ctx context.Context, engine core.Engine,
 	delete(e.ExistingSpecs, engine)
 	e.specsMu.Unlock()
 	return fmt.Sprintf("imported %s configuration; stopped and disabled %s; started and enabled %s", engine, existing.Service, managed.Service), nil
+}
+
+func (e *Executor) validateImportedSnapshot(ctx context.Context, engine core.Engine, spec EngineSpec, content string) (string, error) {
+	if engine != core.EngineSingBox {
+		return e.validate(ctx, engine, spec, content)
+	}
+	output, disabled, err := singBoxLogOutput(content)
+	if err != nil {
+		return "", err
+	}
+	if !disabled && output != "" {
+		if _, err := importedSingBoxLogPath(output); err != nil {
+			return "", fmt.Errorf("imported sing-box log output is unsafe: %w", err)
+		}
+	}
+	return e.validateSnapshot(ctx, engine, spec, content)
 }
 
 func requireManagedServiceSafeInactive(ctx context.Context, engine core.Engine, managed EngineSpec, managers ...*ServiceManager) error {

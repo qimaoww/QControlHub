@@ -7,11 +7,157 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
+
+func TestImportedSingBoxLogSourceFollowsValidatedMigrationFile(t *testing.T) {
+	logRoot := t.TempDir()
+	previous := importedSingBoxLogRoot
+	importedSingBoxLogRoot = logRoot
+	t.Cleanup(func() { importedSingBoxLogRoot = previous })
+	configDirectory := t.TempDir()
+	configPath := filepath.Join(configDirectory, "config.json")
+	content := `{"log":{"level":"info","output":"runtime.log"},"inbounds":[],"outbounds":[]}`
+	if err := os.WriteFile(configPath, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	markerPrefix := filepath.Join(t.TempDir(), "migration")
+	if err := writeCoreMigrationMarker(markerPrefix, core.EngineSingBox, coreMigrationComplete,
+		coreMigrationConfigDigest(content), strings.Repeat("a", 64), "enabled", "disabled"); err != nil {
+		t.Fatal(err)
+	}
+	executor := &Executor{
+		Specs:                 map[core.Engine]EngineSpec{core.EngineSingBox: {ConfigPath: configPath}},
+		MigrationMarkerPrefix: markerPrefix,
+	}
+	collector := NewCoreLogCollectorForExecutor(executor)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { collector.Run(ctx); close(done) }()
+	path := filepath.Join(logRoot, "runtime.log")
+	time.Sleep(100 * time.Millisecond)
+	if err := os.WriteFile(path, []byte("2026-08-24 INFO imported start\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	entry, ok := waitForLine(t, collector, "2026-08-24 INFO imported start")
+	if !ok || entry.Engine != core.EngineSingBox || entry.Level != "info" {
+		t.Fatalf("imported log entry = %+v, ok=%v", entry, ok)
+	}
+	if err := os.Rename(path, path+".1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("2026-08-24 ERROR after rotate\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	entry, ok = waitForLine(t, collector, "2026-08-24 ERROR after rotate")
+	if !ok || entry.Level != "error" {
+		t.Fatalf("rotated imported log entry = %+v, ok=%v", entry, ok)
+	}
+	if err := os.Truncate(path, 0); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(1200 * time.Millisecond)
+	file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = file.WriteString("2026-08-24 WARN after truncate\n")
+	_ = file.Close()
+	entry, ok = waitForLine(t, collector, "2026-08-24 WARN after truncate")
+	if !ok || entry.Level != "warning" {
+		t.Fatalf("truncated imported log entry = %+v, ok=%v", entry, ok)
+	}
+	if err := os.WriteFile(configPath, []byte(`{"log":{"output":"other.log"},"inbounds":[],"outbounds":[]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) && collector.Status()[core.EngineSingBox].Status != "failed" {
+		time.Sleep(50 * time.Millisecond)
+	}
+	if status := collector.Status()[core.EngineSingBox]; status.Status != "failed" {
+		t.Fatalf("configuration drift status = %+v", status)
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("imported file collector leaked after cancellation")
+	}
+}
+
+func TestImportedSingBoxLogSourceFailsClosed(t *testing.T) {
+	logRoot := t.TempDir()
+	previous := importedSingBoxLogRoot
+	importedSingBoxLogRoot = logRoot
+	t.Cleanup(func() { importedSingBoxLogRoot = previous })
+	for _, output := range []string{"/etc/shadow", "../escape.log", logRoot, logRoot + "-other/log"} {
+		if path, err := importedSingBoxLogPath(output); err == nil {
+			t.Errorf("unsafe output %q resolved to %q", output, path)
+		}
+	}
+	path := filepath.Join(logRoot, "runtime.log")
+	if err := os.Symlink(filepath.Join(logRoot, "target.log"), path); err != nil {
+		t.Fatal(err)
+	}
+	source := coreLogFileSource{path: path, root: logRoot, engine: core.EngineSingBox, kind: "test"}
+	if file, err := openValidatedCoreLogFile(source); err == nil {
+		file.Close()
+		t.Fatal("symlinked imported log source was accepted")
+	}
+	_ = os.Remove(path)
+	if err := os.Mkdir(path, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if file, err := openValidatedCoreLogFile(source); err == nil {
+		file.Close()
+		t.Fatal("non-regular imported log source was accepted")
+	}
+	_ = os.Remove(path)
+	if err := os.WriteFile(path, []byte("unsafe\n"), 0o666); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0o666); err != nil {
+		t.Fatal(err)
+	}
+	if file, err := openValidatedCoreLogFile(source); err == nil {
+		file.Close()
+		t.Fatal("group/other-writable imported log source was accepted")
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(logRoot, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	if file, err := openValidatedCoreLogFile(source); err == nil {
+		file.Close()
+		t.Fatal("writable imported log source parent was accepted")
+	}
+}
+
+func TestImportedSingBoxSourceRegistrationIsConcurrentAndCancelable(t *testing.T) {
+	collector := NewCoreLogCollectorForServiceManager(defaultSystemdServiceManager(), map[core.Engine]EngineSpec{})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { collector.Run(ctx); close(done) }()
+	source := coreLogFileSource{path: filepath.Join(t.TempDir(), "missing.log"), root: t.TempDir(), engine: core.EngineSingBox, kind: "file"}
+	var group sync.WaitGroup
+	for range 16 {
+		group.Add(1)
+		go func() { defer group.Done(); collector.startFileSource(source) }()
+	}
+	group.Wait()
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("concurrent source cancellation leaked")
+	}
+}
 
 func TestDecodeJournalCoreLogMapsManagedUnitsAndPriorities(t *testing.T) {
 	t.Parallel()

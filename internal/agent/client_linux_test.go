@@ -161,6 +161,9 @@ func TestClientEnrollAdvertisesCoreLogsPerServiceManager(t *testing.T) {
 		if got := stringInSlice(core.AgentFeatureCoreLogs, captured.Features); got != wantsCoreLogs {
 			t.Fatalf("core-logs advertised = %v; want %v (features: %v)", got, wantsCoreLogs, captured.Features)
 		}
+		if got := stringInSlice(core.AgentFeatureCoreLogStatus, captured.Features); got != wantsCoreLogs {
+			t.Fatalf("core-log status advertised = %v; want %v (features: %v)", got, wantsCoreLogs, captured.Features)
+		}
 		if !stringInSlice(core.AgentFeatureSelfUpgrade, captured.Features) || !stringInSlice(core.AgentFeaturePortTraffic, captured.Features) {
 			t.Fatalf("self-upgrade or port-traffic feature missing: %v", captured.Features)
 		}
@@ -196,6 +199,9 @@ func TestClientHeartbeatAdvertisesCoreLogsPerServiceManager(t *testing.T) {
 		}
 		if got := stringInSlice(core.AgentFeatureCoreLogs, message.Heartbeat.Features); got != wantsCoreLogs {
 			t.Fatalf("heartbeat core-logs advertised = %v; want %v (features: %v)", got, wantsCoreLogs, message.Heartbeat.Features)
+		}
+		if got := stringInSlice(core.AgentFeatureCoreLogStatus, message.Heartbeat.Features); got != wantsCoreLogs {
+			t.Fatalf("heartbeat core-log status advertised = %v; want %v (features: %v)", got, wantsCoreLogs, message.Heartbeat.Features)
 		}
 		if !stringInSlice(core.AgentFeatureSelfUpgrade, message.Heartbeat.Features) || !stringInSlice(core.AgentFeaturePortTraffic, message.Heartbeat.Features) {
 			t.Fatalf("heartbeat self-upgrade or port-traffic feature missing: %v", message.Heartbeat.Features)

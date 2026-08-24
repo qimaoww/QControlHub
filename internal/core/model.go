@@ -28,6 +28,11 @@ const AgentFeaturePortTraffic = "port-traffic-v1"
 // control plane without persisting them on the node.
 const AgentFeatureCoreLogs = "core-logs-v1"
 
+// AgentFeatureCoreLogStatus identifies Agents that report the per-engine
+// health of their managed log source. Older Agents continue to stream logs,
+// but the panel cannot distinguish an idle source from a failed collector.
+const AgentFeatureCoreLogStatus = "core-log-status-v1"
+
 // AgentFeatureMihomoDevelopmentSource identifies Agents that understand the
 // negotiated Mihomo development source. Older Agents ignore an unknown
 // core_source field during JSON/WSS decoding and would silently fall back to
@@ -177,6 +182,8 @@ type RuntimeState struct {
 	ServiceStatus                   string `json:"service_status,omitempty"`
 	ExistingConfigAvailable         bool   `json:"existing_config_available,omitempty"`
 	ExistingConfigUnsupportedReason string `json:"existing_config_unsupported_reason,omitempty"`
+	CoreLogStatus                   string `json:"core_log_status,omitempty"`
+	CoreLogError                    string `json:"core_log_error,omitempty"`
 }
 
 type HostMetrics struct {

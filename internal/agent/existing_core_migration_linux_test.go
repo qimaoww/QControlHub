@@ -1255,7 +1255,7 @@ func configureSingBoxDirectoryFixture(t *testing.T, fixture existingCoreMigratio
 	if err := os.Mkdir(configDirectory, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(fixture.existing.ConfigPath, []byte(`{"inbounds":[{"tag":"primary"}]}`), 0o600); err != nil {
+	if err := os.WriteFile(fixture.existing.ConfigPath, []byte(`{"log":{"output":"runtime.log"},"inbounds":[{"tag":"primary"}]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	overlay := filepath.Join(configDirectory, "10-outbounds.json")

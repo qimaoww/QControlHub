@@ -2441,6 +2441,8 @@ try {
   let coreRenders = 0;
   let coreMarkup = "";
   let coreFailure = false;
+  let coreEntries = [{ id: 1, agent_id: "alpha", engine: "mihomo", level: "info", message: "ready", logged_at: "now" }];
+  let coreAgents = [{ id: "alpha", name: "Alpha" }];
   const coreState = {
     route: "core-logs",
     navigationEpoch: 1,
@@ -2457,9 +2459,8 @@ try {
       coreRequests += 1;
       if (path.startsWith("/core-logs?") && coreFailure)
         throw new Error("temporary log failure");
-      if (path.startsWith("/core-logs?"))
-        return [{ id: 1, agent_id: "alpha", engine: "mihomo", level: "info", message: "ready", logged_at: "now" }];
-      if (path === "/agents") return [{ id: "alpha", name: "Alpha" }];
+      if (path.startsWith("/core-logs?")) return coreEntries;
+      if (path === "/agents") return coreAgents;
       assert.fail(`unexpected core-log polling path ${path}`);
     },
     shell: (markup) => {
@@ -2496,6 +2497,34 @@ try {
   await recoveredCorePoll();
   assert.equal(coreRenders, 3, "log polling recovers without clearing state");
   assert.equal(coreTimers.size, 1);
+  coreEntries = [];
+  coreAgents = [{ id: "alpha", name: "Alpha", features: ["core-logs-v1", "core-log-status-v1"], runtime: { "sing-box": { core_log_status: "failed", core_log_error: "permission-denied" } } }];
+  coreState.data.coreLogFilters = { agent_id: "alpha", engine: "sing-box" };
+  await renderCoreLogs({ syncFilters: true });
+  assert.equal(coreMarkup.includes("日志采集失败"), true, "collector failures are distinct from a genuinely empty stream");
+  coreAgents = [{ id: "alpha", name: "Alpha", features: [], runtime: {} }];
+  await renderCoreLogs({ syncFilters: true });
+  assert.equal(coreMarkup.includes("此节点不支持集中日志"), true, "legacy unsupported Agents have a distinct empty state");
+
+  let deniedMarkup = "";
+  const renderDeniedCoreLogs = installCoreLogs({
+    state: { route: "core-logs", navigationEpoch: 1, data: {} },
+    engines: ["sing-box"],
+    can: () => false,
+    esc: (value) => String(value ?? ""),
+    engineName: (value) => value,
+    date: (value) => value,
+    api: async () => {
+      const error = new Error("forbidden");
+      error.status = 403;
+      throw error;
+    },
+    shell: (markup) => { deniedMarkup = markup; },
+    setTimer: () => 1,
+    clearTimer: () => {},
+  });
+  await renderDeniedCoreLogs();
+  assert.equal(deniedMarkup.includes("无权查看内核日志"), true, "permission failures have a distinct initial state");
 
   const trafficTimers = new Map();
   let nextTrafficTimer = 1;
