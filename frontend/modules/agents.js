@@ -138,6 +138,62 @@ function ipv6PrefixMatches(bytes, prefix) {
   return true;
 }
 
+// Cloudflare edge addresses are relay hops, not an Agent egress address. Keep
+// this list aligned with the backend netpolicy CIDRs so stale observations are
+// fail-closed in the dashboard as well as at ingestion time.
+const cloudflareIPv4Prefixes = [
+  { bytes: [103, 21, 244, 0], bits: 22 },
+  { bytes: [103, 22, 200, 0], bits: 22 },
+  { bytes: [103, 31, 4, 0], bits: 22 },
+  { bytes: [104, 16, 0, 0], bits: 13 },
+  { bytes: [104, 24, 0, 0], bits: 14 },
+  { bytes: [108, 162, 192, 0], bits: 18 },
+  { bytes: [131, 0, 72, 0], bits: 22 },
+  { bytes: [141, 101, 64, 0], bits: 18 },
+  { bytes: [162, 158, 0, 0], bits: 15 },
+  { bytes: [172, 64, 0, 0], bits: 13 },
+  { bytes: [173, 245, 48, 0], bits: 20 },
+  { bytes: [188, 114, 96, 0], bits: 20 },
+  { bytes: [190, 93, 240, 0], bits: 20 },
+  { bytes: [197, 234, 240, 0], bits: 22 },
+  { bytes: [198, 41, 128, 0], bits: 17 },
+];
+
+const cloudflareIPv6Prefixes = [
+  { bytes: [0x24, 0x00, 0xcb, 0x00], bits: 32 },
+  { bytes: [0x26, 0x06, 0x47, 0x00], bits: 32 },
+  { bytes: [0x28, 0x03, 0xf8, 0x00], bits: 32 },
+  { bytes: [0x24, 0x05, 0xb5, 0x00], bits: 32 },
+  { bytes: [0x24, 0x05, 0x81, 0x00], bits: 32 },
+  { bytes: [0x2a, 0x06, 0x98, 0xc0], bits: 29 },
+  { bytes: [0x2c, 0x0f, 0xf2, 0x48], bits: 32 },
+];
+
+function bytePrefixMatches(bytes, prefix) {
+  let remaining = prefix.bits;
+  for (let index = 0; remaining > 0; index++) {
+    const significant = Math.min(remaining, 8);
+    const mask = (0xff << (8 - significant)) & 0xff;
+    if ((bytes[index] & mask) !== (prefix.bytes[index] & mask)) return false;
+    remaining -= significant;
+  }
+  return true;
+}
+
+function isCloudflareRelayNormalized(normalized) {
+  if (normalized.startsWith("IPv4:")) {
+    const bytes = parseCanonicalIPv4(normalized.slice(5));
+    return Boolean(
+      bytes && cloudflareIPv4Prefixes.some((prefix) => bytePrefixMatches(bytes, prefix)),
+    );
+  }
+  if (!normalized.startsWith("IPv6:")) return false;
+  const bytes = parseIPv6Bytes(normalized.slice(5));
+  return Boolean(
+    bytes && cloudflareIPv6Prefixes.some((prefix) => bytePrefixMatches(bytes, prefix)),
+  );
+}
+
 function isGloballyRoutableIPv6(value) {
   const bytes = parseIPv6Bytes(value);
   if (!bytes) return false;
@@ -233,7 +289,10 @@ function interfacePublicAddress(metrics, wantIPv4) {
 // connection source as a last resort. Hostnames and non-public labels remain
 // connection settings and are never inferred into an IP family.
 export function publicAddressRows(metrics = {}, labels = {}, features = []) {
-  const observed = normalizeInterfaceAddress(metrics.observed_public_ip || "");
+  const observedCandidate = normalizeInterfaceAddress(metrics.observed_public_ip || "");
+  const observed = isCloudflareRelayNormalized(observedCandidate)
+    ? ""
+    : observedCandidate;
   const observedIPv4 =
     observed.startsWith("IPv4:") && isGloballyRoutableNormalized(observed)
       ? observed.slice(5)
@@ -325,6 +384,7 @@ export function updatePublicIPDisplays(root, metrics, labels = {}, features = []
         : `.public-ip-row[data-ip-family="${row.cls}"]`;
       const line = container.querySelector(selector);
       if (!line) continue;
+      line.hidden = !row.value;
       if (line.dataset) line.dataset.ipSource = row.source;
       const code = line.querySelector("code");
       if (code) {
@@ -502,7 +562,7 @@ export function installAgents(ctx) {
     const value = row.value || "";
     const title = value ? `复制 ${row.label} 地址` : "暂无地址";
     const aria = `复制 ${row.label} 公网地址 ${value}`;
-    return `<span class="card-ip-row ${value ? "" : "empty"}" data-ip-family="${row.cls}" data-ip-source="${esc(row.source)}"><i class="ip-family ${row.cls}">${row.label}</i><code title="${esc(value)}">${esc(value || "未探测到")}</code><button type="button" class="card-ip-copy" data-copy-ip="${esc(value)}" aria-label="${esc(aria)}" title="${esc(title)}" ${value ? "" : "hidden"}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0 2 2v8a2 2 0 0 0 2 2h2"/><path class="copy-check" d="m9.5 13.5 2 2 4-4.5"/></svg></button></span>`;
+    return `<span class="card-ip-row ${value ? "" : "empty"}" data-ip-family="${row.cls}" data-ip-source="${esc(row.source)}" ${value ? "" : "hidden"}><i class="ip-family ${row.cls}">${row.label}</i><code title="${esc(value)}">${esc(value || "未探测到")}</code><button type="button" class="card-ip-copy" data-copy-ip="${esc(value)}" aria-label="${esc(aria)}" title="${esc(title)}" ${value ? "" : "hidden"}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0 2 2v8a2 2 0 0 0 2 2h2"/><path class="copy-check" d="m9.5 13.5 2 2 4-4.5"/></svg></button></span>`;
   };
   const metricsRefresh = createRefreshChannel({
     isCurrent: () => state.route === "node-settings",
@@ -767,7 +827,7 @@ async function nodeSettings(presetMode = false, { overview: preloadedOverview } 
           <div class="node-settings-panels">
             <section id="${esc(tabID("cores-panel"))}" class="node-tab-panel node-cores-panel" data-node-panel="cores" role="tabpanel" aria-labelledby="${esc(tabID("cores-tab"))}" ${activeTab === "cores" ? "" : "hidden"}><header class="node-panel-heading"><div><h3>内核管理</h3><small>服务状态与版本</small></div><span data-installed-summary>${installedCount ? `${installedCount} 个已安装` : "尚未安装内核"}</span></header><div class="core-runtime-list">${services}</div></section>
             <section id="${esc(tabID("metrics-panel"))}" class="node-tab-panel node-metrics-panel" data-node-panel="metrics" role="tabpanel" aria-labelledby="${esc(tabID("metrics-tab"))}" ${activeTab === "metrics" ? "" : "hidden"}><header class="node-panel-heading"><div><h3>流量趋势</h3><small>最近 24 小时</small></div><span data-metric-text="stamp">${metrics.collected_at ? `采集于 ${ago(metrics.collected_at)}` : "等待资源数据"}</span></header><section class="metric-trend-empty" data-metric-history="${esc(agent.id)}" aria-label="暂无指标趋势"><span>⌁</span><b>正在载入指标趋势</b><small>节点上报指标后显示最近 24 小时的上下行速率。</small></section></section>
-            <section id="${esc(tabID("agent-panel"))}" class="node-tab-panel node-agent-panel" data-node-panel="agent" role="tabpanel" aria-labelledby="${esc(tabID("agent-tab"))}" ${activeTab === "agent" ? "" : "hidden"}><header class="node-panel-heading"><div><h3>Agent 与身份</h3><small>注册信息和安全通道</small></div><span data-agent-version>${esc(agent.version || "未知")}</span></header><dl class="identity-list node-identity-list"><div><dt>节点 ID</dt><dd><code>${esc(agent.id)}</code></dd></div><div><dt>系统平台</dt><dd>${esc(agent.os)} / ${esc(agent.arch)}</dd></div><div><dt>Agent 版本</dt><dd data-agent-version>${esc(agent.version || "未知")}</dd></div><div><dt>注册时间</dt><dd>${date(agent.enrolled_at)}</dd></div><div><dt>安全通道</dt><dd>WSS · Ed25519 签名</dd></div></dl><section class="node-public-ips" aria-label="公网地址"><header><b>公网地址 · 双栈</b><small>手动设置优先 · 出口探测 · 默认路由接口 · 已验证连接来源</small><small class="node-address-note" data-node-connection-address ${connectionAddressNote ? "" : "hidden"}>${esc(connectionAddressNote)}</small></header>${addressRows.map((row) => `<div class="public-ip-row ${row.ok ? "" : "empty"}" data-ip-family="${row.cls}" data-ip-source="${esc(row.source)}"><span class="ip-family ${row.cls}">${row.label}</span><code>${esc(row.value || "未探测到")}</code><small>${esc(row.source)}</small></div>`).join("")}</section>${labels ? `<div class="labels">${labels}</div>` : ""}<footer class="node-identity-refresh"><span>节点身份已验证</span><div></div></footer>${can("agents.manage") ? `<section class="node-danger-zone"><span><b>删除节点</b><small>断开节点并清理关联配置；QAgent 不会被远程卸载。</small></span><button class="button small danger-button" type="button" data-delete="${esc(agent.id)}">删除节点</button></section>` : ""}</section>
+            <section id="${esc(tabID("agent-panel"))}" class="node-tab-panel node-agent-panel" data-node-panel="agent" role="tabpanel" aria-labelledby="${esc(tabID("agent-tab"))}" ${activeTab === "agent" ? "" : "hidden"}><header class="node-panel-heading"><div><h3>Agent 与身份</h3><small>注册信息和安全通道</small></div><span data-agent-version>${esc(agent.version || "未知")}</span></header><dl class="identity-list node-identity-list"><div><dt>节点 ID</dt><dd><code>${esc(agent.id)}</code></dd></div><div><dt>系统平台</dt><dd>${esc(agent.os)} / ${esc(agent.arch)}</dd></div><div><dt>Agent 版本</dt><dd data-agent-version>${esc(agent.version || "未知")}</dd></div><div><dt>注册时间</dt><dd>${date(agent.enrolled_at)}</dd></div><div><dt>安全通道</dt><dd>WSS · Ed25519 签名</dd></div></dl><section class="node-public-ips" aria-label="公网地址"><header><b>公网地址 · 双栈</b><small>手动设置优先 · 出口探测 · 默认路由接口 · 已验证连接来源</small><small class="node-address-note" data-node-connection-address ${connectionAddressNote ? "" : "hidden"}>${esc(connectionAddressNote)}</small></header>${addressRows.map((row) => `<div class="public-ip-row ${row.ok ? "" : "empty"}" data-ip-family="${row.cls}" data-ip-source="${esc(row.source)}" ${row.value ? "" : "hidden"}><span class="ip-family ${row.cls}">${row.label}</span><code>${esc(row.value || "未探测到")}</code><small>${esc(row.source)}</small></div>`).join("")}</section>${labels ? `<div class="labels">${labels}</div>` : ""}<footer class="node-identity-refresh"><span>节点身份已验证</span><div></div></footer>${can("agents.manage") ? `<section class="node-danger-zone"><span><b>删除节点</b><small>断开节点并清理关联配置；QAgent 不会被远程卸载。</small></span><button class="button small danger-button" type="button" data-delete="${esc(agent.id)}">删除节点</button></section>` : ""}</section>
           </div>
         </section>`;
       }

@@ -3526,6 +3526,26 @@ assert.equal(relayRows[0].source, "公网探测未启用 · 可手动设置");
 assert.equal(relayRows[0].ok, false);
 assert.equal(relayRows[1].value, "2606:4700:4700::1111");
 assert.equal(relayRows[1].source, "默认路由接口 eth0");
+
+for (const relayAddress of [
+  "104.22.17.83",
+  "172.69.135.152",
+  "162.158.193.59",
+  "172.64.217.32",
+  "172.71.124.82",
+  "172.68.225.178",
+]) {
+  const rows = publicAddressRows({ observed_public_ip: relayAddress });
+  assert.equal(rows[0].value, "", `Cloudflare relay ${relayAddress} must not be displayed`);
+  assert.equal(rows[0].ok, false, `Cloudflare relay ${relayAddress} must not be copyable`);
+}
+const mappedRelayRows = publicAddressRows({ observed_public_ip: "::ffff:172.69.135.152" });
+assert.equal(mappedRelayRows[0].value, "", "mapped Cloudflare relay must be filtered");
+const cloudflareIPv6Rows = publicAddressRows({ observed_public_ip: "2606:4700::1111" });
+assert.equal(cloudflareIPv6Rows[1].value, "", "Cloudflare IPv6 relay must be filtered");
+const realObservedRows = publicAddressRows({ observed_public_ip: "93.184.216.34" });
+assert.equal(realObservedRows[0].value, "93.184.216.34");
+assert.equal(realObservedRows[0].source, "已验证连接来源");
 assert.equal(relayRows[1].ok, true);
 
 // Interface fallback is strictly filtered: private, CGNAT, documentation and
@@ -3618,6 +3638,11 @@ assert.equal(staleSourceRows[1].ok, false);
     false,
     "card address size must not regress to 9px",
   );
+  assert.equal(
+    css.includes(".card-ip-row code{min-width:0;max-width:calc(100% - 72px);flex:0 1 auto"),
+    true,
+    "card copy control must stay next to the address",
+  );
 }
 
 assert.equal(
@@ -3642,6 +3667,7 @@ assert.equal(formatHostPort("", "443"), "");
     setAttribute() {},
   };
   const lineV4 = {
+    hidden: true,
     querySelector(sel) {
       if (sel === "code") return codeV4;
       if (sel === "[data-copy-ip]") return copyV4;
@@ -3663,6 +3689,7 @@ assert.equal(formatHostPort("", "443"), "");
     },
   };
   updatePublicIPDisplays(root, { public_ipv4: "198.35.26.10", public_ipv6: "" });
+  assert.equal(lineV4.hidden, false);
   assert.equal(codeV4.textContent, "198.35.26.10");
   assert.equal(copyV4.dataset.copyIp, "198.35.26.10");
   assert.equal(copyV4.hidden, false);
@@ -3672,6 +3699,7 @@ assert.equal(formatHostPort("", "443"), "");
   const code = { textContent: "" };
   const small = { textContent: "" };
   const line = {
+    hidden: true,
     querySelector(sel) {
       if (sel === "code") return code;
       if (sel === "small") return small;
@@ -3693,8 +3721,11 @@ assert.equal(formatHostPort("", "443"), "");
     },
   };
   updatePublicIPDisplays(root, { public_ipv6: "2606:4700:4700::1111" });
+  assert.equal(line.hidden, false);
   assert.equal(code.textContent, "2606:4700:4700::1111");
   assert.equal(small.textContent, "公网探测");
+  updatePublicIPDisplays(root, { public_ipv6: "" });
+  assert.equal(line.hidden, true, "undetected IPv6 row is hidden in place");
 }
 
 // Runtime smoke: a normal node-settings overview render must not throw
@@ -3795,6 +3826,11 @@ assert.equal(formatHostPort("", "443"), "");
     "node-settings card prints the probed IPv4 address",
   );
   assert.equal(
+    /class="card-ip-row empty"[^>]*hidden/.test(overviewMarkup),
+    true,
+    "node-settings card hides an unavailable address family",
+  );
+  assert.equal(
     overviewMarkup.includes("data-copy-ip"),
     true,
     "node-settings card keeps a copy button",
@@ -3871,6 +3907,7 @@ assert.equal(formatHostPort("", "443"), "");
     },
   };
   const cardLineV4 = {
+    hidden: false,
     dataset: {},
     querySelector(sel) {
       if (sel === "code") return cardCodeV4;
@@ -3888,6 +3925,7 @@ assert.equal(formatHostPort("", "443"), "");
   const publicCodeV4 = { textContent: "", title: "" };
   const publicSmallV4 = { textContent: "" };
   const publicLineV4 = {
+    hidden: false,
     dataset: {},
     querySelector(sel) {
       if (sel === "code") return publicCodeV4;
@@ -3965,6 +4003,7 @@ assert.equal(formatHostPort("", "443"), "");
     // The one in-place refresh must update the card text and hover title, the
     // copy target/title/aria, and the detail source, without replacing the DOM.
     assert.equal(cardCodeV4.textContent, "93.184.216.34");
+    assert.equal(cardLineV4.hidden, false);
     assert.equal(cardCodeV4.title, "93.184.216.34");
     assert.equal(cardLineV4.dataset.ipSource, "手动设置");
     assert.equal(copyV4.dataset.copyIp, "93.184.216.34");
@@ -3972,6 +4011,7 @@ assert.equal(formatHostPort("", "443"), "");
     assert.equal(copyV4.attrs["aria-label"], "复制 IPv4 公网地址 93.184.216.34");
     assert.equal(copyV4.hidden, false);
     assert.equal(publicCodeV4.textContent, "93.184.216.34");
+    assert.equal(publicLineV4.hidden, false);
     assert.equal(publicCodeV4.title, "93.184.216.34");
     assert.equal(publicLineV4.dataset.ipSource, "手动设置");
     assert.equal(publicSmallV4.textContent, "手动设置");

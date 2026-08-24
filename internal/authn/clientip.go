@@ -95,6 +95,12 @@ func VerifiedAgentPublicIP(request *http.Request, trustedProxies []*net.IPNet) s
 		return ""
 	}
 	if !ipTrusted(remote, trustedProxies) {
+		if address, ok := netip.AddrFromSlice(remote); ok && netpolicy.IsCloudflareAddress(address) {
+			// Cloudflare is a relay, not a directly authenticated Agent peer. It
+			// is intentionally not trusted unless its CIDRs were explicitly
+			// configured above, and its X-Forwarded-For must never be honored here.
+			return ""
+		}
 		// The direct peer is an untrusted public client. A forwarding header it
 		// sends is attacker-controlled and must never be honored.
 		return NormalizePublicIP(remote.String())
@@ -118,6 +124,12 @@ func VerifiedAgentPublicIP(request *http.Request, trustedProxies []*net.IPNet) s
 			continue
 		}
 		candidate = chain[index]
+		if address, ok := netip.AddrFromSlice(candidate); ok && netpolicy.IsCloudflareAddress(address) {
+			// An unconfigured relay in the right-edge chain cannot prove the
+			// Agent source. An explicitly configured Cloudflare CIDR is skipped
+			// above and may be stripped like any other trusted proxy.
+			return ""
+		}
 		for left := index - 1; left >= 0; left-- {
 			if !ipTrusted(chain[left], trustedProxies) {
 				return ""

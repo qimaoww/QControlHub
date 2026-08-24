@@ -143,7 +143,7 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 	if err := authn.SignRequest(handshake, nil, enrolled.AgentID, privateKey, time.Now().UTC()); err != nil {
 		t.Fatalf("sign WSS handshake: %v", err)
 	}
-	handshake.Header.Set("X-Forwarded-For", "2606:4700:4700:0:0:0:0:1111")
+	handshake.Header.Set("X-Forwarded-For", "2001:4860:4860:0:0:0:0:8888")
 	connection, dialResponse, err := websocket.Dial(ctx, websocketURL, &websocket.DialOptions{
 		HTTPHeader: handshake.Header, Subprotocols: []string{"qcontrolhub.agent.v1"},
 	})
@@ -162,7 +162,7 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 		t.Fatalf("hello traffic policies = %+v", hello.TrafficPolicies)
 	}
 	connectedAgent, err := dataStore.GetAgent(ctx, enrolled.AgentID)
-	if err != nil || connectedAgent.Metrics.ObservedPublicIP != "2606:4700:4700::1111" {
+	if err != nil || connectedAgent.Metrics.ObservedPublicIP != "2001:4860:4860::8888" {
 		t.Fatalf("trusted WSS public source was not normalized and stored: agent=%+v error=%v", connectedAgent, err)
 	}
 	periodStart, periodEnd, err := core.TrafficPeriodAt(trafficPolicy.CycleAnchor, trafficPolicy.Cycle, time.Now().UTC())
@@ -216,7 +216,7 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 			if pushed.Version != "test" || len(pushed.Features) == 0 {
 				t.Fatalf("metrics push clobbered heartbeat state: agent=%+v", pushed)
 			}
-			if pushed.Metrics.ObservedPublicIP != "2606:4700:4700::1111" || len(pushed.Metrics.NetworkInterfaces) != 1 || pushed.Metrics.NetworkInterfaces[0].Addresses[0] != "198.35.26.96" {
+			if pushed.Metrics.ObservedPublicIP != "2001:4860:4860::8888" || len(pushed.Metrics.NetworkInterfaces) != 1 || pushed.Metrics.NetworkInterfaces[0].Addresses[0] != "198.35.26.96" {
 				t.Fatalf("metrics push did not preserve server-observed and last usable address state: %+v", pushed.Metrics)
 			}
 			break
@@ -510,14 +510,17 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 	if candidates := clientAddressCandidates(fallbackAgent); err != nil || len(candidates) == 0 || candidates[0].address != "198.35.26.96" || candidates[0].source != "Agent 默认路由接口 eth0" {
 		t.Fatalf("unavailable public source did not retain the default-route fallback: candidates=%+v error=%v", candidates, err)
 	}
-	// An ambiguous proxy chain (a public relay with a real client to its left)
-	// must never be stored as the Agent address. Reconnecting through such a
-	// chain clears the stale observation instead of surfacing the relay.
+	// A direct Cloudflare edge observation must never be stored as the Agent
+	// address. Reconnecting through that relay clears the stale observation
+	// instead of surfacing the control-plane hop.
+	if err := dataStore.UpdateAgentObservedPublicIP(ctx, enrolled.AgentID, "93.184.216.34"); err != nil {
+		t.Fatalf("seed stale WSS public observation: %v", err)
+	}
 	ambiguousHandshake, _ := http.NewRequestWithContext(ctx, http.MethodGet, websocketURL, nil)
 	if err := authn.SignRequest(ambiguousHandshake, nil, enrolled.AgentID, privateKey, time.Now().UTC()); err != nil {
 		t.Fatalf("sign ambiguous WSS handshake: %v", err)
 	}
-	ambiguousHandshake.Header.Set("X-Forwarded-For", "93.184.216.34, 2400:cb00::1")
+	ambiguousHandshake.Header.Set("X-Forwarded-For", "172.69.135.152")
 	ambiguousConnection, ambiguousResponse, err := websocket.Dial(ctx, websocketURL, &websocket.DialOptions{
 		HTTPHeader: ambiguousHandshake.Header, Subprotocols: []string{"qcontrolhub.agent.v1"},
 	})

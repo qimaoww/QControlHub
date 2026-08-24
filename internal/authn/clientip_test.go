@@ -169,4 +169,40 @@ func TestVerifiedAgentPublicIPResolvesOnlyUnambiguousPublicClients(t *testing.T)
 	if got := VerifiedAgentPublicIP(malformed, proxies); got != "" {
 		t.Fatalf("malformed chain resolved as %q", got)
 	}
+
+	for _, relayAddress := range []string{
+		"104.22.17.83", "172.69.135.152", "162.158.193.59", "172.64.217.32",
+		"172.71.124.82", "172.68.225.178",
+	} {
+		relayPeer := httptest.NewRequest("GET", "https://qcontrolhub.example", nil)
+		relayPeer.RemoteAddr = relayAddress + ":443"
+		relayPeer.Header.Set("X-Forwarded-For", "93.184.216.34")
+		if got := VerifiedAgentPublicIP(relayPeer, proxies); got != "" {
+			t.Errorf("Cloudflare direct peer %s was stored as %q", relayAddress, got)
+		}
+	}
+
+	// An unconfigured Cloudflare edge at the right edge is not evidence of the
+	// Agent egress, even when the left side looks like a single public client.
+	for _, relayAddress := range []string{"172.69.135.152", "2606:4700::1111"} {
+		relayChain := httptest.NewRequest("GET", "https://qcontrolhub.example", nil)
+		relayChain.RemoteAddr = webProxy + ":443"
+		relayChain.Header.Set("X-Forwarded-For", "93.184.216.34, "+relayAddress)
+		if got := VerifiedAgentPublicIP(relayChain, proxies); got != "" {
+			t.Errorf("unconfigured Cloudflare chain %s was stored as %q", relayAddress, got)
+		}
+	}
+
+	// A configured edge may be stripped, but only the proven left client is
+	// accepted; configuration never turns the relay itself into the client.
+	configured, err := ParseTrustedProxies([]string{outerProxy + "/32", webProxy + "/32", "172.64.0.0/13"})
+	if err != nil {
+		t.Fatalf("ParseTrustedProxies() configured edge error = %v", err)
+	}
+	configuredChain := httptest.NewRequest("GET", "https://qcontrolhub.example", nil)
+	configuredChain.RemoteAddr = webProxy + ":443"
+	configuredChain.Header.Set("X-Forwarded-For", "93.184.216.34, 172.69.135.152")
+	if got := VerifiedAgentPublicIP(configuredChain, configured); got != "93.184.216.34" {
+		t.Fatalf("configured Cloudflare chain resolved as %q", got)
+	}
 }

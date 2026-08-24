@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/netip"
 	"sort"
 	"strings"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/authn"
 	"github.com/qimaoww/qcontrolhub/internal/configschema"
 	"github.com/qimaoww/qcontrolhub/internal/core"
+	"github.com/qimaoww/qcontrolhub/internal/netpolicy"
 	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
 	"github.com/qimaoww/qcontrolhub/internal/store"
 )
@@ -607,13 +609,16 @@ func clientAddressCandidates(agent core.Agent) []clientAddressCandidate {
 	// unambiguously, so it is a strictly verified fallback; an ambiguous chain
 	// clears the value on reconnect, never surfacing a relay as the node.
 	if address := authn.NormalizePublicIP(agent.Metrics.ObservedPublicIP); address != "" {
-		family := "IPv4"
-		if strings.Contains(address, ":") {
-			family = "IPv6"
-		}
-		if _, exists := seen[address]; !exists {
-			seen[address] = struct{}{}
-			result = append(result, clientAddressCandidate{address: address, source: "已验证连接来源 · " + family})
+		parsed, parseErr := netip.ParseAddr(address)
+		if parseErr == nil && !netpolicy.IsCloudflareAddress(parsed) {
+			family := "IPv4"
+			if strings.Contains(address, ":") {
+				family = "IPv6"
+			}
+			if _, exists := seen[address]; !exists {
+				seen[address] = struct{}{}
+				result = append(result, clientAddressCandidate{address: address, source: "已验证连接来源 · " + family})
+			}
 		}
 	}
 	return result

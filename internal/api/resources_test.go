@@ -40,9 +40,14 @@ func TestClientAddressCandidatesFollowManagedObservedAndInterfacePriority(t *tes
 		t.Fatalf("restored automatic candidates = %+v", candidates)
 	}
 
-	agent.Metrics.ObservedPublicIP = "2606:4700:4700::1111"
-	if changed := clientAddressCandidates(agent); len(changed) != 1 || changed[0].address != "2606:4700:4700::1111" || changed[0].source != "已验证连接来源 · IPv6" {
+	agent.Metrics.ObservedPublicIP = "2001:4860:4860::8888"
+	if changed := clientAddressCandidates(agent); len(changed) != 1 || changed[0].address != "2001:4860:4860::8888" || changed[0].source != "已验证连接来源 · IPv6" {
 		t.Fatalf("changed WSS source candidates = %+v", changed)
+	}
+
+	agent.Metrics.ObservedPublicIP = "172.69.135.152"
+	if candidates := clientAddressCandidates(agent); len(candidates) != 0 {
+		t.Fatalf("Cloudflare WSS relay surfaced as a client candidate = %+v", candidates)
 	}
 
 	// A private interface address must never become a node candidate.
