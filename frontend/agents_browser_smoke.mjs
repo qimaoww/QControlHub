@@ -217,7 +217,7 @@ async function runMode(mode) {
           reject(new Error(`Chrome ${mode} 提前退出（${status}）：${stderr}`)),
         );
       }),
-      delay(10000).then(() => {
+      delay(30000).then(() => {
         throw new Error(`Chrome ${mode} 调试端口启动超时：${stderr}`);
       }),
     ]);
