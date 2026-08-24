@@ -711,6 +711,7 @@ func TestAgentStructureRefreshDoesNotPrecommitComparisonMarkers(t *testing.T) {
 	body := content[start:end]
 	for _, required := range []string{
 		`requestAgentStructureRefresh();`,
+		`card?.dataset.runtimeStructure === "full"`,
 		`card.dataset.coreInstalled !== (installed ? "1" : "0")`,
 		`card.dataset.existingPending !== (existingPending ? "1" : "0")`,
 		`card.dataset.existingUnsupported !== existingUnsupportedReason`,

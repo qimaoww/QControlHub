@@ -1096,6 +1096,7 @@ const structureCards = {
   xray: new StructureElement(),
 };
 for (const card of Object.values(structureCards)) {
+  card.dataset.runtimeStructure = "full";
   card.dataset.coreInstalled = "0";
   card.dataset.existingPending = "0";
   card.dataset.existingUnsupported = "";
@@ -1249,6 +1250,40 @@ try {
   finishControlledRender(twoEngine);
   await flushMicrotasks();
   clearTimeout(structureState.agentPollTimer);
+
+  // Aggregate cards render compact core chips, not full service-card
+  // structure. Missing full-view markers on those chips must not turn every
+  // metrics poll into another page render.
+  structureRequests = 0;
+  structureRenders = 0;
+  controlledRender = null;
+  structurePayload = () => [
+    {
+      id: "alpha",
+      status: "online",
+      metrics: {},
+      capabilities: ["sing-box"],
+      runtime: {
+        "sing-box": { installed: false, service_status: "unknown" },
+      },
+    },
+  ];
+  delete structureCards["sing-box"].dataset.runtimeStructure;
+  delete structureCards["sing-box"].dataset.existingPending;
+  delete structureCards["sing-box"].dataset.existingUnsupported;
+  await pollAgentMetrics();
+  clearTimeout(structureState.agentPollTimer);
+  await flushMicrotasks();
+  assert.equal(
+    structureRequests,
+    1,
+    "a compact aggregate core chip keeps one bounded metrics request",
+  );
+  assert.equal(
+    structureRenders,
+    0,
+    "a compact aggregate core chip does not request a structural page render",
+  );
 } finally {
   if (structureDocument === undefined) delete globalThis.document;
   else globalThis.document = structureDocument;

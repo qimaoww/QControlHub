@@ -27,11 +27,14 @@ const onlineAgent = (id, features = ["agent-self-upgrade-v1"]) => ({
   arch: "amd64",
   status: "online",
   version: "1.2.3",
-  capabilities: ["mihomo"],
+  capabilities: ["mihomo", "sing-box"],
   features,
   labels: {},
   metrics: {},
-  runtime: { mihomo: { installed: true, service_status: "running" } },
+  runtime: {
+    mihomo: { installed: true, service_status: "running" },
+    "sing-box": { installed: false, service_status: "unknown" },
+  },
   last_seen: "2026-08-24T00:00:00Z",
   enrolled_at: "2026-08-24T00:00:00Z",
 });
@@ -359,6 +362,65 @@ async function testAdminRuntime() {
   assert.equal(rows.filter((row) => row.classList.contains("error")).length, 2);
   let retries = [...form.querySelectorAll("[data-batch-retry]")];
   assert.equal(retries.length, 2, "两个失败节点均应保留重试入口");
+  const batchPanel = form.closest("details");
+  const aggregateWorkspace = document.querySelector(".workspace-main");
+  const aggregateHash = location.hash;
+  batchPanel.open = true;
+  aggregateWorkspace.scrollTop = 43;
+  const aggregateScrollTop = aggregateWorkspace.scrollTop;
+  const callsFor = (path) =>
+    testAPI.calls.filter((call) => call.method === "GET" && call.path === path)
+      .length;
+  const agentPollsBefore = callsFor("/agents");
+  const overviewCallsBefore = callsFor("/overview");
+  const enrollmentCallsBefore = callsFor("/enrollment-tokens");
+  await delay(6500);
+  assert.ok(
+    callsFor("/agents") >= agentPollsBefore + 3,
+    "批量失败结果未经历三轮连续指标 poll",
+  );
+  assert.ok(
+    callsFor("/agents") <= agentPollsBefore + 4,
+    "连续指标 poll 请求失去边界",
+  );
+  assert.equal(
+    callsFor("/overview"),
+    overviewCallsBefore,
+    "指标 poll 不应重复加载 overview",
+  );
+  assert.equal(
+    callsFor("/enrollment-tokens"),
+    enrollmentCallsBefore,
+    "指标 poll 不应重复加载 enrollment history",
+  );
+  assert.equal(
+    document.querySelector("#batch-form"),
+    form,
+    "聚合 core chip 的连续 poll 不应替换批量表单",
+  );
+  assert.equal(batchPanel.open, true, "连续 poll 不应折叠批量区域");
+  assert.equal(location.hash, aggregateHash, "连续 poll 不应改变 route");
+  assert.equal(
+    aggregateWorkspace.scrollTop,
+    aggregateScrollTop,
+    "连续 poll 不应改变聚合页滚动位置",
+  );
+  assert.equal(
+    form.querySelector("[data-batch-results]").hidden,
+    false,
+    "连续 poll 不应隐藏批量结果",
+  );
+  assert.equal(
+    form.querySelectorAll(".batch-result-row.error").length,
+    2,
+    "连续 poll 后两个失败结果必须保留",
+  );
+  retries = [...form.querySelectorAll("[data-batch-retry]")];
+  assert.equal(retries.length, 2, "连续 poll 后两个 retry 必须保留");
+  assert.equal(count.textContent, "已选择 2 个节点 · 当前可选 2 个");
+  assert.equal(all.checked, true);
+  assert.equal(all.indeterminate, false);
+  assert.equal(all.getAttribute("aria-checked"), "true");
   retries[0].click();
   retries[1].click();
   form.requestSubmit(submit);
