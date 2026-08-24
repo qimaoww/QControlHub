@@ -804,11 +804,15 @@ func TestHeartbeatClearsStaleFeaturesWithPostgreSQL(t *testing.T) {
 	if err != nil || !containsFeature(current.Features, core.AgentFeatureMihomoDevelopmentSource) {
 		t.Fatalf("agent did not start advertising the source feature: %+v, %v", current.Features, err)
 	}
-	if err := dataStore.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{
+	if err := dataStore.HeartbeatWithPublicIPProbeTrust(ctx, agent.ID, core.HeartbeatRequest{
 		Version: "probe-v2", Features: []string{core.AgentFeatureManagedPublicIPProbe},
 		Metrics: &core.HostMetrics{PublicIPv4: "198.35.26.96", PublicIPv4Source: core.PublicIPProbeSourceControlPlane},
-	}); err != nil {
+	}, PublicIPProbeTrust{ControlPlaneIPv4: true}); err != nil {
 		t.Fatalf("store managed probe heartbeat: %v", err)
+	}
+	current, err = dataStore.GetAgent(ctx, agent.ID)
+	if err != nil || current.Metrics.PublicIPv4 != "198.35.26.96" || current.Metrics.PublicIPv4Source != core.PublicIPProbeSourceControlPlane {
+		t.Fatalf("trusted managed probe was not seeded: metrics=%+v, %v", current.Metrics, err)
 	}
 
 	// A complete heartbeat with an omitted/empty feature list must clear the

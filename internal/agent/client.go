@@ -284,7 +284,7 @@ func (c *Client) enroll(ctx context.Context, publicKey ed25519.PublicKey, privat
 func (c *Client) runWebSocket(ctx context.Context) error {
 	// A managed probe choice is scoped to the current authenticated WSS
 	// session. Clear it before reconnect so an older/downgraded control plane
-	// that omits the hello config cannot leave stale addresses behind. A local
+	// that omits the capability-gated config cannot leave stale addresses behind. A local
 	// Agent override is intentionally unaffected.
 	if err := c.publicIP.ApplyManagedConfig(core.PublicIPProbeConfig{}); err != nil {
 		return err
@@ -407,13 +407,16 @@ func (c *Client) runWebSocket(ctx context.Context) error {
 		case message := <-incoming:
 			switch message.Type {
 			case core.WireHello:
-				if message.PublicIPProbe != nil {
-					if err := c.publicIP.ApplyManagedConfig(*message.PublicIPProbe); err != nil {
-						return fmt.Errorf("control plane supplied invalid public IP probe configuration: %w", err)
-					}
-				}
 				if err := c.traffic.SetPolicies(sessionContext, message.TrafficPolicies, c.creds.AgentID); err != nil {
 					return fmt.Errorf("apply control-plane traffic policies: %w", err)
+				}
+				continue
+			case core.WirePublicIPProbe:
+				if message.PublicIPProbe == nil {
+					return errors.New("control plane returned an invalid public IP probe configuration")
+				}
+				if err := c.publicIP.ApplyManagedConfig(*message.PublicIPProbe); err != nil {
+					return fmt.Errorf("control plane supplied invalid public IP probe configuration: %w", err)
 				}
 				continue
 			case core.WireTask:

@@ -66,6 +66,15 @@ type Server struct {
 	auditWriter     func(context.Context, core.AuditLogEntry) error
 }
 
+func agentHasFeature(features []string, feature string) bool {
+	for _, candidate := range features {
+		if candidate == feature {
+			return true
+		}
+	}
+	return false
+}
+
 type tokenPrincipal struct {
 	Role        core.Role
 	Permissions []core.Permission
@@ -805,7 +814,7 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 		slog.Error("load agent traffic policies", "agent_id", id, "error", err)
 		return
 	}
-	if err := writeWire(ctx, connection, core.WireMessage{Type: core.WireHello, TrafficPolicies: trafficPolicies, PublicIPProbe: &s.publicIPProbe}); err != nil {
+	if err := writeWire(ctx, connection, core.WireMessage{Type: core.WireHello, TrafficPolicies: trafficPolicies}); err != nil {
 		return
 	}
 	taskTicker := time.NewTicker(2 * time.Second)
@@ -829,6 +838,16 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 	// unknown core_source. Once the heartbeat is committed, ClaimTask and
 	// RunningTask see the connection's real features and gate mirror work.
 	var heartbeatReceived bool
+	var managedPublicIPProbe bool
+	publicIPProbeTrust := func() store.PublicIPProbeTrust {
+		if !heartbeatReceived || !managedPublicIPProbe {
+			return store.PublicIPProbeTrust{}
+		}
+		return store.PublicIPProbeTrust{
+			ControlPlaneIPv4: strings.TrimSpace(s.publicIPProbe.IPv4Endpoint) != "",
+			ControlPlaneIPv6: strings.TrimSpace(s.publicIPProbe.IPv6Endpoint) != "",
+		}
+	}
 	resumeRunning := true
 	dispatchTask := func() error {
 		if inFlightTask != "" || !heartbeatReceived {
@@ -884,13 +903,30 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 				if message.Heartbeat.Metrics != nil {
 					message.Heartbeat.Metrics.ObservedPublicIP = observedPublicIP
 				}
-				if err := s.store.Heartbeat(ctx, id, *message.Heartbeat); err != nil {
+				reportedManagedPublicIPProbe := agentHasFeature(message.Heartbeat.Features, core.AgentFeatureManagedPublicIPProbe)
+				capabilityChanged := heartbeatReceived && reportedManagedPublicIPProbe != managedPublicIPProbe
+				trust := publicIPProbeTrust()
+				if !heartbeatReceived || capabilityChanged {
+					trust = store.PublicIPProbeTrust{}
+				}
+				if err := s.store.HeartbeatWithPublicIPProbeTrust(ctx, id, *message.Heartbeat, trust); err != nil {
 					slog.Error("store agent heartbeat", "agent_id", id, "error", err)
 					return
 				}
 				resetHeartbeatDeadline()
+				if capabilityChanged {
+					_ = connection.Close(websocket.StatusPolicyViolation, "agent features changed during session")
+					return
+				}
 				if !heartbeatReceived {
 					heartbeatReceived = true
+					managedPublicIPProbe = reportedManagedPublicIPProbe
+					if managedPublicIPProbe {
+						probeConfig := s.publicIPProbe
+						if err := writeWire(ctx, connection, core.WireMessage{Type: core.WirePublicIPProbe, PublicIPProbe: &probeConfig}); err != nil {
+							return
+						}
+					}
 					if err := dispatchTask(); err != nil {
 						slog.Error("dispatch after first heartbeat", "agent_id", id, "error", err)
 						return
@@ -902,7 +938,7 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 					return
 				}
 				message.Metrics.ObservedPublicIP = observedPublicIP
-				if err := s.store.UpdateAgentMetrics(ctx, id, *message.Metrics); err != nil {
+				if err := s.store.UpdateAgentMetricsWithPublicIPProbeTrust(ctx, id, *message.Metrics, publicIPProbeTrust()); err != nil {
 					slog.Error("store agent metrics", "agent_id", id, "error", err)
 					return
 				}

@@ -75,8 +75,8 @@ func normalizePublicIPProbeEvery(value time.Duration) time.Duration {
 
 // NewPublicIPProber builds a managed-capable prober from optional local
 // operator-supplied endpoints. No third-party service is filled by default;
-// empty lists keep the object idle until an authenticated WSS hello supplies
-// managed configuration. Probes use a direct connection so an operator proxy
+// empty lists keep the object idle until the authenticated WSS session supplies
+// capability-gated managed configuration. Probes use a direct connection so an operator proxy
 // can never turn a proxy egress address into a node address.
 func NewPublicIPProber(interval time.Duration, ipv4Endpoints, ipv6Endpoints []string) (*PublicIPProber, error) {
 	ipv4, err := singleProbeEndpoint(ipv4Endpoints)

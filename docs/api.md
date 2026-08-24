@@ -268,7 +268,7 @@ Agent 协议端点如下：
 | `POST` | `/agent/v1/enroll` | 注册 Bearer 令牌 |
 | `GET` | `/agent/v1/connect` | Agent 签名的 WebSocket Upgrade |
 
-WSS 握手必须协商子协议 `qcontrolhub.agent.v1`。服务端先发送 `hello`、该节点的端口流量策略及可选的运维方公网探针配置；只有声明 `managed-public-ip-probe-v1` 的新 Agent 会使用该附加字段，旧 Agent 忽略它。Agent 定期发送 `heartbeat`，心跳包含内核运行状态、主机资源以及端口配额的收发计数和封禁状态；`runtime.<engine>.existing_config_available` 表示已有服务可在手动配置页读取并迁移，`existing_config_unsupported_reason` 表示检测到已有服务但精确 argv、路径、歧义或 wrapper 安全边界不允许自动读取/接管，控制面只展示该原因并禁用相关操作。服务端下发带随机 lease ID 的 `task`，Agent 返回包含 `success` 和结果正文的 `result`，服务端确认 `result_ack`。连接压缩关闭，服务端要求 50 秒内收到消息，官方 Agent 默认每 15 秒心跳并在断线后指数退避重连。
+WSS 握手必须协商子协议 `qcontrolhub.agent.v1`。服务端先发送只含该节点端口流量策略的 `hello`；当前连接首次完整 `heartbeat` 声明 `managed-public-ip-probe-v1` 且成功持久化后，服务端才以独立的 `public_ip_probe` 消息下发运维方公网探针配置。服务端不会复用数据库中的历史 feature，并按当前会话与已配置地址族约束 `control-plane-config` 来源；空 feature、降级或重连会清除失效来源，旧 Agent 继续只使用本机显式端点。Agent 定期发送 `heartbeat`，心跳包含内核运行状态、主机资源以及端口配额的收发计数和封禁状态；`runtime.<engine>.existing_config_available` 表示已有服务可在手动配置页读取并迁移，`existing_config_unsupported_reason` 表示检测到已有服务但精确 argv、路径、歧义或 wrapper 安全边界不允许自动读取/接管，控制面只展示该原因并禁用相关操作。服务端下发带随机 lease ID 的 `task`，Agent 返回包含 `success` 和结果正文的 `result`，服务端确认 `result_ack`。连接压缩关闭，服务端要求 50 秒内收到消息，官方 Agent 默认每 15 秒心跳并在断线后指数退避重连。
 
 ## Webhook 事件
 

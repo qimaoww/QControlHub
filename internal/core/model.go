@@ -46,8 +46,8 @@ const AgentFeaturePublicIPProbe = "public-ip-probe-v1"
 
 // AgentFeatureManagedPublicIPProbe identifies Agents that can receive an
 // operator-supplied probe configuration over the authenticated WSS session.
-// Older Agents ignore the extra hello field and continue using only their
-// local opt-in configuration.
+// The control plane sends that configuration only after the current session's
+// first complete heartbeat advertises this feature.
 const AgentFeatureManagedPublicIPProbe = "managed-public-ip-probe-v1"
 
 const (
@@ -399,15 +399,16 @@ type TaskResultRequest struct {
 }
 
 const (
-	WireHello       = "hello"
-	WireHeartbeat   = "heartbeat"
-	WireMetrics     = "metrics"
-	WireTask        = "task"
-	WireResult      = "result"
-	WireResultAck   = "result_ack"
-	WireCoreLogs    = "core_logs"
-	WireCoreLogsAck = "core_logs_ack"
-	WireError       = "error"
+	WireHello         = "hello"
+	WirePublicIPProbe = "public_ip_probe"
+	WireHeartbeat     = "heartbeat"
+	WireMetrics       = "metrics"
+	WireTask          = "task"
+	WireResult        = "result"
+	WireResultAck     = "result_ack"
+	WireCoreLogs      = "core_logs"
+	WireCoreLogsAck   = "core_logs_ack"
+	WireError         = "error"
 )
 
 const (

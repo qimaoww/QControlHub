@@ -731,6 +731,13 @@ func (s *Store) CleanupExpiredEnrollmentTokens(ctx context.Context) (int64, erro
 // control plane would otherwise use to dispatch a mirror task. Metrics-only
 // refreshes go through UpdateAgentMetrics, which never touches features.
 func (s *Store) Heartbeat(ctx context.Context, id string, heartbeat core.HeartbeatRequest) error {
+	return s.HeartbeatWithPublicIPProbeTrust(ctx, id, heartbeat, PublicIPProbeTrust{})
+}
+
+// HeartbeatWithPublicIPProbeTrust records a complete heartbeat while binding
+// managed public-IP provenance to capability and configuration established by
+// the current authenticated WSS session.
+func (s *Store) HeartbeatWithPublicIPProbeTrust(ctx context.Context, id string, heartbeat core.HeartbeatRequest, trust PublicIPProbeTrust) error {
 	receivedAt := time.Now().UTC()
 	heartbeat.Version = strings.TrimSpace(heartbeat.Version)
 	if utf8.RuneCountInString(heartbeat.Version) > 100 {
@@ -739,6 +746,11 @@ func (s *Store) Heartbeat(ctx context.Context, id string, heartbeat core.Heartbe
 	runtimeState, err := json.Marshal(heartbeat.Runtime)
 	if err != nil {
 		return err
+	}
+	if heartbeat.Metrics != nil {
+		metrics := *heartbeat.Metrics
+		applyPublicIPProbeTrust(&metrics, trust)
+		heartbeat.Metrics = &metrics
 	}
 	metricsState, err := encodeHeartbeatMetrics(heartbeat.Metrics, receivedAt)
 	if err != nil {
@@ -773,6 +785,14 @@ func (s *Store) Heartbeat(ctx context.Context, id string, heartbeat core.Heartbe
 // high-frequency metrics pushes. The push proves liveness, so last_seen is
 // refreshed as well, while version, runtime, and features stay untouched.
 func (s *Store) UpdateAgentMetrics(ctx context.Context, id string, metrics core.HostMetrics) error {
+	return s.UpdateAgentMetricsWithPublicIPProbeTrust(ctx, id, metrics, PublicIPProbeTrust{})
+}
+
+// UpdateAgentMetricsWithPublicIPProbeTrust applies the same current-session
+// provenance constraint to metrics-only refreshes without changing persisted
+// features.
+func (s *Store) UpdateAgentMetricsWithPublicIPProbeTrust(ctx context.Context, id string, metrics core.HostMetrics, trust PublicIPProbeTrust) error {
+	applyPublicIPProbeTrust(&metrics, trust)
 	metricsState, err := encodeHeartbeatMetrics(&metrics, time.Now().UTC())
 	if err != nil {
 		return err
