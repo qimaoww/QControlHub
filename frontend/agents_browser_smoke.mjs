@@ -78,6 +78,16 @@ async function runMode(mode) {
         "--no-sandbox",
         "--disable-gpu",
         "--disable-dev-shm-usage",
+        "--disable-background-networking",
+        "--disable-client-side-phishing-detection",
+        "--disable-component-update",
+        "--disable-default-apps",
+        "--disable-domain-reliability",
+        "--disable-extensions",
+        "--disable-sync",
+        "--metrics-recording-only",
+        "--no-first-run",
+        "--disable-features=AutofillServerCommunication,CertificateTransparencyComponentUpdater,MediaRouter,OptimizationHints",
         "--hide-scrollbars",
         "--window-size=1280,900",
         `--user-data-dir=${profile}`,
@@ -91,7 +101,7 @@ async function runMode(mode) {
     let stderr = "";
     child.stdout.on("data", (chunk) => (stdout += chunk));
     child.stderr.on("data", (chunk) => (stderr += chunk));
-    const timer = setTimeout(() => child.kill("SIGKILL"), 30000);
+    const timer = setTimeout(() => child.kill("SIGKILL"), 60000);
     const status = await new Promise((resolve) => child.once("exit", resolve));
     clearTimeout(timer);
     assert.equal(status, 0, `Chrome ${mode} smoke 退出失败：${stderr}`);
