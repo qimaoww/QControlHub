@@ -919,7 +919,8 @@ func (e *Executor) importExistingConfig(ctx context.Context, engine core.Engine,
 	if err := verifyExistingServiceMapping(ctx, engine, existing, manager); err != nil {
 		return "", err
 	}
-	if err := requireManagedServiceSafeInactive(ctx, engine, managed, manager); err != nil {
+	managedInitialState, err := managedServiceInitialState(ctx, engine, managed, manager)
+	if err != nil {
 		return "", err
 	}
 	currentContent, err := e.readExistingConfig(ctx, engine, managed, existing)
@@ -946,10 +947,6 @@ func (e *Executor) importExistingConfig(ctx context.Context, engine core.Engine,
 	if _, err := e.validate(ctx, engine, validationSpec, content); err != nil {
 		return "", fmt.Errorf("existing %s configuration is not safe for managed deployment: %w", engine, err)
 	}
-	if err := requireManagedServiceSafeInactive(ctx, engine, managed, manager); err != nil {
-		return "", err
-	}
-
 	configDigest := coreMigrationConfigDigest(content)
 	sourceDigest := coreMigrationSourceDigest(existing)
 	migrationRecord, err := prepareCoreMigrationFileRollback(
@@ -960,6 +957,7 @@ func (e *Executor) importExistingConfig(ctx context.Context, engine core.Engine,
 		coreMigrationRecord{
 			State: coreMigrationInProgress, ConfigDigest: configDigest, SourceDigest: sourceDigest,
 			ExistingEnableState: existingEnableState, ManagedEnableState: managedEnableState,
+			ManagedInitialState: managedInitialState,
 		},
 	)
 	if err != nil {
@@ -979,6 +977,14 @@ func (e *Executor) importExistingConfig(ctx context.Context, engine core.Engine,
 			return "migration failed and rollback was incomplete", fmt.Errorf("%v; rollback: %w", cause, rollbackErr)
 		}
 		return "migration failed; original configuration, binary, and service were restored", cause
+	}
+	if managedInitialState == "active" {
+		if _, err := serviceCommandAndVerifyWithManager(ctx, manager, managed.Service, core.ActionStop); err != nil {
+			return rollbackMigration(fmt.Errorf("stop QAgent %s service before migration: %w", engine, err))
+		}
+		if err := waitForSingleMigrationServiceStable(ctx, managed.Service, "inactive", manager); err != nil {
+			return rollbackMigration(fmt.Errorf("confirm stopped QAgent %s service before migration: %w", engine, err))
+		}
 	}
 
 	if _, err := copyExistingCoreBinary(existing.Binary, managed.Binary); err != nil {
@@ -1080,6 +1086,33 @@ func requireManagedServiceSafeInactive(ctx context.Context, engine core.Engine, 
 		return fmt.Errorf("QAgent %s service must remain inactive or failed before migration (status %q); both services were left unchanged", engine, status)
 	}
 	return nil
+}
+
+// managedServiceInitialState is the migration task's explicit coordination
+// point: an active QAgent service is stopped by the protected import task,
+// recorded in the durable migration marker, and restored on every rollback.
+func managedServiceInitialState(ctx context.Context, engine core.Engine, managed EngineSpec, managers ...*ServiceManager) (string, error) {
+	manager := selectedServiceManager(managers...)
+	if manager.Kind() == ServiceManagerOpenRC {
+		marker := "# QControlHub managed OpenRC service: " + managed.Service
+		if err := validateOpenRCServiceScript(managed.Service, marker); err != nil {
+			return "", fmt.Errorf("QAgent %s OpenRC service script is unsafe: %w", engine, err)
+		}
+	}
+	status, err := serviceStatusWithManager(ctx, manager, managed.Service)
+	if err != nil {
+		return "", fmt.Errorf("query QAgent %s service before migration: %w", engine, err)
+	}
+	if status != "inactive" && status != "failed" && status != "active" {
+		return "", fmt.Errorf("QAgent %s service has unsupported status %q before migration; both services were left unchanged", engine, status)
+	}
+	if status == "active" {
+		if err := ensureManagedCoreServiceCapabilities(ctx, engine, managed, manager); err != nil {
+			return "", err
+		}
+		return "active", nil
+	}
+	return "inactive", nil
 }
 
 func copyExistingCoreBinary(source, destination string) (string, error) {

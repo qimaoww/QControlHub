@@ -275,24 +275,21 @@ func TestExistingCoreMigrationRestoresOriginalServiceWhenNewServiceFails(t *test
 	}
 }
 
-func TestExistingCoreMigrationRejectsActiveManagedServiceBeforeChanges(t *testing.T) {
+func TestExistingCoreMigrationCoordinatesActiveManagedService(t *testing.T) {
 	requireAgentRoot(t)
 	fixture := newExistingCoreMigrationFixture(t, false)
 	writeMigrationServiceState(t, fixture.stateDirectory, "qagent-xray.service", "active", "disabled")
-	if _, err := fixture.executor.Execute(context.Background(), core.Task{
+	output, err := fixture.executor.Execute(context.Background(), core.Task{
 		Action: core.ActionImportExisting, Engine: core.EngineXray, ConfigContent: fixture.importedConfig,
-	}); err == nil || !strings.Contains(err.Error(), `must remain inactive or failed`) || !strings.Contains(err.Error(), `status "active"`) {
-		t.Fatalf("active managed service error = %v", err)
+	})
+	if err != nil {
+		t.Fatalf("active managed service migration = %q, %v", output, err)
 	}
-	fixture.assertServiceState(t, "xray.service", "active", "enabled")
-	fixture.assertServiceState(t, "qagent-xray.service", "active", "disabled")
-	assertFileContentAndMode(t, fixture.managed.ConfigPath, fixture.originalManagedConfig, 0o600)
-	if _, err := os.Stat(fixture.managed.Binary); !os.IsNotExist(err) {
-		t.Fatalf("rejected migration installed managed binary: %v", err)
+	if !strings.Contains(output, "stopped and disabled") {
+		t.Fatalf("migration output did not describe coordinated stop: %q", output)
 	}
-	if _, err := os.Stat(coreMigrationMarkerPath(fixture.markerPrefix, core.EngineXray)); !os.IsNotExist(err) {
-		t.Fatalf("rejected migration left marker: %v", err)
-	}
+	fixture.assertServiceState(t, "xray.service", "inactive", "disabled")
+	fixture.assertServiceState(t, "qagent-xray.service", "active", "enabled")
 }
 
 func TestExistingCoreMigrationRejectsManagedTransientStatesBeforeChanges(t *testing.T) {
