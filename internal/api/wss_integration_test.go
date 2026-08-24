@@ -659,7 +659,7 @@ func TestWSSManagedPublicIPProbeUsesCurrentSessionCapabilityWithPostgreSQL(t *te
 	if err := wsjson.Read(ctx, connection, &probeConfig); err != nil {
 		t.Fatalf("read managed probe config: %v", err)
 	}
-	if probeConfig.Type != core.WirePublicIPProbe || probeConfig.PublicIPProbe == nil || probeConfig.PublicIPProbe.IPv4Endpoint != core.DefaultPublicIPProbeIPv4Endpoint || probeConfig.PublicIPProbe.IPv6Endpoint != core.DefaultPublicIPProbeIPv6Endpoint {
+	if probeConfig.Type != core.WirePublicIPProbe || probeConfig.PublicIPProbe == nil || probeConfig.PublicIPProbe.IPv4Endpoint != core.DefaultPublicIPProbeIPv4Endpoint || probeConfig.PublicIPProbe.IPv4FallbackEndpoint != core.DefaultPublicIPProbeIPv4Fallback || probeConfig.PublicIPProbe.IPv6Endpoint != core.DefaultPublicIPProbeIPv6Endpoint || probeConfig.PublicIPProbe.IPv6FallbackEndpoint != core.DefaultPublicIPProbeIPv6Fallback {
 		t.Fatalf("managed probe message = %+v", probeConfig)
 	}
 	waitRawPublicIPProbeRowAPI(t, ctx, databaseURL, agentID, "", "", "", "", []string{core.AgentFeatureManagedPublicIPProbe})

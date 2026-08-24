@@ -82,7 +82,10 @@ func TestRunWebSocketAppliesCapabilityGatedPublicIPProbeMessage(t *testing.T) {
 	}
 	for {
 		client.publicIP.mu.Lock()
-		endpoint := client.publicIP.config.endpoints[0]
+		endpoint := ""
+		if len(client.publicIP.config.endpoints[0]) > 0 {
+			endpoint = client.publicIP.config.endpoints[0][0]
+		}
 		source := client.publicIP.config.source
 		client.publicIP.mu.Unlock()
 		if endpoint == "https://probe.example.test/v4" && source == core.PublicIPProbeSourceControlPlane {

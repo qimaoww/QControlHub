@@ -29,10 +29,12 @@ func publicIPProbeConfigFromValues(enabled bool, interval time.Duration, ipv4End
 	config.IPv4Endpoint = strings.TrimSpace(ipv4Endpoint)
 	if config.IPv4Endpoint == "" {
 		config.IPv4Endpoint = core.DefaultPublicIPProbeIPv4Endpoint
+		config.IPv4FallbackEndpoint = core.DefaultPublicIPProbeIPv4Fallback
 	}
 	config.IPv6Endpoint = strings.TrimSpace(ipv6Endpoint)
 	if config.IPv6Endpoint == "" {
 		config.IPv6Endpoint = core.DefaultPublicIPProbeIPv6Endpoint
+		config.IPv6FallbackEndpoint = core.DefaultPublicIPProbeIPv6Fallback
 	}
 	return config
 }

@@ -13,6 +13,8 @@ func TestPublicIPProbeConfigValidation(t *testing.T) {
 		{name: "cleartext", config: PublicIPProbeConfig{IPv4Endpoint: "http://probe.example.test/v4"}, wantErr: true},
 		{name: "credentials", config: PublicIPProbeConfig{IPv4Endpoint: "https://user:secret@probe.example.test/v4"}, wantErr: true},
 		{name: "query", config: PublicIPProbeConfig{IPv4Endpoint: "https://probe.example.test/v4?token=secret"}, wantErr: true},
+		{name: "unapproved fallback", config: PublicIPProbeConfig{IPv4Endpoint: DefaultPublicIPProbeIPv4Endpoint, IPv4FallbackEndpoint: "https://ip.sb"}, wantErr: true},
+		{name: "oversized endpoint", config: PublicIPProbeConfig{IPv4Endpoint: "https://" + string(make([]byte, 2048))}, wantErr: true},
 		{name: "too frequent", config: PublicIPProbeConfig{IPv4Endpoint: "https://probe.example.test/v4", IntervalSeconds: 59}, wantErr: true},
 	}
 	for _, test := range tests {
@@ -25,16 +27,18 @@ func TestPublicIPProbeConfigValidation(t *testing.T) {
 	}
 }
 
-func TestDefaultPublicIPProbeEndpointsAreFamilyBoundAndValid(t *testing.T) {
+func TestDefaultPublicIPProbeEndpointChainsAreFamilyBoundAndValid(t *testing.T) {
 	config := PublicIPProbeConfig{
-		IPv4Endpoint:    DefaultPublicIPProbeIPv4Endpoint,
-		IPv6Endpoint:    DefaultPublicIPProbeIPv6Endpoint,
-		IntervalSeconds: 300,
+		IPv4Endpoint:         DefaultPublicIPProbeIPv4Endpoint,
+		IPv4FallbackEndpoint: DefaultPublicIPProbeIPv4Fallback,
+		IPv6Endpoint:         DefaultPublicIPProbeIPv6Endpoint,
+		IPv6FallbackEndpoint: DefaultPublicIPProbeIPv6Fallback,
+		IntervalSeconds:      300,
 	}
 	if err := config.Validate(); err != nil {
 		t.Fatalf("default ident.me probe config is invalid: %v", err)
 	}
-	if config.IPv4Endpoint != "https://4.ident.me" || config.IPv6Endpoint != "https://6.ident.me" {
-		t.Fatalf("default probe endpoints = %+v, want family-specific ident.me endpoints", config)
+	if config.IPv4Endpoint != "https://api.ipify.org/" || config.IPv4FallbackEndpoint != "https://4.ident.me" || config.IPv6Endpoint != "https://api6.ipify.org" || config.IPv6FallbackEndpoint != "https://6.ident.me" {
+		t.Fatalf("default probe endpoint chains = %+v, want approved family-specific chains", config)
 	}
 }

@@ -54,9 +54,10 @@ services:
       QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS: ${QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS:-}
       QCH_OPERATOR_TOKENS: ${QCH_OPERATOR_TOKENS:-}
       QCH_READONLY_TOKENS: ${QCH_READONLY_TOKENS:-}
-      # Managed public-IP probes default to the family-specific ident.me
-      # endpoints. Set the enable flag to false to suppress all public echo
-      # egress; explicit endpoint values override one family at a time.
+      # Managed public-IP probes default to api.ipify.org/api6.ipify.org with
+      # same-family ident.me fallback. Set the enable flag to false to suppress
+      # all public echo egress; explicit endpoint values replace that family's
+      # complete default chain.
       QCH_AGENT_PUBLIC_IP_PROBE_ENABLED: ${QCH_AGENT_PUBLIC_IP_PROBE_ENABLED:-true}
       QCH_AGENT_PUBLIC_IP_PROBE_IPV4_ENDPOINT: ${QCH_AGENT_PUBLIC_IP_PROBE_IPV4_ENDPOINT:-}
       QCH_AGENT_PUBLIC_IP_PROBE_IPV6_ENDPOINT: ${QCH_AGENT_PUBLIC_IP_PROBE_IPV6_ENDPOINT:-}

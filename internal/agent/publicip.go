@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"reflect"
 	"regexp"
 	"strings"
 	"sync"
@@ -54,7 +55,7 @@ type PublicIPProber struct {
 }
 
 type publicIPProbeRuntimeConfig struct {
-	endpoints [2]string
+	endpoints [2][]string
 	source    string
 }
 
@@ -74,10 +75,10 @@ func normalizePublicIPProbeEvery(value time.Duration) time.Duration {
 }
 
 // NewPublicIPProber builds a managed-capable prober from optional local
-// operator-supplied endpoints. No third-party service is filled by default;
-// empty lists keep the object idle until the authenticated WSS session supplies
-// capability-gated managed configuration. Probes use a direct connection so an operator proxy
-// can never turn a proxy egress address into a node address.
+// operator-supplied endpoints. Local configuration is one endpoint per family;
+// only managed zero-configuration supplies the approved same-family fallback.
+// Probes use a direct connection so an operator proxy can never turn a proxy
+// egress address into a node address.
 func NewPublicIPProber(interval time.Duration, ipv4Endpoints, ipv6Endpoints []string) (*PublicIPProber, error) {
 	ipv4, err := singleProbeEndpoint(ipv4Endpoints)
 	if err != nil {
@@ -99,7 +100,7 @@ func NewPublicIPProber(interval time.Duration, ipv4Endpoints, ipv6Endpoints []st
 	}
 	if ipv4 != "" || ipv6 != "" {
 		prober.local = true
-		prober.config = publicIPProbeRuntimeConfig{endpoints: [2]string{ipv4, ipv6}, source: core.PublicIPProbeSourceAgent}
+		prober.config = publicIPProbeRuntimeConfig{endpoints: [2][]string{{ipv4}, {ipv6}}, source: core.PublicIPProbeSourceAgent}
 	}
 	return prober, nil
 }
@@ -204,15 +205,15 @@ func (prober *PublicIPProber) probeAll(ctx context.Context) {
 
 	results := [2]string{}
 	var wait sync.WaitGroup
-	for family, endpoint := range config.endpoints {
-		if endpoint == "" {
+	for family, endpoints := range config.endpoints {
+		if len(endpoints) == 0 || endpoints[0] == "" {
 			continue
 		}
 		wait.Add(1)
-		go func(family int, endpoint string) {
+		go func(family int, endpoints []string) {
 			defer wait.Done()
-			results[family] = probePublicIPFamily(ctx, clients[family], endpoint, family == 0)
-		}(family, endpoint)
+			results[family] = probePublicIPFamily(ctx, clients[family], endpoints, family == 0)
+		}(family, endpoints)
 	}
 	wait.Wait()
 
@@ -261,7 +262,9 @@ func (prober *PublicIPProber) ApplyManagedConfig(config core.PublicIPProbeConfig
 		return nil
 	}
 	config.IPv4Endpoint = strings.TrimSpace(config.IPv4Endpoint)
+	config.IPv4FallbackEndpoint = strings.TrimSpace(config.IPv4FallbackEndpoint)
 	config.IPv6Endpoint = strings.TrimSpace(config.IPv6Endpoint)
+	config.IPv6FallbackEndpoint = strings.TrimSpace(config.IPv6FallbackEndpoint)
 	if err := config.Validate(); err != nil {
 		return err
 	}
@@ -274,8 +277,12 @@ func (prober *PublicIPProber) ApplyManagedConfig(config core.PublicIPProbeConfig
 	if config.IntervalSeconds != 0 {
 		interval = time.Duration(config.IntervalSeconds) * time.Second
 	}
-	next := publicIPProbeRuntimeConfig{endpoints: [2]string{config.IPv4Endpoint, config.IPv6Endpoint}, source: core.PublicIPProbeSourceControlPlane}
-	if prober.config == next && prober.interval == interval {
+	endpoints := [2][]string{
+		compactProbeEndpoints(config.IPv4Endpoint, config.IPv4FallbackEndpoint),
+		compactProbeEndpoints(config.IPv6Endpoint, config.IPv6FallbackEndpoint),
+	}
+	next := publicIPProbeRuntimeConfig{endpoints: endpoints, source: core.PublicIPProbeSourceControlPlane}
+	if reflect.DeepEqual(prober.config, next) && prober.interval == interval {
 		prober.mu.Unlock()
 		return nil
 	}
@@ -317,19 +324,50 @@ func (prober *PublicIPProber) Enabled() bool {
 	}
 	prober.mu.Lock()
 	defer prober.mu.Unlock()
-	return prober.config.endpoints[0] != "" || prober.config.endpoints[1] != ""
+	return len(prober.config.endpoints[0]) > 0 && prober.config.endpoints[0][0] != "" || len(prober.config.endpoints[1]) > 0 && prober.config.endpoints[1][0] != ""
 }
 
-// probePublicIPFamily queries the family's single configured endpoint.
-func probePublicIPFamily(ctx context.Context, client *http.Client, endpoint string, wantIPv4 bool) string {
-	address, err := probePublicIPEndpoint(ctx, client, endpoint, wantIPv4)
-	if err != nil {
-		// Do not log the configured URL: an operator-controlled path can contain
-		// deployment detail even though credentials and query strings are rejected.
-		slog.Debug("public IP probe endpoint failed", "family_ipv4", wantIPv4, "error", err)
-		return ""
+func compactProbeEndpoints(primary, fallback string) []string {
+	endpoints := make([]string, 0, 2)
+	if primary = strings.TrimSpace(primary); primary != "" {
+		endpoints = append(endpoints, primary)
 	}
-	return address
+	if fallback = strings.TrimSpace(fallback); fallback != "" {
+		endpoints = append(endpoints, fallback)
+	}
+	return endpoints
+}
+
+// probePublicIPFamily tries only the ordered same-family chain. A two-endpoint
+// chain shares the five-second family budget, so a failed primary cannot turn
+// into an unbounded second request.
+func probePublicIPFamily(ctx context.Context, client *http.Client, endpoints []string, wantIPv4 bool) string {
+	familyContext, cancel := context.WithTimeout(ctx, publicIPProbeTimeout)
+	defer cancel()
+	for index, endpoint := range endpoints {
+		if endpoint == "" {
+			continue
+		}
+		attemptContext := familyContext
+		var attemptCancel context.CancelFunc
+		if len(endpoints) > 1 {
+			attemptContext, attemptCancel = context.WithTimeout(familyContext, publicIPProbeTimeout/2)
+		}
+		address, err := probePublicIPEndpoint(attemptContext, client, endpoint, wantIPv4)
+		if attemptCancel != nil {
+			attemptCancel()
+		}
+		if err == nil {
+			return address
+		}
+		// Do not log configured URLs: an operator-controlled path can contain
+		// deployment detail even though credentials and query strings are rejected.
+		slog.Debug("public IP probe endpoint failed", "family_ipv4", wantIPv4, "provider_index", index, "error", err)
+		if familyContext.Err() != nil {
+			break
+		}
+	}
+	return ""
 }
 
 func probePublicIPEndpoint(ctx context.Context, client *http.Client, endpoint string, wantIPv4 bool) (string, error) {

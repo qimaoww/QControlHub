@@ -66,6 +66,60 @@ func TestProbePublicIPEndpointRejectsOversizedBody(t *testing.T) {
 	}
 }
 
+func TestPublicIPProbeFamilyUsesOrderedSameFamilyFallback(t *testing.T) {
+	tests := []struct {
+		name          string
+		primaryStatus int
+		primaryBody   string
+		primaryDelay  time.Duration
+		fallbackBody  string
+		want          string
+		wantFallback  bool
+	}{
+		{name: "primary success does not call fallback", primaryStatus: http.StatusOK, primaryBody: "198.35.26.10", fallbackBody: "198.35.26.11", want: "198.35.26.10", wantFallback: false},
+		{name: "status failure calls fallback", primaryStatus: http.StatusBadGateway, primaryBody: "198.35.26.10", fallbackBody: "198.35.26.11", want: "198.35.26.11", wantFallback: true},
+		{name: "invalid family calls fallback", primaryStatus: http.StatusOK, primaryBody: "2001:db8::1", fallbackBody: "198.35.26.11", want: "198.35.26.11", wantFallback: true},
+		{name: "timeout calls fallback", primaryStatus: http.StatusOK, primaryDelay: 3 * time.Second, primaryBody: "198.35.26.10", fallbackBody: "198.35.26.12", want: "198.35.26.12", wantFallback: true},
+		{name: "oversized response calls fallback", primaryStatus: http.StatusOK, primaryBody: string(make([]byte, publicIPProbeMaxBodyBytes+1)), fallbackBody: "198.35.26.13", want: "198.35.26.13", wantFallback: true},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			primaryCalls, fallbackCalls := 0, 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+				switch request.URL.Path {
+				case "/primary":
+					primaryCalls++
+					if testCase.primaryDelay > 0 {
+						select {
+						case <-request.Context().Done():
+							return
+						case <-time.After(testCase.primaryDelay):
+						}
+					}
+					w.WriteHeader(testCase.primaryStatus)
+					_, _ = w.Write([]byte(testCase.primaryBody))
+				case "/fallback":
+					fallbackCalls++
+					_, _ = w.Write([]byte(testCase.fallbackBody))
+				default:
+					http.NotFound(w, request)
+				}
+			}))
+			defer server.Close()
+			got := probePublicIPFamily(context.Background(), server.Client(), []string{server.URL + "/primary", server.URL + "/fallback"}, true)
+			if got != testCase.want {
+				t.Fatalf("probePublicIPFamily() = %q, want %q", got, testCase.want)
+			}
+			if primaryCalls != 1 {
+				t.Fatalf("primary calls = %d, want 1", primaryCalls)
+			}
+			if (fallbackCalls > 0) != testCase.wantFallback {
+				t.Fatalf("fallback calls = %d, want called=%v", fallbackCalls, testCase.wantFallback)
+			}
+		})
+	}
+}
+
 func TestPublicIPProbeClientIgnoresEnvironmentProxy(t *testing.T) {
 	t.Setenv("HTTP_PROXY", "http://127.0.0.1:1")
 	t.Setenv("HTTPS_PROXY", "http://127.0.0.1:1")
@@ -91,7 +145,7 @@ func TestPublicIPProberClearsFailedFamilyWithoutPollutingOtherFamily(t *testing.
 	defer server.Close()
 	prober := &PublicIPProber{
 		httpV4: server.Client(), httpV6: server.Client(), interval: time.Minute,
-		config: publicIPProbeRuntimeConfig{endpoints: [2]string{server.URL, ""}, source: core.PublicIPProbeSourceAgent},
+		config: publicIPProbeRuntimeConfig{endpoints: [2][]string{{server.URL}, {}}, source: core.PublicIPProbeSourceAgent},
 		wake:   make(chan struct{}, 1),
 	}
 	prober.probeAll(context.Background())
@@ -175,10 +229,30 @@ func TestManagedPublicIPProbeConfigClearsCacheAndLocalConfigWins(t *testing.T) {
 		t.Fatal(err)
 	}
 	local.mu.Lock()
-	endpoint, source := local.config.endpoints[0], local.config.source
+	endpoint, source := local.config.endpoints[0][0], local.config.source
 	local.mu.Unlock()
 	if endpoint != "https://local.example.test/v4" || source != core.PublicIPProbeSourceAgent {
 		t.Fatalf("managed config overrode local trust choice: endpoint=%q source=%q", endpoint, source)
+	}
+}
+
+func TestManagedPublicIPProbeConfigKeepsApprovedFamilyFallback(t *testing.T) {
+	prober, err := NewPublicIPProber(0, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := prober.ApplyManagedConfig(core.PublicIPProbeConfig{
+		IPv4Endpoint:         core.DefaultPublicIPProbeIPv4Endpoint,
+		IPv4FallbackEndpoint: core.DefaultPublicIPProbeIPv4Fallback,
+		IntervalSeconds:      60,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	prober.mu.Lock()
+	endpoints := append([]string(nil), prober.config.endpoints[0]...)
+	prober.mu.Unlock()
+	if len(endpoints) != 2 || endpoints[0] != core.DefaultPublicIPProbeIPv4Endpoint || endpoints[1] != core.DefaultPublicIPProbeIPv4Fallback {
+		t.Fatalf("managed IPv4 endpoint chain = %v, want approved primary/fallback", endpoints)
 	}
 }
 
@@ -225,7 +299,7 @@ func TestPublicIPProberCoalescesConcurrentRefresh(t *testing.T) {
 	defer server.Close()
 	prober := &PublicIPProber{
 		httpV4: server.Client(), httpV6: server.Client(), interval: time.Minute,
-		config: publicIPProbeRuntimeConfig{endpoints: [2]string{server.URL, ""}, source: core.PublicIPProbeSourceAgent},
+		config: publicIPProbeRuntimeConfig{endpoints: [2][]string{{server.URL}, {}}, source: core.PublicIPProbeSourceAgent},
 		wake:   make(chan struct{}, 1),
 	}
 	done := make(chan struct{}, 2)

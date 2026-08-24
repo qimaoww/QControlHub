@@ -21,9 +21,11 @@ func TestPublicIPProbeConfigFromValues(t *testing.T) {
 			name:    "enabled defaults both families",
 			enabled: true,
 			want: core.PublicIPProbeConfig{
-				IPv4Endpoint:    core.DefaultPublicIPProbeIPv4Endpoint,
-				IPv6Endpoint:    core.DefaultPublicIPProbeIPv6Endpoint,
-				IntervalSeconds: 300,
+				IPv4Endpoint:         core.DefaultPublicIPProbeIPv4Endpoint,
+				IPv4FallbackEndpoint: core.DefaultPublicIPProbeIPv4Fallback,
+				IPv6Endpoint:         core.DefaultPublicIPProbeIPv6Endpoint,
+				IPv6FallbackEndpoint: core.DefaultPublicIPProbeIPv6Fallback,
+				IntervalSeconds:      300,
 			},
 		},
 		{
@@ -31,9 +33,10 @@ func TestPublicIPProbeConfigFromValues(t *testing.T) {
 			enabled: true,
 			ipv4:    " https://probe.example.test/v4 ",
 			want: core.PublicIPProbeConfig{
-				IPv4Endpoint:    "https://probe.example.test/v4",
-				IPv6Endpoint:    core.DefaultPublicIPProbeIPv6Endpoint,
-				IntervalSeconds: 300,
+				IPv4Endpoint:         "https://probe.example.test/v4",
+				IPv6Endpoint:         core.DefaultPublicIPProbeIPv6Endpoint,
+				IPv6FallbackEndpoint: core.DefaultPublicIPProbeIPv6Fallback,
+				IntervalSeconds:      300,
 			},
 		},
 		{
@@ -68,7 +71,7 @@ func TestPublicIPProbeConfigFromEnvDefaultsAndOptOut(t *testing.T) {
 		t.Setenv(key, "")
 	}
 	defaultConfig := publicIPProbeConfigFromEnv(5 * time.Minute)
-	if defaultConfig.IPv4Endpoint != core.DefaultPublicIPProbeIPv4Endpoint || defaultConfig.IPv6Endpoint != core.DefaultPublicIPProbeIPv6Endpoint {
+	if defaultConfig.IPv4Endpoint != core.DefaultPublicIPProbeIPv4Endpoint || defaultConfig.IPv4FallbackEndpoint != core.DefaultPublicIPProbeIPv4Fallback || defaultConfig.IPv6Endpoint != core.DefaultPublicIPProbeIPv6Endpoint || defaultConfig.IPv6FallbackEndpoint != core.DefaultPublicIPProbeIPv6Fallback {
 		t.Fatalf("empty/unset control-plane settings = %+v, want ident.me defaults", defaultConfig)
 	}
 
