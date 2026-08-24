@@ -542,6 +542,43 @@ func TestSPAModulesArePublished(t *testing.T) {
 	}
 }
 
+func TestAgentBatchAndEnrollmentSafetyContracts(t *testing.T) {
+	content := string(mustReadFrontendFile(t, "modules/agents.js"))
+	for _, marker := range []string{
+		`agent-self-upgrade-v1`,
+		`当前 Agent 不支持远程升级，请先重新安装或升级 Agent`,
+		`batchForm.dataset.busy === "1"`,
+		`for (const input of selected)`,
+		`data-batch-retry`,
+		`命令仅供复制；关闭页面不会连接、安装或重启任何节点。`,
+		`showCommand(command, async () =>`,
+		`不会自动执行`,
+	} {
+		if !strings.Contains(content, marker) {
+			t.Errorf("agent batch/enrollment safety contract is missing %q", marker)
+		}
+	}
+	created := strings.Index(content, `const created = await api("/enrollment-tokens"`)
+	shown := strings.Index(content[created:], `showCommand(command`)
+	if created < 0 || shown < 0 {
+		t.Fatal("enrollment flow must show the generated command")
+	}
+	shown += created
+	refreshed := strings.Index(content[created:], `await refreshAgentPage()`)
+	if refreshed >= 0 && created+refreshed < shown {
+		t.Error("enrollment flow must display the command before refresh can lose it")
+	}
+}
+
+func mustReadFrontendFile(t *testing.T, name string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(".", name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
+
 func TestManualConfigRequiresExplicitImportOfNodeSnapshot(t *testing.T) {
 	configs, err := os.ReadFile("modules/configs.js")
 	if err != nil {

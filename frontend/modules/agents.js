@@ -539,7 +539,7 @@ async function nodeSettings(presetMode = false, { overview: preloadedOverview } 
     .join("");
 
   const enrollment = !presetMode && can("enrollment.manage")
-    ? `<section class="enrollment-sheet" id="enrollment" data-has-agents="${agents.length ? 1 : 0}"><div class="enrollment-sheet-body enrollment-launcher"><div><b>添加节点</b><small>为当前节点生成 Agent 部署命令，仅复制，不会自动执行；已有命令继续有效。</small></div><button class="button primary" type="button" data-open-enrollment>生成部署命令</button></div>${tokenRows ? `<details class="access-history" ${historyOpen ? "open" : ""}><summary>添加记录（${tokens.length}）</summary><div>${tokenRows}</div></details>` : ""}</section>`
+    ? `<section class="enrollment-sheet" id="enrollment" data-has-agents="${agents.length ? 1 : 0}"><div class="enrollment-sheet-body enrollment-launcher"><div><b>添加节点</b><small>为当前节点生成 Agent 部署命令，仅复制，不会自动执行；已有命令继续有效，已有安装命令会继续有效。</small></div><button class="button primary" type="button" data-open-enrollment>生成部署命令</button></div>${tokenRows ? `<details class="access-history" ${historyOpen ? "open" : ""}><summary>添加记录（${tokens.length}）</summary><div>${tokenRows}</div></details>` : ""}</section>`
     : "";
   const batch =
     !presetMode && agents.length > 1 && can("operator")
@@ -1046,12 +1046,16 @@ function bindAgentPage(agentItems, presetMode = false) {
       const agent = agentsByID.get(input.value);
       const eligible =
         agent?.status === "online" &&
-        (action === "upgrade-agent" || Boolean(agent.runtime?.[engine]?.installed));
+        (action === "upgrade-agent"
+          ? (agent.features || []).includes("agent-self-upgrade-v1")
+          : Boolean(agent.runtime?.[engine]?.installed));
       input.disabled = !eligible;
       input.closest(".batch-select").title = eligible
         ? "选择此节点参与批量操作"
         : action === "upgrade-agent"
-          ? "节点离线"
+          ? agent?.status !== "online"
+            ? "节点离线"
+            : "当前 Agent 不支持远程升级，请先重新安装或升级 Agent"
           : `节点离线或未安装 ${engineName(engine)}`;
       if (!eligible) input.checked = false;
     });
@@ -1131,8 +1135,9 @@ function bindAgentPage(agentItems, presetMode = false) {
       const escapedName = name.replaceAll("'", "'\\''");
       const command = `curl -fsSL -H 'X-QControlHub-Enrollment: ${escapedToken}' ${location.origin}/install-agent.sh | sudo sh -s -- ${location.origin} '${escapedToken}' '${escapedName}'`;
       close();
-      await refreshAgentPage();
-      showCommand(command);
+      showCommand(command, async () => {
+        try { await refreshAgentPage(); } catch (error) { notify(error.message, "error"); }
+      });
     });
   });
   const enrollmentForm = document.querySelector("#enrollment-form");
@@ -1180,7 +1185,7 @@ function bindAgentPage(agentItems, presetMode = false) {
     button.onclick = async () => {
       if (
         !(await confirmAction(
-          "确定为这个节点生成一条新的 Agent 安装命令？已有安装命令会继续有效，可在添加记录中单独删除。",
+          "确定为这个节点生成新的 Agent 部署命令？已有命令继续有效；本操作只生成可复制命令，不会自动执行。",
           "生成安装命令",
         ))
       )
@@ -1193,8 +1198,9 @@ function bindAgentPage(agentItems, presetMode = false) {
         const escapedToken = created.token.replaceAll("'", "'\\''");
         const escapedName = created.name.replaceAll("'", "'\\''");
         const command = `curl -fsSL -H 'X-QControlHub-Enrollment: ${escapedToken}' ${location.origin}/install-agent.sh | sudo sh -s -- ${location.origin} '${escapedToken}' '${escapedName}'`;
-        await refreshAgentPage();
-        showCommand(command, undefined, "复制 Agent 安装命令");
+        showCommand(command, async () => {
+          try { await refreshAgentPage(); } catch (error) { notify(error.message, "error"); }
+        }, "复制 Agent 安装命令");
       } catch (error) {
         notify(error.message, "error");
       }
