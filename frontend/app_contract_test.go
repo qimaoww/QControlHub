@@ -579,6 +579,11 @@ func TestEnrollmentEntryRemainsVisibleInNodeSettings(t *testing.T) {
 	if !strings.Contains(css, `.page-agents .node-settings-page>.enrollment-sheet{display:block}`) {
 		t.Fatal("node-settings enrollment entry must override stale closed-details hiding")
 	}
+	hide := strings.LastIndex(css, `.page-agents .node-settings-page>.enrollment-sheet:not([open]){display:none}`)
+	show := strings.LastIndex(css, `.page-agents .node-settings-page>.enrollment-sheet:not([open]){display:block}`)
+	if hide < 0 || show <= hide {
+		t.Fatalf("effective cascade must end with visible enrollment rule (hide=%d show=%d)", hide, show)
+	}
 	if !strings.Contains(module, `data-has-agents="${agents.length ? 1 : 0}"`) {
 		t.Fatal("enrollment entry must render for both populated and empty node states")
 	}
