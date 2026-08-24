@@ -1714,6 +1714,17 @@ func setServiceEnabled(ctx context.Context, service string, enabled bool, manage
 			action = "add"
 			want = "enabled"
 		}
+		current, err := openRCServiceEnableState(ctx, service)
+		if err != nil {
+			return err
+		}
+		// rc-update returns a failure when deleting a service that is already
+		// absent from the runlevel. Rollback and restart reconciliation must be
+		// idempotent, but only after the protected runlevel tree has proved that
+		// the service is already in the exact requested state.
+		if current == want {
+			return nil
+		}
 		if output, err := run(ctx, manager.enableHelper(), action, service, "default"); err != nil {
 			return fmt.Errorf("openrc rc-update %s %s: %w: %s", action, service, err, output)
 		}
