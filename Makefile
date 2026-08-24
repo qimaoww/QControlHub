@@ -21,6 +21,7 @@ fmt-check:
 
 frontend-check:
 	node frontend/module_smoke.mjs
+	node frontend/agents_browser_smoke.mjs
 
 installer-test:
 	sh deploy/tests/inherit-existing-core.sh

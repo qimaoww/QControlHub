@@ -4,6 +4,8 @@ import "./refresh_smoke.mjs";
 
 import {
   animateNodeCardDrop,
+  batchAgentEligibility,
+  batchSelectAllState,
   clearNodeCardDragState,
   coreSourceForInstall,
   developmentSourceVisible,
@@ -33,6 +35,70 @@ import { createLatestRenderScheduler } from "./modules/refresh.js";
 
 const state = { data: {}, session: { role: "admin" } };
 const noop = () => {};
+
+assert.deepEqual(
+  batchAgentEligibility(
+    { status: "online", features: ["agent-self-upgrade-v1"] },
+    "upgrade-agent",
+    "",
+  ),
+  { eligible: true, reason: "在线 · 支持远程升级" },
+);
+assert.match(
+  batchAgentEligibility({ status: "offline" }, "upgrade-agent", "").reason,
+  /离线/,
+);
+assert.match(
+  batchAgentEligibility({ status: "online", features: [] }, "upgrade-agent", "")
+    .reason,
+  /旧版 Agent/,
+);
+assert.equal(
+  batchAgentEligibility(
+    { status: "online", runtime: { mihomo: { installed: true } } },
+    "restart",
+    "mihomo",
+  ).eligible,
+  true,
+);
+assert.equal(
+  batchAgentEligibility(
+    { status: "online", runtime: { mihomo: { installed: false } } },
+    "restart",
+    "mihomo",
+  ).eligible,
+  false,
+);
+assert.deepEqual(
+  batchSelectAllState([
+    { disabled: false, checked: true },
+    { disabled: false, checked: false },
+    { disabled: true, checked: true },
+  ]),
+  { eligible: 2, selected: 1, checked: false, indeterminate: true },
+);
+assert.deepEqual(
+  batchSelectAllState([
+    { disabled: false, checked: true },
+    { disabled: false, checked: true },
+  ]),
+  { eligible: 2, selected: 2, checked: true, indeterminate: false },
+);
+assert.deepEqual(
+  batchSelectAllState([
+    { disabled: true, checked: true, dataset: { batchEligible: "1" } },
+    { disabled: true, checked: true, dataset: { batchEligible: "1" } },
+    { disabled: true, checked: false, dataset: { batchEligible: "0" } },
+  ]),
+  { eligible: 2, selected: 2, checked: true, indeterminate: false },
+  "busy interaction locks do not erase the qualified selection state",
+);
+assert.deepEqual(batchSelectAllState([]), {
+  eligible: 0,
+  selected: 0,
+  checked: false,
+  indeterminate: false,
+});
 
 const pendingMigrationSource = {
   content: '{"inbounds":[{"tag":"original"}]}',
@@ -1029,7 +1095,19 @@ const structureCards = {
   "sing-box": new StructureElement(),
   xray: new StructureElement(),
 };
+const structureStates = {
+  "sing-box": new StructureElement(),
+  xray: new StructureElement(),
+};
+const structureServices = {
+  "sing-box": new StructureElement(),
+  xray: new StructureElement(),
+};
+for (const [engine, service] of Object.entries(structureServices))
+  service.closest = () => structureStates[engine];
+const structureInstalledSummary = new StructureElement();
 for (const card of Object.values(structureCards)) {
+  card.dataset.runtimeStructure = "full";
   card.dataset.coreInstalled = "0";
   card.dataset.existingPending = "0";
   card.dataset.existingUnsupported = "";
@@ -1037,7 +1115,12 @@ for (const card of Object.values(structureCards)) {
 const structureRoot = new StructureElement();
 structureRoot.querySelector = (selector) => {
   const match = selector.match(/^\.service-(.+)$/);
-  return match ? structureCards[match[1]] || null : null;
+  if (match) return structureCards[match[1]] || null;
+  const serviceMatch = selector.match(/^\[data-core-service="(.+)"\]$/);
+  if (serviceMatch) return structureServices[serviceMatch[1]] || null;
+  if (selector === "[data-core-installed-summary]")
+    return structureInstalledSummary;
+  return null;
 };
 globalThis.CSS = { escape: (value) => String(value) };
 globalThis.document = {
@@ -1053,6 +1136,7 @@ try {
   let structureMarkup = "";
   const structureNotifications = [];
   let controlledRender = null;
+  let compactPolling = false;
   const structureState = {
     route: "node-settings",
     anchor: "settings-node-alpha",
@@ -1062,6 +1146,8 @@ try {
   const singleEngine = (unsupported = false) => [
     {
       id: "alpha",
+      os: "linux",
+      arch: "amd64",
       status: "online",
       metrics: {},
       capabilities: ["sing-box"],
@@ -1094,6 +1180,7 @@ try {
         api: async (path) => {
           assert.equal(path, "/agents");
           structureRequests += 1;
+          if (compactPolling) return structurePayload();
           if (structureRequests % 2 === 1) return structurePayload();
           structureRenders += 1;
           if (controlledRender && !controlledRender.used) {
@@ -1183,6 +1270,102 @@ try {
   finishControlledRender(twoEngine);
   await flushMicrotasks();
   clearTimeout(structureState.agentPollTimer);
+
+  // Aggregate cards render compact core chips, not full service-card
+  // structure. Missing full-view markers on those chips must not turn every
+  // metrics poll into another page render.
+  structureRequests = 0;
+  structureRenders = 0;
+  controlledRender = null;
+  compactPolling = true;
+  structurePayload = () => [
+    {
+      id: "alpha",
+      os: "linux",
+      arch: "amd64",
+      status: "online",
+      metrics: {},
+      capabilities: ["sing-box"],
+      runtime: {
+        "sing-box": { installed: false, service_status: "unknown" },
+      },
+    },
+  ];
+  delete structureCards["sing-box"].dataset.runtimeStructure;
+  delete structureCards["sing-box"].dataset.existingPending;
+  delete structureCards["sing-box"].dataset.existingUnsupported;
+  await pollAgentMetrics();
+  clearTimeout(structureState.agentPollTimer);
+  await flushMicrotasks();
+  assert.equal(
+    structureRequests,
+    1,
+    "a compact aggregate core chip keeps one bounded metrics request",
+  );
+  assert.equal(
+    structureRenders,
+    0,
+    "a compact aggregate core chip does not request a structural page render",
+  );
+  assert.equal(structureCards["sing-box"].dataset.coreInstalled, "0");
+  assert.equal(structureServices["sing-box"].textContent, "未安装");
+  assert.equal(structureStates["sing-box"].className, "engine-state muted");
+  assert.equal(
+    structureInstalledSummary.textContent,
+    "linux / amd64 · 尚未安装内核",
+  );
+
+  structurePayload = () => [
+    {
+      id: "alpha",
+      os: "linux",
+      arch: "amd64",
+      status: "online",
+      metrics: {},
+      capabilities: ["sing-box"],
+      runtime: {
+        "sing-box": { installed: true, service_status: "running" },
+      },
+    },
+  ];
+  await pollAgentMetrics();
+  clearTimeout(structureState.agentPollTimer);
+  await flushMicrotasks();
+  assert.equal(structureRequests, 2, "compact install transition stays in place");
+  assert.equal(structureRenders, 0, "compact install transition does not render");
+  assert.equal(structureCards["sing-box"].dataset.coreInstalled, "1");
+  assert.equal(structureServices["sing-box"].textContent, "running");
+  assert.equal(structureStates["sing-box"].className, "engine-state running");
+  assert.equal(
+    structureInstalledSummary.textContent,
+    "linux / amd64 · 1/1 内核已安装",
+  );
+
+  structurePayload = () => [
+    {
+      id: "alpha",
+      os: "linux",
+      arch: "amd64",
+      status: "online",
+      metrics: {},
+      capabilities: ["sing-box"],
+      runtime: {
+        "sing-box": { installed: false, service_status: "unknown" },
+      },
+    },
+  ];
+  await pollAgentMetrics();
+  clearTimeout(structureState.agentPollTimer);
+  await flushMicrotasks();
+  assert.equal(structureRequests, 3, "compact uninstall transition stays bounded");
+  assert.equal(structureRenders, 0, "compact uninstall transition does not render");
+  assert.equal(structureCards["sing-box"].dataset.coreInstalled, "0");
+  assert.equal(structureServices["sing-box"].textContent, "未安装");
+  assert.equal(structureStates["sing-box"].className, "engine-state muted");
+  assert.equal(
+    structureInstalledSummary.textContent,
+    "linux / amd64 · 尚未安装内核",
+  );
 } finally {
   if (structureDocument === undefined) delete globalThis.document;
   else globalThis.document = structureDocument;
