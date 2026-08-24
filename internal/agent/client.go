@@ -558,6 +558,7 @@ func (c *Client) resultForTask(ctx context.Context, task core.Task) core.TaskRes
 	execute := c.executeFunc
 	var output string
 	var executionErr error
+	preparedLogTransition := false
 	if task.Action == core.ActionUpgradeAgent {
 		output, executionErr = c.upgradeAgent(ctx)
 		if executionErr == nil {
@@ -573,6 +574,8 @@ func (c *Client) resultForTask(ctx context.Context, task core.Task) core.TaskRes
 			(task.Action == core.ActionImportExisting || task.Action == core.ActionDeploy) {
 			if err := c.logs.PrepareImportedSingBoxSource(ctx, c.executor, task.ConfigContent); err != nil {
 				slog.Warn("prepare managed sing-box log capture window", "error", err)
+			} else {
+				preparedLogTransition = true
 			}
 		} else if c.logs != nil && task.Engine == core.EngineSingBox &&
 			(task.Action == core.ActionInstall || task.Action == core.ActionStart || task.Action == core.ActionRestart) {
@@ -581,10 +584,19 @@ func (c *Client) resultForTask(ctx context.Context, task core.Task) core.TaskRes
 			}
 		}
 		output, executionErr = execute(ctx, task)
+		if preparedLogTransition {
+			if err := c.logs.CompleteImportedSingBoxSource(c.executor, executionErr == nil); err != nil {
+				slog.Warn("complete managed sing-box log source transition", "error", err)
+			}
+		}
 	}
 	if c.logs != nil && task.Engine == core.EngineSingBox && coreLogSourceMayChange(task.Action) {
-		if err := c.logs.RefreshImportedSingBoxSource(c.executor); err != nil {
-			slog.Warn("refresh managed sing-box log source", "error", err)
+		collectorTransitionComplete := preparedLogTransition &&
+			(task.Action == core.ActionImportExisting || task.Action == core.ActionDeploy)
+		if !collectorTransitionComplete {
+			if err := c.logs.RefreshImportedSingBoxSource(c.executor); err != nil {
+				slog.Warn("refresh managed sing-box log source", "error", err)
+			}
 		}
 	}
 	result := core.TaskResultRequest{

@@ -46,6 +46,7 @@ var (
 
 type CoreLogCollector struct {
 	mu            sync.Mutex
+	filePublishMu sync.Mutex
 	queued        []core.CoreLogEntry
 	pending       *core.CoreLogBatch
 	dropped       uint64
@@ -62,22 +63,32 @@ type CoreLogCollector struct {
 	kindStatus    map[core.Engine]map[string]CoreLogSourceStatus
 	preferredKind map[core.Engine]string
 	consoleKind   map[core.Engine]string
-	importWindows map[core.Engine]coreLogImportWindow
+	transitions   map[core.Engine]*coreLogSourceTransition
+	nextFileEpoch uint64
 	sourceReady   map[core.Engine]chan struct{}
 }
 
 type coreLogFileRun struct {
 	cancel    context.CancelFunc
 	bindingID string
+	done      chan struct{}
+	source    coreLogFileSource
+	progress  coreLogImportWindow
 }
 
 type coreLogImportWindow struct {
-	path         string
-	configDigest string
-	exists       bool
-	device       uint64
-	inode        uint64
-	offset       int64
+	path   string
+	exists bool
+	device uint64
+	inode  uint64
+	offset int64
+}
+
+type coreLogSourceTransition struct {
+	epoch          uint64
+	previousDigest string
+	targetDigest   string
+	windows        map[string]coreLogImportWindow
 }
 
 type coreLogJournalSource struct {
@@ -96,6 +107,7 @@ type coreLogFileSource struct {
 	executor     *Executor
 	ownership    completedCoreMigration
 	initial      *coreLogImportWindow
+	epoch        uint64
 }
 
 type CoreLogSourceStatus struct {
@@ -115,7 +127,7 @@ func NewCoreLogCollectorForServiceManager(manager *ServiceManager, specs ...map[
 		activeFiles: make(map[string]*coreLogFileRun), status: make(map[core.Engine]CoreLogSourceStatus),
 		statusKind: make(map[core.Engine]string), kindStatus: make(map[core.Engine]map[string]CoreLogSourceStatus),
 		preferredKind: make(map[core.Engine]string), consoleKind: make(map[core.Engine]string),
-		importWindows: make(map[core.Engine]coreLogImportWindow), sourceReady: make(map[core.Engine]chan struct{}),
+		transitions: make(map[core.Engine]*coreLogSourceTransition), sourceReady: make(map[core.Engine]chan struct{}),
 	}
 	if manager != nil && manager.Kind() == ServiceManagerOpenRC {
 		collector.fileSources = coreLogFileSources(specs...)
@@ -160,6 +172,10 @@ func (collector *CoreLogCollector) Status() map[core.Engine]CoreLogSourceStatus 
 func (collector *CoreLogCollector) setSourceStatus(engine core.Engine, kind, status, code string) {
 	collector.mu.Lock()
 	defer collector.mu.Unlock()
+	collector.setSourceStatusLocked(engine, kind, status, code)
+}
+
+func (collector *CoreLogCollector) setSourceStatusLocked(engine core.Engine, kind, status, code string) {
 	if collector.status == nil {
 		collector.status = make(map[core.Engine]CoreLogSourceStatus)
 	}
@@ -186,6 +202,19 @@ func (collector *CoreLogCollector) setSourceStatus(engine core.Engine, kind, sta
 	collector.statusKind[engine] = kind
 }
 
+func (collector *CoreLogCollector) setFileSourceStatus(source coreLogFileSource, status, code string) {
+	collector.mu.Lock()
+	defer collector.mu.Unlock()
+	if source.kind == "file" && collector.transitions[source.engine] != nil {
+		return
+	}
+	active := collector.activeFiles[coreLogFileSourceKey(source)]
+	if active == nil || active.bindingID != coreLogFileBindingID(source) {
+		return
+	}
+	collector.setSourceStatusLocked(source.engine, source.kind, status, code)
+}
+
 func (collector *CoreLogCollector) selectSourceKind(engine core.Engine, kind string, fallback CoreLogSourceStatus) {
 	collector.mu.Lock()
 	defer collector.mu.Unlock()
@@ -196,6 +225,13 @@ func (collector *CoreLogCollector) selectSourceKind(engine core.Engine, kind str
 		collector.status[engine] = fallback
 	}
 	collector.statusKind[engine] = kind
+}
+
+func (collector *CoreLogCollector) selectSourceStatus(engine core.Engine, kind, status, code string) {
+	collector.mu.Lock()
+	defer collector.mu.Unlock()
+	collector.preferredKind[engine] = kind
+	collector.setSourceStatusLocked(engine, kind, status, code)
 }
 
 func coreLogErrorCode(err error) string {
@@ -254,6 +290,10 @@ func (collector *CoreLogCollector) startFileSource(source coreLogFileSource) {
 		collector.mu.Unlock()
 		return
 	}
+	if source.kind == "file" && collector.transitions[source.engine] != nil {
+		collector.mu.Unlock()
+		return
+	}
 	if collector.activeFiles == nil {
 		collector.activeFiles = make(map[string]*coreLogFileRun)
 	}
@@ -272,7 +312,7 @@ func (collector *CoreLogCollector) startFileSource(source coreLogFileSource) {
 		active.cancel()
 	}
 	fileContext, cancel := context.WithCancel(ctx)
-	run := &coreLogFileRun{cancel: cancel, bindingID: bindingID}
+	run := &coreLogFileRun{cancel: cancel, bindingID: bindingID, done: make(chan struct{}), source: source}
 	collector.activeFiles[key] = run
 	collector.runWait.Add(1)
 	collector.mu.Unlock()
@@ -283,9 +323,10 @@ func (collector *CoreLogCollector) startFileSource(source coreLogFileSource) {
 				delete(collector.activeFiles, key)
 			}
 			collector.mu.Unlock()
+			close(run.done)
 			collector.runWait.Done()
 		}()
-		collector.runFileSource(fileContext, source)
+		collector.runFileSource(fileContext, source, run)
 	}()
 }
 
@@ -297,18 +338,18 @@ func coreLogFileSourceKey(source coreLogFileSource) string {
 }
 
 func coreLogFileBindingID(source coreLogFileSource) string {
-	return source.path + "\x00" + source.configDigest + "\x00" + source.ownership.SourceDigest
+	return source.path + "\x00" + source.configDigest + "\x00" + source.ownership.SourceDigest + "\x00" + strconv.FormatUint(source.epoch, 10)
 }
 
 // runFileSource keeps one tail reader alive per managed OpenRC log file with
 // the same retry cadence as the journal readers.
-func (collector *CoreLogCollector) runFileSource(ctx context.Context, source coreLogFileSource) {
+func (collector *CoreLogCollector) runFileSource(ctx context.Context, source coreLogFileSource, run *coreLogFileRun) {
 	for ctx.Err() == nil {
-		err := collector.followFile(ctx, source)
+		err := collector.followFile(ctx, source, run)
 		source.initial = nil
 		if ctx.Err() == nil {
 			slog.Warn("managed core log file reader stopped", "path", source.path, "error", err)
-			collector.setSourceStatus(source.engine, source.kind, "failed", coreLogErrorCode(err))
+			collector.setFileSourceStatus(source, "failed", coreLogErrorCode(err))
 		}
 		timer := time.NewTimer(2 * time.Second)
 		select {
@@ -384,7 +425,7 @@ func (collector *CoreLogCollector) follow(ctx context.Context, source coreLogJou
 // followFile tails one supervise-daemon log file. Like journalctl --follow
 // --lines=0, it starts at the current end of the file and only streams lines
 // appended after the collector started.
-func (collector *CoreLogCollector) followFile(ctx context.Context, source coreLogFileSource) error {
+func (collector *CoreLogCollector) followFile(ctx context.Context, source coreLogFileSource, run *coreLogFileRun) error {
 	var file *os.File
 	missingBeforeOpen := false
 	for file == nil {
@@ -394,14 +435,14 @@ func (collector *CoreLogCollector) followFile(ctx context.Context, source coreLo
 		opened, err := openValidatedCoreLogFileContext(ctx, source)
 		if err == nil {
 			file = opened
-			collector.setSourceStatus(source.engine, source.kind, "active", "")
+			collector.setFileSourceStatus(source, "active", "")
 			break
 		}
 		if !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
 		missingBeforeOpen = true
-		collector.setSourceStatus(source.engine, source.kind, "waiting", "source-missing")
+		collector.setFileSourceStatus(source, "waiting", "source-missing")
 		timer := time.NewTimer(2 * time.Second)
 		select {
 		case <-ctx.Done():
@@ -438,6 +479,13 @@ func (collector *CoreLogCollector) followFile(ctx context.Context, source coreLo
 		return err
 	}
 	openedMetadata := metadataFromFileInfo(openedIdentity)
+	collector.filePublishMu.Lock()
+	if err := ctx.Err(); err != nil {
+		collector.filePublishMu.Unlock()
+		return err
+	}
+	setCoreLogFileRunProgress(run, source.path, openedIdentity, offset)
+	collector.filePublishMu.Unlock()
 	// A single Fstat gates every block before any byte can enter partial state or
 	// the shared queue. A 64 KiB block keeps that fail-closed check bounded
 	// without imposing one metadata syscall per small log line.
@@ -448,32 +496,11 @@ func (collector *CoreLogCollector) followFile(ctx context.Context, source coreLo
 	for ctx.Err() == nil {
 		read, readErr := file.Read(buffer)
 		if read > 0 {
-			openedInfo, statErr := file.Stat()
-			if statErr != nil {
-				return statErr
+			if err := collector.publishFileBlock(ctx, file, source, run, openedIdentity, openedMetadata,
+				buffer[:read], &partial, &offset); err != nil {
+				return err
 			}
-			if !os.SameFile(openedIdentity, openedInfo) || !openedInfo.Mode().IsRegular() ||
-				!coreLogFileHasSingleLink(openedInfo) || metadataFromFileInfo(openedInfo) != openedMetadata {
-				return errors.New("managed core log file link identity drifted before publish")
-			}
-			offset += int64(read)
 			bytesSinceValidation += int64(read)
-			chunk := buffer[:read]
-			for {
-				index := bytes.IndexByte(chunk, '\n')
-				if index < 0 {
-					partial = append(partial, chunk...)
-					if len(partial) > coreLogFileMaxLine {
-						collector.appendFileEntry(source, partial)
-						partial = nil
-					}
-					break
-				}
-				line := append(partial, chunk[:index]...)
-				partial = nil
-				chunk = chunk[index+1:]
-				collector.appendFileEntry(source, line)
-			}
 		}
 		if readErr == nil && bytesSinceValidation < coreLogRevalidateBytes && time.Now().Before(nextValidation) {
 			continue
@@ -510,15 +537,24 @@ func (collector *CoreLogCollector) followFile(ctx context.Context, source coreLo
 			// The file was replaced under us (external rename rotation or a
 			// service reinstall). Everything in the new inode is unread, so
 			// reopen it and stream from its start.
+			collector.filePublishMu.Lock()
+			if err := ctx.Err(); err != nil {
+				collector.filePublishMu.Unlock()
+				probe.Close()
+				return err
+			}
 			file.Close()
 			file = probe
 			if _, err := file.Seek(0, io.SeekStart); err != nil {
+				collector.filePublishMu.Unlock()
 				return err
 			}
 			openedIdentity = pathInfo
 			openedMetadata = metadataFromFileInfo(pathInfo)
 			offset = 0
 			partial = nil
+			setCoreLogFileRunProgress(run, source.path, pathInfo, 0)
+			collector.filePublishMu.Unlock()
 			continue
 		}
 		if probe != nil {
@@ -527,11 +563,19 @@ func (collector *CoreLogCollector) followFile(ctx context.Context, source coreLo
 		if info.Size() < offset {
 			// The file was truncated (rotation); re-read from the start so the
 			// freshly written prefix is not missed.
+			collector.filePublishMu.Lock()
+			if err := ctx.Err(); err != nil {
+				collector.filePublishMu.Unlock()
+				return err
+			}
 			if _, err := file.Seek(0, io.SeekStart); err != nil {
+				collector.filePublishMu.Unlock()
 				return err
 			}
 			offset = 0
 			partial = nil
+			setCoreLogFileRunProgress(run, source.path, info, 0)
+			collector.filePublishMu.Unlock()
 			continue
 		}
 		if !atEOF {
@@ -549,6 +593,49 @@ func (collector *CoreLogCollector) followFile(ctx context.Context, source coreLo
 		}
 	}
 	return ctx.Err()
+}
+
+func (collector *CoreLogCollector) publishFileBlock(ctx context.Context, file *os.File, source coreLogFileSource,
+	run *coreLogFileRun, openedIdentity os.FileInfo, openedMetadata fileMetadata, chunk []byte, partial *[]byte, offset *int64) error {
+	collector.filePublishMu.Lock()
+	defer collector.filePublishMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	openedInfo, err := file.Stat()
+	if err != nil {
+		return err
+	}
+	if !os.SameFile(openedIdentity, openedInfo) || !openedInfo.Mode().IsRegular() ||
+		!coreLogFileHasSingleLink(openedInfo) || metadataFromFileInfo(openedInfo) != openedMetadata {
+		return errors.New("managed core log file link identity drifted before publish")
+	}
+	*offset += int64(len(chunk))
+	for {
+		index := bytes.IndexByte(chunk, '\n')
+		if index < 0 {
+			*partial = append(*partial, chunk...)
+			if len(*partial) > coreLogFileMaxLine {
+				collector.appendFileEntry(source, *partial)
+				*partial = nil
+			}
+			break
+		}
+		line := append(*partial, chunk[:index]...)
+		*partial = nil
+		chunk = chunk[index+1:]
+		collector.appendFileEntry(source, line)
+	}
+	setCoreLogFileRunProgress(run, source.path, openedInfo, *offset-int64(len(*partial)))
+	return nil
+}
+
+func setCoreLogFileRunProgress(run *coreLogFileRun, path string, info os.FileInfo, offset int64) {
+	device, inode, ok := coreLogFileIdentity(info)
+	if run == nil || !ok || offset < 0 {
+		return
+	}
+	run.progress = coreLogImportWindow{path: path, exists: true, device: device, inode: inode, offset: offset}
 }
 
 func coreLogFileIdentity(info os.FileInfo) (uint64, uint64, bool) {
@@ -659,6 +746,14 @@ func coreLogFileSources(specSets ...map[core.Engine]EngineSpec) []coreLogFileSou
 }
 
 func (collector *CoreLogCollector) RefreshImportedSingBoxSource(executor *Executor) error {
+	return collector.refreshImportedSingBoxSource(executor, nil)
+}
+
+func (collector *CoreLogCollector) CompleteImportedSingBoxSource(executor *Executor, succeeded bool) error {
+	return collector.refreshImportedSingBoxSource(executor, &succeeded)
+}
+
+func (collector *CoreLogCollector) refreshImportedSingBoxSource(executor *Executor, succeeded *bool) error {
 	if executor == nil {
 		return nil
 	}
@@ -666,6 +761,10 @@ func (collector *CoreLogCollector) RefreshImportedSingBoxSource(executor *Execut
 	spec, enabled := executor.Specs[core.EngineSingBox]
 	executor.specsMu.RUnlock()
 	if !enabled {
+		if succeeded != nil {
+			collector.failImportedSingBoxSource("transition-state-invalid")
+			return errors.New("managed sing-box configuration disappeared during source transition")
+		}
 		collector.replaceImportedSingBoxSource(nil)
 		return nil
 	}
@@ -692,16 +791,37 @@ func (collector *CoreLogCollector) RefreshImportedSingBoxSource(executor *Execut
 		return errors.New("managed sing-box configuration is unavailable")
 	}
 	configDigest := coreMigrationConfigDigest(string(contents))
+	collector.mu.Lock()
+	transition := collector.transitions[core.EngineSingBox]
+	collector.mu.Unlock()
+	if succeeded == nil && transition != nil {
+		return errors.New("managed sing-box log source transition is still in progress")
+	}
+	if succeeded != nil {
+		if transition == nil {
+			collector.failImportedSingBoxSource("transition-state-invalid")
+			return errors.New("managed sing-box log source transition is unavailable")
+		}
+		expectedDigest := transition.previousDigest
+		if *succeeded {
+			expectedDigest = transition.targetDigest
+		}
+		if expectedDigest == "" || configDigest != expectedDigest {
+			collector.failImportedSingBoxSource("transition-state-invalid")
+			return errors.New("managed sing-box configuration does not match the completed source transition")
+		}
+	}
 	output, destination, err := singBoxLogOutput(string(contents))
 	if err != nil {
 		collector.failImportedSingBoxSource("config-invalid")
 		return err
 	}
 	if destination != singBoxLogDestinationFile {
-		collector.mu.Lock()
-		delete(collector.importWindows, core.EngineSingBox)
-		collector.mu.Unlock()
-		collector.replaceImportedSingBoxSource(nil)
+		if transition != nil {
+			collector.completeImportedSingBoxSource(nil)
+		} else {
+			collector.replaceImportedSingBoxSource(nil)
+		}
 		collector.selectConsoleSource(core.EngineSingBox)
 		return nil
 	}
@@ -720,17 +840,34 @@ func (collector *CoreLogCollector) RefreshImportedSingBoxSource(executor *Execut
 		configPath: spec.ConfigPath, configDigest: configDigest, markerPrefix: executor.MigrationMarkerPrefix,
 		executor: executor, ownership: ownership,
 	}
+	reused := false
 	collector.mu.Lock()
-	if window, ok := collector.importWindows[core.EngineSingBox]; ok {
-		if window.path == path && window.configDigest == configDigest {
-			copy := window
-			source.initial = &copy
+	if transition != nil {
+		window, ok := transition.windows[path]
+		if !ok {
+			collector.mu.Unlock()
+			collector.failImportedSingBoxSource("transition-source-invalid")
+			return errors.New("managed sing-box final log source was not captured before transition")
 		}
-		delete(collector.importWindows, core.EngineSingBox)
+		copy := window
+		source.initial = &copy
+		source.epoch = transition.epoch
+	} else {
+		source.epoch, reused = collector.importedSourceEpochLocked(source)
 	}
 	collector.mu.Unlock()
-	collector.replaceImportedSingBoxSource(&source)
-	collector.selectSourceKind(core.EngineSingBox, "file", CoreLogSourceStatus{Status: "waiting", Error: "source-missing"})
+	if transition != nil {
+		collector.selectSourceStatus(core.EngineSingBox, "file", "waiting", "source-transition")
+		collector.completeImportedSingBoxSource(&source)
+	} else {
+		if reused {
+			collector.replaceImportedSingBoxSource(&source)
+			collector.selectSourceKind(core.EngineSingBox, "file", CoreLogSourceStatus{Status: "waiting", Error: "source-missing"})
+		} else {
+			collector.selectSourceStatus(core.EngineSingBox, "file", "waiting", "source-missing")
+			collector.replaceImportedSingBoxSource(&source)
+		}
+	}
 	return nil
 }
 
@@ -739,39 +876,155 @@ func (collector *CoreLogCollector) PrepareImportedSingBoxSource(ctx context.Cont
 	if err != nil {
 		return err
 	}
-	collector.mu.Lock()
-	delete(collector.importWindows, core.EngineSingBox)
-	collector.mu.Unlock()
 	if destination != singBoxLogDestinationFile {
-		return collector.waitForConsoleSource(ctx, core.EngineSingBox)
+		if err := collector.waitForConsoleSource(ctx, core.EngineSingBox); err != nil {
+			return err
+		}
 	}
-	path, err := importedSingBoxLogPath(output)
-	if err != nil {
+	targetPath := ""
+	if destination == singBoxLogDestinationFile {
+		targetPath, err = importedSingBoxLogPath(output)
+		if err != nil {
+			return err
+		}
+	}
+	previousDigest := ""
+	if executor != nil {
+		executor.specsMu.RLock()
+		spec, enabled := executor.Specs[core.EngineSingBox]
+		executor.specsMu.RUnlock()
+		if enabled {
+			var exists bool
+			previousDigest, exists, err = protectedCoreMigrationFileDigest(spec.ConfigPath, core.MaxConfigBytes)
+			if err != nil {
+				return err
+			}
+			if !exists {
+				previousDigest = ""
+			}
+		}
+	}
+
+	collector.filePublishMu.Lock()
+	collector.mu.Lock()
+	if collector.transitions[core.EngineSingBox] != nil {
+		collector.mu.Unlock()
+		collector.filePublishMu.Unlock()
+		return errors.New("managed sing-box log source transition is already in progress")
+	}
+	var currentSource *coreLogFileSource
+	for index := range collector.fileSources {
+		source := &collector.fileSources[index]
+		if source.engine == core.EngineSingBox && source.kind == "file" {
+			copy := *source
+			currentSource = &copy
+			break
+		}
+	}
+	key := string(core.EngineSingBox) + "\x00file"
+	active := collector.activeFiles[key]
+	collector.nextFileEpoch++
+	transition := &coreLogSourceTransition{
+		epoch: collector.nextFileEpoch, previousDigest: previousDigest,
+		targetDigest: coreMigrationConfigDigest(content), windows: make(map[string]coreLogImportWindow),
+	}
+	collector.transitions[core.EngineSingBox] = transition
+	if active != nil {
+		active.cancel()
+	}
+	collector.mu.Unlock()
+
+	paths := make(map[string]struct{})
+	if currentSource != nil {
+		paths[currentSource.path] = struct{}{}
+	}
+	if targetPath != "" {
+		paths[targetPath] = struct{}{}
+	}
+	for path := range paths {
+		var progress *coreLogImportWindow
+		if active != nil && active.source.path == path && active.progress.path == path {
+			copy := active.progress
+			progress = &copy
+		}
+		window, captureErr := captureCoreLogImportWindow(path, progress)
+		if captureErr != nil {
+			collector.mu.Lock()
+			if collector.transitions[core.EngineSingBox] == transition {
+				delete(collector.transitions, core.EngineSingBox)
+			}
+			collector.mu.Unlock()
+			collector.filePublishMu.Unlock()
+			collector.waitAndRestoreFileSource(active, currentSource)
+			return captureErr
+		}
+		transition.windows[path] = window
+	}
+	collector.filePublishMu.Unlock()
+	if err := waitCoreLogFileRun(active, 5*time.Second); err != nil {
+		collector.mu.Lock()
+		if collector.transitions[core.EngineSingBox] == transition {
+			delete(collector.transitions, core.EngineSingBox)
+		}
+		collector.mu.Unlock()
+		collector.waitAndRestoreFileSource(active, currentSource)
 		return err
 	}
-	window := coreLogImportWindow{path: path, configDigest: coreMigrationConfigDigest(content)}
+	collector.selectSourceStatus(core.EngineSingBox, "file", "waiting", "source-transition")
+	return nil
+}
+
+func captureCoreLogImportWindow(path string, progress *coreLogImportWindow) (coreLogImportWindow, error) {
+	window := coreLogImportWindow{path: path}
 	probe := coreLogFileSource{path: path, root: importedSingBoxLogRoot, engine: core.EngineSingBox, kind: "window"}
 	file, err := openValidatedCoreLogFile(probe)
 	if err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
-			return err
+		if errors.Is(err, os.ErrNotExist) {
+			return window, nil
 		}
-	} else {
-		info, statErr := file.Stat()
-		file.Close()
-		if statErr != nil {
-			return statErr
-		}
-		device, inode, ok := coreLogFileIdentity(info)
-		if !ok {
-			return errors.New("managed sing-box log source has no stable file identity")
-		}
-		window.exists, window.device, window.inode, window.offset = true, device, inode, info.Size()
+		return coreLogImportWindow{}, err
 	}
-	collector.mu.Lock()
-	collector.importWindows[core.EngineSingBox] = window
-	collector.mu.Unlock()
-	return nil
+	info, statErr := file.Stat()
+	file.Close()
+	if statErr != nil {
+		return coreLogImportWindow{}, statErr
+	}
+	device, inode, ok := coreLogFileIdentity(info)
+	if !ok {
+		return coreLogImportWindow{}, errors.New("managed sing-box log source has no stable file identity")
+	}
+	window.exists, window.device, window.inode, window.offset = true, device, inode, info.Size()
+	if progress != nil && progress.exists && progress.device == device && progress.inode == inode && progress.offset >= 0 {
+		if info.Size() >= progress.offset {
+			window.offset = progress.offset
+		} else {
+			// A truncate between the last published block and transition
+			// ownership resets the safe replay point to the new file prefix.
+			window.offset = 0
+		}
+	}
+	return window, nil
+}
+
+func waitCoreLogFileRun(run *coreLogFileRun, timeout time.Duration) error {
+	if run == nil {
+		return nil
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-run.done:
+		return nil
+	case <-timer.C:
+		return errors.New("managed core log source did not stop for transition")
+	}
+}
+
+func (collector *CoreLogCollector) waitAndRestoreFileSource(run *coreLogFileRun, source *coreLogFileSource) {
+	_ = waitCoreLogFileRun(run, 5*time.Second)
+	if source != nil {
+		collector.startFileSource(*source)
+	}
 }
 
 func (collector *CoreLogCollector) waitForConsoleSource(ctx context.Context, engine core.Engine) error {
@@ -814,7 +1067,18 @@ func (collector *CoreLogCollector) waitForConsoleSource(ctx context.Context, eng
 }
 
 func (collector *CoreLogCollector) replaceImportedSingBoxSource(source *coreLogFileSource) {
+	collector.replaceImportedSingBoxSourceLocked(source, false)
+}
+
+func (collector *CoreLogCollector) completeImportedSingBoxSource(source *coreLogFileSource) {
+	collector.replaceImportedSingBoxSourceLocked(source, true)
+}
+
+func (collector *CoreLogCollector) replaceImportedSingBoxSourceLocked(source *coreLogFileSource, completeTransition bool) {
 	collector.mu.Lock()
+	if completeTransition {
+		delete(collector.transitions, core.EngineSingBox)
+	}
 	filtered := collector.fileSources[:0]
 	for _, existing := range collector.fileSources {
 		if existing.engine == core.EngineSingBox && existing.kind == "file" {
@@ -830,12 +1094,26 @@ func (collector *CoreLogCollector) replaceImportedSingBoxSource(source *coreLogF
 	running := collector.runContext != nil && !collector.runStopped
 	if source == nil && active != nil {
 		active.cancel()
-		delete(collector.activeFiles, string(core.EngineSingBox)+"\x00file")
 	}
 	collector.mu.Unlock()
+	if source == nil {
+		_ = waitCoreLogFileRun(active, 5*time.Second)
+		return
+	}
 	if source != nil && running {
 		collector.startFileSource(*source)
 	}
+}
+
+func (collector *CoreLogCollector) importedSourceEpochLocked(source coreLogFileSource) (uint64, bool) {
+	for _, existing := range collector.fileSources {
+		if existing.engine == source.engine && existing.kind == source.kind && existing.path == source.path &&
+			existing.configDigest == source.configDigest && existing.ownership == source.ownership {
+			return existing.epoch, true
+		}
+	}
+	collector.nextFileEpoch++
+	return collector.nextFileEpoch, false
 }
 
 func (collector *CoreLogCollector) selectConsoleSource(engine core.Engine) {
@@ -850,10 +1128,10 @@ func (collector *CoreLogCollector) selectConsoleSource(engine core.Engine) {
 
 func (collector *CoreLogCollector) failImportedSingBoxSource(code string) {
 	collector.mu.Lock()
-	delete(collector.importWindows, core.EngineSingBox)
+	delete(collector.transitions, core.EngineSingBox)
 	collector.mu.Unlock()
 	collector.replaceImportedSingBoxSource(nil)
-	collector.selectSourceKind(core.EngineSingBox, "file", CoreLogSourceStatus{Status: "failed", Error: code})
+	collector.selectSourceStatus(core.EngineSingBox, "file", "failed", code)
 }
 
 type singBoxLogDestination uint8

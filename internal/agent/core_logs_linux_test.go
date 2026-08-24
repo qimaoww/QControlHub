@@ -218,7 +218,7 @@ func TestImportedSingBoxFileSourceCapturesOnlyMigrationWindow(t *testing.T) {
 	}
 	_, _ = file.WriteString("migration startup log\n")
 	_ = file.Close()
-	if err := collector.RefreshImportedSingBoxSource(executor); err != nil {
+	if err := collector.CompleteImportedSingBoxSource(executor, true); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := waitForLine(t, collector, "migration startup log"); !ok {
@@ -334,7 +334,7 @@ func TestImportedSingBoxFileSourceStopsOnServiceOwnershipDrift(t *testing.T) {
 	if err := collector.PrepareImportedSingBoxSource(context.Background(), executor, content); err != nil {
 		t.Fatal(err)
 	}
-	if err := collector.RefreshImportedSingBoxSource(executor); err != nil {
+	if err := collector.CompleteImportedSingBoxSource(executor, true); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -398,7 +398,7 @@ func TestImportedSingBoxFileSourceRevalidatesDuringContinuousWrites(t *testing.T
 	if err := collector.PrepareImportedSingBoxSource(context.Background(), executor, content); err != nil {
 		t.Fatal(err)
 	}
-	if err := collector.RefreshImportedSingBoxSource(executor); err != nil {
+	if err := collector.CompleteImportedSingBoxSource(executor, true); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -563,7 +563,7 @@ func TestImportedSingBoxLogSourceRejectsHardLinks(t *testing.T) {
 	if err := os.Link(outside, path); err != nil {
 		t.Fatal(err)
 	}
-	if err := collector.RefreshImportedSingBoxSource(executor); err != nil {
+	if err := collector.CompleteImportedSingBoxSource(executor, true); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -596,7 +596,7 @@ func TestImportedSingBoxLogSourceRejectsHardLinks(t *testing.T) {
 	if err := collector.PrepareImportedSingBoxSource(context.Background(), executor, content); err != nil {
 		t.Fatal(err)
 	}
-	if err := collector.RefreshImportedSingBoxSource(executor); err != nil {
+	if err := collector.CompleteImportedSingBoxSource(executor, true); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel = context.WithCancel(context.Background())
@@ -664,7 +664,7 @@ func TestImportedSingBoxActiveSourceRejectsHardLinkBeforePublish(t *testing.T) {
 			if err := collector.PrepareImportedSingBoxSource(context.Background(), executor, content); err != nil {
 				t.Fatal(err)
 			}
-			if err := collector.RefreshImportedSingBoxSource(executor); err != nil {
+			if err := collector.CompleteImportedSingBoxSource(executor, true); err != nil {
 				t.Fatal(err)
 			}
 

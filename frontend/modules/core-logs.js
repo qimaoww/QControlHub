@@ -59,7 +59,7 @@ export function installCoreLogs(ctx) {
           .filter(Boolean)
       : [];
     let emptyTitle = "暂无日志";
-    let emptyDetail = "当前来源工作正常，尚未收到符合筛选条件的新运行记录。";
+    let emptyDetail = "尚未收到符合当前筛选条件的运行记录。";
     let sourceNoticeTitle = "";
     let sourceNoticeDetail = "";
     if (filters.agent_id && !can("agents.read")) {
@@ -70,6 +70,16 @@ export function installCoreLogs(ctx) {
     } else if (filters.agent_id && !selectedAgent) {
       emptyTitle = "节点状态不可用";
       emptyDetail = "无法读取当前所选节点的运行状态。";
+      sourceNoticeTitle = emptyTitle;
+      sourceNoticeDetail = emptyDetail;
+    } else if (selectedAgent?.status === "offline") {
+      emptyTitle = "节点离线";
+      emptyDetail = "当前日志采集已暂停；已有内容为保留期内的历史记录。";
+      sourceNoticeTitle = emptyTitle;
+      sourceNoticeDetail = emptyDetail;
+    } else if (selectedAgent && selectedAgent.status !== "online") {
+      emptyTitle = "节点状态不可用";
+      emptyDetail = "无法确认当前节点是否仍在采集日志。";
       sourceNoticeTitle = emptyTitle;
       sourceNoticeDetail = emptyDetail;
     } else if (
@@ -122,6 +132,8 @@ export function installCoreLogs(ctx) {
         emptyDetail = "Agent 尚未报告当前内核的采集来源状态。";
         sourceNoticeTitle = emptyTitle;
         sourceNoticeDetail = emptyDetail;
+      } else if (filters.engine && status === "active") {
+        emptyDetail = "当前来源工作正常，尚未收到符合筛选条件的新运行记录。";
       }
     }
     const rows = entries
