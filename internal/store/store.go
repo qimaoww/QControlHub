@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"strings"
 	"sync"
 	"time"
@@ -18,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/qimaoww/qcontrolhub/internal/authn"
 	"github.com/qimaoww/qcontrolhub/internal/core"
+	"github.com/qimaoww/qcontrolhub/internal/netpolicy"
 )
 
 var (
@@ -531,6 +533,10 @@ func (s *Store) UpdateAgentObservedPublicIP(ctx context.Context, id, address str
 		address = authn.NormalizePublicIP(address)
 		if address == "" {
 			return fmt.Errorf("%w: invalid observed public agent address", ErrInvalid)
+		}
+		parsed, err := netip.ParseAddr(address)
+		if err != nil || netpolicy.IsCloudflareAddress(parsed) {
+			address = ""
 		}
 	}
 	command, err := s.pool.Exec(ctx, `
