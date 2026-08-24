@@ -61,9 +61,9 @@ const (
 )
 
 // PublicIPProbeConfig is an operator-controlled, per-family direct egress
-// probe configuration. Each family intentionally has one endpoint: switching
-// to another trust anchor after a failure must be an explicit configuration
-// change rather than a silent fallback.
+// probe configuration. Managed defaults may carry one approved same-family
+// fallback after the ipify primary; an explicit operator endpoint replaces its
+// complete family chain and never inherits a hidden public fallback.
 type PublicIPProbeConfig struct {
 	IPv4Endpoint         string `json:"ipv4_endpoint,omitempty"`
 	IPv4FallbackEndpoint string `json:"ipv4_fallback_endpoint,omitempty"`
@@ -91,6 +91,12 @@ func (config PublicIPProbeConfig) Validate() error {
 		if index == 1 && endpoint != DefaultPublicIPProbeIPv4Fallback || index == 3 && endpoint != DefaultPublicIPProbeIPv6Fallback {
 			return errors.New("public IP probe fallback endpoint is not an approved same-family endpoint")
 		}
+	}
+	if fallback := strings.TrimSpace(config.IPv4FallbackEndpoint); fallback != "" && strings.TrimSpace(config.IPv4Endpoint) != DefaultPublicIPProbeIPv4Endpoint {
+		return errors.New("public IP probe IPv4 fallback requires the approved ipify primary")
+	}
+	if fallback := strings.TrimSpace(config.IPv6FallbackEndpoint); fallback != "" && strings.TrimSpace(config.IPv6Endpoint) != DefaultPublicIPProbeIPv6Endpoint {
+		return errors.New("public IP probe IPv6 fallback requires the approved ipify primary")
 	}
 	return nil
 }

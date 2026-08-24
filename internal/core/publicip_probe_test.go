@@ -14,6 +14,8 @@ func TestPublicIPProbeConfigValidation(t *testing.T) {
 		{name: "credentials", config: PublicIPProbeConfig{IPv4Endpoint: "https://user:secret@probe.example.test/v4"}, wantErr: true},
 		{name: "query", config: PublicIPProbeConfig{IPv4Endpoint: "https://probe.example.test/v4?token=secret"}, wantErr: true},
 		{name: "unapproved fallback", config: PublicIPProbeConfig{IPv4Endpoint: DefaultPublicIPProbeIPv4Endpoint, IPv4FallbackEndpoint: "https://ip.sb"}, wantErr: true},
+		{name: "fallback without primary", config: PublicIPProbeConfig{IPv4FallbackEndpoint: DefaultPublicIPProbeIPv4Fallback}, wantErr: true},
+		{name: "custom primary cannot inherit fallback", config: PublicIPProbeConfig{IPv4Endpoint: "https://probe.example.test/v4", IPv4FallbackEndpoint: DefaultPublicIPProbeIPv4Fallback}, wantErr: true},
 		{name: "oversized endpoint", config: PublicIPProbeConfig{IPv4Endpoint: "https://" + string(make([]byte, 2048))}, wantErr: true},
 		{name: "too frequent", config: PublicIPProbeConfig{IPv4Endpoint: "https://probe.example.test/v4", IntervalSeconds: 59}, wantErr: true},
 	}
