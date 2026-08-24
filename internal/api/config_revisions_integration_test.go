@@ -90,6 +90,43 @@ func TestConfigRevisionAPIWithPostgreSQL(t *testing.T) {
 	}
 }
 
+func TestEncryptedConfigRevisionAPIFailsClosedWithoutKey(t *testing.T) {
+	databaseURL := os.Getenv("QCH_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("QCH_TEST_DATABASE_URL is not configured")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	key := strings.Repeat("c", 32)
+	encryptedStore, err := store.OpenWithConfigKey(ctx, databaseURL, true, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config, err := encryptedStore.CreateConfig(ctx, core.Config{
+		Name: "missing-key API config", Engine: core.EngineXray,
+		Content: `{"log":{"loglevel":"warning"},"inbounds":[],"outbounds":[]}`,
+	})
+	if err != nil {
+		encryptedStore.Close()
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = encryptedStore.DeleteConfig(context.Background(), config.ID)
+		encryptedStore.Close()
+	}()
+	plainStore, err := store.Open(ctx, databaseURL, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer plainStore.Close()
+	adminToken := strings.Repeat("p", 48)
+	response := revisionAPIRequest(t, New(plainStore, Config{AdminToken: adminToken}).Handler(), adminToken,
+		http.MethodGet, "/api/v1/configs/"+config.ID+"/revisions/1", nil)
+	if response.Code != http.StatusInternalServerError || strings.Contains(response.Body.String(), "rf2:") || strings.Contains(response.Body.String(), "loglevel") {
+		t.Fatalf("missing-key revision response status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 func revisionAPIRequest(t *testing.T, handler http.Handler, token, method, target string, body []byte) *httptest.ResponseRecorder {
 	t.Helper()
 	request := httptest.NewRequest(method, target, bytes.NewReader(body))

@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"crypto/subtle"
+	"errors"
 	"net/http"
 	"net/url"
 	"strings"
@@ -256,9 +257,18 @@ func (s *Server) sameOrigin(request *http.Request) bool {
 }
 
 func (s *Server) recordAudit(request *http.Request, action, target, detail string) {
-	if s.store == nil {
+	if s.store == nil && s.auditWriter == nil {
 		return
 	}
+	entry := s.auditEntry(request, action, target, detail)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = s.writeAudit(ctx, entry)
+	}()
+}
+
+func (s *Server) auditEntry(request *http.Request, action, target, detail string) core.AuditLogEntry {
 	role, _ := s.sessionRole(request)
 	actor := string(role)
 	if value, ok := s.sessionForRequest(request); ok && value.Username != "" {
@@ -268,9 +278,24 @@ func (s *Server) recordAudit(request *http.Request, action, target, detail strin
 		actor = "api"
 	}
 	remoteIP := authn.ClientIP(request, s.trustedProxies)
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		_ = s.store.RecordAudit(ctx, core.AuditLogEntry{Actor: actor, Action: action, Target: target, Detail: detail, RemoteIP: remoteIP})
-	}()
+	return core.AuditLogEntry{Actor: actor, Action: action, Target: target, Detail: detail, RemoteIP: remoteIP}
+}
+
+func (s *Server) writeAudit(ctx context.Context, entry core.AuditLogEntry) error {
+	if s.auditWriter != nil {
+		return s.auditWriter(ctx, entry)
+	}
+	if s.store == nil {
+		return errors.New("audit store unavailable")
+	}
+	return s.store.RecordAudit(ctx, entry)
+}
+
+func (s *Server) recordAuditSync(request *http.Request, action, target, detail string) error {
+	if s.store == nil && s.auditWriter == nil {
+		return errors.New("audit store unavailable")
+	}
+	ctx, cancel := context.WithTimeout(request.Context(), 2*time.Second)
+	defer cancel()
+	return s.writeAudit(ctx, s.auditEntry(request, action, target, detail))
 }

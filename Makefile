@@ -3,7 +3,7 @@ SHELL := /bin/sh
 VERSION ?= dev
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
-.PHONY: build test vet fmt-check frontend-check installer-test web-image-test docs-check check init-env compose-config up dev-up down logs
+.PHONY: build test vet fmt-check frontend-check installer-test quick-start-test web-image-test docs-check check init-env compose-config up dev-up down logs
 
 build:
 	mkdir -p bin
@@ -26,13 +26,16 @@ frontend-check:
 installer-test:
 	sh deploy/tests/inherit-existing-core.sh
 
+quick-start-test:
+	bash deploy/tests/quick-start-env.sh
+
 web-image-test:
 	docker build --target qcontrol-web --build-arg VERSION='$(VERSION)' .
 
 docs-check:
 	node docs/check_docs.mjs
 
-check: fmt-check frontend-check installer-test docs-check vet test
+check: fmt-check frontend-check installer-test quick-start-test docs-check vet test
 
 init-env:
 	@command -v openssl >/dev/null 2>&1 || { printf '%s\n' 'openssl is required'; exit 1; }
@@ -50,6 +53,7 @@ init-env:
 		"QCH_ADMIN_TOKEN=$$admin_token" \
 		"QCH_WEBHOOK_SECRET=$$webhook_secret" \
 		"QCH_CONFIG_ENCRYPTION_KEY=$$config_key" \
+		'QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS=' \
 		'QCH_BEHIND_TLS_PROXY=true' \
 		'QCH_ALLOW_INSECURE_HTTP=false' \
 		'QCH_ALLOW_INSECURE_DATABASE=true' \

@@ -224,21 +224,22 @@ type HostNetworkInterface struct {
 }
 
 type Agent struct {
-	ID           string                  `json:"id"`
-	Name         string                  `json:"name"`
-	Version      string                  `json:"version,omitempty"`
-	OS           string                  `json:"os"`
-	Arch         string                  `json:"arch"`
-	Capabilities []Engine                `json:"capabilities"`
-	Features     []string                `json:"features,omitempty"`
-	Labels       map[string]string       `json:"labels,omitempty"`
-	Runtime      map[Engine]RuntimeState `json:"runtime,omitempty"`
-	Metrics      HostMetrics             `json:"metrics,omitempty"`
-	LastSeen     time.Time               `json:"last_seen"`
-	EnrolledAt   time.Time               `json:"enrolled_at"`
-	PublicKey    []byte                  `json:"-"`
-	Status       string                  `json:"status,omitempty"`
-	Reinstalled  bool                    `json:"-"`
+	ID                         string                  `json:"id"`
+	Name                       string                  `json:"name"`
+	Version                    string                  `json:"version,omitempty"`
+	OS                         string                  `json:"os"`
+	Arch                       string                  `json:"arch"`
+	Capabilities               []Engine                `json:"capabilities"`
+	Features                   []string                `json:"features,omitempty"`
+	Labels                     map[string]string       `json:"labels,omitempty"`
+	Runtime                    map[Engine]RuntimeState `json:"runtime,omitempty"`
+	Metrics                    HostMetrics             `json:"metrics,omitempty"`
+	LastSeen                   time.Time               `json:"last_seen"`
+	EnrolledAt                 time.Time               `json:"enrolled_at"`
+	PublicKey                  []byte                  `json:"-"`
+	Status                     string                  `json:"status,omitempty"`
+	EnrollmentCommandAvailable bool                    `json:"enrollment_command_available,omitempty"`
+	Reinstalled                bool                    `json:"-"`
 }
 
 type Config struct {
@@ -317,15 +318,16 @@ type EnrollResponse struct {
 }
 
 type EnrollmentToken struct {
-	ID        string     `json:"id"`
-	AgentID   string     `json:"agent_id,omitempty"`
-	Name      string     `json:"name"`
-	ExpiresAt *time.Time `json:"expires_at,omitempty"`
-	MaxUses   int        `json:"max_uses"`
-	UsedCount int        `json:"used_count"`
-	Reusable  bool       `json:"reusable,omitempty"`
-	CreatedAt time.Time  `json:"created_at"`
-	RevokedAt *time.Time `json:"revoked_at,omitempty"`
+	ID          string     `json:"id"`
+	AgentID     string     `json:"agent_id,omitempty"`
+	Name        string     `json:"name"`
+	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
+	MaxUses     int        `json:"max_uses"`
+	UsedCount   int        `json:"used_count"`
+	Reusable    bool       `json:"reusable,omitempty"`
+	Recoverable bool       `json:"command_available,omitempty"`
+	CreatedAt   time.Time  `json:"created_at"`
+	RevokedAt   *time.Time `json:"revoked_at,omitempty"`
 }
 
 type EnrollmentTokenRequest struct {

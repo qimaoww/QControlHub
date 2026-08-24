@@ -64,7 +64,7 @@ set -a
 set +a
 QCH_SERVER_URL=ws://127.0.0.1:8080 \
 QCH_ALLOW_HTTP=true \
-QCH_ENROLLMENT_TOKEN='刚生成且只显示一次的添加节点凭证' \
+QCH_ENROLLMENT_TOKEN='刚生成或从受保护命令弹窗重新读取的添加节点凭证' \
 QCH_AGENT_STATE=./data/dev-agent-state.json \
 QCH_AGENT_NAME=dev-agent \
 go run ./cmd/agent
