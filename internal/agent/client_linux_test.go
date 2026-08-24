@@ -212,6 +212,43 @@ func TestClientHeartbeatAdvertisesCoreLogsPerServiceManager(t *testing.T) {
 	t.Run("openrc", func(t *testing.T) { run(t, ServiceManagerOpenRC, true) })
 }
 
+func TestImportTaskCapturesSingBoxStartupFileBeforeResultDelivery(t *testing.T) {
+	logRoot := t.TempDir()
+	previous := importedSingBoxLogRoot
+	importedSingBoxLogRoot = logRoot
+	t.Cleanup(func() { importedSingBoxLogRoot = previous })
+	content := `{"log":{"level":"info","timestamp":true,"output":"runtime.log"}}`
+	executor := newImportedSingBoxLogExecutor(t, content)
+	collector := NewCoreLogCollectorForServiceManager(defaultSystemdServiceManager(), executor.Specs)
+	client := &Client{
+		config:   ClientConfig{StatePath: filepath.Join(t.TempDir(), "agent-state.json")},
+		executor: executor,
+		logs:     collector,
+		executeFunc: func(context.Context, core.Task) (string, error) {
+			return "imported", os.WriteFile(filepath.Join(logRoot, "runtime.log"), []byte("managed startup ready\n"), 0o600)
+		},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { collector.Run(ctx); close(done) }()
+	result := client.resultForTask(context.Background(), core.Task{
+		ID: "tsk_0123456789abcdef", LeaseID: "lease_0123456789abcdef",
+		Action: core.ActionImportExisting, Engine: core.EngineSingBox, ConfigContent: content,
+	})
+	if !result.Success {
+		t.Fatalf("import result = %+v", result)
+	}
+	if _, ok := waitForLine(t, collector, "managed startup ready"); !ok {
+		t.Fatal("startup line written during import did not reach the WSS batch queue")
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("client import collector leaked")
+	}
+}
+
 func TestTaskExecutionSurvivesWebSocketSessionCancellation(t *testing.T) {
 	t.Parallel()
 	_, privateKey, err := ed25519.GenerateKey(rand.Reader)

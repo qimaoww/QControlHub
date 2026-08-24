@@ -569,11 +569,22 @@ func (c *Client) resultForTask(ctx context.Context, task core.Task) core.TaskRes
 		if execute == nil {
 			execute = c.executor.Execute
 		}
+		if c.logs != nil && task.Engine == core.EngineSingBox &&
+			(task.Action == core.ActionImportExisting || task.Action == core.ActionDeploy) {
+			if err := c.logs.PrepareImportedSingBoxSource(ctx, c.executor, task.ConfigContent); err != nil {
+				slog.Warn("prepare managed sing-box log capture window", "error", err)
+			}
+		} else if c.logs != nil && task.Engine == core.EngineSingBox &&
+			(task.Action == core.ActionInstall || task.Action == core.ActionStart || task.Action == core.ActionRestart) {
+			if err := c.logs.waitForConsoleSource(ctx, core.EngineSingBox); err != nil {
+				slog.Warn("wait for managed sing-box console log source", "error", err)
+			}
+		}
 		output, executionErr = execute(ctx, task)
 	}
-	if c.logs != nil && executionErr == nil && task.Action == core.ActionImportExisting && task.Engine == core.EngineSingBox {
+	if c.logs != nil && task.Engine == core.EngineSingBox && coreLogSourceMayChange(task.Action) {
 		if err := c.logs.RefreshImportedSingBoxSource(c.executor); err != nil {
-			slog.Warn("refresh imported sing-box log source", "error", err)
+			slog.Warn("refresh managed sing-box log source", "error", err)
 		}
 	}
 	result := core.TaskResultRequest{
@@ -596,6 +607,15 @@ func (c *Client) resultForTask(ctx context.Context, task core.Task) core.TaskRes
 	close(execution.done)
 	c.executionsMu.Unlock()
 	return result
+}
+
+func coreLogSourceMayChange(action core.Action) bool {
+	switch action {
+	case core.ActionImportExisting, core.ActionDeploy, core.ActionInstall, core.ActionStart, core.ActionRestart:
+		return true
+	default:
+		return false
+	}
 }
 
 func (c *Client) pruneExecutionsLocked(now time.Time) {

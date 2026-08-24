@@ -363,9 +363,9 @@ func TestValidateNoRelativeSingBoxResourcesContract(t *testing.T) {
 			contents: `{"log":{"output":"stderr"}}`,
 			wantErr:  false,
 		},
-		"log output relative rejected": {
+		"log output relative deferred to import boundary": {
 			contents: `{"log":{"output":"relative.log"}}`,
-			wantErr:  true,
+			wantErr:  false,
 		},
 		"log output absolute accepted": {
 			contents: `{"log":{"output":"/var/log/sing-box.log"}}`,

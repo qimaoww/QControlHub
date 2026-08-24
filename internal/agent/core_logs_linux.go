@@ -43,20 +43,39 @@ var (
 )
 
 type CoreLogCollector struct {
-	mu          sync.Mutex
-	queued      []core.CoreLogEntry
-	pending     *core.CoreLogBatch
-	dropped     uint64
-	sources     []coreLogJournalSource
-	fileSources []coreLogFileSource
-	seenCursors map[string]struct{}
-	cursorOrder []string
-	runContext  context.Context
-	runWait     sync.WaitGroup
-	runStopped  bool
-	activeFiles map[string]struct{}
-	status      map[core.Engine]CoreLogSourceStatus
-	statusKind  map[core.Engine]string
+	mu            sync.Mutex
+	queued        []core.CoreLogEntry
+	pending       *core.CoreLogBatch
+	dropped       uint64
+	sources       []coreLogJournalSource
+	fileSources   []coreLogFileSource
+	seenCursors   map[string]struct{}
+	cursorOrder   []string
+	runContext    context.Context
+	runWait       sync.WaitGroup
+	runStopped    bool
+	activeFiles   map[string]*coreLogFileRun
+	status        map[core.Engine]CoreLogSourceStatus
+	statusKind    map[core.Engine]string
+	kindStatus    map[core.Engine]map[string]CoreLogSourceStatus
+	preferredKind map[core.Engine]string
+	consoleKind   map[core.Engine]string
+	importWindows map[core.Engine]coreLogImportWindow
+	sourceReady   map[core.Engine]chan struct{}
+}
+
+type coreLogFileRun struct {
+	cancel    context.CancelFunc
+	bindingID string
+}
+
+type coreLogImportWindow struct {
+	path         string
+	configDigest string
+	exists       bool
+	device       uint64
+	inode        uint64
+	offset       int64
 }
 
 type coreLogJournalSource struct {
@@ -72,6 +91,9 @@ type coreLogFileSource struct {
 	configPath   string
 	configDigest string
 	markerPrefix string
+	executor     *Executor
+	ownership    completedCoreMigration
+	initial      *coreLogImportWindow
 }
 
 type CoreLogSourceStatus struct {
@@ -87,12 +109,31 @@ func NewCoreLogCollectorForServiceManager(manager *ServiceManager, specs ...map[
 	if len(specs) == 0 {
 		specs = []map[core.Engine]EngineSpec{DefaultSpecs()}
 	}
-	collector := &CoreLogCollector{activeFiles: make(map[string]struct{}), status: make(map[core.Engine]CoreLogSourceStatus), statusKind: make(map[core.Engine]string)}
+	collector := &CoreLogCollector{
+		activeFiles: make(map[string]*coreLogFileRun), status: make(map[core.Engine]CoreLogSourceStatus),
+		statusKind: make(map[core.Engine]string), kindStatus: make(map[core.Engine]map[string]CoreLogSourceStatus),
+		preferredKind: make(map[core.Engine]string), consoleKind: make(map[core.Engine]string),
+		importWindows: make(map[core.Engine]coreLogImportWindow), sourceReady: make(map[core.Engine]chan struct{}),
+	}
 	if manager != nil && manager.Kind() == ServiceManagerOpenRC {
 		collector.fileSources = coreLogFileSources(specs...)
+		for _, source := range collector.fileSources {
+			collector.consoleKind[source.engine] = "openrc"
+			collector.preferredKind[source.engine] = "openrc"
+			collector.sourceReady[source.engine] = make(chan struct{})
+		}
 		return collector
 	}
 	collector.sources = coreLogJournalSources(specs...)
+	for _, source := range collector.sources {
+		for _, engine := range source.unitEngines {
+			collector.consoleKind[engine] = "journal"
+			collector.preferredKind[engine] = "journal"
+			if collector.sourceReady[engine] == nil {
+				collector.sourceReady[engine] = make(chan struct{})
+			}
+		}
+	}
 	return collector
 }
 
@@ -123,10 +164,35 @@ func (collector *CoreLogCollector) setSourceStatus(engine core.Engine, kind, sta
 	if collector.statusKind == nil {
 		collector.statusKind = make(map[core.Engine]string)
 	}
-	if _, exists := collector.status[engine]; exists && kind == "journal" && collector.statusKind[engine] == "file" {
+	if collector.kindStatus == nil {
+		collector.kindStatus = make(map[core.Engine]map[string]CoreLogSourceStatus)
+	}
+	if collector.kindStatus[engine] == nil {
+		collector.kindStatus[engine] = make(map[string]CoreLogSourceStatus)
+	}
+	value := CoreLogSourceStatus{Status: status, Error: code}
+	collector.kindStatus[engine][kind] = value
+	armed := status == "active" || (kind == "openrc" && status == "waiting")
+	if armed && kind == collector.consoleKind[engine] && collector.sourceReady[engine] != nil {
+		close(collector.sourceReady[engine])
+		collector.sourceReady[engine] = nil
+	}
+	if preferred := collector.preferredKind[engine]; preferred != "" && preferred != kind {
 		return
 	}
-	collector.status[engine] = CoreLogSourceStatus{Status: status, Error: code}
+	collector.status[engine] = value
+	collector.statusKind[engine] = kind
+}
+
+func (collector *CoreLogCollector) selectSourceKind(engine core.Engine, kind string, fallback CoreLogSourceStatus) {
+	collector.mu.Lock()
+	defer collector.mu.Unlock()
+	collector.preferredKind[engine] = kind
+	if current, ok := collector.kindStatus[engine][kind]; ok {
+		collector.status[engine] = current
+	} else {
+		collector.status[engine] = fallback
+	}
 	collector.statusKind[engine] = kind
 }
 
@@ -167,7 +233,10 @@ func (collector *CoreLogCollector) Run(ctx context.Context) {
 			}
 		}
 	}
-	for _, source := range collector.fileSources {
+	collector.mu.Lock()
+	fileSources := append([]coreLogFileSource(nil), collector.fileSources...)
+	collector.mu.Unlock()
+	for _, source := range fileSources {
 		collector.startFileSource(source)
 	}
 	<-ctx.Done()
@@ -184,25 +253,49 @@ func (collector *CoreLogCollector) startFileSource(source coreLogFileSource) {
 		return
 	}
 	if collector.activeFiles == nil {
-		collector.activeFiles = make(map[string]struct{})
+		collector.activeFiles = make(map[string]*coreLogFileRun)
 	}
-	key := string(source.engine) + "\x00" + source.path
-	if _, exists := collector.activeFiles[key]; exists {
+	key := coreLogFileSourceKey(source)
+	bindingID := coreLogFileBindingID(source)
+	if active := collector.activeFiles[key]; active != nil && active.bindingID == bindingID {
 		collector.mu.Unlock()
 		return
 	}
-	collector.activeFiles[key] = struct{}{}
 	ctx := collector.runContext
-	if ctx == nil {
+	if ctx == nil || ctx.Err() != nil {
 		collector.mu.Unlock()
 		return
 	}
+	if active := collector.activeFiles[key]; active != nil {
+		active.cancel()
+	}
+	fileContext, cancel := context.WithCancel(ctx)
+	run := &coreLogFileRun{cancel: cancel, bindingID: bindingID}
+	collector.activeFiles[key] = run
 	collector.runWait.Add(1)
 	collector.mu.Unlock()
 	go func() {
-		defer collector.runWait.Done()
-		collector.runFileSource(ctx, source)
+		defer func() {
+			collector.mu.Lock()
+			if collector.activeFiles[key] == run {
+				delete(collector.activeFiles, key)
+			}
+			collector.mu.Unlock()
+			collector.runWait.Done()
+		}()
+		collector.runFileSource(fileContext, source)
 	}()
+}
+
+func coreLogFileSourceKey(source coreLogFileSource) string {
+	if source.kind == "file" {
+		return string(source.engine) + "\x00file"
+	}
+	return string(source.engine) + "\x00" + source.kind + "\x00" + source.path
+}
+
+func coreLogFileBindingID(source coreLogFileSource) string {
+	return source.path + "\x00" + source.configDigest + "\x00" + source.ownership.SourceDigest
 }
 
 // runFileSource keeps one tail reader alive per managed OpenRC log file with
@@ -210,6 +303,7 @@ func (collector *CoreLogCollector) startFileSource(source coreLogFileSource) {
 func (collector *CoreLogCollector) runFileSource(ctx context.Context, source coreLogFileSource) {
 	for ctx.Err() == nil {
 		err := collector.followFile(ctx, source)
+		source.initial = nil
 		if ctx.Err() == nil {
 			slog.Warn("managed core log file reader stopped", "path", source.path, "error", err)
 			collector.setSourceStatus(source.engine, source.kind, "failed", coreLogErrorCode(err))
@@ -295,7 +389,7 @@ func (collector *CoreLogCollector) followFile(ctx context.Context, source coreLo
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		opened, err := openValidatedCoreLogFile(source)
+		opened, err := openValidatedCoreLogFileContext(ctx, source)
 		if err == nil {
 			file = opened
 			collector.setSourceStatus(source.engine, source.kind, "active", "")
@@ -316,10 +410,21 @@ func (collector *CoreLogCollector) followFile(ctx context.Context, source coreLo
 	}
 	defer file.Close()
 	initialWhence := io.SeekEnd
+	initialOffset := int64(0)
 	if missingBeforeOpen {
 		initialWhence = io.SeekStart
 	}
-	if _, err := file.Seek(0, initialWhence); err != nil {
+	if source.initial != nil {
+		initialWhence = io.SeekStart
+		if source.initial.exists {
+			info, statErr := file.Stat()
+			device, inode, identityOK := coreLogFileIdentity(info)
+			if statErr == nil && identityOK && device == source.initial.device && inode == source.initial.inode && info.Size() >= source.initial.offset {
+				initialOffset = source.initial.offset
+			}
+		}
+	}
+	if _, err := file.Seek(initialOffset, initialWhence); err != nil {
 		return err
 	}
 	offset := int64(0)
@@ -355,7 +460,7 @@ func (collector *CoreLogCollector) followFile(ctx context.Context, source coreLo
 		if !errors.Is(readErr, io.EOF) {
 			return readErr
 		}
-		if err := validateCoreLogSourceBinding(source); err != nil {
+		if err := validateCoreLogSourceBinding(ctx, source); err != nil {
 			return err
 		}
 		info, statErr := file.Stat()
@@ -365,7 +470,7 @@ func (collector *CoreLogCollector) followFile(ctx context.Context, source coreLo
 		if !info.Mode().IsRegular() {
 			return fmt.Errorf("managed core log file %s was replaced by a non-regular file", source.path)
 		}
-		probe, pathErr := openValidatedCoreLogFile(source)
+		probe, pathErr := openValidatedCoreLogFileContext(ctx, source)
 		if pathErr != nil && !errors.Is(pathErr, os.ErrNotExist) {
 			return pathErr
 		}
@@ -415,6 +520,17 @@ func (collector *CoreLogCollector) followFile(ctx context.Context, source coreLo
 		}
 	}
 	return ctx.Err()
+}
+
+func coreLogFileIdentity(info os.FileInfo) (uint64, uint64, bool) {
+	if info == nil {
+		return 0, 0, false
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return 0, 0, false
+	}
+	return uint64(stat.Dev), uint64(stat.Ino), true
 }
 
 // rotateFile copies the live file beside itself as a single .old snapshot
@@ -514,87 +630,224 @@ func coreLogFileSources(specSets ...map[core.Engine]EngineSpec) []coreLogFileSou
 }
 
 func (collector *CoreLogCollector) RefreshImportedSingBoxSource(executor *Executor) error {
-	if executor == nil || executor.MigrationMarkerPrefix == "" {
+	if executor == nil {
 		return nil
 	}
+	executor.specsMu.RLock()
 	spec, enabled := executor.Specs[core.EngineSingBox]
+	executor.specsMu.RUnlock()
 	if !enabled {
-		return nil
-	}
-	record, err := readCoreMigrationRecord(executor.MigrationMarkerPrefix, core.EngineSingBox)
-	if err != nil {
-		collector.setSourceStatus(core.EngineSingBox, "file", "failed", "migration-state-invalid")
-		return err
-	}
-	if record.State != coreMigrationComplete {
+		collector.replaceImportedSingBoxSource(nil)
 		return nil
 	}
 	info, err := os.Lstat(spec.ConfigPath)
 	if err != nil {
-		collector.setSourceStatus(core.EngineSingBox, "file", "failed", "config-unavailable")
+		collector.failImportedSingBoxSource("config-unavailable")
 		return err
 	}
 	file, _, err := openProtectedCoreMigrationFile(spec.ConfigPath, info, core.MaxConfigBytes)
 	if err != nil {
-		collector.setSourceStatus(core.EngineSingBox, "file", "failed", "config-unsafe")
+		collector.failImportedSingBoxSource("config-unsafe")
 		return err
 	}
 	contents, readErr := io.ReadAll(io.LimitReader(file, core.MaxConfigBytes+1))
 	file.Close()
-	if readErr != nil || len(contents) > core.MaxConfigBytes || coreMigrationConfigDigest(string(contents)) != record.ConfigDigest {
-		collector.setSourceStatus(core.EngineSingBox, "file", "failed", "config-drift")
-		return errors.New("imported sing-box configuration no longer matches its migration record")
+	if readErr != nil || len(contents) > core.MaxConfigBytes {
+		collector.failImportedSingBoxSource("config-unavailable")
+		return errors.New("managed sing-box configuration is unavailable")
 	}
-	output, disabled, err := singBoxLogOutput(string(contents))
+	configDigest := coreMigrationConfigDigest(string(contents))
+	output, destination, err := singBoxLogOutput(string(contents))
 	if err != nil {
-		collector.setSourceStatus(core.EngineSingBox, "file", "failed", "config-invalid")
+		collector.failImportedSingBoxSource("config-invalid")
 		return err
 	}
-	if disabled || output == "" {
+	if destination != singBoxLogDestinationFile {
+		collector.mu.Lock()
+		delete(collector.importWindows, core.EngineSingBox)
+		collector.mu.Unlock()
+		collector.replaceImportedSingBoxSource(nil)
+		collector.selectConsoleSource(core.EngineSingBox)
 		return nil
+	}
+	ownership, err := executor.completedMigrationOwnership(context.Background(), core.EngineSingBox, spec)
+	if err != nil {
+		collector.failImportedSingBoxSource("migration-state-invalid")
+		return err
 	}
 	path, err := importedSingBoxLogPath(output)
 	if err != nil {
-		collector.setSourceStatus(core.EngineSingBox, "file", "failed", "source-outside-boundary")
+		collector.failImportedSingBoxSource("source-outside-boundary")
 		return err
 	}
 	source := coreLogFileSource{
 		path: path, root: importedSingBoxLogRoot, engine: core.EngineSingBox, kind: "file",
-		configPath: spec.ConfigPath, configDigest: record.ConfigDigest, markerPrefix: executor.MigrationMarkerPrefix,
+		configPath: spec.ConfigPath, configDigest: configDigest, markerPrefix: executor.MigrationMarkerPrefix,
+		executor: executor, ownership: ownership,
 	}
 	collector.mu.Lock()
-	known := false
-	for _, existing := range collector.fileSources {
-		if existing.engine == source.engine && existing.path == source.path {
-			known = true
-			break
+	if window, ok := collector.importWindows[core.EngineSingBox]; ok {
+		if window.path == path && window.configDigest == configDigest {
+			copy := window
+			source.initial = &copy
 		}
+		delete(collector.importWindows, core.EngineSingBox)
 	}
-	if !known {
-		collector.fileSources = append(collector.fileSources, source)
-	}
-	running := collector.runContext != nil
 	collector.mu.Unlock()
-	collector.setSourceStatus(core.EngineSingBox, "file", "waiting", "source-missing")
-	if running {
-		collector.startFileSource(source)
-	}
+	collector.replaceImportedSingBoxSource(&source)
+	collector.selectSourceKind(core.EngineSingBox, "file", CoreLogSourceStatus{Status: "waiting", Error: "source-missing"})
 	return nil
 }
 
-func singBoxLogOutput(content string) (string, bool, error) {
+func (collector *CoreLogCollector) PrepareImportedSingBoxSource(ctx context.Context, executor *Executor, content string) error {
+	output, destination, err := singBoxLogOutput(content)
+	if err != nil {
+		return err
+	}
+	collector.mu.Lock()
+	delete(collector.importWindows, core.EngineSingBox)
+	collector.mu.Unlock()
+	if destination != singBoxLogDestinationFile {
+		return collector.waitForConsoleSource(ctx, core.EngineSingBox)
+	}
+	path, err := importedSingBoxLogPath(output)
+	if err != nil {
+		return err
+	}
+	window := coreLogImportWindow{path: path, configDigest: coreMigrationConfigDigest(content)}
+	probe := coreLogFileSource{path: path, root: importedSingBoxLogRoot, engine: core.EngineSingBox, kind: "window"}
+	file, err := openValidatedCoreLogFile(probe)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	} else {
+		info, statErr := file.Stat()
+		file.Close()
+		if statErr != nil {
+			return statErr
+		}
+		device, inode, ok := coreLogFileIdentity(info)
+		if !ok {
+			return errors.New("managed sing-box log source has no stable file identity")
+		}
+		window.exists, window.device, window.inode, window.offset = true, device, inode, info.Size()
+	}
+	collector.mu.Lock()
+	collector.importWindows[core.EngineSingBox] = window
+	collector.mu.Unlock()
+	return nil
+}
+
+func (collector *CoreLogCollector) waitForConsoleSource(ctx context.Context, engine core.Engine) error {
+	collector.mu.Lock()
+	ready := collector.sourceReady[engine]
+	kind := collector.consoleKind[engine]
+	if kind == "" {
+		collector.mu.Unlock()
+		return fmt.Errorf("managed %s log source is unsupported", engine)
+	}
+	if ready == nil {
+		status := collector.kindStatus[engine][kind]
+		collector.mu.Unlock()
+		if status.Status == "failed" {
+			return fmt.Errorf("managed %s log source is unavailable: %s", engine, status.Error)
+		}
+		return nil
+	}
+	collector.mu.Unlock()
+	waitContext, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	select {
+	case <-ready:
+		collector.mu.Lock()
+		status := collector.kindStatus[engine][kind]
+		collector.mu.Unlock()
+		if status.Status == "failed" {
+			return fmt.Errorf("managed %s log source is unavailable: %s", engine, status.Error)
+		}
+		return nil
+	case <-waitContext.Done():
+		collector.mu.Lock()
+		status := collector.kindStatus[engine][kind]
+		collector.mu.Unlock()
+		if status.Status == "failed" {
+			return fmt.Errorf("managed %s log source is unavailable: %s", engine, status.Error)
+		}
+		return fmt.Errorf("managed %s log source was not ready before service transition: %w", engine, waitContext.Err())
+	}
+}
+
+func (collector *CoreLogCollector) replaceImportedSingBoxSource(source *coreLogFileSource) {
+	collector.mu.Lock()
+	filtered := collector.fileSources[:0]
+	for _, existing := range collector.fileSources {
+		if existing.engine == core.EngineSingBox && existing.kind == "file" {
+			continue
+		}
+		filtered = append(filtered, existing)
+	}
+	collector.fileSources = filtered
+	if source != nil {
+		collector.fileSources = append(collector.fileSources, *source)
+	}
+	active := collector.activeFiles[string(core.EngineSingBox)+"\x00file"]
+	running := collector.runContext != nil && !collector.runStopped
+	if source == nil && active != nil {
+		active.cancel()
+		delete(collector.activeFiles, string(core.EngineSingBox)+"\x00file")
+	}
+	collector.mu.Unlock()
+	if source != nil && running {
+		collector.startFileSource(*source)
+	}
+}
+
+func (collector *CoreLogCollector) selectConsoleSource(engine core.Engine) {
+	collector.mu.Lock()
+	kind := collector.consoleKind[engine]
+	collector.mu.Unlock()
+	if kind == "" {
+		kind = "journal"
+	}
+	collector.selectSourceKind(engine, kind, CoreLogSourceStatus{Status: "waiting", Error: "collector-starting"})
+}
+
+func (collector *CoreLogCollector) failImportedSingBoxSource(code string) {
+	collector.mu.Lock()
+	delete(collector.importWindows, core.EngineSingBox)
+	collector.mu.Unlock()
+	collector.replaceImportedSingBoxSource(nil)
+	collector.selectSourceKind(core.EngineSingBox, "file", CoreLogSourceStatus{Status: "failed", Error: code})
+}
+
+type singBoxLogDestination uint8
+
+const (
+	singBoxLogDestinationConsole singBoxLogDestination = iota
+	singBoxLogDestinationDisabled
+	singBoxLogDestinationFile
+)
+
+func singBoxLogOutput(content string) (string, singBoxLogDestination, error) {
 	decoded, err := decodeExtendedJSON(content)
 	if err != nil {
-		return "", false, err
+		return "", singBoxLogDestinationConsole, err
 	}
 	root, _ := decoded.(map[string]any)
 	logging, _ := root["log"].(map[string]any)
 	if logging == nil {
-		return "", false, nil
+		return "", singBoxLogDestinationConsole, nil
 	}
 	disabled, _ := logging["disabled"].(bool)
 	output, _ := logging["output"].(string)
-	return output, disabled, nil
+	if disabled {
+		return output, singBoxLogDestinationDisabled, nil
+	}
+	if output == "" || output == "stdout" || output == "stderr" {
+		return output, singBoxLogDestinationConsole, nil
+	}
+	return output, singBoxLogDestinationFile, nil
 }
 
 func importedSingBoxLogPath(output string) (string, error) {
@@ -612,10 +865,14 @@ func importedSingBoxLogPath(output string) (string, error) {
 }
 
 func openValidatedCoreLogFile(source coreLogFileSource) (*os.File, error) {
+	return openValidatedCoreLogFileContext(context.Background(), source)
+}
+
+func openValidatedCoreLogFileContext(ctx context.Context, source coreLogFileSource) (*os.File, error) {
 	if source.root == "" || !filepath.IsAbs(source.path) || !pathWithin(source.path, source.root) {
 		return nil, errors.New("core log source is outside its protected root")
 	}
-	if err := validateCoreLogSourceBinding(source); err != nil {
+	if err := validateCoreLogSourceBinding(ctx, source); err != nil {
 		return nil, err
 	}
 	rootInfo, err := os.Lstat(source.root)
@@ -717,12 +974,19 @@ func validateCoreLogDirectoryFD(fd, expectedUID int, ownerKnown bool) error {
 	return nil
 }
 
-func validateCoreLogSourceBinding(source coreLogFileSource) error {
+func validateCoreLogSourceBinding(ctx context.Context, source coreLogFileSource) error {
 	if source.kind != "file" {
 		return nil
 	}
+	if source.executor == nil || source.engine != core.EngineSingBox {
+		return errors.New("core log source has no verified migration owner")
+	}
+	ownership, err := source.executor.completedMigrationOwnership(ctx, source.engine, source.ownership.Managed)
+	if err != nil || ownership != source.ownership {
+		return errors.New("core log source migration ownership drifted")
+	}
 	record, err := readCoreMigrationRecord(source.markerPrefix, source.engine)
-	if err != nil || record.State != coreMigrationComplete || record.ConfigDigest != source.configDigest {
+	if err != nil || record.State != coreMigrationComplete || record.SourceDigest != source.ownership.SourceDigest {
 		return errors.New("core log source is not bound to a completed migration")
 	}
 	digest, exists, err := protectedCoreMigrationFileDigest(source.configPath, core.MaxConfigBytes)
@@ -730,6 +994,37 @@ func validateCoreLogSourceBinding(source coreLogFileSource) error {
 		return errors.New("core log source configuration drifted")
 	}
 	return nil
+}
+
+func (e *Executor) completedMigrationOwnership(parent context.Context, engine core.Engine, managed EngineSpec) (completedCoreMigration, error) {
+	if e == nil || e.MigrationMarkerPrefix == "" {
+		return completedCoreMigration{}, errors.New("core migration ownership is unavailable")
+	}
+	e.specsMu.RLock()
+	currentManaged, enabled := e.Specs[engine]
+	_, pending := e.ExistingSpecs[engine]
+	issue := strings.TrimSpace(e.ExistingDiscoveryIssues[engine])
+	ownership, completed := e.completedMigrations[engine]
+	e.specsMu.RUnlock()
+	if !enabled || currentManaged != managed || pending || issue != "" || !completed || ownership.Managed != managed {
+		return completedCoreMigration{}, errors.New("core migration is not in a verified managed ownership state")
+	}
+	record, err := readCoreMigrationRecord(e.MigrationMarkerPrefix, engine)
+	if err != nil || record.State != coreMigrationComplete || record.SourceDigest != ownership.SourceDigest {
+		return completedCoreMigration{}, errors.New("core migration marker does not match verified ownership")
+	}
+	verifyContext, cancel := context.WithTimeout(parent, 6*time.Second)
+	defer cancel()
+	verify := e.verifyCompletedMigration
+	if verify == nil {
+		verify = func(ctx context.Context, existing, managed EngineSpec, manager *ServiceManager) error {
+			return verifyCoreMigrationCompletionState(ctx, existing, managed, manager)
+		}
+	}
+	if err := verify(verifyContext, ownership.Existing, managed, e.serviceManager()); err != nil {
+		return completedCoreMigration{}, fmt.Errorf("core migration service ownership drifted: %w", err)
+	}
+	return ownership, nil
 }
 
 func coreLogJournalSources(specSets ...map[core.Engine]EngineSpec) []coreLogJournalSource {

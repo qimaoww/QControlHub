@@ -2505,6 +2505,34 @@ try {
   coreAgents = [{ id: "alpha", name: "Alpha", features: [], runtime: {} }];
   await renderCoreLogs({ syncFilters: true });
   assert.equal(coreMarkup.includes("此节点不支持集中日志"), true, "legacy unsupported Agents have a distinct empty state");
+  coreAgents = [{ id: "alpha", name: "Alpha", features: ["core-logs-v1"], runtime: {} }];
+  await renderCoreLogs({ syncFilters: true });
+  assert.equal(coreMarkup.includes("日志状态能力不可用"), true, "legacy log-capable Agents do not claim an unverifiable healthy source");
+  coreEntries = [{ id: "historical", agent_id: "alpha", engine: "sing-box", level: "info", message: "historical entry", logged_at: "2026-08-24T00:00:00Z" }];
+  coreAgents = [{ id: "alpha", name: "Alpha", features: ["core-logs-v1", "core-log-status-v1"], runtime: { "sing-box": { core_log_status: "failed", core_log_error: "collector-failed" } } }];
+  await renderCoreLogs({ syncFilters: true });
+  assert.equal(coreMarkup.includes("historical entry"), true, "historical results remain visible during a current failure");
+  assert.equal(coreMarkup.includes("日志采集失败"), true, "current failure remains visible beside historical results");
+  coreAgents = [{ id: "alpha", name: "Alpha", features: ["core-logs-v1", "core-log-status-v1"], runtime: { xray: { core_log_status: "failed" }, "sing-box": { core_log_status: "active" } } }];
+  await renderCoreLogs({ syncFilters: true });
+  assert.equal(coreMarkup.includes("日志采集失败"), false, "another engine failure does not contaminate the selected engine status");
+
+  let noAgentDataMarkup = "";
+  const renderWithoutAgentData = installCoreLogs({
+    state: { route: "core-logs", navigationEpoch: 1, data: { coreLogFilters: { agent_id: "alpha", engine: "sing-box" } } },
+    engines: ["sing-box"],
+    can: () => false,
+    esc: (value) => String(value ?? ""),
+    engineName: (value) => value,
+    date: (value) => value,
+    api: async (path) => path.startsWith("/core-logs?") ? coreEntries : assert.fail(`unexpected no-agent-data path ${path}`),
+    shell: (markup) => { noAgentDataMarkup = markup; },
+    setTimer: () => 1,
+    clearTimer: () => {},
+  });
+  await renderWithoutAgentData();
+  assert.equal(noAgentDataMarkup.includes("historical entry"), true, "log permission can retain historical results without agents.read");
+  assert.equal(noAgentDataMarkup.includes("无法核验采集状态"), true, "missing agents.read data is not presented as a healthy source");
 
   let deniedMarkup = "";
   const renderDeniedCoreLogs = installCoreLogs({

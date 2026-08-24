@@ -33,11 +33,19 @@ func TestImportedSingBoxLogSourceFollowsValidatedMigrationFile(t *testing.T) {
 	executor := &Executor{
 		Specs:                 map[core.Engine]EngineSpec{core.EngineSingBox: {ConfigPath: configPath}},
 		MigrationMarkerPrefix: markerPrefix,
+		completedMigrations: map[core.Engine]completedCoreMigration{core.EngineSingBox: {
+			Managed: EngineSpec{ConfigPath: configPath}, SourceDigest: strings.Repeat("a", 64),
+		}},
+		verifyCompletedMigration: func(context.Context, EngineSpec, EngineSpec, *ServiceManager) error { return nil },
 	}
 	collector := NewCoreLogCollectorForExecutor(executor)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { collector.Run(ctx); close(done) }()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) && collector.Status()[core.EngineSingBox].Status != "waiting" {
+		time.Sleep(25 * time.Millisecond)
+	}
 	path := filepath.Join(logRoot, "runtime.log")
 	time.Sleep(100 * time.Millisecond)
 	if err := os.WriteFile(path, []byte("2026-08-24 INFO imported start\n"), 0o600); err != nil {
@@ -74,7 +82,7 @@ func TestImportedSingBoxLogSourceFollowsValidatedMigrationFile(t *testing.T) {
 	if err := os.WriteFile(configPath, []byte(`{"log":{"output":"other.log"},"inbounds":[],"outbounds":[]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.Now().Add(5 * time.Second)
+	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) && collector.Status()[core.EngineSingBox].Status != "failed" {
 		time.Sleep(50 * time.Millisecond)
 	}
@@ -89,6 +97,296 @@ func TestImportedSingBoxLogSourceFollowsValidatedMigrationFile(t *testing.T) {
 	}
 }
 
+func TestImportedSingBoxConsoleOutputsKeepManagedServiceSource(t *testing.T) {
+	for _, managerKind := range []string{ServiceManagerSystemd, ServiceManagerOpenRC} {
+		for _, logging := range []string{
+			`{"log":{"level":"info","timestamp":true}}`,
+			`{"log":{"output":"stdout"}}`,
+			`{"log":{"output":"stderr"}}`,
+			`{"log":{"disabled":true,"output":"runtime.log"}}`,
+		} {
+			t.Run(managerKind+"/"+logging, func(t *testing.T) {
+				manager, err := NewServiceManager(managerKind)
+				if err != nil {
+					t.Fatal(err)
+				}
+				configPath := filepath.Join(t.TempDir(), "config.json")
+				if err := os.WriteFile(configPath, []byte(logging), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				service := "qagent-sing-box.service"
+				wantKind := "journal"
+				if managerKind == ServiceManagerOpenRC {
+					service = "qagent-sing-box"
+					wantKind = "openrc"
+				}
+				executor := &Executor{Specs: map[core.Engine]EngineSpec{
+					core.EngineSingBox: {ConfigPath: configPath, Service: service},
+				}, Services: manager}
+				collector := NewCoreLogCollectorForServiceManager(manager, executor.Specs)
+				if err := collector.RefreshImportedSingBoxSource(executor); err != nil {
+					t.Fatal(err)
+				}
+				collector.mu.Lock()
+				gotKind := collector.preferredKind[core.EngineSingBox]
+				fileCount := 0
+				for _, source := range collector.fileSources {
+					if source.kind == "file" {
+						fileCount++
+					}
+				}
+				collector.mu.Unlock()
+				if gotKind != wantKind || fileCount != 0 {
+					t.Fatalf("console source kind=%q files=%d, want %q and zero files", gotKind, fileCount, wantKind)
+				}
+			})
+		}
+	}
+}
+
+func TestImportedSingBoxConsoleTransitionWaitsForCollectorReadiness(t *testing.T) {
+	content := `{"log":{"level":"info","timestamp":true}}`
+	for _, test := range []struct {
+		name, manager, kind, status string
+		wantErr                     bool
+	}{
+		{name: "systemd active", manager: ServiceManagerSystemd, kind: "journal", status: "active"},
+		{name: "systemd failed", manager: ServiceManagerSystemd, kind: "journal", status: "failed", wantErr: true},
+		{name: "openrc armed", manager: ServiceManagerOpenRC, kind: "openrc", status: "waiting"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			manager, err := NewServiceManager(test.manager)
+			if err != nil {
+				t.Fatal(err)
+			}
+			service := "qagent-sing-box.service"
+			if test.manager == ServiceManagerOpenRC {
+				service = "qagent-sing-box"
+			}
+			collector := NewCoreLogCollectorForServiceManager(manager, map[core.Engine]EngineSpec{
+				core.EngineSingBox: {Service: service},
+			})
+			result := make(chan error, 1)
+			waitContext := context.Background()
+			if test.wantErr {
+				var cancel context.CancelFunc
+				waitContext, cancel = context.WithTimeout(context.Background(), 150*time.Millisecond)
+				defer cancel()
+			}
+			go func() {
+				result <- collector.PrepareImportedSingBoxSource(waitContext, nil, content)
+			}()
+			select {
+			case err := <-result:
+				t.Fatalf("readiness barrier returned before collector status: %v", err)
+			case <-time.After(50 * time.Millisecond):
+			}
+			code := ""
+			if test.status == "failed" {
+				code = "collector-unavailable"
+			}
+			collector.setSourceStatus(core.EngineSingBox, test.kind, test.status, code)
+			err = <-result
+			if (err != nil) != test.wantErr {
+				t.Fatalf("readiness result = %v, wantErr=%v", err, test.wantErr)
+			}
+		})
+	}
+}
+
+func TestImportedSingBoxFileSourceCapturesOnlyMigrationWindow(t *testing.T) {
+	logRoot := t.TempDir()
+	previous := importedSingBoxLogRoot
+	importedSingBoxLogRoot = logRoot
+	t.Cleanup(func() { importedSingBoxLogRoot = previous })
+	path := filepath.Join(logRoot, "runtime.log")
+	if err := os.WriteFile(path, []byte("old deployment log\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	content := `{"log":{"output":"runtime.log"}}`
+	executor := newImportedSingBoxLogExecutor(t, content)
+	collector := NewCoreLogCollectorForServiceManager(defaultSystemdServiceManager(), executor.Specs)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { collector.Run(ctx); close(done) }()
+	if err := collector.PrepareImportedSingBoxSource(context.Background(), executor, content); err != nil {
+		t.Fatal(err)
+	}
+	file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = file.WriteString("migration startup log\n")
+	_ = file.Close()
+	if err := collector.RefreshImportedSingBoxSource(executor); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := waitForLine(t, collector, "migration startup log"); !ok {
+		t.Fatal("migration-window startup log was not collected")
+	}
+	if batch := collector.NextBatch(); batch != nil {
+		for _, entry := range batch.Entries {
+			if entry.Message == "old deployment log" {
+				t.Fatal("pre-window log content leaked")
+			}
+		}
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("migration-window collector leaked")
+	}
+}
+
+func TestImportedSingBoxSourceRequiresVerifiedOwnershipAndReplacesAtomically(t *testing.T) {
+	logRoot := t.TempDir()
+	previous := importedSingBoxLogRoot
+	importedSingBoxLogRoot = logRoot
+	t.Cleanup(func() { importedSingBoxLogRoot = previous })
+	content := `{"log":{"output":"runtime.log"}}`
+	executor := newImportedSingBoxLogExecutor(t, content)
+	delete(executor.completedMigrations, core.EngineSingBox)
+	collector := NewCoreLogCollectorForServiceManager(defaultSystemdServiceManager(), executor.Specs)
+	if err := collector.RefreshImportedSingBoxSource(executor); err == nil {
+		t.Fatal("complete marker without verified migration ownership was accepted")
+	}
+	if status := collector.Status()[core.EngineSingBox]; status.Status != "failed" {
+		t.Fatalf("unverified ownership status = %+v", status)
+	}
+
+	executor = newImportedSingBoxLogExecutor(t, content)
+	collector = NewCoreLogCollectorForServiceManager(defaultSystemdServiceManager(), executor.Specs)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { collector.Run(ctx); close(done) }()
+	var group sync.WaitGroup
+	for range 16 {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			if err := collector.RefreshImportedSingBoxSource(executor); err != nil {
+				t.Errorf("concurrent refresh: %v", err)
+			}
+		}()
+	}
+	group.Wait()
+	replacement := `{"log":{"output":"replacement.log"}}`
+	if err := os.WriteFile(executor.Specs[core.EngineSingBox].ConfigPath, []byte(replacement), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := collector.RefreshImportedSingBoxSource(executor); err != nil {
+		t.Fatal(err)
+	}
+	collector.mu.Lock()
+	fileSources := 0
+	filePath := ""
+	for _, source := range collector.fileSources {
+		if source.kind == "file" {
+			fileSources++
+			filePath = source.path
+		}
+	}
+	collector.mu.Unlock()
+	if fileSources != 1 || filePath != filepath.Join(logRoot, "replacement.log") {
+		t.Fatalf("replacement file sources=%d path=%q", fileSources, filePath)
+	}
+	console := `{"log":{"level":"info","timestamp":true}}`
+	if err := os.WriteFile(executor.Specs[core.EngineSingBox].ConfigPath, []byte(console), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := collector.RefreshImportedSingBoxSource(executor); err != nil {
+		t.Fatal(err)
+	}
+	collector.mu.Lock()
+	active := collector.activeFiles[string(core.EngineSingBox)+"\x00file"]
+	preferred := collector.preferredKind[core.EngineSingBox]
+	collector.mu.Unlock()
+	if active != nil || preferred != "journal" {
+		t.Fatalf("source switch left active file=%v preferred=%q", active != nil, preferred)
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("atomic replacement collector leaked")
+	}
+}
+
+func TestImportedSingBoxFileSourceStopsOnServiceOwnershipDrift(t *testing.T) {
+	logRoot := t.TempDir()
+	previous := importedSingBoxLogRoot
+	importedSingBoxLogRoot = logRoot
+	t.Cleanup(func() { importedSingBoxLogRoot = previous })
+	content := `{"log":{"output":"runtime.log"}}`
+	executor := newImportedSingBoxLogExecutor(t, content)
+	var driftMu sync.Mutex
+	drifted := false
+	executor.verifyCompletedMigration = func(context.Context, EngineSpec, EngineSpec, *ServiceManager) error {
+		driftMu.Lock()
+		defer driftMu.Unlock()
+		if drifted {
+			return os.ErrPermission
+		}
+		return nil
+	}
+	collector := NewCoreLogCollectorForServiceManager(defaultSystemdServiceManager(), executor.Specs)
+	if err := collector.PrepareImportedSingBoxSource(context.Background(), executor, content); err != nil {
+		t.Fatal(err)
+	}
+	if err := collector.RefreshImportedSingBoxSource(executor); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { collector.Run(ctx); close(done) }()
+	path := filepath.Join(logRoot, "runtime.log")
+	if err := os.WriteFile(path, []byte("before drift\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := waitForLine(t, collector, "before drift"); !ok {
+		t.Fatal("pre-drift line was not collected")
+	}
+	driftMu.Lock()
+	drifted = true
+	driftMu.Unlock()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) && collector.Status()[core.EngineSingBox].Status != "failed" {
+		time.Sleep(50 * time.Millisecond)
+	}
+	if status := collector.Status()[core.EngineSingBox]; status.Status != "failed" {
+		t.Fatalf("service ownership drift status = %+v", status)
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("ownership-drift collector leaked")
+	}
+}
+
+func newImportedSingBoxLogExecutor(t *testing.T, content string) *Executor {
+	t.Helper()
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(configPath, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	markerPrefix := filepath.Join(t.TempDir(), "migration")
+	sourceDigest := strings.Repeat("b", 64)
+	if err := writeCoreMigrationMarker(markerPrefix, core.EngineSingBox, coreMigrationComplete,
+		coreMigrationConfigDigest(content), sourceDigest, "enabled", "disabled"); err != nil {
+		t.Fatal(err)
+	}
+	managed := EngineSpec{ConfigPath: configPath, Service: "qagent-sing-box.service"}
+	return &Executor{
+		Specs: map[core.Engine]EngineSpec{core.EngineSingBox: managed}, MigrationMarkerPrefix: markerPrefix,
+		completedMigrations: map[core.Engine]completedCoreMigration{core.EngineSingBox: {
+			Managed: managed, SourceDigest: sourceDigest,
+		}},
+		verifyCompletedMigration: func(context.Context, EngineSpec, EngineSpec, *ServiceManager) error { return nil },
+	}
+}
+
 func TestImportedSingBoxLogSourceFailsClosed(t *testing.T) {
 	logRoot := t.TempDir()
 	previous := importedSingBoxLogRoot
@@ -100,10 +398,25 @@ func TestImportedSingBoxLogSourceFailsClosed(t *testing.T) {
 		}
 	}
 	path := filepath.Join(logRoot, "runtime.log")
+	executor := newImportedSingBoxLogExecutor(t, `{"log":{"output":"runtime.log"}}`)
+	collector := NewCoreLogCollectorForServiceManager(defaultSystemdServiceManager(), executor.Specs)
+	if err := collector.RefreshImportedSingBoxSource(executor); err != nil {
+		t.Fatal(err)
+	}
+	collector.mu.Lock()
+	var source coreLogFileSource
+	for _, candidate := range collector.fileSources {
+		if candidate.kind == "file" {
+			source = candidate
+		}
+	}
+	collector.mu.Unlock()
+	if source.path != path {
+		t.Fatalf("validated file source path = %q, want %q", source.path, path)
+	}
 	if err := os.Symlink(filepath.Join(logRoot, "target.log"), path); err != nil {
 		t.Fatal(err)
 	}
-	source := coreLogFileSource{path: path, root: logRoot, engine: core.EngineSingBox, kind: "test"}
 	if file, err := openValidatedCoreLogFile(source); err == nil {
 		file.Close()
 		t.Fatal("symlinked imported log source was accepted")
@@ -129,6 +442,18 @@ func TestImportedSingBoxLogSourceFailsClosed(t *testing.T) {
 	}
 	if err := os.Chmod(path, 0o600); err != nil {
 		t.Fatal(err)
+	}
+	if os.Geteuid() == 0 {
+		if err := os.Chown(path, 65534, -1); err != nil {
+			t.Fatal(err)
+		}
+		if file, err := openValidatedCoreLogFile(source); err == nil {
+			file.Close()
+			t.Fatal("foreign-owned imported log source was accepted")
+		}
+		if err := os.Chown(path, 0, -1); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err := os.Chmod(logRoot, 0o777); err != nil {
 		t.Fatal(err)

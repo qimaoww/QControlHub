@@ -60,31 +60,63 @@ export function installCoreLogs(ctx) {
       : [];
     let emptyTitle = "暂无日志";
     let emptyDetail = "当前来源工作正常，尚未收到符合筛选条件的新运行记录。";
-    if (
+    let sourceNoticeTitle = "";
+    let sourceNoticeDetail = "";
+    if (filters.agent_id && !can("agents.read")) {
+      emptyTitle = "无法核验采集状态";
+      emptyDetail = "当前账号无权读取节点状态；历史日志仍可按现有权限查看。";
+      sourceNoticeTitle = emptyTitle;
+      sourceNoticeDetail = emptyDetail;
+    } else if (filters.agent_id && !selectedAgent) {
+      emptyTitle = "节点状态不可用";
+      emptyDetail = "无法读取当前所选节点的运行状态。";
+      sourceNoticeTitle = emptyTitle;
+      sourceNoticeDetail = emptyDetail;
+    } else if (
       selectedAgent &&
       !(selectedAgent.features || []).includes("core-logs-v1")
     ) {
       emptyTitle = "此节点不支持集中日志";
       emptyDetail = "请升级 Agent 后再查看内核运行日志。";
+      sourceNoticeTitle = emptyTitle;
+      sourceNoticeDetail = emptyDetail;
+    } else if (
+      selectedAgent &&
+      !(selectedAgent.features || []).includes("core-log-status-v1")
+    ) {
+      emptyTitle = "日志状态能力不可用";
+      emptyDetail = "此 Agent 可以上传日志，但无法报告当前采集来源是否正常。";
+      sourceNoticeTitle = emptyTitle;
+      sourceNoticeDetail = emptyDetail;
     } else if (
       selectedAgent &&
       (selectedAgent.features || []).includes("core-log-status-v1")
     ) {
       const status =
-        selectedRuntime?.core_log_status ||
-        (sourceStates.includes("failed")
-          ? "failed"
-          : sourceStates.length &&
-              sourceStates.every((value) => value === "waiting")
-            ? "waiting"
-            : "");
+        filters.engine
+          ? selectedRuntime?.core_log_status || ""
+          : sourceStates.includes("failed")
+            ? "failed"
+            : sourceStates.length &&
+                sourceStates.every((value) => value === "waiting")
+              ? "waiting"
+              : "";
       if (status === "failed") {
         emptyTitle = "日志采集失败";
         emptyDetail =
           "Agent 已拒绝或无法读取该日志来源，请检查节点上的 Agent 诊断日志。";
+        sourceNoticeTitle = emptyTitle;
+        sourceNoticeDetail = emptyDetail;
       } else if (status === "waiting") {
         emptyTitle = "等待日志来源";
         emptyDetail = "日志文件尚未创建；服务写入后会自动开始采集。";
+        sourceNoticeTitle = emptyTitle;
+        sourceNoticeDetail = emptyDetail;
+      } else if (filters.engine && !status) {
+        emptyTitle = "日志状态尚未上报";
+        emptyDetail = "Agent 尚未报告当前内核的采集来源状态。";
+        sourceNoticeTitle = emptyTitle;
+        sourceNoticeDetail = emptyDetail;
       }
     }
     const rows = entries
@@ -94,8 +126,11 @@ export function installCoreLogs(ctx) {
       })
       .join("");
 
+    const sourceNotice = sourceNoticeTitle && rows
+      ? `<div class="core-log-source-notice" role="status"><strong>${esc(sourceNoticeTitle)}</strong><span>${esc(sourceNoticeDetail)}</span></div>`
+      : "";
     shell(
-      `<div class="core-log-workspace" data-core-log-page><header class="core-log-header"><div><p class="eyebrow">Runtime logs</p><h2>内核日志</h2></div><dl><div><dt>当前结果</dt><dd>${entries.length}</dd></div><div><dt>警告</dt><dd>${warningCount}</dd></div><div class="${errorCount ? "bad" : ""}"><dt>错误</dt><dd>${errorCount}</dd></div></dl></header><form class="core-log-filters" id="core-log-filters"><label>节点<select name="agent_id"><option value="">全部节点</option>${agents.map((agent) => `<option value="${esc(agent.id)}">${esc(agent.name)}</option>`).join("")}</select></label><label>内核<select name="engine"><option value="">全部内核</option>${engines.map((engine) => `<option value="${esc(engine)}">${esc(engineName(engine))}</option>`).join("")}</select></label><label>级别<select name="level"><option value="">全部级别</option>${["debug", "info", "warning", "error", "critical"].map((level) => `<option value="${level}">${levelName(level)}</option>`).join("")}</select></label><label class="core-log-search">关键词<input name="q" type="search" maxlength="120" value="${esc(filters.q || "")}" placeholder="搜索日志内容"></label><label>数量<select name="limit">${[100, 200, 500].map((limit) => `<option value="${limit}">${limit} 条</option>`).join("")}</select></label><button class="button primary" type="submit">应用</button><button class="button" type="button" data-reset-core-logs>重置</button></form><div class="core-log-status" role="status" data-core-log-refresh-status><span><i></i><span data-core-log-refresh-label>自动更新</span></span><span>面板保留 7 天</span></div><section class="core-log-stream" aria-label="内核运行日志" data-refresh-scroll>${rows || `<div class="core-log-empty"><strong>${esc(emptyTitle)}</strong><span>${esc(emptyDetail)}</span></div>`}</section></div>`,
+      `<div class="core-log-workspace" data-core-log-page><header class="core-log-header"><div><p class="eyebrow">Runtime logs</p><h2>内核日志</h2></div><dl><div><dt>当前结果</dt><dd>${entries.length}</dd></div><div><dt>警告</dt><dd>${warningCount}</dd></div><div class="${errorCount ? "bad" : ""}"><dt>错误</dt><dd>${errorCount}</dd></div></dl></header><form class="core-log-filters" id="core-log-filters"><label>节点<select name="agent_id"><option value="">全部节点</option>${agents.map((agent) => `<option value="${esc(agent.id)}">${esc(agent.name)}</option>`).join("")}</select></label><label>内核<select name="engine"><option value="">全部内核</option>${engines.map((engine) => `<option value="${esc(engine)}">${esc(engineName(engine))}</option>`).join("")}</select></label><label>级别<select name="level"><option value="">全部级别</option>${["debug", "info", "warning", "error", "critical"].map((level) => `<option value="${level}">${levelName(level)}</option>`).join("")}</select></label><label class="core-log-search">关键词<input name="q" type="search" maxlength="120" value="${esc(filters.q || "")}" placeholder="搜索日志内容"></label><label>数量<select name="limit">${[100, 200, 500].map((limit) => `<option value="${limit}">${limit} 条</option>`).join("")}</select></label><button class="button primary" type="submit">应用</button><button class="button" type="button" data-reset-core-logs>重置</button></form><div class="core-log-status" role="status" data-core-log-refresh-status><span><i></i><span data-core-log-refresh-label>自动更新</span></span><span>面板保留 7 天</span></div><section class="core-log-stream" aria-label="内核运行日志" data-refresh-scroll>${sourceNotice}${rows || `<div class="core-log-empty"><strong>${esc(emptyTitle)}</strong><span>${esc(emptyDetail)}</span></div>`}</section></div>`,
       "内核日志",
     );
 

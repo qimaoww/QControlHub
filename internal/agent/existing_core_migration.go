@@ -56,6 +56,12 @@ func (e *Executor) LoadCoreMigrationState() error {
 			completionErr := verifyCoreMigrationCompletionState(loadContext, existing, managedSpecs[engine], e.serviceManager())
 			e.specsMu.Lock()
 			if completionErr == nil {
+				if e.completedMigrations == nil {
+					e.completedMigrations = make(map[core.Engine]completedCoreMigration)
+				}
+				e.completedMigrations[engine] = completedCoreMigration{
+					Existing: existing, Managed: managedSpecs[engine], SourceDigest: record.SourceDigest,
+				}
 				_ = cleanupCoreMigrationBackups(e.MigrationMarkerPrefix, engine)
 				delete(e.ExistingSpecs, engine)
 				delete(e.ExistingDiscoveryIssues, engine)
@@ -162,6 +168,12 @@ func (e *Executor) ReconcileExistingCoreServices(ctx context.Context) error {
 		}
 		_ = cleanupCoreMigrationBackups(e.MigrationMarkerPrefix, engine)
 		e.specsMu.Lock()
+		if e.completedMigrations == nil {
+			e.completedMigrations = make(map[core.Engine]completedCoreMigration)
+		}
+		e.completedMigrations[engine] = completedCoreMigration{
+			Existing: existing, Managed: managed[engine], SourceDigest: migrationRecord.SourceDigest,
+		}
 		delete(e.ExistingSpecs, engine)
 		e.specsMu.Unlock()
 	}
@@ -1075,6 +1087,12 @@ func (e *Executor) importExistingConfig(ctx context.Context, engine core.Engine,
 	_ = cleanupCoreMigrationBackups(e.MigrationMarkerPrefix, engine)
 
 	e.specsMu.Lock()
+	if e.completedMigrations == nil {
+		e.completedMigrations = make(map[core.Engine]completedCoreMigration)
+	}
+	e.completedMigrations[engine] = completedCoreMigration{
+		Existing: existing, Managed: managed, SourceDigest: sourceDigest,
+	}
 	delete(e.ExistingSpecs, engine)
 	e.specsMu.Unlock()
 	return fmt.Sprintf("imported %s configuration; stopped and disabled %s; started and enabled %s", engine, existing.Service, managed.Service), nil
@@ -1084,11 +1102,11 @@ func (e *Executor) validateImportedSnapshot(ctx context.Context, engine core.Eng
 	if engine != core.EngineSingBox {
 		return e.validate(ctx, engine, spec, content)
 	}
-	output, disabled, err := singBoxLogOutput(content)
+	output, destination, err := singBoxLogOutput(content)
 	if err != nil {
 		return "", err
 	}
-	if !disabled && output != "" {
+	if destination == singBoxLogDestinationFile {
 		if _, err := importedSingBoxLogPath(output); err != nil {
 			return "", fmt.Errorf("imported sing-box log output is unsafe: %w", err)
 		}
