@@ -754,7 +754,7 @@ func (s *Store) Heartbeat(ctx context.Context, id string, heartbeat core.Heartbe
 	command, err := s.pool.Exec(ctx, `
 			UPDATE agents SET last_seen=now(), version=CASE WHEN $2='' THEN version ELSE $2 END, runtime=$3,
 			                  metrics=CASE
-			                    WHEN $4::jsonb IS NULL THEN metrics
+			                    WHEN $4::jsonb IS NULL THEN metrics - 'public_ipv4' - 'public_ipv6' - 'public_ipv4_source' - 'public_ipv6_source'
 					WHEN $4::jsonb ? 'network_interfaces' OR NOT (metrics ? 'network_interfaces') THEN $4::jsonb
 			                    ELSE $4::jsonb || jsonb_build_object('network_interfaces', metrics->'network_interfaces')
 			                  END,

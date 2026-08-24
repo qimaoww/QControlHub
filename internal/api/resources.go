@@ -581,13 +581,16 @@ func clientAddressCandidates(agent core.Agent) []clientAddressCandidate {
 	// The Agent probes each family outbound, so both routable egress addresses
 	// are known even when the control-plane connection itself used only one.
 	for _, probed := range []struct {
-		value    string
-		source   string
-		wantIPv4 bool
+		value      string
+		provenance string
+		wantIPv4   bool
 	}{
-		{agent.Metrics.PublicIPv4, "节点公网探测 · IPv4", true},
-		{agent.Metrics.PublicIPv6, "节点公网探测 · IPv6", false},
+		{agent.Metrics.PublicIPv4, agent.Metrics.PublicIPv4Source, true},
+		{agent.Metrics.PublicIPv6, agent.Metrics.PublicIPv6Source, false},
 	} {
+		if probed.provenance != "" && probed.provenance != core.PublicIPProbeSourceAgent && probed.provenance != core.PublicIPProbeSourceControlPlane {
+			continue
+		}
 		address := authn.NormalizePublicIP(probed.value)
 		parsed, parseErr := netip.ParseAddr(address)
 		if parseErr != nil || address == "" || parsed.Is4() != probed.wantIPv4 || netpolicy.IsCloudflareAddress(parsed) {
@@ -595,7 +598,15 @@ func clientAddressCandidates(agent core.Agent) []clientAddressCandidate {
 		}
 		if _, exists := seen[address]; !exists {
 			seen[address] = struct{}{}
-			result = append(result, clientAddressCandidate{address: address, source: probed.source})
+			family := "IPv6"
+			if probed.wantIPv4 {
+				family = "IPv4"
+			}
+			source := "Agent 本地直连探测 · " + family
+			if probed.provenance == core.PublicIPProbeSourceControlPlane {
+				source = "控制面配置的 Agent 直连探测 · " + family
+			}
+			result = append(result, clientAddressCandidate{address: address, source: source})
 		}
 	}
 	// Default-route interface addresses are the next fallback per family. Only
@@ -644,6 +655,10 @@ func publicInterfaceAddresses(interfaces []core.HostNetworkInterface) []publicIn
 		for _, raw := range networkInterface.Addresses {
 			normalized := authn.NormalizePublicIP(raw)
 			if normalized == "" {
+				continue
+			}
+			parsed, err := netip.ParseAddr(normalized)
+			if err != nil || netpolicy.IsCloudflareAddress(parsed) {
 				continue
 			}
 			family := 1

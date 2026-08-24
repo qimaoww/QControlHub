@@ -51,6 +51,9 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 		TrustedProxies: trustedProxies,
 		AgentBinary:    []byte("test-agent-binary"),
 		AgentVersion:   "test-version",
+		PublicIPProbe: core.PublicIPProbeConfig{
+			IPv4Endpoint: "https://probe.example.test/v4", IntervalSeconds: 300,
+		},
 	})
 	apiServer.roleTokens[sha256.Sum256([]byte(tasksReadToken))] = tokenPrincipal{
 		Role: core.RoleUser, Permissions: []core.Permission{core.PermissionTasksRead},
@@ -160,6 +163,9 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 	}
 	if len(hello.TrafficPolicies) != 1 || hello.TrafficPolicies[0].ID != trafficPolicy.ID {
 		t.Fatalf("hello traffic policies = %+v", hello.TrafficPolicies)
+	}
+	if hello.PublicIPProbe == nil || hello.PublicIPProbe.IPv4Endpoint != "https://probe.example.test/v4" || hello.PublicIPProbe.IntervalSeconds != 300 {
+		t.Fatalf("hello public IP probe config = %+v", hello.PublicIPProbe)
 	}
 	connectedAgent, err := dataStore.GetAgent(ctx, enrolled.AgentID)
 	if err != nil || connectedAgent.Metrics.ObservedPublicIP != "2001:4860:4860::8888" {

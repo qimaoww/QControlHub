@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/qimaoww/qcontrolhub/internal/core"
 	"github.com/qimaoww/qcontrolhub/internal/netpolicy"
 )
 
@@ -33,18 +34,28 @@ const (
 var publicIPProbeResponse = regexp.MustCompile(`^\s*([0-9a-fA-F:.]+)\s*$`)
 
 // PublicIPProber discovers the node's public egress address for each family
-// with outbound probes to well-known echo services. The control plane's
+// with outbound probes to operator-selected echo services. The control plane's
 // connection-derived observation can only ever see the family the WSS
 // connection used, so these probes close the dual-stack blind spot for
 // client-access address candidates.
 type PublicIPProber struct {
-	mu        sync.Mutex
-	addresses [2]string
+	mu         sync.Mutex
+	addresses  [2]string
+	sources    [2]string
+	config     publicIPProbeRuntimeConfig
+	local      bool
+	generation uint64
+	wake       chan struct{}
+	inflight   chan struct{}
 
-	httpV4    *http.Client
-	httpV6    *http.Client
-	endpoints [2][]string
-	interval  time.Duration
+	httpV4   *http.Client
+	httpV6   *http.Client
+	interval time.Duration
+}
+
+type publicIPProbeRuntimeConfig struct {
+	endpoints [2]string
+	source    string
 }
 
 // normalizePublicIPProbeEvery clamps the configured probe interval. Zero means
@@ -62,36 +73,53 @@ func normalizePublicIPProbeEvery(value time.Duration) time.Duration {
 	return value
 }
 
-// NewPublicIPProber builds a prober from operator-supplied endpoints. The
-// endpoints are never filled with third-party echo services by default: a
-// caller that leaves both lists empty gets a nil prober, whose methods stay
-// safe to call. Probes use a direct connection so an operator proxy can never
-// turn a proxy egress address into a node address.
-func NewPublicIPProber(interval time.Duration, ipv4Endpoints, ipv6Endpoints []string) *PublicIPProber {
-	ipv4 := filteredProbeEndpoints(ipv4Endpoints)
-	ipv6 := filteredProbeEndpoints(ipv6Endpoints)
-	if len(ipv4) == 0 && len(ipv6) == 0 {
-		return nil
+// NewPublicIPProber builds a managed-capable prober from optional local
+// operator-supplied endpoints. No third-party service is filled by default;
+// empty lists keep the object idle until an authenticated WSS hello supplies
+// managed configuration. Probes use a direct connection so an operator proxy
+// can never turn a proxy egress address into a node address.
+func NewPublicIPProber(interval time.Duration, ipv4Endpoints, ipv6Endpoints []string) (*PublicIPProber, error) {
+	ipv4, err := singleProbeEndpoint(ipv4Endpoints)
+	if err != nil {
+		return nil, fmt.Errorf("IPv4 public IP probe: %w", err)
 	}
-	return &PublicIPProber{
-		httpV4:    publicIPProbeClient("tcp4"),
-		httpV6:    publicIPProbeClient("tcp6"),
-		endpoints: [2][]string{ipv4, ipv6},
-		interval:  normalizePublicIPProbeEvery(interval),
+	ipv6, err := singleProbeEndpoint(ipv6Endpoints)
+	if err != nil {
+		return nil, fmt.Errorf("IPv6 public IP probe: %w", err)
 	}
+	config := core.PublicIPProbeConfig{IPv4Endpoint: ipv4, IPv6Endpoint: ipv6, IntervalSeconds: uint32(normalizePublicIPProbeEvery(interval) / time.Second)}
+	if err := config.Validate(); err != nil {
+		return nil, err
+	}
+	prober := &PublicIPProber{
+		httpV4:   publicIPProbeClient("tcp4"),
+		httpV6:   publicIPProbeClient("tcp6"),
+		interval: normalizePublicIPProbeEvery(interval),
+		wake:     make(chan struct{}, 1),
+	}
+	if ipv4 != "" || ipv6 != "" {
+		prober.local = true
+		prober.config = publicIPProbeRuntimeConfig{endpoints: [2]string{ipv4, ipv6}, source: core.PublicIPProbeSourceAgent}
+	}
+	return prober, nil
 }
 
-// filteredProbeEndpoints returns the trimmed, non-empty configured endpoints.
-// An empty input yields nil so an operator that has not opted into probing
-// never causes an outbound request.
-func filteredProbeEndpoints(configured []string) []string {
+// singleProbeEndpoint returns the one explicit trust anchor for a family.
+// Multiple endpoints are rejected so failure cannot silently switch owners.
+func singleProbeEndpoint(configured []string) (string, error) {
 	filtered := make([]string, 0, len(configured))
 	for _, endpoint := range configured {
 		if endpoint = strings.TrimSpace(endpoint); endpoint != "" {
 			filtered = append(filtered, endpoint)
 		}
 	}
-	return filtered
+	if len(filtered) > 1 {
+		return "", errors.New("exactly one endpoint per address family is allowed")
+	}
+	if len(filtered) == 0 {
+		return "", nil
+	}
+	return filtered[0], nil
 }
 
 func publicIPProbeClient(network string) *http.Client {
@@ -118,21 +146,31 @@ func publicIPProbeClient(network string) *http.Client {
 	}
 }
 
-// Run probes both families immediately and then on every tick. A failed probe
-// keeps the previous address so a transient outage never blanks a known value.
+// Run probes configured families immediately and then on every tick. A failed
+// family is cleared so a stale value cannot outlive its latest verification.
 func (prober *PublicIPProber) Run(ctx context.Context) {
 	if prober == nil {
 		return
 	}
 	prober.probeAll(ctx)
-	ticker := time.NewTicker(prober.interval)
-	defer ticker.Stop()
+	timer := time.NewTimer(prober.currentInterval())
+	defer timer.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case <-prober.wake:
 			prober.probeAll(ctx)
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			timer.Reset(prober.currentInterval())
+		case <-timer.C:
+			prober.probeAll(ctx)
+			timer.Reset(prober.currentInterval())
 		}
 	}
 }
@@ -142,29 +180,116 @@ func (prober *PublicIPProber) probeAll(ctx context.Context) {
 		return
 	}
 	prober.mu.Lock()
+	if prober.inflight != nil {
+		done := prober.inflight
+		prober.mu.Unlock()
+		select {
+		case <-done:
+		case <-ctx.Done():
+		}
+		return
+	}
+	done := make(chan struct{})
+	prober.inflight = done
+	config := prober.config
+	generation := prober.generation
 	clients := [2]*http.Client{prober.httpV4, prober.httpV6}
 	prober.mu.Unlock()
-	for family := range prober.endpoints {
-		address := probePublicIPFamily(ctx, clients[family], prober.endpoints[family], family == 0)
-		if address == "" {
+	defer func() {
+		prober.mu.Lock()
+		close(done)
+		prober.inflight = nil
+		prober.mu.Unlock()
+	}()
+
+	results := [2]string{}
+	var wait sync.WaitGroup
+	for family, endpoint := range config.endpoints {
+		if endpoint == "" {
 			continue
 		}
-		prober.mu.Lock()
-		previous := prober.addresses[family]
-		prober.addresses[family] = address
+		wait.Add(1)
+		go func(family int, endpoint string) {
+			defer wait.Done()
+			results[family] = probePublicIPFamily(ctx, clients[family], endpoint, family == 0)
+		}(family, endpoint)
+	}
+	wait.Wait()
+
+	prober.mu.Lock()
+	if generation != prober.generation {
 		prober.mu.Unlock()
-		if previous != address {
-			label := "IPv6"
-			if family == 0 {
-				label = "IPv4"
-			}
-			if previous == "" {
-				slog.Info("probed public egress address", "family", label, "address", address)
-			} else {
-				slog.Info("public egress address changed", "family", label, "previous", previous, "address", address)
-			}
+		return
+	}
+	previous := prober.addresses
+	for family := range results {
+		prober.addresses[family] = results[family]
+		if results[family] == "" {
+			prober.sources[family] = ""
+		} else {
+			prober.sources[family] = config.source
 		}
 	}
+	prober.mu.Unlock()
+	for family, address := range results {
+		if previous[family] == address {
+			continue
+		}
+		label := "IPv6"
+		if family == 0 {
+			label = "IPv4"
+		}
+		if address == "" {
+			slog.Info("cleared unverifiable public egress address", "family", label, "source", config.source)
+		} else {
+			slog.Info("verified public egress address", "family", label, "source", config.source)
+		}
+	}
+}
+
+func (prober *PublicIPProber) currentInterval() time.Duration {
+	prober.mu.Lock()
+	defer prober.mu.Unlock()
+	return prober.interval
+}
+
+// ApplyManagedConfig atomically replaces the control-plane supplied config.
+// A local Agent configuration is authoritative and cannot be silently
+// overridden. Any accepted change clears cached values before a fresh probe.
+func (prober *PublicIPProber) ApplyManagedConfig(config core.PublicIPProbeConfig) error {
+	if prober == nil {
+		return nil
+	}
+	config.IPv4Endpoint = strings.TrimSpace(config.IPv4Endpoint)
+	config.IPv6Endpoint = strings.TrimSpace(config.IPv6Endpoint)
+	if err := config.Validate(); err != nil {
+		return err
+	}
+	prober.mu.Lock()
+	if prober.local {
+		prober.mu.Unlock()
+		return nil
+	}
+	interval := defaultPublicIPProbeEvery
+	if config.IntervalSeconds != 0 {
+		interval = time.Duration(config.IntervalSeconds) * time.Second
+	}
+	next := publicIPProbeRuntimeConfig{endpoints: [2]string{config.IPv4Endpoint, config.IPv6Endpoint}, source: core.PublicIPProbeSourceControlPlane}
+	if prober.config == next && prober.interval == interval {
+		prober.mu.Unlock()
+		return nil
+	}
+	prober.config = next
+	prober.interval = interval
+	prober.generation++
+	prober.addresses = [2]string{}
+	prober.sources = [2]string{}
+	prober.mu.Unlock()
+	select {
+	case prober.wake <- struct{}{}:
+	default:
+	}
+	return nil
 }
 
 // Snapshot returns the most recent probed public addresses.
@@ -177,17 +302,34 @@ func (prober *PublicIPProber) Snapshot() (ipv4, ipv6 string) {
 	return prober.addresses[0], prober.addresses[1]
 }
 
-// probePublicIPFamily queries each endpoint in order and returns the first
-// response that is a globally routable address of the requested family.
-func probePublicIPFamily(ctx context.Context, client *http.Client, endpoints []string, wantIPv4 bool) string {
-	for _, endpoint := range endpoints {
-		address, err := probePublicIPEndpoint(ctx, client, endpoint, wantIPv4)
-		if err == nil && address != "" {
-			return address
-		}
-		slog.Debug("public IP probe endpoint failed", "endpoint", endpoint, "error", err)
+func (prober *PublicIPProber) SnapshotWithSources() (ipv4, ipv6, ipv4Source, ipv6Source string) {
+	if prober == nil {
+		return "", "", "", ""
 	}
-	return ""
+	prober.mu.Lock()
+	defer prober.mu.Unlock()
+	return prober.addresses[0], prober.addresses[1], prober.sources[0], prober.sources[1]
+}
+
+func (prober *PublicIPProber) Enabled() bool {
+	if prober == nil {
+		return false
+	}
+	prober.mu.Lock()
+	defer prober.mu.Unlock()
+	return prober.config.endpoints[0] != "" || prober.config.endpoints[1] != ""
+}
+
+// probePublicIPFamily queries the family's single configured endpoint.
+func probePublicIPFamily(ctx context.Context, client *http.Client, endpoint string, wantIPv4 bool) string {
+	address, err := probePublicIPEndpoint(ctx, client, endpoint, wantIPv4)
+	if err != nil {
+		// Do not log the configured URL: an operator-controlled path can contain
+		// deployment detail even though credentials and query strings are rejected.
+		slog.Debug("public IP probe endpoint failed", "family_ipv4", wantIPv4, "error", err)
+		return ""
+	}
+	return address
 }
 
 func probePublicIPEndpoint(ctx context.Context, client *http.Client, endpoint string, wantIPv4 bool) (string, error) {
@@ -223,8 +365,8 @@ func probePublicIPEndpoint(ctx context.Context, client *http.Client, endpoint st
 		return "", fmt.Errorf("parse probe response: %w", err)
 	}
 	address = address.Unmap()
-	if !netpolicy.IsPublicAddress(address) {
-		return "", errors.New("probe response is not a globally routable address")
+	if !netpolicy.IsPublicAddress(address) || netpolicy.IsCloudflareAddress(address) {
+		return "", errors.New("probe response is not a trusted globally routable address")
 	}
 	if address.Is4() != wantIPv4 {
 		family := "IPv6"

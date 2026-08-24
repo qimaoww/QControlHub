@@ -40,6 +40,7 @@ type Config struct {
 	AgentVersion    string
 	AgentInstaller  []byte
 	WebhookSecret   string
+	PublicIPProbe   core.PublicIPProbeConfig
 	SessionTTL      time.Duration
 }
 
@@ -54,6 +55,7 @@ type Server struct {
 	agentBinary     []byte
 	agentVersion    string
 	agentInstaller  []byte
+	publicIPProbe   core.PublicIPProbeConfig
 	notifier        *notify.Client
 	roleTokens      map[[32]byte]tokenPrincipal
 	sessionsMu      sync.Mutex
@@ -109,6 +111,7 @@ func New(dataStore *store.Store, config Config) *Server {
 		agentBinary:     config.AgentBinary,
 		agentVersion:    strings.TrimSpace(config.AgentVersion),
 		agentInstaller:  config.AgentInstaller,
+		publicIPProbe:   config.PublicIPProbe,
 		notifier:        notify.New(config.WebhookSecret, slog.Default()),
 		roleTokens:      roleTokens,
 		sessions:        make(map[string]apiSession),
@@ -802,7 +805,7 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 		slog.Error("load agent traffic policies", "agent_id", id, "error", err)
 		return
 	}
-	if err := writeWire(ctx, connection, core.WireMessage{Type: core.WireHello, TrafficPolicies: trafficPolicies}); err != nil {
+	if err := writeWire(ctx, connection, core.WireMessage{Type: core.WireHello, TrafficPolicies: trafficPolicies, PublicIPProbe: &s.publicIPProbe}); err != nil {
 		return
 	}
 	taskTicker := time.NewTicker(2 * time.Second)

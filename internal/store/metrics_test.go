@@ -56,6 +56,7 @@ func TestEncodeHeartbeatMetricsValidatesAndServerStamps(t *testing.T) {
 		{PublicIPv6: "fc00::8"},
 		{PublicIPv6: "2001:db8::8"},
 		{PublicIPv6: "not-an-address"},
+		{PublicIPv4: "93.184.216.34", PublicIPv4Source: "unknown-source"},
 	}
 	for _, metrics := range invalid {
 		if _, err := encodeHeartbeatMetrics(&metrics, receivedAt); err == nil {
@@ -78,7 +79,7 @@ func TestEncodeHeartbeatMetricsAcceptsDualStackProbedAddresses(t *testing.T) {
 		t.Fatal("expected encoded payload")
 	}
 	encoded, err = encodeHeartbeatMetrics(&core.HostMetrics{
-		PublicIPv6: "2001:4860:4860::8888",
+		PublicIPv6: "2001:4860:4860::8888", PublicIPv6Source: core.PublicIPProbeSourceControlPlane,
 	}, receivedAt)
 	if err != nil {
 		t.Fatal(err)
@@ -87,7 +88,7 @@ func TestEncodeHeartbeatMetricsAcceptsDualStackProbedAddresses(t *testing.T) {
 	if err := json.Unmarshal(encoded, &decoded); err != nil {
 		t.Fatal(err)
 	}
-	if decoded.PublicIPv6 != "2001:4860:4860::8888" || decoded.PublicIPv4 != "" {
+	if decoded.PublicIPv6 != "2001:4860:4860::8888" || decoded.PublicIPv6Source != core.PublicIPProbeSourceControlPlane || decoded.PublicIPv4 != "" {
 		t.Fatalf("encoded probed addresses = %+v", decoded)
 	}
 	// Older Agents never probe; empty fields must keep encoding successfully.

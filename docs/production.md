@@ -84,6 +84,8 @@ Nginx 示例按真实客户端 IP 对 `/api/v1/auth/login` 和 `/agent/v1/enroll
 
 Agent 使用 `/agent/v1/connect` 的长期 WSS 会话。Nginx 示例已转发 `Upgrade`/`Connection`，并把上游读取空闲超时提高到一小时；删除这些设置会导致 Agent 无法升级或在无任务时周期性断线。
 
+双栈节点若某一族只在 NAT 后提供私网接口地址，控制面无法从经 CDN/反向代理的 WSS 跳点安全推断该族出口。可在控制面显式设置 `QCH_AGENT_PUBLIC_IP_PROBE_IPV4_ENDPOINT`、`QCH_AGENT_PUBLIC_IP_PROBE_IPV6_ENDPOINT`（按需设置其中一个或两个）及 `QCH_AGENT_PUBLIC_IP_PROBE_INTERVAL`（`1m`–`24h`，默认 `5m`）。端点必须是运维方明确选择的、返回单个纯文本 IP 的 HTTPS echo 服务；项目不内置第三方端点。配置通过已认证 WSS 下发给支持 `managed-public-ip-probe-v1` 的 Agent，旧 Agent 会忽略未知字段。Agent 对每族只使用一个端点，以 `tcp4`/`tcp6` 直连且不读取 `HTTP_PROXY`/`HTTPS_PROXY`，不跟随重定向；失败只清除该族旧值，不会改用另一信任锚或污染另一族。若同时配置 Agent 本机 `QCH_PUBLIC_IP_PROBE_*`，本机选择优先且控制面不能覆盖。
+
 ## 4. 安装远程 Agent
 
 控制台生成的一键安装命令使用 POSIX `sh`。在 Alpine Linux 上，安装器会通过 `apk` 补齐 `ca-certificates`、`coreutils`、`curl`、`libcap`、`nftables` 与 `openrc`，自动写入 `/etc/init.d/qagent*`、`/etc/conf.d/qagent` 并加入 default runlevel；没有 `sudo` 的主机应先切换为 root。普通 systemd 主机继续使用原来的受限 unit。

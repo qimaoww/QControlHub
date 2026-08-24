@@ -804,6 +804,12 @@ func TestHeartbeatClearsStaleFeaturesWithPostgreSQL(t *testing.T) {
 	if err != nil || !containsFeature(current.Features, core.AgentFeatureMihomoDevelopmentSource) {
 		t.Fatalf("agent did not start advertising the source feature: %+v, %v", current.Features, err)
 	}
+	if err := dataStore.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{
+		Version: "probe-v2", Features: []string{core.AgentFeatureManagedPublicIPProbe},
+		Metrics: &core.HostMetrics{PublicIPv4: "198.35.26.96", PublicIPv4Source: core.PublicIPProbeSourceControlPlane},
+	}); err != nil {
+		t.Fatalf("store managed probe heartbeat: %v", err)
+	}
 
 	// A complete heartbeat with an omitted/empty feature list must clear the
 	// stale capability; it must not inherit a previous session's value.
@@ -811,8 +817,8 @@ func TestHeartbeatClearsStaleFeaturesWithPostgreSQL(t *testing.T) {
 		t.Fatalf("legacy empty-feature heartbeat: %v", err)
 	}
 	current, err = dataStore.GetAgent(ctx, agent.ID)
-	if err != nil || len(current.Features) != 0 {
-		t.Fatalf("agent features after empty-feature heartbeat = %+v, %v; want empty", current.Features, err)
+	if err != nil || len(current.Features) != 0 || current.Metrics.PublicIPv4 != "" || current.Metrics.PublicIPv4Source != "" {
+		t.Fatalf("agent stale state after empty-feature heartbeat = features=%+v metrics=%+v, %v", current.Features, current.Metrics, err)
 	}
 
 	// Re-advertising a non-empty feature set and then a metrics-only refresh

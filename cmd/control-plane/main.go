@@ -17,6 +17,7 @@ import (
 
 	"github.com/qimaoww/qcontrolhub/internal/api"
 	"github.com/qimaoww/qcontrolhub/internal/authn"
+	"github.com/qimaoww/qcontrolhub/internal/core"
 	"github.com/qimaoww/qcontrolhub/internal/store"
 )
 
@@ -49,6 +50,20 @@ func main() {
 	trustedProxies, err := authn.ParseTrustedProxies(splitList(os.Getenv("QCH_TRUSTED_PROXY_CIDRS")))
 	if err != nil {
 		slog.Error("invalid QCH_TRUSTED_PROXY_CIDRS", "error", err)
+		os.Exit(1)
+	}
+	probeInterval := envDuration("QCH_AGENT_PUBLIC_IP_PROBE_INTERVAL", 5*time.Minute)
+	if probeInterval < time.Minute || probeInterval > 24*time.Hour {
+		slog.Error("QCH_AGENT_PUBLIC_IP_PROBE_INTERVAL must be between 1m and 24h")
+		os.Exit(1)
+	}
+	publicIPProbe := core.PublicIPProbeConfig{
+		IPv4Endpoint:    strings.TrimSpace(os.Getenv("QCH_AGENT_PUBLIC_IP_PROBE_IPV4_ENDPOINT")),
+		IPv6Endpoint:    strings.TrimSpace(os.Getenv("QCH_AGENT_PUBLIC_IP_PROBE_IPV6_ENDPOINT")),
+		IntervalSeconds: uint32(probeInterval / time.Second),
+	}
+	if err := publicIPProbe.Validate(); err != nil {
+		slog.Error("invalid managed public IP probe configuration", "error", err)
 		os.Exit(1)
 	}
 	startupContext, cancelStartup := context.WithTimeout(context.Background(), 20*time.Second)
@@ -102,6 +117,7 @@ func main() {
 		AgentVersion:    version,
 		AgentInstaller:  agentInstaller,
 		WebhookSecret:   strings.TrimSpace(os.Getenv("QCH_WEBHOOK_SECRET")),
+		PublicIPProbe:   publicIPProbe,
 	})
 	root := apiServer.Handler()
 
@@ -215,6 +231,19 @@ func envBool(key string, fallback bool) bool {
 	parsed, err := strconv.ParseBool(value)
 	if err != nil {
 		slog.Error("invalid boolean environment variable", "key", key, "value", value)
+		os.Exit(1)
+	}
+	return parsed
+}
+
+func envDuration(key string, fallback time.Duration) time.Duration {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := time.ParseDuration(value)
+	if err != nil {
+		slog.Error("invalid duration environment variable", "key", key, "value", value)
 		os.Exit(1)
 	}
 	return parsed
