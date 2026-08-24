@@ -72,7 +72,7 @@ func TestPublicIPProbeConfigFromEnvDefaultsAndOptOut(t *testing.T) {
 	}
 	defaultConfig := publicIPProbeConfigFromEnv(5 * time.Minute)
 	if defaultConfig.IPv4Endpoint != core.DefaultPublicIPProbeIPv4Endpoint || defaultConfig.IPv4FallbackEndpoint != core.DefaultPublicIPProbeIPv4Fallback || defaultConfig.IPv6Endpoint != core.DefaultPublicIPProbeIPv6Endpoint || defaultConfig.IPv6FallbackEndpoint != core.DefaultPublicIPProbeIPv6Fallback {
-		t.Fatalf("empty/unset control-plane settings = %+v, want ident.me defaults", defaultConfig)
+		t.Fatalf("empty/unset control-plane settings = %+v, want the approved ipify-primary/ident.me-fallback chains", defaultConfig)
 	}
 
 	t.Setenv(publicIPProbeEnabledEnv, "false")
