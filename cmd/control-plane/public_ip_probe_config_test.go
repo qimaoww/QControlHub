@@ -77,4 +77,10 @@ func TestPublicIPProbeConfigFromEnvDefaultsAndOptOut(t *testing.T) {
 	if disabledConfig.IPv4Endpoint != "" || disabledConfig.IPv6Endpoint != "" {
 		t.Fatalf("disabled control-plane probe = %+v, want both endpoints empty", disabledConfig)
 	}
+
+	t.Setenv(publicIPProbeEnabledEnv, "0")
+	zeroDisabledConfig := publicIPProbeConfigFromEnv(5 * time.Minute)
+	if zeroDisabledConfig.IPv4Endpoint != "" || zeroDisabledConfig.IPv6Endpoint != "" {
+		t.Fatalf("zero-disabled control-plane probe = %+v, want both endpoints empty", zeroDisabledConfig)
+	}
 }
