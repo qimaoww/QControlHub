@@ -523,6 +523,7 @@ func validJournalCursor(cursor string) bool {
 // appended after the collector started.
 func (collector *CoreLogCollector) followFile(ctx context.Context, source coreLogFileSource, run *coreLogFileRun) error {
 	var file *os.File
+	var trusted *validatedCoreLogFile
 	missingBeforeOpen := false
 	for file == nil {
 		if err := ctx.Err(); err != nil {
@@ -530,7 +531,8 @@ func (collector *CoreLogCollector) followFile(ctx context.Context, source coreLo
 		}
 		opened, err := openValidatedCoreLogFileContext(ctx, source)
 		if err == nil {
-			file = opened
+			trusted = opened
+			file = opened.file
 			break
 		}
 		if !errors.Is(err, os.ErrNotExist) {
@@ -572,16 +574,17 @@ func (collector *CoreLogCollector) followFile(ctx context.Context, source coreLo
 	if size, err := file.Seek(0, io.SeekCurrent); err == nil {
 		offset = size
 	}
-	openedIdentity, err := file.Stat()
+	openedIdentity, err := validateOpenedCoreLogFile(source, file, trusted)
 	if err != nil {
 		return err
 	}
-	if !openedIdentity.Mode().IsRegular() || !coreLogFileHasSingleLink(openedIdentity) {
-		return errors.New("managed core log file identity drifted before cursor readiness")
-	}
-	openedMetadata := metadataFromFileInfo(openedIdentity)
 	collector.filePublishMu.Lock()
 	if err := ctx.Err(); err != nil {
+		collector.filePublishMu.Unlock()
+		return err
+	}
+	openedIdentity, err = validateOpenedCoreLogFile(source, file, trusted)
+	if err != nil {
 		collector.filePublishMu.Unlock()
 		return err
 	}
@@ -598,7 +601,7 @@ func (collector *CoreLogCollector) followFile(ctx context.Context, source coreLo
 	for ctx.Err() == nil {
 		read, readErr := file.Read(buffer)
 		if read > 0 {
-			if err := collector.publishFileBlock(ctx, file, source, run, openedIdentity, openedMetadata,
+			if err := collector.publishFileBlock(ctx, file, source, run, trusted,
 				buffer[:read], &partial, &offset); err != nil {
 				return err
 			}
@@ -616,12 +619,9 @@ func (collector *CoreLogCollector) followFile(ctx context.Context, source coreLo
 		}
 		bytesSinceValidation = 0
 		nextValidation = time.Now().Add(coreLogRevalidateEvery)
-		info, statErr := file.Stat()
+		info, statErr := validateOpenedCoreLogFile(source, file, trusted)
 		if statErr != nil {
 			return statErr
-		}
-		if !info.Mode().IsRegular() || !coreLogFileHasSingleLink(info) {
-			return fmt.Errorf("managed core log file %s was replaced by a non-regular file", source.path)
 		}
 		probe, pathErr := openValidatedCoreLogFileContext(ctx, source)
 		if pathErr != nil && !errors.Is(pathErr, os.ErrNotExist) {
@@ -629,11 +629,7 @@ func (collector *CoreLogCollector) followFile(ctx context.Context, source coreLo
 		}
 		var pathInfo os.FileInfo
 		if pathErr == nil {
-			pathInfo, pathErr = probe.Stat()
-			if pathErr != nil {
-				probe.Close()
-				return pathErr
-			}
+			pathInfo = probe.identity
 		}
 		if pathErr == nil && !os.SameFile(info, pathInfo) {
 			// The file was replaced under us (external rename rotation or a
@@ -642,17 +638,29 @@ func (collector *CoreLogCollector) followFile(ctx context.Context, source coreLo
 			collector.filePublishMu.Lock()
 			if err := ctx.Err(); err != nil {
 				collector.filePublishMu.Unlock()
-				probe.Close()
+				probe.file.Close()
+				return err
+			}
+			pathInfo, err = validateOpenedCoreLogFile(source, probe.file, probe)
+			if err != nil {
+				collector.filePublishMu.Unlock()
+				probe.file.Close()
+				return err
+			}
+			if _, err := probe.file.Seek(0, io.SeekStart); err != nil {
+				collector.filePublishMu.Unlock()
+				probe.file.Close()
+				return err
+			}
+			pathInfo, err = validateOpenedCoreLogFile(source, probe.file, probe)
+			if err != nil {
+				collector.filePublishMu.Unlock()
+				probe.file.Close()
 				return err
 			}
 			file.Close()
-			file = probe
-			if _, err := file.Seek(0, io.SeekStart); err != nil {
-				collector.filePublishMu.Unlock()
-				return err
-			}
-			openedIdentity = pathInfo
-			openedMetadata = metadataFromFileInfo(pathInfo)
+			trusted = probe
+			file = probe.file
 			offset = 0
 			partial = nil
 			setCoreLogFileRunProgress(run, source.path, pathInfo, 0)
@@ -660,7 +668,7 @@ func (collector *CoreLogCollector) followFile(ctx context.Context, source coreLo
 			continue
 		}
 		if probe != nil {
-			probe.Close()
+			probe.file.Close()
 		}
 		if info.Size() < offset {
 			// The file was truncated (rotation); re-read from the start so the
@@ -698,19 +706,15 @@ func (collector *CoreLogCollector) followFile(ctx context.Context, source coreLo
 }
 
 func (collector *CoreLogCollector) publishFileBlock(ctx context.Context, file *os.File, source coreLogFileSource,
-	run *coreLogFileRun, openedIdentity os.FileInfo, openedMetadata fileMetadata, chunk []byte, partial *[]byte, offset *int64) error {
+	run *coreLogFileRun, trusted *validatedCoreLogFile, chunk []byte, partial *[]byte, offset *int64) error {
 	collector.filePublishMu.Lock()
 	defer collector.filePublishMu.Unlock()
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	openedInfo, err := file.Stat()
+	openedInfo, err := validateOpenedCoreLogFile(source, file, trusted)
 	if err != nil {
 		return err
-	}
-	if !os.SameFile(openedIdentity, openedInfo) || !openedInfo.Mode().IsRegular() ||
-		!coreLogFileHasSingleLink(openedInfo) || metadataFromFileInfo(openedInfo) != openedMetadata {
-		return errors.New("managed core log file link identity drifted before publish")
 	}
 	*offset += int64(len(chunk))
 	for {
@@ -1280,10 +1284,22 @@ func importedSingBoxLogPath(output string) (string, error) {
 }
 
 func openValidatedCoreLogFile(source coreLogFileSource) (*os.File, error) {
-	return openValidatedCoreLogFileContext(context.Background(), source)
+	validated, err := openValidatedCoreLogFileContext(context.Background(), source)
+	if err != nil {
+		return nil, err
+	}
+	return validated.file, nil
 }
 
-func openValidatedCoreLogFileContext(ctx context.Context, source coreLogFileSource) (*os.File, error) {
+type validatedCoreLogFile struct {
+	file           *os.File
+	identity       os.FileInfo
+	metadata       fileMetadata
+	rootUID        int
+	rootOwnerKnown bool
+}
+
+func openValidatedCoreLogFileContext(ctx context.Context, source coreLogFileSource) (*validatedCoreLogFile, error) {
 	if source.root == "" || !filepath.IsAbs(source.path) || !pathWithin(source.path, source.root) {
 		return nil, errors.New("core log source is outside its protected root")
 	}
@@ -1333,7 +1349,28 @@ func openValidatedCoreLogFileContext(ctx context.Context, source coreLogFileSour
 		file.Close()
 		return nil, errors.New("core log source changed while it was being opened")
 	}
-	return file, nil
+	return &validatedCoreLogFile{
+		file: file, identity: opened, metadata: metadataFromFileInfo(opened),
+		rootUID: rootUID, rootOwnerKnown: rootOwnerKnown,
+	}, nil
+}
+
+func validateOpenedCoreLogFile(source coreLogFileSource, file *os.File, trusted *validatedCoreLogFile) (os.FileInfo, error) {
+	if trusted == nil || file == nil || trusted.file != file || trusted.identity == nil {
+		return nil, errors.New("managed core log file has no trusted opened identity")
+	}
+	current, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	uid, _, ownerKnown := fileOwnership(current)
+	if !os.SameFile(trusted.identity, current) || !current.Mode().IsRegular() ||
+		!coreLogFileHasSingleLink(current) || current.Mode().Perm()&0o022 != 0 ||
+		metadataFromFileInfo(current) != trusted.metadata ||
+		(source.kind == "file" && trusted.rootOwnerKnown && (!ownerKnown || uid != trusted.rootUID)) {
+		return nil, errors.New("managed core log file identity or safety metadata drifted")
+	}
+	return current, nil
 }
 
 func coreLogFileHasSingleLink(info os.FileInfo) bool {
