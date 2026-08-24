@@ -983,7 +983,7 @@ func (e *Executor) importExistingConfig(ctx context.Context, engine core.Engine,
 		// it. This prevents systemd/OpenRC supervision from immediately
 		// respawning the managed service during the migration critical section;
 		// the recorded enable state is restored while it remains stopped.
-		if err := setServiceEnabled(ctx, managed.Service, false, manager); err != nil {
+		if err := disableServiceCompletely(ctx, managed.Service, manager); err != nil {
 			return rollbackMigration(fmt.Errorf("temporarily disable QAgent %s service before migration: %w", engine, err))
 		}
 		if _, err := serviceCommandAndVerifyWithManager(ctx, manager, managed.Service, core.ActionStop); err != nil {

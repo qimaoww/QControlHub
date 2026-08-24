@@ -278,7 +278,7 @@ func TestExistingCoreMigrationRestoresOriginalServiceWhenNewServiceFails(t *test
 func TestExistingCoreMigrationCoordinatesActiveManagedService(t *testing.T) {
 	requireAgentRoot(t)
 	fixture := newExistingCoreMigrationFixture(t, false)
-	writeMigrationServiceState(t, fixture.stateDirectory, "qagent-xray.service", "active", "disabled")
+	writeMigrationServiceState(t, fixture.stateDirectory, "qagent-xray.service", "active", "enabled-runtime")
 	output, err := fixture.executor.Execute(context.Background(), core.Task{
 		Action: core.ActionImportExisting, Engine: core.EngineXray, ConfigContent: fixture.importedConfig,
 	})
