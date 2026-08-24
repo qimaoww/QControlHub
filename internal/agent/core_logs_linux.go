@@ -1183,7 +1183,11 @@ func decodeJournalCoreLog(value []byte, unitEngines map[string]core.Engine) (cor
 	if !ok {
 		return core.CoreLogEntry{}, "", false
 	}
-	message := strings.TrimSpace(strings.ToValidUTF8(stringField(record["MESSAGE"]), "�"))
+	messageValue, ok := journalMessageField(record["MESSAGE"])
+	if !ok {
+		return core.CoreLogEntry{}, "", false
+	}
+	message := strings.TrimSpace(strings.ToValidUTF8(messageValue, "�"))
 	message = strings.ReplaceAll(message, "\x00", "�")
 	if message == "" {
 		return core.CoreLogEntry{}, "", false
@@ -1208,6 +1212,29 @@ func decodeJournalCoreLog(value []byte, unitEngines map[string]core.Engine) (cor
 func stringField(value any) string {
 	result, _ := value.(string)
 	return result
+}
+
+// journalMessageField accepts both normal JSON strings and the byte-array
+// representation journald uses when MESSAGE contains control bytes (for
+// example sing-box ANSI color escapes). Every element must be an integral byte;
+// malformed or oversized arrays fail closed before allocation or enqueue.
+func journalMessageField(value any) (string, bool) {
+	if result, ok := value.(string); ok {
+		return result, true
+	}
+	values, ok := value.([]any)
+	if !ok || len(values) > coreLogFileMaxLine {
+		return "", false
+	}
+	bytes := make([]byte, len(values))
+	for index, value := range values {
+		number, ok := value.(float64)
+		if !ok || number < 0 || number > 255 || number != float64(byte(number)) {
+			return "", false
+		}
+		bytes[index] = byte(number)
+	}
+	return string(bytes), true
 }
 
 func coreLogEngineForUnit(unit string, unitEngines map[string]core.Engine) (core.Engine, bool) {
