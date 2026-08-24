@@ -66,12 +66,126 @@ const chrome = [
 assert.ok(chrome, "真实浏览器 smoke 需要 Google Chrome 或 Chromium");
 const address = server.address();
 
+const delay = (milliseconds) =>
+  new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+async function waitForPageTarget(debugOrigin, expectedURL) {
+  const deadline = Date.now() + 10000;
+  let lastError;
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(`${debugOrigin}/json/list`);
+      const targets = await response.json();
+      const target = targets.find(
+        (candidate) =>
+          candidate.type === "page" && candidate.url.startsWith(expectedURL),
+      );
+      if (target?.webSocketDebuggerUrl) return target.webSocketDebuggerUrl;
+    } catch (error) {
+      lastError = error;
+    }
+    await delay(100);
+  }
+  throw new Error(`无法连接浏览器页面调试目标：${lastError || expectedURL}`);
+}
+
+async function observeSmokeResult(webSocketURL) {
+  const socket = new WebSocket(webSocketURL);
+  await Promise.race([
+    new Promise((resolve, reject) => {
+      socket.addEventListener("open", resolve, { once: true });
+      socket.addEventListener("error", reject, { once: true });
+    }),
+    delay(10000).then(() => {
+      throw new Error("连接浏览器调试目标超时");
+    }),
+  ]);
+
+  let requestID = 0;
+  const pending = new Map();
+  socket.addEventListener("message", (event) => {
+    const message = JSON.parse(String(event.data));
+    if (!message.id || !pending.has(message.id)) return;
+    const { resolve, reject } = pending.get(message.id);
+    pending.delete(message.id);
+    if (message.error) reject(new Error(JSON.stringify(message.error)));
+    else resolve(message.result);
+  });
+
+  const send = (method, params = {}) =>
+    new Promise((resolve, reject) => {
+      const id = ++requestID;
+      pending.set(id, { resolve, reject });
+      socket.send(JSON.stringify({ id, method, params }));
+    });
+
+  try {
+    const deadline = Date.now() + 30000;
+    let evaluation;
+    while (!evaluation && Date.now() < deadline) {
+      try {
+        evaluation = await Promise.race([
+          send("Runtime.evaluate", {
+            expression: `new Promise((resolve) => {
+          const read = () => {
+            const status = document.documentElement.dataset.browserSmoke;
+            if (!status) return false;
+            resolve({
+              status,
+              detail: document.querySelector("#browser-smoke-result")?.textContent || "",
+            });
+            return true;
+          };
+          if (!read()) {
+            new MutationObserver((observer) => {
+              if (read()) observer.disconnect();
+            }).observe(document.documentElement, {
+              attributes: true,
+              attributeFilter: ["data-browser-smoke"],
+            });
+          }
+        })`,
+            awaitPromise: true,
+            returnByValue: true,
+          }),
+          delay(Math.max(1, deadline - Date.now())).then(() => {
+            throw new Error("等待浏览器 smoke 完成标记超时");
+          }),
+        ]);
+      } catch (error) {
+        if (!String(error).includes("Execution context was destroyed")) throw error;
+        await delay(100);
+      }
+    }
+    if (!evaluation) throw new Error("等待浏览器 smoke 完成标记超时");
+    if (evaluation.exceptionDetails)
+      throw new Error(JSON.stringify(evaluation.exceptionDetails));
+    return evaluation.result?.value;
+  } finally {
+    socket.close();
+  }
+}
+
+async function stopBrowser(child) {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  const exited = new Promise((resolve) => child.once("exit", resolve));
+  child.kill("SIGTERM");
+  await Promise.race([
+    exited,
+    delay(3000).then(() => {
+      child.kill("SIGKILL");
+      return exited;
+    }),
+  ]);
+}
+
 async function runMode(mode) {
   const profile = await mkdtemp(join(tmpdir(), `qcontrolhub-browser-${mode}-`));
+  let child;
   try {
     await chmod(profile, 0o700);
     const url = `http://127.0.0.1:${address.port}/agents-browser-smoke.html?mode=${mode}#node-settings`;
-    const child = spawn(
+    child = spawn(
       chrome,
       [
         "--headless=new",
@@ -91,27 +205,45 @@ async function runMode(mode) {
         "--hide-scrollbars",
         "--window-size=1280,900",
         `--user-data-dir=${profile}`,
-        "--virtual-time-budget=15000",
-        "--dump-dom",
+        "--remote-debugging-port=0",
         url,
       ],
-      { stdio: ["ignore", "pipe", "pipe"] },
+      { stdio: ["ignore", "ignore", "pipe"] },
     );
-    let stdout = "";
     let stderr = "";
-    child.stdout.on("data", (chunk) => (stdout += chunk));
-    child.stderr.on("data", (chunk) => (stderr += chunk));
-    const timer = setTimeout(() => child.kill("SIGKILL"), 60000);
-    const status = await new Promise((resolve) => child.once("exit", resolve));
-    clearTimeout(timer);
-    assert.equal(status, 0, `Chrome ${mode} smoke 退出失败：${stderr}`);
-    assert.match(
-      stdout,
-      /data-browser-smoke="passed"/,
-      `Chrome ${mode} smoke 未通过：${stdout}\n${stderr}`,
+    const debugOrigin = await Promise.race([
+      new Promise((resolve, reject) => {
+        child.stderr.on("data", (chunk) => {
+          stderr += chunk;
+          const match = stderr.match(
+            /DevTools listening on ws:\/\/(127\.0\.0\.1|localhost):(\d+)\//,
+          );
+          if (match) resolve(`http://127.0.0.1:${match[2]}`);
+        });
+        child.once("error", reject);
+        child.once("exit", (status) =>
+          reject(new Error(`Chrome ${mode} 提前退出（${status}）：${stderr}`)),
+        );
+      }),
+      delay(10000).then(() => {
+        throw new Error(`Chrome ${mode} 调试端口启动超时：${stderr}`);
+      }),
+    ]);
+    const pageTarget = await waitForPageTarget(debugOrigin, url);
+    const result = await observeSmokeResult(pageTarget);
+    assert.equal(
+      result?.status,
+      "passed",
+      `Chrome ${mode} smoke 未通过：${result?.detail || "无错误详情"}\n${stderr}`,
     );
   } finally {
-    await rm(profile, { recursive: true, force: true });
+    if (child) await stopBrowser(child);
+    await rm(profile, {
+      recursive: true,
+      force: true,
+      maxRetries: 5,
+      retryDelay: 100,
+    });
   }
 }
 
