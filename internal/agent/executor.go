@@ -1212,10 +1212,30 @@ func (e *Executor) validate(ctx context.Context, engine core.Engine, spec Engine
 	if err := core.ValidateConfig(engine, content); err != nil {
 		return "", err
 	}
-	if err := validateNoPersistentCoreLogs(engine, content); err != nil {
+	if err := e.validateManagedLogPolicy(ctx, engine, spec, content); err != nil {
 		return "", err
 	}
 	return e.validateSnapshot(ctx, engine, spec, content)
+}
+
+func (e *Executor) validateManagedLogPolicy(ctx context.Context, engine core.Engine, spec EngineSpec, content string) error {
+	if engine != core.EngineSingBox {
+		return validateNoPersistentCoreLogs(engine, content)
+	}
+	output, destination, err := singBoxLogOutput(content)
+	if err != nil {
+		return err
+	}
+	if destination != singBoxLogDestinationFile {
+		return nil
+	}
+	if _, err := e.completedMigrationOwnership(ctx, engine, spec); err != nil {
+		return validateNoPersistentCoreLogs(engine, content)
+	}
+	if _, err := importedSingBoxLogPath(output); err != nil {
+		return fmt.Errorf("imported sing-box log output is unsafe: %w", err)
+	}
+	return nil
 }
 
 func (e *Executor) validateSnapshot(ctx context.Context, engine core.Engine, spec EngineSpec, content string) (string, error) {

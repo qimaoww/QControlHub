@@ -32,6 +32,8 @@ const (
 	// rotating to a single .old copy once the live file grows past this size.
 	coreLogFileRotateBytes = 8 << 20
 	coreLogFileMaxLine     = 256 << 10
+	coreLogRevalidateBytes = 256 << 10
+	coreLogRevalidateEvery = time.Second
 )
 
 // Managed OpenRC services log through supervise-daemon output_log files below
@@ -433,10 +435,13 @@ func (collector *CoreLogCollector) followFile(ctx context.Context, source coreLo
 	}
 	buffer := make([]byte, 16<<10)
 	var partial []byte
+	bytesSinceValidation := int64(0)
+	nextValidation := time.Now().Add(coreLogRevalidateEvery)
 	for ctx.Err() == nil {
 		read, readErr := file.Read(buffer)
 		if read > 0 {
 			offset += int64(read)
+			bytesSinceValidation += int64(read)
 			chunk := buffer[:read]
 			for {
 				index := bytes.IndexByte(chunk, '\n')
@@ -454,20 +459,23 @@ func (collector *CoreLogCollector) followFile(ctx context.Context, source coreLo
 				collector.appendFileEntry(source, line)
 			}
 		}
-		if readErr == nil {
+		if readErr == nil && bytesSinceValidation < coreLogRevalidateBytes && time.Now().Before(nextValidation) {
 			continue
 		}
-		if !errors.Is(readErr, io.EOF) {
+		atEOF := errors.Is(readErr, io.EOF)
+		if readErr != nil && !atEOF {
 			return readErr
 		}
 		if err := validateCoreLogSourceBinding(ctx, source); err != nil {
 			return err
 		}
+		bytesSinceValidation = 0
+		nextValidation = time.Now().Add(coreLogRevalidateEvery)
 		info, statErr := file.Stat()
 		if statErr != nil {
 			return statErr
 		}
-		if !info.Mode().IsRegular() {
+		if !info.Mode().IsRegular() || !coreLogFileHasSingleLink(info) {
 			return fmt.Errorf("managed core log file %s was replaced by a non-regular file", source.path)
 		}
 		probe, pathErr := openValidatedCoreLogFileContext(ctx, source)
@@ -506,6 +514,9 @@ func (collector *CoreLogCollector) followFile(ctx context.Context, source coreLo
 			}
 			offset = 0
 			partial = nil
+			continue
+		}
+		if !atEOF {
 			continue
 		}
 		if source.kind == "openrc" && info.Size() >= coreLogFileRotateBytes {
@@ -642,6 +653,12 @@ func (collector *CoreLogCollector) RefreshImportedSingBoxSource(executor *Execut
 	}
 	info, err := os.Lstat(spec.ConfigPath)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			if _, binaryErr := os.Lstat(spec.Binary); errors.Is(binaryErr, os.ErrNotExist) {
+				collector.replaceImportedSingBoxSource(nil)
+				return nil
+			}
+		}
 		collector.failImportedSingBoxSource("config-unavailable")
 		return err
 	}
@@ -904,7 +921,7 @@ func openValidatedCoreLogFileContext(ctx context.Context, source coreLogFileSour
 		return nil, err
 	}
 	uid, _, ownerKnown := fileOwnership(expected)
-	if expected.Mode()&os.ModeSymlink != 0 || !expected.Mode().IsRegular() || expected.Mode().Perm()&0o022 != 0 ||
+	if expected.Mode()&os.ModeSymlink != 0 || !expected.Mode().IsRegular() || !coreLogFileHasSingleLink(expected) || expected.Mode().Perm()&0o022 != 0 ||
 		(source.kind == "file" && rootOwnerKnown && ownerKnown && uid != rootUID) {
 		return nil, errors.New("core log source is not a protected regular file")
 	}
@@ -913,12 +930,17 @@ func openValidatedCoreLogFileContext(ctx context.Context, source coreLogFileSour
 		return nil, err
 	}
 	opened, err := file.Stat()
-	if err != nil || !os.SameFile(expected, opened) || !opened.Mode().IsRegular() ||
+	if err != nil || !os.SameFile(expected, opened) || !opened.Mode().IsRegular() || !coreLogFileHasSingleLink(opened) ||
 		metadataFromFileInfo(opened) != metadataFromFileInfo(expected) {
 		file.Close()
 		return nil, errors.New("core log source changed while it was being opened")
 	}
 	return file, nil
+}
+
+func coreLogFileHasSingleLink(info os.FileInfo) bool {
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	return ok && stat.Nlink == 1
 }
 
 func openCoreLogFileNoSymlinks(rootPath, path string, expectedUID int, ownerKnown bool) (*os.File, error) {

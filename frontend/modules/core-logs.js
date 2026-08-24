@@ -88,6 +88,11 @@ export function installCoreLogs(ctx) {
       emptyDetail = "此 Agent 可以上传日志，但无法报告当前采集来源是否正常。";
       sourceNoticeTitle = emptyTitle;
       sourceNoticeDetail = emptyDetail;
+    } else if (filters.engine && selectedRuntime?.installed === false) {
+      emptyTitle = "内核尚未安装";
+      emptyDetail = "当前节点尚未安装所选内核，因此没有可采集的运行日志。";
+      sourceNoticeTitle = emptyTitle;
+      sourceNoticeDetail = emptyDetail;
     } else if (
       selectedAgent &&
       (selectedAgent.features || []).includes("core-log-status-v1")

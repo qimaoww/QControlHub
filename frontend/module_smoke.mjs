@@ -2516,7 +2516,12 @@ try {
   coreAgents = [{ id: "alpha", name: "Alpha", features: ["core-logs-v1", "core-log-status-v1"], runtime: { xray: { core_log_status: "failed" }, "sing-box": { core_log_status: "active" } } }];
   await renderCoreLogs({ syncFilters: true });
   assert.equal(coreMarkup.includes("日志采集失败"), false, "another engine failure does not contaminate the selected engine status");
+  coreEntries = [];
+  coreAgents = [{ id: "alpha", name: "Alpha", features: ["core-logs-v1", "core-log-status-v1"], runtime: { "sing-box": { installed: false } } }];
+  await renderCoreLogs({ syncFilters: true });
+  assert.equal(coreMarkup.includes("内核尚未安装"), true, "an uninstalled engine is distinct from collection failure and an empty active source");
 
+  coreEntries = [{ id: "historical", agent_id: "alpha", engine: "sing-box", level: "info", message: "historical entry", logged_at: "2026-08-24T00:00:00Z" }];
   let noAgentDataMarkup = "";
   const renderWithoutAgentData = installCoreLogs({
     state: { route: "core-logs", navigationEpoch: 1, data: { coreLogFilters: { agent_id: "alpha", engine: "sing-box" } } },

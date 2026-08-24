@@ -180,6 +180,10 @@ func TestExistingSingBoxConfigDirectoryMigrationSucceeds(t *testing.T) {
 
 func TestExistingSingBoxOfficialRelativeLogOutputMigrationSucceeds(t *testing.T) {
 	requireAgentRoot(t)
+	logRoot := t.TempDir()
+	previousLogRoot := importedSingBoxLogRoot
+	importedSingBoxLogRoot = logRoot
+	t.Cleanup(func() { importedSingBoxLogRoot = previousLogRoot })
 	fixture, _ := configureSingBoxOfficialFixture(t, newExistingCoreMigrationFixture(t, false))
 	if err := os.WriteFile(filepath.Join(fixture.existing.ConfigDirectory, "20-log.json"),
 		[]byte(`{"log":{"level":"info","timestamp":true,"output":"runtime.log"}}`), 0o600); err != nil {
@@ -217,9 +221,62 @@ func TestExistingSingBoxOfficialRelativeLogOutputMigrationSucceeds(t *testing.T)
 	if fileSources != 1 {
 		t.Fatalf("restarted imported sing-box file sources = %d", fileSources)
 	}
-	consoleConfig := `{"log":{"level":"info","timestamp":true},"inbounds":[],"outbounds":[]}`
-	if err := os.WriteFile(fixture.managed.ConfigPath, []byte(consoleConfig), 0o600); err != nil {
+	if _, err := restarted.Execute(context.Background(), core.Task{
+		Action: core.ActionValidate, Engine: core.EngineSingBox, ConfigContent: content,
+	}); err != nil {
+		t.Fatalf("validate unchanged imported file log configuration: %v", err)
+	}
+	replacementConfig := `{"log":{"level":"info","output":"replacement.log"},"inbounds":[],"outbounds":[]}`
+	if _, err := restarted.Execute(context.Background(), core.Task{
+		Action: core.ActionDeploy, Engine: core.EngineSingBox, ConfigContent: replacementConfig,
+	}); err != nil {
+		t.Fatalf("deploy imported file-to-file log configuration: %v", err)
+	}
+	if err := collector.RefreshImportedSingBoxSource(restarted); err != nil {
+		t.Fatalf("refresh imported file-to-file source: %v", err)
+	}
+	collector.mu.Lock()
+	filePath := ""
+	for _, source := range collector.fileSources {
+		if source.engine == core.EngineSingBox && source.kind == "file" {
+			filePath = source.path
+		}
+	}
+	collector.mu.Unlock()
+	if filePath != filepath.Join(logRoot, "replacement.log") {
+		t.Fatalf("file-to-file source path = %q", filePath)
+	}
+	failedConfig := `{"log":{"level":"info","output":"failed.log"},"inbounds":[],"outbounds":[]}`
+	if err := os.WriteFile(filepath.Join(fixture.stateDirectory, "fail-managed-restart"), []byte("1"), 0o600); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := restarted.Execute(context.Background(), core.Task{
+		Action: core.ActionDeploy, Engine: core.EngineSingBox, ConfigContent: failedConfig,
+	}); err == nil {
+		t.Fatal("failed imported file deploy unexpectedly succeeded")
+	}
+	if err := os.Remove(filepath.Join(fixture.stateDirectory, "fail-managed-restart")); err != nil && !errors.Is(err, os.ErrNotExist) {
+		t.Fatal(err)
+	}
+	if err := collector.RefreshImportedSingBoxSource(restarted); err != nil {
+		t.Fatalf("refresh rolled-back imported file source: %v", err)
+	}
+	collector.mu.Lock()
+	filePath = ""
+	for _, source := range collector.fileSources {
+		if source.engine == core.EngineSingBox && source.kind == "file" {
+			filePath = source.path
+		}
+	}
+	collector.mu.Unlock()
+	if filePath != filepath.Join(logRoot, "replacement.log") {
+		t.Fatalf("rollback source path = %q", filePath)
+	}
+	consoleConfig := `{"log":{"level":"info","timestamp":true},"inbounds":[],"outbounds":[]}`
+	if _, err := restarted.Execute(context.Background(), core.Task{
+		Action: core.ActionDeploy, Engine: core.EngineSingBox, ConfigContent: consoleConfig,
+	}); err != nil {
+		t.Fatalf("deploy imported file-to-console log configuration: %v", err)
 	}
 	if err := collector.RefreshImportedSingBoxSource(restarted); err != nil {
 		t.Fatalf("switch restarted import to console source: %v", err)
@@ -1465,6 +1522,11 @@ case "$command" in
     fi
     ;;
   start|restart)
+	if [ "$command" = restart ] && [ "$service" = qagent-sing-box.service ] && [ -f "$state/fail-managed-restart" ]; then
+	  rm -f "$state/fail-managed-restart"
+	  printf 'failed\n' > "$active_file"
+	  exit 1
+	fi
     if [ "$service" = qagent-xray.service ] && [ -f "$state/fail-managed-start" ]; then
       printf 'failed\n' > "$active_file"
       exit 1

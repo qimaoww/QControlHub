@@ -387,6 +387,86 @@ func newImportedSingBoxLogExecutor(t *testing.T, content string) *Executor {
 	}
 }
 
+func TestImportedSingBoxFileSourceRevalidatesDuringContinuousWrites(t *testing.T) {
+	logRoot := t.TempDir()
+	previous := importedSingBoxLogRoot
+	importedSingBoxLogRoot = logRoot
+	t.Cleanup(func() { importedSingBoxLogRoot = previous })
+	content := `{"log":{"output":"runtime.log"}}`
+	executor := newImportedSingBoxLogExecutor(t, content)
+	collector := NewCoreLogCollectorForServiceManager(defaultSystemdServiceManager(), executor.Specs)
+	if err := collector.PrepareImportedSingBoxSource(context.Background(), executor, content); err != nil {
+		t.Fatal(err)
+	}
+	if err := collector.RefreshImportedSingBoxSource(executor); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { collector.Run(ctx); close(done) }()
+	path := filepath.Join(logRoot, "runtime.log")
+	writer, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeDone := make(chan struct{})
+	go func() {
+		defer close(writeDone)
+		line := strings.Repeat("x", 1024) + "\n"
+		for ctx.Err() == nil {
+			if _, err := writer.WriteString(line); err != nil {
+				return
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) && collector.Status()[core.EngineSingBox].Status != "active" {
+		time.Sleep(25 * time.Millisecond)
+	}
+	if err := os.WriteFile(executor.Specs[core.EngineSingBox].ConfigPath, []byte(`{"log":{"output":"other.log"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) && collector.Status()[core.EngineSingBox].Status != "failed" {
+		time.Sleep(25 * time.Millisecond)
+	}
+	if status := collector.Status()[core.EngineSingBox]; status.Status != "failed" {
+		t.Fatalf("continuous-write drift status = %+v", status)
+	}
+	cancel()
+	_ = writer.Close()
+	<-writeDone
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("continuous-write drift leaked collector")
+	}
+}
+
+func TestMissingSingBoxInstallationDoesNotReportCollectionFailure(t *testing.T) {
+	for _, kind := range []string{ServiceManagerSystemd, ServiceManagerOpenRC} {
+		t.Run(kind, func(t *testing.T) {
+			manager, err := NewServiceManager(kind)
+			if err != nil {
+				t.Fatal(err)
+			}
+			service := "qagent-sing-box.service"
+			if kind == ServiceManagerOpenRC {
+				service = "qagent-sing-box"
+			}
+			executor := &Executor{Specs: map[core.Engine]EngineSpec{core.EngineSingBox: {
+				Binary: filepath.Join(t.TempDir(), "missing-sing-box"), ConfigPath: filepath.Join(t.TempDir(), "missing-config.json"),
+				Service: service,
+			}}, Services: manager}
+			collector := NewCoreLogCollectorForExecutor(executor)
+			if status, exists := collector.Status()[core.EngineSingBox]; exists {
+				t.Fatalf("missing sing-box installation reported source status: %+v", status)
+			}
+		})
+	}
+}
+
 func TestImportedSingBoxLogSourceFailsClosed(t *testing.T) {
 	logRoot := t.TempDir()
 	previous := importedSingBoxLogRoot
@@ -461,6 +541,96 @@ func TestImportedSingBoxLogSourceFailsClosed(t *testing.T) {
 	if file, err := openValidatedCoreLogFile(source); err == nil {
 		file.Close()
 		t.Fatal("writable imported log source parent was accepted")
+	}
+}
+
+func TestImportedSingBoxLogSourceRejectsHardLinks(t *testing.T) {
+	logRoot := t.TempDir()
+	previous := importedSingBoxLogRoot
+	importedSingBoxLogRoot = logRoot
+	t.Cleanup(func() { importedSingBoxLogRoot = previous })
+	content := `{"log":{"output":"runtime.log"}}`
+	executor := newImportedSingBoxLogExecutor(t, content)
+	collector := NewCoreLogCollectorForServiceManager(defaultSystemdServiceManager(), executor.Specs)
+	if err := collector.PrepareImportedSingBoxSource(context.Background(), executor, content); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(t.TempDir(), "outside.log")
+	if err := os.WriteFile(outside, []byte("must not be collected\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(logRoot, "runtime.log")
+	if err := os.Link(outside, path); err != nil {
+		t.Fatal(err)
+	}
+	if err := collector.RefreshImportedSingBoxSource(executor); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { collector.Run(ctx); close(done) }()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) && collector.Status()[core.EngineSingBox].Status != "failed" {
+		time.Sleep(25 * time.Millisecond)
+	}
+	if status := collector.Status()[core.EngineSingBox]; status.Status != "failed" {
+		t.Fatalf("hard-linked source status = %+v", status)
+	}
+	if batch := collector.NextBatch(); batch != nil {
+		t.Fatalf("hard-linked outside contents reached batch: %+v", batch)
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("hard-link rejection leaked collector")
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("before replacement\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	executor = newImportedSingBoxLogExecutor(t, content)
+	collector = NewCoreLogCollectorForServiceManager(defaultSystemdServiceManager(), executor.Specs)
+	if err := collector.PrepareImportedSingBoxSource(context.Background(), executor, content); err != nil {
+		t.Fatal(err)
+	}
+	if err := collector.RefreshImportedSingBoxSource(executor); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel = context.WithCancel(context.Background())
+	done = make(chan struct{})
+	go func() { collector.Run(ctx); close(done) }()
+	if err := os.Rename(path, path+".old"); err != nil {
+		t.Fatal(err)
+	}
+	replacementOutside := filepath.Join(t.TempDir(), "replacement-outside.log")
+	if err := os.WriteFile(replacementOutside, []byte("replacement must not be collected\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(replacementOutside, path); err != nil {
+		t.Fatal(err)
+	}
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) && collector.Status()[core.EngineSingBox].Status != "failed" {
+		time.Sleep(25 * time.Millisecond)
+	}
+	if status := collector.Status()[core.EngineSingBox]; status.Status != "failed" {
+		t.Fatalf("hard-linked replacement status = %+v", status)
+	}
+	if batch := collector.NextBatch(); batch != nil {
+		for _, entry := range batch.Entries {
+			if strings.Contains(entry.Message, "replacement must not be collected") {
+				t.Fatalf("hard-linked replacement reached batch: %+v", batch)
+			}
+		}
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("hard-link replacement leaked collector")
 	}
 }
 
