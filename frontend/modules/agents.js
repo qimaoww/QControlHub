@@ -873,17 +873,30 @@ async function nodeSettings(presetMode = false, { overview: preloadedOverview } 
           .map((engine) => {
             const runtime = agent.runtime?.[engine] || {};
             const installed = Boolean(runtime.installed);
-            const serviceState = installed
-              ? serviceStatusName(runtime.service_status)
-              : "未安装";
-            const tone = installed
-              ? statusTone(runtime.service_status)
-              : "muted";
+            const existingPending = Boolean(
+              runtime.existing_config_available,
+            );
+            const existingUnsupportedReason = String(
+              runtime.existing_config_unsupported_reason || "",
+            );
+            const serviceState = existingPending
+              ? "现有服务待迁移"
+              : existingUnsupportedReason
+                ? "检测到但不可迁移"
+                : installed
+                  ? serviceStatusName(runtime.service_status)
+                  : "未安装";
+            const tone =
+              existingPending || existingUnsupportedReason
+                ? "warn"
+                : installed
+                  ? statusTone(runtime.service_status)
+                  : "muted";
             return `<span class="core-chip service-${esc(engine)}" data-core-installed="${installed ? 1 : 0}"><span class="engine-badge ${esc(engine)}">${esc(engineName(engine))}</span><span class="engine-state ${tone}"><i></i><b data-core-service="${esc(engine)}">${esc(serviceState)}</b></span></span>`;
           })
           .join("");
         return `<a class="node-card" href="#settings-node-${esc(agent.id)}" data-refresh-key="agent-${esc(agent.id)}" data-agent-node="${esc(agent.id)}" data-agent-metrics="${esc(agent.id)}" data-state="${agent.status === "online" ? "online" : "offline"}" data-available="${metrics.collected_at ? 1 : 0}">
-              <header class="node-card-head"><span class="machine-avatar" aria-hidden="true">●</span><div class="node-card-title"><strong>${esc(agent.name)}</strong><small>${esc(agent.os)} / ${esc(agent.arch)} · ${installedCount ? `${installedCount}/${(agent.capabilities || []).length} 内核已安装` : "尚未安装内核"}</small></div><span class="node-card-state"><i class="status-dot ${statusTone(agent.status)}" data-agent-status-dot></i><b data-agent-status-label>${agent.status === "online" ? "在线" : "离线"}</b><small data-agent-heartbeat>${esc(heartbeat(agent.last_seen))}</small></span><span class="node-card-grip" title="拖动调整顺序" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 6h.01M9 12h.01M9 18h.01M15 6h.01M15 12h.01M15 18h.01"/></svg></span></header>
+              <header class="node-card-head"><span class="machine-avatar" aria-hidden="true">●</span><div class="node-card-title"><strong>${esc(agent.name)}</strong><small data-core-installed-summary>${esc(agent.os)} / ${esc(agent.arch)} · ${installedCount ? `${installedCount}/${(agent.capabilities || []).length} 内核已安装` : "尚未安装内核"}</small></div><span class="node-card-state"><i class="status-dot ${statusTone(agent.status)}" data-agent-status-dot></i><b data-agent-status-label>${agent.status === "online" ? "在线" : "离线"}</b><small data-agent-heartbeat>${esc(heartbeat(agent.last_seen))}</small></span><span class="node-card-grip" title="拖动调整顺序" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 6h.01M9 12h.01M9 18h.01M15 6h.01M15 12h.01M15 18h.01"/></svg></span></header>
               <div class="node-card-ips" aria-label="公网地址">${addressRows.map(cardIPRow).join("")}<small class="node-address-note" data-node-connection-address ${connectionAddressNote ? "" : "hidden"}>${esc(connectionAddressNote)}</small></div>
               <section class="node-card-resources" aria-label="节点资源"><div><span>CPU</span><strong data-metric-text="cpu">${metrics.cpu_available ? `${Number(metrics.cpu_percent).toFixed(1)}%` : "等待采集"}</strong><progress aria-label="CPU 使用率" data-metric-progress="cpu" max="100" value="${metrics.cpu_available ? Number(metrics.cpu_percent) : 0}"></progress></div><div><span>内存</span><strong data-metric-text="memory">${metrics.memory_available ? `${bytes(metrics.memory_used_bytes)} / ${bytes(metrics.memory_total_bytes)}` : "等待采集"}</strong><progress aria-label="内存使用率" data-metric-progress="memory" max="100" value="${percent(metrics.memory_used_bytes, metrics.memory_total_bytes)}"></progress></div><div><span>磁盘</span><strong data-metric-text="disk">${metrics.disk_available ? `${bytes(metrics.disk_used_bytes)} / ${bytes(metrics.disk_total_bytes)}` : "等待采集"}</strong><progress aria-label="根磁盘使用率" data-metric-progress="disk" max="100" value="${percent(metrics.disk_used_bytes, metrics.disk_total_bytes)}"></progress></div><div><span>网络</span><strong>↓ <i data-metric-text="download-rate">${metrics.network_available ? rate(metrics.network_rx_bps) : "等待采集"}</i> · ↑ <i data-metric-text="upload-rate">${metrics.network_available ? rate(metrics.network_tx_bps) : "等待采集"}</i></strong><small>累计 ↓ <b data-metric-text="download-total">${metrics.network_available ? bytes(metrics.network_rx_bytes) : "—"}</b> · ↑ <b data-metric-text="upload-total">${metrics.network_available ? bytes(metrics.network_tx_bytes) : "—"}</b></small></div><span class="machine-resource-live" data-metric-poll role="status" aria-label="资源自动更新"></span></section>
               <section class="node-card-cores" aria-label="内核状态">${coreChips}</section>
@@ -1851,6 +1864,8 @@ function updateAgentMetrics(item) {
       requestAgentStructureRefresh();
       return;
     }
+    if (card && card.dataset.runtimeStructure !== "full")
+      card.dataset.coreInstalled = installed ? "1" : "0";
     const version = root.querySelector(
       `[data-core-version="${CSS.escape(engine)}"]`,
     );
@@ -1884,6 +1899,17 @@ function updateAgentMetrics(item) {
         });
     }
   });
+  const installedSummary = root.querySelector("[data-core-installed-summary]");
+  if (installedSummary) {
+    const installedCount = (item.capabilities || []).filter(
+      (engine) => item.runtime?.[engine]?.installed,
+    ).length;
+    installedSummary.textContent = `${item.os || ""} / ${item.arch || ""} · ${
+      installedCount
+        ? `${installedCount}/${(item.capabilities || []).length} 内核已安装`
+        : "尚未安装内核"
+    }`;
+  }
   root.querySelectorAll(".core-version-form button[type=submit]").forEach(
     (button) => {
       const card = button.closest(".service-card");

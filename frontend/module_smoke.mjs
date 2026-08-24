@@ -1095,6 +1095,17 @@ const structureCards = {
   "sing-box": new StructureElement(),
   xray: new StructureElement(),
 };
+const structureStates = {
+  "sing-box": new StructureElement(),
+  xray: new StructureElement(),
+};
+const structureServices = {
+  "sing-box": new StructureElement(),
+  xray: new StructureElement(),
+};
+for (const [engine, service] of Object.entries(structureServices))
+  service.closest = () => structureStates[engine];
+const structureInstalledSummary = new StructureElement();
 for (const card of Object.values(structureCards)) {
   card.dataset.runtimeStructure = "full";
   card.dataset.coreInstalled = "0";
@@ -1104,7 +1115,12 @@ for (const card of Object.values(structureCards)) {
 const structureRoot = new StructureElement();
 structureRoot.querySelector = (selector) => {
   const match = selector.match(/^\.service-(.+)$/);
-  return match ? structureCards[match[1]] || null : null;
+  if (match) return structureCards[match[1]] || null;
+  const serviceMatch = selector.match(/^\[data-core-service="(.+)"\]$/);
+  if (serviceMatch) return structureServices[serviceMatch[1]] || null;
+  if (selector === "[data-core-installed-summary]")
+    return structureInstalledSummary;
+  return null;
 };
 globalThis.CSS = { escape: (value) => String(value) };
 globalThis.document = {
@@ -1120,6 +1136,7 @@ try {
   let structureMarkup = "";
   const structureNotifications = [];
   let controlledRender = null;
+  let compactPolling = false;
   const structureState = {
     route: "node-settings",
     anchor: "settings-node-alpha",
@@ -1129,6 +1146,8 @@ try {
   const singleEngine = (unsupported = false) => [
     {
       id: "alpha",
+      os: "linux",
+      arch: "amd64",
       status: "online",
       metrics: {},
       capabilities: ["sing-box"],
@@ -1161,6 +1180,7 @@ try {
         api: async (path) => {
           assert.equal(path, "/agents");
           structureRequests += 1;
+          if (compactPolling) return structurePayload();
           if (structureRequests % 2 === 1) return structurePayload();
           structureRenders += 1;
           if (controlledRender && !controlledRender.used) {
@@ -1257,9 +1277,12 @@ try {
   structureRequests = 0;
   structureRenders = 0;
   controlledRender = null;
+  compactPolling = true;
   structurePayload = () => [
     {
       id: "alpha",
+      os: "linux",
+      arch: "amd64",
       status: "online",
       metrics: {},
       capabilities: ["sing-box"],
@@ -1283,6 +1306,65 @@ try {
     structureRenders,
     0,
     "a compact aggregate core chip does not request a structural page render",
+  );
+  assert.equal(structureCards["sing-box"].dataset.coreInstalled, "0");
+  assert.equal(structureServices["sing-box"].textContent, "未安装");
+  assert.equal(structureStates["sing-box"].className, "engine-state muted");
+  assert.equal(
+    structureInstalledSummary.textContent,
+    "linux / amd64 · 尚未安装内核",
+  );
+
+  structurePayload = () => [
+    {
+      id: "alpha",
+      os: "linux",
+      arch: "amd64",
+      status: "online",
+      metrics: {},
+      capabilities: ["sing-box"],
+      runtime: {
+        "sing-box": { installed: true, service_status: "running" },
+      },
+    },
+  ];
+  await pollAgentMetrics();
+  clearTimeout(structureState.agentPollTimer);
+  await flushMicrotasks();
+  assert.equal(structureRequests, 2, "compact install transition stays in place");
+  assert.equal(structureRenders, 0, "compact install transition does not render");
+  assert.equal(structureCards["sing-box"].dataset.coreInstalled, "1");
+  assert.equal(structureServices["sing-box"].textContent, "running");
+  assert.equal(structureStates["sing-box"].className, "engine-state running");
+  assert.equal(
+    structureInstalledSummary.textContent,
+    "linux / amd64 · 1/1 内核已安装",
+  );
+
+  structurePayload = () => [
+    {
+      id: "alpha",
+      os: "linux",
+      arch: "amd64",
+      status: "online",
+      metrics: {},
+      capabilities: ["sing-box"],
+      runtime: {
+        "sing-box": { installed: false, service_status: "unknown" },
+      },
+    },
+  ];
+  await pollAgentMetrics();
+  clearTimeout(structureState.agentPollTimer);
+  await flushMicrotasks();
+  assert.equal(structureRequests, 3, "compact uninstall transition stays bounded");
+  assert.equal(structureRenders, 0, "compact uninstall transition does not render");
+  assert.equal(structureCards["sing-box"].dataset.coreInstalled, "0");
+  assert.equal(structureServices["sing-box"].textContent, "未安装");
+  assert.equal(structureStates["sing-box"].className, "engine-state muted");
+  assert.equal(
+    structureInstalledSummary.textContent,
+    "linux / amd64 · 尚未安装内核",
   );
 } finally {
   if (structureDocument === undefined) delete globalThis.document;

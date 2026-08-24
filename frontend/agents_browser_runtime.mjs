@@ -374,6 +374,26 @@ async function testAdminRuntime() {
   const agentPollsBefore = callsFor("/agents");
   const overviewCallsBefore = callsFor("/overview");
   const enrollmentCallsBefore = callsFor("/enrollment-tokens");
+  const alphaCard = document.querySelector('[data-agent-metrics="alpha"]');
+  const singBoxChip = alphaCard.querySelector(".service-sing-box");
+  const singBoxService = singBoxChip.querySelector('[data-core-service="sing-box"]');
+  const installedSummary = alphaCard.querySelector(
+    "[data-core-installed-summary]",
+  );
+  assert.equal(singBoxChip.dataset.coreInstalled, "0");
+  assert.equal(singBoxService.textContent, "未安装");
+  assert.equal(
+    singBoxService.closest(".engine-state").classList.contains("muted"),
+    true,
+  );
+  assert.match(installedSummary.textContent, /1\/2 内核已安装/);
+  replaceAgent("alpha", (agent) => ({
+    ...agent,
+    runtime: {
+      ...agent.runtime,
+      "sing-box": { installed: true, service_status: "active" },
+    },
+  }));
   await delay(6500);
   assert.ok(
     callsFor("/agents") >= agentPollsBefore + 3,
@@ -417,6 +437,40 @@ async function testAdminRuntime() {
   );
   retries = [...form.querySelectorAll("[data-batch-retry]")];
   assert.equal(retries.length, 2, "连续 poll 后两个 retry 必须保留");
+  assert.equal(count.textContent, "已选择 2 个节点 · 当前可选 2 个");
+  assert.equal(all.checked, true);
+  assert.equal(all.indeterminate, false);
+  assert.equal(all.getAttribute("aria-checked"), "true");
+  assert.equal(singBoxChip.dataset.coreInstalled, "1");
+  assert.equal(singBoxService.textContent, "运行中");
+  assert.equal(
+    singBoxService.closest(".engine-state").classList.contains("ok"),
+    true,
+  );
+  assert.match(installedSummary.textContent, /2\/2 内核已安装/);
+  replaceAgent("alpha", (agent) => ({
+    ...agent,
+    runtime: {
+      ...agent.runtime,
+      "sing-box": { installed: false, service_status: "unknown" },
+    },
+  }));
+  await waitFor(
+    () => singBoxChip.dataset.coreInstalled === "0",
+    "compact chip 没有原位同步卸载转换",
+  );
+  assert.equal(document.querySelector("#batch-form"), form);
+  assert.equal(form.querySelectorAll(".batch-result-row.error").length, 2);
+  assert.equal(form.querySelectorAll("[data-batch-retry]").length, 2);
+  assert.equal(singBoxService.textContent, "未安装");
+  assert.equal(
+    singBoxService.closest(".engine-state").classList.contains("muted"),
+    true,
+  );
+  assert.match(installedSummary.textContent, /1\/2 内核已安装/);
+  assert.equal(batchPanel.open, true);
+  assert.equal(location.hash, aggregateHash);
+  assert.equal(aggregateWorkspace.scrollTop, aggregateScrollTop);
   assert.equal(count.textContent, "已选择 2 个节点 · 当前可选 2 个");
   assert.equal(all.checked, true);
   assert.equal(all.indeterminate, false);

@@ -715,13 +715,14 @@ func TestAgentStructureRefreshDoesNotPrecommitComparisonMarkers(t *testing.T) {
 		`card.dataset.coreInstalled !== (installed ? "1" : "0")`,
 		`card.dataset.existingPending !== (existingPending ? "1" : "0")`,
 		`card.dataset.existingUnsupported !== existingUnsupportedReason`,
+		`card.dataset.runtimeStructure !== "full"`,
+		`card.dataset.coreInstalled = installed ? "1" : "0"`,
 	} {
 		if !strings.Contains(body, required) {
 			t.Errorf("updateAgentMetrics structural comparison is missing %q", required)
 		}
 	}
 	for _, forbidden := range []string{
-		`card.dataset.coreInstalled =`,
 		`card.dataset.existingPending =`,
 		`card.dataset.existingUnsupported =`,
 		`refreshAgentPage();`,
