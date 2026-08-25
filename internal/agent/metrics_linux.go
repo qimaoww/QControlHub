@@ -10,6 +10,7 @@ import (
 	"io"
 	"math"
 	"net"
+	"net/netip"
 	"os"
 	"runtime"
 	"sort"
@@ -19,6 +20,7 @@ import (
 	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
+	"github.com/qimaoww/qcontrolhub/internal/netpolicy"
 )
 
 // cpuUsagePercent converts two aggregate /proc/stat readings into a busy
@@ -180,8 +182,8 @@ func networkInterfaceDetails(names []string) ([]core.HostNetworkInterface, error
 			value := address.String()
 			if host, _, parseErr := net.ParseCIDR(value); parseErr == nil {
 				value = host.String()
-			} else if zone := strings.LastIndexByte(value, '%'); zone >= 0 {
-				value = value[:zone]
+			} else if strings.Contains(value, "%") {
+				continue
 			}
 			ip := net.ParseIP(value)
 			if !usableNetworkAddress(ip) {
@@ -209,7 +211,11 @@ func networkInterfaceDetails(names []string) ([]core.HostNetworkInterface, error
 }
 
 func usableNetworkAddress(ip net.IP) bool {
-	return ip != nil && ip.IsGlobalUnicast() && !ip.IsUnspecified() && !ip.IsLoopback() && !ip.IsLinkLocalUnicast() && !ip.IsLinkLocalMulticast()
+	if ip == nil {
+		return false
+	}
+	address, ok := netip.AddrFromSlice(ip)
+	return ok && ip.IsGlobalUnicast() && !ip.IsUnspecified() && !ip.IsLoopback() && !ip.IsLinkLocalUnicast() && !ip.IsLinkLocalMulticast() && !netpolicy.IsCloudflareAddress(address)
 }
 
 func networkAddressPriority(ip net.IP) int {

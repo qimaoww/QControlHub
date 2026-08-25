@@ -16,6 +16,29 @@ import (
 
 const maxReportedMetricBytes = uint64(1 << 60)
 
+// PublicIPProbeTrust describes which managed probe results the currently
+// authenticated WSS session is entitled to report. It deliberately is not
+// derived from the Agent row: persisted features can belong to an older
+// connection.
+type PublicIPProbeTrust struct {
+	ControlPlaneIPv4 bool
+	ControlPlaneIPv6 bool
+}
+
+func applyPublicIPProbeTrust(metrics *core.HostMetrics, trust PublicIPProbeTrust) {
+	if metrics == nil {
+		return
+	}
+	if strings.TrimSpace(metrics.PublicIPv4Source) == core.PublicIPProbeSourceControlPlane && !trust.ControlPlaneIPv4 {
+		metrics.PublicIPv4 = ""
+		metrics.PublicIPv4Source = ""
+	}
+	if strings.TrimSpace(metrics.PublicIPv6Source) == core.PublicIPProbeSourceControlPlane && !trust.ControlPlaneIPv6 {
+		metrics.PublicIPv6 = ""
+		metrics.PublicIPv6Source = ""
+	}
+}
+
 func encodeHeartbeatMetrics(input *core.HostMetrics, receivedAt time.Time) ([]byte, error) {
 	if input == nil {
 		return nil, nil
@@ -72,10 +95,10 @@ func encodeHeartbeatMetrics(input *core.HostMetrics, receivedAt time.Time) ([]by
 	} else {
 		metrics.ObservedPublicIP = ""
 	}
-	if err := validateProbedPublicAddress(&metrics.PublicIPv4, true); err != nil {
+	if err := validateProbedPublicAddress(&metrics.PublicIPv4, &metrics.PublicIPv4Source, true); err != nil {
 		return nil, err
 	}
-	if err := validateProbedPublicAddress(&metrics.PublicIPv6, false); err != nil {
+	if err := validateProbedPublicAddress(&metrics.PublicIPv6, &metrics.PublicIPv6Source, false); err != nil {
 		return nil, err
 	}
 	return json.Marshal(metrics)
@@ -84,10 +107,21 @@ func encodeHeartbeatMetrics(input *core.HostMetrics, receivedAt time.Time) ([]by
 // validateProbedPublicAddress normalizes an Agent-probed egress address and
 // verifies it belongs to the expected family. Empty stays empty so older
 // Agents that never probe keep working.
-func validateProbedPublicAddress(value *string, wantIPv4 bool) error {
+func validateProbedPublicAddress(value, source *string, wantIPv4 bool) error {
 	if strings.TrimSpace(*value) == "" {
 		*value = ""
+		*source = ""
 		return nil
+	}
+	*source = strings.TrimSpace(*source)
+	// v1 Agents predate the source field; their opt-in endpoints were always
+	// local Agent configuration, so the provenance can be reconstructed without
+	// inventing a different trust anchor.
+	if *source == "" {
+		*source = core.PublicIPProbeSourceAgent
+	}
+	if *source != core.PublicIPProbeSourceAgent && *source != core.PublicIPProbeSourceControlPlane {
+		return errors.New("agent reported an invalid public IP probe source")
 	}
 	normalized := authn.NormalizePublicIP(*value)
 	if normalized == "" {
@@ -105,6 +139,7 @@ func validateProbedPublicAddress(value *string, wantIPv4 bool) error {
 		// it so callers retain the interface or verified-WSS fallback instead of
 		// rejecting the entire heartbeat/metrics update or surfacing the relay.
 		*value = ""
+		*source = ""
 		return nil
 	}
 	*value = normalized

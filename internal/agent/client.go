@@ -170,13 +170,14 @@ func NewClient(config ClientConfig, executor *Executor) (*Client, error) {
 	warmupContext, warmupCancel := context.WithTimeout(context.Background(), 3*time.Second)
 	_, _ = metricsCollector.Collect(warmupContext)
 	warmupCancel()
-	var publicIP *PublicIPProber
+	var ipv4ProbeEndpoints, ipv6ProbeEndpoints []string
 	if config.PublicIPProbe {
-		publicIP = NewPublicIPProber(
-			config.PublicIPProbeEvery,
-			config.PublicIPProbeIPv4Endpoints,
-			config.PublicIPProbeIPv6Endpoints,
-		)
+		ipv4ProbeEndpoints = config.PublicIPProbeIPv4Endpoints
+		ipv6ProbeEndpoints = config.PublicIPProbeIPv6Endpoints
+	}
+	publicIP, err := NewPublicIPProber(config.PublicIPProbeEvery, ipv4ProbeEndpoints, ipv6ProbeEndpoints)
+	if err != nil {
+		return nil, fmt.Errorf("invalid public IP probe configuration: %w", err)
 	}
 	return &Client{
 		config:       config,
@@ -281,6 +282,13 @@ func (c *Client) enroll(ctx context.Context, publicKey ed25519.PublicKey, privat
 }
 
 func (c *Client) runWebSocket(ctx context.Context) error {
+	// A managed probe choice is scoped to the current authenticated WSS
+	// session. Clear it before reconnect so an older/downgraded control plane
+	// that omits the capability-gated config cannot leave stale addresses behind. A local
+	// Agent override is intentionally unaffected.
+	if err := c.publicIP.ApplyManagedConfig(core.PublicIPProbeConfig{}); err != nil {
+		return err
+	}
 	privateKey, err := authn.DecodePrivateKey(c.creds.PrivateKey)
 	if err != nil {
 		return err
@@ -403,6 +411,14 @@ func (c *Client) runWebSocket(ctx context.Context) error {
 					return fmt.Errorf("apply control-plane traffic policies: %w", err)
 				}
 				continue
+			case core.WirePublicIPProbe:
+				if message.PublicIPProbe == nil {
+					return errors.New("control plane returned an invalid public IP probe configuration")
+				}
+				if err := c.publicIP.ApplyManagedConfig(*message.PublicIPProbe); err != nil {
+					return fmt.Errorf("control plane supplied invalid public IP probe configuration: %w", err)
+				}
+				continue
 			case core.WireTask:
 				if message.Task == nil || activeTask != "" || !c.validTask(*message.Task) {
 					return errors.New("control plane returned an invalid or concurrent task envelope")
@@ -450,7 +466,7 @@ func (c *Client) queueHeartbeat(ctx context.Context, outgoing chan<- core.WireMe
 	if metricsErr != nil {
 		slog.Debug("host metrics collection was partial", "error", metricsErr)
 	}
-	metrics.PublicIPv4, metrics.PublicIPv6 = c.publicIP.Snapshot()
+	metrics.PublicIPv4, metrics.PublicIPv6, metrics.PublicIPv4Source, metrics.PublicIPv6Source = c.publicIP.SnapshotWithSources()
 	heartbeat := &core.HeartbeatRequest{
 		Version: c.config.Version, Runtime: runtimeState,
 		Features: c.advertisedFeatures(), TrafficUsage: c.traffic.Snapshot(),
@@ -480,7 +496,7 @@ func (c *Client) queueMetrics(ctx context.Context, outgoing chan<- core.WireMess
 	if !metricsHaveData(metrics) || !metrics.CPUAvailable {
 		return nil
 	}
-	metrics.PublicIPv4, metrics.PublicIPv6 = c.publicIP.Snapshot()
+	metrics.PublicIPv4, metrics.PublicIPv6, metrics.PublicIPv4Source, metrics.PublicIPv6Source = c.publicIP.SnapshotWithSources()
 	message := core.WireMessage{Type: core.WireMetrics, Metrics: &metrics}
 	select {
 	case outgoing <- message:
@@ -500,8 +516,9 @@ func (c *Client) advertisedFeatures() []string {
 		core.AgentFeatureCoreLogs,
 		core.AgentFeatureCoreLogStatus,
 		core.AgentFeatureMihomoDevelopmentSource,
+		core.AgentFeatureManagedPublicIPProbe,
 	}
-	if c.publicIP != nil {
+	if c.publicIP.Enabled() {
 		features = append(features, core.AgentFeaturePublicIPProbe)
 	}
 	return features

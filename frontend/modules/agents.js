@@ -265,7 +265,7 @@ function normalizedPublicLiteral(raw) {
   if (!normalized) return null;
   const isIPv4 = normalized.startsWith("IPv4:");
   const value = normalized.slice(5);
-  if (!isGloballyRoutableNormalized(normalized)) return null;
+  if (!isGloballyRoutableNormalized(normalized) || isCloudflareRelayNormalized(normalized)) return null;
   return { value, isIPv4 };
 }
 
@@ -311,6 +311,7 @@ function interfacePublicAddress(metrics, wantIPv4) {
       const isV4 = normalized.startsWith("IPv4:");
       if (isV4 !== wantIPv4) continue;
       if (!isGloballyRoutableNormalized(normalized)) continue;
+      if (isCloudflareRelayNormalized(normalized)) continue;
       return { value: normalized.slice(5), name: networkInterface.name || "" };
     }
   }
@@ -341,6 +342,7 @@ export function publicAddressRows(metrics = {}, labels = {}, features = []) {
       cls: "v4",
       manualSource: manualPublicAddress(labels, true),
       probed: metrics.public_ipv4,
+      probeSource: metrics.public_ipv4_source,
       interfaceSource: interfacePublicAddress(metrics, true),
       fallback: observedIPv4,
     },
@@ -349,6 +351,7 @@ export function publicAddressRows(metrics = {}, labels = {}, features = []) {
       cls: "v6",
       manualSource: manualPublicAddress(labels, false),
       probed: metrics.public_ipv6,
+      probeSource: metrics.public_ipv6_source,
       interfaceSource: interfacePublicAddress(metrics, false),
       fallback: observedIPv6,
     },
@@ -364,13 +367,21 @@ export function publicAddressRows(metrics = {}, labels = {}, features = []) {
     }
     const probed = normalizeInterfaceAddress(family.probed || "");
     const probedIsIPv4 = probed.startsWith("IPv4:");
+    const probeSourceValid = !family.probeSource || [
+      "agent-config",
+      "control-plane-config",
+    ].includes(family.probeSource);
     if (
       probed &&
+      probeSourceValid &&
       probedIsIPv4 === (family.label === "IPv4") &&
       isGloballyRoutableNormalized(probed) &&
       !isCloudflareRelayNormalized(probed)
     ) {
-      return { ...family, value: probed.slice(5), source: "公网探测", ok: true };
+      const source = family.probeSource === "control-plane-config"
+        ? "控制面配置的 Agent 直连探测"
+        : "Agent 本地直连探测";
+      return { ...family, value: probed.slice(5), source, ok: true };
     }
     if (family.interfaceSource) {
       return {

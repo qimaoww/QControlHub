@@ -155,3 +155,73 @@ func TestHeartbeatAndMetricsClearCloudflareProbesWithPostgreSQL(t *testing.T) {
 		t.Fatalf("genuine probes were not retained: %+v", current.Metrics)
 	}
 }
+
+func TestManagedPublicIPProbeTrustUsesCurrentSessionAndFamilyWithPostgreSQL(t *testing.T) {
+	databaseURL := os.Getenv("QCH_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("QCH_TEST_DATABASE_URL is not configured")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	dataStore, err := Open(ctx, databaseURL, true)
+	if err != nil {
+		t.Fatalf("open PostgreSQL: %v", err)
+	}
+	defer dataStore.Close()
+
+	agent, enrollmentID := enrollTaskTestAgent(t, ctx, dataStore)
+	defer cleanupTaskTestAgent(dataStore, agent.ID, enrollmentID)
+	managed := core.HostMetrics{
+		PublicIPv4: "198.35.26.96", PublicIPv4Source: core.PublicIPProbeSourceControlPlane,
+		PublicIPv6: "2001:4860:4860::8888", PublicIPv6Source: core.PublicIPProbeSourceControlPlane,
+	}
+
+	// Direct store callers and metrics-only traffic before a complete current-
+	// session heartbeat are fail closed for managed provenance.
+	if err := dataStore.UpdateAgentMetrics(ctx, agent.ID, managed); err != nil {
+		t.Fatalf("untrusted metrics-only update: %v", err)
+	}
+	assertRawPublicIPProbeRow(t, ctx, dataStore, agent.ID, "", "", "", "")
+
+	// Trust is per family and cannot be inferred merely from a persisted
+	// managed feature. Here only the configured IPv4 endpoint is authoritative.
+	if err := dataStore.HeartbeatWithPublicIPProbeTrust(ctx, agent.ID, core.HeartbeatRequest{
+		Features: []string{core.AgentFeatureManagedPublicIPProbe}, Metrics: &managed,
+	}, PublicIPProbeTrust{ControlPlaneIPv4: true}); err != nil {
+		t.Fatalf("trusted managed heartbeat: %v", err)
+	}
+	assertRawPublicIPProbeRow(t, ctx, dataStore, agent.ID, "198.35.26.96", core.PublicIPProbeSourceControlPlane, "", "")
+
+	// A later untrusted current session must not inherit the persisted feature.
+	if err := dataStore.UpdateAgentMetrics(ctx, agent.ID, managed); err != nil {
+		t.Fatalf("downgraded metrics-only update: %v", err)
+	}
+	assertRawPublicIPProbeRow(t, ctx, dataStore, agent.ID, "", "", "", "")
+
+	// Missing source remains the v1 local Agent endpoint compatibility path.
+	local := core.HostMetrics{PublicIPv4: "198.35.26.96"}
+	if err := dataStore.UpdateAgentMetrics(ctx, agent.ID, local); err != nil {
+		t.Fatalf("legacy local probe update: %v", err)
+	}
+	assertRawPublicIPProbeRow(t, ctx, dataStore, agent.ID, "198.35.26.96", core.PublicIPProbeSourceAgent, "", "")
+}
+
+func assertRawPublicIPProbeRow(t *testing.T, ctx context.Context, dataStore *Store, agentID, ipv4, ipv4Source, ipv6, ipv6Source string) {
+	t.Helper()
+	var gotIPv4, gotIPv4Source, gotIPv6, gotIPv6Source *string
+	if err := dataStore.pool.QueryRow(ctx, `
+		SELECT metrics->>'public_ipv4', metrics->>'public_ipv4_source',
+		       metrics->>'public_ipv6', metrics->>'public_ipv6_source'
+		FROM agents WHERE id=$1`, agentID).Scan(&gotIPv4, &gotIPv4Source, &gotIPv6, &gotIPv6Source); err != nil {
+		t.Fatalf("read raw public IP probe row: %v", err)
+	}
+	deref := func(value *string) string {
+		if value == nil {
+			return ""
+		}
+		return *value
+	}
+	if deref(gotIPv4) != ipv4 || deref(gotIPv4Source) != ipv4Source || deref(gotIPv6) != ipv6 || deref(gotIPv6Source) != ipv6Source {
+		t.Fatalf("raw public IP probe row = ipv4 %q source %q ipv6 %q source %q; want %q %q %q %q", deref(gotIPv4), deref(gotIPv4Source), deref(gotIPv6), deref(gotIPv6Source), ipv4, ipv4Source, ipv6, ipv6Source)
+	}
+}
