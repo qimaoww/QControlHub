@@ -682,6 +682,10 @@ func collectCoreLogTransitionToken(t *testing.T, collector *CoreLogCollector, to
 
 func TestTaskExecutionSurvivesWebSocketSessionCancellation(t *testing.T) {
 	t.Parallel()
+	systemctl := filepath.Join(t.TempDir(), "systemctl")
+	if err := os.WriteFile(systemctl, []byte("#!/bin/sh\n[ \"$1\" = is-active ] || exit 64\nprintf '%s\\n' active\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
 	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -697,9 +701,12 @@ func TestTaskExecutionSurvivesWebSocketSessionCancellation(t *testing.T) {
 	}
 	client := &Client{
 		config: ClientConfig{StatePath: statePath}, creds: loaded,
-		executor: &Executor{Specs: map[core.Engine]EngineSpec{
-			core.EngineMihomo: {Binary: "unused", ConfigPath: "/tmp/config.yaml", Service: "qagent-mihomo.service"},
-		}},
+		executor: &Executor{
+			Specs: map[core.Engine]EngineSpec{
+				core.EngineMihomo: {Binary: "unused", ConfigPath: "/tmp/config.yaml", Service: "qagent-mihomo.service"},
+			},
+			Services: &ServiceManager{kind: ServiceManagerSystemd, executable: systemctl},
+		},
 	}
 	deliveryContext, cancelDelivery := context.WithCancel(context.Background())
 	cancelDelivery()

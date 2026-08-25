@@ -3,7 +3,7 @@ SHELL := /bin/sh
 VERSION ?= dev
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
-.PHONY: build test vet fmt-check frontend-check installer-test quick-start-test web-image-test docs-check check init-env compose-config up dev-up down logs
+.PHONY: build test alpine-test vet fmt-check frontend-check pr-policy-test installer-test quick-start-test web-image-test docs-check check init-env compose-config up dev-up down logs
 
 build:
 	mkdir -p bin
@@ -12,6 +12,10 @@ build:
 
 test:
 	go test ./...
+
+alpine-test:
+	@packages="$$(go list ./... | sed '\|/internal/agent$$|d')"; go test $$packages
+	go test ./internal/agent -run 'OpenRC|PerServiceManager'
 
 vet:
 	go vet ./...
@@ -22,6 +26,9 @@ fmt-check:
 frontend-check:
 	node frontend/module_smoke.mjs
 	node frontend/agents_browser_smoke.mjs
+
+pr-policy-test:
+	node --test .github/scripts/check-pr.test.mjs
 
 installer-test:
 	sh deploy/tests/inherit-existing-core.sh
@@ -35,7 +42,7 @@ web-image-test:
 docs-check:
 	node docs/check_docs.mjs
 
-check: fmt-check frontend-check installer-test quick-start-test docs-check vet test
+check: fmt-check frontend-check pr-policy-test installer-test quick-start-test docs-check vet test
 
 init-env:
 	@command -v openssl >/dev/null 2>&1 || { printf '%s\n' 'openssl is required'; exit 1; }
