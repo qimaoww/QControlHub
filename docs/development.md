@@ -3,9 +3,17 @@
 ## 环境要求
 
 - Go 1.25 或更高版本
+- Node.js 22 或更高版本，以及 Google Chrome/Chromium（前端 smoke 测试）
 - PostgreSQL 14 或更高版本（Compose 默认 PostgreSQL 17）
 - Docker Engine 与 Docker Compose v2（推荐用于本地数据库）
 - OpenSSL（仅用于 `make init-env` 生成随机密钥）
+
+## Pull Request 约定
+
+PR 标题和正文统一使用英文 ASCII 字符。标题使用 Conventional Commit 格式，
+例如 `feat(agent): add capability` 或 `fix: handle startup failure`。正文应按仓库
+模板填写 `Summary`、`Validation` 和 `Risk and rollback`；CI 会在 PR 创建、
+更新标题或正文、推送新提交时校验这些内容。
 
 ## 全容器开发环境
 
