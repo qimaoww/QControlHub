@@ -4,6 +4,31 @@ import {
   createRefreshChannel,
 } from "./refresh.js";
 
+const visibleLevel = (level) => {
+  if (["error", "critical"].includes(level)) return "error";
+  if (level === "warning") return "warning";
+  return "info";
+};
+
+export function filterCoreLogEntries(entries, filters = {}) {
+  const keyword = String(filters.q || "").trim().toLowerCase();
+  return (entries || []).filter((entry) => {
+    if (filters.engine && entry.engine !== filters.engine) return false;
+    if (filters.level && visibleLevel(entry.level) !== filters.level) return false;
+    return !keyword || String(entry.message || "").toLowerCase().includes(keyword);
+  });
+}
+
+export function coreLogFilterCounts(entries, engines = []) {
+  const engine = Object.fromEntries(engines.map((value) => [value, 0]));
+  const level = { info: 0, warning: 0, error: 0 };
+  (entries || []).forEach((entry) => {
+    if (Object.hasOwn(engine, entry.engine)) engine[entry.engine] += 1;
+    level[visibleLevel(entry.level)] += 1;
+  });
+  return { total: (entries || []).length, engine, level };
+}
+
 export function installCoreLogs(ctx) {
   const {
     api,
@@ -31,24 +56,17 @@ export function installCoreLogs(ctx) {
     const filters = state.data.coreLogFilters || {};
     const params = new URLSearchParams();
     if (filters.agent_id) params.set("agent_id", filters.agent_id);
-    if (filters.engine) params.set("engine", filters.engine);
-    if (filters.level) params.set("level", filters.level);
-    if (filters.q) params.set("q", filters.q);
     params.set("limit", String(filters.limit || 200));
     return { filters, params };
   };
 
-  const renderCoreLogs = (entries, agents, filters, syncFilters) => {
-    const existingPage = document.querySelector("[data-core-log-page]");
+  const renderCoreLogs = (sourceEntries, agents, filters) => {
+    const entries = filterCoreLogEntries(sourceEntries, filters);
+    const counts = coreLogFilterCounts(sourceEntries, engines);
+    state.data.coreLogEntries = sourceEntries;
     state.data.coreLogs = entries;
     state.data.agents = agents;
     const agentsByID = new Map(agents.map((agent) => [agent.id, agent]));
-    const errorCount = entries.filter((entry) =>
-      ["error", "critical"].includes(entry.level),
-    ).length;
-    const warningCount = entries.filter(
-      (entry) => entry.level === "warning",
-    ).length;
     const selectedAgent = agentsByID.get(filters.agent_id || "");
     const selectedRuntime = filters.engine
       ? selectedAgent?.runtime?.[filters.engine]
@@ -136,43 +154,78 @@ export function installCoreLogs(ctx) {
         emptyDetail = "当前来源工作正常，尚未收到符合筛选条件的新运行记录。";
       }
     }
+
     const rows = entries
       .map((entry) => {
         const agent = agentsByID.get(entry.agent_id);
         return `<article class="core-log-row level-${esc(entry.level)}" data-refresh-key="core-log-${esc(entry.id)}"><time datetime="${esc(entry.logged_at)}">${esc(date(entry.logged_at))}</time><span class="engine-badge ${esc(entry.engine)}">${esc(engineName(entry.engine))}</span><span class="core-log-level">${esc(levelName(entry.level))}</span><span class="core-log-agent" title="${esc(agent?.name || entry.agent_id)}">${esc(agent?.name || entry.agent_id)}</span><pre>${esc(entry.message)}</pre></article>`;
       })
       .join("");
-
     const sourceNotice = sourceNoticeTitle && rows
       ? `<div class="core-log-source-notice" role="status"><strong>${esc(sourceNoticeTitle)}</strong><span>${esc(sourceNoticeDetail)}</span></div>`
       : "";
+    const engineButtons = [
+      ["", "全部", counts.total],
+      ...engines.map((engine) => [
+        engine,
+        engine === "ss-rust" ? "SS Rust" : engineName(engine),
+        counts.engine[engine] || 0,
+      ]),
+    ]
+      .map(
+        ([value, label, count]) =>
+          `<button type="button" name="engine" value="${esc(value)}" data-core-log-engine aria-pressed="${String((filters.engine || "") === value)}"><span>${esc(label)}</span><b>${count}</b></button>`,
+      )
+      .join("");
+    const levelButtons = [
+      ["", "全部", counts.total],
+      ["info", "信息", counts.level.info],
+      ["warning", "警告", counts.level.warning],
+      ["error", "错误", counts.level.error],
+    ]
+      .map(
+        ([value, label, count]) =>
+          `<button type="button" name="level" value="${esc(value)}" data-core-log-level aria-pressed="${String((filters.level || "") === value)}"><span>${esc(label)}</span><b>${count}</b></button>`,
+      )
+      .join("");
+    const autoRefresh = state.data.coreLogAutoRefresh !== false;
+    const scopeName = selectedAgent?.name || (filters.agent_id ? filters.agent_id : "全部节点");
     shell(
-      `<div class="core-log-workspace" data-core-log-page><header class="core-log-header"><div><p class="eyebrow">Runtime logs</p><h2>内核日志</h2></div><dl><div><dt>当前结果</dt><dd>${entries.length}</dd></div><div><dt>警告</dt><dd>${warningCount}</dd></div><div class="${errorCount ? "bad" : ""}"><dt>错误</dt><dd>${errorCount}</dd></div></dl></header><form class="core-log-filters" id="core-log-filters"><label>节点<select name="agent_id"><option value="">全部节点</option>${agents.map((agent) => `<option value="${esc(agent.id)}">${esc(agent.name)}</option>`).join("")}</select></label><label>内核<select name="engine"><option value="">全部内核</option>${engines.map((engine) => `<option value="${esc(engine)}">${esc(engineName(engine))}</option>`).join("")}</select></label><label>级别<select name="level"><option value="">全部级别</option>${["debug", "info", "warning", "error", "critical"].map((level) => `<option value="${level}">${levelName(level)}</option>`).join("")}</select></label><label class="core-log-search">关键词<input name="q" type="search" maxlength="120" value="${esc(filters.q || "")}" placeholder="搜索日志内容"></label><label>数量<select name="limit">${[100, 200, 500].map((limit) => `<option value="${limit}">${limit} 条</option>`).join("")}</select></label><button class="button primary" type="submit">应用</button><button class="button" type="button" data-reset-core-logs>重置</button></form><div class="core-log-status" role="status" data-core-log-refresh-status><span><i></i><span data-core-log-refresh-label>自动更新</span></span><span>面板保留 7 天</span></div><section class="core-log-stream" aria-label="内核运行日志" data-refresh-scroll>${sourceNotice}${rows || `<div class="core-log-empty"><strong>${esc(emptyTitle)}</strong><span>${esc(emptyDetail)}</span></div>`}</section></div>`,
+      `<div class="core-log-workspace" data-core-log-page><header class="core-log-header"><div><h2>内核日志</h2><p>当前范围：<strong>${esc(scopeName)}</strong></p></div><label class="core-log-auto"><button type="button" role="switch" aria-checked="${String(autoRefresh)}" data-toggle-core-log-refresh><i></i></button><span>自动更新</span></label></header><section class="core-log-filters" id="core-log-filters" aria-label="日志筛选"><div class="core-log-filter-group core-log-engine-filter"><span>内核</span><div role="group" aria-label="日志内核">${engineButtons}</div></div><div class="core-log-filter-group core-log-level-filter"><span>级别</span><div role="group" aria-label="日志级别">${levelButtons}</div></div><label class="core-log-search">关键词<input name="q" type="search" maxlength="120" value="${esc(filters.q || "")}" placeholder="搜索日志内容，输入即筛选" autocomplete="off"></label><label class="core-log-limit">数量<select name="limit">${[100, 200, 500].map((limit) => `<option value="${limit}" ${Number(filters.limit || 200) === limit ? "selected" : ""}>${limit} 条</option>`).join("")}</select></label><button class="button core-log-reset" type="button" data-reset-core-logs>清除筛选</button></section><div class="core-log-status" role="status" data-core-log-refresh-status><span>显示 <strong>${entries.length}</strong> 条结果</span><span><span class="core-log-live"><i></i><span data-core-log-refresh-label>${autoRefresh ? "正在实时更新" : "自动更新已暂停"}</span></span><span>面板保留 7 天</span></span></div><section class="core-log-stream" aria-label="内核运行日志" data-refresh-scroll><header class="core-log-columns" aria-hidden="true"><span>时间</span><span>内核</span><span>级别</span><span>节点</span><span>日志内容</span></header>${sourceNotice}${rows || `<div class="core-log-empty"><strong>${esc(emptyTitle)}</strong><span>${esc(emptyDetail)}</span></div>`}</section></div>`,
       "内核日志",
     );
 
-    const form = document.querySelector("#core-log-filters");
-    if (form && (!existingPage || syncFilters)) {
-      form.elements.agent_id.value = filters.agent_id || "";
-      form.elements.engine.value = filters.engine || "";
-      form.elements.level.value = filters.level || "";
-      form.elements.limit.value = String(filters.limit || 200);
-      bindEvent(form, "submit", async (event) => {
-        event.preventDefault();
-        const values = new FormData(form);
-        state.data.coreLogFilters = {
-          agent_id: values.get("agent_id") || "",
-          engine: values.get("engine") || "",
-          level: values.get("level") || "",
-          q: String(values.get("q") || "").trim(),
-          limit: Number(values.get("limit") || 200),
-        };
-        await coreLogs({ syncFilters: true });
-      });
-    }
-    bindEvent(document.querySelector("[data-reset-core-logs]"), "click", async () => {
-      state.data.coreLogFilters = {};
+    const renderLocalFilters = (patch) => {
+      state.data.coreLogFilters = {
+        ...(state.data.coreLogFilters || {}),
+        ...patch,
+      };
+      renderCoreLogs(
+        state.data.coreLogEntries || [],
+        state.data.agents || [],
+        state.data.coreLogFilters,
+      );
+    };
+    document.querySelectorAll("[data-core-log-engine]").forEach((button) => {
+      bindEvent(button, "click", () => renderLocalFilters({ engine: button.value }));
+    });
+    document.querySelectorAll("[data-core-log-level]").forEach((button) => {
+      bindEvent(button, "click", () => renderLocalFilters({ level: button.value }));
+    });
+    bindEvent(document.querySelector('#core-log-filters input[name="q"]'), "input", (event) => {
+      renderLocalFilters({ q: event.currentTarget.value });
+    });
+    bindEvent(document.querySelector('#core-log-filters select[name="limit"]'), "change", async (event) => {
+      state.data.coreLogFilters = {
+        ...(state.data.coreLogFilters || {}),
+        limit: Number(event.currentTarget.value || 200),
+      };
       await coreLogs({ syncFilters: true });
+    });
+    bindEvent(document.querySelector("[data-reset-core-logs]"), "click", () => {
+      const search = document.querySelector('#core-log-filters input[name="q"]');
+      if (search) search.value = "";
+      renderLocalFilters({ engine: "", level: "", q: "" });
     });
     document.querySelectorAll("[data-core-log-agent]").forEach((link) => {
       bindEvent(link, "click", async (event) => {
@@ -184,17 +237,27 @@ export function installCoreLogs(ctx) {
         await coreLogs({ syncFilters: true });
       });
     });
+    bindEvent(document.querySelector("[data-toggle-core-log-refresh]"), "click", (event) => {
+      const enabled = state.data.coreLogAutoRefresh === false;
+      state.data.coreLogAutoRefresh = enabled;
+      event.currentTarget.setAttribute("aria-checked", String(enabled));
+      const label = document.querySelector("[data-core-log-refresh-label]");
+      if (label) label.textContent = enabled ? "正在实时更新" : "自动更新已暂停";
+      if (enabled) poller.start();
+      else poller.stop();
+    });
   };
 
   const poller = createPoller({
     run: () => coreLogs({ background: true }),
-    isActive: () => state.route === "core-logs",
+    isActive: () =>
+      state.route === "core-logs" && state.data.coreLogAutoRefresh !== false,
     delay: () => 10_000,
     setTimer,
     clearTimer,
   });
 
-  async function coreLogs({ background = false, syncFilters = false } = {}) {
+  async function coreLogs({ background = false } = {}) {
     poller.stop();
     const { filters, params } = query();
     try {
@@ -207,9 +270,13 @@ export function installCoreLogs(ctx) {
               : Promise.resolve([]),
           ]),
         ([entries, agents]) =>
-          renderCoreLogs(entries, agents, filters, syncFilters),
+          renderCoreLogs(
+            entries,
+            agents,
+            state.data.coreLogFilters || filters,
+          ),
       );
-      if (applied) poller.start();
+      if (applied && state.data.coreLogAutoRefresh !== false) poller.start();
       return applied;
     } catch (error) {
       const status = document.querySelector("[data-core-log-refresh-status]");
@@ -226,7 +293,7 @@ export function installCoreLogs(ctx) {
         const label = status.querySelector("[data-core-log-refresh-label]");
         if (label) label.textContent = "刷新失败，保留上次数据";
       }
-      poller.start();
+      if (state.data.coreLogAutoRefresh !== false) poller.start();
       return false;
     }
   }

@@ -190,6 +190,9 @@ func TestRefreshPathsUseStableViewsAndScopedCoordinators(t *testing.T) {
 		},
 		"modules/core-logs.js": {
 			"createPoller({",
+			"filterCoreLogEntries(sourceEntries, filters)",
+			"data-core-log-engine",
+			"data-core-log-level",
 			"data-refresh-key=\"core-log-${esc(entry.id)}\"",
 			"data-refresh-scroll",
 		},
@@ -715,6 +718,33 @@ func TestCoreLogsLabelFollowsAdvertisedFeature(t *testing.T) {
 	}
 	if strings.Contains(content, `agent.features.includes("core-logs-v1") ? "需升级 Agent"`) {
 		t.Error("core-logs sidebar must enable streaming only when core-logs-v1 is advertised")
+	}
+}
+
+func TestCoreLogsUseImmediateFiltersAndSidebarNodeScope(t *testing.T) {
+	module, err := os.ReadFile("modules/core-logs.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(module)
+	for _, required := range []string{
+		`data-core-log-engine`,
+		`data-core-log-level`,
+		`renderLocalFilters({ q: event.currentTarget.value })`,
+		`data-toggle-core-log-refresh`,
+		`core-log-columns`,
+	} {
+		if !strings.Contains(content, required) {
+			t.Errorf("core-log immediate filtering is missing %q", required)
+		}
+	}
+	for _, duplicatedControl := range []string{
+		`name="agent_id"`,
+		`type="submit"`,
+	} {
+		if strings.Contains(content, duplicatedControl) {
+			t.Errorf("core-log workspace still contains duplicated or deferred control %q", duplicatedControl)
+		}
 	}
 }
 
