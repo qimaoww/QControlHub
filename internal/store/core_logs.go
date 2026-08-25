@@ -144,15 +144,6 @@ func sanitizeCoreLogMessage(raw string) string {
 	message = strings.ReplaceAll(message, "\x00", "�")
 	message = ansiControlPattern.ReplaceAllString(message, "")
 	message = strings.ReplaceAll(message, "\x1b", "")
-	if message == "" {
-		return ""
-	}
-	if len(message) > core.MaxCoreLogMessageBytes {
-		message = message[:core.MaxCoreLogMessageBytes]
-		for !utf8.ValidString(message) {
-			message = message[:len(message)-1]
-		}
-	}
 	return message
 }
 
