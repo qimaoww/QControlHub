@@ -1163,7 +1163,7 @@ func TestDecodeJournalCoreLogAcceptsJournaldByteArrayMessage(t *testing.T) {
 		"qagent-sing-box.service": core.EngineSingBox,
 	})
 	if !ok || cursor != "cursor-array" || entry.Engine != core.EngineSingBox ||
-		entry.Message != "\x1b[32mINFO\x1b[0m inbound/mixed[fixture] started" {
+		entry.Message != "INFO inbound/mixed[fixture] started" {
 		t.Fatalf("decoded journald byte-array entry = %+v, cursor=%q, ok=%v", entry, cursor, ok)
 	}
 	collector := NewCoreLogCollector(map[core.Engine]EngineSpec{})
@@ -1187,6 +1187,41 @@ func TestDecodeJournalCoreLogAcceptsJournaldByteArrayMessage(t *testing.T) {
 	}
 	if _, ok := journalMessageField(make([]any, coreLogFileMaxLine+1)); ok {
 		t.Fatal("oversized journald byte array was accepted")
+	}
+}
+
+func TestSanitizeCoreLogMessage(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"ansi color", "\x1b[32mINFO\x1b[0m inbound started", "INFO inbound started"},
+		{"ansi multi attrs", "\x1b[1;31mERROR\x1b[0m handler failed", "ERROR handler failed"},
+		{"ansi csi with params", "\x1b[38;5;196mWARN\x1b[0m dial", "WARN dial"},
+		{"lone esc", "up\x1bstream", "upstream"},
+		{"nul", "before\x00after", "before�after"},
+		{"invalid utf8", "bad\xffbyte", "bad�byte"},
+		{"surrounding whitespace", "  message  ", "message"},
+		{"plain unchanged", "plain text", "plain text"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := sanitizeCoreLogMessage(test.in); got != test.want {
+				t.Fatalf("sanitizeCoreLogMessage(%q) = %q, want %q", test.in, got, test.want)
+			}
+		})
+	}
+	if got := sanitizeCoreLogMessage(""); got != "" {
+		t.Fatalf("sanitizeCoreLogMessage(empty) = %q", got)
+	}
+	if got := sanitizeCoreLogMessage("\x1b[32m"); got != "" {
+		t.Fatalf("sanitizeCoreLogMessage(only ansi) = %q", got)
+	}
+	long := strings.Repeat("a", core.MaxCoreLogMessageBytes) + "日志"
+	if got := sanitizeCoreLogMessage(long); len([]byte(got)) > core.MaxCoreLogMessageBytes {
+		t.Fatalf("sanitizeCoreLogMessage bound = %d, want <= %d", len([]byte(got)), core.MaxCoreLogMessageBytes)
 	}
 }
 

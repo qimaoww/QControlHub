@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -777,10 +778,32 @@ func (collector *CoreLogCollector) rotateFile(source coreLogFileSource) {
 }
 
 func (collector *CoreLogCollector) appendFileEntry(source coreLogFileSource, line []byte) {
-	message := strings.TrimSpace(strings.ToValidUTF8(string(line), "�"))
-	message = strings.ReplaceAll(message, "\x00", "�")
+	message := sanitizeCoreLogMessage(string(line))
 	if message == "" {
 		return
+	}
+	level := "info"
+	if source.engine == core.EngineSingBox {
+		level = singBoxLogLevel(message)
+	}
+	collector.append(core.CoreLogEntry{Engine: source.engine, Level: level, Message: message, LoggedAt: time.Now().UTC()})
+}
+
+// ansiControlPattern matches ANSI escape sequences (CSI) such as the color
+// codes sing-box emits (`ESC[32m`, `ESC[0m`). They are display-only bytes and
+// must not leak into the core-log panel as visible `[36m`-style text.
+var ansiControlPattern = regexp.MustCompile(`\x1b\[[0-?]*[ -/]*[@-~]`)
+
+// sanitizeCoreLogMessage repairs encoding, drops NUL and ANSI control bytes,
+// and bounds the resulting line before it is enqueued for display.
+func sanitizeCoreLogMessage(raw string) string {
+	message := strings.TrimSpace(strings.ToValidUTF8(raw, "�"))
+	message = strings.ReplaceAll(message, "\x00", "�")
+	message = ansiControlPattern.ReplaceAllString(message, "")
+	// Remove any surviving ESC introducer so a lone control byte cannot render.
+	message = strings.ReplaceAll(message, "\x1b", "")
+	if message == "" {
+		return ""
 	}
 	if len(message) > core.MaxCoreLogMessageBytes {
 		message = message[:core.MaxCoreLogMessageBytes]
@@ -788,11 +811,7 @@ func (collector *CoreLogCollector) appendFileEntry(source coreLogFileSource, lin
 			message = message[:len(message)-1]
 		}
 	}
-	level := "info"
-	if source.engine == core.EngineSingBox {
-		level = singBoxLogLevel(message)
-	}
-	collector.append(core.CoreLogEntry{Engine: source.engine, Level: level, Message: message, LoggedAt: time.Now().UTC()})
+	return message
 }
 
 func singBoxLogLevel(message string) string {
@@ -1645,16 +1664,9 @@ func decodeJournalCoreLog(value []byte, unitEngines map[string]core.Engine) (cor
 	if !ok {
 		return core.CoreLogEntry{}, cursor, false
 	}
-	message := strings.TrimSpace(strings.ToValidUTF8(messageValue, "�"))
-	message = strings.ReplaceAll(message, "\x00", "�")
+	message := sanitizeCoreLogMessage(messageValue)
 	if message == "" {
 		return core.CoreLogEntry{}, cursor, false
-	}
-	if len(message) > core.MaxCoreLogMessageBytes {
-		message = message[:core.MaxCoreLogMessageBytes]
-		for !utf8.ValidString(message) {
-			message = message[:len(message)-1]
-		}
 	}
 	loggedAt := time.Now().UTC()
 	if microseconds, err := strconv.ParseInt(stringField(record["__REALTIME_TIMESTAMP"]), 10, 64); err == nil && microseconds > 0 {
