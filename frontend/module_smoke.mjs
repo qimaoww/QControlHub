@@ -32,7 +32,11 @@ import {
   liveConfigEditorState,
   submitLiveConfigChange,
 } from "./modules/configs.js";
-import { installCoreLogs } from "./modules/core-logs.js";
+import {
+  coreLogFilterCounts,
+  filterCoreLogEntries,
+  installCoreLogs,
+} from "./modules/core-logs.js";
 import { installDashboard } from "./modules/dashboard.js";
 import { installSettings } from "./modules/settings.js";
 import { installTasks } from "./modules/tasks.js";
@@ -41,6 +45,36 @@ import { createLatestRenderScheduler } from "./modules/refresh.js";
 
 const state = { data: {}, session: { role: "admin" } };
 const noop = () => {};
+
+const coreLogFilterFixture = [
+  { engine: "mihomo", level: "debug", message: "bootstrap complete" },
+  { engine: "xray", level: "info", message: "Accepted GitHub connection" },
+  { engine: "sing-box", level: "warning", message: "slow handshake" },
+  { engine: "ss-rust", level: "critical", message: "upstream timeout" },
+];
+assert.deepEqual(
+  filterCoreLogEntries(coreLogFilterFixture, {
+    engine: "xray",
+    level: "info",
+    q: "github",
+  }),
+  [coreLogFilterFixture[1]],
+  "core log engine, level, and keyword filters compose locally",
+);
+assert.deepEqual(
+  coreLogFilterCounts(coreLogFilterFixture, [
+    "mihomo",
+    "xray",
+    "sing-box",
+    "ss-rust",
+  ]),
+  {
+    total: 4,
+    engine: { mihomo: 1, xray: 1, "sing-box": 1, "ss-rust": 1 },
+    level: { info: 2, warning: 1, error: 1 },
+  },
+  "core log buttons keep names separate from accurate result counts",
+);
 
 assert.deepEqual(
   batchAgentEligibility(
@@ -2581,6 +2615,11 @@ try {
   assert.equal(coreRenders, 1);
   assert.equal(coreTimers.size, 1, "log polling owns one timer");
   assert.equal(coreMarkup.includes('data-refresh-key="core-log-1"'), true);
+  assert.equal(coreMarkup.includes('name="agent_id"'), false, "the sidebar is the only node filter");
+  assert.equal(coreMarkup.includes("data-core-log-engine"), true, "engines render as immediate filter buttons");
+  assert.equal(coreMarkup.includes("data-core-log-level"), true, "levels render as immediate filter buttons");
+  assert.equal(coreMarkup.includes('type="submit"'), false, "core log filters do not require an apply action");
+  assert.equal(coreMarkup.includes("core-log-columns"), true, "the light log table has explicit column headings");
   const corePoll = [...coreTimers.values()][0];
   coreTimers.clear();
   await corePoll();
