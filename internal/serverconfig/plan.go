@@ -22,9 +22,13 @@ func NewPlan(protocol Protocol) (Input, error) {
 	if len(protocol.Methods) > 0 {
 		method = protocol.Methods[0]
 	}
-	credential, err := NewCredential(protocol.Key, method)
-	if err != nil {
-		return Input{}, err
+	credential := ""
+	var err error
+	if !protocol.PortForward {
+		credential, err = NewCredential(protocol.Key, method)
+		if err != nil {
+			return Input{}, err
+		}
 	}
 	portOffset, err := rand.Int(rand.Reader, big.NewInt(49151-20000+1))
 	if err != nil {
@@ -46,6 +50,12 @@ func NewPlan(protocol Protocol) (Input, error) {
 		Port: 20000 + int(portOffset.Int64()), Username: "qch-" + suffix,
 		Credential: credential, Method: method, Transport: transport, TransportPath: transportPath,
 		TLSEnabled: protocol.DefaultTLS, CertificatePath: "/etc/qcontrolhub/tls/server.crt", PrivateKeyPath: "/etc/qcontrolhub/tls/server.key",
+	}
+	if protocol.PortForward {
+		input.Username = ""
+		input.TargetAddress = "127.0.0.1"
+		input.TargetPort = 80
+		input.Network = "tcp"
 	}
 	if protocol.Key == ProtocolTUIC {
 		input.Credential, err = NewCredential(ProtocolVLESS, "")
@@ -124,5 +134,10 @@ func RegeneratePlan(protocol Protocol, current Input) (Input, error) {
 	plan.PrivateKeyPath = current.PrivateKeyPath
 	plan.RealityEnabled = current.RealityEnabled
 	plan.RealityServerName = current.RealityServerName
+	if protocol.PortForward {
+		plan.TargetAddress = current.TargetAddress
+		plan.TargetPort = current.TargetPort
+		plan.Network = current.Network
+	}
 	return plan, nil
 }

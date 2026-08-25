@@ -128,6 +128,11 @@ func TestServerPlanRegenerationStaysLocalAndUsesCurrentFormState(t *testing.T) {
 		`["secondary_credential", "secondary_credential", "生成次凭据"]`,
 		`"reality_private_key,reality_public_key"`,
 		`["reality_short_id", "reality_short_id", "生成 Short ID"]`,
+		`const portForward = Boolean(protocol?.port_forward);`,
+		`name="target_address"`,
+		`name="target_port"`,
+		`name="network"`,
+		`<strong>转发目标</strong>`,
 	} {
 		if !strings.Contains(content, required) {
 			t.Errorf("server-plan field generation is missing %q", required)

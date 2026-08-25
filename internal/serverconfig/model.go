@@ -13,6 +13,7 @@ const (
 	ProtocolHy2         = "hysteria2"
 	ProtocolTUIC        = "tuic"
 	ProtocolAnyTLS      = "anytls"
+	ProtocolPortForward = "port-forward"
 )
 
 type Protocol struct {
@@ -32,6 +33,7 @@ type Protocol struct {
 	DefaultTLS          bool     `json:"default_tls"`
 	TransportConfig     bool     `json:"transport_config"`
 	UsesReality         bool     `json:"uses_reality"`
+	PortForward         bool     `json:"port_forward"`
 }
 
 type Input struct {
@@ -54,6 +56,9 @@ type Input struct {
 	RealityPublicKey    string `json:"reality_public_key"`
 	RealityShortID      string `json:"reality_short_id"`
 	RealityServerName   string `json:"reality_server_name"`
+	TargetAddress       string `json:"target_address"`
+	TargetPort          int    `json:"target_port"`
+	Network             string `json:"network"`
 }
 
 func Protocols(engine core.Engine) []Protocol {
@@ -91,8 +96,10 @@ func Protocols(engine core.Engine) []Protocol {
 	vmessPath := "vmess/"
 	trojanPath := "trojan/"
 	hy2Path := "hysteria2/"
+	portForwardPath := "direct/"
 	if engine == core.EngineMihomo {
 		ssPath = "ss/"
+		portForwardPath = "tunnel/"
 	}
 	if engine == core.EngineXray {
 		ssPath = "shadowsocks.html"
@@ -100,6 +107,7 @@ func Protocols(engine core.Engine) []Protocol {
 		vmessPath = "vmess.html"
 		trojanPath = "trojan.html"
 		hy2Path = "hysteria.html"
+		portForwardPath = "tunnel.html"
 	}
 	protocols := []Protocol{
 		{
@@ -132,6 +140,12 @@ func Protocols(engine core.Engine) []Protocol {
 			Description: "基于 QUIC 的高性能入站，可承载 TCP 与 UDP 流量，默认带宽为双向 100 Mbps。",
 			Docs:        base + hy2Path, DefaultPort: 8443, Credential: "用户密码",
 			Transports: []string{"raw"}, SupportsTLS: true, RequiresTLS: true, DefaultTLS: true,
+		},
+		{
+			Key: ProtocolPortForward, Name: "端口转发", Badge: "FORWARD",
+			Description: "将本机监听端口收到的 TCP、UDP 或双协议流量转发到指定目标地址与端口。",
+			Docs:        base + portForwardPath, DefaultPort: 8080,
+			Transports: []string{"raw"}, IgnoresUsername: true, PortForward: true,
 		},
 	}
 	if engine != core.EngineXray {

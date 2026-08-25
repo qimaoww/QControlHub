@@ -47,12 +47,12 @@ func mutateGenerated(engine core.Engine, currentContent, generatedContent, match
 		managedKeys = []string{
 			"name", "listen", "port", "type", "cipher", "password", "udp", "users",
 			"up", "down", "alpn", "congestion-controller", "max-idle-time", "authentication-timeout",
-			"certificate", "private-key", "reality-config", "ws-path", "grpc-service-name",
+			"certificate", "private-key", "reality-config", "ws-path", "grpc-service-name", "network", "target",
 		}
 	} else if engine == core.EngineSingBox {
 		managedKeys = []string{
 			"tag", "listen", "listen_port", "type", "method", "password", "users", "up_mbps", "down_mbps",
-			"congestion_control", "auth_timeout", "heartbeat", "tls", "transport",
+			"congestion_control", "auth_timeout", "heartbeat", "tls", "transport", "network", "override_address", "override_port",
 		}
 	}
 	var (

@@ -1,6 +1,8 @@
 package serverconfig
 
 import (
+	"strings"
+
 	"github.com/qimaoww/qcontrolhub/internal/core"
 	"gopkg.in/yaml.v3"
 )
@@ -46,6 +48,10 @@ func generateMihomo(input Input) (string, error) {
 	case ProtocolAnyTLS:
 		listener["type"] = "anytls"
 		listener["users"] = map[string]any{input.Username: input.Credential}
+	case ProtocolPortForward:
+		listener["type"] = "tunnel"
+		listener["network"] = strings.Split(input.Network, ",")
+		listener["target"] = forwardTarget(input)
 	}
 	if input.TLSEnabled {
 		listener["certificate"] = input.CertificatePath
@@ -78,6 +84,10 @@ func parseMihomo(content string) (Input, bool) {
 		Listen: stringValue(listener["listen"]), Port: intValue(listener["port"]), Username: "default",
 		Method: stringValue(listener["cipher"]), Credential: stringValue(listener["password"]), Transport: "raw",
 		CertificatePath: stringValue(listener["certificate"]), PrivateKeyPath: stringValue(listener["private-key"]),
+	}
+	if input.Protocol == ProtocolPortForward {
+		input.Network = networkListValue(listener["network"])
+		input.TargetAddress, input.TargetPort, _ = splitForwardTarget(stringValue(listener["target"]))
 	}
 	input.TLSEnabled = input.CertificatePath != "" && input.PrivateKeyPath != ""
 	if reality := mapValue(listener["reality-config"]); reality != nil {
@@ -127,7 +137,7 @@ func parseMihomo(content string) (Input, bool) {
 			}
 		}
 	}
-	return input, input.Protocol != "" && input.Tag != "" && input.Port != 0 && input.Credential != ""
+	return input, parsedInputValid(input)
 }
 
 func mihomoTransport(listener map[string]any, input Input) {

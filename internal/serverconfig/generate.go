@@ -8,10 +8,15 @@ import (
 	"fmt"
 	"net"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
+
+func forwardTarget(input Input) string {
+	return net.JoinHostPort(input.TargetAddress, strconv.Itoa(input.TargetPort))
+}
 
 var (
 	tagPattern  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$`)
@@ -32,17 +37,34 @@ func Generate(engine core.Engine, input Input) (string, error) {
 	if strings.TrimSpace(input.Listen) == "" || (net.ParseIP(input.Listen) == nil && input.Listen != "localhost") {
 		return "", errors.New("监听地址必须是 IP 地址或 localhost")
 	}
-	if !protocol.IgnoresUsername && (strings.TrimSpace(input.Username) == "" || len(input.Username) > 64) {
-		return "", errors.New("用户名不能为空且不能超过 64 个字符")
-	}
-	if err := validateCredential(input); err != nil {
-		return "", err
+	if protocol.PortForward {
+		target, err := NormalizeClientAddress(input.TargetAddress)
+		if err != nil {
+			return "", errors.New("转发目标必须是有效域名或 IP 地址")
+		}
+		input.TargetAddress = target
+		if input.TargetPort < 1 || input.TargetPort > 65535 {
+			return "", errors.New("目标端口必须在 1 到 65535 之间")
+		}
+		if input.Network != "tcp" && input.Network != "udp" && input.Network != "tcp,udp" {
+			return "", errors.New("转发协议必须是 TCP、UDP 或 TCP + UDP")
+		}
+	} else {
+		if !protocol.IgnoresUsername && (strings.TrimSpace(input.Username) == "" || len(input.Username) > 64) {
+			return "", errors.New("用户名不能为空且不能超过 64 个字符")
+		}
+		if err := validateCredential(input); err != nil {
+			return "", err
+		}
 	}
 	if input.Transport == "" {
 		input.Transport = "raw"
 	}
 	if input.Transport != "raw" && input.Transport != "websocket" && input.Transport != "grpc" {
 		return "", errors.New("不支持的传输方式")
+	}
+	if protocol.PortForward && input.Transport != "raw" {
+		return "", errors.New("端口转发只支持原生 TCP/UDP 传输")
 	}
 	if input.Transport != "raw" && strings.TrimSpace(input.TransportPath) == "" {
 		return "", errors.New("WebSocket 路径或 gRPC ServiceName 不能为空")

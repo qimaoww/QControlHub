@@ -44,6 +44,13 @@ func generateSingBox(input Input) (string, error) {
 	case ProtocolAnyTLS:
 		inbound["type"] = "anytls"
 		inbound["users"] = []any{map[string]any{"name": input.Username, "password": input.Credential}}
+	case ProtocolPortForward:
+		inbound["type"] = "direct"
+		if input.Network != "tcp,udp" {
+			inbound["network"] = input.Network
+		}
+		inbound["override_address"] = input.TargetAddress
+		inbound["override_port"] = input.TargetPort
 	}
 	if input.TLSEnabled {
 		inbound["tls"] = map[string]any{
@@ -92,6 +99,14 @@ func parseSingBox(content string) (Input, bool) {
 		Listen: stringValue(inbound["listen"]), Port: intValue(inbound["listen_port"]), Username: "default",
 		Method: stringValue(inbound["method"]), Credential: stringValue(inbound["password"]), Transport: "raw",
 	}
+	if input.Protocol == ProtocolPortForward {
+		input.Network = networkListValue(stringValue(inbound["network"]))
+		if input.Network == "" {
+			input.Network = "tcp,udp"
+		}
+		input.TargetAddress = stringValue(inbound["override_address"])
+		input.TargetPort = intValue(inbound["override_port"])
+	}
 	if user := firstMap(inbound["users"]); user != nil {
 		input.Username = stringValue(user["name"])
 		input.Credential = stringValue(user["uuid"])
@@ -128,5 +143,5 @@ func parseSingBox(content string) (Input, bool) {
 		input.RealityShortID = firstString(reality["short_id"])
 		input.RealityServerName = stringValue(tls["server_name"])
 	}
-	return input, input.Protocol != "" && input.Tag != "" && input.Port != 0 && input.Credential != ""
+	return input, parsedInputValid(input)
 }

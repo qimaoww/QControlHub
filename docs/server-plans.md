@@ -16,12 +16,13 @@
 | Hysteria 2 + TLS | 是 | 是（官方 `hysteria` v2） | 是 | 否 | 高位端口、用户名、密码 |
 | TUIC v5 + TLS | 是 | 否 | 是 | 否 | 高位端口、UUID、密码 |
 | AnyTLS | 是 | 否 | 是 | 否 | 高位端口、用户名、密码 |
+| 端口转发 | 是（`tunnel` listener） | 是（`tunnel` inbound） | 是（`direct` inbound） | 否 | 高位监听端口；默认转发到 `127.0.0.1:80`，可选 TCP、UDP 或双协议 |
 
-随机端口来自 20000–49151。密码、PSK、UUID、路径、X25519 密钥和 Short ID 均使用 Go `crypto/rand`。点击“重新生成参数”会直接读取当前表单并只替换随机字段，不会重载页面或恢复协议默认值；例如当前选择 SS2022 AES-128 时会保留该方法并生成匹配的 16 字节 PSK。标签、端口、用户名、凭据、路径、Reality 密钥对和 Short ID 也提供就地生成按钮，其中密钥对始终原子更新 Public Key 与 Private Key。页面中的所有方案字段仍可自定义。
+随机端口来自 20000–49151。密码、PSK、UUID、路径、X25519 密钥和 Short ID 均使用 Go `crypto/rand`。点击“重新生成参数”会直接读取当前表单并只替换随机字段，不会重载页面或恢复协议默认值；例如当前选择 SS2022 AES-128 时会保留该方法并生成匹配的 16 字节 PSK，端口转发方案会保留当前目标地址、目标端口和网络协议。标签、端口、用户名、凭据、路径、Reality 密钥对和 Short ID 也提供就地生成按钮，其中密钥对始终原子更新 Public Key 与 Private Key。页面中的所有方案字段仍可自定义。
 
 ## 生成和部署
 
-生成器按内核输出原生格式：Mihomo 使用 `listeners` YAML，Xray 和 sing-box 使用 `inbounds` JSON，Shadowsocks Rust 使用官方单服务端 JSON，并补齐必要的转发参数。保存时执行以下检查：
+生成器按内核输出原生格式：Mihomo 使用 `listeners` YAML，Xray 和 sing-box 使用 `inbounds` JSON，Shadowsocks Rust 使用官方单服务端 JSON。端口转发分别生成 Mihomo `tunnel` listener、Xray `tunnel` inbound 和 sing-box `direct` inbound，并把统一的 TCP / UDP 选择转换为各内核的原生字段。保存时执行以下检查：
 
 - 节点必须存在并声明对应内核能力；
 - 配置固定绑定到该节点和内核，不能部署到其他 Agent；
@@ -38,15 +39,18 @@ Agent 收到部署任务后仍会调用目标内核自身的配置检查命令�
 
 方案保存后，页面中的“客户端接入”区可根据客户端实际访问的域名或 IP 生成分享 URI，并同时列出服务器、端口、认证、传输、TLS / Reality 等逐项参数。连接地址和 TLS ServerName 只保留在当前页面 URL，不写入内核配置，也不会成为配置版本的一部分。
 
-当前会为 Shadowsocks 2022、VLESS、VMess、Trojan、Hysteria 2、TUIC v5 和 AnyTLS 生成对应 URI。客户端对分享格式的支持可能因产品和版本不同而变化；无法直接导入时，应使用页面列出的逐项参数。URI 和认证字段默认以密码输入框遮罩，复制时无需先显示。
+当前会为 Shadowsocks 2022、VLESS、VMess、Trojan、Hysteria 2、TUIC v5 和 AnyTLS 生成对应 URI。端口转发是节点侧监听与目标映射，不生成代理客户端分享 URI。客户端对分享格式的支持可能因产品和版本不同而变化；无法直接导入时，应使用页面列出的逐项参数。URI 和认证字段默认以密码输入框遮罩，复制时无需先显示。
 
 客户端资料只包含连接所需的公开参数与用户凭据。Reality 服务端 Private Key、TLS 私钥路径和证书路径不会进入客户端 URI 或逐项参数。页面不会代替网络侧配置；部署完成后仍需确认 DNS 指向、证书覆盖域名，以及主机和上游防火墙已放行方案使用的 TCP / UDP 端口。
 
 ## 官方依据
 
 - [Mihomo listeners](https://wiki.metacubex.one/config/inbound/listeners/)
+- [Mihomo tunnel listener](https://wiki.metacubex.one/config/inbound/listeners/tunnel/)
 - [Xray inbounds](https://xtls.github.io/config/inbound.html)
+- [Xray tunnel inbound](https://xtls.github.io/config/inbounds/tunnel.html)
 - [sing-box inbounds](https://sing-box.sagernet.org/configuration/inbound/)
+- [sing-box direct inbound](https://sing-box.sagernet.org/configuration/inbound/direct/)
 - [sing-box JSON Schema](https://sing-box.sagernet.org/schema.json)
 
 页面底部的“高级配置与完整官方目录”保留全部顶层配置、官方入站类型链接及完整源码编辑器，用于方案之外的字段和新版本选项。

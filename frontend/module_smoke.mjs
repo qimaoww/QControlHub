@@ -1572,6 +1572,9 @@ const planControls = Object.fromEntries(
     reality_public_key: "",
     reality_short_id: "",
     reality_server_name: "unsaved.example.test",
+    target_address: "backend.example.test",
+    target_port: "9443",
+    network: "udp",
   }).map(([name, value]) => [name, { name, value }]),
 );
 const planFormListeners = new Map();
@@ -1699,6 +1702,9 @@ try {
   assert.equal(firstPayload.input.transport, "grpc");
   assert.equal(firstPayload.input.listen, "127.0.0.1");
   assert.equal(firstPayload.input.certificate_path, "/unsaved/certificate.pem");
+  assert.equal(firstPayload.input.target_address, "backend.example.test");
+  assert.equal(firstPayload.input.target_port, 9443);
+  assert.equal(firstPayload.input.network, "udp");
   planRequests[0].pending.resolve({
     tag: "regenerated-tag",
     port: 35555,
@@ -1710,6 +1716,9 @@ try {
     transport: "websocket",
     listen: "0.0.0.0",
     certificate_path: "/server/default.pem",
+    target_address: "127.0.0.1",
+    target_port: 80,
+    network: "tcp",
   });
   await firstClick;
   assert.equal(planControls.tag.value, "regenerated-tag");
@@ -1723,6 +1732,13 @@ try {
   assert.equal(planControls.transport.value, "grpc");
   assert.equal(planControls.listen.value, "127.0.0.1");
   assert.equal(planControls.operation.value, "modify");
+  assert.equal(
+    planControls.target_address.value,
+    "backend.example.test",
+    "regeneration preserves the selected forwarding target",
+  );
+  assert.equal(planControls.target_port.value, "9443");
+  assert.equal(planControls.network.value, "udp");
   assert.deepEqual(pageState, {
     route: "#agent-config",
     node: "node-current",
