@@ -76,3 +76,29 @@ func TestCoreLogsStoreQueryAndDeduplicateWithPostgreSQL(t *testing.T) {
 		t.Fatalf("logs after prune = %+v, %v", remaining, err)
 	}
 }
+
+func TestStoreSanitizeCoreLogMessage(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"ansi color", "\x1b[32mINFO\x1b[0m inbound started", "INFO inbound started"},
+		{"ansi multi attrs", "\x1b[1;33mWARN\x1b[0m dial timeout", "WARN dial timeout"},
+		{"lone esc", "up\x1bstream", "upstream"},
+		{"nul", "before\x00after", "before�after"},
+		{"invalid utf8", "bad\xffbyte", "bad�byte"},
+		{"plain unchanged", "plain text", "plain text"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := sanitizeCoreLogMessage(test.in); got != test.want {
+				t.Fatalf("sanitizeCoreLogMessage(%q) = %q, want %q", test.in, got, test.want)
+			}
+		})
+	}
+	if got := sanitizeCoreLogMessage("\x1b[31m"); got != "" {
+		t.Fatalf("sanitizeCoreLogMessage(only ansi) = %q", got)
+	}
+}

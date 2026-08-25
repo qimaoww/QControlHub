@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -28,7 +29,7 @@ func (s *Store) StoreCoreLogs(ctx context.Context, agentID string, batch core.Co
 	receivedAt := time.Now().UTC()
 	entries := make([]core.CoreLogEntry, 0, len(batch.Entries))
 	for _, entry := range batch.Entries {
-		entry.Message = strings.TrimSpace(strings.ToValidUTF8(entry.Message, "�"))
+		entry.Message = sanitizeCoreLogMessage(entry.Message)
 		entry.Level = normalizeCoreLogLevel(entry.Level)
 		if !entry.Engine.Valid() || entry.Level == "" || entry.Message == "" ||
 			!utf8.ValidString(entry.Message) || len([]byte(entry.Message)) > core.MaxCoreLogMessageBytes || strings.ContainsRune(entry.Message, '\x00') {
@@ -115,6 +116,7 @@ func (s *Store) ListCoreLogs(ctx context.Context, query CoreLogQuery) ([]core.Co
 		if err := rows.Scan(&entry.ID, &entry.AgentID, &entry.Engine, &entry.Level, &entry.Message, &entry.LoggedAt, &entry.ReceivedAt); err != nil {
 			return nil, err
 		}
+		entry.Message = sanitizeCoreLogMessage(entry.Message)
 		result = append(result, entry)
 	}
 	return result, rows.Err()
@@ -130,6 +132,19 @@ func validCoreLogBatchID(value string) bool {
 		}
 	}
 	return true
+}
+
+// ansiControlPattern matches ANSI escape sequences (CSI) such as the color
+// codes proxy cores emit. They must not reach the panel as visible `[36m`
+// style text, even when an older Agent uploads them unchanged.
+var ansiControlPattern = regexp.MustCompile(`\x1b\[[0-?]*[ -/]*[@-~]`)
+
+func sanitizeCoreLogMessage(raw string) string {
+	message := strings.TrimSpace(strings.ToValidUTF8(raw, "�"))
+	message = strings.ReplaceAll(message, "\x00", "�")
+	message = ansiControlPattern.ReplaceAllString(message, "")
+	message = strings.ReplaceAll(message, "\x1b", "")
+	return message
 }
 
 func normalizeCoreLogLevel(value string) string {
