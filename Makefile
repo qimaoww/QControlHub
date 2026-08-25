@@ -57,6 +57,7 @@ init-env:
 		'POSTGRES_USER=qcontrolhub' \
 		"POSTGRES_PASSWORD=$$db_password" \
 		'POSTGRES_PORT=5432' \
+		'QCH_DATABASE_BIND_ADDRESS=127.0.0.1' \
 		"QCH_ADMIN_TOKEN=$$admin_token" \
 		"QCH_WEBHOOK_SECRET=$$webhook_secret" \
 		"QCH_CONFIG_ENCRYPTION_KEY=$$config_key" \

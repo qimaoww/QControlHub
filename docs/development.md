@@ -27,7 +27,9 @@ docker compose ps
 
 `make dev-up` 通过当前 shell 临时传入 `QCH_BEHIND_TLS_PROXY=false` 和 `QCH_ALLOW_INSECURE_HTTP=true`，使回环地址上的 HTTP 登录可以工作。它不会改写 `.env`。访问 `http://127.0.0.1:8080`，管理员令牌位于权限为 `0600` 的 `.env`。
 
-数据库与控制面只发布到 `QCH_BIND_ADDRESS`，默认值是 `127.0.0.1`。不要在开发机上把它改为 `0.0.0.0`。
+Web 控制台发布到 `QCH_BIND_ADDRESS`，PostgreSQL 单独发布到
+`QCH_DATABASE_BIND_ADDRESS`；两者默认都是 `127.0.0.1`。即使为了局域网调试而把
+Web 控制台绑定到内网地址，也应让数据库继续保持在回环地址。不要在开发机上把任一地址改为 `0.0.0.0`。
 
 查看日志和停止环境：
 

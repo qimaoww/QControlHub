@@ -1,11 +1,115 @@
 import { bindEvent, createRefreshChannel } from "./refresh.js";
 
+export function normalizeClientAccessFilters(entries, agents, filters = {}) {
+  const agentIDs = new Set((agents || []).map((agent) => agent.id));
+  let agent = String(filters.agent || "");
+  if (agent && !agentIDs.has(agent)) agent = "";
+
+  const scopedEntries = agent
+    ? (entries || []).filter((entry) => entry.agent_id === agent)
+    : entries || [];
+  const engineIDs = new Set(scopedEntries.map((entry) => entry.engine));
+  let engine = String(filters.engine || "");
+  if (engine && !engineIDs.has(engine)) engine = "";
+
+  return {
+    agent,
+    engine,
+    query: String(filters.query || "").trim(),
+  };
+}
+
+export function filterClientAccessEntries(entries, filters = {}) {
+  const query = String(filters.query || "").trim().toLowerCase();
+  return (entries || []).flatMap((entry) => {
+    if (filters.agent && entry.agent_id !== filters.agent) return [];
+    if (filters.engine && entry.engine !== filters.engine) return [];
+    if (!query) return [entry];
+    const entryMatches = [
+      entry.agent_name,
+      entry.agent_id,
+      entry.engine,
+      entry.address,
+      entry.source,
+    ]
+      .join(" ")
+      .toLowerCase()
+      .includes(query);
+    if (entryMatches) return [entry];
+    const profiles = (entry.profiles || []).filter((profile) =>
+      [
+        profile.tag,
+        profile.protocol,
+        profile.profile?.format,
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(query),
+    );
+    return profiles.length ? [{ ...entry, profiles }] : [];
+  });
+}
+
+export function groupClientAccessEntries(entries) {
+  const groups = [];
+  const byAgent = new Map();
+  for (const entry of entries || []) {
+    let group = byAgent.get(entry.agent_id);
+    if (!group) {
+      group = { agent_id: entry.agent_id, entries: [] };
+      byAgent.set(entry.agent_id, group);
+      groups.push(group);
+    }
+    group.entries.push(entry);
+  }
+  return groups;
+}
+
+export async function copyClientValue(
+  input,
+  {
+    navigatorObject = globalThis.navigator,
+    documentObject = globalThis.document,
+  } = {},
+) {
+  if (!input) throw new Error("没有可复制的内容");
+  if (navigatorObject?.clipboard?.writeText) {
+    await navigatorObject.clipboard.writeText(input.value || "");
+    return "clipboard";
+  }
+  if (typeof documentObject?.execCommand !== "function")
+    throw new Error("当前浏览器不支持剪贴板操作");
+
+  const active = documentObject.activeElement;
+  const selection = {
+    start: input.selectionStart,
+    end: input.selectionEnd,
+    direction: input.selectionDirection,
+  };
+  input.focus({ preventScroll: true });
+  input.select();
+  try {
+    if (!documentObject.execCommand("copy"))
+      throw new Error("浏览器拒绝了剪贴板操作");
+  } finally {
+    if (selection.start != null && typeof input.setSelectionRange === "function")
+      input.setSelectionRange(
+        selection.start,
+        selection.end,
+        selection.direction || "none",
+      );
+    active?.focus?.({ preventScroll: true });
+  }
+  return "legacy";
+}
+
 export function installClientAccess(ctx) {
-  const { api, state, engines, esc, engineName, short, shell, can, notify } = ctx;
+  const { api, state, engines, esc, engineName, shell, can, notify } = ctx;
   const refresh = createRefreshChannel({
     isCurrent: () => state.route === "client-access",
     getScope: () => state.navigationEpoch,
   });
+
   async function clientAccess() {
     let payload;
     let applied;
@@ -29,197 +133,265 @@ export function installClientAccess(ctx) {
       notify(error.message, "error");
       return false;
     }
-    if (!applied) return;
+    if (!applied) return false;
     const [entries, agents] = payload;
-  state.data.agents = agents;
-  state.data.clientAccessEntries = entries;
-  const selectedAgent = state.data.accessAgent || "";
-  const selectedEngine = state.data.accessEngine || "";
-  const query = String(state.data.accessQuery || "")
-    .trim()
-    .toLowerCase();
-  const filtered = entries.filter((entry) => {
-    if (selectedAgent && entry.agent_id !== selectedAgent) return false;
-    if (selectedEngine && entry.engine !== selectedEngine) return false;
-    if (!query) return true;
-    return [
-      entry.agent_name,
-      entry.agent_id,
-      entry.engine,
-      entry.address,
-      entry.source,
-      ...(entry.profiles || []).flatMap((profile) => [
-        profile.tag,
-        profile.protocol,
-        profile.profile?.format,
-      ]),
-    ]
-      .join(" ")
-      .toLowerCase()
-      .includes(query);
-  });
-  const filteredProfiles = filtered.reduce(
-    (total, entry) => total + (entry.profiles || []).length,
-    0,
-  );
-  const totalProfiles = entries.reduce(
-    (total, entry) => total + (entry.profiles || []).length,
-    0,
-  );
-  const totalNodes = new Set(
-    entries
-      .filter((entry) => (entry.profiles || []).length > 0)
-      .map((entry) => entry.agent_id),
-  ).size;
-  const results =
-    filtered
-      .map((entry, entryIndex) => {
-        const agent = agents.find((item) => item.id === entry.agent_id) || {};
+    state.data.agents = agents;
+    state.data.clientAccessEntries = entries;
+    renderClientAccess();
+    return true;
+  }
+
+  function renderClientAccess() {
+    const entries = state.data.clientAccessEntries || [];
+    const agents = state.data.agents || [];
+    const filters = normalizeClientAccessFilters(entries, agents, {
+      agent: state.data.accessAgent,
+      engine: state.data.accessEngine,
+      query: state.data.accessQuery,
+    });
+    state.data.accessAgent = filters.agent;
+    state.data.accessEngine = filters.engine;
+    state.data.accessQuery = filters.query;
+
+    const filtered = filterClientAccessEntries(entries, filters);
+    const scopedEntries = filters.agent
+      ? entries.filter((entry) => entry.agent_id === filters.agent)
+      : entries;
+    const scopedProfiles = scopedEntries.reduce(
+      (total, entry) => total + (entry.profiles || []).length,
+      0,
+    );
+    const results = renderResults(filtered, entries, agents, filters);
+    const relevantEngines = new Set(scopedEntries.map((entry) => entry.engine));
+    const engineFilters = engines
+      .filter((engine) => relevantEngines.has(engine))
+      .map((engine) => {
+        const count = scopedEntries
+          .filter((entry) => entry.engine === engine)
+          .reduce((total, entry) => total + (entry.profiles || []).length, 0);
+        return `<a class="${filters.engine === engine ? "active" : ""}" href="#client-access" data-filter-engine="${esc(engine)}">${esc(engineName(engine))}<b>${count}</b></a>`;
+      })
+      .join("");
+    const filtersMarkup = scopedEntries.length
+      ? `<section class="client-access-toolbar" aria-label="客户端配置筛选"><nav aria-label="按内核筛选"><a class="${filters.engine ? "" : "active"}" href="#client-access" data-filter-engine="">全部<b>${scopedProfiles}</b></a>${engineFilters}</nav><div><button class="button small" type="button" data-refresh-client-access>刷新</button><details class="client-access-search-menu" ${filters.query ? "open" : ""}><summary>${filters.query ? `搜索：${esc(filters.query)}` : "搜索"}</summary><form id="client-search"><input type="search" name="q" value="${esc(filters.query)}" aria-label="搜索入站" placeholder="节点、地址、协议或入站" autocomplete="off"><button class="button primary small" type="submit">搜索</button>${filters.query ? '<button class="button small" type="button" data-clear-search>清除</button>' : ""}</form></details></div></section>`
+      : '<section class="client-access-toolbar empty"><span>暂无客户端配置</span><button class="button small" type="button" data-refresh-client-access>刷新</button></section>';
+    shell(
+      `<section class="client-access-workspace compact" data-client-access-page><h1 class="visually-hidden">客户端配置</h1>${filtersMarkup}<div class="client-access-node-grid">${results}</div></section>`,
+      "客户端配置",
+    );
+    bindClientAccessPage();
+  }
+
+  function renderResults(filtered, entries, agents, filters) {
+    if (!filtered.length) {
+      const selectedAgent = agents.find((agent) => agent.id === filters.agent);
+      const selectedHasEntries = entries.some(
+        (entry) => entry.agent_id === filters.agent,
+      );
+      const hasActiveFilter = Boolean(filters.engine || filters.query);
+      const title = !entries.length
+        ? "尚未生成客户端配置"
+        : selectedAgent && !selectedHasEntries
+          ? `${selectedAgent.name} 尚无客户端配置`
+          : "没有匹配的客户端配置";
+      const description = !entries.length
+        ? "安装内核并成功部署可解析的服务端入站后，客户端连接信息会自动出现在这里。"
+        : selectedAgent && !selectedHasEntries
+          ? "为该节点部署一个支持生成客户端连接信息的服务端入站后即可查看。"
+          : "请调整搜索词或内核筛选条件。";
+      const action = hasActiveFilter
+        ? '<button class="button primary" type="button" data-clear-client-filters>清除筛选</button>'
+        : '<a class="button primary" href="#node-settings">前往节点设置</a>';
+      return `<section class="client-access-empty-state"><span>⌁</span><h2>${esc(title)}</h2><p>${description}</p>${action}</section>`;
+    }
+
+    return groupClientAccessEntries(filtered)
+      .map((group, groupIndex) => {
+        const firstEntry = group.entries[0];
+        const agent = agents.find((item) => item.id === group.agent_id) || {};
         const agentStatus = agent.status || "unknown";
         const managedAddress = Boolean(agent.labels?.client_address);
-        const profiles = (entry.profiles || [])
-          .map((item, profileIndex) => {
-            const inputID = `client-share-${entryIndex}-${profileIndex}`;
-            const fields = (item.profile?.fields || [])
-              .map(
-                (field, fieldIndex) =>
-                  `<div><span>${esc(field.label)}</span>${field.secret ? `<form class="secret-value-control" action="#"><input id="client-field-${entryIndex}-${profileIndex}-${fieldIndex}" type="password" readonly autocomplete="off" spellcheck="false" value="${esc(field.value)}"><button type="button" data-secret-visibility>显示</button><button type="button" data-copy-target="#client-field-${entryIndex}-${profileIndex}-${fieldIndex}">复制</button></form>` : `<code title="${esc(field.value)}">${esc(field.value)}</code>`}</div>`,
-              )
-              .join("");
-            return `<article class="client-profile-card" data-refresh-key="client-profile-${esc(entry.agent_id)}-${esc(entry.engine)}-${esc(item.tag)}"><header><span><b>${esc(item.protocol)}</b><small>${esc(item.tag)} · ${esc(item.profile?.format)}</small></span><span class="status-label warn">含凭据</span></header><form class="secret-value-control client-share-control" action="#"><input id="${inputID}" type="password" readonly autocomplete="off" spellcheck="false" value="${esc(item.profile?.uri)}"><button type="button" data-secret-visibility>显示</button><button type="button" data-copy-target="#${inputID}">复制</button></form><details class="client-parameter-menu"><summary>逐项参数 <i>展开</i></summary><div class="client-parameters">${fields}</div></details></article>`;
-          })
-          .join("");
-        const addressForm = `<form class="client-address-form" data-client-address-agent="${esc(entry.agent_id)}"><label><span>客户端连接地址</span><input name="address" required maxlength="253" autocomplete="off" value="${esc(entry.address || "")}" placeholder="例如 203.0.113.10 或 node.example.com"><small>填写客户端实际访问节点的域名或 IP，不要填写 0.0.0.0。</small></label><div><button class="button primary" type="submit">保存并生成配置</button>${managedAddress ? `<button class="button" type="button" data-clear-client-address="${esc(entry.agent_id)}">恢复自动识别</button>` : ""}</div></form>`;
-        const addressSetup = entry.address_required
+        const addressForm = `<form class="client-address-form" data-client-address-agent="${esc(group.agent_id)}"><label><span>客户端连接地址</span><input name="address" required maxlength="253" autocomplete="off" value="${esc(firstEntry.address || "")}" placeholder="例如 203.0.113.10 或 node.example.com"><small>填写客户端实际访问节点的域名或 IP，不要填写 0.0.0.0。</small></label><div><button class="button primary" type="submit">保存并生成配置</button>${managedAddress ? `<button class="button" type="button" data-clear-client-address="${esc(group.agent_id)}">恢复自动识别</button>` : ""}</div></form>`;
+        const addressSetup = firstEntry.address_required
           ? can("agents.manage")
             ? addressForm
-            : `<p class="client-address-missing">管理员尚未设置客户端连接地址，请联系节点管理员。</p>`
+            : '<p class="client-address-missing">管理员尚未设置客户端连接地址，请联系节点管理员。</p>'
           : can("agents.manage")
-            ? `<details class="client-address-editor"><summary>修改连接地址 <i>＋</i></summary>${addressForm}</details>`
+            ? `<details class="client-address-editor"><summary>修改地址 <i>＋</i></summary>${addressForm}</details>`
             : "";
-        const statusLabel = entry.address_required
+        const statusLabel = firstEntry.address_required
           ? "待设置地址"
           : agentStatus === "online"
             ? "在线"
             : agentStatus === "offline"
               ? "离线"
               : "状态未知";
-        return `<article class="client-access-entry" data-refresh-key="client-access-${esc(entry.agent_id)}-${esc(entry.engine)}"><header class="client-access-entry-head"><div class="client-access-node"><span class="node-avatar">●</span><span><strong>${esc(entry.agent_name)}</strong><small>${esc(agent.os || "节点")} / ${esc(agent.arch || "")}${agent.os || agent.arch ? ` · ${esc(short(entry.agent_id))}` : ""}</small></span></div><div class="client-access-engine"><span class="engine-badge ${esc(entry.engine)}">${esc(engineName(entry.engine))}</span><span class="status-label ${entry.address_required ? "warn" : agentStatus === "online" ? "ok" : "muted"}">${statusLabel}</span></div></header><div class="client-access-entry-meta"><span><small>连接地址</small><code>${esc(entry.address || "未设置")}</code></span><span><small>地址来源</small><strong>${esc(entry.source || "需要管理员设置")}</strong></span><a href="#agent-config" data-config-agent="${esc(entry.agent_id)}" data-config-engine="${esc(entry.engine)}">服务端配置 →</a></div>${addressSetup}<div class="client-access-profile-grid">${profiles || `<div class="client-access-entry-empty"><b>暂时无法生成客户端配置</b><span>配置已部署，但需要一个可访问的节点地址。</span></div>`}</div></article>`;
+        const engineSections = group.entries
+          .map((entry, engineIndex) => {
+            const profiles = (entry.profiles || [])
+              .map((item, profileIndex) => {
+                const inputID = `client-share-${groupIndex}-${engineIndex}-${profileIndex}`;
+                const fields = (item.profile?.fields || [])
+                  .map((field, fieldIndex) => {
+                    const fieldID = `client-field-${groupIndex}-${engineIndex}-${profileIndex}-${fieldIndex}`;
+                    return `<div><span>${esc(field.label)}</span>${field.secret ? `<form class="secret-value-control" action="#"><input id="${fieldID}" type="password" readonly autocomplete="off" spellcheck="false" value="${esc(field.value)}"><button type="button" data-secret-visibility aria-controls="${fieldID}" aria-pressed="false">显示</button><button type="button" data-copy-target="#${fieldID}">复制</button></form>` : `<code title="${esc(field.value)}">${esc(field.value)}</code>`}</div>`;
+                  })
+                  .join("");
+                return `<article class="client-profile-row" data-refresh-key="client-profile-${esc(entry.agent_id)}-${esc(entry.engine)}-${esc(item.tag)}"><header><b>${esc(item.protocol)}</b><small>${esc(item.tag)} · ${esc(item.profile?.format)}</small></header><form class="secret-value-control client-share-control" action="#"><input id="${inputID}" type="password" readonly autocomplete="off" spellcheck="false" value="${esc(item.profile?.uri)}"><button type="button" data-secret-visibility aria-controls="${inputID}" aria-pressed="false">显示</button><button type="button" data-copy-target="#${inputID}">复制</button></form><details class="client-parameter-menu"><summary>参数 <i>展开</i></summary><div class="client-parameters">${fields}</div></details></article>`;
+              })
+              .join("");
+            return `<section class="client-access-engine-group"><header><span><span class="engine-badge ${esc(entry.engine)}">${esc(engineName(entry.engine))}</span><small>${(entry.profiles || []).length} 个入站</small></span><a href="#agent-config" data-config-agent="${esc(entry.agent_id)}" data-config-engine="${esc(entry.engine)}">服务端配置</a></header><div>${profiles || '<p class="client-access-entry-empty">需要先设置可访问的节点地址。</p>'}</div></section>`;
+          })
+          .join("");
+        return `<article class="client-access-node-card" data-refresh-key="client-access-node-${esc(group.agent_id)}"><header><div class="client-access-node"><span class="node-avatar">●</span><span><strong>${esc(firstEntry.agent_name)}</strong><small>${esc(agent.os || "节点")} / ${esc(agent.arch || "")} · <code>${esc(firstEntry.address || "未设置地址")}</code></small></span></div><span class="client-access-node-state ${firstEntry.address_required ? "warn" : agentStatus === "online" ? "ok" : "muted"}"><i></i>${statusLabel}</span></header>${addressSetup}<div class="client-access-node-engines">${engineSections}</div></article>`;
       })
-      .join("") ||
-    `<section class="client-access-empty-state"><span>⌁</span><h2>${entries.length ? "没有匹配的客户端配置" : "尚未生成客户端配置"}</h2><p>${entries.length ? "请调整搜索或筛选条件。" : "安装内核并成功部署可解析的服务端入站后，客户端连接信息会自动出现在这里。"}</p><a class="button primary" href="#node-settings">前往节点设置</a></section>`;
-  const filterEngines = new Set(entries.map((entry) => entry.engine));
-  const engineFilters = engines
-    .filter((engine) => filterEngines.has(engine))
-    .map(
-      (engine) =>
-        `<a class="${selectedEngine === engine ? "active" : ""}" href="#client-access" data-filter-engine="${esc(engine)}">${esc(engineName(engine))}</a>`,
-    )
-    .join("");
-  const filters = entries.length
-    ? `<section class="client-access-filter-panel" aria-label="客户端配置筛选"><form class="client-access-search" id="client-search"><label><span>搜索入站</span><input type="search" name="q" value="${esc(state.data.accessQuery || "")}" placeholder="节点、地址、协议或入站名称" autocomplete="off"></label><button class="button primary" type="submit">搜索</button>${query ? '<button class="button" type="button" data-clear-search>清除搜索</button>' : ""}</form><div class="client-access-filter-row"><span>内核</span><nav aria-label="按内核筛选"><a class="${selectedEngine ? "" : "active"}" href="#client-access" data-filter-engine="">全部内核</a>${engineFilters}</nav></div></section><div class="client-access-results-head"><span>当前结果</span><strong>${filtered.length} 组内核配置 · ${filteredProfiles} 个入站</strong></div>`
-    : "";
-  shell(
-    `<section class="client-access-workspace" data-client-access-page><header class="client-access-hero"><div><p class="eyebrow">Client access</p><h1>客户端配置</h1><p>集中查看已部署入站生成的客户端连接信息。凭据默认隐藏，只在本页按需显示或复制。</p></div><dl class="client-access-summary"><div><dt>可用节点</dt><dd>${totalNodes}</dd></div><div><dt>客户端入站</dt><dd>${totalProfiles}</dd></div></dl></header>${filters}<div class="client-access-entry-grid">${results}</div></section>`,
-    "客户端配置",
-  );
-  bindClientAccessPage();
-}
+      .join("");
+  }
 
-function bindClientAccessPage() {
-  document
-    .querySelectorAll("[data-access-agent]")
-    .forEach((button) => {
+  function bindClientAccessPage() {
+    document.querySelectorAll("[data-access-agent]").forEach((button) => {
       button.onclick = (event) => {
         event.preventDefault();
         state.data.accessAgent = button.dataset.accessAgent;
-        return clientAccess();
+        renderClientAccess();
       };
     });
-  document.querySelectorAll("[data-filter-engine]").forEach((button) => {
-    button.onclick = (event) => {
-      event.preventDefault();
-      state.data.accessEngine = button.dataset.filterEngine;
-      clientAccess();
-    };
-  });
-  bindEvent(document.querySelector("#client-search"), "submit", (event) => {
-    event.preventDefault();
-    state.data.accessQuery = new FormData(event.currentTarget).get("q");
-    clientAccess();
-  });
-  bindEvent(document.querySelector("[data-clear-search]"), "click", () => {
-    state.data.accessQuery = "";
-    const input = document.querySelector("#client-search [name=q]");
-    if (input) {
-      input.value = "";
-      input.defaultValue = "";
-    }
-    clientAccess();
-  });
-  document.querySelectorAll("[data-secret-visibility]").forEach((button) => {
-    button.onclick = () => {
-      const input = button.parentElement.querySelector("input");
-      const reveal = input.type === "password";
-      input.type = reveal ? "text" : "password";
-      button.textContent = reveal ? "隐藏" : "显示";
-    };
-  });
-  document.querySelectorAll("[data-copy-target]").forEach((button) => {
-    button.onclick = async () => {
-      const input = document.querySelector(button.dataset.copyTarget);
-      await navigator.clipboard.writeText(input?.value || "");
-      button.textContent = "已复制";
-    };
-  });
-  document.querySelectorAll("[data-config-agent]").forEach((link) => {
-    link.onclick = () => {
-      state.data.agentId = link.dataset.configAgent;
-      state.data.engine = link.dataset.configEngine;
-    };
-  });
-  document.querySelectorAll("[data-client-address-agent]").forEach((form) => {
-    bindEvent(form, "submit", async (event) => {
-      event.preventDefault();
-      const button = form.querySelector("button[type=submit]");
-      const address = new FormData(form).get("address");
-      if (button) button.disabled = true;
-      try {
-        await api(`/agents/${encodeURIComponent(form.dataset.clientAddressAgent)}/client-address`, {
-          method: "PUT",
-          body: JSON.stringify({ address }),
-        });
-        const input = form.elements.namedItem("address");
-        if (input) input.defaultValue = input.value;
-        notify("客户端连接地址已保存");
-        await clientAccess();
-      } catch (error) {
-        notify(error.message, "error");
-        if (button) button.disabled = false;
-      }
+    document.querySelectorAll("[data-filter-engine]").forEach((button) => {
+      button.onclick = (event) => {
+        event.preventDefault();
+        state.data.accessEngine = button.dataset.filterEngine;
+        renderClientAccess();
+      };
     });
-  });
-  document.querySelectorAll("[data-clear-client-address]").forEach((button) => {
-    bindEvent(button, "click", async () => {
-      button.disabled = true;
-      try {
-        await api(`/agents/${encodeURIComponent(button.dataset.clearClientAddress)}/client-address`, {
-          method: "PUT",
-          body: JSON.stringify({ address: "" }),
-        });
-        const input = button.form?.elements.namedItem("address");
+    bindEvent(document.querySelector("#client-search"), "submit", (event) => {
+      event.preventDefault();
+      state.data.accessQuery = String(
+        new FormData(event.currentTarget).get("q") || "",
+      ).trim();
+      renderClientAccess();
+    });
+    bindEvent(document.querySelector("[data-clear-search]"), "click", () => {
+      state.data.accessQuery = "";
+      const input = document.querySelector("#client-search [name=q]");
+      if (input) {
+        input.value = "";
+        input.defaultValue = "";
+      }
+      renderClientAccess();
+    });
+    bindEvent(
+      document.querySelector("[data-clear-client-filters]"),
+      "click",
+      () => {
+        state.data.accessEngine = "";
+        state.data.accessQuery = "";
+        const input = document.querySelector("#client-search [name=q]");
         if (input) {
           input.value = "";
           input.defaultValue = "";
         }
-        notify("已恢复自动识别连接地址");
-        await clientAccess();
-      } catch (error) {
-        notify(error.message, "error");
-        button.disabled = false;
-      }
+        renderClientAccess();
+      },
+    );
+    bindEvent(
+      document.querySelector("[data-refresh-client-access]"),
+      "click",
+      async (event) => {
+        const button = event.currentTarget;
+        button.disabled = true;
+        button.setAttribute("aria-busy", "true");
+        try {
+          const refreshed = await clientAccess();
+          if (refreshed) notify("客户端配置已刷新");
+          else if (button.isConnected) {
+            button.disabled = false;
+            button.removeAttribute("aria-busy");
+          }
+        } catch (error) {
+          notify(error.message, "error");
+          button.disabled = false;
+          button.removeAttribute("aria-busy");
+        }
+      },
+    );
+    document.querySelectorAll("[data-secret-visibility]").forEach((button) => {
+      button.onclick = () => {
+        const input = button.parentElement.querySelector("input");
+        const reveal = input.type === "password";
+        input.type = reveal ? "text" : "password";
+        button.textContent = reveal ? "隐藏" : "显示";
+        button.setAttribute("aria-pressed", String(reveal));
+      };
     });
-  });
-}
+    document.querySelectorAll("[data-copy-target]").forEach((button) => {
+      button.onclick = async () => {
+        const input = document.querySelector(button.dataset.copyTarget);
+        try {
+          await copyClientValue(input);
+          button.textContent = "已复制";
+          button.dataset.copyState = "success";
+          setTimeout(() => {
+            if (!button.isConnected) return;
+            button.textContent = "复制";
+            delete button.dataset.copyState;
+          }, 1600);
+        } catch (error) {
+          notify(`复制失败：${error.message}`, "error");
+        }
+      };
+    });
+    document.querySelectorAll("[data-config-agent]").forEach((link) => {
+      link.onclick = () => {
+        state.data.agentId = link.dataset.configAgent;
+        state.data.engine = link.dataset.configEngine;
+      };
+    });
+    document.querySelectorAll("[data-client-address-agent]").forEach((form) => {
+      bindEvent(form, "submit", async (event) => {
+        event.preventDefault();
+        const button = form.querySelector("button[type=submit]");
+        const address = String(new FormData(form).get("address") || "").trim();
+        if (button) button.disabled = true;
+        try {
+          await api(
+            `/agents/${encodeURIComponent(form.dataset.clientAddressAgent)}/client-address`,
+            { method: "PUT", body: JSON.stringify({ address }) },
+          );
+          const input = form.elements.namedItem("address");
+          if (input) {
+            input.value = address;
+            input.defaultValue = address;
+          }
+          notify("客户端连接地址已保存");
+          await clientAccess();
+        } catch (error) {
+          notify(error.message, "error");
+          if (button) button.disabled = false;
+        }
+      });
+    });
+    document.querySelectorAll("[data-clear-client-address]").forEach((button) => {
+      bindEvent(button, "click", async () => {
+        button.disabled = true;
+        try {
+          await api(
+            `/agents/${encodeURIComponent(button.dataset.clearClientAddress)}/client-address`,
+            { method: "PUT", body: JSON.stringify({ address: "" }) },
+          );
+          const input = button.form?.elements.namedItem("address");
+          if (input) {
+            input.value = "";
+            input.defaultValue = "";
+          }
+          notify("已恢复自动识别连接地址");
+          await clientAccess();
+        } catch (error) {
+          notify(error.message, "error");
+          button.disabled = false;
+        }
+      });
+    });
+  }
+
   return clientAccess;
 }
