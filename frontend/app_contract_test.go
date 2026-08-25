@@ -185,7 +185,7 @@ func TestRefreshPathsUseStableViewsAndScopedCoordinators(t *testing.T) {
 		"modules/client-access.js": {
 			"createRefreshChannel({",
 			"getScope: () => state.navigationEpoch",
-			"if (input) input.defaultValue = input.value",
+			"input.defaultValue = address",
 			`button.form?.elements.namedItem("address")`,
 		},
 		"modules/core-logs.js": {
@@ -374,23 +374,29 @@ func TestClientAccessUsesContextSidebarAsOnlyNodeFilter(t *testing.T) {
 		}
 	}
 	for _, required := range []string{
-		`if (selectedAgent && entry.agent_id !== selectedAgent) return false;`,
+		`if (filters.agent && entry.agent_id !== filters.agent) return [];`,
 		`data-filter-engine=""`,
 		`aria-label="按内核筛选"`,
 		`.querySelectorAll("[data-access-agent]")`,
-		`client-access-results-head`,
+		`client-access-toolbar`,
+		`client-access-node-card`,
+		`groupClientAccessEntries(filtered)`,
+		`normalizeClientAccessFilters(entries, agents`,
+		`renderClientAccess();`,
 	} {
 		if !strings.Contains(string(clientAccess), required) {
 			t.Errorf("client access filtering is missing %q", required)
 		}
 	}
-	for _, forbidden := range []string{`data-filter-agent`, `aria-label="按节点筛选"`, `filterAgentIDs`} {
+	for _, forbidden := range []string{`data-filter-agent`, `aria-label="按节点筛选"`, `filterAgentIDs`, `client-access-hero`, `client-access-summary`, `client-access-filter-panel`, `client-access-results-head`, `含凭据`} {
 		if strings.Contains(string(clientAccess), forbidden) {
-			t.Errorf("client access main workspace still contains duplicate node filtering %q", forbidden)
+			t.Errorf("client access main workspace still contains superseded visual structure %q", forbidden)
 		}
 	}
-	if strings.Count(string(clientAccess), `<div class="client-access-filter-row">`) != 1 {
-		t.Error("client access main filter panel must contain only the engine filter row")
+	for _, required := range []string{`.client-access-toolbar`, `.client-access-node-grid`, `.client-profile-row`} {
+		if !strings.Contains(string(styles), required) {
+			t.Errorf("client access compact layout is missing %q", required)
+		}
 	}
 	const narrowSidebarRule = `@media(max-width:820px) and (pointer:coarse){.page-client-access .context-sidebar{display:flex}}`
 	if !strings.Contains(string(styles), narrowSidebarRule) {

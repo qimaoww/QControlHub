@@ -527,7 +527,7 @@ function shell(content, title, { viewKey = state.route } = {}) {
             ? '<button class="button small" type="button" data-open-enrollment>添加节点</button>'
             : ""
           : state.route === "client-access"
-            ? '<a class="button small" href="#node-settings">返回节点设置</a>'
+            ? ""
             : state.route === "archive-config"
               ? '<a class="button small" href="#live-config">节点实际配置</a>'
               : state.route === "agent-config"
@@ -626,7 +626,7 @@ function contextMarkup(title) {
   if (state.route === "client-access") {
     const items = state.data.agents || [];
     const entries = state.data.clientAccessEntries || [];
-    return `<a class="context-back" href="#node-settings">← 返回节点设置</a><a class="context-primary ${state.data.accessAgent ? "" : "active"}" href="#client-access" data-access-agent="">全部客户端配置</a><div class="context-section-label"><span>按节点查看</span><b>${items.length}</b></div><nav class="context-list" aria-label="客户端配置节点">${items.map((agent) => { const profiles = entries.filter((entry) => entry.agent_id === agent.id).reduce((total, entry) => total + (entry.profiles || []).length, 0); return `<a class="${state.data.accessAgent === agent.id ? "active" : ""}" href="#client-access" data-access-agent="${esc(agent.id)}"><i class="status-dot ${agent.status === "online" ? "ok" : ""}"></i><span><strong>${esc(agent.name)}</strong><small>${profiles ? `${profiles} 个客户端入站` : "尚无客户端配置"}</small></span><em>${agent.status === "online" ? "在线" : "离线"}</em></a>`; }).join("") || "<p>还没有节点</p>"}</nav>`;
+    return `<a class="context-back" href="#node-settings">← 返回节点设置</a><a class="context-primary ${state.data.accessAgent ? "" : "active"}" href="#client-access" data-access-agent="">全部客户端配置</a><div class="context-section-label"><span>按节点查看</span><b>${items.length}</b></div><nav class="context-list" aria-label="客户端配置节点">${items.map((agent) => { const profiles = entries.filter((entry) => entry.agent_id === agent.id).reduce((total, entry) => total + (entry.profiles || []).length, 0); return `<a class="${state.data.accessAgent === agent.id ? "active" : ""}" href="#client-access" data-access-agent="${esc(agent.id)}"><i class="status-dot ${agent.status === "online" ? "ok" : ""}"></i><span><strong>${esc(agent.name)}</strong><small>${profiles ? `${profiles} 个客户端入站` : "尚无客户端配置"}</small></span></a>`; }).join("") || "<p>还没有节点</p>"}</nav>`;
   }
   if (state.route === "live-config") {
     const items = state.data.agents || [];
