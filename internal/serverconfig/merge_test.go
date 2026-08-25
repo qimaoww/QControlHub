@@ -93,7 +93,7 @@ func TestMergeGeneratedForcesCentralLogOutput(t *testing.T) {
 	}{
 		{core.EngineMihomo, "log-level: error\nlisteners: []\nrules: []\n", "log-level: info"},
 		{core.EngineXray, `{"log":{"loglevel":"error","access":"/var/log/xray-access.log"},"inbounds":[],"outbounds":[]}`, `"loglevel": "info"`},
-		{core.EngineSingBox, `{"log":{"level":"error","output":"/var/log/sing-box.log"},"inbounds":[],"outbounds":[]}`, `"level": "info"`},
+		{core.EngineSingBox, `{"log":{"level":"error","output":"/var/log/sing-box.log"},"inbounds":[],"outbounds":[]}`, `"level": "warn"`},
 	}
 	for _, fixture := range fixtures {
 		generated, err := Generate(fixture.engine, input)

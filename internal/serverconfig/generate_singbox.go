@@ -61,7 +61,7 @@ func generateSingBox(input Input) (string, error) {
 	}
 	root := map[string]any{
 		"$schema":   "https://sing-box.sagernet.org/schema.json",
-		"log":       map[string]any{"level": "info"},
+		"log":       map[string]any{"level": "warn"},
 		"inbounds":  []any{inbound},
 		"outbounds": []any{map[string]any{"type": "direct", "tag": "direct"}},
 	}

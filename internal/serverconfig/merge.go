@@ -83,7 +83,7 @@ func enforceCentralLogging(engine core.Engine, content string) (string, error) {
 	case core.EngineXray:
 		return configschema.MergeFragment(engine, content, "log", `{"loglevel":"info"}`, false)
 	case core.EngineSingBox:
-		return configschema.MergeFragment(engine, content, "log", `{"level":"info"}`, false)
+		return configschema.MergeFragment(engine, content, "log", `{"level":"warn"}`, false)
 	default:
 		return content, nil
 	}
