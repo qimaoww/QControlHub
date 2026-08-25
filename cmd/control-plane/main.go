@@ -57,10 +57,11 @@ func main() {
 		slog.Warn("remote PostgreSQL certificate verification is explicitly disabled")
 	}
 	configEncryptionKey := strings.TrimSpace(os.Getenv("QCH_CONFIG_ENCRYPTION_KEY"))
+	previousConfigEncryptionKeys := splitList(os.Getenv("QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS"))
 	if configEncryptionKey != "" {
 		slog.Info("configuration payloads will be encrypted at rest")
 	}
-	dataStore, err := store.OpenWithConfigKey(startupContext, databaseURL, allowInsecureDatabase, configEncryptionKey)
+	dataStore, err := store.OpenWithConfigKeyring(startupContext, databaseURL, allowInsecureDatabase, configEncryptionKey, previousConfigEncryptionKeys)
 	cancelStartup()
 	if err != nil {
 		slog.Error("open data store", "error", err)
@@ -153,6 +154,9 @@ func janitor(ctx context.Context, dataStore *store.Store) {
 			}
 			if err := dataStore.CleanupNonces(operationContext); err != nil {
 				slog.Error("clean signed-request nonces", "error", err)
+			}
+			if _, err := dataStore.CleanupExpiredEnrollmentTokens(operationContext); err != nil {
+				slog.Error("clean expired enrollment credentials", "error", err)
 			}
 			if _, err := dataStore.RecordAgentMetricSamples(operationContext, time.Now().UTC()); err != nil {
 				slog.Warn("record agent metric samples", "error", err)

@@ -657,7 +657,11 @@ async function nodeSettings(presetMode = false, { overview: preloadedOverview } 
     ]);
   if (request !== agentPageRequest || state.route !== expectedRoute) return;
   state.data.agents = agents;
-  if (!agents.some((agent) => agent.id === state.data.selectedAgent))
+  const detailAnchor =
+    !presetMode &&
+    (String(state.anchor || "").startsWith("settings-node-") ||
+      (String(state.anchor || "").startsWith("node-") && state.anchor !== "node-settings"));
+  if (!detailAnchor && !agents.some((agent) => agent.id === state.data.selectedAgent))
     state.data.selectedAgent = agents[0]?.id || "";
   const anchor = String(state.anchor || "");
   if (!presetMode) {
@@ -722,17 +726,20 @@ async function nodeSettings(presetMode = false, { overview: preloadedOverview } 
     tokens
       .map(
         (token) =>
-          `<article><div><strong>${esc(token.name)}</strong><small>${token.reusable ? `可重复安装 · 删除前长期有效 · 已安装 ${token.used_count} 次` : `有效至 ${date(token.expires_at)} · 已使用 ${token.used_count}/${token.max_uses} 次`}</small></div><button class="access-history-delete" type="button" data-delete-enrollment="${esc(token.id)}" aria-label="删除添加命令 ${esc(token.name)}">删除</button></article>`,
+          `<article><div><strong>${esc(token.name)}</strong><small>${token.reusable ? `可重复安装 · 删除前长期有效 · 已安装 ${token.used_count} 次` : `有效至 ${date(token.expires_at)} · 已使用 ${token.used_count}/${token.max_uses} 次`}</small></div><div class="access-history-actions">${token.command_available ? `<button class="button small" type="button" data-view-enrollment-record="${esc(token.id)}" aria-label="查看添加命令 ${esc(token.name)}">查看命令</button>` : ""}<button class="access-history-delete" type="button" data-delete-enrollment="${esc(token.id)}" aria-label="删除添加命令 ${esc(token.name)}">删除</button></div></article>`,
       )
       .join("") || "";
 
   const selectedAgent = agents.find(
     (agent) => agent.id === state.data.selectedAgent,
   );
-  const detailMode =
-    !presetMode && state.data.nodeView === "detail" && selectedAgent;
+  const detailRoute = !presetMode && state.data.nodeView === "detail";
+  const detailMode = detailRoute && Boolean(selectedAgent);
+  const detailMissing = detailRoute && !selectedAgent;
   const visibleAgents = detailMode
     ? [selectedAgent]
+    : detailMissing
+      ? []
     : presetMode
       ? selectedAgent
         ? [selectedAgent]
@@ -861,7 +868,7 @@ async function nodeSettings(presetMode = false, { overview: preloadedOverview } 
           <div class="node-settings-panels">
             <section id="${esc(tabID("cores-panel"))}" class="node-tab-panel node-cores-panel" data-node-panel="cores" role="tabpanel" aria-labelledby="${esc(tabID("cores-tab"))}" ${activeTab === "cores" ? "" : "hidden"}><header class="node-panel-heading"><div><h3>内核管理</h3><small>服务状态与版本</small></div><span data-installed-summary>${installedCount ? `${installedCount} 个已安装` : "尚未安装内核"}</span></header><div class="core-runtime-list">${services}</div></section>
             <section id="${esc(tabID("metrics-panel"))}" class="node-tab-panel node-metrics-panel" data-node-panel="metrics" role="tabpanel" aria-labelledby="${esc(tabID("metrics-tab"))}" ${activeTab === "metrics" ? "" : "hidden"}><header class="node-panel-heading"><div><h3>流量趋势</h3><small>最近 24 小时</small></div><span data-metric-text="stamp">${metrics.collected_at ? `采集于 ${ago(metrics.collected_at)}` : "等待资源数据"}</span></header><section class="metric-trend-empty" data-metric-history="${esc(agent.id)}" aria-label="暂无指标趋势"><span>⌁</span><b>正在载入指标趋势</b><small>节点上报指标后显示最近 24 小时的上下行速率。</small></section></section>
-            <section id="${esc(tabID("agent-panel"))}" class="node-tab-panel node-agent-panel" data-node-panel="agent" role="tabpanel" aria-labelledby="${esc(tabID("agent-tab"))}" ${activeTab === "agent" ? "" : "hidden"}><header class="node-panel-heading"><div><h3>Agent 与身份</h3><small>注册信息和安全通道</small></div><span data-agent-version>${esc(agent.version || "未知")}</span></header><dl class="identity-list node-identity-list"><div><dt>节点 ID</dt><dd><code>${esc(agent.id)}</code></dd></div><div><dt>系统平台</dt><dd>${esc(agent.os)} / ${esc(agent.arch)}</dd></div><div><dt>Agent 版本</dt><dd data-agent-version>${esc(agent.version || "未知")}</dd></div><div><dt>注册时间</dt><dd>${date(agent.enrolled_at)}</dd></div><div><dt>安全通道</dt><dd>WSS · Ed25519 签名</dd></div></dl><section class="node-public-ips" aria-label="公网地址"><header><b>公网地址 · 双栈</b><small>手动设置优先 · 出口探测 · 默认路由接口 · 已验证连接来源</small><small class="node-address-note" data-node-connection-address ${connectionAddressNote ? "" : "hidden"}>${esc(connectionAddressNote)}</small></header>${addressRows.map((row) => `<div class="public-ip-row ${row.ok ? "" : "empty"}" data-ip-family="${row.cls}" data-ip-source="${esc(row.source)}" ${row.value ? "" : "hidden"}><span class="ip-family ${row.cls}">${row.label}</span><code>${esc(row.value || "未探测到")}</code><small>${esc(row.source)}</small></div>`).join("")}</section>${labels ? `<div class="labels">${labels}</div>` : ""}<footer class="node-identity-refresh"><span>节点身份已验证</span><div></div></footer>${can("agents.manage") ? `<section class="node-danger-zone"><span><b>删除节点</b><small>断开节点并清理关联配置；QAgent 不会被远程卸载。</small></span><button class="button small danger-button" type="button" data-delete="${esc(agent.id)}">删除节点</button></section>` : ""}</section>
+          <section id="${esc(tabID("agent-panel"))}" class="node-tab-panel node-agent-panel" data-node-panel="agent" role="tabpanel" aria-labelledby="${esc(tabID("agent-tab"))}" ${activeTab === "agent" ? "" : "hidden"}><header class="node-panel-heading"><div><h3>Agent 与身份</h3><small>注册信息和安全通道</small></div><span data-agent-version>${esc(agent.version || "未知")}</span></header><dl class="identity-list node-identity-list"><div><dt>节点 ID</dt><dd><code>${esc(agent.id)}</code></dd></div><div><dt>系统平台</dt><dd>${esc(agent.os)} / ${esc(agent.arch)}</dd></div><div><dt>Agent 版本</dt><dd data-agent-version>${esc(agent.version || "未知")}</dd></div><div><dt>注册时间</dt><dd>${date(agent.enrolled_at)}</dd></div><div><dt>安全通道</dt><dd>WSS · Ed25519 签名</dd></div></dl><section class="node-public-ips" aria-label="公网地址"><header><b>公网地址 · 双栈</b><small>手动设置优先 · 出口探测 · 默认路由接口 · 已验证连接来源</small><small class="node-address-note" data-node-connection-address ${connectionAddressNote ? "" : "hidden"}>${esc(connectionAddressNote)}</small></header>${addressRows.map((row) => `<div class="public-ip-row ${row.ok ? "" : "empty"}" data-ip-family="${row.cls}" data-ip-source="${esc(row.source)}" ${row.value ? "" : "hidden"}><span class="ip-family ${row.cls}">${row.label}</span><code>${esc(row.value || "未探测到")}</code><small>${esc(row.source)}</small></div>`).join("")}</section>${labels ? `<div class="labels">${labels}</div>` : ""}<footer class="node-identity-refresh"><span>节点身份已验证</span><div>${can("enrollment.manage") && agent.enrollment_command_available ? `<button class="button small" type="button" data-view-enrollment-command="${esc(agent.id)}">查看安装部署命令</button>` : ""}</div></footer>${can("agents.manage") ? `<section class="node-danger-zone"><span><b>删除节点</b><small>断开节点并清理关联配置；QAgent 不会被远程卸载。</small></span><button class="button small danger-button" type="button" data-delete="${esc(agent.id)}">删除节点</button></section>` : ""}</section>
           </div>
         </section>`;
       }
@@ -908,7 +915,7 @@ async function nodeSettings(presetMode = false, { overview: preloadedOverview } 
     .join("");
 
   const batch =
-    !presetMode && !detailMode && agents.length > 1 && can("operator")
+    !presetMode && !detailRoute && agents.length > 1 && can("operator")
       ? `<details class="node-batch-panel"><summary><span><b>批量操作</b><small>全选仅包含当前列表中可执行所选动作的节点</small></span><i>＋</i></summary><form class="batch-toolbar" id="batch-form"><div class="batch-selection-head"><label class="batch-select-all"><input type="checkbox" data-batch-select-all aria-label="全选当前合格节点" aria-checked="false"><span data-batch-select-all-label>全选</span></label><strong data-batch-count aria-live="polite">已选择 0 个节点</strong></div><fieldset class="batch-node-options"><legend>当前节点范围</legend>${agents.map((agent) => `<label class="batch-select" title="选择此节点参与批量操作"><input type="checkbox" data-batch-checkbox value="${esc(agent.id)}" aria-label="选择 ${esc(agent.name)} 参与批量操作"><span><b>${esc(agent.name)}</b><small data-batch-eligibility>${agent.status === "online" ? "在线" : "离线"}</small></span></label>`).join("")}</fieldset><div class="batch-controls"><label>动作<select name="action"><option value="upgrade-agent">批量更新 Agent</option><option value="restart">重启服务</option><option value="status">查询状态</option><option value="start">启动服务</option><option value="stop">停止服务</option></select></label><label data-batch-engine-wrap>内核<select name="engine">${engines.map((engine) => `<option value="${engine}">${esc(engineName(engine))}</option>`).join("")}</select></label><button class="button small" type="submit" disabled>执行</button><button class="button small" type="button" data-batch-clear disabled>清空选择</button></div><section class="batch-results" data-batch-results aria-live="polite" hidden></section></form></details>`
       : "";
   const onlineAgents = agents.filter(
@@ -923,18 +930,24 @@ async function nodeSettings(presetMode = false, { overview: preloadedOverview } 
     : "";
   const pageIntro = presetMode
     ? ""
-    : !detailMode && agents.length
+    : !detailRoute && agents.length
       ? `<header class="node-page-intro"><div><p class="eyebrow">节点设置</p><h2>全部节点</h2><p>每个节点的资源占用与内核状态一屏总览；点击卡片进入管理台，拖动卡片左侧手柄调整顺序。</p></div><span class="node-intro-live"><i class="status-dot ${introTone}"></i>${agents.length} 个节点 · ${onlineAgents} 在线</span></header>`
-      : !detailMode
+      : !detailRoute
         ? `<header class="node-page-intro"><div><p class="eyebrow">节点设置</p><h2>全部节点</h2><p>${can("enrollment.manage") ? "使用页面顶栏的“添加节点”生成部署命令；" : "当前账号没有添加节点权限；"}节点上线后即可在这里管理 Agent、内核与运行状态。</p></div></header>`
       : "";
+  const detailMissingState = detailMissing
+    ? '<section class="node-settings-missing" data-node-missing role="status"><strong>节点不可用</strong><p>该节点已删除、撤销或不再属于当前作用域。</p><a class="button small" href="#node-settings">返回全部节点</a></section>'
+    : "";
+  const pageBody = detailMissingState || (nodeCards
+    ? `<section class="${presetMode ? "machine-stack" : detailMode ? "node-settings-stack" : "node-card-grid"}">${nodeCards}</section>`
+    : '<div class="empty large"><strong>还没有节点</strong><p>点击上方“添加节点”生成部署命令。</p></div>');
   shell(
-    `${pageIntro}${presetMode ? "" : `<div class="node-settings-page">${batch}${detailMode ? `<a class="node-back-link" href="#node-settings">← 全部节点</a>` : ""}`}${nodeCards ? `<section class="${presetMode ? "machine-stack" : detailMode ? "node-settings-stack" : "node-card-grid"}">${nodeCards}</section>` : '<div class="empty large"><strong>还没有节点</strong><p>点击上方“添加节点”生成部署命令。</p></div>'}${presetMode ? "" : "</div>"}`,
+    `${pageIntro}${presetMode ? "" : `<div class="node-settings-page">${batch}${detailRoute ? `<a class="node-back-link" href="#node-settings">← 全部节点</a>` : ""}`}${pageBody}${presetMode ? "" : "</div>"}`,
     presetMode ? "内核配置预设" : "节点设置",
     {
       viewKey: presetMode
         ? `preset-${state.data.selectedAgent || "empty"}`
-        : detailMode
+        : detailRoute
           ? `node-settings-${state.data.selectedAgent || "empty"}`
           : "node-settings-overview",
     },
@@ -1196,17 +1209,6 @@ function bindAgentPage(agentItems, presetMode = false, enrollmentHistory = {}) {
           button.textContent = "需重新安装 Agent";
         }
       });
-      if (!presetMode && can("enrollment.manage")) {
-        const actions = item.querySelector(".node-identity-refresh > div");
-        if (actions && !actions.querySelector("[data-reinstall-agent]")) {
-          const button = document.createElement("button");
-          button.type = "button";
-          button.className = "button small";
-          button.dataset.reinstallAgent = agent.id;
-          button.textContent = "生成新安装命令";
-          actions.append(button);
-        }
-      }
       machineFooter?.remove();
       if (agent) updateAgentMetrics(agent);
       if (item instanceof HTMLDetailsElement) {
@@ -1585,9 +1587,7 @@ function bindAgentPage(agentItems, presetMode = false, enrollmentHistory = {}) {
             method: "POST",
             body: JSON.stringify({ name }),
           });
-          const escapedToken = created.token.replaceAll("'", "'\\''");
-          const escapedName = name.replaceAll("'", "'\\''");
-          const command = `curl -fsSL -H 'X-QControlHub-Enrollment: ${escapedToken}' ${location.origin}/install-agent.sh | sudo sh -s -- ${location.origin} '${escapedToken}' '${escapedName}'`;
+          const command = enrollmentInstallCommand(created);
           close();
           showCommand(command, async () => {
             try {
@@ -1599,6 +1599,7 @@ function bindAgentPage(agentItems, presetMode = false, enrollmentHistory = {}) {
         },
       });
   });
+  bindEnrollmentRecordButtons(document);
   document
     .querySelectorAll("[data-agent-refresh]")
     .forEach((button) => (button.onclick = () => pollAgentMetrics()));
@@ -1618,26 +1619,14 @@ function bindAgentPage(agentItems, presetMode = false, enrollmentHistory = {}) {
       if (task) location.hash = "#tasks";
     };
   });
-  document.querySelectorAll("[data-reinstall-agent]").forEach((button) => {
+  document.querySelectorAll("[data-view-enrollment-command]").forEach((button) => {
     button.onclick = async () => {
-      if (
-        !(await confirmAction(
-          "确定为这个节点生成新的 Agent 部署命令？已有命令继续有效；本操作只生成可复制命令，不会自动执行。",
-          "生成安装命令",
-        ))
-      )
-        return;
       try {
         const created = await api(
-          `/agents/${encodeURIComponent(button.dataset.reinstallAgent)}/enrollment-token`,
+          `/agents/${encodeURIComponent(button.dataset.viewEnrollmentCommand)}/enrollment-command`,
           { method: "POST" },
         );
-        const escapedToken = created.token.replaceAll("'", "'\\''");
-        const escapedName = created.name.replaceAll("'", "'\\''");
-        const command = `curl -fsSL -H 'X-QControlHub-Enrollment: ${escapedToken}' ${location.origin}/install-agent.sh | sudo sh -s -- ${location.origin} '${escapedToken}' '${escapedName}'`;
-        showCommand(command, async () => {
-          try { await refreshAgentPage(); } catch (error) { notify(error.message, "error"); }
-        }, "复制 Agent 安装命令");
+        showCommand(enrollmentInstallCommand(created), null, "复制 Agent 安装命令");
       } catch (error) {
         notify(error.message, "error");
       }
@@ -1772,6 +1761,17 @@ function updateAgentMetrics(item) {
     `[data-agent-metrics="${CSS.escape(item.id)}"]`,
   );
   if (!root) return;
+  if (
+    typeof root.matches === "function" &&
+    root.matches(".node-operations-workspace")
+  ) {
+    const commandShouldExist =
+      can("enrollment.manage") && Boolean(item.enrollment_command_available);
+    const commandExists = Boolean(
+      root.querySelector("[data-view-enrollment-command]"),
+    );
+    if (commandShouldExist !== commandExists) requestAgentStructureRefresh();
+  }
   const metrics = item.metrics || {};
   const setText = (name, value) => {
     const element = root.querySelector(`[data-metric-text="${name}"]`);
@@ -1947,6 +1947,13 @@ async function pollAgentMetrics() {
         // must not inherit the stale state that preceded an Agent upgrade.
         state.data.agents = items;
         syncActiveBatchSnapshot?.(items);
+        if (
+          state.data.nodeView === "detail" &&
+          !items.some((item) => item.id === state.data.selectedAgent)
+        ) {
+          requestAgentStructureRefresh();
+          return;
+        }
         cardInteractions.defer(() => {
           items.forEach(updateAgentMetrics);
           const online = items.filter((item) => item.status === "online").length;
@@ -2275,12 +2282,42 @@ function bindModalLifecycle(wrap, onClose) {
   return close;
 }
 
+function bindEnrollmentRecordButtons(root, closeParent) {
+  root.querySelectorAll("[data-view-enrollment-record]").forEach((button) => {
+    if (button.dataset.bound === "1") return;
+    button.dataset.bound = "1";
+    button.onclick = async () => {
+      if (button.dataset.loading === "1") return;
+      button.dataset.loading = "1";
+      button.disabled = true;
+      try {
+        const created = await api(
+          `/enrollment-tokens/${encodeURIComponent(button.dataset.viewEnrollmentRecord)}/command`,
+          { method: "POST" },
+        );
+        closeParent?.();
+        showCommand(
+          enrollmentInstallCommand(created),
+          () => document.querySelector("[data-open-enrollment]")?.focus(),
+          "复制 Agent 安装命令",
+        );
+      } catch (error) {
+        notify(error.message, "error");
+      } finally {
+        button.dataset.loading = "";
+        button.disabled = false;
+      }
+    };
+  });
+}
+
 function showEnrollmentDialog({ tokenRows, tokenCount, onDelete, onSubmit }) {
   const wrap = document.createElement("div");
   wrap.className = "modal-backdrop";
-  wrap.innerHTML = `<section class="deploy-command-modal enrollment-dialog" role="dialog" aria-modal="true" aria-labelledby="enrollment-dialog-title" aria-describedby="enrollment-dialog-description"><header class="deploy-command-head"><span class="deploy-command-icon" aria-hidden="true">＋</span><div><p class="eyebrow">添加节点</p><h2 id="enrollment-dialog-title">生成 Agent 部署命令</h2><p id="enrollment-dialog-description">为一台新节点生成长期有效的 enrollment 凭据；命令只会显示供复制，浏览器绝不会执行。</p></div><button class="deploy-command-close" type="button" data-close aria-label="关闭添加节点弹窗">×</button></header><div class="deploy-command-body enrollment-dialog-body"><form class="enrollment-dialog-form"><label>节点名称<input name="name" maxlength="100" required autocomplete="off" placeholder="例如 shanghai-edge-01"></label><p class="enrollment-security-note"><b>凭据仅在生成后显示一次</b><span>新命令在删除前长期有效；生成新命令后，已有安装命令会继续有效，已有命令继续有效。</span></p><footer class="enrollment-form-actions"><button class="button" type="button" data-close>取消</button><button class="button primary" type="submit">生成部署命令</button></footer></form><section class="enrollment-history" aria-labelledby="enrollment-history-title"><header><div><b id="enrollment-history-title">添加记录</b><small>删除记录只会立即撤销对应凭据，不会删除已注册节点或卸载 Agent。</small></div><span data-enrollment-history-count>${tokenCount || 0}</span></header><div data-enrollment-history-list>${tokenRows || '<p class="enrollment-history-empty">暂无添加记录</p>'}</div></section></div></section>`;
+  wrap.innerHTML = `<section class="deploy-command-modal enrollment-dialog" role="dialog" aria-modal="true" aria-labelledby="enrollment-dialog-title" aria-describedby="enrollment-dialog-description"><header class="deploy-command-head"><span class="deploy-command-icon" aria-hidden="true">＋</span><div><p class="eyebrow">添加节点</p><h2 id="enrollment-dialog-title">生成 Agent 部署命令</h2><p id="enrollment-dialog-description">为一台新节点生成长期有效的 enrollment 凭据；命令只会显示供复制，浏览器绝不会执行。</p></div><button class="deploy-command-close" type="button" data-close aria-label="关闭添加节点弹窗">×</button></header><div class="deploy-command-body enrollment-dialog-body"><form class="enrollment-dialog-form"><label>节点名称<input name="name" maxlength="100" required autocomplete="off" placeholder="例如 shanghai-edge-01"></label><p class="enrollment-security-note"><b>命令生成后可重复查看</b><span>凭据由控制面受保护保存；删除、撤销或到期后立即失效，普通页面不会显示命令正文。</span></p><footer class="enrollment-form-actions"><button class="button" type="button" data-close>取消</button><button class="button primary" type="submit">生成部署命令</button></footer></form><section class="enrollment-history" aria-labelledby="enrollment-history-title"><header><div><b id="enrollment-history-title">添加记录</b><small>删除记录只会立即撤销对应凭据，不会删除已注册节点或卸载 Agent。</small></div><span data-enrollment-history-count>${tokenCount || 0}</span></header><div data-enrollment-history-list>${tokenRows || '<p class="enrollment-history-empty">暂无添加记录</p>'}</div></section></div></section>`;
   document.body.append(wrap);
   const close = bindModalLifecycle(wrap);
+  bindEnrollmentRecordButtons(wrap, close);
   wrap.querySelectorAll("[data-delete-enrollment]").forEach((button) => {
     button.onclick = async () => {
       if (button.dataset.confirmDelete !== "1") {
@@ -2328,10 +2365,19 @@ function showEnrollmentDialog({ tokenRows, tokenCount, onDelete, onSubmit }) {
   wrap.querySelector("input").focus();
 }
 
-function showCommand(command, onClose, heading = "一键添加 QAgent 节点") {
+function enrollmentInstallCommand(created) {
+  const token = String(created?.token || "");
+  const name = String(created?.name || "");
+  if (!token || !name) throw new Error("当前节点没有可恢复的部署命令");
+  const escapedToken = token.replaceAll("'", "'\\''");
+  const escapedName = name.replaceAll("'", "'\\''");
+  return `curl -fsSL -H 'X-QControlHub-Enrollment: ${escapedToken}' ${location.origin}/install-agent.sh | sudo sh -s -- ${location.origin} '${escapedToken}' '${escapedName}'`;
+}
+
+function showCommand(command, onClose, heading = "复制 QAgent 部署命令") {
   const wrap = document.createElement("div");
   wrap.className = "modal-backdrop";
-  wrap.innerHTML = `<section class="deploy-command-modal" role="dialog" aria-modal="true" aria-labelledby="deploy-command-title" aria-describedby="deploy-command-description"><header class="deploy-command-head"><span class="deploy-command-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m7 8 4 4-4 4M13 16h4"/></svg></span><div><p class="eyebrow">Agent 部署命令</p><h2 id="deploy-command-title">${esc(heading)}</h2><p id="deploy-command-description">命令仅供复制；关闭页面不会连接、安装或重启任何节点。</p></div><button class="deploy-command-close" type="button" data-close aria-label="关闭部署命令弹窗">×</button></header><div class="deploy-command-body"><div class="deploy-command-notice"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.6 2.8 8.1 7 10 4.2-1.9 7-5.4 7-10V6l-7-3Z"/><path d="m9.5 12 1.7 1.7 3.5-3.7"/></svg><span><b>凭据仅在此处显示一次</b><small>请安全复制并妥善保存；命令在对应添加记录被删除前长期有效，控制台不会自动执行或保存命令正文。</small></span></div><section class="deploy-command-shell" aria-label="Agent 安装命令"><header><span><i></i>Terminal</span><small>只读复制模式</small></header><div><span class="deploy-command-prompt" aria-hidden="true">$</span><textarea class="deploy-command-input" rows="5" readonly spellcheck="false" aria-label="Agent 安装命令" data-command>${esc(command)}</textarea></div></section></div><footer class="deploy-command-actions"><span>复制后请在目标 Linux 节点自行执行</span><div><button class="button" type="button" data-close>关闭</button><button class="button primary deploy-command-copy" type="button" data-copy-command><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2v8a2 2 0 0 0 2 2h2"/></svg><span data-copy-label>复制部署命令</span></button></div></footer></section>`;
+  wrap.innerHTML = `<section class="deploy-command-modal" role="dialog" aria-modal="true" aria-labelledby="deploy-command-title" aria-describedby="deploy-command-description"><header class="deploy-command-head"><span class="deploy-command-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m7 8 4 4-4 4M13 16h4"/></svg></span><div><p class="eyebrow">Agent 部署命令</p><h2 id="deploy-command-title">${esc(heading)}</h2><p id="deploy-command-description">命令仅供复制；关闭页面不会连接、安装或重启任何节点。</p></div><button class="deploy-command-close" type="button" data-close aria-label="关闭部署命令弹窗">×</button></header><div class="deploy-command-body"><div class="deploy-command-notice"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.6 2.8 8.1 7 10 4.2-1.9 7-5.4 7-10V6l-7-3Z"/><path d="m9.5 12 1.7 1.7 3.5-3.7"/></svg><span><b>命令可重复查看</b><small>凭据由控制面受保护保存；对应添加记录被删除、撤销或到期后立即失效，普通页面不会显示命令正文。</small></span></div><section class="deploy-command-shell" aria-label="Agent 安装命令"><header><span><i></i>Terminal</span><small>只读复制模式</small></header><div><span class="deploy-command-prompt" aria-hidden="true">$</span><textarea class="deploy-command-input" rows="5" readonly spellcheck="false" aria-label="Agent 安装命令" data-command>${esc(command)}</textarea></div></section></div><footer class="deploy-command-actions"><span>复制后请在目标 Linux 节点自行执行</span><div><button class="button" type="button" data-close>关闭</button><button class="button primary deploy-command-copy" type="button" data-copy-command><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2v8a2 2 0 0 0 2 2h2"/></svg><span data-copy-label>复制部署命令</span></button></div></footer></section>`;
   document.body.append(wrap);
   const copyButton = wrap.querySelector("[data-copy-command]");
   const commandInput = wrap.querySelector("[data-command]");

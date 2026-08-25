@@ -61,6 +61,7 @@ type Server struct {
 	sessionTTL      time.Duration
 	connectionsMu   sync.Mutex
 	connections     map[string]liveConnection
+	auditWriter     func(context.Context, core.AuditLogEntry) error
 }
 
 type tokenPrincipal struct {
@@ -194,6 +195,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/config-catalogs/{engine}", s.requirePermission(core.PermissionCatalogsRead, http.HandlerFunc(s.configCatalog)))
 	mux.Handle("DELETE /api/v1/agents/{id}", s.requirePermission(core.PermissionAgentsManage, http.HandlerFunc(s.deleteAgent)))
 	mux.Handle("POST /api/v1/agents/{id}/enrollment-token", s.requirePermission(core.PermissionEnrollmentManage, http.HandlerFunc(s.createAgentEnrollmentToken)))
+	mux.Handle("POST /api/v1/agents/{id}/enrollment-command", s.requirePermission(core.PermissionEnrollmentManage, http.HandlerFunc(s.getAgentEnrollmentCommand)))
 	mux.Handle("GET /api/v1/agents/{id}/configs", s.requirePermission(core.PermissionAgentConfigRead, http.HandlerFunc(s.listAgentConfigs)))
 	mux.Handle("GET /api/v1/agents/{id}/configs/{engine}", s.requirePermission(core.PermissionAgentConfigRead, http.HandlerFunc(s.getAgentConfig)))
 	mux.Handle("PUT /api/v1/agents/{id}/configs/{engine}", s.requirePermission(core.PermissionAgentConfigWrite, http.HandlerFunc(s.putAgentConfig)))
@@ -221,6 +223,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/enrollment-tokens", s.requirePermission(core.PermissionEnrollmentManage, http.HandlerFunc(s.listEnrollmentTokens)))
 	mux.Handle("POST /api/v1/enrollment-tokens", s.requirePermission(core.PermissionEnrollmentManage, http.HandlerFunc(s.createEnrollmentToken)))
 	mux.Handle("DELETE /api/v1/enrollment-tokens/{id}", s.requirePermission(core.PermissionEnrollmentManage, http.HandlerFunc(s.deleteEnrollmentToken)))
+	mux.Handle("POST /api/v1/enrollment-tokens/{id}/command", s.requirePermission(core.PermissionEnrollmentManage, http.HandlerFunc(s.getEnrollmentCommand)))
 	mux.Handle("GET /api/v1/settings", s.requirePermission(core.PermissionSettingsRead, http.HandlerFunc(s.getSettings)))
 	mux.Handle("PUT /api/v1/settings", s.requirePermission(core.PermissionSettingsManage, http.HandlerFunc(s.putSettings)))
 	mux.Handle("GET /api/v1/audit", s.requirePermission(core.PermissionAuditRead, http.HandlerFunc(s.listAudit)))
@@ -283,6 +286,20 @@ func (s *Server) listAgents(w http.ResponseWriter, request *http.Request) {
 	if !roleOK || !permissionsOK || (!role.Allows(core.PermissionMetricsRead) && !core.HasPermission(permissions, core.PermissionMetricsRead)) {
 		for index := range agents {
 			agents[index].Metrics = core.HostMetrics{}
+		}
+	}
+	if roleOK && permissionsOK && (role.Allows(core.PermissionEnrollmentManage) || core.HasPermission(permissions, core.PermissionEnrollmentManage)) {
+		ids := make([]string, 0, len(agents))
+		for _, agent := range agents {
+			ids = append(ids, agent.ID)
+		}
+		available, availabilityErr := s.store.ListEnrollmentCommandAvailability(request.Context(), ids)
+		if availabilityErr != nil {
+			slog.Warn("enrollment command availability unavailable", "error", availabilityErr)
+		} else {
+			for index := range agents {
+				agents[index].EnrollmentCommandAvailable = available[agents[index].ID]
+			}
 		}
 	}
 	writeJSON(w, http.StatusOK, agents)
@@ -584,17 +601,64 @@ func (s *Server) createEnrollmentToken(w http.ResponseWriter, request *http.Requ
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	created, err := s.store.CreateEnrollmentToken(request.Context(), core.EnrollmentTokenRequest{
-		Name:     input.Name,
-		Reusable: true,
-	})
+	requestData := core.EnrollmentTokenRequest{Name: input.Name, Reusable: true}
+	var created core.EnrollmentTokenCreated
+	var err error
+	if s.auditWriter == nil {
+		created, err = s.store.CreateProtectedEnrollmentTokenWithAudit(request.Context(), requestData,
+			s.auditEntry(request, "enrollment_token.created", "", input.Name))
+	} else {
+		created, err = s.store.CreateProtectedEnrollmentToken(request.Context(), requestData)
+		if err == nil {
+			auditErr := s.recordAuditSync(request, "enrollment_token.created", created.ID, created.Name)
+			if auditErr != nil {
+				err = fmt.Errorf("%w: %v", store.ErrAuditUnavailable, auditErr)
+				if cleanupErr := s.discardEnrollmentToken(created.ID); cleanupErr != nil {
+					slog.Error("enrollment credential cleanup after audit failure", "error", cleanupErr)
+				}
+			}
+		}
+	}
+	if err != nil {
+		if errors.Is(err, store.ErrAuditUnavailable) {
+			writeError(w, http.StatusServiceUnavailable, "audit unavailable; enrollment credential was not disclosed")
+		} else {
+			writeStoreError(w, err)
+		}
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusCreated, created)
+}
+
+func (s *Server) getAgentEnrollmentCommand(w http.ResponseWriter, request *http.Request) {
+	created, err := s.store.EnrollmentCommandForAgent(request.Context(), request.PathValue("id"))
 	if err != nil {
 		writeStoreError(w, err)
 		return
 	}
-	s.recordAudit(request, "enrollment_token.created", created.ID, created.Name)
+	if err := s.recordAuditSync(request, "agent.enrollment_command.viewed", request.PathValue("id"), created.ID); err != nil {
+		writeError(w, http.StatusServiceUnavailable, "audit unavailable; enrollment credential was not disclosed")
+		return
+	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, http.StatusCreated, created)
+	w.Header().Set("Pragma", "no-cache")
+	writeJSON(w, http.StatusOK, created)
+}
+
+func (s *Server) getEnrollmentCommand(w http.ResponseWriter, request *http.Request) {
+	created, err := s.store.EnrollmentCommandByID(request.Context(), request.PathValue("id"))
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	if err := s.recordAuditSync(request, "enrollment_token.command_viewed", created.ID, created.AgentID); err != nil {
+		writeError(w, http.StatusServiceUnavailable, "audit unavailable; enrollment credential was not disclosed")
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Pragma", "no-cache")
+	writeJSON(w, http.StatusOK, created)
 }
 
 func (s *Server) deleteEnrollmentToken(w http.ResponseWriter, request *http.Request) {
@@ -607,14 +671,40 @@ func (s *Server) deleteEnrollmentToken(w http.ResponseWriter, request *http.Requ
 }
 
 func (s *Server) createAgentEnrollmentToken(w http.ResponseWriter, request *http.Request) {
-	created, err := s.store.CreateAgentEnrollmentToken(request.Context(), request.PathValue("id"))
+	agentID := request.PathValue("id")
+	var created core.EnrollmentTokenCreated
+	var err error
+	if s.auditWriter == nil {
+		created, err = s.store.CreateAgentEnrollmentTokenWithAudit(request.Context(), agentID,
+			s.auditEntry(request, "agent.enrollment_token.created", agentID, ""))
+	} else {
+		created, err = s.store.CreateAgentEnrollmentToken(request.Context(), agentID)
+		if err == nil {
+			auditErr := s.recordAuditSync(request, "agent.enrollment_token.created", agentID, created.ID)
+			if auditErr != nil {
+				err = fmt.Errorf("%w: %v", store.ErrAuditUnavailable, auditErr)
+				if cleanupErr := s.discardEnrollmentToken(created.ID); cleanupErr != nil {
+					slog.Error("enrollment credential cleanup after audit failure", "error", cleanupErr)
+				}
+			}
+		}
+	}
 	if err != nil {
-		writeStoreError(w, err)
+		if errors.Is(err, store.ErrAuditUnavailable) {
+			writeError(w, http.StatusServiceUnavailable, "audit unavailable; enrollment credential was not disclosed")
+		} else {
+			writeStoreError(w, err)
+		}
 		return
 	}
-	s.recordAudit(request, "agent.enrollment_token.created", request.PathValue("id"), created.ID)
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusCreated, created)
+}
+
+func (s *Server) discardEnrollmentToken(id string) error {
+	cleanupContext, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	return s.store.DeleteEnrollmentToken(cleanupContext, id)
 }
 
 func (s *Server) enrollAgent(w http.ResponseWriter, request *http.Request) {
@@ -1191,6 +1281,10 @@ func writeStoreError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusConflict, err.Error())
 	case errors.Is(err, store.ErrInvalid):
 		writeError(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, store.ErrSecretUnavailable):
+		writeError(w, http.StatusServiceUnavailable, "protected enrollment credential is unavailable")
+	case errors.Is(err, store.ErrAuditUnavailable):
+		writeError(w, http.StatusServiceUnavailable, "audit unavailable; enrollment credential was not disclosed")
 	default:
 		writeInternalError(w, err)
 	}

@@ -28,10 +28,13 @@ QCH_BIND_ADDRESS=127.0.0.1
 QCH_PORT=8080
 POSTGRES_PORT=5432
 QCH_CORS_ORIGINS=https://qcontrolhub.example.com
-# 可选：配置正文与修订的 AES-256-GCM 落盘加密密钥（任意非空字符串）。
-# 开启后旧明文行仍可透明读取，新写入自动加密；密钥丢失将无法解密，务必备份。
+# 可恢复添加节点命令必须配置；同时保护配置正文与修订（请使用独立高熵 secret）。
+# 旧明文行仍可透明读取，新写入自动加密；密钥丢失将无法解密，务必备份。
 QCH_CONFIG_ENCRYPTION_KEY=replace-with-a-long-random-secret
+QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS=
 ```
+
+`deploy/quick-start.sh -f` 会在生成新的当前密钥前，把原 `QCH_CONFIG_ENCRYPTION_KEY` 按新到旧顺序置于 `QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS` 最前，并保留已有条目，因此不会静默丢失仍需读取的旧密文；确认旧数据已迁移或删除后再清理旧密钥。
 
 `QCH_CORS_ORIGINS` 仅在浏览器从另一个 origin 调用 JSON API 时需要；使用同域 Web 控制台可以留空。官方拓扑包含宿主 Nginx 与 `qcontrol-web` 两跳代理：控制面直接看到固定的 `QCH_WEB_PROXY_ADDRESS`，转发链中真实客户端右侧还包含固定的 `QCH_CONTROL_PROXY_GATEWAY`。`QCH_TRUSTED_PROXY_CIDRS` 必须只列出这两个精确 `/32` 端点，控制面才能从右向左安全剥离完整代理链，同时忽略客户端伪造在链左侧的值。若网段冲突，subnet、gateway、两个容器地址及信任列表必须一起修改，禁止改成整个私网或任意来源网段。若手工设置 PostgreSQL 密码，必须对 URL 保留字符进行百分号编码；`make init-env` 生成的十六进制密码可直接用于 Compose URL。
 
@@ -115,7 +118,7 @@ sudo sh deploy/bootstrap-core-services.sh
 
 TLS 入站默认引用 `/etc/qcontrolhub/tls/server.crt` 与 `/etc/qcontrolhub/tls/server.key`。QControlHub 不代替 ACME 或站点证书管理；使用 TLS、TUIC、Hysteria2、Trojan 或 AnyTLS 前，应把适用的证书链和私钥安装到这两个路径（私钥权限建议 `0600`），或在方案表单中改为站点的既有绝对路径。
 
-如果文件是从另一台构建主机复制来的，请把示例文件的本地路径替换为实际路径。先登录控制台，在“远程节点”页为目标节点生成添加命令；原始凭证只显示一次，可重复安装，直到删除对应的添加记录。然后编辑 `/etc/qcontrolhub/agent.env`：
+如果文件是从另一台构建主机复制来的，请把示例文件的本地路径替换为实际路径。先登录控制台，在“远程节点”页为目标节点生成添加命令；凭据由控制面以摘要认证并保存受保护的 AEAD 可恢复副本，有权限操作者可在有效期内重复查看和复制，直到删除、撤销或到期。然后编辑 `/etc/qcontrolhub/agent.env`：
 
 - `QCH_SERVER_URL` 应使用控制面的 `wss://` origin；Agent 会从同一 origin 派生首次注册所需的 HTTPS 地址。
 - 公网可信证书无需额外配置；私有 CA 或自签名证书必须复制为 root 所有的普通 PEM 文件，并通过 `QCH_TLS_CA_FILE` 指定绝对路径。Agent 不提供跳过证书验证的模式。

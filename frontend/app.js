@@ -523,7 +523,7 @@ function shell(content, title, { viewKey = state.route } = {}) {
       : state.route === "agents"
         ? ""
         : state.route === "node-settings"
-          ? can("enrollment.manage")
+          ? state.data.nodeView !== "detail" && can("enrollment.manage")
             ? '<button class="button small" type="button" data-open-enrollment>添加节点</button>'
             : ""
           : state.route === "client-access"
@@ -749,6 +749,13 @@ async function renderOnce() {
   if (hash.startsWith("preset-node-")) state.data.selectedAgent = hash.slice(12);
   if (hash.startsWith("settings-node-")) state.data.selectedAgent = hash.slice(14);
   if (hash.startsWith("node-")) state.data.selectedAgent = hash.slice(5);
+  if (
+    state.route === "node-settings" &&
+    (hash.startsWith("settings-node-") ||
+      (hash.startsWith("node-") && hash !== "node-settings"))
+  ) {
+    document.querySelectorAll("[data-open-enrollment], .node-batch-panel").forEach((element) => element.remove());
+  }
   if (hash.startsWith("config-")) state.data.archiveConfigId = hash.slice(7);
   try {
     if (!state.session && !(await ensureSession())) {

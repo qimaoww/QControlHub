@@ -43,7 +43,7 @@ func TestSPAConsoleSurfaceMatchesInitialRelease(t *testing.T) {
 		`"client-access"`, `"live-config"`, `"archive-config"`,
 		`machine-workspace`, `server-plan-form`, `field-form`,
 		`revision-timeline`, `task-timeline`, `settings-section`,
-		`node-settings`, `内核配置预设`, `node-settings-tabs`, `复制 Agent 安装命令`,
+		`node-settings`, `内核配置预设`, `node-settings-tabs`, `查看安装部署命令`, `复制 Agent 安装命令`,
 	} {
 		if !strings.Contains(content, required) {
 			t.Errorf("SPA is missing initial console surface %q", required)
@@ -54,7 +54,7 @@ func TestSPAConsoleSurfaceMatchesInitialRelease(t *testing.T) {
 		`app.style.display = "contents"`, `X-QControlHub-Enrollment`,
 		`/install-agent.sh`, `执行记录`, `手动配置`, `系统设置`,
 		`data-delete-enrollment`, `可重复安装`, `删除添加命令`,
-		`enrollment-token`, `生成新安装命令`,
+		`enrollment-token`, `/enrollment-command`,
 		`heartbeat, percent`, `serviceActionDisabled, trafficChart, renderConfigDiff`,
 	} {
 		if !strings.Contains(content, required) {
@@ -72,8 +72,13 @@ func TestSPAConsoleSurfaceMatchesInitialRelease(t *testing.T) {
 	if strings.Contains(content, "旧安装命令会立即失效") || strings.Contains(content, "重新生成后旧命令立即失效") {
 		t.Error("SPA must keep existing Agent install commands valid when another command is generated")
 	}
-	if !strings.Contains(content, "已有安装命令会继续有效") || !strings.Contains(content, "已有命令继续有效") {
-		t.Error("SPA does not explain that existing Agent install commands remain valid")
+	for _, forbidden := range []string{"生成新安装命令", "data-reinstall-agent"} {
+		if strings.Contains(content, forbidden) {
+			t.Errorf("SPA must not expose single-node credential generation control %q", forbidden)
+		}
+	}
+	if !strings.Contains(content, "命令可重复查看") || !strings.Contains(content, "命令生成后可重复查看") {
+		t.Error("SPA does not explain that existing Agent install commands remain readable")
 	}
 }
 
@@ -434,6 +439,7 @@ func TestOfficialDeploymentsTrustTheExactTwoHopProxyChain(t *testing.T) {
 	} {
 		for _, required := range []string{
 			`QCH_TRUSTED_PROXY_CIDRS: ${QCH_TRUSTED_PROXY_CIDRS:-172.30.254.2/32,172.30.254.1/32}`,
+			`QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS: ${QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS:-}`,
 			`ipv4_address: ${QCH_WEB_PROXY_ADDRESS:-172.30.254.2}`,
 			`ipv4_address: ${QCH_CONTROL_PLANE_PROXY_ADDRESS:-172.30.254.3}`,
 			`subnet: ${QCH_CONTROL_PROXY_SUBNET:-172.30.254.0/24}`,
@@ -442,6 +448,15 @@ func TestOfficialDeploymentsTrustTheExactTwoHopProxyChain(t *testing.T) {
 			if !strings.Contains(source.content, required) {
 				t.Errorf("%s does not close the exact proxy chain with %q", source.name, required)
 			}
+		}
+	}
+	for _, required := range []string{
+		`QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS`,
+		`previous_config_keys`,
+		`prepend_unique_csv "$previous_config_keys" "$config_key"`,
+	} {
+		if !strings.Contains(string(quickStart), required) {
+			t.Errorf("quick-start key rotation contract is missing %q", required)
 		}
 	}
 

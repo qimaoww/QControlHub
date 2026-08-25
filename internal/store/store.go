@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -23,10 +24,12 @@ import (
 )
 
 var (
-	ErrNotFound = errors.New("not found")
-	ErrConflict = errors.New("conflict")
-	ErrReplay   = errors.New("replayed request")
-	ErrInvalid  = errors.New("invalid input")
+	ErrNotFound          = errors.New("not found")
+	ErrConflict          = errors.New("conflict")
+	ErrReplay            = errors.New("replayed request")
+	ErrInvalid           = errors.New("invalid input")
+	ErrSecretUnavailable = errors.New("protected enrollment credential unavailable")
+	ErrAuditUnavailable  = errors.New("audit unavailable")
 )
 
 type Store struct {
@@ -36,7 +39,12 @@ type Store struct {
 	taskWakes  map[string]chan struct{}
 }
 
-const currentSchemaVersion = 21
+type storeExecutor interface {
+	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
+	QueryRow(context.Context, string, ...any) pgx.Row
+}
+
+const currentSchemaVersion = 22
 
 func Open(ctx context.Context, databaseURL string, allowInsecureRemote bool) (*Store, error) {
 	return OpenWithConfigKey(ctx, databaseURL, allowInsecureRemote, "")
@@ -46,8 +54,25 @@ func Open(ctx context.Context, databaseURL string, allowInsecureRemote bool) (*S
 // encryption when a non-empty key is supplied. Existing plaintext rows keep
 // working transparently; new writes are sealed with AES-256-GCM.
 func OpenWithConfigKey(ctx context.Context, databaseURL string, allowInsecureRemote bool, configKey string) (*Store, error) {
+	return OpenWithConfigKeyring(ctx, databaseURL, allowInsecureRemote, configKey, nil)
+}
+
+// OpenWithConfigKeyring uses configKey for new encrypted writes and previous
+// keys only to decrypt data written before an intentional key rotation.
+func OpenWithConfigKeyring(ctx context.Context, databaseURL string, allowInsecureRemote bool, configKey string, previousKeys []string) (*Store, error) {
 	if strings.TrimSpace(databaseURL) == "" {
 		return nil, errors.New("QCH_DATABASE_URL is required")
+	}
+	configKey = strings.TrimSpace(configKey)
+	if configKey != "" && len([]byte(configKey)) < minConfigEncryptionKeyBytes {
+		return nil, fmt.Errorf("QCH_CONFIG_ENCRYPTION_KEY must be at least %d bytes", minConfigEncryptionKeyBytes)
+	}
+	if strings.TrimSpace(configKey) == "" {
+		for _, previousKey := range previousKeys {
+			if strings.TrimSpace(previousKey) != "" {
+				return nil, errors.New("QCH_CONFIG_ENCRYPTION_KEY is required when previous encryption keys are configured")
+			}
+		}
 	}
 	config, err := pgxpool.ParseConfig(databaseURL)
 	if err != nil {
@@ -73,7 +98,7 @@ func OpenWithConfigKey(ctx context.Context, databaseURL string, allowInsecureRem
 		pool.Close()
 		return nil, fmt.Errorf("connect to PostgreSQL: %w", err)
 	}
-	cryptor, err := newConfigCryptor(configKey)
+	cryptor, err := newConfigCryptorKeyring(append([]string{configKey}, previousKeys...))
 	if err != nil {
 		return nil, err
 	}
@@ -86,6 +111,17 @@ func OpenWithConfigKey(ctx context.Context, databaseURL string, allowInsecureRem
 		return nil, err
 	}
 	return result, nil
+}
+
+func (s *Store) encryptEnrollmentToken(rawToken string) (string, error) {
+	if s.cryptor == nil {
+		return "", fmt.Errorf("%w: QCH_CONFIG_ENCRYPTION_KEY is required", ErrSecretUnavailable)
+	}
+	sealed, err := s.cryptor.encrypt(rawToken)
+	if err != nil {
+		return "", fmt.Errorf("%w: encrypt enrollment credential: %v", ErrSecretUnavailable, err)
+	}
+	return sealed, nil
 }
 
 func localDatabaseHost(host string) bool {
@@ -290,6 +326,46 @@ func (s *Store) CleanupNonces(ctx context.Context) error {
 }
 
 func (s *Store) CreateEnrollmentToken(ctx context.Context, request core.EnrollmentTokenRequest) (core.EnrollmentTokenCreated, error) {
+	return s.createEnrollmentToken(ctx, request, false)
+}
+
+// CreateProtectedEnrollmentToken persists a recoverable enrollment credential
+// only after sealing it with the configured encryption key. The hash remains
+// the sole value used for Agent authentication.
+func (s *Store) CreateProtectedEnrollmentToken(ctx context.Context, request core.EnrollmentTokenRequest) (core.EnrollmentTokenCreated, error) {
+	return s.createEnrollmentToken(ctx, request, true)
+}
+
+func (s *Store) createEnrollmentToken(ctx context.Context, request core.EnrollmentTokenRequest, protect bool) (core.EnrollmentTokenCreated, error) {
+	return s.createEnrollmentTokenWithExecutor(ctx, s.pool, request, protect)
+}
+
+// CreateProtectedEnrollmentTokenWithAudit commits the recoverable credential
+// and its disclosure audit entry in one PostgreSQL transaction. A failed
+// audit insert rolls back the credential before it becomes visible.
+func (s *Store) CreateProtectedEnrollmentTokenWithAudit(ctx context.Context, request core.EnrollmentTokenRequest, entry core.AuditLogEntry) (core.EnrollmentTokenCreated, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return core.EnrollmentTokenCreated{}, err
+	}
+	defer tx.Rollback(ctx)
+	created, err := s.createEnrollmentTokenWithExecutor(ctx, tx, request, true)
+	if err != nil {
+		return core.EnrollmentTokenCreated{}, err
+	}
+	if entry.Target == "" {
+		entry.Target = created.ID
+	}
+	if err := recordAuditWithExecutor(ctx, tx, entry); err != nil {
+		return core.EnrollmentTokenCreated{}, fmt.Errorf("%w: %v", ErrAuditUnavailable, err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return core.EnrollmentTokenCreated{}, err
+	}
+	return created, nil
+}
+
+func (s *Store) createEnrollmentTokenWithExecutor(ctx context.Context, executor storeExecutor, request core.EnrollmentTokenRequest, protect bool) (core.EnrollmentTokenCreated, error) {
 	name := strings.TrimSpace(request.Name)
 	if name == "" {
 		name = "Add node"
@@ -313,7 +389,7 @@ func (s *Store) CreateEnrollmentToken(ctx context.Context, request core.Enrollme
 	}
 	if request.Reusable {
 		var exists bool
-		if err := s.pool.QueryRow(ctx, `
+		if err := executor.QueryRow(ctx, `
 			SELECT EXISTS(
 				SELECT 1 FROM enrollment_tokens
 				WHERE reusable=TRUE AND revoked_at IS NULL AND lower(name)=lower($1)
@@ -336,22 +412,113 @@ func (s *Store) CreateEnrollmentToken(ctx context.Context, request core.Enrollme
 		return core.EnrollmentTokenCreated{}, err
 	}
 	digest := sha256.Sum256([]byte(rawToken))
+	var tokenCiphertext *string
+	if protect {
+		sealed, err := s.encryptEnrollmentToken(rawToken)
+		if err != nil {
+			return core.EnrollmentTokenCreated{}, err
+		}
+		tokenCiphertext = &sealed
+	}
 	now := time.Now().UTC()
 	value := core.EnrollmentToken{
-		ID: id, Name: name, MaxUses: request.MaxUses, UsedCount: 0, Reusable: request.Reusable, CreatedAt: now,
+		ID: id, Name: name, MaxUses: request.MaxUses, UsedCount: 0, Reusable: request.Reusable, Recoverable: protect, CreatedAt: now,
 	}
 	if !request.Reusable {
 		expiresAt := now.Add(time.Duration(request.TTLMinutes) * time.Minute)
 		value.ExpiresAt = &expiresAt
 	}
-	_, err = s.pool.Exec(ctx, `
-		INSERT INTO enrollment_tokens (id,name,token_hash,expires_at,max_uses,used_count,reusable,created_at)
-		VALUES ($1,$2,$3,$4,$5,0,$6,$7)`,
-		value.ID, value.Name, digest[:], value.ExpiresAt, value.MaxUses, value.Reusable, value.CreatedAt)
+	_, err = executor.Exec(ctx, `
+		INSERT INTO enrollment_tokens (id,name,token_hash,token_ciphertext,expires_at,max_uses,used_count,reusable,created_at)
+		VALUES ($1,$2,$3,$4,$5,$6,0,$7,$8)`,
+		value.ID, value.Name, digest[:], tokenCiphertext, value.ExpiresAt, value.MaxUses, value.Reusable, value.CreatedAt)
 	if err != nil {
 		return core.EnrollmentTokenCreated{}, mapError(err)
 	}
 	return core.EnrollmentTokenCreated{EnrollmentToken: value, Token: rawToken}, nil
+}
+
+// EnrollmentCommandForAgent returns an already-persisted credential without
+// creating, consuming, rotating, or otherwise mutating enrollment state.
+func (s *Store) EnrollmentCommandForAgent(ctx context.Context, agentID string) (core.EnrollmentTokenCreated, error) {
+	agentID = strings.TrimSpace(agentID)
+	if agentID == "" {
+		return core.EnrollmentTokenCreated{}, ErrInvalid
+	}
+	return s.readEnrollmentCommand(ctx, `
+		SELECT id,COALESCE(agent_id,''),name,expires_at,max_uses,used_count,reusable,created_at,revoked_at,token_ciphertext,token_hash
+		FROM enrollment_tokens
+		WHERE agent_id=$1 AND revoked_at IS NULL AND token_ciphertext IS NOT NULL
+		  AND (expires_at IS NULL OR expires_at>now()) AND (reusable OR used_count<max_uses)
+		ORDER BY created_at DESC`, agentID)
+}
+
+// EnrollmentCommandByID reveals one explicitly selected add-node record.
+func (s *Store) EnrollmentCommandByID(ctx context.Context, id string) (core.EnrollmentTokenCreated, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return core.EnrollmentTokenCreated{}, ErrInvalid
+	}
+	return s.readEnrollmentCommand(ctx, `
+		SELECT id,COALESCE(agent_id,''),name,expires_at,max_uses,used_count,reusable,created_at,revoked_at,token_ciphertext,token_hash
+		FROM enrollment_tokens
+		WHERE id=$1 AND revoked_at IS NULL
+		  AND (expires_at IS NULL OR expires_at>now()) AND (reusable OR used_count<max_uses)`, id)
+}
+
+func (s *Store) readEnrollmentCommand(ctx context.Context, query, id string) (core.EnrollmentTokenCreated, error) {
+	rows, err := s.pool.Query(ctx, query, id)
+	if err != nil {
+		return core.EnrollmentTokenCreated{}, err
+	}
+	defer rows.Close()
+	var unavailable bool
+	for rows.Next() {
+		var value core.EnrollmentTokenCreated
+		var ciphertext *string
+		var storedDigest []byte
+		if err := rows.Scan(
+			&value.ID, &value.AgentID, &value.Name, &value.ExpiresAt, &value.MaxUses,
+			&value.UsedCount, &value.Reusable, &value.CreatedAt, &value.RevokedAt, &ciphertext, &storedDigest,
+		); err != nil {
+			return core.EnrollmentTokenCreated{}, err
+		}
+		value.Token, err = s.recoverEnrollmentToken(ciphertext, storedDigest)
+		if err == nil {
+			value.Recoverable = true
+			return value, nil
+		}
+		if errors.Is(err, ErrSecretUnavailable) {
+			unavailable = true
+			continue
+		}
+		return core.EnrollmentTokenCreated{}, err
+	}
+	if err := rows.Err(); err != nil {
+		return core.EnrollmentTokenCreated{}, err
+	}
+	if unavailable {
+		return core.EnrollmentTokenCreated{}, ErrSecretUnavailable
+	}
+	return core.EnrollmentTokenCreated{}, ErrNotFound
+}
+
+func (s *Store) recoverEnrollmentToken(ciphertext *string, storedDigest []byte) (string, error) {
+	if ciphertext == nil || strings.TrimSpace(*ciphertext) == "" {
+		return "", fmt.Errorf("%w: legacy digest-only credential cannot be recovered", ErrSecretUnavailable)
+	}
+	if s.cryptor == nil {
+		return "", fmt.Errorf("%w: QCH_CONFIG_ENCRYPTION_KEY is required", ErrSecretUnavailable)
+	}
+	token, err := s.cryptor.decrypt(*ciphertext)
+	if err != nil {
+		return "", fmt.Errorf("%w: %v", ErrSecretUnavailable, err)
+	}
+	digest := sha256.Sum256([]byte(token))
+	if len(storedDigest) != len(digest) || subtle.ConstantTimeCompare(storedDigest, digest[:]) != 1 {
+		return "", fmt.Errorf("%w: encrypted credential digest mismatch", ErrSecretUnavailable)
+	}
+	return token, nil
 }
 
 // CreateAgentEnrollmentToken adds a reusable credential for an existing agent.
@@ -361,17 +528,60 @@ func (s *Store) CreateAgentEnrollmentToken(ctx context.Context, agentID string) 
 	if agentID == "" {
 		return core.EnrollmentTokenCreated{}, ErrInvalid
 	}
-	rawToken, err := core.NewToken()
-	if err != nil {
-		return core.EnrollmentTokenCreated{}, err
-	}
-	digest := sha256.Sum256([]byte(rawToken))
-	now := time.Now().UTC()
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return core.EnrollmentTokenCreated{}, err
 	}
 	defer tx.Rollback(ctx)
+	created, err := s.createAgentEnrollmentTokenTx(ctx, tx, agentID)
+	if err != nil {
+		return core.EnrollmentTokenCreated{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return core.EnrollmentTokenCreated{}, err
+	}
+	return created, nil
+}
+
+// CreateAgentEnrollmentTokenWithAudit atomically persists an Agent-bound
+// enrollment credential and its creation audit entry.
+func (s *Store) CreateAgentEnrollmentTokenWithAudit(ctx context.Context, agentID string, entry core.AuditLogEntry) (core.EnrollmentTokenCreated, error) {
+	agentID = strings.TrimSpace(agentID)
+	if agentID == "" {
+		return core.EnrollmentTokenCreated{}, ErrInvalid
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return core.EnrollmentTokenCreated{}, err
+	}
+	defer tx.Rollback(ctx)
+	created, err := s.createAgentEnrollmentTokenTx(ctx, tx, agentID)
+	if err != nil {
+		return core.EnrollmentTokenCreated{}, err
+	}
+	if entry.Detail == "" {
+		entry.Detail = created.ID
+	}
+	if err := recordAuditWithExecutor(ctx, tx, entry); err != nil {
+		return core.EnrollmentTokenCreated{}, fmt.Errorf("%w: %v", ErrAuditUnavailable, err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return core.EnrollmentTokenCreated{}, err
+	}
+	return created, nil
+}
+
+func (s *Store) createAgentEnrollmentTokenTx(ctx context.Context, tx pgx.Tx, agentID string) (core.EnrollmentTokenCreated, error) {
+	rawToken, err := core.NewToken()
+	if err != nil {
+		return core.EnrollmentTokenCreated{}, err
+	}
+	digest := sha256.Sum256([]byte(rawToken))
+	sealed, err := s.encryptEnrollmentToken(rawToken)
+	if err != nil {
+		return core.EnrollmentTokenCreated{}, err
+	}
+	now := time.Now().UTC()
 
 	var name string
 	if err := tx.QueryRow(ctx, `
@@ -385,7 +595,7 @@ func (s *Store) CreateAgentEnrollmentToken(ctx context.Context, agentID string) 
 
 	value := core.EnrollmentToken{
 		AgentID: agentID, Name: strings.TrimSpace(name), MaxUses: 0, UsedCount: 0,
-		Reusable: true, CreatedAt: now,
+		Reusable: true, Recoverable: true, CreatedAt: now,
 	}
 	if value.Name == "" {
 		return core.EnrollmentTokenCreated{}, fmt.Errorf("%w: agent name is empty", ErrInvalid)
@@ -396,13 +606,10 @@ func (s *Store) CreateAgentEnrollmentToken(ctx context.Context, agentID string) 
 	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO enrollment_tokens
-			(id,agent_id,name,token_hash,expires_at,max_uses,used_count,reusable,created_at)
-		VALUES ($1,$2,$3,$4,NULL,0,0,TRUE,$5)`,
-		value.ID, value.AgentID, value.Name, digest[:], now); err != nil {
+			(id,agent_id,name,token_hash,token_ciphertext,expires_at,max_uses,used_count,reusable,created_at)
+		VALUES ($1,$2,$3,$4,$5,NULL,0,0,TRUE,$6)`,
+		value.ID, value.AgentID, value.Name, digest[:], sealed, now); err != nil {
 		return core.EnrollmentTokenCreated{}, mapError(err)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return core.EnrollmentTokenCreated{}, err
 	}
 	return core.EnrollmentTokenCreated{EnrollmentToken: value, Token: rawToken}, nil
 }
@@ -427,21 +634,68 @@ func (s *Store) EnrollmentTokenUsable(ctx context.Context, rawToken string) bool
 
 func (s *Store) ListEnrollmentTokens(ctx context.Context) ([]core.EnrollmentToken, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id,COALESCE(agent_id,''),name,expires_at,max_uses,used_count,reusable,created_at,revoked_at
+		SELECT id,COALESCE(agent_id,''),name,expires_at,max_uses,used_count,reusable,created_at,revoked_at,
+		       token_ciphertext,token_hash
 		FROM enrollment_tokens ORDER BY created_at DESC LIMIT 100`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	result := make([]core.EnrollmentToken, 0)
+	now := time.Now().UTC()
 	for rows.Next() {
 		var value core.EnrollmentToken
-		if err := rows.Scan(&value.ID, &value.AgentID, &value.Name, &value.ExpiresAt, &value.MaxUses, &value.UsedCount, &value.Reusable, &value.CreatedAt, &value.RevokedAt); err != nil {
+		var ciphertext *string
+		var storedDigest []byte
+		if err := rows.Scan(&value.ID, &value.AgentID, &value.Name, &value.ExpiresAt, &value.MaxUses, &value.UsedCount, &value.Reusable, &value.CreatedAt, &value.RevokedAt, &ciphertext, &storedDigest); err != nil {
 			return nil, err
 		}
+		_, recoverErr := s.recoverEnrollmentToken(ciphertext, storedDigest)
+		value.Recoverable = recoverErr == nil && enrollmentTokenCommandActive(value.ExpiresAt, value.MaxUses, value.UsedCount, value.Reusable, value.RevokedAt, now)
 		result = append(result, value)
 	}
 	return result, rows.Err()
+}
+
+func enrollmentTokenCommandActive(expiresAt *time.Time, maxUses, usedCount int, reusable bool, revokedAt *time.Time, now time.Time) bool {
+	return revokedAt == nil && (expiresAt == nil || expiresAt.After(now)) && (reusable || usedCount < maxUses)
+}
+
+// ListEnrollmentCommandAvailability returns a non-secret projection for the
+// currently recoverable command of each active Agent. A bad key, damaged
+// ciphertext, digest-only legacy row, revoked row, and expired row all remain
+// unavailable; another valid credential for the same Agent may still qualify.
+func (s *Store) ListEnrollmentCommandAvailability(ctx context.Context, agentIDs []string) (map[string]bool, error) {
+	available := make(map[string]bool)
+	if len(agentIDs) == 0 {
+		return available, nil
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT agent_id,token_ciphertext,token_hash
+		FROM enrollment_tokens
+		WHERE agent_id=ANY($1::text[]) AND revoked_at IS NULL
+		  AND token_ciphertext IS NOT NULL
+		  AND (expires_at IS NULL OR expires_at>now()) AND (reusable OR used_count<max_uses)
+		ORDER BY created_at DESC`, agentIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var agentID string
+		var ciphertext *string
+		var storedDigest []byte
+		if err := rows.Scan(&agentID, &ciphertext, &storedDigest); err != nil {
+			return nil, err
+		}
+		if _, already := available[agentID]; already {
+			continue
+		}
+		if _, err := s.recoverEnrollmentToken(ciphertext, storedDigest); err == nil {
+			available[agentID] = true
+		}
+	}
+	return available, rows.Err()
 }
 
 func (s *Store) DeleteEnrollmentToken(ctx context.Context, id string) error {
@@ -453,6 +707,21 @@ func (s *Store) DeleteEnrollmentToken(ctx context.Context, id string) error {
 		return ErrNotFound
 	}
 	return nil
+}
+
+// CleanupExpiredEnrollmentTokens removes credentials that can no longer be
+// used, including one-shot credentials that exhausted their use count. This
+// also erases protected ciphertext instead of retaining an expired secret.
+func (s *Store) CleanupExpiredEnrollmentTokens(ctx context.Context) (int64, error) {
+	command, err := s.pool.Exec(ctx, `
+		DELETE FROM enrollment_tokens
+		WHERE revoked_at IS NOT NULL
+		   OR (expires_at IS NOT NULL AND expires_at <= now())
+		   OR (reusable = FALSE AND used_count >= max_uses)`)
+	if err != nil {
+		return 0, err
+	}
+	return command.RowsAffected(), nil
 }
 
 // Heartbeat records a complete authenticated Agent heartbeat. The advertised
@@ -1548,6 +1817,7 @@ CREATE TABLE IF NOT EXISTS enrollment_tokens (
     id text PRIMARY KEY,
     name varchar(100) NOT NULL,
     token_hash bytea NOT NULL UNIQUE CHECK (octet_length(token_hash) = 32),
+	    token_ciphertext text,
 	    expires_at timestamptz,
 	    max_uses integer NOT NULL CHECK (max_uses BETWEEN 0 AND 50),
 	    used_count integer NOT NULL DEFAULT 0 CHECK (used_count >= 0),
@@ -1557,6 +1827,7 @@ CREATE TABLE IF NOT EXISTS enrollment_tokens (
 );
 
 ALTER TABLE enrollment_tokens ADD COLUMN IF NOT EXISTS reusable boolean NOT NULL DEFAULT false;
+ALTER TABLE enrollment_tokens ADD COLUMN IF NOT EXISTS token_ciphertext text;
 ALTER TABLE enrollment_tokens ALTER COLUMN expires_at DROP NOT NULL;
 ALTER TABLE enrollment_tokens DROP CONSTRAINT IF EXISTS enrollment_tokens_max_uses_check;
 ALTER TABLE enrollment_tokens ADD CONSTRAINT enrollment_tokens_max_uses_check CHECK (max_uses BETWEEN 0 AND 50);

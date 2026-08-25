@@ -6,13 +6,22 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
+
+type auditExecutor interface {
+	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
+}
 
 // RecordAudit appends one entry to the audit trail. The entry is validated
 // lightly (bounded lengths) and truncated to the declared column limits so a
 // single oversized field cannot poison the log.
 func (s *Store) RecordAudit(ctx context.Context, entry core.AuditLogEntry) error {
+	return recordAuditWithExecutor(ctx, s.pool, entry)
+}
+
+func recordAuditWithExecutor(ctx context.Context, executor auditExecutor, entry core.AuditLogEntry) error {
 	entry.Actor = truncateAuditField(strings.TrimSpace(entry.Actor), 40)
 	entry.Action = truncateAuditField(strings.TrimSpace(entry.Action), 40)
 	entry.Target = truncateAuditField(entry.Target, 500)
@@ -27,7 +36,7 @@ func (s *Store) RecordAudit(ctx context.Context, entry core.AuditLogEntry) error
 	if entry.ActedAt.IsZero() {
 		entry.ActedAt = time.Now().UTC()
 	}
-	_, err := s.pool.Exec(ctx, `
+	_, err := executor.Exec(ctx, `
 		INSERT INTO audit_logs (acted_at, actor, action, target, detail, remote_ip)
 		VALUES ($1,$2,$3,$4,$5,$6)`,
 		entry.ActedAt, entry.Actor, entry.Action, entry.Target, entry.Detail, entry.RemoteIP)

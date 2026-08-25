@@ -201,6 +201,60 @@ func TestOpenMigratesAppliedV20Schema(t *testing.T) {
 	}
 }
 
+func TestOpenMigratesAppliedV21EnrollmentCiphertext(t *testing.T) {
+	databaseURL := os.Getenv("QCH_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("QCH_TEST_DATABASE_URL is not configured")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	schema, err := testdb.IsolatePostgres(ctx, databaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cleanupCancel()
+		if err := schema.Close(cleanupCtx); err != nil {
+			t.Errorf("drop isolated v21 schema: %v", err)
+		}
+	}()
+	setup, err := pgx.Connect(ctx, schema.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer setup.Close(context.Background())
+	if _, err := setup.Exec(ctx, schemaSQL); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := setup.Exec(ctx, `
+		CREATE TABLE qcontrolhub_schema_migrations (
+			version integer PRIMARY KEY CHECK (version > 0),
+			applied_at timestamptz NOT NULL DEFAULT now()
+		);
+		INSERT INTO qcontrolhub_schema_migrations (version) VALUES (21);
+		ALTER TABLE enrollment_tokens DROP COLUMN token_ciphertext;
+	`); err != nil {
+		t.Fatal(err)
+	}
+	dataStore, err := OpenWithConfigKey(ctx, schema.URL, true, testEncryptionKey("migration-command-key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dataStore.Close()
+	var version int
+	var hasCiphertext bool
+	if err := dataStore.pool.QueryRow(ctx, `SELECT max(version) FROM qcontrolhub_schema_migrations`).Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	if err := dataStore.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='enrollment_tokens' AND column_name='token_ciphertext')`).Scan(&hasCiphertext); err != nil {
+		t.Fatal(err)
+	}
+	if version != currentSchemaVersion || !hasCiphertext {
+		t.Fatalf("migrated v21 version=%d ciphertext_column=%t", version, hasCiphertext)
+	}
+}
+
 func TestConcurrentOpenSkipsAppliedSchemaDuringCRUD(t *testing.T) {
 	databaseURL := os.Getenv("QCH_TEST_DATABASE_URL")
 	if databaseURL == "" {

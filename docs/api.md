@@ -40,6 +40,7 @@
 | `GET` | `/api/v1/agents` | 列出未撤销 Agent |
 | `DELETE` | `/api/v1/agents/{id}` | 永久撤销 Agent、立即断开 WSS 并终止其未完成任务 |
 | `POST` | `/api/v1/agents/{id}/enrollment-token` | 为该节点新增一条独立、可重复使用的 Agent 安装凭据；已有凭据继续有效（enrollment.manage） |
+| `POST` | `/api/v1/agents/{id}/enrollment-command` | 幂等读取该节点已有且仍有效的安装命令，不创建或消费凭据（enrollment.manage） |
 | `GET` | `/api/v1/agents/{id}/configs` | 列出节点已有的内核配置 |
 | `GET` | `/api/v1/agents/{id}/configs/{engine}` | 读取节点绑定的内核配置 |
 | `PUT` | `/api/v1/agents/{id}/configs/{engine}` | 以乐观版本锁创建或更新节点配置 |
@@ -69,6 +70,7 @@
 | `GET` | `/api/v1/enrollment-tokens` | 列出添加节点记录，不返回原始凭证（admin） |
 | `POST` | `/api/v1/enrollment-tokens` | 创建节点绑定、可重复安装的添加命令 |
 | `DELETE` | `/api/v1/enrollment-tokens/{id}` | 删除添加节点记录并立即使命令失效 |
+| `POST` | `/api/v1/enrollment-tokens/{id}/command` | 幂等读取指定添加记录的已有命令（enrollment.manage） |
 | `GET` | `/api/v1/settings` | 读取面板设置 |
 | `PUT` | `/api/v1/settings` | 保存面板设置（admin） |
 | `GET` | `/api/v1/audit?limit=` | 读取最近审计记录 |
@@ -106,7 +108,7 @@
 
 `protocol` 为 `tcp`、`udp` 或 `both`，`cycle` 为 `monthly` 或 `yearly`。`cycle_anchor` 必须是当天或过去的 UTC 日期；月末和闰年按日历末日自动对齐。额度是接收与发送字节之和，同一节点同一端口只能配置一次。修改端口、协议、周期或起始日期会开始新的计数；只调整名称、内核归属或额度会保留当前已用流量。响应中的 `enforcement_available`、`enforcement_error`、`blocked`、当前周期与收发计数均来自 Agent 最新心跳。
 
-删除 Agent 是不可逆的身份吊销：控制面先删除该节点的配置与修订、将其未完成任务标记为失败，再主动关闭当前认证 WSS；相同 Ed25519 身份的后续握手返回 `401`。添加节点记录仍存在时，可重新执行原命令原位注册新身份。
+删除 Agent 是不可逆的身份吊销：控制面先删除该节点的配置与修订、删除该节点的全部添加凭证、将其未完成任务标记为失败，再主动关闭当前认证 WSS；相同 Ed25519 身份的后续握手返回 `401`。如需重新注册，必须创建新的添加命令。
 
 ### 添加节点
 
@@ -116,7 +118,7 @@
 }
 ```
 
-`name` 同时是凭证绑定的节点名称。接口始终创建无有效期、可重复安装的添加节点命令；重复注册会更新原节点的密钥并复用节点 ID。为已有节点再次生成命令时会新增独立凭据，不会删除或覆盖已有凭据。创建响应中的 `token` 只返回一次并带有 `Cache-Control: no-store`，控制面只保存摘要。删除某条添加记录后，仅对应命令立即失效；删除节点会使该节点的全部安装命令失效。
+`name` 同时是凭证绑定的节点名称。接口始终创建无有效期、可重复安装的添加节点命令；重复注册会更新原节点的密钥并复用节点 ID。创建时控制面保存用于认证的 SHA-256 摘要，并使用 `QCH_CONFIG_ENCRYPTION_KEY` 保存受保护的 AEAD 可恢复副本；专用读取接口带有 `Cache-Control: no-store`，普通列表与 Agent API 永不返回凭据。查看是幂等读，不增加记录、使用次数或轮换 secret。缺少当前密钥、密钥不匹配、密文损坏以及升级前仅有摘要的旧记录均 fail closed；旧记录仍可继续安装和删除，但因原文不可逆而无法查看。删除某条添加记录后，仅对应命令立即失效；删除节点会使该节点的全部安装命令失效。
 
 ### 创建配置
 

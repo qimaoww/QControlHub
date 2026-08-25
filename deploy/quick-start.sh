@@ -108,7 +108,7 @@ read_env_key() {
 backup_env() {
     [ -f "$ENV_FILE" ] || return 0
     local backup_file
-    backup_file="${ENV_FILE}.bak.$(date +%Y%m%d%H%M%S).$$"
+    backup_file="${ENV_FILE}.bak.$(date +%Y%m%d%H%M%S).$$.${RANDOM}"
     cp -p -- "$ENV_FILE" "$backup_file"
     chmod 600 "$backup_file"
     echo "-> 已备份现有 .env：$backup_file"
@@ -187,6 +187,16 @@ append_trusted_proxy() {
     esac
 }
 
+prepend_unique_csv() {
+    local current="$1" value="$2"
+    [ -n "$value" ] || { printf '%s' "$current"; return; }
+    case ",$current," in
+        *",$value,"*) printf '%s' "$current" ;;
+        ",,") printf '%s' "$value" ;;
+        *) printf '%s,%s' "$value" "$current" ;;
+    esac
+}
+
 write_external_compose() {
     cat > "$EXTERNAL_COMPOSE_FILE" <<'YAML'
 name: qcontrolhub
@@ -211,6 +221,7 @@ services:
       QCH_TRUSTED_PROXY_CIDRS: ${QCH_TRUSTED_PROXY_CIDRS:-172.30.254.2/32,172.30.254.1/32}
       QCH_WEBHOOK_SECRET: ${QCH_WEBHOOK_SECRET:-}
       QCH_CONFIG_ENCRYPTION_KEY: ${QCH_CONFIG_ENCRYPTION_KEY:-}
+      QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS: ${QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS:-}
       QCH_OPERATOR_TOKENS: ${QCH_OPERATOR_TOKENS:-}
       QCH_AUDITOR_TOKENS: ${QCH_AUDITOR_TOKENS:-}
       QCH_READONLY_TOKENS: ${QCH_READONLY_TOKENS:-}
@@ -329,7 +340,7 @@ wait_ready() {
 }
 
 prepare_bundled_env() {
-    local postgres_password admin_token webhook_secret config_key
+    local postgres_password admin_token webhook_secret config_key previous_config_keys
     local behind_proxy allow_http allow_database cors_origins bind_address port image_tag version
     local proxy_subnet proxy_gateway web_proxy_address control_plane_proxy_address trusted_proxy_cidrs
 
@@ -349,7 +360,11 @@ prepare_bundled_env() {
         webhook_secret="$(random_hex)"
     fi
     config_key="$(read_env_key QCH_CONFIG_ENCRYPTION_KEY)"
-    if [ "$FORCE" = true ] || [ -z "$config_key" ]; then
+    previous_config_keys="$(read_env_key QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS)"
+    if [ "$FORCE" = true ]; then
+        previous_config_keys="$(prepend_unique_csv "$previous_config_keys" "$config_key")"
+        config_key="$(random_hex)"
+    elif [ -z "$config_key" ]; then
         config_key="$(random_hex)"
     fi
     validate_secret QCH_ADMIN_TOKEN "$admin_token"
@@ -383,6 +398,7 @@ prepare_bundled_env() {
         "QCH_ADMIN_TOKEN=$admin_token" \
         "QCH_WEBHOOK_SECRET=$webhook_secret" \
         "QCH_CONFIG_ENCRYPTION_KEY=$config_key" \
+        "QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS=$previous_config_keys" \
         "QCH_BEHIND_TLS_PROXY=$behind_proxy" \
         "QCH_ALLOW_INSECURE_HTTP=$allow_http" \
         "QCH_ALLOW_INSECURE_DATABASE=$allow_database" \
@@ -399,7 +415,7 @@ prepare_bundled_env() {
 }
 
 prepare_external_env() {
-    local db_url admin_token webhook_secret config_key
+    local db_url admin_token webhook_secret config_key previous_config_keys
     local behind_proxy allow_http allow_database cors_origins bind_address port image_tag version
     local proxy_subnet proxy_gateway web_proxy_address control_plane_proxy_address trusted_proxy_cidrs
 
@@ -428,7 +444,11 @@ prepare_external_env() {
         webhook_secret="$(random_hex)"
     fi
     config_key="$(read_env_key QCH_CONFIG_ENCRYPTION_KEY)"
-    if [ "$FORCE" = true ] || [ -z "$config_key" ]; then
+    previous_config_keys="$(read_env_key QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS)"
+    if [ "$FORCE" = true ]; then
+        previous_config_keys="$(prepend_unique_csv "$previous_config_keys" "$config_key")"
+        config_key="$(random_hex)"
+    elif [ -z "$config_key" ]; then
         config_key="$(random_hex)"
     fi
     validate_secret QCH_ADMIN_TOKEN "$admin_token"
@@ -454,6 +474,7 @@ prepare_external_env() {
         "QCH_ADMIN_TOKEN=$admin_token" \
         "QCH_WEBHOOK_SECRET=$webhook_secret" \
         "QCH_CONFIG_ENCRYPTION_KEY=$config_key" \
+        "QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS=$previous_config_keys" \
         "QCH_BEHIND_TLS_PROXY=$behind_proxy" \
         "QCH_ALLOW_INSECURE_HTTP=$allow_http" \
         "QCH_ALLOW_INSECURE_DATABASE=$allow_database" \
@@ -484,6 +505,12 @@ show_result() {
     echo "  查看日志：  ${stop_cmd/down/logs -f}"
     echo ""
 }
+
+# Keep the environment preparation functions sourceable for the isolated shell
+# regression without running Docker or mutating the caller's deployment.
+if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
+    return 0
+fi
 
 # ---- 选择部署方式 ----
 if [ -z "$MODE" ]; then

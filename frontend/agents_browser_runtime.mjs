@@ -37,6 +37,7 @@ const onlineAgent = (id, features = ["agent-self-upgrade-v1"]) => ({
   },
   last_seen: "2026-08-24T00:00:00Z",
   enrolled_at: "2026-08-24T00:00:00Z",
+  enrollment_command_available: id === "alpha",
 });
 const populatedAgents = [
   onlineAgent("alpha"),
@@ -49,6 +50,16 @@ const testAPI = {
   calls: [],
   pendingTasks: [],
   enrollmentFailure: false,
+  enrollmentRecords: [
+    {
+      id: "enr-alpha",
+      name: "alpha",
+      reusable: true,
+      used_count: 1,
+      max_uses: 0,
+      command_available: true,
+    },
+  ],
   taskMode: "immediate",
   agents: populatedAgents,
 };
@@ -79,13 +90,17 @@ window.fetch = async (input, options = {}) => {
     return json({ panel_name: "QControlHub Browser Smoke" });
   if (method === "GET" && path === "/agents")
     return json(mode === "empty" ? [] : testAPI.agents);
-  if (method === "GET" && path === "/enrollment-tokens") return json([]);
+  if (method === "GET" && path === "/enrollment-tokens") return json(testAPI.enrollmentRecords);
   if (method === "GET" && /^\/agents\/[^/]+\/configs$/.test(path)) return json([]);
   if (method === "GET" && path.startsWith("/metrics/")) return json([]);
   if (method === "POST" && path === "/enrollment-tokens") {
     if (testAPI.enrollmentFailure) return json({ error: "temporary enrollment failure" }, 503);
     return json({ token: "browser-test-enrollment", name: "browser-node" });
   }
+  if (method === "POST" && /^\/agents\/[^/]+\/enrollment-command$/.test(path))
+    return json({ token: "browser-test-enrollment", name: "ALPHA" });
+  if (method === "POST" && path === "/enrollment-tokens/enr-alpha/command")
+    return json({ token: "browser-test-enrollment", name: "ALPHA" });
   if (method === "DELETE" && path.startsWith("/enrollment-tokens/")) return json(null, 204);
   if (method === "POST" && path === "/tasks") {
     const payload = JSON.parse(String(options.body || "{}"));
@@ -198,6 +213,64 @@ async function testAdminRuntime() {
   assert.match(document.body.textContent, /temporary enrollment failure/);
   testAPI.enrollmentFailure = false;
   enrollment.querySelector("[data-close]").click();
+
+  document.querySelector("[data-open-enrollment]").click();
+  let recordsDialog = await waitFor(() => document.querySelector(".enrollment-dialog"), "添加记录弹窗无法重新打开");
+  let recordButton = document.querySelector('[data-view-enrollment-record="enr-alpha"]');
+  assert.ok(recordButton, "可恢复的聚合添加记录缺少查看入口");
+  const recordReadsBefore = testAPI.calls.filter(
+    (call) => call.method === "POST" && call.path === "/enrollment-tokens/enr-alpha/command",
+  ).length;
+  recordButton.click();
+  const firstRecordDialog = await waitFor(
+    () => document.querySelector(".deploy-command-modal:not(.enrollment-dialog)"),
+    "聚合添加记录无法打开已有部署命令",
+  );
+  assert.equal(document.querySelectorAll(".modal-backdrop").length, 1, "查看记录不得叠加第二层 modal");
+  assert.equal(document.querySelector(".enrollment-dialog"), null, "查看记录后聚合 modal 必须关闭");
+  assert.equal(document.querySelector(".desktop-app").inert, true, "命令 modal 打开时背景必须 inert");
+  const recordCommand = firstRecordDialog.querySelector("[data-command]").value;
+  const commandFocusable = [...firstRecordDialog.querySelectorAll("button:not(:disabled), textarea:not(:disabled)")];
+  commandFocusable.at(-1).focus();
+  document.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }));
+  assert.equal(document.activeElement, commandFocusable[0], "记录命令 modal 的 Tab 必须保持在顶层 modal 内");
+  commandFocusable[0].focus();
+  document.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true, cancelable: true }));
+  assert.equal(document.activeElement, commandFocusable.at(-1), "记录命令 modal 的 Shift+Tab 必须保持在顶层 modal 内");
+  document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+  assert.equal(document.querySelector(".modal-backdrop"), null, "Escape 只能关闭顶层记录命令 modal");
+  assert.equal(document.querySelector(".desktop-app").inert, false, "关闭命令 modal 后背景 inert 必须恢复");
+  assert.equal(document.activeElement, document.querySelector("[data-open-enrollment]"), "关闭命令 modal 后焦点必须回到聚合入口");
+  document.querySelector("[data-open-enrollment]").click();
+  recordsDialog = await waitFor(() => document.querySelector(".enrollment-dialog"), "关闭命令后聚合 modal 无法重新打开");
+  recordButton = recordsDialog.querySelector('[data-view-enrollment-record="enr-alpha"]');
+  recordButton.click();
+  const secondRecordDialog = await waitFor(
+    () => document.querySelector(".deploy-command-modal:not(.enrollment-dialog)"),
+    "聚合添加记录无法重复打开已有部署命令",
+  );
+  assert.equal(secondRecordDialog.querySelector("[data-command]").value, recordCommand);
+  secondRecordDialog.querySelector("[data-close]").click();
+  recordsDialog.querySelector("[data-close]").click();
+  location.hash = "#dashboard";
+  await waitFor(() => document.querySelector(".dashboard-head"), "路由离开后未完成刷新");
+  location.hash = "#node-settings";
+  await waitFor(() => document.querySelector("#batch-form"), "路由往返后聚合页未恢复");
+  document.querySelector("[data-open-enrollment]").click();
+  await waitFor(() => document.querySelector(".enrollment-dialog"), "刷新后添加记录弹窗无法打开");
+  assert.ok(document.querySelector('[data-view-enrollment-record="enr-alpha"]'), "刷新后可恢复添加记录缺少查看入口");
+  const recordButtonAfterRefresh = document.querySelector('[data-view-enrollment-record="enr-alpha"]');
+  recordButtonAfterRefresh.click();
+  const refreshedRecordDialog = await waitFor(
+    () => document.querySelector(".deploy-command-modal:not(.enrollment-dialog)"),
+    "刷新后无法再次打开已有部署命令",
+  );
+  assert.equal(refreshedRecordDialog.querySelector("[data-command]").value, recordCommand);
+  refreshedRecordDialog.querySelector("[data-close]").click();
+  const recordReadsAfter = testAPI.calls.filter(
+    (call) => call.method === "POST" && call.path === "/enrollment-tokens/enr-alpha/command",
+  ).length;
+  assert.equal(recordReadsAfter, recordReadsBefore + 3, "聚合命令重复查看应保持同一读取接口，不得创建新凭据");
 
   let form = document.querySelector("#batch-form");
   let all = form.querySelector("[data-batch-select-all]");
@@ -505,6 +578,71 @@ async function testAdminRuntime() {
   const pendingBeforeRetry = testAPI.pendingTasks.length;
   await remainingRetry.onclick();
   assert.equal(testAPI.pendingTasks.length, pendingBeforeRetry, "retry 实际 POST 前未使用最新离线快照 fail closed");
+
+  location.hash = "#settings-node-alpha";
+  await waitFor(
+    () => document.querySelector('.node-operations-workspace[data-agent-node="alpha"]'),
+    "单节点详情没有完成渲染",
+  );
+  assert.equal(document.querySelector("[data-open-enrollment]"), null, "单节点详情不得渲染添加节点入口");
+  assert.equal(document.querySelector("#batch-form"), null, "单节点详情不得渲染批量操作表单");
+  assert.equal(document.querySelector(".node-batch-panel"), null, "单节点详情不得保留批量操作占位");
+  const commandButton = document.querySelector('[data-view-enrollment-command="alpha"]');
+  assert.ok(commandButton, "有权限的单节点详情缺少查看已有部署命令入口");
+  const commandReadsBefore = testAPI.calls.filter(
+    (call) => call.method === "POST" && call.path === "/agents/alpha/enrollment-command",
+  ).length;
+  commandButton.click();
+  const firstCommandDialog = await waitFor(
+    () => document.querySelector(".deploy-command-modal"),
+    "单节点详情无法打开已有部署命令",
+  );
+  const firstCommand = firstCommandDialog.querySelector("[data-command]").value;
+  assert.match(firstCommand, /browser-test-enrollment/);
+  firstCommandDialog.querySelector("[data-close]").click();
+  commandButton.click();
+  const secondCommandDialog = await waitFor(
+    () => document.querySelector(".deploy-command-modal"),
+    "单节点详情无法重复打开已有部署命令",
+  );
+  assert.equal(secondCommandDialog.querySelector("[data-command]").value, firstCommand);
+  secondCommandDialog.querySelector("[data-close]").click();
+  const commandReadsAfter = testAPI.calls.filter(
+    (call) => call.method === "POST" && call.path === "/agents/alpha/enrollment-command",
+  ).length;
+  assert.equal(commandReadsAfter, commandReadsBefore + 2, "重复查看部署命令应只读取而不创建凭据");
+  assert.equal(
+    testAPI.calls.some((call) => call.method === "POST" && /\/enrollment-token$/.test(call.path)),
+    false,
+    "单节点详情不得调用创建 enrollment credential 的接口",
+  );
+  for (const tab of ["cores", "metrics", "agent"]) {
+    document.querySelector(`[data-node-tab="${tab}"]`).click();
+    await waitFor(
+      () => document.querySelector(`[data-node-panel="${tab}"]:not([hidden])`),
+      `${tab} 标签页没有完成切换`,
+    );
+    assert.equal(document.querySelector("[data-open-enrollment]"), null, `${tab} 标签页不得渲染添加节点入口`);
+    assert.equal(document.querySelector("#batch-form"), null, `${tab} 标签页不得渲染批量操作`);
+    assert.equal(document.querySelector(".node-batch-panel"), null, `${tab} 标签页不得保留批量操作占位`);
+  }
+  testAPI.agents = testAPI.agents.filter((agent) => agent.id !== "alpha");
+  document.querySelector("[data-agent-refresh]").click();
+  await waitFor(() => document.querySelector("[data-node-missing]"), "删除当前节点后未渲染详情缺失状态");
+  assert.equal(document.querySelector("[data-open-enrollment]"), null, "删除当前节点后不得回退到添加入口");
+  assert.equal(document.querySelector("#batch-form"), null, "删除当前节点后不得回退到批量表单");
+  assert.equal(document.querySelector(".node-batch-panel"), null, "删除当前节点后不得回退到批量区占位");
+  testAPI.agents = populatedAgents.slice();
+  location.hash = "#settings-node-unknown";
+  await waitFor(() => document.querySelector("[data-node-missing]"), "未知节点详情路由未渲染缺失状态");
+  assert.equal(document.querySelector("[data-open-enrollment]"), null, "未知节点详情不得渲染添加入口");
+  assert.equal(document.querySelector("#batch-form"), null, "未知节点详情不得渲染批量表单");
+  location.hash = "#settings-node-bravo";
+  await waitFor(
+    () => document.querySelector('.node-operations-workspace[data-agent-node="bravo"]'),
+    "无可恢复命令的单节点详情没有完成渲染",
+  );
+  assert.equal(document.querySelector('[data-view-enrollment-command="bravo"]'), null, "无可恢复命令的节点不得渲染查看入口");
 }
 
 async function testEmptyRuntime() {

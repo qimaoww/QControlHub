@@ -4,7 +4,7 @@ import { dirname, resolve } from "node:path";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const docDir = resolve(root, "docs");
-const files = ["README.md", "docs/api.md", "docs/production.md"]
+const files = ["README.md", "docs/api.md", "docs/production.md", "docs/security.md"]
   .map((path) => resolve(root, path))
   .filter(existsSync);
 
@@ -13,11 +13,15 @@ const forbidden = [
   /版本安装只使用/,
   /只使用官方 prerelease/,
   /development 没有官方 prerelease 时任务会失败/,
+  /原始凭证只显示一次/,
+  /控制面只保存 SHA-256 摘要/,
+  /添加节点记录仍存在时，可重新执行原命令/,
 ];
 
 const required = {
-  "docs/api.md": ["core_source", "vernesong/mihomo", "mihomo-development-source-v1"],
-  "docs/production.md": ["vernesong/mihomo", "mihomo-development-source-v1", "checksums.txt"],
+  "docs/api.md": ["core_source", "vernesong/mihomo", "mihomo-development-source-v1", "受保护的 AEAD 可恢复副本", "删除该节点的全部添加凭证"],
+  "docs/production.md": ["vernesong/mihomo", "mihomo-development-source-v1", "checksums.txt", "受保护的 AEAD 可恢复副本"],
+  "docs/security.md": ["受保护的 AEAD 可恢复副本", "可重复查看有效命令"],
 };
 
 let failures = 0;

@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"os"
 	"strings"
 	"testing"
@@ -20,7 +22,7 @@ func TestEncryptedConfigStorageRoundTrip(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
-	dataStore, err := OpenWithConfigKey(ctx, databaseURL, true, "integration-test-key")
+	dataStore, err := OpenWithConfigKey(ctx, databaseURL, true, testEncryptionKey("integration-test-key"))
 	if err != nil {
 		t.Fatalf("open encrypted store: %v", err)
 	}
@@ -46,14 +48,14 @@ func TestEncryptedConfigStorageRoundTrip(t *testing.T) {
 	if err := dataStore.pool.QueryRow(ctx, `SELECT content FROM configs WHERE id=$1`, saved.ID).Scan(&stored); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(stored, "mixed-port") || !strings.HasPrefix(stored, encryptedPrefix) {
+	if strings.Contains(stored, "mixed-port") || !strings.HasPrefix(stored, keyedEncryptedPrefix) {
 		t.Fatalf("stored content is not sealed: %q", stored)
 	}
 	var revisionStored string
 	if err := dataStore.pool.QueryRow(ctx, `SELECT content FROM config_revisions WHERE config_id=$1 AND version=1`, saved.ID).Scan(&revisionStored); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(revisionStored, encryptedPrefix) {
+	if !strings.HasPrefix(revisionStored, keyedEncryptedPrefix) {
 		t.Fatalf("stored revision is not sealed: %q", revisionStored)
 	}
 
@@ -110,7 +112,7 @@ func TestEncryptedStoreReadsLegacyPlaintext(t *testing.T) {
 	plainStore.Close()
 
 	// Read it back with an encrypted store; the legacy row must pass through.
-	encryptedStore, err := OpenWithConfigKey(ctx, databaseURL, true, "integration-test-key")
+	encryptedStore, err := OpenWithConfigKey(ctx, databaseURL, true, testEncryptionKey("integration-test-key"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,4 +125,77 @@ func TestEncryptedStoreReadsLegacyPlaintext(t *testing.T) {
 	if err != nil || revision.Content != content {
 		t.Fatalf("legacy revision through encrypted store = %+v, %v", revision, err)
 	}
+}
+
+func TestEncryptedContentReadsFailClosedWithoutKeyAcrossStorePaths(t *testing.T) {
+	databaseURL := os.Getenv("QCH_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("QCH_TEST_DATABASE_URL is not configured")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	keyedStore, err := OpenWithConfigKey(ctx, databaseURL, true, testEncryptionKey("missing-key-paths"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer keyedStore.Close()
+
+	enrollment, err := keyedStore.CreateEnrollmentToken(ctx, core.EnrollmentTokenRequest{Name: "missing-key-paths", TTLMinutes: 5, MaxUses: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := keyedStore.EnrollAgent(ctx, core.EnrollRequest{
+		Name: "missing-key-paths", OS: "linux", Arch: "amd64", Capabilities: []core.Engine{core.EngineMihomo},
+		PublicKey: base64.RawURLEncoding.EncodeToString(randomPublicKey(t)),
+	}, enrollment.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanupTaskTestAgent(keyedStore, agent.ID, enrollment.ID)
+	saved, err := keyedStore.SaveAgentConfig(ctx, core.Config{
+		AgentID: agent.ID, Name: "missing-key config", Engine: core.EngineMihomo,
+		Content: "mixed-port: 7892\nmode: rule\nrules:\n  - MATCH,DIRECT\n",
+	}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	template, err := keyedStore.CreateConfigTemplate(ctx, "missing-key template", "mihomo", "mixed-port: 7893\nmode: rule\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer keyedStore.DeleteConfigTemplate(context.Background(), template.ID)
+	task, err := keyedStore.CreateTask(ctx, core.TaskRequest{AgentID: agent.ID, Action: core.ActionReadConfig, Engine: core.EngineMihomo})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := keyedStore.pool.Exec(ctx, `UPDATE tasks SET status='succeeded',config_content=(SELECT content FROM configs WHERE id=$1),finished_at=now() WHERE id=$2`, saved.ID, task.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	plainStore, err := Open(ctx, databaseURL, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer plainStore.Close()
+	if _, err := plainStore.AgentConfig(ctx, agent.ID, core.EngineMihomo); err == nil || strings.Contains(err.Error(), "rf2:") {
+		t.Fatalf("agent config without key error=%v, must fail closed without ciphertext", err)
+	}
+	if _, err := plainStore.ConfigRevision(ctx, saved.ID, 1); err == nil || strings.Contains(err.Error(), "rf2:") {
+		t.Fatalf("config revision without key error=%v, must fail closed without ciphertext", err)
+	}
+	if _, err := plainStore.ListConfigTemplates(ctx); err == nil || strings.Contains(err.Error(), "rf2:") {
+		t.Fatalf("template list without key error=%v, must fail closed without ciphertext", err)
+	}
+	if _, err := plainStore.ReadTaskConfigSnapshot(ctx, task.ID, agent.ID, core.EngineMihomo); err == nil || strings.Contains(err.Error(), "rf2:") {
+		t.Fatalf("task snapshot without key error=%v, must fail closed without ciphertext", err)
+	}
+}
+
+func randomPublicKey(t *testing.T) []byte {
+	t.Helper()
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		t.Fatal(err)
+	}
+	return key
 }

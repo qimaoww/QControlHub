@@ -19,7 +19,7 @@ func TestReusableAddNodeCredentialReinstallsOneBoundNode(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	dataStore, err := Open(ctx, databaseURL, true)
+	dataStore, err := OpenWithConfigKey(ctx, databaseURL, true, testEncryptionKey("enrollment-reinstall-test-key"))
 	if err != nil {
 		t.Fatalf("open PostgreSQL: %v", err)
 	}
@@ -121,7 +121,7 @@ func TestAdditionalAgentCredentialsRemainIndependentlyUsable(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	dataStore, err := Open(ctx, databaseURL, true)
+	dataStore, err := OpenWithConfigKey(ctx, databaseURL, true, testEncryptionKey("enrollment-reinstall-test-key"))
 	if err != nil {
 		t.Fatalf("open PostgreSQL: %v", err)
 	}
@@ -211,7 +211,7 @@ func TestDeleteAgentInvalidatesBoundReusableCredential(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	dataStore, err := Open(ctx, databaseURL, true)
+	dataStore, err := OpenWithConfigKey(ctx, databaseURL, true, testEncryptionKey("enrollment-reinstall-test-key"))
 	if err != nil {
 		t.Fatalf("open PostgreSQL: %v", err)
 	}
