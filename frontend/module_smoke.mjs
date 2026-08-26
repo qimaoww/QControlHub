@@ -31,6 +31,7 @@ import {
   installConfigPages,
   liveConfigEngineEligible,
   liveConfigEditorState,
+  liveConfigReadAction,
   submitLiveConfigChange,
 } from "./modules/configs.js";
 import {
@@ -247,6 +248,40 @@ assert.equal(
   "unsupported existing services remain eligible for the reason page and sidebar",
 );
 assert.equal(liveConfigEngineEligible({ installed: false }), false);
+assert.equal(
+  liveConfigReadAction({
+    sourceMode: "managed",
+    managedReadSupported: false,
+    existingAvailable: false,
+  }),
+  "read-config",
+  "old Agents keep the legacy managed read when no external service exists",
+);
+assert.equal(
+  liveConfigReadAction({
+    sourceMode: "managed",
+    managedReadSupported: false,
+    existingAvailable: true,
+  }),
+  "",
+  "old Agents cannot confuse two coexisting configuration sources",
+);
+assert.equal(
+  liveConfigReadAction({
+    sourceMode: "managed",
+    managedReadSupported: true,
+    existingAvailable: true,
+  }),
+  "read-managed-config",
+);
+assert.equal(
+  liveConfigReadAction({
+    sourceMode: "import",
+    managedReadSupported: true,
+    existingAvailable: true,
+  }),
+  "read-config",
+);
 
 const dualSourceDocument = globalThis.document;
 globalThis.document = {
