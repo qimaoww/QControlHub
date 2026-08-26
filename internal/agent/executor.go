@@ -279,13 +279,13 @@ func validateExistingCoreExecutable(path string) error {
 	return validateNativeCoreExecutableWithOwnerPolicy(path, installerCoreAllowsOrphanOwner(path))
 }
 
-// existingCoreInvocationSpec makes the fixed installer-path orphan-owner
-// exception usable without restoring CAP_DAC_OVERRIDE to QAgent. A historical
-// archive can leave a native core as, for example, uid 1001 mode 0744. The
-// protected file is readable but QAgent's capability-bounded root process is
-// neither its owner nor allowed to bypass the missing other-execute bit.
-// Invoke a root-owned private copy only after the original has passed the full
-// inactive-orphan, protected-path, regular-file, and native-core checks.
+// existingCoreInvocationSpec invokes every fixed installer-path core through a
+// root-owned private copy without restoring CAP_DAC_OVERRIDE to QAgent. This
+// covers both historical orphan-owned archives with a missing other-execute
+// bit and installer directories whose execution policy can deny the original
+// path even when the core itself is root-owned. Every source must first pass
+// the full owner-policy, protected-path, regular-file, and native-core checks;
+// cores outside the four fixed compatibility paths continue to run in place.
 func (e *Executor) existingCoreInvocationSpec(engine core.Engine, managed, existing EngineSpec) (EngineSpec, func(), error) {
 	if err := validateProtectedDirectoryChain(filepath.Dir(existing.Binary)); err != nil {
 		return EngineSpec{}, func() {}, err
@@ -297,12 +297,8 @@ func (e *Executor) existingCoreInvocationSpec(engine core.Engine, managed, exist
 	if err != nil {
 		return EngineSpec{}, func() {}, err
 	}
-	uid, _, ownershipKnown := fileOwnership(info)
-	if !ownershipKnown || uid == 0 {
-		return existing, func() {}, nil
-	}
 	if !installerCoreAllowsOrphanOwner(existing.Binary) {
-		return EngineSpec{}, func() {}, errors.New("non-root existing core is outside the fixed installer compatibility paths")
+		return existing, func() {}, nil
 	}
 
 	stagingDirectory := filepath.Dir(managed.ConfigPath)
@@ -602,7 +598,7 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (string, erro
 		if err := ensureManagedCoreServiceCapabilities(ctx, task.Engine, spec, e.serviceManager()); err != nil {
 			return validation, err
 		}
-		backup, err := atomicDeploy(spec.ConfigPath, task.ConfigContent)
+		backup, err := atomicDeployManagedConfiguration(task.Engine, spec, e.serviceManager(), task.ConfigContent)
 		if err != nil {
 			return validation, err
 		}
@@ -637,6 +633,9 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (string, erro
 	case core.ActionStart, core.ActionRestart:
 		if err := ensureManagedCoreServiceCapabilities(ctx, task.Engine, spec, e.serviceManager()); err != nil {
 			return "", err
+		}
+		if err := ensureDefaultManagedConfigurationAccess(task.Engine, spec, e.serviceManager()); err != nil {
+			return "", fmt.Errorf("prepare managed %s configuration access: %w", task.Engine, err)
 		}
 		return serviceCommandAndVerifyWithManager(ctx, e.serviceManager(), spec.Service, task.Action)
 	case core.ActionStop:
@@ -732,10 +731,16 @@ func (e *Executor) readExistingConfig(ctx context.Context, engine core.Engine, m
 			return "", fmt.Errorf("existing %s configuration sources failed real core validation: %w", engine, err)
 		}
 	}
-	if engine == core.EngineXray {
+	switch engine {
+	case core.EngineXray:
 		content, err = normalizeImportedXrayLogDestinations(content)
 		if err != nil {
 			return "", fmt.Errorf("normalize existing Xray log destinations: %w", err)
+		}
+	case core.EngineSingBox:
+		content, err = normalizeImportedSingBoxLogDestination(content)
+		if err != nil {
+			return "", fmt.Errorf("normalize existing sing-box log destination: %w", err)
 		}
 	}
 	if _, err := e.validateSnapshot(ctx, engine, validationSpec, content); err != nil {
@@ -920,6 +925,45 @@ func normalizeImportedXrayLogDestinations(content string) (string, error) {
 	if !changed {
 		return content, nil
 	}
+	normalizedLog, err := json.Marshal(logging)
+	if err != nil {
+		return "", err
+	}
+	root["log"] = normalizedLog
+	normalized, err := json.MarshalIndent(root, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	return string(normalized) + "\n", nil
+}
+
+// normalizeImportedSingBoxLogDestination moves an existing absolute file log
+// outside the managed state directory onto the managed service's console log.
+// Safe relative/managed-state file outputs and disabled logging are preserved.
+func normalizeImportedSingBoxLogDestination(content string) (string, error) {
+	output, destination, err := singBoxLogOutput(content)
+	if err != nil {
+		return "", err
+	}
+	if destination != singBoxLogDestinationFile {
+		return content, nil
+	}
+	if strings.ContainsAny(output, "\x00\r\n") {
+		return "", errors.New("sing-box log output contains a control character")
+	}
+	if _, err := importedSingBoxLogPath(output); err == nil {
+		return content, nil
+	}
+
+	var root map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(content), &root); err != nil {
+		return "", err
+	}
+	var logging map[string]json.RawMessage
+	if err := json.Unmarshal(root["log"], &logging); err != nil {
+		return "", fmt.Errorf("sing-box log configuration is not an object: %w", err)
+	}
+	logging["output"] = json.RawMessage(`"stdout"`)
 	normalizedLog, err := json.Marshal(logging)
 	if err != nil {
 		return "", err
@@ -1775,24 +1819,58 @@ func serviceCommandAndVerifyWithManager(ctx context.Context, manager *ServiceMan
 	if err != nil {
 		return output, err
 	}
+	if action == core.ActionStop && manager.Kind() == ServiceManagerSystemd {
+		status, statusErr := manager.status(ctx, service)
+		if statusErr != nil {
+			return output, withServiceFailureDiagnostics(ctx, manager, service, statusErr)
+		}
+		if status == "failed" {
+			if err := manager.resetFailed(ctx, service); err != nil {
+				return output, withServiceFailureDiagnostics(ctx, manager, service, err)
+			}
+		}
+	}
 	expected := "active"
 	stableFor := 500 * time.Millisecond
+	verificationTimeout := 12 * time.Second
 	if action == core.ActionStop {
 		expected = "inactive"
 		stableFor = 0
+		verificationTimeout = 5 * time.Second
 	}
-	verifyContext, verifyCancel := context.WithTimeout(ctx, 5*time.Second)
+	verifyContext, verifyCancel := context.WithTimeout(ctx, verificationTimeout)
 	status, statusErr := waitForServiceState(verifyContext, expected, stableFor, 100*time.Millisecond, func(probeContext context.Context) (string, error) {
 		return manager.status(probeContext, service)
 	})
 	verifyCancel()
 	if statusErr != nil {
-		return output, fmt.Errorf("verify %s service %s after %s: %w", manager.Kind(), service, action, statusErr)
+		cause := fmt.Errorf("verify %s service %s after %s: %w", manager.Kind(), service, action, statusErr)
+		return output, withServiceFailureDiagnostics(ctx, manager, service, cause)
 	}
 	if status != expected {
-		return output + "\nservice status: " + status, fmt.Errorf("%s service %s is %s after %s, expected %s", manager.Kind(), service, status, action, expected)
+		cause := fmt.Errorf("%s service %s is %s after %s, expected %s", manager.Kind(), service, status, action, expected)
+		return output + "\nservice status: " + status, withServiceFailureDiagnostics(ctx, manager, service, cause)
 	}
 	return output + "\nservice status: " + status, nil
+}
+
+func withServiceFailureDiagnostics(ctx context.Context, manager *ServiceManager, service string, cause error) error {
+	if manager == nil || manager.Kind() != ServiceManagerSystemd {
+		return cause
+	}
+	diagnosticContext, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	output, _ := run(diagnosticContext, manager.executable, "show", service, "--no-pager",
+		"--property=ActiveState", "--property=SubState", "--property=Result",
+		"--property=ExecMainCode", "--property=ExecMainStatus", "--property=NRestarts")
+	output = strings.TrimSpace(strings.ToValidUTF8(output, "�"))
+	if output == "" {
+		return cause
+	}
+	if len(output) > 2048 {
+		output = strings.ToValidUTF8(output[:2048], "�")
+	}
+	return fmt.Errorf("%w; unit state:\n%s", cause, output)
 }
 
 type serviceStatusProbe func(context.Context) (string, error)
@@ -1963,6 +2041,10 @@ func safeServiceName(value string) bool {
 }
 
 func atomicDeploy(destination, content string) (string, error) {
+	return atomicDeployWithDefaultMetadata(destination, content, fileMetadata{mode: 0o600})
+}
+
+func atomicDeployWithDefaultMetadata(destination, content string, defaultMetadata fileMetadata) (string, error) {
 	if destination == "" || !filepath.IsAbs(destination) {
 		return "", errors.New("configuration destination must be an absolute path")
 	}
@@ -1989,7 +2071,7 @@ func atomicDeploy(destination, content string) (string, error) {
 	}
 	defer root.Close()
 	baseName := filepath.Base(destination)
-	metadata := fileMetadata{mode: 0o600}
+	metadata := defaultMetadata
 	var backup string
 	var backupName string
 	if info, err := root.Lstat(baseName); err == nil {

@@ -550,9 +550,11 @@ func validateManagedUnitDropIns(ctx context.Context, service string) error {
 	if err != nil {
 		return fmt.Errorf("managed service effective DropInPaths cannot be read: %w", err)
 	}
-	allowed := map[string][]byte{
-		filepath.Join(existingDiscoveryManagedUnitRoot, service+".d", "10-qcontrolhub-bind-low-ports.conf"): []byte(managedCoreCapabilityDropIn),
-		filepath.Join(existingDiscoveryManagedUnitRoot, service+".d", "20-qcontrolhub-volatile-logs.conf"):  []byte(managedCoreLogDropIn),
+	allowed := map[string][][]byte{
+		filepath.Join(existingDiscoveryManagedUnitRoot, service+".d", "10-qcontrolhub-bind-low-ports.conf"): {[]byte(managedCoreCapabilityDropIn)},
+		filepath.Join(existingDiscoveryManagedUnitRoot, service+".d", "20-qcontrolhub-volatile-logs.conf"): {
+			[]byte(managedCoreLogDropIn), []byte(managedCoreLogFallbackDropIn),
+		},
 	}
 	for _, path := range strings.Fields(dropInValue) {
 		expected, ok := allowed[path]
@@ -566,11 +568,20 @@ func validateManagedUnitDropIns(ctx context.Context, service string) error {
 			return err
 		}
 		contents, err := os.ReadFile(path)
-		if err != nil || string(contents) != string(expected) {
+		if err != nil || !matchesAnyManagedDropIn(contents, expected) {
 			return fmt.Errorf("managed service drop-in %q is not project-managed", path)
 		}
 	}
 	return nil
+}
+
+func matchesAnyManagedDropIn(contents []byte, expected [][]byte) bool {
+	for _, candidate := range expected {
+		if string(contents) == string(candidate) {
+			return true
+		}
+	}
+	return false
 }
 
 func supportedManagedExecStart(engine core.Engine, managed EngineSpec, executable, argv string) bool {

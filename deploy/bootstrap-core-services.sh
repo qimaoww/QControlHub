@@ -29,8 +29,8 @@ if [ -z "$service_manager" ]; then
   fi
 fi
 case "$service_manager" in
-  systemd) required_commands="cmp getent grep groupadd id install systemctl useradd" ;;
-  openrc) required_commands="addgroup adduser cmp grep id install rc-service rc-update supervise-daemon" ;;
+  systemd) required_commands="chmod chown cmp getent grep groupadd id install systemctl useradd" ;;
+  openrc) required_commands="addgroup adduser chmod chown cmp grep id install rc-service rc-update supervise-daemon" ;;
   *) printf '%s\n' "unsupported service manager: $service_manager" >&2; exit 1 ;;
 esac
 mapping_library="$script_dir/existing-core-mapping.sh"
@@ -75,6 +75,26 @@ ensure_directory() {
   if [ ! -d "$destination" ]; then
     install -d -o root -g "$service_group" -m 0750 "$destination"
   fi
+}
+
+ensure_service_state_directory() {
+  destination=$1
+  if [ -L "$destination" ]; then
+    printf '%s\n' "refusing symlinked state directory: $destination" >&2
+    exit 1
+  fi
+  if [ -e "$destination" ] && [ ! -d "$destination" ]; then
+    printf '%s\n' "refusing non-directory state path: $destination" >&2
+    exit 1
+  fi
+  if [ ! -d "$destination" ]; then
+    install -d -o root -g root -m 0750 "$destination"
+  fi
+  # Capability-bounded root has CAP_CHOWN but deliberately lacks CAP_FOWNER.
+  # Keep root as owner while setting the mode, then transfer ownership last.
+  chown root:root "$destination"
+  chmod 0750 "$destination"
+  chown "$service_user:$service_group" "$destination"
 }
 
 install_managed_unit() {
@@ -155,7 +175,7 @@ for engine in $selected_engines; do
     printf '%s\n' "refusing symlinked state directory: $state_directory" >&2
     exit 1
   fi
-  install -d -o "$service_user" -g "$service_group" -m 0750 "$state_directory"
+  ensure_service_state_directory "$state_directory"
   case "$engine" in
     mihomo) source_config="$repository_dir/examples/configs/mihomo-minimal.yaml"; destination_config=/etc/qagent/mihomo/config.yaml ;;
     xray) source_config="$repository_dir/examples/configs/xray-minimal.json"; destination_config=/etc/qagent/xray/config.json ;;

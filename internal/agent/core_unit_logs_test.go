@@ -54,10 +54,25 @@ func TestStartManagedCoreJournalUsesFixedNamespaceUnit(t *testing.T) {
 	t.Parallel()
 	systemctl := filepath.Join(t.TempDir(), "systemctl")
 	writeExecutable(t, systemctl, `#!/bin/sh
-test "$1" = start
 test "$2" = systemd-journald@qagent-cores.service
+case "$1" in
+start) ;;
+is-active) printf 'active\n' ;;
+*) exit 64 ;;
+esac
 `)
 	if err := startManagedCoreJournal(context.Background(), systemctl); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestManagedCoreLogFallbackIsProjectManaged(t *testing.T) {
+	for _, contents := range [][]byte{[]byte(managedCoreLogDropIn), []byte(managedCoreLogFallbackDropIn)} {
+		if !matchesAnyManagedDropIn(contents, [][]byte{[]byte(managedCoreLogDropIn), []byte(managedCoreLogFallbackDropIn)}) {
+			t.Fatalf("managed log drop-in was not accepted: %q", contents)
+		}
+	}
+	if matchesAnyManagedDropIn([]byte("[Service]\nEnvironment=UNSAFE=1\n"), [][]byte{[]byte(managedCoreLogDropIn), []byte(managedCoreLogFallbackDropIn)}) {
+		t.Fatal("unknown managed log drop-in was accepted")
 	}
 }

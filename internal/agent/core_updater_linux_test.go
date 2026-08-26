@@ -88,7 +88,7 @@ func TestFirstInstallRollbackStopsRestartingService(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(commands) != "stop qagent-sing-box.service\nis-active qagent-sing-box.service\n" {
+	if string(commands) != "stop qagent-sing-box.service\nis-active qagent-sing-box.service\nis-active qagent-sing-box.service\n" {
 		t.Fatalf("systemctl commands = %q", commands)
 	}
 }

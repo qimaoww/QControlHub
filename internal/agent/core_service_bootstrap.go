@@ -15,6 +15,8 @@ import (
 
 const defaultCoreBootstrapScript = "/usr/local/share/qcontrolhub/core-install/deploy/bootstrap-core-services.sh"
 
+const legacyCoreStateDirectoryInstall = `install -d -o "$service_user" -g "$service_group" -m 0750 "$state_directory"`
+
 type coreServiceBootstrapper struct {
 	scriptPath     string
 	systemdRunPath string
@@ -56,6 +58,9 @@ func (e *Executor) prepareManagedCoreService(ctx context.Context, engine core.En
 			return fmt.Errorf("validate newly installed managed %s service: %w", engine, err)
 		}
 	}
+	if err := ensureDefaultManagedConfigurationAccess(engine, spec, manager); err != nil {
+		return fmt.Errorf("prepare managed %s configuration access: %w", engine, err)
+	}
 	if err := ensureManagedCoreLogStreaming(ctx, map[core.Engine]EngineSpec{engine: spec}, manager); err != nil {
 		return fmt.Errorf("prepare managed %s logs: %w", engine, err)
 	}
@@ -91,10 +96,14 @@ func (bootstrapper coreServiceBootstrapper) runSystemd(ctx context.Context, engi
 	if err := validatePrivilegedExecutable(bootstrapper.systemdRunPath); err != nil {
 		return fmt.Errorf("unsafe managed core bootstrap helper: %w", err)
 	}
+	capabilities, err := managedCoreBootstrapCapabilities(bootstrapper.scriptPath)
+	if err != nil {
+		return fmt.Errorf("inspect managed core bootstrap compatibility: %w", err)
+	}
 	arguments := []string{
 		"--pipe", "--wait", "--collect", "--quiet", "--service-type=exec",
 		"--property=User=root", "--property=UMask=0022", "--property=NoNewPrivileges=yes",
-		"--property=CapabilityBoundingSet=CAP_CHOWN", "--property=AmbientCapabilities=CAP_CHOWN",
+		"--property=CapabilityBoundingSet=" + capabilities, "--property=AmbientCapabilities=" + capabilities,
 		"--property=ProtectSystem=strict", "--property=ProtectHome=yes", "--property=PrivateTmp=yes",
 		"--property=PrivateDevices=yes", "--property=RestrictAddressFamilies=AF_UNIX",
 		"--property=ConfigurationDirectory=qagent", "--property=StateDirectory=qcontrolhub-" + managedCoreAssetName(engine),
@@ -106,6 +115,23 @@ func (bootstrapper coreServiceBootstrapper) runSystemd(ctx context.Context, engi
 	}
 	arguments = append(arguments, "--", bootstrapper.scriptPath, managedCoreAssetName(engine))
 	return runCoreBootstrapCommand(ctx, bootstrapper.systemdRunPath, arguments, nil)
+}
+
+// Older staged bootstrap assets use GNU install to chown a state directory
+// before chmodding it. Once ownership changes, capability-bounded root needs
+// CAP_FOWNER for the chmod. New assets order those operations safely and need
+// only CAP_CHOWN; retain the additional transient capability solely while an
+// upgraded Agent is still paired with the exact legacy command.
+func managedCoreBootstrapCapabilities(scriptPath string) (string, error) {
+	contents, err := os.ReadFile(scriptPath)
+	if err != nil {
+		return "", err
+	}
+	capabilities := "CAP_CHOWN"
+	if strings.Contains(string(contents), legacyCoreStateDirectoryInstall) {
+		capabilities += " CAP_FOWNER"
+	}
+	return capabilities, nil
 }
 
 func (bootstrapper coreServiceBootstrapper) runOpenRC(ctx context.Context, engine core.Engine, existing bool) error {

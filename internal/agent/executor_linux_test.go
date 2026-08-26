@@ -8,8 +8,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
@@ -109,6 +111,97 @@ func TestAtomicDeployAndRollbackPreserveConfigurationMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertFileContentAndMetadata(t, destination, "original", want)
+}
+
+func TestManagedConfigurationAccessRepairsExistingAndNewFiles(t *testing.T) {
+	requireAgentRoot(t)
+	root, err := os.MkdirTemp("/tmp", "qcontrolhub-managed-config-test-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(root) })
+	if err := os.Chmod(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	managedRoot := filepath.Join(root, "qagent")
+	directory := filepath.Join(managedRoot, "xray")
+	if err := os.MkdirAll(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(directory, "config.json")
+	if err := os.WriteFile(configPath, []byte("old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	const serviceGID = 65534
+	metadata, err := prepareManagedConfigurationAccessWithGID(managedRoot, configPath, serviceGID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{managedRoot, directory} {
+		got := statFileMetadata(t, path)
+		if got.uid != 0 || got.gid != serviceGID || got.mode != 0o750 {
+			t.Fatalf("managed directory metadata for %s = %+v", path, got)
+		}
+	}
+	got := statFileMetadata(t, configPath)
+	if got.uid != 0 || got.gid != serviceGID || got.mode != 0o640 {
+		t.Fatalf("existing managed configuration metadata = %+v", got)
+	}
+
+	if err := os.Remove(configPath); err != nil {
+		t.Fatal(err)
+	}
+	metadata, err = prepareManagedConfigurationAccessWithGID(managedRoot, configPath, serviceGID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := atomicDeployWithDefaultMetadata(configPath, "new", metadata); err != nil {
+		t.Fatal(err)
+	}
+	got = statFileMetadata(t, configPath)
+	if got.uid != 0 || got.gid != serviceGID || got.mode != 0o640 {
+		t.Fatalf("new managed configuration metadata = %+v", got)
+	}
+	command := exec.Command("/usr/bin/test", "-r", configPath)
+	command.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: serviceGID, Gid: serviceGID}}
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("managed service group cannot read new configuration: %v: %s", err, output)
+	}
+}
+
+func TestManagedConfigurationAccessRejectsUnsafePaths(t *testing.T) {
+	requireAgentRoot(t)
+	root := t.TempDir()
+	managedRoot := filepath.Join(root, "qagent")
+	directory := filepath.Join(managedRoot, "xray")
+	if err := os.MkdirAll(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := prepareManagedConfigurationAccessWithGID(managedRoot, filepath.Join(root, "outside.json"), 65534); err == nil || !strings.Contains(err.Error(), "escapes") {
+		t.Fatalf("outside managed configuration error = %v", err)
+	}
+	if err := os.Chmod(directory, 0o770); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := prepareManagedConfigurationAccessWithGID(managedRoot, filepath.Join(directory, "config.json"), 65534); err == nil || !strings.Contains(err.Error(), "writable") {
+		t.Fatalf("writable managed directory error = %v", err)
+	}
+	if err := os.Chmod(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(root, "target.json")
+	if err := os.WriteFile(target, []byte("unchanged"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(directory, "config.json")
+	if err := os.Symlink(target, configPath); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := prepareManagedConfigurationAccessWithGID(managedRoot, configPath, 65534); err == nil || !strings.Contains(err.Error(), "protected regular file") {
+		t.Fatalf("symlinked managed configuration error = %v", err)
+	}
+	assertFileContentAndMode(t, target, "unchanged", 0o600)
 }
 
 func TestRollbackDeployRestoresBackupAndBackupRetentionIsBounded(t *testing.T) {
@@ -270,7 +363,7 @@ func TestExistingSingBoxSnapshotMergesExactConfigDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	primary := filepath.Join(root, "config.json")
-	if err := os.WriteFile(primary, []byte(`{"log":{"level":"info"},"inbounds":[{"tag":"primary"}]}`), 0o600); err != nil {
+	if err := os.WriteFile(primary, []byte(`{"log":{"level":"info","timestamp":true,"output":"/var/log/sing-box/box.log"},"inbounds":[{"tag":"primary"}]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(configDirectory, "10-outbounds.json"), []byte(`{"outbounds":[{"tag":"direct","type":"direct"}]}`), 0o600); err != nil {
@@ -294,6 +387,9 @@ func TestExistingSingBoxSnapshotMergesExactConfigDirectory(t *testing.T) {
 		if !strings.Contains(content, required) {
 			t.Errorf("merged snapshot is missing %s: %s", required, content)
 		}
+	}
+	if !strings.Contains(content, `"output": "stdout"`) || !strings.Contains(content, `"timestamp": true`) {
+		t.Fatalf("unsafe existing sing-box file log was not normalized to managed console output: %s", content)
 	}
 	if strings.Contains(content, `"level": "info"`) {
 		t.Fatalf("later path unexpectedly replaced the earlier sorted sing-box value: %s", content)
@@ -395,6 +491,7 @@ func TestExistingSingBoxExtendedJSONConfigDirectorySnapshot(t *testing.T) {
 }
 
 func TestReadExistingXrayConfigurationUsesSourceDump(t *testing.T) {
+	requireAgentRoot(t)
 	root := t.TempDir()
 	configDirectory := filepath.Join(root, "conf.d")
 	if err := os.Mkdir(configDirectory, 0o700); err != nil {
@@ -415,6 +512,9 @@ func TestReadExistingXrayConfigurationUsesSourceDump(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "xray-dump.json"), []byte(dumped), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(binary+".control.json", []byte(`{}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	managed := EngineSpec{ConfigPath: filepath.Join(root, "managed", "config.json")}
 	existing := EngineSpec{Binary: binary, ConfigPath: primary, ConfigDirectory: configDirectory}
 	content, err := (&Executor{}).readExistingConfig(context.Background(), core.EngineXray, managed, existing)
@@ -428,6 +528,54 @@ func TestReadExistingXrayConfigurationUsesSourceDump(t *testing.T) {
 	logging := normalized["log"].(map[string]any)
 	if logging["access"] != "" || logging["error"] != "" || logging["loglevel"] != "error" {
 		t.Fatalf("normalized Xray log policy = %+v", logging)
+	}
+	if _, err := os.Stat(binary + ".invocations"); err != nil {
+		t.Fatalf("ordinary root-owned source binary was not invoked directly: %v", err)
+	}
+}
+
+func TestReadExistingXrayConfigurationStagesRootOwnedInstallerBinary(t *testing.T) {
+	requireAgentRoot(t)
+	root := t.TempDir()
+	configDirectory := filepath.Join(root, "conf.d")
+	if err := os.Mkdir(configDirectory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	primary := filepath.Join(root, "config.json")
+	if err := os.WriteFile(primary, []byte(`{"log":{"loglevel":"info"},"inbounds":[],"outbounds":[]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dumped := `{"log":{"loglevel":"error"},"inbounds":[],"outbounds":[]}`
+	binary := filepath.Join(root, "xray")
+	if err := os.WriteFile(binary, existingDiscoveryCoreHelper, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "xray-dump.json"), []byte(dumped), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(binary+".control.json", []byte(`{}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	allowFixtureOrphanOwnerPath(t, binary)
+	stateDirectory := filepath.Join(root, "state")
+	if err := os.Mkdir(stateDirectory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	managed := EngineSpec{ConfigPath: filepath.Join(root, "managed", "config.json")}
+	existing := EngineSpec{Binary: binary, ConfigPath: primary, ConfigDirectory: configDirectory}
+	executor := &Executor{MigrationMarkerPrefix: filepath.Join(stateDirectory, "agent-state.json.core-migration")}
+	content, err := executor.readExistingConfig(context.Background(), core.EngineXray, managed, existing)
+	if err != nil {
+		t.Fatalf("readExistingConfig() error = %v", err)
+	}
+	if !strings.Contains(content, `"loglevel":"error"`) {
+		t.Fatalf("root-owned installer Xray dump = %s", content)
+	}
+	if _, err := os.Stat(binary + ".invocations"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("root-owned installer source binary was invoked directly: %v", err)
+	}
+	if staged, err := filepath.Glob(filepath.Join(stateDirectory, ".qcontrolhub-core-*.tmp")); err != nil || len(staged) != 0 {
+		t.Fatalf("protected invocation copies after cleanup = %v, %v", staged, err)
 	}
 }
 
