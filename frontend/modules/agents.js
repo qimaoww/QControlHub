@@ -771,6 +771,10 @@ async function nodeSettings(presetMode = false, { overview: preloadedOverview } 
         ? [selectedAgent]
         : []
       : orderAgents(agents);
+  const batchAvailable =
+    !presetMode && !detailRoute && agents.length > 1 && can("operator");
+  if (!batchAvailable) state.data.nodeBatchMode = false;
+  const batchMode = batchAvailable && Boolean(state.data.nodeBatchMode);
   const serviceActionIcons = {
     status:
       '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h3l2-5 4 10 2-5h5"/></svg>',
@@ -922,38 +926,27 @@ async function nodeSettings(presetMode = false, { overview: preloadedOverview } 
             return `<span class="core-chip service-${esc(engine)}" data-core-installed="${installed ? 1 : 0}"><span class="engine-badge ${esc(engine)}">${esc(engineName(engine))}</span><span class="engine-state ${tone}"><i></i><b data-core-service="${esc(engine)}">${esc(serviceState)}</b></span></span>`;
           })
           .join("");
-        return `<a class="node-card" href="#settings-node-${esc(agent.id)}" data-refresh-key="agent-${esc(agent.id)}" data-agent-node="${esc(agent.id)}" data-agent-metrics="${esc(agent.id)}" data-state="${agent.status === "online" ? "online" : "offline"}" data-available="${metrics.collected_at ? 1 : 0}">
-              <header class="node-card-head"><span class="machine-avatar" aria-hidden="true">●</span><div class="node-card-title"><strong>${esc(agent.name)}</strong><small data-core-installed-summary>${esc(agent.os)} / ${esc(agent.arch)} · ${installedCount ? `${installedCount}/${(agent.capabilities || []).length} 内核已安装` : "尚未安装内核"}</small></div><span class="node-card-state"><i class="status-dot ${statusTone(agent.status)}" data-agent-status-dot></i><b data-agent-status-label>${agent.status === "online" ? "在线" : "离线"}</b><small data-agent-heartbeat>${esc(heartbeat(agent.last_seen))}</small></span><span class="node-card-grip" title="拖动调整顺序" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 6h.01M9 12h.01M9 18h.01M15 6h.01M15 12h.01M15 18h.01"/></svg></span></header>
+        const cardTag = batchMode ? "article" : "a";
+        const cardInteraction = batchMode
+          ? `data-node-batch-card`
+          : `href="#settings-node-${esc(agent.id)}"`;
+        const batchSelect = batchMode
+          ? `<label class="node-card-select" title="选择 ${esc(agent.name)}"><input type="checkbox" data-batch-checkbox value="${esc(agent.id)}" aria-label="选择 ${esc(agent.name)} 参与批量操作"><span aria-hidden="true"></span></label>`
+          : "";
+        return `<${cardTag} class="node-card ${batchMode ? "batch-selecting" : ""}" ${cardInteraction} data-refresh-key="agent-${esc(agent.id)}" data-agent-node="${esc(agent.id)}" data-agent-metrics="${esc(agent.id)}" data-state="${agent.status === "online" ? "online" : "offline"}" data-available="${metrics.collected_at ? 1 : 0}">
+              <header class="node-card-head"><span class="machine-avatar" aria-hidden="true">●</span><div class="node-card-title"><strong>${esc(agent.name)}</strong><small data-core-installed-summary>${esc(agent.os)} / ${esc(agent.arch)} · ${installedCount ? `${installedCount}/${(agent.capabilities || []).length} 内核已安装` : "尚未安装内核"}</small></div><span class="node-card-state"><i class="status-dot ${statusTone(agent.status)}" data-agent-status-dot></i><b data-agent-status-label>${agent.status === "online" ? "在线" : "离线"}</b><small data-agent-heartbeat>${esc(heartbeat(agent.last_seen))}</small></span>${batchMode ? batchSelect : '<span class="node-card-grip" title="拖动调整顺序" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 6h.01M9 12h.01M9 18h.01M15 6h.01M15 12h.01M15 18h.01"/></svg></span>'}</header>
               <div class="node-card-ips" aria-label="公网地址">${addressRows.map(cardIPRow).join("")}<small class="node-address-note" data-node-connection-address ${connectionAddressNote ? "" : "hidden"}>${esc(connectionAddressNote)}</small></div>
               <section class="node-card-resources" aria-label="节点资源"><div><span>CPU</span><strong data-metric-text="cpu">${metrics.cpu_available ? `${Number(metrics.cpu_percent).toFixed(1)}%` : "等待采集"}</strong><progress aria-label="CPU 使用率" data-metric-progress="cpu" max="100" value="${metrics.cpu_available ? Number(metrics.cpu_percent) : 0}"></progress></div><div><span>内存</span><strong data-metric-text="memory">${metrics.memory_available ? `${bytes(metrics.memory_used_bytes)} / ${bytes(metrics.memory_total_bytes)}` : "等待采集"}</strong><progress aria-label="内存使用率" data-metric-progress="memory" max="100" value="${percent(metrics.memory_used_bytes, metrics.memory_total_bytes)}"></progress></div><div><span>磁盘</span><strong data-metric-text="disk">${metrics.disk_available ? `${bytes(metrics.disk_used_bytes)} / ${bytes(metrics.disk_total_bytes)}` : "等待采集"}</strong><progress aria-label="根磁盘使用率" data-metric-progress="disk" max="100" value="${percent(metrics.disk_used_bytes, metrics.disk_total_bytes)}"></progress></div><div><span>网络</span><strong>↓ <i data-metric-text="download-rate">${metrics.network_available ? rate(metrics.network_rx_bps) : "等待采集"}</i> · ↑ <i data-metric-text="upload-rate">${metrics.network_available ? rate(metrics.network_tx_bps) : "等待采集"}</i></strong><small>累计 ↓ <b data-metric-text="download-total">${metrics.network_available ? bytes(metrics.network_rx_bytes) : "—"}</b> · ↑ <b data-metric-text="upload-total">${metrics.network_available ? bytes(metrics.network_tx_bytes) : "—"}</b></small></div><span class="machine-resource-live" data-metric-poll role="status" aria-label="资源自动更新"></span></section>
               <section class="node-card-cores" aria-label="内核状态">${coreChips}</section>
-              <footer class="node-card-foot"><small><i></i><span data-agent-version>${esc(agent.version || "未知")}</span></small><span class="node-card-stamp" data-metric-text="stamp">${metrics.collected_at ? `采集于 ${ago(metrics.collected_at)}` : "等待资源数据"}</span><span class="node-card-open">管理节点 <i aria-hidden="true">→</i></span></footer>
-            </a>`;
+              <footer class="node-card-foot"><small><i></i><span data-agent-version>${esc(agent.version || "未知")}</span></small><span class="node-card-stamp" data-metric-text="stamp">${metrics.collected_at ? `采集于 ${ago(metrics.collected_at)}` : "等待资源数据"}</span>${batchMode ? "" : '<span class="node-card-open">管理节点 <i aria-hidden="true">→</i></span>'}</footer>
+            </${cardTag}>`;
       }
       return `<section class="preset-node-workspace workspace-panel machine-body" id="preset-node-${esc(agent.id)}" data-refresh-key="agent-${esc(agent.id)}" data-agent-node="${esc(agent.id)}" data-agent-metrics="${esc(agent.id)}" data-available="${metrics.collected_at ? 1 : 0}" aria-label="选中节点的内核预设"><section class="service-canvas"><header class="service-canvas-head"><h2>节点内核</h2><span>${(agent.capabilities || []).length} 个内核</span></header><div class="service-grid">${services}</div></section></section>`;
     })
     .join("");
 
-  const batch =
-    !presetMode && !detailRoute && agents.length > 1 && can("operator")
-      ? `<details class="node-batch-panel"><summary><span><b>批量操作</b><small>全选仅包含当前列表中可执行所选动作的节点</small></span><i>＋</i></summary><form class="batch-toolbar" id="batch-form"><div class="batch-selection-head"><label class="batch-select-all"><input type="checkbox" data-batch-select-all aria-label="全选当前合格节点" aria-checked="false"><span data-batch-select-all-label>全选</span></label><strong data-batch-count aria-live="polite">已选择 0 个节点</strong></div><fieldset class="batch-node-options"><legend>当前节点范围</legend>${agents.map((agent) => `<label class="batch-select" title="选择此节点参与批量操作"><input type="checkbox" data-batch-checkbox value="${esc(agent.id)}" aria-label="选择 ${esc(agent.name)} 参与批量操作"><span><b>${esc(agent.name)}</b><small data-batch-eligibility>${agent.status === "online" ? "在线" : "离线"}</small></span></label>`).join("")}</fieldset><div class="batch-controls"><label>动作<select name="action"><option value="upgrade-agent">批量更新 Agent</option><option value="restart">重启服务</option><option value="status">查询状态</option><option value="start">启动服务</option><option value="stop">停止服务</option></select></label><label data-batch-engine-wrap>内核<select name="engine">${engines.map((engine) => `<option value="${engine}">${esc(engineName(engine))}</option>`).join("")}</select></label><button class="button small" type="submit" disabled>执行</button><button class="button small" type="button" data-batch-clear disabled>清空选择</button></div><section class="batch-results" data-batch-results aria-live="polite" hidden></section></form></details>`
-      : "";
-  const onlineAgents = agents.filter(
-    (agent) => agent.status === "online",
-  ).length;
-  const introTone = agents.length
-    ? onlineAgents === agents.length
-      ? "ok"
-      : onlineAgents
-        ? "warn"
-        : "bad"
-    : "";
-  const pageIntro = presetMode
-    ? ""
-    : !detailRoute && agents.length
-      ? `<header class="node-page-intro"><div><p class="eyebrow">节点设置</p><h2>全部节点</h2><p>每个节点的资源占用与内核状态一屏总览；点击卡片进入管理台，拖动卡片左侧手柄调整顺序。</p></div><span class="node-intro-live"><i class="status-dot ${introTone}"></i>${agents.length} 个节点 · ${onlineAgents} 在线</span></header>`
-      : !detailRoute
-        ? `<header class="node-page-intro"><div><p class="eyebrow">节点设置</p><h2>全部节点</h2><p>${can("enrollment.manage") ? "使用页面顶栏的“添加节点”生成部署命令；" : "当前账号没有添加节点权限；"}节点上线后即可在这里管理 Agent、内核与运行状态。</p></div></header>`
+  const batchBar = batchMode
+      ? `<aside class="node-batch-bar" aria-label="批量操作栏"><div class="batch-selection-head"><label class="batch-select-all"><input type="checkbox" data-batch-select-all aria-label="全选当前合格节点" aria-checked="false"><span data-batch-select-all-label>全选</span></label><strong data-batch-count aria-live="polite">已选择 0 个节点</strong></div><div class="batch-controls"><label><span>动作</span><select name="action"><option value="upgrade-agent">批量更新 Agent</option><option value="restart">重启服务</option><option value="status">查询状态</option><option value="start">启动服务</option><option value="stop">停止服务</option></select></label><label data-batch-engine-wrap><span>内核</span><select name="engine">${engines.map((engine) => `<option value="${engine}">${esc(engineName(engine))}</option>`).join("")}</select></label><button class="button small" type="button" data-batch-clear disabled>清空</button><button class="button small primary" type="submit" disabled>执行</button><button class="node-batch-close" type="button" data-close-node-batch aria-label="退出批量操作" title="退出批量操作">×</button></div><section class="batch-results" data-batch-results aria-live="polite" hidden></section></aside>`
       : "";
   const detailMissingState = detailMissing
     ? '<section class="node-settings-missing" data-node-missing role="status"><strong>节点不可用</strong><p>该节点已删除、撤销或不再属于当前作用域。</p><a class="button small" href="#node-settings">返回全部节点</a></section>'
@@ -961,8 +954,11 @@ async function nodeSettings(presetMode = false, { overview: preloadedOverview } 
   const pageBody = detailMissingState || (nodeCards
     ? `<section class="${presetMode ? "machine-stack" : detailMode ? "node-settings-stack" : "node-card-grid"}">${nodeCards}</section>`
     : '<div class="empty large"><strong>还没有节点</strong><p>点击上方“添加节点”生成部署命令。</p></div>');
+  const batchPage = batchMode
+    ? `<form class="node-batch-form" id="batch-form">${pageBody}${batchBar}</form>`
+    : pageBody;
   shell(
-    `${pageIntro}${presetMode ? "" : `<div class="node-settings-page">${batch}${detailRoute ? `<a class="node-back-link" href="#node-settings">← 全部节点</a>` : ""}`}${pageBody}${presetMode ? "" : "</div>"}`,
+    `${presetMode ? "" : `<div class="node-settings-page">${detailRoute ? `<a class="node-back-link" href="#node-settings">← 全部节点</a>` : ""}`}${batchPage}${presetMode ? "" : "</div>"}`,
     presetMode ? "内核配置预设" : "节点设置",
     {
       viewKey: presetMode
@@ -1417,6 +1413,23 @@ function bindAgentPage(agentItems, presetMode = false, enrollmentHistory = {}) {
       await refreshAgentPage();
     };
   });
+  const setNodeBatchMode = async (enabled, trigger) => {
+    if (trigger?.disabled) return;
+    if (trigger) trigger.disabled = true;
+    state.data.nodeBatchMode = enabled;
+    cancelCardDrag();
+    try {
+      await renderAgentPage();
+    } catch (error) {
+      state.data.nodeBatchMode = !enabled;
+      if (trigger?.isConnected) trigger.disabled = false;
+      notify(error.message, "error");
+    }
+  };
+  document.querySelectorAll("[data-node-batch-toggle]").forEach((button) => {
+    button.onclick = () =>
+      setNodeBatchMode(!Boolean(state.data.nodeBatchMode), button);
+  });
   const batchForm = document.querySelector("#batch-form");
   const updateBatch = () => {
     if (!batchForm) return;
@@ -1429,12 +1442,12 @@ function bindAgentPage(agentItems, presetMode = false, enrollmentHistory = {}) {
       const eligibility = batchAgentEligibility(agent, action, engine);
       input.dataset.batchEligible = eligibility.eligible ? "1" : "0";
       input.disabled = busy || !eligibility.eligible;
-      input.closest(".batch-select").title = eligibility.reason;
-      const reason = input.closest(".batch-select").querySelector(
-        "[data-batch-eligibility]",
-      );
-      if (reason) reason.textContent = eligibility.reason;
+      const card = input.closest(".node-card");
+      const control = input.closest(".node-card-select");
+      if (control) control.title = eligibility.reason;
+      if (card) card.dataset.batchEligible = eligibility.eligible ? "1" : "0";
       if (!eligibility.eligible) input.checked = false;
+      card?.classList.toggle("selected", input.checked);
     });
     const selection = batchSelectAllState(inputs);
     const selectAll = batchForm.querySelector("[data-batch-select-all]");
@@ -1464,6 +1477,8 @@ function bindAgentPage(agentItems, presetMode = false, enrollmentHistory = {}) {
     if (engineWrap) engineWrap.hidden = action === "upgrade-agent";
     batchForm.elements.action.disabled = busy;
     batchForm.elements.engine.disabled = busy;
+    const close = batchForm.querySelector("[data-close-node-batch]");
+    if (close) close.disabled = busy;
     batchForm
       .querySelectorAll("[data-batch-retry]")
       .forEach((retry) => {
@@ -1490,6 +1505,15 @@ function bindAgentPage(agentItems, presetMode = false, enrollmentHistory = {}) {
   batchForm
     ?.querySelectorAll("[data-batch-checkbox]")
     .forEach((input) => (input.onchange = updateBatch));
+  batchForm?.querySelectorAll("[data-node-batch-card]").forEach((card) => {
+    card.onclick = (event) => {
+      if (event.target.closest("input,button,label,select")) return;
+      const input = card.querySelector("[data-batch-checkbox]");
+      if (!input || input.disabled || batchForm.dataset.busy === "1") return;
+      input.checked = !input.checked;
+      updateBatch();
+    };
+  });
   const selectAll = batchForm?.querySelector("[data-batch-select-all]");
   if (selectAll)
     selectAll.onchange = () => {
@@ -1507,6 +1531,9 @@ function bindAgentPage(agentItems, presetMode = false, enrollmentHistory = {}) {
         .forEach((input) => (input.checked = false));
       updateBatch();
     };
+  const closeBatch = batchForm?.querySelector("[data-close-node-batch]");
+  if (closeBatch)
+    closeBatch.onclick = () => setNodeBatchMode(false, closeBatch);
   bindEvent(batchForm?.elements.engine, "change", updateBatch);
   bindEvent(batchForm?.elements.action, "change", updateBatch);
   updateBatch();
@@ -1655,7 +1682,7 @@ function bindAgentPage(agentItems, presetMode = false, enrollmentHistory = {}) {
     };
   });
   const cardGrid = document.querySelector(".node-card-grid");
-  if (cardGrid) enableCardDrag(cardGrid);
+  if (cardGrid && !batchForm) enableCardDrag(cardGrid);
   document.querySelectorAll("[data-copy-ip]").forEach((button) => {
     bindEvent(button, "click", async (event) => {
       // The card itself is a link to the node workspace; copying must not
@@ -1804,6 +1831,13 @@ function updateAgentMetrics(item) {
     if (!element) return;
     element.value = available ? value : 0;
     element.dataset.available = available ? "1" : "0";
+    element.dataset.level = !available
+      ? "idle"
+      : Number(value) >= 90
+        ? "danger"
+        : Number(value) >= 75
+          ? "warn"
+          : "normal";
   };
   const online = item.status === "online";
   const unavailable = metrics.collected_at ? "不可用" : "等待采集";

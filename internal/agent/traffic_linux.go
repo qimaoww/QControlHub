@@ -123,9 +123,11 @@ func (manager *TrafficManager) SetPolicies(ctx context.Context, policies []core.
 		}
 		seenIDs[policy.ID] = struct{}{}
 		seenPorts[policy.Port] = struct{}{}
+		autoBlock := policy.AutoBlock
 		normalized, err := core.NormalizePortTrafficPolicyRequest(core.PortTrafficPolicyRequest{
 			AgentID: policy.AgentID, Name: policy.Name, Engine: policy.Engine, Port: policy.Port,
 			Protocol: policy.Protocol, Cycle: policy.Cycle, CycleAnchor: policy.CycleAnchor, LimitBytes: policy.LimitBytes,
+			AutoBlock: &autoBlock,
 		}, now)
 		if err != nil || policy.ResetGeneration == 0 {
 			return fmt.Errorf("control plane returned an invalid traffic policy: %w", err)
@@ -234,7 +236,7 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 			record.LastCollectedAt = now
 			stateChanged = stateChanged || receivedDelta > 0 || sentDelta > 0
 		}
-		blocked := trafficUsed(record) >= record.Policy.LimitBytes
+		blocked := record.Policy.AutoBlock && trafficUsed(record) >= record.Policy.LimitBytes
 		if blocked != record.Blocked {
 			record.Blocked = blocked
 			forceRules = true
@@ -584,7 +586,7 @@ func validateLoadedTrafficState(state trafficState, now time.Time) error {
 		if _, err := core.NormalizePortTrafficPolicyRequest(core.PortTrafficPolicyRequest{
 			AgentID: record.Policy.AgentID, Name: record.Policy.Name, Engine: record.Policy.Engine,
 			Port: record.Policy.Port, Protocol: record.Policy.Protocol, Cycle: record.Policy.Cycle,
-			CycleAnchor: record.Policy.CycleAnchor, LimitBytes: record.Policy.LimitBytes,
+			CycleAnchor: record.Policy.CycleAnchor, LimitBytes: record.Policy.LimitBytes, AutoBlock: &record.Policy.AutoBlock,
 		}, now); err != nil {
 			return fmt.Errorf("traffic state contains an invalid policy: %w", err)
 		}

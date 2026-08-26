@@ -205,9 +205,20 @@ func TestRefreshPathsUseStableViewsAndScopedCoordinators(t *testing.T) {
 			"return reconcileView(existingCard, freshCard)",
 			"api(`/tasks?${query}`, { signal })",
 		},
+		"modules/dashboard.js": {
+			"api(`/traffic-usage?month=${encodeURIComponent(trafficMonth)}`",
+			"data-dashboard-traffic-month",
+			"data-dashboard-traffic-dialog",
+			"trafficDetailsDialog.showModal()",
+		},
 		"modules/traffic.js": {
 			"createPoller({",
 			"data-refresh-key=\"traffic-policy-${esc(policy.id)}\"",
+			"data-traffic-filter=\"engine\"",
+			"data-traffic-edit-dialog",
+			"class=\"traffic-edit-dialog traffic-create-dialog\"",
+			"dialog?.showModal()",
+			"name=\"auto_block\"",
 		},
 	}
 	for path, markers := range contracts {
@@ -288,6 +299,41 @@ func TestSidebarNavigationUsesWorkflowOrderAndResponsiveGrouping(t *testing.T) {
 	}
 }
 
+func TestTrafficUsesOneNodeFilterSurface(t *testing.T) {
+	app, err := os.ReadFile("app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(app)
+	for _, required := range []string{
+		"端口流量节点",
+		`href="#traffic-all" data-context-traffic-agent="">全部节点`,
+		`"traffic-all": "traffic"`,
+	} {
+		if !strings.Contains(content, required) {
+			t.Errorf("traffic route must keep all node selection in the context sidebar: missing %q", required)
+		}
+	}
+	traffic, err := os.ReadFile("modules/traffic.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(traffic), `data-traffic-filter="agent_id"`) {
+		t.Error("traffic workspace must not duplicate the context sidebar node selector")
+	}
+	if !strings.Contains(string(traffic), `state.anchor === "traffic-all"`) ||
+		!strings.Contains(string(traffic), `currentFilters.agent_id = ""`) {
+		t.Error("traffic all-node sidebar action must clear the selected node scope")
+	}
+	styles := string(mustReadFrontendFile(t, "app.css"))
+	if !strings.Contains(styles, `.traffic-workspace>.traffic-policy-grid{grid-template-columns:repeat(auto-fill,minmax(360px,1fr))`) {
+		t.Error("traffic cards must use the same responsive column sizing as node settings cards")
+	}
+	if strings.Contains(styles, `.traffic-workspace{width:100%;max-width:1240px`) {
+		t.Error("traffic cards must not use a narrower workspace than node settings cards")
+	}
+}
+
 func TestPresetSidebarShowsOnlySelectedNodeContent(t *testing.T) {
 	app, err := os.ReadFile("app.js")
 	if err != nil {
@@ -327,7 +373,6 @@ func TestPresetSidebarShowsOnlySelectedNodeContent(t *testing.T) {
 		`class="preset-node-workspace workspace-panel machine-body"`,
 		`id="preset-node-${esc(agent.id)}"`,
 		`<h2>节点内核</h2>`,
-		"const pageIntro = presetMode\n    ? \"\"",
 		`const prefix = presetMode ? "preset-node" : "settings-node";`,
 		"link.href = `#${prefix}-${link.dataset.contextAgent}`;",
 	} {
@@ -355,6 +400,34 @@ func TestPresetSidebarShowsOnlySelectedNodeContent(t *testing.T) {
 		if strings.TrimSpace(line) == globalSingleColumnRule {
 			t.Error("preset layout must not force every service grid into one column")
 		}
+	}
+}
+
+func TestNodeSettingsStartsWithOperationsAndCards(t *testing.T) {
+	app := string(mustReadFrontendFile(t, "app.js"))
+	agents := string(mustReadFrontendFile(t, "modules/agents.js"))
+	styles := string(mustReadFrontendFile(t, "app.css"))
+	if strings.Contains(agents, `class="node-page-intro"`) || strings.Contains(styles, `.node-page-intro`) {
+		t.Fatal("node settings must not repeat its page title in a separate introduction panel")
+	}
+	if strings.Contains(agents, `class="node-batch-panel"`) {
+		t.Fatal("node settings must not reserve an inline row for batch operations")
+	}
+	for _, required := range []string{
+		`data-node-batch-toggle`,
+		`data-node-batch-card`,
+		`data-batch-checkbox`,
+		`class="node-batch-bar"`,
+		`data-close-node-batch`,
+		`: "node-card-grid"`,
+	} {
+		if !strings.Contains(app+agents, required) {
+			t.Errorf("node batch selection is missing %q", required)
+		}
+	}
+	if !strings.Contains(styles, `.node-batch-bar{position:fixed`) ||
+		!strings.Contains(styles, `.node-card.batch-selecting.selected`) {
+		t.Fatal("node batch mode must use a floating action bar and visible card selection")
 	}
 }
 
@@ -388,6 +461,11 @@ func TestClientAccessUsesContextSidebarAsOnlyNodeFilter(t *testing.T) {
 		`.querySelectorAll("[data-access-agent]")`,
 		`client-access-toolbar`,
 		`client-access-node-card`,
+		`data-client-parameter-open`,
+		`class="traffic-edit-dialog client-parameter-dialog"`,
+		`dialog?.showModal();`,
+		`new ResizeObserver(layout)`,
+		`card.style.gridRowEnd = `,
 		`groupClientAccessEntries(filtered)`,
 		`normalizeClientAccessFilters(entries, agents`,
 		`renderClientAccess();`,
@@ -396,12 +474,20 @@ func TestClientAccessUsesContextSidebarAsOnlyNodeFilter(t *testing.T) {
 			t.Errorf("client access filtering is missing %q", required)
 		}
 	}
-	for _, forbidden := range []string{`data-filter-agent`, `aria-label="按节点筛选"`, `filterAgentIDs`, `client-access-hero`, `client-access-summary`, `client-access-filter-panel`, `client-access-results-head`, `含凭据`} {
+	for _, forbidden := range []string{`data-filter-agent`, `aria-label="按节点筛选"`, `filterAgentIDs`, `client-access-hero`, `client-access-summary`, `client-access-filter-panel`, `client-access-results-head`, `client-parameter-menu`, `client-parameter-grid`, `含凭据`} {
 		if strings.Contains(string(clientAccess), forbidden) {
 			t.Errorf("client access main workspace still contains superseded visual structure %q", forbidden)
 		}
 	}
-	for _, required := range []string{`.client-access-toolbar`, `.client-access-node-grid`, `.client-profile-row`} {
+	for _, required := range []string{
+		`.client-access-toolbar`,
+		`.client-profile-row`,
+		`.client-access-node-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,390px),1fr))`,
+		`grid-auto-rows:1px`,
+		`.client-access-node-card{width:100%;min-width:0`,
+		`.client-parameter-dialog{width:min(560px`,
+		`.client-parameter-list`,
+	} {
 		if !strings.Contains(string(styles), required) {
 			t.Errorf("client access compact layout is missing %q", required)
 		}
@@ -781,6 +867,27 @@ func TestCoreLogsUseReadableAlignedDesktopGrid(t *testing.T) {
 	} {
 		if strings.Contains(content, obsolete) {
 			t.Errorf("core-log columns still use manual baseline offset %q", obsolete)
+		}
+	}
+}
+
+func TestCoreLogsResizeWithinTheirWorkspace(t *testing.T) {
+	stylesheet, err := os.ReadFile("app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(stylesheet)
+	for _, required := range []string{
+		`@media(pointer:fine){.app-body.page-core-logs .desktop-app{min-width:0}}`,
+		`.core-log-workspace{min-width:0;container-type:inline-size}`,
+		`.core-log-filters{display:flex;align-items:flex-end;flex-wrap:wrap}`,
+		`.core-log-stream{--core-log-grid:minmax(130px,.85fr)`,
+		`width:100%;max-width:100%;min-width:0`,
+		`@container(max-width:840px){.core-log-columns{display:none}`,
+		`.core-log-row{grid-template-columns:minmax(140px,1fr) auto auto`,
+	} {
+		if !strings.Contains(content, required) {
+			t.Errorf("core-log responsive workspace is missing %q", required)
 		}
 	}
 }

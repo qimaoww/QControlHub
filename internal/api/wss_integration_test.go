@@ -205,6 +205,27 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+	usageRequest, _ := http.NewRequestWithContext(ctx, http.MethodGet,
+		httpServer.URL+"/api/v1/traffic-usage?month="+time.Now().UTC().Format("2006-01")+"&agent_id="+enrolled.AgentID, nil)
+	usageRequest.Header.Set("Authorization", "Bearer "+adminToken)
+	usageResponse, err := http.DefaultClient.Do(usageRequest)
+	if err != nil {
+		t.Fatalf("query persisted traffic history: %v", err)
+	}
+	defer usageResponse.Body.Close()
+	var history struct {
+		Month    string                       `json:"month"`
+		Timezone string                       `json:"timezone"`
+		Days     []core.PortTrafficDailyUsage `json:"days"`
+	}
+	if err := json.NewDecoder(usageResponse.Body).Decode(&history); err != nil {
+		t.Fatalf("decode persisted traffic history: %v", err)
+	}
+	if usageResponse.StatusCode != http.StatusOK || history.Timezone != "UTC" || len(history.Days) != 1 ||
+		history.Days[0].PolicyID != trafficPolicy.ID || history.Days[0].ReceivedBytes != 2048 ||
+		history.Days[0].SentBytes != 1024 || history.Days[0].UsedBytes != 3072 {
+		t.Fatalf("persisted traffic history status=%d body=%+v", usageResponse.StatusCode, history)
+	}
 	// A high-frequency metrics-only push must refresh the live snapshot
 	// without clobbering version, runtime, or features from the heartbeat.
 	metricsPush := core.WireMessage{Type: core.WireMetrics, Metrics: &core.HostMetrics{

@@ -1,6 +1,7 @@
 package core
 
 import (
+	"encoding/json"
 	"errors"
 	"math"
 	"strings"
@@ -44,6 +45,7 @@ type PortTrafficPolicy struct {
 	Cycle                TrafficCycle    `json:"cycle"`
 	CycleAnchor          time.Time       `json:"cycle_anchor"`
 	LimitBytes           uint64          `json:"limit_bytes"`
+	AutoBlock            bool            `json:"auto_block"`
 	ResetGeneration      uint64          `json:"reset_generation"`
 	ReceivedBytes        uint64          `json:"received_bytes"`
 	SentBytes            uint64          `json:"sent_bytes"`
@@ -60,6 +62,18 @@ type PortTrafficPolicy struct {
 	UpdatedAt            time.Time       `json:"updated_at"`
 }
 
+// UnmarshalJSON preserves the original enforcement behavior when an older
+// control plane or persisted Agent state does not contain auto_block.
+func (policy *PortTrafficPolicy) UnmarshalJSON(data []byte) error {
+	type wirePolicy PortTrafficPolicy
+	decoded := wirePolicy{AutoBlock: true}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*policy = PortTrafficPolicy(decoded)
+	return nil
+}
+
 type PortTrafficPolicyRequest struct {
 	AgentID     string          `json:"agent_id"`
 	Name        string          `json:"name"`
@@ -69,6 +83,7 @@ type PortTrafficPolicyRequest struct {
 	Cycle       TrafficCycle    `json:"cycle"`
 	CycleAnchor time.Time       `json:"cycle_anchor"`
 	LimitBytes  uint64          `json:"limit_bytes"`
+	AutoBlock   *bool           `json:"auto_block,omitempty"`
 }
 
 type PortTrafficUsage struct {
@@ -84,6 +99,27 @@ type PortTrafficUsage struct {
 	Blocked              bool      `json:"blocked"`
 	EnforcementAvailable bool      `json:"enforcement_available"`
 	EnforcementError     string    `json:"enforcement_error,omitempty"`
+}
+
+// PortTrafficDailyUsage is the durable UTC-day aggregate for one monitored
+// port. It keeps a policy metadata snapshot so history remains meaningful
+// after a policy is edited or removed.
+type PortTrafficDailyUsage struct {
+	PolicyID        string          `json:"policy_id"`
+	AgentID         string          `json:"agent_id"`
+	Name            string          `json:"name"`
+	Engine          Engine          `json:"engine"`
+	Port            int             `json:"port"`
+	Protocol        TrafficProtocol `json:"protocol"`
+	Day             string          `json:"day"`
+	ReceivedBytes   uint64          `json:"received_bytes"`
+	SentBytes       uint64          `json:"sent_bytes"`
+	UsedBytes       uint64          `json:"used_bytes"`
+	PeakReceiveBPS  uint64          `json:"peak_receive_bps"`
+	PeakSendBPS     uint64          `json:"peak_send_bps"`
+	SampleCount     uint64          `json:"sample_count"`
+	FirstReportedAt time.Time       `json:"first_reported_at"`
+	LastReportedAt  time.Time       `json:"last_reported_at"`
 }
 
 func ValidPortTrafficPolicyID(value string) bool {
@@ -128,6 +164,10 @@ func NormalizePortTrafficPolicyRequest(request PortTrafficPolicyRequest, now tim
 	}
 	if request.LimitBytes == 0 || request.LimitBytes > math.MaxInt64 {
 		return PortTrafficPolicyRequest{}, errors.New("limit_bytes must be between 1 and 9223372036854775807")
+	}
+	if request.AutoBlock == nil {
+		enabled := true
+		request.AutoBlock = &enabled
 	}
 	return request, nil
 }

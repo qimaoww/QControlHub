@@ -519,15 +519,17 @@ function shell(content, title, { viewKey = state.route } = {}) {
     state.route === id ||
     (state.route === "agent-config" && id === "agents") ||
     (state.route === "archive-config" && id === "live-config");
+  const nodeOverviewActions =
+    state.route === "node-settings" && state.data.nodeView !== "detail"
+      ? `${can("operator") && (state.data.agents || []).length > 1 ? `<button class="button small ${state.data.nodeBatchMode ? "primary" : ""}" type="button" data-node-batch-toggle aria-pressed="${state.data.nodeBatchMode ? "true" : "false"}">${state.data.nodeBatchMode ? "退出批量" : "批量操作"}</button>` : ""}${can("enrollment.manage") ? '<button class="button small" type="button" data-open-enrollment>添加节点</button>' : ""}`
+      : "";
   const topAction =
     state.route === "dashboard"
       ? '<a class="button small" href="#node-settings">节点设置</a>'
       : state.route === "agents"
         ? ""
         : state.route === "node-settings"
-          ? state.data.nodeView !== "detail" && can("enrollment.manage")
-            ? '<button class="button small" type="button" data-open-enrollment>添加节点</button>'
-            : ""
+          ? nodeOverviewActions
           : state.route === "client-access"
             ? ""
             : state.route === "archive-config"
@@ -536,8 +538,6 @@ function shell(content, title, { viewKey = state.route } = {}) {
                 ? '<a class="button small" href="#agents">返回内核预设</a>'
                 : state.route === "tasks"
                   ? '<button id="refresh" class="button small task-refresh-link" type="button">刷新</button>'
-                  : state.route === "traffic" && can("traffic.manage")
-                    ? '<a class="button small" href="#traffic-new">添加端口配额</a>'
                   : "";
   const navigationMarkup = links
     .map(([id, text, icon, mobileSecondary]) => {
@@ -664,7 +664,8 @@ function contextMarkup(title) {
   if (state.route === "traffic") {
     const agents = state.data.agents || [];
     const policies = state.data.trafficPolicies || [];
-    return `${can("traffic.manage") ? '<a class="context-primary" href="#traffic-new">＋ 添加端口配额</a>' : ""}<div class="context-section-label"><span>按节点查看</span><b>${agents.length}</b></div><nav class="context-list" aria-label="端口流量节点">${agents.map((agent) => { const count = policies.filter((policy) => policy.agent_id === agent.id).length; const blocked = policies.filter((policy) => policy.agent_id === agent.id && policy.blocked).length; return `<a href="#traffic-agent-${esc(agent.id)}" data-context-traffic-agent="${esc(agent.id)}"><i class="status-dot ${blocked ? "bad" : agent.status === "online" ? "ok" : ""}"></i><span><strong>${esc(agent.name)}</strong><small>${count ? `${count} 个端口${blocked ? ` · ${blocked} 个封禁` : ""}` : "尚未监控端口"}</small></span></a>`; }).join("") || "<p>还没有节点</p>"}</nav>`;
+    const selected = state.data.trafficFilters?.agent_id || "";
+    return `${can("traffic.manage") ? '<a class="context-primary" href="#traffic-new">＋ 添加端口配额</a>' : ""}<a class="context-primary ${selected ? "" : "active"}" href="#traffic-all" data-context-traffic-agent="">全部节点</a><div class="context-section-label"><span>按节点查看</span><b>${agents.length}</b></div><nav class="context-list" aria-label="端口流量节点">${agents.map((agent) => { const count = policies.filter((policy) => policy.agent_id === agent.id).length; const blocked = policies.filter((policy) => policy.agent_id === agent.id && policy.blocked).length; return `<a class="${selected === agent.id ? "active" : ""}" href="#traffic-agent-${esc(agent.id)}" data-context-traffic-agent="${esc(agent.id)}"><i class="status-dot ${blocked ? "bad" : agent.status === "online" ? "ok" : ""}"></i><span><strong>${esc(agent.name)}</strong><small>${count ? `${count} 个端口${blocked ? ` · ${blocked} 个封禁` : ""}` : "尚未监控端口"}</small></span></a>`; }).join("") || "<p>还没有节点</p>"}</nav>`;
   }
   if (state.route === "settings")
     return `<nav class="context-menu" aria-label="设置目录"><a class="active" href="#identity"><span>01</span>面板标识</a><a href="#defaults"><span>02</span>操作默认值</a><a href="#synchronization"><span>03</span>状态同步</a><a href="#notifications"><span>04</span>事件通知</a>${can("users.manage") ? '<a href="#users"><span>05</span>用户管理</a>' : ""}</nav>`;
@@ -676,7 +677,7 @@ function contextMarkup(title) {
   return `<a class="context-back" href="#agents">← 返回内核预设</a><div class="context-section-label"><span>选择内核</span><b>${installed}/${caps.length}</b></div><nav class="context-list engine-context-list">${caps.map((engine) => `<a class="${state.data.engine === engine ? "active" : ""}" href="#agent-config" data-engine-select="${esc(engine)}"><span class="context-engine ${esc(engine)}">${esc(engineName(engine))}</span><span><strong>${esc(engineName(engine))}</strong><small>${agent?.runtime?.[engine]?.installed ? "服务端入站" : "尚未安装"}</small></span></a>`).join("")}</nav><ol class="context-steps"><li class="active"><b>1</b><span>选择入站</span></li><li><b>2</b><span>编辑参数</span></li><li><b>3</b><span>校验或部署</span></li></ol>`;
 }
 
-const dashboard = installDashboard({ api, state, esc, engineName, heartbeat, statusTone, ago, short, actionName, shell });
+const dashboard = installDashboard({ api, state, can, esc, engineName, heartbeat, statusTone, ago, short, actionName, bytes, rate, shell });
 
 const agentModule = installAgents({ api, optionalAPI, state, engines, can, esc, engineName, statusTone, serviceStatusName, short, date, ago, heartbeat, percent, bytes, conciseVersion, rate, actionName, serviceActionDisabled, trafficChart, renderConfigDiff, notify, confirmAction, shell });
 const { agents, nodeSettings, submitTask, bindCodeEditors, showCommand } = agentModule;
@@ -718,6 +719,7 @@ async function renderOnce() {
     templates: "archive-config",
     archive: "archive-config",
     "traffic-new": "traffic",
+    "traffic-all": "traffic",
   };
   state.route = [
     "dashboard",
@@ -746,8 +748,10 @@ async function renderOnce() {
               ? "archive-config"
               : "dashboard");
   state.anchor = hash;
-  if (previousRoute === "node-settings" && state.route !== previousRoute)
+  if (previousRoute === "node-settings" && state.route !== previousRoute) {
+    state.data.nodeBatchMode = false;
     agentModule.cancelAgentInteractions();
+  }
   if (hash.startsWith("preset-node-")) state.data.selectedAgent = hash.slice(12);
   if (hash.startsWith("settings-node-")) state.data.selectedAgent = hash.slice(14);
   if (hash.startsWith("node-")) state.data.selectedAgent = hash.slice(5);
@@ -756,7 +760,8 @@ async function renderOnce() {
     (hash.startsWith("settings-node-") ||
       (hash.startsWith("node-") && hash !== "node-settings"))
   ) {
-    document.querySelectorAll("[data-open-enrollment], .node-batch-panel").forEach((element) => element.remove());
+    state.data.nodeBatchMode = false;
+    document.querySelectorAll("[data-open-enrollment], [data-node-batch-toggle], .node-batch-bar").forEach((element) => element.remove());
   }
   if (hash.startsWith("config-")) state.data.archiveConfigId = hash.slice(7);
   try {

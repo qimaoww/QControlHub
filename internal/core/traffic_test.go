@@ -1,6 +1,7 @@
 package core
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 )
@@ -36,6 +37,28 @@ func TestTrafficPeriodAtUsesCalendarAnchor(t *testing.T) {
 	}
 }
 
+func TestPortTrafficPolicyJSONDefaultsLegacyAutoBlock(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		body string
+		want bool
+	}{
+		{name: "legacy field omitted", body: `{"id":"trf_0123456789abcdef"}`, want: true},
+		{name: "monitor only explicit", body: `{"id":"trf_0123456789abcdef","auto_block":false}`, want: false},
+		{name: "blocking explicit", body: `{"id":"trf_0123456789abcdef","auto_block":true}`, want: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var policy PortTrafficPolicy
+			if err := json.Unmarshal([]byte(test.body), &policy); err != nil {
+				t.Fatal(err)
+			}
+			if policy.AutoBlock != test.want {
+				t.Fatalf("auto_block = %v, want %v", policy.AutoBlock, test.want)
+			}
+		})
+	}
+}
+
 func TestNormalizePortTrafficPolicyRequest(t *testing.T) {
 	now := time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)
 	request, err := NormalizePortTrafficPolicyRequest(PortTrafficPolicyRequest{
@@ -46,7 +69,7 @@ func TestNormalizePortTrafficPolicyRequest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if request.AgentID != "agt_test" || request.Name != "edge tls" || request.CycleAnchor.Hour() != 0 {
+	if request.AgentID != "agt_test" || request.Name != "edge tls" || request.CycleAnchor.Hour() != 0 || request.AutoBlock == nil || !*request.AutoBlock {
 		t.Fatalf("normalized request = %+v", request)
 	}
 	request.CycleAnchor = now.Add(24 * time.Hour)
