@@ -2931,6 +2931,34 @@ try {
     ["alpha", "beta", "gamma"],
     "metrics polling synchronizes the shared Agent runtime snapshot",
   );
+
+  let rosterOnlyRequests = 0;
+  const rosterOnlyState = {
+    route: "node-settings",
+    navigationEpoch: 1,
+    data: {},
+  };
+  const { pollAgentMetrics: pollAgentRoster } = installAgents(
+    new Proxy(
+      {
+        state: rosterOnlyState,
+        api: async (path) => {
+          assert.equal(path, "/agents");
+          rosterOnlyRequests += 1;
+          return [];
+        },
+        can: (capability) => capability === "agents.read",
+      },
+      { get: (target, key) => target[key] ?? noop },
+    ),
+  );
+  await pollAgentRoster();
+  clearTimeout(rosterOnlyState.agentPollTimer);
+  assert.equal(
+    rosterOnlyRequests,
+    1,
+    "Agent roster polling does not require metrics permission",
+  );
 } finally {
   if (pollingDocument === undefined) delete globalThis.document;
   else globalThis.document = pollingDocument;

@@ -1691,7 +1691,7 @@ function bindAgentPage(agentItems, presetMode = false, enrollmentHistory = {}) {
     });
   });
   clearTimeout(state.agentPollTimer);
-  if (!presetMode && can("metrics.read"))
+  if (!presetMode)
     state.agentPollTimer = setTimeout(pollAgentMetrics, 2000);
 }
 
@@ -1951,7 +1951,7 @@ function updateAgentMetrics(item) {
 }
 
 async function pollAgentMetrics() {
-  if (state.route !== "node-settings" || !can("metrics.read")) return;
+  if (state.route !== "node-settings") return;
   clearTimeout(state.agentPollTimer);
   state.agentPollTimer = null;
   if (document.hidden) {

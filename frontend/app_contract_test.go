@@ -825,10 +825,25 @@ func TestAgentPollingRefreshesNewlyEnrolledNodeStructure(t *testing.T) {
 		`visibleAgentStructure(items) !== renderedAgentStructure`,
 		`if (structureChanged) {`,
 		`requestAgentStructureRefresh();`,
+		`if (!presetMode)`,
+		`state.agentPollTimer = setTimeout(pollAgentMetrics, 2000);`,
 	} {
 		if !strings.Contains(agents, required) {
 			t.Errorf("newly enrolled Agent polling contract is missing %q", required)
 		}
+	}
+	pollStart := strings.Index(agents, "async function pollAgentMetrics()")
+	if pollStart < 0 {
+		t.Fatal("Agent roster polling function boundary is missing")
+	}
+	pollBody := agents[pollStart:]
+	pollEnd := strings.Index(pollBody, "function bindCodeEditors()")
+	if pollEnd < 0 {
+		t.Fatal("Agent roster polling function end is missing")
+	}
+	pollBody = pollBody[:pollEnd]
+	if strings.Contains(pollBody, `!can("metrics.read")`) {
+		t.Error("new Agent discovery must not require metrics.read")
 	}
 }
 
