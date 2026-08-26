@@ -1336,7 +1336,7 @@ func boundOpenRCServiceProcess(ctx context.Context, service string) (openRCServi
 	optionsDirectory := filepath.Join(openRCStateRoot, "options", service)
 	childPIDPath := filepath.Join(optionsDirectory, "child_pid")
 	pidfileMetadataPath := filepath.Join(optionsDirectory, "pidfile")
-	childPIDText, childPIDInfo, err := readProtectedOpenRCMetadata(childPIDPath)
+	childPIDText, childPIDInfo, err := readProtectedOpenRCStateMetadata(childPIDPath)
 	if errors.Is(err, os.ErrNotExist) {
 		return openRCServiceProcessIdentity{}, errOpenRCServiceProcessUnbound
 	}
@@ -1347,15 +1347,23 @@ func boundOpenRCServiceProcess(ctx context.Context, service string) (openRCServi
 	if err != nil {
 		return openRCServiceProcessIdentity{}, fmt.Errorf("parse supervise-daemon child PID metadata: %w", err)
 	}
-	pidfileValue, pidfileMetadataInfo, err := readProtectedOpenRCMetadata(pidfileMetadataPath)
+	pidfileValue, pidfileMetadataInfo, err := readProtectedOpenRCStateMetadata(pidfileMetadataPath)
 	if err != nil {
 		return openRCServiceProcessIdentity{}, fmt.Errorf("read supervise-daemon pidfile metadata: %w", err)
 	}
-	expectedPIDFileName := "supervise-" + service + ".pid"
-	if pidfileValue != filepath.Join("/run", expectedPIDFileName) && pidfileValue != filepath.Join("/var/run", expectedPIDFileName) {
-		return openRCServiceProcessIdentity{}, errors.New("OpenRC service uses an unsupported supervise-daemon pidfile")
+	// An OpenRC init script chooses its own pidfile name, so the name is not a
+	// trust anchor and pinning it to supervise-<service>.pid only rejected
+	// installer layouts that are otherwise entirely provable. What establishes
+	// trust is the supervisor identity verified below: the executable must be
+	// the protected supervise-daemon helper, its argv must name this exact
+	// service with --start, and the child must be its direct descendant running
+	// the discovered binary and arguments. The path is still constrained to a
+	// direct child of the run directory so nothing outside it can be read.
+	supervisorPIDName, err := supervisorPIDFileName(pidfileValue)
+	if err != nil {
+		return openRCServiceProcessIdentity{}, err
 	}
-	supervisorPIDPath := filepath.Join(openRCSupervisorRoot, expectedPIDFileName)
+	supervisorPIDPath := filepath.Join(openRCSupervisorRoot, supervisorPIDName)
 	supervisorPIDText, supervisorPIDInfo, err := readProtectedOpenRCMetadata(supervisorPIDPath)
 	if err != nil {
 		return openRCServiceProcessIdentity{}, fmt.Errorf("read supervise-daemon supervisor PID: %w", err)
@@ -1388,11 +1396,11 @@ func boundOpenRCServiceProcess(ctx context.Context, service string) (openRCServi
 		return openRCServiceProcessIdentity{}, errors.New("OpenRC supervisor identity does not match this service's supervise-daemon invocation")
 	}
 
-	childPIDAgain, childPIDInfoAgain, err := readProtectedOpenRCMetadata(childPIDPath)
+	childPIDAgain, childPIDInfoAgain, err := readProtectedOpenRCStateMetadata(childPIDPath)
 	if err != nil || !os.SameFile(childPIDInfo, childPIDInfoAgain) || childPIDAgain != childPIDText {
 		return openRCServiceProcessIdentity{}, errors.New("OpenRC child PID metadata changed during process verification")
 	}
-	pidfileValueAgain, pidfileMetadataInfoAgain, err := readProtectedOpenRCMetadata(pidfileMetadataPath)
+	pidfileValueAgain, pidfileMetadataInfoAgain, err := readProtectedOpenRCStateMetadata(pidfileMetadataPath)
 	if err != nil || !os.SameFile(pidfileMetadataInfo, pidfileMetadataInfoAgain) || pidfileValueAgain != pidfileValue {
 		return openRCServiceProcessIdentity{}, errors.New("OpenRC pidfile metadata changed during process verification")
 	}
@@ -1409,7 +1417,53 @@ func boundOpenRCServiceProcess(ctx context.Context, service string) (openRCServi
 	return openRCServiceProcessIdentity{Service: service, Supervisor: supervisor, Child: child}, nil
 }
 
+// supervisorPIDFileName validates the supervise-daemon pidfile recorded in
+// protected OpenRC state and returns its file name. The path must be a clean
+// absolute path that is a direct child of /run or /var/run and carries a plain
+// .pid name; a nested directory, a traversal component, or any other character
+// fails closed rather than letting service metadata point the reader at an
+// arbitrary file.
+func supervisorPIDFileName(pidfile string) (string, error) {
+	if !filepath.IsAbs(pidfile) || pidfile != filepath.Clean(pidfile) || strings.ContainsAny(pidfile, " \t\r\n") {
+		return "", errors.New("OpenRC supervise-daemon pidfile path is unsafe")
+	}
+	directory, name := filepath.Split(pidfile)
+	if cleaned := filepath.Clean(directory); cleaned != "/run" && cleaned != "/var/run" {
+		return "", errors.New("OpenRC supervise-daemon pidfile is outside the supported run directory")
+	}
+	if !strings.HasSuffix(name, ".pid") || len(name) <= len(".pid") || !safeOpenRCPIDFileName(name) {
+		return "", errors.New("OpenRC supervise-daemon pidfile name is unsupported")
+	}
+	return name, nil
+}
+
+func safeOpenRCPIDFileName(name string) bool {
+	for _, character := range name {
+		switch {
+		case character >= 'a' && character <= 'z',
+			character >= 'A' && character <= 'Z',
+			character >= '0' && character <= '9',
+			character == '.', character == '_', character == '-':
+		default:
+			return false
+		}
+	}
+	return !strings.HasPrefix(name, ".")
+}
+
 func readProtectedOpenRCMetadata(path string) (string, os.FileInfo, error) {
+	return readProtectedOpenRCMetadataWithStateRoot(path, "")
+}
+
+// readProtectedOpenRCStateMetadata is reserved for child_pid and pidfile below
+// /run/openrc. Stock OpenRC creates that state directory as root:root 0775, so
+// this read permits the root-group write bit while all other OpenRC metadata,
+// including the supervisor PID file directly below /run, stays strict.
+func readProtectedOpenRCStateMetadata(path string) (string, os.FileInfo, error) {
+	return readProtectedOpenRCMetadataWithStateRoot(path, openRCStateRoot)
+}
+
+func readProtectedOpenRCMetadataWithStateRoot(path, relaxedStateRoot string) (string, os.FileInfo, error) {
 	info, err := os.Lstat(path)
 	if err != nil {
 		return "", nil, err
@@ -1421,8 +1475,14 @@ func readProtectedOpenRCMetadata(path string) (string, os.FileInfo, error) {
 		return "", nil, err
 	}
 	directory := filepath.Dir(path)
-	if err := validateProtectedDirectoryChain(directory); err != nil {
-		return "", nil, err
+	var directoryErr error
+	if relaxedStateRoot == "" {
+		directoryErr = validateProtectedDirectoryChain(directory)
+	} else {
+		directoryErr = validateOpenRCStateDirectoryChain(directory, relaxedStateRoot)
+	}
+	if directoryErr != nil {
+		return "", nil, directoryErr
 	}
 	root, err := os.OpenRoot(directory)
 	if err != nil {
@@ -1585,19 +1645,11 @@ func openRCProcessArgvMatches(engine core.Engine, existing EngineSpec, argv []st
 	if len(argv) == 0 || (argv[0] != existingServiceBinary(existing) && argv[0] != existing.Binary) {
 		return false
 	}
-	switch engine {
-	case core.EngineXray:
-		return existing.ConfigDirectory == "" && len(argv) == 4 && argv[1] == "run" &&
-			(argv[2] == "-config" || argv[2] == "-c") && argv[3] == existing.ConfigPath
-	case core.EngineSingBox:
-		if len(argv) == 4 && existing.ConfigDirectory == "" {
-			return argv[1] == "run" && (argv[2] == "-c" || argv[2] == "--config") && argv[3] == existing.ConfigPath
-		}
-		return len(argv) == 6 && existing.ConfigDirectory != "" && argv[1] == "run" && argv[2] == "-c" &&
-			argv[3] == existing.ConfigPath && argv[4] == "-C" && argv[5] == existing.ConfigDirectory
-	default:
-		return false
-	}
+	// The official sing-box working-directory form has no supervised OpenRC
+	// binding this mapping could prove, so it stays rejected here.
+	configPath, configDirectory, workDirectory, ok := parseExistingArgv(engine, argv[0], argv)
+	return ok && workDirectory == "" &&
+		configPath == existing.ConfigPath && configDirectory == existing.ConfigDirectory
 }
 
 func validateOpenRCServiceScript(service, ownershipMarker string) error {
@@ -1657,16 +1709,9 @@ func parseSingleSystemdExecStart(value string) (string, string, error) {
 
 func supportedExistingExecStart(engine core.Engine, existing EngineSpec, argv string) bool {
 	serviceBinary := existingServiceBinary(existing)
-	switch engine {
-	case core.EngineXray:
-		return existing.ConfigDirectory == "" && (argv == serviceBinary+" run -config "+existing.ConfigPath ||
-			argv == serviceBinary+" run -c "+existing.ConfigPath)
-	case core.EngineSingBox:
-		configPath, configDirectory, workDirectory, ok := parseSingBoxExistingArgv(serviceBinary, argv)
-		return ok && configPath == existing.ConfigPath && configDirectory == existing.ConfigDirectory && workDirectory == existing.WorkingDirectory
-	default:
-		return false
-	}
+	configPath, configDirectory, workDirectory, ok := parseExistingArgv(engine, serviceBinary, strings.Fields(argv))
+	return ok && configPath == existing.ConfigPath && configDirectory == existing.ConfigDirectory &&
+		workDirectory == existing.WorkingDirectory
 }
 
 func serviceEnableState(ctx context.Context, service string, managers ...*ServiceManager) (string, error) {

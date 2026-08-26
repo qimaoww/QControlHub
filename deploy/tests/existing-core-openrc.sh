@@ -74,6 +74,8 @@ write_openrc_cmdline 200 "$core" run -config "$config"
 printf '%s\n' 200 > "$test_root/openrc-state/options/qch-test-openrc/child_pid"
 printf '%s\n' "$test_root/openrc-run/supervise-qch-test-openrc.pid" > "$test_root/openrc-state/options/qch-test-openrc/pidfile"
 printf '%s\n' 100 > "$test_root/openrc-run/supervise-qch-test-openrc.pid"
+# Match stock Alpine/OpenRC: only the OpenRC-owned state root is root:root 0775.
+chmod 0775 "$test_root/openrc-state"
 
 export service_manager=openrc
 export OPENRC_INIT_ROOT="$test_root/openrc-init"
@@ -110,6 +112,12 @@ ln -sfn "$core" "$test_root/proc/200/exe"
 
 # A stable supervisor/child identity is accepted (the fail-closed path).
 expect_status 0 stable-identity service_uses_paths qch-test-openrc "$core" "$config" xray "$core"
+
+# The exception must not spill into the supervisor pidfile directory. Making
+# that separate directory group-writable still fails under the general rule.
+chmod 0775 "$test_root/openrc-run"
+expect_status 1 group-writable-supervisor-root service_uses_paths qch-test-openrc "$core" "$config" xray "$core"
+chmod 0755 "$test_root/openrc-run"
 
 # If the child starttime drifts between the two /proc stat reads the helper must
 # fail closed: this is the PID-reuse gate that the supervisor binding relies on.

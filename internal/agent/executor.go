@@ -278,6 +278,24 @@ func validateNativeCoreExecutable(path string) error {
 }
 
 func validateProtectedDirectoryChain(directory string) error {
+	return validateDirectoryChain(directory, false)
+}
+
+// validateOpenRCStateDirectoryChain validates a directory inside OpenRC's own
+// runtime state. OpenRC creates /run/openrc as root:root 0775. Tolerating
+// exactly that policy shape — root owner, root group, no world-write — makes
+// the stock state readable. This is a real but deliberately narrow relaxation
+// because a non-root account could be a member of gid 0; every path outside the
+// supplied OpenRC state root keeps the stricter rule.
+func validateOpenRCStateDirectoryChain(directory, stateRoot string) error {
+	relative, err := filepath.Rel(stateRoot, directory)
+	if err != nil || filepath.IsAbs(relative) || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return errors.New("OpenRC state directory is outside the OpenRC state root")
+	}
+	return validateDirectoryChain(directory, true)
+}
+
+func validateDirectoryChain(directory string, allowRootGroupWrite bool) error {
 	if !filepath.IsAbs(directory) {
 		return errors.New("path is not absolute")
 	}
@@ -300,7 +318,9 @@ func validateProtectedDirectoryChain(directory string) error {
 				}
 				return nil
 			}
-			return fmt.Errorf("%s is writable by group or others", directory)
+			if !allowRootGroupWrite || !rootOwnedRootGroupDirectory(info) {
+				return fmt.Errorf("%s is writable by group or others", directory)
+			}
 		}
 		if err := validateOwner(info, "protected path parent"); err != nil {
 			return err
@@ -313,13 +333,28 @@ func validateProtectedDirectoryChain(directory string) error {
 	}
 }
 
+// rootOwnedRootGroupDirectory reports whether a directory has the exact relaxed
+// OpenRC ownership shape: root owner, root group, and no world-write bit. Any
+// unknown ownership fails closed.
+func rootOwnedRootGroupDirectory(info os.FileInfo) bool {
+	if info.Mode().Perm()&0o002 != 0 {
+		return false
+	}
+	uid, gid, known := fileOwnership(info)
+	return known && uid == 0 && gid == 0
+}
+
 // validateExistingSpecPaths checks the pure structural path constraints of an
 // existing core mapping: absolute executable and configuration paths, no
 // whitespace anywhere, and an absolute configuration/working directory for
 // sing-box. It is independent of the running UID so the same fail-closed rule
 // can be asserted by tests running as root or as an unprivileged CI user.
 func validateExistingSpecPaths(engine core.Engine, spec EngineSpec) error {
-	if !filepath.IsAbs(spec.Binary) || !filepath.IsAbs(spec.ConfigPath) {
+	// A directory-authoritative mapping carries no main configuration file, so
+	// the confdir stands in as the single required absolute source.
+	configPathMapped := filepath.IsAbs(spec.ConfigPath) ||
+		(spec.ConfigPath == "" && filepath.IsAbs(spec.ConfigDirectory))
+	if !filepath.IsAbs(spec.Binary) || !configPathMapped {
 		return fmt.Errorf("existing %s paths must be absolute", engine)
 	}
 	for label, path := range map[string]string{
@@ -331,7 +366,9 @@ func validateExistingSpecPaths(engine core.Engine, spec EngineSpec) error {
 			return fmt.Errorf("existing %s %s path contains unsupported whitespace", engine, label)
 		}
 	}
-	if spec.ConfigDirectory != "" && (engine != core.EngineSingBox || !filepath.IsAbs(spec.ConfigDirectory)) {
+	// Xray reads a confdir via -confdir and sing-box via -C; both are supported.
+	// A working directory remains a sing-box-only packaging shape.
+	if spec.ConfigDirectory != "" && !filepath.IsAbs(spec.ConfigDirectory) {
 		return fmt.Errorf("existing %s configuration directory is unsupported or not absolute", engine)
 	}
 	if spec.WorkingDirectory != "" && (engine != core.EngineSingBox || !filepath.IsAbs(spec.WorkingDirectory)) {
@@ -533,6 +570,14 @@ func (e *Executor) readExistingConfig(ctx context.Context, engine core.Engine, m
 }
 
 func readExistingConfigurationSources(spec EngineSpec) (string, string, error) {
+	// A mapping with no main configuration file is directory-authoritative: the
+	// confdir alone supplies every source, so there is no primary to read.
+	if spec.ConfigPath == "" {
+		if spec.ConfigDirectory == "" {
+			return "", "", errors.New("configuration mapping has neither a file nor a directory")
+		}
+		return mergeExistingConfigurationDirectory(spec, "")
+	}
 	primary, err := readConfigurationFile(spec.ConfigPath)
 	if err != nil {
 		return "", "", err
@@ -541,6 +586,10 @@ func readExistingConfigurationSources(spec EngineSpec) (string, string, error) {
 		digest := sha256.Sum256([]byte(spec.ConfigPath + "\x00" + primary))
 		return primary, hex.EncodeToString(digest[:]), nil
 	}
+	return mergeExistingConfigurationDirectory(spec, primary)
+}
+
+func mergeExistingConfigurationDirectory(spec EngineSpec, primary string) (string, string, error) {
 	if err := validateProtectedDirectoryChain(spec.ConfigDirectory); err != nil {
 		return "", "", fmt.Errorf("configuration directory parent chain is unsafe: %w", err)
 	}
@@ -548,10 +597,12 @@ func readExistingConfigurationSources(spec EngineSpec) (string, string, error) {
 	if err != nil {
 		return "", "", err
 	}
-	// A sing-box config directory is authoritative on its own: when the primary
-	// file is the directory's own config.json, it is a fragment of that
-	// directory and must not be merged twice (sing-box reads it once).
-	directoryPrimary := filepath.Clean(spec.ConfigPath) == filepath.Clean(filepath.Join(spec.ConfigDirectory, "config.json"))
+	// A config directory is authoritative on its own: when the primary file is
+	// the directory's own config.json, it is a fragment of that directory and
+	// must not be merged twice (the core reads it once). A mapping with no
+	// primary at all is directory-authoritative for the same reason.
+	directoryPrimary := spec.ConfigPath == "" ||
+		filepath.Clean(spec.ConfigPath) == filepath.Clean(filepath.Join(spec.ConfigDirectory, "config.json"))
 	sources := make([]existingConfigSource, 0, len(entries)+1)
 	if !directoryPrimary {
 		sources = append(sources, existingConfigSource{path: spec.ConfigPath, content: primary})
@@ -734,7 +785,24 @@ func mergeSingBoxJSON(source, destination any) (any, error) {
 }
 
 func validateExistingSourceInvocation(ctx context.Context, engine core.Engine, spec EngineSpec) error {
-	if engine != core.EngineSingBox || spec.ConfigDirectory == "" {
+	if spec.ConfigDirectory == "" {
+		return nil
+	}
+	if engine == core.EngineXray {
+		// Xray applies its own confdir precedence rules, which this reader's
+		// merge does not reproduce field for field. Re-running the real binary
+		// over the exact discovered sources makes any layout that Xray would
+		// resolve differently fail closed before anything is migrated. Assets
+		// such as geoip.dat live next to the installed binary, so resolve
+		// relative lookups from there.
+		args := []string{"run", "-test", "-confdir", spec.ConfigDirectory}
+		if spec.ConfigPath != "" {
+			args = []string{"run", "-test", "-config", spec.ConfigPath, "-confdir", spec.ConfigDirectory}
+		}
+		_, err := runInDirectory(ctx, filepath.Dir(spec.Binary), spec.Binary, args...)
+		return err
+	}
+	if engine != core.EngineSingBox {
 		return nil
 	}
 	args := []string{"check"}
