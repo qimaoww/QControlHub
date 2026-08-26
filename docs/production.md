@@ -219,7 +219,7 @@ sudo systemctl restart qagent
 
 systemd 单元的 `ProtectSystem=strict` 只放行固定的 `/etc/qagent` 配置根和 `/usr/local/lib/qagent/cores`，用于按需创建所选内核目录并在同一文件系统内原子切换配置和私有内核二进制；原服务的配置与二进制路径保持只读，`/usr/local/bin` 不可写，`/usr/local/bin/qagent` 也保持只读。Agent 单元只保留原子部署所需的 `CAP_CHOWN` 与端口计数/封禁所需的 `CAP_NET_ADMIN`；四个非 root 内核服务只获得监听 1-1023 端口所需的 `CAP_NET_BIND_SERVICE`。迁移完成后所有托管内核服务统一使用 `qagent-` 前缀。OpenRC 没有同等级的文件系统沙箱，应只在专用节点使用。
 
-一键接入节点时只安装 QAgent；四个内核的最小配置、状态目录和 `qagent-*` 服务素材会以 root 只读方式暂存，但不会落地为服务。面板首次提交某个内核的安装任务时，Agent 才创建该内核的配置与 systemd/OpenRC 服务，并同步低端口能力和临时日志策略；自定义服务名不会被修改。重复接入已有节点不会覆盖配置文件或管理员自建单元。
+一键接入节点时只安装 QAgent；四个内核的最小配置、状态目录和 `qagent-*` 服务素材会以 root 只读方式暂存，但不会落地为服务。面板首次提交某个内核的安装任务时，Agent 才创建该内核的配置与 systemd/OpenRC 服务，并同步低端口能力和临时日志策略；自定义服务名不会被修改。若活动的既有 Xray 或 sing-box 无法通过精确映射校验，接入仍会继续，原服务保持不变，Agent 仅禁用该内核的远程任务并在面板报告原因。重复接入已有节点不会覆盖配置文件或管理员自建单元。
 
 端口配额只管理 `inet qcontrolhub` 表，不刷新或改写管理员已有的 nftables 表。每个策略分别统计发往监听端口的接收字节和从该端口发出的发送字节；达到额度后，两条方向规则都切换为 `drop`。计数状态以 `0600` 原子保存在 `/var/lib/qcontrolhub/traffic-state.json`，Agent 或控制面短暂重启不会清零当前周期。
 

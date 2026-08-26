@@ -110,10 +110,17 @@ run_discovery() {
   else
     result=$?
   fi
-  [ "$result" -eq 1 ] || {
-    printf '%s\n' "unsafe $label service state; installation stopped without changing services" >&2
-    exit "$result"
-  }
+  case "$result" in
+    1) return 0 ;;
+    2)
+      printf '%s\n' "warning: existing $label service was left unchanged because it could not be mapped safely; QAgent installation will continue and only this core's remote tasks will remain disabled" >&2
+      return 0
+      ;;
+    *)
+      printf '%s\n' "unexpected $label discovery failure; installation stopped without changing services" >&2
+      exit "$result"
+      ;;
+  esac
 }
 run_discovery Xray discover_existing_xray
 run_discovery sing-box discover_existing_singbox

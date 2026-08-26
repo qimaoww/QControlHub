@@ -185,6 +185,8 @@ func TestOneClickInstallerDefersManagedCoreServicesUntilPanelInstall(t *testing.
 		`core_asset_root=/usr/local/share/qcontrolhub/core-install`,
 		`stage_core_asset "$repository_dir/deploy/$service_manager/$service_asset"`,
 		`/usr/local/lib/qagent/cores`,
+		`existing $label service was left unchanged because it could not be mapped safely`,
+		`only this core's remote tasks will remain disabled`,
 	} {
 		if !strings.Contains(script, required) {
 			t.Errorf("one-click installer is missing deferred-core contract %q", required)
@@ -192,6 +194,9 @@ func TestOneClickInstallerDefersManagedCoreServicesUntilPanelInstall(t *testing.
 	}
 	if strings.Contains(script, `QCH_SKIP_CORE_SERVICES="$mapped_engines" sh "$repository_dir/deploy/bootstrap-core-services.sh"`) {
 		t.Fatal("one-click installer still installs all managed core services during Agent deployment")
+	}
+	if strings.Contains(script, `unsafe $label service state; installation stopped`) {
+		t.Fatal("one-click installer still blocks Agent enrollment for an untouched, unmappable existing core")
 	}
 
 	bootstrap, err := os.ReadFile("../../deploy/bootstrap-core-services.sh")
