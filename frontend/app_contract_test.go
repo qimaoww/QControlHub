@@ -753,6 +753,34 @@ func TestCoreLogsUseImmediateFiltersAndSidebarNodeScope(t *testing.T) {
 	}
 }
 
+func TestCoreLogsUseReadableAlignedDesktopGrid(t *testing.T) {
+	stylesheet, err := os.ReadFile("app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(stylesheet)
+	for _, required := range []string{
+		`--core-log-grid:168px 130px 72px 150px minmax(360px,1fr)`,
+		`grid-template-columns:var(--core-log-grid);align-items:center`,
+		`.core-log-row time,.core-log-row span{min-width:0;overflow:hidden;font-size:11px`,
+		`.core-log-row pre{min-width:0;margin:0;color:var(--ink-2);font:11px/1.6`,
+		`.core-log-filter-group,.core-log-filters label{display:grid;gap:7px;min-width:0;color:var(--muted);font-size:11px`,
+	} {
+		if !strings.Contains(content, required) {
+			t.Errorf("core-log readable alignment contract is missing %q", required)
+		}
+	}
+	for _, obsolete := range []string{
+		`.core-log-row time{padding-top:3px`,
+		`.core-log-level{padding-top:3px`,
+		`.core-log-agent{padding-top:3px`,
+	} {
+		if strings.Contains(content, obsolete) {
+			t.Errorf("core-log columns still use manual baseline offset %q", obsolete)
+		}
+	}
+}
+
 func TestAgentStructureRefreshDoesNotPrecommitComparisonMarkers(t *testing.T) {
 	agents, err := os.ReadFile("modules/agents.js")
 	if err != nil {
