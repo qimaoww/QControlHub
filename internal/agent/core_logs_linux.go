@@ -1512,6 +1512,10 @@ func coreLogJournalSources(specSets ...map[core.Engine]EngineSpec) []coreLogJour
 		for engine, spec := range specs {
 			if managedCoreServiceName(spec.Service) {
 				addCoreLogUnit(managed, managedAmbiguous, spec.Service, engine)
+				// A project-managed fallback clears LogNamespace when namespaced
+				// journald is unavailable. Follow the main journal in parallel;
+				// only one source can contain a given managed unit entry.
+				addCoreLogUnit(generic, genericAmbiguous, spec.Service, engine)
 				continue
 			}
 			switch {

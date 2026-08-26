@@ -20,6 +20,11 @@ LogNamespace=qagent-cores
 StandardOutput=journal
 StandardError=journal
 `
+	managedCoreLogFallbackDropIn = `[Service]
+LogNamespace=
+StandardOutput=journal
+StandardError=journal
+`
 	managedCoreJournalConfig = `[Journal]
 Storage=volatile
 RuntimeMaxUse=16M
@@ -63,16 +68,26 @@ func ensureManagedCoreLogStreaming(ctx context.Context, specs map[core.Engine]En
 		return err
 	}
 
-	changed, err := installManagedLogFile(ensureContext, base,
+	journalChanged, err := installManagedLogFile(ensureContext, base,
 		"/etc/systemd/journald@qagent-cores.conf.d/10-qcontrolhub-volatile.conf",
 		[]byte(managedCoreJournalConfig))
 	if err != nil {
 		return fmt.Errorf("configure volatile core journal: %w", err)
 	}
+	if journalChanged {
+		if output, err := run(ensureContext, base.systemctlPath, "daemon-reload"); err != nil {
+			return fmt.Errorf("reload systemd after core journal update: %w: %s", err, output)
+		}
+	}
+	dropIn := []byte(managedCoreLogDropIn)
+	if err := startManagedCoreJournal(ensureContext, base.systemctlPath); err != nil {
+		dropIn = []byte(managedCoreLogFallbackDropIn)
+	}
+	changed := false
 	for _, spec := range installedSpecs {
 		installed, installErr := installManagedLogFile(ensureContext, base,
 			filepath.Join("/etc/systemd/system", spec.Service+".d", "20-qcontrolhub-volatile-logs.conf"),
-			[]byte(managedCoreLogDropIn))
+			dropIn)
 		if installErr != nil {
 			return fmt.Errorf("configure volatile logs for %s: %w", spec.Service, installErr)
 		}
@@ -82,9 +97,6 @@ func ensureManagedCoreLogStreaming(ctx context.Context, specs map[core.Engine]En
 		if output, err := run(ensureContext, base.systemctlPath, "daemon-reload"); err != nil {
 			return fmt.Errorf("reload systemd after core log update: %w: %s", err, output)
 		}
-	}
-	if err := startManagedCoreJournal(ensureContext, base.systemctlPath); err != nil {
-		return err
 	}
 	return nil
 }
@@ -116,6 +128,23 @@ func ensureOpenRCCoreLogDirectory() error {
 func startManagedCoreJournal(ctx context.Context, systemctl string) error {
 	if output, err := run(ctx, systemctl, "start", managedCoreJournalService); err != nil {
 		return fmt.Errorf("start volatile core journal: %w: %s", err, output)
+	}
+	status, err := waitForServiceState(ctx, "active", 500*time.Millisecond, 100*time.Millisecond, func(probeContext context.Context) (string, error) {
+		output, probeErr := run(probeContext, systemctl, "is-active", managedCoreJournalService)
+		if probeErr != nil {
+			trimmed := strings.TrimSpace(output)
+			if trimmed == "inactive" || trimmed == "failed" || trimmed == "activating" {
+				return trimmed, nil
+			}
+			return trimmed, probeErr
+		}
+		return strings.TrimSpace(output), nil
+	})
+	if err != nil || status != "active" {
+		if err == nil {
+			err = fmt.Errorf("journal service is %s", status)
+		}
+		return fmt.Errorf("verify volatile core journal: %w", err)
 	}
 	return nil
 }

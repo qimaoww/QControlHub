@@ -71,6 +71,36 @@ func TestOpenRCServiceManagerRejectsUnsafeNames(t *testing.T) {
 	}
 }
 
+func TestSystemdStopClearsFailedStateBeforeVerification(t *testing.T) {
+	directory := t.TempDir()
+	statePath := filepath.Join(directory, "state")
+	logPath := filepath.Join(directory, "systemctl.log")
+	helper := filepath.Join(directory, "systemctl")
+	if err := os.WriteFile(statePath, []byte("failed\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	script := "#!/bin/sh\n" +
+		"/usr/bin/printf '%s %s\\n' \"$1\" \"$2\" >> " + logPath + "\n" +
+		"if [ \"$1\" = stop ]; then exit 0; fi\n" +
+		"if [ \"$1\" = reset-failed ]; then /usr/bin/printf 'inactive\\n' > " + statePath + "; exit 0; fi\n" +
+		"if [ \"$1\" = is-active ]; then /usr/bin/cat " + statePath + "; exit 3; fi\n" +
+		"exit 1\n"
+	if err := os.WriteFile(helper, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	manager := &ServiceManager{kind: ServiceManagerSystemd, executable: helper}
+	if _, err := serviceCommandAndVerifyWithManager(context.Background(), manager, "qagent-xray.service", core.ActionStop); err != nil {
+		t.Fatal(err)
+	}
+	commands, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(commands); got != "stop qagent-xray.service\nis-active qagent-xray.service\nreset-failed qagent-xray.service\nis-active qagent-xray.service\n" {
+		t.Fatalf("systemd commands = %q", got)
+	}
+}
+
 func TestOpenRCProcessArgvMatchesExactCoreInvocation(t *testing.T) {
 	tests := []struct {
 		name   string
