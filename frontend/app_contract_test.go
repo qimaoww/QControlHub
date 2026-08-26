@@ -817,6 +817,21 @@ func TestAgentStructureRefreshDoesNotPrecommitComparisonMarkers(t *testing.T) {
 	}
 }
 
+func TestAgentPollingRefreshesNewlyEnrolledNodeStructure(t *testing.T) {
+	agents := string(mustReadFrontendFile(t, "modules/agents.js"))
+	for _, required := range []string{
+		`export function agentStructureSignature(agents = [])`,
+		`renderedAgentStructure = agentStructureSignature(visibleAgents)`,
+		`visibleAgentStructure(items) !== renderedAgentStructure`,
+		`if (structureChanged) {`,
+		`requestAgentStructureRefresh();`,
+	} {
+		if !strings.Contains(agents, required) {
+			t.Errorf("newly enrolled Agent polling contract is missing %q", required)
+		}
+	}
+}
+
 func TestTaskPollingKeepsTheScrollContainerStable(t *testing.T) {
 	tasks, err := os.ReadFile("modules/tasks.js")
 	if err != nil {

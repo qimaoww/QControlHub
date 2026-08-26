@@ -49,6 +49,14 @@ export function batchSelectAllState(inputs) {
   };
 }
 
+export function agentStructureSignature(agents = []) {
+  return JSON.stringify(
+    [...agents]
+      .map((agent) => String(agent?.id || ""))
+      .sort((left, right) => left.localeCompare(right)),
+  );
+}
+
 function mihomoDevelopmentSourceFieldset(canMirror) {
   return `<fieldset class="release-channel-fieldset development-source-field" data-development-source hidden><legend>开发版来源</legend><div class="release-channel-options"><label><input type="radio" name="core_source" value="official" checked><span>MetaCubeX 官方（默认，推荐）</span></label><label><input type="radio" name="core_source" value="mirror" ${canMirror ? "" : "disabled"}><span>vernesong/mihomo Alpha 镜像（第三方）${canMirror ? "" : "（需升级 Agent）"}</span></label></div>${canMirror ? "" : `<p class="source-upgrade-note">当前 Agent 尚未声明 mihomo-development-source-v1，镜像来源不可用；请先在面板升级 Agent。</p>`}</fieldset>`;
 }
@@ -620,6 +628,13 @@ export function installAgents(ctx) {
   let syncActiveBatchSnapshot = null;
   let structureRefreshQueued = false;
   let structureRefreshRunning = false;
+  let renderedAgentStructure = null;
+  const visibleAgentStructure = (items) =>
+    agentStructureSignature(
+      state.data.nodeView === "detail"
+        ? items.filter((item) => item.id === state.data.selectedAgent)
+        : items,
+    );
   const requestAgentStructureRefresh = () => {
     structureRefreshQueued = true;
     cardInteractions.defer(() => void flushAgentStructureRefresh(), "structure");
@@ -963,6 +978,7 @@ async function nodeSettings(presetMode = false, { overview: preloadedOverview } 
           : "node-settings-overview",
     },
   );
+  renderedAgentStructure = agentStructureSignature(visibleAgents);
   document.querySelectorAll("[data-context-agent]").forEach((link) => {
     const prefix = presetMode ? "preset-node" : "settings-node";
     link.href = `#${prefix}-${link.dataset.contextAgent}`;
@@ -1953,11 +1969,23 @@ async function pollAgentMetrics() {
     await metricsRefresh.run(
       (signal) => api("/agents", { signal }),
       (items) => {
+        if (
+          renderedAgentStructure === null &&
+          Array.isArray(state.data.agents)
+        )
+          renderedAgentStructure = visibleAgentStructure(state.data.agents);
+        const structureChanged =
+          renderedAgentStructure !== null &&
+          visibleAgentStructure(items) !== renderedAgentStructure;
         // Keep the shared runtime snapshot current even when an active card
         // interaction defers DOM patches. Other routes (notably live-config)
         // must not inherit the stale state that preceded an Agent upgrade.
         state.data.agents = items;
         syncActiveBatchSnapshot?.(items);
+        if (structureChanged) {
+          requestAgentStructureRefresh();
+          return;
+        }
         if (
           state.data.nodeView === "detail" &&
           !items.some((item) => item.id === state.data.selectedAgent)
