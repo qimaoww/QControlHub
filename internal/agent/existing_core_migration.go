@@ -286,16 +286,22 @@ type coreMigrationRecord struct {
 	BinaryBackupDigest  string
 	ConfigBackupDigest  string
 	StagedBinaryDigest  string
+	AssetBackupDigests  [2]string
+	StagedAssetDigests  [2]string
+	HasAssetRollback    bool
 }
 
 const (
 	coreMigrationNone                coreMigrationState = ""
 	coreMigrationInProgress          coreMigrationState = "migrating"
 	coreMigrationComplete            coreMigrationState = "migrated"
-	coreMigrationPreparedToken                          = "migrating-v3"
+	coreMigrationPreparedToken                          = "migrating-v4"
+	coreMigrationV3PreparedToken                        = "migrating-v3"
 	coreMigrationLegacyPreparedToken                    = "migrating-v2"
 	coreMigrationMissingBackup                          = "-"
 )
+
+var xrayMigrationAssetNames = [2]string{"geoip.dat", "geosite.dat"}
 
 func coreMigrationMarked(prefix string, engine core.Engine) (bool, error) {
 	record, err := readCoreMigrationRecord(prefix, engine)
@@ -409,18 +415,27 @@ func readCoreMigrationRecord(prefix string, engine core.Engine) (coreMigrationRe
 		return coreMigrationRecord{}, err
 	}
 	fields := strings.Fields(string(contents))
-	if len(fields) != 5 && len(fields) != 8 && len(fields) != 9 {
+	if len(fields) != 5 && len(fields) != 8 && len(fields) != 9 && len(fields) != 13 {
 		return coreMigrationRecord{}, errors.New("core migration marker is invalid")
+	}
+	if (fields[0] == coreMigrationPreparedToken && len(fields) != 13) ||
+		(fields[0] == coreMigrationV3PreparedToken && len(fields) != 9) ||
+		(fields[0] == coreMigrationLegacyPreparedToken && len(fields) != 8) {
+		return coreMigrationRecord{}, errors.New("core migration marker version is invalid")
 	}
 	state := coreMigrationState(fields[0])
 	hasFileRollback := false
+	hasAssetRollback := false
 	managedInitialState := "inactive"
 	if fields[0] == coreMigrationPreparedToken {
 		state = coreMigrationInProgress
 		hasFileRollback = true
-		if len(fields) == 9 {
-			managedInitialState = fields[8]
-		}
+		hasAssetRollback = true
+		managedInitialState = fields[8]
+	} else if fields[0] == coreMigrationV3PreparedToken {
+		state = coreMigrationInProgress
+		hasFileRollback = true
+		managedInitialState = fields[8]
 	} else if fields[0] == coreMigrationLegacyPreparedToken {
 		state = coreMigrationInProgress
 		hasFileRollback = true
@@ -428,7 +443,7 @@ func readCoreMigrationRecord(prefix string, engine core.Engine) (coreMigrationRe
 	if state != coreMigrationInProgress && state != coreMigrationComplete {
 		return coreMigrationRecord{}, errors.New("core migration marker is invalid")
 	}
-	if (fields[0] == coreMigrationPreparedToken && len(fields) != 9) || (fields[0] == coreMigrationLegacyPreparedToken && len(fields) != 8) || state == coreMigrationComplete && len(fields) != 5 {
+	if state == coreMigrationComplete && len(fields) != 5 {
 		return coreMigrationRecord{}, errors.New("core migration marker version is invalid")
 	}
 	if managedInitialState != "active" && managedInitialState != "inactive" {
@@ -448,6 +463,7 @@ func readCoreMigrationRecord(prefix string, engine core.Engine) (coreMigrationRe
 		ExistingEnableState: fields[3], ManagedEnableState: fields[4],
 		ManagedInitialState: managedInitialState,
 		HasFileRollback:     hasFileRollback,
+		HasAssetRollback:    hasAssetRollback,
 	}
 	if hasFileRollback {
 		for _, digest := range fields[5:8] {
@@ -464,6 +480,18 @@ func readCoreMigrationRecord(prefix string, engine core.Engine) (coreMigrationRe
 		record.BinaryBackupDigest = fields[5]
 		record.ConfigBackupDigest = fields[6]
 		record.StagedBinaryDigest = fields[7]
+	}
+	if hasAssetRollback {
+		for _, digest := range fields[9:13] {
+			if digest == coreMigrationMissingBackup {
+				continue
+			}
+			if decoded, err := hex.DecodeString(digest); err != nil || len(decoded) != sha256.Size {
+				return coreMigrationRecord{}, errors.New("core migration asset digest is invalid")
+			}
+		}
+		record.AssetBackupDigests = [2]string{fields[9], fields[11]}
+		record.StagedAssetDigests = [2]string{fields[10], fields[12]}
 	}
 	return record, nil
 }
@@ -525,7 +553,7 @@ func prepareCoreMigrationFileRollback(prefix string, engine core.Engine, existin
 		return coreMigrationRecord{}, err
 	}
 	defer root.Close()
-	for _, kind := range []string{"binary", "config"} {
+	for _, kind := range coreMigrationBackupKinds() {
 		if err := root.Remove(coreMigrationBackupName(prefix, engine, kind)); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return coreMigrationRecord{}, fmt.Errorf("remove stale core migration %s backup: %w", kind, err)
 		}
@@ -542,7 +570,7 @@ func prepareCoreMigrationFileRollback(prefix string, engine core.Engine, existin
 		_ = cleanupCoreMigrationBackups(prefix, engine)
 		return coreMigrationRecord{}, fmt.Errorf("snapshot managed configuration: %w", err)
 	}
-	stagedBinaryDigest, exists, err := protectedCoreMigrationFileDigest(existing.Binary, maxReleaseAssetSize)
+	stagedBinaryDigest, exists, err := protectedExistingCoreMigrationFileDigest(existing.Binary, maxReleaseAssetSize)
 	if err != nil {
 		_ = cleanupCoreMigrationBackups(prefix, engine)
 		return coreMigrationRecord{}, fmt.Errorf("digest existing core binary: %w", err)
@@ -558,6 +586,30 @@ func prepareCoreMigrationFileRollback(prefix string, engine core.Engine, existin
 	record.BinaryBackupDigest = binaryBackupDigest
 	record.ConfigBackupDigest = configBackupDigest
 	record.StagedBinaryDigest = stagedBinaryDigest
+	record.AssetBackupDigests = [2]string{coreMigrationMissingBackup, coreMigrationMissingBackup}
+	record.StagedAssetDigests = [2]string{coreMigrationMissingBackup, coreMigrationMissingBackup}
+	record.HasAssetRollback = true
+	if engine == core.EngineXray {
+		for index, name := range xrayMigrationAssetNames {
+			sourcePath := filepath.Join(filepath.Dir(existing.Binary), name)
+			stagedDigest, assetExists, digestErr := protectedCoreMigrationFileDigest(sourcePath, maxReleaseAssetSize)
+			if digestErr != nil {
+				_ = cleanupCoreMigrationBackups(prefix, engine)
+				return coreMigrationRecord{}, fmt.Errorf("digest existing Xray asset %s: %w", name, digestErr)
+			}
+			if !assetExists {
+				continue
+			}
+			destinationPath := filepath.Join(filepath.Dir(managed.Binary), name)
+			backupDigest, snapshotErr := snapshotCoreMigrationFile(root, prefix, engine, "asset-"+name, destinationPath, maxReleaseAssetSize)
+			if snapshotErr != nil {
+				_ = cleanupCoreMigrationBackups(prefix, engine)
+				return coreMigrationRecord{}, fmt.Errorf("snapshot managed Xray asset %s: %w", name, snapshotErr)
+			}
+			record.AssetBackupDigests[index] = backupDigest
+			record.StagedAssetDigests[index] = stagedDigest
+		}
+	}
 	if err := writePreparedCoreMigrationMarker(prefix, engine, record); err != nil {
 		_ = cleanupCoreMigrationBackups(prefix, engine)
 		return coreMigrationRecord{}, err
@@ -642,11 +694,44 @@ func restoreCoreMigrationFiles(prefix string, engine core.Engine, managed Engine
 	if err != nil {
 		return fmt.Errorf("plan managed configuration rollback: %w", err)
 	}
+	type assetRestore struct {
+		path   string
+		name   string
+		backup coreMigrationBackup
+		action coreMigrationRestoreAction
+	}
+	assetRestores := make([]assetRestore, 0, len(xrayMigrationAssetNames))
+	if record.HasAssetRollback {
+		for index, name := range xrayMigrationAssetNames {
+			stagedDigest := record.StagedAssetDigests[index]
+			if stagedDigest == coreMigrationMissingBackup {
+				continue
+			}
+			backup, backupErr := openCoreMigrationBackup(prefix, engine, "asset-"+name, record.AssetBackupDigests[index], maxReleaseAssetSize)
+			if backupErr != nil {
+				return fmt.Errorf("validate managed Xray asset %s rollback backup: %w", name, backupErr)
+			}
+			if backup.file != nil {
+				defer backup.file.Close()
+			}
+			path := filepath.Join(filepath.Dir(managed.Binary), name)
+			action, planErr := planCoreMigrationFileRestore(path, record.AssetBackupDigests[index], stagedDigest, maxReleaseAssetSize)
+			if planErr != nil {
+				return fmt.Errorf("plan managed Xray asset %s rollback: %w", name, planErr)
+			}
+			assetRestores = append(assetRestores, assetRestore{path: path, name: name, backup: backup, action: action})
+		}
+	}
 	if err := applyCoreMigrationFileRestore(managed.Binary, binaryBackup, binaryAction); err != nil {
 		return fmt.Errorf("restore managed binary: %w", err)
 	}
 	if err := applyCoreMigrationFileRestore(managed.ConfigPath, configBackup, configAction); err != nil {
 		return fmt.Errorf("restore managed configuration: %w", err)
+	}
+	for _, asset := range assetRestores {
+		if err := applyCoreMigrationFileRestore(asset.path, asset.backup, asset.action); err != nil {
+			return fmt.Errorf("restore managed Xray asset %s: %w", asset.name, err)
+		}
 	}
 	return nil
 }
@@ -660,11 +745,24 @@ func verifyCoreMigrationStagedFiles(managed EngineSpec, record coreMigrationReco
 	if err != nil || !configExists || configDigest != record.ConfigDigest {
 		return errors.New("managed configuration does not match the recorded staged configuration")
 	}
+	if record.HasAssetRollback {
+		for index, name := range xrayMigrationAssetNames {
+			expectedDigest := record.StagedAssetDigests[index]
+			if expectedDigest == coreMigrationMissingBackup {
+				continue
+			}
+			path := filepath.Join(filepath.Dir(managed.Binary), name)
+			digest, exists, err := protectedCoreMigrationFileDigest(path, maxReleaseAssetSize)
+			if err != nil || !exists || digest != expectedDigest {
+				return fmt.Errorf("managed Xray asset %s does not match the recorded staged asset", name)
+			}
+		}
+	}
 	return nil
 }
 
 func verifyCoreMigrationOriginalFiles(managed EngineSpec, record coreMigrationRecord) error {
-	for _, file := range []struct {
+	files := []struct {
 		path   string
 		digest string
 		limit  int64
@@ -672,7 +770,24 @@ func verifyCoreMigrationOriginalFiles(managed EngineSpec, record coreMigrationRe
 	}{
 		{path: managed.Binary, digest: record.BinaryBackupDigest, limit: maxReleaseAssetSize, label: "binary"},
 		{path: managed.ConfigPath, digest: record.ConfigBackupDigest, limit: core.MaxConfigBytes, label: "configuration"},
-	} {
+	}
+	if record.HasAssetRollback {
+		for index, name := range xrayMigrationAssetNames {
+			if record.StagedAssetDigests[index] == coreMigrationMissingBackup {
+				continue
+			}
+			files = append(files, struct {
+				path   string
+				digest string
+				limit  int64
+				label  string
+			}{
+				path: filepath.Join(filepath.Dir(managed.Binary), name), digest: record.AssetBackupDigests[index],
+				limit: maxReleaseAssetSize, label: "Xray asset " + name,
+			})
+		}
+	}
+	for _, file := range files {
 		currentDigest, exists, err := protectedCoreMigrationFileDigest(file.path, file.limit)
 		if err != nil {
 			return fmt.Errorf("query original managed %s: %w", file.label, err)
@@ -815,6 +930,14 @@ func applyCoreMigrationFileRestore(destination string, backup coreMigrationBacku
 }
 
 func protectedCoreMigrationFileDigest(path string, limit int64) (string, bool, error) {
+	return protectedCoreMigrationFileDigestWithOwnerPolicy(path, limit, false)
+}
+
+func protectedExistingCoreMigrationFileDigest(path string, limit int64) (string, bool, error) {
+	return protectedCoreMigrationFileDigestWithOwnerPolicy(path, limit, installerCoreAllowsOrphanOwner(path))
+}
+
+func protectedCoreMigrationFileDigestWithOwnerPolicy(path string, limit int64, allowOrphanOwner bool) (string, bool, error) {
 	info, err := os.Lstat(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return "", false, nil
@@ -822,7 +945,7 @@ func protectedCoreMigrationFileDigest(path string, limit int64) (string, bool, e
 	if err != nil {
 		return "", false, err
 	}
-	file, _, err := openProtectedCoreMigrationFile(path, info, limit)
+	file, _, err := openProtectedCoreMigrationFileWithOwnerPolicy(path, info, limit, allowOrphanOwner)
 	if err != nil {
 		return "", false, err
 	}
@@ -832,6 +955,10 @@ func protectedCoreMigrationFileDigest(path string, limit int64) (string, bool, e
 }
 
 func openProtectedCoreMigrationFile(path string, expected os.FileInfo, limit int64) (*os.File, os.FileInfo, error) {
+	return openProtectedCoreMigrationFileWithOwnerPolicy(path, expected, limit, false)
+}
+
+func openProtectedCoreMigrationFileWithOwnerPolicy(path string, expected os.FileInfo, limit int64, allowOrphanOwner bool) (*os.File, os.FileInfo, error) {
 	if !filepath.IsAbs(path) {
 		return nil, nil, errors.New("core migration file path is not absolute")
 	}
@@ -842,7 +969,9 @@ func openProtectedCoreMigrationFile(path string, expected os.FileInfo, limit int
 		return nil, nil, errors.New("core migration file exceeds the supported limit")
 	}
 	if err := validateOwner(expected, "core migration file"); err != nil {
-		return nil, nil, err
+		if !allowOrphanOwner || !fileOwnerIsInactiveAndUnassigned(expected) {
+			return nil, nil, err
+		}
 	}
 	directory := filepath.Dir(path)
 	if err := validateProtectedDirectoryChain(directory); err != nil {
@@ -909,12 +1038,16 @@ func cleanupCoreMigrationBackups(prefix string, engine core.Engine) error {
 		return err
 	}
 	defer root.Close()
-	for _, kind := range []string{"binary", "config"} {
+	for _, kind := range coreMigrationBackupKinds() {
 		if err := root.Remove(coreMigrationBackupName(prefix, engine, kind)); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
 	}
 	return syncRootDirectory(root)
+}
+
+func coreMigrationBackupKinds() []string {
+	return []string{"binary", "config", "asset-geoip.dat", "asset-geosite.dat"}
 }
 
 func (e *Executor) importExistingConfig(ctx context.Context, engine core.Engine, managed, existing EngineSpec, content string) (string, error) {
@@ -1017,6 +1150,11 @@ func (e *Executor) importExistingConfig(ctx context.Context, engine core.Engine,
 
 	if _, err := copyExistingCoreBinary(existing.Binary, managed.Binary); err != nil {
 		return rollbackMigration(fmt.Errorf("copy existing %s binary into the QAgent namespace: %w", engine, err))
+	}
+	if engine == core.EngineXray {
+		if err := stageExistingXrayMigrationAssets(existing, managed, migrationRecord); err != nil {
+			return rollbackMigration(fmt.Errorf("copy existing Xray assets into the QAgent namespace: %w", err))
+		}
 	}
 	if _, err := e.validateImportedSnapshot(ctx, engine, managed, content); err != nil {
 		return rollbackMigration(fmt.Errorf("copied %s binary rejected the configuration: %w", engine, err))
@@ -1226,6 +1364,98 @@ func copyExistingCoreBinary(source, destination string) (string, error) {
 		return "", closeErr
 	}
 	return replaceCoreBinary(destinationRoot, filepath.Base(destination), tempName)
+}
+
+func stageExistingXrayMigrationAssets(existing, managed EngineSpec, record coreMigrationRecord) error {
+	if !record.HasAssetRollback {
+		return errors.New("Xray migration record has no asset rollback information")
+	}
+	for index, name := range xrayMigrationAssetNames {
+		expectedDigest := record.StagedAssetDigests[index]
+		if expectedDigest == coreMigrationMissingBackup {
+			continue
+		}
+		source := filepath.Join(filepath.Dir(existing.Binary), name)
+		destination := filepath.Join(filepath.Dir(managed.Binary), name)
+		if err := copyExistingCoreAsset(source, destination, expectedDigest); err != nil {
+			return fmt.Errorf("stage %s: %w", name, err)
+		}
+	}
+	return nil
+}
+
+func copyExistingCoreAsset(source, destination, expectedDigest string) error {
+	sourceInfo, err := os.Lstat(source)
+	if err != nil {
+		return err
+	}
+	input, _, err := openProtectedCoreMigrationFile(source, sourceInfo, maxReleaseAssetSize)
+	if err != nil {
+		return err
+	}
+	defer input.Close()
+	digest, err := digestCoreMigrationFile(input, maxReleaseAssetSize)
+	if err != nil {
+		return err
+	}
+	if digest != expectedDigest {
+		return errors.New("source asset changed after migration preparation")
+	}
+	if _, err := input.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+
+	directory := filepath.Dir(destination)
+	if err := validateProtectedDirectoryChain(directory); err != nil {
+		return err
+	}
+	metadata := fileMetadata{mode: 0o644}
+	if destinationInfo, err := os.Lstat(destination); err == nil {
+		existing, openedInfo, openErr := openProtectedCoreMigrationFile(destination, destinationInfo, maxReleaseAssetSize)
+		if openErr != nil {
+			return openErr
+		}
+		existing.Close()
+		metadata = metadataFromFileInfo(openedInfo)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+
+	root, err := os.OpenRoot(directory)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	tempName, err := randomCoreTempName(root)
+	if err != nil {
+		return err
+	}
+	defer root.Remove(tempName)
+	output, err := root.OpenFile(tempName, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	written, copyErr := io.Copy(output, io.LimitReader(input, maxReleaseAssetSize+1))
+	if copyErr == nil && (written <= 0 || written > maxReleaseAssetSize) {
+		copyErr = errors.New("Xray asset copy exceeded the supported limit")
+	}
+	if copyErr == nil {
+		copyErr = applyFileMetadata(output, metadata)
+	}
+	if copyErr == nil {
+		copyErr = output.Sync()
+	}
+	closeErr := output.Close()
+	if copyErr != nil {
+		return copyErr
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	if err := root.Rename(tempName, filepath.Base(destination)); err != nil {
+		return err
+	}
+	return syncRootDirectory(root)
 }
 
 func verifyExistingServiceMapping(ctx context.Context, engine core.Engine, existing EngineSpec, managers ...*ServiceManager) error {
@@ -1948,6 +2178,20 @@ func writePreparedCoreMigrationMarker(prefix string, engine core.Engine, record 
 	if record.StagedBinaryDigest == coreMigrationMissingBackup {
 		return errors.New("invalid core migration staged binary digest")
 	}
+	if !record.HasAssetRollback {
+		return errors.New("invalid core migration asset rollback record")
+	}
+	for _, digest := range []string{
+		record.AssetBackupDigests[0], record.StagedAssetDigests[0],
+		record.AssetBackupDigests[1], record.StagedAssetDigests[1],
+	} {
+		if digest == coreMigrationMissingBackup {
+			continue
+		}
+		if decoded, err := hex.DecodeString(digest); err != nil || len(decoded) != sha256.Size {
+			return errors.New("invalid core migration asset digest")
+		}
+	}
 	contents := strings.Join([]string{
 		coreMigrationPreparedToken,
 		record.ConfigDigest,
@@ -1958,6 +2202,10 @@ func writePreparedCoreMigrationMarker(prefix string, engine core.Engine, record 
 		record.ConfigBackupDigest,
 		record.StagedBinaryDigest,
 		record.ManagedInitialState,
+		record.AssetBackupDigests[0],
+		record.StagedAssetDigests[0],
+		record.AssetBackupDigests[1],
+		record.StagedAssetDigests[1],
 	}, " ") + "\n"
 	return writeCoreMigrationMarkerContents(prefix, engine, contents)
 }

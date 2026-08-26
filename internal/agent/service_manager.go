@@ -164,3 +164,16 @@ func (manager *ServiceManager) status(ctx context.Context, service string) (stri
 	}
 	return strings.TrimSpace(output), nil
 }
+
+func (manager *ServiceManager) resetFailed(ctx context.Context, service string) error {
+	if manager == nil || manager.Kind() != ServiceManagerSystemd {
+		return nil
+	}
+	if !safeServiceName(service) {
+		return errors.New("configured service name is unsafe")
+	}
+	if _, err := run(ctx, manager.executable, "reset-failed", service); err != nil {
+		return fmt.Errorf("systemd reset-failed %s: %w", service, err)
+	}
+	return nil
+}

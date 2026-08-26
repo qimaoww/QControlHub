@@ -1816,24 +1816,58 @@ func serviceCommandAndVerifyWithManager(ctx context.Context, manager *ServiceMan
 	if err != nil {
 		return output, err
 	}
+	if action == core.ActionStop && manager.Kind() == ServiceManagerSystemd {
+		status, statusErr := manager.status(ctx, service)
+		if statusErr != nil {
+			return output, withServiceFailureDiagnostics(ctx, manager, service, statusErr)
+		}
+		if status == "failed" {
+			if err := manager.resetFailed(ctx, service); err != nil {
+				return output, withServiceFailureDiagnostics(ctx, manager, service, err)
+			}
+		}
+	}
 	expected := "active"
 	stableFor := 500 * time.Millisecond
+	verificationTimeout := 12 * time.Second
 	if action == core.ActionStop {
 		expected = "inactive"
 		stableFor = 0
+		verificationTimeout = 5 * time.Second
 	}
-	verifyContext, verifyCancel := context.WithTimeout(ctx, 5*time.Second)
+	verifyContext, verifyCancel := context.WithTimeout(ctx, verificationTimeout)
 	status, statusErr := waitForServiceState(verifyContext, expected, stableFor, 100*time.Millisecond, func(probeContext context.Context) (string, error) {
 		return manager.status(probeContext, service)
 	})
 	verifyCancel()
 	if statusErr != nil {
-		return output, fmt.Errorf("verify %s service %s after %s: %w", manager.Kind(), service, action, statusErr)
+		cause := fmt.Errorf("verify %s service %s after %s: %w", manager.Kind(), service, action, statusErr)
+		return output, withServiceFailureDiagnostics(ctx, manager, service, cause)
 	}
 	if status != expected {
-		return output + "\nservice status: " + status, fmt.Errorf("%s service %s is %s after %s, expected %s", manager.Kind(), service, status, action, expected)
+		cause := fmt.Errorf("%s service %s is %s after %s, expected %s", manager.Kind(), service, status, action, expected)
+		return output + "\nservice status: " + status, withServiceFailureDiagnostics(ctx, manager, service, cause)
 	}
 	return output + "\nservice status: " + status, nil
+}
+
+func withServiceFailureDiagnostics(ctx context.Context, manager *ServiceManager, service string, cause error) error {
+	if manager == nil || manager.Kind() != ServiceManagerSystemd {
+		return cause
+	}
+	diagnosticContext, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	output, _ := run(diagnosticContext, manager.executable, "show", service, "--no-pager",
+		"--property=ActiveState", "--property=SubState", "--property=Result",
+		"--property=ExecMainCode", "--property=ExecMainStatus", "--property=NRestarts")
+	output = strings.TrimSpace(strings.ToValidUTF8(output, "�"))
+	if output == "" {
+		return cause
+	}
+	if len(output) > 2048 {
+		output = strings.ToValidUTF8(output[:2048], "�")
+	}
+	return fmt.Errorf("%w; unit state:\n%s", cause, output)
 }
 
 type serviceStatusProbe func(context.Context) (string, error)

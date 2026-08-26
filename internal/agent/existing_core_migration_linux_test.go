@@ -849,6 +849,98 @@ func TestCoreMigrationPreparedMarkerTracksManagedInitialStateAndReadsLegacy(t *t
 	}
 }
 
+func TestExistingXrayMigrationStagesAndRollsBackGeoAssets(t *testing.T) {
+	requireAgentRoot(t)
+	fixture := newExistingCoreMigrationFixture(t, false)
+	sourceAssets := map[string]string{
+		"geoip.dat":   "new geoip data\n",
+		"geosite.dat": "new geosite data\n",
+	}
+	for name, content := range sourceAssets {
+		if err := os.WriteFile(filepath.Join(filepath.Dir(fixture.existing.Binary), name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	originalGeoIP := "original managed geoip data\n"
+	managedGeoIP := filepath.Join(filepath.Dir(fixture.managed.Binary), "geoip.dat")
+	if err := os.WriteFile(managedGeoIP, []byte(originalGeoIP), 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	record, err := prepareCoreMigrationFileRollback(
+		fixture.markerPrefix,
+		core.EngineXray,
+		fixture.existing,
+		fixture.managed,
+		coreMigrationRecord{
+			State: coreMigrationInProgress, ConfigDigest: coreMigrationConfigDigest(fixture.importedConfig),
+			SourceDigest: coreMigrationSourceDigest(fixture.existing), ExistingEnableState: "enabled", ManagedEnableState: "disabled",
+		},
+	)
+	if err != nil {
+		t.Fatalf("prepare Xray asset transaction: %v", err)
+	}
+	if !record.HasAssetRollback || record.StagedAssetDigests[0] == coreMigrationMissingBackup ||
+		record.StagedAssetDigests[1] == coreMigrationMissingBackup || record.AssetBackupDigests[0] == coreMigrationMissingBackup ||
+		record.AssetBackupDigests[1] != coreMigrationMissingBackup {
+		t.Fatalf("Xray asset transaction record = %+v", record)
+	}
+	readBack, err := readCoreMigrationRecord(fixture.markerPrefix, core.EngineXray)
+	if err != nil || readBack.AssetBackupDigests != record.AssetBackupDigests || readBack.StagedAssetDigests != record.StagedAssetDigests {
+		t.Fatalf("read Xray asset transaction record = %+v, %v", readBack, err)
+	}
+	if _, err := copyExistingCoreBinary(fixture.existing.Binary, fixture.managed.Binary); err != nil {
+		t.Fatal(err)
+	}
+	if err := stageExistingXrayMigrationAssets(fixture.existing, fixture.managed, record); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := atomicDeploy(fixture.managed.ConfigPath, fixture.importedConfig); err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyCoreMigrationStagedFiles(fixture.managed, record); err != nil {
+		t.Fatalf("verify staged Xray assets: %v", err)
+	}
+	for name, content := range sourceAssets {
+		assertFileContentAndMode(t, filepath.Join(filepath.Dir(fixture.managed.Binary), name), content, map[string]os.FileMode{
+			"geoip.dat": 0o640, "geosite.dat": 0o644,
+		}[name])
+	}
+	if err := restoreCoreMigrationFiles(fixture.markerPrefix, core.EngineXray, fixture.managed, record); err != nil {
+		t.Fatalf("roll back Xray assets: %v", err)
+	}
+	assertFileContentAndMode(t, managedGeoIP, originalGeoIP, 0o640)
+	if _, err := os.Lstat(filepath.Join(filepath.Dir(fixture.managed.Binary), "geosite.dat")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("originally absent geosite.dat remained after rollback: %v", err)
+	}
+}
+
+func TestCoreMigrationDigestAcceptsInactiveOrphanInstallerBinary(t *testing.T) {
+	requireAgentRoot(t)
+	fixture := newExistingCoreMigrationFixture(t, false)
+	allowFixtureOrphanOwnerPath(t, fixture.existing.Binary)
+	assignInactiveOrphanOwner(t, fixture.existing.Binary)
+	if err := os.Chmod(fixture.existing.Binary, 0o744); err != nil {
+		t.Fatal(err)
+	}
+	record, err := prepareCoreMigrationFileRollback(
+		fixture.markerPrefix,
+		core.EngineXray,
+		fixture.existing,
+		fixture.managed,
+		coreMigrationRecord{
+			State: coreMigrationInProgress, ConfigDigest: coreMigrationConfigDigest(fixture.importedConfig),
+			SourceDigest: coreMigrationSourceDigest(fixture.existing), ExistingEnableState: "enabled", ManagedEnableState: "disabled",
+		},
+	)
+	if err != nil {
+		t.Fatalf("prepare inactive-orphan migration transaction: %v", err)
+	}
+	if record.StagedBinaryDigest == "" || record.StagedBinaryDigest == coreMigrationMissingBackup {
+		t.Fatalf("inactive-orphan staged digest = %q", record.StagedBinaryDigest)
+	}
+}
+
 func TestRefreshExistingCoreDiscoveryAcceptsLegacyCompletedMarker(t *testing.T) {
 	fixture := newExistingCoreMigrationFixture(t, false)
 	discoveryStatePath := filepath.Join(filepath.Dir(fixture.markerPrefix), "agent-state.json.existing-cores")

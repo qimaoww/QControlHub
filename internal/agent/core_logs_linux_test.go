@@ -1304,7 +1304,9 @@ func TestCoreLogSourcesMixManagedAndExactGenericUnits(t *testing.T) {
 	}
 	if containsArgument(generic.arguments, "--namespace=qagent-cores") ||
 		!containsArgument(generic.arguments, "--unit=xray.service") ||
-		!containsArgument(generic.arguments, "--unit=sing-box.service") {
+		!containsArgument(generic.arguments, "--unit=sing-box.service") ||
+		!containsArgument(generic.arguments, "--unit=qagent-xray.service") ||
+		!containsArgument(generic.arguments, "--unit=qagent-sing-box.service") {
 		t.Fatalf("generic journal arguments = %v", generic.arguments)
 	}
 	if engine, ok := coreLogEngineForUnit("xray.service", generic.unitEngines); !ok || engine != core.EngineXray {
