@@ -179,7 +179,9 @@ export function liveConfigEditorState({
 
 export function liveConfigEngineEligible(runtime) {
   return Boolean(
-    runtime?.installed || runtime?.existing_config_unsupported_reason,
+    runtime?.installed ||
+      runtime?.existing_config_available ||
+      runtime?.existing_config_unsupported_reason,
   );
 }
 

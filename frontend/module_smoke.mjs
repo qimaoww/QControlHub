@@ -212,6 +212,14 @@ assert.equal(migrationTaskAttempts, 2, "failed import remains retryable without 
 assert.equal(liveConfigEngineEligible({ installed: true }), true);
 assert.equal(
   liveConfigEngineEligible({
+    installed: false,
+    existing_config_available: true,
+  }),
+  true,
+  "migratable existing services remain selectable in manual configuration",
+);
+assert.equal(
+  liveConfigEngineEligible({
     existing_config_unsupported_reason: "unsupported wrapper",
   }),
   true,
