@@ -189,6 +189,29 @@ func TestExistingCoreDiscoveryFindsAndRefreshesAfterAgentRestart(t *testing.T) {
 	}
 }
 
+func TestExistingCoreDiscoveryAcceptsFreshAgentWithoutManagedCoreUnit(t *testing.T) {
+	fixture := newExistingCoreDiscoveryFixture(t)
+	managedUnit := filepath.Join(existingDiscoveryManagedUnitRoot, "qagent-sing-box.service")
+	if err := os.Remove(managedUnit); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(fixture.stateDirectory, "qagent-sing-box.service.load-state"), []byte("not-found\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	specs, issues, err := RefreshExistingCoreDiscovery(
+		context.Background(), fixture.discoveryStatePath, fixture.markerPrefix,
+		fixture.managedSpecs, nil,
+	)
+	if err != nil {
+		t.Fatalf("discover existing sing-box before a panel-managed unit exists: %v", err)
+	}
+	assertDiscoveredSingBoxSpec(t, specs[core.EngineSingBox], fixture.realBinary, fixture.serviceBinary, fixture.configPath, fixture.configDirectory, "")
+	if len(issues) != 0 {
+		t.Fatalf("fresh Agent discovery issues = %+v", issues)
+	}
+}
+
 func TestManagedCoreUnitPolicyMatchesProjectUnits(t *testing.T) {
 	_, sourceFile, _, ok := runtime.Caller(0)
 	if !ok {
@@ -196,8 +219,10 @@ func TestManagedCoreUnitPolicyMatchesProjectUnits(t *testing.T) {
 	}
 	repositoryRoot := filepath.Clean(filepath.Join(filepath.Dir(sourceFile), "../.."))
 	for engine, fileName := range map[core.Engine]string{
-		core.EngineXray:    "qagent-xray.service",
-		core.EngineSingBox: "qagent-sing-box.service",
+		core.EngineMihomo:          "qagent-mihomo.service",
+		core.EngineXray:            "qagent-xray.service",
+		core.EngineSingBox:         "qagent-sing-box.service",
+		core.EngineShadowsocksRust: "qagent-shadowsocks-rust.service",
 	} {
 		spec := DefaultSpecs()[engine]
 		contents, err := os.ReadFile(filepath.Join(repositoryRoot, "deploy", "systemd", fileName))

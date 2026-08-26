@@ -38,6 +38,7 @@ type Executor struct {
 	MigrationMarkerPrefix    string
 	Updater                  *CoreUpdater
 	Services                 *ServiceManager
+	coreBootstrapper         *coreServiceBootstrapper
 	specsMu                  sync.RWMutex
 	migrationMu              sync.Mutex
 	completedMigrations      map[core.Engine]completedCoreMigration
@@ -381,6 +382,9 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (string, erro
 			}
 			return "", fmt.Errorf("%s has no existing service pending manual import", task.Engine)
 		}
+		if err := e.prepareManagedCoreService(ctx, task.Engine, spec, true); err != nil {
+			return "", err
+		}
 		return e.importExistingConfig(ctx, task.Engine, spec, existing, task.ConfigContent)
 	case core.ActionValidate:
 		if hasExisting {
@@ -458,6 +462,9 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (string, erro
 		}
 		source, err := core.NormalizeCoreSource(task.Engine, version, task.CoreSource)
 		if err != nil {
+			return "", err
+		}
+		if err := e.prepareManagedCoreService(ctx, task.Engine, spec, false); err != nil {
 			return "", err
 		}
 		if err := ensureManagedCoreServiceCapabilities(ctx, task.Engine, spec, e.serviceManager()); err != nil {

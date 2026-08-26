@@ -29,10 +29,7 @@ ReadWritePaths=/var/lib/qcontrolhub
 # installed by the server administrator in /usr/local/bin remain untouched.
 ReadWritePaths=-/usr/local/lib/qagent/cores
 ReadWritePaths=-/usr/local/lib/qagent
-ReadWritePaths=-/etc/qagent/mihomo
-ReadWritePaths=-/etc/qagent/xray
-ReadWritePaths=-/etc/qagent/sing-box
-ReadWritePaths=-/etc/qagent/shadowsocks-rust
+ReadWritePaths=-/etc/qagent
 ProtectHome=true
 PrivateTmp=true
 PrivateDevices=true

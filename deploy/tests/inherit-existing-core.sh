@@ -344,6 +344,31 @@ qagent_core_service_is_safe_to_disable xray "$managed_unit" || {
   printf '%s\n' 'repeat install with an inactive dedicated unit was rejected' >&2
   exit 1
 }
+
+# Regression: on a fresh node with an existing sing-box service, bootstrap
+# installs the inactive QAgent unit and immediately validates it under `set -u`.
+# The shared library must not rely on variables initialized by a caller.
+managed_singbox_unit="$test_root/core/qagent-sing-box.service"
+printf '%s\n' \
+  '[Unit]' \
+  'Description=sing-box core managed by QAgent' \
+  '[Service]' \
+  'User=qcontrolhub-core' \
+  'Group=qcontrolhub-core' \
+  "ExecStart=$qagent_singbox_binary run -c $qagent_singbox_config" > "$managed_singbox_unit"
+chmod 0644 "$managed_singbox_unit"
+printf '%s\n' "$managed_singbox_unit" > "$FAKE_SYSTEMCTL_FRAGMENT_PATH"
+write_exec_start "$qagent_singbox_binary" "$qagent_singbox_binary" run -c "$qagent_singbox_config"
+printf '%s\n' 'sing-box core managed by QAgent' > "$FAKE_SYSTEMCTL_QAGENT_DESCRIPTION"
+printf '%s\n' /var/lib/qcontrolhub-sing-box > "$FAKE_SYSTEMCTL_STATE/qagent-WorkingDirectory"
+qagent_core_service_is_safe_to_disable sing-box "$managed_singbox_unit" || {
+  printf '%s\n' 'fresh install with an inactive managed sing-box unit was rejected' >&2
+  exit 1
+}
+
+printf '%s\n' "$managed_unit" > "$FAKE_SYSTEMCTL_FRAGMENT_PATH"
+printf '%s\n' 'Xray core managed by QAgent' > "$FAKE_SYSTEMCTL_QAGENT_DESCRIPTION"
+printf '%s\n' /var/lib/qcontrolhub-xray > "$FAKE_SYSTEMCTL_STATE/qagent-WorkingDirectory"
 custom_unit="$test_root/core/custom-qagent.service"
 printf '%s\n' 'Description=custom unit' > "$custom_unit"
 chmod 0644 "$custom_unit"
