@@ -4,6 +4,9 @@ import (
 	"crypto/ecdh"
 	"encoding/base64"
 	"encoding/json"
+	"net"
+	"strconv"
+	"strings"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
 	"gopkg.in/yaml.v3"
@@ -131,10 +134,32 @@ func firstSupportedInbound(engine core.Engine, value any, protocolField string) 
 		candidate := mapValue(item)
 		protocol := protocolKey(stringValue(candidate[protocolField]))
 		if _, ok := FindProtocol(engine, protocol); ok {
+			if protocol == ProtocolPortForward && !completePortForwardInbound(engine, candidate) {
+				continue
+			}
 			return candidate
 		}
 	}
 	return nil
+}
+
+func completePortForwardInbound(engine core.Engine, inbound map[string]any) bool {
+	switch engine {
+	case core.EngineMihomo:
+		_, _, ok := splitForwardTarget(stringValue(inbound["target"]))
+		return ok && networkListValue(inbound["network"]) != ""
+	case core.EngineXray:
+		settings := mapValue(inbound["settings"])
+		address, port := stringValue(settings["rewriteAddress"]), intValue(settings["rewritePort"])
+		if address == "" || port == 0 {
+			address, port = stringValue(settings["address"]), intValue(settings["port"])
+		}
+		return address != "" && port != 0
+	case core.EngineSingBox:
+		return stringValue(inbound["override_address"]) != "" && intValue(inbound["override_port"]) != 0
+	default:
+		return false
+	}
 }
 
 func firstString(value any) string {
@@ -146,6 +171,62 @@ func firstString(value any) string {
 		return ""
 	}
 	return stringValue(items[0])
+}
+
+func parsedInputValid(input Input) bool {
+	if input.Protocol == ProtocolPortForward {
+		return input.Tag != "" && input.Port != 0 && input.TargetAddress != "" && input.TargetPort != 0 &&
+			(input.Network == "tcp" || input.Network == "udp" || input.Network == "tcp,udp")
+	}
+	return input.Protocol != "" && input.Tag != "" && input.Port != 0 && input.Credential != ""
+}
+
+func splitForwardTarget(value string) (string, int, bool) {
+	host, portValue, err := net.SplitHostPort(value)
+	if err != nil {
+		return "", 0, false
+	}
+	port, err := strconv.Atoi(portValue)
+	if err != nil || port < 1 || port > 65535 || host == "" {
+		return "", 0, false
+	}
+	return host, port, true
+}
+
+func networkListValue(value any) string {
+	hasTCP, hasUDP := false, false
+	add := func(item string) {
+		switch strings.ToLower(strings.TrimSpace(item)) {
+		case "tcp":
+			hasTCP = true
+		case "udp":
+			hasUDP = true
+		}
+	}
+	switch typed := value.(type) {
+	case []any:
+		for _, item := range typed {
+			add(stringValue(item))
+		}
+	case []string:
+		for _, item := range typed {
+			add(item)
+		}
+	case string:
+		for _, item := range strings.Split(typed, ",") {
+			add(item)
+		}
+	}
+	if hasTCP && hasUDP {
+		return "tcp,udp"
+	}
+	if hasUDP {
+		return "udp"
+	}
+	if hasTCP {
+		return "tcp"
+	}
+	return ""
 }
 
 func realityPublicKey(privateValue string) string {
@@ -176,6 +257,8 @@ func protocolKey(value string) string {
 		return ProtocolTUIC
 	case "anytls":
 		return ProtocolAnyTLS
+	case "tunnel", "dokodemo-door", "direct":
+		return ProtocolPortForward
 	default:
 		return ""
 	}

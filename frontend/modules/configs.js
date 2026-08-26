@@ -85,6 +85,9 @@ export function readServerPlanInput(form, protocol) {
     reality_public_key: values.get("reality_public_key") || "",
     reality_short_id: values.get("reality_short_id") || "",
     reality_server_name: values.get("reality_server_name") || "",
+    target_address: values.get("target_address") || "",
+    target_port: Number(values.get("target_port") || 0),
+    network: values.get("network") || "",
   };
 }
 
@@ -484,6 +487,8 @@ async function agentConfig() {
         `<option value="${esc(transport)}" ${transport === plan.transport ? "selected" : ""}>${transport === "raw" ? "Raw / TCP" : transport === "websocket" ? "WebSocket" : "gRPC"}</option>`,
     )
     .join("");
+  const portForward = Boolean(protocol?.port_forward);
+  const identitySection = `<section class="builder-section" id="target"><header><span class="section-number">02</span><strong>转发目标</strong></header><div><div class="plan-fields three"><label>目标地址<input name="target_address" maxlength="253" required value="${esc(plan.target_address)}" placeholder="127.0.0.1 或 target.example.com"></label><label>目标端口<input type="number" name="target_port" min="1" max="65535" required value="${Number(plan.target_port)}"></label><label>转发协议<select name="network"><option value="tcp" ${plan.network === "tcp" ? "selected" : ""}>TCP</option><option value="udp" ${plan.network === "udp" ? "selected" : ""}>UDP</option><option value="tcp,udp" ${plan.network === "tcp,udp" ? "selected" : ""}>TCP + UDP</option></select></label></div><p class="validation-note">流量由当前内核直连转发到目标地址；部署前请确认监听端口与防火墙已放行。</p><input type="hidden" name="username" value=""><input type="hidden" name="credential" value=""><input type="hidden" name="secondary_credential" value=""><input type="hidden" name="method" value=""></div></section>`;
   const security = protocol?.uses_reality
     ? `<input type="hidden" name="reality_enabled" value="1"><section class="builder-section security-section" id="security"><header><span class="section-number">04</span><strong>Reality</strong></header><div><div class="plan-fields two"><label>目标域名 / ServerName<input name="reality_server_name" list="reality-presets" required value="${esc(plan.reality_server_name)}"><datalist id="reality-presets">${workspace.reality_presets.map((value) => `<option value="${esc(value)}">`).join("")}</datalist><small>校验公网 DNS；拒绝 Cloudflare 与非公网地址。</small></label><label>Short ID<input name="reality_short_id" required value="${esc(plan.reality_short_id)}"></label></div><div class="plan-fields one"><label>客户端 Public Key<input name="reality_public_key" required value="${esc(plan.reality_public_key)}"></label><label class="secret-input">服务端 Private Key<span class="secret-value-control"><input type="password" name="reality_private_key" required value="${esc(plan.reality_private_key)}"><button type="button" data-secret-visibility>显示</button></span></label></div></div></section>`
     : protocol?.supports_tls
@@ -505,6 +510,17 @@ async function agentConfig() {
       viewKey: `agent-config-${agent.id}-${engine}-${selectedProtocolKey}-${selectedInbound?.tag || "new"}`,
     },
   );
+  if (portForward) {
+    const identity = document.querySelector("#identity");
+    if (identity) identity.outerHTML = identitySection;
+    const targetStep = document.querySelector('[data-builder-step="identity"]');
+    if (targetStep) {
+      targetStep.href = "#target";
+      targetStep.dataset.builderStep = "target";
+      const label = targetStep.querySelector("strong");
+      if (label) label.textContent = "目标";
+    }
+  }
   bindAgentConfigPage({
     agent,
     engine,

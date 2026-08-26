@@ -110,6 +110,55 @@ func TestMergeGeneratedForcesCentralLogOutput(t *testing.T) {
 	}
 }
 
+func TestMutateGeneratedSwitchesPortForwardFieldsWithoutLosingCustomFields(t *testing.T) {
+	t.Parallel()
+	credential, err := NewCredential(ProtocolSS2022, "2022-blake3-aes-256-gcm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, engine := range []core.Engine{core.EngineMihomo, core.EngineXray, core.EngineSingBox} {
+		engine := engine
+		t.Run(string(engine), func(t *testing.T) {
+			t.Parallel()
+			current, err := Generate(engine, Input{
+				Protocol: ProtocolSS2022, Tag: "managed", Listen: "0.0.0.0", Port: 8388,
+				Method: "2022-blake3-aes-256-gcm", Credential: credential, Transport: "raw",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			forward, err := Generate(engine, Input{
+				Protocol: ProtocolPortForward, Tag: "managed", Listen: "0.0.0.0", Port: 28080,
+				Transport: "raw", TargetAddress: "10.0.0.9", TargetPort: 8080, Network: "udp",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			modified, err := MutateGenerated(engine, current, forward, "managed", "modify")
+			if err != nil {
+				t.Fatal(err)
+			}
+			parsed, ok := Parse(engine, modified)
+			if !ok || parsed.Protocol != ProtocolPortForward || parsed.TargetAddress != "10.0.0.9" || parsed.TargetPort != 8080 || parsed.Network != "udp" {
+				t.Fatalf("port-forward mutation = %+v, parsed=%t\n%s", parsed, ok, modified)
+			}
+			restored, err := MutateGenerated(engine, modified, current, "managed", "modify")
+			if err != nil {
+				t.Fatal(err)
+			}
+			parsed, ok = Parse(engine, restored)
+			if !ok || parsed.Protocol != ProtocolSS2022 || parsed.Credential != credential {
+				t.Fatalf("restored mutation = %+v, parsed=%t\n%s", parsed, ok, restored)
+			}
+			for _, stale := range []string{"10.0.0.9", "override_address", "rewriteAddress", "target:"} {
+				if strings.Contains(restored, stale) {
+					t.Errorf("stale port-forward field %q survived:\n%s", stale, restored)
+				}
+			}
+		})
+	}
+}
+
 func TestMutateGeneratedEnforcesAddModifyDeleteForEveryEngine(t *testing.T) {
 	t.Parallel()
 	credential, err := NewCredential(ProtocolSS2022, "2022-blake3-aes-256-gcm")

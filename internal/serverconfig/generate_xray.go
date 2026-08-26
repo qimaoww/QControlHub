@@ -34,8 +34,14 @@ func generateXray(input Input) (string, error) {
 	case ProtocolHy2:
 		inbound["protocol"] = "hysteria"
 		inbound["settings"] = map[string]any{"version": 2, "users": []any{map[string]any{"auth": input.Credential, "email": input.Username, "level": 0}}}
+	case ProtocolPortForward:
+		inbound["protocol"] = "tunnel"
+		inbound["settings"] = map[string]any{
+			"allowedNetwork": input.Network, "rewriteAddress": input.TargetAddress,
+			"rewritePort": input.TargetPort, "followRedirect": false, "userLevel": 0,
+		}
 	}
-	if input.Protocol != ProtocolSS2022 {
+	if input.Protocol != ProtocolSS2022 && input.Protocol != ProtocolPortForward {
 		stream := xrayStream(input)
 		if input.Protocol == ProtocolHy2 {
 			stream["network"] = "hysteria"
@@ -98,6 +104,19 @@ func parseXray(content string) (Input, bool) {
 	}
 	settings := mapValue(inbound["settings"])
 	input.Method, input.Credential = stringValue(settings["method"]), stringValue(settings["password"])
+	if input.Protocol == ProtocolPortForward {
+		input.Network = networkListValue(stringValue(settings["allowedNetwork"]))
+		input.TargetAddress = stringValue(settings["rewriteAddress"])
+		input.TargetPort = intValue(settings["rewritePort"])
+		if input.TargetAddress == "" || input.TargetPort == 0 {
+			input.Network = networkListValue(stringValue(settings["network"]))
+			input.TargetAddress = stringValue(settings["address"])
+			input.TargetPort = intValue(settings["port"])
+		}
+		if input.Network == "" {
+			input.Network = "tcp"
+		}
+	}
 	if user := firstMap(settings["users"]); user != nil {
 		input.Username = stringValue(user["email"])
 		input.Credential = stringValue(user["id"])
@@ -133,5 +152,5 @@ func parseXray(content string) (Input, bool) {
 		input.RealityShortID = firstString(reality["shortIds"])
 		input.RealityServerName = firstString(reality["serverNames"])
 	}
-	return input, input.Protocol != "" && input.Tag != "" && input.Port != 0 && input.Credential != ""
+	return input, parsedInputValid(input)
 }
