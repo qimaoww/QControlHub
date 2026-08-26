@@ -205,9 +205,20 @@ func TestRefreshPathsUseStableViewsAndScopedCoordinators(t *testing.T) {
 			"return reconcileView(existingCard, freshCard)",
 			"api(`/tasks?${query}`, { signal })",
 		},
+		"modules/dashboard.js": {
+			"api(`/traffic-usage?month=${encodeURIComponent(trafficMonth)}`",
+			"data-dashboard-traffic-month",
+			"data-dashboard-traffic-dialog",
+			"trafficDetailsDialog.showModal()",
+		},
 		"modules/traffic.js": {
 			"createPoller({",
 			"data-refresh-key=\"traffic-policy-${esc(policy.id)}\"",
+			"data-traffic-filter=\"engine\"",
+			"data-traffic-edit-dialog",
+			"class=\"traffic-edit-dialog traffic-create-dialog\"",
+			"dialog?.showModal()",
+			"name=\"auto_block\"",
 		},
 	}
 	for path, markers := range contracts {
@@ -285,6 +296,24 @@ func TestSidebarNavigationUsesWorkflowOrderAndResponsiveGrouping(t *testing.T) {
 		if !strings.Contains(string(styles), required) {
 			t.Errorf("sidebar styles are missing responsive grouping contract %q", required)
 		}
+	}
+}
+
+func TestTrafficUsesOneNodeFilterSurface(t *testing.T) {
+	app, err := os.ReadFile("app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(app)
+	if !strings.Contains(content, "端口流量节点") {
+		t.Error("traffic route must keep node selection in the context sidebar")
+	}
+	traffic, err := os.ReadFile("modules/traffic.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(traffic), `data-traffic-filter="agent_id"`) {
+		t.Error("traffic workspace must not duplicate the context sidebar node selector")
 	}
 }
 

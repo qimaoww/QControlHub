@@ -1,11 +1,60 @@
 package api
 
 import (
+	"math"
 	"net/http"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
+
+func trafficPoliciesForAgent(policies []core.PortTrafficPolicy) []core.PortTrafficPolicy {
+	prepared := append([]core.PortTrafficPolicy(nil), policies...)
+	for index := range prepared {
+		if !prepared[index].AutoBlock {
+			// Older Agents ignore the auto_block JSON field and always enforce
+			// LimitBytes. Sending an unreachable limit keeps monitor-only
+			// policies fail-safe until those Agents are upgraded.
+			prepared[index].LimitBytes = math.MaxInt64
+		}
+	}
+	return prepared
+}
+
+func (s *Server) listPortTrafficUsage(w http.ResponseWriter, request *http.Request) {
+	monthValue := strings.TrimSpace(request.URL.Query().Get("month"))
+	if monthValue == "" {
+		monthValue = time.Now().UTC().Format("2006-01")
+	}
+	month, err := time.Parse("2006-01", monthValue)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "month must use YYYY-MM")
+		return
+	}
+	agentID := strings.TrimSpace(request.URL.Query().Get("agent_id"))
+	policyID := strings.TrimSpace(request.URL.Query().Get("policy_id"))
+	if len(agentID) > 100 {
+		writeError(w, http.StatusBadRequest, "agent_id is invalid")
+		return
+	}
+	if policyID != "" && !core.ValidPortTrafficPolicyID(policyID) {
+		writeError(w, http.StatusBadRequest, "policy_id is invalid")
+		return
+	}
+	usage, err := s.store.ListPortTrafficDailyUsage(request.Context(), agentID, policyID, month)
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, map[string]any{
+		"month":    monthValue,
+		"timezone": "UTC",
+		"days":     usage,
+	})
+}
 
 func (s *Server) listPortTrafficPolicies(w http.ResponseWriter, request *http.Request) {
 	policies, err := s.store.ListPortTrafficPolicies(request.Context())

@@ -76,6 +76,7 @@
 | `GET` | `/api/v1/audit?limit=` | 读取最近审计记录 |
 | `GET` | `/api/v1/metrics/{agent_id}` | 读取节点最近 24 小时资源样本 |
 | `GET` | `/api/v1/traffic-policies` | 读取所有端口流量配额及 Agent 最新计数（traffic.read） |
+| `GET` | `/api/v1/traffic-usage?month=&agent_id=&policy_id=` | 查询控制面持久化的端口每日流量（traffic.read） |
 | `POST` | `/api/v1/traffic-policies` | 创建端口流量配额（traffic.manage） |
 | `PUT` | `/api/v1/traffic-policies/{id}` | 更新端口、协议、周期或额度（traffic.manage） |
 | `POST` | `/api/v1/traffic-policies/{id}/reset` | 立即清零当前周期并解封端口（traffic.manage） |
@@ -102,11 +103,14 @@
   "protocol": "both",
   "cycle": "monthly",
   "cycle_anchor": "2026-08-01T00:00:00Z",
-  "limit_bytes": 107374182400
+  "limit_bytes": 107374182400,
+  "auto_block": true
 }
 ```
 
-`protocol` 为 `tcp`、`udp` 或 `both`，`cycle` 为 `monthly` 或 `yearly`。`cycle_anchor` 必须是当天或过去的 UTC 日期；月末和闰年按日历末日自动对齐。额度是接收与发送字节之和，同一节点同一端口只能配置一次。修改端口、协议、周期或起始日期会开始新的计数；只调整名称、内核归属或额度会保留当前已用流量。响应中的 `enforcement_available`、`enforcement_error`、`blocked`、当前周期与收发计数均来自 Agent 最新心跳。
+`protocol` 为 `tcp`、`udp` 或 `both`，`cycle` 为 `monthly` 或 `yearly`。`cycle_anchor` 必须是当天或过去的 UTC 日期；月末和闰年按日历末日自动对齐。额度是接收与发送字节之和，同一节点同一端口只能配置一次。`auto_block` 默认为 `true`；设为 `false` 时 Agent 仍统计并上报流量，但不会因超额创建丢弃规则。修改端口、协议、周期或起始日期会开始新的计数；只调整名称、内核归属、额度或自动封禁开关会保留当前已用流量。响应中的 `enforcement_available`、`enforcement_error`、`blocked`、当前周期与收发计数均来自 Agent 最新心跳。
+
+`GET /api/v1/traffic-usage` 的 `month` 使用 `YYYY-MM`，省略时为当前 UTC 月；`agent_id` 和 `policy_id` 可选。Agent 上报的是每条策略的累计计数，控制面根据连续心跳计算增量并按 UTC 自然日保存接收、发送、合计和峰值速率。重复或乱序心跳不会重复计量；Agent 或 nftables 计数器重启后从新计数继续累计。升级已有数据库后的第一次心跳只建立历史基线，避免把升级前的整个周期累计量错误记入当天；历史图从升级后的下一次有效增量开始。删除单条配额不会删除已经保存的每日历史。
 
 删除 Agent 是不可逆的身份吊销：控制面先删除该节点的配置与修订、删除该节点的全部添加凭证、将其未完成任务标记为失败，再主动关闭当前认证 WSS；相同 Ed25519 身份的后续握手返回 `401`。如需重新注册，必须创建新的添加命令。
 

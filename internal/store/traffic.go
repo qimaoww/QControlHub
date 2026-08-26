@@ -13,7 +13,7 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
-const trafficPolicyColumns = `id,agent_id,name,engine,port,protocol,cycle,cycle_anchor,limit_bytes,reset_generation,
+const trafficPolicyColumns = `id,agent_id,name,engine,port,protocol,cycle,cycle_anchor,limit_bytes,auto_block,reset_generation,
        received_bytes,sent_bytes,used_bytes,receive_bps,send_bps,period_start,period_end,blocked,
        enforcement_available,enforcement_error,last_reported_at,created_at,updated_at`
 
@@ -25,7 +25,7 @@ func scanTrafficPolicy(row trafficPolicyScanner) (core.PortTrafficPolicy, error)
 	var policy core.PortTrafficPolicy
 	err := row.Scan(
 		&policy.ID, &policy.AgentID, &policy.Name, &policy.Engine, &policy.Port,
-		&policy.Protocol, &policy.Cycle, &policy.CycleAnchor, &policy.LimitBytes,
+		&policy.Protocol, &policy.Cycle, &policy.CycleAnchor, &policy.LimitBytes, &policy.AutoBlock,
 		&policy.ResetGeneration, &policy.ReceivedBytes, &policy.SentBytes,
 		&policy.UsedBytes, &policy.ReceiveBPS, &policy.SendBPS, &policy.PeriodStart,
 		&policy.PeriodEnd, &policy.Blocked, &policy.EnforcementAvailable,
@@ -94,11 +94,11 @@ func (s *Store) CreatePortTrafficPolicy(ctx context.Context, raw core.PortTraffi
 	}
 	now := time.Now().UTC()
 	policy, err := scanTrafficPolicy(tx.QueryRow(ctx, `
-		INSERT INTO port_traffic_policies (id,agent_id,name,engine,port,protocol,cycle,cycle_anchor,limit_bytes,created_at,updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$10)
+		INSERT INTO port_traffic_policies (id,agent_id,name,engine,port,protocol,cycle,cycle_anchor,limit_bytes,auto_block,traffic_history_initialized,created_at,updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,true,$11,$11)
 		RETURNING `+trafficPolicyColumns,
 		id, request.AgentID, request.Name, request.Engine, request.Port, request.Protocol,
-		request.Cycle, request.CycleAnchor, request.LimitBytes, now))
+		request.Cycle, request.CycleAnchor, request.LimitBytes, *request.AutoBlock, now))
 	if err != nil {
 		return core.PortTrafficPolicy{}, mapError(err)
 	}
@@ -132,7 +132,7 @@ func (s *Store) UpdatePortTrafficPolicy(ctx context.Context, id string, raw core
 	}
 	policy, err := scanTrafficPolicy(tx.QueryRow(ctx, `
 		UPDATE port_traffic_policies SET
-			name=$2,engine=$3,port=$4,protocol=$5::varchar(8),cycle=$6::varchar(8),cycle_anchor=$7::date,limit_bytes=$8,
+			name=$2,engine=$3,port=$4,protocol=$5::varchar(8),cycle=$6::varchar(8),cycle_anchor=$7::date,limit_bytes=$8,auto_block=$9,
 			reset_generation=reset_generation + CASE WHEN port<>$4 OR protocol<>$5::varchar(8) OR cycle<>$6::varchar(8) OR cycle_anchor<>$7::date THEN 1 ELSE 0 END,
 			received_bytes=CASE WHEN port<>$4 OR protocol<>$5::varchar(8) OR cycle<>$6::varchar(8) OR cycle_anchor<>$7::date THEN 0 ELSE received_bytes END,
 			sent_bytes=CASE WHEN port<>$4 OR protocol<>$5::varchar(8) OR cycle<>$6::varchar(8) OR cycle_anchor<>$7::date THEN 0 ELSE sent_bytes END,
@@ -143,7 +143,7 @@ func (s *Store) UpdatePortTrafficPolicy(ctx context.Context, id string, raw core
 			last_reported_at=NULL,updated_at=now()
 		WHERE id=$1 RETURNING `+trafficPolicyColumns,
 		id, request.Name, request.Engine, request.Port, request.Protocol, request.Cycle,
-		request.CycleAnchor, request.LimitBytes))
+		request.CycleAnchor, request.LimitBytes, *request.AutoBlock))
 	if err != nil {
 		return core.PortTrafficPolicy{}, mapError(err)
 	}
@@ -200,6 +200,7 @@ func (s *Store) UpdatePortTrafficUsage(ctx context.Context, agentID string, usag
 		return err
 	}
 	defer tx.Rollback(ctx)
+	reportedAt = reportedAt.UTC()
 	for _, usage := range usages {
 		if _, exists := seen[usage.PolicyID]; exists {
 			return fmt.Errorf("%w: duplicate traffic policy usage", ErrInvalid)
@@ -213,16 +214,132 @@ func (s *Store) UpdatePortTrafficUsage(ctx context.Context, agentID string, usag
 			utf8.RuneCountInString(usage.EnforcementError) > 500 || strings.ContainsRune(usage.EnforcementError, '\x00') {
 			return fmt.Errorf("%w: invalid traffic usage record", ErrInvalid)
 		}
-		_, err := tx.Exec(ctx, `
+		var current struct {
+			generation         uint64
+			received, sent     uint64
+			name               string
+			engine             core.Engine
+			port               int
+			protocol           core.TrafficProtocol
+			historyInitialized bool
+			lastReported       *time.Time
+		}
+		err := tx.QueryRow(ctx, `
+			SELECT reset_generation,received_bytes,sent_bytes,name,engine,port,protocol,traffic_history_initialized,last_reported_at
+			FROM port_traffic_policies WHERE id=$1 AND agent_id=$2 FOR UPDATE`, usage.PolicyID, agentID).Scan(
+			&current.generation, &current.received, &current.sent, &current.name, &current.engine,
+			&current.port, &current.protocol, &current.historyInitialized, &current.lastReported,
+		)
+		if errors.Is(err, pgx.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if current.generation != usage.ResetGeneration {
+			continue
+		}
+		if current.lastReported != nil && !reportedAt.After(current.lastReported.UTC()) {
+			continue
+		}
+		receivedDelta, sentDelta := uint64(0), uint64(0)
+		if current.historyInitialized {
+			receivedDelta = trafficCounterDelta(usage.ReceivedBytes, current.received)
+			sentDelta = trafficCounterDelta(usage.SentBytes, current.sent)
+		}
+		usedDelta := receivedDelta + sentDelta
+		if receivedDelta > math.MaxUint64-sentDelta || usedDelta > math.MaxInt64 {
+			return fmt.Errorf("%w: invalid traffic usage delta", ErrInvalid)
+		}
+		command, err := tx.Exec(ctx, `
 			UPDATE port_traffic_policies SET received_bytes=$3,sent_bytes=$4,used_bytes=$5,receive_bps=$6,send_bps=$7,
 				period_start=$8,period_end=$9,blocked=$10,enforcement_available=$11,enforcement_error=$12,
-				last_reported_at=$13
+				last_reported_at=$13,traffic_history_initialized=true
 			WHERE id=$1 AND agent_id=$2 AND reset_generation=$14`, usage.PolicyID, agentID, usage.ReceivedBytes, usage.SentBytes,
 			usage.UsedBytes, usage.ReceiveBPS, usage.SendBPS, usage.PeriodStart, usage.PeriodEnd,
-			usage.Blocked, usage.EnforcementAvailable, strings.TrimSpace(usage.EnforcementError), reportedAt.UTC(), usage.ResetGeneration)
+			usage.Blocked, usage.EnforcementAvailable, strings.TrimSpace(usage.EnforcementError), reportedAt, usage.ResetGeneration)
+		if err != nil {
+			return err
+		}
+		if command.RowsAffected() == 0 {
+			continue
+		}
+		_, err = tx.Exec(ctx, `
+			INSERT INTO port_traffic_daily_usage (
+				policy_id,reset_generation,usage_date,agent_id,name,engine,port,protocol,
+				received_bytes,sent_bytes,used_bytes,peak_receive_bps,peak_send_bps,sample_count,first_reported_at,last_reported_at
+			) VALUES ($1,$2,$3::date,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,1,$14,$14)
+			ON CONFLICT (policy_id,reset_generation,usage_date) DO UPDATE SET
+				agent_id=EXCLUDED.agent_id,name=EXCLUDED.name,engine=EXCLUDED.engine,port=EXCLUDED.port,protocol=EXCLUDED.protocol,
+				received_bytes=LEAST(9223372036854775807::numeric,port_traffic_daily_usage.received_bytes::numeric+EXCLUDED.received_bytes)::bigint,
+				sent_bytes=LEAST(9223372036854775807::numeric,port_traffic_daily_usage.sent_bytes::numeric+EXCLUDED.sent_bytes)::bigint,
+				used_bytes=LEAST(9223372036854775807::numeric,port_traffic_daily_usage.used_bytes::numeric+EXCLUDED.used_bytes)::bigint,
+				peak_receive_bps=GREATEST(port_traffic_daily_usage.peak_receive_bps,EXCLUDED.peak_receive_bps),
+				peak_send_bps=GREATEST(port_traffic_daily_usage.peak_send_bps,EXCLUDED.peak_send_bps),
+				sample_count=port_traffic_daily_usage.sample_count+1,last_reported_at=EXCLUDED.last_reported_at`,
+			usage.PolicyID, usage.ResetGeneration, reportedAt.Format(time.DateOnly), agentID, current.name, current.engine,
+			current.port, current.protocol, receivedDelta, sentDelta, usedDelta, usage.ReceiveBPS, usage.SendBPS, reportedAt)
 		if err != nil {
 			return err
 		}
 	}
 	return tx.Commit(ctx)
+}
+
+func trafficCounterDelta(current, previous uint64) uint64 {
+	if current >= previous {
+		return current - previous
+	}
+	// A counter may restart inside the same policy generation after local state
+	// recovery. Count only the new post-restart bytes instead of losing them.
+	return current
+}
+
+func (s *Store) ListPortTrafficDailyUsage(ctx context.Context, agentID, policyID string, month time.Time) ([]core.PortTrafficDailyUsage, error) {
+	start := time.Date(month.UTC().Year(), month.UTC().Month(), 1, 0, 0, 0, 0, time.UTC)
+	end := start.AddDate(0, 1, 0)
+	rows, err := s.pool.Query(ctx, `
+		WITH filtered AS (
+			SELECT * FROM port_traffic_daily_usage
+			WHERE usage_date >= $1::date AND usage_date < $2::date
+			  AND ($3='' OR agent_id=$3) AND ($4='' OR policy_id=$4)
+		), summed AS (
+			SELECT policy_id,usage_date,
+			       LEAST(9223372036854775807::numeric,SUM(received_bytes::numeric))::bigint AS received_bytes,
+			       LEAST(9223372036854775807::numeric,SUM(sent_bytes::numeric))::bigint AS sent_bytes,
+			       LEAST(9223372036854775807::numeric,SUM(used_bytes::numeric))::bigint AS used_bytes,
+			       MAX(peak_receive_bps) AS peak_receive_bps,MAX(peak_send_bps) AS peak_send_bps,
+			       LEAST(9223372036854775807::numeric,SUM(sample_count::numeric))::bigint AS sample_count,
+			       MIN(first_reported_at) AS first_reported_at,MAX(last_reported_at) AS last_reported_at
+			FROM filtered GROUP BY policy_id,usage_date
+		), latest AS (
+			SELECT DISTINCT ON (policy_id,usage_date)
+			       policy_id,usage_date,agent_id,name,engine,port,protocol
+			FROM filtered ORDER BY policy_id,usage_date,last_reported_at DESC,reset_generation DESC
+		)
+		SELECT latest.policy_id,latest.agent_id,latest.name,latest.engine,latest.port,latest.protocol,latest.usage_date,
+		       summed.received_bytes,summed.sent_bytes,summed.used_bytes,summed.peak_receive_bps,summed.peak_send_bps,
+		       summed.sample_count,summed.first_reported_at,summed.last_reported_at
+		FROM summed JOIN latest USING (policy_id,usage_date)
+		ORDER BY latest.usage_date,latest.agent_id,latest.port,latest.policy_id
+		LIMIT 100000`, start, end, strings.TrimSpace(agentID), strings.TrimSpace(policyID))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]core.PortTrafficDailyUsage, 0)
+	for rows.Next() {
+		var item core.PortTrafficDailyUsage
+		var day time.Time
+		if err := rows.Scan(
+			&item.PolicyID, &item.AgentID, &item.Name, &item.Engine, &item.Port, &item.Protocol, &day,
+			&item.ReceivedBytes, &item.SentBytes, &item.UsedBytes, &item.PeakReceiveBPS, &item.PeakSendBPS,
+			&item.SampleCount, &item.FirstReportedAt, &item.LastReportedAt,
+		); err != nil {
+			return nil, err
+		}
+		item.Day = day.UTC().Format(time.DateOnly)
+		result = append(result, item)
+	}
+	return result, rows.Err()
 }

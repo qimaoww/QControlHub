@@ -46,7 +46,7 @@ func TestNormalizePortTrafficPolicyRequest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if request.AgentID != "agt_test" || request.Name != "edge tls" || request.CycleAnchor.Hour() != 0 {
+	if request.AgentID != "agt_test" || request.Name != "edge tls" || request.CycleAnchor.Hour() != 0 || request.AutoBlock == nil || !*request.AutoBlock {
 		t.Fatalf("normalized request = %+v", request)
 	}
 	request.CycleAnchor = now.Add(24 * time.Hour)

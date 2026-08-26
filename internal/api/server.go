@@ -245,6 +245,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("DELETE /api/v1/users/{id}", s.requirePermission(core.PermissionUsersManage, http.HandlerFunc(s.deleteUser)))
 	mux.Handle("GET /api/v1/metrics/{id}", s.requirePermission(core.PermissionMetricsRead, http.HandlerFunc(s.metricSamples)))
 	mux.Handle("GET /api/v1/traffic-policies", s.requirePermission(core.PermissionTrafficRead, http.HandlerFunc(s.listPortTrafficPolicies)))
+	mux.Handle("GET /api/v1/traffic-usage", s.requirePermission(core.PermissionTrafficRead, http.HandlerFunc(s.listPortTrafficUsage)))
 	mux.Handle("POST /api/v1/traffic-policies", s.requirePermission(core.PermissionTrafficManage, http.HandlerFunc(s.createPortTrafficPolicy)))
 	mux.Handle("PUT /api/v1/traffic-policies/{id}", s.requirePermission(core.PermissionTrafficManage, http.HandlerFunc(s.updatePortTrafficPolicy)))
 	mux.Handle("POST /api/v1/traffic-policies/{id}/reset", s.requirePermission(core.PermissionTrafficManage, http.HandlerFunc(s.resetPortTrafficPolicy)))
@@ -814,7 +815,7 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 		slog.Error("load agent traffic policies", "agent_id", id, "error", err)
 		return
 	}
-	if err := writeWire(ctx, connection, core.WireMessage{Type: core.WireHello, TrafficPolicies: trafficPolicies}); err != nil {
+	if err := writeWire(ctx, connection, core.WireMessage{Type: core.WireHello, TrafficPolicies: trafficPoliciesForAgent(trafficPolicies)}); err != nil {
 		return
 	}
 	taskTicker := time.NewTicker(2 * time.Second)

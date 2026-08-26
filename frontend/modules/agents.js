@@ -1804,6 +1804,13 @@ function updateAgentMetrics(item) {
     if (!element) return;
     element.value = available ? value : 0;
     element.dataset.available = available ? "1" : "0";
+    element.dataset.level = !available
+      ? "idle"
+      : Number(value) >= 90
+        ? "danger"
+        : Number(value) >= 75
+          ? "warn"
+          : "normal";
   };
   const online = item.status === "online";
   const unavailable = metrics.collected_at ? "不可用" : "等待采集";

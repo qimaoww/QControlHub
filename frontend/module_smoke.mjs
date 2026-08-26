@@ -39,7 +39,11 @@ import {
   filterCoreLogEntries,
   installCoreLogs,
 } from "./modules/core-logs.js";
-import { installDashboard } from "./modules/dashboard.js";
+import {
+  aggregateDashboardTrafficDays,
+  dashboardTrafficMonthDays,
+  installDashboard,
+} from "./modules/dashboard.js";
 import { installSettings } from "./modules/settings.js";
 import { installTasks } from "./modules/tasks.js";
 import { installTraffic } from "./modules/traffic.js";
@@ -2496,7 +2500,11 @@ globalThis.document = {
 };
 try {
   const dashboardCalls = [];
-  const dashboardState = { route: "dashboard", data: {} };
+  let dashboardMarkup = "";
+  const dashboardState = {
+    route: "dashboard",
+    data: { dashboardTrafficMonth: "2026-08" },
+  };
   const renderDashboard = installDashboard(
     new Proxy(
       {
@@ -2504,9 +2512,15 @@ try {
         api: async (path) => {
           dashboardCalls.push(path);
           if (path === "/agents" || path.startsWith("/tasks?")) return [];
+          if (path === "/traffic-usage?month=2026-08")
+            return { days: [{ day: "2026-08-27", received_bytes: 6, sent_bytes: 4, used_bytes: 10, peak_receive_bps: 2, peak_send_bps: 1 }] };
           assert.fail(`unexpected dashboard preload API path ${path}`);
         },
-        shell: noop,
+        can: (capability) => capability === "traffic.read",
+        esc: (value) => String(value ?? ""),
+        bytes: (value) => `${value || 0} B`,
+        rate: (value) => `${value || 0} B/s`,
+        shell: (markup) => { dashboardMarkup = markup; },
       },
       { get: (target, key) => target[key] ?? noop },
     ),
@@ -2516,8 +2530,27 @@ try {
   });
   assert.deepEqual(
     dashboardCalls,
-    ["/agents", "/tasks?limit=7"],
+    ["/agents", "/tasks?limit=7", "/traffic-usage?month=2026-08"],
     "dashboard reuses the route bootstrap overview",
+  );
+  assert.equal(dashboardMarkup.includes('id="traffic-usage"'), true, "dashboard owns the monthly traffic chart");
+  assert.equal(dashboardMarkup.includes('data-dashboard-traffic-month'), true, "dashboard traffic history can change month");
+  assert.equal(dashboardMarkup.includes('data-dashboard-traffic-details'), true, "dashboard daily traffic opens from a dedicated action");
+  assert.equal(dashboardMarkup.includes('data-dashboard-traffic-dialog'), true, "dashboard daily traffic is rendered in a modal dialog");
+  assert.equal(dashboardMarkup.includes('class="dashboard-traffic-axis"'), true, "dashboard chart keeps dates on a stable external axis");
+  assert.equal(dashboardMarkup.includes("31日"), true, "dashboard chart labels natural days explicitly");
+  assert.equal(dashboardMarkup.includes('class="dashboard-month-picker"'), true, "dashboard uses a theme-native month picker");
+  assert.equal(dashboardMarkup.includes('type="month"'), false, "dashboard does not open the browser-native month panel");
+  assert.equal(dashboardMarkup.includes("<details class=\"traffic-daily\""), false, "dashboard no longer expands daily history inline");
+  assert.equal(dashboardMarkup.includes("2026-08-27"), true, "dashboard renders persisted daily traffic details");
+  assert.equal(dashboardTrafficMonthDays("2024-02").length, 29, "dashboard traffic month helper observes leap years");
+  assert.deepEqual(
+    aggregateDashboardTrafficDays([
+      { day: "2026-08-01", received_bytes: 4, sent_bytes: 3, used_bytes: 7, peak_receive_bps: 2 },
+      { day: "2026-08-01", received_bytes: 5, sent_bytes: 2, used_bytes: 7, peak_receive_bps: 8 },
+    ], "2026-08")[0],
+    { day: "2026-08-01", received_bytes: 9, sent_bytes: 5, used_bytes: 14, peak_receive_bps: 8, peak_send_bps: 0 },
+    "same-day policy rows are aggregated for the dashboard chart",
   );
 
   const taskCalls = [];
@@ -3005,7 +3038,7 @@ try {
       if (path === "/agents")
         return [{ id: "alpha", name: "Alpha", features: ["port-traffic-v1"], capabilities: ["mihomo"] }];
       if (path === "/traffic-policies")
-        return [{ id: "policy-a", agent_id: "alpha", engine: "mihomo", name: "Primary", port: 443, protocol: "tcp", cycle: "monthly", cycle_anchor: "2026-01-01T00:00:00Z", used_bytes: 10, limit_bytes: 100, received_bytes: 6, sent_bytes: 4, receive_bps: 1, send_bps: 1, enforcement_available: true, last_reported_at: "now" }];
+        return [{ id: "policy-a", agent_id: "alpha", engine: "mihomo", name: "Primary", port: 443, protocol: "tcp", cycle: "monthly", cycle_anchor: "2026-01-01T00:00:00Z", used_bytes: 10, limit_bytes: 100, received_bytes: 6, sent_bytes: 4, receive_bps: 1, send_bps: 1, enforcement_available: true, last_reported_at: "now", auto_block: true }];
       assert.fail(`unexpected traffic polling path ${path}`);
     },
     shell: (markup) => {
@@ -3020,13 +3053,18 @@ try {
     clearTimer: (id) => trafficTimers.delete(id),
   });
   await renderTraffic();
-  assert.equal(trafficRequests, 2, "traffic refresh uses two parallel requests");
+  assert.equal(trafficRequests, 2, "traffic refresh loads only agents and live policies");
   assert.equal(trafficRenders, 1);
   assert.equal(trafficTimers.size, 1, "traffic polling owns one timer");
   assert.equal(
     trafficMarkup.includes('data-refresh-key="traffic-policy-policy-a"'),
     true,
   );
+  assert.equal(trafficMarkup.includes('data-traffic-filter="agent_id"'), false, "traffic workspace does not duplicate the sidebar node selector");
+  assert.equal(trafficMarkup.includes("traffic-history"), false, "monthly history is rendered only on the dashboard");
+  assert.equal(trafficMarkup.includes("traffic-hero"), false, "traffic page starts directly with useful controls instead of a repeated title hero");
+  assert.equal(trafficMarkup.includes("traffic-policy-grid"), true, "traffic policies render as compact cards");
+  assert.equal(trafficMarkup.includes("traffic-edit-dialog"), false, "read-only roles do not receive quota mutation dialogs");
   const trafficPoll = [...trafficTimers.values()][0];
   trafficTimers.clear();
   await trafficPoll();

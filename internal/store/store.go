@@ -44,7 +44,7 @@ type storeExecutor interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }
 
-const currentSchemaVersion = 23
+const currentSchemaVersion = 25
 
 func Open(ctx context.Context, databaseURL string, allowInsecureRemote bool) (*Store, error) {
 	return OpenWithConfigKey(ctx, databaseURL, allowInsecureRemote, "")
@@ -1950,7 +1950,9 @@ CREATE TABLE IF NOT EXISTS port_traffic_policies (
     protocol varchar(8) NOT NULL CHECK (protocol IN ('tcp','udp','both')),
     cycle varchar(8) NOT NULL CHECK (cycle IN ('monthly','yearly')),
     cycle_anchor date NOT NULL,
-    limit_bytes bigint NOT NULL CHECK (limit_bytes > 0),
+	limit_bytes bigint NOT NULL CHECK (limit_bytes > 0),
+	auto_block boolean NOT NULL DEFAULT true,
+	traffic_history_initialized boolean NOT NULL DEFAULT false,
     reset_generation bigint NOT NULL DEFAULT 1 CHECK (reset_generation > 0),
     received_bytes bigint NOT NULL DEFAULT 0 CHECK (received_bytes >= 0),
     sent_bytes bigint NOT NULL DEFAULT 0 CHECK (sent_bytes >= 0),
@@ -1967,7 +1969,31 @@ CREATE TABLE IF NOT EXISTS port_traffic_policies (
     updated_at timestamptz NOT NULL,
     UNIQUE (agent_id,port)
 );
+ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS auto_block boolean NOT NULL DEFAULT true;
+ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS traffic_history_initialized boolean NOT NULL DEFAULT false;
 CREATE INDEX IF NOT EXISTS port_traffic_policies_agent_idx ON port_traffic_policies(agent_id,port);
+
+CREATE TABLE IF NOT EXISTS port_traffic_daily_usage (
+	policy_id text NOT NULL,
+	reset_generation bigint NOT NULL CHECK (reset_generation > 0),
+	usage_date date NOT NULL,
+	agent_id text NOT NULL,
+	name varchar(100) NOT NULL,
+	engine varchar(20) NOT NULL CHECK (engine IN ('mihomo','xray','sing-box','ss-rust')),
+	port integer NOT NULL CHECK (port BETWEEN 1 AND 65535),
+	protocol varchar(8) NOT NULL CHECK (protocol IN ('tcp','udp','both')),
+	received_bytes bigint NOT NULL DEFAULT 0 CHECK (received_bytes >= 0),
+	sent_bytes bigint NOT NULL DEFAULT 0 CHECK (sent_bytes >= 0),
+	used_bytes bigint NOT NULL DEFAULT 0 CHECK (used_bytes >= 0),
+	peak_receive_bps bigint NOT NULL DEFAULT 0 CHECK (peak_receive_bps >= 0),
+	peak_send_bps bigint NOT NULL DEFAULT 0 CHECK (peak_send_bps >= 0),
+	sample_count bigint NOT NULL DEFAULT 0 CHECK (sample_count >= 0),
+	first_reported_at timestamptz NOT NULL,
+	last_reported_at timestamptz NOT NULL,
+	PRIMARY KEY (policy_id,reset_generation,usage_date)
+);
+CREATE INDEX IF NOT EXISTS port_traffic_daily_agent_date_idx ON port_traffic_daily_usage(agent_id,usage_date,port);
+CREATE INDEX IF NOT EXISTS port_traffic_daily_policy_date_idx ON port_traffic_daily_usage(policy_id,usage_date);
 
 CREATE TABLE IF NOT EXISTS audit_logs (
     id bigserial PRIMARY KEY,

@@ -61,6 +61,7 @@ func TestManagementAPIRouteAuthorizationMatrix(t *testing.T) {
 		{http.MethodGet, "/api/v1/audit"},
 		{http.MethodGet, "/api/v1/metrics/agt_0123456789abcdef"},
 		{http.MethodGet, "/api/v1/traffic-policies"},
+		{http.MethodGet, "/api/v1/traffic-usage?month=2026-08"},
 		{http.MethodPost, "/api/v1/traffic-policies"},
 		{http.MethodPut, "/api/v1/traffic-policies/trf_test"},
 		{http.MethodPost, "/api/v1/traffic-policies/trf_test/reset"},

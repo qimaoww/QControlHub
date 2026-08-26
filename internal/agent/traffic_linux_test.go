@@ -46,7 +46,7 @@ func TestTrafficManagerCountsBlocksAndResetsCalendarPeriod(t *testing.T) {
 		ID: "trf_0123456789abcdef", AgentID: "agt_0123456789abcdef", Name: "tls inbound",
 		Engine: core.EngineXray, Port: 443, Protocol: core.TrafficProtocolBoth,
 		Cycle: core.TrafficCycleMonthly, CycleAnchor: time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC),
-		LimitBytes: 1000, ResetGeneration: 1,
+		LimitBytes: 1000, AutoBlock: true, ResetGeneration: 1,
 	}
 	if err := manager.SetPolicies(context.Background(), []core.PortTrafficPolicy{policy}, policy.AgentID); err != nil {
 		t.Fatal(err)
@@ -90,7 +90,7 @@ func TestTrafficManagerPreservesUsageWhenOnlyLimitChanges(t *testing.T) {
 		ID: "trf_fedcba9876543210", AgentID: "agt_0123456789abcdef", Name: "ss inbound",
 		Engine: core.EngineShadowsocksRust, Port: 8388, Protocol: core.TrafficProtocolTCP,
 		Cycle: core.TrafficCycleYearly, CycleAnchor: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
-		LimitBytes: 2000, ResetGeneration: 1,
+		LimitBytes: 2000, AutoBlock: true, ResetGeneration: 1,
 	}
 	if err := manager.SetPolicies(context.Background(), []core.PortTrafficPolicy{policy}, policy.AgentID); err != nil {
 		t.Fatal(err)
@@ -105,6 +105,33 @@ func TestTrafficManagerPreservesUsageWhenOnlyLimitChanges(t *testing.T) {
 	snapshot := manager.Snapshot()
 	if snapshot[0].UsedBytes != 1200 || !snapshot[0].Blocked {
 		t.Fatalf("limit update snapshot = %+v", snapshot[0])
+	}
+}
+
+func TestTrafficManagerCanMonitorWithoutAutomaticBlocking(t *testing.T) {
+	now := time.Date(2026, 8, 21, 0, 0, 0, 0, time.UTC)
+	backend := &fakeTrafficBackend{counters: map[string]uint64{}}
+	manager := &TrafficManager{
+		statePath: t.TempDir() + "/traffic-state.json", backend: backend,
+		records: make(map[string]*trafficRecord), now: func() time.Time { return now },
+	}
+	policy := core.PortTrafficPolicy{
+		ID: "trf_2222222222222222", AgentID: "agt_0123456789abcdef", Name: "observe only",
+		Engine: core.EngineXray, Port: 9443, Protocol: core.TrafficProtocolTCP,
+		Cycle: core.TrafficCycleMonthly, CycleAnchor: now, LimitBytes: 100, AutoBlock: false, ResetGeneration: 1,
+	}
+	if err := manager.SetPolicies(context.Background(), []core.PortTrafficPolicy{policy}, policy.AgentID); err != nil {
+		t.Fatal(err)
+	}
+	backend.counters[trafficRuleComment(policy.ID, "in", "tcp")] = 200
+	now = now.Add(2 * time.Second)
+	manager.collect(context.Background(), false)
+	snapshot := manager.Snapshot()
+	if len(snapshot) != 1 || snapshot[0].UsedBytes != 200 || snapshot[0].Blocked {
+		t.Fatalf("observe-only snapshot = %+v", snapshot)
+	}
+	if strings.Contains(backend.scripts[len(backend.scripts)-1], " drop") {
+		t.Fatalf("observe-only policy installed a drop rule:\n%s", backend.scripts[len(backend.scripts)-1])
 	}
 }
 
