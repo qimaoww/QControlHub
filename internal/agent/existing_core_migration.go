@@ -955,7 +955,13 @@ func (e *Executor) importExistingConfig(ctx context.Context, engine core.Engine,
 	}
 
 	validationSpec := managed
-	validationSpec.Binary = existing.Binary
+	invocationSpec, cleanupInvocation, err := e.existingCoreInvocationSpec(engine, managed, existing)
+	if err != nil {
+		return "", fmt.Errorf("prepare existing %s binary for protected import validation: %w", engine, err)
+	}
+	defer cleanupInvocation()
+	validationSpec.Binary = invocationSpec.Binary
+	validationSpec.commandEnv = invocationSpec.commandEnv
 	if _, err := e.validateImportedSnapshot(ctx, engine, validationSpec, content); err != nil {
 		return "", fmt.Errorf("existing %s configuration is not safe for managed deployment: %w", engine, err)
 	}
