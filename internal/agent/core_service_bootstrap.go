@@ -58,6 +58,9 @@ func (e *Executor) prepareManagedCoreService(ctx context.Context, engine core.En
 			return fmt.Errorf("validate newly installed managed %s service: %w", engine, err)
 		}
 	}
+	if err := ensureDefaultManagedConfigurationAccess(engine, spec, manager); err != nil {
+		return fmt.Errorf("prepare managed %s configuration access: %w", engine, err)
+	}
 	if err := ensureManagedCoreLogStreaming(ctx, map[core.Engine]EngineSpec{engine: spec}, manager); err != nil {
 		return fmt.Errorf("prepare managed %s logs: %w", engine, err)
 	}
