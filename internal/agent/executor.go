@@ -728,10 +728,16 @@ func (e *Executor) readExistingConfig(ctx context.Context, engine core.Engine, m
 			return "", fmt.Errorf("existing %s configuration sources failed real core validation: %w", engine, err)
 		}
 	}
-	if engine == core.EngineXray {
+	switch engine {
+	case core.EngineXray:
 		content, err = normalizeImportedXrayLogDestinations(content)
 		if err != nil {
 			return "", fmt.Errorf("normalize existing Xray log destinations: %w", err)
+		}
+	case core.EngineSingBox:
+		content, err = normalizeImportedSingBoxLogDestination(content)
+		if err != nil {
+			return "", fmt.Errorf("normalize existing sing-box log destination: %w", err)
 		}
 	}
 	if _, err := e.validateSnapshot(ctx, engine, validationSpec, content); err != nil {
@@ -916,6 +922,45 @@ func normalizeImportedXrayLogDestinations(content string) (string, error) {
 	if !changed {
 		return content, nil
 	}
+	normalizedLog, err := json.Marshal(logging)
+	if err != nil {
+		return "", err
+	}
+	root["log"] = normalizedLog
+	normalized, err := json.MarshalIndent(root, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	return string(normalized) + "\n", nil
+}
+
+// normalizeImportedSingBoxLogDestination moves an existing absolute file log
+// outside the managed state directory onto the managed service's console log.
+// Safe relative/managed-state file outputs and disabled logging are preserved.
+func normalizeImportedSingBoxLogDestination(content string) (string, error) {
+	output, destination, err := singBoxLogOutput(content)
+	if err != nil {
+		return "", err
+	}
+	if destination != singBoxLogDestinationFile {
+		return content, nil
+	}
+	if strings.ContainsAny(output, "\x00\r\n") {
+		return "", errors.New("sing-box log output contains a control character")
+	}
+	if _, err := importedSingBoxLogPath(output); err == nil {
+		return content, nil
+	}
+
+	var root map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(content), &root); err != nil {
+		return "", err
+	}
+	var logging map[string]json.RawMessage
+	if err := json.Unmarshal(root["log"], &logging); err != nil {
+		return "", fmt.Errorf("sing-box log configuration is not an object: %w", err)
+	}
+	logging["output"] = json.RawMessage(`"stdout"`)
 	normalizedLog, err := json.Marshal(logging)
 	if err != nil {
 		return "", err
