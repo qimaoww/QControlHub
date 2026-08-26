@@ -404,13 +404,30 @@ func TestPresetSidebarShowsOnlySelectedNodeContent(t *testing.T) {
 }
 
 func TestNodeSettingsStartsWithOperationsAndCards(t *testing.T) {
+	app := string(mustReadFrontendFile(t, "app.js"))
 	agents := string(mustReadFrontendFile(t, "modules/agents.js"))
 	styles := string(mustReadFrontendFile(t, "app.css"))
 	if strings.Contains(agents, `class="node-page-intro"`) || strings.Contains(styles, `.node-page-intro`) {
 		t.Fatal("node settings must not repeat its page title in a separate introduction panel")
 	}
-	if !strings.Contains(agents, `class="node-batch-panel"`) || !strings.Contains(agents, `: "node-card-grid"`) {
-		t.Fatal("node settings must start with batch operations and node cards")
+	if strings.Contains(agents, `class="node-batch-panel"`) {
+		t.Fatal("node settings must not reserve an inline row for batch operations")
+	}
+	for _, required := range []string{
+		`data-node-batch-toggle`,
+		`data-node-batch-card`,
+		`data-batch-checkbox`,
+		`class="node-batch-bar"`,
+		`data-close-node-batch`,
+		`: "node-card-grid"`,
+	} {
+		if !strings.Contains(app+agents, required) {
+			t.Errorf("node batch selection is missing %q", required)
+		}
+	}
+	if !strings.Contains(styles, `.node-batch-bar{position:fixed`) ||
+		!strings.Contains(styles, `.node-card.batch-selecting.selected`) {
+		t.Fatal("node batch mode must use a floating action bar and visible card selection")
 	}
 }
 

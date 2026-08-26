@@ -519,15 +519,17 @@ function shell(content, title, { viewKey = state.route } = {}) {
     state.route === id ||
     (state.route === "agent-config" && id === "agents") ||
     (state.route === "archive-config" && id === "live-config");
+  const nodeOverviewActions =
+    state.route === "node-settings" && state.data.nodeView !== "detail"
+      ? `${can("operator") && (state.data.agents || []).length > 1 ? `<button class="button small ${state.data.nodeBatchMode ? "primary" : ""}" type="button" data-node-batch-toggle aria-pressed="${state.data.nodeBatchMode ? "true" : "false"}">${state.data.nodeBatchMode ? "退出批量" : "批量操作"}</button>` : ""}${can("enrollment.manage") ? '<button class="button small" type="button" data-open-enrollment>添加节点</button>' : ""}`
+      : "";
   const topAction =
     state.route === "dashboard"
       ? '<a class="button small" href="#node-settings">节点设置</a>'
       : state.route === "agents"
         ? ""
         : state.route === "node-settings"
-          ? state.data.nodeView !== "detail" && can("enrollment.manage")
-            ? '<button class="button small" type="button" data-open-enrollment>添加节点</button>'
-            : ""
+          ? nodeOverviewActions
           : state.route === "client-access"
             ? ""
             : state.route === "archive-config"
@@ -746,8 +748,10 @@ async function renderOnce() {
               ? "archive-config"
               : "dashboard");
   state.anchor = hash;
-  if (previousRoute === "node-settings" && state.route !== previousRoute)
+  if (previousRoute === "node-settings" && state.route !== previousRoute) {
+    state.data.nodeBatchMode = false;
     agentModule.cancelAgentInteractions();
+  }
   if (hash.startsWith("preset-node-")) state.data.selectedAgent = hash.slice(12);
   if (hash.startsWith("settings-node-")) state.data.selectedAgent = hash.slice(14);
   if (hash.startsWith("node-")) state.data.selectedAgent = hash.slice(5);
@@ -756,7 +760,8 @@ async function renderOnce() {
     (hash.startsWith("settings-node-") ||
       (hash.startsWith("node-") && hash !== "node-settings"))
   ) {
-    document.querySelectorAll("[data-open-enrollment], .node-batch-panel").forEach((element) => element.remove());
+    state.data.nodeBatchMode = false;
+    document.querySelectorAll("[data-open-enrollment], [data-node-batch-toggle], .node-batch-bar").forEach((element) => element.remove());
   }
   if (hash.startsWith("config-")) state.data.archiveConfigId = hash.slice(7);
   try {

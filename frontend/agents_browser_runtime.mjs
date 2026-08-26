@@ -157,13 +157,16 @@ function responsiveDialogRuleExists() {
 }
 
 async function testAdminRuntime() {
-  await waitFor(() => document.querySelector("#batch-form"), "聚合页没有渲染真实批量表单");
+  await waitFor(() => document.querySelector(".node-card-grid"), "聚合页没有渲染节点卡片");
   assertNoPersistentEnrollment();
+  assert.equal(document.querySelector("#batch-form"), null, "批量操作栏不应常驻聚合页");
+  assert.ok(document.querySelector("[data-node-batch-toggle]"), "聚合页顶栏缺少批量操作入口");
   const launcher = document.querySelector("[data-open-enrollment]");
   assert.ok(launcher, "有权限的 populated 聚合页缺少添加节点入口");
   const originalHash = location.hash;
   const workspace = document.querySelector(".workspace-main");
   workspace.scrollTop = 37;
+  const originalScrollTop = workspace.scrollTop;
   launcher.focus();
   launcher.click();
   const backdrop = await waitFor(() => document.querySelector(".modal-backdrop"), "添加节点入口没有打开 modal");
@@ -199,7 +202,7 @@ async function testAdminRuntime() {
   assert.equal(document.querySelector(".desktop-app").inert, false);
   assert.equal(document.body.style.overflow, "");
   assert.equal(document.activeElement, document.querySelector("[data-open-enrollment]"));
-  assert.equal(document.querySelector(".workspace-main").scrollTop, 37);
+  assert.equal(document.querySelector(".workspace-main").scrollTop, originalScrollTop);
 
   document.querySelector("[data-open-enrollment]").click();
   const enrollment = await waitFor(() => document.querySelector(".enrollment-dialog"), "无法重新打开 enrollment modal");
@@ -255,7 +258,8 @@ async function testAdminRuntime() {
   location.hash = "#dashboard";
   await waitFor(() => document.querySelector(".dashboard-head"), "路由离开后未完成刷新");
   location.hash = "#node-settings";
-  await waitFor(() => document.querySelector("#batch-form"), "路由往返后聚合页未恢复");
+  await waitFor(() => document.querySelector(".node-card-grid"), "路由往返后聚合页未恢复");
+  assert.equal(document.querySelector("#batch-form"), null, "路由往返后批量栏不应自动打开");
   document.querySelector("[data-open-enrollment]").click();
   await waitFor(() => document.querySelector(".enrollment-dialog"), "刷新后添加记录弹窗无法打开");
   assert.ok(document.querySelector('[data-view-enrollment-record="enr-alpha"]'), "刷新后可恢复添加记录缺少查看入口");
@@ -272,6 +276,12 @@ async function testAdminRuntime() {
   ).length;
   assert.equal(recordReadsAfter, recordReadsBefore + 3, "聚合命令重复查看应保持同一读取接口，不得创建新凭据");
 
+  document.querySelector(".enrollment-dialog [data-close]")?.click();
+  const batchLauncher = document.querySelector("[data-node-batch-toggle]");
+  batchLauncher.click();
+  await waitFor(() => document.querySelector("#batch-form"), "顶栏批量操作没有打开选择模式");
+  assert.ok(document.querySelector(".node-batch-bar"), "选择模式没有渲染底部操作栏");
+  assert.equal(document.querySelectorAll("[data-node-batch-card] [data-batch-checkbox]").length, 4);
   let form = document.querySelector("#batch-form");
   let all = form.querySelector("[data-batch-select-all]");
   let inputs = [...form.querySelectorAll("[data-batch-checkbox]")];
@@ -301,9 +311,9 @@ async function testAdminRuntime() {
     }
   };
   assert.equal(charlie.disabled, true);
-  assert.match(charlie.closest("label").textContent, /离线/);
+  assert.match(charlie.closest(".node-card-select").title, /离线/);
   assert.equal(delta.disabled, true);
-  assert.match(delta.closest("label").textContent, /旧版 Agent/);
+  assert.match(delta.closest(".node-card-select").title, /旧版 Agent/);
 
   all.click();
   assert.equal(alpha.checked, true);
@@ -343,7 +353,7 @@ async function testAdminRuntime() {
   let confirmDialog = await waitFor(() => document.querySelector("[data-confirm-dialog][open]"), "离线二次校验没有进入确认流程");
   replaceAgent("alpha", (agent) => ({ ...agent, status: "offline" }));
   await refreshAgents(
-    () => alpha.disabled && !alpha.checked && /离线/.test(alpha.closest("label").textContent),
+    () => alpha.disabled && !alpha.checked && /离线/.test(alpha.closest(".node-card-select").title),
     "刷新后没有立即撤销已离线节点的选择",
   );
   confirmDialog.querySelector("[data-confirm-accept]").click();
@@ -357,7 +367,7 @@ async function testAdminRuntime() {
   confirmDialog = await waitFor(() => document.querySelector("[data-confirm-dialog][open]"), "feature 二次校验没有进入确认流程");
   replaceAgent("bravo", (agent) => ({ ...agent, features: [] }));
   await refreshAgents(
-    () => bravo.disabled && !bravo.checked && /旧版 Agent/.test(bravo.closest("label").textContent),
+    () => bravo.disabled && !bravo.checked && /旧版 Agent/.test(bravo.closest(".node-card-select").title),
     "刷新后没有立即撤销缺少升级 feature 的节点选择",
   );
   confirmDialog.querySelector("[data-confirm-accept]").click();
@@ -376,7 +386,7 @@ async function testAdminRuntime() {
     runtime: { ...agent.runtime, mihomo: { installed: false, service_status: "stopped" } },
   }));
   await refreshAgents(
-    () => alpha.disabled && !alpha.checked && /未安装/.test(alpha.closest("label").textContent),
+    () => alpha.disabled && !alpha.checked && /未安装/.test(alpha.closest(".node-card-select").title),
     "刷新后没有立即撤销 runtime 不可用节点的选择",
   );
   confirmDialog.querySelector("[data-confirm-accept]").click();
@@ -435,10 +445,9 @@ async function testAdminRuntime() {
   assert.equal(rows.filter((row) => row.classList.contains("error")).length, 2);
   let retries = [...form.querySelectorAll("[data-batch-retry]")];
   assert.equal(retries.length, 2, "两个失败节点均应保留重试入口");
-  const batchPanel = form.closest("details");
+  const batchBar = form.querySelector(".node-batch-bar");
   const aggregateWorkspace = document.querySelector(".workspace-main");
   const aggregateHash = location.hash;
-  batchPanel.open = true;
   aggregateWorkspace.scrollTop = 43;
   const aggregateScrollTop = aggregateWorkspace.scrollTop;
   const callsFor = (path) =>
@@ -491,7 +500,7 @@ async function testAdminRuntime() {
     form,
     "聚合 core chip 的连续 poll 不应替换批量表单",
   );
-  assert.equal(batchPanel.open, true, "连续 poll 不应折叠批量区域");
+  assert.equal(batchBar.isConnected, true, "连续 poll 不应关闭底部批量操作栏");
   assert.equal(location.hash, aggregateHash, "连续 poll 不应改变 route");
   assert.equal(
     aggregateWorkspace.scrollTop,
@@ -541,7 +550,7 @@ async function testAdminRuntime() {
     true,
   );
   assert.match(installedSummary.textContent, /1\/2 内核已安装/);
-  assert.equal(batchPanel.open, true);
+  assert.equal(batchBar.isConnected, true);
   assert.equal(location.hash, aggregateHash);
   assert.equal(aggregateWorkspace.scrollTop, aggregateScrollTop);
   assert.equal(count.textContent, "已选择 2 个节点 · 当前可选 2 个");
@@ -585,8 +594,9 @@ async function testAdminRuntime() {
     "单节点详情没有完成渲染",
   );
   assert.equal(document.querySelector("[data-open-enrollment]"), null, "单节点详情不得渲染添加节点入口");
+  assert.equal(document.querySelector("[data-node-batch-toggle]"), null, "单节点详情不得渲染批量操作入口");
   assert.equal(document.querySelector("#batch-form"), null, "单节点详情不得渲染批量操作表单");
-  assert.equal(document.querySelector(".node-batch-panel"), null, "单节点详情不得保留批量操作占位");
+  assert.equal(document.querySelector(".node-batch-bar"), null, "单节点详情不得保留批量操作栏");
   const commandButton = document.querySelector('[data-view-enrollment-command="alpha"]');
   assert.ok(commandButton, "有权限的单节点详情缺少查看已有部署命令入口");
   const commandReadsBefore = testAPI.calls.filter(
@@ -624,14 +634,14 @@ async function testAdminRuntime() {
     );
     assert.equal(document.querySelector("[data-open-enrollment]"), null, `${tab} 标签页不得渲染添加节点入口`);
     assert.equal(document.querySelector("#batch-form"), null, `${tab} 标签页不得渲染批量操作`);
-    assert.equal(document.querySelector(".node-batch-panel"), null, `${tab} 标签页不得保留批量操作占位`);
+    assert.equal(document.querySelector(".node-batch-bar"), null, `${tab} 标签页不得保留批量操作栏`);
   }
   testAPI.agents = testAPI.agents.filter((agent) => agent.id !== "alpha");
   document.querySelector("[data-agent-refresh]").click();
   await waitFor(() => document.querySelector("[data-node-missing]"), "删除当前节点后未渲染详情缺失状态");
   assert.equal(document.querySelector("[data-open-enrollment]"), null, "删除当前节点后不得回退到添加入口");
   assert.equal(document.querySelector("#batch-form"), null, "删除当前节点后不得回退到批量表单");
-  assert.equal(document.querySelector(".node-batch-panel"), null, "删除当前节点后不得回退到批量区占位");
+  assert.equal(document.querySelector(".node-batch-bar"), null, "删除当前节点后不得回退到底部批量栏");
   testAPI.agents = populatedAgents.slice();
   location.hash = "#settings-node-unknown";
   await waitFor(() => document.querySelector("[data-node-missing]"), "未知节点详情路由未渲染缺失状态");
