@@ -102,7 +102,11 @@ func main() {
 	if len(arguments) >= 2 && arguments[0] == "run" {
 		switch arguments[1] {
 		case "-dump":
-			contents, err := os.ReadFile(filepath.Join(filepath.Dir(executable), "xray-dump.json"))
+			assetDirectory := os.Getenv("XRAY_LOCATION_ASSET")
+			if assetDirectory == "" {
+				assetDirectory = filepath.Dir(executable)
+			}
+			contents, err := os.ReadFile(filepath.Join(assetDirectory, "xray-dump.json"))
 			if os.IsNotExist(err) {
 				for index := 2; index+1 < len(arguments); index++ {
 					if arguments[index] == "-config" {
@@ -695,6 +699,12 @@ func TestExistingCoreDiscoveryAcceptsInactiveOrphanOwnedInstallerBinary(t *testi
 	serviceBinary := fixture.useDirectSingBoxBinary(t, -1)
 	allowFixtureOrphanOwnerPath(t, serviceBinary)
 	assignInactiveOrphanOwner(t, serviceBinary)
+	if err := os.Chmod(serviceBinary, 0o744); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(serviceBinary+".control.json", []byte(`{}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
 
 	specs, issues, err := RefreshExistingCoreDiscovery(
 		context.Background(), fixture.discoveryStatePath, fixture.markerPrefix,
@@ -706,6 +716,9 @@ func TestExistingCoreDiscoveryAcceptsInactiveOrphanOwnedInstallerBinary(t *testi
 	assertDiscoveredSingBoxSpec(t, specs[core.EngineSingBox], serviceBinary, serviceBinary, fixture.configPath, fixture.configDirectory, "")
 	if len(issues) != 0 {
 		t.Fatalf("inactive orphan-owned discovery issues = %+v", issues)
+	}
+	if _, err := os.Stat(serviceBinary + ".invocations"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("orphan-owned source binary was invoked directly: %v", err)
 	}
 }
 

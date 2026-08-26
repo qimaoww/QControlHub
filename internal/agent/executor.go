@@ -29,6 +29,8 @@ type EngineSpec struct {
 	WorkingDirectory string
 	ServiceBinary    string
 	Service          string
+	commandDirectory string
+	commandEnv       string
 }
 
 type Executor struct {
@@ -275,6 +277,141 @@ func validateNativeCoreExecutable(path string) error {
 // Every managed/helper executable and every other source remains root-owned.
 func validateExistingCoreExecutable(path string) error {
 	return validateNativeCoreExecutableWithOwnerPolicy(path, installerCoreAllowsOrphanOwner(path))
+}
+
+// existingCoreInvocationSpec makes the fixed installer-path orphan-owner
+// exception usable without restoring CAP_DAC_OVERRIDE to QAgent. A historical
+// archive can leave a native core as, for example, uid 1001 mode 0744. The
+// protected file is readable but QAgent's capability-bounded root process is
+// neither its owner nor allowed to bypass the missing other-execute bit.
+// Invoke a root-owned private copy only after the original has passed the full
+// inactive-orphan, protected-path, regular-file, and native-core checks.
+func (e *Executor) existingCoreInvocationSpec(engine core.Engine, managed, existing EngineSpec) (EngineSpec, func(), error) {
+	if err := validateProtectedDirectoryChain(filepath.Dir(existing.Binary)); err != nil {
+		return EngineSpec{}, func() {}, err
+	}
+	if err := validateExistingCoreExecutable(existing.Binary); err != nil {
+		return EngineSpec{}, func() {}, err
+	}
+	info, err := os.Lstat(existing.Binary)
+	if err != nil {
+		return EngineSpec{}, func() {}, err
+	}
+	uid, _, ownershipKnown := fileOwnership(info)
+	if !ownershipKnown || uid == 0 {
+		return existing, func() {}, nil
+	}
+	if !installerCoreAllowsOrphanOwner(existing.Binary) {
+		return EngineSpec{}, func() {}, errors.New("non-root existing core is outside the fixed installer compatibility paths")
+	}
+
+	stagingDirectory := filepath.Dir(managed.ConfigPath)
+	if e != nil && e.MigrationMarkerPrefix != "" {
+		stagingDirectory = filepath.Dir(e.MigrationMarkerPrefix)
+	}
+	if !filepath.IsAbs(stagingDirectory) {
+		return EngineSpec{}, func() {}, errors.New("existing core invocation directory is not absolute")
+	}
+	if _, err := os.Lstat(stagingDirectory); errors.Is(err, os.ErrNotExist) {
+		if err := validateProtectedDirectoryChain(filepath.Dir(stagingDirectory)); err != nil {
+			return EngineSpec{}, func() {}, fmt.Errorf("existing core invocation directory parent is unsafe: %w", err)
+		}
+		if err := os.Mkdir(stagingDirectory, 0o700); err != nil {
+			return EngineSpec{}, func() {}, err
+		}
+	} else if err != nil {
+		return EngineSpec{}, func() {}, err
+	}
+	if err := validateProtectedDirectoryChain(stagingDirectory); err != nil {
+		return EngineSpec{}, func() {}, fmt.Errorf("existing core invocation directory is unsafe: %w", err)
+	}
+
+	destinationRoot, err := os.OpenRoot(stagingDirectory)
+	if err != nil {
+		return EngineSpec{}, func() {}, err
+	}
+	tempName, err := randomCoreTempName(destinationRoot)
+	if err != nil {
+		destinationRoot.Close()
+		return EngineSpec{}, func() {}, err
+	}
+	cleanup := func() {
+		_ = destinationRoot.Remove(tempName)
+		_ = destinationRoot.Close()
+	}
+
+	sourceInfo, err := os.Lstat(existing.Binary)
+	if err != nil || !os.SameFile(info, sourceInfo) {
+		cleanup()
+		return EngineSpec{}, func() {}, errors.New("existing core binary changed before its invocation copy was opened")
+	}
+	sourceRoot, err := os.OpenRoot(filepath.Dir(existing.Binary))
+	if err != nil {
+		cleanup()
+		return EngineSpec{}, func() {}, err
+	}
+	input, err := sourceRoot.Open(filepath.Base(existing.Binary))
+	if err != nil {
+		sourceRoot.Close()
+		cleanup()
+		return EngineSpec{}, func() {}, err
+	}
+	openedInfo, err := input.Stat()
+	if err != nil || !os.SameFile(info, openedInfo) {
+		input.Close()
+		sourceRoot.Close()
+		cleanup()
+		return EngineSpec{}, func() {}, errors.New("existing core binary changed while its invocation copy was opened")
+	}
+	if openedInfo.Size() <= 0 || openedInfo.Size() > maxReleaseAssetSize {
+		input.Close()
+		sourceRoot.Close()
+		cleanup()
+		return EngineSpec{}, func() {}, errors.New("existing core invocation copy source has an invalid size")
+	}
+
+	output, err := destinationRoot.OpenFile(tempName, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		input.Close()
+		sourceRoot.Close()
+		cleanup()
+		return EngineSpec{}, func() {}, err
+	}
+	written, copyErr := io.Copy(output, io.LimitReader(input, maxReleaseAssetSize+1))
+	input.Close()
+	sourceRoot.Close()
+	if copyErr == nil && (written <= 0 || written > maxReleaseAssetSize) {
+		copyErr = errors.New("existing core invocation copy exceeded the supported limit")
+	}
+	if copyErr == nil {
+		copyErr = output.Sync()
+	}
+	closeErr := output.Close()
+	if copyErr != nil {
+		cleanup()
+		return EngineSpec{}, func() {}, copyErr
+	}
+	if closeErr != nil {
+		cleanup()
+		return EngineSpec{}, func() {}, closeErr
+	}
+	if err := destinationRoot.Chmod(tempName, 0o700); err != nil {
+		cleanup()
+		return EngineSpec{}, func() {}, err
+	}
+
+	invocationPath := filepath.Join(stagingDirectory, tempName)
+	if err := validateNativeCoreExecutable(invocationPath); err != nil {
+		cleanup()
+		return EngineSpec{}, func() {}, fmt.Errorf("validate existing core invocation copy: %w", err)
+	}
+	invocation := existing
+	invocation.Binary = invocationPath
+	invocation.commandDirectory = filepath.Dir(existing.Binary)
+	if engine == core.EngineXray {
+		invocation.commandEnv = "XRAY_LOCATION_ASSET=" + filepath.Dir(existing.Binary)
+	}
+	return invocation, cleanup, nil
 }
 
 func validateNativeCoreExecutableWithOwnerPolicy(path string, allowOrphanOwner bool) error {
@@ -573,8 +710,6 @@ func (e *Executor) readExistingConfig(ctx context.Context, engine core.Engine, m
 			return "", fmt.Errorf("existing %s configuration has a resource that cannot be migrated safely: %w", engine, err)
 		}
 	}
-	validationSpec := managed
-	validationSpec.Binary = existing.Binary
 	if err := validateExistingCoreExecutable(existing.Binary); err != nil {
 		return "", fmt.Errorf("cannot safely invoke existing %s binary: %w", engine, err)
 	}
@@ -584,6 +719,14 @@ func (e *Executor) readExistingConfig(ctx context.Context, engine core.Engine, m
 	if err := validateExistingServiceExecutable(existing); err != nil {
 		return "", fmt.Errorf("cannot safely map existing %s service executable: %w", engine, err)
 	}
+	invocationSpec, cleanupInvocation, err := e.existingCoreInvocationSpec(engine, managed, existing)
+	if err != nil {
+		return "", fmt.Errorf("prepare existing %s binary for protected invocation: %w", engine, err)
+	}
+	defer cleanupInvocation()
+	validationSpec := managed
+	validationSpec.Binary = invocationSpec.Binary
+	validationSpec.commandEnv = invocationSpec.commandEnv
 	if engine == core.EngineXray && existing.ConfigDirectory != "" {
 		// Xray's multi-file semantics are typed and tag-aware: later scalar
 		// sections replace earlier ones, while same-tag inbounds/outbounds are
@@ -591,12 +734,12 @@ func (e *Executor) readExistingConfig(ctx context.Context, engine core.Engine, m
 		// would silently change a valid service. Ask the protected source binary
 		// for its canonical merged form instead and fail closed if it cannot dump
 		// one.
-		content, err = dumpExistingXrayConfiguration(ctx, existing)
+		content, err = dumpExistingXrayConfiguration(ctx, invocationSpec)
 		if err != nil {
 			return "", fmt.Errorf("dump existing Xray configuration sources: %w", err)
 		}
 	} else if engine != core.EngineXray {
-		if err := validateExistingSourceInvocation(ctx, engine, existing); err != nil {
+		if err := validateExistingSourceInvocation(ctx, engine, invocationSpec); err != nil {
 			return "", fmt.Errorf("existing %s configuration sources failed real core validation: %w", engine, err)
 		}
 	}
@@ -709,8 +852,11 @@ func dumpExistingXrayConfiguration(ctx context.Context, spec EngineSpec) (string
 	commandContext, cancel := context.WithCancel(ctx)
 	defer cancel()
 	command := exec.CommandContext(commandContext, spec.Binary, args...)
-	command.Dir = filepath.Dir(spec.Binary)
-	command.Env = []string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin", "LANG=C", "LC_ALL=C"}
+	command.Dir = spec.commandDirectory
+	if command.Dir == "" {
+		command.Dir = filepath.Dir(spec.Binary)
+	}
+	command.Env = commandEnvironment(spec.commandEnv)
 	configureCommand(command)
 	stdout := &boundedOutput{limit: core.MaxConfigBytes, onLimit: cancel}
 	stderr := &boundedOutput{limit: 64 << 10, onLimit: cancel}
@@ -1590,7 +1736,7 @@ func (e *Executor) validateSnapshot(ctx context.Context, engine core.Engine, spe
 	case core.EngineShadowsocksRust:
 		return "ss-rust configuration syntax validated (ssserver has no non-running check mode)", nil
 	}
-	output, err := runInDirectory(ctx, directory, spec.Binary, args...)
+	output, err := runInDirectoryWithEnvironment(ctx, directory, spec.commandEnv, spec.Binary, args...)
 	if err != nil {
 		return output, fmt.Errorf("%s rejected the configuration: %w", engine, err)
 	}
@@ -1734,6 +1880,10 @@ func run(ctx context.Context, name string, args ...string) (string, error) {
 }
 
 func runInDirectory(ctx context.Context, directory, name string, args ...string) (string, error) {
+	return runInDirectoryWithEnvironment(ctx, directory, "", name, args...)
+}
+
+func runInDirectoryWithEnvironment(ctx context.Context, directory, environment, name string, args ...string) (string, error) {
 	if !filepath.IsAbs(name) {
 		return "", errors.New("refusing to execute a non-absolute binary path")
 	}
@@ -1743,7 +1893,7 @@ func runInDirectory(ctx context.Context, directory, name string, args ...string)
 	if directory != "" {
 		command.Dir = directory
 	}
-	command.Env = []string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin", "LANG=C", "LC_ALL=C"}
+	command.Env = commandEnvironment(environment)
 	configureCommand(command)
 	output := &boundedOutput{limit: 64 << 10, onLimit: cancel}
 	command.Stdout = output
@@ -1760,6 +1910,14 @@ func runInDirectory(ctx context.Context, directory, name string, args ...string)
 		return value, ctx.Err()
 	}
 	return value, err
+}
+
+func commandEnvironment(additional string) []string {
+	environment := []string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin", "LANG=C", "LC_ALL=C"}
+	if additional != "" {
+		environment = append(environment, additional)
+	}
+	return environment
 }
 
 type boundedOutput struct {
