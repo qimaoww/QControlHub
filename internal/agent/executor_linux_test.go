@@ -8,8 +8,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
@@ -109,6 +111,97 @@ func TestAtomicDeployAndRollbackPreserveConfigurationMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertFileContentAndMetadata(t, destination, "original", want)
+}
+
+func TestManagedConfigurationAccessRepairsExistingAndNewFiles(t *testing.T) {
+	requireAgentRoot(t)
+	root, err := os.MkdirTemp("/tmp", "qcontrolhub-managed-config-test-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(root) })
+	if err := os.Chmod(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	managedRoot := filepath.Join(root, "qagent")
+	directory := filepath.Join(managedRoot, "xray")
+	if err := os.MkdirAll(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(directory, "config.json")
+	if err := os.WriteFile(configPath, []byte("old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	const serviceGID = 65534
+	metadata, err := prepareManagedConfigurationAccessWithGID(managedRoot, configPath, serviceGID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{managedRoot, directory} {
+		got := statFileMetadata(t, path)
+		if got.uid != 0 || got.gid != serviceGID || got.mode != 0o750 {
+			t.Fatalf("managed directory metadata for %s = %+v", path, got)
+		}
+	}
+	got := statFileMetadata(t, configPath)
+	if got.uid != 0 || got.gid != serviceGID || got.mode != 0o640 {
+		t.Fatalf("existing managed configuration metadata = %+v", got)
+	}
+
+	if err := os.Remove(configPath); err != nil {
+		t.Fatal(err)
+	}
+	metadata, err = prepareManagedConfigurationAccessWithGID(managedRoot, configPath, serviceGID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := atomicDeployWithDefaultMetadata(configPath, "new", metadata); err != nil {
+		t.Fatal(err)
+	}
+	got = statFileMetadata(t, configPath)
+	if got.uid != 0 || got.gid != serviceGID || got.mode != 0o640 {
+		t.Fatalf("new managed configuration metadata = %+v", got)
+	}
+	command := exec.Command("/usr/bin/test", "-r", configPath)
+	command.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: serviceGID, Gid: serviceGID}}
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("managed service group cannot read new configuration: %v: %s", err, output)
+	}
+}
+
+func TestManagedConfigurationAccessRejectsUnsafePaths(t *testing.T) {
+	requireAgentRoot(t)
+	root := t.TempDir()
+	managedRoot := filepath.Join(root, "qagent")
+	directory := filepath.Join(managedRoot, "xray")
+	if err := os.MkdirAll(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := prepareManagedConfigurationAccessWithGID(managedRoot, filepath.Join(root, "outside.json"), 65534); err == nil || !strings.Contains(err.Error(), "escapes") {
+		t.Fatalf("outside managed configuration error = %v", err)
+	}
+	if err := os.Chmod(directory, 0o770); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := prepareManagedConfigurationAccessWithGID(managedRoot, filepath.Join(directory, "config.json"), 65534); err == nil || !strings.Contains(err.Error(), "writable") {
+		t.Fatalf("writable managed directory error = %v", err)
+	}
+	if err := os.Chmod(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(root, "target.json")
+	if err := os.WriteFile(target, []byte("unchanged"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(directory, "config.json")
+	if err := os.Symlink(target, configPath); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := prepareManagedConfigurationAccessWithGID(managedRoot, configPath, 65534); err == nil || !strings.Contains(err.Error(), "protected regular file") {
+		t.Fatalf("symlinked managed configuration error = %v", err)
+	}
+	assertFileContentAndMode(t, target, "unchanged", 0o600)
 }
 
 func TestRollbackDeployRestoresBackupAndBackupRetentionIsBounded(t *testing.T) {

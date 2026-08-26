@@ -1160,7 +1160,7 @@ func (e *Executor) importExistingConfig(ctx context.Context, engine core.Engine,
 		return rollbackMigration(fmt.Errorf("copied %s binary rejected the configuration: %w", engine, err))
 	}
 
-	if _, err := atomicDeploy(managed.ConfigPath, content); err != nil {
+	if _, err := atomicDeployManagedConfiguration(engine, managed, manager, content); err != nil {
 		return rollbackMigration(err)
 	}
 	if err := verifyCoreMigrationStagedFiles(managed, migrationRecord); err != nil {

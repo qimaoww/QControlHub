@@ -598,7 +598,7 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (string, erro
 		if err := ensureManagedCoreServiceCapabilities(ctx, task.Engine, spec, e.serviceManager()); err != nil {
 			return validation, err
 		}
-		backup, err := atomicDeploy(spec.ConfigPath, task.ConfigContent)
+		backup, err := atomicDeployManagedConfiguration(task.Engine, spec, e.serviceManager(), task.ConfigContent)
 		if err != nil {
 			return validation, err
 		}
@@ -633,6 +633,9 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (string, erro
 	case core.ActionStart, core.ActionRestart:
 		if err := ensureManagedCoreServiceCapabilities(ctx, task.Engine, spec, e.serviceManager()); err != nil {
 			return "", err
+		}
+		if err := ensureDefaultManagedConfigurationAccess(task.Engine, spec, e.serviceManager()); err != nil {
+			return "", fmt.Errorf("prepare managed %s configuration access: %w", task.Engine, err)
 		}
 		return serviceCommandAndVerifyWithManager(ctx, e.serviceManager(), spec.Service, task.Action)
 	case core.ActionStop:
@@ -2038,6 +2041,10 @@ func safeServiceName(value string) bool {
 }
 
 func atomicDeploy(destination, content string) (string, error) {
+	return atomicDeployWithDefaultMetadata(destination, content, fileMetadata{mode: 0o600})
+}
+
+func atomicDeployWithDefaultMetadata(destination, content string, defaultMetadata fileMetadata) (string, error) {
 	if destination == "" || !filepath.IsAbs(destination) {
 		return "", errors.New("configuration destination must be an absolute path")
 	}
@@ -2064,7 +2071,7 @@ func atomicDeploy(destination, content string) (string, error) {
 	}
 	defer root.Close()
 	baseName := filepath.Base(destination)
-	metadata := fileMetadata{mode: 0o600}
+	metadata := defaultMetadata
 	var backup string
 	var backupName string
 	if info, err := root.Lstat(baseName); err == nil {
