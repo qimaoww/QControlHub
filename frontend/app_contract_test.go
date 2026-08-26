@@ -871,6 +871,27 @@ func TestCoreLogsUseReadableAlignedDesktopGrid(t *testing.T) {
 	}
 }
 
+func TestCoreLogsResizeWithinTheirWorkspace(t *testing.T) {
+	stylesheet, err := os.ReadFile("app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(stylesheet)
+	for _, required := range []string{
+		`@media(pointer:fine){.app-body.page-core-logs .desktop-app{min-width:0}}`,
+		`.core-log-workspace{min-width:0;container-type:inline-size}`,
+		`.core-log-filters{display:flex;align-items:flex-end;flex-wrap:wrap}`,
+		`.core-log-stream{--core-log-grid:minmax(130px,.85fr)`,
+		`width:100%;max-width:100%;min-width:0`,
+		`@container(max-width:840px){.core-log-columns{display:none}`,
+		`.core-log-row{grid-template-columns:minmax(140px,1fr) auto auto`,
+	} {
+		if !strings.Contains(content, required) {
+			t.Errorf("core-log responsive workspace is missing %q", required)
+		}
+	}
+}
+
 func TestAgentStructureRefreshDoesNotPrecommitComparisonMarkers(t *testing.T) {
 	agents, err := os.ReadFile("modules/agents.js")
 	if err != nil {
