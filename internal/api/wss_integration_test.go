@@ -87,7 +87,7 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 	enrollmentBody, _ := json.Marshal(core.EnrollRequest{
 		Name: "integration-agent", OS: "linux", Arch: "amd64",
 		Capabilities: []core.Engine{core.EngineMihomo},
-		Features:     []string{core.AgentFeatureSelfUpgrade, core.AgentFeaturePortTraffic, core.AgentFeatureMihomoDevelopmentSource},
+		Features:     []string{core.AgentFeatureSelfUpgrade, core.AgentFeaturePortTraffic, core.AgentFeatureMihomoDevelopmentSource, core.AgentFeatureManagedConfigRead},
 		PublicKey:    authn.EncodePublicKey(publicKey),
 	})
 	request, _ := http.NewRequestWithContext(ctx, http.MethodPost, httpServer.URL+"/agent/v1/enroll", bytes.NewReader(enrollmentBody))
@@ -392,7 +392,7 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 	if err != nil || len(tasks) < 2 || tasks[0].Status != core.TaskSucceeded || tasks[0].CoreVersion != core.CoreVersionDevelopment {
 		t.Fatalf("completed task not persisted: tasks=%+v error=%v", tasks, err)
 	}
-	for _, action := range []core.Action{core.ActionDeploy, core.ActionImportExisting, core.ActionReadConfig, core.ActionStart, core.ActionStop, core.ActionRestart} {
+	for _, action := range []core.Action{core.ActionDeploy, core.ActionImportExisting, core.ActionReadConfig, core.ActionReadManagedConfig, core.ActionStart, core.ActionStop, core.ActionRestart} {
 		request := core.TaskRequest{AgentID: enrolled.AgentID, Action: action, Engine: core.EngineMihomo}
 		if action == core.ActionDeploy || action == core.ActionImportExisting {
 			request.ConfigID = config.ID
@@ -406,7 +406,7 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 			t.Fatalf("read %s task: message=%+v error=%v", action, dispatched, readErr)
 		}
 		output := "completed " + string(action)
-		if action == core.ActionReadConfig {
+		if action == core.ActionReadConfig || action == core.ActionReadManagedConfig {
 			output = config.Content
 		}
 		completed := core.WireMessage{Type: core.WireResult, Result: &core.TaskResultEnvelope{
@@ -424,7 +424,7 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 		if getErr != nil || stored.Status != core.TaskSucceeded {
 			t.Fatalf("stored %s task = %+v, %v", action, stored, getErr)
 		}
-		if action == core.ActionReadConfig {
+		if action == core.ActionReadConfig || action == core.ActionReadManagedConfig {
 			snapshot, snapshotErr := dataStore.ReadTaskConfigSnapshot(ctx, created.ID, enrolled.AgentID, core.EngineMihomo)
 			if snapshotErr != nil || snapshot != config.Content {
 				t.Fatalf("read-config snapshot = %q, %v", snapshot, snapshotErr)

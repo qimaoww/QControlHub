@@ -268,8 +268,10 @@ let archiveConfigRequest = 0;
 let liveAgentRuntimeScope;
 let liveAgentRuntimeLoaded = false;
 
-function liveSourceKey(agentId, engine) {
-  return `${agentId}|${engine}`;
+function liveSourceKey(agentId, engine, source = "managed") {
+  return source === "import"
+    ? `${agentId}|${engine}|import`
+    : `${agentId}|${engine}`;
 }
 
 function markStaleReadTask(agentId, engine) {
@@ -813,13 +815,25 @@ async function liveConfig() {
   );
   if (request !== liveConfigRequest || state.route !== "live-config") return;
   const saved = configWorkspace.config || null;
-  const sourceKey = `${agent.id}|${engine}`;
-  state.data.liveSources ||= {};
-  const source = state.data.liveSources[sourceKey] || null;
   const runtime = agent.runtime?.[engine] || {};
   const unsupportedReason = String(
     runtime.existing_config_unsupported_reason || "",
   );
+  const existingAvailable = Boolean(runtime.existing_config_available);
+  const managedAvailable = Boolean(runtime.installed);
+  const managedReadSupported = (agent.features || []).includes(
+    "managed-config-read-v1",
+  );
+  const sourceMode =
+    existingAvailable &&
+    (state.data.liveConfigSource === "import" || !managedAvailable)
+      ? "import"
+      : "managed";
+  state.data.liveConfigSource = sourceMode;
+  const importSource = sourceMode === "import";
+  const sourceKey = liveSourceKey(agent.id, engine, sourceMode);
+  state.data.liveSources ||= {};
+  const source = state.data.liveSources[sourceKey] || null;
   const current = !unsupportedReason && source?.content
     ? {
         ...(saved || {
@@ -831,21 +845,23 @@ async function liveConfig() {
       }
     : null;
   const language = engine === "mihomo" ? "YAML" : "JSON";
-  const existingAvailable = Boolean(runtime.existing_config_available);
 
   const editorState = liveConfigEditorState({
-    existingAvailable,
+    existingAvailable: importSource,
     canOperate: can("operator"),
     sourceContent: source?.content,
     formContent: current?.content,
   });
   const liveActions = unsupportedReason || !can("operator")
     ? ""
-    : existingAvailable
+    : importSource
       ? '<button class="button primary" type="submit" data-live-intent="import">手动导入并迁移</button>'
       : '<button class="button" type="submit" data-live-intent="validate">保存并校验</button><button class="button primary" type="submit" data-live-intent="deploy">保存并部署</button>';
+  const sourceSwitch = existingAvailable
+    ? `<nav class="live-config-source-switch" aria-label="配置来源">${managedAvailable ? `<button class="${sourceMode === "managed" ? "active" : ""}" type="button" data-live-source="managed"><b>现有配置</b><small>QAgent 托管</small></button>` : ""}<button class="${sourceMode === "import" ? "active" : ""}" type="button" data-live-source="import"><b>可导入配置</b><small>系统服务</small></button></nav>`
+    : "";
   shell(
-    `<article class="live-config-workspace"><header class="editor-toolbar"><h2>${esc(agent.name)} · ${esc(engineName(engine))}</h2><div class="editor-toolbar-state"><span class="engine-badge ${esc(engine)}">${esc(engineName(engine))}</span><b>${unsupportedReason ? "不可自动迁移" : saved?.version ? `v${saved.version}` : existingAvailable ? "待导入" : "未保存"}</b></div></header>${current ? `<form class="live-config-editor" id="live-config-form" data-profile-editor data-new-config="0" data-engine="${esc(engine)}"><section class="code-workspace" data-code-editor data-code-language="${language}" data-code-max-bytes="2097152"><header class="code-editor-toolbar"><div class="code-file-meta"><span class="code-file-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7 3.5h7l4 4V20.5H7zM14 3.5v4h4M10 12h5M10 16h3"/></svg></span><b>${engine === "mihomo" ? "config.yaml" : "config.json"}</b></div><div class="code-editor-meta"><span class="code-language">${language}</span><span data-code-status aria-live="polite">${existingAvailable ? "只读迁移快照" : "节点快照"}</span><span data-code-bytes>—</span><span data-code-position>行 1，列 1</span></div></header><div class="code-editor-frame"><aside class="code-gutter" aria-hidden="true" data-line-numbers>1</aside><textarea class="code-editor-input" name="content" data-code-input aria-label="${esc(engineName(engine))} 节点配置源码" spellcheck="false" required ${editorState.readOnly ? "readonly" : ""}>${esc(current.content)}</textarea></div><footer><span><i class="code-status-dot" data-code-status-dot></i><span data-code-validation aria-live="polite">${existingAvailable ? "请先原样导入；迁移完成后再编辑托管配置。" : ""}</span></span><div><button class="button code-reset" type="button" data-code-reset disabled>恢复原文</button>${can("operator") && !editorState.readOnly ? '<button class="button code-format" type="button" data-code-format>格式化配置</button>' : ""}${liveActions}</div></footer></section><aside class="live-config-inspector"><dl><div><dt>节点</dt><dd>${esc(agent.name)}</dd></div><div><dt>系统</dt><dd>${esc(agent.os)} / ${esc(agent.arch)}</dd></div><div><dt>内核</dt><dd>${esc(conciseVersion(engine, runtime.version))}</dd></div><div><dt>来源</dt><dd>${existingAvailable ? "待迁移的现有服务快照（只读）" : "QAgent 管理配置快照"}</dd></div></dl></aside><input type="hidden" name="name" value="${esc(current.name)}"><input type="hidden" name="description" value="${esc(current.description)}"><input type="hidden" name="version" value="${current.version}"></form>` : agent.status !== "online" ? '<section class="node-config-source"><h2>节点离线</h2><span class="status-label warn">无法读取</span></section>' : unsupportedReason ? `<section class="node-config-source" role="status"><h2>检测到现有服务，但不可自动迁移</h2><span class="status-label bad">${esc(unsupportedReason)}</span><p>QAgent 未执行或接管该服务。所有相关内核任务均已禁用；请按提示调整为受支持的精确布局并重启 Agent 重新发现。</p></section>` : source?.error ? `<section class="node-config-source"><h2>读取配置失败</h2><span class="status-label bad">${esc(source.error)}</span><button class="button" type="button" data-read-current>重新读取</button></section>` : '<section class="node-config-source" role="status" aria-live="polite"><h2>正在读取配置</h2><span class="status-label warn">读取中</span><form data-auto-read-current hidden></form></section>'}</article>`,
+    `<article class="live-config-workspace"><header class="editor-toolbar"><div><h2>${esc(agent.name)} · ${esc(engineName(engine))}</h2>${sourceSwitch}</div><div class="editor-toolbar-state"><span class="engine-badge ${esc(engine)}">${esc(engineName(engine))}</span><b>${unsupportedReason ? "不可自动迁移" : importSource ? "可导入" : saved?.version ? `v${saved.version}` : "未保存"}</b></div></header>${current ? `<form class="live-config-editor" id="live-config-form" data-profile-editor data-new-config="0" data-engine="${esc(engine)}"><section class="code-workspace" data-code-editor data-code-language="${language}" data-code-max-bytes="2097152"><header class="code-editor-toolbar"><div class="code-file-meta"><span class="code-file-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7 3.5h7l4 4V20.5H7zM14 3.5v4h4M10 12h5M10 16h3"/></svg></span><b>${engine === "mihomo" ? "config.yaml" : "config.json"}</b></div><div class="code-editor-meta"><span class="code-language">${language}</span><span data-code-status aria-live="polite">${importSource ? "只读导入快照" : "现有配置"}</span><span data-code-bytes>—</span><span data-code-position>行 1，列 1</span></div></header><div class="code-editor-frame"><aside class="code-gutter" aria-hidden="true" data-line-numbers>1</aside><textarea class="code-editor-input" name="content" data-code-input aria-label="${esc(engineName(engine))} 节点配置源码" spellcheck="false" required ${editorState.readOnly ? "readonly" : ""}>${esc(current.content)}</textarea></div><footer><span><i class="code-status-dot" data-code-status-dot></i><span data-code-validation aria-live="polite"></span></span><div><button class="button code-reset" type="button" data-code-reset disabled>恢复原文</button>${can("operator") && !editorState.readOnly ? '<button class="button code-format" type="button" data-code-format>格式化配置</button>' : ""}${liveActions}</div></footer></section><aside class="live-config-inspector"><dl><div><dt>节点</dt><dd>${esc(agent.name)}</dd></div><div><dt>系统</dt><dd>${esc(agent.os)} / ${esc(agent.arch)}</dd></div><div><dt>内核</dt><dd>${esc(conciseVersion(engine, runtime.version))}</dd></div><div><dt>来源</dt><dd>${importSource ? "系统服务配置（只读）" : "QAgent 现有配置"}</dd></div></dl></aside><input type="hidden" name="name" value="${esc(current.name)}"><input type="hidden" name="description" value="${esc(current.description)}"><input type="hidden" name="version" value="${current.version}"></form>` : agent.status !== "online" ? '<section class="node-config-source"><h2>节点离线</h2><span class="status-label warn">无法读取</span></section>' : unsupportedReason ? `<section class="node-config-source" role="status"><h2>检测到现有服务，但不可自动迁移</h2><span class="status-label bad">${esc(unsupportedReason)}</span><p>QAgent 未执行或接管该服务。所有相关内核任务均已禁用；请按提示调整为受支持的精确布局并重启 Agent 重新发现。</p></section>` : !importSource && !managedReadSupported ? '<section class="node-config-source"><h2>需要升级 Agent</h2><span class="status-label warn">暂不可读取现有配置</span><p>升级后即可在不影响可导入配置的情况下独立读取 QAgent 托管配置。</p></section>' : source?.error ? `<section class="node-config-source"><h2>读取配置失败</h2><span class="status-label bad">${esc(source.error)}</span><button class="button" type="button" data-read-current>重新读取</button></section>` : `<section class="node-config-source" role="status" aria-live="polite"><h2>正在读取${importSource ? "可导入配置" : "现有配置"}</h2><span class="status-label warn">读取中</span><form data-auto-read-current hidden></form></section>`}</article>`,
     "手动配置",
     { viewKey: `live-config-${agent.id}-${engine}` },
   );
@@ -856,6 +872,7 @@ async function liveConfig() {
         event.preventDefault();
         state.data.liveAgent = link.dataset.liveAgent;
         state.data.liveEngine = "";
+        state.data.liveConfigSource = "";
         liveConfig();
       }),
   );
@@ -864,12 +881,21 @@ async function liveConfig() {
       (link.onclick = (event) => {
         event.preventDefault();
         state.data.liveEngine = link.dataset.liveEngine;
+        state.data.liveConfigSource = "";
+        liveConfig();
+      }),
+  );
+  document.querySelectorAll("[data-live-source]").forEach(
+    (button) =>
+      (button.onclick = () => {
+        if (button.dataset.liveSource === sourceMode) return;
+        state.data.liveConfigSource = button.dataset.liveSource;
         liveConfig();
       }),
   );
   bindEvent(document.querySelector("[data-read-current]"), "click", async () => {
       delete state.data.liveSources[sourceKey];
-      await readCurrentConfig(agent, engine, sourceKey);
+      await readCurrentConfig(agent, engine, sourceKey, sourceMode);
   });
   bindCodeEditors();
   bindEvent(document.querySelector("#live-config-form"), "submit", async (event) => {
@@ -901,7 +927,7 @@ async function liveConfig() {
           intent,
           form,
           source,
-          existingAvailable,
+          existingAvailable: importSource,
           savedConfig: saved,
           onDeployTask: (taskId) => {
             recordPendingDeploy(taskId, agent.id, engine);
@@ -918,19 +944,20 @@ async function liveConfig() {
         await liveConfig();
       } catch (error) {
         notify(error.message, "error");
-        if (existingAvailable) await liveConfig();
+        if (importSource) await liveConfig();
       }
   });
   if (
     !current &&
     !unsupportedReason &&
     agent.status === "online" &&
+    (importSource || managedReadSupported) &&
     !source?.error
   )
-    void readCurrentConfig(agent, engine, sourceKey);
+    void readCurrentConfig(agent, engine, sourceKey, sourceMode);
 }
 
-async function readCurrentConfig(agent, engine, sourceKey) {
+async function readCurrentConfig(agent, engine, sourceKey, sourceMode = "managed") {
   if (state.data.liveSources?.[sourceKey]?.reading) return;
   const request = ++liveReadRequest;
   const isCurrent = () =>
@@ -965,7 +992,7 @@ async function readCurrentConfig(agent, engine, sourceKey) {
       body: JSON.stringify({
         agent_id: agent.id,
         engine,
-        action: "read-config",
+        action: sourceMode === "import" ? "read-config" : "read-managed-config",
       }),
     });
     if (!isCurrent()) return discardReading();

@@ -539,7 +539,7 @@ func (s *Server) getTaskConfigSnapshot(w http.ResponseWriter, request *http.Requ
 		writeStoreError(w, err)
 		return
 	}
-	if task.Action != core.ActionReadConfig || task.Status != core.TaskSucceeded {
+	if (task.Action != core.ActionReadConfig && task.Action != core.ActionReadManagedConfig) || task.Status != core.TaskSucceeded {
 		writeStoreError(w, store.ErrNotFound)
 		return
 	}

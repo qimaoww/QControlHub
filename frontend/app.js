@@ -27,6 +27,7 @@ const actions = [
   "status",
   "install",
   "read-config",
+  "read-managed-config",
   "import-existing",
   "upgrade-agent",
 ];
@@ -95,7 +96,8 @@ const actionName = (value) =>
     restart: "重启服务",
     status: "查询状态",
     install: "安装或升级内核",
-    "read-config": "读取当前配置",
+    "read-config": "读取可导入配置",
+    "read-managed-config": "读取现有配置",
     "import-existing": "导入并迁移现有服务",
     "upgrade-agent": "升级 Agent",
   })[value] || label(value);
@@ -634,7 +636,7 @@ function contextMarkup(title) {
     const capabilities = (selected?.capabilities || []).filter(
       (engine) => liveConfigEngineEligible(selected.runtime?.[engine]),
     );
-    return `<div class="context-section-label"><span>选择节点</span><b>${items.length}</b></div><nav class="context-list" aria-label="配置节点">${items.map((agent) => { const installed = installedEngineCount(agent); return `<a class="${agent.id === state.data.liveAgent ? "active" : ""}" href="#live-config" data-live-agent="${esc(agent.id)}"><i class="status-dot ${agent.status === "online" ? "ok" : ""}"></i><span><strong>${esc(agent.name)}</strong><small>${installed ? `${installed} 个已安装内核` : "尚未安装内核"}</small></span><em>${agent.status === "online" ? "在线" : "离线"}</em></a>`; }).join("") || "<p>还没有节点</p>"}</nav>${selected ? `<div class="context-section-label"><span>选择内核</span><b>${capabilities.length}</b></div><nav class="context-list config-context-list">${capabilities.map((engine) => `<a class="${engine === state.data.liveEngine ? "active" : ""}" href="#live-config" data-live-engine="${esc(engine)}"><span class="context-engine ${esc(engine)}">${esc(engineName(engine))}</span><span><strong>${esc(engineName(engine))}</strong><small>节点实际文件</small></span></a>`).join("")}</nav>` : ""}<a class="context-primary" href="#archive-config">配置档案 →</a>`;
+    return `<div class="context-section-label"><span>选择节点</span><b>${items.length}</b></div><nav class="context-list" aria-label="配置节点">${items.map((agent) => { const installed = installedEngineCount(agent); return `<a class="${agent.id === state.data.liveAgent ? "active" : ""}" href="#live-config" data-live-agent="${esc(agent.id)}"><i class="status-dot ${agent.status === "online" ? "ok" : ""}"></i><span><strong>${esc(agent.name)}</strong><small>${installed ? `${installed} 个已安装内核` : "尚未安装内核"}</small></span><em>${agent.status === "online" ? "在线" : "离线"}</em></a>`; }).join("") || "<p>还没有节点</p>"}</nav>${selected ? `<div class="context-section-label"><span>选择内核</span><b>${capabilities.length}</b></div><nav class="context-list config-context-list">${capabilities.map((engine) => { const runtime = selected.runtime?.[engine] || {}; const sourceLabel = runtime.installed && runtime.existing_config_available ? "现有配置 · 可导入" : runtime.existing_config_available ? "可导入配置" : runtime.installed ? "现有配置" : "不可导入"; return `<a class="${engine === state.data.liveEngine ? "active" : ""}" href="#live-config" data-live-engine="${esc(engine)}"><span class="context-engine ${esc(engine)}">${esc(engineName(engine))}</span><span><strong>${esc(engineName(engine))}</strong><small>${sourceLabel}</small></span></a>`; }).join("")}</nav>` : ""}<a class="context-primary" href="#archive-config">配置档案 →</a>`;
   }
   if (state.route === "archive-config") {
     const items = state.data.configs || [];

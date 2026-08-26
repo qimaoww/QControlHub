@@ -517,6 +517,7 @@ func (c *Client) advertisedFeatures() []string {
 		core.AgentFeatureCoreLogStatus,
 		core.AgentFeatureMihomoDevelopmentSource,
 		core.AgentFeatureManagedPublicIPProbe,
+		core.AgentFeatureManagedConfigRead,
 	}
 	if c.publicIP.Enabled() {
 		features = append(features, core.AgentFeaturePublicIPProbe)
@@ -625,7 +626,7 @@ func (c *Client) resultForTask(ctx context.Context, task core.Task) core.TaskRes
 	} else {
 		slog.Info("task completed", "task_id", task.ID)
 	}
-	if task.Action != core.ActionReadConfig {
+	if task.Action != core.ActionReadConfig && task.Action != core.ActionReadManagedConfig {
 		if err := c.rememberTaskResult(task.ID, result); err != nil {
 			slog.Warn("persist completed task result", "task_id", task.ID, "error", err)
 		}

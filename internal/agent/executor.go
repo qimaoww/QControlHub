@@ -565,7 +565,14 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (string, erro
 	defer cancel()
 
 	switch task.Action {
+	case core.ActionReadManagedConfig:
+		// The manual configuration page can inspect the QAgent-managed file
+		// independently while an external service remains available to import.
+		return e.readCurrentConfig(ctx, task.Engine, spec)
 	case core.ActionReadConfig:
+		// Reading an available external service remains the explicit preview step
+		// for import. All other actions below continue to target the independent
+		// QAgent-managed service so the two installations can coexist.
 		if hasExisting {
 			return e.readExistingConfig(ctx, task.Engine, spec, existing)
 		}
@@ -586,14 +593,8 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (string, erro
 		}
 		return e.importExistingConfig(ctx, task.Engine, spec, existing, task.ConfigContent)
 	case core.ActionValidate:
-		if hasExisting {
-			return "", errors.New("import the existing configuration before validating managed changes")
-		}
 		return e.validate(ctx, task.Engine, spec, task.ConfigContent)
 	case core.ActionDeploy:
-		if hasExisting {
-			return "", errors.New("import the existing configuration before deploying managed changes")
-		}
 		validation, err := e.validate(ctx, task.Engine, spec, task.ConfigContent)
 		if err != nil {
 			return validation, err
@@ -634,27 +635,15 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (string, erro
 		}
 		return output, nil
 	case core.ActionStart, core.ActionRestart:
-		if hasExisting {
-			return "", errors.New("import the existing configuration before starting the QAgent service")
-		}
 		if err := ensureManagedCoreServiceCapabilities(ctx, task.Engine, spec, e.serviceManager()); err != nil {
 			return "", err
 		}
 		return serviceCommandAndVerifyWithManager(ctx, e.serviceManager(), spec.Service, task.Action)
 	case core.ActionStop:
-		if hasExisting {
-			return "", errors.New("existing service migration is pending; retry the import-existing task to coordinate the protected service transition")
-		}
 		return serviceCommandAndVerifyWithManager(ctx, e.serviceManager(), spec.Service, task.Action)
 	case core.ActionStatus:
-		if hasExisting {
-			return serviceStatusWithManager(ctx, e.serviceManager(), existing.Service)
-		}
 		return serviceStatusWithManager(ctx, e.serviceManager(), spec.Service)
 	case core.ActionInstall:
-		if hasExisting {
-			return "", errors.New("import the existing configuration before installing a managed core")
-		}
 		version, err := core.NormalizeCoreVersionSelector(task.CoreVersion)
 		if err != nil {
 			return "", err
@@ -1628,8 +1617,7 @@ func (e *Executor) Runtime(ctx context.Context) map[core.Engine]core.RuntimeStat
 			result[engine] = state
 			continue
 		}
-		if existing, ok := existingSpecs[engine]; ok {
-			spec = existing
+		if _, ok := existingSpecs[engine]; ok {
 			state.ExistingConfigAvailable = true
 		}
 		if path, err := exec.LookPath(spec.Binary); err == nil {

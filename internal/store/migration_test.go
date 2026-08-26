@@ -96,6 +96,9 @@ func TestOpenMigratesAppliedV19TaskActionConstraint(t *testing.T) {
 	if !strings.Contains(migratedConstraint, string(core.ActionImportExisting)) {
 		t.Fatalf("migrated task constraint does not accept import-existing: %s", migratedConstraint)
 	}
+	if !strings.Contains(migratedConstraint, string(core.ActionReadManagedConfig)) {
+		t.Fatalf("migrated task constraint does not accept read-managed-config: %s", migratedConstraint)
+	}
 
 	agent, enrollmentID := enrollTaskTestAgent(t, ctx, dataStore)
 	defer cleanupTaskTestAgent(dataStore, agent.ID, enrollmentID)
@@ -119,6 +122,12 @@ func TestOpenMigratesAppliedV19TaskActionConstraint(t *testing.T) {
 	}
 	if task.ID == "" || task.AgentID != agent.ID || task.ConfigID != config.ID || task.Action != core.ActionImportExisting {
 		t.Fatalf("import-existing task after v19 migration = %+v", task)
+	}
+	managedRead, err := dataStore.CreateTask(ctx, core.TaskRequest{
+		AgentID: agent.ID, Action: core.ActionReadManagedConfig, Engine: core.EngineMihomo,
+	})
+	if err != nil || managedRead.Action != core.ActionReadManagedConfig {
+		t.Fatalf("create read-managed-config task after v19 migration = %+v, %v", managedRead, err)
 	}
 }
 

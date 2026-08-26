@@ -50,6 +50,11 @@ const AgentFeaturePublicIPProbe = "public-ip-probe-v1"
 // first complete heartbeat advertises this feature.
 const AgentFeatureManagedPublicIPProbe = "managed-public-ip-probe-v1"
 
+// AgentFeatureManagedConfigRead identifies Agents that can independently read
+// the QAgent-managed configuration while an external service is also exposed
+// as an optional import source.
+const AgentFeatureManagedConfigRead = "managed-config-read-v1"
+
 const (
 	PublicIPProbeSourceAgent         = "agent-config"
 	PublicIPProbeSourceControlPlane  = "control-plane-config"
@@ -212,21 +217,22 @@ func ParseEngine(value string) (Engine, error) {
 type Action string
 
 const (
-	ActionValidate       Action = "validate"
-	ActionDeploy         Action = "deploy"
-	ActionStart          Action = "start"
-	ActionStop           Action = "stop"
-	ActionRestart        Action = "restart"
-	ActionStatus         Action = "status"
-	ActionInstall        Action = "install"
-	ActionReadConfig     Action = "read-config"
-	ActionImportExisting Action = "import-existing"
-	ActionUpgradeAgent   Action = "upgrade-agent"
+	ActionValidate          Action = "validate"
+	ActionDeploy            Action = "deploy"
+	ActionStart             Action = "start"
+	ActionStop              Action = "stop"
+	ActionRestart           Action = "restart"
+	ActionStatus            Action = "status"
+	ActionInstall           Action = "install"
+	ActionReadConfig        Action = "read-config"
+	ActionReadManagedConfig Action = "read-managed-config"
+	ActionImportExisting    Action = "import-existing"
+	ActionUpgradeAgent      Action = "upgrade-agent"
 )
 
 func (a Action) Valid() bool {
 	switch a {
-	case ActionValidate, ActionDeploy, ActionStart, ActionStop, ActionRestart, ActionStatus, ActionInstall, ActionReadConfig, ActionImportExisting, ActionUpgradeAgent:
+	case ActionValidate, ActionDeploy, ActionStart, ActionStop, ActionRestart, ActionStatus, ActionInstall, ActionReadConfig, ActionReadManagedConfig, ActionImportExisting, ActionUpgradeAgent:
 		return true
 	default:
 		return false

@@ -668,8 +668,12 @@ func TestManualConfigRequiresExplicitImportOfNodeSnapshot(t *testing.T) {
 		`action: "import-existing"`,
 		`existing_config_unsupported_reason`,
 		`检测到现有服务，但不可自动迁移`,
-		`只读迁移快照`,
-		`请先原样导入；迁移完成后再编辑托管配置`,
+		`只读导入快照`,
+		`data-live-source="managed"`,
+		`data-live-source="import"`,
+		`QAgent 现有配置`,
+		`系统服务配置（只读）`,
+		`read-managed-config`,
 		`submitLiveConfigChange`,
 		`!unsupportedReason`,
 		`esc(unsupportedReason)`,
@@ -684,7 +688,7 @@ func TestManualConfigRequiresExplicitImportOfNodeSnapshot(t *testing.T) {
 	}
 	for _, required := range []string{
 		`data-existing-pending`, `data-existing-unsupported`, `data-manual-import`,
-		`现有服务待迁移`, `检测到但不可迁移`, `查看不可迁移原因`,
+		`导入现有服务`, `检测到但不可迁移`, `查看现有服务不可导入原因`,
 		`existing_config_unsupported_reason`, `esc(existingUnsupportedReason)`,
 	} {
 		if !strings.Contains(string(agents), required) {

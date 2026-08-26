@@ -44,7 +44,7 @@ type storeExecutor interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }
 
-const currentSchemaVersion = 22
+const currentSchemaVersion = 23
 
 func Open(ctx context.Context, databaseURL string, allowInsecureRemote bool) (*Store, error) {
 	return OpenWithConfigKey(ctx, databaseURL, allowInsecureRemote, "")
@@ -1161,6 +1161,9 @@ func (s *Store) CreateTask(ctx context.Context, request core.TaskRequest) (core.
 	if request.Action == core.ActionUpgradeAgent && !containsFeature(features, core.AgentFeatureSelfUpgrade) {
 		return core.Task{}, fmt.Errorf("%w: this Agent does not support remote upgrades; run the current one-click installation once", ErrConflict)
 	}
+	if request.Action == core.ActionReadManagedConfig && !containsFeature(features, core.AgentFeatureManagedConfigRead) {
+		return core.Task{}, fmt.Errorf("%w: this Agent cannot read the managed configuration independently; upgrade the Agent through the panel first", ErrConflict)
+	}
 	if request.Action != core.ActionUpgradeAgent && !containsEngine(capabilities, request.Engine) {
 		return core.Task{}, fmt.Errorf("%w: agent does not advertise the requested engine", ErrInvalid)
 	}
@@ -1517,7 +1520,7 @@ func (s *Store) CompleteTask(ctx context.Context, agentID, taskID string, result
 	storedContent := ""
 	storedOutput := truncate(result.Output, 64<<10)
 	storedError := truncate(result.Error, 8<<10)
-	if action == core.ActionReadConfig && result.Success {
+	if (action == core.ActionReadConfig || action == core.ActionReadManagedConfig) && result.Success {
 		content := result.Output
 		if !utf8.ValidString(content) {
 			status = core.TaskFailed
@@ -1548,11 +1551,11 @@ func (s *Store) CompleteTask(ctx context.Context, agentID, taskID string, result
 	if err != nil {
 		return err
 	}
-	if action == core.ActionReadConfig && status == core.TaskSucceeded {
+	if (action == core.ActionReadConfig || action == core.ActionReadManagedConfig) && status == core.TaskSucceeded {
 		if _, err := tx.Exec(ctx, `
 			UPDATE tasks SET config_content=NULL
 			WHERE agent_id=$1 AND engine=$2 AND action=$3 AND id<>$4 AND config_content IS NOT NULL`,
-			agentID, engine, core.ActionReadConfig, taskID); err != nil {
+			agentID, engine, action, taskID); err != nil {
 			return err
 		}
 	}
@@ -1563,8 +1566,8 @@ func (s *Store) ReadTaskConfigSnapshot(ctx context.Context, taskID, agentID stri
 	var content string
 	err := s.pool.QueryRow(ctx, `
 		SELECT COALESCE(config_content,'') FROM tasks
-		WHERE id=$1 AND agent_id=$2 AND engine=$3 AND action=$4 AND status='succeeded'`,
-		taskID, agentID, engine, core.ActionReadConfig).Scan(&content)
+		WHERE id=$1 AND agent_id=$2 AND engine=$3 AND action IN ($4,$5) AND status='succeeded'`,
+		taskID, agentID, engine, core.ActionReadConfig, core.ActionReadManagedConfig).Scan(&content)
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && content == "") {
 		return "", ErrNotFound
 	}
@@ -1801,7 +1804,7 @@ ALTER TABLE configs ADD CONSTRAINT configs_content_check CHECK (octet_length(con
 CREATE TABLE IF NOT EXISTS tasks (
     id text PRIMARY KEY,
     agent_id text NOT NULL REFERENCES agents(id),
-    action varchar(20) NOT NULL CHECK (action IN ('validate','deploy','import-existing','read-config','start','stop','restart','status','install','upgrade-agent')),
+    action varchar(20) NOT NULL CHECK (action IN ('validate','deploy','import-existing','read-config','read-managed-config','start','stop','restart','status','install','upgrade-agent')),
 	    engine varchar(20) NOT NULL CHECK (engine IN ('mihomo','xray','sing-box','ss-rust') OR (action='upgrade-agent' AND engine='')),
     config_id text REFERENCES configs(id),
     config_version integer,
@@ -1823,7 +1826,7 @@ ALTER TABLE tasks ADD COLUMN IF NOT EXISTS lease_id text;
 	DROP INDEX IF EXISTS tasks_latest_deployment_idx;
 	ALTER TABLE tasks DROP COLUMN IF EXISTS simulated;
 	ALTER TABLE tasks DROP CONSTRAINT IF EXISTS tasks_action_check;
-	ALTER TABLE tasks ADD CONSTRAINT tasks_action_check CHECK (action IN ('validate','deploy','import-existing','read-config','start','stop','restart','status','install','upgrade-agent'));
+	ALTER TABLE tasks ADD CONSTRAINT tasks_action_check CHECK (action IN ('validate','deploy','import-existing','read-config','read-managed-config','start','stop','restart','status','install','upgrade-agent'));
 	ALTER TABLE tasks DROP CONSTRAINT IF EXISTS tasks_status_check;
 	ALTER TABLE tasks ADD CONSTRAINT tasks_status_check CHECK (status IN ('pending','running','succeeded','failed','canceled'));
 	ALTER TABLE configs DROP CONSTRAINT IF EXISTS configs_engine_check;
