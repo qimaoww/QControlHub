@@ -649,6 +649,38 @@ rm "$etc_layout_binary"
 mv "$etc_layout_binary.real" "$etc_layout_binary"
 
 if [ "$(id -u)" -eq 0 ]; then
+  command -v getent >/dev/null 2>&1 || {
+    printf '%s\n' 'getent is required to verify installer orphan-owner compatibility' >&2
+    exit 1
+  }
+  orphan_uid=60000
+  while [ "$orphan_uid" -le 60100 ]; do
+    if file_owner_is_inactive_orphan "$orphan_uid"; then
+      break
+    fi
+    orphan_uid=$((orphan_uid + 1))
+  done
+  [ "$orphan_uid" -le 60100 ] || {
+    printf '%s\n' 'could not find an inactive unassigned UID for the installer compatibility test' >&2
+    exit 1
+  }
+  installer_orphan_owner_binary_candidates="$installer_orphan_owner_binary_candidates $etc_layout_binary"
+  chown "$orphan_uid:$orphan_uid" "$etc_layout_binary"
+  mapped_engines=""
+  mapped_singbox_binary=""
+  mapped_singbox_config=""
+  mapped_singbox_config_directory=""
+  mapped_singbox_service_binary=""
+  mapped_singbox_service=""
+  discover_existing_singbox || {
+    printf '%s\n' 'inactive orphan-owned installer executable was rejected' >&2
+    exit 1
+  }
+  [ "$mapped_singbox_binary" = "$etc_layout_binary" ] || {
+    printf '%s\n' 'inactive orphan-owned installer executable was not mapped exactly' >&2
+    exit 1
+  }
+
   chown 65534:65534 "$etc_layout_binary"
   mapped_engines=""
   mapped_singbox_binary=""

@@ -1163,7 +1163,7 @@ func copyExistingCoreBinary(source, destination string) (string, error) {
 	if source == destination {
 		return "", errors.New("existing and managed core binary paths must differ")
 	}
-	if err := validatePrivilegedExecutable(source); err != nil {
+	if err := validateExistingCoreExecutable(source); err != nil {
 		return "", err
 	}
 	if err := validateCoreInstallDestination(destination); err != nil {

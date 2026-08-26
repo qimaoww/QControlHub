@@ -54,6 +54,11 @@ xray_config_candidates="/usr/local/etc/xray/config.json /etc/xray/config.json"
 singbox_binary_candidates="/usr/local/bin/sing-box /usr/bin/sing-box /etc/sing-box/bin/sing-box /etc/v2ray-agent/sing-box/sing-box"
 singbox_direct_binary_candidates="/etc/sing-box/bin/sing-box /etc/v2ray-agent/sing-box/sing-box"
 singbox_config_candidates="/etc/sing-box/config.json /usr/local/etc/sing-box/config.json /etc/v2ray-agent/sing-box/conf/config.json"
+# Some supported installer archives preserve a numeric file owner that has no
+# account on the target host. This fixed list is intentionally not overridable
+# through the environment: only known real-core destinations may use the
+# inactive-orphan owner exception below.
+installer_orphan_owner_binary_candidates="/etc/xray/bin/xray /etc/v2ray-agent/xray/xray /etc/sing-box/bin/sing-box /etc/v2ray-agent/sing-box/sing-box"
 
 append_csv() {
   current=$1
@@ -183,6 +188,70 @@ protected_regular_file() {
   [ $((0$protected_file_permissions & 022)) -eq 0 ]
 }
 
+file_owner_is_inactive_orphan() {
+  orphan_owner_uid=$1
+  case "$orphan_owner_uid" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$orphan_owner_uid" -gt 0 ] || return 1
+
+  # Use only the fixed, protected system helper to consult the host's complete
+  # NSS view. Missing helpers and lookup errors fail closed; 2 means no account.
+  orphan_getent_path=/usr/bin/getent
+  protected_directory_chain "$(dirname -- "$orphan_getent_path")" || return 1
+  if [ -L "$orphan_getent_path" ]; then
+    orphan_getent_real=$(readlink -f -- "$orphan_getent_path" 2>/dev/null) || return 1
+    case "$orphan_getent_real" in /*) ;; *) return 1 ;; esac
+    protected_directory_chain "$(dirname -- "$orphan_getent_real")" || return 1
+    protected_regular_file "$orphan_getent_real" true || return 1
+    [ "$(head -c 2 "$orphan_getent_real" 2>/dev/null)" != '#!' ] || return 1
+  else
+    protected_regular_file "$orphan_getent_path" true || return 1
+    [ "$(head -c 2 "$orphan_getent_path" 2>/dev/null)" != '#!' ] || return 1
+  fi
+  "$orphan_getent_path" passwd "$orphan_owner_uid" >/dev/null 2>&1
+  orphan_getent_status=$?
+  [ "$orphan_getent_status" -eq 2 ] || return 1
+
+  orphan_status_count=0
+  for orphan_status_path in "$proc_root"/[0-9]*/task/[0-9]*/status; do
+    [ -e "$orphan_status_path" ] || continue
+    orphan_status_count=$((orphan_status_count + 1))
+    orphan_status_uids=$(awk '
+      $1 == "Uid:" {
+        seen = 1
+        if (NF != 5) exit 2
+        print $2, $3, $4, $5
+      }
+      END { if (!seen) exit 2 }
+    ' "$orphan_status_path" 2>/dev/null) || {
+      # A process may disappear between the glob and the read. Every other
+      # unreadable or malformed status file fails closed.
+      [ ! -e "$orphan_status_path" ] || return 1
+      continue
+    }
+    case " $orphan_status_uids " in
+      *" $orphan_owner_uid "*) return 1 ;;
+    esac
+  done
+  [ "$orphan_status_count" -gt 0 ]
+}
+
+protected_existing_core_file() {
+  existing_core_file_path=$1
+  if protected_regular_file "$existing_core_file_path" true; then
+    return 0
+  fi
+  case " $installer_orphan_owner_binary_candidates " in
+    *" $existing_core_file_path "*) ;;
+    *) return 1 ;;
+  esac
+  [ -f "$existing_core_file_path" ] && [ ! -L "$existing_core_file_path" ] && [ -x "$existing_core_file_path" ] || return 1
+  existing_core_file_permissions=$(stat -c '%a' "$existing_core_file_path" 2>/dev/null) || return 1
+  [ $((0$existing_core_file_permissions & 022)) -eq 0 ] || return 1
+  protected_directory_chain "$(dirname -- "$existing_core_file_path")" || return 1
+  existing_core_file_uid=$(stat -c '%u' "$existing_core_file_path" 2>/dev/null) || return 1
+  file_owner_is_inactive_orphan "$existing_core_file_uid"
+}
+
 protected_directory_chain() {
   validate_directory_chain "$1" false
 }
@@ -256,7 +325,7 @@ resolve_fixed_singbox_binary() {
   service_binary=$1
   if [ ! -L "$service_binary" ]; then
     protected_directory_chain "$(dirname -- "$service_binary")" || return 1
-    protected_regular_file "$service_binary" true || return 1
+    protected_existing_core_file "$service_binary" || return 1
     [ "$(head -c 2 "$service_binary" 2>/dev/null)" != '#!' ] || return 1
     printf '%s\n' "$service_binary"
     return 0
@@ -285,7 +354,7 @@ resolve_fixed_singbox_binary() {
   case "$real_binary" in /*) ;; *) return 1 ;; esac
   case "$real_binary" in *[[:space:]]*) return 1 ;; esac
   protected_directory_chain "$(dirname -- "$real_binary")" || return 1
-  protected_regular_file "$real_binary" true || return 1
+  protected_existing_core_file "$real_binary" || return 1
   [ "$(head -c 2 "$real_binary" 2>/dev/null)" != '#!' ] || return 1
   printf '%s\n' "$real_binary"
 }
@@ -707,7 +776,7 @@ discover_existing_xray() {
   found_service=""
   for service in "$active_service_candidate"; do
     for binary in $xray_binary_candidates; do
-      protected_regular_file "$binary" true || continue
+      protected_existing_core_file "$binary" || continue
       # The empty candidate is the directory-authoritative form: an installer
       # that runs Xray with only a confdir ships no main file to whitelist.
       for config in "" $xray_config_candidates; do

@@ -279,15 +279,7 @@ func TestExistingSingBoxSnapshotMergesExactConfigDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	binary := filepath.Join(root, "sing-box")
-	script := `#!/bin/sh
-set -eu
-[ "$1" = check ] && [ "$2" = -c ]
-if [ "$#" -eq 5 ]; then
-  [ "$4" = -C ] && [ -d "$5" ]
-fi
-grep -q '"inbounds"' "$3"
-`
-	if err := os.WriteFile(binary, []byte(script), 0o700); err != nil {
+	if err := os.WriteFile(binary, existingDiscoveryCoreHelper, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	existing := EngineSpec{Binary: binary, ConfigPath: primary, ConfigDirectory: configDirectory, Service: "sing-box.service"}
@@ -414,17 +406,12 @@ func TestReadExistingXrayConfigurationUsesSourceDump(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(configDirectory, "20-log.json"), []byte(`{"log":{"loglevel":"debug"}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	dumped := `{"log":{"loglevel":"error"},"inbounds":[],"outbounds":[]}`
+	dumped := `{"log":{"loglevel":"error","access":"/var/log/xray/access.log","error":"/var/log/xray/error.log"},"inbounds":[],"outbounds":[]}`
 	binary := filepath.Join(root, "xray")
-	script := fmt.Sprintf(`#!/bin/sh
-set -eu
-case "$*" in
-  "run -dump -config %s -confdir %s") printf '%%s\n' %q ;;
-  "run -test -config "*) exit 0 ;;
-  *) exit 64 ;;
-esac
-`, primary, configDirectory, dumped)
-	if err := os.WriteFile(binary, []byte(script), 0o700); err != nil {
+	if err := os.WriteFile(binary, existingDiscoveryCoreHelper, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "xray-dump.json"), []byte(dumped), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	managed := EngineSpec{ConfigPath: filepath.Join(root, "managed", "config.json")}
@@ -433,8 +420,13 @@ esac
 	if err != nil {
 		t.Fatalf("readExistingConfig() error = %v", err)
 	}
-	if strings.TrimSpace(content) != dumped {
-		t.Fatalf("snapshot = %s, want source-core dump %s", content, dumped)
+	var normalized map[string]any
+	if err := json.Unmarshal([]byte(content), &normalized); err != nil {
+		t.Fatal(err)
+	}
+	logging := normalized["log"].(map[string]any)
+	if logging["access"] != "" || logging["error"] != "" || logging["loglevel"] != "error" {
+		t.Fatalf("normalized Xray log policy = %+v", logging)
 	}
 }
 

@@ -157,13 +157,17 @@ TLS 入站默认引用 `/etc/qcontrolhub/tls/server.crt` 与 `/etc/qcontrolhub/t
 
 这些候选覆盖官方包布局，以及 233boy/sing-box（`/etc/sing-box/bin/sing-box run -c /etc/sing-box/config.json -C /etc/sing-box/conf`）、233boy/Xray（`/etc/xray/bin/xray run -config /etc/xray/config.json -confdir /etc/xray/conf`）和 mack-a/v2ray-agent（Xray 为 `run -confdir /etc/v2ray-agent/xray/conf`，sing-box 为 `run -c /etc/v2ray-agent/sing-box/conf/config.json`）这三套一键脚本的默认安装形态。
 
-只有同时满足以下条件才会映射：通用服务当前为 active；systemd 只有一个明确的 `ExecStart`，OpenRC 则要求 `/proc` 中恰好一个进程匹配真实二进制和完整参数；Xray 使用 `run -config|-c <file>`、`run -config|-c <file> -confdir <directory>` 或 `run -confdir <directory>`，sing-box 使用 `run -c <file>`、`run --config <file>`，或固定顺序 `run -c <file> -C <directory>`；二进制、配置源及父链均为 root 所有、不是符号链接且不可被组/其他用户写入；全部配置源与合并快照均不超过 2 MiB；QAgent 对完整合并快照执行结构和真实内核校验；对应的 `qagent-*` 专用服务不存在或处于 inactive/failed。未知附加参数、相似路径前缀、多个 `-c`/`-C`/`-confdir`、其他参数顺序、多个启动命令和活动的专用服务都会安全回退。
+只有同时满足以下条件才会映射：通用服务当前为 active；systemd 只有一个明确的 `ExecStart`，OpenRC 则要求 `/proc` 中恰好一个进程匹配真实二进制和完整参数；Xray 使用 `run -config|-c <file>`、`run -config|-c <file> -confdir <directory>` 或 `run -confdir <directory>`，sing-box 使用 `run -c <file>`、`run --config <file>`，或固定顺序 `run -c <file> -C <directory>`；配置源及全部父链均为 root 所有、不是符号链接且不可被组/其他用户写入；全部配置源与合并快照均不超过 2 MiB；QAgent 对完整合并快照执行结构和真实内核校验；对应的 `qagent-*` 专用服务不存在或处于 inactive/failed。未知附加参数、相似路径前缀、多个 `-c`/`-C`/`-confdir`、其他参数顺序、多个启动命令和活动的专用服务都会安全回退。
 
 `run -confdir <directory>` 是“目录权威”形态：该布局没有主配置文件，目录本身就是唯一配置来源，此时映射的配置路径为空而配置目录必须存在。Xray 的 confdir 具有按类型和 tag 覆盖的专用语义，QAgent 不用通用 JSON 规则猜测其结果，而是保护并跟踪 Xray 会读取的 `.json`、`.jsonc`、`.toml`、`.yaml`、`.yml` 源，再调用受保护的源 Xray 二进制以 `run -dump` 生成规范化快照；不支持安全导出、导出超限或导出结果无效时会 fail closed。
 
+现有 Xray 配置若把 `log.access` 或 `log.error` 指向文件，源服务在迁移前仍按原路径运行，QAgent 不修改这些文件。展示和导入的单文件快照会把非空且不等于精确小写 `none` 的两个目标规范化为空字符串，使迁移后的 Xray 把访问与错误日志写入托管服务的 stdout/stderr，并进入 systemd journal 或 OpenRC 日志采集链；`loglevel`、`dnsLog`、`maskAddress` 及精确的 `none` 均保持不变。这也避免 Agent 在 `ProtectSystem=strict` 沙箱内执行 `Xray run -test` 时为只读的原日志路径产生写入副作用。
+
 sing-box 的 `-C` 表示配置目录，而不是工作目录。QAgent 按 sing-box 的路径排序、对象递归合并、数组追加和“较早标量优先”规则读取主文件及目录中全部 `.json`，拒绝符号链接、非普通 JSON 条目、权限不安全或读取期间发生变化的目录，并分别用原始 `-c/-C` 参数和合并后的单文件快照执行真实内核校验。这样页面展示并迁移的是完整生效配置，不会遗漏目录片段。
 
-二进制路径默认仍必须是受保护的普通文件。`/etc/sing-box/bin/sing-box` 只接受 root 所有、父链不可写且不是符号链接的原生可执行文件。对于常见的 `/usr/local/bin/sing-box` 符号链接，只额外接受两种可证明的形式：直接解析到受保护真实二进制，或解析到内容严格等于 `#!/bin/sh` 加 `exec <受保护真实二进制> "$@"` 的固定转发器。QAgent 记录 systemd 使用的 executable token，但只校验、复制真实二进制；包含条件、环境展开、前后置命令或其他 shell 逻辑的任意 wrapper 不会显示为可迁移入口，也绝不会被复制成内核。
+二进制路径默认仍必须是 root 所有的受保护普通文件。仅 `/etc/xray/bin/xray`、`/etc/sing-box/bin/sing-box`、`/etc/v2ray-agent/xray/xray` 与 `/etc/v2ray-agent/sing-box/sing-box` 四个固定真实内核路径兼容安装器归档遗留的数值属主：该 UID 必须无法通过 NSS 解析为账户，且 `/proc` 中没有任何线程的 real/effective/saved/fs UID 使用它；文件仍必须是父链 root 所有、不可组/其他写、非符号链接的原生 ELF。已注册账户、活动孤儿 UID、其他路径或无法完整读取 NSS/进程状态时继续 fail closed。对于常见的 `/usr/local/bin/sing-box` 符号链接，只额外接受两种可证明的形式：直接解析到受保护真实二进制，或解析到内容严格等于 `#!/bin/sh` 加 `exec <受保护真实二进制> "$@"` 的固定转发器。QAgent 记录 systemd 使用的 executable token，但只校验、复制真实二进制；包含条件、环境展开、前后置命令或其他 shell 逻辑的任意 wrapper 不会显示为可迁移入口，也绝不会被复制成内核。
+
+已由 QControlHub 创建的 `qagent-*` systemd unit 仍按逐行模板核验。除当前模板外，只接受项目早期模板精确缺少 `LogNamespace`、两条 journal 输出指令和两条低端口 capability 指令的形态；有效执行上下文、允许的项目 drop-in、服务用户、路径和无额外 hook 校验保持不变，任何其他缺失、重复或新增指令都会拒绝。
 
 脚本只把核验后的 binary、config、可选 config-directory、service executable 和 service 写成精确的 `QCH_EXISTING_*` 只读发现信息，并同时清除、核验对应 `qagent-*` 空白服务的开机启用状态（systemd 的 persistent/runtime；OpenRC 的全部 runlevel 链接）；不会停止、禁用、替换或修改原通用服务。无法精确映射的活动候选会在引导专用服务前中止安装，不能与“没有活动候选”混同。注册请求不包含配置正文，也不会创建配置、修订或部署记录。节点上线后，管理员在 Web 控制台“手动配置”页查看只读的实时节点快照，再显式选择“手动导入并迁移”；迁移完成后才能编辑托管配置。
 
