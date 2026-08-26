@@ -461,6 +461,11 @@ func TestClientAccessUsesContextSidebarAsOnlyNodeFilter(t *testing.T) {
 		`.querySelectorAll("[data-access-agent]")`,
 		`client-access-toolbar`,
 		`client-access-node-card`,
+		`data-client-parameter-open`,
+		`class="traffic-edit-dialog client-parameter-dialog"`,
+		`dialog?.showModal();`,
+		`new ResizeObserver(layout)`,
+		`card.style.gridRowEnd = `,
 		`groupClientAccessEntries(filtered)`,
 		`normalizeClientAccessFilters(entries, agents`,
 		`renderClientAccess();`,
@@ -469,12 +474,20 @@ func TestClientAccessUsesContextSidebarAsOnlyNodeFilter(t *testing.T) {
 			t.Errorf("client access filtering is missing %q", required)
 		}
 	}
-	for _, forbidden := range []string{`data-filter-agent`, `aria-label="按节点筛选"`, `filterAgentIDs`, `client-access-hero`, `client-access-summary`, `client-access-filter-panel`, `client-access-results-head`, `含凭据`} {
+	for _, forbidden := range []string{`data-filter-agent`, `aria-label="按节点筛选"`, `filterAgentIDs`, `client-access-hero`, `client-access-summary`, `client-access-filter-panel`, `client-access-results-head`, `client-parameter-menu`, `client-parameter-grid`, `含凭据`} {
 		if strings.Contains(string(clientAccess), forbidden) {
 			t.Errorf("client access main workspace still contains superseded visual structure %q", forbidden)
 		}
 	}
-	for _, required := range []string{`.client-access-toolbar`, `.client-access-node-grid`, `.client-profile-row`} {
+	for _, required := range []string{
+		`.client-access-toolbar`,
+		`.client-profile-row`,
+		`.client-access-node-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,390px),1fr))`,
+		`grid-auto-rows:1px`,
+		`.client-access-node-card{width:100%;min-width:0`,
+		`.client-parameter-dialog{width:min(560px`,
+		`.client-parameter-list`,
+	} {
 		if !strings.Contains(string(styles), required) {
 			t.Errorf("client access compact layout is missing %q", required)
 		}

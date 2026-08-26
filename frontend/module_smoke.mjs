@@ -2782,6 +2782,10 @@ try {
   assert.equal(accessMarkup.includes("按内核筛选"), true);
   assert.equal(accessMarkup.includes("client-access-toolbar"), true);
   assert.equal(accessMarkup.includes("client-access-node-card"), true);
+  assert.equal(accessMarkup.includes("data-client-parameter-open"), true);
+  assert.equal(accessMarkup.includes("client-parameter-dialog"), true);
+  assert.equal(accessMarkup.includes("traffic-edit-dialog"), true);
+  assert.equal(accessMarkup.includes("client-parameter-menu"), false);
   assert.equal(accessMarkup.includes("client-access-hero"), false);
   assert.equal(accessMarkup.includes("client-access-filter-panel"), false);
   assert.equal(
