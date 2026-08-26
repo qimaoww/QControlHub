@@ -279,13 +279,13 @@ func validateExistingCoreExecutable(path string) error {
 	return validateNativeCoreExecutableWithOwnerPolicy(path, installerCoreAllowsOrphanOwner(path))
 }
 
-// existingCoreInvocationSpec makes the fixed installer-path orphan-owner
-// exception usable without restoring CAP_DAC_OVERRIDE to QAgent. A historical
-// archive can leave a native core as, for example, uid 1001 mode 0744. The
-// protected file is readable but QAgent's capability-bounded root process is
-// neither its owner nor allowed to bypass the missing other-execute bit.
-// Invoke a root-owned private copy only after the original has passed the full
-// inactive-orphan, protected-path, regular-file, and native-core checks.
+// existingCoreInvocationSpec invokes every fixed installer-path core through a
+// root-owned private copy without restoring CAP_DAC_OVERRIDE to QAgent. This
+// covers both historical orphan-owned archives with a missing other-execute
+// bit and installer directories whose execution policy can deny the original
+// path even when the core itself is root-owned. Every source must first pass
+// the full owner-policy, protected-path, regular-file, and native-core checks;
+// cores outside the four fixed compatibility paths continue to run in place.
 func (e *Executor) existingCoreInvocationSpec(engine core.Engine, managed, existing EngineSpec) (EngineSpec, func(), error) {
 	if err := validateProtectedDirectoryChain(filepath.Dir(existing.Binary)); err != nil {
 		return EngineSpec{}, func() {}, err
@@ -297,12 +297,8 @@ func (e *Executor) existingCoreInvocationSpec(engine core.Engine, managed, exist
 	if err != nil {
 		return EngineSpec{}, func() {}, err
 	}
-	uid, _, ownershipKnown := fileOwnership(info)
-	if !ownershipKnown || uid == 0 {
-		return existing, func() {}, nil
-	}
 	if !installerCoreAllowsOrphanOwner(existing.Binary) {
-		return EngineSpec{}, func() {}, errors.New("non-root existing core is outside the fixed installer compatibility paths")
+		return existing, func() {}, nil
 	}
 
 	stagingDirectory := filepath.Dir(managed.ConfigPath)
