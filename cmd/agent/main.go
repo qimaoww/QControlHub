@@ -124,8 +124,10 @@ func existingSpec(prefix string) (agent.EngineSpec, bool) {
 	if !configured {
 		return agent.EngineSpec{}, false
 	}
-	if binary == "" || configPath == "" || service == "" {
-		slog.Error("existing core mapping requires binary, config, and service", "engine", prefix)
+	// A directory-authoritative mapping (installers that run the core with only
+	// a confdir) has no main configuration file, so either source satisfies it.
+	if binary == "" || service == "" || (configPath == "" && configDirectory == "") {
+		slog.Error("existing core mapping requires binary, service, and a config file or config directory", "engine", prefix)
 		os.Exit(1)
 	}
 	return agent.EngineSpec{
@@ -172,8 +174,17 @@ func runUtilityCommand(specs map[core.Engine]agent.EngineSpec, arguments []strin
 
 func overrideSpec(spec agent.EngineSpec, prefix string) agent.EngineSpec {
 	spec.Binary = env("QCH_"+prefix+"_BINARY", spec.Binary)
-	spec.ConfigPath = env("QCH_"+prefix+"_CONFIG", spec.ConfigPath)
 	spec.ConfigDirectory = strings.TrimSpace(os.Getenv("QCH_" + prefix + "_CONFIG_DIRECTORY"))
+	// A directory-authoritative mapping is expressed as an explicitly empty
+	// configuration path alongside a configuration directory. env() treats an
+	// empty value as unset, so falling through to it here would silently
+	// inspect the managed default file instead of the mapped confdir.
+	rawConfig, configPresent := os.LookupEnv("QCH_" + prefix + "_CONFIG")
+	if configPresent && strings.TrimSpace(rawConfig) == "" && spec.ConfigDirectory != "" {
+		spec.ConfigPath = ""
+	} else {
+		spec.ConfigPath = env("QCH_"+prefix+"_CONFIG", spec.ConfigPath)
+	}
 	spec.WorkingDirectory = strings.TrimSpace(os.Getenv("QCH_" + prefix + "_WORK_DIRECTORY"))
 	spec.ServiceBinary = strings.TrimSpace(os.Getenv("QCH_" + prefix + "_SERVICE_BINARY"))
 	spec.Service = env("QCH_"+prefix+"_SERVICE", spec.Service)

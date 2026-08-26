@@ -179,10 +179,11 @@ umask 077
   printf '%s\n' 'QCH_AGENT_STATE=/var/lib/qcontrolhub/agent-state.json'
   printf '%s\n' 'QCH_AGENT_ENGINES=mihomo,xray,sing-box,ss-rust'
   printf '%s\n' "QCH_SERVICE_MANAGER=$service_manager"
-  if [ -n "$mapped_xray_config" ]; then
+  if [ -n "$mapped_xray_config" ] || [ -n "$mapped_xray_config_directory" ]; then
     printf '%s\n' \
       "QCH_EXISTING_XRAY_BINARY=$mapped_xray_binary" \
       "QCH_EXISTING_XRAY_CONFIG=$mapped_xray_config" \
+      "QCH_EXISTING_XRAY_CONFIG_DIRECTORY=$mapped_xray_config_directory" \
       "QCH_EXISTING_XRAY_SERVICE=$mapped_xray_service"
   fi
   if [ -n "$mapped_singbox_config" ]; then

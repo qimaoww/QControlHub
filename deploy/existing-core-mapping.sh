@@ -1,8 +1,19 @@
 #!/bin/sh
 
+# Managed core paths this library validates the qagent-* units against. They
+# mirror agent.DefaultSpecs() and are only referenced when an existing core was
+# actually mapped, which is why an unset value used to abort the installer under
+# `set -u` instead of failing closed. Keep them overridable so the installer
+# test harness can point them at a fixture tree.
+qagent_xray_binary=${qagent_xray_binary:-/usr/local/lib/qagent/cores/xray}
+qagent_xray_config=${qagent_xray_config:-/etc/qagent/xray/config.json}
+qagent_singbox_binary=${qagent_singbox_binary:-/usr/local/lib/qagent/cores/sing-box}
+qagent_singbox_config=${qagent_singbox_config:-/etc/qagent/sing-box/config.json}
+
 mapped_engines=""
 mapped_xray_binary=""
 mapped_xray_config=""
+mapped_xray_config_directory=""
 mapped_xray_service=""
 mapped_singbox_binary=""
 mapped_singbox_config=""
@@ -38,11 +49,11 @@ case "${service_manager:-systemd}" in
     singbox_service_candidates="sing-box.service singbox.service"
     ;;
 esac
-xray_binary_candidates="/usr/local/bin/xray /usr/bin/xray"
+xray_binary_candidates="/usr/local/bin/xray /usr/bin/xray /etc/xray/bin/xray /etc/v2ray-agent/xray/xray"
 xray_config_candidates="/usr/local/etc/xray/config.json /etc/xray/config.json"
-singbox_binary_candidates="/usr/local/bin/sing-box /usr/bin/sing-box /etc/sing-box/bin/sing-box"
-singbox_direct_binary_candidates="/etc/sing-box/bin/sing-box"
-singbox_config_candidates="/etc/sing-box/config.json /usr/local/etc/sing-box/config.json"
+singbox_binary_candidates="/usr/local/bin/sing-box /usr/bin/sing-box /etc/sing-box/bin/sing-box /etc/v2ray-agent/sing-box/sing-box"
+singbox_direct_binary_candidates="/etc/sing-box/bin/sing-box /etc/v2ray-agent/sing-box/sing-box"
+singbox_config_candidates="/etc/sing-box/config.json /usr/local/etc/sing-box/config.json /etc/v2ray-agent/sing-box/conf/config.json"
 
 append_csv() {
   current=$1
@@ -80,7 +91,7 @@ openrc_supervised_child_pid() {
   protected_regular_file "$openrc_init_root/$service" true || return 1
   rc-service "$service" status >/dev/null 2>&1 || return 1
   options_dir="$openrc_state_root/options/$service"
-  protected_directory_chain "$options_dir" || return 1
+  openrc_state_directory_chain "$options_dir" || return 1
   protected_regular_file "$options_dir/child_pid" false || return 1
   child_pid=$(cat "$options_dir/child_pid") || return 1
   case "$child_pid" in *[!0-9]*) return 1 ;; esac
@@ -88,12 +99,22 @@ openrc_supervised_child_pid() {
   child_pid_stamp=$(stat -c '%d:%i' "$options_dir/child_pid" 2>/dev/null) || return 1
   protected_regular_file "$options_dir/pidfile" false || return 1
   pidfile_value=$(cat "$options_dir/pidfile") || return 1
+  # An OpenRC init script chooses its own pidfile name, so the name is not a
+  # trust anchor; the supervisor identity verified below is. The path is still
+  # constrained to a direct child of the run directory with a plain .pid name.
+  supervisor_pidfile_name=${pidfile_value##*/}
   case "$pidfile_value" in
-    "$openrc_run_root/supervise-$service.pid"|"/var/run/supervise-$service.pid") ;;
+    "$openrc_run_root/$supervisor_pidfile_name"|"/var/run/$supervisor_pidfile_name") ;;
     *) return 1 ;;
   esac
+  case "$supervisor_pidfile_name" in
+    .*|*[!A-Za-z0-9._-]*) return 1 ;;
+    *.pid) ;;
+    *) return 1 ;;
+  esac
+  [ "$supervisor_pidfile_name" != .pid ] || return 1
   pidfile_stamp=$(stat -c '%d:%i' "$options_dir/pidfile" 2>/dev/null) || return 1
-  supervisor_pidfile="$openrc_run_root/supervise-$service.pid"
+  supervisor_pidfile="$openrc_run_root/$supervisor_pidfile_name"
   protected_directory_chain "$(dirname -- "$supervisor_pidfile")" || return 1
   protected_regular_file "$supervisor_pidfile" false || return 1
   supervisor_pid=$(cat "$supervisor_pidfile") || return 1
@@ -145,31 +166,59 @@ openrc_supervised_child_pid() {
 }
 
 protected_regular_file() {
-  candidate=$1
-  executable=${2:-false}
-  [ -f "$candidate" ] && [ ! -L "$candidate" ] || return 1
-  [ "$(stat -c '%u' "$candidate" 2>/dev/null)" = 0 ] || return 1
-  permissions=$(stat -c '%a' "$candidate" 2>/dev/null) || return 1
-  [ $((0$permissions & 022)) -eq 0 ] || return 1
-  if [ "$executable" = true ]; then [ -x "$candidate" ] || return 1; fi
-  parent=$(dirname -- "$candidate")
-  [ -d "$parent" ] && [ ! -L "$parent" ] || return 1
-  [ "$(stat -c '%u' "$parent" 2>/dev/null)" = 0 ] || return 1
-  permissions=$(stat -c '%a' "$parent" 2>/dev/null) || return 1
-  [ $((0$permissions & 022)) -eq 0 ]
+  # POSIX sh has no locals, so these names are prefixed: an earlier revision
+  # assigned a bare `candidate`, which silently overwrote the loop variable of
+  # find_single_active_service and made every OpenRC service look inactive.
+  protected_file_path=$1
+  protected_file_executable=${2:-false}
+  [ -f "$protected_file_path" ] && [ ! -L "$protected_file_path" ] || return 1
+  [ "$(stat -c '%u' "$protected_file_path" 2>/dev/null)" = 0 ] || return 1
+  protected_file_permissions=$(stat -c '%a' "$protected_file_path" 2>/dev/null) || return 1
+  [ $((0$protected_file_permissions & 022)) -eq 0 ] || return 1
+  if [ "$protected_file_executable" = true ]; then [ -x "$protected_file_path" ] || return 1; fi
+  protected_file_parent=$(dirname -- "$protected_file_path")
+  [ -d "$protected_file_parent" ] && [ ! -L "$protected_file_parent" ] || return 1
+  [ "$(stat -c '%u' "$protected_file_parent" 2>/dev/null)" = 0 ] || return 1
+  protected_file_permissions=$(stat -c '%a' "$protected_file_parent" 2>/dev/null) || return 1
+  [ $((0$protected_file_permissions & 022)) -eq 0 ]
 }
 
 protected_directory_chain() {
+  validate_directory_chain "$1" false
+}
+
+# OpenRC creates its own service directory (/run/openrc) as mode 0775 owned by
+# root:root. Tolerate exactly that policy shape — root owner, root group, no
+# world-write — while reading OpenRC state. This is a real but narrow relaxation
+# because a non-root account could be a member of gid 0; every other protected
+# path keeps the stricter rule.
+openrc_state_directory_chain() {
+  case "$1" in
+    "$openrc_state_root"|"$openrc_state_root"/*) ;;
+    *) return 1 ;;
+  esac
+  validate_directory_chain "$1" true || return 1
+  # End the gid-0 exception at OpenRC's state root. Its parent (/run on a
+  # stock system) remains subject to the general protected-path policy.
+  protected_directory_chain "$(dirname -- "$openrc_state_root")"
+}
+
+validate_directory_chain() {
   chain_directory=$1
+  allow_root_group_write=${2:-false}
   case "$chain_directory" in /*) ;; *) return 1 ;; esac
   while :; do
     [ -d "$chain_directory" ] && [ ! -L "$chain_directory" ] || return 1
     chain_permissions=$(stat -c '%a' "$chain_directory" 2>/dev/null) || return 1
     chain_mode=$((0$chain_permissions))
     if [ $((chain_mode & 022)) -ne 0 ]; then
-      [ $((chain_mode & 01000)) -ne 0 ] || return 1
-      [ "$(stat -c '%u' "$chain_directory" 2>/dev/null)" = 0 ] || return 1
-      return 0
+      if [ $((chain_mode & 01000)) -ne 0 ]; then
+        [ "$(stat -c '%u' "$chain_directory" 2>/dev/null)" = 0 ] || return 1
+        return 0
+      fi
+      [ "$allow_root_group_write" = true ] || return 1
+      [ $((chain_mode & 002)) -eq 0 ] || return 1
+      [ "$(stat -c '%g' "$chain_directory" 2>/dev/null)" = 0 ] || return 1
     fi
     [ "$(stat -c '%u' "$chain_directory" 2>/dev/null)" = 0 ] || return 1
     [ "$chain_directory" != / ] || return 0
@@ -180,9 +229,21 @@ protected_directory_chain() {
 protected_config_directory() {
   config_directory=$1
   primary=$2
+  config_engine=$3
   protected_directory_chain "$config_directory" || return 1
-  total=$(wc -c < "$primary") || return 1
-  for config_candidate in "$config_directory"/*.json; do
+  # A directory-authoritative mapping has no main configuration file, so the
+  # size budget starts empty and the directory alone has to stay within it.
+  case "$config_engine" in
+    xray) config_patterns="$config_directory/*.json $config_directory/*.jsonc $config_directory/*.toml $config_directory/*.yaml $config_directory/*.yml" ;;
+    sing-box) config_patterns="$config_directory/*.json" ;;
+    *) return 1 ;;
+  esac
+  if [ -n "$primary" ] && { [ "$config_engine" = xray ] || [ "$primary" != "$config_directory/config.json" ]; }; then
+    total=$(wc -c < "$primary") || return 1
+  else
+    total=0
+  fi
+  for config_candidate in $config_patterns; do
     [ -e "$config_candidate" ] || continue
     protected_regular_file "$config_candidate" false || return 1
     size=$(wc -c < "$config_candidate") || return 1
@@ -252,12 +313,23 @@ single_exec_start_argv() {
   printf '%s\n%s\n' "$executable" "$argv"
 }
 
+config_path_from_argv() {
+  case "$1" in
+    xray) xray_config_path_from_argv "$2" "$3" ;;
+    sing-box) singbox_config_path_from_argv "$2" "$3" ;;
+    *) return 1 ;;
+  esac
+}
+
 service_uses_paths() {
   service=$1
   binary=$2
   config=$3
   engine=$4
   real_binary=${5:-$binary}
+  matched_config_path=""
+  matched_config_directory=""
+  matched_work_directory=""
   if [ "${service_manager:-systemd}" = openrc ]; then
     supervised=$(openrc_supervised_child_pid "$service") || return 1
     set -- $supervised
@@ -266,35 +338,19 @@ service_uses_paths() {
     process_binary=$(readlink "$proc_root/$child_pid/exe" 2>/dev/null) || return 1
     [ "$process_binary" = "$real_binary" ] || return 1
     command_line=$(tr '\000' ' ' < "$proc_root/$child_pid/cmdline" 2>/dev/null) || return 1
-    matched_config_directory=""
-    case "$engine:$command_line" in
-      "xray:$binary run -config $config "|"xray:$binary run -c $config "|\
-      "xray:$real_binary run -config $config "|"xray:$real_binary run -c $config "|\
-      "sing-box:$binary run -c $config "|"sing-box:$binary run --config $config "|\
-      "sing-box:$real_binary run -c $config "|"sing-box:$real_binary run --config $config ") ;;
-      *)
-        [ "$engine" = sing-box ] || return 1
-        for process_prefix in \
-          "$binary run -c $config -C " \
-          "$real_binary run -c $config -C "
-        do
-          case "$command_line" in
-            "$process_prefix"*' ')
-              process_config_directory=${command_line#"$process_prefix"}
-              process_config_directory=${process_config_directory% }
-              ;;
-            *) continue ;;
-          esac
-          case "$process_config_directory" in /*) ;; *) return 1 ;; esac
-          case "$process_config_directory" in *[[:space:]]*) return 1 ;; esac
-          protected_config_directory "$process_config_directory" "$config" || return 1
-          matched_config_directory=$process_config_directory
-          return 0
-        done
-        return 1
-        ;;
-    esac
-    return
+    command_line=${command_line% }
+    # A supervised process reports either the service executable or the resolved
+    # real binary as argv0; accept exactly those two and nothing else.
+    config_path_from_argv "$engine" "$binary" "$command_line" ||
+      config_path_from_argv "$engine" "$real_binary" "$command_line" || return 1
+    [ "$matched_config_path" = "$config" ] || return 1
+    # The official sing-box working-directory form has no supervised OpenRC
+    # binding this mapping could prove, so it stays rejected here.
+    [ -z "$matched_work_directory" ] || return 1
+    if [ -n "$matched_config_directory" ]; then
+      protected_config_directory "$matched_config_directory" "$config" "$engine" || return 1
+    fi
+    return 0
   fi
   systemctl is-active --quiet "$service" 2>/dev/null || return 1
   exec_start=$(systemctl show "$service" --property=ExecStart --value 2>/dev/null) || return 1
@@ -302,36 +358,67 @@ service_uses_paths() {
   executable=$(printf '%s\n' "$parsed" | sed -n '1p')
   argv=$(printf '%s\n' "$parsed" | sed -n '2p')
   [ "$executable" = "$binary" ] || return 1
+  config_path_from_argv "$engine" "$binary" "$argv" || return 1
+  [ "$matched_config_path" = "$config" ] || return 1
+  if [ -n "$matched_config_directory" ]; then
+    protected_config_directory "$matched_config_directory" "$config" "$engine" || return 1
+  fi
+  if [ -n "$matched_work_directory" ]; then
+    case "$matched_work_directory" in /*) ;; *) return 1 ;; esac
+    case "$matched_work_directory" in *[[:space:]]*) return 1 ;; esac
+  fi
+  return 0
+}
+
+# xray_config_path_from_argv recognizes the exact Xray invocation shapes that
+# can be mapped safely: a single configuration file, a file combined with a
+# confdir, and the directory-authoritative form used by installers that ship no
+# main file at all, which reports an empty configuration path.
+xray_config_path_from_argv() {
+  binary=$1
+  argv=$2
+  matched_config_path=""
   matched_config_directory=""
   matched_work_directory=""
-  case "$engine" in
-    xray)
-      case "$argv" in
-        "$binary run -config $config"|"$binary run -c $config") return 0 ;;
+  set -- $argv
+  [ "$1" = "$binary" ] || return 1
+  shift
+  [ "${1:-}" = run ] || return 1
+  shift
+  config_path=""
+  config_directory=""
+  case "$#" in
+    2)
+      case "$1" in
+        -confdir) config_directory=$2 ;;
+        -config|-c) config_path=$2 ;;
+        *) return 1 ;;
       esac
-      return 1
       ;;
-    sing-box)
-      matched_config_path=""
-      matched_config_directory=""
-      singbox_config_path_from_argv "$binary" "$argv" || return 1
-      [ "$matched_config_path" = "$config" ] || return 1
-      if [ -n "$matched_config_directory" ]; then
-        protected_config_directory "$matched_config_directory" "$config" || return 1
-      fi
-      if [ -n "$matched_work_directory" ]; then
-        case "$matched_work_directory" in /*) ;; *) return 1 ;; esac
-        case "$matched_work_directory" in *[[:space:]]*) return 1 ;; esac
-      fi
-      return 0
+    4)
+      case "$1" in -config|-c) ;; *) return 1 ;; esac
+      [ "$3" = -confdir ] || return 1
+      config_path=$2
+      config_directory=$4
       ;;
+    *) return 1 ;;
   esac
-  return 1
+  if [ -n "$config_path" ]; then
+    case "$config_path" in /*) ;; *) return 1 ;; esac
+    case "$config_path" in *[[:space:]]*) return 1 ;; esac
+  fi
+  if [ -n "$config_directory" ]; then
+    case "$config_directory" in /*) ;; *) return 1 ;; esac
+    case "$config_directory" in *[[:space:]]*) return 1 ;; esac
+    matched_config_directory=$config_directory
+  fi
+  matched_config_path=$config_path
 }
 
 singbox_config_path_from_argv() {
   binary=$1
   argv=$2
+  matched_config_path=""
   matched_config_directory=""
   matched_work_directory=""
   set -- $argv
@@ -594,6 +681,7 @@ inspect_existing_candidate() {
   case "$engine" in
     xray)
       QCH_SERVICE_MANAGER=${service_manager:-systemd} QCH_XRAY_BINARY=$binary QCH_XRAY_CONFIG=$config \
+        QCH_XRAY_CONFIG_DIRECTORY=${4:-} \
         "$work_dir/qagent" inspect-existing xray >/dev/null 2>&1
       ;;
     sing-box)
@@ -615,18 +703,27 @@ discover_existing_xray() {
   match_count=0
   found_binary=""
   found_config=""
+  found_config_directory=""
   found_service=""
   for service in "$active_service_candidate"; do
     for binary in $xray_binary_candidates; do
       protected_regular_file "$binary" true || continue
-      for config in $xray_config_candidates; do
-        protected_regular_file "$config" false || continue
-        [ "$(wc -c < "$config")" -le 2097152 ] || continue
+      # The empty candidate is the directory-authoritative form: an installer
+      # that runs Xray with only a confdir ships no main file to whitelist.
+      for config in "" $xray_config_candidates; do
+        if [ -n "$config" ]; then
+          protected_regular_file "$config" false || continue
+          [ "$(wc -c < "$config")" -le 2097152 ] || continue
+        fi
         service_uses_paths "$service" "$binary" "$config" xray || continue
-        inspect_existing_candidate xray "$binary" "$config" || continue
+        config_directory=$matched_config_directory
+        # Exactly one of the two sources must be present, never neither.
+        [ -n "$config" ] || [ -n "$config_directory" ] || continue
+        inspect_existing_candidate xray "$binary" "$config" "$config_directory" || continue
         match_count=$((match_count + 1))
         found_binary=$binary
         found_config=$config
+        found_config_directory=$config_directory
         found_service=$service
       done
     done
@@ -641,9 +738,10 @@ discover_existing_xray() {
   fi
   mapped_xray_binary=$found_binary
   mapped_xray_config=$found_config
+  mapped_xray_config_directory=$found_config_directory
   mapped_xray_service=$found_service
   mapped_engines=$(append_csv "$mapped_engines" xray)
-  printf '%s\n' "detected existing Xray service: $found_service ($found_config)"
+  printf '%s\n' "detected existing Xray service: $found_service (${found_config:-$found_config_directory})"
 }
 
 discover_existing_singbox() {

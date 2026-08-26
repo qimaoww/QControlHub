@@ -25,19 +25,37 @@ type existingDiscoveryCandidateSet struct {
 	configs           []string
 }
 
-const protectedEtcSingBoxExecutable = "/etc/sing-box/bin/sing-box"
+// Installer-owned core layouts that ship the real binary inside the
+// configuration tree rather than a shared bin directory. Each is only ever
+// accepted as a direct, non-symlinked, root-owned executable.
+const (
+	protectedEtcSingBoxExecutable   = "/etc/sing-box/bin/sing-box"
+	protectedEtcXrayExecutable      = "/etc/xray/bin/xray"
+	protectedAgentXrayExecutable    = "/etc/v2ray-agent/xray/xray"
+	protectedAgentSingBoxExecutable = "/etc/v2ray-agent/sing-box/sing-box"
+)
 
 var existingDiscoveryCandidates = map[core.Engine]existingDiscoveryCandidateSet{
 	core.EngineXray: {
-		services:    []string{"xray.service"},
-		executables: []string{"/usr/local/bin/xray", "/usr/bin/xray"},
-		configs:     []string{"/usr/local/etc/xray/config.json", "/etc/xray/config.json"},
+		services: []string{"xray.service"},
+		executables: []string{
+			"/usr/local/bin/xray", "/usr/bin/xray",
+			protectedEtcXrayExecutable, protectedAgentXrayExecutable,
+		},
+		directExecutables: []string{protectedEtcXrayExecutable, protectedAgentXrayExecutable},
+		configs:           []string{"/usr/local/etc/xray/config.json", "/etc/xray/config.json"},
 	},
 	core.EngineSingBox: {
-		services:          []string{"sing-box.service", "singbox.service"},
-		executables:       []string{"/usr/local/bin/sing-box", "/usr/bin/sing-box", protectedEtcSingBoxExecutable},
-		directExecutables: []string{protectedEtcSingBoxExecutable},
-		configs:           []string{"/etc/sing-box/config.json", "/usr/local/etc/sing-box/config.json"},
+		services: []string{"sing-box.service", "singbox.service"},
+		executables: []string{
+			"/usr/local/bin/sing-box", "/usr/bin/sing-box",
+			protectedEtcSingBoxExecutable, protectedAgentSingBoxExecutable,
+		},
+		directExecutables: []string{protectedEtcSingBoxExecutable, protectedAgentSingBoxExecutable},
+		configs: []string{
+			"/etc/sing-box/config.json", "/usr/local/etc/sing-box/config.json",
+			"/etc/v2ray-agent/sing-box/conf/config.json",
+		},
 	},
 }
 
@@ -301,26 +319,19 @@ func matchDiscoveredOpenRCExecutable(processExecutable, argv0 string, candidates
 	return "", "", false
 }
 
+// parseDiscoveredOpenRCArgv maps a supervise-daemon child's argv onto the same
+// layouts the systemd path accepts. The official sing-box working-directory
+// form is deliberately excluded: it is a systemd packaging shape, and an OpenRC
+// service presenting it has no supervised binding this mapping could prove.
 func parseDiscoveredOpenRCArgv(engine core.Engine, argv, configs []string) (string, string, bool) {
-	for _, configPath := range configs {
-		spec := EngineSpec{ConfigPath: configPath}
-		if len(argv) == 4 {
-			spec.Binary = argv[0]
-			spec.ServiceBinary = argv[0]
-			if openRCProcessArgvMatches(engine, spec, argv) {
-				return configPath, "", true
-			}
-		}
-		if engine == core.EngineSingBox && len(argv) == 6 && filepath.IsAbs(argv[5]) && !strings.ContainsAny(argv[5], " \t\r\n") {
-			spec.Binary = argv[0]
-			spec.ServiceBinary = argv[0]
-			spec.ConfigDirectory = argv[5]
-			if openRCProcessArgvMatches(engine, spec, argv) {
-				return configPath, argv[5], true
-			}
-		}
+	if len(argv) == 0 {
+		return "", "", false
 	}
-	return "", "", false
+	configPath, configDirectory, workDirectory, ok := matchDiscoveredExistingArgv(engine, argv[0], argv, configs)
+	if !ok || workDirectory != "" {
+		return "", "", false
+	}
+	return configPath, configDirectory, true
 }
 
 func validateManagedServiceForExistingDiscovery(ctx context.Context, engine core.Engine, managed EngineSpec, managers ...*ServiceManager) (string, error) {
@@ -571,17 +582,24 @@ func managedCoreAssetName(engine core.Engine) string {
 }
 
 func parseDiscoveredExistingArgv(engine core.Engine, executable, argv string, configs []string) (string, string, string, bool) {
-	if engine == core.EngineXray {
-		for _, configPath := range configs {
-			if argv == executable+" run -config "+configPath || argv == executable+" run -c "+configPath {
-				return configPath, "", "", true
-			}
-		}
-		return "", "", "", false
-	}
-	configPath, configDirectory, workDirectory, ok := parseSingBoxExistingArgv(executable, argv)
+	return matchDiscoveredExistingArgv(engine, executable, strings.Fields(argv), configs)
+}
+
+// matchDiscoveredExistingArgv maps one already-split command line onto a
+// supported existing-core layout. A mapping without a main configuration file
+// is directory-authoritative: there is nothing to match against the config
+// whitelist, and the confdir alone decides the content. That directory still
+// has to clear the protected path chain before anything in it is read.
+func matchDiscoveredExistingArgv(engine core.Engine, executable string, fields, configs []string) (string, string, string, bool) {
+	configPath, configDirectory, workDirectory, ok := parseExistingArgv(engine, executable, fields)
 	if !ok {
 		return "", "", "", false
+	}
+	if configPath == "" {
+		if configDirectory == "" {
+			return "", "", "", false
+		}
+		return "", configDirectory, workDirectory, true
 	}
 	for _, candidate := range configs {
 		if configPath == candidate {
@@ -591,6 +609,58 @@ func parseDiscoveredExistingArgv(engine core.Engine, executable, argv string, co
 	return "", "", "", false
 }
 
+func parseExistingArgv(engine core.Engine, executable string, fields []string) (string, string, string, bool) {
+	if len(fields) < 2 || fields[0] != executable {
+		return "", "", "", false
+	}
+	switch engine {
+	case core.EngineXray:
+		configPath, configDirectory, ok := parseXrayExistingArgv(fields[1:])
+		return configPath, configDirectory, "", ok
+	case core.EngineSingBox:
+		return parseSingBoxExistingArgv(fields[1:])
+	default:
+		return "", "", "", false
+	}
+}
+
+// parseXrayExistingArgv recognizes the exact Xray invocation shapes that can be
+// mapped safely: a single configuration file (run -config|-c <file>), a file
+// combined with a confdir (run -config|-c <file> -confdir <dir>), and the
+// directory-authoritative form used by installers that ship no main file at all
+// (run -confdir <dir>), which reports an empty configuration path. Every path
+// must be absolute and free of whitespace and the argument list must be exact;
+// unknown flags or a repeated flag fail closed.
+func parseXrayExistingArgv(args []string) (string, string, bool) {
+	if len(args) == 0 || args[0] != "run" {
+		return "", "", false
+	}
+	args = args[1:]
+	configFlag := func(flag string) bool { return flag == "-config" || flag == "-c" }
+	switch len(args) {
+	case 2:
+		if args[0] == "-confdir" {
+			if !safeExistingAbsolutePath(args[1]) {
+				return "", "", false
+			}
+			return "", args[1], true
+		}
+		if !configFlag(args[0]) || !safeExistingAbsolutePath(args[1]) {
+			return "", "", false
+		}
+		return args[1], "", true
+	case 4:
+		if !configFlag(args[0]) || args[2] != "-confdir" {
+			return "", "", false
+		}
+		if !safeExistingAbsolutePath(args[1]) || !safeExistingAbsolutePath(args[3]) {
+			return "", "", false
+		}
+		return args[1], args[3], true
+	}
+	return "", "", false
+}
+
 // parseSingBoxExistingArgv recognizes the exact sing-box invocation shapes
 // that can be mapped safely. It supports the legacy run-then-flag forms
 // (run -c <file>, run --config <file>, run -c <file> -C <dir> and the
@@ -598,12 +668,10 @@ func parseDiscoveredExistingArgv(engine core.Engine, executable, argv string, co
 // (-D <working-directory> -C <config-directory> run). Every path must be
 // absolute and free of whitespace, and the argument list must be exact;
 // unknown flags, repeated -D/-C, or an ambiguous relative path fail closed.
-func parseSingBoxExistingArgv(executable, argv string) (string, string, string, bool) {
-	fields := strings.Fields(argv)
-	if len(fields) < 2 || fields[0] != executable {
+func parseSingBoxExistingArgv(args []string) (string, string, string, bool) {
+	if len(args) == 0 {
 		return "", "", "", false
 	}
-	args := fields[1:]
 	switch args[0] {
 	case "run":
 		if len(args) == 3 && (args[1] == "-c" || args[1] == "--config") {
@@ -766,7 +834,11 @@ func loadExistingCoreDiscoveryState(path string, managers ...*ServiceManager) (e
 	}
 	for engine, stored := range state.Specs {
 		spec := stored.engineSpec()
-		if !supportedExistingServiceForManager(manager, engine, spec.Service) || !filepath.IsAbs(spec.Binary) || !filepath.IsAbs(spec.ConfigPath) ||
+		// A directory-authoritative mapping carries no main configuration file;
+		// its confdir must then be present and absolute so the reader still has
+		// exactly one protected source of truth.
+		configPathMapped := filepath.IsAbs(spec.ConfigPath) || (spec.ConfigPath == "" && spec.ConfigDirectory != "")
+		if !supportedExistingServiceForManager(manager, engine, spec.Service) || !filepath.IsAbs(spec.Binary) || !configPathMapped ||
 			(spec.ConfigDirectory != "" && !filepath.IsAbs(spec.ConfigDirectory)) || !filepath.IsAbs(existingServiceBinary(spec)) {
 			return existingCoreDiscoveryState{}, errors.New("existing-core discovery mapping is invalid")
 		}
