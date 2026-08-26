@@ -126,9 +126,17 @@ volumes:
 networks:
   backend:
     internal: true
+    ipam:
+      config:
+        - subnet: ${QCH_BACKEND_SUBNET:-172.30.252.0/24}
+          gateway: ${QCH_BACKEND_GATEWAY:-172.30.252.1}
   control-host:
     ipam:
       config:
         - subnet: ${QCH_CONTROL_PROXY_SUBNET:-172.30.254.0/24}
           gateway: ${QCH_CONTROL_PROXY_GATEWAY:-172.30.254.1}
   database-host:
+    ipam:
+      config:
+        - subnet: ${QCH_DATABASE_HOST_SUBNET:-172.30.253.0/24}
+          gateway: ${QCH_DATABASE_HOST_GATEWAY:-172.30.253.1}

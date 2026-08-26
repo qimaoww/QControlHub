@@ -31,6 +31,7 @@ import {
   installConfigPages,
   liveConfigEngineEligible,
   liveConfigEditorState,
+  liveConfigReadAction,
   submitLiveConfigChange,
 } from "./modules/configs.js";
 import {
@@ -247,6 +248,117 @@ assert.equal(
   "unsupported existing services remain eligible for the reason page and sidebar",
 );
 assert.equal(liveConfigEngineEligible({ installed: false }), false);
+assert.equal(
+  liveConfigReadAction({
+    sourceMode: "managed",
+    managedReadSupported: false,
+    existingAvailable: false,
+  }),
+  "read-config",
+  "old Agents keep the legacy managed read when no external service exists",
+);
+assert.equal(
+  liveConfigReadAction({
+    sourceMode: "managed",
+    managedReadSupported: false,
+    existingAvailable: true,
+  }),
+  "",
+  "old Agents cannot confuse two coexisting configuration sources",
+);
+assert.equal(
+  liveConfigReadAction({
+    sourceMode: "managed",
+    managedReadSupported: true,
+    existingAvailable: true,
+  }),
+  "read-managed-config",
+);
+assert.equal(
+  liveConfigReadAction({
+    sourceMode: "import",
+    managedReadSupported: true,
+    existingAvailable: true,
+  }),
+  "read-config",
+);
+
+const dualSourceDocument = globalThis.document;
+globalThis.document = {
+  querySelector: () => null,
+  querySelectorAll: () => [],
+};
+try {
+  const dualState = {
+    route: "live-config",
+    navigationEpoch: 1,
+    data: {
+      liveAgent: "dual-node",
+      liveEngine: "xray",
+      liveConfigSource: "managed",
+      liveSources: {
+        "dual-node|xray": { content: '{"tag":"managed"}' },
+        "dual-node|xray|import": { content: '{"tag":"external"}' },
+      },
+    },
+  };
+  const dualAgent = {
+    id: "dual-node",
+    name: "Dual source node",
+    os: "linux",
+    arch: "amd64",
+    status: "online",
+    capabilities: ["xray"],
+    runtime: {
+      xray: {
+        installed: true,
+        version: "25.8",
+        existing_config_available: true,
+      },
+    },
+  };
+  let dualMarkup = "";
+  const pages = installConfigPages({
+    api: async (path) => {
+      if (path === "/agents") return [dualAgent];
+      if (path === "/agents/dual-node/configs/xray/workspace")
+        return { config: { id: "cfg-managed", version: 3 } };
+      assert.fail(`unexpected dual-source path ${path}`);
+    },
+    optionalAPI: async () => null,
+    state: dualState,
+    engines: ["xray"],
+    can: () => true,
+    esc: (value) => String(value ?? ""),
+    engineName: (value) => value,
+    conciseVersion: (_engine, version) => version,
+    date: (value) => value,
+    ago: (value) => value,
+    bytes: (value) => value,
+    confirmAction: async () => true,
+    notify: noop,
+    shell: (markup) => {
+      dualMarkup = markup;
+    },
+    submitTask: noop,
+    bindCodeEditors: noop,
+  });
+  await pages.liveConfig();
+  assert.equal(dualMarkup.includes("现有配置"), true);
+  assert.equal(dualMarkup.includes("可导入配置"), true);
+  assert.equal(dualMarkup.includes('{"tag":"managed"}'), true);
+  assert.equal(dualMarkup.includes("readonly"), false);
+  assert.equal(dualMarkup.includes('data-live-intent="deploy"'), true);
+
+  dualState.data.liveConfigSource = "import";
+  await pages.liveConfig();
+  assert.equal(dualMarkup.includes('{"tag":"external"}'), true);
+  assert.equal(dualMarkup.includes("readonly"), true);
+  assert.equal(dualMarkup.includes('data-live-intent="import"'), true);
+} finally {
+  if (dualSourceDocument === undefined) delete globalThis.document;
+  else globalThis.document = dualSourceDocument;
+}
 
 const unsupportedDocument = globalThis.document;
 const unsupportedState = {
@@ -422,7 +534,8 @@ try {
 
   const migrationSnapshot =
     '{"inbounds":[{"tag":"complete-existing-snapshot"}]}';
-  runtimeState.data.liveSources["upgraded-node|sing-box"] = {
+  runtimeState.data.liveConfigSource = "import";
+  runtimeState.data.liveSources["upgraded-node|sing-box|import"] = {
     content: migrationSnapshot,
     taskId: "read-after-upgrade",
   };
@@ -471,9 +584,10 @@ try {
     data: {
       liveAgent: "race-node",
       liveEngine: "sing-box",
+      liveConfigSource: "import",
       agents: [],
       liveSources: {
-        "race-node|sing-box": { content: '{"log":{"level":"info"}}' },
+        "race-node|sing-box|import": { content: '{"log":{"level":"info"}}' },
       },
     },
   };
@@ -649,6 +763,7 @@ for (const install of [
   const makeAgent = (id = AGENT_ID) => ({
     id, name: `Agent-${id}`, os: "linux", arch: "amd64",
     status: "online", capabilities: [ENGINE],
+    features: ["managed-config-read-v1"],
     runtime: { [ENGINE]: { installed: true } },
   });
 
@@ -771,7 +886,7 @@ for (const install of [
       })(),
       "POST /tasks": (options) => {
         const body = JSON.parse(options?.body || "{}");
-        if (body.action === "read-config") {
+        if (body.action === "read-managed-config") {
           freshReadCount += 1;
           return { id: `read-${freshReadCount}` };
         }
@@ -985,7 +1100,7 @@ for (const install of [
       })(),
       "POST /tasks": (options) => {
         const body = JSON.parse(options?.body || "{}");
-        if (body.action === "read-config") {
+        if (body.action === "read-managed-config") {
           editorReadCountE += 1;
           return { id: "read-e1" };
         }
@@ -1037,7 +1152,7 @@ for (const install of [
 
     // Strict: post-A fresh read completed and cached NEW_CONTENT.
     assert.ok(editorReadCountE >= 1,
-      "[E] post-A fresh read-config fired");
+      "[E] post-A fresh managed-config read fired");
     assert.equal(state.data.liveSources?.[KEY]?.content, NEW_CONTENT,
       "[E] cache contains post-deploy content (not OLD_CONTENT) after B failed");
   }
@@ -1088,7 +1203,7 @@ for (const install of [
     assert.equal(state.data.pendingDeployTasks?.[KEY], undefined,
       "[F] pending cleared after editor deploy succeeded");
     assert.ok(editorReadCount >= 1,
-      "[F] fresh read-config fired after editor deploy succeeded");
+      "[F] fresh managed-config read fired after editor deploy succeeded");
     assert.equal(state.data.liveSources?.[KEY]?.content, NEW_CONTENT,
       "[F] cache contains post-deploy content after convergence");
   }
@@ -1356,7 +1471,11 @@ try {
       metrics: {},
       capabilities: ["sing-box"],
       runtime: {
-        "sing-box": { installed: false, service_status: "unknown" },
+        "sing-box": {
+          installed: false,
+          service_status: "unknown",
+          existing_config_available: true,
+        },
       },
     },
   ];
@@ -2155,7 +2274,12 @@ const presetAgents = [
     runtime: Object.fromEntries(
       presetEngines.map((engine) => [
         engine,
-        { installed: true, service_status: "active", version: "1.0.0" },
+        {
+          installed: true,
+          service_status: "active",
+          version: "1.0.0",
+          ...(engine === "xray" ? { existing_config_available: true } : {}),
+        },
       ]),
     ),
   },
@@ -2306,9 +2430,9 @@ try {
     "unsupported preset engine keeps a config entry",
   );
   assert.equal(
-    presetMarkup.includes("查看不可迁移原因"),
+    presetMarkup.includes("查看现有服务不可导入原因"),
     true,
-    "unsupported preset engine still explains why migration is blocked",
+    "unsupported preset engine still explains why its optional import is unavailable",
   );
 
   presetState.anchor = "preset-node-gamma";
@@ -2328,6 +2452,23 @@ try {
     presetMarkup.includes("source-upgrade-note"),
     false,
     "source-capable Agent hides the upgrade-source explanation",
+  );
+  assert.equal(
+    presetMarkup.includes('data-config="gamma" data-engine="xray"'),
+    true,
+    "an optional import does not replace the managed configuration action",
+  );
+  assert.equal(
+    presetMarkup.includes(
+      'data-manual-agent="gamma" data-manual-engine="xray" aria-label="导入现有服务"',
+    ),
+    true,
+    "an installed managed core keeps a separate optional import action",
+  );
+  assert.equal(
+    presetMarkup.includes("请先手动导入"),
+    false,
+    "optional imports never become an installation prerequisite",
   );
   assert.equal(
     presetMarkup.includes('value="mirror"'),

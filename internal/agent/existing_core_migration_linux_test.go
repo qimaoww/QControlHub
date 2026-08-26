@@ -390,8 +390,15 @@ func TestExistingCoreMigrationRestoresOriginalServiceWhenNewServiceFails(t *test
 func TestExistingCoreMigrationCoordinatesActiveManagedService(t *testing.T) {
 	requireAgentRoot(t)
 	fixture := newExistingCoreMigrationFixture(t, false)
+	if _, err := copyExistingCoreBinary(fixture.existing.Binary, fixture.managed.Binary); err != nil {
+		t.Fatalf("install managed core before migration: %v", err)
+	}
 	writeMigrationServiceState(t, fixture.stateDirectory, "qagent-xray.service", "active", "enabled-runtime")
 	writeMigrationTrigger(t, fixture.stateDirectory, "respawn-managed-on-runtime-stop")
+	runtime := fixture.executor.Runtime(context.Background())[core.EngineXray]
+	if !runtime.Installed || !runtime.ExistingConfigAvailable || runtime.ServiceStatus != "active" {
+		t.Fatalf("installed managed core with optional import = %+v", runtime)
+	}
 	output, err := fixture.executor.Execute(context.Background(), core.Task{
 		Action: core.ActionImportExisting, Engine: core.EngineXray, ConfigContent: fixture.importedConfig,
 	})
@@ -412,6 +419,52 @@ func TestExistingCoreMigrationCoordinatesActiveManagedService(t *testing.T) {
 	stop := strings.Index(log, "stop qagent-xray.service")
 	if runtimeDisable < 0 || stop < 0 || runtimeDisable > stop {
 		t.Fatalf("runtime enablement was not cleared before managed stop: %q", log)
+	}
+}
+
+func TestPendingExistingServiceDoesNotBlockManagedCoreOperations(t *testing.T) {
+	requireAgentRoot(t)
+	fixture := newExistingCoreMigrationFixture(t, false)
+
+	runtime := fixture.executor.Runtime(context.Background())[core.EngineXray]
+	if runtime.Installed || !runtime.ExistingConfigAvailable || runtime.ServiceStatus != "inactive" {
+		t.Fatalf("uninstalled managed core with optional import = %+v", runtime)
+	}
+	status, err := fixture.executor.Execute(context.Background(), core.Task{
+		Action: core.ActionStatus, Engine: core.EngineXray,
+	})
+	if err != nil || strings.TrimSpace(status) != "inactive" {
+		t.Fatalf("managed status while import is available = %q, %v", status, err)
+	}
+	if _, err := fixture.executor.Execute(context.Background(), core.Task{
+		Action: core.ActionInstall, Engine: core.EngineXray, CoreVersion: "not/a/version",
+	}); err == nil || strings.Contains(err.Error(), "import") || strings.Contains(err.Error(), "导入") || !strings.Contains(err.Error(), "内核版本") {
+		t.Fatalf("managed install was still gated by optional import: %v", err)
+	}
+	if _, err := copyExistingCoreBinary(fixture.existing.Binary, fixture.managed.Binary); err != nil {
+		t.Fatalf("stage independently installed managed core: %v", err)
+	}
+	if _, err := fixture.executor.Execute(context.Background(), core.Task{
+		Action: core.ActionDeploy, Engine: core.EngineXray, ConfigContent: fixture.originalManagedConfig,
+	}); err != nil {
+		t.Fatalf("deploy managed configuration while optional import remains: %v", err)
+	}
+	externalSnapshot, err := fixture.executor.Execute(context.Background(), core.Task{
+		Action: core.ActionReadConfig, Engine: core.EngineXray,
+	})
+	if err != nil || externalSnapshot != fixture.importedConfig {
+		t.Fatalf("external import snapshot = %q, %v", externalSnapshot, err)
+	}
+	managedSnapshot, err := fixture.executor.Execute(context.Background(), core.Task{
+		Action: core.ActionReadManagedConfig, Engine: core.EngineXray,
+	})
+	if err != nil || managedSnapshot != fixture.originalManagedConfig {
+		t.Fatalf("managed configuration snapshot = %q, %v", managedSnapshot, err)
+	}
+	fixture.assertServiceState(t, "xray.service", "active", "enabled")
+	fixture.assertServiceState(t, "qagent-xray.service", "active", "disabled")
+	if _, pending := fixture.executor.ExistingSpecs[core.EngineXray]; !pending {
+		t.Fatal("ordinary managed operation discarded the optional import")
 	}
 }
 

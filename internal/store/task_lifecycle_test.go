@@ -857,7 +857,7 @@ func enrollTaskTestAgent(t *testing.T, ctx context.Context, dataStore *Store) (c
 	agent, err := dataStore.EnrollAgent(ctx, core.EnrollRequest{
 		Name: "task-lifecycle-agent", OS: "linux", Arch: "amd64",
 		Capabilities: []core.Engine{core.EngineMihomo},
-		Features:     []string{core.AgentFeatureSelfUpgrade},
+		Features:     []string{core.AgentFeatureSelfUpgrade, core.AgentFeatureManagedConfigRead},
 		PublicKey:    base64.RawURLEncoding.EncodeToString(publicKey),
 	}, enrollment.Token)
 	if err != nil {

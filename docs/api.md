@@ -64,7 +64,7 @@
 | `GET` | `/api/v1/tasks?agent_id=&status=&action=&limit=` | 按节点、状态和动作筛选任务；`limit` 为 1–500，默认 100 |
 | `POST` | `/api/v1/tasks` | 创建远程任务 |
 | `GET` | `/api/v1/tasks/{id}` | 读取单个任务及结果 |
-| `GET` | `/api/v1/tasks/{id}/config-snapshot` | 读取已成功 `read-config` 任务的短期配置快照（同时需要 `tasks.read` 与 `agent-config.read`） |
+| `GET` | `/api/v1/tasks/{id}/config-snapshot` | 读取已成功 `read-config` 或 `read-managed-config` 任务的短期配置快照（同时需要 `tasks.read` 与 `agent-config.read`） |
 | `DELETE` | `/api/v1/tasks/{id}` | 取消尚未领取的任务 |
 | `POST` | `/api/v1/tasks/{id}/retry` | 按当前配置重试失败或已取消任务 |
 | `GET` | `/api/v1/enrollment-tokens` | 列出添加节点记录，不返回原始凭证（admin） |
@@ -178,7 +178,7 @@ Content-Type: application/json
 
 ### 列出任务
 
-任务列表筛选条件可组合使用。`agent_id` 接受完整 Agent ID；`status` 允许 `pending`、`running`、`succeeded`、`failed`、`canceled`；`action` 允许 `validate`、`deploy`、`import-existing`、`read-config`、`start`、`stop`、`restart`、`status`、`install`。`limit` 默认为 100，最大为 500；无效的 `status` 或 `action` 返回 `400`。
+任务列表筛选条件可组合使用。`agent_id` 接受完整 Agent ID；`status` 允许 `pending`、`running`、`succeeded`、`failed`、`canceled`；`action` 允许 `validate`、`deploy`、`import-existing`、`read-config`、`read-managed-config`、`start`、`stop`、`restart`、`status`、`install`。`limit` 默认为 100，最大为 500；无效的 `status` 或 `action` 返回 `400`。
 
 ### 创建任务
 
@@ -193,7 +193,7 @@ Content-Type: application/json
 }
 ```
 
-`read-config` 不接受 `config_id`。Agent 只会读取该内核启动配置中预先配置的绝对白名单路径，拒绝符号链接、不安全归属或权限、非 UTF-8 以及超过 2 MiB 的文件，并在返回前调用目标节点上的真实内核校验。读取结果作为短期配置快照保存，不出现在普通任务列表响应中；同一节点和内核新的成功读取会清除上一份快照。
+`read-config` 与 `read-managed-config` 都不接受 `config_id`。前者在存在安全映射的系统服务时读取“可导入配置”，后者始终读取 QAgent 托管的“现有配置”；因此两份配置可在手动配置页独立预览和切换。未声明 `managed-config-read-v1` 的旧 Agent 在没有外部服务映射时仍沿用 `read-config` 读取托管配置；只有两份配置并存时才需要先升级 Agent。Agent 只会读取预先配置的绝对白名单路径，拒绝符号链接、不安全归属或权限、非 UTF-8 以及超过 2 MiB 的文件，并在返回前调用目标节点上的真实内核校验。读取结果作为短期配置快照保存，不出现在普通任务列表响应中；同一节点、内核和读取类型新的成功读取会清除上一份同类型快照。
 
 服务动作不使用 `config_id`：
 
@@ -216,7 +216,7 @@ Content-Type: application/json
 }
 ```
 
-允许的 `action` 为 `validate`、`deploy`、`import-existing`、`read-config`、`start`、`stop`、`restart`、`status`、`install`。Agent 必须在注册能力中声明对应内核。若心跳报告某内核检测到现有服务但无法安全映射，或 completed migration 在重启时不再满足原服务 inactive/disabled、托管服务 active/persistent-enabled 的完成态，控制面会对该内核的全部 action 返回 `409`，Agent 执行器也会独立拒绝已在途任务。`import-existing` 只接受该节点自己保存的配置快照，并且只在 Agent 已精确识别、仍等待管理员确认的现有 Xray 或 sing-box 服务上执行；常规使用应从“手动配置”页提交。稳定版和自定义版本使用对应内核的官方 GitHub Release，不接受自定义 URL；某来源没有可用二进制时，对应任务失败而不会降级到另一来源或稳定版。
+允许的 `action` 为 `validate`、`deploy`、`import-existing`、`read-config`、`read-managed-config`、`start`、`stop`、`restart`、`status`、`install`。Agent 必须在注册能力中声明对应内核。若心跳报告某内核检测到现有服务但无法安全映射，或 completed migration 在重启时不再满足原服务 inactive/disabled、托管服务 active/persistent-enabled 的完成态，控制面会对该内核的全部 action 返回 `409`，Agent 执行器也会独立拒绝已在途任务。`import-existing` 只接受该节点自己保存的可导入配置快照，并且只在 Agent 已精确识别、仍等待管理员确认的现有 Xray 或 sing-box 服务上执行；常规使用应从“手动配置”页的“可导入配置”视图提交。稳定版和自定义版本使用对应内核的官方 GitHub Release，不接受自定义 URL；某来源没有可用二进制时，对应任务失败而不会降级到另一来源或稳定版。
 
 Mihomo `development` 安装额外接受 `core_source`，取值为 `official`（默认、推荐，省略该字段等价于 `official`）或 `mirror`（显式选择第三方 `vernesong/mihomo` Alpha 镜像）：
 
@@ -244,7 +244,7 @@ Mihomo `development` 安装额外接受 `core_source`，取值为 `official`（�
 
 任务成功响应表示目标节点已完成对应操作；失败响应会保留节点返回的错误信息。部署任务只有在目标节点真实写入配置并成功重启服务后，才会进入节点的最新部署记录。
 
-成功的 `read-config` 任务不会在普通任务列表或任务详情中返回配置正文。读取完成后，同时具备 `tasks.read` 与 `agent-config.read` 的用户可使用 `GET /api/v1/tasks/{id}/config-snapshot` 获取 `{ "content": "..." }`；仅有 `tasks.read` 仍可查看任务记录，但读取快照会返回 `403`。当快照已被同一节点和内核的后续成功读取清理时返回 `404`。
+成功的 `read-config` 与 `read-managed-config` 任务不会在普通任务列表或任务详情中返回配置正文。读取完成后，同时具备 `tasks.read` 与 `agent-config.read` 的用户可使用 `GET /api/v1/tasks/{id}/config-snapshot` 获取 `{ "content": "..." }`；仅有 `tasks.read` 仍可查看任务记录，但读取快照会返回 `403`。当快照已被同一节点、内核和读取类型的后续成功读取清理时返回 `404`。
 
 ### 状态码
 
