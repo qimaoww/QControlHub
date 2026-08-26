@@ -267,6 +267,61 @@ func TestNormalizeImportedXrayLogDestinations(t *testing.T) {
 	}
 }
 
+func TestNormalizeImportedSingBoxLogDestination(t *testing.T) {
+	root := t.TempDir()
+	previous := importedSingBoxLogRoot
+	importedSingBoxLogRoot = root
+	t.Cleanup(func() { importedSingBoxLogRoot = previous })
+
+	unsafe := `{"log":{"level":"info","timestamp":true,"output":"/var/log/sing-box/box.log"},"inbounds":[],"outbounds":[]}`
+	normalized, err := normalizeImportedSingBoxLogDestination(unsafe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(normalized), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	logging := decoded["log"].(map[string]any)
+	if logging["output"] != "stdout" || logging["level"] != "info" || logging["timestamp"] != true {
+		t.Fatalf("normalized sing-box log policy = %+v", logging)
+	}
+
+	for name, content := range map[string]string{
+		"relative file": `{"log":{"output":"runtime.log"}}`,
+		"managed file":  `{"log":{"output":"` + filepath.ToSlash(filepath.Join(root, "runtime.log")) + `"}}`,
+		"console":       `{"log":{"output":"stderr"}}`,
+		"disabled":      `{"log":{"disabled":true,"output":"/var/log/sing-box/box.log"}}`,
+	} {
+		if got, err := normalizeImportedSingBoxLogDestination(content); err != nil || got != content {
+			t.Errorf("%s changed: %q, %v", name, got, err)
+		}
+	}
+	if _, err := normalizeImportedSingBoxLogDestination("{\"log\":{\"output\":\"bad\\npath\"}}"); err == nil {
+		t.Fatal("sing-box log output containing a control character was normalized")
+	}
+}
+
+func TestManagedCoreBootstrapCapabilities(t *testing.T) {
+	root := t.TempDir()
+	legacy := filepath.Join(root, "legacy.sh")
+	if err := os.WriteFile(legacy, []byte("#!/bin/sh\n"+legacyCoreStateDirectoryInstall+"\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	capabilities, err := managedCoreBootstrapCapabilities(legacy)
+	if err != nil || capabilities != "CAP_CHOWN CAP_FOWNER" {
+		t.Fatalf("legacy bootstrap capabilities = %q, %v", capabilities, err)
+	}
+	current := filepath.Join(root, "current.sh")
+	if err := os.WriteFile(current, []byte("#!/bin/sh\nensure_service_state_directory \"$state_directory\"\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	capabilities, err = managedCoreBootstrapCapabilities(current)
+	if err != nil || capabilities != "CAP_CHOWN" {
+		t.Fatalf("current bootstrap capabilities = %q, %v", capabilities, err)
+	}
+}
+
 func TestImportedSingBoxPreservesManagedFileLogOutput(t *testing.T) {
 	root := t.TempDir()
 	previous := importedSingBoxLogRoot

@@ -270,7 +270,7 @@ func TestExistingSingBoxSnapshotMergesExactConfigDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	primary := filepath.Join(root, "config.json")
-	if err := os.WriteFile(primary, []byte(`{"log":{"level":"info"},"inbounds":[{"tag":"primary"}]}`), 0o600); err != nil {
+	if err := os.WriteFile(primary, []byte(`{"log":{"level":"info","timestamp":true,"output":"/var/log/sing-box/box.log"},"inbounds":[{"tag":"primary"}]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(configDirectory, "10-outbounds.json"), []byte(`{"outbounds":[{"tag":"direct","type":"direct"}]}`), 0o600); err != nil {
@@ -294,6 +294,9 @@ func TestExistingSingBoxSnapshotMergesExactConfigDirectory(t *testing.T) {
 		if !strings.Contains(content, required) {
 			t.Errorf("merged snapshot is missing %s: %s", required, content)
 		}
+	}
+	if !strings.Contains(content, `"output": "stdout"`) || !strings.Contains(content, `"timestamp": true`) {
+		t.Fatalf("unsafe existing sing-box file log was not normalized to managed console output: %s", content)
 	}
 	if strings.Contains(content, `"level": "info"`) {
 		t.Fatalf("later path unexpectedly replaced the earlier sorted sing-box value: %s", content)
