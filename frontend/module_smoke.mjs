@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import "./refresh_smoke.mjs";
 
 import {
+  agentStructureSignature,
   animateNodeCardDrop,
   batchAgentEligibility,
   batchSelectAllState,
@@ -45,6 +46,26 @@ import { createLatestRenderScheduler } from "./modules/refresh.js";
 
 const state = { data: {}, session: { role: "admin" } };
 const noop = () => {};
+
+assert.equal(
+  agentStructureSignature([
+    { id: "beta" },
+    { id: "alpha" },
+  ]),
+  agentStructureSignature([
+    { id: "alpha" },
+    { id: "beta" },
+  ]),
+  "Agent structure signatures ignore response ordering",
+);
+assert.notEqual(
+  agentStructureSignature([{ id: "alpha", capabilities: ["mihomo"] }]),
+  agentStructureSignature([
+    { id: "alpha", capabilities: ["mihomo"] },
+    { id: "new-node", capabilities: [] },
+  ]),
+  "Agent structure signatures detect newly enrolled nodes",
+);
 
 const coreLogFilterFixture = [
   { engine: "mihomo", level: "debug", message: "bootstrap complete" },
@@ -210,6 +231,14 @@ await submitLiveConfigChange({
 assert.equal(migrationTaskAttempts, 2, "failed import remains retryable without another revision");
 
 assert.equal(liveConfigEngineEligible({ installed: true }), true);
+assert.equal(
+  liveConfigEngineEligible({
+    installed: false,
+    existing_config_available: true,
+  }),
+  true,
+  "migratable existing services remain selectable in manual configuration",
+);
 assert.equal(
   liveConfigEngineEligible({
     existing_config_unsupported_reason: "unsupported wrapper",
@@ -1406,6 +1435,45 @@ try {
     structureInstalledSummary.textContent,
     "linux / amd64 · 尚未安装内核",
   );
+
+  // A newly enrolled Agent has no existing card to patch. The fleet poll must
+  // request one structural render so it appears without a browser refresh.
+  const newlyEnrolled = {
+    id: "new-node",
+    name: "New node",
+    os: "linux",
+    arch: "amd64",
+    status: "online",
+    metrics: {},
+    capabilities: [],
+    runtime: {},
+    labels: {},
+    features: [],
+  };
+  const expandedFleet = () => [...singleEngine(), newlyEnrolled];
+  structureRequests = 0;
+  structureRenders = 0;
+  structureMarkup = "";
+  compactPolling = false;
+  structureState.anchor = "node-settings";
+  structureState.data.nodeView = "overview";
+  structureState.data.agents = singleEngine();
+  structurePayload = expandedFleet;
+  controlledRender = {
+    used: false,
+    promise: Promise.resolve(expandedFleet()),
+  };
+  await pollAgentMetrics();
+  clearTimeout(structureState.agentPollTimer);
+  await flushMicrotasks();
+  assert.equal(structureRequests, 2, "new Agent detection uses one poll and one render request");
+  assert.equal(structureRenders, 1, "a new Agent triggers one structural render");
+  assert.equal(
+    structureMarkup.includes('data-agent-node="new-node"'),
+    true,
+    "the structural render includes the newly enrolled Agent card",
+  );
+  clearTimeout(structureState.agentPollTimer);
 } finally {
   if (structureDocument === undefined) delete globalThis.document;
   else globalThis.document = structureDocument;
@@ -2862,6 +2930,34 @@ try {
     metricState.data.agents.map((agent) => agent.id),
     ["alpha", "beta", "gamma"],
     "metrics polling synchronizes the shared Agent runtime snapshot",
+  );
+
+  let rosterOnlyRequests = 0;
+  const rosterOnlyState = {
+    route: "node-settings",
+    navigationEpoch: 1,
+    data: {},
+  };
+  const { pollAgentMetrics: pollAgentRoster } = installAgents(
+    new Proxy(
+      {
+        state: rosterOnlyState,
+        api: async (path) => {
+          assert.equal(path, "/agents");
+          rosterOnlyRequests += 1;
+          return [];
+        },
+        can: (capability) => capability === "agents.read",
+      },
+      { get: (target, key) => target[key] ?? noop },
+    ),
+  );
+  await pollAgentRoster();
+  clearTimeout(rosterOnlyState.agentPollTimer);
+  assert.equal(
+    rosterOnlyRequests,
+    1,
+    "Agent roster polling does not require metrics permission",
   );
 } finally {
   if (pollingDocument === undefined) delete globalThis.document;
