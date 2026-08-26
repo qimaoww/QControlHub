@@ -1,6 +1,7 @@
 package core
 
 import (
+	"encoding/json"
 	"errors"
 	"math"
 	"strings"
@@ -59,6 +60,18 @@ type PortTrafficPolicy struct {
 	LastReportedAt       *time.Time      `json:"last_reported_at,omitempty"`
 	CreatedAt            time.Time       `json:"created_at"`
 	UpdatedAt            time.Time       `json:"updated_at"`
+}
+
+// UnmarshalJSON preserves the original enforcement behavior when an older
+// control plane or persisted Agent state does not contain auto_block.
+func (policy *PortTrafficPolicy) UnmarshalJSON(data []byte) error {
+	type wirePolicy PortTrafficPolicy
+	decoded := wirePolicy{AutoBlock: true}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*policy = PortTrafficPolicy(decoded)
+	return nil
 }
 
 type PortTrafficPolicyRequest struct {

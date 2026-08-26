@@ -1,6 +1,7 @@
 package core
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 )
@@ -33,6 +34,28 @@ func TestTrafficPeriodAtUsesCalendarAnchor(t *testing.T) {
 	start, end, err := TrafficPeriodAt(leapAnchor, TrafficCycleYearly, time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC))
 	if err != nil || start.Format(time.DateOnly) != "2025-02-28" || end.Format(time.DateOnly) != "2026-02-28" {
 		t.Fatalf("leap anniversary = %s..%s, %v", start.Format(time.DateOnly), end.Format(time.DateOnly), err)
+	}
+}
+
+func TestPortTrafficPolicyJSONDefaultsLegacyAutoBlock(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		body string
+		want bool
+	}{
+		{name: "legacy field omitted", body: `{"id":"trf_0123456789abcdef"}`, want: true},
+		{name: "monitor only explicit", body: `{"id":"trf_0123456789abcdef","auto_block":false}`, want: false},
+		{name: "blocking explicit", body: `{"id":"trf_0123456789abcdef","auto_block":true}`, want: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var policy PortTrafficPolicy
+			if err := json.Unmarshal([]byte(test.body), &policy); err != nil {
+				t.Fatal(err)
+			}
+			if policy.AutoBlock != test.want {
+				t.Fatalf("auto_block = %v, want %v", policy.AutoBlock, test.want)
+			}
+		})
 	}
 }
 
