@@ -197,7 +197,10 @@ openrc_state_directory_chain() {
     "$openrc_state_root"|"$openrc_state_root"/*) ;;
     *) return 1 ;;
   esac
-  validate_directory_chain "$1" true
+  validate_directory_chain "$1" true || return 1
+  # End the gid-0 exception at OpenRC's state root. Its parent (/run on a
+  # stock system) remains subject to the general protected-path policy.
+  protected_directory_chain "$(dirname -- "$openrc_state_root")"
 }
 
 validate_directory_chain() {
@@ -226,15 +229,21 @@ validate_directory_chain() {
 protected_config_directory() {
   config_directory=$1
   primary=$2
+  config_engine=$3
   protected_directory_chain "$config_directory" || return 1
   # A directory-authoritative mapping has no main configuration file, so the
   # size budget starts empty and the directory alone has to stay within it.
-  if [ -n "$primary" ]; then
+  case "$config_engine" in
+    xray) config_patterns="$config_directory/*.json $config_directory/*.jsonc $config_directory/*.toml $config_directory/*.yaml $config_directory/*.yml" ;;
+    sing-box) config_patterns="$config_directory/*.json" ;;
+    *) return 1 ;;
+  esac
+  if [ -n "$primary" ] && { [ "$config_engine" = xray ] || [ "$primary" != "$config_directory/config.json" ]; }; then
     total=$(wc -c < "$primary") || return 1
   else
     total=0
   fi
-  for config_candidate in "$config_directory"/*.json; do
+  for config_candidate in $config_patterns; do
     [ -e "$config_candidate" ] || continue
     protected_regular_file "$config_candidate" false || return 1
     size=$(wc -c < "$config_candidate") || return 1
@@ -339,7 +348,7 @@ service_uses_paths() {
     # binding this mapping could prove, so it stays rejected here.
     [ -z "$matched_work_directory" ] || return 1
     if [ -n "$matched_config_directory" ]; then
-      protected_config_directory "$matched_config_directory" "$config" || return 1
+      protected_config_directory "$matched_config_directory" "$config" "$engine" || return 1
     fi
     return 0
   fi
@@ -352,7 +361,7 @@ service_uses_paths() {
   config_path_from_argv "$engine" "$binary" "$argv" || return 1
   [ "$matched_config_path" = "$config" ] || return 1
   if [ -n "$matched_config_directory" ]; then
-    protected_config_directory "$matched_config_directory" "$config" || return 1
+    protected_config_directory "$matched_config_directory" "$config" "$engine" || return 1
   fi
   if [ -n "$matched_work_directory" ]; then
     case "$matched_work_directory" in /*) ;; *) return 1 ;; esac

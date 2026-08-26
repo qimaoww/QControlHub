@@ -292,7 +292,13 @@ func validateOpenRCStateDirectoryChain(directory, stateRoot string) error {
 	if err != nil || filepath.IsAbs(relative) || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
 		return errors.New("OpenRC state directory is outside the OpenRC state root")
 	}
-	return validateDirectoryChain(directory, true)
+	if err := validateDirectoryChain(directory, true); err != nil {
+		return err
+	}
+	// The gid-0 write exception ends at the state root. Its parent chain (for
+	// stock OpenRC, /run and /) is still a general protected path and therefore
+	// must remain non-writable by both group and others.
+	return validateProtectedDirectoryChain(filepath.Dir(filepath.Clean(stateRoot)))
 }
 
 func validateDirectoryChain(directory string, allowRootGroupWrite bool) error {
@@ -533,7 +539,13 @@ func (e *Executor) readCurrentConfig(ctx context.Context, engine core.Engine, sp
 }
 
 func (e *Executor) readExistingConfig(ctx context.Context, engine core.Engine, managed, existing EngineSpec) (string, error) {
-	content, sourceDigest, err := readExistingConfigurationSources(existing)
+	var content, sourceDigest string
+	var err error
+	if engine == core.EngineXray && existing.ConfigDirectory != "" {
+		sourceDigest, err = readExistingXraySourceDigest(existing)
+	} else {
+		content, sourceDigest, err = readExistingConfigurationSources(existing)
+	}
 	if err != nil {
 		return "", fmt.Errorf("read existing %s configuration: %w", engine, err)
 	}
@@ -553,13 +565,29 @@ func (e *Executor) readExistingConfig(ctx context.Context, engine core.Engine, m
 	if err := validateExistingServiceExecutable(existing); err != nil {
 		return "", fmt.Errorf("cannot safely map existing %s service executable: %w", engine, err)
 	}
-	if err := validateExistingSourceInvocation(ctx, engine, existing); err != nil {
+	if engine == core.EngineXray && existing.ConfigDirectory != "" {
+		// Xray's multi-file semantics are typed and tag-aware: later scalar
+		// sections replace earlier ones, while same-tag inbounds/outbounds are
+		// updated rather than appended. Reusing sing-box's generic JSON merge
+		// would silently change a valid service. Ask the protected source binary
+		// for its canonical merged form instead and fail closed if it cannot dump
+		// one.
+		content, err = dumpExistingXrayConfiguration(ctx, existing)
+		if err != nil {
+			return "", fmt.Errorf("dump existing Xray configuration sources: %w", err)
+		}
+	} else if err := validateExistingSourceInvocation(ctx, engine, existing); err != nil {
 		return "", fmt.Errorf("existing %s configuration sources failed real core validation: %w", engine, err)
 	}
 	if _, err := e.validateSnapshot(ctx, engine, validationSpec, content); err != nil {
 		return "", fmt.Errorf("existing %s configuration failed real core validation: %w", engine, err)
 	}
-	_, currentDigest, err := readExistingConfigurationSources(existing)
+	var currentDigest string
+	if engine == core.EngineXray && existing.ConfigDirectory != "" {
+		currentDigest, err = readExistingXraySourceDigest(existing)
+	} else {
+		_, currentDigest, err = readExistingConfigurationSources(existing)
+	}
 	if err != nil || currentDigest != sourceDigest {
 		if err == nil {
 			err = errors.New("configuration sources changed while the snapshot was validated")
@@ -567,6 +595,125 @@ func (e *Executor) readExistingConfig(ctx context.Context, engine core.Engine, m
 		return "", fmt.Errorf("recheck existing %s configuration sources: %w", engine, err)
 	}
 	return content, nil
+}
+
+// readExistingXraySourceDigest reads and fingerprints every exact source that
+// Xray will merge. It deliberately does not apply the sing-box JSON merger:
+// Xray's own -dump output is the only configuration snapshot used for import.
+func readExistingXraySourceDigest(spec EngineSpec) (string, error) {
+	if spec.ConfigDirectory == "" {
+		return "", errors.New("Xray configuration directory is empty")
+	}
+	if err := validateProtectedDirectoryChain(spec.ConfigDirectory); err != nil {
+		return "", fmt.Errorf("configuration directory parent chain is unsafe: %w", err)
+	}
+	entries, err := os.ReadDir(spec.ConfigDirectory)
+	if err != nil {
+		return "", err
+	}
+	sources := make([]existingConfigSource, 0, len(entries)+1)
+	// Unlike sing-box's official -C-only form, any Xray ConfigPath here came
+	// from an explicit -config flag. If it also lives in the confdir, Xray reads
+	// it once from the flag and once from the directory, so preserve both source
+	// occurrences in the size budget and digest.
+	if spec.ConfigPath != "" {
+		primary, err := readConfigurationFile(spec.ConfigPath)
+		if err != nil {
+			return "", err
+		}
+		sources = append(sources, existingConfigSource{path: spec.ConfigPath, content: primary})
+	}
+	for _, entry := range entries {
+		if !isXrayConfigurationFilename(entry.Name()) {
+			continue
+		}
+		if entry.Type()&os.ModeSymlink != 0 || entry.IsDir() {
+			return "", fmt.Errorf("configuration directory entry %q is not a regular non-symlink Xray configuration file", entry.Name())
+		}
+		path := filepath.Join(spec.ConfigDirectory, entry.Name())
+		contents, err := readConfigurationFile(path)
+		if err != nil {
+			return "", fmt.Errorf("read configuration directory entry %q: %w", entry.Name(), err)
+		}
+		sources = append(sources, existingConfigSource{path: path, content: contents})
+	}
+	sort.SliceStable(sources, func(i, j int) bool { return sources[i].path < sources[j].path })
+	total := 0
+	digest := sha256.New()
+	for _, source := range sources {
+		total += len(source.content)
+		if total > core.MaxConfigBytes {
+			return "", fmt.Errorf("combined configuration sources exceed %d bytes", core.MaxConfigBytes)
+		}
+		digest.Write([]byte(source.path))
+		digest.Write([]byte{0})
+		digest.Write([]byte(source.content))
+		digest.Write([]byte{0})
+	}
+	if len(sources) == 0 {
+		return "", errors.New("Xray configuration directory has no supported configuration sources")
+	}
+	return hex.EncodeToString(digest.Sum(nil)), nil
+}
+
+func isXrayConfigurationFilename(name string) bool {
+	// Xray's confdir regex is case-sensitive; keep this list exact so the
+	// fingerprint covers precisely the files its loader selects.
+	switch filepath.Ext(name) {
+	case ".json", ".jsonc", ".toml", ".yaml", ".yml":
+		return true
+	default:
+		return false
+	}
+}
+
+// dumpExistingXrayConfiguration invokes Xray's own config merger over the exact
+// protected sources discovered from the service argv. stdout is the canonical
+// JSON snapshot; diagnostics stay on stderr so they can never be mistaken for
+// configuration content.
+func dumpExistingXrayConfiguration(ctx context.Context, spec EngineSpec) (string, error) {
+	args := []string{"run", "-dump", "-confdir", spec.ConfigDirectory}
+	if spec.ConfigPath != "" {
+		args = []string{"run", "-dump", "-config", spec.ConfigPath, "-confdir", spec.ConfigDirectory}
+	}
+	commandContext, cancel := context.WithCancel(ctx)
+	defer cancel()
+	command := exec.CommandContext(commandContext, spec.Binary, args...)
+	command.Dir = filepath.Dir(spec.Binary)
+	command.Env = []string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin", "LANG=C", "LC_ALL=C"}
+	configureCommand(command)
+	stdout := &boundedOutput{limit: core.MaxConfigBytes, onLimit: cancel}
+	stderr := &boundedOutput{limit: 64 << 10, onLimit: cancel}
+	command.Stdout = stdout
+	command.Stderr = stderr
+	err := command.Run()
+	if ctx.Err() != nil {
+		return "", ctx.Err()
+	}
+	if stdout.Truncated() {
+		return "", fmt.Errorf("Xray merged configuration exceeds %d bytes", core.MaxConfigBytes)
+	}
+	if stderr.Truncated() {
+		return "", errors.New("Xray dump diagnostics exceeded the output limit")
+	}
+	diagnostics := strings.TrimSpace(strings.ToValidUTF8(stderr.String(), "�"))
+	if err != nil {
+		if diagnostics != "" {
+			return "", fmt.Errorf("%w: %s", err, diagnostics)
+		}
+		return "", err
+	}
+	content := strings.TrimSpace(stdout.String())
+	if content == "" {
+		return "", errors.New("Xray returned an empty merged configuration")
+	}
+	if !utf8.ValidString(content) {
+		return "", errors.New("Xray returned a non-UTF-8 merged configuration")
+	}
+	if err := core.ValidateConfig(core.EngineXray, content); err != nil {
+		return "", fmt.Errorf("Xray returned malformed merged configuration: %w", err)
+	}
+	return content + "\n", nil
 }
 
 func readExistingConfigurationSources(spec EngineSpec) (string, string, error) {
@@ -789,18 +936,7 @@ func validateExistingSourceInvocation(ctx context.Context, engine core.Engine, s
 		return nil
 	}
 	if engine == core.EngineXray {
-		// Xray applies its own confdir precedence rules, which this reader's
-		// merge does not reproduce field for field. Re-running the real binary
-		// over the exact discovered sources makes any layout that Xray would
-		// resolve differently fail closed before anything is migrated. Assets
-		// such as geoip.dat live next to the installed binary, so resolve
-		// relative lookups from there.
-		args := []string{"run", "-test", "-confdir", spec.ConfigDirectory}
-		if spec.ConfigPath != "" {
-			args = []string{"run", "-test", "-config", spec.ConfigPath, "-confdir", spec.ConfigDirectory}
-		}
-		_, err := runInDirectory(ctx, filepath.Dir(spec.Binary), spec.Binary, args...)
-		return err
+		return errors.New("Xray config directories must be dumped with the source core merger")
 	}
 	if engine != core.EngineSingBox {
 		return nil

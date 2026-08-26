@@ -113,6 +113,12 @@ ln -sfn "$core" "$test_root/proc/200/exe"
 # A stable supervisor/child identity is accepted (the fail-closed path).
 expect_status 0 stable-identity service_uses_paths qch-test-openrc "$core" "$config" xray "$core"
 
+# The root-group exception ends at the OpenRC state root. A group-writable
+# ancestor outside that root must still fail the general protected-path rule.
+chmod 0775 "$test_root"
+expect_status 1 group-writable-openrc-state-ancestor service_uses_paths qch-test-openrc "$core" "$config" xray "$core"
+chmod 0700 "$test_root"
+
 # The exception must not spill into the supervisor pidfile directory. Making
 # that separate directory group-writable still fails under the general rule.
 chmod 0775 "$test_root/openrc-run"

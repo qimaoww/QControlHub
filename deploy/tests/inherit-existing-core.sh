@@ -169,6 +169,19 @@ expect_rejected config-prefix service_uses_paths xray.service "$binary" "$config
 write_exec_start "$binary" "$binary" run -confdir "$(dirname -- "$config")"
 expect_rejected config-directory service_uses_paths xray.service "$binary" "$config" xray
 
+xray_config_directory="$test_root/core/xray-conf.d"
+mkdir -m 0700 "$xray_config_directory"
+printf '%s\n' 'log: {loglevel: warning}' > "$xray_config_directory/20-log.yaml"
+chmod 0600 "$xray_config_directory/20-log.yaml"
+write_exec_start "$binary" "$binary" run -config "$config" -confdir "$xray_config_directory"
+service_uses_paths xray.service "$binary" "$config" xray || {
+  printf '%s\n' 'safe Xray file plus mixed-format config-directory ExecStart was rejected' >&2
+  exit 1
+}
+ln -s "$xray_config_directory/20-log.yaml" "$xray_config_directory/30-linked.yaml"
+expect_rejected xray-symlinked-yaml-directory-entry service_uses_paths xray.service "$binary" "$config" xray
+rm "$xray_config_directory/30-linked.yaml"
+
 write_exec_start "$binary" "$binary" run -config "$config" -config "$config-other"
 expect_rejected multiple-configs service_uses_paths xray.service "$binary" "$config" xray
 

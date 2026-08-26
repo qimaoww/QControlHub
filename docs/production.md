@@ -159,7 +159,7 @@ TLS 入站默认引用 `/etc/qcontrolhub/tls/server.crt` 与 `/etc/qcontrolhub/t
 
 只有同时满足以下条件才会映射：通用服务当前为 active；systemd 只有一个明确的 `ExecStart`，OpenRC 则要求 `/proc` 中恰好一个进程匹配真实二进制和完整参数；Xray 使用 `run -config|-c <file>`、`run -config|-c <file> -confdir <directory>` 或 `run -confdir <directory>`，sing-box 使用 `run -c <file>`、`run --config <file>`，或固定顺序 `run -c <file> -C <directory>`；二进制、配置源及父链均为 root 所有、不是符号链接且不可被组/其他用户写入；全部配置源与合并快照均不超过 2 MiB；QAgent 对完整合并快照执行结构和真实内核校验；对应的 `qagent-*` 专用服务不存在或处于 inactive/failed。未知附加参数、相似路径前缀、多个 `-c`/`-C`/`-confdir`、其他参数顺序、多个启动命令和活动的专用服务都会安全回退。
 
-`run -confdir <directory>` 是“目录权威”形态：该布局没有主配置文件，目录本身就是唯一配置来源，此时映射的配置路径为空而配置目录必须存在。Xray 的 confdir 合并优先级与本读取器的合并规则并不逐字段等价，因此 QAgent 会额外用真实 Xray 二进制对发现到的原始参数执行一次 `run -test`；任何 Xray 会解析成另一种结果的布局都在迁移前 fail closed。
+`run -confdir <directory>` 是“目录权威”形态：该布局没有主配置文件，目录本身就是唯一配置来源，此时映射的配置路径为空而配置目录必须存在。Xray 的 confdir 具有按类型和 tag 覆盖的专用语义，QAgent 不用通用 JSON 规则猜测其结果，而是保护并跟踪 Xray 会读取的 `.json`、`.jsonc`、`.toml`、`.yaml`、`.yml` 源，再调用受保护的源 Xray 二进制以 `run -dump` 生成规范化快照；不支持安全导出、导出超限或导出结果无效时会 fail closed。
 
 sing-box 的 `-C` 表示配置目录，而不是工作目录。QAgent 按 sing-box 的路径排序、对象递归合并、数组追加和“较早标量优先”规则读取主文件及目录中全部 `.json`，拒绝符号链接、非普通 JSON 条目、权限不安全或读取期间发生变化的目录，并分别用原始 `-c/-C` 参数和合并后的单文件快照执行真实内核校验。这样页面展示并迁移的是完整生效配置，不会遗漏目录片段。
 
@@ -177,7 +177,7 @@ sing-box 的 `-C` 表示配置目录，而不是工作目录。QAgent 按 sing-b
 
 只有文件准备全部成功后，Agent 才停止原通用服务并启动、稳定验证对应的 `qagent-*` 服务；随后启用新服务，并清除原服务可验证的开机启用链接。正常迁移和崩溃恢复共用最后完成门禁：在紧邻 `migrated` marker 前的同一个持续窗口内，反复确认原服务为 `inactive + disabled`、新服务为 `active + enabled`。瞬态、未知、服务退出、enable/disable 空成功或链接残留都会进入完整回滚；回滚始终先停止并持续确认新服务 inactive，再恢复双方原 enable 层级和 managed 文件、启动原服务并持续确认安全服务对，只有服务和文件均恢复且最后核验通过才删除 `migrating-v2` marker。任何启动、enable/disable、文件或状态落盘步骤失败，都会恢复原二进制与配置并保持可恢复状态。迁移成功是一次真实部署，控制面会把导入版本记录为当前部署。
 
-自动识别失败时不会降级为猜测式映射。需要手工提供发现信息时，必须同时核对 `QCH_EXISTING_*_BINARY`、`QCH_EXISTING_*_CONFIG` 与 `QCH_EXISTING_*_SERVICE`；sing-box 目录模式还必须核对 `QCH_EXISTING_SING_BOX_CONFIG_DIRECTORY`，转发器布局必须核对 `QCH_EXISTING_SING_BOX_SERVICE_BINARY`。Xray 的 confdir 布局同样通过 `QCH_EXISTING_XRAY_CONFIG_DIRECTORY` 提供；目录权威形态下 `QCH_EXISTING_XRAY_CONFIG` 留空即可，但两者不能同时为空。任意 wrapper 无法安全证明时不会提供自动迁移入口，应先由管理员把 systemd 单元或 OpenRC 服务脚本改为直接执行受保护真实二进制或上述固定转发形式，再重启 Agent 触发发现；配置仍由管理员在“手动配置”页显式迁移。
+自动识别失败时不会降级为猜测式映射。需要手工提供发现信息时，必须同时核对 `QCH_EXISTING_*_BINARY`、`QCH_EXISTING_*_SERVICE`，以及至少一个配置来源（`QCH_EXISTING_*_CONFIG` 或 `QCH_EXISTING_*_CONFIG_DIRECTORY`）；sing-box 目录模式还必须核对 `QCH_EXISTING_SING_BOX_CONFIG_DIRECTORY`，转发器布局必须核对 `QCH_EXISTING_SING_BOX_SERVICE_BINARY`。Xray 的 confdir 布局同样通过 `QCH_EXISTING_XRAY_CONFIG_DIRECTORY` 提供；目录权威形态下 `QCH_EXISTING_XRAY_CONFIG` 留空即可，但两者不能同时为空。任意 wrapper 无法安全证明时不会提供自动迁移入口，应先由管理员把 systemd 单元或 OpenRC 服务脚本改为直接执行受保护真实二进制或上述固定转发形式，再重启 Agent 触发发现；配置仍由管理员在“手动配置”页显式迁移。
 
 迁移前，Agent 不会获得原配置目录或原核心二进制目录的写权限，也会拒绝部署、启停和内核安装任务。迁移后运行的是复制到 QAgent 私有目录的二进制与专用配置，原服务保持 disabled；后续升级和配置管理只作用于 QAgent 专用服务。每次 Agent 重启都会重新核对 completed marker 的当前服务状态和 enable 层级；若原服务再次 active、托管服务停止或任一 enable 层级漂移，运行态会报告不可安全接管，控制面与 Agent 执行器同时禁用该内核的全部任务，而不是静默复用旧 marker。
 

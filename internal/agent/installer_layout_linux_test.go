@@ -301,6 +301,21 @@ func TestOpenRCStateDirectoryChainAcceptsOnlyRootGroupWrite(t *testing.T) {
 	if err := validateOpenRCStateDirectoryChain(outside, stateRoot); err == nil {
 		t.Error("OpenRC state policy accepted a directory outside its state root")
 	}
+
+	// The exception ends at stateRoot. A root:root group-writable ancestor is
+	// outside OpenRC-owned state and must still fail the general path rule.
+	if err := os.Chown(stateRoot, 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(stateRoot, 0o775); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(root, 0o775); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateOpenRCStateDirectoryChain(options, stateRoot); err == nil {
+		t.Error("OpenRC state policy accepted a group-writable ancestor outside its state root")
+	}
 }
 
 // TestSupervisorPIDFileNameAcceptsInstallerPidfiles pins which supervise-daemon

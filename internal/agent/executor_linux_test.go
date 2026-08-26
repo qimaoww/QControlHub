@@ -401,6 +401,78 @@ func TestExistingSingBoxExtendedJSONConfigDirectorySnapshot(t *testing.T) {
 	}
 }
 
+func TestReadExistingXrayConfigurationUsesSourceDump(t *testing.T) {
+	root := t.TempDir()
+	configDirectory := filepath.Join(root, "conf.d")
+	if err := os.Mkdir(configDirectory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	primary := filepath.Join(root, "config.json")
+	if err := os.WriteFile(primary, []byte(`{"log":{"loglevel":"info"},"inbounds":[],"outbounds":[]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(configDirectory, "20-log.json"), []byte(`{"log":{"loglevel":"debug"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dumped := `{"log":{"loglevel":"error"},"inbounds":[],"outbounds":[]}`
+	binary := filepath.Join(root, "xray")
+	script := fmt.Sprintf(`#!/bin/sh
+set -eu
+case "$*" in
+  "run -dump -config %s -confdir %s") printf '%%s\n' %q ;;
+  "run -test -config "*) exit 0 ;;
+  *) exit 64 ;;
+esac
+`, primary, configDirectory, dumped)
+	if err := os.WriteFile(binary, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	managed := EngineSpec{ConfigPath: filepath.Join(root, "managed", "config.json")}
+	existing := EngineSpec{Binary: binary, ConfigPath: primary, ConfigDirectory: configDirectory}
+	content, err := (&Executor{}).readExistingConfig(context.Background(), core.EngineXray, managed, existing)
+	if err != nil {
+		t.Fatalf("readExistingConfig() error = %v", err)
+	}
+	if strings.TrimSpace(content) != dumped {
+		t.Fatalf("snapshot = %s, want source-core dump %s", content, dumped)
+	}
+}
+
+func TestReadExistingXraySourceDigestTracksEverySupportedFormat(t *testing.T) {
+	root := t.TempDir()
+	configDirectory := filepath.Join(root, "conf.d")
+	if err := os.Mkdir(configDirectory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range map[string]string{
+		"10-base.json":   `{"log":{"loglevel":"info"}}`,
+		"20-extra.jsonc": `{"log":{"loglevel":"warning"}}`,
+		"30-extra.toml":  `[log]\nloglevel = "error"`,
+		"40-extra.yaml":  `log: {loglevel: debug}`,
+		"50-extra.yml":   `log: {loglevel: none}`,
+		"notes.txt":      "ignored by Xray",
+	} {
+		if err := os.WriteFile(filepath.Join(configDirectory, name), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	spec := EngineSpec{ConfigDirectory: configDirectory}
+	digest, err := readExistingXraySourceDigest(spec)
+	if err != nil {
+		t.Fatalf("readExistingXraySourceDigest() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(configDirectory, "40-extra.yaml"), []byte(`log: {loglevel: error}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	changedDigest, err := readExistingXraySourceDigest(spec)
+	if err != nil {
+		t.Fatalf("readExistingXraySourceDigest() after YAML change error = %v", err)
+	}
+	if changedDigest == digest {
+		t.Fatal("source digest did not change after an Xray YAML source changed")
+	}
+}
+
 func TestExistingSingBoxExtendedJSONRejectsMalformedSources(t *testing.T) {
 	root := t.TempDir()
 	configDirectory := filepath.Join(root, "conf.d")
