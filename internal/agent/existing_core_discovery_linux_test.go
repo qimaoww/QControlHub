@@ -4,13 +4,16 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
@@ -41,13 +44,92 @@ func buildExistingDiscoveryCoreHelper() ([]byte, error) {
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 )
 
+type controlMutation struct {
+	At      int    ` + "`" + `json:"at"` + "`" + `
+	Path    string ` + "`" + `json:"path"` + "`" + `
+	Content string ` + "`" + `json:"content"` + "`" + `
+}
+
+type helperControl struct {
+	Mutations []controlMutation ` + "`" + `json:"mutations"` + "`" + `
+}
+
+func applyControl(executable string) {
+	controlPath := executable + ".control.json"
+	contents, err := os.ReadFile(controlPath)
+	if os.IsNotExist(err) {
+		return
+	}
+	if err != nil {
+		os.Exit(3)
+	}
+	var control helperControl
+	if json.Unmarshal(contents, &control) != nil {
+		os.Exit(3)
+	}
+	countPath := executable + ".invocations"
+	count := 0
+	if value, err := os.ReadFile(countPath); err == nil {
+		_, _ = fmt.Sscanf(string(value), "%d", &count)
+	}
+	count++
+	if os.WriteFile(countPath, []byte(fmt.Sprintf("%d\n", count)), 0o600) != nil {
+		os.Exit(3)
+	}
+	for _, mutation := range control.Mutations {
+		if mutation.At > 0 && count < mutation.At {
+			continue
+		}
+		if os.WriteFile(mutation.Path, []byte(mutation.Content), 0o600) != nil {
+			os.Exit(3)
+		}
+	}
+}
+
 func main() {
 	arguments := os.Args[1:]
+	executable, err := os.Executable()
+	if err != nil {
+		os.Exit(3)
+	}
+	applyControl(executable)
+	if len(arguments) >= 2 && arguments[0] == "run" {
+		switch arguments[1] {
+		case "-dump":
+			contents, err := os.ReadFile(filepath.Join(filepath.Dir(executable), "xray-dump.json"))
+			if os.IsNotExist(err) {
+				for index := 2; index+1 < len(arguments); index++ {
+					if arguments[index] == "-config" {
+						contents, err = os.ReadFile(arguments[index+1])
+						break
+					}
+				}
+			}
+			if err != nil || !json.Valid(contents) {
+				os.Exit(1)
+			}
+			_, _ = os.Stdout.Write(contents)
+			return
+		case "-test":
+			for index := 2; index+1 < len(arguments); index++ {
+				if arguments[index] != "-config" {
+					continue
+				}
+				contents, err := os.ReadFile(arguments[index+1])
+				if err != nil || !json.Valid(contents) {
+					os.Exit(1)
+				}
+				return
+			}
+			os.Exit(2)
+		}
+	}
 	if len(arguments) != 3 && len(arguments) != 5 {
 		os.Exit(2)
 	}
@@ -138,6 +220,29 @@ func main() {
 		return nil, errors.New("discovery core helper is not an ELF executable")
 	}
 	return helper, nil
+}
+
+type existingCoreHelperMutation struct {
+	At      int    `json:"at"`
+	Path    string `json:"path"`
+	Content string `json:"content"`
+}
+
+func writeExistingCoreHelperMutations(t *testing.T, binary string, at int, mutations map[string]string) {
+	t.Helper()
+	control := struct {
+		Mutations []existingCoreHelperMutation `json:"mutations"`
+	}{}
+	for path, content := range mutations {
+		control.Mutations = append(control.Mutations, existingCoreHelperMutation{At: at, Path: path, Content: content})
+	}
+	contents, err := json.Marshal(control)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(binary+".control.json", contents, 0o600); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestExistingCoreDiscoveryFindsAndRefreshesAfterAgentRestart(t *testing.T) {
@@ -239,6 +344,31 @@ func TestManagedCoreUnitPolicyMatchesProjectUnits(t *testing.T) {
 		if strings.Join(actual, "\n") != strings.Join(expected, "\n") {
 			t.Fatalf("%s project unit does not match the supported execution policy", engine)
 		}
+	}
+}
+
+func TestManagedCoreUnitPolicyAcceptsOnlyExactHistoricalTemplate(t *testing.T) {
+	managed := DefaultSpecs()[core.EngineSingBox]
+	omissions := map[string]struct{}{
+		"LogNamespace=qagent-cores":                  {},
+		"StandardOutput=journal":                     {},
+		"StandardError=journal":                      {},
+		"CapabilityBoundingSet=CAP_NET_BIND_SERVICE": {},
+		"AmbientCapabilities=CAP_NET_BIND_SERVICE":   {},
+	}
+	legacy := make([]string, 0)
+	for _, line := range managedCoreUnitLines(core.EngineSingBox, managed) {
+		if _, omitted := omissions[line]; !omitted {
+			legacy = append(legacy, line)
+		}
+	}
+	contents := []byte(strings.Join(legacy, "\n") + "\n")
+	if err := validateManagedUnitFragment(contents, core.EngineSingBox, managed); err != nil {
+		t.Fatalf("exact historical QControlHub unit was rejected: %v", err)
+	}
+	contents = append(contents, []byte("EnvironmentFile=/etc/unknown\n")...)
+	if err := validateManagedUnitFragment(contents, core.EngineSingBox, managed); err == nil {
+		t.Fatal("historical unit with an unknown directive was accepted")
 	}
 }
 
@@ -518,8 +648,12 @@ func TestExistingCoreDiscoveryRejectsUnsupportedOfficialSingBoxArgv(t *testing.T
 
 func TestExistingCoreDiscoveryRejectsNonRootEtcSingBoxBinary(t *testing.T) {
 	requireAgentRoot(t)
+	if _, err := user.LookupId("65534"); err != nil {
+		t.Skipf("UID 65534 is not assigned on this host: %v", err)
+	}
 	fixture := newExistingCoreDiscoveryFixture(t)
 	serviceBinary := fixture.useDirectSingBoxBinary(t, 65534)
+	allowFixtureOrphanOwnerPath(t, serviceBinary)
 	specs, issues, err := RefreshExistingCoreDiscovery(
 		context.Background(), fixture.discoveryStatePath, fixture.markerPrefix,
 		fixture.managedSpecs, nil,
@@ -552,6 +686,58 @@ func TestExistingCoreDiscoveryRejectsNonRootEtcSingBoxBinary(t *testing.T) {
 		t.Fatal(err)
 	} else if uid, known := fileOwnerUID(info); !known || uid != 65534 {
 		t.Fatalf("non-root executable fixture owner = %d, known=%v", uid, known)
+	}
+}
+
+func TestExistingCoreDiscoveryAcceptsInactiveOrphanOwnedInstallerBinary(t *testing.T) {
+	requireAgentRoot(t)
+	fixture := newExistingCoreDiscoveryFixture(t)
+	serviceBinary := fixture.useDirectSingBoxBinary(t, -1)
+	allowFixtureOrphanOwnerPath(t, serviceBinary)
+	assignInactiveOrphanOwner(t, serviceBinary)
+
+	specs, issues, err := RefreshExistingCoreDiscovery(
+		context.Background(), fixture.discoveryStatePath, fixture.markerPrefix,
+		fixture.managedSpecs, nil,
+	)
+	if err != nil {
+		t.Fatalf("discover inactive orphan-owned installer binary: %v", err)
+	}
+	assertDiscoveredSingBoxSpec(t, specs[core.EngineSingBox], serviceBinary, serviceBinary, fixture.configPath, fixture.configDirectory, "")
+	if len(issues) != 0 {
+		t.Fatalf("inactive orphan-owned discovery issues = %+v", issues)
+	}
+}
+
+func TestExistingCoreDiscoveryRejectsActiveOrphanOwnedInstallerBinary(t *testing.T) {
+	requireAgentRoot(t)
+	fixture := newExistingCoreDiscoveryFixture(t)
+	serviceBinary := fixture.useDirectSingBoxBinary(t, -1)
+	allowFixtureOrphanOwnerPath(t, serviceBinary)
+	orphanUID := assignInactiveOrphanOwner(t, serviceBinary)
+
+	process := exec.Command("/bin/sleep", "30")
+	process.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{
+		Uid: uint32(orphanUID), Gid: uint32(orphanUID),
+	}}
+	if err := process.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = process.Process.Kill()
+		_ = process.Wait()
+	})
+
+	specs, issues, err := RefreshExistingCoreDiscovery(
+		context.Background(), fixture.discoveryStatePath, fixture.markerPrefix,
+		fixture.managedSpecs, nil,
+	)
+	if err != nil {
+		t.Fatalf("reject active orphan-owned installer binary: %v", err)
+	}
+	reason := issues[core.EngineSingBox]
+	if len(specs) != 0 || !strings.Contains(reason, "root 所有") {
+		t.Fatalf("active orphan-owned discovery = specs %+v reason %q", specs, reason)
 	}
 }
 
@@ -1126,6 +1312,38 @@ func newExistingCoreDiscoveryFixture(t *testing.T) existingCoreDiscoveryFixture 
 		serviceBinary+" run -c "+configPath+" -C "+configDirectory,
 	))
 	return fixture
+}
+
+func allowFixtureOrphanOwnerPath(t *testing.T, path string) {
+	t.Helper()
+	previous := installerOrphanOwnerExecutables
+	allowed := make(map[string]struct{}, len(previous)+1)
+	for candidate := range previous {
+		allowed[candidate] = struct{}{}
+	}
+	allowed[filepath.Clean(path)] = struct{}{}
+	installerOrphanOwnerExecutables = allowed
+	t.Cleanup(func() {
+		installerOrphanOwnerExecutables = previous
+	})
+}
+
+func assignInactiveOrphanOwner(t *testing.T, path string) int {
+	t.Helper()
+	for candidate := 60000; candidate <= 60100; candidate++ {
+		if err := os.Chown(path, candidate, candidate); err != nil {
+			t.Fatal(err)
+		}
+		info, err := os.Lstat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if fileOwnerIsInactiveAndUnassigned(info) {
+			return candidate
+		}
+	}
+	t.Skip("could not find an inactive unassigned UID for the discovery fixture")
+	return -1
 }
 
 func (fixture existingCoreDiscoveryFixture) writeStatus(t *testing.T, service, status string) {

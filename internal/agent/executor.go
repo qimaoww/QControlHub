@@ -122,7 +122,7 @@ func (e *Executor) Validate() error {
 		if err := validateExistingSpecPaths(engine, spec); err != nil {
 			return err
 		}
-		if err := validatePrivilegedExecutable(spec.Binary); err != nil {
+		if err := validateExistingCoreExecutable(spec.Binary); err != nil {
 			return fmt.Errorf("unsafe existing %s binary: %w", engine, err)
 		}
 		if err := validateProtectedDirectoryChain(filepath.Dir(spec.Binary)); err != nil {
@@ -149,6 +149,10 @@ func supportedExistingServiceForManager(manager *ServiceManager, engine core.Eng
 }
 
 func validatePrivilegedExecutable(path string) error {
+	return validateExecutableMetadata(path, false)
+}
+
+func validateExecutableMetadata(path string, allowOrphanOwner bool) error {
 	if !filepath.IsAbs(path) {
 		return errors.New("executable path is not absolute")
 	}
@@ -166,7 +170,9 @@ func validatePrivilegedExecutable(path string) error {
 		return errors.New("executable is writable by group or others")
 	}
 	if err := validateOwner(info, "privileged executable"); err != nil {
-		return err
+		if !allowOrphanOwner || !fileOwnerIsInactiveAndUnassigned(info) {
+			return err
+		}
 	}
 	directoryInfo, err := os.Lstat(filepath.Dir(path))
 	if err != nil {
@@ -199,7 +205,7 @@ func validateExistingServiceExecutable(spec EngineSpec) error {
 		if err := validateProtectedDirectoryChain(filepath.Dir(spec.Binary)); err != nil {
 			return fmt.Errorf("service executable parent chain: %w", err)
 		}
-		return validatePrivilegedExecutable(spec.Binary)
+		return validateExistingCoreExecutable(spec.Binary)
 	}
 	if !filepath.IsAbs(serviceBinary) {
 		return errors.New("service executable path is not absolute")
@@ -233,7 +239,7 @@ func validateExistingServiceExecutable(spec EngineSpec) error {
 		if err := validateProtectedDirectoryChain(filepath.Dir(spec.Binary)); err != nil {
 			return fmt.Errorf("real core parent chain: %w", err)
 		}
-		return validateNativeCoreExecutable(spec.Binary)
+		return validateExistingCoreExecutable(spec.Binary)
 	}
 	if err := validateProtectedDirectoryChain(filepath.Dir(resolved)); err != nil {
 		return fmt.Errorf("forwarder parent chain: %w", err)
@@ -255,11 +261,24 @@ func validateExistingServiceExecutable(spec EngineSpec) error {
 	if err := validateProtectedDirectoryChain(filepath.Dir(spec.Binary)); err != nil {
 		return fmt.Errorf("real core parent chain: %w", err)
 	}
-	return validateNativeCoreExecutable(spec.Binary)
+	return validateExistingCoreExecutable(spec.Binary)
 }
 
 func validateNativeCoreExecutable(path string) error {
-	if err := validatePrivilegedExecutable(path); err != nil {
+	return validateNativeCoreExecutableWithOwnerPolicy(path, false)
+}
+
+// validateExistingCoreExecutable permits one historical installer artifact:
+// 233boy archives can preserve a numeric owner such as 1001 even though that
+// UID has no account on the target. The exception applies only to fixed,
+// whitelisted real-core paths and only while no live thread holds that UID.
+// Every managed/helper executable and every other source remains root-owned.
+func validateExistingCoreExecutable(path string) error {
+	return validateNativeCoreExecutableWithOwnerPolicy(path, installerCoreAllowsOrphanOwner(path))
+}
+
+func validateNativeCoreExecutableWithOwnerPolicy(path string, allowOrphanOwner bool) error {
+	if err := validateExecutableMetadata(path, allowOrphanOwner); err != nil {
 		return err
 	}
 	file, err := os.Open(path)
@@ -556,7 +575,7 @@ func (e *Executor) readExistingConfig(ctx context.Context, engine core.Engine, m
 	}
 	validationSpec := managed
 	validationSpec.Binary = existing.Binary
-	if err := validatePrivilegedExecutable(existing.Binary); err != nil {
+	if err := validateExistingCoreExecutable(existing.Binary); err != nil {
 		return "", fmt.Errorf("cannot safely invoke existing %s binary: %w", engine, err)
 	}
 	if err := validateProtectedDirectoryChain(filepath.Dir(existing.Binary)); err != nil {
@@ -576,8 +595,16 @@ func (e *Executor) readExistingConfig(ctx context.Context, engine core.Engine, m
 		if err != nil {
 			return "", fmt.Errorf("dump existing Xray configuration sources: %w", err)
 		}
-	} else if err := validateExistingSourceInvocation(ctx, engine, existing); err != nil {
-		return "", fmt.Errorf("existing %s configuration sources failed real core validation: %w", engine, err)
+	} else if engine != core.EngineXray {
+		if err := validateExistingSourceInvocation(ctx, engine, existing); err != nil {
+			return "", fmt.Errorf("existing %s configuration sources failed real core validation: %w", engine, err)
+		}
+	}
+	if engine == core.EngineXray {
+		content, err = normalizeImportedXrayLogDestinations(content)
+		if err != nil {
+			return "", fmt.Errorf("normalize existing Xray log destinations: %w", err)
+		}
 	}
 	if _, err := e.validateSnapshot(ctx, engine, validationSpec, content); err != nil {
 		return "", fmt.Errorf("existing %s configuration failed real core validation: %w", engine, err)
@@ -672,9 +699,12 @@ func isXrayConfigurationFilename(name string) bool {
 // JSON snapshot; diagnostics stay on stderr so they can never be mistaken for
 // configuration content.
 func dumpExistingXrayConfiguration(ctx context.Context, spec EngineSpec) (string, error) {
-	args := []string{"run", "-dump", "-confdir", spec.ConfigDirectory}
+	args := []string{"run", "-dump"}
 	if spec.ConfigPath != "" {
-		args = []string{"run", "-dump", "-config", spec.ConfigPath, "-confdir", spec.ConfigDirectory}
+		args = append(args, "-config", spec.ConfigPath)
+	}
+	if spec.ConfigDirectory != "" {
+		args = append(args, "-confdir", spec.ConfigDirectory)
 	}
 	commandContext, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -714,6 +744,57 @@ func dumpExistingXrayConfiguration(ctx context.Context, spec EngineSpec) (string
 		return "", fmt.Errorf("Xray returned malformed merged configuration: %w", err)
 	}
 	return content + "\n", nil
+}
+
+// normalizeImportedXrayLogDestinations moves existing file logging onto the
+// managed service's stdout/stderr stream. Empty Xray destinations mean console;
+// explicit "none" remains disabled. Other log policy fields are preserved.
+func normalizeImportedXrayLogDestinations(content string) (string, error) {
+	var root map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(content), &root); err != nil {
+		return "", err
+	}
+	logValue, ok := root["log"]
+	if !ok {
+		return content, nil
+	}
+	var logging map[string]json.RawMessage
+	if err := json.Unmarshal(logValue, &logging); err != nil {
+		return "", fmt.Errorf("Xray log configuration is not an object: %w", err)
+	}
+	if logging == nil {
+		return content, nil
+	}
+	changed := false
+	for _, key := range []string{"access", "error"} {
+		raw, ok := logging[key]
+		if !ok {
+			continue
+		}
+		var destination string
+		if err := json.Unmarshal(raw, &destination); err != nil {
+			return "", fmt.Errorf("Xray log.%s destination is not a string: %w", key, err)
+		}
+		// Xray recognizes only the exact lowercase literal "none". Whitespace
+		// and case variants are file names, so they must be normalized too.
+		if destination != "" && destination != "none" {
+			logging[key] = json.RawMessage(`""`)
+			changed = true
+		}
+	}
+	if !changed {
+		return content, nil
+	}
+	normalizedLog, err := json.Marshal(logging)
+	if err != nil {
+		return "", err
+	}
+	root["log"] = normalizedLog
+	normalized, err := json.MarshalIndent(root, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	return string(normalized) + "\n", nil
 }
 
 func readExistingConfigurationSources(spec EngineSpec) (string, string, error) {
@@ -1537,8 +1618,10 @@ func validateNoPersistentCoreLogs(engine core.Engine, content string) error {
 	}
 	for _, key := range keys {
 		value, _ := logging[key].(string)
-		value = strings.TrimSpace(value)
-		if value != "" && (engine != core.EngineXray || !strings.EqualFold(value, "none")) {
+		if engine != core.EngineXray {
+			value = strings.TrimSpace(value)
+		}
+		if value != "" && (engine != core.EngineXray || value != "none") {
 			return fmt.Errorf("persistent %s log output %q is disabled; managed core logs are stored by the control plane", engine, key)
 		}
 	}

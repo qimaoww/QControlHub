@@ -298,24 +298,12 @@ func TestExistingSingBoxOfficialRelativeLogOutputMigrationSucceeds(t *testing.T)
 func TestExistingSingBoxConfigDirectoryDriftRollsBackPreparation(t *testing.T) {
 	requireAgentRoot(t)
 	fixture, content, overlay := configureSingBoxDirectoryFixture(t, newExistingCoreMigrationFixture(t, false))
-	counter := filepath.Join(fixture.stateDirectory, "sing-box-validation-count")
-	script := fmt.Sprintf(`#!/bin/sh
-set -eu
-count=0
-[ ! -f %q ] || count=$(cat %q)
-count=$((count + 1))
-printf '%%s\n' "$count" > %q
-if [ "$count" -ge 4 ]; then
-  printf '%%s\n' '{"outbounds":[{"tag":"changed"}]}' > %q
-fi
-exit 0
-`, counter, counter, counter, overlay)
-	if err := os.WriteFile(fixture.existing.Binary, []byte(script), 0o700); err != nil {
-		t.Fatal(err)
-	}
+	writeExistingCoreHelperMutations(t, fixture.existing.Binary, 4, map[string]string{
+		overlay: "{\"outbounds\":[{\"tag\":\"changed\"}]}\n",
+	})
 	if _, err := fixture.executor.Execute(context.Background(), core.Task{
 		Action: core.ActionImportExisting, Engine: core.EngineSingBox, ConfigContent: content,
-	}); err == nil || !strings.Contains(err.Error(), "changed during migration preparation") {
+	}); err == nil || !strings.Contains(err.Error(), "configuration sources changed") {
 		t.Fatalf("config-directory preparation drift error = %v", err)
 	}
 	fixture.assertServiceState(t, "sing-box.service", "active", "enabled")
@@ -335,10 +323,9 @@ func TestExistingSingBoxConfigDirectoryArgvDriftRollsBackPreparation(t *testing.
 	replacementDirectory := fixture.existing.ConfigDirectory + "-replacement"
 	drifted := systemdExecStart(fixture.existing.Binary,
 		fixture.existing.Binary+" run -c "+fixture.existing.ConfigPath+" -C "+replacementDirectory)
-	script := fmt.Sprintf("#!/bin/sh\nprintf '%%s\\n' %q > %q\nexit 0\n", drifted, filepath.Join(fixture.stateDirectory, fixture.existing.Service+".exec-start"))
-	if err := os.WriteFile(fixture.existing.Binary, []byte(script), 0o700); err != nil {
-		t.Fatal(err)
-	}
+	writeExistingCoreHelperMutations(t, fixture.existing.Binary, 1, map[string]string{
+		filepath.Join(fixture.stateDirectory, fixture.existing.Service+".exec-start"): drifted + "\n",
+	})
 	if _, err := fixture.executor.Execute(context.Background(), core.Task{
 		Action: core.ActionImportExisting, Engine: core.EngineSingBox, ConfigContent: content,
 	}); err == nil || !strings.Contains(err.Error(), "ExecStart no longer matches") {
@@ -358,10 +345,9 @@ func TestExistingSingBoxOfficialWorkDirectoryDriftRejectsBeforeChanges(t *testin
 	replacementWork := fixture.existing.WorkingDirectory + "-replacement"
 	drifted := systemdExecStart(fixture.existing.Binary,
 		fixture.existing.Binary+" -D "+replacementWork+" -C "+fixture.existing.ConfigDirectory+" run")
-	script := fmt.Sprintf("#!/bin/sh\nprintf '%%s\\n' %q > %q\nexit 0\n", drifted, filepath.Join(fixture.stateDirectory, fixture.existing.Service+".exec-start"))
-	if err := os.WriteFile(fixture.existing.Binary, []byte(script), 0o700); err != nil {
-		t.Fatal(err)
-	}
+	writeExistingCoreHelperMutations(t, fixture.existing.Binary, 1, map[string]string{
+		filepath.Join(fixture.stateDirectory, fixture.existing.Service+".exec-start"): drifted + "\n",
+	})
 	if _, err := fixture.executor.Execute(context.Background(), core.Task{
 		Action: core.ActionImportExisting, Engine: core.EngineSingBox, ConfigContent: content,
 	}); err == nil || !strings.Contains(err.Error(), "ExecStart no longer matches") {
@@ -456,21 +442,9 @@ func TestExistingCoreMigrationRejectsManagedTransientStatesBeforeChanges(t *test
 func TestExistingCoreMigrationRejectsManagedServiceActivationDuringPreparation(t *testing.T) {
 	requireAgentRoot(t)
 	fixture := newExistingCoreMigrationFixture(t, false)
-	counter := filepath.Join(fixture.stateDirectory, "managed-activation-validation-count")
-	script := fmt.Sprintf(`#!/bin/sh
-set -eu
-count=0
-[ ! -f %q ] || count=$(cat %q)
-count=$((count + 1))
-printf '%%s\n' "$count" > %q
-if [ "$count" -ge 3 ]; then
-  printf 'active\n' > %q
-fi
-exit 0
-`, counter, counter, counter, filepath.Join(fixture.stateDirectory, "qagent-xray.service.active"))
-	if err := os.WriteFile(fixture.existing.Binary, []byte(script), 0o700); err != nil {
-		t.Fatal(err)
-	}
+	writeExistingCoreHelperMutations(t, fixture.existing.Binary, 3, map[string]string{
+		filepath.Join(fixture.stateDirectory, "qagent-xray.service.active"): "active\n",
+	})
 	if _, err := fixture.executor.Execute(context.Background(), core.Task{
 		Action: core.ActionImportExisting, Engine: core.EngineXray, ConfigContent: fixture.importedConfig,
 	}); err == nil || !strings.Contains(err.Error(), `must remain inactive or failed`) || !strings.Contains(err.Error(), `status "active"`) {
@@ -674,10 +648,9 @@ func TestExistingCoreMigrationRejectsExecStartDriftDuringPreparation(t *testing.
 	fixture := newExistingCoreMigrationFixture(t, false)
 	wrapper := fixture.existing.Binary + "-wrapper"
 	drifted := systemdExecStart(wrapper, wrapper+" "+fixture.existing.Binary+" run -config "+fixture.existing.ConfigPath)
-	script := fmt.Sprintf("#!/bin/sh\nprintf '%%s\\n' %q > %q\nexit 0\n", drifted, filepath.Join(fixture.stateDirectory, fixture.existing.Service+".exec-start"))
-	if err := os.WriteFile(fixture.existing.Binary, []byte(script), 0o700); err != nil {
-		t.Fatal(err)
-	}
+	writeExistingCoreHelperMutations(t, fixture.existing.Binary, 1, map[string]string{
+		filepath.Join(fixture.stateDirectory, fixture.existing.Service+".exec-start"): drifted + "\n",
+	})
 	if _, err := fixture.executor.Execute(context.Background(), core.Task{
 		Action: core.ActionImportExisting, Engine: core.EngineXray, ConfigContent: fixture.importedConfig,
 	}); err == nil || !strings.Contains(err.Error(), "ExecStart no longer matches") {
@@ -947,41 +920,41 @@ func TestExistingCoreMigrationRejectsUnrestorableEnableStatesBeforeChanges(t *te
 	}
 }
 
-func TestExistingCoreMigrationRejectsPersistentLogsBeforeStoppingOriginalService(t *testing.T) {
+func TestExistingCoreMigrationNormalizesPersistentXrayLogsIntoManagedStream(t *testing.T) {
 	requireAgentRoot(t)
 	fixture := newExistingCoreMigrationFixture(t, false)
-	content := `{"log":{"access":"/var/log/xray/access.log"},"inbounds":[],"outbounds":[]}`
+	content := `{"log":{"access":"/var/log/xray/access.log","error":"/var/log/xray/error.log","loglevel":"info"},"inbounds":[],"outbounds":[]}`
 	if err := os.WriteFile(fixture.existing.ConfigPath, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := fixture.executor.Execute(context.Background(), core.Task{
-		Action: core.ActionImportExisting, Engine: core.EngineXray, ConfigContent: content,
-	}); err == nil || !strings.Contains(err.Error(), "persistent xray log") {
-		t.Fatalf("persistent log migration error = %v", err)
+	normalized, err := normalizeImportedXrayLogDestinations(content)
+	if err != nil {
+		t.Fatal(err)
 	}
-	fixture.assertServiceState(t, "xray.service", "active", "enabled")
-	fixture.assertServiceState(t, "qagent-xray.service", "inactive", "disabled")
-	assertFileContentAndMode(t, fixture.managed.ConfigPath, fixture.originalManagedConfig, 0o600)
-	if _, err := os.Stat(fixture.managed.Binary); !os.IsNotExist(err) {
-		t.Fatalf("rejected migration installed a managed binary: %v", err)
+	if _, err := fixture.executor.Execute(context.Background(), core.Task{
+		Action: core.ActionImportExisting, Engine: core.EngineXray, ConfigContent: normalized,
+	}); err != nil {
+		t.Fatalf("normalized persistent log migration: %v", err)
+	}
+	fixture.assertServiceState(t, "xray.service", "inactive", "disabled")
+	fixture.assertServiceState(t, "qagent-xray.service", "active", "enabled")
+	managedContent, err := os.ReadFile(fixture.managed.ConfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := validateNoPersistentCoreLogs(core.EngineXray, string(managedContent)); err != nil {
+		t.Fatalf("managed Xray snapshot retained persistent logs: %v", err)
 	}
 }
 
 func TestExistingCoreMigrationRejectsEnableStateChangeBeforeStoppingOriginalService(t *testing.T) {
 	requireAgentRoot(t)
 	fixture := newExistingCoreMigrationFixture(t, false)
-	counter := filepath.Join(fixture.stateDirectory, "validation-count")
-	script := fmt.Sprintf("#!/bin/sh\ncount=0\n[ ! -f %q ] || count=$(cat %q)\ncount=$((count + 1))\nprintf '%%s\\n' \"$count\" > %q\nif [ \"$count\" -ge 3 ]; then\nprintf '0\\n' > %q\nprintf '0\\n' > %q\nprintf 'static\\n' > %q\nfi\nexit 0\n",
-		counter,
-		counter,
-		counter,
-		filepath.Join(fixture.stateDirectory, "xray.service.persistent"),
-		filepath.Join(fixture.stateDirectory, "xray.service.runtime"),
-		filepath.Join(fixture.stateDirectory, "xray.service.fixed"),
-	)
-	if err := os.WriteFile(fixture.existing.Binary, []byte(script), 0o700); err != nil {
-		t.Fatal(err)
-	}
+	writeExistingCoreHelperMutations(t, fixture.existing.Binary, 2, map[string]string{
+		filepath.Join(fixture.stateDirectory, "xray.service.persistent"): "0\n",
+		filepath.Join(fixture.stateDirectory, "xray.service.runtime"):    "0\n",
+		filepath.Join(fixture.stateDirectory, "xray.service.fixed"):      "static\n",
+	})
 	if _, err := fixture.executor.Execute(context.Background(), core.Task{
 		Action: core.ActionImportExisting, Engine: core.EngineXray, ConfigContent: fixture.importedConfig,
 	}); err == nil || !strings.Contains(err.Error(), "enable states changed during migration preparation") {
@@ -1458,7 +1431,7 @@ func newExistingCoreMigrationFixture(t *testing.T, failManagedStart bool) existi
 		}
 	}
 	existingBinary := filepath.Join(existingDirectory, "xray")
-	if err := os.WriteFile(existingBinary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+	if err := os.WriteFile(existingBinary, existingDiscoveryCoreHelper, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	existingConfig := filepath.Join(existingDirectory, "config.json")

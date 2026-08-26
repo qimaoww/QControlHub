@@ -3,8 +3,10 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -12,6 +14,87 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/agent"
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
+
+var inspectExistingCoreHelper []byte
+
+func TestMain(tests *testing.M) {
+	helper, err := buildInspectExistingCoreHelper()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	inspectExistingCoreHelper = helper
+	os.Exit(tests.Run())
+}
+
+func buildInspectExistingCoreHelper() ([]byte, error) {
+	directory, err := os.MkdirTemp("", ".qagent-inspect-core-helper-")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(directory)
+	sourcePath := filepath.Join(directory, "main.go")
+	const source = `package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"strings"
+)
+
+func main() {
+	executable, err := os.Executable()
+	if err != nil {
+		os.Exit(2)
+	}
+	workingDirectory, _ := os.Getwd()
+	record, err := os.OpenFile(executable+".checks.log", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		os.Exit(2)
+	}
+	_, _ = fmt.Fprintf(record, "cwd=%s args=%s\n", workingDirectory, strings.Join(os.Args[1:], " "))
+	_ = record.Close()
+	arguments := os.Args[1:]
+	if len(arguments) >= 2 && arguments[0] == "run" && (arguments[1] == "-test" || arguments[1] == "-dump") {
+		for index := 2; index+1 < len(arguments); index++ {
+			if arguments[index] != "-config" {
+				continue
+			}
+			contents, err := os.ReadFile(arguments[index+1])
+			if err != nil || !json.Valid(contents) {
+				os.Exit(1)
+			}
+			if arguments[1] == "-dump" {
+				_, _ = os.Stdout.Write(contents)
+			}
+			return
+		}
+		os.Exit(2)
+	}
+	if len(arguments) > 0 && arguments[0] == "check" {
+		return
+	}
+	os.Exit(2)
+}
+`
+	if err := os.WriteFile(sourcePath, []byte(source), 0o600); err != nil {
+		return nil, err
+	}
+	binaryPath := filepath.Join(directory, "inspect-core-helper")
+	command := exec.Command("go", "build", "-buildvcs=false", "-trimpath", "-o", binaryPath, sourcePath)
+	if output, err := command.CombinedOutput(); err != nil {
+		return nil, fmt.Errorf("build inspect core helper: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+	helper, err := os.ReadFile(binaryPath)
+	if err != nil {
+		return nil, err
+	}
+	if len(helper) < 4 || string(helper[:4]) != "\x7fELF" {
+		return nil, errors.New("inspect core helper is not ELF")
+	}
+	return helper, nil
+}
 
 func TestInspectExistingValidatesACopyOutsideTheSourceDirectory(t *testing.T) {
 	root := t.TempDir()
@@ -24,8 +107,11 @@ func TestInspectExistingValidatesACopyOutsideTheSourceDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	binaryPath := filepath.Join(sourceDirectory, "xray")
-	script := fmt.Sprintf("#!/bin/sh\n[ \"$1 $2 $3\" = 'run -test -config' ]\n[ \"$4\" != %q ]\ngrep -q '\"inbounds\"' \"$4\"\n", configPath)
-	if err := os.WriteFile(binaryPath, []byte(script), 0o700); err != nil {
+	if err := os.WriteFile(binaryPath, inspectExistingCoreHelper, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	recordPath := binaryPath + ".checks.log"
+	if err := os.WriteFile(recordPath, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	before, err := os.ReadDir(sourceDirectory)
@@ -43,6 +129,13 @@ func TestInspectExistingValidatesACopyOutsideTheSourceDirectory(t *testing.T) {
 	}
 	if len(after) != len(before) {
 		t.Fatalf("inspection changed source directory: before=%d after=%d", len(before), len(after))
+	}
+	checks, err := os.ReadFile(recordPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(checks), "args=run -test -config ") || strings.Contains(string(checks), "-config "+configPath) {
+		t.Fatalf("Xray validation did not use the protected snapshot copy: %q", checks)
 	}
 }
 
@@ -101,10 +194,12 @@ func TestInspectExistingOfficialSingBoxAllowsBoundedRelativeLogAndRejectsOtherRe
 	if err := os.WriteFile(fragmentPath, []byte(`{"outbounds":[]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	recordPath := filepath.Join(root, "checks.log")
 	binaryPath := filepath.Join(root, "sing-box")
-	script := fmt.Sprintf("#!/bin/sh\nprintf '%%s\\n' \"cwd=$(pwd) args=$*\" >> %q\n[ \"$1\" = check ] || exit 1\ncase \"$2\" in -D|-c) exit 0 ;; *) exit 1 ;; esac\n", recordPath)
-	if err := os.WriteFile(binaryPath, []byte(script), 0o700); err != nil {
+	if err := os.WriteFile(binaryPath, inspectExistingCoreHelper, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	recordPath := binaryPath + ".checks.log"
+	if err := os.WriteFile(recordPath, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("QCH_SING_BOX_BINARY", binaryPath)

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -235,6 +236,34 @@ func TestPersistentCoreLogOutputsAreRejected(t *testing.T) {
 	}
 	if err := validateNoPersistentCoreLogs(core.EngineXray, `{"log":{"loglevel":"info","access":"none"}}`); err != nil {
 		t.Fatalf("disabled Xray file logging was rejected: %v", err)
+	}
+	if err := validateNoPersistentCoreLogs(core.EngineXray, `{"log":{"access":" NONE "}}`); err == nil {
+		t.Fatal("Xray file destination disguised as a none variant was accepted")
+	}
+}
+
+func TestNormalizeImportedXrayLogDestinations(t *testing.T) {
+	t.Parallel()
+	content := `{"log":{"access":"/var/log/xray/access.log","error":" NONE ","loglevel":"info","dnsLog":true,"maskAddress":"half"},"inbounds":[],"outbounds":[]}`
+	normalized, err := normalizeImportedXrayLogDestinations(content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var root map[string]any
+	if err := json.Unmarshal([]byte(normalized), &root); err != nil {
+		t.Fatal(err)
+	}
+	logging := root["log"].(map[string]any)
+	if logging["access"] != "" || logging["error"] != "" || logging["loglevel"] != "info" ||
+		logging["dnsLog"] != true || logging["maskAddress"] != "half" {
+		t.Fatalf("normalized Xray log policy = %+v", logging)
+	}
+	unchanged := `{"log":{"access":"none","error":"","loglevel":"warning"},"inbounds":[]}`
+	if got, err := normalizeImportedXrayLogDestinations(unchanged); err != nil || got != unchanged {
+		t.Fatalf("non-persistent Xray log policy changed: %q, %v", got, err)
+	}
+	if _, err := normalizeImportedXrayLogDestinations(`{"log":{"access":42}}`); err == nil {
+		t.Fatal("non-string Xray log destination was accepted")
 	}
 }
 

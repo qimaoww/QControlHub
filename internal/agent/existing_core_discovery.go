@@ -59,6 +59,18 @@ var existingDiscoveryCandidates = map[core.Engine]existingDiscoveryCandidateSet{
 	},
 }
 
+var installerOrphanOwnerExecutables = map[string]struct{}{
+	protectedEtcSingBoxExecutable:   {},
+	protectedEtcXrayExecutable:      {},
+	protectedAgentXrayExecutable:    {},
+	protectedAgentSingBoxExecutable: {},
+}
+
+func installerCoreAllowsOrphanOwner(path string) bool {
+	_, ok := installerOrphanOwnerExecutables[filepath.Clean(path)]
+	return ok
+}
+
 var existingDiscoveryManagedUnitRoot = "/etc/systemd/system"
 
 type existingCoreDiscoveryState struct {
@@ -235,7 +247,7 @@ func discoverExistingCoreService(ctx context.Context, engine core.Engine, manage
 		if err := validateProtectedDirectoryChain(filepath.Dir(executable)); err != nil {
 			return EngineSpec{}, false, fmt.Sprintf("检测到活动的 %s 服务和标准 executable，但 executable 未通过 root 所有、非符号链接、不可组/其他写和原生二进制安全校验", engine)
 		}
-		if err := validateNativeCoreExecutable(executable); err != nil {
+		if err := validateExistingCoreExecutable(executable); err != nil {
 			return EngineSpec{}, false, fmt.Sprintf("检测到活动的 %s 服务和标准 executable，但 executable 未通过 root 所有、非符号链接、不可组/其他写和原生二进制安全校验", engine)
 		}
 		realBinary = executable
@@ -476,15 +488,43 @@ func validateManagedUnitFragment(contents []byte, engine core.Engine, managed En
 		}
 		actual = append(actual, line)
 	}
+	if managedUnitLinesEqual(actual, expected) {
+		return nil
+	}
+
+	// QControlHub releases before the log namespace and low-port capability
+	// hardening wrote this exact unit shape. It remains project-owned and keeps
+	// the same executable, user, filesystem, and sandbox contract. Accept only
+	// that historical template; arbitrary missing or extra directives still fail.
+	legacyOmissions := map[string]struct{}{
+		"LogNamespace=qagent-cores":                  {},
+		"StandardOutput=journal":                     {},
+		"StandardError=journal":                      {},
+		"CapabilityBoundingSet=CAP_NET_BIND_SERVICE": {},
+		"AmbientCapabilities=CAP_NET_BIND_SERVICE":   {},
+	}
+	legacy := make([]string, 0, len(expected)-len(legacyOmissions))
+	for _, line := range expected {
+		if _, omitted := legacyOmissions[line]; !omitted {
+			legacy = append(legacy, line)
+		}
+	}
+	if managedUnitLinesEqual(actual, legacy) {
+		return nil
+	}
+	return errors.New("managed service unit contains an unknown, missing, duplicate, or unsupported historical directive")
+}
+
+func managedUnitLinesEqual(actual, expected []string) bool {
 	if len(actual) != len(expected) {
-		return errors.New("managed service unit contains an unknown, missing, or duplicate directive")
+		return false
 	}
 	for index := range expected {
 		if actual[index] != expected[index] {
-			return errors.New("managed service unit execution context is not the supported QAgent unit")
+			return false
 		}
 	}
-	return nil
+	return true
 }
 
 func validateManagedServiceExecutionContext(ctx context.Context, engine core.Engine, managed EngineSpec) error {
@@ -719,7 +759,7 @@ func resolveDiscoveredExistingBinary(serviceBinary string) (string, error) {
 		return "", err
 	}
 	if info.Mode()&os.ModeSymlink == 0 {
-		if err := validateNativeCoreExecutable(serviceBinary); err != nil {
+		if err := validateExistingCoreExecutable(serviceBinary); err != nil {
 			return "", err
 		}
 		return serviceBinary, nil
@@ -742,7 +782,7 @@ func resolveDiscoveredExistingBinary(serviceBinary string) (string, error) {
 	if err := validateProtectedDirectoryChain(filepath.Dir(target)); err != nil {
 		return "", err
 	}
-	if err := validateNativeCoreExecutable(target); err == nil {
+	if err := validateExistingCoreExecutable(target); err == nil {
 		return target, nil
 	}
 	contents, err := os.ReadFile(target)
@@ -765,7 +805,7 @@ func resolveDiscoveredExistingBinary(serviceBinary string) (string, error) {
 	if err := validateProtectedDirectoryChain(filepath.Dir(realBinary)); err != nil {
 		return "", err
 	}
-	if err := validateNativeCoreExecutable(realBinary); err != nil {
+	if err := validateExistingCoreExecutable(realBinary); err != nil {
 		return "", err
 	}
 	return realBinary, nil
