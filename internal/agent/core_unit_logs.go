@@ -29,7 +29,25 @@ MaxRetentionSec=15min
 )
 
 func ensureManagedCoreLogStreaming(ctx context.Context, specs map[core.Engine]EngineSpec, managers ...*ServiceManager) error {
-	if len(managers) > 0 && managers[0] != nil && managers[0].Kind() == ServiceManagerOpenRC {
+	manager := selectedServiceManager(managers...)
+	installedSpecs := make(map[core.Engine]EngineSpec, len(specs))
+	for engine, spec := range specs {
+		defaultSpec, exists := DefaultSpecsForServiceManager(manager.Kind())[engine]
+		if !exists || spec != defaultSpec {
+			continue
+		}
+		status, err := validateManagedServiceForExistingDiscovery(ctx, engine, spec, manager)
+		if err != nil {
+			return fmt.Errorf("validate managed log service %s: %w", spec.Service, err)
+		}
+		if status != "not-found" {
+			installedSpecs[engine] = spec
+		}
+	}
+	if len(installedSpecs) == 0 {
+		return nil
+	}
+	if manager.Kind() == ServiceManagerOpenRC {
 		return ensureOpenRCCoreLogDirectory()
 	}
 	ensureContext, cancel := context.WithTimeout(ctx, 20*time.Second)
@@ -51,11 +69,7 @@ func ensureManagedCoreLogStreaming(ctx context.Context, specs map[core.Engine]En
 	if err != nil {
 		return fmt.Errorf("configure volatile core journal: %w", err)
 	}
-	for engine, spec := range specs {
-		defaultSpec, exists := DefaultSpecs()[engine]
-		if !exists || spec != defaultSpec || !managedCoreServiceName(spec.Service) {
-			continue
-		}
+	for _, spec := range installedSpecs {
 		installed, installErr := installManagedLogFile(ensureContext, base,
 			filepath.Join("/etc/systemd/system", spec.Service+".d", "20-qcontrolhub-volatile-logs.conf"),
 			[]byte(managedCoreLogDropIn))

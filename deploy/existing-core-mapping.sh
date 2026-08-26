@@ -11,6 +11,17 @@ mapped_singbox_work_directory=""
 mapped_singbox_service_binary=""
 mapped_singbox_service=""
 
+# These paths are part of the managed systemd unit contract. Keep them in the
+# shared mapping library because both the remote installer and the bootstrap
+# script source it independently. When a fresh node already runs Xray or
+# sing-box, bootstrap installs the corresponding inactive QAgent unit and then
+# immediately performs the full ownership check, so every expected path must
+# already be initialized under `set -u`.
+qagent_xray_binary=/usr/local/lib/qagent/cores/xray
+qagent_xray_config=/etc/qagent/xray/config.json
+qagent_singbox_binary=/usr/local/lib/qagent/cores/sing-box
+qagent_singbox_config=/etc/qagent/sing-box/config.json
+
 openrc_init_root=${OPENRC_INIT_ROOT:-/etc/init.d}
 openrc_state_root=${OPENRC_STATE_ROOT:-/run/openrc}
 openrc_run_root=${OPENRC_RUN_ROOT:-/run}

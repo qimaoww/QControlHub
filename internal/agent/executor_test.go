@@ -63,6 +63,9 @@ func TestDefaultSpecsUsePrivateQAgentNamespace(t *testing.T) {
 			continue
 		}
 		unit := string(contents)
+		if err := validateManagedUnitFragment(contents, engine, expected); err != nil {
+			t.Errorf("%s does not match the runtime-owned unit contract: %v", expected.Service, err)
+		}
 		for _, required := range []string{
 			"ConditionFileIsExecutable=" + expected.Binary,
 			"ConditionPathExists=" + expected.ConfigPath,
@@ -166,6 +169,43 @@ func TestOneClickInstallerMapsOnlyValidatedExistingCorePaths(t *testing.T) {
 	for _, forbidden := range []string{"systemctl stop xray.service", "systemctl stop sing-box.service", "QCH_INHERIT_CONFIGS", "validate-inherited", "/proc/[0-9]*"} {
 		if strings.Contains(script, forbidden) {
 			t.Errorf("one-click installer stops an existing service via %q", forbidden)
+		}
+	}
+}
+
+func TestOneClickInstallerDefersManagedCoreServicesUntilPanelInstall(t *testing.T) {
+	t.Parallel()
+	contents, err := os.ReadFile("../../deploy/remote/install-agent.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(contents)
+	for _, required := range []string{
+		`bootstrap-core-services.sh" --prepare-agent`,
+		`core_asset_root=/usr/local/share/qcontrolhub/core-install`,
+		`stage_core_asset "$repository_dir/deploy/$service_manager/$service_asset"`,
+		`/usr/local/lib/qagent/cores`,
+	} {
+		if !strings.Contains(script, required) {
+			t.Errorf("one-click installer is missing deferred-core contract %q", required)
+		}
+	}
+	if strings.Contains(script, `QCH_SKIP_CORE_SERVICES="$mapped_engines" sh "$repository_dir/deploy/bootstrap-core-services.sh"`) {
+		t.Fatal("one-click installer still installs all managed core services during Agent deployment")
+	}
+
+	bootstrap, err := os.ReadFile("../../deploy/bootstrap-core-services.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bootstrapScript := string(bootstrap)
+	for _, required := range []string{
+		`--prepare-agent) selected_engines=""`,
+		`mihomo|xray|sing-box|shadowsocks-rust) selected_engines=$requested_engine`,
+		`for engine in $selected_engines`,
+	} {
+		if !strings.Contains(bootstrapScript, required) {
+			t.Errorf("core bootstrap is missing selective-install contract %q", required)
 		}
 	}
 }

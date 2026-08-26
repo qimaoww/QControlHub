@@ -101,7 +101,7 @@ download /api/v1/agent-binary "$work_dir/qagent"
 [ -s "$work_dir/qagent" ] || { printf '%s\n' 'downloaded agent binary is empty' >&2; exit 1; }
 chmod 0755 "$work_dir/qagent"
 
-echo '== 3/6 检测现有核心并引导其余服务 =='
+echo '== 3/6 检测现有核心并暂存按需安装资源 =='
 run_discovery() {
   label=$1
   shift
@@ -117,7 +117,49 @@ run_discovery() {
 }
 run_discovery Xray discover_existing_xray
 run_discovery sing-box discover_existing_singbox
-QCH_SERVICE_MANAGER="$service_manager" QCH_SKIP_CORE_SERVICES="$mapped_engines" sh "$repository_dir/deploy/bootstrap-core-services.sh"
+QCH_SERVICE_MANAGER="$service_manager" sh "$repository_dir/deploy/bootstrap-core-services.sh" --prepare-agent
+install -d -o root -g qcontrolhub-core -m 0750 /etc/qagent
+
+# Deploying QAgent must not create four unused core services. Keep the
+# credential-protected installation assets in a protected local directory. The
+# Agent invokes the bootstrap for exactly one engine only after an explicit
+# panel install/import task arrives.
+core_asset_root=/usr/local/share/qcontrolhub/core-install
+for asset_directory in \
+  /usr/local/lib/qagent \
+  /usr/local/lib/qagent/cores \
+  /usr/local/share/qcontrolhub \
+  "$core_asset_root" \
+  "$core_asset_root/deploy" \
+  "$core_asset_root/deploy/$service_manager" \
+  "$core_asset_root/examples" \
+  "$core_asset_root/examples/configs"
+do
+  [ ! -L "$asset_directory" ] || { printf '%s\n' "refusing symlinked core asset directory: $asset_directory" >&2; exit 1; }
+  install -d -o root -g root -m 0755 "$asset_directory"
+done
+
+stage_core_asset() {
+  source_file=$1
+  destination=$2
+  mode=$3
+  [ ! -L "$destination" ] || { printf '%s\n' "refusing symlinked core asset: $destination" >&2; exit 1; }
+  [ ! -e "$destination" ] || [ -f "$destination" ] || {
+    printf '%s\n' "refusing non-regular core asset: $destination" >&2
+    exit 1
+  }
+  install -o root -g root -m "$mode" "$source_file" "$destination"
+}
+
+stage_core_asset "$repository_dir/deploy/bootstrap-core-services.sh" "$core_asset_root/deploy/bootstrap-core-services.sh" 0755
+stage_core_asset "$repository_dir/deploy/existing-core-mapping.sh" "$core_asset_root/deploy/existing-core-mapping.sh" 0644
+for config_asset in mihomo-minimal.yaml xray-minimal.json sing-box-minimal.json shadowsocks-rust-minimal.json; do
+  stage_core_asset "$repository_dir/examples/configs/$config_asset" "$core_asset_root/examples/configs/$config_asset" 0644
+done
+for service_asset in $service_assets; do
+  if [ "$service_manager" = openrc ]; then service_mode=0755; else service_mode=0644; fi
+  stage_core_asset "$repository_dir/deploy/$service_manager/$service_asset" "$core_asset_root/deploy/$service_manager/$service_asset" "$service_mode"
+done
 
 echo '== 4/6 写入 agent 环境文件 =='
 mkdir -p /usr/local/lib/qagent

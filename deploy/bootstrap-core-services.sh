@@ -9,6 +9,17 @@ fi
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repository_dir=$(CDPATH= cd -- "$script_dir/.." && pwd)
 
+requested_engine=${1:-all}
+case "$requested_engine" in
+  --prepare-agent) selected_engines="" ;;
+  all) selected_engines="mihomo xray sing-box shadowsocks-rust" ;;
+  mihomo|xray|sing-box|shadowsocks-rust) selected_engines=$requested_engine ;;
+  *)
+    printf '%s\n' 'usage: bootstrap-core-services.sh [all|mihomo|xray|sing-box|shadowsocks-rust|--prepare-agent]' >&2
+    exit 1
+    ;;
+esac
+
 service_manager=${QCH_SERVICE_MANAGER:-}
 if [ -z "$service_manager" ]; then
   if [ -f /etc/alpine-release ] && command -v rc-service >/dev/null 2>&1; then
@@ -48,6 +59,11 @@ else
     [ -x "$nologin_shell" ] || nologin_shell=/bin/false
     useradd --system --gid "$service_group" --home-dir /nonexistent --shell "$nologin_shell" "$service_user"
   fi
+fi
+
+if [ "$requested_engine" = --prepare-agent ]; then
+  printf '%s\n' 'QAgent core service account is prepared; no core configuration or service was installed'
+  exit 0
 fi
 
 ensure_directory() {
@@ -129,34 +145,29 @@ install_if_missing() {
   printf '%s\n' "installed: $destination"
 }
 
-ensure_directory /etc/qagent/mihomo
-ensure_directory /etc/qagent/xray
-ensure_directory /etc/qagent/sing-box
-ensure_directory /etc/qagent/shadowsocks-rust
 ensure_directory /usr/local/lib/qagent
 ensure_directory /usr/local/lib/qagent/cores
 
-for state_directory in \
-  /var/lib/qcontrolhub-mihomo \
-  /var/lib/qcontrolhub-xray \
-  /var/lib/qcontrolhub-sing-box \
-  /var/lib/qcontrolhub-shadowsocks-rust
-do
+for engine in $selected_engines; do
+  ensure_directory "/etc/qagent/$engine"
+  state_directory="/var/lib/qcontrolhub-$engine"
   if [ -L "$state_directory" ]; then
     printf '%s\n' "refusing symlinked state directory: $state_directory" >&2
     exit 1
   fi
   install -d -o "$service_user" -g "$service_group" -m 0750 "$state_directory"
+  case "$engine" in
+    mihomo) source_config="$repository_dir/examples/configs/mihomo-minimal.yaml"; destination_config=/etc/qagent/mihomo/config.yaml ;;
+    xray) source_config="$repository_dir/examples/configs/xray-minimal.json"; destination_config=/etc/qagent/xray/config.json ;;
+    sing-box) source_config="$repository_dir/examples/configs/sing-box-minimal.json"; destination_config=/etc/qagent/sing-box/config.json ;;
+    shadowsocks-rust) source_config="$repository_dir/examples/configs/shadowsocks-rust-minimal.json"; destination_config=/etc/qagent/shadowsocks-rust/config.json ;;
+  esac
+  install_if_missing "$source_config" "$destination_config" root "$service_group" 0640
 done
-
-install_if_missing "$repository_dir/examples/configs/mihomo-minimal.yaml" /etc/qagent/mihomo/config.yaml root "$service_group" 0640
-install_if_missing "$repository_dir/examples/configs/xray-minimal.json" /etc/qagent/xray/config.json root "$service_group" 0640
-install_if_missing "$repository_dir/examples/configs/sing-box-minimal.json" /etc/qagent/sing-box/config.json root "$service_group" 0640
-install_if_missing "$repository_dir/examples/configs/shadowsocks-rust-minimal.json" /etc/qagent/shadowsocks-rust/config.json root "$service_group" 0640
 
 enabled_services=""
 skipped_engines=""
-for engine in mihomo xray sing-box shadowsocks-rust; do
+for engine in $selected_engines; do
   require_skipped_core_service_inactive "$engine"
   if [ "$service_manager" = openrc ]; then
     managed_service="qagent-$engine"
@@ -198,4 +209,4 @@ else
   done
   [ -z "$enabled_services" ] || systemctl enable $enabled_services >/dev/null
 fi
-printf '%s\n' 'core services are bootstrapped; install each official binary from the QControlHub node page'
+printf '%s\n' "core service bootstrap completed for: $selected_engines"

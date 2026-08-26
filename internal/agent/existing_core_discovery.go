@@ -330,6 +330,11 @@ func validateManagedServiceForExistingDiscovery(ctx context.Context, engine core
 		return "", errors.New("managed service mapping is not the QAgent default")
 	}
 	if manager.Kind() == ServiceManagerOpenRC {
+		if _, err := os.Lstat(filepath.Join(openRCInitRoot, managed.Service)); errors.Is(err, os.ErrNotExist) {
+			return "not-found", nil
+		} else if err != nil {
+			return "", err
+		}
 		status, err := serviceStatusWithManager(ctx, manager, managed.Service)
 		if err != nil || (status != "inactive" && status != "failed") {
 			return "", errors.New("managed OpenRC service is not inactive or failed")
@@ -341,6 +346,9 @@ func validateManagedServiceForExistingDiscovery(ctx context.Context, engine core
 		return status, nil
 	}
 	loadState, err := run(ctx, systemctlPath, "show", managed.Service, "--property=LoadState", "--value")
+	if strings.TrimSpace(loadState) == "not-found" {
+		return "not-found", nil
+	}
 	if err != nil || strings.TrimSpace(loadState) != "loaded" {
 		return "", errors.New("managed service unit is not loaded")
 	}
@@ -405,21 +413,33 @@ func validateManagedServiceForExistingDiscovery(ctx context.Context, engine core
 
 func managedCoreUnitLines(engine core.Engine, managed EngineSpec) []string {
 	addressFamilies := "AF_UNIX AF_INET AF_INET6"
-	documentation := "https://github.com/XTLS/Xray-core"
-	execStart := managed.Binary + " run -config " + managed.ConfigPath
-	if engine == core.EngineSingBox {
+	documentation := "https://github.com/MetaCubeX/mihomo"
+	execStart := managed.Binary + " -d /var/lib/qcontrolhub-mihomo -f " + managed.ConfigPath
+	extraServiceLines := []string{}
+	switch engine {
+	case core.EngineXray:
+		documentation = "https://github.com/XTLS/Xray-core"
+		execStart = managed.Binary + " run -config " + managed.ConfigPath
+	case core.EngineSingBox:
 		addressFamilies += " AF_NETLINK"
 		documentation = "https://github.com/SagerNet/sing-box"
 		execStart = managed.Binary + " run -c " + managed.ConfigPath
+	case core.EngineShadowsocksRust:
+		documentation = "https://github.com/shadowsocks/shadowsocks-rust"
+		execStart = managed.Binary + " -c " + managed.ConfigPath
+		extraServiceLines = append(extraServiceLines, "Environment=RUST_LOG=info")
 	}
-	stateDirectory := "/var/lib/qcontrolhub-" + string(engine)
-	return []string{
+	stateDirectory := "/var/lib/qcontrolhub-" + managedCoreAssetName(engine)
+	lines := []string{
 		"[Unit]", "Description=" + engineDisplayName(engine) + " core managed by QAgent",
 		"Documentation=" + documentation, "Wants=network-online.target", "After=network-online.target",
 		"ConditionFileIsExecutable=" + managed.Binary, "ConditionPathExists=" + managed.ConfigPath,
 		"[Service]", "Type=simple", "User=qcontrolhub-core", "Group=qcontrolhub-core",
-		"WorkingDirectory=" + stateDirectory, "StateDirectory=qcontrolhub-" + string(engine),
+		"WorkingDirectory=" + stateDirectory, "StateDirectory=qcontrolhub-" + managedCoreAssetName(engine),
 		"StateDirectoryMode=0750", "UMask=0027", "ExecStart=" + execStart,
+	}
+	lines = append(lines, extraServiceLines...)
+	lines = append(lines,
 		"LogNamespace=qagent-cores", "StandardOutput=journal", "StandardError=journal",
 		"Restart=on-failure", "RestartSec=3s", "TimeoutStopSec=20s", "NoNewPrivileges=true",
 		"CapabilityBoundingSet=CAP_NET_BIND_SERVICE", "AmbientCapabilities=CAP_NET_BIND_SERVICE",
@@ -428,10 +448,11 @@ func managedCoreUnitLines(engine core.Engine, managed EngineSpec) []string {
 		"ProtectControlGroups=true", "ProtectClock=true", "RestrictSUIDSGID=true",
 		"LockPersonality=true", "MemoryDenyWriteExecute=true", "RestrictNamespaces=true",
 		"RestrictRealtime=true", "RemoveIPC=true", "ProtectProc=invisible", "ProcSubset=pid",
-		"RestrictAddressFamilies=" + addressFamilies, "SystemCallArchitectures=native",
-		"ReadOnlyPaths=" + managed.Binary + " " + filepath.Dir(managed.ConfigPath),
-		"ReadWritePaths=" + stateDirectory, "[Install]", "WantedBy=multi-user.target",
-	}
+		"RestrictAddressFamilies="+addressFamilies, "SystemCallArchitectures=native",
+		"ReadOnlyPaths="+managed.Binary+" "+filepath.Dir(managed.ConfigPath),
+		"ReadWritePaths="+stateDirectory, "[Install]", "WantedBy=multi-user.target",
+	)
+	return lines
 }
 
 func validateManagedUnitFragment(contents []byte, engine core.Engine, managed EngineSpec) error {
@@ -456,10 +477,14 @@ func validateManagedUnitFragment(contents []byte, engine core.Engine, managed En
 }
 
 func validateManagedServiceExecutionContext(ctx context.Context, engine core.Engine, managed EngineSpec) error {
-	workingDirectory := "/var/lib/qcontrolhub-" + string(engine)
+	workingDirectory := "/var/lib/qcontrolhub-" + managedCoreAssetName(engine)
+	expectedEnvironment := ""
+	if engine == core.EngineShadowsocksRust {
+		expectedEnvironment = "RUST_LOG=info"
+	}
 	for property, expected := range map[string]string{
 		"Type": "simple", "WorkingDirectory": workingDirectory, "RootDirectory": "",
-		"RootImage": "", "BindPaths": "", "BindReadOnlyPaths": "", "Environment": "", "EnvironmentFiles": "",
+		"RootImage": "", "BindPaths": "", "BindReadOnlyPaths": "", "Environment": expectedEnvironment, "EnvironmentFiles": "",
 	} {
 		value, err := systemdUnitProperty(ctx, managed.Service, property)
 		if err != nil || value != expected {
@@ -502,10 +527,14 @@ func supportedManagedExecStart(engine core.Engine, managed EngineSpec, executabl
 		return false
 	}
 	switch engine {
+	case core.EngineMihomo:
+		return argv == managed.Binary+" -d /var/lib/qcontrolhub-mihomo -f "+managed.ConfigPath
 	case core.EngineXray:
 		return argv == managed.Binary+" run -config "+managed.ConfigPath
 	case core.EngineSingBox:
 		return argv == managed.Binary+" run -c "+managed.ConfigPath
+	case core.EngineShadowsocksRust:
+		return argv == managed.Binary+" -c "+managed.ConfigPath
 	default:
 		return false
 	}
@@ -521,13 +550,24 @@ func systemdUnitProperty(ctx context.Context, service, property string) (string,
 
 func engineDisplayName(engine core.Engine) string {
 	switch engine {
+	case core.EngineMihomo:
+		return "Mihomo"
 	case core.EngineXray:
 		return "Xray"
 	case core.EngineSingBox:
 		return "sing-box"
+	case core.EngineShadowsocksRust:
+		return "Shadowsocks Rust"
 	default:
 		return string(engine)
 	}
+}
+
+func managedCoreAssetName(engine core.Engine) string {
+	if engine == core.EngineShadowsocksRust {
+		return "shadowsocks-rust"
+	}
+	return string(engine)
 }
 
 func parseDiscoveredExistingArgv(engine core.Engine, executable, argv string, configs []string) (string, string, string, bool) {
