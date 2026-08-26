@@ -395,6 +395,7 @@ func TestExistingSingBoxExtendedJSONConfigDirectorySnapshot(t *testing.T) {
 }
 
 func TestReadExistingXrayConfigurationUsesSourceDump(t *testing.T) {
+	requireAgentRoot(t)
 	root := t.TempDir()
 	configDirectory := filepath.Join(root, "conf.d")
 	if err := os.Mkdir(configDirectory, 0o700); err != nil {
@@ -415,6 +416,9 @@ func TestReadExistingXrayConfigurationUsesSourceDump(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "xray-dump.json"), []byte(dumped), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(binary+".control.json", []byte(`{}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	managed := EngineSpec{ConfigPath: filepath.Join(root, "managed", "config.json")}
 	existing := EngineSpec{Binary: binary, ConfigPath: primary, ConfigDirectory: configDirectory}
 	content, err := (&Executor{}).readExistingConfig(context.Background(), core.EngineXray, managed, existing)
@@ -428,6 +432,54 @@ func TestReadExistingXrayConfigurationUsesSourceDump(t *testing.T) {
 	logging := normalized["log"].(map[string]any)
 	if logging["access"] != "" || logging["error"] != "" || logging["loglevel"] != "error" {
 		t.Fatalf("normalized Xray log policy = %+v", logging)
+	}
+	if _, err := os.Stat(binary + ".invocations"); err != nil {
+		t.Fatalf("ordinary root-owned source binary was not invoked directly: %v", err)
+	}
+}
+
+func TestReadExistingXrayConfigurationStagesRootOwnedInstallerBinary(t *testing.T) {
+	requireAgentRoot(t)
+	root := t.TempDir()
+	configDirectory := filepath.Join(root, "conf.d")
+	if err := os.Mkdir(configDirectory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	primary := filepath.Join(root, "config.json")
+	if err := os.WriteFile(primary, []byte(`{"log":{"loglevel":"info"},"inbounds":[],"outbounds":[]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dumped := `{"log":{"loglevel":"error"},"inbounds":[],"outbounds":[]}`
+	binary := filepath.Join(root, "xray")
+	if err := os.WriteFile(binary, existingDiscoveryCoreHelper, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "xray-dump.json"), []byte(dumped), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(binary+".control.json", []byte(`{}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	allowFixtureOrphanOwnerPath(t, binary)
+	stateDirectory := filepath.Join(root, "state")
+	if err := os.Mkdir(stateDirectory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	managed := EngineSpec{ConfigPath: filepath.Join(root, "managed", "config.json")}
+	existing := EngineSpec{Binary: binary, ConfigPath: primary, ConfigDirectory: configDirectory}
+	executor := &Executor{MigrationMarkerPrefix: filepath.Join(stateDirectory, "agent-state.json.core-migration")}
+	content, err := executor.readExistingConfig(context.Background(), core.EngineXray, managed, existing)
+	if err != nil {
+		t.Fatalf("readExistingConfig() error = %v", err)
+	}
+	if !strings.Contains(content, `"loglevel":"error"`) {
+		t.Fatalf("root-owned installer Xray dump = %s", content)
+	}
+	if _, err := os.Stat(binary + ".invocations"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("root-owned installer source binary was invoked directly: %v", err)
+	}
+	if staged, err := filepath.Glob(filepath.Join(stateDirectory, ".qcontrolhub-core-*.tmp")); err != nil || len(staged) != 0 {
+		t.Fatalf("protected invocation copies after cleanup = %v, %v", staged, err)
 	}
 }
 
