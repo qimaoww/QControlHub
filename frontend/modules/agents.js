@@ -938,23 +938,6 @@ async function nodeSettings(presetMode = false, { overview: preloadedOverview } 
     !presetMode && !detailRoute && agents.length > 1 && can("operator")
       ? `<details class="node-batch-panel"><summary><span><b>批量操作</b><small>全选仅包含当前列表中可执行所选动作的节点</small></span><i>＋</i></summary><form class="batch-toolbar" id="batch-form"><div class="batch-selection-head"><label class="batch-select-all"><input type="checkbox" data-batch-select-all aria-label="全选当前合格节点" aria-checked="false"><span data-batch-select-all-label>全选</span></label><strong data-batch-count aria-live="polite">已选择 0 个节点</strong></div><fieldset class="batch-node-options"><legend>当前节点范围</legend>${agents.map((agent) => `<label class="batch-select" title="选择此节点参与批量操作"><input type="checkbox" data-batch-checkbox value="${esc(agent.id)}" aria-label="选择 ${esc(agent.name)} 参与批量操作"><span><b>${esc(agent.name)}</b><small data-batch-eligibility>${agent.status === "online" ? "在线" : "离线"}</small></span></label>`).join("")}</fieldset><div class="batch-controls"><label>动作<select name="action"><option value="upgrade-agent">批量更新 Agent</option><option value="restart">重启服务</option><option value="status">查询状态</option><option value="start">启动服务</option><option value="stop">停止服务</option></select></label><label data-batch-engine-wrap>内核<select name="engine">${engines.map((engine) => `<option value="${engine}">${esc(engineName(engine))}</option>`).join("")}</select></label><button class="button small" type="submit" disabled>执行</button><button class="button small" type="button" data-batch-clear disabled>清空选择</button></div><section class="batch-results" data-batch-results aria-live="polite" hidden></section></form></details>`
       : "";
-  const onlineAgents = agents.filter(
-    (agent) => agent.status === "online",
-  ).length;
-  const introTone = agents.length
-    ? onlineAgents === agents.length
-      ? "ok"
-      : onlineAgents
-        ? "warn"
-        : "bad"
-    : "";
-  const pageIntro = presetMode
-    ? ""
-    : !detailRoute && agents.length
-      ? `<header class="node-page-intro"><div><p class="eyebrow">节点设置</p><h2>全部节点</h2><p>每个节点的资源占用与内核状态一屏总览；点击卡片进入管理台，拖动卡片左侧手柄调整顺序。</p></div><span class="node-intro-live"><i class="status-dot ${introTone}"></i>${agents.length} 个节点 · ${onlineAgents} 在线</span></header>`
-      : !detailRoute
-        ? `<header class="node-page-intro"><div><p class="eyebrow">节点设置</p><h2>全部节点</h2><p>${can("enrollment.manage") ? "使用页面顶栏的“添加节点”生成部署命令；" : "当前账号没有添加节点权限；"}节点上线后即可在这里管理 Agent、内核与运行状态。</p></div></header>`
-      : "";
   const detailMissingState = detailMissing
     ? '<section class="node-settings-missing" data-node-missing role="status"><strong>节点不可用</strong><p>该节点已删除、撤销或不再属于当前作用域。</p><a class="button small" href="#node-settings">返回全部节点</a></section>'
     : "";
@@ -962,7 +945,7 @@ async function nodeSettings(presetMode = false, { overview: preloadedOverview } 
     ? `<section class="${presetMode ? "machine-stack" : detailMode ? "node-settings-stack" : "node-card-grid"}">${nodeCards}</section>`
     : '<div class="empty large"><strong>还没有节点</strong><p>点击上方“添加节点”生成部署命令。</p></div>');
   shell(
-    `${pageIntro}${presetMode ? "" : `<div class="node-settings-page">${batch}${detailRoute ? `<a class="node-back-link" href="#node-settings">← 全部节点</a>` : ""}`}${pageBody}${presetMode ? "" : "</div>"}`,
+    `${presetMode ? "" : `<div class="node-settings-page">${batch}${detailRoute ? `<a class="node-back-link" href="#node-settings">← 全部节点</a>` : ""}`}${pageBody}${presetMode ? "" : "</div>"}`,
     presetMode ? "内核配置预设" : "节点设置",
     {
       viewKey: presetMode

@@ -305,8 +305,14 @@ func TestTrafficUsesOneNodeFilterSurface(t *testing.T) {
 		t.Fatal(err)
 	}
 	content := string(app)
-	if !strings.Contains(content, "端口流量节点") {
-		t.Error("traffic route must keep node selection in the context sidebar")
+	for _, required := range []string{
+		"端口流量节点",
+		`href="#traffic-all" data-context-traffic-agent="">全部节点`,
+		`"traffic-all": "traffic"`,
+	} {
+		if !strings.Contains(content, required) {
+			t.Errorf("traffic route must keep all node selection in the context sidebar: missing %q", required)
+		}
 	}
 	traffic, err := os.ReadFile("modules/traffic.js")
 	if err != nil {
@@ -314,6 +320,17 @@ func TestTrafficUsesOneNodeFilterSurface(t *testing.T) {
 	}
 	if strings.Contains(string(traffic), `data-traffic-filter="agent_id"`) {
 		t.Error("traffic workspace must not duplicate the context sidebar node selector")
+	}
+	if !strings.Contains(string(traffic), `state.anchor === "traffic-all"`) ||
+		!strings.Contains(string(traffic), `currentFilters.agent_id = ""`) {
+		t.Error("traffic all-node sidebar action must clear the selected node scope")
+	}
+	styles := string(mustReadFrontendFile(t, "app.css"))
+	if !strings.Contains(styles, `.traffic-workspace>.traffic-policy-grid{grid-template-columns:repeat(auto-fill,minmax(360px,1fr))`) {
+		t.Error("traffic cards must use the same responsive column sizing as node settings cards")
+	}
+	if strings.Contains(styles, `.traffic-workspace{width:100%;max-width:1240px`) {
+		t.Error("traffic cards must not use a narrower workspace than node settings cards")
 	}
 }
 
@@ -356,7 +373,6 @@ func TestPresetSidebarShowsOnlySelectedNodeContent(t *testing.T) {
 		`class="preset-node-workspace workspace-panel machine-body"`,
 		`id="preset-node-${esc(agent.id)}"`,
 		`<h2>节点内核</h2>`,
-		"const pageIntro = presetMode\n    ? \"\"",
 		`const prefix = presetMode ? "preset-node" : "settings-node";`,
 		"link.href = `#${prefix}-${link.dataset.contextAgent}`;",
 	} {
@@ -384,6 +400,17 @@ func TestPresetSidebarShowsOnlySelectedNodeContent(t *testing.T) {
 		if strings.TrimSpace(line) == globalSingleColumnRule {
 			t.Error("preset layout must not force every service grid into one column")
 		}
+	}
+}
+
+func TestNodeSettingsStartsWithOperationsAndCards(t *testing.T) {
+	agents := string(mustReadFrontendFile(t, "modules/agents.js"))
+	styles := string(mustReadFrontendFile(t, "app.css"))
+	if strings.Contains(agents, `class="node-page-intro"`) || strings.Contains(styles, `.node-page-intro`) {
+		t.Fatal("node settings must not repeat its page title in a separate introduction panel")
+	}
+	if !strings.Contains(agents, `class="node-batch-panel"`) || !strings.Contains(agents, `: "node-card-grid"`) {
+		t.Fatal("node settings must start with batch operations and node cards")
 	}
 }
 

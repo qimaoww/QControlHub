@@ -97,7 +97,10 @@ export function installTraffic(ctx) {
     state.data.agents = agents;
     state.data.trafficPolicies = policies;
     const currentFilters = filters();
-    if (state.anchor?.startsWith("traffic-agent-")) {
+    if (state.anchor === "traffic-all") {
+      currentFilters.agent_id = "";
+      state.anchor = "traffic";
+    } else if (state.anchor?.startsWith("traffic-agent-")) {
       currentFilters.agent_id = state.anchor.slice(14);
       state.anchor = "traffic";
     }
