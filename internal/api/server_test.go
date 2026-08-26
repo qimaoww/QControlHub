@@ -67,6 +67,22 @@ func TestEveryProxyAcceptsMaximumConfigEnvelope(t *testing.T) {
 	}
 }
 
+func TestWebFrontendDropsRootQueryString(t *testing.T) {
+	t.Parallel()
+	contents, err := os.ReadFile("../../frontend/nginx.conf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const expected = `location = / {
+      absolute_redirect off;
+      if ($args != "") { return 302 /; }
+      try_files /index.html =404;
+    }`
+	if !strings.Contains(string(contents), expected) {
+		t.Fatal("web frontend must redirect the root URL without its query string")
+	}
+}
+
 func TestValidateEnrollmentRejectsDatabaseOverflowFields(t *testing.T) {
 	t.Parallel()
 	for _, input := range []core.EnrollRequest{
