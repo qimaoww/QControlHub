@@ -135,6 +135,10 @@ ENV_FILE="$test_root/external.env"
 write_external_compose
 write_secret_compose_override
 grep -Fq 'QCH_ADMIN_TOKEN_SHA256: ${QCH_ADMIN_TOKEN_SHA256:-}' "$EXTERNAL_COMPOSE_FILE"
+if [ "$(grep -Fc 'context: ${QCH_SOURCE_DIR:-.}' "$EXTERNAL_COMPOSE_FILE")" -ne 2 ]; then
+    printf '%s\n' 'quick-start regression: external local builds do not use the source directory' >&2
+    exit 1
+fi
 grep -Fq 'QCH_ADMIN_TOKEN_SHA256: ${QCH_ADMIN_TOKEN_SHA256:?administrator token digest required}' "$SECRET_COMPOSE_FILE"
 grep -Fq 'target: /run/secrets/qch-config-encryption-key' "$SECRET_COMPOSE_FILE"
 if grep -Fq "$legacy_admin" "$ENV_FILE" || grep -Fq "$legacy_key" "$ENV_FILE"; then
@@ -153,6 +157,15 @@ update_env_file "POSTGRES_DB=qcontrolhub"
 MODE=""
 detect_existing_mode
 assert_equal "detected bundled deployment" "bundled" "$MODE"
+
+compose_environment_log="$test_root/compose-environment.log"
+docker() { printf 'source=%s\nargs=%s\n' "$QCH_SOURCE_DIR" "$*" > "$compose_environment_log"; }
+WORK_DIR="$test_root/separate config"
+COMPOSE_ARGS=(-f "$EXTERNAL_COMPOSE_FILE")
+compose config
+grep -Fxq "source=$repo_root" "$compose_environment_log" || { printf '%s\n' 'quick-start regression: source directory was not exported to Compose' >&2; exit 1; }
+grep -Fq -- "--project-directory $WORK_DIR" "$compose_environment_log" || { printf '%s\n' 'quick-start regression: selected project directory was not passed to Compose' >&2; exit 1; }
+unset -f docker
 
 compose_log="$test_root/uninstall-compose.log"
 compose() { printf '%s\n' "$*" > "$compose_log"; }

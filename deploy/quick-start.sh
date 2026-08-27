@@ -425,7 +425,7 @@ services:
   control-plane:
     image: ghcr.io/qimaoww/qcontrol-plane:${QCH_IMAGE_TAG:-latest}
     build:
-      context: .
+      context: ${QCH_SOURCE_DIR:-.}
       target: qcontrol-plane
       args:
         VERSION: ${VERSION:-dev}
@@ -469,7 +469,7 @@ services:
   qcontrol-web:
     image: ghcr.io/qimaoww/qcontrol-web:${QCH_IMAGE_TAG:-latest}
     build:
-      context: .
+      context: ${QCH_SOURCE_DIR:-.}
       target: qcontrol-web
       args:
         VERSION: ${VERSION:-dev}
@@ -540,7 +540,7 @@ YAML
 COMPOSE_ARGS=()
 
 compose() {
-    docker compose --project-directory "$WORK_DIR" --env-file "$ENV_FILE" "${COMPOSE_ARGS[@]}" "$@"
+    QCH_SOURCE_DIR="$REPO_ROOT" docker compose --project-directory "$WORK_DIR" --env-file "$ENV_FILE" "${COMPOSE_ARGS[@]}" "$@"
 }
 
 show_diagnostics() {
