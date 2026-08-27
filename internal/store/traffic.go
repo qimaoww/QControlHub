@@ -106,12 +106,29 @@ func (s *Store) ReconcilePortTrafficEndpoints(ctx context.Context, raw []core.Po
 	rows.Close()
 
 	desired := make(map[string]struct{}, len(endpoints))
+	finalCountByAgent := make(map[string]int)
+	for _, endpoint := range endpoints {
+		desired[trafficPortKey(endpoint.AgentID, endpoint.Port)] = struct{}{}
+		finalCountByAgent[endpoint.AgentID]++
+	}
+	for key, policy := range existing {
+		if _, coveredByDiscovery := desired[key]; coveredByDiscovery {
+			continue
+		}
+		if !policy.Discovered || policy.QuotaEnabled {
+			finalCountByAgent[policy.AgentID]++
+		}
+	}
+	for agentID, count := range finalCountByAgent {
+		if count > 256 {
+			return nil, fmt.Errorf("%w: agent %s would exceed 256 monitored ports", ErrConflict, agentID)
+		}
+	}
 	changedAgents := make(map[string]struct{})
 	now := time.Now().UTC()
 	anchor := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
 	for _, endpoint := range endpoints {
 		key := trafficPortKey(endpoint.AgentID, endpoint.Port)
-		desired[key] = struct{}{}
 		if policy, exists := existing[key]; exists {
 			protocolChanged := !policy.QuotaEnabled && policy.Protocol != endpoint.Protocol
 			metadataChanged := !policy.QuotaEnabled && (policy.Name != endpoint.Name || policy.Engine != endpoint.Engine || protocolChanged)

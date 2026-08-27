@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"os"
 	"testing"
@@ -175,6 +176,43 @@ func TestDiscoveredPortIsMonitoredWithoutQuota(t *testing.T) {
 	policies, err = dataStore.AgentPortTrafficPolicies(ctx, agent.ID)
 	if err != nil || len(policies) != 0 {
 		t.Fatalf("stale automatic monitor remains: %+v, %v", policies, err)
+	}
+}
+
+func TestDiscoveredPortsRespectAgentPolicyLimit(t *testing.T) {
+	databaseURL := os.Getenv("QCH_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("QCH_TEST_DATABASE_URL is not configured")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	dataStore, err := Open(ctx, databaseURL, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dataStore.Close()
+	agent, enrollmentID := enrollTaskTestAgent(t, ctx, dataStore)
+	defer cleanupTaskTestAgent(dataStore, agent.ID, enrollmentID)
+	if _, err := dataStore.CreatePortTrafficPolicy(ctx, core.PortTrafficPolicyRequest{
+		AgentID: agent.ID, Name: "manual", Engine: core.EngineMihomo, Port: 1,
+		Protocol: core.TrafficProtocolTCP, Cycle: core.TrafficCycleMonthly,
+		CycleAnchor: core.UTCDate(time.Now().UTC()), LimitBytes: 1 << 30,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	endpoints := make([]core.PortTrafficEndpoint, 0, 256)
+	for port := 2; port <= 257; port++ {
+		endpoints = append(endpoints, core.PortTrafficEndpoint{
+			AgentID: agent.ID, Name: fmt.Sprintf("auto %d", port), Engine: core.EngineMihomo,
+			Port: port, Protocol: core.TrafficProtocolTCP,
+		})
+	}
+	if _, err := dataStore.ReconcilePortTrafficEndpoints(ctx, endpoints); !errors.Is(err, ErrConflict) {
+		t.Fatalf("257 final monitored ports error = %v, want conflict", err)
+	}
+	policies, err := dataStore.AgentPortTrafficPolicies(ctx, agent.ID)
+	if err != nil || len(policies) != 1 || policies[0].Port != 1 {
+		t.Fatalf("failed reconciliation changed policies: %+v, %v", policies, err)
 	}
 }
 
