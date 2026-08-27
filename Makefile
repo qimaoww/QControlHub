@@ -35,6 +35,7 @@ installer-test:
 
 quick-start-test:
 	bash deploy/tests/quick-start-env.sh
+	bash deploy/tests/install-bootstrap.sh
 
 web-image-test:
 	docker build --target qcontrol-web --build-arg VERSION='$(VERSION)' .
