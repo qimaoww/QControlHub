@@ -287,6 +287,7 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 		writeStoreError(w, err)
 		return
 	}
+	s.refreshPortTrafficMonitoring(request.Context(), "")
 	task, ok := s.createConfigMutationTask(w, request, saved, input.Intent)
 	if !ok {
 		return
@@ -376,6 +377,7 @@ func (s *Server) saveConfigField(w http.ResponseWriter, request *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
+	s.refreshPortTrafficMonitoring(request.Context(), "")
 	task, ok := s.createConfigMutationTask(w, request, saved, input.Intent)
 	if !ok {
 		return

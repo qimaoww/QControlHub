@@ -15,7 +15,7 @@ func TestTrafficPoliciesForAgentKeepsMonitorOnlySafeForLegacyAgents(t *testing.T
 	t.Parallel()
 	policies := []core.PortTrafficPolicy{
 		{ID: "trf_0123456789abcdef", LimitBytes: 1024, AutoBlock: false},
-		{ID: "trf_fedcba9876543210", LimitBytes: 2048, AutoBlock: true},
+		{ID: "trf_fedcba9876543210", LimitBytes: 2048, AutoBlock: true, QuotaEnabled: true},
 	}
 	prepared := trafficPoliciesForAgent(policies)
 	if prepared[0].LimitBytes != math.MaxInt64 || prepared[1].LimitBytes != 2048 {

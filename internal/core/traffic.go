@@ -33,8 +33,9 @@ func (cycle TrafficCycle) Valid() bool {
 }
 
 // PortTrafficPolicy is the control-plane definition and latest Agent-reported
-// state for one listening port. LimitBytes covers received and sent bytes
-// together within the current period.
+// state for one listening port. Every discovered listener is monitored even
+// when QuotaEnabled is false; LimitBytes and AutoBlock only take effect after
+// an operator enables a quota.
 type PortTrafficPolicy struct {
 	ID                   string          `json:"id"`
 	AgentID              string          `json:"agent_id"`
@@ -46,6 +47,8 @@ type PortTrafficPolicy struct {
 	CycleAnchor          time.Time       `json:"cycle_anchor"`
 	LimitBytes           uint64          `json:"limit_bytes"`
 	AutoBlock            bool            `json:"auto_block"`
+	QuotaEnabled         bool            `json:"quota_enabled"`
+	Discovered           bool            `json:"discovered"`
 	ResetGeneration      uint64          `json:"reset_generation"`
 	ReceivedBytes        uint64          `json:"received_bytes"`
 	SentBytes            uint64          `json:"sent_bytes"`
