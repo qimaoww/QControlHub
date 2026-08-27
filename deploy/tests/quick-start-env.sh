@@ -118,6 +118,20 @@ assert_equal "migrated previous keyring" "external-old" "$(read_secret_file "$PR
 assert_equal "current key secret source" ".secrets/config-encryption-key" "$(read_env_key QCH_CONFIG_ENCRYPTION_KEY_SECRET_SOURCE)"
 assert_equal "previous key secret source" ".secrets/config-encryption-previous-keys" "$(read_env_key QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS_SECRET_SOURCE)"
 
+# A partially edited legacy environment must not silently prefer a digest that
+# does not belong to the plaintext token being migrated.
+ENV_FILE="$test_root/mismatched-admin.env"
+update_env_file \
+    "QCH_ADMIN_TOKEN=$legacy_admin" \
+    "QCH_ADMIN_TOKEN_SHA256=$(sha256_hex "$(printf 'x%.0s' {1..32})")"
+ADMIN_TOKEN=""
+FORCE=false
+if (prepare_admin_token >/dev/null 2>&1); then
+    printf '%s\n' 'quick-start regression: mismatched legacy administrator credentials were accepted' >&2
+    exit 1
+fi
+ENV_FILE="$test_root/external.env"
+
 write_external_compose
 write_secret_compose_override
 grep -Fq 'QCH_ADMIN_TOKEN_SHA256: ${QCH_ADMIN_TOKEN_SHA256:-}' "$EXTERNAL_COMPOSE_FILE"

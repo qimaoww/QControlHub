@@ -202,10 +202,17 @@ backup_secret_file() {
 }
 
 prepare_admin_token() {
-    local raw_token stored_digest legacy_token
+    local raw_token stored_digest legacy_token legacy_digest
     raw_token="$ADMIN_TOKEN"
     stored_digest="$(read_env_key QCH_ADMIN_TOKEN_SHA256)"
     legacy_token="$(read_env_key QCH_ADMIN_TOKEN)"
+    if [ "$FORCE" = false ] && [ -z "$raw_token" ] && [ -n "$stored_digest" ] && [ -n "$legacy_token" ]; then
+        validate_secret QCH_ADMIN_TOKEN "$legacy_token"
+        validate_admin_token_digest "$stored_digest"
+        legacy_digest="$(sha256_hex "$legacy_token")"
+        [ "$legacy_digest" = "$(printf '%s' "$stored_digest" | tr 'A-F' 'a-f')" ] || \
+            die "QCH_ADMIN_TOKEN 与 QCH_ADMIN_TOKEN_SHA256 不匹配；请先确认正确的管理员 token"
+    fi
     if [ "$FORCE" = true ]; then
         raw_token="${ADMIN_TOKEN:-$(random_hex)}"
     elif [ -n "$raw_token" ]; then
