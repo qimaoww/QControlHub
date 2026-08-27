@@ -3,7 +3,7 @@ SHELL := /bin/sh
 VERSION ?= dev
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
-.PHONY: build test alpine-test vet fmt-check frontend-check pr-policy-test installer-test quick-start-test web-image-test docs-check check init-env compose-config up dev-up down logs
+.PHONY: build test alpine-test vet fmt-check frontend-check pr-policy-test installer-test agent-redeploy-test quick-start-test web-image-test docs-check check init-env compose-config up dev-up down logs
 
 build:
 	mkdir -p bin
@@ -33,6 +33,9 @@ pr-policy-test:
 installer-test:
 	sh deploy/tests/inherit-existing-core.sh
 
+agent-redeploy-test:
+	sh deploy/tests/install-agent-redeploy.sh
+
 quick-start-test:
 	bash deploy/tests/quick-start-env.sh
 	bash deploy/tests/quick-start-bootstrap.sh
@@ -43,7 +46,7 @@ web-image-test:
 docs-check:
 	node docs/check_docs.mjs
 
-check: fmt-check frontend-check pr-policy-test installer-test quick-start-test docs-check vet test
+check: fmt-check frontend-check pr-policy-test installer-test agent-redeploy-test quick-start-test docs-check vet test
 
 init-env:
 	@command -v openssl >/dev/null 2>&1 || { printf '%s\n' 'openssl is required'; exit 1; }

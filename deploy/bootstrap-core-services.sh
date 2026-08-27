@@ -8,6 +8,20 @@ fi
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repository_dir=$(CDPATH= cd -- "$script_dir/.." && pwd)
+openrc_runlevels_root=${OPENRC_RUNLEVELS_ROOT:-/etc/runlevels}
+
+# OpenRC's rc-update exits non-zero when a service is already enabled, which
+# aborts this script under `set -eu` on a repeat bootstrap. Enable only when the
+# runlevel link is absent so repeated Agent engine tasks stay idempotent.
+enable_openrc_service() {
+  service_name=$1
+  if [ -e "$openrc_runlevels_root/default/$service_name" ]; then
+    printf '%s\n' "openrc service already enabled: $service_name"
+    return
+  fi
+  rc-update add "$service_name" default >/dev/null
+  printf '%s\n' "enabled openrc service: $service_name"
+}
 
 requested_engine=${1:-all}
 case "$requested_engine" in
@@ -208,7 +222,7 @@ if [ "$service_manager" = openrc ]; then
     disable_skipped_core_service "$engine"
     printf '%s\n' "kept existing $engine service; disabled qagent-$engine"
   done
-  for managed_service in $enabled_services; do rc-update add "$managed_service" default >/dev/null; done
+  for managed_service in $enabled_services; do enable_openrc_service "$managed_service"; done
 else
   journal_config_dir=/etc/systemd/journald@qagent-cores.conf.d
   if [ -L "$journal_config_dir" ]; then
