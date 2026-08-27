@@ -40,38 +40,32 @@ func testClientExecutor(t *testing.T) *Executor {
 func TestClientShouldReenroll(t *testing.T) {
 	tests := []struct {
 		name     string
-		client   Client
+		client   *Client
 		loaded   credentials
 		wantTrue bool
 	}{
 		{
 			name:     "host change with token migrates",
-			client:   Client{config: ClientConfig{EnrollmentToken: "tok"}, serverHost: "new.example.test"},
+			client:   &Client{config: ClientConfig{EnrollmentToken: "tok"}, serverHost: "new.example.test"},
 			loaded:   credentials{Server: "old.example.test"},
 			wantTrue: true,
 		},
 		{
 			name:     "same host with token is a normal restart",
-			client:   Client{config: ClientConfig{EnrollmentToken: "tok"}, serverHost: "h.example.test"},
+			client:   &Client{config: ClientConfig{EnrollmentToken: "tok"}, serverHost: "h.example.test"},
 			loaded:   credentials{Server: "h.example.test"},
+			wantTrue: false,
+		},
+		{
+			name:     "legacy credentials without host are adopted without rotation",
+			client:   &Client{config: ClientConfig{EnrollmentToken: "tok"}, serverHost: "h.example.test"},
+			loaded:   credentials{},
 			wantTrue: false,
 		},
 		{
 			name:     "host change without token cannot migrate",
-			client:   Client{config: ClientConfig{}, serverHost: "new.example.test"},
+			client:   &Client{config: ClientConfig{}, serverHost: "new.example.test"},
 			loaded:   credentials{Server: "old.example.test"},
-			wantTrue: false,
-		},
-		{
-			name:     "forced reenroll with token migrates on same host",
-			client:   Client{config: ClientConfig{EnrollmentToken: "tok", Reenroll: true}, serverHost: "h.example.test"},
-			loaded:   credentials{Server: "h.example.test"},
-			wantTrue: true,
-		},
-		{
-			name:     "forced reenroll without token still requires token",
-			client:   Client{config: ClientConfig{Reenroll: true}, serverHost: "h.example.test"},
-			loaded:   credentials{Server: "h.example.test"},
 			wantTrue: false,
 		},
 	}

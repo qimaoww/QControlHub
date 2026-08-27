@@ -54,10 +54,19 @@ EOF
 
 cat > "$fake_bin/systemctl" <<'EOF'
 #!/bin/sh
+set -eu
 printf '%s\n' "$*" >> "$QCH_SYSTEMCTL_LOG"
 case " $* " in
   *' is-active '*|*' is-enabled '*|*' show '*) exit 1 ;;
 esac
+if [ "$*" = 'restart qagent.service' ] && [ "${QCH_SIMULATE_AGENT_ENROLLMENT:-true}" = true ]; then
+  server_url=$(sed -n 's/^QCH_SERVER_URL=//p' "$QCH_AGENT_ENV_FILE" | tail -n 1)
+  state_path=$(sed -n 's/^QCH_AGENT_STATE=//p' "$QCH_AGENT_ENV_FILE" | tail -n 1)
+  server_host=${server_url#*://}
+  restart_count=$(grep -c '^restart qagent.service$' "$QCH_SYSTEMCTL_LOG")
+  mkdir -p "$(dirname "$state_path")"
+  printf '{"agent_id":"abc123","private_key":"fake-key-%s","server":"%s"}\n' "$restart_count" "$server_host" > "$state_path"
+fi
 exit 0
 EOF
 
@@ -108,16 +117,22 @@ echo '== first install (fresh node) =='
 sh "$installer" "$control" "$token" > "$test_root/first.log"
 [ -f "$QCH_AGENT_ENV_FILE" ] || { printf '%s\n' 'first install: agent env missing' >&2; exit 1; }
 grep -q '^QCH_AGENT_LABELS=region=cn-east$' "$QCH_AGENT_ENV_FILE" || { printf '%s\n' 'first install: default label missing' >&2; exit 1; }
-grep -q '^QCH_ENROLLMENT_TOKEN=' "$QCH_AGENT_ENV_FILE" || { printf '%s\n' 'first install: enrollment token missing' >&2; exit 1; }
 grep -q '^QCH_AGENT_NAME=' "$QCH_AGENT_ENV_FILE" || { printf '%s\n' 'first install: agent name missing' >&2; exit 1; }
+if grep -q '^QCH_ENROLLMENT_TOKEN=' "$QCH_AGENT_ENV_FILE"; then
+  printf '%s\n' 'first install: enrollment token remained after confirmed enrollment' >&2
+  exit 1
+fi
 
 # Simulate an operator customizing the deployment and the Agent already having
 # enrolled (state file present, so the enrollment token must be scrubbed).
+custom_state="$test_root/state/custom/agent-state.json"
+mkdir -p "$(dirname "$custom_state")"
+mv "$QCH_AGENT_STATE_FILE" "$custom_state"
 printf '%s\n' \
   'QCH_AGENT_NAME=custom-node' \
   'QCH_AGENT_LABELS=region=us-west' \
-  'QCH_PUBLIC_IP_PROBE=true' >> "$QCH_AGENT_ENV_FILE"
-printf '%s\n' '{"agent_id":"abc123"}' > "$QCH_AGENT_STATE_FILE"
+  'QCH_PUBLIC_IP_PROBE=true' \
+  "QCH_AGENT_STATE=$custom_state" >> "$QCH_AGENT_ENV_FILE"
 
 # Mark the unit and the binary as already installed so the redeploy path is
 # exercised as an upgrade rather than a fresh install.
@@ -167,12 +182,29 @@ assert_env_once QCH_SERVER_URL 'http://newpanel.local'
 assert_env_once QCH_AGENT_NAME custom-node
 assert_env_once QCH_AGENT_LABELS 'region=us-west'
 assert_env_once QCH_PUBLIC_IP_PROBE true
-if grep -q '^QCH_REENROLL=' "$QCH_AGENT_ENV_FILE"; then
-  printf '%s\n' 'migrate: re-enroll flag not scrubbed despite state file' >&2
-  exit 1
-fi
 if grep -q '^QCH_ENROLLMENT_TOKEN=' "$QCH_AGENT_ENV_FILE"; then
   printf '%s\n' 'migrate: enrollment token not scrubbed despite state file' >&2
+  exit 1
+fi
+
+echo '== interrupted migration retains credentials =='
+export QCH_SIMULATE_AGENT_ENROLLMENT=false
+export QCH_AGENT_ENROLLMENT_WAIT_SECONDS=1
+failed_control="http://offline-panel.local"
+if sh "$installer" migrate "$failed_control" "$token" > "$test_root/failed-migrate.log" 2>&1; then
+  printf '%s\n' 'interrupted migration: installer unexpectedly succeeded' >&2
+  exit 1
+fi
+grep -q '^QCH_ENROLLMENT_TOKEN=' "$QCH_AGENT_ENV_FILE" || { printf '%s\n' 'interrupted migration: enrollment token was removed' >&2; exit 1; }
+grep -q 'service was stopped and enrollment credentials were retained' "$test_root/failed-migrate.log" || { printf '%s\n' 'interrupted migration: retry guidance missing' >&2; exit 1; }
+grep -q '^stop qagent.service$' "$QCH_SYSTEMCTL_LOG" || { printf '%s\n' 'interrupted migration: Agent service was not stopped' >&2; exit 1; }
+
+echo '== retry interrupted migration =='
+export QCH_SIMULATE_AGENT_ENROLLMENT=true
+sh "$installer" migrate "$failed_control" "$token" > "$test_root/retry-migrate.log"
+assert_env_once QCH_SERVER_URL 'http://offline-panel.local'
+if grep -q '^QCH_ENROLLMENT_TOKEN=' "$QCH_AGENT_ENV_FILE"; then
+  printf '%s\n' 'migration retry: temporary credentials were not scrubbed' >&2
   exit 1
 fi
 

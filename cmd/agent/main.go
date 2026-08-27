@@ -94,7 +94,6 @@ func main() {
 		PublicIPProbeEvery:         envDuration("QCH_PUBLIC_IP_PROBE_INTERVAL", 5*time.Minute),
 		PublicIPProbeIPv4Endpoints: envList("QCH_PUBLIC_IP_PROBE_IPV4_ENDPOINTS"),
 		PublicIPProbeIPv6Endpoints: envList("QCH_PUBLIC_IP_PROBE_IPV6_ENDPOINTS"),
-		Reenroll:                   envBool("QCH_REENROLL", false),
 	}, executor)
 	if err != nil {
 		slog.Error("invalid agent configuration", "error", err)

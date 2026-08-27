@@ -52,11 +52,6 @@ type ClientConfig struct {
 	// both empty disables the probe in NewClient.
 	PublicIPProbeIPv4Endpoints []string
 	PublicIPProbeIPv6Endpoints []string
-	// Reenroll forces re-enrollment against the configured control plane using
-	// the enrollment token, even when the persisted identity already matches
-	// the host. Used for a no-downtime migration to a replacement panel that
-	// serves the same hostname but a fresh identity store.
-	Reenroll bool
 }
 
 type credentials struct {
@@ -301,16 +296,19 @@ func (c *Client) Run(ctx context.Context) error {
 	}
 }
 
-// shouldReenroll reports whether the persisted identity must be rotated because
-// the Agent is being pointed at a different control plane host, or because the
-// operator explicitly requested a re-enroll. A host change alone only migrates
-// when an enrollment token is supplied; a re-enroll on the same host still
-// needs the token so it never turns a routine restart into a new identity.
+// shouldReenroll reports whether the persisted identity must be rotated before
+// connecting because the Agent is being pointed at a different control-plane
+// host. A same-host replacement is detected by its rejected WebSocket identity
+// and handled by the one-shot recovery path in Run.
 func (c *Client) shouldReenroll(loaded credentials) bool {
-	if c.config.Reenroll {
-		return c.config.EnrollmentToken != ""
-	}
-	return c.config.EnrollmentToken != "" && loaded.Server != c.serverHost
+	// Credentials written by releases before the control-plane migration
+	// feature have no Server field. Treat them as belonging to the currently
+	// configured panel and persist that host in Run instead of rotating a valid
+	// identity during an ordinary in-place Agent update. A forced migration to a
+	// replacement panel on the same host first tries the existing identity; the
+	// 401 recovery path below then re-enrolls exactly once if that identity does
+	// not exist on the replacement panel.
+	return c.config.EnrollmentToken != "" && loaded.Server != "" && loaded.Server != c.serverHost
 }
 
 func (c *Client) reenroll(ctx context.Context) (credentials, error) {

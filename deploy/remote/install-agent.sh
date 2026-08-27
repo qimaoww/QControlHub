@@ -37,6 +37,7 @@ qagent_etc_dir=${QCH_AGENT_ETC_DIR:-/etc/qagent}
 core_service_group=${QCH_AGENT_SERVICE_GROUP:-qcontrolhub-core}
 agent_env_file=${QCH_AGENT_ENV_FILE:-/etc/qcontrolhub/agent.env}
 agent_state_file=${QCH_AGENT_STATE_FILE:-/var/lib/qcontrolhub/agent-state.json}
+enrollment_wait_seconds=${QCH_AGENT_ENROLLMENT_WAIT_SECONDS:-45}
 core_asset_root=${QCH_CORE_ASSET_ROOT:-/usr/local/share/qcontrolhub/core-install}
 core_share_root=$(dirname "$core_asset_root")
 agent_state_dir=$(dirname "$agent_state_file")
@@ -76,6 +77,9 @@ fi
 case "$service_manager" in
   systemd|openrc) ;;
   *) printf '%s\n' "unsupported init system: $service_manager" >&2; exit 1 ;;
+esac
+case "$enrollment_wait_seconds" in
+  ""|0|*[!0-9]*) printf '%s\n' 'QCH_AGENT_ENROLLMENT_WAIT_SECONDS must be a positive integer' >&2; exit 1 ;;
 esac
 
 run_uninstall() {
@@ -145,11 +149,19 @@ case "$control" in
   http://*|https://*|ws://*|wss://*) server_url="$control" ;;
   *) server_url="http://$control" ;;
 esac
+case "$server_url" in */) server_url=${server_url%/} ;; esac
 case "$server_url" in
   ws://*) http_origin="http://${server_url#ws://}" ;;
   wss://*) http_origin="https://${server_url#wss://}" ;;
   http://*|https://*) http_origin="$server_url" ;;
   *) printf '%s\n' 'invalid control-plane URL' >&2; exit 1 ;;
+esac
+server_host=${server_url#*://}
+case "$server_host" in
+  ""|*/*|*'?'*|*'#'*|*@*|*'"'*|*\\*) printf '%s\n' 'control-plane URL must be a bare origin' >&2; exit 1 ;;
+esac
+case "$server_host" in
+  *[[:space:]]*) printf '%s\n' 'control-plane URL must not contain whitespace' >&2; exit 1 ;;
 esac
 
 work_dir=$(mktemp -d "${TMPDIR:-/tmp}/qcontrolhub-agent.XXXXXX")
@@ -327,6 +339,16 @@ validate_environment_value QCH_AGENT_ENGINES "$final_engines"
 validate_environment_value QCH_AGENT_STATE "$final_state"
 
 install -d -o root -g root -m 0755 "$(dirname "$final_state")"
+reenroll_required=false
+if [ "$action" = migrate ] || { [ -n "$existing_server" ] && [ "$existing_server" != "$server_url" ]; }; then
+  reenroll_required=true
+fi
+previous_state_present=false
+previous_private_key=""
+if [ -s "$final_state" ]; then
+  previous_state_present=true
+  previous_private_key=$(sed -n 's/.*"private_key":"\([^"]*\)".*/\1/p' "$final_state" | head -n 1)
+fi
 umask 077
 {
   printf '%s\n' "QCH_SERVER_URL=$server_url"
@@ -336,9 +358,6 @@ umask 077
   esac
   printf '%s\n' "QCH_ALLOW_INSECURE_LIVE=$allow_insecure_live"
   printf '%s\n' "QCH_ENROLLMENT_TOKEN=$token"
-  if [ "$action" = migrate ] || { [ -n "$existing_server" ] && [ "$existing_server" != "$server_url" ]; }; then
-    printf '%s\n' 'QCH_REENROLL=true'
-  fi
   printf '%s\n' "QCH_AGENT_NAME=$final_name"
   printf '%s\n' "QCH_AGENT_LABELS=$final_labels"
   printf '%s\n' "QCH_AGENT_STATE=$final_state"
@@ -437,15 +456,38 @@ else
   "$systemctl_cmd" --no-pager status qagent.service | head -n 10
 fi
 
-# 添加节点凭证只用于下载和注册；无论首次还是覆盖安装，只要身份文件
-# 存在就立即从环境文件移除，避免添加节点凭证残留。
-if [ -s "$agent_state_file" ]; then
-  sed -i '/^QCH_ENROLLMENT_TOKEN=/d' "$agent_env_file"
-  sed -i '/^QCH_REENROLL=/d' "$agent_env_file"
-  chmod 0600 "$agent_env_file"
-  if [ "$service_manager" = openrc ]; then
-    sed -i '/^export QCH_ENROLLMENT_TOKEN=/d' "$openrc_conf"
-    sed -i '/^export QCH_REENROLL=/d' "$openrc_conf"
-    chmod 0600 "$openrc_conf"
+agent_enrollment_completed() {
+  [ -s "$final_state" ] || return 1
+  grep -Fq "\"server\":\"$server_host\"" "$final_state" || return 1
+  if [ "$reenroll_required" = true ] && [ "$previous_state_present" = true ]; then
+    current_private_key=$(sed -n 's/.*"private_key":"\([^"]*\)".*/\1/p' "$final_state" | head -n 1)
+    [ -n "$current_private_key" ] || return 1
+    [ "$current_private_key" != "$previous_private_key" ] || return 1
   fi
+}
+
+waited_seconds=0
+while ! agent_enrollment_completed; do
+  if [ "$waited_seconds" -ge "$enrollment_wait_seconds" ]; then
+    if [ "$service_manager" = openrc ]; then
+      "$rc_service_cmd" qagent stop >/dev/null 2>&1 || true
+    else
+      "$systemctl_cmd" stop qagent.service >/dev/null 2>&1 || true
+    fi
+    printf '%s\n' "Agent did not confirm enrollment with $server_host within ${enrollment_wait_seconds}s; the service was stopped and enrollment credentials were retained, rerun this installer to retry" >&2
+    exit 1
+  fi
+  sleep 1
+  waited_seconds=$((waited_seconds + 1))
+done
+
+# The add-node credential is needed only until the state file proves that the
+# Agent enrolled against this control plane. On a failed or interrupted
+# migration the stopped service retains it so rerunning this installer can
+# retry without destroying the prior identity or any managed core state.
+sed -i '/^QCH_ENROLLMENT_TOKEN=/d' "$agent_env_file"
+chmod 0600 "$agent_env_file"
+if [ "$service_manager" = openrc ]; then
+  sed -i '/^export QCH_ENROLLMENT_TOKEN=/d' "$openrc_conf"
+  chmod 0600 "$openrc_conf"
 fi

@@ -183,9 +183,10 @@ func TestOneClickInstallerDefersManagedCoreServicesUntilPanelInstall(t *testing.
 	script := string(contents)
 	for _, required := range []string{
 		`bootstrap-core-services.sh" --prepare-agent`,
-		`core_asset_root=/usr/local/share/qcontrolhub/core-install`,
+		`core_asset_root=${QCH_CORE_ASSET_ROOT:-/usr/local/share/qcontrolhub/core-install}`,
 		`stage_core_asset "$repository_dir/deploy/$service_manager/$service_asset"`,
-		`/usr/local/lib/qagent/cores`,
+		`qagent_bin_dir=${QCH_AGENT_BIN_DIR:-/usr/local/lib/qagent}`,
+		`"$qagent_bin_dir/cores"`,
 		`existing $label service was left unchanged because it could not be mapped safely`,
 		`only this core's remote tasks will remain disabled`,
 	} {
