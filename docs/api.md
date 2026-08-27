@@ -76,6 +76,7 @@
 | `GET` | `/api/v1/audit?limit=` | 读取最近审计记录 |
 | `GET` | `/api/v1/metrics/{agent_id}` | 读取节点最近 24 小时资源样本 |
 | `GET` | `/api/v1/traffic-policies` | 读取所有端口流量配额及 Agent 最新计数（traffic.read） |
+| `GET` | `/api/v1/traffic-endpoints` | 从节点当前保存的内核配置读取已有监听端口（traffic.read） |
 | `GET` | `/api/v1/traffic-usage?month=&agent_id=&policy_id=` | 查询控制面持久化的端口每日流量（traffic.read） |
 | `POST` | `/api/v1/traffic-policies` | 创建端口流量配额（traffic.manage） |
 | `PUT` | `/api/v1/traffic-policies/{id}` | 更新端口、协议、周期或额度（traffic.manage） |
@@ -108,6 +109,8 @@
 `core_log_minimum_level` 控制主控写入 PostgreSQL 的最低内核日志级别，可选 `debug`、`info`、`warning`、`error`、`critical` 或 `off`。默认 `debug` 保持升级前的全量保存行为；`off` 停止保存新日志。策略只影响设置保存后收到的新日志，已有记录仍按 7 天保留期清理。主控仍会校验并确认被过滤的 Agent 日志批次，因此调整策略不会中断 WSS 会话。旧客户端省略该字段时，主控保留当前值。
 
 ### 端口流量配额
+
+`GET /api/v1/traffic-endpoints` 会从节点当前保存的 Mihomo、Xray、sing-box 与 Shadowsocks Rust 配置中提取监听名称、端口和 TCP/UDP 范围。响应不会包含凭据或完整配置内容；端口即使还没有创建流量配额也会返回，流量页据此直接展示现有端口并提供预填的配额入口。同一节点同一端口已有配额时，页面只显示配额卡片，不重复显示配置端口。
 
 创建与更新请求使用相同结构：
 

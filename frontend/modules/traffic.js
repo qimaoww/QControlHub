@@ -4,6 +4,32 @@ import {
   createRefreshChannel,
 } from "./refresh.js";
 
+const trafficPortIdentity = (item) => `${item.agent_id}:${item.port}`;
+const trafficEndpointKey = (item) => `endpoint:${item.agent_id}:${item.engine}:${item.port}:${item.protocol}`;
+
+export function mergeTrafficPorts(policies = [], endpoints = []) {
+  const monitored = new Set(policies.map(trafficPortIdentity));
+  const discovered = new Map();
+  for (const endpoint of endpoints) {
+    const identity = trafficPortIdentity(endpoint);
+    if (!monitored.has(identity) && !discovered.has(identity)) discovered.set(identity, endpoint);
+  }
+  return [
+    ...policies.map((policy) => ({ kind: "policy", key: `policy:${policy.id}`, policy })),
+    ...[...discovered.values()]
+      .map((endpoint) => ({ kind: "endpoint", key: trafficEndpointKey(endpoint), endpoint })),
+  ];
+}
+
+export function resetTrafficCreateForm(form, agents = [], renderEngineOptions = () => "") {
+  if (!form) return;
+  form.reset();
+  const agentSelect = form.querySelector("[name=agent_id]");
+  const engineSelect = form.querySelector("[name=engine]");
+  const agent = agents.find((candidate) => candidate.id === agentSelect?.value);
+  if (engineSelect) engineSelect.innerHTML = renderEngineOptions(agent);
+}
+
 export function installTraffic(ctx) {
   const {
     api, state, can, esc, engineName, bytes, rate, percent, ago, shell,
@@ -93,9 +119,10 @@ export function installTraffic(ctx) {
   const selectOptions = (items, value, label) =>
     `<option value="">${label}</option>${items.map((item) => `<option value="${esc(item.value)}" ${item.value === value ? "selected" : ""}>${esc(item.label)}</option>`).join("")}`;
 
-  const renderTraffic = (agents, policies, resetCreate = false) => {
+  const renderTraffic = (agents, policies, endpoints, resetCreate = false) => {
     state.data.agents = agents;
     state.data.trafficPolicies = policies;
+    state.data.trafficEndpoints = endpoints;
     const currentFilters = filters();
     if (state.anchor === "traffic-all") {
       currentFilters.agent_id = "";
@@ -105,33 +132,52 @@ export function installTraffic(ctx) {
       state.anchor = "traffic";
     }
     const agentByID = new Map(agents.map((agent) => [agent.id, agent]));
-    const filteredPolicies = policies.filter((policy) => {
-      if (currentFilters.agent_id && policy.agent_id !== currentFilters.agent_id) return false;
-      if (currentFilters.engine && policy.engine !== currentFilters.engine) return false;
-      if (currentFilters.policy_id && policy.id !== currentFilters.policy_id) return false;
-      return !currentFilters.status || policyStatusKey(policy, agentByID.get(policy.agent_id)) === currentFilters.status;
+    const items = mergeTrafficPorts(policies, endpoints);
+    const filteredItems = items.filter((item) => {
+      const value = item.policy || item.endpoint;
+      if (currentFilters.agent_id && value.agent_id !== currentFilters.agent_id) return false;
+      if (currentFilters.engine && value.engine !== currentFilters.engine) return false;
+      if (currentFilters.endpoint_key && item.key !== currentFilters.endpoint_key) return false;
+      const status = item.kind === "endpoint" ? "unconfigured" : policyStatusKey(item.policy, agentByID.get(value.agent_id));
+      return !currentFilters.status || status === currentFilters.status;
     });
+    const filteredPolicies = filteredItems.filter((item) => item.kind === "policy").map((item) => item.policy);
     const totalUsed = filteredPolicies.reduce((sum, policy) => sum + Number(policy.used_bytes || 0), 0);
     const totalLimit = filteredPolicies.reduce((sum, policy) => sum + Number(policy.limit_bytes || 0), 0);
-    const allEngines = [...new Set(policies.map((policy) => policy.engine).filter(Boolean))];
-    const policyChoices = policies.map((policy) => ({
-      value: policy.id,
-      label: `${policy.name || "未命名端口"} · ${engineName(policy.engine)} :${policy.port}`,
-    })).sort((a, b) => a.label.localeCompare(b.label));
+    const allEngines = [...new Set(items.map((item) => (item.policy || item.endpoint).engine).filter(Boolean))];
+    const endpointChoices = items.map((item) => {
+      const value = item.policy || item.endpoint;
+      return {
+        value: item.key,
+        label: `${value.name || "未命名端口"} · ${engineName(value.engine)} :${value.port}`,
+      };
+    }).sort((a, b) => a.label.localeCompare(b.label));
     const selectedScope = currentFilters.agent_id
       ? agentByID.get(currentFilters.agent_id)?.name || "所选节点"
       : "全部节点";
     const toolbar = `<section class="traffic-control-panel"><div class="traffic-filters" aria-label="流量筛选">
       <label>内核<select data-traffic-filter="engine">${selectOptions(allEngines.map((engine) => ({ value: engine, label: engineName(engine) })), currentFilters.engine, "全部内核")}</select></label>
-      <label>端口配额<select data-traffic-filter="policy_id">${selectOptions(policyChoices, currentFilters.policy_id, "全部端口")}</select></label>
-      <label>状态<select data-traffic-filter="status">${selectOptions([{ value: "active", label: "监控中" }, { value: "blocked", label: "已封禁" }, { value: "waiting", label: "等待同步" }, { value: "error", label: "监控异常" }], currentFilters.status, "全部状态")}</select></label>
+      <label>配置端口<select data-traffic-filter="endpoint_key">${selectOptions(endpointChoices, currentFilters.endpoint_key, "全部端口")}</select></label>
+      <label>状态<select data-traffic-filter="status">${selectOptions([{ value: "unconfigured", label: "未设置配额" }, { value: "active", label: "监控中" }, { value: "blocked", label: "已封禁" }, { value: "waiting", label: "等待同步" }, { value: "error", label: "监控异常" }], currentFilters.status, "全部状态")}</select></label>
       <button class="button small" type="button" data-traffic-filter-reset ${Object.values(currentFilters).some(Boolean) ? "" : "disabled"}>清除筛选</button>
-    </div><section class="traffic-total"><span data-traffic-refresh-label>${esc(selectedScope)} · 当前周期</span><div><strong>${bytes(totalUsed)}</strong><small>/ ${bytes(totalLimit)}</small></div><progress max="100" value="${percent(totalUsed, totalLimit)}"></progress><em>${filteredPolicies.length} 个端口</em></section></section>`;
+    </div><section class="traffic-total"><span data-traffic-refresh-label>${esc(selectedScope)} · 当前周期</span><div><strong>${bytes(totalUsed)}</strong><small>/ ${bytes(totalLimit)}</small></div><progress max="100" value="${percent(totalUsed, totalLimit)}"></progress><em>${filteredItems.length} 个端口 · ${filteredPolicies.length} 个配额</em></section></section>`;
     const selectableAgents = eligibleAgents(agents);
     const createDialog = can("traffic.manage")
       ? `<dialog class="traffic-edit-dialog traffic-create-dialog" id="traffic-new" aria-labelledby="traffic-create-title"><header><span class="traffic-edit-icon" aria-hidden="true">＋</span><div><p class="eyebrow">端口流量</p><h2 id="traffic-create-title">添加端口配额</h2><p>选择节点、内核和端口后开始持续统计</p></div><button class="deploy-command-close" type="button" data-traffic-create-close aria-label="关闭添加配额弹窗">×</button></header>${selectableAgents.length ? `<form id="traffic-policy-form"><div class="traffic-edit-body">${policyFields({ cycle_anchor: new Date(), protocol: "both", cycle: "monthly", auto_block: true }, selectableAgents, "create")}</div><footer><span></span><button class="button" type="button" data-traffic-create-close>取消</button><button class="button primary" type="submit">开始监控</button></footer></form>` : '<div class="traffic-create-unavailable"><strong>暂无可配置节点</strong><p>节点需在线并升级到支持端口流量统计的 Agent 后才能添加。</p><button class="button" type="button" data-traffic-create-close>关闭</button></div>'}</dialog>`
       : "";
-    const cards = filteredPolicies.map((policy) => {
+    const cards = filteredItems.map((item) => {
+      if (item.kind === "endpoint") {
+        const endpoint = item.endpoint;
+        const agent = agentByID.get(endpoint.agent_id);
+        const configurable = selectableAgents.some((candidate) => candidate.id === endpoint.agent_id && (candidate.capabilities || []).includes(endpoint.engine));
+        const sourceStatus = configurable ? "现有配置端口" : (agent?.features || []).includes("port-traffic-v1") ? "节点暂不可配置" : "需升级 Agent 后设置配额";
+        return `<article class="traffic-policy-card traffic-configured-port" data-refresh-key="traffic-endpoint-${esc(item.key)}" data-traffic-agent-card="${esc(endpoint.agent_id)}">
+          <header><div class="traffic-card-identity"><span class="engine-badge ${esc(endpoint.engine)}">${esc(engineName(endpoint.engine))}</span><span><strong>${esc(endpoint.name || `端口 ${endpoint.port}`)}</strong><small>${esc(agent?.name || endpoint.agent_id)}<i>·</i><code>:${esc(endpoint.port)}</code><i>·</i>${esc(protocolName(endpoint.protocol))}</small></span></div><span class="traffic-policy-status neutral"><i></i>未设置配额</span></header>
+          <section class="traffic-configured-port-body"><span aria-hidden="true">↳</span><div><strong>已从节点配置读取</strong><p>配置 v${esc(endpoint.config_version || 1)} 中已存在此监听端口，可直接开始统计。</p></div></section>
+          <footer><span class="traffic-card-sync"><i class="${configurable ? "ok" : ""}"></i>${sourceStatus}</span>${can("traffic.manage") && configurable ? `<button class="button small traffic-configure-port" type="button" data-traffic-configure="${esc(item.key)}">设置配额</button>` : ""}</footer>
+        </article>`;
+      }
+      const policy = item.policy;
       const agent = agentByID.get(policy.agent_id);
       const [status, tone] = policyStatus(policy, agent);
       const usedPercent = percent(policy.used_bytes, policy.limit_bytes);
@@ -146,12 +192,12 @@ export function installTraffic(ctx) {
         <footer><span class="traffic-card-sync"><i class="${policy.last_reported_at ? "ok" : ""}"></i>${policy.last_reported_at ? `${ago(policy.last_reported_at)}更新` : "等待 Agent 上报"}</span>${can("traffic.manage") ? `<div class="traffic-card-actions"><button class="button small" type="button" data-traffic-reset="${esc(policy.id)}">清零</button><button class="button small" type="button" data-traffic-edit-open="${esc(policy.id)}">编辑</button></div>` : ""}</footer>${can("traffic.manage") ? `<dialog class="traffic-edit-dialog" data-traffic-edit-dialog="${esc(policy.id)}" aria-labelledby="traffic-edit-title-${esc(policy.id)}"><header><span class="traffic-edit-icon" aria-hidden="true">✎</span><div><p class="eyebrow">端口配额</p><h2 id="traffic-edit-title-${esc(policy.id)}">编辑 ${esc(policy.name)}</h2><p>${esc(agent?.name || policy.agent_id)} · ${esc(engineName(policy.engine))} :${esc(policy.port)}</p></div><button class="deploy-command-close" type="button" data-traffic-edit-close aria-label="关闭编辑弹窗">×</button></header><form data-traffic-edit-form="${esc(policy.id)}"><div class="traffic-edit-body">${policyFields(policy, [agent].filter(Boolean), `edit-${policy.id}`)}</div><footer><button class="button small danger-button" type="button" data-traffic-delete="${esc(policy.id)}">删除配额</button><span></span><button class="button" type="button" data-traffic-edit-close>取消</button><button class="button primary" type="submit">保存修改</button></footer></form></dialog>` : ""}
       </article>`;
     }).join("");
-    const empty = policies.length
+    const empty = items.length
       ? '<div class="empty large"><strong>没有符合筛选条件的端口</strong><p>调整上方筛选条件后再查看。</p></div>'
-      : '<div class="empty large"><strong>还没有端口流量配额</strong><p>添加一个端口后，Agent 会开始上报流量。</p></div>';
-    const listHeader = `<header class="traffic-policy-list-head"><div><h2>端口配额</h2><span>${filteredPolicies.length}</span></div><small>${esc(selectedScope)} · Agent 实时上报</small></header>`;
+      : '<div class="empty large"><strong>尚未读取到配置端口</strong><p>节点保存或部署内核配置后，已有监听端口会直接显示在这里。</p></div>';
+    const listHeader = `<header class="traffic-policy-list-head"><div><h2>配置端口</h2><span>${filteredItems.length}</span></div><small>${esc(selectedScope)} · 配置文件发现 · Agent 实时上报</small></header>`;
     shell(`<div class="traffic-workspace">${toolbar}${listHeader}${cards ? `<section class="traffic-policy-grid">${cards}</section>` : empty}${createDialog}</div>`, "流量配额");
-    bindTrafficForms(selectableAgents);
+    bindTrafficForms(selectableAgents, endpoints);
     if (resetCreate) document.querySelector("#traffic-policy-form")?.reset();
     if (state.anchor === "traffic-new") {
       const create = document.querySelector("#traffic-new");
@@ -175,8 +221,11 @@ export function installTraffic(ctx) {
         (signal) => Promise.all([
           api("/agents", { signal }),
           api("/traffic-policies", { signal }),
+          background && Array.isArray(state.data.trafficEndpoints)
+            ? Promise.resolve(state.data.trafficEndpoints)
+            : api("/traffic-endpoints", { signal }),
         ]),
-        ([agents, policies]) => renderTraffic(agents, policies, resetCreate),
+        ([agents, policies, endpoints]) => renderTraffic(agents, policies, endpoints, resetCreate),
       );
       if (applied) poller.start();
       return applied;
@@ -194,23 +243,47 @@ export function installTraffic(ctx) {
     }
   }
 
-  function bindTrafficForms(agents) {
+  function bindTrafficForms(agents, endpoints) {
     document.querySelectorAll("[data-traffic-filter]").forEach((control) => {
       control.onchange = () => {
         filters()[control.dataset.trafficFilter] = control.value;
-        renderTraffic(state.data.agents || [], state.data.trafficPolicies || []);
+        renderTraffic(state.data.agents || [], state.data.trafficPolicies || [], state.data.trafficEndpoints || []);
       };
     });
     const reset = document.querySelector("[data-traffic-filter-reset]");
     if (reset) reset.onclick = () => {
       state.data.trafficFilters = {};
-      renderTraffic(state.data.agents || [], state.data.trafficPolicies || []);
+      renderTraffic(state.data.agents || [], state.data.trafficPolicies || [], state.data.trafficEndpoints || []);
     };
     document.querySelectorAll('a[href="#traffic-new"]').forEach((link) => {
       link.onclick = (event) => {
         event.preventDefault();
         const create = document.querySelector("#traffic-new");
+        resetTrafficCreateForm(create?.querySelector("form"), agents, engineOptions);
         create?.showModal();
+      };
+    });
+    document.querySelectorAll("[data-traffic-configure]").forEach((button) => {
+      button.onclick = () => {
+        const endpoint = endpoints.find((candidate) => trafficEndpointKey(candidate) === button.dataset.trafficConfigure);
+        const form = document.querySelector("#traffic-policy-form");
+        const dialog = document.querySelector("#traffic-new");
+        if (!endpoint || !form || !dialog) return;
+        resetTrafficCreateForm(form, agents, engineOptions);
+        const agentSelect = form.querySelector("[name=agent_id]");
+        const engineSelect = form.querySelector("[name=engine]");
+        if (agentSelect) agentSelect.value = endpoint.agent_id;
+        const agent = agents.find((candidate) => candidate.id === endpoint.agent_id);
+        if (engineSelect) {
+          engineSelect.innerHTML = engineOptions(agent, endpoint.engine);
+          engineSelect.value = endpoint.engine;
+        }
+        const values = { name: endpoint.name, port: endpoint.port, protocol: endpoint.protocol };
+        Object.entries(values).forEach(([name, value]) => {
+          const field = form.querySelector(`[name="${name}"]`);
+          if (field) field.value = value;
+        });
+        dialog.showModal();
       };
     });
     const createDialog = document.querySelector("#traffic-new");
