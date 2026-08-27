@@ -325,6 +325,11 @@ func TestTrafficUsesOneNodeFilterSurface(t *testing.T) {
 		!strings.Contains(string(traffic), `currentFilters.agent_id = ""`) {
 		t.Error("traffic all-node sidebar action must clear the selected node scope")
 	}
+	for _, required := range []string{`api("/traffic-endpoints"`, `mergeTrafficPorts(policies, endpoints)`, `未设置配额`, `data-traffic-configure`} {
+		if !strings.Contains(string(traffic), required) {
+			t.Errorf("traffic workspace must expose configured ports before a quota exists: missing %q", required)
+		}
+	}
 	styles := string(mustReadFrontendFile(t, "app.css"))
 	if !strings.Contains(styles, `.traffic-workspace>.traffic-policy-grid{grid-template-columns:repeat(auto-fill,minmax(360px,1fr))`) {
 		t.Error("traffic cards must use the same responsive column sizing as node settings cards")
