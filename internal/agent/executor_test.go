@@ -120,7 +120,7 @@ func TestOpenRCSpecsAndServicesUsePrivateQAgentNamespace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, required := range []string{"command=\"/usr/local/lib/qagent/qagent\"", "command_user=\"root:root\"", "respawn_delay=5", "capabilities=\"^cap_chown,^cap_net_admin\"", "no_new_privs=true"} {
+	for _, required := range []string{"command=\"/usr/local/lib/qagent/qagent\"", "command_user=\"root:root\"", "respawn_delay=5", "capabilities=\"^cap_chown\"", "qagent_capability_is_bound 12", "capabilities=\"${capabilities},^cap_net_admin\"", "no_new_privs=true"} {
 		if !strings.Contains(string(agentService), required) {
 			t.Errorf("OpenRC Agent service is missing %q", required)
 		}
