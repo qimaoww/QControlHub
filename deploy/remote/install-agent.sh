@@ -49,6 +49,7 @@ systemctl_cmd=${QCH_SYSTEMCTL:-systemctl}
 rc_service_cmd=${QCH_RC_SERVICE:-rc-service}
 rc_update_cmd=${QCH_RC_UPDATE:-rc-update}
 download_cmd=${QCH_CURL:-curl}
+nft_cmd=${QCH_NFT:-/usr/sbin/nft}
 agent_conf_dir=$(dirname "$agent_env_file")
 
 validate_environment_value() {
@@ -81,6 +82,56 @@ esac
 case "$enrollment_wait_seconds" in
   ""|0|*[!0-9]*) printf '%s\n' 'QCH_AGENT_ENROLLMENT_WAIT_SECONDS must be a positive integer' >&2; exit 1 ;;
 esac
+
+nftables_available() {
+  if [ -n "${QCH_NFT:-}" ]; then
+    [ -x "$nft_cmd" ]
+    return
+  fi
+  [ -x "$nft_cmd" ] || command -v nft >/dev/null 2>&1
+}
+
+install_nftables() {
+  nftables_available && return 0
+  printf '%s\n' 'nft not found; installing the nftables package for port traffic monitoring'
+  if command -v apt-get >/dev/null 2>&1; then
+    DEBIAN_FRONTEND=noninteractive apt-get update -qq || {
+      printf '%s\n' 'failed to update APT package metadata for nftables' >&2
+      exit 1
+    }
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends nftables >/dev/null || {
+      printf '%s\n' 'failed to install nftables with APT' >&2
+      exit 1
+    }
+  elif command -v apk >/dev/null 2>&1; then
+    apk add --no-cache nftables >/dev/null || {
+      printf '%s\n' 'failed to install nftables with apk' >&2
+      exit 1
+    }
+  elif command -v dnf >/dev/null 2>&1; then
+    dnf install -y nftables >/dev/null || {
+      printf '%s\n' 'failed to install nftables with dnf' >&2
+      exit 1
+    }
+  elif command -v yum >/dev/null 2>&1; then
+    yum install -y nftables >/dev/null || {
+      printf '%s\n' 'failed to install nftables with yum' >&2
+      exit 1
+    }
+  elif command -v zypper >/dev/null 2>&1; then
+    zypper --non-interactive install nftables >/dev/null || {
+      printf '%s\n' 'failed to install nftables with zypper' >&2
+      exit 1
+    }
+  else
+    printf '%s\n' 'nftables is required, but no supported package manager was found (apt, apk, dnf, yum, or zypper)' >&2
+    exit 1
+  fi
+  nftables_available || {
+    printf '%s\n' 'the nftables package was installed, but the nft executable is still unavailable' >&2
+    exit 1
+  }
+}
 
 run_uninstall() {
   case "$service_manager" in
@@ -130,6 +181,8 @@ if [ "$action" = uninstall ]; then
   run_uninstall
   exit 0
 fi
+
+install_nftables
 
 control="${1:?usage: install-agent.sh install|update <control-plane-url|ip[:port]> <add-node-credential> [agent-name]}"
 token="${2:?usage: install-agent.sh install|update <control-plane-url|ip[:port]> <add-node-credential> [agent-name]}"
