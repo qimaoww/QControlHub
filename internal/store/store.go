@@ -44,7 +44,7 @@ type storeExecutor interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }
 
-const currentSchemaVersion = 25
+const currentSchemaVersion = 26
 
 func Open(ctx context.Context, databaseURL string, allowInsecureRemote bool) (*Store, error) {
 	return OpenWithConfigKey(ctx, databaseURL, allowInsecureRemote, "")
@@ -1884,10 +1884,14 @@ CREATE TABLE IF NOT EXISTS panel_settings (
     panel_description varchar(120) NOT NULL DEFAULT '',
     task_page_size integer NOT NULL CHECK (task_page_size IN (50,100,500)),
     task_poll_interval_ms integer NOT NULL CHECK (task_poll_interval_ms IN (600,1000,2000,5000)),
+	core_log_minimum_level varchar(10) NOT NULL DEFAULT 'debug' CHECK (core_log_minimum_level IN ('debug','info','warning','error','critical','off')),
     webhook_url varchar(500) NOT NULL DEFAULT '',
     updated_at timestamptz NOT NULL
 );
 ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS webhook_url varchar(500) NOT NULL DEFAULT '';
+ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS core_log_minimum_level varchar(10) NOT NULL DEFAULT 'debug';
+ALTER TABLE panel_settings DROP CONSTRAINT IF EXISTS panel_settings_core_log_minimum_level_check;
+ALTER TABLE panel_settings ADD CONSTRAINT panel_settings_core_log_minimum_level_check CHECK (core_log_minimum_level IN ('debug','info','warning','error','critical','off'));
 ALTER TABLE panel_settings DROP COLUMN IF EXISTS enrollment_ttl_minutes;
 
 CREATE TABLE IF NOT EXISTS panel_users (

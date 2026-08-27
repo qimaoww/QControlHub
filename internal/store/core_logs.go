@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -65,7 +66,18 @@ func (s *Store) StoreCoreLogs(ctx context.Context, agentID string, batch core.Co
 		}
 		return tx.Commit(ctx)
 	}
+	var minimumLevel string
+	if err := tx.QueryRow(ctx, `SELECT core_log_minimum_level FROM panel_settings WHERE id=1`).Scan(&minimumLevel); err != nil {
+		return fmt.Errorf("read core log minimum level: %w", err)
+	}
+	minimumLevel = normalizeCoreLogMinimumLevel(minimumLevel)
+	if minimumLevel == "" {
+		return errors.New("invalid stored core log minimum level")
+	}
 	for index, entry := range entries {
+		if !coreLogLevelAtLeast(entry.Level, minimumLevel) {
+			continue
+		}
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO core_logs (batch_id,entry_index,agent_id,engine,level,message,logged_at,received_at)
 			VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
@@ -163,5 +175,39 @@ func normalizeCoreLogLevel(value string) string {
 		return ""
 	default:
 		return ""
+	}
+}
+
+func normalizeCoreLogMinimumLevel(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "off" {
+		return value
+	}
+	return normalizeCoreLogLevel(value)
+}
+
+func coreLogLevelAtLeast(level, minimum string) bool {
+	if minimum == "off" {
+		return false
+	}
+	levelRank, levelOK := coreLogLevelRank(level)
+	minimumRank, minimumOK := coreLogLevelRank(minimum)
+	return levelOK && minimumOK && levelRank >= minimumRank
+}
+
+func coreLogLevelRank(level string) (int, bool) {
+	switch level {
+	case "debug":
+		return 0, true
+	case "info":
+		return 1, true
+	case "warning":
+		return 2, true
+	case "error":
+		return 3, true
+	case "critical":
+		return 4, true
+	default:
+		return 0, false
 	}
 }

@@ -8,11 +8,40 @@ directory="/var/lib/qcontrolhub"
 supervisor="supervise-daemon"
 respawn_delay=5
 respawn_max=5
-capabilities="^cap_chown,^cap_net_admin"
+capabilities="^cap_chown"
 no_new_privs=true
 umask=0077
 output_log=/var/log/qagent/qagent.log
 error_log=/var/log/qagent/qagent.log
+
+# Some container runtimes remove CAP_NET_ADMIN from the bounding set. Asking
+# supervise-daemon to add a capability that cannot be granted prevents the
+# child from being executed at all, which also hides the real failure behind a
+# healthy-looking supervisor. Keep traffic enforcement optional so the Agent
+# can still connect and manage cores in a restricted container.
+qagent_capability_is_bound() {
+	capability_bit=$1
+	capability_hex=
+	while read -r status_key status_value _; do
+		if [ "$status_key" = "CapBnd:" ]; then
+			capability_hex=$status_value
+			break
+		fi
+	done < /proc/self/status
+	case "$capability_hex" in
+		????????????????) ;;
+		*) return 1 ;;
+	esac
+	case "$capability_hex" in
+		*[!0-9A-Fa-f]*) return 1 ;;
+	esac
+	capability_low_word=${capability_hex#????????}
+	[ $((0x$capability_low_word & (1 << capability_bit))) -ne 0 ]
+}
+
+if qagent_capability_is_bound 12; then
+	capabilities="${capabilities},^cap_net_admin"
+fi
 
 depend() {
 	need net

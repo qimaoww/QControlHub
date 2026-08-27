@@ -91,6 +91,23 @@
 
 `GET /api/v1/overview` 中的 `configs` 只统计可在“配置档案”工作区跨节点下发的全局配置；`node_configs` 单独统计绑定到具体 Agent/内核的节点配置，避免将两类配置混为一个不可解释的总数。为兼容既有调用方，`tasks_pending` 仍表示 `pending + running` 的活动任务总数；`tasks_queued` 和 `tasks_running` 分别给出排队与执行中的精确数量。
 
+### 系统设置
+
+`GET /api/v1/settings` 与 `PUT /api/v1/settings` 的设置对象包含：
+
+```json
+{
+  "panel_name": "QControlHub",
+  "panel_description": "可信远程编排",
+  "task_page_size": 100,
+  "task_poll_interval_ms": 600,
+  "core_log_minimum_level": "debug",
+  "webhook_url": ""
+}
+```
+
+`core_log_minimum_level` 控制主控写入 PostgreSQL 的最低内核日志级别，可选 `debug`、`info`、`warning`、`error`、`critical` 或 `off`。默认 `debug` 保持升级前的全量保存行为；`off` 停止保存新日志。策略只影响设置保存后收到的新日志，已有记录仍按 7 天保留期清理。主控仍会校验并确认被过滤的 Agent 日志批次，因此调整策略不会中断 WSS 会话。旧客户端省略该字段时，主控保留当前值。
+
 ### 端口流量配额
 
 `GET /api/v1/traffic-endpoints` 会从节点当前保存的 Mihomo、Xray、sing-box 与 Shadowsocks Rust 配置中提取监听名称、端口和 TCP/UDP 范围。响应不会包含凭据或完整配置内容；端口即使还没有创建流量配额也会返回，流量页据此直接展示现有端口并提供预填的配额入口。同一节点同一端口已有配额时，页面只显示配额卡片，不重复显示配置端口。

@@ -848,6 +848,39 @@ func TestCoreLogsUseImmediateFiltersAndSidebarNodeScope(t *testing.T) {
 	}
 }
 
+func TestCoreLogStoragePolicyNavigationAndVisibility(t *testing.T) {
+	app, err := os.ReadFile("app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	appContent := string(app)
+	for _, required := range []string{
+		`href="#core-log-storage"><span>04</span>内核日志保存`,
+		`href="#notifications"><span>05</span>事件通知`,
+		`href="#users"><span>06</span>用户管理`,
+		`"core-log-storage": "settings"`,
+	} {
+		if !strings.Contains(appContent, required) {
+			t.Errorf("core-log storage settings navigation is missing %q", required)
+		}
+	}
+
+	module, err := os.ReadFile("modules/core-logs.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	moduleContent := string(module)
+	if !strings.Contains(moduleContent, `})[value] || "保存策略不可见"`) {
+		t.Error("core-log storage policy must be explicit when settings are unavailable")
+	}
+	if !strings.Contains(moduleContent, `can("settings.read")`) {
+		t.Error("core-log storage policy visibility must follow the independent settings.read permission")
+	}
+	if strings.Contains(moduleContent, `state.data.settings?.core_log_minimum_level || "debug"`) {
+		t.Error("core-log readers without settings permission must not see a fabricated debug policy")
+	}
+}
+
 func TestCoreLogsUseReadableAlignedDesktopGrid(t *testing.T) {
 	stylesheet, err := os.ReadFile("app.css")
 	if err != nil {
