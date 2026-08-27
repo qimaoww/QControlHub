@@ -2,12 +2,19 @@ package agent
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/qimaoww/qcontrolhub/internal/authn"
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
@@ -28,6 +35,118 @@ func testClientExecutor(t *testing.T) *Executor {
 		}
 	}
 	return &Executor{Services: manager}
+}
+
+func TestClientShouldReenroll(t *testing.T) {
+	tests := []struct {
+		name     string
+		client   Client
+		loaded   credentials
+		wantTrue bool
+	}{
+		{
+			name:     "host change with token migrates",
+			client:   Client{config: ClientConfig{EnrollmentToken: "tok"}, serverHost: "new.example.test"},
+			loaded:   credentials{Server: "old.example.test"},
+			wantTrue: true,
+		},
+		{
+			name:     "same host with token is a normal restart",
+			client:   Client{config: ClientConfig{EnrollmentToken: "tok"}, serverHost: "h.example.test"},
+			loaded:   credentials{Server: "h.example.test"},
+			wantTrue: false,
+		},
+		{
+			name:     "host change without token cannot migrate",
+			client:   Client{config: ClientConfig{}, serverHost: "new.example.test"},
+			loaded:   credentials{Server: "old.example.test"},
+			wantTrue: false,
+		},
+		{
+			name:     "forced reenroll with token migrates on same host",
+			client:   Client{config: ClientConfig{EnrollmentToken: "tok", Reenroll: true}, serverHost: "h.example.test"},
+			loaded:   credentials{Server: "h.example.test"},
+			wantTrue: true,
+		},
+		{
+			name:     "forced reenroll without token still requires token",
+			client:   Client{config: ClientConfig{Reenroll: true}, serverHost: "h.example.test"},
+			loaded:   credentials{Server: "h.example.test"},
+			wantTrue: false,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := test.client.shouldReenroll(test.loaded); got != test.wantTrue {
+				t.Fatalf("shouldReenroll() = %v, want %v", got, test.wantTrue)
+			}
+		})
+	}
+}
+
+func TestReenrollRotatesIdentityAndDropsPriorPanelTasks(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "agent-state.json")
+	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	initial := credentials{
+		AgentID:    "agt_old",
+		PrivateKey: authn.EncodePrivateKey(privateKey),
+		Server:     "old.example.test",
+		CompletedTasks: map[string]completedTask{
+			"t1": {Success: true, CompletedAt: time.Now()},
+		},
+	}
+	if err := saveCredentials(statePath, initial); err != nil {
+		t.Fatal(err)
+	}
+
+	enrollCalled := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/agent/v1/enroll" {
+			http.NotFound(w, request)
+			return
+		}
+		if request.Header.Get("Authorization") != "Bearer new-token" {
+			t.Errorf("enroll authorization = %q, want Bearer new-token", request.Header.Get("Authorization"))
+		}
+		enrollCalled = true
+		_ = json.NewEncoder(w).Encode(core.EnrollResponse{AgentID: "agt_new"})
+	}))
+	defer server.Close()
+
+	parsedHost := strings.TrimPrefix(server.URL, "http://")
+	client, err := NewClient(ClientConfig{
+		ServerURL: server.URL, StatePath: statePath, EnrollmentToken: "new-token",
+		HeartbeatEvery: 30 * time.Second, MetricsEvery: 30 * time.Second,
+	}, testClientExecutor(t))
+	if err != nil {
+		t.Fatalf("new Client: %v", err)
+	}
+	enrolled, err := client.reenroll(context.Background())
+	if err != nil {
+		t.Fatalf("reenroll: %v", err)
+	}
+	if !enrollCalled {
+		t.Fatal("enroll endpoint was not reached")
+	}
+	if enrolled.Server != parsedHost {
+		t.Errorf("reenrolled server = %q, want %q", enrolled.Server, parsedHost)
+	}
+	if len(enrolled.CompletedTasks) != 0 {
+		t.Errorf("prior panel completed tasks should be dropped, got %d", len(enrolled.CompletedTasks))
+	}
+	stored, err := loadCredentials(statePath)
+	if err != nil {
+		t.Fatalf("load credentials: %v", err)
+	}
+	if stored.AgentID != "agt_new" {
+		t.Errorf("stored agent id = %q, want agt_new", stored.AgentID)
+	}
+	if stored.Server != parsedHost {
+		t.Errorf("stored server = %q, want %q", stored.Server, parsedHost)
+	}
 }
 
 func TestNewClientDerivesHTTPSAndWSSOrigins(t *testing.T) {

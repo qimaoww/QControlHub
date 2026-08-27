@@ -2,11 +2,15 @@
 # install-agent.sh — QControlHub agent 一键安装（root 执行，无需预装仓库）
 #
 # 用法：
-#   sh deploy/remote/install-agent.sh <control-plane-url|ip[:port]> <add-node-credential> [agent-name]
+#   sh deploy/remote/install-agent.sh install   <control-plane-url|ip[:port]> <add-node-credential> [agent-name]
+#   sh deploy/remote/install-agent.sh update    <control-plane-url|ip[:port]> <add-node-credential> [agent-name]
+#   sh deploy/remote/install-agent.sh migrate   <new-control-plane-url|ip[:port]> <add-node-credential> [agent-name]
+#   sh deploy/remote/install-agent.sh uninstall
 #
 # 示例：
 #   QCH_TLS_CA_FILE=/etc/qcontrolhub/control-plane-ca.pem \
-#   sh deploy/remote/install-agent.sh https://qcontrolhub.example.com <token> shanghai-edge-01
+#   sh deploy/remote/install-agent.sh install https://qcontrolhub.example.com <token> shanghai-edge-01
+# 兼容旧式：省略首位的 install 动作时，脚本仍按安装处理。
 #
 # 从控制面 GET /api/v1/agent-binary 下载 agent 可执行文件，引导核心服务，
 # 写入 /etc/qcontrolhub/agent.env，安装 systemd 或 OpenRC 服务并启动。
@@ -14,11 +18,37 @@ set -eu
 
 [ "$(id -u)" -eq 0 ] || { printf '%s\n' 'install-agent.sh must run as root' >&2; exit 1; }
 
-control="${1:?usage: install-agent.sh <control-plane-url|ip[:port]> <add-node-credential> [agent-name]}"
-token="${2:?usage: install-agent.sh <control-plane-url|ip[:port]> <add-node-credential> [agent-name]}"
-name="${3:-$(hostname)}"
-ca_file="${QCH_TLS_CA_FILE:-}"
-allow_insecure_live="${QCH_ALLOW_INSECURE_LIVE:-false}"
+action=${1:-install}
+if [ "$#" -gt 0 ]; then
+  case "$1" in
+    install|update|migrate|uninstall)
+      action=$1
+      shift
+      ;;
+  esac
+fi
+
+# Keep every managed path and helper command overridable so an idempotency
+# regression harness can run against a sandbox tree. Production defaults are
+# unchanged.
+qagent_bin_dir=${QCH_AGENT_BIN_DIR:-/usr/local/lib/qagent}
+qagent_bin_link=${QCH_AGENT_BIN_LINK:-/usr/local/bin/qagent}
+qagent_etc_dir=${QCH_AGENT_ETC_DIR:-/etc/qagent}
+core_service_group=${QCH_AGENT_SERVICE_GROUP:-qcontrolhub-core}
+agent_env_file=${QCH_AGENT_ENV_FILE:-/etc/qcontrolhub/agent.env}
+agent_state_file=${QCH_AGENT_STATE_FILE:-/var/lib/qcontrolhub/agent-state.json}
+core_asset_root=${QCH_CORE_ASSET_ROOT:-/usr/local/share/qcontrolhub/core-install}
+core_share_root=$(dirname "$core_asset_root")
+agent_state_dir=$(dirname "$agent_state_file")
+service_unit_dir=${QCH_SYSTEMD_UNIT_ROOT:-/etc/systemd/system}
+openrc_init_dir=${QCH_OPENRC_INIT_ROOT:-/etc/init.d}
+openrc_conf_dir=${QCH_OPENRC_CONF_DIR:-/etc/conf.d}
+openrc_runlevels_root=${QCH_OPENRC_RUNLEVELS_ROOT:-/etc/runlevels}
+systemctl_cmd=${QCH_SYSTEMCTL:-systemctl}
+rc_service_cmd=${QCH_RC_SERVICE:-rc-service}
+rc_update_cmd=${QCH_RC_UPDATE:-rc-update}
+download_cmd=${QCH_CURL:-curl}
+agent_conf_dir=$(dirname "$agent_env_file")
 
 validate_environment_value() {
   environment_key=$1
@@ -30,22 +60,87 @@ validate_environment_value() {
   }
 }
 
+service_manager=${QCH_SERVICE_MANAGER:-}
+if [ -z "$service_manager" ]; then
+  if [ -f /etc/alpine-release ]; then
+    command -v apk >/dev/null 2>&1 || { printf '%s\n' 'Alpine apk is unavailable' >&2; exit 1; }
+    apk add --no-cache ca-certificates coreutils curl libcap nftables openrc >/dev/null
+    service_manager=openrc
+  elif command -v "$systemctl_cmd" >/dev/null 2>&1; then
+    service_manager=systemd
+  else
+    printf '%s\n' 'unsupported init system: systemd or Alpine OpenRC is required' >&2
+    exit 1
+  fi
+fi
+case "$service_manager" in
+  systemd|openrc) ;;
+  *) printf '%s\n' "unsupported init system: $service_manager" >&2; exit 1 ;;
+esac
+
+run_uninstall() {
+  case "$service_manager" in
+    systemd)
+      if [ -e "$service_unit_dir/qagent.service" ]; then
+        "$systemctl_cmd" disable qagent.service >/dev/null 2>&1 || true
+        "$systemctl_cmd" stop qagent.service >/dev/null 2>&1 || true
+        rm -f "$service_unit_dir/qagent.service"
+        "$systemctl_cmd" daemon-reload
+      fi
+      for unit in "$service_unit_dir"/qagent-*.service; do
+        [ -e "$unit" ] || continue
+        if grep -q '^Description=.* managed by QAgent$' "$unit"; then
+          "$systemctl_cmd" disable "${unit##*/}" >/dev/null 2>&1 || true
+          "$systemctl_cmd" stop "${unit##*/}" >/dev/null 2>&1 || true
+          rm -f "$unit"
+        else
+          printf '%s\n' "preserved non-QAgent unit: $unit"
+        fi
+      done
+      "$systemctl_cmd" daemon-reload
+      ;;
+    openrc)
+      if [ -e "$openrc_init_dir/qagent" ]; then
+        "$rc_service_cmd" qagent stop >/dev/null 2>&1 || true
+        rm -f "$openrc_runlevels_root/default/qagent"
+        rm -f "$openrc_init_dir/qagent"
+      fi
+      for service in "$openrc_init_dir"/qagent-*; do
+        [ -e "$service" ] || continue
+        if grep -q '^# QControlHub managed OpenRC service:' "$service"; then
+          "$rc_service_cmd" "${service##*/}" stop >/dev/null 2>&1 || true
+          rm -f "$openrc_runlevels_root/default/${service##*/}"
+          rm -f "$service"
+        else
+          printf '%s\n' "preserved non-QAgent OpenRC service: $service"
+        fi
+      done
+      ;;
+  esac
+  rm -f "$agent_env_file" "$openrc_conf_dir/qagent" "$qagent_bin_link"
+  rm -rf "$qagent_bin_dir" "$qagent_etc_dir" "$core_asset_root"
+  printf '%s\n' "已卸载 QControlHub Agent；保留节点状态目录 $agent_state_dir，如需彻底清理请手动删除。"
+}
+
+if [ "$action" = uninstall ]; then
+  run_uninstall
+  exit 0
+fi
+
+control="${1:?usage: install-agent.sh install|update <control-plane-url|ip[:port]> <add-node-credential> [agent-name]}"
+token="${2:?usage: install-agent.sh install|update <control-plane-url|ip[:port]> <add-node-credential> [agent-name]}"
+name_arg="${3:-}"
+default_name=$(hostname)
+name=${name_arg:-$default_name}
+ca_file="${QCH_TLS_CA_FILE:-}"
+allow_insecure_live="${QCH_ALLOW_INSECURE_LIVE:-false}"
+
 validate_environment_value QCH_SERVER_URL "$control"
 validate_environment_value QCH_ENROLLMENT_TOKEN "$token"
 validate_environment_value QCH_AGENT_NAME "$name"
 validate_environment_value QCH_TLS_CA_FILE "$ca_file"
 validate_environment_value QCH_ALLOW_INSECURE_LIVE "$allow_insecure_live"
 
-if [ -f /etc/alpine-release ]; then
-  command -v apk >/dev/null 2>&1 || { printf '%s\n' 'Alpine apk is unavailable' >&2; exit 1; }
-  apk add --no-cache ca-certificates coreutils curl libcap nftables openrc >/dev/null
-  service_manager=openrc
-elif command -v systemctl >/dev/null 2>&1; then
-  service_manager=systemd
-else
-  printf '%s\n' 'unsupported init system: systemd or Alpine OpenRC is required' >&2
-  exit 1
-fi
 case "$control" in
   http://*|https://*|ws://*|wss://*) server_url="$control" ;;
   *) server_url="http://$control" ;;
@@ -66,9 +161,9 @@ download() {
   source_path=$1
   destination=$2
   if [ -n "$ca_file" ]; then
-    curl --fail --silent --show-error --cacert "$ca_file" -H "X-QControlHub-Enrollment: $token" "$http_origin$source_path" -o "$destination"
+    "$download_cmd" --fail --silent --show-error --cacert "$ca_file" -H "X-QControlHub-Enrollment: $token" "$http_origin$source_path" -o "$destination"
   else
-    curl --fail --silent --show-error -H "X-QControlHub-Enrollment: $token" "$http_origin$source_path" -o "$destination"
+    "$download_cmd" --fail --silent --show-error -H "X-QControlHub-Enrollment: $token" "$http_origin$source_path" -o "$destination"
   fi
 }
 
@@ -125,17 +220,16 @@ run_discovery() {
 run_discovery Xray discover_existing_xray
 run_discovery sing-box discover_existing_singbox
 QCH_SERVICE_MANAGER="$service_manager" sh "$repository_dir/deploy/bootstrap-core-services.sh" --prepare-agent
-install -d -o root -g qcontrolhub-core -m 0750 /etc/qagent
+install -d -o root -g "$core_service_group" -m 0750 "$qagent_etc_dir"
 
 # Deploying QAgent must not create four unused core services. Keep the
 # credential-protected installation assets in a protected local directory. The
 # Agent invokes the bootstrap for exactly one engine only after an explicit
 # panel install/import task arrives.
-core_asset_root=/usr/local/share/qcontrolhub/core-install
 for asset_directory in \
-  /usr/local/lib/qagent \
-  /usr/local/lib/qagent/cores \
-  /usr/local/share/qcontrolhub \
+  "$qagent_bin_dir" \
+  "$qagent_bin_dir/cores" \
+  "$core_share_root" \
   "$core_asset_root" \
   "$core_asset_root/deploy" \
   "$core_asset_root/deploy/$service_manager" \
@@ -168,23 +262,87 @@ for service_asset in $service_assets; do
   stage_core_asset "$repository_dir/deploy/$service_manager/$service_asset" "$core_asset_root/deploy/$service_manager/$service_asset" "$service_mode"
 done
 
-echo '== 4/6 写入 agent 环境文件 =='
-mkdir -p /usr/local/lib/qagent
-install -m 0755 "$work_dir/qagent" /usr/local/lib/qagent/qagent
-ln -sfn /usr/local/lib/qagent/qagent /usr/local/bin/qagent
-mkdir -p /etc/qcontrolhub /var/lib/qcontrolhub
+echo '== 4/6 安装 agent 二进制并写入环境文件 =='
+if [ -x "$qagent_bin_dir/qagent" ] || [ -f "$agent_env_file" ] || \
+   [ -e "$service_unit_dir/qagent.service" ] || [ -e "$openrc_init_dir/qagent" ]; then
+  if [ "$action" = update ]; then
+    echo '更新已有 QControlHub Agent（保留可复用的自定义配置）。'
+  elif [ "$action" = migrate ]; then
+    echo '迁移到新的控制面板（保留已装内核与配置，仅重新注册身份）。'
+  else
+    echo '检测到已有 QControlHub Agent；本次按覆盖升级处理，保留可复用的自定义配置。'
+  fi
+fi
+
+# 本次安装由脚本显式管理的配置键：这些始终以本次为准，不继承上次的值。
+managed_env_keys="QCH_SERVER_URL QCH_ENROLLMENT_TOKEN QCH_REENROLL QCH_TLS_CA_FILE QCH_ALLOW_INSECURE_LIVE QCH_ALLOW_HTTP QCH_SERVICE_MANAGER QCH_EXISTING_XRAY_BINARY QCH_EXISTING_XRAY_CONFIG QCH_EXISTING_XRAY_CONFIG_DIRECTORY QCH_EXISTING_XRAY_SERVICE QCH_EXISTING_SING_BOX_BINARY QCH_EXISTING_SING_BOX_CONFIG QCH_EXISTING_SING_BOX_CONFIG_DIRECTORY QCH_EXISTING_SING_BOX_WORK_DIRECTORY QCH_EXISTING_SING_BOX_SERVICE_BINARY QCH_EXISTING_SING_BOX_SERVICE"
+
+install -d -o root -g root -m 0700 "$agent_conf_dir"
+install -d -o root -g root -m 0755 "$qagent_bin_dir"
+[ ! -L "$qagent_bin_dir/qagent" ] || { printf '%s\n' "refusing symlinked Agent binary: $qagent_bin_dir/qagent" >&2; exit 1; }
+[ ! -e "$qagent_bin_dir/qagent" ] || [ -f "$qagent_bin_dir/qagent" ] || {
+  printf '%s\n' "refusing non-regular Agent binary: $qagent_bin_dir/qagent" >&2
+  exit 1
+}
+install -m 0755 "$work_dir/qagent" "$qagent_bin_dir/qagent"
+[ ! -e "$qagent_bin_link" ] || [ -L "$qagent_bin_link" ] || {
+  printf '%s\n' "refusing to overwrite non-symlink compatibility link: $qagent_bin_link" >&2
+  exit 1
+}
+ln -sfn "$qagent_bin_dir/qagent" "$qagent_bin_link"
+
+# 读取上次安装留下的可复用配置。只继承非本次管理的 QCH_* 键，便于在重复
+# 安装时保留运维自行追加的探测/标签/心跳等设置，而不是把整份环境重置。
+existing_name=""
+existing_labels=""
+existing_engines=""
+existing_state=""
+existing_server=""
+inherited_env="$work_dir/qagent.inherited.env"
+: > "$inherited_env"
+read_existing_agent_env() {
+  [ -r "$agent_env_file" ] || return 0
+  while IFS='=' read -r environment_key environment_value; do
+    case "$environment_key" in
+      QCH_SERVER_URL) existing_server=$environment_value; continue ;;
+      QCH_AGENT_NAME) existing_name=$environment_value; continue ;;
+      QCH_AGENT_LABELS) existing_labels=$environment_value; continue ;;
+      QCH_AGENT_ENGINES) existing_engines=$environment_value; continue ;;
+      QCH_AGENT_STATE) existing_state=$environment_value; continue ;;
+    esac
+    case "$environment_key" in QCH_*) ;; *) continue ;; esac
+    case " $managed_env_keys " in *" $environment_key "*) continue ;; esac
+    printf '%s=%s\n' "$environment_key" "$environment_value" >> "$inherited_env"
+  done < "$agent_env_file"
+}
+read_existing_agent_env
+
+final_name=${name_arg:-${existing_name:-$default_name}}
+final_labels=${existing_labels:-region=cn-east}
+final_engines=${existing_engines:-mihomo,xray,sing-box,ss-rust}
+final_state=${existing_state:-$agent_state_file}
+validate_environment_value QCH_AGENT_NAME "$final_name"
+validate_environment_value QCH_AGENT_LABELS "$final_labels"
+validate_environment_value QCH_AGENT_ENGINES "$final_engines"
+validate_environment_value QCH_AGENT_STATE "$final_state"
+
+install -d -o root -g root -m 0755 "$(dirname "$final_state")"
 umask 077
 {
   printf '%s\n' "QCH_SERVER_URL=$server_url"
   if [ -n "$ca_file" ]; then printf '%s\n' "QCH_TLS_CA_FILE=$ca_file"; fi
   case "$server_url" in
-    http://*|ws://*) printf '%s\n' 'QCH_ALLOW_HTTP=true' "QCH_ALLOW_INSECURE_LIVE=$allow_insecure_live" ;;
+    http://*|ws://*) printf '%s\n' 'QCH_ALLOW_HTTP=true' ;;
   esac
+  printf '%s\n' "QCH_ALLOW_INSECURE_LIVE=$allow_insecure_live"
   printf '%s\n' "QCH_ENROLLMENT_TOKEN=$token"
-  printf '%s\n' "QCH_AGENT_NAME=$name"
-  printf '%s\n' 'QCH_AGENT_LABELS=region=cn-east'
-  printf '%s\n' 'QCH_AGENT_STATE=/var/lib/qcontrolhub/agent-state.json'
-  printf '%s\n' 'QCH_AGENT_ENGINES=mihomo,xray,sing-box,ss-rust'
+  if [ "$action" = migrate ] || { [ -n "$existing_server" ] && [ "$existing_server" != "$server_url" ]; }; then
+    printf '%s\n' 'QCH_REENROLL=true'
+  fi
+  printf '%s\n' "QCH_AGENT_NAME=$final_name"
+  printf '%s\n' "QCH_AGENT_LABELS=$final_labels"
+  printf '%s\n' "QCH_AGENT_STATE=$final_state"
+  printf '%s\n' "QCH_AGENT_ENGINES=$final_engines"
   printf '%s\n' "QCH_SERVICE_MANAGER=$service_manager"
   if [ -n "$mapped_xray_config" ] || [ -n "$mapped_xray_config_directory" ]; then
     printf '%s\n' \
@@ -204,10 +362,11 @@ umask 077
       printf '%s\n' "QCH_EXISTING_SING_BOX_WORK_DIRECTORY=$mapped_singbox_work_directory"
     fi
   fi
-} > /etc/qcontrolhub/agent.env
-chmod 0600 /etc/qcontrolhub/agent.env
+  if [ -s "$inherited_env" ]; then cat "$inherited_env"; fi
+} > "$agent_env_file"
+chmod 0600 "$agent_env_file"
 
-openrc_conf=/etc/conf.d/qagent
+openrc_conf="$openrc_conf_dir/qagent"
 write_openrc_environment() {
   : > "$work_dir/qagent.openrc.conf"
   while IFS='=' read -r environment_key environment_value; do
@@ -217,44 +376,76 @@ write_openrc_environment() {
     esac
     escaped_value=$(printf '%s' "$environment_value" | sed "s/'/'\\\\''/g")
     printf "export %s='%s'\n" "$environment_key" "$escaped_value" >> "$work_dir/qagent.openrc.conf"
-  done < /etc/qcontrolhub/agent.env
-  install -d -o root -g root -m 0755 /etc/conf.d
+  done < "$agent_env_file"
+  install -d -o root -g root -m 0755 "$openrc_conf_dir"
   install -o root -g root -m 0600 "$work_dir/qagent.openrc.conf" "$openrc_conf"
+}
+
+install_managed_service() {
+  source_file=$1
+  destination=$2
+  mode=$3
+  marker=$4
+  [ ! -L "$destination" ] || { printf '%s\n' "refusing symlinked managed service: $destination" >&2; exit 1; }
+  if [ -e "$destination" ]; then
+    [ -f "$destination" ] || { printf '%s\n' "refusing non-regular managed service: $destination" >&2; exit 1; }
+    if ! grep -q "$marker" "$destination"; then
+      printf '%s\n' "refusing to overwrite non-QAgent service: $destination" >&2
+      exit 1
+    fi
+    if cmp -s "$source_file" "$destination"; then
+      printf '%s\n' "managed service already current: $destination"
+      return
+    fi
+  fi
+  install -o root -g root -m "$mode" "$source_file" "$destination"
+  printf '%s\n' "installed managed service: $destination"
+}
+
+ensure_openrc_enabled() {
+  service_name=$1
+  if [ -e "$openrc_runlevels_root/default/$service_name" ]; then
+    printf '%s\n' "openrc service already enabled: $service_name"
+    return
+  fi
+  "$rc_update_cmd" add "$service_name" default >/dev/null
 }
 
 echo "== 5/6 安装 $service_manager 服务 =="
 if [ "$service_manager" = openrc ]; then
-  install -o root -g root -m 0755 "$repository_dir/deploy/openrc/qagent" /etc/init.d/qagent
+  install_managed_service "$repository_dir/deploy/openrc/qagent" "$openrc_init_dir/qagent" 0755 '^# QControlHub managed OpenRC service:'
   write_openrc_environment
-  rc-update add qagent default >/dev/null
+  ensure_openrc_enabled qagent
 else
-  install -m 0644 "$repository_dir/deploy/systemd/qagent.service" /etc/systemd/system/qagent.service
-  systemctl daemon-reload
+  install_managed_service "$repository_dir/deploy/systemd/qagent.service" "$service_unit_dir/qagent.service" 0644 '^Description=QControlHub remote engine agent$'
+  "$systemctl_cmd" daemon-reload
 fi
 
 echo '== 6/6 启动 agent =='
 if [ "$service_manager" = openrc ]; then
-  if rc-service qagent status >/dev/null 2>&1; then rc-service qagent restart; else rc-service qagent start; fi
+  if "$rc_service_cmd" qagent status >/dev/null 2>&1; then "$rc_service_cmd" qagent restart; else "$rc_service_cmd" qagent start; fi
 else
-  systemctl enable qagent.service >/dev/null
+  "$systemctl_cmd" enable qagent.service >/dev/null
   # restart also starts an inactive unit and guarantees repeated installation
   # replaces the running process with the freshly downloaded binary.
-  systemctl restart qagent.service
+  "$systemctl_cmd" restart qagent.service
 fi
 sleep 3
 if [ "$service_manager" = openrc ]; then
-  rc-service qagent status
+  "$rc_service_cmd" qagent status
 else
-  systemctl --no-pager status qagent.service | head -n 10
+  "$systemctl_cmd" --no-pager status qagent.service | head -n 10
 fi
 
 # 添加节点凭证只用于下载和注册；无论首次还是覆盖安装，只要身份文件
 # 存在就立即从环境文件移除，避免添加节点凭证残留。
-if [ -s /var/lib/qcontrolhub/agent-state.json ]; then
-  sed -i '/^QCH_ENROLLMENT_TOKEN=/d' /etc/qcontrolhub/agent.env
-  chmod 0600 /etc/qcontrolhub/agent.env
+if [ -s "$agent_state_file" ]; then
+  sed -i '/^QCH_ENROLLMENT_TOKEN=/d' "$agent_env_file"
+  sed -i '/^QCH_REENROLL=/d' "$agent_env_file"
+  chmod 0600 "$agent_env_file"
   if [ "$service_manager" = openrc ]; then
     sed -i '/^export QCH_ENROLLMENT_TOKEN=/d' "$openrc_conf"
+    sed -i '/^export QCH_REENROLL=/d' "$openrc_conf"
     chmod 0600 "$openrc_conf"
   fi
 fi

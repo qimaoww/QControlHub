@@ -52,11 +52,17 @@ type ClientConfig struct {
 	// both empty disables the probe in NewClient.
 	PublicIPProbeIPv4Endpoints []string
 	PublicIPProbeIPv6Endpoints []string
+	// Reenroll forces re-enrollment against the configured control plane using
+	// the enrollment token, even when the persisted identity already matches
+	// the host. Used for a no-downtime migration to a replacement panel that
+	// serves the same hostname but a fresh identity store.
+	Reenroll bool
 }
 
 type credentials struct {
 	AgentID        string                   `json:"agent_id"`
 	PrivateKey     string                   `json:"private_key"`
+	Server         string                   `json:"server,omitempty"`
 	CompletedTasks map[string]completedTask `json:"completed_tasks,omitempty"`
 }
 
@@ -68,20 +74,22 @@ type completedTask struct {
 }
 
 type Client struct {
-	config           ClientConfig
-	executor         *Executor
-	http             *http.Client
-	creds            credentials
-	websocketURL     string
-	metrics          *MetricsCollector
-	traffic          *TrafficManager
-	logs             *CoreLogCollector
-	publicIP         *PublicIPProber
-	credentialsMu    sync.Mutex
-	executionsMu     sync.Mutex
-	executions       map[string]*taskExecution
-	restartAfterTask string
-	executeFunc      func(context.Context, core.Task) (string, error)
+	config            ClientConfig
+	executor          *Executor
+	http              *http.Client
+	creds             credentials
+	websocketURL      string
+	metrics           *MetricsCollector
+	traffic           *TrafficManager
+	logs              *CoreLogCollector
+	publicIP          *PublicIPProber
+	serverHost        string
+	reenrollAttempted bool
+	credentialsMu     sync.Mutex
+	executionsMu      sync.Mutex
+	executions        map[string]*taskExecution
+	restartAfterTask  string
+	executeFunc       func(context.Context, core.Task) (string, error)
 }
 
 type taskExecution struct {
@@ -182,6 +190,7 @@ func NewClient(config ClientConfig, executor *Executor) (*Client, error) {
 	return &Client{
 		config:       config,
 		executor:     executor,
+		serverHost:   parsed.Host,
 		websocketURL: websocketScheme + "://" + parsed.Host + "/agent/v1/connect",
 		metrics:      metricsCollector,
 		traffic:      NewTrafficManager(config.StatePath),
@@ -213,8 +222,26 @@ func (c *Client) Run(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		loaded.Server = c.serverHost
 		if err := saveCredentials(c.config.StatePath, loaded); err != nil {
 			return fmt.Errorf("save agent credentials: %w", err)
+		}
+	} else if c.shouldReenroll(loaded) {
+		// Migrating to another control plane: re-enroll with the supplied token,
+		// keep every installed core/config and traffic state on disk, and only
+		// rotate the identity. The old panel's completed-task cache is dropped so
+		// the migrated Agent never carries two control planes' state side by side.
+		// Re-enrollment on the new panel is idempotent for a reusable token bound
+		// to the node name.
+		enrolled, enrollErr := c.reenroll(ctx)
+		if enrollErr != nil {
+			return enrollErr
+		}
+		loaded = enrolled
+	} else if loaded.Server == "" {
+		loaded.Server = c.serverHost
+		if err := saveCredentials(c.config.StatePath, loaded); err != nil {
+			return fmt.Errorf("record control-plane host: %w", err)
 		}
 	}
 	c.creds = loaded
@@ -233,6 +260,20 @@ func (c *Client) Run(ctx context.Context) error {
 			return nil
 		}
 		if errors.Is(err, ErrIdentityRejected) {
+			// A replacement panel serving the same hostname but a fresh identity
+			// store rejects the old identity. When an enrollment token is still
+			// present, rotate the identity once and reconnect instead of giving up;
+			// the local cores, configs, and traffic state are untouched.
+			if !c.reenrollAttempted && c.config.EnrollmentToken != "" {
+				c.reenrollAttempted = true
+				slog.Warn("control plane rejected identity; attempting one re-enroll", "error", err)
+				reenrolled, reenrollErr := c.reenroll(ctx)
+				if reenrollErr != nil {
+					return reenrollErr
+				}
+				c.creds = reenrolled
+				continue
+			}
 			cleanupContext, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
 			if cleanupErr := c.traffic.ClearPolicies(cleanupContext); cleanupErr != nil {
 				slog.Warn("remove traffic rules for rejected Agent identity", "error", cleanupErr)
@@ -258,6 +299,39 @@ func (c *Client) Run(ctx context.Context) error {
 			}
 		}
 	}
+}
+
+// shouldReenroll reports whether the persisted identity must be rotated because
+// the Agent is being pointed at a different control plane host, or because the
+// operator explicitly requested a re-enroll. A host change alone only migrates
+// when an enrollment token is supplied; a re-enroll on the same host still
+// needs the token so it never turns a routine restart into a new identity.
+func (c *Client) shouldReenroll(loaded credentials) bool {
+	if c.config.Reenroll {
+		return c.config.EnrollmentToken != ""
+	}
+	return c.config.EnrollmentToken != "" && loaded.Server != c.serverHost
+}
+
+func (c *Client) reenroll(ctx context.Context) (credentials, error) {
+	if c.config.EnrollmentToken == "" {
+		return credentials{}, errors.New("QCH_ENROLLMENT_TOKEN is required to migrate control planes")
+	}
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return credentials{}, fmt.Errorf("generate agent identity: %w", err)
+	}
+	enrolled, err := c.enroll(ctx, publicKey, privateKey)
+	if err != nil {
+		return credentials{}, err
+	}
+	// Drop the prior panel's completed-task cache so a migrated Agent does not
+	// carry state from two control planes side by side.
+	enrolled.Server = c.serverHost
+	if err := saveCredentials(c.config.StatePath, enrolled); err != nil {
+		return credentials{}, fmt.Errorf("save migrated agent credentials: %w", err)
+	}
+	return enrolled, nil
 }
 
 func (c *Client) enroll(ctx context.Context, publicKey ed25519.PublicKey, privateKey ed25519.PrivateKey) (credentials, error) {
