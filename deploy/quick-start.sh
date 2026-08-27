@@ -52,15 +52,21 @@ die() {
 }
 
 bootstrap_streamed_script() {
-    local script_path install_dir origin_url branch
+    local script_path install_dir origin_url branch marker_file marker_temp bootstrap_ref base_url script_temp compose_temp install_label
     script_path="${BASH_SOURCE[0]}"
     case "$script_path" in
         /dev/fd/*|/proc/self/fd/*) ;;
         *) return 0 ;;
     esac
 
-    command -v git >/dev/null 2>&1 || die "缺少依赖：git"
-    install_dir="${QCH_INSTALL_DIR:-$PWD/qcontrolhub}"
+    command -v curl >/dev/null 2>&1 || die "缺少依赖：curl"
+    if [ -n "${QCH_INSTALL_DIR:-}" ]; then
+        install_dir="$QCH_INSTALL_DIR"
+    elif [ -f "$PWD/.qcontrolhub-quick-start" ] || { [ -d "$PWD/.git" ] && [ -f "$PWD/deploy/quick-start.sh" ] && [ -f "$PWD/docker-compose.yml" ]; }; then
+        install_dir="$PWD"
+    else
+        install_dir="$PWD/qcontrolhub"
+    fi
     case "$install_dir" in
         /*) ;;
         *) install_dir="$PWD/$install_dir" ;;
@@ -68,27 +74,66 @@ bootstrap_streamed_script() {
     case "$install_dir" in
         *$'\n'*|*$'\r'*) die "QCH_INSTALL_DIR 不能包含换行" ;;
     esac
+    [ ! -L "$install_dir" ] || die "安装目录不能是符号链接：$install_dir"
+    marker_file="$install_dir/.qcontrolhub-quick-start"
+    [ ! -L "$marker_file" ] || die "一键安装标记不能是符号链接：$marker_file"
+    bootstrap_ref="${QCH_BOOTSTRAP_REF:-main}"
+    case "$bootstrap_ref" in
+        ""|/*|*/|*..*|*[!A-Za-z0-9._/-]*) die "QCH_BOOTSTRAP_REF 不是安全的 Git ref" ;;
+    esac
+    base_url="https://raw.githubusercontent.com/qimaoww/qcontrolhub/$bootstrap_ref"
 
     if [ -e "$install_dir" ]; then
-        [ -d "$install_dir/.git" ] || die "安装目录已存在但不是 Git 仓库：$install_dir"
-        origin_url="$(git -C "$install_dir" remote get-url origin 2>/dev/null || true)"
-        case "$origin_url" in
-            https://github.com/qimaoww/qcontrolhub|https://github.com/qimaoww/qcontrolhub.git|git@github.com:qimaoww/qcontrolhub.git) ;;
-            *) die "安装目录不是 QControlHub 官方仓库：$install_dir" ;;
-        esac
-        branch="$(git -C "$install_dir" symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
-        [ "$branch" = "main" ] || die "安装目录必须位于 main 分支，当前为：${branch:-detached}"
-        git -C "$install_dir" diff --quiet || die "安装目录包含未提交修改，请先处理后再运行"
-        git -C "$install_dir" diff --cached --quiet || die "安装目录包含已暂存修改，请先处理后再运行"
-        echo "-> 更新 QControlHub：$install_dir"
-        git -C "$install_dir" fetch --prune origin main
-        git -C "$install_dir" merge-base --is-ancestor HEAD FETCH_HEAD || die "安装目录的 main 已偏离官方历史，请人工处理"
-        git -C "$install_dir" merge --ff-only FETCH_HEAD
+        [ -d "$install_dir" ] || die "安装路径已存在但不是目录：$install_dir"
+        if [ -f "$marker_file" ]; then
+            :
+        elif [ -d "$install_dir/.git" ]; then
+            command -v git >/dev/null 2>&1 || die "迁移旧版 Git 安装目录需要 git"
+            origin_url="$(git -C "$install_dir" remote get-url origin 2>/dev/null || true)"
+            case "$origin_url" in
+                https://github.com/qimaoww/qcontrolhub|https://github.com/qimaoww/qcontrolhub.git|git@github.com:qimaoww/qcontrolhub.git) ;;
+                *) die "安装目录不是 QControlHub 官方仓库：$install_dir" ;;
+            esac
+            branch="$(git -C "$install_dir" symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
+            [ "$branch" = "main" ] || die "旧版 Git 安装目录必须位于 main 分支，当前为：${branch:-detached}"
+            git -C "$install_dir" diff --quiet -- deploy/quick-start.sh docker-compose.yml || \
+                die "旧版 Git 安装目录的运行文件包含未提交修改，请先处理"
+            git -C "$install_dir" diff --cached --quiet -- deploy/quick-start.sh docker-compose.yml || \
+                die "旧版 Git 安装目录的运行文件包含已暂存修改，请先处理"
+        elif [ -n "$(ls -A "$install_dir")" ]; then
+            die "安装目录已存在且不是 QControlHub 一键安装目录：$install_dir"
+        fi
+        install_label="更新"
     else
-        echo "-> 下载 QControlHub：$install_dir"
-        mkdir -p "$(dirname "$install_dir")"
-        git clone --depth 1 --branch main --single-branch https://github.com/qimaoww/qcontrolhub.git "$install_dir"
+        mkdir -p "$install_dir"
+        install_label="安装"
     fi
+    [ ! -L "$install_dir/deploy" ] || die "运行文件目录不能是符号链接：$install_dir/deploy"
+    mkdir -p "$install_dir/deploy"
+
+    echo "-> ${install_label} QControlHub 运行文件：$install_dir"
+    script_temp="$(mktemp "$install_dir/deploy/.quick-start.sh.tmp.XXXXXX")"
+    compose_temp="$(mktemp "$install_dir/.docker-compose.yml.tmp.XXXXXX")"
+    marker_temp=""
+    cleanup_bootstrap_downloads() {
+        rm -f -- "$script_temp" "$compose_temp"
+        [ -z "$marker_temp" ] || rm -f -- "$marker_temp"
+    }
+    trap cleanup_bootstrap_downloads EXIT HUP INT TERM
+    curl -fsSL "$base_url/deploy/quick-start.sh" -o "$script_temp" || die "下载 quick-start.sh 失败"
+    curl -fsSL "$base_url/docker-compose.yml" -o "$compose_temp" || die "下载 docker-compose.yml 失败"
+    bash -n "$script_temp" || die "下载的 quick-start.sh 语法无效"
+    grep -Fq 'name: qcontrolhub' "$compose_temp" || die "下载的 docker-compose.yml 内容无效"
+    chmod 0755 "$script_temp"
+    chmod 0644 "$compose_temp"
+    mv -f -- "$compose_temp" "$install_dir/docker-compose.yml"
+    mv -f -- "$script_temp" "$install_dir/deploy/quick-start.sh"
+    marker_temp="$(mktemp "$install_dir/.qcontrolhub-quick-start.tmp.XXXXXX")"
+    printf '%s\n' "$base_url" > "$marker_temp"
+    chmod 0644 "$marker_temp"
+    mv -f -- "$marker_temp" "$marker_file"
+    marker_temp=""
+    trap - EXIT HUP INT TERM
     exec "$install_dir/deploy/quick-start.sh" "$@"
 }
 
