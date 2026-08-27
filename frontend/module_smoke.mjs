@@ -46,7 +46,7 @@ import {
 } from "./modules/dashboard.js";
 import { installSettings } from "./modules/settings.js";
 import { installTasks } from "./modules/tasks.js";
-import { installTraffic } from "./modules/traffic.js";
+import { installTraffic, mergeTrafficPorts } from "./modules/traffic.js";
 import { createLatestRenderScheduler } from "./modules/refresh.js";
 
 const state = { data: {}, session: { role: "admin" } };
@@ -3040,9 +3040,14 @@ try {
     api: async (path) => {
       trafficRequests += 1;
       if (path === "/agents")
-        return [{ id: "alpha", name: "Alpha", features: ["port-traffic-v1"], capabilities: ["mihomo"] }];
+        return [{ id: "alpha", name: "Alpha", status: "online", features: ["port-traffic-v1"], capabilities: ["mihomo"] }];
       if (path === "/traffic-policies")
         return [{ id: "policy-a", agent_id: "alpha", engine: "mihomo", name: "Primary", port: 443, protocol: "tcp", cycle: "monthly", cycle_anchor: "2026-01-01T00:00:00Z", used_bytes: 10, limit_bytes: 100, received_bytes: 6, sent_bytes: 4, receive_bps: 1, send_bps: 1, enforcement_available: true, last_reported_at: "now", auto_block: true }];
+      if (path === "/traffic-endpoints")
+        return [
+          { agent_id: "alpha", engine: "mihomo", name: "Primary from config", port: 443, protocol: "tcp", config_version: 2 },
+          { agent_id: "alpha", engine: "mihomo", name: "Existing UDP", port: 8443, protocol: "udp", config_version: 2 },
+        ];
       assert.fail(`unexpected traffic polling path ${path}`);
     },
     shell: (markup) => {
@@ -3057,7 +3062,7 @@ try {
     clearTimer: (id) => trafficTimers.delete(id),
   });
   await renderTraffic();
-  assert.equal(trafficRequests, 2, "traffic refresh loads only agents and live policies");
+  assert.equal(trafficRequests, 3, "traffic refresh loads agents, live policies, and configured ports");
   assert.equal(trafficRenders, 1);
   assert.equal(trafficTimers.size, 1, "traffic polling owns one timer");
   assert.equal(
@@ -3068,13 +3073,25 @@ try {
   assert.equal(trafficMarkup.includes("traffic-history"), false, "monthly history is rendered only on the dashboard");
   assert.equal(trafficMarkup.includes("traffic-hero"), false, "traffic page starts directly with useful controls instead of a repeated title hero");
   assert.equal(trafficMarkup.includes("traffic-policy-grid"), true, "traffic policies render as compact cards");
+  assert.equal(trafficMarkup.includes("Existing UDP"), true, "unmonitored ports from existing configurations render directly");
+  assert.equal(trafficMarkup.includes("Primary from config"), false, "a configured endpoint already covered by a policy is not duplicated");
+  assert.equal(trafficMarkup.includes("未设置配额"), true, "configured ports are distinguished from monitored policies");
   assert.equal(trafficMarkup.includes("traffic-edit-dialog"), false, "read-only roles do not receive quota mutation dialogs");
   const trafficPoll = [...trafficTimers.values()][0];
   trafficTimers.clear();
   await trafficPoll();
-  assert.equal(trafficRequests, 4);
+  assert.equal(trafficRequests, 6);
   assert.equal(trafficRenders, 2);
   assert.equal(trafficTimers.size, 1, "traffic polling reschedules one timer");
+
+  assert.deepEqual(
+    mergeTrafficPorts(
+      [{ id: "policy-a", agent_id: "alpha", port: 443 }],
+      [{ agent_id: "alpha", engine: "xray", port: 443, protocol: "tcp" }, { agent_id: "alpha", engine: "xray", port: 8443, protocol: "udp" }, { agent_id: "alpha", engine: "sing-box", port: 8443, protocol: "tcp" }],
+    ).map((item) => item.kind),
+    ["policy", "endpoint"],
+    "configured ports merge with policies by the Agent-wide port identity",
+  );
 
   let metricRequests = 0;
   const metricState = {
