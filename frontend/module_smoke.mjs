@@ -46,7 +46,11 @@ import {
 } from "./modules/dashboard.js";
 import { installSettings } from "./modules/settings.js";
 import { installTasks } from "./modules/tasks.js";
-import { installTraffic, mergeTrafficPorts } from "./modules/traffic.js";
+import {
+  installTraffic,
+  mergeTrafficPorts,
+  resetTrafficCreateForm,
+} from "./modules/traffic.js";
 import { createLatestRenderScheduler } from "./modules/refresh.js";
 
 const state = { data: {}, session: { role: "admin" } };
@@ -3080,7 +3084,7 @@ try {
   const trafficPoll = [...trafficTimers.values()][0];
   trafficTimers.clear();
   await trafficPoll();
-  assert.equal(trafficRequests, 6);
+  assert.equal(trafficRequests, 5, "background traffic polling reuses configured ports instead of reparsing every saved configuration");
   assert.equal(trafficRenders, 2);
   assert.equal(trafficTimers.size, 1, "traffic polling reschedules one timer");
 
@@ -3092,6 +3096,24 @@ try {
     ["policy", "endpoint"],
     "configured ports merge with policies by the Agent-wide port identity",
   );
+
+  const createAgent = { value: "beta" };
+  const createEngine = { innerHTML: "stale beta engines" };
+  const createForm = {
+    reset() { createAgent.value = "alpha"; },
+    querySelector(selector) {
+      if (selector === "[name=agent_id]") return createAgent;
+      if (selector === "[name=engine]") return createEngine;
+      return null;
+    },
+  };
+  resetTrafficCreateForm(
+    createForm,
+    [{ id: "alpha", capabilities: ["mihomo"] }, { id: "beta", capabilities: ["xray"] }],
+    (agent) => `${agent.id} engines`,
+  );
+  assert.equal(createAgent.value, "alpha", "general quota creation resets the prefilled Agent");
+  assert.equal(createEngine.innerHTML, "alpha engines", "general quota creation also rebuilds the matching engine choices");
 
   let metricRequests = 0;
   const metricState = {

@@ -21,6 +21,15 @@ export function mergeTrafficPorts(policies = [], endpoints = []) {
   ];
 }
 
+export function resetTrafficCreateForm(form, agents = [], renderEngineOptions = () => "") {
+  if (!form) return;
+  form.reset();
+  const agentSelect = form.querySelector("[name=agent_id]");
+  const engineSelect = form.querySelector("[name=engine]");
+  const agent = agents.find((candidate) => candidate.id === agentSelect?.value);
+  if (engineSelect) engineSelect.innerHTML = renderEngineOptions(agent);
+}
+
 export function installTraffic(ctx) {
   const {
     api, state, can, esc, engineName, bytes, rate, percent, ago, shell,
@@ -212,7 +221,9 @@ export function installTraffic(ctx) {
         (signal) => Promise.all([
           api("/agents", { signal }),
           api("/traffic-policies", { signal }),
-          api("/traffic-endpoints", { signal }),
+          background && Array.isArray(state.data.trafficEndpoints)
+            ? Promise.resolve(state.data.trafficEndpoints)
+            : api("/traffic-endpoints", { signal }),
         ]),
         ([agents, policies, endpoints]) => renderTraffic(agents, policies, endpoints, resetCreate),
       );
@@ -248,7 +259,7 @@ export function installTraffic(ctx) {
       link.onclick = (event) => {
         event.preventDefault();
         const create = document.querySelector("#traffic-new");
-        create?.querySelector("form")?.reset();
+        resetTrafficCreateForm(create?.querySelector("form"), agents, engineOptions);
         create?.showModal();
       };
     });
@@ -258,7 +269,7 @@ export function installTraffic(ctx) {
         const form = document.querySelector("#traffic-policy-form");
         const dialog = document.querySelector("#traffic-new");
         if (!endpoint || !form || !dialog) return;
-        form.reset();
+        resetTrafficCreateForm(form, agents, engineOptions);
         const agentSelect = form.querySelector("[name=agent_id]");
         const engineSelect = form.querySelector("[name=engine]");
         if (agentSelect) agentSelect.value = endpoint.agent_id;
