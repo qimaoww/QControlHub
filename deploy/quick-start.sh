@@ -174,6 +174,7 @@ fi
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
+WORK_DIR="$REPO_ROOT"
 ENV_FILE="$REPO_ROOT/.env"
 EXTERNAL_COMPOSE_FILE="$REPO_ROOT/docker-compose.external.yml"
 SECRET_COMPOSE_FILE="$REPO_ROOT/docker-compose.secrets.yml"
@@ -539,7 +540,7 @@ YAML
 COMPOSE_ARGS=()
 
 compose() {
-    docker compose "${COMPOSE_ARGS[@]}" "$@"
+    docker compose --project-directory "$WORK_DIR" --env-file "$ENV_FILE" "${COMPOSE_ARGS[@]}" "$@"
 }
 
 show_diagnostics() {
@@ -758,22 +759,58 @@ show_admin_token_once() {
     ADMIN_TOKEN_TO_DISPLAY=""
 }
 
+resolve_work_dir() {
+    if [ -z "${QCH_INSTALL_DIR:-}" ]; then
+        WORK_DIR="$REPO_ROOT"
+    else
+        case "$QCH_INSTALL_DIR" in
+            /*) WORK_DIR="$QCH_INSTALL_DIR" ;;
+            *) WORK_DIR="$REPO_ROOT/$QCH_INSTALL_DIR" ;;
+        esac
+    fi
+    mkdir -p "$WORK_DIR" || die "无法创建工作目录：$WORK_DIR"
+    WORK_DIR="$(cd "$WORK_DIR" && pwd)" || die "无法进入工作目录：$WORK_DIR"
+    cd "$WORK_DIR"
+    ENV_FILE="$WORK_DIR/.env"
+    EXTERNAL_COMPOSE_FILE="$WORK_DIR/docker-compose.external.yml"
+    SECRET_COMPOSE_FILE="$WORK_DIR/docker-compose.secrets.yml"
+    SECRET_DIR="$WORK_DIR/.secrets"
+    CONFIG_KEY_FILE="$SECRET_DIR/config-encryption-key"
+    PREVIOUS_CONFIG_KEYS_FILE="$SECRET_DIR/config-encryption-previous-keys"
+}
+
+choose_install_dir() {
+    local input_dir
+    echo ""
+    echo "当前安装/工作目录：$WORK_DIR"
+    echo "请输入新的安装/工作目录（直接回车保持不变）："
+    read -r input_dir
+    case "$input_dir" in
+        "") ;;
+        *) QCH_INSTALL_DIR="$input_dir"; resolve_work_dir ;;
+    esac
+}
+
 choose_action() {
     [ -t 0 ] || die "未指定操作；非交互模式请使用 -o install、-o update 或 -o uninstall"
-    echo ""
-    echo "QControlHub 管理菜单"
-    echo ""
-    echo "  1. 安装 / 重新配置"
-    echo "  2. 更新现有部署"
-    echo "  3. 卸载服务（保留配置、密钥和数据库卷）"
-    echo ""
-    read -r -p "请选择 [1-3] " choice
-    case "$choice" in
-        1) ACTION="install" ;;
-        2) ACTION="update" ;;
-        3) ACTION="uninstall" ;;
-        *) die "无效选择：$choice" ;;
-    esac
+    while :; do
+        echo ""
+        echo "QControlHub 管理菜单"
+        echo ""
+        echo "  1. 安装 / 重新配置"
+        echo "  2. 更新现有部署"
+        echo "  3. 卸载服务（保留配置、密钥和数据库卷）"
+        echo "  4. 设置安装/工作目录"
+        echo ""
+        read -r -p "请选择 [1-4] " choice
+        case "$choice" in
+            1) ACTION="install"; return ;;
+            2) ACTION="update"; return ;;
+            3) ACTION="uninstall"; return ;;
+            4) choose_install_dir ;;
+            *) echo "无效选择：$choice" ;;
+        esac
+    done
 }
 
 choose_mode() {
@@ -846,6 +883,7 @@ if [ -z "$ACTION" ]; then
         choose_action
     fi
 fi
+resolve_work_dir
 if [ "$ACTION" = "install" ]; then
     [ -n "$MODE" ] || choose_mode
 else
@@ -888,7 +926,7 @@ case "$MODE" in
         fi
 
         [ "$ACTION" = "update" ] && result_name="更新完成" || result_name="部署完成"
-        show_result "$result_name" "$panel_url" "docker compose -f docker-compose.yml -f docker-compose.secrets.yml down"
+        show_result "$result_name" "$panel_url" "docker compose --project-directory $WORK_DIR --env-file $ENV_FILE -f $REPO_ROOT/docker-compose.yml -f $SECRET_COMPOSE_FILE down"
         ;;
     external)
         if [ "$ACTION" = "update" ]; then
@@ -917,6 +955,6 @@ case "$MODE" in
         fi
 
         [ "$ACTION" = "update" ] && result_name="更新完成" || result_name="部署完成"
-        show_result "$result_name" "$panel_url" "docker compose -f docker-compose.external.yml -f docker-compose.secrets.yml down"
+        show_result "$result_name" "$panel_url" "docker compose --project-directory $WORK_DIR --env-file $ENV_FILE -f $EXTERNAL_COMPOSE_FILE -f $SECRET_COMPOSE_FILE down"
         ;;
 esac
