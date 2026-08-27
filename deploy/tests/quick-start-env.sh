@@ -128,4 +128,26 @@ if grep -Fq "$legacy_admin" "$ENV_FILE" || grep -Fq "$legacy_key" "$ENV_FILE"; t
     exit 1
 fi
 
+ACTION="update"
+MODE=""
+detect_existing_mode
+assert_equal "detected external deployment" "external" "$MODE"
+
+ENV_FILE="$test_root/detect-bundled.env"
+EXTERNAL_COMPOSE_FILE="$test_root/missing-external-compose.yml"
+update_env_file "POSTGRES_DB=qcontrolhub"
+MODE=""
+detect_existing_mode
+assert_equal "detected bundled deployment" "bundled" "$MODE"
+
+compose_log="$test_root/uninstall-compose.log"
+compose() { printf '%s\n' "$*" > "$compose_log"; }
+MODE="bundled"
+uninstall_services > "$test_root/uninstall-output.txt"
+assert_equal "safe uninstall compose arguments" "down --remove-orphans" "$(<"$compose_log")"
+grep -Fq '已保留数据：Docker PostgreSQL 命名卷' "$test_root/uninstall-output.txt"
+for required_menu_text in '安装 / 重新配置' '更新现有部署' '卸载服务（保留配置、密钥和数据库卷）'; do
+    grep -Fq "$required_menu_text" "$repo_root/deploy/quick-start.sh"
+done
+
 printf '%s\n' 'quick-start secret persistence regression passed'

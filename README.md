@@ -34,7 +34,7 @@ QControlHub 是面向 Linux 节点的配置与远程运维平台，由 Go 控制
 
 ### 生产部署
 
-在 Linux 控制面主机运行以下一键命令，脚本会交互选择内置或外部 PostgreSQL 模式，并完成密钥生成、Compose 服务启动和就绪检查：
+在 Linux 控制面主机运行以下一键命令。脚本提供安装、更新和卸载菜单；安装时可选择内置或外部 PostgreSQL，并自动完成密钥生成、Compose 服务启动和就绪检查：
 
 ```bash
 bash <(curl -fsSL "https://raw.githubusercontent.com/qimaoww/qcontrolhub/main/deploy/quick-start.sh")

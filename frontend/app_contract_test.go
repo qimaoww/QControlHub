@@ -552,8 +552,8 @@ func TestOfficialDeploymentsTrustTheExactTwoHopProxyChain(t *testing.T) {
 	}
 	for _, required := range []string{
 		`QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS`,
-		`previous_config_keys`,
-		`prepend_unique_csv "$previous_config_keys" "$config_key"`,
+		`PREVIOUS_CONFIG_KEYS_FILE`,
+		`prepend_unique_csv "$PREVIOUS_CONFIG_KEYS" "$CONFIG_KEY"`,
 	} {
 		if !strings.Contains(string(quickStart), required) {
 			t.Errorf("quick-start key rotation contract is missing %q", required)

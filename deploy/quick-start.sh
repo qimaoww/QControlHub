@@ -13,6 +13,7 @@
 set -euo pipefail
 
 MODE=""
+ACTION=""
 DATABASE_URL=""
 ADMIN_TOKEN=""
 FORCE=false
@@ -21,7 +22,12 @@ READY_TIMEOUT=60
 usage() {
     cat <<'USAGE'
 用法：
-  ./deploy/quick-start.sh [-m bundled|external] [选项]
+  ./deploy/quick-start.sh [-o install|update|uninstall] [-m bundled|external] [选项]
+
+操作：
+  install             安装或重新配置 QControlHub
+  update              更新现有部署并保持配置和数据
+  uninstall           卸载服务，保留配置、密钥和数据库卷
 
 部署模式：
   bundled             Docker Compose 内置 PostgreSQL + 控制面
@@ -29,6 +35,7 @@ usage() {
 
 选项：
   -m MODE             选择部署模式；省略时交互选择
+  -o OPERATION        选择安装、更新或卸载；省略时交互选择
   -d DATABASE_URL     external 模式使用的 PostgreSQL 连接串
   -a ADMIN_TOKEN      管理员令牌（至少 32 字节）
   -f                  轮换管理员 token 与应用密钥；数据库密码不变
@@ -92,9 +99,10 @@ if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
     exit 0
 fi
 
-while getopts ':m:d:a:ft:h' opt; do
+while getopts ':m:o:d:a:ft:h' opt; do
     case "$opt" in
         m) MODE="$OPTARG" ;;
+        o) ACTION="$OPTARG" ;;
         d) DATABASE_URL="$OPTARG" ;;
         a) ADMIN_TOKEN="$OPTARG" ;;
         f) FORCE=true ;;
@@ -110,6 +118,10 @@ shift $((OPTIND - 1))
 case "$MODE" in
     ""|bundled|external) ;;
     *) die "未知部署模式：$MODE（可选 bundled / external）" ;;
+esac
+case "$ACTION" in
+    ""|install|update|uninstall) ;;
+    *) die "未知操作：$ACTION（可选 install / update / uninstall）" ;;
 esac
 if ! [[ "$READY_TIMEOUT" =~ ^[1-9][0-9]*$ ]]; then
     die "就绪检查超时时间必须是正整数"
@@ -657,10 +669,10 @@ prepare_external_env() {
 }
 
 show_result() {
-    local url="$1" stop_cmd="$2"
+    local result_name="$1" url="$2" stop_cmd="$3"
     echo ""
     echo "============================================"
-    echo "  QControlHub 部署完成"
+    echo "  QControlHub $result_name"
     echo "============================================"
     echo ""
     echo "  访问地址：  $url"
@@ -687,44 +699,117 @@ show_admin_token_once() {
     ADMIN_TOKEN_TO_DISPLAY=""
 }
 
+choose_action() {
+    [ -t 0 ] || die "未指定操作；非交互模式请使用 -o install、-o update 或 -o uninstall"
+    echo ""
+    echo "QControlHub 管理菜单"
+    echo ""
+    echo "  1. 安装 / 重新配置"
+    echo "  2. 更新现有部署"
+    echo "  3. 卸载服务（保留配置、密钥和数据库卷）"
+    echo ""
+    read -r -p "请选择 [1-3] " choice
+    case "$choice" in
+        1) ACTION="install" ;;
+        2) ACTION="update" ;;
+        3) ACTION="uninstall" ;;
+        *) die "无效选择：$choice" ;;
+    esac
+}
+
+choose_mode() {
+    [ -t 0 ] || die "未指定部署模式；非交互模式请使用 -m bundled 或 -m external"
+    echo ""
+    echo "QControlHub 数据库模式"
+    echo ""
+    echo "  1. 内置 PostgreSQL + 控制面（推荐）"
+    echo "  2. 连接外部 PostgreSQL"
+    echo ""
+    read -r -p "请选择 [1-2] " choice
+    case "$choice" in
+        1) MODE="bundled" ;;
+        2) MODE="external" ;;
+        *) die "无效选择：$choice" ;;
+    esac
+}
+
+detect_existing_mode() {
+    [ -f "$ENV_FILE" ] || die "未找到现有部署配置：$ENV_FILE"
+    if [ -n "$(read_env_key QCH_DATABASE_URL)" ] || [ -f "$EXTERNAL_COMPOSE_FILE" ]; then
+        MODE="external"
+        if [ "$ACTION" = "uninstall" ] && [ ! -f "$EXTERNAL_COMPOSE_FILE" ]; then
+            die "外部 PostgreSQL 部署缺少 $EXTERNAL_COMPOSE_FILE"
+        fi
+    else
+        MODE="bundled"
+    fi
+}
+
+configure_compose_args() {
+    case "$MODE" in
+        bundled) COMPOSE_ARGS=(-f "$REPO_ROOT/docker-compose.yml") ;;
+        external) COMPOSE_ARGS=(-f "$EXTERNAL_COMPOSE_FILE") ;;
+    esac
+    if [ "$ACTION" != "uninstall" ] || [ -f "$SECRET_COMPOSE_FILE" ]; then
+        COMPOSE_ARGS+=(-f "$SECRET_COMPOSE_FILE")
+    fi
+}
+
+uninstall_services() {
+    echo "-> 停止并移除 QControlHub 服务容器和网络"
+    compose down --remove-orphans
+    echo ""
+    echo "============================================"
+    echo "  QControlHub 服务已卸载"
+    echo "============================================"
+    echo ""
+    echo "  已保留配置：$ENV_FILE"
+    [ -d "$SECRET_DIR" ] && echo "  已保留密钥：$SECRET_DIR"
+    if [ "$MODE" = "bundled" ]; then
+        echo "  已保留数据：Docker PostgreSQL 命名卷"
+    else
+        echo "  外部 PostgreSQL 数据未被修改"
+    fi
+    echo ""
+}
+
 # Keep the environment preparation functions sourceable for the isolated shell
 # regression without running Docker or mutating the caller's deployment.
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
     return 0
 fi
 
-# ---- 选择部署方式 ----
-if [ -z "$MODE" ]; then
-    [ -t 0 ] || die "未指定部署模式；非交互模式请使用 -m bundled 或 -m external"
-    echo ""
-    echo "QControlHub 部署方式选择"
-    echo ""
-    echo "  1. 全套部署 — Docker Compose 内置 PostgreSQL + 控制面（推荐）"
-    echo "  2. 连接外部 PostgreSQL — 仅部署控制面容器"
-    echo ""
-    read -r -p "请选择 [1-2] " choice
-    case "$choice" in
-        1) MODE="bundled" ;;
-        2) MODE="external" ;;
-        *) echo "无效选择：$choice"; exit 1 ;;
-    esac
+# ---- 选择管理操作和部署方式 ----
+if [ -z "$ACTION" ]; then
+    if [ -n "$MODE" ]; then
+        ACTION="install"
+    else
+        choose_action
+    fi
+fi
+if [ "$ACTION" = "install" ]; then
+    [ -n "$MODE" ] || choose_mode
+else
+    [ -n "$MODE" ] || detect_existing_mode
+fi
+if [ "$ACTION" = "uninstall" ] && [ "$FORCE" = true ]; then
+    die "卸载操作不支持 -f；默认始终保留配置、密钥和数据库卷"
+fi
+configure_compose_args
+
+require_commands
+
+# ---- 执行管理操作 ----
+if [ "$ACTION" = "uninstall" ]; then
+    uninstall_services
+    exit 0
 fi
 
 case "$MODE" in
     bundled)
-        COMPOSE_ARGS=(-f "$REPO_ROOT/docker-compose.yml" -f "$SECRET_COMPOSE_FILE")
-        ;;
-    external)
-        COMPOSE_ARGS=(-f "$EXTERNAL_COMPOSE_FILE" -f "$SECRET_COMPOSE_FILE")
-        ;;
-esac
-
-require_commands
-
-# ---- 执行部署 ----
-case "$MODE" in
-    bundled)
-        if [ -f "$ENV_FILE" ] && [ "$FORCE" = false ]; then
+        if [ "$ACTION" = "update" ]; then
+            echo "-> 更新内置 PostgreSQL 部署并复用现有配置"
+        elif [ -f "$ENV_FILE" ] && [ "$FORCE" = false ]; then
             echo "-> 复用已有 .env，并补齐缺失配置"
         elif [ "$FORCE" = true ]; then
             echo "-> 轮换应用密钥（保留 PostgreSQL 密码）"
@@ -742,10 +827,13 @@ case "$MODE" in
             die "控制面未在 ${READY_TIMEOUT} 秒内就绪"
         fi
 
-        show_result "http://127.0.0.1:8080" "docker compose -f docker-compose.yml -f docker-compose.secrets.yml down"
+        [ "$ACTION" = "update" ] && result_name="更新完成" || result_name="部署完成"
+        show_result "$result_name" "http://127.0.0.1:8080" "docker compose -f docker-compose.yml -f docker-compose.secrets.yml down"
         ;;
     external)
-        if [ -f "$ENV_FILE" ] && [ "$FORCE" = false ]; then
+        if [ "$ACTION" = "update" ]; then
+            echo "-> 更新外部 PostgreSQL 部署并复用现有配置"
+        elif [ -f "$ENV_FILE" ] && [ "$FORCE" = false ]; then
             echo "-> 复用已有 .env，并补齐缺失配置"
         elif [ "$FORCE" = true ]; then
             echo "-> 轮换应用密钥"
@@ -767,6 +855,7 @@ case "$MODE" in
             die "控制面未在 ${READY_TIMEOUT} 秒内就绪"
         fi
 
-        show_result "http://127.0.0.1:8080" "docker compose -f docker-compose.external.yml -f docker-compose.secrets.yml down"
+        [ "$ACTION" = "update" ] && result_name="更新完成" || result_name="部署完成"
+        show_result "$result_name" "http://127.0.0.1:8080" "docker compose -f docker-compose.external.yml -f docker-compose.secrets.yml down"
         ;;
 esac
