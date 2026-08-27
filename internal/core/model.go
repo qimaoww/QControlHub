@@ -410,6 +410,8 @@ type EnrollmentTokenCreated struct {
 
 type HeartbeatRequest struct {
 	Version      string                  `json:"version,omitempty"`
+	OS           string                  `json:"os,omitempty"`
+	Arch         string                  `json:"arch,omitempty"`
 	Runtime      map[Engine]RuntimeState `json:"runtime,omitempty"`
 	Metrics      *HostMetrics            `json:"metrics,omitempty"`
 	TrafficUsage []PortTrafficUsage      `json:"traffic_usage,omitempty"`

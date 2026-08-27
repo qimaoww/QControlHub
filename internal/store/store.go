@@ -740,8 +740,13 @@ func (s *Store) Heartbeat(ctx context.Context, id string, heartbeat core.Heartbe
 func (s *Store) HeartbeatWithPublicIPProbeTrust(ctx context.Context, id string, heartbeat core.HeartbeatRequest, trust PublicIPProbeTrust) error {
 	receivedAt := time.Now().UTC()
 	heartbeat.Version = strings.TrimSpace(heartbeat.Version)
+	heartbeat.OS = strings.TrimSpace(heartbeat.OS)
+	heartbeat.Arch = strings.TrimSpace(heartbeat.Arch)
 	if utf8.RuneCountInString(heartbeat.Version) > 100 {
 		return fmt.Errorf("%w: agent version exceeds 100 characters", ErrInvalid)
+	}
+	if utf8.RuneCountInString(heartbeat.OS) > 50 || utf8.RuneCountInString(heartbeat.Arch) > 50 {
+		return fmt.Errorf("%w: agent OS and architecture must not exceed 50 characters", ErrInvalid)
 	}
 	runtimeState, err := json.Marshal(heartbeat.Runtime)
 	if err != nil {
@@ -770,8 +775,10 @@ func (s *Store) HeartbeatWithPublicIPProbeTrust(ctx context.Context, id string, 
 					WHEN $4::jsonb ? 'network_interfaces' OR NOT (metrics ? 'network_interfaces') THEN $4::jsonb
 			                    ELSE $4::jsonb || jsonb_build_object('network_interfaces', metrics->'network_interfaces')
 			                  END,
-			                  features=$5::jsonb
-			WHERE id=$1 AND revoked_at IS NULL`, id, heartbeat.Version, runtimeState, metricsState, featuresState)
+			                  features=$5::jsonb,
+			                  os=CASE WHEN $6='' THEN os ELSE $6 END,
+			                  arch=CASE WHEN $7='' THEN arch ELSE $7 END
+			WHERE id=$1 AND revoked_at IS NULL`, id, heartbeat.Version, runtimeState, metricsState, featuresState, heartbeat.OS, heartbeat.Arch)
 	if err != nil {
 		return err
 	}
