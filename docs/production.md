@@ -4,13 +4,15 @@
 
 ## 1. 使用部署脚本启动控制面
 
-建议使用受支持的 Linux 发行版，并预先安装 Docker Engine、Docker Compose v2、Git、curl、OpenSSL、Nginx 与证书管理工具。防火墙只对管理来源和 Agent 网络开放 TCP 443；不要开放 8080 或 5432。
+建议使用受支持的 Linux 发行版，并预先安装 Docker Engine、Docker Compose v2、curl、OpenSSL、Nginx 与证书管理工具。防火墙只对管理来源和 Agent 网络开放 TCP 443；不要开放 8080 或 5432。
 
 直接运行一键部署脚本：
 
 ```bash
 bash <(curl -fsSL "https://raw.githubusercontent.com/qimaoww/qcontrolhub/main/deploy/quick-start.sh")
 ```
+
+该命令不克隆源码仓库，只把 `deploy/quick-start.sh` 和生产 `docker-compose.yml` 保存到当前目录下的 `qcontrolhub`。需要固定其他状态目录时，先设置 `QCH_INSTALL_DIR`；后续再次执行同一命令会先下载并校验临时文件，再替换这两个运行文件，同时复用目录内的 `.env`、`.secrets` 和数据库卷。
 
 脚本首先显示管理菜单：安装/重新配置、更新现有部署、卸载服务。卸载默认只移除容器和网络，保留 `.env`、`.secrets` 与 PostgreSQL 命名卷。选择安装后再选择数据库模式；新建单机控制面使用内置 PostgreSQL，它会通过 Compose 启动数据库、控制面和独立 Web 前端。也可以跳过交互，明确指定操作和数据库模式：
 
