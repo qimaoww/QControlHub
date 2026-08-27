@@ -146,6 +146,8 @@ MODE="bundled"
 uninstall_services > "$test_root/uninstall-output.txt"
 assert_equal "safe uninstall compose arguments" "down --remove-orphans" "$(<"$compose_log")"
 grep -Fq '已保留数据：Docker PostgreSQL 命名卷' "$test_root/uninstall-output.txt"
+update_env_file "QCH_PORT=18080"
+assert_equal "custom panel URL" "http://127.0.0.1:18080" "$(local_panel_url)"
 for required_menu_text in '安装 / 重新配置' '更新现有部署' '卸载服务（保留配置、密钥和数据库卷）'; do
     grep -Fq "$required_menu_text" "$repo_root/deploy/quick-start.sh"
 done

@@ -685,6 +685,13 @@ show_result() {
     echo ""
 }
 
+local_panel_url() {
+    local port
+    port="$(read_env_key QCH_PORT)"
+    [ -n "$port" ] || port=8080
+    printf 'http://127.0.0.1:%s' "$port"
+}
+
 show_admin_token_once() {
     [ -n "$ADMIN_TOKEN_TO_DISPLAY" ] || return 0
     echo ""
@@ -821,14 +828,15 @@ case "$MODE" in
         write_secret_compose_override
         start_services
 
+        panel_url="$(local_panel_url)"
         echo "-> 等待控制面就绪..."
-        if ! wait_ready "http://127.0.0.1:8080/readyz" "$READY_TIMEOUT"; then
+        if ! wait_ready "$panel_url/readyz" "$READY_TIMEOUT"; then
             show_diagnostics
             die "控制面未在 ${READY_TIMEOUT} 秒内就绪"
         fi
 
         [ "$ACTION" = "update" ] && result_name="更新完成" || result_name="部署完成"
-        show_result "$result_name" "http://127.0.0.1:8080" "docker compose -f docker-compose.yml -f docker-compose.secrets.yml down"
+        show_result "$result_name" "$panel_url" "docker compose -f docker-compose.yml -f docker-compose.secrets.yml down"
         ;;
     external)
         if [ "$ACTION" = "update" ]; then
@@ -849,13 +857,14 @@ case "$MODE" in
 
         start_services
 
+        panel_url="$(local_panel_url)"
         echo "-> 等待控制面就绪..."
-        if ! wait_ready "http://127.0.0.1:8080/readyz" "$READY_TIMEOUT"; then
+        if ! wait_ready "$panel_url/readyz" "$READY_TIMEOUT"; then
             show_diagnostics
             die "控制面未在 ${READY_TIMEOUT} 秒内就绪"
         fi
 
         [ "$ACTION" = "update" ] && result_name="更新完成" || result_name="部署完成"
-        show_result "$result_name" "http://127.0.0.1:8080" "docker compose -f docker-compose.external.yml -f docker-compose.secrets.yml down"
+        show_result "$result_name" "$panel_url" "docker compose -f docker-compose.external.yml -f docker-compose.secrets.yml down"
         ;;
 esac
