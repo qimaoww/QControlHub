@@ -65,7 +65,11 @@ func prepareManagedConfigurationAccessWithGID(rootPath, configPath string, gid i
 		return fileMetadata{}, fmt.Errorf("managed configuration directory is unsafe: %w", err)
 	}
 
-	directories := []string{rootPath}
+	// The Agent may run under an older systemd unit that exposes only the
+	// engine-specific directory as writable. The installer/bootstrap owns the
+	// protected root metadata, so runtime tasks must validate but never chmod or
+	// chown that parent directory.
+	directories := make([]string, 0)
 	if relative != "." {
 		current := rootPath
 		for _, component := range strings.Split(relative, string(filepath.Separator)) {
