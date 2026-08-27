@@ -30,45 +30,17 @@ QControlHub 是面向 Linux 节点的配置与远程运维平台，由 Go 控制
 - 管理 API 使用 Bearer 令牌；Web 控制台使用服务端会话、HttpOnly Cookie 和 CSRF 防护，并支持按能力授权的管理员与用户账号。
 - 可选用 AES-256-GCM 加密配置正文与修订，并通过 HMAC-SHA256 签名 Webhook 通知。
 
-## 本地快速开始
-
-### 环境要求
-
-- Linux
-- Docker Engine
-- Docker Compose v2（`docker compose`）
-- OpenSSL
-
-### 启动控制面
-
-```bash
-git clone https://github.com/qimaoww/qcontrolhub.git
-cd qcontrolhub
-make init-env
-make dev-up
-```
-
-`make init-env` 会创建权限为 `0600` 的 `.env` 并生成本地所需密钥；`make dev-up` 从当前源码构建镜像，只在回环地址启用开发用 HTTP。
-
-访问 `http://127.0.0.1:8080`，使用 `.env` 中的 `QCH_ADMIN_TOKEN` 登录。停止并保留 PostgreSQL 数据：
-
-```bash
-make down
-```
-
-生产环境不要使用 `make dev-up`，也不要把回环端口直接暴露到公网。
-
 ## 生产部署与 Agent 接入
 
 ### 生产部署
 
-Linux 控制面主机可以运行 [`deploy/quick-start.sh`](deploy/quick-start.sh) 初始化内置或外部 PostgreSQL 模式：
+在 Linux 控制面主机运行以下一键命令，脚本会交互选择内置或外部 PostgreSQL 模式，并完成密钥生成、Compose 服务启动和就绪检查：
 
 ```bash
-./deploy/quick-start.sh
+git clone --depth 1 https://github.com/qimaoww/qcontrolhub.git && cd qcontrolhub && ./deploy/quick-start.sh
 ```
 
-该脚本负责密钥、Compose 服务和就绪检查，不替代 TLS、反向代理、数据库保护、备份与恢复演练。上线前按 [生产部署指南](docs/production.md) 完成全部步骤，并核对 [安全基线](docs/security.md)。
+一键脚本的参数与重复执行行为见 [`deploy/quick-start.sh`](deploy/quick-start.sh)。它不替代 TLS、反向代理、数据库保护、备份与恢复演练；上线前请按 [生产部署指南](docs/production.md) 完成全部步骤，并核对 [安全基线](docs/security.md)。
 
 ### Agent 接入
 
