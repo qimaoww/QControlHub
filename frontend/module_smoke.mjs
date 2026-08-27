@@ -3046,7 +3046,10 @@ try {
       if (path === "/agents")
         return [{ id: "alpha", name: "Alpha", status: "online", features: ["port-traffic-v1"], capabilities: ["mihomo"] }];
       if (path === "/traffic-policies")
-        return [{ id: "policy-a", agent_id: "alpha", engine: "mihomo", name: "Primary", port: 443, protocol: "tcp", cycle: "monthly", cycle_anchor: "2026-01-01T00:00:00Z", used_bytes: 10, limit_bytes: 100, received_bytes: 6, sent_bytes: 4, receive_bps: 1, send_bps: 1, enforcement_available: true, last_reported_at: "now", auto_block: true }];
+        return [
+          { id: "policy-a", agent_id: "alpha", engine: "mihomo", name: "Primary", port: 443, protocol: "tcp", cycle: "monthly", cycle_anchor: "2026-01-01T00:00:00Z", used_bytes: 10, limit_bytes: 100, received_bytes: 6, sent_bytes: 4, receive_bps: 1, send_bps: 1, enforcement_available: true, last_reported_at: "now", auto_block: true, quota_enabled: true },
+          { id: "policy-b", agent_id: "alpha", engine: "mihomo", name: "Existing UDP", port: 8443, protocol: "udp", cycle: "monthly", cycle_anchor: "2026-08-01T00:00:00Z", used_bytes: 20, limit_bytes: Number.MAX_SAFE_INTEGER, received_bytes: 12, sent_bytes: 8, receive_bps: 2, send_bps: 1, enforcement_available: true, last_reported_at: "now", auto_block: false, quota_enabled: false, discovered: true },
+        ];
       if (path === "/traffic-endpoints")
         return [
           { agent_id: "alpha", engine: "mihomo", name: "Primary from config", port: 443, protocol: "tcp", config_version: 2 },
@@ -3077,9 +3080,9 @@ try {
   assert.equal(trafficMarkup.includes("traffic-history"), false, "monthly history is rendered only on the dashboard");
   assert.equal(trafficMarkup.includes("traffic-hero"), false, "traffic page starts directly with useful controls instead of a repeated title hero");
   assert.equal(trafficMarkup.includes("traffic-policy-grid"), true, "traffic policies render as compact cards");
-  assert.equal(trafficMarkup.includes("Existing UDP"), true, "unmonitored ports from existing configurations render directly");
+  assert.equal(trafficMarkup.includes("Existing UDP"), true, "discovered ports render as automatic traffic monitors");
   assert.equal(trafficMarkup.includes("Primary from config"), false, "a configured endpoint already covered by a policy is not duplicated");
-  assert.equal(trafficMarkup.includes("未设置配额"), true, "configured ports are distinguished from monitored policies");
+  assert.equal(trafficMarkup.includes("持续统计"), true, "monitoring remains active without a quota");
   assert.equal(trafficMarkup.includes("traffic-edit-dialog"), false, "read-only roles do not receive quota mutation dialogs");
   const trafficPoll = [...trafficTimers.values()][0];
   trafficTimers.clear();

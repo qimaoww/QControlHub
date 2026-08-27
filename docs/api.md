@@ -81,7 +81,7 @@
 | `POST` | `/api/v1/traffic-policies` | 创建端口流量配额（traffic.manage） |
 | `PUT` | `/api/v1/traffic-policies/{id}` | 更新端口、协议、周期或额度（traffic.manage） |
 | `POST` | `/api/v1/traffic-policies/{id}/reset` | 立即清零当前周期并解封端口（traffic.manage） |
-| `DELETE` | `/api/v1/traffic-policies/{id}` | 停止监控并移除该端口的 QControlHub 封禁规则（traffic.manage） |
+| `DELETE` | `/api/v1/traffic-policies/{id}` | 取消端口配额并移除 QControlHub 封禁；配置端口继续监控（traffic.manage） |
 | `GET` | `/api/v1/templates` | 列出配置模板 |
 | `POST` | `/api/v1/templates` | 创建配置模板 |
 | `DELETE` | `/api/v1/templates/{id}` | 删除配置模板（admin） |
@@ -110,7 +110,7 @@
 
 ### 端口流量配额
 
-`GET /api/v1/traffic-endpoints` 会从节点当前保存的 Mihomo、Xray、sing-box 与 Shadowsocks Rust 配置中提取监听名称、端口和 TCP/UDP 范围。响应不会包含凭据或完整配置内容；端口即使还没有创建流量配额也会返回，流量页据此直接展示现有端口并提供预填的配额入口。同一节点同一端口已有配额时，页面只显示配额卡片，不重复显示配置端口。
+`GET /api/v1/traffic-endpoints` 会从节点当前保存的 Mihomo、Xray、sing-box 与 Shadowsocks Rust 配置中提取监听名称、端口和 TCP/UDP 范围。响应不会包含凭据或完整配置内容。控制面会把这些监听端口自动持久化为监控记录并同步给支持 `port-traffic-v1` 的 Agent；无需先创建配额即可持续统计、保存每日用量并显示实时速率。配额只是监控记录上的可选上限与封禁设置。同一节点同一端口只显示一张流量卡片。
 
 创建与更新请求使用相同结构：
 
@@ -128,7 +128,7 @@
 }
 ```
 
-`protocol` 为 `tcp`、`udp` 或 `both`，`cycle` 为 `monthly` 或 `yearly`。`cycle_anchor` 必须是当天或过去的 UTC 日期；月末和闰年按日历末日自动对齐。额度是接收与发送字节之和，同一节点同一端口只能配置一次。`auto_block` 默认为 `true`；设为 `false` 时 Agent 仍统计并上报流量，但不会因超额创建丢弃规则。修改端口、协议、周期或起始日期会开始新的计数；只调整名称、内核归属、额度或自动封禁开关会保留当前已用流量。响应中的 `enforcement_available`、`enforcement_error`、`blocked`、当前周期与收发计数均来自 Agent 最新心跳。
+`protocol` 为 `tcp`、`udp` 或 `both`，`cycle` 为 `monthly` 或 `yearly`。`cycle_anchor` 必须是当天或过去的 UTC 日期；月末和闰年按日历末日自动对齐。额度是接收与发送字节之和，同一节点同一端口只能配置一次。自动发现记录的 `quota_enabled` 为 `false`；设置配额后变为 `true`。`auto_block` 默认为 `true`；设为 `false` 时 Agent 仍统计并上报流量，但不会因超额创建丢弃规则。取消已发现端口的配额只解除限额和封禁，不删除统计记录或历史。修改端口、协议、周期或起始日期会开始新的周期计数；只调整名称、内核归属、额度或自动封禁开关会保留当前已用流量。响应中的 `enforcement_available`、`enforcement_error`、`blocked`、当前周期与收发计数均来自 Agent 最新心跳。
 
 `GET /api/v1/traffic-usage` 的 `month` 使用 `YYYY-MM`，省略时为当前 UTC 月；`agent_id` 和 `policy_id` 可选。Agent 上报的是每条策略的累计计数，控制面根据连续心跳计算增量并按 UTC 自然日保存接收、发送、合计和峰值速率。重复或乱序心跳不会重复计量；Agent 或 nftables 计数器重启后从新计数继续累计。升级已有数据库后的第一次心跳只建立历史基线，避免把升级前的整个周期累计量错误记入当天；历史图从升级后的下一次有效增量开始。删除单条配额不会删除已经保存的每日历史。
 
