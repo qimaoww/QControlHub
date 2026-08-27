@@ -214,6 +214,10 @@ func TestRefreshPathsUseStableViewsAndScopedCoordinators(t *testing.T) {
 		"modules/traffic.js": {
 			"createPoller({",
 			"data-refresh-key=\"traffic-policy-${esc(policy.id)}\"",
+			"data-traffic-card-key=\"${esc(trafficCardIdentity(item))}\"",
+			"qcontrolhub:traffic-card-order",
+			"enableTrafficCardDrag(cardGrid",
+			"trafficRateForDisplay(policy.receive_bps",
 			"data-traffic-filter=\"engine\"",
 			"data-traffic-edit-dialog",
 			"class=\"traffic-edit-dialog traffic-create-dialog\"",

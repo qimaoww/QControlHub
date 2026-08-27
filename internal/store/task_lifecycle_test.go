@@ -804,6 +804,25 @@ func TestHeartbeatClearsStaleFeaturesWithPostgreSQL(t *testing.T) {
 	if err != nil || !containsFeature(current.Features, core.AgentFeatureMihomoDevelopmentSource) {
 		t.Fatalf("agent did not start advertising the source feature: %+v, %v", current.Features, err)
 	}
+	if err := dataStore.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{
+		Version: "platform-v2", OS: "Debian", Arch: "amd64",
+	}); err != nil {
+		t.Fatalf("store platform heartbeat: %v", err)
+	}
+	current, err = dataStore.GetAgent(ctx, agent.ID)
+	if err != nil || current.OS != "Debian" || current.Arch != "amd64" {
+		t.Fatalf("agent platform after heartbeat = %q/%q, %v", current.OS, current.Arch, err)
+	}
+	if err := dataStore.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Version: "legacy-platform"}); err != nil {
+		t.Fatalf("store legacy platform heartbeat: %v", err)
+	}
+	current, err = dataStore.GetAgent(ctx, agent.ID)
+	if err != nil || current.OS != "Debian" || current.Arch != "amd64" {
+		t.Fatalf("legacy heartbeat overwrote platform = %q/%q, %v", current.OS, current.Arch, err)
+	}
+	if err := dataStore.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{OS: strings.Repeat("x", 51)}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("oversized heartbeat platform error = %v; want ErrInvalid", err)
+	}
 	if err := dataStore.HeartbeatWithPublicIPProbeTrust(ctx, agent.ID, core.HeartbeatRequest{
 		Version: "probe-v2", Features: []string{core.AgentFeatureManagedPublicIPProbe},
 		Metrics: &core.HostMetrics{PublicIPv4: "198.35.26.96", PublicIPv4Source: core.PublicIPProbeSourceControlPlane},

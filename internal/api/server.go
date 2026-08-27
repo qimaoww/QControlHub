@@ -954,6 +954,10 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 					slog.Error("store agent metrics", "agent_id", id, "error", err)
 					return
 				}
+				if err := s.store.UpdatePortTrafficUsage(ctx, id, message.TrafficUsage, time.Now().UTC()); err != nil {
+					slog.Error("store agent traffic metrics", "agent_id", id, "error", err)
+					return
+				}
 				resetHeartbeatDeadline()
 			case core.WireCoreLogs:
 				if message.CoreLogs == nil {

@@ -336,7 +336,7 @@ func (c *Client) enroll(ctx context.Context, publicKey ed25519.PublicKey, privat
 	request := core.EnrollRequest{
 		Name:         c.config.Name,
 		Version:      c.config.Version,
-		OS:           runtime.GOOS,
+		OS:           operatingSystemPlatform(),
 		Arch:         runtime.GOARCH,
 		Capabilities: c.config.Capabilities,
 		Features:     c.advertisedFeatures(),
@@ -540,7 +540,7 @@ func (c *Client) queueHeartbeat(ctx context.Context, outgoing chan<- core.WireMe
 	}
 	metrics.PublicIPv4, metrics.PublicIPv6, metrics.PublicIPv4Source, metrics.PublicIPv6Source = c.publicIP.SnapshotWithSources()
 	heartbeat := &core.HeartbeatRequest{
-		Version: c.config.Version, Runtime: runtimeState,
+		Version: c.config.Version, OS: operatingSystemPlatform(), Arch: runtime.GOARCH, Runtime: runtimeState,
 		Features: c.advertisedFeatures(), TrafficUsage: c.traffic.Snapshot(),
 	}
 	if metricsHaveData(metrics) {
@@ -569,7 +569,7 @@ func (c *Client) queueMetrics(ctx context.Context, outgoing chan<- core.WireMess
 		return nil
 	}
 	metrics.PublicIPv4, metrics.PublicIPv6, metrics.PublicIPv4Source, metrics.PublicIPv6Source = c.publicIP.SnapshotWithSources()
-	message := core.WireMessage{Type: core.WireMetrics, Metrics: &metrics}
+	message := core.WireMessage{Type: core.WireMetrics, Metrics: &metrics, TrafficUsage: c.traffic.Snapshot()}
 	select {
 	case outgoing <- message:
 		return nil

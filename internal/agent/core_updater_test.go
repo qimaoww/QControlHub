@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -45,8 +46,9 @@ func TestSelectCoreReleaseAssetUsesGenericOfficialBuilds(t *testing.T) {
 		want    string
 	}{
 		{
-			name: "Mihomo stable ignores CPU variants", engine: core.EngineMihomo, arch: "amd64",
+			name: "Mihomo stable keeps default CPU build primary", engine: core.EngineMihomo, arch: "amd64",
 			release: githubRelease{TagName: "v1.19.29", Assets: []githubReleaseAsset{
+				asset("MetaCubeX/mihomo", "mihomo-linux-amd64-compatible-v1.19.29.gz"),
 				asset("MetaCubeX/mihomo", "mihomo-linux-amd64-v1-v1.19.29.gz"),
 				asset("MetaCubeX/mihomo", "mihomo-linux-amd64-v1.19.29.gz"),
 			}},
@@ -245,6 +247,94 @@ func TestDownloadAssetDoesNotRetryPermanentHTTPFailure(t *testing.T) {
 	}
 }
 
+func TestMihomoInstallFallsBackOnlyAfterDefaultVersionFailure(t *testing.T) {
+	defaultContents := mihomoVersionFixture(t, false)
+	compatibleContents := mihomoVersionFixture(t, true)
+	asset := func(name string, contents []byte) githubReleaseAsset {
+		digest := sha256.Sum256(contents)
+		return githubReleaseAsset{
+			Name: name, Size: int64(len(contents)), Digest: "sha256:" + hex.EncodeToString(digest[:]),
+			BrowserDownloadURL: "https://github.com/MetaCubeX/mihomo/releases/download/v1.19.30/" + name,
+		}
+	}
+	defaultAsset := asset("mihomo-linux-amd64-v1.19.30.gz", defaultContents)
+	compatibleAsset := asset("mihomo-linux-amd64-compatible-v1.19.30.gz", compatibleContents)
+	releaseBody, err := json.Marshal(githubRelease{
+		TagName: "v1.19.30", Assets: []githubReleaseAsset{compatibleAsset, defaultAsset},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	downloads := map[string][]byte{defaultAsset.Name: defaultContents, compatibleAsset.Name: compatibleContents}
+	requested := make([]string, 0, 2)
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if request.URL.Host == "api.github.com" {
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(releaseBody)), Header: make(http.Header), Request: request}, nil
+		}
+		name := filepath.Base(request.URL.Path)
+		contents, ok := downloads[name]
+		if !ok {
+			t.Fatalf("unexpected asset request %s", request.URL.String())
+		}
+		requested = append(requested, name)
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(contents)), Header: make(http.Header), Request: request}, nil
+	})}
+	updater := &CoreUpdater{
+		client: client, apiBase: githubAPIBase, goarch: "amd64", libc: "gnu", trustedURL: trustedCoreReleaseURL,
+		downloadAttempts: 1, downloadAttemptTimeout: 10 * time.Second,
+	}
+
+	directory := t.TempDir()
+	serviceHelper := filepath.Join(directory, "service-helper")
+	if err := os.WriteFile(serviceHelper, []byte("#!/bin/sh\ncase \"$1\" in\nis-active) echo active ;;\nrestart) : ;;\nesac\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	spec := EngineSpec{Binary: filepath.Join(directory, "mihomo"), Service: "qagent-mihomo.service"}
+	manager := &ServiceManager{kind: ServiceManagerSystemd, executable: serviceHelper, enableExecutable: serviceHelper}
+	output, err := updater.Install(context.Background(), core.EngineMihomo, spec, core.CoreVersionStable, "", manager)
+	if err != nil {
+		t.Fatalf("install with compatible fallback: %v\n%s", err, output)
+	}
+	if len(requested) != 2 || requested[0] != defaultAsset.Name || requested[1] != compatibleAsset.Name {
+		t.Fatalf("Mihomo asset requests = %v, want default then compatible", requested)
+	}
+	if !strings.Contains(output, "fallback: default Mihomo binary failed version verification") || !strings.Contains(output, compatibleAsset.Digest) {
+		t.Fatalf("fallback install output = %q", output)
+	}
+	version, err := run(context.Background(), spec.Binary, "-v")
+	if err != nil || !strings.Contains(version, "v1.19.30") {
+		t.Fatalf("installed compatible binary version = %q, %v", version, err)
+	}
+}
+
+func mihomoVersionFixture(t *testing.T, succeeds bool) []byte {
+	t.Helper()
+	var script bytes.Buffer
+	if succeeds {
+		script.WriteString("#!/bin/sh\necho 'Mihomo Meta v1.19.30 linux amd64 compatible'\nexit 0\n")
+	} else {
+		script.WriteString("#!/bin/sh\necho 'unsupported CPU' >&2\nexit 1\n")
+	}
+	// Keep both the extracted executable and compressed release asset above the
+	// production minimum without relying on a compiled fixture.
+	script.WriteString(": <<'QCH_PADDING'\n")
+	padding := make([]byte, 2<<20)
+	if _, err := rand.Read(padding); err != nil {
+		t.Fatal(err)
+	}
+	hex.NewEncoder(&script).Write(padding)
+	script.WriteString("\nQCH_PADDING\n")
+	var compressed bytes.Buffer
+	writer := gzip.NewWriter(&compressed)
+	if _, err := writer.Write(script.Bytes()); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return compressed.Bytes()
+}
+
 type errorReader struct {
 	err error
 }
@@ -365,7 +455,7 @@ func TestSelectMihomoLinuxAssetMatchesRealNaming(t *testing.T) {
 		wantErr string
 	}{
 		{
-			name: "stable amd64 picks default official asset",
+			name: "stable amd64 keeps default official asset primary",
 			arch: "amd64",
 			release: githubRelease{TagName: "v1.19.30", Assets: []githubReleaseAsset{
 				mihomoFixtureAsset("mihomo-linux-amd64-compatible-v1.19.30.gz"),
@@ -381,11 +471,11 @@ func TestSelectMihomoLinuxAssetMatchesRealNaming(t *testing.T) {
 			want: "mihomo-linux-amd64-v1.19.30.gz",
 		},
 		{
-			name: "development amd64 picks default alpha asset",
+			name: "development amd64 keeps default alpha asset primary",
 			arch: "amd64",
 			// Asset names are the real vernesong/mihomo Prerelease-Alpha publish
-			// set; the matcher must select the default goamd64 build over the
-			// compatible/v1/v2/v3 and Go-toolchain variants.
+			// set; the matcher keeps the default build primary while excluding
+			// explicit v1/v2/v3 and Go-toolchain variants.
 			release: githubRelease{TagName: "Prerelease-Alpha", Prerelease: true, Assets: []githubReleaseAsset{
 				mihomoFixtureAsset("mihomo-linux-amd64-compatible-alpha-smart-834a506.gz"),
 				mihomoFixtureAsset("mihomo-linux-amd64-v1-alpha-smart-834a506.gz"),
@@ -397,7 +487,7 @@ func TestSelectMihomoLinuxAssetMatchesRealNaming(t *testing.T) {
 			want: "mihomo-linux-amd64-alpha-smart-834a506.gz",
 		},
 		{
-			name: "official development amd64 picks default alpha asset",
+			name: "official development amd64 keeps default alpha asset primary",
 			arch: "amd64",
 			release: githubRelease{TagName: "Prerelease-Alpha", Prerelease: true, Assets: []githubReleaseAsset{
 				mihomoFixtureAsset("mihomo-linux-amd64-compatible-alpha-f295ba6.gz"),
@@ -431,9 +521,7 @@ func TestSelectMihomoLinuxAssetMatchesRealNaming(t *testing.T) {
 				mihomoFixtureAsset("mihomo-darwin-amd64-v1.19.30.gz"),
 				mihomoFixtureAsset("mihomo-android-amd64-v1.19.30.gz"),
 				mihomoFixtureAsset("mihomo-linux-amd64-v1.19.30.deb"),
-				mihomoFixtureAsset("mihomo-linux-amd64-v1.19.30.rpm"),
 				mihomoFixtureAsset("mihomo-linux-amd64-v1.19.30.pkg.tar.zst"),
-				mihomoFixtureAsset("mihomo-linux-amd64-compatible-v1.19.30.gz"),
 				mihomoFixtureAsset("mihomo-linux-amd64-v1-go123-v1.19.30.gz"),
 				mihomoFixtureAsset("mihomo-linux-amd64-v1-v1.19.30.gz"),
 				mihomoFixtureAsset("mihomo-linux-amd64-v2-v1.19.30.gz"),
@@ -449,6 +537,16 @@ func TestSelectMihomoLinuxAssetMatchesRealNaming(t *testing.T) {
 				mihomoFixtureAsset("mihomo-linux-amd64-second.gz"),
 			}},
 			wantErr: "multiple generic Linux assets",
+		},
+		{
+			name: "multiple compatible assets rejected as ambiguous",
+			arch: "amd64",
+			release: githubRelease{TagName: "v1.19.30", Assets: []githubReleaseAsset{
+				mihomoFixtureAsset("mihomo-linux-amd64-compatible-first.gz"),
+				mihomoFixtureAsset("mihomo-linux-amd64-compatible-second.gz"),
+				mihomoFixtureAsset("mihomo-linux-amd64-v1.19.30.gz"),
+			}},
+			wantErr: "multiple compatible Linux assets",
 		},
 		{
 			name: "missing sha256 digest rejected fail closed",
@@ -515,8 +613,8 @@ func TestOfficialCoreRepositorySelectsSource(t *testing.T) {
 func TestResolveDevelopmentResolvesOfficialAlphaBuild(t *testing.T) {
 	t.Parallel()
 	// Real MetaCubeX/mihomo releases/tags/Prerelease-Alpha metadata (verified
-	// 2026-08-23): the official source now publishes the full Alpha build set,
-	// including mihomo-linux-amd64-alpha-f295ba6.gz.
+	// 2026-08-23): the official source publishes the full Alpha build set. The
+	// default asset remains primary and compatible is retained as a fallback.
 	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		if request.URL.RequestURI() != "/repos/MetaCubeX/mihomo/releases?per_page=5&page=1" {
 			t.Fatalf("unexpected development request %s", request.URL.String())
@@ -535,8 +633,8 @@ func TestResolveDevelopmentResolvesOfficialAlphaBuild(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveRelease(development): %v", err)
 	}
-	if resolved.Tag != "Prerelease-Alpha" || resolved.Asset.Name != "mihomo-linux-amd64-alpha-f295ba6.gz" {
-		t.Fatalf("resolveRelease(development) = %s/%s, want Prerelease-Alpha/mihomo-linux-amd64-alpha-f295ba6.gz", resolved.Tag, resolved.Asset.Name)
+	if resolved.Tag != "Prerelease-Alpha" || resolved.Asset.Name != "mihomo-linux-amd64-alpha-f295ba6.gz" || resolved.FallbackAsset.Name != "mihomo-linux-amd64-compatible-alpha-f295ba6.gz" {
+		t.Fatalf("resolveRelease(development) = primary %s/%s fallback %s", resolved.Tag, resolved.Asset.Name, resolved.FallbackAsset.Name)
 	}
 }
 
@@ -671,8 +769,8 @@ func TestResolveDevelopmentResolvesMirrorAlphaBuild(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveRelease(mirror): %v", err)
 	}
-	if resolved.Tag != "Prerelease-Alpha" || resolved.Asset.Name != "mihomo-linux-amd64-alpha-smart-834a506.gz" {
-		t.Fatalf("resolveRelease(mirror) = %s/%s, want Prerelease-Alpha/mihomo-linux-amd64-alpha-smart-834a506.gz", resolved.Tag, resolved.Asset.Name)
+	if resolved.Tag != "Prerelease-Alpha" || resolved.Asset.Name != "mihomo-linux-amd64-alpha-smart-834a506.gz" || resolved.FallbackAsset.Name != "mihomo-linux-amd64-compatible-alpha-smart-834a506.gz" {
+		t.Fatalf("resolveRelease(mirror) = primary %s/%s fallback %s", resolved.Tag, resolved.Asset.Name, resolved.FallbackAsset.Name)
 	}
 }
 

@@ -44,7 +44,7 @@ type storeExecutor interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }
 
-const currentSchemaVersion = 26
+const currentSchemaVersion = 28
 
 func Open(ctx context.Context, databaseURL string, allowInsecureRemote bool) (*Store, error) {
 	return OpenWithConfigKey(ctx, databaseURL, allowInsecureRemote, "")
@@ -740,8 +740,13 @@ func (s *Store) Heartbeat(ctx context.Context, id string, heartbeat core.Heartbe
 func (s *Store) HeartbeatWithPublicIPProbeTrust(ctx context.Context, id string, heartbeat core.HeartbeatRequest, trust PublicIPProbeTrust) error {
 	receivedAt := time.Now().UTC()
 	heartbeat.Version = strings.TrimSpace(heartbeat.Version)
+	heartbeat.OS = strings.TrimSpace(heartbeat.OS)
+	heartbeat.Arch = strings.TrimSpace(heartbeat.Arch)
 	if utf8.RuneCountInString(heartbeat.Version) > 100 {
 		return fmt.Errorf("%w: agent version exceeds 100 characters", ErrInvalid)
+	}
+	if utf8.RuneCountInString(heartbeat.OS) > 50 || utf8.RuneCountInString(heartbeat.Arch) > 50 {
+		return fmt.Errorf("%w: agent OS and architecture must not exceed 50 characters", ErrInvalid)
 	}
 	runtimeState, err := json.Marshal(heartbeat.Runtime)
 	if err != nil {
@@ -770,8 +775,10 @@ func (s *Store) HeartbeatWithPublicIPProbeTrust(ctx context.Context, id string, 
 					WHEN $4::jsonb ? 'network_interfaces' OR NOT (metrics ? 'network_interfaces') THEN $4::jsonb
 			                    ELSE $4::jsonb || jsonb_build_object('network_interfaces', metrics->'network_interfaces')
 			                  END,
-			                  features=$5::jsonb
-			WHERE id=$1 AND revoked_at IS NULL`, id, heartbeat.Version, runtimeState, metricsState, featuresState)
+			                  features=$5::jsonb,
+			                  os=CASE WHEN $6='' THEN os ELSE $6 END,
+			                  arch=CASE WHEN $7='' THEN arch ELSE $7 END
+			WHERE id=$1 AND revoked_at IS NULL`, id, heartbeat.Version, runtimeState, metricsState, featuresState, heartbeat.OS, heartbeat.Arch)
 	if err != nil {
 		return err
 	}
@@ -1962,6 +1969,8 @@ CREATE TABLE IF NOT EXISTS port_traffic_policies (
     reset_generation bigint NOT NULL DEFAULT 1 CHECK (reset_generation > 0),
     received_bytes bigint NOT NULL DEFAULT 0 CHECK (received_bytes >= 0),
     sent_bytes bigint NOT NULL DEFAULT 0 CHECK (sent_bytes >= 0),
+	reported_received_bytes bigint NOT NULL DEFAULT 0 CHECK (reported_received_bytes >= 0),
+	reported_sent_bytes bigint NOT NULL DEFAULT 0 CHECK (reported_sent_bytes >= 0),
     used_bytes bigint NOT NULL DEFAULT 0 CHECK (used_bytes >= 0),
     receive_bps bigint NOT NULL DEFAULT 0 CHECK (receive_bps >= 0),
     send_bps bigint NOT NULL DEFAULT 0 CHECK (send_bps >= 0),
@@ -1979,6 +1988,34 @@ ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS auto_block boolean NO
 ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS quota_enabled boolean NOT NULL DEFAULT true;
 ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS discovered boolean NOT NULL DEFAULT false;
 ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS traffic_history_initialized boolean NOT NULL DEFAULT false;
+DO $traffic_baselines$
+DECLARE
+    add_reported_received boolean;
+    add_reported_sent boolean;
+BEGIN
+    SELECT NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema=current_schema() AND table_name='port_traffic_policies' AND column_name='reported_received_bytes'
+    ) INTO add_reported_received;
+    SELECT NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema=current_schema() AND table_name='port_traffic_policies' AND column_name='reported_sent_bytes'
+    ) INTO add_reported_sent;
+
+    ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS reported_received_bytes bigint NOT NULL DEFAULT 0;
+    ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS reported_sent_bytes bigint NOT NULL DEFAULT 0;
+    IF add_reported_received THEN
+        UPDATE port_traffic_policies SET reported_received_bytes=received_bytes;
+    END IF;
+    IF add_reported_sent THEN
+        UPDATE port_traffic_policies SET reported_sent_bytes=sent_bytes;
+    END IF;
+END
+$traffic_baselines$;
+ALTER TABLE port_traffic_policies DROP CONSTRAINT IF EXISTS port_traffic_policies_reported_received_bytes_check;
+ALTER TABLE port_traffic_policies ADD CONSTRAINT port_traffic_policies_reported_received_bytes_check CHECK (reported_received_bytes >= 0);
+ALTER TABLE port_traffic_policies DROP CONSTRAINT IF EXISTS port_traffic_policies_reported_sent_bytes_check;
+ALTER TABLE port_traffic_policies ADD CONSTRAINT port_traffic_policies_reported_sent_bytes_check CHECK (reported_sent_bytes >= 0);
 CREATE INDEX IF NOT EXISTS port_traffic_policies_agent_idx ON port_traffic_policies(agent_id,port);
 
 CREATE TABLE IF NOT EXISTS port_traffic_daily_usage (

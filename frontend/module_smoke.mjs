@@ -48,8 +48,11 @@ import { installSettings } from "./modules/settings.js";
 import { installTasks } from "./modules/tasks.js";
 import {
   installTraffic,
+  mergeVisibleTrafficCardOrder,
   mergeTrafficPorts,
+  orderTrafficItems,
   resetTrafficCreateForm,
+  trafficRateForDisplay,
 } from "./modules/traffic.js";
 import { createLatestRenderScheduler } from "./modules/refresh.js";
 
@@ -74,6 +77,23 @@ assert.notEqual(
     { id: "new-node", capabilities: [] },
   ]),
   "Agent structure signatures detect newly enrolled nodes",
+);
+
+const trafficRateNow = Date.parse("2026-08-28T00:00:30Z");
+assert.equal(
+  trafficRateForDisplay(4096, "2026-08-28T00:00:15Z", "online", trafficRateNow),
+  4096,
+  "a fresh online traffic rate remains visible",
+);
+assert.equal(
+  trafficRateForDisplay(4096, "2026-08-28T00:00:15Z", "offline", trafficRateNow),
+  0,
+  "an offline Agent never keeps a stale traffic rate visible",
+);
+assert.equal(
+  trafficRateForDisplay(4096, "2026-08-27T23:59:00Z", "online", trafficRateNow),
+  0,
+  "an old traffic sample decays to zero",
 );
 
 const coreLogFilterFixture = [
@@ -3026,6 +3046,9 @@ try {
   let trafficRequests = 0;
   let trafficRenders = 0;
   let trafficMarkup = "";
+  const trafficStorage = new Map([
+    ["qcontrolhub:traffic-card-order", JSON.stringify(["alpha:8443", "alpha:443"])],
+  ]);
   const trafficState = {
     route: "traffic",
     navigationEpoch: 1,
@@ -3041,6 +3064,10 @@ try {
     rate: (value) => `${value || 0} B/s`,
     percent: (used, limit) => (limit ? Number(used || 0) * 100 / Number(limit) : 0),
     ago: () => "刚刚",
+    storage: {
+      getItem: (key) => trafficStorage.get(key) || null,
+      setItem: (key, value) => trafficStorage.set(key, value),
+    },
     api: async (path) => {
       trafficRequests += 1;
       if (path === "/agents")
@@ -3080,6 +3107,9 @@ try {
   assert.equal(trafficMarkup.includes("traffic-history"), false, "monthly history is rendered only on the dashboard");
   assert.equal(trafficMarkup.includes("traffic-hero"), false, "traffic page starts directly with useful controls instead of a repeated title hero");
   assert.equal(trafficMarkup.includes("traffic-policy-grid"), true, "traffic policies render as compact cards");
+  assert.equal(trafficMarkup.includes("traffic-card-grip"), true, "traffic cards expose the same drag grip as node cards");
+  assert.equal(trafficMarkup.includes('data-traffic-card-key="alpha:8443"'), true, "traffic cards have stable node and port identities");
+  assert.equal(trafficMarkup.indexOf("Existing UDP") < trafficMarkup.indexOf("Primary"), true, "persisted traffic card order is applied before rendering");
   assert.equal(trafficMarkup.includes("Existing UDP"), true, "discovered ports render as automatic traffic monitors");
   assert.equal(trafficMarkup.includes("Primary from config"), false, "a configured endpoint already covered by a policy is not duplicated");
   assert.equal(trafficMarkup.includes("持续统计"), true, "monitoring remains active without a quota");
@@ -3098,6 +3128,26 @@ try {
     ).map((item) => item.kind),
     ["policy", "endpoint"],
     "configured ports merge with policies by the Agent-wide port identity",
+  );
+  assert.deepEqual(
+    orderTrafficItems(
+      [
+        { policy: { agent_id: "alpha", port: 443 } },
+        { endpoint: { agent_id: "beta", port: 8443 } },
+        { policy: { agent_id: "gamma", port: 80 } },
+      ],
+      ["beta:8443", "alpha:443"],
+    ).map((item) => (item.policy || item.endpoint).agent_id),
+    ["beta", "alpha", "gamma"],
+    "traffic card order appends newly discovered ports after persisted cards",
+  );
+  assert.deepEqual(
+    mergeVisibleTrafficCardOrder(
+      ["alpha:443", "beta:8443", "gamma:80"],
+      ["gamma:80", "alpha:443"],
+    ),
+    ["gamma:80", "beta:8443", "alpha:443"],
+    "filtered traffic reordering preserves hidden card positions",
   );
 
   const createAgent = { value: "beta" };

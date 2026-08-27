@@ -1,11 +1,65 @@
 import {
   bindEvent,
+  createInteractionGate,
   createPoller,
   createRefreshChannel,
 } from "./refresh.js";
+import {
+  animateNodeCardDrop,
+  nodeCardDropIndex,
+} from "./agents.js";
 
 const trafficPortIdentity = (item) => `${item.agent_id}:${item.port}`;
 const trafficEndpointKey = (item) => `endpoint:${item.agent_id}:${item.engine}:${item.port}:${item.protocol}`;
+const trafficCardOrderKey = "qcontrolhub:traffic-card-order";
+
+export const trafficCardIdentity = (item) =>
+  trafficPortIdentity(item.policy || item.endpoint || item);
+
+export function orderTrafficItems(items = [], savedOrder = []) {
+  if (!savedOrder.length) return items;
+  const position = new Map(savedOrder.map((key, index) => [key, index]));
+  return [...items].sort(
+    (left, right) =>
+      (position.get(trafficCardIdentity(left)) ?? savedOrder.length) -
+      (position.get(trafficCardIdentity(right)) ?? savedOrder.length),
+  );
+}
+
+// Reordering a filtered view changes only the visible slots in the complete
+// card order. Hidden cards keep their relative positions and are not lost
+// when the persisted order is updated.
+export function mergeVisibleTrafficCardOrder(allKeys = [], visibleKeys = []) {
+  const visible = new Set(visibleKeys);
+  let nextVisible = 0;
+  const merged = allKeys.map((key) =>
+    visible.has(key) ? visibleKeys[nextVisible++] : key,
+  );
+  for (const key of visibleKeys) {
+    if (!merged.includes(key)) merged.push(key);
+  }
+  return merged;
+}
+
+// The stored rate describes the last complete Agent report interval. It is no
+// longer live once that Agent is offline or the next report is overdue.
+export function trafficRateForDisplay(
+  value,
+  lastReportedAt,
+  agentStatus,
+  now = Date.now(),
+) {
+  const reportedAt = Date.parse(lastReportedAt || "");
+  const age = now - reportedAt;
+  if (
+    agentStatus !== "online" ||
+    !Number.isFinite(reportedAt) ||
+    age < -5000 ||
+    age > 45_000
+  )
+    return 0;
+  return Number(value || 0);
+}
 
 export function mergeTrafficPorts(policies = [], endpoints = []) {
   const monitored = new Set(policies.map(trafficPortIdentity));
@@ -34,6 +88,7 @@ export function installTraffic(ctx) {
   const {
     api, state, can, esc, engineName, bytes, rate, percent, ago, shell,
     notify, confirmAction,
+    storage = globalThis.localStorage,
     setTimer = (callback, delay) => {
       state.trafficPollTimer = setTimeout(callback, delay);
       return state.trafficPollTimer;
@@ -44,6 +99,9 @@ export function installTraffic(ctx) {
     isCurrent: () => state.route === "traffic",
     getScope: () => state.navigationEpoch,
   });
+  const cardInteractions = createInteractionGate();
+  let cancelTrafficCardDrag = () => {};
+  let pendingTrafficRender = null;
   const gibibyte = 1024 ** 3;
   const dateInputValue = (value = new Date()) => {
     const date = new Date(value);
@@ -121,7 +179,171 @@ export function installTraffic(ctx) {
   const selectOptions = (items, value, label) =>
     `<option value="">${label}</option>${items.map((item) => `<option value="${esc(item.value)}" ${item.value === value ? "selected" : ""}>${esc(item.label)}</option>`).join("")}`;
 
+  const savedTrafficCardOrder = () => {
+    try {
+      const parsed = JSON.parse(storage?.getItem(trafficCardOrderKey));
+      if (!Array.isArray(parsed)) return [];
+      return [...new Set(parsed.filter((key) => typeof key === "string" && key))];
+    } catch {
+      return [];
+    }
+  };
+  const saveTrafficCardOrder = (keys) => {
+    try {
+      storage?.setItem(trafficCardOrderKey, JSON.stringify(keys));
+    } catch {}
+  };
+
+  function enableTrafficCardDrag(grid, allKeys) {
+    let drag = null;
+    let cancelLanding = null;
+    const cards = () => [...grid.querySelectorAll("[data-traffic-card-key]")];
+    const clear = (clearAnimationStyles = true) => {
+      if (!drag) return;
+      drag.card.classList.remove("dragging");
+      document.body.classList.remove("traffic-card-dragging");
+      cards().forEach((card) => {
+        card.classList.remove("drop-target");
+        if (clearAnimationStyles) {
+          card.style.transform = "";
+          card.style.transition = "";
+        }
+      });
+      drag.ghost?.remove();
+      drag = null;
+    };
+    const reset = () => {
+      const landing = cancelLanding;
+      cancelLanding = null;
+      const releaseInteraction = drag?.releaseInteraction;
+      landing?.();
+      clear(true);
+      if (!landing) releaseInteraction?.();
+    };
+    cancelTrafficCardDrag = reset;
+    const highlight = (index) => {
+      cards().forEach((card) => card.classList.remove("drop-target"));
+      if (index == null) return;
+      cards().filter((card) => card !== drag.card)[index]?.classList.add("drop-target");
+    };
+    const finish = (event) => {
+      if (!drag || event.pointerId !== drag.pointerId) return;
+      const { card, moved, drop, releaseInteraction } = drag;
+      if (!moved || !grid.contains(card)) return reset();
+      const rest = cards().filter((item) => item !== card);
+      const ghostRect = drag.ghost
+        ? drag.ghost.getBoundingClientRect()
+        : card.getBoundingClientRect();
+      const oldRects = new Map(
+        [card, ...rest].map((item) => [
+          item,
+          item === card ? ghostRect : item.getBoundingClientRect(),
+        ]),
+      );
+      const target = drop == null || drop >= rest.length ? null : rest[drop];
+      if (target) target.before(card);
+      else grid.append(card);
+      const next = cards();
+      const visibleKeys = next.map((item) => item.dataset.trafficCardKey);
+      saveTrafficCardOrder(mergeVisibleTrafficCardOrder(allKeys, visibleKeys));
+      clear(false);
+      let settled = false;
+      const cancelAnimation = animateNodeCardDrop(next, oldRects, {
+        onSettled: () => {
+          settled = true;
+          cancelLanding = null;
+          releaseInteraction();
+        },
+      });
+      if (!settled) cancelLanding = cancelAnimation;
+    };
+    const cancel = (event) => {
+      if (!drag || event.pointerId !== drag.pointerId) return;
+      reset();
+    };
+    grid.querySelectorAll(".traffic-card-grip").forEach((grip) => {
+      bindEvent(grip, "pointerdown", (event) => {
+        if (event.button !== 0 || drag) return;
+        const releaseInteraction = cardInteractions.begin();
+        cancelLanding?.();
+        cancelLanding = null;
+        const card = grip.closest("[data-traffic-card-key]");
+        if (!card) {
+          releaseInteraction();
+          return;
+        }
+        event.preventDefault();
+        const rect = card.getBoundingClientRect();
+        drag = {
+          card,
+          pointerId: event.pointerId,
+          startX: event.clientX,
+          startY: event.clientY,
+          grabOffset: {
+            x: event.clientX - (rect.left + rect.width / 2),
+            y: event.clientY - (rect.top + rect.height / 2),
+          },
+          rect,
+          moved: false,
+          drop: null,
+          ghost: null,
+          releaseInteraction,
+        };
+        grip.setPointerCapture(event.pointerId);
+      });
+      bindEvent(grip, "pointermove", (event) => {
+        if (!drag || event.pointerId !== drag.pointerId) return;
+        if (!drag.card.isConnected) return reset();
+        if (!drag.ghost) {
+          if (Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 4) return;
+          drag.card.classList.add("dragging");
+          document.body.classList.add("traffic-card-dragging");
+          const ghost = drag.card.cloneNode(true);
+          ghost.classList.remove("dragging");
+          ghost.classList.add("traffic-card-ghost");
+          ghost.removeAttribute("id");
+          ghost.removeAttribute("data-traffic-card-key");
+          ghost.querySelectorAll("dialog,[id]").forEach((element) => {
+            if (element.matches("dialog")) element.remove();
+            else element.removeAttribute("id");
+          });
+          ghost.style.position = "fixed";
+          ghost.style.left = `${drag.rect.left}px`;
+          ghost.style.top = `${drag.rect.top}px`;
+          ghost.style.width = `${drag.rect.width}px`;
+          drag.ghost = ghost;
+          document.body.appendChild(ghost);
+        }
+        drag.moved = true;
+        const dx = event.clientX - drag.startX;
+        const dy = event.clientY - drag.startY;
+        drag.ghost.style.transform = `translate(${dx}px, ${dy}px) scale(.99) rotate(.3deg)`;
+        const rects = cards().map((card) => card.getBoundingClientRect());
+        drag.drop = nodeCardDropIndex(
+          rects,
+          { x: event.clientX, y: event.clientY },
+          drag.grabOffset,
+        );
+        highlight(drag.drop);
+      });
+      bindEvent(grip, "pointerup", finish);
+      bindEvent(grip, "pointercancel", cancel);
+      bindEvent(grip, "lostpointercapture", cancel);
+    });
+  }
+
   const renderTraffic = (agents, policies, endpoints, resetCreate = false) => {
+    if (cardInteractions.activeCount()) {
+      pendingTrafficRender = [agents, policies, endpoints, resetCreate];
+      cardInteractions.defer(() => {
+        const pending = pendingTrafficRender;
+        pendingTrafficRender = null;
+        if (pending && state.route === "traffic") renderTraffic(...pending);
+      }, "traffic-card-refresh");
+      return;
+    }
+    cancelTrafficCardDrag();
+    cancelTrafficCardDrag = () => {};
     state.data.agents = agents;
     state.data.trafficPolicies = policies;
     state.data.trafficEndpoints = endpoints;
@@ -135,7 +357,8 @@ export function installTraffic(ctx) {
     }
     const agentByID = new Map(agents.map((agent) => [agent.id, agent]));
     const items = mergeTrafficPorts(policies, endpoints);
-    const filteredItems = items.filter((item) => {
+    const orderedItems = orderTrafficItems(items, savedTrafficCardOrder());
+    const filteredItems = orderedItems.filter((item) => {
       const value = item.policy || item.endpoint;
       if (currentFilters.agent_id && value.agent_id !== currentFilters.agent_id) return false;
       if (currentFilters.engine && value.engine !== currentFilters.engine) return false;
@@ -174,8 +397,8 @@ export function installTraffic(ctx) {
         const agent = agentByID.get(endpoint.agent_id);
         const configurable = selectableAgents.some((candidate) => candidate.id === endpoint.agent_id && (candidate.capabilities || []).includes(endpoint.engine));
         const sourceStatus = configurable ? "正在建立自动监控" : (agent?.features || []).includes("port-traffic-v1") ? "等待控制面同步" : "需升级 Agent 后监控";
-        return `<article class="traffic-policy-card traffic-configured-port" data-refresh-key="traffic-endpoint-${esc(item.key)}" data-traffic-agent-card="${esc(endpoint.agent_id)}">
-          <header><div class="traffic-card-identity"><span class="engine-badge ${esc(endpoint.engine)}">${esc(engineName(endpoint.engine))}</span><span><strong>${esc(endpoint.name || `端口 ${endpoint.port}`)}</strong><small>${esc(agent?.name || endpoint.agent_id)}<i>·</i><code>:${esc(endpoint.port)}</code><i>·</i>${esc(protocolName(endpoint.protocol))}</small></span></div><span class="traffic-policy-status warn"><i></i>等待同步</span></header>
+        return `<article class="traffic-policy-card traffic-configured-port" data-refresh-key="traffic-endpoint-${esc(item.key)}" data-traffic-agent-card="${esc(endpoint.agent_id)}" data-traffic-card-key="${esc(trafficCardIdentity(item))}">
+          <header><div class="traffic-card-identity"><span class="engine-badge ${esc(endpoint.engine)}">${esc(engineName(endpoint.engine))}</span><span><strong>${esc(endpoint.name || `端口 ${endpoint.port}`)}</strong><small>${esc(agent?.name || endpoint.agent_id)}<i>·</i><code>:${esc(endpoint.port)}</code><i>·</i>${esc(protocolName(endpoint.protocol))}</small></span></div><span class="traffic-card-controls"><span class="traffic-policy-status warn"><i></i>等待同步</span><span class="node-card-grip traffic-card-grip" title="拖动调整顺序" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 6h.01M9 12h.01M9 18h.01M15 6h.01M15 12h.01M15 18h.01"/></svg></span></span></header>
           <section class="traffic-configured-port-body"><span aria-hidden="true">↳</span><div><strong>已发现监听端口</strong><p>控制面正在建立持续流量统计，无需先设置配额。</p></div></section>
           <footer><span class="traffic-card-sync"><i></i>${sourceStatus}</span></footer>
         </article>`;
@@ -185,13 +408,15 @@ export function installTraffic(ctx) {
       const [status, tone] = policyStatus(policy, agent);
       const quotaEnabled = policy.quota_enabled !== false;
       const usedPercent = percent(policy.used_bytes, policy.limit_bytes);
+      const receiveBPS = trafficRateForDisplay(policy.receive_bps, policy.last_reported_at, agent?.status);
+      const sendBPS = trafficRateForDisplay(policy.send_bps, policy.last_reported_at, agent?.status);
       const period = policy.period_start && policy.period_end
         ? `${dateInputValue(policy.period_start)} 至 ${dateInputValue(policy.period_end)}`
         : `从 ${dateInputValue(policy.cycle_anchor)} 开始${cycleName(policy.cycle)}重置`;
-      return `<article class="traffic-policy-card ${policy.blocked ? "is-blocked" : ""}" id="traffic-${esc(policy.id)}" data-refresh-key="traffic-policy-${esc(policy.id)}" data-traffic-agent-card="${esc(policy.agent_id)}">
-        <header><div class="traffic-card-identity"><span class="engine-badge ${esc(policy.engine)}">${esc(engineName(policy.engine))}</span><span><strong>${esc(policy.name)}</strong><small>${esc(agent?.name || policy.agent_id)}<i>·</i><code>:${esc(policy.port)}</code><i>·</i>${esc(protocolName(policy.protocol))}</small></span></div><span class="traffic-policy-status ${tone}"><i></i>${esc(status)}</span></header>
-        <section class="traffic-card-quota ${quotaEnabled ? "" : "is-monitor-only"}"><header><span>${quotaEnabled ? "当前周期用量" : "本月累计流量"}</span><b>${quotaEnabled ? `${usedPercent.toFixed(1)}%` : "未设置配额"}</b></header><div><strong>${bytes(policy.used_bytes)}</strong>${quotaEnabled ? `<span>/ ${bytes(policy.limit_bytes)}</span>` : ""}</div>${quotaEnabled ? `<progress max="100" value="${usedPercent}"></progress>` : '<span class="traffic-monitoring-note">持续统计中 · 配额与自动封禁均为可选</span>'}<small>${esc(period)}</small></section>
-        <section class="traffic-card-transfer"><div><i class="received" aria-hidden="true">↓</i><span><small>接收流量</small><strong>${bytes(policy.received_bytes)}</strong></span><em>${rate(policy.receive_bps)}</em></div><div><i class="sent" aria-hidden="true">↑</i><span><small>发送流量</small><strong>${bytes(policy.sent_bytes)}</strong></span><em>${rate(policy.send_bps)}</em></div></section>
+      return `<article class="traffic-policy-card ${policy.blocked ? "is-blocked" : ""}" id="traffic-${esc(policy.id)}" data-refresh-key="traffic-policy-${esc(policy.id)}" data-traffic-agent-card="${esc(policy.agent_id)}" data-traffic-card-key="${esc(trafficCardIdentity(item))}">
+        <header><div class="traffic-card-identity"><span class="engine-badge ${esc(policy.engine)}">${esc(engineName(policy.engine))}</span><span><strong>${esc(policy.name)}</strong><small>${esc(agent?.name || policy.agent_id)}<i>·</i><code>:${esc(policy.port)}</code><i>·</i>${esc(protocolName(policy.protocol))}</small></span></div><span class="traffic-card-controls"><span class="traffic-policy-status ${tone}"><i></i>${esc(status)}</span><span class="node-card-grip traffic-card-grip" title="拖动调整顺序" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 6h.01M9 12h.01M9 18h.01M15 6h.01M15 12h.01M15 18h.01"/></svg></span></span></header>
+        <section class="traffic-card-quota ${quotaEnabled ? "" : "is-monitor-only"}"><header><span>${quotaEnabled ? "当前周期用量" : "本月累计流量"}</span><b>${quotaEnabled ? `${usedPercent.toFixed(1)}%` : "未设置配额"}</b></header><div><strong>${bytes(policy.used_bytes)}</strong>${quotaEnabled ? `<span>/ ${bytes(policy.limit_bytes)}</span>` : ""}</div>${quotaEnabled ? `<progress max="100" value="${usedPercent}"></progress>` : ""}<small>${esc(period)}</small></section>
+        <section class="traffic-card-transfer"><div><i class="received" aria-hidden="true">↓</i><span><small>接收流量</small><strong>${bytes(policy.received_bytes)}</strong></span><em>${rate(receiveBPS)}</em></div><div><i class="sent" aria-hidden="true">↑</i><span><small>发送流量</small><strong>${bytes(policy.sent_bytes)}</strong></span><em>${rate(sendBPS)}</em></div></section>
         ${policy.enforcement_error ? `<p class="traffic-error">${esc(policy.enforcement_error)}</p>` : ""}
         <footer><span class="traffic-card-sync"><i class="${policy.last_reported_at ? "ok" : ""}"></i>${policy.last_reported_at ? `${ago(policy.last_reported_at)}更新` : "等待 Agent 上报"}</span>${can("traffic.manage") ? `<div class="traffic-card-actions"><button class="button small" type="button" data-traffic-reset="${esc(policy.id)}">清零</button><button class="button small" type="button" data-traffic-edit-open="${esc(policy.id)}">${quotaEnabled ? "编辑配额" : "设置配额"}</button></div>` : ""}</footer>${can("traffic.manage") ? `<dialog class="traffic-edit-dialog" data-traffic-edit-dialog="${esc(policy.id)}" aria-labelledby="traffic-edit-title-${esc(policy.id)}"><header><span class="traffic-edit-icon" aria-hidden="true">✎</span><div><p class="eyebrow">端口配额</p><h2 id="traffic-edit-title-${esc(policy.id)}">${quotaEnabled ? "编辑" : "设置"} ${esc(policy.name)} 的配额</h2><p>流量统计不会因配额变更而停止 · ${esc(agent?.name || policy.agent_id)} :${esc(policy.port)}</p></div><button class="deploy-command-close" type="button" data-traffic-edit-close aria-label="关闭编辑弹窗">×</button></header><form data-traffic-edit-form="${esc(policy.id)}"><div class="traffic-edit-body">${policyFields(policy, [agent].filter(Boolean), `edit-${policy.id}`)}</div><footer>${quotaEnabled ? `<button class="button small danger-button" type="button" data-traffic-delete="${esc(policy.id)}">取消配额</button>` : "<span></span>"}<span></span><button class="button" type="button" data-traffic-edit-close>取消</button><button class="button primary" type="submit">保存配额</button></footer></form></dialog>` : ""}
       </article>`;
@@ -202,6 +427,10 @@ export function installTraffic(ctx) {
     const listHeader = `<header class="traffic-policy-list-head"><div><h2>监控端口</h2><span>${filteredItems.length}</span></div><small>${esc(selectedScope)} · 自动发现配置 · Agent 实时上报</small></header>`;
     shell(`<div class="traffic-workspace">${toolbar}${listHeader}${cards ? `<section class="traffic-policy-grid">${cards}</section>` : empty}${createDialog}</div>`, "流量配额");
     bindTrafficForms(selectableAgents, endpoints);
+    const cardGrid = document.querySelector(".traffic-policy-grid");
+    if (cardGrid && filteredItems.length > 1) {
+      enableTrafficCardDrag(cardGrid, orderedItems.map(trafficCardIdentity));
+    }
     if (resetCreate) document.querySelector("#traffic-policy-form")?.reset();
     if (state.anchor === "traffic-new") {
       const create = document.querySelector("#traffic-new");
@@ -213,7 +442,7 @@ export function installTraffic(ctx) {
   const poller = createPoller({
     run: () => traffic({ background: true }),
     isActive: () => state.route === "traffic",
-    delay: () => 5000,
+    delay: () => 2000,
     setTimer,
     clearTimer,
   });

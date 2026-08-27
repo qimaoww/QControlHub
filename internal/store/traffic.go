@@ -144,6 +144,8 @@ func (s *Store) ReconcilePortTrafficEndpoints(ctx context.Context, raw []core.Po
 					reset_generation=reset_generation+CASE WHEN NOT quota_enabled AND protocol<>$4::varchar(8) THEN 1 ELSE 0 END,
 					received_bytes=CASE WHEN NOT quota_enabled AND protocol<>$4::varchar(8) THEN 0 ELSE received_bytes END,
 					sent_bytes=CASE WHEN NOT quota_enabled AND protocol<>$4::varchar(8) THEN 0 ELSE sent_bytes END,
+					reported_received_bytes=CASE WHEN NOT quota_enabled AND protocol<>$4::varchar(8) THEN 0 ELSE reported_received_bytes END,
+					reported_sent_bytes=CASE WHEN NOT quota_enabled AND protocol<>$4::varchar(8) THEN 0 ELSE reported_sent_bytes END,
 					used_bytes=CASE WHEN NOT quota_enabled AND protocol<>$4::varchar(8) THEN 0 ELSE used_bytes END,
 					receive_bps=CASE WHEN NOT quota_enabled AND protocol<>$4::varchar(8) THEN 0 ELSE receive_bps END,
 					send_bps=CASE WHEN NOT quota_enabled AND protocol<>$4::varchar(8) THEN 0 ELSE send_bps END,
@@ -349,6 +351,8 @@ func updatePortTrafficPolicyRow(ctx context.Context, tx pgx.Tx, id string, reque
 			reset_generation=reset_generation + CASE WHEN port<>$4 OR protocol<>$5::varchar(8) OR cycle<>$6::varchar(8) OR cycle_anchor<>$7::date THEN 1 ELSE 0 END,
 			received_bytes=CASE WHEN port<>$4 OR protocol<>$5::varchar(8) OR cycle<>$6::varchar(8) OR cycle_anchor<>$7::date THEN 0 ELSE received_bytes END,
 			sent_bytes=CASE WHEN port<>$4 OR protocol<>$5::varchar(8) OR cycle<>$6::varchar(8) OR cycle_anchor<>$7::date THEN 0 ELSE sent_bytes END,
+			reported_received_bytes=CASE WHEN port<>$4 OR protocol<>$5::varchar(8) OR cycle<>$6::varchar(8) OR cycle_anchor<>$7::date THEN 0 ELSE reported_received_bytes END,
+			reported_sent_bytes=CASE WHEN port<>$4 OR protocol<>$5::varchar(8) OR cycle<>$6::varchar(8) OR cycle_anchor<>$7::date THEN 0 ELSE reported_sent_bytes END,
 			used_bytes=CASE WHEN port<>$4 OR protocol<>$5::varchar(8) OR cycle<>$6::varchar(8) OR cycle_anchor<>$7::date THEN 0 ELSE used_bytes END,
 			receive_bps=0,send_bps=0,blocked=false,enforcement_available=false,enforcement_error='',
 			period_start=CASE WHEN port<>$4 OR protocol<>$5::varchar(8) OR cycle<>$6::varchar(8) OR cycle_anchor<>$7::date THEN NULL ELSE period_start END,
@@ -366,7 +370,7 @@ func updatePortTrafficPolicyRow(ctx context.Context, tx pgx.Tx, id string, reque
 func (s *Store) ResetPortTrafficPolicy(ctx context.Context, id string) (core.PortTrafficPolicy, error) {
 	policy, err := scanTrafficPolicy(s.pool.QueryRow(ctx, `
 		UPDATE port_traffic_policies SET reset_generation=reset_generation+1,received_bytes=0,sent_bytes=0,
-			used_bytes=0,receive_bps=0,send_bps=0,period_start=NULL,period_end=NULL,blocked=false,
+			reported_received_bytes=0,reported_sent_bytes=0,used_bytes=0,receive_bps=0,send_bps=0,period_start=NULL,period_end=NULL,blocked=false,
 			enforcement_available=false,enforcement_error='',last_reported_at=NULL,updated_at=now()
 		WHERE id=$1 RETURNING `+trafficPolicyColumns, id))
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -445,20 +449,24 @@ func (s *Store) UpdatePortTrafficUsage(ctx context.Context, agentID string, usag
 			return fmt.Errorf("%w: invalid traffic usage record", ErrInvalid)
 		}
 		var current struct {
-			generation         uint64
-			received, sent     uint64
-			name               string
-			engine             core.Engine
-			port               int
-			protocol           core.TrafficProtocol
-			historyInitialized bool
-			lastReported       *time.Time
+			generation                     uint64
+			received, sent                 uint64
+			reportedReceived, reportedSent uint64
+			name                           string
+			engine                         core.Engine
+			port                           int
+			protocol                       core.TrafficProtocol
+			historyInitialized             bool
+			periodStart, periodEnd         *time.Time
+			lastReported                   *time.Time
 		}
 		err := tx.QueryRow(ctx, `
-			SELECT reset_generation,received_bytes,sent_bytes,name,engine,port,protocol,traffic_history_initialized,last_reported_at
+			SELECT reset_generation,received_bytes,sent_bytes,reported_received_bytes,reported_sent_bytes,
+			       name,engine,port,protocol,traffic_history_initialized,period_start,period_end,last_reported_at
 			FROM port_traffic_policies WHERE id=$1 AND agent_id=$2 FOR UPDATE`, usage.PolicyID, agentID).Scan(
-			&current.generation, &current.received, &current.sent, &current.name, &current.engine,
-			&current.port, &current.protocol, &current.historyInitialized, &current.lastReported,
+			&current.generation, &current.received, &current.sent, &current.reportedReceived, &current.reportedSent,
+			&current.name, &current.engine, &current.port, &current.protocol, &current.historyInitialized,
+			&current.periodStart, &current.periodEnd, &current.lastReported,
 		)
 		if errors.Is(err, pgx.ErrNoRows) {
 			continue
@@ -472,22 +480,51 @@ func (s *Store) UpdatePortTrafficUsage(ctx context.Context, agentID string, usag
 		if current.lastReported != nil && !reportedAt.After(current.lastReported.UTC()) {
 			continue
 		}
-		receivedDelta, sentDelta := uint64(0), uint64(0)
-		if current.historyInitialized {
-			receivedDelta = trafficCounterDelta(usage.ReceivedBytes, current.received)
-			sentDelta = trafficCounterDelta(usage.SentBytes, current.sent)
+		// A full heartbeat and a metrics push can contain the same snapshot at
+		// the same ticker boundary. Treat sub-second arrivals as duplicates so
+		// they neither zero a valid live rate nor manufacture a short-interval
+		// spike. The unchanged raw baseline means any real increment remains in
+		// the next accepted sample.
+		if current.lastReported != nil && reportedAt.Sub(current.lastReported.UTC()) < 500*time.Millisecond {
+			continue
 		}
-		usedDelta := receivedDelta + sentDelta
-		if receivedDelta > math.MaxUint64-sentDelta || usedDelta > math.MaxInt64 {
+		receivedDelta, sentDelta := uint64(0), uint64(0)
+		newReceived, newSent := usage.ReceivedBytes, usage.SentBytes
+		receiveBPS, sendBPS := uint64(0), uint64(0)
+		samePeriod := current.periodStart != nil && current.periodEnd != nil &&
+			current.periodStart.UTC().Equal(usage.PeriodStart.UTC()) && current.periodEnd.UTC().Equal(usage.PeriodEnd.UTC())
+		periodUnknownAfterUpgrade := !current.historyInitialized && current.periodStart == nil && current.periodEnd == nil
+		if samePeriod || periodUnknownAfterUpgrade {
+			receivedDelta = trafficCounterDelta(usage.ReceivedBytes, current.reportedReceived)
+			sentDelta = trafficCounterDelta(usage.SentBytes, current.reportedSent)
+			newReceived = saturatedStoredTrafficAdd(current.received, receivedDelta)
+			newSent = saturatedStoredTrafficAdd(current.sent, sentDelta)
+			if current.lastReported != nil {
+				receiveBPS = trafficAverageRate(receivedDelta, current.lastReported.UTC(), reportedAt)
+				sendBPS = trafficAverageRate(sentDelta, current.lastReported.UTC(), reportedAt)
+			}
+		} else {
+			// A new calendar period starts at zero on the Agent. Its first
+			// report is both the new total and the first daily increment.
+			receivedDelta, sentDelta = usage.ReceivedBytes, usage.SentBytes
+		}
+		if receivedDelta > math.MaxUint64-sentDelta {
 			return fmt.Errorf("%w: invalid traffic usage delta", ErrInvalid)
 		}
+		usedDelta := receivedDelta + sentDelta
+		if usedDelta > math.MaxInt64 {
+			return fmt.Errorf("%w: invalid traffic usage delta", ErrInvalid)
+		}
+		newUsed := saturatedStoredTrafficAdd(newReceived, newSent)
 		command, err := tx.Exec(ctx, `
 			UPDATE port_traffic_policies SET received_bytes=$3,sent_bytes=$4,used_bytes=$5,receive_bps=$6,send_bps=$7,
 				period_start=$8,period_end=$9,blocked=$10,enforcement_available=$11,enforcement_error=$12,
-				last_reported_at=$13,traffic_history_initialized=true
-			WHERE id=$1 AND agent_id=$2 AND reset_generation=$14`, usage.PolicyID, agentID, usage.ReceivedBytes, usage.SentBytes,
-			usage.UsedBytes, usage.ReceiveBPS, usage.SendBPS, usage.PeriodStart, usage.PeriodEnd,
-			usage.Blocked, usage.EnforcementAvailable, strings.TrimSpace(usage.EnforcementError), reportedAt, usage.ResetGeneration)
+				last_reported_at=$13,traffic_history_initialized=true,
+				reported_received_bytes=$15,reported_sent_bytes=$16
+			WHERE id=$1 AND agent_id=$2 AND reset_generation=$14`, usage.PolicyID, agentID, newReceived, newSent,
+			newUsed, receiveBPS, sendBPS, usage.PeriodStart, usage.PeriodEnd,
+			usage.Blocked, usage.EnforcementAvailable, strings.TrimSpace(usage.EnforcementError), reportedAt, usage.ResetGeneration,
+			usage.ReceivedBytes, usage.SentBytes)
 		if err != nil {
 			return err
 		}
@@ -508,12 +545,34 @@ func (s *Store) UpdatePortTrafficUsage(ctx context.Context, agentID string, usag
 				peak_send_bps=GREATEST(port_traffic_daily_usage.peak_send_bps,EXCLUDED.peak_send_bps),
 				sample_count=port_traffic_daily_usage.sample_count+1,last_reported_at=EXCLUDED.last_reported_at`,
 			usage.PolicyID, usage.ResetGeneration, reportedAt.Format(time.DateOnly), agentID, current.name, current.engine,
-			current.port, current.protocol, receivedDelta, sentDelta, usedDelta, usage.ReceiveBPS, usage.SendBPS, reportedAt)
+			current.port, current.protocol, receivedDelta, sentDelta, usedDelta, receiveBPS, sendBPS, reportedAt)
 		if err != nil {
 			return err
 		}
 	}
 	return tx.Commit(ctx)
+}
+
+func saturatedStoredTrafficAdd(left, right uint64) uint64 {
+	if left >= math.MaxInt64 || right > uint64(math.MaxInt64)-left {
+		return math.MaxInt64
+	}
+	return left + right
+}
+
+func trafficAverageRate(delta uint64, previous, current time.Time) uint64 {
+	elapsed := current.Sub(previous)
+	if delta == 0 || elapsed <= 0 || elapsed > 2*time.Minute {
+		return 0
+	}
+	rate := math.Round(float64(delta) / elapsed.Seconds())
+	if rate <= 0 {
+		return 0
+	}
+	if rate >= math.MaxInt64 {
+		return math.MaxInt64
+	}
+	return uint64(rate)
 }
 
 func trafficCounterDelta(current, previous uint64) uint64 {

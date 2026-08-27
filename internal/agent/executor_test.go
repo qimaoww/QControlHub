@@ -162,6 +162,8 @@ func TestOneClickInstallerMapsOnlyValidatedExistingCorePaths(t *testing.T) {
 		"existing-core-mapping.sh", "QCH_EXISTING_XRAY_CONFIG", "QCH_EXISTING_SING_BOX_CONFIG",
 		"rc-service \"$service\" status", "openrc_supervised_child_pid",
 		"QCH_SERVICE_MANAGER", "apk add --no-cache", "deploy/openrc",
+		"install_nftables", "apt-get install -y --no-install-recommends nftables",
+		"dnf install -y nftables", "zypper --non-interactive install nftables",
 	} {
 		if !strings.Contains(script, required) {
 			t.Errorf("one-click installer is missing inherited-core guard %q", required)

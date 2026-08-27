@@ -264,6 +264,157 @@ func TestOpenMigratesAppliedV21EnrollmentCiphertext(t *testing.T) {
 	}
 }
 
+func TestOpenMigratesAppliedV26TrafficColumns(t *testing.T) {
+	databaseURL := os.Getenv("QCH_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("QCH_TEST_DATABASE_URL is not configured")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	schema, err := testdb.IsolatePostgres(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("create isolated v26 schema: %v", err)
+	}
+	defer func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cleanupCancel()
+		if err := schema.Close(cleanupCtx); err != nil {
+			t.Errorf("drop isolated v26 schema: %v", err)
+		}
+	}()
+
+	setup, err := pgx.Connect(ctx, schema.URL)
+	if err != nil {
+		t.Fatalf("connect to isolated v26 schema: %v", err)
+	}
+	defer setup.Close(context.Background())
+	if _, err := setup.Exec(ctx, schemaSQL); err != nil {
+		t.Fatalf("create current schema fixture: %v", err)
+	}
+	if _, err := setup.Exec(ctx, `
+		CREATE TABLE qcontrolhub_schema_migrations (
+			version integer PRIMARY KEY CHECK (version > 0),
+			applied_at timestamptz NOT NULL DEFAULT now()
+		);
+		INSERT INTO qcontrolhub_schema_migrations (version) VALUES (26);
+		INSERT INTO agents (
+			id,name,version,os,arch,capabilities,features,labels,runtime,metrics,
+			public_key,last_seen,enrolled_at
+		) VALUES (
+			'agt_migration_v26','migration-v26','v26','linux','amd64',
+			'["sing-box"]'::jsonb,'["port-traffic-v1"]'::jsonb,'{}'::jsonb,'{}'::jsonb,'{}'::jsonb,
+			decode(repeat('26',32),'hex'),now(),now()
+		);
+		INSERT INTO port_traffic_policies (
+			id,agent_id,name,engine,port,protocol,cycle,cycle_anchor,limit_bytes,
+			auto_block,quota_enabled,discovered,traffic_history_initialized,reset_generation,
+			received_bytes,sent_bytes,used_bytes,receive_bps,send_bps,
+			blocked,enforcement_available,enforcement_error,period_start,period_end,last_reported_at,created_at,updated_at
+		) VALUES (
+			'trf_2626262626262626','agt_migration_v26','existing quota','sing-box',443,'tcp',
+			'monthly','2026-08-01',1048576,true,true,false,true,4,
+			123,198,321,12,19,false,true,'','2026-08-01','2026-09-01','2026-08-27 23:59:45+00',now(),now()
+		);
+		ALTER TABLE port_traffic_policies DROP COLUMN quota_enabled;
+		ALTER TABLE port_traffic_policies DROP COLUMN discovered;
+		ALTER TABLE port_traffic_policies DROP COLUMN traffic_history_initialized;
+		ALTER TABLE port_traffic_policies DROP COLUMN reported_received_bytes;
+		ALTER TABLE port_traffic_policies DROP COLUMN reported_sent_bytes;
+	`); err != nil {
+		t.Fatalf("restore applied v26 traffic schema drift fixture: %v", err)
+	}
+
+	dataStore, err := Open(ctx, schema.URL, true)
+	if err != nil {
+		t.Fatalf("open and migrate applied v26 traffic schema: %v", err)
+	}
+	defer func() { dataStore.Close() }()
+
+	var schemaVersion int
+	if err := dataStore.pool.QueryRow(ctx, `SELECT max(version) FROM qcontrolhub_schema_migrations`).Scan(&schemaVersion); err != nil {
+		t.Fatalf("read migrated schema version: %v", err)
+	}
+	if schemaVersion != currentSchemaVersion {
+		t.Fatalf("migrated schema version = %d, want %d", schemaVersion, currentSchemaVersion)
+	}
+	var quotaEnabled, discovered, historyInitialized, autoBlock bool
+	var limitBytes, receivedBytes, sentBytes, usedBytes, reportedReceivedBytes, reportedSentBytes int64
+	var resetGeneration int64
+	if err := dataStore.pool.QueryRow(ctx, `
+		SELECT quota_enabled,discovered,traffic_history_initialized,auto_block,
+		       limit_bytes,received_bytes,sent_bytes,used_bytes,reset_generation,
+		       reported_received_bytes,reported_sent_bytes
+		FROM port_traffic_policies WHERE id='trf_2626262626262626'
+	`).Scan(
+		&quotaEnabled, &discovered, &historyInitialized, &autoBlock,
+		&limitBytes, &receivedBytes, &sentBytes, &usedBytes, &resetGeneration,
+		&reportedReceivedBytes, &reportedSentBytes,
+	); err != nil {
+		t.Fatalf("read migrated traffic policy: %v", err)
+	}
+	if !quotaEnabled || discovered || historyInitialized || !autoBlock {
+		t.Fatalf(
+			"migrated traffic flags quota=%t discovered=%t history=%t auto_block=%t",
+			quotaEnabled, discovered, historyInitialized, autoBlock,
+		)
+	}
+	if limitBytes != 1048576 || receivedBytes != 123 || sentBytes != 198 || usedBytes != 321 || resetGeneration != 4 {
+		t.Fatalf(
+			"migrated traffic counters limit=%d received=%d sent=%d used=%d generation=%d",
+			limitBytes, receivedBytes, sentBytes, usedBytes, resetGeneration,
+		)
+	}
+	if reportedReceivedBytes != receivedBytes || reportedSentBytes != sentBytes {
+		t.Fatalf("migrated traffic baselines received=%d sent=%d", reportedReceivedBytes, reportedSentBytes)
+	}
+	periodStart := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
+	if err := dataStore.UpdatePortTrafficUsage(ctx, "agt_migration_v26", []core.PortTrafficUsage{{
+		PolicyID: "trf_2626262626262626", ResetGeneration: 4,
+		ReceivedBytes: 23, SentBytes: 98, UsedBytes: 121,
+		PeriodStart: periodStart, PeriodEnd: periodStart.AddDate(0, 1, 0), EnforcementAvailable: true,
+	}}, time.Date(2026, 8, 28, 0, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatalf("report reset Agent counters after migration: %v", err)
+	}
+	if err := dataStore.pool.QueryRow(ctx, `
+		SELECT received_bytes,sent_bytes,used_bytes,reported_received_bytes,reported_sent_bytes
+		FROM port_traffic_policies WHERE id='trf_2626262626262626'
+	`).Scan(&receivedBytes, &sentBytes, &usedBytes, &reportedReceivedBytes, &reportedSentBytes); err != nil {
+		t.Fatalf("read post-migration Agent counter reset: %v", err)
+	}
+	if receivedBytes != 146 || sentBytes != 296 || usedBytes != 442 || reportedReceivedBytes != 23 || reportedSentBytes != 98 {
+		t.Fatalf("post-migration Agent reset totals=%d/%d/%d raw=%d/%d", receivedBytes, sentBytes, usedBytes, reportedReceivedBytes, reportedSentBytes)
+	}
+
+	// schemaSQL is intentionally rerun for every future schema bump. Existing
+	// raw Agent baselines must not be overwritten by the cumulative totals on a
+	// later pass, or counter-reset protection would silently stop working.
+	if _, err := dataStore.pool.Exec(ctx, `
+		UPDATE port_traffic_policies
+		SET received_bytes=1123,sent_bytes=2198,used_bytes=3321,
+		    reported_received_bytes=23,reported_sent_bytes=98
+		WHERE id='trf_2626262626262626'
+	`); err != nil {
+		t.Fatalf("prepare repeated traffic migration: %v", err)
+	}
+	if _, err := dataStore.pool.Exec(ctx, `DELETE FROM qcontrolhub_schema_migrations WHERE version=$1`, currentSchemaVersion); err != nil {
+		t.Fatalf("rewind repeated traffic migration ledger: %v", err)
+	}
+	dataStore.Close()
+	dataStore, err = Open(ctx, schema.URL, true)
+	if err != nil {
+		t.Fatalf("repeat traffic migration: %v", err)
+	}
+	if err := dataStore.pool.QueryRow(ctx, `
+		SELECT reported_received_bytes,reported_sent_bytes
+		FROM port_traffic_policies WHERE id='trf_2626262626262626'
+	`).Scan(&reportedReceivedBytes, &reportedSentBytes); err != nil {
+		t.Fatalf("read repeated traffic migration baselines: %v", err)
+	}
+	if reportedReceivedBytes != 23 || reportedSentBytes != 98 {
+		t.Fatalf("repeated traffic migration changed raw baselines to %d/%d", reportedReceivedBytes, reportedSentBytes)
+	}
+}
+
 func TestConcurrentOpenSkipsAppliedSchemaDuringCRUD(t *testing.T) {
 	databaseURL := os.Getenv("QCH_TEST_DATABASE_URL")
 	if databaseURL == "" {

@@ -132,17 +132,24 @@ func TestManagedConfigurationAccessRepairsExistingAndNewFiles(t *testing.T) {
 	if err := os.WriteFile(configPath, []byte("old"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-
 	const serviceGID = 65534
+	if err := os.Chown(managedRoot, 0, serviceGID); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(managedRoot, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	rootMetadata := statFileMetadata(t, managedRoot)
+
 	metadata, err := prepareManagedConfigurationAccessWithGID(managedRoot, configPath, serviceGID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range []string{managedRoot, directory} {
-		got := statFileMetadata(t, path)
-		if got.uid != 0 || got.gid != serviceGID || got.mode != 0o750 {
-			t.Fatalf("managed directory metadata for %s = %+v", path, got)
-		}
+	if got := statFileMetadata(t, managedRoot); got != rootMetadata {
+		t.Fatalf("managed root metadata changed from %+v to %+v", rootMetadata, got)
+	}
+	if got := statFileMetadata(t, directory); got.uid != 0 || got.gid != serviceGID || got.mode != 0o750 {
+		t.Fatalf("managed engine directory metadata = %+v", got)
 	}
 	got := statFileMetadata(t, configPath)
 	if got.uid != 0 || got.gid != serviceGID || got.mode != 0o640 {

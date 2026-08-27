@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -246,6 +247,9 @@ func TestClientEnrollAdvertisesCoreLogsPerServiceManager(t *testing.T) {
 		if got := stringInSlice(core.AgentFeatureCoreLogStatus, captured.Features); got != wantsCoreLogs {
 			t.Fatalf("core-log status advertised = %v; want %v (features: %v)", got, wantsCoreLogs, captured.Features)
 		}
+		if captured.OS == "" || captured.Arch != runtime.GOARCH {
+			t.Fatalf("enrollment platform = %q/%q; want detected OS/%q", captured.OS, captured.Arch, runtime.GOARCH)
+		}
 		if !stringInSlice(core.AgentFeatureSelfUpgrade, captured.Features) || !stringInSlice(core.AgentFeaturePortTraffic, captured.Features) {
 			t.Fatalf("self-upgrade or port-traffic feature missing: %v", captured.Features)
 		}
@@ -278,6 +282,9 @@ func TestClientHeartbeatAdvertisesCoreLogsPerServiceManager(t *testing.T) {
 		message := <-outgoing
 		if message.Heartbeat == nil {
 			t.Fatal("heartbeat message has no payload")
+		}
+		if message.Heartbeat.OS == "" || message.Heartbeat.Arch != runtime.GOARCH {
+			t.Fatalf("heartbeat platform = %q/%q; want detected OS/%q", message.Heartbeat.OS, message.Heartbeat.Arch, runtime.GOARCH)
 		}
 		if got := stringInSlice(core.AgentFeatureCoreLogs, message.Heartbeat.Features); got != wantsCoreLogs {
 			t.Fatalf("heartbeat core-logs advertised = %v; want %v (features: %v)", got, wantsCoreLogs, message.Heartbeat.Features)

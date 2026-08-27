@@ -70,6 +70,19 @@ fi
 exit 0
 EOF
 
+cat > "$fake_bin/apt-get" <<'EOF'
+#!/bin/sh
+set -eu
+printf '%s\n' "$*" >> "$QCH_PACKAGE_LOG"
+case " $* " in
+  *' install '*' nftables '*)
+    printf '%s\n' '#!/bin/sh' 'exit 0' > "$QCH_NFT"
+    chmod 0755 "$QCH_NFT"
+    ;;
+esac
+exit 0
+EOF
+
 # Keep the core service account bootstrap on the "already exists" path so the
 # test never creates a real system account or group.
 cat > "$fake_bin/id" <<'EOF'
@@ -90,12 +103,14 @@ for helper_name in groupadd useradd; do
   printf '%s\n' '#!/bin/sh' 'exit 0' > "$fake_bin/$helper_name"
   chmod 0755 "$fake_bin/$helper_name"
 done
-chmod 0755 "$fake_bin/curl" "$fake_bin/systemctl" "$fake_bin/id" "$fake_bin/getent"
+chmod 0755 "$fake_bin/curl" "$fake_bin/systemctl" "$fake_bin/apt-get" "$fake_bin/id" "$fake_bin/getent"
 
 export QCH_ASSET_ROOT="$repo_root"
 export QCH_SYSTEMCTL_LOG="$test_root/systemctl.log"
+export QCH_PACKAGE_LOG="$test_root/package.log"
 export QCH_CURL="$fake_bin/curl"
 export QCH_SYSTEMCTL="$fake_bin/systemctl"
+export QCH_NFT="$fake_bin/nft"
 export QCH_SERVICE_MANAGER=systemd
 export QCH_AGENT_BIN_DIR="$test_root/opt/binary"
 export QCH_AGENT_BIN_LINK="$test_root/opt/qagent"
@@ -115,6 +130,9 @@ token="test-enrollment-token"
 
 echo '== first install (fresh node) =='
 sh "$installer" "$control" "$token" > "$test_root/first.log"
+[ -x "$QCH_NFT" ] || { printf '%s\n' 'first install: nftables executable was not installed' >&2; exit 1; }
+grep -q '^update -qq$' "$QCH_PACKAGE_LOG" || { printf '%s\n' 'first install: APT metadata was not updated for nftables' >&2; exit 1; }
+grep -q '^install -y --no-install-recommends nftables$' "$QCH_PACKAGE_LOG" || { printf '%s\n' 'first install: nftables APT package was not installed' >&2; exit 1; }
 [ -f "$QCH_AGENT_ENV_FILE" ] || { printf '%s\n' 'first install: agent env missing' >&2; exit 1; }
 grep -q '^QCH_AGENT_LABELS=region=cn-east$' "$QCH_AGENT_ENV_FILE" || { printf '%s\n' 'first install: default label missing' >&2; exit 1; }
 grep -q '^QCH_AGENT_NAME=' "$QCH_AGENT_ENV_FILE" || { printf '%s\n' 'first install: agent name missing' >&2; exit 1; }

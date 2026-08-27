@@ -227,14 +227,20 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 		t.Fatalf("persisted traffic history status=%d body=%+v", usageResponse.StatusCode, history)
 	}
 	// A high-frequency metrics-only push must refresh the live snapshot
-	// without clobbering version, runtime, or features from the heartbeat.
+	// and traffic counters without clobbering version, runtime, or features
+	// from the heartbeat.
+	time.Sleep(600 * time.Millisecond)
 	metricsPush := core.WireMessage{Type: core.WireMetrics, Metrics: &core.HostMetrics{
 		CPUAvailable: true, CPUPercent: 42.5,
 		MemoryAvailable: true, MemoryUsedBytes: 1 << 30, MemoryTotalBytes: 4 << 30,
 		DiskAvailable: true, DiskUsedBytes: 2 << 30, DiskTotalBytes: 16 << 30,
 		NetworkAvailable: true, NetworkRXBytes: 2000, NetworkTXBytes: 900, NetworkRXBPS: 300, NetworkTXBPS: 120,
 		ObservedPublicIP: "10.0.0.8",
-	}}
+	}, TrafficUsage: []core.PortTrafficUsage{{
+		PolicyID: trafficPolicy.ID, ResetGeneration: trafficPolicy.ResetGeneration,
+		ReceivedBytes: 4096, SentBytes: 2048, UsedBytes: 6144,
+		PeriodStart: periodStart, PeriodEnd: periodEnd, EnforcementAvailable: true,
+	}}}
 	if err := wsjson.Write(ctx, connection, metricsPush); err != nil {
 		t.Fatalf("write metrics push: %v", err)
 	}
@@ -251,6 +257,16 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 		}
 		if attempt == 49 {
 			t.Fatalf("metrics push was not stored: agent=%+v error=%v", pushed, pushErr)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	for attempt := 0; attempt < 50; attempt++ {
+		policies, listErr := dataStore.AgentPortTrafficPolicies(ctx, enrolled.AgentID)
+		if listErr == nil && len(policies) == 1 && policies[0].UsedBytes == 6144 && policies[0].ReceiveBPS > 0 && policies[0].SendBPS > 0 {
+			break
+		}
+		if attempt == 49 {
+			t.Fatalf("metrics traffic push was not stored: policies=%+v error=%v", policies, listErr)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
