@@ -318,6 +318,8 @@ func TestOpenMigratesAppliedV26TrafficColumns(t *testing.T) {
 		ALTER TABLE port_traffic_policies DROP COLUMN quota_enabled;
 		ALTER TABLE port_traffic_policies DROP COLUMN discovered;
 		ALTER TABLE port_traffic_policies DROP COLUMN traffic_history_initialized;
+		ALTER TABLE port_traffic_policies DROP COLUMN reported_received_bytes;
+		ALTER TABLE port_traffic_policies DROP COLUMN reported_sent_bytes;
 	`); err != nil {
 		t.Fatalf("restore applied v26 traffic schema drift fixture: %v", err)
 	}
@@ -336,15 +338,17 @@ func TestOpenMigratesAppliedV26TrafficColumns(t *testing.T) {
 		t.Fatalf("migrated schema version = %d, want %d", schemaVersion, currentSchemaVersion)
 	}
 	var quotaEnabled, discovered, historyInitialized, autoBlock bool
-	var limitBytes, receivedBytes, sentBytes, usedBytes int64
+	var limitBytes, receivedBytes, sentBytes, usedBytes, reportedReceivedBytes, reportedSentBytes int64
 	var resetGeneration int64
 	if err := dataStore.pool.QueryRow(ctx, `
 		SELECT quota_enabled,discovered,traffic_history_initialized,auto_block,
-		       limit_bytes,received_bytes,sent_bytes,used_bytes,reset_generation
+		       limit_bytes,received_bytes,sent_bytes,used_bytes,reset_generation,
+		       reported_received_bytes,reported_sent_bytes
 		FROM port_traffic_policies WHERE id='trf_migration_v26'
 	`).Scan(
 		&quotaEnabled, &discovered, &historyInitialized, &autoBlock,
 		&limitBytes, &receivedBytes, &sentBytes, &usedBytes, &resetGeneration,
+		&reportedReceivedBytes, &reportedSentBytes,
 	); err != nil {
 		t.Fatalf("read migrated traffic policy: %v", err)
 	}
@@ -359,6 +363,9 @@ func TestOpenMigratesAppliedV26TrafficColumns(t *testing.T) {
 			"migrated traffic counters limit=%d received=%d sent=%d used=%d generation=%d",
 			limitBytes, receivedBytes, sentBytes, usedBytes, resetGeneration,
 		)
+	}
+	if reportedReceivedBytes != receivedBytes || reportedSentBytes != sentBytes {
+		t.Fatalf("migrated traffic baselines received=%d sent=%d", reportedReceivedBytes, reportedSentBytes)
 	}
 }
 

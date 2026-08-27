@@ -472,6 +472,7 @@ type WireMessage struct {
 	Type            string               `json:"type"`
 	Heartbeat       *HeartbeatRequest    `json:"heartbeat,omitempty"`
 	Metrics         *HostMetrics         `json:"metrics,omitempty"`
+	TrafficUsage    []PortTrafficUsage   `json:"traffic_usage,omitempty"`
 	Task            *Task                `json:"task,omitempty"`
 	Result          *TaskResultEnvelope  `json:"result,omitempty"`
 	CoreLogs        *CoreLogBatch        `json:"core_logs,omitempty"`

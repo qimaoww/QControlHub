@@ -71,7 +71,8 @@ func TestPortTrafficPolicyLifecycleWithPostgreSQL(t *testing.T) {
 		t.Fatalf("reported policies = %+v, %v", policies, err)
 	}
 	daily, err := dataStore.ListPortTrafficDailyUsage(ctx, agent.ID, created.ID, reportedAt)
-	if err != nil || len(daily) != 1 || daily[0].UsedBytes != 7<<30 || daily[0].ReceivedBytes != 4<<30 || daily[0].SentBytes != 3<<30 || daily[0].PeakReceiveBPS != 2400 || daily[0].SampleCount != 2 {
+	wantAverageRate := uint64(math.Round(float64(1<<30) / time.Minute.Seconds()))
+	if err != nil || len(daily) != 1 || daily[0].UsedBytes != 7<<30 || daily[0].ReceivedBytes != 4<<30 || daily[0].SentBytes != 3<<30 || daily[0].PeakReceiveBPS != wantAverageRate || daily[0].PeakSendBPS != wantAverageRate || daily[0].SampleCount != 2 {
 		t.Fatalf("daily usage = %+v, %v", daily, err)
 	}
 
@@ -105,6 +106,64 @@ func TestPortTrafficPolicyLifecycleWithPostgreSQL(t *testing.T) {
 	daily, err = dataStore.ListPortTrafficDailyUsage(ctx, agent.ID, created.ID, reportedAt)
 	if err != nil || len(daily) != 1 || daily[0].Port != 443 || daily[0].UsedBytes != 7<<30 {
 		t.Fatalf("deleted policy history was not preserved: %+v, %v", daily, err)
+	}
+}
+
+func TestPortTrafficTotalsSurviveAgentCounterRestartWithPostgreSQL(t *testing.T) {
+	databaseURL := os.Getenv("QCH_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("QCH_TEST_DATABASE_URL is not configured")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	dataStore, err := Open(ctx, databaseURL, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dataStore.Close()
+	agent, enrollmentID := enrollTaskTestAgent(t, ctx, dataStore)
+	defer cleanupTaskTestAgent(dataStore, agent.ID, enrollmentID)
+
+	policy, err := dataStore.CreatePortTrafficPolicy(ctx, core.PortTrafficPolicyRequest{
+		AgentID: agent.ID, Name: "restart-safe totals", Engine: core.EngineMihomo, Port: 443,
+		Protocol: core.TrafficProtocolBoth, Cycle: core.TrafficCycleMonthly,
+		CycleAnchor: time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC), LimitBytes: 100 << 30,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	periodStart := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
+	reportedAt := time.Date(2026, 8, 28, 0, 0, 0, 0, time.UTC)
+	report := func(received, sent uint64, at time.Time) {
+		t.Helper()
+		if err := dataStore.UpdatePortTrafficUsage(ctx, agent.ID, []core.PortTrafficUsage{{
+			PolicyID: policy.ID, ResetGeneration: policy.ResetGeneration,
+			ReceivedBytes: received, SentBytes: sent, UsedBytes: received + sent,
+			PeriodStart: periodStart, PeriodEnd: periodStart.AddDate(0, 1, 0), EnforcementAvailable: true,
+		}}, at); err != nil {
+			t.Fatalf("report traffic usage: %v", err)
+		}
+	}
+	report(1<<30, 2<<30, reportedAt)
+	report(2<<30, 3<<30, reportedAt.Add(15*time.Second))
+	// Simulate a lost Agent state file or rebuilt local counter. The new raw
+	// counters are smaller, but the control-plane totals must keep increasing.
+	report(256<<10, 512<<10, reportedAt.Add(30*time.Second))
+
+	policies, err := dataStore.AgentPortTrafficPolicies(ctx, agent.ID)
+	wantReceived, wantSent := uint64(2<<30)+uint64(256<<10), uint64(3<<30)+uint64(512<<10)
+	if err != nil || len(policies) != 1 || policies[0].ReceivedBytes != wantReceived || policies[0].SentBytes != wantSent || policies[0].UsedBytes != wantReceived+wantSent {
+		t.Fatalf("restart-safe totals = %+v, %v; want received=%d sent=%d", policies, err, wantReceived, wantSent)
+	}
+	if policies[0].ReceiveBPS != uint64(math.Round(float64(256<<10)/15)) ||
+		policies[0].SendBPS != uint64(math.Round(float64(512<<10)/15)) {
+		t.Fatalf("restart interval rates = %d/%d", policies[0].ReceiveBPS, policies[0].SendBPS)
+	}
+	var reportedReceived, reportedSent uint64
+	if err := dataStore.pool.QueryRow(ctx, `
+		SELECT reported_received_bytes,reported_sent_bytes FROM port_traffic_policies WHERE id=$1`, policy.ID,
+	).Scan(&reportedReceived, &reportedSent); err != nil || reportedReceived != 256<<10 || reportedSent != 512<<10 {
+		t.Fatalf("raw Agent baseline = %d/%d, %v", reportedReceived, reportedSent, err)
 	}
 }
 
@@ -278,6 +337,28 @@ func TestTrafficCounterDelta(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			if got := trafficCounterDelta(test.current, test.previous); got != test.want {
 				t.Fatalf("trafficCounterDelta(%d,%d) = %d, want %d", test.current, test.previous, got, test.want)
+			}
+		})
+	}
+}
+
+func TestTrafficAverageRate(t *testing.T) {
+	base := time.Date(2026, 8, 28, 0, 0, 0, 0, time.UTC)
+	for _, test := range []struct {
+		name    string
+		delta   uint64
+		current time.Time
+		want    uint64
+	}{
+		{name: "regular report", delta: 1500, current: base.Add(15 * time.Second), want: 100},
+		{name: "round sub-byte rate", delta: 8, current: base.Add(15 * time.Second), want: 1},
+		{name: "no traffic", current: base.Add(15 * time.Second), want: 0},
+		{name: "stale reconnect", delta: 1 << 30, current: base.Add(3 * time.Minute), want: 0},
+		{name: "non increasing time", delta: 100, current: base, want: 0},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := trafficAverageRate(test.delta, base, test.current); got != test.want {
+				t.Fatalf("trafficAverageRate() = %d; want %d", got, test.want)
 			}
 		})
 	}

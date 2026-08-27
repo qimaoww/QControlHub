@@ -569,7 +569,7 @@ func (c *Client) queueMetrics(ctx context.Context, outgoing chan<- core.WireMess
 		return nil
 	}
 	metrics.PublicIPv4, metrics.PublicIPv6, metrics.PublicIPv4Source, metrics.PublicIPv6Source = c.publicIP.SnapshotWithSources()
-	message := core.WireMessage{Type: core.WireMetrics, Metrics: &metrics}
+	message := core.WireMessage{Type: core.WireMetrics, Metrics: &metrics, TrafficUsage: c.traffic.Snapshot()}
 	select {
 	case outgoing <- message:
 		return nil

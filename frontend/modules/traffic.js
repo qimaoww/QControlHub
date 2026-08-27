@@ -41,6 +41,26 @@ export function mergeVisibleTrafficCardOrder(allKeys = [], visibleKeys = []) {
   return merged;
 }
 
+// The stored rate describes the last complete Agent report interval. It is no
+// longer live once that Agent is offline or the next report is overdue.
+export function trafficRateForDisplay(
+  value,
+  lastReportedAt,
+  agentStatus,
+  now = Date.now(),
+) {
+  const reportedAt = Date.parse(lastReportedAt || "");
+  const age = now - reportedAt;
+  if (
+    agentStatus !== "online" ||
+    !Number.isFinite(reportedAt) ||
+    age < -5000 ||
+    age > 45_000
+  )
+    return 0;
+  return Number(value || 0);
+}
+
 export function mergeTrafficPorts(policies = [], endpoints = []) {
   const monitored = new Set(policies.map(trafficPortIdentity));
   const discovered = new Map();
@@ -388,13 +408,15 @@ export function installTraffic(ctx) {
       const [status, tone] = policyStatus(policy, agent);
       const quotaEnabled = policy.quota_enabled !== false;
       const usedPercent = percent(policy.used_bytes, policy.limit_bytes);
+      const receiveBPS = trafficRateForDisplay(policy.receive_bps, policy.last_reported_at, agent?.status);
+      const sendBPS = trafficRateForDisplay(policy.send_bps, policy.last_reported_at, agent?.status);
       const period = policy.period_start && policy.period_end
         ? `${dateInputValue(policy.period_start)} 至 ${dateInputValue(policy.period_end)}`
         : `从 ${dateInputValue(policy.cycle_anchor)} 开始${cycleName(policy.cycle)}重置`;
       return `<article class="traffic-policy-card ${policy.blocked ? "is-blocked" : ""}" id="traffic-${esc(policy.id)}" data-refresh-key="traffic-policy-${esc(policy.id)}" data-traffic-agent-card="${esc(policy.agent_id)}" data-traffic-card-key="${esc(trafficCardIdentity(item))}">
         <header><div class="traffic-card-identity"><span class="engine-badge ${esc(policy.engine)}">${esc(engineName(policy.engine))}</span><span><strong>${esc(policy.name)}</strong><small>${esc(agent?.name || policy.agent_id)}<i>·</i><code>:${esc(policy.port)}</code><i>·</i>${esc(protocolName(policy.protocol))}</small></span></div><span class="traffic-card-controls"><span class="traffic-policy-status ${tone}"><i></i>${esc(status)}</span><span class="node-card-grip traffic-card-grip" title="拖动调整顺序" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 6h.01M9 12h.01M9 18h.01M15 6h.01M15 12h.01M15 18h.01"/></svg></span></span></header>
         <section class="traffic-card-quota ${quotaEnabled ? "" : "is-monitor-only"}"><header><span>${quotaEnabled ? "当前周期用量" : "本月累计流量"}</span><b>${quotaEnabled ? `${usedPercent.toFixed(1)}%` : "未设置配额"}</b></header><div><strong>${bytes(policy.used_bytes)}</strong>${quotaEnabled ? `<span>/ ${bytes(policy.limit_bytes)}</span>` : ""}</div>${quotaEnabled ? `<progress max="100" value="${usedPercent}"></progress>` : ""}<small>${esc(period)}</small></section>
-        <section class="traffic-card-transfer"><div><i class="received" aria-hidden="true">↓</i><span><small>接收流量</small><strong>${bytes(policy.received_bytes)}</strong></span><em>${rate(policy.receive_bps)}</em></div><div><i class="sent" aria-hidden="true">↑</i><span><small>发送流量</small><strong>${bytes(policy.sent_bytes)}</strong></span><em>${rate(policy.send_bps)}</em></div></section>
+        <section class="traffic-card-transfer"><div><i class="received" aria-hidden="true">↓</i><span><small>接收流量</small><strong>${bytes(policy.received_bytes)}</strong></span><em>${rate(receiveBPS)}</em></div><div><i class="sent" aria-hidden="true">↑</i><span><small>发送流量</small><strong>${bytes(policy.sent_bytes)}</strong></span><em>${rate(sendBPS)}</em></div></section>
         ${policy.enforcement_error ? `<p class="traffic-error">${esc(policy.enforcement_error)}</p>` : ""}
         <footer><span class="traffic-card-sync"><i class="${policy.last_reported_at ? "ok" : ""}"></i>${policy.last_reported_at ? `${ago(policy.last_reported_at)}更新` : "等待 Agent 上报"}</span>${can("traffic.manage") ? `<div class="traffic-card-actions"><button class="button small" type="button" data-traffic-reset="${esc(policy.id)}">清零</button><button class="button small" type="button" data-traffic-edit-open="${esc(policy.id)}">${quotaEnabled ? "编辑配额" : "设置配额"}</button></div>` : ""}</footer>${can("traffic.manage") ? `<dialog class="traffic-edit-dialog" data-traffic-edit-dialog="${esc(policy.id)}" aria-labelledby="traffic-edit-title-${esc(policy.id)}"><header><span class="traffic-edit-icon" aria-hidden="true">✎</span><div><p class="eyebrow">端口配额</p><h2 id="traffic-edit-title-${esc(policy.id)}">${quotaEnabled ? "编辑" : "设置"} ${esc(policy.name)} 的配额</h2><p>流量统计不会因配额变更而停止 · ${esc(agent?.name || policy.agent_id)} :${esc(policy.port)}</p></div><button class="deploy-command-close" type="button" data-traffic-edit-close aria-label="关闭编辑弹窗">×</button></header><form data-traffic-edit-form="${esc(policy.id)}"><div class="traffic-edit-body">${policyFields(policy, [agent].filter(Boolean), `edit-${policy.id}`)}</div><footer>${quotaEnabled ? `<button class="button small danger-button" type="button" data-traffic-delete="${esc(policy.id)}">取消配额</button>` : "<span></span>"}<span></span><button class="button" type="button" data-traffic-edit-close>取消</button><button class="button primary" type="submit">保存配额</button></footer></form></dialog>` : ""}
       </article>`;
@@ -420,7 +442,7 @@ export function installTraffic(ctx) {
   const poller = createPoller({
     run: () => traffic({ background: true }),
     isActive: () => state.route === "traffic",
-    delay: () => 5000,
+    delay: () => 2000,
     setTimer,
     clearTimer,
   });

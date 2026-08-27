@@ -44,7 +44,7 @@ type storeExecutor interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }
 
-const currentSchemaVersion = 27
+const currentSchemaVersion = 28
 
 func Open(ctx context.Context, databaseURL string, allowInsecureRemote bool) (*Store, error) {
 	return OpenWithConfigKey(ctx, databaseURL, allowInsecureRemote, "")
@@ -1969,6 +1969,8 @@ CREATE TABLE IF NOT EXISTS port_traffic_policies (
     reset_generation bigint NOT NULL DEFAULT 1 CHECK (reset_generation > 0),
     received_bytes bigint NOT NULL DEFAULT 0 CHECK (received_bytes >= 0),
     sent_bytes bigint NOT NULL DEFAULT 0 CHECK (sent_bytes >= 0),
+	reported_received_bytes bigint NOT NULL DEFAULT 0 CHECK (reported_received_bytes >= 0),
+	reported_sent_bytes bigint NOT NULL DEFAULT 0 CHECK (reported_sent_bytes >= 0),
     used_bytes bigint NOT NULL DEFAULT 0 CHECK (used_bytes >= 0),
     receive_bps bigint NOT NULL DEFAULT 0 CHECK (receive_bps >= 0),
     send_bps bigint NOT NULL DEFAULT 0 CHECK (send_bps >= 0),
@@ -1986,6 +1988,13 @@ ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS auto_block boolean NO
 ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS quota_enabled boolean NOT NULL DEFAULT true;
 ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS discovered boolean NOT NULL DEFAULT false;
 ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS traffic_history_initialized boolean NOT NULL DEFAULT false;
+ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS reported_received_bytes bigint NOT NULL DEFAULT 0;
+ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS reported_sent_bytes bigint NOT NULL DEFAULT 0;
+UPDATE port_traffic_policies SET reported_received_bytes=received_bytes,reported_sent_bytes=sent_bytes;
+ALTER TABLE port_traffic_policies DROP CONSTRAINT IF EXISTS port_traffic_policies_reported_received_bytes_check;
+ALTER TABLE port_traffic_policies ADD CONSTRAINT port_traffic_policies_reported_received_bytes_check CHECK (reported_received_bytes >= 0);
+ALTER TABLE port_traffic_policies DROP CONSTRAINT IF EXISTS port_traffic_policies_reported_sent_bytes_check;
+ALTER TABLE port_traffic_policies ADD CONSTRAINT port_traffic_policies_reported_sent_bytes_check CHECK (reported_sent_bytes >= 0);
 CREATE INDEX IF NOT EXISTS port_traffic_policies_agent_idx ON port_traffic_policies(agent_id,port);
 
 CREATE TABLE IF NOT EXISTS port_traffic_daily_usage (

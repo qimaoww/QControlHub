@@ -23,7 +23,7 @@ import (
 
 const (
 	trafficTableName       = "qcontrolhub"
-	trafficCollectionEvery = 2 * time.Second
+	trafficCollectionEvery = time.Second
 	trafficStateMaxBytes   = 2 << 20
 )
 

@@ -52,6 +52,7 @@ import {
   mergeTrafficPorts,
   orderTrafficItems,
   resetTrafficCreateForm,
+  trafficRateForDisplay,
 } from "./modules/traffic.js";
 import { createLatestRenderScheduler } from "./modules/refresh.js";
 
@@ -76,6 +77,23 @@ assert.notEqual(
     { id: "new-node", capabilities: [] },
   ]),
   "Agent structure signatures detect newly enrolled nodes",
+);
+
+const trafficRateNow = Date.parse("2026-08-28T00:00:30Z");
+assert.equal(
+  trafficRateForDisplay(4096, "2026-08-28T00:00:15Z", "online", trafficRateNow),
+  4096,
+  "a fresh online traffic rate remains visible",
+);
+assert.equal(
+  trafficRateForDisplay(4096, "2026-08-28T00:00:15Z", "offline", trafficRateNow),
+  0,
+  "an offline Agent never keeps a stale traffic rate visible",
+);
+assert.equal(
+  trafficRateForDisplay(4096, "2026-08-27T23:59:00Z", "online", trafficRateNow),
+  0,
+  "an old traffic sample decays to zero",
 );
 
 const coreLogFilterFixture = [
