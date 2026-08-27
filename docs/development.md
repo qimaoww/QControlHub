@@ -25,7 +25,7 @@ make dev-up
 docker compose ps
 ```
 
-`make dev-up` 通过当前 shell 临时传入 `QCH_BEHIND_TLS_PROXY=false` 和 `QCH_ALLOW_INSECURE_HTTP=true`，使回环地址上的 HTTP 登录可以工作。它不会改写 `.env`。访问 `http://127.0.0.1:8080`，管理员令牌位于权限为 `0600` 的 `.env`。
+`make init-env` 只显示一次新管理员 token，请立即保存到开发用密码管理器；`.env` 仅保存 SHA-256 摘要，配置加密 keyring 位于被 Git 忽略的 `.secrets` 目录。`make dev-up` 通过当前 shell 临时传入 `QCH_BEHIND_TLS_PROXY=false` 和 `QCH_ALLOW_INSECURE_HTTP=true`，使回环地址上的 HTTP 登录可以工作，并通过生成的只读文件挂载向控制面提供 keyring。访问地址为 `http://127.0.0.1:8080`。
 
 Web 控制台发布到 `QCH_BIND_ADDRESS`，PostgreSQL 单独发布到
 `QCH_DATABASE_BIND_ADDRESS`；两者默认都是 `127.0.0.1`。即使为了局域网调试而把

@@ -29,19 +29,20 @@ import (
 )
 
 type Config struct {
-	AdminToken      string
-	OperatorTokens  []string
-	AuditorTokens   []string
-	ReadonlyTokens  []string
-	AllowedOrigins  []string
-	SecureTransport bool
-	TrustedProxies  []*net.IPNet
-	AgentBinary     []byte
-	AgentVersion    string
-	AgentInstaller  []byte
-	WebhookSecret   string
-	PublicIPProbe   core.PublicIPProbeConfig
-	SessionTTL      time.Duration
+	AdminToken       string
+	AdminTokenDigest [32]byte
+	OperatorTokens   []string
+	AuditorTokens    []string
+	ReadonlyTokens   []string
+	AllowedOrigins   []string
+	SecureTransport  bool
+	TrustedProxies   []*net.IPNet
+	AgentBinary      []byte
+	AgentVersion     string
+	AgentInstaller   []byte
+	WebhookSecret    string
+	PublicIPProbe    core.PublicIPProbeConfig
+	SessionTTL       time.Duration
 }
 
 type Server struct {
@@ -93,7 +94,11 @@ func New(dataStore *store.Store, config Config) *Server {
 			origins[origin] = struct{}{}
 		}
 	}
-	roleTokens := map[[32]byte]tokenPrincipal{sha256.Sum256([]byte(config.AdminToken)): {Role: core.RoleAdmin, Permissions: core.AllPermissions()}}
+	adminTokenDigest := config.AdminTokenDigest
+	if adminTokenDigest == ([32]byte{}) {
+		adminTokenDigest = sha256.Sum256([]byte(config.AdminToken))
+	}
+	roleTokens := map[[32]byte]tokenPrincipal{adminTokenDigest: {Role: core.RoleAdmin, Permissions: core.AllPermissions()}}
 	for _, token := range config.OperatorTokens {
 		if token = strings.TrimSpace(token); token != "" {
 			roleTokens[sha256.Sum256([]byte(token))] = tokenPrincipal{Role: core.RoleUser, Permissions: legacyOperatorPermissions()}

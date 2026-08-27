@@ -24,13 +24,13 @@ bash <(curl -fsSL "https://raw.githubusercontent.com/qimaoww/qcontrolhub/main/de
 bash <(curl -fsSL "https://raw.githubusercontent.com/qimaoww/qcontrolhub/main/deploy/quick-start.sh") -m external
 ```
 
-部署完成后，脚本会显示访问地址、管理员令牌、`.env` 路径以及停止服务和查看日志的命令。请立即把 PostgreSQL 密码、管理员令牌和配置加密密钥保存到密码管理器，并确认 `.env` 权限为 `0600`。重复执行默认复用现有 `.env`，只补齐缺失配置；需要轮换应用密钥时运行：
+部署完成后，脚本会显示访问地址、仅本次可见的管理员 token、`.env` 路径、密钥目录以及停止服务和查看日志的命令。请立即把管理员 token 保存到密码管理器：脚本不会把原文写入磁盘，`.env` 只保存 `QCH_ADMIN_TOKEN_SHA256`。配置加密 keyring 位于宿主机权限为 `0700` 的 `.secrets` 目录，通过生成的 `docker-compose.secrets.yml` 只读挂载，不会进入 `.env` 或容器环境。重复执行默认复用现有摘要和 keyring；需要轮换管理员 token 与应用密钥时运行：
 
 ```bash
 bash <(curl -fsSL "https://raw.githubusercontent.com/qimaoww/qcontrolhub/main/deploy/quick-start.sh") -m bundled -f
 ```
 
-`-f` 会先备份现有 `.env`，再生成新的当前应用密钥；数据库密码保持不变。原 `QCH_CONFIG_ENCRYPTION_KEY` 会按新到旧顺序写入 `QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS`，已有条目不会丢失，因此旧密文仍可读取；确认旧数据已迁移或删除后再清理旧密钥。
+`-f` 会生成并仅显示一次新的管理员 token，同时轮换当前应用密钥；数据库密码保持不变。脚本会在私有密钥目录中备份 keyring，并把原配置加密密钥按新到旧顺序加入 previous-key 文件，因此旧密文仍可读取；确认旧数据已迁移或删除后再清理旧密钥。`.env` 备份会清空旧版明文 token 和配置密钥字段。
 
 部署后检查 `.env` 中的生产设置：
 
@@ -48,10 +48,14 @@ QCH_PORT=8080
 QCH_DATABASE_BIND_ADDRESS=127.0.0.1
 POSTGRES_PORT=5432
 QCH_CORS_ORIGINS=https://qcontrolhub.example.com
-# 可恢复添加节点命令必须配置；同时保护配置正文与修订（请使用独立高熵 secret）。
-# 旧明文行仍可透明读取，新写入自动加密；密钥丢失将无法解密，务必备份。
-QCH_CONFIG_ENCRYPTION_KEY=replace-with-a-long-random-secret
+# 管理员 token 原文只在密码管理器中保存；控制面读取不可逆摘要。
+QCH_ADMIN_TOKEN=
+QCH_ADMIN_TOKEN_SHA256=replace-with-64-character-sha256
+# 原始配置密钥位于 .secrets，不进入环境；密钥丢失将无法解密，务必备份。
+QCH_CONFIG_ENCRYPTION_KEY=
 QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS=
+QCH_CONFIG_ENCRYPTION_KEY_SECRET_SOURCE=.secrets/config-encryption-key
+QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS_SECRET_SOURCE=.secrets/config-encryption-previous-keys
 ```
 
 `QCH_CORS_ORIGINS` 仅在浏览器从另一个 origin 调用 JSON API 时需要；使用同域 Web 控制台可以留空。官方拓扑包含宿主 Nginx 与 `qcontrol-web` 两跳代理：控制面直接看到固定的 `QCH_WEB_PROXY_ADDRESS`，转发链中真实客户端右侧还包含固定的 `QCH_CONTROL_PROXY_GATEWAY`。`QCH_TRUSTED_PROXY_CIDRS` 必须只列出这两个精确 `/32` 端点，控制面才能从右向左安全剥离完整代理链，同时忽略客户端伪造在链左侧的值。若网段冲突，subnet、gateway、两个容器地址及信任列表必须一起修改，禁止改成整个私网或任意来源网段。若手工设置 PostgreSQL 密码，必须对 URL 保留字符进行百分号编码；部署脚本生成的十六进制密码可直接用于 Compose URL。
