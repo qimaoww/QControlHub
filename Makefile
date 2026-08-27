@@ -35,6 +35,7 @@ installer-test:
 
 quick-start-test:
 	bash deploy/tests/quick-start-env.sh
+	bash deploy/tests/quick-start-bootstrap.sh
 
 web-image-test:
 	docker build --target qcontrol-web --build-arg VERSION='$(VERSION)' .
@@ -50,18 +51,27 @@ init-env:
 	@umask 077; \
 	db_password="$$(openssl rand -hex 32)"; \
 	admin_token="$$(openssl rand -hex 32)"; \
+	admin_token_sha256="$$(printf '%s' "$$admin_token" | openssl dgst -sha256 | awk '{print $$NF}')"; \
 	webhook_secret="$$(openssl rand -hex 32)"; \
 	config_key="$$(openssl rand -hex 32)"; \
+	mkdir -p .secrets; \
+	chmod 0700 .secrets; \
+	printf '%s\n' "$$config_key" > .secrets/config-encryption-key; \
+	printf '\n' > .secrets/config-encryption-previous-keys; \
+	chmod 0644 .secrets/config-encryption-key .secrets/config-encryption-previous-keys; \
 	printf '%s\n' \
 		'POSTGRES_DB=qcontrolhub' \
 		'POSTGRES_USER=qcontrolhub' \
 		"POSTGRES_PASSWORD=$$db_password" \
 		'POSTGRES_PORT=5432' \
 		'QCH_DATABASE_BIND_ADDRESS=127.0.0.1' \
-		"QCH_ADMIN_TOKEN=$$admin_token" \
+		'QCH_ADMIN_TOKEN=' \
+		"QCH_ADMIN_TOKEN_SHA256=$$admin_token_sha256" \
 		"QCH_WEBHOOK_SECRET=$$webhook_secret" \
-		"QCH_CONFIG_ENCRYPTION_KEY=$$config_key" \
+		'QCH_CONFIG_ENCRYPTION_KEY=' \
 		'QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS=' \
+		'QCH_CONFIG_ENCRYPTION_KEY_SECRET_SOURCE=.secrets/config-encryption-key' \
+		'QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS_SECRET_SOURCE=.secrets/config-encryption-previous-keys' \
 		'QCH_BEHIND_TLS_PROXY=true' \
 		'QCH_ALLOW_INSECURE_HTTP=false' \
 		'QCH_ALLOW_INSECURE_DATABASE=true' \
@@ -75,20 +85,23 @@ init-env:
 		'QCH_PORT=8080' \
 		'QCH_IMAGE_TAG=latest' \
 		'VERSION=$(VERSION)' > .env; \
-	printf '%s\n' '.env created with mode 0600; store its secrets in a password manager.'
+	bash -c 'source deploy/quick-start.sh; write_secret_compose_override'; \
+	printf '%s\n' '.env created with mode 0600; raw administrator token is not stored.'; \
+	printf '%s\n' "Administrator token (shown once): $$admin_token"; \
+	printf '%s\n' 'Store it in a password manager now.'
 
 compose-config:
-	docker compose config --quiet
+	docker compose -f docker-compose.yml -f docker-compose.secrets.yml config --quiet
 
 up:
-	docker compose pull
-	docker compose up -d
+	docker compose -f docker-compose.yml -f docker-compose.secrets.yml pull
+	docker compose -f docker-compose.yml -f docker-compose.secrets.yml up -d
 
 dev-up:
-	QCH_IMAGE_TAG=local QCH_BEHIND_TLS_PROXY=false QCH_ALLOW_INSECURE_HTTP=true QCH_ALLOW_INSECURE_DATABASE=true docker compose up -d --build
+	QCH_IMAGE_TAG=local QCH_BEHIND_TLS_PROXY=false QCH_ALLOW_INSECURE_HTTP=true QCH_ALLOW_INSECURE_DATABASE=true docker compose -f docker-compose.yml -f docker-compose.secrets.yml up -d --build
 
 down:
-	docker compose down
+	docker compose -f docker-compose.yml -f docker-compose.secrets.yml down
 
 logs:
-	docker compose logs -f qcontrol-web control-plane postgres
+	docker compose -f docker-compose.yml -f docker-compose.secrets.yml logs -f qcontrol-web control-plane postgres

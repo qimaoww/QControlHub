@@ -1,6 +1,7 @@
 package api
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"net/http"
 	"net/http/cookiejar"
@@ -13,7 +14,7 @@ import (
 
 func TestAPISessionLoginCSRFAndLogout(t *testing.T) {
 	token := strings.Repeat("a", 32)
-	server := New(nil, Config{AdminToken: token})
+	server := New(nil, Config{AdminTokenDigest: sha256.Sum256([]byte(token))})
 	testServer := httptest.NewServer(server.Handler())
 	defer testServer.Close()
 	jar, err := cookiejar.New(nil)

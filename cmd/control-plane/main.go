@@ -4,7 +4,10 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -23,7 +26,11 @@ import (
 var version = "dev"
 
 func main() {
-	adminToken := requiredSecret("QCH_ADMIN_TOKEN")
+	adminTokenDigest, err := adminTokenDigestFromEnv()
+	if err != nil {
+		slog.Error("invalid administrator token configuration", "error", err)
+		os.Exit(1)
+	}
 	listenAddress := env("QCH_LISTEN", "127.0.0.1:8080")
 	certFile := strings.TrimSpace(os.Getenv("QCH_TLS_CERT_FILE"))
 	keyFile := strings.TrimSpace(os.Getenv("QCH_TLS_KEY_FILE"))
@@ -66,8 +73,17 @@ func main() {
 	if allowInsecureDatabase {
 		slog.Warn("remote PostgreSQL certificate verification is explicitly disabled")
 	}
-	configEncryptionKey := strings.TrimSpace(os.Getenv("QCH_CONFIG_ENCRYPTION_KEY"))
-	previousConfigEncryptionKeys := splitList(os.Getenv("QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS"))
+	configEncryptionKey, err := secretFromEnvOrFile("QCH_CONFIG_ENCRYPTION_KEY", "QCH_CONFIG_ENCRYPTION_KEY_FILE")
+	if err != nil {
+		slog.Error("load configuration encryption key", "error", err)
+		os.Exit(1)
+	}
+	previousConfigEncryptionKeyList, err := secretFromEnvOrFile("QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS", "QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS_FILE")
+	if err != nil {
+		slog.Error("load previous configuration encryption keys", "error", err)
+		os.Exit(1)
+	}
+	previousConfigEncryptionKeys := splitList(previousConfigEncryptionKeyList)
 	if configEncryptionKey != "" {
 		slog.Info("configuration payloads will be encrypted at rest")
 	}
@@ -101,18 +117,18 @@ func main() {
 	}
 
 	apiServer := api.New(dataStore, api.Config{
-		AdminToken:      adminToken,
-		OperatorTokens:  splitList(os.Getenv("QCH_OPERATOR_TOKENS")),
-		AuditorTokens:   splitList(os.Getenv("QCH_AUDITOR_TOKENS")),
-		ReadonlyTokens:  splitList(os.Getenv("QCH_READONLY_TOKENS")),
-		AllowedOrigins:  splitList(os.Getenv("QCH_CORS_ORIGINS")),
-		SecureTransport: secureTransport,
-		TrustedProxies:  trustedProxies,
-		AgentBinary:     agentBinary,
-		AgentVersion:    version,
-		AgentInstaller:  agentInstaller,
-		WebhookSecret:   strings.TrimSpace(os.Getenv("QCH_WEBHOOK_SECRET")),
-		PublicIPProbe:   publicIPProbe,
+		AdminTokenDigest: adminTokenDigest,
+		OperatorTokens:   splitList(os.Getenv("QCH_OPERATOR_TOKENS")),
+		AuditorTokens:    splitList(os.Getenv("QCH_AUDITOR_TOKENS")),
+		ReadonlyTokens:   splitList(os.Getenv("QCH_READONLY_TOKENS")),
+		AllowedOrigins:   splitList(os.Getenv("QCH_CORS_ORIGINS")),
+		SecureTransport:  secureTransport,
+		TrustedProxies:   trustedProxies,
+		AgentBinary:      agentBinary,
+		AgentVersion:     version,
+		AgentInstaller:   agentInstaller,
+		WebhookSecret:    strings.TrimSpace(os.Getenv("QCH_WEBHOOK_SECRET")),
+		PublicIPProbe:    publicIPProbe,
 	})
 	root := apiServer.Handler()
 
@@ -148,6 +164,54 @@ func main() {
 		slog.Error("control plane stopped", "error", err)
 		os.Exit(1)
 	}
+}
+
+func adminTokenDigestFromEnv() ([32]byte, error) {
+	return parseAdminTokenCredential(
+		strings.TrimSpace(os.Getenv("QCH_ADMIN_TOKEN")),
+		strings.TrimSpace(os.Getenv("QCH_ADMIN_TOKEN_SHA256")),
+	)
+}
+
+func parseAdminTokenCredential(rawToken, encodedDigest string) ([32]byte, error) {
+	var digest [32]byte
+	if rawToken == "" && encodedDigest == "" {
+		return digest, errors.New("QCH_ADMIN_TOKEN_SHA256 or legacy QCH_ADMIN_TOKEN is required")
+	}
+	if rawToken != "" && len([]byte(rawToken)) < 32 {
+		return digest, errors.New("QCH_ADMIN_TOKEN must contain at least 32 bytes")
+	}
+	if encodedDigest != "" {
+		decoded, err := hex.DecodeString(encodedDigest)
+		if err != nil || len(decoded) != len(digest) {
+			return digest, errors.New("QCH_ADMIN_TOKEN_SHA256 must be exactly 64 hexadecimal characters")
+		}
+		copy(digest[:], decoded)
+	}
+	if rawToken != "" {
+		rawDigest := sha256.Sum256([]byte(rawToken))
+		if encodedDigest != "" && rawDigest != digest {
+			return digest, errors.New("QCH_ADMIN_TOKEN and QCH_ADMIN_TOKEN_SHA256 do not match")
+		}
+		digest = rawDigest
+	}
+	return digest, nil
+}
+
+func secretFromEnvOrFile(valueKey, fileKey string) (string, error) {
+	value := strings.TrimSpace(os.Getenv(valueKey))
+	path := strings.TrimSpace(os.Getenv(fileKey))
+	if value != "" && path != "" {
+		return "", fmt.Errorf("%s and %s cannot be configured together", valueKey, fileKey)
+	}
+	if path == "" {
+		return value, nil
+	}
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", fileKey, err)
+	}
+	return strings.TrimSpace(string(contents)), nil
 }
 
 func janitor(ctx context.Context, dataStore *store.Store) {
@@ -187,15 +251,6 @@ func janitor(ctx context.Context, dataStore *store.Store) {
 			cancel()
 		}
 	}
-}
-
-func requiredSecret(key string) string {
-	value := strings.TrimSpace(os.Getenv(key))
-	if len(value) < 32 {
-		slog.Error("security secret is missing or too short", "key", key, "minimum_bytes", 32)
-		os.Exit(1)
-	}
-	return value
 }
 
 func splitList(value string) []string {

@@ -7,7 +7,7 @@ QControlHub 的安全边界包括管理员、控制面、PostgreSQL、反向代�
 ### 管理 API
 
 - `/api/v1/*` 要求 `Authorization: Bearer <QCH_ADMIN_TOKEN>`。
-- 控制面只保存令牌的 SHA-256 摘要用于恒定时间比较，不把令牌写入数据库。
+- 新部署只在 `.env` 保存令牌的 SHA-256 摘要；原文仅在创建或轮换时显示一次。控制面以摘要查找认证主体，不把令牌原文写入数据库或容器环境。
 - 同一来源连续失败会触发内存限速；Nginx 示例额外限制登录和注册入口。
 - 控制面个人账号只有 admin（管理员）和 user（用户）两种身份。管理员拥有全部能力；用户通过 `permissions` 能力集合逐项授权，Bearer API 与 Web 会话使用同一套能力校验。旧版 operator/auditor/readonly 令牌仅作为兼容入口映射为用户能力集合。
 - 没有 OIDC 或 MFA。需要多人操作时，应把访问进一步放在 VPN、零信任网关或带 MFA 的上游访问代理之后。
@@ -36,11 +36,11 @@ QControlHub 的安全边界包括管理员、控制面、PostgreSQL、反向代�
 
 ## 密钥要求与轮换
 
-- `QCH_ADMIN_TOKEN` 至少 32 字节，推荐 `openssl rand -hex 32`；添加节点凭证由控制面使用 CSPRNG 生成。
-- `QCH_CONFIG_ENCRYPTION_KEY` 必须使用独立的高熵 secret；它既保护配置正文，也保护可重复读取的添加节点凭据。缺失时创建/读取可恢复命令会 fail closed。
-- 轮换加密密钥时先把新密钥设为 `QCH_CONFIG_ENCRYPTION_KEY`，并将旧密钥按新到旧顺序放入逗号分隔的 `QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS`。确认旧密文均已自然重写或删除后再移除旧密钥；日志和错误不会打印密钥或凭据。
-- PostgreSQL 密码和管理员令牌应进入密码管理器或密钥管理服务，不能提交到 Git。
-- 轮换管理员令牌：更新控制面环境并重启；重启同时使现有 Web 会话失效。
+- 管理员 token 至少 32 字节，推荐由脚本使用 `openssl rand -hex 32` 生成；原文进入密码管理器，部署状态只保存 `QCH_ADMIN_TOKEN_SHA256`。添加节点凭证由控制面使用 CSPRNG 生成。
+- 配置加密 keyring 必须使用独立的高熵 secret；它既保护配置正文，也保护可重复读取的添加节点凭据。加密密钥不能像登录 token 一样只存摘要，因为解密必须取得原值。脚本将它移出 `.env`，保存到宿主机 `0700` 的 `.secrets` 目录，并以只读文件挂载交给非 root 控制面；缺失时创建/读取可恢复命令会 fail closed。
+- `deploy/quick-start.sh -f` 会备份 keyring、生成新的当前密钥，并把旧密钥按新到旧顺序放入 previous-key 文件。确认旧密文均已自然重写或删除后再移除旧密钥；日志和错误不会打印密钥或凭据。
+- PostgreSQL 密码和管理员 token 原文应进入密码管理器或密钥管理服务，不能提交到 Git；`.secrets` 目录及其备份必须纳入加密备份与主机访问控制。
+- 轮换管理员 token：运行部署脚本的 `-f` 流程、保存仅显示一次的新 token，并重启控制面；重启同时使现有 Web 会话失效。
 - 每个添加节点凭证只能注册它绑定的节点名称；重装会原位替换旧公钥并关闭旧连接。凭证无有效期，必须在不再需要重装时删除添加记录。
 - Agent 完成注册后，从 `/etc/qcontrolhub/agent.env` 删除 `QCH_ENROLLMENT_TOKEN`，降低主机进程环境和备份中的暴露面。
 - 若 Agent 私钥疑似泄露，清除远端状态文件并重新执行该节点的添加命令，控制面会替换旧公钥；若添加凭证也疑似泄露，应先删除添加记录再生成新命令。
@@ -84,6 +84,6 @@ Agent 需要写入固定内核配置路径、调用 `systemctl`，并用 `CAP_NE
 - [ ] `QCH_ALLOW_INSECURE_DATABASE=true` 只用于同机隔离 Compose 网络；外部数据库设为 `false` 并验证证书。
 - [ ] HTTPS 证书有效，TLS 1.2/1.3 可用，HTTP 自动跳转 HTTPS。
 - [ ] PostgreSQL 不对公网开放；外部数据库使用证书校验。
-- [ ] `.env`、Agent 环境文件和状态文件权限为 `0600`。
+- [ ] `.env`、Agent 环境文件和状态文件权限为 `0600`；`.env` 不含管理员 token 或配置 keyring 原文，宿主机 `.secrets` 目录权限为 `0700`。
 - [ ] Agent 主机时钟同步，添加节点凭证已在注册后从环境文件删除。
 - [ ] 防火墙、备份、监控与令牌轮换流程已验证。

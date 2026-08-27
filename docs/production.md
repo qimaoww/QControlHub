@@ -2,18 +2,44 @@
 
 本文采用“单机 Docker Compose API 控制面 + 独立 SPA + 宿主机 Nginx + 多台 systemd/OpenRC Agent”的基线。只有 `qcontrol-web` 发布到回环地址，Nginx 负责公网 TLS；控制面 API 只在 Compose 内部网络可达，控制面到 PostgreSQL 使用项目内部后端网络，数据库持久化到命名卷。
 
-## 1. 准备控制面主机
+## 1. 使用部署脚本启动控制面
 
-建议使用受支持的 Linux 发行版，并安装 Docker Engine、Docker Compose v2、Nginx、OpenSSL 与证书管理工具。防火墙只对管理来源和 Agent 网络开放 TCP 443；不要开放 8080 或 5432。
+建议使用受支持的 Linux 发行版，并预先安装 Docker Engine、Docker Compose v2、Git、curl、OpenSSL、Nginx 与证书管理工具。防火墙只对管理来源和 Agent 网络开放 TCP 443；不要开放 8080 或 5432。
 
-初始化随机密钥：
+直接运行一键部署脚本：
 
 ```bash
-make init-env
-chmod 600 .env
+bash <(curl -fsSL "https://raw.githubusercontent.com/qimaoww/qcontrolhub/main/deploy/quick-start.sh")
 ```
 
-把 `.env` 中的 PostgreSQL 密码和管理员令牌保存到密码管理器。确认以下生产设置：
+脚本首先显示管理菜单：安装/重新配置、更新现有部署、卸载服务。卸载默认只移除容器和网络，保留 `.env`、`.secrets` 与 PostgreSQL 命名卷。选择安装后再选择数据库模式；新建单机控制面使用内置 PostgreSQL，它会通过 Compose 启动数据库、控制面和独立 Web 前端。也可以跳过交互，明确指定操作和数据库模式：
+
+```bash
+bash <(curl -fsSL "https://raw.githubusercontent.com/qimaoww/qcontrolhub/main/deploy/quick-start.sh") -o install -m bundled
+```
+
+连接已有 PostgreSQL 时使用 `external` 模式；省略 `-d` 会从终端安全读取连接串，避免把数据库密码直接保存在 shell 历史中：
+
+```bash
+bash <(curl -fsSL "https://raw.githubusercontent.com/qimaoww/qcontrolhub/main/deploy/quick-start.sh") -o install -m external
+```
+
+更新与卸载会自动识别现有数据库模式；卸载不会删除配置、密钥或数据库卷：
+
+```bash
+bash <(curl -fsSL "https://raw.githubusercontent.com/qimaoww/qcontrolhub/main/deploy/quick-start.sh") -o update
+bash <(curl -fsSL "https://raw.githubusercontent.com/qimaoww/qcontrolhub/main/deploy/quick-start.sh") -o uninstall
+```
+
+部署完成后，脚本会显示访问地址、仅本次可见的管理员 token、`.env` 路径、密钥目录以及停止服务和查看日志的命令。请立即把管理员 token 保存到密码管理器：脚本不会把原文写入磁盘，`.env` 只保存 `QCH_ADMIN_TOKEN_SHA256`。配置加密 keyring 位于宿主机权限为 `0700` 的 `.secrets` 目录，通过生成的 `docker-compose.secrets.yml` 只读挂载，不会进入 `.env` 或容器环境。重复执行默认复用现有摘要和 keyring；需要轮换管理员 token 与应用密钥时运行：
+
+```bash
+bash <(curl -fsSL "https://raw.githubusercontent.com/qimaoww/qcontrolhub/main/deploy/quick-start.sh") -o update -f
+```
+
+`-f` 会生成并仅显示一次新的管理员 token，同时轮换当前应用密钥；数据库密码保持不变。脚本会在私有密钥目录中备份 keyring，并把原配置加密密钥按新到旧顺序加入 previous-key 文件，因此旧密文仍可读取；确认旧数据已迁移或删除后再清理旧密钥。`.env` 备份会清空旧版明文 token 和配置密钥字段。
+
+部署后检查 `.env` 中的生产设置：
 
 ```dotenv
 QCH_BEHIND_TLS_PROXY=true
@@ -29,20 +55,23 @@ QCH_PORT=8080
 QCH_DATABASE_BIND_ADDRESS=127.0.0.1
 POSTGRES_PORT=5432
 QCH_CORS_ORIGINS=https://qcontrolhub.example.com
-# 可恢复添加节点命令必须配置；同时保护配置正文与修订（请使用独立高熵 secret）。
-# 旧明文行仍可透明读取，新写入自动加密；密钥丢失将无法解密，务必备份。
-QCH_CONFIG_ENCRYPTION_KEY=replace-with-a-long-random-secret
+# 管理员 token 原文只在密码管理器中保存；控制面读取不可逆摘要。
+QCH_ADMIN_TOKEN=
+QCH_ADMIN_TOKEN_SHA256=replace-with-64-character-sha256
+# 原始配置密钥位于 .secrets，不进入环境；密钥丢失将无法解密，务必备份。
+QCH_CONFIG_ENCRYPTION_KEY=
 QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS=
+QCH_CONFIG_ENCRYPTION_KEY_SECRET_SOURCE=.secrets/config-encryption-key
+QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS_SECRET_SOURCE=.secrets/config-encryption-previous-keys
 ```
 
-`deploy/quick-start.sh -f` 会在生成新的当前密钥前，把原 `QCH_CONFIG_ENCRYPTION_KEY` 按新到旧顺序置于 `QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS` 最前，并保留已有条目，因此不会静默丢失仍需读取的旧密文；确认旧数据已迁移或删除后再清理旧密钥。
+`QCH_CORS_ORIGINS` 仅在浏览器从另一个 origin 调用 JSON API 时需要；使用同域 Web 控制台可以留空。官方拓扑包含宿主 Nginx 与 `qcontrol-web` 两跳代理：控制面直接看到固定的 `QCH_WEB_PROXY_ADDRESS`，转发链中真实客户端右侧还包含固定的 `QCH_CONTROL_PROXY_GATEWAY`。`QCH_TRUSTED_PROXY_CIDRS` 必须只列出这两个精确 `/32` 端点，控制面才能从右向左安全剥离完整代理链，同时忽略客户端伪造在链左侧的值。若网段冲突，subnet、gateway、两个容器地址及信任列表必须一起修改，禁止改成整个私网或任意来源网段。若手工设置 PostgreSQL 密码，必须对 URL 保留字符进行百分号编码；部署脚本生成的十六进制密码可直接用于 Compose URL。
 
-`QCH_CORS_ORIGINS` 仅在浏览器从另一个 origin 调用 JSON API 时需要；使用同域 Web 控制台可以留空。官方拓扑包含宿主 Nginx 与 `qcontrol-web` 两跳代理：控制面直接看到固定的 `QCH_WEB_PROXY_ADDRESS`，转发链中真实客户端右侧还包含固定的 `QCH_CONTROL_PROXY_GATEWAY`。`QCH_TRUSTED_PROXY_CIDRS` 必须只列出这两个精确 `/32` 端点，控制面才能从右向左安全剥离完整代理链，同时忽略客户端伪造在链左侧的值。若网段冲突，subnet、gateway、两个容器地址及信任列表必须一起修改，禁止改成整个私网或任意来源网段。若手工设置 PostgreSQL 密码，必须对 URL 保留字符进行百分号编码；`make init-env` 生成的十六进制密码可直接用于 Compose URL。
+## 2. 核验服务并建立备份
 
-## 2. 启动 PostgreSQL 与控制面
+部署脚本已经启动服务并等待 `/readyz` 通过。进入脚本显示的部署目录后，可以再次核验容器和两个健康端点：
 
 ```bash
-make up
 docker compose ps
 curl --fail http://127.0.0.1:8080/healthz
 curl --fail http://127.0.0.1:8080/readyz
@@ -236,8 +265,8 @@ systemd 单元的 `ProtectSystem=strict` 只放行固定的 `/etc/qagent` 配置
 ### 更新控制面
 
 ```bash
-docker compose build --pull control-plane
-docker compose up -d control-plane
+docker compose -f docker-compose.yml -f docker-compose.secrets.yml build --pull control-plane
+docker compose -f docker-compose.yml -f docker-compose.secrets.yml up -d control-plane
 docker compose ps
 ```
 
@@ -266,15 +295,19 @@ sudo rm /var/lib/qcontrolhub/agent-state.json
 
 ### 外部 PostgreSQL
 
-`deploy/quick-start.sh -m external` 生成的 Compose 仍使用与 bundled 模式相同的专用代理网络、固定 `qcontrol-web`/控制面地址和两项精确信任列表；数据库改为外部连接不会改变 WSS 来源地址解析边界。重复运行脚本会保留自定义代理网络值，并为旧环境补齐缺失的 `qcontrol-web` 精确信任项。
+使用脚本的 `external` 模式，它会从终端读取 `QCH_DATABASE_URL` 并生成 `docker-compose.external.yml`：
 
-使用外部数据库时，不应把密码直接写入可读命令行。通过受保护环境或密钥注入设置完整 `QCH_DATABASE_URL`，并使用类似以下参数：
+```bash
+bash <(curl -fsSL "https://raw.githubusercontent.com/qimaoww/qcontrolhub/main/deploy/quick-start.sh") -m external
+```
+
+不要把密码直接写入可读命令行。连接串应使用 `sslmode=verify-full`，密码中的 URL 保留字符必须编码，例如：
 
 ```text
 postgresql://qcontrolhub:URL_ENCODED_PASSWORD@db.example.com:5432/qcontrolhub?sslmode=verify-full&sslrootcert=/run/secrets/db-ca.pem
 ```
 
-同时移除或禁用 Compose 中的 `postgres` 服务，将 `QCH_ALLOW_INSECURE_DATABASE=false`，并确保 CA 文件对控制面容器只读可见。当前仓库的基础 Compose 面向单机内置 PostgreSQL，外部数据库需要站点级 override 文件。
+脚本生成的外部数据库 Compose 不会启动内置 `postgres` 服务，并设置 `QCH_ALLOW_INSECURE_DATABASE=false`。它仍使用与 bundled 模式相同的专用代理网络、固定 `qcontrol-web`/控制面地址和两项精确信任列表；数据库改为外部连接不会改变 WSS 来源地址解析边界。若连接串引用自定义 CA 文件，还需要通过站点级 Compose override 将 CA 以只读方式挂载到控制面容器。重复运行脚本会保留自定义代理网络值，并为旧环境补齐缺失的 `qcontrol-web` 精确信任项。
 
 ## 6. 监控建议
 

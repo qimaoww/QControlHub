@@ -13,6 +13,7 @@
 set -euo pipefail
 
 MODE=""
+ACTION=""
 DATABASE_URL=""
 ADMIN_TOKEN=""
 FORCE=false
@@ -21,7 +22,12 @@ READY_TIMEOUT=60
 usage() {
     cat <<'USAGE'
 用法：
-  ./deploy/quick-start.sh [-m bundled|external] [选项]
+  ./deploy/quick-start.sh [-o install|update|uninstall] [-m bundled|external] [选项]
+
+操作：
+  install             安装或重新配置 QControlHub
+  update              更新现有部署并保持配置和数据
+  uninstall           卸载服务，保留配置、密钥和数据库卷
 
 部署模式：
   bundled             Docker Compose 内置 PostgreSQL + 控制面
@@ -29,9 +35,10 @@ usage() {
 
 选项：
   -m MODE             选择部署模式；省略时交互选择
+  -o OPERATION        选择安装、更新或卸载；省略时交互选择
   -d DATABASE_URL     external 模式使用的 PostgreSQL 连接串
   -a ADMIN_TOKEN      管理员令牌（至少 32 字节）
-  -f                  轮换应用密钥；执行前备份现有 .env，数据库密码不变
+  -f                  轮换管理员 token 与应用密钥；数据库密码不变
   -t SECONDS          就绪检查超时时间（默认 60 秒）
   -h                  显示帮助
 
@@ -44,14 +51,58 @@ die() {
     exit 1
 }
 
+bootstrap_streamed_script() {
+    local script_path install_dir origin_url branch
+    script_path="${BASH_SOURCE[0]}"
+    case "$script_path" in
+        /dev/fd/*|/proc/self/fd/*) ;;
+        *) return 0 ;;
+    esac
+
+    command -v git >/dev/null 2>&1 || die "缺少依赖：git"
+    install_dir="${QCH_INSTALL_DIR:-$PWD/qcontrolhub}"
+    case "$install_dir" in
+        /*) ;;
+        *) install_dir="$PWD/$install_dir" ;;
+    esac
+    case "$install_dir" in
+        *$'\n'*|*$'\r'*) die "QCH_INSTALL_DIR 不能包含换行" ;;
+    esac
+
+    if [ -e "$install_dir" ]; then
+        [ -d "$install_dir/.git" ] || die "安装目录已存在但不是 Git 仓库：$install_dir"
+        origin_url="$(git -C "$install_dir" remote get-url origin 2>/dev/null || true)"
+        case "$origin_url" in
+            https://github.com/qimaoww/qcontrolhub|https://github.com/qimaoww/qcontrolhub.git|git@github.com:qimaoww/qcontrolhub.git) ;;
+            *) die "安装目录不是 QControlHub 官方仓库：$install_dir" ;;
+        esac
+        branch="$(git -C "$install_dir" symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
+        [ "$branch" = "main" ] || die "安装目录必须位于 main 分支，当前为：${branch:-detached}"
+        git -C "$install_dir" diff --quiet || die "安装目录包含未提交修改，请先处理后再运行"
+        git -C "$install_dir" diff --cached --quiet || die "安装目录包含已暂存修改，请先处理后再运行"
+        echo "-> 更新 QControlHub：$install_dir"
+        git -C "$install_dir" fetch --prune origin main
+        git -C "$install_dir" merge-base --is-ancestor HEAD FETCH_HEAD || die "安装目录的 main 已偏离官方历史，请人工处理"
+        git -C "$install_dir" merge --ff-only FETCH_HEAD
+    else
+        echo "-> 下载 QControlHub：$install_dir"
+        mkdir -p "$(dirname "$install_dir")"
+        git clone --depth 1 --branch main --single-branch https://github.com/qimaoww/qcontrolhub.git "$install_dir"
+    fi
+    exec "$install_dir/deploy/quick-start.sh" "$@"
+}
+
+bootstrap_streamed_script "$@"
+
 if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
     usage
     exit 0
 fi
 
-while getopts ':m:d:a:ft:h' opt; do
+while getopts ':m:o:d:a:ft:h' opt; do
     case "$opt" in
         m) MODE="$OPTARG" ;;
+        o) ACTION="$OPTARG" ;;
         d) DATABASE_URL="$OPTARG" ;;
         a) ADMIN_TOKEN="$OPTARG" ;;
         f) FORCE=true ;;
@@ -68,6 +119,10 @@ case "$MODE" in
     ""|bundled|external) ;;
     *) die "未知部署模式：$MODE（可选 bundled / external）" ;;
 esac
+case "$ACTION" in
+    ""|install|update|uninstall) ;;
+    *) die "未知操作：$ACTION（可选 install / update / uninstall）" ;;
+esac
 if ! [[ "$READY_TIMEOUT" =~ ^[1-9][0-9]*$ ]]; then
     die "就绪检查超时时间必须是正整数"
 fi
@@ -76,6 +131,14 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 ENV_FILE="$REPO_ROOT/.env"
 EXTERNAL_COMPOSE_FILE="$REPO_ROOT/docker-compose.external.yml"
+SECRET_COMPOSE_FILE="$REPO_ROOT/docker-compose.secrets.yml"
+SECRET_DIR="$REPO_ROOT/.secrets"
+CONFIG_KEY_FILE="$SECRET_DIR/config-encryption-key"
+PREVIOUS_CONFIG_KEYS_FILE="$SECRET_DIR/config-encryption-previous-keys"
+ADMIN_TOKEN_TO_DISPLAY=""
+ADMIN_TOKEN_DIGEST=""
+CONFIG_KEY=""
+PREVIOUS_CONFIG_KEYS=""
 
 require_commands() {
     local command_name
@@ -88,6 +151,109 @@ require_commands() {
 
 random_hex() {
     openssl rand -hex 32
+}
+
+sha256_hex() {
+    printf '%s' "$1" | openssl dgst -sha256 | awk '{print $NF}'
+}
+
+validate_admin_token_digest() {
+    local digest="$1"
+    [ "${#digest}" -eq 64 ] || die "QCH_ADMIN_TOKEN_SHA256 必须是 64 个十六进制字符"
+    case "$digest" in
+        *[!0-9A-Fa-f]*) die "QCH_ADMIN_TOKEN_SHA256 必须是 64 个十六进制字符" ;;
+    esac
+}
+
+read_secret_file() {
+    local file="$1" value
+    [ -f "$file" ] || return 0
+    [ ! -L "$file" ] || die "secret 文件不能是符号链接：$file"
+    value="$(<"$file")"
+    case "$value" in
+        *$'\n'*|*$'\r'*) die "secret 文件只能包含一行：$file" ;;
+    esac
+    printf '%s' "$value"
+}
+
+write_secret_file() {
+    local file="$1" value="$2" temp_file
+    [ ! -L "$SECRET_DIR" ] || die "secret 目录不能是符号链接：$SECRET_DIR"
+    mkdir -p "$SECRET_DIR"
+    chmod 0700 "$SECRET_DIR"
+    [ ! -L "$file" ] || die "secret 文件不能是符号链接：$file"
+    umask 077
+    temp_file="$(mktemp "$SECRET_DIR/.tmp.XXXXXX")"
+    printf '%s\n' "$value" > "$temp_file"
+    # The parent directory is private on the host. Compose bind-mounts file
+    # secrets without honoring uid/gid/mode, so the non-root control-plane
+    # process needs the mounted file itself to be readable.
+    chmod 0644 "$temp_file"
+    mv -f -- "$temp_file" "$file"
+}
+
+backup_secret_file() {
+    local file="$1" backup_file
+    [ -f "$file" ] || return 0
+    backup_file="${file}.bak.$(date +%Y%m%d%H%M%S).$$.${RANDOM}"
+    cp -p -- "$file" "$backup_file"
+    chmod 0600 "$backup_file"
+    echo "-> 已备份 secret：$backup_file"
+}
+
+prepare_admin_token() {
+    local raw_token stored_digest legacy_token legacy_digest
+    raw_token="$ADMIN_TOKEN"
+    stored_digest="$(read_env_key QCH_ADMIN_TOKEN_SHA256)"
+    legacy_token="$(read_env_key QCH_ADMIN_TOKEN)"
+    if [ "$FORCE" = false ] && [ -z "$raw_token" ] && [ -n "$stored_digest" ] && [ -n "$legacy_token" ]; then
+        validate_secret QCH_ADMIN_TOKEN "$legacy_token"
+        validate_admin_token_digest "$stored_digest"
+        legacy_digest="$(sha256_hex "$legacy_token")"
+        [ "$legacy_digest" = "$(printf '%s' "$stored_digest" | tr 'A-F' 'a-f')" ] || \
+            die "QCH_ADMIN_TOKEN 与 QCH_ADMIN_TOKEN_SHA256 不匹配；请先确认正确的管理员 token"
+    fi
+    if [ "$FORCE" = true ]; then
+        raw_token="${ADMIN_TOKEN:-$(random_hex)}"
+    elif [ -n "$raw_token" ]; then
+        :
+    elif [ -n "$stored_digest" ]; then
+        raw_token=""
+    elif [ -n "$legacy_token" ]; then
+        raw_token="$legacy_token"
+    else
+        raw_token="$(random_hex)"
+    fi
+    if [ -n "$raw_token" ]; then
+        validate_secret QCH_ADMIN_TOKEN "$raw_token"
+        stored_digest="$(sha256_hex "$raw_token")"
+        ADMIN_TOKEN_TO_DISPLAY="$raw_token"
+    else
+        ADMIN_TOKEN_TO_DISPLAY=""
+    fi
+    validate_admin_token_digest "$stored_digest"
+    ADMIN_TOKEN_DIGEST="$(printf '%s' "$stored_digest" | tr 'A-F' 'a-f')"
+}
+
+prepare_config_keyring() {
+    local legacy_key legacy_previous
+    CONFIG_KEY="$(read_secret_file "$CONFIG_KEY_FILE")"
+    PREVIOUS_CONFIG_KEYS="$(read_secret_file "$PREVIOUS_CONFIG_KEYS_FILE")"
+    legacy_key="$(read_env_key QCH_CONFIG_ENCRYPTION_KEY)"
+    legacy_previous="$(read_env_key QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS)"
+    [ -n "$CONFIG_KEY" ] || CONFIG_KEY="$legacy_key"
+    [ -n "$PREVIOUS_CONFIG_KEYS" ] || PREVIOUS_CONFIG_KEYS="$legacy_previous"
+    if [ "$FORCE" = true ]; then
+        backup_secret_file "$CONFIG_KEY_FILE"
+        backup_secret_file "$PREVIOUS_CONFIG_KEYS_FILE"
+        PREVIOUS_CONFIG_KEYS="$(prepend_unique_csv "$PREVIOUS_CONFIG_KEYS" "$CONFIG_KEY")"
+        CONFIG_KEY="$(random_hex)"
+    elif [ -z "$CONFIG_KEY" ]; then
+        CONFIG_KEY="$(random_hex)"
+    fi
+    validate_secret QCH_CONFIG_ENCRYPTION_KEY "$CONFIG_KEY"
+    write_secret_file "$CONFIG_KEY_FILE" "$CONFIG_KEY"
+    write_secret_file "$PREVIOUS_CONFIG_KEYS_FILE" "$PREVIOUS_CONFIG_KEYS"
 }
 
 read_env_key() {
@@ -108,8 +274,16 @@ read_env_key() {
 backup_env() {
     [ -f "$ENV_FILE" ] || return 0
     local backup_file
+    umask 077
     backup_file="${ENV_FILE}.bak.$(date +%Y%m%d%H%M%S).$$.${RANDOM}"
     cp -p -- "$ENV_FILE" "$backup_file"
+    awk '
+        /^(QCH_ADMIN_TOKEN|QCH_CONFIG_ENCRYPTION_KEY|QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS)=/ {
+            sub(/=.*/, "=")
+        }
+        { print }
+    ' "$backup_file" > "${backup_file}.sanitized"
+    mv -f -- "${backup_file}.sanitized" "$backup_file"
     chmod 600 "$backup_file"
     echo "-> 已备份现有 .env：$backup_file"
 }
@@ -212,7 +386,8 @@ services:
     restart: unless-stopped
     environment:
       QCH_DATABASE_URL: ${QCH_DATABASE_URL:?external database URL required}
-      QCH_ADMIN_TOKEN: ${QCH_ADMIN_TOKEN:?admin token required}
+      QCH_ADMIN_TOKEN: ${QCH_ADMIN_TOKEN:-}
+      QCH_ADMIN_TOKEN_SHA256: ${QCH_ADMIN_TOKEN_SHA256:-}
       QCH_LISTEN: 0.0.0.0:8080
       QCH_BEHIND_TLS_PROXY: ${QCH_BEHIND_TLS_PROXY:-true}
       QCH_ALLOW_INSECURE_HTTP: ${QCH_ALLOW_INSECURE_HTTP:-false}
@@ -222,6 +397,8 @@ services:
       QCH_WEBHOOK_SECRET: ${QCH_WEBHOOK_SECRET:-}
       QCH_CONFIG_ENCRYPTION_KEY: ${QCH_CONFIG_ENCRYPTION_KEY:-}
       QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS: ${QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS:-}
+      QCH_CONFIG_ENCRYPTION_KEY_FILE: ${QCH_CONFIG_ENCRYPTION_KEY_FILE:-}
+      QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS_FILE: ${QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS_FILE:-}
       QCH_OPERATOR_TOKENS: ${QCH_OPERATOR_TOKENS:-}
       QCH_AUDITOR_TOKENS: ${QCH_AUDITOR_TOKENS:-}
       QCH_READONLY_TOKENS: ${QCH_READONLY_TOKENS:-}
@@ -290,6 +467,30 @@ networks:
 YAML
 }
 
+write_secret_compose_override() {
+    cat > "$SECRET_COMPOSE_FILE" <<'YAML'
+services:
+  control-plane:
+    environment:
+      QCH_ADMIN_TOKEN: ""
+      QCH_ADMIN_TOKEN_SHA256: ${QCH_ADMIN_TOKEN_SHA256:?administrator token digest required}
+      QCH_CONFIG_ENCRYPTION_KEY: ""
+      QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS: ""
+      QCH_CONFIG_ENCRYPTION_KEY_FILE: /run/secrets/qch-config-encryption-key
+      QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS_FILE: /run/secrets/qch-config-encryption-previous-keys
+    volumes:
+      - type: bind
+        source: ${QCH_CONFIG_ENCRYPTION_KEY_SECRET_SOURCE:?configuration encryption key file required}
+        target: /run/secrets/qch-config-encryption-key
+        read_only: true
+      - type: bind
+        source: ${QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS_SECRET_SOURCE:?previous configuration encryption keys file required}
+        target: /run/secrets/qch-config-encryption-previous-keys
+        read_only: true
+YAML
+    chmod 0600 "$SECRET_COMPOSE_FILE"
+}
+
 COMPOSE_ARGS=()
 
 compose() {
@@ -340,7 +541,7 @@ wait_ready() {
 }
 
 prepare_bundled_env() {
-    local postgres_password admin_token webhook_secret config_key previous_config_keys
+    local postgres_password webhook_secret
     local behind_proxy allow_http allow_database cors_origins bind_address port image_tag version
     local proxy_subnet proxy_gateway web_proxy_address control_plane_proxy_address trusted_proxy_cidrs
 
@@ -351,23 +552,12 @@ prepare_bundled_env() {
     postgres_password="$(read_env_key POSTGRES_PASSWORD)"
     [ -n "$postgres_password" ] || postgres_password="$(random_hex)"
 
-    admin_token="${ADMIN_TOKEN:-$(read_env_key QCH_ADMIN_TOKEN)}"
-    if [ "$FORCE" = true ] || [ -z "$admin_token" ]; then
-        admin_token="${ADMIN_TOKEN:-$(random_hex)}"
-    fi
+    prepare_admin_token
     webhook_secret="$(read_env_key QCH_WEBHOOK_SECRET)"
     if [ "$FORCE" = true ] || [ -z "$webhook_secret" ]; then
         webhook_secret="$(random_hex)"
     fi
-    config_key="$(read_env_key QCH_CONFIG_ENCRYPTION_KEY)"
-    previous_config_keys="$(read_env_key QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS)"
-    if [ "$FORCE" = true ]; then
-        previous_config_keys="$(prepend_unique_csv "$previous_config_keys" "$config_key")"
-        config_key="$(random_hex)"
-    elif [ -z "$config_key" ]; then
-        config_key="$(random_hex)"
-    fi
-    validate_secret QCH_ADMIN_TOKEN "$admin_token"
+    prepare_config_keyring
 
     behind_proxy="$(read_env_key QCH_BEHIND_TLS_PROXY)"; [ -n "$behind_proxy" ] || behind_proxy=true
     allow_http="$(read_env_key QCH_ALLOW_INSECURE_HTTP)"; [ -n "$allow_http" ] || allow_http=false
@@ -395,10 +585,13 @@ prepare_bundled_env() {
         "POSTGRES_USER=$postgres_user" \
         "POSTGRES_PASSWORD=$postgres_password" \
         "POSTGRES_PORT=$postgres_port" \
-        "QCH_ADMIN_TOKEN=$admin_token" \
+        "QCH_ADMIN_TOKEN=" \
+        "QCH_ADMIN_TOKEN_SHA256=$ADMIN_TOKEN_DIGEST" \
         "QCH_WEBHOOK_SECRET=$webhook_secret" \
-        "QCH_CONFIG_ENCRYPTION_KEY=$config_key" \
-        "QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS=$previous_config_keys" \
+        "QCH_CONFIG_ENCRYPTION_KEY=" \
+        "QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS=" \
+        "QCH_CONFIG_ENCRYPTION_KEY_SECRET_SOURCE=.secrets/config-encryption-key" \
+        "QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS_SECRET_SOURCE=.secrets/config-encryption-previous-keys" \
         "QCH_BEHIND_TLS_PROXY=$behind_proxy" \
         "QCH_ALLOW_INSECURE_HTTP=$allow_http" \
         "QCH_ALLOW_INSECURE_DATABASE=$allow_database" \
@@ -415,7 +608,7 @@ prepare_bundled_env() {
 }
 
 prepare_external_env() {
-    local db_url admin_token webhook_secret config_key previous_config_keys
+    local db_url webhook_secret
     local behind_proxy allow_http allow_database cors_origins bind_address port image_tag version
     local proxy_subnet proxy_gateway web_proxy_address control_plane_proxy_address trusted_proxy_cidrs
 
@@ -435,23 +628,12 @@ prepare_external_env() {
         backup_env
     fi
 
-    admin_token="${ADMIN_TOKEN:-$(read_env_key QCH_ADMIN_TOKEN)}"
-    if [ "$FORCE" = true ] || [ -z "$admin_token" ]; then
-        admin_token="${ADMIN_TOKEN:-$(random_hex)}"
-    fi
+    prepare_admin_token
     webhook_secret="$(read_env_key QCH_WEBHOOK_SECRET)"
     if [ "$FORCE" = true ] || [ -z "$webhook_secret" ]; then
         webhook_secret="$(random_hex)"
     fi
-    config_key="$(read_env_key QCH_CONFIG_ENCRYPTION_KEY)"
-    previous_config_keys="$(read_env_key QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS)"
-    if [ "$FORCE" = true ]; then
-        previous_config_keys="$(prepend_unique_csv "$previous_config_keys" "$config_key")"
-        config_key="$(random_hex)"
-    elif [ -z "$config_key" ]; then
-        config_key="$(random_hex)"
-    fi
-    validate_secret QCH_ADMIN_TOKEN "$admin_token"
+    prepare_config_keyring
 
     behind_proxy="$(read_env_key QCH_BEHIND_TLS_PROXY)"; [ -n "$behind_proxy" ] || behind_proxy=true
     allow_http="$(read_env_key QCH_ALLOW_INSECURE_HTTP)"; [ -n "$allow_http" ] || allow_http=false
@@ -471,10 +653,13 @@ prepare_external_env() {
 
     update_env_file \
         "QCH_DATABASE_URL=$db_url" \
-        "QCH_ADMIN_TOKEN=$admin_token" \
+        "QCH_ADMIN_TOKEN=" \
+        "QCH_ADMIN_TOKEN_SHA256=$ADMIN_TOKEN_DIGEST" \
         "QCH_WEBHOOK_SECRET=$webhook_secret" \
-        "QCH_CONFIG_ENCRYPTION_KEY=$config_key" \
-        "QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS=$previous_config_keys" \
+        "QCH_CONFIG_ENCRYPTION_KEY=" \
+        "QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS=" \
+        "QCH_CONFIG_ENCRYPTION_KEY_SECRET_SOURCE=.secrets/config-encryption-key" \
+        "QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS_SECRET_SOURCE=.secrets/config-encryption-previous-keys" \
         "QCH_BEHIND_TLS_PROXY=$behind_proxy" \
         "QCH_ALLOW_INSECURE_HTTP=$allow_http" \
         "QCH_ALLOW_INSECURE_DATABASE=$allow_database" \
@@ -491,18 +676,114 @@ prepare_external_env() {
 }
 
 show_result() {
-    local token="$1" url="$2" stop_cmd="$3"
+    local result_name="$1" url="$2" stop_cmd="$3"
     echo ""
     echo "============================================"
-    echo "  QControlHub 部署完成"
+    echo "  QControlHub $result_name"
     echo "============================================"
     echo ""
     echo "  访问地址：  $url"
-    echo "  管理员令牌：$token"
+    echo "  管理员 token：请使用密码管理器中保存的原文"
     echo "  配置文件：  $ENV_FILE"
+    echo "  密钥目录：  $SECRET_DIR"
     echo ""
     echo "  停止服务：  $stop_cmd"
     echo "  查看日志：  ${stop_cmd/down/logs -f}"
+    echo ""
+}
+
+local_panel_url() {
+    local port
+    port="$(read_env_key QCH_PORT)"
+    [ -n "$port" ] || port=8080
+    printf 'http://127.0.0.1:%s' "$port"
+}
+
+show_admin_token_once() {
+    [ -n "$ADMIN_TOKEN_TO_DISPLAY" ] || return 0
+    echo ""
+    echo "============================================"
+    echo "  管理员 token（仅本次显示）"
+    echo "  $ADMIN_TOKEN_TO_DISPLAY"
+    echo ""
+    echo "  请立即保存到密码管理器。"
+    echo "  .env 只保存 SHA-256 摘要，之后无法恢复原文。"
+    echo "============================================"
+    echo ""
+    ADMIN_TOKEN_TO_DISPLAY=""
+}
+
+choose_action() {
+    [ -t 0 ] || die "未指定操作；非交互模式请使用 -o install、-o update 或 -o uninstall"
+    echo ""
+    echo "QControlHub 管理菜单"
+    echo ""
+    echo "  1. 安装 / 重新配置"
+    echo "  2. 更新现有部署"
+    echo "  3. 卸载服务（保留配置、密钥和数据库卷）"
+    echo ""
+    read -r -p "请选择 [1-3] " choice
+    case "$choice" in
+        1) ACTION="install" ;;
+        2) ACTION="update" ;;
+        3) ACTION="uninstall" ;;
+        *) die "无效选择：$choice" ;;
+    esac
+}
+
+choose_mode() {
+    [ -t 0 ] || die "未指定部署模式；非交互模式请使用 -m bundled 或 -m external"
+    echo ""
+    echo "QControlHub 数据库模式"
+    echo ""
+    echo "  1. 内置 PostgreSQL + 控制面（推荐）"
+    echo "  2. 连接外部 PostgreSQL"
+    echo ""
+    read -r -p "请选择 [1-2] " choice
+    case "$choice" in
+        1) MODE="bundled" ;;
+        2) MODE="external" ;;
+        *) die "无效选择：$choice" ;;
+    esac
+}
+
+detect_existing_mode() {
+    [ -f "$ENV_FILE" ] || die "未找到现有部署配置：$ENV_FILE"
+    if [ -n "$(read_env_key QCH_DATABASE_URL)" ] || [ -f "$EXTERNAL_COMPOSE_FILE" ]; then
+        MODE="external"
+        if [ "$ACTION" = "uninstall" ] && [ ! -f "$EXTERNAL_COMPOSE_FILE" ]; then
+            die "外部 PostgreSQL 部署缺少 $EXTERNAL_COMPOSE_FILE"
+        fi
+    else
+        MODE="bundled"
+    fi
+}
+
+configure_compose_args() {
+    case "$MODE" in
+        bundled) COMPOSE_ARGS=(-f "$REPO_ROOT/docker-compose.yml") ;;
+        external) COMPOSE_ARGS=(-f "$EXTERNAL_COMPOSE_FILE") ;;
+    esac
+    if [ "$ACTION" != "uninstall" ] || [ -f "$SECRET_COMPOSE_FILE" ]; then
+        COMPOSE_ARGS+=(-f "$SECRET_COMPOSE_FILE")
+    fi
+}
+
+uninstall_services() {
+    echo "-> 停止并移除 QControlHub 服务容器和网络"
+    compose down --remove-orphans
+    echo ""
+    echo "============================================"
+    echo "  QControlHub 服务已卸载"
+    echo "============================================"
+    echo ""
+    echo "  已保留配置：$ENV_FILE"
+    [ -d "$SECRET_DIR" ] && echo "  已保留密钥：$SECRET_DIR"
+    if [ "$MODE" = "bundled" ]; then
+        echo "  已保留数据：Docker PostgreSQL 命名卷"
+    else
+        echo "  外部 PostgreSQL 数据未被修改"
+    fi
     echo ""
 }
 
@@ -512,38 +793,37 @@ if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
     return 0
 fi
 
-# ---- 选择部署方式 ----
-if [ -z "$MODE" ]; then
-    [ -t 0 ] || die "未指定部署模式；非交互模式请使用 -m bundled 或 -m external"
-    echo ""
-    echo "QControlHub 部署方式选择"
-    echo ""
-    echo "  1. 全套部署 — Docker Compose 内置 PostgreSQL + 控制面（推荐）"
-    echo "  2. 连接外部 PostgreSQL — 仅部署控制面容器"
-    echo ""
-    read -r -p "请选择 [1-2] " choice
-    case "$choice" in
-        1) MODE="bundled" ;;
-        2) MODE="external" ;;
-        *) echo "无效选择：$choice"; exit 1 ;;
-    esac
+# ---- 选择管理操作和部署方式 ----
+if [ -z "$ACTION" ]; then
+    if [ -n "$MODE" ]; then
+        ACTION="install"
+    else
+        choose_action
+    fi
+fi
+if [ "$ACTION" = "install" ]; then
+    [ -n "$MODE" ] || choose_mode
+else
+    [ -n "$MODE" ] || detect_existing_mode
+fi
+if [ "$ACTION" = "uninstall" ] && [ "$FORCE" = true ]; then
+    die "卸载操作不支持 -f；默认始终保留配置、密钥和数据库卷"
+fi
+configure_compose_args
+
+require_commands
+
+# ---- 执行管理操作 ----
+if [ "$ACTION" = "uninstall" ]; then
+    uninstall_services
+    exit 0
 fi
 
 case "$MODE" in
     bundled)
-        COMPOSE_ARGS=()
-        ;;
-    external)
-        COMPOSE_ARGS=(-f "$EXTERNAL_COMPOSE_FILE")
-        ;;
-esac
-
-require_commands
-
-# ---- 执行部署 ----
-case "$MODE" in
-    bundled)
-        if [ -f "$ENV_FILE" ] && [ "$FORCE" = false ]; then
+        if [ "$ACTION" = "update" ]; then
+            echo "-> 更新内置 PostgreSQL 部署并复用现有配置"
+        elif [ -f "$ENV_FILE" ] && [ "$FORCE" = false ]; then
             echo "-> 复用已有 .env，并补齐缺失配置"
         elif [ "$FORCE" = true ]; then
             echo "-> 轮换应用密钥（保留 PostgreSQL 密码）"
@@ -551,19 +831,24 @@ case "$MODE" in
             echo "-> 生成部署配置写入 .env"
         fi
         prepare_bundled_env
+        show_admin_token_once
+        write_secret_compose_override
         start_services
 
+        panel_url="$(local_panel_url)"
         echo "-> 等待控制面就绪..."
-        if ! wait_ready "http://127.0.0.1:8080/readyz" "$READY_TIMEOUT"; then
+        if ! wait_ready "$panel_url/readyz" "$READY_TIMEOUT"; then
             show_diagnostics
             die "控制面未在 ${READY_TIMEOUT} 秒内就绪"
         fi
 
-        token="$(read_env_key QCH_ADMIN_TOKEN)"
-        show_result "$token" "http://127.0.0.1:8080" "docker compose down"
+        [ "$ACTION" = "update" ] && result_name="更新完成" || result_name="部署完成"
+        show_result "$result_name" "$panel_url" "docker compose -f docker-compose.yml -f docker-compose.secrets.yml down"
         ;;
     external)
-        if [ -f "$ENV_FILE" ] && [ "$FORCE" = false ]; then
+        if [ "$ACTION" = "update" ]; then
+            echo "-> 更新外部 PostgreSQL 部署并复用现有配置"
+        elif [ -f "$ENV_FILE" ] && [ "$FORCE" = false ]; then
             echo "-> 复用已有 .env，并补齐缺失配置"
         elif [ "$FORCE" = true ]; then
             echo "-> 轮换应用密钥"
@@ -571,18 +856,22 @@ case "$MODE" in
             echo "-> 生成部署配置写入 .env"
         fi
         prepare_external_env
+        show_admin_token_once
 
         echo "-> 生成 $EXTERNAL_COMPOSE_FILE"
         write_external_compose
+        write_secret_compose_override
 
         start_services
 
+        panel_url="$(local_panel_url)"
         echo "-> 等待控制面就绪..."
-        if ! wait_ready "http://127.0.0.1:8080/readyz" "$READY_TIMEOUT"; then
+        if ! wait_ready "$panel_url/readyz" "$READY_TIMEOUT"; then
             show_diagnostics
             die "控制面未在 ${READY_TIMEOUT} 秒内就绪"
         fi
 
-        show_result "$(read_env_key QCH_ADMIN_TOKEN)" "http://127.0.0.1:8080" "docker compose -f docker-compose.external.yml down"
+        [ "$ACTION" = "update" ] && result_name="更新完成" || result_name="部署完成"
+        show_result "$result_name" "$panel_url" "docker compose -f docker-compose.external.yml -f docker-compose.secrets.yml down"
         ;;
 esac

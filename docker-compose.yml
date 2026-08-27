@@ -38,7 +38,10 @@ services:
         condition: service_healthy
     environment:
       QCH_DATABASE_URL: postgresql://${POSTGRES_USER:-qcontrolhub}:${POSTGRES_PASSWORD:?run make init-env or set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-qcontrolhub}?sslmode=disable
-      QCH_ADMIN_TOKEN: ${QCH_ADMIN_TOKEN:?run make init-env or set QCH_ADMIN_TOKEN}
+      # New deployments inject only the digest through the generated secrets
+      # override. The raw value remains for legacy/manual compatibility.
+      QCH_ADMIN_TOKEN: ${QCH_ADMIN_TOKEN:-}
+      QCH_ADMIN_TOKEN_SHA256: ${QCH_ADMIN_TOKEN_SHA256:-}
       QCH_LISTEN: 0.0.0.0:8080
       QCH_BEHIND_TLS_PROXY: ${QCH_BEHIND_TLS_PROXY:-true}
       QCH_ALLOW_INSECURE_HTTP: ${QCH_ALLOW_INSECURE_HTTP:-false}
@@ -52,6 +55,8 @@ services:
       QCH_WEBHOOK_SECRET: ${QCH_WEBHOOK_SECRET:-}
       QCH_CONFIG_ENCRYPTION_KEY: ${QCH_CONFIG_ENCRYPTION_KEY:-}
       QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS: ${QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS:-}
+      QCH_CONFIG_ENCRYPTION_KEY_FILE: ${QCH_CONFIG_ENCRYPTION_KEY_FILE:-}
+      QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS_FILE: ${QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS_FILE:-}
       QCH_OPERATOR_TOKENS: ${QCH_OPERATOR_TOKENS:-}
       QCH_READONLY_TOKENS: ${QCH_READONLY_TOKENS:-}
       # Managed public-IP probes default to api.ipify.org/api6.ipify.org with
