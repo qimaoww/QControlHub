@@ -73,9 +73,10 @@ type githubReleaseAsset struct {
 }
 
 type resolvedCoreRelease struct {
-	Tag        string
-	Asset      githubReleaseAsset
-	Repository string
+	Tag           string
+	Asset         githubReleaseAsset
+	FallbackAsset githubReleaseAsset
+	Repository    string
 }
 
 func NewCoreUpdater() *CoreUpdater {
@@ -132,51 +133,38 @@ func (updater *CoreUpdater) Install(ctx context.Context, engine core.Engine, spe
 		}
 		return "", err
 	}
-	downloadPath, err := updater.downloadAsset(ctx, release.Asset)
-	if err != nil {
-		return "", fmt.Errorf("download %s from %s: %w", release.Asset.Name, release.Repository, err)
-	}
-	defer os.Remove(downloadPath)
-
 	directory := filepath.Dir(spec.Binary)
 	root, err := os.OpenRoot(directory)
 	if err != nil {
 		return "", fmt.Errorf("open core install directory: %w", err)
 	}
 	defer root.Close()
-	tempName, err := randomCoreTempName(root)
+	selectedAsset := release.Asset
+	tempName, versionOutput, verificationFailed, err := updater.stageCoreCandidate(ctx, engine, root, directory, release, selectedAsset)
+	fallbackReason := ""
+	if err != nil && verificationFailed && release.FallbackAsset.Name != "" {
+		primaryErr := err
+		selectedAsset = release.FallbackAsset
+		tempName, versionOutput, _, err = updater.stageCoreCandidate(ctx, engine, root, directory, release, selectedAsset)
+		if err != nil {
+			return "", fmt.Errorf("default Mihomo binary failed version verification (%v); compatible fallback also failed: %w", primaryErr, err)
+		}
+		fallbackReason = "default Mihomo binary failed version verification; installed compatible CPU fallback"
+	}
 	if err != nil {
 		return "", err
 	}
 	defer root.Remove(tempName)
-	temp, err := root.OpenFile(tempName, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o700)
-	if err != nil {
-		return "", fmt.Errorf("create core install candidate: %w", err)
-	}
-	if err := extractCoreBinary(engine, release.Asset.Name, downloadPath, temp); err != nil {
-		temp.Close()
-		return "", err
-	}
-	if err := temp.Sync(); err != nil {
-		temp.Close()
-		return "", err
-	}
-	if err := temp.Close(); err != nil {
-		return "", err
-	}
-
-	candidatePath := filepath.Join(directory, tempName)
-	versionOutput, err := verifyCoreCandidate(ctx, engine, candidatePath, release.Tag)
-	if err != nil {
-		return "", err
-	}
 	backup, err := replaceCoreBinary(root, filepath.Base(spec.Binary), tempName)
 	if err != nil {
 		return "", err
 	}
 
 	restartOutput, restartErr := serviceCommandAndVerifyWithManager(ctx, manager, spec.Service, core.ActionRestart)
-	output := fmt.Sprintf("installed %s release %s\nverified asset SHA-256: %s\nbinary: %s", engine, release.Tag, release.Asset.Digest, spec.Binary)
+	output := fmt.Sprintf("installed %s release %s\nverified asset SHA-256: %s\nbinary: %s", engine, release.Tag, selectedAsset.Digest, spec.Binary)
+	if fallbackReason != "" {
+		output += "\nfallback: " + fallbackReason
+	}
 	if label := coreSourceLabel(engine, selector, source); label != "" {
 		output += "\nsource: " + label
 	}
@@ -220,6 +208,46 @@ func (updater *CoreUpdater) Install(ctx context.Context, engine core.Engine, spe
 		}
 	}
 	return output, fmt.Errorf("new core restart failed and the binary change was rolled back: %w", restartErr)
+}
+
+func (updater *CoreUpdater) stageCoreCandidate(ctx context.Context, engine core.Engine, root *os.Root, directory string, release resolvedCoreRelease, asset githubReleaseAsset) (tempName, versionOutput string, verificationFailed bool, err error) {
+	downloadPath, err := updater.downloadAsset(ctx, asset)
+	if err != nil {
+		return "", "", false, fmt.Errorf("download %s from %s: %w", asset.Name, release.Repository, err)
+	}
+	defer os.Remove(downloadPath)
+
+	tempName, err = randomCoreTempName(root)
+	if err != nil {
+		return "", "", false, err
+	}
+	succeeded := false
+	defer func() {
+		if !succeeded {
+			_ = root.Remove(tempName)
+		}
+	}()
+	temp, err := root.OpenFile(tempName, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o700)
+	if err != nil {
+		return "", "", false, fmt.Errorf("create core install candidate: %w", err)
+	}
+	if err := extractCoreBinary(engine, asset.Name, downloadPath, temp); err != nil {
+		temp.Close()
+		return "", "", false, err
+	}
+	if err := temp.Sync(); err != nil {
+		temp.Close()
+		return "", "", false, err
+	}
+	if err := temp.Close(); err != nil {
+		return "", "", false, err
+	}
+	versionOutput, err = verifyCoreCandidate(ctx, engine, filepath.Join(directory, tempName), release.Tag)
+	if err != nil {
+		return "", versionOutput, true, err
+	}
+	succeeded = true
+	return tempName, versionOutput, false, nil
 }
 
 func stopServiceAfterFirstInstallRollback(service string, managers ...*ServiceManager) (string, error) {
@@ -308,7 +336,11 @@ func (updater *CoreUpdater) resolveRelease(ctx context.Context, engine core.Engi
 	if err != nil {
 		return resolvedCoreRelease{}, err
 	}
-	return resolvedCoreRelease{Tag: release.TagName, Asset: asset, Repository: repository}, nil
+	fallback, err := selectMihomoCompatibleFallback(engine, updater.goarch, release, asset)
+	if err != nil {
+		return resolvedCoreRelease{}, err
+	}
+	return resolvedCoreRelease{Tag: release.TagName, Asset: asset, FallbackAsset: fallback, Repository: repository}, nil
 }
 
 // officialCoreRepository returns the GitHub repository that publishes releases
@@ -373,37 +405,72 @@ func (err missingCoreReleaseAssetError) Error() string {
 	return fmt.Sprintf("%s release does not contain expected asset %s", err.engine, err.asset)
 }
 
-// matchMihomoLinuxAsset returns the single viable generic linux binary for the
-// requested mihomo architecture. found is false when the release carries no
-// usable platform binary (for example Mihomo's toolchain-only Alpha release).
-// A non-nil error is returned only for ambiguous or invalid releases and must
-// be treated as fail-closed.
+// matchMihomoLinuxAsset returns the single default Linux binary for the
+// requested Mihomo architecture. Official amd64 releases currently publish an
+// unqualified performance build and a separate compatible build. The default
+// remains primary; compatible is selected separately as a verification-only
+// fallback. A non-nil error is returned for ambiguous or invalid releases and
+// must be treated as fail-closed.
 func matchMihomoLinuxAsset(arch string, release githubRelease) (githubReleaseAsset, bool, error) {
 	prefix := "mihomo-linux-" + arch + "-"
-	var matched githubReleaseAsset
+	var compatible, generic githubReleaseAsset
 	for _, asset := range release.Assets {
 		if !strings.HasPrefix(asset.Name, prefix) || !strings.HasSuffix(asset.Name, ".gz") {
 			continue
 		}
 		variant := strings.TrimSuffix(strings.TrimPrefix(asset.Name, prefix), ".gz")
+		if arch == "amd64" && strings.HasPrefix(variant, "compatible-") {
+			if err := validateReleaseAssetMetadata(asset); err != nil {
+				return githubReleaseAsset{}, false, err
+			}
+			if compatible.Name != "" {
+				return githubReleaseAsset{}, false, errors.New("Mihomo release contains multiple compatible Linux assets")
+			}
+			compatible = asset
+			continue
+		}
 		if strings.HasPrefix(variant, "v1-") || strings.HasPrefix(variant, "v2-") || strings.HasPrefix(variant, "v3-") {
 			continue
 		}
-		if strings.Contains(variant, "compatible") || strings.Contains(variant, "go1") {
+		if strings.Contains(variant, "go1") {
 			continue
 		}
 		if err := validateReleaseAssetMetadata(asset); err != nil {
 			return githubReleaseAsset{}, false, err
 		}
-		if matched.Name != "" {
+		if generic.Name != "" {
 			return githubReleaseAsset{}, false, errors.New("Mihomo release contains multiple generic Linux assets")
 		}
-		matched = asset
+		generic = asset
 	}
-	if matched.Name == "" {
+	if generic.Name != "" {
+		return generic, true, nil
+	}
+	if compatible.Name == "" {
 		return githubReleaseAsset{}, false, nil
 	}
-	return matched, true, nil
+	return compatible, true, nil
+}
+
+func selectMihomoCompatibleFallback(engine core.Engine, arch string, release githubRelease, primary githubReleaseAsset) (githubReleaseAsset, error) {
+	if engine != core.EngineMihomo || arch != "amd64" || strings.Contains(primary.Name, "-compatible-") {
+		return githubReleaseAsset{}, nil
+	}
+	prefix := "mihomo-linux-amd64-compatible-"
+	var fallback githubReleaseAsset
+	for _, asset := range release.Assets {
+		if !strings.HasPrefix(asset.Name, prefix) || !strings.HasSuffix(asset.Name, ".gz") {
+			continue
+		}
+		if err := validateReleaseAssetMetadata(asset); err != nil {
+			return githubReleaseAsset{}, err
+		}
+		if fallback.Name != "" {
+			return githubReleaseAsset{}, errors.New("Mihomo release contains multiple compatible Linux assets")
+		}
+		fallback = asset
+	}
+	return fallback, nil
 }
 
 func selectCoreReleaseAsset(engine core.Engine, arch string, release githubRelease, libcValues ...string) (githubReleaseAsset, error) {
