@@ -258,8 +258,8 @@ systemd 单元的 `ProtectSystem=strict` 只放行固定的 `/etc/qagent` 配置
 ### 更新控制面
 
 ```bash
-docker compose build --pull control-plane
-docker compose up -d control-plane
+docker compose -f docker-compose.yml -f docker-compose.secrets.yml build --pull control-plane
+docker compose -f docker-compose.yml -f docker-compose.secrets.yml up -d control-plane
 docker compose ps
 ```
 

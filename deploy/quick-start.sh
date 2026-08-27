@@ -31,7 +31,7 @@ usage() {
   -m MODE             选择部署模式；省略时交互选择
   -d DATABASE_URL     external 模式使用的 PostgreSQL 连接串
   -a ADMIN_TOKEN      管理员令牌（至少 32 字节）
-  -f                  轮换应用密钥；执行前备份现有 .env，数据库密码不变
+  -f                  轮换管理员 token 与应用密钥；数据库密码不变
   -t SECONDS          就绪检查超时时间（默认 60 秒）
   -h                  显示帮助
 
@@ -154,10 +154,14 @@ validate_admin_token_digest() {
 }
 
 read_secret_file() {
-    local file="$1"
+    local file="$1" value
     [ -f "$file" ] || return 0
     [ ! -L "$file" ] || die "secret 文件不能是符号链接：$file"
-    tr -d '\r\n' < "$file"
+    value="$(<"$file")"
+    case "$value" in
+        *$'\n'*|*$'\r'*) die "secret 文件只能包含一行：$file" ;;
+    esac
+    printf '%s' "$value"
 }
 
 write_secret_file() {
@@ -251,6 +255,7 @@ read_env_key() {
 backup_env() {
     [ -f "$ENV_FILE" ] || return 0
     local backup_file
+    umask 077
     backup_file="${ENV_FILE}.bak.$(date +%Y%m%d%H%M%S).$$.${RANDOM}"
     cp -p -- "$ENV_FILE" "$backup_file"
     awk '
@@ -652,25 +657,34 @@ prepare_external_env() {
 }
 
 show_result() {
-    local token="$1" url="$2" stop_cmd="$3"
+    local url="$1" stop_cmd="$2"
     echo ""
     echo "============================================"
     echo "  QControlHub 部署完成"
     echo "============================================"
     echo ""
     echo "  访问地址：  $url"
-    if [ -n "$token" ]; then
-        echo "  管理员令牌（仅本次显示）：$token"
-        echo "  请立即保存到密码管理器；控制面只持久化 SHA-256 摘要。"
-    else
-        echo "  管理员令牌：未重新显示（请使用密码管理器中保存的原令牌）"
-    fi
+    echo "  管理员 token：请使用密码管理器中保存的原文"
     echo "  配置文件：  $ENV_FILE"
     echo "  密钥目录：  $SECRET_DIR"
     echo ""
     echo "  停止服务：  $stop_cmd"
     echo "  查看日志：  ${stop_cmd/down/logs -f}"
     echo ""
+}
+
+show_admin_token_once() {
+    [ -n "$ADMIN_TOKEN_TO_DISPLAY" ] || return 0
+    echo ""
+    echo "============================================"
+    echo "  管理员 token（仅本次显示）"
+    echo "  $ADMIN_TOKEN_TO_DISPLAY"
+    echo ""
+    echo "  请立即保存到密码管理器。"
+    echo "  .env 只保存 SHA-256 摘要，之后无法恢复原文。"
+    echo "============================================"
+    echo ""
+    ADMIN_TOKEN_TO_DISPLAY=""
 }
 
 # Keep the environment preparation functions sourceable for the isolated shell
@@ -718,6 +732,7 @@ case "$MODE" in
             echo "-> 生成部署配置写入 .env"
         fi
         prepare_bundled_env
+        show_admin_token_once
         write_secret_compose_override
         start_services
 
@@ -727,7 +742,7 @@ case "$MODE" in
             die "控制面未在 ${READY_TIMEOUT} 秒内就绪"
         fi
 
-        show_result "$ADMIN_TOKEN_TO_DISPLAY" "http://127.0.0.1:8080" "docker compose -f docker-compose.yml -f docker-compose.secrets.yml down"
+        show_result "http://127.0.0.1:8080" "docker compose -f docker-compose.yml -f docker-compose.secrets.yml down"
         ;;
     external)
         if [ -f "$ENV_FILE" ] && [ "$FORCE" = false ]; then
@@ -738,6 +753,7 @@ case "$MODE" in
             echo "-> 生成部署配置写入 .env"
         fi
         prepare_external_env
+        show_admin_token_once
 
         echo "-> 生成 $EXTERNAL_COMPOSE_FILE"
         write_external_compose
@@ -751,6 +767,6 @@ case "$MODE" in
             die "控制面未在 ${READY_TIMEOUT} 秒内就绪"
         fi
 
-        show_result "$ADMIN_TOKEN_TO_DISPLAY" "http://127.0.0.1:8080" "docker compose -f docker-compose.external.yml -f docker-compose.secrets.yml down"
+        show_result "http://127.0.0.1:8080" "docker compose -f docker-compose.external.yml -f docker-compose.secrets.yml down"
         ;;
 esac

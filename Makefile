@@ -54,7 +54,8 @@ init-env:
 	admin_token_sha256="$$(printf '%s' "$$admin_token" | openssl dgst -sha256 | awk '{print $$NF}')"; \
 	webhook_secret="$$(openssl rand -hex 32)"; \
 	config_key="$$(openssl rand -hex 32)"; \
-	install -d -m 0700 .secrets; \
+	mkdir -p .secrets; \
+	chmod 0700 .secrets; \
 	printf '%s\n' "$$config_key" > .secrets/config-encryption-key; \
 	printf '\n' > .secrets/config-encryption-previous-keys; \
 	chmod 0644 .secrets/config-encryption-key .secrets/config-encryption-previous-keys; \
