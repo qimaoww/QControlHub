@@ -122,6 +122,29 @@ func TestCPUUsagePercentZeroDeltaReportsIdleZero(t *testing.T) {
 	}
 }
 
+func TestSampledCPUPercentIgnoresBackToBackTickerSample(t *testing.T) {
+	t.Parallel()
+	started := time.Unix(100, 0)
+	previous := metricSample{
+		cpuTotal: 1000, cpuIdle: 800, cpuAt: started, cpuValid: true,
+		cpuPercent: 12.5, cpuPercentValid: true,
+	}
+	percent, available, advance := sampledCPUPercent(previous, 1001, 800, started.Add(5*time.Millisecond))
+	if !available || advance || percent != 12.5 {
+		t.Fatalf("back-to-back sample = (%v, %v, %v), want cached 12.5 without advancing", percent, available, advance)
+	}
+	percent, available, advance = sampledCPUPercent(previous, 1100, 850, started.Add(time.Second))
+	if !available || !advance || percent != 50 {
+		t.Fatalf("stable sample = (%v, %v, %v), want fresh 50", percent, available, advance)
+	}
+	reset := previous
+	reset.cpuTotal, reset.cpuIdle = 1200, 900
+	percent, available, advance = sampledCPUPercent(reset, 100, 80, started.Add(time.Second))
+	if !available || !advance || percent != 12.5 {
+		t.Fatalf("counter reset = (%v, %v, %v), want cached 12.5 with a new baseline", percent, available, advance)
+	}
+}
+
 func TestMetricsCollectorReadsLiveLinuxHost(t *testing.T) {
 	collector := NewMetricsCollector()
 	first, err := collector.Collect(context.Background())
