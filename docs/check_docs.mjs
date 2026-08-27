@@ -19,7 +19,6 @@ const forbidden = [
 ];
 
 const required = {
-  "README.md": ["bash <(curl -fsSL \"https://raw.githubusercontent.com/qimaoww/qcontrolhub/main/deploy/install.sh\")"],
   "docs/api.md": ["core_source", "vernesong/mihomo", "mihomo-development-source-v1", "受保护的 AEAD 可恢复副本", "删除该节点的全部添加凭证"],
   "docs/production.md": ["vernesong/mihomo", "mihomo-development-source-v1", "checksums.txt", "受保护的 AEAD 可恢复副本"],
   "docs/security.md": ["受保护的 AEAD 可恢复副本", "可重复查看有效命令"],

@@ -34,13 +34,13 @@ QControlHub 是面向 Linux 节点的配置与远程运维平台，由 Go 控制
 
 ### 生产部署
 
-在 Linux 控制面主机运行以下一键命令，安装器会自动下载 QControlHub、交互选择内置或外部 PostgreSQL 模式，并完成密钥生成、Compose 服务启动和就绪检查：
+在 Linux 控制面主机运行以下一键命令，脚本会交互选择内置或外部 PostgreSQL 模式，并完成密钥生成、Compose 服务启动和就绪检查：
 
 ```bash
-bash <(curl -fsSL "https://raw.githubusercontent.com/qimaoww/qcontrolhub/main/deploy/install.sh")
+bash <(curl -fsSL "https://raw.githubusercontent.com/qimaoww/qcontrolhub/main/deploy/quick-start.sh")
 ```
 
-默认安装到当前目录下的 `qcontrolhub`；可在命令前设置 `QCH_INSTALL_DIR=/opt/qcontrolhub` 覆盖路径。重复执行会在工作区干净时快进到最新 `main`，并复用现有 `.env`。一键脚本的部署参数见 [`deploy/quick-start.sh`](deploy/quick-start.sh)。它不替代 TLS、反向代理、数据库保护、备份与恢复演练；上线前请按 [生产部署指南](docs/production.md) 完成全部步骤，并核对 [安全基线](docs/security.md)。
+一键脚本的参数与重复执行行为见 [`deploy/quick-start.sh`](deploy/quick-start.sh)。它不替代 TLS、反向代理、数据库保护、备份与恢复演练；上线前请按 [生产部署指南](docs/production.md) 完成全部步骤，并核对 [安全基线](docs/security.md)。
 
 ### Agent 接入
 
