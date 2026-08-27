@@ -668,7 +668,7 @@ function contextMarkup(title) {
     return `${can("traffic.manage") ? '<a class="context-primary" href="#traffic-new">＋ 添加端口配额</a>' : ""}<a class="context-primary ${selected ? "" : "active"}" href="#traffic-all" data-context-traffic-agent="">全部节点</a><div class="context-section-label"><span>按节点查看</span><b>${agents.length}</b></div><nav class="context-list" aria-label="端口流量节点">${agents.map((agent) => { const count = policies.filter((policy) => policy.agent_id === agent.id).length; const blocked = policies.filter((policy) => policy.agent_id === agent.id && policy.blocked).length; return `<a class="${selected === agent.id ? "active" : ""}" href="#traffic-agent-${esc(agent.id)}" data-context-traffic-agent="${esc(agent.id)}"><i class="status-dot ${blocked ? "bad" : agent.status === "online" ? "ok" : ""}"></i><span><strong>${esc(agent.name)}</strong><small>${count ? `${count} 个端口${blocked ? ` · ${blocked} 个封禁` : ""}` : "尚未监控端口"}</small></span></a>`; }).join("") || "<p>还没有节点</p>"}</nav>`;
   }
   if (state.route === "settings")
-    return `<nav class="context-menu" aria-label="设置目录"><a class="active" href="#identity"><span>01</span>面板标识</a><a href="#defaults"><span>02</span>操作默认值</a><a href="#synchronization"><span>03</span>状态同步</a><a href="#notifications"><span>04</span>事件通知</a>${can("users.manage") ? '<a href="#users"><span>05</span>用户管理</a>' : ""}</nav>`;
+    return `<nav class="context-menu" aria-label="设置目录"><a class="active" href="#identity"><span>01</span>面板标识</a><a href="#defaults"><span>02</span>操作默认值</a><a href="#synchronization"><span>03</span>状态同步</a><a href="#core-log-storage"><span>04</span>内核日志保存</a><a href="#notifications"><span>05</span>事件通知</a>${can("users.manage") ? '<a href="#users"><span>06</span>用户管理</a>' : ""}</nav>`;
   const agent = (state.data.agents || []).find(
     (item) => item.id === state.data.agentId,
   );
@@ -711,6 +711,7 @@ async function renderOnce() {
     identity: "settings",
     defaults: "settings",
     synchronization: "settings",
+    "core-log-storage": "settings",
     notifications: "settings",
     users: "settings",
     "preset-node": "agents",
