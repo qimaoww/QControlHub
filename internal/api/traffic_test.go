@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
@@ -22,6 +23,27 @@ func TestTrafficPoliciesForAgentKeepsMonitorOnlySafeForLegacyAgents(t *testing.T
 	}
 	if policies[0].LimitBytes != 1024 {
 		t.Fatal("preparing Agent policies mutated the management API value")
+	}
+}
+
+func TestTrafficEndpointsFromConfigsReturnsPortsBeforePoliciesExist(t *testing.T) {
+	t.Parallel()
+	updatedAt := time.Date(2026, 8, 27, 0, 0, 0, 0, time.UTC)
+	endpoints := trafficEndpointsFromConfigs([]core.Config{
+		{
+			AgentID: "agt_0123456789abcdef", Engine: core.EngineXray, Version: 4, UpdatedAt: updatedAt,
+			Content: `{"inbounds":[{"tag":"existing-reality","protocol":"vless","port":443},{"tag":"existing-udp","protocol":"future","port":2443,"settings":{"network":"udp"}}]}`,
+		},
+		{Engine: core.EngineSingBox, Content: `{"inbounds":[{"tag":"archive-only","type":"vless","listen_port":8443}]}`},
+	})
+	if len(endpoints) != 2 {
+		t.Fatalf("endpoints = %+v", endpoints)
+	}
+	if endpoints[0].AgentID != "agt_0123456789abcdef" || endpoints[0].Name != "existing-reality" || endpoints[0].Port != 443 || endpoints[0].Protocol != core.TrafficProtocolTCP || endpoints[0].ConfigVersion != 4 || !endpoints[0].ConfigUpdatedAt.Equal(updatedAt) {
+		t.Fatalf("first endpoint = %+v", endpoints[0])
+	}
+	if endpoints[1].Name != "existing-udp" || endpoints[1].Port != 2443 || endpoints[1].Protocol != core.TrafficProtocolUDP {
+		t.Fatalf("second endpoint = %+v", endpoints[1])
 	}
 }
 

@@ -3,11 +3,13 @@ package api
 import (
 	"math"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
+	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
 )
 
 func trafficPoliciesForAgent(policies []core.PortTrafficPolicy) []core.PortTrafficPolicy {
@@ -64,6 +66,50 @@ func (s *Server) listPortTrafficPolicies(w http.ResponseWriter, request *http.Re
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, policies)
+}
+
+func (s *Server) listPortTrafficEndpoints(w http.ResponseWriter, request *http.Request) {
+	configs, err := s.store.ListAgentConfigs(request.Context())
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, trafficEndpointsFromConfigs(configs))
+}
+
+func trafficEndpointsFromConfigs(configs []core.Config) []core.PortTrafficEndpoint {
+	result := make([]core.PortTrafficEndpoint, 0)
+	seen := make(map[string]struct{})
+	for _, config := range configs {
+		if config.AgentID == "" || !config.Engine.Valid() {
+			continue
+		}
+		for _, endpoint := range serverconfig.DiscoverTrafficPorts(config.Engine, config.Content) {
+			endpoint.AgentID = config.AgentID
+			endpoint.ConfigVersion = config.Version
+			endpoint.ConfigUpdatedAt = config.UpdatedAt
+			key := endpoint.AgentID + "\x00" + string(endpoint.Engine) + "\x00" + strconv.Itoa(endpoint.Port) + "\x00" + string(endpoint.Protocol) + "\x00" + endpoint.Name
+			if _, exists := seen[key]; exists {
+				continue
+			}
+			seen[key] = struct{}{}
+			result = append(result, endpoint)
+		}
+	}
+	sort.SliceStable(result, func(left, right int) bool {
+		if result[left].AgentID != result[right].AgentID {
+			return result[left].AgentID < result[right].AgentID
+		}
+		if result[left].Port != result[right].Port {
+			return result[left].Port < result[right].Port
+		}
+		if result[left].Engine != result[right].Engine {
+			return result[left].Engine < result[right].Engine
+		}
+		return result[left].Name < result[right].Name
+	})
+	return result
 }
 
 func (s *Server) createPortTrafficPolicy(w http.ResponseWriter, request *http.Request) {

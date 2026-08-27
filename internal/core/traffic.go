@@ -86,6 +86,20 @@ type PortTrafficPolicyRequest struct {
 	AutoBlock   *bool           `json:"auto_block,omitempty"`
 }
 
+// PortTrafficEndpoint is a listener discovered in a node-owned core
+// configuration. It is deliberately separate from PortTrafficPolicy: a
+// configured listener exists before an operator decides whether to attach a
+// quota to it.
+type PortTrafficEndpoint struct {
+	AgentID         string          `json:"agent_id"`
+	Name            string          `json:"name"`
+	Engine          Engine          `json:"engine"`
+	Port            int             `json:"port"`
+	Protocol        TrafficProtocol `json:"protocol"`
+	ConfigVersion   int             `json:"config_version"`
+	ConfigUpdatedAt time.Time       `json:"config_updated_at"`
+}
+
 type PortTrafficUsage struct {
 	PolicyID             string    `json:"policy_id"`
 	ResetGeneration      uint64    `json:"reset_generation"`
