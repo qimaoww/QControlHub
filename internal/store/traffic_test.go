@@ -299,7 +299,10 @@ func TestTrafficHistoryUpgradeBaseline(t *testing.T) {
 	}
 	reportedAt := time.Now().UTC().Truncate(time.Second)
 	if _, err := dataStore.pool.Exec(ctx, `
-		UPDATE port_traffic_policies SET received_bytes=$2,sent_bytes=$3,used_bytes=$4,last_reported_at=$5,traffic_history_initialized=false
+		UPDATE port_traffic_policies SET received_bytes=$2,sent_bytes=$3,used_bytes=$4,
+			reported_received_bytes=$2,reported_sent_bytes=$3,
+			period_start='2026-08-01',period_end='2026-09-01',
+			last_reported_at=$5,traffic_history_initialized=false
 		WHERE id=$1`, policy.ID, 6<<30, 3<<30, 9<<30, reportedAt); err != nil {
 		t.Fatal(err)
 	}
@@ -319,8 +322,12 @@ func TestTrafficHistoryUpgradeBaseline(t *testing.T) {
 		t.Fatal(err)
 	}
 	daily, err := dataStore.ListPortTrafficDailyUsage(ctx, agent.ID, policy.ID, reportedAt)
-	if err != nil || len(daily) != 1 || daily[0].ReceivedBytes != 1<<30 || daily[0].SentBytes != 1<<30 || daily[0].UsedBytes != 2<<30 || daily[0].SampleCount != 2 {
+	if err != nil || len(daily) != 1 || daily[0].ReceivedBytes != 2<<30 || daily[0].SentBytes != 1<<30 || daily[0].UsedBytes != 3<<30 || daily[0].SampleCount != 2 {
 		t.Fatalf("upgrade baseline daily usage = %+v, %v", daily, err)
+	}
+	policies, err := dataStore.AgentPortTrafficPolicies(ctx, agent.ID)
+	if err != nil || len(policies) != 1 || policies[0].ReceivedBytes != 8<<30 || policies[0].SentBytes != 4<<30 || policies[0].UsedBytes != 12<<30 {
+		t.Fatalf("upgrade baseline cumulative totals = %+v, %v", policies, err)
 	}
 }
 

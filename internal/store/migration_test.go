@@ -309,11 +309,11 @@ func TestOpenMigratesAppliedV26TrafficColumns(t *testing.T) {
 			id,agent_id,name,engine,port,protocol,cycle,cycle_anchor,limit_bytes,
 			auto_block,quota_enabled,discovered,traffic_history_initialized,reset_generation,
 			received_bytes,sent_bytes,used_bytes,receive_bps,send_bps,
-			blocked,enforcement_available,enforcement_error,created_at,updated_at
+			blocked,enforcement_available,enforcement_error,period_start,period_end,last_reported_at,created_at,updated_at
 		) VALUES (
-			'trf_migration_v26','agt_migration_v26','existing quota','sing-box',443,'tcp',
+			'trf_2626262626262626','agt_migration_v26','existing quota','sing-box',443,'tcp',
 			'monthly','2026-08-01',1048576,true,true,false,true,4,
-			123,198,321,12,19,false,true,'',now(),now()
+			123,198,321,12,19,false,true,'','2026-08-01','2026-09-01','2026-08-27 23:59:45+00',now(),now()
 		);
 		ALTER TABLE port_traffic_policies DROP COLUMN quota_enabled;
 		ALTER TABLE port_traffic_policies DROP COLUMN discovered;
@@ -344,7 +344,7 @@ func TestOpenMigratesAppliedV26TrafficColumns(t *testing.T) {
 		SELECT quota_enabled,discovered,traffic_history_initialized,auto_block,
 		       limit_bytes,received_bytes,sent_bytes,used_bytes,reset_generation,
 		       reported_received_bytes,reported_sent_bytes
-		FROM port_traffic_policies WHERE id='trf_migration_v26'
+		FROM port_traffic_policies WHERE id='trf_2626262626262626'
 	`).Scan(
 		&quotaEnabled, &discovered, &historyInitialized, &autoBlock,
 		&limitBytes, &receivedBytes, &sentBytes, &usedBytes, &resetGeneration,
@@ -367,6 +367,23 @@ func TestOpenMigratesAppliedV26TrafficColumns(t *testing.T) {
 	if reportedReceivedBytes != receivedBytes || reportedSentBytes != sentBytes {
 		t.Fatalf("migrated traffic baselines received=%d sent=%d", reportedReceivedBytes, reportedSentBytes)
 	}
+	periodStart := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
+	if err := dataStore.UpdatePortTrafficUsage(ctx, "agt_migration_v26", []core.PortTrafficUsage{{
+		PolicyID: "trf_2626262626262626", ResetGeneration: 4,
+		ReceivedBytes: 23, SentBytes: 98, UsedBytes: 121,
+		PeriodStart: periodStart, PeriodEnd: periodStart.AddDate(0, 1, 0), EnforcementAvailable: true,
+	}}, time.Date(2026, 8, 28, 0, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatalf("report reset Agent counters after migration: %v", err)
+	}
+	if err := dataStore.pool.QueryRow(ctx, `
+		SELECT received_bytes,sent_bytes,used_bytes,reported_received_bytes,reported_sent_bytes
+		FROM port_traffic_policies WHERE id='trf_2626262626262626'
+	`).Scan(&receivedBytes, &sentBytes, &usedBytes, &reportedReceivedBytes, &reportedSentBytes); err != nil {
+		t.Fatalf("read post-migration Agent counter reset: %v", err)
+	}
+	if receivedBytes != 146 || sentBytes != 296 || usedBytes != 442 || reportedReceivedBytes != 23 || reportedSentBytes != 98 {
+		t.Fatalf("post-migration Agent reset totals=%d/%d/%d raw=%d/%d", receivedBytes, sentBytes, usedBytes, reportedReceivedBytes, reportedSentBytes)
+	}
 
 	// schemaSQL is intentionally rerun for every future schema bump. Existing
 	// raw Agent baselines must not be overwritten by the cumulative totals on a
@@ -375,7 +392,7 @@ func TestOpenMigratesAppliedV26TrafficColumns(t *testing.T) {
 		UPDATE port_traffic_policies
 		SET received_bytes=1123,sent_bytes=2198,used_bytes=3321,
 		    reported_received_bytes=23,reported_sent_bytes=98
-		WHERE id='trf_migration_v26'
+		WHERE id='trf_2626262626262626'
 	`); err != nil {
 		t.Fatalf("prepare repeated traffic migration: %v", err)
 	}
@@ -389,7 +406,7 @@ func TestOpenMigratesAppliedV26TrafficColumns(t *testing.T) {
 	}
 	if err := dataStore.pool.QueryRow(ctx, `
 		SELECT reported_received_bytes,reported_sent_bytes
-		FROM port_traffic_policies WHERE id='trf_migration_v26'
+		FROM port_traffic_policies WHERE id='trf_2626262626262626'
 	`).Scan(&reportedReceivedBytes, &reportedSentBytes); err != nil {
 		t.Fatalf("read repeated traffic migration baselines: %v", err)
 	}

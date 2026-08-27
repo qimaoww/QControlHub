@@ -493,7 +493,8 @@ func (s *Store) UpdatePortTrafficUsage(ctx context.Context, agentID string, usag
 		receiveBPS, sendBPS := uint64(0), uint64(0)
 		samePeriod := current.periodStart != nil && current.periodEnd != nil &&
 			current.periodStart.UTC().Equal(usage.PeriodStart.UTC()) && current.periodEnd.UTC().Equal(usage.PeriodEnd.UTC())
-		if current.historyInitialized && samePeriod {
+		periodUnknownAfterUpgrade := !current.historyInitialized && current.periodStart == nil && current.periodEnd == nil
+		if samePeriod || periodUnknownAfterUpgrade {
 			receivedDelta = trafficCounterDelta(usage.ReceivedBytes, current.reportedReceived)
 			sentDelta = trafficCounterDelta(usage.SentBytes, current.reportedSent)
 			newReceived = saturatedStoredTrafficAdd(current.received, receivedDelta)
@@ -502,7 +503,7 @@ func (s *Store) UpdatePortTrafficUsage(ctx context.Context, agentID string, usag
 				receiveBPS = trafficAverageRate(receivedDelta, current.lastReported.UTC(), reportedAt)
 				sendBPS = trafficAverageRate(sentDelta, current.lastReported.UTC(), reportedAt)
 			}
-		} else if current.historyInitialized {
+		} else {
 			// A new calendar period starts at zero on the Agent. Its first
 			// report is both the new total and the first daily increment.
 			receivedDelta, sentDelta = usage.ReceivedBytes, usage.SentBytes
