@@ -67,6 +67,20 @@ if PATH="$fake_bin:$PATH" QCH_INSTALL_DIR="$foreign_dir" \
     exit 1
 fi
 
+marker_link_dir="$test_root/marker-link"
+marker_link_target="$test_root/marker-target"
+mkdir -p "$marker_link_dir"
+printf '%s\n' 'do-not-overwrite' > "$marker_link_target"
+if ln -s "$marker_link_target" "$marker_link_dir/.qcontrolhub-quick-start" 2>/dev/null && \
+    [ -L "$marker_link_dir/.qcontrolhub-quick-start" ]; then
+    if PATH="$fake_bin:$PATH" QCH_INSTALL_DIR="$marker_link_dir" \
+        bash <(cat "$repo_root/deploy/quick-start.sh") -h >/dev/null 2>&1; then
+        printf '%s\n' 'streamed quick-start accepted a symlink install marker' >&2
+        exit 1
+    fi
+    grep -Fxq -- 'do-not-overwrite' "$marker_link_target"
+fi
+
 # Existing installations created by the previous Git-based bootstrap are
 # accepted, but only the two runtime files are refreshed; no fetch or clone is
 # performed.
@@ -91,7 +105,7 @@ printf 'unexpected fake git invocation: %s\n' "$*" >&2
 exit 1
 FAKE_GIT
 chmod 755 "$fake_bin/git"
-export QCH_BOOTSTRAP_GIT_LOG="$test_root/git.log"
+export QCH_BOOTSTRAP_GIT_LOG="$test_root/legacy-git.log"
 PATH="$fake_bin:$PATH" QCH_INSTALL_DIR="$legacy_git_dir" \
     bash <(cat "$repo_root/deploy/quick-start.sh") -m bundled
 grep -Fq -- 'remote get-url origin' "$QCH_BOOTSTRAP_GIT_LOG"
@@ -99,6 +113,20 @@ if grep -Eq -- 'clone|fetch|merge|pull' "$QCH_BOOTSTRAP_GIT_LOG"; then
     printf '%s\n' 'streamed quick-start performed a Git checkout update' >&2
     exit 1
 fi
+[ -f "$legacy_git_dir/.qcontrolhub-quick-start" ]
+
+# The migration marker makes later runs independent of the now-dirty legacy
+# checkout; Git must not be consulted again.
+: > "$QCH_BOOTSTRAP_GIT_LOG"
+cat > "$fake_bin/git" <<'FAIL_GIT'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$QCH_BOOTSTRAP_GIT_LOG"
+exit 1
+FAIL_GIT
+chmod 755 "$fake_bin/git"
+PATH="$fake_bin:$PATH" QCH_INSTALL_DIR="$legacy_git_dir" \
+    bash <(cat "$repo_root/deploy/quick-start.sh") -m bundled
+[ ! -s "$QCH_BOOTSTRAP_GIT_LOG" ]
 
 # Re-running from inside a standalone install directory updates that directory
 # instead of creating qcontrolhub/qcontrolhub.

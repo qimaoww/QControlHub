@@ -52,7 +52,7 @@ die() {
 }
 
 bootstrap_streamed_script() {
-    local script_path install_dir origin_url branch marker_file bootstrap_ref base_url script_temp compose_temp install_label
+    local script_path install_dir origin_url branch marker_file marker_temp bootstrap_ref base_url script_temp compose_temp install_label
     script_path="${BASH_SOURCE[0]}"
     case "$script_path" in
         /dev/fd/*|/proc/self/fd/*) ;;
@@ -76,6 +76,7 @@ bootstrap_streamed_script() {
     esac
     [ ! -L "$install_dir" ] || die "安装目录不能是符号链接：$install_dir"
     marker_file="$install_dir/.qcontrolhub-quick-start"
+    [ ! -L "$marker_file" ] || die "一键安装标记不能是符号链接：$marker_file"
     bootstrap_ref="${QCH_BOOTSTRAP_REF:-main}"
     case "$bootstrap_ref" in
         ""|/*|*/|*..*|*[!A-Za-z0-9._/-]*) die "QCH_BOOTSTRAP_REF 不是安全的 Git ref" ;;
@@ -113,8 +114,10 @@ bootstrap_streamed_script() {
     echo "-> ${install_label} QControlHub 运行文件：$install_dir"
     script_temp="$(mktemp "$install_dir/deploy/.quick-start.sh.tmp.XXXXXX")"
     compose_temp="$(mktemp "$install_dir/.docker-compose.yml.tmp.XXXXXX")"
+    marker_temp=""
     cleanup_bootstrap_downloads() {
         rm -f -- "$script_temp" "$compose_temp"
+        [ -z "$marker_temp" ] || rm -f -- "$marker_temp"
     }
     trap cleanup_bootstrap_downloads EXIT HUP INT TERM
     curl -fsSL "$base_url/deploy/quick-start.sh" -o "$script_temp" || die "下载 quick-start.sh 失败"
@@ -125,10 +128,11 @@ bootstrap_streamed_script() {
     chmod 0644 "$compose_temp"
     mv -f -- "$compose_temp" "$install_dir/docker-compose.yml"
     mv -f -- "$script_temp" "$install_dir/deploy/quick-start.sh"
-    if [ ! -d "$install_dir/.git" ]; then
-        printf '%s\n' "$base_url" > "$marker_file"
-        chmod 0644 "$marker_file"
-    fi
+    marker_temp="$(mktemp "$install_dir/.qcontrolhub-quick-start.tmp.XXXXXX")"
+    printf '%s\n' "$base_url" > "$marker_temp"
+    chmod 0644 "$marker_temp"
+    mv -f -- "$marker_temp" "$marker_file"
+    marker_temp=""
     trap - EXIT HUP INT TERM
     exec "$install_dir/deploy/quick-start.sh" "$@"
 }
