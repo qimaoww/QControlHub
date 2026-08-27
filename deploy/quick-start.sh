@@ -768,8 +768,8 @@ resolve_work_dir() {
             *) WORK_DIR="$REPO_ROOT/$QCH_INSTALL_DIR" ;;
         esac
     fi
-    mkdir -p "$WORK_DIR" || die "无法创建工作目录：$WORK_DIR"
-    WORK_DIR="$(cd "$WORK_DIR" && pwd)" || die "无法进入工作目录：$WORK_DIR"
+    mkdir -p "$WORK_DIR" || die "无法创建目录：$WORK_DIR"
+    WORK_DIR="$(cd "$WORK_DIR" && pwd)" || die "无法进入目录：$WORK_DIR"
     cd "$WORK_DIR"
     ENV_FILE="$WORK_DIR/.env"
     EXTERNAL_COMPOSE_FILE="$WORK_DIR/docker-compose.external.yml"
@@ -782,8 +782,8 @@ resolve_work_dir() {
 choose_install_dir() {
     local input_dir
     echo ""
-    echo "当前安装/工作目录：$WORK_DIR"
-    echo "请输入新的安装/工作目录（直接回车保持不变）："
+    echo "当前目录：$WORK_DIR"
+    echo "请输入新的目录（直接回车保持不变）："
     read -r input_dir
     case "$input_dir" in
         "") ;;
@@ -800,7 +800,7 @@ choose_action() {
         echo "  1. 安装 / 重新配置"
         echo "  2. 更新现有部署"
         echo "  3. 卸载服务（保留配置、密钥和数据库卷）"
-        echo "  4. 设置安装/工作目录"
+        echo "  4. 设置目录"
         echo ""
         read -r -p "请选择 [1-4] " choice
         case "$choice" in
