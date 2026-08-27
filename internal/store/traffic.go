@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -13,7 +14,7 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
-const trafficPolicyColumns = `id,agent_id,name,engine,port,protocol,cycle,cycle_anchor,limit_bytes,auto_block,reset_generation,
+const trafficPolicyColumns = `id,agent_id,name,engine,port,protocol,cycle,cycle_anchor,limit_bytes,auto_block,quota_enabled,discovered,reset_generation,
        received_bytes,sent_bytes,used_bytes,receive_bps,send_bps,period_start,period_end,blocked,
        enforcement_available,enforcement_error,last_reported_at,created_at,updated_at`
 
@@ -26,7 +27,7 @@ func scanTrafficPolicy(row trafficPolicyScanner) (core.PortTrafficPolicy, error)
 	err := row.Scan(
 		&policy.ID, &policy.AgentID, &policy.Name, &policy.Engine, &policy.Port,
 		&policy.Protocol, &policy.Cycle, &policy.CycleAnchor, &policy.LimitBytes, &policy.AutoBlock,
-		&policy.ResetGeneration, &policy.ReceivedBytes, &policy.SentBytes,
+		&policy.QuotaEnabled, &policy.Discovered, &policy.ResetGeneration, &policy.ReceivedBytes, &policy.SentBytes,
 		&policy.UsedBytes, &policy.ReceiveBPS, &policy.SendBPS, &policy.PeriodStart,
 		&policy.PeriodEnd, &policy.Blocked, &policy.EnforcementAvailable,
 		&policy.EnforcementError, &policy.LastReportedAt, &policy.CreatedAt, &policy.UpdatedAt,
@@ -68,14 +69,192 @@ func (s *Store) AgentPortTrafficPolicies(ctx context.Context, agentID string) ([
 	return result, rows.Err()
 }
 
+// ReconcilePortTrafficEndpoints makes listener discovery the source of
+// monitor-only records. Quotas remain operator-managed metadata on top of
+// those records: losing a configuration never deletes an enabled quota, and
+// removing a quota from a discovered listener never stops accounting.
+func (s *Store) ReconcilePortTrafficEndpoints(ctx context.Context, raw []core.PortTrafficEndpoint) ([]string, error) {
+	endpoints, err := normalizePortTrafficEndpoints(raw)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalid, err)
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('qcontrolhub:traffic-endpoints'))`); err != nil {
+		return nil, err
+	}
+	rows, err := tx.Query(ctx, `SELECT `+trafficPolicyColumns+` FROM port_traffic_policies FOR UPDATE`)
+	if err != nil {
+		return nil, err
+	}
+	existing := make(map[string]core.PortTrafficPolicy)
+	for rows.Next() {
+		policy, scanErr := scanTrafficPolicy(rows)
+		if scanErr != nil {
+			rows.Close()
+			return nil, scanErr
+		}
+		existing[trafficPortKey(policy.AgentID, policy.Port)] = policy
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	rows.Close()
+
+	desired := make(map[string]struct{}, len(endpoints))
+	finalCountByAgent := make(map[string]int)
+	for _, endpoint := range endpoints {
+		desired[trafficPortKey(endpoint.AgentID, endpoint.Port)] = struct{}{}
+		finalCountByAgent[endpoint.AgentID]++
+	}
+	for key, policy := range existing {
+		if _, coveredByDiscovery := desired[key]; coveredByDiscovery {
+			continue
+		}
+		if !policy.Discovered || policy.QuotaEnabled {
+			finalCountByAgent[policy.AgentID]++
+		}
+	}
+	for agentID, count := range finalCountByAgent {
+		if count > 256 {
+			return nil, fmt.Errorf("%w: agent %s would exceed 256 monitored ports", ErrConflict, agentID)
+		}
+	}
+	changedAgents := make(map[string]struct{})
+	now := time.Now().UTC()
+	anchor := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+	for _, endpoint := range endpoints {
+		key := trafficPortKey(endpoint.AgentID, endpoint.Port)
+		if policy, exists := existing[key]; exists {
+			protocolChanged := !policy.QuotaEnabled && policy.Protocol != endpoint.Protocol
+			metadataChanged := !policy.QuotaEnabled && (policy.Name != endpoint.Name || policy.Engine != endpoint.Engine || protocolChanged)
+			if policy.Discovered && !metadataChanged {
+				continue
+			}
+			_, err = tx.Exec(ctx, `
+				UPDATE port_traffic_policies SET
+					discovered=true,
+					name=CASE WHEN quota_enabled THEN name ELSE $2 END,
+					engine=CASE WHEN quota_enabled THEN engine ELSE $3 END,
+					protocol=CASE WHEN quota_enabled THEN protocol ELSE $4::varchar(8) END,
+					reset_generation=reset_generation+CASE WHEN NOT quota_enabled AND protocol<>$4::varchar(8) THEN 1 ELSE 0 END,
+					received_bytes=CASE WHEN NOT quota_enabled AND protocol<>$4::varchar(8) THEN 0 ELSE received_bytes END,
+					sent_bytes=CASE WHEN NOT quota_enabled AND protocol<>$4::varchar(8) THEN 0 ELSE sent_bytes END,
+					used_bytes=CASE WHEN NOT quota_enabled AND protocol<>$4::varchar(8) THEN 0 ELSE used_bytes END,
+					receive_bps=CASE WHEN NOT quota_enabled AND protocol<>$4::varchar(8) THEN 0 ELSE receive_bps END,
+					send_bps=CASE WHEN NOT quota_enabled AND protocol<>$4::varchar(8) THEN 0 ELSE send_bps END,
+					period_start=CASE WHEN NOT quota_enabled AND protocol<>$4::varchar(8) THEN NULL ELSE period_start END,
+					period_end=CASE WHEN NOT quota_enabled AND protocol<>$4::varchar(8) THEN NULL ELSE period_end END,
+					blocked=CASE WHEN NOT quota_enabled AND protocol<>$4::varchar(8) THEN false ELSE blocked END,
+					last_reported_at=CASE WHEN NOT quota_enabled AND protocol<>$4::varchar(8) THEN NULL ELSE last_reported_at END,
+					traffic_history_initialized=CASE WHEN NOT quota_enabled AND protocol<>$4::varchar(8) THEN true ELSE traffic_history_initialized END,
+					updated_at=now()
+				WHERE id=$1`, policy.ID, endpoint.Name, endpoint.Engine, endpoint.Protocol)
+			if err != nil {
+				return nil, err
+			}
+			if protocolChanged {
+				changedAgents[endpoint.AgentID] = struct{}{}
+			}
+			continue
+		}
+		id, idErr := core.NewID("trf")
+		if idErr != nil {
+			return nil, idErr
+		}
+		_, err = tx.Exec(ctx, `
+			INSERT INTO port_traffic_policies
+				(id,agent_id,name,engine,port,protocol,cycle,cycle_anchor,limit_bytes,auto_block,quota_enabled,discovered,traffic_history_initialized,created_at,updated_at)
+			VALUES ($1,$2,$3,$4,$5,$6,'monthly',$7,$8,false,false,true,true,$9,$9)`,
+			id, endpoint.AgentID, endpoint.Name, endpoint.Engine, endpoint.Port, endpoint.Protocol, anchor, int64(math.MaxInt64), now)
+		if err != nil {
+			return nil, mapError(err)
+		}
+		changedAgents[endpoint.AgentID] = struct{}{}
+	}
+	for key, policy := range existing {
+		if !policy.Discovered {
+			continue
+		}
+		if _, exists := desired[key]; exists {
+			continue
+		}
+		if policy.QuotaEnabled {
+			if _, err := tx.Exec(ctx, `UPDATE port_traffic_policies SET discovered=false,updated_at=now() WHERE id=$1`, policy.ID); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM port_traffic_policies WHERE id=$1`, policy.ID); err != nil {
+			return nil, err
+		}
+		changedAgents[policy.AgentID] = struct{}{}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	result := make([]string, 0, len(changedAgents))
+	for agentID := range changedAgents {
+		result = append(result, agentID)
+	}
+	sort.Strings(result)
+	return result, nil
+}
+
+func normalizePortTrafficEndpoints(raw []core.PortTrafficEndpoint) ([]core.PortTrafficEndpoint, error) {
+	byPort := make(map[string]core.PortTrafficEndpoint)
+	counts := make(map[string]int)
+	for _, endpoint := range raw {
+		endpoint.AgentID = strings.TrimSpace(endpoint.AgentID)
+		endpoint.Name = strings.TrimSpace(endpoint.Name)
+		if endpoint.AgentID == "" || !endpoint.Engine.Valid() || endpoint.Port < 1 || endpoint.Port > 65535 || !endpoint.Protocol.Valid() {
+			return nil, errors.New("discovered endpoint is invalid")
+		}
+		if endpoint.Name == "" {
+			endpoint.Name = fmt.Sprintf("Port %d", endpoint.Port)
+		}
+		if utf8.RuneCountInString(endpoint.Name) > 100 {
+			return nil, errors.New("discovered endpoint name exceeds 100 characters")
+		}
+		key := trafficPortKey(endpoint.AgentID, endpoint.Port)
+		if current, exists := byPort[key]; exists {
+			if current.Protocol != endpoint.Protocol {
+				current.Protocol = core.TrafficProtocolBoth
+				byPort[key] = current
+			}
+			continue
+		}
+		counts[endpoint.AgentID]++
+		if counts[endpoint.AgentID] > 256 {
+			return nil, errors.New("an agent can have at most 256 monitored ports")
+		}
+		byPort[key] = endpoint
+	}
+	result := make([]core.PortTrafficEndpoint, 0, len(byPort))
+	for _, endpoint := range byPort {
+		result = append(result, endpoint)
+	}
+	sort.Slice(result, func(left, right int) bool {
+		if result[left].AgentID != result[right].AgentID {
+			return result[left].AgentID < result[right].AgentID
+		}
+		return result[left].Port < result[right].Port
+	})
+	return result, nil
+}
+
+func trafficPortKey(agentID string, port int) string {
+	return agentID + "\x00" + fmt.Sprint(port)
+}
+
 func (s *Store) CreatePortTrafficPolicy(ctx context.Context, raw core.PortTrafficPolicyRequest) (core.PortTrafficPolicy, error) {
 	request, err := core.NormalizePortTrafficPolicyRequest(raw, time.Now().UTC())
 	if err != nil {
 		return core.PortTrafficPolicy{}, fmt.Errorf("%w: %v", ErrInvalid, err)
-	}
-	id, err := core.NewID("trf")
-	if err != nil {
-		return core.PortTrafficPolicy{}, err
 	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -85,6 +264,25 @@ func (s *Store) CreatePortTrafficPolicy(ctx context.Context, raw core.PortTraffi
 	if err := validateTrafficPolicyAgent(ctx, tx, request.AgentID, request.Engine); err != nil {
 		return core.PortTrafficPolicy{}, err
 	}
+	var existingID string
+	var quotaEnabled bool
+	err = tx.QueryRow(ctx, `SELECT id,quota_enabled FROM port_traffic_policies WHERE agent_id=$1 AND port=$2 FOR UPDATE`, request.AgentID, request.Port).Scan(&existingID, &quotaEnabled)
+	if err == nil {
+		if quotaEnabled {
+			return core.PortTrafficPolicy{}, fmt.Errorf("%w: this port already has a traffic quota", ErrConflict)
+		}
+		policy, updateErr := updatePortTrafficPolicyRow(ctx, tx, existingID, request)
+		if updateErr != nil {
+			return core.PortTrafficPolicy{}, updateErr
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return core.PortTrafficPolicy{}, err
+		}
+		return policy, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return core.PortTrafficPolicy{}, err
+	}
 	var policyCount int
 	if err := tx.QueryRow(ctx, `SELECT count(*) FROM port_traffic_policies WHERE agent_id=$1`, request.AgentID).Scan(&policyCount); err != nil {
 		return core.PortTrafficPolicy{}, err
@@ -92,10 +290,14 @@ func (s *Store) CreatePortTrafficPolicy(ctx context.Context, raw core.PortTraffi
 	if policyCount >= 256 {
 		return core.PortTrafficPolicy{}, fmt.Errorf("%w: an agent can have at most 256 traffic policies", ErrConflict)
 	}
+	id, err := core.NewID("trf")
+	if err != nil {
+		return core.PortTrafficPolicy{}, err
+	}
 	now := time.Now().UTC()
 	policy, err := scanTrafficPolicy(tx.QueryRow(ctx, `
-		INSERT INTO port_traffic_policies (id,agent_id,name,engine,port,protocol,cycle,cycle_anchor,limit_bytes,auto_block,traffic_history_initialized,created_at,updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,true,$11,$11)
+		INSERT INTO port_traffic_policies (id,agent_id,name,engine,port,protocol,cycle,cycle_anchor,limit_bytes,auto_block,quota_enabled,traffic_history_initialized,created_at,updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,true,true,$11,$11)
 		RETURNING `+trafficPolicyColumns,
 		id, request.AgentID, request.Name, request.Engine, request.Port, request.Protocol,
 		request.Cycle, request.CycleAnchor, request.LimitBytes, *request.AutoBlock, now))
@@ -130,9 +332,20 @@ func (s *Store) UpdatePortTrafficPolicy(ctx context.Context, id string, raw core
 	if err := validateTrafficPolicyAgent(ctx, tx, request.AgentID, request.Engine); err != nil {
 		return core.PortTrafficPolicy{}, err
 	}
+	policy, err := updatePortTrafficPolicyRow(ctx, tx, id, request)
+	if err != nil {
+		return core.PortTrafficPolicy{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return core.PortTrafficPolicy{}, err
+	}
+	return policy, nil
+}
+
+func updatePortTrafficPolicyRow(ctx context.Context, tx pgx.Tx, id string, request core.PortTrafficPolicyRequest) (core.PortTrafficPolicy, error) {
 	policy, err := scanTrafficPolicy(tx.QueryRow(ctx, `
 		UPDATE port_traffic_policies SET
-			name=$2,engine=$3,port=$4,protocol=$5::varchar(8),cycle=$6::varchar(8),cycle_anchor=$7::date,limit_bytes=$8,auto_block=$9,
+			name=$2,engine=$3,port=$4,protocol=$5::varchar(8),cycle=$6::varchar(8),cycle_anchor=$7::date,limit_bytes=$8,auto_block=$9,quota_enabled=true,
 			reset_generation=reset_generation + CASE WHEN port<>$4 OR protocol<>$5::varchar(8) OR cycle<>$6::varchar(8) OR cycle_anchor<>$7::date THEN 1 ELSE 0 END,
 			received_bytes=CASE WHEN port<>$4 OR protocol<>$5::varchar(8) OR cycle<>$6::varchar(8) OR cycle_anchor<>$7::date THEN 0 ELSE received_bytes END,
 			sent_bytes=CASE WHEN port<>$4 OR protocol<>$5::varchar(8) OR cycle<>$6::varchar(8) OR cycle_anchor<>$7::date THEN 0 ELSE sent_bytes END,
@@ -146,9 +359,6 @@ func (s *Store) UpdatePortTrafficPolicy(ctx context.Context, id string, raw core
 		request.CycleAnchor, request.LimitBytes, *request.AutoBlock))
 	if err != nil {
 		return core.PortTrafficPolicy{}, mapError(err)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return core.PortTrafficPolicy{}, err
 	}
 	return policy, nil
 }
@@ -166,12 +376,32 @@ func (s *Store) ResetPortTrafficPolicy(ctx context.Context, id string) (core.Por
 }
 
 func (s *Store) DeletePortTrafficPolicy(ctx context.Context, id string) (string, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback(ctx)
 	var agentID string
-	err := s.pool.QueryRow(ctx, `DELETE FROM port_traffic_policies WHERE id=$1 RETURNING agent_id`, id).Scan(&agentID)
+	var discovered bool
+	err = tx.QueryRow(ctx, `SELECT agent_id,discovered FROM port_traffic_policies WHERE id=$1 FOR UPDATE`, id).Scan(&agentID, &discovered)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", ErrNotFound
 	}
-	return agentID, err
+	if err != nil {
+		return "", err
+	}
+	if discovered {
+		_, err = tx.Exec(ctx, `UPDATE port_traffic_policies SET quota_enabled=false,limit_bytes=$2,auto_block=false,blocked=false,updated_at=now() WHERE id=$1`, id, int64(math.MaxInt64))
+	} else {
+		_, err = tx.Exec(ctx, `DELETE FROM port_traffic_policies WHERE id=$1`, id)
+	}
+	if err != nil {
+		return "", err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return "", err
+	}
+	return agentID, nil
 }
 
 func validateTrafficPolicyAgent(ctx context.Context, tx pgx.Tx, agentID string, engine core.Engine) error {

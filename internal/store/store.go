@@ -1956,6 +1956,8 @@ CREATE TABLE IF NOT EXISTS port_traffic_policies (
     cycle_anchor date NOT NULL,
 	limit_bytes bigint NOT NULL CHECK (limit_bytes > 0),
 	auto_block boolean NOT NULL DEFAULT true,
+	quota_enabled boolean NOT NULL DEFAULT true,
+	discovered boolean NOT NULL DEFAULT false,
 	traffic_history_initialized boolean NOT NULL DEFAULT false,
     reset_generation bigint NOT NULL DEFAULT 1 CHECK (reset_generation > 0),
     received_bytes bigint NOT NULL DEFAULT 0 CHECK (received_bytes >= 0),
@@ -1974,6 +1976,8 @@ CREATE TABLE IF NOT EXISTS port_traffic_policies (
     UNIQUE (agent_id,port)
 );
 ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS auto_block boolean NOT NULL DEFAULT true;
+ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS quota_enabled boolean NOT NULL DEFAULT true;
+ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS discovered boolean NOT NULL DEFAULT false;
 ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS traffic_history_initialized boolean NOT NULL DEFAULT false;
 CREATE INDEX IF NOT EXISTS port_traffic_policies_agent_idx ON port_traffic_policies(agent_id,port);
 

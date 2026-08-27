@@ -1,6 +1,8 @@
 package api
 
 import (
+	"context"
+	"log/slog"
 	"math"
 	"net/http"
 	"sort"
@@ -15,7 +17,7 @@ import (
 func trafficPoliciesForAgent(policies []core.PortTrafficPolicy) []core.PortTrafficPolicy {
 	prepared := append([]core.PortTrafficPolicy(nil), policies...)
 	for index := range prepared {
-		if !prepared[index].AutoBlock {
+		if !prepared[index].QuotaEnabled || !prepared[index].AutoBlock {
 			// Older Agents ignore the auto_block JSON field and always enforce
 			// LimitBytes. Sending an unreachable limit keeps monitor-only
 			// policies fail-safe until those Agents are upgraded.
@@ -66,6 +68,34 @@ func (s *Server) listPortTrafficPolicies(w http.ResponseWriter, request *http.Re
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, policies)
+}
+
+func (s *Server) reconcilePortTrafficEndpoints(ctx context.Context) ([]core.PortTrafficEndpoint, []string, error) {
+	configs, err := s.store.ListAgentConfigs(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	endpoints := trafficEndpointsFromConfigs(configs)
+	changedAgents, err := s.store.ReconcilePortTrafficEndpoints(ctx, endpoints)
+	if err != nil {
+		return endpoints, nil, err
+	}
+	return endpoints, changedAgents, nil
+}
+
+func (s *Server) refreshPortTrafficMonitoring(ctx context.Context, connectedAgentID string) {
+	_, changedAgents, err := s.reconcilePortTrafficEndpoints(ctx)
+	if err != nil {
+		// Listener accounting is best-effort and must never make configuration
+		// management or an authenticated Agent session unavailable.
+		slog.Warn("reconcile discovered traffic endpoints", "error", err)
+		return
+	}
+	for _, agentID := range changedAgents {
+		if agentID != connectedAgentID {
+			s.DisconnectAgent(agentID)
+		}
+	}
 }
 
 func (s *Server) listPortTrafficEndpoints(w http.ResponseWriter, request *http.Request) {
@@ -162,7 +192,7 @@ func (s *Server) deletePortTrafficPolicy(w http.ResponseWriter, request *http.Re
 		return
 	}
 	s.DisconnectAgent(agentID)
-	s.recordAudit(request, "traffic_policy.deleted", request.PathValue("id"), "")
+	s.recordAudit(request, "traffic_policy.quota_removed", request.PathValue("id"), "monitoring continues for discovered ports")
 	w.WriteHeader(http.StatusNoContent)
 }
 

@@ -9,17 +9,20 @@ import (
 )
 
 type metricSample struct {
-	cpuTotal       uint64
-	cpuIdle        uint64
-	cpuValid       bool
-	cgroupCPU      uint64
-	cgroupCPUAt    time.Time
-	cgroupCPUValid bool
-	networkRX      uint64
-	networkTX      uint64
-	networkKey     string
-	networkAt      time.Time
-	networkValid   bool
+	cpuTotal        uint64
+	cpuIdle         uint64
+	cpuAt           time.Time
+	cpuValid        bool
+	cpuPercent      float64
+	cpuPercentValid bool
+	cgroupCPU       uint64
+	cgroupCPUAt     time.Time
+	cgroupCPUValid  bool
+	networkRX       uint64
+	networkTX       uint64
+	networkKey      string
+	networkAt       time.Time
+	networkValid    bool
 }
 
 type MetricsCollector struct {

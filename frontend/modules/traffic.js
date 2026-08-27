@@ -66,6 +66,7 @@ export function installTraffic(ctx) {
     if (policy.blocked) return "blocked";
     if (!policy.last_reported_at) return "waiting";
     if (!policy.enforcement_available) return "error";
+    if (policy.quota_enabled === false) return "metering";
     return "active";
   };
   const policyStatus = (policy, agent) => {
@@ -73,7 +74,8 @@ export function installTraffic(ctx) {
     if (policy.blocked) return ["已超额封禁", "bad"];
     if (!policy.last_reported_at) return ["等待 Agent 同步", "warn"];
     if (!policy.enforcement_available) return ["监控不可用", "bad"];
-    if (policy.auto_block === false) return ["仅统计", "neutral"];
+    if (policy.quota_enabled === false) return ["持续统计", "ok"];
+    if (policy.auto_block === false) return ["配额统计", "neutral"];
     return ["监控中", "ok"];
   };
   const eligibleAgents = (agents) => agents.filter((agent) =>
@@ -99,7 +101,7 @@ export function installTraffic(ctx) {
       <label>协议<select name="protocol"><option value="both" ${policy.protocol === "both" || !policy.protocol ? "selected" : ""}>TCP + UDP</option><option value="tcp" ${policy.protocol === "tcp" ? "selected" : ""}>TCP</option><option value="udp" ${policy.protocol === "udp" ? "selected" : ""}>UDP</option></select></label>
       <label>统计周期<select name="cycle"><option value="monthly" ${policy.cycle === "monthly" || !policy.cycle ? "selected" : ""}>每月</option><option value="yearly" ${policy.cycle === "yearly" ? "selected" : ""}>每年</option></select></label>
       <label>周期起始日期<input name="cycle_anchor" type="date" value="${dateInputValue(policy.cycle_anchor)}" max="${dateInputValue()}" required></label>
-      <label>周期额度（G）<input name="limit_gb" type="number" value="${quotaInputValue(policy.limit_bytes)}" min="0.000001" max="8388607" step="0.000001" required placeholder="100"></label>
+      <label>周期额度（G）<input name="limit_gb" type="number" value="${quotaInputValue(policy.quota_enabled === false ? 0 : policy.limit_bytes)}" min="0.000001" max="8388607" step="0.000001" required placeholder="100"></label>
     </div><label class="traffic-auto-block"><input type="checkbox" name="auto_block" value="1" ${policy.auto_block !== false ? "checked" : ""}><span><b>超额自动封禁</b><small>关闭后仍统计流量，但不会阻断端口</small></span></label>`;
   };
   const requestFromForm = (form) => {
@@ -138,12 +140,13 @@ export function installTraffic(ctx) {
       if (currentFilters.agent_id && value.agent_id !== currentFilters.agent_id) return false;
       if (currentFilters.engine && value.engine !== currentFilters.engine) return false;
       if (currentFilters.endpoint_key && item.key !== currentFilters.endpoint_key) return false;
-      const status = item.kind === "endpoint" ? "unconfigured" : policyStatusKey(item.policy, agentByID.get(value.agent_id));
+      const status = item.kind === "endpoint" ? "waiting" : policyStatusKey(item.policy, agentByID.get(value.agent_id));
       return !currentFilters.status || status === currentFilters.status;
     });
     const filteredPolicies = filteredItems.filter((item) => item.kind === "policy").map((item) => item.policy);
+    const quotaPolicies = filteredPolicies.filter((policy) => policy.quota_enabled !== false);
     const totalUsed = filteredPolicies.reduce((sum, policy) => sum + Number(policy.used_bytes || 0), 0);
-    const totalLimit = filteredPolicies.reduce((sum, policy) => sum + Number(policy.limit_bytes || 0), 0);
+    const totalLimit = quotaPolicies.reduce((sum, policy) => sum + Number(policy.limit_bytes || 0), 0);
     const allEngines = [...new Set(items.map((item) => (item.policy || item.endpoint).engine).filter(Boolean))];
     const endpointChoices = items.map((item) => {
       const value = item.policy || item.endpoint;
@@ -158,44 +161,45 @@ export function installTraffic(ctx) {
     const toolbar = `<section class="traffic-control-panel"><div class="traffic-filters" aria-label="流量筛选">
       <label>内核<select data-traffic-filter="engine">${selectOptions(allEngines.map((engine) => ({ value: engine, label: engineName(engine) })), currentFilters.engine, "全部内核")}</select></label>
       <label>配置端口<select data-traffic-filter="endpoint_key">${selectOptions(endpointChoices, currentFilters.endpoint_key, "全部端口")}</select></label>
-      <label>状态<select data-traffic-filter="status">${selectOptions([{ value: "unconfigured", label: "未设置配额" }, { value: "active", label: "监控中" }, { value: "blocked", label: "已封禁" }, { value: "waiting", label: "等待同步" }, { value: "error", label: "监控异常" }], currentFilters.status, "全部状态")}</select></label>
+      <label>状态<select data-traffic-filter="status">${selectOptions([{ value: "metering", label: "持续统计" }, { value: "active", label: "已设置配额" }, { value: "blocked", label: "已封禁" }, { value: "waiting", label: "等待同步" }, { value: "error", label: "监控异常" }], currentFilters.status, "全部状态")}</select></label>
       <button class="button small" type="button" data-traffic-filter-reset ${Object.values(currentFilters).some(Boolean) ? "" : "disabled"}>清除筛选</button>
-    </div><section class="traffic-total"><span data-traffic-refresh-label>${esc(selectedScope)} · 当前周期</span><div><strong>${bytes(totalUsed)}</strong><small>/ ${bytes(totalLimit)}</small></div><progress max="100" value="${percent(totalUsed, totalLimit)}"></progress><em>${filteredItems.length} 个端口 · ${filteredPolicies.length} 个配额</em></section></section>`;
+    </div><section class="traffic-total"><span data-traffic-refresh-label>${esc(selectedScope)} · 所选端口累计</span><div><strong>${bytes(totalUsed)}</strong>${quotaPolicies.length ? `<small>/ ${bytes(totalLimit)}</small>` : ""}</div>${quotaPolicies.length ? `<progress max="100" value="${percent(totalUsed, totalLimit)}"></progress>` : `<span class="traffic-total-metering">${filteredPolicies.length ? "全部端口正在持续统计" : "等待 Agent 建立监控"}</span>`}<em>${filteredPolicies.length} 个监控端口 · ${quotaPolicies.length} 个配额</em></section></section>`;
     const selectableAgents = eligibleAgents(agents);
     const createDialog = can("traffic.manage")
-      ? `<dialog class="traffic-edit-dialog traffic-create-dialog" id="traffic-new" aria-labelledby="traffic-create-title"><header><span class="traffic-edit-icon" aria-hidden="true">＋</span><div><p class="eyebrow">端口流量</p><h2 id="traffic-create-title">添加端口配额</h2><p>选择节点、内核和端口后开始持续统计</p></div><button class="deploy-command-close" type="button" data-traffic-create-close aria-label="关闭添加配额弹窗">×</button></header>${selectableAgents.length ? `<form id="traffic-policy-form"><div class="traffic-edit-body">${policyFields({ cycle_anchor: new Date(), protocol: "both", cycle: "monthly", auto_block: true }, selectableAgents, "create")}</div><footer><span></span><button class="button" type="button" data-traffic-create-close>取消</button><button class="button primary" type="submit">开始监控</button></footer></form>` : '<div class="traffic-create-unavailable"><strong>暂无可配置节点</strong><p>节点需在线并升级到支持端口流量统计的 Agent 后才能添加。</p><button class="button" type="button" data-traffic-create-close>关闭</button></div>'}</dialog>`
+      ? `<dialog class="traffic-edit-dialog traffic-create-dialog" id="traffic-new" aria-labelledby="traffic-create-title"><header><span class="traffic-edit-icon" aria-hidden="true">＋</span><div><p class="eyebrow">流量配额</p><h2 id="traffic-create-title">添加端口配额</h2><p>监控已自动开启；这里仅设置用量上限和超额处理</p></div><button class="deploy-command-close" type="button" data-traffic-create-close aria-label="关闭添加配额弹窗">×</button></header>${selectableAgents.length ? `<form id="traffic-policy-form"><div class="traffic-edit-body">${policyFields({ cycle_anchor: new Date(), protocol: "both", cycle: "monthly", auto_block: true }, selectableAgents, "create")}</div><footer><span></span><button class="button" type="button" data-traffic-create-close>取消</button><button class="button primary" type="submit">保存配额</button></footer></form>` : '<div class="traffic-create-unavailable"><strong>暂无可配置节点</strong><p>节点需在线并升级到支持端口流量统计的 Agent 后才能添加。</p><button class="button" type="button" data-traffic-create-close>关闭</button></div>'}</dialog>`
       : "";
     const cards = filteredItems.map((item) => {
       if (item.kind === "endpoint") {
         const endpoint = item.endpoint;
         const agent = agentByID.get(endpoint.agent_id);
         const configurable = selectableAgents.some((candidate) => candidate.id === endpoint.agent_id && (candidate.capabilities || []).includes(endpoint.engine));
-        const sourceStatus = configurable ? "现有配置端口" : (agent?.features || []).includes("port-traffic-v1") ? "节点暂不可配置" : "需升级 Agent 后设置配额";
+        const sourceStatus = configurable ? "正在建立自动监控" : (agent?.features || []).includes("port-traffic-v1") ? "等待控制面同步" : "需升级 Agent 后监控";
         return `<article class="traffic-policy-card traffic-configured-port" data-refresh-key="traffic-endpoint-${esc(item.key)}" data-traffic-agent-card="${esc(endpoint.agent_id)}">
-          <header><div class="traffic-card-identity"><span class="engine-badge ${esc(endpoint.engine)}">${esc(engineName(endpoint.engine))}</span><span><strong>${esc(endpoint.name || `端口 ${endpoint.port}`)}</strong><small>${esc(agent?.name || endpoint.agent_id)}<i>·</i><code>:${esc(endpoint.port)}</code><i>·</i>${esc(protocolName(endpoint.protocol))}</small></span></div><span class="traffic-policy-status neutral"><i></i>未设置配额</span></header>
-          <section class="traffic-configured-port-body"><span aria-hidden="true">↳</span><div><strong>已从节点配置读取</strong><p>配置 v${esc(endpoint.config_version || 1)} 中已存在此监听端口，可直接开始统计。</p></div></section>
-          <footer><span class="traffic-card-sync"><i class="${configurable ? "ok" : ""}"></i>${sourceStatus}</span>${can("traffic.manage") && configurable ? `<button class="button small traffic-configure-port" type="button" data-traffic-configure="${esc(item.key)}">设置配额</button>` : ""}</footer>
+          <header><div class="traffic-card-identity"><span class="engine-badge ${esc(endpoint.engine)}">${esc(engineName(endpoint.engine))}</span><span><strong>${esc(endpoint.name || `端口 ${endpoint.port}`)}</strong><small>${esc(agent?.name || endpoint.agent_id)}<i>·</i><code>:${esc(endpoint.port)}</code><i>·</i>${esc(protocolName(endpoint.protocol))}</small></span></div><span class="traffic-policy-status warn"><i></i>等待同步</span></header>
+          <section class="traffic-configured-port-body"><span aria-hidden="true">↳</span><div><strong>已发现监听端口</strong><p>控制面正在建立持续流量统计，无需先设置配额。</p></div></section>
+          <footer><span class="traffic-card-sync"><i></i>${sourceStatus}</span></footer>
         </article>`;
       }
       const policy = item.policy;
       const agent = agentByID.get(policy.agent_id);
       const [status, tone] = policyStatus(policy, agent);
+      const quotaEnabled = policy.quota_enabled !== false;
       const usedPercent = percent(policy.used_bytes, policy.limit_bytes);
       const period = policy.period_start && policy.period_end
         ? `${dateInputValue(policy.period_start)} 至 ${dateInputValue(policy.period_end)}`
         : `从 ${dateInputValue(policy.cycle_anchor)} 开始${cycleName(policy.cycle)}重置`;
       return `<article class="traffic-policy-card ${policy.blocked ? "is-blocked" : ""}" id="traffic-${esc(policy.id)}" data-refresh-key="traffic-policy-${esc(policy.id)}" data-traffic-agent-card="${esc(policy.agent_id)}">
         <header><div class="traffic-card-identity"><span class="engine-badge ${esc(policy.engine)}">${esc(engineName(policy.engine))}</span><span><strong>${esc(policy.name)}</strong><small>${esc(agent?.name || policy.agent_id)}<i>·</i><code>:${esc(policy.port)}</code><i>·</i>${esc(protocolName(policy.protocol))}</small></span></div><span class="traffic-policy-status ${tone}"><i></i>${esc(status)}</span></header>
-        <section class="traffic-card-quota"><header><span>当前周期用量</span><b>${usedPercent.toFixed(1)}%</b></header><div><strong>${bytes(policy.used_bytes)}</strong><span>/ ${bytes(policy.limit_bytes)}</span></div><progress max="100" value="${usedPercent}"></progress><small>${esc(period)}</small></section>
+        <section class="traffic-card-quota ${quotaEnabled ? "" : "is-monitor-only"}"><header><span>${quotaEnabled ? "当前周期用量" : "本月累计流量"}</span><b>${quotaEnabled ? `${usedPercent.toFixed(1)}%` : "未设置配额"}</b></header><div><strong>${bytes(policy.used_bytes)}</strong>${quotaEnabled ? `<span>/ ${bytes(policy.limit_bytes)}</span>` : ""}</div>${quotaEnabled ? `<progress max="100" value="${usedPercent}"></progress>` : '<span class="traffic-monitoring-note">持续统计中 · 配额与自动封禁均为可选</span>'}<small>${esc(period)}</small></section>
         <section class="traffic-card-transfer"><div><i class="received" aria-hidden="true">↓</i><span><small>接收流量</small><strong>${bytes(policy.received_bytes)}</strong></span><em>${rate(policy.receive_bps)}</em></div><div><i class="sent" aria-hidden="true">↑</i><span><small>发送流量</small><strong>${bytes(policy.sent_bytes)}</strong></span><em>${rate(policy.send_bps)}</em></div></section>
         ${policy.enforcement_error ? `<p class="traffic-error">${esc(policy.enforcement_error)}</p>` : ""}
-        <footer><span class="traffic-card-sync"><i class="${policy.last_reported_at ? "ok" : ""}"></i>${policy.last_reported_at ? `${ago(policy.last_reported_at)}更新` : "等待 Agent 上报"}</span>${can("traffic.manage") ? `<div class="traffic-card-actions"><button class="button small" type="button" data-traffic-reset="${esc(policy.id)}">清零</button><button class="button small" type="button" data-traffic-edit-open="${esc(policy.id)}">编辑</button></div>` : ""}</footer>${can("traffic.manage") ? `<dialog class="traffic-edit-dialog" data-traffic-edit-dialog="${esc(policy.id)}" aria-labelledby="traffic-edit-title-${esc(policy.id)}"><header><span class="traffic-edit-icon" aria-hidden="true">✎</span><div><p class="eyebrow">端口配额</p><h2 id="traffic-edit-title-${esc(policy.id)}">编辑 ${esc(policy.name)}</h2><p>${esc(agent?.name || policy.agent_id)} · ${esc(engineName(policy.engine))} :${esc(policy.port)}</p></div><button class="deploy-command-close" type="button" data-traffic-edit-close aria-label="关闭编辑弹窗">×</button></header><form data-traffic-edit-form="${esc(policy.id)}"><div class="traffic-edit-body">${policyFields(policy, [agent].filter(Boolean), `edit-${policy.id}`)}</div><footer><button class="button small danger-button" type="button" data-traffic-delete="${esc(policy.id)}">删除配额</button><span></span><button class="button" type="button" data-traffic-edit-close>取消</button><button class="button primary" type="submit">保存修改</button></footer></form></dialog>` : ""}
+        <footer><span class="traffic-card-sync"><i class="${policy.last_reported_at ? "ok" : ""}"></i>${policy.last_reported_at ? `${ago(policy.last_reported_at)}更新` : "等待 Agent 上报"}</span>${can("traffic.manage") ? `<div class="traffic-card-actions"><button class="button small" type="button" data-traffic-reset="${esc(policy.id)}">清零</button><button class="button small" type="button" data-traffic-edit-open="${esc(policy.id)}">${quotaEnabled ? "编辑配额" : "设置配额"}</button></div>` : ""}</footer>${can("traffic.manage") ? `<dialog class="traffic-edit-dialog" data-traffic-edit-dialog="${esc(policy.id)}" aria-labelledby="traffic-edit-title-${esc(policy.id)}"><header><span class="traffic-edit-icon" aria-hidden="true">✎</span><div><p class="eyebrow">端口配额</p><h2 id="traffic-edit-title-${esc(policy.id)}">${quotaEnabled ? "编辑" : "设置"} ${esc(policy.name)} 的配额</h2><p>流量统计不会因配额变更而停止 · ${esc(agent?.name || policy.agent_id)} :${esc(policy.port)}</p></div><button class="deploy-command-close" type="button" data-traffic-edit-close aria-label="关闭编辑弹窗">×</button></header><form data-traffic-edit-form="${esc(policy.id)}"><div class="traffic-edit-body">${policyFields(policy, [agent].filter(Boolean), `edit-${policy.id}`)}</div><footer>${quotaEnabled ? `<button class="button small danger-button" type="button" data-traffic-delete="${esc(policy.id)}">取消配额</button>` : "<span></span>"}<span></span><button class="button" type="button" data-traffic-edit-close>取消</button><button class="button primary" type="submit">保存配额</button></footer></form></dialog>` : ""}
       </article>`;
     }).join("");
     const empty = items.length
       ? '<div class="empty large"><strong>没有符合筛选条件的端口</strong><p>调整上方筛选条件后再查看。</p></div>'
       : '<div class="empty large"><strong>尚未读取到配置端口</strong><p>节点保存或部署内核配置后，已有监听端口会直接显示在这里。</p></div>';
-    const listHeader = `<header class="traffic-policy-list-head"><div><h2>配置端口</h2><span>${filteredItems.length}</span></div><small>${esc(selectedScope)} · 配置文件发现 · Agent 实时上报</small></header>`;
+    const listHeader = `<header class="traffic-policy-list-head"><div><h2>监控端口</h2><span>${filteredItems.length}</span></div><small>${esc(selectedScope)} · 自动发现配置 · Agent 实时上报</small></header>`;
     shell(`<div class="traffic-workspace">${toolbar}${listHeader}${cards ? `<section class="traffic-policy-grid">${cards}</section>` : empty}${createDialog}</div>`, "流量配额");
     bindTrafficForms(selectableAgents, endpoints);
     if (resetCreate) document.querySelector("#traffic-policy-form")?.reset();
@@ -346,10 +350,10 @@ export function installTraffic(ctx) {
     });
     document.querySelectorAll("[data-traffic-delete]").forEach((button) => {
       button.onclick = async () => {
-        if (!(await confirmAction("删除后 Agent 会停止统计并移除该端口的自动封禁规则，确定继续？", "删除配额"))) return;
+        if (!(await confirmAction("取消配额后会解除自动封禁，但该端口仍会继续统计流量。确定继续？", "取消配额"))) return;
         try {
           await api(`/traffic-policies/${encodeURIComponent(button.dataset.trafficDelete)}`, { method: "DELETE" });
-          notify("端口流量配额已删除");
+          notify("配额已取消，端口流量继续统计");
           await traffic();
         } catch (error) { notify(error.message, "error"); }
       };

@@ -371,6 +371,7 @@ func (s *Server) putAgentConfig(w http.ResponseWriter, request *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
+	s.refreshPortTrafficMonitoring(request.Context(), "")
 	writeJSON(w, http.StatusOK, config)
 }
 
@@ -816,6 +817,10 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 		}
 	}()
 
+	// Listener accounting is created from saved node configurations, not from
+	// quota forms. Reconcile before every session hello so a freshly installed
+	// or long-offline Agent starts monitoring immediately after it connects.
+	s.refreshPortTrafficMonitoring(ctx, id)
 	trafficPolicies, err := s.store.AgentPortTrafficPolicies(ctx, id)
 	if err != nil {
 		slog.Error("load agent traffic policies", "agent_id", id, "error", err)
