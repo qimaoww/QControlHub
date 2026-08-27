@@ -1988,9 +1988,30 @@ ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS auto_block boolean NO
 ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS quota_enabled boolean NOT NULL DEFAULT true;
 ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS discovered boolean NOT NULL DEFAULT false;
 ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS traffic_history_initialized boolean NOT NULL DEFAULT false;
-ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS reported_received_bytes bigint NOT NULL DEFAULT 0;
-ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS reported_sent_bytes bigint NOT NULL DEFAULT 0;
-UPDATE port_traffic_policies SET reported_received_bytes=received_bytes,reported_sent_bytes=sent_bytes;
+DO $traffic_baselines$
+DECLARE
+    add_reported_received boolean;
+    add_reported_sent boolean;
+BEGIN
+    SELECT NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema=current_schema() AND table_name='port_traffic_policies' AND column_name='reported_received_bytes'
+    ) INTO add_reported_received;
+    SELECT NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema=current_schema() AND table_name='port_traffic_policies' AND column_name='reported_sent_bytes'
+    ) INTO add_reported_sent;
+
+    ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS reported_received_bytes bigint NOT NULL DEFAULT 0;
+    ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS reported_sent_bytes bigint NOT NULL DEFAULT 0;
+    IF add_reported_received THEN
+        UPDATE port_traffic_policies SET reported_received_bytes=received_bytes;
+    END IF;
+    IF add_reported_sent THEN
+        UPDATE port_traffic_policies SET reported_sent_bytes=sent_bytes;
+    END IF;
+END
+$traffic_baselines$;
 ALTER TABLE port_traffic_policies DROP CONSTRAINT IF EXISTS port_traffic_policies_reported_received_bytes_check;
 ALTER TABLE port_traffic_policies ADD CONSTRAINT port_traffic_policies_reported_received_bytes_check CHECK (reported_received_bytes >= 0);
 ALTER TABLE port_traffic_policies DROP CONSTRAINT IF EXISTS port_traffic_policies_reported_sent_bytes_check;

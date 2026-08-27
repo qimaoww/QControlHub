@@ -328,7 +328,7 @@ func TestOpenMigratesAppliedV26TrafficColumns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open and migrate applied v26 traffic schema: %v", err)
 	}
-	defer dataStore.Close()
+	defer func() { dataStore.Close() }()
 
 	var schemaVersion int
 	if err := dataStore.pool.QueryRow(ctx, `SELECT max(version) FROM qcontrolhub_schema_migrations`).Scan(&schemaVersion); err != nil {
@@ -366,6 +366,35 @@ func TestOpenMigratesAppliedV26TrafficColumns(t *testing.T) {
 	}
 	if reportedReceivedBytes != receivedBytes || reportedSentBytes != sentBytes {
 		t.Fatalf("migrated traffic baselines received=%d sent=%d", reportedReceivedBytes, reportedSentBytes)
+	}
+
+	// schemaSQL is intentionally rerun for every future schema bump. Existing
+	// raw Agent baselines must not be overwritten by the cumulative totals on a
+	// later pass, or counter-reset protection would silently stop working.
+	if _, err := dataStore.pool.Exec(ctx, `
+		UPDATE port_traffic_policies
+		SET received_bytes=1123,sent_bytes=2198,used_bytes=3321,
+		    reported_received_bytes=23,reported_sent_bytes=98
+		WHERE id='trf_migration_v26'
+	`); err != nil {
+		t.Fatalf("prepare repeated traffic migration: %v", err)
+	}
+	if _, err := dataStore.pool.Exec(ctx, `DELETE FROM qcontrolhub_schema_migrations WHERE version=$1`, currentSchemaVersion); err != nil {
+		t.Fatalf("rewind repeated traffic migration ledger: %v", err)
+	}
+	dataStore.Close()
+	dataStore, err = Open(ctx, schema.URL, true)
+	if err != nil {
+		t.Fatalf("repeat traffic migration: %v", err)
+	}
+	if err := dataStore.pool.QueryRow(ctx, `
+		SELECT reported_received_bytes,reported_sent_bytes
+		FROM port_traffic_policies WHERE id='trf_migration_v26'
+	`).Scan(&reportedReceivedBytes, &reportedSentBytes); err != nil {
+		t.Fatalf("read repeated traffic migration baselines: %v", err)
+	}
+	if reportedReceivedBytes != 23 || reportedSentBytes != 98 {
+		t.Fatalf("repeated traffic migration changed raw baselines to %d/%d", reportedReceivedBytes, reportedSentBytes)
 	}
 }
 
