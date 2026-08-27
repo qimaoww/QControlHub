@@ -23,6 +23,22 @@ func TestCoreLogsStoreQueryAndDeduplicateWithPostgreSQL(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer dataStore.Close()
+	originalSettings, err := dataStore.PanelSettings(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	testSettings := originalSettings
+	testSettings.CoreLogMinimumLevel = "debug"
+	if _, err := dataStore.SavePanelSettings(ctx, testSettings); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cleanupCancel()
+		if _, restoreErr := dataStore.SavePanelSettings(cleanupCtx, originalSettings); restoreErr != nil {
+			t.Errorf("restore panel settings: %v", restoreErr)
+		}
+	}()
 	agent, enrollmentID := enrollTaskTestAgent(t, ctx, dataStore)
 	defer cleanupTaskTestAgent(dataStore, agent.ID, enrollmentID)
 
@@ -58,6 +74,39 @@ func TestCoreLogsStoreQueryAndDeduplicateWithPostgreSQL(t *testing.T) {
 		t.Fatalf("older entries = %+v, %v", older, err)
 	}
 
+	testSettings.CoreLogMinimumLevel = "warning"
+	if _, err := dataStore.SavePanelSettings(ctx, testSettings); err != nil {
+		t.Fatal(err)
+	}
+	thresholdBatch := core.CoreLogBatch{ID: "log_1111111111111111", Entries: []core.CoreLogEntry{
+		{Engine: core.EngineMihomo, Level: "debug", Message: "threshold debug", LoggedAt: now},
+		{Engine: core.EngineXray, Level: "info", Message: "threshold info", LoggedAt: now},
+		{Engine: core.EngineSingBox, Level: "warn", Message: "threshold warning", LoggedAt: now},
+		{Engine: core.EngineShadowsocksRust, Level: "critical", Message: "threshold critical", LoggedAt: now},
+	}}
+	if err := dataStore.StoreCoreLogs(ctx, agent.ID, thresholdBatch); err != nil {
+		t.Fatal(err)
+	}
+	thresholdEntries, err := dataStore.ListCoreLogs(ctx, CoreLogQuery{AgentID: agent.ID, Search: "threshold", Limit: 20})
+	if err != nil || len(thresholdEntries) != 2 || thresholdEntries[0].Level != "critical" || thresholdEntries[1].Level != "warning" {
+		t.Fatalf("threshold entries = %+v, %v", thresholdEntries, err)
+	}
+
+	testSettings.CoreLogMinimumLevel = "off"
+	if _, err := dataStore.SavePanelSettings(ctx, testSettings); err != nil {
+		t.Fatal(err)
+	}
+	offBatch := core.CoreLogBatch{ID: "log_2222222222222222", Entries: []core.CoreLogEntry{{
+		Engine: core.EngineXray, Level: "critical", Message: "disabled persistence", LoggedAt: now,
+	}}}
+	if err := dataStore.StoreCoreLogs(ctx, agent.ID, offBatch); err != nil {
+		t.Fatal(err)
+	}
+	disabledEntries, err := dataStore.ListCoreLogs(ctx, CoreLogQuery{AgentID: agent.ID, Search: "disabled persistence", Limit: 20})
+	if err != nil || len(disabledEntries) != 0 {
+		t.Fatalf("disabled persistence entries = %+v, %v", disabledEntries, err)
+	}
+
 	invalid := core.CoreLogBatch{ID: "log_fedcba9876543210", Entries: []core.CoreLogEntry{{
 		Engine: core.EngineXray, Level: "info", Message: strings.Repeat("x", core.MaxCoreLogMessageBytes+1), LoggedAt: now,
 	}}}
@@ -72,7 +121,7 @@ func TestCoreLogsStoreQueryAndDeduplicateWithPostgreSQL(t *testing.T) {
 		t.Fatalf("pruned batches = %d, %v", pruned, err)
 	}
 	remaining, err := dataStore.ListCoreLogs(ctx, CoreLogQuery{AgentID: agent.ID, Limit: 20})
-	if err != nil || len(remaining) != 0 {
+	if err != nil || len(remaining) != 2 {
 		t.Fatalf("logs after prune = %+v, %v", remaining, err)
 	}
 }
@@ -100,5 +149,28 @@ func TestStoreSanitizeCoreLogMessage(t *testing.T) {
 	}
 	if got := sanitizeCoreLogMessage("\x1b[31m"); got != "" {
 		t.Fatalf("sanitizeCoreLogMessage(only ansi) = %q", got)
+	}
+}
+
+func TestCoreLogLevelAtLeast(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		level   string
+		minimum string
+		want    bool
+	}{
+		{"debug", "debug", true},
+		{"info", "debug", true},
+		{"info", "warning", false},
+		{"warning", "warning", true},
+		{"critical", "error", true},
+		{"critical", "off", false},
+		{"invalid", "debug", false},
+		{"error", "invalid", false},
+	}
+	for _, test := range tests {
+		if got := coreLogLevelAtLeast(test.level, test.minimum); got != test.want {
+			t.Errorf("coreLogLevelAtLeast(%q, %q) = %t, want %t", test.level, test.minimum, got, test.want)
+		}
 	}
 }

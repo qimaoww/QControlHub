@@ -11,6 +11,9 @@ func TestPanelSettingsValidation(t *testing.T) {
 	if err := settings.Validate(); err != nil {
 		t.Fatalf("default settings are invalid: %v", err)
 	}
+	if settings.CoreLogMinimumLevel != "debug" {
+		t.Fatalf("default core log minimum level = %q", settings.CoreLogMinimumLevel)
+	}
 	settings.PanelName = strings.Repeat("界", 40)
 	if err := settings.Validate(); err != nil {
 		t.Fatalf("40-character panel name rejected: %v", err)
@@ -23,6 +26,16 @@ func TestPanelSettingsValidation(t *testing.T) {
 	settings.TaskPollIntervalMS = 750
 	if err := settings.Validate(); err == nil {
 		t.Fatal("unsupported task polling interval was accepted")
+	}
+
+	settings = DefaultPanelSettings()
+	settings.CoreLogMinimumLevel = "off"
+	if err := settings.Validate(); err != nil {
+		t.Fatalf("disabled core log persistence was rejected: %v", err)
+	}
+	settings.CoreLogMinimumLevel = "trace"
+	if err := settings.Validate(); err == nil {
+		t.Fatal("unsupported core log minimum level was accepted")
 	}
 
 	settings = DefaultPanelSettings()

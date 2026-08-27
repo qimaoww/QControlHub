@@ -524,20 +524,22 @@ type ConfigTemplate struct {
 }
 
 type PanelSettings struct {
-	PanelName          string    `json:"panel_name"`
-	PanelDescription   string    `json:"panel_description"`
-	TaskPageSize       int       `json:"task_page_size"`
-	TaskPollIntervalMS int       `json:"task_poll_interval_ms"`
-	WebhookURL         string    `json:"webhook_url"`
-	UpdatedAt          time.Time `json:"updated_at"`
+	PanelName           string    `json:"panel_name"`
+	PanelDescription    string    `json:"panel_description"`
+	TaskPageSize        int       `json:"task_page_size"`
+	TaskPollIntervalMS  int       `json:"task_poll_interval_ms"`
+	CoreLogMinimumLevel string    `json:"core_log_minimum_level"`
+	WebhookURL          string    `json:"webhook_url"`
+	UpdatedAt           time.Time `json:"updated_at"`
 }
 
 func DefaultPanelSettings() PanelSettings {
 	return PanelSettings{
-		PanelName:          "QControlHub",
-		PanelDescription:   "可信远程编排",
-		TaskPageSize:       100,
-		TaskPollIntervalMS: 600,
+		PanelName:           "QControlHub",
+		PanelDescription:    "可信远程编排",
+		TaskPageSize:        100,
+		TaskPollIntervalMS:  600,
+		CoreLogMinimumLevel: "debug",
 	}
 }
 
@@ -557,6 +559,9 @@ func (settings PanelSettings) Validate() error {
 	if !oneOf(settings.TaskPollIntervalMS, 600, 1000, 2000, 5000) {
 		return errors.New("unsupported task polling interval")
 	}
+	if !oneOfString(settings.CoreLogMinimumLevel, "debug", "info", "warning", "error", "critical", "off") {
+		return errors.New("unsupported core log minimum level")
+	}
 	settings.WebhookURL = strings.TrimSpace(settings.WebhookURL)
 	if settings.WebhookURL != "" {
 		if utf8.RuneCountInString(settings.WebhookURL) > 500 {
@@ -571,6 +576,15 @@ func (settings PanelSettings) Validate() error {
 }
 
 func oneOf(value int, allowed ...int) bool {
+	for _, candidate := range allowed {
+		if value == candidate {
+			return true
+		}
+	}
+	return false
+}
+
+func oneOfString(value string, allowed ...string) bool {
 	for _, candidate := range allowed {
 		if value == candidate {
 			return true

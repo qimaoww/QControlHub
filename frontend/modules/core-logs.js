@@ -51,6 +51,15 @@ export function installCoreLogs(ctx) {
   });
   const levelName = (value) =>
     ({ debug: "调试", info: "信息", warning: "警告", error: "错误", critical: "严重" })[value] || value;
+  const storagePolicyName = (value) =>
+    ({
+      debug: "保存全部级别",
+      info: "保存信息及以上",
+      warning: "保存警告及以上",
+      error: "保存错误及以上",
+      critical: "仅保存严重错误",
+      off: "已停止保存新日志",
+    })[value] || "保存全部级别";
 
   const query = () => {
     const filters = state.data.coreLogFilters || {};
@@ -190,8 +199,11 @@ export function installCoreLogs(ctx) {
       .join("");
     const autoRefresh = state.data.coreLogAutoRefresh !== false;
     const scopeName = selectedAgent?.name || (filters.agent_id ? filters.agent_id : "全部节点");
+    const storagePolicy = storagePolicyName(
+      state.data.settings?.core_log_minimum_level || "debug",
+    );
     shell(
-      `<div class="core-log-workspace" data-core-log-page><header class="core-log-header"><div><h2>内核日志</h2><p>当前范围：<strong>${esc(scopeName)}</strong></p></div><label class="core-log-auto"><button type="button" role="switch" aria-checked="${String(autoRefresh)}" data-toggle-core-log-refresh><i></i></button><span>自动更新</span></label></header><section class="core-log-filters" id="core-log-filters" aria-label="日志筛选"><div class="core-log-filter-group core-log-engine-filter"><span>内核</span><div role="group" aria-label="日志内核">${engineButtons}</div></div><div class="core-log-filter-group core-log-level-filter"><span>级别</span><div role="group" aria-label="日志级别">${levelButtons}</div></div><label class="core-log-search">关键词<input name="q" type="search" maxlength="120" value="${esc(filters.q || "")}" placeholder="搜索日志内容，输入即筛选" autocomplete="off"></label><label class="core-log-limit">数量<select name="limit">${[100, 200, 500].map((limit) => `<option value="${limit}" ${Number(filters.limit || 200) === limit ? "selected" : ""}>${limit} 条</option>`).join("")}</select></label><button class="button core-log-reset" type="button" data-reset-core-logs>清除筛选</button></section><div class="core-log-status" role="status" data-core-log-refresh-status><span>显示 <strong>${entries.length}</strong> 条结果</span><span><span class="core-log-live"><i></i><span data-core-log-refresh-label>${autoRefresh ? "正在实时更新" : "自动更新已暂停"}</span></span><span>面板保留 7 天</span></span></div><section class="core-log-stream" aria-label="内核运行日志" data-refresh-scroll><header class="core-log-columns" aria-hidden="true"><span>时间</span><span>内核</span><span>级别</span><span>节点</span><span>日志内容</span></header>${sourceNotice}${rows || `<div class="core-log-empty"><strong>${esc(emptyTitle)}</strong><span>${esc(emptyDetail)}</span></div>`}</section></div>`,
+      `<div class="core-log-workspace" data-core-log-page><header class="core-log-header"><div><h2>内核日志</h2><p>当前范围：<strong>${esc(scopeName)}</strong></p></div><label class="core-log-auto"><button type="button" role="switch" aria-checked="${String(autoRefresh)}" data-toggle-core-log-refresh><i></i></button><span>自动更新</span></label></header><section class="core-log-filters" id="core-log-filters" aria-label="日志筛选"><div class="core-log-filter-group core-log-engine-filter"><span>内核</span><div role="group" aria-label="日志内核">${engineButtons}</div></div><div class="core-log-filter-group core-log-level-filter"><span>级别</span><div role="group" aria-label="日志级别">${levelButtons}</div></div><label class="core-log-search">关键词<input name="q" type="search" maxlength="120" value="${esc(filters.q || "")}" placeholder="搜索日志内容，输入即筛选" autocomplete="off"></label><label class="core-log-limit">数量<select name="limit">${[100, 200, 500].map((limit) => `<option value="${limit}" ${Number(filters.limit || 200) === limit ? "selected" : ""}>${limit} 条</option>`).join("")}</select></label><button class="button core-log-reset" type="button" data-reset-core-logs>清除筛选</button></section><div class="core-log-status" role="status" data-core-log-refresh-status><span>显示 <strong>${entries.length}</strong> 条结果</span><span><span class="core-log-live"><i></i><span data-core-log-refresh-label>${autoRefresh ? "正在实时更新" : "自动更新已暂停"}</span></span><span>${esc(storagePolicy)} · 保留 7 天</span></span></div><section class="core-log-stream" aria-label="内核运行日志" data-refresh-scroll><header class="core-log-columns" aria-hidden="true"><span>时间</span><span>内核</span><span>级别</span><span>节点</span><span>日志内容</span></header>${sourceNotice}${rows || `<div class="core-log-empty"><strong>${esc(emptyTitle)}</strong><span>${esc(emptyDetail)}</span></div>`}</section></div>`,
       "内核日志",
     );
 
