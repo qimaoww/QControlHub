@@ -529,6 +529,8 @@ func TestSubStoreSyncUsesCompactPanelPatterns(t *testing.T) {
 	for _, required := range []string{
 		`.substore-status-bar`, `.substore-filter-bar`, `.substore-agent-grid`,
 		`.substore-agent-card`, `.substore-settings-dialog`, `var(--radius-card)`,
+		`.app-body.page-substore-sync .desktop-app{min-width:0}`,
+		`minmax(min(100%,460px),1fr)`,
 	} {
 		if !strings.Contains(styles, required) {
 			t.Errorf("Sub-Store sync page is missing theme style %q", required)
