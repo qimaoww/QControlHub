@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -40,6 +41,27 @@ func TestTrafficManagerInstallsMissingNFTablesAtStartupWithoutPolicies(t *testin
 	}
 	if err := backend.ensureAvailable(context.Background()); err != nil {
 		t.Fatalf("installed nftables backend remained unavailable: %v", err)
+	}
+}
+
+func TestNFTBackendUsesDetectedServiceManager(t *testing.T) {
+	previousNFTPath := nftExecutablePath
+	nftExecutablePath = "/usr/bin/true"
+	t.Cleanup(func() { nftExecutablePath = previousNFTPath })
+	openRC, err := NewServiceManager(ServiceManagerOpenRC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	openRCBackend := newNFTBackendForServiceManager(openRC)
+	if openRCBackend.systemdRunPath != "" {
+		t.Fatalf("OpenRC nftables backend selected systemd runner %q", openRCBackend.systemdRunPath)
+	}
+	if !openRCBackend.direct && !strings.Contains(fmt.Sprint(openRCBackend.initialization), "OpenRC") {
+		t.Fatalf("OpenRC missing capability error = %v", openRCBackend.initialization)
+	}
+	systemdBackend := newNFTBackendForServiceManager(defaultSystemdServiceManager())
+	if systemdBackend.systemdRunPath != "/usr/bin/systemd-run" {
+		t.Fatalf("systemd nftables runner = %q", systemdBackend.systemdRunPath)
 	}
 }
 

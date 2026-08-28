@@ -61,9 +61,13 @@ type TrafficManager struct {
 }
 
 func NewTrafficManager(agentStatePath string) *TrafficManager {
+	return NewTrafficManagerForServiceManager(agentStatePath, defaultSystemdServiceManager())
+}
+
+func NewTrafficManagerForServiceManager(agentStatePath string, serviceManager *ServiceManager) *TrafficManager {
 	manager := &TrafficManager{
 		statePath: filepath.Join(filepath.Dir(agentStatePath), "traffic-state.json"),
-		backend:   newNFTBackend(), records: make(map[string]*trafficRecord), now: time.Now,
+		backend:   newNFTBackendForServiceManager(serviceManager), records: make(map[string]*trafficRecord), now: time.Now,
 	}
 	state, err := loadTrafficState(manager.statePath)
 	if err == nil {
@@ -431,11 +435,21 @@ var (
 )
 
 func newNFTBackend() *nftBackend {
-	backend := &nftBackend{nftPath: nftExecutablePath, systemdRunPath: "/usr/bin/systemd-run", direct: processHasCapability(12), installer: installNFTablesPackage}
+	return newNFTBackendForServiceManager(defaultSystemdServiceManager())
+}
+
+func newNFTBackendForServiceManager(serviceManager *ServiceManager) *nftBackend {
+	serviceManager = selectedServiceManager(serviceManager)
+	backend := &nftBackend{nftPath: nftExecutablePath, direct: processHasCapability(12), installer: installNFTablesPackage}
+	if serviceManager.Kind() == ServiceManagerSystemd {
+		backend.systemdRunPath = "/usr/bin/systemd-run"
+	}
 	if err := validatePrivilegedExecutable(backend.nftPath); err != nil {
 		backend.initialization = fmt.Errorf("nftables is unavailable: %w", err)
 		_, statErr := os.Lstat(backend.nftPath)
 		backend.missing = errors.Is(statErr, os.ErrNotExist)
+	} else if !backend.direct && serviceManager.Kind() == ServiceManagerOpenRC {
+		backend.initialization = errors.New("nftables CAP_NET_ADMIN is unavailable in the OpenRC Agent service; update the QAgent OpenRC service and restart it")
 	} else if !backend.direct {
 		if err := validatePrivilegedExecutable(backend.systemdRunPath); err != nil {
 			backend.initialization = fmt.Errorf("nftables privilege runner is unavailable: %w", err)
@@ -500,6 +514,10 @@ func (backend *nftBackend) ensureAvailable(ctx context.Context) error {
 	}
 	if err := validatePrivilegedExecutable(backend.nftPath); err != nil {
 		backend.initialization = fmt.Errorf("nftables package was installed but the executable is unavailable: %w", err)
+		return backend.initialization
+	}
+	if !backend.direct && backend.systemdRunPath == "" {
+		backend.initialization = errors.New("nftables CAP_NET_ADMIN is unavailable in the OpenRC Agent service; update the QAgent OpenRC service and restart it")
 		return backend.initialization
 	}
 	if !backend.direct {
