@@ -97,7 +97,7 @@ const actionName = (value) =>
     status: "查询状态",
     install: "安装或升级内核",
     "read-config": "读取可导入配置",
-    "read-managed-config": "读取现有配置",
+    "read-managed-config": "读取 QAgent 配置",
     "import-existing": "导入并迁移现有服务",
     "upgrade-agent": "升级 Agent",
   })[value] || label(value);
@@ -636,7 +636,7 @@ function contextMarkup(title) {
     const capabilities = (selected?.capabilities || []).filter(
       (engine) => liveConfigEngineEligible(selected.runtime?.[engine]),
     );
-    return `<div class="context-section-label"><span>选择节点</span><b>${items.length}</b></div><nav class="context-list" aria-label="配置节点">${items.map((agent) => { const installed = installedEngineCount(agent); return `<a class="${agent.id === state.data.liveAgent ? "active" : ""}" href="#live-config" data-live-agent="${esc(agent.id)}"><i class="status-dot ${agent.status === "online" ? "ok" : ""}"></i><span><strong>${esc(agent.name)}</strong><small>${installed ? `${installed} 个已安装内核` : "尚未安装内核"}</small></span><em>${agent.status === "online" ? "在线" : "离线"}</em></a>`; }).join("") || "<p>还没有节点</p>"}</nav>${selected ? `<div class="context-section-label"><span>选择内核</span><b>${capabilities.length}</b></div><nav class="context-list config-context-list">${capabilities.map((engine) => { const runtime = selected.runtime?.[engine] || {}; const sourceLabel = runtime.installed && runtime.existing_config_available ? "现有配置 · 可导入" : runtime.existing_config_available ? "可导入配置" : runtime.installed ? "现有配置" : "不可导入"; return `<a class="${engine === state.data.liveEngine ? "active" : ""}" href="#live-config" data-live-engine="${esc(engine)}"><span class="context-engine ${esc(engine)}">${esc(engineName(engine))}</span><span><strong>${esc(engineName(engine))}</strong><small>${sourceLabel}</small></span></a>`; }).join("")}</nav>` : ""}<a class="context-primary" href="#archive-config">配置档案 →</a>`;
+    return `<div class="context-section-label"><span>选择节点</span><b>${items.length}</b></div><nav class="context-list" aria-label="配置节点">${items.map((agent) => { const installed = installedEngineCount(agent); return `<a class="${agent.id === state.data.liveAgent ? "active" : ""}" href="#live-config" data-live-agent="${esc(agent.id)}"><i class="status-dot ${agent.status === "online" ? "ok" : ""}"></i><span><strong>${esc(agent.name)}</strong><small>${installed ? `${installed} 个已安装内核` : "尚未安装内核"}</small></span><em>${agent.status === "online" ? "在线" : "离线"}</em></a>`; }).join("") || "<p>还没有节点</p>"}</nav>${selected ? `<div class="context-section-label"><span>选择内核</span><b>${capabilities.length}</b></div><nav class="context-list config-context-list">${capabilities.map((engine) => { const runtime = selected.runtime?.[engine] || {}; const sourceLabel = runtime.installed && runtime.existing_config_available ? "QAgent 配置 · 系统服务可导入" : runtime.existing_config_available ? "系统服务可导入" : runtime.installed ? "QAgent 配置" : "不可导入"; return `<a class="${engine === state.data.liveEngine ? "active" : ""}" href="#live-config" data-live-engine="${esc(engine)}"><span class="context-engine ${esc(engine)}">${esc(engineName(engine))}</span><span><strong>${esc(engineName(engine))}</strong><small>${sourceLabel}</small></span></a>`; }).join("")}</nav>` : ""}<a class="context-primary" href="#archive-config">配置档案 →</a>`;
   }
   if (state.route === "archive-config") {
     const items = state.data.configs || [];
@@ -663,8 +663,10 @@ function contextMarkup(title) {
   }
   if (state.route === "traffic") {
     const agents = state.data.agents || [];
-    const policies = state.data.trafficPolicies || [];
-    const endpoints = state.data.trafficEndpoints || [];
+    const allPolicies = state.data.trafficPolicies || [];
+    const suppressedPorts = new Set(allPolicies.filter((policy) => policy.monitoring_enabled === false).map((policy) => `${policy.agent_id}:${policy.port}`));
+    const policies = allPolicies.filter((policy) => policy.monitoring_enabled !== false);
+    const endpoints = (state.data.trafficEndpoints || []).filter((endpoint) => !suppressedPorts.has(`${endpoint.agent_id}:${endpoint.port}`));
     const selected = state.data.trafficFilters?.agent_id || "";
     return `${can("traffic.manage") ? '<a class="context-primary" href="#traffic-new">＋ 添加端口配额</a>' : ""}<a class="context-primary ${selected ? "" : "active"}" href="#traffic-all" data-context-traffic-agent="">全部节点</a><div class="context-section-label"><span>按节点查看</span><b>${agents.length}</b></div><nav class="context-list" aria-label="端口流量节点">${agents.map((agent) => { const agentPolicies = policies.filter((policy) => policy.agent_id === agent.id); const configured = new Set([...agentPolicies.map((policy) => policy.port), ...endpoints.filter((endpoint) => endpoint.agent_id === agent.id).map((endpoint) => endpoint.port)]).size; const quotas = agentPolicies.filter((policy) => policy.quota_enabled !== false).length; const blocked = agentPolicies.filter((policy) => policy.blocked).length; return `<a class="${selected === agent.id ? "active" : ""}" href="#traffic-agent-${esc(agent.id)}" data-context-traffic-agent="${esc(agent.id)}"><i class="status-dot ${blocked ? "bad" : agent.status === "online" ? "ok" : ""}"></i><span><strong>${esc(agent.name)}</strong><small>${configured ? `${configured} 个监控端口${quotas ? ` · ${quotas} 个配额` : ""}${blocked ? ` · ${blocked} 个封禁` : ""}` : "尚无配置端口"}</small></span></a>`; }).join("") || "<p>还没有节点</p>"}</nav>`;
   }

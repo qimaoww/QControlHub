@@ -256,6 +256,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("PUT /api/v1/traffic-policies/{id}", s.requirePermission(core.PermissionTrafficManage, http.HandlerFunc(s.updatePortTrafficPolicy)))
 	mux.Handle("POST /api/v1/traffic-policies/{id}/reset", s.requirePermission(core.PermissionTrafficManage, http.HandlerFunc(s.resetPortTrafficPolicy)))
 	mux.Handle("DELETE /api/v1/traffic-policies/{id}", s.requirePermission(core.PermissionTrafficManage, http.HandlerFunc(s.deletePortTrafficPolicy)))
+	mux.Handle("DELETE /api/v1/traffic-policies/{id}/monitoring", s.requirePermission(core.PermissionTrafficManage, http.HandlerFunc(s.deletePortTrafficMonitoring)))
 	mux.Handle("GET /api/v1/templates", s.requirePermission(core.PermissionTemplatesRead, http.HandlerFunc(s.listTemplates)))
 	mux.Handle("POST /api/v1/templates", s.requirePermission(core.PermissionTemplatesWrite, http.HandlerFunc(s.createTemplate)))
 	mux.Handle("DELETE /api/v1/templates/{id}", s.requirePermission(core.PermissionTemplatesDelete, http.HandlerFunc(s.deleteTemplate)))

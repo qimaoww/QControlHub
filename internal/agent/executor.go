@@ -675,7 +675,12 @@ func (e *Executor) readCurrentConfig(ctx context.Context, engine core.Engine, sp
 	if err := validatePrivilegedExecutable(spec.Binary); err != nil {
 		return "", fmt.Errorf("cannot safely invoke %s for current configuration validation: %w", engine, err)
 	}
-	_, err = e.validateSnapshot(ctx, engine, spec, content)
+	defaultSpec, managed := DefaultSpecsForServiceManager(e.serviceManager().Kind())[engine]
+	if managed && spec == defaultSpec && engine != core.EngineShadowsocksRust {
+		_, err = e.validateManagedServiceSnapshot(ctx, engine, spec, content)
+	} else {
+		_, err = e.validateSnapshot(ctx, engine, spec, content)
+	}
 	if err != nil {
 		return "", fmt.Errorf("current %s configuration failed real core validation: %w", engine, err)
 	}
@@ -1685,6 +1690,10 @@ func (e *Executor) validate(ctx context.Context, engine core.Engine, spec Engine
 	if err := e.validateManagedLogPolicy(ctx, engine, spec, content); err != nil {
 		return "", err
 	}
+	defaultSpec, managed := DefaultSpecsForServiceManager(e.serviceManager().Kind())[engine]
+	if managed && spec == defaultSpec && engine != core.EngineShadowsocksRust {
+		return e.validateManagedServiceSnapshot(ctx, engine, spec, content)
+	}
 	return e.validateSnapshot(ctx, engine, spec, content)
 }
 
@@ -1709,6 +1718,22 @@ func (e *Executor) validateManagedLogPolicy(ctx context.Context, engine core.Eng
 }
 
 func (e *Executor) validateSnapshot(ctx context.Context, engine core.Engine, spec EngineSpec, content string) (string, error) {
+	return e.validateSnapshotWithIdentity(ctx, engine, spec, content, nil, fileMetadata{})
+}
+
+func (e *Executor) validateManagedServiceSnapshot(ctx context.Context, engine core.Engine, spec EngineSpec, content string) (string, error) {
+	metadata, err := prepareManagedConfigurationAccess(managedCoreConfigurationRoot, spec.ConfigPath)
+	if err != nil {
+		return "", fmt.Errorf("prepare managed %s validation access: %w", engine, err)
+	}
+	identity, err := managedCoreServiceIdentity()
+	if err != nil {
+		return "", err
+	}
+	return e.validateSnapshotWithIdentity(ctx, engine, spec, content, &identity, metadata)
+}
+
+func (e *Executor) validateSnapshotWithIdentity(ctx context.Context, engine core.Engine, spec EngineSpec, content string, identity *commandIdentity, metadata fileMetadata) (string, error) {
 	if err := core.ValidateConfig(engine, content); err != nil {
 		return "", err
 	}
@@ -1753,6 +1778,12 @@ func (e *Executor) validateSnapshot(ctx context.Context, engine core.Engine, spe
 		temp.Close()
 		return "", err
 	}
+	if identity != nil {
+		if err := applyFileMetadata(temp, metadata); err != nil {
+			temp.Close()
+			return "", fmt.Errorf("prepare managed validation file: %w", err)
+		}
+	}
 	if err := temp.Close(); err != nil {
 		return "", err
 	}
@@ -1768,7 +1799,7 @@ func (e *Executor) validateSnapshot(ctx context.Context, engine core.Engine, spe
 	case core.EngineShadowsocksRust:
 		return "ss-rust configuration syntax validated (ssserver has no non-running check mode)", nil
 	}
-	output, err := runInDirectoryWithEnvironment(ctx, directory, spec.commandEnv, spec.Binary, args...)
+	output, err := runInDirectoryWithEnvironmentAndIdentity(ctx, directory, spec.commandEnv, spec.Binary, identity, args...)
 	if err != nil {
 		return output, fmt.Errorf("%s rejected the configuration: %w", engine, err)
 	}
@@ -1864,13 +1895,45 @@ func withServiceFailureDiagnostics(ctx context.Context, manager *ServiceManager,
 		"--property=ActiveState", "--property=SubState", "--property=Result",
 		"--property=ExecMainCode", "--property=ExecMainStatus", "--property=NRestarts")
 	output = strings.TrimSpace(strings.ToValidUTF8(output, "�"))
-	if output == "" {
-		return cause
-	}
+	journal := serviceFailureJournal(diagnosticContext, service)
 	if len(output) > 2048 {
 		output = strings.ToValidUTF8(output[:2048], "�")
 	}
-	return fmt.Errorf("%w; unit state:\n%s", cause, output)
+	if output == "" && journal == "" {
+		return cause
+	}
+	details := ""
+	if output != "" {
+		details = "unit state:\n" + output
+	}
+	if journal != "" {
+		if details != "" {
+			details += "\n"
+		}
+		details += "recent unit logs:\n" + journal
+	}
+	return fmt.Errorf("%w; %s", cause, details)
+}
+
+func serviceFailureJournal(ctx context.Context, service string) string {
+	if !safeServiceName(service) {
+		return ""
+	}
+	arguments := []string{"--unit=" + service, "--since=-30s", "--lines=20", "--no-pager", "--output=cat"}
+	outputs := make([]string, 0, 2)
+	for _, prefix := range [][]string{{"--namespace=qagent-cores"}, nil} {
+		current, _ := run(ctx, journalctlPath, append(prefix, arguments...)...)
+		current = strings.TrimSpace(strings.ToValidUTF8(current, "�"))
+		if current == "" || len(outputs) > 0 && current == outputs[0] {
+			continue
+		}
+		outputs = append(outputs, current)
+	}
+	output := strings.Join(outputs, "\n")
+	if len(output) > 4096 {
+		output = strings.ToValidUTF8(output[len(output)-4096:], "�")
+	}
+	return output
 }
 
 type serviceStatusProbe func(context.Context) (string, error)
@@ -1950,6 +2013,10 @@ func runInDirectory(ctx context.Context, directory, name string, args ...string)
 }
 
 func runInDirectoryWithEnvironment(ctx context.Context, directory, environment, name string, args ...string) (string, error) {
+	return runInDirectoryWithEnvironmentAndIdentity(ctx, directory, environment, name, nil, args...)
+}
+
+func runInDirectoryWithEnvironmentAndIdentity(ctx context.Context, directory, environment, name string, identity *commandIdentity, args ...string) (string, error) {
 	if !filepath.IsAbs(name) {
 		return "", errors.New("refusing to execute a non-absolute binary path")
 	}
@@ -1961,6 +2028,7 @@ func runInDirectoryWithEnvironment(ctx context.Context, directory, environment, 
 	}
 	command.Env = commandEnvironment(environment)
 	configureCommand(command)
+	configureCommandIdentity(command, identity)
 	output := &boundedOutput{limit: 64 << 10, onLimit: cancel}
 	command.Stdout = output
 	command.Stderr = output

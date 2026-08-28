@@ -48,6 +48,7 @@ type PortTrafficPolicy struct {
 	LimitBytes           uint64          `json:"limit_bytes"`
 	AutoBlock            bool            `json:"auto_block"`
 	QuotaEnabled         bool            `json:"quota_enabled"`
+	MonitoringEnabled    bool            `json:"monitoring_enabled"`
 	Discovered           bool            `json:"discovered"`
 	ResetGeneration      uint64          `json:"reset_generation"`
 	ReceivedBytes        uint64          `json:"received_bytes"`
@@ -69,7 +70,7 @@ type PortTrafficPolicy struct {
 // control plane or persisted Agent state does not contain auto_block.
 func (policy *PortTrafficPolicy) UnmarshalJSON(data []byte) error {
 	type wirePolicy PortTrafficPolicy
-	decoded := wirePolicy{AutoBlock: true}
+	decoded := wirePolicy{AutoBlock: true, MonitoringEnabled: true}
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		return err
 	}

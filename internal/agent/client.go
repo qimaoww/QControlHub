@@ -188,7 +188,7 @@ func NewClient(config ClientConfig, executor *Executor) (*Client, error) {
 		serverHost:   parsed.Host,
 		websocketURL: websocketScheme + "://" + parsed.Host + "/agent/v1/connect",
 		metrics:      metricsCollector,
-		traffic:      NewTrafficManager(config.StatePath),
+		traffic:      NewTrafficManagerForServiceManager(config.StatePath, executor.serviceManager()),
 		logs:         NewCoreLogCollectorForExecutor(executor),
 		publicIP:     publicIP,
 		http: &http.Client{

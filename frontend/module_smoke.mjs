@@ -372,8 +372,8 @@ try {
     bindCodeEditors: noop,
   });
   await pages.liveConfig();
-  assert.equal(dualMarkup.includes("现有配置"), true);
-  assert.equal(dualMarkup.includes("可导入配置"), true);
+  assert.equal(dualMarkup.includes("QAgent 配置"), true);
+  assert.equal(dualMarkup.includes("系统服务配置"), true);
   assert.equal(dualMarkup.includes('{"tag":"managed"}'), true);
   assert.equal(dualMarkup.includes("readonly"), false);
   assert.equal(dualMarkup.includes('data-live-intent="deploy"'), true);
@@ -3128,6 +3128,14 @@ try {
     ).map((item) => item.kind),
     ["policy", "endpoint"],
     "configured ports merge with policies by the Agent-wide port identity",
+  );
+  assert.deepEqual(
+    mergeTrafficPorts(
+      [{ id: "policy-hidden", agent_id: "alpha", port: 443, monitoring_enabled: false }],
+      [{ agent_id: "alpha", engine: "xray", port: 443, protocol: "tcp" }],
+    ),
+    [],
+    "deleted monitoring stays hidden even while the configured endpoint is still discoverable",
   );
   assert.deepEqual(
     orderTrafficItems(

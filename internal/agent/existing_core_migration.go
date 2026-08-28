@@ -157,13 +157,16 @@ func (e *Executor) ReconcileExistingCoreServices(ctx context.Context) error {
 		if err := setServiceEnabled(ctx, managed[engine].Service, true, manager); err != nil {
 			return rollback(err)
 		}
+		if err := stopAndDisableMigrationAuxiliary(ctx, migrationRecord, manager); err != nil {
+			return rollback(fmt.Errorf("stop OU-SB auxiliary service: %w", err))
+		}
 		if err := disableServiceCompletely(ctx, existing.Service, manager); err != nil {
 			return rollback(err)
 		}
 		if err := verifyCoreMigrationCompletionState(ctx, existing, managed[engine], manager); err != nil {
 			return rollback(fmt.Errorf("verify service state before migration completion: %w", err))
 		}
-		if err := writeCoreMigrationMarker(e.MigrationMarkerPrefix, engine, coreMigrationComplete, migrationRecord.ConfigDigest, migrationRecord.SourceDigest, migrationRecord.ExistingEnableState, migrationRecord.ManagedEnableState); err != nil {
+		if err := writeCoreMigrationMarkerWithRequestDigest(e.MigrationMarkerPrefix, engine, coreMigrationComplete, migrationRecord.ConfigDigest, migrationRecord.RequestConfigDigest, migrationRecord.SourceDigest, migrationRecord.ExistingEnableState, migrationRecord.ManagedEnableState); err != nil {
 			return rollback(err)
 		}
 		_ = cleanupCoreMigrationBackups(e.MigrationMarkerPrefix, engine)
@@ -276,26 +279,31 @@ func waitForCoreMigrationState(ctx context.Context, existingService, managedServ
 type coreMigrationState string
 
 type coreMigrationRecord struct {
-	State               coreMigrationState
-	ConfigDigest        string
-	SourceDigest        string
-	ExistingEnableState string
-	ManagedEnableState  string
-	ManagedInitialState string
-	HasFileRollback     bool
-	BinaryBackupDigest  string
-	ConfigBackupDigest  string
-	StagedBinaryDigest  string
-	AssetBackupDigests  [2]string
-	StagedAssetDigests  [2]string
-	HasAssetRollback    bool
+	State                 coreMigrationState
+	ConfigDigest          string
+	RequestConfigDigest   string
+	SourceDigest          string
+	ExistingEnableState   string
+	ManagedEnableState    string
+	ManagedInitialState   string
+	HasFileRollback       bool
+	BinaryBackupDigest    string
+	ConfigBackupDigest    string
+	StagedBinaryDigest    string
+	AssetBackupDigests    [2]string
+	StagedAssetDigests    [2]string
+	HasAssetRollback      bool
+	AuxiliaryService      string
+	AuxiliaryEnableState  string
+	AuxiliaryInitialState string
 }
 
 const (
 	coreMigrationNone                coreMigrationState = ""
 	coreMigrationInProgress          coreMigrationState = "migrating"
 	coreMigrationComplete            coreMigrationState = "migrated"
-	coreMigrationPreparedToken                          = "migrating-v4"
+	coreMigrationPreparedToken                          = "migrating-v5"
+	coreMigrationV4PreparedToken                        = "migrating-v4"
 	coreMigrationV3PreparedToken                        = "migrating-v3"
 	coreMigrationLegacyPreparedToken                    = "migrating-v2"
 	coreMigrationMissingBackup                          = "-"
@@ -340,6 +348,9 @@ func restoreCoreMigrationServicesAndFiles(ctx context.Context, prefix string, en
 		if err := restoreCoreMigrationFiles(prefix, engine, managed, record); err != nil {
 			return fmt.Errorf("restore existing %s service after interrupted migration: restore managed files: %w", engine, err)
 		}
+	}
+	if err := restoreMigrationAuxiliary(ctx, record, manager); err != nil {
+		return fmt.Errorf("restore existing %s service after interrupted migration: restore OU-SB auxiliary service: %w", engine, err)
 	}
 	if _, err := serviceCommandAndVerifyWithManager(ctx, manager, existing.Service, core.ActionStart); err != nil {
 		return fmt.Errorf("restore existing %s service after interrupted migration: start original service: %w", engine, err)
@@ -415,10 +426,11 @@ func readCoreMigrationRecord(prefix string, engine core.Engine) (coreMigrationRe
 		return coreMigrationRecord{}, err
 	}
 	fields := strings.Fields(string(contents))
-	if len(fields) != 5 && len(fields) != 8 && len(fields) != 9 && len(fields) != 13 {
+	if len(fields) != 5 && len(fields) != 6 && len(fields) != 8 && len(fields) != 9 && len(fields) != 13 && len(fields) != 17 {
 		return coreMigrationRecord{}, errors.New("core migration marker is invalid")
 	}
-	if (fields[0] == coreMigrationPreparedToken && len(fields) != 13) ||
+	if (fields[0] == coreMigrationPreparedToken && len(fields) != 17) ||
+		(fields[0] == coreMigrationV4PreparedToken && len(fields) != 13) ||
 		(fields[0] == coreMigrationV3PreparedToken && len(fields) != 9) ||
 		(fields[0] == coreMigrationLegacyPreparedToken && len(fields) != 8) {
 		return coreMigrationRecord{}, errors.New("core migration marker version is invalid")
@@ -428,6 +440,11 @@ func readCoreMigrationRecord(prefix string, engine core.Engine) (coreMigrationRe
 	hasAssetRollback := false
 	managedInitialState := "inactive"
 	if fields[0] == coreMigrationPreparedToken {
+		state = coreMigrationInProgress
+		hasFileRollback = true
+		hasAssetRollback = true
+		managedInitialState = fields[8]
+	} else if fields[0] == coreMigrationV4PreparedToken {
 		state = coreMigrationInProgress
 		hasFileRollback = true
 		hasAssetRollback = true
@@ -443,7 +460,7 @@ func readCoreMigrationRecord(prefix string, engine core.Engine) (coreMigrationRe
 	if state != coreMigrationInProgress && state != coreMigrationComplete {
 		return coreMigrationRecord{}, errors.New("core migration marker is invalid")
 	}
-	if state == coreMigrationComplete && len(fields) != 5 {
+	if state == coreMigrationComplete && len(fields) != 5 && len(fields) != 6 {
 		return coreMigrationRecord{}, errors.New("core migration marker version is invalid")
 	}
 	if managedInitialState != "active" && managedInitialState != "inactive" {
@@ -464,6 +481,10 @@ func readCoreMigrationRecord(prefix string, engine core.Engine) (coreMigrationRe
 		ManagedInitialState: managedInitialState,
 		HasFileRollback:     hasFileRollback,
 		HasAssetRollback:    hasAssetRollback,
+	}
+	record.RequestConfigDigest = record.ConfigDigest
+	if state == coreMigrationComplete && len(fields) == 6 {
+		record.RequestConfigDigest = fields[5]
 	}
 	if hasFileRollback {
 		for _, digest := range fields[5:8] {
@@ -493,6 +514,23 @@ func readCoreMigrationRecord(prefix string, engine core.Engine) (coreMigrationRe
 		record.AssetBackupDigests = [2]string{fields[9], fields[11]}
 		record.StagedAssetDigests = [2]string{fields[10], fields[12]}
 	}
+	if fields[0] == coreMigrationPreparedToken {
+		record.RequestConfigDigest = fields[13]
+		if fields[14] != coreMigrationMissingBackup {
+			if !safeServiceName(fields[14]) || !validServiceEnableState(fields[15]) ||
+				(fields[16] != "active" && fields[16] != "inactive") {
+				return coreMigrationRecord{}, errors.New("core migration auxiliary service state is invalid")
+			}
+			record.AuxiliaryService = fields[14]
+			record.AuxiliaryEnableState = fields[15]
+			record.AuxiliaryInitialState = fields[16]
+		} else if fields[15] != coreMigrationMissingBackup || fields[16] != coreMigrationMissingBackup {
+			return coreMigrationRecord{}, errors.New("core migration auxiliary service marker is invalid")
+		}
+	}
+	if decoded, err := hex.DecodeString(record.RequestConfigDigest); err != nil || len(decoded) != sha256.Size {
+		return coreMigrationRecord{}, errors.New("core migration requested configuration digest is invalid")
+	}
 	return record, nil
 }
 
@@ -505,7 +543,7 @@ func completedCoreMigrationMatches(prefix string, engine core.Engine, content st
 	if err != nil || record.State != coreMigrationComplete {
 		return false, err
 	}
-	return record.ConfigDigest == coreMigrationConfigDigest(content), nil
+	return record.RequestConfigDigest == coreMigrationConfigDigest(content), nil
 }
 
 func coreMigrationConfigDigest(content string) string {
@@ -1075,6 +1113,11 @@ func (e *Executor) importExistingConfig(ctx context.Context, engine core.Engine,
 	if currentContent != content {
 		return "", fmt.Errorf("existing %s configuration sources changed after the saved snapshot; both services were left unchanged", engine)
 	}
+	ouSBPlan, err := prepareOUSBSingBoxImport(ctx, manager, existing, content)
+	if err != nil {
+		return "", fmt.Errorf("prepare OU-SB sing-box import: %w", err)
+	}
+	managedContent := ouSBPlan.managedContent
 	existingEnableState, err := serviceEnableState(ctx, existing.Service, manager)
 	if err != nil {
 		return "", err
@@ -1098,7 +1141,8 @@ func (e *Executor) importExistingConfig(ctx context.Context, engine core.Engine,
 	if _, err := e.validateImportedSnapshot(ctx, engine, validationSpec, content); err != nil {
 		return "", fmt.Errorf("existing %s configuration is not safe for managed deployment: %w", engine, err)
 	}
-	configDigest := coreMigrationConfigDigest(content)
+	configDigest := coreMigrationConfigDigest(managedContent)
+	requestConfigDigest := coreMigrationConfigDigest(content)
 	sourceDigest := coreMigrationSourceDigest(existing)
 	migrationRecord, err := prepareCoreMigrationFileRollback(
 		e.MigrationMarkerPrefix,
@@ -1106,9 +1150,11 @@ func (e *Executor) importExistingConfig(ctx context.Context, engine core.Engine,
 		existing,
 		managed,
 		coreMigrationRecord{
-			State: coreMigrationInProgress, ConfigDigest: configDigest, SourceDigest: sourceDigest,
+			State: coreMigrationInProgress, ConfigDigest: configDigest, RequestConfigDigest: requestConfigDigest, SourceDigest: sourceDigest,
 			ExistingEnableState: existingEnableState, ManagedEnableState: managedEnableState,
 			ManagedInitialState: managedInitialState,
+			AuxiliaryService:    ouSBPlan.auxiliary.name, AuxiliaryEnableState: ouSBPlan.auxiliary.enableState,
+			AuxiliaryInitialState: ouSBPlan.auxiliary.initialState,
 		},
 	)
 	if err != nil {
@@ -1124,8 +1170,9 @@ func (e *Executor) importExistingConfig(ctx context.Context, engine core.Engine,
 			rollbackContext, e.MigrationMarkerPrefix, engine, existing, managed, migrationRecord,
 			manager,
 		)
-		if rollbackErr != nil {
-			return "migration failed and rollback was incomplete", fmt.Errorf("%v; rollback: %w", cause, rollbackErr)
+		resourceErr := ouSBPlan.cleanup()
+		if rollbackErr != nil || resourceErr != nil {
+			return "migration failed and rollback was incomplete", fmt.Errorf("%v; rollback: %w", cause, errors.Join(rollbackErr, resourceErr))
 		}
 		return "migration failed; original configuration, binary, and service were restored", cause
 	}
@@ -1156,11 +1203,20 @@ func (e *Executor) importExistingConfig(ctx context.Context, engine core.Engine,
 			return rollbackMigration(fmt.Errorf("copy existing Xray assets into the QAgent namespace: %w", err))
 		}
 	}
-	if _, err := e.validateImportedSnapshot(ctx, engine, managed, content); err != nil {
+	if ouSBPlan.active() {
+		identity, identityErr := managedCoreServiceIdentity()
+		if identityErr != nil {
+			return rollbackMigration(identityErr)
+		}
+		if err := ouSBPlan.stage(identity); err != nil {
+			return rollbackMigration(fmt.Errorf("copy OU-SB certificates into the QAgent namespace: %w", err))
+		}
+	}
+	if _, err := e.validateImportedSnapshot(ctx, engine, managed, managedContent); err != nil {
 		return rollbackMigration(fmt.Errorf("copied %s binary rejected the configuration: %w", engine, err))
 	}
 
-	if _, err := atomicDeployManagedConfiguration(engine, managed, manager, content); err != nil {
+	if _, err := atomicDeployManagedConfiguration(engine, managed, manager, managedContent); err != nil {
 		return rollbackMigration(err)
 	}
 	if err := verifyCoreMigrationStagedFiles(managed, migrationRecord); err != nil {
@@ -1213,6 +1269,9 @@ func (e *Executor) importExistingConfig(ctx context.Context, engine core.Engine,
 			return rollbackMigration(fmt.Errorf("confirm stopped %s OpenRC service process exited: %w", engine, err))
 		}
 	}
+	if err := stopAndDisableMigrationAuxiliary(ctx, migrationRecord, manager); err != nil {
+		return rollbackMigration(fmt.Errorf("stop and disable OU-SB firewall helper: %w", err))
+	}
 	if _, err := serviceCommandAndVerifyWithManager(ctx, manager, managed.Service, core.ActionStart); err != nil {
 		return rollbackMigration(fmt.Errorf("start QAgent %s service: %w", engine, err))
 	}
@@ -1225,7 +1284,7 @@ func (e *Executor) importExistingConfig(ctx context.Context, engine core.Engine,
 	if err := verifyCoreMigrationCompletionState(ctx, existing, managed, manager); err != nil {
 		return rollbackMigration(fmt.Errorf("verify service state before migration completion: %w", err))
 	}
-	if err := writeCoreMigrationMarker(e.MigrationMarkerPrefix, engine, coreMigrationComplete, configDigest, sourceDigest, existingEnableState, managedEnableState); err != nil {
+	if err := writeCoreMigrationMarkerWithRequestDigest(e.MigrationMarkerPrefix, engine, coreMigrationComplete, configDigest, requestConfigDigest, sourceDigest, existingEnableState, managedEnableState); err != nil {
 		return rollbackMigration(fmt.Errorf("persist completed migration: %w", err))
 	}
 	_ = cleanupCoreMigrationBackups(e.MigrationMarkerPrefix, engine)
@@ -1239,7 +1298,14 @@ func (e *Executor) importExistingConfig(ctx context.Context, engine core.Engine,
 	}
 	delete(e.ExistingSpecs, engine)
 	e.specsMu.Unlock()
-	return fmt.Sprintf("imported %s configuration; stopped and disabled %s; started and enabled %s", engine, existing.Service, managed.Service), nil
+	result := fmt.Sprintf("imported %s configuration; stopped and disabled %s; started and enabled %s", engine, existing.Service, managed.Service)
+	if ouSBPlan.active() {
+		result += "; copied protected OU-SB certificates into the QAgent sing-box state directory"
+		if migrationRecord.AuxiliaryService != "" {
+			result += "; stopped and disabled " + migrationRecord.AuxiliaryService
+		}
+	}
+	return result, nil
 }
 
 func (e *Executor) validateImportedSnapshot(ctx context.Context, engine core.Engine, spec EngineSpec, content string) (string, error) {
@@ -1254,6 +1320,10 @@ func (e *Executor) validateImportedSnapshot(ctx context.Context, engine core.Eng
 		if _, err := importedSingBoxLogPath(output); err != nil {
 			return "", fmt.Errorf("imported sing-box log output is unsafe: %w", err)
 		}
+	}
+	defaultSpec, managed := DefaultSpecsForServiceManager(e.serviceManager().Kind())[engine]
+	if managed && spec == defaultSpec {
+		return e.validateManagedServiceSnapshot(ctx, engine, spec, content)
 	}
 	return e.validateSnapshot(ctx, engine, spec, content)
 }
@@ -2127,6 +2197,10 @@ func openRCServiceEnableState(ctx context.Context, service string) (string, erro
 }
 
 func writeCoreMigrationMarker(prefix string, engine core.Engine, state coreMigrationState, configDigest, sourceDigest, existingEnableState, managedEnableState string) error {
+	return writeCoreMigrationMarkerWithRequestDigest(prefix, engine, state, configDigest, configDigest, sourceDigest, existingEnableState, managedEnableState)
+}
+
+func writeCoreMigrationMarkerWithRequestDigest(prefix string, engine core.Engine, state coreMigrationState, configDigest, requestConfigDigest, sourceDigest, existingEnableState, managedEnableState string) error {
 	if prefix == "" {
 		return errors.New("core migration marker path is not configured")
 	}
@@ -2136,15 +2210,20 @@ func writeCoreMigrationMarker(prefix string, engine core.Engine, state coreMigra
 	if decoded, err := hex.DecodeString(configDigest); err != nil || len(decoded) != sha256.Size {
 		return errors.New("invalid core migration configuration digest")
 	}
+	if decoded, err := hex.DecodeString(requestConfigDigest); err != nil || len(decoded) != sha256.Size {
+		return errors.New("invalid core migration requested configuration digest")
+	}
 	if decoded, err := hex.DecodeString(sourceDigest); err != nil || len(decoded) != sha256.Size {
 		return errors.New("invalid core migration source digest")
 	}
 	if !validServiceEnableState(existingEnableState) || !validServiceEnableState(managedEnableState) {
 		return errors.New("invalid core migration enable state")
 	}
-	contents := strings.Join([]string{
-		string(state), configDigest, sourceDigest, existingEnableState, managedEnableState,
-	}, " ") + "\n"
+	fields := []string{string(state), configDigest, sourceDigest, existingEnableState, managedEnableState}
+	if state == coreMigrationComplete && requestConfigDigest != configDigest {
+		fields = append(fields, requestConfigDigest)
+	}
+	contents := strings.Join(fields, " ") + "\n"
 	return writeCoreMigrationMarkerContents(prefix, engine, contents)
 }
 
@@ -2160,6 +2239,12 @@ func writePreparedCoreMigrationMarker(prefix string, engine core.Engine, record 
 	}
 	if decoded, err := hex.DecodeString(record.ConfigDigest); err != nil || len(decoded) != sha256.Size {
 		return errors.New("invalid core migration configuration digest")
+	}
+	if record.RequestConfigDigest == "" {
+		record.RequestConfigDigest = record.ConfigDigest
+	}
+	if decoded, err := hex.DecodeString(record.RequestConfigDigest); err != nil || len(decoded) != sha256.Size {
+		return errors.New("invalid core migration requested configuration digest")
 	}
 	if decoded, err := hex.DecodeString(record.SourceDigest); err != nil || len(decoded) != sha256.Size {
 		return errors.New("invalid core migration source digest")
@@ -2192,6 +2277,18 @@ func writePreparedCoreMigrationMarker(prefix string, engine core.Engine, record 
 			return errors.New("invalid core migration asset digest")
 		}
 	}
+	auxiliaryService := coreMigrationMissingBackup
+	auxiliaryEnableState := coreMigrationMissingBackup
+	auxiliaryInitialState := coreMigrationMissingBackup
+	if record.AuxiliaryService != "" {
+		if !safeServiceName(record.AuxiliaryService) || !validServiceEnableState(record.AuxiliaryEnableState) ||
+			(record.AuxiliaryInitialState != "active" && record.AuxiliaryInitialState != "inactive") {
+			return errors.New("invalid core migration auxiliary service state")
+		}
+		auxiliaryService = record.AuxiliaryService
+		auxiliaryEnableState = record.AuxiliaryEnableState
+		auxiliaryInitialState = record.AuxiliaryInitialState
+	}
 	contents := strings.Join([]string{
 		coreMigrationPreparedToken,
 		record.ConfigDigest,
@@ -2206,6 +2303,10 @@ func writePreparedCoreMigrationMarker(prefix string, engine core.Engine, record 
 		record.StagedAssetDigests[0],
 		record.AssetBackupDigests[1],
 		record.StagedAssetDigests[1],
+		record.RequestConfigDigest,
+		auxiliaryService,
+		auxiliaryEnableState,
+		auxiliaryInitialState,
 	}, " ") + "\n"
 	return writeCoreMigrationMarkerContents(prefix, engine, contents)
 }

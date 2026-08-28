@@ -316,6 +316,7 @@ func TestOpenMigratesAppliedV26TrafficColumns(t *testing.T) {
 			123,198,321,12,19,false,true,'','2026-08-01','2026-09-01','2026-08-27 23:59:45+00',now(),now()
 		);
 		ALTER TABLE port_traffic_policies DROP COLUMN quota_enabled;
+		ALTER TABLE port_traffic_policies DROP COLUMN monitoring_enabled;
 		ALTER TABLE port_traffic_policies DROP COLUMN discovered;
 		ALTER TABLE port_traffic_policies DROP COLUMN traffic_history_initialized;
 		ALTER TABLE port_traffic_policies DROP COLUMN reported_received_bytes;
@@ -337,25 +338,25 @@ func TestOpenMigratesAppliedV26TrafficColumns(t *testing.T) {
 	if schemaVersion != currentSchemaVersion {
 		t.Fatalf("migrated schema version = %d, want %d", schemaVersion, currentSchemaVersion)
 	}
-	var quotaEnabled, discovered, historyInitialized, autoBlock bool
+	var quotaEnabled, monitoringEnabled, discovered, historyInitialized, autoBlock bool
 	var limitBytes, receivedBytes, sentBytes, usedBytes, reportedReceivedBytes, reportedSentBytes int64
 	var resetGeneration int64
 	if err := dataStore.pool.QueryRow(ctx, `
-		SELECT quota_enabled,discovered,traffic_history_initialized,auto_block,
+		SELECT quota_enabled,monitoring_enabled,discovered,traffic_history_initialized,auto_block,
 		       limit_bytes,received_bytes,sent_bytes,used_bytes,reset_generation,
 		       reported_received_bytes,reported_sent_bytes
 		FROM port_traffic_policies WHERE id='trf_2626262626262626'
 	`).Scan(
-		&quotaEnabled, &discovered, &historyInitialized, &autoBlock,
+		&quotaEnabled, &monitoringEnabled, &discovered, &historyInitialized, &autoBlock,
 		&limitBytes, &receivedBytes, &sentBytes, &usedBytes, &resetGeneration,
 		&reportedReceivedBytes, &reportedSentBytes,
 	); err != nil {
 		t.Fatalf("read migrated traffic policy: %v", err)
 	}
-	if !quotaEnabled || discovered || historyInitialized || !autoBlock {
+	if !quotaEnabled || !monitoringEnabled || discovered || historyInitialized || !autoBlock {
 		t.Fatalf(
-			"migrated traffic flags quota=%t discovered=%t history=%t auto_block=%t",
-			quotaEnabled, discovered, historyInitialized, autoBlock,
+			"migrated traffic flags quota=%t monitoring=%t discovered=%t history=%t auto_block=%t",
+			quotaEnabled, monitoringEnabled, discovered, historyInitialized, autoBlock,
 		)
 	}
 	if limitBytes != 1048576 || receivedBytes != 123 || sentBytes != 198 || usedBytes != 321 || resetGeneration != 4 {

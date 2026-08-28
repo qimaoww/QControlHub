@@ -33,7 +33,7 @@ func TestPortTrafficPolicyLifecycleWithPostgreSQL(t *testing.T) {
 		CycleAnchor: time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC), LimitBytes: 100 << 30,
 	}
 	created, err := dataStore.CreatePortTrafficPolicy(ctx, request)
-	if err != nil || created.ResetGeneration != 1 || created.EnforcementAvailable || !created.AutoBlock {
+	if err != nil || created.ResetGeneration != 1 || created.EnforcementAvailable || !created.AutoBlock || !created.MonitoringEnabled {
 		t.Fatalf("created policy = %+v, %v", created, err)
 	}
 	if _, err := dataStore.CreatePortTrafficPolicy(ctx, request); !errors.Is(err, ErrConflict) {
@@ -106,6 +106,55 @@ func TestPortTrafficPolicyLifecycleWithPostgreSQL(t *testing.T) {
 	daily, err = dataStore.ListPortTrafficDailyUsage(ctx, agent.ID, created.ID, reportedAt)
 	if err != nil || len(daily) != 1 || daily[0].Port != 443 || daily[0].UsedBytes != 7<<30 {
 		t.Fatalf("deleted policy history was not preserved: %+v, %v", daily, err)
+	}
+}
+
+func TestDeletePortTrafficMonitoringHidesConfiguredPortUntilReenabledWithPostgreSQL(t *testing.T) {
+	databaseURL := os.Getenv("QCH_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("QCH_TEST_DATABASE_URL is not configured")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	dataStore, err := Open(ctx, databaseURL, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dataStore.Close()
+	agent, enrollmentID := enrollTaskTestAgent(t, ctx, dataStore)
+	defer cleanupTaskTestAgent(dataStore, agent.ID, enrollmentID)
+	request := core.PortTrafficPolicyRequest{
+		AgentID: agent.ID, Name: "deletable 443", Engine: core.EngineMihomo, Port: 443,
+		Protocol: core.TrafficProtocolTCP, Cycle: core.TrafficCycleMonthly,
+		CycleAnchor: time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC), LimitBytes: 10 << 30,
+	}
+	created, err := dataStore.CreatePortTrafficPolicy(ctx, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := dataStore.DeletePortTrafficMonitoring(ctx, created.ID); err != nil {
+		t.Fatal(err)
+	}
+	active, err := dataStore.AgentPortTrafficPolicies(ctx, agent.ID)
+	if err != nil || len(active) != 0 {
+		t.Fatalf("deleted monitor was still sent to Agent: %+v, %v", active, err)
+	}
+	all, err := dataStore.ListPortTrafficPolicies(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundHidden := false
+	for _, policy := range all {
+		if policy.ID == created.ID {
+			foundHidden = !policy.MonitoringEnabled
+		}
+	}
+	if !foundHidden {
+		t.Fatal("deleted monitor did not retain a suppression marker")
+	}
+	reenabled, err := dataStore.CreatePortTrafficPolicy(ctx, request)
+	if err != nil || reenabled.ID != created.ID || !reenabled.MonitoringEnabled {
+		t.Fatalf("reenabled monitor = %+v, %v", reenabled, err)
 	}
 }
 

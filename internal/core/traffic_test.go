@@ -55,6 +55,9 @@ func TestPortTrafficPolicyJSONDefaultsLegacyAutoBlock(t *testing.T) {
 			if policy.AutoBlock != test.want {
 				t.Fatalf("auto_block = %v, want %v", policy.AutoBlock, test.want)
 			}
+			if !policy.MonitoringEnabled {
+				t.Fatal("legacy traffic policy unexpectedly disabled monitoring")
+			}
 		})
 	}
 }

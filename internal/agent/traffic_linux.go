@@ -61,9 +61,13 @@ type TrafficManager struct {
 }
 
 func NewTrafficManager(agentStatePath string) *TrafficManager {
+	return NewTrafficManagerForServiceManager(agentStatePath, defaultSystemdServiceManager())
+}
+
+func NewTrafficManagerForServiceManager(agentStatePath string, serviceManager *ServiceManager) *TrafficManager {
 	manager := &TrafficManager{
 		statePath: filepath.Join(filepath.Dir(agentStatePath), "traffic-state.json"),
-		backend:   newNFTBackend(), records: make(map[string]*trafficRecord), now: time.Now,
+		backend:   newNFTBackendForServiceManager(serviceManager), records: make(map[string]*trafficRecord), now: time.Now,
 	}
 	state, err := loadTrafficState(manager.statePath)
 	if err == nil {
@@ -86,6 +90,15 @@ func (manager *TrafficManager) Start(ctx context.Context) {
 		return
 	}
 	go func() {
+		// nftables is a required Agent runtime dependency, even when no quota
+		// exists yet. Older nodes may have received binary-only Agent upgrades
+		// that never reran install-agent.sh, so repair the package at every Agent
+		// start instead of waiting for the first traffic policy.
+		if backend, ok := manager.backend.(*nftBackend); ok {
+			if err := backend.ensureAvailable(ctx); err != nil {
+				slog.Warn("ensure required nftables dependency", "error", err)
+			}
+		}
 		manager.collect(ctx, true)
 		ticker := time.NewTicker(trafficCollectionEvery)
 		defer ticker.Stop()
@@ -409,12 +422,34 @@ type nftBackend struct {
 	systemdRunPath string
 	direct         bool
 	initialization error
+	missing        bool
+	installMu      sync.Mutex
+	installTried   bool
+	installer      func(context.Context, *nftBackend) error
 }
 
+var (
+	nftExecutablePath = "/usr/sbin/nft"
+	nftAPTGetPath     = "/usr/bin/apt-get"
+	nftAPKPaths       = []string{"/usr/sbin/apk", "/sbin/apk"}
+)
+
 func newNFTBackend() *nftBackend {
-	backend := &nftBackend{nftPath: "/usr/sbin/nft", systemdRunPath: "/usr/bin/systemd-run", direct: processHasCapability(12)}
+	return newNFTBackendForServiceManager(defaultSystemdServiceManager())
+}
+
+func newNFTBackendForServiceManager(serviceManager *ServiceManager) *nftBackend {
+	serviceManager = selectedServiceManager(serviceManager)
+	backend := &nftBackend{nftPath: nftExecutablePath, direct: processHasCapability(12), installer: installNFTablesPackage}
+	if serviceManager.Kind() == ServiceManagerSystemd {
+		backend.systemdRunPath = "/usr/bin/systemd-run"
+	}
 	if err := validatePrivilegedExecutable(backend.nftPath); err != nil {
 		backend.initialization = fmt.Errorf("nftables is unavailable: %w", err)
+		_, statErr := os.Lstat(backend.nftPath)
+		backend.missing = errors.Is(statErr, os.ErrNotExist)
+	} else if !backend.direct && serviceManager.Kind() == ServiceManagerOpenRC {
+		backend.initialization = errors.New("nftables CAP_NET_ADMIN is unavailable in the OpenRC Agent service; update the QAgent OpenRC service and restart it")
 	} else if !backend.direct {
 		if err := validatePrivilegedExecutable(backend.systemdRunPath); err != nil {
 			backend.initialization = fmt.Errorf("nftables privilege runner is unavailable: %w", err)
@@ -424,8 +459,8 @@ func newNFTBackend() *nftBackend {
 }
 
 func (backend *nftBackend) Counters(ctx context.Context) (map[string]uint64, bool, error) {
-	if backend.initialization != nil {
-		return nil, false, backend.initialization
+	if err := backend.ensureAvailable(ctx); err != nil {
+		return nil, false, err
 	}
 	output, err := backend.run(ctx, nil, "-j", "list", "table", "inet", trafficTableName)
 	if err != nil {
@@ -442,14 +477,122 @@ func (backend *nftBackend) Counters(ctx context.Context) (map[string]uint64, boo
 }
 
 func (backend *nftBackend) Replace(ctx context.Context, script string) error {
-	if backend.initialization != nil {
-		return backend.initialization
+	if err := backend.ensureAvailable(ctx); err != nil {
+		return err
 	}
 	if strings.TrimSpace(script) == "" {
 		return nil
 	}
 	if _, err := backend.run(ctx, []byte(script), "-f", "-"); err != nil {
 		return fmt.Errorf("apply nftables traffic rules: %w", err)
+	}
+	return nil
+}
+
+func (backend *nftBackend) ensureAvailable(ctx context.Context) error {
+	if backend == nil {
+		return errors.New("nftables backend is unavailable")
+	}
+	backend.installMu.Lock()
+	defer backend.installMu.Unlock()
+	if backend.initialization == nil {
+		return nil
+	}
+	if !backend.missing || backend.installTried {
+		return backend.initialization
+	}
+	backend.installTried = true
+	installer := backend.installer
+	if installer == nil {
+		installer = installNFTablesPackage
+	}
+	installContext, cancel := context.WithTimeout(ctx, 90*time.Second)
+	defer cancel()
+	if err := installer(installContext, backend); err != nil {
+		backend.initialization = fmt.Errorf("nftables is unavailable and automatic installation failed: %w", err)
+		return backend.initialization
+	}
+	if err := validatePrivilegedExecutable(backend.nftPath); err != nil {
+		backend.initialization = fmt.Errorf("nftables package was installed but the executable is unavailable: %w", err)
+		return backend.initialization
+	}
+	if !backend.direct && backend.systemdRunPath == "" {
+		backend.initialization = errors.New("nftables CAP_NET_ADMIN is unavailable in the OpenRC Agent service; update the QAgent OpenRC service and restart it")
+		return backend.initialization
+	}
+	if !backend.direct {
+		if err := validatePrivilegedExecutable(backend.systemdRunPath); err != nil {
+			backend.initialization = fmt.Errorf("nftables privilege runner is unavailable: %w", err)
+			return backend.initialization
+		}
+	}
+	backend.missing = false
+	backend.initialization = nil
+	return nil
+}
+
+func installNFTablesPackage(ctx context.Context, backend *nftBackend) error {
+	if backend == nil {
+		return errors.New("nftables backend is unavailable")
+	}
+	if err := validatePrivilegedExecutable(nftAPTGetPath); err == nil {
+		if err := runNFTPackageCommand(ctx, backend, []string{"DEBIAN_FRONTEND=noninteractive"}, nftAPTGetPath, "update", "-qq"); err != nil {
+			return fmt.Errorf("update APT metadata: %w", err)
+		}
+		if err := runNFTPackageCommand(ctx, backend, []string{"DEBIAN_FRONTEND=noninteractive"}, nftAPTGetPath,
+			"install", "-y", "--no-install-recommends", "nftables"); err != nil {
+			return fmt.Errorf("install nftables with APT: %w", err)
+		}
+		return nil
+	}
+	for _, apkPath := range nftAPKPaths {
+		if err := validatePrivilegedExecutable(apkPath); err != nil {
+			continue
+		}
+		if err := runNFTPackageCommand(ctx, backend, nil, apkPath, "add", "--no-cache", "nftables"); err != nil {
+			return fmt.Errorf("install nftables with apk: %w", err)
+		}
+		return nil
+	}
+	return errors.New("no supported Debian apt-get or Alpine apk package manager was found")
+}
+
+func runNFTPackageCommand(ctx context.Context, backend *nftBackend, environment []string, executable string, arguments ...string) error {
+	commandName := executable
+	commandArguments := append([]string(nil), arguments...)
+	if backend != nil && backend.systemdRunPath != "" {
+		if _, err := os.Lstat("/run/systemd/system"); err == nil {
+			if err := validatePrivilegedExecutable(backend.systemdRunPath); err != nil {
+				return fmt.Errorf("validate systemd package runner: %w", err)
+			}
+			commandName = backend.systemdRunPath
+			commandArguments = []string{
+				"--pipe", "--wait", "--collect", "--quiet", "--service-type=exec",
+				"--property=User=root", "--property=NoNewPrivileges=no",
+				"--property=RuntimeMaxSec=40s", "--property=TimeoutStopSec=5s",
+			}
+			for _, value := range environment {
+				commandArguments = append(commandArguments, "--setenv="+value)
+			}
+			commandArguments = append(commandArguments, "--", executable)
+			commandArguments = append(commandArguments, arguments...)
+			environment = nil
+		}
+	}
+	command := exec.CommandContext(ctx, commandName, commandArguments...)
+	command.Env = append(os.Environ(), "LC_ALL=C")
+	for _, value := range environment {
+		command.Env = append(command.Env, value)
+	}
+	configureCommand(command)
+	output := &boundedOutput{limit: 64 << 10}
+	command.Stdout, command.Stderr = output, output
+	if err := command.Run(); err != nil {
+		message := strings.TrimSpace(output.String())
+		if message == "" {
+			message = err.Error()
+		}
+		return errors.New(message)
 	}
 	return nil
 }

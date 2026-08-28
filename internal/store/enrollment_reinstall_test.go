@@ -244,6 +244,14 @@ func TestDeleteAgentInvalidatesBoundReusableCredential(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create additional credential: %v", err)
 	}
+	trafficPolicy, err := dataStore.CreatePortTrafficPolicy(ctx, core.PortTrafficPolicyRequest{
+		AgentID: agent.ID, Name: "deleted node port", Engine: core.EngineMihomo, Port: 8443,
+		Protocol: core.TrafficProtocolTCP, Cycle: core.TrafficCycleMonthly,
+		CycleAnchor: time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC), LimitBytes: 1 << 30,
+	})
+	if err != nil {
+		t.Fatalf("create deleted node traffic policy: %v", err)
+	}
 
 	if err := dataStore.DeleteAgent(ctx, agent.ID); err != nil {
 		t.Fatalf("delete agent: %v", err)
@@ -253,6 +261,10 @@ func TestDeleteAgentInvalidatesBoundReusableCredential(t *testing.T) {
 	}
 	if dataStore.EnrollmentTokenUsable(ctx, additional.Token) {
 		t.Fatal("deleted agent's additional credential remains usable")
+	}
+	var trafficRows int
+	if err := dataStore.pool.QueryRow(ctx, `SELECT count(*) FROM port_traffic_policies WHERE id=$1`, trafficPolicy.ID).Scan(&trafficRows); err != nil || trafficRows != 0 {
+		t.Fatalf("deleted agent traffic rows = %d, %v", trafficRows, err)
 	}
 	if _, err := dataStore.EnrollAgent(ctx, core.EnrollRequest{
 		Name: "deleted-bound-node", OS: "linux", Arch: "amd64",
