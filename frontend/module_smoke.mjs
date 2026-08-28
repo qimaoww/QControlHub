@@ -45,6 +45,11 @@ import {
   installDashboard,
 } from "./modules/dashboard.js";
 import { installSettings } from "./modules/settings.js";
+import {
+  filterSubStoreProfiles,
+  installSubStoreSync,
+  subStoreSelectionPayload,
+} from "./modules/substore-sync.js";
 import { installTasks } from "./modules/tasks.js";
 import {
   installTraffic,
@@ -2847,6 +2852,86 @@ try {
 } finally {
   if (previousDocument === undefined) delete globalThis.document;
   else globalThis.document = previousDocument;
+}
+
+const subStoreProfiles = [
+  {
+    agent_id: "alpha",
+    agent_name: "Alpha node",
+    engine: "sing-box",
+    profile_tag: "vless-in",
+    protocol: "VLESS",
+    default_name: "Alpha node · vless-in",
+    custom_name: "Tokyo Premium",
+    selected: true,
+    available: true,
+  },
+  {
+    agent_id: "beta",
+    agent_name: "Beta node",
+    engine: "xray",
+    profile_tag: "ss-in",
+    protocol: "Shadowsocks 2022",
+    default_name: "Beta node · ss-in",
+    selected: false,
+    available: true,
+  },
+];
+assert.deepEqual(
+  filterSubStoreProfiles(subStoreProfiles, "alpha", "premium"),
+  [subStoreProfiles[0]],
+  "Sub-Store node and keyword filters compose locally",
+);
+assert.deepEqual(subStoreSelectionPayload(subStoreProfiles), [
+  {
+    agent_id: "alpha",
+    engine: "sing-box",
+    profile_tag: "vless-in",
+    custom_name: "Tokyo Premium",
+  },
+]);
+const previousSubStoreDocument = globalThis.document;
+globalThis.document = {
+  querySelector: () => null,
+  querySelectorAll: () => [],
+};
+try {
+  let subStoreMarkup = "";
+  const subStoreState = { route: "substore-sync", navigationEpoch: 1, data: {} };
+  const renderSubStore = installSubStoreSync({
+    state: subStoreState,
+    api: async (path) => {
+      assert.equal(path, "/substore-sync");
+      return {
+        settings: {
+          configured: true,
+          endpoint_hint: "https://substore.example/••••••",
+          subscription_name: "QControlHub",
+          last_sync_status: "success",
+          last_synced_at: "2026-08-28T00:00:00Z",
+        },
+        profiles: subStoreProfiles.map((profile) => ({ ...profile })),
+        selections: subStoreSelectionPayload(subStoreProfiles),
+      };
+    },
+    can: () => true,
+    esc: (value) => String(value ?? ""),
+    engineName: (value) => value,
+    notify: noop,
+    shell: (markup) => {
+      subStoreMarkup = markup;
+    },
+  });
+  await renderSubStore();
+  assert.equal(subStoreMarkup.includes("substore-status-bar"), true);
+  assert.equal(subStoreMarkup.includes("substore-agent-card"), true);
+  assert.equal(subStoreMarkup.includes("Tokyo Premium"), true);
+  assert.equal(subStoreMarkup.includes("data-substore-settings-dialog"), true);
+  assert.equal(subStoreMarkup.includes("substore-hero"), false);
+  assert.equal(subStoreMarkup.includes("<h1"), false, "sync page does not repeat a large title hero");
+} finally {
+  if (previousSubStoreDocument === undefined) delete globalThis.document;
+  else globalThis.document = previousSubStoreDocument;
 }
 
 const pollingDocument = globalThis.document;

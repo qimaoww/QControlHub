@@ -1,6 +1,7 @@
 import { installDashboard } from "./modules/dashboard.js";
 import { installAgents } from "./modules/agents.js";
 import { installClientAccess } from "./modules/client-access.js";
+import { installSubStoreSync } from "./modules/substore-sync.js";
 import {
   installConfigPages,
   liveConfigEngineEligible,
@@ -51,6 +52,8 @@ const dockIcons = Object.freeze({
     '<path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"/><path d="M14 2v5a1 1 0 0 0 1 1h5"/><path d="M10 12.5 8 15l2 2.5"/><path d="m14 12.5 2 2.5-2 2.5"/>',
   monitorSmartphone:
     '<path d="M18 8V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h8"/><path d="M10 19v-3.96 3.15M7 19h5"/><rect width="6" height="10" x="16" y="12" rx="2"/>',
+  refreshCw:
+    '<path d="M20 7h-5V2"/><path d="m20 2-3.5 3.5A8 8 0 1 0 20.8 14"/>',
   chart:
     '<path d="M12 16v5M16 14.639V21M20 10.656V21M4 18.463V21M8 14.656V21"/><path d="m22 3-8.646 8.646a.5.5 0 0 1-.708 0L9.354 8.354a.5.5 0 0 0-.707 0L2 15"/>',
   logs:
@@ -490,6 +493,7 @@ function shell(content, title, { viewKey = state.route } = {}) {
     ["agents", "内核预设", dockIcons.layers],
     ["live-config", "配置", dockIcons.fileCode],
     ["client-access", "客户端", dockIcons.monitorSmartphone],
+    ["substore-sync", "同步", dockIcons.refreshCw],
     ["traffic", "流量", dockIcons.chart, true],
     ["core-logs", "日志", dockIcons.logs, true],
     ["tasks", "任务", dockIcons.listChecks],
@@ -499,6 +503,7 @@ function shell(content, title, { viewKey = state.route } = {}) {
     agents: "agents.read",
     "node-settings": "agents.read",
     "client-access": "client-access.read",
+    "substore-sync": "client-access.read",
     "live-config": "agent-config.read",
     tasks: "tasks.read",
     "core-logs": "core-logs.read",
@@ -532,6 +537,8 @@ function shell(content, title, { viewKey = state.route } = {}) {
           ? nodeOverviewActions
           : state.route === "client-access"
             ? ""
+            : state.route === "substore-sync"
+              ? '<a class="button small" href="#client-access">客户端配置</a>'
             : state.route === "archive-config"
               ? '<a class="button small" href="#live-config">节点实际配置</a>'
               : state.route === "agent-config"
@@ -630,6 +637,13 @@ function contextMarkup(title) {
     const entries = state.data.clientAccessEntries || [];
     return `<a class="context-back" href="#node-settings">← 返回节点设置</a><a class="context-primary ${state.data.accessAgent ? "" : "active"}" href="#client-access" data-access-agent="">全部客户端配置</a><div class="context-section-label"><span>按节点查看</span><b>${items.length}</b></div><nav class="context-list" aria-label="客户端配置节点">${items.map((agent) => { const profiles = entries.filter((entry) => entry.agent_id === agent.id).reduce((total, entry) => total + (entry.profiles || []).length, 0); return `<a class="${state.data.accessAgent === agent.id ? "active" : ""}" href="#client-access" data-access-agent="${esc(agent.id)}"><i class="status-dot ${agent.status === "online" ? "ok" : ""}"></i><span><strong>${esc(agent.name)}</strong><small>${profiles ? `${profiles} 个客户端入站` : "尚无客户端配置"}</small></span></a>`; }).join("") || "<p>还没有节点</p>"}</nav>`;
   }
+  if (state.route === "substore-sync") {
+    const resource = state.data.subStoreSync || {};
+    const profiles = resource.profiles || [];
+    const selected = profiles.filter((profile) => profile.selected).length;
+    const settings = resource.settings || {};
+    return `<a class="context-back" href="#client-access">← 返回客户端配置</a><a class="context-primary active" href="#substore-sync">Sub-Store 同步</a><section class="context-metrics"><div><span>可选 / 已选节点</span><b>${profiles.filter((profile) => profile.available).length} / ${selected}</b></div><div><span>连接状态</span><b>${settings.configured ? settings.last_sync_status === "failed" ? "异常" : "已配置" : "未配置"}</b></div></section>`;
+  }
   if (state.route === "live-config") {
     const items = state.data.agents || [];
     const selected = items.find((agent) => agent.id === state.data.liveAgent);
@@ -686,6 +700,7 @@ const agentModule = installAgents({ api, optionalAPI, state, engines, can, esc, 
 const { agents, nodeSettings, submitTask, bindCodeEditors, showCommand } = agentModule;
 
 const clientAccess = installClientAccess({ api, state, engines, esc, engineName, short, can, notify, shell });
+const subStoreSync = installSubStoreSync({ api, state, can, esc, engineName, notify, shell });
 
 const configModule = installConfigPages({ api, optionalAPI, state, engines, can, esc, engineName, conciseVersion, date, ago, bytes, confirmAction, notify, shell, submitTask, bindCodeEditors });
 const { agentConfig, liveConfig, archiveConfigs } = configModule;
@@ -711,6 +726,7 @@ async function renderOnce() {
     activity: "dashboard",
     enrollment: "node-settings",
     "client-access": "client-access",
+    "substore-sync": "substore-sync",
     identity: "settings",
     defaults: "settings",
     synchronization: "settings",
@@ -731,6 +747,7 @@ async function renderOnce() {
     "node-settings",
     "agent-config",
     "client-access",
+    "substore-sync",
     "live-config",
     "archive-config",
     "tasks",
@@ -782,6 +799,7 @@ async function renderOnce() {
       agents,
       "node-settings": (options) => nodeSettings(false, options),
       "client-access": clientAccess,
+      "substore-sync": subStoreSync,
       "agent-config": agentConfig,
       "live-config": liveConfig,
       "archive-config": archiveConfigs,
