@@ -392,20 +392,27 @@ func (s *Server) upsertSubStoreSubscription(ctx context.Context, settings core.S
 		"process":                    []any{},
 		"qcontrolhub_integration_id": settings.IntegrationID,
 	}
-	var existing map[string]any
-	status, err := s.subStoreRequest(ctx, settings.EndpointURL, http.MethodGet, "/api/sub/"+settings.SubscriptionName, nil, &existing)
-	if err != nil && status != http.StatusNotFound {
+	var subscriptions []map[string]any
+	if _, err := s.subStoreRequest(ctx, settings.EndpointURL, http.MethodGet, "/api/subs", nil, &subscriptions); err != nil {
 		return false, err
 	}
-	if status == http.StatusNotFound {
-		_, err = s.subStoreRequest(ctx, settings.EndpointURL, http.MethodPost, "/api/subs", payload, nil)
+	var existing map[string]any
+	for _, subscription := range subscriptions {
+		name, _ := subscription["name"].(string)
+		if name == settings.SubscriptionName {
+			existing = subscription
+			break
+		}
+	}
+	if existing == nil {
+		_, err := s.subStoreRequest(ctx, settings.EndpointURL, http.MethodPost, "/api/subs", payload, nil)
 		return true, err
 	}
 	owner, _ := existing["qcontrolhub_integration_id"].(string)
 	if owner != settings.IntegrationID {
 		return false, errors.New("Sub-Store 中已存在同名订阅，但它不是由当前 QControlHub 同步创建；请更换订阅名称")
 	}
-	_, err = s.subStoreRequest(ctx, settings.EndpointURL, http.MethodPatch, "/api/sub/"+settings.SubscriptionName, payload, nil)
+	_, err := s.subStoreRequest(ctx, settings.EndpointURL, http.MethodPatch, "/api/sub/"+settings.SubscriptionName, payload, nil)
 	return false, err
 }
 

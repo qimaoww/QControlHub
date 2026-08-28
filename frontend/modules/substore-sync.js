@@ -92,7 +92,7 @@ export function installSubStoreSync(ctx) {
           ? "已连接"
           : "等待首次同步";
     const syncMeta = settings.last_synced_at
-      ? `${new Date(settings.last_synced_at).toLocaleString()} · ${availableSelected.length} 个节点`
+      ? `上次同步 ${new Date(settings.last_synced_at).toLocaleString()} · 当前已选 ${availableSelected.length}`
       : `${availableSelected.length} 个待同步节点`;
 
     const cards = [...grouped.values()]

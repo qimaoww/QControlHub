@@ -61,12 +61,12 @@ func TestSubStoreSubscriptionCreateUpdateAndOwnership(t *testing.T) {
 		switch {
 		case request.Method == http.MethodGet && request.URL.Path == "/qch-secret/api/utils/env":
 			writeSubStoreTestEnvelope(t, w, http.StatusOK, map[string]any{"version": "test"}, "")
-		case request.Method == http.MethodGet && request.URL.Path == "/qch-secret/api/sub/QControlHub":
+		case request.Method == http.MethodGet && request.URL.Path == "/qch-secret/api/subs":
 			if stored == nil {
-				writeSubStoreTestEnvelope(t, w, http.StatusNotFound, nil, "not found")
+				writeSubStoreTestEnvelope(t, w, http.StatusOK, []any{}, "")
 				return
 			}
-			writeSubStoreTestEnvelope(t, w, http.StatusOK, stored, "")
+			writeSubStoreTestEnvelope(t, w, http.StatusOK, []any{stored}, "")
 		case request.Method == http.MethodPost && request.URL.Path == "/qch-secret/api/subs":
 			stored = decodeSubStoreTestPayload(t, request.Body)
 			writeSubStoreTestEnvelope(t, w, http.StatusOK, stored, "")
