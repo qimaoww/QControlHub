@@ -2,6 +2,9 @@ package agent
 
 import (
 	"context"
+	"errors"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -9,6 +12,36 @@ import (
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
+
+func TestTrafficManagerInstallsMissingNFTablesAtStartupWithoutPolicies(t *testing.T) {
+	requireAgentRoot(t)
+	root := t.TempDir()
+	nft := filepath.Join(root, "nft")
+	installed := make(chan struct{})
+	backend := &nftBackend{
+		nftPath: nft, direct: true, missing: true,
+		initialization: errors.New("nftables is unavailable"),
+		installer: func(_ context.Context, _ *nftBackend) error {
+			if err := os.WriteFile(nft, []byte("#!/bin/sh\nprintf '{\"nftables\":[]}'\n"), 0o700); err != nil {
+				return err
+			}
+			close(installed)
+			return nil
+		},
+	}
+	manager := &TrafficManager{backend: backend, records: make(map[string]*trafficRecord), now: time.Now}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	manager.Start(ctx)
+	select {
+	case <-installed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("nftables installation was not attempted at Agent startup")
+	}
+	if err := backend.ensureAvailable(context.Background()); err != nil {
+		t.Fatalf("installed nftables backend remained unavailable: %v", err)
+	}
+}
 
 type fakeTrafficBackend struct {
 	counters map[string]uint64
