@@ -14,7 +14,7 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
-const trafficPolicyColumns = `id,agent_id,name,engine,port,protocol,cycle,cycle_anchor,limit_bytes,auto_block,quota_enabled,discovered,reset_generation,
+const trafficPolicyColumns = `id,agent_id,name,engine,port,protocol,cycle,cycle_anchor,limit_bytes,auto_block,quota_enabled,monitoring_enabled,discovered,reset_generation,
        received_bytes,sent_bytes,used_bytes,receive_bps,send_bps,period_start,period_end,blocked,
        enforcement_available,enforcement_error,last_reported_at,created_at,updated_at`
 
@@ -27,7 +27,7 @@ func scanTrafficPolicy(row trafficPolicyScanner) (core.PortTrafficPolicy, error)
 	err := row.Scan(
 		&policy.ID, &policy.AgentID, &policy.Name, &policy.Engine, &policy.Port,
 		&policy.Protocol, &policy.Cycle, &policy.CycleAnchor, &policy.LimitBytes, &policy.AutoBlock,
-		&policy.QuotaEnabled, &policy.Discovered, &policy.ResetGeneration, &policy.ReceivedBytes, &policy.SentBytes,
+		&policy.QuotaEnabled, &policy.MonitoringEnabled, &policy.Discovered, &policy.ResetGeneration, &policy.ReceivedBytes, &policy.SentBytes,
 		&policy.UsedBytes, &policy.ReceiveBPS, &policy.SendBPS, &policy.PeriodStart,
 		&policy.PeriodEnd, &policy.Blocked, &policy.EnforcementAvailable,
 		&policy.EnforcementError, &policy.LastReportedAt, &policy.CreatedAt, &policy.UpdatedAt,
@@ -53,7 +53,7 @@ func (s *Store) ListPortTrafficPolicies(ctx context.Context) ([]core.PortTraffic
 }
 
 func (s *Store) AgentPortTrafficPolicies(ctx context.Context, agentID string) ([]core.PortTrafficPolicy, error) {
-	rows, err := s.pool.Query(ctx, `SELECT `+trafficPolicyColumns+` FROM port_traffic_policies WHERE agent_id=$1 ORDER BY port`, agentID)
+	rows, err := s.pool.Query(ctx, `SELECT `+trafficPolicyColumns+` FROM port_traffic_policies WHERE agent_id=$1 AND monitoring_enabled=true ORDER BY port`, agentID)
 	if err != nil {
 		return nil, err
 	}
@@ -115,7 +115,7 @@ func (s *Store) ReconcilePortTrafficEndpoints(ctx context.Context, raw []core.Po
 		if _, coveredByDiscovery := desired[key]; coveredByDiscovery {
 			continue
 		}
-		if !policy.Discovered || policy.QuotaEnabled {
+		if policy.MonitoringEnabled && (!policy.Discovered || policy.QuotaEnabled) {
 			finalCountByAgent[policy.AgentID]++
 		}
 	}
@@ -347,7 +347,7 @@ func (s *Store) UpdatePortTrafficPolicy(ctx context.Context, id string, raw core
 func updatePortTrafficPolicyRow(ctx context.Context, tx pgx.Tx, id string, request core.PortTrafficPolicyRequest) (core.PortTrafficPolicy, error) {
 	policy, err := scanTrafficPolicy(tx.QueryRow(ctx, `
 		UPDATE port_traffic_policies SET
-			name=$2,engine=$3,port=$4,protocol=$5::varchar(8),cycle=$6::varchar(8),cycle_anchor=$7::date,limit_bytes=$8,auto_block=$9,quota_enabled=true,
+			name=$2,engine=$3,port=$4,protocol=$5::varchar(8),cycle=$6::varchar(8),cycle_anchor=$7::date,limit_bytes=$8,auto_block=$9,quota_enabled=true,monitoring_enabled=true,
 			reset_generation=reset_generation + CASE WHEN port<>$4 OR protocol<>$5::varchar(8) OR cycle<>$6::varchar(8) OR cycle_anchor<>$7::date THEN 1 ELSE 0 END,
 			received_bytes=CASE WHEN port<>$4 OR protocol<>$5::varchar(8) OR cycle<>$6::varchar(8) OR cycle_anchor<>$7::date THEN 0 ELSE received_bytes END,
 			sent_bytes=CASE WHEN port<>$4 OR protocol<>$5::varchar(8) OR cycle<>$6::varchar(8) OR cycle_anchor<>$7::date THEN 0 ELSE sent_bytes END,
@@ -400,6 +400,33 @@ func (s *Store) DeletePortTrafficPolicy(ctx context.Context, id string) (string,
 		_, err = tx.Exec(ctx, `DELETE FROM port_traffic_policies WHERE id=$1`, id)
 	}
 	if err != nil {
+		return "", err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return "", err
+	}
+	return agentID, nil
+}
+
+func (s *Store) DeletePortTrafficMonitoring(ctx context.Context, id string) (string, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback(ctx)
+	var agentID string
+	if err := tx.QueryRow(ctx, `SELECT agent_id FROM port_traffic_policies WHERE id=$1 FOR UPDATE`, id).Scan(&agentID); errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrNotFound
+	} else if err != nil {
+		return "", err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM port_traffic_daily_usage WHERE policy_id=$1`, id); err != nil {
+		return "", err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE port_traffic_policies SET monitoring_enabled=false,quota_enabled=false,auto_block=false,blocked=false,
+		received_bytes=0,sent_bytes=0,reported_received_bytes=0,reported_sent_bytes=0,used_bytes=0,receive_bps=0,send_bps=0,
+		period_start=NULL,period_end=NULL,enforcement_available=false,enforcement_error='',last_reported_at=NULL,
+		reset_generation=reset_generation+1,updated_at=now() WHERE id=$1`, id); err != nil {
 		return "", err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -463,7 +490,7 @@ func (s *Store) UpdatePortTrafficUsage(ctx context.Context, agentID string, usag
 		err := tx.QueryRow(ctx, `
 			SELECT reset_generation,received_bytes,sent_bytes,reported_received_bytes,reported_sent_bytes,
 			       name,engine,port,protocol,traffic_history_initialized,period_start,period_end,last_reported_at
-			FROM port_traffic_policies WHERE id=$1 AND agent_id=$2 FOR UPDATE`, usage.PolicyID, agentID).Scan(
+			FROM port_traffic_policies WHERE id=$1 AND agent_id=$2 AND monitoring_enabled=true FOR UPDATE`, usage.PolicyID, agentID).Scan(
 			&current.generation, &current.received, &current.sent, &current.reportedReceived, &current.reportedSent,
 			&current.name, &current.engine, &current.port, &current.protocol, &current.historyInitialized,
 			&current.periodStart, &current.periodEnd, &current.lastReported,

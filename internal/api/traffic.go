@@ -196,6 +196,17 @@ func (s *Server) deletePortTrafficPolicy(w http.ResponseWriter, request *http.Re
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (s *Server) deletePortTrafficMonitoring(w http.ResponseWriter, request *http.Request) {
+	agentID, err := s.store.DeletePortTrafficMonitoring(request.Context(), request.PathValue("id"))
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	s.DisconnectAgent(agentID)
+	s.recordAudit(request, "traffic_monitor.deleted", request.PathValue("id"), "monitoring record and daily history deleted")
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func trafficPolicyAuditDetail(policy core.PortTrafficPolicy) string {
 	return string(policy.Engine) + " port " + strconv.Itoa(policy.Port) + "/" + string(policy.Protocol)
 }

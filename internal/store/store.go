@@ -44,7 +44,7 @@ type storeExecutor interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }
 
-const currentSchemaVersion = 28
+const currentSchemaVersion = 29
 
 func Open(ctx context.Context, databaseURL string, allowInsecureRemote bool) (*Store, error) {
 	return OpenWithConfigKey(ctx, databaseURL, allowInsecureRemote, "")
@@ -920,6 +920,12 @@ func (s *Store) DeleteAgent(ctx context.Context, id string) error {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM config_revisions WHERE config_id IN (SELECT id FROM configs WHERE agent_id=$1)`, id); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM port_traffic_daily_usage WHERE agent_id=$1`, id); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM port_traffic_policies WHERE agent_id=$1`, id); err != nil {
 		return err
 	}
 	legacyEnrollmentID := ""
@@ -1964,6 +1970,7 @@ CREATE TABLE IF NOT EXISTS port_traffic_policies (
 	limit_bytes bigint NOT NULL CHECK (limit_bytes > 0),
 	auto_block boolean NOT NULL DEFAULT true,
 	quota_enabled boolean NOT NULL DEFAULT true,
+	monitoring_enabled boolean NOT NULL DEFAULT true,
 	discovered boolean NOT NULL DEFAULT false,
 	traffic_history_initialized boolean NOT NULL DEFAULT false,
     reset_generation bigint NOT NULL DEFAULT 1 CHECK (reset_generation > 0),
@@ -1986,6 +1993,7 @@ CREATE TABLE IF NOT EXISTS port_traffic_policies (
 );
 ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS auto_block boolean NOT NULL DEFAULT true;
 ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS quota_enabled boolean NOT NULL DEFAULT true;
+ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS monitoring_enabled boolean NOT NULL DEFAULT true;
 ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS discovered boolean NOT NULL DEFAULT false;
 ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS traffic_history_initialized boolean NOT NULL DEFAULT false;
 DO $traffic_baselines$
@@ -2039,6 +2047,14 @@ CREATE TABLE IF NOT EXISTS port_traffic_daily_usage (
 );
 CREATE INDEX IF NOT EXISTS port_traffic_daily_agent_date_idx ON port_traffic_daily_usage(agent_id,usage_date,port);
 CREATE INDEX IF NOT EXISTS port_traffic_daily_policy_date_idx ON port_traffic_daily_usage(policy_id,usage_date);
+
+-- Agent deletion is intentionally a soft revocation, so foreign-key cascades
+-- do not run. Remove traffic rows left by versions that did not clean them in
+-- DeleteAgent; otherwise revoked nodes survive as orphan cards indefinitely.
+DELETE FROM port_traffic_daily_usage
+WHERE agent_id IN (SELECT id FROM agents WHERE revoked_at IS NOT NULL);
+DELETE FROM port_traffic_policies
+WHERE agent_id IN (SELECT id FROM agents WHERE revoked_at IS NOT NULL);
 
 CREATE TABLE IF NOT EXISTS audit_logs (
     id bigserial PRIMARY KEY,
