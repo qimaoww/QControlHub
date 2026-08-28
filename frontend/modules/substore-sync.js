@@ -34,6 +34,8 @@ export function installSubStoreSync(ctx) {
   const { api, state, can, esc, engineName, notify, shell } = ctx;
   let agentFilter = "";
   let query = "";
+  let masonryObserver = null;
+  let pendingSelectionSave = null;
   const refresh = createRefreshChannel({
     isCurrent: () => state.route === "substore-sync",
     getScope: () => state.navigationEpoch,
@@ -121,6 +123,8 @@ export function installSubStoreSync(ctx) {
       .join("");
     const empty = `<section class="substore-empty"><strong>没有匹配的客户端节点</strong><span>请调整节点或搜索条件。</span></section>`;
     const manage = can("settings.manage");
+    masonryObserver?.disconnect();
+    masonryObserver = null;
     shell(
       `<section class="substore-workspace" data-substore-page>
         <section class="substore-status-bar">
@@ -143,6 +147,31 @@ export function installSubStoreSync(ctx) {
     bindPage();
   }
 
+  function bindSubStoreMasonry() {
+    const grid = document.querySelector(".substore-agent-grid:not(.empty)");
+    if (!grid) return;
+    const cards = [...grid.querySelectorAll(".substore-agent-card")];
+    if (!cards.length) return;
+
+    const layout = () => {
+      const styles = getComputedStyle(grid);
+      const rowHeight = Number.parseFloat(styles.gridAutoRows) || 1;
+      const rowGap = Number.parseFloat(styles.rowGap) || 0;
+      cards.forEach((card) => {
+        const height = card.getBoundingClientRect().height;
+        const span = Math.ceil((height + rowGap) / (rowHeight + rowGap));
+        card.style.gridRowEnd = `span ${span}`;
+      });
+    };
+
+    layout();
+    requestAnimationFrame(layout);
+    if (typeof ResizeObserver === "function") {
+      masonryObserver = new ResizeObserver(layout);
+      cards.forEach((card) => masonryObserver.observe(card));
+    }
+  }
+
   async function saveSelections(profiles) {
     const selections = subStoreSelectionPayload(profiles);
     await api("/substore-sync/selections", {
@@ -151,6 +180,20 @@ export function installSubStoreSync(ctx) {
     });
     notify("同步清单已更新");
     await subStoreSync();
+  }
+
+  function trackSelectionSave(profiles) {
+    const operation = saveSelections(profiles);
+    pendingSelectionSave = operation;
+    operation.then(
+      () => {
+        if (pendingSelectionSave === operation) pendingSelectionSave = null;
+      },
+      () => {
+        if (pendingSelectionSave === operation) pendingSelectionSave = null;
+      },
+    );
+    return operation;
   }
 
   function profileForRow(row) {
@@ -167,6 +210,7 @@ export function installSubStoreSync(ctx) {
   function bindPage() {
     const resource = state.data.subStoreSync || {};
     const profiles = resource.profiles || [];
+    bindSubStoreMasonry();
     bindEvent(document.querySelector("[data-substore-agent-filter]"), "change", (event) => {
       agentFilter = event.currentTarget.value;
       render();
@@ -185,7 +229,7 @@ export function installSubStoreSync(ctx) {
         profile.selected = control.matches("[data-substore-select]") ? control.checked : true;
         if (profile.selected && !profile.custom_name) profile.custom_name = profile.default_name;
         try {
-          await saveSelections(profiles);
+          await trackSelectionSave(profiles);
         } catch (error) {
           notify(error.message, "error");
           await subStoreSync();
@@ -198,7 +242,7 @@ export function installSubStoreSync(ctx) {
         if (!profile) return;
         profile.selected = false;
         try {
-          await saveSelections(profiles);
+          await trackSelectionSave(profiles);
         } catch (error) {
           notify(error.message, "error");
           await subStoreSync();
@@ -206,13 +250,17 @@ export function installSubStoreSync(ctx) {
       };
     });
     document.querySelectorAll("[data-substore-name]").forEach((input) => {
+      input.oninput = () => {
+        const profile = profileForRow(input.closest("[data-substore-key]"));
+        if (profile) profile.custom_name = input.value;
+      };
       input.onchange = async () => {
         const profile = profileForRow(input.closest("[data-substore-key]"));
         if (!profile) return;
-        const previous = profile.custom_name || profile.default_name;
+        const previous = input.defaultValue || profile.default_name;
         profile.custom_name = input.value.trim();
         try {
-          await saveSelections(profiles);
+          await trackSelectionSave(profiles);
         } catch (error) {
           profile.custom_name = previous;
           notify(error.message, "error");
@@ -257,6 +305,7 @@ export function installSubStoreSync(ctx) {
       const button = event.currentTarget;
       button.disabled = true;
       try {
+        if (pendingSelectionSave) await pendingSelectionSave;
         const result = await api("/substore-sync/run", { method: "POST" });
         notify(`${result.node_count} 个节点已同步到 Sub-Store`);
         await subStoreSync();
