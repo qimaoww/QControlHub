@@ -2916,6 +2916,7 @@ try {
         },
         targets: [{
           id: "sst_primary",
+          display_name: "Primary review",
           subscription_name: "QControlHub",
           selection_count: 1,
           last_sync_status: "success",
@@ -2941,6 +2942,10 @@ try {
   assert.equal(subStoreMarkup.includes("VLESS · :443"), true);
   assert.equal(subStoreMarkup.includes("data-substore-target-add"), true);
   assert.equal(subStoreMarkup.includes("data-substore-settings-dialog"), true);
+  assert.equal(subStoreMarkup.includes("仅修改面板名称"), true);
+  assert.equal(subStoreMarkup.includes("同时修改远端组名"), true);
+  assert.equal(subStoreMarkup.includes("Sub-Store 已有组"), true);
+  assert.equal(subStoreMarkup.includes("仅移除面板中的同步关系"), true);
   assert.equal(subStoreMarkup.includes("substore-hero"), false);
   assert.equal(subStoreMarkup.includes("<h1"), false, "sync page does not repeat a large title hero");
 } finally {
