@@ -766,7 +766,7 @@ func TestManualConfigRequiresExplicitImportOfNodeSnapshot(t *testing.T) {
 		`只读导入快照`,
 		`data-live-source="managed"`,
 		`data-live-source="import"`,
-		`QAgent 现有配置`,
+		`QAgent 托管配置`,
 		`系统服务配置（只读）`,
 		`read-managed-config`,
 		`submitLiveConfigChange`,
