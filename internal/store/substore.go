@@ -63,6 +63,9 @@ func (s *Store) SaveSubStoreSyncSettings(ctx context.Context, endpointURL, subsc
 		ON CONFLICT (id) DO UPDATE SET
 			endpoint_ciphertext=EXCLUDED.endpoint_ciphertext,
 			subscription_name=EXCLUDED.subscription_name,
+			last_synced_at=NULL,
+			last_sync_status='never',
+			last_sync_error='',
 			updated_at=EXCLUDED.updated_at`, sealed, subscriptionName, integrationID, now); err != nil {
 		return core.SubStoreSyncSettings{}, fmt.Errorf("save Sub-Store sync settings: %w", err)
 	}

@@ -62,8 +62,11 @@ func TestSubStoreSyncSettingsAndSelectionsLifecycle(t *testing.T) {
 		t.Fatalf("duplicate selection error = %v", err)
 	}
 
+	if err := dataStore.RecordSubStoreSyncResult(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
 	settings, err = dataStore.SaveSubStoreSyncSettings(ctx, endpoint, "QControlHub renamed")
-	if err != nil || settings.IntegrationID != firstIntegrationID {
+	if err != nil || settings.IntegrationID != firstIntegrationID || settings.LastSyncStatus != "never" || settings.LastSyncedAt != nil {
 		t.Fatalf("settings update changed integration identity: %+v, %v", settings, err)
 	}
 	if err := dataStore.RecordSubStoreSyncResult(ctx, nil); err != nil {
