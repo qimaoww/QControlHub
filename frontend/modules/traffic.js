@@ -62,15 +62,15 @@ export function trafficRateForDisplay(
 }
 
 export function mergeTrafficPorts(policies = [], endpoints = []) {
-	const monitored = new Set(policies.map(trafficPortIdentity));
-	const visiblePolicies = policies.filter((policy) => policy.monitoring_enabled !== false);
+  const monitored = new Set(policies.map(trafficPortIdentity));
+  const visiblePolicies = policies.filter((policy) => policy.monitoring_enabled !== false);
   const discovered = new Map();
   for (const endpoint of endpoints) {
     const identity = trafficPortIdentity(endpoint);
     if (!monitored.has(identity) && !discovered.has(identity)) discovered.set(identity, endpoint);
   }
   return [
-		...visiblePolicies.map((policy) => ({ kind: "policy", key: `policy:${policy.id}`, policy })),
+    ...visiblePolicies.map((policy) => ({ kind: "policy", key: `policy:${policy.id}`, policy })),
     ...[...discovered.values()]
       .map((endpoint) => ({ kind: "endpoint", key: trafficEndpointKey(endpoint), endpoint })),
   ];
@@ -593,7 +593,7 @@ export function installTraffic(ctx) {
         if (!(await confirmAction("确定停止监控这个端口，并永久删除当前流量记录和每日历史？以后重新设置配额可再次启用。", "删除流量记录"))) return;
         try {
           await api(`/traffic-policies/${encodeURIComponent(button.dataset.trafficMonitorDelete)}/monitoring`, { method: "DELETE" });
-          notify("孤儿流量记录已删除");
+          notify("流量记录已删除");
           await traffic();
         } catch (error) { notify(error.message, "error"); }
       };
