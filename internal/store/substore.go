@@ -16,13 +16,12 @@ func (s *Store) SubStoreSyncSettings(ctx context.Context) (core.SubStoreSyncSett
 	var settings core.SubStoreSyncSettings
 	var endpoint string
 	err := s.pool.QueryRow(ctx, `
-		SELECT endpoint_ciphertext,subscription_name,integration_id,last_synced_at,last_sync_status,last_sync_error,updated_at
+		SELECT endpoint_ciphertext,updated_at
 		FROM substore_sync_settings WHERE id=1`).Scan(
-		&endpoint, &settings.SubscriptionName, &settings.IntegrationID, &settings.LastSyncedAt,
-		&settings.LastSyncStatus, &settings.LastSyncError, &settings.UpdatedAt,
+		&endpoint, &settings.UpdatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return core.SubStoreSyncSettings{LastSyncStatus: "never"}, nil
+		return core.SubStoreSyncSettings{}, nil
 	}
 	if err != nil {
 		return core.SubStoreSyncSettings{}, fmt.Errorf("read Sub-Store sync settings: %w", err)
@@ -35,14 +34,10 @@ func (s *Store) SubStoreSyncSettings(ctx context.Context) (core.SubStoreSyncSett
 	return settings, nil
 }
 
-func (s *Store) SaveSubStoreSyncSettings(ctx context.Context, endpointURL, subscriptionName string) (core.SubStoreSyncSettings, error) {
+func (s *Store) SaveSubStoreSyncSettings(ctx context.Context, endpointURL string) (core.SubStoreSyncSettings, error) {
 	endpointURL = strings.TrimSpace(endpointURL)
-	subscriptionName = strings.TrimSpace(subscriptionName)
 	if endpointURL == "" || utf8.RuneCountInString(endpointURL) > 1000 {
 		return core.SubStoreSyncSettings{}, fmt.Errorf("%w: Sub-Store endpoint is required and must not exceed 1000 characters", ErrInvalid)
-	}
-	if subscriptionName == "" || utf8.RuneCountInString(subscriptionName) > 100 || subscriptionName == "." || subscriptionName == ".." || strings.ContainsAny(subscriptionName, "/\\?#\r\n") {
-		return core.SubStoreSyncSettings{}, fmt.Errorf("%w: Sub-Store subscription name is required, must not exceed 100 characters, and cannot contain path characters", ErrInvalid)
 	}
 	if s.cryptor == nil {
 		return core.SubStoreSyncSettings{}, fmt.Errorf("%w: QCH_CONFIG_ENCRYPTION_KEY is required for Sub-Store credentials", ErrSecretUnavailable)
@@ -56,26 +51,137 @@ func (s *Store) SaveSubStoreSyncSettings(ctx context.Context, endpointURL, subsc
 		return core.SubStoreSyncSettings{}, err
 	}
 	now := time.Now().UTC()
-	if _, err := s.pool.Exec(ctx, `
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return core.SubStoreSyncSettings{}, err
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `
 		INSERT INTO substore_sync_settings
 			(id,endpoint_ciphertext,subscription_name,integration_id,last_sync_status,last_sync_error,updated_at)
-		VALUES (1,$1,$2,$3,'never','',$4)
+		VALUES (1,$1,'QControlHub',$2,'never','',$3)
 		ON CONFLICT (id) DO UPDATE SET
 			endpoint_ciphertext=EXCLUDED.endpoint_ciphertext,
-			subscription_name=EXCLUDED.subscription_name,
-			last_synced_at=NULL,
-			last_sync_status='never',
-			last_sync_error='',
-			updated_at=EXCLUDED.updated_at`, sealed, subscriptionName, integrationID, now); err != nil {
+			updated_at=EXCLUDED.updated_at`, sealed, integrationID, now); err != nil {
 		return core.SubStoreSyncSettings{}, fmt.Errorf("save Sub-Store sync settings: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE substore_sync_targets SET
+			last_synced_at=NULL,last_sync_status='never',last_sync_error='',updated_at=$1`, now); err != nil {
+		return core.SubStoreSyncSettings{}, fmt.Errorf("reset Sub-Store sync targets: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return core.SubStoreSyncSettings{}, err
 	}
 	return s.SubStoreSyncSettings(ctx)
 }
 
-func (s *Store) ListSubStoreSyncSelections(ctx context.Context) ([]core.SubStoreSyncSelection, error) {
+func validateSubStoreTargetName(name string) (string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" || utf8.RuneCountInString(name) > 100 || name == "." || name == ".." || strings.ContainsAny(name, "/\\?#\r\n") {
+		return "", fmt.Errorf("%w: Sub-Store subscription name is required, must not exceed 100 characters, and cannot contain path characters", ErrInvalid)
+	}
+	return name, nil
+}
+
+func (s *Store) ListSubStoreSyncTargets(ctx context.Context) ([]core.SubStoreSyncTarget, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT agent_id,engine,profile_tag,custom_name,created_at,updated_at
-		FROM substore_sync_items ORDER BY created_at,agent_id,engine,profile_tag`)
+		SELECT target.id,target.subscription_name,target.integration_id,target.last_synced_at,
+		       target.last_sync_status,target.last_sync_error,
+		       (SELECT count(*) FROM substore_sync_items item WHERE item.target_id=target.id),
+		       target.created_at,target.updated_at
+		FROM substore_sync_targets target ORDER BY target.created_at,target.id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	targets := make([]core.SubStoreSyncTarget, 0)
+	for rows.Next() {
+		var target core.SubStoreSyncTarget
+		if err := rows.Scan(
+			&target.ID, &target.SubscriptionName, &target.IntegrationID, &target.LastSyncedAt,
+			&target.LastSyncStatus, &target.LastSyncError, &target.SelectionCount, &target.CreatedAt, &target.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		targets = append(targets, target)
+	}
+	return targets, rows.Err()
+}
+
+func (s *Store) SubStoreSyncTarget(ctx context.Context, id string) (core.SubStoreSyncTarget, error) {
+	var target core.SubStoreSyncTarget
+	err := s.pool.QueryRow(ctx, `
+		SELECT target.id,target.subscription_name,target.integration_id,target.last_synced_at,
+		       target.last_sync_status,target.last_sync_error,
+		       (SELECT count(*) FROM substore_sync_items item WHERE item.target_id=target.id),
+		       target.created_at,target.updated_at
+		FROM substore_sync_targets target WHERE target.id=$1`, strings.TrimSpace(id)).Scan(
+		&target.ID, &target.SubscriptionName, &target.IntegrationID, &target.LastSyncedAt,
+		&target.LastSyncStatus, &target.LastSyncError, &target.SelectionCount, &target.CreatedAt, &target.UpdatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return core.SubStoreSyncTarget{}, ErrNotFound
+	}
+	return target, err
+}
+
+func (s *Store) CreateSubStoreSyncTarget(ctx context.Context, name string) (core.SubStoreSyncTarget, error) {
+	name, err := validateSubStoreTargetName(name)
+	if err != nil {
+		return core.SubStoreSyncTarget{}, err
+	}
+	id, err := core.NewID("sst")
+	if err != nil {
+		return core.SubStoreSyncTarget{}, err
+	}
+	integrationID, err := core.NewID("ssi")
+	if err != nil {
+		return core.SubStoreSyncTarget{}, err
+	}
+	now := time.Now().UTC()
+	if _, err := s.pool.Exec(ctx, `
+		INSERT INTO substore_sync_targets
+			(id,subscription_name,integration_id,last_sync_status,last_sync_error,created_at,updated_at)
+		VALUES ($1,$2,$3,'never','',$4,$4)`, id, name, integrationID, now); err != nil {
+		return core.SubStoreSyncTarget{}, mapError(err)
+	}
+	return s.SubStoreSyncTarget(ctx, id)
+}
+
+func (s *Store) UpdateSubStoreSyncTarget(ctx context.Context, id, name string) (core.SubStoreSyncTarget, error) {
+	name, err := validateSubStoreTargetName(name)
+	if err != nil {
+		return core.SubStoreSyncTarget{}, err
+	}
+	command, err := s.pool.Exec(ctx, `
+		UPDATE substore_sync_targets SET
+			subscription_name=$2,last_synced_at=NULL,last_sync_status='never',last_sync_error='',updated_at=now()
+		WHERE id=$1`, strings.TrimSpace(id), name)
+	if err != nil {
+		return core.SubStoreSyncTarget{}, mapError(err)
+	}
+	if command.RowsAffected() == 0 {
+		return core.SubStoreSyncTarget{}, ErrNotFound
+	}
+	return s.SubStoreSyncTarget(ctx, id)
+}
+
+func (s *Store) DeleteSubStoreSyncTarget(ctx context.Context, id string) error {
+	command, err := s.pool.Exec(ctx, `DELETE FROM substore_sync_targets WHERE id=$1`, strings.TrimSpace(id))
+	if err != nil {
+		return err
+	}
+	if command.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) ListSubStoreSyncSelections(ctx context.Context, targetID string) ([]core.SubStoreSyncSelection, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT target_id,agent_id,engine,profile_tag,custom_name,created_at,updated_at
+		FROM substore_sync_items WHERE target_id=$1 ORDER BY created_at,agent_id,engine,profile_tag`, strings.TrimSpace(targetID))
 	if err != nil {
 		return nil, err
 	}
@@ -83,7 +189,7 @@ func (s *Store) ListSubStoreSyncSelections(ctx context.Context) ([]core.SubStore
 	result := make([]core.SubStoreSyncSelection, 0)
 	for rows.Next() {
 		var item core.SubStoreSyncSelection
-		if err := rows.Scan(&item.AgentID, &item.Engine, &item.ProfileTag, &item.CustomName, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.TargetID, &item.AgentID, &item.Engine, &item.ProfileTag, &item.CustomName, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, err
 		}
 		result = append(result, item)
@@ -91,12 +197,17 @@ func (s *Store) ListSubStoreSyncSelections(ctx context.Context) ([]core.SubStore
 	return result, rows.Err()
 }
 
-func (s *Store) ReplaceSubStoreSyncSelections(ctx context.Context, selections []core.SubStoreSyncSelection) ([]core.SubStoreSyncSelection, error) {
+func (s *Store) ReplaceSubStoreSyncSelections(ctx context.Context, targetID string, selections []core.SubStoreSyncSelection) ([]core.SubStoreSyncSelection, error) {
+	targetID = strings.TrimSpace(targetID)
+	if _, err := s.SubStoreSyncTarget(ctx, targetID); err != nil {
+		return nil, err
+	}
 	if len(selections) > 512 {
 		return nil, fmt.Errorf("%w: no more than 512 Sub-Store nodes can be selected", ErrInvalid)
 	}
 	seen := make(map[string]struct{}, len(selections))
 	for index := range selections {
+		selections[index].TargetID = targetID
 		selections[index].AgentID = strings.TrimSpace(selections[index].AgentID)
 		selections[index].ProfileTag = strings.TrimSpace(selections[index].ProfileTag)
 		selections[index].CustomName = strings.TrimSpace(selections[index].CustomName)
@@ -120,7 +231,7 @@ func (s *Store) ReplaceSubStoreSyncSelections(ctx context.Context, selections []
 		return nil, err
 	}
 	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, `DELETE FROM substore_sync_items`); err != nil {
+	if _, err := tx.Exec(ctx, `DELETE FROM substore_sync_items WHERE target_id=$1`, targetID); err != nil {
 		return nil, err
 	}
 	now := time.Now().UTC()
@@ -132,18 +243,18 @@ func (s *Store) ReplaceSubStoreSyncSelections(ctx context.Context, selections []
 			return nil, err
 		}
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO substore_sync_items (agent_id,engine,profile_tag,custom_name,created_at,updated_at)
-			VALUES ($1,$2,$3,$4,$5,$5)`, item.AgentID, item.Engine, item.ProfileTag, item.CustomName, now); err != nil {
+			INSERT INTO substore_sync_items (target_id,agent_id,engine,profile_tag,custom_name,created_at,updated_at)
+			VALUES ($1,$2,$3,$4,$5,$6,$6)`, targetID, item.AgentID, item.Engine, item.ProfileTag, item.CustomName, now); err != nil {
 			return nil, mapError(err)
 		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
-	return s.ListSubStoreSyncSelections(ctx)
+	return s.ListSubStoreSyncSelections(ctx, targetID)
 }
 
-func (s *Store) RecordSubStoreSyncResult(ctx context.Context, syncErr error) error {
+func (s *Store) RecordSubStoreSyncResult(ctx context.Context, targetID string, syncErr error) error {
 	status := "success"
 	message := ""
 	if syncErr != nil {
@@ -151,9 +262,9 @@ func (s *Store) RecordSubStoreSyncResult(ctx context.Context, syncErr error) err
 		message = truncate(strings.TrimSpace(syncErr.Error()), 500)
 	}
 	command, err := s.pool.Exec(ctx, `
-		UPDATE substore_sync_settings SET
+		UPDATE substore_sync_targets SET
 			last_synced_at=now(),last_sync_status=$1,last_sync_error=$2,updated_at=now()
-		WHERE id=1`, status, message)
+		WHERE id=$3`, status, message, strings.TrimSpace(targetID))
 	if err != nil {
 		return err
 	}

@@ -26,9 +26,11 @@ const subStoreResponseLimit = 1 << 20
 type subStoreSyncProfile struct {
 	AgentID     string      `json:"agent_id"`
 	AgentName   string      `json:"agent_name"`
+	AgentStatus string      `json:"agent_status"`
 	Engine      core.Engine `json:"engine"`
 	ProfileTag  string      `json:"profile_tag"`
 	Protocol    string      `json:"protocol"`
+	Port        int         `json:"port"`
 	DefaultName string      `json:"default_name"`
 	CustomName  string      `json:"custom_name,omitempty"`
 	Selected    bool        `json:"selected"`
@@ -42,17 +44,27 @@ func (profile subStoreSyncProfile) key() string {
 
 type subStoreSyncResource struct {
 	Settings   core.SubStoreSyncSettings    `json:"settings"`
+	Targets    []core.SubStoreSyncTarget    `json:"targets"`
+	TargetID   string                       `json:"target_id,omitempty"`
 	Profiles   []subStoreSyncProfile        `json:"profiles"`
 	Selections []core.SubStoreSyncSelection `json:"selections"`
 }
 
 type subStoreSettingsRequest struct {
-	EndpointURL      string `json:"endpoint_url"`
-	SubscriptionName string `json:"subscription_name"`
+	EndpointURL string `json:"endpoint_url"`
 }
 
 type subStoreSelectionsRequest struct {
+	TargetID   string                       `json:"target_id"`
 	Selections []core.SubStoreSyncSelection `json:"selections"`
+}
+
+type subStoreTargetRequest struct {
+	SubscriptionName string `json:"subscription_name"`
+}
+
+type subStoreRunRequest struct {
+	TargetID string `json:"target_id"`
 }
 
 type subStoreSyncResult struct {
@@ -141,7 +153,7 @@ func subStoreEndpointHint(endpoint string) string {
 }
 
 func (s *Server) getSubStoreSync(w http.ResponseWriter, request *http.Request) {
-	resource, err := s.subStoreSyncResource(request.Context())
+	resource, err := s.subStoreSyncResource(request.Context(), request.URL.Query().Get("target_id"))
 	if err != nil {
 		writeStoreError(w, err)
 		return
@@ -149,7 +161,7 @@ func (s *Server) getSubStoreSync(w http.ResponseWriter, request *http.Request) {
 	writeJSON(w, http.StatusOK, resource)
 }
 
-func (s *Server) subStoreSyncResource(ctx context.Context) (subStoreSyncResource, error) {
+func (s *Server) subStoreSyncResource(ctx context.Context, targetID string) (subStoreSyncResource, error) {
 	settings, err := s.store.SubStoreSyncSettings(ctx)
 	if err != nil {
 		return subStoreSyncResource{}, err
@@ -157,15 +169,38 @@ func (s *Server) subStoreSyncResource(ctx context.Context) (subStoreSyncResource
 	if settings.Configured {
 		settings.EndpointHint = subStoreEndpointHint(settings.EndpointURL)
 	}
-	selections, err := s.store.ListSubStoreSyncSelections(ctx)
+	targets, err := s.store.ListSubStoreSyncTargets(ctx)
 	if err != nil {
 		return subStoreSyncResource{}, err
+	}
+	targetID = strings.TrimSpace(targetID)
+	if targetID == "" && len(targets) > 0 {
+		targetID = targets[0].ID
+	}
+	if targetID != "" {
+		found := false
+		for _, target := range targets {
+			if target.ID == targetID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return subStoreSyncResource{}, store.ErrNotFound
+		}
+	}
+	selections := make([]core.SubStoreSyncSelection, 0)
+	if targetID != "" {
+		selections, err = s.store.ListSubStoreSyncSelections(ctx, targetID)
+		if err != nil {
+			return subStoreSyncResource{}, err
+		}
 	}
 	profiles, err := s.availableSubStoreProfiles(ctx, selections)
 	if err != nil {
 		return subStoreSyncResource{}, err
 	}
-	return subStoreSyncResource{Settings: settings, Profiles: profiles, Selections: selections}, nil
+	return subStoreSyncResource{Settings: settings, Targets: targets, TargetID: targetID, Profiles: profiles, Selections: selections}, nil
 }
 
 func (s *Server) availableSubStoreProfiles(ctx context.Context, selections []core.SubStoreSyncSelection) ([]subStoreSyncProfile, error) {
@@ -182,8 +217,8 @@ func (s *Server) availableSubStoreProfiles(ctx context.Context, selections []cor
 	for _, entry := range entries {
 		for _, item := range entry.Profiles {
 			profile := subStoreSyncProfile{
-				AgentID: entry.AgentID, AgentName: entry.AgentName, Engine: entry.Engine,
-				ProfileTag: item.Tag, Protocol: item.Protocol, URI: item.Profile.URI, Available: true,
+				AgentID: entry.AgentID, AgentName: entry.AgentName, AgentStatus: entry.AgentStatus, Engine: entry.Engine,
+				ProfileTag: item.Tag, Protocol: item.Protocol, Port: item.Port, URI: item.Profile.URI, Available: true,
 				DefaultName: strings.TrimSpace(entry.AgentName + " · " + item.Tag),
 			}
 			if selection, ok := selected[profile.key()]; ok {
@@ -235,7 +270,7 @@ func (s *Server) putSubStoreSettings(w http.ResponseWriter, request *http.Reques
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	settings, err := s.store.SaveSubStoreSyncSettings(request.Context(), endpoint, input.SubscriptionName)
+	settings, err := s.store.SaveSubStoreSyncSettings(request.Context(), endpoint)
 	if err != nil {
 		if errors.Is(err, store.ErrSecretUnavailable) {
 			writeError(w, http.StatusServiceUnavailable, "请先配置 QCH_CONFIG_ENCRYPTION_KEY，再保存 Sub-Store 地址")
@@ -245,8 +280,83 @@ func (s *Server) putSubStoreSettings(w http.ResponseWriter, request *http.Reques
 		return
 	}
 	settings.EndpointHint = subStoreEndpointHint(settings.EndpointURL)
-	s.recordAudit(request, "substore.settings.updated", settings.SubscriptionName, "Sub-Store connection settings updated")
+	s.recordAudit(request, "substore.settings.updated", "Sub-Store", "Sub-Store connection settings updated")
 	writeJSON(w, http.StatusOK, settings)
+}
+
+func (s *Server) createSubStoreTarget(w http.ResponseWriter, request *http.Request) {
+	var input subStoreTargetRequest
+	if err := decodeJSON(w, request, &input, 8<<10); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	target, err := s.store.CreateSubStoreSyncTarget(request.Context(), input.SubscriptionName)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	s.recordAudit(request, "substore.target.created", target.SubscriptionName, "Sub-Store sync target created")
+	writeJSON(w, http.StatusCreated, target)
+}
+
+func (s *Server) updateSubStoreTarget(w http.ResponseWriter, request *http.Request) {
+	var input subStoreTargetRequest
+	if err := decodeJSON(w, request, &input, 8<<10); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	target, err := s.store.UpdateSubStoreSyncTarget(request.Context(), request.PathValue("id"), input.SubscriptionName)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	s.recordAudit(request, "substore.target.updated", target.SubscriptionName, "Sub-Store sync target renamed")
+	writeJSON(w, http.StatusOK, target)
+}
+
+func (s *Server) deleteSubStoreTarget(w http.ResponseWriter, request *http.Request) {
+	target, err := s.store.SubStoreSyncTarget(request.Context(), request.PathValue("id"))
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	settings, err := s.store.SubStoreSyncSettings(request.Context())
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	if settings.Configured && target.LastSyncedAt != nil {
+		if err := s.deleteSubStoreSubscription(request.Context(), settings, target); err != nil {
+			writeError(w, http.StatusBadGateway, err.Error())
+			return
+		}
+	}
+	if err := s.store.DeleteSubStoreSyncTarget(request.Context(), target.ID); err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	s.recordAudit(request, "substore.target.deleted", target.SubscriptionName, "Sub-Store sync target deleted")
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) deleteSubStoreSubscription(ctx context.Context, settings core.SubStoreSyncSettings, target core.SubStoreSyncTarget) error {
+	var subscriptions []map[string]any
+	if _, err := s.subStoreRequest(ctx, settings.EndpointURL, http.MethodGet, "/api/subs", nil, &subscriptions); err != nil {
+		return err
+	}
+	for _, subscription := range subscriptions {
+		owner, _ := subscription["qcontrolhub_integration_id"].(string)
+		if owner != target.IntegrationID {
+			continue
+		}
+		name, _ := subscription["name"].(string)
+		if name == "" {
+			return errors.New("Sub-Store 返回的订阅缺少名称")
+		}
+		_, err := s.subStoreRequest(ctx, settings.EndpointURL, http.MethodDelete, "/api/sub/"+name, nil, nil)
+		return err
+	}
+	return nil
 }
 
 func (s *Server) putSubStoreSelections(w http.ResponseWriter, request *http.Request) {
@@ -274,12 +384,12 @@ func (s *Server) putSubStoreSelections(w http.ResponseWriter, request *http.Requ
 			input.Selections[index].CustomName = profile.DefaultName
 		}
 	}
-	selections, err := s.store.ReplaceSubStoreSyncSelections(request.Context(), input.Selections)
+	selections, err := s.store.ReplaceSubStoreSyncSelections(request.Context(), input.TargetID, input.Selections)
 	if err != nil {
 		writeStoreError(w, err)
 		return
 	}
-	s.recordAudit(request, "substore.nodes.updated", "Sub-Store", fmt.Sprintf("selected node count: %d", len(selections)))
+	s.recordAudit(request, "substore.nodes.updated", input.TargetID, fmt.Sprintf("selected node count: %d", len(selections)))
 	writeJSON(w, http.StatusOK, selections)
 }
 
@@ -302,6 +412,11 @@ func (s *Server) testSubStoreConnection(w http.ResponseWriter, request *http.Req
 }
 
 func (s *Server) runSubStoreSync(w http.ResponseWriter, request *http.Request) {
+	var input subStoreRunRequest
+	if err := decodeJSON(w, request, &input, 8<<10); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	settings, err := s.store.SubStoreSyncSettings(request.Context())
 	if err != nil {
 		writeStoreError(w, err)
@@ -311,7 +426,12 @@ func (s *Server) runSubStoreSync(w http.ResponseWriter, request *http.Request) {
 		writeError(w, http.StatusBadRequest, "请先保存 Sub-Store 连接设置")
 		return
 	}
-	selections, err := s.store.ListSubStoreSyncSelections(request.Context())
+	target, err := s.store.SubStoreSyncTarget(request.Context(), input.TargetID)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	selections, err := s.store.ListSubStoreSyncSelections(request.Context(), target.ID)
 	if err != nil {
 		writeInternalError(w, err)
 		return
@@ -336,29 +456,29 @@ func (s *Server) runSubStoreSync(w http.ResponseWriter, request *http.Request) {
 		profile, ok := byKey[selection.Key()]
 		if !ok {
 			err = errors.New("已选客户端节点发生变化，请删除失效项或重新选择后再同步")
-			_ = s.store.RecordSubStoreSyncResult(request.Context(), err)
+			_ = s.store.RecordSubStoreSyncResult(request.Context(), target.ID, err)
 			writeError(w, http.StatusConflict, err.Error())
 			return
 		}
 		renamed, renameErr := renameSubStoreNode(profile.URI, selection.CustomName)
 		if renameErr != nil {
 			err = fmt.Errorf("客户端节点 %s 无法同步: %w", selection.CustomName, renameErr)
-			_ = s.store.RecordSubStoreSyncResult(request.Context(), err)
+			_ = s.store.RecordSubStoreSyncResult(request.Context(), target.ID, err)
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		content = append(content, renamed)
 	}
-	created, syncErr := s.upsertSubStoreSubscription(request.Context(), settings, strings.Join(content, "\n"))
-	if recordErr := s.store.RecordSubStoreSyncResult(request.Context(), syncErr); recordErr != nil && syncErr == nil {
+	created, syncErr := s.upsertSubStoreSubscription(request.Context(), settings, target, strings.Join(content, "\n"))
+	if recordErr := s.store.RecordSubStoreSyncResult(request.Context(), target.ID, syncErr); recordErr != nil && syncErr == nil {
 		syncErr = recordErr
 	}
 	if syncErr != nil {
 		writeError(w, http.StatusBadGateway, syncErr.Error())
 		return
 	}
-	result := subStoreSyncResult{SubscriptionName: settings.SubscriptionName, NodeCount: len(content), Created: created, SyncedAt: time.Now().UTC()}
-	s.recordAudit(request, "substore.synced", settings.SubscriptionName, fmt.Sprintf("node count: %d", len(content)))
+	result := subStoreSyncResult{SubscriptionName: target.SubscriptionName, NodeCount: len(content), Created: created, SyncedAt: time.Now().UTC()}
+	s.recordAudit(request, "substore.synced", target.SubscriptionName, fmt.Sprintf("node count: %d", len(content)))
 	writeJSON(w, http.StatusOK, result)
 }
 
@@ -381,39 +501,52 @@ func renameSubStoreNode(rawURI, name string) (string, error) {
 	return rawURI + "#" + name, nil
 }
 
-func (s *Server) upsertSubStoreSubscription(ctx context.Context, settings core.SubStoreSyncSettings, content string) (bool, error) {
+func (s *Server) upsertSubStoreSubscription(ctx context.Context, settings core.SubStoreSyncSettings, target core.SubStoreSyncTarget, content string) (bool, error) {
 	payload := map[string]any{
-		"name":                       settings.SubscriptionName,
-		"displayName":                settings.SubscriptionName,
-		"display-name":               settings.SubscriptionName,
+		"name":                       target.SubscriptionName,
+		"displayName":                target.SubscriptionName,
+		"display-name":               target.SubscriptionName,
 		"source":                     "local",
 		"content":                    content,
 		"noFlow":                     true,
 		"remark":                     "Managed by QControlHub",
 		"process":                    []any{},
-		"qcontrolhub_integration_id": settings.IntegrationID,
+		"qcontrolhub_integration_id": target.IntegrationID,
 	}
 	var subscriptions []map[string]any
 	if _, err := s.subStoreRequest(ctx, settings.EndpointURL, http.MethodGet, "/api/subs", nil, &subscriptions); err != nil {
 		return false, err
 	}
-	var existing map[string]any
+	var owned map[string]any
+	var colliding map[string]any
 	for _, subscription := range subscriptions {
 		name, _ := subscription["name"].(string)
-		if name == settings.SubscriptionName {
-			existing = subscription
-			break
+		owner, _ := subscription["qcontrolhub_integration_id"].(string)
+		if owner == target.IntegrationID {
+			owned = subscription
+		}
+		if name == target.SubscriptionName {
+			colliding = subscription
 		}
 	}
-	if existing == nil {
+	if owned == nil && colliding == nil {
 		_, err := s.subStoreRequest(ctx, settings.EndpointURL, http.MethodPost, "/api/subs", payload, nil)
 		return true, err
 	}
-	owner, _ := existing["qcontrolhub_integration_id"].(string)
-	if owner != settings.IntegrationID {
+	if owned == nil {
 		return false, errors.New("Sub-Store 中已存在同名订阅，但它不是由当前 QControlHub 同步创建；请更换订阅名称")
 	}
-	_, err := s.subStoreRequest(ctx, settings.EndpointURL, http.MethodPatch, "/api/sub/"+settings.SubscriptionName, payload, nil)
+	existingName, _ := owned["name"].(string)
+	if existingName == "" {
+		return false, errors.New("Sub-Store 返回的订阅缺少名称")
+	}
+	if colliding != nil {
+		collisionOwner, _ := colliding["qcontrolhub_integration_id"].(string)
+		if collisionOwner != target.IntegrationID {
+			return false, errors.New("Sub-Store 中已存在同名订阅，但它属于其他同步组；请更换订阅名称")
+		}
+	}
+	_, err := s.subStoreRequest(ctx, settings.EndpointURL, http.MethodPatch, "/api/sub/"+existingName, payload, nil)
 	return false, err
 }
 

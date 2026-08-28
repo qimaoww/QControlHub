@@ -79,6 +79,9 @@ func TestSubStoreSubscriptionCreateUpdateAndOwnership(t *testing.T) {
 		case request.Method == http.MethodPatch && request.URL.Path == "/qch-secret/api/sub/QControlHub":
 			stored = decodeSubStoreTestPayload(t, request.Body)
 			writeSubStoreTestEnvelope(t, w, http.StatusOK, stored, "")
+		case request.Method == http.MethodDelete && request.URL.Path == "/qch-secret/api/sub/QControlHub Renamed":
+			stored = nil
+			writeSubStoreTestEnvelope(t, w, http.StatusOK, map[string]any{}, "")
 		default:
 			t.Errorf("unexpected Sub-Store request %s %s", request.Method, request.URL.Path)
 			writeSubStoreTestEnvelope(t, w, http.StatusNotFound, nil, "unexpected")
@@ -87,22 +90,32 @@ func TestSubStoreSubscriptionCreateUpdateAndOwnership(t *testing.T) {
 	defer remote.Close()
 
 	server := &Server{subStoreHTTP: remote.Client()}
-	settings := core.SubStoreSyncSettings{
-		EndpointURL: remote.URL + "/qch-secret", SubscriptionName: "QControlHub", IntegrationID: "ssi_owner",
-	}
-	created, err := server.upsertSubStoreSubscription(context.Background(), settings, "vless://one#One")
+	settings := core.SubStoreSyncSettings{EndpointURL: remote.URL + "/qch-secret"}
+	target := core.SubStoreSyncTarget{SubscriptionName: "QControlHub", IntegrationID: "ssi_owner"}
+	created, err := server.upsertSubStoreSubscription(context.Background(), settings, target, "vless://one#One")
 	if err != nil || !created {
 		t.Fatalf("create subscription = %t, %v", created, err)
 	}
 	if stored["source"] != "local" || stored["content"] != "vless://one#One" || stored["qcontrolhub_integration_id"] != "ssi_owner" {
 		t.Fatalf("created payload = %#v", stored)
 	}
-	created, err = server.upsertSubStoreSubscription(context.Background(), settings, "vless://two#Two")
+	created, err = server.upsertSubStoreSubscription(context.Background(), settings, target, "vless://two#Two")
 	if err != nil || created || stored["content"] != "vless://two#Two" {
 		t.Fatalf("update subscription = %t, %#v, %v", created, stored, err)
 	}
-	stored["qcontrolhub_integration_id"] = "another-control-plane"
-	if _, err := server.upsertSubStoreSubscription(context.Background(), settings, "vless://three#Three"); err == nil || !strings.Contains(err.Error(), "不是由当前 QControlHub") {
+	target.SubscriptionName = "QControlHub Renamed"
+	created, err = server.upsertSubStoreSubscription(context.Background(), settings, target, "vless://renamed#Renamed")
+	if err != nil || created || stored["name"] != "QControlHub Renamed" || stored["content"] != "vless://renamed#Renamed" {
+		t.Fatalf("rename subscription = %t, %#v, %v", created, stored, err)
+	}
+	if err := server.deleteSubStoreSubscription(context.Background(), settings, target); err != nil || stored != nil {
+		t.Fatalf("delete subscription = %#v, %v", stored, err)
+	}
+	stored = map[string]any{
+		"name": "QControlHub Renamed", "content": "vless://foreign#Foreign",
+		"qcontrolhub_integration_id": "another-control-plane",
+	}
+	if _, err := server.upsertSubStoreSubscription(context.Background(), settings, target, "vless://three#Three"); err == nil || !strings.Contains(err.Error(), "不是由当前 QControlHub") {
 		t.Fatalf("foreign subscription ownership error = %v", err)
 	}
 }

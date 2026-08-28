@@ -21,12 +21,14 @@ import (
 type clientAccessProfile struct {
 	Tag      string                     `json:"tag"`
 	Protocol string                     `json:"protocol"`
+	Port     int                        `json:"port"`
 	Profile  serverconfig.ClientProfile `json:"profile"`
 }
 
 type clientAccessEntry struct {
 	AgentID         string                `json:"agent_id"`
 	AgentName       string                `json:"agent_name"`
+	AgentStatus     string                `json:"agent_status"`
 	Engine          core.Engine           `json:"engine"`
 	Address         string                `json:"address"`
 	Source          string                `json:"source"`
@@ -535,11 +537,11 @@ func (s *Server) clientAccessEntries(ctx context.Context) ([]clientAccessEntry, 
 				if !found {
 					continue
 				}
-				profiles = append(profiles, clientAccessProfile{Tag: input.Tag, Protocol: protocol.Name, Profile: profile})
+				profiles = append(profiles, clientAccessProfile{Tag: input.Tag, Protocol: protocol.Name, Port: input.Port, Profile: profile})
 			}
 			if len(profiles) > 0 {
 				entries = append(entries, clientAccessEntry{
-					AgentID: agent.ID, AgentName: agent.Name, Engine: deployment.Engine,
+					AgentID: agent.ID, AgentName: agent.Name, AgentStatus: agent.Status, Engine: deployment.Engine,
 					Address: candidate.address, Source: candidate.source, Profiles: profiles,
 				})
 				profileGenerated = true
@@ -548,7 +550,7 @@ func (s *Server) clientAccessEntries(ctx context.Context) ([]clientAccessEntry, 
 		}
 		if !profileGenerated && len(candidates) == 0 {
 			entries = append(entries, clientAccessEntry{
-				AgentID: agent.ID, AgentName: agent.Name, Engine: deployment.Engine,
+				AgentID: agent.ID, AgentName: agent.Name, AgentStatus: agent.Status, Engine: deployment.Engine,
 				AddressRequired: true, Profiles: []clientAccessProfile{},
 			})
 		}
