@@ -44,7 +44,7 @@ type storeExecutor interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }
 
-const currentSchemaVersion = 29
+const currentSchemaVersion = 32
 
 func Open(ctx context.Context, databaseURL string, allowInsecureRemote bool) (*Store, error) {
 	return OpenWithConfigKey(ctx, databaseURL, allowInsecureRemote, "")
@@ -926,6 +926,9 @@ func (s *Store) DeleteAgent(ctx context.Context, id string) error {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM port_traffic_policies WHERE agent_id=$1`, id); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM substore_sync_items WHERE agent_id=$1`, id); err != nil {
 		return err
 	}
 	legacyEnrollmentID := ""
@@ -2048,12 +2051,78 @@ CREATE TABLE IF NOT EXISTS port_traffic_daily_usage (
 CREATE INDEX IF NOT EXISTS port_traffic_daily_agent_date_idx ON port_traffic_daily_usage(agent_id,usage_date,port);
 CREATE INDEX IF NOT EXISTS port_traffic_daily_policy_date_idx ON port_traffic_daily_usage(policy_id,usage_date);
 
+CREATE TABLE IF NOT EXISTS substore_sync_settings (
+	id smallint PRIMARY KEY CHECK (id = 1),
+	endpoint_ciphertext text NOT NULL,
+	subscription_name varchar(100) NOT NULL,
+	integration_id text NOT NULL,
+	last_synced_at timestamptz,
+	last_sync_status varchar(10) NOT NULL DEFAULT 'never' CHECK (last_sync_status IN ('never','success','failed')),
+	last_sync_error varchar(500) NOT NULL DEFAULT '',
+	updated_at timestamptz NOT NULL
+);
+CREATE TABLE IF NOT EXISTS substore_sync_targets (
+	id text PRIMARY KEY,
+	display_name varchar(100) NOT NULL,
+	subscription_name varchar(100) NOT NULL UNIQUE,
+	integration_id text NOT NULL UNIQUE,
+	last_synced_at timestamptz,
+	last_sync_status varchar(10) NOT NULL DEFAULT 'never' CHECK (last_sync_status IN ('never','success','failed')),
+	last_sync_error varchar(500) NOT NULL DEFAULT '',
+	created_at timestamptz NOT NULL,
+	updated_at timestamptz NOT NULL
+);
+ALTER TABLE substore_sync_targets ADD COLUMN IF NOT EXISTS display_name varchar(100);
+UPDATE substore_sync_targets SET display_name=subscription_name WHERE display_name IS NULL;
+ALTER TABLE substore_sync_targets ALTER COLUMN display_name SET NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS substore_sync_targets_display_name_idx ON substore_sync_targets(display_name);
+INSERT INTO substore_sync_targets (
+	id,display_name,subscription_name,integration_id,last_synced_at,last_sync_status,last_sync_error,created_at,updated_at
+)
+SELECT
+	'sst_default',subscription_name,subscription_name,integration_id,last_synced_at,last_sync_status,last_sync_error,updated_at,updated_at
+FROM substore_sync_settings
+WHERE NOT EXISTS (SELECT 1 FROM substore_sync_targets)
+ON CONFLICT DO NOTHING;
+CREATE TABLE IF NOT EXISTS substore_sync_items (
+	target_id text NOT NULL REFERENCES substore_sync_targets(id) ON DELETE CASCADE,
+	agent_id text NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+	engine varchar(20) NOT NULL CHECK (engine IN ('mihomo','xray','sing-box','ss-rust')),
+	profile_tag text NOT NULL CHECK (octet_length(profile_tag) BETWEEN 1 AND 800),
+	custom_name text NOT NULL CHECK (octet_length(custom_name) BETWEEN 1 AND 400),
+	created_at timestamptz NOT NULL,
+	updated_at timestamptz NOT NULL,
+	PRIMARY KEY (target_id,agent_id,engine,profile_tag)
+);
+ALTER TABLE substore_sync_items ADD COLUMN IF NOT EXISTS target_id text;
+UPDATE substore_sync_items
+SET target_id=(SELECT id FROM substore_sync_targets ORDER BY created_at,id LIMIT 1)
+WHERE target_id IS NULL;
+ALTER TABLE substore_sync_items ALTER COLUMN target_id SET NOT NULL;
+ALTER TABLE substore_sync_items DROP CONSTRAINT IF EXISTS substore_sync_items_pkey;
+ALTER TABLE substore_sync_items ADD CONSTRAINT substore_sync_items_pkey PRIMARY KEY (target_id,agent_id,engine,profile_tag);
+DO $substore_target_fk$
+BEGIN
+	IF NOT EXISTS (
+		SELECT 1 FROM pg_constraint
+		WHERE conrelid='substore_sync_items'::regclass AND conname='substore_sync_items_target_id_fkey'
+	) THEN
+		ALTER TABLE substore_sync_items ADD CONSTRAINT substore_sync_items_target_id_fkey
+			FOREIGN KEY (target_id) REFERENCES substore_sync_targets(id) ON DELETE CASCADE;
+	END IF;
+END
+$substore_target_fk$;
+DROP INDEX IF EXISTS substore_sync_items_created_idx;
+CREATE INDEX substore_sync_items_created_idx ON substore_sync_items(target_id,created_at,agent_id);
+
 -- Agent deletion is intentionally a soft revocation, so foreign-key cascades
 -- do not run. Remove traffic rows left by versions that did not clean them in
 -- DeleteAgent; otherwise revoked nodes survive as orphan cards indefinitely.
 DELETE FROM port_traffic_daily_usage
 WHERE agent_id IN (SELECT id FROM agents WHERE revoked_at IS NOT NULL);
 DELETE FROM port_traffic_policies
+WHERE agent_id IN (SELECT id FROM agents WHERE revoked_at IS NOT NULL);
+DELETE FROM substore_sync_items
 WHERE agent_id IN (SELECT id FROM agents WHERE revoked_at IS NOT NULL);
 
 CREATE TABLE IF NOT EXISTS audit_logs (

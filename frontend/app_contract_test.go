@@ -40,7 +40,7 @@ func TestSPAConsoleSurfaceMatchesInitialRelease(t *testing.T) {
 	}
 	content := scripts.String()
 	for _, required := range []string{
-		`"client-access"`, `"live-config"`, `"archive-config"`,
+		`"client-access"`, `"substore-sync"`, `"live-config"`, `"archive-config"`,
 		`machine-workspace`, `server-plan-form`, `field-form`,
 		`revision-timeline`, `task-timeline`, `settings-section`,
 		`node-settings`, `内核配置预设`, `node-settings-tabs`, `查看安装部署命令`, `复制 Agent 安装命令`,
@@ -256,7 +256,7 @@ func TestSidebarNavigationUsesWorkflowOrderAndResponsiveGrouping(t *testing.T) {
 	previous := -1
 	for _, route := range []string{
 		"dashboard", "node-settings", "agents", "live-config",
-		"client-access", "traffic", "core-logs", "tasks",
+		"client-access", "substore-sync", "traffic", "core-logs", "tasks",
 	} {
 		position := strings.Index(navigation, `"`+route+`"`)
 		if position < 0 {
@@ -277,6 +277,7 @@ func TestSidebarNavigationUsesWorkflowOrderAndResponsiveGrouping(t *testing.T) {
 		`["agents", "内核预设", dockIcons.layers]`,
 		`["live-config", "配置", dockIcons.fileCode]`,
 		`["client-access", "客户端", dockIcons.monitorSmartphone]`,
+		`["substore-sync", "同步", dockIcons.refreshCw]`,
 		`["traffic", "流量", dockIcons.chart, true]`,
 		`["core-logs", "日志", dockIcons.logs, true]`,
 		`["tasks", "任务", dockIcons.listChecks]`,
@@ -469,6 +470,7 @@ func TestClientAccessUsesContextSidebarAsOnlyNodeFilter(t *testing.T) {
 		`aria-label="按内核筛选"`,
 		`.querySelectorAll("[data-access-agent]")`,
 		`client-access-toolbar`,
+		`href="#substore-sync"`,
 		`client-access-node-card`,
 		`data-client-parameter-open`,
 		`class="traffic-edit-dialog client-parameter-dialog"`,
@@ -507,6 +509,37 @@ func TestClientAccessUsesContextSidebarAsOnlyNodeFilter(t *testing.T) {
 	}
 	if !strings.Contains(string(styles), `.context-menu,.context-list{display:flex;overflow:auto;`) {
 		t.Error("narrow context navigation must keep overflow inside its own scroll container")
+	}
+}
+
+func TestSubStoreSyncUsesCompactPanelPatterns(t *testing.T) {
+	app := string(mustReadFrontendFile(t, "app.js"))
+	module := string(mustReadFrontendFile(t, "modules/substore-sync.js"))
+	styles := string(mustReadFrontendFile(t, "app.css"))
+	for _, required := range []string{
+		`installSubStoreSync`, `"substore-sync": subStoreSync`, `href="#client-access"`,
+		`data-substore-settings-dialog`, `dialog?.showModal()`, `data-substore-run`,
+		`data-substore-select`, `data-substore-name`, `data-substore-remove`,
+		`api("/substore-sync/selections"`, `api("/substore-sync/run"`,
+	} {
+		if !strings.Contains(app+module, required) {
+			t.Errorf("Sub-Store sync page is missing %q", required)
+		}
+	}
+	for _, required := range []string{
+		`.substore-status-bar`, `.substore-filter-bar`, `.substore-agent-grid`,
+		`.substore-agent-card`, `.substore-settings-dialog`, `var(--radius-card)`,
+		`.app-body.page-substore-sync .desktop-app{min-width:0}`,
+		`minmax(min(100%,460px),1fr)`,
+	} {
+		if !strings.Contains(styles, required) {
+			t.Errorf("Sub-Store sync page is missing theme style %q", required)
+		}
+	}
+	for _, forbidden := range []string{`substore-hero`, `Sub-Store 使用说明`, `同步工作台`} {
+		if strings.Contains(module, forbidden) {
+			t.Errorf("Sub-Store sync page contains redundant presentation %q", forbidden)
+		}
 	}
 }
 
@@ -663,6 +696,7 @@ func TestSPAModulesArePublished(t *testing.T) {
 		"dashboard.js",
 		"agents.js",
 		"client-access.js",
+		"substore-sync.js",
 		"configs.js",
 		"tasks.js",
 		"traffic.js",
