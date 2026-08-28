@@ -59,6 +59,21 @@ func TestRenameSubStoreNode(t *testing.T) {
 	}
 }
 
+func TestSubStoreRemoteTargetHelpers(t *testing.T) {
+	t.Parallel()
+	if count := subStoreContentNodeCount("vless://one#One\r\n\r\nss://two#Two\n"); count != 2 {
+		t.Fatalf("remote group node count = %d", count)
+	}
+	if _, err := validateSubStoreImportName("Existing group"); err != nil {
+		t.Fatalf("valid remote group name: %v", err)
+	}
+	for _, name := range []string{"", "bad/group", "bad?group"} {
+		if _, err := validateSubStoreImportName(name); err == nil {
+			t.Fatalf("invalid remote group name %q accepted", name)
+		}
+	}
+}
+
 func TestSubStoreSubscriptionCreateUpdateAndOwnership(t *testing.T) {
 	t.Parallel()
 	var stored map[string]any
@@ -76,12 +91,9 @@ func TestSubStoreSubscriptionCreateUpdateAndOwnership(t *testing.T) {
 		case request.Method == http.MethodPost && request.URL.Path == "/qch-secret/api/subs":
 			stored = decodeSubStoreTestPayload(t, request.Body)
 			writeSubStoreTestEnvelope(t, w, http.StatusOK, stored, "")
-		case request.Method == http.MethodPatch && request.URL.Path == "/qch-secret/api/sub/QControlHub":
+		case request.Method == http.MethodPatch && (request.URL.Path == "/qch-secret/api/sub/QControlHub" || request.URL.Path == "/qch-secret/api/sub/QControlHub Renamed"):
 			stored = decodeSubStoreTestPayload(t, request.Body)
 			writeSubStoreTestEnvelope(t, w, http.StatusOK, stored, "")
-		case request.Method == http.MethodDelete && request.URL.Path == "/qch-secret/api/sub/QControlHub Renamed":
-			stored = nil
-			writeSubStoreTestEnvelope(t, w, http.StatusOK, map[string]any{}, "")
 		default:
 			t.Errorf("unexpected Sub-Store request %s %s", request.Method, request.URL.Path)
 			writeSubStoreTestEnvelope(t, w, http.StatusNotFound, nil, "unexpected")
@@ -103,13 +115,15 @@ func TestSubStoreSubscriptionCreateUpdateAndOwnership(t *testing.T) {
 	if err != nil || created || stored["content"] != "vless://two#Two" {
 		t.Fatalf("update subscription = %t, %#v, %v", created, stored, err)
 	}
+	stored["custom-option"] = "preserved"
+	renamed, err := server.renameSubStoreSubscription(context.Background(), settings, target, "QControlHub Renamed")
+	if err != nil || !renamed || stored["name"] != "QControlHub Renamed" || stored["content"] != "vless://two#Two" || stored["custom-option"] != "preserved" {
+		t.Fatalf("rename subscription in place = %t, %#v, %v", renamed, stored, err)
+	}
 	target.SubscriptionName = "QControlHub Renamed"
 	created, err = server.upsertSubStoreSubscription(context.Background(), settings, target, "vless://renamed#Renamed")
 	if err != nil || created || stored["name"] != "QControlHub Renamed" || stored["content"] != "vless://renamed#Renamed" {
 		t.Fatalf("rename subscription = %t, %#v, %v", created, stored, err)
-	}
-	if err := server.deleteSubStoreSubscription(context.Background(), settings, target); err != nil || stored != nil {
-		t.Fatalf("delete subscription = %#v, %v", stored, err)
 	}
 	stored = map[string]any{
 		"name": "QControlHub Renamed", "content": "vless://foreign#Foreign",

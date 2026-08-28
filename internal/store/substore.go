@@ -86,7 +86,7 @@ func validateSubStoreTargetName(name string) (string, error) {
 
 func (s *Store) ListSubStoreSyncTargets(ctx context.Context) ([]core.SubStoreSyncTarget, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT target.id,target.subscription_name,target.integration_id,target.last_synced_at,
+		SELECT target.id,target.display_name,target.subscription_name,target.integration_id,target.last_synced_at,
 		       target.last_sync_status,target.last_sync_error,
 		       (SELECT count(*) FROM substore_sync_items item WHERE item.target_id=target.id),
 		       target.created_at,target.updated_at
@@ -99,7 +99,7 @@ func (s *Store) ListSubStoreSyncTargets(ctx context.Context) ([]core.SubStoreSyn
 	for rows.Next() {
 		var target core.SubStoreSyncTarget
 		if err := rows.Scan(
-			&target.ID, &target.SubscriptionName, &target.IntegrationID, &target.LastSyncedAt,
+			&target.ID, &target.DisplayName, &target.SubscriptionName, &target.IntegrationID, &target.LastSyncedAt,
 			&target.LastSyncStatus, &target.LastSyncError, &target.SelectionCount, &target.CreatedAt, &target.UpdatedAt,
 		); err != nil {
 			return nil, err
@@ -112,12 +112,12 @@ func (s *Store) ListSubStoreSyncTargets(ctx context.Context) ([]core.SubStoreSyn
 func (s *Store) SubStoreSyncTarget(ctx context.Context, id string) (core.SubStoreSyncTarget, error) {
 	var target core.SubStoreSyncTarget
 	err := s.pool.QueryRow(ctx, `
-		SELECT target.id,target.subscription_name,target.integration_id,target.last_synced_at,
+		SELECT target.id,target.display_name,target.subscription_name,target.integration_id,target.last_synced_at,
 		       target.last_sync_status,target.last_sync_error,
 		       (SELECT count(*) FROM substore_sync_items item WHERE item.target_id=target.id),
 		       target.created_at,target.updated_at
 		FROM substore_sync_targets target WHERE target.id=$1`, strings.TrimSpace(id)).Scan(
-		&target.ID, &target.SubscriptionName, &target.IntegrationID, &target.LastSyncedAt,
+		&target.ID, &target.DisplayName, &target.SubscriptionName, &target.IntegrationID, &target.LastSyncedAt,
 		&target.LastSyncStatus, &target.LastSyncError, &target.SelectionCount, &target.CreatedAt, &target.UpdatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -131,33 +131,53 @@ func (s *Store) CreateSubStoreSyncTarget(ctx context.Context, name string) (core
 	if err != nil {
 		return core.SubStoreSyncTarget{}, err
 	}
-	id, err := core.NewID("sst")
+	integrationID, err := core.NewID("ssi")
 	if err != nil {
 		return core.SubStoreSyncTarget{}, err
 	}
-	integrationID, err := core.NewID("ssi")
+	return s.createSubStoreSyncTarget(ctx, name, integrationID)
+}
+
+func (s *Store) ImportSubStoreSyncTarget(ctx context.Context, name, integrationID string) (core.SubStoreSyncTarget, error) {
+	name, err := validateSubStoreTargetName(name)
+	if err != nil {
+		return core.SubStoreSyncTarget{}, err
+	}
+	integrationID = strings.TrimSpace(integrationID)
+	if !strings.HasPrefix(integrationID, "ssi_") || utf8.RuneCountInString(integrationID) > 100 {
+		return core.SubStoreSyncTarget{}, fmt.Errorf("%w: Sub-Store integration identity is invalid", ErrInvalid)
+	}
+	return s.createSubStoreSyncTarget(ctx, name, integrationID)
+}
+
+func (s *Store) createSubStoreSyncTarget(ctx context.Context, name, integrationID string) (core.SubStoreSyncTarget, error) {
+	id, err := core.NewID("sst")
 	if err != nil {
 		return core.SubStoreSyncTarget{}, err
 	}
 	now := time.Now().UTC()
 	if _, err := s.pool.Exec(ctx, `
 		INSERT INTO substore_sync_targets
-			(id,subscription_name,integration_id,last_sync_status,last_sync_error,created_at,updated_at)
-		VALUES ($1,$2,$3,'never','',$4,$4)`, id, name, integrationID, now); err != nil {
+			(id,display_name,subscription_name,integration_id,last_sync_status,last_sync_error,created_at,updated_at)
+		VALUES ($1,$2,$2,$3,'never','',$4,$4)`, id, name, integrationID, now); err != nil {
 		return core.SubStoreSyncTarget{}, mapError(err)
 	}
 	return s.SubStoreSyncTarget(ctx, id)
 }
 
-func (s *Store) UpdateSubStoreSyncTarget(ctx context.Context, id, name string) (core.SubStoreSyncTarget, error) {
-	name, err := validateSubStoreTargetName(name)
+func (s *Store) UpdateSubStoreSyncTarget(ctx context.Context, id, displayName, subscriptionName string) (core.SubStoreSyncTarget, error) {
+	displayName, err := validateSubStoreTargetName(displayName)
+	if err != nil {
+		return core.SubStoreSyncTarget{}, err
+	}
+	subscriptionName, err = validateSubStoreTargetName(subscriptionName)
 	if err != nil {
 		return core.SubStoreSyncTarget{}, err
 	}
 	command, err := s.pool.Exec(ctx, `
 		UPDATE substore_sync_targets SET
-			subscription_name=$2,last_synced_at=NULL,last_sync_status='never',last_sync_error='',updated_at=now()
-		WHERE id=$1`, strings.TrimSpace(id), name)
+			display_name=$2,subscription_name=$3,updated_at=now()
+		WHERE id=$1`, strings.TrimSpace(id), displayName, subscriptionName)
 	if err != nil {
 		return core.SubStoreSyncTarget{}, mapError(err)
 	}

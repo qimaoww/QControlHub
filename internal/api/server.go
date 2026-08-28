@@ -212,6 +212,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/substore-sync", s.requirePermission(core.PermissionClientAccessRead, http.HandlerFunc(s.getSubStoreSync)))
 	mux.Handle("PUT /api/v1/substore-sync/settings", s.requirePermission(core.PermissionSettingsManage, http.HandlerFunc(s.putSubStoreSettings)))
 	mux.Handle("POST /api/v1/substore-sync/targets", s.requirePermission(core.PermissionSettingsManage, http.HandlerFunc(s.createSubStoreTarget)))
+	mux.Handle("GET /api/v1/substore-sync/remote-targets", s.requirePermission(core.PermissionSettingsManage, http.HandlerFunc(s.listSubStoreRemoteTargets)))
+	mux.Handle("POST /api/v1/substore-sync/targets/import", s.requirePermission(core.PermissionSettingsManage, http.HandlerFunc(s.importSubStoreRemoteTarget)))
 	mux.Handle("PUT /api/v1/substore-sync/targets/{id}", s.requirePermission(core.PermissionSettingsManage, http.HandlerFunc(s.updateSubStoreTarget)))
 	mux.Handle("DELETE /api/v1/substore-sync/targets/{id}", s.requirePermission(core.PermissionSettingsManage, http.HandlerFunc(s.deleteSubStoreTarget)))
 	mux.Handle("PUT /api/v1/substore-sync/selections", s.requirePermission(core.PermissionSettingsManage, http.HandlerFunc(s.putSubStoreSelections)))

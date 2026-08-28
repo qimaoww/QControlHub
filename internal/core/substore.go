@@ -14,6 +14,7 @@ type SubStoreSyncSettings struct {
 
 type SubStoreSyncTarget struct {
 	ID               string     `json:"id"`
+	DisplayName      string     `json:"display_name"`
 	SubscriptionName string     `json:"subscription_name"`
 	IntegrationID    string     `json:"-"`
 	LastSyncedAt     *time.Time `json:"last_synced_at,omitempty"`

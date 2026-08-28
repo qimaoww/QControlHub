@@ -44,7 +44,7 @@ type storeExecutor interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }
 
-const currentSchemaVersion = 31
+const currentSchemaVersion = 32
 
 func Open(ctx context.Context, databaseURL string, allowInsecureRemote bool) (*Store, error) {
 	return OpenWithConfigKey(ctx, databaseURL, allowInsecureRemote, "")
@@ -2063,6 +2063,7 @@ CREATE TABLE IF NOT EXISTS substore_sync_settings (
 );
 CREATE TABLE IF NOT EXISTS substore_sync_targets (
 	id text PRIMARY KEY,
+	display_name varchar(100) NOT NULL,
 	subscription_name varchar(100) NOT NULL UNIQUE,
 	integration_id text NOT NULL UNIQUE,
 	last_synced_at timestamptz,
@@ -2071,11 +2072,15 @@ CREATE TABLE IF NOT EXISTS substore_sync_targets (
 	created_at timestamptz NOT NULL,
 	updated_at timestamptz NOT NULL
 );
+ALTER TABLE substore_sync_targets ADD COLUMN IF NOT EXISTS display_name varchar(100);
+UPDATE substore_sync_targets SET display_name=subscription_name WHERE display_name IS NULL;
+ALTER TABLE substore_sync_targets ALTER COLUMN display_name SET NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS substore_sync_targets_display_name_idx ON substore_sync_targets(display_name);
 INSERT INTO substore_sync_targets (
-	id,subscription_name,integration_id,last_synced_at,last_sync_status,last_sync_error,created_at,updated_at
+	id,display_name,subscription_name,integration_id,last_synced_at,last_sync_status,last_sync_error,created_at,updated_at
 )
 SELECT
-	'sst_default',subscription_name,integration_id,last_synced_at,last_sync_status,last_sync_error,updated_at,updated_at
+	'sst_default',subscription_name,subscription_name,integration_id,last_synced_at,last_sync_status,last_sync_error,updated_at,updated_at
 FROM substore_sync_settings
 WHERE NOT EXISTS (SELECT 1 FROM substore_sync_targets)
 ON CONFLICT DO NOTHING;

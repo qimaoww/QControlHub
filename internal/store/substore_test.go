@@ -25,7 +25,7 @@ func TestSubStoreSyncSettingsAndSelectionsLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer dataStore.Close()
-	if _, err := dataStore.pool.Exec(ctx, `DELETE FROM substore_sync_items; DELETE FROM substore_sync_settings`); err != nil {
+	if _, err := dataStore.pool.Exec(ctx, `DELETE FROM substore_sync_items; DELETE FROM substore_sync_targets; DELETE FROM substore_sync_settings`); err != nil {
 		t.Fatal(err)
 	}
 
@@ -48,7 +48,7 @@ func TestSubStoreSyncSettingsAndSelectionsLifecycle(t *testing.T) {
 	agent, enrollmentID := enrollTaskTestAgent(t, ctx, dataStore)
 	defer cleanupTaskTestAgent(dataStore, agent.ID, enrollmentID)
 	target, err := dataStore.CreateSubStoreSyncTarget(ctx, "QControlHub")
-	if err != nil || target.ID == "" || target.IntegrationID == "" || target.LastSyncStatus != "never" {
+	if err != nil || target.ID == "" || target.IntegrationID == "" || target.DisplayName != "QControlHub" || target.SubscriptionName != "QControlHub" || target.LastSyncStatus != "never" {
 		t.Fatalf("created target = %+v, %v", target, err)
 	}
 	firstIntegrationID := target.IntegrationID
@@ -69,9 +69,13 @@ func TestSubStoreSyncSettingsAndSelectionsLifecycle(t *testing.T) {
 	if err := dataStore.RecordSubStoreSyncResult(ctx, target.ID, nil); err != nil {
 		t.Fatal(err)
 	}
-	target, err = dataStore.UpdateSubStoreSyncTarget(ctx, target.ID, "QControlHub renamed")
-	if err != nil || target.IntegrationID != firstIntegrationID || target.LastSyncStatus != "never" || target.LastSyncedAt != nil {
+	target, err = dataStore.UpdateSubStoreSyncTarget(ctx, target.ID, "Panel renamed", "QControlHub")
+	if err != nil || target.IntegrationID != firstIntegrationID || target.DisplayName != "Panel renamed" || target.SubscriptionName != "QControlHub" || target.LastSyncStatus != "success" || target.LastSyncedAt == nil {
 		t.Fatalf("target update changed integration identity: %+v, %v", target, err)
+	}
+	target, err = dataStore.UpdateSubStoreSyncTarget(ctx, target.ID, "Remote renamed", "Remote renamed")
+	if err != nil || target.DisplayName != "Remote renamed" || target.SubscriptionName != "Remote renamed" {
+		t.Fatalf("target remote rename = %+v, %v", target, err)
 	}
 	if err := dataStore.RecordSubStoreSyncResult(ctx, target.ID, nil); err != nil {
 		t.Fatal(err)
@@ -104,6 +108,10 @@ func TestSubStoreSyncSettingsAndSelectionsLifecycle(t *testing.T) {
 	}
 	if selections, err := dataStore.ListSubStoreSyncSelections(ctx, secondTarget.ID); err != nil || len(selections) != 0 {
 		t.Fatalf("deleted target selections = %+v, %v", selections, err)
+	}
+	importedTarget, err := dataStore.ImportSubStoreSyncTarget(ctx, "Existing Sub-Store group", "ssi_existing_remote")
+	if err != nil || importedTarget.DisplayName != "Existing Sub-Store group" || importedTarget.SubscriptionName != "Existing Sub-Store group" || importedTarget.IntegrationID != "ssi_existing_remote" {
+		t.Fatalf("imported target = %+v, %v", importedTarget, err)
 	}
 
 	withoutKey := &Store{pool: dataStore.pool}
@@ -255,11 +263,64 @@ func TestOpenMigratesAppliedV30SubStoreSyncTarget(t *testing.T) {
 	}
 	defer dataStore.Close()
 	targets, err := dataStore.ListSubStoreSyncTargets(ctx)
-	if err != nil || len(targets) != 1 || targets[0].ID != "sst_default" || targets[0].SubscriptionName != "Legacy Group" || targets[0].SelectionCount != 1 || targets[0].LastSyncStatus != "success" {
+	if err != nil || len(targets) != 1 || targets[0].ID != "sst_default" || targets[0].DisplayName != "Legacy Group" || targets[0].SubscriptionName != "Legacy Group" || targets[0].SelectionCount != 1 || targets[0].LastSyncStatus != "success" {
 		t.Fatalf("migrated v30 targets = %+v, %v", targets, err)
 	}
 	selections, err := dataStore.ListSubStoreSyncSelections(ctx, targets[0].ID)
 	if err != nil || len(selections) != 1 || selections[0].CustomName != "Legacy Node" || selections[0].TargetID != targets[0].ID {
 		t.Fatalf("migrated v30 selections = %+v, %v", selections, err)
+	}
+}
+
+func TestOpenMigratesAppliedV31SubStoreDisplayName(t *testing.T) {
+	databaseURL := os.Getenv("QCH_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("QCH_TEST_DATABASE_URL is not configured")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	schema, err := testdb.IsolatePostgres(ctx, databaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cleanupCancel()
+		if err := schema.Close(cleanupCtx); err != nil {
+			t.Errorf("drop isolated v31 schema: %v", err)
+		}
+	}()
+	setup, err := pgx.Connect(ctx, schema.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := setup.Exec(ctx, schemaSQL); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := setup.Exec(ctx, `
+		ALTER TABLE substore_sync_targets DROP COLUMN display_name;
+		INSERT INTO substore_sync_targets (
+			id,subscription_name,integration_id,last_sync_status,last_sync_error,created_at,updated_at
+		) VALUES ('sst_v31','Existing remote group','ssi_v31','success','',now(),now());
+		CREATE TABLE qcontrolhub_schema_migrations (
+			version integer PRIMARY KEY CHECK (version > 0),
+			applied_at timestamptz NOT NULL DEFAULT now()
+		);
+		INSERT INTO qcontrolhub_schema_migrations (version) VALUES (31);
+	`); err != nil {
+		t.Fatal(err)
+	}
+	if err := setup.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	dataStore, err := OpenWithConfigKey(ctx, schema.URL, true, testEncryptionKey("substore-v31"))
+	if err != nil {
+		t.Fatalf("migrate applied v31 schema: %v", err)
+	}
+	defer dataStore.Close()
+	target, err := dataStore.SubStoreSyncTarget(ctx, "sst_v31")
+	if err != nil || target.DisplayName != "Existing remote group" || target.SubscriptionName != "Existing remote group" {
+		t.Fatalf("migrated v31 target = %+v, %v", target, err)
 	}
 }

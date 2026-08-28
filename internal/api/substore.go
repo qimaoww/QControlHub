@@ -60,7 +60,9 @@ type subStoreSelectionsRequest struct {
 }
 
 type subStoreTargetRequest struct {
+	DisplayName      string `json:"display_name"`
 	SubscriptionName string `json:"subscription_name"`
+	RenameRemote     bool   `json:"rename_remote"`
 }
 
 type subStoreRunRequest struct {
@@ -72,6 +74,16 @@ type subStoreSyncResult struct {
 	NodeCount        int       `json:"node_count"`
 	Created          bool      `json:"created"`
 	SyncedAt         time.Time `json:"synced_at"`
+}
+
+type subStoreImportTargetRequest struct {
+	SubscriptionName string `json:"subscription_name"`
+}
+
+type subStoreRemoteTarget struct {
+	SubscriptionName string `json:"subscription_name"`
+	NodeCount        int    `json:"node_count"`
+	Imported         bool   `json:"imported"`
 }
 
 type subStoreEnvelope struct {
@@ -290,7 +302,11 @@ func (s *Server) createSubStoreTarget(w http.ResponseWriter, request *http.Reque
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	target, err := s.store.CreateSubStoreSyncTarget(request.Context(), input.SubscriptionName)
+	name := strings.TrimSpace(input.DisplayName)
+	if name == "" {
+		name = input.SubscriptionName
+	}
+	target, err := s.store.CreateSubStoreSyncTarget(request.Context(), name)
 	if err != nil {
 		writeStoreError(w, err)
 		return
@@ -305,13 +321,182 @@ func (s *Server) updateSubStoreTarget(w http.ResponseWriter, request *http.Reque
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	target, err := s.store.UpdateSubStoreSyncTarget(request.Context(), request.PathValue("id"), input.SubscriptionName)
+	target, err := s.store.SubStoreSyncTarget(request.Context(), request.PathValue("id"))
 	if err != nil {
 		writeStoreError(w, err)
 		return
 	}
-	s.recordAudit(request, "substore.target.updated", target.SubscriptionName, "Sub-Store sync target renamed")
-	writeJSON(w, http.StatusOK, target)
+	displayName := strings.TrimSpace(input.DisplayName)
+	if displayName == "" {
+		displayName = input.SubscriptionName
+	}
+	subscriptionName := target.SubscriptionName
+	if input.RenameRemote {
+		subscriptionName = displayName
+		settings, settingsErr := s.store.SubStoreSyncSettings(request.Context())
+		if settingsErr != nil {
+			writeStoreError(w, settingsErr)
+			return
+		}
+		if !settings.Configured {
+			writeError(w, http.StatusBadRequest, "Sub-Store 尚未配置，无法同时修改远端组名")
+			return
+		}
+	}
+	updated, err := s.store.UpdateSubStoreSyncTarget(request.Context(), target.ID, displayName, subscriptionName)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	if input.RenameRemote && subscriptionName != target.SubscriptionName {
+		settings, settingsErr := s.store.SubStoreSyncSettings(request.Context())
+		if settingsErr == nil {
+			_, settingsErr = s.renameSubStoreSubscription(request.Context(), settings, target, subscriptionName)
+		}
+		if settingsErr != nil {
+			if _, rollbackErr := s.store.UpdateSubStoreSyncTarget(request.Context(), target.ID, target.DisplayName, target.SubscriptionName); rollbackErr != nil {
+				writeInternalError(w, fmt.Errorf("rename Sub-Store group: %v; roll back local target: %w", settingsErr, rollbackErr))
+				return
+			}
+			writeError(w, http.StatusBadGateway, settingsErr.Error())
+			return
+		}
+	}
+	s.recordAudit(request, "substore.target.updated", updated.DisplayName, "Sub-Store sync target renamed")
+	writeJSON(w, http.StatusOK, updated)
+}
+
+func (s *Server) listSubStoreRemoteTargets(w http.ResponseWriter, request *http.Request) {
+	settings, err := s.store.SubStoreSyncSettings(request.Context())
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	if !settings.Configured {
+		writeError(w, http.StatusBadRequest, "请先保存 Sub-Store 连接设置")
+		return
+	}
+	var subscriptions []map[string]any
+	if _, err := s.subStoreRequest(request.Context(), settings.EndpointURL, http.MethodGet, "/api/subs", nil, &subscriptions); err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	targets, err := s.store.ListSubStoreSyncTargets(request.Context())
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	importedNames := make(map[string]struct{}, len(targets))
+	importedOwners := make(map[string]struct{}, len(targets))
+	for _, target := range targets {
+		importedNames[target.SubscriptionName] = struct{}{}
+		importedOwners[target.IntegrationID] = struct{}{}
+	}
+	result := make([]subStoreRemoteTarget, 0, len(subscriptions))
+	for _, subscription := range subscriptions {
+		name, _ := subscription["name"].(string)
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		owner, _ := subscription["qcontrolhub_integration_id"].(string)
+		_, importedByName := importedNames[name]
+		_, importedByOwner := importedOwners[owner]
+		content, _ := subscription["content"].(string)
+		result = append(result, subStoreRemoteTarget{
+			SubscriptionName: name,
+			NodeCount:        subStoreContentNodeCount(content),
+			Imported:         importedByName || (owner != "" && importedByOwner),
+		})
+	}
+	sort.SliceStable(result, func(left, right int) bool { return result[left].SubscriptionName < result[right].SubscriptionName })
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) importSubStoreRemoteTarget(w http.ResponseWriter, request *http.Request) {
+	var input subStoreImportTargetRequest
+	if err := decodeJSON(w, request, &input, 8<<10); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	settings, err := s.store.SubStoreSyncSettings(request.Context())
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	if !settings.Configured {
+		writeError(w, http.StatusBadRequest, "请先保存 Sub-Store 连接设置")
+		return
+	}
+	name := strings.TrimSpace(input.SubscriptionName)
+	if _, err := validateSubStoreImportName(name); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	var subscriptions []map[string]any
+	if _, err := s.subStoreRequest(request.Context(), settings.EndpointURL, http.MethodGet, "/api/subs", nil, &subscriptions); err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	var remote map[string]any
+	for _, subscription := range subscriptions {
+		remoteName, _ := subscription["name"].(string)
+		if remoteName == name {
+			remote = subscription
+			break
+		}
+	}
+	if remote == nil {
+		writeError(w, http.StatusNotFound, "Sub-Store 中没有找到该订阅组")
+		return
+	}
+	integrationID, _ := remote["qcontrolhub_integration_id"].(string)
+	integrationID = strings.TrimSpace(integrationID)
+	claimRemote := !strings.HasPrefix(integrationID, "ssi_") || utf8.RuneCountInString(integrationID) > 100
+	if claimRemote {
+		integrationID, err = core.NewID("ssi")
+		if err != nil {
+			writeInternalError(w, err)
+			return
+		}
+	}
+	target, err := s.store.ImportSubStoreSyncTarget(request.Context(), name, integrationID)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	if claimRemote {
+		payload := make(map[string]any, len(remote)+1)
+		for key, value := range remote {
+			payload[key] = value
+		}
+		payload["qcontrolhub_integration_id"] = integrationID
+		if _, patchErr := s.subStoreRequest(request.Context(), settings.EndpointURL, http.MethodPatch, "/api/sub/"+name, payload, nil); patchErr != nil {
+			_ = s.store.DeleteSubStoreSyncTarget(request.Context(), target.ID)
+			writeError(w, http.StatusBadGateway, patchErr.Error())
+			return
+		}
+	}
+	s.recordAudit(request, "substore.target.imported", target.DisplayName, "Existing Sub-Store group added to sync targets")
+	writeJSON(w, http.StatusCreated, target)
+}
+
+func subStoreContentNodeCount(content string) int {
+	count := 0
+	for _, line := range strings.Split(strings.ReplaceAll(content, "\r\n", "\n"), "\n") {
+		if strings.TrimSpace(line) != "" {
+			count++
+		}
+	}
+	return count
+}
+
+func validateSubStoreImportName(name string) (string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" || utf8.RuneCountInString(name) > 100 || strings.ContainsAny(name, "/\\?#\r\n") {
+		return "", errors.New("Sub-Store 订阅组名称无效")
+	}
+	return name, nil
 }
 
 func (s *Server) deleteSubStoreTarget(w http.ResponseWriter, request *http.Request) {
@@ -320,43 +505,68 @@ func (s *Server) deleteSubStoreTarget(w http.ResponseWriter, request *http.Reque
 		writeStoreError(w, err)
 		return
 	}
-	settings, err := s.store.SubStoreSyncSettings(request.Context())
-	if err != nil {
-		writeStoreError(w, err)
-		return
-	}
-	if settings.Configured && target.LastSyncedAt != nil {
-		if err := s.deleteSubStoreSubscription(request.Context(), settings, target); err != nil {
-			writeError(w, http.StatusBadGateway, err.Error())
-			return
-		}
-	}
 	if err := s.store.DeleteSubStoreSyncTarget(request.Context(), target.ID); err != nil {
 		writeStoreError(w, err)
 		return
 	}
-	s.recordAudit(request, "substore.target.deleted", target.SubscriptionName, "Sub-Store sync target deleted")
+	s.recordAudit(request, "substore.target.deleted", target.DisplayName, "Sub-Store sync target removed locally; remote group retained")
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *Server) deleteSubStoreSubscription(ctx context.Context, settings core.SubStoreSyncSettings, target core.SubStoreSyncTarget) error {
-	var subscriptions []map[string]any
-	if _, err := s.subStoreRequest(ctx, settings.EndpointURL, http.MethodGet, "/api/subs", nil, &subscriptions); err != nil {
-		return err
-	}
+func ownedSubStoreSubscription(subscriptions []map[string]any, integrationID string) map[string]any {
 	for _, subscription := range subscriptions {
 		owner, _ := subscription["qcontrolhub_integration_id"].(string)
-		if owner != target.IntegrationID {
-			continue
+		if owner == integrationID {
+			return subscription
 		}
-		name, _ := subscription["name"].(string)
-		if name == "" {
-			return errors.New("Sub-Store 返回的订阅缺少名称")
-		}
-		_, err := s.subStoreRequest(ctx, settings.EndpointURL, http.MethodDelete, "/api/sub/"+name, nil, nil)
-		return err
 	}
 	return nil
+}
+
+func subStoreSubscriptionPayload(target core.SubStoreSyncTarget, content string) map[string]any {
+	return map[string]any{
+		"name":                       target.SubscriptionName,
+		"displayName":                target.SubscriptionName,
+		"display-name":               target.SubscriptionName,
+		"source":                     "local",
+		"content":                    content,
+		"noFlow":                     true,
+		"remark":                     "Managed by QControlHub",
+		"process":                    []any{},
+		"qcontrolhub_integration_id": target.IntegrationID,
+	}
+}
+
+func (s *Server) renameSubStoreSubscription(ctx context.Context, settings core.SubStoreSyncSettings, target core.SubStoreSyncTarget, name string) (bool, error) {
+	var subscriptions []map[string]any
+	if _, err := s.subStoreRequest(ctx, settings.EndpointURL, http.MethodGet, "/api/subs", nil, &subscriptions); err != nil {
+		return false, err
+	}
+	owned := ownedSubStoreSubscription(subscriptions, target.IntegrationID)
+	if owned == nil {
+		return false, nil
+	}
+	for _, subscription := range subscriptions {
+		existingName, _ := subscription["name"].(string)
+		owner, _ := subscription["qcontrolhub_integration_id"].(string)
+		if existingName == name && owner != target.IntegrationID {
+			return false, errors.New("Sub-Store 中已存在同名订阅，请更换同步组名称")
+		}
+	}
+	existingName, _ := owned["name"].(string)
+	if existingName == "" {
+		return false, errors.New("Sub-Store 返回的订阅缺少名称")
+	}
+	payload := make(map[string]any, len(owned))
+	for key, value := range owned {
+		payload[key] = value
+	}
+	payload["name"] = name
+	payload["displayName"] = name
+	payload["display-name"] = name
+	payload["qcontrolhub_integration_id"] = target.IntegrationID
+	_, err := s.subStoreRequest(ctx, settings.EndpointURL, http.MethodPatch, "/api/sub/"+existingName, payload, nil)
+	return err == nil, err
 }
 
 func (s *Server) putSubStoreSelections(w http.ResponseWriter, request *http.Request) {
@@ -502,17 +712,7 @@ func renameSubStoreNode(rawURI, name string) (string, error) {
 }
 
 func (s *Server) upsertSubStoreSubscription(ctx context.Context, settings core.SubStoreSyncSettings, target core.SubStoreSyncTarget, content string) (bool, error) {
-	payload := map[string]any{
-		"name":                       target.SubscriptionName,
-		"displayName":                target.SubscriptionName,
-		"display-name":               target.SubscriptionName,
-		"source":                     "local",
-		"content":                    content,
-		"noFlow":                     true,
-		"remark":                     "Managed by QControlHub",
-		"process":                    []any{},
-		"qcontrolhub_integration_id": target.IntegrationID,
-	}
+	payload := subStoreSubscriptionPayload(target, content)
 	var subscriptions []map[string]any
 	if _, err := s.subStoreRequest(ctx, settings.EndpointURL, http.MethodGet, "/api/subs", nil, &subscriptions); err != nil {
 		return false, err
