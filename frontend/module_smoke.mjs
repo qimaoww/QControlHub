@@ -2861,6 +2861,7 @@ const subStoreProfiles = [
     engine: "sing-box",
     profile_tag: "vless-in",
     protocol: "VLESS",
+    port: 443,
     default_name: "Alpha node · vless-in",
     custom_name: "Tokyo Premium",
     selected: true,
@@ -2872,6 +2873,7 @@ const subStoreProfiles = [
     engine: "xray",
     profile_tag: "ss-in",
     protocol: "Shadowsocks 2022",
+    port: 8443,
     default_name: "Beta node · ss-in",
     selected: false,
     available: true,
@@ -2881,6 +2883,11 @@ assert.deepEqual(
   filterSubStoreProfiles(subStoreProfiles, "alpha", "premium"),
   [subStoreProfiles[0]],
   "Sub-Store node and keyword filters compose locally",
+);
+assert.deepEqual(
+  filterSubStoreProfiles(subStoreProfiles, "", "8443"),
+  [subStoreProfiles[1]],
+  "Sub-Store profiles can be searched by listening port",
 );
 assert.deepEqual(subStoreSelectionPayload(subStoreProfiles), [
   {
@@ -2906,10 +2913,15 @@ try {
         settings: {
           configured: true,
           endpoint_hint: "https://substore.example/••••••",
+        },
+        targets: [{
+          id: "sst_primary",
           subscription_name: "QControlHub",
+          selection_count: 1,
           last_sync_status: "success",
           last_synced_at: "2026-08-28T00:00:00Z",
-        },
+        }],
+        target_id: "sst_primary",
         profiles: subStoreProfiles.map((profile) => ({ ...profile })),
         selections: subStoreSelectionPayload(subStoreProfiles),
       };
@@ -2926,6 +2938,8 @@ try {
   assert.equal(subStoreMarkup.includes("substore-status-bar"), true);
   assert.equal(subStoreMarkup.includes("substore-agent-card"), true);
   assert.equal(subStoreMarkup.includes("Tokyo Premium"), true);
+  assert.equal(subStoreMarkup.includes("VLESS · :443"), true);
+  assert.equal(subStoreMarkup.includes("data-substore-target-add"), true);
   assert.equal(subStoreMarkup.includes("data-substore-settings-dialog"), true);
   assert.equal(subStoreMarkup.includes("substore-hero"), false);
   assert.equal(subStoreMarkup.includes("<h1"), false, "sync page does not repeat a large title hero");

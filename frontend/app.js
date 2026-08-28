@@ -640,9 +640,20 @@ function contextMarkup(title) {
   if (state.route === "substore-sync") {
     const resource = state.data.subStoreSync || {};
     const profiles = resource.profiles || [];
-    const selected = profiles.filter((profile) => profile.selected).length;
-    const settings = resource.settings || {};
-    return `<a class="context-back" href="#client-access">← 返回客户端配置</a><a class="context-primary active" href="#substore-sync">Sub-Store 同步</a><section class="context-metrics"><div><span>可选 / 已选节点</span><b>${profiles.filter((profile) => profile.available).length} / ${selected}</b></div><div><span>连接状态</span><b>${settings.configured ? settings.last_sync_status === "failed" ? "异常" : "已配置" : "未配置"}</b></div></section>`;
+    const agents = [];
+    const seen = new Set();
+    for (const profile of profiles) {
+      if (!profile.agent_id || seen.has(profile.agent_id)) continue;
+      seen.add(profile.agent_id);
+      agents.push({
+        id: profile.agent_id,
+        name: profile.agent_name || "已删除节点",
+        status: profile.agent_status || "unknown",
+        profiles: profiles.filter((item) => item.agent_id === profile.agent_id).length,
+      });
+    }
+    const selected = state.data.subStoreAgent || "";
+    return `<a class="context-back" href="#client-access">← 返回客户端配置</a><a class="context-primary ${selected ? "" : "active"}" href="#substore-sync" data-substore-agent="">全部节点</a><div class="context-section-label"><span>按节点查看</span><b>${agents.length}</b></div><nav class="context-list" aria-label="Sub-Store 同步节点">${agents.map((agent) => `<a class="${selected === agent.id ? "active" : ""}" href="#substore-sync" data-substore-agent="${esc(agent.id)}"><i class="status-dot ${agent.status === "online" ? "ok" : ""}"></i><span><strong>${esc(agent.name)}</strong><small>${agent.profiles} 个客户端入站</small></span></a>`).join("") || "<p>还没有节点</p>"}</nav>`;
   }
   if (state.route === "live-config") {
     const items = state.data.agents || [];
