@@ -58,6 +58,7 @@ type Server struct {
 	agentInstaller  []byte
 	publicIPProbe   core.PublicIPProbeConfig
 	notifier        *notify.Client
+	subStoreHTTP    *http.Client
 	roleTokens      map[[32]byte]tokenPrincipal
 	sessionsMu      sync.Mutex
 	sessions        map[string]apiSession
@@ -127,6 +128,7 @@ func New(dataStore *store.Store, config Config) *Server {
 		agentInstaller:  config.AgentInstaller,
 		publicIPProbe:   config.PublicIPProbe,
 		notifier:        notify.New(config.WebhookSecret, slog.Default()),
+		subStoreHTTP:    newSubStoreHTTPClient(),
 		roleTokens:      roleTokens,
 		sessions:        make(map[string]apiSession),
 		sessionTTL:      sessionTTL(config.SessionTTL),
@@ -207,6 +209,11 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/agents", s.requirePermission(core.PermissionAgentsRead, http.HandlerFunc(s.listAgents)))
 	mux.Handle("GET /api/v1/deployments", s.requirePermission(core.PermissionDeploymentsRead, http.HandlerFunc(s.listDeployments)))
 	mux.Handle("GET /api/v1/client-access", s.requirePermission(core.PermissionClientAccessRead, http.HandlerFunc(s.listClientAccess)))
+	mux.Handle("GET /api/v1/substore-sync", s.requirePermission(core.PermissionClientAccessRead, http.HandlerFunc(s.getSubStoreSync)))
+	mux.Handle("PUT /api/v1/substore-sync/settings", s.requirePermission(core.PermissionSettingsManage, http.HandlerFunc(s.putSubStoreSettings)))
+	mux.Handle("PUT /api/v1/substore-sync/selections", s.requirePermission(core.PermissionSettingsManage, http.HandlerFunc(s.putSubStoreSelections)))
+	mux.Handle("POST /api/v1/substore-sync/test", s.requirePermission(core.PermissionSettingsManage, http.HandlerFunc(s.testSubStoreConnection)))
+	mux.Handle("POST /api/v1/substore-sync/run", s.requirePermission(core.PermissionSettingsManage, http.HandlerFunc(s.runSubStoreSync)))
 	mux.Handle("GET /api/v1/core-logs", s.requirePermission(core.PermissionCoreLogsRead, http.HandlerFunc(s.listCoreLogs)))
 	mux.Handle("PUT /api/v1/agents/{id}/client-address", s.requirePermission(core.PermissionAgentsManage, http.HandlerFunc(s.putAgentClientAddress)))
 	mux.Handle("GET /api/v1/config-catalogs/{engine}", s.requirePermission(core.PermissionCatalogsRead, http.HandlerFunc(s.configCatalog)))

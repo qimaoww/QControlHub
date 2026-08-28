@@ -44,7 +44,7 @@ type storeExecutor interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }
 
-const currentSchemaVersion = 29
+const currentSchemaVersion = 30
 
 func Open(ctx context.Context, databaseURL string, allowInsecureRemote bool) (*Store, error) {
 	return OpenWithConfigKey(ctx, databaseURL, allowInsecureRemote, "")
@@ -926,6 +926,9 @@ func (s *Store) DeleteAgent(ctx context.Context, id string) error {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM port_traffic_policies WHERE agent_id=$1`, id); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM substore_sync_items WHERE agent_id=$1`, id); err != nil {
 		return err
 	}
 	legacyEnrollmentID := ""
@@ -2048,12 +2051,35 @@ CREATE TABLE IF NOT EXISTS port_traffic_daily_usage (
 CREATE INDEX IF NOT EXISTS port_traffic_daily_agent_date_idx ON port_traffic_daily_usage(agent_id,usage_date,port);
 CREATE INDEX IF NOT EXISTS port_traffic_daily_policy_date_idx ON port_traffic_daily_usage(policy_id,usage_date);
 
+CREATE TABLE IF NOT EXISTS substore_sync_settings (
+	id smallint PRIMARY KEY CHECK (id = 1),
+	endpoint_ciphertext text NOT NULL,
+	subscription_name varchar(100) NOT NULL,
+	integration_id text NOT NULL,
+	last_synced_at timestamptz,
+	last_sync_status varchar(10) NOT NULL DEFAULT 'never' CHECK (last_sync_status IN ('never','success','failed')),
+	last_sync_error varchar(500) NOT NULL DEFAULT '',
+	updated_at timestamptz NOT NULL
+);
+CREATE TABLE IF NOT EXISTS substore_sync_items (
+	agent_id text NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+	engine varchar(20) NOT NULL CHECK (engine IN ('mihomo','xray','sing-box','ss-rust')),
+	profile_tag text NOT NULL CHECK (octet_length(profile_tag) BETWEEN 1 AND 800),
+	custom_name text NOT NULL CHECK (octet_length(custom_name) BETWEEN 1 AND 400),
+	created_at timestamptz NOT NULL,
+	updated_at timestamptz NOT NULL,
+	PRIMARY KEY (agent_id,engine,profile_tag)
+);
+CREATE INDEX IF NOT EXISTS substore_sync_items_created_idx ON substore_sync_items(created_at,agent_id);
+
 -- Agent deletion is intentionally a soft revocation, so foreign-key cascades
 -- do not run. Remove traffic rows left by versions that did not clean them in
 -- DeleteAgent; otherwise revoked nodes survive as orphan cards indefinitely.
 DELETE FROM port_traffic_daily_usage
 WHERE agent_id IN (SELECT id FROM agents WHERE revoked_at IS NOT NULL);
 DELETE FROM port_traffic_policies
+WHERE agent_id IN (SELECT id FROM agents WHERE revoked_at IS NOT NULL);
+DELETE FROM substore_sync_items
 WHERE agent_id IN (SELECT id FROM agents WHERE revoked_at IS NOT NULL);
 
 CREATE TABLE IF NOT EXISTS audit_logs (

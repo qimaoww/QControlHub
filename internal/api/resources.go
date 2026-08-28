@@ -468,10 +468,18 @@ func (s *Server) createConfigMutationTask(w http.ResponseWriter, request *http.R
 }
 
 func (s *Server) listClientAccess(w http.ResponseWriter, request *http.Request) {
-	snapshot, err := loadClientAccessSnapshot(request.Context(), s.store)
+	entries, err := s.clientAccessEntries(request.Context())
 	if err != nil {
 		writeInternalError(w, err)
 		return
+	}
+	writeJSON(w, http.StatusOK, entries)
+}
+
+func (s *Server) clientAccessEntries(ctx context.Context) ([]clientAccessEntry, error) {
+	snapshot, err := loadClientAccessSnapshot(ctx, s.store)
+	if err != nil {
+		return nil, err
 	}
 	agents := snapshot.agents
 	deployments := snapshot.deployments
@@ -501,13 +509,12 @@ func (s *Server) listClientAccess(w http.ResponseWriter, request *http.Request) 
 			continue
 		}
 		if config.Version != deployment.ConfigVersion {
-			config, err = s.store.ConfigRevision(request.Context(), deployment.ConfigID, deployment.ConfigVersion)
+			config, err = s.store.ConfigRevision(ctx, deployment.ConfigID, deployment.ConfigVersion)
 			if errors.Is(err, store.ErrNotFound) {
 				continue
 			}
 			if err != nil {
-				writeInternalError(w, err)
-				return
+				return nil, err
 			}
 		}
 		inputs := serverconfig.ParseAll(deployment.Engine, config.Content)
@@ -552,7 +559,7 @@ func (s *Server) listClientAccess(w http.ResponseWriter, request *http.Request) 
 		}
 		return entries[i].Engine < entries[j].Engine
 	})
-	writeJSON(w, http.StatusOK, entries)
+	return entries, nil
 }
 
 type clientAddressCandidate struct {
