@@ -375,9 +375,10 @@ func renameSubStoreNode(rawURI, name string) (string, error) {
 	if err != nil || parsed.Scheme == "" {
 		return "", errors.New("客户端 URI 无效")
 	}
-	parsed.Fragment = name
-	parsed.RawFragment = ""
-	return parsed.String(), nil
+	if fragment := strings.IndexByte(rawURI, '#'); fragment >= 0 {
+		rawURI = rawURI[:fragment]
+	}
+	return rawURI + "#" + name, nil
 }
 
 func (s *Server) upsertSubStoreSubscription(ctx context.Context, settings core.SubStoreSyncSettings, content string) (bool, error) {

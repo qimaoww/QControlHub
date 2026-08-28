@@ -39,12 +39,18 @@ func TestNormalizeSubStoreEndpoint(t *testing.T) {
 
 func TestRenameSubStoreNode(t *testing.T) {
 	t.Parallel()
-	got, err := renameSubStoreNode("vless://example-id@node.example:443?type=tcp#old-name", "东京 A / 专线")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(got, "#%E4%B8%9C%E4%BA%AC%20A%20/%20%E4%B8%93%E7%BA%BF") || strings.Contains(got, "old-name") {
-		t.Fatalf("renamed URI = %q", got)
+	for _, rawURI := range []string{
+		"vless://example-id@node.example:443?type=tcp#old-name",
+		"trojan://secret@node.example:443?security=tls#old-name",
+		"ss://encoded-identity@node.example:1443#old-name",
+	} {
+		got, err := renameSubStoreNode(rawURI, "东京 A · 专线")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.HasSuffix(got, "#东京 A · 专线") || strings.Contains(got, "old-name") || strings.Contains(got, "%E4%B8%9C") {
+			t.Fatalf("renamed URI = %q", got)
+		}
 	}
 	for _, name := range []string{"", "bad\nname"} {
 		if _, err := renameSubStoreNode("vless://example-id@node.example:443", name); err == nil {
