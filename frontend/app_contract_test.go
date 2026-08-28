@@ -763,7 +763,7 @@ func TestManualConfigRequiresExplicitImportOfNodeSnapshot(t *testing.T) {
 		`action: "import-existing"`,
 		`existing_config_unsupported_reason`,
 		`检测到现有服务，但不可自动迁移`,
-		`只读导入快照`,
+		`系统服务只读快照`,
 		`data-live-source="managed"`,
 		`data-live-source="import"`,
 		`QAgent 托管配置`,
