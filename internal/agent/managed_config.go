@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -16,6 +17,56 @@ const (
 	managedCoreConfigurationRoot = "/etc/qagent"
 	managedCoreServiceGroup      = "qcontrolhub-core"
 )
+
+type commandIdentity struct {
+	uid    uint32
+	gid    uint32
+	groups []uint32
+}
+
+func managedCoreServiceIdentity() (commandIdentity, error) {
+	return lookupCommandIdentity(managedCoreServiceGroup, managedCoreServiceGroup)
+}
+
+func lookupCommandIdentity(userName, groupName string) (commandIdentity, error) {
+	account, err := user.Lookup(userName)
+	if err != nil {
+		return commandIdentity{}, fmt.Errorf("look up managed core service user: %w", err)
+	}
+	group, err := user.LookupGroup(groupName)
+	if err != nil {
+		return commandIdentity{}, fmt.Errorf("look up managed core service group: %w", err)
+	}
+	uid, err := strconv.ParseUint(account.Uid, 10, 32)
+	if err != nil || uid == 0 {
+		return commandIdentity{}, errors.New("managed core service user has an invalid numeric uid")
+	}
+	gid, err := strconv.ParseUint(group.Gid, 10, 32)
+	if err != nil || gid == 0 {
+		return commandIdentity{}, errors.New("managed core service group has an invalid numeric gid")
+	}
+	groupIDs, err := account.GroupIds()
+	if err != nil {
+		return commandIdentity{}, fmt.Errorf("look up managed core supplementary groups: %w", err)
+	}
+	groups := make([]uint32, 0, len(groupIDs)+1)
+	seen := map[uint32]struct{}{uint32(gid): {}}
+	groups = append(groups, uint32(gid))
+	for _, raw := range groupIDs {
+		value, parseErr := strconv.ParseUint(raw, 10, 32)
+		if parseErr != nil || value == 0 {
+			return commandIdentity{}, errors.New("managed core service has an invalid supplementary gid")
+		}
+		current := uint32(value)
+		if _, exists := seen[current]; exists {
+			continue
+		}
+		seen[current] = struct{}{}
+		groups = append(groups, current)
+	}
+	sort.Slice(groups, func(left, right int) bool { return groups[left] < groups[right] })
+	return commandIdentity{uid: uint32(uid), gid: uint32(gid), groups: groups}, nil
+}
 
 func ensureDefaultManagedConfigurationAccess(engine core.Engine, spec EngineSpec, manager *ServiceManager) error {
 	defaultSpec, ok := DefaultSpecsForServiceManager(selectedServiceManager(manager).Kind())[engine]
