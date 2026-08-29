@@ -43,6 +43,7 @@ type clientAccessEntry struct {
 	Profiles        []clientAccessProfile       `json:"profiles"`
 	AddressOptions  []clientAccessAddressOption `json:"address_options,omitempty"`
 	ClientName      string                      `json:"client_name,omitempty"`
+	AddressMode     string                      `json:"address_mode"`
 }
 
 type clientAccessDataSource interface {
@@ -534,19 +535,24 @@ func (s *Server) clientAccessEntries(ctx context.Context) ([]clientAccessEntry, 
 		}
 		serverName := firstLabel(agent, "tls_server_name", "server_name")
 		clientName := firstLabel(agent, "client_name")
+		clientAddressMode := firstLabel(agent, "client_address_mode")
+		if clientAddressMode != core.SubStoreAddressModeIPv4 && clientAddressMode != core.SubStoreAddressModeIPv6 {
+			clientAddressMode = core.SubStoreAddressModeAuto
+		}
 		candidates := clientAddressCandidates(agent)
 		addressOptions := buildClientAccessAddressOptions(deployment.Engine, inputs, candidates, serverName, clientName)
 		if len(addressOptions) > 0 {
 			primary := addressOptions[0]
 			entries = append(entries, clientAccessEntry{
 				AgentID: agent.ID, AgentName: agent.Name, AgentStatus: agent.Status, Engine: deployment.Engine,
-				Address: primary.Address, Source: primary.Source, Profiles: primary.Profiles, AddressOptions: addressOptions, ClientName: clientName,
+				Address: primary.Address, Source: primary.Source, Profiles: primary.Profiles, AddressOptions: addressOptions,
+				ClientName: clientName, AddressMode: clientAddressMode,
 			})
 		}
 		if len(addressOptions) == 0 && len(candidates) == 0 {
 			entries = append(entries, clientAccessEntry{
 				AgentID: agent.ID, AgentName: agent.Name, AgentStatus: agent.Status, Engine: deployment.Engine,
-				AddressRequired: true, Profiles: []clientAccessProfile{},
+				AddressRequired: true, Profiles: []clientAccessProfile{}, AddressMode: clientAddressMode,
 			})
 		}
 	}

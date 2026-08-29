@@ -44,7 +44,7 @@ type storeExecutor interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }
 
-const currentSchemaVersion = 33
+const currentSchemaVersion = 34
 
 func Open(ctx context.Context, databaseURL string, allowInsecureRemote bool) (*Store, error) {
 	return OpenWithConfigKey(ctx, databaseURL, allowInsecureRemote, "")
@@ -2066,6 +2066,7 @@ CREATE TABLE IF NOT EXISTS substore_sync_targets (
 	display_name varchar(100) NOT NULL,
 	subscription_name varchar(100) NOT NULL UNIQUE,
 	integration_id text NOT NULL UNIQUE,
+	sync_mode varchar(12) NOT NULL DEFAULT 'managed' CHECK (sync_mode IN ('incremental','managed')),
 	last_synced_at timestamptz,
 	last_sync_status varchar(10) NOT NULL DEFAULT 'never' CHECK (last_sync_status IN ('never','success','failed')),
 	last_sync_error varchar(500) NOT NULL DEFAULT '',
@@ -2073,6 +2074,9 @@ CREATE TABLE IF NOT EXISTS substore_sync_targets (
 	updated_at timestamptz NOT NULL
 );
 ALTER TABLE substore_sync_targets ADD COLUMN IF NOT EXISTS display_name varchar(100);
+ALTER TABLE substore_sync_targets ADD COLUMN IF NOT EXISTS sync_mode varchar(12) NOT NULL DEFAULT 'managed';
+ALTER TABLE substore_sync_targets DROP CONSTRAINT IF EXISTS substore_sync_targets_sync_mode_check;
+ALTER TABLE substore_sync_targets ADD CONSTRAINT substore_sync_targets_sync_mode_check CHECK (sync_mode IN ('incremental','managed'));
 UPDATE substore_sync_targets SET display_name=subscription_name WHERE display_name IS NULL;
 ALTER TABLE substore_sync_targets ALTER COLUMN display_name SET NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS substore_sync_targets_display_name_idx ON substore_sync_targets(display_name);

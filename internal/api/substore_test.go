@@ -120,7 +120,7 @@ func TestSubStoreSubscriptionCreateUpdateAndOwnership(t *testing.T) {
 		case request.Method == http.MethodPost && request.URL.Path == "/qch-secret/api/subs":
 			stored = decodeSubStoreTestPayload(t, request.Body)
 			writeSubStoreTestEnvelope(t, w, http.StatusOK, stored, "")
-		case request.Method == http.MethodPatch && (request.URL.Path == "/qch-secret/api/sub/QControlHub" || request.URL.Path == "/qch-secret/api/sub/QControlHub Renamed"):
+		case request.Method == http.MethodPatch && (request.URL.Path == "/qch-secret/api/sub/QControlHub" || request.URL.Path == "/qch-secret/api/sub/QControlHub Renamed" || request.URL.Path == "/qch-secret/api/sub/Imported Group"):
 			stored = decodeSubStoreTestPayload(t, request.Body)
 			writeSubStoreTestEnvelope(t, w, http.StatusOK, stored, "")
 		default:
@@ -132,7 +132,11 @@ func TestSubStoreSubscriptionCreateUpdateAndOwnership(t *testing.T) {
 
 	server := &Server{subStoreHTTP: remote.Client()}
 	settings := core.SubStoreSyncSettings{EndpointURL: remote.URL + "/qch-secret"}
-	target := core.SubStoreSyncTarget{SubscriptionName: "QControlHub", IntegrationID: "ssi_owner"}
+	target := core.SubStoreSyncTarget{
+		SubscriptionName: "QControlHub",
+		IntegrationID:    "ssi_owner",
+		SyncMode:         core.SubStoreSyncModeIncremental,
+	}
 	created, err := server.upsertSubStoreSubscription(context.Background(), settings, target, "vless://one#One")
 	if err != nil || !created {
 		t.Fatalf("create subscription = %t, %v", created, err)
@@ -140,9 +144,10 @@ func TestSubStoreSubscriptionCreateUpdateAndOwnership(t *testing.T) {
 	if stored["source"] != "local" || stored["content"] != "vless://one#One" || stored["qcontrolhub_integration_id"] != "ssi_owner" {
 		t.Fatalf("created payload = %#v", stored)
 	}
+	delete(stored, "qcontrolhub_managed_nodes")
 	created, err = server.upsertSubStoreSubscription(context.Background(), settings, target, "vless://two#Two")
 	if err != nil || created || stored["content"] != "vless://two#Two" {
-		t.Fatalf("update subscription = %t, %#v, %v", created, stored, err)
+		t.Fatalf("upgrade legacy owned subscription = %t, %#v, %v", created, stored, err)
 	}
 	stored["custom-option"] = "preserved"
 	renamed, err := server.renameSubStoreSubscription(context.Background(), settings, target, "QControlHub Renamed")
@@ -154,12 +159,65 @@ func TestSubStoreSubscriptionCreateUpdateAndOwnership(t *testing.T) {
 	if err != nil || created || stored["name"] != "QControlHub Renamed" || stored["content"] != "vless://renamed#Renamed" {
 		t.Fatalf("rename subscription = %t, %#v, %v", created, stored, err)
 	}
+	target.SubscriptionName = "Imported Group"
+	stored = map[string]any{
+		"name":    "Imported Group",
+		"content": "vless://manual@old.example:443#Manual\nvless://old@old.example:443#Managed",
+	}
+	created, err = server.upsertSubStoreSubscription(context.Background(), settings, target, "vless://new@new.example:443#Managed\nvless://added@new.example:443#Added")
+	if err != nil || created || stored["content"] != "vless://manual@old.example:443#Manual\nvless://new@new.example:443#Managed\nvless://added@new.example:443#Added" || stored["qcontrolhub_integration_id"] != "ssi_owner" {
+		t.Fatalf("claim and merge unowned subscription = %t, %#v, %v", created, stored, err)
+	}
+	target.SyncMode = core.SubStoreSyncModeManaged
+	created, err = server.upsertSubStoreSubscription(context.Background(), settings, target, "vless://only@managed.example:443#Only")
+	if err != nil || created || stored["content"] != "vless://only@managed.example:443#Only" {
+		t.Fatalf("fully managed subscription = %t, %#v, %v", created, stored, err)
+	}
+	target.SubscriptionName = "QControlHub Renamed"
 	stored = map[string]any{
 		"name": "QControlHub Renamed", "content": "vless://foreign#Foreign",
 		"qcontrolhub_integration_id": "another-control-plane",
 	}
-	if _, err := server.upsertSubStoreSubscription(context.Background(), settings, target, "vless://three#Three"); err == nil || !strings.Contains(err.Error(), "不是由当前 QControlHub") {
+	if _, err := server.upsertSubStoreSubscription(context.Background(), settings, target, "vless://three#Three"); err == nil || !strings.Contains(err.Error(), "其他 QControlHub") {
 		t.Fatalf("foreign subscription ownership error = %v", err)
+	}
+}
+
+func TestMergeSubStoreContentByNodeName(t *testing.T) {
+	t.Parallel()
+	existing := strings.Join([]string{
+		"vless://manual@old.example:443#Manual",
+		"vless://old@old.example:443#Managed",
+		"vless://removed@old.example:443#Removed",
+	}, "\n")
+	desired := strings.Join([]string{
+		"vless://new@new.example:443#Managed",
+		"vless://added@new.example:443#Added",
+	}, "\n")
+	merged, err := mergeSubStoreContentByName(existing, desired, []string{"Managed", "Removed"})
+	want := strings.Join([]string{
+		"vless://manual@old.example:443#Manual",
+		"vless://new@new.example:443#Managed",
+		"vless://added@new.example:443#Added",
+	}, "\n")
+	if err != nil || merged != want {
+		t.Fatalf("incremental merge = %q, %v; want %q", merged, err, want)
+	}
+	if _, err := mergeSubStoreContentByName("", "vless://one@node:443#Duplicate\nvless://two@node:443#Duplicate", nil); err == nil || !strings.Contains(err.Error(), "重名") {
+		t.Fatalf("duplicate desired names error = %v", err)
+	}
+	merged, err = mergeSubStoreContentByName(existing, "", []string{"Managed", "Removed"})
+	if err != nil || merged != "vless://manual@old.example:443#Manual" {
+		t.Fatalf("remove all managed nodes = %q, %v", merged, err)
+	}
+}
+
+func TestUpsertSubStoreSubscriptionRejectsInvalidMode(t *testing.T) {
+	t.Parallel()
+	server := &Server{}
+	_, err := server.upsertSubStoreSubscription(context.Background(), core.SubStoreSyncSettings{}, core.SubStoreSyncTarget{SyncMode: "unknown"}, "vless://one@node:443#One")
+	if err == nil || !strings.Contains(err.Error(), "模式无效") {
+		t.Fatalf("invalid sync mode error = %v", err)
 	}
 }
 

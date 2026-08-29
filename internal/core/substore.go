@@ -3,10 +3,12 @@ package core
 import "time"
 
 const (
-	SubStoreAddressModeAuto = "auto"
-	SubStoreAddressModeIPv4 = "ipv4"
-	SubStoreAddressModeIPv6 = "ipv6"
-	SubStoreAddressModeBoth = "both"
+	SubStoreAddressModeAuto     = "auto"
+	SubStoreAddressModeIPv4     = "ipv4"
+	SubStoreAddressModeIPv6     = "ipv6"
+	SubStoreAddressModeBoth     = "both"
+	SubStoreSyncModeIncremental = "incremental"
+	SubStoreSyncModeManaged     = "managed"
 )
 
 func NormalizeSubStoreAddressMode(value string) (string, bool) {
@@ -14,6 +16,15 @@ func NormalizeSubStoreAddressMode(value string) (string, bool) {
 	case "", SubStoreAddressModeAuto:
 		return SubStoreAddressModeAuto, true
 	case SubStoreAddressModeIPv4, SubStoreAddressModeIPv6, SubStoreAddressModeBoth:
+		return value, true
+	default:
+		return "", false
+	}
+}
+
+func NormalizeSubStoreSyncMode(value string) (string, bool) {
+	switch value {
+	case SubStoreSyncModeIncremental, SubStoreSyncModeManaged:
 		return value, true
 	default:
 		return "", false
@@ -35,6 +46,7 @@ type SubStoreSyncTarget struct {
 	DisplayName      string     `json:"display_name"`
 	SubscriptionName string     `json:"subscription_name"`
 	IntegrationID    string     `json:"-"`
+	SyncMode         string     `json:"sync_mode"`
 	LastSyncedAt     *time.Time `json:"last_synced_at,omitempty"`
 	LastSyncStatus   string     `json:"last_sync_status"`
 	LastSyncError    string     `json:"last_sync_error,omitempty"`

@@ -71,6 +71,7 @@ type subStoreSelectionsRequest struct {
 type subStoreTargetRequest struct {
 	DisplayName      string `json:"display_name"`
 	SubscriptionName string `json:"subscription_name"`
+	SyncMode         string `json:"sync_mode"`
 	RenameRemote     bool   `json:"rename_remote"`
 }
 
@@ -337,7 +338,11 @@ func (s *Server) createSubStoreTarget(w http.ResponseWriter, request *http.Reque
 	if name == "" {
 		name = input.SubscriptionName
 	}
-	target, err := s.store.CreateSubStoreSyncTarget(request.Context(), name)
+	mode := strings.TrimSpace(input.SyncMode)
+	if mode == "" {
+		mode = core.SubStoreSyncModeIncremental
+	}
+	target, err := s.store.CreateSubStoreSyncTarget(request.Context(), name, mode)
 	if err != nil {
 		writeStoreError(w, err)
 		return
@@ -362,6 +367,10 @@ func (s *Server) updateSubStoreTarget(w http.ResponseWriter, request *http.Reque
 		displayName = input.SubscriptionName
 	}
 	subscriptionName := target.SubscriptionName
+	mode := strings.TrimSpace(input.SyncMode)
+	if mode == "" {
+		mode = target.SyncMode
+	}
 	if input.RenameRemote {
 		subscriptionName = displayName
 		settings, settingsErr := s.store.SubStoreSyncSettings(request.Context())
@@ -374,7 +383,7 @@ func (s *Server) updateSubStoreTarget(w http.ResponseWriter, request *http.Reque
 			return
 		}
 	}
-	updated, err := s.store.UpdateSubStoreSyncTarget(request.Context(), target.ID, displayName, subscriptionName)
+	updated, err := s.store.UpdateSubStoreSyncTarget(request.Context(), target.ID, displayName, subscriptionName, mode)
 	if err != nil {
 		writeStoreError(w, err)
 		return
@@ -385,7 +394,7 @@ func (s *Server) updateSubStoreTarget(w http.ResponseWriter, request *http.Reque
 			_, settingsErr = s.renameSubStoreSubscription(request.Context(), settings, target, subscriptionName)
 		}
 		if settingsErr != nil {
-			if _, rollbackErr := s.store.UpdateSubStoreSyncTarget(request.Context(), target.ID, target.DisplayName, target.SubscriptionName); rollbackErr != nil {
+			if _, rollbackErr := s.store.UpdateSubStoreSyncTarget(request.Context(), target.ID, target.DisplayName, target.SubscriptionName, target.SyncMode); rollbackErr != nil {
 				writeInternalError(w, fmt.Errorf("rename Sub-Store group: %v; roll back local target: %w", settingsErr, rollbackErr))
 				return
 			}
@@ -555,6 +564,7 @@ func ownedSubStoreSubscription(subscriptions []map[string]any, integrationID str
 }
 
 func subStoreSubscriptionPayload(target core.SubStoreSyncTarget, content string) map[string]any {
+	managedNames, _ := subStoreNodeNames(content)
 	return map[string]any{
 		"name":                       target.SubscriptionName,
 		"displayName":                target.SubscriptionName,
@@ -565,6 +575,7 @@ func subStoreSubscriptionPayload(target core.SubStoreSyncTarget, content string)
 		"remark":                     "Managed by QControlHub",
 		"process":                    []any{},
 		"qcontrolhub_integration_id": target.IntegrationID,
+		"qcontrolhub_managed_nodes":  managedNames,
 	}
 }
 
@@ -683,7 +694,7 @@ func (s *Server) runSubStoreSync(w http.ResponseWriter, request *http.Request) {
 		writeInternalError(w, err)
 		return
 	}
-	if len(selections) == 0 {
+	if len(selections) == 0 && target.LastSyncedAt == nil {
 		writeError(w, http.StatusBadRequest, "请至少选择一个客户端节点")
 		return
 	}
@@ -826,6 +837,14 @@ func renameSubStoreNode(rawURI, name string) (string, error) {
 }
 
 func (s *Server) upsertSubStoreSubscription(ctx context.Context, settings core.SubStoreSyncSettings, target core.SubStoreSyncTarget, content string) (bool, error) {
+	mode, valid := core.NormalizeSubStoreSyncMode(strings.TrimSpace(target.SyncMode))
+	if !valid {
+		return false, errors.New("Sub-Store 同步组模式无效，请重新保存组设置")
+	}
+	currentNames, err := subStoreNodeNames(content)
+	if err != nil {
+		return false, err
+	}
 	payload := subStoreSubscriptionPayload(target, content)
 	var subscriptions []map[string]any
 	if _, err := s.subStoreRequest(ctx, settings.EndpointURL, http.MethodGet, "/api/subs", nil, &subscriptions); err != nil {
@@ -848,7 +867,25 @@ func (s *Server) upsertSubStoreSubscription(ctx context.Context, settings core.S
 		return true, err
 	}
 	if owned == nil {
-		return false, errors.New("Sub-Store 中已存在同名订阅，但它不是由当前 QControlHub 同步创建；请更换订阅名称")
+		collisionOwner, _ := colliding["qcontrolhub_integration_id"].(string)
+		if strings.TrimSpace(collisionOwner) != "" {
+			return false, errors.New("Sub-Store 中已存在同名订阅，但它属于其他 QControlHub；请更换订阅名称")
+		}
+		existingName, _ := colliding["name"].(string)
+		if existingName == "" {
+			return false, errors.New("Sub-Store 返回的同名订阅缺少名称")
+		}
+		if mode == core.SubStoreSyncModeIncremental {
+			existingContent, _ := colliding["content"].(string)
+			merged, mergeErr := mergeSubStoreContentByName(existingContent, content, nil)
+			if mergeErr != nil {
+				return false, mergeErr
+			}
+			payload["content"] = merged
+		}
+		payload["qcontrolhub_managed_nodes"] = currentNames
+		_, err := s.subStoreRequest(ctx, settings.EndpointURL, http.MethodPatch, "/api/sub/"+existingName, payload, nil)
+		return false, err
 	}
 	existingName, _ := owned["name"].(string)
 	if existingName == "" {
@@ -860,8 +897,123 @@ func (s *Server) upsertSubStoreSubscription(ctx context.Context, settings core.S
 			return false, errors.New("Sub-Store 中已存在同名订阅，但它属于其他同步组；请更换订阅名称")
 		}
 	}
-	_, err := s.subStoreRequest(ctx, settings.EndpointURL, http.MethodPatch, "/api/sub/"+existingName, payload, nil)
+	if mode == core.SubStoreSyncModeIncremental {
+		existingContent, _ := owned["content"].(string)
+		previouslyManaged := subStoreManagedNames(owned["qcontrolhub_managed_nodes"])
+		if _, metadataPresent := owned["qcontrolhub_managed_nodes"]; !metadataPresent {
+			// Before incremental mode existed, an owned subscription was always
+			// fully managed by QControlHub. Seed its first incremental update from
+			// the complete legacy content so deselected legacy nodes are removed.
+			previouslyManaged, err = subStoreNodeNames(existingContent)
+			if err != nil {
+				return false, fmt.Errorf("无法迁移旧版 Sub-Store 同步组: %w", err)
+			}
+		}
+		merged, mergeErr := mergeSubStoreContentByName(existingContent, content, previouslyManaged)
+		if mergeErr != nil {
+			return false, mergeErr
+		}
+		payload["content"] = merged
+	}
+	payload["qcontrolhub_managed_nodes"] = currentNames
+	_, err = s.subStoreRequest(ctx, settings.EndpointURL, http.MethodPatch, "/api/sub/"+existingName, payload, nil)
 	return false, err
+}
+
+func subStoreNodeNames(content string) ([]string, error) {
+	result := make([]string, 0)
+	seen := make(map[string]struct{})
+	for _, line := range strings.Split(strings.ReplaceAll(content, "\r\n", "\n"), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		name := subStoreNodeName(line)
+		if name == "" {
+			return nil, errors.New("Sub-Store 同步要求每个节点 URI 都包含名称")
+		}
+		if _, exists := seen[name]; exists {
+			return nil, fmt.Errorf("Sub-Store 同步清单存在重名节点 %q，请先修改同步名称", name)
+		}
+		seen[name] = struct{}{}
+		result = append(result, name)
+	}
+	return result, nil
+}
+
+func subStoreNodeName(rawURI string) string {
+	fragment := strings.LastIndexByte(rawURI, '#')
+	if fragment < 0 || fragment == len(rawURI)-1 {
+		return ""
+	}
+	name := strings.TrimSpace(rawURI[fragment+1:])
+	if decoded, err := url.PathUnescape(name); err == nil {
+		name = strings.TrimSpace(decoded)
+	}
+	return name
+}
+
+func subStoreManagedNames(value any) []string {
+	result := make([]string, 0)
+	switch names := value.(type) {
+	case []any:
+		for _, item := range names {
+			if name, ok := item.(string); ok && strings.TrimSpace(name) != "" {
+				result = append(result, strings.TrimSpace(name))
+			}
+		}
+	case []string:
+		for _, name := range names {
+			if strings.TrimSpace(name) != "" {
+				result = append(result, strings.TrimSpace(name))
+			}
+		}
+	}
+	return result
+}
+
+func mergeSubStoreContentByName(existingContent, desiredContent string, previouslyManaged []string) (string, error) {
+	desiredNames, err := subStoreNodeNames(desiredContent)
+	if err != nil {
+		return "", err
+	}
+	desiredLines := make(map[string]string, len(desiredNames))
+	for _, line := range strings.Split(strings.ReplaceAll(desiredContent, "\r\n", "\n"), "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			desiredLines[subStoreNodeName(line)] = line
+		}
+	}
+	managed := make(map[string]struct{}, len(previouslyManaged))
+	for _, name := range previouslyManaged {
+		managed[name] = struct{}{}
+	}
+	used := make(map[string]struct{}, len(desiredNames))
+	merged := make([]string, 0)
+	for _, line := range strings.Split(strings.ReplaceAll(existingContent, "\r\n", "\n"), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		name := subStoreNodeName(line)
+		if replacement, exists := desiredLines[name]; exists {
+			if _, alreadyUsed := used[name]; !alreadyUsed {
+				merged = append(merged, replacement)
+				used[name] = struct{}{}
+			}
+			continue
+		}
+		if _, remove := managed[name]; remove {
+			continue
+		}
+		merged = append(merged, line)
+	}
+	for _, name := range desiredNames {
+		if _, exists := used[name]; !exists {
+			merged = append(merged, desiredLines[name])
+		}
+	}
+	return strings.Join(merged, "\n"), nil
 }
 
 func (s *Server) subStoreRequest(ctx context.Context, endpoint, method, route string, payload any, destination any) (int, error) {
