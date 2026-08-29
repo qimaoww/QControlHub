@@ -19,8 +19,9 @@ func TestProductionAgentUnitAllowsOnlyRequiredCapabilities(t *testing.T) {
 		t.Fatal(err)
 	}
 	unit := string(contents)
-	if !strings.Contains(unit, "CapabilityBoundingSet=CAP_CHOWN CAP_NET_ADMIN") || !strings.Contains(unit, "AmbientCapabilities=CAP_CHOWN CAP_NET_ADMIN") {
-		t.Fatal("production Agent unit does not retain the metadata and traffic-accounting capabilities")
+	requiredCapabilities := "CAP_CHOWN CAP_SETGID CAP_SETUID CAP_NET_ADMIN"
+	if !strings.Contains(unit, "CapabilityBoundingSet="+requiredCapabilities) || !strings.Contains(unit, "AmbientCapabilities="+requiredCapabilities) {
+		t.Fatal("production Agent unit does not retain the metadata, validation-identity, and traffic-accounting capabilities")
 	}
 	for _, forbidden := range []string{"CAP_SYS_ADMIN", "CAP_SYS_PTRACE", "CAP_DAC_OVERRIDE", "CAP_NET_RAW"} {
 		if strings.Contains(unit, forbidden) {
@@ -120,7 +121,7 @@ func TestOpenRCSpecsAndServicesUsePrivateQAgentNamespace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, required := range []string{"command=\"/usr/local/lib/qagent/qagent\"", "command_user=\"root:root\"", "respawn_delay=5", "capabilities=\"^cap_chown\"", "qagent_capability_is_bound 12", "capabilities=\"${capabilities},^cap_net_admin\"", "no_new_privs=true"} {
+	for _, required := range []string{"command=\"/usr/local/lib/qagent/qagent\"", "command_user=\"root:root\"", "respawn_delay=5", "capabilities=\"^cap_chown,^cap_setgid,^cap_setuid\"", "qagent_capability_is_bound 12", "capabilities=\"${capabilities},^cap_net_admin\"", "no_new_privs=true"} {
 		if !strings.Contains(string(agentService), required) {
 			t.Errorf("OpenRC Agent service is missing %q", required)
 		}
