@@ -47,7 +47,7 @@ func mutateGenerated(engine core.Engine, currentContent, generatedContent, match
 		managedKeys = []string{
 			"name", "listen", "port", "type", "cipher", "password", "udp", "users",
 			"up", "down", "alpn", "congestion-controller", "max-idle-time", "authentication-timeout",
-			"certificate", "private-key", "reality-config", "ws-path", "grpc-service-name", "network", "target",
+			"certificate", "private-key", "reality-config", "decryption", "ws-path", "grpc-service-name", "xhttp-config", "network", "target",
 		}
 	} else if engine == core.EngineSingBox {
 		managedKeys = []string{

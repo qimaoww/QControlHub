@@ -87,6 +87,83 @@ func TestVLESSXHTTPRealityPlansMatchBothCoreShapes(t *testing.T) {
 	}
 }
 
+func TestVLESSEncryptionRealityVisionPlansRoundTripAndExportClientKey(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		protocol  string
+		transport string
+		uriType   string
+	}{
+		{ProtocolVLESSEncTCP, "raw", "tcp"},
+		{ProtocolVLESSEncXHTTP, "xhttp", "xhttp"},
+	}
+	for _, engine := range []core.Engine{core.EngineMihomo, core.EngineXray} {
+		engine := engine
+		for _, test := range tests {
+			test := test
+			t.Run(string(engine)+"/"+test.protocol, func(t *testing.T) {
+				t.Parallel()
+				protocol, ok := FindProtocol(engine, test.protocol)
+				if !ok || !protocol.UsesVLESSEncryption {
+					t.Fatalf("%s protocol %q does not advertise VLESS Encryption", engine, test.protocol)
+				}
+				input, err := NewPlan(protocol)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if input.Transport != test.transport || input.Flow != "xtls-rprx-vision" || input.VLESSDecryption == "" || input.VLESSEncryption == "" {
+					t.Fatalf("VLESS-ENC plan = %+v", input)
+				}
+				if err := validateVLESSEncryptionPair(input.VLESSDecryption, input.VLESSEncryption); err != nil {
+					t.Fatal(err)
+				}
+				content, err := Generate(engine, input)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !strings.Contains(content, input.VLESSDecryption) || strings.Contains(content, input.VLESSEncryption) || !strings.Contains(content, "xtls-rprx-vision") {
+					t.Fatalf("%s server configuration mixed up VLESS-ENC key roles:\n%s", engine, content)
+				}
+				parsed, ok := Parse(engine, content)
+				if !ok || parsed.Protocol != test.protocol || parsed.VLESSDecryption != input.VLESSDecryption || parsed.VLESSEncryption != input.VLESSEncryption {
+					t.Fatalf("Parse(%s/%s) = %+v, %v", engine, test.protocol, parsed, ok)
+				}
+				profile, err := BuildClientProfile(parsed, "edge.example.com", "")
+				if err != nil {
+					t.Fatal(err)
+				}
+				parsedURI, err := url.Parse(profile.URI)
+				if err != nil {
+					t.Fatal(err)
+				}
+				query := parsedURI.Query()
+				if query.Get("type") != test.uriType || query.Get("flow") != "xtls-rprx-vision" || query.Get("encryption") != input.VLESSEncryption || strings.Contains(profile.URI, input.VLESSDecryption) {
+					t.Fatalf("VLESS-ENC client URI = %q", profile.URI)
+				}
+			})
+		}
+	}
+}
+
+func TestVLESSEncryptionRejectsMismatchedClientKey(t *testing.T) {
+	t.Parallel()
+	for _, engine := range []core.Engine{core.EngineMihomo, core.EngineXray} {
+		protocol, _ := FindProtocol(engine, ProtocolVLESSEncTCP)
+		input, err := NewPlan(protocol)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, otherEncryption, err := newVLESSEncryptionPair()
+		if err != nil {
+			t.Fatal(err)
+		}
+		input.VLESSEncryption = otherEncryption
+		if _, err := Generate(engine, input); err == nil || !strings.Contains(err.Error(), "不属于同一密钥对") {
+			t.Fatalf("%s mismatched VLESS-ENC pair error = %v", engine, err)
+		}
+	}
+}
+
 func TestXrayRealityMLDSASeedPersistsAndDerivesClientVerify(t *testing.T) {
 	t.Parallel()
 	protocol, _ := FindProtocol(core.EngineXray, ProtocolVLESSXHTTP)
@@ -553,7 +630,7 @@ func TestVLESSRealityPlansGenerateAndRoundTripKeys(t *testing.T) {
 			}
 			inbound := firstMap(root["inbounds"])
 			reality := mapValue(mapValue(inbound["streamSettings"])["realitySettings"])
-			if got := stringValue(reality["minClientVer"]); got != "26.3.27" {
+			if got := stringValue(reality["minClientVer"]); got != "0.0.0" {
 				t.Fatalf("Xray Reality minClientVer = %q", got)
 			}
 		}
@@ -561,5 +638,26 @@ func TestVLESSRealityPlansGenerateAndRoundTripKeys(t *testing.T) {
 		if !ok || !parsed.RealityEnabled || parsed.RealityPublicKey != input.RealityPublicKey || parsed.RealityShortID != input.RealityShortID {
 			t.Errorf("Parse(%s) lost Reality material: %+v, %v", engine, parsed, ok)
 		}
+	}
+}
+
+func TestXrayRealityMinClientVersionIsCustomizableWithoutChangingLegacyDefault(t *testing.T) {
+	t.Parallel()
+	protocol, _ := FindProtocol(core.EngineXray, ProtocolVLESSXHTTP)
+	input, err := NewPlan(protocol)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if input.RealityMinClientVer != "0.0.0" {
+		t.Fatalf("legacy minClientVer default = %q", input.RealityMinClientVer)
+	}
+	input.RealityMinClientVer = "26.3.27"
+	content, err := Generate(core.EngineXray, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, ok := Parse(core.EngineXray, content)
+	if !ok || parsed.RealityMinClientVer != "26.3.27" {
+		t.Fatalf("custom minClientVer round trip = %+v, %v", parsed, ok)
 	}
 }

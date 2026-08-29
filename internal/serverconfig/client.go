@@ -44,6 +44,14 @@ func BuildClientProfileNamed(input Input, address, serverName, nodeName string) 
 	if input.RealityMLDSA65Verify == "" && input.RealityMLDSA65Seed != "" {
 		input.RealityMLDSA65Verify, _ = mldsa65VerifyFromSeed(input.RealityMLDSA65Seed)
 	}
+	if isVLESSEncryptionProtocol(input.Protocol) {
+		if input.VLESSEncryption == "" {
+			input.VLESSEncryption, _ = vlessEncryptionFromDecryption(input.VLESSDecryption)
+		}
+		if err := validateVLESSEncryptionPair(input.VLESSDecryption, input.VLESSEncryption); err != nil {
+			return ClientProfile{}, err
+		}
+	}
 	address, err := NormalizeClientAddress(address)
 	if err != nil {
 		return ClientProfile{}, err
@@ -88,8 +96,12 @@ func BuildClientProfileNamed(input Input, address, serverName, nodeName string) 
 		profile.Format = "Shadowsocks SIP002 URI"
 		profile.URI = (&url.URL{Scheme: "ss", User: url.User(identity), Host: host, Fragment: fragment}).String()
 		profile.SubscriptionCompatible = true
-	case ProtocolVLESS, ProtocolVLESSXHTTP:
-		query := url.Values{"encryption": {"none"}, "type": {transport}}
+	case ProtocolVLESS, ProtocolVLESSXHTTP, ProtocolVLESSEncTCP, ProtocolVLESSEncXHTTP:
+		encryption := "none"
+		if isVLESSEncryptionProtocol(input.Protocol) {
+			encryption = input.VLESSEncryption
+		}
+		query := url.Values{"encryption": {encryption}, "type": {transport}}
 		if input.Flow != "" {
 			query.Set("flow", input.Flow)
 		}
@@ -276,7 +288,7 @@ func clientFields(input Input, address, serverName string) []ClientField {
 		credentialLabel = "密码"
 	case ProtocolSS2022:
 		credentialLabel = "Base64 PSK"
-	case ProtocolVLESS, ProtocolVLESSXHTTP, ProtocolVMess, ProtocolTUIC, ProtocolSudoku:
+	case ProtocolVLESS, ProtocolVLESSXHTTP, ProtocolVLESSEncTCP, ProtocolVLESSEncXHTTP, ProtocolVMess, ProtocolTUIC, ProtocolSudoku:
 		credentialLabel = "用户 UUID"
 	}
 	fields = append(fields, ClientField{Label: credentialLabel, Value: input.Credential, Secret: true})
@@ -287,6 +299,9 @@ func clientFields(input Input, address, serverName string) []ClientField {
 		fields = append(fields, ClientField{Label: "加密方法", Value: input.Method})
 	}
 	fields = append(fields, ClientField{Label: "传输", Value: input.Transport})
+	if isVLESSEncryptionProtocol(input.Protocol) {
+		fields = append(fields, ClientField{Label: "VLESS Encryption", Value: input.VLESSEncryption})
+	}
 	if input.TransportPath != "" {
 		fields = append(fields, ClientField{Label: "路径 / ServiceName", Value: input.TransportPath})
 	}

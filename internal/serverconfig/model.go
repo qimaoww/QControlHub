@@ -5,18 +5,20 @@ package serverconfig
 import "github.com/qimaoww/qcontrolhub/internal/core"
 
 const (
-	ProtocolShadowsocks = "shadowsocks"
-	ProtocolSS2022      = "ss2022"
-	ProtocolVLESS       = "vless"
-	ProtocolVLESSXHTTP  = "vless-xhttp-reality"
-	ProtocolVMess       = "vmess"
-	ProtocolTrojan      = "trojan"
-	ProtocolHy2         = "hysteria2"
-	ProtocolTUIC        = "tuic"
-	ProtocolAnyTLS      = "anytls"
-	ProtocolSnell       = "snell"
-	ProtocolSudoku      = "sudoku"
-	ProtocolPortForward = "port-forward"
+	ProtocolShadowsocks   = "shadowsocks"
+	ProtocolSS2022        = "ss2022"
+	ProtocolVLESS         = "vless"
+	ProtocolVLESSXHTTP    = "vless-xhttp-reality"
+	ProtocolVLESSEncTCP   = "vless-enc-tcp-reality-vision"
+	ProtocolVLESSEncXHTTP = "vless-enc-xhttp-reality-vision"
+	ProtocolVMess         = "vmess"
+	ProtocolTrojan        = "trojan"
+	ProtocolHy2           = "hysteria2"
+	ProtocolTUIC          = "tuic"
+	ProtocolAnyTLS        = "anytls"
+	ProtocolSnell         = "snell"
+	ProtocolSudoku        = "sudoku"
+	ProtocolPortForward   = "port-forward"
 )
 
 type Protocol struct {
@@ -37,6 +39,7 @@ type Protocol struct {
 	TransportConfig      bool     `json:"transport_config"`
 	UsesReality          bool     `json:"uses_reality"`
 	SupportsRealityMLDSA bool     `json:"supports_reality_mldsa"`
+	UsesVLESSEncryption  bool     `json:"uses_vless_encryption"`
 	PortForward          bool     `json:"port_forward"`
 }
 
@@ -63,6 +66,8 @@ type Input struct {
 	RealityMinClientVer  string `json:"reality_min_client_ver"`
 	RealityMLDSA65Seed   string `json:"reality_mldsa65_seed"`
 	RealityMLDSA65Verify string `json:"reality_mldsa65_verify"`
+	VLESSDecryption      string `json:"vless_decryption"`
+	VLESSEncryption      string `json:"vless_encryption"`
 	SnellVersion         int    `json:"snell_version"`
 	SudokuPaddingMin     int    `json:"sudoku_padding_min"`
 	SudokuPaddingMax     int    `json:"sudoku_padding_max"`
@@ -167,6 +172,22 @@ func Protocols(engine core.Engine) []Protocol {
 			DefaultPort: 443, Credential: "用户 UUID", Transports: []string{"xhttp"},
 			UsesReality: true, SupportsRealityMLDSA: engine == core.EngineXray, TransportConfig: true,
 		})
+	}
+	if engine == core.EngineMihomo || engine == core.EngineXray {
+		protocols = append(protocols,
+			Protocol{
+				Key: ProtocolVLESSEncTCP, Name: "VLESS-ENC-TCP-Reality-Vision", Badge: "VLESS ENC TCP",
+				Description: "VLESS Encryption + Raw/TCP + Reality + Vision；自动生成独立的服务端 Decryption 与客户端 Encryption。",
+				Docs:        base + vlessPath, DefaultPort: 443, Credential: "用户 UUID",
+				Transports: []string{"raw"}, UsesReality: true, SupportsRealityMLDSA: engine == core.EngineXray, UsesVLESSEncryption: true,
+			},
+			Protocol{
+				Key: ProtocolVLESSEncXHTTP, Name: "VLESS-ENC-XHTTP-Reality-Vision", Badge: "VLESS ENC XHTTP",
+				Description: "VLESS Encryption + XHTTP + Reality + Vision；Vision 穿透 VLESS Encryption，不依赖 XHTTP 底层直拷。",
+				Docs:        base + vlessPath, DefaultPort: 443, Credential: "用户 UUID",
+				Transports: []string{"xhttp"}, UsesReality: true, SupportsRealityMLDSA: engine == core.EngineXray, UsesVLESSEncryption: true, TransportConfig: true,
+			},
+		)
 	}
 	if engine == core.EngineMihomo {
 		protocols = append(protocols,

@@ -1796,9 +1796,11 @@ const planControls = Object.fromEntries(
     reality_public_key: "",
     reality_short_id: "",
     reality_server_name: "unsaved.example.test",
-    reality_min_client_ver: "26.3.27",
+    reality_min_client_ver: "0.0.0",
     reality_mldsa65_seed: "",
     reality_mldsa65_verify: "",
+    vless_decryption: "",
+    vless_encryption: "",
     snell_version: "0",
     sudoku_padding_min: "0",
     sudoku_padding_max: "0",
@@ -1937,6 +1939,11 @@ try {
   assert.equal(firstPayload.input.transport, "grpc");
   assert.equal(firstPayload.input.listen, "127.0.0.1");
   assert.equal(firstPayload.input.certificate_path, "/unsaved/certificate.pem");
+  assert.equal(
+    firstPayload.input.reality_min_client_ver,
+    "0.0.0",
+    "the editable minClientVer preserves the legacy preset default",
+  );
   assert.equal(firstPayload.input.target_address, "backend.example.test");
   assert.equal(firstPayload.input.target_port, 9443);
   assert.equal(firstPayload.input.network, "udp");

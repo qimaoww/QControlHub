@@ -16,17 +16,21 @@ func generateXray(input Input) (string, error) {
 		inbound["settings"] = map[string]any{
 			"network": "tcp,udp", "method": input.Method, "password": input.Credential,
 		}
-	case ProtocolVLESS, ProtocolVLESSXHTTP:
+	case ProtocolVLESS, ProtocolVLESSXHTTP, ProtocolVLESSEncTCP, ProtocolVLESSEncXHTTP:
 		inbound["protocol"] = "vless"
 		user := map[string]any{"id": input.Credential, "level": 0, "email": input.Username}
 		if input.Flow != "" {
 			user["flow"] = input.Flow
 		}
 		usersKey := "users"
-		if input.Protocol == ProtocolVLESSXHTTP {
+		if input.Protocol == ProtocolVLESSXHTTP || isVLESSEncryptionProtocol(input.Protocol) {
 			usersKey = "clients"
 		}
-		inbound["settings"] = map[string]any{usersKey: []any{user}, "decryption": "none"}
+		decryption := "none"
+		if isVLESSEncryptionProtocol(input.Protocol) {
+			decryption = input.VLESSDecryption
+		}
+		inbound["settings"] = map[string]any{usersKey: []any{user}, "decryption": decryption}
 	case ProtocolVMess:
 		inbound["protocol"] = "vmess"
 		inbound["settings"] = map[string]any{
@@ -114,6 +118,7 @@ func parseXray(content string) (Input, bool) {
 		Listen: stringValue(inbound["listen"]), Port: intValue(inbound["port"]), Username: "default", Transport: "raw",
 	}
 	settings := mapValue(inbound["settings"])
+	input.VLESSDecryption = stringValue(settings["decryption"])
 	input.Method, input.Credential = stringValue(settings["method"]), stringValue(settings["password"])
 	if input.Protocol == ProtocolPortForward {
 		input.Network = networkListValue(stringValue(settings["allowedNetwork"]))
@@ -152,9 +157,22 @@ func parseXray(content string) (Input, bool) {
 		input.Transport = "grpc"
 		input.TransportPath = stringValue(mapValue(stream["grpcSettings"])["serviceName"])
 	case "xhttp":
-		input.Protocol = ProtocolVLESSXHTTP
 		input.Transport = "xhttp"
 		input.TransportPath = stringValue(mapValue(stream["xhttpSettings"])["path"])
+	}
+	if input.Protocol == ProtocolVLESS && input.VLESSDecryption != "" && input.VLESSDecryption != "none" {
+		var err error
+		input.VLESSEncryption, err = vlessEncryptionFromDecryption(input.VLESSDecryption)
+		if err != nil {
+			return Input{}, false
+		}
+		if input.Transport == "xhttp" {
+			input.Protocol = ProtocolVLESSEncXHTTP
+		} else {
+			input.Protocol = ProtocolVLESSEncTCP
+		}
+	} else if input.Protocol == ProtocolVLESS && input.Transport == "xhttp" {
+		input.Protocol = ProtocolVLESSXHTTP
 	}
 	if stringValue(stream["security"]) == "tls" {
 		input.TLSEnabled = true
@@ -172,7 +190,7 @@ func parseXray(content string) (Input, bool) {
 		input.RealityServerName = firstString(reality["serverNames"])
 		input.RealityMinClientVer = stringValue(reality["minClientVer"])
 		if input.RealityMinClientVer == "" {
-			input.RealityMinClientVer = "26.3.27"
+			input.RealityMinClientVer = "0.0.0"
 		}
 		input.RealityMLDSA65Seed = stringValue(reality["mldsa65Seed"])
 		if input.RealityMLDSA65Seed != "" {

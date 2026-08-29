@@ -45,7 +45,7 @@ func NewPlan(protocol Protocol) (Input, error) {
 		transport = "websocket"
 		transportPath = "/" + suffix
 	}
-	if protocol.Key == ProtocolVLESSXHTTP {
+	if protocol.Key == ProtocolVLESSXHTTP || protocol.Key == ProtocolVLESSEncXHTTP {
 		transport = "xhttp"
 		transportPath = "/" + suffix
 	}
@@ -79,8 +79,8 @@ func NewPlan(protocol Protocol) (Input, error) {
 		input.SudokuPaddingMax = 15
 		input.SudokuTableType = "prefer_ascii"
 	}
-	if protocol.Key == ProtocolVLESS || protocol.Key == ProtocolVLESSXHTTP {
-		if protocol.Key == ProtocolVLESS {
+	if protocol.Key == ProtocolVLESS || protocol.Key == ProtocolVLESSXHTTP || isVLESSEncryptionProtocol(protocol.Key) {
+		if protocol.Key == ProtocolVLESS || isVLESSEncryptionProtocol(protocol.Key) {
 			input.Flow = "xtls-rprx-vision"
 		}
 		privateKey, err := ecdh.X25519().GenerateKey(rand.Reader)
@@ -98,7 +98,13 @@ func NewPlan(protocol Protocol) (Input, error) {
 		input.RealityPublicKey = base64.RawURLEncoding.EncodeToString(privateKey.PublicKey().Bytes())
 		input.RealityShortID = hex.EncodeToString(shortID)
 		input.RealityServerName = DefaultRealityServerName
-		input.RealityMinClientVer = "26.3.27"
+		input.RealityMinClientVer = "0.0.0"
+	}
+	if protocol.UsesVLESSEncryption {
+		input.VLESSDecryption, input.VLESSEncryption, err = newVLESSEncryptionPair()
+		if err != nil {
+			return Input{}, err
+		}
 	}
 	return input, nil
 }

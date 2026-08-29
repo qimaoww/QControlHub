@@ -10,6 +10,8 @@ const generatedPlanFields = Object.freeze([
   "reality_private_key",
   "reality_public_key",
   "reality_short_id",
+  "vless_decryption",
+  "vless_encryption",
 ]);
 
 const generatedFieldActions = Object.freeze([
@@ -31,11 +33,27 @@ const generatedFieldActions = Object.freeze([
   ],
   ["reality_short_id", "reality_short_id", "生成 Short ID"],
   [
+    "vless_decryption",
+    "vless_decryption,vless_encryption",
+    "生成 VLESS-ENC 密钥对",
+  ],
+  [
+    "vless_encryption",
+    "vless_decryption,vless_encryption",
+    "生成 VLESS-ENC 密钥对",
+  ],
+  [
     "reality_mldsa65_seed",
     "reality_mldsa65_seed",
     "生成 ML-DSA-65 密钥对",
   ],
 ]);
+
+const protocolNavigationNames = Object.freeze({
+  "vless-xhttp-reality": "XHTTP + Reality",
+  "vless-enc-tcp-reality-vision": "TCP + Reality + Vision",
+  "vless-enc-xhttp-reality-vision": "XHTTP + Reality + Vision",
+});
 
 function installGeneratedFieldButtons(form) {
   generatedFieldActions.forEach(([name, fields, label]) => {
@@ -78,7 +96,10 @@ export function readServerPlanInput(form, protocol) {
     credential: values.get("credential"),
     secondary_credential: values.get("secondary_credential"),
     method: values.get("method"),
-    flow: protocol.key === "vless" ? "xtls-rprx-vision" : "",
+    flow:
+      protocol.key === "vless" || protocol.uses_vless_encryption
+        ? "xtls-rprx-vision"
+        : "",
     transport: values.get("transport"),
     transport_path: values.get("transport_path"),
     tls_enabled:
@@ -91,9 +112,11 @@ export function readServerPlanInput(form, protocol) {
     reality_short_id: values.get("reality_short_id") || "",
     reality_server_name: values.get("reality_server_name") || "",
     reality_min_client_ver:
-      values.get("reality_min_client_ver") || "26.3.27",
+      values.get("reality_min_client_ver") || "0.0.0",
     reality_mldsa65_seed: values.get("reality_mldsa65_seed") || "",
     reality_mldsa65_verify: values.get("reality_mldsa65_verify") || "",
+    vless_decryption: values.get("vless_decryption") || "",
+    vless_encryption: values.get("vless_encryption") || "",
     snell_version: Number(values.get("snell_version") || 0),
     sudoku_padding_min: Number(values.get("sudoku_padding_min") || 0),
     sudoku_padding_max: Number(values.get("sudoku_padding_max") || 0),
@@ -502,7 +525,7 @@ async function agentConfig() {
   const protocolNav = workspace.protocols
     .map(
       (item) =>
-        `<a class="${item.key === selectedProtocolKey ? "active" : ""}" href="#agent-config" data-protocol="${esc(item.key)}"><b>${esc(item.badge)}</b><span><strong>${esc(item.name)}</strong></span></a>`,
+        `<a class="${item.key === selectedProtocolKey ? "active" : ""}" href="#agent-config" data-protocol="${esc(item.key)}" title="${esc(item.name)}"><b>${esc(item.badge)}</b><span><strong>${esc(protocolNavigationNames[item.key] || item.name)}</strong></span></a>`,
     )
     .join("");
   const methods = (protocol?.methods || [])
@@ -524,10 +547,13 @@ async function agentConfig() {
       : selectedProtocolKey === "sudoku"
         ? `<div class="plan-fields three"><label>Padding 最小值<input type="number" name="sudoku_padding_min" min="0" max="100" value="${Number(plan.sudoku_padding_min ?? 1)}"></label><label>Padding 最大值<input type="number" name="sudoku_padding_max" min="0" max="100" value="${Number(plan.sudoku_padding_max ?? 15)}"></label><label>Table Type<select name="sudoku_table_type">${["prefer_ascii", "prefer_entropy", "up_ascii_down_entropy", "up_entropy_down_ascii"].map((value) => `<option value="${value}" ${value === (plan.sudoku_table_type || "prefer_ascii") ? "selected" : ""}>${value}</option>`).join("")}</select></label></div>`
         : '<input type="hidden" name="snell_version" value="0"><input type="hidden" name="sudoku_padding_min" value="0"><input type="hidden" name="sudoku_padding_max" value="0"><input type="hidden" name="sudoku_table_type" value="">';
+  const vlessEncryptionOptions = protocol?.uses_vless_encryption
+    ? `<div class="plan-fields one"><label class="secret-input">服务端 VLESS Decryption<span class="secret-value-control"><input type="password" name="vless_decryption" required value="${esc(plan.vless_decryption || "")}" autocomplete="off"><button type="button" data-secret-visibility>显示</button></span><small>由 xray vlessenc 兼容算法生成的 X25519 私有值；只写入服务端，客户端配置不得包含。</small></label><label>客户端 VLESS Encryption<input name="vless_encryption" required value="${esc(plan.vless_encryption || "")}"><small>由服务端 Decryption 自动推导的公开值；分享链接的 encryption 参数使用此值。</small></label></div>`
+    : '<input type="hidden" name="vless_decryption" value=""><input type="hidden" name="vless_encryption" value="">';
   const identitySection = `<section class="builder-section" id="target"><header><span class="section-number">02</span><strong>转发目标</strong></header><div><div class="plan-fields three"><label>目标地址<input name="target_address" maxlength="253" required value="${esc(plan.target_address)}" placeholder="127.0.0.1 或 target.example.com"></label><label>目标端口<input type="number" name="target_port" min="1" max="65535" required value="${Number(plan.target_port)}"></label><label>转发协议<select name="network"><option value="tcp" ${plan.network === "tcp" ? "selected" : ""}>TCP</option><option value="udp" ${plan.network === "udp" ? "selected" : ""}>UDP</option><option value="tcp,udp" ${plan.network === "tcp,udp" ? "selected" : ""}>TCP + UDP</option></select></label></div><p class="validation-note">流量由当前内核直连转发到目标地址；部署前请确认监听端口与防火墙已放行。</p><input type="hidden" name="username" value=""><input type="hidden" name="credential" value=""><input type="hidden" name="secondary_credential" value=""><input type="hidden" name="method" value=""></div></section>`;
   const xrayRealityAdvanced = engine === "xray"
-    ? `<div class="plan-fields one"><label>最低客户端 Xray 版本<input name="reality_min_client_ver" required pattern="[0-9]{1,3}(\\.[0-9]{1,3}){2}" value="${esc(plan.reality_min_client_ver || "26.3.27")}"><small>默认 26.3.27。降低版本会放行旧 TLS 指纹，可能更容易被 DPI 识别。</small></label></div><div class="plan-fields one"><label class="secret-input">ML-DSA-65 Seed（可选，仅服务端）<span class="secret-value-control"><input type="password" name="reality_mldsa65_seed" value="${esc(plan.reality_mldsa65_seed || "")}" autocomplete="off"><button type="button" data-secret-visibility>显示</button></span><small>使用 xray mldsa65 生成；系统会从 Seed 自动推导客户端 Verify。启用前请用 xray tls ping 检查目标证书长度大于 3500。</small></label></div>`
-    : '<input type="hidden" name="reality_min_client_ver" value="26.3.27"><input type="hidden" name="reality_mldsa65_seed" value="">';
+    ? `<div class="plan-fields one"><label>最低客户端 Xray 版本<input name="reality_min_client_ver" required pattern="[0-9]{1,3}(\\.[0-9]{1,3}){2}" value="${esc(plan.reality_min_client_ver || "0.0.0")}"><small>保持原预设默认值 0.0.0；可在此自定义客户端最低版本。提高版本会拒绝更旧的客户端。</small></label></div><div class="plan-fields one"><label class="secret-input">ML-DSA-65 Seed（可选，仅服务端）<span class="secret-value-control"><input type="password" name="reality_mldsa65_seed" value="${esc(plan.reality_mldsa65_seed || "")}" autocomplete="off"><button type="button" data-secret-visibility>显示</button></span><small>使用 xray mldsa65 生成；系统会推导客户端 Verify。启用时强制 target 证书链严格大于 3500 bytes，并要求 X25519MLKEM768。</small></label></div>`
+    : '<input type="hidden" name="reality_min_client_ver" value="0.0.0"><input type="hidden" name="reality_mldsa65_seed" value="">';
   const security = protocol?.uses_reality
     ? `<input type="hidden" name="reality_enabled" value="1"><section class="builder-section security-section" id="security"><header><span class="section-number">04</span><strong>Reality</strong></header><div><div class="plan-fields two"><label>目标域名 / ServerName<input name="reality_server_name" list="reality-presets" required value="${esc(plan.reality_server_name)}"><datalist id="reality-presets">${workspace.reality_presets.map((value) => `<option value="${esc(value)}">`).join("")}</datalist><small>校验公网 DNS；拒绝 Cloudflare 与非公网地址。</small></label><label>Short ID<input name="reality_short_id" required value="${esc(plan.reality_short_id)}"></label></div><div class="plan-fields one"><label>客户端 Public Key<input name="reality_public_key" required value="${esc(plan.reality_public_key)}"></label><label class="secret-input">服务端 Private Key<span class="secret-value-control"><input type="password" name="reality_private_key" required value="${esc(plan.reality_private_key)}"><button type="button" data-secret-visibility>显示</button></span></label></div>${xrayRealityAdvanced}</div></section>`
     : protocol?.supports_tls
@@ -543,14 +569,34 @@ async function agentConfig() {
     ? `<aside class="config-execution-callout"><span><b>${esc(engineName(engine))} 尚未安装</b><small>可以编辑方案，但校验、部署和服务操作需要先在节点设置中安装该内核。</small></span><a class="button small" href="#node-settings">前往安装内核</a></aside>`
     : "";
   shell(
-    `<section class="config-command-bar loaded"><header class="config-command-head"><div class="config-command-title"><span class="engine-badge ${esc(engine)}">${esc(engineName(engine))}</span><div><p class="eyebrow">Server recipe</p><h2>${esc(protocol?.name || "Protocol")} · ${selectedInbound ? esc(selectedInbound.tag) : "新入站"}</h2><small>${esc(agent.name)} · ${esc(workspace.catalog.name)}</small></div></div><div class="config-command-state"><span class="status-label ${!engineInstalled ? "muted" : config ? "ok" : "warn"}">${!engineInstalled ? "内核未安装" : config ? "已读取" : "新方案"}</span><span class="recipe-version"><b>${config ? `v${config.version}` : "草稿"}</b><small>${esc(workspace.catalog.format)}</small></span><a href="${esc(protocol?.docs)}" target="_blank" rel="noopener noreferrer">文档 ↗</a></div></header><details class="config-hierarchy-menu" open><summary><b>切换入站 / 协议</b><i>＋</i></summary><div class="config-command-selectors">${inboundNav ? `<section class="inbound-browser config-selector"><header><span><b>入站</b><small>${workspace.inbounds.length} 个</small></span><button class="button small" type="button" data-new-inbound>＋ 新增</button></header><nav>${inboundNav}</nav></section>` : ""}<section class="protocol-browser config-selector"><header><span><b>协议</b><small>${workspace.protocols.length} 种</small></span></header><nav>${protocolNav}</nav></section></div></details></section>${executionCallout}<article class="recipe-workspace"><form class="server-form" id="server-plan-form"><div class="config-mutation"><label>操作<select name="operation">${selectedInbound ? `<option value="modify">修改 · ${esc(selectedInbound.tag)}</option><option value="add">新增入站</option><option value="delete">删除 · ${esc(selectedInbound.tag)}</option>` : '<option value="add">新增入站</option>'}</select></label></div><div class="builder-layout" data-builder-workbench><nav class="builder-index"><a href="#listen" data-builder-step="listen"><b>01</b><strong>监听</strong></a><a href="#identity" data-builder-step="identity"><b>02</b><strong>认证</strong></a>${protocol?.transport_config ? '<a href="#transport" data-builder-step="transport"><b>03</b><strong>传输</strong></a>' : ""}${protocol?.uses_reality || protocol?.supports_tls ? '<a href="#security" data-builder-step="security"><b>04</b><strong>安全</strong></a>' : ""}</nav><div class="builder-sections"><section class="builder-section" id="listen"><header><span class="section-number">01</span><strong>监听</strong></header><div class="plan-fields three"><label>入站标签<input name="tag" maxlength="64" required value="${esc(plan.tag)}"></label><label>监听地址<input name="listen" required value="${esc(plan.listen)}"></label><label>监听端口<input type="number" name="port" min="1" max="65535" required value="${Number(plan.port)}"></label></div></section><section class="builder-section" id="identity"><header><span class="section-number">02</span><strong>认证</strong></header><div><div class="plan-fields two">${protocol?.ignores_username ? '<input type="hidden" name="username" value="default">' : `<label>用户名或备注<input name="username" maxlength="64" required value="${esc(plan.username)}"></label>`}<label class="secret-input">${esc(protocol?.credential_label || "凭据")}<span class="secret-value-control"><input type="password" name="credential" required value="${esc(plan.credential)}"><button type="button" data-secret-visibility>显示</button></span></label>${protocol?.secondary_credential_label ? `<label class="secret-input">${esc(protocol.secondary_credential_label)}<span class="secret-value-control"><input type="password" name="secondary_credential" required value="${esc(plan.secondary_credential)}"><button type="button" data-secret-visibility>显示</button></span></label>` : '<input type="hidden" name="secondary_credential" value="">'}</div>${methods ? `<div class="plan-fields one"><label>加密方式<select name="method">${methods}</select></label></div>` : '<input type="hidden" name="method" value="">'}</div></section>${protocol?.transport_config ? `<section class="builder-section" id="transport"><header><span class="section-number">03</span><strong>传输</strong></header><div class="plan-fields two"><label>传输<select name="transport">${transports}</select></label><label>路径 / ServiceName<input name="transport_path" value="${esc(plan.transport_path)}"></label></div></section>` : '<input type="hidden" name="transport" value="raw"><input type="hidden" name="transport_path" value="">'}${security}</div></div><footer class="builder-actions compact"><span class="builder-regenerate-status" data-regenerate-status role="status" aria-live="polite"></span><div><button class="button" type="button" data-regenerate>重新生成参数</button><button class="button" type="submit" data-plan-intent="validate" ${agent.status !== "online" || !engineInstalled ? "disabled" : ""}>保存并校验</button><button class="button primary" type="submit" data-plan-intent="deploy" ${agent.status !== "online" || !engineInstalled ? "disabled" : ""}>保存并部署</button></div></footer></form></article>${revisionTimeline}<details class="advanced-studio" id="advanced"><summary><b>全局字段与源码</b><i>＋</i></summary><div class="advanced-studio-body"><nav class="field-rail"><header><b>全局配置项</b><small>${fields.length}</small></header>${fields.map((field) => `<a class="${field.key === selectedField?.key ? "active" : ""}" href="#agent-config" data-config-field="${esc(field.key)}"><i class="${workspace.present_fields[field.key] ? "present" : ""}"></i><span><strong>${esc(field.label)}</strong><code>${esc(field.key)}</code></span><small>${esc(field.kind)}</small></a>`).join("")}</nav><section class="field-canvas" data-refresh-key="config-field-${esc(selectedField?.key || "empty")}"><header><div><h2>${esc(selectedField?.label)}</h2><code>${esc(selectedField?.key)}</code></div><a href="${esc(selectedField?.docs)}" target="_blank" rel="noopener noreferrer">文档 ↗</a></header>${config && selectedField ? `<form id="field-form"><div class="field-mutation"><label>操作<select name="mutation">${fieldValue.present ? '<option value="modify">修改字段</option><option value="delete">删除字段</option>' : '<option value="add">新增字段</option>'}</select></label></div><label>${esc(workspace.catalog.format)} 字段值<textarea name="fragment" spellcheck="false">${esc(fieldValue.fragment)}</textarea></label><footer><div><button class="button" type="submit" data-field-intent="validate">保存并校验</button><button class="button primary" type="submit" data-field-intent="deploy">保存并部署</button></div></footer></form>${sourceStudio}` : '<div class="empty compact"><strong>先创建一个服务端入站</strong></div>'}</section><aside class="official-rail"><header><b>官方文档</b><small>${workspace.catalog.topic_count}</small></header>${workspace.catalog.topic_groups.map((group) => `<details><summary>${esc(group.name)} <b>${group.topics.length}</b></summary><div>${group.topics.map((topic) => `<a href="${esc(topic.docs)}" target="_blank" rel="noopener noreferrer">${esc(topic.label)} ↗</a>`).join("")}</div></details>`).join("")}</aside></div></details>`,
+    `<section class="config-command-bar loaded"><header class="config-command-head"><div class="config-command-title"><span class="engine-badge ${esc(engine)}">${esc(engineName(engine))}</span><div><p class="eyebrow">Server recipe</p><h2>${esc(protocol?.name || "Protocol")} · ${selectedInbound ? esc(selectedInbound.tag) : "新入站"}</h2><small>${esc(agent.name)} · ${esc(workspace.catalog.name)}</small></div></div><div class="config-command-state"><span class="status-label ${!engineInstalled ? "muted" : config ? "ok" : "warn"}">${!engineInstalled ? "内核未安装" : config ? "已读取" : "新方案"}</span><span class="recipe-version"><b>${config ? `v${config.version}` : "草稿"}</b><small>${esc(workspace.catalog.format)}</small></span><a href="${esc(protocol?.docs)}" target="_blank" rel="noopener noreferrer">文档 ↗</a></div></header><details class="config-hierarchy-menu" open><summary><b>切换入站 / 协议</b><i>＋</i></summary><div class="config-command-selectors${workspace.protocols.length > 5 ? " protocol-catalog-wide" : ""}">${inboundNav ? `<section class="inbound-browser config-selector"><header><span><b>入站</b><small>${workspace.inbounds.length} 个</small></span><button class="button small" type="button" data-new-inbound>＋ 新增</button></header><nav>${inboundNav}</nav></section>` : ""}<section class="protocol-browser config-selector"><header><span><b>协议</b><small>${workspace.protocols.length} 种</small></span></header><nav>${protocolNav}</nav></section></div></details></section>${executionCallout}<article class="recipe-workspace"><form class="server-form" id="server-plan-form"><div class="config-mutation"><label>操作<select name="operation">${selectedInbound ? `<option value="modify">修改 · ${esc(selectedInbound.tag)}</option><option value="add">新增入站</option><option value="delete">删除 · ${esc(selectedInbound.tag)}</option>` : '<option value="add">新增入站</option>'}</select></label></div><div class="builder-layout" data-builder-workbench><nav class="builder-index"><a href="#listen" data-builder-step="listen"><b>01</b><strong>监听</strong></a><a href="#identity" data-builder-step="identity"><b>02</b><strong>认证</strong></a>${protocol?.transport_config ? '<a href="#transport" data-builder-step="transport"><b>03</b><strong>传输</strong></a>' : ""}${protocol?.uses_reality || protocol?.supports_tls ? '<a href="#security" data-builder-step="security"><b>04</b><strong>安全</strong></a>' : ""}</nav><div class="builder-sections"><section class="builder-section" id="listen"><header><span class="section-number">01</span><strong>监听</strong></header><div class="plan-fields three"><label>入站标签<input name="tag" maxlength="64" required value="${esc(plan.tag)}"></label><label>监听地址<input name="listen" required value="${esc(plan.listen)}"></label><label>监听端口<input type="number" name="port" min="1" max="65535" required value="${Number(plan.port)}"></label></div></section><section class="builder-section" id="identity"><header><span class="section-number">02</span><strong>认证</strong></header><div><div class="plan-fields two">${protocol?.ignores_username ? '<input type="hidden" name="username" value="default">' : `<label>用户名或备注<input name="username" maxlength="64" required value="${esc(plan.username)}"></label>`}<label class="secret-input">${esc(protocol?.credential_label || "凭据")}<span class="secret-value-control"><input type="password" name="credential" required value="${esc(plan.credential)}"><button type="button" data-secret-visibility>显示</button></span></label>${protocol?.secondary_credential_label ? `<label class="secret-input">${esc(protocol.secondary_credential_label)}<span class="secret-value-control"><input type="password" name="secondary_credential" required value="${esc(plan.secondary_credential)}"><button type="button" data-secret-visibility>显示</button></span></label>` : '<input type="hidden" name="secondary_credential" value="">'}</div>${methods ? `<div class="plan-fields one"><label>加密方式<select name="method">${methods}</select></label></div>` : '<input type="hidden" name="method" value="">'}</div></section>${protocol?.transport_config ? `<section class="builder-section" id="transport"><header><span class="section-number">03</span><strong>传输</strong></header><div class="plan-fields two"><label>传输<select name="transport">${transports}</select></label><label>路径 / ServiceName<input name="transport_path" value="${esc(plan.transport_path)}"></label></div></section>` : '<input type="hidden" name="transport" value="raw"><input type="hidden" name="transport_path" value="">'}${security}</div></div><footer class="builder-actions compact"><span class="builder-regenerate-status" data-regenerate-status role="status" aria-live="polite"></span><div><button class="button" type="button" data-regenerate>重新生成参数</button><button class="button" type="submit" data-plan-intent="validate" ${agent.status !== "online" || !engineInstalled ? "disabled" : ""}>保存并校验</button><button class="button primary" type="submit" data-plan-intent="deploy" ${agent.status !== "online" || !engineInstalled ? "disabled" : ""}>保存并部署</button></div></footer></form></article>${revisionTimeline}<details class="advanced-studio" id="advanced"><summary><b>全局字段与源码</b><i>＋</i></summary><div class="advanced-studio-body"><nav class="field-rail"><header><b>全局配置项</b><small>${fields.length}</small></header>${fields.map((field) => `<a class="${field.key === selectedField?.key ? "active" : ""}" href="#agent-config" data-config-field="${esc(field.key)}"><i class="${workspace.present_fields[field.key] ? "present" : ""}"></i><span><strong>${esc(field.label)}</strong><code>${esc(field.key)}</code></span><small>${esc(field.kind)}</small></a>`).join("")}</nav><section class="field-canvas" data-refresh-key="config-field-${esc(selectedField?.key || "empty")}"><header><div><h2>${esc(selectedField?.label)}</h2><code>${esc(selectedField?.key)}</code></div><a href="${esc(selectedField?.docs)}" target="_blank" rel="noopener noreferrer">文档 ↗</a></header>${config && selectedField ? `<form id="field-form"><div class="field-mutation"><label>操作<select name="mutation">${fieldValue.present ? '<option value="modify">修改字段</option><option value="delete">删除字段</option>' : '<option value="add">新增字段</option>'}</select></label></div><label>${esc(workspace.catalog.format)} 字段值<textarea name="fragment" spellcheck="false">${esc(fieldValue.fragment)}</textarea></label><footer><div><button class="button" type="submit" data-field-intent="validate">保存并校验</button><button class="button primary" type="submit" data-field-intent="deploy">保存并部署</button></div></footer></form>${sourceStudio}` : '<div class="empty compact"><strong>先创建一个服务端入站</strong></div>'}</section><aside class="official-rail"><header><b>官方文档</b><small>${workspace.catalog.topic_count}</small></header>${workspace.catalog.topic_groups.map((group) => `<details><summary>${esc(group.name)} <b>${group.topics.length}</b></summary><div>${group.topics.map((topic) => `<a href="${esc(topic.docs)}" target="_blank" rel="noopener noreferrer">${esc(topic.label)} ↗</a>`).join("")}</div></details>`).join("")}</aside></div></details>`,
     "节点配置",
     {
       viewKey: `agent-config-${agent.id}-${engine}-${selectedProtocolKey}-${selectedInbound?.tag || "new"}`,
     },
   );
   const identityBody = document.querySelector("#identity > div");
-  if (identityBody) identityBody.insertAdjacentHTML("beforeend", protocolOptions);
+  if (identityBody) identityBody.insertAdjacentHTML("beforeend", protocolOptions + vlessEncryptionOptions);
+  const protocolCatalog = document.querySelector(".protocol-catalog-wide");
+  const protocolCatalogNav = protocolCatalog?.querySelector(
+    ".protocol-browser > nav",
+  );
+  const updateProtocolCatalogLayout = () => {
+    if (!protocolCatalogNav) return;
+    protocolCatalog.classList.remove("protocol-two-rows");
+    protocolCatalogNav.style.removeProperty("--protocol-columns");
+    if (protocolCatalogNav.scrollWidth > protocolCatalogNav.clientWidth + 1) {
+      protocolCatalog.classList.add("protocol-two-rows");
+      protocolCatalogNav.style.setProperty(
+        "--protocol-columns",
+        String(Math.ceil(workspace.protocols.length / 2)),
+      );
+    }
+  };
+  updateProtocolCatalogLayout();
+  if (typeof window !== "undefined") {
+    bindEvent(window, "resize", updateProtocolCatalogLayout);
+  }
   if (portForward) {
     const identity = document.querySelector("#identity");
     if (identity) identity.outerHTML = identitySection;

@@ -17,13 +17,16 @@ func generateMihomo(input Input) (string, error) {
 		listener["cipher"] = input.Method
 		listener["password"] = input.Credential
 		listener["udp"] = true
-	case ProtocolVLESS, ProtocolVLESSXHTTP:
+	case ProtocolVLESS, ProtocolVLESSXHTTP, ProtocolVLESSEncTCP, ProtocolVLESSEncXHTTP:
 		listener["type"] = "vless"
 		user := map[string]any{"username": input.Username, "uuid": input.Credential}
 		if input.Flow != "" {
 			user["flow"] = input.Flow
 		}
 		listener["users"] = []any{user}
+		if isVLESSEncryptionProtocol(input.Protocol) {
+			listener["decryption"] = input.VLESSDecryption
+		}
 		mihomoTransport(listener, input)
 	case ProtocolSnell:
 		listener["type"] = "snell"
@@ -100,6 +103,7 @@ func parseMihomo(content string) (Input, bool) {
 		Method: stringValue(listener["cipher"]), Credential: stringValue(listener["password"]), Transport: "raw",
 		CertificatePath: stringValue(listener["certificate"]), PrivateKeyPath: stringValue(listener["private-key"]),
 	}
+	input.VLESSDecryption = stringValue(listener["decryption"])
 	if input.Protocol == ProtocolSnell {
 		input.Credential = stringValue(listener["psk"])
 		input.SnellVersion = intValue(listener["version"])
@@ -130,13 +134,26 @@ func parseMihomo(content string) (Input, bool) {
 		input.Transport, input.TransportPath = "grpc", value
 	}
 	if config := mapValue(listener["xhttp-config"]); config != nil {
-		input.Protocol = ProtocolVLESSXHTTP
 		input.Transport, input.TransportPath = "xhttp", stringValue(config["path"])
 	}
 	if user := firstMap(listener["users"]); user != nil {
 		input.Username = stringValue(user["username"])
 		input.Credential = stringValue(user["uuid"])
 		input.Flow = stringValue(user["flow"])
+	}
+	if input.Protocol == ProtocolVLESS && input.VLESSDecryption != "" {
+		var err error
+		input.VLESSEncryption, err = vlessEncryptionFromDecryption(input.VLESSDecryption)
+		if err != nil {
+			return Input{}, false
+		}
+		if input.Transport == "xhttp" {
+			input.Protocol = ProtocolVLESSEncXHTTP
+		} else {
+			input.Protocol = ProtocolVLESSEncTCP
+		}
+	} else if input.Protocol == ProtocolVLESS && input.Transport == "xhttp" {
+		input.Protocol = ProtocolVLESSXHTTP
 	}
 	if input.Protocol == ProtocolTrojan {
 		if user := firstMap(listener["users"]); user != nil {

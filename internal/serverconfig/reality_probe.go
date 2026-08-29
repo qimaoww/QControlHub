@@ -14,7 +14,10 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/netpolicy"
 )
 
-const DefaultRealityServerName = "www.amazon.com"
+const (
+	DefaultRealityServerName             = "www.amazon.com"
+	RealityMLDSAMinCertificateChainBytes = 3500
+)
 
 var realityServerNamePresets = []string{
 	DefaultRealityServerName,
@@ -32,10 +35,29 @@ func RealityServerNamePresets() []string {
 }
 
 type RealityTarget struct {
-	ServerName string
-	CNAME      string
-	Address    netip.Addr
-	ALPN       string
+	ServerName            string
+	CNAME                 string
+	Address               netip.Addr
+	ALPN                  string
+	CertificateChainBytes int
+	CurveID               tls.CurveID
+}
+
+// ValidateRealityMLDSATarget enforces the same certificate-chain size rule
+// operators inspect with `xray tls ping`. ML-DSA-65 enlarges the temporary
+// REALITY certificate, so a camouflage target at or below 3500 bytes would
+// introduce an avoidable size fingerprint.
+func ValidateRealityMLDSATarget(target RealityTarget) error {
+	if target.CertificateChainBytes <= RealityMLDSAMinCertificateChainBytes {
+		return fmt.Errorf(
+			"Reality target 证书链长度为 %d bytes；启用 mldsa65Seed 必须严格大于 %d bytes，请更换 target",
+			target.CertificateChainBytes, RealityMLDSAMinCertificateChainBytes,
+		)
+	}
+	if target.CurveID != tls.X25519MLKEM768 {
+		return errors.New("Reality target 未协商 X25519MLKEM768 后量子密钥交换；启用 mldsa65Seed 时请更换 target")
+	}
+	return nil
 }
 
 type realityResolver interface {
@@ -163,7 +185,14 @@ func probeRealityAddress(ctx context.Context, serverName string, address netip.A
 	if state.Version != tls.VersionTLS13 || len(state.VerifiedChains) == 0 {
 		return RealityTarget{}, errors.New("目标未通过 TLS 1.3 证书验证")
 	}
-	return RealityTarget{ServerName: serverName, Address: address, ALPN: state.NegotiatedProtocol}, nil
+	certificateChainBytes := 0
+	for _, certificate := range state.PeerCertificates {
+		certificateChainBytes += len(certificate.Raw)
+	}
+	return RealityTarget{
+		ServerName: serverName, Address: address, ALPN: state.NegotiatedProtocol,
+		CertificateChainBytes: certificateChainBytes, CurveID: state.CurveID,
+	}, nil
 }
 
 func normalizeRealityServerName(value string) (string, error) {

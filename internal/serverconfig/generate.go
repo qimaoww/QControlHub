@@ -89,8 +89,10 @@ func Generate(engine core.Engine, input Input) (string, error) {
 	if input.RealityEnabled {
 		vision := input.Protocol == ProtocolVLESS && input.Transport == "raw" && input.Flow == "xtls-rprx-vision"
 		xhttp := input.Protocol == ProtocolVLESSXHTTP && input.Transport == "xhttp" && input.Flow == ""
-		if !vision && !xhttp {
-			return "", errors.New("Reality 方案必须使用 VLESS Vision + Raw 或 VLESS + XHTTP")
+		encTCP := input.Protocol == ProtocolVLESSEncTCP && input.Transport == "raw" && input.Flow == "xtls-rprx-vision"
+		encXHTTP := input.Protocol == ProtocolVLESSEncXHTTP && input.Transport == "xhttp" && input.Flow == "xtls-rprx-vision"
+		if !vision && !xhttp && !encTCP && !encXHTTP {
+			return "", errors.New("Reality 方案的协议、传输与 Vision Flow 组合无效")
 		}
 		serverName, err := normalizeRealityServerName(input.RealityServerName)
 		if err != nil {
@@ -111,7 +113,7 @@ func Generate(engine core.Engine, input Input) (string, error) {
 		}
 		if engine == core.EngineXray {
 			if input.RealityMinClientVer == "" {
-				input.RealityMinClientVer = "26.3.27"
+				input.RealityMinClientVer = "0.0.0"
 			}
 			if !validXrayVersion(input.RealityMinClientVer) {
 				return "", errors.New("Reality 最低客户端版本必须是 x.y.z，且每段为 0 到 255")
@@ -128,6 +130,14 @@ func Generate(engine core.Engine, input Input) (string, error) {
 					return "", errors.New("Reality ML-DSA-65 Seed 与 Verify 不属于同一密钥对")
 				}
 			}
+		}
+	}
+	if protocol.UsesVLESSEncryption {
+		if input.VLESSEncryption == "" {
+			input.VLESSEncryption, _ = vlessEncryptionFromDecryption(input.VLESSDecryption)
+		}
+		if err := validateVLESSEncryptionPair(input.VLESSDecryption, input.VLESSEncryption); err != nil {
+			return "", err
 		}
 	}
 	if input.Protocol == ProtocolSnell && (input.SnellVersion < 1 || input.SnellVersion > 5) {
@@ -182,7 +192,7 @@ func validateCredential(input Input) error {
 		}
 		return nil
 	}
-	if input.Protocol == ProtocolVLESS || input.Protocol == ProtocolVLESSXHTTP || input.Protocol == ProtocolVMess || input.Protocol == ProtocolTUIC || input.Protocol == ProtocolSudoku {
+	if input.Protocol == ProtocolVLESS || input.Protocol == ProtocolVLESSXHTTP || isVLESSEncryptionProtocol(input.Protocol) || input.Protocol == ProtocolVMess || input.Protocol == ProtocolTUIC || input.Protocol == ProtocolSudoku {
 		if !uuidPattern.MatchString(input.Credential) {
 			return errors.New("VLESS/VMess/TUIC/Sudoku 用户凭据必须是有效 UUID")
 		}
