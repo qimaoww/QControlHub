@@ -1,5 +1,17 @@
 import { bindEvent } from "./refresh.js";
 
+// Config views render user-controlled values into HTML before binding their
+// interactions. Keep the renderer self-contained instead of relying on the
+// app module's private helper.
+const esc = (value) =>
+  String(value ?? "").replace(
+    /[&<>"']/g,
+    (char) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[
+        char
+      ],
+  );
+
 const generatedPlanFields = Object.freeze([
   "tag",
   "port",
