@@ -32,6 +32,12 @@ type ClientProfile struct {
 // data. address is deliberately separate from Input.Listen: wildcard listener
 // addresses such as 0.0.0.0 and :: are never valid remote destinations.
 func BuildClientProfile(input Input, address, serverName string) (ClientProfile, error) {
+	return BuildClientProfileNamed(input, address, serverName, "")
+}
+
+// BuildClientProfileNamed is the client-profile builder with an optional
+// operator-facing node name. An empty name preserves the inbound tag.
+func BuildClientProfileNamed(input Input, address, serverName, nodeName string) (ClientProfile, error) {
 	address, err := NormalizeClientAddress(address)
 	if err != nil {
 		return ClientProfile{}, err
@@ -65,6 +71,9 @@ func BuildClientProfile(input Input, address, serverName string) (ClientProfile,
 	fragment := input.Tag
 	if fragment == "" {
 		fragment = input.Protocol
+	}
+	if strings.TrimSpace(nodeName) != "" {
+		fragment = strings.TrimSpace(nodeName)
 	}
 
 	switch input.Protocol {

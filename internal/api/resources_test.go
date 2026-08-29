@@ -1,9 +1,11 @@
 package api
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
+	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
 )
 
 func TestClientAddressCandidatesFollowManagedObservedAndInterfacePriority(t *testing.T) {
@@ -97,6 +99,20 @@ func TestClientAddressCandidatesIncludeProbedDualStackAddresses(t *testing.T) {
 	candidates = clientAddressCandidates(agent)
 	if len(candidates) != 2 {
 		t.Fatalf("deduplicated candidates = %+v", candidates)
+	}
+}
+
+func TestBuildClientAccessAddressOptionsKeepsBothFamilies(t *testing.T) {
+	input := serverconfig.Input{Tag: "vless-in", Protocol: serverconfig.ProtocolVLESS, Port: 443, Credential: "123e4567-e89b-42d3-a456-426614174000", TLSEnabled: true, Transport: "tcp"}
+	options := buildClientAccessAddressOptions(core.EngineXray, []serverconfig.Input{input}, []clientAddressCandidate{
+		{address: "198.51.100.10", source: "IPv4", family: core.SubStoreAddressModeIPv4},
+		{address: "2001:db8::10", source: "IPv6", family: core.SubStoreAddressModeIPv6},
+	}, "edge.example.com", "Tokyo")
+	if len(options) != 2 || len(options[0].Profiles) != 1 || len(options[1].Profiles) != 1 {
+		t.Fatalf("dual-stack options = %+v", options)
+	}
+	if !strings.Contains(options[0].Profiles[0].Profile.URI, "Tokyo") || !strings.Contains(options[1].Profiles[0].Profile.URI, "Tokyo") {
+		t.Fatalf("custom client name missing from profiles = %+v", options)
 	}
 }
 

@@ -52,25 +52,38 @@ func (s *Store) GetAgent(ctx context.Context, id string) (core.Agent, error) {
 // value survives Agent reconnects. Older enrollments may have stored a JSON
 // null instead of an empty labels object, so normalize that shape on update.
 func (s *Store) SetAgentClientAddress(ctx context.Context, id, address string) error {
-	command, err := s.pool.Exec(ctx, `
-		UPDATE agents
-		SET labels = CASE
-			WHEN $2 = '' THEN COALESCE(NULLIF(labels, 'null'::jsonb), '{}'::jsonb) - 'client_address'
-			ELSE jsonb_set(
-				COALESCE(NULLIF(labels, 'null'::jsonb), '{}'::jsonb),
-				'{client_address}',
-				to_jsonb($2::text),
-				true
-			)
-		END
-		WHERE id=$1 AND revoked_at IS NULL`, id, address)
+	return s.SetAgentClientDetails(ctx, id, &address, nil)
+}
+
+// SetAgentClientDetails updates the optional client endpoint and display name.
+// A nil value leaves that field unchanged; an empty value removes it.
+func (s *Store) SetAgentClientDetails(ctx context.Context, id string, address, name *string) error {
+	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
-	if command.RowsAffected() == 0 {
+	defer tx.Rollback(ctx)
+	if address != nil {
+		if _, err := tx.Exec(ctx, `UPDATE agents SET labels = CASE WHEN $2 = '' THEN COALESCE(NULLIF(labels, 'null'::jsonb), '{}'::jsonb) - 'client_address' ELSE jsonb_set(COALESCE(NULLIF(labels, 'null'::jsonb), '{}'::jsonb), '{client_address}', to_jsonb($2::text), true) END WHERE id=$1 AND revoked_at IS NULL`, id, *address); err != nil {
+			return err
+		}
+	}
+	if name != nil {
+		if _, err := tx.Exec(ctx, `UPDATE agents SET labels = CASE WHEN $2 = '' THEN COALESCE(NULLIF(labels, 'null'::jsonb), '{}'::jsonb) - 'client_name' ELSE jsonb_set(COALESCE(NULLIF(labels, 'null'::jsonb), '{}'::jsonb), '{client_name}', to_jsonb($2::text), true) END WHERE id=$1 AND revoked_at IS NULL`, id, *name); err != nil {
+			return err
+		}
+	}
+	if address == nil && name == nil {
+		return nil
+	}
+	var exists bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agents WHERE id=$1 AND revoked_at IS NULL)`, id).Scan(&exists); err != nil {
+		return err
+	}
+	if !exists {
 		return ErrNotFound
 	}
-	return nil
+	return tx.Commit(ctx)
 }
 
 // AgentConfig returns the one active configuration owned by an agent/core
