@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -43,6 +44,7 @@ type Executor struct {
 	Updater                  *CoreUpdater
 	Services                 *ServiceManager
 	coreBootstrapper         *coreServiceBootstrapper
+	validationSystemdRunPath string
 	specsMu                  sync.RWMutex
 	migrationMu              sync.Mutex
 	completedMigrations      map[core.Engine]completedCoreMigration
@@ -1778,7 +1780,7 @@ func (e *Executor) validateSnapshotWithIdentity(ctx context.Context, engine core
 		}
 		defer func() {
 			if validationHomeName != "" {
-				_ = cleanupMihomoValidationHome(root, directory, validationHomeName, identity)
+				_ = e.cleanupMihomoValidationHome(root, directory, validationHomeName, identity)
 			}
 		}()
 		if identity != nil {
@@ -1827,9 +1829,9 @@ func (e *Executor) validateSnapshotWithIdentity(ctx context.Context, engine core
 	case core.EngineShadowsocksRust:
 		return "ss-rust configuration syntax validated (ssserver has no non-running check mode)", nil
 	}
-	output, err := runInDirectoryWithEnvironmentAndIdentity(ctx, directory, spec.commandEnv, spec.Binary, identity, args...)
+	output, err := e.runManagedIdentityCommand(ctx, directory, spec.commandEnv, spec.Binary, identity, args...)
 	if validationHomeName != "" {
-		cleanupErr := cleanupMihomoValidationHome(root, directory, validationHomeName, identity)
+		cleanupErr := e.cleanupMihomoValidationHome(root, directory, validationHomeName, identity)
 		validationHomeName = ""
 		if cleanupErr != nil {
 			if err != nil {
@@ -1847,7 +1849,7 @@ func (e *Executor) validateSnapshotWithIdentity(ctx context.Context, engine core
 	return output, nil
 }
 
-func cleanupMihomoValidationHome(root *os.Root, directory, homeName string, identity *commandIdentity) error {
+func (e *Executor) cleanupMihomoValidationHome(root *os.Root, directory, homeName string, identity *commandIdentity) error {
 	if err := root.RemoveAll(homeName); err == nil {
 		return nil
 	} else if identity == nil {
@@ -1862,11 +1864,53 @@ func cleanupMihomoValidationHome(root *os.Root, directory, homeName string, iden
 	// cannot unlink the home from the root-owned configuration directory.
 	// Ignore that expected final rmdir error; the Agent removes the now-empty
 	// top-level directory through its already-open, protected os.Root.
-	_, _ = runInDirectoryWithEnvironmentAndIdentity(
+	_, _ = e.runManagedIdentityCommand(
 		cleanupContext, directory, "", validationCleanupBinary, identity,
 		"-rf", "--", filepath.Join(directory, homeName),
 	)
 	return root.RemoveAll(homeName)
+}
+
+func (e *Executor) runManagedIdentityCommand(ctx context.Context, directory, environment, name string, identity *commandIdentity, args ...string) (string, error) {
+	// systemd owns the service identity transition. Running managed validation
+	// through a transient unit keeps upgraded Agents compatible with qagent
+	// units from before validation identity capabilities were added: the Agent
+	// process itself no longer needs CAP_SETUID or CAP_SETGID to start the core.
+	if identity != nil && e != nil && e.Services != nil && e.Services.Kind() == ServiceManagerSystemd {
+		return e.runSystemdValidationIdentityCommand(ctx, directory, environment, name, *identity, args...)
+	}
+	return runInDirectoryWithEnvironmentAndIdentity(ctx, directory, environment, name, identity, args...)
+}
+
+func (e *Executor) runSystemdValidationIdentityCommand(ctx context.Context, directory, environment, name string, identity commandIdentity, args ...string) (string, error) {
+	systemdRun := "/usr/bin/systemd-run"
+	if e != nil && strings.TrimSpace(e.validationSystemdRunPath) != "" {
+		systemdRun = e.validationSystemdRunPath
+	}
+	if err := validatePrivilegedExecutable(systemdRun); err != nil {
+		return "", fmt.Errorf("unsafe managed validation launcher: %w", err)
+	}
+	if !filepath.IsAbs(name) || !filepath.IsAbs(directory) {
+		return "", errors.New("managed validation requires absolute binary and working directory paths")
+	}
+	arguments := []string{
+		"--pipe", "--wait", "--collect", "--quiet", "--service-type=exec",
+		"--property=User=" + strconv.FormatUint(uint64(identity.uid), 10),
+		"--property=Group=" + strconv.FormatUint(uint64(identity.gid), 10),
+		"--property=WorkingDirectory=" + directory,
+		"--property=NoNewPrivileges=yes", "--property=ProtectSystem=strict", "--property=ProtectHome=yes",
+		"--property=PrivateTmp=yes", "--property=PrivateDevices=yes", "--property=RestrictSUIDSGID=yes",
+		"--property=LockPersonality=yes", "--property=RestrictNamespaces=yes", "--property=RestrictRealtime=yes",
+		"--property=RemoveIPC=yes", "--property=SystemCallArchitectures=native",
+		"--property=RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK",
+		"--property=ReadWritePaths=" + directory, "--property=RuntimeMaxSec=5min",
+	}
+	for _, item := range commandEnvironment(environment) {
+		arguments = append(arguments, "--setenv="+item)
+	}
+	arguments = append(arguments, "--", name)
+	arguments = append(arguments, args...)
+	return run(ctx, systemdRun, arguments...)
 }
 
 func validateNoPersistentCoreLogs(engine core.Engine, content string) error {

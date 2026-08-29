@@ -53,10 +53,10 @@ func TestSubStoreSyncSettingsAndSelectionsLifecycle(t *testing.T) {
 	}
 	firstIntegrationID := target.IntegrationID
 	selections, err := dataStore.ReplaceSubStoreSyncSelections(ctx, target.ID, []core.SubStoreSyncSelection{
-		{AgentID: agent.ID, Engine: core.EngineMihomo, ProfileTag: "vless-in", CustomName: "Tokyo A"},
-		{AgentID: agent.ID, Engine: core.EngineXray, ProfileTag: "ss-in", CustomName: "Tokyo B"},
+		{AgentID: agent.ID, Engine: core.EngineMihomo, ProfileTag: "vless-in", CustomName: "Tokyo A", AddressMode: core.SubStoreAddressModeIPv4},
+		{AgentID: agent.ID, Engine: core.EngineXray, ProfileTag: "ss-in", CustomName: "Tokyo B", AddressMode: core.SubStoreAddressModeBoth},
 	})
-	if err != nil || len(selections) != 2 || selections[0].CustomName != "Tokyo A" || selections[1].CustomName != "Tokyo B" {
+	if err != nil || len(selections) != 2 || selections[0].CustomName != "Tokyo A" || selections[0].AddressMode != core.SubStoreAddressModeIPv4 || selections[1].CustomName != "Tokyo B" || selections[1].AddressMode != core.SubStoreAddressModeBoth {
 		t.Fatalf("saved selections = %+v, %v", selections, err)
 	}
 	if _, err := dataStore.ReplaceSubStoreSyncSelections(ctx, target.ID, []core.SubStoreSyncSelection{
@@ -267,7 +267,7 @@ func TestOpenMigratesAppliedV30SubStoreSyncTarget(t *testing.T) {
 		t.Fatalf("migrated v30 targets = %+v, %v", targets, err)
 	}
 	selections, err := dataStore.ListSubStoreSyncSelections(ctx, targets[0].ID)
-	if err != nil || len(selections) != 1 || selections[0].CustomName != "Legacy Node" || selections[0].TargetID != targets[0].ID {
+	if err != nil || len(selections) != 1 || selections[0].CustomName != "Legacy Node" || selections[0].AddressMode != core.SubStoreAddressModeAuto || selections[0].TargetID != targets[0].ID {
 		t.Fatalf("migrated v30 selections = %+v, %v", selections, err)
 	}
 }
@@ -322,5 +322,12 @@ func TestOpenMigratesAppliedV31SubStoreDisplayName(t *testing.T) {
 	target, err := dataStore.SubStoreSyncTarget(ctx, "sst_v31")
 	if err != nil || target.DisplayName != "Existing remote group" || target.SubscriptionName != "Existing remote group" {
 		t.Fatalf("migrated v31 target = %+v, %v", target, err)
+	}
+	var addressModeColumn bool
+	if err := dataStore.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='substore_sync_items' AND column_name='address_mode')`).Scan(&addressModeColumn); err != nil {
+		t.Fatal(err)
+	}
+	if !addressModeColumn {
+		t.Fatal("address_mode column was not added while migrating v31")
 	}
 }

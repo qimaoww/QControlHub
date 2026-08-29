@@ -25,15 +25,24 @@ type clientAccessProfile struct {
 	Profile  serverconfig.ClientProfile `json:"profile"`
 }
 
+type clientAccessAddressOption struct {
+	Address  string                `json:"address"`
+	Source   string                `json:"source"`
+	Family   string                `json:"family"`
+	Profiles []clientAccessProfile `json:"profiles"`
+}
+
 type clientAccessEntry struct {
-	AgentID         string                `json:"agent_id"`
-	AgentName       string                `json:"agent_name"`
-	AgentStatus     string                `json:"agent_status"`
-	Engine          core.Engine           `json:"engine"`
-	Address         string                `json:"address"`
-	Source          string                `json:"source"`
-	AddressRequired bool                  `json:"address_required,omitempty"`
-	Profiles        []clientAccessProfile `json:"profiles"`
+	AgentID         string                      `json:"agent_id"`
+	AgentName       string                      `json:"agent_name"`
+	AgentStatus     string                      `json:"agent_status"`
+	Engine          core.Engine                 `json:"engine"`
+	Address         string                      `json:"address"`
+	Source          string                      `json:"source"`
+	AddressRequired bool                        `json:"address_required,omitempty"`
+	Profiles        []clientAccessProfile       `json:"profiles"`
+	AddressOptions  []clientAccessAddressOption `json:"address_options,omitempty"`
+	ClientName      string                      `json:"client_name,omitempty"`
 }
 
 type clientAccessDataSource interface {
@@ -524,31 +533,17 @@ func (s *Server) clientAccessEntries(ctx context.Context) ([]clientAccessEntry, 
 			continue
 		}
 		serverName := firstLabel(agent, "tls_server_name", "server_name")
-		profileGenerated := false
+		clientName := firstLabel(agent, "client_name")
 		candidates := clientAddressCandidates(agent)
-		for _, candidate := range candidates {
-			profiles := make([]clientAccessProfile, 0, len(inputs))
-			for _, input := range inputs {
-				profile, profileErr := serverconfig.BuildClientProfile(input, candidate.address, serverName)
-				if profileErr != nil {
-					continue
-				}
-				protocol, found := serverconfig.FindProtocol(deployment.Engine, input.Protocol)
-				if !found {
-					continue
-				}
-				profiles = append(profiles, clientAccessProfile{Tag: input.Tag, Protocol: protocol.Name, Port: input.Port, Profile: profile})
-			}
-			if len(profiles) > 0 {
-				entries = append(entries, clientAccessEntry{
-					AgentID: agent.ID, AgentName: agent.Name, AgentStatus: agent.Status, Engine: deployment.Engine,
-					Address: candidate.address, Source: candidate.source, Profiles: profiles,
-				})
-				profileGenerated = true
-				break
-			}
+		addressOptions := buildClientAccessAddressOptions(deployment.Engine, inputs, candidates, serverName, clientName)
+		if len(addressOptions) > 0 {
+			primary := addressOptions[0]
+			entries = append(entries, clientAccessEntry{
+				AgentID: agent.ID, AgentName: agent.Name, AgentStatus: agent.Status, Engine: deployment.Engine,
+				Address: primary.Address, Source: primary.Source, Profiles: primary.Profiles, AddressOptions: addressOptions, ClientName: clientName,
+			})
 		}
-		if !profileGenerated && len(candidates) == 0 {
+		if len(addressOptions) == 0 && len(candidates) == 0 {
 			entries = append(entries, clientAccessEntry{
 				AgentID: agent.ID, AgentName: agent.Name, AgentStatus: agent.Status, Engine: deployment.Engine,
 				AddressRequired: true, Profiles: []clientAccessProfile{},
@@ -567,6 +562,46 @@ func (s *Server) clientAccessEntries(ctx context.Context) ([]clientAccessEntry, 
 type clientAddressCandidate struct {
 	address string
 	source  string
+	family  string
+}
+
+func buildClientAccessAddressOptions(engine core.Engine, inputs []serverconfig.Input, candidates []clientAddressCandidate, serverName, clientName string) []clientAccessAddressOption {
+	options := make([]clientAccessAddressOption, 0, len(candidates))
+	for _, candidate := range candidates {
+		profiles := make([]clientAccessProfile, 0, len(inputs))
+		for _, input := range inputs {
+			profile, err := serverconfig.BuildClientProfileNamed(input, candidate.address, serverName, clientName)
+			if err != nil {
+				continue
+			}
+			protocol, found := serverconfig.FindProtocol(engine, input.Protocol)
+			if !found {
+				continue
+			}
+			profiles = append(profiles, clientAccessProfile{Tag: input.Tag, Protocol: protocol.Name, Port: input.Port, Profile: profile})
+		}
+		if len(profiles) > 0 {
+			options = append(options, clientAccessAddressOption{
+				Address: candidate.address, Source: candidate.source, Family: candidate.family, Profiles: profiles,
+			})
+		}
+	}
+	return options
+}
+
+func clientAddressFamily(address string) string {
+	address = strings.TrimSpace(address)
+	if strings.HasPrefix(address, "[") && strings.HasSuffix(address, "]") {
+		address = strings.TrimSuffix(strings.TrimPrefix(address, "["), "]")
+	}
+	parsed, err := netip.ParseAddr(address)
+	if err != nil {
+		return "hostname"
+	}
+	if parsed.Unmap().Is4() {
+		return core.SubStoreAddressModeIPv4
+	}
+	return core.SubStoreAddressModeIPv6
 }
 
 func clientAddressCandidates(agent core.Agent) []clientAddressCandidate {
@@ -585,7 +620,7 @@ func clientAddressCandidates(agent core.Agent) []clientAddressCandidate {
 		if value := strings.TrimSpace(agent.Labels[key]); value != "" {
 			if _, exists := seen[value]; !exists {
 				seen[value] = struct{}{}
-				result = append(result, clientAddressCandidate{address: value, source: item.source})
+				result = append(result, clientAddressCandidate{address: value, source: item.source, family: clientAddressFamily(value)})
 			}
 		}
 	}
@@ -617,7 +652,7 @@ func clientAddressCandidates(agent core.Agent) []clientAddressCandidate {
 			if probed.provenance == core.PublicIPProbeSourceControlPlane {
 				source = "控制面配置的 Agent 直连探测 · " + family
 			}
-			result = append(result, clientAddressCandidate{address: address, source: source})
+			result = append(result, clientAddressCandidate{address: address, source: source, family: clientAddressFamily(address)})
 		}
 	}
 	// Default-route interface addresses are the next fallback per family. Only
@@ -627,7 +662,7 @@ func clientAddressCandidates(agent core.Agent) []clientAddressCandidate {
 	for _, item := range publicInterfaceAddresses(agent.Metrics.NetworkInterfaces) {
 		if _, exists := seen[item.address]; !exists {
 			seen[item.address] = struct{}{}
-			result = append(result, clientAddressCandidate{address: item.address, source: "Agent 默认路由接口 " + item.name})
+			result = append(result, clientAddressCandidate{address: item.address, source: "Agent 默认路由接口 " + item.name, family: clientAddressFamily(item.address)})
 		}
 	}
 	// The WSS observation is now only populated when the proxy chain resolved
@@ -642,7 +677,7 @@ func clientAddressCandidates(agent core.Agent) []clientAddressCandidate {
 			}
 			if _, exists := seen[address]; !exists {
 				seen[address] = struct{}{}
-				result = append(result, clientAddressCandidate{address: address, source: "已验证连接来源 · " + family})
+				result = append(result, clientAddressCandidate{address: address, source: "已验证连接来源 · " + family, family: clientAddressFamily(address)})
 			}
 		}
 	}

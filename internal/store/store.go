@@ -44,7 +44,7 @@ type storeExecutor interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }
 
-const currentSchemaVersion = 32
+const currentSchemaVersion = 33
 
 func Open(ctx context.Context, databaseURL string, allowInsecureRemote bool) (*Store, error) {
 	return OpenWithConfigKey(ctx, databaseURL, allowInsecureRemote, "")
@@ -2090,11 +2090,15 @@ CREATE TABLE IF NOT EXISTS substore_sync_items (
 	engine varchar(20) NOT NULL CHECK (engine IN ('mihomo','xray','sing-box','ss-rust')),
 	profile_tag text NOT NULL CHECK (octet_length(profile_tag) BETWEEN 1 AND 800),
 	custom_name text NOT NULL CHECK (octet_length(custom_name) BETWEEN 1 AND 400),
+	address_mode varchar(8) NOT NULL DEFAULT 'auto' CHECK (address_mode IN ('auto','ipv4','ipv6','both')),
 	created_at timestamptz NOT NULL,
 	updated_at timestamptz NOT NULL,
 	PRIMARY KEY (target_id,agent_id,engine,profile_tag)
 );
 ALTER TABLE substore_sync_items ADD COLUMN IF NOT EXISTS target_id text;
+ALTER TABLE substore_sync_items ADD COLUMN IF NOT EXISTS address_mode varchar(8) NOT NULL DEFAULT 'auto';
+ALTER TABLE substore_sync_items DROP CONSTRAINT IF EXISTS substore_sync_items_address_mode_check;
+ALTER TABLE substore_sync_items ADD CONSTRAINT substore_sync_items_address_mode_check CHECK (address_mode IN ('auto','ipv4','ipv6','both'));
 UPDATE substore_sync_items
 SET target_id=(SELECT id FROM substore_sync_targets ORDER BY created_at,id LIMIT 1)
 WHERE target_id IS NULL;

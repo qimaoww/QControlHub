@@ -23,19 +23,28 @@ import (
 
 const subStoreResponseLimit = 1 << 20
 
+type subStoreSyncAddress struct {
+	Address string `json:"address"`
+	Source  string `json:"source"`
+	Family  string `json:"family"`
+	URI     string `json:"-"`
+}
+
 type subStoreSyncProfile struct {
-	AgentID     string      `json:"agent_id"`
-	AgentName   string      `json:"agent_name"`
-	AgentStatus string      `json:"agent_status"`
-	Engine      core.Engine `json:"engine"`
-	ProfileTag  string      `json:"profile_tag"`
-	Protocol    string      `json:"protocol"`
-	Port        int         `json:"port"`
-	DefaultName string      `json:"default_name"`
-	CustomName  string      `json:"custom_name,omitempty"`
-	Selected    bool        `json:"selected"`
-	Available   bool        `json:"available"`
-	URI         string      `json:"-"`
+	AgentID     string                `json:"agent_id"`
+	AgentName   string                `json:"agent_name"`
+	AgentStatus string                `json:"agent_status"`
+	Engine      core.Engine           `json:"engine"`
+	ProfileTag  string                `json:"profile_tag"`
+	Protocol    string                `json:"protocol"`
+	Port        int                   `json:"port"`
+	DefaultName string                `json:"default_name"`
+	CustomName  string                `json:"custom_name,omitempty"`
+	AddressMode string                `json:"address_mode"`
+	Addresses   []subStoreSyncAddress `json:"addresses"`
+	Selected    bool                  `json:"selected"`
+	Available   bool                  `json:"available"`
+	URI         string                `json:"-"`
 }
 
 func (profile subStoreSyncProfile) key() string {
@@ -227,15 +236,36 @@ func (s *Server) availableSubStoreProfiles(ctx context.Context, selections []cor
 	profiles := make([]subStoreSyncProfile, 0)
 	available := make(map[string]struct{})
 	for _, entry := range entries {
+		displayName := entry.AgentName
+		if strings.TrimSpace(entry.ClientName) != "" {
+			displayName = entry.ClientName
+		}
 		for _, item := range entry.Profiles {
 			profile := subStoreSyncProfile{
-				AgentID: entry.AgentID, AgentName: entry.AgentName, AgentStatus: entry.AgentStatus, Engine: entry.Engine,
+				AgentID: entry.AgentID, AgentName: displayName, AgentStatus: entry.AgentStatus, Engine: entry.Engine,
 				ProfileTag: item.Tag, Protocol: item.Protocol, Port: item.Port, URI: item.Profile.URI, Available: true,
-				DefaultName: strings.TrimSpace(entry.AgentName + " · " + item.Tag),
+				AddressMode: core.SubStoreAddressModeAuto,
+				DefaultName: strings.TrimSpace(displayName + " · " + item.Tag),
+			}
+			for _, option := range entry.AddressOptions {
+				for _, candidate := range option.Profiles {
+					if candidate.Tag == item.Tag {
+						profile.Addresses = append(profile.Addresses, subStoreSyncAddress{
+							Address: option.Address, Source: option.Source, Family: option.Family, URI: candidate.Profile.URI,
+						})
+						break
+					}
+				}
+			}
+			if len(profile.Addresses) == 0 {
+				profile.Addresses = []subStoreSyncAddress{{
+					Address: entry.Address, Source: entry.Source, Family: clientAddressFamily(entry.Address), URI: item.Profile.URI,
+				}}
 			}
 			if selection, ok := selected[profile.key()]; ok {
 				profile.Selected = true
 				profile.CustomName = selection.CustomName
+				profile.AddressMode, _ = core.NormalizeSubStoreAddressMode(selection.AddressMode)
 			}
 			available[profile.key()] = struct{}{}
 			profiles = append(profiles, profile)
@@ -247,7 +277,8 @@ func (s *Server) availableSubStoreProfiles(ctx context.Context, selections []cor
 		}
 		profiles = append(profiles, subStoreSyncProfile{
 			AgentID: selection.AgentID, Engine: selection.Engine, ProfileTag: selection.ProfileTag,
-			DefaultName: selection.CustomName, CustomName: selection.CustomName, Selected: true, Available: false,
+			DefaultName: selection.CustomName, CustomName: selection.CustomName, AddressMode: selection.AddressMode,
+			Addresses: []subStoreSyncAddress{}, Selected: true, Available: false,
 		})
 	}
 	sort.SliceStable(profiles, func(left, right int) bool {
@@ -593,6 +624,12 @@ func (s *Server) putSubStoreSelections(w http.ResponseWriter, request *http.Requ
 		if strings.TrimSpace(input.Selections[index].CustomName) == "" {
 			input.Selections[index].CustomName = profile.DefaultName
 		}
+		mode, valid := core.NormalizeSubStoreAddressMode(strings.TrimSpace(input.Selections[index].AddressMode))
+		if !valid || !subStoreProfileSupportsMode(profile, mode) {
+			writeError(w, http.StatusBadRequest, "所选客户端节点不支持该 IP 地址模式，请刷新后重试")
+			return
+		}
+		input.Selections[index].AddressMode = mode
 	}
 	selections, err := s.store.ReplaceSubStoreSyncSelections(request.Context(), input.TargetID, input.Selections)
 	if err != nil {
@@ -670,14 +707,14 @@ func (s *Server) runSubStoreSync(w http.ResponseWriter, request *http.Request) {
 			writeError(w, http.StatusConflict, err.Error())
 			return
 		}
-		renamed, renameErr := renameSubStoreNode(profile.URI, selection.CustomName)
-		if renameErr != nil {
-			err = fmt.Errorf("客户端节点 %s 无法同步: %w", selection.CustomName, renameErr)
+		nodes, selectionErr := subStoreNodesForSelection(profile, selection)
+		if selectionErr != nil {
+			err = fmt.Errorf("客户端节点 %s 无法同步: %w", selection.CustomName, selectionErr)
 			_ = s.store.RecordSubStoreSyncResult(request.Context(), target.ID, err)
-			writeError(w, http.StatusBadRequest, err.Error())
+			writeError(w, http.StatusConflict, err.Error())
 			return
 		}
-		content = append(content, renamed)
+		content = append(content, nodes...)
 	}
 	created, syncErr := s.upsertSubStoreSubscription(request.Context(), settings, target, strings.Join(content, "\n"))
 	if recordErr := s.store.RecordSubStoreSyncResult(request.Context(), target.ID, syncErr); recordErr != nil && syncErr == nil {
@@ -690,6 +727,83 @@ func (s *Server) runSubStoreSync(w http.ResponseWriter, request *http.Request) {
 	result := subStoreSyncResult{SubscriptionName: target.SubscriptionName, NodeCount: len(content), Created: created, SyncedAt: time.Now().UTC()}
 	s.recordAudit(request, "substore.synced", target.SubscriptionName, fmt.Sprintf("node count: %d", len(content)))
 	writeJSON(w, http.StatusOK, result)
+}
+
+func subStoreProfileAddress(profile subStoreSyncProfile, family string) (subStoreSyncAddress, bool) {
+	for _, address := range profile.Addresses {
+		if address.Family == family {
+			return address, true
+		}
+	}
+	return subStoreSyncAddress{}, false
+}
+
+func subStoreProfileSupportsMode(profile subStoreSyncProfile, mode string) bool {
+	switch mode {
+	case core.SubStoreAddressModeAuto:
+		return strings.TrimSpace(profile.URI) != ""
+	case core.SubStoreAddressModeIPv4, core.SubStoreAddressModeIPv6:
+		_, available := subStoreProfileAddress(profile, mode)
+		return available
+	case core.SubStoreAddressModeBoth:
+		_, ipv4 := subStoreProfileAddress(profile, core.SubStoreAddressModeIPv4)
+		_, ipv6 := subStoreProfileAddress(profile, core.SubStoreAddressModeIPv6)
+		return ipv4 && ipv6
+	default:
+		return false
+	}
+}
+
+func subStoreIPv6NodeName(name string) string {
+	name = strings.TrimSpace(name)
+	if strings.HasSuffix(strings.ToLower(name), " v6") {
+		return name
+	}
+	const suffix = " v6"
+	runes := []rune(name)
+	if len(runes)+utf8.RuneCountInString(suffix) > 100 {
+		runes = runes[:100-utf8.RuneCountInString(suffix)]
+		name = strings.TrimSpace(string(runes))
+	}
+	return name + suffix
+}
+
+func subStoreNodesForSelection(profile subStoreSyncProfile, selection core.SubStoreSyncSelection) ([]string, error) {
+	mode, valid := core.NormalizeSubStoreAddressMode(selection.AddressMode)
+	if !valid || !subStoreProfileSupportsMode(profile, mode) {
+		return nil, errors.New("所选 IP 地址已不可用，请重新选择地址模式")
+	}
+	type candidate struct {
+		uri  string
+		name string
+	}
+	candidates := make([]candidate, 0, 2)
+	switch mode {
+	case core.SubStoreAddressModeAuto:
+		candidates = append(candidates, candidate{uri: profile.URI, name: selection.CustomName})
+	case core.SubStoreAddressModeIPv4:
+		address, _ := subStoreProfileAddress(profile, core.SubStoreAddressModeIPv4)
+		candidates = append(candidates, candidate{uri: address.URI, name: selection.CustomName})
+	case core.SubStoreAddressModeIPv6:
+		address, _ := subStoreProfileAddress(profile, core.SubStoreAddressModeIPv6)
+		candidates = append(candidates, candidate{uri: address.URI, name: subStoreIPv6NodeName(selection.CustomName)})
+	case core.SubStoreAddressModeBoth:
+		ipv4, _ := subStoreProfileAddress(profile, core.SubStoreAddressModeIPv4)
+		ipv6, _ := subStoreProfileAddress(profile, core.SubStoreAddressModeIPv6)
+		candidates = append(candidates,
+			candidate{uri: ipv4.URI, name: selection.CustomName},
+			candidate{uri: ipv6.URI, name: subStoreIPv6NodeName(selection.CustomName)},
+		)
+	}
+	result := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		renamed, err := renameSubStoreNode(candidate.uri, candidate.name)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, renamed)
+	}
+	return result, nil
 }
 
 func renameSubStoreNode(rawURI, name string) (string, error) {

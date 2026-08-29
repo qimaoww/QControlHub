@@ -255,6 +255,36 @@ printf generated > "$3/generated-by-core"
 	}
 }
 
+func TestSystemdManagedValidationDoesNotDependOnAgentIdentityCapabilities(t *testing.T) {
+	requireAgentRoot(t)
+	root := t.TempDir()
+	launcher := filepath.Join(root, "systemd-run")
+	if err := os.WriteFile(launcher, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\"\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	executor := &Executor{
+		Services:                 &ServiceManager{kind: ServiceManagerSystemd},
+		validationSystemdRunPath: launcher,
+	}
+	identity := commandIdentity{uid: 65534, gid: 65534, groups: []uint32{65534}}
+	output, err := executor.runManagedIdentityCommand(
+		context.Background(), root, "XRAY_LOCATION_ASSET="+root, "/usr/bin/true", &identity,
+		"run", "-test", "-config", filepath.Join(root, "config.json"),
+	)
+	if err != nil {
+		t.Fatalf("managed validation launcher: %v", err)
+	}
+	for _, required := range []string{
+		"--property=User=65534", "--property=Group=65534", "--property=WorkingDirectory=" + root,
+		"--property=ReadWritePaths=" + root, "--setenv=XRAY_LOCATION_ASSET=" + root,
+		"/usr/bin/true", "run", "-test", "-config",
+	} {
+		if !strings.Contains(output, required) {
+			t.Errorf("systemd validation invocation missing %q: %s", required, output)
+		}
+	}
+}
+
 func TestRollbackDeployRestoresBackupAndBackupRetentionIsBounded(t *testing.T) {
 	t.Parallel()
 	destination := filepath.Join(t.TempDir(), "config.json")

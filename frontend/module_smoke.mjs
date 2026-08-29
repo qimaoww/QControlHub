@@ -20,6 +20,8 @@ import {
 import { coreSourceLabel, coreSourceName } from "./modules/tasks.js";
 import {
   copyClientValue,
+  clientAccessAddressChoices,
+  clientAccessEntryForAddress,
   filterClientAccessEntries,
   groupClientAccessEntries,
   installClientAccess,
@@ -48,6 +50,8 @@ import { installSettings } from "./modules/settings.js";
 import {
   filterSubStoreProfiles,
   installSubStoreSync,
+  subStoreAddressChoices,
+  subStoreProfileNodeCount,
   subStoreSelectionPayload,
 } from "./modules/substore-sync.js";
 import { installTasks } from "./modules/tasks.js";
@@ -2666,6 +2670,10 @@ const accessEntries = [
         profile: { format: "URI", uri: "test-alpha", fields: [] },
       },
     ],
+    address_options: [
+      { family: "ipv4", address: "198.51.100.10", source: "IPv4", profiles: [] },
+      { family: "ipv6", address: "2001:db8::10", source: "IPv6", profiles: [] },
+    ],
   },
   {
     agent_id: "beta",
@@ -2682,6 +2690,16 @@ const accessEntries = [
     ],
   },
 ];
+assert.deepEqual(
+  clientAccessAddressChoices(accessEntries[0]).map((choice) => choice.value),
+  ["auto", "ipv4", "ipv6"],
+  "client configuration exposes both address families",
+);
+assert.equal(
+  clientAccessEntryForAddress(accessEntries[0], "ipv6").address,
+  "2001:db8::10",
+  "client configuration switches to the IPv6 profile variant",
+);
 const accessAgents = [
   { id: "alpha", name: "Alpha node", labels: {}, status: "online" },
   { id: "beta", name: "Beta node", labels: {}, status: "online" },
@@ -2895,8 +2913,24 @@ assert.deepEqual(subStoreSelectionPayload(subStoreProfiles), [
     engine: "sing-box",
     profile_tag: "vless-in",
     custom_name: "Tokyo Premium",
+    address_mode: "auto",
   },
 ]);
+assert.deepEqual(
+  subStoreAddressChoices({
+    addresses: [
+      { family: "ipv4", address: "198.51.100.10" },
+      { family: "ipv6", address: "2001:db8::10" },
+    ],
+  }).map((choice) => choice.value),
+  ["auto", "ipv4", "ipv6", "both"],
+  "dual-stack Sub-Store profiles expose automatic, family, and both-address modes",
+);
+assert.equal(
+  subStoreProfileNodeCount({ selected: true, available: true, address_mode: "both" }),
+  2,
+  "dual-stack Sub-Store selections count both generated nodes",
+);
 const previousSubStoreDocument = globalThis.document;
 globalThis.document = {
   querySelector: () => null,

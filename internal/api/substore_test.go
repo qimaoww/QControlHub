@@ -59,6 +59,35 @@ func TestRenameSubStoreNode(t *testing.T) {
 	}
 }
 
+func TestSubStoreNodesForAddressMode(t *testing.T) {
+	t.Parallel()
+	profile := subStoreSyncProfile{
+		URI: "vless://auto@node.example:443#node",
+		Addresses: []subStoreSyncAddress{
+			{Family: core.SubStoreAddressModeIPv4, Address: "198.51.100.10", URI: "vless://v4@198.51.100.10:443#node"},
+			{Family: core.SubStoreAddressModeIPv6, Address: "2001:db8::10", URI: "vless://v6@[2001:db8::10]:443#node"},
+		},
+	}
+	selection := core.SubStoreSyncSelection{CustomName: "Tokyo"}
+	nodes, err := subStoreNodesForSelection(profile, selection)
+	if err != nil || len(nodes) != 1 || nodes[0] != "vless://auto@node.example:443#Tokyo" {
+		t.Fatalf("automatic Sub-Store node = %v, %v", nodes, err)
+	}
+	selection.AddressMode = core.SubStoreAddressModeBoth
+	nodes, err = subStoreNodesForSelection(profile, selection)
+	if err != nil || len(nodes) != 2 || !strings.HasSuffix(nodes[0], "#Tokyo") || !strings.HasSuffix(nodes[1], "#Tokyo v6") {
+		t.Fatalf("dual-stack Sub-Store nodes = %v, %v", nodes, err)
+	}
+	selection.AddressMode = core.SubStoreAddressModeIPv6
+	nodes, err = subStoreNodesForSelection(profile, selection)
+	if err != nil || len(nodes) != 1 || !strings.HasSuffix(nodes[0], "#Tokyo v6") {
+		t.Fatalf("IPv6 Sub-Store node = %v, %v", nodes, err)
+	}
+	if got := subStoreIPv6NodeName(strings.Repeat("x", 100)); len([]rune(got)) != 100 || !strings.HasSuffix(got, " v6") {
+		t.Fatalf("IPv6 name truncation = %q", got)
+	}
+}
+
 func TestSubStoreRemoteTargetHelpers(t *testing.T) {
 	t.Parallel()
 	if count := subStoreContentNodeCount("vless://one#One\r\n\r\nss://two#Two\n"); count != 2 {

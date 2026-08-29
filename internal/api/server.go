@@ -603,7 +603,8 @@ func (s *Server) listEnrollmentTokens(w http.ResponseWriter, request *http.Reque
 
 func (s *Server) putAgentClientAddress(w http.ResponseWriter, request *http.Request) {
 	var input struct {
-		Address string `json:"address"`
+		Address string  `json:"address"`
+		Name    *string `json:"name"`
 	}
 	if err := decodeJSON(w, request, &input, 8<<10); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -618,12 +619,25 @@ func (s *Server) putAgentClientAddress(w http.ResponseWriter, request *http.Requ
 			return
 		}
 	}
-	if err := s.store.SetAgentClientAddress(request.Context(), request.PathValue("id"), address); err != nil {
+	var name *string
+	if input.Name != nil {
+		value := strings.TrimSpace(*input.Name)
+		if value != "" && (utf8.RuneCountInString(value) > 100 || strings.ContainsAny(value, "\r\n")) {
+			writeError(w, http.StatusBadRequest, "客户端节点名称不能超过 100 个字符")
+			return
+		}
+		name = &value
+	}
+	if err := s.store.SetAgentClientDetails(request.Context(), request.PathValue("id"), &address, name); err != nil {
 		writeStoreError(w, err)
 		return
 	}
 	s.recordAudit(request, "agent.client_address.updated", request.PathValue("id"), address)
-	writeJSON(w, http.StatusOK, map[string]string{"address": address})
+	result := map[string]string{"address": address}
+	if name != nil {
+		result["name"] = *name
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (s *Server) createEnrollmentToken(w http.ResponseWriter, request *http.Request) {

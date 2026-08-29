@@ -31,6 +31,7 @@ export function filterClientAccessEntries(entries, filters = {}) {
       entry.engine,
       entry.address,
       entry.source,
+      ...(entry.address_options || []).flatMap((option) => [option.address, option.source]),
     ]
       .join(" ")
       .toLowerCase()
@@ -63,6 +64,32 @@ export function groupClientAccessEntries(entries) {
     group.entries.push(entry);
   }
   return groups;
+}
+
+export function clientAccessAddressChoices(entry) {
+  const options = entry?.address_options || [];
+  const byFamily = new Map();
+  for (const option of options) {
+    if ((option.family === "ipv4" || option.family === "ipv6") && !byFamily.has(option.family)) {
+      byFamily.set(option.family, option);
+    }
+  }
+  if (!byFamily.has("ipv4") || !byFamily.has("ipv6")) return [];
+  return [
+    { value: "auto", label: "自动选择" },
+    { value: "ipv4", label: `IPv4 · ${byFamily.get("ipv4").address}` },
+    { value: "ipv6", label: `IPv6 · ${byFamily.get("ipv6").address}` },
+  ];
+}
+
+export function clientAccessEntryForAddress(entry, mode = "auto") {
+  const options = entry?.address_options || [];
+  const selected = mode === "auto"
+    ? options[0]
+    : options.find((option) => option.family === mode) || options[0];
+  return selected
+    ? { ...entry, address: selected.address, source: selected.source, profiles: selected.profiles }
+    : entry;
 }
 
 export async function copyClientValue(
@@ -143,7 +170,10 @@ export function installClientAccess(ctx) {
   }
 
   function renderClientAccess() {
-    const entries = state.data.clientAccessEntries || [];
+    const addressModes = state.data.clientAccessAddressModes || {};
+    const entries = (state.data.clientAccessEntries || []).map((entry) =>
+      clientAccessEntryForAddress(entry, addressModes[entry.agent_id] || "auto"),
+    );
     const agents = state.data.agents || [];
     const filters = normalizeClientAccessFilters(entries, agents, {
       agent: state.data.accessAgent,
@@ -211,6 +241,7 @@ export function installClientAccess(ctx) {
   }
 
   function renderResults(filtered, entries, agents, filters) {
+    const addressModes = state.data.clientAccessAddressModes || {};
     if (!filtered.length) {
       const selectedAgent = agents.find((agent) => agent.id === filters.agent);
       const selectedHasEntries = entries.some(
@@ -239,7 +270,8 @@ export function installClientAccess(ctx) {
         const agent = agents.find((item) => item.id === group.agent_id) || {};
         const agentStatus = agent.status || "unknown";
         const managedAddress = Boolean(agent.labels?.client_address);
-        const addressForm = `<form class="client-address-form" data-client-address-agent="${esc(group.agent_id)}"><label><span>客户端连接地址</span><input name="address" required maxlength="253" autocomplete="off" value="${esc(firstEntry.address || "")}" placeholder="例如 203.0.113.10 或 node.example.com"><small>填写客户端实际访问节点的域名或 IP，不要填写 0.0.0.0。</small></label><div><button class="button primary" type="submit">保存并生成配置</button>${managedAddress ? `<button class="button" type="button" data-clear-client-address="${esc(group.agent_id)}">恢复自动识别</button>` : ""}</div></form>`;
+        const automaticAddress = firstEntry.address_options?.[0]?.address || firstEntry.address || "";
+        const addressForm = `<form class="client-address-form" data-client-address-agent="${esc(group.agent_id)}"><label><span>客户端节点名称</span><input name="name" maxlength="100" autocomplete="off" value="${esc(firstEntry.client_name || "")}" placeholder="留空使用节点名称"><small>名称会写入客户端 URI，便于在客户端列表中识别。</small></label><label><span>客户端连接地址</span><input name="address" required maxlength="253" autocomplete="off" value="${esc(automaticAddress)}" placeholder="例如 203.0.113.10 或 node.example.com"><small>填写客户端实际访问节点的域名或 IP，不要填写 0.0.0.0。</small></label><div><button class="button primary" type="submit">保存并生成配置</button>${managedAddress ? `<button class="button" type="button" data-clear-client-address="${esc(group.agent_id)}">恢复自动识别</button>` : ""}</div></form>`;
         const addressSetup = firstEntry.address_required
           ? can("agents.manage")
             ? addressForm
@@ -254,6 +286,11 @@ export function installClientAccess(ctx) {
             : agentStatus === "offline"
               ? "离线"
               : "状态未知";
+        const addressChoices = clientAccessAddressChoices(firstEntry);
+        const addressMode = addressModes[group.agent_id] || "auto";
+        const addressPicker = addressChoices.length
+          ? `<label class="client-address-picker"><span>地址</span><select data-client-address-mode="${esc(group.agent_id)}" aria-label="切换客户端地址">${addressChoices.map((choice) => `<option value="${esc(choice.value)}" ${choice.value === addressMode ? "selected" : ""}>${esc(choice.label)}</option>`).join("")}</select></label>`
+          : "";
         const engineSections = group.entries
           .map((entry, engineIndex) => {
             const profiles = (entry.profiles || [])
@@ -273,13 +310,20 @@ export function installClientAccess(ctx) {
             return `<section class="client-access-engine-group"><header><span><span class="engine-badge ${esc(entry.engine)}">${esc(engineName(entry.engine))}</span><small>${(entry.profiles || []).length} 个入站</small></span><a href="#agent-config" data-config-agent="${esc(entry.agent_id)}" data-config-engine="${esc(entry.engine)}">服务端配置</a></header><div>${profiles || '<p class="client-access-entry-empty">需要先设置可访问的节点地址。</p>'}</div></section>`;
           })
           .join("");
-        return `<article class="client-access-node-card" data-refresh-key="client-access-node-${esc(group.agent_id)}"><header><div class="client-access-node"><span class="node-avatar">●</span><span><strong>${esc(firstEntry.agent_name)}</strong><small>${esc(agent.os || "节点")} / ${esc(agent.arch || "")} · <code>${esc(firstEntry.address || "未设置地址")}</code></small></span></div><span class="client-access-node-state ${firstEntry.address_required ? "warn" : agentStatus === "online" ? "ok" : "muted"}"><i></i>${statusLabel}</span></header>${addressSetup}<div class="client-access-node-engines">${engineSections}</div></article>`;
+        return `<article class="client-access-node-card" data-refresh-key="client-access-node-${esc(group.agent_id)}"><header><div class="client-access-node"><span class="node-avatar">●</span><span><strong>${esc(firstEntry.client_name || firstEntry.agent_name)}</strong><small>${esc(agent.os || "节点")} / ${esc(agent.arch || "")} · <code>${esc(firstEntry.address || "未设置地址")}</code></small></span></div><span class="client-access-node-state ${firstEntry.address_required ? "warn" : agentStatus === "online" ? "ok" : "muted"}"><i></i>${statusLabel}</span>${addressPicker}</header>${addressSetup}<div class="client-access-node-engines">${engineSections}</div></article>`;
       })
       .join("");
   }
 
   function bindClientAccessPage() {
     bindClientAccessMasonry();
+    document.querySelectorAll("[data-client-address-mode]").forEach((select) => {
+      select.onchange = () => {
+        state.data.clientAccessAddressModes = state.data.clientAccessAddressModes || {};
+        state.data.clientAccessAddressModes[select.dataset.clientAddressMode] = select.value;
+        renderClientAccess();
+      };
+    });
     document.querySelectorAll("[data-access-agent]").forEach((button) => {
       button.onclick = (event) => {
         event.preventDefault();
@@ -395,12 +439,14 @@ export function installClientAccess(ctx) {
       bindEvent(form, "submit", async (event) => {
         event.preventDefault();
         const button = form.querySelector("button[type=submit]");
-        const address = String(new FormData(form).get("address") || "").trim();
+        const formData = new FormData(form);
+        const address = String(formData.get("address") || "").trim();
+        const name = String(formData.get("name") || "").trim();
         if (button) button.disabled = true;
         try {
           await api(
             `/agents/${encodeURIComponent(form.dataset.clientAddressAgent)}/client-address`,
-            { method: "PUT", body: JSON.stringify({ address }) },
+            { method: "PUT", body: JSON.stringify({ address, name }) },
           );
           const input = form.elements.namedItem("address");
           if (input) {

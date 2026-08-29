@@ -36,12 +36,13 @@ PrivateDevices=true
 NoNewPrivileges=true
 # Atomic replacement preserves a protected existing file's group so non-root
 # core services keep access after deploy, upgrade, and rollback.
-# Managed configuration validation drops the child process to the same
-# qcontrolhub-core identity used by the service before invoking the real core.
+# Managed configuration validation is launched by systemd in a transient unit
+# with the same qcontrolhub-core identity used by the long-running service, so
+# QAgent itself does not need process-identity capabilities.
 # CAP_NET_ADMIN is limited to the Agent's dedicated nftables table for
 # engine-independent per-port traffic accounting and quota enforcement.
-CapabilityBoundingSet=CAP_CHOWN CAP_SETGID CAP_SETUID CAP_NET_ADMIN
-AmbientCapabilities=CAP_CHOWN CAP_SETGID CAP_SETUID CAP_NET_ADMIN
+CapabilityBoundingSet=CAP_CHOWN CAP_NET_ADMIN
+AmbientCapabilities=CAP_CHOWN CAP_NET_ADMIN
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectKernelLogs=true

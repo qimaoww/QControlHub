@@ -200,7 +200,7 @@ func (s *Store) DeleteSubStoreSyncTarget(ctx context.Context, id string) error {
 
 func (s *Store) ListSubStoreSyncSelections(ctx context.Context, targetID string) ([]core.SubStoreSyncSelection, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT target_id,agent_id,engine,profile_tag,custom_name,created_at,updated_at
+		SELECT target_id,agent_id,engine,profile_tag,custom_name,address_mode,created_at,updated_at
 		FROM substore_sync_items WHERE target_id=$1 ORDER BY created_at,agent_id,engine,profile_tag`, strings.TrimSpace(targetID))
 	if err != nil {
 		return nil, err
@@ -209,7 +209,7 @@ func (s *Store) ListSubStoreSyncSelections(ctx context.Context, targetID string)
 	result := make([]core.SubStoreSyncSelection, 0)
 	for rows.Next() {
 		var item core.SubStoreSyncSelection
-		if err := rows.Scan(&item.TargetID, &item.AgentID, &item.Engine, &item.ProfileTag, &item.CustomName, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.TargetID, &item.AgentID, &item.Engine, &item.ProfileTag, &item.CustomName, &item.AddressMode, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, err
 		}
 		result = append(result, item)
@@ -231,6 +231,11 @@ func (s *Store) ReplaceSubStoreSyncSelections(ctx context.Context, targetID stri
 		selections[index].AgentID = strings.TrimSpace(selections[index].AgentID)
 		selections[index].ProfileTag = strings.TrimSpace(selections[index].ProfileTag)
 		selections[index].CustomName = strings.TrimSpace(selections[index].CustomName)
+		addressMode, valid := core.NormalizeSubStoreAddressMode(strings.TrimSpace(selections[index].AddressMode))
+		if !valid {
+			return nil, fmt.Errorf("%w: selected Sub-Store address mode is invalid", ErrInvalid)
+		}
+		selections[index].AddressMode = addressMode
 		if selections[index].AgentID == "" || selections[index].ProfileTag == "" || utf8.RuneCountInString(selections[index].ProfileTag) > 200 {
 			return nil, fmt.Errorf("%w: selected Sub-Store node identity is invalid", ErrInvalid)
 		}
@@ -263,8 +268,8 @@ func (s *Store) ReplaceSubStoreSyncSelections(ctx context.Context, targetID stri
 			return nil, err
 		}
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO substore_sync_items (target_id,agent_id,engine,profile_tag,custom_name,created_at,updated_at)
-			VALUES ($1,$2,$3,$4,$5,$6,$6)`, targetID, item.AgentID, item.Engine, item.ProfileTag, item.CustomName, now); err != nil {
+			INSERT INTO substore_sync_items (target_id,agent_id,engine,profile_tag,custom_name,address_mode,created_at,updated_at)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$7)`, targetID, item.AgentID, item.Engine, item.ProfileTag, item.CustomName, item.AddressMode, now); err != nil {
 			return nil, mapError(err)
 		}
 	}

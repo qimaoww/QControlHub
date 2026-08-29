@@ -13,6 +13,7 @@ export function filterSubStoreProfiles(profiles, agentID = "", search = "") {
       profile.protocol,
       profile.port,
       profile.engine,
+      ...(profile.addresses || []).flatMap((address) => [address.address, address.source, address.family]),
     ]
       .join(" ")
       .toLowerCase()
@@ -28,7 +29,32 @@ export function subStoreSelectionPayload(profiles) {
       engine: profile.engine,
       profile_tag: profile.profile_tag,
       custom_name: String(profile.custom_name || profile.default_name || "").trim(),
+      address_mode: String(profile.address_mode || "auto"),
     }));
+}
+
+export function subStoreAddressChoices(profile) {
+  const byFamily = new Map();
+  for (const option of profile?.addresses || []) {
+    if ((option.family === "ipv4" || option.family === "ipv6") && !byFamily.has(option.family)) {
+      byFamily.set(option.family, option);
+    }
+  }
+  const choices = [{ value: "auto", label: "自动选择" }];
+  if (byFamily.has("ipv4")) {
+    choices.push({ value: "ipv4", label: `IPv4 · ${byFamily.get("ipv4").address}` });
+  }
+  if (byFamily.has("ipv6")) {
+    choices.push({ value: "ipv6", label: `IPv6 · ${byFamily.get("ipv6").address}` });
+  }
+  if (byFamily.has("ipv4") && byFamily.has("ipv6")) {
+    choices.push({ value: "both", label: "IPv4 + IPv6（同步两条）" });
+  }
+  return choices;
+}
+
+export function subStoreProfileNodeCount(profile) {
+  return profile?.selected && profile?.available && profile.address_mode === "both" ? 2 : 1;
 }
 
 export function installSubStoreSync(ctx) {
@@ -74,6 +100,10 @@ export function installSubStoreSync(ctx) {
     const profiles = resource.profiles || [];
     const selected = profiles.filter((profile) => profile.selected);
     const availableSelected = selected.filter((profile) => profile.available);
+    const selectedNodeCount = availableSelected.reduce(
+      (total, profile) => total + subStoreProfileNodeCount(profile),
+      0,
+    );
     const agents = [];
     const seenAgents = new Set();
     agentFilter = String(state.data.subStoreAgent || agentFilter || "");
@@ -122,11 +152,16 @@ export function installSubStoreSync(ctx) {
           .map((profile) => {
             const unavailable = !profile.available;
             const name = profile.custom_name || profile.default_name || profile.profile_tag;
+            const addressChoices = subStoreAddressChoices(profile);
+            const addressMode = profile.address_mode || "auto";
+            const addressControl = addressChoices.length > 2
+              ? `<label class="substore-node-address"><span>同步地址</span><select data-substore-address aria-label="${esc(profile.profile_tag)} 同步地址">${addressChoices.map((choice) => `<option value="${esc(choice.value)}" ${choice.value === addressMode ? "selected" : ""}>${esc(choice.label)}</option>`).join("")}</select></label>`
+              : "";
             return `<div class="substore-node-row ${profile.selected ? "selected" : ""} ${unavailable ? "unavailable" : ""}" data-substore-key="${esc(encodeURIComponent(`${profile.agent_id}\u0000${profile.engine}\u0000${profile.profile_tag}`))}">
               <label class="substore-node-toggle"><input type="checkbox" data-substore-select ${profile.selected ? "checked" : ""} ${unavailable ? "disabled" : ""}><span></span></label>
               <span class="engine-badge ${esc(profile.engine)}">${esc(engineName(profile.engine))}</span>
               <span class="substore-node-source"><b>${esc(profile.profile_tag)}</b><small>${unavailable ? "源节点已失效" : `${esc(profile.protocol)}${profile.port ? ` · :${Number(profile.port)}` : ""}`}</small></span>
-              ${profile.selected && !unavailable ? `<label class="substore-node-name"><span>同步名称</span><input data-substore-name maxlength="100" value="${esc(name)}" aria-label="${esc(profile.profile_tag)} 同步名称"></label>` : `<span class="substore-node-preview">${esc(name)}</span>`}
+              ${profile.selected && !unavailable ? `<span class="substore-node-edit"><label class="substore-node-name"><span>同步名称</span><input data-substore-name maxlength="100" value="${esc(name)}" aria-label="${esc(profile.profile_tag)} 同步名称"></label>${addressControl}</span>` : `<span class="substore-node-preview">${esc(name)}</span>`}
               ${profile.selected ? `<button class="substore-remove" type="button" data-substore-remove aria-label="移除 ${esc(name)}">移除</button>` : `<button class="button small" type="button" data-substore-add ${unavailable ? "disabled" : ""}>加入同步</button>`}
             </div>`;
           })
@@ -144,7 +179,7 @@ export function installSubStoreSync(ctx) {
         <section class="substore-status-bar">
           <div class="substore-connection"><i class="${statusClass}"></i><span><b>Sub-Store</b><small>${esc(settings.endpoint_hint || "尚未设置连接")}</small></span><em>${statusText}</em></div>
           <div class="substore-subscription"><span>当前同步组</span><b>${esc(activeTarget?.display_name || activeTarget?.subscription_name || "—")}</b><small>${esc(activeTarget && activeTarget.display_name !== activeTarget.subscription_name ? `Sub-Store：${activeTarget.subscription_name} · ${targetStatus}` : targetStatus)}</small></div>
-          ${manage ? `<div class="substore-status-actions"><button class="button small" type="button" data-substore-test ${settings.configured ? "" : "disabled"}>测试连接</button><button class="button small" type="button" data-substore-settings>连接设置</button>${activeTarget ? '<button class="button small" type="button" data-substore-target-edit>组设置</button>' : ""}<button class="button primary small" type="button" data-substore-run ${settings.configured && activeTarget && availableSelected.length && availableSelected.length === selected.length ? "" : "disabled"}>同步当前组 · ${availableSelected.length}</button></div>` : ""}
+          ${manage ? `<div class="substore-status-actions"><button class="button small" type="button" data-substore-test ${settings.configured ? "" : "disabled"}>测试连接</button><button class="button small" type="button" data-substore-settings>连接设置</button>${activeTarget ? '<button class="button small" type="button" data-substore-target-edit>组设置</button>' : ""}<button class="button primary small" type="button" data-substore-run ${settings.configured && activeTarget && availableSelected.length && availableSelected.length === selected.length ? "" : "disabled"}>同步当前组 · ${selectedNodeCount}</button></div>` : ""}
         </section>
         ${activeTarget?.last_sync_status === "failed" && activeTarget.last_sync_error ? `<p class="substore-error">${esc(activeTarget.last_sync_error)}</p>` : ""}
         <section class="substore-target-bar"><nav aria-label="同步组">${targetTabs || '<span>还没有同步组</span>'}</nav><label class="substore-target-search"><input type="search" data-substore-query value="${esc(query)}" aria-label="搜索客户端节点" placeholder="搜索节点、协议、入站或端口"></label>${manage ? '<button class="button small" type="button" data-substore-target-add>＋ 新建同步组</button>' : ""}</section>
@@ -295,6 +330,21 @@ export function installSubStoreSync(ctx) {
           await trackSelectionSave(profiles);
         } catch (error) {
           profile.custom_name = previous;
+          notify(error.message, "error");
+          await subStoreSync();
+        }
+      };
+    });
+    document.querySelectorAll("[data-substore-address]").forEach((select) => {
+      select.onchange = async () => {
+        const profile = profileForRow(select.closest("[data-substore-key]"));
+        if (!profile) return;
+        const previous = profile.address_mode || "auto";
+        profile.address_mode = select.value;
+        try {
+          await trackSelectionSave(profiles);
+        } catch (error) {
+          profile.address_mode = previous;
           notify(error.message, "error");
           await subStoreSync();
         }
