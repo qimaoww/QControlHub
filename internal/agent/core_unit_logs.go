@@ -25,12 +25,6 @@ LogNamespace=
 StandardOutput=journal
 StandardError=journal
 `
-	managedCoreJournalConfig = `[Journal]
-Storage=volatile
-RuntimeMaxUse=16M
-RuntimeMaxFileSize=8M
-MaxRetentionSec=15min
-`
 )
 
 func ensureManagedCoreLogStreaming(ctx context.Context, specs map[core.Engine]EngineSpec, managers ...*ServiceManager) error {

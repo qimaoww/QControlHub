@@ -804,13 +804,19 @@ func coreLogFileIdentity(info os.FileInfo) (uint64, uint64, bool) {
 
 // rotateFile copies the live file beside itself and truncates it, keeping the
 // configured number of bounded snapshots.
-// and truncates the original. supervise-daemon keeps writing with O_APPEND,
+// supervise-daemon keeps writing with O_APPEND,
 // so truncation is seamless for the writer and bounds the volatile log
 // footprint like the journald RuntimeMaxUse cap does on systemd. A failed
 // snapshot only costs the archived copy; truncation still proceeds so a
 // persistently failing copy can never let the live file grow unbounded.
 func (collector *CoreLogCollector) rotateFile(source coreLogFileSource) {
 	_, rotateCount := collector.rotationPolicy()
+	if rotateCount == 0 {
+		if err := os.Truncate(source.path, 0); err != nil {
+			slog.Warn("managed core log rotation failed", "path", source.path, "error", err)
+		}
+		return
+	}
 	contents, err := os.ReadFile(source.path)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		slog.Warn("managed core log rotation snapshot failed", "path", source.path, "error", err)
