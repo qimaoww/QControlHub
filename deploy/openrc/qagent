@@ -8,7 +8,9 @@ directory="/var/lib/qcontrolhub"
 supervisor="supervise-daemon"
 respawn_delay=5
 respawn_max=5
-capabilities="^cap_chown"
+# The Agent uses CHOWN for atomic managed-file replacement and SETUID/SETGID
+# only while spawning real-core validation as the qcontrolhub-core account.
+capabilities="^cap_chown,^cap_setgid,^cap_setuid"
 no_new_privs=true
 umask=0077
 output_log=/var/log/qagent/qagent.log
