@@ -47,8 +47,33 @@ func TestSubStoreSyncSettingsAndSelectionsLifecycle(t *testing.T) {
 
 	agent, enrollmentID := enrollTaskTestAgent(t, ctx, dataStore)
 	defer cleanupTaskTestAgent(dataStore, agent.ID, enrollmentID)
+	clientAddress := "client.example.test"
+	clientName := "Tokyo Edge"
+	clientAddressMode := core.SubStoreAddressModeIPv6
+	if err := dataStore.SetAgentClientPreferences(ctx, agent.ID, &clientAddress, &clientName, &clientAddressMode); err != nil {
+		t.Fatal(err)
+	}
+	clientAddressMode = core.SubStoreAddressModeAuto
+	if err := dataStore.SetAgentClientPreferences(ctx, agent.ID, nil, nil, &clientAddressMode); err != nil {
+		t.Fatal(err)
+	}
+	loadedAgent, err := dataStore.GetAgent(ctx, agent.ID)
+	if err != nil || loadedAgent.Labels["client_address"] != clientAddress || loadedAgent.Labels["client_name"] != clientName {
+		t.Fatalf("partial client display update lost persisted values: %+v, %v", loadedAgent.Labels, err)
+	}
+	if _, exists := loadedAgent.Labels["client_address_mode"]; exists {
+		t.Fatalf("automatic client address mode must remove the persisted override: %+v", loadedAgent.Labels)
+	}
+	clientAddressMode = core.SubStoreAddressModeIPv4
+	if err := dataStore.SetAgentClientPreferences(ctx, agent.ID, nil, nil, &clientAddressMode); err != nil {
+		t.Fatal(err)
+	}
+	loadedAgent, err = dataStore.GetAgent(ctx, agent.ID)
+	if err != nil || loadedAgent.Labels["client_address_mode"] != core.SubStoreAddressModeIPv4 || loadedAgent.Labels["client_address"] != clientAddress || loadedAgent.Labels["client_name"] != clientName {
+		t.Fatalf("client address mode was not persisted independently: %+v, %v", loadedAgent.Labels, err)
+	}
 	target, err := dataStore.CreateSubStoreSyncTarget(ctx, "QControlHub")
-	if err != nil || target.ID == "" || target.IntegrationID == "" || target.DisplayName != "QControlHub" || target.SubscriptionName != "QControlHub" || target.LastSyncStatus != "never" {
+	if err != nil || target.ID == "" || target.IntegrationID == "" || target.DisplayName != "QControlHub" || target.SubscriptionName != "QControlHub" || target.SyncMode != core.SubStoreSyncModeIncremental || target.LastSyncStatus != "never" {
 		t.Fatalf("created target = %+v, %v", target, err)
 	}
 	firstIntegrationID := target.IntegrationID
@@ -69,12 +94,12 @@ func TestSubStoreSyncSettingsAndSelectionsLifecycle(t *testing.T) {
 	if err := dataStore.RecordSubStoreSyncResult(ctx, target.ID, nil); err != nil {
 		t.Fatal(err)
 	}
-	target, err = dataStore.UpdateSubStoreSyncTarget(ctx, target.ID, "Panel renamed", "QControlHub")
-	if err != nil || target.IntegrationID != firstIntegrationID || target.DisplayName != "Panel renamed" || target.SubscriptionName != "QControlHub" || target.LastSyncStatus != "success" || target.LastSyncedAt == nil {
+	target, err = dataStore.UpdateSubStoreSyncTarget(ctx, target.ID, "Panel renamed", "QControlHub", core.SubStoreSyncModeManaged)
+	if err != nil || target.IntegrationID != firstIntegrationID || target.DisplayName != "Panel renamed" || target.SubscriptionName != "QControlHub" || target.SyncMode != core.SubStoreSyncModeManaged || target.LastSyncStatus != "success" || target.LastSyncedAt == nil {
 		t.Fatalf("target update changed integration identity: %+v, %v", target, err)
 	}
-	target, err = dataStore.UpdateSubStoreSyncTarget(ctx, target.ID, "Remote renamed", "Remote renamed")
-	if err != nil || target.DisplayName != "Remote renamed" || target.SubscriptionName != "Remote renamed" {
+	target, err = dataStore.UpdateSubStoreSyncTarget(ctx, target.ID, "Remote renamed", "Remote renamed", core.SubStoreSyncModeIncremental)
+	if err != nil || target.DisplayName != "Remote renamed" || target.SubscriptionName != "Remote renamed" || target.SyncMode != core.SubStoreSyncModeIncremental {
 		t.Fatalf("target remote rename = %+v, %v", target, err)
 	}
 	if err := dataStore.RecordSubStoreSyncResult(ctx, target.ID, nil); err != nil {
@@ -110,7 +135,7 @@ func TestSubStoreSyncSettingsAndSelectionsLifecycle(t *testing.T) {
 		t.Fatalf("deleted target selections = %+v, %v", selections, err)
 	}
 	importedTarget, err := dataStore.ImportSubStoreSyncTarget(ctx, "Existing Sub-Store group", "ssi_existing_remote")
-	if err != nil || importedTarget.DisplayName != "Existing Sub-Store group" || importedTarget.SubscriptionName != "Existing Sub-Store group" || importedTarget.IntegrationID != "ssi_existing_remote" {
+	if err != nil || importedTarget.DisplayName != "Existing Sub-Store group" || importedTarget.SubscriptionName != "Existing Sub-Store group" || importedTarget.IntegrationID != "ssi_existing_remote" || importedTarget.SyncMode != core.SubStoreSyncModeIncremental {
 		t.Fatalf("imported target = %+v, %v", importedTarget, err)
 	}
 
@@ -263,7 +288,7 @@ func TestOpenMigratesAppliedV30SubStoreSyncTarget(t *testing.T) {
 	}
 	defer dataStore.Close()
 	targets, err := dataStore.ListSubStoreSyncTargets(ctx)
-	if err != nil || len(targets) != 1 || targets[0].ID != "sst_default" || targets[0].DisplayName != "Legacy Group" || targets[0].SubscriptionName != "Legacy Group" || targets[0].SelectionCount != 1 || targets[0].LastSyncStatus != "success" {
+	if err != nil || len(targets) != 1 || targets[0].ID != "sst_default" || targets[0].DisplayName != "Legacy Group" || targets[0].SubscriptionName != "Legacy Group" || targets[0].SyncMode != core.SubStoreSyncModeManaged || targets[0].SelectionCount != 1 || targets[0].LastSyncStatus != "success" {
 		t.Fatalf("migrated v30 targets = %+v, %v", targets, err)
 	}
 	selections, err := dataStore.ListSubStoreSyncSelections(ctx, targets[0].ID)
@@ -299,6 +324,7 @@ func TestOpenMigratesAppliedV31SubStoreDisplayName(t *testing.T) {
 	}
 	if _, err := setup.Exec(ctx, `
 		ALTER TABLE substore_sync_targets DROP COLUMN display_name;
+		ALTER TABLE substore_sync_targets DROP COLUMN sync_mode;
 		INSERT INTO substore_sync_targets (
 			id,subscription_name,integration_id,last_sync_status,last_sync_error,created_at,updated_at
 		) VALUES ('sst_v31','Existing remote group','ssi_v31','success','',now(),now());
@@ -320,14 +346,20 @@ func TestOpenMigratesAppliedV31SubStoreDisplayName(t *testing.T) {
 	}
 	defer dataStore.Close()
 	target, err := dataStore.SubStoreSyncTarget(ctx, "sst_v31")
-	if err != nil || target.DisplayName != "Existing remote group" || target.SubscriptionName != "Existing remote group" {
+	if err != nil || target.DisplayName != "Existing remote group" || target.SubscriptionName != "Existing remote group" || target.SyncMode != core.SubStoreSyncModeManaged {
 		t.Fatalf("migrated v31 target = %+v, %v", target, err)
 	}
-	var addressModeColumn bool
-	if err := dataStore.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='substore_sync_items' AND column_name='address_mode')`).Scan(&addressModeColumn); err != nil {
+	var addressModeColumn, syncModeColumn bool
+	if err := dataStore.pool.QueryRow(ctx, `
+		SELECT
+			EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='substore_sync_items' AND column_name='address_mode'),
+			EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='substore_sync_targets' AND column_name='sync_mode')`).Scan(&addressModeColumn, &syncModeColumn); err != nil {
 		t.Fatal(err)
 	}
 	if !addressModeColumn {
 		t.Fatal("address_mode column was not added while migrating v31")
+	}
+	if !syncModeColumn {
+		t.Fatal("sync_mode column was not added while migrating v31")
 	}
 }

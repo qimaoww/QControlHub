@@ -52,12 +52,19 @@ func (s *Store) GetAgent(ctx context.Context, id string) (core.Agent, error) {
 // value survives Agent reconnects. Older enrollments may have stored a JSON
 // null instead of an empty labels object, so normalize that shape on update.
 func (s *Store) SetAgentClientAddress(ctx context.Context, id, address string) error {
-	return s.SetAgentClientDetails(ctx, id, &address, nil)
+	return s.SetAgentClientPreferences(ctx, id, &address, nil, nil)
 }
 
 // SetAgentClientDetails updates the optional client endpoint and display name.
 // A nil value leaves that field unchanged; an empty value removes it.
 func (s *Store) SetAgentClientDetails(ctx context.Context, id string, address, name *string) error {
+	return s.SetAgentClientPreferences(ctx, id, address, name, nil)
+}
+
+// SetAgentClientPreferences also persists the selected address family. The
+// automatic mode is represented by an absent label so older Agents and
+// control-plane versions keep their original behavior.
+func (s *Store) SetAgentClientPreferences(ctx context.Context, id string, address, name, addressMode *string) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -73,7 +80,12 @@ func (s *Store) SetAgentClientDetails(ctx context.Context, id string, address, n
 			return err
 		}
 	}
-	if address == nil && name == nil {
+	if addressMode != nil {
+		if _, err := tx.Exec(ctx, `UPDATE agents SET labels = CASE WHEN $2 = '' OR $2 = 'auto' THEN COALESCE(NULLIF(labels, 'null'::jsonb), '{}'::jsonb) - 'client_address_mode' ELSE jsonb_set(COALESCE(NULLIF(labels, 'null'::jsonb), '{}'::jsonb), '{client_address_mode}', to_jsonb($2::text), true) END WHERE id=$1 AND revoked_at IS NULL`, id, *addressMode); err != nil {
+			return err
+		}
+	}
+	if address == nil && name == nil && addressMode == nil {
 		return nil
 	}
 	var exists bool

@@ -472,6 +472,12 @@ func TestClientAccessUsesContextSidebarAsOnlyNodeFilter(t *testing.T) {
 		`client-access-toolbar`,
 		`href="#substore-sync"`,
 		`client-access-node-card`,
+		`data-client-display-open`,
+		`class="traffic-edit-dialog client-display-dialog"`,
+		`修改显示参数`,
+		`客户端地址协议栈`,
+		`button small client-display-settings-open`,
+		`button small client-parameter-open`,
 		`data-client-parameter-open`,
 		`class="traffic-edit-dialog client-parameter-dialog"`,
 		`dialog?.showModal();`,
@@ -485,7 +491,7 @@ func TestClientAccessUsesContextSidebarAsOnlyNodeFilter(t *testing.T) {
 			t.Errorf("client access filtering is missing %q", required)
 		}
 	}
-	for _, forbidden := range []string{`data-filter-agent`, `aria-label="按节点筛选"`, `filterAgentIDs`, `client-access-hero`, `client-access-summary`, `client-access-filter-panel`, `client-access-results-head`, `client-parameter-menu`, `client-parameter-grid`, `含凭据`} {
+	for _, forbidden := range []string{`data-filter-agent`, `aria-label="按节点筛选"`, `filterAgentIDs`, `client-access-hero`, `client-access-summary`, `client-access-filter-panel`, `client-access-results-head`, `client-parameter-menu`, `client-parameter-grid`, `含凭据`, `client-address-editor`, `data-client-address-mode`, `修改地址`} {
 		if strings.Contains(string(clientAccess), forbidden) {
 			t.Errorf("client access main workspace still contains superseded visual structure %q", forbidden)
 		}
@@ -519,7 +525,9 @@ func TestSubStoreSyncUsesCompactPanelPatterns(t *testing.T) {
 	for _, required := range []string{
 		`installSubStoreSync`, `"substore-sync": subStoreSync`, `href="#client-access"`,
 		`data-substore-settings-dialog`, `dialog?.showModal()`, `data-substore-run`,
-		`data-substore-select`, `data-substore-name`, `data-substore-remove`,
+		`data-substore-select`, `data-substore-parameters-form`, `data-substore-remove`,
+		`substore-node-settings-row`, `name="sync_mode" value="incremental"`,
+		`name="sync_mode" value="managed"`, `增量模式`, `完全托管模式`,
 		`api("/substore-sync/selections"`, `api("/substore-sync/run"`,
 	} {
 		if !strings.Contains(app+module, required) {
@@ -529,6 +537,7 @@ func TestSubStoreSyncUsesCompactPanelPatterns(t *testing.T) {
 	for _, required := range []string{
 		`.substore-status-bar`, `.substore-filter-bar`, `.substore-agent-grid`,
 		`.substore-agent-card`, `.substore-settings-dialog`, `var(--radius-card)`,
+		`.substore-node-settings-row`, `.substore-mode-options`,
 		`.app-body.page-substore-sync .desktop-app{min-width:0}`,
 		`minmax(min(100%,460px),1fr)`,
 	} {

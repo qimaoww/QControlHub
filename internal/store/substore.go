@@ -86,7 +86,7 @@ func validateSubStoreTargetName(name string) (string, error) {
 
 func (s *Store) ListSubStoreSyncTargets(ctx context.Context) ([]core.SubStoreSyncTarget, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT target.id,target.display_name,target.subscription_name,target.integration_id,target.last_synced_at,
+		SELECT target.id,target.display_name,target.subscription_name,target.integration_id,target.sync_mode,target.last_synced_at,
 		       target.last_sync_status,target.last_sync_error,
 		       (SELECT count(*) FROM substore_sync_items item WHERE item.target_id=target.id),
 		       target.created_at,target.updated_at
@@ -99,7 +99,7 @@ func (s *Store) ListSubStoreSyncTargets(ctx context.Context) ([]core.SubStoreSyn
 	for rows.Next() {
 		var target core.SubStoreSyncTarget
 		if err := rows.Scan(
-			&target.ID, &target.DisplayName, &target.SubscriptionName, &target.IntegrationID, &target.LastSyncedAt,
+			&target.ID, &target.DisplayName, &target.SubscriptionName, &target.IntegrationID, &target.SyncMode, &target.LastSyncedAt,
 			&target.LastSyncStatus, &target.LastSyncError, &target.SelectionCount, &target.CreatedAt, &target.UpdatedAt,
 		); err != nil {
 			return nil, err
@@ -112,12 +112,12 @@ func (s *Store) ListSubStoreSyncTargets(ctx context.Context) ([]core.SubStoreSyn
 func (s *Store) SubStoreSyncTarget(ctx context.Context, id string) (core.SubStoreSyncTarget, error) {
 	var target core.SubStoreSyncTarget
 	err := s.pool.QueryRow(ctx, `
-		SELECT target.id,target.display_name,target.subscription_name,target.integration_id,target.last_synced_at,
+		SELECT target.id,target.display_name,target.subscription_name,target.integration_id,target.sync_mode,target.last_synced_at,
 		       target.last_sync_status,target.last_sync_error,
 		       (SELECT count(*) FROM substore_sync_items item WHERE item.target_id=target.id),
 		       target.created_at,target.updated_at
 		FROM substore_sync_targets target WHERE target.id=$1`, strings.TrimSpace(id)).Scan(
-		&target.ID, &target.DisplayName, &target.SubscriptionName, &target.IntegrationID, &target.LastSyncedAt,
+		&target.ID, &target.DisplayName, &target.SubscriptionName, &target.IntegrationID, &target.SyncMode, &target.LastSyncedAt,
 		&target.LastSyncStatus, &target.LastSyncError, &target.SelectionCount, &target.CreatedAt, &target.UpdatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -126,7 +126,7 @@ func (s *Store) SubStoreSyncTarget(ctx context.Context, id string) (core.SubStor
 	return target, err
 }
 
-func (s *Store) CreateSubStoreSyncTarget(ctx context.Context, name string) (core.SubStoreSyncTarget, error) {
+func (s *Store) CreateSubStoreSyncTarget(ctx context.Context, name string, modes ...string) (core.SubStoreSyncTarget, error) {
 	name, err := validateSubStoreTargetName(name)
 	if err != nil {
 		return core.SubStoreSyncTarget{}, err
@@ -135,7 +135,11 @@ func (s *Store) CreateSubStoreSyncTarget(ctx context.Context, name string) (core
 	if err != nil {
 		return core.SubStoreSyncTarget{}, err
 	}
-	return s.createSubStoreSyncTarget(ctx, name, integrationID)
+	mode := core.SubStoreSyncModeIncremental
+	if len(modes) > 0 {
+		mode = modes[0]
+	}
+	return s.createSubStoreSyncTarget(ctx, name, integrationID, mode)
 }
 
 func (s *Store) ImportSubStoreSyncTarget(ctx context.Context, name, integrationID string) (core.SubStoreSyncTarget, error) {
@@ -147,10 +151,14 @@ func (s *Store) ImportSubStoreSyncTarget(ctx context.Context, name, integrationI
 	if !strings.HasPrefix(integrationID, "ssi_") || utf8.RuneCountInString(integrationID) > 100 {
 		return core.SubStoreSyncTarget{}, fmt.Errorf("%w: Sub-Store integration identity is invalid", ErrInvalid)
 	}
-	return s.createSubStoreSyncTarget(ctx, name, integrationID)
+	return s.createSubStoreSyncTarget(ctx, name, integrationID, core.SubStoreSyncModeIncremental)
 }
 
-func (s *Store) createSubStoreSyncTarget(ctx context.Context, name, integrationID string) (core.SubStoreSyncTarget, error) {
+func (s *Store) createSubStoreSyncTarget(ctx context.Context, name, integrationID, mode string) (core.SubStoreSyncTarget, error) {
+	mode, valid := core.NormalizeSubStoreSyncMode(strings.TrimSpace(mode))
+	if !valid {
+		return core.SubStoreSyncTarget{}, fmt.Errorf("%w: Sub-Store sync mode is invalid", ErrInvalid)
+	}
 	id, err := core.NewID("sst")
 	if err != nil {
 		return core.SubStoreSyncTarget{}, err
@@ -158,14 +166,14 @@ func (s *Store) createSubStoreSyncTarget(ctx context.Context, name, integrationI
 	now := time.Now().UTC()
 	if _, err := s.pool.Exec(ctx, `
 		INSERT INTO substore_sync_targets
-			(id,display_name,subscription_name,integration_id,last_sync_status,last_sync_error,created_at,updated_at)
-		VALUES ($1,$2,$2,$3,'never','',$4,$4)`, id, name, integrationID, now); err != nil {
+			(id,display_name,subscription_name,integration_id,sync_mode,last_sync_status,last_sync_error,created_at,updated_at)
+		VALUES ($1,$2,$2,$3,$4,'never','',$5,$5)`, id, name, integrationID, mode, now); err != nil {
 		return core.SubStoreSyncTarget{}, mapError(err)
 	}
 	return s.SubStoreSyncTarget(ctx, id)
 }
 
-func (s *Store) UpdateSubStoreSyncTarget(ctx context.Context, id, displayName, subscriptionName string) (core.SubStoreSyncTarget, error) {
+func (s *Store) UpdateSubStoreSyncTarget(ctx context.Context, id, displayName, subscriptionName, mode string) (core.SubStoreSyncTarget, error) {
 	displayName, err := validateSubStoreTargetName(displayName)
 	if err != nil {
 		return core.SubStoreSyncTarget{}, err
@@ -174,10 +182,14 @@ func (s *Store) UpdateSubStoreSyncTarget(ctx context.Context, id, displayName, s
 	if err != nil {
 		return core.SubStoreSyncTarget{}, err
 	}
+	mode, valid := core.NormalizeSubStoreSyncMode(strings.TrimSpace(mode))
+	if !valid {
+		return core.SubStoreSyncTarget{}, fmt.Errorf("%w: Sub-Store sync mode is invalid", ErrInvalid)
+	}
 	command, err := s.pool.Exec(ctx, `
 		UPDATE substore_sync_targets SET
-			display_name=$2,subscription_name=$3,updated_at=now()
-		WHERE id=$1`, strings.TrimSpace(id), displayName, subscriptionName)
+			display_name=$2,subscription_name=$3,sync_mode=$4,updated_at=now()
+		WHERE id=$1`, strings.TrimSpace(id), displayName, subscriptionName, mode)
 	if err != nil {
 		return core.SubStoreSyncTarget{}, mapError(err)
 	}

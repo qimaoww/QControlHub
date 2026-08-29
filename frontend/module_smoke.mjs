@@ -2807,7 +2807,7 @@ try {
         if (path === "/agents") return accessAgents;
         assert.fail(`unexpected client access smoke API path ${path}`);
       },
-      can: (capability) => capability === "agents.read",
+      can: (capability) => capability === "agents.read" || capability === "agents.manage",
       esc: (value) => String(value ?? ""),
       engineName: (value) => value,
       short: (value) => value,
@@ -2829,6 +2829,10 @@ try {
   assert.equal(accessMarkup.includes("按内核筛选"), true);
   assert.equal(accessMarkup.includes("client-access-toolbar"), true);
   assert.equal(accessMarkup.includes("client-access-node-card"), true);
+  assert.equal(accessMarkup.includes("修改显示参数"), true);
+  assert.equal(accessMarkup.includes("client-display-dialog"), true);
+  assert.equal(accessMarkup.includes("客户端地址协议栈"), false);
+  assert.equal(accessMarkup.includes("client-address-editor"), false);
   assert.equal(accessMarkup.includes("data-client-parameter-open"), true);
   assert.equal(accessMarkup.includes("client-parameter-dialog"), true);
   assert.equal(accessMarkup.includes("traffic-edit-dialog"), true);
@@ -2845,6 +2849,7 @@ try {
   assert.equal(accessState.data.accessAgent, "");
   assert.equal(accessMarkup.includes("Alpha node"), true);
   assert.equal(accessMarkup.includes("Beta node"), true);
+  assert.equal(accessMarkup.includes("客户端地址协议栈"), true);
   assert.equal(
     accessAPICalls,
     2,
@@ -2952,6 +2957,7 @@ try {
           id: "sst_primary",
           display_name: "Primary review",
           subscription_name: "QControlHub",
+          sync_mode: "incremental",
           selection_count: 1,
           last_sync_status: "success",
           last_synced_at: "2026-08-28T00:00:00Z",
@@ -2978,6 +2984,9 @@ try {
   assert.equal(subStoreMarkup.includes("data-substore-settings-dialog"), true);
   assert.equal(subStoreMarkup.includes("仅修改面板名称"), true);
   assert.equal(subStoreMarkup.includes("同时修改远端组名"), true);
+  assert.equal(subStoreMarkup.includes("增量模式"), true);
+  assert.equal(subStoreMarkup.includes("完全托管模式"), true);
+  assert.equal(subStoreMarkup.includes("substore-node-settings-row"), true);
   assert.equal(subStoreMarkup.includes("Sub-Store 已有组"), true);
   assert.equal(subStoreMarkup.includes("仅移除面板中的同步关系"), true);
   assert.equal(subStoreMarkup.includes("substore-hero"), false);

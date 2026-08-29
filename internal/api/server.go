@@ -603,21 +603,27 @@ func (s *Server) listEnrollmentTokens(w http.ResponseWriter, request *http.Reque
 
 func (s *Server) putAgentClientAddress(w http.ResponseWriter, request *http.Request) {
 	var input struct {
-		Address string  `json:"address"`
-		Name    *string `json:"name"`
+		Address     *string `json:"address"`
+		Name        *string `json:"name"`
+		AddressMode *string `json:"address_mode"`
 	}
 	if err := decodeJSON(w, request, &input, 8<<10); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	address := strings.TrimSpace(input.Address)
-	if address != "" {
+	var address *string
+	if input.Address != nil {
+		value := strings.TrimSpace(*input.Address)
+		address = &value
+	}
+	if address != nil && *address != "" {
 		var err error
-		address, err = serverconfig.NormalizeClientAddress(address)
+		value, err := serverconfig.NormalizeClientAddress(*address)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		address = &value
 	}
 	var name *string
 	if input.Name != nil {
@@ -628,14 +634,33 @@ func (s *Server) putAgentClientAddress(w http.ResponseWriter, request *http.Requ
 		}
 		name = &value
 	}
-	if err := s.store.SetAgentClientDetails(request.Context(), request.PathValue("id"), &address, name); err != nil {
+	var addressMode *string
+	if input.AddressMode != nil {
+		value := strings.TrimSpace(*input.AddressMode)
+		if value != core.SubStoreAddressModeAuto && value != core.SubStoreAddressModeIPv4 && value != core.SubStoreAddressModeIPv6 {
+			writeError(w, http.StatusBadRequest, "客户端地址协议栈必须是 auto、ipv4 或 ipv6")
+			return
+		}
+		addressMode = &value
+	}
+	if address == nil && name == nil && addressMode == nil {
+		writeError(w, http.StatusBadRequest, "至少需要提供一个客户端显示参数")
+		return
+	}
+	if err := s.store.SetAgentClientPreferences(request.Context(), request.PathValue("id"), address, name, addressMode); err != nil {
 		writeStoreError(w, err)
 		return
 	}
-	s.recordAudit(request, "agent.client_address.updated", request.PathValue("id"), address)
-	result := map[string]string{"address": address}
+	s.recordAudit(request, "agent.client_display.updated", request.PathValue("id"), "client display preferences updated")
+	result := map[string]string{}
+	if address != nil {
+		result["address"] = *address
+	}
 	if name != nil {
 		result["name"] = *name
+	}
+	if addressMode != nil {
+		result["address_mode"] = *addressMode
 	}
 	writeJSON(w, http.StatusOK, result)
 }
