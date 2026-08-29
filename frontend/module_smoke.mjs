@@ -34,6 +34,7 @@ import {
   liveConfigEngineEligible,
   liveConfigEditorState,
   liveConfigReadAction,
+  readServerPlanInput,
   submitLiveConfigChange,
 } from "./modules/configs.js";
 import {
@@ -1801,10 +1802,26 @@ const planControls = Object.fromEntries(
     reality_mldsa65_verify: "",
     vless_decryption: "",
     vless_encryption: "",
-    snell_version: "0",
-    sudoku_padding_min: "0",
-    sudoku_padding_max: "0",
-    sudoku_table_type: "",
+    listener_routing_mark: "51820",
+    listener_rule: "private-egress",
+    listener_proxy: "upstream",
+    snell_version: "5",
+    snell_udp: "1",
+    snell_reuse: "1",
+    snell_obfs_mode: "shadow-tls",
+    snell_obfs_host: "cover.example.test",
+    snell_client_fingerprint: "chrome",
+    sudoku_client_key: "client-private-key",
+    sudoku_padding_min: "2",
+    sudoku_padding_max: "18",
+    sudoku_table_type: "prefer_entropy",
+    sudoku_handshake_timeout: "15",
+    sudoku_httpmask_enabled: "1",
+    sudoku_httpmask_mode: "stream",
+    sudoku_httpmask_tls: "1",
+    sudoku_httpmask_host: "cdn.example.test:443",
+    sudoku_httpmask_path_root: "qch",
+    sudoku_multiplex: "on",
     target_address: "backend.example.test",
     target_port: "9443",
     network: "udp",
@@ -1901,6 +1918,16 @@ globalThis.FormData = class {
 };
 
 try {
+  const completePresetInput = readServerPlanInput(planForm, {
+    key: "sudoku",
+    requires_tls: false,
+  });
+  assert.equal(completePresetInput.listener_routing_mark, 51820);
+  assert.equal(completePresetInput.snell_obfs_mode, "shadow-tls");
+  assert.equal(completePresetInput.snell_reuse, true);
+  assert.equal(completePresetInput.sudoku_client_key, "client-private-key");
+  assert.equal(completePresetInput.sudoku_httpmask_mode, "stream");
+
   bindServerPlanRegeneration({
     form: planForm,
     buttons: [planButton, credentialPlanButton, realityKeyPlanButton, mldsaPlanButton],

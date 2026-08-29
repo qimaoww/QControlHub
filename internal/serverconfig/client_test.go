@@ -6,6 +6,8 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+
+	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
 func TestBuildClientProfileCoversEveryServerProtocol(t *testing.T) {
@@ -15,6 +17,15 @@ func TestBuildClientProfileCoversEveryServerProtocol(t *testing.T) {
 		password = "correct-horse-battery-staple"
 		psk      = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
 	)
+	sudokuProtocol, ok := FindProtocol(core.EngineMihomo, ProtocolSudoku)
+	if !ok {
+		t.Fatal("Sudoku preset is unavailable")
+	}
+	sudoku, err := NewPlan(sudokuProtocol)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sudoku.Tag, sudoku.Port = "sudoku", 20010
 	tests := []struct {
 		name   string
 		input  Input
@@ -29,8 +40,8 @@ func TestBuildClientProfileCoversEveryServerProtocol(t *testing.T) {
 		{name: "hysteria2", input: Input{Protocol: ProtocolHy2, Tag: "hy2", Port: 20005, Credential: password, Transport: "raw", TLSEnabled: true}, scheme: "hysteria2"},
 		{name: "tuic", input: Input{Protocol: ProtocolTUIC, Tag: "tuic", Port: 20006, Credential: uuid, SecondaryCredential: password, Transport: "raw", TLSEnabled: true}, scheme: "tuic"},
 		{name: "anytls", input: Input{Protocol: ProtocolAnyTLS, Tag: "anytls", Port: 20007, Credential: password, Transport: "raw", TLSEnabled: true}, scheme: "anytls"},
-		{name: "snell", input: Input{Protocol: ProtocolSnell, Tag: "snell", Port: 20009, Credential: password, Transport: "raw", SnellVersion: 4}, scheme: "yaml"},
-		{name: "sudoku", input: Input{Protocol: ProtocolSudoku, Tag: "sudoku", Port: 20010, Credential: uuid, Method: "chacha20-poly1305", Transport: "raw", SudokuPaddingMin: 1, SudokuPaddingMax: 15, SudokuTableType: "prefer_ascii"}, scheme: "yaml"},
+		{name: "snell", input: Input{Protocol: ProtocolSnell, Tag: "snell", Port: 20009, Credential: password, Transport: "raw", SnellVersion: 5}, scheme: "yaml"},
+		{name: "sudoku", input: sudoku, scheme: "yaml"},
 	}
 	for _, test := range tests {
 		test := test
@@ -42,6 +53,13 @@ func TestBuildClientProfileCoversEveryServerProtocol(t *testing.T) {
 			}
 			if profile.Format == "" || profile.URI == "" || len(profile.Fields) < 6 {
 				t.Fatalf("incomplete client profile: %+v", profile)
+			}
+			if test.input.Protocol == ProtocolSudoku {
+				for _, field := range profile.Fields {
+					if field.Value == test.input.Credential {
+						t.Fatalf("Sudoku client fields leaked the server-only Master Public Key: %+v", profile.Fields)
+					}
+				}
 			}
 			if test.scheme == "yaml" {
 				if profile.SubscriptionCompatible || !strings.Contains(profile.URI, "server: edge.example.com") {

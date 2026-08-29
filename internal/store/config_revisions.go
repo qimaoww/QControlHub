@@ -191,6 +191,13 @@ func (s *Store) RestoreConfigRevision(ctx context.Context, configID string, revi
 	if err := s.insertConfigRevision(ctx, tx, restored); err != nil {
 		return core.Config{}, err
 	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO config_client_metadata (config_id,config_version,profile_tag,content,created_at)
+		SELECT config_id,$3,profile_tag,content,now()
+		FROM config_client_metadata WHERE config_id=$1 AND config_version=$2
+		ON CONFLICT (config_id,config_version,profile_tag) DO NOTHING`, configID, revisionVersion, restored.Version); err != nil {
+		return core.Config{}, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return core.Config{}, err
 	}

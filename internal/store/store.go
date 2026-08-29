@@ -44,7 +44,7 @@ type storeExecutor interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }
 
-const currentSchemaVersion = 34
+const currentSchemaVersion = 35
 
 func Open(ctx context.Context, databaseURL string, allowInsecureRemote bool) (*Store, error) {
 	return OpenWithConfigKey(ctx, databaseURL, allowInsecureRemote, "")
@@ -1811,6 +1811,18 @@ ALTER TABLE configs ADD CONSTRAINT configs_content_check CHECK (octet_length(con
 	);
 	ALTER TABLE config_revisions DROP CONSTRAINT IF EXISTS config_revisions_content_check;
 	ALTER TABLE config_revisions ADD CONSTRAINT config_revisions_content_check CHECK (octet_length(content) <= 4194304);
+
+	CREATE TABLE IF NOT EXISTS config_client_metadata (
+	    config_id text NOT NULL,
+	    config_version integer NOT NULL CHECK (config_version > 0),
+	    profile_tag varchar(64) NOT NULL,
+	    content text NOT NULL CHECK (octet_length(content) BETWEEN 1 AND 65536),
+	    created_at timestamptz NOT NULL DEFAULT now(),
+	    PRIMARY KEY (config_id,config_version,profile_tag),
+	    FOREIGN KEY (config_id,config_version) REFERENCES config_revisions(config_id,version) ON DELETE CASCADE
+	);
+	CREATE INDEX IF NOT EXISTS config_client_metadata_config_idx
+	    ON config_client_metadata(config_id,config_version);
 
 	INSERT INTO config_revisions (config_id,version,agent_id,name,description,engine,content,created_at)
 	SELECT id,version,agent_id,name,description,engine,content,updated_at FROM configs

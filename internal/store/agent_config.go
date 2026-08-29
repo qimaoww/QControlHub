@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -171,6 +172,27 @@ func (s *Store) LatestDeployments(ctx context.Context) ([]core.Deployment, error
 // SaveAgentConfig creates or updates an agent-owned configuration using an
 // optimistic version check. expectedVersion must be zero for the first save.
 func (s *Store) SaveAgentConfig(ctx context.Context, input core.Config, expectedVersion int) (core.Config, error) {
+	return s.saveAgentConfig(ctx, input, expectedVersion, nil)
+}
+
+// ConfigClientMetadataMutation replaces client-only metadata for one inbound
+// in the new configuration version. Content is encrypted with the same keyring
+// as configuration payloads and never sent to an Agent.
+type ConfigClientMetadataMutation struct {
+	OriginalTag string
+	Tag         string
+	Content     string
+	Delete      bool
+}
+
+func (s *Store) SaveAgentConfigWithClientMetadata(ctx context.Context, input core.Config, expectedVersion int, mutation ConfigClientMetadataMutation) (core.Config, error) {
+	if !mutation.Delete && strings.TrimSpace(mutation.Content) != "" && s.cryptor == nil {
+		return core.Config{}, fmt.Errorf("%w: QCH_CONFIG_ENCRYPTION_KEY is required for client-only configuration secrets", ErrSecretUnavailable)
+	}
+	return s.saveAgentConfig(ctx, input, expectedVersion, &mutation)
+}
+
+func (s *Store) saveAgentConfig(ctx context.Context, input core.Config, expectedVersion int, metadataMutation *ConfigClientMetadataMutation) (core.Config, error) {
 	if input.AgentID == "" {
 		return core.Config{}, fmt.Errorf("%w: agent ID is required", ErrInvalid)
 	}
@@ -187,6 +209,23 @@ func (s *Store) SaveAgentConfig(ctx context.Context, input core.Config, expected
 	storedContent, err := s.encryptContent(input.Content)
 	if err != nil {
 		return core.Config{}, err
+	}
+	storedMetadata := ""
+	if metadataMutation != nil {
+		metadataMutation.OriginalTag = strings.TrimSpace(metadataMutation.OriginalTag)
+		metadataMutation.Tag = strings.TrimSpace(metadataMutation.Tag)
+		if len(metadataMutation.OriginalTag) > 64 || len(metadataMutation.Tag) > 64 {
+			return core.Config{}, fmt.Errorf("%w: client metadata tag is too long", ErrInvalid)
+		}
+		if !metadataMutation.Delete && metadataMutation.Content != "" {
+			if len(metadataMutation.Content) > 65536 {
+				return core.Config{}, fmt.Errorf("%w: client metadata is too large", ErrInvalid)
+			}
+			storedMetadata, err = s.encryptContent(metadataMutation.Content)
+			if err != nil {
+				return core.Config{}, err
+			}
+		}
 	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -255,8 +294,62 @@ func (s *Store) SaveAgentConfig(ctx context.Context, input core.Config, expected
 	if err := s.insertConfigRevision(ctx, tx, saved); err != nil {
 		return core.Config{}, err
 	}
+	if currentVersion > 0 {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO config_client_metadata (config_id,config_version,profile_tag,content,created_at)
+			SELECT config_id,$2,profile_tag,content,now()
+			FROM config_client_metadata WHERE config_id=$1 AND config_version=$3
+			ON CONFLICT (config_id,config_version,profile_tag) DO NOTHING`, currentID, saved.Version, currentVersion); err != nil {
+			return core.Config{}, err
+		}
+	}
+	if metadataMutation != nil {
+		for _, tag := range []string{metadataMutation.OriginalTag, metadataMutation.Tag} {
+			if tag == "" {
+				continue
+			}
+			if _, err := tx.Exec(ctx, `DELETE FROM config_client_metadata WHERE config_id=$1 AND config_version=$2 AND profile_tag=$3`, currentID, saved.Version, tag); err != nil {
+				return core.Config{}, err
+			}
+		}
+		if !metadataMutation.Delete && metadataMutation.Tag != "" && storedMetadata != "" {
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO config_client_metadata (config_id,config_version,profile_tag,content,created_at)
+				VALUES ($1,$2,$3,$4,now())`, currentID, saved.Version, metadataMutation.Tag, storedMetadata); err != nil {
+				return core.Config{}, mapError(err)
+			}
+		}
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return core.Config{}, err
 	}
 	return saved, nil
+}
+
+// ConfigClientMetadata returns decrypted client-only metadata for an exact
+// configuration version. Callers apply entries only to the matching tag.
+func (s *Store) ConfigClientMetadata(ctx context.Context, configID string, version int) (map[string]string, error) {
+	if configID == "" || version < 1 {
+		return nil, fmt.Errorf("%w: configuration ID and version are required", ErrInvalid)
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT profile_tag,content FROM config_client_metadata
+		WHERE config_id=$1 AND config_version=$2`, configID, version)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make(map[string]string)
+	for rows.Next() {
+		var tag, stored string
+		if err := rows.Scan(&tag, &stored); err != nil {
+			return nil, err
+		}
+		opened, err := s.decryptContent(stored)
+		if err != nil {
+			return nil, err
+		}
+		result[tag] = opened
+	}
+	return result, rows.Err()
 }
