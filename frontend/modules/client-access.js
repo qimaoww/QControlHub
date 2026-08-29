@@ -310,7 +310,11 @@ export function installClientAccess(ctx) {
                     return `<div class="${field.secret ? "secret" : ""}"><dt>${esc(field.label)}</dt><dd>${field.secret ? `<form class="secret-value-control" action="#"><input id="${fieldID}" type="password" readonly autocomplete="off" spellcheck="false" value="${esc(field.value)}"><button type="button" data-secret-visibility aria-controls="${fieldID}" aria-pressed="false">显示</button><button type="button" data-copy-target="#${fieldID}">复制</button></form>` : `<code title="${esc(field.value)}">${esc(field.value)}</code>`}</dd></div>`;
                   })
                   .join("");
-                return `<article class="client-profile-row" data-refresh-key="client-profile-${esc(entry.agent_id)}-${esc(entry.engine)}-${esc(item.tag)}"><header><b>${esc(item.protocol)}</b><small>${esc(item.tag)} · ${esc(item.profile?.format)}</small></header><form class="secret-value-control client-share-control" action="#"><input id="${inputID}" type="password" readonly autocomplete="off" spellcheck="false" value="${esc(item.profile?.uri)}"><button type="button" data-secret-visibility aria-controls="${inputID}" aria-pressed="false">显示</button><button type="button" data-copy-target="#${inputID}">复制</button></form><div class="client-profile-actions">${displayButton}<button class="button small client-parameter-open" type="button" data-client-parameter-open="${dialogID}" aria-haspopup="dialog" aria-controls="${dialogID}">参数详情 <span aria-hidden="true">→</span></button></div><dialog class="traffic-edit-dialog client-parameter-dialog" id="${dialogID}" aria-labelledby="${dialogTitleID}"><header><span class="traffic-edit-icon client-parameter-icon" aria-hidden="true">&lt;/&gt;</span><div><p class="eyebrow">客户端参数</p><h2 id="${dialogTitleID}">${esc(item.protocol)}</h2><p><span class="engine-badge ${esc(entry.engine)}">${esc(engineName(entry.engine))}</span><span class="client-parameter-meta">${esc(item.tag)} · ${esc(item.profile?.format)}</span></p></div><button class="deploy-command-close" type="button" data-client-parameter-close aria-label="关闭参数详情">×</button></header><div class="traffic-edit-body client-parameter-dialog-body"><dl class="client-parameter-list">${fields || '<div class="empty"><dt>参数</dt><dd>暂无参数</dd></div>'}</dl></div></dialog></article>`;
+                const shareValue = String(item.profile?.uri || "");
+                const shareControl = shareValue.includes("\n")
+                  ? `<textarea class="client-share-yaml is-masked" id="${inputID}" readonly autocomplete="off" spellcheck="false">${esc(shareValue)}</textarea>`
+                  : `<input id="${inputID}" type="password" readonly autocomplete="off" spellcheck="false" value="${esc(shareValue)}">`;
+                return `<article class="client-profile-row" data-refresh-key="client-profile-${esc(entry.agent_id)}-${esc(entry.engine)}-${esc(item.tag)}"><header><b>${esc(item.protocol)}</b><small>${esc(item.tag)} · ${esc(item.profile?.format)}</small></header><form class="secret-value-control client-share-control" action="#">${shareControl}<button type="button" data-secret-visibility aria-controls="${inputID}" aria-pressed="false">显示</button><button type="button" data-copy-target="#${inputID}">复制</button></form><div class="client-profile-actions">${displayButton}<button class="button small client-parameter-open" type="button" data-client-parameter-open="${dialogID}" aria-haspopup="dialog" aria-controls="${dialogID}">参数详情 <span aria-hidden="true">→</span></button></div><dialog class="traffic-edit-dialog client-parameter-dialog" id="${dialogID}" aria-labelledby="${dialogTitleID}"><header><span class="traffic-edit-icon client-parameter-icon" aria-hidden="true">&lt;/&gt;</span><div><p class="eyebrow">客户端参数</p><h2 id="${dialogTitleID}">${esc(item.protocol)}</h2><p><span class="engine-badge ${esc(entry.engine)}">${esc(engineName(entry.engine))}</span><span class="client-parameter-meta">${esc(item.tag)} · ${esc(item.profile?.format)}</span></p></div><button class="deploy-command-close" type="button" data-client-parameter-close aria-label="关闭参数详情">×</button></header><div class="traffic-edit-body client-parameter-dialog-body"><dl class="client-parameter-list">${fields || '<div class="empty"><dt>参数</dt><dd>暂无参数</dd></div>'}</dl></div></dialog></article>`;
               })
               .join("");
             return `<section class="client-access-engine-group"><header><span><span class="engine-badge ${esc(entry.engine)}">${esc(engineName(entry.engine))}</span><small>${(entry.profiles || []).length} 个入站</small></span><a href="#agent-config" data-config-agent="${esc(entry.agent_id)}" data-config-engine="${esc(entry.engine)}">服务端配置</a></header><div>${profiles || '<p class="client-access-entry-empty">需要先设置可访问的节点地址。</p>'}</div></section>`;
@@ -390,9 +394,12 @@ export function installClientAccess(ctx) {
     );
     document.querySelectorAll("[data-secret-visibility]").forEach((button) => {
       button.onclick = () => {
-        const input = button.parentElement.querySelector("input");
-        const reveal = input.type === "password";
-        input.type = reveal ? "text" : "password";
+        const input = button.parentElement.querySelector("input, textarea");
+        const reveal = input.matches("textarea")
+          ? input.classList.contains("is-masked")
+          : input.type === "password";
+        if (input.matches("textarea")) input.classList.toggle("is-masked", !reveal);
+        else input.type = reveal ? "text" : "password";
         button.textContent = reveal ? "隐藏" : "显示";
         button.setAttribute("aria-pressed", String(reveal));
       };

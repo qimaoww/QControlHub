@@ -18,7 +18,7 @@ func NewCredential(protocol, method string) (string, error) {
 		}
 		return base64.StdEncoding.EncodeToString(value), nil
 	}
-	if protocol != ProtocolVLESS && protocol != ProtocolVMess {
+	if protocol != ProtocolVLESS && protocol != ProtocolVLESSXHTTP && protocol != ProtocolVMess && protocol != ProtocolSudoku {
 		value := make([]byte, 24)
 		if _, err := rand.Read(value); err != nil {
 			return "", err

@@ -247,6 +247,10 @@ func protocolKey(value string) string {
 		return ProtocolSS2022
 	case "vless":
 		return ProtocolVLESS
+	case "snell":
+		return ProtocolSnell
+	case "sudoku":
+		return ProtocolSudoku
 	case "vmess":
 		return ProtocolVMess
 	case "trojan":

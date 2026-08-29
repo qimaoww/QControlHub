@@ -30,6 +30,11 @@ const generatedFieldActions = Object.freeze([
     "生成 Reality 密钥对",
   ],
   ["reality_short_id", "reality_short_id", "生成 Short ID"],
+  [
+    "reality_mldsa65_seed",
+    "reality_mldsa65_seed",
+    "生成 ML-DSA-65 密钥对",
+  ],
 ]);
 
 function installGeneratedFieldButtons(form) {
@@ -73,7 +78,7 @@ export function readServerPlanInput(form, protocol) {
     credential: values.get("credential"),
     secondary_credential: values.get("secondary_credential"),
     method: values.get("method"),
-    flow: protocol.uses_reality ? "xtls-rprx-vision" : "",
+    flow: protocol.key === "vless" ? "xtls-rprx-vision" : "",
     transport: values.get("transport"),
     transport_path: values.get("transport_path"),
     tls_enabled:
@@ -85,6 +90,14 @@ export function readServerPlanInput(form, protocol) {
     reality_public_key: values.get("reality_public_key") || "",
     reality_short_id: values.get("reality_short_id") || "",
     reality_server_name: values.get("reality_server_name") || "",
+    reality_min_client_ver:
+      values.get("reality_min_client_ver") || "26.3.27",
+    reality_mldsa65_seed: values.get("reality_mldsa65_seed") || "",
+    reality_mldsa65_verify: values.get("reality_mldsa65_verify") || "",
+    snell_version: Number(values.get("snell_version") || 0),
+    sudoku_padding_min: Number(values.get("sudoku_padding_min") || 0),
+    sudoku_padding_max: Number(values.get("sudoku_padding_max") || 0),
+    sudoku_table_type: values.get("sudoku_table_type") || "",
     target_address: values.get("target_address") || "",
     target_port: Number(values.get("target_port") || 0),
     network: values.get("network") || "",
@@ -501,13 +514,22 @@ async function agentConfig() {
   const transports = (protocol?.transports || ["raw"])
     .map(
       (transport) =>
-        `<option value="${esc(transport)}" ${transport === plan.transport ? "selected" : ""}>${transport === "raw" ? "Raw / TCP" : transport === "websocket" ? "WebSocket" : "gRPC"}</option>`,
+        `<option value="${esc(transport)}" ${transport === plan.transport ? "selected" : ""}>${transport === "raw" ? "Raw / TCP" : transport === "websocket" ? "WebSocket" : transport === "xhttp" ? "XHTTP" : "gRPC"}</option>`,
     )
     .join("");
   const portForward = Boolean(protocol?.port_forward);
+  const protocolOptions =
+    selectedProtocolKey === "snell"
+      ? `<div class="plan-fields one"><label>Snell 版本<select name="snell_version">${[1, 2, 3, 4, 5].map((version) => `<option value="${version}" ${Number(plan.snell_version || 4) === version ? "selected" : ""}>v${version}</option>`).join("")}</select><small>v3-v5 支持 UDP；预设默认使用兼容性稳定的 v4。</small></label></div>`
+      : selectedProtocolKey === "sudoku"
+        ? `<div class="plan-fields three"><label>Padding 最小值<input type="number" name="sudoku_padding_min" min="0" max="100" value="${Number(plan.sudoku_padding_min ?? 1)}"></label><label>Padding 最大值<input type="number" name="sudoku_padding_max" min="0" max="100" value="${Number(plan.sudoku_padding_max ?? 15)}"></label><label>Table Type<select name="sudoku_table_type">${["prefer_ascii", "prefer_entropy", "up_ascii_down_entropy", "up_entropy_down_ascii"].map((value) => `<option value="${value}" ${value === (plan.sudoku_table_type || "prefer_ascii") ? "selected" : ""}>${value}</option>`).join("")}</select></label></div>`
+        : '<input type="hidden" name="snell_version" value="0"><input type="hidden" name="sudoku_padding_min" value="0"><input type="hidden" name="sudoku_padding_max" value="0"><input type="hidden" name="sudoku_table_type" value="">';
   const identitySection = `<section class="builder-section" id="target"><header><span class="section-number">02</span><strong>转发目标</strong></header><div><div class="plan-fields three"><label>目标地址<input name="target_address" maxlength="253" required value="${esc(plan.target_address)}" placeholder="127.0.0.1 或 target.example.com"></label><label>目标端口<input type="number" name="target_port" min="1" max="65535" required value="${Number(plan.target_port)}"></label><label>转发协议<select name="network"><option value="tcp" ${plan.network === "tcp" ? "selected" : ""}>TCP</option><option value="udp" ${plan.network === "udp" ? "selected" : ""}>UDP</option><option value="tcp,udp" ${plan.network === "tcp,udp" ? "selected" : ""}>TCP + UDP</option></select></label></div><p class="validation-note">流量由当前内核直连转发到目标地址；部署前请确认监听端口与防火墙已放行。</p><input type="hidden" name="username" value=""><input type="hidden" name="credential" value=""><input type="hidden" name="secondary_credential" value=""><input type="hidden" name="method" value=""></div></section>`;
+  const xrayRealityAdvanced = engine === "xray"
+    ? `<div class="plan-fields one"><label>最低客户端 Xray 版本<input name="reality_min_client_ver" required pattern="[0-9]{1,3}(\\.[0-9]{1,3}){2}" value="${esc(plan.reality_min_client_ver || "26.3.27")}"><small>默认 26.3.27。降低版本会放行旧 TLS 指纹，可能更容易被 DPI 识别。</small></label></div><div class="plan-fields one"><label class="secret-input">ML-DSA-65 Seed（可选，仅服务端）<span class="secret-value-control"><input type="password" name="reality_mldsa65_seed" value="${esc(plan.reality_mldsa65_seed || "")}" autocomplete="off"><button type="button" data-secret-visibility>显示</button></span><small>使用 xray mldsa65 生成；系统会从 Seed 自动推导客户端 Verify。启用前请用 xray tls ping 检查目标证书长度大于 3500。</small></label></div>`
+    : '<input type="hidden" name="reality_min_client_ver" value="26.3.27"><input type="hidden" name="reality_mldsa65_seed" value="">';
   const security = protocol?.uses_reality
-    ? `<input type="hidden" name="reality_enabled" value="1"><section class="builder-section security-section" id="security"><header><span class="section-number">04</span><strong>Reality</strong></header><div><div class="plan-fields two"><label>目标域名 / ServerName<input name="reality_server_name" list="reality-presets" required value="${esc(plan.reality_server_name)}"><datalist id="reality-presets">${workspace.reality_presets.map((value) => `<option value="${esc(value)}">`).join("")}</datalist><small>校验公网 DNS；拒绝 Cloudflare 与非公网地址。</small></label><label>Short ID<input name="reality_short_id" required value="${esc(plan.reality_short_id)}"></label></div><div class="plan-fields one"><label>客户端 Public Key<input name="reality_public_key" required value="${esc(plan.reality_public_key)}"></label><label class="secret-input">服务端 Private Key<span class="secret-value-control"><input type="password" name="reality_private_key" required value="${esc(plan.reality_private_key)}"><button type="button" data-secret-visibility>显示</button></span></label></div></div></section>`
+    ? `<input type="hidden" name="reality_enabled" value="1"><section class="builder-section security-section" id="security"><header><span class="section-number">04</span><strong>Reality</strong></header><div><div class="plan-fields two"><label>目标域名 / ServerName<input name="reality_server_name" list="reality-presets" required value="${esc(plan.reality_server_name)}"><datalist id="reality-presets">${workspace.reality_presets.map((value) => `<option value="${esc(value)}">`).join("")}</datalist><small>校验公网 DNS；拒绝 Cloudflare 与非公网地址。</small></label><label>Short ID<input name="reality_short_id" required value="${esc(plan.reality_short_id)}"></label></div><div class="plan-fields one"><label>客户端 Public Key<input name="reality_public_key" required value="${esc(plan.reality_public_key)}"></label><label class="secret-input">服务端 Private Key<span class="secret-value-control"><input type="password" name="reality_private_key" required value="${esc(plan.reality_private_key)}"><button type="button" data-secret-visibility>显示</button></span></label></div>${xrayRealityAdvanced}</div></section>`
     : protocol?.supports_tls
       ? `<input type="hidden" name="reality_enabled" value="0"><section class="builder-section security-section" id="security"><header><span class="section-number">04</span><strong>TLS</strong></header><div><label class="tls-switch"><input type="checkbox" name="tls_enabled" value="1" ${plan.tls_enabled || protocol.requires_tls ? "checked" : ""} ${protocol.requires_tls ? "disabled" : ""}><strong>${protocol.requires_tls ? "TLS" : "启用 TLS"}</strong></label><div class="plan-fields two"><label>证书路径<input name="certificate_path" value="${esc(plan.certificate_path)}"></label><label>私钥路径<input name="private_key_path" value="${esc(plan.private_key_path)}"></label></div><p class="validation-note">私钥仅目标内核服务组可读。</p></div></section>`
       : '<input type="hidden" name="reality_enabled" value="0"><input type="hidden" name="tls_enabled" value="0">';
@@ -527,6 +549,8 @@ async function agentConfig() {
       viewKey: `agent-config-${agent.id}-${engine}-${selectedProtocolKey}-${selectedInbound?.tag || "new"}`,
     },
   );
+  const identityBody = document.querySelector("#identity > div");
+  if (identityBody) identityBody.insertAdjacentHTML("beforeend", protocolOptions);
   if (portForward) {
     const identity = document.querySelector("#identity");
     if (identity) identity.outerHTML = identitySection;

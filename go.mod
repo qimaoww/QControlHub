@@ -5,9 +5,11 @@ go 1.25.0
 require gopkg.in/yaml.v3 v3.0.1
 
 require (
+	github.com/cloudflare/circl v1.6.3
 	github.com/coder/websocket v1.8.15
 	github.com/jackc/pgx/v5 v5.9.2
 	github.com/ulikunitz/xz v0.5.15
+	golang.org/x/crypto v0.41.0
 	golang.org/x/sync v0.21.0
 )
 
@@ -17,6 +19,6 @@ require (
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/rogpeppe/go-internal v1.15.0 // indirect
-	golang.org/x/crypto v0.41.0 // indirect
+	golang.org/x/sys v0.35.0 // indirect
 	golang.org/x/text v0.39.0 // indirect
 )

@@ -45,6 +45,10 @@ func NewPlan(protocol Protocol) (Input, error) {
 		transport = "websocket"
 		transportPath = "/" + suffix
 	}
+	if protocol.Key == ProtocolVLESSXHTTP {
+		transport = "xhttp"
+		transportPath = "/" + suffix
+	}
 	input := Input{
 		Protocol: protocol.Key, Tag: protocol.Key + "-" + suffix, Listen: "0.0.0.0",
 		Port: 20000 + int(portOffset.Int64()), Username: "qch-" + suffix,
@@ -67,8 +71,18 @@ func NewPlan(protocol Protocol) (Input, error) {
 			return Input{}, err
 		}
 	}
-	if protocol.Key == ProtocolVLESS {
-		input.Flow = "xtls-rprx-vision"
+	if protocol.Key == ProtocolSnell {
+		input.SnellVersion = 4
+	}
+	if protocol.Key == ProtocolSudoku {
+		input.SudokuPaddingMin = 1
+		input.SudokuPaddingMax = 15
+		input.SudokuTableType = "prefer_ascii"
+	}
+	if protocol.Key == ProtocolVLESS || protocol.Key == ProtocolVLESSXHTTP {
+		if protocol.Key == ProtocolVLESS {
+			input.Flow = "xtls-rprx-vision"
+		}
 		privateKey, err := ecdh.X25519().GenerateKey(rand.Reader)
 		if err != nil {
 			return Input{}, err
@@ -84,6 +98,7 @@ func NewPlan(protocol Protocol) (Input, error) {
 		input.RealityPublicKey = base64.RawURLEncoding.EncodeToString(privateKey.PublicKey().Bytes())
 		input.RealityShortID = hex.EncodeToString(shortID)
 		input.RealityServerName = DefaultRealityServerName
+		input.RealityMinClientVer = "26.3.27"
 	}
 	return input, nil
 }
@@ -118,12 +133,12 @@ func RegeneratePlan(protocol Protocol, current Input) (Input, error) {
 	randomTransportPath := plan.TransportPath
 	plan.Transport = current.Transport
 	plan.TransportPath = current.TransportPath
-	if current.Transport == "websocket" || current.Transport == "grpc" {
+	if current.Transport == "websocket" || current.Transport == "grpc" || current.Transport == "xhttp" {
 		pathSuffix := strings.TrimPrefix(randomTransportPath, "/")
 		if pathSuffix == "" {
 			pathSuffix = strings.TrimPrefix(plan.Tag, protocol.Key+"-")
 		}
-		if current.Transport == "websocket" {
+		if current.Transport == "websocket" || current.Transport == "xhttp" {
 			plan.TransportPath = "/" + pathSuffix
 		} else {
 			plan.TransportPath = pathSuffix
@@ -134,6 +149,22 @@ func RegeneratePlan(protocol Protocol, current Input) (Input, error) {
 	plan.PrivateKeyPath = current.PrivateKeyPath
 	plan.RealityEnabled = current.RealityEnabled
 	plan.RealityServerName = current.RealityServerName
+	plan.RealityMinClientVer = current.RealityMinClientVer
+	if protocol.SupportsRealityMLDSA {
+		seed := make([]byte, 32)
+		if _, err := rand.Read(seed); err != nil {
+			return Input{}, err
+		}
+		plan.RealityMLDSA65Seed = base64.RawURLEncoding.EncodeToString(seed)
+		plan.RealityMLDSA65Verify, err = mldsa65VerifyFromSeed(plan.RealityMLDSA65Seed)
+		if err != nil {
+			return Input{}, err
+		}
+	}
+	plan.SnellVersion = current.SnellVersion
+	plan.SudokuPaddingMin = current.SudokuPaddingMin
+	plan.SudokuPaddingMax = current.SudokuPaddingMax
+	plan.SudokuTableType = current.SudokuTableType
 	if protocol.PortForward {
 		plan.TargetAddress = current.TargetAddress
 		plan.TargetPort = current.TargetPort
