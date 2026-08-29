@@ -22,6 +22,8 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
+const validationCleanupBinary = "/usr/bin/rm"
+
 type EngineSpec struct {
 	Binary           string
 	ConfigPath       string
@@ -1763,6 +1765,32 @@ func (e *Executor) validateSnapshotWithIdentity(ctx context.Context, engine core
 		return "", err
 	}
 	defer root.Close()
+	validationHome := ""
+	validationHomeName := ""
+	if engine == core.EngineMihomo {
+		homeSuffix, err := randomSuffix(10)
+		if err != nil {
+			return "", err
+		}
+		validationHomeName = ".qcontrolhub-validate-home-" + homeSuffix
+		if err := root.Mkdir(validationHomeName, 0o700); err != nil {
+			return "", fmt.Errorf("create Mihomo validation home: %w", err)
+		}
+		defer func() {
+			if validationHomeName != "" {
+				_ = cleanupMihomoValidationHome(root, directory, validationHomeName, identity)
+			}
+		}()
+		if identity != nil {
+			// The directory is created with its final 0700 mode. Chown last:
+			// capability-bounded root deliberately lacks CAP_FOWNER and cannot
+			// chmod the directory after transferring it to the service user.
+			if err := root.Chown(validationHomeName, int(identity.uid), int(identity.gid)); err != nil {
+				return "", fmt.Errorf("prepare Mihomo validation home: %w", err)
+			}
+		}
+		validationHome = filepath.Join(directory, validationHomeName)
+	}
 	suffix, err := randomSuffix(10)
 	if err != nil {
 		return "", err
@@ -1791,7 +1819,7 @@ func (e *Executor) validateSnapshotWithIdentity(ctx context.Context, engine core
 	var args []string
 	switch engine {
 	case core.EngineMihomo:
-		args = []string{"-t", "-f", tempPath}
+		args = []string{"-t", "-d", validationHome, "-f", tempPath}
 	case core.EngineXray:
 		args = []string{"run", "-test", "-config", tempPath}
 	case core.EngineSingBox:
@@ -1800,6 +1828,16 @@ func (e *Executor) validateSnapshotWithIdentity(ctx context.Context, engine core
 		return "ss-rust configuration syntax validated (ssserver has no non-running check mode)", nil
 	}
 	output, err := runInDirectoryWithEnvironmentAndIdentity(ctx, directory, spec.commandEnv, spec.Binary, identity, args...)
+	if validationHomeName != "" {
+		cleanupErr := cleanupMihomoValidationHome(root, directory, validationHomeName, identity)
+		validationHomeName = ""
+		if cleanupErr != nil {
+			if err != nil {
+				return output, fmt.Errorf("%s rejected the configuration: %w; clean up validation home: %v", engine, err, cleanupErr)
+			}
+			return output, fmt.Errorf("clean up Mihomo validation home: %w", cleanupErr)
+		}
+	}
 	if err != nil {
 		return output, fmt.Errorf("%s rejected the configuration: %w", engine, err)
 	}
@@ -1807,6 +1845,28 @@ func (e *Executor) validateSnapshotWithIdentity(ctx context.Context, engine core
 		output = fmt.Sprintf("%s validation passed", engine)
 	}
 	return output, nil
+}
+
+func cleanupMihomoValidationHome(root *os.Root, directory, homeName string, identity *commandIdentity) error {
+	if err := root.RemoveAll(homeName); err == nil {
+		return nil
+	} else if identity == nil {
+		return err
+	}
+	if err := validatePrivilegedExecutable(validationCleanupBinary); err != nil {
+		return fmt.Errorf("unsafe validation cleanup helper: %w", err)
+	}
+	cleanupContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	// The service identity can remove everything below its 0700 home but
+	// cannot unlink the home from the root-owned configuration directory.
+	// Ignore that expected final rmdir error; the Agent removes the now-empty
+	// top-level directory through its already-open, protected os.Root.
+	_, _ = runInDirectoryWithEnvironmentAndIdentity(
+		cleanupContext, directory, "", validationCleanupBinary, identity,
+		"-rf", "--", filepath.Join(directory, homeName),
+	)
+	return root.RemoveAll(homeName)
 }
 
 func validateNoPersistentCoreLogs(engine core.Engine, content string) error {

@@ -211,6 +211,50 @@ func TestManagedConfigurationAccessRejectsUnsafePaths(t *testing.T) {
 	assertFileContentAndMode(t, target, "unchanged", 0o600)
 }
 
+func TestMihomoValidationUsesDisposableServiceWritableHome(t *testing.T) {
+	requireAgentRoot(t)
+	root, err := os.MkdirTemp("/tmp", "qcontrolhub-mihomo-validation-test-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(root) })
+	if err := os.Chmod(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	configDirectory := filepath.Join(root, "config")
+	if err := os.Mkdir(configDirectory, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	const serviceID = 65534
+	if err := os.Chown(configDirectory, 0, serviceID); err != nil {
+		t.Fatal(err)
+	}
+	binary := filepath.Join(root, "mihomo")
+	script := `#!/bin/sh
+[ "$1" = -t ] && [ "$2" = -d ] && [ -d "$3" ] && [ -w "$3" ] &&
+  [ "$4" = -f ] && [ -r "$5" ] || exit 31
+printf generated > "$3/generated-by-core"
+`
+	if err := os.WriteFile(binary, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	identity := commandIdentity{uid: serviceID, gid: serviceID, groups: []uint32{serviceID}}
+	metadata := fileMetadata{mode: 0o640, uid: 0, gid: serviceID, ownershipKnown: true}
+	spec := EngineSpec{Binary: binary, ConfigPath: filepath.Join(configDirectory, "config.yaml")}
+	if _, err := (&Executor{}).validateSnapshotWithIdentity(
+		context.Background(), core.EngineMihomo, spec, "proxies: []\n", &identity, metadata,
+	); err != nil {
+		t.Fatalf("validate Mihomo snapshot as managed service: %v", err)
+	}
+	entries, err := os.ReadDir(configDirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("Mihomo validation artifacts were not removed: %v", entries)
+	}
+}
+
 func TestRollbackDeployRestoresBackupAndBackupRetentionIsBounded(t *testing.T) {
 	t.Parallel()
 	destination := filepath.Join(t.TempDir(), "config.json")
