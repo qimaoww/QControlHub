@@ -491,6 +491,16 @@ func (c *Client) runWebSocket(ctx context.Context) error {
 					return fmt.Errorf("control plane supplied invalid public IP probe configuration: %w", err)
 				}
 				continue
+			case core.WireAgentPolicy:
+				if message.AgentPolicy == nil {
+					return errors.New("control plane returned an invalid agent policy")
+				}
+				if err := c.applyAgentPolicy(sessionContext, *message.AgentPolicy); err != nil {
+					return fmt.Errorf("apply control-plane agent policy: %w", err)
+				}
+				heartbeatTicker.Reset(time.Duration(message.AgentPolicy.HeartbeatIntervalSeconds) * time.Second)
+				metricsTicker.Reset(time.Duration(message.AgentPolicy.MetricsIntervalSeconds) * time.Second)
+				continue
 			case core.WireTask:
 				if message.Task == nil || activeTask != "" || !c.validTask(*message.Task) {
 					return errors.New("control plane returned an invalid or concurrent task envelope")
@@ -520,6 +530,22 @@ func (c *Client) runWebSocket(ctx context.Context) error {
 			}
 		}
 	}
+}
+
+func (c *Client) applyAgentPolicy(ctx context.Context, policy core.AgentPolicy) error {
+	if err := policy.Validate(); err != nil {
+		return err
+	}
+	c.logs.ApplyPolicy(policy)
+	if c.executor.serviceManager().Kind() == ServiceManagerSystemd {
+		if err := ensureManagedCoreLogStreamingWithPolicy(ctx, c.executor.Specs, policy, c.executor.serviceManager()); err != nil {
+			// Local log tuning is best-effort just like initial journal setup. A
+			// host-specific systemd limitation must not put the Agent into a WSS
+			// reconnect loop or prevent heartbeat/metrics policy from applying.
+			slog.Warn("apply systemd core log limits", "error", err)
+		}
+	}
+	return nil
 }
 
 func (c *Client) queueHeartbeat(ctx context.Context, outgoing chan<- core.WireMessage) error {
@@ -589,6 +615,7 @@ func (c *Client) advertisedFeatures() []string {
 		core.AgentFeatureCoreLogStatus,
 		core.AgentFeatureMihomoDevelopmentSource,
 		core.AgentFeatureManagedPublicIPProbe,
+		core.AgentFeatureManagedPolicy,
 		core.AgentFeatureManagedConfigRead,
 	}
 	if c.publicIP.Enabled() {

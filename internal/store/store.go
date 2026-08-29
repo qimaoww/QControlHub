@@ -852,7 +852,8 @@ func (s *Store) UpdateAgentObservedPublicIP(ctx context.Context, id, address str
 
 func (s *Store) ListAgents(ctx context.Context) ([]core.Agent, error) {
 	rows, err := s.pool.Query(ctx, `
-			SELECT id,name,version,os,arch,capabilities,features,labels,runtime,metrics,last_seen,enrolled_at
+			SELECT id,name,version,os,arch,capabilities,features,labels,runtime,metrics,last_seen,enrolled_at,
+				(SELECT agent_offline_threshold_seconds FROM panel_settings WHERE id=1)
 		FROM agents WHERE revoked_at IS NULL ORDER BY enrolled_at DESC`)
 	if err != nil {
 		return nil, err
@@ -863,7 +864,8 @@ func (s *Store) ListAgents(ctx context.Context) ([]core.Agent, error) {
 	for rows.Next() {
 		var agent core.Agent
 		var capabilities, features, labels, runtimeState, metricsState []byte
-		if err := rows.Scan(&agent.ID, &agent.Name, &agent.Version, &agent.OS, &agent.Arch, &capabilities, &features, &labels, &runtimeState, &metricsState, &agent.LastSeen, &agent.EnrolledAt); err != nil {
+		var offlineThresholdSeconds int
+		if err := rows.Scan(&agent.ID, &agent.Name, &agent.Version, &agent.OS, &agent.Arch, &capabilities, &features, &labels, &runtimeState, &metricsState, &agent.LastSeen, &agent.EnrolledAt, &offlineThresholdSeconds); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal(capabilities, &agent.Capabilities); err != nil {
@@ -881,7 +883,7 @@ func (s *Store) ListAgents(ctx context.Context) ([]core.Agent, error) {
 		if err := json.Unmarshal(metricsState, &agent.Metrics); err != nil {
 			return nil, err
 		}
-		if agent.LastSeen.After(now.Add(-45 * time.Second)) {
+		if agent.LastSeen.After(now.Add(-time.Duration(offlineThresholdSeconds) * time.Second)) {
 			agent.Status = "online"
 		} else {
 			agent.Status = "offline"
@@ -1886,6 +1888,9 @@ ALTER TABLE enrollment_tokens ADD COLUMN IF NOT EXISTS agent_id text;
 DROP INDEX IF EXISTS enrollment_tokens_reusable_name_unique_idx;
 
 ALTER TABLE agents ADD COLUMN IF NOT EXISTS enrollment_id text;
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS presence_notification_state varchar(10) NOT NULL DEFAULT 'unknown';
+ALTER TABLE agents DROP CONSTRAINT IF EXISTS agents_presence_notification_state_check;
+ALTER TABLE agents ADD CONSTRAINT agents_presence_notification_state_check CHECK (presence_notification_state IN ('unknown','online','offline'));
 ALTER TABLE agents DROP CONSTRAINT IF EXISTS agents_enrollment_id_fkey;
 ALTER TABLE agents ADD CONSTRAINT agents_enrollment_id_fkey FOREIGN KEY (enrollment_id) REFERENCES enrollment_tokens(id) ON DELETE SET NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS agents_enrollment_id_unique_idx ON agents(enrollment_id) WHERE enrollment_id IS NOT NULL;
@@ -1921,6 +1926,43 @@ ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS core_log_minimum_level varch
 ALTER TABLE panel_settings DROP CONSTRAINT IF EXISTS panel_settings_core_log_minimum_level_check;
 ALTER TABLE panel_settings ADD CONSTRAINT panel_settings_core_log_minimum_level_check CHECK (core_log_minimum_level IN ('debug','info','warning','error','critical','off'));
 ALTER TABLE panel_settings DROP COLUMN IF EXISTS enrollment_ttl_minutes;
+ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS revision bigint NOT NULL DEFAULT 1 CHECK (revision > 0);
+ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS time_zone varchar(32) NOT NULL DEFAULT 'browser';
+ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS time_display varchar(32) NOT NULL DEFAULT 'absolute-relative';
+ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS default_config_editor varchar(16) NOT NULL DEFAULT 'structured';
+ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS agent_heartbeat_interval_seconds integer NOT NULL DEFAULT 15;
+ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS agent_metrics_interval_seconds integer NOT NULL DEFAULT 1;
+ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS agent_offline_threshold_seconds integer NOT NULL DEFAULT 45;
+ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS task_stale_timeout_seconds integer NOT NULL DEFAULT 120;
+ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS install_task_stale_timeout_seconds integer NOT NULL DEFAULT 360;
+ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS task_max_attempts integer NOT NULL DEFAULT 3;
+ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS public_ip_probe_interval_seconds integer NOT NULL DEFAULT 300;
+ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS core_log_retention_days integer NOT NULL DEFAULT 7;
+ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS agent_core_log_max_mib integer NOT NULL DEFAULT 16;
+ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS agent_core_log_rotate_count integer NOT NULL DEFAULT 1;
+ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS metric_retention_days integer NOT NULL DEFAULT 7;
+ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS audit_retention_days integer NOT NULL DEFAULT 90;
+ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS task_retention_days integer NOT NULL DEFAULT 0;
+ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS config_revision_retention integer NOT NULL DEFAULT 0;
+ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS notify_task_failed boolean NOT NULL DEFAULT true;
+ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS notify_agent_offline boolean NOT NULL DEFAULT true;
+ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS notify_agent_online boolean NOT NULL DEFAULT true;
+ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS notify_traffic_quota boolean NOT NULL DEFAULT true;
+ALTER TABLE panel_settings DROP CONSTRAINT IF EXISTS panel_settings_operational_values_check;
+ALTER TABLE panel_settings ADD CONSTRAINT panel_settings_operational_values_check CHECK (
+    time_zone IN ('browser','Asia/Shanghai','UTC') AND
+    time_display IN ('absolute-relative','absolute') AND
+    default_config_editor IN ('structured','source') AND
+    task_page_size IN (50,100,500) AND task_poll_interval_ms IN (600,1000,2000,5000) AND
+    agent_heartbeat_interval_seconds IN (10,15,30) AND agent_metrics_interval_seconds IN (1,5,15,30) AND
+    agent_offline_threshold_seconds IN (45,60,90,180) AND agent_offline_threshold_seconds >= agent_heartbeat_interval_seconds*3 AND
+    task_stale_timeout_seconds IN (60,120,300,600) AND install_task_stale_timeout_seconds IN (180,360,600,900) AND
+    task_max_attempts IN (1,3,5) AND public_ip_probe_interval_seconds IN (300,900,3600) AND
+    core_log_retention_days IN (1,3,7,14,30) AND agent_core_log_max_mib IN (1,2,4,8,16,32,64,128) AND
+    agent_core_log_rotate_count IN (0,1,2,3,5) AND metric_retention_days IN (7,14,30) AND
+    audit_retention_days IN (0,30,90,180) AND task_retention_days IN (0,30,90,180) AND
+    config_revision_retention IN (0,50,100)
+);
 
 CREATE TABLE IF NOT EXISTS panel_users (
     id text PRIMARY KEY,
@@ -2011,6 +2053,9 @@ ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS quota_enabled boolean
 ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS monitoring_enabled boolean NOT NULL DEFAULT true;
 ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS discovered boolean NOT NULL DEFAULT false;
 ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS traffic_history_initialized boolean NOT NULL DEFAULT false;
+ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS quota_notification_generation bigint NOT NULL DEFAULT 0;
+ALTER TABLE port_traffic_policies DROP CONSTRAINT IF EXISTS port_traffic_policies_quota_notification_generation_check;
+ALTER TABLE port_traffic_policies ADD CONSTRAINT port_traffic_policies_quota_notification_generation_check CHECK (quota_notification_generation >= 0);
 DO $traffic_baselines$
 DECLARE
     add_reported_received boolean;

@@ -26,19 +26,23 @@ const (
 	TypeTaskFailed   = "task.failed"
 	TypeAgentOffline = "agent.offline"
 	TypeAgentOnline  = "agent.online"
+	TypeTrafficQuota = "traffic.quota"
 )
 
 // Event is the structured payload sent to the configured webhook.
 type Event struct {
-	Type    string    `json:"type"`
-	Time    time.Time `json:"time"`
-	AgentID string    `json:"agent_id,omitempty"`
-	Agent   string    `json:"agent,omitempty"`
-	Engine  string    `json:"engine,omitempty"`
-	TaskID  string    `json:"task_id,omitempty"`
-	Action  string    `json:"action,omitempty"`
-	Error   string    `json:"error,omitempty"`
-	Message string    `json:"message"`
+	Type       string    `json:"type"`
+	Time       time.Time `json:"time"`
+	AgentID    string    `json:"agent_id,omitempty"`
+	Agent      string    `json:"agent,omitempty"`
+	Engine     string    `json:"engine,omitempty"`
+	TaskID     string    `json:"task_id,omitempty"`
+	Action     string    `json:"action,omitempty"`
+	Port       int       `json:"port,omitempty"`
+	UsedBytes  uint64    `json:"used_bytes,omitempty"`
+	LimitBytes uint64    `json:"limit_bytes,omitempty"`
+	Error      string    `json:"error,omitempty"`
+	Message    string    `json:"message"`
 }
 
 // Client sends signed events over HTTP. It is safe for concurrent use.
@@ -126,6 +130,14 @@ func AgentOnlineEvent(agent core.Agent) Event {
 		AgentID: agent.ID,
 		Agent:   agent.Name,
 		Message: fmt.Sprintf("节点 %s 已恢复在线", agent.Name),
+	}
+}
+
+func TrafficQuotaEvent(policy core.PortTrafficPolicy, agentName string) Event {
+	return Event{
+		Type: TypeTrafficQuota, Time: time.Now().UTC(), AgentID: policy.AgentID, Agent: agentName,
+		Engine: string(policy.Engine), Port: policy.Port, UsedBytes: policy.UsedBytes, LimitBytes: policy.LimitBytes,
+		Message: fmt.Sprintf("流量配额触发：节点 %s 的 %s 端口 %d 已阻断", agentName, policy.Engine, policy.Port),
 	}
 }
 

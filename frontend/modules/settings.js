@@ -1,176 +1,149 @@
 import { bindEvent } from "./refresh.js";
 
 export function installSettings(ctx) {
-  const { api, state, esc, date, can, shell, notify, confirmAction } = ctx;
+  const { api, state, esc, can, shell, notify } = ctx;
   let settingsRequest = 0;
-  async function settings({ settings: preloadedSettings, replaceForm = false } = {}) {
-    const request = ++settingsRequest;
-    const [item, users] = await Promise.all([
-      preloadedSettings || api("/settings"),
-      can("users.manage") ? api("/users") : Promise.resolve([]),
-    ]);
-    if (request !== settingsRequest || state.route !== "settings") return;
-  state.data.settings = item;
-  const readOnly = can("settings.manage") ? "" : "disabled";
-  const roleName = { admin: "管理员", user: "用户" };
-  const permissionGroups = [
-    ["查看", [["overview.read", "查看总览"], ["agents.read", "查看节点"], ["deployments.read", "查看部署记录"], ["client-access.read", "查看客户端配置"], ["catalogs.read", "查看内核目录"], ["agent-config.read", "读取节点配置"], ["configs.read", "查看配置档案"], ["tasks.read", "查看任务记录"], ["core-logs.read", "查看内核日志"], ["settings.read", "查看系统设置"], ["audit.read", "查看审计记录"], ["metrics.read", "查看指标"], ["traffic.read", "查看端口流量"]]],
-    ["操作", [["agent-config.write", "编辑节点配置"], ["configs.write", "管理配置档案"], ["tasks.execute", "执行节点任务"], ["traffic.manage", "管理流量配额"], ["templates.read", "查看配置模板"], ["templates.write", "管理配置模板"]]],
-    ["管理", [["agents.manage", "管理节点身份"], ["enrollment.manage", "添加节点"], ["configs.delete", "删除配置档案"], ["configs.restore", "恢复配置版本"], ["templates.delete", "删除配置模板"], ["settings.manage", "修改系统设置"], ["users.manage", "管理用户"]]],
-  ];
-  const permissionEditor = (permissions, options = {}) => {
-    const selected = new Set(permissions || []);
-    const disabled = options.disabled ? "disabled" : "";
-    const prefix = options.prefix || "";
-    return `<div class="permission-editor" data-permission-editor="${esc(prefix)}"><div class="permission-editor-head"><b>细分权限</b><small>${options.disabled ? "管理员默认拥有全部权限" : "只授予完成工作所需的权限"}</small></div><div class="permission-groups">${permissionGroups.map(([group, values]) => `<section><h4>${group}</h4><div>${values.map(([key, label]) => `<label><input type="checkbox" name="${esc(prefix)}permissions" value="${esc(key)}" ${selected.has(key) ? "checked" : ""} ${disabled}><span>${label}</span></label>`).join("")}</div></section>`).join("")}</div></div>`;
-  };
-  const userRows = users
-    .map(
-      (user) =>
-        `<article class="panel-user-row" data-user-form="${esc(user.id)}"><header><span class="user-avatar">${esc((user.display_name || user.username).slice(0, 1).toUpperCase())}</span><div><strong>${esc(user.display_name || user.username)}</strong><small>${esc(user.username)} · ${user.disabled ? "已停用" : "正常"}</small></div><em class="user-role-badge">${user.role === "admin" ? "管理员" : "用户"}</em></header><div class="user-edit-grid"><label>身份<select name="role" data-user-role aria-label="${esc(user.username)} 身份"><option value="user" ${user.role === "user" ? "selected" : ""}>用户</option><option value="admin" ${user.role === "admin" ? "selected" : ""}>管理员</option></select></label><label>显示名称<input name="display_name" value="${esc(user.display_name || "")}" maxlength="100" placeholder="显示名称"></label><label>修改密码<input name="password" type="password" minlength="12" maxlength="72" autocomplete="new-password" placeholder="留空不修改"></label><label class="user-disabled-toggle"><span>账号状态</span><span><input name="disabled" type="checkbox" ${user.disabled ? "checked" : ""} ${state.session.user_id === user.id ? "disabled" : ""}> ${user.disabled ? "已停用" : "正常"}</span></label></div>${permissionEditor(user.permissions, { disabled: user.role === "admin", prefix: "user-" })}<footer><small>${user.role === "admin" ? "管理员可访问全部功能" : `${(user.permissions || []).length} 项权限已授权`}</small><button class="button small" type="button" data-save-user="${esc(user.id)}">保存修改</button></footer></article>`,
-    )
+
+  const options = (selected, values) => values
+    .map(([value, label]) => `<option value="${esc(value)}" ${String(value) === String(selected) ? "selected" : ""}>${esc(label)}</option>`)
     .join("");
-  const userSection = can("users.manage")
-    ? `<section class="settings-section" id="users"><header><span class="settings-section-number">06</span><div><h3>用户管理</h3><p>身份只有管理员和用户，具体可见和可执行的功能由权限决定。</p></div></header><div class="user-create-form" id="user-create-form"><div class="user-create-fields"><label>用户名<input name="username" required maxlength="64" pattern="[A-Za-z0-9._\\-]+" placeholder="例如 ops-user"></label><label>显示名称<input name="display_name" maxlength="100" placeholder="例如 张三"></label><label>身份<select name="role" data-create-role aria-label="新用户身份"><option value="user">用户</option><option value="admin">管理员</option></select></label><label>初始密码<input name="password" type="password" required minlength="12" maxlength="72" autocomplete="new-password" placeholder="至少 12 个字符"></label></div>${permissionEditor([], { prefix: "create-" })}<div class="user-create-actions"><span>创建后仍可随时调整权限</span><button class="button primary" type="button" data-create-user>添加用户</button></div></div><div class="panel-user-list">${userRows || '<div class="empty compact"><strong>还没有个人用户</strong><span>使用上方表单添加第一个用户</span></div>'}</div></section>`
-    : "";
-  shell(
-    `<div class="settings-workspace"><header class="settings-hero"><h2>系统设置</h2></header><form class="settings-form" id="settings-form"><section class="settings-section" id="identity"><header><span class="settings-section-number">01</span><h3>面板标识</h3></header><div class="settings-grid"><label class="settings-field"><span>面板名称</span><input name="panel_name" value="${esc(item.panel_name)}" maxlength="40" required autocomplete="organization" ${readOnly}></label><label class="settings-field"><span>面板说明</span><input name="panel_description" value="${esc(item.panel_description)}" maxlength="120" ${readOnly}></label></div></section><section class="settings-section" id="defaults"><header><span class="settings-section-number">02</span><h3>操作默认值</h3></header><div class="settings-grid one-column"><label class="settings-field"><span>任务默认显示数量</span><select name="task_page_size" ${readOnly}>${[50, 100, 500].map((value) => `<option value="${value}" ${value === item.task_page_size ? "selected" : ""}>${value} 条</option>`).join("")}</select></label></div></section><section class="settings-section" id="synchronization"><header><span class="settings-section-number">03</span><h3>状态同步</h3></header><div class="settings-grid one-column"><label class="settings-field"><span>任务状态刷新频率</span><select name="task_poll_interval_ms" ${readOnly}>${[600, 1000, 2000, 5000].map((value) => `<option value="${value}" ${value === item.task_poll_interval_ms ? "selected" : ""}>${value < 1000 ? "0.6 秒" : `${value / 1000} 秒`}</option>`).join("")}</select></label></div></section><section class="settings-section" id="core-log-storage"><header><span class="settings-section-number">04</span><h3>内核日志保存</h3></header><div class="settings-grid one-column"><label class="settings-field"><span>最低保存级别</span><select name="core_log_minimum_level" ${readOnly}>${[["debug", "调试及以上（保存全部）"], ["info", "信息及以上"], ["warning", "警告及以上"], ["error", "错误及以上"], ["critical", "仅严重错误"], ["off", "停止保存新日志"]].map(([value, label]) => `<option value="${value}" ${value === (item.core_log_minimum_level || "debug") ? "selected" : ""}>${label}</option>`).join("")}</select></label><p class="settings-hint">该策略在主控写入 PostgreSQL 前生效，只影响保存后的新日志；已有日志仍按 7 天保留期清理。主控仍会校验并向 Agent 确认批次，再丢弃低于阈值的内容，不会因此断开连接。</p></div></section><section class="settings-section" id="notifications"><header><span class="settings-section-number">05</span><h3>事件通知</h3></header><div class="settings-grid one-column"><label class="settings-field"><span>Webhook 地址</span><input name="webhook_url" type="url" value="${esc(item.webhook_url)}" maxlength="500" placeholder="https://example.com/hooks/qcontrolhub（留空禁用）" autocomplete="off" spellcheck="false" ${readOnly}></label><p class="settings-hint">任务失败、节点离线或恢复在线时，控制面会向该地址 POST 带 <code>X-QControlHub-Signature</code> HMAC-SHA256 签名的 JSON 事件（通过 <code>QCH_WEBHOOK_SECRET</code> 签名），可对接钉钉 / 企业微信自定义机器人或自建接收端。</p></div></section>${can("settings.manage") ? '<footer class="settings-savebar"><div class="settings-savebar-copy"><b>保存设置</b><small>修改后的设置只在保存后生效。</small></div><div><button class="button" type="button" data-reset-settings>恢复默认值</button><button class="button primary" type="submit">保存设置</button></div></footer>' : '<p class="settings-hint">当前为只读角色，仅可查看设置。</p>'}</form></div>`,
-    "系统设置",
-  );
-  if (replaceForm) {
+  const field = (name, label, control, hint = "") => `<label class="settings-field"><span>${label}</span>${control}${hint ? `<small>${hint}</small>` : ""}</label>`;
+  const select = (item, name, label, values, disabled, hint = "") => field(name, label, `<select name="${name}" ${disabled}>${options(item[name], values)}</select>`, hint);
+  const toggle = (item, name, label, hint, disabled) => `<label class="settings-toggle"><span><b>${label}</b><small>${hint}</small></span><input type="checkbox" name="${name}" ${item[name] ? "checked" : ""} ${disabled}></label>`;
+  const section = (id, number, title, copy, body) => `<section class="settings-section" id="${id}"><header><span class="settings-section-number">${number}</span><div><h3>${title}</h3><p>${copy}</p></div></header>${body}</section>`;
+
+  async function settings() {
+    const request = ++settingsRequest;
+    const [item, deployment] = await Promise.all([api("/settings"), api("/settings/deployment")]);
+    if (request !== settingsRequest || state.route !== "settings") return;
+    state.data.settings = item;
+    const writable = can("settings.manage");
+    const disabled = writable ? "" : "disabled";
+    const securityRows = [
+      ["控制面传输", deployment.secure_transport, deployment.secure_transport ? "已启用 HTTPS / TLS 代理" : "未声明安全传输"],
+      ["PostgreSQL 校验", deployment.database_tls_verified, deployment.database_tls_verified ? "远程连接要求 verify-full" : "允许不安全数据库连接"],
+      ["配置加密", deployment.config_encryption_configured, deployment.config_encryption_configured ? "已配置静态加密密钥" : "未配置静态加密密钥"],
+      ["Webhook 签名", deployment.webhook_signing_configured, deployment.webhook_signing_configured ? "已配置 HMAC 密钥" : "未配置签名密钥"],
+    ].map(([label, healthy, copy]) => `<li><span><b>${label}</b><small>${copy}</small></span><em class="${healthy ? "ok" : "warn"}">${healthy ? "正常" : "需检查"}</em></li>`).join("");
+
+    shell(`<div class="settings-workspace settings-overview">
+      <header class="settings-hero"><div><h2>系统设置</h2><p>运行策略、数据保留、通知和部署状态集中管理。</p></div><span class="settings-saved-state" data-settings-state>已保存 · v${esc(item.revision)}</span></header>
+      <nav class="settings-category-nav" aria-label="设置分类">
+        <a href="#settings-basic">基础设置</a><a href="#settings-runtime">任务与同步</a><a href="#settings-data">数据与日志</a><a href="#settings-notify">事件通知</a><a href="#settings-deployment">部署状态</a>
+      </nav>
+      <form class="settings-form" id="settings-form">
+        ${section("settings-basic", "01", "基础设置", "面板显示和操作默认值。", `<div class="settings-grid">
+          ${field("panel_name", "面板名称", `<input name="panel_name" value="${esc(item.panel_name)}" maxlength="40" required ${disabled}>`)}
+          ${field("panel_description", "面板说明", `<input name="panel_description" value="${esc(item.panel_description)}" maxlength="120" ${disabled}>`)}
+          ${select(item, "time_zone", "时间区域", [["browser", "跟随浏览器"], ["Asia/Shanghai", "Asia/Shanghai"], ["UTC", "UTC"]], disabled)}
+          ${select(item, "time_display", "时间显示", [["absolute-relative", "绝对时间 + 相对时间"], ["absolute", "仅绝对时间"]], disabled)}
+          ${select(item, "task_page_size", "任务默认显示数量", [[50, "50 条"], [100, "100 条"], [500, "500 条"]], disabled)}
+          ${select(item, "default_config_editor", "配置编辑器默认模式", [["structured", "结构化表单"], ["source", "源文件"]], disabled)}
+        </div>`)}
+        ${section("settings-runtime", "02", "任务与同步", "策略保存后，在线 Agent 自动重连并立即获取新配置，不会重启内核。", `<div class="settings-subsection"><h4>节点上报策略</h4><div class="settings-grid settings-grid-three">
+          ${select(item, "agent_heartbeat_interval_seconds", "心跳间隔", [[10, "10 秒"], [15, "15 秒"], [30, "30 秒"]], disabled)}
+          ${select(item, "agent_metrics_interval_seconds", "指标采集间隔", [[1, "1 秒"], [5, "5 秒"], [15, "15 秒"], [30, "30 秒"]], disabled)}
+          ${select(item, "agent_offline_threshold_seconds", "离线判定时间", [[45, "45 秒"], [60, "60 秒"], [90, "90 秒"], [180, "180 秒"]], disabled, "不得少于心跳间隔的 3 倍")}
+        </div></div><div class="settings-subsection"><h4>任务恢复与探测</h4><div class="settings-grid settings-grid-three">
+          ${select(item, "task_poll_interval_ms", "页面任务刷新", [[600, "0.6 秒"], [1000, "1 秒"], [2000, "2 秒"], [5000, "5 秒"]], disabled)}
+          ${select(item, "task_stale_timeout_seconds", "普通任务失联重排", [[60, "1 分钟"], [120, "2 分钟"], [300, "5 分钟"], [600, "10 分钟"]], disabled)}
+          ${select(item, "install_task_stale_timeout_seconds", "安装任务失联重排", [[180, "3 分钟"], [360, "6 分钟"], [600, "10 分钟"], [900, "15 分钟"]], disabled)}
+          ${select(item, "task_max_attempts", "最大尝试次数", [[1, "1 次"], [3, "3 次"], [5, "5 次"]], disabled)}
+          ${select(item, "public_ip_probe_interval_seconds", "公网 IP 探测间隔", [[300, "5 分钟"], [900, "15 分钟"], [3600, "1 小时"]], disabled)}
+        </div></div>`)}
+        ${section("settings-data", "03", "数据与日志", "Agent 本地缓存与 PostgreSQL 历史数据分别控制。", `<div class="settings-subsection settings-local-log"><h4>Agent 本地内核日志</h4><p>限制每个节点的易失性内核日志空间；可继续调小到 1 MiB。systemd 使用独立 journal 总容量，OpenRC 使用受控文件轮转。</p><div class="settings-grid">
+          ${select(item, "agent_core_log_max_mib", "单节点容量上限", [[1, "1 MiB"], [2, "2 MiB"], [4, "4 MiB"], [8, "8 MiB"], [16, "16 MiB"], [32, "32 MiB"], [64, "64 MiB"], [128, "128 MiB"]], disabled)}
+          ${select(item, "agent_core_log_rotate_count", "旧文件保留数量", [[0, "0（仅当前日志）"], [1, "1 个"], [2, "2 个"], [3, "3 个"], [5, "5 个"]], disabled)}
+        </div></div><div class="settings-subsection"><h4>PostgreSQL 数据保留</h4><div class="settings-grid settings-grid-three">
+          ${select(item, "core_log_minimum_level", "内核日志最低级别", [["debug", "调试及以上"], ["info", "信息及以上"], ["warning", "警告及以上"], ["error", "错误及以上"], ["critical", "仅严重错误"], ["off", "停止保存新日志"]], disabled)}
+          ${select(item, "core_log_retention_days", "内核日志保留", [[1, "1 天"], [3, "3 天"], [7, "7 天"], [14, "14 天"], [30, "30 天"]], disabled, "每小时按时间清理；不是固定条数")}
+          ${select(item, "metric_retention_days", "指标历史保留", [[7, "7 天"], [14, "14 天"], [30, "30 天"]], disabled)}
+          ${select(item, "audit_retention_days", "审计记录保留", [[0, "永久"], [30, "30 天"], [90, "90 天"], [180, "180 天"]], disabled)}
+          ${select(item, "task_retention_days", "任务记录保留", [[0, "永久"], [30, "30 天"], [90, "90 天"], [180, "180 天"]], disabled)}
+          ${select(item, "config_revision_retention", "每份配置保留版本", [[0, "全部"], [50, "最近 50 个"], [100, "最近 100 个"]], disabled)}
+        </div></div>`)}
+        ${section("settings-notify", "04", "事件通知", "Webhook 地址由控制面调用，签名密钥继续通过部署环境配置。", `<div class="settings-grid one-column">${field("webhook_url", "Webhook 地址", `<input name="webhook_url" type="url" value="${esc(item.webhook_url || "")}" maxlength="500" placeholder="https://example.com/hooks/qcontrolhub" ${disabled}>`)}</div><div class="settings-toggle-list">
+          ${toggle(item, "notify_task_failed", "任务失败", "部署、校验或服务操作失败", disabled)}
+          ${toggle(item, "notify_agent_offline", "节点离线", "超过离线判定时间", disabled)}
+          ${toggle(item, "notify_agent_online", "节点恢复在线", "离线节点重新连接", disabled)}
+          ${toggle(item, "notify_traffic_quota", "流量配额事件", "端口达到配额并触发阻断", disabled)}
+        </div>`)}
+        ${section("settings-deployment", "05", "部署状态", "高风险密钥、数据库地址和代理信任范围只读展示，仍由部署环境管理。", `<div class="settings-deployment-grid"><div><h4>安全状态</h4><ul class="settings-health-list">${securityRows}<li><span><b>可信代理</b><small>已配置 ${esc(deployment.trusted_proxy_count)} 条网段</small></span><em>${esc(deployment.trusted_proxy_count)}</em></li></ul></div><div class="settings-version-card"><header><h4>组件版本</h4><button class="button small" type="button" data-check-update>检查更新</button></header><dl><div><dt>Control Plane</dt><dd><code>${esc(deployment.control_plane_version || "unknown")}</code><span>当前</span></dd></div><div><dt>QAgent 安装包</dt><dd><code>${esc(deployment.agent_package_version || "unknown")}</code><span>当前</span></dd></div></dl><p data-update-result>尚未检查 GHCR latest；只检查，不会自动升级。</p></div></div>`)}
+        ${writable ? `<footer class="settings-savebar"><div class="settings-savebar-copy"><b data-save-title>所有更改已保存</b><small>修改任一选项后可统一保存。</small></div><button class="button primary" type="submit" data-save-settings disabled>保存更改</button></footer>` : `<p class="settings-hint">当前账号仅可查看设置。</p>`}
+      </form>
+    </div>`, "系统设置");
+
     const form = document.querySelector("#settings-form");
-    if (form) {
-      form.elements.panel_name.value = item.panel_name;
-      form.elements.panel_description.value = item.panel_description;
-      form.elements.task_page_size.value = String(item.task_page_size);
-      form.elements.task_poll_interval_ms.value = String(item.task_poll_interval_ms);
-      form.elements.core_log_minimum_level.value = item.core_log_minimum_level || "debug";
-      form.elements.webhook_url.value = item.webhook_url || "";
-    }
-  }
-  if (userSection) {
-    document.querySelector(".settings-savebar")?.insertAdjacentHTML("beforebegin", userSection);
-  }
-  const togglePermissionEditor = (select, editor) => {
-    if (!select || !editor) return;
-    const admin = select.value === "admin";
-    editor.querySelectorAll("input[type=checkbox]").forEach((input) => {
-      input.disabled = admin;
-      if (admin) input.checked = false;
-    });
-    editor.querySelector(".permission-editor-head small")?.replaceChildren(
-      document.createTextNode(admin ? "管理员默认拥有全部权限" : "只授予完成工作所需的权限"),
-    );
-  };
-  document.querySelectorAll("[data-user-role]").forEach((select) => {
-    bindEvent(select, "change", () => togglePermissionEditor(select, select.closest("[data-user-form]")?.querySelector("[data-permission-editor]")));
-  });
-  const createRole = document.querySelector("[data-create-role]");
-  bindEvent(createRole, "change", () => togglePermissionEditor(createRole, document.querySelector("#user-create-form [data-permission-editor]")));
-  const checkedPermissions = (root, prefix) => [...(root?.querySelectorAll(`input[name="${prefix}permissions"]`) || [])].filter((input) => input.checked && !input.disabled).map((input) => input.value);
-  document.querySelector("#settings-form").onsubmit = async (event) => {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    try {
-      await api("/settings", {
-        method: "PUT",
-        body: JSON.stringify({
-          panel_name: form.get("panel_name"),
-          panel_description: form.get("panel_description"),
-          task_page_size: Number(form.get("task_page_size")),
-          task_poll_interval_ms: Number(form.get("task_poll_interval_ms")),
-          core_log_minimum_level: form.get("core_log_minimum_level"),
-          webhook_url: form.get("webhook_url"),
-        }),
-      });
-      notify("设置已保存");
-    } catch (error) {
-      notify(error.message, "error");
-    }
-  };
-  bindEvent(document.querySelector("[data-reset-settings]"), "click", async () => {
-      if (!(await confirmAction("确定恢复系统默认设置？", "恢复默认值"))) return;
-      await api("/settings", {
-        method: "PUT",
-        body: JSON.stringify({
-          panel_name: "QControlHub",
-          panel_description: "可信远程编排",
-          task_page_size: 100,
-          task_poll_interval_ms: 600,
-          core_log_minimum_level: "debug",
-          webhook_url: "",
-        }),
-      });
-      await settings({ replaceForm: true });
-  });
-  bindEvent(document.querySelector("[data-create-user]"), "click", async (event) => {
-    const container = document.querySelector("#user-create-form");
-    const value = (name) => container.querySelector(`[name="${name}"]`)?.value || "";
-    try {
-      await api("/users", {
-        method: "POST",
-        body: JSON.stringify({
-          username: value("username"),
-          display_name: value("display_name"),
-          role: value("role"),
-          password: value("password"),
-          permissions: checkedPermissions(container, "create-"),
-        }),
-      });
-      notify("用户已创建");
-      container.querySelectorAll("input").forEach((input) => {
-        if (input.type === "checkbox" || input.type === "radio")
-          input.checked = input.defaultChecked;
-        else input.value = input.defaultValue;
-      });
-      container.querySelectorAll("select").forEach((select) => {
-        select.value = [...select.options].find((option) => option.defaultSelected)?.value || "";
-      });
-      await settings();
-    } catch (error) {
-      notify(error.message, "error");
-    }
-  });
-  document.querySelectorAll("[data-save-user]").forEach((button) => {
-    bindEvent(button, "click", async () => {
-      const formElement = button.closest("[data-user-form]");
-      const value = (name) => formElement.querySelector(`[name="${name}"]`);
-      const password = String(value("password")?.value || "");
+    const saveButton = form?.querySelector("[data-save-settings]");
+    const stateBadge = document.querySelector("[data-settings-state]");
+    const saveTitle = form?.querySelector("[data-save-title]");
+    const markDirty = () => {
+      if (!saveButton) return;
+      saveButton.disabled = false;
+      stateBadge.textContent = "有未保存更改";
+      stateBadge.classList.add("dirty");
+      if (saveTitle) saveTitle.textContent = "有未保存更改";
+    };
+    bindEvent(form, "input", markDirty);
+    bindEvent(form, "change", markDirty);
+
+    bindEvent(form, "submit", async (event) => {
+      event.preventDefault();
+      if (!writable) return;
+      const data = new FormData(form);
+      const number = (name) => Number(data.get(name));
       const body = {
-        display_name: value("display_name")?.value || "",
-        role: value("role")?.value || "",
-        disabled: Boolean(value("disabled")?.checked),
-        permissions: checkedPermissions(formElement, "user-"),
+        revision: item.revision,
+        panel_name: data.get("panel_name"), panel_description: data.get("panel_description"),
+        time_zone: data.get("time_zone"), time_display: data.get("time_display"), default_config_editor: data.get("default_config_editor"),
+        task_page_size: number("task_page_size"), task_poll_interval_ms: number("task_poll_interval_ms"),
+        agent_heartbeat_interval_seconds: number("agent_heartbeat_interval_seconds"), agent_metrics_interval_seconds: number("agent_metrics_interval_seconds"),
+        agent_offline_threshold_seconds: number("agent_offline_threshold_seconds"), task_stale_timeout_seconds: number("task_stale_timeout_seconds"),
+        install_task_stale_timeout_seconds: number("install_task_stale_timeout_seconds"), task_max_attempts: number("task_max_attempts"),
+        public_ip_probe_interval_seconds: number("public_ip_probe_interval_seconds"), core_log_minimum_level: data.get("core_log_minimum_level"),
+        core_log_retention_days: number("core_log_retention_days"), agent_core_log_max_mib: number("agent_core_log_max_mib"),
+        agent_core_log_rotate_count: number("agent_core_log_rotate_count"), metric_retention_days: number("metric_retention_days"),
+        audit_retention_days: number("audit_retention_days"), task_retention_days: number("task_retention_days"),
+        config_revision_retention: number("config_revision_retention"), webhook_url: data.get("webhook_url"),
+        notify_task_failed: data.has("notify_task_failed"), notify_agent_offline: data.has("notify_agent_offline"),
+        notify_agent_online: data.has("notify_agent_online"), notify_traffic_quota: data.has("notify_traffic_quota"),
       };
-      if (password) body.password = password;
+      saveButton.disabled = true;
       try {
-        await api(`/users/${encodeURIComponent(formElement.dataset.userForm)}`, {
-          method: "PUT",
-          body: JSON.stringify(body),
-        });
-        notify("用户已更新");
-        if (value("password")) {
-          value("password").value = "";
-          value("password").defaultValue = "";
+        const saved = await api("/settings", { method: "PUT", body: JSON.stringify(body) });
+        state.data.settings = saved;
+        item.revision = saved.revision;
+        stateBadge.textContent = `已保存 · v${saved.revision}`;
+        stateBadge.classList.remove("dirty");
+        if (saveTitle) saveTitle.textContent = "所有更改已保存";
+        notify("设置已保存；运行策略变更会由在线 Agent 自动应用");
+      } catch (error) {
+        saveButton.disabled = false;
+        notify(error.message, "error");
+      }
+    });
+
+    bindEvent(document.querySelector("[data-check-update]"), "click", async (event) => {
+      const button = event.currentTarget;
+      const output = document.querySelector("[data-update-result]");
+      button.disabled = true;
+      output.textContent = "正在检查 GitHub 最新正式版…";
+      try {
+        const result = await api("/settings/check-update", { method: "POST" });
+        if (!result.comparable) {
+          output.innerHTML = `GHCR latest 当前为 <a href="${esc(result.release_url)}" target="_blank" rel="noopener">${esc(result.latest_version)}</a>；当前构建 ${esc(result.current_control_plane)} 不是可比较的提交或版本号。`;
+        } else if (result.update_available) {
+          output.innerHTML = `GHCR latest 已更新为 <a href="${esc(result.release_url)}" target="_blank" rel="noopener">${esc(result.latest_version)}</a>，请审核变更后再升级。`;
+        } else {
+          output.textContent = `已是 GHCR latest 对应版本（${result.latest_version}）。`;
         }
-        await settings();
       } catch (error) {
-        notify(error.message, "error");
+        output.textContent = `检查失败：${error.message}`;
+      } finally {
+        button.disabled = false;
       }
     });
-  });
-  document.querySelectorAll("[data-disable-user]").forEach((button) => {
-    bindEvent(button, "click", async () => {
-      if (!(await confirmAction("停用后该用户将立即退出所有会话，确定继续？", "停用用户"))) return;
-      try {
-        await api(`/users/${encodeURIComponent(button.dataset.disableUser)}`, { method: "DELETE" });
-        notify("用户已停用");
-        await settings();
-      } catch (error) {
-        notify(error.message, "error");
-      }
-    });
-  });
-}
+  }
+
   return settings;
 }

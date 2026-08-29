@@ -20,6 +20,7 @@ import (
 
 	"github.com/qimaoww/qcontrolhub/internal/api"
 	"github.com/qimaoww/qcontrolhub/internal/authn"
+	"github.com/qimaoww/qcontrolhub/internal/core"
 	"github.com/qimaoww/qcontrolhub/internal/store"
 )
 
@@ -117,18 +118,21 @@ func main() {
 	}
 
 	apiServer := api.New(dataStore, api.Config{
-		AdminTokenDigest: adminTokenDigest,
-		OperatorTokens:   splitList(os.Getenv("QCH_OPERATOR_TOKENS")),
-		AuditorTokens:    splitList(os.Getenv("QCH_AUDITOR_TOKENS")),
-		ReadonlyTokens:   splitList(os.Getenv("QCH_READONLY_TOKENS")),
-		AllowedOrigins:   splitList(os.Getenv("QCH_CORS_ORIGINS")),
-		SecureTransport:  secureTransport,
-		TrustedProxies:   trustedProxies,
-		AgentBinary:      agentBinary,
-		AgentVersion:     version,
-		AgentInstaller:   agentInstaller,
-		WebhookSecret:    strings.TrimSpace(os.Getenv("QCH_WEBHOOK_SECRET")),
-		PublicIPProbe:    publicIPProbe,
+		AdminTokenDigest:           adminTokenDigest,
+		OperatorTokens:             splitList(os.Getenv("QCH_OPERATOR_TOKENS")),
+		AuditorTokens:              splitList(os.Getenv("QCH_AUDITOR_TOKENS")),
+		ReadonlyTokens:             splitList(os.Getenv("QCH_READONLY_TOKENS")),
+		AllowedOrigins:             splitList(os.Getenv("QCH_CORS_ORIGINS")),
+		SecureTransport:            secureTransport,
+		DatabaseTLSVerified:        !allowInsecureDatabase,
+		ConfigEncryptionConfigured: configEncryptionKey != "",
+		TrustedProxies:             trustedProxies,
+		AgentBinary:                agentBinary,
+		AgentVersion:               version,
+		ControlPlaneVersion:        version,
+		AgentInstaller:             agentInstaller,
+		WebhookSecret:              strings.TrimSpace(os.Getenv("QCH_WEBHOOK_SECRET")),
+		PublicIPProbe:              publicIPProbe,
 	})
 	root := apiServer.Handler()
 
@@ -145,6 +149,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	go janitor(ctx, dataStore)
+	go apiServer.MonitorAgentPresence(ctx)
 	go func() {
 		<-ctx.Done()
 		shutdownContext, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -224,7 +229,12 @@ func janitor(ctx context.Context, dataStore *store.Store) {
 			return
 		case <-ticker.C:
 			operationContext, cancel := context.WithTimeout(ctx, 15*time.Second)
-			if err := dataStore.RequeueStaleTasks(operationContext, 2*time.Minute, 6*time.Minute, 3); err != nil {
+			settings, settingsErr := dataStore.PanelSettings(operationContext)
+			if settingsErr != nil {
+				slog.Warn("load maintenance settings", "error", settingsErr)
+				settings = core.DefaultPanelSettings()
+			}
+			if err := dataStore.RequeueStaleTasks(operationContext, time.Duration(settings.TaskStaleTimeoutSeconds)*time.Second, time.Duration(settings.InstallTaskStaleTimeoutSeconds)*time.Second, settings.TaskMaxAttempts); err != nil {
 				slog.Error("requeue stale tasks", "error", err)
 			}
 			if err := dataStore.CleanupNonces(operationContext); err != nil {
@@ -238,14 +248,25 @@ func janitor(ctx context.Context, dataStore *store.Store) {
 			}
 			pruneCounter++
 			if pruneCounter%60 == 0 {
-				if _, err := dataStore.PruneMetricSamples(operationContext, time.Now().UTC().Add(-7*24*time.Hour)); err != nil {
+				now := time.Now().UTC()
+				if _, err := dataStore.PruneMetricSamples(operationContext, now.Add(-time.Duration(settings.MetricRetentionDays)*24*time.Hour)); err != nil {
 					slog.Warn("prune old metric samples", "error", err)
 				}
-				if _, err := dataStore.PruneAuditLogs(operationContext, time.Now().UTC().Add(-90*24*time.Hour)); err != nil {
-					slog.Warn("prune old audit logs", "error", err)
+				if settings.AuditRetentionDays > 0 {
+					if _, err := dataStore.PruneAuditLogs(operationContext, now.Add(-time.Duration(settings.AuditRetentionDays)*24*time.Hour)); err != nil {
+						slog.Warn("prune old audit logs", "error", err)
+					}
 				}
-				if _, err := dataStore.PruneCoreLogs(operationContext, time.Now().UTC().Add(-7*24*time.Hour)); err != nil {
+				if _, err := dataStore.PruneCoreLogs(operationContext, now.Add(-time.Duration(settings.CoreLogRetentionDays)*24*time.Hour)); err != nil {
 					slog.Warn("prune old core logs", "error", err)
+				}
+				if settings.TaskRetentionDays > 0 {
+					if _, err := dataStore.PruneTasks(operationContext, now.Add(-time.Duration(settings.TaskRetentionDays)*24*time.Hour)); err != nil {
+						slog.Warn("prune old tasks", "error", err)
+					}
+				}
+				if _, err := dataStore.PruneConfigRevisions(operationContext, settings.ConfigRevisionRetention); err != nil {
+					slog.Warn("prune config revisions", "error", err)
 				}
 			}
 			cancel()

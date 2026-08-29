@@ -27,13 +27,12 @@ import (
 )
 
 const (
-	coreLogQueueLimit = 2048
-	// Align the volatile budget with the journald Storage=volatile cap by
-	// rotating to a single .old copy once the live file grows past this size.
-	coreLogFileRotateBytes = 8 << 20
-	coreLogFileMaxLine     = 256 << 10
-	coreLogRevalidateBytes = 256 << 10
-	coreLogRevalidateEvery = time.Second
+	coreLogQueueLimit         = 2048
+	defaultCoreLogMaxBytes    = 16 << 20
+	defaultCoreLogRotateCount = 1
+	coreLogFileMaxLine        = 256 << 10
+	coreLogRevalidateBytes    = 256 << 10
+	coreLogRevalidateEvery    = time.Second
 )
 
 // Managed OpenRC services log through supervise-daemon output_log files below
@@ -46,27 +45,29 @@ var (
 )
 
 type CoreLogCollector struct {
-	mu            sync.Mutex
-	filePublishMu sync.Mutex
-	queued        []core.CoreLogEntry
-	pending       *core.CoreLogBatch
-	dropped       uint64
-	sources       []coreLogJournalSource
-	fileSources   []coreLogFileSource
-	seenCursors   map[string]struct{}
-	cursorOrder   []string
-	runContext    context.Context
-	runWait       sync.WaitGroup
-	runStopped    bool
-	activeFiles   map[string]*coreLogFileRun
-	status        map[core.Engine]CoreLogSourceStatus
-	statusKind    map[core.Engine]string
-	kindStatus    map[core.Engine]map[string]CoreLogSourceStatus
-	preferredKind map[core.Engine]string
-	consoleKind   map[core.Engine]string
-	transitions   map[core.Engine]*coreLogSourceTransition
-	nextFileEpoch uint64
-	sourceReady   map[core.Engine]chan struct{}
+	mu                 sync.Mutex
+	filePublishMu      sync.Mutex
+	queued             []core.CoreLogEntry
+	pending            *core.CoreLogBatch
+	dropped            uint64
+	sources            []coreLogJournalSource
+	fileSources        []coreLogFileSource
+	seenCursors        map[string]struct{}
+	cursorOrder        []string
+	runContext         context.Context
+	runWait            sync.WaitGroup
+	runStopped         bool
+	activeFiles        map[string]*coreLogFileRun
+	status             map[core.Engine]CoreLogSourceStatus
+	statusKind         map[core.Engine]string
+	kindStatus         map[core.Engine]map[string]CoreLogSourceStatus
+	preferredKind      map[core.Engine]string
+	consoleKind        map[core.Engine]string
+	transitions        map[core.Engine]*coreLogSourceTransition
+	nextFileEpoch      uint64
+	sourceReady        map[core.Engine]chan struct{}
+	coreLogMaxBytes    int64
+	coreLogRotateCount int
 }
 
 type coreLogFileRun struct {
@@ -132,6 +133,7 @@ func NewCoreLogCollectorForServiceManager(manager *ServiceManager, specs ...map[
 		statusKind: make(map[core.Engine]string), kindStatus: make(map[core.Engine]map[string]CoreLogSourceStatus),
 		preferredKind: make(map[core.Engine]string), consoleKind: make(map[core.Engine]string),
 		transitions: make(map[core.Engine]*coreLogSourceTransition), sourceReady: make(map[core.Engine]chan struct{}),
+		coreLogMaxBytes: defaultCoreLogMaxBytes, coreLogRotateCount: defaultCoreLogRotateCount,
 	}
 	if manager != nil && manager.Kind() == ServiceManagerOpenRC {
 		collector.fileSources = coreLogFileSources(specs...)
@@ -153,6 +155,49 @@ func NewCoreLogCollectorForServiceManager(manager *ServiceManager, specs ...map[
 		}
 	}
 	return collector
+}
+
+// ApplyPolicy updates OpenRC file rotation immediately. systemd journal
+// limits are applied by Client.applyAgentPolicy through the managed namespace.
+func (collector *CoreLogCollector) ApplyPolicy(policy core.AgentPolicy) {
+	collector.mu.Lock()
+	changed := collector.coreLogMaxBytes != int64(policy.CoreLogMaxMiB)<<20 || collector.coreLogRotateCount != int(policy.CoreLogRotateCount)
+	collector.coreLogMaxBytes = int64(policy.CoreLogMaxMiB) << 20
+	collector.coreLogRotateCount = int(policy.CoreLogRotateCount)
+	sources := append([]coreLogFileSource(nil), collector.fileSources...)
+	collector.mu.Unlock()
+	for _, source := range sources {
+		collector.removeExcessArchives(source)
+		if changed {
+			for index := 1; index <= 5; index++ {
+				_ = os.Remove(coreLogArchivePath(source.path, index))
+			}
+			maxFileBytes, _ := collector.rotationPolicy()
+			if validated, err := openValidatedCoreLogFileContext(context.Background(), source); err == nil {
+				if validated.identity.Size() > maxFileBytes {
+					if err := validated.file.Truncate(0); err != nil {
+						slog.Warn("apply managed core log capacity", "path", source.path, "error", err)
+					}
+				}
+				_ = validated.file.Close()
+			}
+		}
+	}
+}
+
+func (collector *CoreLogCollector) rotationPolicy() (int64, int) {
+	collector.mu.Lock()
+	defer collector.mu.Unlock()
+	count := collector.coreLogRotateCount
+	sources := len(collector.fileSources)
+	if sources < 1 {
+		sources = 1
+	}
+	bytes := collector.coreLogMaxBytes / int64((count+1)*sources)
+	if bytes < 1 {
+		bytes = 1
+	}
+	return bytes, count
 }
 
 func NewCoreLogCollectorForExecutor(executor *Executor) *CoreLogCollector {
@@ -692,7 +737,8 @@ func (collector *CoreLogCollector) followFile(ctx context.Context, source coreLo
 		if !atEOF {
 			continue
 		}
-		if source.kind == "openrc" && info.Size() >= coreLogFileRotateBytes {
+		rotateBytes, _ := collector.rotationPolicy()
+		if source.kind == "openrc" && info.Size() >= rotateBytes {
 			collector.rotateFile(source)
 		}
 		timer := time.NewTimer(time.Second)
@@ -756,24 +802,43 @@ func coreLogFileIdentity(info os.FileInfo) (uint64, uint64, bool) {
 	return uint64(stat.Dev), uint64(stat.Ino), true
 }
 
-// rotateFile copies the live file beside itself as a single .old snapshot
+// rotateFile copies the live file beside itself and truncates it, keeping the
+// configured number of bounded snapshots.
 // and truncates the original. supervise-daemon keeps writing with O_APPEND,
 // so truncation is seamless for the writer and bounds the volatile log
 // footprint like the journald RuntimeMaxUse cap does on systemd. A failed
 // snapshot only costs the archived copy; truncation still proceeds so a
 // persistently failing copy can never let the live file grow unbounded.
 func (collector *CoreLogCollector) rotateFile(source coreLogFileSource) {
+	_, rotateCount := collector.rotationPolicy()
 	contents, err := os.ReadFile(source.path)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		slog.Warn("managed core log rotation snapshot failed", "path", source.path, "error", err)
 	}
-	if len(contents) > 0 {
-		if err := os.WriteFile(source.path+".old", contents, 0o600); err != nil {
+	if len(contents) > 0 && rotateCount > 0 {
+		for index := rotateCount; index >= 2; index-- {
+			_ = os.Rename(coreLogArchivePath(source.path, index-1), coreLogArchivePath(source.path, index))
+		}
+		if err := os.WriteFile(coreLogArchivePath(source.path, 1), contents, 0o600); err != nil {
 			slog.Warn("managed core log rotation snapshot failed", "path", source.path, "error", err)
 		}
 	}
 	if err := os.Truncate(source.path, 0); err != nil {
 		slog.Warn("managed core log rotation failed", "path", source.path, "error", err)
+	}
+}
+
+func coreLogArchivePath(path string, index int) string {
+	if index == 1 {
+		return path + ".old"
+	}
+	return fmt.Sprintf("%s.old.%d", path, index)
+}
+
+func (collector *CoreLogCollector) removeExcessArchives(source coreLogFileSource) {
+	_, count := collector.rotationPolicy()
+	for index := count + 1; index <= 5; index++ {
+		_ = os.Remove(coreLogArchivePath(source.path, index))
 	}
 }
 

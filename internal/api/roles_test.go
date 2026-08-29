@@ -66,6 +66,8 @@ func TestManagementAPIRouteAuthorizationMatrix(t *testing.T) {
 		{http.MethodPost, "/api/v1/enrollment-tokens/tok_test/command"},
 		{http.MethodGet, "/api/v1/settings"},
 		{http.MethodPut, "/api/v1/settings"},
+		{http.MethodGet, "/api/v1/settings/deployment"},
+		{http.MethodPost, "/api/v1/settings/check-update"},
 		{http.MethodPut, "/api/v1/substore-sync/settings"}, {http.MethodPost, "/api/v1/substore-sync/targets"}, {http.MethodPut, "/api/v1/substore-sync/targets/sst_test"}, {http.MethodDelete, "/api/v1/substore-sync/targets/sst_test"}, {http.MethodPut, "/api/v1/substore-sync/selections"}, {http.MethodPost, "/api/v1/substore-sync/test"}, {http.MethodPost, "/api/v1/substore-sync/run"},
 		{http.MethodGet, "/api/v1/audit"},
 		{http.MethodGet, "/api/v1/metrics/agt_0123456789abcdef"},
@@ -138,6 +140,8 @@ func TestManagementAPIRouteAuthorizationMatrix(t *testing.T) {
 		{http.MethodGet, "/api/v1/tasks/tsk_test/config-snapshot"},
 		{http.MethodPost, "/api/v1/configs"},
 		{http.MethodGet, "/api/v1/settings"},
+		{http.MethodGet, "/api/v1/settings/deployment"},
+		{http.MethodPost, "/api/v1/settings/check-update"},
 	}
 	for _, item := range auditorDenied {
 		if got := status(item, auditorToken); got != http.StatusForbidden {

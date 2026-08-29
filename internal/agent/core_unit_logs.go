@@ -28,12 +28,26 @@ StandardError=journal
 	managedCoreJournalConfig = `[Journal]
 Storage=volatile
 RuntimeMaxUse=16M
-RuntimeMaxFileSize=2M
+RuntimeMaxFileSize=8M
 MaxRetentionSec=15min
 `
 )
 
 func ensureManagedCoreLogStreaming(ctx context.Context, specs map[core.Engine]EngineSpec, managers ...*ServiceManager) error {
+	return ensureManagedCoreLogStreamingWithPolicy(ctx, specs, core.AgentPolicy{CoreLogMaxMiB: 16, CoreLogRotateCount: 1}, managers...)
+}
+
+func managedCoreJournalConfigForPolicy(policy core.AgentPolicy) []byte {
+	maxBytes := uint64(policy.CoreLogMaxMiB) << 20
+	fileBytes := maxBytes / uint64(policy.CoreLogRotateCount+1)
+	return []byte(fmt.Sprintf("[Journal]\nStorage=volatile\nRuntimeMaxUse=%d\nRuntimeMaxFileSize=%d\nMaxRetentionSec=15min\n", maxBytes, fileBytes))
+}
+
+func ensureManagedCoreLogStreamingWithPolicy(ctx context.Context, specs map[core.Engine]EngineSpec, policy core.AgentPolicy, managers ...*ServiceManager) error {
+	if policy.CoreLogMaxMiB == 0 {
+		policy.CoreLogMaxMiB = 16
+		policy.CoreLogRotateCount = 1
+	}
 	manager := selectedServiceManager(managers...)
 	installedSpecs := make(map[core.Engine]EngineSpec, len(specs))
 	for engine, spec := range specs {
@@ -70,7 +84,7 @@ func ensureManagedCoreLogStreaming(ctx context.Context, specs map[core.Engine]En
 
 	journalChanged, err := installManagedLogFile(ensureContext, base,
 		"/etc/systemd/journald@qagent-cores.conf.d/10-qcontrolhub-volatile.conf",
-		[]byte(managedCoreJournalConfig))
+		managedCoreJournalConfigForPolicy(policy))
 	if err != nil {
 		return fmt.Errorf("configure volatile core journal: %w", err)
 	}
@@ -78,6 +92,9 @@ func ensureManagedCoreLogStreaming(ctx context.Context, specs map[core.Engine]En
 		if output, err := run(ensureContext, base.systemctlPath, "daemon-reload"); err != nil {
 			return fmt.Errorf("reload systemd after core journal update: %w: %s", err, output)
 		}
+		// A namespaced journald process only reads its limits on start. Restarting
+		// this isolated namespace does not affect the host journal or proxy cores.
+		_, _ = run(ensureContext, base.systemctlPath, "restart", managedCoreJournalService)
 	}
 	dropIn := []byte(managedCoreLogDropIn)
 	if err := startManagedCoreJournal(ensureContext, base.systemctlPath); err != nil {

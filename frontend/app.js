@@ -78,7 +78,12 @@ const esc = (value) =>
         char
       ],
   );
-const date = (value) => (value ? new Date(value).toLocaleString() : "-");
+const date = (value) => {
+  if (!value) return "-";
+  const timeZone = state.data.settings?.time_zone;
+  const options = timeZone && timeZone !== "browser" ? { timeZone } : undefined;
+  return new Date(value).toLocaleString(undefined, options);
+};
 const bytes = (value) => {
   const n = Number(value || 0);
   if (!n) return "0 B";
@@ -151,6 +156,7 @@ const percent = (used, total) =>
     ? Math.min(100, Math.max(0, (Number(used) / Number(total)) * 100))
     : 0;
 const ago = (value) => {
+  if (state.data.settings?.time_display === "absolute") return date(value);
   const elapsed = Date.now() - new Date(value).getTime();
   if (!Number.isFinite(elapsed)) return "未知";
   if (elapsed < 60_000) return "刚刚";
@@ -696,7 +702,7 @@ function contextMarkup(title) {
     return `${can("traffic.manage") ? '<a class="context-primary" href="#traffic-new">＋ 添加端口配额</a>' : ""}<a class="context-primary ${selected ? "" : "active"}" href="#traffic-all" data-context-traffic-agent="">全部节点</a><div class="context-section-label"><span>按节点查看</span><b>${agents.length}</b></div><nav class="context-list" aria-label="端口流量节点">${agents.map((agent) => { const agentPolicies = policies.filter((policy) => policy.agent_id === agent.id); const configured = new Set([...agentPolicies.map((policy) => policy.port), ...endpoints.filter((endpoint) => endpoint.agent_id === agent.id).map((endpoint) => endpoint.port)]).size; const quotas = agentPolicies.filter((policy) => policy.quota_enabled !== false).length; const blocked = agentPolicies.filter((policy) => policy.blocked).length; return `<a class="${selected === agent.id ? "active" : ""}" href="#traffic-agent-${esc(agent.id)}" data-context-traffic-agent="${esc(agent.id)}"><i class="status-dot ${blocked ? "bad" : agent.status === "online" ? "ok" : ""}"></i><span><strong>${esc(agent.name)}</strong><small>${configured ? `${configured} 个监控端口${quotas ? ` · ${quotas} 个配额` : ""}${blocked ? ` · ${blocked} 个封禁` : ""}` : "尚无配置端口"}</small></span></a>`; }).join("") || "<p>还没有节点</p>"}</nav>`;
   }
   if (state.route === "settings")
-    return `<nav class="context-menu" aria-label="设置目录"><a class="active" href="#identity"><span>01</span>面板标识</a><a href="#defaults"><span>02</span>操作默认值</a><a href="#synchronization"><span>03</span>状态同步</a><a href="#core-log-storage"><span>04</span>内核日志保存</a><a href="#notifications"><span>05</span>事件通知</a>${can("users.manage") ? '<a href="#users"><span>06</span>用户管理</a>' : ""}</nav>`;
+    return `<nav class="context-menu" aria-label="设置目录"><a class="active" href="#settings-basic"><span>01</span>基础设置</a><a href="#settings-runtime"><span>02</span>任务与同步</a><a href="#settings-data"><span>03</span>数据与日志</a><a href="#settings-notify"><span>04</span>事件通知</a><a href="#settings-deployment"><span>05</span>部署状态</a></nav>`;
   const agent = (state.data.agents || []).find(
     (item) => item.id === state.data.agentId,
   );
@@ -738,12 +744,11 @@ async function renderOnce() {
     enrollment: "node-settings",
     "client-access": "client-access",
     "substore-sync": "substore-sync",
-    identity: "settings",
-    defaults: "settings",
-    synchronization: "settings",
-    "core-log-storage": "settings",
-    notifications: "settings",
-    users: "settings",
+    "settings-basic": "settings",
+    "settings-runtime": "settings",
+    "settings-data": "settings",
+    "settings-notify": "settings",
+    "settings-deployment": "settings",
     "preset-node": "agents",
     "settings-node": "node-settings",
     "new-config": "archive-config",
