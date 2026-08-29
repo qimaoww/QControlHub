@@ -123,6 +123,7 @@ func TestServerPlanRegenerationStaysLocalAndUsesCurrentFormState(t *testing.T) {
 		t.Error("server-plan regeneration needs a local status region that does not scroll the page")
 	}
 	for _, required := range []string{
+		"const esc = (value) =>",
 		`["port", "port", "生成监听端口"]`,
 		`["credential", "credential", "生成凭据"]`,
 		`["secondary_credential", "secondary_credential", "生成次凭据"]`,
