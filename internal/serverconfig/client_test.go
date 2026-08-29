@@ -93,6 +93,18 @@ func TestBuildClientProfileRejectsListenerAndUnsafeAddresses(t *testing.T) {
 	}
 }
 
+func TestBuildClientProfileNamedUsesOperatorName(t *testing.T) {
+	t.Parallel()
+	input := Input{Protocol: ProtocolVLESS, Tag: "inbound-tag", Port: 443, Credential: "123e4567-e89b-42d3-a456-426614174000", Transport: "raw"}
+	profile, err := BuildClientProfileNamed(input, "edge.example.com", "", "Tokyo v6")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(profile.URI, "#Tokyo%20v6") {
+		t.Fatalf("named profile URI = %q", profile.URI)
+	}
+}
+
 func TestClientProfileNeverExportsServerPrivateMaterial(t *testing.T) {
 	t.Parallel()
 	input := Input{
