@@ -14,7 +14,7 @@ import (
 
 func TestMihomoSnellAndSudokuPlansGenerateRoundTripAndExportYAML(t *testing.T) {
 	t.Parallel()
-	for _, key := range []string{ProtocolSnell, ProtocolSudoku} {
+	for _, key := range []string{ProtocolSnell, ProtocolSnellShadowTLS, ProtocolSudoku} {
 		key := key
 		t.Run(key, func(t *testing.T) {
 			t.Parallel()
@@ -33,6 +33,13 @@ func TestMihomoSnellAndSudokuPlansGenerateRoundTripAndExportYAML(t *testing.T) {
 			parsed, ok := Parse(core.EngineMihomo, content)
 			if !ok || parsed.Protocol != key || parsed.Credential != input.Credential {
 				t.Fatalf("Parse(Mihomo/%s) = %+v, %v\n%s", key, parsed, ok, content)
+			}
+			metadata, err := MarshalClientMetadata(input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := ApplyClientMetadata(&parsed, metadata); err != nil {
+				t.Fatal(err)
 			}
 			profile, err := BuildClientProfileNamed(parsed, "edge.example.com", "", "Tokyo")
 			if err != nil {

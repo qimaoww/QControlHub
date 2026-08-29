@@ -52,6 +52,21 @@ func BuildClientProfileNamed(input Input, address, serverName, nodeName string) 
 			return ClientProfile{}, err
 		}
 	}
+	if isSnellProtocol(input.Protocol) {
+		if err := validateSnellPresetIdentity(input); err != nil {
+			return ClientProfile{}, err
+		}
+		normalizeSnellInput(&input)
+		if err := validateSnellInput(input); err != nil {
+			return ClientProfile{}, err
+		}
+	}
+	if input.Protocol == ProtocolSudoku {
+		normalizeSudokuInput(&input)
+		if err := validateSudokuInput(input); err != nil {
+			return ClientProfile{}, err
+		}
+	}
 	address, err := NormalizeClientAddress(address)
 	if err != nil {
 		return ClientProfile{}, err
@@ -122,20 +137,42 @@ func BuildClientProfileNamed(input Input, address, serverName, nodeName string) 
 		profile.Format = "VLESS URI"
 		profile.URI = (&url.URL{Scheme: "vless", User: url.User(input.Credential), Host: host, RawQuery: query.Encode(), Fragment: fragment}).String()
 		profile.SubscriptionCompatible = true
-	case ProtocolSnell:
-		value, marshalErr := yaml.Marshal(map[string]any{"name": fragment, "type": "snell", "server": address, "port": input.Port, "psk": input.Credential, "version": input.SnellVersion, "udp": true})
+	case ProtocolSnell, ProtocolSnellShadowTLS:
+		proxy := map[string]any{
+			"name": fragment, "type": "snell", "server": address, "port": input.Port,
+			"psk": input.Credential, "version": input.SnellVersion, "udp": input.SnellUDP, "tfo": true,
+		}
+		if input.SnellReuse {
+			proxy["reuse"] = true
+		}
+		switch input.SnellObfsMode {
+		case SnellObfsShadowTLS:
+			alpn, _ := validatedALPN(input.SnellShadowTLSALPN)
+			proxy["client-fingerprint"] = input.SnellClientFingerprint
+			proxy["obfs-opts"] = compactMap(map[string]any{
+				"mode": SnellObfsShadowTLS, "host": input.SnellObfsHost,
+				"password": input.SnellShadowTLSPassword, "version": input.SnellShadowTLSVersion, "alpn": alpn,
+			})
+		}
+		value, marshalErr := yaml.Marshal(proxy)
 		if marshalErr != nil {
 			return ClientProfile{}, marshalErr
 		}
 		profile.Format = "Mihomo Snell YAML"
 		profile.URI = string(value)
 	case ProtocolSudoku:
-		value, marshalErr := yaml.Marshal(map[string]any{
-			"name": fragment, "type": "sudoku", "server": address, "port": input.Port, "key": input.Credential,
+		proxy := map[string]any{
+			"name": fragment, "type": "sudoku", "server": address, "port": input.Port, "key": input.SudokuClientKey,
 			"aead-method": input.Method, "padding-min": input.SudokuPaddingMin, "padding-max": input.SudokuPaddingMax,
-			"table-type": input.SudokuTableType, "enable-pure-downlink": false,
-			"httpmask": map[string]any{"disable": false, "mode": "legacy"},
-		})
+			"table-type": input.SudokuTableType, "enable-pure-downlink": input.SudokuEnablePureDownlink,
+			"multiplex": input.SudokuMultiplex,
+			"httpmask": compactMap(map[string]any{
+				"disable": !input.SudokuHTTPMaskEnabled, "mode": input.SudokuHTTPMaskMode,
+				"tls": input.SudokuHTTPMaskTLS, "host": input.SudokuHTTPMaskHost,
+				"path-root": input.SudokuHTTPMaskPathRoot, "multiplex": input.SudokuMultiplex,
+			}),
+		}
+		value, marshalErr := yaml.Marshal(proxy)
 		if marshalErr != nil {
 			return ClientProfile{}, marshalErr
 		}
@@ -288,15 +325,33 @@ func clientFields(input Input, address, serverName string) []ClientField {
 		credentialLabel = "密码"
 	case ProtocolSS2022:
 		credentialLabel = "Base64 PSK"
-	case ProtocolVLESS, ProtocolVLESSXHTTP, ProtocolVLESSEncTCP, ProtocolVLESSEncXHTTP, ProtocolVMess, ProtocolTUIC, ProtocolSudoku:
+	case ProtocolVLESS, ProtocolVLESSXHTTP, ProtocolVLESSEncTCP, ProtocolVLESSEncXHTTP, ProtocolVMess, ProtocolTUIC:
 		credentialLabel = "用户 UUID"
+	case ProtocolSudoku:
+		credentialLabel = "Master Public Key"
 	}
-	fields = append(fields, ClientField{Label: credentialLabel, Value: input.Credential, Secret: true})
+	if input.Protocol != ProtocolSudoku {
+		fields = append(fields, ClientField{Label: credentialLabel, Value: input.Credential, Secret: true})
+	}
 	if input.SecondaryCredential != "" {
 		fields = append(fields, ClientField{Label: "用户密码", Value: input.SecondaryCredential, Secret: true})
 	}
 	if input.Method != "" {
 		fields = append(fields, ClientField{Label: "加密方法", Value: input.Method})
+	}
+	if isSnellProtocol(input.Protocol) {
+		fields = append(fields,
+			ClientField{Label: "UDP over TCP", Value: strconv.FormatBool(input.SnellUDP)},
+			ClientField{Label: "TCP Fast Open", Value: "true"},
+			ClientField{Label: "伪装模式", Value: input.SnellObfsMode},
+		)
+	}
+	if input.Protocol == ProtocolSudoku {
+		fields = append(fields,
+			ClientField{Label: "Available Private Key", Value: input.SudokuClientKey, Secret: true},
+			ClientField{Label: "HTTPMask", Value: input.SudokuHTTPMaskMode},
+			ClientField{Label: "Sudoku Multiplex", Value: input.SudokuMultiplex},
+		)
 	}
 	fields = append(fields, ClientField{Label: "传输", Value: input.Transport})
 	if isVLESSEncryptionProtocol(input.Protocol) {

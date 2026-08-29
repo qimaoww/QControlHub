@@ -5,20 +5,21 @@ package serverconfig
 import "github.com/qimaoww/qcontrolhub/internal/core"
 
 const (
-	ProtocolShadowsocks   = "shadowsocks"
-	ProtocolSS2022        = "ss2022"
-	ProtocolVLESS         = "vless"
-	ProtocolVLESSXHTTP    = "vless-xhttp-reality"
-	ProtocolVLESSEncTCP   = "vless-enc-tcp-reality-vision"
-	ProtocolVLESSEncXHTTP = "vless-enc-xhttp-reality-vision"
-	ProtocolVMess         = "vmess"
-	ProtocolTrojan        = "trojan"
-	ProtocolHy2           = "hysteria2"
-	ProtocolTUIC          = "tuic"
-	ProtocolAnyTLS        = "anytls"
-	ProtocolSnell         = "snell"
-	ProtocolSudoku        = "sudoku"
-	ProtocolPortForward   = "port-forward"
+	ProtocolShadowsocks    = "shadowsocks"
+	ProtocolSS2022         = "ss2022"
+	ProtocolVLESS          = "vless"
+	ProtocolVLESSXHTTP     = "vless-xhttp-reality"
+	ProtocolVLESSEncTCP    = "vless-enc-tcp-reality-vision"
+	ProtocolVLESSEncXHTTP  = "vless-enc-xhttp-reality-vision"
+	ProtocolVMess          = "vmess"
+	ProtocolTrojan         = "trojan"
+	ProtocolHy2            = "hysteria2"
+	ProtocolTUIC           = "tuic"
+	ProtocolAnyTLS         = "anytls"
+	ProtocolSnell          = "snell"
+	ProtocolSnellShadowTLS = "snell-shadow-tls-v3"
+	ProtocolSudoku         = "sudoku"
+	ProtocolPortForward    = "port-forward"
 )
 
 type Protocol struct {
@@ -44,37 +45,61 @@ type Protocol struct {
 }
 
 type Input struct {
-	Protocol             string `json:"protocol"`
-	Tag                  string `json:"tag"`
-	Listen               string `json:"listen"`
-	Port                 int    `json:"port"`
-	Username             string `json:"username"`
-	Credential           string `json:"credential"`
-	SecondaryCredential  string `json:"secondary_credential"`
-	Method               string `json:"method"`
-	Flow                 string `json:"flow"`
-	Transport            string `json:"transport"`
-	TransportPath        string `json:"transport_path"`
-	TLSEnabled           bool   `json:"tls_enabled"`
-	CertificatePath      string `json:"certificate_path"`
-	PrivateKeyPath       string `json:"private_key_path"`
-	RealityEnabled       bool   `json:"reality_enabled"`
-	RealityPrivateKey    string `json:"reality_private_key"`
-	RealityPublicKey     string `json:"reality_public_key"`
-	RealityShortID       string `json:"reality_short_id"`
-	RealityServerName    string `json:"reality_server_name"`
-	RealityMinClientVer  string `json:"reality_min_client_ver"`
-	RealityMLDSA65Seed   string `json:"reality_mldsa65_seed"`
-	RealityMLDSA65Verify string `json:"reality_mldsa65_verify"`
-	VLESSDecryption      string `json:"vless_decryption"`
-	VLESSEncryption      string `json:"vless_encryption"`
-	SnellVersion         int    `json:"snell_version"`
-	SudokuPaddingMin     int    `json:"sudoku_padding_min"`
-	SudokuPaddingMax     int    `json:"sudoku_padding_max"`
-	SudokuTableType      string `json:"sudoku_table_type"`
-	TargetAddress        string `json:"target_address"`
-	TargetPort           int    `json:"target_port"`
-	Network              string `json:"network"`
+	Protocol                 string `json:"protocol"`
+	Tag                      string `json:"tag"`
+	Listen                   string `json:"listen"`
+	Port                     int    `json:"port"`
+	Username                 string `json:"username"`
+	Credential               string `json:"credential"`
+	SecondaryCredential      string `json:"secondary_credential"`
+	Method                   string `json:"method"`
+	Flow                     string `json:"flow"`
+	Transport                string `json:"transport"`
+	TransportPath            string `json:"transport_path"`
+	TLSEnabled               bool   `json:"tls_enabled"`
+	CertificatePath          string `json:"certificate_path"`
+	PrivateKeyPath           string `json:"private_key_path"`
+	RealityEnabled           bool   `json:"reality_enabled"`
+	RealityPrivateKey        string `json:"reality_private_key"`
+	RealityPublicKey         string `json:"reality_public_key"`
+	RealityShortID           string `json:"reality_short_id"`
+	RealityServerName        string `json:"reality_server_name"`
+	RealityMinClientVer      string `json:"reality_min_client_ver"`
+	RealityMLDSA65Seed       string `json:"reality_mldsa65_seed"`
+	RealityMLDSA65Verify     string `json:"reality_mldsa65_verify"`
+	VLESSDecryption          string `json:"vless_decryption"`
+	VLESSEncryption          string `json:"vless_encryption"`
+	ListenerRoutingMark      int    `json:"listener_routing_mark"`
+	ListenerRule             string `json:"listener_rule"`
+	ListenerProxy            string `json:"listener_proxy"`
+	SnellVersion             int    `json:"snell_version"`
+	SnellUDP                 bool   `json:"snell_udp"`
+	SnellReuse               bool   `json:"snell_reuse"`
+	SnellObfsMode            string `json:"snell_obfs_mode"`
+	SnellObfsHost            string `json:"snell_obfs_host"`
+	SnellClientFingerprint   string `json:"snell_client_fingerprint"`
+	SnellShadowTLSVersion    int    `json:"snell_shadow_tls_version"`
+	SnellShadowTLSPassword   string `json:"snell_shadow_tls_password"`
+	SnellShadowTLSUser       string `json:"snell_shadow_tls_user"`
+	SnellShadowTLSHandshake  string `json:"snell_shadow_tls_handshake"`
+	SnellShadowTLSProxy      string `json:"snell_shadow_tls_proxy"`
+	SnellShadowTLSALPN       string `json:"snell_shadow_tls_alpn"`
+	SudokuClientKey          string `json:"sudoku_client_key"`
+	SudokuPaddingMin         int    `json:"sudoku_padding_min"`
+	SudokuPaddingMax         int    `json:"sudoku_padding_max"`
+	SudokuTableType          string `json:"sudoku_table_type"`
+	SudokuHandshakeTimeout   int    `json:"sudoku_handshake_timeout"`
+	SudokuEnablePureDownlink bool   `json:"sudoku_enable_pure_downlink"`
+	SudokuHTTPMaskEnabled    bool   `json:"sudoku_httpmask_enabled"`
+	SudokuHTTPMaskMode       string `json:"sudoku_httpmask_mode"`
+	SudokuHTTPMaskTLS        bool   `json:"sudoku_httpmask_tls"`
+	SudokuHTTPMaskHost       string `json:"sudoku_httpmask_host"`
+	SudokuHTTPMaskPathRoot   string `json:"sudoku_httpmask_path_root"`
+	SudokuMultiplex          string `json:"sudoku_multiplex"`
+	SudokuFallback           string `json:"sudoku_fallback"`
+	TargetAddress            string `json:"target_address"`
+	TargetPort               int    `json:"target_port"`
+	Network                  string `json:"network"`
 }
 
 func Protocols(engine core.Engine) []Protocol {
@@ -192,15 +217,21 @@ func Protocols(engine core.Engine) []Protocol {
 	if engine == core.EngineMihomo {
 		protocols = append(protocols,
 			Protocol{
-				Key: ProtocolSnell, Name: "Snell", Badge: "SNELL",
-				Description: "Snell v1-v5 服务端，默认使用 v4 并启用 UDP over TCP。",
+				Key: ProtocolSnell, Name: "Snell v5", Badge: "SNELL v5",
+				Description: "固定 Snell v5 的原生服务端，支持 UDP over TCP 与连接复用。",
+				Docs:        base + "snell/", DefaultPort: 8443, Credential: "预共享密钥（PSK）",
+				Transports: []string{"raw"}, IgnoresUsername: true,
+			},
+			Protocol{
+				Key: ProtocolSnellShadowTLS, Name: "Snell v5 + ShadowTLS v3", Badge: "SNELL STLS",
+				Description: "固定 Snell v5 与 ShadowTLS v3；自动生成独立用户与强密码，并生成严格校验证书的匹配客户端配置。",
 				Docs:        base + "snell/", DefaultPort: 8443, Credential: "预共享密钥（PSK）",
 				Transports: []string{"raw"}, IgnoresUsername: true,
 			},
 			Protocol{
 				Key: ProtocolSudoku, Name: "Sudoku", Badge: "SUDOKU",
-				Description: "Sudoku 服务端，默认使用 UUID 共享密钥、ChaCha20-Poly1305 与 ASCII 优先表。",
-				Docs:        base + "sudoku/", DefaultPort: 8443, Credential: "共享 UUID / 服务端公钥",
+				Description: "按 SUDOKU-ASCII 上游生成 Ed25519 公私钥、AEAD、低熵字节表、HTTPMask 与原生复用。",
+				Docs:        base + "sudoku/", DefaultPort: 8443, Credential: "Master Public Key（服务端）",
 				Methods: []string{"chacha20-poly1305", "aes-128-gcm"}, Transports: []string{"raw"}, IgnoresUsername: true,
 			},
 		)

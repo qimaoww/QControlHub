@@ -1389,7 +1389,7 @@ func writeStoreError(w http.ResponseWriter, err error) {
 	case errors.Is(err, store.ErrInvalid):
 		writeError(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, store.ErrSecretUnavailable):
-		writeError(w, http.StatusServiceUnavailable, "protected enrollment credential is unavailable")
+		writeError(w, http.StatusServiceUnavailable, "protected credential storage is unavailable; configure QCH_CONFIG_ENCRYPTION_KEY")
 	case errors.Is(err, store.ErrAuditUnavailable):
 		writeError(w, http.StatusServiceUnavailable, "audit unavailable; enrollment credential was not disclosed")
 	default:

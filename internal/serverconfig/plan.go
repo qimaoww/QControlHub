@@ -71,13 +71,38 @@ func NewPlan(protocol Protocol) (Input, error) {
 			return Input{}, err
 		}
 	}
-	if protocol.Key == ProtocolSnell {
-		input.SnellVersion = 4
+	if isSnellProtocol(protocol.Key) {
+		input.SnellVersion = 5
+		input.SnellUDP = true
+		input.SnellReuse = true
+		input.SnellObfsMode = SnellObfsNone
+		if protocol.Key == ProtocolSnellShadowTLS {
+			input.SnellObfsMode = SnellObfsShadowTLS
+			input.SnellObfsHost = "www.microsoft.com"
+			input.SnellClientFingerprint = "chrome"
+			input.SnellShadowTLSVersion = 3
+			input.SnellShadowTLSUser = "qch-" + suffix
+			input.SnellShadowTLSHandshake = "www.microsoft.com:443"
+			input.SnellShadowTLSALPN = "h2,http/1.1"
+			input.SnellShadowTLSPassword, err = NewCredential(ProtocolTrojan, "")
+			if err != nil {
+				return Input{}, err
+			}
+		}
 	}
 	if protocol.Key == ProtocolSudoku {
-		input.SudokuPaddingMin = 1
+		input.SudokuClientKey, input.Credential, err = newSudokuKeyPair()
+		if err != nil {
+			return Input{}, err
+		}
+		input.SudokuPaddingMin = 5
 		input.SudokuPaddingMax = 15
-		input.SudokuTableType = "prefer_ascii"
+		input.SudokuTableType = "prefer_entropy"
+		input.SudokuHandshakeTimeout = 5
+		input.SudokuEnablePureDownlink = true
+		input.SudokuHTTPMaskEnabled = true
+		input.SudokuHTTPMaskMode = "ws"
+		input.SudokuMultiplex = "off"
 	}
 	if protocol.Key == ProtocolVLESS || protocol.Key == ProtocolVLESSXHTTP || isVLESSEncryptionProtocol(protocol.Key) {
 		if protocol.Key == ProtocolVLESS || isVLESSEncryptionProtocol(protocol.Key) {
@@ -156,6 +181,9 @@ func RegeneratePlan(protocol Protocol, current Input) (Input, error) {
 	plan.RealityEnabled = current.RealityEnabled
 	plan.RealityServerName = current.RealityServerName
 	plan.RealityMinClientVer = current.RealityMinClientVer
+	plan.ListenerRoutingMark = current.ListenerRoutingMark
+	plan.ListenerRule = current.ListenerRule
+	plan.ListenerProxy = current.ListenerProxy
 	if protocol.SupportsRealityMLDSA {
 		seed := make([]byte, 32)
 		if _, err := rand.Read(seed); err != nil {
@@ -167,10 +195,41 @@ func RegeneratePlan(protocol Protocol, current Input) (Input, error) {
 			return Input{}, err
 		}
 	}
-	plan.SnellVersion = current.SnellVersion
-	plan.SudokuPaddingMin = current.SudokuPaddingMin
-	plan.SudokuPaddingMax = current.SudokuPaddingMax
-	plan.SudokuTableType = current.SudokuTableType
+	if isSnellProtocol(protocol.Key) {
+		plan.SnellVersion = 5
+		plan.SnellUDP = current.SnellUDP
+		plan.SnellReuse = current.SnellReuse
+		plan.SnellObfsMode = SnellObfsNone
+		plan.SnellObfsHost = current.SnellObfsHost
+		plan.SnellClientFingerprint = current.SnellClientFingerprint
+		plan.SnellShadowTLSVersion = current.SnellShadowTLSVersion
+		plan.SnellShadowTLSUser = current.SnellShadowTLSUser
+		plan.SnellShadowTLSHandshake = current.SnellShadowTLSHandshake
+		plan.SnellShadowTLSProxy = current.SnellShadowTLSProxy
+		plan.SnellShadowTLSALPN = current.SnellShadowTLSALPN
+		if protocol.Key == ProtocolSnellShadowTLS {
+			plan.SnellObfsMode = SnellObfsShadowTLS
+			plan.SnellShadowTLSVersion = 3
+		}
+	}
+	if protocol.Key == ProtocolSudoku {
+		plan.SudokuClientKey, plan.Credential, err = newSudokuKeyPair()
+		if err != nil {
+			return Input{}, err
+		}
+		plan.SudokuPaddingMin = current.SudokuPaddingMin
+		plan.SudokuPaddingMax = current.SudokuPaddingMax
+		plan.SudokuTableType = current.SudokuTableType
+		plan.SudokuHandshakeTimeout = current.SudokuHandshakeTimeout
+		plan.SudokuEnablePureDownlink = current.SudokuEnablePureDownlink
+		plan.SudokuHTTPMaskEnabled = current.SudokuHTTPMaskEnabled
+		plan.SudokuHTTPMaskMode = current.SudokuHTTPMaskMode
+		plan.SudokuHTTPMaskTLS = current.SudokuHTTPMaskTLS
+		plan.SudokuHTTPMaskHost = current.SudokuHTTPMaskHost
+		plan.SudokuHTTPMaskPathRoot = current.SudokuHTTPMaskPathRoot
+		plan.SudokuMultiplex = current.SudokuMultiplex
+		plan.SudokuFallback = current.SudokuFallback
+	}
 	if protocol.PortForward {
 		plan.TargetAddress = current.TargetAddress
 		plan.TargetPort = current.TargetPort

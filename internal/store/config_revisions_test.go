@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -21,7 +22,7 @@ func TestConfigRevisionLifecycleWithPostgreSQL(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
-	dataStore, err := Open(ctx, databaseURL, true)
+	dataStore, err := OpenWithConfigKey(ctx, databaseURL, true, testEncryptionKey("revision-client-metadata"))
 	if err != nil {
 		t.Fatalf("open PostgreSQL: %v", err)
 	}
@@ -125,27 +126,46 @@ func testAgentConfigRevisionLifecycle(t *testing.T, ctx context.Context, dataSto
 	}
 	defer cleanupRevisionTestAgent(dataStore, agent.ID, enrollment.ID)
 
-	first, err := dataStore.SaveAgentConfig(ctx, core.Config{
+	first, err := dataStore.SaveAgentConfigWithClientMetadata(ctx, core.Config{
 		AgentID: agent.ID, Name: "node xray v1", Engine: core.EngineXray,
 		Content: `{"log":{"loglevel":"warning"},"inbounds":[],"outbounds":[]}`,
-	}, 0)
+	}, 0, ConfigClientMetadataMutation{Tag: "in-1", Content: `{"client_private":"revision-secret-v1"}`})
 	if err != nil {
 		t.Fatalf("save first agent config: %v", err)
+	}
+	firstMetadata, err := dataStore.ConfigClientMetadata(ctx, first.ID, 1)
+	if err != nil || firstMetadata["in-1"] != `{"client_private":"revision-secret-v1"}` {
+		t.Fatalf("first client metadata = %#v, %v", firstMetadata, err)
+	}
+	var rawMetadata string
+	if err := dataStore.pool.QueryRow(ctx, `SELECT content FROM config_client_metadata WHERE config_id=$1 AND config_version=1 AND profile_tag='in-1'`, first.ID).Scan(&rawMetadata); err != nil {
+		t.Fatalf("read stored client metadata: %v", err)
+	}
+	if strings.Contains(rawMetadata, "revision-secret-v1") {
+		t.Fatalf("client-only private metadata was stored in plaintext: %q", rawMetadata)
 	}
 	withAgentConfig, err := dataStore.Overview(ctx)
 	if err != nil || withAgentConfig.Configs != baselineOverview.Configs || withAgentConfig.NodeConfigs != baselineOverview.NodeConfigs+1 {
 		t.Fatalf("overview after node config = %+v, %v; baseline = %+v", withAgentConfig, err, baselineOverview)
 	}
-	second, err := dataStore.SaveAgentConfig(ctx, core.Config{
+	second, err := dataStore.SaveAgentConfigWithClientMetadata(ctx, core.Config{
 		AgentID: agent.ID, Name: "node xray v2", Engine: core.EngineXray,
 		Content: `{"log":{"loglevel":"info"},"inbounds":[],"outbounds":[]}`,
-	}, 1)
+	}, 1, ConfigClientMetadataMutation{OriginalTag: "in-1", Tag: "in-2", Content: `{"client_private":"revision-secret-v2"}`})
 	if err != nil || second.Version != 2 {
 		t.Fatalf("save second agent config = %+v, %v", second, err)
+	}
+	secondMetadata, err := dataStore.ConfigClientMetadata(ctx, first.ID, 2)
+	if err != nil || secondMetadata["in-2"] != `{"client_private":"revision-secret-v2"}` || secondMetadata["in-1"] != "" {
+		t.Fatalf("renamed client metadata = %#v, %v", secondMetadata, err)
 	}
 	restored, err := dataStore.RestoreConfigRevision(ctx, first.ID, 1, 2)
 	if err != nil || restored.Version != 3 || restored.AgentID != agent.ID || restored.Content != first.Content {
 		t.Fatalf("restore agent revision = %+v, %v", restored, err)
+	}
+	restoredMetadata, err := dataStore.ConfigClientMetadata(ctx, first.ID, 3)
+	if err != nil || restoredMetadata["in-1"] != `{"client_private":"revision-secret-v1"}` || restoredMetadata["in-2"] != "" {
+		t.Fatalf("restored client metadata = %#v, %v", restoredMetadata, err)
 	}
 	listed, err := dataStore.ListAgentConfigs(ctx)
 	if err != nil {

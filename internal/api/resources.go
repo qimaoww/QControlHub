@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/netip"
 	"sort"
@@ -178,6 +179,10 @@ func (s *Server) agentConfigWorkspace(w http.ResponseWriter, request *http.Reque
 	if err == nil {
 		result.Config = &config
 		result.Inbounds = serverconfig.ParseAll(engine, config.Content)
+		if err := s.hydrateClientMetadata(request.Context(), config, result.Inbounds); err != nil {
+			writeInternalError(w, err)
+			return
+		}
 		result.PresentFields, err = configschema.RootKeys(engine, config.Content)
 		if err != nil {
 			writeError(w, http.StatusUnprocessableEntity, err.Error())
@@ -298,9 +303,16 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 	if name == "" {
 		name = agent.Name + " · " + string(engine)
 	}
-	saved, err := s.store.SaveAgentConfig(request.Context(), core.Config{
+	clientMetadata, err := serverconfig.MarshalClientMetadata(input.Input)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	saved, err := s.store.SaveAgentConfigWithClientMetadata(request.Context(), core.Config{
 		AgentID: agent.ID, Name: name, Description: input.Description, Engine: engine, Content: content,
-	}, input.ExpectedVersion)
+	}, input.ExpectedVersion, store.ConfigClientMetadataMutation{
+		OriginalTag: input.OriginalTag, Tag: input.Input.Tag, Content: clientMetadata, Delete: input.Operation == "delete",
+	})
 	if err != nil {
 		writeStoreError(w, err)
 		return
@@ -539,6 +551,9 @@ func (s *Server) clientAccessEntries(ctx context.Context) ([]clientAccessEntry, 
 		if len(inputs) == 0 {
 			continue
 		}
+		if err := s.hydrateClientMetadata(ctx, config, inputs); err != nil {
+			return nil, err
+		}
 		serverName := firstLabel(agent, "tls_server_name", "server_name")
 		clientName := firstLabel(agent, "client_name")
 		clientAddressMode := firstLabel(agent, "client_address_mode")
@@ -569,6 +584,19 @@ func (s *Server) clientAccessEntries(ctx context.Context) ([]clientAccessEntry, 
 		return entries[i].Engine < entries[j].Engine
 	})
 	return entries, nil
+}
+
+func (s *Server) hydrateClientMetadata(ctx context.Context, config core.Config, inputs []serverconfig.Input) error {
+	metadata, err := s.store.ConfigClientMetadata(ctx, config.ID, config.Version)
+	if err != nil {
+		return err
+	}
+	for index := range inputs {
+		if err := serverconfig.ApplyClientMetadata(&inputs[index], metadata[inputs[index].Tag]); err != nil {
+			return fmt.Errorf("apply client metadata for %s: %w", inputs[index].Tag, err)
+		}
+	}
+	return nil
 }
 
 type clientAddressCandidate struct {

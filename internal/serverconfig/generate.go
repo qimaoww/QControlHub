@@ -28,6 +28,15 @@ func Generate(engine core.Engine, input Input) (string, error) {
 	if !ok {
 		return "", errors.New("不支持的服务端入站协议")
 	}
+	if isSnellProtocol(input.Protocol) {
+		if err := validateSnellPresetIdentity(input); err != nil {
+			return "", err
+		}
+		normalizeSnellInput(&input)
+	}
+	if input.Protocol == ProtocolSudoku {
+		normalizeSudokuInput(&input)
+	}
 	if !tagPattern.MatchString(input.Tag) {
 		return "", errors.New("入站标签只能包含字母、数字、点、下划线和短横线，最长 64 位")
 	}
@@ -140,20 +149,19 @@ func Generate(engine core.Engine, input Input) (string, error) {
 			return "", err
 		}
 	}
-	if input.Protocol == ProtocolSnell && (input.SnellVersion < 1 || input.SnellVersion > 5) {
-		return "", errors.New("Snell 版本必须在 1 到 5 之间")
+	if engine == core.EngineMihomo && (isSnellProtocol(input.Protocol) || input.Protocol == ProtocolSudoku) {
+		if err := validateListenerOptions(input); err != nil {
+			return "", err
+		}
+	}
+	if isSnellProtocol(input.Protocol) {
+		if err := validateSnellInput(input); err != nil {
+			return "", err
+		}
 	}
 	if input.Protocol == ProtocolSudoku {
-		if input.SudokuPaddingMin < 0 || input.SudokuPaddingMin > 100 || input.SudokuPaddingMax < input.SudokuPaddingMin || input.SudokuPaddingMax > 100 {
-			return "", errors.New("Sudoku Padding 必须在 0 到 100 之间，且最大值不能小于最小值")
-		}
-		if input.SudokuTableType == "" {
-			input.SudokuTableType = "prefer_ascii"
-		}
-		switch input.SudokuTableType {
-		case "prefer_ascii", "prefer_entropy", "up_ascii_down_entropy", "up_entropy_down_ascii":
-		default:
-			return "", errors.New("不支持的 Sudoku Table Type")
+		if err := validateSudokuInput(input); err != nil {
+			return "", err
 		}
 	}
 	switch engine {
@@ -192,9 +200,12 @@ func validateCredential(input Input) error {
 		}
 		return nil
 	}
-	if input.Protocol == ProtocolVLESS || input.Protocol == ProtocolVLESSXHTTP || isVLESSEncryptionProtocol(input.Protocol) || input.Protocol == ProtocolVMess || input.Protocol == ProtocolTUIC || input.Protocol == ProtocolSudoku {
+	if input.Protocol == ProtocolSudoku {
+		return nil
+	}
+	if input.Protocol == ProtocolVLESS || input.Protocol == ProtocolVLESSXHTTP || isVLESSEncryptionProtocol(input.Protocol) || input.Protocol == ProtocolVMess || input.Protocol == ProtocolTUIC {
 		if !uuidPattern.MatchString(input.Credential) {
-			return errors.New("VLESS/VMess/TUIC/Sudoku 用户凭据必须是有效 UUID")
+			return errors.New("VLESS/VMess/TUIC 用户凭据必须是有效 UUID")
 		}
 		if input.Protocol == ProtocolTUIC && (len(input.SecondaryCredential) < 16 || len(input.SecondaryCredential) > 128) {
 			return errors.New("TUIC 用户密码必须在 16 到 128 个字符之间")

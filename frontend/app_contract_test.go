@@ -137,9 +137,26 @@ func TestServerPlanRegenerationStaysLocalAndUsesCurrentFormState(t *testing.T) {
 		`name="target_port"`,
 		`name="network"`,
 		`<strong>转发目标</strong>`,
+		`snellProtocolOptions(plan, false)`,
+		`snellProtocolOptions(plan, true)`,
+		`sudokuProtocolOptions(plan)`,
+		`name="snell_obfs_mode" value="shadow-tls"`,
+		`optionSecret("snell_shadow_tls_password"`,
+		`optionSecret("sudoku_client_key"`,
+		`name="sudoku_httpmask_mode"`,
+		`name="sudoku_multiplex"`,
+		`bindProtocolOptionVisibility(serverPlanForm)`,
 	} {
 		if !strings.Contains(content, required) {
 			t.Errorf("server-plan field generation is missing %q", required)
+		}
+	}
+	if strings.Contains(content, "skip-cert-verify") {
+		t.Error("safe Snell presets must not expose a certificate verification bypass")
+	}
+	for _, forbidden := range []string{`name="sudoku_key_mode"`, `name="sudoku_smux_enabled"`, `name="sudoku_allow_insecure_aead"`} {
+		if strings.Contains(content, forbidden) {
+			t.Errorf("safe Sudoku preset must not expose %q", forbidden)
 		}
 	}
 	styles, err := os.ReadFile("app.css")

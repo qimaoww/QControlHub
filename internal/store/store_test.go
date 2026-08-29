@@ -1,8 +1,12 @@
 package store
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
+
+	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
 func TestValidateConfigMetadataCountsCharactersNotUTF8Bytes(t *testing.T) {
@@ -17,5 +21,16 @@ func TestValidateConfigMetadataCountsCharactersNotUTF8Bytes(t *testing.T) {
 	}
 	if _, _, err := validateConfigMetadata(name, description+"长"); err == nil {
 		t.Fatal("configuration description over 300 characters was accepted")
+	}
+}
+
+func TestClientOnlyMetadataRequiresEncryptionKey(t *testing.T) {
+	t.Parallel()
+	dataStore := &Store{}
+	_, err := dataStore.SaveAgentConfigWithClientMetadata(context.Background(), core.Config{}, 0, ConfigClientMetadataMutation{
+		Tag: "sudoku", Content: `{"sudoku_client_key":"private"}`,
+	})
+	if !errors.Is(err, ErrSecretUnavailable) {
+		t.Fatalf("SaveAgentConfigWithClientMetadata() error = %v, want ErrSecretUnavailable", err)
 	}
 }

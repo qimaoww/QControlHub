@@ -99,7 +99,7 @@ func TestGeneratedMihomoClientYAMLWithLiveCore(t *testing.T) {
 	if err := executor.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{serverconfig.ProtocolSnell, serverconfig.ProtocolSudoku} {
+	for _, key := range []string{serverconfig.ProtocolSnell, serverconfig.ProtocolSnellShadowTLS, serverconfig.ProtocolSudoku} {
 		key := key
 		t.Run(key, func(t *testing.T) {
 			protocol, ok := serverconfig.FindProtocol(core.EngineMihomo, key)

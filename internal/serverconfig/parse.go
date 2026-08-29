@@ -115,6 +115,28 @@ func intValue(value any) int {
 	}
 }
 
+func boolValue(value any) bool {
+	result, _ := value.(bool)
+	return result
+}
+
+func stringSliceValue(value any) []string {
+	switch typed := value.(type) {
+	case []string:
+		return append([]string(nil), typed...)
+	case []any:
+		result := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if text := stringValue(item); text != "" {
+				result = append(result, text)
+			}
+		}
+		return result
+	default:
+		return nil
+	}
+}
+
 func mapValue(value any) map[string]any {
 	result, _ := value.(map[string]any)
 	return result
