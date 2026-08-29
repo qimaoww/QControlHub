@@ -23,11 +23,14 @@ func TestBuildClientProfileCoversEveryServerProtocol(t *testing.T) {
 		{name: "shadowsocks standard", input: Input{Protocol: ProtocolShadowsocks, Tag: "ss-standard", Port: 20000, Credential: password, Method: "chacha20-ietf-poly1305", Transport: "raw"}, scheme: "ss"},
 		{name: "shadowsocks", input: Input{Protocol: ProtocolSS2022, Tag: "ss", Port: 20001, Credential: psk, Method: "2022-blake3-aes-256-gcm", Transport: "raw"}, scheme: "ss"},
 		{name: "vless reality", input: Input{Protocol: ProtocolVLESS, Tag: "vless", Port: 20002, Credential: uuid, Flow: "xtls-rprx-vision", Transport: "raw", RealityEnabled: true, RealityServerName: "www.cloudflare.com", RealityPublicKey: "public-key", RealityShortID: "0123456789abcdef"}, scheme: "vless"},
+		{name: "vless xhttp reality", input: Input{Protocol: ProtocolVLESSXHTTP, Tag: "vless-xhttp", Port: 20008, Credential: uuid, Transport: "xhttp", TransportPath: "/xhttp", RealityEnabled: true, RealityServerName: "www.cloudflare.com", RealityPublicKey: "public-key", RealityShortID: "0123456789abcdef"}, scheme: "vless"},
 		{name: "vmess", input: Input{Protocol: ProtocolVMess, Tag: "vmess", Port: 20003, Credential: uuid, Transport: "websocket", TransportPath: "/relay", TLSEnabled: true}, scheme: "vmess"},
 		{name: "trojan", input: Input{Protocol: ProtocolTrojan, Tag: "trojan", Port: 20004, Credential: password, Transport: "grpc", TransportPath: "relay", TLSEnabled: true}, scheme: "trojan"},
 		{name: "hysteria2", input: Input{Protocol: ProtocolHy2, Tag: "hy2", Port: 20005, Credential: password, Transport: "raw", TLSEnabled: true}, scheme: "hysteria2"},
 		{name: "tuic", input: Input{Protocol: ProtocolTUIC, Tag: "tuic", Port: 20006, Credential: uuid, SecondaryCredential: password, Transport: "raw", TLSEnabled: true}, scheme: "tuic"},
 		{name: "anytls", input: Input{Protocol: ProtocolAnyTLS, Tag: "anytls", Port: 20007, Credential: password, Transport: "raw", TLSEnabled: true}, scheme: "anytls"},
+		{name: "snell", input: Input{Protocol: ProtocolSnell, Tag: "snell", Port: 20009, Credential: password, Transport: "raw", SnellVersion: 4}, scheme: "yaml"},
+		{name: "sudoku", input: Input{Protocol: ProtocolSudoku, Tag: "sudoku", Port: 20010, Credential: uuid, Method: "chacha20-poly1305", Transport: "raw", SudokuPaddingMin: 1, SudokuPaddingMax: 15, SudokuTableType: "prefer_ascii"}, scheme: "yaml"},
 	}
 	for _, test := range tests {
 		test := test
@@ -39,6 +42,12 @@ func TestBuildClientProfileCoversEveryServerProtocol(t *testing.T) {
 			}
 			if profile.Format == "" || profile.URI == "" || len(profile.Fields) < 6 {
 				t.Fatalf("incomplete client profile: %+v", profile)
+			}
+			if test.scheme == "yaml" {
+				if profile.SubscriptionCompatible || !strings.Contains(profile.URI, "server: edge.example.com") {
+					t.Fatalf("YAML profile = %+v", profile)
+				}
+				return
 			}
 			if !test.input.TLSEnabled && !test.input.RealityEnabled {
 				for _, field := range profile.Fields {

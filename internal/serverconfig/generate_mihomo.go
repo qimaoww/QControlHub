@@ -17,14 +17,32 @@ func generateMihomo(input Input) (string, error) {
 		listener["cipher"] = input.Method
 		listener["password"] = input.Credential
 		listener["udp"] = true
-	case ProtocolVLESS:
+	case ProtocolVLESS, ProtocolVLESSXHTTP, ProtocolVLESSEncTCP, ProtocolVLESSEncXHTTP:
 		listener["type"] = "vless"
 		user := map[string]any{"username": input.Username, "uuid": input.Credential}
 		if input.Flow != "" {
 			user["flow"] = input.Flow
 		}
 		listener["users"] = []any{user}
+		if isVLESSEncryptionProtocol(input.Protocol) {
+			listener["decryption"] = input.VLESSDecryption
+		}
 		mihomoTransport(listener, input)
+	case ProtocolSnell:
+		listener["type"] = "snell"
+		listener["psk"] = input.Credential
+		listener["version"] = input.SnellVersion
+		listener["udp"] = true
+	case ProtocolSudoku:
+		listener["type"] = "sudoku"
+		listener["key"] = input.Credential
+		listener["aead-method"] = input.Method
+		listener["padding-min"] = input.SudokuPaddingMin
+		listener["padding-max"] = input.SudokuPaddingMax
+		listener["table-type"] = input.SudokuTableType
+		listener["handshake-timeout"] = 5
+		listener["enable-pure-downlink"] = false
+		listener["httpmask"] = map[string]any{"disable": false, "mode": "legacy"}
 	case ProtocolVMess:
 		listener["type"] = "vmess"
 		listener["users"] = []any{map[string]any{"username": input.Username, "uuid": input.Credential, "alterId": 0}}
@@ -85,6 +103,18 @@ func parseMihomo(content string) (Input, bool) {
 		Method: stringValue(listener["cipher"]), Credential: stringValue(listener["password"]), Transport: "raw",
 		CertificatePath: stringValue(listener["certificate"]), PrivateKeyPath: stringValue(listener["private-key"]),
 	}
+	input.VLESSDecryption = stringValue(listener["decryption"])
+	if input.Protocol == ProtocolSnell {
+		input.Credential = stringValue(listener["psk"])
+		input.SnellVersion = intValue(listener["version"])
+	}
+	if input.Protocol == ProtocolSudoku {
+		input.Credential = stringValue(listener["key"])
+		input.Method = stringValue(listener["aead-method"])
+		input.SudokuPaddingMin = intValue(listener["padding-min"])
+		input.SudokuPaddingMax = intValue(listener["padding-max"])
+		input.SudokuTableType = stringValue(listener["table-type"])
+	}
 	if input.Protocol == ProtocolPortForward {
 		input.Network = networkListValue(listener["network"])
 		input.TargetAddress, input.TargetPort, _ = splitForwardTarget(stringValue(listener["target"]))
@@ -103,10 +133,27 @@ func parseMihomo(content string) (Input, bool) {
 	if value := stringValue(listener["grpc-service-name"]); value != "" {
 		input.Transport, input.TransportPath = "grpc", value
 	}
+	if config := mapValue(listener["xhttp-config"]); config != nil {
+		input.Transport, input.TransportPath = "xhttp", stringValue(config["path"])
+	}
 	if user := firstMap(listener["users"]); user != nil {
 		input.Username = stringValue(user["username"])
 		input.Credential = stringValue(user["uuid"])
 		input.Flow = stringValue(user["flow"])
+	}
+	if input.Protocol == ProtocolVLESS && input.VLESSDecryption != "" {
+		var err error
+		input.VLESSEncryption, err = vlessEncryptionFromDecryption(input.VLESSDecryption)
+		if err != nil {
+			return Input{}, false
+		}
+		if input.Transport == "xhttp" {
+			input.Protocol = ProtocolVLESSEncXHTTP
+		} else {
+			input.Protocol = ProtocolVLESSEncTCP
+		}
+	} else if input.Protocol == ProtocolVLESS && input.Transport == "xhttp" {
+		input.Protocol = ProtocolVLESSXHTTP
 	}
 	if input.Protocol == ProtocolTrojan {
 		if user := firstMap(listener["users"]); user != nil {
@@ -146,5 +193,7 @@ func mihomoTransport(listener map[string]any, input Input) {
 		listener["ws-path"] = input.TransportPath
 	case "grpc":
 		listener["grpc-service-name"] = input.TransportPath
+	case "xhttp":
+		listener["xhttp-config"] = map[string]any{"path": input.TransportPath, "mode": "auto"}
 	}
 }

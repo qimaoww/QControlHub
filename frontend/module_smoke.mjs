@@ -1796,6 +1796,15 @@ const planControls = Object.fromEntries(
     reality_public_key: "",
     reality_short_id: "",
     reality_server_name: "unsaved.example.test",
+    reality_min_client_ver: "0.0.0",
+    reality_mldsa65_seed: "",
+    reality_mldsa65_verify: "",
+    vless_decryption: "",
+    vless_encryption: "",
+    snell_version: "0",
+    sudoku_padding_min: "0",
+    sudoku_padding_max: "0",
+    sudoku_table_type: "",
     target_address: "backend.example.test",
     target_port: "9443",
     network: "udp",
@@ -1857,6 +1866,10 @@ const realityKeyPlanButton = fakePlanButton("生成密钥对", {
   regenerate: "reality_private_key,reality_public_key",
   regenerateSuccess: "Reality 密钥对已生成",
 });
+const mldsaPlanButton = fakePlanButton("生成密钥对", {
+  regenerate: "reality_mldsa65_seed",
+  regenerateSuccess: "ML-DSA-65 密钥对已生成",
+});
 const deferredPlan = () => {
   let resolve;
   let reject;
@@ -1890,7 +1903,7 @@ globalThis.FormData = class {
 try {
   bindServerPlanRegeneration({
     form: planForm,
-    buttons: [planButton, credentialPlanButton, realityKeyPlanButton],
+    buttons: [planButton, credentialPlanButton, realityKeyPlanButton, mldsaPlanButton],
     api: async (path, options) => {
       const pending = deferredPlan();
       planRequests.push({ path, options, pending });
@@ -1926,6 +1939,11 @@ try {
   assert.equal(firstPayload.input.transport, "grpc");
   assert.equal(firstPayload.input.listen, "127.0.0.1");
   assert.equal(firstPayload.input.certificate_path, "/unsaved/certificate.pem");
+  assert.equal(
+    firstPayload.input.reality_min_client_ver,
+    "0.0.0",
+    "the editable minClientVer preserves the legacy preset default",
+  );
   assert.equal(firstPayload.input.target_address, "backend.example.test");
   assert.equal(firstPayload.input.target_port, 9443);
   assert.equal(firstPayload.input.network, "udp");
@@ -2066,6 +2084,24 @@ try {
   );
   assert.equal(planControls.method.value, "2022-blake3-aes-256-gcm");
   assert.equal(planButton.disabled, false);
+
+  const mldsaClick = mldsaPlanButton.dispatchClick();
+  planRequests[6].pending.resolve({
+    reality_mldsa65_seed: "generated-mldsa-seed",
+    reality_mldsa65_verify: "server-derived-verify",
+  });
+  await mldsaClick;
+  assert.equal(
+    planControls.reality_mldsa65_seed.value,
+    "generated-mldsa-seed",
+    "ML-DSA generation applies only the persisted server seed",
+  );
+  assert.equal(
+    planControls.reality_mldsa65_verify.value,
+    "",
+    "the UI does not retain a stale client verify value",
+  );
+  assert.deepEqual(planNotifications.at(-1), ["ML-DSA-65 密钥对已生成"]);
 } finally {
   if (previousFormData === undefined) delete globalThis.FormData;
   else globalThis.FormData = previousFormData;

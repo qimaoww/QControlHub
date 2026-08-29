@@ -1,14 +1,230 @@
 package serverconfig
 
 import (
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"net/url"
 	"strings"
 	"testing"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
+
+func TestMihomoSnellAndSudokuPlansGenerateRoundTripAndExportYAML(t *testing.T) {
+	t.Parallel()
+	for _, key := range []string{ProtocolSnell, ProtocolSudoku} {
+		key := key
+		t.Run(key, func(t *testing.T) {
+			t.Parallel()
+			protocol, ok := FindProtocol(core.EngineMihomo, key)
+			if !ok {
+				t.Fatalf("Mihomo protocol %q was not published", key)
+			}
+			input, err := NewPlan(protocol)
+			if err != nil {
+				t.Fatal(err)
+			}
+			content, err := Generate(core.EngineMihomo, input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			parsed, ok := Parse(core.EngineMihomo, content)
+			if !ok || parsed.Protocol != key || parsed.Credential != input.Credential {
+				t.Fatalf("Parse(Mihomo/%s) = %+v, %v\n%s", key, parsed, ok, content)
+			}
+			profile, err := BuildClientProfileNamed(parsed, "edge.example.com", "", "Tokyo")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if profile.SubscriptionCompatible || !strings.Contains(profile.Format, "Mihomo") || !strings.Contains(profile.URI, "name: Tokyo") || !strings.Contains(profile.URI, "server: edge.example.com") {
+				t.Fatalf("Mihomo client YAML = %+v", profile)
+			}
+		})
+	}
+}
+
+func TestVLESSXHTTPRealityPlansMatchBothCoreShapes(t *testing.T) {
+	t.Parallel()
+	for _, engine := range []core.Engine{core.EngineMihomo, core.EngineXray} {
+		engine := engine
+		t.Run(string(engine), func(t *testing.T) {
+			t.Parallel()
+			protocol, ok := FindProtocol(engine, ProtocolVLESSXHTTP)
+			if !ok {
+				t.Fatalf("%s XHTTP preset was not published", engine)
+			}
+			input, err := NewPlan(protocol)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if input.Flow != "" || input.Transport != "xhttp" || !strings.HasPrefix(input.TransportPath, "/") {
+				t.Fatalf("XHTTP plan = %+v", input)
+			}
+			content, err := Generate(engine, input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, marker := range []string{"xhttp", input.TransportPath, input.RealityPrivateKey} {
+				if !strings.Contains(content, marker) {
+					t.Fatalf("%s XHTTP config omitted %q:\n%s", engine, marker, content)
+				}
+			}
+			parsed, ok := Parse(engine, content)
+			if !ok || parsed.Protocol != ProtocolVLESSXHTTP || parsed.Transport != "xhttp" || parsed.TransportPath != input.TransportPath || parsed.Flow != "" {
+				t.Fatalf("Parse(%s/XHTTP) = %+v, %v", engine, parsed, ok)
+			}
+			profile, err := BuildClientProfile(parsed, "edge.example.com", "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			parsedURI, err := url.Parse(profile.URI)
+			if err != nil || parsedURI.Query().Get("type") != "xhttp" || parsedURI.Query().Get("path") != input.TransportPath || parsedURI.Query().Get("flow") != "" {
+				t.Fatalf("XHTTP client URI = %q, err = %v", profile.URI, err)
+			}
+		})
+	}
+}
+
+func TestVLESSEncryptionRealityVisionPlansRoundTripAndExportClientKey(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		protocol  string
+		transport string
+		uriType   string
+	}{
+		{ProtocolVLESSEncTCP, "raw", "tcp"},
+		{ProtocolVLESSEncXHTTP, "xhttp", "xhttp"},
+	}
+	for _, engine := range []core.Engine{core.EngineMihomo, core.EngineXray} {
+		engine := engine
+		for _, test := range tests {
+			test := test
+			t.Run(string(engine)+"/"+test.protocol, func(t *testing.T) {
+				t.Parallel()
+				protocol, ok := FindProtocol(engine, test.protocol)
+				if !ok || !protocol.UsesVLESSEncryption {
+					t.Fatalf("%s protocol %q does not advertise VLESS Encryption", engine, test.protocol)
+				}
+				input, err := NewPlan(protocol)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if input.Transport != test.transport || input.Flow != "xtls-rprx-vision" || input.VLESSDecryption == "" || input.VLESSEncryption == "" {
+					t.Fatalf("VLESS-ENC plan = %+v", input)
+				}
+				if err := validateVLESSEncryptionPair(input.VLESSDecryption, input.VLESSEncryption); err != nil {
+					t.Fatal(err)
+				}
+				content, err := Generate(engine, input)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !strings.Contains(content, input.VLESSDecryption) || strings.Contains(content, input.VLESSEncryption) || !strings.Contains(content, "xtls-rprx-vision") {
+					t.Fatalf("%s server configuration mixed up VLESS-ENC key roles:\n%s", engine, content)
+				}
+				parsed, ok := Parse(engine, content)
+				if !ok || parsed.Protocol != test.protocol || parsed.VLESSDecryption != input.VLESSDecryption || parsed.VLESSEncryption != input.VLESSEncryption {
+					t.Fatalf("Parse(%s/%s) = %+v, %v", engine, test.protocol, parsed, ok)
+				}
+				profile, err := BuildClientProfile(parsed, "edge.example.com", "")
+				if err != nil {
+					t.Fatal(err)
+				}
+				parsedURI, err := url.Parse(profile.URI)
+				if err != nil {
+					t.Fatal(err)
+				}
+				query := parsedURI.Query()
+				if query.Get("type") != test.uriType || query.Get("flow") != "xtls-rprx-vision" || query.Get("encryption") != input.VLESSEncryption || strings.Contains(profile.URI, input.VLESSDecryption) {
+					t.Fatalf("VLESS-ENC client URI = %q", profile.URI)
+				}
+			})
+		}
+	}
+}
+
+func TestVLESSEncryptionRejectsMismatchedClientKey(t *testing.T) {
+	t.Parallel()
+	for _, engine := range []core.Engine{core.EngineMihomo, core.EngineXray} {
+		protocol, _ := FindProtocol(engine, ProtocolVLESSEncTCP)
+		input, err := NewPlan(protocol)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, otherEncryption, err := newVLESSEncryptionPair()
+		if err != nil {
+			t.Fatal(err)
+		}
+		input.VLESSEncryption = otherEncryption
+		if _, err := Generate(engine, input); err == nil || !strings.Contains(err.Error(), "不属于同一密钥对") {
+			t.Fatalf("%s mismatched VLESS-ENC pair error = %v", engine, err)
+		}
+	}
+}
+
+func TestXrayRealityMLDSASeedPersistsAndDerivesClientVerify(t *testing.T) {
+	t.Parallel()
+	protocol, _ := FindProtocol(core.EngineXray, ProtocolVLESSXHTTP)
+	input, err := NewPlan(protocol)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed := make([]byte, 32)
+	if _, err := rand.Read(seed); err != nil {
+		t.Fatal(err)
+	}
+	input.RealityMLDSA65Seed = base64.RawURLEncoding.EncodeToString(seed)
+	verify, err := mldsa65VerifyFromSeed(input.RealityMLDSA65Seed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input.RealityMLDSA65Verify = verify
+	content, err := Generate(core.EngineXray, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(content, `"mldsa65Seed"`) || strings.Contains(content, `"mldsa65Verify"`) {
+		t.Fatalf("server config must persist only the ML-DSA seed:\n%s", content)
+	}
+	parsed, ok := Parse(core.EngineXray, content)
+	if !ok || parsed.RealityMLDSA65Seed != input.RealityMLDSA65Seed || parsed.RealityMLDSA65Verify != verify {
+		t.Fatalf("Parse(Xray/ML-DSA) = %+v, %v", parsed, ok)
+	}
+	profile, err := BuildClientProfile(parsed, "edge.example.com", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(profile.URI, "pqv=") || strings.Contains(profile.URI, input.RealityMLDSA65Seed) {
+		t.Fatalf("client profile did not export only the ML-DSA verify value: %+v", profile)
+	}
+}
+
+func TestRegenerateXrayRealityProvidesOptionalMLDSAKeyPair(t *testing.T) {
+	t.Parallel()
+	protocol, ok := FindProtocol(core.EngineXray, ProtocolVLESSXHTTP)
+	if !ok || !protocol.SupportsRealityMLDSA {
+		t.Fatal("Xray XHTTP preset does not advertise ML-DSA support")
+	}
+	current, err := NewPlan(protocol)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.RealityMLDSA65Seed != "" || current.RealityMLDSA65Verify != "" {
+		t.Fatal("new plans must not enable optional ML-DSA automatically")
+	}
+	regenerated, err := RegeneratePlan(protocol, current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !validRawURLBase64Size(regenerated.RealityMLDSA65Seed, 32) || !validRawURLBase64Size(regenerated.RealityMLDSA65Verify, 1952) {
+		t.Fatalf("regenerated ML-DSA material is invalid: seed=%d verify=%d", len(regenerated.RealityMLDSA65Seed), len(regenerated.RealityMLDSA65Verify))
+	}
+	if _, err := Generate(core.EngineXray, regenerated); err != nil {
+		t.Fatalf("generated ML-DSA pair was rejected: %v", err)
+	}
+}
 
 func TestGenerateServerConfigurations(t *testing.T) {
 	t.Parallel()
@@ -422,5 +638,26 @@ func TestVLESSRealityPlansGenerateAndRoundTripKeys(t *testing.T) {
 		if !ok || !parsed.RealityEnabled || parsed.RealityPublicKey != input.RealityPublicKey || parsed.RealityShortID != input.RealityShortID {
 			t.Errorf("Parse(%s) lost Reality material: %+v, %v", engine, parsed, ok)
 		}
+	}
+}
+
+func TestXrayRealityMinClientVersionIsCustomizableWithoutChangingLegacyDefault(t *testing.T) {
+	t.Parallel()
+	protocol, _ := FindProtocol(core.EngineXray, ProtocolVLESSXHTTP)
+	input, err := NewPlan(protocol)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if input.RealityMinClientVer != "0.0.0" {
+		t.Fatalf("legacy minClientVer default = %q", input.RealityMinClientVer)
+	}
+	input.RealityMinClientVer = "26.3.27"
+	content, err := Generate(core.EngineXray, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, ok := Parse(core.EngineXray, content)
+	if !ok || parsed.RealityMinClientVer != "26.3.27" {
+		t.Fatalf("custom minClientVer round trip = %+v, %v", parsed, ok)
 	}
 }

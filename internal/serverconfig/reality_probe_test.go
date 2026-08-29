@@ -132,8 +132,29 @@ func TestProbeRealityTargetPinsResolvedIPAndVerifiesTLS13(t *testing.T) {
 	if result.ServerName != serverName || result.Address != publicAddress || result.CNAME != "origin.reality.example" || result.ALPN != "h2" {
 		t.Fatalf("probeRealityTarget() = %+v", result)
 	}
+	if result.CertificateChainBytes <= 0 {
+		t.Fatalf("probeRealityTarget() did not report the peer certificate chain length: %+v", result)
+	}
+	if result.CurveID == 0 {
+		t.Fatalf("probeRealityTarget() did not report the negotiated key exchange: %+v", result)
+	}
 	if err := <-serverErr; err != nil {
 		t.Fatalf("test TLS server handshake: %v", err)
+	}
+}
+
+func TestValidateRealityMLDSATargetRequiresStrictlyMoreThan3500Bytes(t *testing.T) {
+	t.Parallel()
+	for _, size := range []int{0, 3499, 3500} {
+		if err := ValidateRealityMLDSATarget(RealityTarget{CertificateChainBytes: size, CurveID: tls.X25519MLKEM768}); err == nil || !strings.Contains(err.Error(), "严格大于 3500") {
+			t.Errorf("certificate chain length %d error = %v", size, err)
+		}
+	}
+	if err := ValidateRealityMLDSATarget(RealityTarget{CertificateChainBytes: 3501, CurveID: tls.X25519MLKEM768}); err != nil {
+		t.Fatalf("certificate chain length 3501 was rejected: %v", err)
+	}
+	if err := ValidateRealityMLDSATarget(RealityTarget{CertificateChainBytes: 3501, CurveID: tls.X25519}); err == nil || !strings.Contains(err.Error(), "X25519MLKEM768") {
+		t.Fatalf("non-post-quantum target error = %v", err)
 	}
 }
 

@@ -128,6 +128,10 @@ func TestServerPlanRegenerationStaysLocalAndUsesCurrentFormState(t *testing.T) {
 		`["secondary_credential", "secondary_credential", "生成次凭据"]`,
 		`"reality_private_key,reality_public_key"`,
 		`["reality_short_id", "reality_short_id", "生成 Short ID"]`,
+		`"vless_decryption,vless_encryption"`,
+		`protocol?.uses_vless_encryption`,
+		`name="vless_decryption"`,
+		`name="vless_encryption"`,
 		`const portForward = Boolean(protocol?.port_forward);`,
 		`name="target_address"`,
 		`name="target_port"`,
@@ -137,6 +141,16 @@ func TestServerPlanRegenerationStaysLocalAndUsesCurrentFormState(t *testing.T) {
 		if !strings.Contains(content, required) {
 			t.Errorf("server-plan field generation is missing %q", required)
 		}
+	}
+	styles, err := os.ReadFile("app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(styles), ".protocol-catalog-wide.protocol-two-rows .protocol-browser>nav{display:grid") ||
+		!strings.Contains(content, `protocolCatalogNav.scrollWidth > protocolCatalogNav.clientWidth + 1`) ||
+		!strings.Contains(content, `String(Math.ceil(workspace.protocols.length / 2))`) ||
+		!strings.Contains(content, `"vless-enc-xhttp-reality-vision": "XHTTP + Reality + Vision"`) {
+		t.Error("large protocol preset catalogs must render as exactly two rows")
 	}
 }
 

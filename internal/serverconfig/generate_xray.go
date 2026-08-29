@@ -16,13 +16,21 @@ func generateXray(input Input) (string, error) {
 		inbound["settings"] = map[string]any{
 			"network": "tcp,udp", "method": input.Method, "password": input.Credential,
 		}
-	case ProtocolVLESS:
+	case ProtocolVLESS, ProtocolVLESSXHTTP, ProtocolVLESSEncTCP, ProtocolVLESSEncXHTTP:
 		inbound["protocol"] = "vless"
 		user := map[string]any{"id": input.Credential, "level": 0, "email": input.Username}
 		if input.Flow != "" {
 			user["flow"] = input.Flow
 		}
-		inbound["settings"] = map[string]any{"users": []any{user}, "decryption": "none"}
+		usersKey := "users"
+		if input.Protocol == ProtocolVLESSXHTTP || isVLESSEncryptionProtocol(input.Protocol) {
+			usersKey = "clients"
+		}
+		decryption := "none"
+		if isVLESSEncryptionProtocol(input.Protocol) {
+			decryption = input.VLESSDecryption
+		}
+		inbound["settings"] = map[string]any{usersKey: []any{user}, "decryption": decryption}
 	case ProtocolVMess:
 		inbound["protocol"] = "vmess"
 		inbound["settings"] = map[string]any{
@@ -70,6 +78,9 @@ func xrayStream(input Input) map[string]any {
 	case "grpc":
 		network = "grpc"
 		stream["grpcSettings"] = map[string]any{"serviceName": input.TransportPath}
+	case "xhttp":
+		network = "xhttp"
+		stream["xhttpSettings"] = map[string]any{"path": input.TransportPath}
 	}
 	stream["network"] = network
 	if input.TLSEnabled {
@@ -80,11 +91,15 @@ func xrayStream(input Input) map[string]any {
 	}
 	if input.RealityEnabled {
 		stream["security"] = "reality"
-		stream["realitySettings"] = map[string]any{
-			"show": false, "target": input.RealityServerName + ":443", "xver": 0, "minClientVer": "0.0.0",
+		reality := map[string]any{
+			"show": false, "target": input.RealityServerName + ":443", "xver": 0, "minClientVer": input.RealityMinClientVer,
 			"serverNames": []string{input.RealityServerName}, "privateKey": input.RealityPrivateKey,
 			"shortIds": []string{input.RealityShortID},
 		}
+		if input.RealityMLDSA65Seed != "" {
+			reality["mldsa65Seed"] = input.RealityMLDSA65Seed
+		}
+		stream["realitySettings"] = reality
 	}
 	return stream
 }
@@ -103,6 +118,7 @@ func parseXray(content string) (Input, bool) {
 		Listen: stringValue(inbound["listen"]), Port: intValue(inbound["port"]), Username: "default", Transport: "raw",
 	}
 	settings := mapValue(inbound["settings"])
+	input.VLESSDecryption = stringValue(settings["decryption"])
 	input.Method, input.Credential = stringValue(settings["method"]), stringValue(settings["password"])
 	if input.Protocol == ProtocolPortForward {
 		input.Network = networkListValue(stringValue(settings["allowedNetwork"]))
@@ -117,7 +133,11 @@ func parseXray(content string) (Input, bool) {
 			input.Network = "tcp"
 		}
 	}
-	if user := firstMap(settings["users"]); user != nil {
+	user := firstMap(settings["users"])
+	if user == nil {
+		user = firstMap(settings["clients"])
+	}
+	if user != nil {
 		input.Username = stringValue(user["email"])
 		input.Credential = stringValue(user["id"])
 		input.Flow = stringValue(user["flow"])
@@ -136,6 +156,23 @@ func parseXray(content string) (Input, bool) {
 	case "grpc":
 		input.Transport = "grpc"
 		input.TransportPath = stringValue(mapValue(stream["grpcSettings"])["serviceName"])
+	case "xhttp":
+		input.Transport = "xhttp"
+		input.TransportPath = stringValue(mapValue(stream["xhttpSettings"])["path"])
+	}
+	if input.Protocol == ProtocolVLESS && input.VLESSDecryption != "" && input.VLESSDecryption != "none" {
+		var err error
+		input.VLESSEncryption, err = vlessEncryptionFromDecryption(input.VLESSDecryption)
+		if err != nil {
+			return Input{}, false
+		}
+		if input.Transport == "xhttp" {
+			input.Protocol = ProtocolVLESSEncXHTTP
+		} else {
+			input.Protocol = ProtocolVLESSEncTCP
+		}
+	} else if input.Protocol == ProtocolVLESS && input.Transport == "xhttp" {
+		input.Protocol = ProtocolVLESSXHTTP
 	}
 	if stringValue(stream["security"]) == "tls" {
 		input.TLSEnabled = true
@@ -151,6 +188,14 @@ func parseXray(content string) (Input, bool) {
 		input.RealityPublicKey = realityPublicKey(input.RealityPrivateKey)
 		input.RealityShortID = firstString(reality["shortIds"])
 		input.RealityServerName = firstString(reality["serverNames"])
+		input.RealityMinClientVer = stringValue(reality["minClientVer"])
+		if input.RealityMinClientVer == "" {
+			input.RealityMinClientVer = "0.0.0"
+		}
+		input.RealityMLDSA65Seed = stringValue(reality["mldsa65Seed"])
+		if input.RealityMLDSA65Seed != "" {
+			input.RealityMLDSA65Verify, _ = mldsa65VerifyFromSeed(input.RealityMLDSA65Seed)
+		}
 	}
 	return input, parsedInputValid(input)
 }

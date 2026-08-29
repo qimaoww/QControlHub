@@ -8,6 +8,8 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 // ClientField is one exact value a client needs to reach a generated inbound.
@@ -23,9 +25,10 @@ type ClientField struct {
 // data as explicit fields. The explicit fields remain useful when a particular
 // client does not implement the URI scheme.
 type ClientProfile struct {
-	Format string        `json:"format"`
-	URI    string        `json:"uri"`
-	Fields []ClientField `json:"fields"`
+	Format                 string        `json:"format"`
+	URI                    string        `json:"uri"`
+	SubscriptionCompatible bool          `json:"subscription_compatible"`
+	Fields                 []ClientField `json:"fields"`
 }
 
 // BuildClientProfile converts a generated inbound into client-facing access
@@ -38,6 +41,17 @@ func BuildClientProfile(input Input, address, serverName string) (ClientProfile,
 // BuildClientProfileNamed is the client-profile builder with an optional
 // operator-facing node name. An empty name preserves the inbound tag.
 func BuildClientProfileNamed(input Input, address, serverName, nodeName string) (ClientProfile, error) {
+	if input.RealityMLDSA65Verify == "" && input.RealityMLDSA65Seed != "" {
+		input.RealityMLDSA65Verify, _ = mldsa65VerifyFromSeed(input.RealityMLDSA65Seed)
+	}
+	if isVLESSEncryptionProtocol(input.Protocol) {
+		if input.VLESSEncryption == "" {
+			input.VLESSEncryption, _ = vlessEncryptionFromDecryption(input.VLESSDecryption)
+		}
+		if err := validateVLESSEncryptionPair(input.VLESSDecryption, input.VLESSEncryption); err != nil {
+			return ClientProfile{}, err
+		}
+	}
 	address, err := NormalizeClientAddress(address)
 	if err != nil {
 		return ClientProfile{}, err
@@ -81,8 +95,13 @@ func BuildClientProfileNamed(input Input, address, serverName, nodeName string) 
 		identity := base64.RawURLEncoding.EncodeToString([]byte(input.Method + ":" + input.Credential))
 		profile.Format = "Shadowsocks SIP002 URI"
 		profile.URI = (&url.URL{Scheme: "ss", User: url.User(identity), Host: host, Fragment: fragment}).String()
-	case ProtocolVLESS:
-		query := url.Values{"encryption": {"none"}, "type": {transport}}
+		profile.SubscriptionCompatible = true
+	case ProtocolVLESS, ProtocolVLESSXHTTP, ProtocolVLESSEncTCP, ProtocolVLESSEncXHTTP:
+		encryption := "none"
+		if isVLESSEncryptionProtocol(input.Protocol) {
+			encryption = input.VLESSEncryption
+		}
+		query := url.Values{"encryption": {encryption}, "type": {transport}}
 		if input.Flow != "" {
 			query.Set("flow", input.Flow)
 		}
@@ -92,6 +111,9 @@ func BuildClientProfileNamed(input Input, address, serverName, nodeName string) 
 			query.Set("fp", "chrome")
 			query.Set("pbk", input.RealityPublicKey)
 			query.Set("sid", input.RealityShortID)
+			if input.RealityMLDSA65Verify != "" {
+				query.Set("pqv", input.RealityMLDSA65Verify)
+			}
 		} else if input.TLSEnabled {
 			query.Set("security", "tls")
 			query.Set("sni", serverName)
@@ -99,6 +121,26 @@ func BuildClientProfileNamed(input Input, address, serverName, nodeName string) 
 		addTransportQuery(query, input)
 		profile.Format = "VLESS URI"
 		profile.URI = (&url.URL{Scheme: "vless", User: url.User(input.Credential), Host: host, RawQuery: query.Encode(), Fragment: fragment}).String()
+		profile.SubscriptionCompatible = true
+	case ProtocolSnell:
+		value, marshalErr := yaml.Marshal(map[string]any{"name": fragment, "type": "snell", "server": address, "port": input.Port, "psk": input.Credential, "version": input.SnellVersion, "udp": true})
+		if marshalErr != nil {
+			return ClientProfile{}, marshalErr
+		}
+		profile.Format = "Mihomo Snell YAML"
+		profile.URI = string(value)
+	case ProtocolSudoku:
+		value, marshalErr := yaml.Marshal(map[string]any{
+			"name": fragment, "type": "sudoku", "server": address, "port": input.Port, "key": input.Credential,
+			"aead-method": input.Method, "padding-min": input.SudokuPaddingMin, "padding-max": input.SudokuPaddingMax,
+			"table-type": input.SudokuTableType, "enable-pure-downlink": false,
+			"httpmask": map[string]any{"disable": false, "mode": "legacy"},
+		})
+		if marshalErr != nil {
+			return ClientProfile{}, marshalErr
+		}
+		profile.Format = "Mihomo Sudoku YAML"
+		profile.URI = string(value)
 	case ProtocolVMess:
 		payload := struct {
 			Version string `json:"v"`
@@ -131,6 +173,7 @@ func BuildClientProfileNamed(input Input, address, serverName, nodeName string) 
 		}
 		profile.Format = "VMess v2 JSON URI"
 		profile.URI = "vmess://" + base64.StdEncoding.EncodeToString(encoded)
+		profile.SubscriptionCompatible = true
 	case ProtocolTrojan:
 		query := url.Values{"type": {transport}}
 		if input.TLSEnabled {
@@ -140,6 +183,7 @@ func BuildClientProfileNamed(input Input, address, serverName, nodeName string) 
 		addTransportQuery(query, input)
 		profile.Format = "Trojan URI"
 		profile.URI = (&url.URL{Scheme: "trojan", User: url.User(input.Credential), Host: host, RawQuery: query.Encode(), Fragment: fragment}).String()
+		profile.SubscriptionCompatible = true
 	case ProtocolHy2:
 		query := url.Values{}
 		if serverName != "" {
@@ -147,6 +191,7 @@ func BuildClientProfileNamed(input Input, address, serverName, nodeName string) 
 		}
 		profile.Format = "Hysteria 2 URI"
 		profile.URI = (&url.URL{Scheme: "hysteria2", User: url.User(input.Credential), Host: host, RawQuery: query.Encode(), Fragment: fragment}).String()
+		profile.SubscriptionCompatible = true
 	case ProtocolTUIC:
 		query := url.Values{"congestion_control": {"bbr"}, "udp_relay_mode": {"native"}}
 		if serverName != "" {
@@ -154,6 +199,7 @@ func BuildClientProfileNamed(input Input, address, serverName, nodeName string) 
 		}
 		profile.Format = "TUIC v5 URI"
 		profile.URI = (&url.URL{Scheme: "tuic", User: url.UserPassword(input.Credential, input.SecondaryCredential), Host: host, RawQuery: query.Encode(), Fragment: fragment}).String()
+		profile.SubscriptionCompatible = true
 	case ProtocolAnyTLS:
 		query := url.Values{"security": {"tls"}}
 		if serverName != "" {
@@ -161,6 +207,7 @@ func BuildClientProfileNamed(input Input, address, serverName, nodeName string) 
 		}
 		profile.Format = "AnyTLS URI"
 		profile.URI = (&url.URL{Scheme: "anytls", User: url.User(input.Credential), Host: host, RawQuery: query.Encode(), Fragment: fragment}).String()
+		profile.SubscriptionCompatible = true
 	default:
 		return ClientProfile{}, errors.New("不支持生成此协议的客户端接入资料")
 	}
@@ -207,6 +254,8 @@ func clientTransport(value string) string {
 		return "ws"
 	case "grpc":
 		return "grpc"
+	case "xhttp":
+		return "xhttp"
 	default:
 		return "tcp"
 	}
@@ -218,6 +267,9 @@ func addTransportQuery(query url.Values, input Input) {
 		query.Set("path", input.TransportPath)
 	case "grpc":
 		query.Set("serviceName", input.TransportPath)
+	case "xhttp":
+		query.Set("path", input.TransportPath)
+		query.Set("mode", "auto")
 	}
 }
 
@@ -236,7 +288,7 @@ func clientFields(input Input, address, serverName string) []ClientField {
 		credentialLabel = "密码"
 	case ProtocolSS2022:
 		credentialLabel = "Base64 PSK"
-	case ProtocolVLESS, ProtocolVMess, ProtocolTUIC:
+	case ProtocolVLESS, ProtocolVLESSXHTTP, ProtocolVLESSEncTCP, ProtocolVLESSEncXHTTP, ProtocolVMess, ProtocolTUIC, ProtocolSudoku:
 		credentialLabel = "用户 UUID"
 	}
 	fields = append(fields, ClientField{Label: credentialLabel, Value: input.Credential, Secret: true})
@@ -247,6 +299,9 @@ func clientFields(input Input, address, serverName string) []ClientField {
 		fields = append(fields, ClientField{Label: "加密方法", Value: input.Method})
 	}
 	fields = append(fields, ClientField{Label: "传输", Value: input.Transport})
+	if isVLESSEncryptionProtocol(input.Protocol) {
+		fields = append(fields, ClientField{Label: "VLESS Encryption", Value: input.VLESSEncryption})
+	}
 	if input.TransportPath != "" {
 		fields = append(fields, ClientField{Label: "路径 / ServiceName", Value: input.TransportPath})
 	}
@@ -266,6 +321,9 @@ func clientFields(input Input, address, serverName string) []ClientField {
 			ClientField{Label: "Reality Short ID", Value: input.RealityShortID},
 			ClientField{Label: "客户端指纹", Value: "chrome"},
 		)
+		if input.RealityMLDSA65Verify != "" {
+			fields = append(fields, ClientField{Label: "ML-DSA-65 Verify", Value: input.RealityMLDSA65Verify})
+		}
 	}
 	return fields
 }

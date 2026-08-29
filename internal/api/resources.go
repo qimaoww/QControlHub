@@ -266,6 +266,12 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		if input.Input.RealityMLDSA65Seed != "" {
+			if err := serverconfig.ValidateRealityMLDSATarget(target); err != nil {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+		}
 		input.Input.RealityServerName = target.ServerName
 	}
 	generated, err := serverconfig.Generate(engine, input.Input)

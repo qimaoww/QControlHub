@@ -242,6 +242,9 @@ func (s *Server) availableSubStoreProfiles(ctx context.Context, selections []cor
 			displayName = entry.ClientName
 		}
 		for _, item := range entry.Profiles {
+			if !item.Profile.SubscriptionCompatible {
+				continue
+			}
 			profile := subStoreSyncProfile{
 				AgentID: entry.AgentID, AgentName: displayName, AgentStatus: entry.AgentStatus, Engine: entry.Engine,
 				ProfileTag: item.Tag, Protocol: item.Protocol, Port: item.Port, URI: item.Profile.URI, Available: true,
