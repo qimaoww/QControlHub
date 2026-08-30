@@ -187,6 +187,8 @@ func TestRefreshPathsUseStableViewsAndScopedCoordinators(t *testing.T) {
 		"combineAbortSignals(options.signal, routeSignal)",
 		"[\"GET\", \"HEAD\", \"OPTIONS\"].includes(method)",
 		"reconcileView(currentView, template.content.firstElementChild",
+		"const routeChanged = !previousMain || previousRoute !== state.route",
+		"workspace-main${motionClass}",
 		"state.navigationEpoch += 1",
 		"cancelActive: () => routeController?.abort()",
 		"agentModule.cancelAgentInteractions()",
@@ -267,6 +269,27 @@ func TestRefreshPathsUseStableViewsAndScopedCoordinators(t *testing.T) {
 	}
 	if !strings.Contains(read("module_smoke.mjs"), `import "./refresh_smoke.mjs"`) {
 		t.Error("frontend smoke must execute the refresh interaction runtime")
+	}
+}
+
+func TestMotionSystemCoversWorkspaceInteractions(t *testing.T) {
+	styles, err := os.ReadFile("app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(styles)
+	for _, required := range []string{
+		"@keyframes qch-page-enter",
+		"@keyframes qch-card-enter",
+		"@keyframes qch-dialog-enter",
+		".workspace-main.page-enter>",
+		"dialog[open]::backdrop",
+		".modal-backdrop>[role=dialog]",
+		"@media(prefers-reduced-motion:reduce)",
+	} {
+		if !strings.Contains(content, required) {
+			t.Errorf("motion system is missing %q", required)
+		}
 	}
 }
 
