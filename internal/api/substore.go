@@ -597,13 +597,6 @@ func (s *Server) linkSubStoreRemoteTarget(w http.ResponseWriter, request *http.R
 	}
 	integrationID := target.IntegrationID
 	needsClaim := remoteOwner != integrationID
-	cloneSubscription := func(source map[string]any) map[string]any {
-		clone := make(map[string]any, len(source))
-		for key, value := range source {
-			clone[key] = value
-		}
-		return clone
-	}
 	type ownershipChange struct {
 		name   string
 		before map[string]any
@@ -613,7 +606,7 @@ func (s *Server) linkSubStoreRemoteTarget(w http.ResponseWriter, request *http.R
 		oldName, _ := subscription["name"].(string)
 		owner, _ := subscription["qcontrolhub_integration_id"].(string)
 		if strings.TrimSpace(oldName) != "" && strings.TrimSpace(oldName) != name && strings.TrimSpace(owner) == target.IntegrationID {
-			changes = append(changes, ownershipChange{name: oldName, before: cloneSubscription(subscription)})
+			changes = append(changes, ownershipChange{name: oldName, before: cloneSubStoreSubscription(subscription)})
 		}
 	}
 	restoreOwnership := func() error {
@@ -631,7 +624,7 @@ func (s *Server) linkSubStoreRemoteTarget(w http.ResponseWriter, request *http.R
 		return restoreErr
 	}
 	for _, change := range changes {
-		released := cloneSubscription(change.before)
+		released := cloneSubStoreSubscription(change.before)
 		released["qcontrolhub_integration_id"] = ""
 		released["qcontrolhub_managed_nodes"] = []any{}
 		if _, err := s.subStoreRequest(request.Context(), settings.EndpointURL, http.MethodPatch, "/api/sub/"+change.name, released, nil); err != nil {
@@ -644,7 +637,7 @@ func (s *Server) linkSubStoreRemoteTarget(w http.ResponseWriter, request *http.R
 		}
 	}
 	if needsClaim {
-		claimed := cloneSubscription(remote)
+		claimed := cloneSubStoreSubscription(remote)
 		claimed["qcontrolhub_integration_id"] = integrationID
 		if _, err := s.subStoreRequest(request.Context(), settings.EndpointURL, http.MethodPatch, "/api/sub/"+name, claimed, nil); err != nil {
 			if restoreErr := restoreOwnership(); restoreErr != nil {
@@ -708,6 +701,26 @@ func ownedSubStoreSubscription(subscriptions []map[string]any, integrationID str
 		}
 	}
 	return nil
+}
+
+// cloneSubStoreSubscription keeps fields that are owned by Sub-Store (for
+// example custom remarks, filters, and processing options) when we update only
+// the content and QControlHub ownership metadata. The API returns maps whose
+// values are not mutated after this point, so a shallow copy is sufficient.
+func cloneSubStoreSubscription(source map[string]any) map[string]any {
+	clone := make(map[string]any, len(source))
+	for key, value := range source {
+		clone[key] = value
+	}
+	return clone
+}
+
+func subStoreSubscriptionUpdate(existing, desired map[string]any) map[string]any {
+	updated := cloneSubStoreSubscription(existing)
+	for key, value := range desired {
+		updated[key] = value
+	}
+	return updated
 }
 
 func subStoreSubscriptionPayload(target core.SubStoreSyncTarget, content string) map[string]any {
@@ -970,8 +983,8 @@ func renameSubStoreNode(rawURI, name string) (string, error) {
 	if rawURI == "" || strings.ContainsAny(rawURI, "\r\n") {
 		return "", errors.New("客户端 URI 无效")
 	}
-	if name == "" || utf8.RuneCountInString(name) > 100 || strings.ContainsAny(name, "\r\n") {
-		return "", errors.New("节点名称不能为空且不能超过 100 个字符")
+	if name == "" || utf8.RuneCountInString(name) > 100 || strings.ContainsAny(name, "#\r\n") {
+		return "", errors.New("节点名称不能为空、不能超过 100 个字符且不能包含 #")
 	}
 	parsed, err := url.Parse(rawURI)
 	if err != nil || parsed.Scheme == "" {
@@ -1031,6 +1044,9 @@ func (s *Server) upsertSubStoreSubscription(ctx context.Context, settings core.S
 			payload["content"] = merged
 		}
 		payload["qcontrolhub_managed_nodes"] = currentNames
+		// Preserve fields configured directly in Sub-Store while replacing only
+		// values owned by QControlHub.
+		payload = subStoreSubscriptionUpdate(colliding, payload)
 		_, err := s.subStoreRequest(ctx, settings.EndpointURL, http.MethodPatch, "/api/sub/"+existingName, payload, nil)
 		return false, err
 	}
@@ -1057,6 +1073,9 @@ func (s *Server) upsertSubStoreSubscription(ctx context.Context, settings core.S
 		payload["content"] = merged
 	}
 	payload["qcontrolhub_managed_nodes"] = currentNames
+	// Preserve fields configured directly in Sub-Store while replacing only
+	// values owned by QControlHub.
+	payload = subStoreSubscriptionUpdate(owned, payload)
 	_, err = s.subStoreRequest(ctx, settings.EndpointURL, http.MethodPatch, "/api/sub/"+existingName, payload, nil)
 	return false, err
 }
