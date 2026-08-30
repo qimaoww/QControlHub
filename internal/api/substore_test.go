@@ -52,7 +52,7 @@ func TestRenameSubStoreNode(t *testing.T) {
 			t.Fatalf("renamed URI = %q", got)
 		}
 	}
-	for _, name := range []string{"", "bad\nname"} {
+	for _, name := range []string{"", "bad\nname", "bad#name"} {
 		if _, err := renameSubStoreNode("vless://example-id@node.example:443", name); err == nil {
 			t.Errorf("invalid node name %q unexpectedly succeeded", name)
 		}
@@ -149,11 +149,11 @@ func TestSubStoreSubscriptionCreateUpdateAndOwnership(t *testing.T) {
 	if err != nil || created || stored["content"] != "vless://one#One\nvless://two#Two" {
 		t.Fatalf("upgrade legacy owned subscription = %t, %#v, %v", created, stored, err)
 	}
+	stored["custom-option"] = "preserved"
 	created, err = server.upsertSubStoreSubscription(context.Background(), settings, target, "vless://three#Three")
-	if err != nil || created || stored["content"] != "vless://one#One\nvless://two#Two\nvless://three#Three" {
+	if err != nil || created || stored["content"] != "vless://one#One\nvless://two#Two\nvless://three#Three" || stored["custom-option"] != "preserved" {
 		t.Fatalf("incremental sync preserved previous nodes = %t, %#v, %v", created, stored, err)
 	}
-	stored["custom-option"] = "preserved"
 	renamed, err := server.renameSubStoreSubscription(context.Background(), settings, target, "QControlHub Renamed")
 	if err != nil || !renamed || stored["name"] != "QControlHub Renamed" || stored["content"] != "vless://one#One\nvless://two#Two\nvless://three#Three" || stored["custom-option"] != "preserved" {
 		t.Fatalf("rename subscription in place = %t, %#v, %v", renamed, stored, err)
