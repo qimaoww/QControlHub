@@ -117,6 +117,9 @@ func generateMihomo(input Input) (string, error) {
 	root := map[string]any{
 		"log-level": "info", "listeners": []any{listener}, "rules": []string{"MATCH,DIRECT"},
 	}
+	if err := applyMainlandMihomo(root, input.Tag, input.BlockMainlandDestination, input.BlockMainlandSource); err != nil {
+		return "", err
+	}
 	value, err := yaml.Marshal(root)
 	return string(value), err
 }
@@ -294,6 +297,7 @@ func parseMihomo(content string) (Input, bool) {
 			}
 		}
 	}
+	input.BlockMainlandDestination, input.BlockMainlandSource = mainlandMihomoFlags(root, input.Tag)
 	return input, parsedInputValid(input)
 }
 

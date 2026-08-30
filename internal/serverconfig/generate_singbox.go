@@ -143,5 +143,6 @@ func parseSingBox(content string) (Input, bool) {
 		input.RealityShortID = firstString(reality["short_id"])
 		input.RealityServerName = stringValue(tls["server_name"])
 	}
+	input.BlockMainlandDestination, input.BlockMainlandSource = mainlandSingBoxFlags(root, input.Tag)
 	return input, parsedInputValid(input)
 }

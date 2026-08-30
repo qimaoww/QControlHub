@@ -231,6 +231,11 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/v1/substore-sync/test", s.requirePermission(core.PermissionSettingsManage, http.HandlerFunc(s.testSubStoreConnection)))
 	mux.Handle("POST /api/v1/substore-sync/run", s.requirePermission(core.PermissionSettingsManage, http.HandlerFunc(s.runSubStoreSync)))
 	mux.Handle("GET /api/v1/core-logs", s.requirePermission(core.PermissionCoreLogsRead, http.HandlerFunc(s.listCoreLogs)))
+	mux.Handle("GET /api/v1/access-controls", s.requirePermission(core.PermissionAgentConfigRead, http.HandlerFunc(s.listMainlandAccessPolicies)))
+	mux.Handle("PUT /api/v1/access-controls", s.requireAllPermissions(
+		[]core.Permission{core.PermissionAgentConfigWrite, core.PermissionTasksExecute},
+		http.HandlerFunc(s.putMainlandAccessPolicy),
+	))
 	mux.Handle("PUT /api/v1/agents/{id}/client-address", s.requirePermission(core.PermissionAgentsManage, http.HandlerFunc(s.putAgentClientAddress)))
 	mux.Handle("GET /api/v1/config-catalogs/{engine}", s.requirePermission(core.PermissionCatalogsRead, http.HandlerFunc(s.configCatalog)))
 	mux.Handle("DELETE /api/v1/agents/{id}", s.requirePermission(core.PermissionAgentsManage, http.HandlerFunc(s.deleteAgent)))

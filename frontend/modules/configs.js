@@ -168,6 +168,9 @@ export function readServerPlanInput(form, protocol) {
     target_address: values.get("target_address") || "",
     target_port: Number(values.get("target_port") || 0),
     network: values.get("network") || "",
+    block_mainland_destination:
+      form.dataset?.blockMainlandDestination === "1",
+    block_mainland_source: form.dataset?.blockMainlandSource === "1",
   };
 }
 
@@ -686,6 +689,13 @@ async function agentConfig() {
       viewKey: `agent-config-${agent.id}-${engine}-${selectedProtocolKey}-${selectedInbound?.tag || "new"}`,
     },
   );
+  const serverPlan = document.querySelector("#server-plan-form");
+  if (serverPlan?.dataset) {
+    serverPlan.dataset.blockMainlandDestination = plan.block_mainland_destination
+      ? "1"
+      : "0";
+    serverPlan.dataset.blockMainlandSource = plan.block_mainland_source ? "1" : "0";
+  }
   const identityBody = document.querySelector("#identity > div");
   if (identityBody) identityBody.insertAdjacentHTML("beforeend", protocolOptions + vlessEncryptionOptions);
   const protocolCatalog = document.querySelector(".protocol-catalog-wide");

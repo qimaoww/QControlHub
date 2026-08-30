@@ -83,6 +83,56 @@ func TestEveryGeneratedServerConfigurationWithLiveCores(t *testing.T) {
 	}
 }
 
+func TestGeneratedMainlandAccessPoliciesWithLiveCores(t *testing.T) {
+	if os.Getenv("QCH_LIVE_CORE_VALIDATION_TEST") != "1" {
+		t.Skip("QCH_LIVE_CORE_VALIDATION_TEST is not enabled")
+	}
+	root := os.Getenv("QCH_LIVE_CORE_ROOT")
+	if root == "" {
+		t.Fatal("QCH_LIVE_CORE_ROOT is required")
+	}
+	executor := &Executor{Specs: map[core.Engine]EngineSpec{
+		core.EngineMihomo:  {Binary: filepath.Join(root, "bin", "mihomo"), ConfigPath: filepath.Join(root, "configs", "mihomo", "config.yaml"), Service: "unused-mihomo.service"},
+		core.EngineXray:    {Binary: filepath.Join(root, "bin", "xray"), ConfigPath: filepath.Join(root, "configs", "xray", "config.json"), Service: "unused-xray.service"},
+		core.EngineSingBox: {Binary: filepath.Join(root, "bin", "sing-box"), ConfigPath: filepath.Join(root, "configs", "sing-box", "config.json"), Service: "unused-sing-box.service"},
+	}}
+	if err := executor.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	prefixes, err := serverconfig.LoadChinaRoutes(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, engine := range []core.Engine{core.EngineMihomo, core.EngineXray, core.EngineSingBox} {
+		engine := engine
+		t.Run(string(engine), func(t *testing.T) {
+			protocol, ok := serverconfig.FindProtocol(engine, serverconfig.ProtocolVLESS)
+			if !ok {
+				t.Fatalf("%s VLESS preset was not published", engine)
+			}
+			input, err := serverconfig.NewPlan(protocol)
+			if err != nil {
+				t.Fatal(err)
+			}
+			content, err := serverconfig.Generate(engine, input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			content, err = serverconfig.ApplyMainlandAccessPolicyWithPrefixes(engine, content, serverconfig.MainlandAccessPolicy{
+				Tag: input.Tag, Port: input.Port, Engine: engine,
+				BlockMainlandDestination: true, BlockMainlandSource: true,
+			}, prefixes)
+			if err != nil {
+				t.Fatal(err)
+			}
+			output, err := executor.Execute(context.Background(), core.Task{Action: core.ActionValidate, Engine: engine, ConfigContent: content})
+			if err != nil {
+				t.Fatalf("official %s rejected mainland access rules: %v\n%s\n%s", engine, err, output, content)
+			}
+		})
+	}
+}
+
 func TestGeneratedMihomoClientYAMLWithLiveCore(t *testing.T) {
 	if os.Getenv("QCH_LIVE_CORE_VALIDATION_TEST") != "1" {
 		t.Skip("QCH_LIVE_CORE_VALIDATION_TEST is not enabled")

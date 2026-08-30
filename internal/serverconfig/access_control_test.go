@@ -1,0 +1,245 @@
+package serverconfig
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/qimaoww/qcontrolhub/internal/core"
+)
+
+func TestMainlandAccessPoliciesApplyPerInboundAndPreserveUnrelatedRules(t *testing.T) {
+	t.Parallel()
+	for _, engine := range []core.Engine{core.EngineMihomo, core.EngineXray, core.EngineSingBox} {
+		engine := engine
+		t.Run(string(engine), func(t *testing.T) {
+			t.Parallel()
+			protocol, ok := FindProtocol(engine, ProtocolVLESS)
+			if !ok {
+				t.Fatalf("%s VLESS preset was not published", engine)
+			}
+			input, err := NewPlan(protocol)
+			if err != nil {
+				t.Fatal(err)
+			}
+			content, err := Generate(engine, input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			content = addUnrelatedMainlandTestRule(t, engine, content)
+			updated, err := ApplyMainlandAccessPolicyWithPrefixes(engine, content, MainlandAccessPolicy{
+				Tag: input.Tag, Port: input.Port, Engine: engine,
+				BlockMainlandDestination: true, BlockMainlandSource: true,
+			}, []string{"1.1.8.0/24", "240e::/16"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			policies := DiscoverMainlandAccessPolicies(engine, updated)
+			if len(policies) != 1 || !policies[0].BlockMainlandDestination || !policies[0].BlockMainlandSource {
+				t.Fatalf("DiscoverMainlandAccessPolicies(%s) = %+v\n%s", engine, policies, updated)
+			}
+			if !strings.Contains(updated, "example.org") {
+				t.Fatalf("%s update discarded an unrelated routing rule:\n%s", engine, updated)
+			}
+			updated, err = ApplyMainlandAccessPolicyWithPrefixes(engine, updated, MainlandAccessPolicy{Tag: input.Tag, Port: input.Port, Engine: engine}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			policies = DiscoverMainlandAccessPolicies(engine, updated)
+			if len(policies) != 1 || policies[0].BlockMainlandDestination || policies[0].BlockMainlandSource {
+				t.Fatalf("disabled DiscoverMainlandAccessPolicies(%s) = %+v\n%s", engine, policies, updated)
+			}
+			if !strings.Contains(updated, "example.org") {
+				t.Fatalf("%s disable discarded an unrelated routing rule:\n%s", engine, updated)
+			}
+		})
+	}
+}
+
+func TestMainlandAccessPolicyRejectsTagPortMismatch(t *testing.T) {
+	t.Parallel()
+	protocol, _ := FindProtocol(core.EngineMihomo, ProtocolVLESS)
+	input, err := NewPlan(protocol)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content, err := Generate(core.EngineMihomo, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = ApplyMainlandAccessPolicyWithPrefixes(core.EngineMihomo, content, MainlandAccessPolicy{
+		Tag: input.Tag, Port: input.Port + 1, BlockMainlandDestination: true,
+	}, nil)
+	if err == nil || !strings.Contains(err.Error(), "不存在匹配") {
+		t.Fatalf("tag/port mismatch error = %v", err)
+	}
+}
+
+func TestMainlandAccessPoliciesRemainIndependentAcrossInboundPorts(t *testing.T) {
+	t.Parallel()
+	prefixes := []string{"1.1.8.0/24", "240e::/16"}
+	for _, engine := range []core.Engine{core.EngineMihomo, core.EngineXray, core.EngineSingBox} {
+		engine := engine
+		t.Run(string(engine), func(t *testing.T) {
+			t.Parallel()
+			protocol, _ := FindProtocol(engine, ProtocolVLESS)
+			first, err := NewPlan(protocol)
+			if err != nil {
+				t.Fatal(err)
+			}
+			second, err := NewPlan(protocol)
+			if err != nil {
+				t.Fatal(err)
+			}
+			firstContent, err := Generate(engine, first)
+			if err != nil {
+				t.Fatal(err)
+			}
+			secondContent, err := Generate(engine, second)
+			if err != nil {
+				t.Fatal(err)
+			}
+			content, err := MutateGenerated(engine, firstContent, secondContent, "", "add")
+			if err != nil {
+				t.Fatal(err)
+			}
+			content, err = ApplyMainlandAccessPolicyWithPrefixes(engine, content, MainlandAccessPolicy{
+				Tag: first.Tag, Port: first.Port, BlockMainlandDestination: true,
+			}, prefixes)
+			if err != nil {
+				t.Fatal(err)
+			}
+			content, err = ApplyMainlandAccessPolicyWithPrefixes(engine, content, MainlandAccessPolicy{
+				Tag: second.Tag, Port: second.Port, BlockMainlandSource: true,
+			}, prefixes)
+			if err != nil {
+				t.Fatal(err)
+			}
+			policies := DiscoverMainlandAccessPolicies(engine, content)
+			byTag := make(map[string]MainlandAccessPolicy, len(policies))
+			for _, policy := range policies {
+				byTag[policy.Tag] = policy
+			}
+			if !byTag[first.Tag].BlockMainlandDestination || byTag[first.Tag].BlockMainlandSource ||
+				byTag[second.Tag].BlockMainlandDestination || !byTag[second.Tag].BlockMainlandSource {
+				t.Fatalf("independent policies for %s = %+v", engine, policies)
+			}
+			content, err = ApplyMainlandAccessPolicyWithPrefixes(engine, content, MainlandAccessPolicy{
+				Tag: first.Tag, Port: first.Port,
+			}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			policies = DiscoverMainlandAccessPolicies(engine, content)
+			byTag = make(map[string]MainlandAccessPolicy, len(policies))
+			for _, policy := range policies {
+				byTag[policy.Tag] = policy
+			}
+			if byTag[first.Tag].BlockMainlandDestination || !byTag[second.Tag].BlockMainlandSource {
+				t.Fatalf("disabling first policy changed another %s inbound: %+v", engine, policies)
+			}
+		})
+	}
+}
+
+func TestXHTTPPlansBlockMainlandDestinationByDefault(t *testing.T) {
+	t.Parallel()
+	for _, engine := range []core.Engine{core.EngineMihomo, core.EngineXray} {
+		for _, key := range []string{ProtocolVLESSXHTTP, ProtocolVLESSEncXHTTP} {
+			protocol, ok := FindProtocol(engine, key)
+			if !ok {
+				t.Fatalf("%s %s preset was not published", engine, key)
+			}
+			input, err := NewPlan(protocol)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !input.BlockMainlandDestination || input.BlockMainlandSource {
+				t.Fatalf("%s %s access defaults = %+v", engine, key, input)
+			}
+			content, err := Generate(engine, input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			parsed, ok := Parse(engine, content)
+			if !ok || !parsed.BlockMainlandDestination || parsed.BlockMainlandSource {
+				t.Fatalf("Parse(%s/%s) access defaults = %+v, %v\n%s", engine, key, parsed, ok, content)
+			}
+		}
+	}
+}
+
+func TestMainlandAccessPolicyDoesNotClaimReservedResourcesWithoutOwnedRules(t *testing.T) {
+	t.Parallel()
+	prefixes := []string{"1.1.8.0/24", "240e::/16"}
+	for _, engine := range []core.Engine{core.EngineXray, core.EngineSingBox} {
+		engine := engine
+		t.Run(string(engine), func(t *testing.T) {
+			t.Parallel()
+			protocol, _ := FindProtocol(engine, ProtocolVLESS)
+			input, err := NewPlan(protocol)
+			if err != nil {
+				t.Fatal(err)
+			}
+			content, err := Generate(engine, input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			root := decodeTrafficConfiguration(engine, content)
+			switch engine {
+			case core.EngineXray:
+				outbounds, _ := root["outbounds"].([]any)
+				root["outbounds"] = append(outbounds, map[string]any{
+					"protocol": "blackhole", "tag": mainlandXrayBlockTag,
+				})
+			case core.EngineSingBox:
+				root["route"] = map[string]any{"rule_set": []any{map[string]any{
+					"type": "inline", "tag": mainlandSingBoxRuleSetTag,
+					"rules": []any{map[string]any{"domain_suffix": []any{"example.org"}}},
+				}}}
+			}
+			content, err = marshalMainlandConfiguration(engine, root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			preserved, err := ApplyMainlandAccessPolicyWithPrefixes(engine, content, MainlandAccessPolicy{
+				Tag: input.Tag, Port: input.Port,
+			}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(preserved, mainlandXrayBlockTag) && !strings.Contains(preserved, mainlandSingBoxRuleSetTag) {
+				t.Fatalf("%s removed an unowned reserved resource:\n%s", engine, preserved)
+			}
+			_, err = ApplyMainlandAccessPolicyWithPrefixes(engine, content, MainlandAccessPolicy{
+				Tag: input.Tag, Port: input.Port, BlockMainlandDestination: true,
+			}, prefixes)
+			if err == nil || !strings.Contains(err.Error(), "占用") {
+				t.Fatalf("%s reserved resource collision error = %v", engine, err)
+			}
+		})
+	}
+}
+
+func addUnrelatedMainlandTestRule(t *testing.T, engine core.Engine, content string) string {
+	t.Helper()
+	root := decodeTrafficConfiguration(engine, content)
+	switch engine {
+	case core.EngineMihomo:
+		rules := stringSliceValue(root["rules"])
+		root["rules"] = append([]string{"DOMAIN,example.org,DIRECT"}, rules...)
+	case core.EngineXray:
+		routing := map[string]any{"rules": []any{map[string]any{
+			"type": "field", "domain": []any{"full:example.org"}, "outboundTag": "direct",
+		}}}
+		root["routing"] = routing
+	case core.EngineSingBox:
+		root["route"] = map[string]any{"rules": []any{map[string]any{
+			"domain": []any{"example.org"}, "action": "route", "outbound": "direct",
+		}}}
+	}
+	formatted, err := marshalMainlandConfiguration(engine, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return formatted
+}
