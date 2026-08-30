@@ -608,6 +608,9 @@ function shell(content, title, { viewKey = state.route } = {}) {
   } else {
     app.innerHTML = markup;
   }
+  const renderedMain = app.querySelector(".workspace-main");
+  renderedMain?.classList.remove("is-route-pending");
+  renderedMain?.removeAttribute("aria-busy");
   applyTheme();
   document.querySelector("#logout").onclick = async () => {
     try {
@@ -867,10 +870,22 @@ async function renderOnce() {
       renderLogin();
       return;
     }
-    [state.data.overview, state.data.settings] = await Promise.all([
+    const hasSharedData =
+      state.data.overview !== undefined && state.data.settings !== undefined;
+    const sharedDataPromise = Promise.all([
       can("overview.read") ? api("/overview") : Promise.resolve({}),
       can("settings.read") ? api("/settings") : Promise.resolve({}),
     ]);
+    if (!hasSharedData) {
+      [state.data.overview, state.data.settings] = await sharedDataPromise;
+    } else {
+      sharedDataPromise
+        .then(([overview, settings]) => {
+          state.data.overview = overview;
+          state.data.settings = settings;
+        })
+        .catch(() => {});
+    }
     const pages = {
       dashboard,
       agents,
@@ -915,7 +930,15 @@ async function renderOnce() {
 const scheduleRender = createLatestRenderScheduler(renderOnce, {
   cancelActive: () => routeController?.abort(),
 });
+function primeRouteTransition() {
+  if (!state.session) return;
+  const main = app.querySelector(".workspace-main");
+  if (!main) return;
+  main.classList.add("is-route-pending");
+  main.setAttribute("aria-busy", "true");
+}
 const render = () => {
+  primeRouteTransition();
   state.navigationEpoch += 1;
   return scheduleRender();
 };

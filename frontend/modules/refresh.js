@@ -72,11 +72,13 @@ function compatible(current, fresh) {
 
 function syncAttributes(current, fresh, metrics) {
   const preserveOpen = current.tagName === "DETAILS" || current.tagName === "DIALOG";
+  const preserveInert = current.classList?.contains("desktop-app") && current.inert;
   const freshNames = new Set(
     [...fresh.attributes].map((attribute) => attribute.name),
   );
   [...current.attributes].forEach((attribute) => {
     if (preserveOpen && attribute.name === "open") return;
+    if (preserveInert && attribute.name === "inert") return;
     if (!freshNames.has(attribute.name)) {
       current.removeAttribute(attribute.name);
       metrics.updated += 1;
@@ -84,6 +86,7 @@ function syncAttributes(current, fresh, metrics) {
   });
   [...fresh.attributes].forEach((attribute) => {
     if (preserveOpen && attribute.name === "open") return;
+    if (preserveInert && attribute.name === "inert") return;
     if (current.getAttribute(attribute.name) !== attribute.value) {
       current.setAttribute(attribute.name, attribute.value);
       metrics.updated += 1;

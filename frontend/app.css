@@ -491,6 +491,11 @@ a.node-card:hover .node-card-open i{transform:translateX(3px)}
 @keyframes qch-alert-enter{from{opacity:0;transform:translate3d(0,-8px,0) scale(.98)}to{opacity:1;transform:translate3d(0,0,0) scale(1)}}
 @keyframes qch-nav-active{from{opacity:.4;transform:scale(.92)}to{opacity:1;transform:scale(1)}}
 @keyframes qch-expand-enter{from{opacity:0;transform:translate3d(0,-5px,0)}to{opacity:1;transform:translate3d(0,0,0)}}
+@keyframes qch-route-progress{from{transform:scaleX(.08)}to{transform:scaleX(.82)}}
+
+.workspace-main.is-route-pending{position:relative;cursor:progress}
+.workspace-main.is-route-pending::before{content:"";position:absolute;z-index:30;top:0;left:0;width:100%;height:2px;background:linear-gradient(90deg,var(--accent),color-mix(in srgb,var(--accent) 22%,transparent));transform-origin:left;animation:qch-route-progress 1.05s var(--motion-ease-out) infinite alternate}
+.workspace-main.is-route-pending::after{content:"";position:absolute;z-index:29;top:0;left:0;right:0;height:2px;background:color-mix(in srgb,var(--accent) 12%,transparent);pointer-events:none}
 
 .workspace-main.page-enter> *{animation:qch-page-enter var(--motion-slow) var(--motion-ease-out) both}
 .workspace-main.page-enter> *:nth-child(2){animation-delay:35ms}
