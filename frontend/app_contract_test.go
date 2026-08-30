@@ -329,12 +329,48 @@ func TestSidebarNavigationUsesWorkflowOrderAndResponsiveGrouping(t *testing.T) {
 		`.dock-nav .dock-mobile-secondary{display:none}`,
 		`.app-dock{left:0;right:0;bottom:0;height:calc(64px + env(safe-area-inset-bottom));display:grid;grid-template-columns:repeat(5,minmax(0,1fr))`,
 		`.dock-nav{display:contents!important}`,
+		`.dock-nav a,.mobile-account-menu>summary{display:flex;align-items:center;justify-content:center;flex-direction:column;gap:1px`,
+		`,.page-agents .release-channel-options label{min-height:44px}`,
 		`.mobile-account-menu>summary.active`,
 		`.mobile-account-menu a,.mobile-account-menu button`,
+		`.page-access-control .access-control-card form.is-dirty>footer{position:fixed;z-index:85;right:8px;bottom:calc(64px + env(safe-area-inset-bottom));left:8px`,
 	} {
 		if !strings.Contains(string(styles), required) {
 			t.Errorf("sidebar styles are missing responsive grouping contract %q", required)
 		}
+	}
+}
+
+func TestLoginDoesNotPreFillAdministratorUsername(t *testing.T) {
+	app, err := os.ReadFile("app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(app)
+	if strings.Contains(content, `name="username" type="text" value="admin"`) {
+		t.Fatal("login username must not be prefilled with admin")
+	}
+	if !strings.Contains(content, `name="username" type="text" autocomplete="username"`) {
+		t.Fatal("login username must retain browser autocomplete support")
+	}
+	if !strings.Contains(content, `placeholder="输入用户名"`) {
+		t.Fatal("login username must explain the empty field")
+	}
+}
+
+func TestSettingsDoesNotRepeatTheContextNavigation(t *testing.T) {
+	settings, err := os.ReadFile("modules/settings.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(settings)
+	for _, duplicate := range []string{`class="settings-hero"`, `class="settings-category-nav"`, `aria-label="设置分类"`} {
+		if strings.Contains(content, duplicate) {
+			t.Errorf("settings workspace repeats context navigation with %q", duplicate)
+		}
+	}
+	if !strings.Contains(content, `class="settings-savebar"`) || !strings.Contains(content, `data-settings-state`) {
+		t.Fatal("settings save bar must retain the saved revision state")
 	}
 }
 
