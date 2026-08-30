@@ -107,7 +107,10 @@ func TestTrafficManagerCountsBlocksAndResetsCalendarPeriod(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(backend.scripts) != 1 || strings.Contains(backend.scripts[0], " drop") ||
-		!strings.Contains(backend.scripts[0], "tcp dport 443 counter") || !strings.Contains(backend.scripts[0], "udp sport 443 counter") {
+		!strings.Contains(backend.scripts[0], "input meta l4proto tcp tcp dport 443 counter") ||
+		!strings.Contains(backend.scripts[0], "output meta l4proto tcp tcp sport 443 counter") ||
+		!strings.Contains(backend.scripts[0], "input meta l4proto udp udp dport 443 counter") ||
+		!strings.Contains(backend.scripts[0], "output meta l4proto udp udp sport 443 counter") {
 		t.Fatalf("initial nftables rules:\n%s", strings.Join(backend.scripts, "\n---\n"))
 	}
 	backend.counters[trafficRuleComment(policy.ID, "in", "tcp")] = 600
@@ -115,7 +118,8 @@ func TestTrafficManagerCountsBlocksAndResetsCalendarPeriod(t *testing.T) {
 	now = now.Add(2 * time.Second)
 	manager.collect(context.Background(), false)
 	snapshot := manager.Snapshot()
-	if len(snapshot) != 1 || snapshot[0].UsedBytes != 1100 || !snapshot[0].Blocked || !snapshot[0].EnforcementAvailable {
+	if len(snapshot) != 1 || snapshot[0].ReceivedBytes != 600 || snapshot[0].SentBytes != 500 ||
+		snapshot[0].UsedBytes != 1100 || !snapshot[0].Blocked || !snapshot[0].EnforcementAvailable {
 		t.Fatalf("blocked snapshot = %+v", snapshot)
 	}
 	if len(backend.scripts) != 2 || strings.Count(backend.scripts[1], " drop") != 4 {

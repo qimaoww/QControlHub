@@ -1,3 +1,5 @@
+import { portTrafficDirections } from "./traffic.js";
+
 const utcMonth = (value = new Date()) => {
   const date = new Date(value);
   if (!Number.isFinite(date.getTime())) return "";
@@ -66,20 +68,21 @@ async function dashboard({ overview: preloadedOverview } = {}) {
   state.data.dashboardTrafficMonth = trafficMonth;
   state.data.dashboardTrafficUsage = trafficUsage;
   const dailyTraffic = aggregateDashboardTrafficDays(trafficUsage.days, trafficMonth);
-  const receivedTraffic = dailyTraffic.reduce((sum, day) => sum + day.received_bytes, 0);
-  const sentTraffic = dailyTraffic.reduce((sum, day) => sum + day.sent_bytes, 0);
-  const usedTraffic = receivedTraffic + sentTraffic;
+  const uploadTraffic = dailyTraffic.reduce((sum, day) => sum + portTrafficDirections(day).uploadBytes, 0);
+  const downloadTraffic = dailyTraffic.reduce((sum, day) => sum + portTrafficDirections(day).downloadBytes, 0);
+  const usedTraffic = uploadTraffic + downloadTraffic;
   const maxTrafficDay = Math.max(1, ...dailyTraffic.map((day) => day.used_bytes));
   const trafficChartHeight = 112;
   const trafficChartWidth = Math.max(20, dailyTraffic.length * 20);
   const trafficBars = dailyTraffic.map((day, index) => {
     const usedHeight = Math.round(day.used_bytes / maxTrafficDay * trafficChartHeight);
-    const receivedHeight = Math.round(day.received_bytes / maxTrafficDay * trafficChartHeight);
-    const sentHeight = Math.max(0, usedHeight - receivedHeight);
+    const { uploadBytes, downloadBytes } = portTrafficDirections(day);
+    const uploadHeight = Math.round(uploadBytes / maxTrafficDay * trafficChartHeight);
+    const downloadHeight = Math.max(0, usedHeight - uploadHeight);
     const x = index * 20 + 3;
-    const receivedY = trafficChartHeight - receivedHeight;
-    const sentY = receivedY - sentHeight;
-    return `<g><title>${esc(day.day)} · 接收 ${esc(bytes(day.received_bytes))} · 发送 ${esc(bytes(day.sent_bytes))} · 合计 ${esc(bytes(day.used_bytes))}</title><rect class="traffic-bar-sent" x="${x}" y="${sentY}" width="14" height="${sentHeight}" rx="2"></rect><rect class="traffic-bar-received" x="${x}" y="${receivedY}" width="14" height="${receivedHeight}" rx="2"></rect></g>`;
+    const uploadY = trafficChartHeight - uploadHeight;
+    const downloadY = uploadY - downloadHeight;
+    return `<g><title>${esc(day.day)} · 下载 ${esc(bytes(downloadBytes))} · 上传 ${esc(bytes(uploadBytes))} · 合计 ${esc(bytes(day.used_bytes))}</title><rect class="traffic-bar-download" x="${x}" y="${downloadY}" width="14" height="${downloadHeight}" rx="2"></rect><rect class="traffic-bar-upload" x="${x}" y="${uploadY}" width="14" height="${uploadHeight}" rx="2"></rect></g>`;
   }).join("");
   const trafficAxis = dailyTraffic.map((day, index) => {
     const dayNumber = index + 1;
@@ -88,13 +91,13 @@ async function dashboard({ overview: preloadedOverview } = {}) {
   const [trafficYear, trafficMonthNumber] = trafficMonth.split("-").map(Number);
   const trafficMonthLabel = `${trafficYear}年${String(trafficMonthNumber).padStart(2, "0")}月`;
   const trafficMonthOptions = Array.from({ length: 12 }, (_, index) => `<button type="button" data-dashboard-month-option data-month-index="${index + 1}">${index + 1}月</button>`).join("");
-  const trafficDetailRows = dailyTraffic.map((day) => `<tr><td>${esc(day.day)}</td><td>${bytes(day.received_bytes)}</td><td>${bytes(day.sent_bytes)}</td><td><b>${bytes(day.used_bytes)}</b></td><td>${rate(day.peak_receive_bps)} / ${rate(day.peak_send_bps)}</td></tr>`).join("");
+  const trafficDetailRows = dailyTraffic.map((day) => `<tr><td>${esc(day.day)}</td><td>${bytes(portTrafficDirections(day).downloadBytes)}</td><td>${bytes(portTrafficDirections(day).uploadBytes)}</td><td><b>${bytes(day.used_bytes)}</b></td><td>${rate(day.peak_send_bps)} / ${rate(day.peak_receive_bps)}</td></tr>`).join("");
   const trafficHistory = can("traffic.read") ? `<section class="traffic-history dashboard-traffic-history" id="traffic-usage">
-    <header class="dashboard-traffic-head"><div class="dashboard-traffic-title"><span class="eyebrow">流量总览</span><h3>${esc(trafficMonth)} 月流量</h3><small>控制面持久化汇总 · UTC 自然日</small></div><div class="dashboard-traffic-total"><span>本月累计</span><strong>${bytes(usedTraffic)}</strong></div><dl><div><dt>接收</dt><dd>${bytes(receivedTraffic)}</dd></div><div><dt>发送</dt><dd>${bytes(sentTraffic)}</dd></div></dl><div class="dashboard-traffic-month"><span>月份</span><details class="dashboard-month-picker" data-dashboard-traffic-month><summary><b data-dashboard-month-summary>${esc(trafficMonthLabel)}</b><i>⌄</i></summary><div class="dashboard-month-popover"><header><button type="button" data-dashboard-month-year-shift="-1" aria-label="上一年">‹</button><strong data-dashboard-month-year>${trafficYear}</strong><button type="button" data-dashboard-month-year-shift="1" aria-label="下一年">›</button></header><div class="dashboard-month-grid">${trafficMonthOptions}</div><footer><button type="button" data-dashboard-current-month>回到本月</button></footer></div></details></div></header>
-    <div class="traffic-chart-legend"><span class="received">接收</span><span class="sent">发送</span><small>每日接收与发送合计</small></div>
-    <div class="traffic-month-chart dashboard-traffic-chart"><svg viewBox="0 0 ${trafficChartWidth} ${trafficChartHeight}" preserveAspectRatio="none" role="img" aria-label="${esc(trafficMonth)} 每日接收和发送流量图">${trafficBars}</svg></div><div class="dashboard-traffic-axis" aria-hidden="true">${trafficAxis}</div>
+    <header class="dashboard-traffic-head"><div class="dashboard-traffic-title"><span class="eyebrow">流量总览</span><h3>${esc(trafficMonth)} 月流量</h3><small>控制面持久化汇总 · UTC 自然日</small></div><div class="dashboard-traffic-total"><span>本月累计</span><strong>${bytes(usedTraffic)}</strong></div><dl><div><dt>下载</dt><dd>${bytes(downloadTraffic)}</dd></div><div><dt>上传</dt><dd>${bytes(uploadTraffic)}</dd></div></dl><div class="dashboard-traffic-month"><span>月份</span><details class="dashboard-month-picker" data-dashboard-traffic-month><summary><b data-dashboard-month-summary>${esc(trafficMonthLabel)}</b><i>⌄</i></summary><div class="dashboard-month-popover"><header><button type="button" data-dashboard-month-year-shift="-1" aria-label="上一年">‹</button><strong data-dashboard-month-year>${trafficYear}</strong><button type="button" data-dashboard-month-year-shift="1" aria-label="下一年">›</button></header><div class="dashboard-month-grid">${trafficMonthOptions}</div><footer><button type="button" data-dashboard-current-month>回到本月</button></footer></div></details></div></header>
+    <div class="traffic-chart-legend"><span class="download">下载</span><span class="upload">上传</span><small>每日下载与上传合计</small></div>
+    <div class="traffic-month-chart dashboard-traffic-chart"><svg viewBox="0 0 ${trafficChartWidth} ${trafficChartHeight}" preserveAspectRatio="none" role="img" aria-label="${esc(trafficMonth)} 每日下载和上传流量图">${trafficBars}</svg></div><div class="dashboard-traffic-axis" aria-hidden="true">${trafficAxis}</div>
     <footer class="dashboard-traffic-actions"><button class="button small" type="button" data-dashboard-traffic-details>查看 ${dailyTraffic.length} 天明细</button><a href="#traffic">管理流量配额 →</a></footer>
-    <dialog class="traffic-edit-dialog dashboard-traffic-dialog" data-dashboard-traffic-dialog aria-labelledby="dashboard-traffic-dialog-title"><header><span class="traffic-edit-icon" aria-hidden="true">↕</span><div><p class="eyebrow">每日用量</p><h2 id="dashboard-traffic-dialog-title">${esc(trafficMonth)} 流量明细</h2><p>接收、发送和峰值按 UTC 自然日汇总</p></div><button class="deploy-command-close" type="button" data-dashboard-traffic-close aria-label="关闭流量明细弹窗">×</button></header><div class="dashboard-traffic-detail-body"><table><thead><tr><th>日期</th><th>接收</th><th>发送</th><th>合计</th><th>接收 / 发送峰值</th></tr></thead><tbody>${trafficDetailRows}</tbody></table></div><footer class="dashboard-traffic-dialog-actions"><span>共 ${dailyTraffic.length} 个自然日</span><button class="button" type="button" data-dashboard-traffic-close>关闭</button></footer></dialog>
+    <dialog class="traffic-edit-dialog dashboard-traffic-dialog" data-dashboard-traffic-dialog aria-labelledby="dashboard-traffic-dialog-title"><header><span class="traffic-edit-icon" aria-hidden="true">↕</span><div><p class="eyebrow">每日用量</p><h2 id="dashboard-traffic-dialog-title">${esc(trafficMonth)} 流量明细</h2><p>下载、上传和峰值按 UTC 自然日汇总</p></div><button class="deploy-command-close" type="button" data-dashboard-traffic-close aria-label="关闭流量明细弹窗">×</button></header><div class="dashboard-traffic-detail-body"><table><thead><tr><th>日期</th><th>下载</th><th>上传</th><th>合计</th><th>下载 / 上传峰值</th></tr></thead><tbody>${trafficDetailRows}</tbody></table></div><footer class="dashboard-traffic-dialog-actions"><span>共 ${dailyTraffic.length} 个自然日</span><button class="button" type="button" data-dashboard-traffic-close>关闭</button></footer></dialog>
   </section>` : "";
   const fleet =
     agents

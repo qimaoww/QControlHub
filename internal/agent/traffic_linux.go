@@ -328,6 +328,8 @@ func sortedTrafficRecordIDs(records map[string]*trafficRecord) []string {
 func policyKernelCounters(counters map[string]uint64, policy core.PortTrafficPolicy) (uint64, uint64) {
 	var received, sent uint64
 	for _, protocol := range trafficProtocols(policy.Protocol) {
+		// input+dport is client-to-listener upload; output+sport is
+		// listener-to-client download. Keep the API field names listener-centric.
 		received = saturatedTrafficAdd(received, counters[trafficRuleComment(policy.ID, "in", protocol)])
 		sent = saturatedTrafficAdd(sent, counters[trafficRuleComment(policy.ID, "out", protocol)])
 	}

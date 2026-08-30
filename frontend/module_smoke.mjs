@@ -90,9 +90,11 @@ import {
   mergeVisibleTrafficCardOrder,
   mergeTrafficPorts,
   orderTrafficItems,
+  portTrafficDirections,
   resetTrafficCreateForm,
   trafficRateForDisplay,
 } from "./modules/traffic.js";
+
 import { createLatestRenderScheduler } from "./modules/refresh.js";
 import {
   nodeCardOrderKey,
@@ -100,6 +102,12 @@ import {
   savedNodeOrder,
   saveNodeOrder,
 } from "./modules/node-order.js";
+
+assert.deepEqual(
+  portTrafficDirections({ received_bytes: 12, sent_bytes: 8, receive_bps: 3, send_bps: 2 }),
+  { downloadBytes: 8, uploadBytes: 12, downloadBPS: 2, uploadBPS: 3 },
+  "port traffic maps listener outbound/inbound counters to client download/upload",
+);
 
 const state = { data: {}, session: { role: "admin" } };
 const noop = () => {};
@@ -2710,6 +2718,8 @@ try {
   assert.equal(dashboardMarkup.includes('type="month"'), false, "dashboard does not open the browser-native month panel");
   assert.equal(dashboardMarkup.includes("<details class=\"traffic-daily\""), false, "dashboard no longer expands daily history inline");
   assert.equal(dashboardMarkup.includes("2026-08-27"), true, "dashboard renders persisted daily traffic details");
+  assert.equal(dashboardMarkup.includes("<dt>下载</dt><dd>4 B</dd>"), true, "dashboard download total uses sent bytes");
+  assert.equal(dashboardMarkup.includes("<dt>上传</dt><dd>6 B</dd>"), true, "dashboard upload total uses received bytes");
   assert.equal(dashboardTrafficMonthDays("2024-02").length, 29, "dashboard traffic month helper observes leap years");
   assert.deepEqual(
     aggregateDashboardTrafficDays([
@@ -3394,6 +3404,8 @@ try {
   assert.equal(trafficMarkup.includes("Existing UDP"), true, "discovered ports render as automatic traffic monitors");
   assert.equal(trafficMarkup.includes("Primary from config"), false, "a configured endpoint already covered by a policy is not duplicated");
   assert.equal(trafficMarkup.includes("持续统计"), true, "monitoring remains active without a quota");
+  assert.equal(trafficMarkup.includes("<small>下载流量</small><strong>4 B</strong>"), true, "port download uses listener outbound bytes");
+  assert.equal(trafficMarkup.includes("<small>上传流量</small><strong>6 B</strong>"), true, "port upload uses listener inbound bytes");
   assert.equal(trafficMarkup.includes("traffic-edit-dialog"), false, "read-only roles do not receive quota mutation dialogs");
   const trafficPoll = [...trafficTimers.values()][0];
   trafficTimers.clear();

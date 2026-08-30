@@ -258,7 +258,7 @@ systemd 单元的 `ProtectSystem=strict` 只放行固定的 `/etc/qagent` 配置
 
 一键接入节点时只安装 QAgent；四个内核的最小配置、状态目录和 `qagent-*` 服务素材会以 root 只读方式暂存，但不会落地为服务。面板首次提交某个内核的安装任务时，Agent 才创建该内核的配置与 systemd/OpenRC 服务，并同步低端口能力和临时日志策略；自定义服务名不会被修改。若活动的既有 Xray 或 sing-box 无法通过精确映射校验，接入仍会继续，原服务保持不变，Agent 仅禁用该内核的远程任务并在面板报告原因。重复接入已有节点不会覆盖配置文件或管理员自建单元。
 
-端口配额只管理 `inet qcontrolhub` 表，不刷新或改写管理员已有的 nftables 表。每个策略分别统计发往监听端口的接收字节和从该端口发出的发送字节；达到额度后，两条方向规则都切换为 `drop`。计数状态以 `0600` 原子保存在 `/var/lib/qcontrolhub/traffic-state.json`，Agent 或控制面短暂重启不会清零当前周期。
+端口配额只管理 `inet qcontrolhub` 表，不刷新或改写管理员已有的 nftables 表。每个策略分别统计发往监听端口的接收字节和从该端口发出的发送字节；对客户端分别对应上行和下行，两个方向的实际字节数不要求相等。达到额度后，两条方向规则都切换为 `drop`。计数状态以 `0600` 原子保存在 `/var/lib/qcontrolhub/traffic-state.json`，Agent 或控制面短暂重启不会清零当前周期。
 
 面板首次安装内核时会按需完成配置目录、最小初始配置和 systemd/OpenRC 服务前置条件，不要求空白节点预先运行 bootstrap。手工部署仍可使用 `deploy/bootstrap-core-services.sh <内核>`，省略参数则一次准备全部四个；脚本只创建缺失配置和新的 `qagent-*` 服务，不迁移也不操作旧的通用服务或二进制。Alpine 会为 Shadowsocks Rust 选择官方 musl 资产；其他系统继续选择 GNU Linux 资产。稳定版和自定义版本使用对应内核的官方 GitHub Release，不接受自定义下载地址；自定义版本必须是类似 `1.19.29` 或 `1.14.0-beta.3` 的完整版本号。Mihomo `development` 支持显式来源：官方 MetaCubeX（默认、推荐，省略 `core_source` 即官方）与第三方 `vernesong/mihomo` Alpha 镜像（仅显式选择，信任锚为镜像仓库所有者身份）；各来源独立解析并 fail-closed，不使用另一来源或稳定版兜底，且不会把镜像描述为官方或自动 fallback。Agent 必须完整心跳声明 `mihomo-development-source-v1`，控制面才会为其派发镜像任务。Agent 在下载后强制核对 GitHub Release API 给出的 SHA-256（`checksums.txt` 不作为已验证输入，完整性来自 GitHub 资产 `digest`，信任锚随发布仓库所有者身份变化），运行候选二进制确认版本，随后原子替换并重启服务；失败时恢复上一二进制。
 
