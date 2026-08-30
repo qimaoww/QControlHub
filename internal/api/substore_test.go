@@ -146,17 +146,21 @@ func TestSubStoreSubscriptionCreateUpdateAndOwnership(t *testing.T) {
 	}
 	delete(stored, "qcontrolhub_managed_nodes")
 	created, err = server.upsertSubStoreSubscription(context.Background(), settings, target, "vless://two#Two")
-	if err != nil || created || stored["content"] != "vless://two#Two" {
+	if err != nil || created || stored["content"] != "vless://one#One\nvless://two#Two" {
 		t.Fatalf("upgrade legacy owned subscription = %t, %#v, %v", created, stored, err)
+	}
+	created, err = server.upsertSubStoreSubscription(context.Background(), settings, target, "vless://three#Three")
+	if err != nil || created || stored["content"] != "vless://one#One\nvless://two#Two\nvless://three#Three" {
+		t.Fatalf("incremental sync preserved previous nodes = %t, %#v, %v", created, stored, err)
 	}
 	stored["custom-option"] = "preserved"
 	renamed, err := server.renameSubStoreSubscription(context.Background(), settings, target, "QControlHub Renamed")
-	if err != nil || !renamed || stored["name"] != "QControlHub Renamed" || stored["content"] != "vless://two#Two" || stored["custom-option"] != "preserved" {
+	if err != nil || !renamed || stored["name"] != "QControlHub Renamed" || stored["content"] != "vless://one#One\nvless://two#Two\nvless://three#Three" || stored["custom-option"] != "preserved" {
 		t.Fatalf("rename subscription in place = %t, %#v, %v", renamed, stored, err)
 	}
 	target.SubscriptionName = "QControlHub Renamed"
 	created, err = server.upsertSubStoreSubscription(context.Background(), settings, target, "vless://renamed#Renamed")
-	if err != nil || created || stored["name"] != "QControlHub Renamed" || stored["content"] != "vless://renamed#Renamed" {
+	if err != nil || created || stored["name"] != "QControlHub Renamed" || stored["content"] != "vless://one#One\nvless://two#Two\nvless://three#Three\nvless://renamed#Renamed" {
 		t.Fatalf("rename subscription = %t, %#v, %v", created, stored, err)
 	}
 	target.SubscriptionName = "Imported Group"
@@ -209,6 +213,16 @@ func TestMergeSubStoreContentByNodeName(t *testing.T) {
 	merged, err = mergeSubStoreContentByName(existing, "", []string{"Managed", "Removed"})
 	if err != nil || merged != "vless://manual@old.example:443#Manual" {
 		t.Fatalf("remove all managed nodes = %q, %v", merged, err)
+	}
+	merged, err = mergeSubStoreContentByName(existing, desired, nil)
+	want = strings.Join([]string{
+		"vless://manual@old.example:443#Manual",
+		"vless://new@new.example:443#Managed",
+		"vless://removed@old.example:443#Removed",
+		"vless://added@new.example:443#Added",
+	}, "\n")
+	if err != nil || merged != want {
+		t.Fatalf("incremental sync preserves existing nodes = %q, %v; want %q", merged, err, want)
 	}
 }
 

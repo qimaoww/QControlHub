@@ -362,4 +362,23 @@ func TestOpenMigratesAppliedV31SubStoreDisplayName(t *testing.T) {
 	if !syncModeColumn {
 		t.Fatal("sync_mode column was not added while migrating v31")
 	}
+	if _, err := dataStore.pool.Exec(ctx, `DELETE FROM substore_sync_targets`); err != nil {
+		t.Fatal("remove local Sub-Store target: ", err)
+	}
+	if _, err := dataStore.pool.Exec(ctx, `DELETE FROM qcontrolhub_schema_migrations; INSERT INTO qcontrolhub_schema_migrations (version) VALUES (39)`); err != nil {
+		t.Fatal("prepare later schema migration: ", err)
+	}
+	dataStore.Close()
+	dataStore, err = OpenWithConfigKey(ctx, schema.URL, true, testEncryptionKey("substore-v31"))
+	if err != nil {
+		t.Fatalf("reopen after removing Sub-Store target: %v", err)
+	}
+	defer dataStore.Close()
+	targets, err := dataStore.ListSubStoreSyncTargets(ctx)
+	if err != nil {
+		t.Fatal("list targets after later migration: ", err)
+	}
+	if len(targets) != 0 {
+		t.Fatalf("later schema migration recreated removed Sub-Store targets: %+v", targets)
+	}
 }

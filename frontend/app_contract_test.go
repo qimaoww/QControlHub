@@ -631,6 +631,7 @@ func TestSubStoreSyncUsesCompactPanelPatterns(t *testing.T) {
 		`substore-node-settings-row`, `name="sync_mode" value="incremental"`,
 		`name="sync_mode" value="managed"`, `增量模式`, `完全托管模式`,
 		`api("/substore-sync/selections"`, `api("/substore-sync/run"`,
+		`data-substore-remote-import-button`, `/substore-sync/targets/${encodeURIComponent(activeTarget.id)}/remote`,
 	} {
 		if !strings.Contains(app+module, required) {
 			t.Errorf("Sub-Store sync page is missing %q", required)
