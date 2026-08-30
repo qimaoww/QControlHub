@@ -948,6 +948,7 @@ function bindAgentConfigPage(ctx) {
     if (!links.length || !sections.length) return;
     const activate = (id) => {
       const selected = sections.find((section) => section.id === id) || sections[0];
+      state.data.builderStep = selected.id;
       sections.forEach((section) => {
         const active = section === selected;
         section.hidden = !active;

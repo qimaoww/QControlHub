@@ -497,6 +497,8 @@ a.node-card:hover .node-card-open i{transform:translateX(3px)}
 @keyframes qch-first-screen-enter{from{opacity:0;transform:translate3d(0,10px,0) scale(.995)}to{opacity:1;transform:translate3d(0,0,0) scale(1)}}
 @keyframes qch-node-panel-enter{from{opacity:0;transform:translate3d(0,8px,0)}to{opacity:1;transform:translate3d(0,0,0)}}
 @keyframes qch-metric-glow{from{opacity:.45;filter:saturate(.72)}to{opacity:1;filter:saturate(1)}}
+@keyframes qch-config-step-enter{from{opacity:0;transform:translate3d(0,7px,0) scale(.998)}to{opacity:1;transform:translate3d(0,0,0) scale(1)}}
+@keyframes qch-context-enter{from{opacity:0;transform:translate3d(-10px,0,0)}to{opacity:1;transform:translate3d(0,0,0)}}
 
 .boot{min-height:100vh;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;padding-top:84px;background:var(--canvas);color:var(--muted);font-size:calc(12px * var(--ui-font-scale));font-weight:700;letter-spacing:.02em;animation:qch-boot-enter 360ms var(--motion-ease-out) both}
 .boot::before{content:"";width:42px;height:42px;position:absolute;top:calc(50% - 29px);left:calc(50% - 21px);border:2px solid color-mix(in srgb,var(--accent) 18%,transparent);border-top-color:var(--accent);border-radius:50%;animation:qch-boot-orbit 1.05s linear infinite}
@@ -535,6 +537,34 @@ a.node-card:hover .node-card-open i{transform:translateX(3px)}
 .page-node-settings .core-runtime-row .core-version-panel>summary{transition:background-color var(--motion-fast) ease,transform var(--motion-fast) var(--motion-ease-spring)}
 .page-node-settings .core-runtime-row .core-version-panel>summary:active{transform:translate3d(0,1px,0)}
 .page-node-settings .core-version-panel[open]>summary span{transition:color var(--motion-fast) ease,transform var(--motion-base) var(--motion-ease-spring);transform:translateX(2px)}
+.page-agent-config .workspace-main.page-enter .config-command-head{animation:qch-config-step-enter 400ms var(--motion-ease-out) both}
+.page-agent-config .workspace-main.page-enter .config-hierarchy-menu{animation:qch-config-step-enter 400ms var(--motion-ease-out) 45ms both}
+.page-agent-config .workspace-main.page-enter .config-execution-callout{animation:qch-config-step-enter 400ms var(--motion-ease-out) 75ms both}
+.page-agent-config .workspace-main.page-enter .recipe-workspace{animation:qch-config-step-enter 420ms var(--motion-ease-out) 95ms both}
+.page-agent-config .workspace-main.page-enter .advanced-studio{animation:qch-config-step-enter 420ms var(--motion-ease-out) 135ms both}
+.page-agent-config .config-hierarchy-menu[open]>.config-command-selectors{animation:qch-expand-enter 320ms var(--motion-ease-out) both}
+.page-agent-config .config-selector nav a{transition:transform var(--motion-fast) var(--motion-ease-spring),background-color var(--motion-fast) ease,border-color var(--motion-fast) ease,color var(--motion-fast) ease,box-shadow var(--motion-fast) ease}
+.page-agent-config .config-selector nav a:hover{transform:translate3d(0,-2px,0)}
+.page-agent-config .config-selector nav a:active{transform:translate3d(0,1px,0) scale(.98)}
+.page-agent-config .config-selector nav a.active{animation:qch-nav-active 300ms var(--motion-ease-spring) both}
+.page-agent-config .builder-index a{transition:transform var(--motion-fast) var(--motion-ease-spring),background-color var(--motion-fast) ease,color var(--motion-fast) ease,box-shadow var(--motion-fast) ease}
+.page-agent-config .builder-index a:hover{transform:translate3d(3px,0,0)}
+.page-agent-config .builder-index a:active{transform:translate3d(1px,0,0) scale(.99)}
+.page-agent-config .builder-sections>.builder-section:not([hidden]){animation:qch-config-step-enter 360ms var(--motion-ease-out) both}
+.page-agent-config .builder-section .section-number{transition:transform var(--motion-base) var(--motion-ease-spring),box-shadow var(--motion-base) ease}
+.page-agent-config .builder-section:hover .section-number{transform:scale(1.06);box-shadow:0 8px 18px -12px color-mix(in srgb,var(--accent) 70%,transparent)}
+.page-agent-config .builder-actions{transition:box-shadow var(--motion-base) ease,background-color var(--motion-base) ease}
+.page-agent-config .builder-actions:focus-within{box-shadow:0 -10px 26px -22px color-mix(in srgb,var(--accent) 66%,transparent)}
+.page-agent-config .advanced-studio[open]>.advanced-studio-body{animation:qch-expand-enter 320ms var(--motion-ease-out) both}
+.context-sidebar.context-enter>*:not(.context-brand){animation:qch-context-enter 360ms var(--motion-ease-out) both}
+.context-sidebar.context-enter>*:nth-child(3){animation-delay:30ms}
+.context-sidebar.context-enter>*:nth-child(4){animation-delay:60ms}
+.context-sidebar.context-enter>*:nth-child(5){animation-delay:90ms}
+.context-sidebar.context-enter>*:nth-child(n+6){animation-delay:115ms}
+.context-sidebar :is(.context-menu,.context-list)>a{transition:transform var(--motion-fast) var(--motion-ease-spring),background-color var(--motion-fast) ease,border-color var(--motion-fast) ease,color var(--motion-fast) ease,box-shadow var(--motion-fast) ease}
+.context-sidebar :is(.context-menu,.context-list)>a:hover{transform:translate3d(3px,0,0)}
+.context-sidebar :is(.context-menu,.context-list)>a:active{transform:translate3d(1px,0,0) scale(.985)}
+.context-sidebar :is(.context-menu,.context-list)>a.active{animation:qch-nav-active 300ms var(--motion-ease-spring) both}
 
 :is(.node-card,.workspace-panel,.service-card,.traffic-policy-card,.task-event-card,.client-access-node-card,.access-control-card,.substore-agent-card,.settings-version-card,.template-card){transition:transform var(--motion-base) var(--motion-ease-out),box-shadow var(--motion-base) var(--motion-ease-out),border-color var(--motion-base) ease}
 :is(.node-card,.workspace-panel,.service-card,.traffic-policy-card,.task-event-card,.client-access-node-card,.access-control-card,.substore-agent-card,.settings-version-card,.template-card):not(.dragging):hover{transform:translate3d(0,-3px,0);box-shadow:var(--shadow-lift)}
