@@ -563,6 +563,7 @@ type PanelSettings struct {
 	PanelDescription               string    `json:"panel_description"`
 	TimeZone                       string    `json:"time_zone"`
 	TimeDisplay                    string    `json:"time_display"`
+	UIFontScale                    int       `json:"ui_font_scale"`
 	DefaultConfigEditor            string    `json:"default_config_editor"`
 	TaskPageSize                   int       `json:"task_page_size"`
 	TaskPollIntervalMS             int       `json:"task_poll_interval_ms"`
@@ -596,6 +597,7 @@ func DefaultPanelSettings() PanelSettings {
 		PanelDescription:               "可信远程编排",
 		TimeZone:                       "browser",
 		TimeDisplay:                    "absolute-relative",
+		UIFontScale:                    100,
 		DefaultConfigEditor:            "structured",
 		TaskPageSize:                   100,
 		TaskPollIntervalMS:             600,
@@ -634,6 +636,9 @@ func (settings PanelSettings) Validate() error {
 	}
 	if !oneOfString(settings.TimeDisplay, "absolute-relative", "absolute") {
 		return errors.New("unsupported time display")
+	}
+	if !oneOf(settings.UIFontScale, 90, 100, 110) {
+		return errors.New("unsupported UI font scale")
 	}
 	if !oneOfString(settings.DefaultConfigEditor, "structured", "source") {
 		return errors.New("unsupported default config editor")

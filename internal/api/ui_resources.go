@@ -42,7 +42,7 @@ func (s *Server) putSettings(w http.ResponseWriter, request *http.Request) {
 	if expectedRevision > 0 {
 		saved, err = s.store.SavePanelSettingsRevision(request.Context(), settings, expectedRevision)
 	} else {
-		// Cached pre-v35 frontends do not send revision or any newly introduced
+		// Cached pre-v37 frontends do not send revision or any newly introduced
 		// policy fields. The store preserves those fields as one compatibility
 		// unit while the new UI gets optimistic concurrency protection.
 		saved, err = s.store.SavePanelSettings(request.Context(), settings)

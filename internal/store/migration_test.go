@@ -455,6 +455,7 @@ func TestOpenMigratesAppliedV35OperationalColumns(t *testing.T) {
 		ALTER TABLE panel_settings DROP COLUMN revision;
 		ALTER TABLE panel_settings DROP COLUMN time_zone;
 		ALTER TABLE panel_settings DROP COLUMN time_display;
+		ALTER TABLE panel_settings DROP COLUMN ui_font_scale;
 		ALTER TABLE panel_settings DROP COLUMN default_config_editor;
 		ALTER TABLE panel_settings DROP COLUMN agent_heartbeat_interval_seconds;
 		ALTER TABLE panel_settings DROP COLUMN agent_metrics_interval_seconds;
@@ -483,7 +484,7 @@ func TestOpenMigratesAppliedV35OperationalColumns(t *testing.T) {
 	missingColumns := map[string][]string{
 		"agents": {"presence_notification_state"},
 		"panel_settings": {
-			"revision", "time_zone", "time_display", "default_config_editor",
+			"revision", "time_zone", "time_display", "ui_font_scale", "default_config_editor",
 			"agent_heartbeat_interval_seconds", "agent_metrics_interval_seconds", "agent_offline_threshold_seconds",
 			"task_stale_timeout_seconds", "install_task_stale_timeout_seconds", "task_max_attempts",
 			"public_ip_probe_interval_seconds", "core_log_retention_days", "agent_core_log_max_mib",
@@ -534,7 +535,7 @@ func TestOpenMigratesAppliedV35OperationalColumns(t *testing.T) {
 				t.Fatalf("inspect migrated column %s.%s: %v", table, column, err)
 			}
 			if !exists {
-				t.Errorf("v36 migration did not restore %s.%s", table, column)
+				t.Errorf("v37 migration did not restore %s.%s", table, column)
 			}
 		}
 	}
@@ -545,7 +546,7 @@ func TestOpenMigratesAppliedV35OperationalColumns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read panel settings after v35 migration: %v", err)
 	}
-	if settings.Revision != 1 || settings.AgentHeartbeatIntervalSeconds != 15 || !settings.NotifyAgentOffline {
+	if settings.Revision != 1 || settings.UIFontScale != 100 || settings.AgentHeartbeatIntervalSeconds != 15 || !settings.NotifyAgentOffline {
 		t.Fatalf("migrated panel setting defaults = %+v", settings)
 	}
 	if _, err := dataStore.AgentPresenceTransitions(ctx, time.Now().UTC(), 45*time.Second); err != nil {

@@ -759,8 +759,8 @@ func TestInitialConsoleStylesRemainExactOutsideApprovedExtensions(t *testing.T) 
 	}
 	// Base hash covers the initial release plus the approved v56 revision that
 	// reserved the compact media queries for coarse-pointer devices so desktop
-	// zoom keeps one fixed layout.
-	const expected = "b967be66daf4078b69fdc204cf88105800f424dae4aed74ec3e5807b47a3ff4c"
+	// zoom keeps one fixed layout and the shared typography scale revision.
+	const expected = "bbf685608d6a619a5db5cdbee9e6a287fd9aa698f71070038c312f14976d73cc"
 	if actual := fmt.Sprintf("%x", sha256.Sum256([]byte(parts[0]))); actual != expected {
 		t.Fatalf("base app.css hash = %s, want initial release hash %s", actual, expected)
 	}
@@ -1024,6 +1024,19 @@ func TestCoreLogStoragePolicyNavigationAndVisibility(t *testing.T) {
 	if strings.Count(settingsContent, `data-save-settings`) != 2 {
 		t.Error("settings page must render and bind exactly one save button")
 	}
+	for _, required := range []string{
+		`select(item, "ui_font_scale", "界面字号"`,
+		`[90, "小"]`, `[100, "正常"]`, `[110, "大"]`,
+		`ui_font_scale: number("ui_font_scale")`,
+		`applyUIFontScale?.(saved.ui_font_scale)`,
+	} {
+		if !strings.Contains(settingsContent, required) {
+			t.Errorf("settings page is missing configurable typography marker %q", required)
+		}
+	}
+	if !strings.Contains(appContent, `--ui-font-scale`) || !strings.Contains(appContent, `uiFontScaleOptions`) {
+		t.Error("app shell must apply the persisted typography scale")
+	}
 
 	module, err := os.ReadFile("modules/core-logs.js")
 	if err != nil {
@@ -1047,12 +1060,15 @@ func TestCoreLogsUseReadableAlignedDesktopGrid(t *testing.T) {
 		t.Fatal(err)
 	}
 	content := string(stylesheet)
+	if !strings.Contains(content, `:root{--ui-font-scale:1}`) {
+		t.Fatal("frontend typography must expose the shared scale fallback")
+	}
 	for _, required := range []string{
 		`--core-log-grid:168px 130px 72px 150px minmax(360px,1fr)`,
 		`grid-template-columns:var(--core-log-grid);align-items:center`,
-		`.core-log-row time,.core-log-row span{min-width:0;overflow:hidden;font-size:11px`,
-		`.core-log-row pre{min-width:0;margin:0;color:var(--ink-2);font:11px/1.6`,
-		`.core-log-filter-group,.core-log-filters label{display:grid;gap:7px;min-width:0;color:var(--muted);font-size:11px`,
+		`.core-log-row time,.core-log-row span{min-width:0;overflow:hidden;font-size:calc(11px * var(--ui-font-scale))`,
+		`.core-log-row pre{min-width:0;margin:0;color:var(--ink-2);font:calc(11px * var(--ui-font-scale))/1.6`,
+		`.core-log-filter-group,.core-log-filters label{display:grid;gap:7px;min-width:0;color:var(--muted);font-size:calc(11px * var(--ui-font-scale))`,
 	} {
 		if !strings.Contains(content, required) {
 			t.Errorf("core-log readable alignment contract is missing %q", required)

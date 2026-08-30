@@ -4736,6 +4736,16 @@ assert.equal(staleSourceRows[1].ok, false);
 // keep the readability floor while staying on a single ellipsizing line.
 {
   const css = readFileSync(new URL("app.css", import.meta.url), "utf8");
+  assert.equal(
+    /font-size:[1-9]\d*(?:\.\d+)?px/.test(css),
+    false,
+    "positive pixel font sizes must use the shared typography scale",
+  );
+  assert.equal(
+    /line-height:\d+(?:\.\d+)?px/.test(css),
+    false,
+    "pixel line heights must use the shared typography scale",
+  );
   const badge = /\.ip-family\{[^}]*\}/.exec(css)?.[0] || "";
   assert.equal(
     badge.includes("font-style:normal"),
@@ -4750,14 +4760,14 @@ assert.equal(staleSourceRows[1].ok, false);
   const cardCode = /\.card-ip-row code\{[^}]*\}/.exec(css)?.[0] || "";
   const publicCode = /\.public-ip-row code\{[^}]*\}/.exec(css)?.[0] || "";
   assert.equal(
-    /\bfont-size:11px/.test(cardCode),
+    /font-size:(?:11px|calc\(11px \* var\(--ui-font-scale\)\))/.test(cardCode),
     true,
-    "card address text must be at least 11px",
+    "card address text must be at least 11px before the shared scale",
   );
   assert.equal(
-    /\bfont-size:12px/.test(publicCode),
+    /font-size:(?:12px|calc\(12px \* var\(--ui-font-scale\)\))/.test(publicCode),
     true,
-    "detail address text must be at least 12px",
+    "detail address text must be at least 12px before the shared scale",
   );
   assert.equal(
     /\.card-ip-row code\{[^}]*font-size:9px/.test(css),
