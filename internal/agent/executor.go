@@ -599,6 +599,11 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (string, erro
 		if err != nil {
 			return validation, err
 		}
+		if task.Engine == core.EngineShadowsocksRust && mainlandDestinationPolicyEnabled(task.MainlandAccessPolicies) {
+			if err := e.prepareShadowsocksRustACLService(ctx, spec); err != nil {
+				return validation, err
+			}
+		}
 		if err := ensureManagedCoreServiceCapabilities(ctx, task.Engine, spec, e.serviceManager()); err != nil {
 			return validation, err
 		}
@@ -669,6 +674,15 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (string, erro
 	default:
 		return "", fmt.Errorf("unsupported action %q", task.Action)
 	}
+}
+
+func mainlandDestinationPolicyEnabled(policies []core.MainlandAccessPolicy) bool {
+	for _, policy := range policies {
+		if policy.Engine == core.EngineShadowsocksRust && policy.BlockMainlandDestination {
+			return true
+		}
+	}
+	return false
 }
 
 func (e *Executor) readCurrentConfig(ctx context.Context, engine core.Engine, spec EngineSpec) (string, error) {

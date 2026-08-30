@@ -3,7 +3,7 @@
 
 description="Shadowsocks Rust core managed by QAgent"
 command="/bin/sh"
-command_args="-c 'exec /usr/local/lib/qagent/cores/ssserver -c /etc/qagent/shadowsocks-rust/config.json >>/var/log/qagent/qagent-shadowsocks-rust.log 2>&1'"
+command_args="-c 'exec /usr/local/lib/qagent/cores/ssserver -c /etc/qagent/shadowsocks-rust/config.json --acl /etc/qagent/shadowsocks-rust/qch-mainland-block.acl >>/var/log/qagent/qagent-shadowsocks-rust.log 2>&1'"
 command_user="qcontrolhub-core:qcontrolhub-core"
 directory="/var/lib/qcontrolhub-shadowsocks-rust"
 supervisor="supervise-daemon"
@@ -23,4 +23,5 @@ start_pre() {
 	checkpath --file --owner qcontrolhub-core:qcontrolhub-core --mode 0640 /var/log/qagent/qagent-shadowsocks-rust.log
 	[ -x "/usr/local/lib/qagent/cores/ssserver" ] || { eerror "missing Shadowsocks Rust binary: /usr/local/lib/qagent/cores/ssserver"; return 1; }
 	[ -f "/etc/qagent/shadowsocks-rust/config.json" ] || { eerror "missing Shadowsocks Rust configuration"; return 1; }
+	[ -f "/etc/qagent/shadowsocks-rust/qch-mainland-block.acl" ] || { eerror "missing Shadowsocks Rust mainland ACL"; return 1; }
 }

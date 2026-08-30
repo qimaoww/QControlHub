@@ -183,6 +183,24 @@ func (s *Server) agentConfigWorkspace(w http.ResponseWriter, request *http.Reque
 			writeInternalError(w, err)
 			return
 		}
+		if engine == core.EngineShadowsocksRust {
+			policies, policyErr := s.store.ListMainlandAccessPolicies(request.Context(), agent.ID)
+			if policyErr != nil {
+				writeInternalError(w, policyErr)
+				return
+			}
+			destination := false
+			byKey := make(map[string]core.MainlandAccessPolicy, len(policies))
+			for _, policy := range policies {
+				destination = destination || policy.BlockMainlandDestination
+				byKey[mainlandPolicyKey(agent.ID, engine, policy.Tag, policy.Port)] = policy
+			}
+			for index := range result.Inbounds {
+				policy := byKey[mainlandPolicyKey(agent.ID, engine, result.Inbounds[index].Tag, result.Inbounds[index].Port)]
+				result.Inbounds[index].BlockMainlandDestination = destination
+				result.Inbounds[index].BlockMainlandSource = policy.BlockMainlandSource
+			}
+		}
 		result.PresentFields, err = configschema.RootKeys(engine, config.Content)
 		if err != nil {
 			writeError(w, http.StatusUnprocessableEntity, err.Error())
@@ -285,6 +303,14 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 		return
 	}
 	content := generated
+	var existingShadowsocksRustPolicies []core.MainlandAccessPolicy
+	if engine == core.EngineShadowsocksRust {
+		existingShadowsocksRustPolicies, err = s.store.ListMainlandAccessPolicies(request.Context(), agent.ID)
+		if err != nil {
+			writeInternalError(w, err)
+			return
+		}
+	}
 	current, currentErr := s.store.AgentConfig(request.Context(), agent.ID, engine)
 	if currentErr == nil {
 		content, err = serverconfig.MutateGenerated(engine, current.Content, generated, input.OriginalTag, input.Operation)
@@ -299,31 +325,26 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 		writeError(w, http.StatusConflict, "no saved configuration exists for this operation")
 		return
 	}
-	if engine == core.EngineMihomo || engine == core.EngineXray || engine == core.EngineSingBox {
+	if engine == core.EngineShadowsocksRust && input.Operation != "delete" && input.Input.BlockMainlandDestination && len(serverconfig.DiscoverMainlandAccessPolicies(engine, content)) > 1 {
+		writeError(w, http.StatusBadRequest, "Shadowsocks Rust 的 ACL 由单个 ssserver 进程统一加载；多端口配置请拆分为单独进程后再启用目标限制")
+		return
+	}
+	if engine == core.EngineMihomo || engine == core.EngineXray || engine == core.EngineSingBox || engine == core.EngineShadowsocksRust {
 		if currentErr == nil && input.OriginalTag != "" {
-			content, err = serverconfig.RemoveMainlandAccessPolicy(engine, content, input.OriginalTag)
-			if err != nil {
-				writeError(w, http.StatusBadRequest, err.Error())
-				return
-			}
-		}
-		if input.Operation != "delete" {
-			var prefixes []string
-			if input.Input.BlockMainlandDestination || input.Input.BlockMainlandSource {
-				prefixes, err = serverconfig.LoadChinaRoutes(request.Context())
+			if engine != core.EngineShadowsocksRust {
+				content, err = serverconfig.RemoveMainlandAccessPolicy(engine, content, input.OriginalTag)
 				if err != nil {
-					writeError(w, http.StatusBadGateway, err.Error())
+					writeError(w, http.StatusBadRequest, err.Error())
 					return
 				}
-				if engine == core.EngineMihomo {
-					prefixes = nil
-				}
 			}
+		}
+		if input.Operation != "delete" && engine != core.EngineShadowsocksRust {
 			content, err = serverconfig.ApplyMainlandAccessPolicyWithPrefixes(engine, content, serverconfig.MainlandAccessPolicy{
 				Tag: input.Input.Tag, Port: input.Input.Port, Engine: engine,
 				BlockMainlandDestination: input.Input.BlockMainlandDestination,
 				BlockMainlandSource:      input.Input.BlockMainlandSource,
-			}, prefixes)
+			}, nil)
 			if err != nil {
 				writeError(w, http.StatusBadRequest, err.Error())
 				return
@@ -347,6 +368,30 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 	if err != nil {
 		writeStoreError(w, err)
 		return
+	}
+	if engine == core.EngineShadowsocksRust {
+		entries := serverconfig.DiscoverMainlandAccessPolicies(engine, saved.Content)
+		destination := false
+		for _, policy := range existingShadowsocksRustPolicies {
+			destination = destination || policy.BlockMainlandDestination
+		}
+		canonicalTag := input.Input.Tag
+		applySelection := input.Operation != "delete"
+		if applySelection && input.Operation != "add" {
+			destination = input.Input.BlockMainlandDestination
+			for _, entry := range entries {
+				if entry.Port == input.Input.Port && (entry.Tag == canonicalTag || len(entries) == 1) {
+					canonicalTag = entry.Tag
+					break
+				}
+			}
+		}
+		desired := reconcileShadowsocksRustPolicies(entries, existingShadowsocksRustPolicies, agent.ID, saved.Version,
+			destination, canonicalTag, input.Input.Port, input.Input.BlockMainlandSource, applySelection)
+		if err := s.store.ReplaceMainlandAccessPolicies(request.Context(), agent.ID, saved.Version, desired); err != nil {
+			writeStoreError(w, err)
+			return
+		}
 	}
 	s.refreshPortTrafficMonitoring(request.Context(), "")
 	task, ok := s.createConfigMutationTask(w, request, saved, input.Intent)
@@ -435,6 +480,10 @@ func (s *Server) saveConfigField(w http.ResponseWriter, request *http.Request) {
 		AgentID: agent.ID, Name: name, Description: input.Description, Engine: engine, Content: content,
 	}, input.ExpectedVersion)
 	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	if err := s.reconcileSavedShadowsocksRustPolicies(request.Context(), saved); err != nil {
 		writeStoreError(w, err)
 		return
 	}

@@ -20,22 +20,21 @@ const (
 	mainlandMihomoProviderTag     = "qch-chnroutes2-cn-ipv4"
 	mainlandMihomoIPv6ProviderTag = "qch-china-cn-ipv6"
 	mainlandSingBoxRuleSetTag     = "qch-chnroutes2-cn"
+	mainlandSingBoxIPv6RuleSetTag = "qch-china-cn-ipv6"
+	// sing-box expects rule-set files in its binary/source SRS formats. Use the
+	// daily-built chnroutes2 IPv4 and APNIC IPv6 source files instead of an inline
+	// CIDR array.
+	mainlandSingBoxRuleSetURL     = "https://raw.githubusercontent.com/Dreista/sing-box-rule-set-cn/rule-set/chnroutes.txt.json"
+	mainlandSingBoxIPv6RuleSetURL = "https://raw.githubusercontent.com/Dreista/sing-box-rule-set-cn/rule-set/apnic-cn-ipv6.json"
 )
 
-// MainlandAccessPolicy is intentionally scoped to one named inbound. The
-// policy is rendered into the proxy core configuration, never into a node-wide
-// firewall, so qagent and unrelated listening ports remain reachable.
-type MainlandAccessPolicy struct {
-	Tag                      string      `json:"tag"`
-	Port                     int         `json:"port"`
-	Kind                     string      `json:"kind"`
-	Engine                   core.Engine `json:"engine"`
-	BlockMainlandDestination bool        `json:"block_mainland_destination"`
-	BlockMainlandSource      bool        `json:"block_mainland_source"`
-}
+// MainlandAccessPolicy is intentionally scoped to one named inbound. Keep the
+// wire representation in core so Agents can apply out-of-config policies
+// for engines that do not expose routing hooks (such as Shadowsocks Rust).
+type MainlandAccessPolicy = core.MainlandAccessPolicy
 
 // DiscoverMainlandAccessPolicies returns only named inbounds that can be
-// safely targeted by the core's routing engine.
+// safely targeted by either the core or the Agent's engine-specific policy.
 func DiscoverMainlandAccessPolicies(engine core.Engine, content string) []MainlandAccessPolicy {
 	root := decodeTrafficConfiguration(engine, content)
 	if root == nil {
@@ -53,11 +52,26 @@ func DiscoverMainlandAccessPolicies(engine core.Engine, content string) []Mainla
 	case core.EngineSingBox:
 		entries, _ = root["inbounds"].([]any)
 		nameField, kindField, portField = "tag", "type", "listen_port"
+	case core.EngineShadowsocksRust:
+		// ssserver stores one service at the document root or several services
+		// under the official `servers`/`shadowsocks` arrays rather than exposing
+		// a routing-capable inbound list.
+		for _, input := range ParseAll(core.EngineShadowsocksRust, content) {
+			result := MainlandAccessPolicy{Tag: input.Tag, Port: input.Port, Kind: input.Protocol, Engine: engine}
+			// The durable ACL/firewall flags are merged by the API layer.
+			entries = append(entries, map[string]any{"__policy": result})
+		}
 	default:
 		return nil
 	}
 	result := make([]MainlandAccessPolicy, 0, len(entries))
 	for _, value := range entries {
+		if entry, ok := value.(map[string]any); ok {
+			if policyValue, ok := entry["__policy"].(MainlandAccessPolicy); ok {
+				result = append(result, policyValue)
+				continue
+			}
+		}
 		entry, _ := value.(map[string]any)
 		if entry == nil {
 			continue
@@ -82,12 +96,13 @@ func DiscoverMainlandAccessPolicies(engine core.Engine, content string) []Mainla
 	return result
 }
 
-// ApplyMainlandAccessPolicyWithPrefixes embeds validated mainland CIDRs in
-// cores that do not natively consume the upstream text feeds. It replaces
-// QControlHub-owned rules for exactly one inbound while retaining operator-
-// authored routing rules and their order.
+// ApplyMainlandAccessPolicyWithPrefixes applies a mainland policy to one
+// inbound. Mihomo keeps its upstream rule-provider files, Xray uses its
+// installed geoip.dat, sing-box uses remote rule-set files, and Shadowsocks Rust
+// leaves its native JSON untouched for an Agent-managed ACL/firewall policy. The
+// prefixes argument is retained for API compatibility and legacy callers.
 func ApplyMainlandAccessPolicyWithPrefixes(engine core.Engine, content string, policy MainlandAccessPolicy, prefixes []string) (string, error) {
-	if engine != core.EngineMihomo && engine != core.EngineXray && engine != core.EngineSingBox {
+	if engine != core.EngineMihomo && engine != core.EngineXray && engine != core.EngineSingBox && engine != core.EngineShadowsocksRust {
 		return "", errors.New("该内核暂不支持按入站限制大陆访问")
 	}
 	policy.Tag = strings.TrimSpace(policy.Tag)
@@ -97,10 +112,8 @@ func ApplyMainlandAccessPolicyWithPrefixes(engine core.Engine, content string, p
 	if policy.Port < 1 || policy.Port > 65535 {
 		return "", errors.New("监听端口必须在 1 到 65535 之间")
 	}
-	if engine != core.EngineMihomo && (policy.BlockMainlandDestination || policy.BlockMainlandSource) {
-		if err := validateChinaRoutePrefixes(prefixes); err != nil {
-			return "", err
-		}
+	if engine == core.EngineShadowsocksRust && policy.BlockMainlandDestination {
+		return "", errors.New("Shadowsocks Rust 仅支持按入站端口封禁大陆来源，目标限制请使用支持路由的内核")
 	}
 	root := decodeTrafficConfiguration(engine, content)
 	if root == nil {
@@ -117,6 +130,10 @@ func ApplyMainlandAccessPolicyWithPrefixes(engine core.Engine, content string, p
 		err = applyMainlandXray(root, policy.Tag, policy.BlockMainlandDestination, policy.BlockMainlandSource, prefixes)
 	case core.EngineSingBox:
 		err = applyMainlandSingBox(root, policy.Tag, policy.BlockMainlandDestination, policy.BlockMainlandSource, prefixes)
+	case core.EngineShadowsocksRust:
+		// ACL/firewall policy state is persisted separately by the API. The
+		// ssserver configuration must stay a native JSON document.
+		err = nil
 	}
 	if err != nil {
 		return "", err
@@ -327,10 +344,12 @@ func mainlandXrayRouting(tag string, destination, source bool) map[string]any {
 }
 
 func mainlandXrayRules(tag string, destination, source bool, prefixes []string) []any {
-	ipValues := stringAnySlice(prefixes)
-	if len(ipValues) == 0 {
-		ipValues = []any{"geoip:cn"}
-	}
+	// Xray resolves geoip:cn from its installed geoip.dat resource. Keeping
+	// the rule as a resource reference avoids embedding thousands of CIDRs in
+	// every generated configuration and follows Xray's native geodata path.
+	// prefixes is retained in the function signature for backwards-compatible
+	// callers and tests; it is intentionally ignored for Xray.
+	ipValues := []any{"geoip:cn"}
 	rules := make([]any, 0, 2)
 	if source {
 		rules = append(rules, map[string]any{
@@ -527,13 +546,13 @@ func mainlandSingBoxRules(tag string, destination, source bool) []any {
 	rules := make([]any, 0, 2)
 	if source {
 		rules = append(rules, map[string]any{
-			"inbound": []any{tag}, "rule_set": []any{mainlandSingBoxRuleSetTag},
+			"inbound": []any{tag}, "rule_set": []any{mainlandSingBoxRuleSetTag, mainlandSingBoxIPv6RuleSetTag},
 			"rule_set_ip_cidr_match_source": true, "action": "reject",
 		})
 	}
 	if destination {
 		rules = append(rules, map[string]any{
-			"inbound": []any{tag}, "rule_set": []any{mainlandSingBoxRuleSetTag}, "action": "reject",
+			"inbound": []any{tag}, "rule_set": []any{mainlandSingBoxRuleSetTag, mainlandSingBoxIPv6RuleSetTag}, "action": "reject",
 		})
 	}
 	return rules
@@ -564,7 +583,7 @@ func applyMainlandSingBox(root map[string]any, tag string, destination, source b
 	hadManagedRules := false
 	for _, value := range current {
 		rule, _ := value.(map[string]any)
-		if !stringSliceContains(rule["rule_set"], mainlandSingBoxRuleSetTag) {
+		if !stringSliceContains(rule["rule_set"], mainlandSingBoxRuleSetTag) && !stringSliceContains(rule["rule_set"], mainlandSingBoxIPv6RuleSetTag) {
 			continue
 		}
 		if !mainlandSingBoxManagedRule(rule) {
@@ -589,11 +608,11 @@ func applyMainlandSingBox(root map[string]any, tag string, destination, source b
 		}
 	}
 	ruleSets, _ := route["rule_set"].([]any)
-	filtered := make([]any, 0, len(ruleSets)+1)
-	foundManagedRuleSet := false
+	filtered := make([]any, 0, len(ruleSets)+2)
 	for _, value := range ruleSets {
 		ruleSet, _ := value.(map[string]any)
-		if stringValue(ruleSet["tag"]) != mainlandSingBoxRuleSetTag {
+		ruleSetTag := stringValue(ruleSet["tag"])
+		if ruleSetTag != mainlandSingBoxRuleSetTag && ruleSetTag != mainlandSingBoxIPv6RuleSetTag {
 			filtered = append(filtered, value)
 			continue
 		}
@@ -607,15 +626,9 @@ func applyMainlandSingBox(root map[string]any, tag string, destination, source b
 		if !mainlandSingBoxManagedRuleSet(ruleSet) {
 			return errors.New("配置中的 qch-chnroutes2-cn 规则集标签已被其他资源占用")
 		}
-		foundManagedRuleSet = true
-		if hasManagedRules && len(prefixes) == 0 {
-			filtered = append(filtered, value)
-		}
 	}
-	if hasManagedRules && len(prefixes) > 0 {
-		filtered = append(filtered, mainlandSingBoxRuleSet(prefixes))
-	} else if hasManagedRules && !foundManagedRuleSet {
-		return errors.New("Sing-box 大陆访问限制需要有效的 chnroutes2 路由表")
+	if hasManagedRules {
+		filtered = append(filtered, mainlandSingBoxRuleSets()...)
 	}
 	if len(filtered) == 0 {
 		delete(route, "rule_set")
@@ -634,7 +647,21 @@ func applyMainlandSingBox(root map[string]any, tag string, destination, source b
 }
 
 func mainlandSingBoxManagedRuleSet(ruleSet map[string]any) bool {
-	if len(ruleSet) != 3 || stringValue(ruleSet["type"]) != "inline" || stringValue(ruleSet["tag"]) != mainlandSingBoxRuleSetTag {
+	tag := stringValue(ruleSet["tag"])
+	if tag != mainlandSingBoxRuleSetTag && tag != mainlandSingBoxIPv6RuleSetTag {
+		return false
+	}
+	// sing-box consumes CN CIDRs through a downloaded rule-set file. Accept
+	// both the new remote binary form and the legacy inline form so an upgrade
+	// can remove the old representation safely.
+	if stringValue(ruleSet["type"]) == "remote" {
+		expectedURL := mainlandSingBoxRuleSetURL
+		if tag == mainlandSingBoxIPv6RuleSetTag {
+			expectedURL = mainlandSingBoxIPv6RuleSetURL
+		}
+		return stringValue(ruleSet["format"]) == "source" && stringValue(ruleSet["url"]) == expectedURL
+	}
+	if tag != mainlandSingBoxRuleSetTag || stringValue(ruleSet["type"]) != "inline" {
 		return false
 	}
 	rules, _ := ruleSet["rules"].([]any)
@@ -647,12 +674,12 @@ func mainlandSingBoxManagedRuleSet(ruleSet map[string]any) bool {
 
 func mainlandSingBoxSourceRule(rule map[string]any, tag string) bool {
 	return len(rule) == 4 && stringValue(rule["action"]) == "reject" && stringSliceEqual(rule["inbound"], tag) &&
-		stringSliceEqual(rule["rule_set"], mainlandSingBoxRuleSetTag) && boolValue(rule["rule_set_ip_cidr_match_source"])
+		mainlandSingBoxRuleSetReferences(rule["rule_set"]) && boolValue(rule["rule_set_ip_cidr_match_source"])
 }
 
 func mainlandSingBoxDestinationRule(rule map[string]any, tag string) bool {
 	return len(rule) == 3 && stringValue(rule["action"]) == "reject" && stringSliceEqual(rule["inbound"], tag) &&
-		stringSliceEqual(rule["rule_set"], mainlandSingBoxRuleSetTag) && !boolValue(rule["rule_set_ip_cidr_match_source"])
+		mainlandSingBoxRuleSetReferences(rule["rule_set"]) && !boolValue(rule["rule_set_ip_cidr_match_source"])
 }
 
 func mainlandSingBoxManagedRule(rule map[string]any) bool {
@@ -663,10 +690,15 @@ func mainlandSingBoxManagedRule(rule map[string]any) bool {
 	return mainlandSingBoxSourceRule(rule, inbounds[0]) || mainlandSingBoxDestinationRule(rule, inbounds[0])
 }
 
-func mainlandSingBoxRuleSet(prefixes []string) map[string]any {
-	return map[string]any{
-		"type": "inline", "tag": mainlandSingBoxRuleSetTag,
-		"rules": []any{map[string]any{"ip_cidr": stringAnySlice(prefixes)}},
+func mainlandSingBoxRuleSetReferences(value any) bool {
+	return stringSliceEqual(value, mainlandSingBoxRuleSetTag) ||
+		stringSliceEqual(value, mainlandSingBoxRuleSetTag, mainlandSingBoxIPv6RuleSetTag)
+}
+
+func mainlandSingBoxRuleSets() []any {
+	return []any{
+		map[string]any{"type": "remote", "tag": mainlandSingBoxRuleSetTag, "format": "source", "url": mainlandSingBoxRuleSetURL, "download_detour": "direct"},
+		map[string]any{"type": "remote", "tag": mainlandSingBoxIPv6RuleSetTag, "format": "source", "url": mainlandSingBoxIPv6RuleSetURL, "download_detour": "direct"},
 	}
 }
 
@@ -701,6 +733,19 @@ func stringAnySlice(values []string) []any {
 }
 
 func mainlandInboundExists(engine core.Engine, root map[string]any, tag string, port int) bool {
+	if engine == core.EngineShadowsocksRust {
+		entries := ParseAll(engine, mustMarshalJSON(root))
+		for _, input := range entries {
+			// The single-service ssserver JSON format has no tag field; its
+			// canonical synthetic tag is `ss-rust`. Accept the operator's
+			// generated tag when there is only one service and keep the durable
+			// firewall key stable by port.
+			if input.Port == port && (input.Tag == tag || len(entries) == 1) {
+				return true
+			}
+		}
+		return false
+	}
 	field, portField, values := "name", "port", root["listeners"]
 	if engine == core.EngineXray {
 		field, values = "tag", root["inbounds"]
@@ -715,6 +760,14 @@ func mainlandInboundExists(engine core.Engine, root map[string]any, tag string, 
 		}
 	}
 	return false
+}
+
+func mustMarshalJSON(root map[string]any) string {
+	value, err := json.Marshal(root)
+	if err != nil {
+		return ""
+	}
+	return string(value)
 }
 
 func marshalMainlandConfiguration(engine core.Engine, root map[string]any) (string, error) {

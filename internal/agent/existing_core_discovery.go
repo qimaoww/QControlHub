@@ -449,7 +449,7 @@ func managedCoreUnitLines(engine core.Engine, managed EngineSpec) []string {
 		execStart = managed.Binary + " run -c " + managed.ConfigPath
 	case core.EngineShadowsocksRust:
 		documentation = "https://github.com/shadowsocks/shadowsocks-rust"
-		execStart = managed.Binary + " -c " + managed.ConfigPath
+		execStart = managed.Binary + " -c " + managed.ConfigPath + " --acl " + shadowsocksRustACLPath
 		extraServiceLines = append(extraServiceLines, "Environment=RUST_LOG=info")
 	}
 	stateDirectory := "/var/lib/qcontrolhub-" + managedCoreAssetName(engine)
@@ -460,6 +460,10 @@ func managedCoreUnitLines(engine core.Engine, managed EngineSpec) []string {
 		"[Service]", "Type=simple", "User=qcontrolhub-core", "Group=qcontrolhub-core",
 		"WorkingDirectory=" + stateDirectory, "StateDirectory=qcontrolhub-" + managedCoreAssetName(engine),
 		"StateDirectoryMode=0750", "UMask=0027", "ExecStart=" + execStart,
+	}
+	if engine == core.EngineShadowsocksRust {
+		conditionIndex := 6
+		lines = append(lines[:conditionIndex+1], append([]string{"ConditionPathExists=" + shadowsocksRustACLPath}, lines[conditionIndex+1:]...)...)
 	}
 	lines = append(lines, extraServiceLines...)
 	lines = append(lines,
@@ -511,6 +515,32 @@ func validateManagedUnitFragment(contents []byte, engine core.Engine, managed En
 	}
 	if managedUnitLinesEqual(actual, legacy) {
 		return nil
+	}
+	if engine == core.EngineShadowsocksRust {
+		oldExecStart := "ExecStart=" + managed.Binary + " -c " + managed.ConfigPath
+		newExecStart := oldExecStart + " --acl " + shadowsocksRustACLPath
+		old := make([]string, 0, len(expected)-1)
+		for _, line := range expected {
+			if line == "ConditionPathExists="+shadowsocksRustACLPath {
+				continue
+			}
+			if line == newExecStart {
+				line = oldExecStart
+			}
+			old = append(old, line)
+		}
+		if managedUnitLinesEqual(actual, old) {
+			return nil
+		}
+		oldWithoutLegacyHardening := make([]string, 0, len(old)-len(legacyOmissions))
+		for _, line := range old {
+			if _, omitted := legacyOmissions[line]; !omitted {
+				oldWithoutLegacyHardening = append(oldWithoutLegacyHardening, line)
+			}
+		}
+		if managedUnitLinesEqual(actual, oldWithoutLegacyHardening) {
+			return nil
+		}
 	}
 	return errors.New("managed service unit contains an unknown, missing, duplicate, or unsupported historical directive")
 }
@@ -596,7 +626,8 @@ func supportedManagedExecStart(engine core.Engine, managed EngineSpec, executabl
 	case core.EngineSingBox:
 		return argv == managed.Binary+" run -c "+managed.ConfigPath
 	case core.EngineShadowsocksRust:
-		return argv == managed.Binary+" -c "+managed.ConfigPath
+		return argv == managed.Binary+" -c "+managed.ConfigPath ||
+			argv == managed.Binary+" -c "+managed.ConfigPath+" --acl "+shadowsocksRustACLPath
 	default:
 		return false
 	}

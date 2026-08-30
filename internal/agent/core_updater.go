@@ -140,12 +140,12 @@ func (updater *CoreUpdater) Install(ctx context.Context, engine core.Engine, spe
 	}
 	defer root.Close()
 	selectedAsset := release.Asset
-	tempName, versionOutput, verificationFailed, err := updater.stageCoreCandidate(ctx, engine, root, directory, release, selectedAsset)
+	tempName, xrayAssets, versionOutput, verificationFailed, err := updater.stageCoreCandidate(ctx, engine, root, directory, release, selectedAsset)
 	fallbackReason := ""
 	if err != nil && verificationFailed && release.FallbackAsset.Name != "" {
 		primaryErr := err
 		selectedAsset = release.FallbackAsset
-		tempName, versionOutput, _, err = updater.stageCoreCandidate(ctx, engine, root, directory, release, selectedAsset)
+		tempName, xrayAssets, versionOutput, _, err = updater.stageCoreCandidate(ctx, engine, root, directory, release, selectedAsset)
 		if err != nil {
 			return "", fmt.Errorf("default Mihomo binary failed version verification (%v); compatible fallback also failed: %w", primaryErr, err)
 		}
@@ -155,9 +155,28 @@ func (updater *CoreUpdater) Install(ctx context.Context, engine core.Engine, spe
 		return "", err
 	}
 	defer root.Remove(tempName)
+	for _, tempAsset := range xrayAssets {
+		defer root.Remove(tempAsset)
+	}
 	backup, err := replaceCoreBinary(root, filepath.Base(spec.Binary), tempName)
 	if err != nil {
 		return "", err
+	}
+	assetBackups := make(map[string]string, len(xrayAssets))
+	for _, name := range xrayMigrationAssetNames {
+		tempAsset, exists := xrayAssets[name]
+		if !exists {
+			continue
+		}
+		assetBackup, assetErr := replaceCoreAsset(root, name, tempAsset)
+		if assetErr != nil {
+			for installedName, installedBackup := range assetBackups {
+				_, _ = rollbackCoreBinary(root, installedName, installedBackup)
+			}
+			_, _ = rollbackCoreBinary(root, filepath.Base(spec.Binary), backup)
+			return "", fmt.Errorf("install Xray resource %s: %w", name, assetErr)
+		}
+		assetBackups[name] = assetBackup
 	}
 
 	restartOutput, restartErr := serviceCommandAndVerifyWithManager(ctx, manager, spec.Service, core.ActionRestart)
@@ -176,6 +195,11 @@ func (updater *CoreUpdater) Install(ctx context.Context, engine core.Engine, spe
 	}
 	if restartErr == nil {
 		return output, nil
+	}
+	for name, assetBackup := range assetBackups {
+		if _, assetRollbackErr := rollbackCoreBinary(root, name, assetBackup); assetRollbackErr != nil {
+			return output, fmt.Errorf("core restart failed (%v); roll back Xray resource %s: %w", restartErr, name, assetRollbackErr)
+		}
 	}
 	rollbackOutput, rollbackErr := rollbackCoreBinary(root, filepath.Base(spec.Binary), backup)
 	if rollbackOutput != "" {
@@ -210,16 +234,16 @@ func (updater *CoreUpdater) Install(ctx context.Context, engine core.Engine, spe
 	return output, fmt.Errorf("new core restart failed and the binary change was rolled back: %w", restartErr)
 }
 
-func (updater *CoreUpdater) stageCoreCandidate(ctx context.Context, engine core.Engine, root *os.Root, directory string, release resolvedCoreRelease, asset githubReleaseAsset) (tempName, versionOutput string, verificationFailed bool, err error) {
+func (updater *CoreUpdater) stageCoreCandidate(ctx context.Context, engine core.Engine, root *os.Root, directory string, release resolvedCoreRelease, asset githubReleaseAsset) (tempName string, xrayAssets map[string]string, versionOutput string, verificationFailed bool, err error) {
 	downloadPath, err := updater.downloadAsset(ctx, asset)
 	if err != nil {
-		return "", "", false, fmt.Errorf("download %s from %s: %w", asset.Name, release.Repository, err)
+		return "", nil, "", false, fmt.Errorf("download %s from %s: %w", asset.Name, release.Repository, err)
 	}
 	defer os.Remove(downloadPath)
 
 	tempName, err = randomCoreTempName(root)
 	if err != nil {
-		return "", "", false, err
+		return "", nil, "", false, err
 	}
 	succeeded := false
 	defer func() {
@@ -229,25 +253,38 @@ func (updater *CoreUpdater) stageCoreCandidate(ctx context.Context, engine core.
 	}()
 	temp, err := root.OpenFile(tempName, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o700)
 	if err != nil {
-		return "", "", false, fmt.Errorf("create core install candidate: %w", err)
+		return "", nil, "", false, fmt.Errorf("create core install candidate: %w", err)
 	}
 	if err := extractCoreBinary(engine, asset.Name, downloadPath, temp); err != nil {
 		temp.Close()
-		return "", "", false, err
+		return "", nil, "", false, err
 	}
 	if err := temp.Sync(); err != nil {
 		temp.Close()
-		return "", "", false, err
+		return "", nil, "", false, err
 	}
 	if err := temp.Close(); err != nil {
-		return "", "", false, err
+		return "", nil, "", false, err
+	}
+	if engine == core.EngineXray {
+		xrayAssets, err = stageXrayReleaseAssets(root, asset.Name, downloadPath)
+		if err != nil {
+			return "", nil, "", false, err
+		}
+		defer func() {
+			if !succeeded {
+				for _, name := range xrayAssets {
+					_ = root.Remove(name)
+				}
+			}
+		}()
 	}
 	versionOutput, err = verifyCoreCandidate(ctx, engine, filepath.Join(directory, tempName), release.Tag)
 	if err != nil {
-		return "", versionOutput, true, err
+		return "", nil, versionOutput, true, err
 	}
 	succeeded = true
-	return tempName, versionOutput, false, nil
+	return tempName, xrayAssets, versionOutput, false, nil
 }
 
 func stopServiceAfterFirstInstallRollback(service string, managers ...*ServiceManager) (string, error) {
@@ -838,6 +875,71 @@ func extractCoreBinary(engine core.Engine, assetName, archivePath string, output
 	return nil
 }
 
+func stageXrayReleaseAssets(root *os.Root, assetName, archivePath string) (map[string]string, error) {
+	archive, err := zip.OpenReader(archivePath)
+	if err != nil {
+		return nil, err
+	}
+	defer archive.Close()
+	result := make(map[string]string, len(xrayMigrationAssetNames))
+	succeeded := false
+	defer func() {
+		if !succeeded {
+			for _, name := range result {
+				_ = root.Remove(name)
+			}
+		}
+	}()
+	for _, expected := range xrayMigrationAssetNames {
+		var entry *zip.File
+		for _, candidate := range archive.File {
+			if candidate.Name == expected && candidate.Mode().IsRegular() && candidate.UncompressedSize64 <= maxReleaseAssetSize {
+				entry = candidate
+				break
+			}
+		}
+		if entry == nil {
+			return nil, fmt.Errorf("release asset %s does not contain Xray resource %s", assetName, expected)
+		}
+		tempName, err := randomCoreTempName(root)
+		if err != nil {
+			return nil, err
+		}
+		input, err := entry.Open()
+		if err != nil {
+			return nil, err
+		}
+		output, err := root.OpenFile(tempName, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err != nil {
+			input.Close()
+			return nil, err
+		}
+		written, copyErr := io.Copy(output, io.LimitReader(input, maxReleaseAssetSize+1))
+		syncErr := error(nil)
+		if copyErr == nil {
+			syncErr = output.Sync()
+		}
+		closeErr := output.Close()
+		input.Close()
+		if copyErr != nil || syncErr != nil || closeErr != nil || written < 1<<10 || written > maxReleaseAssetSize {
+			_ = root.Remove(tempName)
+			if copyErr != nil {
+				return nil, copyErr
+			}
+			if syncErr != nil {
+				return nil, syncErr
+			}
+			if closeErr != nil {
+				return nil, closeErr
+			}
+			return nil, fmt.Errorf("Xray resource %s size is outside the accepted range", expected)
+		}
+		result[expected] = tempName
+	}
+	succeeded = true
+	return result, nil
+}
+
 func verifyCoreCandidate(ctx context.Context, engine core.Engine, candidatePath, releaseTag string) (string, error) {
 	args := coreVersionArgs(engine)
 	output, err := run(ctx, candidatePath, args...)
@@ -870,7 +972,15 @@ func coreVersionArgs(engine core.Engine) []string {
 }
 
 func replaceCoreBinary(root *os.Root, destinationName, candidateName string) (string, error) {
-	metadata := fileMetadata{mode: 0o755}
+	return replaceCoreFile(root, destinationName, candidateName, 0o755)
+}
+
+func replaceCoreAsset(root *os.Root, destinationName, candidateName string) (string, error) {
+	return replaceCoreFile(root, destinationName, candidateName, 0o644)
+}
+
+func replaceCoreFile(root *os.Root, destinationName, candidateName string, defaultMode os.FileMode) (string, error) {
+	metadata := fileMetadata{mode: defaultMode}
 	var backupName string
 	if info, err := root.Lstat(destinationName); err == nil {
 		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() || info.Mode().Perm()&0o022 != 0 {
