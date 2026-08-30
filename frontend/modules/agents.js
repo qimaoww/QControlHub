@@ -664,7 +664,7 @@ export function installAgents(ctx) {
   const komariNetworkMarkup = (agent) => {
     const uuid = komariUUIDFor(agent);
     if (!uuid) return "";
-    return `<div class="node-card-komari-cycle" data-komari-link="${esc(agent.id)}"><small><b data-komari-traffic>本期读取中…</b><i data-komari-cycle>周期读取中…</i></small><progress data-komari-progress aria-label="Komari 月流量使用率" max="100" value="0"></progress></div>`;
+    return `<div class="node-card-komari-cycle" data-komari-link="${esc(agent.id)}"><small><b data-komari-traffic>读取中…</b><i data-komari-cycle>周期读取中…</i></small><progress data-komari-progress aria-label="Komari 月流量使用率" max="100" value="0"></progress></div>`;
   };
   const updateKomariDisplay = (root, link, error = "") => {
     const card = root?.querySelector?.("[data-komari-link]");
@@ -690,8 +690,8 @@ export function installAgents(ctx) {
     const resetDay = komariResetDay(server);
     if (traffic)
       traffic.textContent = limit > 0
-        ? `本期 ${usedAvailable ? bytes(used) : "—"} / ${bytes(limit)}`
-        : "本期不限流量";
+        ? `${usedAvailable ? bytes(used) : "—"} / ${bytes(limit)}`
+        : "不限流量";
     if (cycle)
       cycle.textContent = komariCycleRange(resetDay) || "周期日期未设置";
     if (progress) {

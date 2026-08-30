@@ -196,7 +196,10 @@ async function testAdminRuntime() {
     "Komari 流量没有融合进网络资源格",
   );
   assert.equal(komariInline.closest(".node-card-network") !== null, true);
-  assert.match(komariInline.querySelector("[data-komari-traffic]").textContent, /本期 4\.0 GB \/ 10\.0 GB/);
+  assert.equal(
+    komariInline.querySelector("[data-komari-traffic]").textContent,
+    "4.0 GB / 10.0 GB",
+  );
   assert.match(
     komariInline.querySelector("[data-komari-cycle]").textContent,
     /\d{1,2}\.\d{1,2}–\d{1,2}\.\d{1,2}/,
