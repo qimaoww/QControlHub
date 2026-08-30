@@ -57,6 +57,8 @@ const populatedAgents = [
       network_tx_bps: 645120,
       network_rx_bytes: 9878424781,
       network_tx_bytes: 4617089843,
+      public_ipv4: "8.8.8.8",
+      public_ipv4_source: "agent-config",
       collected_at: "2026-08-30T09:00:00Z",
     },
   },
@@ -109,6 +111,8 @@ window.fetch = async (input, options = {}) => {
     return json({ panel_name: "QControlHub Browser Smoke" });
   if (method === "GET" && path === "/agents")
     return json(mode === "empty" ? [] : testAPI.agents);
+  if (method === "GET" && path === "/agents/alpha/region")
+    return json({ ip: "8.8.8.8", country_code: "TW", country: "Taiwan" });
   if (method === "GET" && path === "/agents/alpha/komari")
     return json({
       uuid: "komari-alpha",
@@ -211,6 +215,11 @@ async function testAdminRuntime() {
     /\d{1,2}\.\d{1,2}–\d{1,2}\.\d{1,2}/,
   );
   assert.equal(Number(komariInline.querySelector("[data-komari-progress]").value), 40);
+  const alphaAvatar = document.querySelector('[data-agent-node="alpha"] [data-region-avatar]');
+  assert.equal(alphaAvatar.textContent, "🇨🇳");
+  assert.equal(alphaAvatar.classList.contains("has-region"), true);
+  assert.equal(alphaAvatar.title, "中国台湾 (TW)");
+  assert.equal(alphaAvatar.getAttribute("aria-label"), "中国台湾");
   assert.equal(document.querySelector(".node-card-komari"), null, "Komari 不应再渲染为独立卡片");
   assert.ok(
     komariInline.closest(".node-card-network").querySelector("[data-metric-text=download-rate]"),

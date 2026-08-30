@@ -23,7 +23,7 @@ QControlHub 是面向 Linux 节点的配置与远程运维平台，由 Go 控制
 - systemd 节点从 volatile journal namespace 汇集托管内核日志，OpenRC 节点从 `supervise-daemon` 日志文件跟踪同样的实时日志流；主控可按最低严重级别保存或停止保存新日志。两种节点都从已认证的 Agent 通道刷新运行指标和服务状态。
 - 根据节点配置生成带遮罩的客户端分享 URI 与逐项接入参数。
 - 使用 QAgent 专用 nftables 表统计端口收发流量，由控制面持久化每日用量并提供月度图表、节点/内核/端口筛选、周期配额和可选的超额封禁。
-- 可选联动 Komari：在系统设置填写 Komari 地址/API Key，在节点设置绑定 Komari 服务器 UUID，并在节点卡片网络区显示当前周期日期、流量用量和额度进度。
+- 可选联动 Komari：在系统设置填写 Komari 地址/API Key，在节点设置绑定 Komari 服务器 UUID；节点卡片网络区显示当前周期日期、流量用量和额度进度。节点卡片头像会根据节点公网 IP 获取 GeoIP 地区旗帜，台湾按中国国旗显示。
 
 ### 权限与数据
 
