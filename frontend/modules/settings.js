@@ -33,7 +33,7 @@ export function installSettings(ctx) {
           ${field("panel_description", "面板说明", `<input name="panel_description" value="${esc(item.panel_description)}" maxlength="120" ${disabled}>`)}
           ${select(item, "time_zone", "时间区域", [["browser", "跟随浏览器"], ["Asia/Shanghai", "Asia/Shanghai"], ["UTC", "UTC"]], disabled)}
           ${select(item, "time_display", "时间显示", [["absolute-relative", "绝对时间 + 相对时间"], ["absolute", "仅绝对时间"]], disabled)}
-          ${select(item, "ui_font_scale", "界面字号", [[90, "小 · 90%"], [100, "中 · 100%"], [110, "大 · 110%"]], disabled, "所有页面统一缩放；保存后立即生效")}
+          ${select(item, "ui_font_scale", "界面字号", [[90, "小 · 90%"], [100, "正常 · 100%"], [110, "大 · 110%"]], disabled, "所有页面统一缩放；保存后立即生效")}
           ${select(item, "task_page_size", "任务默认显示数量", [[50, "50 条"], [100, "100 条"], [500, "500 条"]], disabled)}
           ${select(item, "default_config_editor", "配置编辑器默认模式", [["structured", "结构化表单"], ["source", "源文件"]], disabled)}
         </div>`)}
