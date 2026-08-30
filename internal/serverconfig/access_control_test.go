@@ -1,6 +1,7 @@
 package serverconfig
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -26,6 +27,7 @@ func TestMainlandAccessPoliciesApplyPerInboundAndPreserveUnrelatedRules(t *testi
 				t.Fatal(err)
 			}
 			content = addUnrelatedMainlandTestRule(t, engine, content)
+			original := decodeTrafficConfiguration(engine, content)
 			updated, err := ApplyMainlandAccessPolicyWithPrefixes(engine, content, MainlandAccessPolicy{
 				Tag: input.Tag, Port: input.Port, Engine: engine,
 				BlockMainlandDestination: true, BlockMainlandSource: true,
@@ -50,6 +52,10 @@ func TestMainlandAccessPoliciesApplyPerInboundAndPreserveUnrelatedRules(t *testi
 			}
 			if !strings.Contains(updated, "example.org") {
 				t.Fatalf("%s disable discarded an unrelated routing rule:\n%s", engine, updated)
+			}
+			restored := decodeTrafficConfiguration(engine, updated)
+			if !reflect.DeepEqual(restored, original) {
+				t.Fatalf("%s disable did not restore the original configuration\noriginal: %#v\nrestored: %#v", engine, original, restored)
 			}
 		})
 	}
@@ -102,6 +108,7 @@ func TestMainlandAccessPoliciesRemainIndependentAcrossInboundPorts(t *testing.T)
 			if err != nil {
 				t.Fatal(err)
 			}
+			original := decodeTrafficConfiguration(engine, content)
 			content, err = ApplyMainlandAccessPolicyWithPrefixes(engine, content, MainlandAccessPolicy{
 				Tag: first.Tag, Port: first.Port, BlockMainlandDestination: true,
 			}, prefixes)
@@ -137,6 +144,15 @@ func TestMainlandAccessPoliciesRemainIndependentAcrossInboundPorts(t *testing.T)
 			if byTag[first.Tag].BlockMainlandDestination || !byTag[second.Tag].BlockMainlandSource {
 				t.Fatalf("disabling first policy changed another %s inbound: %+v", engine, policies)
 			}
+			content, err = ApplyMainlandAccessPolicyWithPrefixes(engine, content, MainlandAccessPolicy{
+				Tag: second.Tag, Port: second.Port,
+			}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if restored := decodeTrafficConfiguration(engine, content); !reflect.DeepEqual(restored, original) {
+				t.Fatalf("%s did not restore shared resources after the last port was disabled\noriginal: %#v\nrestored: %#v", engine, original, restored)
+			}
 		})
 	}
 }
@@ -171,7 +187,7 @@ func TestXHTTPPlansBlockMainlandDestinationByDefault(t *testing.T) {
 func TestMainlandAccessPolicyDoesNotClaimReservedResourcesWithoutOwnedRules(t *testing.T) {
 	t.Parallel()
 	prefixes := []string{"1.1.8.0/24", "240e::/16"}
-	for _, engine := range []core.Engine{core.EngineXray, core.EngineSingBox} {
+	for _, engine := range []core.Engine{core.EngineMihomo, core.EngineXray, core.EngineSingBox} {
 		engine := engine
 		t.Run(string(engine), func(t *testing.T) {
 			t.Parallel()
@@ -186,6 +202,13 @@ func TestMainlandAccessPolicyDoesNotClaimReservedResourcesWithoutOwnedRules(t *t
 			}
 			root := decodeTrafficConfiguration(engine, content)
 			switch engine {
+			case core.EngineMihomo:
+				root["rule-providers"] = map[string]any{
+					mainlandMihomoProviderTag: map[string]any{
+						"type": "http", "behavior": "ipcidr", "format": "text", "url": ChinaRoutesURL,
+						"path": "./ruleset/qch-chnroutes2-cn.txt", "interval": 3600,
+					},
+				}
 			case core.EngineXray:
 				outbounds, _ := root["outbounds"].([]any)
 				root["outbounds"] = append(outbounds, map[string]any{
@@ -207,7 +230,7 @@ func TestMainlandAccessPolicyDoesNotClaimReservedResourcesWithoutOwnedRules(t *t
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !strings.Contains(preserved, mainlandXrayBlockTag) && !strings.Contains(preserved, mainlandSingBoxRuleSetTag) {
+			if !strings.Contains(preserved, mainlandMihomoProviderTag) && !strings.Contains(preserved, mainlandXrayBlockTag) && !strings.Contains(preserved, mainlandSingBoxRuleSetTag) {
 				t.Fatalf("%s removed an unowned reserved resource:\n%s", engine, preserved)
 			}
 			_, err = ApplyMainlandAccessPolicyWithPrefixes(engine, content, MainlandAccessPolicy{
@@ -218,6 +241,146 @@ func TestMainlandAccessPolicyDoesNotClaimReservedResourcesWithoutOwnedRules(t *t
 			}
 		})
 	}
+}
+
+func TestXrayMainlandDestinationRestoresOwnedDomainStrategy(t *testing.T) {
+	t.Parallel()
+	protocol, _ := FindProtocol(core.EngineXray, ProtocolVLESS)
+	input, err := NewPlan(protocol)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content, err := Generate(core.EngineXray, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content, err = ApplyMainlandAccessPolicyWithPrefixes(core.EngineXray, content, MainlandAccessPolicy{
+		Tag: input.Tag, Port: input.Port, BlockMainlandDestination: true,
+	}, []string{"1.1.8.0/24", "240e::/16"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := decodeTrafficConfiguration(core.EngineXray, content)
+	routing := mapValue(root["routing"])
+	if stringValue(routing["domainStrategy"]) != "IPIfNonMatch" || !xrayHasStrategyMarker(routing) {
+		t.Fatalf("enabled routing did not record the owned strategy: %+v", routing)
+	}
+	content, err = ApplyMainlandAccessPolicyWithPrefixes(core.EngineXray, content, MainlandAccessPolicy{
+		Tag: input.Tag, Port: input.Port,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root = decodeTrafficConfiguration(core.EngineXray, content)
+	routing = mapValue(root["routing"])
+	if routing != nil && (routing["domainStrategy"] != nil || xrayHasStrategyMarker(routing)) {
+		t.Fatalf("disable retained QControlHub-owned routing state: %+v", routing)
+	}
+}
+
+func TestXrayMainlandDestinationPreservesOperatorDomainStrategy(t *testing.T) {
+	t.Parallel()
+	protocol, _ := FindProtocol(core.EngineXray, ProtocolVLESS)
+	input, err := NewPlan(protocol)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content, err := Generate(core.EngineXray, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := decodeTrafficConfiguration(core.EngineXray, content)
+	root["routing"] = map[string]any{
+		"domainStrategy": "AsIs",
+		"rules":          []any{map[string]any{"type": "field", "domain": []any{"full:example.org"}, "outboundTag": "direct"}},
+	}
+	content, err = marshalMainlandConfiguration(core.EngineXray, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content, err = ApplyMainlandAccessPolicyWithPrefixes(core.EngineXray, content, MainlandAccessPolicy{
+		Tag: input.Tag, Port: input.Port, BlockMainlandDestination: true,
+	}, []string{"1.1.8.0/24", "240e::/16"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	content, err = ApplyMainlandAccessPolicyWithPrefixes(core.EngineXray, content, MainlandAccessPolicy{
+		Tag: input.Tag, Port: input.Port,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root = decodeTrafficConfiguration(core.EngineXray, content)
+	routing := mapValue(root["routing"])
+	if stringValue(routing["domainStrategy"]) != "AsIs" || xrayHasStrategyMarker(routing) || !strings.Contains(content, "example.org") {
+		t.Fatalf("operator routing state was not preserved: %+v", routing)
+	}
+}
+
+func TestXrayMainlandSourceDoesNotChangeDomainStrategy(t *testing.T) {
+	t.Parallel()
+	protocol, _ := FindProtocol(core.EngineXray, ProtocolVLESS)
+	input, err := NewPlan(protocol)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input.BlockMainlandSource = true
+	content, err := Generate(core.EngineXray, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := decodeTrafficConfiguration(core.EngineXray, content)
+	routing := mapValue(root["routing"])
+	if routing == nil || routing["domainStrategy"] != nil || xrayHasStrategyMarker(routing) {
+		t.Fatalf("source-only policy changed domain strategy: %+v", routing)
+	}
+}
+
+func TestXrayMainlandDestinationPreservesLaterOperatorStrategyChange(t *testing.T) {
+	t.Parallel()
+	protocol, _ := FindProtocol(core.EngineXray, ProtocolVLESS)
+	input, err := NewPlan(protocol)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content, err := Generate(core.EngineXray, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content, err = ApplyMainlandAccessPolicyWithPrefixes(core.EngineXray, content, MainlandAccessPolicy{
+		Tag: input.Tag, Port: input.Port, BlockMainlandDestination: true,
+	}, []string{"1.1.8.0/24", "240e::/16"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := decodeTrafficConfiguration(core.EngineXray, content)
+	mapValue(root["routing"])["domainStrategy"] = "AsIs"
+	content, err = marshalMainlandConfiguration(core.EngineXray, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content, err = ApplyMainlandAccessPolicyWithPrefixes(core.EngineXray, content, MainlandAccessPolicy{
+		Tag: input.Tag, Port: input.Port,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root = decodeTrafficConfiguration(core.EngineXray, content)
+	routing := mapValue(root["routing"])
+	if stringValue(routing["domainStrategy"]) != "AsIs" || xrayHasStrategyMarker(routing) {
+		t.Fatalf("later operator strategy change was not preserved: %+v", routing)
+	}
+}
+
+func xrayHasStrategyMarker(routing map[string]any) bool {
+	rules, _ := routing["rules"].([]any)
+	for _, value := range rules {
+		rule, _ := value.(map[string]any)
+		if stringValue(rule["ruleTag"]) == mainlandXrayStrategyMarkerTag {
+			return true
+		}
+	}
+	return false
 }
 
 func addUnrelatedMainlandTestRule(t *testing.T, engine core.Engine, content string) string {

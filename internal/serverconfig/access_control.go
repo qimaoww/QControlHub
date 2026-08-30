@@ -15,6 +15,8 @@ const (
 	mainlandXrayBlockTag          = "qch-mainland-block"
 	mainlandXrayDestinationPrefix = "qch-mainland-destination:"
 	mainlandXraySourcePrefix      = "qch-mainland-source:"
+	mainlandXrayStrategyMarkerTag = "qch-mainland-domain-strategy"
+	mainlandXrayNeverDomain       = "regexp:^$"
 	mainlandMihomoProviderTag     = "qch-chnroutes2-cn-ipv4"
 	mainlandMihomoIPv6ProviderTag = "qch-china-cn-ipv6"
 	mainlandSingBoxRuleSetTag     = "qch-chnroutes2-cn"
@@ -197,6 +199,49 @@ func mainlandMihomoFlags(root map[string]any, tag string) (bool, bool) {
 func applyMainlandMihomo(root map[string]any, tag string, destination, source bool) error {
 	destinationRule, sourceRule := mainlandMihomoDestinationRule(tag), mainlandMihomoSourceRule(tag)
 	current := stringSliceValue(root["rules"])
+	hadManagedRules := false
+	hasForeignProviderReference := false
+	for _, rule := range current {
+		if mainlandMihomoManagedRule(rule) {
+			hadManagedRules = true
+			continue
+		}
+		if mainlandMihomoProviderReferenced(rule) {
+			hasForeignProviderReference = true
+		}
+	}
+	providers := mapValue(root["rule-providers"])
+	if providers == nil {
+		providers = map[string]any{}
+	}
+	_, hasIPv4Provider := providers[mainlandMihomoProviderTag]
+	_, hasIPv6Provider := providers[mainlandMihomoIPv6ProviderTag]
+	hasReservedProvider := hasIPv4Provider || hasIPv6Provider
+	if !hadManagedRules && !destination && !source {
+		// No canonical QControlHub rule proves ownership of the reserved
+		// providers. A disabled policy therefore leaves them untouched.
+		return nil
+	}
+	if !hadManagedRules && (hasReservedProvider || hasForeignProviderReference) {
+		return errors.New("配置中的大陆路由规则集标签已被其他资源占用")
+	}
+	if hadManagedRules && hasForeignProviderReference {
+		return errors.New("配置中的大陆路由规则集已被其他规则引用")
+	}
+	if hadManagedRules {
+		if value, exists := providers[mainlandMihomoProviderTag]; exists {
+			existing := mapValue(value)
+			if existing == nil || !mainlandMihomoManagedProvider(existing) {
+				return errors.New("配置中的 qch-chnroutes2-cn 规则集标签已被其他资源占用")
+			}
+		}
+		if value, exists := providers[mainlandMihomoIPv6ProviderTag]; exists {
+			existing := mapValue(value)
+			if existing == nil || !mainlandMihomoManagedIPv6Provider(existing) {
+				return errors.New("配置中的 qch-china-cn-ipv6 规则集标签已被其他资源占用")
+			}
+		}
+	}
 	rules := mainlandMihomoRules(tag, destination, source)
 	for _, rule := range current {
 		trimmed := strings.TrimSpace(rule)
@@ -204,23 +249,17 @@ func applyMainlandMihomo(root map[string]any, tag string, destination, source bo
 			rules = append(rules, rule)
 		}
 	}
-	root["rules"] = rules
-	providers := mapValue(root["rule-providers"])
-	if providers == nil {
-		providers = map[string]any{}
-	}
 	hasManagedRules := false
 	for _, rule := range rules {
-		if strings.Contains(rule, "RULE-SET,"+mainlandMihomoProviderTag) || strings.Contains(rule, "RULE-SET,"+mainlandMihomoIPv6ProviderTag) {
+		if mainlandMihomoManagedRule(rule) {
 			hasManagedRules = true
 			break
 		}
 	}
-	if existing := mapValue(providers[mainlandMihomoProviderTag]); existing != nil && !mainlandMihomoManagedProvider(existing) {
-		return errors.New("配置中的 qch-chnroutes2-cn 规则集标签已被其他资源占用")
-	}
-	if existing := mapValue(providers[mainlandMihomoIPv6ProviderTag]); existing != nil && !mainlandMihomoManagedIPv6Provider(existing) {
-		return errors.New("配置中的 qch-china-cn-ipv6 规则集标签已被其他资源占用")
+	if len(rules) == 0 {
+		delete(root, "rules")
+	} else {
+		root["rules"] = rules
 	}
 	if hasManagedRules {
 		providers[mainlandMihomoProviderTag] = map[string]any{
@@ -243,14 +282,36 @@ func applyMainlandMihomo(root map[string]any, tag string, destination, source bo
 	return nil
 }
 
+func mainlandMihomoManagedRule(rule string) bool {
+	trimmed := strings.TrimSpace(rule)
+	const prefix = "AND,((IN-NAME,"
+	if !strings.HasPrefix(trimmed, prefix) {
+		return false
+	}
+	rest := strings.TrimPrefix(trimmed, prefix)
+	separator := strings.Index(rest, "),")
+	if separator <= 0 {
+		return false
+	}
+	tag := rest[:separator]
+	return tagPattern.MatchString(tag) && (trimmed == mainlandMihomoDestinationRule(tag) || trimmed == mainlandMihomoSourceRule(tag))
+}
+
+func mainlandMihomoProviderReferenced(rule string) bool {
+	return strings.Contains(rule, "RULE-SET,"+mainlandMihomoProviderTag) ||
+		strings.Contains(rule, "RULE-SET,"+mainlandMihomoIPv6ProviderTag)
+}
+
 func mainlandMihomoManagedIPv6Provider(provider map[string]any) bool {
-	return stringValue(provider["type"]) == "http" && stringValue(provider["behavior"]) == "ipcidr" &&
-		stringValue(provider["format"]) == "text" && stringValue(provider["url"]) == ChinaRoutesIPv6URL
+	return len(provider) == 6 && stringValue(provider["type"]) == "http" && stringValue(provider["behavior"]) == "ipcidr" &&
+		stringValue(provider["format"]) == "text" && stringValue(provider["url"]) == ChinaRoutesIPv6URL &&
+		stringValue(provider["path"]) == "./ruleset/qch-china-cn-ipv6.txt" && intValue(provider["interval"]) == 86400
 }
 
 func mainlandMihomoManagedProvider(provider map[string]any) bool {
-	return stringValue(provider["type"]) == "http" && stringValue(provider["behavior"]) == "ipcidr" &&
-		stringValue(provider["format"]) == "text" && stringValue(provider["url"]) == ChinaRoutesURL
+	return len(provider) == 6 && stringValue(provider["type"]) == "http" && stringValue(provider["behavior"]) == "ipcidr" &&
+		stringValue(provider["format"]) == "text" && stringValue(provider["url"]) == ChinaRoutesURL &&
+		stringValue(provider["path"]) == "./ruleset/qch-chnroutes2-cn.txt" && intValue(provider["interval"]) == 3600
 }
 
 func mainlandXrayRouting(tag string, destination, source bool) map[string]any {
@@ -258,7 +319,11 @@ func mainlandXrayRouting(tag string, destination, source bool) map[string]any {
 	if len(rules) == 0 {
 		return nil
 	}
-	return map[string]any{"domainStrategy": "IPIfNonMatch", "rules": rules}
+	if destination {
+		rules = append(rules, mainlandXrayStrategyMarker())
+		return map[string]any{"domainStrategy": "IPIfNonMatch", "rules": rules}
+	}
+	return map[string]any{"rules": rules}
 }
 
 func mainlandXrayRules(tag string, destination, source bool, prefixes []string) []any {
@@ -305,9 +370,17 @@ func applyMainlandXray(root map[string]any, tag string, destination, source bool
 	}
 	current, _ := routing["rules"].([]any)
 	hadManagedRules := false
+	strategyOwned := false
 	for _, value := range current {
 		rule, _ := value.(map[string]any)
 		ruleTag := stringValue(rule["ruleTag"])
+		if ruleTag == mainlandXrayStrategyMarkerTag {
+			if !mainlandXrayManagedStrategyMarker(rule) {
+				return errors.New("配置中的大陆访问域名解析标记已被其他规则占用")
+			}
+			strategyOwned = true
+			continue
+		}
 		var managed bool
 		switch {
 		case strings.HasPrefix(ruleTag, mainlandXrayDestinationPrefix):
@@ -329,6 +402,9 @@ func applyMainlandXray(root map[string]any, tag string, destination, source bool
 	for _, value := range current {
 		rule, _ := value.(map[string]any)
 		ruleTag := stringValue(rule["ruleTag"])
+		if ruleTag == mainlandXrayStrategyMarkerTag {
+			continue
+		}
 		if ruleTag == mainlandXrayDestinationPrefix+tag {
 			if !mainlandXrayManagedRule(rule, tag, false) {
 				return errors.New("配置中的大陆目标限制规则标签已被其他规则占用")
@@ -343,11 +419,37 @@ func applyMainlandXray(root map[string]any, tag string, destination, source bool
 		}
 		rules = append(rules, value)
 	}
-	routing["rules"] = rules
-	if destination && strings.TrimSpace(stringValue(routing["domainStrategy"])) == "" {
-		routing["domainStrategy"] = "IPIfNonMatch"
+	hasDestinationRules := false
+	for _, value := range rules {
+		rule, _ := value.(map[string]any)
+		if strings.HasPrefix(stringValue(rule["ruleTag"]), mainlandXrayDestinationPrefix) {
+			hasDestinationRules = true
+			break
+		}
 	}
-	if len(rules) == 0 && len(routing) == 1 {
+	strategy := strings.TrimSpace(stringValue(routing["domainStrategy"]))
+	keepStrategyMarker := false
+	if hasDestinationRules {
+		if strategyOwned {
+			// Keep ownership only while the value still equals what QControlHub
+			// wrote. If an operator changed it, their value wins.
+			keepStrategyMarker = strategy == "IPIfNonMatch"
+		} else if strategy == "" {
+			routing["domainStrategy"] = "IPIfNonMatch"
+			keepStrategyMarker = true
+		}
+	} else if strategyOwned && strategy == "IPIfNonMatch" {
+		delete(routing, "domainStrategy")
+	}
+	routing["rules"] = rules
+	if keepStrategyMarker {
+		routing["rules"] = append([]any{mainlandXrayStrategyMarker()}, rules...)
+	}
+	finalRules, _ := routing["rules"].([]any)
+	if len(finalRules) == 0 {
+		delete(routing, "rules")
+	}
+	if len(routing) == 0 {
 		delete(root, "routing")
 	} else {
 		root["routing"] = routing
@@ -371,14 +473,14 @@ func applyMainlandXray(root map[string]any, tag string, destination, source bool
 			filtered = append(filtered, value)
 			continue
 		}
-		if !hadManagedRules {
+		if !hadManagedRules && !strategyOwned {
 			if hasManagedRules {
 				return errors.New("配置中的 qch-mainland-block 出站标签已被其他出站占用")
 			}
 			filtered = append(filtered, value)
 			continue
 		}
-		if stringValue(outbound["protocol"]) != "blackhole" {
+		if !mainlandXrayManagedOutbound(outbound) {
 			return errors.New("配置中的 qch-mainland-block 出站标签已被其他协议占用")
 		}
 		foundManagedOutbound = true
@@ -393,8 +495,13 @@ func applyMainlandXray(root map[string]any, tag string, destination, source bool
 	return nil
 }
 
+func mainlandXrayManagedOutbound(outbound map[string]any) bool {
+	return len(outbound) == 2 && stringValue(outbound["protocol"]) == "blackhole" &&
+		stringValue(outbound["tag"]) == mainlandXrayBlockTag
+}
+
 func mainlandXrayManagedRule(rule map[string]any, tag string, source bool) bool {
-	if stringValue(rule["type"]) != "field" || stringValue(rule["outboundTag"]) != mainlandXrayBlockTag ||
+	if !tagPattern.MatchString(tag) || len(rule) != 5 || stringValue(rule["type"]) != "field" || stringValue(rule["outboundTag"]) != mainlandXrayBlockTag ||
 		!stringSliceEqual(rule["inboundTag"], tag) {
 		return false
 	}
@@ -402,6 +509,18 @@ func mainlandXrayManagedRule(rule map[string]any, tag string, source bool) bool 
 		return len(stringSliceValue(rule["source"])) > 0 && len(stringSliceValue(rule["ip"])) == 0
 	}
 	return len(stringSliceValue(rule["ip"])) > 0 && len(stringSliceValue(rule["source"])) == 0
+}
+
+func mainlandXrayStrategyMarker() map[string]any {
+	return map[string]any{
+		"type": "field", "ruleTag": mainlandXrayStrategyMarkerTag,
+		"domain": []any{mainlandXrayNeverDomain}, "outboundTag": mainlandXrayBlockTag,
+	}
+}
+
+func mainlandXrayManagedStrategyMarker(rule map[string]any) bool {
+	return len(rule) == 4 && stringValue(rule["type"]) == "field" && stringValue(rule["outboundTag"]) == mainlandXrayBlockTag &&
+		stringSliceEqual(rule["domain"], mainlandXrayNeverDomain)
 }
 
 func mainlandSingBoxRules(tag string, destination, source bool) []any {
@@ -445,10 +564,10 @@ func applyMainlandSingBox(root map[string]any, tag string, destination, source b
 	hadManagedRules := false
 	for _, value := range current {
 		rule, _ := value.(map[string]any)
-		if !stringSliceEqual(rule["rule_set"], mainlandSingBoxRuleSetTag) {
+		if !stringSliceContains(rule["rule_set"], mainlandSingBoxRuleSetTag) {
 			continue
 		}
-		if !mainlandSingBoxManagedRule(rule) || len(stringSliceValue(rule["inbound"])) != 1 {
+		if !mainlandSingBoxManagedRule(rule) {
 			return errors.New("配置中的 qch-chnroutes2-cn 规则集已被其他路由规则引用")
 		}
 		hadManagedRules = true
@@ -498,8 +617,15 @@ func applyMainlandSingBox(root map[string]any, tag string, destination, source b
 	} else if hasManagedRules && !foundManagedRuleSet {
 		return errors.New("Sing-box 大陆访问限制需要有效的 chnroutes2 路由表")
 	}
-	route["rule_set"] = filtered
-	if len(rules) == 0 && len(filtered) == 0 && len(route) == 2 {
+	if len(filtered) == 0 {
+		delete(route, "rule_set")
+	} else {
+		route["rule_set"] = filtered
+	}
+	if len(rules) == 0 {
+		delete(route, "rules")
+	}
+	if len(route) == 0 {
 		delete(root, "route")
 	} else {
 		root["route"] = route
@@ -508,7 +634,7 @@ func applyMainlandSingBox(root map[string]any, tag string, destination, source b
 }
 
 func mainlandSingBoxManagedRuleSet(ruleSet map[string]any) bool {
-	if stringValue(ruleSet["type"]) != "inline" {
+	if len(ruleSet) != 3 || stringValue(ruleSet["type"]) != "inline" || stringValue(ruleSet["tag"]) != mainlandSingBoxRuleSetTag {
 		return false
 	}
 	rules, _ := ruleSet["rules"].([]any)
@@ -516,21 +642,25 @@ func mainlandSingBoxManagedRuleSet(ruleSet map[string]any) bool {
 		return false
 	}
 	rule, _ := rules[0].(map[string]any)
-	return rule != nil && len(stringSliceValue(rule["ip_cidr"])) > 0
+	return rule != nil && len(rule) == 1 && len(stringSliceValue(rule["ip_cidr"])) > 0
 }
 
 func mainlandSingBoxSourceRule(rule map[string]any, tag string) bool {
-	return stringValue(rule["action"]) == "reject" && stringSliceEqual(rule["inbound"], tag) &&
+	return len(rule) == 4 && stringValue(rule["action"]) == "reject" && stringSliceEqual(rule["inbound"], tag) &&
 		stringSliceEqual(rule["rule_set"], mainlandSingBoxRuleSetTag) && boolValue(rule["rule_set_ip_cidr_match_source"])
 }
 
 func mainlandSingBoxDestinationRule(rule map[string]any, tag string) bool {
-	return stringValue(rule["action"]) == "reject" && stringSliceEqual(rule["inbound"], tag) &&
+	return len(rule) == 3 && stringValue(rule["action"]) == "reject" && stringSliceEqual(rule["inbound"], tag) &&
 		stringSliceEqual(rule["rule_set"], mainlandSingBoxRuleSetTag) && !boolValue(rule["rule_set_ip_cidr_match_source"])
 }
 
 func mainlandSingBoxManagedRule(rule map[string]any) bool {
-	return stringValue(rule["action"]) == "reject" && stringSliceEqual(rule["rule_set"], mainlandSingBoxRuleSetTag)
+	inbounds := stringSliceValue(rule["inbound"])
+	if len(inbounds) != 1 || !tagPattern.MatchString(inbounds[0]) {
+		return false
+	}
+	return mainlandSingBoxSourceRule(rule, inbounds[0]) || mainlandSingBoxDestinationRule(rule, inbounds[0])
 }
 
 func mainlandSingBoxRuleSet(prefixes []string) map[string]any {
@@ -551,6 +681,15 @@ func stringSliceEqual(value any, expected ...string) bool {
 		}
 	}
 	return true
+}
+
+func stringSliceContains(value any, expected string) bool {
+	for _, actual := range stringSliceValue(value) {
+		if actual == expected {
+			return true
+		}
+	}
+	return false
 }
 
 func stringAnySlice(values []string) []any {
