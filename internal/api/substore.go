@@ -524,6 +524,150 @@ func (s *Server) importSubStoreRemoteTarget(w http.ResponseWriter, request *http
 	writeJSON(w, http.StatusCreated, target)
 }
 
+func (s *Server) linkSubStoreRemoteTarget(w http.ResponseWriter, request *http.Request) {
+	var input subStoreImportTargetRequest
+	if err := decodeJSON(w, request, &input, 8<<10); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	target, err := s.store.SubStoreSyncTarget(request.Context(), request.PathValue("id"))
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	settings, err := s.store.SubStoreSyncSettings(request.Context())
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	if !settings.Configured {
+		writeError(w, http.StatusBadRequest, "请先保存 Sub-Store 连接设置")
+		return
+	}
+	name, err := validateSubStoreImportName(input.SubscriptionName)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	var subscriptions []map[string]any
+	if _, err := s.subStoreRequest(request.Context(), settings.EndpointURL, http.MethodGet, "/api/subs", nil, &subscriptions); err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	var remote map[string]any
+	for _, subscription := range subscriptions {
+		remoteName, _ := subscription["name"].(string)
+		if strings.TrimSpace(remoteName) == name {
+			remote = subscription
+			break
+		}
+	}
+	if remote == nil {
+		writeError(w, http.StatusNotFound, "Sub-Store 中没有找到该订阅组")
+		return
+	}
+	localTargets, err := s.store.ListSubStoreSyncTargets(request.Context())
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	remoteOwner, _ := remote["qcontrolhub_integration_id"].(string)
+	remoteOwner = strings.TrimSpace(remoteOwner)
+	for _, existing := range localTargets {
+		if existing.ID == target.ID {
+			continue
+		}
+		if existing.SubscriptionName == name {
+			writeError(w, http.StatusConflict, "该 Sub-Store 组已关联其他同步组")
+			return
+		}
+		if remoteOwner != "" && existing.IntegrationID == remoteOwner {
+			writeError(w, http.StatusConflict, "该 Sub-Store 组已关联其他同步组")
+			return
+		}
+	}
+	if name == target.SubscriptionName && remoteOwner == target.IntegrationID {
+		writeJSON(w, http.StatusOK, target)
+		return
+	}
+	validRemoteOwner := strings.HasPrefix(remoteOwner, "ssi_") && utf8.RuneCountInString(remoteOwner) <= 100
+	if validRemoteOwner && remoteOwner != target.IntegrationID {
+		writeError(w, http.StatusConflict, "该 Sub-Store 组属于其他 QControlHub，无法编辑关联")
+		return
+	}
+	integrationID := target.IntegrationID
+	needsClaim := remoteOwner != integrationID
+	cloneSubscription := func(source map[string]any) map[string]any {
+		clone := make(map[string]any, len(source))
+		for key, value := range source {
+			clone[key] = value
+		}
+		return clone
+	}
+	type ownershipChange struct {
+		name   string
+		before map[string]any
+	}
+	changes := make([]ownershipChange, 0)
+	for _, subscription := range subscriptions {
+		oldName, _ := subscription["name"].(string)
+		owner, _ := subscription["qcontrolhub_integration_id"].(string)
+		if strings.TrimSpace(oldName) != "" && strings.TrimSpace(oldName) != name && strings.TrimSpace(owner) == target.IntegrationID {
+			changes = append(changes, ownershipChange{name: oldName, before: cloneSubscription(subscription)})
+		}
+	}
+	restoreOwnership := func() error {
+		var restoreErr error
+		for _, change := range changes {
+			if _, err := s.subStoreRequest(request.Context(), settings.EndpointURL, http.MethodPatch, "/api/sub/"+change.name, change.before, nil); err != nil && restoreErr == nil {
+				restoreErr = err
+			}
+		}
+		if needsClaim {
+			if _, err := s.subStoreRequest(request.Context(), settings.EndpointURL, http.MethodPatch, "/api/sub/"+name, remote, nil); err != nil && restoreErr == nil {
+				restoreErr = err
+			}
+		}
+		return restoreErr
+	}
+	for _, change := range changes {
+		released := cloneSubscription(change.before)
+		released["qcontrolhub_integration_id"] = ""
+		released["qcontrolhub_managed_nodes"] = []any{}
+		if _, err := s.subStoreRequest(request.Context(), settings.EndpointURL, http.MethodPatch, "/api/sub/"+change.name, released, nil); err != nil {
+			if restoreErr := restoreOwnership(); restoreErr != nil {
+				writeInternalError(w, fmt.Errorf("release old Sub-Store group: %v; restore ownership: %w", err, restoreErr))
+				return
+			}
+			writeError(w, http.StatusBadGateway, err.Error())
+			return
+		}
+	}
+	if needsClaim {
+		claimed := cloneSubscription(remote)
+		claimed["qcontrolhub_integration_id"] = integrationID
+		if _, err := s.subStoreRequest(request.Context(), settings.EndpointURL, http.MethodPatch, "/api/sub/"+name, claimed, nil); err != nil {
+			if restoreErr := restoreOwnership(); restoreErr != nil {
+				writeInternalError(w, fmt.Errorf("claim Sub-Store group: %v; restore ownership: %w", err, restoreErr))
+				return
+			}
+			writeError(w, http.StatusBadGateway, err.Error())
+			return
+		}
+	}
+	updated, updateErr := s.store.UpdateSubStoreSyncTarget(request.Context(), target.ID, target.DisplayName, name, target.SyncMode)
+	if updateErr != nil {
+		if restoreErr := restoreOwnership(); restoreErr != nil {
+			writeInternalError(w, fmt.Errorf("link Sub-Store group: %v; restore ownership: %w", updateErr, restoreErr))
+			return
+		}
+		writeStoreError(w, updateErr)
+		return
+	}
+	s.recordAudit(request, "substore.target.linked", updated.DisplayName, "Existing Sub-Store group linked to sync target")
+	writeJSON(w, http.StatusOK, updated)
+}
+
 func subStoreContentNodeCount(content string) int {
 	count := 0
 	for _, line := range strings.Split(strings.ReplaceAll(content, "\r\n", "\n"), "\n") {
@@ -902,17 +1046,11 @@ func (s *Server) upsertSubStoreSubscription(ctx context.Context, settings core.S
 	}
 	if mode == core.SubStoreSyncModeIncremental {
 		existingContent, _ := owned["content"].(string)
-		previouslyManaged := subStoreManagedNames(owned["qcontrolhub_managed_nodes"])
-		if _, metadataPresent := owned["qcontrolhub_managed_nodes"]; !metadataPresent {
-			// Before incremental mode existed, an owned subscription was always
-			// fully managed by QControlHub. Seed its first incremental update from
-			// the complete legacy content so deselected legacy nodes are removed.
-			previouslyManaged, err = subStoreNodeNames(existingContent)
-			if err != nil {
-				return false, fmt.Errorf("无法迁移旧版 Sub-Store 同步组: %w", err)
-			}
-		}
-		merged, mergeErr := mergeSubStoreContentByName(existingContent, content, previouslyManaged)
+		// Incremental sync is additive: update nodes with the same name and append
+		// new ones, while preserving every existing remote node. This is especially
+		// important for groups created before incremental mode, which have no
+		// ownership metadata and must never be treated as disposable legacy data.
+		merged, mergeErr := mergeSubStoreContentByName(existingContent, content, nil)
 		if mergeErr != nil {
 			return false, mergeErr
 		}
