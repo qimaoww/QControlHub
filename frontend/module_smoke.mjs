@@ -4775,6 +4775,16 @@ assert.equal(staleSourceRows[1].ok, false);
     false,
     "pixel line heights must use the shared typography scale",
   );
+  assert.equal(
+    css.includes(".settings-section>.settings-hint{padding:0 20px 18px"),
+    true,
+    "settings helper text keeps the section's horizontal and bottom padding",
+  );
+  assert.equal(
+    css.includes(".settings-section header p,.settings-hint{min-width:0;overflow-wrap:anywhere}"),
+    true,
+    "settings copy wraps instead of overflowing its card",
+  );
   const badge = /\.ip-family\{[^}]*\}/.exec(css)?.[0] || "";
   assert.equal(
     badge.includes("font-style:normal"),
