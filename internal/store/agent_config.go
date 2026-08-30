@@ -304,6 +304,12 @@ func (s *Store) saveAgentConfig(ctx context.Context, input core.Config, expected
 			ON CONFLICT (config_id,config_version,profile_tag) DO NOTHING`, currentID, saved.Version, currentVersion); err != nil {
 			return core.Config{}, err
 		}
+		if input.Engine == core.EngineShadowsocksRust {
+			if _, err := tx.Exec(ctx, `UPDATE mainland_access_policies SET config_version=$3,updated_at=now()
+				WHERE agent_id=$1 AND engine=$2 AND config_version=$4`, input.AgentID, input.Engine, saved.Version, currentVersion); err != nil {
+				return core.Config{}, err
+			}
+		}
 	}
 	if metadataMutation != nil {
 		for _, tag := range []string{metadataMutation.OriginalTag, metadataMutation.Tag} {

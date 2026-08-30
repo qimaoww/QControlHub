@@ -80,6 +80,73 @@ func TestMainlandAccessPolicyRejectsTagPortMismatch(t *testing.T) {
 	}
 }
 
+func TestShadowsocksRustMainlandPolicyRemainsOutsideCoreJSON(t *testing.T) {
+	t.Parallel()
+	protocol, ok := FindProtocol(core.EngineShadowsocksRust, ProtocolShadowsocks)
+	if !ok {
+		t.Fatal("ss-rust Shadowsocks preset was not published")
+	}
+	input, err := NewPlan(protocol)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content, err := Generate(core.EngineShadowsocksRust, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, err := ApplyMainlandAccessPolicyWithPrefixes(core.EngineShadowsocksRust, content, MainlandAccessPolicy{
+		Tag: "ss-rust", Port: input.Port, Engine: core.EngineShadowsocksRust, BlockMainlandSource: true,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated != content || strings.Contains(updated, "qch-mainland") {
+		t.Fatalf("ss-rust policy polluted native config:\n%s", updated)
+	}
+	policies := DiscoverMainlandAccessPolicies(core.EngineShadowsocksRust, updated)
+	if len(policies) != 1 || policies[0].Tag != "ss-rust" || policies[0].Port != input.Port {
+		t.Fatalf("ss-rust inbound discovery = %+v", policies)
+	}
+	if _, err := ApplyMainlandAccessPolicyWithPrefixes(core.EngineShadowsocksRust, content, MainlandAccessPolicy{
+		Tag: input.Tag, Port: input.Port, Engine: core.EngineShadowsocksRust, BlockMainlandDestination: true,
+	}, nil); err == nil {
+		t.Fatal("ss-rust destination restriction was accepted")
+	}
+}
+
+func TestMainlandRulesUseExternalCoreResources(t *testing.T) {
+	t.Parallel()
+	for _, engine := range []core.Engine{core.EngineXray, core.EngineSingBox} {
+		protocol, ok := FindProtocol(engine, ProtocolVLESS)
+		if !ok {
+			t.Fatalf("%s VLESS preset missing", engine)
+		}
+		input, err := NewPlan(protocol)
+		if err != nil {
+			t.Fatal(err)
+		}
+		content, err := Generate(engine, input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		content, err = ApplyMainlandAccessPolicyWithPrefixes(engine, content, MainlandAccessPolicy{
+			Tag: input.Tag, Port: input.Port, Engine: engine, BlockMainlandDestination: true,
+		}, []string{"1.1.1.0/24"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(content, "1.1.1.0/24") {
+			t.Fatalf("%s embedded CIDR data in generated config:\n%s", engine, content)
+		}
+		if engine == core.EngineXray && !strings.Contains(content, "geoip:cn") {
+			t.Fatalf("Xray resource reference missing:\n%s", content)
+		}
+		if engine == core.EngineSingBox && (!strings.Contains(content, `"type": "remote"`) || !strings.Contains(content, mainlandSingBoxRuleSetURL)) {
+			t.Fatalf("sing-box remote rule-set missing:\n%s", content)
+		}
+	}
+}
+
 func TestMainlandAccessPoliciesRemainIndependentAcrossInboundPorts(t *testing.T) {
 	t.Parallel()
 	prefixes := []string{"1.1.8.0/24", "240e::/16"}

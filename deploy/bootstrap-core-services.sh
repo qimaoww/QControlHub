@@ -43,8 +43,8 @@ if [ -z "$service_manager" ]; then
   fi
 fi
 case "$service_manager" in
-  systemd) required_commands="chmod chown cmp getent grep groupadd id install systemctl useradd" ;;
-  openrc) required_commands="addgroup adduser chmod chown cmp grep id install rc-service rc-update supervise-daemon" ;;
+  systemd) required_commands="chmod chown cmp getent grep groupadd id install mv rm systemctl useradd" ;;
+  openrc) required_commands="addgroup adduser chmod chown cmp grep id install mv rc-service rc-update rm supervise-daemon" ;;
   *) printf '%s\n' "unsupported service manager: $service_manager" >&2; exit 1 ;;
 esac
 mapping_library="$script_dir/existing-core-mapping.sh"
@@ -179,6 +179,34 @@ install_if_missing() {
   printf '%s\n' "installed: $destination"
 }
 
+install_empty_shadowsocks_rust_acl() {
+  destination=$1
+  if [ -L "$destination" ]; then
+    printf '%s\n' "refusing symlinked Shadowsocks Rust ACL: $destination" >&2
+    exit 1
+  fi
+  if [ -e "$destination" ]; then
+    if [ ! -f "$destination" ]; then
+      printf '%s\n' "refusing non-regular Shadowsocks Rust ACL: $destination" >&2
+      exit 1
+    fi
+    printf '%s\n' "preserved existing Shadowsocks Rust ACL: $destination"
+    return
+  fi
+  temporary="$destination.tmp.$$"
+  trap 'rm -f "$temporary"' EXIT HUP INT TERM
+  {
+    printf '%s\n' '# QControlHub managed Shadowsocks Rust mainland ACL.'
+    printf '%s\n' '# Sources: misakaio/chnroutes2 and MetaCubeX/meta-rules-dat.'
+    printf '\n[outbound_block_list]\n'
+  } > "$temporary"
+  chown root:"$service_group" "$temporary"
+  chmod 0640 "$temporary"
+  mv "$temporary" "$destination"
+  trap - EXIT HUP INT TERM
+  printf '%s\n' "installed empty Shadowsocks Rust ACL: $destination"
+}
+
 ensure_directory /usr/local/lib/qagent
 ensure_directory /usr/local/lib/qagent/cores
 
@@ -197,6 +225,9 @@ for engine in $selected_engines; do
     shadowsocks-rust) source_config="$repository_dir/examples/configs/shadowsocks-rust-minimal.json"; destination_config=/etc/qagent/shadowsocks-rust/config.json ;;
   esac
   install_if_missing "$source_config" "$destination_config" root "$service_group" 0640
+  if [ "$engine" = shadowsocks-rust ]; then
+    install_empty_shadowsocks_rust_acl /etc/qagent/shadowsocks-rust/qch-mainland-block.acl
+  fi
 done
 
 enabled_services=""

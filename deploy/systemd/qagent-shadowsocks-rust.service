@@ -5,6 +5,7 @@ Wants=network-online.target
 After=network-online.target
 ConditionFileIsExecutable=/usr/local/lib/qagent/cores/ssserver
 ConditionPathExists=/etc/qagent/shadowsocks-rust/config.json
+ConditionPathExists=/etc/qagent/shadowsocks-rust/qch-mainland-block.acl
 
 [Service]
 Type=simple
@@ -14,7 +15,7 @@ WorkingDirectory=/var/lib/qcontrolhub-shadowsocks-rust
 StateDirectory=qcontrolhub-shadowsocks-rust
 StateDirectoryMode=0750
 UMask=0027
-ExecStart=/usr/local/lib/qagent/cores/ssserver -c /etc/qagent/shadowsocks-rust/config.json
+ExecStart=/usr/local/lib/qagent/cores/ssserver -c /etc/qagent/shadowsocks-rust/config.json --acl /etc/qagent/shadowsocks-rust/qch-mainland-block.acl
 Environment=RUST_LOG=info
 LogNamespace=qagent-cores
 StandardOutput=journal

@@ -36,6 +36,14 @@ curl -fsSL -o "$work/xray.zip" "$xray_zip"
 mkdir -p "$work/xray"
 unzip -o -q "$work/xray.zip" -d "$work/xray"
 install -o root -g root -m 0755 "$work/xray/xray" "$core_dir/xray"
+# Xray resolves `geoip:cn`/`geosite:*` from the configuration directory.
+# Keep the official resource files beside the Xray binary (the lookup path
+# used by Xray) so mainland
+# access policies remain a compact file-backed reference after installation.
+for asset in geoip.dat geosite.dat; do
+  [ -f "$work/xray/$asset" ] || { printf '%s\n' "Xray release is missing $asset" >&2; exit 1; }
+  install -o root -g root -m 0644 "$work/xray/$asset" "$core_dir/$asset"
+done
 "$core_dir/xray" version | head -n1
 
 echo '== sing-box v1.13.16 =='
@@ -57,4 +65,4 @@ install -o root -g root -m 0755 "$ssserver_binary" "$core_dir/ssserver"
 "$core_dir/ssserver" --version | head -n1
 
 echo '== installed =='
-ls -l "$core_dir/mihomo" "$core_dir/xray" "$core_dir/sing-box" "$core_dir/ssserver"
+ls -l "$core_dir/mihomo" "$core_dir/xray" "$core_dir/sing-box" "$core_dir/ssserver" "$core_dir/geoip.dat" "$core_dir/geosite.dat"

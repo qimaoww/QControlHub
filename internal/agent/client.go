@@ -76,6 +76,7 @@ type Client struct {
 	websocketURL      string
 	metrics           *MetricsCollector
 	traffic           *TrafficManager
+	mainland          *MainlandAccessManager
 	logs              *CoreLogCollector
 	publicIP          *PublicIPProber
 	serverHost        string
@@ -189,6 +190,7 @@ func NewClient(config ClientConfig, executor *Executor) (*Client, error) {
 		websocketURL: websocketScheme + "://" + parsed.Host + "/agent/v1/connect",
 		metrics:      metricsCollector,
 		traffic:      NewTrafficManagerForServiceManager(config.StatePath, executor.serviceManager()),
+		mainland:     NewMainlandAccessManager(config.StatePath, executor.serviceManager()),
 		logs:         NewCoreLogCollectorForExecutor(executor),
 		publicIP:     publicIP,
 		http: &http.Client{
@@ -246,6 +248,13 @@ func (c *Client) Run(ctx context.Context) error {
 	go c.logs.Run(ctx)
 	go c.publicIP.Run(ctx)
 	c.traffic.Start(ctx)
+	if c.mainland != nil {
+		restoreContext, restoreCancel := context.WithTimeout(ctx, 30*time.Second)
+		if err := c.mainland.Restore(restoreContext, c.creds.AgentID); err != nil {
+			slog.Warn("restore deployed mainland access policies", "error", err)
+		}
+		restoreCancel()
+	}
 	slog.Info("agent identity loaded", "agent_id", c.creds.AgentID, "server", c.websocketURL)
 	backoff := time.Second
 	for {
@@ -272,6 +281,11 @@ func (c *Client) Run(ctx context.Context) error {
 			cleanupContext, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
 			if cleanupErr := c.traffic.ClearPolicies(cleanupContext); cleanupErr != nil {
 				slog.Warn("remove traffic rules for rejected Agent identity", "error", cleanupErr)
+			}
+			if c.mainland != nil {
+				if cleanupErr := c.mainland.Deploy(cleanupContext, nil, c.creds.AgentID); cleanupErr != nil {
+					slog.Warn("remove mainland rules for rejected Agent identity", "error", cleanupErr)
+				}
 			}
 			cleanupCancel()
 			return err
@@ -687,6 +701,14 @@ func (c *Client) resultForTask(ctx context.Context, task core.Task) core.TaskRes
 		if execute == nil {
 			execute = c.executor.Execute
 		}
+		var previousMainlandPolicies []core.MainlandAccessPolicy
+		mainlandChanged := task.Action == core.ActionDeploy && task.Engine == core.EngineShadowsocksRust && c.mainland != nil
+		if mainlandChanged {
+			previousMainlandPolicies = c.mainland.Snapshot()
+			if err := c.mainland.Deploy(ctx, task.MainlandAccessPolicies, c.creds.AgentID); err != nil {
+				executionErr = fmt.Errorf("apply Shadowsocks Rust mainland access policy: %w", err)
+			}
+		}
 		if c.logs != nil && task.Engine == core.EngineSingBox &&
 			(task.Action == core.ActionImportExisting || task.Action == core.ActionDeploy) {
 			if err := c.logs.PrepareImportedSingBoxSource(ctx, c.executor, task.ConfigContent); err != nil {
@@ -700,7 +722,17 @@ func (c *Client) resultForTask(ctx context.Context, task core.Task) core.TaskRes
 				slog.Warn("wait for managed sing-box console log source", "error", err)
 			}
 		}
-		output, executionErr = execute(ctx, task)
+		if executionErr == nil {
+			output, executionErr = execute(ctx, task)
+		}
+		if executionErr != nil && mainlandChanged {
+			rollbackContext, rollbackCancel := context.WithTimeout(context.Background(), 20*time.Second)
+			rollbackErr := c.mainland.Deploy(rollbackContext, previousMainlandPolicies, c.creds.AgentID)
+			rollbackCancel()
+			if rollbackErr != nil {
+				executionErr = fmt.Errorf("%v; mainland access rollback failed: %w", executionErr, rollbackErr)
+			}
+		}
 		if preparedLogTransition {
 			if err := c.logs.CompleteImportedSingBoxSource(c.executor, executionErr == nil); err != nil {
 				slog.Warn("complete managed sing-box log source transition", "error", err)

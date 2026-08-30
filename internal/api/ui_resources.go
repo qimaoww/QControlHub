@@ -412,6 +412,10 @@ func (s *Server) applyTemplate(w http.ResponseWriter, request *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
+	if err := s.reconcileSavedShadowsocksRustPolicies(request.Context(), saved); err != nil {
+		writeStoreError(w, err)
+		return
+	}
 	s.refreshPortTrafficMonitoring(request.Context(), "")
 	s.recordAudit(request, "template.applied", template.ID, agent.Name+" "+string(template.Engine))
 	writeJSON(w, http.StatusOK, saved)

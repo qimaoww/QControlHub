@@ -67,6 +67,53 @@ func (e *Executor) prepareManagedCoreService(ctx context.Context, engine core.En
 	return nil
 }
 
+// prepareShadowsocksRustACLService refreshes the exact QAgent-owned service
+// template before a destination-blocking policy is activated. This upgrades
+// older nodes from a config-only ssserver command to the native --acl file
+// without accepting or replacing administrator-owned service definitions.
+func (e *Executor) prepareShadowsocksRustACLService(ctx context.Context, spec EngineSpec) error {
+	manager := e.serviceManager()
+	defaultSpec, ok := DefaultSpecsForServiceManager(manager.Kind())[core.EngineShadowsocksRust]
+	if !ok || spec != defaultSpec {
+		return errors.New("Shadowsocks Rust mainland destination blocking requires the QAgent-managed service")
+	}
+	servicePath, marker, command := shadowsocksRustACLServiceIdentity(manager, spec)
+	if err := validateManagedUnitFile(servicePath); err == nil {
+		if contents, readErr := os.ReadFile(servicePath); readErr == nil && strings.Contains(string(contents), marker) && strings.Contains(string(contents), command) {
+			return nil
+		}
+	}
+	bootstrapper := defaultCoreServiceBootstrapper()
+	if e.coreBootstrapper != nil {
+		bootstrapper = *e.coreBootstrapper
+	}
+	if err := bootstrapper.install(ctx, core.EngineShadowsocksRust, false, manager); err != nil {
+		return fmt.Errorf("upgrade managed Shadowsocks Rust ACL service: %w", err)
+	}
+	if err := validateManagedUnitFile(servicePath); err != nil {
+		return fmt.Errorf("validate upgraded Shadowsocks Rust service: %w", err)
+	}
+	contents, err := os.ReadFile(servicePath)
+	if err != nil {
+		return fmt.Errorf("read upgraded Shadowsocks Rust service: %w", err)
+	}
+	if !strings.Contains(string(contents), marker) || !strings.Contains(string(contents), command) {
+		return errors.New("staged QAgent service assets do not support the Shadowsocks Rust ACL; redeploy the current QAgent package")
+	}
+	return nil
+}
+
+func shadowsocksRustACLServiceIdentity(manager *ServiceManager, spec EngineSpec) (string, string, string) {
+	servicePath := filepath.Join(existingDiscoveryManagedUnitRoot, spec.Service)
+	marker := "Description=Shadowsocks Rust core managed by QAgent"
+	if manager.Kind() == ServiceManagerOpenRC {
+		servicePath = filepath.Join(openRCInitRoot, spec.Service)
+		marker = "# QControlHub managed OpenRC service: " + spec.Service
+	}
+	command := spec.Binary + " -c " + spec.ConfigPath + " --acl " + shadowsocksRustACLPath
+	return servicePath, marker, command
+}
+
 func (bootstrapper coreServiceBootstrapper) install(ctx context.Context, engine core.Engine, existing bool, manager *ServiceManager) error {
 	if !engine.Valid() {
 		return errors.New("unsupported core bootstrap engine")

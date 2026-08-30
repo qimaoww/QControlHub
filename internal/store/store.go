@@ -47,7 +47,7 @@ type storeExecutor interface {
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 37
+const currentSchemaVersion = 38
 
 func Open(ctx context.Context, databaseURL string, allowInsecureRemote bool) (*Store, error) {
 	return OpenWithConfigKey(ctx, databaseURL, allowInsecureRemote, "")
@@ -1228,6 +1228,27 @@ func (s *Store) CreateTask(ctx context.Context, request core.TaskRequest) (core.
 		if err != nil {
 			return core.Task{}, err
 		}
+		if request.Engine == core.EngineShadowsocksRust {
+			rows, policyErr := tx.Query(ctx, `SELECT agent_id,engine,tag,kind,port,config_version,block_mainland_destination,block_mainland_source
+				FROM mainland_access_policies WHERE agent_id=$1 AND engine=$2 AND config_version=$3 ORDER BY port,tag`, request.AgentID, request.Engine, task.ConfigVersion)
+			if policyErr != nil {
+				return core.Task{}, policyErr
+			}
+			for rows.Next() {
+				var policy core.MainlandAccessPolicy
+				if policyErr = rows.Scan(&policy.AgentID, &policy.Engine, &policy.Tag, &policy.Kind, &policy.Port, &policy.ConfigVersion,
+					&policy.BlockMainlandDestination, &policy.BlockMainlandSource); policyErr != nil {
+					rows.Close()
+					return core.Task{}, policyErr
+				}
+				task.MainlandAccessPolicies = append(task.MainlandAccessPolicies, policy)
+			}
+			policyErr = rows.Err()
+			rows.Close()
+			if policyErr != nil {
+				return core.Task{}, policyErr
+			}
+		}
 	} else {
 		task.ConfigID = ""
 	}
@@ -1262,10 +1283,14 @@ func (s *Store) CreateTask(ctx context.Context, request core.TaskRequest) (core.
 	if err != nil {
 		return core.Task{}, err
 	}
+	mainlandPoliciesJSON, err := json.Marshal(task.MainlandAccessPolicies)
+	if err != nil {
+		return core.Task{}, err
+	}
 	_, err = tx.Exec(ctx, `
-			INSERT INTO tasks (id,agent_id,action,engine,config_id,config_version,config_content,core_version,core_source,status,attempt,created_at)
-			VALUES ($1,$2,$3,$4,NULLIF($5,''),NULLIF($6,0),NULLIF($7,''),NULLIF($8,''),NULLIF($9,''),$10,0,$11)`,
-		task.ID, task.AgentID, task.Action, task.Engine, task.ConfigID, task.ConfigVersion, storedConfigContent, task.CoreVersion, task.CoreSource, task.Status, task.CreatedAt)
+			INSERT INTO tasks (id,agent_id,action,engine,config_id,config_version,config_content,mainland_access_policies,core_version,core_source,status,attempt,created_at)
+			VALUES ($1,$2,$3,$4,NULLIF($5,''),NULLIF($6,0),NULLIF($7,''),$8,NULLIF($9,''),NULLIF($10,''),$11,0,$12)`,
+		task.ID, task.AgentID, task.Action, task.Engine, task.ConfigID, task.ConfigVersion, storedConfigContent, mainlandPoliciesJSON, task.CoreVersion, task.CoreSource, task.Status, task.CreatedAt)
 	if err != nil {
 		return core.Task{}, mapError(err)
 	}
@@ -1406,7 +1431,7 @@ func (s *Store) RunningTask(ctx context.Context, agentID string) (*core.Task, er
 	}
 	row := tx.QueryRow(ctx, `
 		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),
-		       COALESCE(config_content,''),COALESCE(core_version,''),COALESCE(core_source,''),status,attempt,COALESCE(lease_id,''),
+		       COALESCE(config_content,''),COALESCE(mainland_access_policies,'[]'::jsonb),COALESCE(core_version,''),COALESCE(core_source,''),status,attempt,COALESCE(lease_id,''),
 		       COALESCE(output,''),COALESCE(error,''),created_at,started_at,finished_at
 		FROM tasks WHERE agent_id=$1 AND status='running'
 		ORDER BY started_at DESC LIMIT 1`, agentID)
@@ -1477,7 +1502,7 @@ func (s *Store) ClaimTask(ctx context.Context, agentID string) (*core.Task, erro
 		UPDATE tasks t SET status='running',started_at=now(),attempt=attempt+1,lease_id=$2
 		FROM next_task n WHERE t.id=n.id
 		RETURNING t.id,t.agent_id,t.action,t.engine,COALESCE(t.config_id,''),COALESCE(t.config_version,0),
-		          COALESCE(t.config_content,''),COALESCE(t.core_version,''),COALESCE(t.core_source,''),t.status,t.attempt,COALESCE(t.lease_id,''),COALESCE(t.output,''),COALESCE(t.error,''),
+		          COALESCE(t.config_content,''),COALESCE(t.mainland_access_policies,'[]'::jsonb),COALESCE(t.core_version,''),COALESCE(t.core_source,''),t.status,t.attempt,COALESCE(t.lease_id,''),COALESCE(t.output,''),COALESCE(t.error,''),
 		          t.created_at,t.started_at,t.finished_at`, agentID, leaseID, mirrorSupported)
 	task, err := scanTask(row, true)
 	if commitErr := tx.Commit(ctx); commitErr != nil {
@@ -1658,9 +1683,13 @@ func scanTask(row rowScanner, includeContent bool) (core.Task, error) {
 	var task core.Task
 	var err error
 	if includeContent {
+		var mainlandPoliciesJSON []byte
 		err = row.Scan(&task.ID, &task.AgentID, &task.Action, &task.Engine, &task.ConfigID, &task.ConfigVersion,
-			&task.ConfigContent, &task.CoreVersion, &task.CoreSource, &task.Status, &task.Attempt, &task.LeaseID, &task.Output, &task.Error,
+			&task.ConfigContent, &mainlandPoliciesJSON, &task.CoreVersion, &task.CoreSource, &task.Status, &task.Attempt, &task.LeaseID, &task.Output, &task.Error,
 			&task.CreatedAt, &task.StartedAt, &task.FinishedAt)
+		if err == nil && len(mainlandPoliciesJSON) > 0 {
+			err = json.Unmarshal(mainlandPoliciesJSON, &task.MainlandAccessPolicies)
+		}
 	} else {
 		err = row.Scan(&task.ID, &task.AgentID, &task.Action, &task.Engine, &task.ConfigID, &task.ConfigVersion,
 			&task.CoreVersion, &task.CoreSource, &task.Status, &task.Attempt, &task.Output, &task.Error,
@@ -1834,6 +1863,29 @@ ALTER TABLE configs ADD CONSTRAINT configs_content_check CHECK (octet_length(con
 	WHERE deleted_at IS NULL
 	ON CONFLICT (config_id,version) DO NOTHING;
 
+-- Shadowsocks Rust has no routing section. Keep its per-inbound mainland
+-- policy in the control plane and deliver it to the Agent for a native ACL
+-- plus nftables source enforcement, rather than polluting ssserver JSON.
+CREATE TABLE IF NOT EXISTS mainland_access_policies (
+    agent_id text NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    engine varchar(20) NOT NULL CHECK (engine = 'ss-rust'),
+    tag varchar(64) NOT NULL,
+    kind varchar(64) NOT NULL DEFAULT '',
+	    port integer NOT NULL CHECK (port BETWEEN 1 AND 65535),
+	    config_version integer NOT NULL CHECK (config_version > 0),
+    block_mainland_destination boolean NOT NULL DEFAULT false,
+    block_mainland_source boolean NOT NULL DEFAULT false,
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (agent_id,engine,tag,port)
+);
+CREATE INDEX IF NOT EXISTS mainland_access_policies_agent_idx
+    ON mainland_access_policies(agent_id);
+	ALTER TABLE mainland_access_policies ADD COLUMN IF NOT EXISTS config_version integer;
+	UPDATE mainland_access_policies p SET config_version=c.version FROM configs c
+	WHERE p.config_version IS NULL AND c.agent_id=p.agent_id AND c.engine=p.engine AND c.deleted_at IS NULL;
+	DELETE FROM mainland_access_policies WHERE config_version IS NULL;
+	ALTER TABLE mainland_access_policies ALTER COLUMN config_version SET NOT NULL;
+
 CREATE TABLE IF NOT EXISTS tasks (
     id text PRIMARY KEY,
     agent_id text NOT NULL REFERENCES agents(id),
@@ -1842,6 +1894,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     config_id text REFERENCES configs(id),
     config_version integer,
 	    config_content text,
+	    mainland_access_policies jsonb NOT NULL DEFAULT '[]'::jsonb,
 	    core_version varchar(64),
 	    core_source varchar(32),
 	    status varchar(20) NOT NULL CHECK (status IN ('pending','running','succeeded','failed','canceled')),
@@ -1856,6 +1909,7 @@ CREATE TABLE IF NOT EXISTS tasks (
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS lease_id text;
 	ALTER TABLE tasks ADD COLUMN IF NOT EXISTS core_version varchar(64);
 	ALTER TABLE tasks ADD COLUMN IF NOT EXISTS core_source varchar(32);
+	ALTER TABLE tasks ADD COLUMN IF NOT EXISTS mainland_access_policies jsonb NOT NULL DEFAULT '[]'::jsonb;
 	DROP INDEX IF EXISTS tasks_latest_deployment_idx;
 	ALTER TABLE tasks DROP COLUMN IF EXISTS simulated;
 	ALTER TABLE tasks DROP CONSTRAINT IF EXISTS tasks_action_check;

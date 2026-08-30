@@ -69,6 +69,21 @@ const (
 	publicIPProbeEndpointMaxBytes    = 2048
 )
 
+// MainlandAccessPolicy describes a per-inbound mainland access restriction.
+// Core-native policies are rendered into the proxy configuration; engines
+// without routing support (for example Shadowsocks Rust) apply the same
+// policy through an Agent-managed native ACL and per-port firewall rules.
+type MainlandAccessPolicy struct {
+	AgentID                  string `json:"agent_id,omitempty"`
+	ConfigVersion            int    `json:"config_version,omitempty"`
+	Tag                      string `json:"tag"`
+	Port                     int    `json:"port"`
+	Kind                     string `json:"kind"`
+	Engine                   Engine `json:"engine"`
+	BlockMainlandDestination bool   `json:"block_mainland_destination"`
+	BlockMainlandSource      bool   `json:"block_mainland_source"`
+}
+
 // PublicIPProbeConfig is an operator-controlled, per-family direct egress
 // probe configuration. Managed defaults may carry one approved same-family
 // fallback after the ipify primary; an explicit operator endpoint replaces its
@@ -335,24 +350,25 @@ const (
 )
 
 type Task struct {
-	ID            string     `json:"id"`
-	AgentID       string     `json:"agent_id"`
-	Action        Action     `json:"action"`
-	Engine        Engine     `json:"engine"`
-	ConfigID      string     `json:"config_id,omitempty"`
-	ConfigVersion int        `json:"config_version,omitempty"`
-	ConfigContent string     `json:"config_content,omitempty"`
-	CoreVersion   string     `json:"core_version,omitempty"`
-	CoreSource    string     `json:"core_source,omitempty"`
-	Status        TaskStatus `json:"status"`
-	Attempt       int        `json:"attempt"`
-	LeaseID       string     `json:"lease_id,omitempty"`
-	Output        string     `json:"output,omitempty"`
-	Error         string     `json:"error,omitempty"`
-	Reused        bool       `json:"reused,omitempty"`
-	CreatedAt     time.Time  `json:"created_at"`
-	StartedAt     *time.Time `json:"started_at,omitempty"`
-	FinishedAt    *time.Time `json:"finished_at,omitempty"`
+	ID                     string                 `json:"id"`
+	AgentID                string                 `json:"agent_id"`
+	Action                 Action                 `json:"action"`
+	Engine                 Engine                 `json:"engine"`
+	ConfigID               string                 `json:"config_id,omitempty"`
+	ConfigVersion          int                    `json:"config_version,omitempty"`
+	ConfigContent          string                 `json:"config_content,omitempty"`
+	MainlandAccessPolicies []MainlandAccessPolicy `json:"mainland_access_policies,omitempty"`
+	CoreVersion            string                 `json:"core_version,omitempty"`
+	CoreSource             string                 `json:"core_source,omitempty"`
+	Status                 TaskStatus             `json:"status"`
+	Attempt                int                    `json:"attempt"`
+	LeaseID                string                 `json:"lease_id,omitempty"`
+	Output                 string                 `json:"output,omitempty"`
+	Error                  string                 `json:"error,omitempty"`
+	Reused                 bool                   `json:"reused,omitempty"`
+	CreatedAt              time.Time              `json:"created_at"`
+	StartedAt              *time.Time             `json:"started_at,omitempty"`
+	FinishedAt             *time.Time             `json:"finished_at,omitempty"`
 }
 
 type TaskRequest struct {

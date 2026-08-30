@@ -402,6 +402,10 @@ func (s *Server) putAgentConfig(w http.ResponseWriter, request *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
+	if err := s.reconcileSavedShadowsocksRustPolicies(request.Context(), config); err != nil {
+		writeStoreError(w, err)
+		return
+	}
 	s.refreshPortTrafficMonitoring(request.Context(), "")
 	writeJSON(w, http.StatusOK, config)
 }
