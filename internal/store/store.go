@@ -47,7 +47,7 @@ type storeExecutor interface {
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 39
+const currentSchemaVersion = 40
 
 func Open(ctx context.Context, databaseURL string, allowInsecureRemote bool) (*Store, error) {
 	return OpenWithConfigKey(ctx, databaseURL, allowInsecureRemote, "")
@@ -176,6 +176,46 @@ func (s *Store) migrate(ctx context.Context) error {
 		return fmt.Errorf("begin schema migration: %w", err)
 	}
 	defer tx.Rollback(ctx)
+	// substore_sync_targets was split out of the legacy single-target settings
+	// row in schema v31. Create and populate that table before the rest of the
+	// schema so the legacy substore_sync_items rows can receive their target_id.
+	// Keep this compatibility work tied to the v31 boundary; running it from
+	// schemaSQL would recreate the default group after a later migration finds
+	// the local target table empty.
+	if appliedVersion < 31 {
+		if _, err := tx.Exec(ctx, `
+			CREATE TABLE IF NOT EXISTS substore_sync_targets (
+				id text PRIMARY KEY,
+				display_name varchar(100) NOT NULL,
+				subscription_name varchar(100) NOT NULL UNIQUE,
+				integration_id text NOT NULL UNIQUE,
+				sync_mode varchar(12) NOT NULL DEFAULT 'managed' CHECK (sync_mode IN ('incremental','managed')),
+				last_synced_at timestamptz,
+				last_sync_status varchar(10) NOT NULL DEFAULT 'never' CHECK (last_sync_status IN ('never','success','failed')),
+				last_sync_error varchar(500) NOT NULL DEFAULT '',
+				created_at timestamptz NOT NULL,
+				updated_at timestamptz NOT NULL
+			)`); err != nil {
+			return fmt.Errorf("prepare legacy Sub-Store sync target: %w", err)
+		}
+		var legacySettingsTable bool
+		if err := tx.QueryRow(ctx, `SELECT to_regclass('substore_sync_settings') IS NOT NULL`).Scan(&legacySettingsTable); err != nil {
+			return fmt.Errorf("inspect legacy Sub-Store settings: %w", err)
+		}
+		if legacySettingsTable {
+			if _, err := tx.Exec(ctx, `
+			INSERT INTO substore_sync_targets (
+				id,display_name,subscription_name,integration_id,last_synced_at,last_sync_status,last_sync_error,created_at,updated_at
+			)
+			SELECT
+				'sst_default',subscription_name,subscription_name,integration_id,last_synced_at,last_sync_status,last_sync_error,updated_at,updated_at
+			FROM substore_sync_settings
+			WHERE NOT EXISTS (SELECT 1 FROM substore_sync_targets)
+			ON CONFLICT DO NOTHING`); err != nil {
+				return fmt.Errorf("migrate legacy Sub-Store sync target: %w", err)
+			}
+		}
+	}
 	if _, err := tx.Exec(ctx, schemaSQL); err != nil {
 		return fmt.Errorf("apply PostgreSQL schema: %w", err)
 	}
@@ -2200,14 +2240,6 @@ ALTER TABLE substore_sync_targets ADD CONSTRAINT substore_sync_targets_sync_mode
 UPDATE substore_sync_targets SET display_name=subscription_name WHERE display_name IS NULL;
 ALTER TABLE substore_sync_targets ALTER COLUMN display_name SET NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS substore_sync_targets_display_name_idx ON substore_sync_targets(display_name);
-INSERT INTO substore_sync_targets (
-	id,display_name,subscription_name,integration_id,last_synced_at,last_sync_status,last_sync_error,created_at,updated_at
-)
-SELECT
-	'sst_default',subscription_name,subscription_name,integration_id,last_synced_at,last_sync_status,last_sync_error,updated_at,updated_at
-FROM substore_sync_settings
-WHERE NOT EXISTS (SELECT 1 FROM substore_sync_targets)
-ON CONFLICT DO NOTHING;
 CREATE TABLE IF NOT EXISTS substore_sync_items (
 	target_id text NOT NULL REFERENCES substore_sync_targets(id) ON DELETE CASCADE,
 	agent_id text NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
