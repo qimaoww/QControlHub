@@ -132,6 +132,8 @@ func main() {
 		ControlPlaneVersion:        version,
 		AgentInstaller:             agentInstaller,
 		WebhookSecret:              strings.TrimSpace(os.Getenv("QCH_WEBHOOK_SECRET")),
+		KomariURL:                  strings.TrimSpace(os.Getenv("QCH_KOMARI_URL")),
+		KomariAPIKey:               strings.TrimSpace(os.Getenv("QCH_KOMARI_API_KEY")),
 		PublicIPProbe:              publicIPProbe,
 	})
 	root := apiServer.Handler()

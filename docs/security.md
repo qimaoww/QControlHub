@@ -11,6 +11,7 @@ QControlHub 的安全边界包括管理员、控制面、PostgreSQL、反向代�
 - 同一来源连续失败会触发内存限速；Nginx 示例额外限制登录和注册入口。
 - 控制面个人账号只有 admin（管理员）和 user（用户）两种身份。管理员拥有全部能力；用户通过 `permissions` 能力集合逐项授权，Bearer API 与 Web 会话使用同一套能力校验。旧版 operator/auditor/readonly 令牌仅作为兼容入口映射为用户能力集合。
 - 没有 OIDC 或 MFA。需要多人操作时，应把访问进一步放在 VPN、零信任网关或带 MFA 的上游访问代理之后。
+- Komari API Key 仅由控制面服务端调用，系统设置接口只返回掩码；仍应按第三方监控凭据保护 PostgreSQL、备份和管理员会话。
 
 ### 独立 SPA 控制台
 

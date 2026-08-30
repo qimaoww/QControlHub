@@ -45,18 +45,20 @@ func TestPanelSettingsPersistAndValidate(t *testing.T) {
 	want.AgentCoreLogRotateCount = 0
 	want.CoreLogMinimumLevel = "warning"
 	want.WebhookURL = "https://hooks.example.com/qcontrolhub?token=abc"
+	want.KomariURL = "https://komari.example.com"
+	want.KomariAPIKey = "komari-test-key"
 	saved, err := dataStore.SavePanelSettings(ctx, want)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if saved.PanelName != "Edge Control" || saved.PanelDescription != "production fleet" || saved.UIFontScale != 110 || saved.CoreLogMinimumLevel != "warning" || saved.WebhookURL != want.WebhookURL || saved.AgentMetricsIntervalSeconds != 5 || saved.AgentCoreLogMaxMiB != 1 || saved.AgentCoreLogRotateCount != 0 || saved.UpdatedAt.IsZero() {
+	if saved.PanelName != "Edge Control" || saved.PanelDescription != "production fleet" || saved.UIFontScale != 110 || saved.CoreLogMinimumLevel != "warning" || saved.WebhookURL != want.WebhookURL || saved.KomariURL != want.KomariURL || saved.KomariAPIKey != want.KomariAPIKey || saved.AgentMetricsIntervalSeconds != 5 || saved.AgentCoreLogMaxMiB != 1 || saved.AgentCoreLogRotateCount != 0 || saved.UpdatedAt.IsZero() {
 		t.Fatalf("saved settings = %+v", saved)
 	}
 	loaded, err := dataStore.PanelSettings(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.PanelName != saved.PanelName || loaded.UIFontScale != 110 || loaded.TaskPageSize != 50 || loaded.TaskPollIntervalMS != 2000 || loaded.CoreLogMinimumLevel != "warning" || loaded.WebhookURL != want.WebhookURL || loaded.AgentMetricsIntervalSeconds != 5 || loaded.AgentCoreLogMaxMiB != 1 {
+	if loaded.PanelName != saved.PanelName || loaded.UIFontScale != 110 || loaded.TaskPageSize != 50 || loaded.TaskPollIntervalMS != 2000 || loaded.CoreLogMinimumLevel != "warning" || loaded.WebhookURL != want.WebhookURL || loaded.KomariURL != want.KomariURL || loaded.KomariAPIKey != want.KomariAPIKey || loaded.AgentMetricsIntervalSeconds != 5 || loaded.AgentCoreLogMaxMiB != 1 {
 		t.Fatalf("loaded settings = %+v, want %+v", loaded, saved)
 	}
 	legacyClient := saved

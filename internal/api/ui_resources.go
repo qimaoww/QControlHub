@@ -16,13 +16,22 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/store"
 )
 
+const komariAPIKeyMask = "••••••••"
+
+func panelSettingsResponse(settings core.PanelSettings) core.PanelSettings {
+	if settings.KomariAPIKey != "" {
+		settings.KomariAPIKey = komariAPIKeyMask
+	}
+	return settings
+}
+
 func (s *Server) getSettings(w http.ResponseWriter, request *http.Request) {
 	settings, err := s.store.PanelSettings(request.Context())
 	if err != nil {
 		writeInternalError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, settings)
+	writeJSON(w, http.StatusOK, panelSettingsResponse(settings))
 }
 
 func (s *Server) putSettings(w http.ResponseWriter, request *http.Request) {
@@ -31,11 +40,35 @@ func (s *Server) putSettings(w http.ResponseWriter, request *http.Request) {
 		writeInternalError(w, previousErr)
 		return
 	}
-	var settings core.PanelSettings
-	if err := decodeJSON(w, request, &settings, 16<<10); err != nil {
+	var input struct {
+		core.PanelSettings
+		KomariURL         *string `json:"komari_url"`
+		KomariAPIKey      *string `json:"komari_api_key"`
+		ClearKomariAPIKey bool    `json:"clear_komari_api_key"`
+	}
+	if err := decodeJSON(w, request, &input, 16<<10); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	settings := input.PanelSettings
+	// Pointer fields distinguish a legacy client that does not know about
+	// Komari from an explicit empty value used to clear the URL.
+	if input.KomariURL == nil {
+		settings.KomariURL = previous.KomariURL
+	} else {
+		settings.KomariURL = *input.KomariURL
+	}
+	preserveKomariAPIKey := input.KomariAPIKey == nil
+	if !preserveKomariAPIKey && !input.ClearKomariAPIKey {
+		preserveKomariAPIKey = *input.KomariAPIKey == "" || *input.KomariAPIKey == komariAPIKeyMask
+	}
+	if preserveKomariAPIKey {
+		settings.KomariAPIKey = previous.KomariAPIKey
+	} else {
+		settings.KomariAPIKey = *input.KomariAPIKey
+	}
+	// The browser never receives the actual key. An empty or masked value means
+	// keep the currently saved key; an explicit clear flag removes it.
 	expectedRevision := settings.Revision
 	var saved core.PanelSettings
 	var err error
@@ -55,7 +88,7 @@ func (s *Server) putSettings(w http.ResponseWriter, request *http.Request) {
 	if agentPolicyChanged(previous, saved) {
 		s.DisconnectAllAgents()
 	}
-	writeJSON(w, http.StatusOK, saved)
+	writeJSON(w, http.StatusOK, panelSettingsResponse(saved))
 }
 
 func agentPolicyChanged(left, right core.PanelSettings) bool {

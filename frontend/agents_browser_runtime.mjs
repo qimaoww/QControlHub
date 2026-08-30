@@ -40,7 +40,26 @@ const onlineAgent = (id, features = ["agent-self-upgrade-v1"]) => ({
   enrollment_command_available: id === "alpha",
 });
 const populatedAgents = [
-  onlineAgent("alpha"),
+  {
+    ...onlineAgent("alpha"),
+    labels: { komari_uuid: "komari-alpha" },
+    metrics: {
+      cpu_available: true,
+      cpu_percent: 18.6,
+      memory_available: true,
+      memory_used_bytes: 1288490189,
+      memory_total_bytes: 4294967296,
+      disk_available: true,
+      disk_used_bytes: 17179869184,
+      disk_total_bytes: 53687091200,
+      network_available: true,
+      network_rx_bps: 1887437,
+      network_tx_bps: 645120,
+      network_rx_bytes: 9878424781,
+      network_tx_bytes: 4617089843,
+      collected_at: "2026-08-30T09:00:00Z",
+    },
+  },
   onlineAgent("bravo"),
   { ...onlineAgent("charlie"), status: "offline" },
   onlineAgent("delta", []),
@@ -90,6 +109,20 @@ window.fetch = async (input, options = {}) => {
     return json({ panel_name: "QControlHub Browser Smoke" });
   if (method === "GET" && path === "/agents")
     return json(mode === "empty" ? [] : testAPI.agents);
+  if (method === "GET" && path === "/agents/alpha/komari")
+    return json({
+      uuid: "komari-alpha",
+      server: {
+        uuid: "komari-alpha",
+        name: "Tokyo edge-01",
+        billing_cycle: 30,
+        expired_at: "2026-08-27T00:00:00Z",
+        traffic_limit: 10737418240,
+        traffic_limit_type: "sum",
+        traffic_used: 4294967296,
+        traffic_used_available: true,
+      },
+    });
   if (method === "GET" && path === "/enrollment-tokens") return json(testAPI.enrollmentRecords);
   if (method === "GET" && /^\/agents\/[^/]+\/configs$/.test(path)) return json([]);
   if (method === "GET" && path.startsWith("/metrics/")) return json([]);
@@ -158,6 +191,44 @@ function responsiveDialogRuleExists() {
 
 async function testAdminRuntime() {
   await waitFor(() => document.querySelector(".node-card-grid"), "聚合页没有渲染节点卡片");
+  const komariInline = await waitFor(
+    () => {
+      const inline = document.querySelector('[data-komari-link="alpha"]');
+      return inline?.querySelector("[data-komari-traffic]")?.textContent ===
+        "4.0 GB / 10.0 GB"
+        ? inline
+        : null;
+    },
+    "Komari 流量没有载入网络资源格",
+  );
+  assert.equal(komariInline.closest(".node-card-network") !== null, true);
+  assert.equal(
+    komariInline.querySelector("[data-komari-traffic]").textContent,
+    "4.0 GB / 10.0 GB",
+  );
+  assert.match(
+    komariInline.querySelector("[data-komari-cycle]").textContent,
+    /\d{1,2}\.\d{1,2}–\d{1,2}\.\d{1,2}/,
+  );
+  assert.equal(Number(komariInline.querySelector("[data-komari-progress]").value), 40);
+  assert.equal(document.querySelector(".node-card-komari"), null, "Komari 不应再渲染为独立卡片");
+  assert.ok(
+    komariInline.closest(".node-card-network").querySelector("[data-metric-text=download-rate]"),
+    "绑定 Komari UUID 后必须保留原实时网络内容",
+  );
+  assert.equal(
+    komariInline.closest(".node-card-network").querySelector("[data-metric-text=download-total]"),
+    null,
+    "绑定 Komari UUID 后应只替换原累计网络内容",
+  );
+  assert.ok(
+    document.querySelector('[data-agent-node="bravo"] .node-card-network [data-metric-text="download-rate"]'),
+    "未绑定 Komari UUID 的节点必须保留原实时网络内容",
+  );
+  assert.ok(
+    document.querySelector('[data-agent-node="bravo"] .node-card-network [data-metric-text="download-total"]'),
+    "未绑定 Komari UUID 的节点必须保留原累计网络内容",
+  );
   assertNoPersistentEnrollment();
   assert.equal(document.querySelector("#batch-form"), null, "批量操作栏不应常驻聚合页");
   assert.ok(document.querySelector("[data-node-batch-toggle]"), "聚合页顶栏缺少批量操作入口");
