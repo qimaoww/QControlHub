@@ -416,6 +416,146 @@ func TestOpenMigratesAppliedV26TrafficColumns(t *testing.T) {
 	}
 }
 
+func TestOpenMigratesAppliedV35OperationalColumns(t *testing.T) {
+	databaseURL := os.Getenv("QCH_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("QCH_TEST_DATABASE_URL is not configured")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	schema, err := testdb.IsolatePostgres(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("create isolated v35 schema: %v", err)
+	}
+	defer func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cleanupCancel()
+		if err := schema.Close(cleanupCtx); err != nil {
+			t.Errorf("drop isolated v35 schema: %v", err)
+		}
+	}()
+
+	setup, err := pgx.Connect(ctx, schema.URL)
+	if err != nil {
+		t.Fatalf("connect to isolated v35 schema: %v", err)
+	}
+	defer setup.Close(context.Background())
+	if _, err := setup.Exec(ctx, schemaSQL); err != nil {
+		t.Fatalf("create current schema fixture: %v", err)
+	}
+	if _, err := setup.Exec(ctx, `
+		CREATE TABLE qcontrolhub_schema_migrations (
+			version integer PRIMARY KEY CHECK (version > 0),
+			applied_at timestamptz NOT NULL DEFAULT now()
+		);
+		INSERT INTO qcontrolhub_schema_migrations (version) VALUES (35);
+
+		ALTER TABLE agents DROP COLUMN presence_notification_state;
+
+		ALTER TABLE panel_settings DROP COLUMN revision;
+		ALTER TABLE panel_settings DROP COLUMN time_zone;
+		ALTER TABLE panel_settings DROP COLUMN time_display;
+		ALTER TABLE panel_settings DROP COLUMN default_config_editor;
+		ALTER TABLE panel_settings DROP COLUMN agent_heartbeat_interval_seconds;
+		ALTER TABLE panel_settings DROP COLUMN agent_metrics_interval_seconds;
+		ALTER TABLE panel_settings DROP COLUMN agent_offline_threshold_seconds;
+		ALTER TABLE panel_settings DROP COLUMN task_stale_timeout_seconds;
+		ALTER TABLE panel_settings DROP COLUMN install_task_stale_timeout_seconds;
+		ALTER TABLE panel_settings DROP COLUMN task_max_attempts;
+		ALTER TABLE panel_settings DROP COLUMN public_ip_probe_interval_seconds;
+		ALTER TABLE panel_settings DROP COLUMN core_log_retention_days;
+		ALTER TABLE panel_settings DROP COLUMN agent_core_log_max_mib;
+		ALTER TABLE panel_settings DROP COLUMN agent_core_log_rotate_count;
+		ALTER TABLE panel_settings DROP COLUMN metric_retention_days;
+		ALTER TABLE panel_settings DROP COLUMN audit_retention_days;
+		ALTER TABLE panel_settings DROP COLUMN task_retention_days;
+		ALTER TABLE panel_settings DROP COLUMN config_revision_retention;
+		ALTER TABLE panel_settings DROP COLUMN notify_task_failed;
+		ALTER TABLE panel_settings DROP COLUMN notify_agent_offline;
+		ALTER TABLE panel_settings DROP COLUMN notify_agent_online;
+		ALTER TABLE panel_settings DROP COLUMN notify_traffic_quota;
+
+		ALTER TABLE port_traffic_policies DROP COLUMN quota_notification_generation;
+	`); err != nil {
+		t.Fatalf("restore applied v35 schema fixture: %v", err)
+	}
+
+	missingColumns := map[string][]string{
+		"agents": {"presence_notification_state"},
+		"panel_settings": {
+			"revision", "time_zone", "time_display", "default_config_editor",
+			"agent_heartbeat_interval_seconds", "agent_metrics_interval_seconds", "agent_offline_threshold_seconds",
+			"task_stale_timeout_seconds", "install_task_stale_timeout_seconds", "task_max_attempts",
+			"public_ip_probe_interval_seconds", "core_log_retention_days", "agent_core_log_max_mib",
+			"agent_core_log_rotate_count", "metric_retention_days", "audit_retention_days",
+			"task_retention_days", "config_revision_retention", "notify_task_failed", "notify_agent_offline",
+			"notify_agent_online", "notify_traffic_quota",
+		},
+		"port_traffic_policies": {"quota_notification_generation"},
+	}
+	for table, columns := range missingColumns {
+		for _, column := range columns {
+			var exists bool
+			if err := setup.QueryRow(ctx, `
+				SELECT EXISTS (
+					SELECT 1 FROM information_schema.columns
+					WHERE table_schema=current_schema() AND table_name=$1 AND column_name=$2
+				)
+			`, table, column).Scan(&exists); err != nil {
+				t.Fatalf("inspect v35 column %s.%s: %v", table, column, err)
+			}
+			if exists {
+				t.Fatalf("v35 fixture unexpectedly contains %s.%s", table, column)
+			}
+		}
+	}
+
+	dataStore, err := Open(ctx, schema.URL, true)
+	if err != nil {
+		t.Fatalf("open and migrate applied v35 operational schema: %v", err)
+	}
+	defer dataStore.Close()
+	var schemaVersion int
+	if err := dataStore.pool.QueryRow(ctx, `SELECT max(version) FROM qcontrolhub_schema_migrations`).Scan(&schemaVersion); err != nil {
+		t.Fatalf("read migrated schema version: %v", err)
+	}
+	if schemaVersion != currentSchemaVersion {
+		t.Fatalf("migrated schema version = %d, want %d", schemaVersion, currentSchemaVersion)
+	}
+	for table, columns := range missingColumns {
+		for _, column := range columns {
+			var exists bool
+			if err := dataStore.pool.QueryRow(ctx, `
+				SELECT EXISTS (
+					SELECT 1 FROM information_schema.columns
+					WHERE table_schema=current_schema() AND table_name=$1 AND column_name=$2
+				)
+			`, table, column).Scan(&exists); err != nil {
+				t.Fatalf("inspect migrated column %s.%s: %v", table, column, err)
+			}
+			if !exists {
+				t.Errorf("v36 migration did not restore %s.%s", table, column)
+			}
+		}
+	}
+	if t.Failed() {
+		return
+	}
+	settings, err := dataStore.PanelSettings(ctx)
+	if err != nil {
+		t.Fatalf("read panel settings after v35 migration: %v", err)
+	}
+	if settings.Revision != 1 || settings.AgentHeartbeatIntervalSeconds != 15 || !settings.NotifyAgentOffline {
+		t.Fatalf("migrated panel setting defaults = %+v", settings)
+	}
+	if _, err := dataStore.AgentPresenceTransitions(ctx, time.Now().UTC(), 45*time.Second); err != nil {
+		t.Fatalf("read agent presence state after v35 migration: %v", err)
+	}
+	if _, err := dataStore.ClaimTrafficQuotaTransitions(ctx); err != nil {
+		t.Fatalf("read quota notification state after v35 migration: %v", err)
+	}
+}
+
 func TestConcurrentOpenSkipsAppliedSchemaDuringCRUD(t *testing.T) {
 	databaseURL := os.Getenv("QCH_TEST_DATABASE_URL")
 	if databaseURL == "" {
