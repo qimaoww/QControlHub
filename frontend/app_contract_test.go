@@ -491,14 +491,15 @@ func TestNodeSidebarsUseDraggedNodeSettingsOrder(t *testing.T) {
 	if !strings.Contains(order, `export const nodeCardOrderKey = "qcontrolhub:node-card-order"`) {
 		t.Fatal("shared node ordering must retain the existing localStorage key")
 	}
-	if strings.Count(app, "orderNodesBySavedOrder(") != 6 {
-		t.Fatalf("all six node sidebars must use the shared dragged order; got %d call sites", strings.Count(app, "orderNodesBySavedOrder("))
+	if strings.Count(app, "orderNodesBySavedOrder(") != 7 {
+		t.Fatalf("all seven node sidebars must use the shared dragged order; got %d call sites", strings.Count(app, "orderNodesBySavedOrder("))
 	}
 	for _, required := range []string{
 		`import { orderNodesBySavedOrder } from "./modules/node-order.js";`,
 		`const items = orderNodesBySavedOrder(state.data.agents || []);`,
 		`const orderedAgents = orderNodesBySavedOrder(agents);`,
 		`const agents = orderNodesBySavedOrder(state.data.agents || []);`,
+		`<nav class="context-list" aria-label="访问限制节点">${orderedAgents.map`,
 	} {
 		if !strings.Contains(app, required) {
 			t.Errorf("node sidebar shared ordering is missing %q", required)

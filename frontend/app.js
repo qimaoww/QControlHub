@@ -741,7 +741,8 @@ function contextMarkup(title) {
       });
     }
     const selected = state.data.accessControlAgent || "";
-    return `<a class="context-primary ${selected ? "" : "active"}" href="#access-control-all" data-access-control-agent="">全部节点</a><div class="context-section-label"><span>按节点查看</span><b>${agents.length}</b></div><nav class="context-list" aria-label="访问限制节点">${agents.map((agent) => `<a class="${selected === agent.id ? "active" : ""}" href="#access-control-agent-${esc(agent.id)}" data-access-control-agent="${esc(agent.id)}"><i class="status-dot ${agent.status === "online" ? "ok" : ""}"></i><span><strong>${esc(agent.name)}</strong><small>${agent.count} 个入站端口${agent.enabled ? ` · ${agent.enabled} 个已限制` : ""}</small></span></a>`).join("") || "<p>还没有可限制的入站</p>"}</nav>`;
+    const orderedAgents = orderNodesBySavedOrder(agents);
+    return `<a class="context-primary ${selected ? "" : "active"}" href="#access-control-all" data-access-control-agent="">全部节点</a><div class="context-section-label"><span>按节点查看</span><b>${orderedAgents.length}</b></div><nav class="context-list" aria-label="访问限制节点">${orderedAgents.map((agent) => `<a class="${selected === agent.id ? "active" : ""}" href="#access-control-agent-${esc(agent.id)}" data-access-control-agent="${esc(agent.id)}"><i class="status-dot ${agent.status === "online" ? "ok" : ""}"></i><span><strong>${esc(agent.name)}</strong><small>${agent.count} 个入站端口${agent.enabled ? ` · ${agent.enabled} 个已限制` : ""}</small></span></a>`).join("") || "<p>还没有可限制的入站</p>"}</nav>`;
   }
   if (state.route === "settings")
     return `<nav class="context-menu" aria-label="设置目录"><a class="active" href="#settings-basic"><span>01</span>基础设置</a><a href="#settings-runtime"><span>02</span>任务与同步</a><a href="#settings-data"><span>03</span>数据与日志</a><a href="#settings-notify"><span>04</span>事件通知</a><a href="#settings-deployment"><span>05</span>部署状态</a></nav>`;
