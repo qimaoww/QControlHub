@@ -196,6 +196,7 @@ func TestRefreshPathsUseStableViewsAndScopedCoordinators(t *testing.T) {
 		"const firstScreenClass = !previousMain ? \" first-screen\" : \"\"",
 		"const contextChanged = routeChanged || state.data.contextMotionKey !== contextKey",
 		"const contextMotionClass = contextChanged ? \" context-enter\" : \"\"",
+		"data-refresh-key=\"context-${esc(contextKey)}\"",
 		"state.navigationEpoch += 1",
 		"cancelActive: () => routeController?.abort()",
 		"agentModule.cancelAgentInteractions()",
@@ -295,18 +296,36 @@ func TestMotionSystemCoversWorkspaceInteractions(t *testing.T) {
 		"@keyframes qch-first-screen-enter",
 		"@keyframes qch-context-enter",
 		"@keyframes qch-task-result-enter",
+		"@keyframes qch-config-read-enter",
 		".boot::before",
 		".workspace-main.first-screen.page-enter>",
 		".workspace-main.page-enter>",
 		".workspace-main.is-route-pending::before",
 		".context-sidebar.context-enter>",
 		".page-tasks [data-task-result][open]>.task-result-block",
+		".page-live-config .live-config-workspace[data-live-config-phase]",
+		".client-access-toolbar>nav a.active",
+		".substore-target-bar>nav>button.active",
+		".core-log-filter-group button[aria-pressed=true]",
 		"dialog[open]::backdrop",
 		".modal-backdrop>[role=dialog]",
 		"@media(prefers-reduced-motion:reduce)",
 	} {
 		if !strings.Contains(content, required) {
 			t.Errorf("motion system is missing %q", required)
+		}
+	}
+	configs, err := os.ReadFile("modules/configs.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, required := range []string{
+		"const liveConfigPhase = current",
+		"data-live-config-phase=\"${esc(liveConfigPhase)}\"",
+		"data-refresh-key=\"live-config-content-${esc(agent.id)}-${esc(engine)}-${esc(sourceMode)}-${esc(liveConfigPhase)}\"",
+	} {
+		if !strings.Contains(string(configs), required) {
+			t.Errorf("live configuration transition is missing %q", required)
 		}
 	}
 }

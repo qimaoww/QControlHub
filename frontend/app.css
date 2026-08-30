@@ -498,6 +498,7 @@ a.node-card:hover .node-card-open i{transform:translateX(3px)}
 @keyframes qch-node-panel-enter{from{opacity:0;transform:translate3d(0,8px,0)}to{opacity:1;transform:translate3d(0,0,0)}}
 @keyframes qch-metric-glow{from{opacity:.45;filter:saturate(.72)}to{opacity:1;filter:saturate(1)}}
 @keyframes qch-config-step-enter{from{opacity:0;transform:translate3d(0,7px,0) scale(.998)}to{opacity:1;transform:translate3d(0,0,0) scale(1)}}
+@keyframes qch-config-read-enter{from{opacity:0;transform:translate3d(0,8px,0) scale(.996)}to{opacity:1;transform:translate3d(0,0,0) scale(1)}}
 @keyframes qch-context-enter{from{opacity:0;transform:translate3d(-10px,0,0)}to{opacity:1;transform:translate3d(0,0,0)}}
 @keyframes qch-task-result-enter{from{opacity:0;transform:translate3d(0,-6px,0) scale(.995)}to{opacity:1;transform:translate3d(0,0,0) scale(1)}}
 
@@ -518,10 +519,11 @@ a.node-card:hover .node-card-open i{transform:translateX(3px)}
 .workspace-main.page-enter :is(.node-card,.service-card,.workspace-panel,.traffic-policy-card,.task-event-card,.client-access-node-card,.access-control-card,.substore-agent-card,.settings-version-card,.template-card):nth-child(3){animation-delay:90ms}
 .workspace-main.page-enter :is(.node-card,.service-card,.workspace-panel,.traffic-policy-card,.task-event-card,.client-access-node-card,.access-control-card,.substore-agent-card,.settings-version-card,.template-card):nth-child(4){animation-delay:135ms}
 .workspace-main.page-enter :is(.node-card,.service-card,.workspace-panel,.traffic-policy-card,.task-event-card,.client-access-node-card,.access-control-card,.substore-agent-card,.settings-version-card,.template-card):nth-child(n+5){animation-delay:170ms}
-.workspace-main.first-screen.page-enter> *{animation-name:qch-first-screen-enter;animation-duration:520ms}
-.workspace-main.first-screen.page-enter> *:nth-child(2){animation-delay:55ms}
-.workspace-main.first-screen.page-enter> *:nth-child(3){animation-delay:105ms}
-.workspace-main.first-screen.page-enter> *:nth-child(4){animation-delay:150ms}
+.workspace-main.first-screen.page-enter> *{animation-name:qch-first-screen-enter;animation-duration:480ms;animation-delay:0ms}
+.workspace-main.first-screen.page-enter> *:nth-child(n+2){animation-delay:24ms}
+/* The first loaded batch moves as one stable layout. Nested cards inherit the
+   motion of their section instead of receiving a second, misaligned stagger. */
+.workspace-main.first-screen.page-enter> * :is(.node-card,.service-card,.workspace-panel,.traffic-policy-card,.task-event-card,.client-access-node-card,.access-control-card,.substore-agent-card,.settings-version-card,.template-card){animation:none}
 .login-shell.compact-login{animation:qch-first-screen-enter 520ms var(--motion-ease-spring) both}
 .workspace-main.page-enter .node-operations-header{animation:qch-node-panel-enter 420ms var(--motion-ease-out) both}
 .workspace-main.page-enter .node-resource-strip{animation:qch-node-panel-enter 420ms var(--motion-ease-out) 55ms both}
@@ -557,6 +559,17 @@ a.node-card:hover .node-card-open i{transform:translateX(3px)}
 .page-agent-config .builder-actions{transition:box-shadow var(--motion-base) ease,background-color var(--motion-base) ease}
 .page-agent-config .builder-actions:focus-within{box-shadow:0 -10px 26px -22px color-mix(in srgb,var(--accent) 66%,transparent)}
 .page-agent-config .advanced-studio[open]>.advanced-studio-body{animation:qch-expand-enter 320ms var(--motion-ease-out) both}
+.page-live-config .live-config-workspace[data-live-config-phase]{animation:qch-config-read-enter 420ms var(--motion-ease-out) both}
+.page-live-config .live-config-source-switch button{transition:transform var(--motion-fast) var(--motion-ease-spring),background-color var(--motion-fast) ease,border-color var(--motion-fast) ease,color var(--motion-fast) ease,box-shadow var(--motion-fast) ease}
+.page-live-config .live-config-source-switch button:active{transform:translate3d(0,1px,0) scale(.985)}
+.page-live-config .live-config-source-switch button.active{animation:qch-nav-active 280ms var(--motion-ease-spring) both}
+.client-access-toolbar>nav a.active,.substore-target-bar>nav>button.active,.core-log-filter-group button[aria-pressed=true],.dashboard-month-grid button.active{animation:qch-nav-active 280ms var(--motion-ease-spring) both}
+.substore-node-row{transition:background-color var(--motion-base) ease,border-color var(--motion-fast) ease}
+.substore-node-toggle span{transition:transform var(--motion-fast) var(--motion-ease-spring),background-color var(--motion-fast) ease,border-color var(--motion-fast) ease}
+.substore-node-toggle input:checked+span{transform:scale(1.04)}
+.settings-saved-state{transition:background-color var(--motion-base) ease,color var(--motion-base) ease,transform var(--motion-fast) var(--motion-ease-spring)}
+.settings-saved-state.dirty{animation:qch-alert-enter 300ms var(--motion-ease-out) both}
+.access-control-card form.is-dirty>footer{animation:qch-alert-enter 300ms var(--motion-ease-out) both}
 .context-sidebar.context-enter>*:not(.context-brand){animation:qch-context-enter 360ms var(--motion-ease-out) both}
 .context-sidebar.context-enter>*:nth-child(3){animation-delay:30ms}
 .context-sidebar.context-enter>*:nth-child(4){animation-delay:60ms}
