@@ -192,8 +192,14 @@ function responsiveDialogRuleExists() {
 async function testAdminRuntime() {
   await waitFor(() => document.querySelector(".node-card-grid"), "聚合页没有渲染节点卡片");
   const komariInline = await waitFor(
-    () => document.querySelector('[data-komari-link="alpha"]'),
-    "Komari 流量没有融合进网络资源格",
+    () => {
+      const inline = document.querySelector('[data-komari-link="alpha"]');
+      return inline?.querySelector("[data-komari-traffic]")?.textContent ===
+        "4.0 GB / 10.0 GB"
+        ? inline
+        : null;
+    },
+    "Komari 流量没有载入网络资源格",
   );
   assert.equal(komariInline.closest(".node-card-network") !== null, true);
   assert.equal(
