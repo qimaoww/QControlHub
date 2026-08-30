@@ -1025,7 +1025,7 @@ func TestCoreLogStoragePolicyNavigationAndVisibility(t *testing.T) {
 	}
 	for _, required := range []string{
 		`select(item, "ui_font_scale", "界面字号"`,
-		`[90, "小 · 90%"]`, `[100, "正常 · 100%"]`, `[110, "大 · 110%"]`,
+		`[90, "小"]`, `[100, "正常"]`, `[110, "大"]`,
 		`ui_font_scale: number("ui_font_scale")`,
 		`applyUIFontScale?.(saved.ui_font_scale)`,
 	} {
