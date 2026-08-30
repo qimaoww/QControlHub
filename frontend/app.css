@@ -521,6 +521,7 @@ a.node-card:hover .node-card-open i{transform:translateX(3px)}
 .workspace-main.page-enter :is(.node-card,.service-card,.workspace-panel,.traffic-policy-card,.task-event-card,.client-access-node-card,.access-control-card,.substore-agent-card,.settings-version-card,.template-card):nth-child(4){animation-delay:135ms}
 .workspace-main.page-enter :is(.node-card,.service-card,.workspace-panel,.traffic-policy-card,.task-event-card,.client-access-node-card,.access-control-card,.substore-agent-card,.settings-version-card,.template-card):nth-child(n+5){animation-delay:170ms}
 .workspace-main.first-screen.page-enter> *{animation-name:qch-first-screen-enter;animation-duration:480ms;animation-delay:0ms}
+.workspace-main.first-screen.page-enter> *:nth-child(n){animation-delay:0ms}
 /* The first loaded batch moves as one stable layout. Nested cards inherit the
    motion of their section instead of receiving a second, misaligned stagger. */
 .workspace-main.first-screen.page-enter> * :is(.node-card,.service-card,.workspace-panel,.traffic-policy-card,.task-event-card,.client-access-node-card,.access-control-card,.substore-agent-card,.settings-version-card,.template-card){animation:none}

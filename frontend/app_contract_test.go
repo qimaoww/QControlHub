@@ -302,6 +302,7 @@ func TestMotionSystemCoversWorkspaceInteractions(t *testing.T) {
 		"@keyframes qch-config-read-enter",
 		".boot::before",
 		".workspace-main.first-screen.page-enter>",
+		".workspace-main.first-screen.page-enter> *:nth-child(n){animation-delay:0ms}",
 		".workspace-main.page-enter>",
 		".workspace-main.is-route-pending::before",
 		".context-sidebar.context-enter>",
