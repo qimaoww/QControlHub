@@ -8,7 +8,14 @@
   <link rel="stylesheet" href="/assets/app.css?v=__QCH_CSS_VERSION__">
 </head>
 <body>
-  <div id="app"><div class="boot">正在加载控制台...</div></div>
+  <div id="app">
+    <div class="boot">
+      <div class="boot-content" role="status" aria-live="polite">
+        <div class="boot-mark" aria-hidden="true"></div>
+        <span>正在加载控制台...</span>
+      </div>
+    </div>
+  </div>
   <noscript>需要启用 JavaScript 才能使用 QControlHub 控制台。</noscript>
   <script type="module" src="/assets/app.js?v=__QCH_JS_VERSION__"></script>
 </body>
