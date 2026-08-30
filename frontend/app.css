@@ -495,6 +495,8 @@ a.node-card:hover .node-card-open i{transform:translateX(3px)}
 @keyframes qch-boot-enter{from{opacity:0;transform:translate3d(0,6px,0)}to{opacity:1;transform:translate3d(0,0,0)}}
 @keyframes qch-boot-orbit{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
 @keyframes qch-first-screen-enter{from{opacity:0;transform:translate3d(0,10px,0) scale(.995)}to{opacity:1;transform:translate3d(0,0,0) scale(1)}}
+@keyframes qch-node-panel-enter{from{opacity:0;transform:translate3d(0,8px,0)}to{opacity:1;transform:translate3d(0,0,0)}}
+@keyframes qch-metric-glow{from{opacity:.45;filter:saturate(.72)}to{opacity:1;filter:saturate(1)}}
 
 .boot{min-height:100vh;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;padding-top:84px;background:var(--canvas);color:var(--muted);font-size:calc(12px * var(--ui-font-scale));font-weight:700;letter-spacing:.02em;animation:qch-boot-enter 360ms var(--motion-ease-out) both}
 .boot::before{content:"";width:42px;height:42px;position:absolute;top:calc(50% - 29px);left:calc(50% - 21px);border:2px solid color-mix(in srgb,var(--accent) 18%,transparent);border-top-color:var(--accent);border-radius:50%;animation:qch-boot-orbit 1.05s linear infinite}
@@ -518,6 +520,21 @@ a.node-card:hover .node-card-open i{transform:translateX(3px)}
 .workspace-main.first-screen.page-enter> *:nth-child(3){animation-delay:105ms}
 .workspace-main.first-screen.page-enter> *:nth-child(4){animation-delay:150ms}
 .login-shell.compact-login{animation:qch-first-screen-enter 520ms var(--motion-ease-spring) both}
+.workspace-main.page-enter .node-operations-header{animation:qch-node-panel-enter 420ms var(--motion-ease-out) both}
+.workspace-main.page-enter .node-resource-strip{animation:qch-node-panel-enter 420ms var(--motion-ease-out) 55ms both}
+.workspace-main.page-enter .node-settings-tabs{animation:qch-node-panel-enter 420ms var(--motion-ease-out) 95ms both}
+.workspace-main.page-enter .node-settings-panels{animation:qch-node-panel-enter 420ms var(--motion-ease-out) 130ms both}
+.node-settings-tabs button:after{transform:scaleX(0);transform-origin:left;transition:transform var(--motion-base) var(--motion-ease-spring),background-color var(--motion-fast) ease}
+.node-settings-tabs button[aria-selected="true"]:after{transform:scaleX(1)}
+.node-tab-panel:not([hidden]){animation:qch-node-panel-enter 360ms var(--motion-ease-out) both}
+.page-node-settings .node-resource-strip progress::-webkit-progress-value{animation:qch-metric-glow 520ms var(--motion-ease-out) both}
+.page-node-settings .node-live-state i{transition:transform var(--motion-base) var(--motion-ease-spring),box-shadow var(--motion-base) ease}
+.page-node-settings .node-live-state:not(:has(.status-dot.bad)) i{animation:task-feedback-pulse 1.8s ease-in-out infinite}
+.page-node-settings .metric-trend-empty{background:linear-gradient(110deg,var(--surface) 35%,color-mix(in srgb,var(--accent-soft) 58%,var(--surface)) 50%,var(--surface) 65%);background-size:220% 100%;animation:qch-metric-glow 620ms var(--motion-ease-out) both}
+.page-node-settings .core-runtime-row{transition:background-color var(--motion-fast) ease,border-color var(--motion-fast) ease}
+.page-node-settings .core-runtime-row .core-version-panel>summary{transition:background-color var(--motion-fast) ease,transform var(--motion-fast) var(--motion-ease-spring)}
+.page-node-settings .core-runtime-row .core-version-panel>summary:active{transform:translate3d(0,1px,0)}
+.page-node-settings .core-version-panel[open]>summary span{transition:color var(--motion-fast) ease,transform var(--motion-base) var(--motion-ease-spring);transform:translateX(2px)}
 
 :is(.node-card,.workspace-panel,.service-card,.traffic-policy-card,.task-event-card,.client-access-node-card,.access-control-card,.substore-agent-card,.settings-version-card,.template-card){transition:transform var(--motion-base) var(--motion-ease-out),box-shadow var(--motion-base) var(--motion-ease-out),border-color var(--motion-base) ease}
 :is(.node-card,.workspace-panel,.service-card,.traffic-policy-card,.task-event-card,.client-access-node-card,.access-control-card,.substore-agent-card,.settings-version-card,.template-card):not(.dragging):hover{transform:translate3d(0,-3px,0);box-shadow:var(--shadow-lift)}
