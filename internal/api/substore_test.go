@@ -150,17 +150,25 @@ func TestSubStoreSubscriptionCreateUpdateAndOwnership(t *testing.T) {
 		t.Fatalf("upgrade legacy owned subscription = %t, %#v, %v", created, stored, err)
 	}
 	stored["custom-option"] = "preserved"
+	stored["displayName"] = "Sub-Store custom display"
+	stored["display-name"] = "Sub-Store custom display"
+	stored["noFlow"] = false
+	stored["remark"] = "Keep this remark"
+	stored["process"] = []any{"process-rule"}
 	created, err = server.upsertSubStoreSubscription(context.Background(), settings, target, "vless://three#Three")
-	if err != nil || created || stored["content"] != "vless://one#One\nvless://two#Two\nvless://three#Three" || stored["custom-option"] != "preserved" {
+	if err != nil || created || stored["content"] != "vless://one#One\nvless://three#Three" || stored["custom-option"] != "preserved" || stored["displayName"] != "Sub-Store custom display" || stored["display-name"] != "Sub-Store custom display" || stored["noFlow"] != false || stored["remark"] != "Keep this remark" {
 		t.Fatalf("incremental sync preserved previous nodes = %t, %#v, %v", created, stored, err)
 	}
+	if process, ok := stored["process"].([]any); !ok || len(process) != 1 || process[0] != "process-rule" {
+		t.Fatalf("incremental sync preserved Sub-Store processing rules = %#v", stored["process"])
+	}
 	renamed, err := server.renameSubStoreSubscription(context.Background(), settings, target, "QControlHub Renamed")
-	if err != nil || !renamed || stored["name"] != "QControlHub Renamed" || stored["content"] != "vless://one#One\nvless://two#Two\nvless://three#Three" || stored["custom-option"] != "preserved" {
+	if err != nil || !renamed || stored["name"] != "QControlHub Renamed" || stored["content"] != "vless://one#One\nvless://three#Three" || stored["custom-option"] != "preserved" {
 		t.Fatalf("rename subscription in place = %t, %#v, %v", renamed, stored, err)
 	}
 	target.SubscriptionName = "QControlHub Renamed"
 	created, err = server.upsertSubStoreSubscription(context.Background(), settings, target, "vless://renamed#Renamed")
-	if err != nil || created || stored["name"] != "QControlHub Renamed" || stored["content"] != "vless://one#One\nvless://two#Two\nvless://three#Three\nvless://renamed#Renamed" {
+	if err != nil || created || stored["name"] != "QControlHub Renamed" || stored["content"] != "vless://one#One\nvless://renamed#Renamed" {
 		t.Fatalf("rename subscription = %t, %#v, %v", created, stored, err)
 	}
 	target.SubscriptionName = "Imported Group"

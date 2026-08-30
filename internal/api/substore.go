@@ -88,6 +88,7 @@ type subStoreSyncResult struct {
 
 type subStoreImportTargetRequest struct {
 	SubscriptionName string `json:"subscription_name"`
+	DisplayName      string `json:"display_name"`
 }
 
 type subStoreRemoteTarget struct {
@@ -476,6 +477,18 @@ func (s *Server) importSubStoreRemoteTarget(w http.ResponseWriter, request *http
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	displayName := strings.TrimSpace(input.DisplayName)
+	if displayName == "" {
+		displayName = name
+	}
+	if _, err := validateSubStoreImportName(displayName); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if displayName == "." || displayName == ".." {
+		writeError(w, http.StatusBadRequest, "同步组名称无效")
+		return
+	}
 	var subscriptions []map[string]any
 	if _, err := s.subStoreRequest(request.Context(), settings.EndpointURL, http.MethodGet, "/api/subs", nil, &subscriptions); err != nil {
 		writeError(w, http.StatusBadGateway, err.Error())
@@ -495,7 +508,12 @@ func (s *Server) importSubStoreRemoteTarget(w http.ResponseWriter, request *http
 	}
 	integrationID, _ := remote["qcontrolhub_integration_id"].(string)
 	integrationID = strings.TrimSpace(integrationID)
-	claimRemote := !strings.HasPrefix(integrationID, "ssi_") || utf8.RuneCountInString(integrationID) > 100
+	originalIntegrationID := integrationID
+	// A newly created local target must own the remote group with a fresh
+	// identity. Reusing an identity left by another control plane would make the
+	// two panels race on the same group and would also trust stale managed-node
+	// metadata from that panel.
+	claimRemote := true
 	if claimRemote {
 		integrationID, err = core.NewID("ssi")
 		if err != nil {
@@ -514,9 +532,27 @@ func (s *Server) importSubStoreRemoteTarget(w http.ResponseWriter, request *http
 			payload[key] = value
 		}
 		payload["qcontrolhub_integration_id"] = integrationID
+		payload["qcontrolhub_managed_nodes"] = []any{}
 		if _, patchErr := s.subStoreRequest(request.Context(), settings.EndpointURL, http.MethodPatch, "/api/sub/"+name, payload, nil); patchErr != nil {
 			_ = s.store.DeleteSubStoreSyncTarget(request.Context(), target.ID)
 			writeError(w, http.StatusBadGateway, patchErr.Error())
+			return
+		}
+	}
+	if displayName != target.DisplayName {
+		targetID := target.ID
+		target, err = s.store.UpdateSubStoreSyncTarget(request.Context(), targetID, displayName, target.SubscriptionName, target.SyncMode)
+		if err != nil {
+			if claimRemote {
+				rollback := cloneSubStoreSubscription(remote)
+				rollback["qcontrolhub_integration_id"] = originalIntegrationID
+				if _, restoreErr := s.subStoreRequest(request.Context(), settings.EndpointURL, http.MethodPatch, "/api/sub/"+name, rollback, nil); restoreErr != nil {
+					writeInternalError(w, fmt.Errorf("save local Sub-Store target name: %v; restore ownership: %w", err, restoreErr))
+					return
+				}
+			}
+			_ = s.store.DeleteSubStoreSyncTarget(request.Context(), targetID)
+			writeStoreError(w, err)
 			return
 		}
 	}
@@ -547,6 +583,18 @@ func (s *Server) linkSubStoreRemoteTarget(w http.ResponseWriter, request *http.R
 	name, err := validateSubStoreImportName(input.SubscriptionName)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	displayName := strings.TrimSpace(input.DisplayName)
+	if displayName == "" {
+		displayName = target.DisplayName
+	}
+	if _, err := validateSubStoreImportName(displayName); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if displayName == "." || displayName == ".." {
+		writeError(w, http.StatusBadRequest, "同步组名称无效")
 		return
 	}
 	var subscriptions []map[string]any
@@ -587,14 +635,22 @@ func (s *Server) linkSubStoreRemoteTarget(w http.ResponseWriter, request *http.R
 		}
 	}
 	if name == target.SubscriptionName && remoteOwner == target.IntegrationID {
+		if displayName != target.DisplayName {
+			updated, updateErr := s.store.UpdateSubStoreSyncTarget(request.Context(), target.ID, displayName, target.SubscriptionName, target.SyncMode)
+			if updateErr != nil {
+				writeStoreError(w, updateErr)
+				return
+			}
+			target = updated
+		}
 		writeJSON(w, http.StatusOK, target)
 		return
 	}
-	validRemoteOwner := strings.HasPrefix(remoteOwner, "ssi_") && utf8.RuneCountInString(remoteOwner) <= 100
-	if validRemoteOwner && remoteOwner != target.IntegrationID {
-		writeError(w, http.StatusConflict, "该 Sub-Store 组属于其他 QControlHub，无法编辑关联")
-		return
-	}
+	// Selecting an existing remote group is an explicit relink operation. A group
+	// may still carry the integration identity of a previous control plane, so
+	// claim it for this target instead of creating a duplicate local subscription.
+	// The conflict check above still prevents two local targets from claiming the
+	// same remote identity.
 	integrationID := target.IntegrationID
 	needsClaim := remoteOwner != integrationID
 	type ownershipChange struct {
@@ -639,6 +695,10 @@ func (s *Server) linkSubStoreRemoteTarget(w http.ResponseWriter, request *http.R
 	if needsClaim {
 		claimed := cloneSubStoreSubscription(remote)
 		claimed["qcontrolhub_integration_id"] = integrationID
+		// Ownership changed from another panel; its managed-node list is not
+		// authoritative for this target. The next sync will seed this panel's
+		// list without deleting the existing remote content.
+		claimed["qcontrolhub_managed_nodes"] = []any{}
 		if _, err := s.subStoreRequest(request.Context(), settings.EndpointURL, http.MethodPatch, "/api/sub/"+name, claimed, nil); err != nil {
 			if restoreErr := restoreOwnership(); restoreErr != nil {
 				writeInternalError(w, fmt.Errorf("claim Sub-Store group: %v; restore ownership: %w", err, restoreErr))
@@ -648,7 +708,7 @@ func (s *Server) linkSubStoreRemoteTarget(w http.ResponseWriter, request *http.R
 			return
 		}
 	}
-	updated, updateErr := s.store.UpdateSubStoreSyncTarget(request.Context(), target.ID, target.DisplayName, name, target.SyncMode)
+	updated, updateErr := s.store.UpdateSubStoreSyncTarget(request.Context(), target.ID, displayName, name, target.SyncMode)
 	if updateErr != nil {
 		if restoreErr := restoreOwnership(); restoreErr != nil {
 			writeInternalError(w, fmt.Errorf("link Sub-Store group: %v; restore ownership: %w", updateErr, restoreErr))
@@ -719,6 +779,14 @@ func subStoreSubscriptionUpdate(existing, desired map[string]any) map[string]any
 	updated := cloneSubStoreSubscription(existing)
 	for key, value := range desired {
 		updated[key] = value
+	}
+	// These options are intentionally user-owned in Sub-Store. Keep them when
+	// the control plane refreshes node content, while still updating the name,
+	// source, content, and QControlHub ownership fields above.
+	for _, key := range []string{"displayName", "display-name", "noFlow", "remark", "process"} {
+		if value, ok := existing[key]; ok {
+			updated[key] = value
+		}
 	}
 	return updated
 }
@@ -1062,11 +1130,16 @@ func (s *Server) upsertSubStoreSubscription(ctx context.Context, settings core.S
 	}
 	if mode == core.SubStoreSyncModeIncremental {
 		existingContent, _ := owned["content"].(string)
-		// Incremental sync is additive: update nodes with the same name and append
-		// new ones, while preserving every existing remote node. This is especially
-		// important for groups created before incremental mode, which have no
-		// ownership metadata and must never be treated as disposable legacy data.
-		merged, mergeErr := mergeSubStoreContentByName(existingContent, content, nil)
+		// Once ownership metadata exists, remove nodes that this target managed in
+		// the previous sync but are no longer selected. A legacy group without the
+		// metadata is different: its existing nodes have unknown provenance, so the
+		// first incremental sync must preserve all of them and only start tracking
+		// the nodes written by this run.
+		var previouslyManaged []string
+		if _, metadataPresent := owned["qcontrolhub_managed_nodes"]; metadataPresent {
+			previouslyManaged = subStoreManagedNames(owned["qcontrolhub_managed_nodes"])
+		}
+		merged, mergeErr := mergeSubStoreContentByName(existingContent, content, previouslyManaged)
 		if mergeErr != nil {
 			return false, mergeErr
 		}
