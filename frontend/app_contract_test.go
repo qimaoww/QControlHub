@@ -1006,7 +1006,8 @@ func TestCoreLogStoragePolicyNavigationAndVisibility(t *testing.T) {
 	for _, required := range []string{
 		`href="#settings-data"><span>03</span>数据与日志`,
 		`href="#settings-notify"><span>04</span>事件通知`,
-		`href="#settings-deployment"><span>05</span>部署状态`,
+		`href="#settings-komari"><span>05</span>Komari 联动`,
+		`href="#settings-deployment"><span>06</span>部署状态`,
 		`"settings-data": "settings"`,
 	} {
 		if !strings.Contains(appContent, required) {

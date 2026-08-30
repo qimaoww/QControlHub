@@ -12,7 +12,21 @@ import (
 	"testing"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
+	"github.com/qimaoww/qcontrolhub/internal/komari"
 )
+
+func TestKomariNodeResourceIncludesCurrentPeriodUsage(t *testing.T) {
+	resource := komariNodeResource(komari.Node{
+		UUID:            "komari-node",
+		TrafficLimit:    10 << 30,
+		TrafficResetDay: 27,
+		TrafficUsed:     4 << 30,
+		TrafficUsedSet:  true,
+	})
+	if resource.UUID != "komari-node" || resource.TrafficResetDay != 27 || resource.TrafficUsed != 4<<30 || !resource.TrafficUsedAvailable {
+		t.Fatalf("Komari API resource = %+v", resource)
+	}
+}
 
 func TestDecodeJSONAcceptsMaximumConfigAfterEscapingExpansion(t *testing.T) {
 	t.Parallel()
@@ -64,6 +78,30 @@ func TestEveryProxyAcceptsMaximumConfigEnvelope(t *testing.T) {
 		if amount < core.MaxConfigEnvelopeBytes {
 			t.Fatalf("%s body limit = %d bytes, smaller than maximum configuration envelope %d", path, amount, core.MaxConfigEnvelopeBytes)
 		}
+	}
+}
+
+func TestPanelSettingsResponseMasksKomariAPIKey(t *testing.T) {
+	settings := core.DefaultPanelSettings()
+	settings.KomariAPIKey = "secret-komari-key"
+	response := panelSettingsResponse(settings)
+	if response.KomariAPIKey == settings.KomariAPIKey || response.KomariAPIKey == "" {
+		t.Fatalf("Komari API key was not masked: %q", response.KomariAPIKey)
+	}
+}
+
+func TestPanelSettingsRequestDecodesKomariOverrides(t *testing.T) {
+	var input struct {
+		core.PanelSettings
+		KomariURL         *string `json:"komari_url"`
+		KomariAPIKey      *string `json:"komari_api_key"`
+		ClearKomariAPIKey bool    `json:"clear_komari_api_key"`
+	}
+	if err := json.Unmarshal([]byte(`{"komari_url":"https://komari.example","komari_api_key":"key","clear_komari_api_key":true}`), &input); err != nil {
+		t.Fatal(err)
+	}
+	if input.KomariURL == nil || *input.KomariURL != "https://komari.example" || input.KomariAPIKey == nil || *input.KomariAPIKey != "key" || !input.ClearKomariAPIKey {
+		t.Fatalf("decoded Komari settings = %+v, url=%v, key=%v, clear=%v", input.PanelSettings, input.KomariURL, input.KomariAPIKey, input.ClearKomariAPIKey)
 	}
 }
 

@@ -1976,9 +1976,13 @@ CREATE TABLE IF NOT EXISTS panel_settings (
     task_poll_interval_ms integer NOT NULL CHECK (task_poll_interval_ms IN (600,1000,2000,5000)),
 	core_log_minimum_level varchar(10) NOT NULL DEFAULT 'debug' CHECK (core_log_minimum_level IN ('debug','info','warning','error','critical','off')),
     webhook_url varchar(500) NOT NULL DEFAULT '',
+    komari_url varchar(500) NOT NULL DEFAULT '',
+    komari_api_key varchar(500) NOT NULL DEFAULT '',
     updated_at timestamptz NOT NULL
 );
 ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS webhook_url varchar(500) NOT NULL DEFAULT '';
+ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS komari_url varchar(500) NOT NULL DEFAULT '';
+ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS komari_api_key varchar(500) NOT NULL DEFAULT '';
 ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS core_log_minimum_level varchar(10) NOT NULL DEFAULT 'debug';
 ALTER TABLE panel_settings DROP CONSTRAINT IF EXISTS panel_settings_core_log_minimum_level_check;
 ALTER TABLE panel_settings ADD CONSTRAINT panel_settings_core_log_minimum_level_check CHECK (core_log_minimum_level IN ('debug','info','warning','error','critical','off'));

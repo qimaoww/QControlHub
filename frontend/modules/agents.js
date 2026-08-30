@@ -19,6 +19,50 @@ export function coreSourceForInstall(engine, channel, rawSource) {
     : undefined;
 }
 
+function monthBoundary(year, month, resetDay) {
+  const lastDay = new Date(year, month + 1, 0).getDate();
+  return new Date(year, month, Math.min(resetDay, lastDay));
+}
+
+export function komariResetDay(server = {}) {
+  const explicit = Number(server.traffic_reset_day);
+  if (Number.isInteger(explicit) && explicit >= 1 && explicit <= 31)
+    return explicit;
+  const billingCycle = Number(server.billing_cycle);
+  if (billingCycle < 27 || billingCycle > 32) return 0;
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(
+    String(server.expired_at || "").trim(),
+  );
+  const expirationDay = Number(match?.[3]);
+  return Number.isInteger(expirationDay) && expirationDay >= 1 && expirationDay <= 31
+    ? expirationDay
+    : 0;
+}
+
+export function komariCycleRange(resetDay, now = new Date()) {
+  resetDay = Number(resetDay);
+  if (
+    !Number.isInteger(resetDay) ||
+    resetDay < 1 ||
+    resetDay > 31 ||
+    !(now instanceof Date) ||
+    Number.isNaN(now.getTime())
+  )
+    return "";
+  const year = now.getFullYear();
+  const month = now.getMonth();
+  const currentBoundary = monthBoundary(year, month, resetDay);
+  const startsThisMonth = now.getDate() >= currentBoundary.getDate();
+  const start = startsThisMonth
+    ? currentBoundary
+    : monthBoundary(year, month - 1, resetDay);
+  const end = startsThisMonth
+    ? monthBoundary(year, month + 1, resetDay)
+    : currentBoundary;
+  const label = (value) => `${value.getMonth() + 1}.${value.getDate()}`;
+  return `${label(start)}–${label(end)}`;
+}
+
 export function batchAgentEligibility(agent, action, engine) {
   if (!agent || agent.status !== "online")
     return { eligible: false, reason: "节点离线，不能执行当前动作" };
@@ -616,6 +660,61 @@ export function clearNodeCardDragState(
 
 export function installAgents(ctx) {
   const { api, optionalAPI, state, engines, can, esc, engineName, statusTone, serviceStatusName, short, date, ago, heartbeat, percent, bytes, conciseVersion, rate, actionName, serviceActionDisabled, trafficChart, renderConfigDiff, notify, confirmAction, shell } = ctx;
+  const komariUUIDFor = (agent) => String(agent?.labels?.komari_uuid || "").trim();
+  const komariNetworkMarkup = (agent) => {
+    const uuid = komariUUIDFor(agent);
+    if (!uuid) return "";
+    return `<div class="node-card-komari-cycle" data-komari-link="${esc(agent.id)}"><small><b data-komari-traffic>读取中…</b><i data-komari-cycle>周期读取中…</i></small><progress data-komari-progress aria-label="Komari 月流量使用率" max="100" value="0"></progress></div>`;
+  };
+  const updateKomariDisplay = (root, link, error = "") => {
+    const card = root?.querySelector?.("[data-komari-link]");
+    if (!card) return;
+    const traffic = card.querySelector("[data-komari-traffic]");
+    const cycle = card.querySelector("[data-komari-cycle]");
+    const progress = card.querySelector("[data-komari-progress]");
+    if (error || !link?.server) {
+      if (traffic) traffic.textContent = error || "Komari 读取失败";
+      if (cycle) cycle.textContent = "检查联动设置";
+      if (progress) {
+        progress.value = 0;
+        progress.hidden = false;
+      }
+      card.classList.add("unavailable");
+      return;
+    }
+    const server = link.server;
+    const hasEffectiveLimit = server.effective_traffic_limit_available === true;
+    const limit = Number(hasEffectiveLimit ? server.effective_traffic_limit : server.traffic_limit || 0);
+    const usedAvailable = server.traffic_used_available === true;
+    const used = Math.max(0, Number(server.traffic_used || 0));
+    const resetDay = komariResetDay(server);
+    if (traffic)
+      traffic.textContent = limit > 0
+        ? `${usedAvailable ? bytes(used) : "—"} / ${bytes(limit)}`
+        : "不限流量";
+    if (cycle)
+      cycle.textContent = komariCycleRange(resetDay) || "周期日期未设置";
+    if (progress) {
+      progress.hidden = !(limit > 0);
+      progress.value = limit > 0 && usedAvailable
+        ? Math.min(100, (used / limit) * 100)
+        : 0;
+      progress.setAttribute(
+        "aria-label",
+        limit > 0 && usedAvailable
+          ? `Komari 月流量使用率 ${progress.value.toFixed(1)}%`
+          : "Komari 月流量使用率暂不可用",
+      );
+    }
+    card.classList.toggle("usage-unavailable", limit > 0 && !usedAvailable);
+    card.classList.remove("unavailable");
+  };
+  const loadKomariDisplay = (agent, root) => {
+    if (!komariUUIDFor(agent) || !root) return;
+    api(`/agents/${encodeURIComponent(agent.id)}/komari`)
+      .then((link) => updateKomariDisplay(root, link))
+      .catch((error) => updateKomariDisplay(root, null, error?.message || "Komari 读取失败"));
+  };
   const cardIPRow = (row) => {
     const value = row.value || "";
     const title = value ? `复制 ${row.label} 地址` : "暂无地址";
@@ -901,7 +1000,7 @@ async function nodeSettings(presetMode = false, { overview: preloadedOverview } 
           <div class="node-settings-panels">
             <section id="${esc(tabID("cores-panel"))}" class="node-tab-panel node-cores-panel" data-node-panel="cores" role="tabpanel" aria-labelledby="${esc(tabID("cores-tab"))}" ${activeTab === "cores" ? "" : "hidden"}><header class="node-panel-heading"><div><h3>内核管理</h3><small>服务状态与版本</small></div><span data-installed-summary>${installedCount ? `${installedCount} 个已安装` : "尚未安装内核"}</span></header><div class="core-runtime-list">${services}</div></section>
             <section id="${esc(tabID("metrics-panel"))}" class="node-tab-panel node-metrics-panel" data-node-panel="metrics" role="tabpanel" aria-labelledby="${esc(tabID("metrics-tab"))}" ${activeTab === "metrics" ? "" : "hidden"}><header class="node-panel-heading"><div><h3>流量趋势</h3><small>最近 24 小时</small></div><span data-metric-text="stamp">${metrics.collected_at ? `采集于 ${ago(metrics.collected_at)}` : "等待资源数据"}</span></header><section class="metric-trend-empty" data-metric-history="${esc(agent.id)}" aria-label="暂无指标趋势"><span>⌁</span><b>正在载入指标趋势</b><small>节点上报指标后显示最近 24 小时的上下行速率。</small></section></section>
-          <section id="${esc(tabID("agent-panel"))}" class="node-tab-panel node-agent-panel" data-node-panel="agent" role="tabpanel" aria-labelledby="${esc(tabID("agent-tab"))}" ${activeTab === "agent" ? "" : "hidden"}><header class="node-panel-heading"><div><h3>Agent 与身份</h3><small>注册信息和安全通道</small></div><span data-agent-version>${esc(agent.version || "未知")}</span></header><dl class="identity-list node-identity-list"><div><dt>节点 ID</dt><dd><code>${esc(agent.id)}</code></dd></div><div><dt>系统平台</dt><dd>${esc(agent.os)} / ${esc(agent.arch)}</dd></div><div><dt>Agent 版本</dt><dd data-agent-version>${esc(agent.version || "未知")}</dd></div><div><dt>注册时间</dt><dd>${date(agent.enrolled_at)}</dd></div><div><dt>安全通道</dt><dd>WSS · Ed25519 签名</dd></div></dl><section class="node-public-ips" aria-label="公网地址"><header><b>公网地址 · 双栈</b><small>手动设置优先 · 出口探测 · 默认路由接口 · 已验证连接来源</small><small class="node-address-note" data-node-connection-address ${connectionAddressNote ? "" : "hidden"}>${esc(connectionAddressNote)}</small></header>${addressRows.map((row) => `<div class="public-ip-row ${row.ok ? "" : "empty"}" data-ip-family="${row.cls}" data-ip-source="${esc(row.source)}" ${row.value ? "" : "hidden"}><span class="ip-family ${row.cls}">${row.label}</span><code>${esc(row.value || "未探测到")}</code><small>${esc(row.source)}</small></div>`).join("")}</section>${labels ? `<div class="labels">${labels}</div>` : ""}<footer class="node-identity-refresh"><span>节点身份已验证</span><div>${can("enrollment.manage") && agent.enrollment_command_available ? `<button class="button small" type="button" data-view-enrollment-command="${esc(agent.id)}">查看安装部署命令</button>` : ""}</div></footer>${can("agents.manage") ? `<section class="node-danger-zone"><span><b>删除节点</b><small>断开节点并清理关联配置；QAgent 不会被远程卸载。</small></span><button class="button small danger-button" type="button" data-delete="${esc(agent.id)}">删除节点</button></section>` : ""}</section>
+          <section id="${esc(tabID("agent-panel"))}" class="node-tab-panel node-agent-panel" data-node-panel="agent" role="tabpanel" aria-labelledby="${esc(tabID("agent-tab"))}" ${activeTab === "agent" ? "" : "hidden"}><header class="node-panel-heading"><div><h3>Agent 与身份</h3><small>注册信息和安全通道</small></div><span data-agent-version>${esc(agent.version || "未知")}</span></header><dl class="identity-list node-identity-list"><div><dt>节点 ID</dt><dd><code>${esc(agent.id)}</code></dd></div><div><dt>系统平台</dt><dd>${esc(agent.os)} / ${esc(agent.arch)}</dd></div><div><dt>Agent 版本</dt><dd data-agent-version>${esc(agent.version || "未知")}</dd></div><div><dt>注册时间</dt><dd>${date(agent.enrolled_at)}</dd></div><div><dt>安全通道</dt><dd>WSS · Ed25519 签名</dd></div></dl><section class="node-public-ips" aria-label="公网地址"><header><b>公网地址 · 双栈</b><small>手动设置优先 · 出口探测 · 默认路由接口 · 已验证连接来源</small><small class="node-address-note" data-node-connection-address ${connectionAddressNote ? "" : "hidden"}>${esc(connectionAddressNote)}</small></header>${addressRows.map((row) => `<div class="public-ip-row ${row.ok ? "" : "empty"}" data-ip-family="${row.cls}" data-ip-source="${esc(row.source)}" ${row.value ? "" : "hidden"}><span class="ip-family ${row.cls}">${row.label}</span><code>${esc(row.value || "未探测到")}</code><small>${esc(row.source)}</small></div>`).join("")}</section><section class="node-komari-settings" aria-label="Komari 联动"><header><div><b>Komari 联动</b><small>填写 Komari 服务器 UUID；周期日期、已用量和额度会显示在节点卡片的网络区。</small></div></header><form data-komari-form="${esc(agent.id)}"><label><span>Komari 服务器 UUID</span><input name="uuid" maxlength="100" autocomplete="off" value="${esc(komariUUIDFor(agent))}" placeholder="例如 4addbaf1-7ffb-474c-98ee-4ffd476755ff" ${can("agents.manage") ? "" : "disabled"}></label><button class="button small" type="submit" ${can("agents.manage") ? "" : "disabled"}>保存</button></form>${komariUUIDFor(agent) ? "" : `<p class="node-komari-empty">尚未关联 Komari 服务器</p>`}</section>${labels ? `<div class="labels">${labels}</div>` : ""}<footer class="node-identity-refresh"><span>节点身份已验证</span><div>${can("enrollment.manage") && agent.enrollment_command_available ? `<button class="button small" type="button" data-view-enrollment-command="${esc(agent.id)}">查看安装部署命令</button>` : ""}</div></footer>${can("agents.manage") ? `<section class="node-danger-zone"><span><b>删除节点</b><small>断开节点并清理关联配置；QAgent 不会被远程卸载。</small></span><button class="button small danger-button" type="button" data-delete="${esc(agent.id)}">删除节点</button></section>` : ""}</section>
           </div>
         </section>`;
       }
@@ -940,7 +1039,7 @@ async function nodeSettings(presetMode = false, { overview: preloadedOverview } 
         return `<${cardTag} class="node-card ${batchMode ? "batch-selecting" : ""}" ${cardInteraction} data-refresh-key="agent-${esc(agent.id)}" data-agent-node="${esc(agent.id)}" data-agent-metrics="${esc(agent.id)}" data-state="${agent.status === "online" ? "online" : "offline"}" data-available="${metrics.collected_at ? 1 : 0}">
               <header class="node-card-head"><span class="machine-avatar" aria-hidden="true">●</span><div class="node-card-title"><strong>${esc(agent.name)}</strong><small data-core-installed-summary>${esc(agent.os)} / ${esc(agent.arch)} · ${installedCount ? `${installedCount}/${(agent.capabilities || []).length} 内核已安装` : "尚未安装内核"}</small></div><span class="node-card-state"><i class="status-dot ${statusTone(agent.status)}" data-agent-status-dot></i><b data-agent-status-label>${agent.status === "online" ? "在线" : "离线"}</b><small data-agent-heartbeat>${esc(heartbeat(agent.last_seen))}</small></span>${batchMode ? batchSelect : '<span class="node-card-grip" title="拖动调整顺序" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 6h.01M9 12h.01M9 18h.01M15 6h.01M15 12h.01M15 18h.01"/></svg></span>'}</header>
               <div class="node-card-ips" aria-label="公网地址">${addressRows.map(cardIPRow).join("")}<small class="node-address-note" data-node-connection-address ${connectionAddressNote ? "" : "hidden"}>${esc(connectionAddressNote)}</small></div>
-              <section class="node-card-resources" aria-label="节点资源"><div><span>CPU</span><strong data-metric-text="cpu">${metrics.cpu_available ? `${Number(metrics.cpu_percent).toFixed(1)}%` : "等待采集"}</strong><progress aria-label="CPU 使用率" data-metric-progress="cpu" max="100" value="${metrics.cpu_available ? Number(metrics.cpu_percent) : 0}"></progress></div><div><span>内存</span><strong data-metric-text="memory">${metrics.memory_available ? `${bytes(metrics.memory_used_bytes)} / ${bytes(metrics.memory_total_bytes)}` : "等待采集"}</strong><progress aria-label="内存使用率" data-metric-progress="memory" max="100" value="${percent(metrics.memory_used_bytes, metrics.memory_total_bytes)}"></progress></div><div><span>磁盘</span><strong data-metric-text="disk">${metrics.disk_available ? `${bytes(metrics.disk_used_bytes)} / ${bytes(metrics.disk_total_bytes)}` : "等待采集"}</strong><progress aria-label="根磁盘使用率" data-metric-progress="disk" max="100" value="${percent(metrics.disk_used_bytes, metrics.disk_total_bytes)}"></progress></div><div><span>网络</span><strong>↓ <i data-metric-text="download-rate">${metrics.network_available ? rate(metrics.network_rx_bps) : "等待采集"}</i> · ↑ <i data-metric-text="upload-rate">${metrics.network_available ? rate(metrics.network_tx_bps) : "等待采集"}</i></strong><small>累计 ↓ <b data-metric-text="download-total">${metrics.network_available ? bytes(metrics.network_rx_bytes) : "—"}</b> · ↑ <b data-metric-text="upload-total">${metrics.network_available ? bytes(metrics.network_tx_bytes) : "—"}</b></small></div><span class="machine-resource-live" data-metric-poll role="status" aria-label="资源自动更新"></span></section>
+              <section class="node-card-resources" aria-label="节点资源"><div><span>CPU</span><strong data-metric-text="cpu">${metrics.cpu_available ? `${Number(metrics.cpu_percent).toFixed(1)}%` : "等待采集"}</strong><progress aria-label="CPU 使用率" data-metric-progress="cpu" max="100" value="${metrics.cpu_available ? Number(metrics.cpu_percent) : 0}"></progress></div><div><span>内存</span><strong data-metric-text="memory">${metrics.memory_available ? `${bytes(metrics.memory_used_bytes)} / ${bytes(metrics.memory_total_bytes)}` : "等待采集"}</strong><progress aria-label="内存使用率" data-metric-progress="memory" max="100" value="${percent(metrics.memory_used_bytes, metrics.memory_total_bytes)}"></progress></div><div><span>磁盘</span><strong data-metric-text="disk">${metrics.disk_available ? `${bytes(metrics.disk_used_bytes)} / ${bytes(metrics.disk_total_bytes)}` : "等待采集"}</strong><progress aria-label="根磁盘使用率" data-metric-progress="disk" max="100" value="${percent(metrics.disk_used_bytes, metrics.disk_total_bytes)}"></progress></div><div class="node-card-network"><span>网络</span><strong>↓ <i data-metric-text="download-rate">${metrics.network_available ? rate(metrics.network_rx_bps) : "等待采集"}</i> · ↑ <i data-metric-text="upload-rate">${metrics.network_available ? rate(metrics.network_tx_bps) : "等待采集"}</i></strong>${komariNetworkMarkup(agent) || `<small>累计 ↓ <b data-metric-text="download-total">${metrics.network_available ? bytes(metrics.network_rx_bytes) : "—"}</b> · ↑ <b data-metric-text="upload-total">${metrics.network_available ? bytes(metrics.network_tx_bytes) : "—"}</b></small>`}</div><span class="machine-resource-live" data-metric-poll role="status" aria-label="资源自动更新"></span></section>
               <section class="node-card-cores" aria-label="内核状态">${coreChips}</section>
               <footer class="node-card-foot"><small><i></i><span data-agent-version>${esc(agent.version || "未知")}</span></small><span class="node-card-stamp" data-metric-text="stamp">${metrics.collected_at ? `采集于 ${ago(metrics.collected_at)}` : "等待资源数据"}</span>${batchMode ? "" : '<span class="node-card-open">管理节点 <i aria-hidden="true">→</i></span>'}</footer>
             </${cardTag}>`;
@@ -1633,6 +1732,38 @@ function bindAgentPage(agentItems, presetMode = false, enrollmentHistory = {}) {
   document
     .querySelectorAll("[data-agent-refresh]")
     .forEach((button) => (button.onclick = () => pollAgentMetrics()));
+  document.querySelectorAll("[data-komari-form]").forEach((form) => {
+    form.onsubmit = async (event) => {
+      event.preventDefault();
+      if (!can("agents.manage")) return;
+      const uuid = String(new FormData(form).get("uuid") || "").trim();
+      const agentID = form.dataset.komariForm;
+      const button = form.querySelector("button[type=submit]");
+      if (button) button.disabled = true;
+      try {
+        await api(`/agents/${encodeURIComponent(agentID)}/komari`, {
+          method: "PUT",
+          body: JSON.stringify({ uuid }),
+        });
+        const agent = agentsByID.get(agentID);
+        if (agent) {
+          agent.labels = { ...(agent.labels || {}) };
+          if (uuid) agent.labels.komari_uuid = uuid;
+          else delete agent.labels.komari_uuid;
+        }
+        await refreshAgentPage();
+        notify(uuid ? "Komari 服务器已关联" : "Komari 服务器关联已清除");
+      } catch (error) {
+        notify(error.message, "error");
+        if (button) button.disabled = false;
+      }
+    };
+  });
+  document.querySelectorAll("[data-komari-link]").forEach((card) => {
+    const root = card.closest("[data-agent-metrics]");
+    const agent = root ? agentsByID.get(root.dataset.agentMetrics) : null;
+    if (agent) loadKomariDisplay(agent, root);
+  });
   document.querySelectorAll("[data-upgrade-agent]").forEach((button) => {
     button.onclick = async () => {
       if (

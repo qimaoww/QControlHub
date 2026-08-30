@@ -61,6 +61,19 @@ func TestPanelSettingsValidation(t *testing.T) {
 	}
 
 	settings = DefaultPanelSettings()
+	settings.KomariURL = "https://komari.example.com"
+	settings.KomariAPIKey = "komari-key"
+	if err := settings.Validate(); err != nil {
+		t.Fatalf("valid Komari settings rejected: %v", err)
+	}
+	for _, invalid := range []string{"ftp://komari.example.com", "not-a-url", "https://user:pass@komari.example.com", "https://komari.example.com?token=secret"} {
+		settings.KomariURL = invalid
+		if err := settings.Validate(); err == nil {
+			t.Fatalf("invalid Komari URL %q was accepted", invalid)
+		}
+	}
+
+	settings = DefaultPanelSettings()
 	settings.AgentCoreLogMaxMiB = 1
 	settings.AgentCoreLogRotateCount = 0
 	if err := settings.Validate(); err != nil {
