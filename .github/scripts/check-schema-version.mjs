@@ -32,7 +32,11 @@ function main() {
   if (!baseRef || /^0+$/.test(baseRef)) {
     throw new Error("QCH_SCHEMA_BASE_REF must name the pull request base or previous push commit");
   }
-  const baseSource = execFileSync("git", ["show", `${baseRef}:${storePath}`], { encoding: "utf8" });
+  const baseSource = execFileSync(
+    "git",
+    ["-c", `safe.directory=${process.cwd()}`, "show", `${baseRef}:${storePath}`],
+    { encoding: "utf8" },
+  );
   const currentSource = readFileSync(storePath, "utf8");
   const result = validateSchemaVersionChange(baseSource, currentSource);
   process.stdout.write(
