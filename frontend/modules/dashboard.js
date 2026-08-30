@@ -34,6 +34,48 @@ export function aggregateDashboardTrafficDays(rows, month) {
   return [...totals.values()];
 }
 
+// Keep the shared edge between stacked segments square so the two colors
+// touch without the small gap created by two independently rounded rects.
+const trafficBarPath = (x, top, bottom, width, corners) => {
+  const right = x + width;
+  const height = Math.max(0, bottom - top);
+  const radius = Math.min(2, width / 2, height / 2);
+  const topLeft = corners.includes("top-left") ? radius : 0;
+  const topRight = corners.includes("top-right") ? radius : 0;
+  const bottomRight = corners.includes("bottom-right") ? radius : 0;
+  const bottomLeft = corners.includes("bottom-left") ? radius : 0;
+  return [
+    `M ${x + topLeft} ${top}`,
+    `H ${right - topRight}`,
+    topRight ? `Q ${right} ${top} ${right} ${top + topRight}` : `V ${top}`,
+    `V ${bottom - bottomRight}`,
+    bottomRight ? `Q ${right} ${bottom} ${right - bottomRight} ${bottom}` : `H ${right}`,
+    `H ${x + bottomLeft}`,
+    bottomLeft ? `Q ${x} ${bottom} ${x} ${bottom - bottomLeft}` : `H ${x}`,
+    `V ${top + topLeft}`,
+    topLeft ? `Q ${x} ${top} ${x + topLeft} ${top}` : `H ${x}`,
+    "Z",
+  ].join(" ");
+};
+
+const trafficBarSegments = (x, top, middle, bottom, width = 14) => {
+  const hasSent = middle > top;
+  const hasReceived = bottom > middle;
+  if (!hasSent && !hasReceived) return "";
+
+  if (hasSent && hasReceived) {
+    return `<path class="traffic-bar-sent" d="${trafficBarPath(x, top, middle, width, ["top-left", "top-right"])}"></path><path class="traffic-bar-received" d="${trafficBarPath(x, middle, bottom, width, ["bottom-left", "bottom-right"])}"></path>`;
+  }
+
+  const path = trafficBarPath(x, top, bottom, width, [
+    "top-left",
+    "top-right",
+    "bottom-left",
+    "bottom-right",
+  ]);
+  return `<path class="${hasSent ? "traffic-bar-sent" : "traffic-bar-received"}" d="${path}"></path>`;
+};
+
 export function installDashboard(ctx) {
   const {
     api, state, esc, engineName, heartbeat, statusTone, ago, short, actionName, shell,
@@ -79,7 +121,7 @@ async function dashboard({ overview: preloadedOverview } = {}) {
     const x = index * 20 + 3;
     const receivedY = trafficChartHeight - receivedHeight;
     const sentY = receivedY - sentHeight;
-    return `<g><title>${esc(day.day)} · 接收 ${esc(bytes(day.received_bytes))} · 发送 ${esc(bytes(day.sent_bytes))} · 合计 ${esc(bytes(day.used_bytes))}</title><rect class="traffic-bar-sent" x="${x}" y="${sentY}" width="14" height="${sentHeight}" rx="2"></rect><rect class="traffic-bar-received" x="${x}" y="${receivedY}" width="14" height="${receivedHeight}" rx="2"></rect></g>`;
+    return `<g><title>${esc(day.day)} · 接收 ${esc(bytes(day.received_bytes))} · 发送 ${esc(bytes(day.sent_bytes))} · 合计 ${esc(bytes(day.used_bytes))}</title>${trafficBarSegments(x, sentY, receivedY, trafficChartHeight)}</g>`;
   }).join("");
   const trafficAxis = dailyTraffic.map((day, index) => {
     const dayNumber = index + 1;
