@@ -595,8 +595,12 @@ function shell(content, title, { viewKey = state.route } = {}) {
   const mobileAccountMarkup = `<details class="mobile-account-menu"><summary class="${mobileMoreActive ? "active" : ""}" aria-label="打开更多导航与账户操作" title="更多"><svg viewBox="0 0 24 24" aria-hidden="true">${dockIcons.more}</svg><span>更多</span></summary><div>${mobileMoreLinks}<button type="button" id="mobile-theme-toggle">切换主题</button><button type="button" id="mobile-logout">退出登录</button></div></details>`;
   document.title = `${title} · ${panelName}`;
   const routeChanged = !previousMain || previousRoute !== state.route;
+  const workspaceKey = `workspace-${viewKey}`;
+  const viewChanged =
+    !previousMain || previousMain.dataset.refreshKey !== workspaceKey;
   const firstScreenClass = !previousMain ? " first-screen" : "";
-  const motionClass = routeChanged ? ` page-enter${firstScreenClass}` : "";
+  const motionClass =
+    routeChanged || viewChanged ? ` page-enter${firstScreenClass}` : "";
   const contextKey = `${state.route}|${state.data.selectedAgent || ""}|${state.data.agentId || ""}|${state.data.engine || ""}|${state.data.liveAgent || ""}|${state.data.liveEngine || ""}`;
   const contextChanged = routeChanged || state.data.contextMotionKey !== contextKey;
   state.data.contextMotionKey = contextKey;

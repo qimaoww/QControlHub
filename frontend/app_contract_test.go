@@ -188,6 +188,8 @@ func TestRefreshPathsUseStableViewsAndScopedCoordinators(t *testing.T) {
 		"[\"GET\", \"HEAD\", \"OPTIONS\"].includes(method)",
 		"reconcileView(currentView, template.content.firstElementChild",
 		"const routeChanged = !previousMain || previousRoute !== state.route",
+		"previousMain.dataset.refreshKey !== workspaceKey",
+		"routeChanged || viewChanged ? ` page-enter${firstScreenClass}`",
 		"workspace-main${motionClass}",
 		"const hasSharedData =",
 		"const sharedDataPromise = Promise.all([",
@@ -296,6 +298,7 @@ func TestMotionSystemCoversWorkspaceInteractions(t *testing.T) {
 		"@keyframes qch-first-screen-enter",
 		"@keyframes qch-context-enter",
 		"@keyframes qch-task-result-enter",
+		"@keyframes qch-reconcile-enter",
 		"@keyframes qch-config-read-enter",
 		".boot::before",
 		".workspace-main.first-screen.page-enter>",
@@ -307,6 +310,7 @@ func TestMotionSystemCoversWorkspaceInteractions(t *testing.T) {
 		".client-access-toolbar>nav a.active",
 		".substore-target-bar>nav>button.active",
 		".core-log-filter-group button[aria-pressed=true]",
+		".qch-reconcile-enter",
 		"dialog[open]::backdrop",
 		".modal-backdrop>[role=dialog]",
 		"@media(prefers-reduced-motion:reduce)",
@@ -314,6 +318,13 @@ func TestMotionSystemCoversWorkspaceInteractions(t *testing.T) {
 		if !strings.Contains(content, required) {
 			t.Errorf("motion system is missing %q", required)
 		}
+	}
+	refresh, err := os.ReadFile("modules/refresh.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(refresh), "markInsertedMotion(freshChild.cloneNode(true))") {
+		t.Error("reconciled dynamic content must animate only when inserted")
 	}
 	configs, err := os.ReadFile("modules/configs.js")
 	if err != nil {

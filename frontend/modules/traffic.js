@@ -426,7 +426,8 @@ export function installTraffic(ctx) {
       ? '<div class="empty large"><strong>没有符合筛选条件的端口</strong><p>调整上方筛选条件后再查看。</p></div>'
       : '<div class="empty large"><strong>尚未读取到配置端口</strong><p>节点保存或部署内核配置后，已有监听端口会直接显示在这里。</p></div>';
     const listHeader = `<header class="traffic-policy-list-head"><div><h2>监控端口</h2><span>${filteredItems.length}</span></div><small>${esc(selectedScope)} · 自动发现配置 · Agent 实时上报</small></header>`;
-    shell(`<div class="traffic-workspace">${toolbar}${listHeader}${cards ? `<section class="traffic-policy-grid">${cards}</section>` : empty}${createDialog}</div>`, "流量配额");
+    const trafficResultKey = `${currentFilters.agent_id || "all"}-${currentFilters.engine || "all"}-${currentFilters.endpoint_key || "all"}-${currentFilters.status || "all"}`;
+    shell(`<div class="traffic-workspace">${toolbar}${listHeader}${cards ? `<section class="traffic-policy-grid qch-swap-panel" data-refresh-key="traffic-results-${esc(trafficResultKey)}">${cards}</section>` : `<div class="qch-swap-panel" data-refresh-key="traffic-results-${esc(trafficResultKey)}-empty">${empty}</div>`}${createDialog}</div>`, "流量配额", { viewKey: `traffic-${trafficResultKey}` });
     bindTrafficForms(selectableAgents, endpoints);
     const cardGrid = document.querySelector(".traffic-policy-grid");
     if (cardGrid && filteredItems.length > 1) {
