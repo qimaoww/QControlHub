@@ -100,6 +100,8 @@ type Input struct {
 	TargetAddress            string `json:"target_address"`
 	TargetPort               int    `json:"target_port"`
 	Network                  string `json:"network"`
+	BlockMainlandDestination bool   `json:"block_mainland_destination"`
+	BlockMainlandSource      bool   `json:"block_mainland_source"`
 }
 
 func Protocols(engine core.Engine) []Protocol {

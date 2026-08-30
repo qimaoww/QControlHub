@@ -56,13 +56,21 @@ func generateXray(input Input) (string, error) {
 		}
 		inbound["streamSettings"] = stream
 	}
+	outbounds := []any{
+		map[string]any{"protocol": "freedom", "tag": "direct"},
+		map[string]any{"protocol": "blackhole", "tag": "block"},
+	}
+	routing := mainlandXrayRouting(input.Tag, input.BlockMainlandDestination, input.BlockMainlandSource)
+	if routing != nil {
+		outbounds = append(outbounds, map[string]any{"protocol": "blackhole", "tag": mainlandXrayBlockTag})
+	}
 	root := map[string]any{
-		"log":      map[string]any{"loglevel": "info"},
-		"inbounds": []any{inbound},
-		"outbounds": []any{
-			map[string]any{"protocol": "freedom", "tag": "direct"},
-			map[string]any{"protocol": "blackhole", "tag": "block"},
-		},
+		"log":       map[string]any{"loglevel": "info"},
+		"inbounds":  []any{inbound},
+		"outbounds": outbounds,
+	}
+	if routing != nil {
+		root["routing"] = routing
 	}
 	value, err := json.MarshalIndent(root, "", "  ")
 	return string(value) + "\n", err
@@ -197,5 +205,6 @@ func parseXray(content string) (Input, bool) {
 			input.RealityMLDSA65Verify, _ = mldsa65VerifyFromSeed(input.RealityMLDSA65Seed)
 		}
 	}
+	input.BlockMainlandDestination, input.BlockMainlandSource = mainlandXrayFlags(root, input.Tag)
 	return input, parsedInputValid(input)
 }

@@ -299,6 +299,37 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 		writeError(w, http.StatusConflict, "no saved configuration exists for this operation")
 		return
 	}
+	if engine == core.EngineMihomo || engine == core.EngineXray || engine == core.EngineSingBox {
+		if currentErr == nil && input.OriginalTag != "" {
+			content, err = serverconfig.RemoveMainlandAccessPolicy(engine, content, input.OriginalTag)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+		}
+		if input.Operation != "delete" {
+			var prefixes []string
+			if input.Input.BlockMainlandDestination || input.Input.BlockMainlandSource {
+				prefixes, err = serverconfig.LoadChinaRoutes(request.Context())
+				if err != nil {
+					writeError(w, http.StatusBadGateway, err.Error())
+					return
+				}
+				if engine == core.EngineMihomo {
+					prefixes = nil
+				}
+			}
+			content, err = serverconfig.ApplyMainlandAccessPolicyWithPrefixes(engine, content, serverconfig.MainlandAccessPolicy{
+				Tag: input.Input.Tag, Port: input.Input.Port, Engine: engine,
+				BlockMainlandDestination: input.Input.BlockMainlandDestination,
+				BlockMainlandSource:      input.Input.BlockMainlandSource,
+			}, prefixes)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+		}
+	}
 	name := strings.TrimSpace(input.Name)
 	if name == "" {
 		name = agent.Name + " · " + string(engine)

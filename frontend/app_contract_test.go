@@ -306,13 +306,13 @@ func TestSidebarNavigationUsesWorkflowOrderAndResponsiveGrouping(t *testing.T) {
 	for _, required := range []string{
 		`const dockIcons = Object.freeze({`,
 		`["node-settings", "节点设置", dockIcons.server]`,
-		`["agents", "内核预设", dockIcons.layers]`,
+		`["agents", "内核预设", dockIcons.layers, true]`,
 		`["live-config", "配置", dockIcons.fileCode]`,
 		`["client-access", "客户端", dockIcons.monitorSmartphone]`,
-		`["substore-sync", "同步", dockIcons.refreshCw]`,
+		`["substore-sync", "同步", dockIcons.refreshCw, true]`,
 		`["traffic", "流量", dockIcons.chart, true]`,
 		`["core-logs", "日志", dockIcons.logs, true]`,
-		`["tasks", "任务", dockIcons.listChecks]`,
+		`["tasks", "任务", dockIcons.listChecks, true]`,
 		`class="dock-settings`,
 		`mobileMoreRoutes.some(([id]) => activeDockRoute(id))`,
 		`summary class="${mobileMoreActive ? "active" : ""}"`,
@@ -327,6 +327,8 @@ func TestSidebarNavigationUsesWorkflowOrderAndResponsiveGrouping(t *testing.T) {
 	}
 	for _, required := range []string{
 		`.dock-nav .dock-mobile-secondary{display:none}`,
+		`.app-dock{left:0;right:0;bottom:0;height:calc(64px + env(safe-area-inset-bottom));display:grid;grid-template-columns:repeat(5,minmax(0,1fr))`,
+		`.dock-nav{display:contents!important}`,
 		`.mobile-account-menu>summary.active`,
 		`.mobile-account-menu a,.mobile-account-menu button`,
 	} {

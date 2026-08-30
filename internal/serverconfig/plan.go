@@ -55,6 +55,9 @@ func NewPlan(protocol Protocol) (Input, error) {
 		Credential: credential, Method: method, Transport: transport, TransportPath: transportPath,
 		TLSEnabled: protocol.DefaultTLS, CertificatePath: "/etc/qcontrolhub/tls/server.crt", PrivateKeyPath: "/etc/qcontrolhub/tls/server.key",
 	}
+	if protocol.Key == ProtocolVLESSXHTTP || protocol.Key == ProtocolVLESSEncXHTTP {
+		input.BlockMainlandDestination = true
+	}
 	if protocol.PortForward {
 		input.Username = ""
 		input.TargetAddress = "127.0.0.1"
@@ -184,6 +187,8 @@ func RegeneratePlan(protocol Protocol, current Input) (Input, error) {
 	plan.ListenerRoutingMark = current.ListenerRoutingMark
 	plan.ListenerRule = current.ListenerRule
 	plan.ListenerProxy = current.ListenerProxy
+	plan.BlockMainlandDestination = current.BlockMainlandDestination
+	plan.BlockMainlandSource = current.BlockMainlandSource
 	if protocol.SupportsRealityMLDSA {
 		seed := make([]byte, 32)
 		if _, err := rand.Read(seed); err != nil {

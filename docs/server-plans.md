@@ -44,6 +44,12 @@ Snell 预设只生成 Mihomo 当前支持的 v5，不提供旧版本或 v6 字�
 
 Agent 收到部署任务后仍会调用目标内核自身的配置检查命令。语法生成成功不代表端口一定空闲、证书路径一定存在或防火墙已经放行，因此正式部署前应先执行“保存并校验”。
 
+## 按节点与端口限制大陆访问
+
+独立的“访问限制”页面按节点、内核、入站标签和实际监听端口管理两个开关：“禁止此入站访问大陆目标”和“禁止大陆来源连接此入站”。Mihomo、Xray 与 sing-box 均使用内核原生入站路由规则实现，不创建节点级全局防火墙规则，因此不会影响 QAgent 控制连接、内核更新、DNS 或同节点其他端口。新建 VLESS-XHTTP-Reality 与 VLESS-ENC-XHTTP-Reality-Vision 方案默认启用目标大陆限制；已有配置保持原状，由管理员明确保存后生效。
+
+IPv4 地址使用 [misakaio/chnroutes2](https://github.com/misakaio/chnroutes2) 每小时更新的 BGP 聚合列表；该项目不提供 IPv6，因此 IPv6 使用 [gaoyifan/china-operator-ip](https://github.com/gaoyifan/china-operator-ip) 的每日 BGP 列表补齐。控制端下载后逐条校验 CIDR，最多缓存一小时；Mihomo 使用只含 CIDR 的远程 rule provider，Xray 和 sing-box 在保存时嵌入同一批已校验地址。规则只按 IP 地址匹配，不把域名后缀当作国家归属。
+
 ## 客户端接入资料
 
 方案保存后，页面中的“客户端接入”区可根据客户端实际访问的域名或 IP 生成分享 URI，并同时列出服务器、端口、认证、传输、TLS / Reality 等逐项参数。连接地址和 TLS ServerName 只保留在当前页面 URL，不写入内核配置，也不会成为配置版本的一部分。

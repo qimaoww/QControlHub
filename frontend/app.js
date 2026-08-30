@@ -9,6 +9,7 @@ import {
 import { installCoreLogs } from "./modules/core-logs.js";
 import { installTasks } from "./modules/tasks.js";
 import { installTraffic } from "./modules/traffic.js";
+import { installAccessControl } from "./modules/access-control.js";
 import { installSettings } from "./modules/settings.js";
 import {
   bindEvent,
@@ -57,6 +58,8 @@ const dockIcons = Object.freeze({
     '<path d="M20 7h-5V2"/><path d="m20 2-3.5 3.5A8 8 0 1 0 20.8 14"/>',
   chart:
     '<path d="M12 16v5M16 14.639V21M20 10.656V21M4 18.463V21M8 14.656V21"/><path d="m22 3-8.646 8.646a.5.5 0 0 1-.708 0L9.354 8.354a.5.5 0 0 0-.707 0L2 15"/>',
+  shield:
+    '<path d="M20 13c0 5-3.5 7.5-8 9-4.5-1.5-8-4-8-9V5l8-3 8 3z"/><path d="M8.5 12h7M12 8.5v7"/>',
   logs:
     '<path d="M3 5h1M3 12h1M3 19h1M8 5h1M8 12h1M8 19h1M13 5h8M13 12h8M13 19h8"/>',
   listChecks:
@@ -497,13 +500,14 @@ function shell(content, title, { viewKey = state.route } = {}) {
   const links = [
     ["dashboard", "总览", dockIcons.layoutDashboard],
     ["node-settings", "节点设置", dockIcons.server],
-    ["agents", "内核预设", dockIcons.layers],
+    ["agents", "内核预设", dockIcons.layers, true],
     ["live-config", "配置", dockIcons.fileCode],
     ["client-access", "客户端", dockIcons.monitorSmartphone],
-    ["substore-sync", "同步", dockIcons.refreshCw],
+    ["substore-sync", "同步", dockIcons.refreshCw, true],
+    ["access-control", "限制", dockIcons.shield, true],
     ["traffic", "流量", dockIcons.chart, true],
     ["core-logs", "日志", dockIcons.logs, true],
-    ["tasks", "任务", dockIcons.listChecks],
+    ["tasks", "任务", dockIcons.listChecks, true],
   ];
   const linkPermissions = {
     dashboard: "overview.read",
@@ -511,6 +515,7 @@ function shell(content, title, { viewKey = state.route } = {}) {
     "node-settings": "agents.read",
     "client-access": "client-access.read",
     "substore-sync": "client-access.read",
+    "access-control": "agent-config.read",
     "live-config": "agent-config.read",
     tasks: "tasks.read",
     "core-logs": "core-logs.read",
@@ -564,8 +569,12 @@ function shell(content, title, { viewKey = state.route } = {}) {
     ? `<a class="dock-settings ${settingsActive ? "active" : ""}" href="#settings" title="设置" ${settingsActive ? 'aria-current="page"' : ""}><svg viewBox="0 0 24 24" aria-hidden="true">${dockIcons.settings}</svg><span class="dock-label">设置</span></a>`
     : "";
   const mobileMoreRoutes = [
+    ["agents", "内核预设"],
+    ["substore-sync", "Sub-Store 同步"],
+    ["access-control", "访问限制"],
     ["traffic", "流量"],
     ["core-logs", "日志"],
+    ["tasks", "任务"],
     ["settings", "设置"],
   ];
   const mobileMoreActive = mobileMoreRoutes.some(([id]) => activeDockRoute(id));
@@ -573,9 +582,9 @@ function shell(content, title, { viewKey = state.route } = {}) {
     .filter(([id]) => can(linkPermissions[id]))
     .map(([id, text]) => `<a class="${activeDockRoute(id) ? "active" : ""}" href="#${id}" ${activeDockRoute(id) ? 'aria-current="page"' : ""}>${text}</a>`)
     .join("");
-  const mobileAccountMarkup = `<details class="mobile-account-menu"><summary class="${mobileMoreActive ? "active" : ""}" aria-label="打开更多导航与账户操作" title="更多"><svg viewBox="0 0 24 24" aria-hidden="true">${dockIcons.more}</svg></summary><div>${mobileMoreLinks}<button type="button" id="mobile-theme-toggle">切换主题</button><button type="button" id="mobile-logout">退出登录</button></div></details>`;
+  const mobileAccountMarkup = `<details class="mobile-account-menu"><summary class="${mobileMoreActive ? "active" : ""}" aria-label="打开更多导航与账户操作" title="更多"><svg viewBox="0 0 24 24" aria-hidden="true">${dockIcons.more}</svg><span>更多</span></summary><div>${mobileMoreLinks}<button type="button" id="mobile-theme-toggle">切换主题</button><button type="button" id="mobile-logout">退出登录</button></div></details>`;
   document.title = `${title} · ${panelName}`;
-  const markup = `<div class="desktop-app"><aside class="app-dock"><a class="dock-logo" href="#dashboard" aria-label="${esc(panelName)} 总览"><span>QH</span></a><nav class="dock-nav" aria-label="主导航">${navigationMarkup}</nav><div class="dock-tools">${settingsDockLink}<button id="theme-toggle" data-theme-toggle type="button" aria-label="切换颜色主题" title="切换主题"><svg viewBox="0 0 24 24" aria-hidden="true">${dockIcons.sun}</svg><span class="dock-label">主题</span></button><button id="logout" type="button" aria-label="退出登录" title="退出登录"><svg viewBox="0 0 24 24" aria-hidden="true">${dockIcons.logOut}</svg><span class="dock-label">退出</span></button></div></aside><aside class="context-sidebar"><header class="context-brand"><a href="#dashboard"><span class="brand-mark">QH</span><strong>${esc(panelName)}</strong></a></header>${context}</aside><section class="workspace-shell"><header class="workspace-topbar"><div class="workspace-route"><span>${esc(panelName)}</span><i>/</i><b>${esc(title)}</b><i class="role-badge role-${esc(state.session.role)}">${esc(roleName)}</i></div><div class="workspace-actions"><span class="sync-state ${overview.agents_online ? "" : "inactive"}" data-sync-state><i></i><span data-sync-label>${overview.agents_online ? `${overview.agents_online} 个节点在线` : "等待节点连接"}</span></span>${topAction}${mobileAccountMarkup}</div></header><main class="workspace-main" data-refresh-key="workspace-${esc(viewKey)}">${content}</main></section></div><dialog class="confirm-dialog" data-confirm-dialog aria-labelledby="confirm-dialog-title" aria-describedby="confirm-dialog-message"><div class="confirm-dialog-card"><span class="confirm-dialog-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3.5 21 20H3zM12 9v5M12 17.5h.01"/></svg></span><div><p class="eyebrow">操作确认</p><h2 id="confirm-dialog-title">确认继续？</h2><p id="confirm-dialog-message" data-confirm-message></p></div><footer><button class="button" type="button" data-confirm-cancel>取消</button><button class="button danger-confirm" type="button" data-confirm-accept>确认继续</button></footer></div></dialog>`;
+  const markup = `<div class="desktop-app"><aside class="app-dock"><a class="dock-logo" href="#dashboard" aria-label="${esc(panelName)} 总览"><span>QH</span></a><nav class="dock-nav" aria-label="主导航">${navigationMarkup}</nav><div class="dock-tools">${settingsDockLink}<button id="theme-toggle" data-theme-toggle type="button" aria-label="切换颜色主题" title="切换主题"><svg viewBox="0 0 24 24" aria-hidden="true">${dockIcons.sun}</svg><span class="dock-label">主题</span></button><button id="logout" type="button" aria-label="退出登录" title="退出登录"><svg viewBox="0 0 24 24" aria-hidden="true">${dockIcons.logOut}</svg><span class="dock-label">退出</span></button></div>${mobileAccountMarkup}</aside><aside class="context-sidebar"><header class="context-brand"><a href="#dashboard"><span class="brand-mark">QH</span><strong>${esc(panelName)}</strong></a></header>${context}</aside><section class="workspace-shell"><header class="workspace-topbar"><div class="workspace-route"><span>${esc(panelName)}</span><i>/</i><b>${esc(title)}</b><i class="role-badge role-${esc(state.session.role)}">${esc(roleName)}</i></div><div class="workspace-actions"><span class="sync-state ${overview.agents_online ? "" : "inactive"}" data-sync-state><i></i><span data-sync-label>${overview.agents_online ? `${overview.agents_online} 个节点在线` : "等待节点连接"}</span></span>${topAction}</div></header><main class="workspace-main" data-refresh-key="workspace-${esc(viewKey)}">${content}</main></section></div><dialog class="confirm-dialog" data-confirm-dialog aria-labelledby="confirm-dialog-title" aria-describedby="confirm-dialog-message"><div class="confirm-dialog-card"><span class="confirm-dialog-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3.5 21 20H3zM12 9v5M12 17.5h.01"/></svg></span><div><p class="eyebrow">操作确认</p><h2 id="confirm-dialog-title">确认继续？</h2><p id="confirm-dialog-message" data-confirm-message></p></div><footer><button class="button" type="button" data-confirm-cancel>取消</button><button class="button danger-confirm" type="button" data-confirm-accept>确认继续</button></footer></div></dialog>`;
   const currentView = app.querySelector(":scope > .desktop-app");
   if (previousMain && previousRoute === state.route && currentView) {
     const template = document.createElement("template");
@@ -603,6 +612,15 @@ function shell(content, title, { viewKey = state.route } = {}) {
     document.querySelector("#theme-toggle").onclick;
   document.querySelector("#mobile-logout").onclick =
     document.querySelector("#logout").onclick;
+  bindEvent(document, "click", (event) => {
+    const menu = document.querySelector(".mobile-account-menu[open]");
+    if (menu && !menu.contains(event.target)) menu.open = false;
+  });
+  bindEvent(document, "keydown", (event) => {
+    if (event.key !== "Escape") return;
+    const menu = document.querySelector(".mobile-account-menu[open]");
+    if (menu) menu.open = false;
+  });
   document.querySelectorAll("[data-context-agent]").forEach((link) => {
     link.onclick = () => {
       state.data.selectedAgent = link.dataset.contextAgent;
@@ -703,6 +721,28 @@ function contextMarkup(title) {
     const selected = state.data.trafficFilters?.agent_id || "";
     return `${can("traffic.manage") ? '<a class="context-primary" href="#traffic-new">＋ 添加端口配额</a>' : ""}<a class="context-primary ${selected ? "" : "active"}" href="#traffic-all" data-context-traffic-agent="">全部节点</a><div class="context-section-label"><span>按节点查看</span><b>${agents.length}</b></div><nav class="context-list" aria-label="端口流量节点">${agents.map((agent) => { const agentPolicies = policies.filter((policy) => policy.agent_id === agent.id); const configured = new Set([...agentPolicies.map((policy) => policy.port), ...endpoints.filter((endpoint) => endpoint.agent_id === agent.id).map((endpoint) => endpoint.port)]).size; const quotas = agentPolicies.filter((policy) => policy.quota_enabled !== false).length; const blocked = agentPolicies.filter((policy) => policy.blocked).length; return `<a class="${selected === agent.id ? "active" : ""}" href="#traffic-agent-${esc(agent.id)}" data-context-traffic-agent="${esc(agent.id)}"><i class="status-dot ${blocked ? "bad" : agent.status === "online" ? "ok" : ""}"></i><span><strong>${esc(agent.name)}</strong><small>${configured ? `${configured} 个监控端口${quotas ? ` · ${quotas} 个配额` : ""}${blocked ? ` · ${blocked} 个封禁` : ""}` : "尚无配置端口"}</small></span></a>`; }).join("") || "<p>还没有节点</p>"}</nav>`;
   }
+  if (state.route === "access-control") {
+    const entries = state.data.accessControls || [];
+    const agents = [];
+    const seen = new Set();
+    for (const entry of entries) {
+      if (seen.has(entry.agent_id)) continue;
+      seen.add(entry.agent_id);
+      agents.push({
+        id: entry.agent_id,
+        name: entry.agent_name,
+        status: entry.agent_status,
+        count: entries.filter((item) => item.agent_id === entry.agent_id).length,
+        enabled: entries.filter(
+          (item) =>
+            item.agent_id === entry.agent_id &&
+            (item.block_mainland_destination || item.block_mainland_source),
+        ).length,
+      });
+    }
+    const selected = state.data.accessControlAgent || "";
+    return `<a class="context-primary ${selected ? "" : "active"}" href="#access-control-all" data-access-control-agent="">全部节点</a><div class="context-section-label"><span>按节点查看</span><b>${agents.length}</b></div><nav class="context-list" aria-label="访问限制节点">${agents.map((agent) => `<a class="${selected === agent.id ? "active" : ""}" href="#access-control-agent-${esc(agent.id)}" data-access-control-agent="${esc(agent.id)}"><i class="status-dot ${agent.status === "online" ? "ok" : ""}"></i><span><strong>${esc(agent.name)}</strong><small>${agent.count} 个入站端口${agent.enabled ? ` · ${agent.enabled} 个已限制` : ""}</small></span></a>`).join("") || "<p>还没有可限制的入站</p>"}</nav>`;
+  }
   if (state.route === "settings")
     return `<nav class="context-menu" aria-label="设置目录"><a class="active" href="#settings-basic"><span>01</span>基础设置</a><a href="#settings-runtime"><span>02</span>任务与同步</a><a href="#settings-data"><span>03</span>数据与日志</a><a href="#settings-notify"><span>04</span>事件通知</a><a href="#settings-deployment"><span>05</span>部署状态</a></nav>`;
   const agent = (state.data.agents || []).find(
@@ -727,6 +767,7 @@ const { agentConfig, liveConfig, archiveConfigs } = configModule;
 const tasks = installTasks({ api, state, actions, can, esc, statusName, engineName, short, date, ago, actionName, statusTone, notify, confirmAction, shell });
 const coreLogs = installCoreLogs({ api, state, engines, can, esc, engineName, date, shell });
 const traffic = installTraffic({ api, state, can, esc, engineName, bytes, rate, percent, ago, shell, notify, confirmAction });
+const accessControl = installAccessControl({ api, state, can, esc, engineName, shell, notify, confirmAction });
 const settings = installSettings({ api, state, esc, date, can, shell, notify, confirmAction });
 
 async function renderOnce() {
@@ -758,6 +799,7 @@ async function renderOnce() {
     archive: "archive-config",
     "traffic-new": "traffic",
     "traffic-all": "traffic",
+    "access-control-all": "access-control",
   };
   state.route = [
     "dashboard",
@@ -771,6 +813,7 @@ async function renderOnce() {
     "tasks",
     "core-logs",
     "traffic",
+    "access-control",
     "settings",
   ].includes(hash)
     ? hash
@@ -783,6 +826,8 @@ async function renderOnce() {
               ? "node-settings"
               : hash.startsWith("traffic-agent-")
                 ? "traffic"
+                : hash.startsWith("access-control-agent-")
+                  ? "access-control"
             : hash.startsWith("config-")
               ? "archive-config"
               : "dashboard");
@@ -824,6 +869,7 @@ async function renderOnce() {
       tasks,
       "core-logs": coreLogs,
       traffic,
+      "access-control": accessControl,
       settings,
     };
     await (pages[state.route] || dashboard)({
