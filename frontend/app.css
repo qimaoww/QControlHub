@@ -492,6 +492,13 @@ a.node-card:hover .node-card-open i{transform:translateX(3px)}
 @keyframes qch-nav-active{from{opacity:.4;transform:scale(.92)}to{opacity:1;transform:scale(1)}}
 @keyframes qch-expand-enter{from{opacity:0;transform:translate3d(0,-5px,0)}to{opacity:1;transform:translate3d(0,0,0)}}
 @keyframes qch-route-progress{from{transform:scaleX(.08)}to{transform:scaleX(.82)}}
+@keyframes qch-boot-enter{from{opacity:0;transform:translate3d(0,6px,0)}to{opacity:1;transform:translate3d(0,0,0)}}
+@keyframes qch-boot-orbit{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+@keyframes qch-first-screen-enter{from{opacity:0;transform:translate3d(0,10px,0) scale(.995)}to{opacity:1;transform:translate3d(0,0,0) scale(1)}}
+
+.boot{min-height:100vh;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;padding-top:84px;background:var(--canvas);color:var(--muted);font-size:calc(12px * var(--ui-font-scale));font-weight:700;letter-spacing:.02em;animation:qch-boot-enter 360ms var(--motion-ease-out) both}
+.boot::before{content:"";width:42px;height:42px;position:absolute;top:calc(50% - 29px);left:calc(50% - 21px);border:2px solid color-mix(in srgb,var(--accent) 18%,transparent);border-top-color:var(--accent);border-radius:50%;animation:qch-boot-orbit 1.05s linear infinite}
+.boot::after{content:"QH";position:absolute;top:calc(50% - 23px);left:calc(50% - 15px);display:grid;place-items:center;width:30px;height:30px;border-radius:9px;background:var(--accent);color:var(--on-accent);font-size:calc(10px * var(--ui-font-scale));font-weight:850;letter-spacing:0;box-shadow:0 10px 24px -12px color-mix(in srgb,var(--accent) 70%,transparent)}
 
 .workspace-main.is-route-pending{position:relative;cursor:progress}
 .workspace-main.is-route-pending::before{content:"";position:absolute;z-index:30;top:0;left:0;width:100%;height:2px;background:linear-gradient(90deg,var(--accent),color-mix(in srgb,var(--accent) 22%,transparent));transform-origin:left;animation:qch-route-progress 1.05s var(--motion-ease-out) infinite alternate}
@@ -506,6 +513,11 @@ a.node-card:hover .node-card-open i{transform:translateX(3px)}
 .workspace-main.page-enter :is(.node-card,.service-card,.workspace-panel,.traffic-policy-card,.task-event-card,.client-access-node-card,.access-control-card,.substore-agent-card,.settings-version-card,.template-card):nth-child(3){animation-delay:90ms}
 .workspace-main.page-enter :is(.node-card,.service-card,.workspace-panel,.traffic-policy-card,.task-event-card,.client-access-node-card,.access-control-card,.substore-agent-card,.settings-version-card,.template-card):nth-child(4){animation-delay:135ms}
 .workspace-main.page-enter :is(.node-card,.service-card,.workspace-panel,.traffic-policy-card,.task-event-card,.client-access-node-card,.access-control-card,.substore-agent-card,.settings-version-card,.template-card):nth-child(n+5){animation-delay:170ms}
+.workspace-main.first-screen.page-enter> *{animation-name:qch-first-screen-enter;animation-duration:520ms}
+.workspace-main.first-screen.page-enter> *:nth-child(2){animation-delay:55ms}
+.workspace-main.first-screen.page-enter> *:nth-child(3){animation-delay:105ms}
+.workspace-main.first-screen.page-enter> *:nth-child(4){animation-delay:150ms}
+.login-shell.compact-login{animation:qch-first-screen-enter 520ms var(--motion-ease-spring) both}
 
 :is(.node-card,.workspace-panel,.service-card,.traffic-policy-card,.task-event-card,.client-access-node-card,.access-control-card,.substore-agent-card,.settings-version-card,.template-card){transition:transform var(--motion-base) var(--motion-ease-out),box-shadow var(--motion-base) var(--motion-ease-out),border-color var(--motion-base) ease}
 :is(.node-card,.workspace-panel,.service-card,.traffic-policy-card,.task-event-card,.client-access-node-card,.access-control-card,.substore-agent-card,.settings-version-card,.template-card):not(.dragging):hover{transform:translate3d(0,-3px,0);box-shadow:var(--shadow-lift)}
