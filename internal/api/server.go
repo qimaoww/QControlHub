@@ -715,7 +715,11 @@ func komariNodeResource(node komari.Node) core.KomariNode {
 		EffectiveTrafficLimit: node.EffectiveTrafficLimit, EffectiveTrafficType: node.EffectiveTrafficType,
 		EffectiveTrafficLimitAvailable: node.EffectiveTrafficLimitSet,
 		EffectiveTrafficTypeAvailable:  node.EffectiveTrafficTypeSet,
-		TrafficResetDay:                node.TrafficResetDay, ExpiredAt: node.ExpiredAt, UpdatedAt: node.UpdatedAt,
+		TrafficResetDay:                node.TrafficResetDay,
+		TrafficUsed:                    node.TrafficUsed,
+		TrafficUsedAvailable:           node.TrafficUsedSet,
+		ExpiredAt:                      node.ExpiredAt,
+		UpdatedAt:                      node.UpdatedAt,
 	}
 }
 

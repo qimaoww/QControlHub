@@ -313,8 +313,7 @@ type Agent struct {
 }
 
 // KomariNode is the read-only billing and traffic configuration returned by a
-// linked Komari monitor. Values are kept in Komari's native units: billing
-// cycle in days and traffic limits in bytes.
+// linked Komari monitor. Traffic values are kept in Komari's native byte unit.
 type KomariNode struct {
 	UUID                           string `json:"uuid"`
 	Name                           string `json:"name,omitempty"`
@@ -326,6 +325,8 @@ type KomariNode struct {
 	EffectiveTrafficLimitAvailable bool   `json:"effective_traffic_limit_available,omitempty"`
 	EffectiveTrafficTypeAvailable  bool   `json:"effective_traffic_type_available,omitempty"`
 	TrafficResetDay                int64  `json:"traffic_reset_day,omitempty"`
+	TrafficUsed                    int64  `json:"traffic_used"`
+	TrafficUsedAvailable           bool   `json:"traffic_used_available,omitempty"`
 	ExpiredAt                      string `json:"expired_at,omitempty"`
 	UpdatedAt                      string `json:"updated_at,omitempty"`
 }

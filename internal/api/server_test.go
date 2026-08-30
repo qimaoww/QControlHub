@@ -12,7 +12,21 @@ import (
 	"testing"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
+	"github.com/qimaoww/qcontrolhub/internal/komari"
 )
+
+func TestKomariNodeResourceIncludesCurrentPeriodUsage(t *testing.T) {
+	resource := komariNodeResource(komari.Node{
+		UUID:            "komari-node",
+		TrafficLimit:    10 << 30,
+		TrafficResetDay: 27,
+		TrafficUsed:     4 << 30,
+		TrafficUsedSet:  true,
+	})
+	if resource.UUID != "komari-node" || resource.TrafficResetDay != 27 || resource.TrafficUsed != 4<<30 || !resource.TrafficUsedAvailable {
+		t.Fatalf("Komari API resource = %+v", resource)
+	}
+}
 
 func TestDecodeJSONAcceptsMaximumConfigAfterEscapingExpansion(t *testing.T) {
 	t.Parallel()

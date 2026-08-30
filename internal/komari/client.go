@@ -3,6 +3,7 @@
 package komari
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -33,6 +34,10 @@ type Node struct {
 	EffectiveTrafficLimitSet bool   `json:"-"`
 	EffectiveTrafficTypeSet  bool   `json:"-"`
 	TrafficResetDay          int64  `json:"traffic_reset_day"`
+	TrafficUsed              int64  `json:"-"`
+	TrafficUsedSet           bool   `json:"-"`
+	TrafficUp                int64  `json:"-"`
+	TrafficDown              int64  `json:"-"`
 	ExpiredAt                string `json:"expired_at"`
 	UpdatedAt                string `json:"updated_at"`
 }
@@ -100,28 +105,9 @@ func (client *Client) GetNode(ctx context.Context, uuid string) (Node, error) {
 	}
 	requestContext, cancel := context.WithTimeout(ctx, requestTimeout)
 	defer cancel()
-	request, err := http.NewRequestWithContext(requestContext, http.MethodGet, client.baseURL+"/api/nodes", nil)
-	if err != nil {
-		return Node{}, fmt.Errorf("create Komari request: %w", err)
-	}
-	request.Header.Set("Accept", "application/json")
-	if client.apiKey != "" {
-		request.Header.Set("Authorization", "Bearer "+client.apiKey)
-	}
-	response, err := client.http.Do(request)
+	body, err := client.request(requestContext, http.MethodGet, "/api/nodes", nil)
 	if err != nil {
 		return Node{}, fmt.Errorf("request Komari nodes: %w", err)
-	}
-	defer response.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes+1))
-	if err != nil {
-		return Node{}, fmt.Errorf("read Komari response: %w", err)
-	}
-	if len(body) > maxResponseBytes {
-		return Node{}, errors.New("Komari response is too large")
-	}
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return Node{}, fmt.Errorf("Komari returned HTTP %d", response.StatusCode)
 	}
 	nodes, message, err := decodeNodes(body)
 	if err != nil {
@@ -129,9 +115,10 @@ func (client *Client) GetNode(ctx context.Context, uuid string) (Node, error) {
 	}
 	for _, node := range nodes {
 		if strings.EqualFold(strings.TrimSpace(node.UUID), uuid) {
-			if node.BillingCycle < 0 || node.TrafficLimit < 0 || node.EffectiveTrafficLimit < 0 || node.TrafficResetDay < 0 {
+			if node.BillingCycle < 0 || node.TrafficLimit < 0 || node.EffectiveTrafficLimit < 0 || node.TrafficResetDay < 0 || node.TrafficResetDay > 31 {
 				return Node{}, errors.New("Komari returned invalid billing or traffic values")
 			}
+			client.populateTrafficUsage(requestContext, &node)
 			return node, nil
 		}
 	}
@@ -139,6 +126,138 @@ func (client *Client) GetNode(ctx context.Context, uuid string) (Node, error) {
 		return Node{}, fmt.Errorf("Komari node %q was not found: %s", uuid, message)
 	}
 	return Node{}, fmt.Errorf("Komari node %q was not found", uuid)
+}
+
+func (client *Client) request(ctx context.Context, method, path string, payload []byte) ([]byte, error) {
+	request, err := http.NewRequestWithContext(ctx, method, client.baseURL+path, bytes.NewReader(payload))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	request.Header.Set("Accept", "application/json")
+	if len(payload) > 0 {
+		request.Header.Set("Content-Type", "application/json")
+	}
+	if client.apiKey != "" {
+		request.Header.Set("Authorization", "Bearer "+client.apiKey)
+	}
+	response, err := client.http.Do(request)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+	if len(body) > maxResponseBytes {
+		return nil, errors.New("response is too large")
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return nil, fmt.Errorf("returned HTTP %d", response.StatusCode)
+	}
+	return body, nil
+}
+
+type nodeTrafficStatus struct {
+	Client       string `json:"client"`
+	NetTotalUp   *int64 `json:"net_total_up"`
+	NetTotalDown *int64 `json:"net_total_down"`
+	Network      *struct {
+		TotalUp   *int64 `json:"totalUp"`
+		TotalDown *int64 `json:"totalDown"`
+	} `json:"network"`
+}
+
+// populateTrafficUsage reads Komari's current-period cumulative counters.
+// Status is best-effort: an offline node or an older Komari without RPC2 still
+// returns its configured limit, but does not claim that zero bytes were used.
+func (client *Client) populateTrafficUsage(ctx context.Context, node *Node) {
+	payload, err := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "common:getNodesLatestStatus",
+		"params":  map[string]string{"uuid": node.UUID},
+	})
+	if err != nil {
+		return
+	}
+	body, err := client.request(ctx, http.MethodPost, "/api/rpc2", payload)
+	if err != nil {
+		return
+	}
+	var envelope struct {
+		Result json.RawMessage `json:"result"`
+		Error  *struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(body, &envelope) != nil || envelope.Error != nil || len(envelope.Result) == 0 || string(envelope.Result) == "null" {
+		return
+	}
+	var status nodeTrafficStatus
+	if json.Unmarshal(envelope.Result, &status) != nil {
+		return
+	}
+	if status.NetTotalUp == nil && status.NetTotalDown == nil && status.Network == nil {
+		var statuses map[string]nodeTrafficStatus
+		if json.Unmarshal(envelope.Result, &statuses) != nil {
+			return
+		}
+		status = statuses[node.UUID]
+	}
+	up, down, ok := trafficCounters(status)
+	if !ok || up < 0 || down < 0 {
+		return
+	}
+	trafficType := node.TrafficLimitType
+	if node.EffectiveTrafficTypeSet && strings.TrimSpace(node.EffectiveTrafficType) != "" {
+		trafficType = node.EffectiveTrafficType
+	}
+	node.TrafficUp = up
+	node.TrafficDown = down
+	node.TrafficUsed = trafficUsed(trafficType, up, down)
+	node.TrafficUsedSet = true
+}
+
+func trafficCounters(status nodeTrafficStatus) (int64, int64, bool) {
+	up, down := status.NetTotalUp, status.NetTotalDown
+	if status.Network != nil {
+		if up == nil {
+			up = status.Network.TotalUp
+		}
+		if down == nil {
+			down = status.Network.TotalDown
+		}
+	}
+	if up == nil || down == nil {
+		return 0, 0, false
+	}
+	return *up, *down, true
+}
+
+func trafficUsed(trafficType string, up, down int64) int64 {
+	switch strings.ToLower(strings.TrimSpace(trafficType)) {
+	case "up":
+		return up
+	case "down":
+		return down
+	case "sum":
+		const maxInt64 = int64(^uint64(0) >> 1)
+		if up > maxInt64-down {
+			return maxInt64
+		}
+		return up + down
+	case "min":
+		if up < down {
+			return up
+		}
+		return down
+	default:
+		if up > down {
+			return up
+		}
+		return down
+	}
 }
 
 func decodeNodes(body []byte) ([]Node, string, error) {

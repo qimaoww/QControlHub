@@ -94,7 +94,7 @@
 | `GET` | `/api/v1/agent-installer` | 下载添加节点凭证保护的一键安装脚本 |
 | `GET` | `/api/v1/agent-binary` | 下载添加节点凭证保护的 Agent 可执行文件 |
 
-系统设置中的 `komari_url` 为 Komari 站点根地址，`komari_api_key` 可选；读取接口只返回掩码。节点的 Komari UUID 通过上面的节点接口保存。成功读取关联节点时，`GET /api/v1/agents/{id}/komari` 返回 `server.billing_cycle`（天）、`server.traffic_limit`（字节）及 Komari 新版本提供的 `effective_traffic_limit` / `traffic_reset_day` 等字段。
+系统设置中的 `komari_url` 为 Komari 站点根地址，`komari_api_key` 可选；读取接口只返回掩码。节点的 Komari UUID 通过上面的节点接口保存。成功读取关联节点时，`GET /api/v1/agents/{id}/komari` 返回 Komari 的流量上限、按配置口径计算的 `server.traffic_used`（字节）及 `server.traffic_used_available`，并在 Komari 提供时返回 `effective_traffic_limit` / `traffic_reset_day`。前端按重置日显示实际周期日期范围，不把 `billing_cycle`（天）直接显示成“30 天”。
 
 `GET /api/v1/overview` 中的 `configs` 只统计可在“配置档案”工作区跨节点下发的全局配置；`node_configs` 单独统计绑定到具体 Agent/内核的节点配置，避免将两类配置混为一个不可解释的总数。为兼容既有调用方，`tasks_pending` 仍表示 `pending + running` 的活动任务总数；`tasks_queued` 和 `tasks_running` 分别给出排队与执行中的精确数量。
 
