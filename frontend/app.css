@@ -603,3 +603,13 @@ dialog[open]::backdrop{animation:qch-backdrop-enter 220ms ease both}
 }
 /* Typography scale v1: keep every explicit UI size on one readable baseline. */
 :root{--ui-font-scale:1}
+
+/* Settings copy must stay inside its section at large type scales. */
+.settings-section>header>div{min-width:0}
+.settings-section header p,.settings-hint{min-width:0;overflow-wrap:anywhere}
+.settings-section>.settings-hint{padding:0 20px 18px}
+.settings-section>.settings-toggle{margin:0 20px 18px}
+.settings-field{min-width:0}
+.settings-field input,.settings-field select{min-width:0}
+.settings-field small{overflow-wrap:anywhere}
+@media(max-width:820px) and (pointer:coarse){.settings-section>.settings-hint{padding:0 16px 16px}.settings-section>.settings-toggle{margin-inline:16px}}
