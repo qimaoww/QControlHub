@@ -29,43 +29,50 @@ import (
 )
 
 type Config struct {
-	AdminToken       string
-	AdminTokenDigest [32]byte
-	OperatorTokens   []string
-	AuditorTokens    []string
-	ReadonlyTokens   []string
-	AllowedOrigins   []string
-	SecureTransport  bool
-	TrustedProxies   []*net.IPNet
-	AgentBinary      []byte
-	AgentVersion     string
-	AgentInstaller   []byte
-	WebhookSecret    string
-	PublicIPProbe    core.PublicIPProbeConfig
-	SessionTTL       time.Duration
+	AdminToken                 string
+	AdminTokenDigest           [32]byte
+	OperatorTokens             []string
+	AuditorTokens              []string
+	ReadonlyTokens             []string
+	AllowedOrigins             []string
+	SecureTransport            bool
+	DatabaseTLSVerified        bool
+	ConfigEncryptionConfigured bool
+	TrustedProxies             []*net.IPNet
+	AgentBinary                []byte
+	AgentVersion               string
+	ControlPlaneVersion        string
+	AgentInstaller             []byte
+	WebhookSecret              string
+	PublicIPProbe              core.PublicIPProbeConfig
+	SessionTTL                 time.Duration
 }
 
 type Server struct {
-	store           *store.Store
-	allowedOrigins  map[string]struct{}
-	secureTransport bool
-	adminLimiter    *authn.FailureLimiter
-	enrollLimiter   *authn.FailureLimiter
-	agentLimiter    *authn.FailureLimiter
-	trustedProxies  []*net.IPNet
-	agentBinary     []byte
-	agentVersion    string
-	agentInstaller  []byte
-	publicIPProbe   core.PublicIPProbeConfig
-	notifier        *notify.Client
-	subStoreHTTP    *http.Client
-	roleTokens      map[[32]byte]tokenPrincipal
-	sessionsMu      sync.Mutex
-	sessions        map[string]apiSession
-	sessionTTL      time.Duration
-	connectionsMu   sync.Mutex
-	connections     map[string]liveConnection
-	auditWriter     func(context.Context, core.AuditLogEntry) error
+	store                      *store.Store
+	allowedOrigins             map[string]struct{}
+	secureTransport            bool
+	databaseTLSVerified        bool
+	configEncryptionConfigured bool
+	adminLimiter               *authn.FailureLimiter
+	enrollLimiter              *authn.FailureLimiter
+	agentLimiter               *authn.FailureLimiter
+	trustedProxies             []*net.IPNet
+	agentBinary                []byte
+	agentVersion               string
+	controlPlaneVersion        string
+	agentInstaller             []byte
+	publicIPProbe              core.PublicIPProbeConfig
+	webhookSigningConfigured   bool
+	notifier                   *notify.Client
+	subStoreHTTP               *http.Client
+	roleTokens                 map[[32]byte]tokenPrincipal
+	sessionsMu                 sync.Mutex
+	sessions                   map[string]apiSession
+	sessionTTL                 time.Duration
+	connectionsMu              sync.Mutex
+	connections                map[string]liveConnection
+	auditWriter                func(context.Context, core.AuditLogEntry) error
 }
 
 func agentHasFeature(features []string, feature string) bool {
@@ -116,23 +123,27 @@ func New(dataStore *store.Store, config Config) *Server {
 		}
 	}
 	return &Server{
-		store:           dataStore,
-		allowedOrigins:  origins,
-		secureTransport: config.SecureTransport,
-		adminLimiter:    authn.NewFailureLimiter(8, 5*time.Minute, 10*time.Minute),
-		enrollLimiter:   authn.NewFailureLimiter(5, 10*time.Minute, 20*time.Minute),
-		agentLimiter:    authn.NewFailureLimiter(20, time.Minute, 5*time.Minute),
-		trustedProxies:  config.TrustedProxies,
-		agentBinary:     config.AgentBinary,
-		agentVersion:    strings.TrimSpace(config.AgentVersion),
-		agentInstaller:  config.AgentInstaller,
-		publicIPProbe:   config.PublicIPProbe,
-		notifier:        notify.New(config.WebhookSecret, slog.Default()),
-		subStoreHTTP:    newSubStoreHTTPClient(),
-		roleTokens:      roleTokens,
-		sessions:        make(map[string]apiSession),
-		sessionTTL:      sessionTTL(config.SessionTTL),
-		connections:     make(map[string]liveConnection),
+		store:                      dataStore,
+		allowedOrigins:             origins,
+		secureTransport:            config.SecureTransport,
+		databaseTLSVerified:        config.DatabaseTLSVerified,
+		configEncryptionConfigured: config.ConfigEncryptionConfigured,
+		adminLimiter:               authn.NewFailureLimiter(8, 5*time.Minute, 10*time.Minute),
+		enrollLimiter:              authn.NewFailureLimiter(5, 10*time.Minute, 20*time.Minute),
+		agentLimiter:               authn.NewFailureLimiter(20, time.Minute, 5*time.Minute),
+		trustedProxies:             config.TrustedProxies,
+		agentBinary:                config.AgentBinary,
+		agentVersion:               strings.TrimSpace(config.AgentVersion),
+		controlPlaneVersion:        strings.TrimSpace(config.ControlPlaneVersion),
+		agentInstaller:             config.AgentInstaller,
+		publicIPProbe:              config.PublicIPProbe,
+		webhookSigningConfigured:   strings.TrimSpace(config.WebhookSecret) != "",
+		notifier:                   notify.New(config.WebhookSecret, slog.Default()),
+		subStoreHTTP:               newSubStoreHTTPClient(),
+		roleTokens:                 roleTokens,
+		sessions:                   make(map[string]apiSession),
+		sessionTTL:                 sessionTTL(config.SessionTTL),
+		connections:                make(map[string]liveConnection),
 	}
 }
 
@@ -255,6 +266,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/v1/enrollment-tokens/{id}/command", s.requirePermission(core.PermissionEnrollmentManage, http.HandlerFunc(s.getEnrollmentCommand)))
 	mux.Handle("GET /api/v1/settings", s.requirePermission(core.PermissionSettingsRead, http.HandlerFunc(s.getSettings)))
 	mux.Handle("PUT /api/v1/settings", s.requirePermission(core.PermissionSettingsManage, http.HandlerFunc(s.putSettings)))
+	mux.Handle("GET /api/v1/settings/deployment", s.requirePermission(core.PermissionSettingsRead, http.HandlerFunc(s.getDeploymentSettings)))
+	mux.Handle("POST /api/v1/settings/check-update", s.requirePermission(core.PermissionSettingsRead, http.HandlerFunc(s.checkUpdate)))
 	mux.Handle("GET /api/v1/audit", s.requirePermission(core.PermissionAuditRead, http.HandlerFunc(s.listAudit)))
 	mux.Handle("GET /api/v1/users", s.requirePermission(core.PermissionUsersManage, http.HandlerFunc(s.listUsers)))
 	mux.Handle("POST /api/v1/users", s.requirePermission(core.PermissionUsersManage, http.HandlerFunc(s.createUser)))
@@ -839,6 +852,19 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 	connection.SetReadLimit(core.MaxCoreLogWireBytes)
 
 	id := agentID(request)
+	panelSettings, settingsErr := s.store.PanelSettings(request.Context())
+	if settingsErr != nil {
+		slog.Warn("load agent policy settings", "agent_id", id, "error", settingsErr)
+		panelSettings = core.DefaultPanelSettings()
+	}
+	agentPolicy := core.AgentPolicy{
+		HeartbeatIntervalSeconds: uint32(panelSettings.AgentHeartbeatIntervalSeconds),
+		MetricsIntervalSeconds:   uint32(panelSettings.AgentMetricsIntervalSeconds),
+		CoreLogMaxMiB:            uint32(panelSettings.AgentCoreLogMaxMiB),
+		CoreLogRotateCount:       uint32(panelSettings.AgentCoreLogRotateCount),
+	}
+	effectivePublicIPProbe := s.publicIPProbe
+	effectivePublicIPProbe.IntervalSeconds = uint32(panelSettings.PublicIPProbeIntervalSeconds)
 	ctx, cancelConnection := context.WithCancel(request.Context())
 	defer cancelConnection()
 	connectionID, err := core.NewID("wss")
@@ -883,7 +909,8 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 	}
 	taskTicker := time.NewTicker(2 * time.Second)
 	defer taskTicker.Stop()
-	heartbeatDeadline := time.NewTimer(50 * time.Second)
+	heartbeatTimeout := time.Duration(panelSettings.AgentOfflineThresholdSeconds+5) * time.Second
+	heartbeatDeadline := time.NewTimer(heartbeatTimeout)
 	defer heartbeatDeadline.Stop()
 	resetHeartbeatDeadline := func() {
 		if !heartbeatDeadline.Stop() {
@@ -892,7 +919,7 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 			default:
 			}
 		}
-		heartbeatDeadline.Reset(50 * time.Second)
+		heartbeatDeadline.Reset(heartbeatTimeout)
 	}
 	var inFlightTask string
 	// Dispatch is deferred until this connection has supplied a heartbeat that
@@ -903,13 +930,14 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 	// RunningTask see the connection's real features and gate mirror work.
 	var heartbeatReceived bool
 	var managedPublicIPProbe bool
+	var managedAgentPolicy bool
 	publicIPProbeTrust := func() store.PublicIPProbeTrust {
 		if !heartbeatReceived || !managedPublicIPProbe {
 			return store.PublicIPProbeTrust{}
 		}
 		return store.PublicIPProbeTrust{
-			ControlPlaneIPv4: strings.TrimSpace(s.publicIPProbe.IPv4Endpoint) != "",
-			ControlPlaneIPv6: strings.TrimSpace(s.publicIPProbe.IPv6Endpoint) != "",
+			ControlPlaneIPv4: strings.TrimSpace(effectivePublicIPProbe.IPv4Endpoint) != "",
+			ControlPlaneIPv6: strings.TrimSpace(effectivePublicIPProbe.IPv6Endpoint) != "",
 		}
 	}
 	resumeRunning := true
@@ -968,7 +996,8 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 					message.Heartbeat.Metrics.ObservedPublicIP = observedPublicIP
 				}
 				reportedManagedPublicIPProbe := agentHasFeature(message.Heartbeat.Features, core.AgentFeatureManagedPublicIPProbe)
-				capabilityChanged := heartbeatReceived && reportedManagedPublicIPProbe != managedPublicIPProbe
+				reportedManagedAgentPolicy := agentHasFeature(message.Heartbeat.Features, core.AgentFeatureManagedPolicy)
+				capabilityChanged := heartbeatReceived && (reportedManagedPublicIPProbe != managedPublicIPProbe || reportedManagedAgentPolicy != managedAgentPolicy)
 				trust := publicIPProbeTrust()
 				if !heartbeatReceived || capabilityChanged {
 					trust = store.PublicIPProbeTrust{}
@@ -985,9 +1014,15 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 				if !heartbeatReceived {
 					heartbeatReceived = true
 					managedPublicIPProbe = reportedManagedPublicIPProbe
+					managedAgentPolicy = reportedManagedAgentPolicy
 					if managedPublicIPProbe {
-						probeConfig := s.publicIPProbe
+						probeConfig := effectivePublicIPProbe
 						if err := writeWire(ctx, connection, core.WireMessage{Type: core.WirePublicIPProbe, PublicIPProbe: &probeConfig}); err != nil {
+							return
+						}
+					}
+					if managedAgentPolicy {
+						if err := writeWire(ctx, connection, core.WireMessage{Type: core.WireAgentPolicy, AgentPolicy: &agentPolicy}); err != nil {
 							return
 						}
 					}
@@ -1072,7 +1107,7 @@ func (s *Server) notifyTaskFailure(agentID, taskID string, result core.TaskResul
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 		settings, err := s.store.PanelSettings(ctx)
-		if err != nil || strings.TrimSpace(settings.WebhookURL) == "" {
+		if err != nil || !settings.NotifyTaskFailed || strings.TrimSpace(settings.WebhookURL) == "" {
 			return
 		}
 		task, err := s.store.GetTask(ctx, taskID)
@@ -1086,6 +1121,53 @@ func (s *Server) notifyTaskFailure(agentID, taskID string, result core.TaskResul
 			slog.Warn("deliver task failure webhook", "task_id", taskID, "error", err)
 		}
 	}()
+}
+
+// MonitorAgentPresence emits each durable online/offline transition once.
+// State is stored in PostgreSQL so a process restart cannot duplicate alerts.
+func (s *Server) MonitorAgentPresence(ctx context.Context) {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-ticker.C:
+			operationContext, cancel := context.WithTimeout(ctx, 10*time.Second)
+			settings, err := s.store.PanelSettings(operationContext)
+			if err == nil {
+				var transitions []store.AgentPresenceTransition
+				transitions, err = s.store.AgentPresenceTransitions(operationContext, now.UTC(), time.Duration(settings.AgentOfflineThresholdSeconds)*time.Second)
+				if err == nil {
+					for _, transition := range transitions {
+						if strings.TrimSpace(settings.WebhookURL) == "" || (transition.Online && !settings.NotifyAgentOnline) || (!transition.Online && !settings.NotifyAgentOffline) {
+							continue
+						}
+						event := notify.AgentOfflineEvent(transition.Agent)
+						if transition.Online {
+							event = notify.AgentOnlineEvent(transition.Agent)
+						}
+						if sendErr := s.notifier.Send(operationContext, settings.WebhookURL, event); sendErr != nil {
+							slog.Warn("deliver agent presence webhook", "agent_id", transition.Agent.ID, "error", sendErr)
+						}
+					}
+					var quotaTransitions []store.TrafficQuotaTransition
+					quotaTransitions, err = s.store.ClaimTrafficQuotaTransitions(operationContext)
+					if err == nil && settings.NotifyTrafficQuota && strings.TrimSpace(settings.WebhookURL) != "" {
+						for _, transition := range quotaTransitions {
+							if sendErr := s.notifier.Send(operationContext, settings.WebhookURL, notify.TrafficQuotaEvent(transition.Policy, transition.AgentName)); sendErr != nil {
+								slog.Warn("deliver traffic quota webhook", "policy_id", transition.Policy.ID, "error", sendErr)
+							}
+						}
+					}
+				}
+			}
+			if err != nil && !errors.Is(err, context.Canceled) {
+				slog.Warn("monitor agent presence", "error", err)
+			}
+			cancel()
+		}
+	}
 }
 
 func (s *Server) registerConnection(agentID, connectionID string, cancel context.CancelFunc) {
@@ -1118,6 +1200,21 @@ func (s *Server) DisconnectAgent(agentID string) {
 	}
 	s.connectionsMu.Unlock()
 	if exists {
+		connection.cancel()
+	}
+}
+
+// DisconnectAllAgents makes active sessions reconnect and receive a freshly
+// saved managed policy. It does not restart Agent processes or managed cores.
+func (s *Server) DisconnectAllAgents() {
+	s.connectionsMu.Lock()
+	connections := make([]liveConnection, 0, len(s.connections))
+	for id, connection := range s.connections {
+		connections = append(connections, connection)
+		delete(s.connections, id)
+	}
+	s.connectionsMu.Unlock()
+	for _, connection := range connections {
 		connection.cancel()
 	}
 }

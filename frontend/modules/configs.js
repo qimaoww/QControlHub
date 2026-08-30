@@ -667,9 +667,12 @@ async function agentConfig() {
     : protocol?.supports_tls
       ? `<input type="hidden" name="reality_enabled" value="0"><section class="builder-section security-section" id="security"><header><span class="section-number">04</span><strong>TLS</strong></header><div><label class="tls-switch"><input type="checkbox" name="tls_enabled" value="1" ${plan.tls_enabled || protocol.requires_tls ? "checked" : ""} ${protocol.requires_tls ? "disabled" : ""}><strong>${protocol.requires_tls ? "TLS" : "启用 TLS"}</strong></label><div class="plan-fields two"><label>证书路径<input name="certificate_path" value="${esc(plan.certificate_path)}"></label><label>私钥路径<input name="private_key_path" value="${esc(plan.private_key_path)}"></label></div><p class="validation-note">私钥仅目标内核服务组可读。</p></div></section>`
       : '<input type="hidden" name="reality_enabled" value="0"><input type="hidden" name="tls_enabled" value="0">';
-  const sourceStudio = config
+  const sourceStudioMarkup = config
     ? `<details class="source-studio"><summary>完整源码</summary><form id="source-config-form"><div class="form-grid"><label>配置名称<input name="name" maxlength="100" required value="${esc(config.name)}"></label><label>说明<input name="description" maxlength="300" value="${esc(config.description)}"></label></div><textarea name="content" spellcheck="false" required>${esc(config.content)}</textarea><footer><div><button class="button" type="submit" data-source-intent="validate" ${engineInstalled ? "" : "disabled"}>保存源码并校验</button><button class="button primary" type="submit" data-source-intent="deploy" ${engineInstalled ? "" : "disabled"}>保存源码并部署</button></div></footer></form></details>`
     : "";
+  const sourceStudio = state.data.settings?.default_config_editor === "source"
+    ? sourceStudioMarkup.replace('<details class="source-studio">', '<details class="source-studio" open>')
+    : sourceStudioMarkup;
   const revisionTimeline = config
     ? `<details class="revision-timeline node-revision-timeline" id="revisions"><summary><b>版本历史</b><strong>${revisions.length} 个版本</strong></summary><div class="timeline-body"><nav>${revisions.map((revision) => `<span class="${revision.version === config.version ? "current" : ""}"><i></i><span><b>v${revision.version}</b><strong>${esc(revision.name)}</strong><small>${ago(revision.updated_at)}${revision.version === config.version ? " · 当前" : ""}</small></span></span>`).join("")}</nav><div class="timeline-placeholder">当前 v${config.version}</div></div></details>`
     : "";

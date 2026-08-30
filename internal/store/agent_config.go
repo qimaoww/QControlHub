@@ -15,10 +15,12 @@ import (
 func (s *Store) GetAgent(ctx context.Context, id string) (core.Agent, error) {
 	var agent core.Agent
 	var capabilities, features, labels, runtimeState, metricsState []byte
+	var offlineThresholdSeconds int
 	err := s.pool.QueryRow(ctx, `
-			SELECT id,name,version,os,arch,capabilities,features,labels,runtime,metrics,last_seen,enrolled_at
+			SELECT id,name,version,os,arch,capabilities,features,labels,runtime,metrics,last_seen,enrolled_at,
+				(SELECT agent_offline_threshold_seconds FROM panel_settings WHERE id=1)
 			FROM agents WHERE id=$1 AND revoked_at IS NULL`, id).Scan(
-		&agent.ID, &agent.Name, &agent.Version, &agent.OS, &agent.Arch, &capabilities, &features, &labels, &runtimeState, &metricsState, &agent.LastSeen, &agent.EnrolledAt)
+		&agent.ID, &agent.Name, &agent.Version, &agent.OS, &agent.Arch, &capabilities, &features, &labels, &runtimeState, &metricsState, &agent.LastSeen, &agent.EnrolledAt, &offlineThresholdSeconds)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return core.Agent{}, ErrNotFound
 	}
@@ -40,7 +42,7 @@ func (s *Store) GetAgent(ctx context.Context, id string) (core.Agent, error) {
 	if err := json.Unmarshal(metricsState, &agent.Metrics); err != nil {
 		return core.Agent{}, err
 	}
-	if agent.LastSeen.After(time.Now().UTC().Add(-45 * time.Second)) {
+	if agent.LastSeen.After(time.Now().UTC().Add(-time.Duration(offlineThresholdSeconds) * time.Second)) {
 		agent.Status = "online"
 	} else {
 		agent.Status = "offline"

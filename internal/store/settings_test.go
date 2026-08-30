@@ -34,31 +34,36 @@ func TestPanelSettingsPersistAndValidate(t *testing.T) {
 		}
 	}()
 
-	want := core.PanelSettings{
-		PanelName: "  Edge Control  ", PanelDescription: "  production fleet  ",
-		TaskPageSize: 50, TaskPollIntervalMS: 2000,
-		CoreLogMinimumLevel: "warning",
-		WebhookURL:          "https://hooks.example.com/qcontrolhub?token=abc",
-	}
+	want := core.DefaultPanelSettings()
+	want.PanelName = "  Edge Control  "
+	want.PanelDescription = "  production fleet  "
+	want.TaskPageSize = 50
+	want.TaskPollIntervalMS = 2000
+	want.AgentMetricsIntervalSeconds = 5
+	want.AgentCoreLogMaxMiB = 1
+	want.AgentCoreLogRotateCount = 0
+	want.CoreLogMinimumLevel = "warning"
+	want.WebhookURL = "https://hooks.example.com/qcontrolhub?token=abc"
 	saved, err := dataStore.SavePanelSettings(ctx, want)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if saved.PanelName != "Edge Control" || saved.PanelDescription != "production fleet" || saved.CoreLogMinimumLevel != "warning" || saved.WebhookURL != want.WebhookURL || saved.UpdatedAt.IsZero() {
+	if saved.PanelName != "Edge Control" || saved.PanelDescription != "production fleet" || saved.CoreLogMinimumLevel != "warning" || saved.WebhookURL != want.WebhookURL || saved.AgentMetricsIntervalSeconds != 5 || saved.AgentCoreLogMaxMiB != 1 || saved.AgentCoreLogRotateCount != 0 || saved.UpdatedAt.IsZero() {
 		t.Fatalf("saved settings = %+v", saved)
 	}
 	loaded, err := dataStore.PanelSettings(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.PanelName != saved.PanelName || loaded.TaskPageSize != 50 || loaded.TaskPollIntervalMS != 2000 || loaded.CoreLogMinimumLevel != "warning" || loaded.WebhookURL != want.WebhookURL {
+	if loaded.PanelName != saved.PanelName || loaded.TaskPageSize != 50 || loaded.TaskPollIntervalMS != 2000 || loaded.CoreLogMinimumLevel != "warning" || loaded.WebhookURL != want.WebhookURL || loaded.AgentMetricsIntervalSeconds != 5 || loaded.AgentCoreLogMaxMiB != 1 {
 		t.Fatalf("loaded settings = %+v, want %+v", loaded, saved)
 	}
 	legacyClient := saved
 	legacyClient.PanelName = "Legacy client update"
 	legacyClient.CoreLogMinimumLevel = ""
+	legacyClient.AgentHeartbeatIntervalSeconds = 0
 	legacySaved, err := dataStore.SavePanelSettings(ctx, legacyClient)
-	if err != nil || legacySaved.CoreLogMinimumLevel != "warning" {
+	if err != nil || legacySaved.CoreLogMinimumLevel != "warning" || legacySaved.AgentCoreLogMaxMiB != 1 || legacySaved.AgentMetricsIntervalSeconds != 5 {
 		t.Fatalf("legacy settings update changed core log policy: %+v, %v", legacySaved, err)
 	}
 

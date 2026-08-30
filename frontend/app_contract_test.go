@@ -934,14 +934,25 @@ func TestCoreLogStoragePolicyNavigationAndVisibility(t *testing.T) {
 	}
 	appContent := string(app)
 	for _, required := range []string{
-		`href="#core-log-storage"><span>04</span>内核日志保存`,
-		`href="#notifications"><span>05</span>事件通知`,
-		`href="#users"><span>06</span>用户管理`,
-		`"core-log-storage": "settings"`,
+		`href="#settings-data"><span>03</span>数据与日志`,
+		`href="#settings-notify"><span>04</span>事件通知`,
+		`href="#settings-deployment"><span>05</span>部署状态`,
+		`"settings-data": "settings"`,
 	} {
 		if !strings.Contains(appContent, required) {
 			t.Errorf("core-log storage settings navigation is missing %q", required)
 		}
+	}
+	settingsModule, err := os.ReadFile("modules/settings.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	settingsContent := string(settingsModule)
+	if strings.Contains(settingsContent, `api("/users")`) || strings.Contains(settingsContent, "用户管理") {
+		t.Error("settings page must not load or render user permission management")
+	}
+	if strings.Count(settingsContent, `data-save-settings`) != 2 {
+		t.Error("settings page must render and bind exactly one save button")
 	}
 
 	module, err := os.ReadFile("modules/core-logs.js")

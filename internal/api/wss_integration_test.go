@@ -762,6 +762,41 @@ func TestWSSManagedPublicIPProbeUsesCurrentSessionCapabilityWithPostgreSQL(t *te
 	waitRawPublicIPProbeRowAPI(t, ctx, databaseURL, agentID, "198.35.26.96", core.PublicIPProbeSourceAgent, "", "", []string{})
 }
 
+func TestWSSManagedAgentPolicyDeliversValidPolicyWithPostgreSQL(t *testing.T) {
+	databaseURL := os.Getenv("QCH_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("QCH_TEST_DATABASE_URL is not configured")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	dataStore, err := store.Open(ctx, databaseURL, true)
+	if err != nil {
+		t.Fatalf("open PostgreSQL: %v", err)
+	}
+	defer dataStore.Close()
+
+	httpServer := httptest.NewServer(New(dataStore, Config{AdminToken: strings.Repeat("m", 48)}).Handler())
+	defer httpServer.Close()
+	agentID, privateKey := enrollWSSTestSourceAgent(t, ctx, httpServer.URL, databaseURL, dataStore, "wss-managed-policy")
+	connection := dialPublicIPProbeWSS(t, ctx, httpServer.URL, agentID, privateKey)
+	defer connection.Close(websocket.StatusNormalClosure, "test complete")
+	if err := wsjson.Write(ctx, connection, core.WireMessage{Type: core.WireHeartbeat, Heartbeat: &core.HeartbeatRequest{
+		Version: "managed-policy-v1", Features: []string{core.AgentFeatureManagedPolicy},
+	}}); err != nil {
+		t.Fatalf("write managed-policy heartbeat: %v", err)
+	}
+	var message core.WireMessage
+	if err := wsjson.Read(ctx, connection, &message); err != nil {
+		t.Fatalf("read managed Agent policy: %v", err)
+	}
+	if message.Type != core.WireAgentPolicy || message.AgentPolicy == nil {
+		t.Fatalf("managed Agent policy = %+v", message)
+	}
+	if err := message.AgentPolicy.Validate(); err != nil {
+		t.Fatalf("managed Agent policy is invalid: %+v: %v", message.AgentPolicy, err)
+	}
+}
+
 func dialPublicIPProbeWSS(t *testing.T, ctx context.Context, base, agentID string, privateKey ed25519.PrivateKey) *websocket.Conn {
 	t.Helper()
 	websocketURL := "ws" + strings.TrimPrefix(base, "http") + "/agent/v1/connect"

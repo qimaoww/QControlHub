@@ -53,4 +53,28 @@ func TestPanelSettingsValidation(t *testing.T) {
 	if err := settings.Validate(); err != nil {
 		t.Fatalf("empty webhook URL must stay valid: %v", err)
 	}
+
+	settings = DefaultPanelSettings()
+	settings.AgentCoreLogMaxMiB = 1
+	settings.AgentCoreLogRotateCount = 0
+	if err := settings.Validate(); err != nil {
+		t.Fatalf("minimum local core log policy rejected: %v", err)
+	}
+	settings.AgentHeartbeatIntervalSeconds = 30
+	settings.AgentOfflineThresholdSeconds = 60
+	if err := settings.Validate(); err == nil {
+		t.Fatal("offline threshold below three heartbeat intervals was accepted")
+	}
+}
+
+func TestAgentPolicyValidation(t *testing.T) {
+	t.Parallel()
+	policy := AgentPolicy{HeartbeatIntervalSeconds: 15, MetricsIntervalSeconds: 1, CoreLogMaxMiB: 1, CoreLogRotateCount: 0}
+	if err := policy.Validate(); err != nil {
+		t.Fatalf("valid minimum policy rejected: %v", err)
+	}
+	policy.CoreLogMaxMiB = 3
+	if err := policy.Validate(); err == nil {
+		t.Fatal("unsupported local log capacity was accepted")
+	}
 }
