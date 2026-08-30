@@ -27,10 +27,6 @@ export function installSettings(ctx) {
     ].map(([label, healthy, copy]) => `<li><span><b>${label}</b><small>${copy}</small></span><em class="${healthy ? "ok" : "warn"}">${healthy ? "正常" : "需检查"}</em></li>`).join("");
 
     shell(`<div class="settings-workspace settings-overview">
-      <header class="settings-hero"><div><h2>系统设置</h2><p>运行策略、数据保留、通知和部署状态集中管理。</p></div><span class="settings-saved-state" data-settings-state>已保存 · v${esc(item.revision)}</span></header>
-      <nav class="settings-category-nav" aria-label="设置分类">
-        <a href="#settings-basic">基础设置</a><a href="#settings-runtime">任务与同步</a><a href="#settings-data">数据与日志</a><a href="#settings-notify">事件通知</a><a href="#settings-deployment">部署状态</a>
-      </nav>
       <form class="settings-form" id="settings-form">
         ${section("settings-basic", "01", "基础设置", "面板显示和操作默认值。", `<div class="settings-grid">
           ${field("panel_name", "面板名称", `<input name="panel_name" value="${esc(item.panel_name)}" maxlength="40" required ${disabled}>`)}
@@ -69,7 +65,7 @@ export function installSettings(ctx) {
           ${toggle(item, "notify_traffic_quota", "流量配额事件", "端口达到配额并触发阻断", disabled)}
         </div>`)}
         ${section("settings-deployment", "05", "部署状态", "高风险密钥、数据库地址和代理信任范围只读展示，仍由部署环境管理。", `<div class="settings-deployment-grid"><div><h4>安全状态</h4><ul class="settings-health-list">${securityRows}<li><span><b>可信代理</b><small>已配置 ${esc(deployment.trusted_proxy_count)} 条网段</small></span><em>${esc(deployment.trusted_proxy_count)}</em></li></ul></div><div class="settings-version-card"><header><h4>组件版本</h4><button class="button small" type="button" data-check-update>检查更新</button></header><dl><div><dt>Control Plane</dt><dd><code>${esc(deployment.control_plane_version || "unknown")}</code><span>当前</span></dd></div><div><dt>QAgent 安装包</dt><dd><code>${esc(deployment.agent_package_version || "unknown")}</code><span>当前</span></dd></div></dl><p data-update-result>尚未检查 GHCR latest；只检查，不会自动升级。</p></div></div>`)}
-        ${writable ? `<footer class="settings-savebar"><div class="settings-savebar-copy"><b data-save-title>所有更改已保存</b><small>修改任一选项后可统一保存。</small></div><button class="button primary" type="submit" data-save-settings disabled>保存更改</button></footer>` : `<p class="settings-hint">当前账号仅可查看设置。</p>`}
+        ${writable ? `<footer class="settings-savebar"><div class="settings-savebar-copy"><b data-save-title>所有更改已保存</b><small><span class="settings-saved-state" data-settings-state>已保存 · v${esc(item.revision)}</span> 修改任一选项后可统一保存。</small></div><button class="button primary" type="submit" data-save-settings disabled>保存更改</button></footer>` : `<p class="settings-hint"><span class="settings-saved-state" data-settings-state>已保存 · v${esc(item.revision)}</span> 当前账号仅可查看设置。</p>`}
       </form>
     </div>`, "系统设置");
 
