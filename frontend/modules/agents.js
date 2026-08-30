@@ -4,6 +4,10 @@ import {
   createRefreshChannel,
 } from "./refresh.js";
 import { ConfigFormatError, formatConfigContent } from "./code-format.js";
+import {
+  orderNodesBySavedOrder,
+  saveNodeOrder,
+} from "./node-order.js";
 
 export function developmentSourceVisible(engine, channel) {
   return engine === "mihomo" && channel === "development";
@@ -770,7 +774,7 @@ async function nodeSettings(presetMode = false, { overview: preloadedOverview } 
       ? selectedAgent
         ? [selectedAgent]
         : []
-      : orderAgents(agents);
+      : orderNodesBySavedOrder(agents);
   const batchAvailable =
     !presetMode && !detailRoute && agents.length > 1 && can("operator");
   if (!batchAvailable) state.data.nodeBatchMode = false;
@@ -998,27 +1002,6 @@ function cancelAgentInteractions() {
   cancelCardDrag = () => {};
 }
 
-const nodeCardOrderKey = "qcontrolhub:node-card-order";
-
-function savedCardOrder() {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(nodeCardOrderKey));
-    return Array.isArray(parsed) ? parsed.filter((id) => typeof id === "string") : [];
-  } catch {
-    return [];
-  }
-}
-
-function orderAgents(agents) {
-  const saved = savedCardOrder();
-  if (!saved.length) return agents;
-  const position = new Map(saved.map((id, index) => [id, index]));
-  return [...agents].sort(
-    (a, b) =>
-      (position.get(a.id) ?? saved.length) - (position.get(b.id) ?? saved.length),
-  );
-}
-
 // Drag reordering of the overview cards. A cloned ghost follows the cursor and
 // the target card is highlighted, while the grid itself does not reflow
 // mid-drag; on release the cards FLIP-animate to their new layout and the
@@ -1093,9 +1076,7 @@ function enableCardDrag(grid) {
       },
     });
     if (!settled) cancelLanding = cancelAnimation;
-    try {
-      localStorage.setItem(nodeCardOrderKey, JSON.stringify(ids));
-    } catch {}
+    saveNodeOrder(ids);
   };
   const cancel = (event) => {
     if (!drag || event.pointerId !== drag.pointerId) return;

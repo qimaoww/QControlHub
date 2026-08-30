@@ -445,6 +445,37 @@ func TestPresetSidebarShowsOnlySelectedNodeContent(t *testing.T) {
 	}
 }
 
+func TestNodeSidebarsUseDraggedNodeSettingsOrder(t *testing.T) {
+	app := string(mustReadFrontendFile(t, "app.js"))
+	agents := string(mustReadFrontendFile(t, "modules/agents.js"))
+	order := string(mustReadFrontendFile(t, "modules/node-order.js"))
+
+	if !strings.Contains(order, `export const nodeCardOrderKey = "qcontrolhub:node-card-order"`) {
+		t.Fatal("shared node ordering must retain the existing localStorage key")
+	}
+	if strings.Count(app, "orderNodesBySavedOrder(") != 6 {
+		t.Fatalf("all six node sidebars must use the shared dragged order; got %d call sites", strings.Count(app, "orderNodesBySavedOrder("))
+	}
+	for _, required := range []string{
+		`import { orderNodesBySavedOrder } from "./modules/node-order.js";`,
+		`const items = orderNodesBySavedOrder(state.data.agents || []);`,
+		`const orderedAgents = orderNodesBySavedOrder(agents);`,
+		`const agents = orderNodesBySavedOrder(state.data.agents || []);`,
+	} {
+		if !strings.Contains(app, required) {
+			t.Errorf("node sidebar shared ordering is missing %q", required)
+		}
+	}
+	for _, required := range []string{
+		`orderNodesBySavedOrder(agents)`,
+		`saveNodeOrder(ids);`,
+	} {
+		if !strings.Contains(agents, required) {
+			t.Errorf("node settings drag ordering is not using shared persistence: missing %q", required)
+		}
+	}
+}
+
 func TestNodeSettingsStartsWithOperationsAndCards(t *testing.T) {
 	app := string(mustReadFrontendFile(t, "app.js"))
 	agents := string(mustReadFrontendFile(t, "modules/agents.js"))

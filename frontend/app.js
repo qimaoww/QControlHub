@@ -15,6 +15,7 @@ import {
   createLatestRenderScheduler,
   reconcileView,
 } from "./modules/refresh.js";
+import { orderNodesBySavedOrder } from "./modules/node-order.js";
 
 const app = document.querySelector("#app");
 const themeStorageKey = "qcontrolhub-color-theme";
@@ -630,7 +631,7 @@ function contextMarkup(title) {
   if (state.route === "dashboard")
     return `<nav class="context-menu" aria-label="总览目录"><a class="active" href="#summary"><span>01</span>运行概览</a><a href="#fleet"><span>02</span>节点状态</a><a href="#activity"><span>03</span>最近活动</a></nav><section class="context-metrics"><div><span>在线 / 全部节点</span><b>${state.data.overview?.agents_online || 0} / ${state.data.overview?.agents || 0}</b></div><div><span>节点版本 / 独立档案</span><b>${state.data.overview?.node_configs || 0} / ${state.data.overview?.configs || 0}</b></div><div><span>准备中 / 执行中</span><b>${state.data.overview?.tasks_queued || 0} / ${state.data.overview?.tasks_running || 0}</b></div></section>`;
   if (state.route === "agents") {
-    const items = state.data.agents || [];
+    const items = orderNodesBySavedOrder(state.data.agents || []);
     return `<div class="context-section-label"><span>内核配置预设</span><b>${items.length}</b></div><nav class="context-list" aria-label="节点内核预设">${items.map((agent) => `<a class="${state.data.selectedAgent === agent.id ? "active" : ""}" href="#node-${esc(agent.id)}" data-context-agent="${esc(agent.id)}"><span class="context-engine">${(agent.capabilities || []).length}</span><span><strong>${esc(agent.name)}</strong><small>${esc(agent.os)} / ${esc(agent.arch)}</small></span><em>${agent.status === "online" ? "在线" : "离线"}</em></a>`).join("") || "<p>还没有节点</p>"}</nav>`;
   }
   if (state.route === "node-settings") {
@@ -639,7 +640,7 @@ function contextMarkup(title) {
     return "";
   }
   if (state.route === "client-access") {
-    const items = state.data.agents || [];
+    const items = orderNodesBySavedOrder(state.data.agents || []);
     const entries = state.data.clientAccessEntries || [];
     return `<a class="context-back" href="#node-settings">← 返回节点设置</a><a class="context-primary ${state.data.accessAgent ? "" : "active"}" href="#client-access" data-access-agent="">全部客户端配置</a><div class="context-section-label"><span>按节点查看</span><b>${items.length}</b></div><nav class="context-list" aria-label="客户端配置节点">${items.map((agent) => { const profiles = entries.filter((entry) => entry.agent_id === agent.id).reduce((total, entry) => total + (entry.profiles || []).length, 0); return `<a class="${state.data.accessAgent === agent.id ? "active" : ""}" href="#client-access" data-access-agent="${esc(agent.id)}"><i class="status-dot ${agent.status === "online" ? "ok" : ""}"></i><span><strong>${esc(agent.name)}</strong><small>${profiles ? `${profiles} 个客户端入站` : "尚无客户端配置"}</small></span></a>`; }).join("") || "<p>还没有节点</p>"}</nav>`;
   }
@@ -658,11 +659,12 @@ function contextMarkup(title) {
         profiles: profiles.filter((item) => item.agent_id === profile.agent_id).length,
       });
     }
+    const orderedAgents = orderNodesBySavedOrder(agents);
     const selected = state.data.subStoreAgent || "";
-    return `<a class="context-back" href="#client-access">← 返回客户端配置</a><a class="context-primary ${selected ? "" : "active"}" href="#substore-sync" data-substore-agent="">全部节点</a><div class="context-section-label"><span>按节点查看</span><b>${agents.length}</b></div><nav class="context-list" aria-label="Sub-Store 同步节点">${agents.map((agent) => `<a class="${selected === agent.id ? "active" : ""}" href="#substore-sync" data-substore-agent="${esc(agent.id)}"><i class="status-dot ${agent.status === "online" ? "ok" : ""}"></i><span><strong>${esc(agent.name)}</strong><small>${agent.profiles} 个客户端入站</small></span></a>`).join("") || "<p>还没有节点</p>"}</nav>`;
+    return `<a class="context-back" href="#client-access">← 返回客户端配置</a><a class="context-primary ${selected ? "" : "active"}" href="#substore-sync" data-substore-agent="">全部节点</a><div class="context-section-label"><span>按节点查看</span><b>${orderedAgents.length}</b></div><nav class="context-list" aria-label="Sub-Store 同步节点">${orderedAgents.map((agent) => `<a class="${selected === agent.id ? "active" : ""}" href="#substore-sync" data-substore-agent="${esc(agent.id)}"><i class="status-dot ${agent.status === "online" ? "ok" : ""}"></i><span><strong>${esc(agent.name)}</strong><small>${agent.profiles} 个客户端入站</small></span></a>`).join("") || "<p>还没有节点</p>"}</nav>`;
   }
   if (state.route === "live-config") {
-    const items = state.data.agents || [];
+    const items = orderNodesBySavedOrder(state.data.agents || []);
     const selected = items.find((agent) => agent.id === state.data.liveAgent);
     const capabilities = (selected?.capabilities || []).filter(
       (engine) => liveConfigEngineEligible(selected.runtime?.[engine]),
@@ -688,12 +690,12 @@ function contextMarkup(title) {
       )
       .join("")}</nav>`;
   if (state.route === "core-logs") {
-    const agents = state.data.agents || [];
+    const agents = orderNodesBySavedOrder(state.data.agents || []);
     const selected = state.data.coreLogFilters?.agent_id || "";
     return `<a class="context-primary ${selected ? "" : "active"}" href="#core-logs" data-core-log-agent="">全部节点日志</a><div class="context-section-label"><span>按节点查看</span><b>${agents.length}</b></div><nav class="context-list" aria-label="内核日志节点">${agents.map((agent) => `<a class="${selected === agent.id ? "active" : ""}" href="#core-logs" data-core-log-agent="${esc(agent.id)}"><i class="status-dot ${agent.status === "online" ? "ok" : ""}"></i><span><strong>${esc(agent.name)}</strong><small>${(agent.features || []).includes("core-logs-v1") ? "集中日志已启用" : "需升级 Agent"}</small></span><em>${agent.status === "online" ? "在线" : "离线"}</em></a>`).join("") || "<p>还没有节点</p>"}</nav>`;
   }
   if (state.route === "traffic") {
-    const agents = state.data.agents || [];
+    const agents = orderNodesBySavedOrder(state.data.agents || []);
     const allPolicies = state.data.trafficPolicies || [];
     const suppressedPorts = new Set(allPolicies.filter((policy) => policy.monitoring_enabled === false).map((policy) => `${policy.agent_id}:${policy.port}`));
     const policies = allPolicies.filter((policy) => policy.monitoring_enabled !== false);
