@@ -25,6 +25,11 @@ const server = createServer(async (request, response) => {
       response.end(html);
       return;
     }
+    if (path === "/api/v1/region-flags/cn") {
+      response.writeHead(200, { "Content-Type": "image/svg+xml" });
+      response.end('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><circle cx="16" cy="16" r="16" fill="#d80027"/></svg>');
+      return;
+    }
     let file;
     if (path === "/assets/app.css") file = join(root, "app.css");
     else if (path === "/assets/app.js") file = join(root, "app.js");

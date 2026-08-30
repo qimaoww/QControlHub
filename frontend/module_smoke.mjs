@@ -48,18 +48,13 @@ assert.equal(
   "monthly Komari expiry supplies a reset day when the API omits one",
 );
 assert.deepEqual(
-  geoRegionDetails("🇹🇼"),
-  { code: "TW", flagCode: "CN", flag: "🇨🇳", name: "中国台湾" },
-  "GeoIP Taiwan region uses the China flag while retaining its display name",
-);
-assert.deepEqual(
   geoRegionDetails("TW"),
-  { code: "TW", flagCode: "CN", flag: "🇨🇳", name: "中国台湾" },
+  { code: "TW", flagCode: "CN", name: "中国台湾" },
   "ISO Taiwan region codes use the same China flag policy",
 );
 assert.deepEqual(
-  geoRegionDetails("🇸🇬"),
-  { code: "SG", flagCode: "SG", flag: "🇸🇬", name: "新加坡" },
+  geoRegionDetails("SG"),
+  { code: "SG", flagCode: "SG", name: "新加坡" },
   "GeoIP country flags preserve non-Taiwan regions",
 );
 assert.equal(geoRegionDetails("not-a-region"), null, "invalid GeoIP regions are hidden");

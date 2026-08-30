@@ -216,7 +216,12 @@ async function testAdminRuntime() {
   );
   assert.equal(Number(komariInline.querySelector("[data-komari-progress]").value), 40);
   const alphaAvatar = document.querySelector('[data-agent-node="alpha"] [data-region-avatar]');
-  assert.equal(alphaAvatar.textContent, "🇨🇳");
+  const alphaFlag = await waitFor(
+    () => alphaAvatar.querySelector('img[src="/api/v1/region-flags/cn"]'),
+    "节点地区没有渲染统一 SVG 旗帜",
+  );
+  await waitFor(() => alphaFlag.complete && alphaFlag.naturalWidth > 0, "节点地区 SVG 旗帜没有载入");
+  assert.equal(alphaAvatar.textContent, "");
   assert.equal(alphaAvatar.classList.contains("has-region"), true);
   assert.equal(alphaAvatar.title, "中国台湾 (TW)");
   assert.equal(alphaAvatar.getAttribute("aria-label"), "中国台湾");

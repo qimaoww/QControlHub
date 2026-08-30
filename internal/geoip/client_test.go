@@ -50,3 +50,30 @@ func TestLookupRejectsNonPublicAddressBeforeRequest(t *testing.T) {
 		t.Fatal("private address unexpectedly accepted")
 	}
 }
+
+func TestFlagReadsSafeSVGAndCachesByCode(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		requests++
+		if request.URL.Path != "/cn.svg" {
+			t.Fatalf("flag path = %q", request.URL.Path)
+		}
+		w.Header().Set("Content-Type", "image/svg+xml")
+		_, _ = w.Write([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><circle cx="16" cy="16" r="16"/></svg>`))
+	}))
+	defer server.Close()
+	client := New(server.Client())
+	client.flagEndpoint = server.URL
+
+	first, err := client.Flag(context.Background(), "CN")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := client.Flag(context.Background(), "cn")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(first) != string(second) || requests != 1 {
+		t.Fatalf("flag cache mismatch: requests=%d first=%q second=%q", requests, first, second)
+	}
+}

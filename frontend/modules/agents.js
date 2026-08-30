@@ -63,30 +63,12 @@ export function komariCycleRange(resetDay, now = new Date()) {
   return `${label(start)}–${label(end)}`;
 }
 
-const regionalIndicatorStart = 0x1f1e6;
-
-function regionCodeFromValue(value) {
-  const normalized = String(value || "").trim();
-  if (/^[a-z]{2}$/i.test(normalized)) return normalized.toUpperCase();
-  const codePoints = [...normalized].map((character) => character.codePointAt(0));
-  if (codePoints.length !== 2 || codePoints.some((point) => point < regionalIndicatorStart || point > regionalIndicatorStart + 25)) return "";
-  return codePoints
-    .map((point) => String.fromCharCode(65 + point - regionalIndicatorStart))
-    .join("");
-}
-
-function regionFlagFromCode(code) {
-  return [...code]
-    .map((character) => String.fromCodePoint(regionalIndicatorStart + character.charCodeAt(0) - 65))
-    .join("");
-}
-
 // GeoIP providers return a two-letter ISO country/region code. Keep the
 // original code for traceability, but follow the panel display policy for
 // Taiwan: show the China flag while naming the region 中国台湾.
 export function geoRegionDetails(value) {
-  const code = regionCodeFromValue(value);
-  if (!code) return null;
+  const code = String(value || "").trim().toUpperCase();
+  if (!/^[A-Z]{2}$/.test(code)) return null;
   const flagCode = code === "TW" ? "CN" : code;
   const name = code === "TW"
     ? "中国台湾"
@@ -97,7 +79,7 @@ export function geoRegionDetails(value) {
         return code;
       }
     })();
-  return { code, flagCode, flag: regionFlagFromCode(flagCode), name };
+  return { code, flagCode, name };
 }
 
 export function batchAgentEligibility(agent, action, engine) {
@@ -749,12 +731,22 @@ export function installAgents(ctx) {
   const updateRegionAvatar = (root, region) => {
     const avatar = root?.querySelector?.("[data-region-avatar]");
     if (!avatar) return;
-    avatar.textContent = region?.flag || "●";
+    avatar.replaceChildren();
     avatar.classList.toggle("has-region", Boolean(region));
     if (region) {
+      const image = document.createElement("img");
+      image.src = `/api/v1/region-flags/${region.flagCode.toLowerCase()}`;
+      image.alt = "";
+      image.decoding = "async";
+      image.addEventListener("error", () => {
+        avatar.textContent = "●";
+        avatar.classList.remove("has-region");
+      }, { once: true });
+      avatar.append(image);
       avatar.title = `${region.name} (${region.code})`;
       avatar.setAttribute("aria-label", region.name);
     } else {
+      avatar.textContent = "●";
       avatar.removeAttribute("title");
       avatar.setAttribute("aria-label", "节点地区未知");
     }

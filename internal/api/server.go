@@ -269,6 +269,7 @@ func (s *Server) Handler() http.Handler {
 	))
 	mux.Handle("PUT /api/v1/agents/{id}/client-address", s.requirePermission(core.PermissionAgentsManage, http.HandlerFunc(s.putAgentClientAddress)))
 	mux.Handle("GET /api/v1/agents/{id}/region", s.requirePermission(core.PermissionAgentsRead, http.HandlerFunc(s.getAgentRegion)))
+	mux.Handle("GET /api/v1/region-flags/{code}", s.requirePermission(core.PermissionAgentsRead, http.HandlerFunc(s.getRegionFlag)))
 	mux.Handle("GET /api/v1/agents/{id}/komari", s.requirePermission(core.PermissionAgentsRead, http.HandlerFunc(s.getAgentKomari)))
 	mux.Handle("PUT /api/v1/agents/{id}/komari", s.requirePermission(core.PermissionAgentsManage, http.HandlerFunc(s.putAgentKomari)))
 	mux.Handle("GET /api/v1/config-catalogs/{engine}", s.requirePermission(core.PermissionCatalogsRead, http.HandlerFunc(s.configCatalog)))
@@ -833,6 +834,25 @@ func (s *Server) getAgentRegion(w http.ResponseWriter, request *http.Request) {
 		"country_code": region.ISOCode,
 		"country":      region.Name,
 	})
+}
+
+func (s *Server) getRegionFlag(w http.ResponseWriter, request *http.Request) {
+	code := strings.ToUpper(strings.TrimSpace(request.PathValue("code")))
+	// The panel display policy treats Taiwan as part of China and uses the
+	// China flag regardless of which code a direct API caller supplies.
+	if code == "TW" {
+		code = "CN"
+	}
+	flag, err := s.geoip.Flag(request.Context(), code)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "image/svg+xml")
+	w.Header().Set("Cache-Control", "public, max-age=172800, immutable")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	_, _ = w.Write(flag)
 }
 
 func (s *Server) putAgentKomari(w http.ResponseWriter, request *http.Request) {
