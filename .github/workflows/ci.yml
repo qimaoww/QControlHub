@@ -36,6 +36,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@v7
@@ -48,6 +50,11 @@ jobs:
         with:
           node-version: "24"
           package-manager-cache: false
+
+      - name: Require a schema version bump for schema changes
+        env:
+          QCH_SCHEMA_BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: node .github/scripts/check-schema-version.mjs
 
       - name: Install Debian test dependencies
         env:
@@ -112,7 +119,7 @@ jobs:
             -e VERSION="${{ github.sha }}" \
             -v "$PWD:/src" -w /src golang:1.25-alpine sh -euxc '
               apk add --no-cache bash chromium coreutils findutils libcap make nftables nodejs openrc openssl
-              make fmt-check frontend-check pr-policy-test installer-test quick-start-test docs-check vet alpine-test
+              make fmt-check frontend-check pr-policy-test schema-policy-test installer-test quick-start-test docs-check vet alpine-test
               make build VERSION="$VERSION"
               sh deploy/tests/existing-core-openrc.sh
               sh -n deploy/remote/install-agent.sh

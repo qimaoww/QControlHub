@@ -44,7 +44,10 @@ type storeExecutor interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }
 
-const currentSchemaVersion = 35
+// Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
+// database already reports this version, so leaving the version unchanged can
+// strand upgraded installations without newly added columns or constraints.
+const currentSchemaVersion = 36
 
 func Open(ctx context.Context, databaseURL string, allowInsecureRemote bool) (*Store, error) {
 	return OpenWithConfigKey(ctx, databaseURL, allowInsecureRemote, "")
