@@ -11,7 +11,7 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
-const panelSettingsColumns = `revision,panel_name,panel_description,time_zone,time_display,default_config_editor,
+const panelSettingsColumns = `revision,panel_name,panel_description,time_zone,time_display,ui_font_scale,default_config_editor,
 	task_page_size,task_poll_interval_ms,agent_heartbeat_interval_seconds,agent_metrics_interval_seconds,
 	agent_offline_threshold_seconds,task_stale_timeout_seconds,install_task_stale_timeout_seconds,task_max_attempts,
 	public_ip_probe_interval_seconds,core_log_minimum_level,core_log_retention_days,agent_core_log_max_mib,
@@ -21,7 +21,7 @@ const panelSettingsColumns = `revision,panel_name,panel_description,time_zone,ti
 func scanPanelSettings(row pgx.Row) (core.PanelSettings, error) {
 	var value core.PanelSettings
 	err := row.Scan(
-		&value.Revision, &value.PanelName, &value.PanelDescription, &value.TimeZone, &value.TimeDisplay, &value.DefaultConfigEditor,
+		&value.Revision, &value.PanelName, &value.PanelDescription, &value.TimeZone, &value.TimeDisplay, &value.UIFontScale, &value.DefaultConfigEditor,
 		&value.TaskPageSize, &value.TaskPollIntervalMS, &value.AgentHeartbeatIntervalSeconds, &value.AgentMetricsIntervalSeconds,
 		&value.AgentOfflineThresholdSeconds, &value.TaskStaleTimeoutSeconds, &value.InstallTaskStaleTimeoutSeconds, &value.TaskMaxAttempts,
 		&value.PublicIPProbeIntervalSeconds, &value.CoreLogMinimumLevel, &value.CoreLogRetentionDays, &value.AgentCoreLogMaxMiB,
@@ -67,6 +67,7 @@ func (s *Store) savePanelSettings(ctx context.Context, settings core.PanelSettin
 	if settings.AgentHeartbeatIntervalSeconds == 0 {
 		settings.TimeZone = current.TimeZone
 		settings.TimeDisplay = current.TimeDisplay
+		settings.UIFontScale = current.UIFontScale
 		settings.DefaultConfigEditor = current.DefaultConfigEditor
 		settings.AgentHeartbeatIntervalSeconds = current.AgentHeartbeatIntervalSeconds
 		settings.AgentMetricsIntervalSeconds = current.AgentMetricsIntervalSeconds
@@ -87,6 +88,12 @@ func (s *Store) savePanelSettings(ctx context.Context, settings core.PanelSettin
 		settings.NotifyAgentOnline = current.NotifyAgentOnline
 		settings.NotifyTrafficQuota = current.NotifyTrafficQuota
 	}
+	// The v36 frontend sends a revision and all operational fields but does not
+	// know about the v37 typography setting. Preserve the stored value when
+	// that field is absent so an older tab can still save unrelated changes.
+	if settings.UIFontScale == 0 {
+		settings.UIFontScale = current.UIFontScale
+	}
 	if settings.CoreLogMinimumLevel == "" {
 		settings.CoreLogMinimumLevel = current.CoreLogMinimumLevel
 	}
@@ -96,7 +103,7 @@ func (s *Store) savePanelSettings(ctx context.Context, settings core.PanelSettin
 	settings.UpdatedAt = time.Now().UTC()
 	where := "id=1"
 	args := []any{
-		settings.PanelName, settings.PanelDescription, settings.TimeZone, settings.TimeDisplay, settings.DefaultConfigEditor,
+		settings.PanelName, settings.PanelDescription, settings.TimeZone, settings.TimeDisplay, settings.UIFontScale, settings.DefaultConfigEditor,
 		settings.TaskPageSize, settings.TaskPollIntervalMS, settings.AgentHeartbeatIntervalSeconds, settings.AgentMetricsIntervalSeconds,
 		settings.AgentOfflineThresholdSeconds, settings.TaskStaleTimeoutSeconds, settings.InstallTaskStaleTimeoutSeconds, settings.TaskMaxAttempts,
 		settings.PublicIPProbeIntervalSeconds, settings.CoreLogMinimumLevel, settings.CoreLogRetentionDays, settings.AgentCoreLogMaxMiB,
@@ -109,13 +116,13 @@ func (s *Store) savePanelSettings(ctx context.Context, settings core.PanelSettin
 		args = append(args, expectedRevision)
 	}
 	query := `UPDATE panel_settings SET revision=revision+1,
-		panel_name=$1,panel_description=$2,time_zone=$3,time_display=$4,default_config_editor=$5,
-		task_page_size=$6,task_poll_interval_ms=$7,agent_heartbeat_interval_seconds=$8,agent_metrics_interval_seconds=$9,
-		agent_offline_threshold_seconds=$10,task_stale_timeout_seconds=$11,install_task_stale_timeout_seconds=$12,task_max_attempts=$13,
-		public_ip_probe_interval_seconds=$14,core_log_minimum_level=$15,core_log_retention_days=$16,agent_core_log_max_mib=$17,
-		agent_core_log_rotate_count=$18,metric_retention_days=$19,audit_retention_days=$20,task_retention_days=$21,
-		config_revision_retention=$22,webhook_url=$23,notify_task_failed=$24,notify_agent_offline=$25,
-		notify_agent_online=$26,notify_traffic_quota=$27,updated_at=$28 WHERE ` + where + ` RETURNING ` + panelSettingsColumns
+		panel_name=$1,panel_description=$2,time_zone=$3,time_display=$4,ui_font_scale=$5,default_config_editor=$6,
+		task_page_size=$7,task_poll_interval_ms=$8,agent_heartbeat_interval_seconds=$9,agent_metrics_interval_seconds=$10,
+		agent_offline_threshold_seconds=$11,task_stale_timeout_seconds=$12,install_task_stale_timeout_seconds=$13,task_max_attempts=$14,
+		public_ip_probe_interval_seconds=$15,core_log_minimum_level=$16,core_log_retention_days=$17,agent_core_log_max_mib=$18,
+		agent_core_log_rotate_count=$19,metric_retention_days=$20,audit_retention_days=$21,task_retention_days=$22,
+		config_revision_retention=$23,webhook_url=$24,notify_task_failed=$25,notify_agent_offline=$26,
+		notify_agent_online=$27,notify_traffic_quota=$28,updated_at=$29 WHERE ` + where + ` RETURNING ` + panelSettingsColumns
 	saved, err := scanPanelSettings(s.pool.QueryRow(ctx, query, args...))
 	if errors.Is(err, pgx.ErrNoRows) && expectedRevision > 0 {
 		return core.PanelSettings{}, fmt.Errorf("%w: settings were changed in another session", ErrConflict)

@@ -29,6 +29,12 @@ func TestPanelSettingsValidation(t *testing.T) {
 	}
 
 	settings = DefaultPanelSettings()
+	settings.UIFontScale = 125
+	if err := settings.Validate(); err == nil {
+		t.Fatal("unsupported UI font scale was accepted")
+	}
+
+	settings = DefaultPanelSettings()
 	settings.CoreLogMinimumLevel = "off"
 	if err := settings.Validate(); err != nil {
 		t.Fatalf("disabled core log persistence was rejected: %v", err)

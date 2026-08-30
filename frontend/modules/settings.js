@@ -1,7 +1,7 @@
 import { bindEvent } from "./refresh.js";
 
 export function installSettings(ctx) {
-  const { api, state, esc, can, shell, notify } = ctx;
+  const { api, state, esc, can, shell, notify, applyUIFontScale } = ctx;
   let settingsRequest = 0;
 
   const options = (selected, values) => values
@@ -33,6 +33,7 @@ export function installSettings(ctx) {
           ${field("panel_description", "面板说明", `<input name="panel_description" value="${esc(item.panel_description)}" maxlength="120" ${disabled}>`)}
           ${select(item, "time_zone", "时间区域", [["browser", "跟随浏览器"], ["Asia/Shanghai", "Asia/Shanghai"], ["UTC", "UTC"]], disabled)}
           ${select(item, "time_display", "时间显示", [["absolute-relative", "绝对时间 + 相对时间"], ["absolute", "仅绝对时间"]], disabled)}
+          ${select(item, "ui_font_scale", "界面字号", [[90, "小 · 90%"], [100, "中 · 100%"], [110, "大 · 110%"]], disabled, "所有页面统一缩放；保存后立即生效")}
           ${select(item, "task_page_size", "任务默认显示数量", [[50, "50 条"], [100, "100 条"], [500, "500 条"]], disabled)}
           ${select(item, "default_config_editor", "配置编辑器默认模式", [["structured", "结构化表单"], ["source", "源文件"]], disabled)}
         </div>`)}
@@ -91,7 +92,7 @@ export function installSettings(ctx) {
       const body = {
         revision: item.revision,
         panel_name: data.get("panel_name"), panel_description: data.get("panel_description"),
-        time_zone: data.get("time_zone"), time_display: data.get("time_display"), default_config_editor: data.get("default_config_editor"),
+        time_zone: data.get("time_zone"), time_display: data.get("time_display"), ui_font_scale: number("ui_font_scale"), default_config_editor: data.get("default_config_editor"),
         task_page_size: number("task_page_size"), task_poll_interval_ms: number("task_poll_interval_ms"),
         agent_heartbeat_interval_seconds: number("agent_heartbeat_interval_seconds"), agent_metrics_interval_seconds: number("agent_metrics_interval_seconds"),
         agent_offline_threshold_seconds: number("agent_offline_threshold_seconds"), task_stale_timeout_seconds: number("task_stale_timeout_seconds"),
@@ -109,6 +110,7 @@ export function installSettings(ctx) {
         const saved = await api("/settings", { method: "PUT", body: JSON.stringify(body) });
         state.data.settings = saved;
         item.revision = saved.revision;
+        applyUIFontScale?.(saved.ui_font_scale);
         stateBadge.textContent = `已保存 · v${saved.revision}`;
         stateBadge.classList.remove("dirty");
         if (saveTitle) saveTitle.textContent = "所有更改已保存";

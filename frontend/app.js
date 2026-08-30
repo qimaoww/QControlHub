@@ -403,7 +403,16 @@ function storedTheme() {
   }
 }
 
+const uiFontScaleOptions = new Set([90, 100, 110]);
+function applyUIFontScale(value = state.data.settings?.ui_font_scale) {
+  const percent = Number(value);
+  const normalized = uiFontScaleOptions.has(percent) ? percent : 100;
+  document.documentElement.dataset.uiFontScale = String(normalized);
+  document.documentElement.style.setProperty("--ui-font-scale", String(normalized / 100));
+}
+
 function applyTheme(theme = storedTheme() || (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark")) {
+  applyUIFontScale();
   document.documentElement.dataset.theme = theme;
   document.documentElement.style.colorScheme = theme;
   const nextLabel = theme === "light" ? "切换为深色主题" : "切换为浅色主题";
@@ -443,6 +452,7 @@ function renderLogin(message = "") {
   document.title = "登录 · QControlHub";
   app.style.display = "contents";
   app.innerHTML = `<button class="theme-toggle login-theme-toggle" type="button" data-theme-toggle aria-label="切换颜色主题"><span data-theme-icon aria-hidden="true">☀</span></button><main class="login-shell compact-login"><section class="login-card"><a class="brand login-card-brand" href="#dashboard"><span class="brand-mark large">QH</span><strong>QControlHub</strong></a><div class="login-card-head"><h1>登录</h1></div>${message ? `<div class="alert error">${esc(message)}</div>` : ""}<form id="login-form" class="stack-form"><label>用户名<input name="username" type="text" autocomplete="username" autofocus required maxlength="64" pattern="[A-Za-z0-9._\\-]+" placeholder="输入用户名"></label><label>密码 / 管理令牌<input name="token" type="password" autocomplete="current-password" required minlength="12"></label><small class="settings-hint">可使用管理员令牌，或使用管理员创建的个人账号密码登录。</small><button class="button primary" type="submit">登录</button></form></section></main>`;
+  applyUIFontScale(100);
   applyTheme();
   document.querySelector("[data-theme-toggle]").onclick = toggleTheme;
   document
@@ -768,7 +778,7 @@ const tasks = installTasks({ api, state, actions, can, esc, statusName, engineNa
 const coreLogs = installCoreLogs({ api, state, engines, can, esc, engineName, date, shell });
 const traffic = installTraffic({ api, state, can, esc, engineName, bytes, rate, percent, ago, shell, notify, confirmAction });
 const accessControl = installAccessControl({ api, state, can, esc, engineName, shell, notify, confirmAction });
-const settings = installSettings({ api, state, esc, date, can, shell, notify, confirmAction });
+const settings = installSettings({ api, state, esc, date, can, shell, notify, confirmAction, applyUIFontScale });
 
 async function renderOnce() {
   const previousRoute = state.route;

@@ -47,7 +47,7 @@ type storeExecutor interface {
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 36
+const currentSchemaVersion = 37
 
 func Open(ctx context.Context, databaseURL string, allowInsecureRemote bool) (*Store, error) {
 	return OpenWithConfigKey(ctx, databaseURL, allowInsecureRemote, "")
@@ -1932,6 +1932,7 @@ ALTER TABLE panel_settings DROP COLUMN IF EXISTS enrollment_ttl_minutes;
 ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS revision bigint NOT NULL DEFAULT 1 CHECK (revision > 0);
 ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS time_zone varchar(32) NOT NULL DEFAULT 'browser';
 ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS time_display varchar(32) NOT NULL DEFAULT 'absolute-relative';
+ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS ui_font_scale integer NOT NULL DEFAULT 100;
 ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS default_config_editor varchar(16) NOT NULL DEFAULT 'structured';
 ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS agent_heartbeat_interval_seconds integer NOT NULL DEFAULT 15;
 ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS agent_metrics_interval_seconds integer NOT NULL DEFAULT 1;
@@ -1955,6 +1956,7 @@ ALTER TABLE panel_settings DROP CONSTRAINT IF EXISTS panel_settings_operational_
 ALTER TABLE panel_settings ADD CONSTRAINT panel_settings_operational_values_check CHECK (
     time_zone IN ('browser','Asia/Shanghai','UTC') AND
     time_display IN ('absolute-relative','absolute') AND
+    ui_font_scale IN (90,100,110) AND
     default_config_editor IN ('structured','source') AND
     task_page_size IN (50,100,500) AND task_poll_interval_ms IN (600,1000,2000,5000) AND
     agent_heartbeat_interval_seconds IN (10,15,30) AND agent_metrics_interval_seconds IN (1,5,15,30) AND
