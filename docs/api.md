@@ -55,6 +55,8 @@
 | `PUT` | `/api/v1/access-controls` | 保存单个入站的大陆来源/目标限制并创建校验或部署任务（agent-config.write + tasks.execute） |
 | `GET` | `/api/v1/core-logs` | 查询面板集中保存的内核运行日志 |
 | `PUT` | `/api/v1/agents/{id}/client-address` | 设置或清除客户端访问节点时使用的域名/IP（agents.manage） |
+| `GET` | `/api/v1/agents/{id}/komari` | 读取节点关联的 Komari 服务器计费周期和流量配置（agents.read） |
+| `PUT` | `/api/v1/agents/{id}/komari` | 设置或清除节点关联的 Komari 服务器 UUID（agents.manage） |
 | `GET` | `/api/v1/config-catalogs/{engine}` | 读取内核官方配置字段和服务端协议目录 |
 | `GET` | `/api/v1/configs` | 列出配置及正文 |
 | `POST` | `/api/v1/configs` | 创建配置 |
@@ -73,7 +75,7 @@
 | `POST` | `/api/v1/enrollment-tokens` | 创建节点绑定、可重复安装的添加命令 |
 | `DELETE` | `/api/v1/enrollment-tokens/{id}` | 删除添加节点记录并立即使命令失效 |
 | `POST` | `/api/v1/enrollment-tokens/{id}/command` | 幂等读取指定添加记录的已有命令（enrollment.manage） |
-| `GET` | `/api/v1/settings` | 读取面板设置 |
+| `GET` | `/api/v1/settings` | 读取面板设置；Komari API Key 只返回已配置的掩码，不返回原文 |
 | `PUT` | `/api/v1/settings` | 保存面板设置（admin） |
 | `GET` | `/api/v1/audit?limit=` | 读取最近审计记录 |
 | `GET` | `/api/v1/metrics/{agent_id}` | 读取节点最近 24 小时资源样本 |
@@ -88,8 +90,11 @@
 | `POST` | `/api/v1/templates` | 创建配置模板 |
 | `DELETE` | `/api/v1/templates/{id}` | 删除配置模板（admin） |
 | `POST` | `/api/v1/templates/{id}/apply` | 渲染模板并保存到指定节点 |
+
 | `GET` | `/api/v1/agent-installer` | 下载添加节点凭证保护的一键安装脚本 |
 | `GET` | `/api/v1/agent-binary` | 下载添加节点凭证保护的 Agent 可执行文件 |
+
+系统设置中的 `komari_url` 为 Komari 站点根地址，`komari_api_key` 可选；读取接口只返回掩码。节点的 Komari UUID 通过上面的节点接口保存。成功读取关联节点时，`GET /api/v1/agents/{id}/komari` 返回 `server.billing_cycle`（天）、`server.traffic_limit`（字节）及 Komari 新版本提供的 `effective_traffic_limit` / `traffic_reset_day` 等字段。
 
 `GET /api/v1/overview` 中的 `configs` 只统计可在“配置档案”工作区跨节点下发的全局配置；`node_configs` 单独统计绑定到具体 Agent/内核的节点配置，避免将两类配置混为一个不可解释的总数。为兼容既有调用方，`tasks_pending` 仍表示 `pending + running` 的活动任务总数；`tasks_queued` 和 `tasks_running` 分别给出排队与执行中的精确数量。
 
@@ -104,7 +109,9 @@
   "task_page_size": 100,
   "task_poll_interval_ms": 600,
   "core_log_minimum_level": "debug",
-  "webhook_url": ""
+  "webhook_url": "",
+  "komari_url": "",
+  "komari_api_key": ""
 }
 ```
 

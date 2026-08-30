@@ -23,6 +23,7 @@ import (
 	"github.com/coder/websocket/wsjson"
 	"github.com/qimaoww/qcontrolhub/internal/authn"
 	"github.com/qimaoww/qcontrolhub/internal/core"
+	"github.com/qimaoww/qcontrolhub/internal/komari"
 	"github.com/qimaoww/qcontrolhub/internal/notify"
 	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
 	"github.com/qimaoww/qcontrolhub/internal/store"
@@ -45,7 +46,12 @@ type Config struct {
 	AgentInstaller             []byte
 	WebhookSecret              string
 	PublicIPProbe              core.PublicIPProbeConfig
-	SessionTTL                 time.Duration
+	// KomariURL and KomariAPIKey configure the optional read-only Komari
+	// integration. The key is never exposed through the panel API.
+	KomariURL        string
+	KomariAPIKey     string
+	KomariHTTPClient *http.Client
+	SessionTTL       time.Duration
 }
 
 type Server struct {
@@ -63,6 +69,9 @@ type Server struct {
 	controlPlaneVersion        string
 	agentInstaller             []byte
 	publicIPProbe              core.PublicIPProbeConfig
+	komari                     *komari.Client
+	komariHTTPClient           *http.Client
+	komariConfigError          error
 	webhookSigningConfigured   bool
 	notifier                   *notify.Client
 	subStoreHTTP               *http.Client
@@ -122,6 +131,17 @@ func New(dataStore *store.Store, config Config) *Server {
 			roleTokens[sha256.Sum256([]byte(token))] = tokenPrincipal{Role: core.RoleUser, Permissions: legacyReadonlyPermissions()}
 		}
 	}
+	komariClient, komariErr := komari.New(config.KomariURL, config.KomariAPIKey, config.KomariHTTPClient)
+	if komariErr != nil {
+		// Keep the control plane available when an optional integration is
+		// misconfigured; the endpoint reports the configuration error to an
+		// operator instead of preventing unrelated node management.
+		komariClient = nil
+	}
+	komariHTTPClient := config.KomariHTTPClient
+	if komariHTTPClient == nil {
+		komariHTTPClient = &http.Client{Timeout: 10 * time.Second}
+	}
 	return &Server{
 		store:                      dataStore,
 		allowedOrigins:             origins,
@@ -137,6 +157,9 @@ func New(dataStore *store.Store, config Config) *Server {
 		controlPlaneVersion:        strings.TrimSpace(config.ControlPlaneVersion),
 		agentInstaller:             config.AgentInstaller,
 		publicIPProbe:              config.PublicIPProbe,
+		komari:                     komariClient,
+		komariHTTPClient:           komariHTTPClient,
+		komariConfigError:          komariErr,
 		webhookSigningConfigured:   strings.TrimSpace(config.WebhookSecret) != "",
 		notifier:                   notify.New(config.WebhookSecret, slog.Default()),
 		subStoreHTTP:               newSubStoreHTTPClient(),
@@ -237,6 +260,8 @@ func (s *Server) Handler() http.Handler {
 		http.HandlerFunc(s.putMainlandAccessPolicy),
 	))
 	mux.Handle("PUT /api/v1/agents/{id}/client-address", s.requirePermission(core.PermissionAgentsManage, http.HandlerFunc(s.putAgentClientAddress)))
+	mux.Handle("GET /api/v1/agents/{id}/komari", s.requirePermission(core.PermissionAgentsRead, http.HandlerFunc(s.getAgentKomari)))
+	mux.Handle("PUT /api/v1/agents/{id}/komari", s.requirePermission(core.PermissionAgentsManage, http.HandlerFunc(s.putAgentKomari)))
 	mux.Handle("GET /api/v1/config-catalogs/{engine}", s.requirePermission(core.PermissionCatalogsRead, http.HandlerFunc(s.configCatalog)))
 	mux.Handle("DELETE /api/v1/agents/{id}", s.requirePermission(core.PermissionAgentsManage, http.HandlerFunc(s.deleteAgent)))
 	mux.Handle("POST /api/v1/agents/{id}/enrollment-token", s.requirePermission(core.PermissionEnrollmentManage, http.HandlerFunc(s.createAgentEnrollmentToken)))
@@ -682,6 +707,101 @@ func (s *Server) putAgentClientAddress(w http.ResponseWriter, request *http.Requ
 	}
 	writeJSON(w, http.StatusOK, result)
 }
+
+func komariNodeResource(node komari.Node) core.KomariNode {
+	return core.KomariNode{
+		UUID: node.UUID, Name: node.Name, BillingCycle: node.BillingCycle,
+		TrafficLimit: node.TrafficLimit, TrafficLimitType: node.TrafficLimitType,
+		EffectiveTrafficLimit: node.EffectiveTrafficLimit, EffectiveTrafficType: node.EffectiveTrafficType,
+		EffectiveTrafficLimitAvailable: node.EffectiveTrafficLimitSet,
+		EffectiveTrafficTypeAvailable:  node.EffectiveTrafficTypeSet,
+		TrafficResetDay:                node.TrafficResetDay, ExpiredAt: node.ExpiredAt, UpdatedAt: node.UpdatedAt,
+	}
+}
+
+func (s *Server) komariForRequest(ctx context.Context) (*komari.Client, error) {
+	if s.store == nil {
+		if s.komariConfigError != nil {
+			return nil, s.komariConfigError
+		}
+		return s.komari, nil
+	}
+	settings, err := s.store.PanelSettings(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(settings.KomariURL) == "" {
+		return s.komari, s.komariConfigError
+	}
+	client, err := komari.New(settings.KomariURL, settings.KomariAPIKey, s.komariHTTPClient)
+	if err != nil {
+		return nil, err
+	}
+	return client, nil
+}
+
+func (s *Server) getAgentKomari(w http.ResponseWriter, request *http.Request) {
+	agent, err := s.store.GetAgent(request.Context(), request.PathValue("id"))
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	uuid := store.AgentKomariUUID(agent)
+	result := core.KomariLink{UUID: uuid}
+	if uuid == "" {
+		writeJSON(w, http.StatusOK, result)
+		return
+	}
+	komariClient, clientErr := s.komariForRequest(request.Context())
+	if clientErr != nil {
+		writeError(w, http.StatusServiceUnavailable, clientErr.Error())
+		return
+	}
+	if komariClient == nil {
+		writeError(w, http.StatusServiceUnavailable, "Komari integration is not configured")
+		return
+	}
+	node, err := komariClient.GetNode(request.Context(), uuid)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	result.Server = ptr(komariNodeResource(node))
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) putAgentKomari(w http.ResponseWriter, request *http.Request) {
+	var input struct {
+		UUID       *string `json:"uuid"`
+		KomariUUID *string `json:"komari_uuid"`
+	}
+	if err := decodeJSON(w, request, &input, 8<<10); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	value := input.UUID
+	if value == nil {
+		value = input.KomariUUID
+	}
+	if value == nil {
+		writeError(w, http.StatusBadRequest, "uuid is required")
+		return
+	}
+	uuid := strings.TrimSpace(*value)
+	if len(uuid) > 100 || strings.ContainsAny(uuid, "\r\n\t") {
+		writeError(w, http.StatusBadRequest, "Komari server UUID is invalid")
+		return
+	}
+	if err := s.store.SetAgentKomariUUID(request.Context(), request.PathValue("id"), uuid); err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	s.recordAudit(request, "agent.komari.updated", request.PathValue("id"), "Komari UUID linked")
+	writeJSON(w, http.StatusOK, core.KomariLink{UUID: uuid})
+}
+
+func ptr[T any](value T) *T { return &value }
 
 func (s *Server) createEnrollmentToken(w http.ResponseWriter, request *http.Request) {
 	var input struct {

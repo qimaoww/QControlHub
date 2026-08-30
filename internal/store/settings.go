@@ -16,7 +16,7 @@ const panelSettingsColumns = `revision,panel_name,panel_description,time_zone,ti
 	agent_offline_threshold_seconds,task_stale_timeout_seconds,install_task_stale_timeout_seconds,task_max_attempts,
 	public_ip_probe_interval_seconds,core_log_minimum_level,core_log_retention_days,agent_core_log_max_mib,
 	agent_core_log_rotate_count,metric_retention_days,audit_retention_days,task_retention_days,config_revision_retention,
-	webhook_url,notify_task_failed,notify_agent_offline,notify_agent_online,notify_traffic_quota,updated_at`
+	webhook_url,notify_task_failed,notify_agent_offline,notify_agent_online,notify_traffic_quota,komari_url,komari_api_key,updated_at`
 
 func scanPanelSettings(row pgx.Row) (core.PanelSettings, error) {
 	var value core.PanelSettings
@@ -26,7 +26,7 @@ func scanPanelSettings(row pgx.Row) (core.PanelSettings, error) {
 		&value.AgentOfflineThresholdSeconds, &value.TaskStaleTimeoutSeconds, &value.InstallTaskStaleTimeoutSeconds, &value.TaskMaxAttempts,
 		&value.PublicIPProbeIntervalSeconds, &value.CoreLogMinimumLevel, &value.CoreLogRetentionDays, &value.AgentCoreLogMaxMiB,
 		&value.AgentCoreLogRotateCount, &value.MetricRetentionDays, &value.AuditRetentionDays, &value.TaskRetentionDays, &value.ConfigRevisionRetention,
-		&value.WebhookURL, &value.NotifyTaskFailed, &value.NotifyAgentOffline, &value.NotifyAgentOnline, &value.NotifyTrafficQuota, &value.UpdatedAt,
+		&value.WebhookURL, &value.NotifyTaskFailed, &value.NotifyAgentOffline, &value.NotifyAgentOnline, &value.NotifyTrafficQuota, &value.KomariURL, &value.KomariAPIKey, &value.UpdatedAt,
 	)
 	return value, err
 }
@@ -57,6 +57,8 @@ func (s *Store) savePanelSettings(ctx context.Context, settings core.PanelSettin
 	settings.PanelDescription = strings.TrimSpace(settings.PanelDescription)
 	settings.CoreLogMinimumLevel = strings.ToLower(strings.TrimSpace(settings.CoreLogMinimumLevel))
 	settings.WebhookURL = strings.TrimSpace(settings.WebhookURL)
+	settings.KomariURL = strings.TrimSpace(settings.KomariURL)
+	settings.KomariAPIKey = strings.TrimSpace(settings.KomariAPIKey)
 	current, err := s.PanelSettings(ctx)
 	if err != nil {
 		return core.PanelSettings{}, err
@@ -88,9 +90,10 @@ func (s *Store) savePanelSettings(ctx context.Context, settings core.PanelSettin
 		settings.NotifyAgentOnline = current.NotifyAgentOnline
 		settings.NotifyTrafficQuota = current.NotifyTrafficQuota
 	}
-	// The v36 frontend sends a revision and all operational fields but does not
-	// know about the v37 typography setting. Preserve the stored value when
-	// that field is absent so an older tab can still save unrelated changes.
+	// Older frontends send a revision and all known operational fields but do
+	// not know about settings added later (typography, then Komari). Preserve
+	// the typography value when it is absent; the API layer similarly preserves
+	// omitted Komari fields.
 	if settings.UIFontScale == 0 {
 		settings.UIFontScale = current.UIFontScale
 	}
@@ -109,7 +112,7 @@ func (s *Store) savePanelSettings(ctx context.Context, settings core.PanelSettin
 		settings.PublicIPProbeIntervalSeconds, settings.CoreLogMinimumLevel, settings.CoreLogRetentionDays, settings.AgentCoreLogMaxMiB,
 		settings.AgentCoreLogRotateCount, settings.MetricRetentionDays, settings.AuditRetentionDays, settings.TaskRetentionDays,
 		settings.ConfigRevisionRetention, settings.WebhookURL, settings.NotifyTaskFailed, settings.NotifyAgentOffline,
-		settings.NotifyAgentOnline, settings.NotifyTrafficQuota, settings.UpdatedAt,
+		settings.NotifyAgentOnline, settings.NotifyTrafficQuota, settings.KomariURL, settings.KomariAPIKey, settings.UpdatedAt,
 	}
 	if expectedRevision > 0 {
 		where += fmt.Sprintf(" AND revision=$%d", len(args)+1)
@@ -122,7 +125,7 @@ func (s *Store) savePanelSettings(ctx context.Context, settings core.PanelSettin
 		public_ip_probe_interval_seconds=$15,core_log_minimum_level=$16,core_log_retention_days=$17,agent_core_log_max_mib=$18,
 		agent_core_log_rotate_count=$19,metric_retention_days=$20,audit_retention_days=$21,task_retention_days=$22,
 		config_revision_retention=$23,webhook_url=$24,notify_task_failed=$25,notify_agent_offline=$26,
-		notify_agent_online=$27,notify_traffic_quota=$28,updated_at=$29 WHERE ` + where + ` RETURNING ` + panelSettingsColumns
+		notify_agent_online=$27,notify_traffic_quota=$28,komari_url=$29,komari_api_key=$30,updated_at=$31 WHERE ` + where + ` RETURNING ` + panelSettingsColumns
 	saved, err := scanPanelSettings(s.pool.QueryRow(ctx, query, args...))
 	if errors.Is(err, pgx.ErrNoRows) && expectedRevision > 0 {
 		return core.PanelSettings{}, fmt.Errorf("%w: settings were changed in another session", ErrConflict)

@@ -312,6 +312,31 @@ type Agent struct {
 	Reinstalled                bool                    `json:"-"`
 }
 
+// KomariNode is the read-only billing and traffic configuration returned by a
+// linked Komari monitor. Values are kept in Komari's native units: billing
+// cycle in days and traffic limits in bytes.
+type KomariNode struct {
+	UUID                           string `json:"uuid"`
+	Name                           string `json:"name,omitempty"`
+	BillingCycle                   int64  `json:"billing_cycle"`
+	TrafficLimit                   int64  `json:"traffic_limit"`
+	TrafficLimitType               string `json:"traffic_limit_type,omitempty"`
+	EffectiveTrafficLimit          int64  `json:"effective_traffic_limit"`
+	EffectiveTrafficType           string `json:"effective_traffic_type,omitempty"`
+	EffectiveTrafficLimitAvailable bool   `json:"effective_traffic_limit_available,omitempty"`
+	EffectiveTrafficTypeAvailable  bool   `json:"effective_traffic_type_available,omitempty"`
+	TrafficResetDay                int64  `json:"traffic_reset_day,omitempty"`
+	ExpiredAt                      string `json:"expired_at,omitempty"`
+	UpdatedAt                      string `json:"updated_at,omitempty"`
+}
+
+// KomariLink is returned by the node settings endpoint. Server is omitted
+// when the UUID is not configured or when Komari is unavailable.
+type KomariLink struct {
+	UUID   string      `json:"uuid,omitempty"`
+	Server *KomariNode `json:"server,omitempty"`
+}
+
 type Config struct {
 	ID          string    `json:"id"`
 	AgentID     string    `json:"agent_id,omitempty"`
@@ -587,6 +612,8 @@ type PanelSettings struct {
 	NotifyAgentOffline             bool      `json:"notify_agent_offline"`
 	NotifyAgentOnline              bool      `json:"notify_agent_online"`
 	NotifyTrafficQuota             bool      `json:"notify_traffic_quota"`
+	KomariURL                      string    `json:"komari_url"`
+	KomariAPIKey                   string    `json:"komari_api_key"`
 	UpdatedAt                      time.Time `json:"updated_at"`
 }
 
@@ -618,12 +645,26 @@ func DefaultPanelSettings() PanelSettings {
 		NotifyAgentOffline:             true,
 		NotifyAgentOnline:              true,
 		NotifyTrafficQuota:             true,
+		KomariURL:                      "",
+		KomariAPIKey:                   "",
 	}
 }
 
 func (settings PanelSettings) Validate() error {
 	if settings.PanelName == "" {
 		return errors.New("panel name is required")
+	}
+	if utf8.RuneCountInString(settings.KomariURL) > 500 || utf8.RuneCountInString(settings.KomariAPIKey) > 500 {
+		return errors.New("Komari settings must not exceed 500 characters")
+	}
+	if strings.ContainsAny(settings.KomariAPIKey, "\r\n") {
+		return errors.New("Komari API Key contains invalid characters")
+	}
+	if strings.TrimSpace(settings.KomariURL) != "" {
+		parsed, err := url.Parse(strings.TrimSpace(settings.KomariURL))
+		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+			return errors.New("Komari URL must be an absolute HTTP(S) URL without credentials, query, or fragment")
+		}
 	}
 	if utf8.RuneCountInString(settings.PanelName) > 40 {
 		return errors.New("panel name must not exceed 40 characters")
