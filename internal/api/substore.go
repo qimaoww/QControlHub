@@ -509,7 +509,11 @@ func (s *Server) importSubStoreRemoteTarget(w http.ResponseWriter, request *http
 	integrationID, _ := remote["qcontrolhub_integration_id"].(string)
 	integrationID = strings.TrimSpace(integrationID)
 	originalIntegrationID := integrationID
-	claimRemote := !strings.HasPrefix(integrationID, "ssi_") || utf8.RuneCountInString(integrationID) > 100
+	// A newly created local target must own the remote group with a fresh
+	// identity. Reusing an identity left by another control plane would make the
+	// two panels race on the same group and would also trust stale managed-node
+	// metadata from that panel.
+	claimRemote := true
 	if claimRemote {
 		integrationID, err = core.NewID("ssi")
 		if err != nil {
@@ -528,6 +532,7 @@ func (s *Server) importSubStoreRemoteTarget(w http.ResponseWriter, request *http
 			payload[key] = value
 		}
 		payload["qcontrolhub_integration_id"] = integrationID
+		payload["qcontrolhub_managed_nodes"] = []any{}
 		if _, patchErr := s.subStoreRequest(request.Context(), settings.EndpointURL, http.MethodPatch, "/api/sub/"+name, payload, nil); patchErr != nil {
 			_ = s.store.DeleteSubStoreSyncTarget(request.Context(), target.ID)
 			writeError(w, http.StatusBadGateway, patchErr.Error())
@@ -690,6 +695,10 @@ func (s *Server) linkSubStoreRemoteTarget(w http.ResponseWriter, request *http.R
 	if needsClaim {
 		claimed := cloneSubStoreSubscription(remote)
 		claimed["qcontrolhub_integration_id"] = integrationID
+		// Ownership changed from another panel; its managed-node list is not
+		// authoritative for this target. The next sync will seed this panel's
+		// list without deleting the existing remote content.
+		claimed["qcontrolhub_managed_nodes"] = []any{}
 		if _, err := s.subStoreRequest(request.Context(), settings.EndpointURL, http.MethodPatch, "/api/sub/"+name, claimed, nil); err != nil {
 			if restoreErr := restoreOwnership(); restoreErr != nil {
 				writeInternalError(w, fmt.Errorf("claim Sub-Store group: %v; restore ownership: %w", err, restoreErr))
@@ -770,6 +779,14 @@ func subStoreSubscriptionUpdate(existing, desired map[string]any) map[string]any
 	updated := cloneSubStoreSubscription(existing)
 	for key, value := range desired {
 		updated[key] = value
+	}
+	// These options are intentionally user-owned in Sub-Store. Keep them when
+	// the control plane refreshes node content, while still updating the name,
+	// source, content, and QControlHub ownership fields above.
+	for _, key := range []string{"displayName", "display-name", "noFlow", "remark", "process"} {
+		if value, ok := existing[key]; ok {
+			updated[key] = value
+		}
 	}
 	return updated
 }

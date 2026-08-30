@@ -412,7 +412,7 @@ export function installSubStoreSync(ctx) {
         if (dialogTarget && available.some((remoteTarget) => remoteTarget.subscription_name === dialogTarget.subscription_name)) {
           select.value = dialogTarget.subscription_name;
         }
-        button.disabled = true;
+        button.disabled = !select.value || Boolean(dialogTarget && select.value === dialogTarget.subscription_name);
       } catch (error) {
         select.innerHTML = "<option value=\"\">读取失败</option>";
         notify(error.message, "error");
@@ -489,8 +489,13 @@ export function installSubStoreSync(ctx) {
     bindEvent(targetDialog?.querySelector("[data-substore-remote-select]"), "change", (event) => {
       const select = event.currentTarget;
       const button = targetDialog?.querySelector("[data-substore-remote-import-button]");
-      select.dataset.substoreRemoteChosen = select.value ? "true" : "";
-      if (button) button.disabled = !select.value;
+      const targetID = String(targetForm?.elements.target_id.value || "");
+      const currentTarget = targets.find((target) => target.id === targetID) || null;
+      const changedRemote = select.value && (!currentTarget || select.value !== currentTarget.subscription_name);
+      select.dataset.substoreRemoteChosen = changedRemote ? "true" : "";
+      if (button) button.disabled = !changedRemote;
+      const renameOptions = targetDialog?.querySelector("[data-substore-rename-options]");
+      if (renameOptions) renameOptions.hidden = !targetID || Boolean(changedRemote);
     });
     bindEvent(document.querySelector("[data-substore-remote-import-button]"), "click", async (event) => {
       const select = targetDialog?.querySelector("[data-substore-remote-select]");
