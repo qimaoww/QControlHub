@@ -1,5 +1,31 @@
 const boundEvents = new WeakMap();
 
+const insertedMotionSelector = [
+  ".qch-swap-panel",
+  ".task-event",
+  ".core-log-row",
+  ".node-card",
+  ".service-card",
+  ".client-access-node-card",
+  ".access-control-card",
+  ".substore-agent-card",
+  ".settings-version-card",
+  ".template-card",
+].join(",");
+
+function markInsertedMotion(node) {
+  if (node?.nodeType !== 1 || !node.matches(insertedMotionSelector)) {
+    return node;
+  }
+  node.classList.add("qch-reconcile-enter");
+  node.addEventListener(
+    "animationend",
+    () => node.classList.remove("qch-reconcile-enter"),
+    { once: true },
+  );
+  return node;
+}
+
 export function bindEvent(target, type, handler, options) {
   if (!target) return;
   let events = boundEvents.get(target);
@@ -72,11 +98,13 @@ function compatible(current, fresh) {
 
 function syncAttributes(current, fresh, metrics) {
   const preserveOpen = current.tagName === "DETAILS" || current.tagName === "DIALOG";
+  const preserveInert = current.classList?.contains("desktop-app") && current.inert;
   const freshNames = new Set(
     [...fresh.attributes].map((attribute) => attribute.name),
   );
   [...current.attributes].forEach((attribute) => {
     if (preserveOpen && attribute.name === "open") return;
+    if (preserveInert && attribute.name === "inert") return;
     if (!freshNames.has(attribute.name)) {
       current.removeAttribute(attribute.name);
       metrics.updated += 1;
@@ -84,6 +112,7 @@ function syncAttributes(current, fresh, metrics) {
   });
   [...fresh.attributes].forEach((attribute) => {
     if (preserveOpen && attribute.name === "open") return;
+    if (preserveInert && attribute.name === "inert") return;
     if (current.getAttribute(attribute.name) !== attribute.value) {
       current.setAttribute(attribute.name, attribute.value);
       metrics.updated += 1;
@@ -157,7 +186,7 @@ function reconcileChildren(current, fresh, metrics) {
     }
     if (!candidate) {
       metrics.inserted += 1;
-      return freshChild.cloneNode(true);
+      return markInsertedMotion(freshChild.cloneNode(true));
     }
     used.add(candidate);
     return reconcileNode(candidate, freshChild, metrics);

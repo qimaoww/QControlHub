@@ -212,8 +212,9 @@ export function installClientAccess(ctx) {
     masonryObserver?.disconnect();
     masonryObserver = null;
     shell(
-      `<section class="client-access-workspace compact" data-client-access-page><h1 class="visually-hidden">客户端配置</h1>${filtersMarkup}<div class="client-access-node-grid${filtered.length ? "" : " empty"}">${results}</div></section>`,
+      `<section class="client-access-workspace compact" data-client-access-page><h1 class="visually-hidden">客户端配置</h1>${filtersMarkup}<div class="client-access-node-grid qch-swap-panel${filtered.length ? "" : " empty"}" data-refresh-key="client-results-${esc(filters.agent || "all")}-${esc(filters.engine || "all")}-${esc(filters.query || "all")}">${results}</div></section>`,
       "客户端配置",
+      { viewKey: `client-access-${filters.agent || "all"}-${filters.engine || "all"}-${filters.query || "all"}` },
     );
     bindClientAccessPage();
   }

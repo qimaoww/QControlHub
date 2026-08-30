@@ -131,6 +131,12 @@ export function installTasks(ctx) {
     const nextCards = freshCards.map((freshCard) => {
       const existingCard = existingCards.get(freshCard.dataset.taskId);
       if (existingCard) return reconcileView(existingCard, freshCard);
+      freshCard.classList.add("qch-reconcile-enter");
+      freshCard.addEventListener(
+        "animationend",
+        () => freshCard.classList.remove("qch-reconcile-enter"),
+        { once: true },
+      );
       return freshCard;
     });
 
@@ -386,6 +392,7 @@ export function installTasks(ctx) {
     shell(
       `<div class="task-workspace" data-task-page><details class="task-filter-panel" open><summary><b>筛选</b><i>⌄</i></summary><div class="audit-query"><label>节点<select id="task-agent"><option value="">全部节点</option>${agents.map((agent) => `<option value="${esc(agent.id)}">${esc(agent.name)}</option>`).join("")}</select></label><label>状态<select id="task-status"><option value="">全部状态</option>${["pending", "running", "succeeded", "failed", "canceled"].map((status) => `<option value="${status}">${esc(statusName(status))}</option>`).join("")}</select></label><label>动作<select id="task-action"><option value="">全部动作</option>${actions.map((action) => `<option value="${action}">${esc(actionName(action))}</option>`).join("")}</select></label><label>每页数量<select id="task-limit"><option value="50">50 条</option><option value="100">100 条</option><option value="500">500 条</option></select></label><button class="button primary" type="button" data-apply-task-filter>应用筛选</button></div></details><div class="audit-live syncing" data-task-refresh-status role="status"><i></i><span data-task-refresh-label>自动更新</span></div><section class="task-timeline" aria-label="任务时间线">${taskCards}</section></div>`,
       "执行记录",
+      { viewKey: `tasks-${filters.agent_id || "all"}-${filters.status || "all"}-${filters.action || "all"}-${filters.limit || 100}` },
     );
     document
       .querySelector("[data-apply-task-filter]")

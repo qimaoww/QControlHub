@@ -187,6 +187,18 @@ func TestRefreshPathsUseStableViewsAndScopedCoordinators(t *testing.T) {
 		"combineAbortSignals(options.signal, routeSignal)",
 		"[\"GET\", \"HEAD\", \"OPTIONS\"].includes(method)",
 		"reconcileView(currentView, template.content.firstElementChild",
+		"const routeChanged = !previousMain || previousRoute !== state.route",
+		"previousMain.dataset.refreshKey !== workspaceKey",
+		"routeChanged || viewChanged ? ` page-enter${firstScreenClass}`",
+		"workspace-main${motionClass}",
+		"const hasSharedData =",
+		"const sharedDataPromise = Promise.all([",
+		"function primeRouteTransition()",
+		"main.classList.add(\"is-route-pending\")",
+		"const firstScreenClass = !previousMain ? \" first-screen\" : \"\"",
+		"const contextChanged = routeChanged || state.data.contextMotionKey !== contextKey",
+		"const contextMotionClass = contextChanged ? \" context-enter\" : \"\"",
+		"data-refresh-key=\"context-${esc(contextKey)}\"",
 		"state.navigationEpoch += 1",
 		"cancelActive: () => routeController?.abort()",
 		"agentModule.cancelAgentInteractions()",
@@ -204,6 +216,7 @@ func TestRefreshPathsUseStableViewsAndScopedCoordinators(t *testing.T) {
 		"export function createRefreshChannel",
 		"export function createPoller",
 		"export function createInteractionGate",
+		"const preserveInert = current.classList?.contains(\"desktop-app\") && current.inert",
 		"scope !== getScope()",
 		"state.active.focus({ preventScroll: true })",
 	} {
@@ -267,6 +280,65 @@ func TestRefreshPathsUseStableViewsAndScopedCoordinators(t *testing.T) {
 	}
 	if !strings.Contains(read("module_smoke.mjs"), `import "./refresh_smoke.mjs"`) {
 		t.Error("frontend smoke must execute the refresh interaction runtime")
+	}
+}
+
+func TestMotionSystemCoversWorkspaceInteractions(t *testing.T) {
+	styles, err := os.ReadFile("app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(styles)
+	for _, required := range []string{
+		"@keyframes qch-page-enter",
+		"@keyframes qch-card-enter",
+		"@keyframes qch-dialog-enter",
+		"@keyframes qch-route-progress",
+		"@keyframes qch-boot-enter",
+		"@keyframes qch-first-screen-enter",
+		"@keyframes qch-context-enter",
+		"@keyframes qch-task-result-enter",
+		"@keyframes qch-reconcile-enter",
+		"@keyframes qch-config-read-enter",
+		".boot::before",
+		".workspace-main.first-screen.page-enter>",
+		".workspace-main.first-screen.page-enter> *:nth-child(n){animation-delay:0ms}",
+		".workspace-main.page-enter>",
+		".workspace-main.is-route-pending::before",
+		".context-sidebar.context-enter>",
+		".page-tasks [data-task-result][open]>.task-result-block",
+		".page-live-config .live-config-workspace[data-live-config-phase]",
+		".client-access-toolbar>nav a.active",
+		".substore-target-bar>nav>button.active",
+		".core-log-filter-group button[aria-pressed=true]",
+		".qch-reconcile-enter",
+		"dialog[open]::backdrop",
+		".modal-backdrop>[role=dialog]",
+		"@media(prefers-reduced-motion:reduce)",
+	} {
+		if !strings.Contains(content, required) {
+			t.Errorf("motion system is missing %q", required)
+		}
+	}
+	refresh, err := os.ReadFile("modules/refresh.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(refresh), "markInsertedMotion(freshChild.cloneNode(true))") {
+		t.Error("reconciled dynamic content must animate only when inserted")
+	}
+	configs, err := os.ReadFile("modules/configs.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, required := range []string{
+		"const liveConfigPhase = current",
+		"data-live-config-phase=\"${esc(liveConfigPhase)}\"",
+		"data-refresh-key=\"live-config-content-${esc(agent.id)}-${esc(engine)}-${esc(sourceMode)}-${esc(liveConfigPhase)}\"",
+	} {
+		if !strings.Contains(string(configs), required) {
+			t.Errorf("live configuration transition is missing %q", required)
+		}
 	}
 }
 
