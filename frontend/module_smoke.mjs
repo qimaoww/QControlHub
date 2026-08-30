@@ -65,9 +65,51 @@ import {
   trafficRateForDisplay,
 } from "./modules/traffic.js";
 import { createLatestRenderScheduler } from "./modules/refresh.js";
+import {
+  nodeCardOrderKey,
+  orderNodesBySavedOrder,
+  savedNodeOrder,
+  saveNodeOrder,
+} from "./modules/node-order.js";
 
 const state = { data: {}, session: { role: "admin" } };
 const noop = () => {};
+
+const nodeOrderStorage = {
+  value: null,
+  getItem(key) {
+    assert.equal(key, nodeCardOrderKey);
+    return this.value;
+  },
+  setItem(key, value) {
+    assert.equal(key, nodeCardOrderKey);
+    this.value = value;
+  },
+};
+saveNodeOrder(["node-c", "node-a", "node-c", ""], nodeOrderStorage);
+assert.deepEqual(
+  savedNodeOrder(nodeOrderStorage),
+  ["node-c", "node-a"],
+  "saved node order ignores duplicate and empty identifiers",
+);
+const unorderedNodes = [
+  { id: "node-a" },
+  { id: "node-b" },
+  { id: "node-c" },
+  { id: "node-d" },
+];
+assert.deepEqual(
+  orderNodesBySavedOrder(unorderedNodes, savedNodeOrder(nodeOrderStorage)).map(
+    (node) => node.id,
+  ),
+  ["node-c", "node-a", "node-b", "node-d"],
+  "sidebars keep the dragged node order and append unknown nodes stably",
+);
+assert.deepEqual(
+  unorderedNodes.map((node) => node.id),
+  ["node-a", "node-b", "node-c", "node-d"],
+  "node ordering does not mutate the API response",
+);
 
 assert.equal(
   agentStructureSignature([
