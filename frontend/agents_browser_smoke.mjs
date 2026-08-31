@@ -27,7 +27,7 @@ const server = createServer(async (request, response) => {
     }
     if (path === "/api/v1/region-flags/cn") {
       response.writeHead(200, { "Content-Type": "image/svg+xml" });
-      response.end('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><circle cx="16" cy="16" r="16" fill="#d80027"/></svg>');
+      response.end('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 48"><rect width="64" height="48" fill="#d80027"/></svg>');
       return;
     }
     let file;

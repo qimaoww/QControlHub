@@ -18,7 +18,7 @@ import (
 
 const (
 	defaultEndpoint     = "https://get.geojs.io/v1/ip/geo"
-	defaultFlagEndpoint = "https://hatscripts.github.io/circle-flags/flags"
+	defaultFlagEndpoint = "https://raw.githubusercontent.com/lipis/flag-icons/main/flags/4x3"
 	requestTimeout      = 5 * time.Second
 	maxResponseBytes    = 64 << 10
 	maxFlagBytes        = 64 << 10
@@ -129,8 +129,8 @@ func (client *Client) Lookup(ctx context.Context, address netip.Addr) (Region, e
 	return region, nil
 }
 
-// Flag returns a circular SVG flag for one ISO country/region code. Artwork is
-// fetched from HatScripts/circle-flags and cached in memory; callers only ever
+// Flag returns a compact 4:3 SVG flag for one ISO country/region code. Artwork
+// is fetched from lipis/flag-icons and cached in memory; callers only ever
 // supply the validated two-letter code returned by the GeoIP provider.
 func (client *Client) Flag(ctx context.Context, isoCode string) ([]byte, error) {
 	code := strings.ToLower(strings.TrimSpace(isoCode))

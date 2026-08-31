@@ -623,8 +623,8 @@ dialog[open]::backdrop{animation:qch-backdrop-enter 220ms ease both}
 :root{--ui-font-scale:1}
 
 /* GeoIP country flags replace the generic node dot when available. */
-.machine-avatar.has-region{padding:3px;background:transparent;box-shadow:none}
-.machine-avatar.has-region>img{width:100%;height:100%;display:block;border-radius:50%;box-shadow:0 0 0 1px color-mix(in srgb,var(--ink) 12%,transparent),0 3px 8px -4px color-mix(in srgb,var(--ink) 45%,transparent);object-fit:cover}
+.machine-avatar.has-region{padding:5px 3px;background:var(--surface-3);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--accent) 10%,transparent)}
+.machine-avatar.has-region>img{width:100%;height:auto;aspect-ratio:4/3;display:block;border:1px solid color-mix(in srgb,var(--ink) 14%,transparent);border-radius:6px;box-shadow:0 2px 5px -3px color-mix(in srgb,var(--ink) 55%,transparent);object-fit:cover}
 
 /* Settings copy must stay inside its section at large type scales. */
 .settings-section>header>div{min-width:0}
