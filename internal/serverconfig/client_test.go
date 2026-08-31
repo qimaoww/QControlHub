@@ -40,8 +40,8 @@ func TestBuildClientProfileCoversEveryServerProtocol(t *testing.T) {
 		{name: "hysteria2", input: Input{Protocol: ProtocolHy2, Tag: "hy2", Port: 20005, Credential: password, Transport: "raw", TLSEnabled: true}, scheme: "hysteria2"},
 		{name: "tuic", input: Input{Protocol: ProtocolTUIC, Tag: "tuic", Port: 20006, Credential: uuid, SecondaryCredential: password, Transport: "raw", TLSEnabled: true}, scheme: "tuic"},
 		{name: "anytls", input: Input{Protocol: ProtocolAnyTLS, Tag: "anytls", Port: 20007, Credential: password, Transport: "raw", TLSEnabled: true}, scheme: "anytls"},
-		{name: "snell", input: Input{Protocol: ProtocolSnell, Tag: "snell", Port: 20009, Credential: password, Transport: "raw", SnellVersion: 5}, scheme: "yaml"},
-		{name: "sudoku", input: sudoku, scheme: "yaml"},
+		{name: "snell", input: Input{Protocol: ProtocolSnell, Tag: "snell", Port: 20009, Credential: password, Transport: "raw", SnellVersion: 5}, scheme: "snell"},
+		{name: "sudoku", input: sudoku, scheme: "sudoku"},
 	}
 	for _, test := range tests {
 		test := test
@@ -54,6 +54,9 @@ func TestBuildClientProfileCoversEveryServerProtocol(t *testing.T) {
 			if profile.Format == "" || profile.URI == "" || len(profile.Fields) < 6 {
 				t.Fatalf("incomplete client profile: %+v", profile)
 			}
+			if strings.ContainsAny(profile.URI, "\r\n") {
+				t.Fatalf("client export must be a single-line URL: %+v", profile)
+			}
 			if test.input.Protocol == ProtocolSudoku {
 				for _, field := range profile.Fields {
 					if field.Value == test.input.Credential {
@@ -61,11 +64,15 @@ func TestBuildClientProfileCoversEveryServerProtocol(t *testing.T) {
 					}
 				}
 			}
-			if test.scheme == "yaml" {
-				if profile.SubscriptionCompatible || !strings.Contains(profile.URI, "server: edge.example.com") {
-					t.Fatalf("YAML profile = %+v", profile)
+			if test.input.Protocol == ProtocolSnell {
+				if profile.SubscriptionCompatible || !strings.HasPrefix(profile.URI, "snell://") {
+					t.Fatalf("Snell profile = %+v", profile)
 				}
-				return
+			}
+			if test.input.Protocol == ProtocolSudoku {
+				if profile.SubscriptionCompatible || !strings.HasPrefix(profile.URI, "sudoku://") {
+					t.Fatalf("Sudoku profile = %+v", profile)
+				}
 			}
 			if !test.input.TLSEnabled && !test.input.RealityEnabled {
 				for _, field := range profile.Fields {
@@ -99,6 +106,43 @@ func TestBuildClientProfileCoversEveryServerProtocol(t *testing.T) {
 				t.Fatalf("parsed URI = %#v", parsed)
 			}
 		})
+	}
+}
+
+func TestBuildSnellClientURIIncludesOptionalTransportParameters(t *testing.T) {
+	t.Parallel()
+	input := Input{
+		Protocol: ProtocolSnellShadowTLS, Tag: "snell-shadow", Port: 20009,
+		Credential: "psk with symbols", Transport: "raw", SnellVersion: 5,
+		SnellUDP: true, SnellReuse: true, SnellObfsMode: SnellObfsShadowTLS,
+		SnellObfsHost: "cover.example.com", SnellClientFingerprint: "chrome",
+		SnellShadowTLSVersion: 3, SnellShadowTLSPassword: "shadow secret",
+		SnellShadowTLSUser: "shadow-user", SnellShadowTLSHandshake: "cover.example.com:443",
+		SnellShadowTLSALPN: "h2,http/1.1",
+	}
+	profile, err := BuildClientProfile(input, "edge.example.com", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := url.Parse(profile.URI)
+	if err != nil {
+		t.Fatalf("Snell URI = %q, err = %v", profile.URI, err)
+	}
+	if parsed.Scheme != "snell" || parsed.Hostname() != "edge.example.com" || parsed.Port() != "20009" {
+		t.Fatalf("Snell URI target = %#v", parsed)
+	}
+	query := parsed.Query()
+	for key, want := range map[string]string{
+		"psk": "psk with symbols", "version": "5", "udp": "true", "tfo": "true", "reuse": "true",
+		"obfs": "shadow-tls", "obfs-host": "cover.example.com", "client-fingerprint": "chrome",
+		"obfs-password": "shadow secret", "obfs-version": "3", "obfs-alpn": "h2,http/1.1",
+	} {
+		if got := query.Get(key); got != want {
+			t.Errorf("query[%q] = %q, want %q", key, got, want)
+		}
+	}
+	if profile.SubscriptionCompatible {
+		t.Fatal("Snell raw URI must not be advertised as a universal subscription format")
 	}
 }
 

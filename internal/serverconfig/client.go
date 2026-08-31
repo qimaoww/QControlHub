@@ -8,8 +8,6 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-
-	"gopkg.in/yaml.v3"
 )
 
 // ClientField is one exact value a client needs to reach a generated inbound.
@@ -138,46 +136,11 @@ func BuildClientProfileNamed(input Input, address, serverName, nodeName string) 
 		profile.URI = (&url.URL{Scheme: "vless", User: url.User(input.Credential), Host: host, RawQuery: query.Encode(), Fragment: fragment}).String()
 		profile.SubscriptionCompatible = true
 	case ProtocolSnell, ProtocolSnellShadowTLS:
-		proxy := map[string]any{
-			"name": fragment, "type": "snell", "server": address, "port": input.Port,
-			"psk": input.Credential, "version": input.SnellVersion, "udp": input.SnellUDP, "tfo": true,
-		}
-		if input.SnellReuse {
-			proxy["reuse"] = true
-		}
-		switch input.SnellObfsMode {
-		case SnellObfsShadowTLS:
-			alpn, _ := validatedALPN(input.SnellShadowTLSALPN)
-			proxy["client-fingerprint"] = input.SnellClientFingerprint
-			proxy["obfs-opts"] = compactMap(map[string]any{
-				"mode": SnellObfsShadowTLS, "host": input.SnellObfsHost,
-				"password": input.SnellShadowTLSPassword, "version": input.SnellShadowTLSVersion, "alpn": alpn,
-			})
-		}
-		value, marshalErr := yaml.Marshal(proxy)
-		if marshalErr != nil {
-			return ClientProfile{}, marshalErr
-		}
-		profile.Format = "Mihomo Snell YAML"
-		profile.URI = string(value)
+		profile.Format = "Snell URI"
+		profile.URI = buildSnellClientURI(input, host, fragment)
 	case ProtocolSudoku:
-		proxy := map[string]any{
-			"name": fragment, "type": "sudoku", "server": address, "port": input.Port, "key": input.SudokuClientKey,
-			"aead-method": input.Method, "padding-min": input.SudokuPaddingMin, "padding-max": input.SudokuPaddingMax,
-			"table-type": input.SudokuTableType, "enable-pure-downlink": input.SudokuEnablePureDownlink,
-			"multiplex": input.SudokuMultiplex,
-			"httpmask": compactMap(map[string]any{
-				"disable": !input.SudokuHTTPMaskEnabled, "mode": input.SudokuHTTPMaskMode,
-				"tls": input.SudokuHTTPMaskTLS, "host": input.SudokuHTTPMaskHost,
-				"path-root": input.SudokuHTTPMaskPathRoot, "multiplex": input.SudokuMultiplex,
-			}),
-		}
-		value, marshalErr := yaml.Marshal(proxy)
-		if marshalErr != nil {
-			return ClientProfile{}, marshalErr
-		}
-		profile.Format = "Mihomo Sudoku YAML"
-		profile.URI = string(value)
+		profile.Format = "Sudoku URI"
+		profile.URI = buildSudokuClientURI(input, host, fragment)
 	case ProtocolVMess:
 		payload := struct {
 			Version string `json:"v"`
@@ -249,6 +212,66 @@ func BuildClientProfileNamed(input Input, address, serverName, nodeName string) 
 		return ClientProfile{}, errors.New("不支持生成此协议的客户端接入资料")
 	}
 	return profile, nil
+}
+
+// buildSnellClientURI emits the raw snell:// form understood by common
+// converters and client import tools. Snell has no single official share-link
+// standard, so SubscriptionCompatible deliberately remains false; the URI is
+// still preferable to presenting a multi-line YAML document as a share link.
+func buildSnellClientURI(input Input, host, fragment string) string {
+	query := url.Values{
+		"psk":     {input.Credential},
+		"version": {strconv.Itoa(input.SnellVersion)},
+		"udp":     {strconv.FormatBool(input.SnellUDP)},
+		"tfo":     {"true"},
+	}
+	if input.SnellReuse {
+		query.Set("reuse", "true")
+	}
+	if input.SnellObfsMode != "" && input.SnellObfsMode != SnellObfsNone {
+		query.Set("obfs", input.SnellObfsMode)
+		if input.SnellObfsHost != "" {
+			query.Set("obfs-host", input.SnellObfsHost)
+		}
+	}
+	if input.SnellObfsMode == SnellObfsShadowTLS {
+		if input.SnellClientFingerprint != "" {
+			query.Set("client-fingerprint", input.SnellClientFingerprint)
+		}
+		if input.SnellShadowTLSPassword != "" {
+			query.Set("obfs-password", input.SnellShadowTLSPassword)
+		}
+		if input.SnellShadowTLSVersion > 0 {
+			query.Set("obfs-version", strconv.Itoa(input.SnellShadowTLSVersion))
+		}
+		if input.SnellShadowTLSALPN != "" {
+			query.Set("obfs-alpn", input.SnellShadowTLSALPN)
+		}
+	}
+	return (&url.URL{Scheme: "snell", Host: host, RawQuery: query.Encode(), Fragment: fragment}).String()
+}
+
+// buildSudokuClientURI uses a self-describing raw URL for clients that accept
+// Sudoku share links. Mihomo's canonical representation is YAML, but keeping
+// the client export single-line makes it consistent with the other protocols;
+// every parameter needed to reconstruct that YAML is retained in the query.
+func buildSudokuClientURI(input Input, host, fragment string) string {
+	query := url.Values{
+		"key":                  {input.SudokuClientKey},
+		"aead-method":          {input.Method},
+		"padding-min":          {strconv.Itoa(input.SudokuPaddingMin)},
+		"padding-max":          {strconv.Itoa(input.SudokuPaddingMax)},
+		"table-type":           {input.SudokuTableType},
+		"enable-pure-downlink": {strconv.FormatBool(input.SudokuEnablePureDownlink)},
+		"multiplex":            {input.SudokuMultiplex},
+		"httpmask-disable":     {strconv.FormatBool(!input.SudokuHTTPMaskEnabled)},
+		"httpmask-mode":        {input.SudokuHTTPMaskMode},
+		"httpmask-tls":         {strconv.FormatBool(input.SudokuHTTPMaskTLS)},
+		"httpmask-host":        {input.SudokuHTTPMaskHost},
+		"httpmask-path-root":   {input.SudokuHTTPMaskPathRoot},
+		"httpmask-multiplex":   {input.SudokuMultiplex},
+	}
+	return (&url.URL{Scheme: "sudoku", Host: host, RawQuery: query.Encode(), Fragment: fragment}).String()
 }
 
 // NormalizeClientAddress validates and canonicalizes the address that will be
