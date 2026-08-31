@@ -1056,8 +1056,9 @@ func renameSubStoreNode(rawValue, name string) (string, error) {
 		return "", errors.New("节点名称不能为空、不能超过 100 个字符且不能包含 #")
 	}
 	if config, ok := subStoreSurgeConfig(rawValue); ok {
-		if strings.ContainsAny(name, "=,") {
-			return "", errors.New("Surge 节点名称不能包含 = 或 ,")
+		name = strings.TrimSpace(strings.NewReplacer("=", "", ",", "").Replace(name))
+		if name == "" {
+			return "", errors.New("Surge 节点名称删除保留符号后不能为空")
 		}
 		return name + " = " + config, nil
 	}

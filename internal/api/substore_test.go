@@ -62,8 +62,9 @@ func TestRenameSubStoreNode(t *testing.T) {
 	if err != nil || surge != "东京 Snell = snell, edge.example.com, 8443, psk = secret, version = 5, reuse = true, tfo = true" || subStoreNodeName(surge) != "东京 Snell" {
 		t.Fatalf("renamed Surge Snell = %q, %v", surge, err)
 	}
-	if _, err := renameSubStoreNode(surge, "bad,name"); err == nil || !strings.Contains(err.Error(), "Surge") {
-		t.Fatalf("invalid Surge name error = %v", err)
+	cleanedSurge, err := renameSubStoreNode(surge, "东,京=Snell")
+	if err != nil || subStoreNodeName(cleanedSurge) != "东京Snell" {
+		t.Fatalf("sanitized Surge name = %q, %v", cleanedSurge, err)
 	}
 
 	mihomo, err := renameSubStoreNode("{name: Old, type: sudoku, server: edge.example.com, port: 8443, key: secret}", "东京 Sudoku")
