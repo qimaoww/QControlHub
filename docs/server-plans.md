@@ -52,9 +52,9 @@ IPv4 地址使用 [misakaio/chnroutes2](https://github.com/misakaio/chnroutes2) 
 
 ## 客户端接入资料
 
-方案保存后，页面中的“客户端接入”区可根据客户端实际访问的域名或 IP 生成分享 URI，并同时列出服务器、端口、认证、传输、TLS / Reality 等逐项参数。连接地址和 TLS ServerName 只保留在当前页面 URL，不写入内核配置，也不会成为配置版本的一部分。
+方案保存后，页面中的“客户端接入”区可根据客户端实际访问的域名或 IP 生成可复制的客户端配置，并同时列出服务器、端口、认证、传输、TLS / Reality 等逐项参数。连接地址和 TLS ServerName 只保留在当前页面 URL，不写入内核配置，也不会成为配置版本的一部分。
 
-当前会为 Shadowsocks 2022、VLESS、VMess、Trojan、Hysteria 2、TUIC v5 和 AnyTLS 生成对应 URI；Snell v5、Snell v5 + ShadowTLS v3 与 Sudoku 生成可直接放入 Mihomo `proxies` 的单节点 YAML。端口转发是节点侧监听与目标映射，不生成代理客户端分享资料。客户端对分享格式的支持可能因产品和版本不同而变化；无法直接导入时，应使用页面列出的逐项参数。URI、YAML 和认证字段默认以密码输入框遮罩，复制时无需先显示。
+Shadowsocks 2022、VLESS、VMess、Trojan、Hysteria 2、TUIC v5 和 AnyTLS 使用各协议的分享 URI。Snell v5 与 Snell v5 + ShadowTLS v3 没有通用 URI，按 `jinqians/snell.sh` 和 Surge 的实际客户端格式生成单行 Surge 配置；Sudoku 按 Mihomo 原生字段生成单行流式 YAML。Sub-Store 会逐行识别 URI、Surge 和 Mihomo 节点，因此这两类原生配置也可在同步页面选择、按地址模式重命名并与普通 URI 一起同步；最终导出目标仍须支持相应协议。端口转发是节点侧监听与目标映射，不生成代理客户端分享资料。客户端对分享格式的支持可能因产品和版本不同而变化；无法直接导入时，应使用页面列出的逐项参数。分享值和认证字段默认以密码输入框遮罩，复制时无需先显示。
 
 客户端资料只包含连接所需的公开参数与用户凭据。Reality 服务端 Private Key、TLS 私钥路径和证书路径不会进入客户端 URI 或逐项参数。页面不会代替网络侧配置；部署完成后仍需确认 DNS 指向、证书覆盖域名，以及主机和上游防火墙已放行方案使用的 TCP / UDP 端口。
 

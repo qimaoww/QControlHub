@@ -19,6 +19,7 @@ import (
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
 	"github.com/qimaoww/qcontrolhub/internal/store"
+	"gopkg.in/yaml.v3"
 )
 
 const subStoreResponseLimit = 1 << 20
@@ -1045,23 +1046,87 @@ func subStoreNodesForSelection(profile subStoreSyncProfile, selection core.SubSt
 	return result, nil
 }
 
-func renameSubStoreNode(rawURI, name string) (string, error) {
-	rawURI = strings.TrimSpace(rawURI)
+func renameSubStoreNode(rawValue, name string) (string, error) {
+	rawValue = strings.TrimSpace(rawValue)
 	name = strings.TrimSpace(name)
-	if rawURI == "" || strings.ContainsAny(rawURI, "\r\n") {
-		return "", errors.New("客户端 URI 无效")
+	if rawValue == "" || strings.ContainsAny(rawValue, "\r\n") {
+		return "", errors.New("客户端分享值无效")
 	}
 	if name == "" || utf8.RuneCountInString(name) > 100 || strings.ContainsAny(name, "#\r\n") {
 		return "", errors.New("节点名称不能为空、不能超过 100 个字符且不能包含 #")
 	}
-	parsed, err := url.Parse(rawURI)
+	if config, ok := subStoreSurgeConfig(rawValue); ok {
+		name = strings.TrimSpace(strings.NewReplacer("=", "", ",", "").Replace(name))
+		if name == "" {
+			return "", errors.New("Surge 节点名称删除保留符号后不能为空")
+		}
+		return name + " = " + config, nil
+	}
+	if document, nameNode, ok := subStoreMihomoNode(rawValue); ok {
+		nameNode.Value = name
+		nameNode.Tag = "!!str"
+		setSubStoreYAMLFlowStyle(document)
+		encoded, err := yaml.Marshal(document)
+		if err != nil {
+			return "", errors.New("无法编码 Mihomo 节点配置")
+		}
+		return strings.TrimSpace(string(encoded)), nil
+	}
+	parsed, err := url.Parse(rawValue)
 	if err != nil || parsed.Scheme == "" {
-		return "", errors.New("客户端 URI 无效")
+		return "", errors.New("Sub-Store 无法识别客户端分享值")
 	}
-	if fragment := strings.IndexByte(rawURI, '#'); fragment >= 0 {
-		rawURI = rawURI[:fragment]
+	if fragment := strings.IndexByte(rawValue, '#'); fragment >= 0 {
+		rawValue = rawValue[:fragment]
 	}
-	return rawURI + "#" + name, nil
+	return rawValue + "#" + name, nil
+}
+
+func subStoreSurgeConfig(rawValue string) (string, bool) {
+	_, config, found := strings.Cut(rawValue, "=")
+	if !found {
+		return "", false
+	}
+	config = strings.TrimSpace(config)
+	proxyType, _, found := strings.Cut(config, ",")
+	return config, found && strings.EqualFold(strings.TrimSpace(proxyType), "snell")
+}
+
+func subStoreMihomoNode(rawValue string) (*yaml.Node, *yaml.Node, bool) {
+	rawValue = strings.TrimSpace(rawValue)
+	if len(rawValue) > 64<<10 || !strings.HasPrefix(rawValue, "{") || !strings.HasSuffix(rawValue, "}") {
+		return nil, nil, false
+	}
+	var document yaml.Node
+	if err := yaml.Unmarshal([]byte(rawValue), &document); err != nil || len(document.Content) != 1 {
+		return nil, nil, false
+	}
+	mapping := document.Content[0]
+	if mapping.Kind != yaml.MappingNode {
+		return nil, nil, false
+	}
+	var nameNode, typeNode *yaml.Node
+	for index := 0; index+1 < len(mapping.Content); index += 2 {
+		switch mapping.Content[index].Value {
+		case "name":
+			nameNode = mapping.Content[index+1]
+		case "type":
+			typeNode = mapping.Content[index+1]
+		}
+	}
+	if nameNode == nil || typeNode == nil || strings.TrimSpace(typeNode.Value) == "" {
+		return nil, nil, false
+	}
+	return &document, nameNode, true
+}
+
+func setSubStoreYAMLFlowStyle(node *yaml.Node) {
+	if node.Kind == yaml.MappingNode || node.Kind == yaml.SequenceNode {
+		node.Style |= yaml.FlowStyle
+	}
+	for _, child := range node.Content {
+		setSubStoreYAMLFlowStyle(child)
+	}
 }
 
 func (s *Server) upsertSubStoreSubscription(ctx context.Context, settings core.SubStoreSyncSettings, target core.SubStoreSyncTarget, content string) (bool, error) {
@@ -1163,7 +1228,7 @@ func subStoreNodeNames(content string) ([]string, error) {
 		}
 		name := subStoreNodeName(line)
 		if name == "" {
-			return nil, errors.New("Sub-Store 同步要求每个节点 URI 都包含名称")
+			return nil, errors.New("Sub-Store 同步要求每个节点配置都包含名称")
 		}
 		if _, exists := seen[name]; exists {
 			return nil, fmt.Errorf("Sub-Store 同步清单存在重名节点 %q，请先修改同步名称", name)
@@ -1174,12 +1239,20 @@ func subStoreNodeNames(content string) ([]string, error) {
 	return result, nil
 }
 
-func subStoreNodeName(rawURI string) string {
-	fragment := strings.LastIndexByte(rawURI, '#')
-	if fragment < 0 || fragment == len(rawURI)-1 {
+func subStoreNodeName(rawValue string) string {
+	rawValue = strings.TrimSpace(rawValue)
+	if _, ok := subStoreSurgeConfig(rawValue); ok {
+		name, _, _ := strings.Cut(rawValue, "=")
+		return strings.TrimSpace(name)
+	}
+	if _, nameNode, ok := subStoreMihomoNode(rawValue); ok {
+		return strings.TrimSpace(nameNode.Value)
+	}
+	fragment := strings.LastIndexByte(rawValue, '#')
+	if fragment < 0 || fragment == len(rawValue)-1 {
 		return ""
 	}
-	name := strings.TrimSpace(rawURI[fragment+1:])
+	name := strings.TrimSpace(rawValue[fragment+1:])
 	if decoded, err := url.PathUnescape(name); err == nil {
 		name = strings.TrimSpace(decoded)
 	}

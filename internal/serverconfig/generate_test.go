@@ -12,7 +12,7 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
-func TestMihomoSnellAndSudokuPlansGenerateRoundTripAndExportYAML(t *testing.T) {
+func TestMihomoSnellAndSudokuPlansGenerateRoundTripAndExportClientProfiles(t *testing.T) {
 	t.Parallel()
 	for _, key := range []string{ProtocolSnell, ProtocolSnellShadowTLS, ProtocolSudoku} {
 		key := key
@@ -45,8 +45,14 @@ func TestMihomoSnellAndSudokuPlansGenerateRoundTripAndExportYAML(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if profile.SubscriptionCompatible || !strings.Contains(profile.Format, "Mihomo") || !strings.Contains(profile.URI, "name: Tokyo") || !strings.Contains(profile.URI, "server: edge.example.com") {
-				t.Fatalf("Mihomo client YAML = %+v", profile)
+			if key == ProtocolSudoku {
+				if !profile.SubscriptionCompatible || profile.Format != "Mihomo Sudoku YAML" || !strings.HasPrefix(profile.URI, "{aead-method:") || !strings.Contains(profile.URI, "type: sudoku") {
+					t.Fatalf("Sudoku client YAML = %+v", profile)
+				}
+				return
+			}
+			if !profile.SubscriptionCompatible || !strings.HasPrefix(profile.URI, "Tokyo = snell, edge.example.com,") {
+				t.Fatalf("Snell Surge client config = %+v", profile)
 			}
 		})
 	}

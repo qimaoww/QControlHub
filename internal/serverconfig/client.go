@@ -21,9 +21,9 @@ type ClientField struct {
 	Secret bool   `json:"secret"`
 }
 
-// ClientProfile contains a common client import URI plus the same connection
-// data as explicit fields. The explicit fields remain useful when a particular
-// client does not implement the URI scheme.
+// ClientProfile contains a client import value plus the same connection data
+// as explicit fields. Most protocols use a URI; protocols without a portable
+// URI use their native single-line client configuration instead.
 type ClientProfile struct {
 	Format                 string        `json:"format"`
 	URI                    string        `json:"uri"`
@@ -138,46 +138,19 @@ func BuildClientProfileNamed(input Input, address, serverName, nodeName string) 
 		profile.URI = (&url.URL{Scheme: "vless", User: url.User(input.Credential), Host: host, RawQuery: query.Encode(), Fragment: fragment}).String()
 		profile.SubscriptionCompatible = true
 	case ProtocolSnell, ProtocolSnellShadowTLS:
-		proxy := map[string]any{
-			"name": fragment, "type": "snell", "server": address, "port": input.Port,
-			"psk": input.Credential, "version": input.SnellVersion, "udp": input.SnellUDP, "tfo": true,
+		profile.Format = "Surge Snell"
+		if input.Protocol == ProtocolSnellShadowTLS {
+			profile.Format = "Surge Snell + ShadowTLS"
 		}
-		if input.SnellReuse {
-			proxy["reuse"] = true
-		}
-		switch input.SnellObfsMode {
-		case SnellObfsShadowTLS:
-			alpn, _ := validatedALPN(input.SnellShadowTLSALPN)
-			proxy["client-fingerprint"] = input.SnellClientFingerprint
-			proxy["obfs-opts"] = compactMap(map[string]any{
-				"mode": SnellObfsShadowTLS, "host": input.SnellObfsHost,
-				"password": input.SnellShadowTLSPassword, "version": input.SnellShadowTLSVersion, "alpn": alpn,
-			})
-		}
-		value, marshalErr := yaml.Marshal(proxy)
-		if marshalErr != nil {
-			return ClientProfile{}, marshalErr
-		}
-		profile.Format = "Mihomo Snell YAML"
-		profile.URI = string(value)
+		profile.URI = buildSnellSurgeConfig(input, address, fragment)
+		profile.SubscriptionCompatible = true
 	case ProtocolSudoku:
-		proxy := map[string]any{
-			"name": fragment, "type": "sudoku", "server": address, "port": input.Port, "key": input.SudokuClientKey,
-			"aead-method": input.Method, "padding-min": input.SudokuPaddingMin, "padding-max": input.SudokuPaddingMax,
-			"table-type": input.SudokuTableType, "enable-pure-downlink": input.SudokuEnablePureDownlink,
-			"multiplex": input.SudokuMultiplex,
-			"httpmask": compactMap(map[string]any{
-				"disable": !input.SudokuHTTPMaskEnabled, "mode": input.SudokuHTTPMaskMode,
-				"tls": input.SudokuHTTPMaskTLS, "host": input.SudokuHTTPMaskHost,
-				"path-root": input.SudokuHTTPMaskPathRoot, "multiplex": input.SudokuMultiplex,
-			}),
-		}
-		value, marshalErr := yaml.Marshal(proxy)
-		if marshalErr != nil {
-			return ClientProfile{}, marshalErr
-		}
 		profile.Format = "Mihomo Sudoku YAML"
-		profile.URI = string(value)
+		profile.URI, err = buildSudokuMihomoYAML(input, address, fragment)
+		if err != nil {
+			return ClientProfile{}, err
+		}
+		profile.SubscriptionCompatible = true
 	case ProtocolVMess:
 		payload := struct {
 			Version string `json:"v"`
@@ -249,6 +222,86 @@ func BuildClientProfileNamed(input Input, address, serverName, nodeName string) 
 		return ClientProfile{}, errors.New("不支持生成此协议的客户端接入资料")
 	}
 	return profile, nil
+}
+
+// buildSnellSurgeConfig emits the single-line Surge profile used by the
+// Snell installer and by Surge's native configuration format. Snell does not
+// have a portable URI, but Sub-Store parses Surge lines in local subscriptions.
+func buildSnellSurgeConfig(input Input, address, fragment string) string {
+	name := strings.NewReplacer("=", "", ",", "").Replace(fragment)
+	if name == "" {
+		name = "Snell"
+	}
+	parts := []string{
+		name + " = snell",
+		address,
+		strconv.Itoa(input.Port),
+		"psk = " + input.Credential,
+		"version = " + strconv.Itoa(input.SnellVersion),
+	}
+	if input.SnellReuse {
+		parts = append(parts, "reuse = true")
+	}
+	parts = append(parts, "tfo = true")
+	if input.SnellUDP {
+		parts = append(parts, "udp-relay = true")
+	}
+	if input.SnellObfsMode == SnellObfsShadowTLS {
+		if input.SnellShadowTLSPassword != "" {
+			parts = append(parts, "shadow-tls-password = "+input.SnellShadowTLSPassword)
+		}
+		if input.SnellObfsHost != "" {
+			parts = append(parts, "shadow-tls-sni = "+input.SnellObfsHost)
+		}
+		if input.SnellShadowTLSVersion > 0 {
+			parts = append(parts, "shadow-tls-version = "+strconv.Itoa(input.SnellShadowTLSVersion))
+		}
+	}
+	return strings.Join(parts, ", ")
+}
+
+// buildSudokuMihomoYAML emits a single-line flow-style YAML proxy map. This
+// preserves Mihomo's native Sudoku keys while keeping the value copy-friendly
+// in the client access view.
+func buildSudokuMihomoYAML(input Input, address, fragment string) (string, error) {
+	proxy := map[string]any{
+		"name": fragment, "type": "sudoku", "server": address, "port": input.Port, "key": input.SudokuClientKey,
+		"aead-method": input.Method, "padding-min": input.SudokuPaddingMin, "padding-max": input.SudokuPaddingMax,
+		"table-type": input.SudokuTableType, "enable-pure-downlink": input.SudokuEnablePureDownlink,
+		"multiplex": input.SudokuMultiplex,
+		"httpmask": compactMap(map[string]any{
+			"disable": !input.SudokuHTTPMaskEnabled, "mode": input.SudokuHTTPMaskMode,
+			"tls": input.SudokuHTTPMaskTLS, "host": input.SudokuHTTPMaskHost,
+			"path-root": input.SudokuHTTPMaskPathRoot, "multiplex": input.SudokuMultiplex,
+		}),
+	}
+	return marshalSingleLineYAML(proxy)
+}
+
+func marshalSingleLineYAML(value map[string]any) (string, error) {
+	encoded, err := yaml.Marshal(value)
+	if err != nil {
+		return "", err
+	}
+	var document yaml.Node
+	if err := yaml.Unmarshal(encoded, &document); err != nil {
+		return "", err
+	}
+	setYAMLFlowStyle(&document)
+	encoded, err = yaml.Marshal(&document)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(encoded)), nil
+}
+
+func setYAMLFlowStyle(node *yaml.Node) {
+	if node.Kind == yaml.MappingNode || node.Kind == yaml.SequenceNode {
+		node.Style |= yaml.FlowStyle
+	}
+	for _, child := range node.Content {
+		setYAMLFlowStyle(child)
+	}
 }
 
 // NormalizeClientAddress validates and canonicalizes the address that will be
