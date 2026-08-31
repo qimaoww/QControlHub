@@ -46,13 +46,13 @@ func TestMihomoSnellAndSudokuPlansGenerateRoundTripAndExportClientProfiles(t *te
 				t.Fatal(err)
 			}
 			if key == ProtocolSudoku {
-				if profile.SubscriptionCompatible || profile.Format != "Sudoku URI" || !strings.HasPrefix(profile.URI, "sudoku://edge.example.com:") {
-					t.Fatalf("Sudoku client URI = %+v", profile)
+				if !profile.SubscriptionCompatible || profile.Format != "Mihomo Sudoku YAML" || !strings.HasPrefix(profile.URI, "{aead-method:") || !strings.Contains(profile.URI, "type: sudoku") {
+					t.Fatalf("Sudoku client YAML = %+v", profile)
 				}
 				return
 			}
-			if profile.SubscriptionCompatible || profile.Format != "Snell URI" || !strings.HasPrefix(profile.URI, "snell://edge.example.com:") {
-				t.Fatalf("Snell client URI = %+v", profile)
+			if !profile.SubscriptionCompatible || !strings.HasPrefix(profile.URI, "Tokyo = snell, edge.example.com,") {
+				t.Fatalf("Snell Surge client config = %+v", profile)
 			}
 		})
 	}

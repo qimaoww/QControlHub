@@ -8,6 +8,8 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 // ClientField is one exact value a client needs to reach a generated inbound.
@@ -19,9 +21,9 @@ type ClientField struct {
 	Secret bool   `json:"secret"`
 }
 
-// ClientProfile contains a common client import URI plus the same connection
-// data as explicit fields. The explicit fields remain useful when a particular
-// client does not implement the URI scheme.
+// ClientProfile contains a client import value plus the same connection data
+// as explicit fields. Most protocols use a URI; protocols without a portable
+// URI use their native single-line client configuration instead.
 type ClientProfile struct {
 	Format                 string        `json:"format"`
 	URI                    string        `json:"uri"`
@@ -136,11 +138,19 @@ func BuildClientProfileNamed(input Input, address, serverName, nodeName string) 
 		profile.URI = (&url.URL{Scheme: "vless", User: url.User(input.Credential), Host: host, RawQuery: query.Encode(), Fragment: fragment}).String()
 		profile.SubscriptionCompatible = true
 	case ProtocolSnell, ProtocolSnellShadowTLS:
-		profile.Format = "Snell URI"
-		profile.URI = buildSnellClientURI(input, host, fragment)
+		profile.Format = "Surge Snell"
+		if input.Protocol == ProtocolSnellShadowTLS {
+			profile.Format = "Surge Snell + ShadowTLS"
+		}
+		profile.URI = buildSnellSurgeConfig(input, address, fragment)
+		profile.SubscriptionCompatible = true
 	case ProtocolSudoku:
-		profile.Format = "Sudoku URI"
-		profile.URI = buildSudokuClientURI(input, host, fragment)
+		profile.Format = "Mihomo Sudoku YAML"
+		profile.URI, err = buildSudokuMihomoYAML(input, address, fragment)
+		if err != nil {
+			return ClientProfile{}, err
+		}
+		profile.SubscriptionCompatible = true
 	case ProtocolVMess:
 		payload := struct {
 			Version string `json:"v"`
@@ -214,64 +224,84 @@ func BuildClientProfileNamed(input Input, address, serverName, nodeName string) 
 	return profile, nil
 }
 
-// buildSnellClientURI emits the raw snell:// form understood by common
-// converters and client import tools. Snell has no single official share-link
-// standard, so SubscriptionCompatible deliberately remains false; the URI is
-// still preferable to presenting a multi-line YAML document as a share link.
-func buildSnellClientURI(input Input, host, fragment string) string {
-	query := url.Values{
-		"psk":     {input.Credential},
-		"version": {strconv.Itoa(input.SnellVersion)},
-		"udp":     {strconv.FormatBool(input.SnellUDP)},
-		"tfo":     {"true"},
+// buildSnellSurgeConfig emits the single-line Surge profile used by the
+// Snell installer and by Surge's native configuration format. Snell does not
+// have a portable URI, but Sub-Store parses Surge lines in local subscriptions.
+func buildSnellSurgeConfig(input Input, address, fragment string) string {
+	name := strings.NewReplacer("=", "", ",", "").Replace(fragment)
+	if name == "" {
+		name = "Snell"
+	}
+	parts := []string{
+		name + " = snell",
+		address,
+		strconv.Itoa(input.Port),
+		"psk = " + input.Credential,
+		"version = " + strconv.Itoa(input.SnellVersion),
 	}
 	if input.SnellReuse {
-		query.Set("reuse", "true")
+		parts = append(parts, "reuse = true")
 	}
-	if input.SnellObfsMode != "" && input.SnellObfsMode != SnellObfsNone {
-		query.Set("obfs", input.SnellObfsMode)
-		if input.SnellObfsHost != "" {
-			query.Set("obfs-host", input.SnellObfsHost)
-		}
+	parts = append(parts, "tfo = true")
+	if input.SnellUDP {
+		parts = append(parts, "udp-relay = true")
 	}
 	if input.SnellObfsMode == SnellObfsShadowTLS {
-		if input.SnellClientFingerprint != "" {
-			query.Set("client-fingerprint", input.SnellClientFingerprint)
-		}
 		if input.SnellShadowTLSPassword != "" {
-			query.Set("obfs-password", input.SnellShadowTLSPassword)
+			parts = append(parts, "shadow-tls-password = "+input.SnellShadowTLSPassword)
+		}
+		if input.SnellObfsHost != "" {
+			parts = append(parts, "shadow-tls-sni = "+input.SnellObfsHost)
 		}
 		if input.SnellShadowTLSVersion > 0 {
-			query.Set("obfs-version", strconv.Itoa(input.SnellShadowTLSVersion))
-		}
-		if input.SnellShadowTLSALPN != "" {
-			query.Set("obfs-alpn", input.SnellShadowTLSALPN)
+			parts = append(parts, "shadow-tls-version = "+strconv.Itoa(input.SnellShadowTLSVersion))
 		}
 	}
-	return (&url.URL{Scheme: "snell", Host: host, RawQuery: query.Encode(), Fragment: fragment}).String()
+	return strings.Join(parts, ", ")
 }
 
-// buildSudokuClientURI uses a self-describing raw URL for clients that accept
-// Sudoku share links. Mihomo's canonical representation is YAML, but keeping
-// the client export single-line makes it consistent with the other protocols;
-// every parameter needed to reconstruct that YAML is retained in the query.
-func buildSudokuClientURI(input Input, host, fragment string) string {
-	query := url.Values{
-		"key":                  {input.SudokuClientKey},
-		"aead-method":          {input.Method},
-		"padding-min":          {strconv.Itoa(input.SudokuPaddingMin)},
-		"padding-max":          {strconv.Itoa(input.SudokuPaddingMax)},
-		"table-type":           {input.SudokuTableType},
-		"enable-pure-downlink": {strconv.FormatBool(input.SudokuEnablePureDownlink)},
-		"multiplex":            {input.SudokuMultiplex},
-		"httpmask-disable":     {strconv.FormatBool(!input.SudokuHTTPMaskEnabled)},
-		"httpmask-mode":        {input.SudokuHTTPMaskMode},
-		"httpmask-tls":         {strconv.FormatBool(input.SudokuHTTPMaskTLS)},
-		"httpmask-host":        {input.SudokuHTTPMaskHost},
-		"httpmask-path-root":   {input.SudokuHTTPMaskPathRoot},
-		"httpmask-multiplex":   {input.SudokuMultiplex},
+// buildSudokuMihomoYAML emits a single-line flow-style YAML proxy map. This
+// preserves Mihomo's native Sudoku keys while keeping the value copy-friendly
+// in the client access view.
+func buildSudokuMihomoYAML(input Input, address, fragment string) (string, error) {
+	proxy := map[string]any{
+		"name": fragment, "type": "sudoku", "server": address, "port": input.Port, "key": input.SudokuClientKey,
+		"aead-method": input.Method, "padding-min": input.SudokuPaddingMin, "padding-max": input.SudokuPaddingMax,
+		"table-type": input.SudokuTableType, "enable-pure-downlink": input.SudokuEnablePureDownlink,
+		"multiplex": input.SudokuMultiplex,
+		"httpmask": compactMap(map[string]any{
+			"disable": !input.SudokuHTTPMaskEnabled, "mode": input.SudokuHTTPMaskMode,
+			"tls": input.SudokuHTTPMaskTLS, "host": input.SudokuHTTPMaskHost,
+			"path-root": input.SudokuHTTPMaskPathRoot, "multiplex": input.SudokuMultiplex,
+		}),
 	}
-	return (&url.URL{Scheme: "sudoku", Host: host, RawQuery: query.Encode(), Fragment: fragment}).String()
+	return marshalSingleLineYAML(proxy)
+}
+
+func marshalSingleLineYAML(value map[string]any) (string, error) {
+	encoded, err := yaml.Marshal(value)
+	if err != nil {
+		return "", err
+	}
+	var document yaml.Node
+	if err := yaml.Unmarshal(encoded, &document); err != nil {
+		return "", err
+	}
+	setYAMLFlowStyle(&document)
+	encoded, err = yaml.Marshal(&document)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(encoded)), nil
+}
+
+func setYAMLFlowStyle(node *yaml.Node) {
+	if node.Kind == yaml.MappingNode || node.Kind == yaml.SequenceNode {
+		node.Style |= yaml.FlowStyle
+	}
+	for _, child := range node.Content {
+		setYAMLFlowStyle(child)
+	}
 }
 
 // NormalizeClientAddress validates and canonicalizes the address that will be

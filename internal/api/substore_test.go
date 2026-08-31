@@ -57,6 +57,41 @@ func TestRenameSubStoreNode(t *testing.T) {
 			t.Errorf("invalid node name %q unexpectedly succeeded", name)
 		}
 	}
+
+	surge, err := renameSubStoreNode("Old = snell, edge.example.com, 8443, psk = secret, version = 5, reuse = true, tfo = true", "东京 Snell")
+	if err != nil || surge != "东京 Snell = snell, edge.example.com, 8443, psk = secret, version = 5, reuse = true, tfo = true" || subStoreNodeName(surge) != "东京 Snell" {
+		t.Fatalf("renamed Surge Snell = %q, %v", surge, err)
+	}
+	if _, err := renameSubStoreNode(surge, "bad,name"); err == nil || !strings.Contains(err.Error(), "Surge") {
+		t.Fatalf("invalid Surge name error = %v", err)
+	}
+
+	mihomo, err := renameSubStoreNode("{name: Old, type: sudoku, server: edge.example.com, port: 8443, key: secret}", "东京 Sudoku")
+	if err != nil || strings.ContainsAny(mihomo, "\r\n") || subStoreNodeName(mihomo) != "东京 Sudoku" || !strings.Contains(mihomo, "type: sudoku") {
+		t.Fatalf("renamed Mihomo Sudoku = %q, %v", mihomo, err)
+	}
+}
+
+func TestSubStoreMixedNativeFormatsKeepNamesForIncrementalSync(t *testing.T) {
+	t.Parallel()
+	existing := strings.Join([]string{
+		"vless://manual@old.example:443#Manual",
+		"Snell = snell, old.example.com, 8443, psk = old-secret, version = 5",
+		"{name: Sudoku, type: sudoku, server: old.example.com, port: 9443, key: old-key}",
+	}, "\n")
+	desired := strings.Join([]string{
+		"Snell = snell, new.example.com, 8443, psk = new-secret, version = 5",
+		"{name: Sudoku, type: sudoku, server: new.example.com, port: 9443, key: new-key}",
+	}, "\n")
+
+	names, err := subStoreNodeNames(existing)
+	if err != nil || strings.Join(names, ",") != "Manual,Snell,Sudoku" {
+		t.Fatalf("mixed Sub-Store node names = %v, %v", names, err)
+	}
+	merged, err := mergeSubStoreContentByName(existing, desired, []string{"Snell", "Sudoku"})
+	if err != nil || !strings.Contains(merged, "vless://manual@old.example:443#Manual") || !strings.Contains(merged, "new.example.com") || strings.Contains(merged, "old-secret") || strings.Contains(merged, "old-key") {
+		t.Fatalf("mixed incremental merge = %q, %v", merged, err)
+	}
 }
 
 func TestSubStoreNodesForAddressMode(t *testing.T) {

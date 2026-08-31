@@ -1,7 +1,6 @@
 package serverconfig
 
 import (
-	"net/url"
 	"strings"
 	"testing"
 
@@ -43,14 +42,9 @@ func generatedMihomoClient(t *testing.T, input Input) (string, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if isSnellProtocol(input.Protocol) || input.Protocol == ProtocolSudoku {
-		parsed, err := url.Parse(profile.URI)
-		wantScheme := "snell"
-		if input.Protocol == ProtocolSudoku {
-			wantScheme = "sudoku"
-		}
-		if err != nil || parsed.Scheme != wantScheme || parsed.Hostname() != "edge.example.com" {
-			t.Fatalf("client %s URI did not parse: %v\n%s", wantScheme, err, profile.URI)
+	if isSnellProtocol(input.Protocol) {
+		if !profile.SubscriptionCompatible || !strings.Contains(profile.URI, " = snell, edge.example.com,") || strings.Contains(profile.URI, "snell://") {
+			t.Fatalf("client Surge Snell profile did not parse:\n%s", profile.URI)
 		}
 		return content, profile.URI
 	}
@@ -73,24 +67,20 @@ func TestSnellCompletePresetMatrix(t *testing.T) {
 			input := mihomoPresetPlan(t, test.protocol)
 			input.SnellReuse = true
 			server, client := generatedMihomoClient(t, input)
-			parsedClient, err := url.Parse(client)
-			if err != nil {
-				t.Fatalf("client profile did not parse: %v\n%s", err, client)
-			}
 			if test.shadow {
-				if !strings.Contains(server, "shadow-tls:") || !strings.Contains(server, "version: 3") || !strings.Contains(server, "strict-mode: true") || parsedClient.Query().Get("obfs") != "shadow-tls" {
+				if !strings.Contains(server, "shadow-tls:") || !strings.Contains(server, "version: 3") || !strings.Contains(server, "strict-mode: true") || !strings.Contains(client, "shadow-tls-password = ") || !strings.Contains(client, "shadow-tls-sni = ") {
 					t.Fatalf("ShadowTLS v3 pair is incomplete:\nserver:\n%s\nclient:\n%s", server, client)
 				}
-			} else if strings.Contains(server, "shadow-tls:") || parsedClient.Query().Get("obfs") != "" {
+			} else if strings.Contains(server, "shadow-tls:") || strings.Contains(client, "shadow-tls-") {
 				t.Fatalf("plain Snell preset gained an extra carrier:\nserver:\n%s\nclient:\n%s", server, client)
 			}
 			if strings.Contains(server, "client-fingerprint") || strings.Contains(server, "reuse:") {
 				t.Fatalf("server leaked client-only Snell settings:\n%s", server)
 			}
-			if parsedClient.Query().Get("reuse") != "true" {
+			if !strings.Contains(client, "reuse = true") {
 				t.Fatalf("client-only reuse was not restored:\n%s", client)
 			}
-			if parsedClient.Query().Get("tfo") != "true" {
+			if !strings.Contains(client, "tfo = true") {
 				t.Fatalf("Snell v5 client did not enable TCP Fast Open:\n%s", client)
 			}
 		})
@@ -143,14 +133,18 @@ func TestSudokuCompletePresetMatrixAndPrivateKeyIsolation(t *testing.T) {
 				input.SudokuHTTPMaskHost = "cdn.example.com:443"
 			}
 			server, client := generatedMihomoClient(t, input)
-			parsedClient, err := url.Parse(client)
-			if err != nil || parsedClient.Query().Get("httpmask-mode") != mode {
+			var proxy map[string]any
+			if err := yaml.Unmarshal([]byte(client), &proxy); err != nil {
+				t.Fatalf("Sudoku client YAML did not parse: %v\n%s", err, client)
+			}
+			httpmask := mapValue(proxy["httpmask"])
+			if stringValue(httpmask["mode"]) != mode {
 				t.Fatalf("HTTPMask %s was not preserved:\nserver:\n%s\nclient:\n%s", mode, server, client)
 			}
 			if !strings.Contains(server, "mode: auto") {
 				t.Fatalf("Sudoku server HTTPMask mode was not normalized:\n%s", server)
 			}
-			if mode != "legacy" && (parsedClient.Query().Get("httpmask-tls") != "true" || parsedClient.Query().Get("httpmask-host") != "cdn.example.com:443") {
+			if mode != "legacy" && (!boolValue(httpmask["tls"]) || stringValue(httpmask["host"]) != "cdn.example.com:443") {
 				t.Fatalf("modern HTTPMask client values were not restored:\n%s", client)
 			}
 		})
@@ -179,18 +173,21 @@ func TestSudokuCompletePresetMatrixAndPrivateKeyIsolation(t *testing.T) {
 			t.Fatalf("Sudoku server omitted %q:\n%s", marker, server)
 		}
 	}
-	parsedClient, err := url.Parse(client)
-	if err != nil || parsedClient.Scheme != "sudoku" {
-		t.Fatalf("Sudoku client URI did not parse: %v\n%s", err, client)
+	var proxy map[string]any
+	if err := yaml.Unmarshal([]byte(client), &proxy); err != nil {
+		t.Fatalf("Sudoku client YAML did not parse: %v\n%s", err, client)
 	}
+	httpmask := mapValue(proxy["httpmask"])
 	for key, want := range map[string]string{
-		"key": input.SudokuClientKey, "aead-method": input.Method, "padding-min": "5", "padding-max": "15",
-		"table-type": input.SudokuTableType, "multiplex": "on", "httpmask-mode": "stream", "httpmask-tls": "true",
-		"httpmask-host": "cdn.example.com", "httpmask-path-root": "/qch/",
+		"key": input.SudokuClientKey, "aead-method": input.Method,
+		"table-type": input.SudokuTableType, "multiplex": "on",
 	} {
-		if got := parsedClient.Query().Get(key); got != want {
-			t.Errorf("Sudoku client query[%q] = %q, want %q", key, got, want)
+		if got := stringValue(proxy[key]); got != want {
+			t.Errorf("Sudoku client YAML[%q] = %q, want %q", key, got, want)
 		}
+	}
+	if intValue(proxy["padding-min"]) != 5 || intValue(proxy["padding-max"]) != 15 || stringValue(httpmask["mode"]) != "stream" || !boolValue(httpmask["tls"]) || stringValue(httpmask["host"]) != "cdn.example.com" || stringValue(httpmask["path-root"]) != "/qch/" {
+		t.Fatalf("Sudoku client YAML omitted client-only settings: %s", client)
 	}
 }
 
