@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"os"
 	"regexp"
 	"strconv"
@@ -25,6 +26,21 @@ func TestKomariNodeResourceIncludesCurrentPeriodUsage(t *testing.T) {
 	})
 	if resource.UUID != "komari-node" || resource.TrafficResetDay != 27 || resource.TrafficUsed != 4<<30 || !resource.TrafficUsedAvailable {
 		t.Fatalf("Komari API resource = %+v", resource)
+	}
+}
+
+func TestAgentGeoIPUsesTrustedPublicMetricAddress(t *testing.T) {
+	agent := core.Agent{Metrics: core.HostMetrics{
+		PublicIPv4:       "192.168.1.20",
+		PublicIPv6:       "2606:4700::1111",
+		ObservedPublicIP: "8.8.8.8",
+	}}
+	if got := agentGeoIP(agent); got != netip.MustParseAddr("8.8.8.8") {
+		t.Fatalf("GeoIP address = %s, want verified public fallback", got)
+	}
+	agent.Metrics.ObservedPublicIP = ""
+	if got := agentGeoIP(agent); got.IsValid() {
+		t.Fatalf("Cloudflare address unexpectedly selected: %s", got)
 	}
 }
 

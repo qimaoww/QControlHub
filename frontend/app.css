@@ -622,6 +622,10 @@ dialog[open]::backdrop{animation:qch-backdrop-enter 220ms ease both}
 /* Typography scale v1: keep every explicit UI size on one readable baseline. */
 :root{--ui-font-scale:1}
 
+/* GeoIP country flags replace the generic node dot when available. */
+.machine-avatar.has-region{padding:0;background:transparent;box-shadow:none}
+.machine-avatar.has-region>img{width:100%;height:auto;aspect-ratio:4/3;display:block;border:1px solid color-mix(in srgb,var(--ink) 14%,transparent);border-radius:6px;object-fit:cover}
+
 /* Settings copy must stay inside its section at large type scales. */
 .settings-section>header>div{min-width:0}
 .settings-section header p,.settings-hint{min-width:0;overflow-wrap:anywhere}

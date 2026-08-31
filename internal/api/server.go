@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/netip"
 	"strconv"
 	"strings"
 	"sync"
@@ -23,7 +24,9 @@ import (
 	"github.com/coder/websocket/wsjson"
 	"github.com/qimaoww/qcontrolhub/internal/authn"
 	"github.com/qimaoww/qcontrolhub/internal/core"
+	"github.com/qimaoww/qcontrolhub/internal/geoip"
 	"github.com/qimaoww/qcontrolhub/internal/komari"
+	"github.com/qimaoww/qcontrolhub/internal/netpolicy"
 	"github.com/qimaoww/qcontrolhub/internal/notify"
 	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
 	"github.com/qimaoww/qcontrolhub/internal/store"
@@ -51,6 +54,7 @@ type Config struct {
 	KomariURL        string
 	KomariAPIKey     string
 	KomariHTTPClient *http.Client
+	GeoIPHTTPClient  *http.Client
 	SessionTTL       time.Duration
 }
 
@@ -69,6 +73,7 @@ type Server struct {
 	controlPlaneVersion        string
 	agentInstaller             []byte
 	publicIPProbe              core.PublicIPProbeConfig
+	geoip                      *geoip.Client
 	komari                     *komari.Client
 	komariHTTPClient           *http.Client
 	komariConfigError          error
@@ -132,6 +137,7 @@ func New(dataStore *store.Store, config Config) *Server {
 		}
 	}
 	komariClient, komariErr := komari.New(config.KomariURL, config.KomariAPIKey, config.KomariHTTPClient)
+	geoipClient := geoip.New(config.GeoIPHTTPClient)
 	if komariErr != nil {
 		// Keep the control plane available when an optional integration is
 		// misconfigured; the endpoint reports the configuration error to an
@@ -157,6 +163,7 @@ func New(dataStore *store.Store, config Config) *Server {
 		controlPlaneVersion:        strings.TrimSpace(config.ControlPlaneVersion),
 		agentInstaller:             config.AgentInstaller,
 		publicIPProbe:              config.PublicIPProbe,
+		geoip:                      geoipClient,
 		komari:                     komariClient,
 		komariHTTPClient:           komariHTTPClient,
 		komariConfigError:          komariErr,
@@ -261,6 +268,8 @@ func (s *Server) Handler() http.Handler {
 		http.HandlerFunc(s.putMainlandAccessPolicy),
 	))
 	mux.Handle("PUT /api/v1/agents/{id}/client-address", s.requirePermission(core.PermissionAgentsManage, http.HandlerFunc(s.putAgentClientAddress)))
+	mux.Handle("GET /api/v1/agents/{id}/region", s.requirePermission(core.PermissionAgentsRead, http.HandlerFunc(s.getAgentRegion)))
+	mux.Handle("GET /api/v1/region-flags/{code}", s.requirePermission(core.PermissionAgentsRead, http.HandlerFunc(s.getRegionFlag)))
 	mux.Handle("GET /api/v1/agents/{id}/komari", s.requirePermission(core.PermissionAgentsRead, http.HandlerFunc(s.getAgentKomari)))
 	mux.Handle("PUT /api/v1/agents/{id}/komari", s.requirePermission(core.PermissionAgentsManage, http.HandlerFunc(s.putAgentKomari)))
 	mux.Handle("GET /api/v1/config-catalogs/{engine}", s.requirePermission(core.PermissionCatalogsRead, http.HandlerFunc(s.configCatalog)))
@@ -778,6 +787,72 @@ func (s *Server) getAgentKomari(w http.ResponseWriter, request *http.Request) {
 	result.Server = ptr(komariNodeResource(node))
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, result)
+}
+
+func agentGeoIP(agent core.Agent) netip.Addr {
+	for _, raw := range []string{
+		agent.Metrics.PublicIPv4,
+		agent.Metrics.PublicIPv6,
+		agent.Metrics.ObservedPublicIP,
+	} {
+		address, err := netip.ParseAddr(strings.TrimSpace(raw))
+		if err != nil || !netpolicy.IsPublicAddress(address) || netpolicy.IsCloudflareAddress(address) {
+			continue
+		}
+		return address
+	}
+	for _, networkInterface := range agent.Metrics.NetworkInterfaces {
+		for _, raw := range networkInterface.Addresses {
+			address, err := netip.ParseAddr(strings.TrimSpace(raw))
+			if err != nil || !netpolicy.IsPublicAddress(address) || netpolicy.IsCloudflareAddress(address) {
+				continue
+			}
+			return address
+		}
+	}
+	return netip.Addr{}
+}
+
+func (s *Server) getAgentRegion(w http.ResponseWriter, request *http.Request) {
+	agent, err := s.store.GetAgent(request.Context(), request.PathValue("id"))
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	address := agentGeoIP(agent)
+	if !address.IsValid() {
+		writeJSON(w, http.StatusOK, map[string]string{})
+		return
+	}
+	region, err := s.geoip.Lookup(request.Context(), address)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{
+		"ip":           address.String(),
+		"country_code": region.ISOCode,
+		"country":      region.Name,
+	})
+}
+
+func (s *Server) getRegionFlag(w http.ResponseWriter, request *http.Request) {
+	code := strings.ToUpper(strings.TrimSpace(request.PathValue("code")))
+	// The panel display policy treats Taiwan as part of China and uses the
+	// China flag regardless of which code a direct API caller supplies.
+	if code == "TW" {
+		code = "CN"
+	}
+	flag, err := s.geoip.Flag(request.Context(), code)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "image/svg+xml")
+	w.Header().Set("Cache-Control", "public, max-age=172800, immutable")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	_, _ = w.Write(flag)
 }
 
 func (s *Server) putAgentKomari(w http.ResponseWriter, request *http.Request) {
