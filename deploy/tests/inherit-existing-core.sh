@@ -410,6 +410,46 @@ expect_rejected ssrust-environment-override qagent_core_service_is_safe_owned sh
 printf '%s\n' RUST_LOG=info > "$FAKE_SYSTEMCTL_STATE/qagent-Environment"
 write_exec_start "$qagent_ssrust_binary" "$qagent_ssrust_binary" -c "$qagent_ssrust_config" --acl /tmp/unexpected.acl
 expect_rejected ssrust-acl-override qagent_core_service_is_safe_owned shadowsocks-rust "$managed_ssrust_unit"
+
+# Discovery accepts the pre-ACL QAgent unit too. The bootstrap ownership
+# check must agree before rewriting that template, without stopping an active
+# managed service or accepting arbitrary arguments/environment/hooks.
+for ssrust_generation in current legacy; do
+  cp "$(dirname -- "$0")/../systemd/qagent-shadowsocks-rust.service" "$managed_ssrust_unit"
+  ssrust_argv="$qagent_ssrust_binary -c $qagent_ssrust_config --acl $qagent_ssrust_acl"
+  if [ "$ssrust_generation" = legacy ]; then
+    sed -i "s| --acl $qagent_ssrust_acl||;\\|^ConditionPathExists=$qagent_ssrust_acl$|d" "$managed_ssrust_unit"
+    ssrust_argv="$qagent_ssrust_binary -c $qagent_ssrust_config"
+  fi
+  write_exec_start "$qagent_ssrust_binary" $ssrust_argv
+  for ssrust_state in active inactive failed; do
+    printf '%s\n' "$ssrust_state" > "$FAKE_SYSTEMCTL_STATE/qagent-shadowsocks-rust.service.active"
+    printf '%s\n' "$ssrust_state" > "$FAKE_SYSTEMCTL_QAGENT_ACTIVE_STATE"
+    QCH_SKIP_CORE_SERVICES=shadowsocks-rust
+    qagent_core_service_is_safe_owned shadowsocks-rust "$managed_ssrust_unit"
+    require_skipped_core_service_inactive shadowsocks-rust "$managed_ssrust_unit"
+    : > "$FAKE_SYSTEMCTL_STATE/qagent-shadowsocks-rust.service.persistent"
+    disable_skipped_core_service shadowsocks-rust "$managed_ssrust_unit"
+    if [ "$ssrust_state" = active ]; then
+      [ -f "$FAKE_SYSTEMCTL_STATE/qagent-shadowsocks-rust.service.persistent" ]
+      expect_rejected active-ssrust-disable qagent_core_service_is_safe_to_disable shadowsocks-rust "$managed_ssrust_unit"
+    else
+      [ ! -f "$FAKE_SYSTEMCTL_STATE/qagent-shadowsocks-rust.service.persistent" ]
+    fi
+  done
+  write_exec_start "$qagent_ssrust_binary" $ssrust_argv --unexpected
+  expect_rejected ssrust-extra-argument qagent_core_service_is_safe_owned shadowsocks-rust "$managed_ssrust_unit"
+  write_exec_start "$qagent_ssrust_binary" $ssrust_argv
+  printf '%s\n' RUST_LOG=debug > "$FAKE_SYSTEMCTL_STATE/qagent-Environment"
+  expect_rejected ssrust-legacy-environment qagent_core_service_is_safe_owned shadowsocks-rust "$managed_ssrust_unit"
+  printf '%s\n' RUST_LOG=info > "$FAKE_SYSTEMCTL_STATE/qagent-Environment"
+  printf '%s\n' /usr/bin/false > "$FAKE_SYSTEMCTL_STATE/qagent-ExecStartPre"
+  expect_rejected ssrust-legacy-hook qagent_core_service_is_safe_owned shadowsocks-rust "$managed_ssrust_unit"
+  : > "$FAKE_SYSTEMCTL_STATE/qagent-ExecStartPre"
+done
+printf '%s\n' inactive > "$FAKE_SYSTEMCTL_STATE/qagent-shadowsocks-rust.service.active"
+printf '%s\n' inactive > "$FAKE_SYSTEMCTL_QAGENT_ACTIVE_STATE"
+QCH_SKIP_CORE_SERVICES=''
 : > "$FAKE_SYSTEMCTL_STATE/qagent-Environment"
 
 printf '%s\n' "$managed_unit" > "$FAKE_SYSTEMCTL_FRAGMENT_PATH"
