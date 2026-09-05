@@ -654,6 +654,21 @@ skip_core_service() {
   esac
 }
 
+# Import has already validated this installed unit. Recheck ownership, but
+# leave its exact command and enablement for the durable migration transaction.
+require_preserved_core_service_safe() {
+  engine=$1
+  skip_core_service "$engine" || return 1
+  if [ "${service_manager:-systemd}" = openrc ]; then
+    expected_fragment=${2:-$openrc_init_root/qagent-$engine}
+  else
+    expected_fragment=${2:-/etc/systemd/system/qagent-$engine.service}
+    [ "$(systemctl show "qagent-$engine.service" --property=LoadState --value 2>/dev/null)" = loaded ] || return 1
+  fi
+  [ -f "$expected_fragment" ] && [ ! -L "$expected_fragment" ] || return 1
+  qagent_core_service_is_safe_owned "$engine" "$expected_fragment"
+}
+
 require_skipped_core_service_inactive() {
   engine=$1
   skip_core_service "$engine" || return 0

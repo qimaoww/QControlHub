@@ -18,7 +18,7 @@ func shadowsocksRustFields() []Field {
 		field("outbound_bind_addr", "出站绑定地址", "字符串", "出站使用的本机 IP；servers[].outbound_bind_addr 可逐端口覆盖。", general),
 		field("ipv6_first", "IPv6 优先", "布尔", "全局优先使用 IPv6 地址，默认 false。", general),
 		field("security", "安全策略", "对象", "重放攻击检测等安全策略。", general),
-		field("acl", "访问控制", "字符串", "ACL 文件路径；端口 ACL 优先，未设置时继承全局 ACL。不会新增或下载 CN 域名规则。", general),
+		field("acl", "访问控制", "字符串", "端口 ACL 优先。删除端口 ACL 后使用启动 --acl；未指定启动 --acl 时才使用顶层 acl。新版 QAgent 模板指定固定的 qch-mainland-block.acl，顶层 acl 不会覆盖它。不新增或下载 CN 域名规则。", general),
 		field("outbound_bind_interface", "出站网卡", "字符串", "出站使用的本机网卡；端口设置覆盖全局值。", general),
 		field("outbound_fwmark", "出站标记", "整数", "Linux / Android 出站 SO_MARK；端口设置覆盖全局值。", general),
 		field("outbound_udp_allow_fragmentation", "出站 UDP 分片", "布尔", "允许出站 UDP 分片；端口设置覆盖全局值。", general),

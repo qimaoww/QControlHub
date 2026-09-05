@@ -1633,6 +1633,9 @@ case "$command" in
     cat "$state/$service.exec-start"
     ;;
   stop)
+    if [ "$service" = qagent-shadowsocks-rust.service ] && [ -f "$state/fail-ssrust-rollback-stop" ]; then
+      exit 1
+    fi
     printf 'inactive\n' > "$active_file"
     if [ "$service" = qagent-xray.service ] && [ "$(cat "$state/$service.runtime")" = 1 ] && [ -f "$state/respawn-managed-on-runtime-stop" ] && [ ! -f "$state/managed-respawned" ]; then
       printf 'active\n' > "$active_file"
@@ -1640,6 +1643,12 @@ case "$command" in
     fi
     ;;
   start|restart)
+	if [ "$service" = qagent-shadowsocks-rust.service ] && [ -f "$state/fail-ssrust-start-once" ]; then
+	  rm -f "$state/fail-ssrust-start-once"
+	  if [ -f "$state/ssrust-incomplete-rollback" ]; then : > "$state/fail-ssrust-rollback-stop"; fi
+	  printf 'failed\n' > "$active_file"
+	  exit 1
+	fi
 	if [ "$command" = restart ] && [ "$service" = qagent-sing-box.service ] && [ -f "$state/fail-managed-restart" ]; then
 	  rm -f "$state/fail-managed-restart"
 	  printf 'failed\n' > "$active_file"

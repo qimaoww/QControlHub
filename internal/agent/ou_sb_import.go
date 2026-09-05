@@ -30,11 +30,13 @@ type coreImportResource struct {
 }
 
 type coreImportPlan struct {
-	managedContent string
-	resourceRoot   string
-	stateRoot      string
-	resources      []coreImportResource
-	auxiliary      coreMigrationAuxiliaryService
+	managedContent   string
+	resourceRoot     string
+	stateRoot        string
+	resources        []coreImportResource
+	auxiliary        coreMigrationAuxiliaryService
+	createdResources []coreImportResource
+	createdDirectory bool
 }
 
 type coreMigrationAuxiliaryService struct {
@@ -139,7 +141,7 @@ func (plan coreImportPlan) active() bool {
 	return len(plan.resources) > 0
 }
 
-func (plan coreImportPlan) stage(identity commandIdentity) error {
+func (plan *coreImportPlan) stage(identity commandIdentity) error {
 	if !plan.active() {
 		return nil
 	}
@@ -147,28 +149,77 @@ func (plan coreImportPlan) stage(identity commandIdentity) error {
 	if stateRoot == "" {
 		stateRoot = ouSBManagedStateRoot
 	}
+	if _, err := os.Lstat(plan.resourceRoot); errors.Is(err, os.ErrNotExist) {
+		plan.createdDirectory = true
+	} else if err != nil {
+		return err
+	}
 	if err := prepareImportResourceDirectory(stateRoot, plan.resourceRoot, identity); err != nil {
 		return err
 	}
 	for _, resource := range plan.resources {
+		// Reuse is read-only. A prior migration or an independently running
+		// managed service may already reference this content-addressed path.
+		digest, present, err := protectedCoreMigrationFileDigest(resource.source, ouSBResourceLimit)
+		if err != nil || !present {
+			return fmt.Errorf("read protected import source: %w", errors.Join(err, errors.New("resource unavailable")))
+		}
+		if resource.digest != "" && digest != resource.digest {
+			return errors.New("protected import resource changed after snapshot planning")
+		}
+		resource.digest = digest
+		if info, err := os.Lstat(resource.destination); err == nil {
+			if err := validateImportResourceReuse(resource, info, identity); err != nil {
+				return err
+			}
+			continue
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
 		if err := copyProtectedImportResource(resource.source, resource.destination, resource.digest, identity); err != nil {
 			return err
 		}
+		plan.createdResources = append(plan.createdResources, resource)
 	}
 	return nil
 }
 
-func (plan coreImportPlan) cleanup() error {
+func (plan *coreImportPlan) cleanup() error {
 	if !plan.active() {
 		return nil
 	}
-	for _, resource := range plan.resources {
+	for _, resource := range plan.createdResources {
+		digest, present, err := protectedCoreMigrationFileDigest(resource.destination, ouSBResourceLimit)
+		if err != nil {
+			return err
+		}
+		if present && digest != resource.digest {
+			return errors.New("refusing to remove an imported resource modified outside this transaction")
+		}
 		if err := os.Remove(resource.destination); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
 	}
-	if err := os.Remove(plan.resourceRoot); err != nil && !errors.Is(err, os.ErrNotExist) {
+	if plan.createdDirectory {
+		if err := os.Remove(plan.resourceRoot); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	plan.createdResources, plan.createdDirectory = nil, false
+	return nil
+}
+
+func validateImportResourceReuse(resource coreImportResource, info os.FileInfo, identity commandIdentity) error {
+	uid, gid, known := fileOwnership(info)
+	if !info.Mode().IsRegular() || info.Mode().Perm() != 0o640 || !known || uid != 0 || gid != int(identity.gid) {
+		return errors.New("existing imported resource has unsafe ownership or permissions")
+	}
+	digest, present, err := protectedCoreMigrationFileDigest(resource.destination, ouSBResourceLimit)
+	if err != nil {
 		return err
+	}
+	if !present || digest != resource.digest {
+		return errors.New("existing imported resource does not match the protected source; refusing overwrite")
 	}
 	return nil
 }

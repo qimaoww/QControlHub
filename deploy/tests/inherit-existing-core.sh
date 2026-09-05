@@ -427,6 +427,7 @@ for ssrust_generation in current legacy; do
     printf '%s\n' "$ssrust_state" > "$FAKE_SYSTEMCTL_QAGENT_ACTIVE_STATE"
     QCH_SKIP_CORE_SERVICES=shadowsocks-rust
     qagent_core_service_is_safe_owned shadowsocks-rust "$managed_ssrust_unit"
+    require_preserved_core_service_safe shadowsocks-rust "$managed_ssrust_unit"
     require_skipped_core_service_inactive shadowsocks-rust "$managed_ssrust_unit"
     : > "$FAKE_SYSTEMCTL_STATE/qagent-shadowsocks-rust.service.persistent"
     disable_skipped_core_service shadowsocks-rust "$managed_ssrust_unit"

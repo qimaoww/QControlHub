@@ -66,7 +66,11 @@ func MutateSSRustPort(current, generated, tag, operation string) (string, error)
 				entry[key] = value
 			}
 		}
-		// New ports inherit defaults, including ACL, without freezing a copy.
+		// The managed unit's --acl supersedes root.acl. Explicitly carry the
+		// imported ACL onto new ports so they retain the imported policy too.
+		if acl, present := root["acl"]; present {
+			entry["acl"] = acl
+		}
 		entries = append(entries, entry)
 	} else {
 		_, selected, _, err := ssRustFieldTarget(current, tag, "server")
