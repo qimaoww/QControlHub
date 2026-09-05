@@ -635,3 +635,7 @@ dialog[open]::backdrop{animation:qch-backdrop-enter 220ms ease both}
 .settings-field input,.settings-field select{min-width:0}
 .settings-field small{overflow-wrap:anywhere}
 @media(max-width:820px) and (pointer:coarse){.settings-section>.settings-hint{padding:0 16px 16px}.settings-section>.settings-toggle{margin-inline:16px}}
+.ss-rust-field-studio .scoped-field-body{grid-template-columns:220px minmax(0,1fr)}
+.ss-rust-field-studio .field-canvas code{overflow-wrap:anywhere;white-space:pre-wrap}
+.ss-rust-source{border:1px solid var(--line);border-radius:12px;margin-top:16px;background:var(--surface)}
+@media(max-width:760px){.ss-rust-field-studio .scoped-field-body{display:block}}
