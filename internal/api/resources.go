@@ -496,6 +496,12 @@ func (s *Server) saveConfigField(w http.ResponseWriter, request *http.Request) {
 		return
 	}
 	var content string
+	if engine == core.EngineShadowsocksRust {
+		if err := serverconfig.ValidateSSRustFieldValue(key, input.Fragment, input.Mutation == "delete"); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
 	if scoped {
 		content, err = serverconfig.MergeSSRustInboundField(current.Content, inbound, key, input.Fragment, input.Mutation == "delete")
 	} else {

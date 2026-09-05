@@ -130,6 +130,32 @@ func TestSSRustPortFieldsRejectUnsupportedOrAmbiguousScope(t *testing.T) {
 	}
 }
 
+func TestSSRustFieldEditsRejectInvalidValuesBeforeSaving(t *testing.T) {
+	for key, values := range map[string][]string{
+		"mode": {`"invalid"`, `true`, `null`}, "outbound_bind_addr": {`"eth0"`, `123`},
+		"acl": {`"relative.acl"`, `false`}, "server_port": {`0`, `65536`, `1.5`, `-1`},
+		"outbound_fwmark": {`4294967296`, `-1`}, "timeout": {`"300"`, `-1`},
+		"no_delay": {`"false"`, `0`}, "dns": {`[]`, `false`}, "plugin_args": {`[1]`, `"--arg"`},
+	} {
+		for _, value := range values {
+			if err := ValidateSSRustFieldValue(key, value, false); err == nil {
+				t.Errorf("accepted %s=%s", key, value)
+			}
+		}
+	}
+	for _, key := range []string{"server", "server_port", "method", "password"} {
+		if _, err := MergeSSRustInboundField(ssRustScopedFixture, "one", key, "", true); err == nil {
+			t.Errorf("deleted mandatory %s", key)
+		}
+	}
+	if _, err := MergeSSRustInboundField(ssRustScopedFixture, "one", "server_port", "20002", false); err == nil {
+		t.Fatal("accepted duplicate port")
+	}
+	if err := ValidateSSRustFieldValue("timeout", "9007199254740993", false); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSSRustScopedPresetDoesNotChangeGlobals(t *testing.T) {
 	for _, current := range []string{ssRustScopedFixture,
 		`{"server":"::","server_port":20001,"method":"aes-256-gcm","password":"password-one","mode":"udp_only","timeout":75,"fast_open":true}`,

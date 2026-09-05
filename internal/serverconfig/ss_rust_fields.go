@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
+	"path/filepath"
 	"strings"
 
 	"github.com/qimaoww/qcontrolhub/internal/configschema"
@@ -137,6 +139,12 @@ func SSRustInboundField(content, tag, key string) (fragment string, present bool
 // Legacy single-server documents are normalized to the extended format before
 // a port override is edited; this avoids silently editing a global default.
 func MergeSSRustInboundField(content, tag, key, fragment string, remove bool) (string, error) {
+	if err := ValidateSSRustFieldValue(key, fragment, remove); err != nil {
+		return "", err
+	}
+	if remove && (key == "server" || key == "server_port" || key == "method" || key == "password") {
+		return "", errors.New("不能删除端口必需字段；请使用删除入站操作")
+	}
 	root, entry, commit, err := ssRustFieldTarget(content, tag, key)
 	if err != nil {
 		return "", err
@@ -153,8 +161,92 @@ func MergeSSRustInboundField(content, tag, key, fragment string, remove bool) (s
 	if err := commit(updated); err != nil {
 		return "", err
 	}
+	if key == "server_port" && !remove {
+		for _, listKey := range []string{"servers", "shadowsocks"} {
+			var entries []map[string]json.RawMessage
+			if err := json.Unmarshal(root[listKey], &entries); err != nil {
+				continue
+			}
+			ports := make(map[int]bool)
+			for _, item := range entries {
+				var port int
+				if err := json.Unmarshal(item["server_port"], &port); err != nil {
+					continue
+				}
+				if ports[port] {
+					return "", fmt.Errorf("SS Rust 端口 %d 已存在", port)
+				}
+				ports[port] = true
+			}
+		}
+	}
 	encoded, err = json.MarshalIndent(root, "", "  ")
 	return string(encoded) + "\n", err
+}
+
+// The field editor has no native ssserver check mode to lean on. Reject
+// obvious invalid typed values before saving/restarting a running service.
+func ValidateSSRustFieldValue(key, fragment string, remove bool) error {
+	if remove {
+		return nil
+	}
+	invalid := func() error { return fmt.Errorf("SS Rust 字段 %s 的类型或值无效", key) }
+	if !json.Valid([]byte(fragment)) || strings.TrimSpace(fragment) == "null" {
+		return invalid()
+	}
+	var text string
+	switch key {
+	case "server", "password", "method", "mode", "plugin", "plugin_opts", "plugin_mode", "outbound_bind_addr", "outbound_bind_interface", "acl":
+		if err := json.Unmarshal([]byte(fragment), &text); err != nil || strings.ContainsAny(text, "\x00\r\n") {
+			return invalid()
+		}
+		if text == "" && key != "plugin" && key != "plugin_opts" {
+			return invalid()
+		}
+		if (key == "mode" || key == "plugin_mode") && text != "tcp_only" && text != "udp_only" && text != "tcp_and_udp" {
+			return invalid()
+		}
+		if key == "outbound_bind_addr" && net.ParseIP(text) == nil {
+			return invalid()
+		}
+		if key == "acl" && !filepath.IsAbs(text) {
+			return invalid()
+		}
+	case "server_port", "timeout", "udp_timeout", "keep_alive", "outbound_fwmark":
+		var value uint64
+		if err := json.Unmarshal([]byte(fragment), &value); err != nil {
+			return invalid()
+		}
+		if key == "server_port" && (value == 0 || value > 65535) {
+			return invalid()
+		}
+		if key == "outbound_fwmark" && value > 0xffffffff {
+			return invalid()
+		}
+	case "fast_open", "no_delay", "ipv6_first", "outbound_udp_allow_fragmentation", "inbound_udp_allow_fragmentation":
+		var value bool
+		if err := json.Unmarshal([]byte(fragment), &value); err != nil {
+			return invalid()
+		}
+	case "plugin_args":
+		var value []string
+		if err := json.Unmarshal([]byte(fragment), &value); err != nil {
+			return invalid()
+		}
+	case "dns":
+		if json.Unmarshal([]byte(fragment), &text) != nil {
+			var object map[string]json.RawMessage
+			if json.Unmarshal([]byte(fragment), &object) != nil || object == nil {
+				return invalid()
+			}
+		}
+	case "security":
+		var object map[string]json.RawMessage
+		if json.Unmarshal([]byte(fragment), &object) != nil || object == nil {
+			return invalid()
+		}
+	}
+	return nil
 }
 
 func ssRustFieldScope(key string) string {
