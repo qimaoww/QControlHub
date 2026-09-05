@@ -572,6 +572,14 @@ qagent_core_service_is_safe_owned() {
       expected_argv="$expected_binary -c $expected_config --acl $qagent_ssrust_acl"
       expected_description='Shadowsocks Rust core managed by QAgent'
       expected_environment='RUST_LOG=info'
+      # Match the same two exact QAgent commands accepted by Agent discovery.
+      # Older managed units predate the dedicated --acl argument. Bootstrap
+      # must recognize those units before replacing them with the new template,
+      # including when a partial import left the old managed service active.
+      legacy_argv="$expected_binary -c $expected_config"
+      if [ "$(grep -c "^ExecStart=$legacy_argv$" "$fragment_path")" -eq 1 ]; then
+        expected_argv=$legacy_argv
+      fi
       ;;
     *) return 1 ;;
   esac
