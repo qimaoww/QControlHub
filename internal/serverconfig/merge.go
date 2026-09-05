@@ -112,11 +112,22 @@ func mutateShadowsocksRust(currentContent, generatedContent, matchValue, operati
 		return mutateShadowsocksRustExtended(currentRoot, listKey, entries, generated, matchValue, operation)
 	}
 	current, currentOK := parseShadowsocksRust(merged)
-	switch operation {
-	case "add":
-		if currentOK {
-			return "", fmt.Errorf("ss-rust 配置只支持单个服务端入站")
+	if operation == "add" || (operation == "upsert" && !currentOK) {
+		if !currentOK {
+			if _, hasServer := currentRoot["server_port"]; hasServer {
+				return "", fmt.Errorf("ss-rust 现有服务端无法由预设解析，请使用源码编辑，避免覆盖自定义配置")
+			}
 		}
+		entries := []any{}
+		if currentOK {
+			entries = append(entries, shadowsocksRustGeneratedEntry(currentRoot))
+		}
+		for _, key := range []string{"server", "server_port", "password", "method", "plugin", "plugin_opts", "plugin_args", "plugin_mode"} {
+			delete(currentRoot, key)
+		}
+		return mutateShadowsocksRustExtended(currentRoot, "servers", entries, generated, matchValue, operation)
+	}
+	switch operation {
 	case "modify", "delete":
 		if !currentOK {
 			return "", fmt.Errorf("ss-rust %s 操作需要现有服务端配置", operation)
@@ -135,6 +146,20 @@ func mutateShadowsocksRust(currentContent, generatedContent, matchValue, operati
 		}
 		return merged, nil
 	}
+	for _, key := range []string{"dns", "outbound_bind_addr"} {
+		if _, present := generated[key]; !present {
+			if key == "dns" {
+				if _, custom := currentRoot[key].(map[string]any); custom {
+					continue
+				}
+			}
+			var err error
+			merged, err = configschema.MergeFragment(core.EngineShadowsocksRust, merged, key, "", true)
+			if err != nil {
+				return "", err
+			}
+		}
+	}
 	for key, value := range generated {
 		fragment, err := json.Marshal(value)
 		if err != nil {
@@ -150,6 +175,16 @@ func mutateShadowsocksRust(currentContent, generatedContent, matchValue, operati
 
 func mutateShadowsocksRustExtended(root map[string]any, listKey string, entries []any, generated map[string]any, matchValue, operation string) (string, error) {
 	generatedEntry := shadowsocksRustGeneratedEntry(generated)
+	// The preset does not edit these fields: retain existing per-port values
+	// and let new ports inherit the global settings.
+	delete(generatedEntry, "mode")
+	delete(generatedEntry, "timeout")
+	// Official ssserver only consumes DNS at the root. Keep script-written
+	// per-server DNS as an unknown field instead of presenting it as effective.
+	delete(generatedEntry, "dns")
+	if acl, ok := root["acl"]; ok {
+		generatedEntry["acl"] = acl
+	}
 	targetIndex := -1
 	if matchValue != "" {
 		for index, value := range entries {
@@ -174,6 +209,7 @@ func mutateShadowsocksRustExtended(root map[string]any, listKey string, entries 
 		if currentEntry == nil {
 			return "", fmt.Errorf("ss-rust 扩展服务端入站必须是 JSON 对象")
 		}
+		delete(generatedEntry, "acl")
 		entries[targetIndex] = mergeShadowsocksRustEntry(currentEntry, generatedEntry)
 	case "delete":
 		if targetIndex < 0 {
@@ -188,15 +224,32 @@ func mutateShadowsocksRustExtended(root map[string]any, listKey string, entries 
 			if currentEntry == nil {
 				return "", fmt.Errorf("ss-rust 扩展服务端入站必须是 JSON 对象")
 			}
+			delete(generatedEntry, "acl")
 			entries[targetIndex] = mergeShadowsocksRustEntry(currentEntry, generatedEntry)
 		}
 	default:
 		return "", fmt.Errorf("不支持的 ss-rust 入站操作 %q", operation)
 	}
+	ports := make(map[int]bool)
+	for _, value := range entries {
+		port := intValue(mapValue(value)["server_port"])
+		if port != 0 && ports[port] {
+			return "", fmt.Errorf("ss-rust 端口 %d 已存在", port)
+		}
+		ports[port] = true
+	}
 	root[listKey] = entries
 	if operation != "delete" {
-		if noDelay, ok := generated["no_delay"]; ok {
-			root["no_delay"] = noDelay
+		for _, key := range []string{"timeout", "mode", "fast_open", "no_delay"} {
+			if _, present := root[key]; !present {
+				root[key] = generated[key]
+			}
+		}
+		root["ipv6_first"] = generated["ipv6_first"]
+		if dns, present := generated["dns"]; present {
+			root["dns"] = dns
+		} else if _, custom := root["dns"].(map[string]any); !custom {
+			delete(root, "dns")
 		}
 	}
 	formatted, err := json.MarshalIndent(root, "", "  ")
@@ -208,7 +261,7 @@ func mutateShadowsocksRustExtended(root map[string]any, listKey string, entries 
 
 func shadowsocksRustGeneratedEntry(generated map[string]any) map[string]any {
 	entry := make(map[string]any)
-	for _, key := range []string{"server", "server_port", "password", "method", "mode", "timeout", "acl", "plugin", "plugin_opts", "plugin_args", "plugin_mode"} {
+	for _, key := range []string{"server", "server_port", "password", "method", "dns", "outbound_bind_addr", "mode", "timeout", "acl", "plugin", "plugin_opts", "plugin_args", "plugin_mode"} {
 		if value, ok := generated[key]; ok {
 			entry[key] = value
 		}
@@ -217,6 +270,7 @@ func shadowsocksRustGeneratedEntry(generated map[string]any) map[string]any {
 }
 
 func mergeShadowsocksRustEntry(current, generated map[string]any) map[string]any {
+	delete(current, "outbound_bind_addr")
 	for key, value := range generated {
 		current[key] = value
 	}

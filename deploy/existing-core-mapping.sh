@@ -9,6 +9,9 @@ qagent_xray_binary=${qagent_xray_binary:-/usr/local/lib/qagent/cores/xray}
 qagent_xray_config=${qagent_xray_config:-/etc/qagent/xray/config.json}
 qagent_singbox_binary=${qagent_singbox_binary:-/usr/local/lib/qagent/cores/sing-box}
 qagent_singbox_config=${qagent_singbox_config:-/etc/qagent/sing-box/config.json}
+qagent_ssrust_binary=${qagent_ssrust_binary:-/usr/local/lib/qagent/cores/ssserver}
+qagent_ssrust_config=${qagent_ssrust_config:-/etc/qagent/shadowsocks-rust/config.json}
+qagent_ssrust_acl=${qagent_ssrust_acl:-/etc/qagent/shadowsocks-rust/qch-mainland-block.acl}
 
 mapped_engines=""
 mapped_xray_binary=""
@@ -549,6 +552,7 @@ qagent_core_service_is_safe_owned() {
   fragment_path=$(systemctl show "$service" --property=FragmentPath --value 2>/dev/null) || return 1
   [ "$fragment_path" = "$expected_fragment" ] || return 1
   protected_regular_file "$fragment_path" false || return 1
+  expected_environment=""
   case "$engine" in
     xray)
       expected_binary=$qagent_xray_binary
@@ -561,6 +565,13 @@ qagent_core_service_is_safe_owned() {
       expected_config=$qagent_singbox_config
       expected_argv="$expected_binary run -c $expected_config"
       expected_description='sing-box core managed by QAgent'
+      ;;
+    shadowsocks-rust)
+      expected_binary=$qagent_ssrust_binary
+      expected_config=$qagent_ssrust_config
+      expected_argv="$expected_binary -c $expected_config --acl $qagent_ssrust_acl"
+      expected_description='Shadowsocks Rust core managed by QAgent'
+      expected_environment='RUST_LOG=info'
       ;;
     *) return 1 ;;
   esac
@@ -579,7 +590,8 @@ qagent_core_service_is_safe_owned() {
   [ "$(systemctl show "$service" --property=Group --value 2>/dev/null)" = qcontrolhub-core ] || return 1
   [ "$(systemctl show "$service" --property=Type --value 2>/dev/null)" = simple ] || return 1
   [ "$(systemctl show "$service" --property=WorkingDirectory --value 2>/dev/null)" = "/var/lib/qcontrolhub-$engine" ] || return 1
-  for property in RootDirectory RootImage BindPaths BindReadOnlyPaths Environment EnvironmentFiles; do
+  [ "$(systemctl show "$service" --property=Environment --value 2>/dev/null)" = "$expected_environment" ] || return 1
+  for property in RootDirectory RootImage BindPaths BindReadOnlyPaths EnvironmentFiles; do
     [ -z "$(systemctl show "$service" --property="$property" --value 2>/dev/null)" ] || return 1
   done
   for hook in ExecCondition ExecStartPre ExecStartPost ExecReload ExecStop ExecStopPost; do

@@ -219,7 +219,7 @@ func TestMutateGeneratedEnforcesAddModifyDeleteForEveryEngine(t *testing.T) {
 	}
 }
 
-func TestMutateGeneratedEnforcesSingleShadowsocksRustServer(t *testing.T) {
+func TestMutateGeneratedConvertsSingleShadowsocksRustServer(t *testing.T) {
 	t.Parallel()
 	current := `{"future":{"enabled":true},"server":"0.0.0.0","server_port":8388,"password":"current-password","method":"chacha20-ietf-poly1305","mode":"tcp_and_udp","timeout":300,"no_delay":true}`
 	replacement, err := Generate(core.EngineShadowsocksRust, Input{
@@ -240,8 +240,9 @@ func TestMutateGeneratedEnforcesSingleShadowsocksRustServer(t *testing.T) {
 	if _, err := MutateGenerated(core.EngineShadowsocksRust, current, replacement, "missing", "modify"); err == nil {
 		t.Fatal("ss-rust modify accepted a missing target")
 	}
-	if _, err := MutateGenerated(core.EngineShadowsocksRust, current, replacement, "", "add"); err == nil {
-		t.Fatal("ss-rust duplicate add was accepted")
+	converted, err := MutateGenerated(core.EngineShadowsocksRust, current, replacement, "", "add")
+	if err != nil || len(ParseAll(core.EngineShadowsocksRust, converted)) != 2 {
+		t.Fatalf("ss-rust single server conversion: %v\n%s", err, converted)
 	}
 	empty := `{"future":{"enabled":true}}`
 	added, err := MutateGenerated(core.EngineShadowsocksRust, empty, replacement, "", "add")

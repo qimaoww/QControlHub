@@ -13,7 +13,7 @@ func TestCatalogsCoverOfficialIndexes(t *testing.T) {
 		core.EngineMihomo:          {fields: 64, topics: 76},
 		core.EngineXray:            {fields: 17, topics: 63},
 		core.EngineSingBox:         {fields: 14, topics: 120},
-		core.EngineShadowsocksRust: {fields: 13, topics: 4},
+		core.EngineShadowsocksRust: {fields: 16, topics: 4},
 	}
 	for engine, want := range wants {
 		catalog, err := CatalogFor(engine)

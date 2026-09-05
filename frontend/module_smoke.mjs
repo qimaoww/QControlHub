@@ -2011,6 +2011,19 @@ try {
   assert.equal(completePresetInput.sudoku_client_key, "client-private-key");
   assert.equal(completePresetInput.sudoku_httpmask_mode, "stream");
 
+  const ssRustInput = readServerPlanInput({
+    elements: {
+      namedItem(name) {
+        const values = { ss_rust_dns: "1.1.1.1", ss_rust_outbound_bind_addr: "2001:db8::1", ss_rust_ipv6_first: "1" };
+        return name in values ? { value: values[name] } : null;
+      },
+    },
+    dataset: {},
+  }, { key: "ss2022" });
+  assert.equal(ssRustInput.ss_rust_dns, "1.1.1.1");
+  assert.equal(ssRustInput.ss_rust_outbound_bind_addr, "2001:db8::1");
+  assert.equal(ssRustInput.ss_rust_ipv6_first, true);
+
   bindServerPlanRegeneration({
     form: planForm,
     buttons: [planButton, credentialPlanButton, realityKeyPlanButton, mldsaPlanButton],

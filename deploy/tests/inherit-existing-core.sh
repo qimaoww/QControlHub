@@ -379,6 +379,39 @@ qagent_core_service_is_safe_to_disable sing-box "$managed_singbox_unit" || {
   exit 1
 }
 
+# SS Rust import also bootstraps an inactive managed unit before migration.
+# Validate its exact ACL command and required (non-empty) log environment.
+managed_ssrust_unit="$test_root/core/qagent-shadowsocks-rust.service"
+cp "$(dirname -- "$0")/../systemd/qagent-shadowsocks-rust.service" "$managed_ssrust_unit"
+chmod 0644 "$managed_ssrust_unit"
+printf '%s\n' "$managed_ssrust_unit" > "$FAKE_SYSTEMCTL_FRAGMENT_PATH"
+write_exec_start "$qagent_ssrust_binary" "$qagent_ssrust_binary" -c "$qagent_ssrust_config" --acl "$qagent_ssrust_acl"
+printf '%s\n' 'Shadowsocks Rust core managed by QAgent' > "$FAKE_SYSTEMCTL_QAGENT_DESCRIPTION"
+printf '%s\n' /var/lib/qcontrolhub-shadowsocks-rust > "$FAKE_SYSTEMCTL_STATE/qagent-WorkingDirectory"
+printf '%s\n' RUST_LOG=info > "$FAKE_SYSTEMCTL_STATE/qagent-Environment"
+printf '%s\n' inactive > "$FAKE_SYSTEMCTL_STATE/qagent-shadowsocks-rust.service.active"
+: > "$FAKE_SYSTEMCTL_STATE/qagent-shadowsocks-rust.service.persistent"
+: > "$FAKE_SYSTEMCTL_STATE/qagent-shadowsocks-rust.service.runtime"
+qagent_core_service_is_safe_to_disable shadowsocks-rust "$managed_ssrust_unit" || {
+  printf '%s\n' 'fresh SS Rust import bootstrap rejected the managed unit' >&2
+  exit 1
+}
+disable_skipped_core_service shadowsocks-rust "$managed_ssrust_unit" || {
+  printf '%s\n' 'SS Rust import bootstrap could not keep the managed unit disabled' >&2
+  exit 1
+}
+[ ! -f "$FAKE_SYSTEMCTL_STATE/qagent-shadowsocks-rust.service.persistent" ] &&
+  [ ! -f "$FAKE_SYSTEMCTL_STATE/qagent-shadowsocks-rust.service.runtime" ] || {
+  printf '%s\n' 'SS Rust import bootstrap left managed service enabled' >&2
+  exit 1
+}
+printf '%s\n' RUST_LOG=debug > "$FAKE_SYSTEMCTL_STATE/qagent-Environment"
+expect_rejected ssrust-environment-override qagent_core_service_is_safe_owned shadowsocks-rust "$managed_ssrust_unit"
+printf '%s\n' RUST_LOG=info > "$FAKE_SYSTEMCTL_STATE/qagent-Environment"
+write_exec_start "$qagent_ssrust_binary" "$qagent_ssrust_binary" -c "$qagent_ssrust_config" --acl /tmp/unexpected.acl
+expect_rejected ssrust-acl-override qagent_core_service_is_safe_owned shadowsocks-rust "$managed_ssrust_unit"
+: > "$FAKE_SYSTEMCTL_STATE/qagent-Environment"
+
 printf '%s\n' "$managed_unit" > "$FAKE_SYSTEMCTL_FRAGMENT_PATH"
 printf '%s\n' 'Xray core managed by QAgent' > "$FAKE_SYSTEMCTL_QAGENT_DESCRIPTION"
 printf '%s\n' /var/lib/qcontrolhub-xray > "$FAKE_SYSTEMCTL_STATE/qagent-WorkingDirectory"

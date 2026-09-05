@@ -560,6 +560,9 @@ func coreMigrationSourceDigest(existing EngineSpec) string {
 		}
 		source += "\x00" + existingServiceBinary(existing) + "\x00" + existing.Service
 	}
+	if existing.ACLPath != "" {
+		source += "\x00acl\x00" + existing.ACLPath
+	}
 	digest := sha256.Sum256([]byte(source))
 	return hex.EncodeToString(digest[:])
 }
@@ -1113,11 +1116,21 @@ func (e *Executor) importExistingConfig(ctx context.Context, engine core.Engine,
 	if currentContent != content {
 		return "", fmt.Errorf("existing %s configuration sources changed after the saved snapshot; both services were left unchanged", engine)
 	}
-	ouSBPlan, err := prepareOUSBSingBoxImport(ctx, manager, existing, content)
-	if err != nil {
-		return "", fmt.Errorf("prepare OU-SB sing-box import: %w", err)
+	resourcePlan, err := prepareOUSBSingBoxImport(ctx, manager, existing, content)
+	if engine == core.EngineShadowsocksRust {
+		var original string
+		original, err = readConfigurationFile(existing.ConfigPath)
+		if err == nil {
+			resourcePlan, err = prepareSSRustImport(existing, original)
+		}
+		if err == nil && resourcePlan.managedContent != content {
+			err = errors.New("SS Rust configuration or ACL changed after the saved snapshot")
+		}
 	}
-	managedContent := ouSBPlan.managedContent
+	if err != nil {
+		return "", fmt.Errorf("prepare protected resource import: %w", err)
+	}
+	managedContent := resourcePlan.managedContent
 	existingEnableState, err := serviceEnableState(ctx, existing.Service, manager)
 	if err != nil {
 		return "", err
@@ -1153,8 +1166,8 @@ func (e *Executor) importExistingConfig(ctx context.Context, engine core.Engine,
 			State: coreMigrationInProgress, ConfigDigest: configDigest, RequestConfigDigest: requestConfigDigest, SourceDigest: sourceDigest,
 			ExistingEnableState: existingEnableState, ManagedEnableState: managedEnableState,
 			ManagedInitialState: managedInitialState,
-			AuxiliaryService:    ouSBPlan.auxiliary.name, AuxiliaryEnableState: ouSBPlan.auxiliary.enableState,
-			AuxiliaryInitialState: ouSBPlan.auxiliary.initialState,
+			AuxiliaryService:    resourcePlan.auxiliary.name, AuxiliaryEnableState: resourcePlan.auxiliary.enableState,
+			AuxiliaryInitialState: resourcePlan.auxiliary.initialState,
 		},
 	)
 	if err != nil {
@@ -1170,7 +1183,7 @@ func (e *Executor) importExistingConfig(ctx context.Context, engine core.Engine,
 			rollbackContext, e.MigrationMarkerPrefix, engine, existing, managed, migrationRecord,
 			manager,
 		)
-		resourceErr := ouSBPlan.cleanup()
+		resourceErr := resourcePlan.cleanup()
 		if rollbackErr != nil || resourceErr != nil {
 			return "migration failed and rollback was incomplete", fmt.Errorf("%v; rollback: %w", cause, errors.Join(rollbackErr, resourceErr))
 		}
@@ -1203,13 +1216,13 @@ func (e *Executor) importExistingConfig(ctx context.Context, engine core.Engine,
 			return rollbackMigration(fmt.Errorf("copy existing Xray assets into the QAgent namespace: %w", err))
 		}
 	}
-	if ouSBPlan.active() {
+	if resourcePlan.active() {
 		identity, identityErr := managedCoreServiceIdentity()
 		if identityErr != nil {
 			return rollbackMigration(identityErr)
 		}
-		if err := ouSBPlan.stage(identity); err != nil {
-			return rollbackMigration(fmt.Errorf("copy OU-SB certificates into the QAgent namespace: %w", err))
+		if err := resourcePlan.stage(identity); err != nil {
+			return rollbackMigration(fmt.Errorf("copy protected resources into the QAgent namespace: %w", err))
 		}
 	}
 	if _, err := e.validateImportedSnapshot(ctx, engine, managed, managedContent); err != nil {
@@ -1299,11 +1312,14 @@ func (e *Executor) importExistingConfig(ctx context.Context, engine core.Engine,
 	delete(e.ExistingSpecs, engine)
 	e.specsMu.Unlock()
 	result := fmt.Sprintf("imported %s configuration; stopped and disabled %s; started and enabled %s", engine, existing.Service, managed.Service)
-	if ouSBPlan.active() {
-		result += "; copied protected OU-SB certificates into the QAgent sing-box state directory"
+	if resourcePlan.active() {
+		result += "; copied protected external resources into the QAgent state directory"
 		if migrationRecord.AuxiliaryService != "" {
 			result += "; stopped and disabled " + migrationRecord.AuxiliaryService
 		}
+	}
+	if engine == core.EngineShadowsocksRust {
+		result += "; script-owned inbound firewall rules and helper were left unchanged; manage them separately before changing ports"
 	}
 	return result, nil
 }
@@ -2017,7 +2033,7 @@ func supportedExistingExecStart(engine core.Engine, existing EngineSpec, argv st
 	serviceBinary := existingServiceBinary(existing)
 	configPath, configDirectory, workDirectory, ok := parseExistingArgv(engine, serviceBinary, strings.Fields(argv))
 	return ok && configPath == existing.ConfigPath && configDirectory == existing.ConfigDirectory &&
-		workDirectory == existing.WorkingDirectory
+		workDirectory == existing.WorkingDirectory && existingSSRustACLArg(engine, strings.Fields(argv)) == existing.ACLPath
 }
 
 func serviceEnableState(ctx context.Context, service string, managers ...*ServiceManager) (string, error) {

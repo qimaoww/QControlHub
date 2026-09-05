@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,15 +23,17 @@ var (
 	ouSBManagedStateRoot = "/var/lib/qcontrolhub-sing-box"
 )
 
-type ouSBImportResource struct {
+type coreImportResource struct {
 	source      string
 	destination string
+	digest      string
 }
 
-type ouSBImportPlan struct {
+type coreImportPlan struct {
 	managedContent string
 	resourceRoot   string
-	resources      []ouSBImportResource
+	stateRoot      string
+	resources      []coreImportResource
 	auxiliary      coreMigrationAuxiliaryService
 }
 
@@ -39,10 +43,10 @@ type coreMigrationAuxiliaryService struct {
 	initialState string
 }
 
-func prepareOUSBSingBoxImport(ctx context.Context, manager *ServiceManager, existing EngineSpec, content string) (ouSBImportPlan, error) {
+func prepareOUSBSingBoxImport(ctx context.Context, manager *ServiceManager, existing EngineSpec, content string) (coreImportPlan, error) {
 	if filepath.Clean(existing.ConfigPath) != filepath.Clean(ouSBConfigPath) ||
 		(existing.Service != "sing-box.service" && existing.Service != "sing-box") {
-		return ouSBImportPlan{managedContent: content}, nil
+		return coreImportPlan{managedContent: content}, nil
 	}
 
 	requestDigest := coreMigrationConfigDigest(content)
@@ -53,24 +57,24 @@ func prepareOUSBSingBoxImport(ctx context.Context, manager *ServiceManager, exis
 	}
 	managedContent, used, err := rewriteOUSBSingBoxResources(content, replacements)
 	if err != nil {
-		return ouSBImportPlan{}, err
+		return coreImportPlan{}, err
 	}
 	if len(used) == 0 {
-		return ouSBImportPlan{managedContent: content}, nil
+		return coreImportPlan{managedContent: content}, nil
 	}
 
-	plan := ouSBImportPlan{managedContent: managedContent, resourceRoot: resourceRoot}
+	plan := coreImportPlan{managedContent: managedContent, resourceRoot: resourceRoot}
 	for _, source := range []string{
 		filepath.Join(ouSBCertificateRoot, "fullchain.pem"),
 		filepath.Join(ouSBCertificateRoot, "privkey.pem"),
 	} {
 		if used[source] {
-			plan.resources = append(plan.resources, ouSBImportResource{source: source, destination: replacements[source]})
+			plan.resources = append(plan.resources, coreImportResource{source: source, destination: replacements[source]})
 		}
 	}
 	plan.auxiliary, err = inspectOUSBAuxiliaryService(ctx, manager)
 	if err != nil {
-		return ouSBImportPlan{}, err
+		return coreImportPlan{}, err
 	}
 	return plan, nil
 }
@@ -131,26 +135,30 @@ func rewriteOUSBSingBoxResources(content string, replacements map[string]string)
 	return string(encoded) + "\n", used, nil
 }
 
-func (plan ouSBImportPlan) active() bool {
+func (plan coreImportPlan) active() bool {
 	return len(plan.resources) > 0
 }
 
-func (plan ouSBImportPlan) stage(identity commandIdentity) error {
+func (plan coreImportPlan) stage(identity commandIdentity) error {
 	if !plan.active() {
 		return nil
 	}
-	if err := prepareOUSBResourceDirectory(plan.resourceRoot, identity); err != nil {
+	stateRoot := plan.stateRoot
+	if stateRoot == "" {
+		stateRoot = ouSBManagedStateRoot
+	}
+	if err := prepareImportResourceDirectory(stateRoot, plan.resourceRoot, identity); err != nil {
 		return err
 	}
 	for _, resource := range plan.resources {
-		if err := copyOUSBResource(resource.source, resource.destination, identity); err != nil {
+		if err := copyProtectedImportResource(resource.source, resource.destination, resource.digest, identity); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (plan ouSBImportPlan) cleanup() error {
+func (plan coreImportPlan) cleanup() error {
 	if !plan.active() {
 		return nil
 	}
@@ -166,10 +174,14 @@ func (plan ouSBImportPlan) cleanup() error {
 }
 
 func prepareOUSBResourceDirectory(directory string, identity commandIdentity) error {
-	root := filepath.Clean(ouSBManagedStateRoot)
+	return prepareImportResourceDirectory(ouSBManagedStateRoot, directory, identity)
+}
+
+func prepareImportResourceDirectory(stateRoot, directory string, identity commandIdentity) error {
+	root := filepath.Clean(stateRoot)
 	relative, err := filepath.Rel(root, filepath.Clean(directory))
 	if err != nil || filepath.IsAbs(relative) || relative == "." || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-		return errors.New("OU-SB managed resource directory escapes the sing-box state root")
+		return errors.New("managed import resource directory escapes the core state root")
 	}
 	if err := validateManagedStateRoot(root, identity); err != nil {
 		return err
@@ -177,7 +189,7 @@ func prepareOUSBResourceDirectory(directory string, identity commandIdentity) er
 	current := root
 	for _, component := range strings.Split(relative, string(filepath.Separator)) {
 		if component == "" || component == "." || component == ".." {
-			return errors.New("OU-SB managed resource directory is invalid")
+			return errors.New("managed import resource directory is invalid")
 		}
 		current = filepath.Join(current, component)
 		if err := os.Mkdir(current, 0o750); err != nil && !errors.Is(err, os.ErrExist) {
@@ -185,7 +197,7 @@ func prepareOUSBResourceDirectory(directory string, identity commandIdentity) er
 		}
 		info, err := os.Lstat(current)
 		if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() || info.Mode().Perm()&0o027 != 0 {
-			return fmt.Errorf("OU-SB managed resource directory %s is unsafe", current)
+			return fmt.Errorf("managed import resource directory %s is unsafe", current)
 		}
 		if err := os.Chown(current, 0, int(identity.gid)); err != nil {
 			return err
@@ -200,26 +212,26 @@ func prepareOUSBResourceDirectory(directory string, identity commandIdentity) er
 func validateManagedStateRoot(path string, identity commandIdentity) error {
 	info, err := os.Lstat(path)
 	if err != nil {
-		return fmt.Errorf("inspect managed sing-box state directory: %w", err)
+		return fmt.Errorf("inspect managed core state directory: %w", err)
 	}
 	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() || info.Mode().Perm()&0o027 != 0 {
-		return errors.New("managed sing-box state directory is unsafe")
+		return errors.New("managed core state directory is unsafe")
 	}
 	uid, gid, known := fileOwnership(info)
 	if known && !((uid == 0 || uid == int(identity.uid)) && (gid == 0 || gid == int(identity.gid))) {
-		return errors.New("managed sing-box state directory has unexpected ownership")
+		return errors.New("managed core state directory has unexpected ownership")
 	}
 	return validateProtectedDirectoryChain(filepath.Dir(path))
 }
 
-func copyOUSBResource(source, destination string, identity commandIdentity) error {
+func copyProtectedImportResource(source, destination, expectedDigest string, identity commandIdentity) error {
 	info, err := os.Lstat(source)
 	if err != nil {
-		return fmt.Errorf("inspect OU-SB resource %s: %w", source, err)
+		return fmt.Errorf("inspect protected import resource %s: %w", source, err)
 	}
 	input, _, err := openProtectedCoreMigrationFile(source, info, ouSBResourceLimit)
 	if err != nil {
-		return fmt.Errorf("open OU-SB resource %s: %w", source, err)
+		return fmt.Errorf("open protected import resource %s: %w", source, err)
 	}
 	defer input.Close()
 	root, err := os.OpenRoot(filepath.Dir(destination))
@@ -236,9 +248,13 @@ func copyOUSBResource(source, destination string, identity commandIdentity) erro
 	if err != nil {
 		return err
 	}
-	written, copyErr := io.Copy(output, io.LimitReader(input, ouSBResourceLimit+1))
+	digest := sha256.New()
+	written, copyErr := io.Copy(io.MultiWriter(output, digest), io.LimitReader(input, ouSBResourceLimit+1))
 	if copyErr == nil && (written <= 0 || written > ouSBResourceLimit) {
-		copyErr = errors.New("OU-SB resource exceeds the supported limit")
+		copyErr = errors.New("protected import resource is empty or exceeds the supported limit")
+	}
+	if copyErr == nil && expectedDigest != "" && hex.EncodeToString(digest.Sum(nil)) != expectedDigest {
+		copyErr = errors.New("protected import resource changed after snapshot planning")
 	}
 	if copyErr == nil {
 		copyErr = applyFileMetadata(output, fileMetadata{mode: 0o640, uid: 0, gid: int(identity.gid), ownershipKnown: true})

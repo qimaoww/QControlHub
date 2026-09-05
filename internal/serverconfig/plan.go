@@ -58,6 +58,9 @@ func NewPlan(protocol Protocol) (Input, error) {
 	if protocol.Key == ProtocolVLESSXHTTP || protocol.Key == ProtocolVLESSEncXHTTP {
 		input.BlockMainlandDestination = true
 	}
+	if protocol.DefaultListen != "" {
+		input.Listen = protocol.DefaultListen
+	}
 	if protocol.PortForward {
 		input.Username = ""
 		input.TargetAddress = "127.0.0.1"
@@ -161,6 +164,9 @@ func RegeneratePlan(protocol Protocol, current Input) (Input, error) {
 	}
 
 	plan.Listen = current.Listen
+	plan.SSRustDNS = current.SSRustDNS
+	plan.SSRustOutboundBindAddr = current.SSRustOutboundBindAddr
+	plan.SSRustIPv6First = current.SSRustIPv6First
 	if protocol.IgnoresUsername {
 		plan.Username = current.Username
 	}

@@ -139,6 +139,9 @@ export function readServerPlanInput(form, protocol) {
     vless_encryption: values.get("vless_encryption") || "",
     listener_routing_mark: Number(values.get("listener_routing_mark") || 0),
     listener_rule: values.get("listener_rule") || "",
+    ss_rust_dns: values.get("ss_rust_dns") || "",
+    ss_rust_outbound_bind_addr: values.get("ss_rust_outbound_bind_addr") || "",
+    ss_rust_ipv6_first: values.get("ss_rust_ipv6_first") === "1",
     listener_proxy: values.get("listener_proxy") || "",
     snell_version: Number(values.get("snell_version") || 0),
     snell_udp: values.get("snell_udp") === "1",
@@ -651,7 +654,9 @@ async function agentConfig() {
     .join("");
   const portForward = Boolean(protocol?.port_forward);
   const protocolOptions =
-    selectedProtocolKey === "snell"
+    engine === "ss-rust"
+      ? `<details class="preset-option-panel" open><summary><b>SS Rust 网络选项</b><small>与 install-ss-rust 脚本对应</small></summary><div class="plan-fields two"><label>全局 DNS<input name="ss_rust_dns" maxlength="1024" value="${esc(plan.ss_rust_dns || "")}" placeholder="留空使用系统 DNS"><small>影响所有端口；官方内核忽略脚本的端口级 DNS。留空保留已有自定义 DNS 对象，可在源码中删除。</small></label><label>出站绑定 IP<input name="ss_rust_outbound_bind_addr" value="${esc(plan.ss_rust_outbound_bind_addr || "")}" placeholder="留空不绑定"><small>填写节点本机网卡上的 IPv4 / IPv6 地址。</small></label><label class="plan-check"><input type="checkbox" name="ss_rust_ipv6_first" value="1" ${plan.ss_rust_ipv6_first ? "checked" : ""}><span><b>IPv6 优先（全局）</b><small>影响此内核的所有端口。</small></span></label></div></details>`
+      : selectedProtocolKey === "snell"
       ? snellProtocolOptions(plan, false)
       : selectedProtocolKey === "snell-shadow-tls-v3"
         ? snellProtocolOptions(plan, true)
@@ -1070,9 +1075,12 @@ async function liveConfig() {
     : importSource
       ? '<button class="button primary" type="submit" data-live-intent="import">手动导入并迁移</button>'
       : '<button class="button" type="submit" data-live-intent="validate">保存并校验</button><button class="button primary" type="submit" data-live-intent="deploy">保存并部署</button>';
-  const sourceSwitch = existingAvailable
+  let sourceSwitch = existingAvailable
     ? `<nav class="live-config-source-switch" aria-label="配置来源">${managedAvailable ? `<button class="${sourceMode === "managed" ? "active" : ""}" type="button" data-live-source="managed"><b>QAgent 配置</b><small>/etc/qagent 托管</small></button>` : ""}<button class="${sourceMode === "import" ? "active" : ""}" type="button" data-live-source="import"><b>系统服务配置</b><small>可选导入</small></button></nav>`
     : "";
+  if (importSource && engine === "ss-rust") {
+    sourceSwitch += '<p class="validation-note">导入 install-ss-rust：保留多端口、DNS、出站绑定及 IPv6 优先，复制出站 ACL。脚本自有入站防火墙和重应用服务不会迁移；修改端口前请单独处理。日志统一为 QAgent info。SS Rust 无离线检查模式，启动失败会回滚。</p>';
+  }
   const liveConfigPhase = current
     ? "ready"
     : source?.error

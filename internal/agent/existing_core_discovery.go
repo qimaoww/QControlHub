@@ -36,6 +36,11 @@ const (
 )
 
 var existingDiscoveryCandidates = map[core.Engine]existingDiscoveryCandidateSet{
+	core.EngineShadowsocksRust: {
+		services:    []string{"shadowsocks-rust.service"},
+		executables: []string{"/usr/local/bin/ssserver"},
+		configs:     []string{"/etc/shadowsocks-rust/config.json"},
+	},
 	core.EngineXray: {
 		services: []string{"xray.service"},
 		executables: []string{
@@ -83,6 +88,7 @@ type existingDiscoverySpec struct {
 	Binary           string `json:"binary"`
 	ConfigPath       string `json:"config_path"`
 	ConfigDirectory  string `json:"config_directory,omitempty"`
+	ACLPath          string `json:"acl_path,omitempty"`
 	WorkingDirectory string `json:"working_directory,omitempty"`
 	ServiceBinary    string `json:"service_binary,omitempty"`
 	Service          string `json:"service"`
@@ -91,6 +97,7 @@ type existingDiscoverySpec struct {
 func discoverySpecFromEngineSpec(spec EngineSpec) existingDiscoverySpec {
 	return existingDiscoverySpec{
 		Binary: spec.Binary, ConfigPath: spec.ConfigPath, ConfigDirectory: spec.ConfigDirectory,
+		ACLPath:          spec.ACLPath,
 		WorkingDirectory: spec.WorkingDirectory, ServiceBinary: spec.ServiceBinary, Service: spec.Service,
 	}
 }
@@ -98,6 +105,7 @@ func discoverySpecFromEngineSpec(spec EngineSpec) existingDiscoverySpec {
 func (spec existingDiscoverySpec) engineSpec() EngineSpec {
 	return EngineSpec{
 		Binary: spec.Binary, ConfigPath: spec.ConfigPath, ConfigDirectory: spec.ConfigDirectory,
+		ACLPath:          spec.ACLPath,
 		WorkingDirectory: spec.WorkingDirectory, ServiceBinary: spec.ServiceBinary, Service: spec.Service,
 	}
 }
@@ -137,7 +145,7 @@ func RefreshExistingCoreDiscovery(
 
 	automatic := make(map[core.Engine]EngineSpec)
 	issues := make(map[core.Engine]string)
-	for _, engine := range []core.Engine{core.EngineXray, core.EngineSingBox} {
+	for _, engine := range []core.Engine{core.EngineXray, core.EngineSingBox, core.EngineShadowsocksRust} {
 		if _, explicit := manualSpecs[engine]; explicit {
 			continue
 		}
@@ -195,6 +203,9 @@ func RefreshExistingCoreDiscovery(
 
 func discoverExistingCoreService(ctx context.Context, engine core.Engine, managed EngineSpec, validationDirectory string, managers ...*ServiceManager) (EngineSpec, bool, string) {
 	manager := selectedServiceManager(managers...)
+	if engine == core.EngineShadowsocksRust && manager.Kind() == ServiceManagerOpenRC {
+		return EngineSpec{}, false, ""
+	}
 	candidates := existingDiscoveryCandidates[engine]
 	services := candidates.services
 	if manager.Kind() == ServiceManagerOpenRC {
@@ -261,6 +272,7 @@ func discoverExistingCoreService(ctx context.Context, engine core.Engine, manage
 	spec := EngineSpec{
 		Binary: realBinary, ConfigPath: configPath, ConfigDirectory: configDirectory,
 		WorkingDirectory: workDirectory, ServiceBinary: executable, Service: service,
+		ACLPath: existingSSRustACLArg(engine, strings.Fields(argv)),
 	}
 	return validateDiscoveredExistingSpec(ctx, engine, managed, spec, validationDirectory, manager)
 }
@@ -696,6 +708,13 @@ func parseExistingArgv(engine core.Engine, executable string, fields []string) (
 		return "", "", "", false
 	}
 	switch engine {
+	case core.EngineShadowsocksRust:
+		if (len(fields) == 3 || len(fields) == 5) && fields[1] == "-c" && safeExistingAbsolutePath(fields[2]) {
+			if len(fields) == 3 || (fields[3] == "--acl" && fields[4] == filepath.Join(filepath.Dir(fields[2]), "block_cn.acl")) {
+				return fields[2], "", "", true
+			}
+		}
+		return "", "", "", false
 	case core.EngineXray:
 		configPath, configDirectory, ok := parseXrayExistingArgv(fields[1:])
 		return configPath, configDirectory, "", ok
@@ -910,12 +929,15 @@ func loadExistingCoreDiscoveryState(path string, managers ...*ServiceManager) (e
 		return existingCoreDiscoveryState{}, errors.New("existing-core discovery state version is unsupported")
 	}
 	for engine, issue := range state.Issues {
-		if (engine != core.EngineXray && engine != core.EngineSingBox) || issue == "" || len(issue) > 512 || !utf8.ValidString(issue) {
+		if (engine != core.EngineXray && engine != core.EngineSingBox && engine != core.EngineShadowsocksRust) || issue == "" || len(issue) > 512 || !utf8.ValidString(issue) {
 			return existingCoreDiscoveryState{}, errors.New("existing-core discovery issue is invalid")
 		}
 	}
 	for engine, stored := range state.Specs {
 		spec := stored.engineSpec()
+		if err := validateExistingSpecPaths(engine, spec); err != nil {
+			return existingCoreDiscoveryState{}, err
+		}
 		// A directory-authoritative mapping carries no main configuration file;
 		// its confdir must then be present and absolute so the reader still has
 		// exactly one protected source of truth.
