@@ -18,6 +18,8 @@ SS Rust 优先展示 Shadowsocks 2022，默认 `2022-blake3-aes-128-gcm`、匹�
 2. 在节点的 SS Rust 卡片点击“可导入”，读取系统服务配置快照。
 3. 检查后点击“手动导入并迁移”。只有此操作才会复制二进制和配置、停止并禁用旧服务、启动并启用 `qagent-shadowsocks-rust.service`。失败恢复原有二进制、配置和服务状态；重复提交已完成的导入不会重复切换服务。
 
+如果旧节点曾报 `refusing to disable an unrecognized qagent-shadowsocks-rust.service`，且旧缓存脚本没有 `qagent_ssrust_`，应先更新控制面到包含安装资源包的构建，再在面板升级 Agent。新版 Agent 会使用自身内置的匹配资源，不再需要手工替换缓存脚本。确认原服务仍活动、托管服务未运行后，重新读取快照并导入；若仍报安全校验错误，检查节点返回结果，不要删除服务或跳过校验。
+
 ACL 会复制到 `/var/lib/qcontrolhub-shadowsocks-rust/install-ss-rust/<摘要>/block_cn.acl`，并绑定到每个使用该策略的端口，避免被 QAgent 的全局 ACL 参数覆盖。原有 ACL 和配置不删除；新增端口继承导入的全局 ACL。快照路径包含配置和 ACL 内容摘要，保存后原文件变化会要求重新读取快照。未知 ACL 路径、符号链接、不安全文件权限、额外启动参数和插件进程均拒绝自动迁移。
 
 SS Rust 没有不启动服务的离线检查模式：导入前检查 JSON、文件权限及精确服务映射，启动后确认服务稳定，失败回滚；不声称已完成真实内核离线校验。

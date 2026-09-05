@@ -13,25 +13,25 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
-const defaultCoreBootstrapScript = "/usr/local/share/qcontrolhub/core-install/deploy/bootstrap-core-services.sh"
-
 const legacyCoreStateDirectoryInstall = `install -d -o "$service_user" -g "$service_group" -m 0750 "$state_directory"`
 
 type coreServiceBootstrapper struct {
 	scriptPath     string
 	systemdRunPath string
+	assetRoot      string
 }
 
 func defaultCoreServiceBootstrapper() coreServiceBootstrapper {
 	return coreServiceBootstrapper{
-		scriptPath: defaultCoreBootstrapScript, systemdRunPath: "/usr/bin/systemd-run",
+		assetRoot: coreInstallAssetRoot, systemdRunPath: "/usr/bin/systemd-run",
 	}
 }
 
 // prepareManagedCoreService creates one QAgent-owned configuration and service
 // only after the panel has submitted an explicit core install/import task.
-// Existing deployments that already have a valid managed service do not need
-// the staged bootstrap assets and continue to upgrade normally.
+// Existing deployments with a valid managed service skip bootstrap. When
+// bootstrap is needed, use assets bundled with this Agent, not stale files
+// left by an older installer in /usr/local/share.
 func (e *Executor) prepareManagedCoreService(ctx context.Context, engine core.Engine, spec EngineSpec, existing bool) error {
 	manager := e.serviceManager()
 	defaultSpec, ok := DefaultSpecsForServiceManager(manager.Kind())[engine]
@@ -117,6 +117,13 @@ func shadowsocksRustACLServiceIdentity(manager *ServiceManager, spec EngineSpec)
 func (bootstrapper coreServiceBootstrapper) install(ctx context.Context, engine core.Engine, existing bool, manager *ServiceManager) error {
 	if !engine.Valid() {
 		return errors.New("unsupported core bootstrap engine")
+	}
+	if bootstrapper.assetRoot != "" {
+		scriptPath, err := stageBundledCoreInstallAssets(bootstrapper.assetRoot)
+		if err != nil {
+			return fmt.Errorf("prepare bundled core install assets: %w", err)
+		}
+		bootstrapper.scriptPath = scriptPath
 	}
 	if strings.TrimSpace(bootstrapper.scriptPath) == "" {
 		return errors.New("managed core bootstrap assets are unavailable; redeploy QAgent from the node page")
