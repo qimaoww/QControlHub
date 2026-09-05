@@ -1183,7 +1183,12 @@ func (e *Executor) importExistingConfig(ctx context.Context, engine core.Engine,
 			rollbackContext, e.MigrationMarkerPrefix, engine, existing, managed, migrationRecord,
 			manager,
 		)
-		resourceErr := resourcePlan.cleanup()
+		var resourceErr error
+		// An incomplete rollback can still leave the managed configuration
+		// referencing these resources. Keep them for restart reconciliation.
+		if rollbackErr == nil {
+			resourceErr = resourcePlan.cleanup()
+		}
 		if rollbackErr != nil || resourceErr != nil {
 			return "migration failed and rollback was incomplete", fmt.Errorf("%v; rollback: %w", cause, errors.Join(rollbackErr, resourceErr))
 		}

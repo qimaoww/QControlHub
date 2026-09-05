@@ -1,4 +1,5 @@
 import { bindEvent } from "./refresh.js";
+import { configFieldURL, renderSSRustFieldStudio, ssRustFieldGroups, ssRustPlanBinding } from "./ss-rust-fields.js";
 
 // Config views render user-controlled values into HTML before binding their
 // interactions. Keep the renderer self-contained instead of relying on the
@@ -614,7 +615,9 @@ async function agentConfig() {
     transport: "raw",
   };
   const operation = selectedInbound ? "modify" : "add";
-  const fields = workspace.catalog.fields || [];
+  const allFields = workspace.catalog.fields || [];
+  const ssRustGroups = ssRustFieldGroups(allFields);
+  const fields = engine === "ss-rust" ? ssRustGroups.global : allFields;
   const selectedField =
     fields.find((field) => field.key === state.data.configField) || fields[0];
   state.data.configField = selectedField?.key || "";
@@ -623,6 +626,20 @@ async function agentConfig() {
     fieldValue = await api(
       `${base}/fields/${encodeURIComponent(selectedField.key)}`,
     );
+  if (request !== agentConfigRequest || state.route !== "agent-config") return;
+  const selectedInboundField = ssRustGroups.inbound.find(
+    (field) => field.key === state.data.configInboundField,
+  ) || ssRustGroups.inbound.find((field) => field.key === "mode") || ssRustGroups.inbound[0];
+  let inboundFieldValue = { present: false, fragment: "" };
+  if (engine === "ss-rust" && config && selectedInbound && selectedInboundField) {
+    state.data.configInboundField = selectedInboundField.key;
+    try {
+      inboundFieldValue = await api(configFieldURL(base, selectedInboundField.key, selectedInbound.tag));
+    } catch (error) {
+      if (error.name === "AbortError") throw error;
+      inboundFieldValue.error = error.message;
+    }
+  }
   if (request !== agentConfigRequest || state.route !== "agent-config") return;
   const revisions = config
     ? await api(`/configs/${encodeURIComponent(config.id)}/revisions?limit=50`)
@@ -655,7 +672,7 @@ async function agentConfig() {
   const portForward = Boolean(protocol?.port_forward);
   const protocolOptions =
     engine === "ss-rust"
-      ? `<details class="preset-option-panel" open><summary><b>SS Rust 网络选项</b><small>与 install-ss-rust 脚本对应</small></summary><div class="plan-fields two"><label>全局 DNS<input name="ss_rust_dns" maxlength="1024" value="${esc(plan.ss_rust_dns || "")}" placeholder="留空使用系统 DNS"><small>影响所有端口；官方内核忽略脚本的端口级 DNS。留空保留已有自定义 DNS 对象，可在源码中删除。</small></label><label>出站绑定 IP<input name="ss_rust_outbound_bind_addr" value="${esc(plan.ss_rust_outbound_bind_addr || "")}" placeholder="留空不绑定"><small>填写节点本机网卡上的 IPv4 / IPv6 地址。</small></label><label class="plan-check"><input type="checkbox" name="ss_rust_ipv6_first" value="1" ${plan.ss_rust_ipv6_first ? "checked" : ""}><span><b>IPv6 优先（全局）</b><small>影响此内核的所有端口。</small></span></label></div></details>`
+      ? `<details class="preset-option-panel" open><summary><b>当前端口 · 出站绑定</b><small>仅当前端口生效</small></summary><div class="plan-fields one"><label>出站绑定 IP<input name="ss_rust_outbound_bind_addr" value="${esc(ssRustPlanBinding(plan, config, selectedInbound))}" placeholder="留空继承全局绑定"><small>填写节点本机网卡上的 IPv4 / IPv6 地址。留空删除端口覆盖，不代表禁用全局绑定。DNS、IPv6 优先与性能选项在下方「全局与默认值」单独保存。</small></label></div></details>`
       : selectedProtocolKey === "snell"
       ? snellProtocolOptions(plan, false)
       : selectedProtocolKey === "snell-shadow-tls-v3"
@@ -687,8 +704,15 @@ async function agentConfig() {
   const executionCallout = !engineInstalled
     ? `<aside class="config-execution-callout"><span><b>${esc(engineName(engine))} 尚未安装</b><small>可以编辑方案，但校验、部署和服务操作需要先在节点设置中安装该内核。</small></span><a class="button small" href="#node-settings">前往安装内核</a></aside>`
     : "";
+  const advancedStudio = engine === "ss-rust"
+    ? renderSSRustFieldStudio({ scope: "inbound", fields: ssRustGroups.inbound, selected: selectedInboundField,
+        value: inboundFieldValue, config, inbound: selectedInbound }) +
+      renderSSRustFieldStudio({ scope: "global", fields, selected: selectedField, value: fieldValue,
+        config, presentFields: workspace.present_fields }) +
+      `<article class="field-canvas ss-rust-source">${sourceStudio || '<p>先创建配置，再编辑完整源码。</p>'}<p>完整源码包含 servers 列表及未收录字段，可同时影响多个端口。</p><a href="${esc(workspace.catalog.source)}" target="_blank" rel="noopener noreferrer">官方完整配置定义 ↗</a></article>`
+    : `<details class="advanced-studio" id="advanced"><summary><b>全局字段与源码</b><i>＋</i></summary><div class="advanced-studio-body"><nav class="field-rail"><header><b>全局配置项</b><small>${fields.length}</small></header>${fields.map((field) => `<a class="${field.key === selectedField?.key ? "active" : ""}" href="#agent-config" data-config-field="${esc(field.key)}"><i class="${workspace.present_fields[field.key] ? "present" : ""}"></i><span><strong>${esc(field.label)}</strong><code>${esc(field.key)}</code></span><small>${esc(field.kind)}</small></a>`).join("")}</nav><section class="field-canvas" data-refresh-key="config-field-${esc(selectedField?.key || "empty")}"><header><div><h2>${esc(selectedField?.label)}</h2><code>${esc(selectedField?.key)}</code></div><a href="${esc(selectedField?.docs)}" target="_blank" rel="noopener noreferrer">文档 ↗</a></header>${config && selectedField ? `<form id="field-form"><div class="field-mutation"><label>操作<select name="mutation">${fieldValue.present ? '<option value="modify">修改字段</option><option value="delete">删除字段</option>' : '<option value="add">新增字段</option>'}</select></label></div><label>${esc(workspace.catalog.format)} 字段值<textarea name="fragment" spellcheck="false">${esc(fieldValue.fragment)}</textarea></label><footer><div><button class="button" type="submit" data-field-intent="validate">保存并校验</button><button class="button primary" type="submit" data-field-intent="deploy">保存并部署</button></div></footer></form>${sourceStudio}` : '<div class="empty compact"><strong>先创建一个服务端入站</strong></div>'}</section><aside class="official-rail"><header><b>官方文档</b><small>${workspace.catalog.topic_count}</small></header>${workspace.catalog.topic_groups.map((group) => `<details><summary>${esc(group.name)} <b>${group.topics.length}</b></summary><div>${group.topics.map((topic) => `<a href="${esc(topic.docs)}" target="_blank" rel="noopener noreferrer">${esc(topic.label)} ↗</a>`).join("")}</div></details>`).join("")}</aside></div></details>`;
   shell(
-    `<section class="config-command-bar loaded"><header class="config-command-head"><div class="config-command-title"><span class="engine-badge ${esc(engine)}">${esc(engineName(engine))}</span><div><p class="eyebrow">Server recipe</p><h2>${esc(protocol?.name || "Protocol")} · ${selectedInbound ? esc(selectedInbound.tag) : "新入站"}</h2><small>${esc(agent.name)} · ${esc(workspace.catalog.name)}</small></div></div><div class="config-command-state"><span class="status-label ${!engineInstalled ? "muted" : config ? "ok" : "warn"}">${!engineInstalled ? "内核未安装" : config ? "已读取" : "新方案"}</span><span class="recipe-version"><b>${config ? `v${config.version}` : "草稿"}</b><small>${esc(workspace.catalog.format)}</small></span><a href="${esc(protocol?.docs)}" target="_blank" rel="noopener noreferrer">文档 ↗</a></div></header><details class="config-hierarchy-menu" open><summary><b>切换入站 / 协议</b><i>＋</i></summary><div class="config-command-selectors${workspace.protocols.length > 5 ? " protocol-catalog-wide" : ""}">${inboundNav ? `<section class="inbound-browser config-selector"><header><span><b>入站</b><small>${workspace.inbounds.length} 个</small></span><button class="button small" type="button" data-new-inbound>＋ 新增</button></header><nav>${inboundNav}</nav></section>` : ""}<section class="protocol-browser config-selector"><header><span><b>协议</b><small>${workspace.protocols.length} 种</small></span></header><nav>${protocolNav}</nav></section></div></details></section>${executionCallout}<article class="recipe-workspace"><form class="server-form" id="server-plan-form"><div class="config-mutation"><label>操作<select name="operation">${selectedInbound ? `<option value="modify">修改 · ${esc(selectedInbound.tag)}</option><option value="add">新增入站</option><option value="delete">删除 · ${esc(selectedInbound.tag)}</option>` : '<option value="add">新增入站</option>'}</select></label></div><div class="builder-layout" data-builder-workbench><nav class="builder-index"><a href="#listen" data-builder-step="listen"><b>01</b><strong>监听</strong></a><a href="#identity" data-builder-step="identity"><b>02</b><strong>认证</strong></a>${protocol?.transport_config ? '<a href="#transport" data-builder-step="transport"><b>03</b><strong>传输</strong></a>' : ""}${protocol?.uses_reality || protocol?.supports_tls ? '<a href="#security" data-builder-step="security"><b>04</b><strong>安全</strong></a>' : ""}</nav><div class="builder-sections"><section class="builder-section" id="listen"><header><span class="section-number">01</span><strong>监听</strong></header><div class="plan-fields three"><label>入站标签<input name="tag" maxlength="64" required value="${esc(plan.tag)}"></label><label>监听地址<input name="listen" required value="${esc(plan.listen)}"></label><label>监听端口<input type="number" name="port" min="1" max="65535" required value="${Number(plan.port)}"></label></div></section><section class="builder-section" id="identity"><header><span class="section-number">02</span><strong>认证</strong></header><div><div class="plan-fields two">${protocol?.ignores_username ? '<input type="hidden" name="username" value="default">' : `<label>用户名或备注<input name="username" maxlength="64" required value="${esc(plan.username)}"></label>`}<label class="secret-input">${esc(protocol?.credential_label || "凭据")}<span class="secret-value-control"><input type="password" name="credential" required value="${esc(plan.credential)}"><button type="button" data-secret-visibility>显示</button></span></label>${protocol?.secondary_credential_label ? `<label class="secret-input">${esc(protocol.secondary_credential_label)}<span class="secret-value-control"><input type="password" name="secondary_credential" required value="${esc(plan.secondary_credential)}"><button type="button" data-secret-visibility>显示</button></span></label>` : '<input type="hidden" name="secondary_credential" value="">'}</div>${methods ? `<div class="plan-fields one"><label>加密方式<select name="method">${methods}</select></label></div>` : '<input type="hidden" name="method" value="">'}</div></section>${protocol?.transport_config ? `<section class="builder-section" id="transport"><header><span class="section-number">03</span><strong>传输</strong></header><div class="plan-fields two"><label>传输<select name="transport">${transports}</select></label><label>路径 / ServiceName<input name="transport_path" value="${esc(plan.transport_path)}"></label></div></section>` : '<input type="hidden" name="transport" value="raw"><input type="hidden" name="transport_path" value="">'}${security}</div></div><footer class="builder-actions compact"><span class="builder-regenerate-status" data-regenerate-status role="status" aria-live="polite"></span><div><button class="button" type="button" data-regenerate>重新生成参数</button><button class="button" type="submit" data-plan-intent="validate" ${agent.status !== "online" || !engineInstalled ? "disabled" : ""}>保存并校验</button><button class="button primary" type="submit" data-plan-intent="deploy" ${agent.status !== "online" || !engineInstalled ? "disabled" : ""}>保存并部署</button></div></footer></form></article>${revisionTimeline}<details class="advanced-studio" id="advanced"><summary><b>全局字段与源码</b><i>＋</i></summary><div class="advanced-studio-body"><nav class="field-rail"><header><b>全局配置项</b><small>${fields.length}</small></header>${fields.map((field) => `<a class="${field.key === selectedField?.key ? "active" : ""}" href="#agent-config" data-config-field="${esc(field.key)}"><i class="${workspace.present_fields[field.key] ? "present" : ""}"></i><span><strong>${esc(field.label)}</strong><code>${esc(field.key)}</code></span><small>${esc(field.kind)}</small></a>`).join("")}</nav><section class="field-canvas" data-refresh-key="config-field-${esc(selectedField?.key || "empty")}"><header><div><h2>${esc(selectedField?.label)}</h2><code>${esc(selectedField?.key)}</code></div><a href="${esc(selectedField?.docs)}" target="_blank" rel="noopener noreferrer">文档 ↗</a></header>${config && selectedField ? `<form id="field-form"><div class="field-mutation"><label>操作<select name="mutation">${fieldValue.present ? '<option value="modify">修改字段</option><option value="delete">删除字段</option>' : '<option value="add">新增字段</option>'}</select></label></div><label>${esc(workspace.catalog.format)} 字段值<textarea name="fragment" spellcheck="false">${esc(fieldValue.fragment)}</textarea></label><footer><div><button class="button" type="submit" data-field-intent="validate">保存并校验</button><button class="button primary" type="submit" data-field-intent="deploy">保存并部署</button></div></footer></form>${sourceStudio}` : '<div class="empty compact"><strong>先创建一个服务端入站</strong></div>'}</section><aside class="official-rail"><header><b>官方文档</b><small>${workspace.catalog.topic_count}</small></header>${workspace.catalog.topic_groups.map((group) => `<details><summary>${esc(group.name)} <b>${group.topics.length}</b></summary><div>${group.topics.map((topic) => `<a href="${esc(topic.docs)}" target="_blank" rel="noopener noreferrer">${esc(topic.label)} ↗</a>`).join("")}</div></details>`).join("")}</aside></div></details>`,
+    `<section class="config-command-bar loaded"><header class="config-command-head"><div class="config-command-title"><span class="engine-badge ${esc(engine)}">${esc(engineName(engine))}</span><div><p class="eyebrow">Server recipe</p><h2>${esc(protocol?.name || "Protocol")} · ${selectedInbound ? esc(selectedInbound.tag) : "新入站"}</h2><small>${esc(agent.name)} · ${esc(workspace.catalog.name)}</small></div></div><div class="config-command-state"><span class="status-label ${!engineInstalled ? "muted" : config ? "ok" : "warn"}">${!engineInstalled ? "内核未安装" : config ? "已读取" : "新方案"}</span><span class="recipe-version"><b>${config ? `v${config.version}` : "草稿"}</b><small>${esc(workspace.catalog.format)}</small></span><a href="${esc(protocol?.docs)}" target="_blank" rel="noopener noreferrer">文档 ↗</a></div></header><details class="config-hierarchy-menu" open><summary><b>切换入站 / 协议</b><i>＋</i></summary><div class="config-command-selectors${workspace.protocols.length > 5 ? " protocol-catalog-wide" : ""}">${inboundNav ? `<section class="inbound-browser config-selector"><header><span><b>入站</b><small>${workspace.inbounds.length} 个</small></span><button class="button small" type="button" data-new-inbound>＋ 新增</button></header><nav>${inboundNav}</nav></section>` : ""}<section class="protocol-browser config-selector"><header><span><b>协议</b><small>${workspace.protocols.length} 种</small></span></header><nav>${protocolNav}</nav></section></div></details></section>${executionCallout}<article class="recipe-workspace"><form class="server-form" id="server-plan-form"><div class="config-mutation"><label>操作<select name="operation">${selectedInbound ? `<option value="modify">修改 · ${esc(selectedInbound.tag)}</option><option value="add">新增入站</option><option value="delete">删除 · ${esc(selectedInbound.tag)}</option>` : '<option value="add">新增入站</option>'}</select></label></div><div class="builder-layout" data-builder-workbench><nav class="builder-index"><a href="#listen" data-builder-step="listen"><b>01</b><strong>监听</strong></a><a href="#identity" data-builder-step="identity"><b>02</b><strong>认证</strong></a>${protocol?.transport_config ? '<a href="#transport" data-builder-step="transport"><b>03</b><strong>传输</strong></a>' : ""}${protocol?.uses_reality || protocol?.supports_tls ? '<a href="#security" data-builder-step="security"><b>04</b><strong>安全</strong></a>' : ""}</nav><div class="builder-sections"><section class="builder-section" id="listen"><header><span class="section-number">01</span><strong>监听</strong></header><div class="plan-fields three"><label>入站标签<input name="tag" maxlength="64" required value="${esc(plan.tag)}"></label><label>监听地址<input name="listen" required value="${esc(plan.listen)}"></label><label>监听端口<input type="number" name="port" min="1" max="65535" required value="${Number(plan.port)}"></label></div></section><section class="builder-section" id="identity"><header><span class="section-number">02</span><strong>认证</strong></header><div><div class="plan-fields two">${protocol?.ignores_username ? '<input type="hidden" name="username" value="default">' : `<label>用户名或备注<input name="username" maxlength="64" required value="${esc(plan.username)}"></label>`}<label class="secret-input">${esc(protocol?.credential_label || "凭据")}<span class="secret-value-control"><input type="password" name="credential" required value="${esc(plan.credential)}"><button type="button" data-secret-visibility>显示</button></span></label>${protocol?.secondary_credential_label ? `<label class="secret-input">${esc(protocol.secondary_credential_label)}<span class="secret-value-control"><input type="password" name="secondary_credential" required value="${esc(plan.secondary_credential)}"><button type="button" data-secret-visibility>显示</button></span></label>` : '<input type="hidden" name="secondary_credential" value="">'}</div>${methods ? `<div class="plan-fields one"><label>加密方式<select name="method">${methods}</select></label></div>` : '<input type="hidden" name="method" value="">'}</div></section>${protocol?.transport_config ? `<section class="builder-section" id="transport"><header><span class="section-number">03</span><strong>传输</strong></header><div class="plan-fields two"><label>传输<select name="transport">${transports}</select></label><label>路径 / ServiceName<input name="transport_path" value="${esc(plan.transport_path)}"></label></div></section>` : '<input type="hidden" name="transport" value="raw"><input type="hidden" name="transport_path" value="">'}${security}</div></div><footer class="builder-actions compact"><span class="builder-regenerate-status" data-regenerate-status role="status" aria-live="polite"></span><div><button class="button" type="button" data-regenerate>重新生成参数</button><button class="button" type="submit" data-plan-intent="validate" ${agent.status !== "online" || !engineInstalled ? "disabled" : ""}>保存并校验</button><button class="button primary" type="submit" data-plan-intent="deploy" ${agent.status !== "online" || !engineInstalled ? "disabled" : ""}>保存并部署</button></div></footer></form></article>${revisionTimeline}${advancedStudio}`,
     "节点配置",
     {
       viewKey: `agent-config-${agent.id}-${engine}-${selectedProtocolKey}-${selectedInbound?.tag || "new"}`,
@@ -742,6 +766,7 @@ async function agentConfig() {
     plan,
     selectedInbound,
     selectedField,
+    selectedInboundField,
     fieldValue,
     base,
     engineInstalled,
@@ -752,7 +777,7 @@ function bindAgentConfigPage(ctx) {
   if (!ctx.engineInstalled)
     document
       .querySelectorAll(
-        "#field-form button[type=submit], #source-config-form button[type=submit]",
+        "#field-form button[type=submit], #inbound-field-form button[type=submit], #source-config-form button[type=submit]",
       )
       .forEach((button) => (button.disabled = true));
   document.querySelectorAll("[data-engine-select]").forEach(
@@ -799,6 +824,13 @@ function bindAgentConfigPage(ctx) {
         agentConfig();
       }),
   );
+  document.querySelectorAll("[data-inbound-field]").forEach((link) => {
+    link.onclick = (event) => {
+      event.preventDefault();
+      state.data.configInboundField = link.dataset.inboundField;
+      agentConfig();
+    };
+  });
   document.querySelectorAll("[data-secret-visibility]").forEach(
     (button) =>
       (button.onclick = () => {
@@ -860,6 +892,7 @@ function bindAgentConfigPage(ctx) {
               `${ctx.agent.name} · ${engineName(ctx.engine)}`,
             description: `${ctx.protocol.name} 服务端入站，由 QControlHub 方案生成`,
             intent: event.submitter?.dataset.planIntent || "validate",
+            preserve_ss_rust_globals: ctx.engine === "ss-rust",
             input,
           }),
         });
@@ -875,7 +908,8 @@ function bindAgentConfigPage(ctx) {
         notify(error.message, "error");
       }
   });
-  bindEvent(document.querySelector("#field-form"), "submit", async (event) => {
+  for (const perPort of [false, true]) {
+    bindEvent(document.querySelector(perPort ? "#inbound-field-form" : "#field-form"), "submit", async (event) => {
       event.preventDefault();
       if (!ctx.engineInstalled) {
         notify("请先安装当前内核，再提交校验或部署任务", "error");
@@ -884,7 +918,8 @@ function bindAgentConfigPage(ctx) {
       const form = new FormData(event.currentTarget);
       try {
         const result = await api(
-          `${ctx.base}/fields/${encodeURIComponent(ctx.selectedField.key)}`,
+          configFieldURL(ctx.base, (perPort ? ctx.selectedInboundField : ctx.selectedField).key,
+            perPort ? ctx.selectedInbound?.tag || "" : undefined),
           {
             method: "POST",
             body: JSON.stringify({
@@ -908,6 +943,7 @@ function bindAgentConfigPage(ctx) {
         notify(error.message, "error");
       }
   });
+  }
   bindEvent(document.querySelector("#source-config-form"), "submit", async (event) => {
       event.preventDefault();
       if (!ctx.engineInstalled) {

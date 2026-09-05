@@ -50,13 +50,24 @@ func prepareSSRustImport(existing EngineSpec, content string) (coreImportPlan, e
 		}
 	}
 	entries, extended := root[listKey].([]any)
+	if value, exists := root[listKey]; exists && (!extended || value == nil) {
+		return coreImportPlan{}, errors.New("SS Rust servers must be an array")
+	}
 	if !extended {
 		listKey = "shadowsocks"
 		entries, extended = root[listKey].([]any)
+		if value, exists := root[listKey]; exists && (!extended || value == nil) {
+			return coreImportPlan{}, errors.New("SS Rust shadowsocks must be an array")
+		}
 	}
 	if extended {
-		if _, hasPrimary := root["server_port"]; hasPrimary {
+		_, hasPrimary := root["server_port"]
+		_, hasPrimaryAddress := root["server"]
+		if hasPrimary || hasPrimaryAddress {
 			return coreImportPlan{}, errors.New("SS Rust import cannot combine a primary server and extended servers; normalize the source first")
+		}
+		if len(entries) == 0 {
+			return coreImportPlan{}, errors.New("SS Rust import requires at least one server")
 		}
 	}
 	if !extended {

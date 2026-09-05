@@ -63,12 +63,11 @@ func Fragment(engine core.Engine, content, key string) (string, bool, error) {
 	if !ok {
 		return "", false, nil
 	}
-	var compact any
-	if err := json.Unmarshal(value, &compact); err != nil {
+	var formatted bytes.Buffer
+	if err := json.Indent(&formatted, value, "", "  "); err != nil {
 		return "", false, err
 	}
-	formatted, err := json.MarshalIndent(compact, "", "  ")
-	return string(formatted), true, err
+	return formatted.String(), true, nil
 }
 
 // MergeFragment replaces or removes one root key. It preserves all other

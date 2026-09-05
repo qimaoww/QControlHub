@@ -214,6 +214,15 @@ install_empty_shadowsocks_rust_acl() {
 ensure_directory /usr/local/lib/qagent
 ensure_directory /usr/local/lib/qagent/cores
 
+if [ "${QCH_PRESERVE_CORE_UNIT:-0}" = 1 ]; then
+  for engine in $selected_engines; do
+    require_preserved_core_service_safe "$engine" || {
+      printf '%s\n' "refusing to repair prerequisites for an unrecognized existing qagent-$engine service" >&2
+      exit 1
+    }
+  done
+fi
+
 for engine in $selected_engines; do
   ensure_directory "/etc/qagent/$engine"
   state_directory="/var/lib/qcontrolhub-$engine"
@@ -237,6 +246,11 @@ done
 enabled_services=""
 skipped_engines=""
 for engine in $selected_engines; do
+  if [ "${QCH_PRESERVE_CORE_UNIT:-0}" = 1 ]; then
+    require_preserved_core_service_safe "$engine" || exit 1
+    printf '%s\n' "preserved existing managed $engine unit and enablement for transactional import"
+    continue
+  fi
   require_skipped_core_service_inactive "$engine"
   if [ "$service_manager" = openrc ]; then
     managed_service="qagent-$engine"

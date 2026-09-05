@@ -13,7 +13,7 @@ func TestCatalogsCoverOfficialIndexes(t *testing.T) {
 		core.EngineMihomo:          {fields: 64, topics: 76},
 		core.EngineXray:            {fields: 17, topics: 63},
 		core.EngineSingBox:         {fields: 14, topics: 120},
-		core.EngineShadowsocksRust: {fields: 16, topics: 4},
+		core.EngineShadowsocksRust: {fields: 25, topics: 4},
 	}
 	for engine, want := range wants {
 		catalog, err := CatalogFor(engine)
@@ -64,6 +64,20 @@ func TestMergeJSONPreservesUnknownFieldsAndRemovesSelectedField(t *testing.T) {
 	}
 	if strings.Contains(output, `"inbounds"`) || !strings.Contains(output, `"future"`) {
 		t.Fatalf("unexpected JSON after remove: %s", output)
+	}
+}
+
+func TestJSONFragmentDoesNotRoundLargeNumbers(t *testing.T) {
+	const content = `{"timeout":9007199254740993,"custom":{"number":18446744073709551615}}`
+	for _, key := range []string{"timeout", "custom"} {
+		fragment, present, err := Fragment(core.EngineShadowsocksRust, content, key)
+		if err != nil || !present {
+			t.Fatalf("read fragment: %v", err)
+		}
+		merged, err := MergeFragment(core.EngineShadowsocksRust, content, key, fragment, false)
+		if err != nil || !strings.Contains(merged, "9007199254740993") || !strings.Contains(merged, "18446744073709551615") {
+			t.Fatalf("field round trip lost numeric precision: %s / %v", merged, err)
+		}
 	}
 }
 

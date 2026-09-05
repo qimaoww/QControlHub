@@ -20,6 +20,9 @@ type Field struct {
 	Kind        string `json:"kind"`
 	Description string `json:"description"`
 	Docs        string `json:"docs"`
+	// Scope is explicit for SS Rust: inbound, override (global default plus
+	// per-inbound override), global, or structure. Other catalogs remain root-only.
+	Scope string `json:"scope,omitempty"`
 }
 
 type Topic struct {

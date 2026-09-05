@@ -3,7 +3,7 @@ SHELL := /bin/sh
 VERSION ?= dev
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
-.PHONY: build test alpine-test upgrade-sandbox-test vet fmt-check frontend-check pr-policy-test schema-policy-test installer-test agent-redeploy-test quick-start-test web-image-test docs-check check init-env compose-config up dev-up down logs
+.PHONY: build test alpine-test upgrade-sandbox-test ss-rust-runtime-test vet fmt-check frontend-check pr-policy-test schema-policy-test installer-test agent-redeploy-test quick-start-test web-image-test docs-check check init-env compose-config up dev-up down logs
 
 build:
 	mkdir -p bin
@@ -22,9 +22,10 @@ upgrade-sandbox-test:
 	docker run --rm --read-only --network none --cap-drop ALL --cap-add CHOWN \
 		--security-opt no-new-privileges --tmpfs /tmp:rw,exec,mode=1777 \
 		--tmpfs /usr/local/lib/qagent:rw,exec,mode=0755 --tmpfs /etc/qagent:rw,mode=0755 \
+		--tmpfs /etc/systemd:rw,mode=0755 --tmpfs /var/lib/qcontrolhub-shadowsocks-rust:rw,mode=0750 \
 		-e QCH_TEST_UPGRADE_SANDBOX=1 -e GOCACHE=/tmp/qch-go-cache -e GOTOOLCHAIN=local \
 		-v "$(CURDIR):/src:ro" -v "$$(go env GOMODCACHE):/go/pkg/mod:ro" \
-		qch-upgrade-lifecycle-test go test ./internal/agent -run '^TestAgentLifecycleReadOnlySandbox$$' -count=1 -v
+		qch-upgrade-lifecycle-test go test ./internal/agent -run '^(TestAgentLifecycleReadOnlySandbox|TestSSRustMigrationLifecycleWithACLAndActiveManagedService|TestImportResourcesReuseAndRollbackOwnership)$$' -count=1 -v
 
 vet:
 	go vet ./...
@@ -35,6 +36,9 @@ fmt-check:
 frontend-check:
 	node frontend/module_smoke.mjs
 	node frontend/agents_browser_smoke.mjs
+
+ss-rust-runtime-test:
+	sh deploy/tests/ss-rust-runtime.sh
 
 pr-policy-test:
 	node --test .github/scripts/check-pr.test.mjs

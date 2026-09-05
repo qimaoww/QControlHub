@@ -4,7 +4,9 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -47,6 +49,7 @@ func TestAgentLifecycleReadOnlySandbox(t *testing.T) {
 	if !strings.HasPrefix(script, coreInstallAssetRoot+"/") {
 		t.Fatal("bundle escaped writable namespace")
 	}
+	testSSRustBootstrapPreservesUnit(t, script)
 	root := t.TempDir()
 	acl := filepath.Join(root, "block_cn.acl")
 	if err := os.WriteFile(acl, []byte("[outbound_block_list]\n192.0.2.0/24\n"), 0o600); err != nil {
@@ -91,5 +94,75 @@ func TestAgentLifecycleReadOnlySandbox(t *testing.T) {
 	}
 	if err := transaction.rollback(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func testSSRustBootstrapPreservesUnit(t *testing.T, script string) {
+	t.Helper()
+	unitDir := "/etc/systemd/system"
+	if err := os.MkdirAll(unitDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	unit := filepath.Join(unitDir, "qagent-shadowsocks-rust.service")
+	content, err := os.ReadFile(filepath.Join(filepath.Dir(script), "systemd", "qagent-shadowsocks-rust.service"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := strings.ReplaceAll(string(content), " --acl "+shadowsocksRustACLPath, "")
+	legacy = strings.ReplaceAll(legacy, "ConditionPathExists="+shadowsocksRustACLPath+"\n", "")
+	if err := os.WriteFile(unit, []byte(legacy), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	const configPath = "/etc/qagent/shadowsocks-rust/config.json"
+	const original = `{"server":"::","server_port":20001,"method":"aes-256-gcm","password":"original-managed"}`
+	if err := os.WriteFile(configPath, []byte(original), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	fakeBin := t.TempDir()
+	fake := filepath.Join(fakeBin, "systemctl")
+	contents := fmt.Sprintf(`#!/bin/sh
+set -eu
+case "$1" in
+  daemon-reload) exit 0 ;;
+  is-active) exit 0 ;;
+  show)
+    case "$3" in
+      --property=LoadState) echo loaded ;;
+      --property=ActiveState) echo active ;;
+      --property=FragmentPath) echo %s ;;
+      --property=ExecStart) echo '{ path=/usr/local/lib/qagent/cores/ssserver ; argv[]=/usr/local/lib/qagent/cores/ssserver -c /etc/qagent/shadowsocks-rust/config.json ; ignore_errors=no ; }' ;;
+      --property=Description) echo 'Shadowsocks Rust core managed by QAgent' ;;
+      --property=User|--property=Group) echo qcontrolhub-core ;;
+      --property=Type) echo simple ;;
+      --property=WorkingDirectory) echo /var/lib/qcontrolhub-shadowsocks-rust ;;
+      --property=Environment) echo RUST_LOG=info ;;
+      --property=*) echo '' ;;
+      *) exit 99 ;;
+    esac ;;
+  *) echo "unexpected service mutation: $*" >&2; exit 99 ;;
+esac
+`, unit)
+	if err := os.WriteFile(fake, []byte(contents), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	command := exec.Command(script, "shadowsocks-rust")
+	command.Env = append(os.Environ(), "QCH_SERVICE_MANAGER=systemd", "QCH_SKIP_CORE_SERVICES=shadowsocks-rust", "QCH_PRESERVE_CORE_UNIT=1", "PATH="+fakeBin+":/usr/sbin:/usr/bin:/sbin:/bin")
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("preserved-unit bootstrap: %v\n%s", err, output)
+	}
+	after, err := os.ReadFile(unit)
+	if err != nil || string(after) != legacy {
+		t.Fatal("bootstrap changed unit before migration transaction")
+	}
+	after, err = os.ReadFile(configPath)
+	if err != nil || string(after) != original {
+		t.Fatal("bootstrap changed existing configuration")
+	}
+	if !strings.Contains(string(output), "preserved existing managed shadowsocks-rust unit and enablement") {
+		t.Fatal("bootstrap did not report preserved service")
+	}
+	if _, err := os.Stat(shadowsocksRustACLPath); err != nil {
+		t.Fatal("bootstrap did not repair missing ACL prerequisite")
 	}
 }

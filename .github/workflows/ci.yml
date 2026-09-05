@@ -145,6 +145,7 @@ jobs:
           cache-dependency-path: go.sum
       - run: go mod download
       - run: make upgrade-sandbox-test
+      - run: make ss-rust-runtime-test
 
   images:
     name: Build ${{ matrix.target }} image

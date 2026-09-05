@@ -268,13 +268,14 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 		return
 	}
 	var input struct {
-		Operation       string             `json:"operation"`
-		OriginalTag     string             `json:"original_tag"`
-		ExpectedVersion int                `json:"expected_version"`
-		Name            string             `json:"name"`
-		Description     string             `json:"description"`
-		Intent          string             `json:"intent"`
-		Input           serverconfig.Input `json:"input"`
+		Operation             string             `json:"operation"`
+		PreserveSSRustGlobals bool               `json:"preserve_ss_rust_globals"`
+		OriginalTag           string             `json:"original_tag"`
+		ExpectedVersion       int                `json:"expected_version"`
+		Name                  string             `json:"name"`
+		Description           string             `json:"description"`
+		Intent                string             `json:"intent"`
+		Input                 serverconfig.Input `json:"input"`
 	}
 	if err := decodeJSON(w, request, &input, core.MaxConfigEnvelopeBytes); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -322,7 +323,11 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 	}
 	current, currentErr := s.store.AgentConfig(request.Context(), agent.ID, engine)
 	if currentErr == nil {
-		content, err = serverconfig.MutateGenerated(engine, current.Content, generated, input.OriginalTag, input.Operation)
+		if engine == core.EngineShadowsocksRust && input.PreserveSSRustGlobals {
+			content, err = serverconfig.MutateSSRustPort(current.Content, generated, input.OriginalTag, input.Operation)
+		} else {
+			content, err = serverconfig.MutateGenerated(engine, current.Content, generated, input.OriginalTag, input.Operation)
+		}
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
@@ -333,6 +338,12 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 	} else if input.Operation != "add" {
 		writeError(w, http.StatusConflict, "no saved configuration exists for this operation")
 		return
+	} else if engine == core.EngineShadowsocksRust && input.PreserveSSRustGlobals {
+		content, err = serverconfig.MutateGenerated(engine, "{}", generated, "", "add")
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
 	if engine == core.EngineShadowsocksRust && input.Operation != "delete" && input.Input.BlockMainlandDestination && len(serverconfig.DiscoverMainlandAccessPolicies(engine, content)) > 1 {
 		writeError(w, http.StatusBadRequest, "Shadowsocks Rust 的 ACL 由单个 ssserver 进程统一加载；多端口配置请拆分为单独进程后再启用目标限制")
@@ -417,6 +428,11 @@ func (s *Server) saveConfigField(w http.ResponseWriter, request *http.Request) {
 		return
 	}
 	key := strings.TrimSpace(request.PathValue("key"))
+	inbound, scoped, scopeErr := configFieldInbound(request, engine)
+	if scopeErr != nil {
+		writeError(w, http.StatusBadRequest, scopeErr.Error())
+		return
+	}
 	catalog, err := configschema.CatalogFor(engine)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -454,13 +470,16 @@ func (s *Server) saveConfigField(w http.ResponseWriter, request *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
-	present := false
-	keys, err := configschema.RootKeys(engine, current.Content)
+	var present bool
+	if scoped {
+		_, present, _, err = serverconfig.SSRustInboundField(current.Content, inbound, key)
+	} else {
+		_, present, err = configschema.Fragment(engine, current.Content, key)
+	}
 	if err != nil {
 		writeError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	present = keys[key]
 	switch input.Mutation {
 	case "add":
 		if present {
@@ -476,7 +495,18 @@ func (s *Server) saveConfigField(w http.ResponseWriter, request *http.Request) {
 		writeError(w, http.StatusBadRequest, "mutation must be add, modify, or delete")
 		return
 	}
-	content, err := configschema.MergeFragment(engine, current.Content, key, input.Fragment, input.Mutation == "delete")
+	var content string
+	if engine == core.EngineShadowsocksRust {
+		if err := serverconfig.ValidateSSRustFieldValue(key, input.Fragment, input.Mutation == "delete"); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+	if scoped {
+		content, err = serverconfig.MergeSSRustInboundField(current.Content, inbound, key, input.Fragment, input.Mutation == "delete")
+	} else {
+		content, err = configschema.MergeFragment(engine, current.Content, key, input.Fragment, input.Mutation == "delete")
+	}
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -501,7 +531,7 @@ func (s *Server) saveConfigField(w http.ResponseWriter, request *http.Request) {
 	if !ok {
 		return
 	}
-	s.recordAudit(request, "agent_config.field_saved", saved.ID, input.Mutation+" "+key+" "+agent.ID)
+	s.recordAudit(request, "agent_config.field_saved", saved.ID, input.Mutation+" "+key+" "+agent.ID+" inbound="+inbound)
 	writeJSON(w, http.StatusOK, configMutationResult{Config: saved, Task: task})
 }
 
@@ -511,6 +541,11 @@ func (s *Server) getConfigField(w http.ResponseWriter, request *http.Request) {
 		return
 	}
 	key := strings.TrimSpace(request.PathValue("key"))
+	inbound, scoped, scopeErr := configFieldInbound(request, engine)
+	if scopeErr != nil {
+		writeError(w, http.StatusBadRequest, scopeErr.Error())
+		return
+	}
 	catalog, err := configschema.CatalogFor(engine)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -533,11 +568,27 @@ func (s *Server) getConfigField(w http.ResponseWriter, request *http.Request) {
 		return
 	}
 	fragment, present, err := configschema.Fragment(engine, config.Content, key)
+	inherited := ""
+	if scoped {
+		fragment, present, inherited, err = serverconfig.SSRustInboundField(config.Content, inbound, key)
+	}
 	if err != nil {
 		writeError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"key": key, "present": present, "fragment": fragment})
+	writeJSON(w, http.StatusOK, map[string]any{"key": key, "present": present, "fragment": fragment, "inherited_fragment": inherited})
+}
+
+// An empty/unsupported scope must never silently fall back to a global edit.
+func configFieldInbound(request *http.Request, engine core.Engine) (string, bool, error) {
+	values, scoped := request.URL.Query()["inbound"]
+	if !scoped {
+		return "", false, nil
+	}
+	if engine != core.EngineShadowsocksRust || len(values) != 1 || strings.TrimSpace(values[0]) == "" {
+		return "", true, errors.New("a single SS Rust inbound must be selected")
+	}
+	return values[0], true, nil
 }
 
 func (s *Server) agentEngineFromPath(w http.ResponseWriter, request *http.Request) (core.Engine, core.Agent, bool) {

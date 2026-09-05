@@ -175,6 +175,7 @@ func TestBundledCoreInstallAssetsBootstrapAfterBinaryOnlyUpgrade(t *testing.T) {
 	bootstrapper.assetRoot = filepath.Join(root, "core-install")
 	bootstrapper.scriptPath = legacy
 	bootstrapper.systemdRunPath = launcher
+	bootstrapper.preserveUnit = true
 	if err := bootstrapper.install(context.Background(), core.EngineShadowsocksRust, true, defaultSystemdServiceManager()); err != nil {
 		t.Fatalf("binary-only upgrade bootstrap: %v", err)
 	}
@@ -184,6 +185,9 @@ func TestBundledCoreInstallAssetsBootstrapAfterBinaryOnlyUpgrade(t *testing.T) {
 	}
 	if content, err := os.ReadFile(legacy); err != nil || string(content) != legacyContent {
 		t.Fatal("legacy installation resource was overwritten")
+	}
+	if !strings.Contains(string(arguments), "--setenv=QCH_PRESERVE_CORE_UNIT=1") {
+		t.Fatal("prerequisite repair did not preserve the pre-transaction unit")
 	}
 }
 

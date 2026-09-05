@@ -19,6 +19,7 @@ type coreServiceBootstrapper struct {
 	scriptPath     string
 	systemdRunPath string
 	assetRoot      string
+	preserveUnit   bool
 }
 
 func defaultCoreServiceBootstrapper() coreServiceBootstrapper {
@@ -51,6 +52,10 @@ func (e *Executor) prepareManagedCoreService(ctx context.Context, engine core.En
 		if e.coreBootstrapper != nil {
 			bootstrapper = *e.coreBootstrapper
 		}
+		// File/service rollback starts inside importExistingConfig. Do not
+		// replace a previously validated unit or change its enablement before
+		// that transaction has recorded the original state.
+		bootstrapper.preserveUnit = existing && status != "not-found"
 		if err := bootstrapper.install(ctx, engine, existing, manager); err != nil {
 			return err
 		}
@@ -218,6 +223,9 @@ func (bootstrapper coreServiceBootstrapper) runSystemd(ctx context.Context, engi
 	if existing {
 		arguments = append(arguments, "--setenv=QCH_SKIP_CORE_SERVICES="+managedCoreAssetName(engine))
 	}
+	if bootstrapper.preserveUnit {
+		arguments = append(arguments, "--setenv=QCH_PRESERVE_CORE_UNIT=1")
+	}
 	arguments = append(arguments, "--", bootstrapper.scriptPath, managedCoreAssetName(engine))
 	return runCoreBootstrapCommand(ctx, bootstrapper.systemdRunPath, arguments, nil)
 }
@@ -243,6 +251,9 @@ func (bootstrapper coreServiceBootstrapper) runOpenRC(ctx context.Context, engin
 	environment := []string{"QCH_SERVICE_MANAGER=openrc"}
 	if existing {
 		environment = append(environment, "QCH_SKIP_CORE_SERVICES="+managedCoreAssetName(engine))
+	}
+	if bootstrapper.preserveUnit {
+		environment = append(environment, "QCH_PRESERVE_CORE_UNIT=1")
 	}
 	return runCoreBootstrapCommand(ctx, bootstrapper.scriptPath, []string{managedCoreAssetName(engine)}, environment)
 }
