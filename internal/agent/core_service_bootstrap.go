@@ -42,12 +42,22 @@ func (e *Executor) prepareManagedCoreService(ctx context.Context, engine core.En
 	if err != nil {
 		return fmt.Errorf("refusing to replace an unrecognized managed %s service: %w", engine, err)
 	}
-	if status == "not-found" {
+	missing, err := managedCorePrerequisitesMissing(engine, spec)
+	if err != nil {
+		return fmt.Errorf("inspect managed %s prerequisites: %w", engine, err)
+	}
+	if status == "not-found" || missing {
 		bootstrapper := defaultCoreServiceBootstrapper()
 		if e.coreBootstrapper != nil {
 			bootstrapper = *e.coreBootstrapper
 		}
 		if err := bootstrapper.install(ctx, engine, existing, manager); err != nil {
+			return err
+		}
+		if missing, err := managedCorePrerequisitesMissing(engine, spec); err != nil || missing {
+			if err == nil {
+				err = errors.New("managed core prerequisites remain incomplete after bootstrap")
+			}
 			return err
 		}
 		status, err = validateManagedServiceForExistingDiscovery(ctx, engine, spec, manager)
@@ -65,6 +75,47 @@ func (e *Executor) prepareManagedCoreService(ctx context.Context, engine core.En
 		return fmt.Errorf("prepare managed %s logs: %w", engine, err)
 	}
 	return nil
+}
+
+// A previous bootstrap can exit after writing the unit but before finishing
+// prerequisites. Never equate an existing unit with a complete installation.
+// Only absence is repairable; unsafe files stay a hard error.
+func managedCorePrerequisitesMissing(engine core.Engine, spec EngineSpec) (bool, error) {
+	return managedCorePrerequisitesMissingAt(engine, spec, filepath.Join("/var/lib", "qcontrolhub-"+managedCoreAssetName(engine)))
+}
+
+func managedCorePrerequisitesMissingAt(engine core.Engine, spec EngineSpec, statePath string) (bool, error) {
+	paths := []struct {
+		path      string
+		directory bool
+	}{
+		{filepath.Dir(spec.Binary), true},
+		{filepath.Dir(spec.ConfigPath), true},
+		{spec.ConfigPath, false},
+		{statePath, true},
+	}
+	if engine == core.EngineShadowsocksRust {
+		paths = append(paths, struct {
+			path      string
+			directory bool
+		}{filepath.Join(filepath.Dir(spec.ConfigPath), "qch-mainland-block.acl"), false})
+	}
+	missing := false
+	for _, item := range paths {
+		info, err := os.Lstat(item.path)
+		if errors.Is(err, os.ErrNotExist) {
+			missing = true
+			continue
+		}
+		if err != nil {
+			return false, err
+		}
+		if info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0o022 != 0 ||
+			(item.directory && !info.IsDir()) || (!item.directory && !info.Mode().IsRegular()) {
+			return false, fmt.Errorf("unsafe managed prerequisite %s", item.path)
+		}
+	}
+	return missing, nil
 }
 
 // prepareShadowsocksRustACLService refreshes the exact QAgent-owned service

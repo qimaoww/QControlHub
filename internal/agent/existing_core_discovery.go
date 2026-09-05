@@ -371,8 +371,8 @@ func validateManagedServiceForExistingDiscovery(ctx context.Context, engine core
 			return "", err
 		}
 		status, err := serviceStatusWithManager(ctx, manager, managed.Service)
-		if err != nil || (status != "inactive" && status != "failed") {
-			return "", errors.New("managed OpenRC service is not inactive or failed")
+		if err != nil || (status != "active" && status != "inactive" && status != "failed") {
+			return "", errors.New("managed OpenRC service has an unsupported state")
 		}
 		marker := "# QControlHub managed OpenRC service: " + managed.Service
 		if err := validateOpenRCServiceScript(managed.Service, marker); err != nil {

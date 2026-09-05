@@ -10,7 +10,9 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
-var ssRustImportStateRoot = "/var/lib/qcontrolhub-shadowsocks-rust"
+// Import resources must live inside the Agent's existing writable config
+// namespace; core StateDirectory paths are read-only in the Agent sandbox.
+var ssRustImportStateRoot = "/etc/qagent/shadowsocks-rust"
 
 func existingSSRustACLArg(engine core.Engine, argv []string) string {
 	if engine == core.EngineShadowsocksRust && len(argv) == 5 && argv[3] == "--acl" {
