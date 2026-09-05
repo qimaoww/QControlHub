@@ -14,6 +14,8 @@ SS Rust 优先展示 Shadowsocks 2022，默认 `2022-blake3-aes-128-gcm`、匹�
 - **全局与默认值**：DNS（支持字符串或自定义对象）、IPv6 优先、TCP / UDP 超时、Fast Open、TCP_NODELAY、Keepalive、安全策略是全局设置；可被端口覆盖的字段单独标注为默认值。删除端口覆盖后继承全局值，不代表禁用全局值。空上游代理链也会继承全局链。
 - **完整源码**：独立入口，包含 `servers` 列表与未收录的配置字段。混合格式或重复端口标识不接受自动端口编辑，但仍可通过完整源码修正。
 
+三个区域使用面板统一的明暗主题和紧凑卡片。未选择端口时仅显示选择提示，全局字段仍可单独编辑；字段列表独立滚动，窄屏改为横向列表并保持选中项可见。Mihomo、Xray、sing-box 的全局字段也使用同一编辑布局，完整源码和参考文档单独折叠，不再挤占字段编辑区域。
+
 作用范围按 [SS Rust v1.25.0 配置解析](https://github.com/shadowsocks/shadowsocks-rust/blob/v1.25.0/crates/shadowsocks-service/src/config.rs) 与 [服务端运行逻辑](https://github.com/shadowsocks/shadowsocks-rust/blob/v1.25.0/crates/shadowsocks-service/src/server/mod.rs) 核对：`servers[].dns` 被忽略；`servers[].timeout` 虽有字段定义，但该版本实际读取顶层 `timeout`，因此不提供端口级超时控件。HTTP(S) 上游代理跳点不转发 UDP，UDP 会直连。`ssserver` 没有不启动服务的完整校验模式；保存并校验仅做结构检查，部署才实际启动内核。即使仅修改一个端口，部署也会重启整个 `ssserver` 进程，可能短暂影响所有端口。
 
 ACL 是特殊情况：端口 `acl` 优先于启动参数 `--acl`，后者又覆盖顶层 `acl`。新版 QAgent 模板使用固定 `--acl /etc/qagent/shadowsocks-rust/qch-mainland-block.acl`，因此顶层 ACL 不能视为当前进程一定生效的默认值。页面标注此优先级；导入保留显式端口 ACL，新增端口也复制已导入的顶层 ACL 为端口覆盖，避免原脚本策略被固定启动 ACL 覆盖。
