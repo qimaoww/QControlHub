@@ -42,10 +42,20 @@ func prepareSSRustImport(existing EngineSpec, content string) (coreImportPlan, e
 		globalACL = existing.ACLPath
 	}
 	listKey := "servers"
+	if _, hasServers := root["servers"]; hasServers {
+		if _, hasAlias := root["shadowsocks"]; hasAlias {
+			return coreImportPlan{}, errors.New("SS Rust import cannot combine servers and shadowsocks aliases")
+		}
+	}
 	entries, extended := root[listKey].([]any)
 	if !extended {
 		listKey = "shadowsocks"
 		entries, extended = root[listKey].([]any)
+	}
+	if extended {
+		if _, hasPrimary := root["server_port"]; hasPrimary {
+			return coreImportPlan{}, errors.New("SS Rust import cannot combine a primary server and extended servers; normalize the source first")
+		}
 	}
 	if !extended {
 		entries = []any{root}
@@ -80,7 +90,7 @@ func prepareSSRustImport(existing EngineSpec, content string) (coreImportPlan, e
 	}
 	plan.resourceRoot = filepath.Join(plan.stateRoot, "install-ss-rust", coreMigrationConfigDigest(content+"\x00"+aclContent))
 	destination := filepath.Join(plan.resourceRoot, "block_cn.acl")
-	plan.resources = []coreImportResource{{source: allowedACL, destination: destination}}
+	plan.resources = []coreImportResource{{source: allowedACL, destination: destination, digest: coreMigrationConfigDigest(aclContent)}}
 	if !extended {
 		entry := make(map[string]any)
 		for _, key := range []string{"server", "server_port", "method", "password", "mode", "timeout", "dns", "outbound_bind_addr"} {

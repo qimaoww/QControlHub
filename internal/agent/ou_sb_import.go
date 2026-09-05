@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -24,6 +26,7 @@ var (
 type coreImportResource struct {
 	source      string
 	destination string
+	digest      string
 }
 
 type coreImportPlan struct {
@@ -148,7 +151,7 @@ func (plan coreImportPlan) stage(identity commandIdentity) error {
 		return err
 	}
 	for _, resource := range plan.resources {
-		if err := copyProtectedImportResource(resource.source, resource.destination, identity); err != nil {
+		if err := copyProtectedImportResource(resource.source, resource.destination, resource.digest, identity); err != nil {
 			return err
 		}
 	}
@@ -221,7 +224,7 @@ func validateManagedStateRoot(path string, identity commandIdentity) error {
 	return validateProtectedDirectoryChain(filepath.Dir(path))
 }
 
-func copyProtectedImportResource(source, destination string, identity commandIdentity) error {
+func copyProtectedImportResource(source, destination, expectedDigest string, identity commandIdentity) error {
 	info, err := os.Lstat(source)
 	if err != nil {
 		return fmt.Errorf("inspect protected import resource %s: %w", source, err)
@@ -245,9 +248,13 @@ func copyProtectedImportResource(source, destination string, identity commandIde
 	if err != nil {
 		return err
 	}
-	written, copyErr := io.Copy(output, io.LimitReader(input, ouSBResourceLimit+1))
+	digest := sha256.New()
+	written, copyErr := io.Copy(io.MultiWriter(output, digest), io.LimitReader(input, ouSBResourceLimit+1))
 	if copyErr == nil && (written <= 0 || written > ouSBResourceLimit) {
 		copyErr = errors.New("protected import resource is empty or exceeds the supported limit")
+	}
+	if copyErr == nil && expectedDigest != "" && hex.EncodeToString(digest.Sum(nil)) != expectedDigest {
+		copyErr = errors.New("protected import resource changed after snapshot planning")
 	}
 	if copyErr == nil {
 		copyErr = applyFileMetadata(output, fileMetadata{mode: 0o640, uid: 0, gid: int(identity.gid), ownershipKnown: true})

@@ -8,7 +8,9 @@
 
 SS Rust 优先展示 Shadowsocks 2022，默认 `2022-blake3-aes-128-gcm`、匹配长度的随机 Base64 PSK、`::` 监听和随机高位端口。保留标准 AEAD 方案及全部三种 SS2022 算法。
 
-新增配置使用 `servers` 多端口格式，默认 TCP + UDP、300 秒超时、关闭 Fast Open，启用 TCP_NODELAY。可逐端口设置 DNS 与出站绑定 IP；修改时留空会删除该端口的覆盖值。IPv6 优先是全局选项。修改已有多端口配置保留其他端口、自定义字段、ACL、转发模式、超时及全局性能设置。自定义 DNS 对象通过源码编辑，不降级成文本输入。
+新增配置使用 `servers` 多端口格式，默认 TCP + UDP、300 秒超时、关闭 Fast Open，启用 TCP_NODELAY。出站绑定 IP 是端口级选项，留空删除端口覆盖值；DNS 和 IPv6 优先是全局选项，新端口方案继承已有全局值。修改已有多端口配置保留其他端口、自定义字段、ACL、转发模式、超时及全局性能设置。自定义 DNS 对象通过源码编辑，DNS 文本框留空不会清除已有对象。
+
+注意：[官方 v1.25.0 配置结构](https://github.com/shadowsocks/shadowsocks-rust/blob/v1.25.0/crates/shadowsocks-service/src/config.rs) 仅支持根字段 `dns`，不支持 `servers[].dns`。原脚本写入的端口级 DNS 会被官方内核忽略；导入原样保留该字段，但不将其提升为全局 DNS，以免改变其他端口行为。需要指定解析器时请设置全局 DNS。
 
 ## 导入已有安装
 

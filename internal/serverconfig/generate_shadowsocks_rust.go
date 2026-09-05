@@ -11,7 +11,7 @@ func generateShadowsocksRust(input Input) (string, error) {
 	input.SSRustDNS = strings.TrimSpace(input.SSRustDNS)
 	input.SSRustOutboundBindAddr = strings.TrimSpace(input.SSRustOutboundBindAddr)
 	if len(input.SSRustDNS) > 1024 || strings.ContainsAny(input.SSRustDNS, "\r\n\x00") {
-		return "", errors.New("端口 DNS 不能超过 1024 字符或包含换行和空字符")
+		return "", errors.New("全局 DNS 不能超过 1024 字符或包含换行和空字符")
 	}
 	if input.SSRustOutboundBindAddr != "" && net.ParseIP(input.SSRustOutboundBindAddr) == nil {
 		return "", errors.New("出站绑定地址必须是 IP 地址")
@@ -55,11 +55,23 @@ func parseShadowsocksRust(content string) (Input, bool) {
 	for index, value := range entries {
 		entry := mapValue(value)
 		if input, ok := parseShadowsocksRustEntry(entry, shadowsocksRustEntryTag(entry, index)); ok {
+			input.SSRustDNS = stringValue(root["dns"])
 			input.SSRustIPv6First, _ = root["ipv6_first"].(bool)
 			return input, true
 		}
 	}
 	return Input{}, false
+}
+
+// InheritShadowsocksRustGlobals seeds new inbound plans from the current root
+// configuration so adding a port does not reset DNS or IPv6 preference.
+func InheritShadowsocksRustGlobals(input Input, content string) Input {
+	var root map[string]any
+	if json.Unmarshal([]byte(content), &root) == nil {
+		input.SSRustDNS = stringValue(root["dns"])
+		input.SSRustIPv6First, _ = root["ipv6_first"].(bool)
+	}
+	return input
 }
 
 func parseShadowsocksRustEntry(root map[string]any, tag string) (Input, bool) {

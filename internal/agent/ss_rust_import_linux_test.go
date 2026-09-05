@@ -87,7 +87,13 @@ func TestSSRustScriptACLPlanIsReadOnlyAndTracksDrift(t *testing.T) {
 	if err != nil || changed.managedContent == plan.managedContent {
 		t.Fatalf("ACL drift not reflected in snapshot: %v", err)
 	}
-	for _, invalid := range []string{`{"servers":[{"acl":"/tmp/other.acl"}]}`, `{"servers":[{"acl":false}]}`, `{"servers":[{"plugin":"custom"}]}`, `{"servers":[null]}`, `{} {}`} {
+	if err := plan.stage(identity); err == nil {
+		t.Fatal("staging accepted changed ACL bytes under the original digest")
+	}
+	if err := plan.cleanup(); err != nil {
+		t.Fatal(err)
+	}
+	for _, invalid := range []string{`{"servers":[{"acl":"/tmp/other.acl"}]}`, `{"servers":[{"acl":false}]}`, `{"servers":[{"plugin":"custom"}]}`, `{"servers":[null]}`, `{} {}`, `{"servers":[],"shadowsocks":[]}`, `{"server_port":20001,"servers":[]}`} {
 		if _, err := prepareSSRustImport(spec, invalid); err == nil {
 			t.Fatalf("unsupported import accepted: %s", invalid)
 		}

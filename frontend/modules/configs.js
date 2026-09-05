@@ -655,7 +655,7 @@ async function agentConfig() {
   const portForward = Boolean(protocol?.port_forward);
   const protocolOptions =
     engine === "ss-rust"
-      ? `<details class="preset-option-panel" open><summary><b>SS Rust 网络选项</b><small>与 install-ss-rust 脚本对应</small></summary><div class="plan-fields two"><label>端口 DNS<input name="ss_rust_dns" maxlength="1024" value="${esc(plan.ss_rust_dns || "")}" placeholder="留空使用全局 DNS"><small>修改时留空清除此端口的 DNS 覆盖。</small></label><label>出站绑定 IP<input name="ss_rust_outbound_bind_addr" value="${esc(plan.ss_rust_outbound_bind_addr || "")}" placeholder="留空不绑定"><small>填写节点本机网卡上的 IPv4 / IPv6 地址。</small></label><label class="plan-check"><input type="checkbox" name="ss_rust_ipv6_first" value="1" ${plan.ss_rust_ipv6_first ? "checked" : ""}><span><b>IPv6 优先（全局）</b><small>影响此内核的所有端口。</small></span></label></div></details>`
+      ? `<details class="preset-option-panel" open><summary><b>SS Rust 网络选项</b><small>与 install-ss-rust 脚本对应</small></summary><div class="plan-fields two"><label>全局 DNS<input name="ss_rust_dns" maxlength="1024" value="${esc(plan.ss_rust_dns || "")}" placeholder="留空使用系统 DNS"><small>影响所有端口；官方内核忽略脚本的端口级 DNS。留空保留已有自定义 DNS 对象，可在源码中删除。</small></label><label>出站绑定 IP<input name="ss_rust_outbound_bind_addr" value="${esc(plan.ss_rust_outbound_bind_addr || "")}" placeholder="留空不绑定"><small>填写节点本机网卡上的 IPv4 / IPv6 地址。</small></label><label class="plan-check"><input type="checkbox" name="ss_rust_ipv6_first" value="1" ${plan.ss_rust_ipv6_first ? "checked" : ""}><span><b>IPv6 优先（全局）</b><small>影响此内核的所有端口。</small></span></label></div></details>`
       : selectedProtocolKey === "snell"
       ? snellProtocolOptions(plan, false)
       : selectedProtocolKey === "snell-shadow-tls-v3"

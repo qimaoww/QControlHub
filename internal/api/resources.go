@@ -237,6 +237,15 @@ func (s *Server) newServerPlan(w http.ResponseWriter, request *http.Request) {
 	)
 	if input.Input == nil {
 		plan, err = serverconfig.NewPlan(protocol)
+		if err == nil && engine == core.EngineShadowsocksRust {
+			config, configErr := s.store.AgentConfig(request.Context(), agent.ID, engine)
+			if configErr == nil {
+				plan = serverconfig.InheritShadowsocksRustGlobals(plan, config.Content)
+			} else if !errors.Is(configErr, store.ErrNotFound) {
+				writeStoreError(w, configErr)
+				return
+			}
+		}
 	} else {
 		input.Input.Protocol = protocol.Key
 		plan, err = serverconfig.RegeneratePlan(protocol, *input.Input)

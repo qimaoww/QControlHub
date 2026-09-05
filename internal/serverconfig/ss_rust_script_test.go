@@ -29,6 +29,14 @@ func TestSSRustScriptPresetNetworkRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	inputs := ParseAll(core.EngineShadowsocksRust, content)
+	var root map[string]any
+	if err := json.Unmarshal([]byte(content), &root); err != nil {
+		t.Fatal(err)
+	}
+	entry := root["servers"].([]any)[0].(map[string]any)
+	if _, hasPerPortDNS := entry["dns"]; hasPerPortDNS || root["dns"] != "1.1.1.1" {
+		t.Fatalf("DNS must be global: %s", content)
+	}
 	if len(inputs) != 1 || inputs[0].SSRustDNS != plan.SSRustDNS || inputs[0].SSRustOutboundBindAddr != plan.SSRustOutboundBindAddr || !inputs[0].SSRustIPv6First {
 		t.Fatalf("network round trip: %+v\n%s", inputs, content)
 	}
@@ -80,9 +88,9 @@ func TestSSRustScriptMutationPreservesPolicyAndGlobalSettings(t *testing.T) {
 }
 
 func TestSSRustCustomDNSIsNotLostDuringPresetEdit(t *testing.T) {
-	current := `{"servers":[{"server":"::","server_port":20001,"method":"aes-256-gcm","password":"current-password","dns":{"nameservers":["1.1.1.1"]}}]}`
+	current := `{"dns":{"nameservers":["1.1.1.1"]},"servers":[{"server":"::","server_port":20001,"method":"aes-256-gcm","password":"current-password","dns":"ignored-script-value"}]}`
 	inputs := ParseAll(core.EngineShadowsocksRust, current)
-	if len(inputs) != 1 {
+	if len(inputs) != 1 || inputs[0].SSRustDNS != "" {
 		t.Fatal("custom DNS prevented client/port discovery")
 	}
 	inputs[0].Port = 20002
@@ -91,7 +99,33 @@ func TestSSRustCustomDNSIsNotLostDuringPresetEdit(t *testing.T) {
 		t.Fatal(err)
 	}
 	modified, err := MutateGenerated(core.EngineShadowsocksRust, current, generated, inputs[0].Tag, "modify")
-	if err != nil || !strings.Contains(modified, `"nameservers"`) {
+	if err != nil || !strings.Contains(modified, `"nameservers"`) || !strings.Contains(modified, "ignored-script-value") {
 		t.Fatalf("custom DNS was cleared: %v\n%s", err, modified)
+	}
+}
+
+func TestSSRustNewPlanInheritsGlobalOptions(t *testing.T) {
+	current := `{"dns":"9.9.9.9","ipv6_first":true,"servers":[{"server":"::","server_port":20001,"method":"aes-256-gcm","password":"current-password","dns":"1.1.1.1"}]}`
+	plan, err := NewPlan(Protocols(core.EngineShadowsocksRust)[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan = InheritShadowsocksRustGlobals(plan, current)
+	plan.Port = 20002
+	if plan.SSRustDNS != "9.9.9.9" || !plan.SSRustIPv6First {
+		t.Fatalf("new plan reset global options: %+v", plan)
+	}
+	generated, err := Generate(core.EngineShadowsocksRust, plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	added, err := MutateGenerated(core.EngineShadowsocksRust, current, generated, "", "add")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, input := range ParseAll(core.EngineShadowsocksRust, added) {
+		if input.SSRustDNS != "9.9.9.9" || !input.SSRustIPv6First {
+			t.Fatalf("global inheritance failed: %+v", input)
+		}
 	}
 }

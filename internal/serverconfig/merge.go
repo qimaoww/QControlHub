@@ -179,6 +179,9 @@ func mutateShadowsocksRustExtended(root map[string]any, listKey string, entries 
 	// and let new ports inherit the global settings.
 	delete(generatedEntry, "mode")
 	delete(generatedEntry, "timeout")
+	// Official ssserver only consumes DNS at the root. Keep script-written
+	// per-server DNS as an unknown field instead of presenting it as effective.
+	delete(generatedEntry, "dns")
 	if acl, ok := root["acl"]; ok {
 		generatedEntry["acl"] = acl
 	}
@@ -243,6 +246,11 @@ func mutateShadowsocksRustExtended(root map[string]any, listKey string, entries 
 			}
 		}
 		root["ipv6_first"] = generated["ipv6_first"]
+		if dns, present := generated["dns"]; present {
+			root["dns"] = dns
+		} else if _, custom := root["dns"].(map[string]any); !custom {
+			delete(root, "dns")
+		}
 	}
 	formatted, err := json.MarshalIndent(root, "", "  ")
 	if err != nil {
@@ -262,16 +270,7 @@ func shadowsocksRustGeneratedEntry(generated map[string]any) map[string]any {
 }
 
 func mergeShadowsocksRustEntry(current, generated map[string]any) map[string]any {
-	for _, key := range []string{"dns", "outbound_bind_addr"} {
-		if key == "dns" {
-			if _, custom := current[key].(map[string]any); custom {
-				// Resolver objects are edited in source. A blank text field
-				// must not clear them while changing an unrelated port field.
-				continue
-			}
-		}
-		delete(current, key)
-	}
+	delete(current, "outbound_bind_addr")
 	for key, value := range generated {
 		current[key] = value
 	}
