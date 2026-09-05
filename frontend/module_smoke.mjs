@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import "./refresh_smoke.mjs";
+import "./config_fields_smoke.mjs";
 
 import {
   agentStructureSignature,
