@@ -49,7 +49,7 @@ bash <(curl -fsSL "https://raw.githubusercontent.com/qimaoww/qcontrolhub/main/de
 
 Alpine 会自动安装 `ca-certificates`、`coreutils`、`curl`、`libcap`、`nftables` 与 `openrc`，使用 `/etc/init.d/qagent*`、`/etc/conf.d/qagent` 和 default runlevel。没有 `sudo` 的 Alpine 主机应先切换为 root，再执行控制台生成的同一条 `sh` 命令。Alpine 上的 Shadowsocks Rust 版本切换会选择官方 musl 资产。
 
-一键安装器可以识别符合严格安全检查的标准 Xray 或 sing-box 服务：systemd 核验唯一 `ExecStart`，OpenRC 核验活动服务对应的 `/proc` 实际二进制和精确参数。现有配置不会在注册时自动切换服务，管理员可在“手动配置”页查看节点快照并显式迁移到 QAgent 专用服务；迁移失败会恢复原服务。无法精确识别时，安装器保留原服务并继续接入 QAgent，面板只禁用该内核的远程任务，不影响节点管理和其他内核。
+一键安装器可以识别符合严格安全检查的标准 Xray 或 sing-box 服务：systemd 核验唯一 `ExecStart`，OpenRC 核验活动服务对应的 `/proc` 实际二进制和精确参数。Agent 启动时还可识别 systemd 下由 `install-ss-rust` 安装的 SS Rust，保留多端口及出站 ACL，详见 [SS Rust 预设与导入](docs/ss-rust-import.md)。现有配置不会在注册时自动切换服务，管理员可在“手动配置”页查看节点快照并显式迁移到 QAgent 专用服务；迁移失败会恢复原服务。无法精确识别时，安装器保留原服务并继续接入 QAgent，面板只禁用该内核的远程任务，不影响节点管理和其他内核。
 
 手工部署可运行 `sudo sh deploy/bootstrap-core-services.sh <内核>`，其中内核是 `mihomo`、`xray`、`sing-box` 或 `shadowsocks-rust`；省略参数仍可一次准备全部四个。脚本创建非 root 的 `qcontrolhub-core` 用户、所选 `qagent-*` 服务和只在缺失时写入的最小回环配置，不会迁移通用服务或覆盖已有配置。
 

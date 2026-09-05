@@ -29,6 +29,7 @@ type EngineSpec struct {
 	Binary           string
 	ConfigPath       string
 	ConfigDirectory  string
+	ACLPath          string
 	WorkingDirectory string
 	ServiceBinary    string
 	Service          string
@@ -151,6 +152,7 @@ func supportedExistingServiceForManager(manager *ServiceManager, engine core.Eng
 			(engine == core.EngineSingBox && (service == "sing-box" || service == "singbox"))
 	}
 	return (engine == core.EngineXray && service == "xray.service") ||
+		(engine == core.EngineShadowsocksRust && service == "shadowsocks-rust.service") ||
 		(engine == core.EngineSingBox && (service == "sing-box.service" || service == "singbox.service"))
 }
 
@@ -523,6 +525,7 @@ func validateExistingSpecPaths(engine core.Engine, spec EngineSpec) error {
 		"binary": spec.Binary, "configuration": spec.ConfigPath,
 		"configuration directory": spec.ConfigDirectory, "service executable": existingServiceBinary(spec),
 		"working directory": spec.WorkingDirectory,
+		"ACL":               spec.ACLPath,
 	} {
 		if strings.ContainsAny(path, " \t\r\n") {
 			return fmt.Errorf("existing %s %s path contains unsupported whitespace", engine, label)
@@ -535,6 +538,12 @@ func validateExistingSpecPaths(engine core.Engine, spec EngineSpec) error {
 	}
 	if spec.WorkingDirectory != "" && (engine != core.EngineSingBox || !filepath.IsAbs(spec.WorkingDirectory)) {
 		return fmt.Errorf("existing %s working directory is unsupported or not absolute", engine)
+	}
+	if spec.ACLPath != "" && (engine != core.EngineShadowsocksRust || spec.ACLPath != filepath.Join(filepath.Dir(spec.ConfigPath), "block_cn.acl")) {
+		return fmt.Errorf("existing %s ACL path is unsupported", engine)
+	}
+	if engine == core.EngineShadowsocksRust && spec.ConfigDirectory != "" {
+		return errors.New("SS Rust configuration directories are unsupported")
 	}
 	return nil
 }
@@ -755,6 +764,12 @@ func (e *Executor) readExistingConfig(ctx context.Context, engine core.Engine, m
 		}
 	}
 	switch engine {
+	case core.EngineShadowsocksRust:
+		plan, planErr := prepareSSRustImport(existing, content)
+		if planErr != nil {
+			return "", planErr
+		}
+		content = plan.managedContent
 	case core.EngineXray:
 		content, err = normalizeImportedXrayLogDestinations(content)
 		if err != nil {

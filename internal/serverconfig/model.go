@@ -42,6 +42,7 @@ type Protocol struct {
 	SupportsRealityMLDSA bool     `json:"supports_reality_mldsa"`
 	UsesVLESSEncryption  bool     `json:"uses_vless_encryption"`
 	PortForward          bool     `json:"port_forward"`
+	DefaultListen        string   `json:"default_listen,omitempty"`
 }
 
 type Input struct {
@@ -100,28 +101,32 @@ type Input struct {
 	TargetAddress            string `json:"target_address"`
 	TargetPort               int    `json:"target_port"`
 	Network                  string `json:"network"`
+	SSRustDNS                string `json:"ss_rust_dns"`
+	SSRustOutboundBindAddr   string `json:"ss_rust_outbound_bind_addr"`
+	SSRustIPv6First          bool   `json:"ss_rust_ipv6_first"`
 	BlockMainlandDestination bool   `json:"block_mainland_destination"`
 	BlockMainlandSource      bool   `json:"block_mainland_source"`
 }
 
 func Protocols(engine core.Engine) []Protocol {
 	if engine == core.EngineShadowsocksRust {
-		return []Protocol{
+		protocols := []Protocol{
 			{
 				Key: ProtocolShadowsocks, Name: "Shadowsocks", Badge: "SS",
 				Description: "Shadowsocks Rust 标准 AEAD 服务端，默认同时监听 TCP 与 UDP。",
 				Docs:        "https://shadowsocks.org/doc/configs.html", DefaultPort: 8388, Credential: "服务端密码",
 				Methods:    []string{"chacha20-ietf-poly1305", "aes-256-gcm", "aes-128-gcm"},
-				Transports: []string{"raw"}, IgnoresUsername: true,
+				Transports: []string{"raw"}, IgnoresUsername: true, DefaultListen: "::",
 			},
 			{
 				Key: ProtocolSS2022, Name: "Shadowsocks 2022", Badge: "SS2022",
 				Description: "Shadowsocks Rust 的 AEAD-2022 服务端，使用标准 Base64 PSK。",
 				Docs:        "https://shadowsocks.org/doc/configs.html", DefaultPort: 8388, Credential: "Base64 PSK",
-				Methods:    []string{"2022-blake3-aes-256-gcm", "2022-blake3-aes-128-gcm", "2022-blake3-chacha20-poly1305"},
-				Transports: []string{"raw"}, IgnoresUsername: true,
+				Methods:    []string{"2022-blake3-aes-128-gcm", "2022-blake3-aes-256-gcm", "2022-blake3-chacha20-poly1305"},
+				Transports: []string{"raw"}, IgnoresUsername: true, DefaultListen: "::",
 			},
 		}
+		return []Protocol{protocols[1], protocols[0]}
 	}
 	base := ""
 	switch engine {

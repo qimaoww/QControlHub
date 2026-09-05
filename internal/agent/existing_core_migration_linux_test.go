@@ -1645,7 +1645,7 @@ case "$command" in
 	  printf 'failed\n' > "$active_file"
 	  exit 1
 	fi
-    if [ "$service" = qagent-xray.service ] && [ -f "$state/fail-managed-start" ]; then
+    if { [ "$service" = qagent-xray.service ] || [ "$service" = qagent-shadowsocks-rust.service ]; } && [ -f "$state/fail-managed-start" ]; then
       printf 'failed\n' > "$active_file"
       exit 1
     fi

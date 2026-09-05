@@ -31,7 +31,7 @@ Snell 预设只生成 Mihomo 当前支持的 v5，不提供旧版本或 v6 字�
 
 ## 生成和部署
 
-生成器按内核输出原生格式：Mihomo 使用 `listeners` YAML，Xray 和 sing-box 使用 `inbounds` JSON，Shadowsocks Rust 使用官方单服务端 JSON。端口转发分别生成 Mihomo `tunnel` listener、Xray `tunnel` inbound 和 sing-box `direct` inbound，并把统一的 TCP / UDP 选择转换为各内核的原生字段。保存时执行以下检查：
+生成器按内核输出原生格式：Mihomo 使用 `listeners` YAML，Xray 和 sing-box 使用 `inbounds` JSON。Shadowsocks Rust 的单入站片段在新增时合并为官方 `servers` 多端口 JSON；向旧单端口配置新增时自动保留旧端口并转换为多端口，重复端口会拒绝。端口转发分别生成 Mihomo `tunnel` listener、Xray `tunnel` inbound 和 sing-box `direct` inbound，并把统一的 TCP / UDP 选择转换为各内核的原生字段。保存时执行以下检查：
 
 - 节点必须存在并声明对应内核能力；
 - 配置固定绑定到该节点和内核，不能部署到其他 Agent；

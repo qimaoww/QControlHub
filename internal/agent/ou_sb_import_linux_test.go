@@ -60,10 +60,10 @@ func TestOUSBImportPlanStagesProtectedServiceReadableResources(t *testing.T) {
 	ouSBManagedStateRoot = stateRoot
 	t.Cleanup(func() { ouSBManagedStateRoot = previousStateRoot })
 	resourceRoot := filepath.Join(stateRoot, "ou-sb", strings.Repeat("a", 64))
-	plan := ouSBImportPlan{
+	plan := coreImportPlan{
 		managedContent: "{}\n",
 		resourceRoot:   resourceRoot,
-		resources: []ouSBImportResource{
+		resources: []coreImportResource{
 			{source: fullchain, destination: filepath.Join(resourceRoot, "fullchain.pem")},
 			{source: privateKey, destination: filepath.Join(resourceRoot, "privkey.pem")},
 		},

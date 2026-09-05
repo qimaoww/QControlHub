@@ -53,6 +53,9 @@ func main() {
 	if spec, ok := existingSpec("SING_BOX"); ok {
 		manualExistingSpecs[core.EngineSingBox] = spec
 	}
+	if spec, ok := existingSpec("SS_RUST"); ok {
+		manualExistingSpecs[core.EngineShadowsocksRust] = spec
+	}
 	discoveryContext, discoveryCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	existingSpecs, discoveryIssues, err := agent.RefreshExistingCoreDiscovery(
 		discoveryContext,
@@ -120,7 +123,8 @@ func existingSpec(prefix string) (agent.EngineSpec, bool) {
 	workingDirectory := strings.TrimSpace(os.Getenv("QCH_EXISTING_" + prefix + "_WORK_DIRECTORY"))
 	serviceBinary := strings.TrimSpace(os.Getenv("QCH_EXISTING_" + prefix + "_SERVICE_BINARY"))
 	service := strings.TrimSpace(os.Getenv("QCH_EXISTING_" + prefix + "_SERVICE"))
-	configured := binary != "" || configPath != "" || configDirectory != "" || workingDirectory != "" || serviceBinary != "" || service != ""
+	aclPath := strings.TrimSpace(os.Getenv("QCH_EXISTING_" + prefix + "_ACL"))
+	configured := binary != "" || configPath != "" || configDirectory != "" || workingDirectory != "" || serviceBinary != "" || service != "" || aclPath != ""
 	if !configured {
 		return agent.EngineSpec{}, false
 	}
@@ -133,6 +137,7 @@ func existingSpec(prefix string) (agent.EngineSpec, bool) {
 	return agent.EngineSpec{
 		Binary: binary, ConfigPath: configPath, ConfigDirectory: configDirectory,
 		WorkingDirectory: workingDirectory, ServiceBinary: serviceBinary, Service: service,
+		ACLPath: aclPath,
 	}, true
 }
 
@@ -145,11 +150,11 @@ func runUtilityCommand(specs map[core.Engine]agent.EngineSpec, arguments []strin
 		serviceManager = serviceManagers[0]
 	}
 	if len(arguments) != 2 || arguments[0] != "inspect-existing" {
-		return errors.New("usage: qagent inspect-existing <xray|sing-box>")
+		return errors.New("usage: qagent inspect-existing <xray|sing-box|ss-rust>")
 	}
 	engine, err := core.ParseEngine(arguments[1])
-	if err != nil || (engine != core.EngineXray && engine != core.EngineSingBox) {
-		return errors.New("inspect-existing supports only xray and sing-box")
+	if err != nil || (engine != core.EngineXray && engine != core.EngineSingBox && engine != core.EngineShadowsocksRust) {
+		return errors.New("inspect-existing supports only xray, sing-box and ss-rust")
 	}
 	existing := specs[engine]
 	temporaryDirectory, err := os.MkdirTemp("", "qagent-inspect-existing-")

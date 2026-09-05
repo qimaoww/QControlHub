@@ -50,6 +50,7 @@ func ParseAll(engine core.Engine, content string) []Input {
 		for index, value := range entries {
 			entry := mapValue(value)
 			if input, ok := parseShadowsocksRustEntry(entry, shadowsocksRustEntryTag(entry, index)); ok {
+				input.SSRustIPv6First, _ = root["ipv6_first"].(bool)
 				result = append(result, input)
 			}
 		}

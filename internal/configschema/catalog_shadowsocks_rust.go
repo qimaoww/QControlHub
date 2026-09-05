@@ -14,6 +14,9 @@ func shadowsocksRustFields() []Field {
 		field("no_delay", "TCP_NODELAY", "布尔", "启用 TCP_NODELAY。", general),
 		field("keep_alive", "TCP Keepalive", "整数", "TCP keepalive 超时时间，单位为秒。", general),
 		field("servers", "多服务端配置", "对象数组", "Shadowsocks Rust 扩展格式，可同时运行多个服务端。", general),
+		field("dns", "DNS", "字符串或对象", "全局 DNS；servers[].dns 可为每个端口单独指定。", general),
+		field("outbound_bind_addr", "出站绑定地址", "字符串", "出站使用的本机 IP；servers[].outbound_bind_addr 可逐端口覆盖。", general),
+		field("ipv6_first", "IPv6 优先", "布尔", "全局优先使用 IPv6 地址，默认 false。", general),
 		field("security", "安全策略", "对象", "重放攻击检测等安全策略。", general),
 		field("acl", "访问控制", "字符串", "ACL 文件路径。", general),
 	}
