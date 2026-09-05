@@ -20,7 +20,7 @@ const ouSBResourceLimit = 4 << 20
 var (
 	ouSBConfigPath       = "/etc/sing-box/config.json"
 	ouSBCertificateRoot  = "/etc/ou-sb/certs"
-	ouSBManagedStateRoot = "/var/lib/qcontrolhub-sing-box"
+	ouSBManagedStateRoot = "/etc/qagent/sing-box"
 )
 
 type coreImportResource struct {

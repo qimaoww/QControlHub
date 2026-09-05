@@ -276,6 +276,8 @@ docker compose ps
 
 ### 更新 Agent
 
+在线升级的校验、备份、异常恢复及覆盖范围见 [Agent 升级与恢复边界](agent-upgrade-lifecycle.md)。OU-SB 证书新导入使用 `/etc/qagent/sing-box/ou-sb/<摘要>/`，SS Rust ACL 使用对应的 `/etc/qagent/shadowsocks-rust/` 子目录，兼容旧 Agent 的只读沙箱。
+
 面板“升级 Agent”仍原子替换二进制并重启进程；新版二进制内置同一构建的内核安装脚本、systemd/OpenRC 模板和最小配置。升级后首次显式安装或导入内核时，Agent 将完整资源包按 SHA-256 摘要原子释放到 `/usr/local/lib/qagent/core-install/<摘要>/`，复用前逐文件核验内容、权限和所有权。这个目录位于已有 QAgent 服务的可写范围内，因此旧节点只需升级一次二进制，不要求重新部署或放宽服务权限。
 
 旧安装器缓存 `/usr/local/share/qcontrolhub/core-install` 不再作为新版 Agent 的执行来源，也不会被覆盖。资源准备不下载远程脚本，不启停内核，不更改 `/etc/qagent` 或原服务配置；实际安装与迁移仍由显式任务触发。资源不完整、被修改或路径不安全时任务报错，不回退执行旧资源。旧版本资源目录保留，回退到具备此机制的旧 Agent 时使用该二进制自身的资源摘要；更早的 Agent 仍使用原安装器缓存。

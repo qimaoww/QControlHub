@@ -172,6 +172,10 @@ install_if_missing() {
     exit 1
   fi
   if [ -e "$destination" ]; then
+    if [ ! -f "$destination" ]; then
+      printf '%s\n' "refusing non-regular configuration: $destination" >&2
+      exit 1
+    fi
     printf '%s\n' "preserved existing file: $destination"
     return
   fi

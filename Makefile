@@ -3,7 +3,7 @@ SHELL := /bin/sh
 VERSION ?= dev
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
-.PHONY: build test alpine-test vet fmt-check frontend-check pr-policy-test schema-policy-test installer-test agent-redeploy-test quick-start-test web-image-test docs-check check init-env compose-config up dev-up down logs
+.PHONY: build test alpine-test upgrade-sandbox-test vet fmt-check frontend-check pr-policy-test schema-policy-test installer-test agent-redeploy-test quick-start-test web-image-test docs-check check init-env compose-config up dev-up down logs
 
 build:
 	mkdir -p bin
@@ -15,7 +15,16 @@ test:
 
 alpine-test:
 	@packages="$$(go list ./... | sed '\|/internal/agent$$|d')"; go test $$packages
-	go test ./internal/agent -run 'OpenRC|PerServiceManager'
+	go test ./internal/agent -run 'OpenRC|PerServiceManager|AgentUpgrade|ManagedCorePrerequisites'
+
+upgrade-sandbox-test:
+	docker build -f deploy/tests/Dockerfile.upgrade-lifecycle -t qch-upgrade-lifecycle-test .
+	docker run --rm --read-only --network none --cap-drop ALL --cap-add CHOWN \
+		--security-opt no-new-privileges --tmpfs /tmp:rw,exec,mode=1777 \
+		--tmpfs /usr/local/lib/qagent:rw,exec,mode=0755 --tmpfs /etc/qagent:rw,mode=0755 \
+		-e QCH_TEST_UPGRADE_SANDBOX=1 -e GOCACHE=/tmp/qch-go-cache -e GOTOOLCHAIN=local \
+		-v "$(CURDIR):/src:ro" -v "$$(go env GOMODCACHE):/go/pkg/mod:ro" \
+		qch-upgrade-lifecycle-test go test ./internal/agent -run '^TestAgentLifecycleReadOnlySandbox$$' -count=1 -v
 
 vet:
 	go vet ./...

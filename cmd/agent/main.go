@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -21,6 +22,19 @@ import (
 var version = "dev"
 
 func main() {
+	// Handle the side-effect-limited candidate check before loading credentials,
+	// discovering cores, or starting the Agent's normal runtime.
+	if len(os.Args) == 4 && os.Args[1] == "upgrade-preflight" {
+		report, err := agent.PreflightAgentUpgrade(version, os.Args[2], os.Args[3])
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		if err := json.NewEncoder(os.Stdout).Encode(report); err != nil {
+			os.Exit(1)
+		}
+		return
+	}
 	hostname, _ := os.Hostname()
 	serviceManagerName := env("QCH_SERVICE_MANAGER", agent.ServiceManagerSystemd)
 	serviceManager, err := agent.NewServiceManager(serviceManagerName)

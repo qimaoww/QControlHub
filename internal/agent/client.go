@@ -85,6 +85,10 @@ type Client struct {
 	executionsMu      sync.Mutex
 	executions        map[string]*taskExecution
 	restartAfterTask  string
+	taskLifecycleMu   sync.Mutex
+	upgradePending    bool
+	upgradeCommitted  *agentUpgradeTransaction
+	reexecFunc        func(string, []string, []string) error
 	executeFunc       func(context.Context, core.Task) (string, error)
 }
 
@@ -493,6 +497,12 @@ func (c *Client) runWebSocket(ctx context.Context) error {
 		case message := <-incoming:
 			switch message.Type {
 			case core.WireHello:
+				// The result ACK can be lost after the control plane committed
+				// it. A subsequent authenticated connection must not leave the
+				// old process running forever with a new binary on disk.
+				if c.committedUpgradeAwaitingRestart() {
+					go c.reexecAfterUpgrade()
+				}
 				if err := c.traffic.SetPolicies(sessionContext, message.TrafficPolicies, c.creds.AgentID); err != nil {
 					return fmt.Errorf("apply control-plane traffic policies: %w", err)
 				}
@@ -684,15 +694,22 @@ func (c *Client) resultForTask(ctx context.Context, task core.Task) core.TaskRes
 	execution := &taskExecution{done: make(chan struct{})}
 	c.executions[task.ID] = execution
 	c.executionsMu.Unlock()
+	// Serialize mutations across reconnects as well as within one WSS session.
+	// An upgrade must not replace/re-exec the process during a core migration.
+	c.taskLifecycleMu.Lock()
+	defer c.taskLifecycleMu.Unlock()
 
 	slog.Info("executing task", "task_id", task.ID, "action", task.Action, "engine", task.Engine)
 	execute := c.executeFunc
 	var output string
 	var executionErr error
 	preparedLogTransition := false
-	if task.Action == core.ActionUpgradeAgent {
+	if c.upgradePending {
+		executionErr = errors.New("Agent upgrade is waiting for restart; retry after the new Agent reconnects")
+	} else if task.Action == core.ActionUpgradeAgent {
 		output, executionErr = c.upgradeAgent(ctx)
 		if executionErr == nil {
+			c.upgradePending = true
 			c.executionsMu.Lock()
 			c.restartAfterTask = task.ID
 			c.executionsMu.Unlock()
@@ -760,6 +777,18 @@ func (c *Client) resultForTask(ctx context.Context, task core.Task) core.TaskRes
 	if task.Action != core.ActionReadConfig && task.Action != core.ActionReadManagedConfig {
 		if err := c.rememberTaskResult(task.ID, result); err != nil {
 			slog.Warn("persist completed task result", "task_id", task.ID, "error", err)
+			if task.Action == core.ActionUpgradeAgent && result.Success && c.upgradeCommitted != nil {
+				rollbackErr := c.upgradeCommitted.rollback()
+				result.Success = false
+				result.Error = fmt.Sprintf("persist Agent upgrade result: %v; rollback: %v", err, rollbackErr)
+				c.credentialsMu.Lock()
+				delete(c.creds.CompletedTasks, task.ID)
+				c.credentialsMu.Unlock()
+				c.executionsMu.Lock()
+				c.restartAfterTask = ""
+				c.executionsMu.Unlock()
+				c.upgradePending = rollbackErr != nil
+			}
 		}
 	}
 	c.executionsMu.Lock()
@@ -890,19 +919,14 @@ func (c *Client) upgradeAgent(ctx context.Context) (string, error) {
 		return "", err
 	}
 	defer os.Remove(temporary)
-	info, err := os.Lstat(executable)
+	transaction, err := prepareAgentUpgrade(ctx, executable, temporary, version, c.executor.serviceManager().Kind())
 	if err != nil {
-		return "", fmt.Errorf("inspect running Agent executable: %w", err)
+		return "", err
 	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 {
-		return "", errors.New("running Agent executable is not a regular executable file")
+	if err := transaction.commit(); err != nil {
+		return "", err
 	}
-	if err := os.Chmod(temporary, info.Mode().Perm()); err != nil {
-		return "", fmt.Errorf("set upgraded Agent permissions: %w", err)
-	}
-	if err := os.Rename(temporary, executable); err != nil {
-		return "", fmt.Errorf("replace Agent executable atomically: %w", err)
-	}
+	c.upgradeCommitted = transaction
 	return fmt.Sprintf("Agent binary replaced with %s (%d bytes); reconnecting with the upgraded process", versionLabel(version), size), nil
 }
 
@@ -949,7 +973,7 @@ func (c *Client) downloadAgentBinary(ctx context.Context, directory string) (str
 		cleanup()
 		return "", "", 0, errors.New("downloaded Agent binary has an invalid size")
 	}
-	if expected := strings.TrimSpace(response.Header.Get("X-QControlHub-Agent-SHA256")); expected != "" && !strings.EqualFold(expected, fmt.Sprintf("%x", hash.Sum(nil))) {
+	if expected := strings.TrimSpace(response.Header.Get("X-QControlHub-Agent-SHA256")); len(expected) != sha256.Size*2 || !strings.EqualFold(expected, fmt.Sprintf("%x", hash.Sum(nil))) {
 		cleanup()
 		return "", "", 0, errors.New("downloaded Agent binary checksum mismatch")
 	}
@@ -966,19 +990,36 @@ func (c *Client) downloadAgentBinary(ctx context.Context, directory string) (str
 
 func (c *Client) reexecAfterUpgrade() {
 	time.Sleep(150 * time.Millisecond)
-	executable, err := os.Executable()
-	if err != nil {
-		slog.Error("resolve upgraded Agent executable for restart", "error", err)
+	c.taskLifecycleMu.Lock()
+	defer c.taskLifecycleMu.Unlock()
+	if !c.upgradePending || c.upgradeCommitted == nil {
 		return
 	}
-	executable, err = filepath.EvalSymlinks(executable)
-	if err != nil {
-		slog.Error("resolve upgraded Agent executable path for restart", "error", err)
+	executable := c.upgradeCommitted.executable
+	if digest, exists, err := protectedCoreMigrationFileDigest(executable, core.MaxAgentBinaryBytes); err != nil || !exists || digest != c.upgradeCommitted.candidateDigest {
+		slog.Error("upgraded Agent changed before restart; refusing to execute it")
 		return
 	}
-	if err := syscall.Exec(executable, os.Args, os.Environ()); err != nil {
+	reexec := c.reexecFunc
+	if reexec == nil {
+		reexec = syscall.Exec
+	}
+	if err := reexec(executable, os.Args, os.Environ()); err != nil {
 		slog.Error("restart upgraded Agent", "error", err)
+		if c.upgradeCommitted != nil {
+			if rollbackErr := c.upgradeCommitted.rollback(); rollbackErr != nil {
+				slog.Error("restore previous Agent executable", "error", rollbackErr)
+				return
+			}
+			c.upgradePending = false
+		}
 	}
+}
+
+func (c *Client) committedUpgradeAwaitingRestart() bool {
+	c.taskLifecycleMu.Lock()
+	defer c.taskLifecycleMu.Unlock()
+	return c.upgradePending && c.upgradeCommitted != nil
 }
 
 func versionLabel(value string) string {

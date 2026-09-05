@@ -1,0 +1,3 @@
+FROM golang:1.25-bookworm
+RUN groupadd --system qcontrolhub-core && useradd --system --gid qcontrolhub-core --no-create-home qcontrolhub-core
+WORKDIR /src

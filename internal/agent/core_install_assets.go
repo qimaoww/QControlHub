@@ -70,7 +70,7 @@ func stageBundledCoreInstallAssets(directory string) (string, error) {
 	if !filepath.IsAbs(directory) || filepath.Clean(directory) != directory {
 		return "", errors.New("core install asset directory must be a clean absolute path")
 	}
-	if err := validateProtectedDirectoryChain(filepath.Dir(directory)); err != nil {
+	if err := ensureCoreInstallAssetParent(filepath.Dir(directory)); err != nil {
 		return "", fmt.Errorf("unsafe core install asset parent: %w", err)
 	}
 	if err := os.Mkdir(directory, 0o755); err != nil && !errors.Is(err, os.ErrExist) {
@@ -144,6 +144,27 @@ func stageBundledCoreInstallAssets(directory string) (string, error) {
 		return "", err
 	}
 	return scriptPath, nil
+}
+
+// Older hand-installed Agents may have no private binary directory yet.
+// Build only a missing, protected parent chain; never chmod existing paths.
+func ensureCoreInstallAssetParent(directory string) error {
+	if _, err := os.Lstat(directory); err == nil {
+		return validateProtectedDirectoryChain(directory)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	parent := filepath.Dir(directory)
+	if parent == directory {
+		return errors.New("core install asset parent has no existing ancestor")
+	}
+	if err := ensureCoreInstallAssetParent(parent); err != nil {
+		return err
+	}
+	if err := os.Mkdir(directory, 0o755); err != nil && !errors.Is(err, os.ErrExist) {
+		return err
+	}
+	return validateProtectedDirectoryChain(directory)
 }
 
 func verifyCoreInstallAssets(root *os.Root, directory string, assets []coreInstallAsset) error {
