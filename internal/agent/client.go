@@ -480,6 +480,9 @@ func (c *Client) runWebSocket(ctx context.Context) error {
 			if err := c.queueHeartbeat(sessionContext, outgoing); err != nil {
 				return err
 			}
+			if c.committedUpgradeAwaitingRestart() {
+				go c.reexecAfterUpgrade()
+			}
 		case <-metricsTicker.C:
 			if err := c.queueMetrics(sessionContext, outgoing); err != nil {
 				return err
@@ -1017,7 +1020,11 @@ func (c *Client) reexecAfterUpgrade() {
 }
 
 func (c *Client) committedUpgradeAwaitingRestart() bool {
-	c.taskLifecycleMu.Lock()
+	// Never block the websocket loop behind a long-running core mutation.
+	// The next heartbeat retries if a reconnect overlaps task completion.
+	if !c.taskLifecycleMu.TryLock() {
+		return false
+	}
 	defer c.taskLifecycleMu.Unlock()
 	return c.upgradePending && c.upgradeCommitted != nil
 }

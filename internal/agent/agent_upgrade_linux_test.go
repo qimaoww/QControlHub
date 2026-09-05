@@ -17,6 +17,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/authn"
 	"github.com/qimaoww/qcontrolhub/internal/core"
@@ -224,6 +225,26 @@ func TestAgentUpgradeReconnectRetainsRestartIntent(t *testing.T) {
 	client.upgradePending = false
 	if client.committedUpgradeAwaitingRestart() {
 		t.Fatal("rolled-back upgrade schedules another restart")
+	}
+}
+
+func TestAgentUpgradeRestartProbeDoesNotBlockHeartbeat(t *testing.T) {
+	client := &Client{upgradePending: true, upgradeCommitted: &agentUpgradeTransaction{}}
+	client.taskLifecycleMu.Lock()
+	done := make(chan bool, 1)
+	go func() { done <- client.committedUpgradeAwaitingRestart() }()
+	select {
+	case ready := <-done:
+		if ready {
+			t.Error("restart probe ignored active mutation")
+		}
+	case <-time.After(time.Second):
+		client.taskLifecycleMu.Unlock()
+		t.Fatal("restart probe blocked network loop")
+	}
+	client.taskLifecycleMu.Unlock()
+	if !client.committedUpgradeAwaitingRestart() {
+		t.Fatal("next heartbeat lost restart intent")
 	}
 }
 
