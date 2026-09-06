@@ -105,8 +105,11 @@ func TestSSRustScopedConfigAPIWithPostgreSQL(t *testing.T) {
 		t.Fatalf("scope isolation lost: %s", saved.Content)
 	}
 	const customName = "香港-ATT"
+	if err := dataStore.ReplaceMainlandAccessPolicies(ctx, agent.ID, saved.Version, []core.MainlandAccessPolicy{{AgentID: agent.ID, Engine: core.EngineShadowsocksRust, Tag: "two", Port: 20002, Kind: "shadowsocks", BlockMainlandSource: true}}); err != nil {
+		t.Fatal(err)
+	}
 	response = request(http.MethodPost, "/server-inbounds", map[string]any{"operation": "modify", "original_tag": "one", "expected_version": saved.Version, "intent": "validate", "preserve_ss_rust_globals": true,
-		"input": map[string]any{"protocol": "shadowsocks", "tag": customName, "listen": "::", "port": 20003, "method": "aes-256-gcm", "credential": "password-one-long", "username": "default"}})
+		"input": map[string]any{"protocol": "shadowsocks", "tag": customName, "listen": "::", "port": 20003, "method": "aes-256-gcm", "credential": "password-one-long", "username": "default", "block_mainland_source": true}})
 	if response.Code != http.StatusOK {
 		t.Fatalf("rename through preset: %d %s", response.Code, response.Body.String())
 	}
@@ -117,5 +120,9 @@ func TestSSRustScopedConfigAPIWithPostgreSQL(t *testing.T) {
 	parsed := serverconfig.ParseAll(core.EngineShadowsocksRust, saved.Content)
 	if len(parsed) != 2 || parsed[0].Tag != customName || parsed[1].Tag != "two" {
 		t.Fatalf("preset did not persist names: %+v", parsed)
+	}
+	policies, err := dataStore.ListMainlandAccessPolicies(ctx, agent.ID)
+	if err != nil || len(policies) != 2 || policies[0].Tag != "two" || policies[1].Tag != customName || !policies[1].BlockMainlandSource {
+		t.Fatalf("renaming changed port policies: %+v %v", policies, err)
 	}
 }
