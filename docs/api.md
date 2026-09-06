@@ -39,6 +39,7 @@
 | `POST` | `/api/v1/auth/logout` | 注销当前 SPA 会话 |
 | `GET` | `/api/v1/agents` | 列出未撤销 Agent |
 | `DELETE` | `/api/v1/agents/{id}` | 永久撤销 Agent、立即断开 WSS 并终止其未完成任务 |
+| `PUT` | `/api/v1/agents/{id}/name` | 修改面板显示的节点名称，不改变身份和安装凭据（agents.manage） |
 | `POST` | `/api/v1/agents/{id}/enrollment-token` | 为该节点新增一条独立、可重复使用的 Agent 安装凭据；已有凭据继续有效（enrollment.manage） |
 | `POST` | `/api/v1/agents/{id}/enrollment-command` | 幂等读取该节点已有且仍有效的安装命令，不创建或消费凭据（enrollment.manage） |
 | `GET` | `/api/v1/agents/{id}/configs` | 列出节点已有的内核配置 |
@@ -156,6 +157,12 @@
 ```
 
 `name` 同时是凭证绑定的节点名称。接口始终创建无有效期、可重复安装的添加节点命令；重复注册会更新原节点的密钥并复用节点 ID。创建时控制面保存用于认证的 SHA-256 摘要，并使用 `QCH_CONFIG_ENCRYPTION_KEY` 保存受保护的 AEAD 可恢复副本；专用读取接口带有 `Cache-Control: no-store`，普通列表与 Agent API 永不返回凭据。查看是幂等读，不增加记录、使用次数或轮换 secret。缺少当前密钥、密钥不匹配、密文损坏以及升级前仅有摘要的旧记录均 fail closed；旧记录仍可继续安装和删除，但因原文不可逆而无法查看。删除某条添加记录后，仅对应命令立即失效；删除节点会使该节点的全部安装命令失效。
+
+### 修改节点名称
+
+在节点详情的“Agent 与身份”中可保存自定义名称。`PUT /api/v1/agents/{id}/name` 接受 `{"name":"香港 · edge-01"}`，返回裁剪首尾空白后的同形对象。名称须为 1–100 个 Unicode 字符，不得包含控制字符；非法名称返回 `400`，节点不存在或已撤销返回 `404`。接口需要 `agents.manage` 权限，浏览器会话还需 CSRF，并记录 `agent.renamed` 审计。
+
+名称只修改控制面展示元数据，不改变节点 ID、公钥、配置关联或现有 WSS 连接。旧安装命令保留原凭据绑定名称，仍可使用；心跳和使用旧命令重装都不会把自定义名称改回。改名不自动修改独立设置的客户端分享名称。
 
 ### 创建配置
 

@@ -462,7 +462,7 @@ func managedCoreUnitLines(engine core.Engine, managed EngineSpec) []string {
 	case core.EngineShadowsocksRust:
 		documentation = "https://github.com/shadowsocks/shadowsocks-rust"
 		execStart = managed.Binary + " -c " + managed.ConfigPath + " --acl " + shadowsocksRustACLPath
-		extraServiceLines = append(extraServiceLines, "Environment=RUST_LOG=info")
+		extraServiceLines = append(extraServiceLines, "Environment=RUST_LOG="+managedSSRustLogFilter)
 	}
 	stateDirectory := "/var/lib/qcontrolhub-" + managedCoreAssetName(engine)
 	lines := []string{
@@ -501,6 +501,10 @@ func validateManagedUnitFragment(contents []byte, engine core.Engine, managed En
 		line := strings.TrimSuffix(rawLine, "\r")
 		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
 			continue
+		}
+		// Accept the exact historical info-only template for safe upgrades.
+		if engine == core.EngineShadowsocksRust && line == "Environment=RUST_LOG=info" {
+			line = "Environment=RUST_LOG=" + managedSSRustLogFilter
 		}
 		actual = append(actual, line)
 	}
@@ -573,13 +577,16 @@ func validateManagedServiceExecutionContext(ctx context.Context, engine core.Eng
 	workingDirectory := "/var/lib/qcontrolhub-" + managedCoreAssetName(engine)
 	expectedEnvironment := ""
 	if engine == core.EngineShadowsocksRust {
-		expectedEnvironment = "RUST_LOG=info"
+		expectedEnvironment = "RUST_LOG=" + managedSSRustLogFilter
 	}
 	for property, expected := range map[string]string{
 		"Type": "simple", "WorkingDirectory": workingDirectory, "RootDirectory": "",
 		"RootImage": "", "BindPaths": "", "BindReadOnlyPaths": "", "Environment": expectedEnvironment, "EnvironmentFiles": "",
 	} {
 		value, err := systemdUnitProperty(ctx, managed.Service, property)
+		if err == nil && engine == core.EngineShadowsocksRust && property == "Environment" && value == "RUST_LOG=info" {
+			continue
+		}
 		if err != nil || value != expected {
 			return fmt.Errorf("managed service effective %s is not %q", property, expected)
 		}
@@ -597,6 +604,9 @@ func validateManagedUnitDropIns(ctx context.Context, service string) error {
 		filepath.Join(existingDiscoveryManagedUnitRoot, service+".d", "20-qcontrolhub-volatile-logs.conf"): {
 			[]byte(managedCoreLogDropIn), []byte(managedCoreLogFallbackDropIn),
 		},
+	}
+	if service == "qagent-shadowsocks-rust.service" {
+		allowed[filepath.Join(existingDiscoveryManagedUnitRoot, service+".d", "30-qcontrolhub-ss-rust-logs.conf")] = [][]byte{[]byte(managedSSRustLogDropIn)}
 	}
 	for _, path := range strings.Fields(dropInValue) {
 		expected, ok := allowed[path]

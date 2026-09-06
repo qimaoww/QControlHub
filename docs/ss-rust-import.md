@@ -14,11 +14,19 @@ SS Rust 优先展示 Shadowsocks 2022，默认 `2022-blake3-aes-128-gcm`、匹�
 - **全局与默认值**：DNS（支持字符串或自定义对象）、IPv6 优先、TCP / UDP 超时、Fast Open、TCP_NODELAY、Keepalive、安全策略是全局设置；可被端口覆盖的字段单独标注为默认值。删除端口覆盖后继承全局值，不代表禁用全局值。空上游代理链也会继承全局链。
 - **完整源码**：独立入口，包含 `servers` 列表与未收录的配置字段。混合格式或重复端口标识不接受自动端口编辑，但仍可通过完整源码修正。
 
+三个区域使用面板统一的明暗主题和紧凑卡片。未选择端口时仅显示选择提示，全局字段仍可单独编辑；字段列表独立滚动，窄屏改为横向列表并保持选中项可见。Mihomo、Xray、sing-box 的全局字段也使用同一编辑布局，完整源码和参考文档单独折叠，不再挤占字段编辑区域。
+
 作用范围按 [SS Rust v1.25.0 配置解析](https://github.com/shadowsocks/shadowsocks-rust/blob/v1.25.0/crates/shadowsocks-service/src/config.rs) 与 [服务端运行逻辑](https://github.com/shadowsocks/shadowsocks-rust/blob/v1.25.0/crates/shadowsocks-service/src/server/mod.rs) 核对：`servers[].dns` 被忽略；`servers[].timeout` 虽有字段定义，但该版本实际读取顶层 `timeout`，因此不提供端口级超时控件。HTTP(S) 上游代理跳点不转发 UDP，UDP 会直连。`ssserver` 没有不启动服务的完整校验模式；保存并校验仅做结构检查，部署才实际启动内核。即使仅修改一个端口，部署也会重启整个 `ssserver` 进程，可能短暂影响所有端口。
 
 ACL 是特殊情况：端口 `acl` 优先于启动参数 `--acl`，后者又覆盖顶层 `acl`。新版 QAgent 模板使用固定 `--acl /etc/qagent/shadowsocks-rust/qch-mainland-block.acl`，因此顶层 ACL 不能视为当前进程一定生效的默认值。页面标注此优先级；导入保留显式端口 ACL，新增端口也复制已导入的顶层 ACL 为端口覆盖，避免原脚本策略被固定启动 ACL 覆盖。
 
 保存端口预设不再保存 DNS / IPv6 等全局设置；新增、修改或删除端口都保留已有全局值及其缺省状态。旧式顶层单端口配置首次端口编辑时转换为 `servers` 格式，原全局默认值、插件与当前选择保留。不新增或下载 CN 域名规则。
+
+## 日志
+
+面板新建配置和已迁移的 SS Rust 均使用集中日志。官方 v1.25.0 的正常 TCP 隧道和 UDP 会话记录是 `debug` 级别，单纯 `RUST_LOG=info` 只会留下启动信息及警告/错误，运行稳定后看起来像“没有日志”。托管 systemd / OpenRC 服务现在使用 `info,shadowsocks_service::server::tcprelay=debug,shadowsocks_service::server::udprelay=debug`，仅开启连接模块，不开启全局 debug 或报文 trace。采集器识别 SS Rust 行首的真实级别；已识别但尚未迁移的脚本服务 `shadowsocks-rust.service` 也会被只读采集，但不会修改原脚本 `.env`。
+
+已安装节点需先升级并重启 Agent，再在面板显式重启 SS Rust 或保存并部署一次配置，使新的服务环境生效。Agent 只更新经过验证的托管服务日志设置，不自动重启代理、不修改配置、ACL 或安装凭据。旧的未知/自定义服务定义不会被覆盖。日志页选择“全部”或“调试”，系统设置的“内核日志最低级别”须为 `debug` 才会保存正常连接记录；此设置是控制面保存过滤器，不是内核日志开关。只有保存配置而未运行服务，或没有新连接时，不会生成连接日志；日志采集也不会补采启动采集前的历史记录。连接日志含客户端/目标地址，继续受面板权限与日志保留策略保护。
 
 ## 导入与恢复检查
 
@@ -43,6 +51,6 @@ SS Rust 没有不启动服务的离线检查模式：导入前检查 JSON、文�
 ## 边界与回退
 
 - 脚本的入站 CN 防火墙、自有 nftables / iptables 对象及 `shadowsocks-rust-inbound-cn-block.service` 保持原状，不归 QAgent 管理。它们仍按旧配置的端口工作；修改端口前需由管理员在原脚本关闭旧入站规则，再按需要配置面板入站控制。
-- 脚本 `.env` 日志等级不迁移；QAgent 使用集中日志与 `RUST_LOG=info`。ACL 是导入时的独立副本，后续原脚本更新 ACL 不会同步到 QAgent。
+- 脚本 `.env` 日志等级不迁移；迁移后 QAgent 使用上述连接级别的集中日志策略。ACL 是导入时的独立副本，后续原脚本更新 ACL 不会同步到 QAgent。
 - 此脚本导入只支持 systemd；不扩展到 OpenRC、自定义 wrapper 参数或其他安装脚本布局。
 - 成功迁移后如需人工回退，先停止并禁用 `qagent-shadowsocks-rust.service`，再启用和启动原 `shadowsocks-rust.service`；原脚本文件仍在。面板完成标记需要另行核对，不应在两个服务同时运行时重试导入。

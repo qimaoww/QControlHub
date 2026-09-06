@@ -14,4 +14,4 @@ docker run --rm --read-only --network none --user "$(id -u):$(id -g)" --cap-drop
   -w /src golang:1.25-bookworm go test -c -buildvcs=false -o /native/runtime.test ./internal/serverconfig
 docker run --rm --read-only --network none --user 65534:65534 --cap-drop ALL \
   --tmpfs /tmp:exec,mode=1777 -e QCH_SS_RUST_NATIVE_BIN=/native \
-  -v "$fixture:/native:ro" golang:1.25-bookworm /native/runtime.test -test.run '^TestSSRustNativeFieldScopes$' -test.v
+  -v "$fixture:/native:ro" golang:1.25-bookworm /native/runtime.test -test.run '^TestSSRustNative(FieldScopes|ConnectionLogs)$' -test.v

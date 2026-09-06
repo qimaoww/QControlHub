@@ -7,12 +7,31 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
 const komariUUIDLabel = "komari_uuid"
+
+// SetAgentName changes only panel display metadata. Enrollment credentials
+// keep their original names, and reconnects continue to use the stable ID/key.
+func (s *Store) SetAgentName(ctx context.Context, id, name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" || !utf8.ValidString(name) || utf8.RuneCountInString(name) > 100 || strings.ContainsFunc(name, unicode.IsControl) {
+		return fmt.Errorf("%w: agent name must contain 1 to 100 characters without control characters", ErrInvalid)
+	}
+	command, err := s.pool.Exec(ctx, `UPDATE agents SET name=$2 WHERE id=$1 AND revoked_at IS NULL`, id, name)
+	if err != nil {
+		return err
+	}
+	if command.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
 
 // AgentKomariUUID returns the optional Komari node UUID stored with the
 // QControlHub agent's display labels. Keeping this as an agent preference

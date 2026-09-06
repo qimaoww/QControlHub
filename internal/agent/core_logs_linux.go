@@ -856,6 +856,8 @@ func (collector *CoreLogCollector) appendFileEntry(source coreLogFileSource, lin
 	level := "info"
 	if source.engine == core.EngineSingBox {
 		level = singBoxLogLevel(message)
+	} else if source.engine == core.EngineShadowsocksRust {
+		level = ssRustLogLevel(message, level)
 	}
 	collector.append(core.CoreLogEntry{Engine: source.engine, Level: level, Message: message, LoggedAt: time.Now().UTC()})
 }
@@ -896,6 +898,28 @@ func singBoxLogLevel(message string) string {
 		}
 	}
 	return "info"
+}
+
+// Rust's tracing/log4rs console output does not carry a syslog priority.
+// Match only the level prefix (optionally after its timestamp), never words
+// inside a connection message, hostname, or error description.
+var ssRustLogLevelPattern = regexp.MustCompile(`^(?:\d{4}-\d{2}-\d{2}[T ][0-9:.]+(?:Z|[+-][0-9:]+)?\s+)?(ERROR|WARN|INFO|DEBUG|TRACE)\s+`)
+
+func ssRustLogLevel(message, fallback string) string {
+	match := ssRustLogLevelPattern.FindStringSubmatch(message)
+	if match == nil {
+		return fallback
+	}
+	switch match[1] {
+	case "ERROR":
+		return "error"
+	case "WARN":
+		return "warning"
+	case "DEBUG", "TRACE":
+		return "debug"
+	default:
+		return "info"
+	}
 }
 
 // managedOpenRCCoreServiceName matches the fixed OpenRC service names
@@ -1594,6 +1618,8 @@ func coreLogJournalSources(specSets ...map[core.Engine]EngineSpec) []coreLogJour
 				addCoreLogUnit(generic, genericAmbiguous, spec.Service, engine)
 			case engine == core.EngineSingBox && (spec.Service == "sing-box.service" || spec.Service == "singbox.service"):
 				addCoreLogUnit(generic, genericAmbiguous, spec.Service, engine)
+			case engine == core.EngineShadowsocksRust && spec.Service == "shadowsocks-rust.service":
+				addCoreLogUnit(generic, genericAmbiguous, spec.Service, engine)
 			}
 		}
 	}
@@ -1751,7 +1777,11 @@ func decodeJournalCoreLog(value []byte, unitEngines map[string]core.Engine) (cor
 	if err != nil {
 		priority = 6
 	}
-	return core.CoreLogEntry{Engine: engine, Level: coreLogLevelForPriority(priority), Message: message, LoggedAt: loggedAt}, cursor, true
+	level := coreLogLevelForPriority(priority)
+	if engine == core.EngineShadowsocksRust {
+		level = ssRustLogLevel(message, level)
+	}
+	return core.CoreLogEntry{Engine: engine, Level: level, Message: message, LoggedAt: loggedAt}, cursor, true
 }
 
 func stringField(value any) string {
