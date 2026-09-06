@@ -100,9 +100,10 @@ type taskExecution struct {
 }
 
 const (
-	defaultHeartbeatInterval = 15 * time.Second
-	minHeartbeatInterval     = time.Second
-	maxHeartbeatInterval     = 30 * time.Second
+	webSocketHandshakeTimeout = 30 * time.Second
+	defaultHeartbeatInterval  = 15 * time.Second
+	minHeartbeatInterval      = time.Second
+	maxHeartbeatInterval      = 30 * time.Second
 	// Metrics pushes are lightweight /proc snapshots on a dedicated wire
 	// message so the panel's live card values refresh without waiting for the
 	// full heartbeat cycle.
@@ -296,10 +297,10 @@ func (c *Client) Run(ctx context.Context) error {
 			cleanupCancel()
 			return err
 		}
-		slog.Warn("WSS connection lost", "error", err, "reconnect_in", backoff)
 		if time.Since(started) > time.Minute {
 			backoff = time.Second
 		}
+		slog.Warn("WSS connection lost", "error", err, "reconnect_in", backoff)
 		timer := time.NewTimer(backoff)
 		select {
 		case <-ctx.Done():
@@ -385,19 +386,25 @@ func (c *Client) runWebSocket(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	handshake, err := http.NewRequestWithContext(ctx, http.MethodGet, c.websocketURL, nil)
+	// Bound the entire handshake, including a proxy/server that accepts TCP
+	// but never returns HTTP headers. The established session keeps ctx, not
+	// this short-lived context, so healthy long-running connections survive.
+	handshakeContext, handshakeCancel := context.WithTimeout(ctx, webSocketHandshakeTimeout)
+	defer handshakeCancel()
+	handshake, err := http.NewRequestWithContext(handshakeContext, http.MethodGet, c.websocketURL, nil)
 	if err != nil {
 		return err
 	}
 	if err := authn.SignRequest(handshake, nil, c.creds.AgentID, privateKey, time.Now().UTC()); err != nil {
 		return err
 	}
-	connection, response, err := websocket.Dial(ctx, c.websocketURL, &websocket.DialOptions{
+	connection, response, err := websocket.Dial(handshakeContext, c.websocketURL, &websocket.DialOptions{
 		HTTPClient:      c.http,
 		HTTPHeader:      handshake.Header,
 		CompressionMode: websocket.CompressionDisabled,
 		Subprotocols:    []string{"qcontrolhub.agent.v1"},
 	})
+	handshakeCancel()
 	if err != nil {
 		if response != nil {
 			defer response.Body.Close()
@@ -416,20 +423,18 @@ func (c *Client) runWebSocket(ctx context.Context) error {
 	connection.SetReadLimit(core.MaxConfigEnvelopeBytes)
 	slog.Info("WSS session established", "agent_id", c.creds.AgentID)
 
-	sessionContext, cancel := context.WithCancel(ctx)
-	defer cancel()
+	sessionContext, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
 	incoming := make(chan core.WireMessage, 1)
 	outgoing := make(chan core.WireMessage, 16)
-	readErrors := make(chan error, 1)
-	writeErrors := make(chan error, 1)
+	// The main loop may be blocked enqueueing a heartbeat or metrics. Signal
+	// failures through cancellation so that producer also wakes immediately;
+	// an error channel consumed only by the main loop can deadlock here.
 	go func() {
 		for {
 			var message core.WireMessage
 			if err := wsjson.Read(sessionContext, connection, &message); err != nil {
-				select {
-				case readErrors <- err:
-				default:
-				}
+				cancel(err)
 				return
 			}
 			select {
@@ -449,10 +454,7 @@ func (c *Client) runWebSocket(ctx context.Context) error {
 				err := wsjson.Write(writeContext, connection, message)
 				writeCancel()
 				if err != nil {
-					select {
-					case writeErrors <- err:
-					default:
-					}
+					cancel(err)
 					return
 				}
 			}
@@ -472,12 +474,11 @@ func (c *Client) runWebSocket(ctx context.Context) error {
 	var sentLogBatch string
 	for {
 		select {
-		case <-ctx.Done():
-			return nil
-		case err := <-readErrors:
-			return err
-		case err := <-writeErrors:
-			return err
+		case <-sessionContext.Done():
+			if ctx.Err() != nil {
+				return nil
+			}
+			return context.Cause(sessionContext)
 		case <-heartbeatTicker.C:
 			if err := c.queueHeartbeat(sessionContext, outgoing); err != nil {
 				return err
@@ -610,7 +611,7 @@ func (c *Client) queueHeartbeat(ctx context.Context, outgoing chan<- core.WireMe
 	case outgoing <- message:
 		return nil
 	case <-ctx.Done():
-		return ctx.Err()
+		return context.Cause(ctx)
 	}
 }
 
@@ -633,7 +634,7 @@ func (c *Client) queueMetrics(ctx context.Context, outgoing chan<- core.WireMess
 	case outgoing <- message:
 		return nil
 	case <-ctx.Done():
-		return ctx.Err()
+		return context.Cause(ctx)
 	}
 }
 

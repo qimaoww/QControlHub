@@ -337,7 +337,7 @@ func (s *Server) listCoreLogs(w http.ResponseWriter, request *http.Request) {
 	if raw := strings.TrimSpace(values.Get("limit")); raw != "" {
 		parsed, err := strconv.Atoi(raw)
 		if err != nil || parsed < 1 || parsed > 500 {
-			writeError(w, http.StatusBadRequest, "limit must be between 1 and 500")
+			writeError(w, http.StatusBadRequest, "limit must be between 1 and 500 per engine")
 			return
 		}
 		query.Limit = parsed

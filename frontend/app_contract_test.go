@@ -1057,6 +1057,8 @@ func TestCoreLogsUseImmediateFiltersAndSidebarNodeScope(t *testing.T) {
 		`renderLocalFilters({ q: event.currentTarget.value })`,
 		`data-toggle-core-log-refresh`,
 		`core-log-columns`,
+		`每内核上限<select name="limit">`,
+		`每种内核分别取最新日志，不共用总条数上限`,
 	} {
 		if !strings.Contains(content, required) {
 			t.Errorf("core-log immediate filtering is missing %q", required)

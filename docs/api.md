@@ -103,6 +103,12 @@
 
 `GET /api/v1/overview` 中的 `configs` 只统计可在“配置档案”工作区跨节点下发的全局配置；`node_configs` 单独统计绑定到具体 Agent/内核的节点配置，避免将两类配置混为一个不可解释的总数。为兼容既有调用方，`tasks_pending` 仍表示 `pending + running` 的活动任务总数；`tasks_queued` 和 `tasks_running` 分别给出排队与执行中的精确数量。
 
+### 内核日志查询
+
+`GET /api/v1/core-logs` 的 `limit` 表示当前节点范围内**每种内核各自的日志条数上限**，默认 200，可选 1–500。未指定 `engine` 时，Mihomo、Xray、sing-box 和 Shadowsocks Rust 分别取最新的至多 `limit` 条，再按日志 ID 倒序合并；例如 `limit=200` 最多返回 800 条，而不是所有内核共用 200 条。指定 `agent_id` 时只统计该节点；不指定时按全部节点中的内核类型分别计数，不是每个节点各分配一份额度。
+
+可同时使用 `engine`、`level`、`q`（消息关键词）和 `before`（仅取小于该日志 ID 的记录）筛选；这些条件在每种内核截取数量之前生效。日志页的“每内核上限”控制读取和展示数量，不改变数据库的日志保留期限。
+
 ### 系统设置
 
 `GET /api/v1/settings` 与 `PUT /api/v1/settings` 的设置对象包含：
