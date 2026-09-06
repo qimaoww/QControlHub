@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>QControlHub · 完整面板演示</title>
+  <link rel="stylesheet" href="/assets/app.css">
+  <style>
+    /* Only the demo banner is additional UI. The application below is real. */
+    #panel-demo-banner{height:38px;display:flex;align-items:center;gap:12px;padding:0 14px;background:var(--surface);border-bottom:1px solid var(--line);color:var(--muted);font:11px system-ui;overflow-x:auto;white-space:nowrap}
+    #panel-demo-banner strong{color:var(--accent);font-weight:600}
+    #panel-demo-banner select,#panel-demo-banner button{height:27px;min-height:27px;font:11px system-ui;padding:2px 8px;border:1px solid var(--line);border-radius:5px;background:var(--surface);color:var(--ink)}
+    #panel-demo-banner [role=status]{margin-left:auto}
+    .desktop-app{height:calc(100dvh - 38px)}
+    @media(max-width:820px) and (pointer:coarse){.desktop-app{height:auto}.demo-long-label{display:none}}
+  </style>
+</head>
+<body>
+  <aside id="panel-demo-banner" aria-label="本地演示控制">
+    <strong>完整面板演示</strong><span class="demo-long-label">真实前端 · 内存数据 · 不连接节点</span>
+    <select aria-label="演示页面导航" id="panel-demo-jump">
+      <option value="dashboard">总览</option><option value="node-settings">节点设置</option>
+      <option value="agents">内核预设</option><option value="live-config">手动配置</option>
+      <option value="archive-config">配置档案</option><option value="client-access">客户端</option>
+      <option value="substore-sync">Sub-Store 同步</option><option value="access-control">访问限制</option>
+      <option value="traffic">流量</option><option value="core-logs">日志</option>
+      <option value="tasks">执行记录</option><option value="settings">系统设置</option>
+    </select>
+    <button type="button" id="panel-demo-failure">下次操作模拟失败</button>
+    <button type="button" id="panel-demo-reset">恢复演示数据</button>
+    <span id="panel-demo-status" role="status">演示登录：admin / demo-panel-only</span>
+  </aside>
+  <div id="app"><div class="boot"><div class="boot-content" role="status"><div class="boot-mark" aria-hidden="true"></div><span>正在打开完整面板…</span></div></div></div>
+  <noscript>需要启用 JavaScript。</noscript>
+  <script type="module">
+    const jump = document.getElementById("panel-demo-jump");
+    jump.onchange = () => { location.hash = jump.value; };
+    window.addEventListener("hashchange", () => {
+      const route = location.hash.slice(1);
+      if ([...jump.options].some((option) => option.value === route)) jump.value = route;
+    });
+    async function control(action) {
+      const response = await fetch("/_demo/control", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action }) });
+      if (!response.ok) throw new Error("演示控制请求失败");
+    }
+    document.getElementById("panel-demo-failure").onclick = async () => {
+      try {
+        await control("fail-next");
+        document.getElementById("panel-demo-status").textContent = "下一次保存或提交将返回演示错误";
+      } catch (error) { document.getElementById("panel-demo-status").textContent = error.message; }
+    };
+    document.getElementById("panel-demo-reset").onclick = async () => {
+      try {
+        await control("reset");
+        sessionStorage.clear();
+        location.hash = "dashboard";
+        location.reload();
+      } catch (error) { document.getElementById("panel-demo-status").textContent = error.message; }
+    };
+    await import("/assets/app.js");
+  </script>
+</body>
+</html>

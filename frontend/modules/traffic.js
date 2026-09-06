@@ -1,3 +1,4 @@
+import { openDialog, closeDialog, frameLatest } from "./motion.js";
 import {
   bindEvent,
   createInteractionGate,
@@ -199,8 +200,20 @@ export function installTraffic(ctx) {
     let drag = null;
     let cancelLanding = null;
     const cards = () => [...grid.querySelectorAll("[data-traffic-card-key]")];
+    const move = frameLatest((event) => {
+      if (!drag?.ghost || event.pointerId !== drag.pointerId) return;
+      const rects = cards().map((card) => card.getBoundingClientRect());
+      const next = nodeCardDropIndex(rects,
+        { x: event.clientX, y: event.clientY }, drag.grabOffset);
+      const dx = event.clientX - drag.startX;
+      const dy = event.clientY - drag.startY;
+      drag.ghost.style.transform = `translate(${dx}px, ${dy}px) scale(.99) rotate(.3deg)`;
+      if (drag.drop !== next) highlight(next);
+      drag.drop = next;
+    });
     const clear = (clearAnimationStyles = true) => {
       if (!drag) return;
+      move.cancel();
       drag.card.classList.remove("dragging");
       document.body.classList.remove("traffic-card-dragging");
       cards().forEach((card) => {
@@ -229,6 +242,8 @@ export function installTraffic(ctx) {
     };
     const finish = (event) => {
       if (!drag || event.pointerId !== drag.pointerId) return;
+      if (drag.ghost) move(event);
+      move.flush();
       const { card, moved, drop, releaseInteraction } = drag;
       if (!moved || !grid.contains(card)) return reset();
       const rest = cards().filter((item) => item !== card);
@@ -304,6 +319,8 @@ export function installTraffic(ctx) {
           ghost.classList.add("traffic-card-ghost");
           ghost.removeAttribute("id");
           ghost.removeAttribute("data-traffic-card-key");
+          ghost.inert = true;
+          ghost.setAttribute("aria-hidden", "true");
           ghost.querySelectorAll("dialog,[id]").forEach((element) => {
             if (element.matches("dialog")) element.remove();
             else element.removeAttribute("id");
@@ -316,16 +333,7 @@ export function installTraffic(ctx) {
           document.body.appendChild(ghost);
         }
         drag.moved = true;
-        const dx = event.clientX - drag.startX;
-        const dy = event.clientY - drag.startY;
-        drag.ghost.style.transform = `translate(${dx}px, ${dy}px) scale(.99) rotate(.3deg)`;
-        const rects = cards().map((card) => card.getBoundingClientRect());
-        drag.drop = nodeCardDropIndex(
-          rects,
-          { x: event.clientX, y: event.clientY },
-          drag.grabOffset,
-        );
-        highlight(drag.drop);
+        move(event);
       });
       bindEvent(grip, "pointerup", finish);
       bindEvent(grip, "pointercancel", cancel);
@@ -436,7 +444,7 @@ export function installTraffic(ctx) {
     if (resetCreate) document.querySelector("#traffic-policy-form")?.reset();
     if (state.anchor === "traffic-new") {
       const create = document.querySelector("#traffic-new");
-      create?.showModal();
+      openDialog(create);
       state.anchor = "traffic";
     }
   };
@@ -495,7 +503,7 @@ export function installTraffic(ctx) {
         event.preventDefault();
         const create = document.querySelector("#traffic-new");
         resetTrafficCreateForm(create?.querySelector("form"), agents, engineOptions);
-        create?.showModal();
+        openDialog(create);
       };
     });
     document.querySelectorAll("[data-traffic-configure]").forEach((button) => {
@@ -518,17 +526,14 @@ export function installTraffic(ctx) {
           const field = form.querySelector(`[name="${name}"]`);
           if (field) field.value = value;
         });
-        dialog.showModal();
+        openDialog(dialog);
       };
     });
     const createDialog = document.querySelector("#traffic-new");
     if (createDialog) {
       createDialog.querySelectorAll("[data-traffic-create-close]").forEach((button) => {
-        button.onclick = () => createDialog.close();
+        button.onclick = () => closeDialog(createDialog);
       });
-      createDialog.onclick = (event) => {
-        if (event.target === createDialog) createDialog.close();
-      };
     }
     document.querySelectorAll("[data-traffic-agent-select]").forEach((select) => {
       select.onchange = () => {
@@ -540,21 +545,20 @@ export function installTraffic(ctx) {
     document.querySelectorAll("[data-traffic-edit-open]").forEach((button) => {
       button.onclick = () => {
         const dialog = document.querySelector(`[data-traffic-edit-dialog="${CSS.escape(button.dataset.trafficEditOpen)}"]`);
-        dialog?.showModal();
+        openDialog(dialog);
       };
     });
     document.querySelectorAll("[data-traffic-edit-dialog]").forEach((dialog) => {
       dialog.querySelectorAll("[data-traffic-edit-close]").forEach((button) => {
-        button.onclick = () => dialog.close();
+        button.onclick = () => closeDialog(dialog);
       });
-      dialog.onclick = (event) => {
-        if (event.target === dialog) dialog.close();
-      };
     });
     bindEvent(document.querySelector("#traffic-policy-form"), "submit", async (event) => {
       event.preventDefault();
+      const form = event.currentTarget;
       try {
-        await api("/traffic-policies", { method: "POST", body: JSON.stringify(requestFromForm(event.currentTarget)) });
+        await api("/traffic-policies", { method: "POST", body: JSON.stringify(requestFromForm(form)) });
+        await closeDialog(form.closest("dialog"));
         notify("端口流量配额已创建，正在同步到 Agent");
         await traffic({ resetCreate: true });
       } catch (error) { notify(error.message, "error"); }
@@ -564,6 +568,7 @@ export function installTraffic(ctx) {
         event.preventDefault();
         try {
           await api(`/traffic-policies/${encodeURIComponent(form.dataset.trafficEditForm)}`, { method: "PUT", body: JSON.stringify(requestFromForm(form)) });
+          await closeDialog(form.closest("dialog"));
           notify("端口流量配额已更新");
           await traffic();
         } catch (error) { notify(error.message, "error"); }
@@ -584,6 +589,7 @@ export function installTraffic(ctx) {
         if (!(await confirmAction("取消配额后会解除自动封禁，但该端口仍会继续统计流量。确定继续？", "取消配额"))) return;
         try {
           await api(`/traffic-policies/${encodeURIComponent(button.dataset.trafficDelete)}`, { method: "DELETE" });
+          await closeDialog(button.closest("dialog"));
           notify("配额已取消，端口流量继续统计");
           await traffic();
         } catch (error) { notify(error.message, "error"); }

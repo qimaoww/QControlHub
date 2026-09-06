@@ -1,3 +1,4 @@
+import { openDialog, closeDialog, setDisclosureOpen } from "./motion.js";
 const utcMonth = (value = new Date()) => {
   const date = new Date(value);
   if (!Number.isFinite(date.getTime())) return "";
@@ -199,7 +200,7 @@ async function dashboard({ overview: preloadedOverview } = {}) {
     const selectMonth = async (value) => {
       const previousMonth = state.data.dashboardTrafficMonth;
       state.data.dashboardTrafficMonth = value;
-      trafficMonthPicker.open = false;
+      setDisclosureOpen(trafficMonthPicker, false);
       try {
         await dashboard({ overview: state.data.overview });
       } catch {
@@ -221,13 +222,10 @@ async function dashboard({ overview: preloadedOverview } = {}) {
   const trafficDetailsButton = document.querySelector("[data-dashboard-traffic-details]");
   const trafficDetailsDialog = document.querySelector("[data-dashboard-traffic-dialog]");
   if (trafficDetailsButton && trafficDetailsDialog) {
-    trafficDetailsButton.onclick = () => trafficDetailsDialog.showModal();
+    trafficDetailsButton.onclick = () => openDialog(trafficDetailsDialog);
     trafficDetailsDialog.querySelectorAll("[data-dashboard-traffic-close]").forEach((button) => {
-      button.onclick = () => trafficDetailsDialog.close();
+      button.onclick = () => closeDialog(trafficDetailsDialog);
     });
-    trafficDetailsDialog.onclick = (event) => {
-      if (event.target === trafficDetailsDialog) trafficDetailsDialog.close();
-    };
   }
 }
   return dashboard;

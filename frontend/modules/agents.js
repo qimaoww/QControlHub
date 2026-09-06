@@ -1,3 +1,4 @@
+import { openDialog, closeDialog, setDisclosureOpen, switchPanels, frameLatest, motionEnabled, removeWithMotion } from "./motion.js";
 import {
   bindEvent,
   createInteractionGate,
@@ -611,8 +612,10 @@ export function animateNodeCardDrop(
       if (snap) {
         item.style.transition = "none";
         item.style.transform = "";
-        void item.offsetWidth;
       }
+    });
+    if (snap && items.length) void items[0].offsetWidth;
+    items.forEach((item) => {
       item.style.transition = "";
       item.style.transform = "";
     });
@@ -621,22 +624,28 @@ export function animateNodeCardDrop(
       onSettled();
     }
   };
+  if (typeof document !== "undefined" && !motionEnabled()) {
+    clear();
+    return () => {};
+  }
+  // Read the entire grid before writing transforms; one layout flush per drop.
+  const nextRects = new Map(items.map((item) => [item, item.getBoundingClientRect()]));
   items.forEach((item) => {
     const prev = oldRects.get(item);
     if (!prev) return;
-    const rect = item.getBoundingClientRect();
+    const rect = nextRects.get(item);
     const dx = prev.left - rect.left;
     const dy = prev.top - rect.top;
     if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return;
     item.style.transition = "none";
     item.style.transform = `translate(${dx}px, ${dy}px)`;
-    void item.offsetWidth;
     animated.add(item);
   });
   if (!animated.size) {
     clear();
     return () => {};
   }
+  void [...animated][0].offsetWidth;
   animated.forEach((item) => {
     const listener = (event) => {
       if (event.target !== item || event.propertyName !== "transform") return;
@@ -1161,6 +1170,15 @@ function cancelAgentInteractions() {
 function enableCardDrag(grid) {
   let drag = null;
   let cancelLanding = null;
+  const move = frameLatest((event) => {
+    if (!drag?.ghost || event.pointerId !== drag.pointerId) return;
+    const index = dropIndex(event.clientX, event.clientY);
+    const dx = event.clientX - drag.startX;
+    const dy = event.clientY - drag.startY;
+    drag.ghost.style.transform = `translate(${dx}px, ${dy}px) scale(.99) rotate(.3deg)`;
+    if (drag.drop !== index) highlight(index);
+    drag.drop = index;
+  });
   const dropIndex = (pointerX, pointerY) => {
     const rects = [...grid.querySelectorAll(".node-card")].map((card) =>
       card.getBoundingClientRect(),
@@ -1183,6 +1201,7 @@ function enableCardDrag(grid) {
   };
   const clearDragState = (clearAnimationStyles) => {
     if (!drag) return;
+    move.cancel();
     clearNodeCardDragState(grid, drag, {
       clearAnimationStyles,
     });
@@ -1199,6 +1218,8 @@ function enableCardDrag(grid) {
   cancelCardDrag = reset;
   const finish = (event) => {
     if (!drag || event.pointerId !== drag.pointerId) return;
+    if (drag.ghost) move(event);
+    move.flush();
     const { card, moved, drop, releaseInteraction } = drag;
     if (!moved || !grid.contains(card)) return reset();
     const rest = [...grid.querySelectorAll(".node-card")].filter(
@@ -1286,6 +1307,8 @@ function enableCardDrag(grid) {
         ghost.removeAttribute("data-agent-node");
         ghost.removeAttribute("data-agent-metrics");
         ghost.removeAttribute("data-metric-poll");
+        ghost.inert = true;
+        ghost.setAttribute("aria-hidden", "true");
         ghost.style.position = "fixed";
         ghost.style.left = `${drag.rect.left}px`;
         ghost.style.top = `${drag.rect.top}px`;
@@ -1294,12 +1317,7 @@ function enableCardDrag(grid) {
         document.body.appendChild(ghost);
       }
       drag.moved = true;
-      const dx = event.clientX - drag.startX;
-      const dy = event.clientY - drag.startY;
-      drag.ghost.style.transform = `translate(${dx}px, ${dy}px) scale(.99) rotate(.3deg)`;
-      const index = dropIndex(event.clientX, event.clientY);
-      drag.drop = index;
-      highlight(index);
+      move(event);
     });
     bindEvent(grip, "pointerup", finish);
     bindEvent(grip, "pointercancel", cancel);
@@ -1388,9 +1406,8 @@ function bindAgentPage(agentItems, presetMode = false, enrollmentHistory = {}) {
         candidate.setAttribute("aria-selected", String(selected));
         candidate.tabIndex = selected ? 0 : -1;
       });
-      workspace.querySelectorAll("[data-node-panel]").forEach((panel) => {
-        panel.hidden = panel.dataset.nodePanel !== tab;
-      });
+      const panels = [...workspace.querySelectorAll("[data-node-panel]")];
+      switchPanels(panels, panels.find((panel) => panel.dataset.nodePanel === tab));
       if (tab === "metrics" && can("metrics.read"))
         loadMetricHistory(workspace.dataset.agentNode);
     };
@@ -1503,7 +1520,7 @@ function bindAgentPage(agentItems, presetMode = false, enrollmentHistory = {}) {
       const drawer = button
         .closest(".service-card")
         ?.querySelector(".version-drawer");
-      if (drawer) drawer.open = true;
+      if (drawer) setDisclosureOpen(drawer, true);
     };
   });
   document.querySelectorAll(".core-version-form").forEach((form) => {
@@ -1548,10 +1565,14 @@ function bindAgentPage(agentItems, presetMode = false, enrollmentHistory = {}) {
   });
   const setNodeBatchMode = async (enabled, trigger) => {
     if (trigger?.disabled) return;
+    const epoch = state.navigationEpoch;
+    const route = state.route;
     if (trigger) trigger.disabled = true;
     state.data.nodeBatchMode = enabled;
     cancelCardDrag();
     try {
+      if (!enabled) await removeWithMotion(document.querySelector(".node-batch-bar"));
+      if (epoch !== state.navigationEpoch || route !== state.route) return;
       await renderAgentPage();
     } catch (error) {
       state.data.nodeBatchMode = !enabled;
@@ -1770,7 +1791,7 @@ function bindAgentPage(agentItems, presetMode = false, enrollmentHistory = {}) {
             body: JSON.stringify({ name }),
           });
           const command = enrollmentInstallCommand(created);
-          close();
+          await close();
           showCommand(command, async () => {
             try {
               await refreshAgentPage();
@@ -2442,74 +2463,29 @@ function bindCodeEditors() {
 
 function bindModalLifecycle(wrap, onClose) {
   const previousFocus = document.activeElement;
-  const restoreEnrollmentEntry = previousFocus?.matches?.(
-    "[data-open-enrollment]",
-  );
-  const inertRoots = new Map();
-  const lockBackground = () => {
-    document.querySelectorAll(".desktop-app").forEach((root) => {
-      if (!inertRoots.has(root)) inertRoots.set(root, root.inert || false);
-      root.inert = true;
-    });
-  };
-  const observer = new MutationObserver(lockBackground);
-  const previousOverflow = document.body.style.overflow;
-  let closed = false;
-  lockBackground();
-  observer.observe(document.body, { childList: true, subtree: true });
-  document.body.style.overflow = "hidden";
-  const focusable = () => [
-    ...wrap.querySelectorAll(
-      'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [href], [tabindex]:not([tabindex="-1"])',
-    ),
-  ].filter((element) => !element.hidden);
-  const close = () => {
-    if (closed) return;
-    closed = true;
-    observer.disconnect();
-    document.removeEventListener("keydown", onKeydown);
-    inertRoots.forEach((inert, root) => {
-      if (root.isConnected) root.inert = inert;
-    });
-    document.body.style.overflow = previousOverflow;
+  const restoreEnrollmentEntry = previousFocus?.matches?.("[data-open-enrollment]");
+  let cleaned = false;
+  const cleanup = () => {
+    if (cleaned) return;
+    cleaned = true;
     wrap.remove();
+    if (wrap.dataset.motionDiscarded) return;
     const restoreTarget = previousFocus instanceof HTMLElement && previousFocus.isConnected
       ? previousFocus
-      : restoreEnrollmentEntry
-        ? document.querySelector("[data-open-enrollment]")
-        : null;
-    restoreTarget?.focus();
+      : restoreEnrollmentEntry ? document.querySelector("[data-open-enrollment]") : null;
+    if (!document.querySelector("dialog[open]")) restoreTarget?.focus({ preventScroll: true });
     onClose?.();
   };
-  const onKeydown = (event) => {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      close();
-      return;
-    }
-    if (event.key !== "Tab") return;
-    const items = focusable();
-    if (!items.length) {
-      event.preventDefault();
-      return;
-    }
-    const first = items[0];
-    const last = items[items.length - 1];
-    if (event.shiftKey && document.activeElement === first) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault();
-      first.focus();
-    }
+  const close = async () => {
+    if (await closeDialog(wrap)) cleanup();
   };
-  document.addEventListener("keydown", onKeydown);
+  wrap.addEventListener("close", cleanup, { once: true });
   wrap.querySelectorAll("[data-close]").forEach((button) => {
     button.onclick = close;
   });
-  wrap.onclick = (event) => {
-    if (event.target === wrap) close();
-  };
+  // Native modality owns focus trapping and scroll isolation. Clicking empty
+  // space never dismisses the dialog or discards an in-progress form.
+  openDialog(wrap);
   return close;
 }
 
@@ -2526,7 +2502,7 @@ function bindEnrollmentRecordButtons(root, closeParent) {
           `/enrollment-tokens/${encodeURIComponent(button.dataset.viewEnrollmentRecord)}/command`,
           { method: "POST" },
         );
-        closeParent?.();
+        await closeParent?.();
         showCommand(
           enrollmentInstallCommand(created),
           () => document.querySelector("[data-open-enrollment]")?.focus(),
@@ -2543,8 +2519,10 @@ function bindEnrollmentRecordButtons(root, closeParent) {
 }
 
 function showEnrollmentDialog({ tokenRows, tokenCount, onDelete, onSubmit }) {
-  const wrap = document.createElement("div");
+  const wrap = document.createElement("dialog");
   wrap.className = "modal-backdrop";
+  wrap.setAttribute("aria-labelledby", "enrollment-dialog-title");
+  wrap.setAttribute("aria-describedby", "enrollment-dialog-description");
   wrap.innerHTML = `<section class="deploy-command-modal enrollment-dialog" role="dialog" aria-modal="true" aria-labelledby="enrollment-dialog-title" aria-describedby="enrollment-dialog-description"><header class="deploy-command-head"><span class="deploy-command-icon" aria-hidden="true">＋</span><div><p class="eyebrow">添加节点</p><h2 id="enrollment-dialog-title">生成 Agent 部署命令</h2><p id="enrollment-dialog-description">为一台新节点生成长期有效的 enrollment 凭据；命令只会显示供复制，浏览器绝不会执行。</p></div><button class="deploy-command-close" type="button" data-close aria-label="关闭添加节点弹窗">×</button></header><div class="deploy-command-body enrollment-dialog-body"><form class="enrollment-dialog-form"><label>节点名称<input name="name" maxlength="100" required autocomplete="off" placeholder="例如 shanghai-edge-01"></label><p class="enrollment-security-note"><b>命令生成后可重复查看</b><span>凭据由控制面受保护保存；删除、撤销或到期后立即失效，普通页面不会显示命令正文。</span></p><footer class="enrollment-form-actions"><button class="button" type="button" data-close>取消</button><button class="button primary" type="submit">生成部署命令</button></footer></form><section class="enrollment-history" aria-labelledby="enrollment-history-title"><header><div><b id="enrollment-history-title">添加记录</b><small>删除记录只会立即撤销对应凭据，不会删除已注册节点或卸载 Agent。</small></div><span data-enrollment-history-count>${tokenCount || 0}</span></header><div data-enrollment-history-list>${tokenRows || '<p class="enrollment-history-empty">暂无添加记录</p>'}</div></section></div></section>`;
   document.body.append(wrap);
   const close = bindModalLifecycle(wrap);
@@ -2572,7 +2550,7 @@ function showEnrollmentDialog({ tokenRows, tokenCount, onDelete, onSubmit }) {
       button.disabled = true;
       try {
         await onDelete(button.dataset.deleteEnrollment);
-        button.closest("article")?.remove();
+        await removeWithMotion(button.closest("article"));
         const list = wrap.querySelector("[data-enrollment-history-list]");
         const count = list?.querySelectorAll("article").length || 0;
         const countLabel = wrap.querySelector("[data-enrollment-history-count]");
@@ -2606,8 +2584,10 @@ function enrollmentInstallCommand(created) {
 }
 
 function showCommand(command, onClose, heading = "复制 QAgent 部署命令") {
-  const wrap = document.createElement("div");
+  const wrap = document.createElement("dialog");
   wrap.className = "modal-backdrop";
+  wrap.setAttribute("aria-labelledby", "deploy-command-title");
+  wrap.setAttribute("aria-describedby", "deploy-command-description");
   wrap.innerHTML = `<section class="deploy-command-modal" role="dialog" aria-modal="true" aria-labelledby="deploy-command-title" aria-describedby="deploy-command-description"><header class="deploy-command-head"><span class="deploy-command-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m7 8 4 4-4 4M13 16h4"/></svg></span><div><p class="eyebrow">Agent 部署命令</p><h2 id="deploy-command-title">${esc(heading)}</h2><p id="deploy-command-description">命令仅供复制；关闭页面不会连接、安装或重启任何节点。</p></div><button class="deploy-command-close" type="button" data-close aria-label="关闭部署命令弹窗">×</button></header><div class="deploy-command-body"><div class="deploy-command-notice"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.6 2.8 8.1 7 10 4.2-1.9 7-5.4 7-10V6l-7-3Z"/><path d="m9.5 12 1.7 1.7 3.5-3.7"/></svg><span><b>命令可重复查看</b><small>凭据由控制面受保护保存；对应添加记录被删除、撤销或到期后立即失效，普通页面不会显示命令正文。</small></span></div><section class="deploy-command-shell" aria-label="Agent 安装命令"><header><span><i></i>Terminal</span><small>只读复制模式</small></header><div><span class="deploy-command-prompt" aria-hidden="true">$</span><textarea class="deploy-command-input" rows="5" readonly spellcheck="false" aria-label="Agent 安装命令" data-command>${esc(command)}</textarea></div></section></div><footer class="deploy-command-actions"><span>复制后请在目标 Linux 节点自行执行</span><div><button class="button" type="button" data-close>关闭</button><button class="button primary deploy-command-copy" type="button" data-copy-command><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2v8a2 2 0 0 0 2 2h2"/></svg><span data-copy-label>复制部署命令</span></button></div></footer></section>`;
   document.body.append(wrap);
   const copyButton = wrap.querySelector("[data-copy-command]");

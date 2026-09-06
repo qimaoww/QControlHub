@@ -1,4 +1,5 @@
 import { bindEvent } from "./refresh.js";
+import { switchPanels } from "./motion.js";
 import { configFieldURL, renderSSRustFieldStudio, ssRustFieldGroups, ssRustPlanBinding } from "./ss-rust-fields.js";
 
 // Config views render user-controlled values into HTML before binding their
@@ -991,11 +992,9 @@ function bindAgentConfigPage(ctx) {
       const selected = sections.find((section) => section.id === id) || sections[0];
       state.data.builderStep = selected.id;
       sections.forEach((section) => {
-        const active = section === selected;
-        section.hidden = !active;
         section.setAttribute("role", "tabpanel");
-        section.setAttribute("aria-hidden", active ? "false" : "true");
       });
+      switchPanels(sections, selected);
       links.forEach((link) => {
         const active = link.dataset.builderStep === selected.id;
         link.classList.toggle("active", active);

@@ -189,15 +189,15 @@ func TestRefreshPathsUseStableViewsAndScopedCoordinators(t *testing.T) {
 		"reconcileView(currentView, template.content.firstElementChild",
 		"const routeChanged = !previousMain || previousRoute !== state.route",
 		"previousMain.dataset.refreshKey !== workspaceKey",
-		"routeChanged || viewChanged ? ` page-enter${firstScreenClass}`",
-		"workspace-main${motionClass}",
+		"if (routeChanged || viewChanged) queueEntrance(renderedMain)",
+		`class="workspace-main" data-refresh-key=`,
 		"const hasSharedData =",
 		"const sharedDataPromise = Promise.all([",
 		"function primeRouteTransition()",
 		"main.classList.add(\"is-route-pending\")",
-		"const firstScreenClass = !previousMain ? \" first-screen\" : \"\"",
+		"if (previousMain && currentView)",
 		"const contextChanged = routeChanged || state.data.contextMotionKey !== contextKey",
-		"const contextMotionClass = contextChanged ? \" context-enter\" : \"\"",
+		"if (contextChanged) queueEntrance(app.querySelector(\".context-sidebar\"))",
 		"data-refresh-key=\"context-${esc(contextKey)}\"",
 		"state.navigationEpoch += 1",
 		"cancelActive: () => routeController?.abort()",
@@ -254,7 +254,7 @@ func TestRefreshPathsUseStableViewsAndScopedCoordinators(t *testing.T) {
 			"api(`/traffic-usage?month=${encodeURIComponent(trafficMonth)}`",
 			"data-dashboard-traffic-month",
 			"data-dashboard-traffic-dialog",
-			"trafficDetailsDialog.showModal()",
+			"openDialog(trafficDetailsDialog)",
 		},
 		"modules/traffic.js": {
 			"createPoller({",
@@ -290,43 +290,43 @@ func TestMotionSystemCoversWorkspaceInteractions(t *testing.T) {
 	}
 	content := string(styles)
 	for _, required := range []string{
-		"@keyframes qch-page-enter",
-		"@keyframes qch-card-enter",
-		"@keyframes qch-dialog-enter",
+		"@keyframes qch-spin",
+		"@starting-style",
 		"@keyframes qch-route-progress",
 		"@keyframes qch-boot-enter",
-		"@keyframes qch-first-screen-enter",
-		"@keyframes qch-context-enter",
-		"@keyframes qch-task-result-enter",
-		"@keyframes qch-reconcile-enter",
-		"@keyframes qch-config-read-enter",
 		".boot-content",
 		".boot-mark::before",
-		".workspace-main.first-screen.page-enter>",
-		".workspace-main.first-screen.page-enter> *:nth-child(n){animation-delay:0ms}",
-		".workspace-main.page-enter>",
-		".workspace-main.is-route-pending::before",
-		".context-sidebar.context-enter>",
-		".page-tasks [data-task-result][open]>.task-result-block",
-		".page-live-config .live-config-workspace[data-live-config-phase]",
-		".client-access-toolbar>nav a.active",
-		".substore-target-bar>nav>button.active",
-		".core-log-filter-group button[aria-pressed=true]",
-		".qch-reconcile-enter",
+		".workspace-shell:has(.is-route-pending)::after",
+		".page-tasks [data-task-result][open]>summary span",
+		"button[aria-busy=true]::after",
+		"scrollbar-gutter:stable",
 		"dialog[open]::backdrop",
-		".modal-backdrop>[role=dialog]",
+		"dialog.modal-backdrop[open]",
 		"@media(prefers-reduced-motion:reduce)",
 	} {
 		if !strings.Contains(content, required) {
 			t.Errorf("motion system is missing %q", required)
 		}
 	}
-	refresh, err := os.ReadFile("modules/refresh.js")
+	motion, err := os.ReadFile("modules/motion.js")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(refresh), "markInsertedMotion(freshChild.cloneNode(true))") {
-		t.Error("reconciled dynamic content must animate only when inserted")
+	for _, required := range []string{
+		"export function animateSurface", "export function openDialog", "export function closeDialog",
+		"export function setDisclosureOpen", "export function switchPanels", "export function frameLatest",
+		"prefers-reduced-motion: reduce", "visibilitychange", "record.addedNodes", "seen.has(item)",
+		"outermost(candidates)", "slice(0, 12)", "lockInert(dialog, state)", `dialog.setAttribute("closedby", "closerequest")`,
+	} {
+		if !strings.Contains(string(motion), required) {
+			t.Errorf("shared motion lifecycle is missing %q", required)
+		}
+	}
+	for _, name := range []string{"agents", "dashboard", "traffic", "client-access", "substore-sync"} {
+		source := string(mustReadFrontendFile(t, "modules/"+name+".js"))
+		if strings.Contains(source, ".showModal()") || strings.Contains(source, "event.target === dialog") {
+			t.Errorf("%s must use shared dialogs without click-away dismissal", name)
+		}
 	}
 	configs, err := os.ReadFile("modules/configs.js")
 	if err != nil {
@@ -887,6 +887,7 @@ func TestSPAModulesArePublished(t *testing.T) {
 		"tasks.js",
 		"traffic.js",
 		"settings.js",
+		"motion.js",
 		"../module_smoke.mjs",
 	} {
 		if _, err := os.Stat(filepath.Join("modules", name)); err != nil {
@@ -910,10 +911,10 @@ func TestAgentBatchAndEnrollmentSafetyContracts(t *testing.T) {
 		`命令仅供复制；关闭页面不会连接、安装或重启任何节点。`,
 		`showCommand(command, async () =>`,
 		`浏览器绝不会执行`,
-		`document.body.style.overflow = "hidden"`,
-		`root.inert = true`,
-		`new MutationObserver(lockBackground)`,
-		`event.key !== "Tab"`,
+		`document.createElement("dialog")`,
+		`openDialog(wrap)`,
+		`await closeDialog(wrap)`,
+		`wrap.addEventListener("close", cleanup`,
 		`button.dataset.confirmDelete !== "1"`,
 	} {
 		if !strings.Contains(content, marker) {

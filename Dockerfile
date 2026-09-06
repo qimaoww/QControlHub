@@ -91,6 +91,7 @@ RUN css_version="$(sha256sum /usr/share/nginx/html/assets/app.css | cut -c1-16)"
     && js_content_version="$(find /usr/share/nginx/html/assets -type f -name '*.js' -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -c1-10)" \
     && js_version="${js_content_version}-$(printf '%s' "${VERSION}" | sha256sum | cut -c1-10)" \
     && sed -i -E "s#(from \"\\./modules/[^\"]+\\.js)\"#\\1?v=${js_version}\"#g" /usr/share/nginx/html/assets/app.js \
+    && find /usr/share/nginx/html/assets/modules -name '*.js' -exec sed -i -E "s#(from \"\\./[^\"]+\\.js)\"#\\1?v=${js_version}\"#g" {} + \
     && sed -i \
       -e "s/__QCH_CSS_VERSION__/${css_version}/g" \
       -e "s/__QCH_JS_VERSION__/${js_version}/g" \

@@ -175,13 +175,12 @@ function responsiveDialogRuleExists() {
     for (const rule of rules) {
       if (rule instanceof CSSMediaRule) {
         if (
-          rule.conditionText.includes("max-width: 620px") &&
+          rule.conditionText.includes("max-width: 820px") &&
           rule.conditionText.includes("pointer: coarse") &&
           [...rule.cssRules].some(
             (child) =>
-              child.selectorText === ".modal-backdrop" &&
-              child.style.alignItems === "end" &&
-              child.style.padding === "0px",
+              child.selectorText === "dialog.modal-backdrop" &&
+              child.style.padding === "12px",
           )
         )
           return true;
@@ -261,30 +260,26 @@ async function testAdminRuntime() {
   assert.equal(dialog.getAttribute("aria-describedby"), "enrollment-dialog-description");
   assert.equal(location.hash, originalHash, "打开 modal 不应切换 route");
   assert.equal(document.activeElement, dialog.querySelector("input"));
-  assert.equal(document.querySelector(".desktop-app").inert, true);
-  assert.equal(document.body.style.overflow, "hidden");
+  assert.ok(backdrop.matches(":modal"), "添加节点必须使用原生顶层模态窗口");
+  assert.equal(getComputedStyle(document.body).overflow, "hidden");
   const backdropStyle = getComputedStyle(backdrop);
   assert.equal(backdropStyle.position, "fixed");
   assert.equal(backdropStyle.display, "grid");
-  assert.notEqual(backdropStyle.backgroundColor, "rgba(0, 0, 0, 0)");
+  assert.notEqual(getComputedStyle(backdrop, "::backdrop").backgroundColor, "rgba(0, 0, 0, 0)");
   assert.equal(getComputedStyle(dialog).display, "flex");
   assert.equal(responsiveDialogRuleExists(), true, "浏览器 CSSOM 未包含窄屏 modal 最终规则");
 
-  const focusable = [...backdrop.querySelectorAll("button:not(:disabled), input:not(:disabled)")];
-  focusable.at(-1).focus();
-  document.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }));
-  assert.equal(document.activeElement, focusable[0], "Tab 没有限制在 modal 内");
-  focusable[0].focus();
-  document.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true, cancelable: true }));
-  assert.equal(document.activeElement, focusable.at(-1), "Shift+Tab 没有限制在 modal 内");
+  launcher.focus();
+  assert.ok(backdrop.contains(document.activeElement), "原生模态不能把焦点移到背景");
+  backdrop.click();
+  assert.ok(backdrop.open, "点击空白遮罩不能关闭表单");
 
   window.dispatchEvent(new HashChangeEvent("hashchange"));
   await waitFor(() => document.querySelector(".modal-backdrop") === backdrop, "同 route 刷新丢失了打开的 modal");
   await delay();
-  assert.equal(document.querySelector(".desktop-app").inert, true, "刷新后的背景没有继续 inert");
-  document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
-  assert.equal(document.querySelector(".modal-backdrop"), null);
-  assert.equal(document.querySelector(".desktop-app").inert, false);
+  assert.ok(backdrop.matches(":modal"), "刷新后原生模态必须保持");
+  backdrop.dispatchEvent(new Event("cancel", { cancelable: true }));
+  await waitFor(() => !document.querySelector(".modal-backdrop"), "取消后弹窗未退出");
   assert.equal(document.body.style.overflow, "");
   assert.equal(document.activeElement, document.querySelector("[data-open-enrollment]"));
   assert.equal(document.querySelector(".workspace-main").scrollTop, originalScrollTop);
@@ -301,6 +296,7 @@ async function testAdminRuntime() {
   assert.match(document.body.textContent, /temporary enrollment failure/);
   testAPI.enrollmentFailure = false;
   enrollment.querySelector("[data-close]").click();
+  await waitFor(() => !enrollment.isConnected, "重新打开前旧表单必须完成退出");
 
   document.querySelector("[data-open-enrollment]").click();
   let recordsDialog = await waitFor(() => document.querySelector(".enrollment-dialog"), "添加记录弹窗无法重新打开");
@@ -316,18 +312,12 @@ async function testAdminRuntime() {
   );
   assert.equal(document.querySelectorAll(".modal-backdrop").length, 1, "查看记录不得叠加第二层 modal");
   assert.equal(document.querySelector(".enrollment-dialog"), null, "查看记录后聚合 modal 必须关闭");
-  assert.equal(document.querySelector(".desktop-app").inert, true, "命令 modal 打开时背景必须 inert");
+  assert.ok(firstRecordDialog.closest("dialog").matches(":modal"), "命令窗口必须阻止背景交互");
   const recordCommand = firstRecordDialog.querySelector("[data-command]").value;
-  const commandFocusable = [...firstRecordDialog.querySelectorAll("button:not(:disabled), textarea:not(:disabled)")];
-  commandFocusable.at(-1).focus();
-  document.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }));
-  assert.equal(document.activeElement, commandFocusable[0], "记录命令 modal 的 Tab 必须保持在顶层 modal 内");
-  commandFocusable[0].focus();
-  document.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true, cancelable: true }));
-  assert.equal(document.activeElement, commandFocusable.at(-1), "记录命令 modal 的 Shift+Tab 必须保持在顶层 modal 内");
-  document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
-  assert.equal(document.querySelector(".modal-backdrop"), null, "Escape 只能关闭顶层记录命令 modal");
-  assert.equal(document.querySelector(".desktop-app").inert, false, "关闭命令 modal 后背景 inert 必须恢复");
+  document.querySelector("[data-open-enrollment]").focus();
+  assert.ok(firstRecordDialog.contains(document.activeElement), "命令窗口不能把焦点移到背景");
+  firstRecordDialog.closest("dialog").dispatchEvent(new Event("cancel", { cancelable: true }));
+  await waitFor(() => !document.querySelector(".modal-backdrop"), "取消只能关闭顶层命令窗口");
   assert.equal(document.activeElement, document.querySelector("[data-open-enrollment]"), "关闭命令 modal 后焦点必须回到聚合入口");
   document.querySelector("[data-open-enrollment]").click();
   recordsDialog = await waitFor(() => document.querySelector(".enrollment-dialog"), "关闭命令后聚合 modal 无法重新打开");
@@ -339,6 +329,7 @@ async function testAdminRuntime() {
   );
   assert.equal(secondRecordDialog.querySelector("[data-command]").value, recordCommand);
   secondRecordDialog.querySelector("[data-close]").click();
+  await waitFor(() => !secondRecordDialog.isConnected, "命令窗口未完成退出");
   recordsDialog.querySelector("[data-close]").click();
   location.hash = "#dashboard";
   await waitFor(() => document.querySelector(".dashboard-head"), "路由离开后未完成刷新");
@@ -356,6 +347,7 @@ async function testAdminRuntime() {
   );
   assert.equal(refreshedRecordDialog.querySelector("[data-command]").value, recordCommand);
   refreshedRecordDialog.querySelector("[data-close]").click();
+  await waitFor(() => !refreshedRecordDialog.isConnected, "刷新后的命令窗口未完成退出");
   const recordReadsAfter = testAPI.calls.filter(
     (call) => call.method === "POST" && call.path === "/enrollment-tokens/enr-alpha/command",
   ).length;

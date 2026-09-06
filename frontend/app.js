@@ -17,8 +17,10 @@ import {
   reconcileView,
 } from "./modules/refresh.js";
 import { orderNodesBySavedOrder } from "./modules/node-order.js";
+import { installMotion, queueEntrance, openDialog, closeDialog, dismissDialogsImmediately, removeWithMotion, beginBusy, transitionTheme } from "./modules/motion.js";
 
 const app = document.querySelector("#app");
+installMotion();
 const themeStorageKey = "qcontrolhub-color-theme";
 const engines = ["mihomo", "xray", "sing-box", "ss-rust"];
 const actions = [
@@ -345,6 +347,8 @@ async function api(path, options = {}) {
     ? state.routeSignal
     : null;
   const request = combineAbortSignals(options.signal, routeSignal);
+  const releaseBusy = !["GET", "HEAD", "OPTIONS"].includes(method)
+    ? beginBusy(document.activeElement?.closest?.("button")) : () => {};
   try {
     const response = await fetch(`/api/v1${path}`, {
       ...options,
@@ -370,6 +374,7 @@ async function api(path, options = {}) {
     if (response.status === 204) return null;
     return await response.json();
   } finally {
+    releaseBusy();
     request.release();
   }
 }
@@ -430,10 +435,12 @@ function toggleTheme() {
   try {
     localStorage.setItem(themeStorageKey, next);
   } catch {}
-  applyTheme(next);
+  transitionTheme(() => applyTheme(next));
 }
 
 function renderLogin(message = "") {
+  dismissDialogsImmediately();
+  document.querySelectorAll("[data-spa-notice]").forEach((notice) => clearTimeout(notice.dismissTimer));
   if (state.route === "node-settings") agentModule.cancelAgentInteractions();
   const confirmResolver = state.confirmResolver;
   state.confirmResolver = null;
@@ -479,26 +486,61 @@ function renderLogin(message = "") {
 }
 
 function notify(message, tone = "success") {
-  const main = document.querySelector(".workspace-main");
+  const activeDialog = [...document.querySelectorAll("dialog[open]:not([data-motion-closing])")].at(-1);
+  let main = activeDialog?.querySelector(".deploy-command-body,.traffic-edit-body") || activeDialog;
+  if (!main && document.querySelector(".workspace-main")) {
+    // Keep notifications outside the reconciled view so a successful save's
+    // immediate refresh does not remove the feedback before it can be read.
+    main = app.querySelector(":scope > .qch-notice-stack");
+    if (!main) {
+      main = document.createElement("aside");
+      main.className = "qch-notice-stack";
+      main.setAttribute("aria-label", "操作提示");
+      app.append(main);
+    }
+  }
   if (!main) return;
   const notice =
-    main.querySelector(":scope > [data-spa-notice]") ||
+    main.querySelector(":scope > [data-spa-notice]:not([data-motion-closing])") ||
     document.createElement("div");
   notice.className = `alert ${tone}`;
   notice.dataset.spaNotice = "";
   notice.dataset.refreshKey = "spa-notice";
   notice.setAttribute("role", tone === "error" ? "alert" : "status");
-  notice.textContent = message;
+  clearTimeout(notice.dismissTimer);
+  notice.innerHTML = `<span>${esc(message)}</span><button class="notice-dismiss" type="button" aria-label="关闭提示">×</button>`;
+  const dismiss = () => {
+    clearTimeout(notice.dismissTimer);
+    removeWithMotion(notice);
+  };
+  notice.querySelector("button").onclick = dismiss;
   if (!notice.isConnected) main.prepend(notice);
+  else queueEntrance(notice);
+  if (tone !== "error") {
+    const schedule = () => {
+      clearTimeout(notice.dismissTimer);
+      notice.dismissTimer = setTimeout(dismiss, 6000);
+    };
+    notice.onpointerenter = () => clearTimeout(notice.dismissTimer);
+    notice.onpointerleave = schedule;
+    notice.onfocusin = () => clearTimeout(notice.dismissTimer);
+    notice.onfocusout = schedule;
+    schedule();
+  } else {
+    notice.onpointerenter = notice.onpointerleave = null;
+    notice.onfocusin = notice.onfocusout = null;
+  }
 }
 
 function confirmAction(message, label = "确认继续") {
   const dialog = document.querySelector("[data-confirm-dialog]");
   if (!dialog?.showModal) return Promise.resolve(window.confirm(message));
+  // A second confirmation must not leave the first caller waiting forever.
+  state.confirmResolver?.(false);
   dialog.querySelector("[data-confirm-message]").textContent = message;
   dialog.querySelector("[data-confirm-accept]").textContent = label;
   state.confirmOpen = true;
-  dialog.showModal();
+  openDialog(dialog);
   return new Promise((resolve) => {
     state.confirmResolver = resolve;
   });
@@ -598,16 +640,12 @@ function shell(content, title, { viewKey = state.route } = {}) {
   const workspaceKey = `workspace-${viewKey}`;
   const viewChanged =
     !previousMain || previousMain.dataset.refreshKey !== workspaceKey;
-  const firstScreenClass = !previousMain ? " first-screen" : "";
-  const motionClass =
-    routeChanged || viewChanged ? ` page-enter${firstScreenClass}` : "";
   const contextKey = `${state.route}|${state.data.selectedAgent || ""}|${state.data.agentId || ""}|${state.data.engine || ""}|${state.data.liveAgent || ""}|${state.data.liveEngine || ""}`;
   const contextChanged = routeChanged || state.data.contextMotionKey !== contextKey;
   state.data.contextMotionKey = contextKey;
-  const contextMotionClass = contextChanged ? " context-enter" : "";
-  const markup = `<div class="desktop-app"><aside class="app-dock"><a class="dock-logo" href="#dashboard" aria-label="${esc(panelName)} 总览"><span>QH</span></a><nav class="dock-nav" aria-label="主导航">${navigationMarkup}</nav><div class="dock-tools">${settingsDockLink}<button id="theme-toggle" data-theme-toggle type="button" aria-label="切换颜色主题" title="切换主题"><svg viewBox="0 0 24 24" aria-hidden="true">${dockIcons.sun}</svg><span class="dock-label">主题</span></button><button id="logout" type="button" aria-label="退出登录" title="退出登录"><svg viewBox="0 0 24 24" aria-hidden="true">${dockIcons.logOut}</svg><span class="dock-label">退出</span></button></div>${mobileAccountMarkup}</aside><aside class="context-sidebar${contextMotionClass}" data-refresh-key="context-${esc(contextKey)}"><header class="context-brand"><a href="#dashboard"><span class="brand-mark">QH</span><strong>${esc(panelName)}</strong></a></header>${context}</aside><section class="workspace-shell"><header class="workspace-topbar"><div class="workspace-route"><span>${esc(panelName)}</span><i>/</i><b>${esc(title)}</b><i class="role-badge role-${esc(state.session.role)}">${esc(roleName)}</i></div><div class="workspace-actions"><span class="sync-state ${overview.agents_online ? "" : "inactive"}" data-sync-state><i></i><span data-sync-label>${overview.agents_online ? `${overview.agents_online} 个节点在线` : "等待节点连接"}</span></span>${topAction}</div></header><main class="workspace-main${motionClass}" data-refresh-key="workspace-${esc(viewKey)}">${content}</main></section></div><dialog class="confirm-dialog" data-confirm-dialog aria-labelledby="confirm-dialog-title" aria-describedby="confirm-dialog-message"><div class="confirm-dialog-card"><span class="confirm-dialog-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3.5 21 20H3zM12 9v5M12 17.5h.01"/></svg></span><div><p class="eyebrow">操作确认</p><h2 id="confirm-dialog-title">确认继续？</h2><p id="confirm-dialog-message" data-confirm-message></p></div><footer><button class="button" type="button" data-confirm-cancel>取消</button><button class="button danger-confirm" type="button" data-confirm-accept>确认继续</button></footer></div></dialog>`;
+  const markup = `<div class="desktop-app"><aside class="app-dock"><a class="dock-logo" href="#dashboard" aria-label="${esc(panelName)} 总览"><span>QH</span></a><nav class="dock-nav" aria-label="主导航">${navigationMarkup}</nav><div class="dock-tools">${settingsDockLink}<button id="theme-toggle" data-theme-toggle type="button" aria-label="切换颜色主题" title="切换主题"><svg viewBox="0 0 24 24" aria-hidden="true">${dockIcons.sun}</svg><span class="dock-label">主题</span></button><button id="logout" type="button" aria-label="退出登录" title="退出登录"><svg viewBox="0 0 24 24" aria-hidden="true">${dockIcons.logOut}</svg><span class="dock-label">退出</span></button></div>${mobileAccountMarkup}</aside><aside class="context-sidebar" data-refresh-key="context-${esc(contextKey)}"><header class="context-brand"><a href="#dashboard"><span class="brand-mark">QH</span><strong>${esc(panelName)}</strong></a></header>${context}</aside><section class="workspace-shell"><header class="workspace-topbar"><div class="workspace-route"><span>${esc(panelName)}</span><i>/</i><b>${esc(title)}</b><i class="role-badge role-${esc(state.session.role)}">${esc(roleName)}</i></div><div class="workspace-actions"><span class="sync-state ${overview.agents_online ? "" : "inactive"}" data-sync-state><i></i><span data-sync-label>${overview.agents_online ? `${overview.agents_online} 个节点在线` : "等待节点连接"}</span></span>${topAction}</div></header><main class="workspace-main" data-refresh-key="workspace-${esc(viewKey)}">${content}</main></section></div><dialog class="confirm-dialog" data-confirm-dialog aria-labelledby="confirm-dialog-title" aria-describedby="confirm-dialog-message"><div class="confirm-dialog-card"><span class="confirm-dialog-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3.5 21 20H3zM12 9v5M12 17.5h.01"/></svg></span><div><p class="eyebrow">操作确认</p><h2 id="confirm-dialog-title">确认继续？</h2><p id="confirm-dialog-message" data-confirm-message></p></div><footer><button class="button" type="button" data-confirm-cancel>取消</button><button class="button danger-confirm" type="button" data-confirm-accept>确认继续</button></footer></div></dialog>`;
   const currentView = app.querySelector(":scope > .desktop-app");
-  if (previousMain && previousRoute === state.route && currentView) {
+  if (previousMain && currentView) {
     const template = document.createElement("template");
     template.innerHTML = markup;
     const metrics = { inserted: 0, removed: 0, replaced: 0, updated: 0 };
@@ -620,6 +658,8 @@ function shell(content, title, { viewKey = state.route } = {}) {
   const renderedMain = app.querySelector(".workspace-main");
   renderedMain?.classList.remove("is-route-pending");
   renderedMain?.removeAttribute("aria-busy");
+  if (routeChanged || viewChanged) queueEntrance(renderedMain);
+  if (contextChanged) queueEntrance(app.querySelector(".context-sidebar"));
   applyTheme();
   document.querySelector("#logout").onclick = async () => {
     try {
@@ -636,27 +676,18 @@ function shell(content, title, { viewKey = state.route } = {}) {
     document.querySelector("#theme-toggle").onclick;
   document.querySelector("#mobile-logout").onclick =
     document.querySelector("#logout").onclick;
-  bindEvent(document, "click", (event) => {
-    const menu = document.querySelector(".mobile-account-menu[open]");
-    if (menu && !menu.contains(event.target)) menu.open = false;
-  });
-  bindEvent(document, "keydown", (event) => {
-    if (event.key !== "Escape") return;
-    const menu = document.querySelector(".mobile-account-menu[open]");
-    if (menu) menu.open = false;
-  });
   document.querySelectorAll("[data-context-agent]").forEach((link) => {
     link.onclick = () => {
       state.data.selectedAgent = link.dataset.contextAgent;
     };
   });
   const confirmDialog = document.querySelector("[data-confirm-dialog]");
-  const finishConfirm = (accepted) => {
+  const finishConfirm = async (accepted) => {
     if (!state.confirmResolver) return;
     const resolve = state.confirmResolver;
     state.confirmResolver = null;
-    state.confirmOpen = false;
-    confirmDialog.close();
+    await closeDialog(confirmDialog);
+    state.confirmOpen = Boolean(state.confirmResolver);
     resolve(accepted);
   };
   confirmDialog.querySelector("[data-confirm-cancel]").onclick = () =>
@@ -800,6 +831,7 @@ async function renderOnce() {
   routeController?.abort();
   routeController = new AbortController();
   state.routeSignal = routeController.signal;
+  const navigationSignal = state.routeSignal;
   clearTimeout(state.taskPollTimer);
   clearTimeout(state.trafficPollTimer);
   clearTimeout(state.coreLogPollTimer);
@@ -934,6 +966,12 @@ async function renderOnce() {
         `<section class="section"><div class="alert error">${esc(error.message)}</div></section>`,
         "错误",
       );
+  } finally {
+    if (state.routeSignal === navigationSignal) {
+      const main = app.querySelector(".workspace-main");
+      main?.classList.remove("is-route-pending");
+      main?.removeAttribute("aria-busy");
+    }
   }
 }
 const scheduleRender = createLatestRenderScheduler(renderOnce, {
