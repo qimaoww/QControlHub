@@ -12,6 +12,7 @@ import (
 
 	"github.com/qimaoww/qcontrolhub/internal/authn"
 	"github.com/qimaoww/qcontrolhub/internal/core"
+	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
 	"github.com/qimaoww/qcontrolhub/internal/store"
 	"github.com/qimaoww/qcontrolhub/internal/testdb"
 )
@@ -102,5 +103,19 @@ func TestSSRustScopedConfigAPIWithPostgreSQL(t *testing.T) {
 	first, second := entries[0].(map[string]any), entries[1].(map[string]any)
 	if root["dns"] != "1.1.1.1" || root["mode"] != "tcp_and_udp" || root["timeout"] != float64(75) || first["mode"] != nil || first["server_port"] != float64(20003) || second["mode"] != "udp_only" || second["server_port"] != float64(20002) {
 		t.Fatalf("scope isolation lost: %s", saved.Content)
+	}
+	const customName = "香港-ATT"
+	response = request(http.MethodPost, "/server-inbounds", map[string]any{"operation": "modify", "original_tag": "one", "expected_version": saved.Version, "intent": "validate", "preserve_ss_rust_globals": true,
+		"input": map[string]any{"protocol": "shadowsocks", "tag": customName, "listen": "::", "port": 20003, "method": "aes-256-gcm", "credential": "password-one-long", "username": "default"}})
+	if response.Code != http.StatusOK {
+		t.Fatalf("rename through preset: %d %s", response.Code, response.Body.String())
+	}
+	saved, err = dataStore.AgentConfig(ctx, agent.ID, core.EngineShadowsocksRust)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed := serverconfig.ParseAll(core.EngineShadowsocksRust, saved.Content)
+	if len(parsed) != 2 || parsed[0].Tag != customName || parsed[1].Tag != "two" {
+		t.Fatalf("preset did not persist names: %+v", parsed)
 	}
 }

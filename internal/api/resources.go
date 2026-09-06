@@ -20,10 +20,12 @@ import (
 )
 
 type clientAccessProfile struct {
-	Tag      string                     `json:"tag"`
-	Protocol string                     `json:"protocol"`
-	Port     int                        `json:"port"`
-	Profile  serverconfig.ClientProfile `json:"profile"`
+	Tag            string                     `json:"tag"`
+	Protocol       string                     `json:"protocol"`
+	Port           int                        `json:"port"`
+	Profile        serverconfig.ClientProfile `json:"profile"`
+	ClientName     string                     `json:"client_name,omitempty"`
+	NameOverridden bool                       `json:"name_overridden,omitempty"`
 }
 
 type clientAccessAddressOption struct {
@@ -701,7 +703,7 @@ func (s *Server) clientAccessEntries(ctx context.Context) ([]clientAccessEntry, 
 			clientAddressMode = core.SubStoreAddressModeAuto
 		}
 		candidates := clientAddressCandidates(agent)
-		addressOptions := buildClientAccessAddressOptions(deployment.Engine, inputs, candidates, serverName, clientName)
+		addressOptions := buildClientAccessAddressOptions(deployment.Engine, inputs, candidates, serverName, clientName, agent.Labels)
 		if len(addressOptions) > 0 {
 			primary := addressOptions[0]
 			entries = append(entries, clientAccessEntry{
@@ -745,12 +747,18 @@ type clientAddressCandidate struct {
 	family  string
 }
 
-func buildClientAccessAddressOptions(engine core.Engine, inputs []serverconfig.Input, candidates []clientAddressCandidate, serverName, clientName string) []clientAccessAddressOption {
+func buildClientAccessAddressOptions(engine core.Engine, inputs []serverconfig.Input, candidates []clientAddressCandidate, serverName, clientName string, labelSets ...map[string]string) []clientAccessAddressOption {
 	options := make([]clientAccessAddressOption, 0, len(candidates))
 	for _, candidate := range candidates {
 		profiles := make([]clientAccessProfile, 0, len(inputs))
 		for _, input := range inputs {
-			profile, err := serverconfig.BuildClientProfileNamed(input, candidate.address, serverName, clientName)
+			name, overridden := clientName, false
+			if len(labelSets) > 0 {
+				if value, exists := labelSets[0][core.ClientProfileNameLabel(engine, input.Listen, input.Port)]; exists {
+					name, overridden = value, true
+				}
+			}
+			profile, err := serverconfig.BuildClientProfileNamed(input, candidate.address, serverName, name)
 			if err != nil {
 				continue
 			}
@@ -758,7 +766,7 @@ func buildClientAccessAddressOptions(engine core.Engine, inputs []serverconfig.I
 			if !found {
 				continue
 			}
-			profiles = append(profiles, clientAccessProfile{Tag: input.Tag, Protocol: protocol.Name, Port: input.Port, Profile: profile})
+			profiles = append(profiles, clientAccessProfile{Tag: input.Tag, Protocol: protocol.Name, Port: input.Port, Profile: profile, ClientName: name, NameOverridden: overridden})
 		}
 		if len(profiles) > 0 {
 			options = append(options, clientAccessAddressOption{

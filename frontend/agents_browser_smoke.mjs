@@ -245,7 +245,7 @@ async function runMode(mode) {
 }
 
 try {
-  for (const mode of ["admin", "empty", "readonly"]) await runMode(mode);
+  for (const mode of ["admin", "empty", "readonly", "ports"]) await runMode(mode);
   process.stdout.write("agents browser runtime smoke passed\n");
 } finally {
   await new Promise((resolve) => server.close(resolve));

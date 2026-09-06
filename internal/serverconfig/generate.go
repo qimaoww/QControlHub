@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
@@ -37,7 +39,11 @@ func Generate(engine core.Engine, input Input) (string, error) {
 	if input.Protocol == ProtocolSudoku {
 		normalizeSudokuInput(&input)
 	}
-	if !tagPattern.MatchString(input.Tag) {
+	if engine == core.EngineShadowsocksRust {
+		if strings.TrimSpace(input.Tag) == "" || strings.TrimSpace(input.Tag) != input.Tag || !utf8.ValidString(input.Tag) || utf8.RuneCountInString(input.Tag) > 64 || strings.ContainsFunc(input.Tag, unicode.IsControl) {
+			return "", errors.New("SS Rust 入站名称须为 1–64 个字符，不得包含控制字符或首尾空白")
+		}
+	} else if !tagPattern.MatchString(input.Tag) {
 		return "", errors.New("入站标签只能包含字母、数字、点、下划线和短横线，最长 64 位")
 	}
 	if input.Port < 1 || input.Port > 65535 {

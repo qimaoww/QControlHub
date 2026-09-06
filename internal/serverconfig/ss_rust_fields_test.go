@@ -165,6 +165,7 @@ func TestSSRustScopedPresetDoesNotChangeGlobals(t *testing.T) {
 			tag := plan.Tag
 			if operation == "add" {
 				tag, plan.Port = "", 20003
+				plan.Tag = "new-port"
 			}
 			plan.SSRustDNS, plan.SSRustIPv6First, plan.SSRustOutboundBindAddr = "", false, ""
 			plan.Credential = "password-long-enough-for-test"

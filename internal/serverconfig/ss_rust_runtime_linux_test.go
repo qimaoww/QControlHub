@@ -167,6 +167,20 @@ func TestSSRustNativeConnectionLogs(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			if scenario == "panel" {
+				plan.Tag = "香港-改名后"
+				renamed, err := Generate(core.EngineShadowsocksRust, plan)
+				if err != nil {
+					t.Fatal(err)
+				}
+				content, err = MutateSSRustPort(content, renamed, "logging-test", "modify")
+				if err != nil {
+					t.Fatal(err)
+				}
+				if inputs := ParseAll(core.EngineShadowsocksRust, content); len(inputs) != 1 || inputs[0].Tag != plan.Tag {
+					t.Fatal("renamed native profile lost its tag")
+				}
+			}
 			if scenario == "imported" {
 				content = fmt.Sprintf(`{"mode":"tcp_and_udp","servers":[{"server":"127.0.0.1","server_port":%d,"method":"aes-256-gcm","password":%q}]}`, serverPort, password)
 			}

@@ -88,6 +88,7 @@ type Client struct {
 	taskLifecycleMu   sync.Mutex
 	upgradePending    bool
 	upgradeCommitted  *agentUpgradeTransaction
+	runtimeRefresh    chan struct{}
 	reexecFunc        func(string, []string, []string) error
 	executeFunc       func(context.Context, core.Task) (string, error)
 }
@@ -188,15 +189,16 @@ func NewClient(config ClientConfig, executor *Executor) (*Client, error) {
 		return nil, fmt.Errorf("invalid public IP probe configuration: %w", err)
 	}
 	return &Client{
-		config:       config,
-		executor:     executor,
-		serverHost:   parsed.Host,
-		websocketURL: websocketScheme + "://" + parsed.Host + "/agent/v1/connect",
-		metrics:      metricsCollector,
-		traffic:      NewTrafficManagerForServiceManager(config.StatePath, executor.serviceManager()),
-		mainland:     NewMainlandAccessManager(config.StatePath, executor.serviceManager()),
-		logs:         NewCoreLogCollectorForExecutor(executor),
-		publicIP:     publicIP,
+		config:         config,
+		executor:       executor,
+		serverHost:     parsed.Host,
+		websocketURL:   websocketScheme + "://" + parsed.Host + "/agent/v1/connect",
+		metrics:        metricsCollector,
+		traffic:        NewTrafficManagerForServiceManager(config.StatePath, executor.serviceManager()),
+		mainland:       NewMainlandAccessManager(config.StatePath, executor.serviceManager()),
+		logs:           NewCoreLogCollectorForExecutor(executor),
+		publicIP:       publicIP,
+		runtimeRefresh: make(chan struct{}, 1),
 		http: &http.Client{
 			Transport: transport,
 			CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
@@ -483,6 +485,10 @@ func (c *Client) runWebSocket(ctx context.Context) error {
 			if c.committedUpgradeAwaitingRestart() {
 				go c.reexecAfterUpgrade()
 			}
+		case <-c.runtimeRefresh:
+			if err := c.queueHeartbeat(sessionContext, outgoing); err != nil {
+				return err
+			}
 		case <-metricsTicker.C:
 			if err := c.queueMetrics(sessionContext, outgoing); err != nil {
 				return err
@@ -661,6 +667,19 @@ func (c *Client) executeTaskForSession(executionContext, deliveryContext context
 	select {
 	case outgoing <- message:
 	case <-deliveryContext.Done():
+		return
+	}
+	// Probe after real lifecycle results (including partial failures), rather
+	// than optimistically declaring the service installed/running in the UI.
+	// The session loop owns heartbeat collection; a single buffered request
+	// coalesces completions without racing its periodic metrics collection.
+	switch task.Action {
+	case core.ActionInstall, core.ActionDeploy, core.ActionImportExisting,
+		core.ActionStart, core.ActionStop, core.ActionRestart:
+		select {
+		case c.runtimeRefresh <- struct{}{}:
+		default:
+		}
 	}
 }
 

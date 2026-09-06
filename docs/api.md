@@ -55,7 +55,7 @@
 | `GET` | `/api/v1/access-controls` | 按节点、入站标签和端口读取大陆访问限制（agent-config.read） |
 | `PUT` | `/api/v1/access-controls` | 保存单个入站的大陆来源/目标限制并创建校验或部署任务（agent-config.write + tasks.execute） |
 | `GET` | `/api/v1/core-logs` | 查询面板集中保存的内核运行日志 |
-| `PUT` | `/api/v1/agents/{id}/client-address` | 设置或清除客户端访问节点时使用的域名/IP（agents.manage） |
+| `PUT` | `/api/v1/agents/{id}/client-address` | 设置客户端访问地址、协议栈或单端口显示名称（agents.manage） |
 | `GET` | `/api/v1/agents/{id}/region` | 根据节点已验证的公网 IP 查询 GeoIP 国家/地区（agents.read） |
 | `GET` | `/api/v1/region-flags/{code}` | 读取统一风格的圆形 SVG 国家/地区旗帜（agents.read） |
 | `GET` | `/api/v1/agents/{id}/komari` | 读取节点关联的 Komari 服务器计费周期和流量配置（agents.read） |
@@ -163,6 +163,12 @@
 在节点详情的“Agent 与身份”中可保存自定义名称。`PUT /api/v1/agents/{id}/name` 接受 `{"name":"香港 · edge-01"}`，返回裁剪首尾空白后的同形对象。名称须为 1–100 个 Unicode 字符，不得包含控制字符；非法名称返回 `400`，节点不存在或已撤销返回 `404`。接口需要 `agents.manage` 权限，浏览器会话还需 CSRF，并记录 `agent.renamed` 审计。
 
 名称只修改控制面展示元数据，不改变节点 ID、公钥、配置关联或现有 WSS 连接。旧安装命令保留原凭据绑定名称，仍可使用；心跳和使用旧命令重装都不会把自定义名称改回。改名不自动修改独立设置的客户端分享名称。
+
+### 客户端端口显示名称
+
+客户端页面的“修改显示参数”按入站定位名称。例如 `PUT /api/v1/agents/{id}/client-address` 的请求 `{"profile":{"engine":"ss-rust","tag":"ss-rust-1","port":20001},"name":"香港 · ATT"}` 只修改该内核、监听地址和端口的分享名称；不创建配置版本、不重启内核，也不修改其他端口。名称最多 100 个 Unicode 字符且不能包含控制字符；空名称恢复该端口的入站标签。已有节点级名称继续作为未单独命名端口的默认值。选择器必须匹配实际成功部署的修订；不存在或已变更的入站返回 `404`，不完整的选择器返回 `400`。
+
+`address` 和 `address_mode`（`auto` / `ipv4` / `ipv6`）仍为整台节点共用的可选设置，省略表示不修改；新界面仅在用户改动它们时提交。旧客户端不携带 `profile` 时仍使用节点级名称接口。端口名称适用于所有地址族的分享值和 Sub-Store 默认名称，Sub-Store 自己设置的名称优先。名称绑定监听端点，不随 SS Rust 数组位置或标签改名转移到别的端口；改变监听地址/端口会使用新端点的设置。此接口继续要求 `agents.manage`、浏览器 CSRF 和审计记录。
 
 ### 创建配置
 

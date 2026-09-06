@@ -104,7 +104,7 @@ func TestShadowsocksRustMainlandPolicyRemainsOutsideCoreJSON(t *testing.T) {
 		t.Fatalf("ss-rust policy polluted native config:\n%s", updated)
 	}
 	policies := DiscoverMainlandAccessPolicies(core.EngineShadowsocksRust, updated)
-	if len(policies) != 1 || policies[0].Tag != "ss-rust" || policies[0].Port != input.Port {
+	if len(policies) != 1 || policies[0].Tag != input.Tag || policies[0].Port != input.Port {
 		t.Fatalf("ss-rust inbound discovery = %+v", policies)
 	}
 	if _, err := ApplyMainlandAccessPolicyWithPrefixes(core.EngineShadowsocksRust, content, MainlandAccessPolicy{
