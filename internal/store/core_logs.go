@@ -20,7 +20,8 @@ type CoreLogQuery struct {
 	Level   string
 	Search  string
 	Before  int64
-	Limit   int
+	// Limit bounds each engine independently within the selected node scope.
+	Limit int
 }
 
 func (s *Store) StoreCoreLogs(ctx context.Context, agentID string, batch core.CoreLogBatch) error {
@@ -109,20 +110,32 @@ func (s *Store) ListCoreLogs(ctx context.Context, query CoreLogQuery) ([]core.Co
 	if len(query.Search) > 120 || (query.Engine != "" && !query.Engine.Valid()) {
 		return nil, fmt.Errorf("%w: invalid core log query", ErrInvalid)
 	}
+	engines := []string{string(core.EngineMihomo), string(core.EngineXray), string(core.EngineSingBox), string(core.EngineShadowsocksRust)}
+	if query.Engine != "" {
+		engines = []string{string(query.Engine)}
+	}
+	// Bound each engine's indexed scan before merging the results. A busy
+	// engine must not consume the other engines' slots, and we should not rank
+	// the entire retained log history just to display a small recent window.
 	rows, err := s.pool.Query(ctx, `
-		SELECT id,agent_id,engine,level,message,logged_at,received_at
-		FROM core_logs
-		WHERE ($1='' OR agent_id=$1)
-		  AND ($2='' OR engine=$2)
-		  AND ($3='' OR level=$3)
-		  AND ($4='' OR position(lower($4) in lower(message)) > 0)
-		  AND ($5=0 OR id<$5)
-		ORDER BY id DESC LIMIT $6`, query.AgentID, query.Engine, query.Level, query.Search, query.Before, query.Limit)
+		SELECT logs.id,logs.agent_id,logs.engine,logs.level,logs.message,logs.logged_at,logs.received_at
+		FROM unnest($2::text[]) AS selected(engine)
+		CROSS JOIN LATERAL (
+			SELECT id,agent_id,engine,level,message,logged_at,received_at
+			FROM core_logs
+			WHERE engine=selected.engine
+			  AND ($1='' OR agent_id=$1)
+			  AND ($3='' OR level=$3)
+			  AND ($4='' OR position(lower($4) in lower(message)) > 0)
+			  AND ($5=0 OR id<$5)
+			ORDER BY id DESC LIMIT $6
+		) AS logs
+		ORDER BY logs.id DESC`, query.AgentID, engines, query.Level, query.Search, query.Before, query.Limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	result := make([]core.CoreLogEntry, 0, query.Limit)
+	result := make([]core.CoreLogEntry, 0, query.Limit*len(engines))
 	for rows.Next() {
 		var entry core.CoreLogEntry
 		if err := rows.Scan(&entry.ID, &entry.AgentID, &entry.Engine, &entry.Level, &entry.Message, &entry.LoggedAt, &entry.ReceivedAt); err != nil {

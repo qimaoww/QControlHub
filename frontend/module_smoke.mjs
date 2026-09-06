@@ -3236,6 +3236,7 @@ try {
   let coreRenders = 0;
   let coreMarkup = "";
   let coreFailure = false;
+  let coreLogQuery = "";
   let coreEntries = [{ id: 1, agent_id: "alpha", engine: "mihomo", level: "info", message: "ready", logged_at: "now" }];
   let coreAgents = [{ id: "alpha", name: "Alpha" }];
   const coreState = {
@@ -3245,7 +3246,7 @@ try {
   };
   const renderCoreLogs = installCoreLogs({
     state: coreState,
-    engines: ["mihomo"],
+    engines: ["mihomo", "xray", "sing-box", "ss-rust"],
     can: () => true,
     esc: (value) => String(value ?? ""),
     engineName: (value) => value,
@@ -3254,7 +3255,10 @@ try {
       coreRequests += 1;
       if (path.startsWith("/core-logs?") && coreFailure)
         throw new Error("temporary log failure");
-      if (path.startsWith("/core-logs?")) return coreEntries;
+      if (path.startsWith("/core-logs?")) {
+        coreLogQuery = path;
+        return coreEntries;
+      }
       if (path === "/agents") return coreAgents;
       assert.fail(`unexpected core-log polling path ${path}`);
     },
@@ -3279,6 +3283,7 @@ try {
   assert.equal(coreMarkup.includes("data-core-log-level"), true, "levels render as immediate filter buttons");
   assert.equal(coreMarkup.includes('type="submit"'), false, "core log filters do not require an apply action");
   assert.equal(coreMarkup.includes("core-log-columns"), true, "the light log table has explicit column headings");
+  assert.equal(coreMarkup.includes('每内核上限<select name="limit">'), true, "the log count setting explicitly applies to each engine");
   const corePoll = [...coreTimers.values()][0];
   coreTimers.clear();
   await corePoll();
@@ -3297,6 +3302,22 @@ try {
   await recoveredCorePoll();
   assert.equal(coreRenders, 3, "log polling recovers without clearing state");
   assert.equal(coreTimers.size, 1);
+  coreEntries = ["mihomo", "xray", "sing-box", "ss-rust"].flatMap((engine, engineIndex) =>
+    Array.from({ length: 100 }, (_, index) => ({
+      id: 400 - engineIndex * 100 - index, agent_id: "alpha", engine,
+      level: "info", message: `${engine} log ${index}`, logged_at: "now",
+    })),
+  );
+  coreState.data.coreLogFilters = { limit: 100 };
+  await renderCoreLogs();
+  assert.equal(coreState.data.coreLogs.length, 400, "all engines keep their own 100-entry allowance without a global frontend slice");
+  assert.equal(coreLogQuery, "/core-logs?limit=100", "the selected value is passed unchanged as the API's per-engine cap");
+  assert.equal(coreMarkup.includes('value="sing-box" data-core-log-engine aria-pressed="false"><span>sing-box</span><b>100</b>'), true, "engine badges report their independent loaded counts");
+  assert.equal(coreMarkup.includes('显示 <strong>400</strong> 条结果'), true);
+  coreState.data.coreLogFilters = { limit: 100, engine: "sing-box" };
+  await renderCoreLogs();
+  assert.equal(coreState.data.coreLogs.length, 100, "selecting a quiet engine still exposes its full allowance");
+  assert.equal(coreState.data.coreLogs.every((entry) => entry.engine === "sing-box"), true);
   coreEntries = [];
   coreAgents = [{ id: "alpha", name: "Alpha", status: "online", features: ["core-logs-v1", "core-log-status-v1"], runtime: { "sing-box": { core_log_status: "failed", core_log_error: "permission-denied" } } }];
   coreState.data.coreLogFilters = { agent_id: "alpha", engine: "sing-box" };
