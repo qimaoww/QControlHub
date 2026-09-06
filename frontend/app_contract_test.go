@@ -740,7 +740,7 @@ func TestAgentWebSocketProxyForwardsSourceChain(t *testing.T) {
 	}
 }
 
-func TestOfficialDeploymentsPreserveTheProxyAndExternalDatabaseBoundaries(t *testing.T) {
+func TestOfficialDeploymentsTrustTheExactTwoHopProxyChain(t *testing.T) {
 	compose, err := os.ReadFile("../docker-compose.yml")
 	if err != nil {
 		t.Fatal(err)
@@ -762,7 +762,7 @@ func TestOfficialDeploymentsPreserveTheProxyAndExternalDatabaseBoundaries(t *tes
 		name    string
 		content string
 	}{
-		{name: "development compose", content: string(compose)},
+		{name: "bundled compose", content: string(compose)},
 		{name: "external quick-start compose", content: string(quickStart)},
 	} {
 		for _, required := range []string{
@@ -780,18 +780,17 @@ func TestOfficialDeploymentsPreserveTheProxyAndExternalDatabaseBoundaries(t *tes
 	}
 	for _, required := range []string{
 		`QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS`,
-		`validate_external_update_env`,
-		`cmp -s "$UPDATE_BACKUP_DIR/.env" "$ENV_FILE"`,
-		`外部 PostgreSQL 更新不支持 -f；令牌和配置加密密钥不得轮换`,
+		`PREVIOUS_CONFIG_KEYS_FILE`,
+		`prepend_unique_csv "$PREVIOUS_CONFIG_KEYS" "$CONFIG_KEY"`,
 	} {
 		if !strings.Contains(string(quickStart), required) {
-			t.Errorf("quick-start external configuration preservation contract is missing %q", required)
+			t.Errorf("quick-start key rotation contract is missing %q", required)
 		}
 	}
 
 	qcontrolWeb := strings.SplitN(string(compose), "\n  qcontrol-web:", 2)
 	if len(qcontrolWeb) != 2 {
-		t.Fatal("development compose is missing qcontrol-web")
+		t.Fatal("bundled compose is missing qcontrol-web")
 	}
 	qcontrolWebBlock := strings.SplitN(qcontrolWeb[1], "\nvolumes:", 2)[0]
 	if strings.Contains(qcontrolWebBlock, "\n      - backend") || strings.Contains(qcontrolWebBlock, "\n      backend:") {
@@ -812,8 +811,8 @@ func TestOfficialDeploymentsPreserveTheProxyAndExternalDatabaseBoundaries(t *tes
 		`trusted_proxy_cidrs="$(append_trusted_proxy "$trusted_proxy_cidrs" "$proxy_gateway/32")"`,
 		`"QCH_TRUSTED_PROXY_CIDRS=$trusted_proxy_cidrs"`,
 	} {
-		if strings.Count(string(quickStart), required) != 1 {
-			t.Errorf("external env preparation must preserve %q exactly once", required)
+		if strings.Count(string(quickStart), required) != 2 {
+			t.Errorf("bundled and external env preparation must both preserve %q", required)
 		}
 	}
 	for _, required := range []string{"宿主 Nginx 与 `qcontrol-web` 两跳代理", "两个精确 `/32` 端点", "禁止改成整个私网"} {

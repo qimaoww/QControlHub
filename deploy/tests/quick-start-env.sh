@@ -20,6 +20,23 @@ assert_equal() {
     fi
 }
 
+assert_file_mode() {
+    local file="$1" expected="$2"
+    [ "$(stat -c '%a' "$file")" = "$expected" ] || {
+        printf '%s\n' "quick-start regression: $file mode is not $expected" >&2
+        exit 1
+    }
+}
+
+assert_secret_source_mode() {
+    local file="$1" mode
+    mode="$(stat -c '%a' "$file")"
+    case "$mode" in
+        600|644) ;;
+        *) printf '%s\n' "quick-start regression: $file mode is unsafe: $mode" >&2; exit 1 ;;
+    esac
+}
+
 configure_secret_paths() {
     SECRET_DIR="$1"
     CONFIG_KEY_FILE="$SECRET_DIR/config-encryption-key"
@@ -33,6 +50,51 @@ write_test_secret() {
     printf '%s\n' "$value" > "$file"
     chmod 600 "$file"
 }
+
+ENV_FILE="$test_root/bundled.env"
+EXTERNAL_COMPOSE_FILE="$test_root/external-compose.yml"
+SECRET_COMPOSE_FILE="$test_root/secrets-compose.yml"
+configure_secret_paths "$test_root/bundled-secrets"
+ADMIN_TOKEN="$(printf 'a%.0s' {1..32})"
+DATABASE_URL=""
+FORCE=false
+prepare_bundled_env
+
+expected_digest="$(sha256_hex "$ADMIN_TOKEN")"
+assert_equal "persisted raw administrator token" "" "$(read_env_key QCH_ADMIN_TOKEN)"
+assert_equal "administrator token digest" "$expected_digest" "$(read_env_key QCH_ADMIN_TOKEN_SHA256)"
+assert_equal "first token display" "$ADMIN_TOKEN" "$ADMIN_TOKEN_TO_DISPLAY"
+assert_file_mode "$SECRET_DIR" 700
+assert_secret_source_mode "$CONFIG_KEY_FILE"
+assert_secret_source_mode "$PREVIOUS_CONFIG_KEYS_FILE"
+bundled_first_current="$(read_secret_file "$CONFIG_KEY_FILE")"
+assert_equal "plaintext config key in env" "" "$(read_env_key QCH_CONFIG_ENCRYPTION_KEY)"
+assert_equal "first previous ring" "" "$(read_secret_file "$PREVIOUS_CONFIG_KEYS_FILE")"
+
+write_secret_file "$PREVIOUS_CONFIG_KEYS_FILE" "older-key,oldest-key"
+bundled_before_force="$(<"$ENV_FILE")"
+ADMIN_TOKEN=""
+FORCE=true
+prepare_bundled_env
+bundled_second_current="$(read_secret_file "$CONFIG_KEY_FILE")"
+assert_equal "bundled force rotates current key" false "$( [ "$bundled_first_current" = "$bundled_second_current" ] && printf true || printf false )"
+assert_equal "bundled force prepends previous keys" "$bundled_first_current,older-key,oldest-key" "$(read_secret_file "$PREVIOUS_CONFIG_KEYS_FILE")"
+[ -n "$ADMIN_TOKEN_TO_DISPLAY" ] || { printf '%s\n' 'quick-start regression: rotated administrator token was not shown once' >&2; exit 1; }
+assert_equal "rotated administrator digest" "$(sha256_hex "$ADMIN_TOKEN_TO_DISPLAY")" "$(read_env_key QCH_ADMIN_TOKEN_SHA256)"
+bundled_backup="$(find "$test_root" -maxdepth 1 -name 'bundled.env.bak.*' -print | head -n 1)"
+[ -n "$bundled_backup" ] || { printf '%s\n' 'quick-start regression: bundled backup missing' >&2; exit 1; }
+assert_file_mode "$bundled_backup" 600
+assert_equal "bundled backup content" "$bundled_before_force" "$(<"$bundled_backup")"
+config_backup="$(find "$SECRET_DIR" -maxdepth 1 -name 'config-encryption-key.bak.*' -print | head -n 1)"
+[ -n "$config_backup" ] || { printf '%s\n' 'quick-start regression: config key backup missing' >&2; exit 1; }
+assert_file_mode "$config_backup" 600
+
+prepare_bundled_env
+bundled_third_current="$(read_secret_file "$CONFIG_KEY_FILE")"
+assert_equal "second bundled force prepends newest key" "$bundled_second_current,$bundled_first_current,older-key,oldest-key" "$(read_secret_file "$PREVIOUS_CONFIG_KEYS_FILE")"
+assert_equal "second bundled force rotates again" false "$( [ "$bundled_second_current" = "$bundled_third_current" ] && printf true || printf false )"
+secret_backup_count="$(find "$SECRET_DIR" -maxdepth 1 -name 'config-encryption-key.bak.*' -type f | wc -l | tr -d ' ')"
+[ "$secret_backup_count" -ge 2 ] || { printf '%s\n' 'quick-start regression: repeated secret backup missing' >&2; exit 1; }
 
 # External PostgreSQL reconfiguration keeps the six deployment-critical values
 # unchanged and stores the encryption key directly for the external Compose.
@@ -79,7 +141,6 @@ grep -Fq 'image: ghcr.io/qimaoww/qcontrol-plane:latest' "$EXTERNAL_COMPOSE_FILE"
 grep -Fq 'image: ghcr.io/qimaoww/qcontrol-web:latest' "$EXTERNAL_COMPOSE_FILE"
 grep -Fq 'QCH_DATABASE_URL: ${QCH_DATABASE_URL:?QCH_DATABASE_URL required}' "$EXTERNAL_COMPOSE_FILE"
 grep -Fq 'QCH_CONFIG_ENCRYPTION_KEY: ${QCH_CONFIG_ENCRYPTION_KEY:?QCH_CONFIG_ENCRYPTION_KEY required}' "$EXTERNAL_COMPOSE_FILE"
-grep -Fq 'QCH_DISABLE_DATABASE_MIGRATIONS: "true"' "$EXTERNAL_COMPOSE_FILE"
 grep -Fq 'ipv4_address: ${QCH_WEB_PROXY_ADDRESS:-172.30.254.2}' "$EXTERNAL_COMPOSE_FILE"
 if grep -Eq '^[[:space:]]{2}postgres:|postgres-data|depends_on:[[:space:]]*postgres|127\.0\.0\.1:5432|QCH_IMAGE_TAG|^[[:space:]]+build:' "$EXTERNAL_COMPOSE_FILE"; then
     printf '%s\n' 'quick-start regression: external Compose contains a local database or mutable image source' >&2
@@ -143,7 +204,7 @@ EXTERNAL_COMPOSE_FILE="$test_root/missing-external-compose.yml"
 update_env_file "POSTGRES_DB=qcontrolhub"
 MODE=""
 detect_existing_mode
-assert_equal "fixed external deployment mode" "external" "$MODE"
+assert_equal "detected bundled deployment" "bundled" "$MODE"
 
 compose_environment_log="$test_root/compose-environment.log"
 docker() { printf 'source=%s\nargs=%s\n' "$QCH_SOURCE_DIR" "$*" > "$compose_environment_log"; }
@@ -163,12 +224,8 @@ assert_equal "safe uninstall compose arguments" "down --remove-orphans" "$(<"$co
 grep -Fq '外部 PostgreSQL 数据未被修改' "$test_root/uninstall-output.txt"
 update_env_file "QCH_PORT=18080"
 assert_equal "custom panel URL" "http://127.0.0.1:18080" "$(local_panel_url)"
-for required_menu_text in '安装 / 重新配置外部 PostgreSQL 部署' '更新现有部署（保留原配置，失败自动回滚）' '卸载应用容器（保留配置、密钥和外部数据库）'; do
+for required_menu_text in '安装 / 重新配置' '更新现有部署' '卸载服务（保留配置、密钥和数据库卷）'; do
     grep -Fq "$required_menu_text" "$repo_root/deploy/quick-start.sh"
 done
-if bash "$repo_root/deploy/quick-start.sh" -m bundled -o install >/dev/null 2>&1; then
-    printf '%s\n' 'quick-start regression: production installer still accepted bundled PostgreSQL' >&2
-    exit 1
-fi
 
 printf '%s\n' 'quick-start external configuration regression passed'

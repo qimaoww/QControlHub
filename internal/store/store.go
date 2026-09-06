@@ -44,11 +44,6 @@ type storeExecutor interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }
 
-// OpenOptions controls database-opening behavior for managed deployments.
-type OpenOptions struct {
-	DisableMigrations bool
-}
-
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
@@ -68,13 +63,6 @@ func OpenWithConfigKey(ctx context.Context, databaseURL string, allowInsecureRem
 // OpenWithConfigKeyring uses configKey for new encrypted writes and previous
 // keys only to decrypt data written before an intentional key rotation.
 func OpenWithConfigKeyring(ctx context.Context, databaseURL string, allowInsecureRemote bool, configKey string, previousKeys []string) (*Store, error) {
-	return OpenWithConfigKeyringOptions(ctx, databaseURL, allowInsecureRemote, configKey, previousKeys, OpenOptions{})
-}
-
-// OpenWithConfigKeyringOptions can open a pre-provisioned database without
-// applying or initializing schema. When migrations are disabled, startup is
-// allowed only when the existing migration ledger matches this binary exactly.
-func OpenWithConfigKeyringOptions(ctx context.Context, databaseURL string, allowInsecureRemote bool, configKey string, previousKeys []string, options OpenOptions) (*Store, error) {
 	if strings.TrimSpace(databaseURL) == "" {
 		return nil, errors.New("QCH_DATABASE_URL is required")
 	}
@@ -121,34 +109,11 @@ func OpenWithConfigKeyringOptions(ctx context.Context, databaseURL string, allow
 		return nil, err
 	}
 	result := &Store{pool: pool, cryptor: cryptor}
-	if options.DisableMigrations {
-		err = result.verifySchemaVersion(ctx)
-	} else {
-		err = result.migrate(ctx)
-	}
-	if err != nil {
+	if err := result.migrate(ctx); err != nil {
 		pool.Close()
 		return nil, err
 	}
 	return result, nil
-}
-
-func (s *Store) verifySchemaVersion(ctx context.Context) error {
-	var ledgerExists bool
-	if err := s.pool.QueryRow(ctx, `SELECT to_regclass('qcontrolhub_schema_migrations') IS NOT NULL`).Scan(&ledgerExists); err != nil {
-		return fmt.Errorf("inspect schema migration ledger: %w", err)
-	}
-	if !ledgerExists {
-		return errors.New("database schema is not initialized and migrations are disabled")
-	}
-	var appliedVersion int
-	if err := s.pool.QueryRow(ctx, `SELECT COALESCE(max(version),0) FROM qcontrolhub_schema_migrations`).Scan(&appliedVersion); err != nil {
-		return fmt.Errorf("read schema migration version: %w", err)
-	}
-	if appliedVersion != currentSchemaVersion {
-		return fmt.Errorf("database schema version %d does not match required version %d and migrations are disabled", appliedVersion, currentSchemaVersion)
-	}
-	return nil
 }
 
 func (s *Store) encryptEnrollmentToken(rawToken string) (string, error) {

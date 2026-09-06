@@ -88,18 +88,7 @@ func main() {
 	if configEncryptionKey != "" {
 		slog.Info("configuration payloads will be encrypted at rest")
 	}
-	disableDatabaseMigrations := envBool("QCH_DISABLE_DATABASE_MIGRATIONS", false)
-	if disableDatabaseMigrations {
-		slog.Info("database migrations are disabled; requiring an existing matching schema")
-	}
-	dataStore, err := store.OpenWithConfigKeyringOptions(
-		startupContext,
-		databaseURL,
-		allowInsecureDatabase,
-		configEncryptionKey,
-		previousConfigEncryptionKeys,
-		store.OpenOptions{DisableMigrations: disableDatabaseMigrations},
-	)
+	dataStore, err := store.OpenWithConfigKeyring(startupContext, databaseURL, allowInsecureDatabase, configEncryptionKey, previousConfigEncryptionKeys)
 	cancelStartup()
 	if err != nil {
 		slog.Error("open data store", "error", err)
