@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"net/netip"
 	"strings"
@@ -47,7 +48,7 @@ type storeExecutor interface {
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 40
+const currentSchemaVersion = 41
 
 func Open(ctx context.Context, databaseURL string, allowInsecureRemote bool) (*Store, error) {
 	return OpenWithConfigKey(ctx, databaseURL, allowInsecureRemote, "")
@@ -1166,12 +1167,21 @@ func (s *Store) ExistingConfigIDs(ctx context.Context, ids []string) (map[string
 }
 
 func (s *Store) CreateTask(ctx context.Context, request core.TaskRequest) (core.Task, error) {
+	if request.Action == core.ActionConfigureTCP {
+		settings, err := core.NormalizeTCPSettings(request.TCPSettings)
+		if err != nil {
+			return core.Task{}, fmt.Errorf("%w: %v", ErrInvalid, err)
+		}
+		request.TCPSettings = settings
+	} else if len(request.TCPSettings) != 0 {
+		return core.Task{}, fmt.Errorf("%w: TCP settings are only accepted by configure-tcp", ErrInvalid)
+	}
 	if !request.Action.Valid() {
 		return core.Task{}, fmt.Errorf("%w: unsupported action %q", ErrInvalid, request.Action)
 	}
-	if request.Action == core.ActionUpgradeAgent {
+	if request.Action.AgentLevel() {
 		if request.Engine != "" || request.ConfigID != "" || request.CoreVersion != "" {
-			return core.Task{}, fmt.Errorf("%w: agent upgrade tasks cannot reference an engine, configuration, or core version", ErrInvalid)
+			return core.Task{}, fmt.Errorf("%w: agent-level tasks cannot reference an engine, configuration, or core version", ErrInvalid)
 		}
 	} else if !request.Engine.Valid() {
 		return core.Task{}, fmt.Errorf("%w: unsupported engine %q", ErrInvalid, request.Engine)
@@ -1224,10 +1234,13 @@ func (s *Store) CreateTask(ctx context.Context, request core.TaskRequest) (core.
 	if request.Action == core.ActionUpgradeAgent && !containsFeature(features, core.AgentFeatureSelfUpgrade) {
 		return core.Task{}, fmt.Errorf("%w: this Agent does not support remote upgrades; run the current one-click installation once", ErrConflict)
 	}
-	if request.Action != core.ActionUpgradeAgent && !containsEngine(capabilities, request.Engine) {
+	if request.Action.SystemBBR() && !containsFeature(features, core.AgentFeatureSystemBBR) {
+		return core.Task{}, fmt.Errorf("%w: upgrade this Agent before managing system BBR", ErrConflict)
+	}
+	if !request.Action.AgentLevel() && !containsEngine(capabilities, request.Engine) {
 		return core.Task{}, fmt.Errorf("%w: agent does not advertise the requested engine", ErrInvalid)
 	}
-	if request.Action != core.ActionUpgradeAgent {
+	if !request.Action.AgentLevel() {
 		if reason := strings.TrimSpace(runtime[request.Engine].ExistingConfigUnsupportedReason); reason != "" {
 			return core.Task{}, fmt.Errorf("%w: %s core tasks are disabled because an existing service could not be mapped safely: %s", ErrConflict, request.Engine, reason)
 		}
@@ -1243,9 +1256,13 @@ func (s *Store) CreateTask(ctx context.Context, request core.TaskRequest) (core.
 	}
 
 	task := core.Task{
-		AgentID: request.AgentID, Action: request.Action, Engine: request.Engine,
+		TCPSettings: request.TCPSettings,
+		AgentID:     request.AgentID, Action: request.Action, Engine: request.Engine,
 		ConfigID: request.ConfigID, CoreVersion: request.CoreVersion, CoreSource: request.CoreSource,
 		Status: core.TaskPending, CreatedAt: time.Now().UTC(),
+	}
+	if task.TCPSettings == nil {
+		task.TCPSettings = core.TCPSettings{}
 	}
 	if request.Action == core.ActionDeploy || request.Action == core.ActionValidate || request.Action == core.ActionImportExisting {
 		var configEngine core.Engine
@@ -1296,9 +1313,9 @@ func (s *Store) CreateTask(ctx context.Context, request core.TaskRequest) (core.
 	}
 	existing, existingErr := scanTask(tx.QueryRow(ctx, `
 		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),COALESCE(core_version,''),COALESCE(core_source,''),status,attempt,
-		       COALESCE(output,''),COALESCE(error,''),created_at,started_at,finished_at
+		       COALESCE(output,''),COALESCE(error,''),created_at,started_at,finished_at,tcp_settings
 		FROM tasks
-		WHERE agent_id=$1 AND action=$2 AND engine=$3
+		WHERE agent_id=$1 AND (action=$2 OR ($2 IN ('enable-bbr','disable-bbr','configure-tcp') AND action IN ('enable-bbr','disable-bbr','configure-tcp'))) AND engine=$3
 		  AND COALESCE(config_id,'')=$4 AND COALESCE(config_version,0)=$5 AND COALESCE(core_version,'')=$6
 		  AND (CASE WHEN $2='install' AND $3='mihomo' AND $6='development' AND COALESCE($7,'') IN ('','official')
 		            THEN 'official' ELSE COALESCE($7,'') END)
@@ -1308,6 +1325,9 @@ func (s *Store) CreateTask(ctx context.Context, request core.TaskRequest) (core.
 		ORDER BY created_at DESC LIMIT 1`,
 		task.AgentID, task.Action, task.Engine, task.ConfigID, task.ConfigVersion, task.CoreVersion, task.CoreSource), false)
 	if existingErr == nil {
+		if task.Action.SystemBBR() && (existing.Action != task.Action || !maps.Equal(existing.TCPSettings, task.TCPSettings)) {
+			return core.Task{}, fmt.Errorf("%w: another system TCP task is pending or running", ErrConflict)
+		}
 		if err := tx.Commit(ctx); err != nil {
 			return core.Task{}, err
 		}
@@ -1330,9 +1350,9 @@ func (s *Store) CreateTask(ctx context.Context, request core.TaskRequest) (core.
 		return core.Task{}, err
 	}
 	_, err = tx.Exec(ctx, `
-			INSERT INTO tasks (id,agent_id,action,engine,config_id,config_version,config_content,mainland_access_policies,core_version,core_source,status,attempt,created_at)
-			VALUES ($1,$2,$3,$4,NULLIF($5,''),NULLIF($6,0),NULLIF($7,''),$8,NULLIF($9,''),NULLIF($10,''),$11,0,$12)`,
-		task.ID, task.AgentID, task.Action, task.Engine, task.ConfigID, task.ConfigVersion, storedConfigContent, mainlandPoliciesJSON, task.CoreVersion, task.CoreSource, task.Status, task.CreatedAt)
+			INSERT INTO tasks (id,agent_id,action,engine,config_id,config_version,config_content,mainland_access_policies,core_version,core_source,status,attempt,created_at,tcp_settings)
+			VALUES ($1,$2,$3,$4,NULLIF($5,''),NULLIF($6,0),NULLIF($7,''),$8,NULLIF($9,''),NULLIF($10,''),$11,0,$12,$13)`,
+		task.ID, task.AgentID, task.Action, task.Engine, task.ConfigID, task.ConfigVersion, storedConfigContent, mainlandPoliciesJSON, task.CoreVersion, task.CoreSource, task.Status, task.CreatedAt, task.TCPSettings)
 	if err != nil {
 		return core.Task{}, mapError(err)
 	}
@@ -1383,7 +1403,7 @@ func (s *Store) ListTasksFiltered(ctx context.Context, agentID string, status co
 	}
 	rows, err := s.pool.Query(ctx, `
 		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),COALESCE(core_version,''),COALESCE(core_source,''),status,attempt,
-		       COALESCE(output,''),COALESCE(error,''),created_at,started_at,finished_at
+		       COALESCE(output,''),COALESCE(error,''),created_at,started_at,finished_at,tcp_settings
 		FROM tasks
 		WHERE ($1='' OR agent_id=$1) AND ($2='' OR status=$2) AND ($3='' OR action=$3)
 		ORDER BY created_at DESC LIMIT $4`, agentID, status, action, limit)
@@ -1405,7 +1425,7 @@ func (s *Store) ListTasksFiltered(ctx context.Context, agentID string, status co
 func (s *Store) GetTask(ctx context.Context, id string) (core.Task, error) {
 	row := s.pool.QueryRow(ctx, `
 		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),COALESCE(core_version,''),COALESCE(core_source,''),status,attempt,
-		       COALESCE(output,''),COALESCE(error,''),created_at,started_at,finished_at
+		       COALESCE(output,''),COALESCE(error,''),created_at,started_at,finished_at,tcp_settings
 		FROM tasks WHERE id=$1`, id)
 	task, err := scanTask(row, false)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -1443,7 +1463,8 @@ func (s *Store) RetryTask(ctx context.Context, id string) (core.Task, error) {
 		return core.Task{}, fmt.Errorf("%w: only failed or canceled tasks can be retried", ErrConflict)
 	}
 	return s.CreateTask(ctx, core.TaskRequest{
-		AgentID: previous.AgentID, Action: previous.Action, Engine: previous.Engine,
+		TCPSettings: previous.TCPSettings,
+		AgentID:     previous.AgentID, Action: previous.Action, Engine: previous.Engine,
 		ConfigID: previous.ConfigID, CoreVersion: previous.CoreVersion, CoreSource: previous.CoreSource,
 	})
 }
@@ -1474,7 +1495,7 @@ func (s *Store) RunningTask(ctx context.Context, agentID string) (*core.Task, er
 	row := tx.QueryRow(ctx, `
 		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),
 		       COALESCE(config_content,''),COALESCE(mainland_access_policies,'[]'::jsonb),COALESCE(core_version,''),COALESCE(core_source,''),status,attempt,COALESCE(lease_id,''),
-		       COALESCE(output,''),COALESCE(error,''),created_at,started_at,finished_at
+		       COALESCE(output,''),COALESCE(error,''),created_at,started_at,finished_at,tcp_settings
 		FROM tasks WHERE agent_id=$1 AND status='running'
 		ORDER BY started_at DESC LIMIT 1`, agentID)
 	task, err := scanTask(row, true)
@@ -1487,11 +1508,16 @@ func (s *Store) RunningTask(ctx context.Context, agentID string) (*core.Task, er
 	if err != nil {
 		return nil, err
 	}
-	if isMihomoMirrorTask(task) && !containsFeature(features, core.AgentFeatureMihomoDevelopmentSource) {
+	if (isMihomoMirrorTask(task) && !containsFeature(features, core.AgentFeatureMihomoDevelopmentSource)) ||
+		(task.Action.SystemBBR() && !containsFeature(features, core.AgentFeatureSystemBBR)) {
+		message := "Agent no longer advertises mihomo-development-source-v1; the mirror development task cannot be safely resumed and it is unknown whether the previous Agent executed it before the connection was lost"
+		if task.Action.SystemBBR() {
+			message = "Agent no longer advertises system-bbr-v1; TCP tuning cannot safely resume and previous execution before disconnect is unknown"
+		}
 		if _, updateErr := tx.Exec(ctx, `
 			UPDATE tasks SET status='failed', error=$2, finished_at=now(), config_content=NULL, lease_id=NULL
 			WHERE id=$1 AND status='running'`, task.ID,
-			"Agent no longer advertises mihomo-development-source-v1; the mirror development task cannot be safely resumed and it is unknown whether the previous Agent executed it before the connection was lost"); updateErr != nil {
+			message); updateErr != nil {
 			return nil, updateErr
 		}
 		if commitErr := tx.Commit(ctx); commitErr != nil {
@@ -1539,13 +1565,14 @@ func (s *Store) ClaimTask(ctx context.Context, agentID string) (*core.Task, erro
 			WHERE t.agent_id=$1 AND t.status='pending'
 			  AND NOT EXISTS (SELECT 1 FROM tasks running WHERE running.agent_id=$1 AND running.status='running')
 			  AND ($3::boolean OR NOT (t.action='install' AND t.engine='mihomo' AND t.core_version='development' AND COALESCE(t.core_source,'')='mirror'))
+			  AND ($4::boolean OR t.action NOT IN ('enable-bbr','disable-bbr','configure-tcp'))
 			ORDER BY t.created_at ASC FOR UPDATE OF t SKIP LOCKED LIMIT 1
 		)
 		UPDATE tasks t SET status='running',started_at=now(),attempt=attempt+1,lease_id=$2
 		FROM next_task n WHERE t.id=n.id
 		RETURNING t.id,t.agent_id,t.action,t.engine,COALESCE(t.config_id,''),COALESCE(t.config_version,0),
 		          COALESCE(t.config_content,''),COALESCE(t.mainland_access_policies,'[]'::jsonb),COALESCE(t.core_version,''),COALESCE(t.core_source,''),t.status,t.attempt,COALESCE(t.lease_id,''),COALESCE(t.output,''),COALESCE(t.error,''),
-		          t.created_at,t.started_at,t.finished_at`, agentID, leaseID, mirrorSupported)
+		          t.created_at,t.started_at,t.finished_at,t.tcp_settings`, agentID, leaseID, mirrorSupported, containsFeature(features, core.AgentFeatureSystemBBR))
 	task, err := scanTask(row, true)
 	if commitErr := tx.Commit(ctx); commitErr != nil {
 		return nil, commitErr
@@ -1671,7 +1698,7 @@ func (s *Store) RecentReadTask(ctx context.Context, agentID string, engine core.
 	}
 	row := s.pool.QueryRow(ctx, `
 		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),COALESCE(core_version,''),COALESCE(core_source,''),status,attempt,
-		       COALESCE(output,''),COALESCE(error,''),created_at,started_at,finished_at
+		       COALESCE(output,''),COALESCE(error,''),created_at,started_at,finished_at,tcp_settings
 		FROM tasks
 		WHERE agent_id=$1 AND engine=$2 AND action=$3 AND status='succeeded'
 		  AND config_content IS NOT NULL AND finished_at > now()-$4::interval
@@ -1724,18 +1751,22 @@ type rowScanner interface {
 func scanTask(row rowScanner, includeContent bool) (core.Task, error) {
 	var task core.Task
 	var err error
+	var tcpSettingsJSON []byte
 	if includeContent {
 		var mainlandPoliciesJSON []byte
 		err = row.Scan(&task.ID, &task.AgentID, &task.Action, &task.Engine, &task.ConfigID, &task.ConfigVersion,
 			&task.ConfigContent, &mainlandPoliciesJSON, &task.CoreVersion, &task.CoreSource, &task.Status, &task.Attempt, &task.LeaseID, &task.Output, &task.Error,
-			&task.CreatedAt, &task.StartedAt, &task.FinishedAt)
+			&task.CreatedAt, &task.StartedAt, &task.FinishedAt, &tcpSettingsJSON)
 		if err == nil && len(mainlandPoliciesJSON) > 0 {
 			err = json.Unmarshal(mainlandPoliciesJSON, &task.MainlandAccessPolicies)
 		}
 	} else {
 		err = row.Scan(&task.ID, &task.AgentID, &task.Action, &task.Engine, &task.ConfigID, &task.ConfigVersion,
 			&task.CoreVersion, &task.CoreSource, &task.Status, &task.Attempt, &task.Output, &task.Error,
-			&task.CreatedAt, &task.StartedAt, &task.FinishedAt)
+			&task.CreatedAt, &task.StartedAt, &task.FinishedAt, &tcpSettingsJSON)
+	}
+	if err == nil && len(tcpSettingsJSON) > 0 {
+		err = json.Unmarshal(tcpSettingsJSON, &task.TCPSettings)
 	}
 	return task, err
 }
@@ -1931,8 +1962,8 @@ CREATE INDEX IF NOT EXISTS mainland_access_policies_agent_idx
 CREATE TABLE IF NOT EXISTS tasks (
     id text PRIMARY KEY,
     agent_id text NOT NULL REFERENCES agents(id),
-    action varchar(20) NOT NULL CHECK (action IN ('validate','deploy','import-existing','read-config','read-managed-config','start','stop','restart','status','install','upgrade-agent')),
-	    engine varchar(20) NOT NULL CHECK (engine IN ('mihomo','xray','sing-box','ss-rust') OR (action='upgrade-agent' AND engine='')),
+    action varchar(20) NOT NULL CHECK (action IN ('validate','deploy','import-existing','read-config','read-managed-config','start','stop','restart','status','install','upgrade-agent','enable-bbr','disable-bbr','configure-tcp')),
+	    engine varchar(20) NOT NULL CHECK (engine IN ('mihomo','xray','sing-box','ss-rust') OR (action IN ('upgrade-agent','enable-bbr','disable-bbr','configure-tcp') AND engine='')),
     config_id text REFERENCES configs(id),
     config_version integer,
 	    config_content text,
@@ -1949,13 +1980,14 @@ CREATE TABLE IF NOT EXISTS tasks (
 );
 
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS lease_id text;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS tcp_settings jsonb NOT NULL DEFAULT '{}'::jsonb;
 	ALTER TABLE tasks ADD COLUMN IF NOT EXISTS core_version varchar(64);
 	ALTER TABLE tasks ADD COLUMN IF NOT EXISTS core_source varchar(32);
 	ALTER TABLE tasks ADD COLUMN IF NOT EXISTS mainland_access_policies jsonb NOT NULL DEFAULT '[]'::jsonb;
 	DROP INDEX IF EXISTS tasks_latest_deployment_idx;
 	ALTER TABLE tasks DROP COLUMN IF EXISTS simulated;
 	ALTER TABLE tasks DROP CONSTRAINT IF EXISTS tasks_action_check;
-	ALTER TABLE tasks ADD CONSTRAINT tasks_action_check CHECK (action IN ('validate','deploy','import-existing','read-config','read-managed-config','start','stop','restart','status','install','upgrade-agent'));
+	ALTER TABLE tasks ADD CONSTRAINT tasks_action_check CHECK (action IN ('validate','deploy','import-existing','read-config','read-managed-config','start','stop','restart','status','install','upgrade-agent','enable-bbr','disable-bbr','configure-tcp'));
 	ALTER TABLE tasks DROP CONSTRAINT IF EXISTS tasks_status_check;
 	ALTER TABLE tasks ADD CONSTRAINT tasks_status_check CHECK (status IN ('pending','running','succeeded','failed','canceled'));
 	ALTER TABLE configs DROP CONSTRAINT IF EXISTS configs_engine_check;
@@ -1963,7 +1995,7 @@ ALTER TABLE tasks ADD COLUMN IF NOT EXISTS lease_id text;
 	ALTER TABLE config_revisions DROP CONSTRAINT IF EXISTS config_revisions_engine_check;
 	ALTER TABLE config_revisions ADD CONSTRAINT config_revisions_engine_check CHECK (engine IN ('mihomo','xray','sing-box','ss-rust'));
 	ALTER TABLE tasks DROP CONSTRAINT IF EXISTS tasks_engine_check;
-	ALTER TABLE tasks ADD CONSTRAINT tasks_engine_check CHECK (engine IN ('mihomo','xray','sing-box','ss-rust') OR (action='upgrade-agent' AND engine=''));
+	ALTER TABLE tasks ADD CONSTRAINT tasks_engine_check CHECK (engine IN ('mihomo','xray','sing-box','ss-rust') OR (action IN ('upgrade-agent','enable-bbr','disable-bbr','configure-tcp') AND engine=''));
 
 CREATE TABLE IF NOT EXISTS enrollment_tokens (
     id text PRIMARY KEY,

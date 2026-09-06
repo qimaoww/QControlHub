@@ -20,6 +20,22 @@ const assert = {
 };
 
 const mode = new URLSearchParams(location.search).get("mode") || "admin";
+const tcpRules = [
+  { key: "net.ipv4.tcp_congestion_control", label: "拥塞控制算法", choices: ["bbr", "bbr2", "bbr3", "cubic", "reno"] },
+  { key: "net.core.default_qdisc", label: "默认队列算法", choices: ["fq", "fq_codel", "pfifo_fast"] },
+  { key: "net.ipv4.tcp_rmem", label: "TCP 接收缓冲区：最小 / 默认 / 最大（字节）", tuple: true, min: 1, max: 1073741824 },
+  { key: "net.ipv4.tcp_wmem", label: "TCP 发送缓冲区：最小 / 默认 / 最大（字节）", tuple: true, min: 1, max: 1073741824 },
+  { key: "net.core.rmem_max", label: "接收缓冲区上限（字节）", min: 4096, max: 1073741824 },
+  { key: "net.core.wmem_max", label: "发送缓冲区上限（字节）", min: 4096, max: 1073741824 },
+  { key: "net.core.somaxconn", label: "监听连接队列上限", min: 128, max: 65535 },
+  { key: "net.core.netdev_max_backlog", label: "网卡接收积压队列上限", min: 64, max: 1000000 },
+  { key: "net.ipv4.tcp_max_syn_backlog", label: "TCP SYN 队列上限", min: 128, max: 1000000 },
+  { key: "net.ipv4.tcp_mtu_probing", label: "MTU 探测（0 / 1 / 2）", max: 2 },
+  { key: "net.ipv4.tcp_ecn", label: "ECN（0 / 1 / 2）", max: 2 },
+  { key: "net.ipv4.tcp_fastopen", label: "TCP Fast Open（0 / 1 / 2 / 3）", max: 3 },
+  { key: "net.ipv4.tcp_sack", label: "SACK（0 / 1）", max: 1 },
+  { key: "net.ipv4.tcp_window_scaling", label: "窗口缩放（0 / 1）", max: 1 },
+];
 const onlineAgent = (id, features = ["agent-self-upgrade-v1"]) => ({
   id,
   name: id.toUpperCase(),
@@ -94,6 +110,25 @@ const testAPI = {
   agents: populatedAgents,
 };
 window.__agentsBrowserTestAPI = testAPI;
+if (mode.startsWith("bbr")) {
+  testAPI.tcpTasks = [];
+  testAPI.tcpMutations = [];
+  testAPI.agents = populatedAgents.map((agent, index) => ({
+    ...agent, features: index === 3 ? [] : ["system-bbr-v1"],
+    metrics: { bbr: {
+      available: true, collected_at: new Date().toISOString(), kernel_release: "6.12.46-amd64",
+      congestion_control: index === 1 ? "cubic" : "bbr", default_qdisc: "fq_codel",
+      available_algorithms: ["reno", "cubic", "bbr"], persistence: "unmanaged",
+      parameters: Object.fromEntries(tcpRules.map((rule) => [rule.key,
+        rule.key === "net.ipv4.tcp_congestion_control" ? (index === 1 ? "cubic" : "bbr") :
+        rule.key === "net.core.default_qdisc" ? "fq_codel" : rule.tuple ? "4096 131072 16777216" :
+        rule.max < 4 ? "1" : "4096",
+      ])),
+      qdiscs: [{ device: "eth0", kind: "mq", root: true }, { device: "eth0", kind: "fq_codel", parent: "1:1", handle: "0:" }],
+    } },
+  }));
+  location.hash = "#system-bbr";
+}
 
 const json = (value, status = 200) =>
   new Response(value === null ? null : JSON.stringify(value), {
@@ -113,7 +148,19 @@ window.fetch = async (input, options = {}) => {
       `mutation ${method} ${path} 缺少 CSRF 头`,
     );
   if (method === "GET" && path === "/auth/session")
-    return json({ role: mode === "readonly" ? "readonly" : "admin", csrf_token: "browser-test-csrf" });
+    return json({ role: mode === "readonly" || mode === "bbr-readonly" ? "readonly" : "admin", csrf_token: "browser-test-csrf" });
+  if (method === "GET" && path === "/system-tcp/parameters") return json(tcpRules);
+  if (mode.startsWith("bbr") && path === "/tasks") {
+    if (method === "GET") return json(testAPI.tcpTasks.filter((task) => task.action === url.searchParams.get("action") && (!url.searchParams.get("agent_id") || task.agent_id === url.searchParams.get("agent_id"))));
+    if (method === "POST") {
+      const payload = JSON.parse(options.body);
+      testAPI.tcpMutations.push(payload);
+      if (testAPI.tcpFailure) return json({ error: "TCP test failure" }, 503);
+      const task = { ...payload, id: `tcp-${testAPI.tcpTasks.length}`, created_at: new Date().toISOString(), status: "pending" };
+      testAPI.tcpTasks.push(task);
+      return json(task, 201);
+    }
+  }
   if (method === "GET" && path === "/overview")
     return json({ agents: mode === "empty" ? 0 : populatedAgents.length, agents_online: mode === "empty" ? 0 : 3 });
   if (method === "GET" && path === "/settings")
@@ -928,9 +975,98 @@ async function testPortNamesAndRuntimeRefresh() {
   assert.equal(testAPI.calls.filter((call) => call.path==="/agents").length,before,"离开预设页仍后台轮询");
 }
 
+async function testSystemTCPRuntime() {
+  await waitFor(() => document.querySelector(".bbr-card"), "TCP 页面未加载");
+  assert.equal(document.querySelector(".bbr-intro"), null, "不应恢复冗余的顶部说明卡");
+  assert.notEqual(document.querySelector('.dock-nav a[href="#system-bbr"] svg').innerHTML, document.querySelector('.dock-nav a[href="#traffic"] svg').innerHTML, "TCP 调优和流量侧栏图标重复");
+  const card = () => document.querySelector('[data-refresh-key="bbr-alpha"]');
+  assert.match(card().textContent, /BBR 已启用/);
+  assert.match(card().textContent, /未由 QControlHub 管理/);
+  assert.match(card().textContent, /fq_codel/);
+  if (mode === "bbr-readonly") {
+    assert.equal(document.querySelector("[data-tcp-form]"), null);
+    assert.equal(document.querySelector("[data-bbr-action]"), null);
+    return;
+  }
+  assert.ok(document.querySelector('[data-bbr-agent="charlie"]').disabled, "离线节点允许提交");
+  assert.ok(document.querySelector('[data-bbr-agent="delta"]').disabled, "旧 Agent 允许提交");
+  const editor = () => card().querySelector(".bbr-editor");
+  editor().open = true;
+  const field = () => editor().querySelector('[data-tcp-value="net.ipv4.tcp_rmem"]');
+  field().value = "4096 262144 33554432";
+  field().dispatchEvent(new Event("input", { bubbles: true }));
+  const refresh = async () => {
+    const before = testAPI.calls.filter((call) => call.path === "/system-tcp/parameters").length;
+    document.querySelector("[data-bbr-refresh]").click();
+    await waitFor(() => testAPI.calls.filter((call) => call.path === "/system-tcp/parameters").length > before, "TCP 刷新未请求");
+    await delay(120);
+  };
+  await refresh();
+  assert.equal(field().value, "4096 262144 33554432", "刷新覆盖了 TCP 草稿");
+  assert.equal(editor().open, true, "刷新折叠了 TCP 编辑器");
+  const originalTheme = document.documentElement.dataset.theme;
+  document.querySelector("#theme-toggle").click();
+  assert.notEqual(document.documentElement.dataset.theme, originalTheme);
+  assert.equal(field().value, "4096 262144 33554432");
+  editor().querySelector("form").requestSubmit();
+  const dialog = await waitFor(() => document.querySelector("[data-confirm-dialog][open]"), "TCP 没有使用共享确认弹窗");
+  assert.match(dialog.textContent, /4096 262144 33554432/);
+  assert.match(dialog.textContent, /\/etc\/sysctl.d\/90-qcontrolhub-bbr.conf/);
+  dialog.querySelector("[data-confirm-cancel]").click();
+  await delay(200);
+  assert.equal(testAPI.tcpMutations.length, 0, "取消仍提交任务");
+  assert.equal(field().value, "4096 262144 33554432");
+  testAPI.tcpFailure = true;
+  editor().querySelector("form").requestSubmit();
+  (await waitFor(() => document.querySelector("[data-confirm-dialog][open]"), "失败测试没有确认弹窗")).querySelector("[data-confirm-accept]").click();
+  await waitFor(() => testAPI.tcpMutations.length === 1, "TCP 任务未发出");
+  await delay(200);
+  assert.equal(field().value, "4096 262144 33554432", "失败丢失草稿");
+  testAPI.tcpFailure = false;
+  editor().querySelector("form").requestSubmit();
+  (await waitFor(() => document.querySelector("[data-confirm-dialog][open]"), "重试没有确认弹窗")).querySelector("[data-confirm-accept]").click();
+  await waitFor(() => testAPI.tcpTasks.length === 1, "TCP 任务未创建");
+  await delay(200);
+  const payload = testAPI.tcpMutations.at(-1);
+  assert.equal(payload.action, "configure-tcp");
+  assert.equal(payload.engine, "");
+  assert.equal(Object.keys(payload.tcp_settings).length, 1, "提交了未勾选的参数");
+  assert.equal(payload.tcp_settings["net.ipv4.tcp_rmem"], "4096 262144 33554432");
+  assert.ok(card().querySelector("[data-bbr-action]").disabled, "进行中任务未禁止重复提交");
+  assert.match(card().textContent, /等待执行/);
+  testAPI.tcpTasks[0].status = "succeeded";
+  testAPI.agents[0].metrics.bbr.parameters["net.ipv4.tcp_rmem"] = "4096 262144 33554432";
+  testAPI.agents[0].metrics.bbr.persistence = "managed";
+  testAPI.agents[0].metrics.bbr.configured_parameters = { "net.ipv4.tcp_rmem": "4096 262144 33554432" };
+  await refresh();
+  assert.match(card().textContent, /执行成功/);
+  assert.ok(!card().querySelector("[data-bbr-action]").disabled);
+  field().value = "4096 524288 67108864";
+  field().dispatchEvent(new Event("input", { bubbles: true }));
+  editor().querySelector("[data-tcp-reset]").click();
+  (await waitFor(() => document.querySelector("[data-confirm-dialog][open]"), "清空草稿未确认")).querySelector("[data-confirm-accept]").click();
+  await delay(200);
+  assert.equal(editor().querySelector('[data-tcp-selected="net.ipv4.tcp_rmem"]').checked, false, "清空后仍勾选参数");
+  assert.equal(field().value, "4096 262144 33554432", "清空后未恢复当前值");
+  testAPI.agentsFailure = true;
+  await refresh();
+  assert.match(document.querySelector("[data-bbr-refresh-status]").textContent, /刷新失败/);
+  assert.ok(card(), "刷新失败清空了状态");
+  testAPI.agentsFailure = false;
+  location.hash = "#system-bbr-agent-bravo";
+  await waitFor(() => document.querySelectorAll(".bbr-card").length === 1 && document.querySelector('[data-refresh-key="bbr-bravo"]'), "节点筛选失败");
+  location.hash = "#node-settings";
+  await waitFor(() => document.querySelector(".node-card"), "离开 TCP 页面失败");
+  const calls = testAPI.calls.filter((call) => call.path === "/system-tcp/parameters").length;
+  await delay(5200);
+  assert.equal(testAPI.calls.filter((call) => call.path === "/system-tcp/parameters").length, calls, "离开 TCP 页面后继续轮询");
+}
+
 try {
   await import("./app.js");
-  if (mode === "admin") await testAdminRuntime();
+  if (mode === "bbr-preview") await new Promise(() => {});
+  else if (mode.startsWith("bbr")) await testSystemTCPRuntime();
+  else if (mode === "admin") await testAdminRuntime();
   else if (mode === "ports") await testPortNamesAndRuntimeRefresh();
   else if (mode === "empty") await testEmptyRuntime();
   else await testReadonlyRuntime();

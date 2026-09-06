@@ -4,6 +4,12 @@ QControlHub 的安全边界包括管理员、控制面、PostgreSQL、反向代�
 
 ## 身份与鉴权
 
+### 系统 TCP 调优边界
+
+BBR / TCP 调优同时需要 `agents.manage` 和 `tasks.execute`，读取状态只需 `agents.read`；通用任务创建和重试入口均执行权限校验。参数通过任务中的 `tcp_settings` 传递，API 与 Agent 使用同一白名单和取值边界，不能下发任意 sysctl 键、shell、路径或模块加载命令。审计与任务结果保留动作、节点和参数快照。新动作必须由当前连接的 Agent 心跳声明 `system-bbr-v1` 才可下发；节点降级后不继续运行不兼容任务。
+
+systemd helper 保留 `ProtectSystem=strict`、`NoNewPrivileges`，仅有 `CAP_NET_ADMIN`，整个 `/proc/sys` 只读，只放行本次选中的固定参数文件和 `/etc/sysctl.d`。使用受保护的 Agent 本身执行固定 utility，无 shell、无任意命令。它有独立超时和跨进程锁，不改变常驻 Agent 的服务单元。OpenRC 复用相同校验和事务，遵循宿主机权限。常规失败恢复原参数和原托管文件；强制杀进程/掉电不保证回滚完成，需核对实际状态。
+
 ### 管理 API
 
 - `/api/v1/*` 要求 `Authorization: Bearer <QCH_ADMIN_TOKEN>`。

@@ -245,7 +245,7 @@ async function runMode(mode) {
 }
 
 try {
-  for (const mode of ["admin", "empty", "readonly", "ports"]) await runMode(mode);
+  for (const mode of (process.env.QCH_BROWSER_SMOKE_MODES || "admin,empty,readonly,ports,bbr,bbr-readonly").split(",")) await runMode(mode);
   process.stdout.write("agents browser runtime smoke passed\n");
 } finally {
   await new Promise((resolve) => server.close(resolve));

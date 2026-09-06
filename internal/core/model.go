@@ -59,6 +59,8 @@ const AgentFeatureManagedPolicy = "managed-agent-policy-v1"
 // as an optional import source.
 const AgentFeatureManagedConfigRead = "managed-config-read-v1"
 
+const AgentFeatureSystemBBR = "system-bbr-v1"
+
 const (
 	PublicIPProbeSourceAgent         = "agent-config"
 	PublicIPProbeSourceControlPlane  = "control-plane-config"
@@ -247,16 +249,25 @@ const (
 	ActionReadManagedConfig Action = "read-managed-config"
 	ActionImportExisting    Action = "import-existing"
 	ActionUpgradeAgent      Action = "upgrade-agent"
+	ActionEnableBBR         Action = "enable-bbr"
+	ActionDisableBBR        Action = "disable-bbr"
+	ActionConfigureTCP      Action = "configure-tcp"
 )
 
 func (a Action) Valid() bool {
 	switch a {
-	case ActionValidate, ActionDeploy, ActionStart, ActionStop, ActionRestart, ActionStatus, ActionInstall, ActionReadConfig, ActionReadManagedConfig, ActionImportExisting, ActionUpgradeAgent:
+	case ActionValidate, ActionDeploy, ActionStart, ActionStop, ActionRestart, ActionStatus, ActionInstall, ActionReadConfig, ActionReadManagedConfig, ActionImportExisting, ActionUpgradeAgent, ActionEnableBBR, ActionDisableBBR, ActionConfigureTCP:
 		return true
 	default:
 		return false
 	}
 }
+
+func (a Action) SystemBBR() bool {
+	return a == ActionEnableBBR || a == ActionDisableBBR || a == ActionConfigureTCP
+}
+
+func (a Action) AgentLevel() bool { return a == ActionUpgradeAgent || a.SystemBBR() }
 
 type RuntimeState struct {
 	Installed                       bool   `json:"installed"`
@@ -269,6 +280,7 @@ type RuntimeState struct {
 }
 
 type HostMetrics struct {
+	BBR               *SystemBBRStatus       `json:"bbr,omitempty"`
 	CollectedAt       time.Time              `json:"collected_at"`
 	CPUAvailable      bool                   `json:"cpu_available"`
 	CPUPercent        float64                `json:"cpu_percent"`
@@ -376,6 +388,7 @@ const (
 )
 
 type Task struct {
+	TCPSettings            TCPSettings            `json:"tcp_settings,omitempty"`
 	ID                     string                 `json:"id"`
 	AgentID                string                 `json:"agent_id"`
 	Action                 Action                 `json:"action"`
@@ -398,12 +411,13 @@ type Task struct {
 }
 
 type TaskRequest struct {
-	AgentID     string `json:"agent_id"`
-	Action      Action `json:"action"`
-	Engine      Engine `json:"engine"`
-	ConfigID    string `json:"config_id,omitempty"`
-	CoreVersion string `json:"core_version,omitempty"`
-	CoreSource  string `json:"core_source,omitempty"`
+	TCPSettings TCPSettings `json:"tcp_settings,omitempty"`
+	AgentID     string      `json:"agent_id"`
+	Action      Action      `json:"action"`
+	Engine      Engine      `json:"engine"`
+	ConfigID    string      `json:"config_id,omitempty"`
+	CoreVersion string      `json:"core_version,omitempty"`
+	CoreSource  string      `json:"core_source,omitempty"`
 }
 
 type Deployment struct {

@@ -44,6 +44,17 @@ func encodeHeartbeatMetrics(input *core.HostMetrics, receivedAt time.Time) ([]by
 		return nil, nil
 	}
 	metrics := *input
+	if metrics.BBR != nil {
+		status := *metrics.BBR
+		encoded, err := json.Marshal(status)
+		if err != nil || len(encoded) > 32<<10 || len(status.Parameters) > 32 || len(status.ConfiguredParameters) > 16 || len(status.Qdiscs) > 256 || len(status.AvailableAlgorithms) > 64 {
+			return nil, errors.New("agent reported oversized system TCP status")
+		}
+		if status.CollectedAt.After(receivedAt.Add(30 * time.Second)) {
+			status.CollectedAt = receivedAt.UTC()
+		}
+		metrics.BBR = &status
+	}
 	metrics.CollectedAt = receivedAt.UTC()
 	if metrics.CPUAvailable {
 		if math.IsNaN(metrics.CPUPercent) || math.IsInf(metrics.CPUPercent, 0) || metrics.CPUPercent < 0 || metrics.CPUPercent > 100 {
