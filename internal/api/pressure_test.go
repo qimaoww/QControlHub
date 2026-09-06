@@ -107,6 +107,19 @@ type pressureResult struct {
 // Opt-in mixed load: real HTTP GETs compete with durable telemetry writes for
 // the normal 20-connection pool. Never use a production database account.
 func TestRemoteDatabasePressure(t *testing.T) {
+	runDatabasePressure(t, []pressurePhase{{64, 0}, {64, 20 * time.Millisecond}, {128, 20 * time.Millisecond}})
+}
+
+func TestLocalDatabasePressure(t *testing.T) {
+	runDatabasePressure(t, []pressurePhase{{64, 0}, {128, 0}})
+}
+
+type pressurePhase struct {
+	workers int
+	delay   time.Duration
+}
+
+func runDatabasePressure(t *testing.T, phases []pressurePhase) {
 	if os.Getenv("QCH_TEST_PRESSURE") != "1" {
 		t.Skip("set QCH_TEST_PRESSURE=1 for the mixed-load test")
 	}
@@ -184,10 +197,7 @@ func TestRemoteDatabasePressure(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Log("fixture: 200 agents, 3200 ports, 50000 tasks, 400000 logs, 99200 daily usage rows, 60000 metric samples")
-	for _, phase := range []struct {
-		workers int
-		delay   time.Duration
-	}{{64, 0}, {64, 20 * time.Millisecond}, {128, 20 * time.Millisecond}} {
+	for _, phase := range phases {
 		t.Run(fmt.Sprintf("workers%d-delay%s", phase.workers, phase.delay), func(t *testing.T) {
 			url := pressureDatabaseProxy(t, schema.URL, phase.delay)
 			dataStore, err := store.Open(ctx, url, true)

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -112,13 +113,21 @@ func delayedPerformanceStore(tb testing.TB, source *Store, latency time.Duration
 }
 
 func BenchmarkRemoteDatabase(b *testing.B) {
-	for _, name := range []string{"logs32", "traffic64", "idle-task", "presence64"} {
+	benchmarkDatabase(b, 20*time.Millisecond)
+}
+
+func BenchmarkLocalDatabase(b *testing.B) {
+	benchmarkDatabase(b, 0)
+}
+
+func benchmarkDatabase(b *testing.B, latency time.Duration) {
+	for _, name := range []string{"logs32", "traffic16", "traffic64", "traffic256", "idle-task", "presence64"} {
 		b.Run(name, func(b *testing.B) {
 			base := openPerformanceStore(b)
 			ctx := context.Background()
 			ports := 0
-			if name == "traffic64" {
-				ports = 64
+			if strings.HasPrefix(name, "traffic") {
+				fmt.Sscanf(name, "traffic%d", &ports)
 			}
 			agentID, usages := seedPerformanceAgent(b, base, ports)
 			if name == "presence64" {
@@ -126,7 +135,7 @@ func BenchmarkRemoteDatabase(b *testing.B) {
 					seedPerformanceAgent(b, base, 0)
 				}
 			}
-			measured, writes := delayedPerformanceStore(b, base, 20*time.Millisecond)
+			measured, writes := delayedPerformanceStore(b, base, latency)
 			now := time.Now().UTC()
 			entries := make([]core.CoreLogEntry, core.MaxCoreLogBatchEntries)
 			for index := range entries {
@@ -136,7 +145,7 @@ func BenchmarkRemoteDatabase(b *testing.B) {
 				switch name {
 				case "logs32":
 					return measured.StoreCoreLogs(ctx, agentID, core.CoreLogBatch{ID: fmt.Sprintf("log_%016x", index), Entries: entries})
-				case "traffic64":
+				case "traffic16", "traffic64", "traffic256":
 					return measured.UpdatePortTrafficUsage(ctx, agentID, usages, now.Add(time.Duration(index)*time.Second))
 				case "idle-task":
 					_, err := measured.ClaimTask(ctx, agentID)
@@ -151,6 +160,7 @@ func BenchmarkRemoteDatabase(b *testing.B) {
 				b.Fatal(err)
 			}
 			writes.Store(0)
+			b.ReportAllocs()
 			b.ResetTimer()
 			for index := 1; index <= b.N; index++ {
 				if name == "presence64" {
@@ -199,5 +209,41 @@ func BenchmarkRemoteLogVolume(b *testing.B) {
 			b.ReportMetric(float64(writes.Load())/float64(b.N), "wire-writes/op")
 			b.ReportMetric(float64(total*b.N)/b.Elapsed().Seconds(), "logs/s")
 		})
+	}
+}
+
+func seedDeploymentHistory(tb testing.TB) *Store {
+	tb.Helper()
+	base := openPerformanceStore(tb)
+	ctx := context.Background()
+	_, err := base.pool.Exec(ctx, `
+		INSERT INTO agents(id,name,os,arch,capabilities,public_key,last_seen,enrolled_at)
+		SELECT 'agt_history_'||n,'history fixture','linux','amd64','[]',decode(repeat(md5(n::text),2),'hex'),now(),now()
+		FROM generate_series(1,200) n;
+		INSERT INTO tasks(id,agent_id,action,engine,status,created_at,finished_at)
+		SELECT 'tsk_history_'||n,'agt_history_'||((n-1)%200+1),'deploy',
+		       (ARRAY['mihomo','xray','sing-box','ss-rust'])[((n-1)/200)%4+1],
+		       'succeeded',now()-n*interval '1 second',now()-n*interval '1 second'
+		FROM generate_series(1,200000) n;
+		ANALYZE tasks; ANALYZE agents;`)
+	if err != nil {
+		tb.Fatal(err)
+	}
+	return base
+}
+
+func BenchmarkLocalDeploymentHistory(b *testing.B) {
+	base := seedDeploymentHistory(b)
+	ctx := context.Background()
+	if _, err := base.LatestDeployments(ctx); err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		got, err := base.LatestDeployments(ctx)
+		if err != nil || len(got) != 800 {
+			b.Fatalf("deployments=%d, err=%v", len(got), err)
+		}
 	}
 }

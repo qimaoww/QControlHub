@@ -19,21 +19,7 @@ type DeployedConfig struct {
 // single query instead of downloading all saved bodies and doing two further
 // reads per deployment. Deleted configs and pruned revisions remain hidden.
 func (s *Store) DeployedConfigs(ctx context.Context) ([]DeployedConfig, error) {
-	rows, err := s.pool.Query(ctx, `
-		WITH latest AS (
-			SELECT DISTINCT ON (agent_id,engine) agent_id,engine,config_id,config_version,finished_at
-			FROM tasks WHERE action IN ('deploy','import-existing') AND status='succeeded' AND finished_at IS NOT NULL
-			ORDER BY agent_id,engine,finished_at DESC
-		)
-		SELECT latest.agent_id,latest.engine,latest.config_id,latest.config_version,latest.finished_at,
-		       CASE WHEN config.version=latest.config_version THEN config.content ELSE revision.content END,
-		       COALESCE((SELECT jsonb_object_agg(profile_tag,content) FROM config_client_metadata
-			         WHERE config_id=latest.config_id AND config_version=latest.config_version),'{}'::jsonb)
-		FROM latest JOIN agents agent ON agent.id=latest.agent_id AND agent.revoked_at IS NULL
-		JOIN configs config ON config.id=latest.config_id AND config.deleted_at IS NULL
-		LEFT JOIN config_revisions revision ON revision.config_id=latest.config_id
-		     AND revision.version=latest.config_version AND config.version<>latest.config_version
-		WHERE config.version=latest.config_version OR revision.config_id IS NOT NULL`)
+	rows, err := s.pool.Query(ctx, deployedConfigsSQL)
 	if err != nil {
 		return nil, err
 	}
@@ -66,3 +52,18 @@ func (s *Store) DeployedConfigs(ctx context.Context) ([]DeployedConfig, error) {
 	}
 	return result, rows.Err()
 }
+
+// Materialize only the small latest-service projection. Without this boundary
+// the planner can pull config/revision joins into the per-agent lateral loop
+// and rescan their entire tables for every node, especially on local databases.
+const deployedConfigsSQL = `
+	WITH latest AS MATERIALIZED (` + latestDeploymentsSQL + `)
+	SELECT latest.agent_id,latest.engine,latest.config_id,latest.config_version,latest.finished_at,
+	       CASE WHEN config.version=latest.config_version THEN config.content ELSE revision.content END,
+	       COALESCE((SELECT jsonb_object_agg(profile_tag,content) FROM config_client_metadata
+		         WHERE config_id=latest.config_id AND config_version=latest.config_version),'{}'::jsonb)
+	FROM latest JOIN agents agent ON agent.id=latest.agent_id AND agent.revoked_at IS NULL
+	JOIN configs config ON config.id=latest.config_id AND config.deleted_at IS NULL
+	LEFT JOIN config_revisions revision ON revision.config_id=latest.config_id
+	     AND revision.version=latest.config_version AND config.version<>latest.config_version
+	WHERE config.version=latest.config_version OR revision.config_id IS NOT NULL`

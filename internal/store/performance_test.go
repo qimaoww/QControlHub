@@ -2,7 +2,10 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"math"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -13,7 +16,7 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
-type queryBudget struct{ queries, batches atomic.Int64 }
+type queryBudget struct{ queries, batches, statements atomic.Int64 }
 
 func (trace *queryBudget) TraceQueryStart(ctx context.Context, _ *pgx.Conn, _ pgx.TraceQueryStartData) context.Context {
 	trace.queries.Add(1)
@@ -24,8 +27,10 @@ func (trace *queryBudget) TraceBatchStart(ctx context.Context, _ *pgx.Conn, _ pg
 	trace.batches.Add(1)
 	return ctx
 }
-func (*queryBudget) TraceBatchQuery(context.Context, *pgx.Conn, pgx.TraceBatchQueryData) {}
-func (*queryBudget) TraceBatchEnd(context.Context, *pgx.Conn, pgx.TraceBatchEndData)     {}
+func (trace *queryBudget) TraceBatchQuery(context.Context, *pgx.Conn, pgx.TraceBatchQueryData) {
+	trace.statements.Add(1)
+}
+func (*queryBudget) TraceBatchEnd(context.Context, *pgx.Conn, pgx.TraceBatchEndData) {}
 
 func TestRemoteDatabaseQueryBudgets(t *testing.T) {
 	base := openPerformanceStore(t)
@@ -53,7 +58,7 @@ func TestRemoteDatabaseQueryBudgets(t *testing.T) {
 		{"logs32", 5, 0, func() error {
 			return measured.StoreCoreLogs(ctx, agentID, core.CoreLogBatch{ID: "log_0000000000000001", Entries: entries})
 		}},
-		{"traffic64", 3, 1, func() error { return measured.UpdatePortTrafficUsage(ctx, agentID, usages, time.Now()) }},
+		{"traffic64", 4, 0, func() error { return measured.UpdatePortTrafficUsage(ctx, agentID, usages, time.Now()) }},
 		{"idle task", 1, 0, func() error { _, err := measured.ClaimTask(ctx, agentID); return err }},
 		{"presence", 1, 0, func() error { _, err := measured.AgentPresenceTransitions(ctx, time.Now(), 45*time.Second); return err }},
 		{"quota", 1, 0, func() error { _, err := measured.ClaimTrafficQuotaTransitions(ctx); return err }},
@@ -408,5 +413,201 @@ func TestQuotaClaimsAreAtomicAcrossMonitors(t *testing.T) {
 	got, err := s.ClaimTrafficQuotaTransitions(ctx)
 	if err != nil || len(got) != 1 || got[0].Policy.ResetGeneration != 2 {
 		t.Fatalf("next generation: %+v, %v", got, err)
+	}
+}
+
+func TestLocalTrafficBatchStatementBudget(t *testing.T) {
+	base := openPerformanceStore(t)
+	agentID, usages := seedPerformanceAgent(t, base, 256)
+	ctx := context.Background()
+	trace := &queryBudget{}
+	config := base.pool.Config()
+	config.MaxConns, config.MinConns = 1, 0
+	config.ConnConfig.Tracer = trace
+	config.ShouldPing = func(context.Context, pgxpool.ShouldPingParams) bool { return false }
+	pool, err := pgxpool.NewWithConfig(ctx, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	measured := &Store{pool: pool, cryptor: base.cryptor}
+	// UTC bucketing must not depend on the database session's timezone.
+	if _, err := pool.Exec(ctx, `SET TIME ZONE 'America/Los_Angeles'`); err != nil {
+		t.Fatal(err)
+	}
+	trace.queries.Store(0)
+	now := time.Date(2026, 9, 6, 1, 0, 0, 0, time.UTC)
+	if err := measured.UpdatePortTrafficUsage(ctx, agentID, usages, now); err != nil {
+		t.Fatal(err)
+	}
+	if got := trace.queries.Load() + trace.statements.Load(); got != 4 {
+		t.Fatalf("256 ports executed %d statements, want BEGIN/read/set-write/COMMIT", got)
+	}
+	daily, err := base.ListPortTrafficDailyUsage(ctx, agentID, "", now)
+	if err != nil || len(daily) != 256 {
+		t.Fatalf("daily rows=%d, %v", len(daily), err)
+	}
+	for _, item := range daily {
+		if item.Day != "2026-09-06" || item.UsedBytes != 100 || item.SampleCount != 1 {
+			t.Fatalf("wrong daily sample: %+v", item)
+		}
+	}
+}
+
+func TestLocalLatestDeploymentPlanIsBounded(t *testing.T) {
+	s := seedDeploymentHistory(t)
+	ctx := context.Background()
+	var encoded []byte
+	if err := s.pool.QueryRow(ctx, `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) `+latestDeploymentsSQL).Scan(&encoded); err != nil {
+		t.Fatal(err)
+	}
+	type planNode struct {
+		Relation string            `json:"Relation Name"`
+		Index    string            `json:"Index Name"`
+		Rows     float64           `json:"Actual Rows"`
+		Loops    float64           `json:"Actual Loops"`
+		Filtered float64           `json:"Rows Removed by Filter"`
+		Plans    []json.RawMessage `json:"Plans"`
+	}
+	var explain []struct {
+		Plan        json.RawMessage `json:"Plan"`
+		ExecutionMS float64         `json:"Execution Time"`
+	}
+	if err := json.Unmarshal(encoded, &explain); err != nil || len(explain) != 1 {
+		t.Fatalf("explain result: %v", err)
+	}
+	var examined float64
+	examinedByRelation := map[string]float64{}
+	var walk func(json.RawMessage)
+	walk = func(raw json.RawMessage) {
+		var node planNode
+		if err := json.Unmarshal(raw, &node); err != nil {
+			t.Fatal(err)
+		}
+		examinedByRelation[node.Relation] += (node.Rows + node.Filtered) * node.Loops
+		if node.Relation == "tasks" {
+			if node.Index != "tasks_latest_deployment_idx" {
+				t.Errorf("unexpected task access: %s", node.Index)
+			}
+			examined += (node.Rows + node.Filtered) * node.Loops
+		}
+		for _, child := range node.Plans {
+			walk(child)
+		}
+	}
+	walk(explain[0].Plan)
+	if examined != 800 {
+		t.Fatalf("read %.0f task rows for 800 services; history has 200000 rows", examined)
+	}
+	t.Logf("200000 deployments -> %.0f task rows visited, execution %.3fms", examined, explain[0].ExecutionMS)
+	if _, err := s.pool.Exec(ctx, `
+		INSERT INTO configs(id,agent_id,name,description,engine,content,version,created_at,updated_at)
+		SELECT 'cfg_history_'||n,'agt_history_'||n,'fixture','','mihomo',E'mixed-port: 7890\n',1,now(),now()
+		FROM generate_series(1,200) n;
+		INSERT INTO config_revisions(config_id,version,agent_id,name,description,engine,content,created_at)
+		SELECT id,version,agent_id,name,description,engine,content,updated_at FROM configs;
+		UPDATE tasks SET config_id=replace(agent_id,'agt_history_','cfg_history_'),config_version=1
+		WHERE id IN (SELECT 'tsk_history_'||n FROM generate_series(1,200) n);
+		ANALYZE configs; ANALYZE config_revisions;`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.pool.QueryRow(ctx, `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) `+deployedConfigsSQL).Scan(&encoded); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(encoded, &explain); err != nil {
+		t.Fatal(err)
+	}
+	examined = 0
+	clear(examinedByRelation)
+	walk(explain[0].Plan)
+	for _, relation := range []string{"configs", "config_revisions"} {
+		if examinedByRelation[relation] > 1000 {
+			t.Errorf("%s read %.0f rows; should not rescan all 200 rows per agent", relation, examinedByRelation[relation])
+		}
+	}
+	deployed, err := s.DeployedConfigs(ctx)
+	if err != nil || len(deployed) != 200 {
+		t.Fatalf("deployed configs=%d, %v", len(deployed), err)
+	}
+	t.Logf("joined deployed config plan visited rows=%v, execution %.3fms", examinedByRelation, explain[0].ExecutionMS)
+	// A revoked node and engines no longer in capabilities remain visible in
+	// the historical list, matching the previous listing contract.
+	if _, err := s.pool.Exec(ctx, `UPDATE agents SET revoked_at=now() WHERE id='agt_history_1'`); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.LatestDeployments(ctx)
+	if err != nil || len(got) != 800 {
+		t.Fatalf("history result=%d, %v", len(got), err)
+	}
+	if _, err := s.pool.Exec(ctx, `UPDATE tasks SET status='failed' WHERE agent_id='agt_history_1' AND engine='mihomo'`); err != nil {
+		t.Fatal(err)
+	}
+	got, err = s.LatestDeployments(ctx)
+	if err != nil || len(got) != 799 {
+		t.Fatalf("failed deployment included: %d, %v", len(got), err)
+	}
+}
+
+func TestSetTrafficWriteIsIsolatedAndConcurrent(t *testing.T) {
+	s := openPerformanceStore(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	agentID, usages := seedPerformanceAgent(t, s, 16)
+	_, foreign := seedPerformanceAgent(t, s, 1)
+	if _, err := s.pool.Exec(ctx, `UPDATE port_traffic_policies SET monitoring_enabled=false WHERE id=$1`, usages[0].PolicyID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.pool.Exec(ctx, `UPDATE port_traffic_policies SET reset_generation=2 WHERE id=$1`, usages[1].PolicyID); err != nil {
+		t.Fatal(err)
+	}
+	report := append(slices.Clone(usages), foreign[0])
+	reversed := slices.Clone(report)
+	slices.Reverse(reversed)
+	now := time.Now().UTC()
+	var group sync.WaitGroup
+	for _, input := range [][]core.PortTrafficUsage{report, reversed} {
+		group.Add(1)
+		go func(input []core.PortTrafficUsage) {
+			defer group.Done()
+			if err := s.UpdatePortTrafficUsage(ctx, agentID, input, now); err != nil {
+				t.Error(err)
+			}
+		}(input)
+	}
+	group.Wait()
+	daily, err := s.ListPortTrafficDailyUsage(ctx, "", "", now)
+	if err != nil || len(daily) != 14 {
+		t.Fatalf("daily rows=%d, %v; want 14 owned, enabled, matching-generation ports", len(daily), err)
+	}
+	for _, item := range daily {
+		if item.AgentID != agentID || item.UsedBytes != 100 || item.SampleCount != 1 {
+			t.Fatalf("duplicate or cross-agent write: %+v", item)
+		}
+	}
+}
+
+func TestSetTrafficWritePreservesBigintPrecisionAndSaturation(t *testing.T) {
+	s := openPerformanceStore(t)
+	ctx := context.Background()
+	agentID, usages := seedPerformanceAgent(t, s, 1)
+	usages[0].ReceivedBytes = math.MaxInt64 - 1
+	usages[0].UsedBytes = math.MaxInt64 - 1
+	now := time.Now().UTC()
+	if err := s.UpdatePortTrafficUsage(ctx, agentID, usages, now); err != nil {
+		t.Fatal(err)
+	}
+	policies, err := s.AgentPortTrafficPolicies(ctx, agentID)
+	if err != nil || len(policies) != 1 || policies[0].ReceivedBytes != math.MaxInt64-1 {
+		t.Fatalf("JSON bigint lost precision: %+v, %v", policies, err)
+	}
+	// Simulate a counter restart. Accumulated totals saturate, never overflow
+	// or lose low bits through a floating-point JSON intermediate.
+	usages[0].ReceivedBytes, usages[0].UsedBytes = 10, 10
+	if err := s.UpdatePortTrafficUsage(ctx, agentID, usages, now.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	daily, err := s.ListPortTrafficDailyUsage(ctx, agentID, "", now)
+	if err != nil || len(daily) != 1 || daily[0].ReceivedBytes != math.MaxInt64 || daily[0].UsedBytes != math.MaxInt64 {
+		t.Fatalf("saturation failed: %+v, %v", daily, err)
 	}
 }
