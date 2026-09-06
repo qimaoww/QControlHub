@@ -253,6 +253,12 @@ func (s *Server) availableSubStoreProfiles(ctx context.Context, selections []cor
 				AddressMode: core.SubStoreAddressModeAuto,
 				DefaultName: strings.TrimSpace(displayName + " · " + item.Tag),
 			}
+			if item.NameOverridden {
+				profile.DefaultName = item.ClientName
+				if profile.DefaultName == "" {
+					profile.DefaultName = item.Tag
+				}
+			}
 			for _, option := range entry.AddressOptions {
 				for _, candidate := range option.Profiles {
 					if candidate.Tag == item.Tag {

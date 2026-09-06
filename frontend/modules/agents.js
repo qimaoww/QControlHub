@@ -775,8 +775,9 @@ export function installAgents(ctx) {
     const aria = `复制 ${row.label} 公网地址 ${value}`;
     return `<span class="card-ip-row ${value ? "" : "empty"}" data-ip-family="${row.cls}" data-ip-source="${esc(row.source)}" ${value ? "" : "hidden"}><i class="ip-family ${row.cls}">${row.label}</i><code title="${esc(value)}">${esc(value || "未探测到")}</code><button type="button" class="card-ip-copy" data-copy-ip="${esc(value)}" aria-label="${esc(aria)}" title="${esc(title)}" ${value ? "" : "hidden"}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0 2 2v8a2 2 0 0 0 2 2h2"/><path class="copy-check" d="m9.5 13.5 2 2 4-4.5"/></svg></button></span>`;
   };
+  const agentPageActive = () => state.route === "node-settings" || state.route === "agents";
   const metricsRefresh = createRefreshChannel({
-    isCurrent: () => state.route === "node-settings",
+    isCurrent: agentPageActive,
     getScope: () => state.navigationEpoch,
   });
   const cardInteractions = createInteractionGate();
@@ -786,9 +787,14 @@ export function installAgents(ctx) {
   let structureRefreshQueued = false;
   let structureRefreshRunning = false;
   let renderedAgentStructure = null;
+  let renderedPresetConfigs = null;
+  const presetConfigSignature = (deployments, configs, agentID) => JSON.stringify([
+    deployments.filter((item) => item.agent_id === agentID).map((item) => [item.engine, item.config_id, item.config_version]).sort(),
+    configs.filter((item) => item.agent_id === agentID).map((item) => [item.engine, item.id, item.version]).sort(),
+  ]);
   const visibleAgentStructure = (items) =>
     agentStructureSignature(
-      state.data.nodeView === "detail"
+      state.route === "agents" || state.data.nodeView === "detail"
         ? items.filter((item) => item.id === state.data.selectedAgent)
         : items,
     );
@@ -800,7 +806,7 @@ export function installAgents(ctx) {
     if (
       structureRefreshRunning ||
       !structureRefreshQueued ||
-      state.route !== "node-settings"
+      !agentPageActive()
     )
       return;
     structureRefreshQueued = false;
@@ -1033,6 +1039,7 @@ async function nodeSettings(presetMode = false, { overview: preloadedOverview } 
         })
         .join("");
       const labels = Object.entries(agent.labels || {})
+        .filter(([key]) => !key.startsWith("client_profile_name_"))
         .map(([key, value]) => `<span>${esc(key)}=${esc(value)}</span>`)
         .join("");
       if (detailMode) {
@@ -1126,6 +1133,7 @@ async function nodeSettings(presetMode = false, { overview: preloadedOverview } 
     },
   );
   renderedAgentStructure = agentStructureSignature(visibleAgents);
+  if (presetMode) renderedPresetConfigs = presetConfigSignature(deployments, savedConfigs, state.data.selectedAgent);
   document.querySelectorAll("[data-context-agent]").forEach((link) => {
     const prefix = presetMode ? "preset-node" : "settings-node";
     link.href = `#${prefix}-${link.dataset.contextAgent}`;
@@ -1919,7 +1927,7 @@ function bindAgentPage(agentItems, presetMode = false, enrollmentHistory = {}) {
     });
   });
   clearTimeout(state.agentPollTimer);
-  if (!presetMode)
+  if (agentPageActive())
     state.agentPollTimer = setTimeout(pollAgentMetrics, 2000);
 }
 
@@ -2183,7 +2191,7 @@ function updateAgentMetrics(item) {
 }
 
 async function pollAgentMetrics() {
-  if (state.route !== "node-settings") return;
+  if (!agentPageActive()) return;
   clearTimeout(state.agentPollTimer);
   state.agentPollTimer = null;
   if (document.hidden) {
@@ -2199,8 +2207,17 @@ async function pollAgentMetrics() {
   );
   try {
     await metricsRefresh.run(
-      (signal) => api("/agents", { signal }),
-      (items) => {
+      async (signal) => {
+        const preset = state.route === "agents";
+        const selected = state.data.selectedAgent;
+        const [items, deployments, configs] = await Promise.all([
+          api("/agents", { signal }),
+          preset && can("deployments.read") ? api("/deployments", { signal }) : [],
+          preset && selected && can("agent-config.read") ? api(`/agents/${encodeURIComponent(selected)}/configs`, { signal }) : [],
+        ]);
+        return { items, preset, signature: presetConfigSignature(deployments, configs, selected) };
+      },
+      ({ items, preset, signature }) => {
         if (
           renderedAgentStructure === null &&
           Array.isArray(state.data.agents)
@@ -2215,6 +2232,10 @@ async function pollAgentMetrics() {
         state.data.agents = items;
         syncActiveBatchSnapshot?.(items);
         if (structureChanged) {
+          requestAgentStructureRefresh();
+          return;
+        }
+        if (preset && signature !== renderedPresetConfigs) {
           requestAgentStructureRefresh();
           return;
         }
@@ -2254,7 +2275,7 @@ async function pollAgentMetrics() {
     );
   } finally {
     clearTimeout(state.agentPollTimer);
-    if (state.route === "node-settings")
+    if (agentPageActive())
       state.agentPollTimer = setTimeout(pollAgentMetrics, 2000);
   }
 }

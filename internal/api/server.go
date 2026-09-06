@@ -678,9 +678,10 @@ func (s *Server) listEnrollmentTokens(w http.ResponseWriter, request *http.Reque
 
 func (s *Server) putAgentClientAddress(w http.ResponseWriter, request *http.Request) {
 	var input struct {
-		Address     *string `json:"address"`
-		Name        *string `json:"name"`
-		AddressMode *string `json:"address_mode"`
+		Address     *string                `json:"address"`
+		Name        *string                `json:"name"`
+		AddressMode *string                `json:"address_mode"`
+		Profile     *clientProfileSelector `json:"profile"`
 	}
 	if err := decodeJSON(w, request, &input, 8<<10); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -722,7 +723,18 @@ func (s *Server) putAgentClientAddress(w http.ResponseWriter, request *http.Requ
 		writeError(w, http.StatusBadRequest, "至少需要提供一个客户端显示参数")
 		return
 	}
-	if err := s.store.SetAgentClientPreferences(request.Context(), request.PathValue("id"), address, name, addressMode); err != nil {
+	var saveErr error
+	if input.Profile != nil {
+		label, err := s.clientProfileNameLabel(request.Context(), request.PathValue("id"), *input.Profile)
+		if err != nil {
+			writeStoreError(w, err)
+			return
+		}
+		saveErr = s.store.SetAgentClientProfilePreferences(request.Context(), request.PathValue("id"), label, address, name, addressMode)
+	} else {
+		saveErr = s.store.SetAgentClientPreferences(request.Context(), request.PathValue("id"), address, name, addressMode)
+	}
+	if err := saveErr; err != nil {
 		writeStoreError(w, err)
 		return
 	}

@@ -17,6 +17,7 @@ func generateShadowsocksRust(input Input) (string, error) {
 		return "", errors.New("出站绑定地址必须是 IP 地址")
 	}
 	root := map[string]any{
+		"id":          input.Tag,
 		"server":      input.Listen,
 		"server_port": input.Port,
 		"password":    input.Credential,
@@ -45,7 +46,7 @@ func parseShadowsocksRust(content string) (Input, bool) {
 	if json.Unmarshal([]byte(content), &root) != nil || root == nil {
 		return Input{}, false
 	}
-	if input, ok := parseShadowsocksRustEntry(root, "ss-rust"); ok {
+	if input, ok := parseShadowsocksRustEntry(root, shadowsocksRustSingleTag(root)); ok {
 		return input, true
 	}
 	_, entries, ok := shadowsocksRustExtendedEntries(root)
@@ -61,6 +62,15 @@ func parseShadowsocksRust(content string) (Input, bool) {
 		}
 	}
 	return Input{}, false
+}
+
+func shadowsocksRustSingleTag(root map[string]any) string {
+	for _, key := range []string{"id", "remarks", "name"} {
+		if value := strings.TrimSpace(stringValue(root[key])); value != "" {
+			return value
+		}
+	}
+	return "ss-rust"
 }
 
 // InheritShadowsocksRustGlobals seeds new inbound plans from the current root

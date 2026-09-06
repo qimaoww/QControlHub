@@ -135,6 +135,18 @@ esac
 			t.Fatalf("nftables rules missing %q:\n%s", expected, log)
 		}
 	}
+	policy.Tag = "香港 · ATT; metadata-only"
+	if err := manager.Deploy(context.Background(), []core.MainlandAccessPolicy{policy}, "agt_test"); err != nil {
+		t.Fatalf("renamed port policy rejected: %v", err)
+	}
+	renamedRules, err := os.ReadFile(logPath)
+	if err != nil || strings.Contains(string(renamedRules), policy.Tag) {
+		t.Fatal("display name was interpolated into firewall commands")
+	}
+	policy.Tag = "bad\nname"
+	if err := manager.Deploy(context.Background(), []core.MainlandAccessPolicy{policy}, "agt_test"); err == nil {
+		t.Fatal("control characters in policy accepted")
+	}
 	if _, err := os.Stat(statePath); !os.IsNotExist(err) {
 		t.Fatalf("unexpected Agent credential state side effect: %v", err)
 	}

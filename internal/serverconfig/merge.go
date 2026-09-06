@@ -120,9 +120,11 @@ func mutateShadowsocksRust(currentContent, generatedContent, matchValue, operati
 		}
 		entries := []any{}
 		if currentOK {
-			entries = append(entries, shadowsocksRustGeneratedEntry(currentRoot))
+			entry := shadowsocksRustGeneratedEntry(currentRoot)
+			entry["id"] = current.Tag
+			entries = append(entries, entry)
 		}
-		for _, key := range []string{"server", "server_port", "password", "method", "plugin", "plugin_opts", "plugin_args", "plugin_mode"} {
+		for _, key := range []string{"id", "server", "server_port", "password", "method", "plugin", "plugin_opts", "plugin_args", "plugin_mode"} {
 			delete(currentRoot, key)
 		}
 		return mutateShadowsocksRustExtended(currentRoot, "servers", entries, generated, matchValue, operation)
@@ -174,6 +176,13 @@ func mutateShadowsocksRust(currentContent, generatedContent, matchValue, operati
 }
 
 func mutateShadowsocksRustExtended(root map[string]any, listKey string, entries []any, generated map[string]any, matchValue, operation string) (string, error) {
+	for index, value := range entries {
+		entry := mapValue(value)
+		if entry == nil {
+			return "", fmt.Errorf("ss-rust 扩展服务端入站必须是 JSON 对象")
+		}
+		entry["id"] = shadowsocksRustEntryTag(entry, index)
+	}
 	generatedEntry := shadowsocksRustGeneratedEntry(generated)
 	// The preset does not edit these fields: retain existing per-port values
 	// and let new ports inherit the global settings.
@@ -231,7 +240,13 @@ func mutateShadowsocksRustExtended(root map[string]any, listKey string, entries 
 		return "", fmt.Errorf("不支持的 ss-rust 入站操作 %q", operation)
 	}
 	ports := make(map[int]bool)
-	for _, value := range entries {
+	tags := make(map[string]bool)
+	for index, value := range entries {
+		tag := shadowsocksRustEntryTag(mapValue(value), index)
+		if tags[tag] {
+			return "", fmt.Errorf("ss-rust 入站标签 %q 已存在", tag)
+		}
+		tags[tag] = true
 		port := intValue(mapValue(value)["server_port"])
 		if port != 0 && ports[port] {
 			return "", fmt.Errorf("ss-rust 端口 %d 已存在", port)
@@ -261,7 +276,7 @@ func mutateShadowsocksRustExtended(root map[string]any, listKey string, entries 
 
 func shadowsocksRustGeneratedEntry(generated map[string]any) map[string]any {
 	entry := make(map[string]any)
-	for _, key := range []string{"server", "server_port", "password", "method", "dns", "outbound_bind_addr", "mode", "timeout", "acl", "plugin", "plugin_opts", "plugin_args", "plugin_mode"} {
+	for _, key := range []string{"id", "server", "server_port", "password", "method", "dns", "outbound_bind_addr", "mode", "timeout", "acl", "plugin", "plugin_opts", "plugin_args", "plugin_mode"} {
 		if value, ok := generated[key]; ok {
 			entry[key] = value
 		}

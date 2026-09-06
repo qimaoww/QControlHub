@@ -106,7 +106,7 @@ func ApplyMainlandAccessPolicyWithPrefixes(engine core.Engine, content string, p
 		return "", errors.New("该内核暂不支持按入站限制大陆访问")
 	}
 	policy.Tag = strings.TrimSpace(policy.Tag)
-	if !tagPattern.MatchString(policy.Tag) {
+	if (engine == core.EngineShadowsocksRust && !core.ValidSSRustTag(policy.Tag)) || (engine != core.EngineShadowsocksRust && !tagPattern.MatchString(policy.Tag)) {
 		return "", errors.New("入站标签只能包含字母、数字、点、下划线和短横线，最长 64 位")
 	}
 	if policy.Port < 1 || policy.Port > 65535 {

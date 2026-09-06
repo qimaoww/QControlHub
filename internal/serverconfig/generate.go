@@ -37,7 +37,11 @@ func Generate(engine core.Engine, input Input) (string, error) {
 	if input.Protocol == ProtocolSudoku {
 		normalizeSudokuInput(&input)
 	}
-	if !tagPattern.MatchString(input.Tag) {
+	if engine == core.EngineShadowsocksRust {
+		if !core.ValidSSRustTag(input.Tag) {
+			return "", errors.New("SS Rust 入站名称须为 1–64 个字符，不得包含控制字符或首尾空白")
+		}
+	} else if !tagPattern.MatchString(input.Tag) {
 		return "", errors.New("入站标签只能包含字母、数字、点、下划线和短横线，最长 64 位")
 	}
 	if input.Port < 1 || input.Port > 65535 {

@@ -30,8 +30,6 @@ const (
 	shadowsocksRustACLPath  = "/etc/qagent/shadowsocks-rust/qch-mainland-block.acl"
 )
 
-var mainlandTagPattern = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
-
 // MainlandAccessManager applies Shadowsocks Rust access policies without
 // bloating its JSON configuration. Destination blocking uses ssserver's native
 // ACL file while mainland-source blocking uses an isolated nftables table keyed
@@ -151,7 +149,7 @@ func (manager *MainlandAccessManager) Apply(ctx context.Context, policies []core
 		if policy.Engine != core.EngineShadowsocksRust || (!policy.BlockMainlandDestination && !policy.BlockMainlandSource) {
 			continue
 		}
-		if !mainlandTagPattern.MatchString(policy.Tag) || policy.Port < 1 || policy.Port > 65535 {
+		if !core.ValidSSRustTag(policy.Tag) || policy.Port < 1 || policy.Port > 65535 {
 			return errors.New("control plane returned an invalid ss-rust mainland policy")
 		}
 		if policy.BlockMainlandDestination {

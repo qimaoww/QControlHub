@@ -14,6 +14,10 @@ SS Rust 优先展示 Shadowsocks 2022，默认 `2022-blake3-aes-128-gcm`、匹�
 - **全局与默认值**：DNS（支持字符串或自定义对象）、IPv6 优先、TCP / UDP 超时、Fast Open、TCP_NODELAY、Keepalive、安全策略是全局设置；可被端口覆盖的字段单独标注为默认值。删除端口覆盖后继承全局值，不代表禁用全局值。空上游代理链也会继承全局链。
 - **完整源码**：独立入口，包含 `servers` 列表与未收录的配置字段。混合格式或重复端口标识不接受自动端口编辑，但仍可通过完整源码修正。
 
+“入站标签”支持自定义 1–64 个 Unicode 字符的名称，不能包含控制字符或首尾空白；保存时写入 SS Rust 的 `id`，重名会被拒绝。旧单端口配置以及没有 `id` 的多端口配置在预设编辑时固定原有标识，删除前一个端口不会让其他端口编号变化。这里修改的是服务端配置；客户端页的“修改显示参数”则是独立的单端口分享名称，保存后即时生效，不需要重新部署。
+
+使用中文入站名称且启用了面板访问限制的节点，须先升级 Agent，使端口策略的名称校验与面板一致；防火墙依然只按数字端口匹配，不把显示名称拼入规则。
+
 三个区域使用面板统一的明暗主题和紧凑卡片。未选择端口时仅显示选择提示，全局字段仍可单独编辑；字段列表独立滚动，窄屏改为横向列表并保持选中项可见。Mihomo、Xray、sing-box 的全局字段也使用同一编辑布局，完整源码和参考文档单独折叠，不再挤占字段编辑区域。
 
 作用范围按 [SS Rust v1.25.0 配置解析](https://github.com/shadowsocks/shadowsocks-rust/blob/v1.25.0/crates/shadowsocks-service/src/config.rs) 与 [服务端运行逻辑](https://github.com/shadowsocks/shadowsocks-rust/blob/v1.25.0/crates/shadowsocks-service/src/server/mod.rs) 核对：`servers[].dns` 被忽略；`servers[].timeout` 虽有字段定义，但该版本实际读取顶层 `timeout`，因此不提供端口级超时控件。HTTP(S) 上游代理跳点不转发 UDP，UDP 会直连。`ssserver` 没有不启动服务的完整校验模式；保存并校验仅做结构检查，部署才实际启动内核。即使仅修改一个端口，部署也会重启整个 `ssserver` 进程，可能短暂影响所有端口。

@@ -24,7 +24,8 @@ func MutateSSRustPort(current, generated, tag, operation string) (string, error)
 		return "", errors.New("SS Rust 配置必须是 JSON 对象")
 	}
 	if original["server_port"] != nil {
-		root, entry, commit, err := ssRustFieldTarget(current, "ss-rust", "server")
+		parsed, _ := parseShadowsocksRust(current)
+		root, entry, commit, err := ssRustFieldTarget(current, parsed.Tag, "server")
 		if err != nil {
 			return "", err
 		}
@@ -51,6 +52,14 @@ func MutateSSRustPort(current, generated, tag, operation string) (string, error)
 			return "", errors.New("SS Rust 服务端列表必须是对象数组")
 		}
 	}
+	// Pin positional legacy names before insertion/deletion can shift indices.
+	for index, entry := range entries {
+		if entry == nil {
+			return "", errors.New("SS Rust 服务端条目必须是对象")
+		}
+		identity, _ := json.Marshal(ssRustRawEntryTag(entry, index))
+		entry["id"] = identity
+	}
 	var incoming map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(generated), &incoming); err != nil {
 		return "", err
@@ -63,7 +72,7 @@ func MutateSSRustPort(current, generated, tag, operation string) (string, error)
 			return "", errors.New("新增端口不能携带现有端口标识")
 		}
 		entry := make(map[string]json.RawMessage)
-		for _, key := range []string{"server", "server_port", "method", "password", "outbound_bind_addr"} {
+		for _, key := range []string{"id", "server", "server_port", "method", "password", "outbound_bind_addr"} {
 			if value, exists := incoming[key]; exists {
 				entry[key] = value
 			}
@@ -92,7 +101,10 @@ func MutateSSRustPort(current, generated, tag, operation string) (string, error)
 		if operation == "delete" {
 			entries = append(entries[:index], entries[index+1:]...)
 		} else {
-			for _, key := range []string{"server", "server_port", "method", "password", "outbound_bind_addr"} {
+			for _, key := range []string{"id", "server", "server_port", "method", "password", "outbound_bind_addr"} {
+				if key == "id" && incoming[key] == nil {
+					continue
+				}
 				delete(entries[index], key)
 				if value, exists := incoming[key]; exists {
 					entries[index][key] = value
@@ -101,10 +113,16 @@ func MutateSSRustPort(current, generated, tag, operation string) (string, error)
 		}
 	}
 	ports := make(map[int]bool)
-	for _, entry := range entries {
+	tags := make(map[string]bool)
+	for index, entry := range entries {
 		if entry == nil {
 			return "", errors.New("SS Rust 服务端条目必须是对象")
 		}
+		identity := ssRustRawEntryTag(entry, index)
+		if tags[identity] {
+			return "", fmt.Errorf("SS Rust 入站标签 %q 已存在", identity)
+		}
+		tags[identity] = true
 		var port int
 		if err := json.Unmarshal(entry["server_port"], &port); err == nil && port != 0 {
 			if ports[port] {
@@ -283,7 +301,7 @@ func ssRustFieldTarget(content, tag, key string) (map[string]json.RawMessage, ma
 		}
 	}
 	if listKey == "" {
-		if _, ok := parseShadowsocksRust(content); !ok || tag != "ss-rust" {
+		if parsed, ok := parseShadowsocksRust(content); !ok || tag != parsed.Tag {
 			return fail(fmt.Errorf("SS Rust 端口 %q 不存在", tag))
 		}
 		entry := make(map[string]json.RawMessage)
@@ -293,8 +311,9 @@ func ssRustFieldTarget(content, tag, key string) (map[string]json.RawMessage, ma
 			}
 		}
 		// Keep the original UI identity when switching to servers[].
-		entry["id"] = json.RawMessage(`"ss-rust"`)
+		entry["id"], _ = json.Marshal(tag)
 		return root, entry, func(updated map[string]json.RawMessage) error {
+			delete(root, "id")
 			for name := range root {
 				if ssRustFieldScope(name) == "inbound" {
 					delete(root, name)
