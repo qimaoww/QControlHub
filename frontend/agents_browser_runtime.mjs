@@ -71,6 +71,15 @@ const testAPI = {
   calls: [],
   pendingTasks: [],
   enrollmentFailure: false,
+  renameFailure: false,
+  renameGate: null,
+  profileNames: {},
+  profileSaves: [],
+  profileSaveFailure: false,
+  profileSaveGate: null,
+  deployments: [],
+  savedConfigs: [],
+  agentsFailure: false,
   enrollmentRecords: [
     {
       id: "enr-alpha",
@@ -109,8 +118,37 @@ window.fetch = async (input, options = {}) => {
     return json({ agents: mode === "empty" ? 0 : populatedAgents.length, agents_online: mode === "empty" ? 0 : 3 });
   if (method === "GET" && path === "/settings")
     return json({ panel_name: "QControlHub Browser Smoke" });
+  if (method === "GET" && path === "/agents" && testAPI.agentsFailure) return json({error:"temporary runtime failure"},503);
   if (method === "GET" && path === "/agents")
     return json(mode === "empty" ? [] : testAPI.agents);
+  if (method === "GET" && path === "/deployments") return json(testAPI.deployments);
+  if (method === "GET" && path === "/client-access" && ["ports","readonly"].includes(mode)) {
+    const profiles = (address) => [20001,20002].map((port,index) => {
+      const tag = `ss-rust-${index+1}`;
+      const name = testAPI.profileNames[port] || tag;
+      return {tag,port,client_name:testAPI.profileNames[port] || "",protocol:"Shadowsocks",profile:{format:"Shadowsocks SIP002 URI",uri:`ss://example@${address}:${port}#${encodeURIComponent(name)}`,fields:[]}};
+    });
+    return json([{agent_id:"alpha",agent_name:"ALPHA",engine:"ss-rust",address:"edge.example.com",source:"test",address_mode:"auto",profiles:profiles("edge.example.com"),address_options:[
+      {address:"edge.example.com",family:"ipv4",source:"test",profiles:profiles("edge.example.com")},
+      {address:"2001:db8::1",family:"ipv6",source:"test",profiles:profiles("[2001:db8::1]")},
+    ]}]);
+  }
+  if (method === "PUT" && path === "/agents/alpha/client-address") {
+    const payload = JSON.parse(options.body);
+    testAPI.profileSaves.push(payload);
+    if (testAPI.profileSaveFailure) return json({error:"temporary profile save failure"},503);
+    if (testAPI.profileSaveGate) await testAPI.profileSaveGate;
+    if (payload.profile) testAPI.profileNames[payload.profile.port] = payload.name;
+    return json(payload);
+  }
+  if (method === "PUT" && /^\/agents\/[^/]+\/name$/.test(path)) {
+    if (testAPI.renameFailure) return json({ error: "temporary rename failure" }, 503);
+    const agentID = decodeURIComponent(path.split("/")[2]);
+    const { name } = JSON.parse(String(options.body || "{}"));
+    if (testAPI.renameGate) await testAPI.renameGate;
+    testAPI.agents = testAPI.agents.map((agent) => agent.id === agentID ? { ...agent, name } : agent);
+    return json({ name });
+  }
   if (method === "GET" && path === "/agents/alpha/region")
     return json({ ip: "8.8.8.8", country_code: "TW", country: "Taiwan" });
   if (method === "GET" && path === "/agents/alpha/komari")
@@ -128,7 +166,7 @@ window.fetch = async (input, options = {}) => {
       },
     });
   if (method === "GET" && path === "/enrollment-tokens") return json(testAPI.enrollmentRecords);
-  if (method === "GET" && /^\/agents\/[^/]+\/configs$/.test(path)) return json([]);
+  if (method === "GET" && /^\/agents\/[^/]+\/configs$/.test(path)) return json(testAPI.savedConfigs.filter((item) => path.includes(item.agent_id)));
   if (method === "GET" && path.startsWith("/metrics/")) return json([]);
   if (method === "POST" && path === "/enrollment-tokens") {
     if (testAPI.enrollmentFailure) return json({ error: "temporary enrollment failure" }, 503);
@@ -713,6 +751,45 @@ async function testAdminRuntime() {
     assert.equal(document.querySelector("#batch-form"), null, `${tab} 标签页不得渲染批量操作`);
     assert.equal(document.querySelector(".node-batch-bar"), null, `${tab} 标签页不得保留批量操作栏`);
   }
+  const renameForm = document.querySelector('[data-agent-name-form="alpha"]');
+  assert.ok(renameForm, "节点身份页缺少改名表单");
+  const renameInput = renameForm.elements.namedItem("name");
+  const renameButton = renameForm.querySelector('button[type="submit"]');
+  const renameCalls = () => testAPI.calls.filter((call) => call.method === "PUT" && call.path === "/agents/alpha/name").length;
+  const renameBefore = renameCalls();
+  renameInput.value = "   ";
+  renameForm.requestSubmit(renameButton);
+  assert.equal(renameCalls(), renameBefore, "空白名称不应提交");
+  testAPI.renameFailure = true;
+  renameInput.value = "香港 & Tokyo <edge>";
+  renameForm.requestSubmit(renameButton);
+  await waitFor(() => !renameButton.disabled, "改名失败后保存按钮未恢复");
+  assert.equal(renameInput.value, "香港 & Tokyo <edge>", "改名失败后丢失输入");
+  assert.match(document.body.textContent, /temporary rename failure/);
+  testAPI.renameFailure = false;
+  renameForm.requestSubmit(renameButton);
+  await waitFor(() => document.querySelector(".node-operations-title h2")?.textContent === "香港 & Tokyo <edge>", "改名后标题未更新");
+  assert.equal(document.querySelector(".node-operations-title edge"), null, "节点名称未进行 HTML 转义");
+  assert.equal(document.querySelector('[data-agent-name-form="alpha"] input').value, "香港 & Tokyo <edge>");
+  document.querySelector("[data-agent-refresh]").click();
+  await waitFor(() => !document.querySelector("[data-agent-refresh]").disabled, "改名后节点刷新未完成");
+  assert.equal(document.querySelector(".node-operations-title h2").textContent, "香港 & Tokyo <edge>", "指标刷新覆盖自定义名称");
+  let completeRename;
+  testAPI.renameGate = new Promise((resolve) => { completeRename = resolve; });
+  const pendingForm = document.querySelector('[data-agent-name-form="alpha"]');
+  const pendingInput = pendingForm.elements.namedItem("name");
+  const pendingButton = pendingForm.querySelector('button[type="submit"]');
+  const pendingCalls = renameCalls();
+  pendingInput.value = "正在保存的名称";
+  pendingForm.requestSubmit(pendingButton);
+  await waitFor(() => renameCalls() === pendingCalls + 1, "改名请求未发出");
+  pendingInput.value = "保存期间继续编辑的名称";
+  pendingForm.requestSubmit();
+  assert.equal(renameCalls(), pendingCalls + 1, "重复提交产生并行改名请求");
+  completeRename();
+  await waitFor(() => document.querySelector(".node-operations-title h2")?.textContent === "正在保存的名称", "延迟改名未完成");
+  assert.equal(document.querySelector('[data-agent-name-form="alpha"] input').value, "保存期间继续编辑的名称", "迟到的保存响应覆盖了新草稿");
+  testAPI.renameGate = null;
   testAPI.agents = testAPI.agents.filter((agent) => agent.id !== "alpha");
   document.querySelector("[data-agent-refresh]").click();
   await waitFor(() => document.querySelector("[data-node-missing]"), "删除当前节点后未渲染详情缺失状态");
@@ -744,16 +821,109 @@ async function testReadonlyRuntime() {
   assertNoPersistentEnrollment();
   assert.equal(document.querySelector("[data-open-enrollment]"), null);
   assert.equal(document.querySelector("#batch-form"), null);
+  location.hash = "#settings-node-alpha";
+  const renameForm = await waitFor(() => document.querySelector('[data-agent-name-form="alpha"]'), "只读节点详情未完成渲染");
+  assert.equal(renameForm.querySelector("input").disabled, true, "只读用户可编辑节点名称");
+  assert.equal(renameForm.querySelector("button").disabled, true, "只读用户可提交改名");
+  renameForm.requestSubmit();
+  assert.equal(testAPI.calls.some((call) => call.method === "PUT" && call.path.endsWith("/name")), false, "只读用户触发改名请求");
   assert.equal(
     testAPI.calls.some((call) => call.path === "/enrollment-tokens"),
     false,
     "无 enrollment.manage 权限不应读取添加记录",
   );
+  location.hash = "#client-access";
+  await waitFor(() => document.querySelector(".client-profile-row"), "只读客户端页未渲染");
+  assert.equal(document.querySelector("[data-client-display-open]"),null,"只读用户可修改端口名称");
+}
+
+async function testPortNamesAndRuntimeRefresh() {
+  location.hash = "#client-access";
+  const row = (port) => document.querySelector(`[data-client-profile-port="${port}"]`)?.closest(".client-profile-row");
+  await waitFor(() => row(20002), "两个端口没有渲染");
+  const open = (port) => {row(port).querySelector("[data-client-display-open]").click(); return row(port).querySelector("dialog.client-display-dialog form");};
+  let form = open(20001);
+  assert.equal(form.dataset.clientProfileTag,"ss-rust-1");
+  form.elements.name.value = "香港 & ATT <edge>";
+  testAPI.profileSaveFailure = true;
+  form.requestSubmit();
+  await waitFor(() => !form.querySelector('[type="submit"]').disabled,"失败保存按钮未恢复");
+  assert.equal(form.closest("dialog").open,true,"保存失败关闭了弹窗");
+  assert.equal(form.elements.name.value,"香港 & ATT <edge>","失败丢失草稿");
+  testAPI.profileSaveFailure = false;
+  let release;
+  testAPI.profileSaveGate = new Promise((resolve) => {release=resolve;});
+  const calls = testAPI.profileSaves.length;
+  form.requestSubmit();form.requestSubmit();
+  await waitFor(() => testAPI.profileSaves.length===calls+1,"未提交保存");
+  assert.equal(testAPI.profileSaves.length,calls+1,"重复提交产生并行请求");
+  release();testAPI.profileSaveGate=null;
+  await waitFor(() => row(20001).querySelector("header b").textContent === "香港 & ATT <edge>","首端口名称未更新");
+  assert.equal(row(20001).querySelector("header edge"),null,"名称未转义");
+  assert.equal(row(20002).querySelector("header b").textContent,"ss-rust-2","改名影响第二端口");
+  assert.equal("address" in testAPI.profileSaves.at(-1),false,"仅改名称意外固定了自动连接地址");
+  assert.equal("address_mode" in testAPI.profileSaves.at(-1),false,"仅改名称意外覆盖协议栈");
+  form=open(20002);form.elements.name.value="Tokyo 第二端口";form.requestSubmit();
+  await waitFor(() => row(20002).querySelector("header b").textContent === "Tokyo 第二端口","第二端口名称未更新");
+  document.querySelector("[data-refresh-client-access]").click();
+  await waitFor(() => !document.querySelector("[data-refresh-client-access]").disabled,"刷新未完成");
+  assert.equal(row(20001).querySelector("header b").textContent,"香港 & ATT <edge>","刷新串名");
+  assert.equal(new URL(row(20002).querySelector(".client-share-control input").value).hash,"#Tokyo%20%E7%AC%AC%E4%BA%8C%E7%AB%AF%E5%8F%A3","分享链接未使用独立名称");
+  form=open(20001);form.elements.name.value="";form.requestSubmit();
+  await waitFor(() => row(20001).querySelector("header b").textContent === "ss-rust-1","清空未恢复入站标签");
+  assert.equal(row(20002).querySelector("header b").textContent,"Tokyo 第二端口","清空影响其他端口");
+
+  location.hash="#settings-node-alpha";
+  await waitFor(() => document.querySelector(".node-operations-workspace"),"节点详情未渲染");
+  const runtime = (installed,version,service_status="running") => {
+    testAPI.agents = testAPI.agents.map((agent) => agent.id!=="alpha"?agent:{...agent,runtime:{...agent.runtime,"sing-box":{installed,version,service_status}}});
+  };
+  document.querySelector('[data-node-tab="agent"]').click();
+  const draft = document.querySelector('[data-agent-name-form="alpha"] input');draft.value="尚未保存的节点名称";
+  runtime(true,"1.13.0");
+  await waitFor(() => document.querySelector('.service-sing-box[data-core-installed="1"]'),"安装完成后详情没有自动刷新");
+  assert.match(document.querySelector('[data-core-version="sing-box"]').textContent,/1\.13\.0/);
+  assert.equal(document.querySelector('[data-agent-name-form="alpha"] input').value,"尚未保存的节点名称","刷新覆盖节点名称草稿");
+  assert.equal(document.querySelector('[data-task-engine="sing-box"][data-task-action="restart"]').disabled,false,"安装后操作按钮未启用");
+  runtime(false,"");
+  await waitFor(() => document.querySelector('.service-sing-box[data-core-installed="0"]'),"卸载状态未自动刷新");
+
+  location.hash="#preset-node-alpha";
+  await waitFor(() => document.querySelector(".preset-node-workspace"),"预设页未渲染");
+  const card = () => document.querySelector(".service-sing-box");
+  card().querySelector("[data-open-version-form]").click();
+  card().querySelector('[name="release_channel"][value="custom"]').click();
+  card().querySelector('[name="custom_version"]').value="1.14.0-draft";
+  runtime(true,"1.13.1");
+  await waitFor(() => card().dataset.coreInstalled==="1","预设页安装状态未自动刷新");
+  assert.match(card().querySelector('[data-core-version]').textContent,/1\.13\.1/);
+  assert.equal(card().querySelector('[name="custom_version"]').value,"1.14.0-draft","安装刷新覆盖版本草稿");
+  assert.equal(card().querySelector(".version-drawer").open,true,"刷新关闭版本抽屉");
+  runtime(true,"1.13.2","inactive");
+  await waitFor(() => card().querySelector('[data-core-version]').textContent.includes("1.13.2"),"版本切换未自动刷新");
+  assert.equal(card().querySelector('[data-core-service]').textContent,"已停止");
+  testAPI.savedConfigs=[{id:"cfg-preset",agent_id:"alpha",engine:"sing-box",name:"preset",version:2,content:'{"inbounds":[]}'}];
+  testAPI.deployments=[{agent_id:"alpha",engine:"sing-box",config_id:"cfg-preset",config_version:2}];
+  await waitFor(() => card().querySelector(".service-facts").textContent.includes("v2"),"部署/保存版本未自动刷新");
+  assert.equal(card().querySelector('[name="custom_version"]').value,"1.14.0-draft","部署刷新覆盖草稿");
+  testAPI.agentsFailure=true;
+  await delay(2200);
+  assert.match(card().querySelector('[data-core-version]').textContent,/1\.13\.2/,"获取失败丢失最后状态");
+  testAPI.agentsFailure=false;
+  runtime(false,"");
+  await waitFor(() => card().dataset.coreInstalled==="0","失败后没有恢复轮询");
+  location.hash="#client-access";
+  await waitFor(() => row(20001),"离开预设页失败");
+  await delay(2200);
+  const before = testAPI.calls.filter((call) => call.path==="/agents").length;
+  await delay(2200);
+  assert.equal(testAPI.calls.filter((call) => call.path==="/agents").length,before,"离开预设页仍后台轮询");
 }
 
 try {
   await import("./app.js");
   if (mode === "admin") await testAdminRuntime();
+  else if (mode === "ports") await testPortNamesAndRuntimeRefresh();
   else if (mode === "empty") await testEmptyRuntime();
   else await testReadonlyRuntime();
   document.documentElement.dataset.browserSmoke = "passed";

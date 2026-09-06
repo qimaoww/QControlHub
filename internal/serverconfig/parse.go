@@ -39,7 +39,7 @@ func ParseAll(engine core.Engine, content string) []Input {
 		if json.Unmarshal([]byte(content), &root) != nil || root == nil {
 			return nil
 		}
-		if input, ok := parseShadowsocksRustEntry(root, "ss-rust"); ok {
+		if input, ok := parseShadowsocksRustEntry(root, shadowsocksRustSingleTag(root)); ok {
 			return []Input{input}
 		}
 		_, entries, ok := shadowsocksRustExtendedEntries(root)

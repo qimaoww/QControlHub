@@ -688,6 +688,7 @@ export function clearNodeCardDragState(
 
 export function installAgents(ctx) {
   const { api, optionalAPI, state, engines, can, esc, engineName, statusTone, serviceStatusName, short, date, ago, heartbeat, percent, bytes, conciseVersion, rate, actionName, serviceActionDisabled, trafficChart, renderConfigDiff, notify, confirmAction, shell } = ctx;
+  const pendingAgentNames = new Set();
   const komariUUIDFor = (agent) => String(agent?.labels?.komari_uuid || "").trim();
   const komariNetworkMarkup = (agent) => {
     const uuid = komariUUIDFor(agent);
@@ -783,8 +784,9 @@ export function installAgents(ctx) {
     const aria = `复制 ${row.label} 公网地址 ${value}`;
     return `<span class="card-ip-row ${value ? "" : "empty"}" data-ip-family="${row.cls}" data-ip-source="${esc(row.source)}" ${value ? "" : "hidden"}><i class="ip-family ${row.cls}">${row.label}</i><code title="${esc(value)}">${esc(value || "未探测到")}</code><button type="button" class="card-ip-copy" data-copy-ip="${esc(value)}" aria-label="${esc(aria)}" title="${esc(title)}" ${value ? "" : "hidden"}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0 2 2v8a2 2 0 0 0 2 2h2"/><path class="copy-check" d="m9.5 13.5 2 2 4-4.5"/></svg></button></span>`;
   };
+  const agentPageActive = () => state.route === "node-settings" || state.route === "agents";
   const metricsRefresh = createRefreshChannel({
-    isCurrent: () => state.route === "node-settings",
+    isCurrent: agentPageActive,
     getScope: () => state.navigationEpoch,
   });
   const cardInteractions = createInteractionGate();
@@ -794,9 +796,14 @@ export function installAgents(ctx) {
   let structureRefreshQueued = false;
   let structureRefreshRunning = false;
   let renderedAgentStructure = null;
+  let renderedPresetConfigs = null;
+  const presetConfigSignature = (deployments, configs, agentID) => JSON.stringify([
+    deployments.filter((item) => item.agent_id === agentID).map((item) => [item.engine, item.config_id, item.config_version]).sort(),
+    configs.filter((item) => item.agent_id === agentID).map((item) => [item.engine, item.id, item.version]).sort(),
+  ]);
   const visibleAgentStructure = (items) =>
     agentStructureSignature(
-      state.data.nodeView === "detail"
+      state.route === "agents" || state.data.nodeView === "detail"
         ? items.filter((item) => item.id === state.data.selectedAgent)
         : items,
     );
@@ -808,7 +815,7 @@ export function installAgents(ctx) {
     if (
       structureRefreshRunning ||
       !structureRefreshQueued ||
-      state.route !== "node-settings"
+      !agentPageActive()
     )
       return;
     structureRefreshQueued = false;
@@ -1041,6 +1048,7 @@ async function nodeSettings(presetMode = false, { overview: preloadedOverview } 
         })
         .join("");
       const labels = Object.entries(agent.labels || {})
+        .filter(([key]) => !key.startsWith("client_profile_name_"))
         .map(([key, value]) => `<span>${esc(key)}=${esc(value)}</span>`)
         .join("");
       if (detailMode) {
@@ -1062,7 +1070,7 @@ async function nodeSettings(presetMode = false, { overview: preloadedOverview } 
           <div class="node-settings-panels">
             <section id="${esc(tabID("cores-panel"))}" class="node-tab-panel node-cores-panel" data-node-panel="cores" role="tabpanel" aria-labelledby="${esc(tabID("cores-tab"))}" ${activeTab === "cores" ? "" : "hidden"}><header class="node-panel-heading"><div><h3>内核管理</h3><small>服务状态与版本</small></div><span data-installed-summary>${installedCount ? `${installedCount} 个已安装` : "尚未安装内核"}</span></header><div class="core-runtime-list">${services}</div></section>
             <section id="${esc(tabID("metrics-panel"))}" class="node-tab-panel node-metrics-panel" data-node-panel="metrics" role="tabpanel" aria-labelledby="${esc(tabID("metrics-tab"))}" ${activeTab === "metrics" ? "" : "hidden"}><header class="node-panel-heading"><div><h3>流量趋势</h3><small>最近 24 小时</small></div><span data-metric-text="stamp">${metrics.collected_at ? `采集于 ${ago(metrics.collected_at)}` : "等待资源数据"}</span></header><section class="metric-trend-empty" data-metric-history="${esc(agent.id)}" aria-label="暂无指标趋势"><span>⌁</span><b>正在载入指标趋势</b><small>节点上报指标后显示最近 24 小时的上下行速率。</small></section></section>
-          <section id="${esc(tabID("agent-panel"))}" class="node-tab-panel node-agent-panel" data-node-panel="agent" role="tabpanel" aria-labelledby="${esc(tabID("agent-tab"))}" ${activeTab === "agent" ? "" : "hidden"}><header class="node-panel-heading"><div><h3>Agent 与身份</h3><small>注册信息和安全通道</small></div><span data-agent-version>${esc(agent.version || "未知")}</span></header><dl class="identity-list node-identity-list"><div><dt>节点 ID</dt><dd><code>${esc(agent.id)}</code></dd></div><div><dt>系统平台</dt><dd>${esc(agent.os)} / ${esc(agent.arch)}</dd></div><div><dt>Agent 版本</dt><dd data-agent-version>${esc(agent.version || "未知")}</dd></div><div><dt>注册时间</dt><dd>${date(agent.enrolled_at)}</dd></div><div><dt>安全通道</dt><dd>WSS · Ed25519 签名</dd></div></dl><section class="node-public-ips" aria-label="公网地址"><header><b>公网地址 · 双栈</b><small>手动设置优先 · 出口探测 · 默认路由接口 · 已验证连接来源</small><small class="node-address-note" data-node-connection-address ${connectionAddressNote ? "" : "hidden"}>${esc(connectionAddressNote)}</small></header>${addressRows.map((row) => `<div class="public-ip-row ${row.ok ? "" : "empty"}" data-ip-family="${row.cls}" data-ip-source="${esc(row.source)}" ${row.value ? "" : "hidden"}><span class="ip-family ${row.cls}">${row.label}</span><code>${esc(row.value || "未探测到")}</code><small>${esc(row.source)}</small></div>`).join("")}</section><section class="node-komari-settings" aria-label="Komari 联动"><header><div><b>Komari 联动</b><small>填写 Komari 服务器 UUID；周期日期、已用量和额度会显示在节点卡片的网络区。</small></div></header><form data-komari-form="${esc(agent.id)}"><label><span>Komari 服务器 UUID</span><input name="uuid" maxlength="100" autocomplete="off" value="${esc(komariUUIDFor(agent))}" placeholder="例如 4addbaf1-7ffb-474c-98ee-4ffd476755ff" ${can("agents.manage") ? "" : "disabled"}></label><button class="button small" type="submit" ${can("agents.manage") ? "" : "disabled"}>保存</button></form>${komariUUIDFor(agent) ? "" : `<p class="node-komari-empty">尚未关联 Komari 服务器</p>`}</section>${labels ? `<div class="labels">${labels}</div>` : ""}<footer class="node-identity-refresh"><span>节点身份已验证</span><div>${can("enrollment.manage") && agent.enrollment_command_available ? `<button class="button small" type="button" data-view-enrollment-command="${esc(agent.id)}">查看安装部署命令</button>` : ""}</div></footer>${can("agents.manage") ? `<section class="node-danger-zone"><span><b>删除节点</b><small>断开节点并清理关联配置；QAgent 不会被远程卸载。</small></span><button class="button small danger-button" type="button" data-delete="${esc(agent.id)}">删除节点</button></section>` : ""}</section>
+          <section id="${esc(tabID("agent-panel"))}" class="node-tab-panel node-agent-panel" data-node-panel="agent" role="tabpanel" aria-labelledby="${esc(tabID("agent-tab"))}" ${activeTab === "agent" ? "" : "hidden"}><header class="node-panel-heading"><div><h3>Agent 与身份</h3><small>注册信息和安全通道</small></div><span data-agent-version>${esc(agent.version || "未知")}</span></header><section class="node-name-settings" aria-label="节点名称"><header><div><b>节点名称</b><small>自定义面板显示名称；不改变节点 ID、连接或安装凭据。</small></div></header><form data-agent-name-form="${esc(agent.id)}"><label><span>显示名称</span><input name="name" maxlength="100" required autocomplete="off" value="${esc(agent.name)}" ${can("agents.manage") ? "" : "disabled"}></label><button class="button small" type="submit" ${can("agents.manage") ? "" : "disabled"}>保存名称</button></form></section><dl class="identity-list node-identity-list"><div><dt>节点 ID</dt><dd><code>${esc(agent.id)}</code></dd></div><div><dt>系统平台</dt><dd>${esc(agent.os)} / ${esc(agent.arch)}</dd></div><div><dt>Agent 版本</dt><dd data-agent-version>${esc(agent.version || "未知")}</dd></div><div><dt>注册时间</dt><dd>${date(agent.enrolled_at)}</dd></div><div><dt>安全通道</dt><dd>WSS · Ed25519 签名</dd></div></dl><section class="node-public-ips" aria-label="公网地址"><header><b>公网地址 · 双栈</b><small>手动设置优先 · 出口探测 · 默认路由接口 · 已验证连接来源</small><small class="node-address-note" data-node-connection-address ${connectionAddressNote ? "" : "hidden"}>${esc(connectionAddressNote)}</small></header>${addressRows.map((row) => `<div class="public-ip-row ${row.ok ? "" : "empty"}" data-ip-family="${row.cls}" data-ip-source="${esc(row.source)}" ${row.value ? "" : "hidden"}><span class="ip-family ${row.cls}">${row.label}</span><code>${esc(row.value || "未探测到")}</code><small>${esc(row.source)}</small></div>`).join("")}</section><section class="node-komari-settings" aria-label="Komari 联动"><header><div><b>Komari 联动</b><small>填写 Komari 服务器 UUID；周期日期、已用量和额度会显示在节点卡片的网络区。</small></div></header><form data-komari-form="${esc(agent.id)}"><label><span>Komari 服务器 UUID</span><input name="uuid" maxlength="100" autocomplete="off" value="${esc(komariUUIDFor(agent))}" placeholder="例如 4addbaf1-7ffb-474c-98ee-4ffd476755ff" ${can("agents.manage") ? "" : "disabled"}></label><button class="button small" type="submit" ${can("agents.manage") ? "" : "disabled"}>保存</button></form>${komariUUIDFor(agent) ? "" : `<p class="node-komari-empty">尚未关联 Komari 服务器</p>`}</section>${labels ? `<div class="labels">${labels}</div>` : ""}<footer class="node-identity-refresh"><span>节点身份已验证</span><div>${can("enrollment.manage") && agent.enrollment_command_available ? `<button class="button small" type="button" data-view-enrollment-command="${esc(agent.id)}">查看安装部署命令</button>` : ""}</div></footer>${can("agents.manage") ? `<section class="node-danger-zone"><span><b>删除节点</b><small>断开节点并清理关联配置；QAgent 不会被远程卸载。</small></span><button class="button small danger-button" type="button" data-delete="${esc(agent.id)}">删除节点</button></section>` : ""}</section>
           </div>
         </section>`;
       }
@@ -1134,6 +1142,7 @@ async function nodeSettings(presetMode = false, { overview: preloadedOverview } 
     },
   );
   renderedAgentStructure = agentStructureSignature(visibleAgents);
+  if (presetMode) renderedPresetConfigs = presetConfigSignature(deployments, savedConfigs, state.data.selectedAgent);
   document.querySelectorAll("[data-context-agent]").forEach((link) => {
     const prefix = presetMode ? "preset-node" : "settings-node";
     link.href = `#${prefix}-${link.dataset.contextAgent}`;
@@ -1806,6 +1815,45 @@ function bindAgentPage(agentItems, presetMode = false, enrollmentHistory = {}) {
   document
     .querySelectorAll("[data-agent-refresh]")
     .forEach((button) => (button.onclick = () => pollAgentMetrics()));
+  document.querySelectorAll("[data-agent-name-form]").forEach((form) => {
+    const agentID = form.dataset.agentNameForm;
+    const button = form.querySelector("button[type=submit]");
+    if (button) button.disabled = !can("agents.manage") || pendingAgentNames.has(agentID);
+    bindEvent(form, "submit", async (event) => {
+      event.preventDefault();
+      if (!can("agents.manage") || pendingAgentNames.has(agentID)) return;
+      const name = String(new FormData(form).get("name") || "").trim();
+      if (!name || [...name].length > 100 || /[\u0000-\u001f\u007f-\u009f]/u.test(name)) {
+        notify("节点名称须为 1–100 个字符，且不能包含控制字符", "error");
+        return;
+      }
+      pendingAgentNames.add(agentID);
+      form.dataset.busy = "1";
+      if (button) button.disabled = true;
+      try {
+        const saved = await api(`/agents/${encodeURIComponent(agentID)}/name`, {
+          method: "PUT", body: JSON.stringify({ name }),
+        });
+        const agent = agentsByID.get(agentID);
+        if (agent) agent.name = saved.name;
+        const input = form.elements.namedItem("name");
+        // Keep any newer draft typed while the save request was in flight.
+        if (input.value.trim() === name) input.value = saved.name;
+        input.defaultValue = saved.name;
+        await refreshAgentPage();
+        notify("节点名称已保存");
+      } catch (error) {
+        notify(error.message, "error");
+      } finally {
+        pendingAgentNames.delete(agentID);
+        delete form.dataset.busy;
+        if (button) button.disabled = !can("agents.manage");
+        document.querySelectorAll("[data-agent-name-form]").forEach((current) => {
+          if (current.dataset.agentNameForm === agentID) current.querySelector("button[type=submit]").disabled = !can("agents.manage");
+        });
+      }
+    });
+  });
   document.querySelectorAll("[data-komari-form]").forEach((form) => {
     form.onsubmit = async (event) => {
       event.preventDefault();
@@ -1900,7 +1948,7 @@ function bindAgentPage(agentItems, presetMode = false, enrollmentHistory = {}) {
     });
   });
   clearTimeout(state.agentPollTimer);
-  if (!presetMode)
+  if (agentPageActive())
     state.agentPollTimer = setTimeout(pollAgentMetrics, 2000);
 }
 
@@ -2164,7 +2212,7 @@ function updateAgentMetrics(item) {
 }
 
 async function pollAgentMetrics() {
-  if (state.route !== "node-settings") return;
+  if (!agentPageActive()) return;
   clearTimeout(state.agentPollTimer);
   state.agentPollTimer = null;
   if (document.hidden) {
@@ -2180,8 +2228,17 @@ async function pollAgentMetrics() {
   );
   try {
     await metricsRefresh.run(
-      (signal) => api("/agents", { signal }),
-      (items) => {
+      async (signal) => {
+        const preset = state.route === "agents";
+        const selected = state.data.selectedAgent;
+        const [items, deployments, configs] = await Promise.all([
+          api("/agents", { signal }),
+          preset && can("deployments.read") ? api("/deployments", { signal }) : [],
+          preset && selected && can("agent-config.read") ? api(`/agents/${encodeURIComponent(selected)}/configs`, { signal }) : [],
+        ]);
+        return { items, preset, signature: presetConfigSignature(deployments, configs, selected) };
+      },
+      ({ items, preset, signature }) => {
         if (
           renderedAgentStructure === null &&
           Array.isArray(state.data.agents)
@@ -2196,6 +2253,10 @@ async function pollAgentMetrics() {
         state.data.agents = items;
         syncActiveBatchSnapshot?.(items);
         if (structureChanged) {
+          requestAgentStructureRefresh();
+          return;
+        }
+        if (preset && signature !== renderedPresetConfigs) {
           requestAgentStructureRefresh();
           return;
         }
@@ -2235,7 +2296,7 @@ async function pollAgentMetrics() {
     );
   } finally {
     clearTimeout(state.agentPollTimer);
-    if (state.route === "node-settings")
+    if (agentPageActive())
       state.agentPollTimer = setTimeout(pollAgentMetrics, 2000);
   }
 }

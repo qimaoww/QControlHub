@@ -571,7 +571,7 @@ qagent_core_service_is_safe_owned() {
       expected_config=$qagent_ssrust_config
       expected_argv="$expected_binary -c $expected_config --acl $qagent_ssrust_acl"
       expected_description='Shadowsocks Rust core managed by QAgent'
-      expected_environment='RUST_LOG=info'
+      expected_environment='RUST_LOG=info,shadowsocks_service::server::tcprelay=debug,shadowsocks_service::server::udprelay=debug'
       # Match the same two exact QAgent commands accepted by Agent discovery.
       # Older managed units predate the dedicated --acl argument. Bootstrap
       # must recognize those units before replacing them with the new template,
@@ -598,7 +598,12 @@ qagent_core_service_is_safe_owned() {
   [ "$(systemctl show "$service" --property=Group --value 2>/dev/null)" = qcontrolhub-core ] || return 1
   [ "$(systemctl show "$service" --property=Type --value 2>/dev/null)" = simple ] || return 1
   [ "$(systemctl show "$service" --property=WorkingDirectory --value 2>/dev/null)" = "/var/lib/qcontrolhub-$engine" ] || return 1
-  [ "$(systemctl show "$service" --property=Environment --value 2>/dev/null)" = "$expected_environment" ] || return 1
+  actual_environment=$(systemctl show "$service" --property=Environment --value 2>/dev/null) || return 1
+  if [ "$engine" = shadowsocks-rust ] && [ "$actual_environment" = RUST_LOG=info ]; then
+    : # Exact historical QAgent log policy; safe to upgrade.
+  else
+    [ "$actual_environment" = "$expected_environment" ] || return 1
+  fi
   for property in RootDirectory RootImage BindPaths BindReadOnlyPaths EnvironmentFiles; do
     [ -z "$(systemctl show "$service" --property="$property" --value 2>/dev/null)" ] || return 1
   done
@@ -613,6 +618,13 @@ qagent_core_service_is_safe_owned() {
         ;;
       */20-qcontrolhub-volatile-logs.conf)
         [ "$(cat "$drop_in" 2>/dev/null)" = "$(printf '%s\n' '[Service]' 'LogNamespace=qagent-cores' 'StandardOutput=journal' 'StandardError=journal')" ] || return 1
+        ;;
+      */30-qcontrolhub-ss-rust-logs.conf)
+        [ "$engine" = shadowsocks-rust ] || return 1
+        [ "$drop_in" = "$fragment_path.d/30-qcontrolhub-ss-rust-logs.conf" ] || return 1
+        protected_directory_chain "$fragment_path.d" || return 1
+        protected_regular_file "$drop_in" false || return 1
+        [ "$(cat "$drop_in" 2>/dev/null)" = "$(printf '%s\n' '[Service]' "Environment=$expected_environment")" ] || return 1
         ;;
       *) return 1 ;;
     esac

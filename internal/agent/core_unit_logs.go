@@ -14,6 +14,10 @@ import (
 )
 
 const (
+	// Normal SS Rust TCP tunnels and UDP associations are DEBUG events. Enable
+	// only those modules, not global debug/trace (which can dump configuration).
+	managedSSRustLogFilter    = "info,shadowsocks_service::server::tcprelay=debug,shadowsocks_service::server::udprelay=debug"
+	managedSSRustLogDropIn    = "[Service]\nEnvironment=RUST_LOG=" + managedSSRustLogFilter + "\n"
 	managedCoreJournalService = "systemd-journald@qagent-cores.service"
 	managedCoreLogDropIn      = `[Service]
 LogNamespace=qagent-cores
@@ -61,6 +65,11 @@ func ensureManagedCoreLogStreamingWithPolicy(ctx context.Context, specs map[core
 		return nil
 	}
 	if manager.Kind() == ServiceManagerOpenRC {
+		if spec, ok := installedSpecs[core.EngineShadowsocksRust]; ok {
+			if err := ensureOpenRCSSRustLogging(spec.Service); err != nil {
+				return err
+			}
+		}
 		return ensureOpenRCCoreLogDirectory()
 	}
 	ensureContext, cancel := context.WithTimeout(ctx, 20*time.Second)
@@ -95,7 +104,7 @@ func ensureManagedCoreLogStreamingWithPolicy(ctx context.Context, specs map[core
 		dropIn = []byte(managedCoreLogFallbackDropIn)
 	}
 	changed := false
-	for _, spec := range installedSpecs {
+	for engine, spec := range installedSpecs {
 		installed, installErr := installManagedLogFile(ensureContext, base,
 			filepath.Join("/etc/systemd/system", spec.Service+".d", "20-qcontrolhub-volatile-logs.conf"),
 			dropIn)
@@ -103,6 +112,15 @@ func ensureManagedCoreLogStreamingWithPolicy(ctx context.Context, specs map[core
 			return fmt.Errorf("configure volatile logs for %s: %w", spec.Service, installErr)
 		}
 		changed = changed || installed
+		if engine == core.EngineShadowsocksRust {
+			installed, installErr = installManagedLogFile(ensureContext, base,
+				filepath.Join("/etc/systemd/system", spec.Service+".d", "30-qcontrolhub-ss-rust-logs.conf"),
+				[]byte(managedSSRustLogDropIn))
+			if installErr != nil {
+				return fmt.Errorf("configure SS Rust connection logs: %w", installErr)
+			}
+			changed = changed || installed
+		}
 	}
 	if changed {
 		if output, err := run(ensureContext, base.systemctlPath, "daemon-reload"); err != nil {

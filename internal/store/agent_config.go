@@ -2,17 +2,37 @@ package store
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
 const komariUUIDLabel = "komari_uuid"
+
+// SetAgentName changes only panel display metadata. Enrollment credentials
+// keep their original names, and reconnects continue to use the stable ID/key.
+func (s *Store) SetAgentName(ctx context.Context, id, name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" || !utf8.ValidString(name) || utf8.RuneCountInString(name) > 100 || strings.ContainsFunc(name, unicode.IsControl) {
+		return fmt.Errorf("%w: agent name must contain 1 to 100 characters without control characters", ErrInvalid)
+	}
+	command, err := s.pool.Exec(ctx, `UPDATE agents SET name=$2 WHERE id=$1 AND revoked_at IS NULL`, id, name)
+	if err != nil {
+		return err
+	}
+	if command.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
 
 // AgentKomariUUID returns the optional Komari node UUID stored with the
 // QControlHub agent's display labels. Keeping this as an agent preference
@@ -98,6 +118,24 @@ func (s *Store) SetAgentClientDetails(ctx context.Context, id string, address, n
 // automatic mode is represented by an absent label so older Agents and
 // control-plane versions keep their original behavior.
 func (s *Store) SetAgentClientPreferences(ctx context.Context, id string, address, name, addressMode *string) error {
+	return s.setAgentClientPreferences(ctx, id, "client_name", address, name, addressMode)
+}
+
+// SetAgentClientProfilePreferences preserves legacy node-wide defaults while
+// updating one verified listening endpoint. An explicit empty name opts that
+// endpoint out of the legacy name and restores its inbound tag.
+func (s *Store) SetAgentClientProfilePreferences(ctx context.Context, id, nameLabel string, address, name, addressMode *string) error {
+	digest, err := hex.DecodeString(strings.TrimPrefix(nameLabel, core.ClientProfileNameLabelPrefix))
+	if !strings.HasPrefix(nameLabel, core.ClientProfileNameLabelPrefix) || err != nil || len(digest) != 32 {
+		return fmt.Errorf("%w: invalid client profile name scope", ErrInvalid)
+	}
+	return s.setAgentClientPreferences(ctx, id, nameLabel, address, name, addressMode)
+}
+
+func (s *Store) setAgentClientPreferences(ctx context.Context, id, nameLabel string, address, name, addressMode *string) error {
+	if name != nil && (!utf8.ValidString(*name) || utf8.RuneCountInString(*name) > 100 || strings.ContainsFunc(*name, unicode.IsControl)) {
+		return fmt.Errorf("%w: client name must not exceed 100 characters or contain control characters", ErrInvalid)
+	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -109,7 +147,7 @@ func (s *Store) SetAgentClientPreferences(ctx context.Context, id string, addres
 		}
 	}
 	if name != nil {
-		if _, err := tx.Exec(ctx, `UPDATE agents SET labels = CASE WHEN $2 = '' THEN COALESCE(NULLIF(labels, 'null'::jsonb), '{}'::jsonb) - 'client_name' ELSE jsonb_set(COALESCE(NULLIF(labels, 'null'::jsonb), '{}'::jsonb), '{client_name}', to_jsonb($2::text), true) END WHERE id=$1 AND revoked_at IS NULL`, id, *name); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE agents SET labels = CASE WHEN $2 = '' AND $3 = 'client_name' THEN COALESCE(NULLIF(labels, 'null'::jsonb), '{}'::jsonb) - $3::text ELSE jsonb_set(COALESCE(NULLIF(labels, 'null'::jsonb), '{}'::jsonb), ARRAY[$3::text], to_jsonb($2::text), true) END WHERE id=$1 AND revoked_at IS NULL`, id, *name, nameLabel); err != nil {
 			return err
 		}
 	}
@@ -246,7 +284,7 @@ func (s *Store) saveAgentConfig(ctx context.Context, input core.Config, expected
 	if metadataMutation != nil {
 		metadataMutation.OriginalTag = strings.TrimSpace(metadataMutation.OriginalTag)
 		metadataMutation.Tag = strings.TrimSpace(metadataMutation.Tag)
-		if len(metadataMutation.OriginalTag) > 64 || len(metadataMutation.Tag) > 64 {
+		if utf8.RuneCountInString(metadataMutation.OriginalTag) > 64 || utf8.RuneCountInString(metadataMutation.Tag) > 64 {
 			return core.Config{}, fmt.Errorf("%w: client metadata tag is too long", ErrInvalid)
 		}
 		if !metadataMutation.Delete && metadataMutation.Content != "" {

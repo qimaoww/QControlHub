@@ -280,9 +280,9 @@ func (s *Store) EnrollAgent(ctx context.Context, request core.EnrollRequest, enr
 			boundAgentID = strings.TrimSpace(*enrollmentAgentID)
 		}
 		if boundAgentID != "" {
-			err = tx.QueryRow(ctx, `SELECT id FROM agents WHERE id=$1 AND revoked_at IS NULL FOR UPDATE`, boundAgentID).Scan(&id)
+			err = tx.QueryRow(ctx, `SELECT id,name FROM agents WHERE id=$1 AND revoked_at IS NULL FOR UPDATE`, boundAgentID).Scan(&id, &name)
 		} else {
-			err = tx.QueryRow(ctx, `SELECT id FROM agents WHERE enrollment_id=$1 AND revoked_at IS NULL FOR UPDATE`, enrollmentID).Scan(&id)
+			err = tx.QueryRow(ctx, `SELECT id,name FROM agents WHERE enrollment_id=$1 AND revoked_at IS NULL FOR UPDATE`, enrollmentID).Scan(&id, &name)
 		}
 		if errors.Is(err, pgx.ErrNoRows) {
 			if boundAgentID != "" {
@@ -296,6 +296,8 @@ func (s *Store) EnrollAgent(ctx context.Context, request core.EnrollRequest, enr
 		}
 	}
 	if reinstalled {
+		// The credential's original name authenticates the reinstall above;
+		// retain the row-locked panel name instead of reverting a custom rename.
 		_, err = tx.Exec(ctx, `
 			UPDATE agents SET name=$2,version=$3,os=$4,arch=$5,capabilities=$6,features=$7,labels=$8,runtime=$9,
 				metrics='{}'::jsonb,public_key=$10,last_seen=$11,enrolled_at=$12,revoked_at=NULL

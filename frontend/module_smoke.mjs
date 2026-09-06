@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import "./refresh_smoke.mjs";
+import "./config_fields_smoke.mjs";
 
 import {
   agentStructureSignature,
@@ -2742,6 +2743,7 @@ try {
     "source-capable Agent still exposes the source fieldset",
   );
 } finally {
+  clearTimeout(presetState.agentPollTimer);
   if (previousDocument === undefined) delete globalThis.document;
   else globalThis.document = previousDocument;
   if (previousDetailsElement === undefined) delete globalThis.HTMLDetailsElement;
@@ -2895,8 +2897,8 @@ const accessEntries = [
       },
     ],
     address_options: [
-      { family: "ipv4", address: "198.51.100.10", source: "IPv4", profiles: [] },
-      { family: "ipv6", address: "2001:db8::10", source: "IPv6", profiles: [] },
+      { family: "ipv4", address: "198.51.100.10", source: "IPv4", profiles: [{tag: "alpha-in", port: 20001, protocol: "test", profile: {format: "URI", uri: "test-alpha", fields: []}}] },
+      { family: "ipv6", address: "2001:db8::10", source: "IPv6", profiles: [{tag: "alpha-in", port: 20001, protocol: "test", profile: {format: "URI", uri: "test-alpha-v6", fields: []}}] },
     ],
   },
   {
@@ -3900,6 +3902,7 @@ try {
       "mirror",
       "feature-capable mirror carries through the payload",
     );
+    clearTimeout(state.agentPollTimer);
   } finally {
     if (presetDomDocument === undefined) delete globalThis.document;
     else globalThis.document = presetDomDocument;
