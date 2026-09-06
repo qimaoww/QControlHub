@@ -46,6 +46,8 @@ bash <(curl -fsSL "https://raw.githubusercontent.com/qimaoww/qcontrolhub/main/de
 
 该命令不会克隆源码仓库，只把运行脚本和生产 Compose 文件保存到当前目录下的 `qcontrolhub`；可通过 `QCH_INSTALL_DIR` 指定其他持久化目录。从该安装目录内再次运行也会自动复用当前目录，不会创建嵌套目录。管理员 token 原文只在创建或轮换时显示一次，`.env` 仅保存 SHA-256 摘要；配置加密 keyring 保存在宿主机私有的 `.secrets` 目录，通过只读文件挂载交给控制面，不进入容器环境。一键脚本的参数与重复执行行为见 [`deploy/quick-start.sh`](deploy/quick-start.sh)。它不替代 TLS、反向代理、数据库保护、备份与恢复演练；上线前请按 [生产部署指南](docs/production.md) 完成全部步骤，并核对 [安全基线](docs/security.md)。
 
+内置与外部 PostgreSQL 两种模式均保留。外部模式安装时可选择默认项目网络或自定义已有 Docker 网络；更新会逐字节保留原 `.env`（包括旧明文凭据或既有 secret 文件来源），只更新两个 `latest` 应用镜像，启动/健康检查失败时尝试恢复旧 Compose 与镜像。控制面原有的 schema 初始化/升级行为不变，更新前仍须备份数据库。
+
 ### Agent 接入
 
 控制面可用后，在 Web 控制台为目标节点生成添加命令，并在受控 Linux 节点执行。安装器使用 POSIX `sh`，会下载受凭据保护的 Agent 与配套资源、写入受限环境文件，并且只安装 systemd `qagent.service` 或 Alpine OpenRC `qagent`。四个内核的配置和 `qagent-*` 服务不会在接入节点时预创建；从面板明确安装某个内核时，Agent 才按需创建该内核的最小配置和专用服务。

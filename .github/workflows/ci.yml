@@ -165,7 +165,9 @@ jobs:
         env:
           POSTGRES_PASSWORD: ci-postgres-password
           QCH_ADMIN_TOKEN: ci-admin-token
-        run: docker compose config --quiet
+        run: |
+          docker compose config --quiet
+          bash deploy/tests/quick-start-compose.sh
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4

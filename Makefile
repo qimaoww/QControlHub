@@ -55,6 +55,9 @@ agent-redeploy-test:
 quick-start-test:
 	bash deploy/tests/quick-start-env.sh
 	bash deploy/tests/quick-start-bootstrap.sh
+	bash deploy/tests/quick-start-update.sh
+	bash deploy/tests/quick-start-modes.sh
+	bash deploy/tests/quick-start-compose.sh
 
 web-image-test:
 	docker build --target qcontrol-web --build-arg VERSION='$(VERSION)' .
