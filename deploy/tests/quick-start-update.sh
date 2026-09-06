@@ -217,5 +217,8 @@ backup_path="$(find "$WORK_DIR" -maxdepth 1 -name '.qcontrolhub-update.*' -type 
 [ -n "$backup_path" ]
 cmp "$test_root/expected.env" "$backup_path/.env"
 cmp "$test_root/expected-compose.yml" "$backup_path/docker-compose.external.yml"
+# Retained rollback files contain credentials and must never be accidentally
+# staged when this installer is used from a repository checkout.
+git -C "$repo_root" check-ignore --no-index -q .qcontrolhub-update.review/.env
 
 printf '%s\n' 'quick-start external update rollback regression passed'
