@@ -272,6 +272,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/region-flags/{code}", s.requirePermission(core.PermissionAgentsRead, http.HandlerFunc(s.getRegionFlag)))
 	mux.Handle("GET /api/v1/agents/{id}/komari", s.requirePermission(core.PermissionAgentsRead, http.HandlerFunc(s.getAgentKomari)))
 	mux.Handle("PUT /api/v1/agents/{id}/komari", s.requirePermission(core.PermissionAgentsManage, http.HandlerFunc(s.putAgentKomari)))
+	mux.Handle("PUT /api/v1/agents/{id}/name", s.requirePermission(core.PermissionAgentsManage, http.HandlerFunc(s.putAgentName)))
 	mux.Handle("GET /api/v1/config-catalogs/{engine}", s.requirePermission(core.PermissionCatalogsRead, http.HandlerFunc(s.configCatalog)))
 	mux.Handle("DELETE /api/v1/agents/{id}", s.requirePermission(core.PermissionAgentsManage, http.HandlerFunc(s.deleteAgent)))
 	mux.Handle("POST /api/v1/agents/{id}/enrollment-token", s.requirePermission(core.PermissionEnrollmentManage, http.HandlerFunc(s.createAgentEnrollmentToken)))
@@ -388,6 +389,23 @@ func (s *Server) listAgents(w http.ResponseWriter, request *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, agents)
+}
+
+func (s *Server) putAgentName(w http.ResponseWriter, request *http.Request) {
+	var input struct {
+		Name string `json:"name"`
+	}
+	if err := decodeJSON(w, request, &input, 8<<10); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	input.Name = strings.TrimSpace(input.Name)
+	if err := s.store.SetAgentName(request.Context(), request.PathValue("id"), input.Name); err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	s.recordAudit(request, "agent.renamed", request.PathValue("id"), input.Name)
+	writeJSON(w, http.StatusOK, input)
 }
 
 func (s *Server) deleteAgent(w http.ResponseWriter, request *http.Request) {

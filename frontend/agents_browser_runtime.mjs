@@ -71,6 +71,8 @@ const testAPI = {
   calls: [],
   pendingTasks: [],
   enrollmentFailure: false,
+  renameFailure: false,
+  renameGate: null,
   enrollmentRecords: [
     {
       id: "enr-alpha",
@@ -111,6 +113,14 @@ window.fetch = async (input, options = {}) => {
     return json({ panel_name: "QControlHub Browser Smoke" });
   if (method === "GET" && path === "/agents")
     return json(mode === "empty" ? [] : testAPI.agents);
+  if (method === "PUT" && /^\/agents\/[^/]+\/name$/.test(path)) {
+    if (testAPI.renameFailure) return json({ error: "temporary rename failure" }, 503);
+    const agentID = decodeURIComponent(path.split("/")[2]);
+    const { name } = JSON.parse(String(options.body || "{}"));
+    if (testAPI.renameGate) await testAPI.renameGate;
+    testAPI.agents = testAPI.agents.map((agent) => agent.id === agentID ? { ...agent, name } : agent);
+    return json({ name });
+  }
   if (method === "GET" && path === "/agents/alpha/region")
     return json({ ip: "8.8.8.8", country_code: "TW", country: "Taiwan" });
   if (method === "GET" && path === "/agents/alpha/komari")
@@ -721,6 +731,45 @@ async function testAdminRuntime() {
     assert.equal(document.querySelector("#batch-form"), null, `${tab} 标签页不得渲染批量操作`);
     assert.equal(document.querySelector(".node-batch-bar"), null, `${tab} 标签页不得保留批量操作栏`);
   }
+  const renameForm = document.querySelector('[data-agent-name-form="alpha"]');
+  assert.ok(renameForm, "节点身份页缺少改名表单");
+  const renameInput = renameForm.elements.namedItem("name");
+  const renameButton = renameForm.querySelector('button[type="submit"]');
+  const renameCalls = () => testAPI.calls.filter((call) => call.method === "PUT" && call.path === "/agents/alpha/name").length;
+  const renameBefore = renameCalls();
+  renameInput.value = "   ";
+  renameForm.requestSubmit(renameButton);
+  assert.equal(renameCalls(), renameBefore, "空白名称不应提交");
+  testAPI.renameFailure = true;
+  renameInput.value = "香港 & Tokyo <edge>";
+  renameForm.requestSubmit(renameButton);
+  await waitFor(() => !renameButton.disabled, "改名失败后保存按钮未恢复");
+  assert.equal(renameInput.value, "香港 & Tokyo <edge>", "改名失败后丢失输入");
+  assert.match(document.body.textContent, /temporary rename failure/);
+  testAPI.renameFailure = false;
+  renameForm.requestSubmit(renameButton);
+  await waitFor(() => document.querySelector(".node-operations-title h2")?.textContent === "香港 & Tokyo <edge>", "改名后标题未更新");
+  assert.equal(document.querySelector(".node-operations-title edge"), null, "节点名称未进行 HTML 转义");
+  assert.equal(document.querySelector('[data-agent-name-form="alpha"] input').value, "香港 & Tokyo <edge>");
+  document.querySelector("[data-agent-refresh]").click();
+  await waitFor(() => !document.querySelector("[data-agent-refresh]").disabled, "改名后节点刷新未完成");
+  assert.equal(document.querySelector(".node-operations-title h2").textContent, "香港 & Tokyo <edge>", "指标刷新覆盖自定义名称");
+  let completeRename;
+  testAPI.renameGate = new Promise((resolve) => { completeRename = resolve; });
+  const pendingForm = document.querySelector('[data-agent-name-form="alpha"]');
+  const pendingInput = pendingForm.elements.namedItem("name");
+  const pendingButton = pendingForm.querySelector('button[type="submit"]');
+  const pendingCalls = renameCalls();
+  pendingInput.value = "正在保存的名称";
+  pendingForm.requestSubmit(pendingButton);
+  await waitFor(() => renameCalls() === pendingCalls + 1, "改名请求未发出");
+  pendingInput.value = "保存期间继续编辑的名称";
+  pendingForm.requestSubmit();
+  assert.equal(renameCalls(), pendingCalls + 1, "重复提交产生并行改名请求");
+  completeRename();
+  await waitFor(() => document.querySelector(".node-operations-title h2")?.textContent === "正在保存的名称", "延迟改名未完成");
+  assert.equal(document.querySelector('[data-agent-name-form="alpha"] input').value, "保存期间继续编辑的名称", "迟到的保存响应覆盖了新草稿");
+  testAPI.renameGate = null;
   testAPI.agents = testAPI.agents.filter((agent) => agent.id !== "alpha");
   document.querySelector("[data-agent-refresh]").click();
   await waitFor(() => document.querySelector("[data-node-missing]"), "删除当前节点后未渲染详情缺失状态");
@@ -752,6 +801,12 @@ async function testReadonlyRuntime() {
   assertNoPersistentEnrollment();
   assert.equal(document.querySelector("[data-open-enrollment]"), null);
   assert.equal(document.querySelector("#batch-form"), null);
+  location.hash = "#settings-node-alpha";
+  const renameForm = await waitFor(() => document.querySelector('[data-agent-name-form="alpha"]'), "只读节点详情未完成渲染");
+  assert.equal(renameForm.querySelector("input").disabled, true, "只读用户可编辑节点名称");
+  assert.equal(renameForm.querySelector("button").disabled, true, "只读用户可提交改名");
+  renameForm.requestSubmit();
+  assert.equal(testAPI.calls.some((call) => call.method === "PUT" && call.path.endsWith("/name")), false, "只读用户触发改名请求");
   assert.equal(
     testAPI.calls.some((call) => call.path === "/enrollment-tokens"),
     false,
