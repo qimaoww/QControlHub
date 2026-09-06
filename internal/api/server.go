@@ -362,30 +362,20 @@ func (s *Server) overview(w http.ResponseWriter, request *http.Request) {
 }
 
 func (s *Server) listAgents(w http.ResponseWriter, request *http.Request) {
-	agents, err := s.store.ListAgents(request.Context())
+	role, roleOK := s.sessionRole(request)
+	permissions, permissionsOK := s.sessionPermissions(request)
+	list := s.store.ListAgents
+	if roleOK && permissionsOK && (role.Allows(core.PermissionEnrollmentManage) || core.HasPermission(permissions, core.PermissionEnrollmentManage)) {
+		list = s.store.ListAgentsWithEnrollmentCommands
+	}
+	agents, err := list(request.Context())
 	if err != nil {
 		writeInternalError(w, err)
 		return
 	}
-	role, roleOK := s.sessionRole(request)
-	permissions, permissionsOK := s.sessionPermissions(request)
 	if !roleOK || !permissionsOK || (!role.Allows(core.PermissionMetricsRead) && !core.HasPermission(permissions, core.PermissionMetricsRead)) {
 		for index := range agents {
 			agents[index].Metrics = core.HostMetrics{}
-		}
-	}
-	if roleOK && permissionsOK && (role.Allows(core.PermissionEnrollmentManage) || core.HasPermission(permissions, core.PermissionEnrollmentManage)) {
-		ids := make([]string, 0, len(agents))
-		for _, agent := range agents {
-			ids = append(ids, agent.ID)
-		}
-		available, availabilityErr := s.store.ListEnrollmentCommandAvailability(request.Context(), ids)
-		if availabilityErr != nil {
-			slog.Warn("enrollment command availability unavailable", "error", availabilityErr)
-		} else {
-			for index := range agents {
-				agents[index].EnrollmentCommandAvailable = available[agents[index].ID]
-			}
 		}
 	}
 	writeJSON(w, http.StatusOK, agents)

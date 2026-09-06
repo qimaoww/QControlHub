@@ -309,6 +309,8 @@ sudo rm /var/lib/qcontrolhub/agent-state.json
 
 使用脚本的 `external` 模式，它会从终端读取 `QCH_DATABASE_URL` 并生成 `docker-compose.external.yml`：
 
+远程数据库的性能优化、连接池参数及 schema 41 索引升级注意事项见 [远程 PostgreSQL 性能](performance.md)。
+
 ```bash
 bash <(curl -fsSL "https://raw.githubusercontent.com/qimaoww/qcontrolhub/main/deploy/quick-start.sh") -m external
 ```

@@ -1,0 +1,68 @@
+package store
+
+import (
+	"context"
+	"encoding/json"
+
+	"github.com/qimaoww/qcontrolhub/internal/core"
+)
+
+// DeployedConfig contains only the exact version currently deployed, plus its
+// version-bound client secrets. It is an internal snapshot, never a JSON API.
+type DeployedConfig struct {
+	Deployment core.Deployment
+	Config     core.Config
+	Metadata   map[string]string
+}
+
+// DeployedConfigs resolves current/historical bodies and client metadata in a
+// single query instead of downloading all saved bodies and doing two further
+// reads per deployment. Deleted configs and pruned revisions remain hidden.
+func (s *Store) DeployedConfigs(ctx context.Context) ([]DeployedConfig, error) {
+	rows, err := s.pool.Query(ctx, `
+		WITH latest AS (
+			SELECT DISTINCT ON (agent_id,engine) agent_id,engine,config_id,config_version,finished_at
+			FROM tasks WHERE action IN ('deploy','import-existing') AND status='succeeded' AND finished_at IS NOT NULL
+			ORDER BY agent_id,engine,finished_at DESC
+		)
+		SELECT latest.agent_id,latest.engine,latest.config_id,latest.config_version,latest.finished_at,
+		       CASE WHEN config.version=latest.config_version THEN config.content ELSE revision.content END,
+		       COALESCE((SELECT jsonb_object_agg(profile_tag,content) FROM config_client_metadata
+			         WHERE config_id=latest.config_id AND config_version=latest.config_version),'{}'::jsonb)
+		FROM latest JOIN agents agent ON agent.id=latest.agent_id AND agent.revoked_at IS NULL
+		JOIN configs config ON config.id=latest.config_id AND config.deleted_at IS NULL
+		LEFT JOIN config_revisions revision ON revision.config_id=latest.config_id
+		     AND revision.version=latest.config_version AND config.version<>latest.config_version
+		WHERE config.version=latest.config_version OR revision.config_id IS NOT NULL`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]DeployedConfig, 0)
+	for rows.Next() {
+		var item DeployedConfig
+		var metadata []byte
+		if err := rows.Scan(&item.Deployment.AgentID, &item.Deployment.Engine, &item.Deployment.ConfigID,
+			&item.Deployment.ConfigVersion, &item.Deployment.DeployedAt, &item.Config.Content, &metadata); err != nil {
+			return nil, err
+		}
+		item.Config.ID = item.Deployment.ConfigID
+		item.Config.Version = item.Deployment.ConfigVersion
+		item.Config.Engine = item.Deployment.Engine
+		item.Config.Content, err = s.decryptContent(item.Config.Content)
+		if err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(metadata, &item.Metadata); err != nil {
+			return nil, err
+		}
+		for tag, ciphertext := range item.Metadata {
+			item.Metadata[tag], err = s.decryptContent(ciphertext)
+			if err != nil {
+				return nil, err
+			}
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
+}

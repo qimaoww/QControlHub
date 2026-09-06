@@ -195,9 +195,40 @@ func (s *Store) AgentConfig(ctx context.Context, agentID string, engine core.Eng
 // plane uses this for fleet-level deployment drift and listener summaries;
 // general configuration workspaces remain isolated through ListConfigs.
 func (s *Store) ListAgentConfigs(ctx context.Context) ([]core.Config, error) {
+	return s.listAgentConfigs(ctx, "")
+}
+
+// AgentConfigs filters before fetching or decrypting configuration bodies.
+func (s *Store) AgentConfigs(ctx context.Context, agentID string) ([]core.Config, error) {
+	if agentID == "" {
+		return nil, ErrInvalid
+	}
+	configs, err := s.listAgentConfigs(ctx, agentID)
+	if err != nil || len(configs) > 0 {
+		return configs, err
+	}
+	var exists bool
+	if err := s.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agents WHERE id=$1 AND revoked_at IS NULL)`, agentID).Scan(&exists); err != nil {
+		return nil, err
+	}
+	if !exists {
+		return nil, ErrNotFound
+	}
+	return configs, nil
+}
+
+func (s *Store) listAgentConfigs(ctx context.Context, agentID string) ([]core.Config, error) {
+	where := "agent_id IS NOT NULL"
+	var args []any
+	if agentID != "" {
+		where = "agent_id=$1"
+		args = []any{agentID}
+	}
 	rows, err := s.pool.Query(ctx, `
 		SELECT id,COALESCE(agent_id,''),name,description,engine,content,version,created_at,updated_at
-		FROM configs WHERE agent_id IS NOT NULL AND deleted_at IS NULL ORDER BY updated_at DESC`)
+		FROM configs WHERE `+where+` AND deleted_at IS NULL
+		  AND agent_id IN (SELECT id FROM agents WHERE revoked_at IS NULL)
+		ORDER BY updated_at DESC`, args...)
 	if err != nil {
 		return nil, err
 	}

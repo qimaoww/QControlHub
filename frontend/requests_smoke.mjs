@@ -1,0 +1,31 @@
+import assert from "node:assert/strict";
+import { createScopedAPI } from "./modules/requests.js";
+
+const calls = [];
+const api = createScopedAPI(async (path, options) => {
+  calls.push({ path, options });
+  return { items: [path] };
+});
+api.begin();
+const [first, second] = await Promise.all([api.request("/agents"), api.request("/agents")]);
+assert.equal(calls.length, 1, "prefetch and page share one read");
+first.items.push("changed");
+assert.deepEqual(second.items, ["/agents"], "callers cannot mutate each other's responses");
+await api.request("/agents");
+assert.equal(calls.length, 1, "completed prefetch stays usable until rendering completes");
+await api.request("/agents", { signal: new AbortController().signal });
+assert.equal(calls.length, 2, "independent cancellation bypasses sharing");
+await api.request("/agents", { method: "PUT" });
+await api.request("/agents");
+assert.equal(calls.length, 4, "writes invalidate prefetched data");
+api.end();
+await api.request("/agents");
+await api.request("/agents");
+assert.equal(calls.length, 6, "polling outside rendering always reads fresh data");
+api.begin();
+await api.request("/agents");
+assert.equal(calls.length, 7, "a new navigation cannot reuse old data");
+await api.request("/auth/session");
+await api.request("/auth/session");
+assert.equal(calls.length, 9, "authentication is never cached");
+api.end();

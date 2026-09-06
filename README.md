@@ -77,6 +77,7 @@ Agent 以高权限 root 服务运行，远程任务会真实修改配置、服�
 
 - [开发指南](docs/development.md)
 - [生产部署](docs/production.md)
+- [远程 PostgreSQL 性能与连接池](docs/performance.md)
 - [鉴权与安全基线](docs/security.md)
 
 ### 接口与配置
