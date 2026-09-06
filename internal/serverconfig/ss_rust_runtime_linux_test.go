@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -14,8 +15,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/qimaoww/qcontrolhub"
+	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
 // Opt-in only: the target runs checksum-pinned official binaries in a
@@ -98,7 +103,7 @@ func nativeSSRustPort(t *testing.T) int {
 	return listener.Addr().(*net.TCPAddr).Port
 }
 
-func nativeSSRustStart(t *testing.T, root, binary string, args ...string) {
+func nativeSSRustStart(t *testing.T, root, binary string, args ...string) string {
 	t.Helper()
 	command := exec.Command(binary, args...)
 	command.Dir = root
@@ -120,6 +125,120 @@ func nativeSSRustStart(t *testing.T, root, binary string, args ...string) {
 			t.Log(string(contents))
 		}
 	})
+	return log.Name()
+}
+
+func TestSSRustNativeConnectionLogs(t *testing.T) {
+	binaries := os.Getenv("QCH_SS_RUST_NATIVE_BIN")
+	if binaries == "" {
+		t.Skip("requires make ss-rust-runtime-test")
+	}
+	if _, err := os.Stat("/.dockerenv"); err != nil || os.Geteuid() == 0 {
+		t.Fatal("native test requires a non-root Docker container")
+	}
+	unit, err := fs.ReadFile(qcontrolhub.CoreInstallAssets(), "deploy/systemd/qagent-shadowsocks-rust.service")
+	if err != nil {
+		t.Fatal(err)
+	}
+	filter := ""
+	for _, line := range strings.Split(string(unit), "\n") {
+		if value, ok := strings.CutPrefix(line, "Environment=RUST_LOG="); ok {
+			filter = value
+		}
+	}
+	if filter == "" {
+		t.Fatal("SS Rust template has no logging policy")
+	}
+	for _, scenario := range []string{"legacy-info", "panel", "imported"} {
+		t.Run(scenario, func(t *testing.T) {
+			t.Setenv("RUST_LOG", filter)
+			if scenario == "legacy-info" {
+				t.Setenv("RUST_LOG", "info")
+			}
+			root := t.TempDir()
+			serverPort := nativeSSRustPort(t)
+			const password = "native-logging-test-secret"
+			plan := Input{Protocol: ProtocolShadowsocks, Tag: "logging-test", Listen: "127.0.0.1", Port: serverPort, Method: "aes-256-gcm", Credential: password}
+			generated, err := Generate(core.EngineShadowsocksRust, plan)
+			if err != nil {
+				t.Fatal(err)
+			}
+			content, err := MutateGenerated(core.EngineShadowsocksRust, "{}", generated, "", "add")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if scenario == "imported" {
+				content = fmt.Sprintf(`{"mode":"tcp_and_udp","servers":[{"server":"127.0.0.1","server_port":%d,"method":"aes-256-gcm","password":%q}]}`, serverPort, password)
+			}
+			serverPath := filepath.Join(root, "server.json")
+			if err := os.WriteFile(serverPath, []byte(content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			logPath := nativeSSRustStart(t, root, filepath.Join(binaries, "ssserver"), "-c", serverPath)
+			nativeSSRustWait(t, serverPort)
+			localPort := nativeSSRustPort(t)
+			clientConfig := nativeSSRustConfig(t, root, "client.json", map[string]any{"server": "127.0.0.1", "server_port": serverPort, "method": "aes-256-gcm", "password": password, "local_address": "127.0.0.1", "local_port": localPort})
+			nativeSSRustStart(t, root, filepath.Join(binaries, "sslocal"), "-c", clientConfig)
+			nativeSSRustWait(t, localPort)
+			echo := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, "tcp-ok") }))
+			t.Cleanup(echo.Close)
+			_, targetPort, _ := net.SplitHostPort(echo.Listener.Addr().String())
+			if body, err := nativeSSRustHTTP(localPort, targetPort); err != nil || body != "tcp-ok" {
+				t.Fatalf("TCP relay: %q %v", body, err)
+			}
+			udpEcho, err := net.ListenPacket("udp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { udpEcho.Close() })
+			go func() {
+				buffer := make([]byte, 128)
+				for {
+					n, addr, err := udpEcho.ReadFrom(buffer)
+					if err != nil {
+						return
+					}
+					_, _ = udpEcho.WriteTo(buffer[:n], addr)
+				}
+			}()
+			udpPort := nativeSSRustPort(t)
+			udpLocal := net.JoinHostPort("127.0.0.1", strconv.Itoa(udpPort))
+			// CLI locals are appended, not substituted for a config-file local.
+			udpConfig := nativeSSRustConfig(t, root, "udp-client.json", map[string]any{"server": "127.0.0.1", "server_port": serverPort, "method": "aes-256-gcm", "password": password, "mode": "tcp_and_udp"})
+			nativeSSRustStart(t, root, filepath.Join(binaries, "sslocal"), "-c", udpConfig, "--protocol", "tunnel", "--local-addr", udpLocal, "--forward-addr", udpEcho.LocalAddr().String(), "-U")
+			udp, err := net.Dial("udp", udpLocal)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer udp.Close()
+			delivered := false
+			for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); {
+				_ = udp.SetDeadline(time.Now().Add(200 * time.Millisecond))
+				_, _ = udp.Write([]byte("udp-ok"))
+				buffer := make([]byte, 16)
+				if n, err := udp.Read(buffer); err == nil && string(buffer[:n]) == "udp-ok" {
+					delivered = true
+					break
+				}
+				time.Sleep(30 * time.Millisecond)
+			}
+			if !delivered {
+				t.Fatal("UDP relay failed")
+			}
+			logs, err := os.ReadFile(logPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, expected := range []string{"established tcp tunnel", "created udp association"} {
+				if strings.Contains(string(logs), expected) != (scenario != "legacy-info") {
+					t.Fatalf("%s presence differs from policy: %s", expected, logs)
+				}
+			}
+			if strings.Contains(string(logs), password) || strings.Contains(string(logs), " TRACE ") {
+				t.Fatalf("connection policy leaked secret/trace: %s", logs)
+			}
+		})
+	}
 }
 
 func nativeSSRustWait(t *testing.T, port int) {

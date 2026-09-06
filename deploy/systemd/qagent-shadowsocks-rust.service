@@ -16,7 +16,7 @@ StateDirectory=qcontrolhub-shadowsocks-rust
 StateDirectoryMode=0750
 UMask=0027
 ExecStart=/usr/local/lib/qagent/cores/ssserver -c /etc/qagent/shadowsocks-rust/config.json --acl /etc/qagent/shadowsocks-rust/qch-mainland-block.acl
-Environment=RUST_LOG=info
+Environment=RUST_LOG=info,shadowsocks_service::server::tcprelay=debug,shadowsocks_service::server::udprelay=debug
 LogNamespace=qagent-cores
 StandardOutput=journal
 StandardError=journal

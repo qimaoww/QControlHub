@@ -1271,8 +1271,9 @@ func TestCoreLogSourcesMixManagedAndExactGenericUnits(t *testing.T) {
 			core.EngineShadowsocksRust: {Service: "qagent-shadowsocks-rust.service"},
 		},
 		map[core.Engine]EngineSpec{
-			core.EngineXray:    {Service: "xray.service"},
-			core.EngineSingBox: {Service: "sing-box.service"},
+			core.EngineXray:            {Service: "xray.service"},
+			core.EngineSingBox:         {Service: "sing-box.service"},
+			core.EngineShadowsocksRust: {Service: "shadowsocks-rust.service"},
 		},
 	)
 	if len(sources) != 2 {
@@ -1303,6 +1304,7 @@ func TestCoreLogSourcesMixManagedAndExactGenericUnits(t *testing.T) {
 		t.Fatalf("managed journal bounded follower arguments = %v", followArguments)
 	}
 	if containsArgument(generic.arguments, "--namespace=qagent-cores") ||
+		!containsArgument(generic.arguments, "--unit=shadowsocks-rust.service") ||
 		!containsArgument(generic.arguments, "--unit=xray.service") ||
 		!containsArgument(generic.arguments, "--unit=sing-box.service") ||
 		!containsArgument(generic.arguments, "--unit=qagent-xray.service") ||

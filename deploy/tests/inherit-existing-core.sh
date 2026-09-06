@@ -411,6 +411,22 @@ printf '%s\n' RUST_LOG=info > "$FAKE_SYSTEMCTL_STATE/qagent-Environment"
 write_exec_start "$qagent_ssrust_binary" "$qagent_ssrust_binary" -c "$qagent_ssrust_config" --acl /tmp/unexpected.acl
 expect_rejected ssrust-acl-override qagent_core_service_is_safe_owned shadowsocks-rust "$managed_ssrust_unit"
 
+# The new narrowly scoped connection logger remains an exact managed policy.
+ssrust_log_environment='RUST_LOG=info,shadowsocks_service::server::tcprelay=debug,shadowsocks_service::server::udprelay=debug'
+write_exec_start "$qagent_ssrust_binary" "$qagent_ssrust_binary" -c "$qagent_ssrust_config" --acl "$qagent_ssrust_acl"
+printf '%s\n' "$ssrust_log_environment" > "$FAKE_SYSTEMCTL_STATE/qagent-Environment"
+qagent_core_service_is_safe_owned shadowsocks-rust "$managed_ssrust_unit"
+mkdir -p "$managed_ssrust_unit.d"
+ssrust_log_dropin="$managed_ssrust_unit.d/30-qcontrolhub-ss-rust-logs.conf"
+printf '%s\n' '[Service]' "Environment=$ssrust_log_environment" > "$ssrust_log_dropin"
+chmod 0644 "$ssrust_log_dropin"
+printf '%s\n' "$ssrust_log_dropin" > "$FAKE_SYSTEMCTL_STATE/qagent-DropInPaths"
+qagent_core_service_is_safe_owned shadowsocks-rust "$managed_ssrust_unit"
+printf '%s\n' 'ExecStart=/tmp/unexpected' >> "$ssrust_log_dropin"
+expect_rejected ssrust-modified-log-dropin qagent_core_service_is_safe_owned shadowsocks-rust "$managed_ssrust_unit"
+: > "$FAKE_SYSTEMCTL_STATE/qagent-DropInPaths"
+printf '%s\n' RUST_LOG=info > "$FAKE_SYSTEMCTL_STATE/qagent-Environment"
+
 # Discovery accepts the pre-ACL QAgent unit too. The bootstrap ownership
 # check must agree before rewriting that template, without stopping an active
 # managed service or accepting arbitrary arguments/environment/hooks.
