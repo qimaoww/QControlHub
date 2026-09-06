@@ -41,20 +41,22 @@ export QCH_BOOTSTRAP_TEST_LOG="$test_root/git.log"
 export QCH_BOOTSTRAP_TEST_ARGS="$test_root/quick-start.args"
 
 PATH="$fake_bin:$PATH" QCH_INSTALL_DIR="$install_dir" \
-    bash <(cat "$repo_root/deploy/quick-start.sh") -m bundled
+    bash <(cat "$repo_root/deploy/quick-start.sh") -m external
 grep -Fq -- 'https://raw.githubusercontent.com/qimaoww/qcontrolhub/main/deploy/quick-start.sh' "$QCH_BOOTSTRAP_TEST_LOG"
-grep -Fq -- 'https://raw.githubusercontent.com/qimaoww/qcontrolhub/main/docker-compose.yml' "$QCH_BOOTSTRAP_TEST_LOG"
+if grep -Fq -- '/docker-compose.yml' "$QCH_BOOTSTRAP_TEST_LOG"; then
+    printf '%s\n' 'streamed quick-start downloaded the local PostgreSQL Compose' >&2
+    exit 1
+fi
 [ -f "$install_dir/.qcontrolhub-quick-start" ]
-[ -f "$install_dir/docker-compose.yml" ]
+[ ! -f "$install_dir/docker-compose.yml" ]
 [ ! -e "$install_dir/.git" ]
 grep -Fxq -- "-m" "$QCH_BOOTSTRAP_TEST_ARGS"
-grep -Fxq -- "bundled" "$QCH_BOOTSTRAP_TEST_ARGS"
+grep -Fxq -- "external" "$QCH_BOOTSTRAP_TEST_ARGS"
 
 : > "$QCH_BOOTSTRAP_TEST_LOG"
 PATH="$fake_bin:$PATH" QCH_INSTALL_DIR="$install_dir" \
     bash <(cat "$repo_root/deploy/quick-start.sh") -m external -d 'postgresql://db.example.test/qcontrolhub'
 grep -Fq -- 'https://raw.githubusercontent.com/qimaoww/qcontrolhub/main/deploy/quick-start.sh' "$QCH_BOOTSTRAP_TEST_LOG"
-grep -Fq -- 'https://raw.githubusercontent.com/qimaoww/qcontrolhub/main/docker-compose.yml' "$QCH_BOOTSTRAP_TEST_LOG"
 grep -Fxq -- "external" "$QCH_BOOTSTRAP_TEST_ARGS"
 grep -Fxq -- "postgresql://db.example.test/qcontrolhub" "$QCH_BOOTSTRAP_TEST_ARGS"
 
@@ -107,7 +109,7 @@ FAKE_GIT
 chmod 755 "$fake_bin/git"
 export QCH_BOOTSTRAP_GIT_LOG="$test_root/legacy-git.log"
 PATH="$fake_bin:$PATH" QCH_INSTALL_DIR="$legacy_git_dir" \
-    bash <(cat "$repo_root/deploy/quick-start.sh") -m bundled
+    bash <(cat "$repo_root/deploy/quick-start.sh") -m external
 grep -Fq -- 'remote get-url origin' "$QCH_BOOTSTRAP_GIT_LOG"
 if grep -Eq -- 'clone|fetch|merge|pull' "$QCH_BOOTSTRAP_GIT_LOG"; then
     printf '%s\n' 'streamed quick-start performed a Git checkout update' >&2
@@ -125,7 +127,7 @@ exit 1
 FAIL_GIT
 chmod 755 "$fake_bin/git"
 PATH="$fake_bin:$PATH" QCH_INSTALL_DIR="$legacy_git_dir" \
-    bash <(cat "$repo_root/deploy/quick-start.sh") -m bundled
+    bash <(cat "$repo_root/deploy/quick-start.sh") -m external
 [ ! -s "$QCH_BOOTSTRAP_GIT_LOG" ]
 
 # Re-running from inside a standalone install directory updates that directory
@@ -133,9 +135,9 @@ PATH="$fake_bin:$PATH" QCH_INSTALL_DIR="$legacy_git_dir" \
 : > "$QCH_BOOTSTRAP_TEST_LOG"
 (
     cd "$install_dir"
-    PATH="$fake_bin:$PATH" bash <(cat "$repo_root/deploy/quick-start.sh") -m bundled
+    PATH="$fake_bin:$PATH" bash <(cat "$repo_root/deploy/quick-start.sh") -m external
 )
 [ ! -e "$install_dir/qcontrolhub" ]
-grep -Fq -- 'https://raw.githubusercontent.com/qimaoww/qcontrolhub/main/docker-compose.yml' "$QCH_BOOTSTRAP_TEST_LOG"
+grep -Fq -- 'https://raw.githubusercontent.com/qimaoww/qcontrolhub/main/deploy/quick-start.sh' "$QCH_BOOTSTRAP_TEST_LOG"
 
 printf '%s\n' 'streamed quick-start bootstrap regression passed'
