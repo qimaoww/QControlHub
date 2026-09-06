@@ -323,6 +323,8 @@ postgresql://qcontrolhub:URL_ENCODED_PASSWORD@db.example.com:5432/qcontrolhub?ss
 
 external 更新拒绝 `-d`、`-a`、`-n`、`-f` 配置变更参数，并逐字节保留完整 `.env`。特别是 `QCH_DATABASE_URL`、`QCH_ADMIN_TOKEN`、`QCH_ADMIN_TOKEN_SHA256`、`QCH_CONFIG_ENCRYPTION_KEY`、`QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS`、`QCH_ALLOW_INSECURE_DATABASE` 不会被清空、转换或重新生成。连接串的远程地址、用户名、密码、数据库名及 SSL/query 参数均按原值复用。旧版只读 secret-file keyring 继续使用，不会重新生成或迁移到环境变量。
 
+更新在现有 Compose 上合并应用镜像及环境变量引用，保留已有网络、端口、CA 挂载等配置，不重新生成整套拓扑。配置文件中的变量引用不会被展开成明文凭据。external Compose 命令会排除当前 shell 对部署变量的覆盖，确保数据库与凭据来自指定 `.env`；回滚同样遵循这一规则。更新/回滚仅重建两个应用服务，使用 `--no-build --pull never --no-deps` 防止重新构建、再次拉取镜像或启动其他服务；回滚固定读取保存的旧镜像 ID。
+
 更新前检查原连接串及 `/healthz`、`/readyz`，保存完整旧 Compose、`.env` 和正在使用的镜像；依次拉取 control-plane、qcontrol-web 的 `latest`，运行 `docker compose config --quiet`，然后 `up -d --force-recreate`，最后检查两个健康端点。拉取或配置校验失败时不重建原容器；重建或健康检查失败时恢复旧配置和旧镜像并重启原版本，恢复失败则保留回滚材料并报错。
 
 此回滚仅覆盖应用配置和镜像，不回滚数据库。脚本不执行数据库搬迁、清空或独立初始化命令；控制面原有的自动 schema 初始化/升级行为保持不变，因此首次安装空库仍然可用，但跨 schema 版本更新前必须备份并验证恢复方案。自定义 CA、挂载等站点配置应保留在独立 override，并由运维显式带入其部署命令；脚本不会自动合并任意站点 override。

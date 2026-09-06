@@ -598,8 +598,57 @@ YAML
 
 COMPOSE_ARGS=()
 
+run_compose() (
+    # --env-file alone does not override exported shell variables. The
+    # external deployment must read its own database, credentials and network.
+    if [ "$MODE" = external ]; then
+        local env_key
+        while IFS= read -r env_key; do
+            unset "$env_key"
+        done < <(awk '
+            { sub(/^\xef\xbb\xbf/, "") }
+            /^QCH_[A-Za-z0-9_]+=/ { sub(/=.*/, ""); print }
+        ' "$ENV_FILE")
+        unset QCH_DATABASE_URL QCH_ADMIN_TOKEN QCH_ADMIN_TOKEN_SHA256 \
+            QCH_CONFIG_ENCRYPTION_KEY QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS \
+            QCH_CONFIG_ENCRYPTION_KEY_FILE QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS_FILE \
+            QCH_CONFIG_ENCRYPTION_KEY_SECRET_SOURCE QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS_SECRET_SOURCE \
+            QCH_ALLOW_INSECURE_DATABASE QCH_DOCKER_NETWORK QCH_BIND_ADDRESS QCH_PORT
+    fi
+    QCH_SOURCE_DIR="$REPO_ROOT" docker compose -p qcontrolhub --project-directory "$WORK_DIR" --env-file "$ENV_FILE" "$@"
+)
+
 compose() {
-    QCH_SOURCE_DIR="$REPO_ROOT" docker compose -p qcontrolhub --project-directory "$WORK_DIR" --env-file "$ENV_FILE" "${COMPOSE_ARGS[@]}" "$@"
+    run_compose "${COMPOSE_ARGS[@]}" "$@"
+}
+
+prepare_external_update_compose() {
+    # Merge only application settings. Do not regenerate the topology: an
+    # existing deployment may have its own network, ports, CA mounts, etc.
+    cat > "$UPDATE_BACKUP_DIR/docker-compose.update.yml" <<'YAML'
+services:
+  control-plane:
+    image: ghcr.io/qimaoww/qcontrol-plane:latest
+    restart: unless-stopped
+    environment:
+      QCH_DATABASE_URL: ${QCH_DATABASE_URL:?QCH_DATABASE_URL required}
+      QCH_ADMIN_TOKEN: ${QCH_ADMIN_TOKEN:-}
+      QCH_ADMIN_TOKEN_SHA256: ${QCH_ADMIN_TOKEN_SHA256:-}
+      QCH_CONFIG_ENCRYPTION_KEY: ${QCH_CONFIG_ENCRYPTION_KEY:-}
+      QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS: ${QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS:-}
+      QCH_ALLOW_INSECURE_DATABASE: ${QCH_ALLOW_INSECURE_DATABASE:-false}
+  qcontrol-web:
+    image: ghcr.io/qimaoww/qcontrol-web:latest
+    restart: unless-stopped
+YAML
+    # Keep variable references, not rendered credentials, in the persisted
+    # Compose. The existing secret override remains a separate unmodified file.
+    run_compose -f "$EXTERNAL_COMPOSE_FILE" -f "$UPDATE_BACKUP_DIR/docker-compose.update.yml" \
+        config --no-interpolate --no-normalize --no-path-resolution \
+        > "$UPDATE_BACKUP_DIR/docker-compose.next.yml" || die "无法保留现有 Compose 配置"
+    [ -s "$UPDATE_BACKUP_DIR/docker-compose.next.yml" ] || die "生成的 Compose 配置为空"
+    chmod 0600 "$UPDATE_BACKUP_DIR/docker-compose.next.yml"
+    mv -f -- "$UPDATE_BACKUP_DIR/docker-compose.next.yml" "$EXTERNAL_COMPOSE_FILE"
 }
 
 show_diagnostics() {
@@ -639,7 +688,7 @@ start_external_services() {
     docker pull ghcr.io/qimaoww/qcontrol-web:latest
     echo "-> 校验 Docker Compose 配置"
     compose config --quiet || die "Docker Compose 配置无效，请检查 .env 和连接参数"
-    if ! compose up -d --force-recreate; then
+    if ! compose up -d --force-recreate --no-build --pull never --no-deps control-plane qcontrol-web; then
         show_diagnostics
         die "Docker Compose 启动失败；请确认已登录 ghcr.io 且镜像可用"
     fi
@@ -812,6 +861,8 @@ cleanup_external_update_backup() {
             "$UPDATE_BACKUP_DIR/.env" \
             "$UPDATE_BACKUP_DIR/docker-compose.external.yml" \
             "$UPDATE_BACKUP_DIR/docker-compose.secrets.yml" \
+            "$UPDATE_BACKUP_DIR/docker-compose.update.yml" \
+            "$UPDATE_BACKUP_DIR/docker-compose.next.yml" \
             "$UPDATE_BACKUP_DIR/docker-compose.rollback.yml"
         rmdir -- "$UPDATE_BACKUP_DIR" 2>/dev/null || true
     fi
@@ -819,35 +870,46 @@ cleanup_external_update_backup() {
 }
 
 rollback_external_update() {
-    local control_ref web_ref
     local -a rollback_args
     [ "$UPDATE_ROLLBACK_ARMED" = true ] || return 0
     UPDATE_ROLLBACK_ARMED=false
     echo "-> 更新失败，正在恢复旧配置和旧镜像" >&2
 
-    cp -p -- "$UPDATE_BACKUP_DIR/.env" "$ENV_FILE"
-    cp -p -- "$UPDATE_BACKUP_DIR/docker-compose.external.yml" "$EXTERNAL_COMPOSE_FILE"
+    if ! cp -p -- "$UPDATE_BACKUP_DIR/.env" "$ENV_FILE" || \
+        ! cp -p -- "$UPDATE_BACKUP_DIR/docker-compose.external.yml" "$EXTERNAL_COMPOSE_FILE"; then
+        echo "错误：旧配置恢复失败；回滚材料保留在 $UPDATE_BACKUP_DIR" >&2
+        return 1
+    fi
     if [ "$UPDATE_HAD_SECRET_COMPOSE" = true ]; then
-        cp -p -- "$UPDATE_BACKUP_DIR/docker-compose.secrets.yml" "$SECRET_COMPOSE_FILE"
+        if ! cp -p -- "$UPDATE_BACKUP_DIR/docker-compose.secrets.yml" "$SECRET_COMPOSE_FILE"; then
+            echo "错误：旧 secret 配置恢复失败；回滚材料保留在 $UPDATE_BACKUP_DIR" >&2
+            return 1
+        fi
     fi
 
-    control_ref="$(restore_update_image_ref "$UPDATE_CONTROL_IMAGE" "$UPDATE_CONTROL_REF" "$UPDATE_CONTROL_BACKUP_TAG")"
-    web_ref="$(restore_update_image_ref "$UPDATE_WEB_IMAGE" "$UPDATE_WEB_REF" "$UPDATE_WEB_BACKUP_TAG")"
+    restore_update_image_ref "$UPDATE_CONTROL_IMAGE" "$UPDATE_CONTROL_REF" "$UPDATE_CONTROL_BACKUP_TAG" >/dev/null
+    restore_update_image_ref "$UPDATE_WEB_IMAGE" "$UPDATE_WEB_REF" "$UPDATE_WEB_BACKUP_TAG" >/dev/null
     if [ "$UPDATE_SERVICES_CHANGED" = true ]; then
-        cat > "$UPDATE_BACKUP_DIR/docker-compose.rollback.yml" <<YAML
+        # Immutable IDs plus --pull never are required even when the old
+        # Compose used latest with pull_policy: always.
+        if ! cat > "$UPDATE_BACKUP_DIR/docker-compose.rollback.yml" <<YAML
 services:
   control-plane:
-    image: $control_ref
+    image: $UPDATE_CONTROL_IMAGE
   qcontrol-web:
-    image: $web_ref
+    image: $UPDATE_WEB_IMAGE
 YAML
-        rollback_args=(-p qcontrolhub --project-directory "$WORK_DIR" --env-file "$ENV_FILE" -f "$EXTERNAL_COMPOSE_FILE")
+        then
+            echo "错误：无法写入回滚镜像配置；回滚材料保留在 $UPDATE_BACKUP_DIR" >&2
+            return 1
+        fi
+        rollback_args=(-f "$EXTERNAL_COMPOSE_FILE")
         if [ "$UPDATE_HAD_SECRET_COMPOSE" = true ]; then
             rollback_args+=(-f "$SECRET_COMPOSE_FILE")
         fi
         rollback_args+=(-f "$UPDATE_BACKUP_DIR/docker-compose.rollback.yml")
-        if ! docker compose "${rollback_args[@]}" config --quiet || \
-            ! docker compose "${rollback_args[@]}" up -d --force-recreate --no-build; then
+        if ! run_compose "${rollback_args[@]}" config --quiet || \
+            ! run_compose "${rollback_args[@]}" up -d --force-recreate --no-build --pull never --no-deps control-plane qcontrol-web; then
             echo "错误：旧部署恢复失败；回滚材料保留在 $UPDATE_BACKUP_DIR" >&2
             return 1
         fi
@@ -878,7 +940,7 @@ check_external_endpoints() {
     wait_ready "$panel_url/readyz" "$READY_TIMEOUT"
 }
 
-update_external_services() {
+update_external_services() (
     local panel_url
     trap external_update_exit_handler EXIT
     trap 'exit 130' HUP INT TERM
@@ -887,15 +949,15 @@ update_external_services() {
     check_external_endpoints "$panel_url" || die "更新前原部署未通过 healthz 和 readyz 检查"
     begin_external_update
 
-    echo "-> 生成 $EXTERNAL_COMPOSE_FILE"
-    write_external_compose
+    echo "-> 保留现有拓扑并更新 $EXTERNAL_COMPOSE_FILE 中的应用配置"
+    prepare_external_update_compose
     cmp -s "$UPDATE_BACKUP_DIR/.env" "$ENV_FILE" || die "更新过程改写了 .env，已终止"
     docker pull ghcr.io/qimaoww/qcontrol-plane:latest || die "拉取 control-plane:latest 失败"
     docker pull ghcr.io/qimaoww/qcontrol-web:latest || die "拉取 qcontrol-web:latest 失败"
 
     compose config --quiet || die "Docker Compose 配置校验失败"
     UPDATE_SERVICES_CHANGED=true
-    if ! compose up -d --force-recreate; then
+    if ! compose up -d --force-recreate --no-build --pull never --no-deps control-plane qcontrol-web; then
         show_diagnostics
         die "使用新镜像重建应用容器失败"
     fi
@@ -909,7 +971,7 @@ update_external_services() {
     UPDATE_ROLLBACK_ARMED=false
     trap - EXIT HUP INT TERM
     cleanup_external_update_backup
-}
+)
 
 prepare_bundled_env() {
     local postgres_password webhook_secret
@@ -1126,10 +1188,17 @@ show_result() {
 }
 
 local_panel_url() {
-    local port
+    local port address
     port="$(read_env_key QCH_PORT)"
     [ -n "$port" ] || port=8080
-    printf 'http://127.0.0.1:%s' "$port"
+    address="$(read_env_key QCH_BIND_ADDRESS)"
+    case "$address" in
+        ""|0.0.0.0) address=127.0.0.1 ;;
+        ::|\[::\]) address='[::1]' ;;
+        \[*\]) ;;
+        *:*) address="[$address]" ;;
+    esac
+    printf 'http://%s:%s' "$address" "$port"
 }
 
 show_admin_token_once() {

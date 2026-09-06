@@ -11,6 +11,7 @@ umask 077
 docker() {
     printf '%s\n' "$*" >> "$QCH_MODES_TEST_LOG"
     case " $* " in
+        *" config --no-interpolate "*) cat "$QCH_INSTALL_DIR/docker-compose.external.yml" ;;
         *" ps -q control-plane "*) printf '%s\n' control-container ;;
         *" ps -q qcontrol-web "*) printf '%s\n' web-container ;;
         *" inspect --format {{.Image}} "*) printf '%s\n' sha256:old-image ;;
