@@ -20,6 +20,62 @@ DOCKER_NETWORK=""
 FORCE=false
 READY_TIMEOUT=60
 
+install_dir_preference_file() {
+    local config_root="${XDG_CONFIG_HOME:-${HOME:-}}"
+    [ -n "$config_root" ] || return 1
+    case "$config_root" in
+        /*) printf '%s\n' "$config_root/qcontrolhub/install-dir" ;;
+        *) return 1 ;;
+    esac
+}
+
+read_install_dir_preference() {
+    local preference_file value
+    preference_file="$(install_dir_preference_file 2>/dev/null)" || return 0
+    [ -f "$preference_file" ] || return 0
+    [ ! -L "$preference_file" ] || return 0
+    value="$(<"$preference_file")" || return 0
+    case "$value" in
+        /*) ;;
+        *) return 0 ;;
+    esac
+    case "$value" in
+        *$'\n'*|*$'\r'*) return 0 ;;
+    esac
+    printf '%s\n' "$value"
+}
+
+persist_install_dir_preference() {
+    local install_dir="$1" preference_file preference_dir temp_file
+    case "$install_dir" in
+        /*) ;;
+        *) return 1 ;;
+    esac
+    case "$install_dir" in
+        *$'\n'*|*$'\r'*) return 1 ;;
+    esac
+    preference_file="$(install_dir_preference_file 2>/dev/null)" || return 1
+    preference_dir="$(dirname -- "$preference_file")"
+    [ ! -L "$preference_dir" ] || return 1
+    mkdir -p "$preference_dir" || return 1
+    chmod 0700 "$preference_dir" || return 1
+    [ ! -L "$preference_file" ] || return 1
+    umask 077
+    temp_file="$(mktemp "$preference_dir/.install-dir.XXXXXX")" || return 1
+    if ! printf '%s\n' "$install_dir" > "$temp_file"; then
+        rm -f -- "$temp_file"
+        return 1
+    fi
+    chmod 0600 "$temp_file" || {
+        rm -f -- "$temp_file"
+        return 1
+    }
+    if ! mv -f -- "$temp_file" "$preference_file"; then
+        rm -f -- "$temp_file"
+        return 1
+    fi
+}
+
 usage() {
     cat <<'USAGE'
 用法：
@@ -45,6 +101,7 @@ usage() {
   -h                  显示帮助
 
 安装可选择 bundled 或 external；普通 external 更新逐字节保留 .env，不迁移凭据或轮换密钥。
+交互式菜单中选择的安装目录会保存到当前用户配置；后续从远程一键命令运行时会自动复用。显式设置 QCH_INSTALL_DIR 时以该值为准。
 USAGE
 }
 
@@ -54,7 +111,7 @@ die() {
 }
 
 bootstrap_streamed_script() {
-    local script_path install_dir origin_url branch marker_file marker_temp bootstrap_ref base_url script_temp compose_temp install_label
+    local script_path install_dir persisted_install_dir origin_url branch marker_file marker_temp bootstrap_ref base_url script_temp compose_temp install_label
     script_path="${BASH_SOURCE[0]}"
     case "$script_path" in
         /dev/fd/*|/proc/self/fd/*) ;;
@@ -66,6 +123,8 @@ bootstrap_streamed_script() {
         install_dir="$QCH_INSTALL_DIR"
     elif [ -f "$PWD/.qcontrolhub-quick-start" ] || { [ -d "$PWD/.git" ] && [ -f "$PWD/deploy/quick-start.sh" ] && [ -f "$PWD/docker-compose.yml" ]; }; then
         install_dir="$PWD"
+    elif persisted_install_dir="$(read_install_dir_preference)" && [ -n "$persisted_install_dir" ]; then
+        install_dir="$persisted_install_dir"
     else
         install_dir="$PWD/qcontrolhub"
     fi
@@ -136,6 +195,9 @@ bootstrap_streamed_script() {
     mv -f -- "$marker_temp" "$marker_file"
     marker_temp=""
     trap - EXIT HUP INT TERM
+    persist_install_dir_preference "$install_dir" ||
+        echo "警告：无法保存安装目录，下次从远程一键命令运行时可能需要重新设置目录：$install_dir" >&2
+    export QCH_INSTALL_DIR="$install_dir"
     exec "$install_dir/deploy/quick-start.sh" "$@"
 }
 
@@ -1233,6 +1295,8 @@ resolve_work_dir() {
     SECRET_DIR="$WORK_DIR/.secrets"
     CONFIG_KEY_FILE="$SECRET_DIR/config-encryption-key"
     PREVIOUS_CONFIG_KEYS_FILE="$SECRET_DIR/config-encryption-previous-keys"
+    persist_install_dir_preference "$WORK_DIR" ||
+        echo "警告：无法保存安装目录，下次从远程一键命令运行时可能需要重新设置目录：$WORK_DIR" >&2
 }
 
 choose_install_dir() {
