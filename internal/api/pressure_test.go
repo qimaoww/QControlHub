@@ -215,6 +215,8 @@ func runDatabasePressure(t *testing.T, phases []pressurePhase) {
 			paths := []string{"/agents", "/overview", "/tasks?status=failed&limit=100", "/client-access",
 				"/agents/agt_0000000000000001/configs", "/core-logs?limit=1000", "/core-logs?limit=2000",
 				"/core-logs?agent_id=agt_0000000000000001&engine=mihomo&limit=2000",
+				"/core-logs?agent_id=agt_0000000000000001&limit=200",
+				"/core-logs?agent_id=agt_0000000000000001&limit=2000",
 				"/traffic-usage?month=" + month, "/metrics/agt_0000000000000001", "/access-controls"}
 			var mu sync.Mutex
 			results := map[string]*pressureResult{}

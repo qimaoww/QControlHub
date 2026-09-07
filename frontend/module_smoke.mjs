@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import "./refresh_smoke.mjs";
 import "./requests_smoke.mjs";
+import "./core_logs_smoke.mjs";
 import "./config_fields_smoke.mjs";
 
 import {
@@ -3301,13 +3302,13 @@ try {
   const failedCorePoll = [...coreTimers.values()][0];
   coreTimers.clear();
   await failedCorePoll();
-  assert.equal(coreRenders, 2, "a log error preserves the current view");
+  assert.equal(coreRenders, 3, "a log error preserves data and renders the failure status");
   assert.equal(coreTimers.size, 1, "a log error keeps recovery polling alive");
   coreFailure = false;
   const recoveredCorePoll = [...coreTimers.values()][0];
   coreTimers.clear();
   await recoveredCorePoll();
-  assert.equal(coreRenders, 3, "log polling recovers without clearing state");
+  assert.equal(coreRenders, 4, "log polling recovers without clearing state");
   assert.equal(coreTimers.size, 1);
   coreEntries = ["mihomo", "xray", "sing-box", "ss-rust"].flatMap((engine, engineIndex) =>
     Array.from({ length: 100 }, (_, index) => ({
