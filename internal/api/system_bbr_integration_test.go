@@ -56,7 +56,7 @@ func TestSystemTCPAPIAndTaskLifecycle(t *testing.T) {
 		}
 		return response
 	}
-	input := core.TaskRequest{AgentID: agent.ID, Action: core.ActionConfigureTCP, TCPSettings: core.TCPSettings{"net.ipv4.tcp_ecn": "1", "net.ipv4.tcp_rmem": "4096\t131072 33554432"}}
+	input := core.TaskRequest{AgentID: agent.ID, Action: core.ActionConfigureTCP, TCPSettings: core.TCPSettings{"net.ipv4.tcp_ecn": "1", "net.ipv4.tcp_rmem": "4096\t131072 33554432", "net.core.default_qdisc": "fq_pie"}}
 	call("GET", "/system-tcp/parameters", "tcp-reader", nil, 200)
 	call("POST", "/tasks", "tcp-reader", input, 403)
 	call("POST", "/tasks", "tcp-operator", input, 403)

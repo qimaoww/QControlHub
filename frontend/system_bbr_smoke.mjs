@@ -21,7 +21,9 @@ const rules = [
   { key: "net.ipv4.tcp_rmem", label: "缓冲区", tuple: true, min: 1, max: 1073741824 },
   { key: "net.ipv4.tcp_ecn", label: "ECN", max: 2 },
   { key: "net.ipv4.tcp_congestion_control", label: "算法", choices: ["bbr", "cubic"] },
+  { key: "net.core.default_qdisc", label: "队列", choices: ["fq", "fq_codel", "fq_pie"] },
 ];
+assert.deepEqual(validateTCPSelection({ "net.core.default_qdisc": "fq_pie" }, rules), { "net.core.default_qdisc": "fq_pie" });
 assert.deepEqual(validateTCPSelection({ "net.ipv4.tcp_rmem": "4096\t87380 16777216", "net.ipv4.tcp_ecn": "02" }, rules), {
   "net.ipv4.tcp_rmem": "4096 87380 16777216", "net.ipv4.tcp_ecn": "2",
 });

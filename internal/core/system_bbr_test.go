@@ -16,6 +16,9 @@ func TestNormalizeTCPSettings(t *testing.T) {
 	if input["net.ipv4.tcp_ecn"] != "02" {
 		t.Fatal("mutated caller input")
 	}
+	if got, err := NormalizeTCPSettings(TCPSettings{"net.core.default_qdisc": "fq_pie"}); err != nil || got["net.core.default_qdisc"] != "fq_pie" {
+		t.Fatalf("FQ-PIE rejected: %v %v", got, err)
+	}
 	for name, settings := range map[string]TCPSettings{
 		"empty": {}, "unknown": {"kernel.core_pattern": "|/bin/sh"},
 		"newline":     {"net.core.default_qdisc": "fq\nnet.ipv4.ip_forward=1"},

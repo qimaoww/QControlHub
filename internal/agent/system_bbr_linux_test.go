@@ -87,6 +87,18 @@ func TestSystemBBRCustomSettingsMergeAndDrift(t *testing.T) {
 	}
 }
 
+func TestSystemBBRCustomFQPIEPreservesAlgorithm(t *testing.T) {
+	b, values := tcpTestBackend(t)
+	values[bbrAlgorithmKey] = "bbr3"
+	if _, err := b.apply(context.Background(), core.ActionConfigureTCP, core.TCPSettings{bbrQdiscKey: "fq_pie"}); err != nil {
+		t.Fatal(err)
+	}
+	status := b.snapshot()
+	if status.DefaultQdisc != "fq_pie" || status.ConfiguredQdisc != "fq_pie" || status.CongestionControl != "bbr3" || len(status.ConfiguredParameters) != 1 {
+		t.Fatalf("FQ-PIE selection changed unselected defaults: %+v", status)
+	}
+}
+
 func TestSystemBBRRollback(t *testing.T) {
 	for _, failure := range []string{"write", "verify", "persist", "persist-after-rename", "canceled"} {
 		t.Run(failure, func(t *testing.T) {

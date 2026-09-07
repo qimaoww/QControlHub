@@ -22,7 +22,7 @@ const assert = {
 const mode = new URLSearchParams(location.search).get("mode") || "admin";
 const tcpRules = [
   { key: "net.ipv4.tcp_congestion_control", label: "拥塞控制算法", choices: ["bbr", "bbr2", "bbr3", "cubic", "reno"] },
-  { key: "net.core.default_qdisc", label: "默认队列算法", choices: ["fq", "fq_codel", "pfifo_fast"] },
+  { key: "net.core.default_qdisc", label: "默认队列算法", choices: ["fq", "fq_codel", "fq_pie", "pfifo_fast", "sfq", "cake"] },
   { key: "net.ipv4.tcp_rmem", label: "TCP 接收缓冲区：最小 / 默认 / 最大（字节）", tuple: true, min: 1, max: 1073741824 },
   { key: "net.ipv4.tcp_wmem", label: "TCP 发送缓冲区：最小 / 默认 / 最大（字节）", tuple: true, min: 1, max: 1073741824 },
   { key: "net.core.rmem_max", label: "接收缓冲区上限（字节）", min: 4096, max: 1073741824 },
@@ -1024,6 +1024,7 @@ async function testSystemTCPRuntime() {
   }
   const editor = () => card().querySelector(".bbr-editor");
   editor().open = true;
+  assert.ok(editor().querySelector('[data-tcp-value="net.core.default_qdisc"] option[value="fq_pie"]'), "缺少 FQ-PIE 自定义选项");
   const field = () => editor().querySelector('[data-tcp-value="net.ipv4.tcp_rmem"]');
   field().value = "4096 262144 33554432";
   field().dispatchEvent(new Event("input", { bubbles: true }));

@@ -16,6 +16,8 @@
 
 系统启动通常加载 `sysctl.d`，但其他更高优先级配置或网络服务仍可能覆盖本文件。页面“已保存”不等于“已验证重启后生效”；升级后及重启后应核对实测值。回退参数应显式填写原值并应用；本功能不删除或改写其他工具创建的 sysctl 文件。
 
+默认队列也可自定义选择 `fq_pie`（按流排队并使用 PIE 控制队列延迟），前提是发行版内核提供 `sch_fq_pie`。它不是 `fq` 的升级版，也不保证更快；快捷启用仍使用 BBR 官方示例的 `fq`，需要 `fq_pie` 时在自定义参数中显式选择。仅修改默认队列不会替换当前网卡队列。参见 [Linux FQ-PIE 实现](https://github.com/torvalds/linux/blob/master/net/sched/sch_fq_pie.c)。
+
 ## 1. 使用部署脚本启动控制面
 
 建议使用受支持的 Linux 发行版，并预先安装 Docker Engine、Docker Compose v2、curl、OpenSSL、Nginx 与证书管理工具。防火墙只对管理来源和 Agent 网络开放 TCP 443；不要开放 8080 或 5432。

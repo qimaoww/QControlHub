@@ -43,7 +43,7 @@ type TCPParameterRule struct {
 func TCPParameterRules() []TCPParameterRule {
 	return []TCPParameterRule{
 		{Key: "net.ipv4.tcp_congestion_control", Label: "拥塞控制算法", Choices: []string{"bbr", "bbr2", "bbr3", "cubic", "reno", "dctcp", "htcp", "westwood", "vegas"}},
-		{Key: "net.core.default_qdisc", Label: "默认队列算法", Choices: []string{"fq", "fq_codel", "pfifo_fast", "sfq", "cake"}},
+		{Key: "net.core.default_qdisc", Label: "默认队列算法", Choices: []string{"fq", "fq_codel", "fq_pie", "pfifo_fast", "sfq", "cake"}},
 		{Key: "net.ipv4.tcp_rmem", Label: "TCP 接收缓冲区：最小 / 默认 / 最大（字节）", Min: 1, Max: 1 << 30, Tuple: true},
 		{Key: "net.ipv4.tcp_wmem", Label: "TCP 发送缓冲区：最小 / 默认 / 最大（字节）", Min: 1, Max: 1 << 30, Tuple: true},
 		{Key: "net.core.rmem_max", Label: "接收缓冲区上限（字节）", Min: 4096, Max: 1 << 30},
