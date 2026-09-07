@@ -694,9 +694,9 @@ func (s *Store) ListPortTrafficDailyUsage(ctx context.Context, agentID, policyID
 			       MAX(peak_receive_bps) OVER day AS peak_receive_bps,MAX(peak_send_bps) OVER day AS peak_send_bps,
 			       LEAST(9223372036854775807::numeric,SUM(sample_count) OVER day)::bigint AS sample_count,
 			       MIN(first_reported_at) OVER day AS first_reported_at,MAX(last_reported_at) OVER day AS last_reported_at
-			FROM port_traffic_daily_usage WHERE `+where+`
+			FROM port_traffic_daily_usage AS usage WHERE `+where+`
 			WINDOW day AS (PARTITION BY policy_id,usage_date)
-			ORDER BY policy_id,usage_date,last_reported_at DESC,reset_generation DESC
+			ORDER BY policy_id,usage_date,usage.last_reported_at DESC,reset_generation DESC
 		)
 		SELECT * FROM daily ORDER BY usage_date,agent_id,port,policy_id LIMIT 100000`, args...)
 	if err != nil {

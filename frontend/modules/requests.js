@@ -7,7 +7,12 @@ export function createScopedAPI(send) {
     end() { reads = null; },
     request(path, options = {}) {
       const method = String(options.method || "GET").toUpperCase();
-      if (!["GET", "HEAD", "OPTIONS"].includes(method)) reads?.clear();
+      if (!["GET", "HEAD", "OPTIONS"].includes(method)) {
+        reads?.clear();
+        // A read can populate this scope while the write is in flight. Clear
+        // again on completion, including ambiguous failures after a commit.
+        return Promise.resolve(send(path, options)).finally(() => reads?.clear());
+      }
       // Independently cancellable requests and custom headers must not share
       // a promise with another caller's request options.
       if (!reads || Object.keys(options).length || path.startsWith("/auth/"))

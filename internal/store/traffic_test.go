@@ -419,3 +419,39 @@ func TestTrafficAverageRate(t *testing.T) {
 		})
 	}
 }
+
+func TestDailyTrafficMetadataFollowsLatestSampleNotGeneration(t *testing.T) {
+	s := openPerformanceStore(t)
+	ctx := context.Background()
+	agentID, usages := seedPerformanceAgent(t, s, 1)
+	day := time.Date(2026, 9, 6, 0, 0, 0, 0, time.UTC)
+	// A clock adjustment around a quota reset can leave a lower generation
+	// with the latest timestamp. Preserve the old query's sample-time ordering.
+	for _, row := range []struct {
+		generation int
+		name       string
+		port       int
+		reportedAt time.Time
+	}{
+		{1, "latest sample", 12345, day.Add(2 * time.Hour)},
+		{2, "older sample", 23456, day.Add(time.Hour)},
+	} {
+		if _, err := s.pool.Exec(ctx, `INSERT INTO port_traffic_daily_usage
+			(policy_id,reset_generation,usage_date,agent_id,name,engine,port,protocol,received_bytes,sent_bytes,used_bytes,
+			 sample_count,first_reported_at,last_reported_at)
+			VALUES ($1,$2,$3,$4,$5,'mihomo',$6,'tcp',100,200,300,1,$7,$7)`,
+			usages[0].PolicyID, row.generation, day, agentID, row.name, row.port, row.reportedAt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := s.ListPortTrafficDailyUsage(ctx, agentID, "", day)
+	if err != nil || len(got) != 1 {
+		t.Fatalf("daily result=%+v, %v", got, err)
+	}
+	if got[0].Name != "latest sample" || got[0].Port != 12345 || !got[0].LastReportedAt.Equal(day.Add(2*time.Hour)) {
+		t.Fatalf("latest metadata and timestamp disagree: %+v", got[0])
+	}
+	if got[0].ReceivedBytes != 200 || got[0].SentBytes != 400 || got[0].UsedBytes != 600 || got[0].SampleCount != 2 {
+		t.Fatalf("generations were not aggregated: %+v", got[0])
+	}
+}

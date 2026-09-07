@@ -29,3 +29,31 @@ await api.request("/auth/session");
 await api.request("/auth/session");
 assert.equal(calls.length, 9, "authentication is never cached");
 api.end();
+
+// A render can read while a save is in flight. That pre-commit snapshot must
+// not be reused by the refresh that follows successful or failed completion.
+for (const fails of [false, true]) {
+  let version = 1;
+  let complete;
+  const concurrent = createScopedAPI(async (_path, options) => {
+    if (options.method === "PUT") {
+      return new Promise((resolve, reject) => {
+        complete = () => {
+          version = 2;
+          if (fails) reject(new Error("response lost after save"));
+          else resolve({ version });
+        };
+      });
+    }
+    return { version };
+  });
+  concurrent.begin();
+  const saved = concurrent.request("/settings", { method: "PUT" });
+  assert.equal((await concurrent.request("/settings")).version, 1);
+  complete();
+  if (fails) await assert.rejects(saved, /response lost/);
+  else await saved;
+  assert.equal((await concurrent.request("/settings")).version, 2,
+    "write completion invalidates any read cached while the write was pending");
+  concurrent.end();
+}
