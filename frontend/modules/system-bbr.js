@@ -45,6 +45,8 @@ export function installSystemBBR(ctx) {
   const submitting = new Set();
   const localTasks = new Map();
   const drafts = (state.data.bbrDrafts ||= {});
+  const editorErrors = new Map();
+  const backdropStarts = new WeakSet();
   let rules = null;
   let lastAgents = null;
   let refreshFailed = false;
@@ -58,11 +60,33 @@ export function installSystemBBR(ctx) {
   const taskLabel = (status) => ({ pending: "等待执行", running: "执行中", succeeded: "执行成功", failed: "执行失败", canceled: "已取消", submitted: "已提交（无任务查看权限）" })[status] || status;
   const actionLabel = (action) => ({ "enable-bbr": "启用 BBR", "disable-bbr": "切换 CUBIC", "configure-tcp": "自定义 TCP 调优" })[action] || action;
 
+  const dialogID = (agentID, kind) => `bbr-${kind}-${agentID}`;
+  function dialogMarkup(agent, kind, title, content) {
+    const id = dialogID(agent.id, kind);
+    const task = localTasks.get(agent.id);
+    const status = [systemBBRState(agent).text, task ? taskLabel(task.status) : "", refreshFailed ? "刷新失败，显示上次数据" : ""].filter(Boolean).join(" · ");
+    return `<dialog class="traffic-edit-dialog bbr-dialog ${kind === "editor" ? "bbr-editor" : "bbr-parameters"}" id="${esc(id)}" data-refresh-live aria-labelledby="${esc(id)}-title" aria-describedby="${esc(id)}-status"><header><span class="traffic-edit-icon" aria-hidden="true">${kind === "editor" ? "≡" : "≋"}</span><div><p class="eyebrow">${esc(agent.name)}</p><h2 id="${esc(id)}-title">${title}</h2><p id="${esc(id)}-status" data-bbr-dialog-status>${esc(status)}</p></div><button class="deploy-command-close" type="button" data-bbr-dialog-close aria-label="关闭${title}" autofocus>×</button></header>${content}</dialog>`;
+  }
+
+  function dialogButton(agent, kind, title) {
+    return `<button class="bbr-dialog-open" type="button" data-bbr-dialog-open="${esc(dialogID(agent.id, kind))}" aria-haspopup="dialog" aria-controls="${esc(dialogID(agent.id, kind))}"><span>${title}${kind === "editor" ? `<small data-bbr-draft-label="${esc(agent.id)}" ${Object.keys(drafts[agent.id] || {}).length ? "" : "hidden"}>有未提交草稿</small>` : ""}</span><span aria-hidden="true">→</span></button>`;
+  }
+
+  function editorError(agentID, message) {
+    editorErrors.set(agentID, message);
+    const dialog = document.getElementById(dialogID(agentID, "editor"));
+    const label = dialog?.querySelector("[data-tcp-error]");
+    if (label) { label.textContent = message; label.hidden = !message; }
+    // Keep errors in the active modal. An outside notice is obscured by the
+    // backdrop and inserting/removing it can move the modal's DOM ancestors.
+    if (message && !dialog?.open) notify(message, "error");
+  }
+
   function editor(agent, disabled) {
     if (!editable() || !agent.metrics?.bbr || !(agent.features || []).includes(systemBBRFeature)) return "";
     const current = agent.metrics.bbr.parameters || {};
     const draft = drafts[agent.id] || {};
-    return `<details class="bbr-details bbr-editor" data-refresh-key="tcp-editor-${esc(agent.id)}"><summary>自定义 BBR / TCP 参数${Object.keys(draft).length ? " · 有未提交草稿" : ""}</summary><form novalidate data-tcp-form="${esc(agent.id)}"><p class="bbr-note">勾选需要管理的参数；编辑会自动勾选。仅应用勾选项，其他系统参数和既有托管项保持不变。草稿在本次页面会话中保留，刷新浏览器会丢失。</p><div class="bbr-fields">${rules.map((rule) => {
+    const content = `<form novalidate data-tcp-form="${esc(agent.id)}"><div class="bbr-dialog-body" data-refresh-scroll><p class="bbr-note">勾选需要管理的参数；编辑会自动勾选。仅应用勾选项，其他系统参数和既有托管项保持不变。关闭弹窗保留草稿，刷新浏览器会丢失。</p><div class="bbr-fields">${rules.map((rule) => {
       const available = Object.hasOwn(current, rule.key);
       const value = draft[rule.key] ?? current[rule.key] ?? "";
       const choices = rule.choices || [];
@@ -70,10 +94,12 @@ export function installSystemBBR(ctx) {
         ? `<select data-tcp-value="${esc(rule.key)}" aria-label="${esc(rule.label)}" ${disabled || !available ? "disabled" : ""}>${!choices.includes(value) ? `<option value="${esc(value)}">${esc(value || "未上报")}</option>` : ""}${choices.map((choice) => `<option value="${choice}" ${value === choice ? "selected" : ""}>${choice}</option>`).join("")}</select>`
         : `<input data-tcp-value="${esc(rule.key)}" aria-label="${esc(rule.label)}" type="${rule.tuple ? "text" : "number"}" ${rule.tuple ? 'placeholder="最小 默认 最大"' : `min="${rule.min || 0}" max="${rule.max}" step="1"`} value="${esc(value)}" ${disabled || !available ? "disabled" : ""}>`;
       return `<div class="bbr-field" data-refresh-key="tcp-field-${esc(agent.id)}-${esc(rule.key)}"><label class="bbr-field-label"><input type="checkbox" data-tcp-selected="${esc(rule.key)}" ${Object.hasOwn(draft, rule.key) ? "checked" : ""} ${disabled || !available ? "disabled" : ""}><span><b>${esc(rule.label)}</b><code>${esc(rule.key)}</code></span></label>${field}<small>当前：${esc(current[rule.key] || "此系统未提供，不能修改")}${choices.length ? "" : ` · 范围 ${rule.min || 0}–${rule.max}`}</small></div>`;
-    }).join("")}</div><footer><span data-tcp-draft-status role="status">${Object.keys(draft).length} 项待提交</span><div><button class="button small" type="button" data-tcp-reset ${disabled ? "disabled" : ""}>清空选择</button><button class="button small primary" type="submit" ${disabled ? "disabled" : ""}>保存并应用选中参数</button></div></footer></form></details>`;
+    }).join("")}</div></div><p class="bbr-warning" data-tcp-error role="alert" ${editorErrors.get(agent.id) ? "" : "hidden"}>${esc(editorErrors.get(agent.id) || "")}</p><footer><span data-tcp-draft-status role="status">${Object.keys(draft).length} 项待提交</span><div><button class="button small" type="button" data-bbr-dialog-close>关闭</button><button class="button small" type="button" data-tcp-reset ${disabled ? "disabled" : ""}>清空选择</button><button class="button small primary" type="submit" ${disabled ? "disabled" : ""}>保存并应用选中参数</button></div></footer></form>`;
+    return dialogButton(agent, "editor", "自定义 BBR / TCP 参数") + dialogMarkup(agent, "editor", "自定义 BBR / TCP 参数", content);
   }
 
   function render(agents) {
+    const focused = document.activeElement;
     state.data.agents = agents;
     state.data.bbrAgent = selectedID();
     const visible = selectedID() ? agents.filter((agent) => agent.id === selectedID()) : agents;
@@ -96,11 +122,12 @@ export function installSystemBBR(ctx) {
         <div class="bbr-note"><strong>已加载算法</strong><span>${value((status.available_algorithms || []).join(" · "))}</span><small>未列出 BBR 不一定代表内核不支持；启用时由系统尝试加载自带模块。</small></div>
         ${drift ? '<p class="bbr-warning" role="status">当前生效参数与已保存配置不一致，请核对其他系统配置是否覆盖。</p>' : ""}
         ${status.error ? `<p class="bbr-warning" role="status">${esc(status.error)}</p>` : ""}
-        <details class="bbr-details" data-refresh-key="bbr-parameters-${esc(agent.id)}"><summary>生效参数与网卡队列</summary>
+        ${dialogButton(agent, "parameters", "生效参数与网卡队列")}
+        ${dialogMarkup(agent, "parameters", "生效参数与网卡队列", `<div class="bbr-dialog-body" data-refresh-scroll>
           <div class="bbr-table-wrap"><table><caption>内核当前参数（包括面板外设置）</caption><thead><tr><th>参数</th><th>当前值</th><th>面板保存值</th></tr></thead><tbody>${Object.entries(status.parameters || {}).map(([key, entry]) => `<tr><td><code>${esc(key)}</code></td><td><code>${value(entry)}</code></td><td><code>${esc(status.configured_parameters?.[key] || "—")}</code></td></tr>`).join("")}</tbody></table></div>
           <div class="bbr-table-wrap"><table><caption>网卡实际队列（不自动重置）</caption><thead><tr><th>网卡</th><th>队列</th><th>层级</th></tr></thead><tbody>${(status.qdiscs || []).map((qdisc) => `<tr><td>${esc(qdisc.device)}</td><td><code>${esc(qdisc.kind)}</code></td><td>${qdisc.root ? "root" : value(qdisc.parent)} ${esc(qdisc.handle || "")}</td></tr>`).join("") || '<tr><td colspan="3">暂无可读取的网卡队列</td></tr>'}</tbody></table></div>
           ${status.qdisc_error ? `<p class="bbr-note">${esc(status.qdisc_error)}</p>` : ""}
-        </details>` : `<div class="empty"><strong>${hasFeature ? "等待 Agent 上报系统参数" : "请先升级此节点的 Agent"}</strong><p>本页不会把未上报或旧版本节点显示为 BBR 已关闭。</p></div>`}
+        </div><footer class="bbr-dialog-footer"><small>参数采集：${status.collected_at ? esc(date(status.collected_at)) : "尚未上报"}</small><button class="button small" type="button" data-bbr-dialog-close>关闭</button></footer>`)}` : `<div class="empty"><strong>${hasFeature ? "等待 Agent 上报系统参数" : "请先升级此节点的 Agent"}</strong><p>本页不会把未上报或旧版本节点显示为 BBR 已关闭。</p></div>`}
         ${editor(agent, disabled)}
         ${task ? `<div class="bbr-task" role="status"><span>${esc(actionLabel(task.action))} · ${esc(taskLabel(task.status))}</span>${can("tasks.read") ? `<a href="#tasks">查看任务记录 →</a>` : ""}${task.error ? `<p>${esc(task.error)}</p>` : ""}</div>` : ""}
         <footer><small>参数采集：${status?.collected_at ? esc(date(status.collected_at)) : "尚未上报"}</small>${editable() ? `<div class="bbr-actions"><button class="button small" type="button" data-bbr-agent="${esc(agent.id)}" data-bbr-action="disable-bbr" ${presetDisabled ? "disabled" : ""}>关闭 BBR / 切换 CUBIC</button><button class="button small primary" type="button" data-bbr-agent="${esc(agent.id)}" data-bbr-action="enable-bbr" ${presetDisabled ? "disabled" : ""}>启用 BBR</button></div>` : '<span class="bbr-readonly">只读权限</span>'}</footer>
@@ -108,6 +135,47 @@ export function installSystemBBR(ctx) {
     }).join("");
     shell(`<div class="bbr-workspace"><div class="bbr-toolbar"><small data-bbr-refresh-status aria-live="polite">${refreshFailed ? "刷新失败，显示上次数据 · 将自动重试" : "自动刷新 · Agent 心跳采集"}</small><button class="button small" type="button" data-bbr-refresh>刷新状态</button></div><section class="bbr-grid">${cards || '<div class="empty large"><strong>当前范围没有节点</strong><p>添加节点后即可查看系统 BBR 状态。</p></div>'}</section></div>`, "BBR / TCP 调优", { viewKey: `system-bbr-${selectedID() || "all"}` });
     bindEvent(document.querySelector("[data-bbr-refresh]"), "click", () => systemBBR());
+    document.querySelectorAll("[data-bbr-dialog-open]").forEach((button) => {
+      bindEvent(button, "click", () => {
+        if (!state.confirmOpen) document.getElementById(button.dataset.bbrDialogOpen)?.showModal();
+      });
+    });
+    document.querySelectorAll("[data-bbr-dialog-close]").forEach((button) => {
+      bindEvent(button, "click", () => {
+        if (!state.confirmOpen) button.closest("dialog")?.close();
+      });
+    });
+    document.querySelectorAll(".bbr-dialog").forEach((dialog) => {
+      // Moving a keyed card (or removing a preceding warning) can detach its
+      // native modal from the top layer while leaving `open` set. Restore it
+      // only after the shared confirmation is closed so it stays on top.
+      if (dialog.open && !dialog.matches(":modal") && !state.confirmOpen) {
+        dialog.close();
+        dialog.showModal();
+        if (dialog.contains(focused)) focused.focus({ preventScroll: true });
+      }
+      const outside = (event) => {
+        const rect = dialog.getBoundingClientRect();
+        return event.target === dialog && (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom);
+      };
+      // A refresh can rebind handlers between pointerdown and click. Retain
+      // the gesture on the dialog, and don't dismiss a drag from inside it.
+      bindEvent(dialog, "pointerdown", (event) => {
+        if (outside(event)) backdropStarts.add(dialog);
+        else backdropStarts.delete(dialog);
+      });
+      bindEvent(dialog, "click", (event) => {
+        if (backdropStarts.has(dialog) && outside(event) && !state.confirmOpen) dialog.close();
+        backdropStarts.delete(dialog);
+      });
+      bindEvent(dialog, "pointercancel", () => backdropStarts.delete(dialog));
+      bindEvent(dialog, "close", () => {
+        // close() queues this event; modal restoration may already have
+        // reopened the dialog and started a new gesture before it arrives.
+        if (!dialog.open) backdropStarts.delete(dialog);
+      });
+      bindEvent(dialog, "cancel", (event) => { if (state.confirmOpen) event.preventDefault(); });
+    });
     document.querySelectorAll("[data-bbr-action]").forEach((button) => {
       bindEvent(button, "click", () => submitChange(
         agents.find((entry) => entry.id === button.dataset.bbrAgent), button.dataset.bbrAction,
@@ -131,6 +199,9 @@ export function installSystemBBR(ctx) {
           if (checkbox.checked) draft[checkbox.dataset.tcpSelected] = form.querySelector(`[data-tcp-value="${checkbox.dataset.tcpSelected}"]`).value;
         });
         drafts[agent.id] = draft;
+        editorError(agent.id, "");
+        const draftLabel = document.querySelector(`[data-bbr-draft-label="${agent.id}"]`);
+        if (draftLabel) draftLabel.hidden = !Object.keys(draft).length;
         const label = form.querySelector("[data-tcp-draft-status]");
         if (label) label.textContent = `${Object.keys(draft).length} 项待提交 · 草稿已保留`;
       };
@@ -147,9 +218,14 @@ export function installSystemBBR(ctx) {
       form.querySelectorAll("[data-tcp-selected]").forEach((input) => bindEvent(input, "change", capture));
       bindEvent(form.querySelector("[data-tcp-reset]"), "click", async () => {
         const epoch = state.navigationEpoch;
-        if (Object.keys(drafts[agent.id] || {}).length && !(await confirmAction("确定清空此节点未提交的 TCP 参数选择？已保存的系统配置不受影响。", "清空选择"))) return;
+        const accepted = !Object.keys(drafts[agent.id] || {}).length || await confirmAction("确定清空此节点未提交的 TCP 参数选择？已保存的系统配置不受影响。", "清空选择");
         if (state.route !== "system-bbr" || epoch !== state.navigationEpoch) return;
-        delete drafts[agent.id];
+        if (accepted) {
+          delete drafts[agent.id];
+          editorErrors.delete(agent.id);
+        }
+        // Also restore modal state on cancellation: background reconciliation
+        // may have moved this dialog while the confirmation was on top.
         // Local editor state must settle even when the network is unavailable.
         render(lastAgents);
       });
@@ -160,7 +236,7 @@ export function installSystemBBR(ctx) {
           const settings = validateTCPSelection(drafts[agent.id], rules);
           await submitChange(agent, "configure-tcp", settings);
         } catch (error) {
-          notify(error.message, "error");
+          editorError(agent.id, error.message);
         }
       });
     });
@@ -173,7 +249,7 @@ export function installSystemBBR(ctx) {
       if (entry.dataset.bbrAgent === agent.id) entry.disabled = true;
     });
     document.querySelectorAll("[data-tcp-form]").forEach((form) => {
-      if (form.dataset.tcpForm === agent.id) form.querySelectorAll("input, select, button").forEach((entry) => (entry.disabled = true));
+      if (form.dataset.tcpForm === agent.id) form.querySelectorAll("input, select, button:not([data-bbr-dialog-close])").forEach((entry) => (entry.disabled = true));
     });
     const epoch = state.navigationEpoch;
     try {
@@ -186,17 +262,21 @@ export function installSystemBBR(ctx) {
       if (state.route !== "system-bbr" || epoch !== state.navigationEpoch) return;
       const current = lastAgents?.find((entry) => entry.id === agent.id);
       if (!editable() || !current || !systemBBRState(current).controllable || ["pending", "running"].includes(localTasks.get(agent.id)?.status)) {
-        notify("节点或任务状态已变化，请刷新核对后重新操作。", "error");
+        editorError(agent.id, "节点或任务状态已变化，请刷新核对后重新操作。");
         return;
       }
       const task = await api("/tasks", { method: "POST", body: JSON.stringify({
         agent_id: agent.id, action, engine: "", ...(settings ? { tcp_settings: settings } : {}),
       }) });
       localTasks.set(agent.id, can("tasks.read") ? task : { ...task, status: "submitted" });
-      if (settings) delete drafts[agent.id];
+      if (settings) {
+        delete drafts[agent.id];
+        editorErrors.delete(agent.id);
+        document.getElementById(dialogID(agent.id, "editor"))?.close();
+      }
       notify("TCP 调优任务已提交，等待 Agent 执行；实际参数以采集结果为准。");
     } catch (error) {
-      notify(error.message, "error");
+      editorError(agent.id, error.message);
     } finally {
       submitting.delete(agent.id);
       if (state.route === "system-bbr" && epoch === state.navigationEpoch) {
@@ -234,7 +314,7 @@ export function installSystemBBR(ctx) {
       if (applied) poller.start();
       return applied;
     } catch (error) {
-      if (!background) notify(error.message, "error");
+      if (!background && !document.querySelector(".bbr-dialog[open]")) notify(error.message, "error");
       refreshFailed = true;
       if (lastAgents) render(lastAgents);
       else shell('<div class="empty large"><strong>无法读取系统 BBR 状态</strong><p>请检查节点查看权限或稍后刷新重试。</p><button class="button" data-bbr-retry>重试</button></div>', "系统 BBR");
