@@ -169,7 +169,11 @@ export function installSystemBBR(ctx) {
         backdropStarts.delete(dialog);
       });
       bindEvent(dialog, "pointercancel", () => backdropStarts.delete(dialog));
-      bindEvent(dialog, "close", () => backdropStarts.delete(dialog));
+      bindEvent(dialog, "close", () => {
+        // close() queues this event; modal restoration may already have
+        // reopened the dialog and started a new gesture before it arrives.
+        if (!dialog.open) backdropStarts.delete(dialog);
+      });
       bindEvent(dialog, "cancel", (event) => { if (state.confirmOpen) event.preventDefault(); });
     });
     document.querySelectorAll("[data-bbr-action]").forEach((button) => {

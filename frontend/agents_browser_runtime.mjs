@@ -1041,8 +1041,17 @@ async function testSystemTCPRuntime() {
   assert.equal(card().offsetHeight, height, "打开编辑器撑开了卡片");
   assert.ok(editor().querySelector('[data-tcp-value="net.core.default_qdisc"] option[value="fq_pie"]'), "缺少 FQ-PIE 自定义选项");
   const field = () => editor().querySelector('[data-tcp-value="net.ipv4.tcp_rmem"]');
+  editor().querySelector("form").requestSubmit();
+  assert.match(editor().querySelector("[data-tcp-error]").textContent, /请至少勾选/, "空选择没有弹窗内提示");
+  field().value = "4096 invalid 33554432";
+  field().dispatchEvent(new Event("input", { bubbles: true }));
+  editor().querySelector("form").requestSubmit();
+  assert.match(editor().querySelector("[data-tcp-error]").textContent, /三个递增整数/, "非法参数没有弹窗内提示");
+  assert.equal(document.querySelector("[data-confirm-dialog][open]"), null, "非法参数进入了确认流程");
+  assert.equal(testAPI.tcpMutations.length, 0, "非法参数发出了任务");
   field().value = "4096 262144 33554432";
   field().dispatchEvent(new Event("input", { bubbles: true }));
+  assert.ok(editor().querySelector("[data-tcp-error]").hidden, "修改参数后仍残留旧错误");
   editor().querySelector("[data-bbr-dialog-close]").click();
   assert.ok(card().querySelector("[data-bbr-draft-label]").textContent.includes("草稿"));
   openEditor();
@@ -1083,6 +1092,9 @@ async function testSystemTCPRuntime() {
   backdropGesture("click", true);
   assert.ok(editor().matches(":modal"), "从弹窗内拖到遮罩被误判为关闭");
   backdropGesture("pointerdown", true);
+  // Native close events are queued. A close used to restore a detached modal
+  // can arrive after it has reopened and the next gesture has already begun.
+  editor().dispatchEvent(new Event("close"));
   await refresh();
   backdropGesture("click", true);
   assert.equal(editor().open, false, "刷新打断了遮罩关闭手势");
@@ -1100,11 +1112,20 @@ async function testSystemTCPRuntime() {
   assert.match(dialog.textContent, /4096 262144 33554432/);
   assert.match(dialog.textContent, /\/etc\/sysctl.d\/90-qcontrolhub-bbr.conf/);
   assert.ok(editor().matches(":modal") && dialog.matches(":modal"), "嵌套确认丢失编辑弹窗");
+  const confirmationSnapshot = dialog.textContent;
+  testAPI.agents.reverse();
+  await refresh();
+  testAPI.agents.reverse();
+  await refresh();
+  assert.ok(dialog.matches(":modal"), "节点重排打断确认弹窗");
+  assert.ok(dialog.contains(document.activeElement), "后台刷新抢走确认焦点");
+  assert.equal(dialog.textContent, confirmationSnapshot, "后台刷新改写确认快照");
   testAPI.agentsFailure = true;
   dialog.querySelector("[data-confirm-cancel]").click();
   await delay(200);
   assert.equal(testAPI.tcpMutations.length, 0, "取消仍提交任务");
   assert.equal(field().value, "4096 262144 33554432");
+  assert.ok(editor().matches(":modal"), "取消确认后没有恢复编辑弹窗");
   assert.ok(!field().disabled, "取消后刷新失败导致编辑器锁死");
   assert.ok(!card().querySelector("[data-bbr-action]").disabled, "取消后刷新失败导致按钮锁死");
   testAPI.tcpFailure = true;
