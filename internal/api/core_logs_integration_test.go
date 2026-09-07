@@ -151,7 +151,12 @@ func TestCoreLogsLimitAppliesPerEngine(t *testing.T) {
 	if got := request("", http.StatusOK); len(got) != len(all) {
 		t.Fatalf("default limit returned %d entries, want %d", len(got), len(all))
 	}
-	for _, limit := range []string{"0", "-1", "501", "invalid"} {
+	for _, limit := range []string{"1000", "2000"} {
+		if got := request("limit="+limit, http.StatusOK); len(got) != len(all) {
+			t.Fatalf("expanded limit %s returned %d entries, want %d", limit, len(got), len(all))
+		}
+	}
+	for _, limit := range []string{"0", "-1", "2001", "invalid"} {
 		request("limit="+limit, http.StatusBadRequest)
 	}
 }

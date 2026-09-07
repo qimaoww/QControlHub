@@ -251,6 +251,12 @@ func (b *systemBBRBackend) apply(ctx context.Context, action core.Action, input 
 			key := attempted[i]
 			failures = append(failures, b.write(key, previous[key]))
 		}
+		for _, key := range attempted {
+			value, err := b.read(key)
+			if err != nil || strings.Join(strings.Fields(value), " ") != previous[key] {
+				failures = append(failures, fmt.Errorf("cannot verify restored %s", key))
+			}
+		}
 		if rollbackErr := errors.Join(failures...); rollbackErr != nil {
 			return "", fmt.Errorf("%w; rollback failed: %v", cause, rollbackErr)
 		}

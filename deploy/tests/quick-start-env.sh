@@ -216,6 +216,28 @@ grep -Fq -- "compose -p qcontrolhub" "$compose_environment_log" || { printf '%s\
 grep -Fq -- "--project-directory $WORK_DIR" "$compose_environment_log" || { printf '%s\n' 'quick-start regression: selected project directory was not passed to Compose' >&2; exit 1; }
 unset -f docker
 
+# The saved work directory must be resolved before the interactive action menu
+# runs, so option 4 displays the persisted path instead of the runtime script
+# directory.
+(
+    menu_runtime_dir="$test_root/menu-runtime"
+    menu_work_dir="$test_root/menu-work"
+    mkdir -p "$menu_runtime_dir" "$menu_work_dir"
+    REPO_ROOT="$menu_runtime_dir"
+    WORK_DIR="$REPO_ROOT"
+    QCH_INSTALL_DIR="$menu_work_dir"
+    XDG_CONFIG_HOME="$test_root/menu-config"
+    ACTION=""
+    MODE=""
+    choose_action() {
+        assert_equal "menu displays persisted work directory" "$menu_work_dir" "$WORK_DIR"
+        ACTION="uninstall"
+    }
+    prepare_action_and_work_dir
+    assert_equal "menu action selection" "uninstall" "$ACTION"
+    grep -Fxq -- "$menu_work_dir" "$XDG_CONFIG_HOME/qcontrolhub/install-dir"
+)
+
 compose_log="$test_root/uninstall-compose.log"
 compose() { printf '%s\n' "$*" > "$compose_log"; }
 MODE="external"

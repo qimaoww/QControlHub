@@ -2,6 +2,7 @@ package core
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -22,6 +23,8 @@ func TestNormalizeTCPSettings(t *testing.T) {
 		"module path": {"net.ipv4.tcp_congestion_control": "../../bbr"},
 		"range":       {"net.ipv4.tcp_ecn": "9"}, "negative": {"net.core.wmem_max": "-1"},
 		"overflow":     {"net.core.wmem_max": "99999999999999999999"},
+		"signed":       {"net.ipv4.tcp_ecn": "+1"},
+		"overlong":     {"net.ipv4.tcp_ecn": strings.Repeat("0", 101)},
 		"tuple length": {"net.ipv4.tcp_rmem": "4096 8192"},
 		"tuple order":  {"net.ipv4.tcp_rmem": "8192 4096 16384"},
 		"tuple size":   {"net.ipv4.tcp_rmem": "4096 8192 2147483648"},

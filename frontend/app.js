@@ -18,6 +18,7 @@ import {
   reconcileView,
 } from "./modules/refresh.js";
 import { orderNodesBySavedOrder } from "./modules/node-order.js";
+import { createScopedAPI } from "./modules/requests.js";
 
 const app = document.querySelector("#app");
 const themeStorageKey = "qcontrolhub-color-theme";
@@ -338,7 +339,10 @@ function combineAbortSignals(...values) {
   };
 }
 
-async function api(path, options = {}) {
+const scopedAPI = createScopedAPI(sendAPI);
+const api = (path, options) => scopedAPI.request(path, options);
+
+async function sendAPI(path, options = {}) {
   const method = String(options.method || "GET").toUpperCase();
   const headers = {
     Accept: "application/json",
@@ -818,6 +822,8 @@ async function renderOnce() {
   routeController?.abort();
   routeController = new AbortController();
   state.routeSignal = routeController.signal;
+  const renderSignal = state.routeSignal;
+  scopedAPI.begin();
   clearTimeout(state.taskPollTimer);
   clearTimeout(state.trafficPollTimer);
   clearTimeout(state.coreLogPollTimer);
@@ -899,6 +905,17 @@ async function renderOnce() {
       renderLogin();
       return;
     }
+    // Start common page reads while the shell settings/overview are loading.
+    // The page consumes these same promises through the render-local scope.
+    // Pages with their own refresh AbortSignal must start their own request;
+    // prefetching those here would create an unshareable duplicate read.
+    const agentRoutes = ["dashboard", "agents", "node-settings", "archive-config"];
+    if (agentRoutes.includes(state.route) && can("agents.read"))
+      void api("/agents").catch(() => {});
+    if (state.route === "dashboard" && can("tasks.read"))
+      void api("/tasks?limit=7").catch(() => {});
+    if (state.route === "settings")
+      void api("/settings/deployment").catch(() => {});
     const hasSharedData =
       state.data.overview !== undefined && state.data.settings !== undefined;
     const sharedDataPromise = Promise.all([
@@ -910,6 +927,7 @@ async function renderOnce() {
     } else {
       sharedDataPromise
         .then(([overview, settings]) => {
+          if (renderSignal.aborted || state.routeSignal !== renderSignal || !state.session) return;
           state.data.overview = overview;
           state.data.settings = settings;
         })
@@ -955,6 +973,8 @@ async function renderOnce() {
         `<section class="section"><div class="alert error">${esc(error.message)}</div></section>`,
         "错误",
       );
+  } finally {
+    scopedAPI.end();
   }
 }
 const scheduleRender = createLatestRenderScheduler(renderOnce, {

@@ -15,7 +15,7 @@ test:
 
 alpine-test:
 	@packages="$$(go list ./... | sed '\|/internal/agent$$|d')"; go test $$packages
-	go test ./internal/agent -run 'OpenRC|PerServiceManager|AgentUpgrade|ManagedCorePrerequisites'
+	go test ./internal/agent -run 'OpenRC|PerServiceManager|AgentUpgrade|ManagedCorePrerequisites|SystemBBR'
 
 upgrade-sandbox-test:
 	docker build -f deploy/tests/Dockerfile.upgrade-lifecycle -t qch-upgrade-lifecycle-test .

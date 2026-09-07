@@ -93,7 +93,7 @@ func NormalizeTCPSettings(input TCPSettings) (TCPSettings, error) {
 			var previous int64
 			for i, part := range parts {
 				n, err := strconv.ParseInt(part, 10, 64)
-				if err != nil || n < rule.Min || n > rule.Max || (i > 0 && n < previous) {
+				if err != nil || strings.Trim(part, "0123456789") != "" || n < rule.Min || n > rule.Max || (i > 0 && n < previous) {
 					return nil, fmt.Errorf("%s requires ordered integers in [%d, %d]", key, rule.Min, rule.Max)
 				}
 				parts[i], previous = strconv.FormatInt(n, 10), n

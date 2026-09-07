@@ -27,4 +27,6 @@ assert.deepEqual(validateTCPSelection({ "net.ipv4.tcp_rmem": "4096\t87380 167772
 });
 for (const settings of [{}, { "kernel.sysrq": "1" }, { "net.ipv4.tcp_ecn": "3" }, { "net.ipv4.tcp_rmem": "8192 4096 16384" }, { "net.ipv4.tcp_rmem": "4096 8192" }, { "net.ipv4.tcp_congestion_control": "bbr\nnet.ipv4.ip_forward=1" }])
   assert.throws(() => validateTCPSelection(settings, rules));
+for (const value of ["+1", "0".repeat(101), "\u3000".repeat(34) + "1"])
+  assert.throws(() => validateTCPSelection({ "net.ipv4.tcp_ecn": value }, rules));
 console.log("system BBR/TCP module smoke passed");

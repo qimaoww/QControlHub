@@ -48,7 +48,7 @@ type storeExecutor interface {
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 41
+const currentSchemaVersion = 42
 
 func Open(ctx context.Context, databaseURL string, allowInsecureRemote bool) (*Store, error) {
 	return OpenWithConfigKey(ctx, databaseURL, allowInsecureRemote, "")
@@ -78,7 +78,7 @@ func OpenWithConfigKeyring(ctx context.Context, databaseURL string, allowInsecur
 			}
 		}
 	}
-	config, err := pgxpool.ParseConfig(databaseURL)
+	config, err := databasePoolConfig(databaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("parse PostgreSQL URL: %w", err)
 	}
@@ -89,11 +89,6 @@ func OpenWithConfigKeyring(ctx context.Context, databaseURL string, allowInsecur
 			return nil, errors.New("remote PostgreSQL connections must use sslmode=verify-full without cleartext fallback; set QCH_ALLOW_INSECURE_DATABASE=true only on a trusted development network")
 		}
 	}
-	config.MaxConns = 20
-	config.MinConns = 2
-	config.MaxConnLifetime = 30 * time.Minute
-	config.MaxConnIdleTime = 5 * time.Minute
-	config.HealthCheckPeriod = 30 * time.Second
 	pool, err := pgxpool.NewWithConfig(ctx, config)
 	if err != nil {
 		return nil, fmt.Errorf("open PostgreSQL pool: %w", err)
@@ -104,9 +99,11 @@ func OpenWithConfigKeyring(ctx context.Context, databaseURL string, allowInsecur
 	}
 	cryptor, err := newConfigCryptorKeyring(append([]string{configKey}, previousKeys...))
 	if err != nil {
+		pool.Close()
 		return nil, err
 	}
 	if err := cryptor.verify(); err != nil {
+		pool.Close()
 		return nil, err
 	}
 	result := &Store{pool: pool, cryptor: cryptor}
@@ -716,17 +713,25 @@ func (s *Store) ListEnrollmentCommandAvailability(ctx context.Context, agentIDs 
 	if len(agentIDs) == 0 {
 		return available, nil
 	}
-	rows, err := s.pool.Query(ctx, `
-		SELECT agent_id,token_ciphertext,token_hash
-		FROM enrollment_tokens
-		WHERE agent_id=ANY($1::text[]) AND revoked_at IS NULL
-		  AND token_ciphertext IS NOT NULL
-		  AND (expires_at IS NULL OR expires_at>now()) AND (reusable OR used_count<max_uses)
-		ORDER BY created_at DESC`, agentIDs)
+	rows, err := s.pool.Query(ctx, enrollmentCommandAvailabilitySQL, agentIDs)
 	if err != nil {
 		return nil, err
 	}
+	return s.scanEnrollmentCommandAvailability(rows)
+}
+
+const enrollmentCommandAvailabilitySQL = `
+		SELECT agent_id,token_ciphertext,token_hash
+		FROM enrollment_tokens
+		WHERE ($1::text[] IS NULL OR agent_id=ANY($1::text[])) AND revoked_at IS NULL
+		  AND agent_id IN (SELECT id FROM agents WHERE revoked_at IS NULL)
+		  AND token_ciphertext IS NOT NULL
+		  AND (expires_at IS NULL OR expires_at>now()) AND (reusable OR used_count<max_uses)
+		ORDER BY created_at DESC`
+
+func (s *Store) scanEnrollmentCommandAvailability(rows pgx.Rows) (map[string]bool, error) {
 	defer rows.Close()
+	available := make(map[string]bool)
 	for rows.Next() {
 		var agentID string
 		var ciphertext *string
@@ -897,13 +902,53 @@ func (s *Store) UpdateAgentObservedPublicIP(ctx context.Context, id, address str
 }
 
 func (s *Store) ListAgents(ctx context.Context) ([]core.Agent, error) {
-	rows, err := s.pool.Query(ctx, `
-			SELECT id,name,version,os,arch,capabilities,features,labels,runtime,metrics,last_seen,enrolled_at,
-				(SELECT agent_offline_threshold_seconds FROM panel_settings WHERE id=1)
-		FROM agents WHERE revoked_at IS NULL ORDER BY enrolled_at DESC`)
+	rows, err := s.pool.Query(ctx, listAgentsSQL)
 	if err != nil {
 		return nil, err
 	}
+	return scanAgents(rows)
+}
+
+// ListAgentsWithEnrollmentCommands pipelines the panel's two independent
+// reads on one connection. Only callers authorized to manage enrollment should
+// use it; ciphertext is verified locally and never included in the response.
+func (s *Store) ListAgentsWithEnrollmentCommands(ctx context.Context) ([]core.Agent, error) {
+	batch := &pgx.Batch{}
+	batch.Queue(listAgentsSQL)
+	batch.Queue(enrollmentCommandAvailabilitySQL, nil)
+	results := s.pool.SendBatch(ctx, batch)
+	defer results.Close()
+	rows, err := results.Query()
+	if err != nil {
+		return nil, err
+	}
+	agents, err := scanAgents(rows)
+	if err != nil {
+		return nil, err
+	}
+	rows, err = results.Query()
+	if err != nil {
+		return nil, err
+	}
+	available, err := s.scanEnrollmentCommandAvailability(rows)
+	if err != nil {
+		return nil, err
+	}
+	if err := results.Close(); err != nil {
+		return nil, err
+	}
+	for index := range agents {
+		agents[index].EnrollmentCommandAvailable = available[agents[index].ID]
+	}
+	return agents, nil
+}
+
+const listAgentsSQL = `
+			SELECT id,name,version,os,arch,capabilities,features,labels,runtime,metrics,last_seen,enrolled_at,
+				(SELECT agent_offline_threshold_seconds FROM panel_settings WHERE id=1)
+		FROM agents WHERE revoked_at IS NULL ORDER BY enrolled_at DESC`
+
+func scanAgents(rows pgx.Rows) ([]core.Agent, error) {
 	defer rows.Close()
 	agents := make([]core.Agent, 0)
 	now := time.Now().UTC()
@@ -1401,12 +1446,24 @@ func (s *Store) ListTasksFiltered(ctx context.Context, agentID string, status co
 	if limit > 500 {
 		limit = 500
 	}
+	// Keep optional filters out of the SQL entirely when unused. An OR against
+	// a parameter can hide selective indexes once pgx reuses a generic plan.
+	where := "true"
+	args := make([]any, 0, 4)
+	for _, filter := range []struct{ column, value string }{
+		{"agent_id", agentID}, {"status", string(status)}, {"action", string(action)},
+	} {
+		if filter.value != "" {
+			args = append(args, filter.value)
+			where += fmt.Sprintf(" AND %s=$%d", filter.column, len(args))
+		}
+	}
+	args = append(args, limit)
 	rows, err := s.pool.Query(ctx, `
 		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),COALESCE(core_version,''),COALESCE(core_source,''),status,attempt,
 		       COALESCE(output,''),COALESCE(error,''),created_at,started_at,finished_at,tcp_settings
 		FROM tasks
-		WHERE ($1='' OR agent_id=$1) AND ($2='' OR status=$2) AND ($3='' OR action=$3)
-		ORDER BY created_at DESC LIMIT $4`, agentID, status, action, limit)
+		WHERE `+where+fmt.Sprintf(` ORDER BY created_at DESC LIMIT $%d`, len(args)), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1538,6 +1595,18 @@ func (s *Store) RunningTask(ctx context.Context, agentID string) (*core.Task, er
 }
 
 func (s *Store) ClaimTask(ctx context.Context, agentID string) (*core.Task, error) {
+	// Most fallback polls find no work. Avoid opening a transaction and locking
+	// the Agent (blocking live metrics) for these idle polls. This is only a
+	// hint: the transactional checks below remain authoritative when work exists.
+	var pending bool
+	if err := s.pool.QueryRow(ctx, `SELECT EXISTS(
+		SELECT 1 FROM tasks WHERE agent_id=$1 AND status='pending'
+	)`, agentID).Scan(&pending); err != nil {
+		return nil, err
+	}
+	if !pending {
+		return nil, nil
+	}
 	leaseID, err := core.NewToken()
 	if err != nil {
 		return nil, err
@@ -1730,15 +1799,23 @@ func (s *Store) RequeueStaleTasks(ctx context.Context, age, installAge time.Dura
 func (s *Store) Overview(ctx context.Context) (core.Overview, error) {
 	var result core.Overview
 	err := s.pool.QueryRow(ctx, `
-		SELECT
-			(SELECT count(*) FROM agents WHERE revoked_at IS NULL),
-			(SELECT count(*) FROM agents WHERE revoked_at IS NULL AND last_seen > now()-interval '45 seconds'),
-			(SELECT count(*) FROM configs WHERE deleted_at IS NULL AND agent_id IS NULL),
-			(SELECT count(*) FROM configs WHERE deleted_at IS NULL AND agent_id IS NOT NULL),
-			(SELECT count(*) FROM tasks WHERE status IN ('pending','running')),
-			(SELECT count(*) FROM tasks WHERE status='pending'),
-			(SELECT count(*) FROM tasks WHERE status='running'),
-			(SELECT count(*) FROM tasks WHERE status='failed')`).Scan(
+		SELECT agents.total,agents.online,configs.archived,configs.node,
+		       tasks.queued+tasks.running,tasks.queued,tasks.running,tasks.failed
+		FROM (
+			SELECT count(*) AS total,
+			       count(*) FILTER (WHERE last_seen > now() - make_interval(secs =>
+			         (SELECT agent_offline_threshold_seconds FROM panel_settings WHERE id=1))) AS online
+			FROM agents WHERE revoked_at IS NULL
+		) agents CROSS JOIN (
+			SELECT count(*) FILTER (WHERE agent_id IS NULL) AS archived,
+			       count(*) FILTER (WHERE agent_id IS NOT NULL) AS node
+			FROM configs WHERE deleted_at IS NULL
+		) configs CROSS JOIN (
+			SELECT count(*) FILTER (WHERE status='pending') AS queued,
+			       count(*) FILTER (WHERE status='running') AS running,
+			       count(*) FILTER (WHERE status='failed') AS failed
+			FROM tasks WHERE status IN ('pending','running','failed')
+		) tasks`).Scan(
 		&result.Agents, &result.AgentsOnline, &result.Configs, &result.NodeConfigs,
 		&result.TasksPending, &result.TasksQueued, &result.TasksRunning, &result.TasksFailed)
 	return result, err
@@ -1885,6 +1962,7 @@ CREATE TABLE IF NOT EXISTS core_logs (
 
 CREATE INDEX IF NOT EXISTS core_logs_agent_recent_idx ON core_logs(agent_id,id DESC);
 CREATE INDEX IF NOT EXISTS core_logs_engine_recent_idx ON core_logs(engine,id DESC);
+CREATE INDEX IF NOT EXISTS core_logs_agent_engine_recent_idx ON core_logs(agent_id,engine,id DESC);
 CREATE INDEX IF NOT EXISTS core_logs_received_idx ON core_logs(received_at);
 CREATE INDEX IF NOT EXISTS core_log_batches_received_idx ON core_log_batches(received_at);
 
@@ -2139,6 +2217,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS agents_public_key_unique_idx ON agents(public_
 	CREATE INDEX IF NOT EXISTS config_revisions_recent_idx ON config_revisions(config_id,version DESC);
 CREATE INDEX IF NOT EXISTS tasks_agent_queue_idx ON tasks(agent_id, status, created_at);
 CREATE INDEX IF NOT EXISTS tasks_created_idx ON tasks(created_at DESC);
+CREATE INDEX IF NOT EXISTS tasks_status_created_idx ON tasks(status,created_at DESC);
+CREATE INDEX IF NOT EXISTS tasks_agent_created_idx ON tasks(agent_id,created_at DESC);
+CREATE INDEX IF NOT EXISTS tasks_system_tcp_recent_idx ON tasks(agent_id,created_at DESC,id DESC) WHERE action IN ('enable-bbr','disable-bbr','configure-tcp');
+CREATE INDEX IF NOT EXISTS tasks_retention_idx ON tasks((COALESCE(finished_at,created_at))) WHERE status IN ('succeeded','failed','canceled');
 CREATE INDEX IF NOT EXISTS tasks_latest_deployment_idx ON tasks(agent_id,engine,finished_at DESC) WHERE action IN ('deploy','import-existing') AND status='succeeded';
 CREATE UNIQUE INDEX IF NOT EXISTS tasks_one_running_per_agent_idx ON tasks(agent_id) WHERE status='running';
 CREATE TABLE IF NOT EXISTS metric_samples (
@@ -2151,6 +2233,7 @@ CREATE TABLE IF NOT EXISTS metric_samples (
     PRIMARY KEY (agent_id, sampled_at)
 );
 CREATE INDEX IF NOT EXISTS metric_samples_recent_idx ON metric_samples(agent_id, sampled_at DESC);
+CREATE INDEX IF NOT EXISTS metric_samples_retention_idx ON metric_samples(sampled_at);
 
 CREATE TABLE IF NOT EXISTS port_traffic_policies (
     id text PRIMARY KEY,
@@ -2244,6 +2327,7 @@ CREATE TABLE IF NOT EXISTS port_traffic_daily_usage (
 );
 CREATE INDEX IF NOT EXISTS port_traffic_daily_agent_date_idx ON port_traffic_daily_usage(agent_id,usage_date,port);
 CREATE INDEX IF NOT EXISTS port_traffic_daily_policy_date_idx ON port_traffic_daily_usage(policy_id,usage_date);
+CREATE INDEX IF NOT EXISTS port_traffic_daily_date_idx ON port_traffic_daily_usage(usage_date,agent_id);
 
 CREATE TABLE IF NOT EXISTS substore_sync_settings (
 	id smallint PRIMARY KEY CHECK (id = 1),

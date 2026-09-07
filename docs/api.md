@@ -39,6 +39,7 @@
 | `POST` | `/api/v1/auth/logout` | 注销当前 SPA 会话 |
 | `GET` | `/api/v1/agents` | 列出未撤销 Agent |
 | `GET` | `/api/v1/system-tcp/parameters` | BBR / TCP 调优字段与取值范围（agents.read） |
+| `GET` | `/api/v1/system-tcp/tasks` | 每个节点最新的 TCP 调优任务（tasks.read，可按 agent_id 筛选） |
 | `DELETE` | `/api/v1/agents/{id}` | 永久撤销 Agent、立即断开 WSS 并终止其未完成任务 |
 | `PUT` | `/api/v1/agents/{id}/name` | 修改面板显示的节点名称，不改变身份和安装凭据（agents.manage） |
 | `POST` | `/api/v1/agents/{id}/enrollment-token` | 为该节点新增一条独立、可重复使用的 Agent 安装凭据；已有凭据继续有效（enrollment.manage） |
@@ -106,7 +107,9 @@
 
 ### 内核日志查询
 
-`GET /api/v1/core-logs` 的 `limit` 表示当前节点范围内**每种内核各自的日志条数上限**，默认 200，可选 1–500。未指定 `engine` 时，Mihomo、Xray、sing-box 和 Shadowsocks Rust 分别取最新的至多 `limit` 条，再按日志 ID 倒序合并；例如 `limit=200` 最多返回 800 条，而不是所有内核共用 200 条。指定 `agent_id` 时只统计该节点；不指定时按全部节点中的内核类型分别计数，不是每个节点各分配一份额度。
+`GET /api/v1/core-logs` 的 `limit` 表示当前节点范围内**每种内核各自的日志条数上限**，默认 1000，可选 1–2000。未指定 `engine` 时，Mihomo、Xray、sing-box 和 Shadowsocks Rust 分别取最新的至多 `limit` 条，再按日志 ID 倒序合并；例如 `limit=2000` 最多返回 8000 条，而不是所有内核共用 2000 条。指定 `agent_id` 时只统计该节点；不指定时按全部节点中的内核类型分别计数，不是每个节点各分配一份额度。
+
+Web 日志页保留完整返回结果用于筛选，每页渲染 200 条，可翻页查看；1000/2000 条是每内核查询窗口，不是日志保留总量。Agent 的单次上报批次仍为最多 32 条，以避免日志大包阻塞心跳。
 
 可同时使用 `engine`、`level`、`q`（消息关键词）和 `before`（仅取小于该日志 ID 的记录）筛选；这些条件在每种内核截取数量之前生效。日志页的“每内核上限”控制读取和展示数量，不改变数据库的日志保留期限。
 
@@ -364,6 +367,8 @@ WSS 握手必须协商子协议 `qcontrolhub.agent.v1`。服务端先发送只�
 `GET /api/v1/agents` 的 `metrics.bbr` 返回 Agent 直接读取的系统参数，包含 `collected_at`、`kernel_release`、`congestion_control`、`default_qdisc`、`available_algorithms`、`parameters`、网卡实际 `qdiscs` 及采集错误。即使 BBR 是 SSH、脚本或其他工具开启的，也会据实显示，不依赖面板操作记录。`persistence=unmanaged` 仅表示没有本面板的托管文件，**不表示 BBR 未开启，也不表示系统没有其他持久化配置**。`configured_parameters` 是面板文件里的值，可能与当前生效值不同。
 
 `GET /api/v1/system-tcp/parameters` 返回可编辑字段、数值范围、三元组要求和枚举值，需 `agents.read`。系统实际值允许超出编辑白名单显示；只有受支持的取值可下发。`tcp_rmem/tcp_wmem` 是三个从小到大、以空格分隔的字节数。
+
+`GET /api/v1/system-tcp/tasks` 需 `tasks.read`，返回每个未撤销节点最新的一条 TCP 任务，支持 `agent_id` 筛选；不会因其他节点的任务历史过多而遗漏状态。响应包含动作、参数快照、状态、时间和错误，不包含完整执行输出；完整历史和输出仍从 `/tasks` 查看。
 
 调优复用 `POST /api/v1/tasks`，需同时具备 `tasks.execute` 与 `agents.manage`，目标节点须在线并通过心跳声明 `system-bbr-v1`；任务重试使用相同权限。示例：
 

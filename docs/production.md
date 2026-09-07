@@ -4,7 +4,7 @@
 
 ## BBR / TCP 调优页面
 
-升级控制面、Web 和 Agent 后，侧栏“TCP 调优”提供独立的 **BBR / TCP 调优** 页面。控制面 schema 升至 v41（增加任务 `tcp_settings` 和三个系统级动作），升级前按现有流程备份数据库。Agent 无需重装服务即可使用此功能：systemd 模式通过受保护的当前 Agent 可执行文件启动短时 helper，OpenRC 模式直接执行相同受限操作；不会放宽长期运行的 Agent 服务沙箱。
+升级控制面、Web 和 Agent 后，侧栏“TCP 调优”提供独立的 **BBR / TCP 调优** 页面。控制面 schema 升至 v42（在主线 v41 性能优化基础上增加任务 `tcp_settings` 和三个系统级动作），升级前按现有流程备份数据库。Agent 无需重装服务即可使用此功能：systemd 模式通过受保护的当前 Agent 可执行文件启动短时 helper，OpenRC 模式直接执行相同受限操作；不会放宽长期运行的 Agent 服务沙箱。
 
 状态来自 `/proc/sys/net` 和只读的 `tc -j qdisc show`，与是否在面板开启无关。没有可用 `tc` 时仍展示系统参数，实际网卡队列显示“未知”；只为查看队列可由管理员安装发行版的 iproute2。采集不加载模块、不改参数、不创建配置文件。页面沿用全局主题、字体比例、确认弹窗、节点导航及任务提示；编辑草稿在本次页面会话中保留，切换节点或自动刷新不会覆盖。
 
@@ -26,7 +26,7 @@
 bash <(curl -fsSL "https://raw.githubusercontent.com/qimaoww/qcontrolhub/main/deploy/quick-start.sh")
 ```
 
-该命令不克隆源码仓库，只把 `deploy/quick-start.sh` 和生产 `docker-compose.yml` 保存到当前目录下的 `qcontrolhub`。需要固定其他状态目录时，先设置 `QCH_INSTALL_DIR`；后续再次执行同一命令会先下载并校验临时文件，再替换这两个运行文件，同时复用目录内的 `.env`、`.secrets` 和数据库卷。
+该命令不克隆源码仓库，只把 `deploy/quick-start.sh` 和生产 `docker-compose.yml` 保存到当前目录下的 `qcontrolhub`。需要固定其他状态目录时，可设置 `QCH_INSTALL_DIR`，或在交互式菜单的“设置目录”中选择；后者会保存到当前用户配置，后续再次执行远程一键命令时直接复用为一键安装目录。再次执行同一命令会先下载并校验临时文件，再替换该目录中的这两个运行文件，同时复用目录内的 `.env`、`.secrets` 和数据库卷；显式设置 `QCH_INSTALL_DIR` 时以该值为准。
 
 脚本首先显示管理菜单：安装/重新配置、更新现有部署、卸载服务。卸载默认只移除容器和网络，保留 `.env`、`.secrets` 与 PostgreSQL 命名卷。选择安装后再选择数据库模式；新建单机控制面使用内置 PostgreSQL，它会通过 Compose 启动数据库、控制面和独立 Web 前端。也可以跳过交互，明确指定操作和数据库模式：
 
@@ -322,6 +322,8 @@ sudo rm /var/lib/qcontrolhub/agent-state.json
 ### 外部 PostgreSQL
 
 使用脚本的 `external` 模式，它会从终端读取 `QCH_DATABASE_URL` 并生成 `docker-compose.external.yml`：
+
+本地和远程数据库的性能优化、连接池参数及 schema 41 索引升级注意事项见 [本地与远程 PostgreSQL 性能](performance.md)。
 
 ```bash
 bash <(curl -fsSL "https://raw.githubusercontent.com/qimaoww/qcontrolhub/main/deploy/quick-start.sh") -m external

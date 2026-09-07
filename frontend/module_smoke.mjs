@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import "./refresh_smoke.mjs";
+import "./requests_smoke.mjs";
+import "./core_logs_smoke.mjs";
 import "./config_fields_smoke.mjs";
 import "./system_bbr_smoke.mjs";
 
@@ -2558,6 +2560,7 @@ const presetLinks = presetAgents.map((agent) => ({
 }));
 let presetWorkspaces = [];
 let presetMarkup = "";
+const presetConfigReads = [];
 
 globalThis.HTMLDetailsElement = class {};
 globalThis.CSS = { escape: (value) => String(value) };
@@ -2590,7 +2593,10 @@ try {
       engines: presetEngines,
       api: async (path) => {
         if (path === "/agents") return presetAgents;
-        if (path.endsWith("/configs")) return [];
+        if (path.endsWith("/configs")) {
+          presetConfigReads.push(path);
+          return [];
+        }
         assert.fail(`unexpected preset smoke API path ${path}`);
       },
       optionalAPI: async () => null,
@@ -2607,6 +2613,8 @@ try {
   );
   const { agents: renderPresetAgents } = installAgents(presetCtx);
   await renderPresetAgents({ overview: { agents: 2, agents_online: 2 } });
+  assert.deepEqual(presetConfigReads, [`/agents/${presetState.data.selectedAgent}/configs`],
+    "preset loading only fetches the visible node's configuration, not the entire fleet");
 
   const assertFocusedPreset = (selected, excluded) => {
     assert.equal(presetState.route, "agents", "preset selection stays on agents");
@@ -3295,13 +3303,13 @@ try {
   const failedCorePoll = [...coreTimers.values()][0];
   coreTimers.clear();
   await failedCorePoll();
-  assert.equal(coreRenders, 2, "a log error preserves the current view");
+  assert.equal(coreRenders, 3, "a log error preserves data and renders the failure status");
   assert.equal(coreTimers.size, 1, "a log error keeps recovery polling alive");
   coreFailure = false;
   const recoveredCorePoll = [...coreTimers.values()][0];
   coreTimers.clear();
   await recoveredCorePoll();
-  assert.equal(coreRenders, 3, "log polling recovers without clearing state");
+  assert.equal(coreRenders, 4, "log polling recovers without clearing state");
   assert.equal(coreTimers.size, 1);
   coreEntries = ["mihomo", "xray", "sing-box", "ss-rust"].flatMap((engine, engineIndex) =>
     Array.from({ length: 100 }, (_, index) => ({
@@ -3319,6 +3327,21 @@ try {
   await renderCoreLogs();
   assert.equal(coreState.data.coreLogs.length, 100, "selecting a quiet engine still exposes its full allowance");
   assert.equal(coreState.data.coreLogs.every((entry) => entry.engine === "sing-box"), true);
+  for (const limit of [1000, 2000]) {
+    coreEntries = ["mihomo", "xray", "sing-box", "ss-rust"].flatMap((engine, engineIndex) =>
+      Array.from({ length: limit }, (_, index) => ({
+        id: engineIndex * limit + index + 1, agent_id: "alpha", engine,
+        level: "info", message: `${engine} pressure ${index}`, logged_at: "now",
+      })));
+    coreState.data.coreLogFilters = { limit };
+    await renderCoreLogs();
+    assert.equal(coreLogQuery, `/core-logs?limit=${limit}`);
+    assert.equal(coreState.data.coreLogs.length, 4 * limit);
+    assert.equal((coreMarkup.match(/class="core-log-row /g) || []).length, 200,
+      "large windows keep DOM work bounded without truncating the searchable dataset");
+    assert.ok(coreMarkup.includes(`已加载 ${4 * limit} 条`));
+    assert.ok(coreMarkup.includes('value="1000"') && coreMarkup.includes('value="2000"'));
+  }
   coreEntries = [];
   coreAgents = [{ id: "alpha", name: "Alpha", status: "online", features: ["core-logs-v1", "core-log-status-v1"], runtime: { "sing-box": { core_log_status: "failed", core_log_error: "permission-denied" } } }];
   coreState.data.coreLogFilters = { agent_id: "alpha", engine: "sing-box" };

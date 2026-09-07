@@ -150,6 +150,56 @@ func TestSystemTCPAPIAndTaskLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer connection.Close(context.Background())
+	// One busy node must remain visible even after another node has produced
+	// more than a global history page's worth of completed tuning tasks.
+	var pending core.Task
+	if err := db.Heartbeat(ctx, agent.ID, beat); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(call("POST", "/tasks", "tcp-admin", input, 201).Body.Bytes(), &pending); err != nil {
+		t.Fatal(err)
+	}
+	_, err = connection.Exec(ctx, `
+		INSERT INTO agents(id,name,version,os,arch,capabilities,features,public_key,last_seen,enrolled_at)
+		VALUES('agt_tcp_history','history','test','linux','amd64','[]','["system-bbr-v1"]',decode(repeat('02',32),'hex'),now(),now());
+		INSERT INTO tasks(id,agent_id,action,engine,status,created_at,output)
+		SELECT 'tsk_tcp_history_' || i,'agt_tcp_history','enable-bbr','','succeeded',now()+i*interval '1 second','full output belongs on the task page'
+		FROM generate_series(1,200) i;
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	readLatest := func(path string) []core.Task {
+		t.Helper()
+		var tasks []core.Task
+		if err := json.Unmarshal(call("GET", path, "tcp-reader", nil, 200).Body.Bytes(), &tasks); err != nil {
+			t.Fatal(err)
+		}
+		return tasks
+	}
+	latest := readLatest("/system-tcp/tasks")
+	if len(latest) != 2 {
+		t.Fatalf("latest TCP task set: %+v", latest)
+	}
+	for _, task := range latest {
+		if task.Output != "" || (task.AgentID == agent.ID && (task.ID != pending.ID || task.Status != core.TaskPending || !reflect.DeepEqual(task.TCPSettings, normalized))) ||
+			(task.AgentID == "agt_tcp_history" && task.ID != "tsk_tcp_history_200") {
+			t.Fatalf("incorrect latest TCP task: %+v", task)
+		}
+	}
+	if filtered := readLatest("/system-tcp/tasks?agent_id=" + agent.ID); len(filtered) != 1 || filtered[0].ID != pending.ID {
+		t.Fatalf("node filter: %+v", filtered)
+	}
+	if missing := readLatest("/system-tcp/tasks?agent_id=nonexistent"); len(missing) != 0 {
+		t.Fatal("unknown node returned another node's tasks")
+	}
+	call("GET", "/system-tcp/tasks", "invalid-token", nil, 401)
+	if _, err := connection.Exec(ctx, `UPDATE agents SET revoked_at=now() WHERE id='agt_tcp_history'`); err != nil {
+		t.Fatal(err)
+	}
+	if latest = readLatest("/system-tcp/tasks"); len(latest) != 1 || latest[0].ID != pending.ID {
+		t.Fatalf("revoked node visible: %+v", latest)
+	}
 	if _, err := connection.Exec(ctx, `UPDATE agents SET last_seen=now()-interval '1 day' WHERE id=$1`, agent.ID); err != nil {
 		t.Fatal(err)
 	}

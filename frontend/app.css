@@ -568,6 +568,13 @@ a.node-card:hover .node-card-open i{transform:translateX(3px)}
 .page-live-config .live-config-source-switch button.active{animation:qch-nav-active 280ms var(--motion-ease-spring) both}
 .qch-reconcile-enter{animation:qch-reconcile-enter 360ms var(--motion-ease-out) both}
 .task-event,.core-log-row{content-visibility:auto;contain-intrinsic-size:0 96px}
+.core-log-result-toolbar,.core-log-result-footer{display:flex;align-items:center;justify-content:space-between;gap:12px;color:var(--muted);font-size:calc(10px * var(--ui-font-scale))}
+.core-log-result-toolbar{min-height:30px;margin-top:-6px;padding-inline:4px}.core-log-result-footer{justify-content:flex-end;padding:0 4px 4px}
+.core-log-pagination{display:flex;align-items:center;justify-content:flex-end;gap:10px;white-space:nowrap;color:var(--muted);font-size:calc(10px * var(--ui-font-scale));font-variant-numeric:tabular-nums}
+.core-log-pagination .button{min-height:30px;padding:5px 10px;font-size:inherit;background:var(--surface);box-shadow:none}.core-log-pagination .button:disabled{opacity:.45;cursor:default}
+.core-log-status{flex-wrap:wrap}.core-log-status>span:last-child{flex-wrap:wrap}
+.core-log-filter-group>div{min-width:0}
+@media(max-width:480px){.core-log-result-toolbar{flex-wrap:wrap}.core-log-result-toolbar>.core-log-pagination{margin-left:auto}.core-log-pagination{gap:6px}}
 .client-access-toolbar>nav a.active,.substore-target-bar>nav>button.active,.core-log-filter-group button[aria-pressed=true],.dashboard-month-grid button.active{animation:qch-nav-active 280ms var(--motion-ease-spring) both}
 .substore-node-row{transition:background-color var(--motion-base) ease,border-color var(--motion-fast) ease}
 .substore-node-toggle span{transition:transform var(--motion-fast) var(--motion-ease-spring),background-color var(--motion-fast) ease,border-color var(--motion-fast) ease}

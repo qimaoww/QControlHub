@@ -140,7 +140,7 @@ window.fetch = async (input, options = {}) => {
   const url = new URL(input instanceof Request ? input.url : input, location.href);
   const path = url.pathname.replace(/^\/api\/v1/, "");
   const method = String(options.method || (input instanceof Request ? input.method : "GET")).toUpperCase();
-  testAPI.calls.push({ method, path });
+  testAPI.calls.push({ method, path, query: url.search });
   if (!["GET", "HEAD", "OPTIONS"].includes(method))
     assert.equal(
       new Headers(options.headers).get("X-QControlHub-CSRF"),
@@ -148,8 +148,18 @@ window.fetch = async (input, options = {}) => {
       `mutation ${method} ${path} 缺少 CSRF 头`,
     );
   if (method === "GET" && path === "/auth/session")
-    return json({ role: mode === "readonly" || mode === "bbr-readonly" ? "readonly" : "admin", csrf_token: "browser-test-csrf" });
+    return json(mode === "bbr-writeonly"
+      ? { role: "user", permissions: ["agents.read", "agents.manage", "tasks.execute"], csrf_token: "browser-test-csrf" }
+      : { role: mode === "readonly" || mode === "bbr-readonly" ? "readonly" : "admin", csrf_token: "browser-test-csrf" });
   if (method === "GET" && path === "/system-tcp/parameters") return json(tcpRules);
+  if (method === "GET" && path === "/system-tcp/tasks") {
+    const latest = new Map();
+    for (const task of testAPI.tcpTasks || []) {
+      if (url.searchParams.get("agent_id") && task.agent_id !== url.searchParams.get("agent_id")) continue;
+      if (!latest.has(task.agent_id) || task.created_at >= latest.get(task.agent_id).created_at) latest.set(task.agent_id, task);
+    }
+    return json([...latest.values()]);
+  }
   if (mode.startsWith("bbr") && path === "/tasks") {
     if (method === "GET") return json(testAPI.tcpTasks.filter((task) => task.action === url.searchParams.get("action") && (!url.searchParams.get("agent_id") || task.agent_id === url.searchParams.get("agent_id"))));
     if (method === "POST") {
@@ -166,8 +176,21 @@ window.fetch = async (input, options = {}) => {
   if (method === "GET" && path === "/settings")
     return json({ panel_name: "QControlHub Browser Smoke" });
   if (method === "GET" && path === "/agents" && testAPI.agentsFailure) return json({error:"temporary runtime failure"},503);
-  if (method === "GET" && path === "/agents")
+  if (method === "GET" && path === "/agents") {
+    if (testAPI.agentsGate) await testAPI.agentsGate;
     return json(mode === "empty" ? [] : testAPI.agents);
+  }
+  if (method === "GET" && path === "/core-logs" && mode === "logs") {
+    const limit = Number(url.searchParams.get("limit") || 1000);
+    const agent = url.searchParams.get("agent_id") || "alpha";
+    if (testAPI.logGates?.[`${agent}:${limit}`]) await testAPI.logGates[`${agent}:${limit}`];
+    if (options.signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    return json(["mihomo", "xray", "sing-box", "ss-rust"].flatMap((engine, engineIndex) =>
+      Array.from({ length: limit }, (_, index) => ({
+        id: engineIndex * 10000 + index + 1, agent_id: agent, engine, level: "warning",
+        message: `${agent} ${engine} pressure entry ${index}`, logged_at: "2026-09-06T00:00:00Z",
+      }))));
+  }
   if (method === "GET" && path === "/deployments") return json(testAPI.deployments);
   if (method === "GET" && path === "/client-access" && ["ports","readonly"].includes(mode)) {
     const profiles = (address) => [20001,20002].map((port,index) => {
@@ -978,7 +1001,8 @@ async function testPortNamesAndRuntimeRefresh() {
 async function testSystemTCPRuntime() {
   await waitFor(() => document.querySelector(".bbr-card"), "TCP 页面未加载");
   assert.equal(document.querySelector(".bbr-intro"), null, "不应恢复冗余的顶部说明卡");
-  assert.notEqual(document.querySelector('.dock-nav a[href="#system-bbr"] svg').innerHTML, document.querySelector('.dock-nav a[href="#traffic"] svg').innerHTML, "TCP 调优和流量侧栏图标重复");
+  if (mode !== "bbr-writeonly")
+    assert.notEqual(document.querySelector('.dock-nav a[href="#system-bbr"] svg').innerHTML, document.querySelector('.dock-nav a[href="#traffic"] svg').innerHTML, "TCP 调优和流量侧栏图标重复");
   const card = () => document.querySelector('[data-refresh-key="bbr-alpha"]');
   assert.match(card().textContent, /BBR 已启用/);
   assert.match(card().textContent, /未由 QControlHub 管理/);
@@ -990,15 +1014,23 @@ async function testSystemTCPRuntime() {
   }
   assert.ok(document.querySelector('[data-bbr-agent="charlie"]').disabled, "离线节点允许提交");
   assert.ok(document.querySelector('[data-bbr-agent="delta"]').disabled, "旧 Agent 允许提交");
+  if (mode === "bbr-writeonly") {
+    card().querySelector('[data-bbr-action="enable-bbr"]').click();
+    (await waitFor(() => document.querySelector("[data-confirm-dialog][open]"), "无任务读权限时未显示确认框")).querySelector("[data-confirm-accept]").click();
+    await waitFor(() => card().textContent.includes("已提交（无任务查看权限）"), "无任务读权限时状态卡在等待执行");
+    assert.equal(testAPI.calls.filter((call) => call.path === "/system-tcp/tasks").length, 0, "越权读取任务列表");
+    assert.equal(card().querySelector('.bbr-task a[href="#tasks"]'), null, "展示了无权访问的任务链接");
+    return;
+  }
   const editor = () => card().querySelector(".bbr-editor");
   editor().open = true;
   const field = () => editor().querySelector('[data-tcp-value="net.ipv4.tcp_rmem"]');
   field().value = "4096 262144 33554432";
   field().dispatchEvent(new Event("input", { bubbles: true }));
   const refresh = async () => {
-    const before = testAPI.calls.filter((call) => call.path === "/system-tcp/parameters").length;
+    const before = testAPI.calls.filter((call) => call.path === "/system-tcp/tasks").length;
     document.querySelector("[data-bbr-refresh]").click();
-    await waitFor(() => testAPI.calls.filter((call) => call.path === "/system-tcp/parameters").length > before, "TCP 刷新未请求");
+    await waitFor(() => testAPI.calls.filter((call) => call.path === "/system-tcp/tasks").length > before, "TCP 刷新未请求");
     await delay(120);
   };
   await refresh();
@@ -1012,16 +1044,21 @@ async function testSystemTCPRuntime() {
   const dialog = await waitFor(() => document.querySelector("[data-confirm-dialog][open]"), "TCP 没有使用共享确认弹窗");
   assert.match(dialog.textContent, /4096 262144 33554432/);
   assert.match(dialog.textContent, /\/etc\/sysctl.d\/90-qcontrolhub-bbr.conf/);
+  testAPI.agentsFailure = true;
   dialog.querySelector("[data-confirm-cancel]").click();
   await delay(200);
   assert.equal(testAPI.tcpMutations.length, 0, "取消仍提交任务");
   assert.equal(field().value, "4096 262144 33554432");
+  assert.ok(!field().disabled, "取消后刷新失败导致编辑器锁死");
+  assert.ok(!card().querySelector("[data-bbr-action]").disabled, "取消后刷新失败导致按钮锁死");
   testAPI.tcpFailure = true;
   editor().querySelector("form").requestSubmit();
   (await waitFor(() => document.querySelector("[data-confirm-dialog][open]"), "失败测试没有确认弹窗")).querySelector("[data-confirm-accept]").click();
   await waitFor(() => testAPI.tcpMutations.length === 1, "TCP 任务未发出");
   await delay(200);
   assert.equal(field().value, "4096 262144 33554432", "失败丢失草稿");
+  assert.ok(!field().disabled, "提交失败且刷新失败导致编辑器锁死");
+  testAPI.agentsFailure = false;
   testAPI.tcpFailure = false;
   editor().querySelector("form").requestSubmit();
   (await waitFor(() => document.querySelector("[data-confirm-dialog][open]"), "重试没有确认弹窗")).querySelector("[data-confirm-accept]").click();
@@ -1043,23 +1080,116 @@ async function testSystemTCPRuntime() {
   assert.ok(!card().querySelector("[data-bbr-action]").disabled);
   field().value = "4096 524288 67108864";
   field().dispatchEvent(new Event("input", { bubbles: true }));
+  testAPI.agentsFailure = true;
   editor().querySelector("[data-tcp-reset]").click();
   (await waitFor(() => document.querySelector("[data-confirm-dialog][open]"), "清空草稿未确认")).querySelector("[data-confirm-accept]").click();
   await delay(200);
   assert.equal(editor().querySelector('[data-tcp-selected="net.ipv4.tcp_rmem"]').checked, false, "清空后仍勾选参数");
   assert.equal(field().value, "4096 262144 33554432", "清空后未恢复当前值");
-  testAPI.agentsFailure = true;
+  assert.ok(!field().disabled, "清空草稿依赖网络成功才能解锁");
   await refresh();
   assert.match(document.querySelector("[data-bbr-refresh-status]").textContent, /刷新失败/);
   assert.ok(card(), "刷新失败清空了状态");
   testAPI.agentsFailure = false;
+  testAPI.tcpTasks[0].status = "pending";
+  await refresh();
+  assert.ok(card().querySelector("[data-bbr-action]").disabled);
+  testAPI.tcpTasks = [];
+  await refresh();
+  assert.ok(!card().querySelector("[data-bbr-action]").disabled, "已被服务端移除的任务仍永久阻塞操作");
+  assert.equal(card().querySelector(".bbr-task"), null, "仍显示被清理的任务历史");
+  card().querySelector('[data-bbr-action="enable-bbr"]').click();
+  await waitFor(() => document.querySelector("[data-confirm-dialog][open]"), "节点状态变化测试未显示弹窗");
+  const beforeOffline = testAPI.tcpMutations.length;
+  testAPI.agents[0].status = "offline";
+  await refresh();
+  document.querySelector("[data-confirm-dialog][open] [data-confirm-accept]").click();
+  await delay(200);
+  assert.equal(testAPI.tcpMutations.length, beforeOffline, "确认框打开期间节点离线仍然提交");
+  testAPI.agents[0].status = "online";
+  await refresh();
   location.hash = "#system-bbr-agent-bravo";
   await waitFor(() => document.querySelectorAll(".bbr-card").length === 1 && document.querySelector('[data-refresh-key="bbr-bravo"]'), "节点筛选失败");
   location.hash = "#node-settings";
   await waitFor(() => document.querySelector(".node-card"), "离开 TCP 页面失败");
-  const calls = testAPI.calls.filter((call) => call.path === "/system-tcp/parameters").length;
+  const calls = testAPI.calls.filter((call) => call.path === "/system-tcp/tasks").length;
   await delay(5200);
-  assert.equal(testAPI.calls.filter((call) => call.path === "/system-tcp/parameters").length, calls, "离开 TCP 页面后继续轮询");
+  assert.equal(testAPI.calls.filter((call) => call.path === "/system-tcp/tasks").length, calls, "离开 TCP 页面后继续轮询");
+  assert.equal(testAPI.calls.filter((call) => call.path === "/system-tcp/parameters").length, 1, "每次轮询都重复读取不变的参数规则");
+}
+
+async function testLargeLogRuntime() {
+  await waitFor(() => document.querySelector(".desktop-app"), "initial shell missing");
+  let releaseAgents;
+  testAPI.agentsGate = new Promise((resolve) => { releaseAgents = resolve; });
+  const began = performance.now();
+  location.hash = "#core-logs";
+  await waitFor(() => document.querySelectorAll(".core-log-row").length === 200, "default log page missing");
+  assert.match(document.querySelector(".core-log-status").textContent, /已加载 4000 条/);
+  const initial = performance.now() - began;
+  testAPI.agentsGate = null;
+  releaseAgents();
+  document.querySelector("[data-toggle-core-log-refresh]").click();
+  const selectedAt = performance.now();
+  const limit = document.querySelector('#core-log-filters select[name="limit"]');
+  limit.value = "2000";
+  limit.dispatchEvent(new Event("change", { bubbles: true }));
+  await waitFor(() => document.querySelector(".core-log-status")?.textContent.includes("已加载 8000 条"), "2000/engine result missing");
+  const expanded = performance.now() - selectedAt;
+  assert.equal(document.querySelectorAll(".core-log-row").length, 200, "8000 entries must not create 8000 DOM rows");
+  assert.equal(document.querySelector(".core-log-stream .core-log-pagination"), null, "pagination must not split headings and log rows");
+  assert.equal(document.querySelectorAll(".core-log-result-toolbar .core-log-pagination, .core-log-result-footer .core-log-pagination").length, 2);
+  const toolbarBox = document.querySelector(".core-log-result-toolbar .core-log-pagination").getBoundingClientRect();
+  const streamBox = document.querySelector(".core-log-stream").getBoundingClientRect();
+  assert.ok(toolbarBox.bottom <= streamBox.top && Math.abs(toolbarBox.right - streamBox.right) < 10, "top pagination must sit outside and align with the table's right edge");
+  const reads = testAPI.calls.filter((call) => call.path === "/core-logs").length;
+  const pageAt = performance.now();
+  document.querySelector('[data-core-log-page-index="1"]').click();
+  await waitFor(() => document.querySelector(".core-log-pagination")?.textContent.includes("第 2 / 40 页"), "second page missing");
+  assert.match(document.querySelector(".core-log-row pre").textContent, /entry 200/);
+  const pageTime = performance.now() - pageAt;
+  const filterAt = performance.now();
+  const search = document.querySelector('#core-log-filters input[name="q"]');
+  search.value = "pressure entry 1999";
+  search.dispatchEvent(new Event("input", { bubbles: true }));
+  await waitFor(() => document.querySelectorAll(".core-log-row").length === 4, "filter must search beyond the displayed page");
+  const filterTime = performance.now() - filterAt;
+  assert.equal(testAPI.calls.filter((call) => call.path === "/core-logs").length, reads, "local pagination/filtering must not query the remote database");
+  document.querySelector("[data-reset-core-logs]").click();
+  const gated = () => {
+    let resolve;
+    const promise = new Promise((yes) => { resolve = yes; });
+    return { promise, resolve };
+  };
+  const preview = gated(), full = gated();
+  testAPI.logGates = { "bravo:200": preview.promise, "bravo:2000": full.promise };
+  const switchAt = performance.now();
+  document.querySelector('[data-core-log-agent="bravo"]').click();
+  assert.ok(document.querySelector('[data-core-log-agent="bravo"]').classList.contains("active"), "sidebar selection must update before network completion");
+  assert.equal(document.querySelectorAll(".core-log-row").length, 0, "old node's logs must disappear immediately");
+  const acknowledgement = performance.now() - switchAt;
+  const previewAt = performance.now();
+  preview.resolve();
+  await waitFor(() => document.querySelector(".core-log-status")?.textContent.includes("已加载 800 条"), "node preview did not render before full window");
+  const previewTime = performance.now() - previewAt;
+  assert.match(document.querySelector(".core-log-row pre").textContent, /bravo/);
+  assert.match(document.querySelector("[data-core-log-refresh-label]").textContent, /正在补齐/);
+  full.resolve();
+  await waitFor(() => document.querySelector(".core-log-status")?.textContent.includes("已加载 8000 条"), "node's requested window was truncated");
+  document.querySelector('[data-core-log-agent=""]').click();
+  await waitFor(() => document.querySelector(".core-log-row pre")?.textContent.includes("alpha"), "return to all logs failed");
+  const refreshGate = gated();
+  testAPI.logGates["bravo:2000"] = refreshGate.promise;
+  const cachedAt = performance.now();
+  document.querySelector('[data-core-log-agent="bravo"]').click();
+  assert.match(document.querySelector(".core-log-row pre").textContent, /bravo/, "cached node must appear synchronously with a pending network refresh");
+  assert.match(document.querySelector("[data-core-log-refresh-label]").textContent, /已显示缓存/);
+  const cachedTime = performance.now() - cachedAt;
+  refreshGate.resolve();
+  await waitFor(() => document.querySelector("[data-core-log-refresh-label]")?.textContent === "自动更新已暂停", "cache revalidation did not settle");
+  assert.ok(initial < 5000 && expanded < 5000 && pageTime < 2000 && filterTime < 2000, "large log UI exceeded smoke responsiveness budget");
+  assert.ok(acknowledgement < 500 && previewTime < 1000 && cachedTime < 500, "node switch exceeded local rendering budget");
+  window.logPressureResult = { loaded: 8000, domRows: 200, initialMs: Math.round(initial), expandedMs: Math.round(expanded), pageMs: Math.round(pageTime), filterMs: Math.round(filterTime), switchAckMs: Math.round(acknowledgement), previewRenderMs: Math.round(previewTime), cachedSwitchMs: Math.round(cachedTime) };
 }
 
 try {
@@ -1069,9 +1199,11 @@ try {
   else if (mode === "admin") await testAdminRuntime();
   else if (mode === "ports") await testPortNamesAndRuntimeRefresh();
   else if (mode === "empty") await testEmptyRuntime();
+  else if (mode === "logs") await testLargeLogRuntime();
   else await testReadonlyRuntime();
   document.documentElement.dataset.browserSmoke = "passed";
-  document.body.innerHTML = `<pre id="browser-smoke-result">PASS ${mode}</pre>`;
+  if (!new URLSearchParams(location.search).has("preview"))
+    document.body.innerHTML = `<pre id="browser-smoke-result">PASS ${mode}${window.logPressureResult ? " " + JSON.stringify(window.logPressureResult) : ""}</pre>`;
 } catch (error) {
   document.documentElement.dataset.browserSmoke = "failed";
   document.body.innerHTML = `<pre id="browser-smoke-result"></pre>`;

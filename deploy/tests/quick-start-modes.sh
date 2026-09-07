@@ -5,6 +5,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 test_root="$(mktemp -d "${TMPDIR:-/tmp}/qcontrolhub-quick-start-modes.XXXXXX")"
 trap 'rm -rf "$test_root"' EXIT HUP INT TERM
 umask 077
+export XDG_CONFIG_HOME="$test_root/config"
 
 # Exercise the real CLI entry points without pulling images, creating a
 # database, or touching any host services. Only Docker/curl are substituted.
@@ -26,6 +27,7 @@ export -f docker curl
 export QCH_INSTALL_DIR="$test_root/bundled"
 export QCH_MODES_TEST_LOG="$test_root/bundled.log"
 bash "$repo_root/deploy/quick-start.sh" -m bundled -o install > "$test_root/bundled-install.out"
+grep -Fxq -- "$QCH_INSTALL_DIR" "$XDG_CONFIG_HOME/qcontrolhub/install-dir"
 grep -q '^POSTGRES_PASSWORD=.' "$QCH_INSTALL_DIR/.env"
 [ -s "$QCH_INSTALL_DIR/.secrets/config-encryption-key" ]
 [ ! -f "$QCH_INSTALL_DIR/docker-compose.external.yml" ]

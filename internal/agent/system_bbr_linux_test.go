@@ -169,6 +169,48 @@ func TestSystemBBRRejectsUnsafeOrUnsupportedChanges(t *testing.T) {
 	}
 }
 
+func TestSystemBBRRollbackOfNewProfile(t *testing.T) {
+	for _, afterRename := range []bool{false, true} {
+		b, values := tcpTestBackend(t)
+		persist := b.persist
+		b.persist = func(content string) error {
+			if afterRename {
+				if err := persist(content); err != nil {
+					t.Fatal(err)
+				}
+			}
+			return errors.New("disk failure")
+		}
+		if _, err := b.apply(context.Background(), core.ActionEnableBBR, nil); err == nil {
+			t.Fatal("expected persistence failure")
+		}
+		if values[bbrAlgorithmKey] != "cubic" || values[bbrQdiscKey] != "fq_codel" {
+			t.Fatalf("new profile failure changed runtime: %v", values)
+		}
+		if _, err := os.Lstat(b.configPath); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("failed new profile still exists: %v", err)
+		}
+	}
+}
+
+func TestSystemBBRReportsUnverifiedRollback(t *testing.T) {
+	b, values := tcpTestBackend(t)
+	write := b.write
+	b.write = func(key, value string) error {
+		if key == bbrAlgorithmKey && value == "bbr" {
+			return errors.New("unsupported algorithm")
+		}
+		if key == bbrQdiscKey && value == "fq_codel" {
+			return nil // Simulate a concurrent writer or a silently ignored restore.
+		}
+		return write(key, value)
+	}
+	_, err := b.apply(context.Background(), core.ActionEnableBBR, nil)
+	if err == nil || !strings.Contains(err.Error(), "rollback failed") || !strings.Contains(err.Error(), bbrQdiscKey) || strings.Contains(err.Error(), "defaults restored") || values[bbrQdiscKey] != "fq" {
+		t.Fatalf("unverified rollback presented as restored: %v", err)
+	}
+}
+
 func TestSystemBBRHelperHasNarrowWriteScope(t *testing.T) {
 	settings := core.TCPSettings{"net.ipv4.tcp_ecn": "1", "net.core.wmem_max": "4194304"}
 	args := bbrHelperArguments("/usr/local/lib/qagent/qagent", core.ActionConfigureTCP, settings)

@@ -197,8 +197,9 @@ function reconcileChildren(current, fresh, metrics) {
     const currentAtIndex = current.childNodes[index] || null;
     if (currentAtIndex !== child) current.insertBefore(child, currentAtIndex);
   });
+  const desiredNodes = new Set(desired);
   [...current.childNodes].forEach((child) => {
-    if (!desired.includes(child)) {
+    if (!desiredNodes.has(child)) {
       child.remove();
       metrics.removed += 1;
     }

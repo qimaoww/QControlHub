@@ -8,7 +8,7 @@ export function validateTCPSelection(input, rules) {
   return Object.fromEntries(Object.entries(input).map(([key, raw]) => {
     const rule = rules.find((entry) => entry.key === key);
     const value = String(raw).trim().replace(/\s+/g, " ");
-    if (!rule || /[\r\n\x00]/.test(raw)) throw new Error(`不支持的参数或取值：${key}`);
+    if (!rule || new TextEncoder().encode(String(raw)).length > 100 || /[\r\n\x00]/.test(raw)) throw new Error(`不支持的参数或取值：${key}`);
     if (rule.choices?.length) {
       if (!rule.choices.includes(value)) throw new Error(`${rule.label}：请选择支持的选项`);
       return [key, value];
@@ -45,7 +45,9 @@ export function installSystemBBR(ctx) {
   const submitting = new Set();
   const localTasks = new Map();
   const drafts = (state.data.bbrDrafts ||= {});
-  let rules = [];
+  let rules = null;
+  let lastAgents = null;
+  let refreshFailed = false;
   const refresh = createRefreshChannel({
     isCurrent: () => state.route === "system-bbr",
     getScope: () => state.navigationEpoch,
@@ -71,13 +73,9 @@ export function installSystemBBR(ctx) {
     }).join("")}</div><footer><span data-tcp-draft-status role="status">${Object.keys(draft).length} 项待提交</span><div><button class="button small" type="button" data-tcp-reset ${disabled ? "disabled" : ""}>清空选择</button><button class="button small primary" type="submit" ${disabled ? "disabled" : ""}>保存并应用选中参数</button></div></footer></form></details>`;
   }
 
-  function render(agents, tasks) {
+  function render(agents) {
     state.data.agents = agents;
     state.data.bbrAgent = selectedID();
-    for (const task of tasks) {
-      const previous = localTasks.get(task.agent_id);
-      if (!previous || task.created_at >= previous.created_at) localTasks.set(task.agent_id, task);
-    }
     const visible = selectedID() ? agents.filter((agent) => agent.id === selectedID()) : agents;
     const cards = visible.map((agent) => {
       const info = systemBBRState(agent);
@@ -108,7 +106,7 @@ export function installSystemBBR(ctx) {
         <footer><small>参数采集：${status?.collected_at ? esc(date(status.collected_at)) : "尚未上报"}</small>${editable() ? `<div class="bbr-actions"><button class="button small" type="button" data-bbr-agent="${esc(agent.id)}" data-bbr-action="disable-bbr" ${presetDisabled ? "disabled" : ""}>关闭 BBR / 切换 CUBIC</button><button class="button small primary" type="button" data-bbr-agent="${esc(agent.id)}" data-bbr-action="enable-bbr" ${presetDisabled ? "disabled" : ""}>启用 BBR</button></div>` : '<span class="bbr-readonly">只读权限</span>'}</footer>
       </article>`;
     }).join("");
-    shell(`<div class="bbr-workspace"><div class="bbr-toolbar"><small data-bbr-refresh-status aria-live="polite">自动刷新 · Agent 心跳采集</small><button class="button small" type="button" data-bbr-refresh>刷新状态</button></div><section class="bbr-grid">${cards || '<div class="empty large"><strong>当前范围没有节点</strong><p>添加节点后即可查看系统 BBR 状态。</p></div>'}</section></div>`, "BBR / TCP 调优", { viewKey: `system-bbr-${selectedID() || "all"}` });
+    shell(`<div class="bbr-workspace"><div class="bbr-toolbar"><small data-bbr-refresh-status aria-live="polite">${refreshFailed ? "刷新失败，显示上次数据 · 将自动重试" : "自动刷新 · Agent 心跳采集"}</small><button class="button small" type="button" data-bbr-refresh>刷新状态</button></div><section class="bbr-grid">${cards || '<div class="empty large"><strong>当前范围没有节点</strong><p>添加节点后即可查看系统 BBR 状态。</p></div>'}</section></div>`, "BBR / TCP 调优", { viewKey: `system-bbr-${selectedID() || "all"}` });
     bindEvent(document.querySelector("[data-bbr-refresh]"), "click", () => systemBBR());
     document.querySelectorAll("[data-bbr-action]").forEach((button) => {
       bindEvent(button, "click", () => submitChange(
@@ -148,12 +146,12 @@ export function installSystemBBR(ctx) {
       });
       form.querySelectorAll("[data-tcp-selected]").forEach((input) => bindEvent(input, "change", capture));
       bindEvent(form.querySelector("[data-tcp-reset]"), "click", async () => {
+        const epoch = state.navigationEpoch;
         if (Object.keys(drafts[agent.id] || {}).length && !(await confirmAction("确定清空此节点未提交的 TCP 参数选择？已保存的系统配置不受影响。", "清空选择"))) return;
+        if (state.route !== "system-bbr" || epoch !== state.navigationEpoch) return;
         delete drafts[agent.id];
-        // This is an explicit discard, not a background refresh. Do not let
-        // the shared reconciler restore the just-discarded dirty controls.
-        form.querySelectorAll("input, select").forEach((input) => (input.disabled = true));
-        await systemBBR();
+        // Local editor state must settle even when the network is unavailable.
+        render(lastAgents);
       });
       bindEvent(form, "submit", async (event) => {
         event.preventDefault();
@@ -186,6 +184,11 @@ export function installSystemBBR(ctx) {
       const summary = Object.entries(changes).map(([key, value]) => `${key}: ${agent.metrics?.bbr?.parameters?.[key] || "未知"} → ${value}`).join("\n");
       if (!(await confirmAction(`确定对「${agent.name}」应用以下系统参数？\n${summary}\n保存到 /etc/sysctl.d/90-qcontrolhub-bbr.conf；未选参数保持不变，不重启网络或重置现有连接、网卡队列。请确认这些值适合该节点。`, actionLabel(action)))) return;
       if (state.route !== "system-bbr" || epoch !== state.navigationEpoch) return;
+      const current = lastAgents?.find((entry) => entry.id === agent.id);
+      if (!editable() || !current || !systemBBRState(current).controllable || ["pending", "running"].includes(localTasks.get(agent.id)?.status)) {
+        notify("节点或任务状态已变化，请刷新核对后重新操作。", "error");
+        return;
+      }
       const task = await api("/tasks", { method: "POST", body: JSON.stringify({
         agent_id: agent.id, action, engine: "", ...(settings ? { tcp_settings: settings } : {}),
       }) });
@@ -196,7 +199,12 @@ export function installSystemBBR(ctx) {
       notify(error.message, "error");
     } finally {
       submitting.delete(agent.id);
-      if (state.route === "system-bbr" && epoch === state.navigationEpoch) await systemBBR({ background: true });
+      if (state.route === "system-bbr" && epoch === state.navigationEpoch) {
+        // Cancel/failure/submission must update controls before an optional
+        // network refresh, which can be slow or fail entirely.
+        render(lastAgents);
+        await systemBBR({ background: true });
+      }
     }
   }
   const poller = createPoller({ run: () => systemBBR({ background: true }),
@@ -205,18 +213,30 @@ export function installSystemBBR(ctx) {
   async function systemBBR({ background = false } = {}) {
     poller.stop();
     try {
-      const params = selectedID() ? `&agent_id=${encodeURIComponent(selectedID())}` : "";
+      const params = selectedID() ? `?agent_id=${encodeURIComponent(selectedID())}` : "";
       const applied = await refresh.run((signal) => Promise.all([
         api("/agents", { signal }),
-        api("/system-tcp/parameters", { signal }),
-        ...systemBBRActions.map((action) => can("tasks.read") ? api(`/tasks?action=${action}&limit=100${params}`, { signal }) : Promise.resolve([])),
-      ]), ([agents, parameters, ...taskLists]) => { rules = parameters; render(agents, taskLists.flat()); });
+        rules ? Promise.resolve(rules) : api("/system-tcp/parameters", { signal }),
+        can("tasks.read") ? api(`/system-tcp/tasks${params}`, { signal }) : Promise.resolve([]),
+      ]), ([agents, parameters, tasks]) => {
+        rules = parameters;
+        lastAgents = agents;
+        refreshFailed = false;
+        if (can("tasks.read")) {
+          // The response is authoritative for this scope, including tasks
+          // removed by retention; never keep an obsolete busy state forever.
+          if (selectedID()) localTasks.delete(selectedID());
+          else localTasks.clear();
+          for (const task of tasks) localTasks.set(task.agent_id, task);
+        }
+        render(agents);
+      });
       if (applied) poller.start();
       return applied;
     } catch (error) {
       if (!background) notify(error.message, "error");
-      const label = document.querySelector("[data-bbr-refresh-status]");
-      if (label) label.textContent = "刷新失败，显示上次数据";
+      refreshFailed = true;
+      if (lastAgents) render(lastAgents);
       else shell('<div class="empty large"><strong>无法读取系统 BBR 状态</strong><p>请检查节点查看权限或稍后刷新重试。</p><button class="button" data-bbr-retry>重试</button></div>', "系统 BBR");
       bindEvent(document.querySelector("[data-bbr-retry]"), "click", () => systemBBR());
       poller.start();
