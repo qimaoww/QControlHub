@@ -220,7 +220,9 @@ function reconcileNode(current, fresh, metrics) {
     }
     return current;
   }
-  if (current.tagName === "DIALOG" && current.open) return current;
+  // Confirmation dialogs keep their original snapshot. Live status/editor
+  // dialogs may opt in to reconciliation without closing their native modal.
+  if (current.tagName === "DIALOG" && current.open && current.getAttribute("data-refresh-live") == null) return current;
   const state = controlState(current);
   const detailsOpen = current.tagName === "DETAILS" ? current.open : null;
   const scrollTop = current.scrollTop;
