@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/qimaoww/qcontrolhub/internal/core"
 	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
 )
@@ -26,13 +28,26 @@ type mainlandAccessResource struct {
 }
 
 func (s *Server) listMainlandAccessPolicies(w http.ResponseWriter, request *http.Request) {
-	agents, err := s.store.ListAgents(request.Context())
-	if err != nil {
-		writeInternalError(w, err)
-		return
-	}
-	configs, err := s.store.ListAgentConfigs(request.Context())
-	if err != nil {
+	var agents []core.Agent
+	var configs []core.Config
+	var agentPolicies []core.MainlandAccessPolicy
+	group, ctx := errgroup.WithContext(request.Context())
+	group.Go(func() error {
+		var err error
+		agents, err = s.store.ListAgents(ctx)
+		return err
+	})
+	group.Go(func() error {
+		var err error
+		configs, err = s.store.ListAgentConfigs(ctx)
+		return err
+	})
+	group.Go(func() error {
+		var err error
+		agentPolicies, err = s.store.ListMainlandAccessPolicies(ctx, "")
+		return err
+	})
+	if err := group.Wait(); err != nil {
 		writeInternalError(w, err)
 		return
 	}
@@ -62,11 +77,6 @@ func (s *Server) listMainlandAccessPolicies(w http.ResponseWriter, request *http
 			resourceIndex[mainlandPolicyKey(resource.AgentID, resource.Engine, resource.Tag, resource.Port)] = len(result)
 			result = append(result, resource)
 		}
-	}
-	agentPolicies, err := s.store.ListMainlandAccessPolicies(request.Context(), "")
-	if err != nil {
-		writeInternalError(w, err)
-		return
 	}
 	for _, policy := range agentPolicies {
 		agent, exists := agentByID[policy.AgentID]

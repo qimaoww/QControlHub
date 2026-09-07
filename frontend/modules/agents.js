@@ -868,14 +868,8 @@ async function nodeSettings(presetMode = false, { overview: preloadedOverview } 
   if (request !== agentPageRequest || state.route !== expectedRoute) return;
   state.data.overview = overview;
 
-  const savedConfigs = presetMode && can("agent-config.read")
-    ? (
-        await Promise.all(
-          agents.map((agent) =>
-            api(`/agents/${encodeURIComponent(agent.id)}/configs`),
-          ),
-        )
-      ).flat()
+  const savedConfigs = presetMode && state.data.selectedAgent && can("agent-config.read")
+    ? await api(`/agents/${encodeURIComponent(state.data.selectedAgent)}/configs`)
     : [];
   if (request !== agentPageRequest || state.route !== expectedRoute) return;
   const configByService = new Map(

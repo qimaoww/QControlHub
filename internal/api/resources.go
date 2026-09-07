@@ -51,16 +51,12 @@ type clientAccessEntry struct {
 
 type clientAccessDataSource interface {
 	ListAgents(context.Context) ([]core.Agent, error)
-	LatestDeployments(context.Context) ([]core.Deployment, error)
-	ListAgentConfigs(context.Context) ([]core.Config, error)
-	ListConfigs(context.Context) ([]core.Config, error)
+	DeployedConfigs(context.Context) ([]store.DeployedConfig, error)
 }
 
 type clientAccessSnapshot struct {
-	agents         []core.Agent
-	deployments    []core.Deployment
-	agentConfigs   []core.Config
-	archiveConfigs []core.Config
+	agents  []core.Agent
+	configs []store.DeployedConfig
 }
 
 func loadClientAccessSnapshot(ctx context.Context, source clientAccessDataSource) (clientAccessSnapshot, error) {
@@ -73,20 +69,11 @@ func loadClientAccessSnapshot(ctx context.Context, source clientAccessDataSource
 	})
 	group.Go(func() error {
 		var err error
-		snapshot.deployments, err = source.LatestDeployments(groupContext)
+		snapshot.configs, err = source.DeployedConfigs(groupContext)
 		return err
 	})
-	group.Go(func() error {
-		var err error
-		snapshot.agentConfigs, err = source.ListAgentConfigs(groupContext)
-		return err
-	})
-	group.Go(func() error {
-		var err error
-		snapshot.archiveConfigs, err = source.ListConfigs(groupContext)
-		return err
-	})
-	return snapshot, group.Wait()
+	err := group.Wait()
+	return snapshot, err
 }
 
 type configCatalogResource struct {
@@ -120,22 +107,12 @@ func (s *Server) listDeployments(w http.ResponseWriter, request *http.Request) {
 
 func (s *Server) listAgentConfigs(w http.ResponseWriter, request *http.Request) {
 	agentID := request.PathValue("id")
-	if _, err := s.store.GetAgent(request.Context(), agentID); err != nil {
+	configs, err := s.store.AgentConfigs(request.Context(), agentID)
+	if err != nil {
 		writeStoreError(w, err)
 		return
 	}
-	configs, err := s.store.ListAgentConfigs(request.Context())
-	if err != nil {
-		writeInternalError(w, err)
-		return
-	}
-	result := make([]core.Config, 0, len(configs))
-	for _, config := range configs {
-		if config.AgentID == agentID {
-			result = append(result, config)
-		}
-	}
-	writeJSON(w, http.StatusOK, result)
+	writeJSON(w, http.StatusOK, configs)
 }
 
 func (s *Server) configCatalog(w http.ResponseWriter, request *http.Request) {
@@ -158,8 +135,31 @@ func (s *Server) agentConfigWorkspace(w http.ResponseWriter, request *http.Reque
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	agent, err := s.store.GetAgent(request.Context(), request.PathValue("id"))
-	if err != nil {
+	var agent core.Agent
+	var config core.Config
+	var policies []core.MainlandAccessPolicy
+	group, ctx := errgroup.WithContext(request.Context())
+	group.Go(func() error {
+		var err error
+		agent, err = s.store.GetAgent(ctx, request.PathValue("id"))
+		return err
+	})
+	group.Go(func() error {
+		var err error
+		config, err = s.store.AgentConfig(ctx, request.PathValue("id"), engine)
+		if errors.Is(err, store.ErrNotFound) {
+			return nil
+		}
+		return err
+	})
+	if engine == core.EngineShadowsocksRust {
+		group.Go(func() error {
+			var err error
+			policies, err = s.store.ListMainlandAccessPolicies(ctx, request.PathValue("id"))
+			return err
+		})
+	}
+	if err := group.Wait(); err != nil {
 		writeStoreError(w, err)
 		return
 	}
@@ -177,8 +177,7 @@ func (s *Server) agentConfigWorkspace(w http.ResponseWriter, request *http.Reque
 		Inbounds: []serverconfig.Input{}, PresentFields: map[string]bool{},
 		RealityPresets: serverconfig.RealityServerNamePresets(),
 	}
-	config, err := s.store.AgentConfig(request.Context(), agent.ID, engine)
-	if err == nil {
+	if config.ID != "" {
 		result.Config = &config
 		result.Inbounds = serverconfig.ParseAll(engine, config.Content)
 		if err := s.hydrateClientMetadata(request.Context(), config, result.Inbounds); err != nil {
@@ -186,11 +185,6 @@ func (s *Server) agentConfigWorkspace(w http.ResponseWriter, request *http.Reque
 			return
 		}
 		if engine == core.EngineShadowsocksRust {
-			policies, policyErr := s.store.ListMainlandAccessPolicies(request.Context(), agent.ID)
-			if policyErr != nil {
-				writeInternalError(w, policyErr)
-				return
-			}
 			destination := false
 			byKey := make(map[string]core.MainlandAccessPolicy, len(policies))
 			for _, policy := range policies {
@@ -208,9 +202,6 @@ func (s *Server) agentConfigWorkspace(w http.ResponseWriter, request *http.Reque
 			writeError(w, http.StatusUnprocessableEntity, err.Error())
 			return
 		}
-	} else if !errors.Is(err, store.ErrNotFound) {
-		writeStoreError(w, err)
-		return
 	}
 	writeJSON(w, http.StatusOK, result)
 }
@@ -654,46 +645,23 @@ func (s *Server) clientAccessEntries(ctx context.Context) ([]clientAccessEntry, 
 		return nil, err
 	}
 	agents := snapshot.agents
-	deployments := snapshot.deployments
-	agentConfigs := snapshot.agentConfigs
-	archiveConfigs := snapshot.archiveConfigs
 
 	agentsByID := make(map[string]core.Agent, len(agents))
 	for _, agent := range agents {
 		agentsByID[agent.ID] = agent
 	}
-	configsByID := make(map[string]core.Config, len(agentConfigs)+len(archiveConfigs))
-	for _, config := range agentConfigs {
-		configsByID[config.ID] = config
-	}
-	for _, config := range archiveConfigs {
-		configsByID[config.ID] = config
-	}
-
-	entries := make([]clientAccessEntry, 0, len(deployments))
-	for _, deployment := range deployments {
+	entries := make([]clientAccessEntry, 0, len(snapshot.configs))
+	for _, deployed := range snapshot.configs {
+		deployment, config := deployed.Deployment, deployed.Config
 		agent, ok := agentsByID[deployment.AgentID]
 		if !ok {
 			continue
-		}
-		config, ok := configsByID[deployment.ConfigID]
-		if !ok {
-			continue
-		}
-		if config.Version != deployment.ConfigVersion {
-			config, err = s.store.ConfigRevision(ctx, deployment.ConfigID, deployment.ConfigVersion)
-			if errors.Is(err, store.ErrNotFound) {
-				continue
-			}
-			if err != nil {
-				return nil, err
-			}
 		}
 		inputs := serverconfig.ParseAll(deployment.Engine, config.Content)
 		if len(inputs) == 0 {
 			continue
 		}
-		if err := s.hydrateClientMetadata(ctx, config, inputs); err != nil {
+		if err := applyClientMetadata(inputs, deployed.Metadata); err != nil {
 			return nil, err
 		}
 		serverName := firstLabel(agent, "tls_server_name", "server_name")
@@ -733,6 +701,10 @@ func (s *Server) hydrateClientMetadata(ctx context.Context, config core.Config, 
 	if err != nil {
 		return err
 	}
+	return applyClientMetadata(inputs, metadata)
+}
+
+func applyClientMetadata(inputs []serverconfig.Input, metadata map[string]string) error {
 	for index := range inputs {
 		if err := serverconfig.ApplyClientMetadata(&inputs[index], metadata[inputs[index].Tag]); err != nil {
 			return fmt.Errorf("apply client metadata for %s: %w", inputs[index].Tag, err)

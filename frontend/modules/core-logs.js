@@ -65,7 +65,7 @@ export function installCoreLogs(ctx) {
     const filters = state.data.coreLogFilters || {};
     const params = new URLSearchParams();
     if (filters.agent_id) params.set("agent_id", filters.agent_id);
-    params.set("limit", String(filters.limit || 200));
+    params.set("limit", String(filters.limit || 1000));
     return { filters, params };
   };
 
@@ -164,12 +164,26 @@ export function installCoreLogs(ctx) {
       }
     }
 
-    const rows = entries
+    const pageSize = 200;
+    const pageCount = Math.max(1, Math.ceil(entries.length / pageSize));
+    const scope = JSON.stringify([filters.agent_id, filters.engine, filters.level, filters.q, filters.limit]);
+    if (state.data.coreLogPageScope !== scope) {
+      state.data.coreLogPageScope = scope;
+      state.data.coreLogPage = 0;
+    }
+    const page = Math.max(0, Math.min(state.data.coreLogPage || 0, pageCount - 1));
+    state.data.coreLogPage = page;
+    // Keep all fetched entries searchable, but bound DOM work independently
+    // of the per-engine retention window (up to 8000 entries across engines).
+    const rows = entries.slice(page * pageSize, (page + 1) * pageSize)
       .map((entry) => {
         const agent = agentsByID.get(entry.agent_id);
         return `<article class="core-log-row level-${esc(entry.level)}" data-refresh-key="core-log-${esc(entry.id)}"><time datetime="${esc(entry.logged_at)}">${esc(date(entry.logged_at))}</time><span class="engine-badge ${esc(entry.engine)}">${esc(engineName(entry.engine))}</span><span class="core-log-level">${esc(levelName(entry.level))}</span><span class="core-log-agent" title="${esc(agent?.name || entry.agent_id)}">${esc(agent?.name || entry.agent_id)}</span><pre>${esc(entry.message)}</pre></article>`;
       })
       .join("");
+    const pagination = entries.length > pageSize
+      ? `<nav class="core-log-pagination" aria-label="日志分页"><button class="button small" type="button" data-core-log-page-index="${page - 1}" ${page === 0 ? "disabled" : ""}>上一页</button><span>第 ${page + 1} / ${pageCount} 页 · 每页 ${pageSize} 条 · 已加载 ${entries.length} 条</span><button class="button small" type="button" data-core-log-page-index="${page + 1}" ${page + 1 === pageCount ? "disabled" : ""}>下一页</button></nav>`
+      : "";
     const sourceNotice = sourceNoticeTitle && rows
       ? `<div class="core-log-source-notice" role="status"><strong>${esc(sourceNoticeTitle)}</strong><span>${esc(sourceNoticeDetail)}</span></div>`
       : "";
@@ -203,10 +217,16 @@ export function installCoreLogs(ctx) {
       ? storagePolicyName(state.data.settings?.core_log_minimum_level)
       : "保存策略不可见";
     shell(
-      `<div class="core-log-workspace" data-core-log-page><header class="core-log-header"><div><h2>内核日志</h2><p>当前范围：<strong>${esc(scopeName)}</strong></p></div><label class="core-log-auto"><button type="button" role="switch" aria-checked="${String(autoRefresh)}" data-toggle-core-log-refresh><i></i></button><span>自动更新</span></label></header><section class="core-log-filters" id="core-log-filters" aria-label="日志筛选"><div class="core-log-filter-group core-log-engine-filter"><span>内核</span><div role="group" aria-label="日志内核">${engineButtons}</div></div><div class="core-log-filter-group core-log-level-filter"><span>级别</span><div role="group" aria-label="日志级别">${levelButtons}</div></div><label class="core-log-search">关键词<input name="q" type="search" maxlength="120" value="${esc(filters.q || "")}" placeholder="搜索日志内容，输入即筛选" autocomplete="off"></label><label class="core-log-limit" title="每种内核分别取最新日志，不共用总条数上限">每内核上限<select name="limit">${[100, 200, 500].map((limit) => `<option value="${limit}" ${Number(filters.limit || 200) === limit ? "selected" : ""}>${limit} 条</option>`).join("")}</select></label><button class="button core-log-reset" type="button" data-reset-core-logs>清除筛选</button></section><div class="core-log-status" role="status" data-core-log-refresh-status><span>显示 <strong>${entries.length}</strong> 条结果</span><span><span class="core-log-live"><i></i><span data-core-log-refresh-label>${autoRefresh ? "正在实时更新" : "自动更新已暂停"}</span></span><span>${esc(storagePolicy)} · 保留 7 天</span></span></div><section class="core-log-stream qch-swap-panel" aria-label="内核运行日志" data-refresh-scroll data-refresh-key="core-log-results-${esc(filters.agent_id || "all")}-${esc(filters.engine || "all")}-${esc(filters.level || "all")}"><header class="core-log-columns" aria-hidden="true"><span>时间</span><span>内核</span><span>级别</span><span>节点</span><span>日志内容</span></header>${sourceNotice}${rows || `<div class="core-log-empty"><strong>${esc(emptyTitle)}</strong><span>${esc(emptyDetail)}</span></div>`}</section></div>`,
+      `<div class="core-log-workspace" data-core-log-page><header class="core-log-header"><div><h2>内核日志</h2><p>当前范围：<strong>${esc(scopeName)}</strong></p></div><label class="core-log-auto"><button type="button" role="switch" aria-checked="${String(autoRefresh)}" data-toggle-core-log-refresh><i></i></button><span>自动更新</span></label></header><section class="core-log-filters" id="core-log-filters" aria-label="日志筛选"><div class="core-log-filter-group core-log-engine-filter"><span>内核</span><div role="group" aria-label="日志内核">${engineButtons}</div></div><div class="core-log-filter-group core-log-level-filter"><span>级别</span><div role="group" aria-label="日志级别">${levelButtons}</div></div><label class="core-log-search">关键词<input name="q" type="search" maxlength="120" value="${esc(filters.q || "")}" placeholder="搜索日志内容，输入即筛选" autocomplete="off"></label><label class="core-log-limit" title="每种内核分别取最新日志，不共用总条数上限">每内核上限<select name="limit">${[100, 200, 500, 1000, 2000].map((limit) => `<option value="${limit}" ${Number(filters.limit || 1000) === limit ? "selected" : ""}>${limit} 条</option>`).join("")}</select></label><button class="button core-log-reset" type="button" data-reset-core-logs>清除筛选</button></section><div class="core-log-status" role="status" data-core-log-refresh-status><span>显示 <strong>${entries.length}</strong> 条结果</span><span><span class="core-log-live"><i></i><span data-core-log-refresh-label>${autoRefresh ? "正在实时更新" : "自动更新已暂停"}</span></span><span>${esc(storagePolicy)} · 保留 7 天</span></span></div><section class="core-log-stream qch-swap-panel" aria-label="内核运行日志" data-refresh-scroll data-refresh-key="core-log-results-${esc(filters.agent_id || "all")}-${esc(filters.engine || "all")}-${esc(filters.level || "all")}"><header class="core-log-columns" aria-hidden="true"><span>时间</span><span>内核</span><span>级别</span><span>节点</span><span>日志内容</span></header>${pagination}${sourceNotice}${rows || `<div class="core-log-empty"><strong>${esc(emptyTitle)}</strong><span>${esc(emptyDetail)}</span></div>`}</section></div>`,
       "内核日志",
     );
 
+    document.querySelectorAll("[data-core-log-page-index]").forEach((button) => {
+      bindEvent(button, "click", () => {
+        state.data.coreLogPage = Number(button.dataset.coreLogPageIndex);
+        renderCoreLogs(state.data.coreLogEntries || [], state.data.agents || [], state.data.coreLogFilters || filters);
+      });
+    });
     const renderLocalFilters = (patch) => {
       state.data.coreLogFilters = {
         ...(state.data.coreLogFilters || {}),
@@ -230,7 +250,7 @@ export function installCoreLogs(ctx) {
     bindEvent(document.querySelector('#core-log-filters select[name="limit"]'), "change", async (event) => {
       state.data.coreLogFilters = {
         ...(state.data.coreLogFilters || {}),
-        limit: Number(event.currentTarget.value || 200),
+        limit: Number(event.currentTarget.value || 1000),
       };
       await coreLogs({ syncFilters: true });
     });

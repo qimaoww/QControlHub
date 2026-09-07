@@ -121,6 +121,14 @@ window.fetch = async (input, options = {}) => {
   if (method === "GET" && path === "/agents" && testAPI.agentsFailure) return json({error:"temporary runtime failure"},503);
   if (method === "GET" && path === "/agents")
     return json(mode === "empty" ? [] : testAPI.agents);
+  if (method === "GET" && path === "/core-logs" && mode === "logs") {
+    const limit = Number(url.searchParams.get("limit") || 1000);
+    return json(["mihomo", "xray", "sing-box", "ss-rust"].flatMap((engine, engineIndex) =>
+      Array.from({ length: limit }, (_, index) => ({
+        id: engineIndex * 10000 + index + 1, agent_id: "alpha", engine, level: "warning",
+        message: `${engine} pressure entry ${index}`, logged_at: "2026-09-06T00:00:00Z",
+      }))));
+  }
   if (method === "GET" && path === "/deployments") return json(testAPI.deployments);
   if (method === "GET" && path === "/client-access" && ["ports","readonly"].includes(mode)) {
     const profiles = (address) => [20001,20002].map((port,index) => {
@@ -928,14 +936,47 @@ async function testPortNamesAndRuntimeRefresh() {
   assert.equal(testAPI.calls.filter((call) => call.path==="/agents").length,before,"离开预设页仍后台轮询");
 }
 
+async function testLargeLogRuntime() {
+  await waitFor(() => document.querySelector(".desktop-app"), "initial shell missing");
+  const began = performance.now();
+  location.hash = "#core-logs";
+  await waitFor(() => document.querySelectorAll(".core-log-row").length === 200, "default log page missing");
+  assert.match(document.querySelector(".core-log-pagination").textContent, /已加载 4000 条/);
+  const initial = performance.now() - began;
+  document.querySelector("[data-toggle-core-log-refresh]").click();
+  const selectedAt = performance.now();
+  const limit = document.querySelector('#core-log-filters select[name="limit"]');
+  limit.value = "2000";
+  limit.dispatchEvent(new Event("change", { bubbles: true }));
+  await waitFor(() => document.querySelector(".core-log-pagination")?.textContent.includes("已加载 8000 条"), "2000/engine result missing");
+  const expanded = performance.now() - selectedAt;
+  assert.equal(document.querySelectorAll(".core-log-row").length, 200, "8000 entries must not create 8000 DOM rows");
+  const reads = testAPI.calls.filter((call) => call.path === "/core-logs").length;
+  const pageAt = performance.now();
+  document.querySelector('[data-core-log-page-index="1"]').click();
+  await waitFor(() => document.querySelector(".core-log-pagination")?.textContent.includes("第 2 / 40 页"), "second page missing");
+  assert.match(document.querySelector(".core-log-row pre").textContent, /entry 200/);
+  const pageTime = performance.now() - pageAt;
+  const filterAt = performance.now();
+  const search = document.querySelector('#core-log-filters input[name="q"]');
+  search.value = "pressure entry 1999";
+  search.dispatchEvent(new Event("input", { bubbles: true }));
+  await waitFor(() => document.querySelectorAll(".core-log-row").length === 4, "filter must search beyond the displayed page");
+  const filterTime = performance.now() - filterAt;
+  assert.equal(testAPI.calls.filter((call) => call.path === "/core-logs").length, reads, "local pagination/filtering must not query the remote database");
+  assert.ok(initial < 5000 && expanded < 5000 && pageTime < 2000 && filterTime < 2000, "large log UI exceeded smoke responsiveness budget");
+  window.logPressureResult = { loaded: 8000, domRows: 200, initialMs: Math.round(initial), expandedMs: Math.round(expanded), pageMs: Math.round(pageTime), filterMs: Math.round(filterTime) };
+}
+
 try {
   await import("./app.js");
   if (mode === "admin") await testAdminRuntime();
   else if (mode === "ports") await testPortNamesAndRuntimeRefresh();
   else if (mode === "empty") await testEmptyRuntime();
+  else if (mode === "logs") await testLargeLogRuntime();
   else await testReadonlyRuntime();
   document.documentElement.dataset.browserSmoke = "passed";
-  document.body.innerHTML = `<pre id="browser-smoke-result">PASS ${mode}</pre>`;
+  document.body.innerHTML = `<pre id="browser-smoke-result">PASS ${mode}${window.logPressureResult ? " " + JSON.stringify(window.logPressureResult) : ""}</pre>`;
 } catch (error) {
   document.documentElement.dataset.browserSmoke = "failed";
   document.body.innerHTML = `<pre id="browser-smoke-result"></pre>`;

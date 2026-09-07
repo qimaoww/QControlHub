@@ -195,9 +195,40 @@ func (s *Store) AgentConfig(ctx context.Context, agentID string, engine core.Eng
 // plane uses this for fleet-level deployment drift and listener summaries;
 // general configuration workspaces remain isolated through ListConfigs.
 func (s *Store) ListAgentConfigs(ctx context.Context) ([]core.Config, error) {
+	return s.listAgentConfigs(ctx, "")
+}
+
+// AgentConfigs filters before fetching or decrypting configuration bodies.
+func (s *Store) AgentConfigs(ctx context.Context, agentID string) ([]core.Config, error) {
+	if agentID == "" {
+		return nil, ErrInvalid
+	}
+	configs, err := s.listAgentConfigs(ctx, agentID)
+	if err != nil || len(configs) > 0 {
+		return configs, err
+	}
+	var exists bool
+	if err := s.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agents WHERE id=$1 AND revoked_at IS NULL)`, agentID).Scan(&exists); err != nil {
+		return nil, err
+	}
+	if !exists {
+		return nil, ErrNotFound
+	}
+	return configs, nil
+}
+
+func (s *Store) listAgentConfigs(ctx context.Context, agentID string) ([]core.Config, error) {
+	where := "agent_id IS NOT NULL"
+	var args []any
+	if agentID != "" {
+		where = "agent_id=$1"
+		args = []any{agentID}
+	}
 	rows, err := s.pool.Query(ctx, `
 		SELECT id,COALESCE(agent_id,''),name,description,engine,content,version,created_at,updated_at
-		FROM configs WHERE agent_id IS NOT NULL AND deleted_at IS NULL ORDER BY updated_at DESC`)
+		FROM configs WHERE `+where+` AND deleted_at IS NULL
+		  AND agent_id IN (SELECT id FROM agents WHERE revoked_at IS NULL)
+		ORDER BY updated_at DESC`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -220,10 +251,8 @@ func (s *Store) ListAgentConfigs(ctx context.Context) ([]core.Config, error) {
 
 func (s *Store) LatestDeployments(ctx context.Context) ([]core.Deployment, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT DISTINCT ON (agent_id,engine) agent_id,engine,COALESCE(config_id,''),COALESCE(config_version,0),finished_at
-		FROM tasks
-		WHERE action IN ('deploy','import-existing') AND status='succeeded' AND finished_at IS NOT NULL
-		ORDER BY agent_id,engine,finished_at DESC`)
+		SELECT agent_id,engine,COALESCE(config_id,''),COALESCE(config_version,0),finished_at
+		FROM (`+latestDeploymentsSQL+`) latest ORDER BY agent_id,engine`)
 	if err != nil {
 		return nil, err
 	}
@@ -238,6 +267,21 @@ func (s *Store) LatestDeployments(ctx context.Context) ([]core.Deployment, error
 	}
 	return result, rows.Err()
 }
+
+// Probe the existing (agent_id,engine,finished_at) partial index once per
+// possible service instead of scanning every successful deployment retained
+// in tasks. Do not restrict this to current capabilities: historical deployed
+// services (and revoked-node history) retain the same listing semantics.
+const latestDeploymentsSQL = `
+	SELECT agent.id AS agent_id,latest.engine,latest.config_id,latest.config_version,latest.finished_at
+	FROM agents agent CROSS JOIN unnest(ARRAY['mihomo','xray','sing-box','ss-rust']::text[]) selected(engine)
+	CROSS JOIN LATERAL (
+		SELECT task.engine,task.config_id,task.config_version,task.finished_at
+		FROM tasks task
+		WHERE task.agent_id=agent.id AND task.engine=selected.engine
+		  AND task.action IN ('deploy','import-existing') AND task.status='succeeded' AND task.finished_at IS NOT NULL
+		ORDER BY task.finished_at DESC LIMIT 1
+	) latest`
 
 // SaveAgentConfig creates or updates an agent-owned configuration using an
 // optimistic version check. expectedVersion must be zero for the first save.

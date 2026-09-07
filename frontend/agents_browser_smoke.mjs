@@ -233,6 +233,7 @@ async function runMode(mode) {
       "passed",
       `Chrome ${mode} smoke 未通过：${result?.detail || "无错误详情"}\n${stderr}`,
     );
+    if (mode === "logs") process.stdout.write(`${result.detail}\n`);
   } finally {
     if (child) await stopBrowser(child);
     await rm(profile, {
@@ -245,7 +246,7 @@ async function runMode(mode) {
 }
 
 try {
-  for (const mode of ["admin", "empty", "readonly", "ports"]) await runMode(mode);
+  for (const mode of (process.env.QCH_BROWSER_SMOKE_MODE ? [process.env.QCH_BROWSER_SMOKE_MODE] : ["admin", "empty", "readonly", "ports", "logs"])) await runMode(mode);
   process.stdout.write("agents browser runtime smoke passed\n");
 } finally {
   await new Promise((resolve) => server.close(resolve));
