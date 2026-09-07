@@ -111,7 +111,7 @@ die() {
 }
 
 bootstrap_streamed_script() {
-    local script_path install_dir persisted_install_dir origin_url branch marker_file marker_temp bootstrap_ref base_url script_temp compose_temp install_label
+    local script_path install_dir saved_work_dir origin_url branch marker_file marker_temp bootstrap_ref base_url script_temp compose_temp install_label
     script_path="${BASH_SOURCE[0]}"
     case "$script_path" in
         /dev/fd/*|/proc/self/fd/*) ;;
@@ -123,8 +123,6 @@ bootstrap_streamed_script() {
         install_dir="$QCH_INSTALL_DIR"
     elif [ -f "$PWD/.qcontrolhub-quick-start" ] || { [ -d "$PWD/.git" ] && [ -f "$PWD/deploy/quick-start.sh" ] && [ -f "$PWD/docker-compose.yml" ]; }; then
         install_dir="$PWD"
-    elif persisted_install_dir="$(read_install_dir_preference)" && [ -n "$persisted_install_dir" ]; then
-        install_dir="$persisted_install_dir"
     else
         install_dir="$PWD/qcontrolhub"
     fi
@@ -195,9 +193,14 @@ bootstrap_streamed_script() {
     mv -f -- "$marker_temp" "$marker_file"
     marker_temp=""
     trap - EXIT HUP INT TERM
-    persist_install_dir_preference "$install_dir" ||
-        echo "警告：无法保存安装目录，下次从远程一键命令运行时可能需要重新设置目录：$install_dir" >&2
-    export QCH_INSTALL_DIR="$install_dir"
+    # 菜单保存的是部署工作目录，可能已有配置和数据；不能把它当作
+    # 远程脚本的下载目录。先安全地更新运行脚本，再将保存的目录传入。
+    if [ -z "${QCH_INSTALL_DIR:-}" ] &&
+        saved_work_dir="$(read_install_dir_preference)" && [ -n "$saved_work_dir" ]; then
+        export QCH_INSTALL_DIR="$saved_work_dir"
+    else
+        export QCH_INSTALL_DIR="$install_dir"
+    fi
     exec "$install_dir/deploy/quick-start.sh" "$@"
 }
 
