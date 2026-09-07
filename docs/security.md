@@ -37,7 +37,7 @@ systemd helper 保留 `ProtectSystem=strict`、`NoNewPrivileges`，仅有 `CAP_N
 
 主机指标复用已认证 WSS 心跳，不开放额外监听端口。Linux Agent 只读取内核提供的 `/proc/stat`、`/proc/meminfo`、路由与网卡字节计数，并读取根文件系统容量；不采集进程列表、文件名或配置正文。控制面会校验指标范围、使用服务器接收时间盖章并仅保存最新快照，前端轮询接口仍要求有效的 HttpOnly 会话。
 
-端口流量监控与可选配额同样通过已认证 WSS 同步，不开放管理端口。QAgent 只在专用 `inet qcontrolhub` nftables 表中创建带策略 ID 注释的计数/丢弃规则，不接受控制面传入 nftables 表达式，也不刷新管理员已有规则。生产单元的 `CAP_NET_ADMIN` 用于这一固定操作；端口、协议、策略数量、计数范围及策略归属会在控制面和 Agent 两端校验。计数状态写入 QAgent 私有状态目录并使用原子替换。Agent 只上报累计计数、瞬时速率和执行状态；控制面拒绝重复、旧代次和乱序样本后计算增量，并将每日聚合保存在 PostgreSQL。未设置或取消配额只禁止丢弃规则，不停止计量。
+端口流量监控与可选配额通过已认证 WSS 同步，不开放公网管理端口。原生统计 API 仅绑定节点回环地址：Xray 为 `127.0.0.1:10085`，具备该功能的 sing-box 为 `127.0.0.1:10086`；API 无独立认证，节点本地用户属于信任边界，不能将这些端口转发到公网。QAgent 只在专用 `inet qcontrolhub` nftables 表中创建带策略 ID 注释的计数/丢弃规则，不接受控制面传入 nftables 表达式，也不刷新管理员已有规则。生产单元的 `CAP_NET_ADMIN` 用于这一固定操作；端口、协议、策略数量、计数范围及策略归属在控制面和 Agent 两端校验。计数状态原子写入 Agent 私有目录；来源、映射、四方向累计、原始基线与代次也保存 PostgreSQL。控制面拒绝重复、旧代次和乱序样本后计算增量，并保存每日聚合。未设置或取消配额只禁止丢弃规则，不停止计量。标记计量使用专用出口 socket mark 和 conntrack，已有 fwmark 策略路由会阻止自动迁移，避免更改管理员路由语义。
 
 大陆访问限制与流量配额的主机防火墙机制相互独立。Mihomo、Xray 和 sing-box 的大陆限制写入目标配置的入站标签路由规则，只作用于页面列出的节点、内核、标签和端口；不会封禁节点整机出口或 QAgent WSS。关闭限制时只删除 QControlHub 为对应入站注入的规则；最后一个受管规则关闭后才清理本功能创建的 provider、规则集或拒绝出站，并恢复本功能改动的路由字段，管理员原有配置及顺序保持不变。外部 CIDR 下载必须是固定 HTTPS URL、响应成功、大小受限且每一行均为规范 CIDR，异常更新保留进程内最后一份已验证数据；没有有效数据时 fail closed 并拒绝保存新限制。配置碰到 QControlHub 保留的规则、出站或 provider 标签被其他内容占用时同样拒绝修改，避免覆盖管理员规则。
 
@@ -67,7 +67,7 @@ systemd helper 保留 `ProtectSystem=strict`、`NoNewPrivileges`，仅有 `CAP_N
 
 ## 主机权限
 
-Agent 需要写入固定内核配置路径、调用 `systemctl`，并用 `CAP_NET_ADMIN` 管理专用端口配额表，systemd 示例因此以 root 运行。该单元使用只读系统视图和 `ReadWritePaths` 限定可写目录，但 root Agent 仍然属于高价值进程。真实内核校验由 systemd 通过一次性沙箱单元直接以 `qcontrolhub-core` 身份启动，因此 Agent 不再依赖 `CAP_SETUID`/`CAP_SETGID`，也兼容只升级了 Agent 二进制、尚未刷新旧服务单元的节点；四个内核继续以该专用非 root 用户运行，只获得监听低端口所需的 `CAP_NET_BIND_SERVICE`。Agent 只会为固定 `qagent-*` 服务名同步内核服务的这一项能力，不修改自定义服务：
+Agent 需要写入固定内核配置路径、调用 `systemctl`，并用 `CAP_NET_ADMIN` 管理专用端口配额表，systemd 示例因此以 root 运行。该单元使用只读系统视图和 `ReadWritePaths` 限定可写目录，但 root Agent 仍然属于高价值进程。真实内核校验由 systemd 通过一次性沙箱单元直接以 `qcontrolhub-core` 身份启动，因此 Agent 不再依赖 `CAP_SETUID`/`CAP_SETGID`，也兼容只升级 Agent 二进制的节点。四个内核以专用非 root 用户运行并获得 `CAP_NET_BIND_SERVICE`；Mihomo、sing-box、SS Rust 服务还获得出口 socket 标记所需的 `CAP_NET_ADMIN`，这是额外的网络管理权限，不应将非 root 身份等同于无网络管理能力。Xray 不增加该权限。Agent 只为固定 QAgent 服务同步这些权限，不修改自定义服务：
 
 - 只从可信构建产物安装 Agent，限制二进制和环境文件为 root 可写。
 - 只启用实际安装的内核，并核对服务名和绝对配置路径。
