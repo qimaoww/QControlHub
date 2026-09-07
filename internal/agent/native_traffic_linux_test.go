@@ -17,6 +17,8 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/core"
 	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
 	"golang.org/x/net/proxy"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 // Explicit opt-in, isolated loopback and local fixture binaries: never starts
@@ -261,7 +263,57 @@ func TestNativeTrafficCores(t *testing.T) {
 				}
 			}
 			testCoreUDPAccounting(t, ctx, engine, plan, nil)
+			testStatsAPIProxyIsolation(t, ctx, engine, plan)
 		})
+	}
+}
+
+type resetStatsTestCodec struct{ nativeStatsCodec }
+
+func (resetStatsTestCodec) Marshal(any) ([]byte, error) { return []byte{0x10, 1}, nil }
+
+func testStatsAPIProxyIsolation(t *testing.T, ctx context.Context, engine core.Engine, plan serverconfig.AccountingPlan) {
+	t.Helper()
+	before, err := queryNativeTraffic(ctx, engine)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, port, err := net.SplitHostPort(plan.API)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, host := range []string{"127.0.0.1", "localhost", "::ffff:127.0.0.1"} {
+		dialer, err := proxy.SOCKS5("tcp", "127.0.0.1:1080", nil, proxy.Direct)
+		if err != nil {
+			t.Fatal(err)
+		}
+		connection, err := grpc.NewClient(plan.API, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
+			return dialer.(proxy.ContextDialer).DialContext(ctx, "tcp", net.JoinHostPort(host, port))
+		}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		probe, cancel := context.WithTimeout(ctx, 600*time.Millisecond)
+		service := "xray.app.stats.command.StatsService"
+		if engine == core.EngineSingBox {
+			service = "v2ray.core.app.stats.command.StatsService"
+		}
+		var response nativeStatsResponse
+		err = connection.Invoke(probe, "/"+service+"/QueryStats", &nativeStatsRequest{}, &response, grpc.ForceCodec(resetStatsTestCodec{}))
+		cancel()
+		_ = connection.Close()
+		if err == nil {
+			t.Fatalf("proxy accessed reset-capable API through %s", host)
+		}
+	}
+	after, err := queryNativeTraffic(ctx, engine)
+	if err != nil {
+		t.Fatalf("Agent lost local API access: %v", err)
+	}
+	for key, value := range before {
+		if after[key] < value {
+			t.Fatalf("API attack reset %s: %d -> %d", key, value, after[key])
+		}
 	}
 }
 

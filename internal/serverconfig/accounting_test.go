@@ -42,7 +42,7 @@ func TestAccountingPlansAreIdempotentAndPerPort(t *testing.T) {
 					key, target = "routing", "outboundTag"
 				}
 				rules := mapValue(root[key])["rules"].([]any)
-				first := mapValue(rules[0])[target]
+				first := mapValue(rules[1])[target]
 				if first != "reject" && first != "blocked" {
 					t.Fatalf("security rule reordered: %v", rules)
 				}

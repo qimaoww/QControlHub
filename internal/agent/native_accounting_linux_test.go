@@ -99,3 +99,81 @@ func TestNativeAccountingLifecycle(t *testing.T) {
 		t.Fatal("process epoch not checkpointed")
 	}
 }
+
+func TestMarkedAccountingFailurePreservesAllLegs(t *testing.T) {
+	m, backend, now, policy := newAccuracyTrafficManager(t)
+	var sourceErr error
+	m.nativeSource = func(context.Context, core.Engine) (nativeAccountingSnapshot, error) {
+		return nativeAccountingSnapshot{Plan: serverconfig.AccountingPlan{Source: "nft-dual", Ports: []serverconfig.AccountingPort{{Port: policy.Port, Mark: 0x51430000 | uint32(policy.Port)}}}}, sourceErr
+	}
+	m.collect(context.Background(), false)
+	for _, direction := range []string{"in", "out", "targetin", "targetout"} {
+		backend.counters[trafficCounterName(m.records[policy.ID], direction, "tcp")] = 100
+	}
+	sourceErr = errors.New("temporary process lookup failure")
+	for i := 0; i < 3; i++ {
+		*now = now.Add(time.Second)
+		m.collect(context.Background(), false)
+	}
+	sourceErr = nil
+	*now = now.Add(time.Second)
+	m.collect(context.Background(), false)
+	got := m.Snapshot()[0]
+	if got.ReceivedBytes != 200 || got.SentBytes != 200 || got.Accounting.ClientReceived != 100 || got.Accounting.ClientSent != 100 {
+		t.Fatalf("recovery lost a leg: %+v / %+v", got, got.Accounting)
+	}
+	m.collect(context.Background(), false)
+	if got := m.Snapshot()[0]; got.UsedBytes != 400 {
+		t.Fatalf("recovery rebilled bytes: %+v", got)
+	}
+}
+
+func TestQuotaRelaxationDuringAccountingFailure(t *testing.T) {
+	for _, change := range []string{"disable", "raise", "rollover"} {
+		t.Run(change, func(t *testing.T) {
+			m, _, now, policy := newAccuracyTrafficManager(t)
+			counters := map[string]uint64{}
+			var sourceErr error
+			m.nativeSource = func(context.Context, core.Engine) (nativeAccountingSnapshot, error) {
+				return nativeAccountingSnapshot{Plan: serverconfig.AccountingPlan{Source: "core-api", Ports: []serverconfig.AccountingPort{{Port: policy.Port, Inbound: "a"}}}, Counters: counters, ProcessEpoch: "same"}, sourceErr
+			}
+			policy.AutoBlock, policy.LimitBytes = true, 100
+			if err := m.SetPolicies(context.Background(), []core.PortTrafficPolicy{policy}, policy.AgentID); err != nil {
+				t.Fatal(err)
+			}
+			counters["inbound>>>a>>>traffic>>>uplink"] = 110
+			*now = now.Add(time.Second)
+			m.collect(context.Background(), false)
+			if !m.Snapshot()[0].Blocked {
+				t.Fatal("setup not blocked")
+			}
+			sourceErr = errors.New("stats API unavailable")
+			switch change {
+			case "disable":
+				policy.AutoBlock = false
+			case "raise":
+				policy.LimitBytes = 1000
+			case "rollover":
+				*now = time.Date(2026, 9, 1, 0, 0, 1, 0, time.UTC)
+			}
+			if err := m.SetPolicies(context.Background(), []core.PortTrafficPolicy{policy}, policy.AgentID); err != nil {
+				t.Fatal(err)
+			}
+			m.collect(context.Background(), false)
+			if m.Snapshot()[0].Blocked {
+				t.Fatal("quota relaxation retained drop rules")
+			}
+			sourceErr = nil
+			counters["inbound>>>a>>>traffic>>>uplink"] = 120
+			*now = now.Add(time.Second)
+			m.collect(context.Background(), false)
+			got := m.Snapshot()[0]
+			if got.LifetimeReceivedBytes != 120 || got.Blocked {
+				t.Fatalf("invalid recovery: %+v", got)
+			}
+			if change == "rollover" && got.ReceivedBytes != 10 {
+				t.Fatalf("old usage billed to new period: %+v", got)
+			}
+		})
+	}
+}

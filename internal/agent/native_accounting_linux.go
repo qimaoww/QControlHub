@@ -31,6 +31,21 @@ func (e *Executor) prepareNativeAccountingContent(ctx context.Context, engine co
 	if spec != DefaultSpecsForServiceManager(e.serviceManager().Kind())[engine] {
 		return content, ""
 	}
+	_, compilationErr := serverconfig.PrepareAccounting(engine, content)
+	if compilationErr != nil && engine == core.EngineSingBox {
+		_, compilationErr = serverconfig.PrepareMarkedSingBoxAccounting(content)
+	}
+	if compilationErr != nil && strings.Contains(content, "qch-trf-") {
+		previous, err := readConfigurationFile(spec.ConfigPath)
+		if err != nil {
+			return content, "accounting update rejected: " + err.Error()
+		}
+		source, err := serverconfig.AccountingUpdateSource(engine, content, previous)
+		if err != nil {
+			return content, "accounting update rejected: " + err.Error()
+		}
+		content = source
+	}
 	if engine == core.EngineSingBox {
 		if err := validatePrivilegedExecutable(spec.Binary); err != nil {
 			return content, "native accounting unavailable: " + err.Error()

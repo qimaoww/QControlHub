@@ -602,10 +602,17 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (string, erro
 		}
 		return e.importExistingConfig(ctx, task.Engine, spec, existing, task.ConfigContent)
 	case core.ActionValidate:
-		task.ConfigContent, _ = e.prepareNativeAccountingContent(ctx, task.Engine, spec, task.ConfigContent)
+		prepared, warning := e.prepareNativeAccountingContent(ctx, task.Engine, spec, task.ConfigContent)
+		if warning != "" && strings.Contains(task.ConfigContent, "qch-trf-") {
+			return warning, errors.New("cannot safely regenerate managed accounting configuration")
+		}
+		task.ConfigContent = prepared
 		return e.validate(ctx, task.Engine, spec, task.ConfigContent)
 	case core.ActionDeploy:
 		prepared, accountingWarning := e.prepareNativeAccountingContent(ctx, task.Engine, spec, task.ConfigContent)
+		if accountingWarning != "" && strings.Contains(task.ConfigContent, "qch-trf-") {
+			return accountingWarning, errors.New("cannot safely regenerate managed accounting configuration")
+		}
 		task.ConfigContent = prepared
 		validation, err := e.validate(ctx, task.Engine, spec, task.ConfigContent)
 		if err != nil {

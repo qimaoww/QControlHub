@@ -112,6 +112,26 @@ func prepareTaggedAccounting(engine core.Engine, root map[string]any, plan *Acco
 	if route["balancers"] != nil || root["endpoints"] != nil {
 		return fmt.Errorf("balancer/endpoint routing requires explicit accounting mapping")
 	}
+	// Loopback is reachable through direct proxy outbounds. Deny these
+	// destination ports before any user route, including domain-based routes,
+	// so DNS aliases and IP encodings cannot expose the reset-capable API.
+	guard := map[string]any{"port": []int{10085, 10086}, "action": "reject"}
+	if xray {
+		guard = map[string]any{"type": "field", "port": "10085,10086", "outboundTag": "qch-stat-block"}
+		found := false
+		for _, raw := range outbounds {
+			out := mapValue(raw)
+			if stringValue(out["tag"]) == "qch-stat-block" {
+				if !accountingGeneratedSubset([]any{out}, []any{map[string]any{"tag": "qch-stat-block", "protocol": "blackhole"}}) {
+					return fmt.Errorf("reserved statistics protection outbound conflicts with custom configuration")
+				}
+				found = true
+			}
+		}
+		if !found {
+			outbounds = append(outbounds, map[string]any{"tag": "qch-stat-block", "protocol": "blackhole"})
+		}
+	}
 	var originals []any
 	var priorClones []any
 	byTag := map[string]map[string]any{}
@@ -145,6 +165,9 @@ func prepareTaggedAccounting(engine core.Engine, root map[string]any, plan *Acco
 	var priorRules []any
 	rules, _ := route["rules"].([]any)
 	for _, raw := range rules {
+		if accountingGeneratedSubset([]any{raw}, []any{guard}) {
+			continue
+		}
 		rule := mapValue(raw)
 		if rule == nil {
 			return fmt.Errorf("invalid routing rule")
@@ -185,7 +208,7 @@ func prepareTaggedAccounting(engine core.Engine, root map[string]any, plan *Acco
 		}
 		plan.Ports = append(plan.Ports, entry)
 	}
-	var compiled []any
+	compiled := []any{guard}
 	for _, raw := range originalRules {
 		rule := mapValue(raw)
 		target := stringValue(rule[targetKey])

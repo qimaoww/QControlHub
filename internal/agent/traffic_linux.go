@@ -8,10 +8,12 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -299,6 +301,16 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 		if periodErr != nil {
 			return manager.setUnavailableLocked(periodErr)
 		}
+		// Sampling is transactional: a failed source must not consume the
+		// listener delta before the marked target counters can be collected.
+		previousRecord := *record
+		previousRecord.KernelCounters = maps.Clone(record.KernelCounters)
+		if record.Accounting != nil {
+			accounting := *record.Accounting
+			accounting.Counters = maps.Clone(record.Accounting.Counters)
+			accounting.Outbounds = slices.Clone(record.Accounting.Outbounds)
+			previousRecord.Accounting = &accounting
+		}
 		receivedDelta, sentDelta := collectTrafficCounterDeltas(counters, record)
 		if manager.nativeSource != nil {
 			err := nativeErrors[record.Policy.Engine]
@@ -325,8 +337,21 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 				}
 				if record.Accounting != nil && record.Accounting.Source != "listener" {
 					// Preserve native baselines and do not substitute network bytes.
+					message := record.AccountingError
+					*record = previousRecord
+					record.AccountingError = message
 					record.ReceiveBPS, record.SendBPS = 0, 0
 					next := *record
+					// Explicit quota relaxation and calendar expiry do not depend
+					// on a working stats API. Keep accounting timestamps intact
+					// so recovery still commits every unreported byte.
+					if !record.Policy.AutoBlock || !record.PeriodEnd.After(now) ||
+						saturatedTrafficAdd(trafficUsed(record), record.QuotaBaselineBytes) < record.Policy.LimitBytes {
+						next.Blocked = false
+					}
+					if next.Blocked != record.Blocked {
+						manager.rulesDirty = true
+					}
 					desired[id] = &next
 					continue
 				}
