@@ -111,7 +111,7 @@ die() {
 }
 
 bootstrap_streamed_script() {
-    local script_path install_dir saved_work_dir origin_url branch marker_file marker_temp bootstrap_ref base_url script_temp compose_temp install_label
+    local script_path install_dir install_dir_source persisted_install_dir origin_url branch marker_file marker_temp bootstrap_ref base_url script_temp compose_temp install_label
     script_path="${BASH_SOURCE[0]}"
     case "$script_path" in
         /dev/fd/*|/proc/self/fd/*) ;;
@@ -121,10 +121,16 @@ bootstrap_streamed_script() {
     command -v curl >/dev/null 2>&1 || die "缺少依赖：curl"
     if [ -n "${QCH_INSTALL_DIR:-}" ]; then
         install_dir="$QCH_INSTALL_DIR"
+        install_dir_source="explicit"
     elif [ -f "$PWD/.qcontrolhub-quick-start" ] || { [ -d "$PWD/.git" ] && [ -f "$PWD/deploy/quick-start.sh" ] && [ -f "$PWD/docker-compose.yml" ]; }; then
         install_dir="$PWD"
+        install_dir_source="current"
+    elif persisted_install_dir="$(read_install_dir_preference)" && [ -n "$persisted_install_dir" ]; then
+        install_dir="$persisted_install_dir"
+        install_dir_source="preference"
     else
         install_dir="$PWD/qcontrolhub"
+        install_dir_source="default"
     fi
     case "$install_dir" in
         /*) ;;
@@ -133,6 +139,7 @@ bootstrap_streamed_script() {
     case "$install_dir" in
         *$'\n'*|*$'\r'*) die "QCH_INSTALL_DIR 不能包含换行" ;;
     esac
+    [ "$install_dir" != "/" ] || die "安装目录不能是文件系统根目录"
     [ ! -L "$install_dir" ] || die "安装目录不能是符号链接：$install_dir"
     marker_file="$install_dir/.qcontrolhub-quick-start"
     [ ! -L "$marker_file" ] || die "一键安装标记不能是符号链接：$marker_file"
@@ -159,6 +166,11 @@ bootstrap_streamed_script() {
                 die "旧版 Git 安装目录的运行文件包含未提交修改，请先处理"
             git -C "$install_dir" diff --cached --quiet -- deploy/quick-start.sh docker-compose.yml || \
                 die "旧版 Git 安装目录的运行文件包含已暂存修改，请先处理"
+        # A directory previously selected from the menu is explicit user
+        # intent. It can contain deployment state even when it predates the
+        # standalone bootstrap marker.
+        elif [ "$install_dir_source" = "preference" ]; then
+            :
         elif [ -n "$(ls -A "$install_dir")" ]; then
             die "安装目录已存在且不是 QControlHub 一键安装目录：$install_dir"
         fi
@@ -193,14 +205,9 @@ bootstrap_streamed_script() {
     mv -f -- "$marker_temp" "$marker_file"
     marker_temp=""
     trap - EXIT HUP INT TERM
-    # 菜单保存的是部署工作目录，可能已有配置和数据；不能把它当作
-    # 远程脚本的下载目录。先安全地更新运行脚本，再将保存的目录传入。
-    if [ -z "${QCH_INSTALL_DIR:-}" ] &&
-        saved_work_dir="$(read_install_dir_preference)" && [ -n "$saved_work_dir" ]; then
-        export QCH_INSTALL_DIR="$saved_work_dir"
-    else
-        export QCH_INSTALL_DIR="$install_dir"
-    fi
+    persist_install_dir_preference "$install_dir" ||
+        echo "警告：无法保存安装目录，下次从远程一键命令运行时可能需要重新设置目录：$install_dir" >&2
+    export QCH_INSTALL_DIR="$install_dir"
     exec "$install_dir/deploy/quick-start.sh" "$@"
 }
 
@@ -1399,6 +1406,20 @@ uninstall_services() {
     echo ""
 }
 
+prepare_action_and_work_dir() {
+    # The directory selector is part of the action menu, so resolve the saved
+    # work directory first. Otherwise option 4 displays the runtime script
+    # directory even though QCH_INSTALL_DIR has already been restored.
+    resolve_work_dir
+    if [ -z "$ACTION" ]; then
+        if [ -n "$MODE" ]; then
+            ACTION="install"
+        else
+            choose_action
+        fi
+    fi
+}
+
 # Keep the environment preparation functions sourceable for the isolated shell
 # regression without running Docker or mutating the caller's deployment.
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
@@ -1406,14 +1427,7 @@ if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
 fi
 
 # ---- 选择管理操作和部署方式 ----
-if [ -z "$ACTION" ]; then
-    if [ -n "$MODE" ]; then
-        ACTION="install"
-    else
-        choose_action
-    fi
-fi
-resolve_work_dir
+prepare_action_and_work_dir
 if [ "$ACTION" = "install" ]; then
     [ -n "$MODE" ] || choose_mode
 else
