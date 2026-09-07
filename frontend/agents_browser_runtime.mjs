@@ -1035,7 +1035,11 @@ async function testSystemTCPRuntime() {
     return;
   }
   const editor = () => card().querySelector(".bbr-editor");
-  const openEditor = () => card().querySelector('[data-bbr-dialog-open="bbr-editor-alpha"]').click();
+  const openEditor = () => {
+    const button = card().querySelector('[data-bbr-dialog-open="bbr-editor-alpha"]');
+    button.focus();
+    button.click();
+  };
   openEditor();
   assert.ok(editor().matches(":modal"), "参数编辑器不是模态弹窗");
   assert.equal(card().offsetHeight, height, "打开编辑器撑开了卡片");
@@ -1098,6 +1102,8 @@ async function testSystemTCPRuntime() {
   await refresh();
   backdropGesture("click", true);
   assert.equal(editor().open, false, "刷新打断了遮罩关闭手势");
+  await delay(50);
+  assert.equal(document.activeElement, card().querySelector('[data-bbr-dialog-open="bbr-editor-alpha"]'), "节点重排后关闭弹窗未恢复入口焦点");
   openEditor();
   assert.equal(field().value, "4096 262144 33554432", "遮罩关闭丢失草稿");
   testAPI.agents[0].metrics.bbr.parameters["net.ipv4.tcp_ecn"] = "2";
@@ -1161,6 +1167,16 @@ async function testSystemTCPRuntime() {
   openEditor();
   field().value = "4096 524288 67108864";
   field().dispatchEvent(new Event("input", { bubbles: true }));
+  editor().querySelector("[data-tcp-reset]").click();
+  await waitFor(() => document.querySelector("[data-confirm-dialog][open]"), "取消清空测试未显示确认框");
+  testAPI.agents.reverse();
+  await refresh();
+  testAPI.agents.reverse();
+  await refresh();
+  document.querySelector("[data-confirm-cancel]").click();
+  await delay(50);
+  assert.ok(editor().matches(":modal"), "取消清空后编辑弹窗丢失遮罩");
+  assert.equal(field().value, "4096 524288 67108864", "取消清空丢失草稿");
   testAPI.agentsFailure = true;
   editor().querySelector("[data-tcp-reset]").click();
   (await waitFor(() => document.querySelector("[data-confirm-dialog][open]"), "清空草稿未确认")).querySelector("[data-confirm-accept]").click();

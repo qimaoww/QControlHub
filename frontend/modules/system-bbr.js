@@ -218,10 +218,14 @@ export function installSystemBBR(ctx) {
       form.querySelectorAll("[data-tcp-selected]").forEach((input) => bindEvent(input, "change", capture));
       bindEvent(form.querySelector("[data-tcp-reset]"), "click", async () => {
         const epoch = state.navigationEpoch;
-        if (Object.keys(drafts[agent.id] || {}).length && !(await confirmAction("确定清空此节点未提交的 TCP 参数选择？已保存的系统配置不受影响。", "清空选择"))) return;
+        const accepted = !Object.keys(drafts[agent.id] || {}).length || await confirmAction("确定清空此节点未提交的 TCP 参数选择？已保存的系统配置不受影响。", "清空选择");
         if (state.route !== "system-bbr" || epoch !== state.navigationEpoch) return;
-        delete drafts[agent.id];
-        editorErrors.delete(agent.id);
+        if (accepted) {
+          delete drafts[agent.id];
+          editorErrors.delete(agent.id);
+        }
+        // Also restore modal state on cancellation: background reconciliation
+        // may have moved this dialog while the confirmation was on top.
         // Local editor state must settle even when the network is unavailable.
         render(lastAgents);
       });
