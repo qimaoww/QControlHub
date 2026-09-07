@@ -280,6 +280,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/agents/{id}/configs", s.requirePermission(core.PermissionAgentConfigRead, http.HandlerFunc(s.listAgentConfigs)))
 	mux.Handle("GET /api/v1/agents/{id}/configs/{engine}", s.requirePermission(core.PermissionAgentConfigRead, http.HandlerFunc(s.getAgentConfig)))
 	mux.Handle("PUT /api/v1/agents/{id}/configs/{engine}", s.requirePermission(core.PermissionAgentConfigWrite, http.HandlerFunc(s.putAgentConfig)))
+	mux.Handle("GET /api/v1/agents/{id}/configs/{engine}/files", s.requirePermission(core.PermissionAgentConfigRead, http.HandlerFunc(s.getAgentConfigFiles)))
+	mux.Handle("PUT /api/v1/agents/{id}/configs/{engine}/files", s.requirePermission(core.PermissionAgentConfigWrite, http.HandlerFunc(s.putAgentConfigFiles)))
 	mux.Handle("GET /api/v1/agents/{id}/configs/{engine}/workspace", s.requirePermission(core.PermissionAgentConfigRead, http.HandlerFunc(s.agentConfigWorkspace)))
 	mux.Handle("POST /api/v1/agents/{id}/configs/{engine}/plans", s.requirePermission(core.PermissionAgentConfigWrite, http.HandlerFunc(s.newServerPlan)))
 	mux.Handle("POST /api/v1/agents/{id}/configs/{engine}/server-inbounds", s.requirePermission(core.PermissionAgentConfigWrite, http.HandlerFunc(s.saveServerInbound)))
@@ -444,6 +446,10 @@ func (s *Server) putAgentConfig(w http.ResponseWriter, request *http.Request) {
 	}
 	input.AgentID = request.PathValue("id")
 	input.Engine = engine
+	s.saveAgentConfigResponse(w, request, input)
+}
+
+func (s *Server) saveAgentConfigResponse(w http.ResponseWriter, request *http.Request, input core.Config) {
 	config, err := s.store.SaveAgentConfig(request.Context(), input, input.Version)
 	if err != nil {
 		writeStoreError(w, err)

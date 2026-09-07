@@ -478,10 +478,14 @@ func managedCoreUnitLines(engine core.Engine, managed EngineSpec) []string {
 		lines = append(lines[:conditionIndex+1], append([]string{"ConditionPathExists=" + shadowsocksRustACLPath}, lines[conditionIndex+1:]...)...)
 	}
 	lines = append(lines, extraServiceLines...)
+	capabilities := "CAP_NET_BIND_SERVICE"
+	if engine != core.EngineXray {
+		capabilities += " CAP_NET_ADMIN"
+	}
 	lines = append(lines,
 		"LogNamespace=qagent-cores", "StandardOutput=journal", "StandardError=journal",
 		"Restart=on-failure", "RestartSec=3s", "TimeoutStopSec=20s", "NoNewPrivileges=true",
-		"CapabilityBoundingSet=CAP_NET_BIND_SERVICE", "AmbientCapabilities=CAP_NET_BIND_SERVICE",
+		"CapabilityBoundingSet="+capabilities, "AmbientCapabilities="+capabilities,
 		"ProtectSystem=strict", "ProtectHome=true", "PrivateTmp=true", "PrivateDevices=true",
 		"ProtectKernelTunables=true", "ProtectKernelModules=true", "ProtectKernelLogs=true",
 		"ProtectControlGroups=true", "ProtectClock=true", "RestrictSUIDSGID=true",
@@ -506,6 +510,9 @@ func validateManagedUnitFragment(contents []byte, engine core.Engine, managed En
 		if engine == core.EngineShadowsocksRust && line == "Environment=RUST_LOG=info" {
 			line = "Environment=RUST_LOG=" + managedSSRustLogFilter
 		}
+		if engine != core.EngineXray && (line == "CapabilityBoundingSet=CAP_NET_BIND_SERVICE" || line == "AmbientCapabilities=CAP_NET_BIND_SERVICE") {
+			line += " CAP_NET_ADMIN"
+		}
 		actual = append(actual, line)
 	}
 	if managedUnitLinesEqual(actual, expected) {
@@ -517,11 +524,13 @@ func validateManagedUnitFragment(contents []byte, engine core.Engine, managed En
 	// the same executable, user, filesystem, and sandbox contract. Accept only
 	// that historical template; arbitrary missing or extra directives still fail.
 	legacyOmissions := map[string]struct{}{
-		"LogNamespace=qagent-cores":                  {},
-		"StandardOutput=journal":                     {},
-		"StandardError=journal":                      {},
-		"CapabilityBoundingSet=CAP_NET_BIND_SERVICE": {},
-		"AmbientCapabilities=CAP_NET_BIND_SERVICE":   {},
+		"LogNamespace=qagent-cores":                                {},
+		"StandardOutput=journal":                                   {},
+		"StandardError=journal":                                    {},
+		"CapabilityBoundingSet=CAP_NET_BIND_SERVICE":               {},
+		"AmbientCapabilities=CAP_NET_BIND_SERVICE":                 {},
+		"CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_NET_ADMIN": {},
+		"AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_NET_ADMIN":   {},
 	}
 	legacy := make([]string, 0, len(expected)-len(legacyOmissions))
 	for _, line := range expected {
@@ -600,7 +609,7 @@ func validateManagedUnitDropIns(ctx context.Context, service string) error {
 		return fmt.Errorf("managed service effective DropInPaths cannot be read: %w", err)
 	}
 	allowed := map[string][][]byte{
-		filepath.Join(existingDiscoveryManagedUnitRoot, service+".d", "10-qcontrolhub-bind-low-ports.conf"): {[]byte(managedCoreCapabilityDropIn)},
+		filepath.Join(existingDiscoveryManagedUnitRoot, service+".d", "10-qcontrolhub-bind-low-ports.conf"): managedCapabilityDropInVariants(service),
 		filepath.Join(existingDiscoveryManagedUnitRoot, service+".d", "20-qcontrolhub-volatile-logs.conf"): {
 			[]byte(managedCoreLogDropIn), []byte(managedCoreLogFallbackDropIn),
 		},

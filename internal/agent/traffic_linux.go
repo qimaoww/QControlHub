@@ -33,22 +33,24 @@ type trafficCounterBackend interface {
 }
 
 type trafficRecord struct {
-	Policy                core.PortTrafficPolicy `json:"policy"`
-	ReceivedBytes         uint64                 `json:"received_bytes"`
-	SentBytes             uint64                 `json:"sent_bytes"`
-	LastKernelReceived    uint64                 `json:"last_kernel_received"`
-	LastKernelSent        uint64                 `json:"last_kernel_sent"`
-	PeriodStart           time.Time              `json:"period_start"`
-	PeriodEnd             time.Time              `json:"period_end"`
-	Blocked               bool                   `json:"blocked"`
-	ReceiveBPS            uint64                 `json:"-"`
-	SendBPS               uint64                 `json:"-"`
-	LastCollectedAt       time.Time              `json:"-"`
-	CounterEpoch          string                 `json:"counter_epoch,omitempty"`
-	LifetimeReceivedBytes uint64                 `json:"lifetime_received_bytes,omitempty"`
-	LifetimeSentBytes     uint64                 `json:"lifetime_sent_bytes,omitempty"`
-	QuotaBaselineBytes    uint64                 `json:"quota_baseline_bytes,omitempty"`
-	KernelCounters        map[string]uint64      `json:"kernel_counters,omitempty"`
+	Accounting            *core.TrafficAccounting `json:"accounting,omitempty"`
+	AccountingError       string                  `json:"-"`
+	Policy                core.PortTrafficPolicy  `json:"policy"`
+	ReceivedBytes         uint64                  `json:"received_bytes"`
+	SentBytes             uint64                  `json:"sent_bytes"`
+	LastKernelReceived    uint64                  `json:"last_kernel_received"`
+	LastKernelSent        uint64                  `json:"last_kernel_sent"`
+	PeriodStart           time.Time               `json:"period_start"`
+	PeriodEnd             time.Time               `json:"period_end"`
+	Blocked               bool                    `json:"blocked"`
+	ReceiveBPS            uint64                  `json:"-"`
+	SendBPS               uint64                  `json:"-"`
+	LastCollectedAt       time.Time               `json:"-"`
+	CounterEpoch          string                  `json:"counter_epoch,omitempty"`
+	LifetimeReceivedBytes uint64                  `json:"lifetime_received_bytes,omitempty"`
+	LifetimeSentBytes     uint64                  `json:"lifetime_sent_bytes,omitempty"`
+	QuotaBaselineBytes    uint64                  `json:"quota_baseline_bytes,omitempty"`
+	KernelCounters        map[string]uint64       `json:"kernel_counters,omitempty"`
 }
 
 type trafficState struct {
@@ -57,15 +59,16 @@ type trafficState struct {
 }
 
 type TrafficManager struct {
-	mu         sync.Mutex
-	statePath  string
-	backend    trafficCounterBackend
-	records    map[string]*trafficRecord
-	snapshot   []core.PortTrafficUsage
-	dirty      bool
-	rulesDirty bool
-	bootID     string
-	now        func() time.Time
+	nativeSource func(context.Context, core.Engine) (nativeAccountingSnapshot, error)
+	mu           sync.Mutex
+	statePath    string
+	backend      trafficCounterBackend
+	records      map[string]*trafficRecord
+	snapshot     []core.PortTrafficUsage
+	dirty        bool
+	rulesDirty   bool
+	bootID       string
+	now          func() time.Time
 }
 
 func NewTrafficManager(agentStatePath string) *TrafficManager {
@@ -269,6 +272,18 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 		manager.rulesDirty = true
 	}
 	desired := make(map[string]*trafficRecord, len(manager.records))
+	nativeSnapshots := map[core.Engine]nativeAccountingSnapshot{}
+	nativeErrors := map[core.Engine]error{}
+	if manager.nativeSource != nil {
+		for _, record := range manager.records {
+			engine := record.Policy.Engine
+			if _, checked := nativeErrors[engine]; checked {
+				continue
+			}
+			snapshot, err := manager.nativeSource(ctx, engine)
+			nativeSnapshots[engine], nativeErrors[engine] = snapshot, err
+		}
+	}
 	for _, id := range sortedTrafficRecordIDs(manager.records) {
 		record := manager.records[id]
 		if record.CounterEpoch == "" {
@@ -285,6 +300,38 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 			return manager.setUnavailableLocked(periodErr)
 		}
 		receivedDelta, sentDelta := collectTrafficCounterDeltas(counters, record)
+		if manager.nativeSource != nil {
+			err := nativeErrors[record.Policy.Engine]
+			if err == nil {
+				previousEpoch := record.CounterEpoch
+				if nativeSnapshots[record.Policy.Engine].Plan.Source == "nft-dual" {
+					err = prepareMarkedAccounting(record, nativeSnapshots[record.Policy.Engine])
+					if err == nil {
+						receivedDelta, sentDelta = collectMarkedAccounting(counters, record, receivedDelta, sentDelta, previousEpoch != record.CounterEpoch)
+					}
+				} else {
+					receivedDelta, sentDelta, err = collectNativeAccounting(record, nativeSnapshots[record.Policy.Engine])
+				}
+				if previousEpoch != record.CounterEpoch {
+					manager.rulesDirty = true
+				}
+				manager.dirty = true
+			}
+			record.AccountingError = ""
+			if err != nil {
+				record.AccountingError = err.Error()
+				if len(record.AccountingError) > 400 {
+					record.AccountingError = record.AccountingError[:400]
+				}
+				if record.Accounting != nil && record.Accounting.Source != "listener" {
+					// Preserve native baselines and do not substitute network bytes.
+					record.ReceiveBPS, record.SendBPS = 0, 0
+					next := *record
+					desired[id] = &next
+					continue
+				}
+			}
+		}
 		if !record.PeriodStart.Equal(periodStart) || !record.PeriodEnd.Equal(periodEnd) {
 			record.ReceivedBytes, record.SentBytes = 0, 0
 			record.QuotaBaselineBytes = 0
@@ -296,7 +343,7 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 			record.ReceiveBPS, record.SendBPS = 0, 0
 			record.PeriodStart, record.PeriodEnd = periodStart, periodEnd
 			manager.dirty = true
-		} else if record.Blocked && !hasNamedTrafficCounters(counters, record) {
+		} else if record.Blocked && record.Accounting == nil && !hasNamedTrafficCounters(counters, record) {
 			// Only legacy anonymous counters count rejected attempts. Named
 			// counters stop at the actual drop rule; their final increment is
 			// still valid even when it arrived during the rule transaction.
@@ -381,21 +428,35 @@ func (manager *TrafficManager) refreshSnapshotLocked(available bool, message str
 	result := make([]core.PortTrafficUsage, 0, len(manager.records))
 	for _, id := range sortedTrafficRecordIDs(manager.records) {
 		record := manager.records[id]
+		accounting := record.Accounting
+		if accounting != nil {
+			data, _ := json.Marshal(accounting)
+			accounting = nil
+			_ = json.Unmarshal(data, &accounting)
+		}
+		healthMessage := message
+		if record.AccountingError != "" {
+			healthMessage = strings.TrimSpace(healthMessage + "; dual accounting unavailable: " + record.AccountingError)
+		}
+		if len(healthMessage) > 500 {
+			healthMessage = string([]rune(healthMessage)[:min(500, len([]rune(healthMessage)))])
+		}
 		result = append(result, core.PortTrafficUsage{
 			PolicyID: id, ResetGeneration: record.Policy.ResetGeneration,
 			ReceivedBytes: record.ReceivedBytes, SentBytes: record.SentBytes,
 			UsedBytes: trafficUsed(record), ReceiveBPS: record.ReceiveBPS, SendBPS: record.SendBPS,
 			PeriodStart: record.PeriodStart, PeriodEnd: record.PeriodEnd, Blocked: record.Blocked,
-			EnforcementAvailable: available, EnforcementError: message,
+			EnforcementAvailable: available && !(record.AccountingError != "" && accounting != nil && accounting.Source != "listener"), EnforcementError: healthMessage,
 			CollectedAt: record.LastCollectedAt, CounterEpoch: record.CounterEpoch,
 			LifetimeReceivedBytes: record.LifetimeReceivedBytes, LifetimeSentBytes: record.LifetimeSentBytes,
+			Accounting: accounting,
 		})
 	}
 	manager.snapshot = result
 }
 
 func sameTrafficCounter(left, right core.PortTrafficPolicy) bool {
-	return left.Port == right.Port && left.Protocol == right.Protocol && left.Cycle == right.Cycle &&
+	return left.Engine == right.Engine && left.Port == right.Port && left.Protocol == right.Protocol && left.Cycle == right.Cycle &&
 		core.UTCDate(left.CycleAnchor).Equal(core.UTCDate(right.CycleAnchor)) && left.ResetGeneration == right.ResetGeneration
 }
 
@@ -499,6 +560,16 @@ func trafficRuleSetComplete(counters map[string]uint64, records map[string]*traf
 				}
 			}
 		}
+		if record.Accounting != nil && record.Accounting.Source == "nft-dual" {
+			for _, protocol := range []string{"tcp", "udp"} {
+				for _, direction := range []string{"targetin", "targetout"} {
+					name := trafficCounterName(record, direction, protocol)
+					if _, exists := counters[name]; !exists || counters["rule:"+name] != 1 {
+						return false
+					}
+				}
+			}
+		}
 	}
 	return true
 }
@@ -552,6 +623,23 @@ func renderTrafficRules(records map[string]*trafficRecord, tableExists bool, cou
 	active := make(map[string]bool)
 	for _, id := range sortedTrafficRecordIDs(records) {
 		record := records[id]
+		if record.Accounting != nil && record.Accounting.Source == "nft-dual" {
+			mark := record.Accounting.Mark
+			for _, protocol := range []string{"tcp", "udp"} {
+				for _, direction := range []string{"targetin", "targetout"} {
+					name := trafficCounterName(record, direction, protocol)
+					active[name] = true
+					if _, exists := counters[name]; !exists {
+						fmt.Fprintf(&script, "add counter inet %s %s\n", trafficTableName, name)
+					}
+					chain, match := "input", fmt.Sprintf("ct direction reply ct mark %d", mark)
+					if direction == "targetout" {
+						chain, match = "output", fmt.Sprintf("ct direction original meta mark %d ct mark set meta mark", mark)
+					}
+					fmt.Fprintf(&script, "add rule inet %s %s meta l4proto %s %s counter name %s comment %s\n", trafficTableName, chain, protocol, match, name, strconv.Quote(trafficRuleComment(id, direction, protocol)))
+				}
+			}
+		}
 		for _, protocol := range trafficProtocols(record.Policy.Protocol) {
 			for _, direction := range []string{"in", "out"} {
 				name := trafficCounterName(record, direction, protocol)
@@ -590,7 +678,7 @@ func renderTrafficRules(records map[string]*trafficRecord, tableExists bool, cou
 func validTrafficCounterName(name string) bool {
 	parts := strings.Split(name, "_")
 	return len(parts) == 6 && parts[0] == "qch" && core.ValidPortTrafficPolicyID(parts[1]+"_"+parts[2]) &&
-		core.ValidTrafficCounterEpoch(parts[3]) && (parts[4] == "in" || parts[4] == "out") && (parts[5] == "tcp" || parts[5] == "udp")
+		core.ValidTrafficCounterEpoch(parts[3]) && (parts[4] == "in" || parts[4] == "out" || parts[4] == "targetin" || parts[4] == "targetout") && (parts[5] == "tcp" || parts[5] == "udp")
 }
 
 type nftBackend struct {
@@ -943,7 +1031,10 @@ func validateLoadedTrafficState(state trafficState, now time.Time) error {
 		if record.CounterEpoch != "" && !core.ValidTrafficCounterEpoch(record.CounterEpoch) {
 			return errors.New("traffic state contains an invalid counter epoch")
 		}
-		if len(record.KernelCounters) > 8 {
+		if !record.Accounting.Valid() {
+			return errors.New("traffic state contains invalid accounting metadata")
+		}
+		if len(record.KernelCounters) > 16 {
 			return errors.New("traffic state contains too many kernel counters")
 		}
 		for key := range record.KernelCounters {

@@ -9,7 +9,7 @@ directory="/var/lib/qcontrolhub-shadowsocks-rust"
 supervisor="supervise-daemon"
 respawn_delay=3
 respawn_max=5
-capabilities="^cap_net_bind_service"
+capabilities="^cap_net_bind_service,^cap_net_admin"
 no_new_privs=true
 umask=0027
 export RUST_LOG="info,shadowsocks_service::server::tcprelay=debug,shadowsocks_service::server::udprelay=debug"

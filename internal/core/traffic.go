@@ -37,34 +37,35 @@ func (cycle TrafficCycle) Valid() bool {
 // when QuotaEnabled is false; LimitBytes and AutoBlock only take effect after
 // an operator enables a quota.
 type PortTrafficPolicy struct {
-	ID                   string          `json:"id"`
-	AgentID              string          `json:"agent_id"`
-	Name                 string          `json:"name"`
-	Engine               Engine          `json:"engine"`
-	Port                 int             `json:"port"`
-	Protocol             TrafficProtocol `json:"protocol"`
-	Cycle                TrafficCycle    `json:"cycle"`
-	CycleAnchor          time.Time       `json:"cycle_anchor"`
-	LimitBytes           uint64          `json:"limit_bytes"`
-	AutoBlock            bool            `json:"auto_block"`
-	QuotaEnabled         bool            `json:"quota_enabled"`
-	MonitoringEnabled    bool            `json:"monitoring_enabled"`
-	Discovered           bool            `json:"discovered"`
-	ResetGeneration      uint64          `json:"reset_generation"`
-	ReceivedBytes        uint64          `json:"received_bytes"`
-	SentBytes            uint64          `json:"sent_bytes"`
-	UsedBytes            uint64          `json:"used_bytes"`
-	ReceiveBPS           uint64          `json:"receive_bps"`
-	SendBPS              uint64          `json:"send_bps"`
-	PeriodStart          *time.Time      `json:"period_start,omitempty"`
-	PeriodEnd            *time.Time      `json:"period_end,omitempty"`
-	Blocked              bool            `json:"blocked"`
-	EnforcementAvailable bool            `json:"enforcement_available"`
-	EnforcementError     string          `json:"enforcement_error,omitempty"`
-	LastReportedAt       *time.Time      `json:"last_reported_at,omitempty"`
-	LastCollectedAt      *time.Time      `json:"last_collected_at,omitempty"`
-	CreatedAt            time.Time       `json:"created_at"`
-	UpdatedAt            time.Time       `json:"updated_at"`
+	ID                   string             `json:"id"`
+	AgentID              string             `json:"agent_id"`
+	Name                 string             `json:"name"`
+	Engine               Engine             `json:"engine"`
+	Port                 int                `json:"port"`
+	Protocol             TrafficProtocol    `json:"protocol"`
+	Cycle                TrafficCycle       `json:"cycle"`
+	CycleAnchor          time.Time          `json:"cycle_anchor"`
+	LimitBytes           uint64             `json:"limit_bytes"`
+	AutoBlock            bool               `json:"auto_block"`
+	QuotaEnabled         bool               `json:"quota_enabled"`
+	MonitoringEnabled    bool               `json:"monitoring_enabled"`
+	Discovered           bool               `json:"discovered"`
+	ResetGeneration      uint64             `json:"reset_generation"`
+	ReceivedBytes        uint64             `json:"received_bytes"`
+	SentBytes            uint64             `json:"sent_bytes"`
+	UsedBytes            uint64             `json:"used_bytes"`
+	ReceiveBPS           uint64             `json:"receive_bps"`
+	SendBPS              uint64             `json:"send_bps"`
+	PeriodStart          *time.Time         `json:"period_start,omitempty"`
+	PeriodEnd            *time.Time         `json:"period_end,omitempty"`
+	Blocked              bool               `json:"blocked"`
+	EnforcementAvailable bool               `json:"enforcement_available"`
+	EnforcementError     string             `json:"enforcement_error,omitempty"`
+	LastReportedAt       *time.Time         `json:"last_reported_at,omitempty"`
+	LastCollectedAt      *time.Time         `json:"last_collected_at,omitempty"`
+	Accounting           *TrafficAccounting `json:"accounting,omitempty"`
+	CreatedAt            time.Time          `json:"created_at"`
+	UpdatedAt            time.Time          `json:"updated_at"`
 }
 
 // UnmarshalJSON preserves the original enforcement behavior when an older
@@ -106,6 +107,7 @@ type PortTrafficEndpoint struct {
 }
 
 type PortTrafficUsage struct {
+	Accounting *TrafficAccounting `json:"accounting,omitempty"`
 	// CollectedAt identifies the actual sample, not the heartbeat or network
 	// arrival. CounterEpoch changes only when the local accounting is reset.
 	CollectedAt           time.Time `json:"collected_at,omitzero"`
@@ -124,6 +126,48 @@ type PortTrafficUsage struct {
 	Blocked               bool      `json:"blocked"`
 	EnforcementAvailable  bool      `json:"enforcement_available"`
 	EnforcementError      string    `json:"enforcement_error,omitempty"`
+}
+
+// TrafficAccounting records the actual attribution and cumulative components
+// of one counter epoch. Network-layer and proxy-payload measurements must not
+// be presented as interchangeable or backfilled into legacy listener history.
+type TrafficAccounting struct {
+	Source         string            `json:"source"`
+	Inbound        string            `json:"inbound,omitempty"`
+	Outbounds      []string          `json:"outbounds,omitempty"`
+	Mark           uint32            `json:"mark,omitempty"`
+	ProcessEpoch   string            `json:"process_epoch,omitempty"`
+	ClientReceived uint64            `json:"client_received"`
+	ClientSent     uint64            `json:"client_sent"`
+	TargetReceived uint64            `json:"target_received"`
+	TargetSent     uint64            `json:"target_sent"`
+	Counters       map[string]uint64 `json:"counters,omitempty"`
+}
+
+func (value *TrafficAccounting) Valid() bool {
+	if value == nil {
+		return true
+	}
+	if value.Source != "listener" && value.Source != "core-api" && value.Source != "nft-dual" {
+		return false
+	}
+	if len(value.Inbound) > 100 || len(value.ProcessEpoch) > 200 || len(value.Outbounds) > 64 || len(value.Counters) > 260 {
+		return false
+	}
+	if value.ClientReceived > math.MaxInt64 || value.ClientSent > math.MaxInt64 || value.TargetReceived > math.MaxInt64 || value.TargetSent > math.MaxInt64 {
+		return false
+	}
+	for _, tag := range append([]string{value.Inbound, value.ProcessEpoch}, value.Outbounds...) {
+		if len(tag) > 200 || strings.ContainsAny(tag, "\x00\r\n") {
+			return false
+		}
+	}
+	for key, count := range value.Counters {
+		if len(key) > 512 || strings.ContainsRune(key, '\x00') || count > math.MaxInt64 {
+			return false
+		}
+	}
+	return true
 }
 
 func ValidTrafficCounterEpoch(value string) bool {

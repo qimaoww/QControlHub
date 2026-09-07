@@ -47,6 +47,8 @@
 | `GET` | `/api/v1/agents/{id}/configs` | 列出节点已有的内核配置 |
 | `GET` | `/api/v1/agents/{id}/configs/{engine}` | 读取节点绑定的内核配置 |
 | `PUT` | `/api/v1/agents/{id}/configs/{engine}` | 以乐观版本锁创建或更新节点配置 |
+| `GET` | `/api/v1/agents/{id}/configs/{engine}/files` | 返回 `{version, files:[{path,content}]}`，单文件内核返回一个文件 |
+| `PUT` | `/api/v1/agents/{id}/configs/{engine}/files` | Xray / sing-box 按 `{name,description,version,files}` 原子保存合并配置；非法路径返回 400，版本冲突返回 409；不自动部署 |
 | `GET` | `/api/v1/agents/{id}/configs/{engine}/workspace` | 读取服务端入站、字段目录和节点配置工作区数据 |
 | `POST` | `/api/v1/agents/{id}/configs/{engine}/plans` | 生成带安全随机凭据的服务端入站方案；可传当前 `input` 以保留用户选择并重新生成随机字段 |
 | `POST` | `/api/v1/agents/{id}/configs/{engine}/server-inbounds` | 新增、修改或删除服务端入站并创建校验/部署任务 |
@@ -133,6 +135,8 @@ Web 日志页保留完整返回结果用于筛选，每页渲染 200 条，可�
 `core_log_minimum_level` 控制主控写入 PostgreSQL 的最低内核日志级别，可选 `debug`、`info`、`warning`、`error`、`critical` 或 `off`。默认 `debug` 保持升级前的全量保存行为；`off` 停止保存新日志。策略只影响设置保存后收到的新日志，已有记录仍按 7 天保留期清理。主控仍会校验并确认被过滤的 Agent 日志批次，因此调整策略不会中断 WSS 会话。旧客户端省略该字段时，主控保留当前值。
 
 ### 端口流量配额
+
+schema 44 的策略响应增加 `accounting`：`source` 为 `core-api`、`nft-dual`，未启用双链路时可为空；`inbound` / `outbounds` / `mark` 是归属映射，`process_epoch` 标识内核进程，`client_received` / `client_sent` / `target_received` / `target_sent` 是本计量代次的四方向累计，`counters` 是恢复用原始基线。同一 `counter_epoch` 不允许更换归属口径。详情见 [端口流量统计](traffic-accounting.md)。
 
 `GET /api/v1/traffic-endpoints` 会从节点当前保存的 Mihomo、Xray、sing-box 与 Shadowsocks Rust 配置中提取监听名称、端口和 TCP/UDP 范围。响应不会包含凭据或完整配置内容。控制面会把这些监听端口自动持久化为监控记录并同步给支持 `port-traffic-v1` 的 Agent；无需先创建配额即可持续统计、保存每日用量并显示实时速率。配额只是监控记录上的可选上限与封禁设置。同一节点同一端口只显示一张流量卡片。
 

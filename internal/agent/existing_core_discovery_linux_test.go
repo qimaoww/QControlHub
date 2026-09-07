@@ -354,11 +354,13 @@ func TestManagedCoreUnitPolicyMatchesProjectUnits(t *testing.T) {
 func TestManagedCoreUnitPolicyAcceptsOnlyExactHistoricalTemplate(t *testing.T) {
 	managed := DefaultSpecs()[core.EngineSingBox]
 	omissions := map[string]struct{}{
-		"LogNamespace=qagent-cores":                  {},
-		"StandardOutput=journal":                     {},
-		"StandardError=journal":                      {},
-		"CapabilityBoundingSet=CAP_NET_BIND_SERVICE": {},
-		"AmbientCapabilities=CAP_NET_BIND_SERVICE":   {},
+		"LogNamespace=qagent-cores":                                {},
+		"StandardOutput=journal":                                   {},
+		"StandardError=journal":                                    {},
+		"CapabilityBoundingSet=CAP_NET_BIND_SERVICE":               {},
+		"AmbientCapabilities=CAP_NET_BIND_SERVICE":                 {},
+		"CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_NET_ADMIN": {},
+		"AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_NET_ADMIN":   {},
 	}
 	legacy := make([]string, 0)
 	for _, line := range managedCoreUnitLines(core.EngineSingBox, managed) {

@@ -602,8 +602,11 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (string, erro
 		}
 		return e.importExistingConfig(ctx, task.Engine, spec, existing, task.ConfigContent)
 	case core.ActionValidate:
+		task.ConfigContent, _ = e.prepareNativeAccountingContent(ctx, task.Engine, spec, task.ConfigContent)
 		return e.validate(ctx, task.Engine, spec, task.ConfigContent)
 	case core.ActionDeploy:
+		prepared, accountingWarning := e.prepareNativeAccountingContent(ctx, task.Engine, spec, task.ConfigContent)
+		task.ConfigContent = prepared
 		validation, err := e.validate(ctx, task.Engine, spec, task.ConfigContent)
 		if err != nil {
 			return validation, err
@@ -622,6 +625,9 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (string, erro
 		}
 		restartOutput, err := serviceCommandAndVerifyWithManager(ctx, e.serviceManager(), spec.Service, core.ActionRestart)
 		output := validation + "\ndeployed to " + spec.ConfigPath
+		if accountingWarning != "" {
+			output += "\n" + accountingWarning
+		}
 		if backup != "" {
 			output += "\nbackup: " + backup
 		}

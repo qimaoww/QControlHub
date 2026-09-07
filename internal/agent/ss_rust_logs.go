@@ -38,7 +38,10 @@ func ensureOpenRCSSRustLogging(service string) error {
 		return err
 	}
 	legacy := bytes.Replace(current, []byte(managedSSRustLogFilter), []byte("info"), 1)
-	if !bytes.Equal(contents, legacy) {
+	oldCapabilities := func(value []byte) []byte {
+		return bytes.ReplaceAll(value, []byte("^cap_net_bind_service,^cap_net_admin"), []byte("^cap_net_bind_service"))
+	}
+	if !bytes.Equal(contents, legacy) && !bytes.Equal(contents, oldCapabilities(current)) && !bytes.Equal(contents, oldCapabilities(legacy)) {
 		return errors.New("SS Rust OpenRC logging upgrade refused an unrecognized service script")
 	}
 	name, err := randomCoreTempName(root)

@@ -1,4 +1,5 @@
 import { bindEvent } from "./refresh.js";
+import { bindConfigFiles } from "./config-files.js";
 import { renderConfigSourceStudio, renderGlobalFieldStudio, revealSelectedFields } from "./config-fields.js";
 import { configFieldURL, renderSSRustFieldStudio, ssRustFieldGroups, ssRustPlanBinding } from "./ss-rust-fields.js";
 
@@ -1165,12 +1166,14 @@ async function liveConfig() {
       delete state.data.liveSources[sourceKey];
       await readCurrentConfig(agent, engine, sourceKey, readAction);
   });
+  const configFiles = bindConfigFiles(document.querySelector("#live-config-form"), engine, notify);
   bindCodeEditors();
   bindEvent(document.querySelector("#live-config-form"), "submit", async (event) => {
       event.preventDefault();
       const form = new FormData(event.currentTarget);
       const intent = event.submitter?.dataset.liveIntent || "validate";
       try {
+        if (configFiles) form.set("content", configFiles.content());
         if (
           intent === "import" &&
           !(await confirmAction(

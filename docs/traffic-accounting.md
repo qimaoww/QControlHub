@@ -2,12 +2,20 @@
 
 ## 统计口径与存储
 
-端口流量是节点本机 INPUT / OUTPUT 路径上匹配监听端口的网络层字节数：接收按目标端口，发送按源端口，覆盖 IPv4、IPv6、TCP 和 UDP。包含 IP / 传输层头、加密协议开销与重传，不等于代理内核显示的应用有效载荷，也不承诺与云厂商账单一致。范围是整个节点上的端口，不是单个进程；不统计纯 FORWARD / Docker bridge 转发路径。回环连接也在统计范围内；端口间的本机通信可能分别进入两张端口卡片，不应将全部端口之和解释为物理网卡总流量。
+双链路统计按代理入口归属四个方向：客户端→代理、代理→客户端、目标→代理、代理→目标。接收为前者与目标回包之和，发送为客户端回包与出口请求之和。因此常规转发的接收/发送累计通常接近，但协议握手、加密封装、重传、拦截和缓冲会产生真实差额，绝不强行配平或乘二。
+
+- Xray：独立出站 tag 与只读 Stats API，读取各入站及所属出站计数；入站可能包含代理协议握手开销。
+- sing-box：具有 `with_v2ray_api` 的构建使用原生 API；没有该功能的官方构建自动使用独立出站 `routing_mark` 与 nftables/conntrack。
+- Mihomo、SS Rust：独立出口标记与 nftables/conntrack，不通过轮询活跃连接列表推算已结束连接。统计包含网络层包头、加密开销和重传。Mihomo 不标记回环等非全局单播目标，这类目标的出口链路不在完整归属范围内。
+- 未迁移或复杂配置无法安全建立独立出口时，保留原监听端口统计并显示原因，不宣称双链路可用。已启用双链路后遇到采集错误时保留旧基线，不替换成另一种口径的字节数。
+
+监听端口计数覆盖节点 INPUT / OUTPUT 的 IPv4、IPv6、TCP、UDP，不统计纯 FORWARD / Docker bridge 转发路径。标记计数要求连接经过 conntrack；自定义 NOTRACK、策略路由、共享传输、跨网络命名空间等配置必须单独核验。不同计数层级不等价，不承诺与云厂商账单一致，也不能把所有端口之和直接解释为物理网卡总量。
 
 额度为接收加发送，输入单位为 GiB（1 GiB = 1,073,741,824 字节）；速率为 B/s。配额以 UTC 日历月/年为周期。页面累计值属于各端口当前周期；历史页来自数据库每日汇总。
 
 - PostgreSQL `port_traffic_policies` 保存当前周期用量、收发速率、周期、封禁/可用性、实际采样时间、计量代次、周期原始基线和跨周期 lifetime 原始基线。
 - PostgreSQL `port_traffic_daily_usage` 保存每日收发、合计、峰值速率、样本数及端口元数据快照。基线更新与每日增量在同一事务内提交，任一端口写入失败整批回滚。
+- schema 44 的 `port_traffic_policies.accounting` 保存统计来源、入站/出站映射、出口标记、进程代次、四方向累计和原始计数器；`port_traffic_accounting_epochs` 按计量代次保留这些恢复信息。`port_traffic_daily_accounting` 从升级后开始按来源分别保存每日收发增量，避免把新旧来源当成同一种计量。
 - Agent 的私有 `traffic-state.json` 是断线期间的本地恢复检查点，不是控制面的唯一数据源。它保留每个 TCP/UDP、收/发计数器的值和内核对象身份，以及宿主机启动标识；有变化的采样在发布成功快照前以临时文件、fsync、原子重命名持久化。正常退出会等待最后一次采集与检查点完成。
 
 ## 准确性保障
@@ -32,12 +40,34 @@
 
 ## 升级与验证
 
-先升级控制面（自动迁移至 schema 43），再升级 Agent；旧 Agent 可继续向新控制面上报。schema 43 只新增字段，不清零历史。回滚控制面前需恢复升级前的数据库备份，旧二进制会拒绝较新的 schema；不要手工降低迁移版本号冒充回滚。
+先升级控制面（自动迁移至 schema 44），再升级 Agent；旧 Agent 可继续向新控制面上报。新增字段/表不清零历史。Agent 启动时只迁移已验证且正在运行的 QAgent 托管服务，跳过等待导入的系统服务；迁移先校验、备份，再重启对应内核，重启失败自动恢复旧配置并尝试恢复服务。选择标记计量的内核服务需要 CAP_NET_ADMIN；Xray 原生 API 路径不新增此权限。无法安全处理的自定义路由、共享/复用出站、已有自定义标记或 API 会保留原配置并明确报告。
+
+切换统计来源会新建计量代次并建立基线，不重复计入该内核此前已累计的流量。历史不会被重新解释为双链路字节数；当前配额会保留切换前的已用基线。内核重启通过进程启动标识识别，各出站计数器独立求增量。
+
+回滚控制面前需恢复升级前的数据库备份，旧二进制会拒绝较新的 schema；不要手工降低迁移版本号冒充回滚。
+
+## 配置文件
+
+Xray / sing-box 手动配置页支持 `00-common.json`、`inbounds/0000.json`、`outbounds/0000.json` 等独立文件切换与只读合并预览。文件编辑合并后作为一个加密配置版本及修订保存在 PostgreSQL；带版本锁，不能部分写入或跨版本混合。Agent 部署时生成内容寻址的 `sources-<sha256>/` 源码目录；内核仍启动经过验证的固定路径合并配置，而非依赖不同内核的目录合并顺序。源码包为不可变版本，先写完再原子替换运行配置，失败回滚不会混合文件。历史源码包保留在节点用于恢复，不自动删除。Mihomo / SS Rust 保持单文件。
 
 ```sh
 QCH_TEST_DATABASE_URL='postgres://postgres:password@127.0.0.1:5432/postgres?sslmode=disable' go test ./internal/store ./internal/api
 go test -race ./internal/agent ./internal/store -run 'Traffic|NFT'
 QCH_TEST_NFTABLES=1 go test ./internal/agent -run '^TestTrafficNFTablesNetworkNamespace$' -v
+QCH_TEST_NFTABLES=1 go test ./internal/agent -run '^TestMarkedTrafficNetworkNamespace$' -v
 ```
 
 最后一项需要 `nft`、`ip`、`unshare` 和创建网络命名空间的权限；仅在新建隔离命名空间中发包、安装规则，绝不修改宿主机规则。测试验证 IPv4/IPv6 UDP 的实际字节数、TCP 双向传输、规则刷新后累计保留，以及超额丢包不计费。
+
+真实内核端到端测试使用本地测试二进制，所有监听及 nftables 操作都在独立网络命名空间中：
+
+```sh
+QCH_TEST_NATIVE_TRAFFIC=1 \
+QCH_TEST_XRAY_BIN=/absolute/path/xray \
+QCH_TEST_SINGBOX_BIN=/absolute/path/sing-box-with-v2ray-api \
+QCH_TEST_MIHOMO_BIN=/absolute/path/mihomo \
+QCH_TEST_SSRUST_DIR=/absolute/path/shadowsocks-rust-binaries \
+go test ./internal/agent -run '^TestNativeTrafficCores$' -count=3 -v
+```
+
+SS Rust 目录需要同时包含 `ssserver` 与 `sslocal`。使用官方无 Stats API 的 sing-box 时设置 `QCH_TEST_SINGBOX_MARKS=1` 并选择 `-run '^TestNativeTrafficCores$/sing-box$'`。测试通过两个入口发送不同大小 TCP 内容，再通过 SOCKS5 UDP 转发，检查四方向计数和端口隔离；原生 API 重复读取不得重置计数器。

@@ -18,6 +18,7 @@ QControlHub 是面向 Linux 节点的配置与远程运维平台，由 Go 控制
 
 - 管理 Mihomo、Xray、sing-box 和 Shadowsocks Rust 的节点配置、版本修订、差异与模板。
 - 提供服务端入站方案和源码编辑入口，配置在控制面检查结构后仍由目标内核完成真实校验。
+- Xray / sing-box 手动配置支持按公共、入站、出站文件切换编辑和合并预览，作为一个加密版本入库；Mihomo / SS Rust 保持单文件。
 - Agent 通过受限路径、原子替换、备份和失败回滚部署配置与内核二进制，并通过专用 systemd/OpenRC 服务管理进程。
 
 ### 接入、日志与流量

@@ -256,6 +256,10 @@ func (c *Client) Run(ctx context.Context) error {
 	}
 	go c.logs.Run(ctx)
 	go c.publicIP.Run(ctx)
+	c.executor.migrateNativeAccounting(ctx)
+	if c.traffic != nil {
+		c.traffic.nativeSource = c.executor.nativeAccounting
+	}
 	trafficContext, stopTraffic := context.WithCancel(ctx)
 	trafficDone := c.traffic.Start(trafficContext)
 	defer func() {

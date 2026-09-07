@@ -86,6 +86,9 @@ func atomicDeployManagedConfiguration(engine core.Engine, spec EngineSpec, manag
 	if err != nil {
 		return "", err
 	}
+	if err := writeManagedConfigFiles(engine, spec.ConfigPath, content, metadata); err != nil {
+		return "", err
+	}
 	return atomicDeployWithDefaultMetadata(spec.ConfigPath, content, metadata)
 }
 

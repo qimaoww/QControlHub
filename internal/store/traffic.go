@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -17,7 +18,7 @@ import (
 
 const trafficPolicyColumns = `id,agent_id,name,engine,port,protocol,cycle,cycle_anchor,limit_bytes,auto_block,quota_enabled,monitoring_enabled,discovered,reset_generation,
        received_bytes,sent_bytes,used_bytes,receive_bps,send_bps,period_start,period_end,blocked,
-       enforcement_available,enforcement_error,last_reported_at,created_at,updated_at,last_collected_at`
+       enforcement_available,enforcement_error,last_reported_at,created_at,updated_at,last_collected_at,accounting`
 
 type trafficPolicyScanner interface {
 	Scan(dest ...any) error
@@ -32,7 +33,7 @@ func scanTrafficPolicy(row trafficPolicyScanner) (core.PortTrafficPolicy, error)
 		&policy.UsedBytes, &policy.ReceiveBPS, &policy.SendBPS, &policy.PeriodStart,
 		&policy.PeriodEnd, &policy.Blocked, &policy.EnforcementAvailable,
 		&policy.EnforcementError, &policy.LastReportedAt, &policy.CreatedAt, &policy.UpdatedAt,
-		&policy.LastCollectedAt,
+		&policy.LastCollectedAt, &policy.Accounting,
 	)
 	return policy, err
 }
@@ -154,6 +155,7 @@ func (s *Store) ReconcilePortTrafficEndpoints(ctx context.Context, raw []core.Po
 					send_bps=CASE WHEN NOT quota_enabled AND protocol<>$4::varchar(8) THEN 0 ELSE send_bps END,
 					period_start=CASE WHEN NOT quota_enabled AND protocol<>$4::varchar(8) THEN NULL ELSE period_start END,
 					last_collected_at=CASE WHEN NOT quota_enabled AND protocol<>$4::varchar(8) THEN NULL ELSE last_collected_at END,
+					accounting=CASE WHEN NOT quota_enabled AND protocol<>$4::varchar(8) THEN NULL ELSE accounting END,
 					counter_epoch=CASE WHEN NOT quota_enabled AND protocol<>$4::varchar(8) THEN '' ELSE counter_epoch END,
 					reported_lifetime_received_bytes=CASE WHEN NOT quota_enabled AND protocol<>$4::varchar(8) THEN 0 ELSE reported_lifetime_received_bytes END,
 					reported_lifetime_sent_bytes=CASE WHEN NOT quota_enabled AND protocol<>$4::varchar(8) THEN 0 ELSE reported_lifetime_sent_bytes END,
@@ -359,6 +361,7 @@ func updatePortTrafficPolicyRow(ctx context.Context, tx pgx.Tx, id string, reque
 			receive_bps=0,send_bps=0,blocked=false,enforcement_available=false,enforcement_error='',
 			period_start=CASE WHEN port<>$4 OR protocol<>$5::varchar(8) OR cycle<>$6::varchar(8) OR cycle_anchor<>$7::date THEN NULL ELSE period_start END,
 			last_collected_at=CASE WHEN port<>$4 OR protocol<>$5::varchar(8) OR cycle<>$6::varchar(8) OR cycle_anchor<>$7::date THEN NULL ELSE last_collected_at END,
+			accounting=CASE WHEN port<>$4 OR protocol<>$5::varchar(8) OR cycle<>$6::varchar(8) OR cycle_anchor<>$7::date THEN NULL ELSE accounting END,
 			counter_epoch=CASE WHEN port<>$4 OR protocol<>$5::varchar(8) OR cycle<>$6::varchar(8) OR cycle_anchor<>$7::date THEN '' ELSE counter_epoch END,
 			reported_lifetime_received_bytes=CASE WHEN port<>$4 OR protocol<>$5::varchar(8) OR cycle<>$6::varchar(8) OR cycle_anchor<>$7::date THEN 0 ELSE reported_lifetime_received_bytes END,
 			reported_lifetime_sent_bytes=CASE WHEN port<>$4 OR protocol<>$5::varchar(8) OR cycle<>$6::varchar(8) OR cycle_anchor<>$7::date THEN 0 ELSE reported_lifetime_sent_bytes END,
@@ -376,7 +379,7 @@ func updatePortTrafficPolicyRow(ctx context.Context, tx pgx.Tx, id string, reque
 func (s *Store) ResetPortTrafficPolicy(ctx context.Context, id string) (core.PortTrafficPolicy, error) {
 	policy, err := scanTrafficPolicy(s.pool.QueryRow(ctx, `
 		UPDATE port_traffic_policies SET reset_generation=reset_generation+1,received_bytes=0,sent_bytes=0,
-			last_collected_at=NULL,counter_epoch='',reported_lifetime_received_bytes=0,reported_lifetime_sent_bytes=0,
+			last_collected_at=NULL,counter_epoch='',reported_lifetime_received_bytes=0,reported_lifetime_sent_bytes=0,accounting=NULL,
 			reported_received_bytes=0,reported_sent_bytes=0,used_bytes=0,receive_bps=0,send_bps=0,period_start=NULL,period_end=NULL,blocked=false,
 			enforcement_available=false,enforcement_error='',last_reported_at=NULL,updated_at=now()
 		WHERE id=$1 RETURNING `+trafficPolicyColumns, id))
@@ -430,8 +433,14 @@ func (s *Store) DeletePortTrafficMonitoring(ctx context.Context, id string) (str
 	if _, err := tx.Exec(ctx, `DELETE FROM port_traffic_daily_usage WHERE policy_id=$1`, id); err != nil {
 		return "", err
 	}
+	if _, err := tx.Exec(ctx, `DELETE FROM port_traffic_daily_accounting WHERE policy_id=$1`, id); err != nil {
+		return "", err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM port_traffic_accounting_epochs WHERE policy_id=$1`, id); err != nil {
+		return "", err
+	}
 	if _, err := tx.Exec(ctx, `UPDATE port_traffic_policies SET monitoring_enabled=false,quota_enabled=false,auto_block=false,blocked=false,
-		last_collected_at=NULL,counter_epoch='',reported_lifetime_received_bytes=0,reported_lifetime_sent_bytes=0,
+		last_collected_at=NULL,counter_epoch='',reported_lifetime_received_bytes=0,reported_lifetime_sent_bytes=0,accounting=NULL,
 		received_bytes=0,sent_bytes=0,reported_received_bytes=0,reported_sent_bytes=0,used_bytes=0,receive_bps=0,send_bps=0,
 		period_start=NULL,period_end=NULL,enforcement_available=false,enforcement_error='',last_reported_at=NULL,
 		reset_generation=reset_generation+1,updated_at=now() WHERE id=$1`, id); err != nil {
@@ -466,6 +475,9 @@ func (s *Store) UpdatePortTrafficUsage(ctx context.Context, agentID string, usag
 	seen := make(map[string]struct{}, len(usages))
 	ids := make([]string, 0, len(usages))
 	for _, usage := range usages {
+		if !usage.Accounting.Valid() || usage.Accounting != nil && usage.CounterEpoch == "" {
+			return fmt.Errorf("%w: invalid traffic accounting metadata", ErrInvalid)
+		}
 		if _, exists := seen[usage.PolicyID]; exists {
 			return fmt.Errorf("%w: duplicate traffic policy usage", ErrInvalid)
 		}
@@ -496,7 +508,7 @@ func (s *Store) UpdatePortTrafficUsage(ctx context.Context, agentID string, usag
 	rows, err := tx.Query(ctx, `
 		SELECT id,reset_generation,received_bytes,sent_bytes,reported_received_bytes,reported_sent_bytes,
 		       traffic_history_initialized,period_start,period_end,last_reported_at,last_collected_at,counter_epoch,
-		       reported_lifetime_received_bytes,reported_lifetime_sent_bytes,cycle,cycle_anchor
+		       reported_lifetime_received_bytes,reported_lifetime_sent_bytes,cycle,cycle_anchor,accounting
 		FROM port_traffic_policies
 		WHERE id=ANY($1::text[]) AND agent_id=$2 AND monitoring_enabled=true
 		ORDER BY id FOR UPDATE`, ids, agentID)
@@ -504,6 +516,7 @@ func (s *Store) UpdatePortTrafficUsage(ctx context.Context, agentID string, usag
 		return err
 	}
 	type trafficBaseline struct {
+		accounting                     *core.TrafficAccounting
 		generation                     uint64
 		received, sent                 uint64
 		reportedReceived, reportedSent uint64
@@ -525,6 +538,7 @@ func (s *Store) UpdatePortTrafficUsage(ctx context.Context, agentID string, usag
 			&current.historyInitialized,
 			&current.periodStart, &current.periodEnd, &current.lastReported,
 			&current.lastCollected, &current.epoch, &current.lifetimeReceived, &current.lifetimeSent, &current.cycle, &current.anchor,
+			&current.accounting,
 		); err != nil {
 			rows.Close()
 			return err
@@ -544,6 +558,9 @@ func (s *Store) UpdatePortTrafficUsage(ctx context.Context, agentID string, usag
 		}
 		if current.generation != usage.ResetGeneration {
 			continue
+		}
+		if usage.CounterEpoch != "" && usage.CounterEpoch == current.epoch && !sameAccountingScope(current.accounting, usage.Accounting) {
+			return fmt.Errorf("%w: accounting scope changed without a new counter epoch", ErrInvalid)
 		}
 		if current.lastReported != nil && !reportedAt.After(current.lastReported.UTC()) {
 			continue
@@ -630,7 +647,7 @@ func (s *Store) UpdatePortTrafficUsage(ctx context.Context, agentID string, usag
 			ReportedReceived: usage.ReceivedBytes, ReportedSent: usage.SentBytes,
 			ReceivedDelta: receivedDelta, SentDelta: sentDelta, UsedDelta: usedDelta,
 			RecordSample: true, SampledAt: sampledAt, CollectedAt: nilIfZeroTime(usage.CollectedAt), CounterEpoch: usage.CounterEpoch,
-			LifetimeReceived: usage.LifetimeReceivedBytes, LifetimeSent: usage.LifetimeSentBytes,
+			LifetimeReceived: usage.LifetimeReceivedBytes, LifetimeSent: usage.LifetimeSentBytes, Accounting: usage.Accounting,
 		})
 	}
 	// One set-based statement also reduces database executor work on local
@@ -649,29 +666,30 @@ func (s *Store) UpdatePortTrafficUsage(ctx context.Context, agentID string, usag
 }
 
 type trafficUsageWrite struct {
-	RecordSample         bool       `json:"record_sample"`
-	SampledAt            time.Time  `json:"sampled_at"`
-	CollectedAt          *time.Time `json:"collected_at"`
-	CounterEpoch         string     `json:"counter_epoch"`
-	LifetimeReceived     uint64     `json:"lifetime_received"`
-	LifetimeSent         uint64     `json:"lifetime_sent"`
-	ID                   string     `json:"id"`
-	Generation           uint64     `json:"generation"`
-	Received             uint64     `json:"received"`
-	Sent                 uint64     `json:"sent"`
-	Used                 uint64     `json:"used"`
-	ReceiveBPS           uint64     `json:"receive_bps"`
-	SendBPS              uint64     `json:"send_bps"`
-	PeriodStart          time.Time  `json:"period_start"`
-	PeriodEnd            time.Time  `json:"period_end"`
-	Blocked              bool       `json:"blocked"`
-	EnforcementAvailable bool       `json:"enforcement_available"`
-	EnforcementError     string     `json:"enforcement_error"`
-	ReportedReceived     uint64     `json:"reported_received"`
-	ReportedSent         uint64     `json:"reported_sent"`
-	ReceivedDelta        uint64     `json:"received_delta"`
-	SentDelta            uint64     `json:"sent_delta"`
-	UsedDelta            uint64     `json:"used_delta"`
+	Accounting           *core.TrafficAccounting `json:"accounting"`
+	RecordSample         bool                    `json:"record_sample"`
+	SampledAt            time.Time               `json:"sampled_at"`
+	CollectedAt          *time.Time              `json:"collected_at"`
+	CounterEpoch         string                  `json:"counter_epoch"`
+	LifetimeReceived     uint64                  `json:"lifetime_received"`
+	LifetimeSent         uint64                  `json:"lifetime_sent"`
+	ID                   string                  `json:"id"`
+	Generation           uint64                  `json:"generation"`
+	Received             uint64                  `json:"received"`
+	Sent                 uint64                  `json:"sent"`
+	Used                 uint64                  `json:"used"`
+	ReceiveBPS           uint64                  `json:"receive_bps"`
+	SendBPS              uint64                  `json:"send_bps"`
+	PeriodStart          time.Time               `json:"period_start"`
+	PeriodEnd            time.Time               `json:"period_end"`
+	Blocked              bool                    `json:"blocked"`
+	EnforcementAvailable bool                    `json:"enforcement_available"`
+	EnforcementError     string                  `json:"enforcement_error"`
+	ReportedReceived     uint64                  `json:"reported_received"`
+	ReportedSent         uint64                  `json:"reported_sent"`
+	ReceivedDelta        uint64                  `json:"received_delta"`
+	SentDelta            uint64                  `json:"sent_delta"`
+	UsedDelta            uint64                  `json:"used_delta"`
 }
 
 const applyTrafficUsageSQL = `
@@ -681,9 +699,10 @@ const applyTrafficUsageSQL = `
 			period_start timestamptz,period_end timestamptz,blocked boolean,enforcement_available boolean,
 			enforcement_error text,reported_received bigint,reported_sent bigint,
 			received_delta bigint,sent_delta bigint,used_delta bigint,record_sample boolean,sampled_at timestamptz,
-			collected_at timestamptz,counter_epoch text,lifetime_received bigint,lifetime_sent bigint)
+			collected_at timestamptz,counter_epoch text,lifetime_received bigint,lifetime_sent bigint,accounting jsonb)
 	), updated AS (
 		UPDATE port_traffic_policies policy SET
+			accounting=CASE WHEN input.record_sample THEN NULLIF(input.accounting,'null'::jsonb) ELSE policy.accounting END,
 			received_bytes=CASE WHEN input.record_sample THEN input.received ELSE policy.received_bytes END,
 			sent_bytes=CASE WHEN input.record_sample THEN input.sent ELSE policy.sent_bytes END,
 			used_bytes=CASE WHEN input.record_sample THEN input.used ELSE policy.used_bytes END,
@@ -700,6 +719,24 @@ const applyTrafficUsageSQL = `
 			reported_sent_bytes=CASE WHEN input.record_sample THEN input.reported_sent ELSE policy.reported_sent_bytes END
 		FROM input WHERE policy.id=input.id AND policy.agent_id=$1 AND policy.reset_generation=input.generation
 		RETURNING policy.id,policy.agent_id,policy.name,policy.engine,policy.port,policy.protocol
+	), scoped_daily AS (
+		INSERT INTO port_traffic_daily_accounting (policy_id,reset_generation,usage_date,source,received_bytes,sent_bytes)
+		SELECT updated.id,input.generation,(input.sampled_at AT TIME ZONE 'UTC')::date,
+			COALESCE(input.accounting->>'source','listener'),input.received_delta,input.sent_delta
+		FROM updated JOIN input ON input.id=updated.id WHERE input.record_sample
+		ON CONFLICT (policy_id,reset_generation,usage_date,source) DO UPDATE SET
+			received_bytes=LEAST(9223372036854775807::numeric,port_traffic_daily_accounting.received_bytes::numeric+EXCLUDED.received_bytes)::bigint,
+			sent_bytes=LEAST(9223372036854775807::numeric,port_traffic_daily_accounting.sent_bytes::numeric+EXCLUDED.sent_bytes)::bigint
+	), epochs AS (
+		INSERT INTO port_traffic_accounting_epochs (policy_id,reset_generation,counter_epoch,accounting,
+			lifetime_received_bytes,lifetime_sent_bytes,first_collected_at,last_collected_at)
+		SELECT updated.id,input.generation,input.counter_epoch,input.accounting,input.lifetime_received,input.lifetime_sent,
+			input.collected_at,input.collected_at
+		FROM updated JOIN input ON input.id=updated.id
+		WHERE input.record_sample AND input.collected_at IS NOT NULL AND NULLIF(input.accounting,'null'::jsonb) IS NOT NULL
+		ON CONFLICT (policy_id,reset_generation,counter_epoch) DO UPDATE SET
+			accounting=EXCLUDED.accounting,lifetime_received_bytes=EXCLUDED.lifetime_received_bytes,
+			lifetime_sent_bytes=EXCLUDED.lifetime_sent_bytes,last_collected_at=EXCLUDED.last_collected_at
 	)
 	INSERT INTO port_traffic_daily_usage (
 		policy_id,reset_generation,usage_date,agent_id,name,engine,port,protocol,
@@ -722,6 +759,13 @@ func saturatedStoredTrafficAdd(left, right uint64) uint64 {
 		return math.MaxInt64
 	}
 	return left + right
+}
+
+func sameAccountingScope(a, b *core.TrafficAccounting) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return a.Source == b.Source && a.Inbound == b.Inbound && a.Mark == b.Mark && slices.Equal(a.Outbounds, b.Outbounds)
 }
 
 func nilIfZeroTime(value time.Time) *time.Time {

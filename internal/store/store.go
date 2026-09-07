@@ -48,7 +48,7 @@ type storeExecutor interface {
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 43
+const currentSchemaVersion = 44
 
 func Open(ctx context.Context, databaseURL string, allowInsecureRemote bool) (*Store, error) {
 	return OpenWithConfigKey(ctx, databaseURL, allowInsecureRemote, "")
@@ -2277,6 +2277,27 @@ ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS last_collected_at tim
 ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS counter_epoch varchar(32) NOT NULL DEFAULT '';
 ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS reported_lifetime_received_bytes bigint NOT NULL DEFAULT 0 CHECK (reported_lifetime_received_bytes >= 0);
 ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS reported_lifetime_sent_bytes bigint NOT NULL DEFAULT 0 CHECK (reported_lifetime_sent_bytes >= 0);
+ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS accounting jsonb;
+CREATE TABLE IF NOT EXISTS port_traffic_daily_accounting (
+  policy_id text NOT NULL REFERENCES port_traffic_policies(id) ON DELETE CASCADE,
+  reset_generation bigint NOT NULL,
+  usage_date date NOT NULL,
+  source varchar(16) NOT NULL CHECK (source IN ('listener','core-api','nft-dual')),
+  received_bytes bigint NOT NULL CHECK (received_bytes >= 0),
+  sent_bytes bigint NOT NULL CHECK (sent_bytes >= 0),
+  PRIMARY KEY (policy_id,reset_generation,usage_date,source)
+);
+CREATE TABLE IF NOT EXISTS port_traffic_accounting_epochs (
+  policy_id text NOT NULL REFERENCES port_traffic_policies(id) ON DELETE CASCADE,
+  reset_generation bigint NOT NULL,
+  counter_epoch varchar(32) NOT NULL,
+  accounting jsonb NOT NULL,
+  lifetime_received_bytes bigint NOT NULL CHECK (lifetime_received_bytes >= 0),
+  lifetime_sent_bytes bigint NOT NULL CHECK (lifetime_sent_bytes >= 0),
+  first_collected_at timestamptz NOT NULL,
+  last_collected_at timestamptz NOT NULL,
+  PRIMARY KEY (policy_id,reset_generation,counter_epoch)
+);
 ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS quota_notification_generation bigint NOT NULL DEFAULT 0;
 ALTER TABLE port_traffic_policies DROP CONSTRAINT IF EXISTS port_traffic_policies_quota_notification_generation_check;
 ALTER TABLE port_traffic_policies ADD CONSTRAINT port_traffic_policies_quota_notification_generation_check CHECK (quota_notification_generation >= 0);

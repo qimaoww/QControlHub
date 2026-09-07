@@ -9,7 +9,7 @@ directory="/var/lib/qcontrolhub-sing-box"
 supervisor="supervise-daemon"
 respawn_delay=3
 respawn_max=5
-capabilities="^cap_net_bind_service"
+capabilities="^cap_net_bind_service,^cap_net_admin"
 no_new_privs=true
 umask=0027
 depend() { need net; }

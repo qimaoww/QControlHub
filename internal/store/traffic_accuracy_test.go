@@ -29,6 +29,7 @@ func TestTrafficSampleIdentityAndLifetimeWithPostgreSQL(t *testing.T) {
 		CollectedAt: start.AddDate(0, 0, 30).Add(23*time.Hour + 59*time.Minute + 40*time.Second),
 		PeriodStart: start, PeriodEnd: start.AddDate(0, 1, 0), EnforcementAvailable: true,
 		ReceivedBytes: 100, SentBytes: 200, UsedBytes: 300, LifetimeReceivedBytes: 100, LifetimeSentBytes: 200,
+		Accounting: &core.TrafficAccounting{Source: "core-api", Inbound: "test-in", Outbounds: []string{"test-out"}, ProcessEpoch: "boot:pid:start", ClientReceived: 100, TargetReceived: 0, ClientSent: 0, TargetSent: 200, Counters: map[string]uint64{"inbound>>>test-in>>>traffic>>>uplink": 100}},
 	}
 	arrival := usage.CollectedAt.Add(10 * time.Second)
 	report := func(value core.PortTrafficUsage, at time.Time) {
@@ -63,6 +64,25 @@ func TestTrafficSampleIdentityAndLifetimeWithPostgreSQL(t *testing.T) {
 	report(rollback, arrival.Add(3*time.Second))
 	if got := read(); got.UsedBytes != 600 || got.ReceiveBPS != 20 {
 		t.Fatalf("replay changed totals/rate: %+v", got)
+	}
+	if got := read(); got.Accounting == nil || got.Accounting.Inbound != "test-in" || got.Accounting.Counters["inbound>>>test-in>>>traffic>>>uplink"] != 100 {
+		t.Fatalf("accounting metadata not stored: %+v", got.Accounting)
+	}
+	var epochs int
+	var lifetime uint64
+	if err := s.pool.QueryRow(ctx, `SELECT count(*),max(lifetime_received_bytes) FROM port_traffic_accounting_epochs WHERE policy_id=$1`, policy.ID).Scan(&epochs, &lifetime); err != nil || epochs != 1 || lifetime != 200 {
+		t.Fatalf("epoch metadata dedup: %d %d %v", epochs, lifetime, err)
+	}
+	if err := s.pool.QueryRow(ctx, `SELECT received_bytes FROM port_traffic_daily_accounting WHERE policy_id=$1 AND source='core-api'`, policy.ID).Scan(&lifetime); err != nil || lifetime != 200 {
+		t.Fatalf("source daily dedup: %d %v", lifetime, err)
+	}
+	conflict := usage
+	changed := *usage.Accounting
+	changed.Source = "nft-dual"
+	conflict.Accounting = &changed
+	conflict.CollectedAt = conflict.CollectedAt.Add(time.Second)
+	if err := s.UpdatePortTrafficUsage(ctx, agent.ID, []core.PortTrafficUsage{conflict}, arrival.Add(4*time.Second)); err == nil {
+		t.Fatal("accepted scope change in the same epoch")
 	}
 	daily, err := s.ListPortTrafficDailyUsage(ctx, agent.ID, policy.ID, start)
 	if err != nil || len(daily) != 1 || daily[0].SampleCount != 2 || daily[0].UsedBytes != 600 {
