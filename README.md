@@ -44,7 +44,7 @@ QControlHub 是面向 Linux 节点的配置与远程运维平台，由 Go 控制
 bash <(curl -fsSL "https://raw.githubusercontent.com/qimaoww/qcontrolhub/main/deploy/quick-start.sh")
 ```
 
-该命令不会克隆源码仓库，只把运行脚本和生产 Compose 文件保存到当前目录下的 `qcontrolhub`；可通过 `QCH_INSTALL_DIR` 指定其他持久化目录。从该安装目录内再次运行也会自动复用当前目录，不会创建嵌套目录。管理员 token 原文只在创建或轮换时显示一次，`.env` 仅保存 SHA-256 摘要；配置加密 keyring 保存在宿主机私有的 `.secrets` 目录，通过只读文件挂载交给控制面，不进入容器环境。一键脚本的参数与重复执行行为见 [`deploy/quick-start.sh`](deploy/quick-start.sh)。它不替代 TLS、反向代理、数据库保护、备份与恢复演练；上线前请按 [生产部署指南](docs/production.md) 完成全部步骤，并核对 [安全基线](docs/security.md)。
+该命令不会克隆源码仓库，只把运行脚本和生产 Compose 文件保存到当前目录下的 `qcontrolhub`；可通过 `QCH_INSTALL_DIR` 指定其他持久化目录，交互式菜单中选择的目录也会保存到当前用户配置，后续从远程一键命令运行时自动复用。从该安装目录内再次运行也会自动复用当前目录，不会创建嵌套目录。管理员 token 原文只在创建或轮换时显示一次，`.env` 仅保存 SHA-256 摘要；配置加密 keyring 保存在宿主机私有的 `.secrets` 目录，通过只读文件挂载交给控制面，不进入容器环境。一键脚本的参数与重复执行行为见 [`deploy/quick-start.sh`](deploy/quick-start.sh)。它不替代 TLS、反向代理、数据库保护、备份与恢复演练；上线前请按 [生产部署指南](docs/production.md) 完成全部步骤，并核对 [安全基线](docs/security.md)。
 
 内置与外部 PostgreSQL 两种模式均保留。外部模式安装时可选择默认项目网络或自定义已有 Docker 网络；更新会逐字节保留原 `.env`（包括旧明文凭据或既有 secret 文件来源），只更新两个 `latest` 应用镜像，启动/健康检查失败时尝试恢复旧 Compose 与镜像。控制面原有的 schema 初始化/升级行为不变，更新前仍须备份数据库。
 
