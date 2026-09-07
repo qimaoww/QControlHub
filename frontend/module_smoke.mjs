@@ -178,6 +178,9 @@ assert.notEqual(
 );
 
 const trafficRateNow = Date.parse("2026-08-28T00:00:30Z");
+for (const invalidRate of [-1, NaN, Infinity, "invalid"]) {
+  assert.equal(trafficRateForDisplay(invalidRate, "2026-08-28T00:00:15Z", "online", trafficRateNow), 0);
+}
 assert.equal(
   trafficRateForDisplay(4096, "2026-08-28T00:00:15Z", "online", trafficRateNow),
   4096,

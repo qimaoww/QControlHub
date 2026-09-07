@@ -58,7 +58,8 @@ export function trafficRateForDisplay(
     age > 45_000
   )
     return 0;
-  return Number(value || 0);
+  const numeric = Number(value || 0);
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : 0;
 }
 
 export function mergeTrafficPorts(policies = [], endpoints = []) {
@@ -160,7 +161,7 @@ export function installTraffic(ctx) {
       <label>协议<select name="protocol"><option value="both" ${policy.protocol === "both" || !policy.protocol ? "selected" : ""}>TCP + UDP</option><option value="tcp" ${policy.protocol === "tcp" ? "selected" : ""}>TCP</option><option value="udp" ${policy.protocol === "udp" ? "selected" : ""}>UDP</option></select></label>
       <label>统计周期<select name="cycle"><option value="monthly" ${policy.cycle === "monthly" || !policy.cycle ? "selected" : ""}>每月</option><option value="yearly" ${policy.cycle === "yearly" ? "selected" : ""}>每年</option></select></label>
       <label>周期起始日期<input name="cycle_anchor" type="date" value="${dateInputValue(policy.cycle_anchor)}" max="${dateInputValue()}" required></label>
-      <label>周期额度（G）<input name="limit_gb" type="number" value="${quotaInputValue(policy.quota_enabled === false ? 0 : policy.limit_bytes)}" min="0.000001" max="8388607" step="0.000001" required placeholder="100"></label>
+      <label>周期额度（GiB）<input name="limit_gb" type="number" value="${quotaInputValue(policy.quota_enabled === false ? 0 : policy.limit_bytes)}" min="0.000001" max="8388607" step="0.000001" required placeholder="100"></label>
     </div><label class="traffic-auto-block"><input type="checkbox" name="auto_block" value="1" ${policy.auto_block !== false ? "checked" : ""}><span><b>超额自动封禁</b><small>关闭后仍统计流量，但不会阻断端口</small></span></label>`;
   };
   const requestFromForm = (form) => {
@@ -409,8 +410,9 @@ export function installTraffic(ctx) {
       const [status, tone] = policyStatus(policy, agent);
       const quotaEnabled = policy.quota_enabled !== false;
       const usedPercent = percent(policy.used_bytes, policy.limit_bytes);
-      const receiveBPS = trafficRateForDisplay(policy.receive_bps, policy.last_reported_at, agent?.status);
-      const sendBPS = trafficRateForDisplay(policy.send_bps, policy.last_reported_at, agent?.status);
+      const sampledAt = policy.last_collected_at || policy.last_reported_at;
+      const receiveBPS = policy.enforcement_available === false ? 0 : trafficRateForDisplay(policy.receive_bps, sampledAt, agent?.status);
+      const sendBPS = policy.enforcement_available === false ? 0 : trafficRateForDisplay(policy.send_bps, sampledAt, agent?.status);
       const period = policy.period_start && policy.period_end
         ? `${dateInputValue(policy.period_start)} 至 ${dateInputValue(policy.period_end)}`
         : `从 ${dateInputValue(policy.cycle_anchor)} 开始${cycleName(policy.cycle)}重置`;

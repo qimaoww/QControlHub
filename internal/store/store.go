@@ -48,7 +48,7 @@ type storeExecutor interface {
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 42
+const currentSchemaVersion = 43
 
 func Open(ctx context.Context, databaseURL string, allowInsecureRemote bool) (*Store, error) {
 	return OpenWithConfigKey(ctx, databaseURL, allowInsecureRemote, "")
@@ -2273,6 +2273,10 @@ ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS quota_enabled boolean
 ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS monitoring_enabled boolean NOT NULL DEFAULT true;
 ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS discovered boolean NOT NULL DEFAULT false;
 ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS traffic_history_initialized boolean NOT NULL DEFAULT false;
+ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS last_collected_at timestamptz;
+ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS counter_epoch varchar(32) NOT NULL DEFAULT '';
+ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS reported_lifetime_received_bytes bigint NOT NULL DEFAULT 0 CHECK (reported_lifetime_received_bytes >= 0);
+ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS reported_lifetime_sent_bytes bigint NOT NULL DEFAULT 0 CHECK (reported_lifetime_sent_bytes >= 0);
 ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS quota_notification_generation bigint NOT NULL DEFAULT 0;
 ALTER TABLE port_traffic_policies DROP CONSTRAINT IF EXISTS port_traffic_policies_quota_notification_generation_check;
 ALTER TABLE port_traffic_policies ADD CONSTRAINT port_traffic_policies_quota_notification_generation_check CHECK (quota_notification_generation >= 0);

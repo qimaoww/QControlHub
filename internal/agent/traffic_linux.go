@@ -33,31 +33,39 @@ type trafficCounterBackend interface {
 }
 
 type trafficRecord struct {
-	Policy             core.PortTrafficPolicy `json:"policy"`
-	ReceivedBytes      uint64                 `json:"received_bytes"`
-	SentBytes          uint64                 `json:"sent_bytes"`
-	LastKernelReceived uint64                 `json:"last_kernel_received"`
-	LastKernelSent     uint64                 `json:"last_kernel_sent"`
-	PeriodStart        time.Time              `json:"period_start"`
-	PeriodEnd          time.Time              `json:"period_end"`
-	Blocked            bool                   `json:"blocked"`
-	ReceiveBPS         uint64                 `json:"-"`
-	SendBPS            uint64                 `json:"-"`
-	LastCollectedAt    time.Time              `json:"-"`
+	Policy                core.PortTrafficPolicy `json:"policy"`
+	ReceivedBytes         uint64                 `json:"received_bytes"`
+	SentBytes             uint64                 `json:"sent_bytes"`
+	LastKernelReceived    uint64                 `json:"last_kernel_received"`
+	LastKernelSent        uint64                 `json:"last_kernel_sent"`
+	PeriodStart           time.Time              `json:"period_start"`
+	PeriodEnd             time.Time              `json:"period_end"`
+	Blocked               bool                   `json:"blocked"`
+	ReceiveBPS            uint64                 `json:"-"`
+	SendBPS               uint64                 `json:"-"`
+	LastCollectedAt       time.Time              `json:"-"`
+	CounterEpoch          string                 `json:"counter_epoch,omitempty"`
+	LifetimeReceivedBytes uint64                 `json:"lifetime_received_bytes,omitempty"`
+	LifetimeSentBytes     uint64                 `json:"lifetime_sent_bytes,omitempty"`
+	QuotaBaselineBytes    uint64                 `json:"quota_baseline_bytes,omitempty"`
+	KernelCounters        map[string]uint64      `json:"kernel_counters,omitempty"`
 }
 
 type trafficState struct {
 	Records map[string]*trafficRecord `json:"records"`
+	BootID  string                    `json:"boot_id,omitempty"`
 }
 
 type TrafficManager struct {
-	mu          sync.Mutex
-	statePath   string
-	backend     trafficCounterBackend
-	records     map[string]*trafficRecord
-	snapshot    []core.PortTrafficUsage
-	lastSavedAt time.Time
-	now         func() time.Time
+	mu         sync.Mutex
+	statePath  string
+	backend    trafficCounterBackend
+	records    map[string]*trafficRecord
+	snapshot   []core.PortTrafficUsage
+	dirty      bool
+	rulesDirty bool
+	bootID     string
+	now        func() time.Time
 }
 
 func NewTrafficManager(agentStatePath string) *TrafficManager {
@@ -69,10 +77,19 @@ func NewTrafficManagerForServiceManager(agentStatePath string, serviceManager *S
 		statePath: filepath.Join(filepath.Dir(agentStatePath), "traffic-state.json"),
 		backend:   newNFTBackendForServiceManager(serviceManager), records: make(map[string]*trafficRecord), now: time.Now,
 	}
+	if bootID, err := os.ReadFile("/proc/sys/kernel/random/boot_id"); err == nil {
+		manager.bootID = strings.TrimSpace(string(bootID))
+	}
 	state, err := loadTrafficState(manager.statePath)
 	if err == nil {
 		if err := validateLoadedTrafficState(state, manager.now().UTC()); err == nil {
 			manager.records = state.Records
+			if state.BootID != "" && state.BootID != manager.bootID {
+				for _, record := range manager.records {
+					record.LastKernelReceived, record.LastKernelSent = 0, 0
+					record.KernelCounters = nil
+				}
+			}
 		} else {
 			slog.Warn("ignore invalid port traffic state", "error", err)
 		}
@@ -85,11 +102,14 @@ func NewTrafficManagerForServiceManager(agentStatePath string, serviceManager *S
 	return manager
 }
 
-func (manager *TrafficManager) Start(ctx context.Context) {
+func (manager *TrafficManager) Start(ctx context.Context) <-chan struct{} {
+	done := make(chan struct{})
 	if manager == nil {
-		return
+		close(done)
+		return done
 	}
 	go func() {
+		defer close(done)
 		// nftables is a required Agent runtime dependency, even when no quota
 		// exists yet. Older nodes may have received binary-only Agent upgrades
 		// that never reran install-agent.sh, so repair the package at every Agent
@@ -105,12 +125,23 @@ func (manager *TrafficManager) Start(ctx context.Context) {
 		for {
 			select {
 			case <-ctx.Done():
+				// The parent context is already cancelled. Finish one bounded
+				// collection and checkpoint without removing enforcement rules.
+				shutdown, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+				manager.mu.Lock()
+				_ = manager.collectLocked(shutdown, false)
+				if err := manager.saveLocked(); err != nil {
+					slog.Warn("persist final port traffic counters", "error", err)
+				}
+				manager.mu.Unlock()
+				cancel()
 				return
 			case <-ticker.C:
 				manager.collect(ctx, false)
 			}
 		}
 	}()
+	return done
 }
 
 func (manager *TrafficManager) SetPolicies(ctx context.Context, policies []core.PortTrafficPolicy, agentID string) error {
@@ -142,25 +173,49 @@ func (manager *TrafficManager) SetPolicies(ctx context.Context, policies []core.
 			Protocol: policy.Protocol, Cycle: policy.Cycle, CycleAnchor: policy.CycleAnchor, LimitBytes: policy.LimitBytes,
 			AutoBlock: &autoBlock,
 		}, now)
-		if err != nil || policy.ResetGeneration == 0 {
+		if err != nil {
 			return fmt.Errorf("control plane returned an invalid traffic policy: %w", err)
+		}
+		if policy.ResetGeneration == 0 || policy.ResetGeneration > math.MaxInt64 {
+			return errors.New("control plane returned an invalid traffic policy generation")
 		}
 		policy.Name, policy.CycleAnchor = normalized.Name, normalized.CycleAnchor
 	}
 
 	manager.mu.Lock()
 	defer manager.mu.Unlock()
+	unchanged := len(policies) == len(manager.records)
+	for _, policy := range policies {
+		record := manager.records[policy.ID]
+		if record == nil || !sameTrafficCounter(record.Policy, policy) || record.Policy.AgentID != policy.AgentID ||
+			record.Policy.Name != policy.Name || record.Policy.Engine != policy.Engine ||
+			record.Policy.LimitBytes != policy.LimitBytes || record.Policy.AutoBlock != policy.AutoBlock {
+			unchanged = false
+			break
+		}
+	}
+	if unchanged && !manager.rulesDirty {
+		return nil
+	}
 	_ = manager.collectLocked(ctx, false)
 	next := make(map[string]*trafficRecord, len(policies))
 	for _, policy := range policies {
 		record := manager.records[policy.ID]
 		if record == nil || !sameTrafficCounter(record.Policy, policy) {
-			record = &trafficRecord{}
+			record = &trafficRecord{KernelCounters: make(map[string]uint64)}
+			// The control plane already billed these bytes. Use them only for
+			// recovered quota enforcement, never as new lifetime increments.
+			start, end, _ := core.TrafficPeriodAt(policy.CycleAnchor, policy.Cycle, now)
+			if policy.PeriodStart != nil && policy.PeriodEnd != nil && policy.PeriodStart.Equal(start) && policy.PeriodEnd.Equal(end) {
+				record.QuotaBaselineBytes = saturatedTrafficAdd(policy.ReceivedBytes, policy.SentBytes)
+				record.PeriodStart, record.PeriodEnd = start, end
+			}
 		}
 		record.Policy = policy
 		next[policy.ID] = record
 	}
 	manager.records = next
+	manager.dirty = true
 	if err := manager.collectLocked(ctx, true); err != nil {
 		slog.Warn("apply port traffic policies", "error", err)
 	}
@@ -175,6 +230,7 @@ func (manager *TrafficManager) ClearPolicies(ctx context.Context) error {
 	defer manager.mu.Unlock()
 	_ = manager.collectLocked(ctx, false)
 	manager.records = make(map[string]*trafficRecord)
+	manager.dirty = true
 	return manager.collectLocked(ctx, true)
 }
 
@@ -196,9 +252,10 @@ func (manager *TrafficManager) collect(ctx context.Context, forceRules bool) {
 }
 
 func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules bool) error {
-	if len(manager.records) == 0 && !forceRules {
+	manager.rulesDirty = manager.rulesDirty || forceRules
+	if len(manager.records) == 0 && !manager.rulesDirty {
 		manager.snapshot = nil
-		return nil
+		return manager.saveLocked()
 	}
 	if manager.backend == nil {
 		return manager.setUnavailableLocked(errors.New("nftables backend is unavailable"))
@@ -208,74 +265,97 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 		return manager.setUnavailableLocked(err)
 	}
 	now := manager.now().UTC()
-	stateChanged := false
 	if tableExists && !trafficRuleSetComplete(counters, manager.records) {
-		forceRules = true
+		manager.rulesDirty = true
 	}
+	desired := make(map[string]*trafficRecord, len(manager.records))
 	for _, id := range sortedTrafficRecordIDs(manager.records) {
 		record := manager.records[id]
+		if record.CounterEpoch == "" {
+			epoch, err := randomSuffix(16)
+			if err != nil {
+				return manager.setUnavailableLocked(err)
+			}
+			record.CounterEpoch = epoch
+			record.LifetimeReceivedBytes, record.LifetimeSentBytes = record.ReceivedBytes, record.SentBytes
+			manager.dirty, manager.rulesDirty = true, true
+		}
 		periodStart, periodEnd, periodErr := core.TrafficPeriodAt(record.Policy.CycleAnchor, record.Policy.Cycle, now)
 		if periodErr != nil {
 			return manager.setUnavailableLocked(periodErr)
 		}
-		kernelReceived, kernelSent := policyKernelCounters(counters, record.Policy)
+		receivedDelta, sentDelta := collectTrafficCounterDeltas(counters, record)
 		if !record.PeriodStart.Equal(periodStart) || !record.PeriodEnd.Equal(periodEnd) {
 			record.ReceivedBytes, record.SentBytes = 0, 0
-			record.LastKernelReceived, record.LastKernelSent = kernelReceived, kernelSent
-			record.ReceiveBPS, record.SendBPS = 0, 0
-			record.PeriodStart, record.PeriodEnd = periodStart, periodEnd
-			record.LastCollectedAt = now
-			if record.Blocked {
-				record.Blocked = false
-				forceRules = true
-			}
-			stateChanged = true
-		} else {
-			receivedDelta := counterDelta(kernelReceived, record.LastKernelReceived)
-			sentDelta := counterDelta(kernelSent, record.LastKernelSent)
-			// Once blocked, nftables counters observe rejected attempts. Keep
-			// those bytes out of billed usage while retaining a fresh baseline.
-			if record.Blocked {
+			record.QuotaBaselineBytes = 0
+			// Keep the crossing sample in the new period instead of silently
+			// discarding it. An initial baseline is not historical usage.
+			if record.PeriodStart.IsZero() || (record.Blocked && !hasNamedTrafficCounters(counters, record)) {
 				receivedDelta, sentDelta = 0, 0
 			}
-			record.ReceivedBytes = saturatedTrafficAdd(record.ReceivedBytes, receivedDelta)
-			record.SentBytes = saturatedTrafficAdd(record.SentBytes, sentDelta)
-			if !record.LastCollectedAt.IsZero() && now.After(record.LastCollectedAt) {
-				seconds := now.Sub(record.LastCollectedAt).Seconds()
-				record.ReceiveBPS = trafficRate(receivedDelta, seconds)
-				record.SendBPS = trafficRate(sentDelta, seconds)
-			}
-			record.LastKernelReceived, record.LastKernelSent = kernelReceived, kernelSent
-			record.LastCollectedAt = now
-			stateChanged = stateChanged || receivedDelta > 0 || sentDelta > 0
+			record.ReceiveBPS, record.SendBPS = 0, 0
+			record.PeriodStart, record.PeriodEnd = periodStart, periodEnd
+			manager.dirty = true
+		} else if record.Blocked && !hasNamedTrafficCounters(counters, record) {
+			// Only legacy anonymous counters count rejected attempts. Named
+			// counters stop at the actual drop rule; their final increment is
+			// still valid even when it arrived during the rule transaction.
+			receivedDelta, sentDelta = 0, 0
 		}
-		blocked := record.Policy.AutoBlock && trafficUsed(record) >= record.Policy.LimitBytes
+		record.ReceivedBytes = saturatedTrafficAdd(record.ReceivedBytes, receivedDelta)
+		record.SentBytes = saturatedTrafficAdd(record.SentBytes, sentDelta)
+		record.LifetimeReceivedBytes = saturatedTrafficAdd(record.LifetimeReceivedBytes, receivedDelta)
+		record.LifetimeSentBytes = saturatedTrafficAdd(record.LifetimeSentBytes, sentDelta)
+		record.ReceiveBPS, record.SendBPS = 0, 0
+		if !record.LastCollectedAt.IsZero() && now.After(record.LastCollectedAt) {
+			seconds := now.Sub(record.LastCollectedAt).Seconds()
+			record.ReceiveBPS = trafficRate(receivedDelta, seconds)
+			record.SendBPS = trafficRate(sentDelta, seconds)
+		}
+		record.LastCollectedAt = now
+		manager.dirty = manager.dirty || receivedDelta > 0 || sentDelta > 0
+		blocked := record.Policy.AutoBlock && saturatedTrafficAdd(trafficUsed(record), record.QuotaBaselineBytes) >= record.Policy.LimitBytes
+		next := *record
+		next.Blocked = blocked
+		desired[id] = &next
 		if blocked != record.Blocked {
-			record.Blocked = blocked
-			forceRules = true
-			stateChanged = true
+			manager.rulesDirty = true
 		}
 	}
 
-	if forceRules || (len(manager.records) > 0 && !tableExists) || (len(manager.records) == 0 && tableExists) {
-		script := renderTrafficRules(manager.records, tableExists)
+	if manager.rulesDirty || (len(manager.records) > 0 && !tableExists) || (len(manager.records) == 0 && tableExists) {
+		manager.rulesDirty = true
+		script := renderTrafficRules(desired, tableExists, counters)
 		if err := manager.backend.Replace(ctx, script); err != nil {
+			// Counting can still succeed while enforcement is broken. Keep
+			// those observed bytes durable even through repeated apply errors.
+			if saveErr := manager.saveLocked(); saveErr != nil {
+				err = errors.Join(err, fmt.Errorf("persist traffic counters: %w", saveErr))
+			}
 			return manager.setUnavailableLocked(err)
 		}
-		for _, record := range manager.records {
-			record.LastKernelReceived, record.LastKernelSent = 0, 0
+		for id, record := range manager.records {
+			record.Blocked = desired[id].Blocked
 		}
-		stateChanged = true
-		manager.lastSavedAt = time.Time{}
+		manager.rulesDirty = false
+		manager.dirty = true
 	}
 	manager.refreshSnapshotLocked(true, "")
-	if stateChanged && (manager.lastSavedAt.IsZero() || now.Sub(manager.lastSavedAt) >= 30*time.Second || forceRules) {
-		if err := saveTrafficState(manager.statePath, trafficState{Records: manager.records}); err != nil {
-			manager.refreshSnapshotLocked(false, "persist traffic counters: "+err.Error())
-			return err
-		}
-		manager.lastSavedAt = now
+	if err := manager.saveLocked(); err != nil {
+		manager.refreshSnapshotLocked(false, "persist traffic counters: "+err.Error())
+		return err
 	}
+	return nil
+}
+
+func (manager *TrafficManager) saveLocked() error {
+	if !manager.dirty {
+		return nil
+	}
+	if err := saveTrafficState(manager.statePath, trafficState{Records: manager.records, BootID: manager.bootID}); err != nil {
+		return err
+	}
+	manager.dirty = false
 	return nil
 }
 
@@ -286,6 +366,7 @@ func (manager *TrafficManager) setUnavailableLocked(err error) error {
 	}
 	now := manager.now().UTC()
 	for _, record := range manager.records {
+		record.ReceiveBPS, record.SendBPS = 0, 0
 		if record.PeriodStart.IsZero() || record.PeriodEnd.IsZero() {
 			if start, end, periodErr := core.TrafficPeriodAt(record.Policy.CycleAnchor, record.Policy.Cycle, now); periodErr == nil {
 				record.PeriodStart, record.PeriodEnd = start, end
@@ -306,6 +387,8 @@ func (manager *TrafficManager) refreshSnapshotLocked(available bool, message str
 			UsedBytes: trafficUsed(record), ReceiveBPS: record.ReceiveBPS, SendBPS: record.SendBPS,
 			PeriodStart: record.PeriodStart, PeriodEnd: record.PeriodEnd, Blocked: record.Blocked,
 			EnforcementAvailable: available, EnforcementError: message,
+			CollectedAt: record.LastCollectedAt, CounterEpoch: record.CounterEpoch,
+			LifetimeReceivedBytes: record.LifetimeReceivedBytes, LifetimeSentBytes: record.LifetimeSentBytes,
 		})
 	}
 	manager.snapshot = result
@@ -334,6 +417,60 @@ func policyKernelCounters(counters map[string]uint64, policy core.PortTrafficPol
 	return received, sent
 }
 
+func trafficCounterName(record *trafficRecord, direction, protocol string) string {
+	return "qch_" + record.Policy.ID + "_" + record.CounterEpoch + "_" + direction + "_" + protocol
+}
+
+func hasNamedTrafficCounters(counters map[string]uint64, record *trafficRecord) bool {
+	for _, protocol := range trafficProtocols(record.Policy.Protocol) {
+		if _, ok := counters[trafficCounterName(record, "in", protocol)]; ok {
+			return true
+		}
+		if _, ok := counters[trafficCounterName(record, "out", protocol)]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func collectTrafficCounterDeltas(counters map[string]uint64, record *trafficRecord) (uint64, uint64) {
+	if !hasNamedTrafficCounters(counters, record) && record.KernelCounters == nil {
+		// One-time migration of the original aggregated anonymous baseline.
+		received, sent := policyKernelCounters(counters, record.Policy)
+		rx, tx := counterDelta(received, record.LastKernelReceived), counterDelta(sent, record.LastKernelSent)
+		record.LastKernelReceived, record.LastKernelSent = received, sent
+		return rx, tx
+	}
+	if record.KernelCounters == nil {
+		record.KernelCounters = make(map[string]uint64)
+	}
+	var received, sent uint64
+	for _, protocol := range trafficProtocols(record.Policy.Protocol) {
+		for _, direction := range []string{"in", "out"} {
+			key := trafficCounterName(record, direction, protocol)
+			value, exists := counters[key]
+			if !exists {
+				delete(record.KernelCounters, key)
+				delete(record.KernelCounters, "handle:"+key)
+				continue
+			}
+			previous := record.KernelCounters[key]
+			handle := counters["handle:"+key]
+			if handle != record.KernelCounters["handle:"+key] {
+				previous = 0
+			}
+			delta := counterDelta(value, previous)
+			record.KernelCounters[key], record.KernelCounters["handle:"+key] = value, handle
+			if direction == "in" {
+				received = saturatedTrafficAdd(received, delta)
+			} else {
+				sent = saturatedTrafficAdd(sent, delta)
+			}
+		}
+	}
+	return received, sent
+}
+
 func trafficProtocols(protocol core.TrafficProtocol) []string {
 	if protocol == core.TrafficProtocolBoth {
 		return []string{"tcp", "udp"}
@@ -346,13 +483,20 @@ func trafficRuleComment(policyID, direction, protocol string) string {
 }
 
 func trafficRuleSetComplete(counters map[string]uint64, records map[string]*trafficRecord) bool {
-	for id, record := range records {
+	for _, record := range records {
 		for _, protocol := range trafficProtocols(record.Policy.Protocol) {
-			if _, exists := counters[trafficRuleComment(id, "in", protocol)]; !exists {
-				return false
-			}
-			if _, exists := counters[trafficRuleComment(id, "out", protocol)]; !exists {
-				return false
+			for _, direction := range []string{"in", "out"} {
+				name := trafficCounterName(record, direction, protocol)
+				if _, exists := counters[name]; !exists || counters["rule:"+name] != 1 {
+					return false
+				}
+				wantDrops := uint64(0)
+				if record.Blocked {
+					wantDrops = 1
+				}
+				if counters["drop:"+name] != wantDrops {
+					return false
+				}
 			}
 		}
 	}
@@ -388,33 +532,65 @@ func trafficRate(delta uint64, seconds float64) uint64 {
 	return uint64(rate)
 }
 
-func renderTrafficRules(records map[string]*trafficRecord, tableExists bool) string {
+func renderTrafficRules(records map[string]*trafficRecord, tableExists bool, counters map[string]uint64) string {
 	var script strings.Builder
-	if tableExists {
-		script.WriteString("delete table inet " + trafficTableName + "\n")
-	}
 	if len(records) == 0 {
+		if tableExists {
+			script.WriteString("delete table inet " + trafficTableName + "\n")
+		}
 		return script.String()
 	}
 	script.WriteString("add table inet " + trafficTableName + "\n")
 	script.WriteString("add chain inet " + trafficTableName + " input { type filter hook input priority -10; policy accept; }\n")
 	script.WriteString("add chain inet " + trafficTableName + " output { type filter hook output priority -10; policy accept; }\n")
+	if tableExists {
+		// Flush rules only, atomically with their replacements. Named counter
+		// objects survive, including bytes arriving after the preceding read.
+		script.WriteString("flush chain inet " + trafficTableName + " input\n")
+		script.WriteString("flush chain inet " + trafficTableName + " output\n")
+	}
+	active := make(map[string]bool)
 	for _, id := range sortedTrafficRecordIDs(records) {
 		record := records[id]
 		for _, protocol := range trafficProtocols(record.Policy.Protocol) {
-			verdict := ""
-			if record.Blocked {
-				verdict = " drop"
+			for _, direction := range []string{"in", "out"} {
+				name := trafficCounterName(record, direction, protocol)
+				active[name] = true
+				if _, exists := counters[name]; !exists {
+					fmt.Fprintf(&script, "add counter inet %s %s\n", trafficTableName, name)
+				}
+				chain, portField := "input", "dport"
+				if direction == "out" {
+					chain, portField = "output", "sport"
+				}
+				if record.Blocked {
+					// Rejected packets never reach the accounting statement.
+					fmt.Fprintf(&script, "add rule inet %s %s meta l4proto %s %s %s %d drop comment %s\n",
+						trafficTableName, chain, protocol, protocol, portField, record.Policy.Port, strconv.Quote("qch:block:"+name))
+				}
+				fmt.Fprintf(&script, "add rule inet %s %s meta l4proto %s %s %s %d counter name %s comment %s\n",
+					trafficTableName, chain, protocol, protocol, portField, record.Policy.Port, name,
+					strconv.Quote(trafficRuleComment(id, direction, protocol)))
 			}
-			fmt.Fprintf(&script, "add rule inet %s input meta l4proto %s %s dport %d counter%s comment %s\n",
-				trafficTableName, protocol, protocol, record.Policy.Port, verdict,
-				strconv.Quote(trafficRuleComment(id, "in", protocol)))
-			fmt.Fprintf(&script, "add rule inet %s output meta l4proto %s %s sport %d counter%s comment %s\n",
-				trafficTableName, protocol, protocol, record.Policy.Port, verdict,
-				strconv.Quote(trafficRuleComment(id, "out", protocol)))
 		}
 	}
+	var obsolete []string
+	for name := range counters {
+		if validTrafficCounterName(name) && !active[name] {
+			obsolete = append(obsolete, name)
+		}
+	}
+	sort.Strings(obsolete)
+	for _, name := range obsolete {
+		fmt.Fprintf(&script, "delete counter inet %s %s\n", trafficTableName, name)
+	}
 	return script.String()
+}
+
+func validTrafficCounterName(name string) bool {
+	parts := strings.Split(name, "_")
+	return len(parts) == 6 && parts[0] == "qch" && core.ValidPortTrafficPolicyID(parts[1]+"_"+parts[2]) &&
+		core.ValidTrafficCounterEpoch(parts[3]) && (parts[4] == "in" || parts[4] == "out") && (parts[5] == "tcp" || parts[5] == "udp")
 }
 
 type nftBackend struct {
@@ -647,12 +823,15 @@ func processHasCapability(bit uint) bool {
 func parseNFTTrafficCounters(contents []byte) (map[string]uint64, error) {
 	var document struct {
 		NFTables []struct {
+			Counter *struct {
+				Name   string `json:"name"`
+				Bytes  uint64 `json:"bytes"`
+				Handle uint64 `json:"handle"`
+			} `json:"counter"`
 			Rule *struct {
 				Comment string `json:"comment"`
 				Expr    []struct {
-					Counter *struct {
-						Bytes uint64 `json:"bytes"`
-					} `json:"counter"`
+					Counter json.RawMessage `json:"counter"`
 				} `json:"expr"`
 			} `json:"rule"`
 		} `json:"nftables"`
@@ -662,13 +841,37 @@ func parseNFTTrafficCounters(contents []byte) (map[string]uint64, error) {
 	}
 	result := make(map[string]uint64)
 	for _, item := range document.NFTables {
+		if item.Counter != nil && validTrafficCounterName(item.Counter.Name) {
+			result[item.Counter.Name] = item.Counter.Bytes
+			result["handle:"+item.Counter.Name] = item.Counter.Handle
+		}
+		if item.Rule != nil && strings.HasPrefix(item.Rule.Comment, "qch:block:") {
+			name := strings.TrimPrefix(item.Rule.Comment, "qch:block:")
+			if validTrafficCounterName(name) {
+				result["drop:"+name]++
+			}
+		}
 		if item.Rule == nil || !strings.HasPrefix(item.Rule.Comment, "qch:trf_") {
 			continue
 		}
 		for _, expression := range item.Rule.Expr {
-			if expression.Counter != nil {
-				result[item.Rule.Comment] = saturatedTrafficAdd(result[item.Rule.Comment], expression.Counter.Bytes)
+			if len(expression.Counter) == 0 {
+				continue
 			}
+			var name string
+			if json.Unmarshal(expression.Counter, &name) == nil {
+				if validTrafficCounterName(name) {
+					result["rule:"+name]++
+				}
+				continue
+			}
+			var counter struct {
+				Bytes uint64 `json:"bytes"`
+			}
+			if err := json.Unmarshal(expression.Counter, &counter); err != nil {
+				return nil, fmt.Errorf("parse nftables counter expression: %w", err)
+			}
+			result[item.Rule.Comment] = saturatedTrafficAdd(result[item.Rule.Comment], counter.Bytes)
 		}
 	}
 	return result, nil
@@ -733,9 +936,21 @@ func validateLoadedTrafficState(state trafficState, now time.Time) error {
 		}, now); err != nil {
 			return fmt.Errorf("traffic state contains an invalid policy: %w", err)
 		}
-		if record.ReceivedBytes > math.MaxInt64 || record.SentBytes > math.MaxInt64 ||
+		if record.ReceivedBytes > math.MaxInt64 || record.SentBytes > math.MaxInt64 || record.LifetimeReceivedBytes > math.MaxInt64 || record.LifetimeSentBytes > math.MaxInt64 || record.QuotaBaselineBytes > math.MaxInt64 ||
 			record.LastKernelReceived > math.MaxInt64 || record.LastKernelSent > math.MaxInt64 {
 			return errors.New("traffic state contains an out-of-range counter")
+		}
+		if record.CounterEpoch != "" && !core.ValidTrafficCounterEpoch(record.CounterEpoch) {
+			return errors.New("traffic state contains an invalid counter epoch")
+		}
+		if len(record.KernelCounters) > 8 {
+			return errors.New("traffic state contains too many kernel counters")
+		}
+		for key := range record.KernelCounters {
+			name := strings.TrimPrefix(key, "handle:")
+			if !validTrafficCounterName(name) || !strings.HasPrefix(name, "qch_"+id+"_"+record.CounterEpoch+"_") {
+				return errors.New("traffic state contains an invalid kernel counter")
+			}
 		}
 	}
 	return nil

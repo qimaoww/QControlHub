@@ -62,6 +62,7 @@ type PortTrafficPolicy struct {
 	EnforcementAvailable bool            `json:"enforcement_available"`
 	EnforcementError     string          `json:"enforcement_error,omitempty"`
 	LastReportedAt       *time.Time      `json:"last_reported_at,omitempty"`
+	LastCollectedAt      *time.Time      `json:"last_collected_at,omitempty"`
 	CreatedAt            time.Time       `json:"created_at"`
 	UpdatedAt            time.Time       `json:"updated_at"`
 }
@@ -105,18 +106,36 @@ type PortTrafficEndpoint struct {
 }
 
 type PortTrafficUsage struct {
-	PolicyID             string    `json:"policy_id"`
-	ResetGeneration      uint64    `json:"reset_generation"`
-	ReceivedBytes        uint64    `json:"received_bytes"`
-	SentBytes            uint64    `json:"sent_bytes"`
-	UsedBytes            uint64    `json:"used_bytes"`
-	ReceiveBPS           uint64    `json:"receive_bps"`
-	SendBPS              uint64    `json:"send_bps"`
-	PeriodStart          time.Time `json:"period_start"`
-	PeriodEnd            time.Time `json:"period_end"`
-	Blocked              bool      `json:"blocked"`
-	EnforcementAvailable bool      `json:"enforcement_available"`
-	EnforcementError     string    `json:"enforcement_error,omitempty"`
+	// CollectedAt identifies the actual sample, not the heartbeat or network
+	// arrival. CounterEpoch changes only when the local accounting is reset.
+	CollectedAt           time.Time `json:"collected_at,omitzero"`
+	CounterEpoch          string    `json:"counter_epoch,omitempty"`
+	LifetimeReceivedBytes uint64    `json:"lifetime_received_bytes,omitempty"`
+	LifetimeSentBytes     uint64    `json:"lifetime_sent_bytes,omitempty"`
+	PolicyID              string    `json:"policy_id"`
+	ResetGeneration       uint64    `json:"reset_generation"`
+	ReceivedBytes         uint64    `json:"received_bytes"`
+	SentBytes             uint64    `json:"sent_bytes"`
+	UsedBytes             uint64    `json:"used_bytes"`
+	ReceiveBPS            uint64    `json:"receive_bps"`
+	SendBPS               uint64    `json:"send_bps"`
+	PeriodStart           time.Time `json:"period_start"`
+	PeriodEnd             time.Time `json:"period_end"`
+	Blocked               bool      `json:"blocked"`
+	EnforcementAvailable  bool      `json:"enforcement_available"`
+	EnforcementError      string    `json:"enforcement_error,omitempty"`
+}
+
+func ValidTrafficCounterEpoch(value string) bool {
+	if len(value) != 32 {
+		return false
+	}
+	for _, character := range value {
+		if (character < '0' || character > '9') && (character < 'a' || character > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 // PortTrafficDailyUsage is the durable UTC-day aggregate for one monitored
