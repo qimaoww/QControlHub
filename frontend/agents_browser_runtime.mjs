@@ -105,7 +105,7 @@ window.fetch = async (input, options = {}) => {
   const url = new URL(input instanceof Request ? input.url : input, location.href);
   const path = url.pathname.replace(/^\/api\/v1/, "");
   const method = String(options.method || (input instanceof Request ? input.method : "GET")).toUpperCase();
-  testAPI.calls.push({ method, path });
+  testAPI.calls.push({ method, path, query: url.search });
   if (!["GET", "HEAD", "OPTIONS"].includes(method))
     assert.equal(
       new Headers(options.headers).get("X-QControlHub-CSRF"),
@@ -119,14 +119,19 @@ window.fetch = async (input, options = {}) => {
   if (method === "GET" && path === "/settings")
     return json({ panel_name: "QControlHub Browser Smoke" });
   if (method === "GET" && path === "/agents" && testAPI.agentsFailure) return json({error:"temporary runtime failure"},503);
-  if (method === "GET" && path === "/agents")
+  if (method === "GET" && path === "/agents") {
+    if (testAPI.agentsGate) await testAPI.agentsGate;
     return json(mode === "empty" ? [] : testAPI.agents);
+  }
   if (method === "GET" && path === "/core-logs" && mode === "logs") {
     const limit = Number(url.searchParams.get("limit") || 1000);
+    const agent = url.searchParams.get("agent_id") || "alpha";
+    if (testAPI.logGates?.[`${agent}:${limit}`]) await testAPI.logGates[`${agent}:${limit}`];
+    if (options.signal?.aborted) throw new DOMException("Aborted", "AbortError");
     return json(["mihomo", "xray", "sing-box", "ss-rust"].flatMap((engine, engineIndex) =>
       Array.from({ length: limit }, (_, index) => ({
-        id: engineIndex * 10000 + index + 1, agent_id: "alpha", engine, level: "warning",
-        message: `${engine} pressure entry ${index}`, logged_at: "2026-09-06T00:00:00Z",
+        id: engineIndex * 10000 + index + 1, agent_id: agent, engine, level: "warning",
+        message: `${agent} ${engine} pressure entry ${index}`, logged_at: "2026-09-06T00:00:00Z",
       }))));
   }
   if (method === "GET" && path === "/deployments") return json(testAPI.deployments);
@@ -938,19 +943,28 @@ async function testPortNamesAndRuntimeRefresh() {
 
 async function testLargeLogRuntime() {
   await waitFor(() => document.querySelector(".desktop-app"), "initial shell missing");
+  let releaseAgents;
+  testAPI.agentsGate = new Promise((resolve) => { releaseAgents = resolve; });
   const began = performance.now();
   location.hash = "#core-logs";
   await waitFor(() => document.querySelectorAll(".core-log-row").length === 200, "default log page missing");
-  assert.match(document.querySelector(".core-log-pagination").textContent, /已加载 4000 条/);
+  assert.match(document.querySelector(".core-log-status").textContent, /已加载 4000 条/);
   const initial = performance.now() - began;
+  testAPI.agentsGate = null;
+  releaseAgents();
   document.querySelector("[data-toggle-core-log-refresh]").click();
   const selectedAt = performance.now();
   const limit = document.querySelector('#core-log-filters select[name="limit"]');
   limit.value = "2000";
   limit.dispatchEvent(new Event("change", { bubbles: true }));
-  await waitFor(() => document.querySelector(".core-log-pagination")?.textContent.includes("已加载 8000 条"), "2000/engine result missing");
+  await waitFor(() => document.querySelector(".core-log-status")?.textContent.includes("已加载 8000 条"), "2000/engine result missing");
   const expanded = performance.now() - selectedAt;
   assert.equal(document.querySelectorAll(".core-log-row").length, 200, "8000 entries must not create 8000 DOM rows");
+  assert.equal(document.querySelector(".core-log-stream .core-log-pagination"), null, "pagination must not split headings and log rows");
+  assert.equal(document.querySelectorAll(".core-log-result-toolbar .core-log-pagination, .core-log-result-footer .core-log-pagination").length, 2);
+  const toolbarBox = document.querySelector(".core-log-result-toolbar .core-log-pagination").getBoundingClientRect();
+  const streamBox = document.querySelector(".core-log-stream").getBoundingClientRect();
+  assert.ok(toolbarBox.bottom <= streamBox.top && Math.abs(toolbarBox.right - streamBox.right) < 10, "top pagination must sit outside and align with the table's right edge");
   const reads = testAPI.calls.filter((call) => call.path === "/core-logs").length;
   const pageAt = performance.now();
   document.querySelector('[data-core-log-page-index="1"]').click();
@@ -964,8 +978,41 @@ async function testLargeLogRuntime() {
   await waitFor(() => document.querySelectorAll(".core-log-row").length === 4, "filter must search beyond the displayed page");
   const filterTime = performance.now() - filterAt;
   assert.equal(testAPI.calls.filter((call) => call.path === "/core-logs").length, reads, "local pagination/filtering must not query the remote database");
+  document.querySelector("[data-reset-core-logs]").click();
+  const gated = () => {
+    let resolve;
+    const promise = new Promise((yes) => { resolve = yes; });
+    return { promise, resolve };
+  };
+  const preview = gated(), full = gated();
+  testAPI.logGates = { "bravo:200": preview.promise, "bravo:2000": full.promise };
+  const switchAt = performance.now();
+  document.querySelector('[data-core-log-agent="bravo"]').click();
+  assert.ok(document.querySelector('[data-core-log-agent="bravo"]').classList.contains("active"), "sidebar selection must update before network completion");
+  assert.equal(document.querySelectorAll(".core-log-row").length, 0, "old node's logs must disappear immediately");
+  const acknowledgement = performance.now() - switchAt;
+  const previewAt = performance.now();
+  preview.resolve();
+  await waitFor(() => document.querySelector(".core-log-status")?.textContent.includes("已加载 800 条"), "node preview did not render before full window");
+  const previewTime = performance.now() - previewAt;
+  assert.match(document.querySelector(".core-log-row pre").textContent, /bravo/);
+  assert.match(document.querySelector("[data-core-log-refresh-label]").textContent, /正在补齐/);
+  full.resolve();
+  await waitFor(() => document.querySelector(".core-log-status")?.textContent.includes("已加载 8000 条"), "node's requested window was truncated");
+  document.querySelector('[data-core-log-agent=""]').click();
+  await waitFor(() => document.querySelector(".core-log-row pre")?.textContent.includes("alpha"), "return to all logs failed");
+  const refreshGate = gated();
+  testAPI.logGates["bravo:2000"] = refreshGate.promise;
+  const cachedAt = performance.now();
+  document.querySelector('[data-core-log-agent="bravo"]').click();
+  assert.match(document.querySelector(".core-log-row pre").textContent, /bravo/, "cached node must appear synchronously with a pending network refresh");
+  assert.match(document.querySelector("[data-core-log-refresh-label]").textContent, /已显示缓存/);
+  const cachedTime = performance.now() - cachedAt;
+  refreshGate.resolve();
+  await waitFor(() => document.querySelector("[data-core-log-refresh-label]")?.textContent === "自动更新已暂停", "cache revalidation did not settle");
   assert.ok(initial < 5000 && expanded < 5000 && pageTime < 2000 && filterTime < 2000, "large log UI exceeded smoke responsiveness budget");
-  window.logPressureResult = { loaded: 8000, domRows: 200, initialMs: Math.round(initial), expandedMs: Math.round(expanded), pageMs: Math.round(pageTime), filterMs: Math.round(filterTime) };
+  assert.ok(acknowledgement < 500 && previewTime < 1000 && cachedTime < 500, "node switch exceeded local rendering budget");
+  window.logPressureResult = { loaded: 8000, domRows: 200, initialMs: Math.round(initial), expandedMs: Math.round(expanded), pageMs: Math.round(pageTime), filterMs: Math.round(filterTime), switchAckMs: Math.round(acknowledgement), previewRenderMs: Math.round(previewTime), cachedSwitchMs: Math.round(cachedTime) };
 }
 
 try {
@@ -976,7 +1023,8 @@ try {
   else if (mode === "logs") await testLargeLogRuntime();
   else await testReadonlyRuntime();
   document.documentElement.dataset.browserSmoke = "passed";
-  document.body.innerHTML = `<pre id="browser-smoke-result">PASS ${mode}${window.logPressureResult ? " " + JSON.stringify(window.logPressureResult) : ""}</pre>`;
+  if (!new URLSearchParams(location.search).has("preview"))
+    document.body.innerHTML = `<pre id="browser-smoke-result">PASS ${mode}${window.logPressureResult ? " " + JSON.stringify(window.logPressureResult) : ""}</pre>`;
 } catch (error) {
   document.documentElement.dataset.browserSmoke = "failed";
   document.body.innerHTML = `<pre id="browser-smoke-result"></pre>`;

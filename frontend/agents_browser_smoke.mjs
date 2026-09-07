@@ -54,6 +54,13 @@ await new Promise((resolve, reject) => {
   server.listen(0, "127.0.0.1", resolve);
 });
 
+// Reuse the same fixture for manual layout inspection, without launching the
+// automated browser runner. No production API or credentials are involved.
+if (process.env.QCH_BROWSER_SMOKE_SERVE_ONLY) {
+  process.stdout.write(`http://127.0.0.1:${server.address().port}/agents-browser-smoke.html?mode=logs&preview=1#node-settings\n`);
+  await new Promise(() => {});
+}
+
 const chrome = [
   process.env.QCH_CHROME_BIN,
   "chromium",
