@@ -2,6 +2,22 @@
 
 本文采用“单机 Docker Compose API 控制面 + 独立 SPA + 宿主机 Nginx + 多台 systemd/OpenRC Agent”的基线。只有 `qcontrol-web` 发布到回环地址，Nginx 负责公网 TLS；控制面 API 只在 Compose 内部网络可达，控制面到 PostgreSQL 使用项目内部后端网络，数据库持久化到命名卷。
 
+## BBR / TCP 调优页面
+
+升级控制面、Web 和 Agent 后，侧栏“TCP 调优”提供独立的 **BBR / TCP 调优** 页面。控制面 schema 升至 v42（在主线 v41 性能优化基础上增加任务 `tcp_settings` 和三个系统级动作），升级前按现有流程备份数据库。Agent 无需重装服务即可使用此功能：systemd 模式通过受保护的当前 Agent 可执行文件启动短时 helper，OpenRC 模式直接执行相同受限操作；不会放宽长期运行的 Agent 服务沙箱。
+
+状态来自 `/proc/sys/net` 和只读的 `tc -j qdisc show`，与是否在面板开启无关。没有可用 `tc` 时仍展示系统参数，实际网卡队列显示“未知”；只为查看队列可由管理员安装发行版的 iproute2。采集不加载模块、不改参数、不创建配置文件。页面沿用全局主题、字体比例、确认弹窗、节点导航及任务提示；编辑草稿在本次页面会话中保留，切换节点或自动刷新不会覆盖。
+
+自定义编辑支持拥塞算法、默认队列、TCP 收发缓冲区、核心缓冲区上限、SYN/监听/网卡队列、MTU 探测、ECN、Fast Open、SACK 和窗口缩放；服务端和 Agent 共用字段白名单及数值校验。算法选项不保证系统内核已提供，实际写入失败会报告原因并回滚，不下载安装新内核或第三方模块。系统原有参数超出本面板编辑范围时仍原样显示，不会静默归一化覆盖。
+
+配置固定保存到 `/etc/sysctl.d/90-qcontrolhub-bbr.conf`，不写 `/etc/sysctl.conf`，不运行 `sysctl --system`。新配置与已有面板托管项合并，未选择的项目保持不变；文件被外部改写或替换成符号链接时拒绝覆盖。启用/关闭快捷按钮分别设置 `bbr + fq` / `cubic + fq`，保留其他已托管 TCP 项。写入失败、回读不一致、持久化失败会尝试回滚，并保留有限数量的原文件备份。进程被强制终止或主机掉电不能保证事务完成；下次采集会展示当前值与保存值的差异。
+
+这些参数不是“越大越快”，应根据内存、并发连接和网络条件选择。本功能不重启网络、不修改现有网卡队列，也不保证现有 socket 切换拥塞算法；应用仍可为 socket 指定算法。默认队列与网卡当前队列分开展示。Linux 4.20 及以后 BBR 不严格要求 `fq`，不能仅因为网卡是 `fq_codel/noqueue/mq` 就判定 BBR 未启用。参见 [Linux TCP 参数文档](https://kernel.org/doc/html/latest/networking/ip-sysctl.html)、[默认队列语义](https://www.kernel.org/doc/html/latest/admin-guide/sysctl/net.html) 和 [BBR 项目说明](https://github.com/google/bbr/blob/master/Documentation/bbr-quick-start.md)。
+
+系统启动通常加载 `sysctl.d`，但其他更高优先级配置或网络服务仍可能覆盖本文件。页面“已保存”不等于“已验证重启后生效”；升级后及重启后应核对实测值。回退参数应显式填写原值并应用；本功能不删除或改写其他工具创建的 sysctl 文件。
+
+默认队列也可自定义选择 `fq_pie`（按流排队并使用 PIE 控制队列延迟），前提是发行版内核提供 `sch_fq_pie`。它不是 `fq` 的升级版，也不保证更快；快捷启用仍使用 BBR 官方示例的 `fq`，需要 `fq_pie` 时在自定义参数中显式选择。仅修改默认队列不会替换当前网卡队列。参见 [Linux FQ-PIE 实现](https://github.com/torvalds/linux/blob/master/net/sched/sch_fq_pie.c)。
+
 ## 1. 使用部署脚本启动控制面
 
 建议使用受支持的 Linux 发行版，并预先安装 Docker Engine、Docker Compose v2、curl、OpenSSL、Nginx 与证书管理工具。防火墙只对管理来源和 Agent 网络开放 TCP 443；不要开放 8080 或 5432。

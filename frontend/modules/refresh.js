@@ -8,6 +8,7 @@ const insertedMotionSelector = [
   ".service-card",
   ".client-access-node-card",
   ".access-control-card",
+  ".bbr-card",
   ".substore-agent-card",
   ".settings-version-card",
   ".template-card",

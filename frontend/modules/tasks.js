@@ -99,9 +99,9 @@ export function installTasks(ctx) {
           const tone = statusTone(item.status);
           const statusLabel = statusName(item.status);
           const taskEngine =
-            item.action === "upgrade-agent" ? "qagent" : item.engine;
+            item.action === "upgrade-agent" || ["enable-bbr", "disable-bbr", "configure-tcp"].includes(item.action) ? "qagent" : item.engine;
           const taskEngineLabel =
-            item.action === "upgrade-agent"
+            ["enable-bbr", "disable-bbr", "configure-tcp"].includes(item.action) ? "BBR / TCP" : item.action === "upgrade-agent"
               ? "QAgent"
               : engineName(item.engine);
           const resultOpen = openResults.has(item.id) ? " open" : "";

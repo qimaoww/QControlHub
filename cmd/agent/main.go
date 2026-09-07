@@ -22,6 +22,28 @@ import (
 var version = "dev"
 
 func main() {
+	if len(os.Args) >= 2 && os.Args[1] == "system-bbr" {
+		if (len(os.Args) != 3 && len(os.Args) != 4) || !core.Action(os.Args[2]).SystemBBR() {
+			fmt.Fprintln(os.Stderr, "usage: qagent system-bbr enable-bbr|disable-bbr|configure-tcp [settings-json]")
+			os.Exit(1)
+		}
+		var settings core.TCPSettings
+		if len(os.Args) == 4 {
+			if len(os.Args[3]) > 4096 || json.Unmarshal([]byte(os.Args[3]), &settings) != nil {
+				fmt.Fprintln(os.Stderr, "invalid TCP settings JSON")
+				os.Exit(1)
+			}
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		output, err := agent.RunSystemBBR(ctx, core.Action(os.Args[2]), settings)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		fmt.Println(output)
+		return
+	}
 	// Handle the side-effect-limited candidate check before loading credentials,
 	// discovering cores, or starting the Agent's normal runtime.
 	if len(os.Args) == 4 && os.Args[1] == "upgrade-preflight" {

@@ -4,6 +4,7 @@ import "./refresh_smoke.mjs";
 import "./requests_smoke.mjs";
 import "./core_logs_smoke.mjs";
 import "./config_fields_smoke.mjs";
+import "./system_bbr_smoke.mjs";
 
 import {
   agentStructureSignature,
