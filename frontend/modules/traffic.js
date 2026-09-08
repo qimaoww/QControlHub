@@ -13,6 +13,38 @@ const trafficPortIdentity = (item) => `${item.agent_id}:${item.port}`;
 const trafficEndpointKey = (item) => `endpoint:${item.agent_id}:${item.engine}:${item.port}:${item.protocol}`;
 const trafficCardOrderKey = "qcontrolhub:traffic-card-order";
 
+export function renderTrafficAccounting(policy, esc, bytes) {
+  const accounting = policy.accounting;
+  const dual = ["core-api", "nft-dual"].includes(accounting?.source);
+  const raw = String(policy.enforcement_error || "").replace(/^[;\s]+/, "");
+  const scopeOnly = /^dual accounting unavailable: single-protocol policy uses listener-only accounting; (?:dual accounting requires TCP\+UDP because core counters and outbound marks are shared|exclusive listener transport could not be verified)$/.test(raw);
+  const failed = policy.enforcement_available === false || (raw && !scopeOnly);
+  const partialEgress = policy.engine === "mihomo" && accounting?.source === "nft-dual";
+  const tone = failed ? "bad" : dual && !partialEgress ? "ok" : "limited";
+  const title = failed ? "统计异常" : partialEgress ? "双链路 · 范围受限" : dual ? "双链路统计" : "仅监听端口";
+  const hint = failed
+    ? raw ? "请查看诊断信息，确认统计是否完整。" : "Agent 报告监控不可用，暂未提供详细诊断。"
+    : scopeOnly ? "暂未确认入站协议独占，当前仅统计入口收发。"
+    : !dual ? "独立出口统计尚未生效，当前仅计入口。"
+    : accounting.source === "core-api" ? "内核计数 · 包含入站协议开销" : "网络层计数 · 包含包头及重传";
+  const legs = dual ? `<dl class="traffic-accounting-legs">${[
+    ["客户端 → 代理", accounting.client_received],
+    ["代理 → 客户端", accounting.client_sent],
+    ["目标 → 代理", accounting.target_received],
+    ["代理 → 目标", accounting.target_sent],
+  ].map(([label, value]) => `<div><dt>${label}</dt><dd>${bytes(value)}</dd></div>`).join("")}</dl>` : "";
+  const content = `<section class="traffic-accounting-panel ${tone}" aria-label="统计口径">
+    <div class="traffic-accounting-heading"><span class="traffic-accounting-badge"><i aria-hidden="true"></i>${title}</span><span class="traffic-accounting-caption">${partialEgress ? "入口 + 已标记出口" : dual ? "入口 + 出口" : "入口收发"}</span></div>
+    <p class="traffic-accounting-hint">${hint}</p>
+    ${partialEgress ? '<p class="traffic-accounting-note">Mihomo 不为回环（127.0.0.1、::1）等非全局单播目标设置出口标记。这些连接仍统计入口收发，但出口未计入；当前无法可靠补算，也不按入口流量翻倍估算。此提示说明能力限制，不表示当前一定存在漏计连接。</p>' : ""}
+    ${dual || raw ? `<details class="traffic-accounting-details">
+      <summary>${failed ? "查看诊断" : dual ? "查看链路明细" : "查看统计说明"}<span aria-hidden="true">⌄</span></summary>
+      <div class="traffic-accounting-detail-body">${dual ? `<p>本计量代次累计，不等同于本月总量</p>${legs}` : ""}${raw ? `<p>Agent 原始诊断</p><pre>${esc(raw)}</pre>` : ""}</div>
+    </details>` : ""}
+  </section>`;
+  return `<button class="button small traffic-status-button ${tone}" type="button" data-traffic-status-open="${esc(policy.id)}" aria-haspopup="dialog"><i aria-hidden="true"></i>状态${failed ? "异常" : ""}</button><dialog class="traffic-status-dialog" data-refresh-live data-traffic-status-dialog="${esc(policy.id)}" aria-label="统计状态"><header><div><p class="eyebrow">统计状态</p><h2>${esc(policy.name || "端口统计")}</h2></div><button class="deploy-command-close" type="button" data-traffic-status-close aria-label="关闭统计状态">×</button></header>${content}</dialog>`;
+}
+
 export const trafficCardIdentity = (item) =>
   trafficPortIdentity(item.policy || item.endpoint || item);
 
@@ -420,11 +452,7 @@ export function installTraffic(ctx) {
         <header><div class="traffic-card-identity"><span class="engine-badge ${esc(policy.engine)}">${esc(engineName(policy.engine))}</span><span><strong>${esc(policy.name)}</strong><small>${esc(agent?.name || policy.agent_id)}<i>·</i><code>:${esc(policy.port)}</code><i>·</i>${esc(protocolName(policy.protocol))}</small></span></div><span class="traffic-card-controls"><span class="traffic-policy-status ${tone}"><i></i>${esc(status)}</span><span class="node-card-grip traffic-card-grip" title="拖动调整顺序" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 6h.01M9 12h.01M9 18h.01M15 6h.01M15 12h.01M15 18h.01"/></svg></span></span></header>
         <section class="traffic-card-quota ${quotaEnabled ? "" : "is-monitor-only"}"><header><span>${quotaEnabled ? "当前周期用量" : "本月累计流量"}</span><b>${quotaEnabled ? `${usedPercent.toFixed(1)}%` : "未设置配额"}</b></header><div><strong>${bytes(policy.used_bytes)}</strong>${quotaEnabled ? `<span>/ ${bytes(policy.limit_bytes)}</span>` : ""}</div>${quotaEnabled ? `<progress max="100" value="${usedPercent}"></progress>` : ""}<small>${esc(period)}</small></section>
         <section class="traffic-card-transfer"><div><i class="received" aria-hidden="true">↓</i><span><small>接收流量</small><strong>${bytes(policy.received_bytes)}</strong></span><em>${rate(receiveBPS)}</em></div><div><i class="sent" aria-hidden="true">↑</i><span><small>发送流量</small><strong>${bytes(policy.sent_bytes)}</strong></span><em>${rate(sendBPS)}</em></div></section>
-        <p class="traffic-accounting-source">${policy.accounting?.source === "core-api" ? "双链路 · 内核计数（含入站协议开销）" : policy.accounting?.source === "nft-dual" ? "双链路 · 网络层计数（含包头及重传）" : "仅监听端口 · 尚未启用双链路统计"}</p>
-        ${policy.engine === "mihomo" && policy.accounting?.source === "nft-dual" ? '<p class="traffic-error">不含回环等未被内核标记的出口流量。</p>' : ""}
-        ${policy.accounting && policy.accounting.source !== "listener" ? `<details><summary>本计量代次的链路明细</summary><dl><dt>客户端 → 代理</dt><dd>${bytes(policy.accounting.client_received)}</dd><dt>代理 → 客户端</dt><dd>${bytes(policy.accounting.client_sent)}</dd><dt>目标 → 代理</dt><dd>${bytes(policy.accounting.target_received)}</dd><dt>代理 → 目标</dt><dd>${bytes(policy.accounting.target_sent)}</dd></dl></details>` : ""}
-        ${policy.enforcement_error ? `<p class="traffic-error">${esc(policy.enforcement_error)}</p>` : ""}
-        <footer><span class="traffic-card-sync"><i class="${policy.last_reported_at ? "ok" : ""}"></i>${policy.last_reported_at ? `${ago(policy.last_reported_at)}更新` : "等待 Agent 上报"}</span>${can("traffic.manage") ? `<div class="traffic-card-actions"><button class="button small danger-button" type="button" data-traffic-monitor-delete="${esc(policy.id)}">删除</button><button class="button small" type="button" data-traffic-reset="${esc(policy.id)}">清零</button><button class="button small" type="button" data-traffic-edit-open="${esc(policy.id)}">${quotaEnabled ? "编辑配额" : "设置配额"}</button></div>` : ""}</footer>${can("traffic.manage") ? `<dialog class="traffic-edit-dialog" data-traffic-edit-dialog="${esc(policy.id)}" aria-labelledby="traffic-edit-title-${esc(policy.id)}"><header><span class="traffic-edit-icon" aria-hidden="true">✎</span><div><p class="eyebrow">端口配额</p><h2 id="traffic-edit-title-${esc(policy.id)}">${quotaEnabled ? "编辑" : "设置"} ${esc(policy.name)} 的配额</h2><p>流量统计不会因配额变更而停止 · ${esc(agent?.name || policy.agent_id)} :${esc(policy.port)}</p></div><button class="deploy-command-close" type="button" data-traffic-edit-close aria-label="关闭编辑弹窗">×</button></header><form data-traffic-edit-form="${esc(policy.id)}"><div class="traffic-edit-body">${policyFields(policy, [agent].filter(Boolean), `edit-${policy.id}`)}</div><footer>${quotaEnabled ? `<button class="button small danger-button" type="button" data-traffic-delete="${esc(policy.id)}">取消配额</button>` : "<span></span>"}<span></span><button class="button" type="button" data-traffic-edit-close>取消</button><button class="button primary" type="submit">保存配额</button></footer></form></dialog>` : ""}
+        <footer><span class="traffic-card-sync"><i class="${policy.last_reported_at ? "ok" : ""}"></i>${policy.last_reported_at ? `${ago(policy.last_reported_at)}更新` : "等待 Agent 上报"}</span>${renderTrafficAccounting(policy, esc, bytes)}${can("traffic.manage") ? `<div class="traffic-card-actions"><button class="button small danger-button" type="button" data-traffic-monitor-delete="${esc(policy.id)}">删除</button><button class="button small" type="button" data-traffic-reset="${esc(policy.id)}">清零</button><button class="button small" type="button" data-traffic-edit-open="${esc(policy.id)}">${quotaEnabled ? "编辑配额" : "设置配额"}</button></div>` : ""}</footer>${can("traffic.manage") ? `<dialog class="traffic-edit-dialog" data-traffic-edit-dialog="${esc(policy.id)}" aria-labelledby="traffic-edit-title-${esc(policy.id)}"><header><span class="traffic-edit-icon" aria-hidden="true">✎</span><div><p class="eyebrow">端口配额</p><h2 id="traffic-edit-title-${esc(policy.id)}">${quotaEnabled ? "编辑" : "设置"} ${esc(policy.name)} 的配额</h2><p>流量统计不会因配额变更而停止 · ${esc(agent?.name || policy.agent_id)} :${esc(policy.port)}</p></div><button class="deploy-command-close" type="button" data-traffic-edit-close aria-label="关闭编辑弹窗">×</button></header><form data-traffic-edit-form="${esc(policy.id)}"><div class="traffic-edit-body">${policyFields(policy, [agent].filter(Boolean), `edit-${policy.id}`)}</div><footer>${quotaEnabled ? `<button class="button small danger-button" type="button" data-traffic-delete="${esc(policy.id)}">取消配额</button>` : "<span></span>"}<span></span><button class="button" type="button" data-traffic-edit-close>取消</button><button class="button primary" type="submit">保存配额</button></footer></form></dialog>` : ""}
       </article>`;
     }).join("");
     const empty = items.length
@@ -434,6 +462,13 @@ export function installTraffic(ctx) {
     const trafficResultKey = `${currentFilters.agent_id || "all"}-${currentFilters.engine || "all"}-${currentFilters.endpoint_key || "all"}-${currentFilters.status || "all"}`;
     shell(`<div class="traffic-workspace">${toolbar}${listHeader}${cards ? `<section class="traffic-policy-grid qch-swap-panel" data-refresh-key="traffic-results-${esc(trafficResultKey)}">${cards}</section>` : `<div class="qch-swap-panel" data-refresh-key="traffic-results-${esc(trafficResultKey)}-empty">${empty}</div>`}${createDialog}</div>`, "流量配额", { viewKey: `traffic-${trafficResultKey}` });
     bindTrafficForms(selectableAgents, endpoints);
+    document.querySelectorAll("[data-traffic-status-open]").forEach(button => {
+      button.onclick = () => document.querySelector(`[data-traffic-status-dialog="${CSS.escape(button.dataset.trafficStatusOpen)}"]`)?.showModal();
+    });
+    document.querySelectorAll("[data-traffic-status-dialog]").forEach(dialog => {
+      dialog.querySelector("[data-traffic-status-close]").onclick = () => dialog.close();
+      dialog.onclick = event => { if (event.target === dialog) dialog.close(); };
+    });
     const cardGrid = document.querySelector(".traffic-policy-grid");
     if (cardGrid && filteredItems.length > 1) {
       enableTrafficCardDrag(cardGrid, orderedItems.map(trafficCardIdentity));

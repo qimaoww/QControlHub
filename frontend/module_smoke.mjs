@@ -105,12 +105,29 @@ import {
 import { installTasks } from "./modules/tasks.js";
 import {
   installTraffic,
+  renderTrafficAccounting,
   mergeVisibleTrafficCardOrder,
   mergeTrafficPorts,
   orderTrafficItems,
   resetTrafficCreateForm,
   trafficRateForDisplay,
 } from "./modules/traffic.js";
+
+const scopeDiagnostic = "dual accounting unavailable: single-protocol policy uses listener-only accounting; dual accounting requires TCP+UDP because core counters and outbound marks are shared";
+const accountingHTML = policy => renderTrafficAccounting(policy, value => String(value).replaceAll("<", "&lt;"), value => `${value} B`);
+assert.match(accountingHTML({enforcement_error: `; ${scopeDiagnostic}`}), /traffic-accounting-panel limited/);
+assert.match(accountingHTML({enforcement_error: `${scopeDiagnostic}; read failed`}), /traffic-accounting-panel bad/);
+assert.match(accountingHTML({enforcement_available:false}), /暂未提供详细诊断/);
+assert.match(accountingHTML({enforcement_error:"<script>"}), /&lt;script>/);
+const dualAccountingHTML = accountingHTML({accounting:{source:"core-api",client_received:1,client_sent:2,target_received:3,target_sent:4}});
+assert.match(dualAccountingHTML, /不等同于本月总量/);
+assert.match(dualAccountingHTML, /<dl class="traffic-accounting-legs">/);
+assert.doesNotMatch(dualAccountingHTML, /<details[^>]*\bopen\b/);
+const mihomoAccountingHTML = accountingHTML({engine:"mihomo",accounting:{source:"nft-dual"}});
+assert.match(mihomoAccountingHTML, /双链路 · 范围受限/);
+assert.match(mihomoAccountingHTML, /入口 \+ 已标记出口/);
+assert.match(mihomoAccountingHTML, /traffic-accounting-panel limited/);
+assert.match(mihomoAccountingHTML, /不表示当前一定存在漏计连接/);
 import { createLatestRenderScheduler } from "./modules/refresh.js";
 import {
   nodeCardOrderKey,

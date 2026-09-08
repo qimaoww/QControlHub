@@ -278,9 +278,6 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 	nativeErrors := map[core.Engine]error{}
 	if manager.nativeSource != nil {
 		for _, record := range manager.records {
-			if record.Policy.Protocol != core.TrafficProtocolBoth {
-				continue
-			}
 			engine := record.Policy.Engine
 			if _, checked := nativeErrors[engine]; checked {
 				continue
@@ -291,10 +288,16 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 	}
 	for _, id := range sortedTrafficRecordIDs(manager.records) {
 		record := manager.records[id]
+		nativeAllowed := nativeAccountingScopeAllowed(record.Policy, nativeSnapshots[record.Policy.Engine])
+		// A transient source failure must freeze an established native baseline,
+		// not change its scope or substitute listener bytes.
+		if nativeErrors[record.Policy.Engine] != nil && record.Accounting != nil && record.Accounting.Source != "listener" {
+			nativeAllowed = true
+		}
 		// Core counters and per-port marks do not distinguish the originating
 		// listener transport. A TCP-only policy must not bill another UDP flow
 		// (nor mistake a QUIC outbound carrying TCP for a UDP listener flow).
-		if manager.nativeSource != nil && record.Policy.Protocol != core.TrafficProtocolBoth && record.Accounting != nil && record.Accounting.Source != "listener" {
+		if manager.nativeSource != nil && !nativeAllowed && record.Accounting != nil && record.Accounting.Source != "listener" {
 			epoch, err := randomSuffix(16)
 			if err != nil {
 				return manager.setUnavailableLocked(err)
@@ -329,7 +332,7 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 			previousRecord.Accounting = &accounting
 		}
 		receivedDelta, sentDelta := collectTrafficCounterDeltas(counters, record)
-		if manager.nativeSource != nil && record.Policy.Protocol == core.TrafficProtocolBoth {
+		if manager.nativeSource != nil && nativeAllowed {
 			err := nativeErrors[record.Policy.Engine]
 			if err == nil {
 				previousEpoch := record.CounterEpoch
@@ -374,8 +377,14 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 				}
 			}
 		}
-		if manager.nativeSource != nil && record.Policy.Protocol != core.TrafficProtocolBoth {
-			record.AccountingError = "single-protocol policy uses listener-only accounting; dual accounting requires TCP+UDP because core counters and outbound marks are shared"
+		if manager.nativeSource != nil && !nativeAllowed {
+			record.AccountingError = "single-protocol policy uses listener-only accounting; exclusive listener transport could not be verified"
+			if sourceErr := nativeErrors[record.Policy.Engine]; sourceErr != nil {
+				record.AccountingError = sourceErr.Error()
+				if len(record.AccountingError) > 400 {
+					record.AccountingError = record.AccountingError[:400]
+				}
+			}
 		}
 		if !record.PeriodStart.Equal(periodStart) || !record.PeriodEnd.Equal(periodEnd) {
 			record.ReceivedBytes, record.SentBytes = 0, 0
@@ -481,7 +490,10 @@ func (manager *TrafficManager) refreshSnapshotLocked(available bool, message str
 		}
 		healthMessage := message
 		if record.AccountingError != "" {
-			healthMessage = strings.TrimSpace(healthMessage + "; dual accounting unavailable: " + record.AccountingError)
+			if healthMessage != "" {
+				healthMessage += "; "
+			}
+			healthMessage += "dual accounting unavailable: " + record.AccountingError
 		}
 		if len(healthMessage) > 500 {
 			healthMessage = string([]rune(healthMessage)[:min(500, len([]rune(healthMessage)))])

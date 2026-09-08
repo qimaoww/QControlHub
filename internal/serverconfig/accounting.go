@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net"
 	"strings"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
@@ -101,6 +102,17 @@ func prepareTaggedAccounting(engine core.Engine, root map[string]any, plan *Acco
 	inbounds, _ := root["inbounds"].([]any)
 	outbounds, _ := root["outbounds"].([]any)
 	xray := engine == core.EngineXray
+	if xray {
+		address, err := xrayAccountingAPIAddress(root)
+		if err != nil {
+			return err
+		}
+		plan.API = address
+	}
+	apiTag := "qch-stat-api"
+	if xray && stringValue(mapValue(root["api"])["tag"]) != "" {
+		apiTag = stringValue(mapValue(root["api"])["tag"])
+	}
 	routeKey, targetKey, inKey, kindKey, portKey := "route", "outbound", "inbound", "type", "listen_port"
 	if xray {
 		routeKey, targetKey, inKey, kindKey, portKey = "routing", "outboundTag", "inboundTag", "protocol", "port"
@@ -118,6 +130,25 @@ func prepareTaggedAccounting(engine core.Engine, root map[string]any, plan *Acco
 	guard := map[string]any{"port": []int{10085, 10086}, "action": "reject"}
 	if xray {
 		guard = map[string]any{"type": "field", "port": "10085,10086", "outboundTag": "qch-stat-block"}
+		if api := mapValue(root["api"]); stringValue(api["listen"]) != "" {
+			_, port, _ := net.SplitHostPort(plan.API)
+			if port != "10085" && port != "10086" {
+				guard["port"] = fmt.Sprintf("%s,%s", guard["port"], port)
+			}
+		}
+		for _, raw := range inbounds {
+			in := mapValue(raw)
+			if xrayInternalAPIInbound(root, in) {
+				listen := stringValue(in["listen"])
+				if listen != "127.0.0.1" && listen != "::1" {
+					return fmt.Errorf("existing Xray API inbound must listen on loopback before enabling statistics")
+				}
+				port := trafficPortNumber(in["port"])
+				if port != 0 && port != 10085 && port != 10086 {
+					guard["port"] = fmt.Sprintf("%s,%d", guard["port"], port)
+				}
+			}
+		}
 		found := false
 		for _, raw := range outbounds {
 			out := mapValue(raw)
@@ -154,6 +185,9 @@ func prepareTaggedAccounting(engine core.Engine, root map[string]any, plan *Acco
 	if len(originals) == 0 || len(originals) > 64 {
 		return fmt.Errorf("no explicit default outbound")
 	}
+	if xray && (!tagPattern.MatchString(apiTag) || byTag[apiTag] != nil || strings.HasPrefix(apiTag, accountingPrefix)) {
+		return fmt.Errorf("Xray API tag conflicts with proxy outbound tags")
+	}
 	defaultTag := stringValue(mapValue(originals[0])["tag"])
 	if !xray && stringValue(route["final"]) != "" {
 		defaultTag = stringValue(route["final"])
@@ -187,7 +221,7 @@ func prepareTaggedAccounting(engine core.Engine, root map[string]any, plan *Acco
 		in := mapValue(raw)
 		tag := stringValue(in["tag"])
 		port := trafficPortNumber(in[portKey])
-		if tag == "qch-stat-api" {
+		if tag == "qch-stat-api" || (xray && xrayInternalAPIInbound(root, in)) {
 			continue
 		}
 		if !tagPattern.MatchString(tag) || port == 0 || seenPorts[port] || seenTags[tag] {
@@ -209,11 +243,33 @@ func prepareTaggedAccounting(engine core.Engine, root map[string]any, plan *Acco
 		plan.Ports = append(plan.Ports, entry)
 	}
 	compiled := []any{guard}
+	var apiRules []any
 	for _, raw := range originalRules {
 		rule := mapValue(raw)
 		target := stringValue(rule[targetKey])
-		if target != "" && byTag[target] == nil && target != "qch-stat-api" {
+		if target != "" && byTag[target] == nil && !(xray && target == apiTag) {
 			return fmt.Errorf("unknown route target %s", target)
+		}
+		if xray && target == apiTag {
+			// Only dedicated loopback API routes may precede the API port guard.
+			tags, ok := rule[inKey].([]any)
+			if !ok || len(tags) == 0 {
+				return fmt.Errorf("Xray API route requires explicit internal inbounds")
+			}
+			for _, tag := range tags {
+				valid := false
+				for _, rawIn := range inbounds {
+					in := mapValue(rawIn)
+					if in["tag"] == tag && xrayInternalAPIInbound(root, in) {
+						valid = true
+					}
+				}
+				if !valid {
+					return fmt.Errorf("Xray API route includes a non-internal inbound")
+				}
+			}
+			apiRules = append(apiRules, raw)
+			continue
 		}
 		for _, entry := range plan.Ports {
 			if !accountingRuleMatches(rule[inKey], entry.Inbound) {
@@ -243,6 +299,7 @@ func prepareTaggedAccounting(engine core.Engine, root map[string]any, plan *Acco
 		}
 		compiled = append(compiled, rule)
 	}
+	compiled = append(apiRules, compiled...)
 	route["rules"] = compiled
 	if !accountingGeneratedSubset(priorClones, clones) || !accountingGeneratedSubset(priorRules, compiled) {
 		return fmt.Errorf("reserved accounting tags conflict with custom or edited routing; review configuration before migration")
@@ -250,11 +307,22 @@ func prepareTaggedAccounting(engine core.Engine, root map[string]any, plan *Acco
 	root[routeKey] = route
 	root["outbounds"] = append(originals, clones...)
 	if xray {
-		plan.API = "127.0.0.1:10085"
-		if api := mapValue(root["api"]); api != nil && stringValue(api["tag"]) != "qch-stat-api" {
-			return fmt.Errorf("existing Xray API requires manual integration")
+		api := mapValue(root["api"])
+		if api == nil {
+			api = map[string]any{"tag": apiTag, "listen": plan.API}
 		}
-		root["api"] = map[string]any{"tag": "qch-stat-api", "listen": plan.API, "services": []string{"StatsService"}}
+		services, _ := api["services"].([]any)
+		foundStats := false
+		for _, service := range services {
+			if service == "StatsService" {
+				foundStats = true
+			}
+		}
+		if !foundStats {
+			services = append(services, "StatsService")
+		}
+		api["services"] = services
+		root["api"] = api
 		root["stats"] = map[string]any{}
 		policy := mapValue(root["policy"])
 		if policy == nil {

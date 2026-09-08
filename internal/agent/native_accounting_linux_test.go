@@ -230,7 +230,6 @@ func TestSingleProtocolAccountingDoesNotBillOtherTransport(t *testing.T) {
 				t.Fatal(err)
 			}
 			m.nativeSource = func(context.Context, core.Engine) (nativeAccountingSnapshot, error) {
-				t.Error("queried protocol-ambiguous source")
 				return nativeAccountingSnapshot{}, nil
 			}
 			r := m.records[p.ID]
@@ -259,7 +258,6 @@ func TestSingleProtocolUpgradePreservesQuotaBaseline(t *testing.T) {
 	record.ReceivedBytes, record.LifetimeReceivedBytes = 100, 100
 	record.QuotaBaselineBytes = 50
 	m.nativeSource = func(context.Context, core.Engine) (nativeAccountingSnapshot, error) {
-		t.Fatal("single protocol must not query shared native counters")
 		return nativeAccountingSnapshot{}, nil
 	}
 	*now = now.Add(time.Second)

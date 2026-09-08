@@ -41,7 +41,14 @@ func DiscoverTrafficPorts(engine core.Engine, content string) []core.PortTraffic
 			}
 		}
 	case core.EngineXray:
-		result = discoverTrafficList(root["inbounds"], engine, "tag", "protocol", "port", core.TrafficProtocolBoth)
+		var business []any
+		inbounds, _ := root["inbounds"].([]any)
+		for _, raw := range inbounds {
+			if !xrayInternalAPIInbound(root, mapValue(raw)) {
+				business = append(business, raw)
+			}
+		}
+		result = discoverTrafficList(business, engine, "tag", "protocol", "port", core.TrafficProtocolBoth)
 	case core.EngineSingBox:
 		result = discoverTrafficList(root["inbounds"], engine, "tag", "type", "listen_port", core.TrafficProtocolBoth)
 	case core.EngineShadowsocksRust:
@@ -105,6 +112,18 @@ func discoverTrafficList(value any, engine core.Engine, nameField, typeField, po
 		if engine == core.EngineXray {
 			if settings, ok := entry["settings"].(map[string]any); ok {
 				protocol = trafficProtocol(settings["network"], protocol)
+			}
+			stream := mapValue(entry["streamSettings"])
+			if kind == "vless" || kind == "vmess" || kind == "trojan" {
+				switch stringValue(stream["network"]) {
+				case "quic", "kcp":
+					protocol = core.TrafficProtocolUDP
+				case "xhttp", "splithttp":
+					alpn, _ := mapValue(stream["tlsSettings"])["alpn"].([]any)
+					if stream["security"] == "tls" && len(alpn) == 1 && alpn[0] == "h3" {
+						protocol = core.TrafficProtocolUDP
+					}
+				}
 			}
 		}
 		result = append(result, trafficEndpoint(engine, name, port, protocol))

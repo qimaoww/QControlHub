@@ -110,6 +110,23 @@ const testAPI = {
   agents: populatedAgents,
 };
 window.__agentsBrowserTestAPI = testAPI;
+if (mode === "traffic-layout") {
+  location.hash = "#traffic";
+  testAPI.agents = populatedAgents.map(agent=>({...agent,features:[...(agent.features||[]),"port-traffic-v1"]}));
+  const issue = "; dual accounting unavailable: single-protocol policy uses listener-only accounting; dual accounting requires TCP+UDP because core counters and outbound marks are shared";
+  testAPI.trafficPolicies = ["xray", "sing-box", "mihomo", "ss-rust"].map((engine, index) => ({
+    id: `trf_layout_${index}`, agent_id: testAPI.agents[index % testAPI.agents.length].id,
+    name: ["VLESS-REALITY-8443", "vless-in-443", "香港入口", "SS-2022"][index], engine,
+    port: 8443 + index, protocol: index < 2 ? "tcp" : "both", cycle: "monthly",
+    cycle_anchor: "2026-09-01", period_start: "2026-09-01", period_end: "2026-10-01",
+    quota_enabled: false, monitoring_enabled: true,
+    received_bytes: 3e9, sent_bytes: index > 1 ? 3e9 : 31.6e9, used_bytes: index > 1 ? 6e9 : 34.6e9,
+    receive_bps: 7000, send_bps: 137000, enforcement_available: index !== 1,
+    enforcement_error: index === 0 ? issue : index === 1 ? "dual accounting unavailable: unknown route target api" : "",
+    last_reported_at: new Date().toISOString(), last_collected_at: new Date().toISOString(),
+    ...(index > 1 ? {accounting: {source: "nft-dual", client_received: 1e9, client_sent: 2e9, target_received: 2e9, target_sent: 1e9}} : {}),
+  }));
+}
 const layoutConfig = engine => engine === "mihomo" ? "log-level: info\nlisteners:\n  - name: socks-in\n    type: socks\n    port: 1080\n    listen: 0.0.0.0\nrules:\n  - MATCH,DIRECT\n" : engine === "ss-rust" ? JSON.stringify({server:"0.0.0.0",server_port:8388,method:"aes-256-gcm",password:"demo-not-a-real-secret",mode:"tcp_and_udp"},null,2) : JSON.stringify({log:{loglevel:"warning"},dns:{servers:["1.1.1.1","8.8.8.8"]},inbounds:[{tag:"socks-in",listen:"127.0.0.1",...(engine==="xray"?{port:1080,protocol:"socks",settings:{auth:"noauth",udp:true}}:{listen_port:1080,type:"socks"})},{tag:"http-in",listen:"127.0.0.1",...(engine==="xray"?{port:8080,protocol:"http"}:{listen_port:8080,type:"http"})}],outbounds:[{tag:"direct",...(engine==="xray"?{protocol:"freedom"}:{type:"direct"})}],...(engine==="xray"?{routing:{domainStrategy:"AsIs",rules:[]}}:{route:{final:"direct"}})},null,2);
 if (mode === "config-layout") {
   testAPI.agents = populatedAgents.map((agent,index)=>({...agent,name:["香港 · HK-01","新加坡 · SG-02","东京 · JP-03","美国 · US-04"][index],features:["managed-config-read-v1","config-files-v1"],capabilities:["xray","sing-box","mihomo","ss-rust"],runtime:Object.fromEntries(["xray","sing-box","mihomo","ss-rust"].map(engine=>[engine,{installed:true,service_status:"running",version:{xray:"26.3.27","sing-box":"1.13.19",mihomo:"1.19.0","ss-rust":"1.25.0"}[engine]}]))}));
@@ -147,6 +164,10 @@ window.fetch = async (input, options = {}) => {
   const path = url.pathname.replace(/^\/api\/v1/, "");
   const method = String(options.method || (input instanceof Request ? input.method : "GET")).toUpperCase();
   testAPI.calls.push({ method, path, query: url.search });
+  if (mode === "traffic-layout") {
+    if (path === "/traffic-policies") return json(testAPI.trafficPolicies);
+    if (path === "/traffic-endpoints") return json([]);
+  }
   if (mode === "config-layout") {
     if (path === "/settings") return json({panel_name:"QControlHub"});
     if (path.endsWith("/workspace")) {
@@ -1329,7 +1350,34 @@ try {
     await testConfigMigrationRuntime(new URLSearchParams(location.search).has("preview"));
   } else {
   await import("./app.js");
-  if (mode === "config-layout") {
+  if (mode === "traffic-layout") {
+    await waitFor(()=>document.querySelectorAll(".traffic-accounting-panel").length===4,"traffic accounting cards did not load");
+    assert.equal(document.querySelectorAll(".traffic-accounting-panel.bad").length,1,"scope limitation must not be rendered as an error");
+    assert.equal(document.querySelectorAll(".traffic-accounting-details[open]").length,0,"diagnostics should be collapsed initially");
+    assert.equal(document.querySelectorAll(".traffic-status-dialog[open]").length,0,"status dialogs must start closed");
+    document.querySelector("[data-traffic-status-open]").click();
+    assert.ok(document.querySelector(".traffic-status-dialog").open,"status button should open dialog");
+    const details = document.querySelector(".traffic-accounting-details"); details.querySelector("summary").click();
+    assert.ok(details.open && details.textContent.includes("single-protocol"),"original diagnostic inaccessible");
+    if (!new URLSearchParams(location.search).has("preview")) {
+      const dialog = document.querySelector(".traffic-status-dialog");
+      const policy = testAPI.trafficPolicies[0];
+      policy.enforcement_error = "API connection refused";
+      await waitFor(()=>dialog.textContent.includes("API connection refused"),"open status dialog did not refresh failure");
+      assert.ok(dialog.open && dialog.querySelector("details").open,"refresh closed dialog or details");
+      policy.enforcement_error = "";
+      policy.accounting = {source:"core-api",client_received:1024,client_sent:2048,target_received:4096,target_sent:8192};
+      await waitFor(()=>dialog.textContent.includes("双链路统计") && !dialog.textContent.includes("API connection refused"),"open dialog did not recover");
+      const previousLegs = dialog.querySelector(".traffic-accounting-legs").textContent;
+      policy.accounting.target_sent = 16384;
+      await waitFor(()=>dialog.querySelector(".traffic-accounting-legs").textContent !== previousLegs,"open dialog counters did not refresh");
+      assert.ok(dialog.open && dialog.querySelector("details").open,"counter refresh closed dialog or details");
+    }
+    details.querySelector("summary").click();
+    document.querySelector("[data-traffic-status-close]").click();
+    assert.ok(!document.querySelector(".traffic-status-dialog").open,"status dialog should close");
+  }
+  else if (mode === "config-layout") {
     await waitFor(()=>document.querySelector("#live-config-form"),"manual editor did not load");
     assert.equal(document.querySelectorAll(".live-engine-bar [data-live-engine]").length,4,"top bar must expose all installed engines");
     assert.equal(document.querySelectorAll(".context-sidebar [data-live-engine]").length,0,"sidebar must not duplicate engine navigation");
@@ -1358,6 +1406,10 @@ try {
       await waitFor(()=>document.querySelector('#live-config-form[data-engine="mihomo"]'),"confirmed engine switch failed");
     }
     assert.ok(document.documentElement.scrollWidth<=innerWidth,"manual page overflows viewport");
+    document.querySelectorAll(".live-engine-tab").forEach(tab => {
+      assert.equal(tab.offsetWidth,140,"engine buttons must have fixed width");
+      assert.equal(tab.offsetHeight,40,"engine buttons must have fixed height");
+    });
   }
   else if (mode === "bbr-preview") await new Promise(() => {});
   else if (mode.startsWith("bbr")) await testSystemTCPRuntime();
