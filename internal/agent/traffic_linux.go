@@ -325,12 +325,7 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 		// listener delta before the marked target counters can be collected.
 		previousRecord := *record
 		previousRecord.KernelCounters = maps.Clone(record.KernelCounters)
-		if record.Accounting != nil {
-			accounting := *record.Accounting
-			accounting.Counters = maps.Clone(record.Accounting.Counters)
-			accounting.Outbounds = slices.Clone(record.Accounting.Outbounds)
-			previousRecord.Accounting = &accounting
-		}
+		previousRecord.Accounting = cloneTrafficAccounting(record.Accounting)
 		receivedDelta, sentDelta := collectTrafficCounterDeltas(counters, record)
 		if manager.nativeSource != nil && nativeAllowed {
 			err := nativeErrors[record.Policy.Engine]
@@ -482,12 +477,7 @@ func (manager *TrafficManager) refreshSnapshotLocked(available bool, message str
 	result := make([]core.PortTrafficUsage, 0, len(manager.records))
 	for _, id := range sortedTrafficRecordIDs(manager.records) {
 		record := manager.records[id]
-		accounting := record.Accounting
-		if accounting != nil {
-			data, _ := json.Marshal(accounting)
-			accounting = nil
-			_ = json.Unmarshal(data, &accounting)
-		}
+		accounting := cloneTrafficAccounting(record.Accounting)
 		healthMessage := message
 		if record.AccountingError != "" {
 			if healthMessage != "" {
@@ -510,6 +500,16 @@ func (manager *TrafficManager) refreshSnapshotLocked(available bool, message str
 		})
 	}
 	manager.snapshot = result
+}
+
+func cloneTrafficAccounting(accounting *core.TrafficAccounting) *core.TrafficAccounting {
+	if accounting == nil {
+		return nil
+	}
+	clone := *accounting
+	clone.Counters = maps.Clone(accounting.Counters)
+	clone.Outbounds = slices.Clone(accounting.Outbounds)
+	return &clone
 }
 
 func sameTrafficCounter(left, right core.PortTrafficPolicy) bool {
