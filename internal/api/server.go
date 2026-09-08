@@ -298,6 +298,8 @@ func (s *Server) Handler() http.Handler {
 	))
 	mux.Handle("PUT /api/v1/agents/{id}/client-address", s.requirePermission(core.PermissionAgentsManage, http.HandlerFunc(s.putAgentClientAddress)))
 	mux.Handle("GET /api/v1/agents/{id}/region", s.requirePermission(core.PermissionAgentsRead, http.HandlerFunc(s.getAgentRegion)))
+	mux.Handle("PUT /api/v1/agents/{id}/region", s.requirePermission(core.PermissionAgentsManage, http.HandlerFunc(s.putAgentRegion)))
+	mux.Handle("GET /api/v1/regions", s.requirePermission(core.PermissionAgentsRead, http.HandlerFunc(s.listRegions)))
 	mux.Handle("GET /api/v1/region-flags/{code}", s.requirePermission(core.PermissionAgentsRead, http.HandlerFunc(s.getRegionFlag)))
 	mux.Handle("GET /api/v1/agents/{id}/komari", s.requirePermission(core.PermissionAgentsRead, http.HandlerFunc(s.getAgentKomari)))
 	mux.Handle("PUT /api/v1/agents/{id}/komari", s.requirePermission(core.PermissionAgentsManage, http.HandlerFunc(s.putAgentKomari)))
@@ -889,6 +891,11 @@ func (s *Server) getAgentRegion(w http.ResponseWriter, request *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
+	w.Header().Set("Cache-Control", "no-store")
+	if code := store.AgentRegionCode(agent); code != "" {
+		writeJSON(w, http.StatusOK, map[string]string{"country_code": code, "source": "manual"})
+		return
+	}
 	address := agentGeoIP(agent)
 	if !address.IsValid() {
 		writeJSON(w, http.StatusOK, map[string]string{})
@@ -903,7 +910,33 @@ func (s *Server) getAgentRegion(w http.ResponseWriter, request *http.Request) {
 		"ip":           address.String(),
 		"country_code": region.ISOCode,
 		"country":      region.Name,
+		"source":       "auto",
 	})
+}
+
+func (s *Server) listRegions(w http.ResponseWriter, request *http.Request) {
+	writeJSON(w, http.StatusOK, geoip.RegionCodes())
+}
+
+func (s *Server) putAgentRegion(w http.ResponseWriter, request *http.Request) {
+	var input struct {
+		CountryCode *string `json:"country_code"`
+	}
+	if err := decodeJSON(w, request, &input, 8<<10); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if input.CountryCode == nil {
+		writeError(w, http.StatusBadRequest, "country_code is required; use an empty string for automatic GeoIP")
+		return
+	}
+	code := strings.ToUpper(strings.TrimSpace(*input.CountryCode))
+	if err := s.store.SetAgentRegionCode(request.Context(), request.PathValue("id"), code); err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	s.recordAudit(request, "agent.region.updated", request.PathValue("id"), code)
+	writeJSON(w, http.StatusOK, map[string]string{"country_code": code})
 }
 
 func (s *Server) getRegionFlag(w http.ResponseWriter, request *http.Request) {

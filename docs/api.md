@@ -60,8 +60,10 @@
 | `PUT` | `/api/v1/access-controls` | 保存单个入站的大陆来源/目标限制并创建校验或部署任务（agent-config.write + tasks.execute） |
 | `GET` | `/api/v1/core-logs` | 查询面板集中保存的内核运行日志 |
 | `PUT` | `/api/v1/agents/{id}/client-address` | 设置客户端访问地址、协议栈或单端口显示名称（agents.manage） |
-| `GET` | `/api/v1/agents/{id}/region` | 根据节点已验证的公网 IP 查询 GeoIP 国家/地区（agents.read） |
-| `GET` | `/api/v1/region-flags/{code}` | 读取统一风格的圆形 SVG 国家/地区旗帜（agents.read） |
+| `GET` | `/api/v1/agents/{id}/region` | 读取手动设置或根据公网 IP 自动识别的国家/地区（agents.read） |
+| `PUT` | `/api/v1/agents/{id}/region` | 保存国家/地区旗帜，空代码恢复自动识别（agents.manage） |
+| `GET` | `/api/v1/regions` | 读取可选择的两位国家/地区代码列表（agents.read） |
+| `GET` | `/api/v1/region-flags/{code}` | 读取统一风格的 4:3 SVG 国家/地区旗帜（agents.read） |
 | `GET` | `/api/v1/agents/{id}/komari` | 读取节点关联的 Komari 服务器计费周期和流量配置（agents.read） |
 | `PUT` | `/api/v1/agents/{id}/komari` | 设置或清除节点关联的 Komari 服务器 UUID（agents.manage） |
 | `GET` | `/api/v1/config-catalogs/{engine}` | 读取内核官方配置字段和服务端协议目录 |
@@ -103,7 +105,9 @@
 
 系统设置中的 `komari_url` 为 Komari 站点根地址，`komari_api_key` 可选；读取接口只返回掩码。节点的 Komari UUID 通过上面的节点接口保存。成功读取关联节点时，`GET /api/v1/agents/{id}/komari` 返回 Komari 的流量上限、按配置口径计算的 `server.traffic_used`（字节）及 `server.traffic_used_available`，并在 Komari 提供时返回 `effective_traffic_limit` / `traffic_reset_day`。前端按重置日显示实际周期日期范围，不把 `billing_cycle`（天）直接显示成“30 天”。
 
-`GET /api/v1/agents/{id}/region` 只使用节点已验证的公网 IP；控制面向 GeoJS 查询国家/地区并缓存 48 小时。前端通过同源接口读取 [lipis/flag-icons](https://github.com/lipis/flag-icons) 的统一 4:3 SVG 旗帜并由控制面缓存；该流程独立于 Komari 关联配置。
+`GET /api/v1/agents/{id}/region` 优先返回节点的手动设置（`country_code` 和 `source: "manual"`）；否则只使用节点已验证的公网 IP，控制面向 GeoJS 查询国家/地区并缓存 48 小时（`source: "auto"`）。没有可用公网 IP 时返回空对象。前端通过同源接口读取 [lipis/flag-icons](https://github.com/lipis/flag-icons) 的统一 4:3 SVG 旗帜并由控制面缓存；该流程独立于 Komari 关联配置。
+
+在节点设置中点击旗帜可搜索、选择国家/地区；保存后节点设置及客户端卡片左上角使用同一旗帜。`PUT /api/v1/agents/{id}/region` 接收 `{"country_code":"SG"}`，代码由 `/api/v1/regions` 提供，保存时去除首尾空格并转大写；`{"country_code":""}` 清除手动设置并恢复自动识别。缺少字段、`null` 或不支持的代码返回 400。设置持久化为节点的 `region_code` 标签，重连后保留，不修改其他标签、公网 IP 或客户端连接配置。只读用户只能查看；写入沿用管理权限、CSRF 和审计保护。
 
 `GET /api/v1/overview` 中的 `configs` 只统计可在“配置档案”工作区跨节点下发的全局配置；`node_configs` 单独统计绑定到具体 Agent/内核的节点配置，避免将两类配置混为一个不可解释的总数。为兼容既有调用方，`tasks_pending` 仍表示 `pending + running` 的活动任务总数；`tasks_queued` 和 `tasks_running` 分别给出排队与执行中的精确数量。
 

@@ -16,6 +16,7 @@ const mime = (path) =>
       ? "text/javascript; charset=utf-8"
       : "text/html; charset=utf-8";
 
+const previewFlags = new Map();
 const server = createServer(async (request, response) => {
   try {
     const path = new URL(request.url, "http://127.0.0.1").pathname;
@@ -25,7 +26,20 @@ const server = createServer(async (request, response) => {
       response.end(html);
       return;
     }
-    if (path === "/api/v1/region-flags/cn") {
+    if (/^\/api\/v1\/region-flags\/[a-z]{2}$/.test(path)) {
+      // Opt-in manual previews use the production artwork; automated tests
+      // remain deterministic and never depend on an external flag provider.
+      if (process.env.QCH_BROWSER_SMOKE_PREVIEW_FLAGS) {
+        const code = path.split("/").pop();
+        if (!previewFlags.has(code)) {
+          const upstream = await fetch(`https://raw.githubusercontent.com/lipis/flag-icons/main/flags/4x3/${code}.svg`, { signal: AbortSignal.timeout(5000) });
+          if (!upstream.ok) throw new Error(`flag preview: ${upstream.status}`);
+          previewFlags.set(code, await upstream.text());
+        }
+        response.writeHead(200, { "Content-Type": "image/svg+xml" });
+        response.end(previewFlags.get(code));
+        return;
+      }
       response.writeHead(200, { "Content-Type": "image/svg+xml" });
       response.end('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 48"><rect width="64" height="48" fill="#d80027"/></svg>');
       return;
@@ -255,7 +269,7 @@ async function runMode(mode) {
 }
 
 try {
-  const modes = process.env.QCH_BROWSER_SMOKE_MODES || process.env.QCH_BROWSER_SMOKE_MODE || "admin,empty,readonly,ports,logs,bbr,bbr-readonly,bbr-writeonly,config-migration,config-layout,traffic-layout";
+  const modes = process.env.QCH_BROWSER_SMOKE_MODES || process.env.QCH_BROWSER_SMOKE_MODE || "admin,empty,readonly,ports,regions,logs,bbr,bbr-readonly,bbr-writeonly,config-migration,config-layout,traffic-layout";
   for (const mode of modes.split(",")) await runMode(mode);
   process.stdout.write("agents browser runtime smoke passed\n");
 } finally {
