@@ -19,8 +19,9 @@ export function renderTrafficAccounting(policy, esc, bytes) {
   const raw = String(policy.enforcement_error || "").replace(/^[;\s]+/, "");
   const scopeOnly = /^dual accounting unavailable: single-protocol policy uses listener-only accounting; (?:dual accounting requires TCP\+UDP because core counters and outbound marks are shared|exclusive listener transport could not be verified)$/.test(raw);
   const failed = policy.enforcement_available === false || (raw && !scopeOnly);
-  const tone = failed ? "bad" : dual ? "ok" : "limited";
-  const title = failed ? "统计异常" : dual ? "双链路统计" : "仅监听端口";
+  const partialEgress = policy.engine === "mihomo" && accounting?.source === "nft-dual";
+  const tone = failed ? "bad" : dual && !partialEgress ? "ok" : "limited";
+  const title = failed ? "统计异常" : partialEgress ? "双链路 · 范围受限" : dual ? "双链路统计" : "仅监听端口";
   const hint = failed
     ? raw ? "请查看诊断信息，确认统计是否完整。" : "Agent 报告监控不可用，暂未提供详细诊断。"
     : scopeOnly ? "暂未确认入站协议独占，当前仅统计入口收发。"
@@ -33,9 +34,9 @@ export function renderTrafficAccounting(policy, esc, bytes) {
     ["代理 → 目标", accounting.target_sent],
   ].map(([label, value]) => `<div><dt>${label}</dt><dd>${bytes(value)}</dd></div>`).join("")}</dl>` : "";
   const content = `<section class="traffic-accounting-panel ${tone}" aria-label="统计口径">
-    <div class="traffic-accounting-heading"><span class="traffic-accounting-badge"><i aria-hidden="true"></i>${title}</span><span class="traffic-accounting-caption">${dual ? "入口 + 出口" : "入口收发"}</span></div>
+    <div class="traffic-accounting-heading"><span class="traffic-accounting-badge"><i aria-hidden="true"></i>${title}</span><span class="traffic-accounting-caption">${partialEgress ? "入口 + 已标记出口" : dual ? "入口 + 出口" : "入口收发"}</span></div>
     <p class="traffic-accounting-hint">${hint}</p>
-    ${policy.engine === "mihomo" && accounting?.source === "nft-dual" ? '<p class="traffic-accounting-note">不含回环等未标记目标的出口流量。</p>' : ""}
+    ${partialEgress ? '<p class="traffic-accounting-note">Mihomo 不为回环（127.0.0.1、::1）等非全局单播目标设置出口标记。这些连接仍统计入口收发，但出口未计入；当前无法可靠补算，也不按入口流量翻倍估算。此提示说明能力限制，不表示当前一定存在漏计连接。</p>' : ""}
     ${dual || raw ? `<details class="traffic-accounting-details">
       <summary>${failed ? "查看诊断" : dual ? "查看链路明细" : "查看统计说明"}<span aria-hidden="true">⌄</span></summary>
       <div class="traffic-accounting-detail-body">${dual ? `<p>本计量代次累计，不等同于本月总量</p>${legs}` : ""}${raw ? `<p>Agent 原始诊断</p><pre>${esc(raw)}</pre>` : ""}</div>

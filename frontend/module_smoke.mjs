@@ -123,6 +123,11 @@ const dualAccountingHTML = accountingHTML({accounting:{source:"core-api",client_
 assert.match(dualAccountingHTML, /不等同于本月总量/);
 assert.match(dualAccountingHTML, /<dl class="traffic-accounting-legs">/);
 assert.doesNotMatch(dualAccountingHTML, /<details[^>]*\bopen\b/);
+const mihomoAccountingHTML = accountingHTML({engine:"mihomo",accounting:{source:"nft-dual"}});
+assert.match(mihomoAccountingHTML, /双链路 · 范围受限/);
+assert.match(mihomoAccountingHTML, /入口 \+ 已标记出口/);
+assert.match(mihomoAccountingHTML, /traffic-accounting-panel limited/);
+assert.match(mihomoAccountingHTML, /不表示当前一定存在漏计连接/);
 import { createLatestRenderScheduler } from "./modules/refresh.js";
 import {
   nodeCardOrderKey,
