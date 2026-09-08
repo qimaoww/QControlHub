@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -198,6 +199,68 @@ func TestAgentUpgradeDownloadChecksIntegrityAndCleanup(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestAgentUpgradeDownloadRetriesTransientStreamError(t *testing.T) {
+	_, privateKey, _ := ed25519.GenerateKey(rand.Reader)
+	payload := []byte("candidate payload larger than the partial failure")
+	var attempts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if attempts.Add(1) == 1 {
+			// Abort the response mid-stream, as an HTTP/2 edge or proxy can do
+			// with an INTERNAL_ERROR RST_STREAM, so the client sees a truncated
+			// body and must retry the download.
+			w.Header().Set("Content-Length", fmt.Sprint(len(payload)+10))
+			w.Header().Set("X-QControlHub-Agent-SHA256", fmt.Sprintf("%x", sha256.Sum256(payload)))
+			_, _ = w.Write(payload[:len(payload)/2])
+			if hijacker, ok := w.(http.Hijacker); ok {
+				connection, _, _ := hijacker.Hijack()
+				_ = connection.Close()
+			}
+			return
+		}
+		w.Header().Set("X-QControlHub-Agent-SHA256", fmt.Sprintf("%x", sha256.Sum256(payload)))
+		_, _ = w.Write(payload)
+	}))
+	defer server.Close()
+
+	client := &Client{config: ClientConfig{ServerURL: server.URL}, creds: credentials{AgentID: "agt_0123456789abcdef", PrivateKey: authn.EncodePrivateKey(privateKey)}, http: server.Client()}
+	root := t.TempDir()
+	path, _, _, err := client.downloadAgentBinary(context.Background(), root)
+	if err != nil {
+		t.Fatalf("download after transient failure: %v", err)
+	}
+	if got := attempts.Load(); got != 2 {
+		t.Fatalf("download attempts = %d, want 2", got)
+	}
+	content, readErr := os.ReadFile(path)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if string(content) != string(payload) {
+		t.Fatalf("downloaded payload = %q, want %q", content, payload)
+	}
+}
+
+func TestAgentUpgradeDownloadDoesNotRetryPermanentIntegrityFailure(t *testing.T) {
+	_, privateKey, _ := ed25519.GenerateKey(rand.Reader)
+	payload := []byte("candidate payload")
+	var attempts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts.Add(1)
+		w.Header().Set("X-QControlHub-Agent-SHA256", strings.Repeat("0", 64))
+		_, _ = w.Write(payload)
+	}))
+	defer server.Close()
+
+	client := &Client{config: ClientConfig{ServerURL: server.URL}, creds: credentials{AgentID: "agt_0123456789abcdef", PrivateKey: authn.EncodePrivateKey(privateKey)}, http: server.Client()}
+	root := t.TempDir()
+	if _, _, _, err := client.downloadAgentBinary(context.Background(), root); err == nil {
+		t.Fatal("checksum mismatch was accepted")
+	}
+	if got := attempts.Load(); got != 1 {
+		t.Fatalf("download attempts = %d, want 1 (permanent integrity failure must not retry)", got)
 	}
 }
 
