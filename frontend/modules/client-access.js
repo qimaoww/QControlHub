@@ -1,3 +1,4 @@
+import { openDialog, closeDialog } from "./motion.js";
 import { bindEvent, createRefreshChannel } from "./refresh.js";
 
 export function normalizeClientAccessFilters(entries, agents, filters = {}) {
@@ -412,27 +413,17 @@ export function installClientAccess(ctx) {
     document.querySelectorAll("[data-client-parameter-open]").forEach((button) => {
       button.onclick = () => {
         const dialog = document.getElementById(button.dataset.clientParameterOpen);
-        dialog?.showModal();
+        openDialog(dialog);
       };
     });
     document.querySelectorAll("[data-client-parameter-close]").forEach((button) => {
-      button.onclick = () => button.closest("dialog")?.close();
+      button.onclick = () => closeDialog(button.closest("dialog"));
     });
     document.querySelectorAll("[data-client-display-open]").forEach((button) => {
-      button.onclick = () => document.getElementById(button.dataset.clientDisplayOpen)?.showModal();
+      button.onclick = () => openDialog(document.getElementById(button.dataset.clientDisplayOpen));
     });
     document.querySelectorAll("[data-client-display-close]").forEach((button) => {
-      button.onclick = () => button.closest("dialog")?.close();
-    });
-    document.querySelectorAll(".client-parameter-dialog").forEach((dialog) => {
-      dialog.onclick = (event) => {
-        if (event.target === dialog) dialog.close();
-      };
-    });
-    document.querySelectorAll(".client-display-dialog").forEach((dialog) => {
-      dialog.onclick = (event) => {
-        if (event.target === dialog) dialog.close();
-      };
+      button.onclick = () => closeDialog(button.closest("dialog"));
     });
     document.querySelectorAll("[data-copy-target]").forEach((button) => {
       button.onclick = async () => {
@@ -487,7 +478,7 @@ export function installClientAccess(ctx) {
             input.value = address;
             input.defaultValue = address;
           }
-          form.closest("dialog")?.close();
+          await closeDialog(form.closest("dialog"));
           notify("客户端显示参数已保存");
           await clientAccess();
         } catch (error) {

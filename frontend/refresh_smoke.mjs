@@ -169,9 +169,9 @@ const fakeDocument = { activeElement: null };
 const fakeWindow = {
   scrollX: 14,
   scrollY: 640,
-  scrollTo(x, y) {
-    this.scrollX = x;
-    this.scrollY = y;
+  scrollTo({ left, top }) {
+    this.scrollX = left;
+    this.scrollY = top;
   },
 };
 const element = (tag, attributes, ...children) => {

@@ -1,3 +1,4 @@
+import { openDialog, closeDialog } from "./motion.js";
 import { bindEvent, createRefreshChannel } from "./refresh.js";
 
 export function filterSubStoreProfiles(profiles, agentID = "", search = "") {
@@ -358,9 +359,9 @@ export function installSubStoreSync(ctx) {
       };
     });
     const dialog = document.querySelector("[data-substore-settings-dialog]");
-    bindEvent(document.querySelector("[data-substore-settings]"), "click", () => dialog?.showModal());
+    bindEvent(document.querySelector("[data-substore-settings]"), "click", () => openDialog(dialog));
     document.querySelectorAll("[data-substore-settings-close]").forEach((button) => {
-      button.onclick = () => dialog?.close();
+      button.onclick = () => closeDialog(dialog);
     });
     bindEvent(document.querySelector("[data-substore-settings-form]"), "submit", async (event) => {
       event.preventDefault();
@@ -370,7 +371,7 @@ export function installSubStoreSync(ctx) {
       try {
         const data = Object.fromEntries(new FormData(form));
         await api("/substore-sync/settings", { method: "PUT", body: JSON.stringify(data) });
-        dialog?.close();
+        await closeDialog(dialog);
         notify("Sub-Store 连接设置已保存");
         await subStoreSync();
       } catch (error) {
@@ -436,14 +437,14 @@ export function installSubStoreSync(ctx) {
       if (remove) remove.hidden = !target;
       const renameOptions = targetDialog.querySelector("[data-substore-rename-options]");
       if (renameOptions) renameOptions.hidden = !target;
-      targetDialog.showModal();
+      openDialog(targetDialog);
       targetForm.elements.display_name.focus();
       loadRemoteTargets(target);
     };
     bindEvent(document.querySelector("[data-substore-target-add]"), "click", () => openTargetDialog());
     bindEvent(document.querySelector("[data-substore-target-edit]"), "click", () => openTargetDialog(activeTarget));
     document.querySelectorAll("[data-substore-target-close]").forEach((button) => {
-      button.onclick = () => targetDialog?.close();
+      button.onclick = () => closeDialog(targetDialog);
     });
     bindEvent(targetForm, "submit", async (event) => {
       event.preventDefault();
@@ -468,7 +469,7 @@ export function installSubStoreSync(ctx) {
             body: JSON.stringify({ subscription_name: remoteName, display_name: displayName }),
           });
           activeTargetID = target.id;
-          targetDialog?.close();
+          await closeDialog(targetDialog);
           notify(targetID ? "已关联 Sub-Store 现有组" : "已加入 Sub-Store 现有组");
           await subStoreSync();
           return;
@@ -478,7 +479,7 @@ export function installSubStoreSync(ctx) {
           { method: targetID ? "PUT" : "POST", body: JSON.stringify({ display_name: displayName, rename_remote: Boolean(renameRemote), sync_mode: syncMode }) },
         );
         activeTargetID = target.id;
-        targetDialog?.close();
+        await closeDialog(targetDialog);
         notify(targetID ? "同步组已更新" : "同步组已创建");
         await subStoreSync();
       } catch (error) {
@@ -513,7 +514,7 @@ export function installSubStoreSync(ctx) {
           body: JSON.stringify({ subscription_name: subscriptionName, display_name: targetForm?.elements.display_name.value || "" }),
         });
         activeTargetID = target.id;
-        targetDialog?.close();
+        await closeDialog(targetDialog);
         notify(targetID ? `已切换到 Sub-Store 组“${target.subscription_name}”` : `已加入 Sub-Store 组“${target.subscription_name}”`);
         await subStoreSync();
       } catch (error) {
@@ -522,16 +523,16 @@ export function installSubStoreSync(ctx) {
       }
     });
     const deleteDialog = document.querySelector("[data-substore-delete-dialog]");
-    bindEvent(document.querySelector("[data-substore-target-delete]"), "click", () => {
+    bindEvent(document.querySelector("[data-substore-target-delete]"), "click", async () => {
       if (!activeTarget || !deleteDialog) return;
-      targetDialog?.close();
+      await closeDialog(targetDialog);
       const title = deleteDialog.querySelector("#substore-delete-title");
       if (title) title.textContent = `移除“${activeTarget.display_name || activeTarget.subscription_name}”`;
       deleteDialog.querySelector("[data-substore-delete-form]")?.reset();
-      deleteDialog.showModal();
+      openDialog(deleteDialog);
     });
     document.querySelectorAll("[data-substore-delete-close]").forEach((button) => {
-      button.onclick = () => deleteDialog?.close();
+      button.onclick = () => closeDialog(deleteDialog);
     });
     bindEvent(document.querySelector("[data-substore-delete-form]"), "submit", async (event) => {
       event.preventDefault();
@@ -542,7 +543,7 @@ export function installSubStoreSync(ctx) {
       try {
         await api(`/substore-sync/targets/${encodeURIComponent(activeTarget.id)}`, { method: "DELETE" });
         activeTargetID = "";
-        deleteDialog?.close();
+        await closeDialog(deleteDialog);
         notify("同步组已从面板移除");
         await subStoreSync();
       } catch (error) {

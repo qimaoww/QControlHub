@@ -1,4 +1,5 @@
 import { bindEvent, createPoller, createRefreshChannel } from "./refresh.js";
+import { openDialog, closeDialog } from "./motion.js";
 
 export const systemBBRFeature = "system-bbr-v1";
 export const systemBBRActions = ["enable-bbr", "disable-bbr", "configure-tcp"];
@@ -46,7 +47,6 @@ export function installSystemBBR(ctx) {
   const localTasks = new Map();
   const drafts = (state.data.bbrDrafts ||= {});
   const editorErrors = new Map();
-  const backdropStarts = new WeakSet();
   let rules = null;
   let lastAgents = null;
   let refreshFailed = false;
@@ -137,15 +137,16 @@ export function installSystemBBR(ctx) {
     bindEvent(document.querySelector("[data-bbr-refresh]"), "click", () => systemBBR());
     document.querySelectorAll("[data-bbr-dialog-open]").forEach((button) => {
       bindEvent(button, "click", () => {
-        if (!state.confirmOpen) document.getElementById(button.dataset.bbrDialogOpen)?.showModal();
+        if (!state.confirmOpen) openDialog(document.getElementById(button.dataset.bbrDialogOpen));
       });
     });
     document.querySelectorAll("[data-bbr-dialog-close]").forEach((button) => {
       bindEvent(button, "click", () => {
-        if (!state.confirmOpen) button.closest("dialog")?.close();
+        if (!state.confirmOpen) closeDialog(button.closest("dialog"));
       });
     });
     document.querySelectorAll(".bbr-dialog").forEach((dialog) => {
+      dialog.setAttribute("closedby", "closerequest");
       // Moving a keyed card (or removing a preceding warning) can detach its
       // native modal from the top layer while leaving `open` set. Restore it
       // only after the shared confirmation is closed so it stays on top.
@@ -154,27 +155,11 @@ export function installSystemBBR(ctx) {
         dialog.showModal();
         if (dialog.contains(focused)) focused.focus({ preventScroll: true });
       }
-      const outside = (event) => {
-        const rect = dialog.getBoundingClientRect();
-        return event.target === dialog && (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom);
-      };
-      // A refresh can rebind handlers between pointerdown and click. Retain
-      // the gesture on the dialog, and don't dismiss a drag from inside it.
-      bindEvent(dialog, "pointerdown", (event) => {
-        if (outside(event)) backdropStarts.add(dialog);
-        else backdropStarts.delete(dialog);
-      });
-      bindEvent(dialog, "click", (event) => {
-        if (backdropStarts.has(dialog) && outside(event) && !state.confirmOpen) dialog.close();
-        backdropStarts.delete(dialog);
-      });
-      bindEvent(dialog, "pointercancel", () => backdropStarts.delete(dialog));
-      bindEvent(dialog, "close", () => {
-        // close() queues this event; modal restoration may already have
-        // reopened the dialog and started a new gesture before it arrives.
-        if (!dialog.open) backdropStarts.delete(dialog);
-      });
-      bindEvent(dialog, "cancel", (event) => { if (state.confirmOpen) event.preventDefault(); });
+      // Blank-space clicks never dismiss a panel. Guard Escape before the
+      // shared motion handler while a nested confirmation owns the top layer.
+      bindEvent(dialog, "cancel", (event) => {
+        if (state.confirmOpen) event.preventDefault();
+      }, { capture: true });
     });
     document.querySelectorAll("[data-bbr-action]").forEach((button) => {
       bindEvent(button, "click", () => submitChange(
@@ -272,7 +257,7 @@ export function installSystemBBR(ctx) {
       if (settings) {
         delete drafts[agent.id];
         editorErrors.delete(agent.id);
-        document.getElementById(dialogID(agent.id, "editor"))?.close();
+        await closeDialog(document.getElementById(dialogID(agent.id, "editor")));
       }
       notify("TCP 调优任务已提交，等待 Agent 执行；实际参数以采集结果为准。");
     } catch (error) {

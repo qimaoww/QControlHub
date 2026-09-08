@@ -1,31 +1,6 @@
+import { motionOwnsInert } from "./motion.js";
+
 const boundEvents = new WeakMap();
-
-const insertedMotionSelector = [
-  ".qch-swap-panel",
-  ".task-event",
-  ".core-log-row",
-  ".node-card",
-  ".service-card",
-  ".client-access-node-card",
-  ".access-control-card",
-  ".bbr-card",
-  ".substore-agent-card",
-  ".settings-version-card",
-  ".template-card",
-].join(",");
-
-function markInsertedMotion(node) {
-  if (node?.nodeType !== 1 || !node.matches(insertedMotionSelector)) {
-    return node;
-  }
-  node.classList.add("qch-reconcile-enter");
-  node.addEventListener(
-    "animationend",
-    () => node.classList.remove("qch-reconcile-enter"),
-    { once: true },
-  );
-  return node;
-}
 
 export function bindEvent(target, type, handler, options) {
   if (!target) return;
@@ -104,6 +79,7 @@ function syncAttributes(current, fresh, metrics) {
     [...fresh.attributes].map((attribute) => attribute.name),
   );
   [...current.attributes].forEach((attribute) => {
+    if (attribute.name === "inert" && motionOwnsInert(current)) return;
     if (preserveOpen && attribute.name === "open") return;
     if (preserveInert && attribute.name === "inert") return;
     if (!freshNames.has(attribute.name)) {
@@ -112,6 +88,7 @@ function syncAttributes(current, fresh, metrics) {
     }
   });
   [...fresh.attributes].forEach((attribute) => {
+    if (attribute.name === "inert" && motionOwnsInert(current)) return;
     if (preserveOpen && attribute.name === "open") return;
     if (preserveInert && attribute.name === "inert") return;
     if (current.getAttribute(attribute.name) !== attribute.value) {
@@ -187,7 +164,7 @@ function reconcileChildren(current, fresh, metrics) {
     }
     if (!candidate) {
       metrics.inserted += 1;
-      return markInsertedMotion(freshChild.cloneNode(true));
+      return freshChild.cloneNode(true);
     }
     used.add(candidate);
     return reconcileNode(candidate, freshChild, metrics);
@@ -284,7 +261,7 @@ export function restoreViewState(state, windowObject = window) {
     windowObject.scrollX !== state.windowX ||
     windowObject.scrollY !== state.windowY
   )
-    windowObject.scrollTo(state.windowX, state.windowY);
+    windowObject.scrollTo({ left: state.windowX, top: state.windowY, behavior: "instant" });
 }
 
 export function reconcileView(current, fresh, runtime = {}) {

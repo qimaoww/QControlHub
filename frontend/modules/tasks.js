@@ -131,12 +131,6 @@ export function installTasks(ctx) {
     const nextCards = freshCards.map((freshCard) => {
       const existingCard = existingCards.get(freshCard.dataset.taskId);
       if (existingCard) return reconcileView(existingCard, freshCard);
-      freshCard.classList.add("qch-reconcile-enter");
-      freshCard.addEventListener(
-        "animationend",
-        () => freshCard.classList.remove("qch-reconcile-enter"),
-        { once: true },
-      );
       return freshCard;
     });
 
