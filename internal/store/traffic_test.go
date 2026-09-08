@@ -109,6 +109,95 @@ func TestPortTrafficPolicyLifecycleWithPostgreSQL(t *testing.T) {
 	}
 }
 
+func TestUpdatePortTrafficPolicyClearingLimitKeepsMonitorOnlyWithPostgreSQL(t *testing.T) {
+	databaseURL := os.Getenv("QCH_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("QCH_TEST_DATABASE_URL is not configured")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	dataStore, err := Open(ctx, databaseURL, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dataStore.Close()
+	agent, enrollmentID := enrollTaskTestAgent(t, ctx, dataStore)
+	defer cleanupTaskTestAgent(dataStore, agent.ID, enrollmentID)
+
+	created, err := dataStore.CreatePortTrafficPolicy(ctx, core.PortTrafficPolicyRequest{
+		AgentID: agent.ID, Name: "quota 443", Engine: core.EngineMihomo, Port: 443,
+		Protocol: core.TrafficProtocolTCP, Cycle: core.TrafficCycleMonthly,
+		CycleAnchor: core.UTCDate(time.Now().UTC()), LimitBytes: 10 << 30,
+	})
+	if err != nil || !created.QuotaEnabled || !created.AutoBlock {
+		t.Fatalf("created quota = %+v, %v", created, err)
+	}
+	// Clearing the limit returns the record to monitoring-only, matching the
+	// optional quota field when an operator only edits the name.
+	renamed, err := dataStore.UpdatePortTrafficPolicy(ctx, created.ID, core.PortTrafficPolicyRequest{
+		AgentID: agent.ID, Name: "renamed 443", Engine: core.EngineMihomo, Port: 443,
+		Protocol: core.TrafficProtocolTCP, Cycle: core.TrafficCycleMonthly,
+		CycleAnchor: created.CycleAnchor, LimitBytes: 0,
+	})
+	if err != nil || renamed.Name != "renamed 443" || renamed.QuotaEnabled || renamed.AutoBlock || renamed.LimitBytes != 0 {
+		t.Fatalf("cleared quota update = %+v, %v", renamed, err)
+	}
+	// Re-enabling with a limit restores quota enforcement on the same record.
+	reapplied, err := dataStore.UpdatePortTrafficPolicy(ctx, created.ID, core.PortTrafficPolicyRequest{
+		AgentID: agent.ID, Name: "renamed 443", Engine: core.EngineMihomo, Port: 443,
+		Protocol: core.TrafficProtocolTCP, Cycle: core.TrafficCycleMonthly,
+		CycleAnchor: created.CycleAnchor, LimitBytes: 5 << 30,
+	})
+	if err != nil || !reapplied.QuotaEnabled || reapplied.LimitBytes != 5<<30 {
+		t.Fatalf("re-enabled quota update = %+v, %v", reapplied, err)
+	}
+}
+
+func TestReconcilePortTrafficEndpointsPreservesExistingWithoutPruneWithPostgreSQL(t *testing.T) {
+	databaseURL := os.Getenv("QCH_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("QCH_TEST_DATABASE_URL is not configured")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	dataStore, err := Open(ctx, databaseURL, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dataStore.Close()
+	agent, enrollmentID := enrollTaskTestAgent(t, ctx, dataStore)
+	defer cleanupTaskTestAgent(dataStore, agent.ID, enrollmentID)
+
+	endpoints := []core.PortTrafficEndpoint{{
+		AgentID: agent.ID, Name: "auto 8443", Engine: core.EngineMihomo,
+		Port: 8443, Protocol: core.TrafficProtocolBoth,
+	}}
+	if _, err := dataStore.ReconcilePortTrafficEndpoints(ctx, endpoints, true); err != nil {
+		t.Fatal(err)
+	}
+	policies, err := dataStore.AgentPortTrafficPolicies(ctx, agent.ID)
+	if err != nil || len(policies) != 1 || !policies[0].Discovered || policies[0].QuotaEnabled {
+		t.Fatalf("discovered monitor = %+v, %v", policies, err)
+	}
+	// A manual sync never prunes, so an existing discovered monitor survives
+	// even when the listener is no longer in the saved configuration.
+	if _, err := dataStore.ReconcilePortTrafficEndpoints(ctx, nil, false); err != nil {
+		t.Fatal(err)
+	}
+	policies, err = dataStore.AgentPortTrafficPolicies(ctx, agent.ID)
+	if err != nil || len(policies) != 1 || !policies[0].Discovered {
+		t.Fatalf("manual sync pruned existing monitor: %+v, %v", policies, err)
+	}
+	// The automatic reconcile still prunes the stale record.
+	if _, err := dataStore.ReconcilePortTrafficEndpoints(ctx, nil, true); err != nil {
+		t.Fatal(err)
+	}
+	policies, err = dataStore.AgentPortTrafficPolicies(ctx, agent.ID)
+	if err != nil || len(policies) != 0 {
+		t.Fatalf("automatic reconcile kept stale monitor: %+v, %v", policies, err)
+	}
+}
+
 func TestDeletePortTrafficMonitoringHidesConfiguredPortUntilReenabledWithPostgreSQL(t *testing.T) {
 	databaseURL := os.Getenv("QCH_TEST_DATABASE_URL")
 	if databaseURL == "" {
@@ -234,7 +323,7 @@ func TestDiscoveredPortIsMonitoredWithoutQuota(t *testing.T) {
 	changed, err := dataStore.ReconcilePortTrafficEndpoints(ctx, []core.PortTrafficEndpoint{{
 		AgentID: agent.ID, Name: "auto 8443", Engine: core.EngineMihomo,
 		Port: 8443, Protocol: core.TrafficProtocolBoth,
-	}})
+	}}, true)
 	if err != nil || len(changed) != 1 || changed[0] != agent.ID {
 		t.Fatalf("reconcile changed agents = %v, %v", changed, err)
 	}
@@ -277,7 +366,7 @@ func TestDiscoveredPortIsMonitoredWithoutQuota(t *testing.T) {
 	if err != nil || len(policies) != 1 || policies[0].QuotaEnabled || !policies[0].Discovered || policies[0].UsedBytes != 12288 {
 		t.Fatalf("quota removal stopped monitoring: %+v, %v", policies, err)
 	}
-	changed, err = dataStore.ReconcilePortTrafficEndpoints(ctx, nil)
+	changed, err = dataStore.ReconcilePortTrafficEndpoints(ctx, nil, true)
 	if err != nil || len(changed) != 1 || changed[0] != agent.ID {
 		t.Fatalf("remove stale monitor = %v, %v", changed, err)
 	}
@@ -315,7 +404,7 @@ func TestDiscoveredPortsRespectAgentPolicyLimit(t *testing.T) {
 			Port: port, Protocol: core.TrafficProtocolTCP,
 		})
 	}
-	if _, err := dataStore.ReconcilePortTrafficEndpoints(ctx, endpoints); !errors.Is(err, ErrConflict) {
+	if _, err := dataStore.ReconcilePortTrafficEndpoints(ctx, endpoints, true); !errors.Is(err, ErrConflict) {
 		t.Fatalf("257 final monitored ports error = %v, want conflict", err)
 	}
 	policies, err := dataStore.AgentPortTrafficPolicies(ctx, agent.ID)

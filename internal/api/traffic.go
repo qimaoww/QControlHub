@@ -70,13 +70,13 @@ func (s *Server) listPortTrafficPolicies(w http.ResponseWriter, request *http.Re
 	writeJSON(w, http.StatusOK, policies)
 }
 
-func (s *Server) reconcilePortTrafficEndpoints(ctx context.Context) ([]core.PortTrafficEndpoint, []string, error) {
+func (s *Server) reconcilePortTrafficEndpoints(ctx context.Context, prune bool) ([]core.PortTrafficEndpoint, []string, error) {
 	configs, err := s.store.ListAgentConfigs(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
 	endpoints := trafficEndpointsFromConfigs(configs)
-	changedAgents, err := s.store.ReconcilePortTrafficEndpoints(ctx, endpoints)
+	changedAgents, err := s.store.ReconcilePortTrafficEndpoints(ctx, endpoints, prune)
 	if err != nil {
 		return endpoints, nil, err
 	}
@@ -84,7 +84,10 @@ func (s *Server) reconcilePortTrafficEndpoints(ctx context.Context) ([]core.Port
 }
 
 func (s *Server) refreshPortTrafficMonitoring(ctx context.Context, connectedAgentID string) {
-	_, changedAgents, err := s.reconcilePortTrafficEndpoints(ctx)
+	// Reconnects also follow manual sync and metadata edits. Only a saved
+	// configuration change may prune stale discovered monitors, otherwise a
+	// non-destructive sync would delete them as soon as the Agent reconnects.
+	_, changedAgents, err := s.reconcilePortTrafficEndpoints(ctx, connectedAgentID == "")
 	if err != nil {
 		// Listener accounting is best-effort and must never make configuration
 		// management or an authenticated Agent session unavailable.
@@ -106,6 +109,23 @@ func (s *Server) listPortTrafficEndpoints(w http.ResponseWriter, request *http.R
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, trafficEndpointsFromConfigs(configs))
+}
+
+func (s *Server) syncPortTrafficEndpoints(w http.ResponseWriter, request *http.Request) {
+	endpoints, changedAgents, err := s.reconcilePortTrafficEndpoints(request.Context(), false)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	for _, agentID := range changedAgents {
+		s.DisconnectAgent(agentID)
+	}
+	s.recordAudit(request, "traffic_endpoints.synced", "", "discovered endpoints: "+strconv.Itoa(len(endpoints))+", changed agents: "+strconv.Itoa(len(changedAgents)))
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, map[string]any{
+		"endpoints":      endpoints,
+		"changed_agents": changedAgents,
+	})
 }
 
 func trafficEndpointsFromConfigs(configs []core.Config) []core.PortTrafficEndpoint {

@@ -48,7 +48,7 @@ type storeExecutor interface {
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 45
+const currentSchemaVersion = 46
 
 func Open(ctx context.Context, databaseURL string, allowInsecureRemote bool) (*Store, error) {
 	return OpenWithConfigKey(ctx, databaseURL, allowInsecureRemote, "")
@@ -2256,7 +2256,7 @@ CREATE TABLE IF NOT EXISTS port_traffic_policies (
     protocol varchar(8) NOT NULL CHECK (protocol IN ('tcp','udp','both')),
     cycle varchar(8) NOT NULL CHECK (cycle IN ('monthly','yearly')),
     cycle_anchor date NOT NULL,
-	limit_bytes bigint NOT NULL CHECK (limit_bytes > 0),
+	limit_bytes bigint NOT NULL CHECK (limit_bytes >= 0),
 	auto_block boolean NOT NULL DEFAULT true,
 	quota_enabled boolean NOT NULL DEFAULT true,
 	monitoring_enabled boolean NOT NULL DEFAULT true,
@@ -2284,6 +2284,9 @@ ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS auto_block boolean NO
 ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS quota_enabled boolean NOT NULL DEFAULT true;
 ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS monitoring_enabled boolean NOT NULL DEFAULT true;
 ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS discovered boolean NOT NULL DEFAULT false;
+ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS metadata_managed boolean NOT NULL DEFAULT false;
+ALTER TABLE port_traffic_policies DROP CONSTRAINT IF EXISTS port_traffic_policies_limit_bytes_check;
+ALTER TABLE port_traffic_policies ADD CONSTRAINT port_traffic_policies_limit_bytes_check CHECK (limit_bytes >= 0);
 ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS traffic_history_initialized boolean NOT NULL DEFAULT false;
 ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS last_collected_at timestamptz;
 ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS counter_epoch varchar(32) NOT NULL DEFAULT '';

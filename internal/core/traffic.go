@@ -50,6 +50,7 @@ type PortTrafficPolicy struct {
 	QuotaEnabled         bool               `json:"quota_enabled"`
 	MonitoringEnabled    bool               `json:"monitoring_enabled"`
 	Discovered           bool               `json:"discovered"`
+	MetadataManaged      bool               `json:"-"` // Explicit operator edits must survive listener discovery.
 	ResetGeneration      uint64             `json:"reset_generation"`
 	ReceivedBytes        uint64             `json:"received_bytes"`
 	SentBytes            uint64             `json:"sent_bytes"`
@@ -243,8 +244,11 @@ func NormalizePortTrafficPolicyRequest(request PortTrafficPolicyRequest, now tim
 	if request.CycleAnchor.After(UTCDate(now)) {
 		return PortTrafficPolicyRequest{}, errors.New("cycle_anchor cannot be in the future")
 	}
-	if request.LimitBytes == 0 || request.LimitBytes > math.MaxInt64 {
-		return PortTrafficPolicyRequest{}, errors.New("limit_bytes must be between 1 and 9223372036854775807")
+	// A zero limit marks a monitoring-only policy (no quota). The Agent never
+	// sees this raw value: trafficPoliciesForAgent replaces it with a safe
+	// unreachable limit before sending monitor-only policies over the wire.
+	if request.LimitBytes > math.MaxInt64 {
+		return PortTrafficPolicyRequest{}, errors.New("limit_bytes must not exceed 9223372036854775807")
 	}
 	if request.AutoBlock == nil {
 		enabled := true

@@ -74,6 +74,7 @@ func TestManagementAPIRouteAuthorizationMatrix(t *testing.T) {
 		{http.MethodGet, "/api/v1/metrics/agt_0123456789abcdef"},
 		{http.MethodGet, "/api/v1/traffic-policies"},
 		{http.MethodGet, "/api/v1/traffic-endpoints"},
+		{http.MethodPost, "/api/v1/traffic-endpoints/sync"},
 		{http.MethodGet, "/api/v1/traffic-usage?month=2026-08"},
 		{http.MethodPost, "/api/v1/traffic-policies"},
 		{http.MethodPut, "/api/v1/traffic-policies/trf_test"},
@@ -112,7 +113,7 @@ func TestManagementAPIRouteAuthorizationMatrix(t *testing.T) {
 		{http.MethodGet, "/api/v1/enrollment-tokens"}, {http.MethodPost, "/api/v1/enrollment-tokens"}, {http.MethodDelete, "/api/v1/enrollment-tokens/tok_test"}, {http.MethodPost, "/api/v1/enrollment-tokens/tok_test/command"},
 		{http.MethodPut, "/api/v1/settings"},
 		{http.MethodPut, "/api/v1/substore-sync/settings"}, {http.MethodPost, "/api/v1/substore-sync/targets"}, {http.MethodPost, "/api/v1/substore-sync/targets/sst_test/remote"}, {http.MethodPut, "/api/v1/substore-sync/targets/sst_test"}, {http.MethodDelete, "/api/v1/substore-sync/targets/sst_test"}, {http.MethodPut, "/api/v1/substore-sync/selections"}, {http.MethodPost, "/api/v1/substore-sync/test"}, {http.MethodPost, "/api/v1/substore-sync/run"},
-		{http.MethodPost, "/api/v1/traffic-policies"}, {http.MethodPut, "/api/v1/traffic-policies/trf_test"}, {http.MethodPost, "/api/v1/traffic-policies/trf_test/reset"}, {http.MethodDelete, "/api/v1/traffic-policies/trf_test"},
+		{http.MethodPost, "/api/v1/traffic-endpoints/sync"}, {http.MethodPost, "/api/v1/traffic-policies"}, {http.MethodPut, "/api/v1/traffic-policies/trf_test"}, {http.MethodPost, "/api/v1/traffic-policies/trf_test/reset"}, {http.MethodDelete, "/api/v1/traffic-policies/trf_test"},
 		{http.MethodPost, "/api/v1/templates"}, {http.MethodDelete, "/api/v1/templates/tpl_test"}, {http.MethodPost, "/api/v1/templates/tpl_test/apply"},
 	}
 	for _, item := range readonlyDenied {

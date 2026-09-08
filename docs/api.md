@@ -144,6 +144,10 @@ schema 44 的策略响应增加 `accounting`：`source` 为 `core-api`、`nft-du
 
 `GET /api/v1/traffic-endpoints` 会从节点当前保存的 Mihomo、Xray、sing-box 与 Shadowsocks Rust 配置中提取监听名称、端口和 TCP/UDP 范围。响应不会包含凭据或完整配置内容。控制面会把这些监听端口自动持久化为监控记录并同步给支持 `port-traffic-v1` 的 Agent；无需先创建配额即可持续统计、保存每日用量并显示实时速率。配额只是监控记录上的可选上限与封禁设置。同一节点同一端口只显示一张流量卡片。
 
+`POST /api/v1/traffic-endpoints/sync` 由具有 `traffic.manage` 权限的调用方触发一次监听端口同步：控制面重新读取全部节点配置，新增新发现的监听端口并更新失配的监控元数据；它不会删除流量页上已有的端口记录，已设置配额的统计与历史始终保留。
+
+手动编辑的名称、内核归属与协议不会被自动发现覆盖。Agent 重连同样只补充监控记录，不清理旧端口；保存节点配置时仍会清理已不在配置中的自动发现、无配额记录。schema 46 支持零额度并记录元数据是否经过手动编辑，旧版本数据库会自动迁移。
+
 创建与更新请求使用相同结构：
 
 ```json
@@ -160,7 +164,7 @@ schema 44 的策略响应增加 `accounting`：`source` 为 `core-api`、`nft-du
 }
 ```
 
-`protocol` 为 `tcp`、`udp` 或 `both`，`cycle` 为 `monthly` 或 `yearly`。`cycle_anchor` 必须是当天或过去的 UTC 日期；月末和闰年按日历末日自动对齐。额度是接收与发送字节之和，同一节点同一端口只能配置一次。自动发现记录的 `quota_enabled` 为 `false`；设置配额后变为 `true`。`auto_block` 默认为 `true`；设为 `false` 时 Agent 仍统计并上报流量，但不会因超额创建丢弃规则。取消已发现端口的配额只解除限额和封禁，不删除统计记录或历史。修改端口、协议、周期或起始日期会开始新的周期计数；只调整名称、内核归属、额度或自动封禁开关会保留当前已用流量。响应中的 `enforcement_available`、`enforcement_error`、`blocked`、当前周期与收发计数均来自 Agent 最新心跳。
+`protocol` 为 `tcp`、`udp` 或 `both`，`cycle` 为 `monthly` 或 `yearly`。`cycle_anchor` 必须是当天或过去的 UTC 日期；月末和闰年按日历末日自动对齐。额度是接收与发送字节之和，同一节点同一端口只能配置一次。请求中的 `limit_bytes` 为 `0` 或省略时保持监控-only（`quota_enabled=false`，只统计不设上限），大于 `0` 时开启配额（`quota_enabled=true`）。自动发现记录的 `quota_enabled` 为 `false`；设置配额后变为 `true`。`auto_block` 默认为 `true`；设为 `false` 时 Agent 仍统计并上报流量，但不会因超额创建丢弃规则。未启用配额时 `auto_block` 会被强制为 `false`。取消已发现端口的配额只解除限额和封禁，不删除统计记录或历史。修改端口、协议、周期或起始日期会开始新的周期计数；只调整名称、内核归属、额度或自动封禁开关会保留当前已用流量。响应中的 `enforcement_available`、`enforcement_error`、`blocked`、当前周期与收发计数均来自 Agent 最新心跳。
 
 `GET /api/v1/traffic-usage` 的 `month` 使用 `YYYY-MM`，省略时为当前 UTC 月；`agent_id` 和 `policy_id` 可选。控制面将策略当前用量和每日接收、发送、合计、峰值速率写入 PostgreSQL；删除单条配额不会删除已经保存的每日历史。
 

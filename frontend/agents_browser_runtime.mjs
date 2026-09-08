@@ -167,6 +167,7 @@ window.fetch = async (input, options = {}) => {
   if (mode === "traffic-layout") {
     if (path === "/traffic-policies") return json(testAPI.trafficPolicies);
     if (path === "/traffic-endpoints") return json([]);
+    if (path === "/traffic-endpoints/sync" && method === "POST") return json({ endpoints: [], changed_agents: [] });
   }
   if (mode === "config-layout") {
     if (path === "/settings") return json({panel_name:"QControlHub"});
@@ -1492,6 +1493,18 @@ try {
     details.querySelector("summary").click();
     document.querySelector("[data-traffic-status-close]").click();
     assert.ok(!document.querySelector(".traffic-status-dialog").open,"status dialog should close");
+    const quota = document.querySelector('[data-traffic-edit-form] [name="limit_gb"]');
+    assert.ok(quota && !quota.required && quota.value === "" && quota.checkValidity(), "monitor-only quota must allow an empty value");
+    quota.value = "0";
+    assert.ok(quota.checkValidity(), "zero must be a valid monitor-only quota");
+    quota.value = "";
+    document.querySelector("[data-traffic-sync]").click();
+    const confirmation = await waitFor(() => document.querySelector("[data-confirm-dialog][open]"), "sync confirmation did not open");
+    assert.ok(document.querySelector("[data-traffic-sync]").disabled, "sync must lock while awaiting confirmation");
+    confirmation.querySelector("[data-confirm-accept]").click();
+    await waitFor(() => testAPI.calls.some(call => call.path === "/traffic-endpoints/sync" && call.method === "POST"), "confirmed sync did not send POST");
+    await waitFor(() => !document.querySelector("[data-traffic-sync]").disabled, "sync button did not recover after refresh");
+    assert.equal(testAPI.calls.filter(call => call.path === "/traffic-endpoints/sync").length, 1, "sync must send exactly one request");
   }
   else if (mode === "config-layout") {
     await waitFor(()=>document.querySelector("#live-config-form"),"manual editor did not load");
