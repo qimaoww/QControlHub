@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net"
+	"strconv"
 	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
@@ -109,6 +111,10 @@ func decodeNativeStat(data []byte) (string, uint64, error) {
 }
 
 func queryNativeTraffic(ctx context.Context, engine core.Engine) (map[string]uint64, error) {
+	return queryNativeTrafficAt(ctx, engine, "")
+}
+
+func queryNativeTrafficAt(ctx context.Context, engine core.Engine, verifiedAddress string) (map[string]uint64, error) {
 	var address, service string
 	switch engine {
 	case core.EngineXray:
@@ -119,6 +125,14 @@ func queryNativeTraffic(ctx context.Context, engine core.Engine) (map[string]uin
 		address, service = "127.0.0.1:10086", "v2ray.core.app.stats.command.StatsService"
 	default:
 		return nil, errors.New("native traffic API not supported")
+	}
+	if verifiedAddress != "" {
+		host, port, err := net.SplitHostPort(verifiedAddress)
+		n, _ := strconv.Atoi(port)
+		if err != nil || (host != "127.0.0.1" && host != "::1") || n < 1 || n > 65535 {
+			return nil, errors.New("statistics API must use a verified loopback TCP address")
+		}
+		address = verifiedAddress
 	}
 	// Never dial a control-plane/user-supplied host: these endpoints must be
 	// loopback-only and belong to a verified managed process.

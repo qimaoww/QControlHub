@@ -342,7 +342,7 @@ func (e *Executor) nativeAccounting(ctx context.Context, engine core.Engine) (na
 	if plan.Source == "nft-dual" {
 		return nativeAccountingSnapshot{Plan: plan, ProcessEpoch: epoch, ListenerProtocols: accountingListenerProtocols(engine, content)}, nil
 	}
-	counters, err := queryNativeTraffic(ctx, engine)
+	counters, err := queryNativeTrafficAt(ctx, engine, plan.API)
 	if err != nil {
 		return result, err
 	}
