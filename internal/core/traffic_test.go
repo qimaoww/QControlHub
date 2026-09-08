@@ -80,3 +80,21 @@ func TestNormalizePortTrafficPolicyRequest(t *testing.T) {
 		t.Fatal("future anchor was accepted")
 	}
 }
+
+func TestNormalizePortTrafficPolicyRequestAllowsMonitorOnlyLimit(t *testing.T) {
+	now := time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)
+	request, err := NormalizePortTrafficPolicyRequest(PortTrafficPolicyRequest{
+		AgentID: "agt_test", Name: "monitor only", Engine: EngineXray,
+		Port: 443, Protocol: TrafficProtocolBoth, Cycle: TrafficCycleMonthly,
+		CycleAnchor: now.Add(-24 * time.Hour), LimitBytes: 0,
+	}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if request.LimitBytes != 0 {
+		t.Fatalf("monitor-only limit_bytes = %d, want 0", request.LimitBytes)
+	}
+	if request.AutoBlock == nil || !*request.AutoBlock {
+		t.Fatalf("monitor-only default auto_block = %+v, want enabled", request.AutoBlock)
+	}
+}

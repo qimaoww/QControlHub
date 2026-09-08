@@ -75,8 +75,11 @@ func (s *Store) AgentPortTrafficPolicies(ctx context.Context, agentID string) ([
 // ReconcilePortTrafficEndpoints makes listener discovery the source of
 // monitor-only records. Quotas remain operator-managed metadata on top of
 // those records: losing a configuration never deletes an enabled quota, and
-// removing a quota from a discovered listener never stops accounting.
-func (s *Store) ReconcilePortTrafficEndpoints(ctx context.Context, raw []core.PortTrafficEndpoint) ([]string, error) {
+// removing a quota from a discovered listener never stops accounting. When
+// prune is true, monitoring-only records for listeners that left the saved
+// configuration are removed; manual sync keeps every existing record and only
+// adds or updates newly discovered listeners.
+func (s *Store) ReconcilePortTrafficEndpoints(ctx context.Context, raw []core.PortTrafficEndpoint, prune bool) ([]string, error) {
 	endpoints, err := normalizePortTrafficEndpoints(raw)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalid, err)
@@ -118,9 +121,15 @@ func (s *Store) ReconcilePortTrafficEndpoints(ctx context.Context, raw []core.Po
 		if _, coveredByDiscovery := desired[key]; coveredByDiscovery {
 			continue
 		}
-		if policy.MonitoringEnabled && (!policy.Discovered || policy.QuotaEnabled) {
-			finalCountByAgent[policy.AgentID]++
+		if !policy.MonitoringEnabled {
+			continue
 		}
+		if prune && policy.Discovered && !policy.QuotaEnabled {
+			// This stale monitor-only record is pruned below, so it does not
+			// occupy a slot in the agent's monitoring budget.
+			continue
+		}
+		finalCountByAgent[policy.AgentID]++
 	}
 	for agentID, count := range finalCountByAgent {
 		if count > 256 {
@@ -181,19 +190,21 @@ func (s *Store) ReconcilePortTrafficEndpoints(ctx context.Context, raw []core.Po
 			id, endpoint.AgentID, endpoint.Name, endpoint.Engine, endpoint.Port, endpoint.Protocol, anchor, int64(math.MaxInt64), now)
 		changedAgents[endpoint.AgentID] = struct{}{}
 	}
-	for key, policy := range existing {
-		if !policy.Discovered {
-			continue
+	if prune {
+		for key, policy := range existing {
+			if !policy.Discovered {
+				continue
+			}
+			if _, exists := desired[key]; exists {
+				continue
+			}
+			if policy.QuotaEnabled {
+				writes.Queue(`UPDATE port_traffic_policies SET discovered=false,updated_at=now() WHERE id=$1`, policy.ID)
+				continue
+			}
+			writes.Queue(`DELETE FROM port_traffic_policies WHERE id=$1`, policy.ID)
+			changedAgents[policy.AgentID] = struct{}{}
 		}
-		if _, exists := desired[key]; exists {
-			continue
-		}
-		if policy.QuotaEnabled {
-			writes.Queue(`UPDATE port_traffic_policies SET discovered=false,updated_at=now() WHERE id=$1`, policy.ID)
-			continue
-		}
-		writes.Queue(`DELETE FROM port_traffic_policies WHERE id=$1`, policy.ID)
-		changedAgents[policy.AgentID] = struct{}{}
 	}
 	if writes.Len() > 0 {
 		if err := tx.SendBatch(ctx, writes).Close(); err != nil {
@@ -301,12 +312,14 @@ func (s *Store) CreatePortTrafficPolicy(ctx context.Context, raw core.PortTraffi
 		return core.PortTrafficPolicy{}, err
 	}
 	now := time.Now().UTC()
+	enableQuota := request.LimitBytes > 0
+	effectiveAutoBlock := enableQuota && *request.AutoBlock
 	policy, err := scanTrafficPolicy(tx.QueryRow(ctx, `
 		INSERT INTO port_traffic_policies (id,agent_id,name,engine,port,protocol,cycle,cycle_anchor,limit_bytes,auto_block,quota_enabled,traffic_history_initialized,created_at,updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,true,true,$11,$11)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,true,$12,$12)
 		RETURNING `+trafficPolicyColumns,
 		id, request.AgentID, request.Name, request.Engine, request.Port, request.Protocol,
-		request.Cycle, request.CycleAnchor, request.LimitBytes, *request.AutoBlock, now))
+		request.Cycle, request.CycleAnchor, request.LimitBytes, effectiveAutoBlock, enableQuota, now))
 	if err != nil {
 		return core.PortTrafficPolicy{}, mapError(err)
 	}
@@ -349,9 +362,14 @@ func (s *Store) UpdatePortTrafficPolicy(ctx context.Context, id string, raw core
 }
 
 func updatePortTrafficPolicyRow(ctx context.Context, tx pgx.Tx, id string, request core.PortTrafficPolicyRequest) (core.PortTrafficPolicy, error) {
+	quotaEnabled := request.LimitBytes > 0
+	// A policy without a quota never auto-blocks, matching quota removal and
+	// auto-discovered monitoring records. This keeps monitor-only entries from
+	// holding a stale auto_block toggle in the management view.
+	autoBlock := quotaEnabled && *request.AutoBlock
 	policy, err := scanTrafficPolicy(tx.QueryRow(ctx, `
 		UPDATE port_traffic_policies SET
-			name=$2,engine=$3,port=$4,protocol=$5::varchar(8),cycle=$6::varchar(8),cycle_anchor=$7::date,limit_bytes=$8,auto_block=$9,quota_enabled=true,monitoring_enabled=true,
+			name=$2,engine=$3,port=$4,protocol=$5::varchar(8),cycle=$6::varchar(8),cycle_anchor=$7::date,limit_bytes=$8,auto_block=$9,quota_enabled=$10,monitoring_enabled=true,
 			reset_generation=reset_generation + CASE WHEN port<>$4 OR protocol<>$5::varchar(8) OR cycle<>$6::varchar(8) OR cycle_anchor<>$7::date THEN 1 ELSE 0 END,
 			received_bytes=CASE WHEN port<>$4 OR protocol<>$5::varchar(8) OR cycle<>$6::varchar(8) OR cycle_anchor<>$7::date THEN 0 ELSE received_bytes END,
 			sent_bytes=CASE WHEN port<>$4 OR protocol<>$5::varchar(8) OR cycle<>$6::varchar(8) OR cycle_anchor<>$7::date THEN 0 ELSE sent_bytes END,
@@ -369,7 +387,7 @@ func updatePortTrafficPolicyRow(ctx context.Context, tx pgx.Tx, id string, reque
 			last_reported_at=NULL,updated_at=now()
 		WHERE id=$1 RETURNING `+trafficPolicyColumns,
 		id, request.Name, request.Engine, request.Port, request.Protocol, request.Cycle,
-		request.CycleAnchor, request.LimitBytes, *request.AutoBlock))
+		request.CycleAnchor, request.LimitBytes, autoBlock, quotaEnabled))
 	if err != nil {
 		return core.PortTrafficPolicy{}, mapError(err)
 	}

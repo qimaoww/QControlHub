@@ -935,3 +935,5 @@ dialog[open]::backdrop{animation:qch-backdrop-enter 220ms ease both}
   .page-live-config .app-dock .dock-nav>a{flex:1;min-width:44px;min-height:44px;margin:0}
 }
 @media(max-width:820px){.bbr-primary-values{grid-template-columns:1fr 1fr}.bbr-primary-values>div:last-child{grid-column:1/-1}.bbr-card>footer{align-items:stretch}.bbr-actions{width:100%}.bbr-actions>.button{flex:1;min-height:44px}.bbr-toolbar .button{min-height:44px}}
+
+.traffic-policy-list-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
