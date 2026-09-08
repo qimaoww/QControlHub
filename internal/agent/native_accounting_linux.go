@@ -3,6 +3,7 @@ package agent
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -26,6 +27,58 @@ type nativeAccountingSnapshot struct {
 	Counters          map[string]uint64
 	ProcessEpoch      string
 	ListenerProtocols map[int]core.TrafficProtocol
+}
+
+type nativeAccountingConfigEntry struct {
+	digest   [sha256.Size]byte
+	snapshot nativeAccountingSnapshot
+	err      error
+}
+
+// Cache only immutable, content-derived metadata, never counters or process
+// identity. Every sample still securely reads the file and checks the live core.
+// A single entry per engine bounds memory and also avoids recompiling unchanged
+// invalid configurations every second. Changes and rollbacks are checked at once.
+func (e *Executor) accountingConfiguration(engine core.Engine, content string) (nativeAccountingSnapshot, error) {
+	if !engine.Valid() {
+		return nativeAccountingSnapshot{}, errors.New("invalid accounting engine")
+	}
+	digest := sha256.Sum256([]byte(content))
+	e.accountingConfigMu.Lock()
+	defer e.accountingConfigMu.Unlock()
+	if entry, ok := e.accountingConfigs[engine]; ok && entry.digest == digest {
+		return entry.snapshot, entry.err
+	}
+	snapshot, err := compileAccountingConfiguration(engine, content)
+	if e.accountingConfigs == nil {
+		e.accountingConfigs = make(map[core.Engine]nativeAccountingConfigEntry)
+	}
+	e.accountingConfigs[engine] = nativeAccountingConfigEntry{digest: digest, snapshot: snapshot, err: err}
+	return snapshot, err
+}
+
+// The returned plan and listener map are read-only to accounting consumers.
+func compileAccountingConfiguration(engine core.Engine, content string) (nativeAccountingSnapshot, error) {
+	plan, err := serverconfig.PrepareAccounting(engine, content)
+	if engine == core.EngineSingBox && (err != nil || !strings.Contains(content, `"v2ray_api"`)) {
+		plan, err = serverconfig.PrepareMarkedSingBoxAccounting(content)
+	}
+	if err != nil {
+		return nativeAccountingSnapshot{}, err
+	}
+	var actual, compiled any
+	decode := func(content string, dest *any) error {
+		if engine == core.EngineMihomo {
+			return yaml.Unmarshal([]byte(content), dest)
+		}
+		decoder := json.NewDecoder(strings.NewReader(content))
+		decoder.UseNumber()
+		return decoder.Decode(dest)
+	}
+	if decode(content, &actual) != nil || decode(plan.Content, &compiled) != nil || !reflect.DeepEqual(actual, compiled) {
+		return nativeAccountingSnapshot{}, errors.New("managed configuration has not migrated to independent outbound accounting")
+	}
+	return nativeAccountingSnapshot{Plan: plan, ListenerProtocols: accountingListenerProtocols(engine, content)}, nil
 }
 
 // Inbound payloads may carry UDP over a TCP listener (and vice versa).
@@ -325,33 +378,19 @@ func (e *Executor) nativeAccounting(ctx context.Context, engine core.Engine) (na
 	if err != nil {
 		return result, err
 	}
-	plan, err := serverconfig.PrepareAccounting(engine, content)
-	if engine == core.EngineSingBox && (err != nil || !strings.Contains(content, `"v2ray_api"`)) {
-		plan, err = serverconfig.PrepareMarkedSingBoxAccounting(content)
-	}
+	configuration, err := e.accountingConfiguration(engine, content)
 	if err != nil {
 		return result, err
-	}
-	var actual, compiled any
-	decode := func(content string, dest *any) error {
-		if engine == core.EngineMihomo {
-			return yaml.Unmarshal([]byte(content), dest)
-		}
-		decoder := json.NewDecoder(strings.NewReader(content))
-		decoder.UseNumber()
-		return decoder.Decode(dest)
-	}
-	if decode(content, &actual) != nil || decode(plan.Content, &compiled) != nil || !reflect.DeepEqual(actual, compiled) {
-		return result, errors.New("managed configuration has not migrated to independent outbound accounting")
 	}
 	epoch, err := e.accountingProcessEpoch(ctx, spec)
 	if err != nil {
 		return result, err
 	}
-	if plan.Source == "nft-dual" {
-		return nativeAccountingSnapshot{Plan: plan, ProcessEpoch: epoch, ListenerProtocols: accountingListenerProtocols(engine, content)}, nil
+	configuration.ProcessEpoch = epoch
+	if configuration.Plan.Source == "nft-dual" {
+		return configuration, nil
 	}
-	counters, err := queryNativeTrafficAt(ctx, engine, plan.API)
+	counters, err := queryNativeTrafficAt(ctx, engine, configuration.Plan.API)
 	if err != nil {
 		return result, err
 	}
@@ -361,7 +400,8 @@ func (e *Executor) nativeAccounting(ctx context.Context, engine core.Engine) (na
 	if err != nil || after != epoch {
 		return result, errors.New("core restarted during statistics collection")
 	}
-	return nativeAccountingSnapshot{Plan: plan, Counters: counters, ProcessEpoch: epoch, ListenerProtocols: accountingListenerProtocols(engine, content)}, nil
+	configuration.Counters = counters
+	return configuration, nil
 }
 
 func (e *Executor) accountingProcessEpoch(ctx context.Context, spec EngineSpec) (string, error) {

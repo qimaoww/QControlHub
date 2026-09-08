@@ -48,6 +48,8 @@ type Executor struct {
 	validationSystemdRunPath string
 	specsMu                  sync.RWMutex
 	migrationMu              sync.Mutex
+	accountingConfigMu       sync.Mutex
+	accountingConfigs        map[core.Engine]nativeAccountingConfigEntry
 	completedMigrations      map[core.Engine]completedCoreMigration
 	verifyCompletedMigration func(context.Context, EngineSpec, EngineSpec, *ServiceManager) error
 }
