@@ -734,7 +734,7 @@ func TestAgentWebSocketProxyForwardsSourceChain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const agentProxy = `location /agent/ { proxy_http_version 1.1; proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection "upgrade"; proxy_set_header Host $http_host; proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; proxy_pass $control_plane; }`
+	const agentProxy = `location /agent/ { proxy_http_version 1.1; proxy_buffering off; proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection "upgrade"; proxy_set_header Host $http_host; proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; proxy_pass $control_plane; }`
 	if !strings.Contains(string(nginx), agentProxy) {
 		t.Error("Agent WebSocket proxy must forward the existing trusted source chain")
 	}
