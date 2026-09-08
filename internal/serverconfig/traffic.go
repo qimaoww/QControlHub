@@ -41,7 +41,14 @@ func DiscoverTrafficPorts(engine core.Engine, content string) []core.PortTraffic
 			}
 		}
 	case core.EngineXray:
-		result = discoverTrafficList(root["inbounds"], engine, "tag", "protocol", "port", core.TrafficProtocolBoth)
+		var business []any
+		inbounds, _ := root["inbounds"].([]any)
+		for _, raw := range inbounds {
+			if !xrayInternalAPIInbound(root, mapValue(raw)) {
+				business = append(business, raw)
+			}
+		}
+		result = discoverTrafficList(business, engine, "tag", "protocol", "port", core.TrafficProtocolBoth)
 	case core.EngineSingBox:
 		result = discoverTrafficList(root["inbounds"], engine, "tag", "type", "listen_port", core.TrafficProtocolBoth)
 	case core.EngineShadowsocksRust:

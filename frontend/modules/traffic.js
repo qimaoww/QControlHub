@@ -17,13 +17,13 @@ export function renderTrafficAccounting(policy, esc, bytes) {
   const accounting = policy.accounting;
   const dual = ["core-api", "nft-dual"].includes(accounting?.source);
   const raw = String(policy.enforcement_error || "").replace(/^[;\s]+/, "");
-  const scopeOnly = /^dual accounting unavailable: single-protocol policy uses listener-only accounting; dual accounting requires TCP\+UDP because core counters and outbound marks are shared$/.test(raw);
+  const scopeOnly = /^dual accounting unavailable: single-protocol policy uses listener-only accounting; (?:dual accounting requires TCP\+UDP because core counters and outbound marks are shared|exclusive listener transport could not be verified)$/.test(raw);
   const failed = policy.enforcement_available === false || (raw && !scopeOnly);
   const tone = failed ? "bad" : dual ? "ok" : "limited";
   const title = failed ? "统计异常" : dual ? "双链路统计" : "仅监听端口";
   const hint = failed
     ? raw ? "请查看诊断信息，确认统计是否完整。" : "Agent 报告监控不可用，暂未提供详细诊断。"
-    : scopeOnly ? "当前为单协议统计，未计入出口链路。"
+    : scopeOnly ? "暂未确认入站协议独占，当前仅统计入口收发。"
     : !dual ? "独立出口统计尚未生效，当前仅计入口。"
     : accounting.source === "core-api" ? "内核计数 · 包含入站协议开销" : "网络层计数 · 包含包头及重传";
   const legs = dual ? `<dl class="traffic-accounting-legs">${[

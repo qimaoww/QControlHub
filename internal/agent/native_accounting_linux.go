@@ -22,9 +22,156 @@ import (
 )
 
 type nativeAccountingSnapshot struct {
-	Plan         serverconfig.AccountingPlan
-	Counters     map[string]uint64
-	ProcessEpoch string
+	Plan              serverconfig.AccountingPlan
+	Counters          map[string]uint64
+	ProcessEpoch      string
+	ListenerProtocols map[int]core.TrafficProtocol
+}
+
+// Inbound payloads may carry UDP over a TCP listener (and vice versa).
+// Unknown transports and duplicate ports deliberately remain unsupported.
+func exclusiveXrayProtocols(engine core.Engine, content string) map[int]core.TrafficProtocol {
+	ports := map[int]core.TrafficProtocol{}
+	if engine != core.EngineXray {
+		return ports
+	}
+	var root struct {
+		Inbounds []struct {
+			Port     int    `json:"port"`
+			Protocol string `json:"protocol"`
+			Settings struct {
+				Network string `json:"network"`
+			} `json:"settings"`
+			Stream struct {
+				Network string `json:"network"`
+			} `json:"streamSettings"`
+		} `json:"inbounds"`
+	}
+	if json.Unmarshal([]byte(content), &root) != nil {
+		return ports
+	}
+	seen := map[int]bool{}
+	for _, inbound := range root.Inbounds {
+		if seen[inbound.Port] {
+			ports[inbound.Port] = core.TrafficProtocolBoth
+			continue
+		}
+		seen[inbound.Port] = true
+		switch inbound.Protocol {
+		case "vless", "vmess", "trojan":
+			switch inbound.Stream.Network {
+			case "", "tcp", "raw", "ws", "grpc", "http", "h2", "httpupgrade", "splithttp", "xhttp":
+				ports[inbound.Port] = core.TrafficProtocolTCP
+			case "quic", "kcp":
+				ports[inbound.Port] = core.TrafficProtocolUDP
+			}
+		case "shadowsocks", "dokodemo-door":
+			if inbound.Settings.Network == "tcp" {
+				ports[inbound.Port] = core.TrafficProtocolTCP
+			}
+			if inbound.Settings.Network == "udp" {
+				ports[inbound.Port] = core.TrafficProtocolUDP
+			}
+		}
+	}
+	return ports
+}
+
+func nativeAccountingScopeAllowed(policy core.PortTrafficPolicy, snapshot nativeAccountingSnapshot) bool {
+	return policy.Protocol == core.TrafficProtocolBoth ||
+		(snapshot.ListenerProtocols[policy.Port] == policy.Protocol && policy.Protocol != "")
+}
+
+func accountingListenerProtocols(engine core.Engine, content string) map[int]core.TrafficProtocol {
+	result := map[int]core.TrafficProtocol{}
+	seen := map[int]bool{}
+	for _, endpoint := range serverconfig.DiscoverTrafficPorts(engine, content) {
+		if seen[endpoint.Port] {
+			result[endpoint.Port] = core.TrafficProtocolBoth
+			continue
+		}
+		seen[endpoint.Port] = true
+		result[endpoint.Port] = endpoint.Protocol
+	}
+	if engine == core.EngineXray {
+		// Discovery is for presentation; only verified transports can authorize billing.
+		for port := range result {
+			result[port] = core.TrafficProtocolBoth
+		}
+		for port, protocol := range exclusiveXrayProtocols(engine, content) {
+			result[port] = protocol
+		}
+	}
+	if engine == core.EngineSingBox {
+		var root struct {
+			Inbounds []struct {
+				Port      int    `json:"listen_port"`
+				Type      string `json:"type"`
+				Transport struct {
+					Type string `json:"type"`
+				} `json:"transport"`
+			} `json:"inbounds"`
+		}
+		if json.Unmarshal([]byte(content), &root) != nil {
+			return nil
+		}
+		seen := map[int]bool{}
+		for _, in := range root.Inbounds {
+			if seen[in.Port] {
+				result[in.Port] = core.TrafficProtocolBoth
+				continue
+			}
+			seen[in.Port] = true
+			switch in.Type {
+			case "vless", "vmess", "trojan", "anytls", "http":
+				result[in.Port] = core.TrafficProtocolTCP
+			case "hysteria", "hysteria2", "tuic":
+				result[in.Port] = core.TrafficProtocolUDP
+			}
+			if in.Transport.Type != "" && in.Transport.Type != "tcp" && in.Transport.Type != "ws" && in.Transport.Type != "http" && in.Transport.Type != "httpupgrade" && in.Transport.Type != "grpc" {
+				result[in.Port] = core.TrafficProtocolBoth
+			}
+		}
+	}
+	if engine == core.EngineMihomo {
+		// Do not trust arbitrary `network` hints on listener kinds that do not
+		// use them. Unknown kinds remain protocol-ambiguous.
+		for port := range result {
+			result[port] = core.TrafficProtocolBoth
+		}
+		var root struct {
+			Port      int `yaml:"port"`
+			RedirPort int `yaml:"redir-port"`
+			Listeners []struct {
+				Port int    `yaml:"port"`
+				Type string `yaml:"type"`
+			} `yaml:"listeners"`
+		}
+		if yaml.Unmarshal([]byte(content), &root) != nil {
+			return nil
+		}
+		seen := map[int]bool{}
+		for _, port := range []int{root.Port, root.RedirPort} {
+			if port != 0 {
+				result[port] = core.TrafficProtocolTCP
+				seen[port] = true
+			}
+		}
+		for _, in := range root.Listeners {
+			if seen[in.Port] {
+				result[in.Port] = core.TrafficProtocolBoth
+				continue
+			}
+			seen[in.Port] = true
+			switch in.Type {
+			case "vless", "vmess", "trojan", "http", "redir", "anytls":
+				result[in.Port] = core.TrafficProtocolTCP
+			case "hysteria2", "hysteria", "tuic":
+				result[in.Port] = core.TrafficProtocolUDP
+			}
+		}
+	}
+	return result
 }
 
 func (e *Executor) prepareNativeAccountingContent(ctx context.Context, engine core.Engine, spec EngineSpec, content string) (string, string) {
@@ -193,7 +340,7 @@ func (e *Executor) nativeAccounting(ctx context.Context, engine core.Engine) (na
 		return result, err
 	}
 	if plan.Source == "nft-dual" {
-		return nativeAccountingSnapshot{Plan: plan, ProcessEpoch: epoch}, nil
+		return nativeAccountingSnapshot{Plan: plan, ProcessEpoch: epoch, ListenerProtocols: accountingListenerProtocols(engine, content)}, nil
 	}
 	counters, err := queryNativeTraffic(ctx, engine)
 	if err != nil {
@@ -205,7 +352,7 @@ func (e *Executor) nativeAccounting(ctx context.Context, engine core.Engine) (na
 	if err != nil || after != epoch {
 		return result, errors.New("core restarted during statistics collection")
 	}
-	return nativeAccountingSnapshot{Plan: plan, Counters: counters, ProcessEpoch: epoch}, nil
+	return nativeAccountingSnapshot{Plan: plan, Counters: counters, ProcessEpoch: epoch, ListenerProtocols: accountingListenerProtocols(engine, content)}, nil
 }
 
 func (e *Executor) accountingProcessEpoch(ctx context.Context, spec EngineSpec) (string, error) {
