@@ -980,28 +980,76 @@ func (c *Client) upgradeAgent(ctx context.Context) (string, error) {
 	return fmt.Sprintf("Agent binary replaced with %s (%d bytes); reconnecting with the upgraded process", versionLabel(version), size), nil
 }
 
+// agentBinaryDownloadTimeout bounds the whole signed download, including
+// retries, so a misbehaving control plane cannot hold an upgrade task open.
+const agentBinaryDownloadTimeout = 2 * time.Minute
+
 func (c *Client) downloadAgentBinary(ctx context.Context, directory string) (string, string, int64, error) {
+	totalContext, cancel := context.WithTimeout(ctx, agentBinaryDownloadTimeout)
+	defer cancel()
+	attempts := defaultDownloadAttempts
+	if attempts > maxDownloadAttempts {
+		attempts = maxDownloadAttempts
+	}
+	retryDelay := defaultDownloadRetryDelay
+	var lastErr error
+	performedAttempts := 0
+	for attempt := 1; attempt <= attempts; attempt++ {
+		performedAttempts = attempt
+		attemptContext, attemptCancel := context.WithTimeout(totalContext, defaultDownloadTimeout)
+		path, version, size, err := c.downloadAgentBinaryOnce(attemptContext, c.http, directory)
+		attemptCancel()
+		if err == nil {
+			return path, version, size, nil
+		}
+		lastErr = err
+		if totalContext.Err() != nil {
+			return "", "", 0, totalContext.Err()
+		}
+		var retryable retryableCoreDownloadError
+		if !errors.As(err, &retryable) || attempt == attempts {
+			break
+		}
+		delay := retryDelay * time.Duration(1<<(attempt-1))
+		timer := time.NewTimer(delay)
+		select {
+		case <-totalContext.Done():
+			timer.Stop()
+			return "", "", 0, totalContext.Err()
+		case <-timer.C:
+		}
+	}
+	if performedAttempts > 1 {
+		return "", "", 0, fmt.Errorf("download Agent binary after %d attempts: %w", performedAttempts, lastErr)
+	}
+	return "", "", 0, lastErr
+}
+
+func (c *Client) downloadAgentBinaryOnce(ctx context.Context, client *http.Client, directory string) (string, string, int64, error) {
 	privateKey, err := authn.DecodePrivateKey(c.creds.PrivateKey)
 	if err != nil {
 		return "", "", 0, err
 	}
-	requestContext, cancel := context.WithTimeout(ctx, 2*time.Minute)
-	defer cancel()
-	request, err := http.NewRequestWithContext(requestContext, http.MethodGet, c.config.ServerURL+"/agent/v1/binary", nil)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, c.config.ServerURL+"/agent/v1/binary", nil)
 	if err != nil {
 		return "", "", 0, err
 	}
 	if err := authn.SignRequest(request, nil, c.creds.AgentID, privateKey, time.Now().UTC()); err != nil {
 		return "", "", 0, err
 	}
-	response, err := c.http.Do(request)
+	response, err := client.Do(request)
 	if err != nil {
-		return "", "", 0, explainTLSError(err)
+		return "", "", 0, retryableCoreDownloadError{err: explainTLSError(err)}
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		contents, _ := io.ReadAll(io.LimitReader(response.Body, 8<<10))
-		return "", "", 0, fmt.Errorf("control plane returned %s: %s", response.Status, strings.TrimSpace(string(contents)))
+		err := fmt.Errorf("control plane returned %s: %s", response.Status, strings.TrimSpace(string(contents)))
+		if response.StatusCode >= 500 || response.StatusCode == http.StatusRequestTimeout ||
+			response.StatusCode == http.StatusTooEarly || response.StatusCode == http.StatusTooManyRequests {
+			return "", "", 0, retryableCoreDownloadError{err: err}
+		}
+		return "", "", 0, err
 	}
 	limit := int64(core.MaxAgentBinaryBytes)
 	if response.ContentLength > limit {
@@ -1017,11 +1065,11 @@ func (c *Client) downloadAgentBinary(ctx context.Context, directory string) (str
 	written, err := io.Copy(io.MultiWriter(temporary, hash), io.LimitReader(response.Body, limit+1))
 	if err != nil {
 		cleanup()
-		return "", "", 0, fmt.Errorf("download Agent binary: %w", err)
+		return "", "", 0, retryableCoreDownloadError{err: err}
 	}
 	if written == 0 || written > limit {
 		cleanup()
-		return "", "", 0, errors.New("downloaded Agent binary has an invalid size")
+		return "", "", 0, retryableCoreDownloadError{err: errors.New("downloaded Agent binary has an invalid size")}
 	}
 	if expected := strings.TrimSpace(response.Header.Get("X-QControlHub-Agent-SHA256")); len(expected) != sha256.Size*2 || !strings.EqualFold(expected, fmt.Sprintf("%x", hash.Sum(nil))) {
 		cleanup()
