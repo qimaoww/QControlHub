@@ -103,6 +103,30 @@ func TestAccountingFieldMutationsWithPostgreSQL(t *testing.T) {
 			if engine == core.EngineShadowsocksRust && compiled.Ports[0].Port != 21002 {
 				t.Fatal("old port mark retained")
 			}
+			if engine != core.EngineShadowsocksRust {
+				for _, enabled := range []bool{true, false, true} {
+					body, _ := json.Marshal(map[string]any{"agent_id": agent.ID, "engine": engine, "tag": "one", "port": 21001, "block_mainland_source": enabled, "block_mainland_destination": enabled, "expected_version": after.Version, "intent": "validate"})
+					r := httptest.NewRequest(http.MethodPut, "/api/v1/access-controls", bytes.NewReader(body))
+					r.Header.Set("Authorization", "Bearer "+token)
+					w := httptest.NewRecorder()
+					New(db, Config{AdminToken: token}).Handler().ServeHTTP(w, r)
+					if w.Code != http.StatusOK {
+						t.Fatalf("access update: %d %s", w.Code, w.Body.String())
+					}
+					after, err = db.AgentConfig(ctx, agent.ID, engine)
+					if err != nil {
+						t.Fatal(err)
+					}
+					compiled, err = serverconfig.PrepareAccounting(engine, after.Content)
+					if err != nil || compiled.Content != after.Content {
+						t.Fatalf("access update left stale outbound mapping: %v", err)
+					}
+					policies := serverconfig.DiscoverMainlandAccessPolicies(engine, after.Content)
+					if len(policies) != 1 || policies[0].BlockMainlandDestination != enabled || policies[0].BlockMainlandSource != enabled {
+						t.Fatalf("access policy changed: %+v", policies)
+					}
+				}
+			}
 		})
 	}
 }
