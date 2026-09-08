@@ -97,6 +97,26 @@ func TestCoreUnitCapabilitySyncerRejectsUnmanagedService(t *testing.T) {
 	}
 }
 
+func TestXrayOutboundMarkCapabilityRecognition(t *testing.T) {
+	variants := managedCapabilityDropInVariants("qagent-xray.service")
+	if len(variants) != 2 || !strings.Contains(string(variants[1]), "CAP_NET_ADMIN") {
+		t.Fatal("marked Xray drop-in must be recognized during managed-service migration")
+	}
+	for _, marked := range []bool{false, true} {
+		capabilities := "cap_net_bind_service"
+		if marked {
+			capabilities += " cap_net_admin"
+		}
+		systemctl := filepath.Join(t.TempDir(), "systemctl")
+		writeExecutable(t, systemctl, "#!/bin/sh\nprintf '%s\\n' 'AmbientCapabilities="+capabilities+"' 'CapabilityBoundingSet="+capabilities+"'\n")
+		syncer := coreUnitCapabilitySyncer{systemctlPath: systemctl, outboundMarks: true}
+		configured, err := syncer.configured(context.Background(), "qagent-xray.service")
+		if err != nil || configured != marked {
+			t.Fatalf("socket mark capability checked incorrectly: configured=%v err=%v", configured, err)
+		}
+	}
+}
+
 func writeExecutable(t *testing.T, path, contents string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(contents), 0o700); err != nil {

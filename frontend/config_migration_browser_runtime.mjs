@@ -47,10 +47,12 @@ export async function testConfigMigrationRuntime(preview = false) {
       assert(test.writes.length===0 && test.tasks.length===0,"canceling migration wrote data");
       test.accept = true;
       const select = document.querySelector('select[aria-label="选择入站、出站或公共配置文件"]');
+      assert(select.options[1].textContent === "a.json", "filename must follow the preset tag, not the server name");
       select.value = "1"; select.dispatchEvent(new Event("change"));
       const input = document.querySelector("[data-code-input]");
-      input.value = input.value.replaceAll("1080","2080");
+      input.value = input.value.replaceAll("1080","2080").replace('"a"','"VLESS-REALITY-443"');
       select.value = "0"; select.dispatchEvent(new Event("change"));
+      assert(select.options[1].textContent === "VLESS-REALITY-443.json", "renaming the preset did not refresh its filename");
       document.querySelector('[data-live-intent="migrate-files"]').click(); await pause();
       assert(test.writes.length===1 && test.tasks.length===1,"migration did not save and submit exactly once");
       assert(test.tasks[0].action==="deploy","migration must use validated rollback-capable deployment");

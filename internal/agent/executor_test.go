@@ -114,10 +114,7 @@ func TestOpenRCSpecsAndServicesUsePrivateQAgentNamespace(t *testing.T) {
 			continue
 		}
 		script := string(contents)
-		capabilities := "capabilities=\"^cap_net_bind_service\""
-		if engine != core.EngineXray {
-			capabilities = "capabilities=\"^cap_net_bind_service,^cap_net_admin\""
-		}
+		capabilities := "capabilities=\"^cap_net_bind_service,^cap_net_admin\""
 		for _, required := range []string{"#!/sbin/openrc-run", "# QControlHub managed OpenRC service:", "supervisor=\"supervise-daemon\"", capabilities, spec.Binary} {
 			if !strings.Contains(script, required) {
 				t.Errorf("OpenRC service %s is missing %q", spec.Service, required)

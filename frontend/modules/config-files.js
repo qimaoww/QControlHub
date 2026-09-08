@@ -34,16 +34,27 @@ function members(text, array = false) {
 }
 const objectText = (map) => `{\n${[...map].map(([key,value]) => `  ${JSON.stringify(key)}: ${value}`).join(",\n")}\n}\n`;
 
+function entryFilename(tag, kind, index, used) {
+  let base = typeof tag === "string" ? tag.replace(/\.json$/, "") : "";
+  base = Array.from(base.replace(/[^\p{L}\p{N}_.-]/gu, "_").replace(/^\.+|\.+$/g, "")).slice(0,48).join("");
+  if (!base) base = `${kind.replace(/s$/, "")}-${index + 1}`;
+  let name = `${base}.json`;
+  for (let suffix = 2; used.has(name); suffix++) name = `${base}-${suffix}.json`;
+  used.add(name);
+  return name;
+}
+
 export function splitConfigFiles(engine, content) {
   if (!["xray", "sing-box"].includes(engine)) return [{path: engine === "mihomo" ? "config.yaml" : "config.json", content}];
   const root = members(content);
-  const files = [{path:"00-common.json", content:""}];
+  const files = [{path:"common.json", content:""}];
   for (const key of ["inbounds", "outbounds"]) {
     if (!root.has(key)) continue;
     const entries = members(root.get(key), true);
+    const used = new Set();
     entries.forEach((entry, i) => {
       members(entry);
-      files.push({path:`${key}/${String(i).padStart(4,"0")}.json`,content:objectText(new Map([[key,`[${entry}]`]]))});
+      files.push({path:`${key}/${entryFilename(JSON.parse(entry).tag, key, i, used)}`,content:objectText(new Map([[key,`[${entry}]`]]))});
     });
     if (entries.length) root.delete(key);
   }
@@ -52,12 +63,17 @@ export function splitConfigFiles(engine, content) {
 }
 
 export function mergeConfigFiles(files) {
-  if (!files.length || files.length > 1025 || files[0].path !== "00-common.json") throw new Error("无效配置文件列表");
+  if (!files.length || files.length > 1025 || !["common.json","00-common.json"].includes(files[0].path)) throw new Error("无效配置文件列表");
   const root = members(files[0].content), lists = new Map();
+  const seen = new Set();
   for (const file of files.slice(1)) {
-    const key = file.path.split("/")[0], entries = lists.get(key) || [];
-    if (!["inbounds","outbounds"].includes(key) || file.path !== `${key}/${String(entries.length).padStart(4,"0")}.json`)
+    const [key, name, extra] = file.path.split("/"), entries = lists.get(key) || [];
+    const validName = files[0].path === "00-common.json"
+      ? file.path === `${key}/${String(entries.length).padStart(4,"0")}.json`
+      : extra === undefined && typeof name === "string" && new TextEncoder().encode(name).length <= 220 && /^[\p{L}\p{N}_-][\p{L}\p{N}_.-]*\.json$/u.test(name);
+    if (!["inbounds","outbounds"].includes(key) || !validName || seen.has(file.path))
       throw new Error("无效配置文件路径或顺序");
+    seen.add(file.path);
     const fragment = members(file.content);
     if (fragment.size !== 1 || !fragment.has(key)) throw new Error(`${file.path} 只能包含 ${key}`);
     const values = members(fragment.get(key), true);
@@ -74,16 +90,18 @@ export function mergeConfigFiles(files) {
   return content;
 }
 
-// Display names are independent of the canonical paths used for merge validation.
-export function configFileDisplayName(path, nodeName = "节点") {
-  const node = String(nodeName || "节点");
-  if (path === "00-common.json") return `${node} · 公共配置.json`;
-  const match = /^(inbounds|outbounds)\/(\d+)\.json$/.exec(path);
-  if (!match) return path;
-  return `${node} · ${match[1] === "inbounds" ? "入站" : "出站"} ${Number(match[2]) + 1}.json`;
+export function configFileDisplayName(path, content) {
+  if (["common.json","00-common.json"].includes(path)) return "公共配置.json";
+  const name = path.split("/").at(-1);
+  try {
+    const key = path.split("/")[0], entry = JSON.parse(content)[key]?.[0];
+    const protocol = entry?.type || entry?.protocol;
+    if (typeof protocol === "string" && protocol) return `${name} · ${protocol}`;
+  } catch { /* Invalid drafts retain their file identity. */ }
+  return name;
 }
 
-export function bindConfigFiles(form, engine, notify, nodeName) {
+export function bindConfigFiles(form, engine, notify) {
   if (!form || !["xray","sing-box"].includes(engine)) return null;
   const editor = form.querySelector("[data-code-editor]"), input = form.querySelector("[data-code-input]");
   if (!editor || !input) return null;
@@ -99,7 +117,7 @@ export function bindConfigFiles(form, engine, notify, nodeName) {
     if (!groups.has(kind)) {
       const group = document.createElement("optgroup"); group.label = kind; groups.set(kind, group); select.append(group);
     }
-    const option = document.createElement("option"); option.value = String(i); option.textContent = configFileDisplayName(file.path, nodeName); groups.get(kind).append(option);
+    const option = document.createElement("option"); option.value = String(i); option.textContent = configFileDisplayName(file.path, file.content); groups.get(kind).append(option);
   }
   const preview = document.createElement("option"); preview.value = "preview"; preview.textContent = "合并预览（只读）"; select.append(preview);
   editor.querySelector(".code-file-meta").append(select);
@@ -117,15 +135,27 @@ export function bindConfigFiles(form, engine, notify, nodeName) {
     select.dispatchEvent(new Event("change", {bubbles:true}));
   });
   const save = () => { if (selected !== "preview" && !readOnly) files[selected].content = input.value; };
+  // Reflect renamed preset tags on navigation, preserving invalid drafts until
+  // the user fixes them. Only the returned merged content is saved/deployed.
+  const refreshNames = () => {
+    try {
+      const renamed = splitConfigFiles(engine, mergeConfigFiles(files));
+      if (renamed.length !== files.length) return;
+      files.forEach((file,i) => {
+        file.path = renamed[i].path;
+        select.querySelector(`option[value="${i}"]`).textContent = configFileDisplayName(file.path, file.content);
+      });
+    } catch { /* A syntax error must not discard a draft or block switching. */ }
+  };
   const controller = {
     content() { save(); return mergeConfigFiles(files); },
-	paths() { return files.map(file => file.path); },
+    paths() { save(); refreshNames(); return files.map(file => file.path); },
     original() { return selected === "preview" ? input.value : originals[selected]; },
     dirty() { save(); return files.some((file,i) => file.content !== originals[i]); },
     reset() { if (selected !== "preview" && !readOnly) input.value = files[selected].content = originals[selected]; },
   };
   select.addEventListener("change", () => {
-    save();
+    save(); refreshNames();
     try {
       const next = select.value === "preview" ? "preview" : Number(select.value);
       const content = next === "preview" ? mergeConfigFiles(files) : files[next].content;

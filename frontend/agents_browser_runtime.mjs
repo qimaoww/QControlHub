@@ -1410,6 +1410,18 @@ try {
       assert.equal(tab.offsetWidth,140,"engine buttons must have fixed width");
       assert.equal(tab.offsetHeight,40,"engine buttons must have fixed height");
     });
+    if (innerWidth <= 820) {
+      const bar = document.querySelector(".live-engine-bar").getBoundingClientRect();
+      const tab = document.querySelector(".live-engine-tab").getBoundingClientRect();
+      assert.ok(tab.top-bar.top >= 15.5 && bar.bottom-tab.bottom >= 15.5,"mobile tabs touch section dividers");
+      const toolbar = document.querySelector(".code-editor-toolbar").getBoundingClientRect();
+      const file = document.querySelector(".code-file-meta").getBoundingClientRect();
+      const meta = document.querySelector(".code-editor-meta").getBoundingClientRect();
+      assert.ok(file.top-toolbar.top >= 15.5 && toolbar.bottom-meta.bottom >= 15.5,`mobile file controls touch section dividers: ${file.top-toolbar.top}/${toolbar.bottom-meta.bottom}`);
+      const footer = document.querySelector(".code-workspace>footer").getBoundingClientRect();
+      const actions = document.querySelector(".code-workspace>footer>div").getBoundingClientRect();
+      assert.ok(actions.top-footer.top >= 15.5 && footer.bottom-actions.bottom >= 15.5,"mobile actions touch section dividers");
+    }
   }
   else if (mode === "bbr-preview") await new Promise(() => {});
   else if (mode.startsWith("bbr")) await testSystemTCPRuntime();

@@ -11,7 +11,7 @@ import (
 )
 
 func ensureOpenRCOutboundMarkCapability(service string) error {
-	if service != "qagent-mihomo" && service != "qagent-shadowsocks-rust" && service != "qagent-sing-box" {
+	if service != "qagent-mihomo" && service != "qagent-shadowsocks-rust" && service != "qagent-sing-box" && service != "qagent-xray" {
 		return errors.New("outbound marks require a managed proxy service")
 	}
 	path := filepath.Join(openRCInitRoot, service)

@@ -25,7 +25,9 @@ func writeManagedConfigFiles(engine core.Engine, configPath, content string, met
 		return err
 	}
 	sum := sha256.Sum256([]byte(content))
-	name := "sources-" + hex.EncodeToString(sum[:])
+	// Version the derived layout so existing numbered bundles remain immutable
+	// and rollback/upgrade cannot mistake them for the new named fragments.
+	name := "sources-v2-" + hex.EncodeToString(sum[:])
 	directory := filepath.Dir(configPath)
 	root, err := os.OpenRoot(directory)
 	if err != nil {

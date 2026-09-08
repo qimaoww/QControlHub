@@ -68,7 +68,10 @@ func TestConfigFilesVersionedWithPostgreSQL(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &bundle); err != nil || response.Code != 200 || len(bundle.Files) != 3 {
 		t.Fatalf("read files: %d %s %v", response.Code, response.Body.String(), err)
 	}
-	bundle.Files[1].Content = `{"inbounds":[{"tag":"a","port":2080}]}`
+	if bundle.Files[1].Path != "inbounds/a.json" || bundle.Files[2].Path != "outbounds/direct.json" {
+		t.Fatalf("preset names not exposed: %+v", bundle.Files)
+	}
+	bundle.Files[1].Content = `{"inbounds":[{"tag":"VLESS-REALITY-443","port":2080}]}`
 	body := map[string]any{"name": "files", "version": saved.Version, "files": bundle.Files}
 	response = request(http.MethodPut, body, true)
 	if response.Code != 200 {
@@ -81,6 +84,10 @@ func TestConfigFilesVersionedWithPostgreSQL(t *testing.T) {
 	got, err := db.AgentConfig(ctx, agent.ID, core.EngineXray)
 	if err != nil || got.Version != saved.Version+1 || !strings.Contains(got.Content, "2080") || !strings.Contains(got.Content, "9007199254740993") {
 		t.Fatalf("stored bundle: %+v %v", got, err)
+	}
+	response = request(http.MethodGet, nil, true)
+	if err := json.Unmarshal(response.Body.Bytes(), &bundle); err != nil || response.Code != 200 || bundle.Files[1].Path != "inbounds/VLESS-REALITY-443.json" {
+		t.Fatalf("saved rename not reflected: %d %s %v", response.Code, response.Body.String(), err)
 	}
 	bundle.Files[1].Path = "../escape.json"
 	body["version"] = got.Version
