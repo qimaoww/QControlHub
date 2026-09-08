@@ -5,6 +5,7 @@ import (
 	"errors"
 	"github.com/qimaoww/qcontrolhub/internal/core"
 	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
+	"strings"
 	"testing"
 	"time"
 )
@@ -16,6 +17,9 @@ func TestVerifiedListenerProtocols(t *testing.T) {
 		want    core.TrafficProtocol
 	}{
 		{core.EngineXray, `{"inbounds":[{"port":443,"protocol":"vless"}]}`, core.TrafficProtocolTCP},
+		{core.EngineXray, `{"inbounds":[{"port":443,"protocol":"vless","streamSettings":{"network":"xhttp","security":"tls","tlsSettings":{"alpn":["h3"]}}}]}`, core.TrafficProtocolUDP},
+		{core.EngineXray, `{"inbounds":[{"port":443,"protocol":"vless","streamSettings":{"network":"splithttp","security":"tls","tlsSettings":{"alpn":["h2","http/1.1"]}}}]}`, core.TrafficProtocolTCP},
+		{core.EngineXray, `{"inbounds":[{"port":443,"protocol":"vless","streamSettings":{"network":"xhttp","security":"tls","tlsSettings":{"alpn":["h3","h2"]}}}]}`, core.TrafficProtocolTCP},
 		{core.EngineXray, `{"inbounds":[{"port":443,"protocol":"vmess","streamSettings":{"network":"kcp"}}]}`, core.TrafficProtocolUDP},
 		{core.EngineXray, `{"inbounds":[{"port":443,"protocol":"dokodemo-door","settings":{"network":"udp"}}]}`, core.TrafficProtocolUDP},
 		{core.EngineXray, `{"inbounds":[{"port":443,"protocol":"vless"},{"port":443,"protocol":"vmess"}]}`, core.TrafficProtocolBoth},
@@ -28,6 +32,36 @@ func TestVerifiedListenerProtocols(t *testing.T) {
 		got := accountingListenerProtocols(tc.engine, tc.content)[443]
 		if got != tc.want {
 			t.Errorf("%s %s got %s want %s", tc.engine, tc.content, got, tc.want)
+		}
+		if tc.engine == core.EngineXray && (strings.Contains(tc.content, "xhttp") || strings.Contains(tc.content, "splithttp")) {
+			endpoints := serverconfig.DiscoverTrafficPorts(tc.engine, tc.content)
+			if len(endpoints) != 1 || endpoints[0].Protocol != tc.want {
+				t.Fatalf("discovery and accounting disagree: %+v", endpoints)
+			}
+		}
+	}
+}
+
+func TestSingleTransportInitialFailurePreservesDiagnostic(t *testing.T) {
+	for _, protocol := range []core.TrafficProtocol{core.TrafficProtocolTCP, core.TrafficProtocolUDP} {
+		m, _, _, p := newAccuracyTrafficManager(t)
+		p.Protocol = protocol
+		if err := m.SetPolicies(context.Background(), []core.PortTrafficPolicy{p}, p.AgentID); err != nil {
+			t.Fatal(err)
+		}
+		m.nativeSource = func(context.Context, core.Engine) (nativeAccountingSnapshot, error) {
+			return nativeAccountingSnapshot{}, errors.New("API connection refused")
+		}
+		m.collect(context.Background(), false)
+		if got := m.Snapshot()[0]; !strings.Contains(got.EnforcementError, "API connection refused") || strings.Contains(got.EnforcementError, "exclusive listener") {
+			t.Fatalf("diagnostic lost: %+v", got)
+		}
+		m.nativeSource = func(context.Context, core.Engine) (nativeAccountingSnapshot, error) {
+			return nativeAccountingSnapshot{}, nil
+		}
+		m.collect(context.Background(), false)
+		if got := m.Snapshot()[0]; strings.Contains(got.EnforcementError, "API connection refused") {
+			t.Fatal("stale source error retained")
 		}
 	}
 }

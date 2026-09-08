@@ -113,6 +113,18 @@ func discoverTrafficList(value any, engine core.Engine, nameField, typeField, po
 			if settings, ok := entry["settings"].(map[string]any); ok {
 				protocol = trafficProtocol(settings["network"], protocol)
 			}
+			stream := mapValue(entry["streamSettings"])
+			if kind == "vless" || kind == "vmess" || kind == "trojan" {
+				switch stringValue(stream["network"]) {
+				case "quic", "kcp":
+					protocol = core.TrafficProtocolUDP
+				case "xhttp", "splithttp":
+					alpn, _ := mapValue(stream["tlsSettings"])["alpn"].([]any)
+					if stream["security"] == "tls" && len(alpn) == 1 && alpn[0] == "h3" {
+						protocol = core.TrafficProtocolUDP
+					}
+				}
+			}
 		}
 		result = append(result, trafficEndpoint(engine, name, port, protocol))
 	}

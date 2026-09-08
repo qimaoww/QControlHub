@@ -379,6 +379,12 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 		}
 		if manager.nativeSource != nil && !nativeAllowed {
 			record.AccountingError = "single-protocol policy uses listener-only accounting; exclusive listener transport could not be verified"
+			if sourceErr := nativeErrors[record.Policy.Engine]; sourceErr != nil {
+				record.AccountingError = sourceErr.Error()
+				if len(record.AccountingError) > 400 {
+					record.AccountingError = record.AccountingError[:400]
+				}
+			}
 		}
 		if !record.PeriodStart.Equal(periodStart) || !record.PeriodEnd.Equal(periodEnd) {
 			record.ReceivedBytes, record.SentBytes = 0, 0

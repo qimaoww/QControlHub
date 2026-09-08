@@ -1359,6 +1359,20 @@ try {
     assert.ok(document.querySelector(".traffic-status-dialog").open,"status button should open dialog");
     const details = document.querySelector(".traffic-accounting-details"); details.querySelector("summary").click();
     assert.ok(details.open && details.textContent.includes("single-protocol"),"original diagnostic inaccessible");
+    if (!new URLSearchParams(location.search).has("preview")) {
+      const dialog = document.querySelector(".traffic-status-dialog");
+      const policy = testAPI.trafficPolicies[0];
+      policy.enforcement_error = "API connection refused";
+      await waitFor(()=>dialog.textContent.includes("API connection refused"),"open status dialog did not refresh failure");
+      assert.ok(dialog.open && dialog.querySelector("details").open,"refresh closed dialog or details");
+      policy.enforcement_error = "";
+      policy.accounting = {source:"core-api",client_received:1024,client_sent:2048,target_received:4096,target_sent:8192};
+      await waitFor(()=>dialog.textContent.includes("双链路统计") && !dialog.textContent.includes("API connection refused"),"open dialog did not recover");
+      const previousLegs = dialog.querySelector(".traffic-accounting-legs").textContent;
+      policy.accounting.target_sent = 16384;
+      await waitFor(()=>dialog.querySelector(".traffic-accounting-legs").textContent !== previousLegs,"open dialog counters did not refresh");
+      assert.ok(dialog.open && dialog.querySelector("details").open,"counter refresh closed dialog or details");
+    }
     details.querySelector("summary").click();
     document.querySelector("[data-traffic-status-close]").click();
     assert.ok(!document.querySelector(".traffic-status-dialog").open,"status dialog should close");

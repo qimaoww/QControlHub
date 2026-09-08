@@ -42,7 +42,7 @@ export function renderTrafficAccounting(policy, esc, bytes) {
       <div class="traffic-accounting-detail-body">${dual ? `<p>本计量代次累计，不等同于本月总量</p>${legs}` : ""}${raw ? `<p>Agent 原始诊断</p><pre>${esc(raw)}</pre>` : ""}</div>
     </details>` : ""}
   </section>`;
-  return `<button class="button small traffic-status-button ${tone}" type="button" data-traffic-status-open="${esc(policy.id)}" aria-haspopup="dialog"><i aria-hidden="true"></i>状态${failed ? "异常" : ""}</button><dialog class="traffic-status-dialog" data-traffic-status-dialog="${esc(policy.id)}" aria-label="统计状态"><header><div><p class="eyebrow">统计状态</p><h2>${esc(policy.name || "端口统计")}</h2></div><button class="deploy-command-close" type="button" data-traffic-status-close aria-label="关闭统计状态">×</button></header>${content}</dialog>`;
+  return `<button class="button small traffic-status-button ${tone}" type="button" data-traffic-status-open="${esc(policy.id)}" aria-haspopup="dialog"><i aria-hidden="true"></i>状态${failed ? "异常" : ""}</button><dialog class="traffic-status-dialog" data-refresh-live data-traffic-status-dialog="${esc(policy.id)}" aria-label="统计状态"><header><div><p class="eyebrow">统计状态</p><h2>${esc(policy.name || "端口统计")}</h2></div><button class="deploy-command-close" type="button" data-traffic-status-close aria-label="关闭统计状态">×</button></header>${content}</dialog>`;
 }
 
 export const trafficCardIdentity = (item) =>

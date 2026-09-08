@@ -43,7 +43,11 @@ func exclusiveXrayProtocols(engine core.Engine, content string) map[int]core.Tra
 				Network string `json:"network"`
 			} `json:"settings"`
 			Stream struct {
-				Network string `json:"network"`
+				Network  string `json:"network"`
+				Security string `json:"security"`
+				TLS      struct {
+					ALPN []string `json:"alpn"`
+				} `json:"tlsSettings"`
 			} `json:"streamSettings"`
 		} `json:"inbounds"`
 	}
@@ -60,8 +64,13 @@ func exclusiveXrayProtocols(engine core.Engine, content string) map[int]core.Tra
 		switch inbound.Protocol {
 		case "vless", "vmess", "trojan":
 			switch inbound.Stream.Network {
-			case "", "tcp", "raw", "ws", "grpc", "http", "h2", "httpupgrade", "splithttp", "xhttp":
+			case "", "tcp", "raw", "ws", "grpc", "http", "h2", "httpupgrade":
 				ports[inbound.Port] = core.TrafficProtocolTCP
+			case "splithttp", "xhttp":
+				ports[inbound.Port] = core.TrafficProtocolTCP
+				if inbound.Stream.Security == "tls" && len(inbound.Stream.TLS.ALPN) == 1 && inbound.Stream.TLS.ALPN[0] == "h3" {
+					ports[inbound.Port] = core.TrafficProtocolUDP
+				}
 			case "quic", "kcp":
 				ports[inbound.Port] = core.TrafficProtocolUDP
 			}
