@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
+	"github.com/qimaoww/qcontrolhub/internal/store"
 )
 
 type blockingClientAccessSource struct {
@@ -31,23 +32,15 @@ func (source *blockingClientAccessSource) ListAgents(ctx context.Context) ([]cor
 	return nil, source.wait(ctx, "agents")
 }
 
-func (source *blockingClientAccessSource) LatestDeployments(ctx context.Context) ([]core.Deployment, error) {
-	return nil, source.wait(ctx, "deployments")
-}
-
-func (source *blockingClientAccessSource) ListAgentConfigs(ctx context.Context) ([]core.Config, error) {
-	return nil, source.wait(ctx, "agent-configs")
-}
-
-func (source *blockingClientAccessSource) ListConfigs(ctx context.Context) ([]core.Config, error) {
-	return nil, source.wait(ctx, "archive-configs")
+func (source *blockingClientAccessSource) DeployedConfigs(ctx context.Context) ([]store.DeployedConfig, error) {
+	return nil, source.wait(ctx, "deployed-configs")
 }
 
 func TestLoadClientAccessSnapshotStartsIndependentReadsTogether(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	source := &blockingClientAccessSource{
-		started: make(chan string, 4),
+		started: make(chan string, 2),
 		release: make(chan struct{}),
 	}
 	done := make(chan error, 1)
@@ -56,8 +49,8 @@ func TestLoadClientAccessSnapshotStartsIndependentReadsTogether(t *testing.T) {
 		done <- err
 	}()
 
-	started := make(map[string]bool, 4)
-	for len(started) < 4 {
+	started := make(map[string]bool, 2)
+	for len(started) < 2 {
 		select {
 		case name := <-source.started:
 			started[name] = true

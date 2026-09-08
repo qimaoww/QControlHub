@@ -1,6 +1,7 @@
 /.env
 /.env.bak.*
 /.env.tmp.*
+/.qcontrolhub-update.*/
 /docker-compose.external.yml
 /docker-compose.secrets.yml
 /.secrets/

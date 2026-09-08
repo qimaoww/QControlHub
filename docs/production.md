@@ -2,6 +2,24 @@
 
 本文采用“单机 Docker Compose API 控制面 + 独立 SPA + 宿主机 Nginx + 多台 systemd/OpenRC Agent”的基线。只有 `qcontrol-web` 发布到回环地址，Nginx 负责公网 TLS；控制面 API 只在 Compose 内部网络可达，控制面到 PostgreSQL 使用项目内部后端网络，数据库持久化到命名卷。
 
+## BBR / TCP 调优页面
+
+升级控制面、Web 和 Agent 后，侧栏“TCP 调优”提供独立的 **BBR / TCP 调优** 页面。控制面 schema 升至 v42（在主线 v41 性能优化基础上增加任务 `tcp_settings` 和三个系统级动作），升级前按现有流程备份数据库。Agent 无需重装服务即可使用此功能：systemd 模式通过受保护的当前 Agent 可执行文件启动短时 helper，OpenRC 模式直接执行相同受限操作；不会放宽长期运行的 Agent 服务沙箱。
+
+状态来自 `/proc/sys/net` 和只读的 `tc -j qdisc show`，与是否在面板开启无关。没有可用 `tc` 时仍展示系统参数，实际网卡队列显示“未知”；只为查看队列可由管理员安装发行版的 iproute2。采集不加载模块、不改参数、不创建配置文件。页面沿用全局主题、字体比例、确认弹窗、节点导航及任务提示；编辑草稿在本次页面会话中保留，切换节点或自动刷新不会覆盖。
+
+节点卡片中的“生效参数与网卡队列”和“自定义 BBR / TCP 参数”均以弹窗打开，不再展开卡片。可通过关闭按钮、Esc 或点击遮罩退出；关闭编辑弹窗保留草稿，提交成功后关闭，失败时在弹窗内提示。后台刷新保留弹窗、输入焦点和滚动位置，同时更新实际参数及节点可操作状态。
+
+自定义编辑支持拥塞算法、默认队列、TCP 收发缓冲区、核心缓冲区上限、SYN/监听/网卡队列、MTU 探测、ECN、Fast Open、SACK 和窗口缩放；服务端和 Agent 共用字段白名单及数值校验。算法选项不保证系统内核已提供，实际写入失败会报告原因并回滚，不下载安装新内核或第三方模块。系统原有参数超出本面板编辑范围时仍原样显示，不会静默归一化覆盖。
+
+配置固定保存到 `/etc/sysctl.d/90-qcontrolhub-bbr.conf`，不写 `/etc/sysctl.conf`，不运行 `sysctl --system`。新配置与已有面板托管项合并，未选择的项目保持不变；文件被外部改写或替换成符号链接时拒绝覆盖。启用/关闭快捷按钮分别设置 `bbr + fq` / `cubic + fq`，保留其他已托管 TCP 项。写入失败、回读不一致、持久化失败会尝试回滚，并保留有限数量的原文件备份。进程被强制终止或主机掉电不能保证事务完成；下次采集会展示当前值与保存值的差异。
+
+这些参数不是“越大越快”，应根据内存、并发连接和网络条件选择。本功能不重启网络、不修改现有网卡队列，也不保证现有 socket 切换拥塞算法；应用仍可为 socket 指定算法。默认队列与网卡当前队列分开展示。Linux 4.20 及以后 BBR 不严格要求 `fq`，不能仅因为网卡是 `fq_codel/noqueue/mq` 就判定 BBR 未启用。参见 [Linux TCP 参数文档](https://kernel.org/doc/html/latest/networking/ip-sysctl.html)、[默认队列语义](https://www.kernel.org/doc/html/latest/admin-guide/sysctl/net.html) 和 [BBR 项目说明](https://github.com/google/bbr/blob/master/Documentation/bbr-quick-start.md)。
+
+系统启动通常加载 `sysctl.d`，但其他更高优先级配置或网络服务仍可能覆盖本文件。页面“已保存”不等于“已验证重启后生效”；升级后及重启后应核对实测值。回退参数应显式填写原值并应用；本功能不删除或改写其他工具创建的 sysctl 文件。
+
+默认队列也可自定义选择 `fq_pie`（按流排队并使用 PIE 控制队列延迟），前提是发行版内核提供 `sch_fq_pie`。它不是 `fq` 的升级版，也不保证更快；快捷启用仍使用 BBR 官方示例的 `fq`，需要 `fq_pie` 时在自定义参数中显式选择。仅修改默认队列不会替换当前网卡队列。参见 [Linux FQ-PIE 实现](https://github.com/torvalds/linux/blob/master/net/sched/sch_fq_pie.c)。
+
 ## 1. 使用部署脚本启动控制面
 
 建议使用受支持的 Linux 发行版，并预先安装 Docker Engine、Docker Compose v2、curl、OpenSSL、Nginx 与证书管理工具。防火墙只对管理来源和 Agent 网络开放 TCP 443；不要开放 8080 或 5432。
@@ -12,7 +30,7 @@
 bash <(curl -fsSL "https://raw.githubusercontent.com/qimaoww/qcontrolhub/main/deploy/quick-start.sh")
 ```
 
-该命令不克隆源码仓库，只把 `deploy/quick-start.sh` 和生产 `docker-compose.yml` 保存到当前目录下的 `qcontrolhub`。需要固定其他状态目录时，先设置 `QCH_INSTALL_DIR`；后续再次执行同一命令会先下载并校验临时文件，再替换这两个运行文件，同时复用目录内的 `.env`、`.secrets` 和数据库卷。
+该命令不克隆源码仓库，只把 `deploy/quick-start.sh` 和生产 `docker-compose.yml` 保存到当前目录下的 `qcontrolhub`。需要固定其他状态目录时，可设置 `QCH_INSTALL_DIR`，或在交互式菜单的“设置目录”中选择；后者会保存到当前用户配置，后续再次执行远程一键命令时直接复用为一键安装目录。再次执行同一命令会先下载并校验临时文件，再替换该目录中的这两个运行文件，同时复用目录内的 `.env`、`.secrets` 和数据库卷；显式设置 `QCH_INSTALL_DIR` 时以该值为准。
 
 脚本首先显示管理菜单：安装/重新配置、更新现有部署、卸载服务。卸载默认只移除容器和网络，保留 `.env`、`.secrets` 与 PostgreSQL 命名卷。选择安装后再选择数据库模式；新建单机控制面使用内置 PostgreSQL，它会通过 Compose 启动数据库、控制面和独立 Web 前端。也可以跳过交互，明确指定操作和数据库模式：
 
@@ -33,13 +51,15 @@ bash <(curl -fsSL "https://raw.githubusercontent.com/qimaoww/qcontrolhub/main/de
 bash <(curl -fsSL "https://raw.githubusercontent.com/qimaoww/qcontrolhub/main/deploy/quick-start.sh") -o uninstall
 ```
 
-部署完成后，脚本会显示访问地址、仅本次可见的管理员 token、`.env` 路径、密钥目录以及停止服务和查看日志的命令。请立即把管理员 token 保存到密码管理器：脚本不会把原文写入磁盘，`.env` 只保存 `QCH_ADMIN_TOKEN_SHA256`。配置加密 keyring 位于宿主机权限为 `0700` 的 `.secrets` 目录，通过生成的 `docker-compose.secrets.yml` 只读挂载，不会进入 `.env` 或容器环境。重复执行默认复用现有摘要和 keyring；需要轮换管理员 token 与应用密钥时运行：
+部署完成后，脚本会显示访问地址、仅本次可见的管理员 token、`.env` 路径、密钥目录以及停止服务和查看日志的命令。请立即把管理员 token 保存到密码管理器：新安装不会把原文写入磁盘，`.env` 只保存 `QCH_ADMIN_TOKEN_SHA256`。配置加密 keyring 位于宿主机权限为 `0700` 的 `.secrets` 目录，通过生成的 `docker-compose.secrets.yml` 只读挂载。旧外部部署的普通更新不会将原有环境变量凭据转换成摘要或 secret 文件。内置模式需要显式轮换管理员 token 与应用密钥时运行：
 
 ```bash
 bash <(curl -fsSL "https://raw.githubusercontent.com/qimaoww/qcontrolhub/main/deploy/quick-start.sh") -o update -f
 ```
 
 `-f` 会生成并仅显示一次新的管理员 token，同时轮换当前应用密钥；数据库密码保持不变。脚本会在私有密钥目录中备份 keyring，并把原配置加密密钥按新到旧顺序加入 previous-key 文件，因此旧密文仍可读取；确认旧数据已迁移或删除后再清理旧密钥。`.env` 备份会清空旧版明文 token 和配置密钥字段。
+
+以上 `-f` 维护流程只用于内置模式。外部模式拒绝 `-f`，普通更新不轮换管理员 token、配置加密密钥或 previous-key 列表。
 
 部署后检查 `.env` 中的生产设置：
 
@@ -115,6 +135,8 @@ curl --fail https://qcontrolhub.example.com/healthz
 Nginx 示例按真实客户端 IP 对 `/api/v1/auth/login` 和 `/agent/v1/enroll` 做额外限速。控制面仅在直接 TCP 对端匹配 `QCH_TRUSTED_PROXY_CIDRS` 时解析 `X-Forwarded-For`，并从右向左剥离可信代理。官方 Compose 将 `qcontrol-web` 和宿主入口各自固定为一个精确信任端点；不要删除其中任何一跳，也不要把整个私网或 `0.0.0.0/0` 加入该列表。
 
 Agent 使用 `/agent/v1/connect` 的长期 WSS 会话。Nginx 示例已转发 `Upgrade`/`Connection`，并把上游读取空闲超时提高到一小时；删除这些设置会导致 Agent 无法升级或在无任务时周期性断线。
+
+每次 WSS 握手的总超时为 30 秒，覆盖 TCP/TLS 连接及等待 HTTP 升级响应；这个超时不会限制已经建立的会话寿命。瞬时网络错误会按 1、2、4、8、16、30 秒退避持续重试，不设次数上限。会话读写失败会立即取消该会话并释放堵塞的心跳/指标发送队列，再进入重连；不会因此取消正在执行的内核任务。日志中的 `WSS connection lost` 和 `reconnect_in` 可用于核对下一次重试时间；身份被永久拒绝的处理见下文，仍与网络故障区分。
 
 双栈节点若某一族只在 NAT 后提供私网接口地址，控制面无法从经 CDN/反向代理的 WSS 跳点安全推断该族出口。默认 managed probe 按族使用有序端点：IPv4 先访问 `https://api.ipify.org/`，失败后才访问同族 `https://4.ident.me`；IPv6 先访问 `https://api6.ipify.org`，失败后才访问同族 `https://6.ident.me`。ipify 的公开应用实现依赖受信前置设施提供的 `X-Forwarded-For`，ident.me handler 使用 `RemoteAddr`；两者都会看到节点公网 IP，ident.me 还可能为少量运行诊断和统计保留/采样来源 IP 信息，不能宣称零日志。其公开说明见 [ident.me API](https://api.ident.me/)、[ident.me 开源 HTTP handler](https://github.com/xmit-co/ident.me/blob/main/backend/http/main.go) 及 [ipify 开源应用](https://github.com/rdegges/ipify-api)。若运维不允许向公共 echo 服务发出节点出口请求，可将控制面 `QCH_AGENT_PUBLIC_IP_PROBE_ENABLED=false` 全局关闭；关闭后两族 endpoint 链均为空、不会访问四个服务，并按既有语义清除 stale 值。也可显式设置 `QCH_AGENT_PUBLIC_IP_PROBE_IPV4_ENDPOINT`、`QCH_AGENT_PUBLIC_IP_PROBE_IPV6_ENDPOINT` 覆盖对应族的完整默认链（不再暗留公共 fallback），及 `QCH_AGENT_PUBLIC_IP_PROBE_INTERVAL`（`1m`–`24h`，默认 `5m`）。未设置或设为空的 endpoint 使用对应默认链；`false`/`0` 关闭值在直接运行和 Compose 中语义一致。fallback 仅允许上述同族 ident.me URL；失败不会静默切换 Cloudflare trace、ip.sb、其他公共 API、控制面/WSS/CDN 或中继。
 
@@ -305,6 +327,8 @@ sudo rm /var/lib/qcontrolhub/agent-state.json
 
 使用脚本的 `external` 模式，它会从终端读取 `QCH_DATABASE_URL` 并生成 `docker-compose.external.yml`：
 
+本地和远程数据库的性能优化、连接池参数及 schema 41 索引升级注意事项见 [本地与远程 PostgreSQL 性能](performance.md)。
+
 ```bash
 bash <(curl -fsSL "https://raw.githubusercontent.com/qimaoww/qcontrolhub/main/deploy/quick-start.sh") -m external
 ```
@@ -315,7 +339,17 @@ bash <(curl -fsSL "https://raw.githubusercontent.com/qimaoww/qcontrolhub/main/de
 postgresql://qcontrolhub:URL_ENCODED_PASSWORD@db.example.com:5432/qcontrolhub?sslmode=verify-full&sslrootcert=/run/secrets/db-ca.pem
 ```
 
-脚本生成的外部数据库 Compose 不会启动内置 `postgres` 服务，并设置 `QCH_ALLOW_INSECURE_DATABASE=false`。它仍使用与 bundled 模式相同的专用代理网络、固定 `qcontrol-web`/控制面地址和两项精确信任列表；数据库改为外部连接不会改变 WSS 来源地址解析边界。若连接串引用自定义 CA 文件，还需要通过站点级 Compose override 将 CA 以只读方式挂载到控制面容器。重复运行脚本会保留自定义代理网络值，并为旧环境补齐缺失的 `qcontrol-web` 精确信任项。
+脚本仍提供 `bundled` 与 `external` 两种模式，更新/卸载默认识别现有部署。只有 external 使用的 `docker-compose.external.yml` 不包含本地 `postgres` 服务、数据库数据卷或 PostgreSQL 依赖；控制面直接读取原 `QCH_DATABASE_URL`，不会从 `POSTGRES_*` 重新拼接连接串。新安装默认设置 `QCH_ALLOW_INSECURE_DATABASE=false`，更新原样保留该值。两个外部模式应用镜像固定为 `latest`，不创建控制面 systemd 服务，容器继续通过 `restart: unless-stopped` 自动恢复。
+
+首次 external 安装会询问加入的 Docker 网络：直接回车使用原来的 Compose 项目网络，也可输入已有网络名，或通过 `-n NETWORK` 非交互指定。选择保存在 `QCH_DOCKER_NETWORK`；自定义网络不存在时终止，不会擅自创建网络。默认项目网络沿用固定代理地址；自定义网络使用其地址分配策略，不注入默认网段或宽泛信任 CIDR。需要转发真实客户端 IP 时，应按实际拓扑配置精确的 `QCH_TRUSTED_PROXY_CIDRS`。监听地址/端口仍读取 `QCH_BIND_ADDRESS` 和 `QCH_PORT`，不固化站点专用网络、端口或安装目录。
+
+external 更新拒绝 `-d`、`-a`、`-n`、`-f` 配置变更参数，并逐字节保留完整 `.env`。特别是 `QCH_DATABASE_URL`、`QCH_ADMIN_TOKEN`、`QCH_ADMIN_TOKEN_SHA256`、`QCH_CONFIG_ENCRYPTION_KEY`、`QCH_CONFIG_ENCRYPTION_PREVIOUS_KEYS`、`QCH_ALLOW_INSECURE_DATABASE` 不会被清空、转换或重新生成。连接串的远程地址、用户名、密码、数据库名及 SSL/query 参数均按原值复用。旧版只读 secret-file keyring 继续使用，不会重新生成或迁移到环境变量。
+
+更新在现有 Compose 上合并应用镜像及环境变量引用，保留已有网络、端口、CA 挂载等配置，不重新生成整套拓扑。配置文件中的变量引用不会被展开成明文凭据。external Compose 命令会排除当前 shell 对部署变量的覆盖，确保数据库与凭据来自指定 `.env`；回滚同样遵循这一规则。更新/回滚仅重建两个应用服务，使用 `--no-build --pull never --no-deps` 防止重新构建、再次拉取镜像或启动其他服务；回滚固定读取保存的旧镜像 ID。
+
+更新前检查原连接串及 `/healthz`、`/readyz`，保存完整旧 Compose、`.env` 和正在使用的镜像；依次拉取 control-plane、qcontrol-web 的 `latest`，运行 `docker compose config --quiet`，然后 `up -d --force-recreate`，最后检查两个健康端点。拉取或配置校验失败时不重建原容器；重建或健康检查失败时恢复旧配置和旧镜像并重启原版本，恢复失败则保留回滚材料并报错。
+
+此回滚仅覆盖应用配置和镜像，不回滚数据库。脚本不执行数据库搬迁、清空或独立初始化命令；控制面原有的自动 schema 初始化/升级行为保持不变，因此首次安装空库仍然可用，但跨 schema 版本更新前必须备份并验证恢复方案。自定义 CA、挂载等站点配置应保留在独立 override，并由运维显式带入其部署命令；脚本不会自动合并任意站点 override。
 
 ## 6. 监控建议
 

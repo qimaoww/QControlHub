@@ -4,6 +4,12 @@ QControlHub 的安全边界包括管理员、控制面、PostgreSQL、反向代�
 
 ## 身份与鉴权
 
+### 系统 TCP 调优边界
+
+BBR / TCP 调优同时需要 `agents.manage` 和 `tasks.execute`，读取状态只需 `agents.read`；通用任务创建和重试入口均执行权限校验。参数通过任务中的 `tcp_settings` 传递，API 与 Agent 使用同一白名单和取值边界，不能下发任意 sysctl 键、shell、路径或模块加载命令。审计与任务结果保留动作、节点和参数快照。新动作必须由当前连接的 Agent 心跳声明 `system-bbr-v1` 才可下发；节点降级后不继续运行不兼容任务。
+
+systemd helper 保留 `ProtectSystem=strict`、`NoNewPrivileges`，仅有 `CAP_NET_ADMIN`，整个 `/proc/sys` 只读，只放行本次选中的固定参数文件和 `/etc/sysctl.d`。使用受保护的 Agent 本身执行固定 utility，无 shell、无任意命令。它有独立超时和跨进程锁，不改变常驻 Agent 的服务单元。OpenRC 复用相同校验和事务，遵循宿主机权限。常规失败恢复原参数和原托管文件；强制杀进程/掉电不保证回滚完成，需核对实际状态。
+
 ### 管理 API
 
 - `/api/v1/*` 要求 `Authorization: Bearer <QCH_ADMIN_TOKEN>`。
@@ -44,6 +50,7 @@ QControlHub 的安全边界包括管理员、控制面、PostgreSQL、反向代�
 - `deploy/quick-start.sh -f` 会备份 keyring、生成新的当前密钥，并把旧密钥按新到旧顺序放入 previous-key 文件。确认旧密文均已自然重写或删除后再移除旧密钥；日志和错误不会打印密钥或凭据。
 - PostgreSQL 密码和管理员 token 原文应进入密码管理器或密钥管理服务，不能提交到 Git；`.secrets` 目录及其备份必须纳入加密备份与主机访问控制。
 - 轮换管理员 token：运行部署脚本的 `-f` 流程、保存仅显示一次的新 token，并重启控制面；重启同时使现有 Web 会话失效。
+- 上述脚本轮换流程适用于内置数据库模式。外部数据库更新保留原 `.env` 和既有 keyring，不轮换、不转换旧明文凭据；其完整回滚备份位于权限受限的临时目录，回滚成功后清理，失败时保留用于人工恢复。普通应用回滚不能替代数据库备份。
 - 每个添加节点凭证只能注册它绑定的节点名称；重装会原位替换旧公钥并关闭旧连接。凭证无有效期，必须在不再需要重装时删除添加记录。
 - Agent 完成注册后，从 `/etc/qcontrolhub/agent.env` 删除 `QCH_ENROLLMENT_TOKEN`，降低主机进程环境和备份中的暴露面。
 - 若 Agent 私钥疑似泄露，清除远端状态文件并重新执行该节点的添加命令，控制面会替换旧公钥；若添加凭证也疑似泄露，应先删除添加记录再生成新命令。

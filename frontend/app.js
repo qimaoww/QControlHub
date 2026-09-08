@@ -10,6 +10,7 @@ import { installCoreLogs } from "./modules/core-logs.js";
 import { installTasks } from "./modules/tasks.js";
 import { installTraffic } from "./modules/traffic.js";
 import { installAccessControl } from "./modules/access-control.js";
+import { installSystemBBR } from "./modules/system-bbr.js";
 import { installSettings } from "./modules/settings.js";
 import {
   bindEvent,
@@ -18,6 +19,7 @@ import {
 } from "./modules/refresh.js";
 import { orderNodesBySavedOrder } from "./modules/node-order.js";
 import { installMotion, queueEntrance, openDialog, closeDialog, dismissDialogsImmediately, removeWithMotion, beginBusy, transitionTheme } from "./modules/motion.js";
+import { createScopedAPI } from "./modules/requests.js";
 
 const app = document.querySelector("#app");
 installMotion();
@@ -35,6 +37,9 @@ const actions = [
   "read-managed-config",
   "import-existing",
   "upgrade-agent",
+  "enable-bbr",
+  "disable-bbr",
+  "configure-tcp",
 ];
 const state = {
   session: null,
@@ -60,6 +65,8 @@ const dockIcons = Object.freeze({
     '<path d="M20 7h-5V2"/><path d="m20 2-3.5 3.5A8 8 0 1 0 20.8 14"/>',
   chart:
     '<path d="M12 16v5M16 14.639V21M20 10.656V21M4 18.463V21M8 14.656V21"/><path d="m22 3-8.646 8.646a.5.5 0 0 1-.708 0L9.354 8.354a.5.5 0 0 0-.707 0L2 15"/>',
+  sliders:
+    '<path d="M3 6h4m4 0h10M3 12h10m4 0h4M3 18h4m4 0h10"/><circle cx="9" cy="6" r="2"/><circle cx="15" cy="12" r="2"/><circle cx="9" cy="18" r="2"/>',
   shield:
     '<path d="M20 13c0 5-3.5 7.5-8 9-4.5-1.5-8-4-8-9V5l8-3 8 3z"/><path d="M8.5 12h7M12 8.5v7"/>',
   logs:
@@ -114,6 +121,9 @@ const actionName = (value) =>
     "read-managed-config": "读取 QAgent 配置",
     "import-existing": "导入并迁移现有服务",
     "upgrade-agent": "升级 Agent",
+    "enable-bbr": "启用系统 BBR",
+    "disable-bbr": "关闭 BBR / 切换 CUBIC",
+    "configure-tcp": "自定义 BBR / TCP 调优",
   })[value] || label(value);
 const statusName = (value) =>
   ({
@@ -331,7 +341,10 @@ function combineAbortSignals(...values) {
   };
 }
 
-async function api(path, options = {}) {
+const scopedAPI = createScopedAPI(sendAPI);
+const api = (path, options) => scopedAPI.request(path, options);
+
+async function sendAPI(path, options = {}) {
   const method = String(options.method || "GET").toUpperCase();
   const headers = {
     Accept: "application/json",
@@ -557,6 +570,7 @@ function shell(content, title, { viewKey = state.route } = {}) {
     ["client-access", "客户端", dockIcons.monitorSmartphone],
     ["substore-sync", "同步", dockIcons.refreshCw, true],
     ["access-control", "限制", dockIcons.shield, true],
+    ["system-bbr", "TCP 调优", dockIcons.sliders, true],
     ["traffic", "流量", dockIcons.chart, true],
     ["core-logs", "日志", dockIcons.logs, true],
     ["tasks", "任务", dockIcons.listChecks, true],
@@ -568,6 +582,7 @@ function shell(content, title, { viewKey = state.route } = {}) {
     "client-access": "client-access.read",
     "substore-sync": "client-access.read",
     "access-control": "agent-config.read",
+    "system-bbr": "agents.read",
     "live-config": "agent-config.read",
     tasks: "tasks.read",
     "core-logs": "core-logs.read",
@@ -624,6 +639,7 @@ function shell(content, title, { viewKey = state.route } = {}) {
     ["agents", "内核预设"],
     ["substore-sync", "Sub-Store 同步"],
     ["access-control", "访问限制"],
+    ["system-bbr", "BBR / TCP 调优"],
     ["traffic", "流量"],
     ["core-logs", "日志"],
     ["tasks", "任务"],
@@ -762,6 +778,11 @@ function contextMarkup(title) {
           `<a class="${(state.data.taskFilters?.status || "") === status ? "active" : ""}" href="#tasks" data-task-status-filter="${status}">${text}</a>`,
       )
       .join("")}</nav>`;
+  if (state.route === "system-bbr") {
+    const agents = orderNodesBySavedOrder(state.data.agents || []);
+    const selected = state.data.bbrAgent || "";
+    return `<a class="context-primary ${selected ? "" : "active"}" href="#system-bbr">全部节点</a><div class="context-section-label"><span>系统 BBR</span><b>${agents.length}</b></div><nav class="context-list" aria-label="系统 BBR 节点">${agents.map((agent) => `<a class="${selected === agent.id ? "active" : ""}" href="#system-bbr-agent-${esc(agent.id)}"><i class="status-dot ${agent.status === "online" ? "ok" : ""}"></i><span><strong>${esc(agent.name)}</strong><small>${(agent.features || []).includes("system-bbr-v1") ? "系统 TCP 参数" : "需升级 Agent"}</small></span><em>${agent.status === "online" ? "在线" : "离线"}</em></a>`).join("") || "<p>还没有节点</p>"}</nav>`;
+  }
   if (state.route === "core-logs") {
     const agents = orderNodesBySavedOrder(state.data.agents || []);
     const selected = state.data.coreLogFilters?.agent_id || "";
@@ -824,6 +845,7 @@ const tasks = installTasks({ api, state, actions, can, esc, statusName, engineNa
 const coreLogs = installCoreLogs({ api, state, engines, can, esc, engineName, date, shell });
 const traffic = installTraffic({ api, state, can, esc, engineName, bytes, rate, percent, ago, shell, notify, confirmAction });
 const accessControl = installAccessControl({ api, state, can, esc, engineName, shell, notify, confirmAction });
+const systemBBR = installSystemBBR({ api, state, can, esc, date, shell, notify, confirmAction });
 const settings = installSettings({ api, state, esc, date, can, shell, notify, confirmAction, applyUIFontScale });
 
 async function renderOnce() {
@@ -831,10 +853,12 @@ async function renderOnce() {
   routeController?.abort();
   routeController = new AbortController();
   state.routeSignal = routeController.signal;
-  const navigationSignal = state.routeSignal;
+  const renderSignal = state.routeSignal;
+  scopedAPI.begin();
   clearTimeout(state.taskPollTimer);
   clearTimeout(state.trafficPollTimer);
   clearTimeout(state.coreLogPollTimer);
+  clearTimeout(state.bbrPollTimer);
   clearTimeout(state.agentPollTimer);
   const hash = location.hash.slice(1);
   const routeMap = {
@@ -872,10 +896,11 @@ async function renderOnce() {
     "core-logs",
     "traffic",
     "access-control",
+    "system-bbr",
     "settings",
   ].includes(hash)
     ? hash
-    : routeMap[hash] ||
+    : (hash.startsWith("system-bbr-agent-") ? "system-bbr" : routeMap[hash]) ||
       (hash.startsWith("preset-node-")
         ? "agents"
         : hash.startsWith("settings-node-")
@@ -911,6 +936,17 @@ async function renderOnce() {
       renderLogin();
       return;
     }
+    // Start common page reads while the shell settings/overview are loading.
+    // The page consumes these same promises through the render-local scope.
+    // Pages with their own refresh AbortSignal must start their own request;
+    // prefetching those here would create an unshareable duplicate read.
+    const agentRoutes = ["dashboard", "agents", "node-settings", "archive-config"];
+    if (agentRoutes.includes(state.route) && can("agents.read"))
+      void api("/agents").catch(() => {});
+    if (state.route === "dashboard" && can("tasks.read"))
+      void api("/tasks?limit=7").catch(() => {});
+    if (state.route === "settings")
+      void api("/settings/deployment").catch(() => {});
     const hasSharedData =
       state.data.overview !== undefined && state.data.settings !== undefined;
     const sharedDataPromise = Promise.all([
@@ -922,6 +958,7 @@ async function renderOnce() {
     } else {
       sharedDataPromise
         .then(([overview, settings]) => {
+          if (renderSignal.aborted || state.routeSignal !== renderSignal || !state.session) return;
           state.data.overview = overview;
           state.data.settings = settings;
         })
@@ -940,6 +977,7 @@ async function renderOnce() {
       "core-logs": coreLogs,
       traffic,
       "access-control": accessControl,
+      "system-bbr": systemBBR,
       settings,
     };
     await (pages[state.route] || dashboard)({
@@ -967,11 +1005,12 @@ async function renderOnce() {
         "错误",
       );
   } finally {
-    if (state.routeSignal === navigationSignal) {
+    if (state.routeSignal === renderSignal) {
       const main = app.querySelector(".workspace-main");
       main?.classList.remove("is-route-pending");
       main?.removeAttribute("aria-busy");
     }
+    scopedAPI.end();
   }
 }
 const scheduleRender = createLatestRenderScheduler(renderOnce, {

@@ -20,7 +20,8 @@ type CoreLogQuery struct {
 	Level   string
 	Search  string
 	Before  int64
-	Limit   int
+	// Limit bounds each engine independently within the selected node scope.
+	Limit int
 }
 
 func (s *Store) StoreCoreLogs(ctx context.Context, agentID string, batch core.CoreLogBatch) error {
@@ -74,14 +75,30 @@ func (s *Store) StoreCoreLogs(ctx context.Context, agentID string, batch core.Co
 	if minimumLevel == "" {
 		return errors.New("invalid stored core log minimum level")
 	}
+	indexes := make([]int32, 0, len(entries))
+	engines := make([]string, 0, len(entries))
+	levels := make([]string, 0, len(entries))
+	messages := make([]string, 0, len(entries))
+	loggedAt := make([]time.Time, 0, len(entries))
 	for index, entry := range entries {
 		if !coreLogLevelAtLeast(entry.Level, minimumLevel) {
 			continue
 		}
+		indexes = append(indexes, int32(index))
+		engines = append(engines, string(entry.Engine))
+		levels = append(levels, entry.Level)
+		messages = append(messages, entry.Message)
+		loggedAt = append(loggedAt, entry.LoggedAt.UTC())
+	}
+	// Keep the deduplication marker and all accepted entries in the same
+	// transaction, but pay only one remote round trip for the entire batch.
+	if len(indexes) > 0 {
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO core_logs (batch_id,entry_index,agent_id,engine,level,message,logged_at,received_at)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-			batch.ID, index, agentID, entry.Engine, entry.Level, entry.Message, entry.LoggedAt.UTC(), receivedAt); err != nil {
+			SELECT $1,entry_index,$2,engine,level,message,logged_at,$3
+			FROM unnest($4::integer[],$5::text[],$6::text[],$7::text[],$8::timestamptz[])
+			AS entries(entry_index,engine,level,message,logged_at)`,
+			batch.ID, agentID, receivedAt, indexes, engines, levels, messages, loggedAt); err != nil {
 			return mapError(err)
 		}
 	}
@@ -98,9 +115,9 @@ func (s *Store) PruneCoreLogs(ctx context.Context, olderThan time.Time) (int64, 
 
 func (s *Store) ListCoreLogs(ctx context.Context, query CoreLogQuery) ([]core.CoreLogEntry, error) {
 	if query.Limit == 0 {
-		query.Limit = 200
+		query.Limit = 1000
 	}
-	if query.Limit < 1 || query.Limit > 500 || query.Before < 0 {
+	if query.Limit < 1 || query.Limit > 2000 || query.Before < 0 {
 		return nil, fmt.Errorf("%w: invalid core log query", ErrInvalid)
 	}
 	query.AgentID = strings.TrimSpace(query.AgentID)
@@ -109,20 +126,44 @@ func (s *Store) ListCoreLogs(ctx context.Context, query CoreLogQuery) ([]core.Co
 	if len(query.Search) > 120 || (query.Engine != "" && !query.Engine.Valid()) {
 		return nil, fmt.Errorf("%w: invalid core log query", ErrInvalid)
 	}
+	engines := []string{string(core.EngineMihomo), string(core.EngineXray), string(core.EngineSingBox), string(core.EngineShadowsocksRust)}
+	if query.Engine != "" {
+		engines = []string{string(query.Engine)}
+	}
+	// Bound each engine's indexed scan before merging the results. A busy
+	// engine must not consume the other engines' slots, and we should not rank
+	// the entire retained log history just to display a small recent window.
+	where := "engine=selected.engine"
+	args := []any{engines, query.Limit}
+	for _, filter := range []struct{ column, value string }{{"agent_id", query.AgentID}, {"level", query.Level}} {
+		if filter.value != "" {
+			args = append(args, filter.value)
+			where += fmt.Sprintf(" AND %s=$%d", filter.column, len(args))
+		}
+	}
+	if query.Search != "" {
+		args = append(args, query.Search)
+		where += fmt.Sprintf(" AND position(lower($%d) in lower(message)) > 0", len(args))
+	}
+	if query.Before > 0 {
+		args = append(args, query.Before)
+		where += fmt.Sprintf(" AND id<$%d", len(args))
+	}
 	rows, err := s.pool.Query(ctx, `
-		SELECT id,agent_id,engine,level,message,logged_at,received_at
-		FROM core_logs
-		WHERE ($1='' OR agent_id=$1)
-		  AND ($2='' OR engine=$2)
-		  AND ($3='' OR level=$3)
-		  AND ($4='' OR position(lower($4) in lower(message)) > 0)
-		  AND ($5=0 OR id<$5)
-		ORDER BY id DESC LIMIT $6`, query.AgentID, query.Engine, query.Level, query.Search, query.Before, query.Limit)
+		SELECT logs.id,logs.agent_id,logs.engine,logs.level,logs.message,logs.logged_at,logs.received_at
+		FROM unnest($1::text[]) AS selected(engine)
+		CROSS JOIN LATERAL (
+			SELECT id,agent_id,engine,level,message,logged_at,received_at
+			FROM core_logs
+			WHERE `+where+`
+			ORDER BY id DESC LIMIT $2
+		) AS logs
+		ORDER BY logs.id DESC`, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	result := make([]core.CoreLogEntry, 0, query.Limit)
+	result := make([]core.CoreLogEntry, 0, query.Limit*len(engines))
 	for rows.Next() {
 		var entry core.CoreLogEntry
 		if err := rows.Scan(&entry.ID, &entry.AgentID, &entry.Engine, &entry.Level, &entry.Message, &entry.LoggedAt, &entry.ReceivedAt); err != nil {

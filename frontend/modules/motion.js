@@ -81,7 +81,7 @@ const entranceSelector = [
   ".workspace-main", ".context-sidebar", ".login-card", ".qch-swap-panel",
   ".node-card", ".service-card", ".traffic-policy-card", ".task-event",
   ".core-log-row", ".client-access-node-card", ".client-profile-row",
-  ".access-control-card", ".substore-agent-card", ".template-card",
+  ".access-control-card", ".bbr-card", ".substore-agent-card", ".template-card",
   ".settings-version-card", ".node-batch-bar", ".batch-results",
   ".alert", ".task-feedback", ".core-log-source-notice", ".empty",
   ".metric-trend-panel", ".batch-result-row", ".enrollment-history-empty",
@@ -162,7 +162,7 @@ export function openDialog(dialog) {
     boundDialogs.add(dialog);
     dialog.addEventListener("cancel", (event) => {
       // Confirmation dialogs own their resolver and cancel handler.
-      if (dialog.matches("[data-confirm-dialog]")) return;
+      if (event.defaultPrevented || dialog.matches("[data-confirm-dialog]")) return;
       event.preventDefault();
       closeDialog(dialog);
     });

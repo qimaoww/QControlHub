@@ -237,7 +237,9 @@ const currentMain = element("main", { class: "workspace-main" }, currentList);
 currentMain.scrollTop = 420;
 const currentDialog = element("dialog", { open: "" }, text("confirm"));
 currentDialog.open = true;
-const currentRoot = element("div", {}, currentMain, currentDialog);
+const currentLiveDialog = element("dialog", { open: "", "data-refresh-live": "" }, text("old TCP status"));
+currentLiveDialog.open = true;
+const currentRoot = element("div", {}, currentMain, currentDialog, currentLiveDialog);
 currentRoot.connected = true;
 currentInput.focus();
 
@@ -295,6 +297,7 @@ const freshRoot = element(
     element("section", { "data-refresh-scroll": "" }, freshC, freshA),
   ),
   element("dialog", {}, text("confirm updated")),
+  element("dialog", { "data-refresh-live": "" }, text("new TCP status")),
 );
 
 const reconciliationMetrics = { inserted: 0, removed: 0, replaced: 0, updated: 0 };
@@ -324,6 +327,8 @@ assert.deepEqual(
 assert.equal(currentDetails.open, true, "details state survives");
 assert.equal(currentDialog.open, true, "modal state survives");
 assert.equal(currentDialog.childNodes[0].data, "confirm", "open modal content stays stable");
+assert.equal(currentLiveDialog.open, true, "live modal stays open");
+assert.equal(currentLiveDialog.childNodes[0].data, "new TCP status", "only opted-in modal content refreshes");
 assert.equal(currentMain.scrollTop, 420, "workspace scroll survives");
 assert.equal(currentList.scrollTop, 155, "inner scroll survives");
 assert.deepEqual([fakeWindow.scrollX, fakeWindow.scrollY], [14, 640]);

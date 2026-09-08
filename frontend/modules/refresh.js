@@ -174,8 +174,9 @@ function reconcileChildren(current, fresh, metrics) {
     const currentAtIndex = current.childNodes[index] || null;
     if (currentAtIndex !== child) current.insertBefore(child, currentAtIndex);
   });
+  const desiredNodes = new Set(desired);
   [...current.childNodes].forEach((child) => {
-    if (!desired.includes(child)) {
+    if (!desiredNodes.has(child)) {
       child.remove();
       metrics.removed += 1;
     }
@@ -196,7 +197,9 @@ function reconcileNode(current, fresh, metrics) {
     }
     return current;
   }
-  if (current.tagName === "DIALOG" && current.open) return current;
+  // Confirmation dialogs keep their original snapshot. Live status/editor
+  // dialogs may opt in to reconciliation without closing their native modal.
+  if (current.tagName === "DIALOG" && current.open && current.getAttribute("data-refresh-live") == null) return current;
   const state = controlState(current);
   const detailsOpen = current.tagName === "DETAILS" ? current.open : null;
   const scrollTop = current.scrollTop;

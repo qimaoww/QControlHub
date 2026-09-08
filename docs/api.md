@@ -38,6 +38,8 @@
 | `GET` | `/api/v1/auth/session` | 读取当前 SPA 会话 |
 | `POST` | `/api/v1/auth/logout` | 注销当前 SPA 会话 |
 | `GET` | `/api/v1/agents` | 列出未撤销 Agent |
+| `GET` | `/api/v1/system-tcp/parameters` | BBR / TCP 调优字段与取值范围（agents.read） |
+| `GET` | `/api/v1/system-tcp/tasks` | 每个节点最新的 TCP 调优任务（tasks.read，可按 agent_id 筛选） |
 | `DELETE` | `/api/v1/agents/{id}` | 永久撤销 Agent、立即断开 WSS 并终止其未完成任务 |
 | `PUT` | `/api/v1/agents/{id}/name` | 修改面板显示的节点名称，不改变身份和安装凭据（agents.manage） |
 | `POST` | `/api/v1/agents/{id}/enrollment-token` | 为该节点新增一条独立、可重复使用的 Agent 安装凭据；已有凭据继续有效（enrollment.manage） |
@@ -102,6 +104,14 @@
 `GET /api/v1/agents/{id}/region` 只使用节点已验证的公网 IP；控制面向 GeoJS 查询国家/地区并缓存 48 小时。前端通过同源接口读取 [lipis/flag-icons](https://github.com/lipis/flag-icons) 的统一 4:3 SVG 旗帜并由控制面缓存；该流程独立于 Komari 关联配置。
 
 `GET /api/v1/overview` 中的 `configs` 只统计可在“配置档案”工作区跨节点下发的全局配置；`node_configs` 单独统计绑定到具体 Agent/内核的节点配置，避免将两类配置混为一个不可解释的总数。为兼容既有调用方，`tasks_pending` 仍表示 `pending + running` 的活动任务总数；`tasks_queued` 和 `tasks_running` 分别给出排队与执行中的精确数量。
+
+### 内核日志查询
+
+`GET /api/v1/core-logs` 的 `limit` 表示当前节点范围内**每种内核各自的日志条数上限**，默认 1000，可选 1–2000。未指定 `engine` 时，Mihomo、Xray、sing-box 和 Shadowsocks Rust 分别取最新的至多 `limit` 条，再按日志 ID 倒序合并；例如 `limit=2000` 最多返回 8000 条，而不是所有内核共用 2000 条。指定 `agent_id` 时只统计该节点；不指定时按全部节点中的内核类型分别计数，不是每个节点各分配一份额度。
+
+Web 日志页保留完整返回结果用于筛选，每页渲染 200 条，可翻页查看；1000/2000 条是每内核查询窗口，不是日志保留总量。Agent 的单次上报批次仍为最多 32 条，以避免日志大包阻塞心跳。
+
+可同时使用 `engine`、`level`、`q`（消息关键词）和 `before`（仅取小于该日志 ID 的记录）筛选；这些条件在每种内核截取数量之前生效。日志页的“每内核上限”控制读取和展示数量，不改变数据库的日志保留期限。
 
 ### 系统设置
 
@@ -351,3 +361,30 @@ WSS 握手必须协商子协议 `qcontrolhub.agent.v1`。服务端先发送只�
 主机指标不会开放新的 Agent 监听端口。Agent 不上报通配、回环、组播或链路本地地址；控制面用服务器接收时间覆盖 Agent 时间戳，并校验百分比、容量、接口数量、名称和地址边界，只在 PostgreSQL 保存每个节点的最新快照。SPA 通过要求有效管理会话的 `GET /api/v1/metrics/{agent_id}` 获取历史样本；响应设置 `Cache-Control: no-store`。节点运行区只从实际部署版本生成客户端资料，优先使用受控节点标签中的入口地址，否则自动选择默认路由接口地址；配置编辑器不接受或传播客户端连接地址参数。
 
 握手签名 canonical value 由固定字符串 `qcontrolhub-agent-v1`、大写 HTTP 方法、原始转义路径及查询串、Agent ID、Unix 秒时间戳、随机 nonce、空正文 SHA-256 十六进制摘要以换行连接。握手需要以下头：`X-QControlHub-Agent-ID`、`X-QControlHub-Timestamp`、`X-QControlHub-Nonce`、`X-QControlHub-Signature`。有效时间窗为正负 90 秒，nonce 在窗口内只能使用一次。应直接使用官方 Go Agent，避免自行实现导致编码、代理重写、lease 或防重放错误。
+
+## 系统 BBR / TCP 调优
+
+`GET /api/v1/agents` 的 `metrics.bbr` 返回 Agent 直接读取的系统参数，包含 `collected_at`、`kernel_release`、`congestion_control`、`default_qdisc`、`available_algorithms`、`parameters`、网卡实际 `qdiscs` 及采集错误。即使 BBR 是 SSH、脚本或其他工具开启的，也会据实显示，不依赖面板操作记录。`persistence=unmanaged` 仅表示没有本面板的托管文件，**不表示 BBR 未开启，也不表示系统没有其他持久化配置**。`configured_parameters` 是面板文件里的值，可能与当前生效值不同。
+
+`GET /api/v1/system-tcp/parameters` 返回可编辑字段、数值范围、三元组要求和枚举值，需 `agents.read`。系统实际值允许超出编辑白名单显示；只有受支持的取值可下发。`tcp_rmem/tcp_wmem` 是三个从小到大、以空格分隔的字节数。
+
+`GET /api/v1/system-tcp/tasks` 需 `tasks.read`，返回每个未撤销节点最新的一条 TCP 任务，支持 `agent_id` 筛选；不会因其他节点的任务历史过多而遗漏状态。响应包含动作、参数快照、状态、时间和错误，不包含完整执行输出；完整历史和输出仍从 `/tasks` 查看。
+
+调优复用 `POST /api/v1/tasks`，需同时具备 `tasks.execute` 与 `agents.manage`，目标节点须在线并通过心跳声明 `system-bbr-v1`；任务重试使用相同权限。示例：
+
+```json
+{
+  "agent_id": "agt_example",
+  "engine": "",
+  "action": "configure-tcp",
+  "tcp_settings": {
+    "net.ipv4.tcp_congestion_control": "bbr",
+    "net.core.default_qdisc": "fq",
+    "net.ipv4.tcp_rmem": "4096 131072 16777216"
+  }
+}
+```
+
+示例值仅说明格式，不是适用于所有节点的优化建议。仅提交选中的参数；未提交的系统参数和原托管项不变。`enable-bbr`、`disable-bbr` 是不接受 `tcp_settings` 的快捷任务，分别设置 `bbr + fq`、`cubic + fq`。三种任务都不能关联代理内核、配置 ID、内核版本或来源。同节点不同的未完成 TCP 调优请求返回 `409`；相同请求复用原任务。`tasks.read` 可查看参数快照和执行结果。旧版 Agent 不会认领或继续执行这些任务。
+
+Agent 逐项写入、回读核验后合并保存到 `/etc/sysctl.d/90-qcontrolhub-bbr.conf`。常规失败会尝试恢复原值和原文件，回滚失败在任务错误中明确上报。执行成功并不代表所有已有连接切换算法；页面以采集时间及实际值为准，不将“任务已提交”显示成“参数已生效”。

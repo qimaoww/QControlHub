@@ -293,6 +293,10 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/configs/{id}/revisions/{version}", s.requirePermission(core.PermissionConfigsRead, http.HandlerFunc(s.getConfigRevision)))
 	mux.Handle("POST /api/v1/configs/{id}/revisions/{version}/restore", s.requirePermission(core.PermissionConfigsRestore, http.HandlerFunc(s.restoreConfigRevision)))
 	mux.Handle("GET /api/v1/tasks", s.requirePermission(core.PermissionTasksRead, http.HandlerFunc(s.listTasks)))
+	mux.Handle("GET /api/v1/system-tcp/tasks", s.requirePermission(core.PermissionTasksRead, http.HandlerFunc(s.latestSystemTCPTasks)))
+	mux.Handle("GET /api/v1/system-tcp/parameters", s.requirePermission(core.PermissionAgentsRead, http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		writeJSON(w, http.StatusOK, core.TCPParameterRules())
+	})))
 	mux.Handle("POST /api/v1/tasks", s.requirePermission(core.PermissionTasksExecute, http.HandlerFunc(s.createTask)))
 	mux.Handle("GET /api/v1/tasks/{id}", s.requirePermission(core.PermissionTasksRead, http.HandlerFunc(s.getTask)))
 	mux.Handle("GET /api/v1/tasks/{id}/config-snapshot", s.requireAllPermissions(
@@ -362,30 +366,20 @@ func (s *Server) overview(w http.ResponseWriter, request *http.Request) {
 }
 
 func (s *Server) listAgents(w http.ResponseWriter, request *http.Request) {
-	agents, err := s.store.ListAgents(request.Context())
+	role, roleOK := s.sessionRole(request)
+	permissions, permissionsOK := s.sessionPermissions(request)
+	list := s.store.ListAgents
+	if roleOK && permissionsOK && (role.Allows(core.PermissionEnrollmentManage) || core.HasPermission(permissions, core.PermissionEnrollmentManage)) {
+		list = s.store.ListAgentsWithEnrollmentCommands
+	}
+	agents, err := list(request.Context())
 	if err != nil {
 		writeInternalError(w, err)
 		return
 	}
-	role, roleOK := s.sessionRole(request)
-	permissions, permissionsOK := s.sessionPermissions(request)
 	if !roleOK || !permissionsOK || (!role.Allows(core.PermissionMetricsRead) && !core.HasPermission(permissions, core.PermissionMetricsRead)) {
 		for index := range agents {
 			agents[index].Metrics = core.HostMetrics{}
-		}
-	}
-	if roleOK && permissionsOK && (role.Allows(core.PermissionEnrollmentManage) || core.HasPermission(permissions, core.PermissionEnrollmentManage)) {
-		ids := make([]string, 0, len(agents))
-		for _, agent := range agents {
-			ids = append(ids, agent.ID)
-		}
-		available, availabilityErr := s.store.ListEnrollmentCommandAvailability(request.Context(), ids)
-		if availabilityErr != nil {
-			slog.Warn("enrollment command availability unavailable", "error", availabilityErr)
-		} else {
-			for index := range agents {
-				agents[index].EnrollmentCommandAvailable = available[agents[index].ID]
-			}
 		}
 	}
 	writeJSON(w, http.StatusOK, agents)
@@ -606,6 +600,9 @@ func (s *Server) createTask(w http.ResponseWriter, request *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if input.Action.SystemBBR() && !s.authorizeSystemBBR(w, request, input.AgentID) {
+		return
+	}
 	task, err := s.store.CreateTask(request.Context(), input)
 	if err != nil {
 		writeStoreError(w, err)
@@ -657,6 +654,14 @@ func (s *Server) cancelTask(w http.ResponseWriter, request *http.Request) {
 }
 
 func (s *Server) retryTask(w http.ResponseWriter, request *http.Request) {
+	previous, err := s.store.GetTask(request.Context(), request.PathValue("id"))
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	if previous.Action.SystemBBR() && !s.authorizeSystemBBR(w, request, previous.AgentID) {
+		return
+	}
 	task, err := s.store.RetryTask(request.Context(), request.PathValue("id"))
 	if err != nil {
 		writeStoreError(w, err)

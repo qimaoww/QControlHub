@@ -54,6 +54,13 @@ await new Promise((resolve, reject) => {
   server.listen(0, "127.0.0.1", resolve);
 });
 
+// Reuse the same fixture for manual layout inspection, without launching the
+// automated browser runner. No production API or credentials are involved.
+if (process.env.QCH_BROWSER_SMOKE_SERVE_ONLY) {
+  process.stdout.write(`http://127.0.0.1:${server.address().port}/agents-browser-smoke.html?mode=logs&preview=1#node-settings\n`);
+  await new Promise(() => {});
+}
+
 const chrome = [
   process.env.QCH_CHROME_BIN,
   "chromium",
@@ -233,6 +240,7 @@ async function runMode(mode) {
       "passed",
       `Chrome ${mode} smoke 未通过：${result?.detail || "无错误详情"}\n${stderr}`,
     );
+    if (mode === "logs") process.stdout.write(`${result.detail}\n`);
   } finally {
     if (child) await stopBrowser(child);
     await rm(profile, {
@@ -245,7 +253,8 @@ async function runMode(mode) {
 }
 
 try {
-  for (const mode of ["admin", "empty", "readonly", "ports"]) await runMode(mode);
+  const modes = process.env.QCH_BROWSER_SMOKE_MODES || process.env.QCH_BROWSER_SMOKE_MODE || "admin,empty,readonly,ports,logs,bbr,bbr-readonly,bbr-writeonly";
+  for (const mode of modes.split(",")) await runMode(mode);
   process.stdout.write("agents browser runtime smoke passed\n");
 } finally {
   await new Promise((resolve) => server.close(resolve));

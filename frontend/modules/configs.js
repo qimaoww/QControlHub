@@ -623,29 +623,25 @@ async function agentConfig() {
   const selectedField =
     fields.find((field) => field.key === state.data.configField) || fields[0];
   state.data.configField = selectedField?.key || "";
-  let fieldValue = { present: false, fragment: "" };
-  if (config && selectedField)
-    fieldValue = await api(
-      `${base}/fields/${encodeURIComponent(selectedField.key)}`,
-    );
-  if (request !== agentConfigRequest || state.route !== "agent-config") return;
   const selectedInboundField = ssRustGroups.inbound.find(
     (field) => field.key === state.data.configInboundField,
   ) || ssRustGroups.inbound.find((field) => field.key === "mode") || ssRustGroups.inbound[0];
-  let inboundFieldValue = { present: false, fragment: "" };
-  if (engine === "ss-rust" && config && selectedInbound && selectedInboundField) {
+  const hasInboundField = engine === "ss-rust" && config && selectedInbound && selectedInboundField;
+  if (hasInboundField)
     state.data.configInboundField = selectedInboundField.key;
-    try {
-      inboundFieldValue = await api(configFieldURL(base, selectedInboundField.key, selectedInbound.tag));
-    } catch (error) {
-      if (error.name === "AbortError") throw error;
-      inboundFieldValue.error = error.message;
-    }
-  }
-  if (request !== agentConfigRequest || state.route !== "agent-config") return;
-  const revisions = config
-    ? await api(`/configs/${encodeURIComponent(config.id)}/revisions?limit=50`)
-    : [];
+  // Root field, port field, and revision history do not depend on each other.
+  const [fieldValue, inboundFieldValue, revisions] = await Promise.all([
+    config && selectedField
+      ? api(`${base}/fields/${encodeURIComponent(selectedField.key)}`)
+      : { present: false, fragment: "" },
+    hasInboundField
+      ? api(configFieldURL(base, selectedInboundField.key, selectedInbound.tag)).catch((error) => {
+          if (error.name === "AbortError") throw error;
+          return { present: false, fragment: "", error: error.message };
+        })
+      : { present: false, fragment: "" },
+    config ? api(`/configs/${encodeURIComponent(config.id)}/revisions?limit=50`) : [],
+  ]);
   if (request !== agentConfigRequest || state.route !== "agent-config") return;
   const inboundNav = (workspace.inbounds || [])
     .map(

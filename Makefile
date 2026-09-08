@@ -15,7 +15,7 @@ test:
 
 alpine-test:
 	@packages="$$(go list ./... | sed '\|/internal/agent$$|d')"; go test $$packages
-	go test ./internal/agent -run 'OpenRC|PerServiceManager|AgentUpgrade|ManagedCorePrerequisites'
+	go test ./internal/agent -run 'OpenRC|PerServiceManager|AgentUpgrade|ManagedCorePrerequisites|SystemBBR'
 
 upgrade-sandbox-test:
 	docker build -f deploy/tests/Dockerfile.upgrade-lifecycle -t qch-upgrade-lifecycle-test .
@@ -55,6 +55,9 @@ agent-redeploy-test:
 quick-start-test:
 	bash deploy/tests/quick-start-env.sh
 	bash deploy/tests/quick-start-bootstrap.sh
+	bash deploy/tests/quick-start-update.sh
+	bash deploy/tests/quick-start-modes.sh
+	bash deploy/tests/quick-start-compose.sh
 
 web-image-test:
 	docker build --target qcontrol-web --build-arg VERSION='$(VERSION)' .

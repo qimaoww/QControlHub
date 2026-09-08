@@ -79,6 +79,7 @@ type Client struct {
 	mainland          *MainlandAccessManager
 	logs              *CoreLogCollector
 	publicIP          *PublicIPProber
+	bbr               *SystemBBRManager
 	serverHost        string
 	reenrollAttempted bool
 	credentialsMu     sync.Mutex
@@ -100,9 +101,10 @@ type taskExecution struct {
 }
 
 const (
-	defaultHeartbeatInterval = 15 * time.Second
-	minHeartbeatInterval     = time.Second
-	maxHeartbeatInterval     = 30 * time.Second
+	webSocketHandshakeTimeout = 30 * time.Second
+	defaultHeartbeatInterval  = 15 * time.Second
+	minHeartbeatInterval      = time.Second
+	maxHeartbeatInterval      = 30 * time.Second
 	// Metrics pushes are lightweight /proc snapshots on a dedicated wire
 	// message so the panel's live card values refresh without waiting for the
 	// full heartbeat cycle.
@@ -198,6 +200,7 @@ func NewClient(config ClientConfig, executor *Executor) (*Client, error) {
 		mainland:       NewMainlandAccessManager(config.StatePath, executor.serviceManager()),
 		logs:           NewCoreLogCollectorForExecutor(executor),
 		publicIP:       publicIP,
+		bbr:            NewSystemBBRManager(executor.serviceManager()),
 		runtimeRefresh: make(chan struct{}, 1),
 		http: &http.Client{
 			Transport: transport,
@@ -296,10 +299,10 @@ func (c *Client) Run(ctx context.Context) error {
 			cleanupCancel()
 			return err
 		}
-		slog.Warn("WSS connection lost", "error", err, "reconnect_in", backoff)
 		if time.Since(started) > time.Minute {
 			backoff = time.Second
 		}
+		slog.Warn("WSS connection lost", "error", err, "reconnect_in", backoff)
 		timer := time.NewTimer(backoff)
 		select {
 		case <-ctx.Done():
@@ -385,19 +388,25 @@ func (c *Client) runWebSocket(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	handshake, err := http.NewRequestWithContext(ctx, http.MethodGet, c.websocketURL, nil)
+	// Bound the entire handshake, including a proxy/server that accepts TCP
+	// but never returns HTTP headers. The established session keeps ctx, not
+	// this short-lived context, so healthy long-running connections survive.
+	handshakeContext, handshakeCancel := context.WithTimeout(ctx, webSocketHandshakeTimeout)
+	defer handshakeCancel()
+	handshake, err := http.NewRequestWithContext(handshakeContext, http.MethodGet, c.websocketURL, nil)
 	if err != nil {
 		return err
 	}
 	if err := authn.SignRequest(handshake, nil, c.creds.AgentID, privateKey, time.Now().UTC()); err != nil {
 		return err
 	}
-	connection, response, err := websocket.Dial(ctx, c.websocketURL, &websocket.DialOptions{
+	connection, response, err := websocket.Dial(handshakeContext, c.websocketURL, &websocket.DialOptions{
 		HTTPClient:      c.http,
 		HTTPHeader:      handshake.Header,
 		CompressionMode: websocket.CompressionDisabled,
 		Subprotocols:    []string{"qcontrolhub.agent.v1"},
 	})
+	handshakeCancel()
 	if err != nil {
 		if response != nil {
 			defer response.Body.Close()
@@ -416,20 +425,18 @@ func (c *Client) runWebSocket(ctx context.Context) error {
 	connection.SetReadLimit(core.MaxConfigEnvelopeBytes)
 	slog.Info("WSS session established", "agent_id", c.creds.AgentID)
 
-	sessionContext, cancel := context.WithCancel(ctx)
-	defer cancel()
+	sessionContext, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
 	incoming := make(chan core.WireMessage, 1)
 	outgoing := make(chan core.WireMessage, 16)
-	readErrors := make(chan error, 1)
-	writeErrors := make(chan error, 1)
+	// The main loop may be blocked enqueueing a heartbeat or metrics. Signal
+	// failures through cancellation so that producer also wakes immediately;
+	// an error channel consumed only by the main loop can deadlock here.
 	go func() {
 		for {
 			var message core.WireMessage
 			if err := wsjson.Read(sessionContext, connection, &message); err != nil {
-				select {
-				case readErrors <- err:
-				default:
-				}
+				cancel(err)
 				return
 			}
 			select {
@@ -449,10 +456,7 @@ func (c *Client) runWebSocket(ctx context.Context) error {
 				err := wsjson.Write(writeContext, connection, message)
 				writeCancel()
 				if err != nil {
-					select {
-					case writeErrors <- err:
-					default:
-					}
+					cancel(err)
 					return
 				}
 			}
@@ -472,12 +476,11 @@ func (c *Client) runWebSocket(ctx context.Context) error {
 	var sentLogBatch string
 	for {
 		select {
-		case <-ctx.Done():
-			return nil
-		case err := <-readErrors:
-			return err
-		case err := <-writeErrors:
-			return err
+		case <-sessionContext.Done():
+			if ctx.Err() != nil {
+				return nil
+			}
+			return context.Cause(sessionContext)
 		case <-heartbeatTicker.C:
 			if err := c.queueHeartbeat(sessionContext, outgoing); err != nil {
 				return err
@@ -598,11 +601,12 @@ func (c *Client) queueHeartbeat(ctx context.Context, outgoing chan<- core.WireMe
 		slog.Debug("host metrics collection was partial", "error", metricsErr)
 	}
 	metrics.PublicIPv4, metrics.PublicIPv6, metrics.PublicIPv4Source, metrics.PublicIPv6Source = c.publicIP.SnapshotWithSources()
+	metrics.BBR = c.bbr.Collect(ctx)
 	heartbeat := &core.HeartbeatRequest{
 		Version: c.config.Version, OS: operatingSystemPlatform(), Arch: runtime.GOARCH, Runtime: runtimeState,
 		Features: c.advertisedFeatures(), TrafficUsage: c.traffic.Snapshot(),
 	}
-	if metricsHaveData(metrics) {
+	if metricsHaveData(metrics) || metrics.BBR != nil {
 		heartbeat.Metrics = &metrics
 	}
 	message := core.WireMessage{Type: core.WireHeartbeat, Heartbeat: heartbeat}
@@ -610,7 +614,7 @@ func (c *Client) queueHeartbeat(ctx context.Context, outgoing chan<- core.WireMe
 	case outgoing <- message:
 		return nil
 	case <-ctx.Done():
-		return ctx.Err()
+		return context.Cause(ctx)
 	}
 }
 
@@ -628,12 +632,13 @@ func (c *Client) queueMetrics(ctx context.Context, outgoing chan<- core.WireMess
 		return nil
 	}
 	metrics.PublicIPv4, metrics.PublicIPv6, metrics.PublicIPv4Source, metrics.PublicIPv6Source = c.publicIP.SnapshotWithSources()
+	metrics.BBR = c.bbr.Cached()
 	message := core.WireMessage{Type: core.WireMetrics, Metrics: &metrics, TrafficUsage: c.traffic.Snapshot()}
 	select {
 	case outgoing <- message:
 		return nil
 	case <-ctx.Done():
-		return ctx.Err()
+		return context.Cause(ctx)
 	}
 }
 
@@ -650,6 +655,7 @@ func (c *Client) advertisedFeatures() []string {
 		core.AgentFeatureManagedPublicIPProbe,
 		core.AgentFeatureManagedPolicy,
 		core.AgentFeatureManagedConfigRead,
+		core.AgentFeatureSystemBBR,
 	}
 	if c.publicIP.Enabled() {
 		features = append(features, core.AgentFeaturePublicIPProbe)
@@ -675,7 +681,7 @@ func (c *Client) executeTaskForSession(executionContext, deliveryContext context
 	// coalesces completions without racing its periodic metrics collection.
 	switch task.Action {
 	case core.ActionInstall, core.ActionDeploy, core.ActionImportExisting,
-		core.ActionStart, core.ActionStop, core.ActionRestart:
+		core.ActionStart, core.ActionStop, core.ActionRestart, core.ActionEnableBBR, core.ActionDisableBBR, core.ActionConfigureTCP:
 		select {
 		case c.runtimeRefresh <- struct{}{}:
 		default:
@@ -728,6 +734,8 @@ func (c *Client) resultForTask(ctx context.Context, task core.Task) core.TaskRes
 	preparedLogTransition := false
 	if c.upgradePending {
 		executionErr = errors.New("Agent upgrade is waiting for restart; retry after the new Agent reconnects")
+	} else if task.Action.SystemBBR() {
+		output, executionErr = c.bbr.Execute(ctx, task.Action, task.TCPSettings)
 	} else if task.Action == core.ActionUpgradeAgent {
 		output, executionErr = c.upgradeAgent(ctx)
 		if executionErr == nil {
@@ -913,9 +921,19 @@ func limitStateValue(value string, limit int) string {
 }
 
 func (c *Client) validTask(task core.Task) bool {
+	if task.Action.SystemBBR() {
+		if _, err := settingsForTCPAction(task.Action, task.TCPSettings); err != nil {
+			return false
+		}
+	} else if len(task.TCPSettings) > 0 {
+		return false
+	}
 	engineValid := task.Engine.Valid()
-	if task.Action == core.ActionUpgradeAgent {
+	if task.Action.AgentLevel() {
 		engineValid = task.Engine == ""
+	}
+	if task.Action.SystemBBR() && (task.ConfigID != "" || task.ConfigContent != "" || task.CoreVersion != "" || task.CoreSource != "" || len(task.MainlandAccessPolicies) != 0) {
+		return false
 	}
 	return task.AgentID == c.creds.AgentID && validTaskID(task.ID) && len(task.LeaseID) >= 32 &&
 		task.Status == core.TaskRunning && task.Action.Valid() && engineValid

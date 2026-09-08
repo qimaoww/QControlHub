@@ -564,8 +564,8 @@ func TestNodeSidebarsUseDraggedNodeSettingsOrder(t *testing.T) {
 	if !strings.Contains(order, `export const nodeCardOrderKey = "qcontrolhub:node-card-order"`) {
 		t.Fatal("shared node ordering must retain the existing localStorage key")
 	}
-	if strings.Count(app, "orderNodesBySavedOrder(") != 7 {
-		t.Fatalf("all seven node sidebars must use the shared dragged order; got %d call sites", strings.Count(app, "orderNodesBySavedOrder("))
+	if strings.Count(app, "orderNodesBySavedOrder(") != 8 {
+		t.Fatalf("all eight node sidebars must use the shared dragged order; got %d call sites", strings.Count(app, "orderNodesBySavedOrder("))
 	}
 	for _, required := range []string{
 		`import { orderNodesBySavedOrder } from "./modules/node-order.js";`,
@@ -1058,6 +1058,8 @@ func TestCoreLogsUseImmediateFiltersAndSidebarNodeScope(t *testing.T) {
 		`renderLocalFilters({ q: event.currentTarget.value })`,
 		`data-toggle-core-log-refresh`,
 		`core-log-columns`,
+		`每内核上限<select name="limit">`,
+		`每种内核分别取最新日志，不共用总条数上限`,
 	} {
 		if !strings.Contains(content, required) {
 			t.Errorf("core-log immediate filtering is missing %q", required)

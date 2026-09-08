@@ -308,7 +308,7 @@ func (s *Server) listCoreLogs(w http.ResponseWriter, request *http.Request) {
 		AgentID: strings.TrimSpace(values.Get("agent_id")),
 		Level:   strings.TrimSpace(values.Get("level")),
 		Search:  strings.TrimSpace(values.Get("q")),
-		Limit:   200,
+		Limit:   1000,
 	}
 	if query.AgentID != "" && !validAgentID(query.AgentID) {
 		writeError(w, http.StatusBadRequest, "invalid agent_id filter")
@@ -336,8 +336,8 @@ func (s *Server) listCoreLogs(w http.ResponseWriter, request *http.Request) {
 	}
 	if raw := strings.TrimSpace(values.Get("limit")); raw != "" {
 		parsed, err := strconv.Atoi(raw)
-		if err != nil || parsed < 1 || parsed > 500 {
-			writeError(w, http.StatusBadRequest, "limit must be between 1 and 500")
+		if err != nil || parsed < 1 || parsed > 2000 {
+			writeError(w, http.StatusBadRequest, "limit must be between 1 and 2000 per engine")
 			return
 		}
 		query.Limit = parsed

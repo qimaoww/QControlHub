@@ -27,6 +27,7 @@ case "$url" in
         cat > "$output" <<'QUICK_START'
 #!/usr/bin/env bash
 printf '%s\n' "$@" > "$QCH_BOOTSTRAP_TEST_ARGS"
+printf '%s\n' "${QCH_INSTALL_DIR:-}" > "$QCH_BOOTSTRAP_TEST_WORK_DIR"
 QUICK_START
         ;;
     */docker-compose.yml)
@@ -39,6 +40,8 @@ chmod 755 "$fake_bin/curl"
 
 export QCH_BOOTSTRAP_TEST_LOG="$test_root/git.log"
 export QCH_BOOTSTRAP_TEST_ARGS="$test_root/quick-start.args"
+export QCH_BOOTSTRAP_TEST_WORK_DIR="$test_root/quick-start.work-dir"
+export XDG_CONFIG_HOME="$test_root/config"
 
 PATH="$fake_bin:$PATH" QCH_INSTALL_DIR="$install_dir" \
     bash <(cat "$repo_root/deploy/quick-start.sh") -m bundled
@@ -47,6 +50,8 @@ grep -Fq -- 'https://raw.githubusercontent.com/qimaoww/qcontrolhub/main/docker-c
 [ -f "$install_dir/.qcontrolhub-quick-start" ]
 [ -f "$install_dir/docker-compose.yml" ]
 [ ! -e "$install_dir/.git" ]
+grep -Fxq -- "$install_dir" "$XDG_CONFIG_HOME/qcontrolhub/install-dir"
+grep -Fxq -- "$install_dir" "$QCH_BOOTSTRAP_TEST_WORK_DIR"
 grep -Fxq -- "-m" "$QCH_BOOTSTRAP_TEST_ARGS"
 grep -Fxq -- "bundled" "$QCH_BOOTSTRAP_TEST_ARGS"
 
@@ -57,6 +62,28 @@ grep -Fq -- 'https://raw.githubusercontent.com/qimaoww/qcontrolhub/main/deploy/q
 grep -Fq -- 'https://raw.githubusercontent.com/qimaoww/qcontrolhub/main/docker-compose.yml' "$QCH_BOOTSTRAP_TEST_LOG"
 grep -Fxq -- "external" "$QCH_BOOTSTRAP_TEST_ARGS"
 grep -Fxq -- "postgresql://db.example.test/qcontrolhub" "$QCH_BOOTSTRAP_TEST_ARGS"
+
+# A menu-selected directory is explicit user intent. A later remote invocation
+# must reuse it as the one-click install directory even if it contains
+# deployment state from before the standalone bootstrap marker was introduced.
+saved_install_dir="$test_root/saved install directory"
+mkdir -p "$saved_install_dir" "$XDG_CONFIG_HOME/qcontrolhub"
+printf '%s\n' 'preserve deployment state' > "$saved_install_dir/keep.txt"
+printf '%s\n' "$saved_install_dir" > "$XDG_CONFIG_HOME/qcontrolhub/install-dir"
+: > "$QCH_BOOTSTRAP_TEST_LOG"
+remote_cwd="$test_root/remote cwd"
+mkdir -p "$remote_cwd"
+(
+    cd "$remote_cwd"
+    PATH="$fake_bin:$PATH" XDG_CONFIG_HOME="$XDG_CONFIG_HOME" \
+        bash <(cat "$repo_root/deploy/quick-start.sh") -m bundled
+)
+[ ! -e "$remote_cwd/qcontrolhub" ]
+[ -f "$saved_install_dir/.qcontrolhub-quick-start" ]
+[ -f "$saved_install_dir/docker-compose.yml" ]
+grep -Fxq -- 'preserve deployment state' "$saved_install_dir/keep.txt"
+grep -Fxq -- "$saved_install_dir" "$QCH_BOOTSTRAP_TEST_WORK_DIR"
+grep -Fq -- 'https://raw.githubusercontent.com/qimaoww/qcontrolhub/main/docker-compose.yml' "$QCH_BOOTSTRAP_TEST_LOG"
 
 foreign_dir="$test_root/foreign"
 mkdir -p "$foreign_dir"
