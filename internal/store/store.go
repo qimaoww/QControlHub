@@ -48,7 +48,7 @@ type storeExecutor interface {
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 44
+const currentSchemaVersion = 45
 
 func Open(ctx context.Context, databaseURL string, allowInsecureRemote bool) (*Store, error) {
 	return OpenWithConfigKey(ctx, databaseURL, allowInsecureRemote, "")
@@ -1016,6 +1016,12 @@ func (s *Store) DeleteAgent(ctx context.Context, id string) error {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM port_traffic_daily_usage WHERE agent_id=$1`, id); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM port_traffic_daily_accounting WHERE agent_id=$1`, id); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM port_traffic_accounting_epochs WHERE agent_id=$1`, id); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM port_traffic_policies WHERE agent_id=$1`, id); err != nil {
@@ -2298,6 +2304,26 @@ CREATE TABLE IF NOT EXISTS port_traffic_accounting_epochs (
   last_collected_at timestamptz NOT NULL,
   PRIMARY KEY (policy_id,reset_generation,counter_epoch)
 );
+-- Attribution history survives port removal, just like daily_usage. Keep
+-- node ownership independently so explicit node deletion still clears it.
+ALTER TABLE port_traffic_daily_accounting ADD COLUMN IF NOT EXISTS agent_id text REFERENCES agents(id) ON DELETE CASCADE;
+ALTER TABLE port_traffic_accounting_epochs ADD COLUMN IF NOT EXISTS agent_id text REFERENCES agents(id) ON DELETE CASCADE;
+UPDATE port_traffic_daily_accounting h SET agent_id=p.agent_id FROM port_traffic_policies p WHERE h.policy_id=p.id AND h.agent_id IS NULL;
+UPDATE port_traffic_accounting_epochs h SET agent_id=p.agent_id FROM port_traffic_policies p WHERE h.policy_id=p.id AND h.agent_id IS NULL;
+ALTER TABLE port_traffic_daily_accounting ALTER COLUMN agent_id SET NOT NULL;
+ALTER TABLE port_traffic_accounting_epochs ALTER COLUMN agent_id SET NOT NULL;
+ALTER TABLE port_traffic_daily_accounting DROP CONSTRAINT IF EXISTS port_traffic_daily_accounting_policy_id_fkey;
+ALTER TABLE port_traffic_accounting_epochs DROP CONSTRAINT IF EXISTS port_traffic_accounting_epochs_policy_id_fkey;
+CREATE INDEX IF NOT EXISTS port_traffic_daily_accounting_agent_idx ON port_traffic_daily_accounting(agent_id);
+CREATE INDEX IF NOT EXISTS port_traffic_accounting_epochs_agent_idx ON port_traffic_accounting_epochs(agent_id);
+-- Version 44 did not retain listener-only epochs. Seed its current confirmed
+-- baseline before another epoch can replace the policy's latest pointer.
+INSERT INTO port_traffic_accounting_epochs(policy_id,agent_id,reset_generation,counter_epoch,accounting,
+  lifetime_received_bytes,lifetime_sent_bytes,first_collected_at,last_collected_at)
+SELECT id,agent_id,reset_generation,counter_epoch,COALESCE(accounting,'{"source":"listener"}'::jsonb),
+  reported_lifetime_received_bytes,reported_lifetime_sent_bytes,last_collected_at,last_collected_at
+FROM port_traffic_policies WHERE counter_epoch<>'' AND last_collected_at IS NOT NULL
+ON CONFLICT (policy_id,reset_generation,counter_epoch) DO NOTHING;
 ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS quota_notification_generation bigint NOT NULL DEFAULT 0;
 ALTER TABLE port_traffic_policies DROP CONSTRAINT IF EXISTS port_traffic_policies_quota_notification_generation_check;
 ALTER TABLE port_traffic_policies ADD CONSTRAINT port_traffic_policies_quota_notification_generation_check CHECK (quota_notification_generation >= 0);
@@ -2422,6 +2448,10 @@ CREATE INDEX substore_sync_items_created_idx ON substore_sync_items(target_id,cr
 -- do not run. Remove traffic rows left by versions that did not clean them in
 -- DeleteAgent; otherwise revoked nodes survive as orphan cards indefinitely.
 DELETE FROM port_traffic_daily_usage
+WHERE agent_id IN (SELECT id FROM agents WHERE revoked_at IS NOT NULL);
+DELETE FROM port_traffic_daily_accounting
+WHERE agent_id IN (SELECT id FROM agents WHERE revoked_at IS NOT NULL);
+DELETE FROM port_traffic_accounting_epochs
 WHERE agent_id IN (SELECT id FROM agents WHERE revoked_at IS NOT NULL);
 DELETE FROM port_traffic_policies
 WHERE agent_id IN (SELECT id FROM agents WHERE revoked_at IS NOT NULL);

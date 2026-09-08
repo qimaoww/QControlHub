@@ -1302,6 +1302,10 @@ async function testLargeLogRuntime() {
 }
 
 try {
+  if (mode === "config-migration") {
+    const {testConfigMigrationRuntime} = await import("./config_migration_browser_runtime.mjs");
+    await testConfigMigrationRuntime(new URLSearchParams(location.search).has("preview"));
+  } else {
   await import("./app.js");
   if (mode === "bbr-preview") await new Promise(() => {});
   else if (mode.startsWith("bbr")) await testSystemTCPRuntime();
@@ -1310,6 +1314,7 @@ try {
   else if (mode === "empty") await testEmptyRuntime();
   else if (mode === "logs") await testLargeLogRuntime();
   else await testReadonlyRuntime();
+  }
   document.documentElement.dataset.browserSmoke = "passed";
   if (!new URLSearchParams(location.search).has("preview"))
     document.body.innerHTML = `<pre id="browser-smoke-result">PASS ${mode}${window.logPressureResult ? " " + JSON.stringify(window.logPressureResult) : ""}</pre>`;

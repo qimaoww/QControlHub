@@ -59,6 +59,10 @@ const AgentFeatureManagedPolicy = "managed-agent-policy-v1"
 // as an optional import source.
 const AgentFeatureManagedConfigRead = "managed-config-read-v1"
 
+// AgentFeatureConfigFiles advertises validated, rollback-safe materialization
+// of Xray/sing-box source fragments alongside the runtime configuration.
+const AgentFeatureConfigFiles = "config-files-v1"
+
 const AgentFeatureSystemBBR = "system-bbr-v1"
 
 const (

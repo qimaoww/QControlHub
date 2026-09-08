@@ -92,6 +92,7 @@ export function bindConfigFiles(form, engine, notify) {
   const save = () => { if (selected !== "preview" && !readOnly) files[selected].content = input.value; };
   const controller = {
     content() { save(); return mergeConfigFiles(files); },
+	paths() { return files.map(file => file.path); },
     original() { return selected === "preview" ? input.value : originals[selected]; },
     dirty() { save(); return files.some((file,i) => file.content !== originals[i]); },
     reset() { if (selected !== "preview" && !readOnly) input.value = files[selected].content = originals[selected]; },

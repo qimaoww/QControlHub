@@ -36,11 +36,7 @@ func (e *Executor) prepareNativeAccountingContent(ctx context.Context, engine co
 		_, compilationErr = serverconfig.PrepareMarkedSingBoxAccounting(content)
 	}
 	if compilationErr != nil && strings.Contains(content, "qch-trf-") {
-		previous, err := readConfigurationFile(spec.ConfigPath)
-		if err != nil {
-			return content, "accounting update rejected: " + err.Error()
-		}
-		source, err := serverconfig.AccountingUpdateSource(engine, content, previous)
+		source, err := accountingUpdateInput(engine, spec.ConfigPath, content)
 		if err != nil {
 			return content, "accounting update rejected: " + err.Error()
 		}

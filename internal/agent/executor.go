@@ -609,6 +609,7 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (string, erro
 		task.ConfigContent = prepared
 		return e.validate(ctx, task.Engine, spec, task.ConfigContent)
 	case core.ActionDeploy:
+		originalInput := task.ConfigContent
 		prepared, accountingWarning := e.prepareNativeAccountingContent(ctx, task.Engine, spec, task.ConfigContent)
 		if accountingWarning != "" && strings.Contains(task.ConfigContent, "qch-trf-") {
 			return accountingWarning, errors.New("cannot safely regenerate managed accounting configuration")
@@ -617,6 +618,12 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (string, erro
 		validation, err := e.validate(ctx, task.Engine, spec, task.ConfigContent)
 		if err != nil {
 			return validation, err
+		}
+		if spec == DefaultSpecsForServiceManager(e.serviceManager().Kind())[task.Engine] &&
+			accountingWarning == "" && strings.Contains(originalInput, "qch-trf-") && originalInput != prepared {
+			if err := rememberAccountingInput(spec.ConfigPath, originalInput, prepared); err != nil {
+				return validation, fmt.Errorf("persist repeatable accounting source: %w", err)
+			}
 		}
 		if task.Engine == core.EngineShadowsocksRust && mainlandDestinationPolicyEnabled(task.MainlandAccessPolicies) {
 			if err := e.prepareShadowsocksRustACLService(ctx, spec); err != nil {

@@ -549,6 +549,49 @@ func (s *Store) UpdatePortTrafficUsage(ctx context.Context, agentID string, usag
 	if err := rows.Err(); err != nil {
 		return err
 	}
+	// A restored checkpoint can return to an older epoch with a NEW sample
+	// timestamp. Consult the durable per-epoch baseline, not only the latest
+	// policy epoch. The policy locks above serialize all writes to these rows.
+	type epochKey struct {
+		id         string
+		generation uint64
+		epoch      string
+	}
+	type epochBaseline struct {
+		received, sent uint64
+		accounting     *core.TrafficAccounting
+	}
+	history := make(map[epochKey]epochBaseline)
+	var historyIDs, historyEpochs []string
+	var historyGenerations []int64
+	for _, usage := range usages {
+		if _, ok := baselines[usage.PolicyID]; ok && usage.CounterEpoch != "" {
+			historyIDs = append(historyIDs, usage.PolicyID)
+			historyEpochs = append(historyEpochs, usage.CounterEpoch)
+			historyGenerations = append(historyGenerations, int64(usage.ResetGeneration))
+		}
+	}
+	if len(historyIDs) > 0 {
+		rows, err := tx.Query(ctx, `SELECT e.policy_id,e.reset_generation,e.counter_epoch,e.lifetime_received_bytes,e.lifetime_sent_bytes,e.accounting
+			FROM port_traffic_accounting_epochs e JOIN unnest($1::text[],$2::bigint[],$3::text[]) AS wanted(id,generation,epoch)
+			ON e.policy_id=wanted.id AND e.reset_generation=wanted.generation AND e.counter_epoch=wanted.epoch`, historyIDs, historyGenerations, historyEpochs)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			var key epochKey
+			var value epochBaseline
+			if err := rows.Scan(&key.id, &key.generation, &key.epoch, &value.received, &value.sent, &value.accounting); err != nil {
+				rows.Close()
+				return err
+			}
+			history[key] = value
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+	}
 	writes := make([]trafficUsageWrite, 0, len(baselines))
 	reportedAt = reportedAt.UTC()
 	for _, usage := range usages {
@@ -624,6 +667,18 @@ func (s *Store) UpdatePortTrafficUsage(ctx context.Context, agentID string, usag
 				}
 				receivedDelta = usage.LifetimeReceivedBytes - current.lifetimeReceived
 				sentDelta = usage.LifetimeSentBytes - current.lifetimeSent
+			} else if prior, known := history[epochKey{usage.PolicyID, usage.ResetGeneration, usage.CounterEpoch}]; known {
+				accounting := usage.Accounting
+				if accounting == nil {
+					accounting = &core.TrafficAccounting{Source: "listener"}
+				}
+				if !sameAccountingScope(prior.accounting, accounting) {
+					return fmt.Errorf("%w: historical accounting scope changed", ErrInvalid)
+				}
+				if usage.LifetimeReceivedBytes < prior.received || usage.LifetimeSentBytes < prior.sent {
+					continue
+				}
+				receivedDelta, sentDelta = usage.LifetimeReceivedBytes-prior.received, usage.LifetimeSentBytes-prior.sent
 			} else if current.epoch != "" || (current.periodStart == nil && !periodUnknownAfterUpgrade) {
 				receivedDelta, sentDelta = usage.LifetimeReceivedBytes, usage.LifetimeSentBytes
 			}
@@ -720,20 +775,20 @@ const applyTrafficUsageSQL = `
 		FROM input WHERE policy.id=input.id AND policy.agent_id=$1 AND policy.reset_generation=input.generation
 		RETURNING policy.id,policy.agent_id,policy.name,policy.engine,policy.port,policy.protocol
 	), scoped_daily AS (
-		INSERT INTO port_traffic_daily_accounting (policy_id,reset_generation,usage_date,source,received_bytes,sent_bytes)
-		SELECT updated.id,input.generation,(input.sampled_at AT TIME ZONE 'UTC')::date,
+		INSERT INTO port_traffic_daily_accounting (policy_id,agent_id,reset_generation,usage_date,source,received_bytes,sent_bytes)
+		SELECT updated.id,updated.agent_id,input.generation,(input.sampled_at AT TIME ZONE 'UTC')::date,
 			COALESCE(input.accounting->>'source','listener'),input.received_delta,input.sent_delta
 		FROM updated JOIN input ON input.id=updated.id WHERE input.record_sample
 		ON CONFLICT (policy_id,reset_generation,usage_date,source) DO UPDATE SET
 			received_bytes=LEAST(9223372036854775807::numeric,port_traffic_daily_accounting.received_bytes::numeric+EXCLUDED.received_bytes)::bigint,
 			sent_bytes=LEAST(9223372036854775807::numeric,port_traffic_daily_accounting.sent_bytes::numeric+EXCLUDED.sent_bytes)::bigint
 	), epochs AS (
-		INSERT INTO port_traffic_accounting_epochs (policy_id,reset_generation,counter_epoch,accounting,
+		INSERT INTO port_traffic_accounting_epochs (policy_id,agent_id,reset_generation,counter_epoch,accounting,
 			lifetime_received_bytes,lifetime_sent_bytes,first_collected_at,last_collected_at)
-		SELECT updated.id,input.generation,input.counter_epoch,input.accounting,input.lifetime_received,input.lifetime_sent,
+		SELECT updated.id,updated.agent_id,input.generation,input.counter_epoch,COALESCE(NULLIF(input.accounting,'null'::jsonb),'{"source":"listener"}'::jsonb),input.lifetime_received,input.lifetime_sent,
 			input.collected_at,input.collected_at
 		FROM updated JOIN input ON input.id=updated.id
-		WHERE input.record_sample AND input.collected_at IS NOT NULL AND NULLIF(input.accounting,'null'::jsonb) IS NOT NULL
+		WHERE input.record_sample AND input.collected_at IS NOT NULL AND input.counter_epoch<>''
 		ON CONFLICT (policy_id,reset_generation,counter_epoch) DO UPDATE SET
 			accounting=EXCLUDED.accounting,lifetime_received_bytes=EXCLUDED.lifetime_received_bytes,
 			lifetime_sent_bytes=EXCLUDED.lifetime_sent_bytes,last_collected_at=EXCLUDED.last_collected_at

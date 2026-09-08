@@ -278,6 +278,9 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 	nativeErrors := map[core.Engine]error{}
 	if manager.nativeSource != nil {
 		for _, record := range manager.records {
+			if record.Policy.Protocol != core.TrafficProtocolBoth {
+				continue
+			}
 			engine := record.Policy.Engine
 			if _, checked := nativeErrors[engine]; checked {
 				continue
@@ -288,6 +291,20 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 	}
 	for _, id := range sortedTrafficRecordIDs(manager.records) {
 		record := manager.records[id]
+		// Core counters and per-port marks do not distinguish the originating
+		// listener transport. A TCP-only policy must not bill another UDP flow
+		// (nor mistake a QUIC outbound carrying TCP for a UDP listener flow).
+		if manager.nativeSource != nil && record.Policy.Protocol != core.TrafficProtocolBoth && record.Accounting != nil && record.Accounting.Source != "listener" {
+			epoch, err := randomSuffix(16)
+			if err != nil {
+				return manager.setUnavailableLocked(err)
+			}
+			record.QuotaBaselineBytes = saturatedTrafficAdd(record.QuotaBaselineBytes, trafficUsed(record))
+			record.CounterEpoch, record.Accounting = epoch, nil
+			record.KernelCounters = make(map[string]uint64)
+			record.ReceivedBytes, record.SentBytes, record.LifetimeReceivedBytes, record.LifetimeSentBytes = 0, 0, 0, 0
+			manager.dirty, manager.rulesDirty = true, true
+		}
 		if record.CounterEpoch == "" {
 			epoch, err := randomSuffix(16)
 			if err != nil {
@@ -312,7 +329,7 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 			previousRecord.Accounting = &accounting
 		}
 		receivedDelta, sentDelta := collectTrafficCounterDeltas(counters, record)
-		if manager.nativeSource != nil {
+		if manager.nativeSource != nil && record.Policy.Protocol == core.TrafficProtocolBoth {
 			err := nativeErrors[record.Policy.Engine]
 			if err == nil {
 				previousEpoch := record.CounterEpoch
@@ -356,6 +373,9 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 					continue
 				}
 			}
+		}
+		if manager.nativeSource != nil && record.Policy.Protocol != core.TrafficProtocolBoth {
+			record.AccountingError = "single-protocol policy uses listener-only accounting; dual accounting requires TCP+UDP because core counters and outbound marks are shared"
 		}
 		if !record.PeriodStart.Equal(periodStart) || !record.PeriodEnd.Equal(periodEnd) {
 			record.ReceivedBytes, record.SentBytes = 0, 0

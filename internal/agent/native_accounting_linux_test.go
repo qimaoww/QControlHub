@@ -177,3 +177,57 @@ func TestQuotaRelaxationDuringAccountingFailure(t *testing.T) {
 		})
 	}
 }
+
+func TestSingleProtocolAccountingDoesNotBillOtherTransport(t *testing.T) {
+	for _, engine := range []core.Engine{core.EngineXray, core.EngineSingBox, core.EngineMihomo, core.EngineShadowsocksRust} {
+		for _, protocol := range []core.TrafficProtocol{core.TrafficProtocolTCP, core.TrafficProtocolUDP} {
+			m, b, now, p := newAccuracyTrafficManager(t)
+			p.Engine, p.Protocol = engine, protocol
+			if err := m.SetPolicies(context.Background(), []core.PortTrafficPolicy{p}, p.AgentID); err != nil {
+				t.Fatal(err)
+			}
+			m.nativeSource = func(context.Context, core.Engine) (nativeAccountingSnapshot, error) {
+				t.Error("queried protocol-ambiguous source")
+				return nativeAccountingSnapshot{}, nil
+			}
+			r := m.records[p.ID]
+			b.counters[trafficCounterName(r, "targetout", "udp")] = 100
+			b.counters[trafficCounterName(r, "targetout", "tcp")] = 100
+			b.counters[trafficCounterName(r, "in", string(protocol))] = 25
+			*now = now.Add(time.Second)
+			m.collect(context.Background(), false)
+			got := m.Snapshot()[0]
+			if got.UsedBytes != 25 || !got.EnforcementAvailable || !strings.Contains(got.EnforcementError, "listener-only") {
+				t.Fatalf("invalid filtered sample: %+v", got)
+			}
+		}
+	}
+}
+
+func TestSingleProtocolUpgradePreservesQuotaBaseline(t *testing.T) {
+	m, backend, now, policy := newAccuracyTrafficManager(t)
+	policy.Protocol = core.TrafficProtocolTCP
+	if err := m.SetPolicies(context.Background(), []core.PortTrafficPolicy{policy}, policy.AgentID); err != nil {
+		t.Fatal(err)
+	}
+	record := m.records[policy.ID]
+	oldEpoch := record.CounterEpoch
+	record.Accounting = &core.TrafficAccounting{Source: "core-api", Inbound: "a"}
+	record.ReceivedBytes, record.LifetimeReceivedBytes = 100, 100
+	record.QuotaBaselineBytes = 50
+	m.nativeSource = func(context.Context, core.Engine) (nativeAccountingSnapshot, error) {
+		t.Fatal("single protocol must not query shared native counters")
+		return nativeAccountingSnapshot{}, nil
+	}
+	*now = now.Add(time.Second)
+	m.collect(context.Background(), false)
+	if record.CounterEpoch == oldEpoch || record.QuotaBaselineBytes != 150 || record.Accounting != nil || record.LifetimeReceivedBytes != 0 {
+		t.Fatalf("upgrade lost quota or reused mixed-scope epoch: %+v", record)
+	}
+	backend.counters[trafficCounterName(record, "in", "tcp")] = 25
+	*now = now.Add(time.Second)
+	m.collect(context.Background(), false)
+	if got := m.Snapshot()[0]; got.ReceivedBytes != 25 || record.QuotaBaselineBytes != 150 {
+		t.Fatalf("upgrade rebilled old scope: %+v", got)
+	}
+}
