@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -70,6 +71,21 @@ func TestNativeTrafficCores(t *testing.T) {
 			content := `{"inbounds":[{"tag":"a","port":1080,"listen":"127.0.0.1","protocol":"socks","settings":{"auth":"noauth","udp":true}},{"tag":"b","port":1081,"listen":"127.0.0.1","protocol":"socks","settings":{"auth":"noauth","udp":true}}],"outbounds":[{"tag":"direct","protocol":"freedom"}]}`
 			if engine == core.EngineSingBox {
 				content = `{"inbounds":[{"tag":"a","listen_port":1080,"listen":"127.0.0.1","type":"socks"},{"tag":"b","listen_port":1081,"listen":"127.0.0.1","type":"socks"}],"outbounds":[{"tag":"direct","type":"direct"}]}`
+			}
+			if os.Getenv("QCH_TEST_UNTAGGED_OUTBOUNDS") == "1" {
+				content = strings.ReplaceAll(content, `"tag":"direct",`, "")
+				t.Log("testing automatic default-outbound tag assignment")
+			}
+			protocolExit := os.Getenv("QCH_TEST_PROTOCOL_OUTBOUNDS") == "1" && (engine == core.EngineXray || engine == core.EngineSingBox)
+			if protocolExit {
+				var root map[string]any
+				if err := json.Unmarshal([]byte(content), &root); err != nil {
+					t.Fatal(err)
+				}
+				root["outbounds"] = []any{nativeTestVLESSExit(t, engine, binary)}
+				data, _ := json.Marshal(root)
+				content = string(data)
+				t.Log("testing untagged VLESS protocol outbounds with explicitly disabled multiplexing")
 			}
 			plan, err := serverconfig.PlanPresetAccounting(engine, content)
 			if engine == core.EngineSingBox && os.Getenv("QCH_TEST_SINGBOX_MARKS") == "1" {
@@ -256,7 +272,13 @@ func TestNativeTrafficCores(t *testing.T) {
 					want.ClientReceived += 13
 					want.ClientSent += 12
 				}
-				if got != want {
+				if protocolExit {
+					// Protocol exits may count their transport framing. Both legs
+					// must include the payload without mixing the other port.
+					if got.ClientReceived != want.ClientReceived || got.ClientSent != want.ClientSent || got.TargetSent < want.TargetSent || got.TargetSent > want.TargetSent+256 || got.TargetReceived < want.TargetReceived || got.TargetReceived > want.TargetReceived+256 {
+						t.Fatalf("protocol exit port %d: %+v, payload %+v", port.Port, got, want)
+					}
+				} else if got != want {
 					t.Fatalf("port %d: %+v, want %+v", port.Port, got, want)
 				}
 			}
@@ -273,6 +295,61 @@ func TestNativeTrafficCores(t *testing.T) {
 			testStatsAPIProxyIsolation(t, ctx, engine, plan)
 		})
 	}
+}
+
+// A real second-hop VLESS server in the same isolated network verifies that
+// independent accounting applies to protocol exits, not only direct sockets.
+func nativeTestVLESSExit(t *testing.T, engine core.Engine, binary string) map[string]any {
+	t.Helper()
+	const uuid = "0185f625-451f-4a40-91aa-57b3f392fabc"
+	const port = 20100
+	var inbound, outbound, exit map[string]any
+	if engine == core.EngineXray {
+		inbound = map[string]any{"tag": "relay", "listen": "127.0.0.1", "port": port, "protocol": "vless", "settings": map[string]any{"decryption": "none", "clients": []any{map[string]any{"id": uuid}}}}
+		outbound = map[string]any{"protocol": "freedom"}
+		exit = map[string]any{"protocol": "vless", "settings": map[string]any{"vnext": []any{map[string]any{"address": "127.0.0.1", "port": port, "users": []any{map[string]any{"id": uuid, "encryption": "none"}}}}}, "mux": map[string]any{"enabled": false}}
+	} else {
+		inbound = map[string]any{"tag": "relay", "listen": "127.0.0.1", "listen_port": port, "type": "vless", "users": []any{map[string]any{"uuid": uuid}}}
+		outbound = map[string]any{"type": "direct"}
+		exit = map[string]any{"type": "vless", "server": "127.0.0.1", "server_port": port, "uuid": uuid, "multiplex": map[string]any{"enabled": false}}
+	}
+	data, _ := json.Marshal(map[string]any{"inbounds": []any{inbound}, "outbounds": []any{outbound}})
+	path := filepath.Join(t.TempDir(), "relay.json")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	command := exec.CommandContext(ctx, binary, "run", "-c", path)
+	log, err := os.CreateTemp(t.TempDir(), "relay-log-")
+	if err != nil {
+		cancel()
+		t.Fatal(err)
+	}
+	command.Stdout, command.Stderr = log, log
+	if err := command.Start(); err != nil {
+		cancel()
+		_ = log.Close()
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		cancel()
+		_ = command.Wait()
+		_ = log.Close()
+		if t.Failed() {
+			data, _ := os.ReadFile(log.Name())
+			t.Log(string(data))
+		}
+	})
+	for attempt := 0; attempt < 80; attempt++ {
+		connection, err := net.DialTimeout("tcp", "127.0.0.1:20100", 100*time.Millisecond)
+		if err == nil {
+			_ = connection.Close()
+			return exit
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatal("VLESS relay did not start")
+	return nil
 }
 
 type resetStatsTestCodec struct{ nativeStatsCodec }

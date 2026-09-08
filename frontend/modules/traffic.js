@@ -22,8 +22,13 @@ export function renderTrafficAccounting(policy, esc, bytes) {
   const partialEgress = policy.engine === "mihomo" && accounting?.source === "nft-dual";
   const tone = failed ? "bad" : dual && !partialEgress ? "ok" : "limited";
   const title = failed ? "统计异常" : partialEgress ? "双链路 · 范围受限" : dual ? "双链路统计" : "仅监听端口";
+  const outboundTagHint = raw.endsWith("outbound tags must be present and unique")
+    ? "出口缺少标签或标签重复，独立出口统计未启用。新版 Agent 可自动补齐缺失标签；重复标签需修正配置，不能直接合并计数。"
+    : /outbounds\[\d+\]\.tag duplicates an earlier outbound;/.test(raw)
+      ? "多个出口使用了相同标签，无法确定路由与统计归属。请为这些出口设置不同标签，并同步修改对应路由。"
+      : "";
   const hint = failed
-    ? raw ? "请查看诊断信息，确认统计是否完整。" : "Agent 报告监控不可用，暂未提供详细诊断。"
+    ? outboundTagHint || (raw ? "请查看诊断信息，确认统计是否完整。" : "Agent 报告监控不可用，暂未提供详细诊断。")
     : scopeOnly ? "暂未确认入站协议独占，当前仅统计入口收发。"
     : !dual ? "独立出口统计尚未生效，当前仅计入口。"
     : accounting.source === "core-api" ? "内核计数 · 包含入站协议开销" : "网络层计数 · 包含包头及重传";

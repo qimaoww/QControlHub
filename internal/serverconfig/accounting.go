@@ -101,6 +101,9 @@ func PrepareAccounting(engine core.Engine, content string) (AccountingPlan, erro
 func prepareTaggedAccounting(engine core.Engine, root map[string]any, plan *AccountingPlan) error {
 	inbounds, _ := root["inbounds"].([]any)
 	outbounds, _ := root["outbounds"].([]any)
+	if len(outbounds) == 0 {
+		return fmt.Errorf("no explicit default outbound")
+	}
 	xray := engine == core.EngineXray
 	if xray {
 		address, err := xrayAccountingAPIAddress(root)
@@ -166,17 +169,46 @@ func prepareTaggedAccounting(engine core.Engine, root map[string]any, plan *Acco
 	var originals []any
 	var priorClones []any
 	byTag := map[string]map[string]any{}
+	// Untagged outbounds are legal defaults. Give them stable, collision-free
+	// identities without changing their order or any existing route targets.
+	usedTags := map[string]bool{apiTag: true}
+	usedTags[stringValue(route["final"])] = true
+	routeRules, _ := route["rules"].([]any)
+	for _, raw := range routeRules {
+		usedTags[stringValue(mapValue(raw)[targetKey])] = true
+	}
 	for _, raw := range outbounds {
+		if out := mapValue(raw); out != nil {
+			usedTags[stringValue(out["tag"])] = true
+		}
+	}
+	for index, raw := range outbounds {
 		out := mapValue(raw)
+		if out == nil {
+			return fmt.Errorf("outbounds[%d] must be an object", index)
+		}
 		tag := stringValue(out["tag"])
+		if tag == "" {
+			if value, exists := out["tag"]; exists && value != "" {
+				return fmt.Errorf("outbounds[%d].tag must be a string", index)
+			}
+			for suffix := index + 1; ; suffix++ {
+				tag = fmt.Sprintf("qch-outbound-%d", suffix)
+				if !usedTags[tag] {
+					break
+				}
+			}
+			out["tag"] = tag
+			usedTags[tag] = true
+		}
 		if strings.HasPrefix(tag, accountingPrefix) {
 			priorClones = append(priorClones, raw)
 			continue
 		}
-		if tag == "" || byTag[tag] != nil {
-			return fmt.Errorf("outbound tags must be present and unique")
+		if byTag[tag] != nil {
+			return fmt.Errorf("outbounds[%d].tag duplicates an earlier outbound; assign distinct tags and update the intended route targets", index)
 		}
-		if out["detour"] != nil || out["proxySettings"] != nil || out["mux"] != nil || out["multiplex"] != nil || out[kindKey] == "selector" || out[kindKey] == "urltest" || mapValue(mapValue(out["streamSettings"])["sockopt"])["dialerProxy"] != nil {
+		if out["detour"] != nil || out["proxySettings"] != nil || !accountingMultiplexDisabled(out["mux"]) || !accountingMultiplexDisabled(out["multiplex"]) || out[kindKey] == "selector" || out[kindKey] == "urltest" || mapValue(mapValue(out["streamSettings"])["sockopt"])["dialerProxy"] != nil {
 			return fmt.Errorf("chained, balanced or multiplexed outbound %s requires explicit accounting mapping", tag)
 		}
 		byTag[tag] = out
@@ -194,6 +226,31 @@ func prepareTaggedAccounting(engine core.Engine, root map[string]any, plan *Acco
 	}
 	if byTag[defaultTag] == nil {
 		return fmt.Errorf("unknown default outbound")
+	}
+	// Xray protocol writers can bypass the core's outbound byte wrapper (the
+	// native VLESS regression reproduces an uplink of zero). Use socket marks
+	// for the whole configuration when protocol exits are present, never mix
+	// listener bytes with an incomplete API counter or estimate missing bytes.
+	xrayMarked := false
+	if xray {
+		for _, raw := range originals {
+			switch stringValue(mapValue(raw)[kindKey]) {
+			case "freedom", "blackhole", "dns":
+			case "vless", "vmess", "trojan", "shadowsocks", "socks", "http":
+				xrayMarked = true
+			default:
+				return fmt.Errorf("outbound protocol requires explicit accounting mapping")
+			}
+		}
+		if xrayMarked {
+			for _, raw := range originals {
+				mark := mapValue(mapValue(mapValue(raw)["streamSettings"])["sockopt"])["mark"]
+				if mark != nil && mark != json.Number("0") {
+					return fmt.Errorf("custom outbound socket mark requires manual review")
+				}
+			}
+			plan.Source = "nft-dual"
+		}
 	}
 	var originalRules []any
 	var priorRules []any
@@ -215,7 +272,7 @@ func prepareTaggedAccounting(engine core.Engine, root map[string]any, plan *Acco
 		}
 		originalRules = append(originalRules, raw)
 	}
-	var clones []any
+	var clones, legacyClones []any
 	seenPorts, seenTags := map[int]bool{}, map[string]bool{}
 	for _, raw := range inbounds {
 		in := mapValue(raw)
@@ -229,6 +286,9 @@ func prepareTaggedAccounting(engine core.Engine, root map[string]any, plan *Acco
 		}
 		seenPorts[port], seenTags[tag] = true, true
 		entry := AccountingPort{Port: port, Inbound: tag}
+		if xrayMarked {
+			entry.Mark = uint32(0x51430000) | uint32(port)
+		}
 		for _, rawOut := range originals {
 			out := mapValue(rawOut)
 			original := stringValue(out["tag"])
@@ -237,6 +297,19 @@ func prepareTaggedAccounting(engine core.Engine, root map[string]any, plan *Acco
 			}
 			clone := cloneAccountingObject(out)
 			clone["tag"] = accountingTag(port, original)
+			if xrayMarked {
+				legacyClones = append(legacyClones, cloneAccountingObject(clone))
+				stream := mapValue(clone["streamSettings"])
+				if stream == nil {
+					stream = map[string]any{}
+				}
+				sockopt := mapValue(stream["sockopt"])
+				if sockopt == nil {
+					sockopt = map[string]any{}
+				}
+				sockopt["mark"] = entry.Mark
+				stream["sockopt"], clone["streamSettings"] = sockopt, stream
+			}
 			clones = append(clones, clone)
 			entry.Outbounds = append(entry.Outbounds, stringValue(clone["tag"]))
 		}
@@ -301,7 +374,7 @@ func prepareTaggedAccounting(engine core.Engine, root map[string]any, plan *Acco
 	}
 	compiled = append(apiRules, compiled...)
 	route["rules"] = compiled
-	if !accountingGeneratedSubset(priorClones, clones) || !accountingGeneratedSubset(priorRules, compiled) {
+	if !accountingGeneratedSubset(priorClones, append(legacyClones, clones...)) || !accountingGeneratedSubset(priorRules, compiled) {
 		return fmt.Errorf("reserved accounting tags conflict with custom or edited routing; review configuration before migration")
 	}
 	root[routeKey] = route
@@ -360,6 +433,12 @@ func prepareTaggedAccounting(engine core.Engine, root map[string]any, plan *Acco
 		}
 	}
 	return nil
+}
+
+func accountingMultiplexDisabled(value any) bool {
+	// An explicitly disabled option is common in imported protocol outbounds.
+	// Preserve it verbatim, but do not infer disabled from an unknown/default mode.
+	return value == nil || mapValue(value)["enabled"] == false
 }
 
 func accountingGeneratedSubset(previous, current []any) bool {

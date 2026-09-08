@@ -3,6 +3,7 @@ package serverconfig
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
@@ -14,6 +15,30 @@ import (
 type ConfigFile struct {
 	Path    string `json:"path"`
 	Content string `json:"content"`
+}
+
+var configNameUnsafe = regexp.MustCompile(`[^\p{L}\p{N}_.-]`)
+var configSourceName = regexp.MustCompile(`^[\p{L}\p{N}_-][\p{L}\p{N}_.-]*\.json$`)
+
+// Names come from the preset's inbound/outbound tag, never the Agent's name.
+// The manifest keeps array order; filenames must not determine routing order.
+func configEntryFilename(tag, kind string, index int, used map[string]bool) string {
+	base := strings.TrimSuffix(tag, ".json")
+	base = configNameUnsafe.ReplaceAllString(base, "_")
+	base = strings.Trim(base, ".")
+	runes := []rune(base)
+	if len(runes) > 48 {
+		base = string(runes[:48])
+	}
+	if base == "" {
+		base = fmt.Sprintf("%s-%d", strings.TrimSuffix(kind, "s"), index+1)
+	}
+	name := base + ".json"
+	for suffix := 2; used[name]; suffix++ {
+		name = fmt.Sprintf("%s-%d.json", base, suffix)
+	}
+	used[name] = true
+	return name
 }
 
 func SplitConfigFiles(engine core.Engine, content string) ([]ConfigFile, error) {
@@ -28,7 +53,7 @@ func SplitConfigFiles(engine core.Engine, content string) ([]ConfigFile, error) 
 	if err := json.Unmarshal([]byte(content), &root); err != nil || root == nil {
 		return nil, fmt.Errorf("multi-file configuration must be a JSON object")
 	}
-	files := []ConfigFile{{Path: "00-common.json"}}
+	files := []ConfigFile{{Path: "common.json"}}
 	for _, key := range []string{"inbounds", "outbounds"} {
 		raw, exists := root[key]
 		if !exists {
@@ -41,13 +66,16 @@ func SplitConfigFiles(engine core.Engine, content string) ([]ConfigFile, error) 
 		if entries == nil {
 			return nil, fmt.Errorf("%s must not be null", key)
 		}
+		used := map[string]bool{}
 		for i, entry := range entries {
 			var object map[string]json.RawMessage
 			if err := json.Unmarshal(entry, &object); err != nil || object == nil {
 				return nil, fmt.Errorf("%s[%d] must be an object", key, i)
 			}
 			value, _ := json.MarshalIndent(map[string]any{key: []json.RawMessage{entry}}, "", "  ")
-			files = append(files, ConfigFile{Path: fmt.Sprintf("%s/%04d.json", key, i), Content: string(value) + "\n"})
+			var tag string
+			_ = json.Unmarshal(object["tag"], &tag)
+			files = append(files, ConfigFile{Path: key + "/" + configEntryFilename(tag, key, i, used), Content: string(value) + "\n"})
 		}
 		// Keep empty arrays in common to preserve their presence.
 		if len(entries) > 0 {
@@ -63,7 +91,7 @@ func MergeConfigFiles(engine core.Engine, files []ConfigFile) (string, error) {
 	if engine != core.EngineXray && engine != core.EngineSingBox {
 		return "", fmt.Errorf("multi-file editing is only available for Xray and sing-box")
 	}
-	if len(files) == 0 || len(files) > 1025 || files[0].Path != "00-common.json" {
+	if len(files) == 0 || len(files) > 1025 || (files[0].Path != "common.json" && files[0].Path != "00-common.json") {
 		return "", fmt.Errorf("invalid configuration file manifest")
 	}
 	var root map[string]json.RawMessage
@@ -85,8 +113,12 @@ func MergeConfigFiles(engine core.Engine, files []ConfigFile) (string, error) {
 		if i == 0 {
 			continue
 		}
-		key, _, ok := strings.Cut(file.Path, "/")
-		if !ok || (key != "inbounds" && key != "outbounds") || file.Path != fmt.Sprintf("%s/%04d.json", key, len(lists[key])) {
+		key, name, ok := strings.Cut(file.Path, "/")
+		validName := len(name) <= 220 && configSourceName.MatchString(name)
+		if files[0].Path == "00-common.json" {
+			validName = file.Path == fmt.Sprintf("%s/%04d.json", key, len(lists[key]))
+		}
+		if !ok || (key != "inbounds" && key != "outbounds") || !validName {
 			return "", fmt.Errorf("invalid ordered configuration path %q", file.Path)
 		}
 		var fragment map[string]json.RawMessage
