@@ -141,6 +141,7 @@ export function installTraffic(ctx) {
   const cardInteractions = createInteractionGate();
   let cancelTrafficCardDrag = () => {};
   let pendingTrafficRender = null;
+  let trafficSyncPending = false;
   const gibibyte = 1024 ** 3;
   const dateInputValue = (value = new Date()) => {
     const date = new Date(value);
@@ -198,7 +199,7 @@ export function installTraffic(ctx) {
       <label>协议<select name="protocol"><option value="both" ${policy.protocol === "both" || !policy.protocol ? "selected" : ""}>TCP + UDP</option><option value="tcp" ${policy.protocol === "tcp" ? "selected" : ""}>TCP</option><option value="udp" ${policy.protocol === "udp" ? "selected" : ""}>UDP</option></select></label>
       <label>统计周期<select name="cycle"><option value="monthly" ${policy.cycle === "monthly" || !policy.cycle ? "selected" : ""}>每月</option><option value="yearly" ${policy.cycle === "yearly" ? "selected" : ""}>每年</option></select></label>
       <label>周期起始日期<input name="cycle_anchor" type="date" value="${dateInputValue(policy.cycle_anchor)}" max="${dateInputValue()}" required></label>
-      <label>周期额度（GiB）<input name="limit_gb" type="number" value="${quotaInputValue(policy.quota_enabled === false ? 0 : policy.limit_bytes)}" min="0.000001" max="8388607" step="0.000001" placeholder="100"></label>
+      <label>周期额度（GiB）<input name="limit_gb" type="number" value="${quotaInputValue(policy.quota_enabled === false ? 0 : policy.limit_bytes)}" min="0" max="8388607" step="0.000001" placeholder="留空或填 0：仅监控"></label>
     </div><label class="traffic-auto-block"><input type="checkbox" name="auto_block" value="1" ${policy.auto_block !== false ? "checked" : ""}><span><b>超额自动封禁</b><small>关闭后仍统计流量，但不会阻断端口</small></span></label>`;
   };
   const requestFromForm = (form) => {
@@ -536,20 +537,27 @@ export function installTraffic(ctx) {
       renderTraffic(state.data.agents || [], state.data.trafficPolicies || [], state.data.trafficEndpoints || []);
     };
     const trafficSync = document.querySelector("[data-traffic-sync]");
+    if (trafficSync) trafficSync.disabled = trafficSyncPending;
     if (trafficSync) trafficSync.onclick = async (event) => {
-      if (!(await confirmAction("同步会按节点当前配置重新核对并补充已发现端口，不会删除流量页上已有的端口。确定同步？", "同步端口"))) return;
+      if (trafficSyncPending) return;
       const button = event.currentTarget;
+      const navigationEpoch = state.navigationEpoch;
+      trafficSyncPending = true;
       button.disabled = true;
-      button.textContent = "同步中…";
       try {
+        if (!(await confirmAction("同步会按全部节点当前配置重新核对并补充已发现端口，不会删除流量页上已有的端口。确定同步？", "同步端口"))) return;
+        button.textContent = "同步中…";
         await api("/traffic-endpoints/sync", { method: "POST" });
         notify("端口监控已同步，正在刷新");
-        await traffic();
+        if (state.route === "traffic" && state.navigationEpoch === navigationEpoch) await traffic();
       } catch (error) {
         notify(error.message, "error");
       } finally {
+        trafficSyncPending = false;
         button.disabled = false;
         button.textContent = "同步端口";
+        const currentButton = document.querySelector("[data-traffic-sync]");
+        if (currentButton) currentButton.disabled = false;
       }
     };
     document.querySelectorAll('a[href="#traffic-new"]').forEach((link) => {

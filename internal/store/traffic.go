@@ -18,7 +18,7 @@ import (
 
 const trafficPolicyColumns = `id,agent_id,name,engine,port,protocol,cycle,cycle_anchor,limit_bytes,auto_block,quota_enabled,monitoring_enabled,discovered,reset_generation,
        received_bytes,sent_bytes,used_bytes,receive_bps,send_bps,period_start,period_end,blocked,
-       enforcement_available,enforcement_error,last_reported_at,created_at,updated_at,last_collected_at,accounting`
+       enforcement_available,enforcement_error,last_reported_at,created_at,updated_at,last_collected_at,accounting,metadata_managed`
 
 type trafficPolicyScanner interface {
 	Scan(dest ...any) error
@@ -34,6 +34,7 @@ func scanTrafficPolicy(row trafficPolicyScanner) (core.PortTrafficPolicy, error)
 		&policy.PeriodEnd, &policy.Blocked, &policy.EnforcementAvailable,
 		&policy.EnforcementError, &policy.LastReportedAt, &policy.CreatedAt, &policy.UpdatedAt,
 		&policy.LastCollectedAt, &policy.Accounting,
+		&policy.MetadataManaged,
 	)
 	return policy, err
 }
@@ -143,37 +144,38 @@ func (s *Store) ReconcilePortTrafficEndpoints(ctx context.Context, raw []core.Po
 	for _, endpoint := range endpoints {
 		key := trafficPortKey(endpoint.AgentID, endpoint.Port)
 		if policy, exists := existing[key]; exists {
-			protocolChanged := !policy.QuotaEnabled && policy.Protocol != endpoint.Protocol
-			metadataChanged := !policy.QuotaEnabled && (policy.Name != endpoint.Name || policy.Engine != endpoint.Engine || protocolChanged)
+			updateMetadata := !policy.QuotaEnabled && !policy.MetadataManaged
+			protocolChanged := updateMetadata && policy.Protocol != endpoint.Protocol
+			metadataChanged := updateMetadata && (policy.Name != endpoint.Name || policy.Engine != endpoint.Engine || protocolChanged)
 			if policy.Discovered && !metadataChanged {
 				continue
 			}
 			writes.Queue(`
 				UPDATE port_traffic_policies SET
 					discovered=true,
-					name=CASE WHEN quota_enabled THEN name ELSE $2 END,
-					engine=CASE WHEN quota_enabled THEN engine ELSE $3 END,
-					protocol=CASE WHEN quota_enabled THEN protocol ELSE $4::varchar(8) END,
-					reset_generation=reset_generation+CASE WHEN NOT quota_enabled AND protocol<>$4::varchar(8) THEN 1 ELSE 0 END,
-					received_bytes=CASE WHEN NOT quota_enabled AND protocol<>$4::varchar(8) THEN 0 ELSE received_bytes END,
-					sent_bytes=CASE WHEN NOT quota_enabled AND protocol<>$4::varchar(8) THEN 0 ELSE sent_bytes END,
-					reported_received_bytes=CASE WHEN NOT quota_enabled AND protocol<>$4::varchar(8) THEN 0 ELSE reported_received_bytes END,
-					reported_sent_bytes=CASE WHEN NOT quota_enabled AND protocol<>$4::varchar(8) THEN 0 ELSE reported_sent_bytes END,
-					used_bytes=CASE WHEN NOT quota_enabled AND protocol<>$4::varchar(8) THEN 0 ELSE used_bytes END,
-					receive_bps=CASE WHEN NOT quota_enabled AND protocol<>$4::varchar(8) THEN 0 ELSE receive_bps END,
-					send_bps=CASE WHEN NOT quota_enabled AND protocol<>$4::varchar(8) THEN 0 ELSE send_bps END,
-					period_start=CASE WHEN NOT quota_enabled AND protocol<>$4::varchar(8) THEN NULL ELSE period_start END,
-					last_collected_at=CASE WHEN NOT quota_enabled AND protocol<>$4::varchar(8) THEN NULL ELSE last_collected_at END,
-					accounting=CASE WHEN NOT quota_enabled AND protocol<>$4::varchar(8) THEN NULL ELSE accounting END,
-					counter_epoch=CASE WHEN NOT quota_enabled AND protocol<>$4::varchar(8) THEN '' ELSE counter_epoch END,
-					reported_lifetime_received_bytes=CASE WHEN NOT quota_enabled AND protocol<>$4::varchar(8) THEN 0 ELSE reported_lifetime_received_bytes END,
-					reported_lifetime_sent_bytes=CASE WHEN NOT quota_enabled AND protocol<>$4::varchar(8) THEN 0 ELSE reported_lifetime_sent_bytes END,
-					period_end=CASE WHEN NOT quota_enabled AND protocol<>$4::varchar(8) THEN NULL ELSE period_end END,
-					blocked=CASE WHEN NOT quota_enabled AND protocol<>$4::varchar(8) THEN false ELSE blocked END,
-					last_reported_at=CASE WHEN NOT quota_enabled AND protocol<>$4::varchar(8) THEN NULL ELSE last_reported_at END,
-					traffic_history_initialized=CASE WHEN NOT quota_enabled AND protocol<>$4::varchar(8) THEN true ELSE traffic_history_initialized END,
+					name=CASE WHEN $5 THEN $2 ELSE name END,
+					engine=CASE WHEN $5 THEN $3 ELSE engine END,
+					protocol=CASE WHEN $5 THEN $4::varchar(8) ELSE protocol END,
+					reset_generation=reset_generation+CASE WHEN $6 THEN 1 ELSE 0 END,
+					received_bytes=CASE WHEN $6 THEN 0 ELSE received_bytes END,
+					sent_bytes=CASE WHEN $6 THEN 0 ELSE sent_bytes END,
+					reported_received_bytes=CASE WHEN $6 THEN 0 ELSE reported_received_bytes END,
+					reported_sent_bytes=CASE WHEN $6 THEN 0 ELSE reported_sent_bytes END,
+					used_bytes=CASE WHEN $6 THEN 0 ELSE used_bytes END,
+					receive_bps=CASE WHEN $6 THEN 0 ELSE receive_bps END,
+					send_bps=CASE WHEN $6 THEN 0 ELSE send_bps END,
+					period_start=CASE WHEN $6 THEN NULL ELSE period_start END,
+					last_collected_at=CASE WHEN $6 THEN NULL ELSE last_collected_at END,
+					accounting=CASE WHEN $6 THEN NULL ELSE accounting END,
+					counter_epoch=CASE WHEN $6 THEN '' ELSE counter_epoch END,
+					reported_lifetime_received_bytes=CASE WHEN $6 THEN 0 ELSE reported_lifetime_received_bytes END,
+					reported_lifetime_sent_bytes=CASE WHEN $6 THEN 0 ELSE reported_lifetime_sent_bytes END,
+					period_end=CASE WHEN $6 THEN NULL ELSE period_end END,
+					blocked=CASE WHEN $6 THEN false ELSE blocked END,
+					last_reported_at=CASE WHEN $6 THEN NULL ELSE last_reported_at END,
+					traffic_history_initialized=CASE WHEN $6 THEN true ELSE traffic_history_initialized END,
 					updated_at=now()
-				WHERE id=$1`, policy.ID, endpoint.Name, endpoint.Engine, endpoint.Protocol)
+				WHERE id=$1`, policy.ID, endpoint.Name, endpoint.Engine, endpoint.Protocol, updateMetadata, protocolChanged)
 			if protocolChanged {
 				changedAgents[endpoint.AgentID] = struct{}{}
 			}
@@ -315,8 +317,8 @@ func (s *Store) CreatePortTrafficPolicy(ctx context.Context, raw core.PortTraffi
 	enableQuota := request.LimitBytes > 0
 	effectiveAutoBlock := enableQuota && *request.AutoBlock
 	policy, err := scanTrafficPolicy(tx.QueryRow(ctx, `
-		INSERT INTO port_traffic_policies (id,agent_id,name,engine,port,protocol,cycle,cycle_anchor,limit_bytes,auto_block,quota_enabled,traffic_history_initialized,created_at,updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,true,$12,$12)
+		INSERT INTO port_traffic_policies (id,agent_id,name,engine,port,protocol,cycle,cycle_anchor,limit_bytes,auto_block,quota_enabled,traffic_history_initialized,metadata_managed,created_at,updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,true,true,$12,$12)
 		RETURNING `+trafficPolicyColumns,
 		id, request.AgentID, request.Name, request.Engine, request.Port, request.Protocol,
 		request.Cycle, request.CycleAnchor, request.LimitBytes, effectiveAutoBlock, enableQuota, now))
@@ -369,7 +371,7 @@ func updatePortTrafficPolicyRow(ctx context.Context, tx pgx.Tx, id string, reque
 	autoBlock := quotaEnabled && *request.AutoBlock
 	policy, err := scanTrafficPolicy(tx.QueryRow(ctx, `
 		UPDATE port_traffic_policies SET
-			name=$2,engine=$3,port=$4,protocol=$5::varchar(8),cycle=$6::varchar(8),cycle_anchor=$7::date,limit_bytes=$8,auto_block=$9,quota_enabled=$10,monitoring_enabled=true,
+			name=$2,engine=$3,port=$4,protocol=$5::varchar(8),cycle=$6::varchar(8),cycle_anchor=$7::date,limit_bytes=$8,auto_block=$9,quota_enabled=$10,monitoring_enabled=true,metadata_managed=true,
 			reset_generation=reset_generation + CASE WHEN port<>$4 OR protocol<>$5::varchar(8) OR cycle<>$6::varchar(8) OR cycle_anchor<>$7::date THEN 1 ELSE 0 END,
 			received_bytes=CASE WHEN port<>$4 OR protocol<>$5::varchar(8) OR cycle<>$6::varchar(8) OR cycle_anchor<>$7::date THEN 0 ELSE received_bytes END,
 			sent_bytes=CASE WHEN port<>$4 OR protocol<>$5::varchar(8) OR cycle<>$6::varchar(8) OR cycle_anchor<>$7::date THEN 0 ELSE sent_bytes END,

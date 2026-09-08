@@ -50,6 +50,7 @@ type PortTrafficPolicy struct {
 	QuotaEnabled         bool               `json:"quota_enabled"`
 	MonitoringEnabled    bool               `json:"monitoring_enabled"`
 	Discovered           bool               `json:"discovered"`
+	MetadataManaged      bool               `json:"-"` // Explicit operator edits must survive listener discovery.
 	ResetGeneration      uint64             `json:"reset_generation"`
 	ReceivedBytes        uint64             `json:"received_bytes"`
 	SentBytes            uint64             `json:"sent_bytes"`
