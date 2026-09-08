@@ -315,6 +315,17 @@ func collectNativeAccounting(record *trafficRecord, snapshot nativeAccountingSna
 		return 0, 0, errors.New("too many accounting outbounds")
 	}
 	first := record.Accounting == nil || record.Accounting.Source != "core-api" || record.Accounting.Inbound != port.Inbound || !reflect.DeepEqual(record.Accounting.Outbounds, port.Outbounds)
+	// Lazy counters may be absent before their first use. Once a nonzero
+	// baseline exists, absence in the same process is not evidence of reset.
+	// Validate all legs before mutating any baseline so recovery cannot rebill
+	// an omitted counter's old lifetime or consume the other legs prematurely.
+	if !first && record.Accounting.ProcessEpoch == snapshot.ProcessEpoch {
+		for _, key := range keys {
+			if _, present := snapshot.Counters[key]; !present && record.Accounting.Counters[key] != 0 {
+				return 0, 0, errors.New("incomplete native statistics: previously active counter is missing")
+			}
+		}
+	}
 	if first {
 		epoch, err := randomSuffix(16)
 		if err != nil {

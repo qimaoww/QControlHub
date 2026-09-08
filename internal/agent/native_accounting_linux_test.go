@@ -12,6 +12,49 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
 )
 
+func TestNativeMissingCounterDoesNotRebillRecovery(t *testing.T) {
+	for _, missing := range []string{"inbound>>>a>>>traffic>>>uplink", "inbound>>>a>>>traffic>>>downlink", "outbound>>>direct>>>traffic>>>downlink", "outbound>>>direct>>>traffic>>>uplink"} {
+		t.Run(missing, func(t *testing.T) {
+			m, _, now, policy := newAccuracyTrafficManager(t)
+			counters := map[string]uint64{"inbound>>>a>>>traffic>>>uplink": 100, "inbound>>>a>>>traffic>>>downlink": 100, "outbound>>>direct>>>traffic>>>uplink": 100, "outbound>>>direct>>>traffic>>>downlink": 100}
+			m.nativeSource = func(context.Context, core.Engine) (nativeAccountingSnapshot, error) {
+				return nativeAccountingSnapshot{Plan: serverconfig.AccountingPlan{Source: "core-api", Ports: []serverconfig.AccountingPort{{Port: policy.Port, Inbound: "a", Outbounds: []string{"direct"}}}}, Counters: counters, ProcessEpoch: "same"}, nil
+			}
+			m.collect(context.Background(), false)
+			for key := range counters {
+				counters[key] = 200
+			}
+			*now = now.Add(time.Second)
+			m.collect(context.Background(), false)
+			if got := m.Snapshot()[0]; got.ReceivedBytes != 200 || got.SentBytes != 200 {
+				t.Fatalf("initial accounting: %+v", got)
+			}
+			delete(counters, missing)
+			for key := range counters {
+				counters[key] = 225
+			}
+			*now = now.Add(time.Second)
+			m.collect(context.Background(), false)
+			if got := m.Snapshot()[0]; got.EnforcementAvailable {
+				t.Error("incomplete sample reported healthy")
+			}
+			for key := range counters {
+				counters[key] = 250
+			}
+			counters[missing] = 250
+			*now = now.Add(time.Second)
+			m.collect(context.Background(), false)
+			if got := m.Snapshot()[0]; got.ReceivedBytes != 300 || got.SentBytes != 300 {
+				t.Fatalf("missing counter recovery rebilled history: rx=%d tx=%d", got.ReceivedBytes, got.SentBytes)
+			}
+			m.collect(context.Background(), false)
+			if got := m.Snapshot()[0]; got.UsedBytes != 600 {
+				t.Fatalf("repeated snapshot changed total: %d", got.UsedBytes)
+			}
+		})
+	}
+}
+
 func TestAccountingSystemdEpochWithoutProcAccess(t *testing.T) {
 	for _, test := range []struct {
 		name, output string

@@ -957,9 +957,9 @@ func parseNFTTrafficCounters(contents []byte) (map[string]uint64, error) {
 	var document struct {
 		NFTables []struct {
 			Counter *struct {
-				Name   string `json:"name"`
-				Bytes  uint64 `json:"bytes"`
-				Handle uint64 `json:"handle"`
+				Name   string  `json:"name"`
+				Bytes  *uint64 `json:"bytes"`
+				Handle uint64  `json:"handle"`
 			} `json:"counter"`
 			Rule *struct {
 				Comment string `json:"comment"`
@@ -975,7 +975,13 @@ func parseNFTTrafficCounters(contents []byte) (map[string]uint64, error) {
 	result := make(map[string]uint64)
 	for _, item := range document.NFTables {
 		if item.Counter != nil && validTrafficCounterName(item.Counter.Name) {
-			result[item.Counter.Name] = item.Counter.Bytes
+			if item.Counter.Bytes == nil || *item.Counter.Bytes > math.MaxInt64 {
+				return nil, errors.New("invalid or missing nftables counter bytes")
+			}
+			if _, exists := result[item.Counter.Name]; exists {
+				return nil, errors.New("duplicate nftables traffic counter")
+			}
+			result[item.Counter.Name] = *item.Counter.Bytes
 			result["handle:"+item.Counter.Name] = item.Counter.Handle
 		}
 		if item.Rule != nil && strings.HasPrefix(item.Rule.Comment, "qch:block:") {
@@ -999,12 +1005,15 @@ func parseNFTTrafficCounters(contents []byte) (map[string]uint64, error) {
 				continue
 			}
 			var counter struct {
-				Bytes uint64 `json:"bytes"`
+				Bytes *uint64 `json:"bytes"`
 			}
 			if err := json.Unmarshal(expression.Counter, &counter); err != nil {
 				return nil, fmt.Errorf("parse nftables counter expression: %w", err)
 			}
-			result[item.Rule.Comment] = saturatedTrafficAdd(result[item.Rule.Comment], counter.Bytes)
+			if counter.Bytes == nil || *counter.Bytes > math.MaxInt64 {
+				return nil, errors.New("invalid or missing nftables anonymous counter bytes")
+			}
+			result[item.Rule.Comment] = saturatedTrafficAdd(result[item.Rule.Comment], *counter.Bytes)
 		}
 	}
 	return result, nil

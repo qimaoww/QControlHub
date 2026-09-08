@@ -239,6 +239,25 @@ func TestParseNFTTrafficCounters(t *testing.T) {
 	}
 }
 
+func TestParseNFTTrafficCountersRejectsIncompleteSnapshots(t *testing.T) {
+	name := "qch_trf_0123456789abcdef_0123456789abcdef0123456789abcdef_in_tcp"
+	entry := `{"counter":{"name":"` + name + `","handle":1,"bytes":100}}`
+	for _, entries := range []string{
+		strings.Replace(entry, `,"bytes":100`, "", 1),
+		strings.Replace(entry, `"bytes":100`, `"bytes":null`, 1),
+		strings.Replace(entry, `"bytes":100`, `"bytes":18446744073709551615`, 1),
+		entry + "," + entry,
+		`{"rule":{"comment":"qch:trf_0123456789abcdef:in:tcp","expr":[{"counter":{"packets":3}}]}}`,
+	} {
+		if got, err := parseNFTTrafficCounters([]byte(`{"nftables":[` + entries + `]}`)); err == nil {
+			t.Fatalf("accepted incomplete/ambiguous counters: %s => %v", entries, got)
+		}
+	}
+	if got, err := parseNFTTrafficCounters([]byte(`{"nftables":[` + strings.Replace(entry, `"bytes":100`, `"bytes":0`, 1) + `]}`)); err != nil || got[name] != 0 {
+		t.Fatalf("explicit zero counter rejected: %v %v", got, err)
+	}
+}
+
 func TestTrafficManagerReportsUnavailableWithoutRejectingPolicies(t *testing.T) {
 	now := time.Date(2026, 8, 21, 0, 0, 0, 0, time.UTC)
 	backend := &fakeTrafficBackend{counters: map[string]uint64{}, err: context.DeadlineExceeded}
