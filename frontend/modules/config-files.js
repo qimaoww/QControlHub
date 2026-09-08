@@ -74,7 +74,16 @@ export function mergeConfigFiles(files) {
   return content;
 }
 
-export function bindConfigFiles(form, engine, notify) {
+// Display names are independent of the canonical paths used for merge validation.
+export function configFileDisplayName(path, nodeName = "节点") {
+  const node = String(nodeName || "节点");
+  if (path === "00-common.json") return `${node} · 公共配置.json`;
+  const match = /^(inbounds|outbounds)\/(\d+)\.json$/.exec(path);
+  if (!match) return path;
+  return `${node} · ${match[1] === "inbounds" ? "入站" : "出站"} ${Number(match[2]) + 1}.json`;
+}
+
+export function bindConfigFiles(form, engine, notify, nodeName) {
   if (!form || !["xray","sing-box"].includes(engine)) return null;
   const editor = form.querySelector("[data-code-editor]"), input = form.querySelector("[data-code-input]");
   if (!editor || !input) return null;
@@ -90,7 +99,7 @@ export function bindConfigFiles(form, engine, notify) {
     if (!groups.has(kind)) {
       const group = document.createElement("optgroup"); group.label = kind; groups.set(kind, group); select.append(group);
     }
-    const option = document.createElement("option"); option.value = String(i); option.textContent = file.path; groups.get(kind).append(option);
+    const option = document.createElement("option"); option.value = String(i); option.textContent = configFileDisplayName(file.path, nodeName); groups.get(kind).append(option);
   }
   const preview = document.createElement("option"); preview.value = "preview"; preview.textContent = "合并预览（只读）"; select.append(preview);
   editor.querySelector(".code-file-meta").append(select);

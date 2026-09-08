@@ -1,5 +1,10 @@
 import assert from "node:assert/strict";
-import {splitConfigFiles,mergeConfigFiles} from "./modules/config-files.js";
+import {splitConfigFiles,mergeConfigFiles,configFileDisplayName} from "./modules/config-files.js";
+
+assert.equal(configFileDisplayName("00-common.json", "香港节点"), "香港节点 · 公共配置.json");
+assert.equal(configFileDisplayName("inbounds/0000.json", "香港节点"), "香港节点 · 入站 1.json");
+assert.equal(configFileDisplayName("outbounds/0010.json", "香港节点"), "香港节点 · 出站 11.json");
+assert.equal(configFileDisplayName("config.json", "香港节点"), "config.json");
 
 const original = '{"inbounds":[{"tag":"a","port":1080,"test":"[,\\\"}x"},{"tag":"b","port":1081}],"outbounds":[{"tag":"direct"}],"large":9007199254740993,"__proto__":{"safe":true}}';
 for (const engine of ["xray","sing-box"]) {
