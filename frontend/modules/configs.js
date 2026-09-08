@@ -397,6 +397,7 @@ export async function submitLiveConfigChange({
         engine,
         action: "validate",
         config_id: saved.id,
+        expected_config_version: saved.version,
       });
       return { saved, content: editor.content };
     }
@@ -405,6 +406,7 @@ export async function submitLiveConfigChange({
       engine,
       action: "deploy",
       config_id: saved.id,
+      expected_config_version: saved.version,
     });
     if (!task?.id) throw new Error("部署任务未创建");
     onDeployTask?.(task.id);
@@ -417,6 +419,7 @@ export async function submitLiveConfigChange({
       engine,
       action: "import-existing",
       config_id: saved.id,
+      expected_config_version: saved.version,
     }),
   });
   if (!task?.id) throw new Error("迁移任务未创建");
@@ -713,6 +716,14 @@ async function agentConfig() {
     },
   );
   const serverPlan = document.querySelector("#server-plan-form");
+  if (serverPlan) {
+    const accounting = document.createElement("section");
+    accounting.className = "preset-accounting-summary";
+    accounting.setAttribute("aria-label", "独立出口规划");
+    const ports = workspace.accounting_plan?.ports || [];
+    accounting.innerHTML = `<header><b>独立出口归属</b><span>${workspace.accounting_error ? "需要处理" : ports.length ? `${ports.length} 个入口 · 规划通过` : "保存时自动检查"}</span></header><p>新增、修改入站时重新规划专属出站或标记；保存前检查整份配置。此处是已保存版本的规划，不代表节点已生效。</p>${workspace.accounting_error ? `<p class="error">${esc(workspace.accounting_error)}</p>` : ports.length ? `<ul>${ports.map(port => `<li><span>${esc(port.inbound || "服务端口")} · ${esc(port.port)}</span><code>${esc(port.outbounds?.join("、") || `出口标记 ${port.mark}`)}</code></li>`).join("")}</ul>` : ""}<p>部署后请在<a href="#traffic">流量统计</a>确认“双链路”状态；实际计数方式由 Agent 根据内核能力选择。</p>`;
+    serverPlan.before(accounting);
+  }
   if (serverPlan?.dataset) {
     serverPlan.dataset.blockMainlandDestination = plan.block_mainland_destination
       ? "1"
@@ -971,6 +982,7 @@ function bindAgentConfigPage(ctx) {
             engine: ctx.engine,
             action: event.submitter?.dataset.sourceIntent || "validate",
             config_id: saved.id,
+            expected_config_version: saved.version,
           }),
         });
         notify("源码已保存，任务已提交");
@@ -1131,17 +1143,29 @@ async function liveConfig() {
           ? "unsupported"
           : !importSource && !readAction
             ? "upgrade"
-            : "loading";
+          : "loading";
+  const engineBar = `<nav class="live-engine-bar" aria-label="选择内核">${installedEngines.map(item => {
+    const info = agent.runtime?.[item] || {};
+    const active = item === engine;
+    return `<button type="button" class="live-engine-tab ${active ? "active" : ""}" data-live-engine="${esc(item)}" aria-pressed="${active}" ${active ? 'aria-current="true"' : ""}><span class="engine-badge ${esc(item)}">${esc(engineName(item))}</span><small>${info.installed ? "已安装" : "待导入"}</small></button>`;
+  }).join("")}</nav>`;
   shell(
-    `<article class="live-config-workspace" data-refresh-key="live-config-content-${esc(agent.id)}-${esc(engine)}-${esc(sourceMode)}-${esc(liveConfigPhase)}" data-live-config-phase="${esc(liveConfigPhase)}"><header class="editor-toolbar"><div><h2>${esc(agent.name)} · ${esc(engineName(engine))}</h2>${sourceSwitch}</div><div class="editor-toolbar-state"><span class="engine-badge ${esc(engine)}">${esc(engineName(engine))}</span><b>${unsupportedReason ? "不可自动迁移" : importSource ? "可导入" : saved?.version ? `v${saved.version}` : "未保存"}</b></div></header>${current ? `<form class="live-config-editor" id="live-config-form" data-profile-editor data-new-config="0" data-engine="${esc(engine)}"><section class="code-workspace" data-code-editor data-code-language="${language}" data-code-max-bytes="2097152"><header class="code-editor-toolbar"><div class="code-file-meta"><span class="code-file-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7 3.5h7l4 4V20.5H7zM14 3.5v4h4M10 12h5M10 16h3"/></svg></span><b>${engine === "mihomo" ? "config.yaml" : "config.json"}</b></div><div class="code-editor-meta"><span class="code-language">${language}</span><span data-code-status aria-live="polite">${importSource ? "系统服务只读快照" : "QAgent 配置"}</span><span data-code-bytes>—</span><span data-code-position>行 1，列 1</span></div></header><div class="code-editor-frame"><aside class="code-gutter" aria-hidden="true" data-line-numbers>1</aside><textarea class="code-editor-input" name="content" data-code-input aria-label="${esc(engineName(engine))} 节点配置源码" spellcheck="false" required ${editorState.readOnly ? "readonly" : ""}>${esc(current.content)}</textarea></div><footer><span><i class="code-status-dot" data-code-status-dot></i><span data-code-validation aria-live="polite"></span></span><div><button class="button code-reset" type="button" data-code-reset disabled>恢复原文</button>${can("operator") && !editorState.readOnly ? '<button class="button code-format" type="button" data-code-format>格式化配置</button>' : ""}${liveActions}</div></footer></section><aside class="live-config-inspector"><dl><div><dt>节点</dt><dd>${esc(agent.name)}</dd></div><div><dt>系统</dt><dd>${esc(agent.os)} / ${esc(agent.arch)}</dd></div><div><dt>内核</dt><dd>${esc(conciseVersion(engine, runtime.version))}</dd></div><div><dt>来源</dt><dd>${importSource ? "系统服务配置（只读）" : "QAgent 托管配置"}</dd></div></dl></aside><input type="hidden" name="name" value="${esc(current.name)}"><input type="hidden" name="description" value="${esc(current.description)}"><input type="hidden" name="version" value="${current.version}"></form>` : agent.status !== "online" ? '<section class="node-config-source"><h2>节点离线</h2><span class="status-label warn">无法读取</span></section>' : unsupportedReason ? `<section class="node-config-source" role="status"><h2>检测到现有服务，但不可自动迁移</h2><span class="status-label bad">${esc(unsupportedReason)}</span><p>QAgent 未执行或接管该服务。所有相关内核任务均已禁用；请按提示调整为受支持的精确布局并重启 Agent 重新发现。</p></section>` : !importSource && !readAction ? '<section class="node-config-source"><h2>需要升级 Agent</h2><span class="status-label warn">暂不可读取 QAgent 配置</span><p>升级后即可在不影响系统服务可选导入的情况下独立读取 QAgent 托管配置。</p></section>' : source?.error ? `<section class="node-config-source"><h2>读取配置失败</h2><span class="status-label bad">${esc(source.error)}</span><button class="button" type="button" data-read-current>重新读取</button></section>` : `<section class="node-config-source" role="status" aria-live="polite"><h2>正在读取${importSource ? "系统服务配置" : "QAgent 配置"}</h2><span class="status-label warn">读取中</span><form data-auto-read-current hidden></form></section>`}</article>`,
+    `<article class="live-config-workspace" data-refresh-key="live-config-content-${esc(agent.id)}-${esc(engine)}-${esc(sourceMode)}-${esc(liveConfigPhase)}" data-live-config-phase="${esc(liveConfigPhase)}"><header class="editor-toolbar"><div><p class="live-config-eyebrow">节点配置工作区</p><h2>${esc(agent.name)}</h2>${sourceSwitch}</div><div class="editor-toolbar-state"><span class="engine-badge ${esc(engine)}">${esc(engineName(engine))}</span><b>${unsupportedReason ? "不可自动迁移" : importSource ? "可导入" : saved?.version ? `v${saved.version}` : "未保存"}</b></div></header>${engineBar}<div class="live-config-details"><span><i class="status-dot ${agent.status === "online" ? "ok" : ""}"></i>${agent.status === "online" ? "节点在线" : "节点离线"}</span><span>${esc(agent.os)} / ${esc(agent.arch)}</span><span>${esc(engineName(engine))} · ${esc(conciseVersion(engine, runtime.version))}</span><span>${importSource ? "系统服务 · 只读快照" : "QAgent 托管 · 编辑后需保存部署"}</span></div>${current ? `<form class="live-config-editor" id="live-config-form" data-profile-editor data-new-config="0" data-engine="${esc(engine)}"><section class="code-workspace" data-code-editor data-code-language="${language}" data-code-max-bytes="2097152"><header class="code-editor-toolbar"><div class="code-file-meta"><span class="code-file-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7 3.5h7l4 4V20.5H7zM14 3.5v4h4M10 12h5M10 16h3"/></svg></span><b>${engine === "mihomo" ? "config.yaml" : "config.json"}</b></div><div class="code-editor-meta"><span class="code-language">${language}</span><span data-code-status aria-live="polite">${importSource ? "系统服务只读快照" : "QAgent 配置"}</span><span data-code-bytes>—</span><span data-code-position>行 1，列 1</span></div></header><div class="code-editor-frame"><aside class="code-gutter" aria-hidden="true" data-line-numbers>1</aside><textarea class="code-editor-input" name="content" data-code-input aria-label="${esc(engineName(engine))} 节点配置源码" spellcheck="false" required ${editorState.readOnly ? "readonly" : ""}>${esc(current.content)}</textarea></div><footer><span><i class="code-status-dot" data-code-status-dot></i><span data-code-validation aria-live="polite"></span></span><div><button class="button code-reset" type="button" data-code-reset disabled>恢复原文</button>${can("operator") && !editorState.readOnly ? '<button class="button code-format" type="button" data-code-format>格式化配置</button>' : ""}${liveActions}</div></footer></section><input type="hidden" name="name" value="${esc(current.name)}"><input type="hidden" name="description" value="${esc(current.description)}"><input type="hidden" name="version" value="${current.version}"></form>` : agent.status !== "online" ? '<section class="node-config-source"><h2>节点离线</h2><span class="status-label warn">无法读取</span></section>' : unsupportedReason ? `<section class="node-config-source" role="status"><h2>检测到现有服务，但不可自动迁移</h2><span class="status-label bad">${esc(unsupportedReason)}</span><p>QAgent 未执行或接管该服务。所有相关内核任务均已禁用；请按提示调整为受支持的精确布局并重启 Agent 重新发现。</p></section>` : !importSource && !readAction ? '<section class="node-config-source"><h2>需要升级 Agent</h2><span class="status-label warn">暂不可读取 QAgent 配置</span><p>升级后即可在不影响系统服务可选导入的情况下独立读取 QAgent 托管配置。</p></section>' : source?.error ? `<section class="node-config-source"><h2>读取配置失败</h2><span class="status-label bad">${esc(source.error)}</span><button class="button" type="button" data-read-current>重新读取</button></section>` : `<section class="node-config-source" role="status" aria-live="polite"><h2>正在读取${importSource ? "系统服务配置" : "QAgent 配置"}</h2><span class="status-label warn">读取中</span><form data-auto-read-current hidden></form></section>`}</article>`,
     "手动配置",
     { viewKey: `live-config-${agent.id}-${engine}` },
   );
   state.data.liveEngines = installedEngines;
+  const confirmSwitch = async (title) => {
+    const editor = document.querySelector("#live-config-form [data-code-editor]");
+    const input = editor?.querySelector("[data-code-input]");
+    const dirty = editor?.configFileController?.dirty() ?? (input && !input.readOnly && input.value !== current?.content);
+    return !dirty || await confirmAction("当前配置有未保存的修改，切换后将丢弃这些修改。确定切换？", title);
+  };
   document.querySelectorAll("[data-live-agent]").forEach(
     (link) =>
-      (link.onclick = (event) => {
+      (link.onclick = async (event) => {
         event.preventDefault();
+        if (link.dataset.liveAgent === agent.id || !(await confirmSwitch("切换节点"))) return;
         state.data.liveAgent = link.dataset.liveAgent;
         state.data.liveEngine = "";
         state.data.liveConfigSource = "";
@@ -1150,8 +1174,10 @@ async function liveConfig() {
   );
   document.querySelectorAll("[data-live-engine]").forEach(
     (link) =>
-      (link.onclick = (event) => {
+      (link.onclick = async (event) => {
         event.preventDefault();
+        if (link.dataset.liveEngine === engine) return;
+        if (!(await confirmSwitch("切换内核"))) return;
         state.data.liveEngine = link.dataset.liveEngine;
         state.data.liveConfigSource = "";
         liveConfig();
@@ -1159,8 +1185,9 @@ async function liveConfig() {
   );
   document.querySelectorAll("[data-live-source]").forEach(
     (button) =>
-      (button.onclick = () => {
+      (button.onclick = async () => {
         if (button.dataset.liveSource === sourceMode) return;
+        if (!(await confirmSwitch("切换配置来源"))) return;
         state.data.liveConfigSource = button.dataset.liveSource;
         liveConfig();
       }),
@@ -1478,6 +1505,7 @@ async function archiveConfigs() {
         engine: formConfig.engine,
         action: form.get("action"),
         config_id: formConfig.id,
+        expected_config_version: formConfig.version,
       });
       location.hash = "#tasks";
   });

@@ -110,6 +110,12 @@ const testAPI = {
   agents: populatedAgents,
 };
 window.__agentsBrowserTestAPI = testAPI;
+const layoutConfig = engine => engine === "mihomo" ? "log-level: info\nlisteners:\n  - name: socks-in\n    type: socks\n    port: 1080\n    listen: 0.0.0.0\nrules:\n  - MATCH,DIRECT\n" : engine === "ss-rust" ? JSON.stringify({server:"0.0.0.0",server_port:8388,method:"aes-256-gcm",password:"demo-not-a-real-secret",mode:"tcp_and_udp"},null,2) : JSON.stringify({log:{loglevel:"warning"},dns:{servers:["1.1.1.1","8.8.8.8"]},inbounds:[{tag:"socks-in",listen:"127.0.0.1",...(engine==="xray"?{port:1080,protocol:"socks",settings:{auth:"noauth",udp:true}}:{listen_port:1080,type:"socks"})},{tag:"http-in",listen:"127.0.0.1",...(engine==="xray"?{port:8080,protocol:"http"}:{listen_port:8080,type:"http"})}],outbounds:[{tag:"direct",...(engine==="xray"?{protocol:"freedom"}:{type:"direct"})}],...(engine==="xray"?{routing:{domainStrategy:"AsIs",rules:[]}}:{route:{final:"direct"}})},null,2);
+if (mode === "config-layout") {
+  testAPI.agents = populatedAgents.map((agent,index)=>({...agent,name:["香港 · HK-01","新加坡 · SG-02","东京 · JP-03","美国 · US-04"][index],features:["managed-config-read-v1","config-files-v1"],capabilities:["xray","sing-box","mihomo","ss-rust"],runtime:Object.fromEntries(["xray","sing-box","mihomo","ss-rust"].map(engine=>[engine,{installed:true,service_status:"running",version:{xray:"26.3.27","sing-box":"1.13.19",mihomo:"1.19.0","ss-rust":"1.25.0"}[engine]}]))}));
+  testAPI.layoutTasks = new Map();
+  location.hash = "#live-config";
+}
 if (mode.startsWith("bbr")) {
   testAPI.tcpTasks = [];
   testAPI.tcpMutations = [];
@@ -141,6 +147,22 @@ window.fetch = async (input, options = {}) => {
   const path = url.pathname.replace(/^\/api\/v1/, "");
   const method = String(options.method || (input instanceof Request ? input.method : "GET")).toUpperCase();
   testAPI.calls.push({ method, path, query: url.search });
+  if (mode === "config-layout") {
+    if (path === "/settings") return json({panel_name:"QControlHub"});
+    if (path.endsWith("/workspace")) {
+      const engine = path.split("/")[4];
+      return json({config:{id:"cfg-layout",version:8,name:"节点实际配置",content:layoutConfig(engine)}});
+    }
+    if (path === "/tasks" && method === "POST") {
+      const input = JSON.parse(options.body);
+      const task = {id:`layout-${testAPI.layoutTasks.size}`,status:"succeeded",...input};
+      testAPI.layoutTasks.set(task.id,task);return json(task);
+    }
+    if (path.startsWith("/tasks/layout-")) {
+      const task = testAPI.layoutTasks.get(path.split("/")[2]);
+      return json(path.endsWith("/config-snapshot")?{content:layoutConfig(task.engine)}:task);
+    }
+  }
   if (!["GET", "HEAD", "OPTIONS"].includes(method))
     assert.equal(
       new Headers(options.headers).get("X-QControlHub-CSRF"),
@@ -1307,7 +1329,37 @@ try {
     await testConfigMigrationRuntime(new URLSearchParams(location.search).has("preview"));
   } else {
   await import("./app.js");
-  if (mode === "bbr-preview") await new Promise(() => {});
+  if (mode === "config-layout") {
+    await waitFor(()=>document.querySelector("#live-config-form"),"manual editor did not load");
+    assert.equal(document.querySelectorAll(".live-engine-bar [data-live-engine]").length,4,"top bar must expose all installed engines");
+    assert.equal(document.querySelectorAll(".context-sidebar [data-live-engine]").length,0,"sidebar must not duplicate engine navigation");
+    if (!new URLSearchParams(location.search).has("preview")) {
+      document.querySelector('[data-live-engine="sing-box"]').click();
+      await waitFor(()=>document.querySelector('#live-config-form[data-engine="sing-box"]'),"top engine switch failed");
+      const input=document.querySelector("[data-code-input]");input.value+="\n";input.dispatchEvent(new Event("input",{bubbles:true}));
+      const draft = input.value;
+      assert.equal(document.querySelectorAll(".code-file-meta optgroup").length,3,"file groups missing");
+      document.querySelector(".config-file-navigation button").click();
+      assert.ok(input.readOnly,"merged preview must be readonly");
+      document.querySelector(".config-file-navigation button").click();
+      assert.equal(input.value,draft,"preview lost file draft");
+      assert.ok(!input.readOnly,"return from preview must restore editing");
+      document.querySelectorAll("[data-live-agent]")[1].click();
+      await waitFor(()=>document.querySelector("[data-confirm-dialog][open]"),"dirty node switch did not prompt");
+      document.querySelector("[data-confirm-cancel]").click();
+      assert.equal(input.value,draft,"cancel node switch lost draft");
+      document.querySelector('[data-live-engine="mihomo"]').click();
+      await waitFor(()=>document.querySelector("[data-confirm-dialog][open]"),"dirty engine switch did not prompt");
+      document.querySelector("[data-confirm-cancel]").click();
+      assert.ok(document.querySelector('#live-config-form[data-engine="sing-box"]'),"cancel discarded active engine");
+      document.querySelector('[data-live-engine="mihomo"]').click();
+      await waitFor(()=>document.querySelector("[data-confirm-dialog][open]"),"second switch did not prompt");
+      document.querySelector("[data-confirm-accept]").click();
+      await waitFor(()=>document.querySelector('#live-config-form[data-engine="mihomo"]'),"confirmed engine switch failed");
+    }
+    assert.ok(document.documentElement.scrollWidth<=innerWidth,"manual page overflows viewport");
+  }
+  else if (mode === "bbr-preview") await new Promise(() => {});
   else if (mode.startsWith("bbr")) await testSystemTCPRuntime();
   else if (mode === "admin") await testAdminRuntime();
   else if (mode === "ports") await testPortNamesAndRuntimeRefresh();

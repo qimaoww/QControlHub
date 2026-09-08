@@ -54,6 +54,7 @@ export async function testConfigMigrationRuntime(preview = false) {
       document.querySelector('[data-live-intent="migrate-files"]').click(); await pause();
       assert(test.writes.length===1 && test.tasks.length===1,"migration did not save and submit exactly once");
       assert(test.tasks[0].action==="deploy","migration must use validated rollback-capable deployment");
+      assert(test.tasks[0].expected_config_version===2,"migration must deploy the exact newly saved version");
       assert(test.writes[0].content.includes("9007199254740993") && test.writes[0].content.includes("2080"),"migration corrupted integer or discarded fragment draft");
       assert(test.confirmations.length===2,"migration presented duplicate confirmations");
     }

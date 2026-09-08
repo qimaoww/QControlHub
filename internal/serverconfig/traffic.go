@@ -92,6 +92,9 @@ func discoverTrafficList(value any, engine core.Engine, nameField, typeField, po
 		if entry == nil {
 			continue
 		}
+		if engine == core.EngineXray && stringValue(entry[nameField]) == "qch-stat-api" {
+			continue // Internal statistics transport is not a billable proxy inlet.
+		}
 		port := trafficPortNumber(entry[portField])
 		if port == 0 {
 			continue

@@ -32,9 +32,11 @@ func TestNativeTrafficCores(t *testing.T) {
 		defer cancel()
 		command := exec.CommandContext(ctx, "unshare", "--net", os.Args[0], "-test.run="+flag.Lookup("test.run").Value.String(), "-test.v")
 		command.Env = append(os.Environ(), "QCH_NATIVE_TEST_CHILD=1")
-		if output, err := command.CombinedOutput(); err != nil {
+		output, err := command.CombinedOutput()
+		if err != nil {
 			t.Fatalf("isolated core accounting: %v\n%s", err, output)
 		}
+		t.Logf("isolated core measurements:\n%s", output)
 		return
 	}
 	if output, err := exec.Command("ip", "link", "set", "lo", "up").CombinedOutput(); err != nil {
@@ -69,9 +71,12 @@ func TestNativeTrafficCores(t *testing.T) {
 			if engine == core.EngineSingBox {
 				content = `{"inbounds":[{"tag":"a","listen_port":1080,"listen":"127.0.0.1","type":"socks"},{"tag":"b","listen_port":1081,"listen":"127.0.0.1","type":"socks"}],"outbounds":[{"tag":"direct","type":"direct"}]}`
 			}
-			plan, err := serverconfig.PrepareAccounting(engine, content)
+			plan, err := serverconfig.PlanPresetAccounting(engine, content)
 			if engine == core.EngineSingBox && os.Getenv("QCH_TEST_SINGBOX_MARKS") == "1" {
-				plan, err = serverconfig.PrepareMarkedSingBoxAccounting(content)
+				if err != nil {
+					t.Fatal(err)
+				}
+				plan, err = serverconfig.PrepareMarkedSingBoxAccounting(plan.Content)
 			}
 			if engine == core.EngineMihomo {
 				plan, err = serverconfig.PrepareAccounting(engine, "listeners: [{name: a, type: socks, listen: 127.0.0.1, port: 1080, udp: true}, {name: b, type: socks, listen: 127.0.0.1, port: 1081, udp: true}]\nrules: ['MATCH,DIRECT']\n")
@@ -223,6 +228,7 @@ func TestNativeTrafficCores(t *testing.T) {
 				for i, usage := range manager.Snapshot() {
 					want := uint64(4096 * (i + 1))
 					a := usage.Accounting
+					t.Logf("TCP engine=%s port=%d payload_up=16 payload_down=%d accounting=%+v", engine, 1080+i, want, a)
 					if !usage.EnforcementAvailable || a == nil || a.TargetReceived < want || a.TargetReceived > want+2000 || a.TargetSent < 16 || a.ClientSent < want {
 						t.Fatalf("marked core %s port %d: %+v / %+v", engine, 1080+i, usage, a)
 					}
@@ -242,6 +248,7 @@ func TestNativeTrafficCores(t *testing.T) {
 			}
 			for i, port := range plan.Ports {
 				got := nativeTrafficLegs(counters, port)
+				t.Logf("TCP engine=%s port=%d payload_up=16 payload_down=%d legs=%+v", engine, port.Port, 4096*(i+1), got)
 				want := trafficLegs{ClientReceived: 16, TargetSent: 16, ClientSent: uint64(4096 * (i + 1)), TargetReceived: uint64(4096 * (i + 1))}
 				// Xray wraps inbound transport before the SOCKS handshake;
 				// sing-box counts the decoded stream. Do not erase this overhead.
@@ -417,6 +424,7 @@ func testCoreUDPAccounting(t *testing.T, ctx context.Context, engine core.Engine
 	if after[0].TargetReceived < before[0].TargetReceived+17 || after[0].TargetSent < before[0].TargetSent+11 || after[0].ClientReceived <= before[0].ClientReceived || after[0].ClientSent <= before[0].ClientSent {
 		t.Fatalf("UDP four-leg accounting: before=%+v after=%+v", before, after)
 	}
+	t.Logf("UDP engine=%s payload_up=11 payload_down=17 before=%+v after=%+v", engine, before, after)
 	if after[1].TargetReceived != before[1].TargetReceived || after[1].TargetSent != before[1].TargetSent {
 		t.Fatalf("UDP attributed to another port: before=%+v after=%+v", before, after)
 	}

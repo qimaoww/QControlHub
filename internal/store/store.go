@@ -1218,6 +1218,9 @@ func (s *Store) ExistingConfigIDs(ctx context.Context, ids []string) (map[string
 }
 
 func (s *Store) CreateTask(ctx context.Context, request core.TaskRequest) (core.Task, error) {
+	if request.ExpectedConfigVersion < 0 || (request.ExpectedConfigVersion != 0 && request.Action != core.ActionDeploy && request.Action != core.ActionValidate && request.Action != core.ActionImportExisting) {
+		return core.Task{}, fmt.Errorf("%w: expected configuration version requires a configuration task", ErrInvalid)
+	}
 	if request.Action == core.ActionConfigureTCP {
 		settings, err := core.NormalizeTCPSettings(request.TCPSettings)
 		if err != nil {
@@ -1327,6 +1330,9 @@ func (s *Store) CreateTask(ctx context.Context, request core.TaskRequest) (core.
 		}
 		if configEngine != request.Engine {
 			return core.Task{}, fmt.Errorf("%w: task engine does not match configuration engine", ErrInvalid)
+		}
+		if request.ExpectedConfigVersion != 0 && task.ConfigVersion != request.ExpectedConfigVersion {
+			return core.Task{}, fmt.Errorf("%w: configuration changed after saving; no task was submitted, reload before deployment", ErrConflict)
 		}
 		if request.Action == core.ActionImportExisting && configAgentID != request.AgentID {
 			return core.Task{}, fmt.Errorf("%w: existing service migration requires this agent's saved snapshot", ErrInvalid)

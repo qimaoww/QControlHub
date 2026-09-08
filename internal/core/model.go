@@ -415,13 +415,14 @@ type Task struct {
 }
 
 type TaskRequest struct {
-	TCPSettings TCPSettings `json:"tcp_settings,omitempty"`
-	AgentID     string      `json:"agent_id"`
-	Action      Action      `json:"action"`
-	Engine      Engine      `json:"engine"`
-	ConfigID    string      `json:"config_id,omitempty"`
-	CoreVersion string      `json:"core_version,omitempty"`
-	CoreSource  string      `json:"core_source,omitempty"`
+	ExpectedConfigVersion int         `json:"expected_config_version,omitempty"`
+	TCPSettings           TCPSettings `json:"tcp_settings,omitempty"`
+	AgentID               string      `json:"agent_id"`
+	Action                Action      `json:"action"`
+	Engine                Engine      `json:"engine"`
+	ConfigID              string      `json:"config_id,omitempty"`
+	CoreVersion           string      `json:"core_version,omitempty"`
+	CoreSource            string      `json:"core_source,omitempty"`
 }
 
 type Deployment struct {

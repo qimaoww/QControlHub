@@ -345,8 +345,9 @@ assert.deepEqual(
   "failed import does not replace the pending migration source",
 );
 await submitLiveConfigChange({
-  api: async (path) => {
+  api: async (path, options) => {
     if (path !== "/tasks") throw new Error("retry unexpectedly rewrote snapshot");
+    assert.equal(JSON.parse(options.body).expected_config_version, savedMigrationConfig.version, "import retry must pin the saved snapshot version");
     migrationTaskAttempts += 1;
     return { id: "tsk_retry" };
   },
@@ -842,6 +843,7 @@ for (const install of [
   globalThis.location ??= { hash: "" };
 
   class FakeForm {
+    before(element) { this.accountingSummary = element; }
     constructor(elements = {}) {
       this.isConnected = true;
       this.querySelector = () => null;
@@ -961,7 +963,7 @@ for (const install of [
       querySelectorAll: () => [],
       createElement: () => ({
         className: "", type: "", dataset: {}, textContent: "",
-        setAttribute() {}, removeAttribute() {}, append() {}, addEventListener() {},
+        setAttribute() {}, removeAttribute() {}, append() {}, before() {}, addEventListener() {},
         parentElement: { classList: { contains: () => false }, append() {} },
       }),
     };

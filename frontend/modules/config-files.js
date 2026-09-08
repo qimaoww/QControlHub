@@ -84,11 +84,29 @@ export function bindConfigFiles(form, engine, notify) {
   let selected = 0;
   const select = document.createElement("select");
   select.setAttribute("aria-label","选择入站、出站或公共配置文件");
+  const groups = new Map();
   for (const [i,file] of files.entries()) {
-    const option = document.createElement("option"); option.value = String(i); option.textContent = file.path; select.append(option);
+    const kind = file.path.startsWith("inbounds/") ? "入站" : file.path.startsWith("outbounds/") ? "出站" : "公共配置";
+    if (!groups.has(kind)) {
+      const group = document.createElement("optgroup"); group.label = kind; groups.set(kind, group); select.append(group);
+    }
+    const option = document.createElement("option"); option.value = String(i); option.textContent = file.path; groups.get(kind).append(option);
   }
   const preview = document.createElement("option"); preview.value = "preview"; preview.textContent = "合并预览（只读）"; select.append(preview);
   editor.querySelector(".code-file-meta").append(select);
+  const fileLabel = editor.querySelector(".code-file-meta b");
+  if (fileLabel) fileLabel.hidden = true;
+  const navigation = document.createElement("div"); navigation.className = "config-file-navigation";
+  const summary = document.createElement("span"); summary.textContent = `${files.length} 个源码文件 · 切换文件保留当前草稿`;
+  const previewButton = document.createElement("button"); previewButton.type = "button"; previewButton.className = "button"; previewButton.textContent = "合并预览";
+  previewButton.setAttribute("aria-pressed", "false");
+  navigation.append(summary, previewButton);
+  editor.querySelector(".code-editor-toolbar").after(navigation);
+  let lastFile = 0;
+  previewButton.addEventListener("click", () => {
+    select.value = selected === "preview" ? String(lastFile) : "preview";
+    select.dispatchEvent(new Event("change", {bubbles:true}));
+  });
   const save = () => { if (selected !== "preview" && !readOnly) files[selected].content = input.value; };
   const controller = {
     content() { save(); return mergeConfigFiles(files); },
@@ -102,7 +120,11 @@ export function bindConfigFiles(form, engine, notify) {
     try {
       const next = select.value === "preview" ? "preview" : Number(select.value);
       const content = next === "preview" ? mergeConfigFiles(files) : files[next].content;
+      if (next !== "preview") lastFile = next;
       selected = next; input.value = content; input.readOnly = readOnly || next === "preview";
+      previewButton.textContent = next === "preview" ? "返回文件" : "合并预览";
+      previewButton.setAttribute("aria-pressed", String(next === "preview"));
+      summary.textContent = next === "preview" ? "合并预览只读 · 保存和部署使用全部文件" : `${files.length} 个源码文件 · 切换文件保留当前草稿`;
       input.dispatchEvent(new Event("input", {bubbles:true}));
     } catch (error) { select.value = String(selected); notify(error.message,"error"); }
   });

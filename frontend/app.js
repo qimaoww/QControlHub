@@ -4,7 +4,6 @@ import { installClientAccess } from "./modules/client-access.js";
 import { installSubStoreSync } from "./modules/substore-sync.js";
 import {
   installConfigPages,
-  liveConfigEngineEligible,
 } from "./modules/configs.js";
 import { installCoreLogs } from "./modules/core-logs.js";
 import { installTasks } from "./modules/tasks.js";
@@ -136,7 +135,7 @@ const engineName = (value) =>
     mihomo: "Mihomo",
     xray: "Xray",
     "sing-box": "sing-box",
-    "ss-rust": "Shadowsocks Rust",
+    "ss-rust": "ss-rust",
   })[value] || value;
 const serviceStatusName = (value) =>
   ({
@@ -723,11 +722,7 @@ function contextMarkup(title) {
   }
   if (state.route === "live-config") {
     const items = orderNodesBySavedOrder(state.data.agents || []);
-    const selected = items.find((agent) => agent.id === state.data.liveAgent);
-    const capabilities = (selected?.capabilities || []).filter(
-      (engine) => liveConfigEngineEligible(selected.runtime?.[engine]),
-    );
-    return `<div class="context-section-label"><span>选择节点</span><b>${items.length}</b></div><nav class="context-list" aria-label="配置节点">${items.map((agent) => { const installed = installedEngineCount(agent); return `<a class="${agent.id === state.data.liveAgent ? "active" : ""}" href="#live-config" data-live-agent="${esc(agent.id)}"><i class="status-dot ${agent.status === "online" ? "ok" : ""}"></i><span><strong>${esc(agent.name)}</strong><small>${installed ? `${installed} 个已安装内核` : "尚未安装内核"}</small></span><em>${agent.status === "online" ? "在线" : "离线"}</em></a>`; }).join("") || "<p>还没有节点</p>"}</nav>${selected ? `<div class="context-section-label"><span>选择内核</span><b>${capabilities.length}</b></div><nav class="context-list config-context-list">${capabilities.map((engine) => { const runtime = selected.runtime?.[engine] || {}; const sourceLabel = runtime.installed && runtime.existing_config_available ? "QAgent 配置 · 系统服务可导入" : runtime.existing_config_available ? "系统服务可导入" : runtime.installed ? "QAgent 配置" : "不可导入"; return `<a class="${engine === state.data.liveEngine ? "active" : ""}" href="#live-config" data-live-engine="${esc(engine)}"><span class="context-engine ${esc(engine)}">${esc(engineName(engine))}</span><span><strong>${esc(engineName(engine))}</strong><small>${sourceLabel}</small></span></a>`; }).join("")}</nav>` : ""}<a class="context-primary" href="#archive-config">配置档案 →</a>`;
+    return `<div class="context-section-label"><span>选择节点</span><b>${items.length}</b></div><nav class="context-list" aria-label="配置节点">${items.map((agent) => { const installed = installedEngineCount(agent); return `<a class="${agent.id === state.data.liveAgent ? "active" : ""}" href="#live-config" data-live-agent="${esc(agent.id)}"><i class="status-dot ${agent.status === "online" ? "ok" : ""}"></i><span><strong>${esc(agent.name)}</strong><small>${installed ? `${installed} 个已安装内核` : "尚未安装内核"}</small></span><em>${agent.status === "online" ? "在线" : "离线"}</em></a>`; }).join("") || "<p>还没有节点</p>"}</nav><a class="context-primary" href="#archive-config">配置档案 →</a>`;
   }
   if (state.route === "archive-config") {
     const items = state.data.configs || [];

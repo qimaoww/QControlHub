@@ -987,7 +987,7 @@ func TestManualConfigRequiresExplicitImportOfNodeSnapshot(t *testing.T) {
 		`data-live-source="managed"`,
 		`data-live-source="import"`,
 		`QAgent 托管配置`,
-		`系统服务配置（只读）`,
+		`系统服务 · 只读快照`,
 		`read-managed-config`,
 		`submitLiveConfigChange`,
 		`!unsupportedReason`,
@@ -1015,13 +1015,17 @@ func TestManualConfigRequiresExplicitImportOfNodeSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, required := range []string{
-		`liveConfigEngineEligible,`,
-		`(engine) => liveConfigEngineEligible(selected.runtime?.[engine])`,
-		`class="${engine === state.data.liveEngine ? "active" : ""}"`,
+		`(item) => liveConfigEngineEligible(agent.runtime?.[item])`,
+		`class="live-engine-bar" aria-label="选择内核"`,
+		`data-live-engine="${esc(item)}" aria-pressed="${active}"`,
 	} {
-		if !strings.Contains(string(app), required) {
-			t.Errorf("manual configuration context sidebar is missing %q", required)
+		if !strings.Contains(content, required) {
+			t.Errorf("manual configuration engine top bar is missing %q", required)
 		}
+	}
+	sidebar := strings.Split(strings.Split(string(app), `if (state.route === "live-config") {`)[1], `if (state.route === "archive-config")`)[0]
+	if strings.Contains(sidebar, "data-live-engine") || !strings.Contains(sidebar, "data-live-agent") {
+		t.Fatal("manual configuration sidebar must select nodes only")
 	}
 }
 
