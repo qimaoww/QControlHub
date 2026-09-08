@@ -58,7 +58,8 @@ export function trafficRateForDisplay(
     age > 45_000
   )
     return 0;
-  return Number(value || 0);
+  const numeric = Number(value || 0);
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : 0;
 }
 
 export function mergeTrafficPorts(policies = [], endpoints = []) {
@@ -160,7 +161,7 @@ export function installTraffic(ctx) {
       <label>协议<select name="protocol"><option value="both" ${policy.protocol === "both" || !policy.protocol ? "selected" : ""}>TCP + UDP</option><option value="tcp" ${policy.protocol === "tcp" ? "selected" : ""}>TCP</option><option value="udp" ${policy.protocol === "udp" ? "selected" : ""}>UDP</option></select></label>
       <label>统计周期<select name="cycle"><option value="monthly" ${policy.cycle === "monthly" || !policy.cycle ? "selected" : ""}>每月</option><option value="yearly" ${policy.cycle === "yearly" ? "selected" : ""}>每年</option></select></label>
       <label>周期起始日期<input name="cycle_anchor" type="date" value="${dateInputValue(policy.cycle_anchor)}" max="${dateInputValue()}" required></label>
-      <label>周期额度（G）<input name="limit_gb" type="number" value="${quotaInputValue(policy.quota_enabled === false ? 0 : policy.limit_bytes)}" min="0.000001" max="8388607" step="0.000001" required placeholder="100"></label>
+      <label>周期额度（GiB）<input name="limit_gb" type="number" value="${quotaInputValue(policy.quota_enabled === false ? 0 : policy.limit_bytes)}" min="0.000001" max="8388607" step="0.000001" required placeholder="100"></label>
     </div><label class="traffic-auto-block"><input type="checkbox" name="auto_block" value="1" ${policy.auto_block !== false ? "checked" : ""}><span><b>超额自动封禁</b><small>关闭后仍统计流量，但不会阻断端口</small></span></label>`;
   };
   const requestFromForm = (form) => {
@@ -409,8 +410,9 @@ export function installTraffic(ctx) {
       const [status, tone] = policyStatus(policy, agent);
       const quotaEnabled = policy.quota_enabled !== false;
       const usedPercent = percent(policy.used_bytes, policy.limit_bytes);
-      const receiveBPS = trafficRateForDisplay(policy.receive_bps, policy.last_reported_at, agent?.status);
-      const sendBPS = trafficRateForDisplay(policy.send_bps, policy.last_reported_at, agent?.status);
+      const sampledAt = policy.last_collected_at || policy.last_reported_at;
+      const receiveBPS = policy.enforcement_available === false ? 0 : trafficRateForDisplay(policy.receive_bps, sampledAt, agent?.status);
+      const sendBPS = policy.enforcement_available === false ? 0 : trafficRateForDisplay(policy.send_bps, sampledAt, agent?.status);
       const period = policy.period_start && policy.period_end
         ? `${dateInputValue(policy.period_start)} 至 ${dateInputValue(policy.period_end)}`
         : `从 ${dateInputValue(policy.cycle_anchor)} 开始${cycleName(policy.cycle)}重置`;
@@ -418,6 +420,9 @@ export function installTraffic(ctx) {
         <header><div class="traffic-card-identity"><span class="engine-badge ${esc(policy.engine)}">${esc(engineName(policy.engine))}</span><span><strong>${esc(policy.name)}</strong><small>${esc(agent?.name || policy.agent_id)}<i>·</i><code>:${esc(policy.port)}</code><i>·</i>${esc(protocolName(policy.protocol))}</small></span></div><span class="traffic-card-controls"><span class="traffic-policy-status ${tone}"><i></i>${esc(status)}</span><span class="node-card-grip traffic-card-grip" title="拖动调整顺序" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 6h.01M9 12h.01M9 18h.01M15 6h.01M15 12h.01M15 18h.01"/></svg></span></span></header>
         <section class="traffic-card-quota ${quotaEnabled ? "" : "is-monitor-only"}"><header><span>${quotaEnabled ? "当前周期用量" : "本月累计流量"}</span><b>${quotaEnabled ? `${usedPercent.toFixed(1)}%` : "未设置配额"}</b></header><div><strong>${bytes(policy.used_bytes)}</strong>${quotaEnabled ? `<span>/ ${bytes(policy.limit_bytes)}</span>` : ""}</div>${quotaEnabled ? `<progress max="100" value="${usedPercent}"></progress>` : ""}<small>${esc(period)}</small></section>
         <section class="traffic-card-transfer"><div><i class="received" aria-hidden="true">↓</i><span><small>接收流量</small><strong>${bytes(policy.received_bytes)}</strong></span><em>${rate(receiveBPS)}</em></div><div><i class="sent" aria-hidden="true">↑</i><span><small>发送流量</small><strong>${bytes(policy.sent_bytes)}</strong></span><em>${rate(sendBPS)}</em></div></section>
+        <p class="traffic-accounting-source">${policy.accounting?.source === "core-api" ? "双链路 · 内核计数（含入站协议开销）" : policy.accounting?.source === "nft-dual" ? "双链路 · 网络层计数（含包头及重传）" : "仅监听端口 · 尚未启用双链路统计"}</p>
+        ${policy.engine === "mihomo" && policy.accounting?.source === "nft-dual" ? '<p class="traffic-error">不含回环等未被内核标记的出口流量。</p>' : ""}
+        ${policy.accounting && policy.accounting.source !== "listener" ? `<details><summary>本计量代次的链路明细</summary><dl><dt>客户端 → 代理</dt><dd>${bytes(policy.accounting.client_received)}</dd><dt>代理 → 客户端</dt><dd>${bytes(policy.accounting.client_sent)}</dd><dt>目标 → 代理</dt><dd>${bytes(policy.accounting.target_received)}</dd><dt>代理 → 目标</dt><dd>${bytes(policy.accounting.target_sent)}</dd></dl></details>` : ""}
         ${policy.enforcement_error ? `<p class="traffic-error">${esc(policy.enforcement_error)}</p>` : ""}
         <footer><span class="traffic-card-sync"><i class="${policy.last_reported_at ? "ok" : ""}"></i>${policy.last_reported_at ? `${ago(policy.last_reported_at)}更新` : "等待 Agent 上报"}</span>${can("traffic.manage") ? `<div class="traffic-card-actions"><button class="button small danger-button" type="button" data-traffic-monitor-delete="${esc(policy.id)}">删除</button><button class="button small" type="button" data-traffic-reset="${esc(policy.id)}">清零</button><button class="button small" type="button" data-traffic-edit-open="${esc(policy.id)}">${quotaEnabled ? "编辑配额" : "设置配额"}</button></div>` : ""}</footer>${can("traffic.manage") ? `<dialog class="traffic-edit-dialog" data-traffic-edit-dialog="${esc(policy.id)}" aria-labelledby="traffic-edit-title-${esc(policy.id)}"><header><span class="traffic-edit-icon" aria-hidden="true">✎</span><div><p class="eyebrow">端口配额</p><h2 id="traffic-edit-title-${esc(policy.id)}">${quotaEnabled ? "编辑" : "设置"} ${esc(policy.name)} 的配额</h2><p>流量统计不会因配额变更而停止 · ${esc(agent?.name || policy.agent_id)} :${esc(policy.port)}</p></div><button class="deploy-command-close" type="button" data-traffic-edit-close aria-label="关闭编辑弹窗">×</button></header><form data-traffic-edit-form="${esc(policy.id)}"><div class="traffic-edit-body">${policyFields(policy, [agent].filter(Boolean), `edit-${policy.id}`)}</div><footer>${quotaEnabled ? `<button class="button small danger-button" type="button" data-traffic-delete="${esc(policy.id)}">取消配额</button>` : "<span></span>"}<span></span><button class="button" type="button" data-traffic-edit-close>取消</button><button class="button primary" type="submit">保存配额</button></footer></form></dialog>` : ""}
       </article>`;

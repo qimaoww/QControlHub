@@ -66,10 +66,13 @@ func TestNFTBackendUsesDetectedServiceManager(t *testing.T) {
 }
 
 type fakeTrafficBackend struct {
-	counters map[string]uint64
-	exists   bool
-	scripts  []string
-	err      error
+	counters   map[string]uint64
+	exists     bool
+	scripts    []string
+	err        error
+	replaceErr error
+	onReplace  func()
+	nextHandle uint64
 }
 
 func (backend *fakeTrafficBackend) Counters(context.Context) (map[string]uint64, bool, error) {
@@ -81,12 +84,50 @@ func (backend *fakeTrafficBackend) Counters(context.Context) (map[string]uint64,
 }
 
 func (backend *fakeTrafficBackend) Replace(_ context.Context, script string) error {
+	if backend.onReplace != nil {
+		backend.onReplace()
+	}
+	if backend.replaceErr != nil {
+		return backend.replaceErr
+	}
 	if backend.err != nil {
 		return backend.err
 	}
 	backend.scripts = append(backend.scripts, script)
 	backend.exists = strings.Contains(script, "add table inet "+trafficTableName)
-	backend.counters = map[string]uint64{}
+	if strings.Contains(script, "delete table") || backend.counters == nil {
+		backend.counters = map[string]uint64{}
+	}
+	for key := range backend.counters {
+		if strings.HasPrefix(key, "rule:") || strings.HasPrefix(key, "drop:") || strings.HasPrefix(key, "qch:") {
+			delete(backend.counters, key)
+		}
+	}
+	for _, line := range strings.Split(script, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 5 && fields[1] == "counter" {
+			key := fields[4]
+			if fields[0] == "delete" {
+				delete(backend.counters, key)
+				delete(backend.counters, "handle:"+key)
+			} else {
+				backend.nextHandle++
+				backend.counters[key] = 0
+				backend.counters["handle:"+key] = backend.nextHandle
+			}
+		}
+		for index, field := range fields {
+			if field == "counter" && index+2 < len(fields) && fields[index+1] == "name" {
+				backend.counters["rule:"+fields[index+2]]++
+			}
+			if field == "comment" && index+1 < len(fields) {
+				comment, _ := strconv.Unquote(fields[index+1])
+				if strings.HasPrefix(comment, "qch:block:") {
+					backend.counters["drop:"+strings.TrimPrefix(comment, "qch:block:")]++
+				}
+			}
+		}
+	}
 	return nil
 }
 
@@ -110,8 +151,8 @@ func TestTrafficManagerCountsBlocksAndResetsCalendarPeriod(t *testing.T) {
 		!strings.Contains(backend.scripts[0], "tcp dport 443 counter") || !strings.Contains(backend.scripts[0], "udp sport 443 counter") {
 		t.Fatalf("initial nftables rules:\n%s", strings.Join(backend.scripts, "\n---\n"))
 	}
-	backend.counters[trafficRuleComment(policy.ID, "in", "tcp")] = 600
-	backend.counters[trafficRuleComment(policy.ID, "out", "tcp")] = 500
+	backend.counters[trafficCounterName(manager.records[policy.ID], "in", "tcp")] = 600
+	backend.counters[trafficCounterName(manager.records[policy.ID], "out", "tcp")] = 500
 	now = now.Add(2 * time.Second)
 	manager.collect(context.Background(), false)
 	snapshot := manager.Snapshot()
@@ -122,7 +163,7 @@ func TestTrafficManagerCountsBlocksAndResetsCalendarPeriod(t *testing.T) {
 		t.Fatalf("blocked nftables rules:\n%s", backend.scripts[len(backend.scripts)-1])
 	}
 
-	backend.counters[trafficRuleComment(policy.ID, "in", "tcp")] = 200
+	// The drop precedes the counter, so rejected attempts add no bytes.
 	now = time.Date(2026, 9, 1, 0, 0, 1, 0, time.UTC)
 	manager.collect(context.Background(), false)
 	snapshot = manager.Snapshot()
@@ -150,7 +191,7 @@ func TestTrafficManagerPreservesUsageWhenOnlyLimitChanges(t *testing.T) {
 	if err := manager.SetPolicies(context.Background(), []core.PortTrafficPolicy{policy}, policy.AgentID); err != nil {
 		t.Fatal(err)
 	}
-	backend.counters[trafficRuleComment(policy.ID, "in", "tcp")] = 1200
+	backend.counters[trafficCounterName(manager.records[policy.ID], "in", "tcp")] = 1200
 	now = now.Add(2 * time.Second)
 	manager.collect(context.Background(), false)
 	policy.LimitBytes = 1000
@@ -178,7 +219,7 @@ func TestTrafficManagerCanMonitorWithoutAutomaticBlocking(t *testing.T) {
 	if err := manager.SetPolicies(context.Background(), []core.PortTrafficPolicy{policy}, policy.AgentID); err != nil {
 		t.Fatal(err)
 	}
-	backend.counters[trafficRuleComment(policy.ID, "in", "tcp")] = 200
+	backend.counters[trafficCounterName(manager.records[policy.ID], "in", "tcp")] = 200
 	now = now.Add(2 * time.Second)
 	manager.collect(context.Background(), false)
 	snapshot := manager.Snapshot()

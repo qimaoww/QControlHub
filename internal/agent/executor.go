@@ -602,11 +602,28 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (string, erro
 		}
 		return e.importExistingConfig(ctx, task.Engine, spec, existing, task.ConfigContent)
 	case core.ActionValidate:
+		prepared, warning := e.prepareNativeAccountingContent(ctx, task.Engine, spec, task.ConfigContent)
+		if warning != "" && (strings.Contains(task.ConfigContent, "qch-trf-") || (task.Engine == core.EngineShadowsocksRust && strings.Contains(task.ConfigContent, "outbound_fwmark"))) {
+			return warning, errors.New("cannot safely regenerate managed accounting configuration")
+		}
+		task.ConfigContent = prepared
 		return e.validate(ctx, task.Engine, spec, task.ConfigContent)
 	case core.ActionDeploy:
+		originalInput := task.ConfigContent
+		prepared, accountingWarning := e.prepareNativeAccountingContent(ctx, task.Engine, spec, task.ConfigContent)
+		if accountingWarning != "" && (strings.Contains(task.ConfigContent, "qch-trf-") || (task.Engine == core.EngineShadowsocksRust && strings.Contains(task.ConfigContent, "outbound_fwmark"))) {
+			return accountingWarning, errors.New("cannot safely regenerate managed accounting configuration")
+		}
+		task.ConfigContent = prepared
 		validation, err := e.validate(ctx, task.Engine, spec, task.ConfigContent)
 		if err != nil {
 			return validation, err
+		}
+		if spec == DefaultSpecsForServiceManager(e.serviceManager().Kind())[task.Engine] &&
+			accountingWarning == "" && strings.Contains(originalInput, "qch-trf-") && originalInput != prepared {
+			if err := rememberAccountingInput(spec.ConfigPath, originalInput, prepared); err != nil {
+				return validation, fmt.Errorf("persist repeatable accounting source: %w", err)
+			}
 		}
 		if task.Engine == core.EngineShadowsocksRust && mainlandDestinationPolicyEnabled(task.MainlandAccessPolicies) {
 			if err := e.prepareShadowsocksRustACLService(ctx, spec); err != nil {
@@ -622,6 +639,9 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (string, erro
 		}
 		restartOutput, err := serviceCommandAndVerifyWithManager(ctx, e.serviceManager(), spec.Service, core.ActionRestart)
 		output := validation + "\ndeployed to " + spec.ConfigPath
+		if accountingWarning != "" {
+			output += "\n" + accountingWarning
+		}
 		if backup != "" {
 			output += "\nbackup: " + backup
 		}

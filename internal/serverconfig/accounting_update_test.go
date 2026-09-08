@@ -1,0 +1,86 @@
+package serverconfig
+
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+
+	"github.com/qimaoww/qcontrolhub/internal/core"
+)
+
+func TestAccountingUpdateRegeneratesOriginalEdits(t *testing.T) {
+	for engine, content := range map[core.Engine]string{
+		core.EngineXray:    `{"inbounds":[{"tag":"a","port":1080,"protocol":"socks"}],"outbounds":[{"tag":"direct","protocol":"freedom","settings":{"domainStrategy":"AsIs"}}]}`,
+		core.EngineSingBox: `{"inbounds":[{"tag":"a","listen_port":1080,"type":"socks"}],"outbounds":[{"tag":"direct","type":"direct","bind_interface":"eth0"}]}`,
+		core.EngineMihomo:  "listeners: [{name: a, type: socks, port: 1080}]\nproxies: [{name: exit, type: direct, interface-name: eth0}]\nrules: ['MATCH,exit']\n",
+	} {
+		t.Run(string(engine), func(t *testing.T) {
+			plan, err := PrepareAccounting(engine, content)
+			if err != nil {
+				t.Fatal(err)
+			}
+			from, to := "eth0", "eth1"
+			if engine == core.EngineXray {
+				from, to = "AsIs", "UseIP"
+			}
+			edited := strings.Replace(plan.Content, from, to, 1)
+			source, err := AccountingUpdateSource(engine, edited, plan.Content)
+			if err != nil {
+				t.Fatal(err)
+			}
+			updated, err := PrepareAccounting(engine, source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(updated.Content, from) || strings.Count(updated.Content, to) != 2 {
+				t.Fatalf("stale clone retained: %s", updated.Content)
+			}
+			// Editing generated copies is never silently ignored.
+			if _, err := AccountingUpdateSource(engine, strings.ReplaceAll(plan.Content, from, to), plan.Content); err == nil {
+				t.Fatal("accepted edited generated copy")
+			}
+		})
+	}
+}
+
+func TestAccountingUpdateRemovesObsoleteInboundAndRoutes(t *testing.T) {
+	content := `{"inbounds":[{"tag":"a","listen_port":1080,"type":"socks"},{"tag":"b","listen_port":1081,"type":"socks"}],"outbounds":[{"tag":"direct","type":"direct","bind_interface":"eth0"}],"route":{"rules":[{"domain":["old.example"],"outbound":"direct"}]}}`
+	for _, marked := range []bool{false, true} {
+		prepare := func(value string) (AccountingPlan, error) { return PrepareAccounting(core.EngineSingBox, value) }
+		if marked {
+			prepare = PrepareMarkedSingBoxAccounting
+		}
+		plan, err := prepare(content)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var root map[string]any
+		decoder := json.NewDecoder(strings.NewReader(plan.Content))
+		decoder.UseNumber()
+		if err := decoder.Decode(&root); err != nil {
+			t.Fatal(err)
+		}
+		root["inbounds"] = root["inbounds"].([]any)[:1]
+		for _, raw := range mapValue(root["route"])["rules"].([]any) {
+			rule := mapValue(raw)
+			if rule["outbound"] == "direct" {
+				rule["domain"] = []string{"new.example"}
+			}
+		}
+		data, _ := json.Marshal(root)
+		source, err := AccountingUpdateSource(core.EngineSingBox, string(data), plan.Content)
+		if err != nil {
+			t.Fatal(err)
+		}
+		updated, err := prepare(source)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(updated.Ports) != 1 || strings.Contains(updated.Content, "qch-trf-1081-") || strings.Contains(updated.Content, "old.example") || strings.Count(updated.Content, "new.example") != 2 {
+			t.Fatalf("stale generated routing: %s", updated.Content)
+		}
+		if _, err := prepare(updated.Content); err != nil {
+			t.Fatalf("updated plan is not idempotent: %v", err)
+		}
+	}
+}

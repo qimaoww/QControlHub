@@ -47,6 +47,8 @@
 | `GET` | `/api/v1/agents/{id}/configs` | 列出节点已有的内核配置 |
 | `GET` | `/api/v1/agents/{id}/configs/{engine}` | 读取节点绑定的内核配置 |
 | `PUT` | `/api/v1/agents/{id}/configs/{engine}` | 以乐观版本锁创建或更新节点配置 |
+| `GET` | `/api/v1/agents/{id}/configs/{engine}/files` | 返回 `{version, files:[{path,content}]}`，单文件内核返回一个文件 |
+| `PUT` | `/api/v1/agents/{id}/configs/{engine}/files` | Xray / sing-box 按 `{name,description,version,files}` 原子保存合并配置；非法路径返回 400，版本冲突返回 409；不自动部署 |
 | `GET` | `/api/v1/agents/{id}/configs/{engine}/workspace` | 读取服务端入站、字段目录和节点配置工作区数据 |
 | `POST` | `/api/v1/agents/{id}/configs/{engine}/plans` | 生成带安全随机凭据的服务端入站方案；可传当前 `input` 以保留用户选择并重新生成随机字段 |
 | `POST` | `/api/v1/agents/{id}/configs/{engine}/server-inbounds` | 新增、修改或删除服务端入站并创建校验/部署任务 |
@@ -134,6 +136,8 @@ Web 日志页保留完整返回结果用于筛选，每页渲染 200 条，可�
 
 ### 端口流量配额
 
+schema 44 的策略响应增加 `accounting`：`source` 为 `core-api`、`nft-dual`，未启用双链路时可为空；`inbound` / `outbounds` / `mark` 是归属映射，`process_epoch` 标识内核进程，`client_received` / `client_sent` / `target_received` / `target_sent` 是本计量代次的四方向累计，`counters` 是恢复用原始基线。同一 `counter_epoch` 不允许更换归属口径。详情见 [端口流量统计](traffic-accounting.md)。
+
 `GET /api/v1/traffic-endpoints` 会从节点当前保存的 Mihomo、Xray、sing-box 与 Shadowsocks Rust 配置中提取监听名称、端口和 TCP/UDP 范围。响应不会包含凭据或完整配置内容。控制面会把这些监听端口自动持久化为监控记录并同步给支持 `port-traffic-v1` 的 Agent；无需先创建配额即可持续统计、保存每日用量并显示实时速率。配额只是监控记录上的可选上限与封禁设置。同一节点同一端口只显示一张流量卡片。
 
 创建与更新请求使用相同结构：
@@ -154,7 +158,13 @@ Web 日志页保留完整返回结果用于筛选，每页渲染 200 条，可�
 
 `protocol` 为 `tcp`、`udp` 或 `both`，`cycle` 为 `monthly` 或 `yearly`。`cycle_anchor` 必须是当天或过去的 UTC 日期；月末和闰年按日历末日自动对齐。额度是接收与发送字节之和，同一节点同一端口只能配置一次。自动发现记录的 `quota_enabled` 为 `false`；设置配额后变为 `true`。`auto_block` 默认为 `true`；设为 `false` 时 Agent 仍统计并上报流量，但不会因超额创建丢弃规则。取消已发现端口的配额只解除限额和封禁，不删除统计记录或历史。修改端口、协议、周期或起始日期会开始新的周期计数；只调整名称、内核归属、额度或自动封禁开关会保留当前已用流量。响应中的 `enforcement_available`、`enforcement_error`、`blocked`、当前周期与收发计数均来自 Agent 最新心跳。
 
-`GET /api/v1/traffic-usage` 的 `month` 使用 `YYYY-MM`，省略时为当前 UTC 月；`agent_id` 和 `policy_id` 可选。Agent 上报的是每条策略的累计计数，控制面根据连续心跳计算增量并按 UTC 自然日保存接收、发送、合计和峰值速率。重复或乱序心跳不会重复计量；Agent 或 nftables 计数器重启后从新计数继续累计。升级已有数据库后的第一次心跳只建立历史基线，避免把升级前的整个周期累计量错误记入当天；历史图从升级后的下一次有效增量开始。删除单条配额不会删除已经保存的每日历史。
+`GET /api/v1/traffic-usage` 的 `month` 使用 `YYYY-MM`，省略时为当前 UTC 月；`agent_id` 和 `policy_id` 可选。控制面将策略当前用量和每日接收、发送、合计、峰值速率写入 PostgreSQL；删除单条配额不会删除已经保存的每日历史。
+
+新版 Agent 同时上报实际采样时间 `collected_at`、本地计量代次 `counter_epoch` 和不随日历周期清零的 `lifetime_received_bytes` / `lifetime_sent_bytes`。数据库版本 43 保存对应的 `last_collected_at`、`counter_epoch`、`reported_lifetime_received_bytes` / `reported_lifetime_sent_bytes` 基线。策略响应通过 `last_collected_at` 区分采样时间和服务器的 `last_reported_at`；速率单位是 **字节/秒（B/s）**，由连续有效采样之间的增量和采样间隔计算，不使用网络到达间隔。重复、延迟和乱序样本不重复写历史，也不覆盖有效速率；采集失败仅更新健康状态并将速率置零，恢复时从最后成功的基线继续累计。超过两分钟的补报不显示为实时速率。
+
+跨月/跨年后，周期用量按新周期显示，历史增量通过不清零的 lifetime 基线保留上一周期尚未上报的尾部流量。同一代次的 lifetime 倒退不作为计数器重启再次收费；本地状态确实丢失时生成新代次，即使恢复后的计数已经超过旧值也能识别。旧 Agent 不含新字段时继续使用原有兼容逻辑；数据库升级不会改写已有累计量、原始基线或每日历史，首次新版上报也不会把已入账的旧流量重复写入历史。
+
+每日归属采用**有效采样结束时的 UTC 日期**，不是消息到达日期。跨午夜的采样间隔或长时间离线补报只提供总增量，不能据此恢复逐日的真实分布，不会用平均速率伪造离线日流量。端口的统计范围、升级顺序与精度边界见 [端口流量统计](traffic-accounting.md)。
 
 删除 Agent 是不可逆的身份吊销：控制面先删除该节点的配置与修订、删除该节点的全部添加凭证、将其未完成任务标记为失败，再主动关闭当前认证 WSS；相同 Ed25519 身份的后续握手返回 `401`。如需重新注册，必须创建新的添加命令。
 

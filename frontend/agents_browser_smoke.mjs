@@ -35,6 +35,8 @@ const server = createServer(async (request, response) => {
     else if (path === "/assets/app.js") file = join(root, "app.js");
     else if (path === "/assets/agents_browser_runtime.mjs")
       file = join(root, "agents_browser_runtime.mjs");
+    else if (path === "/assets/config_migration_browser_runtime.mjs")
+      file = join(root, "config_migration_browser_runtime.mjs");
     else if (path.startsWith("/assets/modules/"))
       file = join(root, "modules", path.slice("/assets/modules/".length));
     if (!file) {
@@ -253,7 +255,7 @@ async function runMode(mode) {
 }
 
 try {
-  const modes = process.env.QCH_BROWSER_SMOKE_MODES || process.env.QCH_BROWSER_SMOKE_MODE || "admin,empty,readonly,ports,logs,bbr,bbr-readonly,bbr-writeonly";
+  const modes = process.env.QCH_BROWSER_SMOKE_MODES || process.env.QCH_BROWSER_SMOKE_MODE || "admin,empty,readonly,ports,logs,bbr,bbr-readonly,bbr-writeonly,config-migration,config-layout";
   for (const mode of modes.split(",")) await runMode(mode);
   process.stdout.write("agents browser runtime smoke passed\n");
 } finally {

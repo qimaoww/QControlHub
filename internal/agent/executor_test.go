@@ -83,6 +83,9 @@ func TestDefaultSpecsUsePrivateQAgentNamespace(t *testing.T) {
 			}
 		}
 		for _, forbidden := range []string{"CAP_NET_ADMIN", "CAP_NET_RAW", "CAP_SYS_ADMIN", "CAP_DAC_OVERRIDE"} {
+			if forbidden == "CAP_NET_ADMIN" && engine != core.EngineXray {
+				continue
+			}
 			if strings.Contains(unit, forbidden) {
 				t.Errorf("%s grants unnecessary capability %s", expected.Service, forbidden)
 			}
@@ -111,7 +114,11 @@ func TestOpenRCSpecsAndServicesUsePrivateQAgentNamespace(t *testing.T) {
 			continue
 		}
 		script := string(contents)
-		for _, required := range []string{"#!/sbin/openrc-run", "# QControlHub managed OpenRC service:", "supervisor=\"supervise-daemon\"", "capabilities=\"^cap_net_bind_service\"", spec.Binary} {
+		capabilities := "capabilities=\"^cap_net_bind_service\""
+		if engine != core.EngineXray {
+			capabilities = "capabilities=\"^cap_net_bind_service,^cap_net_admin\""
+		}
+		for _, required := range []string{"#!/sbin/openrc-run", "# QControlHub managed OpenRC service:", "supervisor=\"supervise-daemon\"", capabilities, spec.Binary} {
 			if !strings.Contains(script, required) {
 				t.Errorf("OpenRC service %s is missing %q", spec.Service, required)
 			}

@@ -256,7 +256,16 @@ func (c *Client) Run(ctx context.Context) error {
 	}
 	go c.logs.Run(ctx)
 	go c.publicIP.Run(ctx)
-	c.traffic.Start(ctx)
+	c.executor.migrateNativeAccounting(ctx)
+	if c.traffic != nil {
+		c.traffic.nativeSource = c.executor.nativeAccounting
+	}
+	trafficContext, stopTraffic := context.WithCancel(ctx)
+	trafficDone := c.traffic.Start(trafficContext)
+	defer func() {
+		stopTraffic()
+		<-trafficDone
+	}()
 	if c.mainland != nil {
 		restoreContext, restoreCancel := context.WithTimeout(ctx, 30*time.Second)
 		if err := c.mainland.Restore(restoreContext, c.creds.AgentID); err != nil {
@@ -655,6 +664,7 @@ func (c *Client) advertisedFeatures() []string {
 		core.AgentFeatureManagedPublicIPProbe,
 		core.AgentFeatureManagedPolicy,
 		core.AgentFeatureManagedConfigRead,
+		core.AgentFeatureConfigFiles,
 		core.AgentFeatureSystemBBR,
 	}
 	if c.publicIP.Enabled() {

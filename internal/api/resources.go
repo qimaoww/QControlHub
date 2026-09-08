@@ -82,13 +82,15 @@ type configCatalogResource struct {
 }
 
 type agentConfigWorkspaceResource struct {
-	Agent          core.Agent              `json:"agent"`
-	Config         *core.Config            `json:"config,omitempty"`
-	Catalog        configschema.Catalog    `json:"catalog"`
-	Protocols      []serverconfig.Protocol `json:"protocols"`
-	Inbounds       []serverconfig.Input    `json:"inbounds"`
-	PresentFields  map[string]bool         `json:"present_fields"`
-	RealityPresets []string                `json:"reality_presets"`
+	AccountingPlan  *serverconfig.AccountingPlan `json:"accounting_plan,omitempty"`
+	AccountingError string                       `json:"accounting_error,omitempty"`
+	Agent           core.Agent                   `json:"agent"`
+	Config          *core.Config                 `json:"config,omitempty"`
+	Catalog         configschema.Catalog         `json:"catalog"`
+	Protocols       []serverconfig.Protocol      `json:"protocols"`
+	Inbounds        []serverconfig.Input         `json:"inbounds"`
+	PresentFields   map[string]bool              `json:"present_fields"`
+	RealityPresets  []string                     `json:"reality_presets"`
 }
 
 type configMutationResult struct {
@@ -179,6 +181,11 @@ func (s *Server) agentConfigWorkspace(w http.ResponseWriter, request *http.Reque
 	}
 	if config.ID != "" {
 		result.Config = &config
+		if plan, planErr := serverconfig.PlanPresetAccounting(engine, config.Content); planErr == nil {
+			result.AccountingPlan = &plan
+		} else {
+			result.AccountingError = planErr.Error()
+		}
 		result.Inbounds = serverconfig.ParseAll(engine, config.Content)
 		if err := s.hydrateClientMetadata(request.Context(), config, result.Inbounds); err != nil {
 			writeInternalError(w, err)
@@ -316,6 +323,11 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 	}
 	current, currentErr := s.store.AgentConfig(request.Context(), agent.ID, engine)
 	if currentErr == nil {
+		current.Content, err = serverconfig.PresetAccountingSource(engine, current.Content)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "无法安全更新独立出口配置："+err.Error())
+			return
+		}
 		if engine == core.EngineShadowsocksRust && input.PreserveSSRustGlobals {
 			content, err = serverconfig.MutateSSRustPort(current.Content, generated, input.OriginalTag, input.Operation)
 		} else {
@@ -363,6 +375,16 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 				return
 			}
 		}
+	}
+	// Reject unsupported attribution before saving a version or queuing a task.
+	// Deleting the last inbound must remain possible.
+	if len(serverconfig.DiscoverTrafficPorts(engine, content)) > 0 {
+		plan, err := serverconfig.PlanPresetAccounting(engine, content)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "预设配置无法建立独立出口归属，未保存或部署："+err.Error())
+			return
+		}
+		content = plan.Content
 	}
 	name := strings.TrimSpace(input.Name)
 	if name == "" {
@@ -489,6 +511,16 @@ func (s *Server) saveConfigField(w http.ResponseWriter, request *http.Request) {
 		return
 	}
 	var content string
+	managedAccounting := strings.Contains(current.Content, "qch-trf-") ||
+		(engine == core.EngineShadowsocksRust && strings.Contains(current.Content, "outbound_fwmark"))
+	mutationSource := current.Content
+	if managedAccounting && engine == core.EngineShadowsocksRust {
+		mutationSource, err = serverconfig.PresetAccountingSource(engine, current.Content)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
 	if engine == core.EngineShadowsocksRust {
 		if err := serverconfig.ValidateSSRustFieldValue(key, input.Fragment, input.Mutation == "delete"); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
@@ -496,13 +528,27 @@ func (s *Server) saveConfigField(w http.ResponseWriter, request *http.Request) {
 		}
 	}
 	if scoped {
-		content, err = serverconfig.MergeSSRustInboundField(current.Content, inbound, key, input.Fragment, input.Mutation == "delete")
+		content, err = serverconfig.MergeSSRustInboundField(mutationSource, inbound, key, input.Fragment, input.Mutation == "delete")
 	} else {
-		content, err = configschema.MergeFragment(engine, current.Content, key, input.Fragment, input.Mutation == "delete")
+		content, err = configschema.MergeFragment(engine, mutationSource, key, input.Fragment, input.Mutation == "delete")
 	}
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	if managedAccounting {
+		if engine != core.EngineShadowsocksRust {
+			content, err = serverconfig.AccountingUpdateSource(engine, content, current.Content)
+		}
+		if err == nil && len(serverconfig.DiscoverTrafficPorts(engine, content)) > 0 {
+			var plan serverconfig.AccountingPlan
+			plan, err = serverconfig.PlanPresetAccounting(engine, content)
+			content = plan.Content
+		}
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "字段修改无法保持独立出口归属，未保存："+err.Error())
+			return
+		}
 	}
 	name := strings.TrimSpace(input.Name)
 	if name == "" {
@@ -620,7 +666,7 @@ func (s *Server) createConfigMutationTask(w http.ResponseWriter, request *http.R
 		return core.Task{}, false
 	}
 	task, err := s.store.CreateTask(request.Context(), core.TaskRequest{
-		AgentID: config.AgentID, Engine: config.Engine, Action: action, ConfigID: config.ID,
+		AgentID: config.AgentID, Engine: config.Engine, Action: action, ConfigID: config.ID, ExpectedConfigVersion: config.Version,
 	})
 	if err != nil {
 		writeStoreError(w, err)

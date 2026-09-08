@@ -2349,7 +2349,7 @@ function bindCodeEditors() {
     };
     const update = () => {
       const result = inspect();
-      const dirty = input.value !== original;
+      const dirty = editor.configFileController ? editor.configFileController.dirty() : input.value !== original;
       gutter.textContent = Array.from(
         { length: Math.max(1, input.value.split("\n").length) },
         (_, index) => String(index + 1),
@@ -2360,7 +2360,7 @@ function bindCodeEditors() {
       editor.dataset.dirty = dirty ? "1" : "0";
       editor.dataset.codeValid = result.valid ? "1" : "0";
       input.classList.toggle("is-invalid", !result.valid);
-      if (reset) reset.disabled = !dirty;
+      if (reset) reset.disabled = !dirty || input.readOnly;
       if (!result.valid) {
         if (status) status.textContent = result.status;
         if (validation) validation.textContent = result.message;
@@ -2417,7 +2417,9 @@ function bindCodeEditors() {
       input.dispatchEvent(new Event("input", { bubbles: true }));
     });
     bindEvent(reset, "click", () => {
-      input.value = original;
+      if (input.readOnly) return;
+      if (editor.configFileController) editor.configFileController.reset();
+      else input.value = original;
       input.setSelectionRange(0, 0);
       update();
       input.focus();

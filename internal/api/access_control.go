@@ -193,11 +193,25 @@ func (s *Server) putMainlandAccessPolicy(w http.ResponseWriter, request *http.Re
 		writeJSON(w, http.StatusOK, configMutationResult{Config: saved, Task: task})
 		return
 	}
-	content, err := serverconfig.ApplyMainlandAccessPolicyWithPrefixes(input.Engine, config.Content, serverconfig.MainlandAccessPolicy{
+	source := config.Content
+	managedAccounting := strings.Contains(source, "qch-trf-")
+	if managedAccounting {
+		source, err = serverconfig.PresetAccountingSource(input.Engine, source)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+	content, err := serverconfig.ApplyMainlandAccessPolicyWithPrefixes(input.Engine, source, serverconfig.MainlandAccessPolicy{
 		Tag: input.Tag, Port: input.Port, Engine: input.Engine,
 		BlockMainlandDestination: input.BlockMainlandDestination,
 		BlockMainlandSource:      input.BlockMainlandSource,
 	}, nil)
+	if err == nil && managedAccounting {
+		var plan serverconfig.AccountingPlan
+		plan, err = serverconfig.PlanPresetAccounting(input.Engine, content)
+		content = plan.Content
+	}
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return

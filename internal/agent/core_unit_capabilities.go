@@ -19,7 +19,16 @@ CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 `
 
+func managedCapabilityDropInVariants(service string) [][]byte {
+	variants := [][]byte{[]byte(managedCoreCapabilityDropIn)}
+	if service == "qagent-mihomo.service" || service == "qagent-sing-box.service" || service == "qagent-shadowsocks-rust.service" {
+		variants = append(variants, []byte(strings.ReplaceAll(managedCoreCapabilityDropIn, "=CAP_NET_BIND_SERVICE", "=CAP_NET_BIND_SERVICE CAP_NET_ADMIN")))
+	}
+	return variants
+}
+
 type coreUnitCapabilitySyncer struct {
+	outboundMarks  bool
 	systemctlPath  string
 	systemdRunPath string
 	installPath    string
@@ -53,9 +62,13 @@ func ensureManagedCoreServiceCapabilities(ctx context.Context, engine core.Engin
 	// Alpine's managed OpenRC scripts grant CAP_NET_BIND_SERVICE when they
 	// launch the non-root core. No unit drop-in is needed or available there.
 	if manager.Kind() == ServiceManagerOpenRC {
+		if engine == core.EngineMihomo || engine == core.EngineShadowsocksRust || engine == core.EngineSingBox {
+			return ensureOpenRCOutboundMarkCapability(spec.Service)
+		}
 		return nil
 	}
 	syncer := defaultCoreUnitCapabilitySyncer()
+	syncer.outboundMarks = engine == core.EngineMihomo || engine == core.EngineShadowsocksRust || engine == core.EngineSingBox
 	if err := syncer.ensure(ctx, spec.Service); err != nil {
 		return fmt.Errorf("prepare managed systemd service %s for privileged ports: %w", spec.Service, err)
 	}
@@ -105,7 +118,11 @@ func (syncer coreUnitCapabilitySyncer) ensure(ctx context.Context, service strin
 		return err
 	}
 	temporaryPath := filepath.Join(dropInDirectory, ".qcontrolhub-bind-low-ports-"+suffix+".tmp")
-	if err := syncer.runHelper(ensureContext, []byte(managedCoreCapabilityDropIn), syncer.teePath, temporaryPath); err != nil {
+	content := managedCoreCapabilityDropIn
+	if syncer.outboundMarks {
+		content = strings.ReplaceAll(content, "=CAP_NET_BIND_SERVICE", "=CAP_NET_BIND_SERVICE CAP_NET_ADMIN")
+	}
+	if err := syncer.runHelper(ensureContext, []byte(content), syncer.teePath, temporaryPath); err != nil {
 		return fmt.Errorf("write managed systemd drop-in: %w", err)
 	}
 	moved := false
@@ -150,7 +167,8 @@ func (syncer coreUnitCapabilitySyncer) configured(ctx context.Context, service s
 		}
 	}
 	return capabilityListContains(properties["AmbientCapabilities"], "cap_net_bind_service") &&
-		capabilityListContains(properties["CapabilityBoundingSet"], "cap_net_bind_service"), nil
+		capabilityListContains(properties["CapabilityBoundingSet"], "cap_net_bind_service") &&
+		(!syncer.outboundMarks || capabilityListContains(properties["AmbientCapabilities"], "cap_net_admin") && capabilityListContains(properties["CapabilityBoundingSet"], "cap_net_admin")), nil
 }
 
 func capabilityListContains(value, capability string) bool {

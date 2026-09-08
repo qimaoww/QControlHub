@@ -110,6 +110,9 @@ func intValue(value any) int {
 		return typed
 	case int64:
 		return int(typed)
+	case json.Number:
+		value, _ := strconv.Atoi(string(typed))
+		return value
 	case float64:
 		return int(typed)
 	default:

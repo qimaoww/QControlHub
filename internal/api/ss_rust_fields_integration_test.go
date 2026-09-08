@@ -101,6 +101,14 @@ func TestSSRustScopedConfigAPIWithPostgreSQL(t *testing.T) {
 	_ = json.Unmarshal([]byte(saved.Content), &root)
 	entries := root["servers"].([]any)
 	first, second := entries[0].(map[string]any), entries[1].(map[string]any)
+	if first["outbound_fwmark"] != float64(uint32(0x51430000)|20003) || second["outbound_fwmark"] != float64(uint32(0x51430000)|20002) {
+		t.Fatalf("preset did not persist independent exit marks: %s", saved.Content)
+	}
+	response = request(http.MethodGet, "/workspace", nil)
+	var workspace agentConfigWorkspaceResource
+	if err := json.Unmarshal(response.Body.Bytes(), &workspace); err != nil || response.Code != http.StatusOK || workspace.AccountingPlan == nil || len(workspace.AccountingPlan.Ports) != 2 {
+		t.Fatalf("missing saved exit plan: %d %s, %v", response.Code, response.Body.String(), err)
+	}
 	if root["dns"] != "1.1.1.1" || root["mode"] != "tcp_and_udp" || root["timeout"] != float64(75) || first["mode"] != nil || first["server_port"] != float64(20003) || second["mode"] != "udp_only" || second["server_port"] != float64(20002) {
 		t.Fatalf("scope isolation lost: %s", saved.Content)
 	}
@@ -124,5 +132,26 @@ func TestSSRustScopedConfigAPIWithPostgreSQL(t *testing.T) {
 	policies, err := dataStore.ListMainlandAccessPolicies(ctx, agent.ID)
 	if err != nil || len(policies) != 2 || policies[0].Tag != "two" || policies[1].Tag != customName || !policies[1].BlockMainlandSource {
 		t.Fatalf("renaming changed port policies: %+v %v", policies, err)
+	}
+	// A shared plugin transport must fail before creating another DB revision.
+	var unsupported map[string]any
+	if err := json.Unmarshal([]byte(saved.Content), &unsupported); err != nil {
+		t.Fatal(err)
+	}
+	unsupported["plugin"] = "custom-transport"
+	unsupportedContent, _ := json.Marshal(unsupported)
+	saved.Content = string(unsupportedContent)
+	saved, err = dataStore.SaveAgentConfig(ctx, saved, saved.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response = request(http.MethodPost, "/server-inbounds", map[string]any{"operation": "modify", "original_tag": customName, "expected_version": saved.Version, "intent": "deploy", "preserve_ss_rust_globals": true,
+		"input": map[string]any{"protocol": "shadowsocks", "tag": customName, "listen": "::", "port": 20003, "method": "aes-256-gcm", "credential": "password-one-long", "username": "default"}})
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("unsafe preset accepted: %d %s", response.Code, response.Body.String())
+	}
+	after, err := dataStore.AgentConfig(ctx, agent.ID, core.EngineShadowsocksRust)
+	if err != nil || after.Version != saved.Version || after.Content != saved.Content {
+		t.Fatalf("rejected preset changed database: %v", err)
 	}
 }

@@ -5,6 +5,7 @@ import "./requests_smoke.mjs";
 import "./core_logs_smoke.mjs";
 import "./config_fields_smoke.mjs";
 import "./system_bbr_smoke.mjs";
+import "./config_files_smoke.mjs";
 
 import {
   agentStructureSignature,
@@ -178,6 +179,9 @@ assert.notEqual(
 );
 
 const trafficRateNow = Date.parse("2026-08-28T00:00:30Z");
+for (const invalidRate of [-1, NaN, Infinity, "invalid"]) {
+  assert.equal(trafficRateForDisplay(invalidRate, "2026-08-28T00:00:15Z", "online", trafficRateNow), 0);
+}
 assert.equal(
   trafficRateForDisplay(4096, "2026-08-28T00:00:15Z", "online", trafficRateNow),
   4096,
@@ -341,8 +345,9 @@ assert.deepEqual(
   "failed import does not replace the pending migration source",
 );
 await submitLiveConfigChange({
-  api: async (path) => {
+  api: async (path, options) => {
     if (path !== "/tasks") throw new Error("retry unexpectedly rewrote snapshot");
+    assert.equal(JSON.parse(options.body).expected_config_version, savedMigrationConfig.version, "import retry must pin the saved snapshot version");
     migrationTaskAttempts += 1;
     return { id: "tsk_retry" };
   },
@@ -838,6 +843,7 @@ for (const install of [
   globalThis.location ??= { hash: "" };
 
   class FakeForm {
+    before(element) { this.accountingSummary = element; }
     constructor(elements = {}) {
       this.isConnected = true;
       this.querySelector = () => null;
@@ -957,7 +963,7 @@ for (const install of [
       querySelectorAll: () => [],
       createElement: () => ({
         className: "", type: "", dataset: {}, textContent: "",
-        setAttribute() {}, removeAttribute() {}, append() {}, addEventListener() {},
+        setAttribute() {}, removeAttribute() {}, append() {}, before() {}, addEventListener() {},
         parentElement: { classList: { contains: () => false }, append() {} },
       }),
     };
