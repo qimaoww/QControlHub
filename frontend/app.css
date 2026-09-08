@@ -581,7 +581,7 @@ button[aria-busy=true]::after{content:"";position:absolute;right:5px;top:4px;wid
 dialog [data-spa-notice]{position:relative;inset:auto;max-width:none;pointer-events:auto;margin:12px;flex-shrink:0}
 @media(max-width:820px) and (pointer:coarse){.qch-notice-stack{top:auto;bottom:calc(78px + env(safe-area-inset-bottom));right:16px}}
 [data-spa-notice]>span{flex:1;min-width:0;overflow-wrap:anywhere}
-.notice-dismiss{flex:none;align-self:flex-start;border:0;border-radius:6px;padding:2px 7px;background:transparent;color:inherit;font-size:18px;line-height:1.2}
+.notice-dismiss{flex:none;align-self:flex-start;border:0;border-radius:6px;padding:2px 7px;background:transparent;color:inherit;font-size:calc(18px * var(--ui-font-scale));line-height:1.2}
 
 /* Drag ghosts follow the pointer with no CSS interpolation; only landing moves
    interpolate. No permanent promotion of normal cards into compositor layers. */
