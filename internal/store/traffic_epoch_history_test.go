@@ -78,7 +78,7 @@ func TestTrafficHistoryVersion44MigrationWithPostgreSQL(t *testing.T) {
 		ALTER TABLE port_traffic_daily_accounting DROP COLUMN agent_id;
 		ALTER TABLE port_traffic_accounting_epochs ADD FOREIGN KEY(policy_id) REFERENCES port_traffic_policies(id) ON DELETE CASCADE;
 		ALTER TABLE port_traffic_daily_accounting ADD FOREIGN KEY(policy_id) REFERENCES port_traffic_policies(id) ON DELETE CASCADE;
-		DELETE FROM qcontrolhub_schema_migrations WHERE version=45;
+		DELETE FROM qcontrolhub_schema_migrations WHERE version>44;
 		INSERT INTO qcontrolhub_schema_migrations(version) VALUES(44) ON CONFLICT DO NOTHING`)
 	if err != nil {
 		t.Fatal(err)
