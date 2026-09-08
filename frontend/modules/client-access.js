@@ -1,4 +1,5 @@
 import { bindEvent, createRefreshChannel } from "./refresh.js";
+import { createRegionDisplay, regionAvatarMarkup } from "./regions.js";
 
 export function normalizeClientAccessFilters(entries, agents, filters = {}) {
   const agentIDs = new Set((agents || []).map((agent) => agent.id));
@@ -134,6 +135,7 @@ export async function copyClientValue(
 
 export function installClientAccess(ctx) {
   const { api, state, engines, esc, engineName, shell, can, notify } = ctx;
+  const loadRegionDisplay = createRegionDisplay(ctx);
   let masonryObserver = null;
   const refresh = createRefreshChannel({
     isCurrent: () => state.route === "client-access",
@@ -325,13 +327,18 @@ export function installClientAccess(ctx) {
             return `<section class="client-access-engine-group"><header><span><span class="engine-badge ${esc(entry.engine)}">${esc(engineName(entry.engine))}</span><small>${(entry.profiles || []).length} 个入站</small></span><a href="#agent-config" data-config-agent="${esc(entry.agent_id)}" data-config-engine="${esc(entry.engine)}">服务端配置</a></header><div>${profiles || '<p class="client-access-entry-empty">需要先设置可访问的节点地址。</p>'}</div></section>`;
           })
           .join("");
-        return `<article class="client-access-node-card" data-refresh-key="client-access-node-${esc(group.agent_id)}"><header><div class="client-access-node"><span class="node-avatar">●</span><span><strong>${esc(firstEntry.agent_name)}</strong><small>${esc(agent.os || "节点")} / ${esc(agent.arch || "")} · <code>${esc(firstEntry.address || "未设置地址")}</code></small></span></div><span class="client-access-node-state ${firstEntry.address_required ? "warn" : agentStatus === "online" ? "ok" : "muted"}"><i></i>${statusLabel}</span></header>${addressWarning}<div class="client-access-node-engines">${engineSections}</div></article>`;
+        return `<article class="client-access-node-card" data-refresh-key="client-access-node-${esc(group.agent_id)}"><header><div class="client-access-node">${regionAvatarMarkup({ id: group.agent_id }, esc, false, "node-avatar")}<span><strong>${esc(firstEntry.agent_name)}</strong><small>${esc(agent.os || "节点")} / ${esc(agent.arch || "")} · <code>${esc(firstEntry.address || "未设置地址")}</code></small></span></div><span class="client-access-node-state ${firstEntry.address_required ? "warn" : agentStatus === "online" ? "ok" : "muted"}"><i></i>${statusLabel}</span></header>${addressWarning}<div class="client-access-node-engines">${engineSections}</div></article>`;
       })
       .join("");
   }
 
   function bindClientAccessPage() {
     bindClientAccessMasonry();
+    document.querySelectorAll(".client-access-node-card").forEach((card) => {
+      const id = card.querySelector("[data-region-avatar]")?.dataset.regionAvatar;
+      const agent = (state.data.agents || []).find((item) => item.id === id);
+      if (agent) loadRegionDisplay(agent, card);
+    });
     document.querySelectorAll("[data-access-agent]").forEach((button) => {
       button.onclick = (event) => {
         event.preventDefault();

@@ -235,7 +235,7 @@ window.fetch = async (input, options = {}) => {
       }))));
   }
   if (method === "GET" && path === "/deployments") return json(testAPI.deployments);
-  if (method === "GET" && path === "/client-access" && ["ports","readonly"].includes(mode)) {
+  if (method === "GET" && path === "/client-access" && ["ports","readonly","regions","regions-preview"].includes(mode)) {
     const profiles = (address) => [20001,20002].map((port,index) => {
       const tag = `ss-rust-${index+1}`;
       const name = testAPI.profileNames[port] || tag;
@@ -262,8 +262,22 @@ window.fetch = async (input, options = {}) => {
     testAPI.agents = testAPI.agents.map((agent) => agent.id === agentID ? { ...agent, name } : agent);
     return json({ name });
   }
-  if (method === "GET" && path === "/agents/alpha/region")
-    return json({ ip: "8.8.8.8", country_code: "TW", country: "Taiwan" });
+  if (method === "GET" && path === "/regions")
+    return testAPI.regionCatalogFailure ? json({ error: "temporary catalog failure" }, 503) : json(["CN", "HK", "MO", "TW", "US", "SG", "JP", "GB", "DE", "FR", "AQ", "KR", "CA", "AU", "NL", "IN", "AT", "BE", "BR", "CH", "ES", "FI", "IE", "IS", "IT", "LU", "MY", "NO", "NZ", "PH", "PL", "RU", "SE", "TH", "TR", "VN", "ZA"]);
+  if (method === "PUT" && /^\/agents\/[^/]+\/region$/.test(path)) {
+    if (testAPI.regionSaveFailure) return json({ error: "temporary region save failure" }, 503);
+    if (testAPI.regionSaveGate) await testAPI.regionSaveGate;
+    const agent = testAPI.agents.find((item) => item.id === path.split("/")[2]);
+    const { country_code } = JSON.parse(options.body);
+    if (country_code) agent.labels.region_code = country_code;
+    else delete agent.labels.region_code;
+    return json({ country_code });
+  }
+  if (method === "GET" && path === "/agents/alpha/region") {
+    const country_code = testAPI.agents.find((item) => item.id === "alpha")?.labels.region_code || "TW";
+    if (testAPI.regionLookupGate) await testAPI.regionLookupGate;
+    return json({ ip: "8.8.8.8", country_code });
+  }
   if (method === "GET" && path === "/agents/alpha/komari")
     return json({
       uuid: "komari-alpha",
@@ -374,8 +388,8 @@ async function testAdminRuntime() {
   await waitFor(() => alphaFlag.complete && alphaFlag.naturalWidth > 0, "节点地区 SVG 旗帜没有载入");
   assert.equal(alphaAvatar.textContent, "");
   assert.equal(alphaAvatar.classList.contains("has-region"), true);
-  assert.equal(alphaAvatar.title, "中国台湾 (TW)");
-  assert.equal(alphaAvatar.getAttribute("aria-label"), "中国台湾");
+  assert.equal(alphaAvatar.title, "中国台湾 (TW) · 点击选择国家/地区旗帜");
+  assert.equal(alphaAvatar.getAttribute("aria-label"), "选择国家/地区旗帜：中国台湾 (TW)");
   assert.equal(document.querySelector(".node-card-komari"), null, "Komari 不应再渲染为独立卡片");
   assert.ok(
     komariInline.closest(".node-card-network").querySelector("[data-metric-text=download-rate]"),
@@ -946,6 +960,7 @@ async function testReadonlyRuntime() {
   const renameForm = await waitFor(() => document.querySelector('[data-agent-name-form="alpha"]'), "只读节点详情未完成渲染");
   assert.equal(renameForm.querySelector("input").disabled, true, "只读用户可编辑节点名称");
   assert.equal(renameForm.querySelector("button").disabled, true, "只读用户可提交改名");
+  assert.equal(document.querySelector("[data-region-edit]"), null, "只读用户不应编辑旗帜");
   renameForm.requestSubmit();
   assert.equal(testAPI.calls.some((call) => call.method === "PUT" && call.path.endsWith("/name")), false, "只读用户触发改名请求");
   assert.equal(
@@ -956,6 +971,107 @@ async function testReadonlyRuntime() {
   location.hash = "#client-access";
   await waitFor(() => document.querySelector(".client-profile-row"), "只读客户端页未渲染");
   assert.equal(document.querySelector("[data-client-display-open]"),null,"只读用户可修改端口名称");
+  await waitFor(() => document.querySelector('.client-access-node-card [data-region-avatar] img[src="/api/v1/region-flags/cn"]'), "只读用户客户端旗帜没有显示");
+}
+
+async function testRegionRuntime() {
+  const avatar = () => document.querySelector('[data-agent-node="alpha"] [data-region-avatar]');
+  const flag = (root, code) => root?.querySelector(`img[src="/api/v1/region-flags/${code}"]`);
+  await waitFor(() => flag(avatar(), "cn"), "自动旗帜未显示");
+  const initialHash = location.hash;
+  const open = async () => {
+    avatar().click();
+    return waitFor(() => {
+      const form = document.querySelector(".region-picker-dialog[open] form");
+      return form && !form.querySelector('[type="submit"]').disabled ? form : null;
+    }, "旗帜选择未打开");
+  };
+  let form = await open();
+  assert.equal(location.hash, initialHash, "点击旗帜不应打开节点卡片");
+  assert.ok(form.closest("dialog").querySelector("h2").getBoundingClientRect().width > 200, "弹窗标题被挤入图标列");
+  const search = form.elements.namedItem("query");
+  search.value = "japan";
+  search.dispatchEvent(new Event("input", { bubbles: true }));
+  assert.equal(form.querySelectorAll("[data-region-choice]").length, 1, "英文搜索未筛选国家/地区");
+  form.querySelector('[data-region-choice="JP"]').click();
+  assert.ok(flag(form.querySelector("[data-region-preview]"), "jp"), "选择预览未更新");
+  testAPI.regionSaveFailure = true;
+  form.requestSubmit();
+  await waitFor(() => form.querySelector("[data-region-status]").textContent.includes("temporary region save failure"), "保存错误未显示");
+  assert.equal(form.closest("dialog").open, true);
+  assert.equal(form.querySelector('[data-region-choice="JP"]').getAttribute("aria-pressed"), "true", "保存失败丢失选择");
+  assert.ok(flag(avatar(), "cn"), "失败保存修改了现有旗帜");
+  testAPI.regionSaveFailure = false;
+  let releaseSave;
+  testAPI.regionSaveGate = new Promise((resolve) => { releaseSave = resolve; });
+  const before = testAPI.calls.filter((call) => call.method === "PUT" && call.path.endsWith("/region")).length;
+  form.requestSubmit();
+  form.requestSubmit();
+  assert.equal(form.querySelector('[data-region-choice="JP"]').disabled, true);
+  assert.equal(testAPI.calls.filter((call) => call.method === "PUT" && call.path.endsWith("/region")).length, before + 1, "重复提交了旗帜设置");
+  releaseSave();
+  await waitFor(() => !document.querySelector(".region-picker-dialog") && flag(avatar(), "jp"), "保存旗帜未生效");
+  testAPI.regionSaveGate = null;
+  location.hash = "#settings-node-alpha";
+  await waitFor(() => document.querySelector(".node-operations-workspace") && flag(avatar(), "jp"), "详情页未保留选择");
+  form = await open();
+  assert.equal(form.querySelector('[data-region-choice="JP"]').getAttribute("aria-pressed"), "true", "重新打开没有保存的选项");
+  form.querySelector("[data-region-auto]").click();
+  form.querySelector("[data-region-close]").click();
+  await waitFor(() => !document.querySelector(".region-picker-dialog"), "取消未关闭弹窗");
+  assert.ok(flag(avatar(), "jp"), "取消不应保存自动模式");
+  location.hash = "#client-access";
+  const clientAvatar = () => document.querySelector(".client-access-node-card [data-region-avatar]");
+  await waitFor(() => flag(clientAvatar(), "jp"), "客户端卡片未使用手动旗帜");
+  assert.ok(clientAvatar().closest(".client-access-node-card>header .client-access-node"), "旗帜不在卡片左上角");
+  document.querySelector("[data-refresh-client-access]").click();
+  await waitFor(() => !document.querySelector("[data-refresh-client-access]").disabled && flag(clientAvatar(), "jp"), "刷新后手动旗帜丢失");
+  location.hash = "#settings-node-alpha";
+  await waitFor(() => avatar(), "未返回节点详情");
+  form = await open();
+  form.querySelector("[data-region-auto]").click();
+  form.requestSubmit();
+  await waitFor(() => !document.querySelector(".region-picker-dialog") && flag(avatar(), "cn"), "没有恢复自动识别");
+  assert.equal(testAPI.agents.find((agent) => agent.id === "alpha").labels.region_code, undefined);
+  location.hash = "#client-access";
+  await waitFor(() => flag(clientAvatar(), "cn"), "客户端未恢复自动旗帜");
+  // A lookup already in flight must not overwrite a subsequently saved flag.
+  let releaseLookup;
+  testAPI.regionLookupGate = new Promise((resolve) => { releaseLookup = resolve; });
+  location.hash = "#settings-node-alpha";
+  await waitFor(() => avatar(), "未进入延迟查询节点");
+  form = await open();
+  form.querySelector('[data-region-choice="SG"]').click();
+  form.requestSubmit();
+  await waitFor(() => flag(avatar(), "sg"), "延迟查询时不能保存手动旗帜");
+  releaseLookup();
+  testAPI.regionLookupGate = null;
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.ok(flag(avatar(), "sg"), "迟到的自动查询覆盖了手动旗帜");
+  const img = avatar().querySelector("img");
+  img.dispatchEvent(new Event("error"));
+  assert.equal(avatar().textContent, "●", "图片失败未退回占位符");
+  form = await open();
+  assert.equal(form.querySelector('[data-region-choice="SG"]').getAttribute("aria-pressed"), "true", "图片载入失败丢失手动设置");
+  const query = form.elements.namedItem("query");
+  query.value = "no such region";
+  query.dispatchEvent(new Event("input", { bubbles: true }));
+  assert.equal(form.querySelector("[data-region-empty]").hidden, false, "无匹配结果未显示提示");
+  assert.equal(form.querySelector("[data-region-description]").textContent, "新加坡 · SG", "搜索不能丢失选择");
+  query.value = "香港";
+  query.dispatchEvent(new Event("input", { bubbles: true }));
+  assert.equal(form.querySelectorAll("[data-region-choice]").length, 1, "中文搜索未筛选国家/地区");
+  form.querySelector('[data-region-choice="HK"]').focus();
+  form.querySelector('[data-region-choice="HK"]').click();
+  assert.equal(form.querySelector('[data-region-choice="HK"]').getAttribute("aria-pressed"), "true");
+  form.querySelector("[data-region-close]").click();
+  await waitFor(() => !document.querySelector(".region-picker-dialog"), "没有关闭选择器");
+  testAPI.regionCatalogFailure = true;
+  avatar().click();
+  await waitFor(() => document.querySelector("[data-region-status]")?.textContent.includes("temporary catalog failure"), "列表载入失败未显示提示");
+  assert.equal(document.querySelector('.region-picker-dialog [type="submit"]').disabled, true, "列表载入失败允许误保存");
+  document.querySelector(".region-picker-dialog [data-region-close]").click();
+  testAPI.regionCatalogFailure = false;
 }
 
 async function testPortNamesAndRuntimeRefresh() {
@@ -1423,10 +1539,11 @@ try {
       assert.ok(actions.top-footer.top >= 15.5 && footer.bottom-actions.bottom >= 15.5,"mobile actions touch section dividers");
     }
   }
-  else if (mode === "bbr-preview") await new Promise(() => {});
+  else if (mode === "bbr-preview" || mode === "regions-preview") await new Promise(() => {});
   else if (mode.startsWith("bbr")) await testSystemTCPRuntime();
   else if (mode === "admin") await testAdminRuntime();
   else if (mode === "ports") await testPortNamesAndRuntimeRefresh();
+  else if (mode === "regions") await testRegionRuntime();
   else if (mode === "empty") await testEmptyRuntime();
   else if (mode === "logs") await testLargeLogRuntime();
   else await testReadonlyRuntime();

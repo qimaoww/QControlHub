@@ -4,6 +4,8 @@ import {
   createRefreshChannel,
 } from "./refresh.js";
 import { ConfigFormatError, formatConfigContent } from "./code-format.js";
+import { createRegionDisplay, openRegionPicker, regionAvatarMarkup } from "./regions.js";
+export { geoRegionDetails } from "./regions.js";
 import {
   orderNodesBySavedOrder,
   saveNodeOrder,
@@ -61,25 +63,6 @@ export function komariCycleRange(resetDay, now = new Date()) {
     : currentBoundary;
   const label = (value) => `${value.getMonth() + 1}.${value.getDate()}`;
   return `${label(start)}–${label(end)}`;
-}
-
-// GeoIP providers return a two-letter ISO country/region code. Keep the
-// original code for traceability, but follow the panel display policy for
-// Taiwan: show the China flag while naming the region 中国台湾.
-export function geoRegionDetails(value) {
-  const code = String(value || "").trim().toUpperCase();
-  if (!/^[A-Z]{2}$/.test(code)) return null;
-  const flagCode = code === "TW" ? "CN" : code;
-  const name = code === "TW"
-    ? "中国台湾"
-    : (() => {
-      try {
-        return new Intl.DisplayNames(["zh-CN"], { type: "region" }).of(code) || code;
-      } catch {
-        return code;
-      }
-    })();
-  return { code, flagCode, name };
 }
 
 export function batchAgentEligibility(agent, action, engine) {
@@ -729,40 +712,7 @@ export function installAgents(ctx) {
     card.classList.toggle("usage-unavailable", limit > 0 && !usedAvailable);
     card.classList.remove("unavailable");
   };
-  const updateRegionAvatar = (root, region) => {
-    const avatar = root?.querySelector?.("[data-region-avatar]");
-    if (!avatar) return;
-    avatar.replaceChildren();
-    avatar.classList.toggle("has-region", Boolean(region));
-    if (region) {
-      const image = document.createElement("img");
-      image.src = `/api/v1/region-flags/${region.flagCode.toLowerCase()}`;
-      image.alt = "";
-      image.decoding = "async";
-      image.addEventListener("error", () => {
-        avatar.textContent = "●";
-        avatar.classList.remove("has-region");
-      }, { once: true });
-      avatar.append(image);
-      avatar.title = `${region.name} (${region.code})`;
-      avatar.setAttribute("aria-label", region.name);
-    } else {
-      avatar.textContent = "●";
-      avatar.removeAttribute("title");
-      avatar.setAttribute("aria-label", "节点地区未知");
-    }
-  };
-  const loadRegionDisplay = (agent, root) => {
-    if (!root || !can("metrics.read")) return;
-    api(`/agents/${encodeURIComponent(agent.id)}/region`)
-      .then((payload) => {
-        if (root.isConnected)
-          updateRegionAvatar(root, geoRegionDetails(payload?.country_code));
-      })
-      .catch(() => {
-        if (root.isConnected) updateRegionAvatar(root, null);
-      });
-  };
+  const loadRegionDisplay = createRegionDisplay(ctx);
   const loadKomariDisplay = (agent, root) => {
     if (!komariUUIDFor(agent) || !root) return;
     api(`/agents/${encodeURIComponent(agent.id)}/komari`)
@@ -1049,7 +999,7 @@ async function nodeSettings(presetMode = false, { overview: preloadedOverview } 
         const tabButton = (name, label, count = "") =>
           `<button id="${esc(tabID(`${name}-tab`))}" type="button" role="tab" data-node-tab="${name}" aria-controls="${esc(tabID(`${name}-panel`))}" aria-selected="${activeTab === name}" tabindex="${activeTab === name ? 0 : -1}">${label}${count ? `<span>${count}</span>` : ""}</button>`;
         return `<section class="node-operations-workspace" id="settings-node-${esc(agent.id)}" data-refresh-key="agent-${esc(agent.id)}" data-agent-node="${esc(agent.id)}" data-agent-metrics="${esc(agent.id)}" data-available="${metrics.collected_at ? 1 : 0}">
-          <header class="node-operations-header"><div class="node-operations-title"><span class="machine-avatar" data-region-avatar="${esc(agent.id)}" role="img" aria-label="节点地区未知">●</span><div><span class="node-live-state"><i class="status-dot ${statusTone(agent.status)}" data-agent-status-dot></i><b data-agent-status-label>${agent.status === "online" ? "在线" : "离线"}</b><small data-agent-heartbeat>${esc(heartbeat(agent.last_seen))}</small></span><h2>${esc(agent.name)}</h2><code>${esc(agent.os)} / ${esc(agent.arch)} · ${esc(short(agent.id))}</code></div></div><div class="node-operations-actions">${can("metrics.read") ? `<button class="button small" type="button" data-agent-refresh title="刷新节点状态">刷新</button>` : ""}${can("operator") ? `<button type="button" class="button primary small" data-upgrade-agent="${esc(agent.id)}">升级 Agent</button>` : ""}</div></header>
+          <header class="node-operations-header"><div class="node-operations-title">${regionAvatarMarkup(agent, esc, can("agents.manage"))}<div><span class="node-live-state"><i class="status-dot ${statusTone(agent.status)}" data-agent-status-dot></i><b data-agent-status-label>${agent.status === "online" ? "在线" : "离线"}</b><small data-agent-heartbeat>${esc(heartbeat(agent.last_seen))}</small></span><h2>${esc(agent.name)}</h2><code>${esc(agent.os)} / ${esc(agent.arch)} · ${esc(short(agent.id))}</code></div></div><div class="node-operations-actions">${can("metrics.read") ? `<button class="button small" type="button" data-agent-refresh title="刷新节点状态">刷新</button>` : ""}${can("operator") ? `<button type="button" class="button primary small" data-upgrade-agent="${esc(agent.id)}">升级 Agent</button>` : ""}</div></header>
           <section class="node-resource-strip" aria-label="节点资源"><div><span>CPU</span><strong data-metric-text="cpu">${metrics.cpu_available ? `${Number(metrics.cpu_percent).toFixed(1)}%` : "等待采集"}</strong><progress aria-label="CPU 使用率" data-metric-progress="cpu" max="100" value="${metrics.cpu_available ? Number(metrics.cpu_percent) : 0}"></progress></div><div><span>内存</span><strong data-metric-text="memory">${metrics.memory_available ? `${bytes(metrics.memory_used_bytes)} / ${bytes(metrics.memory_total_bytes)}` : "等待采集"}</strong><progress aria-label="内存使用率" data-metric-progress="memory" max="100" value="${percent(metrics.memory_used_bytes, metrics.memory_total_bytes)}"></progress></div><div><span>磁盘</span><strong data-metric-text="disk">${metrics.disk_available ? `${bytes(metrics.disk_used_bytes)} / ${bytes(metrics.disk_total_bytes)}` : "等待采集"}</strong><progress aria-label="根磁盘使用率" data-metric-progress="disk" max="100" value="${percent(metrics.disk_used_bytes, metrics.disk_total_bytes)}"></progress></div><div class="node-resource-network"><span>网络</span><strong>↓ <i data-metric-text="download-rate">${metrics.network_available ? rate(metrics.network_rx_bps) : "等待采集"}</i> · ↑ <i data-metric-text="upload-rate">${metrics.network_available ? rate(metrics.network_tx_bps) : "等待采集"}</i></strong><small>累计 ↓ <b data-metric-text="download-total">${metrics.network_available ? bytes(metrics.network_rx_bytes) : "—"}</b> · ↑ <b data-metric-text="upload-total">${metrics.network_available ? bytes(metrics.network_tx_bytes) : "—"}</b></small></div><span class="machine-resource-live" data-metric-poll role="status" aria-label="资源自动更新"></span></section>
           <nav class="node-settings-tabs" role="tablist" aria-label="节点设置分区">${tabButton("cores", "内核", `${installedCount}/${(agent.capabilities || []).length}`)}${tabButton("metrics", "监控")}${tabButton("agent", "Agent")}</nav>
           <div class="node-settings-panels">
@@ -1092,7 +1042,7 @@ async function nodeSettings(presetMode = false, { overview: preloadedOverview } 
           ? `<label class="node-card-select" title="选择 ${esc(agent.name)}"><input type="checkbox" data-batch-checkbox value="${esc(agent.id)}" aria-label="选择 ${esc(agent.name)} 参与批量操作"><span aria-hidden="true"></span></label>`
           : "";
         return `<${cardTag} class="node-card ${batchMode ? "batch-selecting" : ""}" ${cardInteraction} data-refresh-key="agent-${esc(agent.id)}" data-agent-node="${esc(agent.id)}" data-agent-metrics="${esc(agent.id)}" data-state="${agent.status === "online" ? "online" : "offline"}" data-available="${metrics.collected_at ? 1 : 0}">
-              <header class="node-card-head"><span class="machine-avatar" data-region-avatar="${esc(agent.id)}" role="img" aria-label="节点地区未知">●</span><div class="node-card-title"><strong>${esc(agent.name)}</strong><small data-core-installed-summary>${esc(agent.os)} / ${esc(agent.arch)} · ${installedCount ? `${installedCount}/${(agent.capabilities || []).length} 内核已安装` : "尚未安装内核"}</small></div><span class="node-card-state"><i class="status-dot ${statusTone(agent.status)}" data-agent-status-dot></i><b data-agent-status-label>${agent.status === "online" ? "在线" : "离线"}</b><small data-agent-heartbeat>${esc(heartbeat(agent.last_seen))}</small></span>${batchMode ? batchSelect : '<span class="node-card-grip" title="拖动调整顺序" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 6h.01M9 12h.01M9 18h.01M15 6h.01M15 12h.01M15 18h.01"/></svg></span>'}</header>
+              <header class="node-card-head">${regionAvatarMarkup(agent, esc, can("agents.manage"))}<div class="node-card-title"><strong>${esc(agent.name)}</strong><small data-core-installed-summary>${esc(agent.os)} / ${esc(agent.arch)} · ${installedCount ? `${installedCount}/${(agent.capabilities || []).length} 内核已安装` : "尚未安装内核"}</small></div><span class="node-card-state"><i class="status-dot ${statusTone(agent.status)}" data-agent-status-dot></i><b data-agent-status-label>${agent.status === "online" ? "在线" : "离线"}</b><small data-agent-heartbeat>${esc(heartbeat(agent.last_seen))}</small></span>${batchMode ? batchSelect : '<span class="node-card-grip" title="拖动调整顺序" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 6h.01M9 12h.01M9 18h.01M15 6h.01M15 12h.01M15 18h.01"/></svg></span>'}</header>
               <div class="node-card-ips" aria-label="公网地址">${addressRows.map(cardIPRow).join("")}<small class="node-address-note" data-node-connection-address ${connectionAddressNote ? "" : "hidden"}>${esc(connectionAddressNote)}</small></div>
               <section class="node-card-resources" aria-label="节点资源"><div><span>CPU</span><strong data-metric-text="cpu">${metrics.cpu_available ? `${Number(metrics.cpu_percent).toFixed(1)}%` : "等待采集"}</strong><progress aria-label="CPU 使用率" data-metric-progress="cpu" max="100" value="${metrics.cpu_available ? Number(metrics.cpu_percent) : 0}"></progress></div><div><span>内存</span><strong data-metric-text="memory">${metrics.memory_available ? `${bytes(metrics.memory_used_bytes)} / ${bytes(metrics.memory_total_bytes)}` : "等待采集"}</strong><progress aria-label="内存使用率" data-metric-progress="memory" max="100" value="${percent(metrics.memory_used_bytes, metrics.memory_total_bytes)}"></progress></div><div><span>磁盘</span><strong data-metric-text="disk">${metrics.disk_available ? `${bytes(metrics.disk_used_bytes)} / ${bytes(metrics.disk_total_bytes)}` : "等待采集"}</strong><progress aria-label="根磁盘使用率" data-metric-progress="disk" max="100" value="${percent(metrics.disk_used_bytes, metrics.disk_total_bytes)}"></progress></div><div class="node-card-network"><span>网络</span><strong>↓ <i data-metric-text="download-rate">${metrics.network_available ? rate(metrics.network_rx_bps) : "等待采集"}</i> · ↑ <i data-metric-text="upload-rate">${metrics.network_available ? rate(metrics.network_tx_bps) : "等待采集"}</i></strong>${komariNetworkMarkup(agent) || `<small>累计 ↓ <b data-metric-text="download-total">${metrics.network_available ? bytes(metrics.network_rx_bytes) : "—"}</b> · ↑ <b data-metric-text="upload-total">${metrics.network_available ? bytes(metrics.network_tx_bytes) : "—"}</b></small>`}</div><span class="machine-resource-live" data-metric-poll role="status" aria-label="资源自动更新"></span></section>
               <section class="node-card-cores" aria-label="内核状态">${coreChips}</section>
@@ -1860,6 +1810,31 @@ function bindAgentPage(agentItems, presetMode = false, enrollmentHistory = {}) {
     loadRegionDisplay(agent, root);
     if (root.querySelector("[data-komari-link]")) loadKomariDisplay(agent, root);
   });
+  document.querySelectorAll("[data-region-edit]").forEach((button) => {
+    button.onclick = (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!can("agents.manage")) return;
+      const agent = (state.data.agents || []).find((item) => item.id === button.dataset.regionAvatar) || agentsByID.get(button.dataset.regionAvatar);
+      if (!agent) return;
+      const release = cardInteractions.begin();
+      openRegionPicker(agent, {
+        api, esc, onClose: release,
+        onSave: (code) => {
+          for (const item of new Set([agent, agentsByID.get(agent.id), ...(state.data.agents || []).filter((item) => item.id === agent.id)])) {
+            if (!item) continue;
+            item.labels = { ...(item.labels || {}) };
+            if (code) item.labels.region_code = code;
+            else delete item.labels.region_code;
+          }
+          document.querySelectorAll("[data-agent-metrics]").forEach((root) => {
+            if (root.dataset.agentMetrics === agent.id) loadRegionDisplay(agent, root);
+          });
+          notify(code ? "国家/地区旗帜已保存" : "已恢复自动识别旗帜");
+        },
+      });
+    };
+  });
   document.querySelectorAll("[data-upgrade-agent]").forEach((button) => {
     button.onclick = async () => {
       if (
@@ -2018,6 +1993,7 @@ function updateAgentMetrics(item) {
     `[data-agent-metrics="${CSS.escape(item.id)}"]`,
   );
   if (!root) return;
+  loadRegionDisplay(item, root);
   if (
     typeof root.matches === "function" &&
     root.matches(".node-operations-workspace")

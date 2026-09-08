@@ -13,9 +13,41 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/qimaoww/qcontrolhub/internal/core"
+	"github.com/qimaoww/qcontrolhub/internal/geoip"
 )
 
 const komariUUIDLabel = "komari_uuid"
+
+// AgentRegionCode returns the optional operator-selected display region.
+func AgentRegionCode(agent core.Agent) string {
+	code := strings.ToUpper(strings.TrimSpace(agent.Labels["region_code"]))
+	if !geoip.ValidRegionCode(code) {
+		return ""
+	}
+	return code
+}
+
+// SetAgentRegionCode changes only the region preference, preserving all other
+// labels. Clearing it restores automatic GeoIP without requiring a migration.
+func (s *Store) SetAgentRegionCode(ctx context.Context, id, code string) error {
+	code = strings.ToUpper(strings.TrimSpace(code))
+	if code != "" && !geoip.ValidRegionCode(code) {
+		return fmt.Errorf("%w: unsupported country/region code", ErrInvalid)
+	}
+	command, err := s.pool.Exec(ctx, `
+		UPDATE agents SET labels = CASE
+			WHEN $2='' THEN COALESCE(NULLIF(labels, 'null'::jsonb), '{}'::jsonb) - 'region_code'
+			ELSE jsonb_set(COALESCE(NULLIF(labels, 'null'::jsonb), '{}'::jsonb), '{region_code}', to_jsonb($2::text), true)
+		END
+		WHERE id=$1 AND revoked_at IS NULL`, id, code)
+	if err != nil {
+		return err
+	}
+	if command.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
 
 // SetAgentName changes only panel display metadata. Enrollment credentials
 // keep their original names, and reconnects continue to use the stable ID/key.
