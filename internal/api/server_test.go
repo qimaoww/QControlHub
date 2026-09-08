@@ -2,7 +2,11 @@ package api
 
 import (
 	"bytes"
+	"compress/gzip"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -163,6 +167,52 @@ func TestAgentDownloadsRequireEnrollmentToken(t *testing.T) {
 		if response.Code != http.StatusUnauthorized {
 			t.Fatalf("GET %s without enrollment token = %d, want %d", path, response.Code, http.StatusUnauthorized)
 		}
+	}
+}
+
+func TestServeAgentBinaryForAgentSupportsGzip(t *testing.T) {
+	raw := []byte("agent-binary-payload-for-gzip")
+	compressed := gzipCompress(raw)
+	if compressed == nil {
+		t.Fatal("gzip compress returned nil")
+	}
+	server := &Server{agentBinary: raw, agentBinaryGzip: compressed, agentVersion: "v9"}
+	sum := fmt.Sprintf("%x", sha256.Sum256(raw))
+
+	gzipRequest := httptest.NewRequest(http.MethodGet, "/agent/v1/binary", nil)
+	gzipRequest.Header.Set("Accept-Encoding", "gzip")
+	gzipResponse := httptest.NewRecorder()
+	server.serveAgentBinaryForAgent(gzipResponse, gzipRequest)
+	if gzipResponse.Code != http.StatusOK {
+		t.Fatalf("gzip status = %d, want %d", gzipResponse.Code, http.StatusOK)
+	}
+	if encoding := gzipResponse.Header().Get("Content-Encoding"); encoding != "gzip" {
+		t.Fatalf("Content-Encoding = %q, want gzip", encoding)
+	}
+	if got := gzipResponse.Header().Get("X-QControlHub-Agent-SHA256"); got != sum {
+		t.Fatalf("checksum header = %q, want %q", got, sum)
+	}
+	reader, err := gzip.NewReader(gzipResponse.Body)
+	if err != nil {
+		t.Fatalf("open gzip body: %v", err)
+	}
+	decoded, readErr := io.ReadAll(reader)
+	_ = reader.Close()
+	if readErr != nil {
+		t.Fatalf("read gzip body: %v", readErr)
+	}
+	if !bytes.Equal(decoded, raw) {
+		t.Fatalf("gzip body = %q, want %q", decoded, raw)
+	}
+
+	rawRequest := httptest.NewRequest(http.MethodGet, "/agent/v1/binary", nil)
+	rawResponse := httptest.NewRecorder()
+	server.serveAgentBinaryForAgent(rawResponse, rawRequest)
+	if got := rawResponse.Body.Bytes(); !bytes.Equal(got, raw) {
+		t.Fatalf("raw body = %q, want %q", got, raw)
+	}
+	if encoding := rawResponse.Header().Get("Content-Encoding"); encoding != "" {
+		t.Fatalf("raw Content-Encoding = %q, want empty", encoding)
 	}
 }
 

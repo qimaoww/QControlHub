@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -69,6 +70,7 @@ type Server struct {
 	agentLimiter               *authn.FailureLimiter
 	trustedProxies             []*net.IPNet
 	agentBinary                []byte
+	agentBinaryGzip            []byte
 	agentVersion               string
 	controlPlaneVersion        string
 	agentInstaller             []byte
@@ -159,6 +161,7 @@ func New(dataStore *store.Store, config Config) *Server {
 		agentLimiter:               authn.NewFailureLimiter(20, time.Minute, 5*time.Minute),
 		trustedProxies:             config.TrustedProxies,
 		agentBinary:                config.AgentBinary,
+		agentBinaryGzip:            gzipCompress(config.AgentBinary),
 		agentVersion:               strings.TrimSpace(config.AgentVersion),
 		controlPlaneVersion:        strings.TrimSpace(config.ControlPlaneVersion),
 		agentInstaller:             config.AgentInstaller,
@@ -186,6 +189,39 @@ func (s *Server) enrollmentDownloadAllowed(w http.ResponseWriter, request *http.
 	return true
 }
 
+func acceptsGzip(request *http.Request) bool {
+	return strings.Contains(strings.ToLower(request.Header.Get("Accept-Encoding")), "gzip")
+}
+
+func gzipCompress(input []byte) []byte {
+	if len(input) == 0 {
+		return nil
+	}
+	var buffer bytes.Buffer
+	writer := gzip.NewWriter(&buffer)
+	_, _ = writer.Write(input)
+	_ = writer.Close()
+	return buffer.Bytes()
+}
+
+// writeAgentBinary writes the immutable agent executable. When the client
+// advertises gzip support it is sent with Content-Encoding: gzip, which
+// conforming clients (Go's transport and curl --compressed) decompress before
+// hashing or saving it. The checksum header always reflects the raw binary.
+func (s *Server) writeAgentBinary(w http.ResponseWriter, request *http.Request) {
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Cache-Control", "no-store")
+	body := s.agentBinary
+	if len(s.agentBinaryGzip) != 0 && acceptsGzip(request) {
+		body = s.agentBinaryGzip
+		w.Header().Set("Content-Encoding", "gzip")
+		w.Header().Set("Vary", "Accept-Encoding")
+	}
+	w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+	_, _ = w.Write(body)
+}
+
 // agentBinary serves the statically-extracted agent executable only to a valid
 // node-bound add-node credential.
 func (s *Server) serveAgentBinary(w http.ResponseWriter, r *http.Request) {
@@ -196,10 +232,7 @@ func (s *Server) serveAgentBinary(w http.ResponseWriter, r *http.Request) {
 	if !s.enrollmentDownloadAllowed(w, r) {
 		return
 	}
-	w.Header().Set("Content-Type", "application/octet-stream")
-	w.Header().Set("X-Content-Type-Options", "nosniff")
-	w.Header().Set("Cache-Control", "no-store")
-	w.Write(s.agentBinary)
+	s.writeAgentBinary(w, r)
 }
 
 // serveAgentBinaryForAgent serves the same immutable binary as the installer,
@@ -211,15 +244,11 @@ func (s *Server) serveAgentBinaryForAgent(w http.ResponseWriter, r *http.Request
 		http.NotFound(w, r)
 		return
 	}
-	w.Header().Set("Content-Type", "application/octet-stream")
-	w.Header().Set("Content-Length", strconv.Itoa(len(s.agentBinary)))
 	w.Header().Set("X-QControlHub-Agent-SHA256", fmt.Sprintf("%x", sha256.Sum256(s.agentBinary)))
 	if s.agentVersion != "" {
 		w.Header().Set("X-QControlHub-Agent-Version", s.agentVersion)
 	}
-	w.Header().Set("X-Content-Type-Options", "nosniff")
-	w.Header().Set("Cache-Control", "no-store")
-	_, _ = w.Write(s.agentBinary)
+	s.writeAgentBinary(w, r)
 }
 
 func (s *Server) serveAgentInstaller(w http.ResponseWriter, r *http.Request) {
