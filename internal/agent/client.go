@@ -980,9 +980,11 @@ func (c *Client) upgradeAgent(ctx context.Context) (string, error) {
 	return fmt.Sprintf("Agent binary replaced with %s (%d bytes); reconnecting with the upgraded process", versionLabel(version), size), nil
 }
 
-// agentBinaryDownloadTimeout bounds the whole signed download, including
-// retries, so a misbehaving control plane cannot hold an upgrade task open.
-const agentBinaryDownloadTimeout = 2 * time.Minute
+// agentBinaryDownloadTimeout bounds the whole signed download, including fast
+// retries, so a slow control-plane link cannot hold an upgrade task open
+// forever. Each attempt shares this budget: a transfer that is progressing
+// slowly is allowed to run, while a quick transient failure triggers a retry.
+const agentBinaryDownloadTimeout = 6 * time.Minute
 
 func (c *Client) downloadAgentBinary(ctx context.Context, directory string) (string, string, int64, error) {
 	totalContext, cancel := context.WithTimeout(ctx, agentBinaryDownloadTimeout)
@@ -996,9 +998,7 @@ func (c *Client) downloadAgentBinary(ctx context.Context, directory string) (str
 	performedAttempts := 0
 	for attempt := 1; attempt <= attempts; attempt++ {
 		performedAttempts = attempt
-		attemptContext, attemptCancel := context.WithTimeout(totalContext, defaultDownloadTimeout)
-		path, version, size, err := c.downloadAgentBinaryOnce(attemptContext, c.http, directory)
-		attemptCancel()
+		path, version, size, err := c.downloadAgentBinaryOnce(totalContext, c.http, directory)
 		if err == nil {
 			return path, version, size, nil
 		}

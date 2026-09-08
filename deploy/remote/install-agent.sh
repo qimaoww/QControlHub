@@ -226,9 +226,9 @@ download() {
   source_path=$1
   destination=$2
   if [ -n "$ca_file" ]; then
-    "$download_cmd" --fail --silent --show-error --cacert "$ca_file" -H "X-QControlHub-Enrollment: $token" "$http_origin$source_path" -o "$destination"
+    "$download_cmd" --fail --silent --show-error --compressed --cacert "$ca_file" -H "X-QControlHub-Enrollment: $token" "$http_origin$source_path" -o "$destination"
   else
-    "$download_cmd" --fail --silent --show-error -H "X-QControlHub-Enrollment: $token" "$http_origin$source_path" -o "$destination"
+    "$download_cmd" --fail --silent --show-error --compressed -H "X-QControlHub-Enrollment: $token" "$http_origin$source_path" -o "$destination"
   fi
 }
 
