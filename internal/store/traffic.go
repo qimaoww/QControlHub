@@ -81,7 +81,47 @@ func (s *Store) AgentPortTrafficPolicies(ctx context.Context, agentID string) ([
 // configuration are removed; manual sync keeps every existing record and only
 // adds or updates newly discovered listeners.
 func (s *Store) ReconcilePortTrafficEndpoints(ctx context.Context, raw []core.PortTrafficEndpoint, prune bool) ([]string, error) {
-	endpoints, err := normalizePortTrafficEndpoints(raw)
+	return s.reconcilePortTrafficEndpoints(ctx, raw, prune, nil)
+}
+
+// TrafficSyncCandidates includes tombstones even when their configuration is gone.
+func TrafficSyncCandidates(raw []core.PortTrafficEndpoint, policies []core.PortTrafficPolicy) ([]core.TrafficSyncCandidate, error) {
+	endpoints, err := normalizePortTrafficEndpointsWithLimit(raw, false)
+	if err != nil {
+		return nil, err
+	}
+	existing := make(map[string]bool)
+	result := make([]core.TrafficSyncCandidate, 0)
+	for _, policy := range policies {
+		existing[trafficPortKey(policy.AgentID, policy.Port)] = true
+		if !policy.MonitoringEnabled {
+			result = append(result, core.TrafficSyncCandidate{PortTrafficEndpoint: core.PortTrafficEndpoint{AgentID: policy.AgentID, Name: policy.Name, Engine: policy.Engine, Port: policy.Port, Protocol: policy.Protocol}, Kind: "deleted"})
+		}
+	}
+	for _, endpoint := range endpoints {
+		if !existing[trafficPortKey(endpoint.AgentID, endpoint.Port)] {
+			result = append(result, core.TrafficSyncCandidate{PortTrafficEndpoint: endpoint, Kind: "new"})
+		}
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].AgentID != result[j].AgentID {
+			return result[i].AgentID < result[j].AgentID
+		}
+		return result[i].Port < result[j].Port
+	})
+	return result, nil
+}
+
+func (s *Store) SyncSelectedPortTrafficEndpoints(ctx context.Context, raw []core.PortTrafficEndpoint, selections []core.TrafficSyncSelection) ([]string, error) {
+	if len(selections) == 0 || len(selections) > 4096 {
+		return nil, fmt.Errorf("%w: select between 1 and 4096 ports", ErrInvalid)
+	}
+	return s.reconcilePortTrafficEndpoints(ctx, raw, false, selections)
+}
+
+func (s *Store) reconcilePortTrafficEndpoints(ctx context.Context, raw []core.PortTrafficEndpoint, prune bool, selections []core.TrafficSyncSelection) ([]string, error) {
+	// Selective sync budgets the selected final set, not every available candidate.
+	endpoints, err := normalizePortTrafficEndpointsWithLimit(raw, selections == nil)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalid, err)
 	}
@@ -111,6 +151,33 @@ func (s *Store) ReconcilePortTrafficEndpoints(ctx context.Context, raw []core.Po
 		return nil, err
 	}
 	rows.Close()
+
+	if selections != nil {
+		available := make(map[string]core.PortTrafficEndpoint)
+		for _, endpoint := range endpoints {
+			available[trafficPortKey(endpoint.AgentID, endpoint.Port)] = endpoint
+		}
+		selected := make(map[string]bool)
+		endpoints = nil
+		for _, selection := range selections {
+			key := trafficPortKey(selection.AgentID, selection.Port)
+			if selection.AgentID == "" || selection.Port < 1 || selection.Port > 65535 || selected[key] {
+				return nil, fmt.Errorf("%w: invalid or duplicate selected port", ErrInvalid)
+			}
+			selected[key] = true
+			if policy, ok := existing[key]; ok {
+				// Repeated submissions are harmless; existing monitors are never edited.
+				if policy.MonitoringEnabled {
+					continue
+				}
+				endpoints = append(endpoints, core.PortTrafficEndpoint{AgentID: policy.AgentID, Name: policy.Name, Engine: policy.Engine, Port: policy.Port, Protocol: policy.Protocol})
+			} else if endpoint, ok := available[key]; ok {
+				endpoints = append(endpoints, endpoint)
+			} else {
+				return nil, fmt.Errorf("%w: selected port is no longer available; refresh the list", ErrConflict)
+			}
+		}
+	}
 
 	desired := make(map[string]struct{}, len(endpoints))
 	finalCountByAgent := make(map[string]int)
@@ -144,6 +211,13 @@ func (s *Store) ReconcilePortTrafficEndpoints(ctx context.Context, raw []core.Po
 	for _, endpoint := range endpoints {
 		key := trafficPortKey(endpoint.AgentID, endpoint.Port)
 		if policy, exists := existing[key]; exists {
+			if selections != nil {
+				// Deleted history stays deleted. Preserve metadata and the reset generation
+				// established by deletion; restoring never re-enables a quota or blocking.
+				writes.Queue(`UPDATE port_traffic_policies SET monitoring_enabled=true,quota_enabled=false,auto_block=false,blocked=false,discovered=false,metadata_managed=true,updated_at=now() WHERE id=$1`, policy.ID)
+				changedAgents[endpoint.AgentID] = struct{}{}
+				continue
+			}
 			updateMetadata := !policy.QuotaEnabled && !policy.MetadataManaged
 			protocolChanged := updateMetadata && policy.Protocol != endpoint.Protocol
 			metadataChanged := updateMetadata && (policy.Name != endpoint.Name || policy.Engine != endpoint.Engine || protocolChanged)
@@ -225,6 +299,10 @@ func (s *Store) ReconcilePortTrafficEndpoints(ctx context.Context, raw []core.Po
 }
 
 func normalizePortTrafficEndpoints(raw []core.PortTrafficEndpoint) ([]core.PortTrafficEndpoint, error) {
+	return normalizePortTrafficEndpointsWithLimit(raw, true)
+}
+
+func normalizePortTrafficEndpointsWithLimit(raw []core.PortTrafficEndpoint, enforceLimit bool) ([]core.PortTrafficEndpoint, error) {
 	byPort := make(map[string]core.PortTrafficEndpoint)
 	counts := make(map[string]int)
 	for _, endpoint := range raw {
@@ -248,7 +326,7 @@ func normalizePortTrafficEndpoints(raw []core.PortTrafficEndpoint) ([]core.PortT
 			continue
 		}
 		counts[endpoint.AgentID]++
-		if counts[endpoint.AgentID] > 256 {
+		if enforceLimit && counts[endpoint.AgentID] > 256 {
 			return nil, errors.New("an agent can have at most 256 monitored ports")
 		}
 		byPort[key] = endpoint

@@ -107,6 +107,17 @@ type PortTrafficEndpoint struct {
 	ConfigUpdatedAt time.Time       `json:"config_updated_at"`
 }
 
+// TrafficSyncSelection identifies a port without trusting client metadata.
+type TrafficSyncSelection struct {
+	AgentID string `json:"agent_id"`
+	Port    int    `json:"port"`
+}
+
+type TrafficSyncCandidate struct {
+	PortTrafficEndpoint
+	Kind string `json:"kind"` // deleted or new
+}
+
 type PortTrafficUsage struct {
 	Accounting *TrafficAccounting `json:"accounting,omitempty"`
 	// CollectedAt identifies the actual sample, not the heartbeat or network

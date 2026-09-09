@@ -112,6 +112,11 @@ const testAPI = {
 window.__agentsBrowserTestAPI = testAPI;
 if (mode === "traffic-layout") {
   location.hash = "#traffic";
+  testAPI.trafficCandidates = [
+    { agent_id: "alpha", name: "误删的 VLESS 入口", engine: "xray", port: 443, protocol: "both", kind: "deleted" },
+    { agent_id: "bravo", name: "新增的香港入口", engine: "sing-box", port: 9443, protocol: "tcp", kind: "new" },
+    { agent_id: "alpha", name: "暂不恢复的端口", engine: "mihomo", port: 10443, protocol: "both", kind: "deleted" },
+  ];
   testAPI.agents = populatedAgents.map(agent=>({...agent,features:[...(agent.features||[]),"port-traffic-v1"]}));
   const issue = "; dual accounting unavailable: single-protocol policy uses listener-only accounting; dual accounting requires TCP+UDP because core counters and outbound marks are shared";
   testAPI.trafficPolicies = ["xray", "sing-box", "mihomo", "ss-rust"].map((engine, index) => ({
@@ -167,7 +172,23 @@ window.fetch = async (input, options = {}) => {
   if (mode === "traffic-layout") {
     if (path === "/traffic-policies") return json(testAPI.trafficPolicies);
     if (path === "/traffic-endpoints") return json([]);
-    if (path === "/traffic-endpoints/sync" && method === "POST") return json({ endpoints: [], changed_agents: [] });
+    if (path === "/traffic-endpoints/sync") {
+      if (method === "GET") {
+        if (testAPI.trafficPreviewGate) await testAPI.trafficPreviewGate;
+        if (testAPI.trafficPreviewFailure) return json({ error: "preview unavailable" }, 500);
+        return json({ candidates: testAPI.trafficCandidates });
+      }
+      const body = JSON.parse(options.body);
+      testAPI.trafficSelection = body.selections;
+      if (testAPI.trafficSyncGate) await testAPI.trafficSyncGate;
+      if (testAPI.trafficSyncFailure) return json({ error: "sync unavailable" }, 500);
+      testAPI.trafficCandidates = testAPI.trafficCandidates.filter(candidate => {
+        if (!body.selections.some(item => item.agent_id === candidate.agent_id && item.port === candidate.port)) return true;
+        testAPI.trafficPolicies.push({ ...candidate, id: `trf_sync_${candidate.port}`, quota_enabled: false, monitoring_enabled: true });
+        return false;
+      });
+      return json({ changed_agents: [...new Set(body.selections.map(item => item.agent_id))] });
+    }
   }
   if (mode === "config-layout") {
     if (path === "/settings") return json({panel_name:"QControlHub"});
@@ -1498,13 +1519,66 @@ try {
     quota.value = "0";
     assert.ok(quota.checkValidity(), "zero must be a valid monitor-only quota");
     quota.value = "";
-    document.querySelector("[data-traffic-sync]").click();
-    const confirmation = await waitFor(() => document.querySelector("[data-confirm-dialog][open]"), "sync confirmation did not open");
-    assert.ok(document.querySelector("[data-traffic-sync]").disabled, "sync must lock while awaiting confirmation");
-    confirmation.querySelector("[data-confirm-accept]").click();
-    await waitFor(() => testAPI.calls.some(call => call.path === "/traffic-endpoints/sync" && call.method === "POST"), "confirmed sync did not send POST");
-    await waitFor(() => !document.querySelector("[data-traffic-sync]").disabled, "sync button did not recover after refresh");
-    assert.equal(testAPI.calls.filter(call => call.path === "/traffic-endpoints/sync").length, 1, "sync must send exactly one request");
+    if (new URLSearchParams(location.search).has("preview")) await new Promise(() => {});
+    const posts = () => testAPI.calls.filter(call => call.path === "/traffic-endpoints/sync" && call.method === "POST").length;
+    const openSync = async () => {
+      document.querySelector("[data-traffic-sync]").click();
+      return waitFor(() => document.querySelector("[data-traffic-sync-dialog][open]"), "sync selection dialog did not open");
+    };
+    let dialog = await openSync();
+    await waitFor(() => dialog.querySelectorAll("[data-sync-choice]").length === 3, "candidates did not load");
+    assert.equal(posts(), 0, "preview must not write");
+    assert.ok(dialog.querySelector("[data-sync-submit]").disabled, "nothing selected by default");
+    assert.ok(dialog.textContent.includes("已删除 · 可恢复") && dialog.textContent.includes("未监控 · 可添加"), "candidate types missing");
+    dialog.querySelector("[data-sync-close]").click();
+    assert.equal(posts(), 0, "cancel must not write");
+    assert.ok(!document.querySelector("[data-traffic-sync]").disabled, "cancel must unlock sync");
+    testAPI.trafficPreviewFailure = true;
+    dialog = await openSync();
+    await waitFor(() => !dialog.querySelector("[data-sync-retry]").hidden, "preview failure must allow retry");
+    assert.ok(dialog.querySelector("[data-sync-error]").textContent.includes("preview unavailable"), "preview error hidden");
+    testAPI.trafficPreviewFailure = false;
+    dialog.querySelector("[data-sync-retry]").click();
+    await waitFor(() => dialog.querySelectorAll("[data-sync-choice]").length === 3, "retry did not load");
+    dialog.querySelector("[data-sync-all]").click();
+    assert.equal(dialog.querySelectorAll("[data-sync-choice]:checked").length, 3, "select all failed");
+    dialog.querySelector('[data-sync-choice="2"]').click();
+    assert.ok(dialog.querySelector("[data-sync-all]").indeterminate, "partial selection indicator missing");
+    const reads = testAPI.calls.filter(call => call.path === "/traffic-policies").length;
+    await waitFor(() => testAPI.calls.filter(call => call.path === "/traffic-policies").length > reads, "background poll stopped");
+    assert.ok(dialog.open && dialog.querySelectorAll("[data-sync-choice]:checked").length === 2, "polling reset selection");
+    assert.ok(document.querySelector("[data-traffic-sync]").disabled, "polling unlocked duplicate dialog");
+    testAPI.trafficSyncFailure = true;
+    dialog.querySelector("[data-sync-submit]").click();
+    await waitFor(() => dialog.querySelector("[data-sync-error]").textContent.includes("sync unavailable"), "mutation error hidden");
+    assert.equal(dialog.querySelectorAll("[data-sync-choice]:checked").length, 2, "failure lost selection");
+    testAPI.trafficSyncFailure = false;
+    let finish;
+    testAPI.trafficSyncGate = new Promise(resolve => { finish = resolve; });
+    dialog.querySelector("[data-sync-submit]").click();
+    dialog.querySelector("[data-sync-submit]").click();
+    assert.equal(posts(), 2, "duplicate submission not blocked");
+    assert.ok(dialog.querySelector("[data-sync-close]").disabled, "pending mutation close must be disabled");
+    assert.equal(JSON.stringify(testAPI.trafficSelection), JSON.stringify([{agent_id:"alpha",port:443},{agent_id:"bravo",port:9443}]), "must send only selected identities");
+    finish();
+    await waitFor(() => !document.querySelector("[data-traffic-sync-dialog]") && !document.querySelector("[data-traffic-sync]").disabled, "success did not close and unlock");
+    assert.equal(testAPI.trafficCandidates.length, 1, "unselected candidate changed");
+    testAPI.trafficSyncGate = null;
+    dialog = await openSync();
+    await waitFor(() => dialog.querySelectorAll("[data-sync-choice]").length === 1, "reopen did not reload remaining candidates");
+    dialog.querySelector("[data-sync-close]").click();
+    testAPI.trafficCandidates = [];
+    dialog = await openSync();
+    await waitFor(() => dialog.textContent.includes("暂无需要同步的端口"), "empty state missing");
+    assert.ok(dialog.querySelector("[data-sync-submit]").disabled, "empty list allows write");
+    dialog.querySelector("[data-sync-close]").click();
+    let finishPreview;
+    testAPI.trafficPreviewGate = new Promise(resolve => { finishPreview = resolve; });
+    await openSync();
+    location.hash = "#node-settings";
+    await waitFor(() => !document.querySelector("[data-traffic-sync-dialog]"), "navigation left a modal behind");
+    finishPreview();
+    assert.equal(posts(), 2, "navigation must not write");
   }
   else if (mode === "config-layout") {
     await waitFor(()=>document.querySelector("#live-config-form"),"manual editor did not load");
