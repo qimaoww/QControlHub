@@ -1838,7 +1838,7 @@ func writeInternalError(w http.ResponseWriter, err error) {
 }
 
 func writeError(w http.ResponseWriter, status int, message string) {
-	writeJSON(w, status, map[string]string{"error": message})
+	writeJSON(w, status, map[string]string{"error": chineseErrorMessage(status, message)})
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {

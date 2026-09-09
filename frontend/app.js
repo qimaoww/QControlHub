@@ -18,6 +18,7 @@ import {
 } from "./modules/refresh.js";
 import { orderNodesBySavedOrder } from "./modules/node-order.js";
 import { createScopedAPI } from "./modules/requests.js";
+import { errorMessage, requestJSON } from "./modules/errors.js";
 
 const app = document.querySelector("#app");
 const themeStorageKey = "qcontrolhub-color-theme";
@@ -358,29 +359,19 @@ async function sendAPI(path, options = {}) {
     : null;
   const request = combineAbortSignals(options.signal, routeSignal);
   try {
-    const response = await fetch(`/api/v1${path}`, {
+    return await requestJSON(`/api/v1${path}`, {
       ...options,
       signal: request.signal,
       headers,
       credentials: "same-origin",
+    }, {
+      isLogin: path === "/auth/login",
+      onUnauthorized() {
+        state.session = null;
+        state.data = {};
+        renderLogin();
+      },
     });
-    if (response.status === 401) {
-      state.session = null;
-      state.data = {};
-      renderLogin();
-      throw new Error("登录已失效");
-    }
-    if (!response.ok) {
-      let body = {};
-      try {
-        body = await response.json();
-      } catch {}
-      const error = new Error(body.error || `请求失败 (${response.status})`);
-      error.status = response.status;
-      throw error;
-    }
-    if (response.status === 204) return null;
-    return await response.json();
   } finally {
     request.release();
   }
@@ -491,6 +482,7 @@ function renderLogin(message = "") {
 }
 
 function notify(message, tone = "success") {
+  if (tone === "error") message = errorMessage(message);
   const main = document.querySelector(".workspace-main");
   if (!main) return;
   const notice =
@@ -966,7 +958,7 @@ async function renderOnce() {
     if (renderedRoute === state.route) notify(error.message, "error");
     else
       shell(
-        `<section class="section"><div class="alert error">${esc(error.message)}</div></section>`,
+        `<section class="section"><div class="alert error">${esc(errorMessage(error.message))}</div></section>`,
         "错误",
       );
   } finally {

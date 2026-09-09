@@ -1,3 +1,4 @@
+import { diagnosticError } from "./errors.js";
 import { bindEvent, createPoller, createRefreshChannel } from "./refresh.js";
 
 export const systemBBRFeature = "system-bbr-v1";
@@ -121,15 +122,15 @@ export function installSystemBBR(ctx) {
         ${hasFeature && status ? `<dl class="bbr-primary-values"><div><dt>当前默认拥塞算法</dt><dd>${value(status.congestion_control)}</dd></div><div><dt>当前默认队列</dt><dd>${value(status.default_qdisc)}</dd></div><div><dt>已保存的重启配置</dt><dd>${esc(persistence)}</dd></div></dl>
         <div class="bbr-note"><strong>已加载算法</strong><span>${value((status.available_algorithms || []).join(" · "))}</span><small>未列出 BBR 不一定代表内核不支持；启用时由系统尝试加载自带模块。</small></div>
         ${drift ? '<p class="bbr-warning" role="status">当前生效参数与已保存配置不一致，请核对其他系统配置是否覆盖。</p>' : ""}
-        ${status.error ? `<p class="bbr-warning" role="status">${esc(status.error)}</p>` : ""}
+        ${status.error ? `<p class="bbr-warning" role="status">${esc(diagnosticError(status.error))}</p>` : ""}
         ${dialogButton(agent, "parameters", "生效参数与网卡队列")}
         ${dialogMarkup(agent, "parameters", "生效参数与网卡队列", `<div class="bbr-dialog-body" data-refresh-scroll>
           <div class="bbr-table-wrap"><table><caption>内核当前参数（包括面板外设置）</caption><thead><tr><th>参数</th><th>当前值</th><th>面板保存值</th></tr></thead><tbody>${Object.entries(status.parameters || {}).map(([key, entry]) => `<tr><td><code>${esc(key)}</code></td><td><code>${value(entry)}</code></td><td><code>${esc(status.configured_parameters?.[key] || "—")}</code></td></tr>`).join("")}</tbody></table></div>
           <div class="bbr-table-wrap"><table><caption>网卡实际队列（不自动重置）</caption><thead><tr><th>网卡</th><th>队列</th><th>层级</th></tr></thead><tbody>${(status.qdiscs || []).map((qdisc) => `<tr><td>${esc(qdisc.device)}</td><td><code>${esc(qdisc.kind)}</code></td><td>${qdisc.root ? "root" : value(qdisc.parent)} ${esc(qdisc.handle || "")}</td></tr>`).join("") || '<tr><td colspan="3">暂无可读取的网卡队列</td></tr>'}</tbody></table></div>
-          ${status.qdisc_error ? `<p class="bbr-note">${esc(status.qdisc_error)}</p>` : ""}
+          ${status.qdisc_error ? `<p class="bbr-note">${esc(diagnosticError(status.qdisc_error))}</p>` : ""}
         </div><footer class="bbr-dialog-footer"><small>参数采集：${status.collected_at ? esc(date(status.collected_at)) : "尚未上报"}</small><button class="button small" type="button" data-bbr-dialog-close>关闭</button></footer>`)}` : `<div class="empty"><strong>${hasFeature ? "等待 Agent 上报系统参数" : "请先升级此节点的 Agent"}</strong><p>本页不会把未上报或旧版本节点显示为 BBR 已关闭。</p></div>`}
         ${editor(agent, disabled)}
-        ${task ? `<div class="bbr-task" role="status"><span>${esc(actionLabel(task.action))} · ${esc(taskLabel(task.status))}</span>${can("tasks.read") ? `<a href="#tasks">查看任务记录 →</a>` : ""}${task.error ? `<p>${esc(task.error)}</p>` : ""}</div>` : ""}
+        ${task ? `<div class="bbr-task" role="status"><span>${esc(actionLabel(task.action))} · ${esc(taskLabel(task.status))}</span>${can("tasks.read") ? `<a href="#tasks">查看任务记录 →</a>` : ""}${task.error ? `<p>${esc(diagnosticError(task.error))}</p>` : ""}</div>` : ""}
         <footer><small>参数采集：${status?.collected_at ? esc(date(status.collected_at)) : "尚未上报"}</small>${editable() ? `<div class="bbr-actions"><button class="button small" type="button" data-bbr-agent="${esc(agent.id)}" data-bbr-action="disable-bbr" ${presetDisabled ? "disabled" : ""}>关闭 BBR / 切换 CUBIC</button><button class="button small primary" type="button" data-bbr-agent="${esc(agent.id)}" data-bbr-action="enable-bbr" ${presetDisabled ? "disabled" : ""}>启用 BBR</button></div>` : '<span class="bbr-readonly">只读权限</span>'}</footer>
       </article>`;
     }).join("");

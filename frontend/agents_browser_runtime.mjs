@@ -430,7 +430,7 @@ async function testCapabilitySettingsRuntime() {
   assert.notEqual(getComputedStyle(inputs[1].closest("label").querySelector(".when-enabled")).display, "none", "状态文字须随开关即时更新");
   testAPI.settingsFailure = true;
   form.requestSubmit(save);
-  await waitFor(() => !save.disabled && document.body.textContent.includes("settings save failed"), "保存失败未恢复操作");
+  await waitFor(() => !save.disabled && document.body.textContent.includes("数据已发生变化或存在冲突"), "保存失败未恢复操作或未显示中文提示");
   assert.ok(inputs[1].checked, "保存失败须保留选择");
   testAPI.settingsFailure = false;
   for (const input of inputs) if (input.checked) input.click();
@@ -545,7 +545,8 @@ async function testAdminRuntime() {
   enrollmentForm.requestSubmit(enrollmentSubmit);
   await waitFor(() => !enrollmentSubmit.disabled, "enrollment 失败后提交按钮未恢复");
   assert.equal(document.querySelector(".enrollment-dialog"), enrollment);
-  assert.match(document.body.textContent, /temporary enrollment failure/);
+  assert.match(document.body.textContent, /服务暂不可用，请稍后重试/);
+  assert.equal(document.body.textContent.includes("temporary enrollment failure"), false);
   testAPI.enrollmentFailure = false;
   enrollment.querySelector("[data-close]").click();
 
@@ -1027,7 +1028,7 @@ async function testAdminRuntime() {
   renameForm.requestSubmit(renameButton);
   await waitFor(() => !renameButton.disabled, "改名失败后保存按钮未恢复");
   assert.equal(renameInput.value, "香港 & Tokyo <edge>", "改名失败后丢失输入");
-  assert.match(document.body.textContent, /temporary rename failure/);
+  assert.match(document.body.textContent, /服务暂不可用，请稍后重试/);
   testAPI.renameFailure = false;
   renameForm.requestSubmit(renameButton);
   await waitFor(() => document.querySelector(".node-operations-title h2")?.textContent === "香港 & Tokyo <edge>", "改名后标题未更新");
@@ -1124,7 +1125,7 @@ async function testRegionRuntime() {
   assert.ok(flag(form.querySelector("[data-region-preview]"), "jp"), "选择预览未更新");
   testAPI.regionSaveFailure = true;
   form.requestSubmit();
-  await waitFor(() => form.querySelector("[data-region-status]").textContent.includes("temporary region save failure"), "保存错误未显示");
+  await waitFor(() => form.querySelector("[data-region-status]").textContent.includes("服务暂不可用"), "中文保存错误未显示");
   assert.equal(form.closest("dialog").open, true);
   assert.equal(form.querySelector('[data-region-choice="JP"]').getAttribute("aria-pressed"), "true", "保存失败丢失选择");
   assert.ok(flag(avatar(), "cn"), "失败保存修改了现有旗帜");
@@ -1195,7 +1196,7 @@ async function testRegionRuntime() {
   await waitFor(() => !document.querySelector(".region-picker-dialog"), "没有关闭选择器");
   testAPI.regionCatalogFailure = true;
   avatar().click();
-  await waitFor(() => document.querySelector("[data-region-status]")?.textContent.includes("temporary catalog failure"), "列表载入失败未显示提示");
+  await waitFor(() => document.querySelector("[data-region-status]")?.textContent.includes("服务暂不可用"), "列表载入失败未显示中文提示");
   assert.equal(document.querySelector('.region-picker-dialog [type="submit"]').disabled, true, "列表载入失败允许误保存");
   document.querySelector(".region-picker-dialog [data-region-close]").click();
   testAPI.regionCatalogFailure = false;
@@ -1427,7 +1428,7 @@ async function testSystemTCPRuntime() {
   await delay(200);
   assert.equal(field().value, "4096 262144 33554432", "失败丢失草稿");
   assert.ok(editor().matches(":modal"), "失败关闭了编辑弹窗");
-  assert.match(editor().querySelector("[data-tcp-error]").textContent, /TCP test failure/, "错误提示在弹窗外不可见");
+  assert.match(editor().querySelector("[data-tcp-error]").textContent, /服务暂不可用，请稍后重试/, "中文错误提示在弹窗外不可见");
   assert.ok(!field().disabled, "提交失败且刷新失败导致编辑器锁死");
   testAPI.agentsFailure = false;
   testAPI.tcpFailure = false;
@@ -1641,7 +1642,7 @@ try {
     testAPI.trafficPreviewFailure = true;
     dialog = await openSync();
     await waitFor(() => !dialog.querySelector("[data-sync-retry]").hidden, "preview failure must allow retry");
-    assert.ok(dialog.querySelector("[data-sync-error]").textContent.includes("preview unavailable"), "preview error hidden");
+    assert.ok(dialog.querySelector("[data-sync-error]").textContent.includes("服务器处理失败"), "Chinese preview error hidden");
     testAPI.trafficPreviewFailure = false;
     dialog.querySelector("[data-sync-retry]").click();
     await waitFor(() => dialog.querySelectorAll("[data-sync-choice]").length === 3, "retry did not load");
@@ -1655,7 +1656,9 @@ try {
     assert.ok(document.querySelector("[data-traffic-sync]").disabled, "polling unlocked duplicate dialog");
     testAPI.trafficSyncFailure = true;
     dialog.querySelector("[data-sync-submit]").click();
-    await waitFor(() => dialog.querySelector("[data-sync-error]").textContent.includes("sync unavailable"), "mutation error hidden");
+    await waitFor(() => posts() === 1 && !dialog.querySelector("[data-sync-submit]").disabled
+      && !dialog.querySelector("[data-sync-error]").hidden
+      && dialog.querySelector("[data-sync-error]").textContent.includes("服务器处理失败"), "Chinese mutation error hidden");
     assert.equal(dialog.querySelectorAll("[data-sync-choice]:checked").length, 2, "failure lost selection");
     testAPI.trafficSyncFailure = false;
     let finish;
