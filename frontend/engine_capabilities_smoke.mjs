@@ -4,12 +4,14 @@ import { engineCapabilityToggles, selectedDefaultEngines } from "./modules/engin
 const defaults = engineCapabilityToggles([]);
 assert.equal((defaults.match(/type="checkbox"/g) || []).length, 4);
 assert.equal(defaults.includes("checked"), false);
-assert.equal(defaults.includes("disabled"), false, "globally disabled engines remain selectable");
+assert.doesNotMatch(defaults, /<input[^>]*\sdisabled(?:\s|>)/, "globally disabled engines remain selectable");
+assert.equal((defaults.match(/role="switch"/g) || []).length, 4);
+assert.doesNotMatch(defaults, /settings-toggle/, "capabilities use compact switch rows instead of checkbox cards");
 const node = engineCapabilityToggles(["mihomo"], { supported: ["mihomo", "xray"], node: true });
 assert.match(node, /data-engine-capability="xray"[^>]*>/);
 assert.doesNotMatch(node, /data-engine-capability="xray"[^>]*disabled/);
 assert.match(node, /data-engine-capability="sing-box"[^>]*disabled/);
-assert.equal((engineCapabilityToggles([], { writable: false }).match(/disabled/g) || []).length, 4);
+assert.equal((engineCapabilityToggles([], { writable: false }).match(/<input[^>]*\sdisabled(?:\s|>)/g) || []).length, 4);
 const form = new FormData();
 assert.deepEqual(selectedDefaultEngines(form), []);
 form.append("default_agent_engines", "xray");
