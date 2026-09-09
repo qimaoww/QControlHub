@@ -56,9 +56,9 @@ func TestTrafficUsageQueryValidation(t *testing.T) {
 		path string
 		want string
 	}{
-		{name: "month", path: "/api/v1/traffic-usage?month=2026-13", want: "month must use YYYY-MM"},
-		{name: "policy", path: "/api/v1/traffic-usage?month=2026-08&policy_id=invalid", want: "policy_id is invalid"},
-		{name: "agent", path: "/api/v1/traffic-usage?month=2026-08&agent_id=" + strings.Repeat("a", 101), want: "agent_id is invalid"},
+		{name: "month", path: "/api/v1/traffic-usage?month=2026-13", want: "月份格式应为 YYYY-MM"},
+		{name: "policy", path: "/api/v1/traffic-usage?month=2026-08&policy_id=invalid", want: "流量策略标识无效"},
+		{name: "agent", path: "/api/v1/traffic-usage?month=2026-08&agent_id=" + strings.Repeat("a", 101), want: "节点标识无效"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			request := httptest.NewRequest(http.MethodGet, test.path, nil)
