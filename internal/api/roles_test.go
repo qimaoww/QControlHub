@@ -75,6 +75,7 @@ func TestManagementAPIRouteAuthorizationMatrix(t *testing.T) {
 		{http.MethodGet, "/api/v1/traffic-policies"},
 		{http.MethodGet, "/api/v1/traffic-endpoints"},
 		{http.MethodPost, "/api/v1/traffic-endpoints/sync"},
+		{http.MethodGet, "/api/v1/traffic-endpoints/sync"},
 		{http.MethodGet, "/api/v1/traffic-usage?month=2026-08"},
 		{http.MethodPost, "/api/v1/traffic-policies"},
 		{http.MethodPut, "/api/v1/traffic-policies/trf_test"},
@@ -101,6 +102,7 @@ func TestManagementAPIRouteAuthorizationMatrix(t *testing.T) {
 		}
 	}
 	readonlyDenied := []route{
+		{http.MethodGet, "/api/v1/traffic-endpoints/sync"},
 		{http.MethodDelete, "/api/v1/agents/agt_0123456789abcdef"},
 		{http.MethodPost, "/api/v1/agents/agt_0123456789abcdef/enrollment-token"},
 		{http.MethodPost, "/api/v1/agents/agt_0123456789abcdef/enrollment-command"},

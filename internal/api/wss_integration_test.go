@@ -167,6 +167,13 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 	if hello.PublicIPProbe != nil {
 		t.Fatalf("legacy Agent hello unexpectedly included public IP probe config = %+v", hello.PublicIPProbe)
 	}
+	// Selective sync pushes a fresh policy set over the same session. It must
+	// not disconnect the Agent and trigger unrelated listener discovery.
+	apiServer.refreshAgentTrafficPolicies(enrolled.AgentID)
+	var refreshed core.WireMessage
+	if err := wsjson.Read(ctx, connection, &refreshed); err != nil || refreshed.Type != core.WireHello || len(refreshed.TrafficPolicies) != 1 || refreshed.TrafficPolicies[0].ID != trafficPolicy.ID {
+		t.Fatalf("live traffic policy refresh: %+v, %v", refreshed, err)
+	}
 	connectedAgent, err := dataStore.GetAgent(ctx, enrolled.AgentID)
 	if err != nil || connectedAgent.Metrics.ObservedPublicIP != "2001:4860:4860::8888" {
 		t.Fatalf("trusted WSS public source was not normalized and stored: agent=%+v error=%v", connectedAgent, err)

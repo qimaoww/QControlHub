@@ -106,8 +106,9 @@ type tokenPrincipal struct {
 }
 
 type liveConnection struct {
-	id     string
-	cancel context.CancelFunc
+	trafficRefresh chan struct{}
+	id             string
+	cancel         context.CancelFunc
 }
 
 func New(dataStore *store.Store, config Config) *Server {
@@ -355,6 +356,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/traffic-policies", s.requirePermission(core.PermissionTrafficRead, http.HandlerFunc(s.listPortTrafficPolicies)))
 	mux.Handle("GET /api/v1/traffic-endpoints", s.requirePermission(core.PermissionTrafficRead, http.HandlerFunc(s.listPortTrafficEndpoints)))
 	mux.Handle("POST /api/v1/traffic-endpoints/sync", s.requirePermission(core.PermissionTrafficManage, http.HandlerFunc(s.syncPortTrafficEndpoints)))
+	mux.Handle("GET /api/v1/traffic-endpoints/sync", s.requirePermission(core.PermissionTrafficManage, http.HandlerFunc(s.previewPortTrafficSync)))
 	mux.Handle("GET /api/v1/traffic-usage", s.requirePermission(core.PermissionTrafficRead, http.HandlerFunc(s.listPortTrafficUsage)))
 	mux.Handle("POST /api/v1/traffic-policies", s.requirePermission(core.PermissionTrafficManage, http.HandlerFunc(s.createPortTrafficPolicy)))
 	mux.Handle("PUT /api/v1/traffic-policies/{id}", s.requirePermission(core.PermissionTrafficManage, http.HandlerFunc(s.updatePortTrafficPolicy)))
@@ -1184,7 +1186,7 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 	if err != nil {
 		return
 	}
-	s.registerConnection(id, connectionID, cancelConnection)
+	trafficRefresh := s.registerConnection(id, connectionID, cancelConnection)
 	defer s.unregisterConnection(id, connectionID)
 	if err := s.store.UpdateAgentObservedPublicIP(ctx, id, observedPublicIP); err != nil {
 		// Address discovery is best-effort and must never take an authenticated
@@ -1287,6 +1289,14 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 
 	for {
 		select {
+		case <-trafficRefresh:
+			policies, err := s.store.AgentPortTrafficPolicies(ctx, id)
+			if err != nil {
+				return
+			}
+			if err := writeWire(ctx, connection, core.WireMessage{Type: core.WireHello, TrafficPolicies: trafficPoliciesForAgent(policies)}); err != nil {
+				return
+			}
 		case <-ctx.Done():
 			return
 		case err := <-readErrors:
@@ -1483,13 +1493,27 @@ func (s *Server) MonitorAgentPresence(ctx context.Context) {
 	}
 }
 
-func (s *Server) registerConnection(agentID, connectionID string, cancel context.CancelFunc) {
+func (s *Server) registerConnection(agentID, connectionID string, cancel context.CancelFunc) chan struct{} {
+	trafficRefresh := make(chan struct{}, 1)
 	s.connectionsMu.Lock()
 	previous, exists := s.connections[agentID]
-	s.connections[agentID] = liveConnection{id: connectionID, cancel: cancel}
+	s.connections[agentID] = liveConnection{id: connectionID, cancel: cancel, trafficRefresh: trafficRefresh}
 	s.connectionsMu.Unlock()
 	if exists {
 		previous.cancel()
+	}
+	return trafficRefresh
+}
+
+// Refresh policies in-place: reconnect discovery would also add unselected ports.
+func (s *Server) refreshAgentTrafficPolicies(agentID string) {
+	s.connectionsMu.Lock()
+	defer s.connectionsMu.Unlock()
+	if connection, ok := s.connections[agentID]; ok {
+		select {
+		case connection.trafficRefresh <- struct{}{}:
+		default:
+		}
 	}
 }
 

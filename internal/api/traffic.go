@@ -12,6 +12,7 @@ import (
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
 	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
+	"github.com/qimaoww/qcontrolhub/internal/store"
 )
 
 func trafficPoliciesForAgent(policies []core.PortTrafficPolicy) []core.PortTrafficPolicy {
@@ -84,7 +85,7 @@ func (s *Server) reconcilePortTrafficEndpoints(ctx context.Context, prune bool) 
 }
 
 func (s *Server) refreshPortTrafficMonitoring(ctx context.Context, connectedAgentID string) {
-	// Reconnects also follow manual sync and metadata edits. Only a saved
+	// Reconnects also follow metadata edits. Only a saved
 	// configuration change may prune stale discovered monitors, otherwise a
 	// non-destructive sync would delete them as soon as the Agent reconnects.
 	_, changedAgents, err := s.reconcilePortTrafficEndpoints(ctx, connectedAgentID == "")
@@ -112,20 +113,53 @@ func (s *Server) listPortTrafficEndpoints(w http.ResponseWriter, request *http.R
 }
 
 func (s *Server) syncPortTrafficEndpoints(w http.ResponseWriter, request *http.Request) {
-	endpoints, changedAgents, err := s.reconcilePortTrafficEndpoints(request.Context(), false)
+	var input struct {
+		Selections []core.TrafficSyncSelection `json:"selections"`
+	}
+	if err := decodeJSON(w, request, &input, 512<<10); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	configs, err := s.store.ListAgentConfigs(request.Context())
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
+	endpoints := trafficEndpointsFromConfigs(configs)
+	changedAgents, err := s.store.SyncSelectedPortTrafficEndpoints(request.Context(), endpoints, input.Selections)
 	if err != nil {
 		writeStoreError(w, err)
 		return
 	}
 	for _, agentID := range changedAgents {
-		s.DisconnectAgent(agentID)
+		s.refreshAgentTrafficPolicies(agentID)
 	}
-	s.recordAudit(request, "traffic_endpoints.synced", "", "discovered endpoints: "+strconv.Itoa(len(endpoints))+", changed agents: "+strconv.Itoa(len(changedAgents)))
+	s.recordAudit(request, "traffic_endpoints.synced", "", "selected ports: "+strconv.Itoa(len(input.Selections))+", changed agents: "+strconv.Itoa(len(changedAgents)))
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, map[string]any{
 		"endpoints":      endpoints,
 		"changed_agents": changedAgents,
 	})
+}
+
+func (s *Server) previewPortTrafficSync(w http.ResponseWriter, request *http.Request) {
+	configs, err := s.store.ListAgentConfigs(request.Context())
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
+	policies, err := s.store.ListPortTrafficPolicies(request.Context())
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
+	candidates, err := store.TrafficSyncCandidates(trafficEndpointsFromConfigs(configs), policies)
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, map[string]any{"candidates": candidates})
 }
 
 func trafficEndpointsFromConfigs(configs []core.Config) []core.PortTrafficEndpoint {
