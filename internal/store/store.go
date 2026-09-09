@@ -48,7 +48,7 @@ type storeExecutor interface {
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 47
+const currentSchemaVersion = 48
 
 func Open(ctx context.Context, databaseURL string, allowInsecureRemote bool) (*Store, error) {
 	return OpenWithConfigKey(ctx, databaseURL, allowInsecureRemote, "")
@@ -966,7 +966,7 @@ func (s *Store) ListAgentsWithEnrollmentCommands(ctx context.Context) ([]core.Ag
 
 const listAgentsSQL = `
 			SELECT id,name,version,os,arch,capabilities,features,labels,runtime,metrics,last_seen,enrolled_at,
-				(SELECT agent_offline_threshold_seconds FROM panel_settings WHERE id=1),supported_capabilities
+				(SELECT agent_offline_threshold_seconds FROM panel_settings WHERE id=1),supported_capabilities,` + capabilityTransitionsSQL + `
 		FROM agents WHERE revoked_at IS NULL ORDER BY enrolled_at DESC`
 
 func scanAgents(rows pgx.Rows) ([]core.Agent, error) {
@@ -977,7 +977,7 @@ func scanAgents(rows pgx.Rows) ([]core.Agent, error) {
 		var agent core.Agent
 		var capabilities, features, labels, runtimeState, metricsState []byte
 		var offlineThresholdSeconds int
-		if err := rows.Scan(&agent.ID, &agent.Name, &agent.Version, &agent.OS, &agent.Arch, &capabilities, &features, &labels, &runtimeState, &metricsState, &agent.LastSeen, &agent.EnrolledAt, &offlineThresholdSeconds, &agent.SupportedCapabilities); err != nil {
+		if err := rows.Scan(&agent.ID, &agent.Name, &agent.Version, &agent.OS, &agent.Arch, &capabilities, &features, &labels, &runtimeState, &metricsState, &agent.LastSeen, &agent.EnrolledAt, &offlineThresholdSeconds, &agent.SupportedCapabilities, &agent.CapabilityTransitions); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal(capabilities, &agent.Capabilities); err != nil {
@@ -1312,10 +1312,13 @@ func (s *Store) CreateTask(ctx context.Context, request core.TaskRequest) (core.
 	if request.Action.SystemBBR() && !containsFeature(features, core.AgentFeatureSystemBBR) {
 		return core.Task{}, fmt.Errorf("%w: upgrade this Agent before managing system BBR", ErrConflict)
 	}
-	if !request.Action.AgentLevel() && !containsEngine(capabilities, request.Engine) {
-		return core.Task{}, fmt.Errorf("%w: agent does not advertise the requested engine", ErrInvalid)
-	}
 	if !request.Action.AgentLevel() {
+		if err := rejectPendingCapabilityTransition(ctx, tx, request.AgentID, request.Engine); err != nil {
+			return core.Task{}, err
+		}
+		if !containsEngine(capabilities, request.Engine) {
+			return core.Task{}, fmt.Errorf("%w: agent does not advertise the requested engine", ErrInvalid)
+		}
 		if reason := strings.TrimSpace(runtime[request.Engine].ExistingConfigUnsupportedReason); reason != "" {
 			return core.Task{}, fmt.Errorf("%w: %s core tasks are disabled because an existing service could not be mapped safely: %s", ErrConflict, request.Engine, reason)
 		}
@@ -1552,6 +1555,20 @@ func (s *Store) RetryTask(ctx context.Context, id string) (core.Task, error) {
 	if previous.Status != core.TaskFailed && previous.Status != core.TaskCanceled {
 		return core.Task{}, fmt.Errorf("%w: only failed or canceled tasks can be retried", ErrConflict)
 	}
+	var transition bool
+	if err := s.pool.QueryRow(ctx, `SELECT capability_transition FROM tasks WHERE id=$1`, id).Scan(&transition); err != nil {
+		return core.Task{}, err
+	}
+	if transition {
+		change, err := s.ChangeAgentEngineCapability(ctx, previous.AgentID, previous.Engine, previous.Action == core.ActionStart)
+		if err != nil {
+			return core.Task{}, err
+		}
+		if change.TaskID == "" {
+			return core.Task{}, fmt.Errorf("%w: 节点能力已更新，无需重试启停任务", ErrConflict)
+		}
+		return s.GetTask(ctx, change.TaskID)
+	}
 	return s.CreateTask(ctx, core.TaskRequest{
 		TCPSettings: previous.TCPSettings,
 		AgentID:     previous.AgentID, Action: previous.Action, Engine: previous.Engine,
@@ -1712,12 +1729,22 @@ func (s *Store) CompleteTask(ctx context.Context, agentID, taskID string, result
 		return err
 	}
 	defer tx.Rollback(ctx)
+	// Match creation/claim lock order: node first, then task. A successful
+	// transition updates eligibility atomically with the task acknowledgement.
+	var selected, supported []core.Engine
+	if err := tx.QueryRow(ctx, `SELECT capabilities,COALESCE(supported_capabilities,capabilities) FROM agents WHERE id=$1 FOR UPDATE`, agentID).Scan(&selected, &supported); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
+	}
 	var action core.Action
 	var engine core.Engine
+	var transition bool
 	if err := tx.QueryRow(ctx, `
-		SELECT action,engine FROM tasks
+		SELECT action,engine,capability_transition FROM tasks
 		WHERE id=$1 AND agent_id=$2 AND lease_id=$3 AND status='running'
-		FOR UPDATE`, taskID, agentID, result.LeaseID).Scan(&action, &engine); err != nil {
+		FOR UPDATE`, taskID, agentID, result.LeaseID).Scan(&action, &engine, &transition); err != nil {
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
@@ -1733,6 +1760,17 @@ func (s *Store) CompleteTask(ctx context.Context, agentID, taskID string, result
 	status := core.TaskFailed
 	if result.Success {
 		status = core.TaskSucceeded
+	}
+	// Re-enrollment can narrow declared support while an offline transition
+	// is queued. Never restore a capability outside that current support set.
+	if transition && result.Success && action == core.ActionStart && !containsEngine(supported, engine) {
+		status = core.TaskFailed
+		result.Error = "Agent no longer declares support for this engine; capability was not enabled"
+	}
+	if transition && status == core.TaskSucceeded {
+		if err := setEngineCapability(ctx, tx, agentID, engine, action == core.ActionStart, selected); err != nil {
+			return err
+		}
 	}
 	storedContent := ""
 	storedOutput := truncate(result.Output, 64<<10)
@@ -2091,6 +2129,8 @@ CREATE TABLE IF NOT EXISTS tasks (
 );
 
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS lease_id text;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS capability_transition boolean NOT NULL DEFAULT false;
+CREATE INDEX IF NOT EXISTS tasks_capability_transition_idx ON tasks(agent_id,engine,created_at DESC,id DESC) WHERE capability_transition;
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS tcp_settings jsonb NOT NULL DEFAULT '{}'::jsonb;
 	ALTER TABLE tasks ADD COLUMN IF NOT EXISTS core_version varchar(64);
 	ALTER TABLE tasks ADD COLUMN IF NOT EXISTS core_source varchar(32);

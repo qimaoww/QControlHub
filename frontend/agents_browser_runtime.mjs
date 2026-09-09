@@ -291,6 +291,11 @@ window.fetch = async (input, options = {}) => {
     const [, , id, , engine] = path.split("/");
     const { enabled } = JSON.parse(options.body);
     const agent = testAPI.agents.find((item) => item.id === id);
+    if (agent.runtime?.[engine]?.installed) {
+      agent.capability_transitions ||= {};
+      agent.capability_transitions[engine] = { task_id: `capability-${Date.now()}`, status: "pending", enabled };
+      return json({ enabled: agent.capabilities.includes(engine), task_id: agent.capability_transitions[engine].task_id }, 202);
+    }
     agent.capabilities = agent.capabilities.filter((item) => item !== engine);
     if (enabled) agent.capabilities.push(engine);
     return json({ enabled });
@@ -920,6 +925,36 @@ async function testAdminRuntime() {
   testAPI.capabilityFailure = false;
   capability().click();
   await waitFor(() => !capability()?.checked && !capability()?.disabled && !document.querySelector('[data-version-engine="xray"]'), "关闭后应移除 Xray 管理入口但保留能力开关");
+  const installedCapability = () => document.querySelector('[data-engine-capability="mihomo"]');
+  const transition = () => testAPI.agents.find((item) => item.id === "alpha").capability_transitions?.mihomo;
+  const completeTransition = async (success) => {
+    const agent = testAPI.agents.find((item) => item.id === "alpha");
+    transition().status = success ? "succeeded" : "failed";
+    if (success) {
+      agent.capabilities = agent.capabilities.filter((engine) => engine !== "mihomo");
+      if (transition().enabled) agent.capabilities.push("mihomo");
+      agent.runtime.mihomo.service_status = transition().enabled ? "running" : "inactive";
+    }
+    document.querySelector("[data-agent-refresh]").click();
+    await waitFor(() => installedCapability() && !installedCapability().disabled && installedCapability().checked === agent.capabilities.includes("mihomo"), "启停完成后开关没有更新并解除等待");
+  };
+  installedCapability().click();
+  await waitFor(() => transition()?.status === "pending" && installedCapability()?.checked && installedCapability()?.disabled, "停止任务未确认前不能提前关闭能力");
+  await completeTransition(false);
+  assert.equal(installedCapability().checked, true, "停止失败须保留能力");
+  assert.match(document.querySelector("[data-node-capabilities]").textContent, /失败或取消/, "失败状态必须可见");
+  installedCapability().click();
+  await waitFor(() => transition()?.status === "pending" && installedCapability()?.disabled, "未排队重试停止");
+  await completeTransition(true);
+  assert.equal(installedCapability().checked, false, "停止成功才关闭能力");
+  installedCapability().click();
+  await waitFor(() => transition()?.enabled && transition()?.status === "pending" && !installedCapability()?.checked && installedCapability()?.disabled, "启动任务未确认前不能提前开启能力");
+  await completeTransition(false);
+  assert.equal(installedCapability().checked, false, "启动失败须保持关闭");
+  installedCapability().click();
+  await waitFor(() => transition()?.status === "pending" && installedCapability()?.disabled, "未排队重试启动");
+  await completeTransition(true);
+  assert.equal(installedCapability().checked, true, "启动成功恢复管理能力");
   for (const tab of ["cores", "metrics", "agent"]) {
     document.querySelector(`[data-node-tab="${tab}"]`).click();
     await waitFor(

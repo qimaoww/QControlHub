@@ -107,6 +107,7 @@ export function agentStructureSignature(agents = []) {
         String(agent?.id || ""),
         [...(agent.capabilities || [])].sort(),
         [...(agent.supported_capabilities || agent.capabilities || [])].sort(),
+        Object.entries(agent.capability_transitions || {}).map(([engine, task]) => [engine, task.task_id, task.status]).sort(),
       ]))
       .sort((left, right) => left.localeCompare(right)),
   );
@@ -1011,8 +1012,8 @@ async function nodeSettings(presetMode = false, { overview: preloadedOverview } 
           <div class="node-settings-panels">
             <section id="${esc(tabID("cores-panel"))}" class="node-tab-panel node-cores-panel" data-node-panel="cores" role="tabpanel" aria-labelledby="${esc(tabID("cores-tab"))}" ${activeTab === "cores" ? "" : "hidden"}>
               <section class="node-capability-settings" aria-label="节点内核能力" data-node-capabilities="${esc(agent.id)}">
-                <h3>节点内核能力</h3><p>可独立于全局默认值开关。关闭不停止或卸载服务，不删除配置；如需停止服务，请先操作“停止”。</p>
-                ${engineCapabilityToggles(agent.capabilities || [], { supported: agent.supported_capabilities ?? agent.capabilities ?? [], writable: can("agents.manage"), node: true })}
+                <h3>节点内核能力</h3><p>关闭停止对应服务；开启恢复管理能力并启动已安装内核。启停成功后更新开关，离线节点上线后执行；未安装内核仅切换能力，不删除配置或卸载内核。</p>
+                ${engineCapabilityToggles(agent.capabilities || [], { supported: agent.supported_capabilities ?? agent.capabilities ?? [], writable: can("agents.manage"), node: true, transitions: agent.capability_transitions || {} })}
               </section>
               <header class="node-panel-heading"><div><h3>内核管理</h3><small>服务状态与版本</small></div><span data-installed-summary>${installedCount ? `${installedCount} 个已安装` : "尚未安装内核"}</span></header><div class="core-runtime-list">${services}</div>
             </section>
@@ -1755,24 +1756,36 @@ function bindAgentPage(agentItems, presetMode = false, enrollmentHistory = {}) {
     section.querySelectorAll("[data-engine-capability]").forEach((input) => {
       const engine = input.dataset.engineCapability;
       const key = `${agentID}|${engine}`;
+      // These are immediate-action controls, not an unsaved form draft.
+      // Reconciliation updates attributes but a checkbox's dirty-checkedness
+      // flag can retain its old property after an asynchronous service result.
+      if (!pendingEngineCapabilities.has(key)) {
+        input.checked = (agentsByID.get(agentID)?.capabilities || []).includes(engine);
+        input.defaultChecked = input.checked;
+      }
       if (pendingEngineCapabilities.has(key)) input.disabled = true;
       bindEvent(input, "change", async () => {
         if (!can("agents.manage") || pendingEngineCapabilities.has(key)) return;
         const enabled = input.checked;
+        let awaitingService = false;
         pendingEngineCapabilities.add(key);
         input.disabled = true;
         try {
-          await api(`/agents/${encodeURIComponent(agentID)}/capabilities/${engine}`, {
+          const saved = await api(`/agents/${encodeURIComponent(agentID)}/capabilities/${engine}`, {
             method: "PUT", body: JSON.stringify({ enabled }),
           });
-          input.defaultChecked = enabled;
-          notify(`${engineName(engine)} 能力已${enabled ? "开启" : "关闭"}；未改变服务运行状态`);
+          input.checked = saved.enabled;
+          input.defaultChecked = saved.enabled;
+          awaitingService = Boolean(saved.task_id);
+          notify(saved.task_id
+            ? `${engineName(engine)} ${enabled ? "启动" : "停止"}任务已提交，成功后更新能力；离线节点上线后执行`
+            : `${engineName(engine)} 能力已${enabled ? "开启" : "关闭"}（未安装内核，不执行启停）`);
         } catch (error) {
           input.checked = !enabled;
           notify(error.message, "error");
         } finally {
           pendingEngineCapabilities.delete(key);
-          input.disabled = !can("agents.manage");
+          input.disabled = awaitingService || !can("agents.manage");
           try {
             await refreshAgentPage();
           } catch (error) {

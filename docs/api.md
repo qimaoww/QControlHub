@@ -412,6 +412,10 @@ Agent 逐项写入、回读核验后合并保存到 `/etc/sysctl.d/90-qcontrolhu
 
 `GET /api/v1/settings` 返回 `default_agent_engines`（数组）。`PUT /api/v1/settings` 可随其他设置及 `revision` 一起保存该字段；`[]` 明确关闭全部新 Agent 默认能力，省略或 `null` 保留现值。需要 `settings.manage`。默认值只在新节点注册时与 Agent 声明的支持范围求交集，不批量修改已有节点，也不是禁止节点独立开启的全局限制。
 
-Agent 对象中 `capabilities` 为当前启用能力，`supported_capabilities` 为注册声明的支持范围。`PUT /api/v1/agents/{id}/capabilities/{engine}` 使用 `{"enabled":true}` 或 `{"enabled":false}` 单独修改一种能力，需要 `agents.manage`，沿用会话 CSRF 保护，并记录 `agent.capability.updated` 审计。不同内核的并发修改不会互相覆盖。该接口返回 `{"enabled":...}`；参数非法/Agent 不支持返回 400，节点不存在或已撤销返回 404，关闭时有待处理/执行中内核任务返回 409。
+Agent 对象中 `capabilities` 为当前启用能力，`supported_capabilities` 为注册声明的支持范围。`capability_transitions` 按内核返回最近一次切换的 `task_id`、`status` 和目标 `enabled`，可用于展示等待/失败状态。`PUT /api/v1/agents/{id}/capabilities/{engine}` 使用 `{"enabled":true}` 或 `{"enabled":false}` 单独修改一种能力，需要 `agents.manage`，沿用会话 CSRF 保护。不同内核的并发修改不会互相覆盖。
 
-关闭能力不会停止服务、删除配置或取消已有流量规则；新内核任务和配置写入会被拒绝。所有能力关闭的 Agent 仍可连接、上报监控和执行 Agent 级操作。重新使用原安装凭据注册会保留节点选择；若新 Agent 不再声明某种内核，该内核不再启用。
+已安装内核：关闭提交 `stop` 任务，重新开启提交 `start` 任务，返回 HTTP 202 和 `{"enabled":当前生效值,"task_id":"..."}`，记录 `agent.capability.requested` 审计。任务成功回执与能力更新原子提交；失败、取消或超时失败不改变能力。执行期间对应内核的新任务、配置写入和重复/反向切换返回 409。离线节点上线后执行；任务页重试保留其能力切换语义。普通服务启停任务不会改变能力。
+
+未安装内核或无需变更：返回 HTTP 200 和 `{"enabled":...}`，不创建启停任务，记录 `agent.capability.updated` 审计。参数非法/Agent 不支持返回 400，节点不存在或已撤销返回 404，已有待处理/执行中内核任务阻止切换并返回 409。
+
+开关不会删除配置、卸载内核或取消已有流量规则。所有能力关闭的 Agent 仍可连接、上报监控和执行 Agent 级操作。重新使用原安装凭据注册会保留节点选择；若新 Agent 不再声明某种内核，该内核不再启用。全局默认能力依然只影响新节点注册，不批量启停已有服务。

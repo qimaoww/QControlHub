@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -79,6 +80,35 @@ func TestAgentEngineCapabilityAPI(t *testing.T) {
 	got, err := db.GetAgent(ctx, agent.ID)
 	if err != nil || len(got.Capabilities) != 0 || len(got.SupportedCapabilities) != 4 {
 		t.Fatalf("saved capability state: %+v %v", got, err)
+	}
+	if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Runtime: map[core.Engine]core.RuntimeState{core.EngineXray: {Installed: true, ServiceStatus: "inactive"}}}); err != nil {
+		t.Fatal(err)
+	}
+	response := put(agent.ID, "xray", admin, `{"enabled":true}`)
+	var change store.EngineCapabilityChange
+	if response.Code != http.StatusAccepted || json.Unmarshal(response.Body.Bytes(), &change) != nil || change.Enabled || change.TaskID == "" {
+		t.Fatalf("installed start response: %d %s", response.Code, response.Body.String())
+	}
+	if response := put(agent.ID, "xray", admin, `{"enabled":true}`); response.Code != http.StatusConflict {
+		t.Fatalf("overlapping start: %d %s", response.Code, response.Body.String())
+	}
+	claimed, err := db.ClaimTask(ctx, agent.ID)
+	if err != nil || claimed == nil || claimed.Action != core.ActionStart {
+		t.Fatalf("start dispatch: %+v %v", claimed, err)
+	}
+	if err := db.CompleteTask(ctx, agent.ID, claimed.ID, core.TaskResultRequest{LeaseID: claimed.LeaseID, Success: true}); err != nil {
+		t.Fatal(err)
+	}
+	response = put(agent.ID, "xray", admin, `{"enabled":false}`)
+	if response.Code != http.StatusAccepted || json.Unmarshal(response.Body.Bytes(), &change) != nil || !change.Enabled || change.TaskID == "" {
+		t.Fatalf("installed stop response: %d %s", response.Code, response.Body.String())
+	}
+	claimed, err = db.ClaimTask(ctx, agent.ID)
+	if err != nil || claimed == nil || claimed.Action != core.ActionStop {
+		t.Fatalf("stop dispatch: %+v %v", claimed, err)
+	}
+	if err := db.CompleteTask(ctx, agent.ID, claimed.ID, core.TaskResultRequest{LeaseID: claimed.LeaseID, Success: true}); err != nil {
+		t.Fatal(err)
 	}
 	if err := db.DeleteAgent(ctx, agent.ID); err != nil {
 		t.Fatal(err)
