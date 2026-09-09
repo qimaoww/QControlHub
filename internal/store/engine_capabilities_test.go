@@ -214,6 +214,68 @@ func TestEngineCapabilitiesMigrationPreservesExistingNodes(t *testing.T) {
 	}
 }
 
+func TestEngineCapabilityRejectsUnsafeDiscovery(t *testing.T) {
+	database := os.Getenv("QCH_TEST_DATABASE_URL")
+	if database == "" {
+		t.Skip("requires PostgreSQL")
+	}
+	ctx := context.Background()
+	schema, err := testdb.IsolatePostgres(ctx, database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer schema.Close(ctx)
+	s, err := Open(ctx, schema.URL, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	credential, err := s.CreateEnrollmentToken(ctx, core.EnrollmentTokenRequest{Name: "unsafe-discovery", Reusable: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := s.EnrollAgent(ctx, core.EnrollRequest{Name: "unsafe-discovery", OS: "linux", Arch: "amd64", Capabilities: core.AllEngines(), PublicKey: base64.RawURLEncoding.EncodeToString(testEnrollmentPublicKey(t))}, credential.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name      string
+		installed bool
+		enabled   bool
+	}{
+		{"disable undiscovered active service", false, false},
+		{"enable undiscovered active service", false, true},
+		{"disable installed unsafe service", true, false},
+		{"enable installed unsafe service", true, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			selected := []core.Engine{core.EngineXray}
+			if !test.enabled {
+				selected = append(selected, core.EngineSingBox)
+			}
+			const reason = "wrapper 不在安全支持范围"
+			runtime := map[core.Engine]core.RuntimeState{core.EngineSingBox: {
+				Installed: test.installed, ServiceStatus: "active", ExistingConfigUnsupportedReason: reason,
+			}}
+			if _, err := s.pool.Exec(ctx, `UPDATE agents SET capabilities=$2,runtime=$3 WHERE id=$1`, agent.ID, selected, runtime); err != nil {
+				t.Fatal(err)
+			}
+			change, err := s.ChangeAgentEngineCapability(ctx, agent.ID, core.EngineSingBox, test.enabled)
+			if !errors.Is(err, ErrConflict) || !strings.Contains(err.Error(), reason) {
+				t.Errorf("unsafe discovery accepted: %+v, %v", change, err)
+			}
+			got, err := s.GetAgent(ctx, agent.ID)
+			if err != nil || !reflect.DeepEqual(got.Capabilities, selected) || !reflect.DeepEqual(got.SupportedCapabilities, core.AllEngines()) || !reflect.DeepEqual(got.Runtime, runtime) {
+				t.Fatalf("rejected switch changed node: %+v, %v", got, err)
+			}
+			var tasks int
+			if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM tasks WHERE agent_id=$1`, agent.ID).Scan(&tasks); err != nil || tasks != 0 {
+				t.Fatalf("rejected switch created tasks: %d, %v", tasks, err)
+			}
+		})
+	}
+}
+
 func TestEngineCapabilityServiceLifecycle(t *testing.T) {
 	database := os.Getenv("QCH_TEST_DATABASE_URL")
 	if database == "" {

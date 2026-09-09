@@ -65,10 +65,12 @@ func (s *Store) ChangeAgentEngineCapability(ctx context.Context, id string, engi
 	if busy {
 		return change, fmt.Errorf("%w: 该内核有待处理或执行中的任务，请完成或取消后再切换能力", ErrConflict)
 	}
+	// Unsafe discovery can report an active service with Installed=false.
+	// Reject it before the uninstalled fast path can change management access.
+	if reason := runtime[engine].ExistingConfigUnsupportedReason; reason != "" {
+		return change, fmt.Errorf("%w: %s", ErrConflict, reason)
+	}
 	if runtime[engine].Installed {
-		if reason := runtime[engine].ExistingConfigUnsupportedReason; reason != "" {
-			return change, fmt.Errorf("%w: %s", ErrConflict, reason)
-		}
 		action := core.ActionStop
 		if enabled {
 			action = core.ActionStart

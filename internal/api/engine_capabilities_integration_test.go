@@ -81,6 +81,25 @@ func TestAgentEngineCapabilityAPI(t *testing.T) {
 	if err != nil || len(got.Capabilities) != 0 || len(got.SupportedCapabilities) != 4 {
 		t.Fatalf("saved capability state: %+v %v", got, err)
 	}
+	assertUnsafeSwitchRejected := func(body string, enabled bool) {
+		t.Helper()
+		const reason = "wrapper 不在安全支持范围"
+		if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Runtime: map[core.Engine]core.RuntimeState{core.EngineXray: {ServiceStatus: "active", ExistingConfigUnsupportedReason: reason}}}); err != nil {
+			t.Fatal(err)
+		}
+		response := put(agent.ID, "xray", admin, body)
+		if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), reason) {
+			t.Fatalf("unsafe switch response: %d %s", response.Code, response.Body.String())
+		}
+		got, err := db.GetAgent(ctx, agent.ID)
+		if err != nil || (len(got.Capabilities) == 1) != enabled {
+			t.Fatalf("unsafe switch changed capability: %+v %v", got, err)
+		}
+		if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Runtime: map[core.Engine]core.RuntimeState{core.EngineXray: {Installed: true, ServiceStatus: "active"}}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	assertUnsafeSwitchRejected(`{"enabled":true}`, false)
 	if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Runtime: map[core.Engine]core.RuntimeState{core.EngineXray: {Installed: true, ServiceStatus: "inactive"}}}); err != nil {
 		t.Fatal(err)
 	}
@@ -99,6 +118,7 @@ func TestAgentEngineCapabilityAPI(t *testing.T) {
 	if err := db.CompleteTask(ctx, agent.ID, claimed.ID, core.TaskResultRequest{LeaseID: claimed.LeaseID, Success: true}); err != nil {
 		t.Fatal(err)
 	}
+	assertUnsafeSwitchRejected(`{"enabled":false}`, true)
 	response = put(agent.ID, "xray", admin, `{"enabled":false}`)
 	if response.Code != http.StatusAccepted || json.Unmarshal(response.Body.Bytes(), &change) != nil || !change.Enabled || change.TaskID == "" {
 		t.Fatalf("installed stop response: %d %s", response.Code, response.Body.String())
