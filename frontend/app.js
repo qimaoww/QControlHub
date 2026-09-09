@@ -366,10 +366,10 @@ async function sendAPI(path, options = {}) {
       credentials: "same-origin",
     }, {
       isLogin: path === "/auth/login",
-      onUnauthorized() {
+      onUnauthorized(message) {
         state.session = null;
         state.data = {};
-        renderLogin();
+        renderLogin(message);
       },
     });
   } finally {

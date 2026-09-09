@@ -16,6 +16,9 @@ assert.match(diagnosticError("dial tcp: connection refused"), /目标服务拒�
 assert.match(diagnosticError("permission denied"), /节点执行权限不足/);
 assert.match(diagnosticError("context deadline exceeded"), /节点操作超时/);
 assert.match(diagnosticError("configuration rejected; rolled back"), /已自动回滚/);
+const recoveryFailure = "configuration restart failed (exit status 1); previous file was restored but service recovery failed: exit status 1";
+assert.match(errorMessage(diagnosticError(recoveryFailure)), /回滚或服务恢复失败/);
+assert.ok(errorMessage(diagnosticError(recoveryFailure)).includes(recoveryFailure), "notification must preserve deployment recovery diagnostics");
 
 let unauthorized = 0;
 const send = (response, extra = {}) => requestJSON("/api/v1/test", {}, {
@@ -31,6 +34,17 @@ for (const isLogin of [true, false]) {
   });
 }
 assert.equal(unauthorized, 1, "invalid login must not trigger session-expired handling");
+const expiredRoute = new AbortController();
+await assert.rejects(requestJSON("/api/v1/agents", { signal: expiredRoute.signal }, {
+  fetchImpl: async () => ({
+    ok: false, status: 401,
+    json: async () => { assert.fail("401 must not read a body after login cancels the route"); },
+  }),
+  onUnauthorized: (message) => {
+    assert.match(message, /登录已失效/);
+    expiredRoute.abort();
+  },
+}), (error) => error.status === 401 && error.name === "Error" && /登录已失效/.test(error.message));
 await assert.rejects(send(new Response("<html>Bad Gateway</html>", { status: 502 })), (error) => {
   assert.equal(error.status, 502);
   assert.match(error.message, /后端服务/);

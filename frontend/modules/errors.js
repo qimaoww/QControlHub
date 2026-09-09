@@ -43,6 +43,7 @@ export function diagnosticError(value) {
   const raw = String(value);
   if (/\p{Script=Han}/u.test(raw)) return raw;
   const explanations = [
+    [/rollback (?:also )?failed|service recovery failed|binary rollback also failed/i, "变更失败，且回滚或服务恢复失败，请立即检查节点服务状态；确认恢复前不要重复部署。"],
     [/rolled back/i, "变更失败，已自动回滚，请确认服务状态并检查配置后重试。"],
     [/rejected the configuration|invalid configuration|configuration validation failed/i, "配置未通过内核校验，请根据下方诊断修正配置后重试。"],
     [/deadline exceeded|timed? ?out|timeout/i, "节点操作超时，请检查节点连接和服务状态，确认执行结果后再重试。"],
@@ -77,7 +78,14 @@ export async function requestJSON(url, options, {
     throw new Error(message, { cause });
   }
   if (!response.ok) {
-    if (response.status === 401 && !isLogin) onUnauthorized();
+    // Rendering login aborts the route signal. Do not read the response body
+    // afterward: that would replace the authentication failure with AbortError.
+    if (response.status === 401) {
+      const error = new Error(isLogin ? errorMessage("invalid admin token") : statusMessages[401]);
+      error.status = response.status;
+      if (!isLogin) onUnauthorized(error.message);
+      throw error;
+    }
     let body;
     try {
       body = await response.json();
@@ -85,9 +93,7 @@ export async function requestJSON(url, options, {
       if (canceled(cause)) throw cause;
       // A proxy may return HTML instead of JSON.
     }
-    const message = response.status === 401
-      ? isLogin ? errorMessage("invalid admin token") : statusMessages[401]
-      : errorMessage(body?.error, response.status);
+    const message = errorMessage(body?.error, response.status);
     const error = new Error(message);
     error.status = response.status;
     throw error;

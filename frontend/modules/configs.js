@@ -500,7 +500,7 @@ function handleDeployTerminal(result, taskID, agentId, engine) {
     // Failed/canceled: notify and clear only if still current pending.
     if (clearPendingDeploy(agentId, engine, taskID)) {
       notify(
-        result.error ||
+        diagnosticError(result.error) ||
           `部署${result.status === "canceled" ? "已取消" : "失败"}`,
         "error",
       );
