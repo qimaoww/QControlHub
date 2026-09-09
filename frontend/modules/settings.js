@@ -29,7 +29,7 @@ export function installSettings(ctx) {
 
     shell(`<div class="settings-workspace settings-overview">
       <form class="settings-form" id="settings-form">
-        ${section("settings-engines", "01", "全局内核默认能力", "仅决定新 Agent 的默认能力，不覆盖已有节点；全局关闭的内核仍可在节点设置中单独开启。全部关闭可作为纯监控节点接入。", engineCapabilityToggles(item.default_agent_engines ?? ["mihomo", "xray", "sing-box", "ss-rust"], { writable }))}
+        ${section("settings-engines", "01", "默认内核能力", "仅应用于新 Agent，不影响已有节点。节点设置 → Agent 可单独调整；全部关闭可作为纯监控节点接入。", engineCapabilityToggles(item.default_agent_engines ?? ["mihomo", "xray", "sing-box", "ss-rust"], { writable }))}
         ${section("settings-basic", "02", "基础设置", "面板显示和操作默认值。", `<div class="settings-grid">
           ${field("panel_name", "面板名称", `<input name="panel_name" value="${esc(item.panel_name)}" maxlength="40" required ${disabled}>`)}
           ${field("panel_description", "面板说明", `<input name="panel_description" value="${esc(item.panel_description)}" maxlength="120" ${disabled}>`)}

@@ -134,6 +134,10 @@ if (mode === "traffic-layout") {
   }));
 }
 const layoutConfig = engine => engine === "mihomo" ? "log-level: info\nlisteners:\n  - name: socks-in\n    type: socks\n    port: 1080\n    listen: 0.0.0.0\nrules:\n  - MATCH,DIRECT\n" : engine === "ss-rust" ? JSON.stringify({server:"0.0.0.0",server_port:8388,method:"aes-256-gcm",password:"demo-not-a-real-secret",mode:"tcp_and_udp"},null,2) : JSON.stringify({log:{loglevel:"warning"},dns:{servers:["1.1.1.1","8.8.8.8"]},inbounds:[{tag:"socks-in",listen:"127.0.0.1",...(engine==="xray"?{port:1080,protocol:"socks",settings:{auth:"noauth",udp:true}}:{listen_port:1080,type:"socks"})},{tag:"http-in",listen:"127.0.0.1",...(engine==="xray"?{port:8080,protocol:"http"}:{listen_port:8080,type:"http"})}],outbounds:[{tag:"direct",...(engine==="xray"?{protocol:"freedom"}:{type:"direct"})}],...(engine==="xray"?{routing:{domainStrategy:"AsIs",rules:[]}}:{route:{final:"direct"}})},null,2);
+if (mode.startsWith("capabilities-settings")) {
+  location.hash = "#settings-engines";
+  testAPI.settings = { panel_name: "QControlHub Browser Smoke", panel_description: "可信远程编排", revision: 1, ui_font_scale: 100, default_agent_engines: ["mihomo", "sing-box"] };
+}
 if (mode === "config-layout") {
   testAPI.agents = populatedAgents.map((agent,index)=>({...agent,name:["香港 · HK-01","新加坡 · SG-02","东京 · JP-03","美国 · US-04"][index],features:["managed-config-read-v1","config-files-v1"],capabilities:["xray","sing-box","mihomo","ss-rust"],runtime:Object.fromEntries(["xray","sing-box","mihomo","ss-rust"].map(engine=>[engine,{installed:true,service_status:"running",version:{xray:"26.3.27","sing-box":"1.13.19",mihomo:"1.19.0","ss-rust":"1.25.0"}[engine]}]))}));
   testAPI.layoutTasks = new Map();
@@ -217,7 +221,7 @@ window.fetch = async (input, options = {}) => {
   if (method === "GET" && path === "/auth/session")
     return json(mode === "bbr-writeonly"
       ? { role: "user", permissions: ["agents.read", "agents.manage", "tasks.execute"], csrf_token: "browser-test-csrf" }
-      : { role: mode === "readonly" || mode === "bbr-readonly" ? "readonly" : "admin", csrf_token: "browser-test-csrf" });
+      : { role: mode === "readonly" || mode.endsWith("-readonly") ? "readonly" : "admin", csrf_token: "browser-test-csrf" });
   if (method === "GET" && path === "/system-tcp/parameters") return json(tcpRules);
   if (method === "GET" && path === "/system-tcp/tasks") {
     const latest = new Map();
@@ -241,7 +245,14 @@ window.fetch = async (input, options = {}) => {
   if (method === "GET" && path === "/overview")
     return json({ agents: mode === "empty" ? 0 : populatedAgents.length, agents_online: mode === "empty" ? 0 : 3 });
   if (method === "GET" && path === "/settings")
-    return json({ panel_name: "QControlHub Browser Smoke" });
+    return json(testAPI.settings || { panel_name: "QControlHub Browser Smoke" });
+  if (path === "/settings/deployment" && mode.startsWith("capabilities-settings"))
+    return json({ secure_transport: true, database_tls_verified: true, config_encryption_configured: true, webhook_signing_configured: true, trusted_proxy_count: 1, control_plane_version: "preview", agent_package_version: "preview" });
+  if (method === "PUT" && path === "/settings" && mode.startsWith("capabilities-settings")) {
+    if (testAPI.settingsFailure) return json({ error: "settings save failed" }, 409);
+    testAPI.settings = { ...JSON.parse(options.body), revision: testAPI.settings.revision + 1 };
+    return json(testAPI.settings);
+  }
   if (method === "GET" && path === "/agents" && testAPI.agentsFailure) return json({error:"temporary runtime failure"},503);
   if (method === "GET" && path === "/agents") {
     if (testAPI.agentsGate) await testAPI.agentsGate;
@@ -394,6 +405,39 @@ function responsiveDialogRuleExists() {
     return false;
   };
   return [...document.styleSheets].some((sheet) => visit(sheet.cssRules));
+}
+
+async function testCapabilitySettingsRuntime() {
+  const form = await waitFor(() => document.querySelector("#settings-form"), "系统设置未加载");
+  const inputs = [...form.querySelectorAll('#settings-engines input[role="switch"]')];
+  assert.equal(inputs.length, 4, "全局设置应显示四个内核开关");
+  assert.equal(form.querySelector("#settings-engines .settings-toggle"), null, "不再使用大块复选框卡片");
+  assert.ok(inputs[0].checked && !inputs[1].checked, "默认能力状态错误");
+  assert.equal(getComputedStyle(inputs[0]).appearance, "none", "开关不应使用浏览器默认复选框样式");
+  for (const link of document.querySelectorAll('[aria-label="设置目录"] a')) {
+    assert.equal(link.querySelector("span").textContent, document.querySelector(`${link.hash} .settings-section-number`).textContent, "目录与设置分区编号须一致");
+  }
+  if (new URLSearchParams(location.search).has("preview")) return;
+  if (mode.endsWith("-readonly")) {
+    assert.ok(inputs.every(input => input.disabled), "只读用户不得修改全局能力");
+    assert.equal(form.querySelector("[data-save-settings]"), null, "只读页不得提供保存入口");
+    return;
+  }
+  const save = form.querySelector("[data-save-settings]");
+  assert.ok(save.disabled, "初始状态不应需要保存");
+  inputs[1].click();
+  assert.ok(!save.disabled, "切换应标记待保存");
+  assert.notEqual(getComputedStyle(inputs[1].closest("label").querySelector(".when-enabled")).display, "none", "状态文字须随开关即时更新");
+  testAPI.settingsFailure = true;
+  form.requestSubmit(save);
+  await waitFor(() => !save.disabled && document.body.textContent.includes("settings save failed"), "保存失败未恢复操作");
+  assert.ok(inputs[1].checked, "保存失败须保留选择");
+  testAPI.settingsFailure = false;
+  for (const input of inputs) if (input.checked) input.click();
+  form.requestSubmit(save);
+  await waitFor(() => testAPI.settings.revision === 2, "全局能力未保存");
+  assert.equal(testAPI.settings.default_agent_engines.length, 0, "必须允许全部关闭");
+  assert.ok(save.disabled, "保存成功后应清除待保存状态");
 }
 
 async function testAdminRuntime() {
@@ -915,7 +959,11 @@ async function testAdminRuntime() {
     "单节点详情不得调用创建 enrollment credential 的接口",
   );
   document.querySelector('[data-node-tab="cores"]').click();
+  assert.equal(document.querySelector('[data-node-panel="cores"] [data-node-capabilities]'), null, "内核页不应包含 Agent 能力设置");
+  document.querySelector('[data-node-tab="agent"]').click();
+  assert.ok(document.querySelector('[data-node-panel="agent"] [data-node-capabilities]'), "能力设置应位于 Agent 页");
   const capability = () => document.querySelector('[data-engine-capability="xray"]');
+  assert.equal(capability()?.getAttribute("role"), "switch", "能力使用语义化开关");
   assert.ok(capability() && !capability().checked && !capability().disabled, "默认关闭的 Xray 必须可以单独开启");
   capability().click();
   await waitFor(() => capability()?.checked && !capability()?.disabled && document.querySelector('[data-version-engine="xray"]'), "开启后应显示 Xray 内核管理卡片");
@@ -1705,6 +1753,7 @@ try {
       assert.ok(actions.top-footer.top >= 15.5 && footer.bottom-actions.bottom >= 15.5,"mobile actions touch section dividers");
     }
   }
+  else if (mode.startsWith("capabilities-settings")) await testCapabilitySettingsRuntime();
   else if (mode === "bbr-preview" || mode === "regions-preview") await new Promise(() => {});
   else if (mode.startsWith("bbr")) await testSystemTCPRuntime();
   else if (mode === "admin") await testAdminRuntime();
