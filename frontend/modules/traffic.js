@@ -528,6 +528,7 @@ export function installTraffic(ctx) {
     if (trafficSyncPending) return;
     trafficSyncPending = true;
     const navigationEpoch = state.navigationEpoch;
+    const routeSignal = state.routeSignal;
     const isCurrent = () => state.route === "traffic" && state.navigationEpoch === navigationEpoch;
     const controller = new AbortController();
     // Keep this dialog outside the reconciled workspace so polling cannot reset
@@ -559,6 +560,7 @@ export function installTraffic(ctx) {
       closed = true;
       controller.abort();
       window.removeEventListener("hashchange", navigate);
+      routeSignal?.removeEventListener("abort", navigate);
       dialog.remove();
       trafficSyncPending = false;
       const button = document.querySelector("[data-traffic-sync]");
@@ -567,6 +569,7 @@ export function installTraffic(ctx) {
     const navigate = () => { dialog.close(); cleanup(); };
     const close = () => { if (!saving) { dialog.close(); cleanup(); } };
     window.addEventListener("hashchange", navigate);
+    routeSignal?.addEventListener("abort", navigate, { once: true });
     dialog.addEventListener("close", cleanup);
     dialog.addEventListener("cancel", event => { event.preventDefault(); close(); });
     dialog.querySelectorAll("[data-sync-close]").forEach(button => { button.onclick = close; });
@@ -585,7 +588,7 @@ export function installTraffic(ctx) {
         list.querySelectorAll("[data-sync-choice]").forEach(input => { input.onchange = updateSelection; });
         updateSelection();
       } catch (error) {
-        if (closed) return;
+        if (closed || !isCurrent()) { cleanup(); return; }
         list.textContent = "无法读取待同步端口";
         showError(error.message);
         retry.hidden = false;
@@ -603,14 +606,15 @@ export function installTraffic(ctx) {
       submit.textContent = "同步中…";
       try {
         await api("/traffic-endpoints/sync", { method: "POST", body: JSON.stringify({ selections: chosen.map(({ agent_id, port }) => ({ agent_id, port })) }) });
-        if (closed || !isCurrent()) return;
+        if (closed || !isCurrent()) { cleanup(); return; }
         const restored = chosen.filter(candidate => candidate.kind === "deleted").length;
         dialog.close();
         cleanup();
         const refreshed = await traffic();
         if (isCurrent()) notify(`所选端口已同步：恢复 ${restored} 项，添加 ${chosen.length - restored} 项${refreshed ? "" : "；列表刷新失败，请重新进入流量页"}`);
       } catch (error) {
-        if (!closed && isCurrent()) showError(error.message);
+        if (closed || !isCurrent()) cleanup();
+        else showError(error.message);
       } finally {
         saving = false;
         if (!closed) {

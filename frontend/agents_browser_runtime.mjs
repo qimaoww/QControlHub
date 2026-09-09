@@ -175,6 +175,7 @@ window.fetch = async (input, options = {}) => {
     if (path === "/traffic-endpoints/sync") {
       if (method === "GET") {
         if (testAPI.trafficPreviewGate) await testAPI.trafficPreviewGate;
+        if (testAPI.trafficPreviewUnauthorized) return json({ error: "session expired" }, 401);
         if (testAPI.trafficPreviewFailure) return json({ error: "preview unavailable" }, 500);
         return json({ candidates: testAPI.trafficCandidates });
       }
@@ -1579,6 +1580,28 @@ try {
     await waitFor(() => !document.querySelector("[data-traffic-sync-dialog]"), "navigation left a modal behind");
     finishPreview();
     assert.equal(posts(), 2, "navigation must not write");
+    testAPI.trafficPreviewGate = null;
+    location.hash = "#traffic";
+    await waitFor(() => document.querySelector("[data-traffic-sync]"), "traffic return failed");
+    testAPI.trafficCandidates = [{agent_id:"alpha",name:"late selection",engine:"xray",port:11443,protocol:"both",kind:"new"}];
+    dialog = await openSync();
+    await waitFor(() => dialog.querySelector("[data-sync-choice]"), "late selection missing");
+    dialog.querySelector("[data-sync-choice]").click();
+    testAPI.trafficSyncGate = new Promise(resolve => { finish = resolve; });
+    dialog.querySelector("[data-sync-submit]").click();
+    assert.equal(posts(), 3, "selected navigation test did not submit");
+    location.hash = "#node-settings";
+    await waitFor(() => !document.querySelector("[data-traffic-sync-dialog]"), "pending write dialog survived navigation");
+    finish();
+    await waitFor(() => testAPI.trafficCandidates.length === 0, "late mutation did not finish");
+    assert.ok(!document.querySelector("[data-traffic-sync]"), "late mutation returned to traffic route");
+    testAPI.trafficSyncGate = null;
+    location.hash = "#traffic";
+    await waitFor(() => document.querySelector("[data-traffic-sync]"), "traffic return before expiry failed");
+    testAPI.trafficPreviewUnauthorized = true;
+    document.querySelector("[data-traffic-sync]").click();
+    await waitFor(() => document.querySelector("#login-form"), "expired session did not reach login");
+    assert.ok(!document.querySelector("[data-traffic-sync-dialog]"), "expired session left an orphan modal blocking login");
   }
   else if (mode === "config-layout") {
     await waitFor(()=>document.querySelector("#live-config-form"),"manual editor did not load");
