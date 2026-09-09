@@ -50,6 +50,7 @@ func TestChineseErrorMessages(t *testing.T) {
 		t.Fatalf("Chinese cause lost: %q", got)
 	}
 	for original, want := range map[string]string{
+		"conflict: sing-box core tasks are disabled because an existing service could not be mapped safely: unsupported executable wrapper": "现有 sing-box 服务无法安全接管，已禁用该内核的任务。请检查现有服务布局后重新发现。原始原因（供排查）：unsupported executable wrapper",
 		"net.ipv4.tcp_rmem requires 3 integers":                   "参数 net.ipv4.tcp_rmem 需要填写 3 个整数。",
 		"net.ipv4.tcp_rmem requires ordered integers in [1, 100]": "参数 net.ipv4.tcp_rmem 需要按从小到大的顺序填写整数，范围为 1 到 100。",
 		`invalid JSON body: json: unknown field "typo"`:           "请求包含不支持的字段 typo，请检查字段名称或刷新页面后重试。",

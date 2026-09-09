@@ -235,6 +235,7 @@ var errorMessagePatterns = []struct {
 	pattern *regexp.Regexp
 	text    string
 }{
+	{regexp.MustCompile(`^(.+) core tasks are disabled because an existing service could not be mapped safely: ([\s\S]+)$`), "现有 ${1} 服务无法安全接管，已禁用该内核的任务。请检查现有服务布局后重新发现。原始原因（供排查）：${2}"},
 	{regexp.MustCompile(`^Mihomo (.+) requires migration to explicit listeners$`), "Mihomo 的 ${1} 需要先迁移为明确的监听器配置。"},
 	{regexp.MustCompile(`^Mihomo proxy (.+) has shared transport or custom mark$`), "Mihomo 代理 ${1} 使用了共享传输或自定义标记，请人工核对统计归属。"},
 	{regexp.MustCompile(`^unknown Mihomo outbound (.+)$`), "Mihomo 出口 ${1} 不存在，请检查代理名称和路由目标。"},

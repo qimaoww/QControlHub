@@ -244,7 +244,7 @@ func TestTaskAPIRejectsEveryCoreActionForUnsupportedExistingService(t *testing.T
 			request.Header.Set("Content-Type", "application/json")
 			response := httptest.NewRecorder()
 			handler.ServeHTTP(response, request)
-			if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "core tasks are disabled") || !strings.Contains(response.Body.String(), reason) {
+			if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "已禁用该内核的任务") || !strings.Contains(response.Body.String(), reason) {
 				t.Fatalf("POST %s status=%d body=%s", action, response.Code, response.Body.String())
 			}
 		})
