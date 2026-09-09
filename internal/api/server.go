@@ -305,6 +305,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/agents/{id}/komari", s.requirePermission(core.PermissionAgentsRead, http.HandlerFunc(s.getAgentKomari)))
 	mux.Handle("PUT /api/v1/agents/{id}/komari", s.requirePermission(core.PermissionAgentsManage, http.HandlerFunc(s.putAgentKomari)))
 	mux.Handle("PUT /api/v1/agents/{id}/name", s.requirePermission(core.PermissionAgentsManage, http.HandlerFunc(s.putAgentName)))
+	mux.Handle("PUT /api/v1/agents/{id}/capabilities/{engine}", s.requirePermission(core.PermissionAgentsManage, http.HandlerFunc(s.putAgentEngineCapability)))
 	mux.Handle("GET /api/v1/config-catalogs/{engine}", s.requirePermission(core.PermissionCatalogsRead, http.HandlerFunc(s.configCatalog)))
 	mux.Handle("DELETE /api/v1/agents/{id}", s.requirePermission(core.PermissionAgentsManage, http.HandlerFunc(s.deleteAgent)))
 	mux.Handle("POST /api/v1/agents/{id}/enrollment-token", s.requirePermission(core.PermissionEnrollmentManage, http.HandlerFunc(s.createAgentEnrollmentToken)))

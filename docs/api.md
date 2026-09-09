@@ -408,3 +408,10 @@ WSS 握手必须协商子协议 `qcontrolhub.agent.v1`。服务端先发送只�
 示例值仅说明格式，不是适用于所有节点的优化建议。仅提交选中的参数；未提交的系统参数和原托管项不变。`enable-bbr`、`disable-bbr` 是不接受 `tcp_settings` 的快捷任务，分别设置 `bbr + fq`、`cubic + fq`。三种任务都不能关联代理内核、配置 ID、内核版本或来源。同节点不同的未完成 TCP 调优请求返回 `409`；相同请求复用原任务。`tasks.read` 可查看参数快照和执行结果。旧版 Agent 不会认领或继续执行这些任务。
 
 Agent 逐项写入、回读核验后合并保存到 `/etc/sysctl.d/90-qcontrolhub-bbr.conf`。常规失败会尝试恢复原值和原文件，回滚失败在任务错误中明确上报。执行成功并不代表所有已有连接切换算法；页面以采集时间及实际值为准，不将“任务已提交”显示成“参数已生效”。
+## 内核能力默认值与节点开关
+
+`GET /api/v1/settings` 返回 `default_agent_engines`（数组）。`PUT /api/v1/settings` 可随其他设置及 `revision` 一起保存该字段；`[]` 明确关闭全部新 Agent 默认能力，省略或 `null` 保留现值。需要 `settings.manage`。默认值只在新节点注册时与 Agent 声明的支持范围求交集，不批量修改已有节点，也不是禁止节点独立开启的全局限制。
+
+Agent 对象中 `capabilities` 为当前启用能力，`supported_capabilities` 为注册声明的支持范围。`PUT /api/v1/agents/{id}/capabilities/{engine}` 使用 `{"enabled":true}` 或 `{"enabled":false}` 单独修改一种能力，需要 `agents.manage`，沿用会话 CSRF 保护，并记录 `agent.capability.updated` 审计。不同内核的并发修改不会互相覆盖。该接口返回 `{"enabled":...}`；参数非法/Agent 不支持返回 400，节点不存在或已撤销返回 404，关闭时有待处理/执行中内核任务返回 409。
+
+关闭能力不会停止服务、删除配置或取消已有流量规则；新内核任务和配置写入会被拒绝。所有能力关闭的 Agent 仍可连接、上报监控和执行 Agent 级操作。重新使用原安装凭据注册会保留节点选择；若新 Agent 不再声明某种内核，该内核不再启用。

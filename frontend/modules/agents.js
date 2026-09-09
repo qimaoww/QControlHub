@@ -4,6 +4,7 @@ import {
   createRefreshChannel,
 } from "./refresh.js";
 import { ConfigFormatError, formatConfigContent } from "./code-format.js";
+import { engineCapabilityToggles } from "./engine-capabilities.js";
 import { createRegionDisplay, openRegionPicker, regionAvatarMarkup } from "./regions.js";
 export { geoRegionDetails } from "./regions.js";
 import {
@@ -102,7 +103,11 @@ export function batchSelectAllState(inputs) {
 export function agentStructureSignature(agents = []) {
   return JSON.stringify(
     [...agents]
-      .map((agent) => String(agent?.id || ""))
+      .map((agent) => JSON.stringify([
+        String(agent?.id || ""),
+        [...(agent.capabilities || [])].sort(),
+        [...(agent.supported_capabilities || agent.capabilities || [])].sort(),
+      ]))
       .sort((left, right) => left.localeCompare(right)),
   );
 }
@@ -663,6 +668,7 @@ export function clearNodeCardDragState(
 export function installAgents(ctx) {
   const { api, optionalAPI, state, engines, can, esc, engineName, statusTone, serviceStatusName, short, date, ago, heartbeat, percent, bytes, conciseVersion, rate, actionName, serviceActionDisabled, trafficChart, renderConfigDiff, notify, confirmAction, shell } = ctx;
   const pendingAgentNames = new Set();
+  const pendingEngineCapabilities = new Set();
   const komariUUIDFor = (agent) => String(agent?.labels?.komari_uuid || "").trim();
   const komariNetworkMarkup = (agent) => {
     const uuid = komariUUIDFor(agent);
@@ -1003,7 +1009,13 @@ async function nodeSettings(presetMode = false, { overview: preloadedOverview } 
           <section class="node-resource-strip" aria-label="节点资源"><div><span>CPU</span><strong data-metric-text="cpu">${metrics.cpu_available ? `${Number(metrics.cpu_percent).toFixed(1)}%` : "等待采集"}</strong><progress aria-label="CPU 使用率" data-metric-progress="cpu" max="100" value="${metrics.cpu_available ? Number(metrics.cpu_percent) : 0}"></progress></div><div><span>内存</span><strong data-metric-text="memory">${metrics.memory_available ? `${bytes(metrics.memory_used_bytes)} / ${bytes(metrics.memory_total_bytes)}` : "等待采集"}</strong><progress aria-label="内存使用率" data-metric-progress="memory" max="100" value="${percent(metrics.memory_used_bytes, metrics.memory_total_bytes)}"></progress></div><div><span>磁盘</span><strong data-metric-text="disk">${metrics.disk_available ? `${bytes(metrics.disk_used_bytes)} / ${bytes(metrics.disk_total_bytes)}` : "等待采集"}</strong><progress aria-label="根磁盘使用率" data-metric-progress="disk" max="100" value="${percent(metrics.disk_used_bytes, metrics.disk_total_bytes)}"></progress></div><div class="node-resource-network"><span>网络</span><strong>↓ <i data-metric-text="download-rate">${metrics.network_available ? rate(metrics.network_rx_bps) : "等待采集"}</i> · ↑ <i data-metric-text="upload-rate">${metrics.network_available ? rate(metrics.network_tx_bps) : "等待采集"}</i></strong><small>累计 ↓ <b data-metric-text="download-total">${metrics.network_available ? bytes(metrics.network_rx_bytes) : "—"}</b> · ↑ <b data-metric-text="upload-total">${metrics.network_available ? bytes(metrics.network_tx_bytes) : "—"}</b></small></div><span class="machine-resource-live" data-metric-poll role="status" aria-label="资源自动更新"></span></section>
           <nav class="node-settings-tabs" role="tablist" aria-label="节点设置分区">${tabButton("cores", "内核", `${installedCount}/${(agent.capabilities || []).length}`)}${tabButton("metrics", "监控")}${tabButton("agent", "Agent")}</nav>
           <div class="node-settings-panels">
-            <section id="${esc(tabID("cores-panel"))}" class="node-tab-panel node-cores-panel" data-node-panel="cores" role="tabpanel" aria-labelledby="${esc(tabID("cores-tab"))}" ${activeTab === "cores" ? "" : "hidden"}><header class="node-panel-heading"><div><h3>内核管理</h3><small>服务状态与版本</small></div><span data-installed-summary>${installedCount ? `${installedCount} 个已安装` : "尚未安装内核"}</span></header><div class="core-runtime-list">${services}</div></section>
+            <section id="${esc(tabID("cores-panel"))}" class="node-tab-panel node-cores-panel" data-node-panel="cores" role="tabpanel" aria-labelledby="${esc(tabID("cores-tab"))}" ${activeTab === "cores" ? "" : "hidden"}>
+              <section class="node-capability-settings" aria-label="节点内核能力" data-node-capabilities="${esc(agent.id)}">
+                <h3>节点内核能力</h3><p>可独立于全局默认值开关。关闭不停止或卸载服务，不删除配置；如需停止服务，请先操作“停止”。</p>
+                ${engineCapabilityToggles(agent.capabilities || [], { supported: agent.supported_capabilities ?? agent.capabilities ?? [], writable: can("agents.manage"), node: true })}
+              </section>
+              <header class="node-panel-heading"><div><h3>内核管理</h3><small>服务状态与版本</small></div><span data-installed-summary>${installedCount ? `${installedCount} 个已安装` : "尚未安装内核"}</span></header><div class="core-runtime-list">${services}</div>
+            </section>
             <section id="${esc(tabID("metrics-panel"))}" class="node-tab-panel node-metrics-panel" data-node-panel="metrics" role="tabpanel" aria-labelledby="${esc(tabID("metrics-tab"))}" ${activeTab === "metrics" ? "" : "hidden"}><header class="node-panel-heading"><div><h3>流量趋势</h3><small>最近 24 小时</small></div><span data-metric-text="stamp">${metrics.collected_at ? `采集于 ${ago(metrics.collected_at)}` : "等待资源数据"}</span></header><section class="metric-trend-empty" data-metric-history="${esc(agent.id)}" aria-label="暂无指标趋势"><span>⌁</span><b>正在载入指标趋势</b><small>节点上报指标后显示最近 24 小时的上下行速率。</small></section></section>
           <section id="${esc(tabID("agent-panel"))}" class="node-tab-panel node-agent-panel" data-node-panel="agent" role="tabpanel" aria-labelledby="${esc(tabID("agent-tab"))}" ${activeTab === "agent" ? "" : "hidden"}><header class="node-panel-heading"><div><h3>Agent 与身份</h3><small>注册信息和安全通道</small></div><span data-agent-version>${esc(agent.version || "未知")}</span></header><section class="node-name-settings" aria-label="节点名称"><header><div><b>节点名称</b><small>自定义面板显示名称；不改变节点 ID、连接或安装凭据。</small></div></header><form data-agent-name-form="${esc(agent.id)}"><label><span>显示名称</span><input name="name" maxlength="100" required autocomplete="off" value="${esc(agent.name)}" ${can("agents.manage") ? "" : "disabled"}></label><button class="button small" type="submit" ${can("agents.manage") ? "" : "disabled"}>保存名称</button></form></section><dl class="identity-list node-identity-list"><div><dt>节点 ID</dt><dd><code>${esc(agent.id)}</code></dd></div><div><dt>系统平台</dt><dd>${esc(agent.os)} / ${esc(agent.arch)}</dd></div><div><dt>Agent 版本</dt><dd data-agent-version>${esc(agent.version || "未知")}</dd></div><div><dt>注册时间</dt><dd>${date(agent.enrolled_at)}</dd></div><div><dt>安全通道</dt><dd>WSS · Ed25519 签名</dd></div></dl><section class="node-public-ips" aria-label="公网地址"><header><b>公网地址 · 双栈</b><small>手动设置优先 · 出口探测 · 默认路由接口 · 已验证连接来源</small><small class="node-address-note" data-node-connection-address ${connectionAddressNote ? "" : "hidden"}>${esc(connectionAddressNote)}</small></header>${addressRows.map((row) => `<div class="public-ip-row ${row.ok ? "" : "empty"}" data-ip-family="${row.cls}" data-ip-source="${esc(row.source)}" ${row.value ? "" : "hidden"}><span class="ip-family ${row.cls}">${row.label}</span><code>${esc(row.value || "未探测到")}</code><small>${esc(row.source)}</small></div>`).join("")}</section><section class="node-komari-settings" aria-label="Komari 联动"><header><div><b>Komari 联动</b><small>填写 Komari 服务器 UUID；周期日期、已用量和额度会显示在节点卡片的网络区。</small></div></header><form data-komari-form="${esc(agent.id)}"><label><span>Komari 服务器 UUID</span><input name="uuid" maxlength="100" autocomplete="off" value="${esc(komariUUIDFor(agent))}" placeholder="例如 4addbaf1-7ffb-474c-98ee-4ffd476755ff" ${can("agents.manage") ? "" : "disabled"}></label><button class="button small" type="submit" ${can("agents.manage") ? "" : "disabled"}>保存</button></form>${komariUUIDFor(agent) ? "" : `<p class="node-komari-empty">尚未关联 Komari 服务器</p>`}</section>${labels ? `<div class="labels">${labels}</div>` : ""}<footer class="node-identity-refresh"><span>节点身份已验证</span><div>${can("enrollment.manage") && agent.enrollment_command_available ? `<button class="button small" type="button" data-view-enrollment-command="${esc(agent.id)}">查看安装部署命令</button>` : ""}</div></footer>${can("agents.manage") ? `<section class="node-danger-zone"><span><b>删除节点</b><small>断开节点并清理关联配置；QAgent 不会被远程卸载。</small></span><button class="button small danger-button" type="button" data-delete="${esc(agent.id)}">删除节点</button></section>` : ""}</section>
           </div>
@@ -1738,6 +1750,38 @@ function bindAgentPage(agentItems, presetMode = false, enrollmentHistory = {}) {
   document
     .querySelectorAll("[data-agent-refresh]")
     .forEach((button) => (button.onclick = () => pollAgentMetrics()));
+  document.querySelectorAll("[data-node-capabilities]").forEach((section) => {
+    const agentID = section.dataset.nodeCapabilities;
+    section.querySelectorAll("[data-engine-capability]").forEach((input) => {
+      const engine = input.dataset.engineCapability;
+      const key = `${agentID}|${engine}`;
+      if (pendingEngineCapabilities.has(key)) input.disabled = true;
+      bindEvent(input, "change", async () => {
+        if (!can("agents.manage") || pendingEngineCapabilities.has(key)) return;
+        const enabled = input.checked;
+        pendingEngineCapabilities.add(key);
+        input.disabled = true;
+        try {
+          await api(`/agents/${encodeURIComponent(agentID)}/capabilities/${engine}`, {
+            method: "PUT", body: JSON.stringify({ enabled }),
+          });
+          input.defaultChecked = enabled;
+          notify(`${engineName(engine)} 能力已${enabled ? "开启" : "关闭"}；未改变服务运行状态`);
+        } catch (error) {
+          input.checked = !enabled;
+          notify(error.message, "error");
+        } finally {
+          pendingEngineCapabilities.delete(key);
+          input.disabled = !can("agents.manage");
+          try {
+            await refreshAgentPage();
+          } catch (error) {
+            notify(error.message, "error");
+          }
+        }
+      });
+    });
+  });
   document.querySelectorAll("[data-agent-name-form]").forEach((form) => {
     const agentID = form.dataset.agentNameForm;
     const button = form.querySelector("button[type=submit]");

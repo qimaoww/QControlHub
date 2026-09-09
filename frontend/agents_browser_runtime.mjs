@@ -44,6 +44,7 @@ const onlineAgent = (id, features = ["agent-self-upgrade-v1"]) => ({
   status: "online",
   version: "1.2.3",
   capabilities: ["mihomo", "sing-box"],
+  supported_capabilities: ["mihomo", "xray", "sing-box", "ss-rust"],
   features,
   labels: {},
   metrics: {},
@@ -284,6 +285,15 @@ window.fetch = async (input, options = {}) => {
     if (testAPI.renameGate) await testAPI.renameGate;
     testAPI.agents = testAPI.agents.map((agent) => agent.id === agentID ? { ...agent, name } : agent);
     return json({ name });
+  }
+  if (method === "PUT" && /^\/agents\/[^/]+\/capabilities\/[^/]+$/.test(path)) {
+    if (testAPI.capabilityFailure) return json({ error: "capability save failure" }, 409);
+    const [, , id, , engine] = path.split("/");
+    const { enabled } = JSON.parse(options.body);
+    const agent = testAPI.agents.find((item) => item.id === id);
+    agent.capabilities = agent.capabilities.filter((item) => item !== engine);
+    if (enabled) agent.capabilities.push(engine);
+    return json({ enabled });
   }
   if (method === "GET" && path === "/regions")
     return testAPI.regionCatalogFailure ? json({ error: "temporary catalog failure" }, 503) : json(["CN", "HK", "MO", "TW", "US", "SG", "JP", "GB", "DE", "FR", "AQ", "KR", "CA", "AU", "NL", "IN", "AT", "BE", "BR", "CH", "ES", "FI", "IE", "IS", "IT", "LU", "MY", "NO", "NZ", "PH", "PL", "RU", "SE", "TH", "TR", "VN", "ZA"]);
@@ -899,6 +909,17 @@ async function testAdminRuntime() {
     false,
     "单节点详情不得调用创建 enrollment credential 的接口",
   );
+  document.querySelector('[data-node-tab="cores"]').click();
+  const capability = () => document.querySelector('[data-engine-capability="xray"]');
+  assert.ok(capability() && !capability().checked && !capability().disabled, "默认关闭的 Xray 必须可以单独开启");
+  capability().click();
+  await waitFor(() => capability()?.checked && !capability()?.disabled && document.querySelector('[data-version-engine="xray"]'), "开启后应显示 Xray 内核管理卡片");
+  testAPI.capabilityFailure = true;
+  capability().click();
+  await waitFor(() => capability()?.checked && !capability()?.disabled, "保存失败应恢复开关");
+  testAPI.capabilityFailure = false;
+  capability().click();
+  await waitFor(() => !capability()?.checked && !capability()?.disabled && !document.querySelector('[data-version-engine="xray"]'), "关闭后应移除 Xray 管理入口但保留能力开关");
   for (const tab of ["cores", "metrics", "agent"]) {
     document.querySelector(`[data-node-tab="${tab}"]`).click();
     await waitFor(

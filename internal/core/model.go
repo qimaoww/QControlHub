@@ -331,6 +331,7 @@ type Agent struct {
 	OS                         string                  `json:"os"`
 	Arch                       string                  `json:"arch"`
 	Capabilities               []Engine                `json:"capabilities"`
+	SupportedCapabilities      []Engine                `json:"supported_capabilities"`
 	Features                   []string                `json:"features,omitempty"`
 	Labels                     map[string]string       `json:"labels,omitempty"`
 	Runtime                    map[Engine]RuntimeState `json:"runtime,omitempty"`
@@ -619,6 +620,7 @@ type ConfigTemplate struct {
 }
 
 type PanelSettings struct {
+	DefaultAgentEngines            []Engine  `json:"default_agent_engines"`
 	Revision                       int64     `json:"revision"`
 	PanelName                      string    `json:"panel_name"`
 	PanelDescription               string    `json:"panel_description"`
@@ -655,6 +657,7 @@ type PanelSettings struct {
 
 func DefaultPanelSettings() PanelSettings {
 	return PanelSettings{
+		DefaultAgentEngines:            AllEngines(),
 		Revision:                       1,
 		PanelName:                      "QControlHub",
 		PanelDescription:               "可信远程编排",
@@ -687,6 +690,9 @@ func DefaultPanelSettings() PanelSettings {
 }
 
 func (settings PanelSettings) Validate() error {
+	if err := ValidateEngineCapabilities(settings.DefaultAgentEngines); err != nil {
+		return err
+	}
 	if settings.PanelName == "" {
 		return errors.New("panel name is required")
 	}

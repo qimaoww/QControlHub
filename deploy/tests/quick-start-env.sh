@@ -254,4 +254,24 @@ for required_menu_text in '安装 / 重新配置' '更新现有部署' '卸载�
     grep -Fq "$required_menu_text" "$repo_root/deploy/quick-start.sh"
 done
 
+# Default engine selection: new install, monitor-only, validation and upgrades.
+ENV_FILE="$test_root/engine-selection.env"
+QCH_DEFAULT_AGENT_ENGINES=xray,ss-rust
+prepare_default_agent_engines
+assert_equal "selected default engines" "xray,ss-rust" "$DEFAULT_AGENT_ENGINES"
+QCH_DEFAULT_AGENT_ENGINES=none
+prepare_default_agent_engines
+assert_equal "monitor-only defaults" "none" "$DEFAULT_AGENT_ENGINES"
+for invalid in xray,xray xray, ,xray xray,,mihomo unknown; do
+    if (QCH_DEFAULT_AGENT_ENGINES="$invalid"; prepare_default_agent_engines) >/dev/null 2>&1; then
+        echo "invalid engine selection accepted: $invalid" >&2
+        exit 1
+    fi
+done
+update_env_file "QCH_DEFAULT_AGENT_ENGINES=xray"
+QCH_DEFAULT_AGENT_ENGINES=mihomo
+prepare_default_agent_engines
+assert_equal "upgrade preserves installed selection" "xray" "$DEFAULT_AGENT_ENGINES"
+unset QCH_DEFAULT_AGENT_ENGINES
+
 printf '%s\n' 'quick-start external configuration regression passed'

@@ -48,7 +48,7 @@ type storeExecutor interface {
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 46
+const currentSchemaVersion = 47
 
 func Open(ctx context.Context, databaseURL string, allowInsecureRemote bool) (*Store, error) {
 	return OpenWithConfigKey(ctx, databaseURL, allowInsecureRemote, "")
@@ -235,7 +235,8 @@ func (s *Store) EnrollAgent(ctx context.Context, request core.EnrollRequest, enr
 	if err != nil || len(publicKey) != 32 {
 		return core.Agent{}, fmt.Errorf("%w: invalid Ed25519 public key", ErrInvalid)
 	}
-	capabilities, _ := json.Marshal(request.Capabilities)
+	supported := append([]core.Engine{}, request.Capabilities...)
+	supportedCapabilities, _ := json.Marshal(supported)
 	features, _ := json.Marshal(request.Features)
 	if len(request.Features) == 0 {
 		features = []byte(`[]`)
@@ -294,6 +295,22 @@ func (s *Store) EnrollAgent(ctx context.Context, request core.EnrollRequest, enr
 		}
 	}
 	if reinstalled {
+		// Keep the node's selection through reinstalls, bounded by the newly
+		// declared support of the Agent binary/environment.
+		var selected []core.Engine
+		if err := tx.QueryRow(ctx, `SELECT capabilities FROM agents WHERE id=$1`, id).Scan(&selected); err != nil {
+			return core.Agent{}, err
+		}
+		request.Capabilities = core.IntersectEngines(selected, request.Capabilities)
+	} else {
+		var defaults []core.Engine
+		if err := tx.QueryRow(ctx, `SELECT COALESCE(default_agent_engines, '["mihomo","xray","sing-box","ss-rust"]'::jsonb) FROM panel_settings WHERE id=1`).Scan(&defaults); err != nil {
+			return core.Agent{}, err
+		}
+		request.Capabilities = core.IntersectEngines(defaults, request.Capabilities)
+	}
+	capabilities, _ := json.Marshal(request.Capabilities)
+	if reinstalled {
 		// The credential's original name authenticates the reinstall above;
 		// retain the row-locked panel name instead of reverting a custom rename.
 		_, err = tx.Exec(ctx, `
@@ -314,6 +331,9 @@ func (s *Store) EnrollAgent(ctx context.Context, request core.EnrollRequest, enr
 	if err != nil {
 		return core.Agent{}, mapError(err)
 	}
+	if _, err := tx.Exec(ctx, `UPDATE agents SET supported_capabilities=$2 WHERE id=$1`, id, supportedCapabilities); err != nil {
+		return core.Agent{}, err
+	}
 	if reusable {
 		result, bindErr := tx.Exec(ctx, `
 			UPDATE enrollment_tokens SET agent_id=$2
@@ -329,8 +349,9 @@ func (s *Store) EnrollAgent(ctx context.Context, request core.EnrollRequest, enr
 		return core.Agent{}, err
 	}
 	return core.Agent{
-		ID: id, Name: name, Version: request.Version,
-		OS: request.OS, Arch: request.Arch, Capabilities: append([]core.Engine(nil), request.Capabilities...), Features: append([]string(nil), request.Features...),
+		SupportedCapabilities: supported,
+		ID:                    id, Name: name, Version: request.Version,
+		OS: request.OS, Arch: request.Arch, Capabilities: append([]core.Engine{}, request.Capabilities...), Features: append([]string(nil), request.Features...),
 		Labels: cloneLabels(request.Labels), Runtime: map[core.Engine]core.RuntimeState{},
 		LastSeen: lastSeen, EnrolledAt: enrolledAt, Status: "offline", Reinstalled: reinstalled,
 	}, nil
@@ -945,7 +966,7 @@ func (s *Store) ListAgentsWithEnrollmentCommands(ctx context.Context) ([]core.Ag
 
 const listAgentsSQL = `
 			SELECT id,name,version,os,arch,capabilities,features,labels,runtime,metrics,last_seen,enrolled_at,
-				(SELECT agent_offline_threshold_seconds FROM panel_settings WHERE id=1)
+				(SELECT agent_offline_threshold_seconds FROM panel_settings WHERE id=1),supported_capabilities
 		FROM agents WHERE revoked_at IS NULL ORDER BY enrolled_at DESC`
 
 func scanAgents(rows pgx.Rows) ([]core.Agent, error) {
@@ -956,7 +977,7 @@ func scanAgents(rows pgx.Rows) ([]core.Agent, error) {
 		var agent core.Agent
 		var capabilities, features, labels, runtimeState, metricsState []byte
 		var offlineThresholdSeconds int
-		if err := rows.Scan(&agent.ID, &agent.Name, &agent.Version, &agent.OS, &agent.Arch, &capabilities, &features, &labels, &runtimeState, &metricsState, &agent.LastSeen, &agent.EnrolledAt, &offlineThresholdSeconds); err != nil {
+		if err := rows.Scan(&agent.ID, &agent.Name, &agent.Version, &agent.OS, &agent.Arch, &capabilities, &features, &labels, &runtimeState, &metricsState, &agent.LastSeen, &agent.EnrolledAt, &offlineThresholdSeconds, &agent.SupportedCapabilities); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal(capabilities, &agent.Capabilities); err != nil {
@@ -2146,6 +2167,9 @@ CREATE TABLE IF NOT EXISTS panel_settings (
 );
 ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS webhook_url varchar(500) NOT NULL DEFAULT '';
 ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS komari_url varchar(500) NOT NULL DEFAULT '';
+ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS default_agent_engines jsonb;
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS supported_capabilities jsonb;
+UPDATE agents SET supported_capabilities=capabilities WHERE supported_capabilities IS NULL;
 ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS komari_api_key varchar(500) NOT NULL DEFAULT '';
 ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS core_log_minimum_level varchar(10) NOT NULL DEFAULT 'debug';
 ALTER TABLE panel_settings DROP CONSTRAINT IF EXISTS panel_settings_core_log_minimum_level_check;

@@ -100,9 +100,9 @@ func (s *Store) GetAgent(ctx context.Context, id string) (core.Agent, error) {
 	var offlineThresholdSeconds int
 	err := s.pool.QueryRow(ctx, `
 			SELECT id,name,version,os,arch,capabilities,features,labels,runtime,metrics,last_seen,enrolled_at,
-				(SELECT agent_offline_threshold_seconds FROM panel_settings WHERE id=1)
+				(SELECT agent_offline_threshold_seconds FROM panel_settings WHERE id=1),supported_capabilities
 			FROM agents WHERE id=$1 AND revoked_at IS NULL`, id).Scan(
-		&agent.ID, &agent.Name, &agent.Version, &agent.OS, &agent.Arch, &capabilities, &features, &labels, &runtimeState, &metricsState, &agent.LastSeen, &agent.EnrolledAt, &offlineThresholdSeconds)
+		&agent.ID, &agent.Name, &agent.Version, &agent.OS, &agent.Arch, &capabilities, &features, &labels, &runtimeState, &metricsState, &agent.LastSeen, &agent.EnrolledAt, &offlineThresholdSeconds, &agent.SupportedCapabilities)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return core.Agent{}, ErrNotFound
 	}
