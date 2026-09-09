@@ -1,0 +1,27 @@
+import assert from "node:assert/strict";
+import { engineCapabilityToggles, selectedDefaultEngines } from "./modules/engine-capabilities.js";
+
+const defaults = engineCapabilityToggles([]);
+assert.equal((defaults.match(/type="checkbox"/g) || []).length, 4);
+assert.equal(defaults.includes("checked"), false);
+assert.equal(defaults.includes("disabled"), false, "globally disabled engines remain selectable");
+const node = engineCapabilityToggles(["mihomo"], { supported: ["mihomo", "xray"], node: true });
+assert.match(node, /data-engine-capability="xray"[^>]*>/);
+assert.doesNotMatch(node, /data-engine-capability="xray"[^>]*disabled/);
+assert.match(node, /data-engine-capability="sing-box"[^>]*disabled/);
+assert.equal((engineCapabilityToggles([], { writable: false }).match(/disabled/g) || []).length, 4);
+const form = new FormData();
+assert.deepEqual(selectedDefaultEngines(form), []);
+form.append("default_agent_engines", "xray");
+form.append("default_agent_engines", "ss-rust");
+assert.deepEqual(selectedDefaultEngines(form), ["xray", "ss-rust"]);
+console.log("Engine capability module smoke passed");
+const stopping = engineCapabilityToggles(["mihomo"], { node: true, transitions: { mihomo: { status: "pending", enabled: false } } });
+assert.match(stopping, /等待停止服务并关闭能力/);
+assert.match(stopping, /data-engine-capability="mihomo" checked disabled/);
+const starting = engineCapabilityToggles([], { node: true, transitions: { mihomo: { status: "running", enabled: true } } });
+assert.match(starting, /等待启动服务并开启能力/);
+assert.match(starting, /data-engine-capability="mihomo"\s+disabled/);
+const failed = engineCapabilityToggles([], { node: true, transitions: { mihomo: { status: "failed", enabled: true } } });
+assert.match(failed, /启停失败或取消/);
+assert.doesNotMatch(failed, /data-engine-capability="mihomo"[^>]*disabled/);

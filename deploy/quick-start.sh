@@ -518,6 +518,7 @@ services:
       QCH_ADMIN_TOKEN: ${QCH_ADMIN_TOKEN:-}
       QCH_ADMIN_TOKEN_SHA256: ${QCH_ADMIN_TOKEN_SHA256:-}
       QCH_LISTEN: 0.0.0.0:8080
+      QCH_DEFAULT_AGENT_ENGINES: ${QCH_DEFAULT_AGENT_ENGINES:-}
       QCH_BEHIND_TLS_PROXY: ${QCH_BEHIND_TLS_PROXY:-true}
       QCH_ALLOW_INSECURE_HTTP: ${QCH_ALLOW_INSECURE_HTTP:-false}
       QCH_ALLOW_INSECURE_DATABASE: ${QCH_ALLOW_INSECURE_DATABASE:-false}
@@ -1045,7 +1046,44 @@ update_external_services() (
     cleanup_external_update_backup
 )
 
+prepare_default_agent_engines() {
+    local engine answer selection seen=","
+    DEFAULT_AGENT_ENGINES="$(read_env_key QCH_DEFAULT_AGENT_ENGINES)"
+    # Existing installations keep the database-owned choice on upgrade.
+    [ ! -f "$ENV_FILE" ] || return 0
+    selection="${QCH_DEFAULT_AGENT_ENGINES:-mihomo,xray,sing-box,ss-rust}"
+    if [ -z "${QCH_DEFAULT_AGENT_ENGINES:-}" ] && [ -t 0 ]; then
+        echo ""
+        echo "选择新 Agent 默认启用的内核能力（不自动安装内核）。"
+        echo "后续可在系统设置修改默认值，节点设置可单独开关。"
+        selection=""
+        for engine in mihomo xray sing-box ss-rust; do
+            while true; do
+                read -r -p "默认启用 $engine？[Y/n] " answer
+                case "$answer" in
+                    ""|y|Y|yes|YES) selection="${selection:+$selection,}$engine"; break ;;
+                    n|N|no|NO) break ;;
+                    *) echo "请输入 y 或 n。" ;;
+                esac
+            done
+        done
+        selection="${selection:-none}"
+    fi
+    if [ "$selection" != none ]; then
+        case "$selection" in ,*|*,|*,,*) die "QCH_DEFAULT_AGENT_ENGINES 含空内核名称" ;; esac
+        local -a selected_engines
+        IFS=',' read -r -a selected_engines <<< "$selection"
+        for engine in "${selected_engines[@]}"; do
+            case "$engine" in mihomo|xray|sing-box|ss-rust) ;; *) die "无效内核能力：$engine" ;; esac
+            case "$seen" in *",$engine,"*) die "重复内核能力：$engine" ;; esac
+            seen="$seen$engine,"
+        done
+    fi
+    DEFAULT_AGENT_ENGINES="$selection"
+}
+
 prepare_bundled_env() {
+    prepare_default_agent_engines
     local postgres_password webhook_secret
     local behind_proxy allow_http allow_database cors_origins bind_address port image_tag version
     local proxy_subnet proxy_gateway web_proxy_address control_plane_proxy_address trusted_proxy_cidrs
@@ -1087,6 +1125,7 @@ prepare_bundled_env() {
 
     update_env_file \
         "POSTGRES_DB=$postgres_db" \
+        "QCH_DEFAULT_AGENT_ENGINES=$DEFAULT_AGENT_ENGINES" \
         "POSTGRES_USER=$postgres_user" \
         "POSTGRES_PASSWORD=$postgres_password" \
         "POSTGRES_PORT=$postgres_port" \
@@ -1113,6 +1152,7 @@ prepare_bundled_env() {
 }
 
 prepare_external_env() {
+    prepare_default_agent_engines
     local db_url webhook_secret env_existed existing_admin_token existing_admin_digest
     local docker_network existing_network
     local behind_proxy allow_http allow_database cors_origins bind_address port
@@ -1219,6 +1259,7 @@ prepare_external_env() {
 
     update_env_file \
         "QCH_DATABASE_URL=$db_url" \
+        "QCH_DEFAULT_AGENT_ENGINES=$DEFAULT_AGENT_ENGINES" \
         "QCH_ADMIN_TOKEN=$existing_admin_token" \
         "QCH_ADMIN_TOKEN_SHA256=$ADMIN_TOKEN_DIGEST" \
         "QCH_WEBHOOK_SECRET=$webhook_secret" \

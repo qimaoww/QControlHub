@@ -43,6 +43,7 @@ services:
       QCH_ADMIN_TOKEN: ${QCH_ADMIN_TOKEN:-}
       QCH_ADMIN_TOKEN_SHA256: ${QCH_ADMIN_TOKEN_SHA256:-}
       QCH_LISTEN: 0.0.0.0:8080
+      QCH_DEFAULT_AGENT_ENGINES: ${QCH_DEFAULT_AGENT_ENGINES:-}
       QCH_BEHIND_TLS_PROXY: ${QCH_BEHIND_TLS_PROXY:-true}
       QCH_ALLOW_INSECURE_HTTP: ${QCH_ALLOW_INSECURE_HTTP:-false}
       # PostgreSQL is on this Compose project's isolated internal bridge.

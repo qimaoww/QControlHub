@@ -48,7 +48,7 @@ type storeExecutor interface {
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 46
+const currentSchemaVersion = 48
 
 func Open(ctx context.Context, databaseURL string, allowInsecureRemote bool) (*Store, error) {
 	return OpenWithConfigKey(ctx, databaseURL, allowInsecureRemote, "")
@@ -235,7 +235,8 @@ func (s *Store) EnrollAgent(ctx context.Context, request core.EnrollRequest, enr
 	if err != nil || len(publicKey) != 32 {
 		return core.Agent{}, fmt.Errorf("%w: invalid Ed25519 public key", ErrInvalid)
 	}
-	capabilities, _ := json.Marshal(request.Capabilities)
+	supported := append([]core.Engine{}, request.Capabilities...)
+	supportedCapabilities, _ := json.Marshal(supported)
 	features, _ := json.Marshal(request.Features)
 	if len(request.Features) == 0 {
 		features = []byte(`[]`)
@@ -294,6 +295,22 @@ func (s *Store) EnrollAgent(ctx context.Context, request core.EnrollRequest, enr
 		}
 	}
 	if reinstalled {
+		// Keep the node's selection through reinstalls, bounded by the newly
+		// declared support of the Agent binary/environment.
+		var selected []core.Engine
+		if err := tx.QueryRow(ctx, `SELECT capabilities FROM agents WHERE id=$1`, id).Scan(&selected); err != nil {
+			return core.Agent{}, err
+		}
+		request.Capabilities = core.IntersectEngines(selected, request.Capabilities)
+	} else {
+		var defaults []core.Engine
+		if err := tx.QueryRow(ctx, `SELECT COALESCE(default_agent_engines, '["mihomo","xray","sing-box","ss-rust"]'::jsonb) FROM panel_settings WHERE id=1`).Scan(&defaults); err != nil {
+			return core.Agent{}, err
+		}
+		request.Capabilities = core.IntersectEngines(defaults, request.Capabilities)
+	}
+	capabilities, _ := json.Marshal(request.Capabilities)
+	if reinstalled {
 		// The credential's original name authenticates the reinstall above;
 		// retain the row-locked panel name instead of reverting a custom rename.
 		_, err = tx.Exec(ctx, `
@@ -314,6 +331,9 @@ func (s *Store) EnrollAgent(ctx context.Context, request core.EnrollRequest, enr
 	if err != nil {
 		return core.Agent{}, mapError(err)
 	}
+	if _, err := tx.Exec(ctx, `UPDATE agents SET supported_capabilities=$2 WHERE id=$1`, id, supportedCapabilities); err != nil {
+		return core.Agent{}, err
+	}
 	if reusable {
 		result, bindErr := tx.Exec(ctx, `
 			UPDATE enrollment_tokens SET agent_id=$2
@@ -329,8 +349,9 @@ func (s *Store) EnrollAgent(ctx context.Context, request core.EnrollRequest, enr
 		return core.Agent{}, err
 	}
 	return core.Agent{
-		ID: id, Name: name, Version: request.Version,
-		OS: request.OS, Arch: request.Arch, Capabilities: append([]core.Engine(nil), request.Capabilities...), Features: append([]string(nil), request.Features...),
+		SupportedCapabilities: supported,
+		ID:                    id, Name: name, Version: request.Version,
+		OS: request.OS, Arch: request.Arch, Capabilities: append([]core.Engine{}, request.Capabilities...), Features: append([]string(nil), request.Features...),
 		Labels: cloneLabels(request.Labels), Runtime: map[core.Engine]core.RuntimeState{},
 		LastSeen: lastSeen, EnrolledAt: enrolledAt, Status: "offline", Reinstalled: reinstalled,
 	}, nil
@@ -945,7 +966,7 @@ func (s *Store) ListAgentsWithEnrollmentCommands(ctx context.Context) ([]core.Ag
 
 const listAgentsSQL = `
 			SELECT id,name,version,os,arch,capabilities,features,labels,runtime,metrics,last_seen,enrolled_at,
-				(SELECT agent_offline_threshold_seconds FROM panel_settings WHERE id=1)
+				(SELECT agent_offline_threshold_seconds FROM panel_settings WHERE id=1),supported_capabilities,` + capabilityTransitionsSQL + `
 		FROM agents WHERE revoked_at IS NULL ORDER BY enrolled_at DESC`
 
 func scanAgents(rows pgx.Rows) ([]core.Agent, error) {
@@ -956,7 +977,7 @@ func scanAgents(rows pgx.Rows) ([]core.Agent, error) {
 		var agent core.Agent
 		var capabilities, features, labels, runtimeState, metricsState []byte
 		var offlineThresholdSeconds int
-		if err := rows.Scan(&agent.ID, &agent.Name, &agent.Version, &agent.OS, &agent.Arch, &capabilities, &features, &labels, &runtimeState, &metricsState, &agent.LastSeen, &agent.EnrolledAt, &offlineThresholdSeconds); err != nil {
+		if err := rows.Scan(&agent.ID, &agent.Name, &agent.Version, &agent.OS, &agent.Arch, &capabilities, &features, &labels, &runtimeState, &metricsState, &agent.LastSeen, &agent.EnrolledAt, &offlineThresholdSeconds, &agent.SupportedCapabilities, &agent.CapabilityTransitions); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal(capabilities, &agent.Capabilities); err != nil {
@@ -1291,10 +1312,13 @@ func (s *Store) CreateTask(ctx context.Context, request core.TaskRequest) (core.
 	if request.Action.SystemBBR() && !containsFeature(features, core.AgentFeatureSystemBBR) {
 		return core.Task{}, fmt.Errorf("%w: upgrade this Agent before managing system BBR", ErrConflict)
 	}
-	if !request.Action.AgentLevel() && !containsEngine(capabilities, request.Engine) {
-		return core.Task{}, fmt.Errorf("%w: agent does not advertise the requested engine", ErrInvalid)
-	}
 	if !request.Action.AgentLevel() {
+		if err := rejectPendingCapabilityTransition(ctx, tx, request.AgentID, request.Engine); err != nil {
+			return core.Task{}, err
+		}
+		if !containsEngine(capabilities, request.Engine) {
+			return core.Task{}, fmt.Errorf("%w: agent does not advertise the requested engine", ErrInvalid)
+		}
 		if reason := strings.TrimSpace(runtime[request.Engine].ExistingConfigUnsupportedReason); reason != "" {
 			return core.Task{}, fmt.Errorf("%w: %s core tasks are disabled because an existing service could not be mapped safely: %s", ErrConflict, request.Engine, reason)
 		}
@@ -1531,6 +1555,20 @@ func (s *Store) RetryTask(ctx context.Context, id string) (core.Task, error) {
 	if previous.Status != core.TaskFailed && previous.Status != core.TaskCanceled {
 		return core.Task{}, fmt.Errorf("%w: only failed or canceled tasks can be retried", ErrConflict)
 	}
+	var transition bool
+	if err := s.pool.QueryRow(ctx, `SELECT capability_transition FROM tasks WHERE id=$1`, id).Scan(&transition); err != nil {
+		return core.Task{}, err
+	}
+	if transition {
+		change, err := s.ChangeAgentEngineCapability(ctx, previous.AgentID, previous.Engine, previous.Action == core.ActionStart)
+		if err != nil {
+			return core.Task{}, err
+		}
+		if change.TaskID == "" {
+			return core.Task{}, fmt.Errorf("%w: 节点能力已更新，无需重试启停任务", ErrConflict)
+		}
+		return s.GetTask(ctx, change.TaskID)
+	}
 	return s.CreateTask(ctx, core.TaskRequest{
 		TCPSettings: previous.TCPSettings,
 		AgentID:     previous.AgentID, Action: previous.Action, Engine: previous.Engine,
@@ -1691,12 +1729,22 @@ func (s *Store) CompleteTask(ctx context.Context, agentID, taskID string, result
 		return err
 	}
 	defer tx.Rollback(ctx)
+	// Match creation/claim lock order: node first, then task. A successful
+	// transition updates eligibility atomically with the task acknowledgement.
+	var selected, supported []core.Engine
+	if err := tx.QueryRow(ctx, `SELECT capabilities,COALESCE(supported_capabilities,capabilities) FROM agents WHERE id=$1 FOR UPDATE`, agentID).Scan(&selected, &supported); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
+	}
 	var action core.Action
 	var engine core.Engine
+	var transition bool
 	if err := tx.QueryRow(ctx, `
-		SELECT action,engine FROM tasks
+		SELECT action,engine,capability_transition FROM tasks
 		WHERE id=$1 AND agent_id=$2 AND lease_id=$3 AND status='running'
-		FOR UPDATE`, taskID, agentID, result.LeaseID).Scan(&action, &engine); err != nil {
+		FOR UPDATE`, taskID, agentID, result.LeaseID).Scan(&action, &engine, &transition); err != nil {
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
@@ -1712,6 +1760,17 @@ func (s *Store) CompleteTask(ctx context.Context, agentID, taskID string, result
 	status := core.TaskFailed
 	if result.Success {
 		status = core.TaskSucceeded
+	}
+	// Re-enrollment can narrow declared support while an offline transition
+	// is queued. Never restore a capability outside that current support set.
+	if transition && result.Success && action == core.ActionStart && !containsEngine(supported, engine) {
+		status = core.TaskFailed
+		result.Error = "Agent no longer declares support for this engine; capability was not enabled"
+	}
+	if transition && status == core.TaskSucceeded {
+		if err := setEngineCapability(ctx, tx, agentID, engine, action == core.ActionStart, selected); err != nil {
+			return err
+		}
 	}
 	storedContent := ""
 	storedOutput := truncate(result.Output, 64<<10)
@@ -2070,6 +2129,8 @@ CREATE TABLE IF NOT EXISTS tasks (
 );
 
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS lease_id text;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS capability_transition boolean NOT NULL DEFAULT false;
+CREATE INDEX IF NOT EXISTS tasks_capability_transition_idx ON tasks(agent_id,engine,created_at DESC,id DESC) WHERE capability_transition;
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS tcp_settings jsonb NOT NULL DEFAULT '{}'::jsonb;
 	ALTER TABLE tasks ADD COLUMN IF NOT EXISTS core_version varchar(64);
 	ALTER TABLE tasks ADD COLUMN IF NOT EXISTS core_source varchar(32);
@@ -2146,6 +2207,9 @@ CREATE TABLE IF NOT EXISTS panel_settings (
 );
 ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS webhook_url varchar(500) NOT NULL DEFAULT '';
 ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS komari_url varchar(500) NOT NULL DEFAULT '';
+ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS default_agent_engines jsonb;
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS supported_capabilities jsonb;
+UPDATE agents SET supported_capabilities=capabilities WHERE supported_capabilities IS NULL;
 ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS komari_api_key varchar(500) NOT NULL DEFAULT '';
 ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS core_log_minimum_level varchar(10) NOT NULL DEFAULT 'debug';
 ALTER TABLE panel_settings DROP CONSTRAINT IF EXISTS panel_settings_core_log_minimum_level_check;

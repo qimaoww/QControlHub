@@ -16,7 +16,8 @@ const panelSettingsColumns = `revision,panel_name,panel_description,time_zone,ti
 	agent_offline_threshold_seconds,task_stale_timeout_seconds,install_task_stale_timeout_seconds,task_max_attempts,
 	public_ip_probe_interval_seconds,core_log_minimum_level,core_log_retention_days,agent_core_log_max_mib,
 	agent_core_log_rotate_count,metric_retention_days,audit_retention_days,task_retention_days,config_revision_retention,
-	webhook_url,notify_task_failed,notify_agent_offline,notify_agent_online,notify_traffic_quota,komari_url,komari_api_key,updated_at`
+	webhook_url,notify_task_failed,notify_agent_offline,notify_agent_online,notify_traffic_quota,komari_url,komari_api_key,updated_at,
+	COALESCE(default_agent_engines, '["mihomo","xray","sing-box","ss-rust"]'::jsonb)`
 
 func scanPanelSettings(row pgx.Row) (core.PanelSettings, error) {
 	var value core.PanelSettings
@@ -27,6 +28,7 @@ func scanPanelSettings(row pgx.Row) (core.PanelSettings, error) {
 		&value.PublicIPProbeIntervalSeconds, &value.CoreLogMinimumLevel, &value.CoreLogRetentionDays, &value.AgentCoreLogMaxMiB,
 		&value.AgentCoreLogRotateCount, &value.MetricRetentionDays, &value.AuditRetentionDays, &value.TaskRetentionDays, &value.ConfigRevisionRetention,
 		&value.WebhookURL, &value.NotifyTaskFailed, &value.NotifyAgentOffline, &value.NotifyAgentOnline, &value.NotifyTrafficQuota, &value.KomariURL, &value.KomariAPIKey, &value.UpdatedAt,
+		&value.DefaultAgentEngines,
 	)
 	return value, err
 }
@@ -62,6 +64,10 @@ func (s *Store) savePanelSettings(ctx context.Context, settings core.PanelSettin
 	current, err := s.PanelSettings(ctx)
 	if err != nil {
 		return core.PanelSettings{}, err
+	}
+	// Omitted/null means a legacy client; [] explicitly disables all defaults.
+	if settings.DefaultAgentEngines == nil {
+		settings.DefaultAgentEngines = current.DefaultAgentEngines
 	}
 	// Requests produced before schema v35 have none of the new reporting
 	// fields. Preserve every new setting as one unit so a legacy cosmetic save
@@ -113,6 +119,7 @@ func (s *Store) savePanelSettings(ctx context.Context, settings core.PanelSettin
 		settings.AgentCoreLogRotateCount, settings.MetricRetentionDays, settings.AuditRetentionDays, settings.TaskRetentionDays,
 		settings.ConfigRevisionRetention, settings.WebhookURL, settings.NotifyTaskFailed, settings.NotifyAgentOffline,
 		settings.NotifyAgentOnline, settings.NotifyTrafficQuota, settings.KomariURL, settings.KomariAPIKey, settings.UpdatedAt,
+		settings.DefaultAgentEngines,
 	}
 	if expectedRevision > 0 {
 		where += fmt.Sprintf(" AND revision=$%d", len(args)+1)
@@ -125,7 +132,7 @@ func (s *Store) savePanelSettings(ctx context.Context, settings core.PanelSettin
 		public_ip_probe_interval_seconds=$15,core_log_minimum_level=$16,core_log_retention_days=$17,agent_core_log_max_mib=$18,
 		agent_core_log_rotate_count=$19,metric_retention_days=$20,audit_retention_days=$21,task_retention_days=$22,
 		config_revision_retention=$23,webhook_url=$24,notify_task_failed=$25,notify_agent_offline=$26,
-		notify_agent_online=$27,notify_traffic_quota=$28,komari_url=$29,komari_api_key=$30,updated_at=$31 WHERE ` + where + ` RETURNING ` + panelSettingsColumns
+		notify_agent_online=$27,notify_traffic_quota=$28,komari_url=$29,komari_api_key=$30,updated_at=$31,default_agent_engines=$32 WHERE ` + where + ` RETURNING ` + panelSettingsColumns
 	saved, err := scanPanelSettings(s.pool.QueryRow(ctx, query, args...))
 	if errors.Is(err, pgx.ErrNoRows) && expectedRevision > 0 {
 		return core.PanelSettings{}, fmt.Errorf("%w: settings were changed in another session", ErrConflict)
@@ -134,4 +141,18 @@ func (s *Store) savePanelSettings(ctx context.Context, settings core.PanelSettin
 		return core.PanelSettings{}, fmt.Errorf("save panel settings: %w", err)
 	}
 	return saved, nil
+}
+
+// InitializeDefaultAgentEngines seeds installation preferences once. Subsequent
+// starts and upgrades never overwrite a selection saved by the panel.
+func (s *Store) InitializeDefaultAgentEngines(ctx context.Context, engines []core.Engine) error {
+	if engines == nil {
+		return fmt.Errorf("%w: explicit engine selection required", ErrInvalid)
+	}
+	if err := core.ValidateEngineCapabilities(engines); err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalid, err)
+	}
+	_, err := s.pool.Exec(ctx, `UPDATE panel_settings SET default_agent_engines=$1,
+		revision=revision+1,updated_at=now() WHERE id=1 AND default_agent_engines IS NULL`, engines)
+	return err
 }

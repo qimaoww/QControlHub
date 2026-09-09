@@ -325,22 +325,24 @@ type HostNetworkInterface struct {
 }
 
 type Agent struct {
-	ID                         string                  `json:"id"`
-	Name                       string                  `json:"name"`
-	Version                    string                  `json:"version,omitempty"`
-	OS                         string                  `json:"os"`
-	Arch                       string                  `json:"arch"`
-	Capabilities               []Engine                `json:"capabilities"`
-	Features                   []string                `json:"features,omitempty"`
-	Labels                     map[string]string       `json:"labels,omitempty"`
-	Runtime                    map[Engine]RuntimeState `json:"runtime,omitempty"`
-	Metrics                    HostMetrics             `json:"metrics,omitempty"`
-	LastSeen                   time.Time               `json:"last_seen"`
-	EnrolledAt                 time.Time               `json:"enrolled_at"`
-	PublicKey                  []byte                  `json:"-"`
-	Status                     string                  `json:"status,omitempty"`
-	EnrollmentCommandAvailable bool                    `json:"enrollment_command_available,omitempty"`
-	Reinstalled                bool                    `json:"-"`
+	ID                         string                          `json:"id"`
+	Name                       string                          `json:"name"`
+	Version                    string                          `json:"version,omitempty"`
+	OS                         string                          `json:"os"`
+	Arch                       string                          `json:"arch"`
+	Capabilities               []Engine                        `json:"capabilities"`
+	SupportedCapabilities      []Engine                        `json:"supported_capabilities"`
+	CapabilityTransitions      map[Engine]CapabilityTransition `json:"capability_transitions,omitempty"`
+	Features                   []string                        `json:"features,omitempty"`
+	Labels                     map[string]string               `json:"labels,omitempty"`
+	Runtime                    map[Engine]RuntimeState         `json:"runtime,omitempty"`
+	Metrics                    HostMetrics                     `json:"metrics,omitempty"`
+	LastSeen                   time.Time                       `json:"last_seen"`
+	EnrolledAt                 time.Time                       `json:"enrolled_at"`
+	PublicKey                  []byte                          `json:"-"`
+	Status                     string                          `json:"status,omitempty"`
+	EnrollmentCommandAvailable bool                            `json:"enrollment_command_available,omitempty"`
+	Reinstalled                bool                            `json:"-"`
 }
 
 // KomariNode is the read-only billing and traffic configuration returned by a
@@ -382,6 +384,13 @@ type Config struct {
 }
 
 type TaskStatus string
+
+// CapabilityTransition exposes the last service action behind each node switch.
+type CapabilityTransition struct {
+	TaskID  string     `json:"task_id"`
+	Status  TaskStatus `json:"status"`
+	Enabled bool       `json:"enabled"`
+}
 
 const (
 	TaskPending   TaskStatus = "pending"
@@ -619,6 +628,7 @@ type ConfigTemplate struct {
 }
 
 type PanelSettings struct {
+	DefaultAgentEngines            []Engine  `json:"default_agent_engines"`
 	Revision                       int64     `json:"revision"`
 	PanelName                      string    `json:"panel_name"`
 	PanelDescription               string    `json:"panel_description"`
@@ -655,6 +665,7 @@ type PanelSettings struct {
 
 func DefaultPanelSettings() PanelSettings {
 	return PanelSettings{
+		DefaultAgentEngines:            AllEngines(),
 		Revision:                       1,
 		PanelName:                      "QControlHub",
 		PanelDescription:               "可信远程编排",
@@ -687,6 +698,9 @@ func DefaultPanelSettings() PanelSettings {
 }
 
 func (settings PanelSettings) Validate() error {
+	if err := ValidateEngineCapabilities(settings.DefaultAgentEngines); err != nil {
+		return err
+	}
 	if settings.PanelName == "" {
 		return errors.New("panel name is required")
 	}

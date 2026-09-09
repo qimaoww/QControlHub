@@ -44,6 +44,7 @@ const onlineAgent = (id, features = ["agent-self-upgrade-v1"]) => ({
   status: "online",
   version: "1.2.3",
   capabilities: ["mihomo", "sing-box"],
+  supported_capabilities: ["mihomo", "xray", "sing-box", "ss-rust"],
   features,
   labels: {},
   metrics: {},
@@ -284,6 +285,20 @@ window.fetch = async (input, options = {}) => {
     if (testAPI.renameGate) await testAPI.renameGate;
     testAPI.agents = testAPI.agents.map((agent) => agent.id === agentID ? { ...agent, name } : agent);
     return json({ name });
+  }
+  if (method === "PUT" && /^\/agents\/[^/]+\/capabilities\/[^/]+$/.test(path)) {
+    if (testAPI.capabilityFailure) return json({ error: "capability save failure" }, 409);
+    const [, , id, , engine] = path.split("/");
+    const { enabled } = JSON.parse(options.body);
+    const agent = testAPI.agents.find((item) => item.id === id);
+    if (agent.runtime?.[engine]?.installed) {
+      agent.capability_transitions ||= {};
+      agent.capability_transitions[engine] = { task_id: `capability-${Date.now()}`, status: "pending", enabled };
+      return json({ enabled: agent.capabilities.includes(engine), task_id: agent.capability_transitions[engine].task_id }, 202);
+    }
+    agent.capabilities = agent.capabilities.filter((item) => item !== engine);
+    if (enabled) agent.capabilities.push(engine);
+    return json({ enabled });
   }
   if (method === "GET" && path === "/regions")
     return testAPI.regionCatalogFailure ? json({ error: "temporary catalog failure" }, 503) : json(["CN", "HK", "MO", "TW", "US", "SG", "JP", "GB", "DE", "FR", "AQ", "KR", "CA", "AU", "NL", "IN", "AT", "BE", "BR", "CH", "ES", "FI", "IE", "IS", "IT", "LU", "MY", "NO", "NZ", "PH", "PL", "RU", "SE", "TH", "TR", "VN", "ZA"]);
@@ -899,6 +914,47 @@ async function testAdminRuntime() {
     false,
     "单节点详情不得调用创建 enrollment credential 的接口",
   );
+  document.querySelector('[data-node-tab="cores"]').click();
+  const capability = () => document.querySelector('[data-engine-capability="xray"]');
+  assert.ok(capability() && !capability().checked && !capability().disabled, "默认关闭的 Xray 必须可以单独开启");
+  capability().click();
+  await waitFor(() => capability()?.checked && !capability()?.disabled && document.querySelector('[data-version-engine="xray"]'), "开启后应显示 Xray 内核管理卡片");
+  testAPI.capabilityFailure = true;
+  capability().click();
+  await waitFor(() => capability()?.checked && !capability()?.disabled, "保存失败应恢复开关");
+  testAPI.capabilityFailure = false;
+  capability().click();
+  await waitFor(() => !capability()?.checked && !capability()?.disabled && !document.querySelector('[data-version-engine="xray"]'), "关闭后应移除 Xray 管理入口但保留能力开关");
+  const installedCapability = () => document.querySelector('[data-engine-capability="mihomo"]');
+  const transition = () => testAPI.agents.find((item) => item.id === "alpha").capability_transitions?.mihomo;
+  const completeTransition = async (success) => {
+    const agent = testAPI.agents.find((item) => item.id === "alpha");
+    transition().status = success ? "succeeded" : "failed";
+    if (success) {
+      agent.capabilities = agent.capabilities.filter((engine) => engine !== "mihomo");
+      if (transition().enabled) agent.capabilities.push("mihomo");
+      agent.runtime.mihomo.service_status = transition().enabled ? "running" : "inactive";
+    }
+    document.querySelector("[data-agent-refresh]").click();
+    await waitFor(() => installedCapability() && !installedCapability().disabled && installedCapability().checked === agent.capabilities.includes("mihomo"), "启停完成后开关没有更新并解除等待");
+  };
+  installedCapability().click();
+  await waitFor(() => transition()?.status === "pending" && installedCapability()?.checked && installedCapability()?.disabled, "停止任务未确认前不能提前关闭能力");
+  await completeTransition(false);
+  assert.equal(installedCapability().checked, true, "停止失败须保留能力");
+  assert.match(document.querySelector("[data-node-capabilities]").textContent, /失败或取消/, "失败状态必须可见");
+  installedCapability().click();
+  await waitFor(() => transition()?.status === "pending" && installedCapability()?.disabled, "未排队重试停止");
+  await completeTransition(true);
+  assert.equal(installedCapability().checked, false, "停止成功才关闭能力");
+  installedCapability().click();
+  await waitFor(() => transition()?.enabled && transition()?.status === "pending" && !installedCapability()?.checked && installedCapability()?.disabled, "启动任务未确认前不能提前开启能力");
+  await completeTransition(false);
+  assert.equal(installedCapability().checked, false, "启动失败须保持关闭");
+  installedCapability().click();
+  await waitFor(() => transition()?.status === "pending" && installedCapability()?.disabled, "未排队重试启动");
+  await completeTransition(true);
+  assert.equal(installedCapability().checked, true, "启动成功恢复管理能力");
   for (const tab of ["cores", "metrics", "agent"]) {
     document.querySelector(`[data-node-tab="${tab}"]`).click();
     await waitFor(

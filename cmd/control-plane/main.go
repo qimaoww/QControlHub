@@ -89,6 +89,15 @@ func main() {
 		slog.Info("configuration payloads will be encrypted at rest")
 	}
 	dataStore, err := store.OpenWithConfigKeyring(startupContext, databaseURL, allowInsecureDatabase, configEncryptionKey, previousConfigEncryptionKeys)
+	if err == nil {
+		if selection := strings.TrimSpace(os.Getenv("QCH_DEFAULT_AGENT_ENGINES")); selection != "" {
+			var engines []core.Engine
+			engines, err = core.ParseDefaultAgentEngines(selection)
+			if err == nil {
+				err = dataStore.InitializeDefaultAgentEngines(startupContext, engines)
+			}
+		}
+	}
 	cancelStartup()
 	if err != nil {
 		slog.Error("open data store", "error", err)

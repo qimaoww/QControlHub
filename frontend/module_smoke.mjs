@@ -7,6 +7,7 @@ import "./config_fields_smoke.mjs";
 import "./system_bbr_smoke.mjs";
 import "./config_files_smoke.mjs";
 import "./traffic_smoke.mjs";
+import "./engine_capabilities_smoke.mjs";
 
 import {
   agentStructureSignature,
@@ -196,6 +197,12 @@ assert.notEqual(
     { id: "new-node", capabilities: [] },
   ]),
   "Agent structure signatures detect newly enrolled nodes",
+);
+
+assert.notEqual(
+  agentStructureSignature([{ id: "alpha", capabilities: ["mihomo"] }]),
+  agentStructureSignature([{ id: "alpha", capabilities: [] }]),
+  "Capability changes from another session trigger a structural refresh",
 );
 
 const trafficRateNow = Date.parse("2026-08-28T00:00:30Z");
@@ -1685,7 +1692,9 @@ try {
       arch: "amd64",
       status: "online",
       metrics: {},
-      capabilities: ["sing-box"],
+      // Keep capability membership stable: changing it now deliberately
+      // requests one structural refresh for node-level switches.
+      capabilities: ["sing-box", "xray"],
       runtime: {
         "sing-box": {
           installed: false,
@@ -1726,7 +1735,7 @@ try {
       arch: "amd64",
       status: "online",
       metrics: {},
-      capabilities: ["sing-box"],
+      capabilities: ["sing-box", "xray"],
       runtime: {
         "sing-box": { installed: true, service_status: "running" },
       },
@@ -1742,7 +1751,7 @@ try {
   assert.equal(structureStates["sing-box"].className, "engine-state running");
   assert.equal(
     structureInstalledSummary.textContent,
-    "linux / amd64 · 1/1 内核已安装",
+    "linux / amd64 · 1/2 内核已安装",
   );
 
   structurePayload = () => [
@@ -1752,7 +1761,7 @@ try {
       arch: "amd64",
       status: "online",
       metrics: {},
-      capabilities: ["sing-box"],
+      capabilities: ["sing-box", "xray"],
       runtime: {
         "sing-box": { installed: false, service_status: "unknown" },
       },
