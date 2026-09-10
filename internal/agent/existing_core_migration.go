@@ -53,9 +53,14 @@ func (e *Executor) LoadCoreMigrationState() error {
 			e.specsMu.Unlock()
 		}
 		if record.State == coreMigrationComplete && record.SourceDigest == coreMigrationSourceDigest(existing) {
-			completionErr := verifyCoreMigrationCompletionState(loadContext, existing, managedSpecs[engine], e.serviceManager())
+			// A completed migration is re-checked on every Agent start. Only the
+			// retired legacy service can invalidate it; the current runtime state
+			// of the QAgent-managed unit (stopped, disabled, or failed by an
+			// operator) belongs to the regular core actions and must not
+			// permanently disable the engine.
+			ownershipErr := verifyCompletedCoreMigrationOwnership(loadContext, existing, e.serviceManager())
 			e.specsMu.Lock()
-			if completionErr == nil {
+			if ownershipErr == nil {
 				if e.completedMigrations == nil {
 					e.completedMigrations = make(map[core.Engine]completedCoreMigration)
 				}
@@ -69,7 +74,7 @@ func (e *Executor) LoadCoreMigrationState() error {
 				if e.ExistingDiscoveryIssues == nil {
 					e.ExistingDiscoveryIssues = make(map[core.Engine]string)
 				}
-				issue := strings.ToValidUTF8(fmt.Sprintf("已完成的 %s 服务迁移状态不再安全，相关内核任务已禁用：%v", engine, completionErr), "�")
+				issue := strings.ToValidUTF8(fmt.Sprintf("已完成的 %s 服务迁移状态不再安全，相关内核任务已禁用：%v", engine, ownershipErr), "�")
 				if len(issue) > 512 {
 					issue = strings.ToValidUTF8(issue[:512], "�")
 				}
@@ -230,6 +235,86 @@ func verifyCoreMigrationCompletionState(ctx context.Context, existing, managed E
 		}
 	}
 	return nil
+}
+
+// verifyCompletedCoreMigrationOwnership re-checks the durable ownership
+// invariants of an already completed migration. Restarting the Agent must fail
+// closed only when the retired legacy service can reclaim the core again: it is
+// running once more, or it would start again on boot. The runtime state of the
+// QAgent-managed unit is intentionally ignored — an operator stopping or
+// disabling the managed core, or the unit failing, is an ordinary condition
+// that the regular core actions handle; treating it as an unsafe migration
+// would disable every task for that engine until an administrator edits the
+// node by hand.
+//
+// The retired service itself must be provably unable to take over again, but
+// only states that really can start it are rejected: `enabled` and
+// `enabled-runtime`. `disabled`, `static`, `indirect` and `masked` units cannot
+// start on boot, and a unit that an administrator or a package removal deleted
+// (`not-found`) is gone entirely. A `failed` retired service is still rejected
+// because it proves something tried to start it after the migration.
+//
+// The strict transition check stays in verifyCoreMigrationCompletionState,
+// which runs while the migration is still being finalized and therefore must
+// observe the managed service up and running.
+func verifyCompletedCoreMigrationOwnership(ctx context.Context, existing EngineSpec, managers ...*ServiceManager) error {
+	manager := selectedServiceManager(managers...)
+	status, err := serviceStatusWithManager(ctx, manager, existing.Service)
+	if err != nil {
+		return fmt.Errorf("query existing service state: %w", err)
+	}
+	if status != "inactive" {
+		return fmt.Errorf("existing %s service is %s after migration completion", existing.Service, status)
+	}
+	if manager.Kind() == ServiceManagerOpenRC {
+		enableState, err := openRCServiceEnableState(ctx, existing.Service)
+		if err != nil {
+			return err
+		}
+		if enableState != "disabled" {
+			return fmt.Errorf("existing %s service is %s after migration completion", existing.Service, enableState)
+		}
+		if _, err := boundOpenRCServiceProcess(ctx, existing.Service); !errors.Is(err, errOpenRCServiceProcessUnbound) {
+			if err == nil {
+				return errors.New("existing OpenRC service still owns a supervised process after migration")
+			}
+			return fmt.Errorf("existing OpenRC service process state is not safely absent after migration: %w", err)
+		}
+		return nil
+	}
+	enableState, err := retiredSystemdServiceEnableState(ctx, existing.Service, manager)
+	if err != nil {
+		return err
+	}
+	switch enableState {
+	case "enabled", "enabled-runtime":
+		return fmt.Errorf("existing %s service is %s after migration completion", existing.Service, enableState)
+	case "disabled", "static", "indirect", "masked", "not-found":
+		return nil
+	default:
+		return fmt.Errorf("existing %s service has an unexpected enable state %q after migration completion", existing.Service, enableState)
+	}
+}
+
+// retiredSystemdServiceEnableState reads the raw `systemctl is-enabled` answer
+// for a retired service. Unlike serviceEnableState it also accepts the states
+// that prove the unit cannot start again but are outside the migration
+// transition set: `masked` and the `not-found` answer for a unit that no longer
+// exists. An empty or failed query stays fail closed.
+func retiredSystemdServiceEnableState(ctx context.Context, service string, managers ...*ServiceManager) (string, error) {
+	manager := selectedServiceManager(managers...)
+	if !safeServiceName(service) {
+		return "", errors.New("configured service name is unsafe")
+	}
+	output, err := run(ctx, manager.enableHelper(), "is-enabled", service)
+	state := strings.TrimSpace(output)
+	if ctx.Err() != nil {
+		return "", ctx.Err()
+	}
+	if state == "" {
+		return "", fmt.Errorf("query whether systemd service %s is enabled: %w", service, err)
+	}
+	return state, nil
 }
 
 func waitForCoreMigrationState(ctx context.Context, existingService, managedService, expectedExistingStatus, expectedManagedStatus, expectedExistingEnableState, expectedManagedEnableState string, managers ...*ServiceManager) error {

@@ -1589,7 +1589,7 @@ func (e *Executor) completedMigrationOwnership(parent context.Context, engine co
 	verify := e.verifyCompletedMigration
 	if verify == nil {
 		verify = func(ctx context.Context, existing, managed EngineSpec, manager *ServiceManager) error {
-			return verifyCoreMigrationCompletionState(ctx, existing, managed, manager)
+			return verifyCompletedCoreMigrationOwnership(ctx, existing, manager)
 		}
 	}
 	if err := verify(verifyContext, ownership.Existing, managed, e.serviceManager()); err != nil {
