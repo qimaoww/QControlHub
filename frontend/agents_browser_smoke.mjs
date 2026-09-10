@@ -282,7 +282,7 @@ async function runMode(mode) {
 }
 
 try {
-  const modes = process.env.QCH_BROWSER_SMOKE_MODES || process.env.QCH_BROWSER_SMOKE_MODE || "admin,empty,readonly,ports,regions,logs,bbr,bbr-readonly,bbr-writeonly,config-migration,config-layout,traffic-layout,capabilities-settings,capabilities-settings-readonly,presets";
+  const modes = process.env.QCH_BROWSER_SMOKE_MODES || process.env.QCH_BROWSER_SMOKE_MODE || "admin,empty,readonly,ports,regions,logs,logs-restore,bbr,bbr-readonly,bbr-writeonly,config-migration,config-layout,traffic-layout,capabilities-settings,capabilities-settings-readonly,presets";
   for (const mode of modes.split(",")) await runMode(mode);
   process.stdout.write("agents browser runtime smoke passed\n");
 } finally {

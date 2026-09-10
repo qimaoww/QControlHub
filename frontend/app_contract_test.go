@@ -887,6 +887,7 @@ func TestSPAModulesArePublished(t *testing.T) {
 		"tasks.js",
 		"traffic.js",
 		"settings.js",
+		"core-log-preferences.js",
 		"../module_smoke.mjs",
 	} {
 		if _, err := os.Stat(filepath.Join("modules", name)); err != nil {
@@ -1074,6 +1075,45 @@ func TestCoreLogsUseImmediateFiltersAndSidebarNodeScope(t *testing.T) {
 	} {
 		if strings.Contains(content, duplicatedControl) {
 			t.Errorf("core-log workspace still contains duplicated or deferred control %q", duplicatedControl)
+		}
+	}
+}
+
+func TestCoreLogPageSelectionPersistsInBrowserStorage(t *testing.T) {
+	module, err := os.ReadFile("modules/core-logs.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(module)
+	for _, required := range []string{
+		`savedCoreLogPreferences`,
+		`saveCoreLogPreferences`,
+		`restoreSelection()`,
+		`rememberSelection()`,
+		`coreLogFilterLimits.map((limit) =>`,
+	} {
+		if !strings.Contains(content, required) {
+			t.Errorf("core-log selection persistence is missing %q", required)
+		}
+	}
+	if strings.Count(content, "rememberSelection();") != 4 {
+		t.Errorf("every core-log selection surface must persist its own change; got %d call sites", strings.Count(content, "rememberSelection();"))
+	}
+	store, err := os.ReadFile("modules/core-log-preferences.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	storeContent := string(store)
+	if !strings.Contains(storeContent, `export const coreLogPreferenceKey = "qcontrolhub:core-log-preferences"`) {
+		t.Error("core-log selection must keep one stable browser-storage key")
+	}
+	for _, required := range []string{
+		`export const coreLogFilterLimits = [100, 200, 500, 1000, 2000];`,
+		`autoRefresh: record.auto_refresh !== false`,
+		`filters.q = source.q.slice(0, keywordLength);`,
+	} {
+		if !strings.Contains(storeContent, required) {
+			t.Errorf("core-log preference store is missing %q", required)
 		}
 	}
 }

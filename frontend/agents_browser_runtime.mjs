@@ -111,6 +111,23 @@ const testAPI = {
   agents: populatedAgents,
 };
 window.__agentsBrowserTestAPI = testAPI;
+if (mode === "logs-restore") {
+  // Seed the browser store before the application boots so the log page has
+  // to restore the previous session's node scope, filters, and live switch.
+  testAPI.agents = populatedAgents.map((agent) => ({
+    ...agent,
+    features: [...(agent.features || []), "core-logs-v1", "core-log-status-v1"],
+    runtime: { ...agent.runtime, xray: { installed: true, core_log_status: "active" } },
+  }));
+  localStorage.setItem("qcontrolhub:core-log-preferences", JSON.stringify({
+    agent_id: "bravo",
+    engine: "xray",
+    level: "warning",
+    q: "pressure entry 1999",
+    limit: 2000,
+    auto_refresh: false,
+  }));
+}
 if (mode === "traffic-layout") {
   location.hash = "#traffic";
   testAPI.trafficCandidates = [
@@ -260,7 +277,7 @@ window.fetch = async (input, options = {}) => {
     if (testAPI.agentsGate) await testAPI.agentsGate;
     return json(mode === "empty" ? [] : testAPI.agents);
   }
-  if (method === "GET" && path === "/core-logs" && mode === "logs") {
+  if (method === "GET" && path === "/core-logs" && (mode === "logs" || mode === "logs-restore")) {
     const limit = Number(url.searchParams.get("limit") || 1000);
     const agent = url.searchParams.get("agent_id") || "alpha";
     if (testAPI.logGates?.[`${agent}:${limit}`]) await testAPI.logGates[`${agent}:${limit}`];
@@ -1585,9 +1602,36 @@ async function testLargeLogRuntime() {
   const cachedTime = performance.now() - cachedAt;
   refreshGate.resolve();
   await waitFor(() => document.querySelector("[data-core-log-refresh-label]")?.textContent === "自动更新已暂停", "cache revalidation did not settle");
+  const storedPreference = JSON.parse(localStorage.getItem("qcontrolhub:core-log-preferences"));
+  assert.equal(storedPreference.agent_id, "bravo", "the selected node must be remembered");
+  assert.equal(storedPreference.limit, 2000, "the expanded per-engine window must be remembered");
+  assert.equal(storedPreference.auto_refresh, false, "a paused live stream must be remembered");
+  assert.equal("engine" in storedPreference || "level" in storedPreference || "q" in storedPreference, false, "cleared local filters must not be remembered");
   assert.ok(initial < 5000 && expanded < 5000 && pageTime < 2000 && filterTime < 2000, "large log UI exceeded smoke responsiveness budget");
   assert.ok(acknowledgement < 500 && previewTime < 1000 && cachedTime < 500, "node switch exceeded local rendering budget");
   window.logPressureResult = { loaded: 8000, domRows: 200, initialMs: Math.round(initial), expandedMs: Math.round(expanded), pageMs: Math.round(pageTime), filterMs: Math.round(filterTime), switchAckMs: Math.round(acknowledgement), previewRenderMs: Math.round(previewTime), cachedSwitchMs: Math.round(cachedTime) };
+}
+
+async function testLogPreferenceRestoreRuntime() {
+  await waitFor(() => document.querySelector(".desktop-app"), "initial shell missing");
+  location.hash = "#core-logs";
+  await waitFor(() => document.querySelector(".core-log-status")?.textContent.includes("已加载 8000 条"), "restored per-engine window did not load");
+  const logCalls = testAPI.calls.filter((call) => call.path === "/core-logs");
+  assert.ok(logCalls.length > 0, "the restored page must still read logs");
+  assert.ok(logCalls.every((call) => call.query.includes("agent_id=bravo")), "every log read must use the restored node scope");
+  assert.ok(logCalls.some((call) => call.query.includes("limit=2000")), "the restored per-engine window must be requested");
+  assert.ok(document.querySelector('[data-core-log-agent="bravo"]').classList.contains("active"), "the restored node must be selected in the sidebar");
+  assert.equal(document.querySelector('[data-core-log-agent=""]').classList.contains("active"), false, "the aggregate node link must not stay active");
+  assert.equal(document.querySelector('[data-core-log-engine][value="xray"]').getAttribute("aria-pressed"), "true", "the restored engine filter must render as pressed");
+  assert.equal(document.querySelector('[data-core-log-level][value="warning"]').getAttribute("aria-pressed"), "true", "the restored level filter must render as pressed");
+  assert.equal(document.querySelector('#core-log-filters input[name="q"]').value, "pressure entry 1999", "the restored keyword must fill the search box");
+  assert.equal(document.querySelector('#core-log-filters select[name="limit"]').value, "2000", "the restored window must select its option");
+  assert.equal(document.querySelector("[data-toggle-core-log-refresh]").getAttribute("aria-checked"), "false", "a paused live stream must stay paused");
+  assert.match(document.querySelector("[data-core-log-refresh-label]").textContent, /自动更新已暂停/, "a restored pause must stay visible");
+  assert.match(document.querySelector(".core-log-status").textContent, /显示 1 条结果/);
+  assert.match(document.querySelector(".core-log-row pre").textContent, /pressure entry 1999/);
+  document.querySelector("[data-toggle-core-log-refresh]").click();
+  assert.equal(JSON.parse(localStorage.getItem("qcontrolhub:core-log-preferences")).auto_refresh, true, "resuming the restored stream must be remembered");
 }
 
 try {
@@ -1770,6 +1814,7 @@ try {
   else if (mode === "regions") await testRegionRuntime();
   else if (mode === "empty") await testEmptyRuntime();
   else if (mode === "logs") await testLargeLogRuntime();
+  else if (mode === "logs-restore") await testLogPreferenceRestoreRuntime();
   else await testReadonlyRuntime();
   }
   document.documentElement.dataset.browserSmoke = "passed";
