@@ -209,6 +209,7 @@ var errorMessages = map[string]string{
 	"agent does not support the requested engine":                       "节点不支持所选内核，请检查节点能力或升级 Agent。",
 	"unknown server inbound protocol":                                   "不支持所选服务端入站协议，请重新选择。",
 	"operation must be add, modify, or delete":                          "操作类型必须是新增、修改或删除。",
+	"invalid preset engine or intent":                                   "预设内核或保存操作无效，请选择当前内核并使用保存校验或保存部署。",
 	"mutation must be add, modify, or delete":                           "字段操作类型必须是新增、修改或删除。",
 	"intent must be validate or deploy":                                 "操作意图必须是验证或部署。",
 	"no saved configuration exists for this operation":                  "尚无已保存的配置，请先保存配置后再操作。",
