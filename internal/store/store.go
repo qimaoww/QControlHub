@@ -48,7 +48,7 @@ type storeExecutor interface {
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 49
+const currentSchemaVersion = 50
 
 func Open(ctx context.Context, databaseURL string, allowInsecureRemote bool) (*Store, error) {
 	return OpenWithConfigKey(ctx, databaseURL, allowInsecureRemote, "")
@@ -222,6 +222,15 @@ func (s *Store) migrate(ctx context.Context) error {
 			}
 		}
 	}
+	if appliedVersion < 50 {
+		// Agent metrics move into a narrow side table and the agents row is
+		// squeezed, so that the once-per-second push and the once-per-heartbeat
+		// liveness stamp both update on-page instead of rewriting a wide row and
+		// every index that points at it.
+		if err := splitAgentLiveState(ctx, tx); err != nil {
+			return fmt.Errorf("split agent live state: %w", err)
+		}
+	}
 	if appliedVersion < 49 {
 		// Kernel logs become a table partitioned by receive day. Converting in
 		// place is impossible, and copying millions of retained rows would turn
@@ -377,11 +386,17 @@ func (s *Store) EnrollAgent(ctx context.Context, request core.EnrollRequest, enr
 	if reinstalled {
 		// The credential's original name authenticates the reinstall above;
 		// retain the row-locked panel name instead of reverting a custom rename.
+		// The stored metrics snapshot and the observed address describe the
+		// previous installation, so a first report from the new one starts from
+		// a clean slate rather than inheriting stale probe results.
 		_, err = tx.Exec(ctx, `
 			UPDATE agents SET name=$2,version=$3,os=$4,arch=$5,capabilities=$6,features=$7,labels=$8,runtime=$9,
-				metrics='{}'::jsonb,public_key=$10,last_seen=$11,enrolled_at=$12,revoked_at=NULL
+				observed_public_ip='',public_key=$10,last_seen=$11,enrolled_at=$12,revoked_at=NULL
 			WHERE id=$1`, id, name, strings.TrimSpace(request.Version), strings.TrimSpace(request.OS), strings.TrimSpace(request.Arch),
 			capabilities, features, labels, runtimeState, publicKey, lastSeen, enrolledAt)
+		if err == nil {
+			_, err = tx.Exec(ctx, `DELETE FROM agent_live_state WHERE agent_id=$1`, id)
+		}
 		if err == nil {
 			_, err = tx.Exec(ctx, `DELETE FROM agent_nonces WHERE agent_id=$1`, id)
 		}
@@ -904,22 +919,36 @@ func (s *Store) HeartbeatWithPublicIPProbeTrust(ctx context.Context, id string, 
 	if len(heartbeat.Features) == 0 {
 		featuresState = []byte(`[]`)
 	}
+	// The observed address is control-plane state that a WSS session supplies
+	// with the heartbeat, so it is persisted in its own column rather than left
+	// inside the snapshot a later metrics push would replace. A heartbeat
+	// without metrics carries no observation and must keep the stored value.
+	observedPublicIP := ""
+	if heartbeat.Metrics != nil {
+		observedPublicIP = heartbeat.Metrics.ObservedPublicIP
+	}
 	command, err := s.pool.Exec(ctx, `
 			UPDATE agents SET last_seen=now(), version=CASE WHEN $2='' THEN version ELSE $2 END, runtime=$3,
-			                  metrics=CASE
-			                    WHEN $4::jsonb IS NULL THEN metrics - 'public_ipv4' - 'public_ipv6' - 'public_ipv4_source' - 'public_ipv6_source'
-					WHEN $4::jsonb ? 'network_interfaces' OR NOT (metrics ? 'network_interfaces') THEN $4::jsonb
-			                    ELSE $4::jsonb || jsonb_build_object('network_interfaces', metrics->'network_interfaces')
-			                  END,
-			                  features=$5::jsonb,
-			                  os=CASE WHEN $6='' THEN os ELSE $6 END,
-			                  arch=CASE WHEN $7='' THEN arch ELSE $7 END
-			WHERE id=$1 AND revoked_at IS NULL`, id, heartbeat.Version, runtimeState, metricsState, featuresState, heartbeat.OS, heartbeat.Arch)
+			                  features=$4::jsonb,
+			                  os=CASE WHEN $5='' THEN os ELSE $5 END,
+			                  arch=CASE WHEN $6='' THEN arch ELSE $6 END,
+			                  observed_public_ip=CASE WHEN $7='' THEN observed_public_ip ELSE $7 END
+			WHERE id=$1 AND revoked_at IS NULL`, id, heartbeat.Version, runtimeState, featuresState, heartbeat.OS, heartbeat.Arch, observedPublicIP)
 	if err != nil {
 		return err
 	}
 	if command.RowsAffected() == 0 {
 		return ErrNotFound
+	}
+	// The Agent-reported snapshot is large and changes on every push, so it is
+	// written to its own narrow table where the update can stay on-page. A
+	// heartbeat without metrics reports that this Agent can no longer probe.
+	if metricsState == nil {
+		if err := s.clearAgentLiveStateProbes(ctx, id); err != nil {
+			return err
+		}
+	} else if err := s.recordAgentLiveState(ctx, id, metricsState); err != nil {
+		return err
 	}
 	return s.UpdatePortTrafficUsage(ctx, id, heartbeat.TrafficUsage, receivedAt)
 }
@@ -941,24 +970,22 @@ func (s *Store) UpdateAgentMetricsWithPublicIPProbeTrust(ctx context.Context, id
 		return err
 	}
 	command, err := s.pool.Exec(ctx, `
-			UPDATE agents SET last_seen=now(), metrics=CASE
-			  WHEN $2::jsonb ? 'network_interfaces' OR NOT (metrics ? 'network_interfaces') THEN $2::jsonb
-			  ELSE $2::jsonb || jsonb_build_object('network_interfaces', metrics->'network_interfaces')
-			END
-			WHERE id=$1 AND revoked_at IS NULL`, id, metricsState)
+			UPDATE agents SET last_seen=now()
+			WHERE id=$1 AND revoked_at IS NULL`, id)
 	if err != nil {
 		return err
 	}
 	if command.RowsAffected() == 0 {
 		return ErrNotFound
 	}
-	return nil
+	return s.recordAgentLiveState(ctx, id, metricsState)
 }
 
-// UpdateAgentObservedPublicIP stores the authenticated WSS peer address in
-// the existing metrics snapshot without disturbing Agent-reported counters or
-// default-route interfaces. An empty value removes a stale observation so the
-// client address resolver falls back to the current interface snapshot.
+// UpdateAgentObservedPublicIP stores the authenticated WSS peer address for the
+// client address resolver. It is kept in its own column so that the
+// high-frequency metrics snapshot, which never carries this key, cannot
+// overwrite it. An empty value removes a stale observation so the resolver
+// falls back to the current interface snapshot.
 func (s *Store) UpdateAgentObservedPublicIP(ctx context.Context, id, address string) error {
 	address = strings.TrimSpace(address)
 	if address != "" {
@@ -972,10 +999,7 @@ func (s *Store) UpdateAgentObservedPublicIP(ctx context.Context, id, address str
 		}
 	}
 	command, err := s.pool.Exec(ctx, `
-		UPDATE agents SET metrics=CASE
-			WHEN $2='' THEN metrics - 'observed_public_ip'
-			ELSE jsonb_set(metrics, '{observed_public_ip}', to_jsonb($2::text), true)
-		END
+		UPDATE agents SET observed_public_ip=$2
 		WHERE id=$1 AND revoked_at IS NULL`, id, address)
 	if err != nil {
 		return err
@@ -1029,7 +1053,9 @@ func (s *Store) ListAgentsWithEnrollmentCommands(ctx context.Context) ([]core.Ag
 }
 
 const listAgentsSQL = `
-			SELECT id,name,version,os,arch,capabilities,features,labels,runtime,metrics,last_seen,enrolled_at,
+			SELECT id,name,version,os,arch,capabilities,features,labels,runtime,observed_public_ip,
+				(SELECT metrics FROM agent_live_state WHERE agent_id=agents.id),
+				last_seen,enrolled_at,
 				(SELECT agent_offline_threshold_seconds FROM panel_settings WHERE id=1),supported_capabilities,` + capabilityTransitionsSQL + `
 		FROM agents WHERE revoked_at IS NULL ORDER BY enrolled_at DESC`
 
@@ -1040,8 +1066,9 @@ func scanAgents(rows pgx.Rows) ([]core.Agent, error) {
 	for rows.Next() {
 		var agent core.Agent
 		var capabilities, features, labels, runtimeState, metricsState []byte
+		var observedPublicIP string
 		var offlineThresholdSeconds int
-		if err := rows.Scan(&agent.ID, &agent.Name, &agent.Version, &agent.OS, &agent.Arch, &capabilities, &features, &labels, &runtimeState, &metricsState, &agent.LastSeen, &agent.EnrolledAt, &offlineThresholdSeconds, &agent.SupportedCapabilities, &agent.CapabilityTransitions); err != nil {
+		if err := rows.Scan(&agent.ID, &agent.Name, &agent.Version, &agent.OS, &agent.Arch, &capabilities, &features, &labels, &runtimeState, &observedPublicIP, &metricsState, &agent.LastSeen, &agent.EnrolledAt, &offlineThresholdSeconds, &agent.SupportedCapabilities, &agent.CapabilityTransitions); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal(capabilities, &agent.Capabilities); err != nil {
@@ -1056,7 +1083,7 @@ func scanAgents(rows pgx.Rows) ([]core.Agent, error) {
 		if err := json.Unmarshal(runtimeState, &agent.Runtime); err != nil {
 			return nil, err
 		}
-		if err := json.Unmarshal(metricsState, &agent.Metrics); err != nil {
+		if err := decodeAgentMetrics(metricsState, observedPublicIP, &agent.Metrics); err != nil {
 			return nil, err
 		}
 		if agent.LastSeen.After(now.Add(-time.Duration(offlineThresholdSeconds) * time.Second)) {
@@ -2099,15 +2126,32 @@ CREATE TABLE IF NOT EXISTS agents (
 	features jsonb NOT NULL DEFAULT '[]'::jsonb,
     labels jsonb NOT NULL DEFAULT '{}'::jsonb,
 	    runtime jsonb NOT NULL DEFAULT '{}'::jsonb,
-	    metrics jsonb NOT NULL DEFAULT '{}'::jsonb,
     public_key bytea NOT NULL CHECK (octet_length(public_key) = 32),
     last_seen timestamptz NOT NULL,
     enrolled_at timestamptz NOT NULL,
     revoked_at timestamptz
 	);
 
-	ALTER TABLE agents ADD COLUMN IF NOT EXISTS metrics jsonb NOT NULL DEFAULT '{}'::jsonb;
-	ALTER TABLE agents ADD COLUMN IF NOT EXISTS features jsonb NOT NULL DEFAULT '[]'::jsonb;
+	-- Agent-reported metrics live in agent_live_state. Keeping that snapshot in
+	-- a narrow side table, and keeping the agents row free of it, is what lets
+	-- both the per-second metrics push and the per-heartbeat liveness stamp
+	-- update on-page: the previous layout rewrote a row of roughly 3 kB plus
+	-- every index pointing at it, once per second per node, and never once
+	-- qualified as a heap-only update.
+	--
+	-- observed_public_ip is assigned by the control plane from the
+	-- authenticated WSS peer rather than reported by the Agent, so it is
+	-- updated on its own schedule and cannot live inside the Agent's snapshot:
+	-- a later push would have overwritten it.
+	ALTER TABLE agents ADD COLUMN IF NOT EXISTS observed_public_ip text NOT NULL DEFAULT '';
+	COMMENT ON COLUMN agents.observed_public_ip IS 'Public address the control plane observed for this Agent''s authenticated WSS session; written from the socket, never reported by the Agent.';
+	ALTER TABLE agents SET (fillfactor = 70);
+
+CREATE TABLE IF NOT EXISTS agent_live_state (
+    agent_id text PRIMARY KEY REFERENCES agents(id) ON DELETE CASCADE,
+    metrics jsonb NOT NULL DEFAULT '{}'::jsonb,
+    updated_at timestamptz NOT NULL DEFAULT now()
+) WITH (fillfactor = 70);
 
 CREATE TABLE IF NOT EXISTS core_log_batches (
     id text PRIMARY KEY,
@@ -2396,7 +2440,12 @@ INSERT INTO panel_settings (
 ) VALUES (1,'QControlHub','可信远程编排',100,600,now())
 ON CONFLICT (id) DO NOTHING;
 
-CREATE INDEX IF NOT EXISTS agents_active_seen_idx ON agents(last_seen DESC) WHERE revoked_at IS NULL;
+-- agents_active_seen_idx was retired in v50. It was built on last_seen, which
+-- changes on every heartbeat, so it forced every liveness update to rewrite an
+-- index entry it could never benefit from: no update touching last_seen can be
+-- a heap-only update while such an index exists. The panel reads it for an
+-- online count over a table with one row per node, which a sequential scan
+-- answers at least as cheaply.
 CREATE UNIQUE INDEX IF NOT EXISTS agents_public_key_unique_idx ON agents(public_key);
 	CREATE INDEX IF NOT EXISTS configs_active_updated_idx ON configs(updated_at DESC) WHERE deleted_at IS NULL;
 	CREATE UNIQUE INDEX IF NOT EXISTS configs_agent_engine_unique_idx ON configs(agent_id,engine) WHERE agent_id IS NOT NULL AND deleted_at IS NULL;

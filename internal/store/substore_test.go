@@ -255,11 +255,11 @@ func TestOpenMigratesAppliedV30SubStoreSyncTarget(t *testing.T) {
 		);
 		INSERT INTO qcontrolhub_schema_migrations (version) VALUES (30);
 		INSERT INTO agents (
-			id,name,version,os,arch,capabilities,features,labels,runtime,metrics,
+			id,name,version,os,arch,capabilities,features,labels,runtime,
 			public_key,last_seen,enrolled_at
 		) VALUES (
 			'agt_substore_v30','substore-v30','v30','linux','amd64',
-			'["sing-box"]'::jsonb,'[]'::jsonb,'{}'::jsonb,'{}'::jsonb,'{}'::jsonb,
+			'["sing-box"]'::jsonb,'[]'::jsonb,'{}'::jsonb,'{}'::jsonb,
 			decode(repeat('30',32),'hex'),now(),now()
 		);
 		INSERT INTO substore_sync_settings (
