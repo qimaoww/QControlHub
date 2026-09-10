@@ -227,9 +227,10 @@ func (s *Store) migrate(ctx context.Context) error {
 		// place is impossible, and copying millions of retained rows would turn
 		// a version upgrade into minutes of blocked writes on the instances this
 		// panel targets. Retained logs are time-bounded and already truncated by
-		// retention, so the previous rows are set aside under a legacy name and
-		// the empty partitioned table takes over immediately. Janitor drops the
-		// legacy copy once its grace period passes.
+		// retention, so the previous rows are set aside under a timestamped
+		// legacy name and the empty partitioned table takes over immediately.
+		// Janitor reads the age out of that name and drops the copy once the
+		// grace period passes.
 		//
 		// This runs before schemaSQL on purpose: the partitioned table is
 		// created with IF NOT EXISTS, so an existing heap table has to move out
@@ -259,12 +260,13 @@ func (s *Store) migrate(ctx context.Context) error {
 					return fmt.Errorf("drop superseded core log index %s: %w", index, err)
 				}
 			}
-			// A legacy copy left by an interrupted attempt must go before the
-			// rename below, which cannot overwrite an existing relation.
-			if _, err := tx.Exec(ctx, `DROP TABLE IF EXISTS core_logs_legacy`); err != nil {
-				return fmt.Errorf("drop previous legacy core logs: %w", err)
+			// Copies left by earlier interrupted attempts are released before
+			// this one contributes its own.
+			if err := dropLegacyCoreLogTables(ctx, tx); err != nil {
+				return err
 			}
-			if _, err := tx.Exec(ctx, `ALTER TABLE IF EXISTS core_logs RENAME TO core_logs_legacy`); err != nil {
+			if _, err := tx.Exec(ctx, `ALTER TABLE IF EXISTS core_logs RENAME TO `+
+				pgx.Identifier{legacyCoreLogsPrefix + time.Now().UTC().Format("20060102150405")}.Sanitize()); err != nil {
 				return fmt.Errorf("set aside previous core logs: %w", err)
 			}
 		}

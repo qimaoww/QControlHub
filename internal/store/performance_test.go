@@ -311,7 +311,7 @@ func TestPerformanceIndexesMigrateFromV40(t *testing.T) {
 	if _, err := s.pool.Exec(ctx, `DROP TABLE IF EXISTS core_logs CASCADE`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.pool.Exec(ctx, `DROP TABLE IF EXISTS core_logs_legacy CASCADE`); err != nil {
+	if _, err := s.pool.Exec(ctx, `DROP TABLE IF EXISTS core_logs_legacy_19700101000000 CASCADE`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.pool.Exec(ctx, `CREATE TABLE core_logs (
@@ -356,21 +356,45 @@ func TestPerformanceIndexesMigrateFromV40(t *testing.T) {
 		}
 	}
 	// The heap table is moved aside instead of migrated in place, and the new
-	// core_logs must be the partitioned replacement.
-	var partitioned, legacyExists bool
+	// core_logs must be the partitioned replacement. The set-aside copy carries
+	// the timestamp its cleanup uses to decide when to drop it.
+	var partitioned bool
 	if err := s.pool.QueryRow(ctx, `
-		SELECT COALESCE(bool_or(relkind = 'p'), false),
-		       COALESCE(bool_or(relname = 'core_logs_legacy'), false)
+		SELECT COALESCE(bool_or(relkind = 'p'), false)
 		FROM pg_class class JOIN pg_namespace namespace ON namespace.oid = class.relnamespace
-		WHERE namespace.nspname = current_schema()
-		  AND relname IN ('core_logs','core_logs_legacy')`).Scan(&partitioned, &legacyExists); err != nil {
+		WHERE namespace.nspname = current_schema() AND relname = 'core_logs'`).Scan(&partitioned); err != nil {
 		t.Fatal(err)
 	}
 	if !partitioned {
 		t.Fatal("core_logs was not converted to a partitioned table")
 	}
-	if !legacyExists {
-		t.Fatal("previous heap table was not kept as core_logs_legacy")
+	var legacyName string
+	if err := s.pool.QueryRow(ctx, `
+		SELECT class.relname
+		FROM pg_class class JOIN pg_namespace namespace ON namespace.oid = class.relnamespace
+		WHERE namespace.nspname = current_schema() AND class.relname LIKE $1
+		ORDER BY class.relname DESC LIMIT 1`, legacyCoreLogsPrefix+"%").Scan(&legacyName); err != nil {
+		t.Fatalf("previous heap table was not set aside under %s<timestamp>: %v", legacyCoreLogsPrefix, err)
+	}
+	// The timestamp suffix is what lets the maintenance loop age the copy out.
+	renamedAt, err := legacyCoreLogRenamedAt(legacyName)
+	if err != nil {
+		t.Fatalf("legacy copy %s has no readable timestamp: %v", legacyName, err)
+	}
+	if age := time.Since(renamedAt); age < 0 || age > time.Hour {
+		t.Fatalf("legacy copy %s timestamp is not recent: %s", legacyName, age)
+	}
+	// Dropping it must wait for the grace period, then succeed.
+	if dropped, err := s.DropLegacyCoreLogs(ctx, time.Now().UTC()); err != nil || dropped != 0 {
+		t.Fatalf("legacy copy dropped before its grace period: dropped=%d err=%v", dropped, err)
+	}
+	dropped, err := s.DropLegacyCoreLogs(ctx, time.Now().UTC().Add(legacyCoreLogsGraceDays*24*time.Hour))
+	if err != nil || dropped != 1 {
+		t.Fatalf("legacy copy was not dropped after the grace period: dropped=%d err=%v", dropped, err)
+	}
+	var legacyGone bool
+	if err := s.pool.QueryRow(ctx, `SELECT to_regclass($1) IS NULL`, legacyName).Scan(&legacyGone); err != nil || !legacyGone {
+		t.Fatalf("legacy copy %s still present: %v", legacyName, err)
 	}
 	// The log read path is served by the partition-level covering index; the
 	// single-column recency indexes only added write cost per inserted row.

@@ -106,33 +106,14 @@ func (s *Store) PruneCoreLogPartitions(ctx context.Context, olderThan time.Time)
 // DropLegacyCoreLogs removes the pre-partition heap table once its grace period
 // has passed, releasing the disk its heap and indexes still occupy.
 func (s *Store) DropLegacyCoreLogs(ctx context.Context, now time.Time) (int, error) {
-	rows, err := s.pool.Query(ctx, `
-		SELECT class.relname
-		FROM pg_class class
-		JOIN pg_namespace namespace ON namespace.oid = class.relnamespace
-		WHERE class.relname LIKE $1 AND namespace.nspname = current_schema()`, legacyCoreLogsPrefix+"%")
+	legacy, err := legacyCoreLogTables(ctx, s.pool)
 	if err != nil {
-		return 0, err
-	}
-	var legacy []string
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			rows.Close()
-			return 0, err
-		}
-		legacy = append(legacy, name)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
 		return 0, err
 	}
 	dropped := 0
 	for _, name := range legacy {
-		day := strings.TrimPrefix(name, legacyCoreLogsPrefix)
-		renamedAt, err := time.Parse("20060102150405", day)
+		renamedAt, err := legacyCoreLogRenamedAt(name)
 		if err != nil {
-			// Not one of ours (or an unexpected suffix); leave it alone.
 			continue
 		}
 		if now.UTC().Sub(renamedAt) < legacyCoreLogsGraceDays*24*time.Hour {
@@ -144,6 +125,58 @@ func (s *Store) DropLegacyCoreLogs(ctx context.Context, now time.Time) (int, err
 		dropped++
 	}
 	return dropped, nil
+}
+
+// dropLegacyCoreLogTables releases every set-aside copy immediately. It runs
+// inside the migration transaction, where a previous interrupted attempt may
+// have left one behind and the rename cannot overwrite an existing relation.
+func dropLegacyCoreLogTables(ctx context.Context, tx pgx.Tx) error {
+	legacy, err := legacyCoreLogTables(ctx, tx)
+	if err != nil {
+		return err
+	}
+	for _, name := range legacy {
+		if _, err := tx.Exec(ctx, "DROP TABLE "+pgx.Identifier{name}.Sanitize()); err != nil {
+			return fmt.Errorf("drop previous legacy core logs %s: %w", name, err)
+		}
+	}
+	return nil
+}
+
+// legacyCoreLogTables lists the set-aside copies. Both the migration and the
+// maintenance loop address them the same way, so they share one query.
+func legacyCoreLogTables(ctx context.Context, queryer interface {
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+}) ([]string, error) {
+	rows, err := queryer.Query(ctx, `
+		SELECT class.relname
+		FROM pg_class class
+		JOIN pg_namespace namespace ON namespace.oid = class.relnamespace
+		WHERE class.relname LIKE $1 AND class.relkind = 'r'
+		  AND namespace.nspname = current_schema()`, legacyCoreLogsPrefix+"%")
+	if err != nil {
+		return nil, fmt.Errorf("list legacy core logs: %w", err)
+	}
+	defer rows.Close()
+	var legacy []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		legacy = append(legacy, name)
+	}
+	return legacy, rows.Err()
+}
+
+// legacyCoreLogRenamedAt reads the age of a set-aside copy out of its name. A
+// relation that does not follow the naming scheme is not ours to drop.
+func legacyCoreLogRenamedAt(name string) (time.Time, error) {
+	suffix, found := strings.CutPrefix(name, legacyCoreLogsPrefix)
+	if !found {
+		return time.Time{}, fmt.Errorf("unexpected legacy core log name %q", name)
+	}
+	return time.Parse("20060102150405", suffix)
 }
 
 func (s *Store) coreLogsIsPartitioned(ctx context.Context) (bool, error) {
