@@ -238,7 +238,7 @@ sing-box 的 `-C` 表示配置目录，而不是工作目录。QAgent 按 sing-b
 
 自动识别失败时不会降级为猜测式映射。需要手工提供发现信息时，必须同时核对 `QCH_EXISTING_*_BINARY`、`QCH_EXISTING_*_SERVICE`，以及至少一个配置来源（`QCH_EXISTING_*_CONFIG` 或 `QCH_EXISTING_*_CONFIG_DIRECTORY`）；sing-box 目录模式还必须核对 `QCH_EXISTING_SING_BOX_CONFIG_DIRECTORY`，转发器布局必须核对 `QCH_EXISTING_SING_BOX_SERVICE_BINARY`。Xray 的 confdir 布局同样通过 `QCH_EXISTING_XRAY_CONFIG_DIRECTORY` 提供；目录权威形态下 `QCH_EXISTING_XRAY_CONFIG` 留空即可，但两者不能同时为空。任意 wrapper 无法安全证明时不会提供自动迁移入口，应先由管理员把 systemd 单元或 OpenRC 服务脚本改为直接执行受保护真实二进制或上述固定转发形式，再重启 Agent 触发发现；配置仍由管理员在“手动配置”页显式迁移。
 
-迁移前，Agent 不会获得原配置目录或原核心二进制目录的写权限，也会拒绝部署、启停和内核安装任务。迁移后运行的是复制到 QAgent 私有目录的二进制与专用配置，原服务保持 disabled；后续升级和配置管理只作用于 QAgent 专用服务。每次 Agent 重启都会重新核对 completed marker 的归属，但只以“已退役的原服务不能重新接管”为准：原服务必须仍为 `inactive` 且未被重新 enable（OpenRC 还要求没有遗留的受监管进程）。`qagent-*` 托管服务自身的运行态不再参与这项判定，操作员通过控制台停止、禁用该服务，或该服务启动失败，都只影响当前状态展示，控制台仍可继续用常规启停、部署和版本任务恢复它。若原服务再次 active 或被重新 enable，运行态会报告不可安全接管，控制面与 Agent 执行器同时禁用该内核的全部任务，而不是静默复用旧 marker。
+迁移前，Agent 不会获得原配置目录或原核心二进制目录的写权限，也会拒绝部署、启停和内核安装任务。迁移后运行的是复制到 QAgent 私有目录的二进制与专用配置，原服务保持 disabled；后续升级和配置管理只作用于 QAgent 专用服务。每次 Agent 重启都会重新核对 completed marker 的归属，但只以“已退役的原服务不能重新接管”为准：原服务必须仍为 `inactive`，且 enable 层级不能是 `enabled`/`enabled-runtime`——`disabled`、`static`、`indirect`、被管理员 `mask`、或单元文件已被删除而不存在（`not-found`）都视为已退役；仍处于 `failed` 说明迁移后有人尝试启动过它，继续按不可安全接管处理。systemd 直接采用 `systemctl is-enabled` 的原始回答，空回答或查询失败一律 fail closed；OpenRC 要求未加入任何 runlevel 且没有遗留的受监管进程。`qagent-*` 托管服务自身的运行态不再参与这项判定，操作员通过控制台停止、禁用该服务，或该服务启动失败，都只影响当前状态展示，控制台仍可继续用常规启停、部署和版本任务恢复它；托管 unit 被手工删除或改指向同样不再在启动时拦截，随后的启停或部署任务会直接报出真实的服务错误。若原服务再次 active、被重新 enable 或处于 `failed`，运行态会报告不可安全接管，控制面与 Agent 执行器同时禁用该内核的全部任务，而不是静默复用旧 marker。
 
 私有 CA 示例：
 
