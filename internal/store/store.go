@@ -48,7 +48,7 @@ type storeExecutor interface {
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 48
+const currentSchemaVersion = 49
 
 func Open(ctx context.Context, databaseURL string, allowInsecureRemote bool) (*Store, error) {
 	return OpenWithConfigKey(ctx, databaseURL, allowInsecureRemote, "")
@@ -216,6 +216,14 @@ func (s *Store) migrate(ctx context.Context) error {
 	}
 	if _, err := tx.Exec(ctx, schemaSQL); err != nil {
 		return fmt.Errorf("apply PostgreSQL schema: %w", err)
+	}
+	if appliedVersion < 49 {
+		// The plain (agent_id,engine,id DESC) index is superseded by the covering
+		// variant created above. Dropping it frees the duplicated write cost and
+		// disk; the covering index serves the same lookups with index-only reads.
+		if _, err := tx.Exec(ctx, `DROP INDEX IF EXISTS core_logs_agent_engine_recent_idx`); err != nil {
+			return fmt.Errorf("drop superseded core log index: %w", err)
+		}
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO qcontrolhub_schema_migrations (version) VALUES ($1)`, currentSchemaVersion); err != nil {
 		return fmt.Errorf("record schema migration version: %w", err)
@@ -2057,7 +2065,12 @@ CREATE TABLE IF NOT EXISTS core_logs (
 
 CREATE INDEX IF NOT EXISTS core_logs_agent_recent_idx ON core_logs(agent_id,id DESC);
 CREATE INDEX IF NOT EXISTS core_logs_engine_recent_idx ON core_logs(engine,id DESC);
-CREATE INDEX IF NOT EXISTS core_logs_agent_engine_recent_idx ON core_logs(agent_id,engine,id DESC);
+-- The log window query reads every column for a bounded set of rows. Carrying
+-- them in the index turns each of those rows into an index-only read instead of
+-- a random heap fetch: with a 7 ms page latency that is the difference between
+-- a sub-second window and a timeout. See docs/performance.md.
+CREATE INDEX IF NOT EXISTS core_logs_agent_engine_covering_idx ON core_logs(agent_id,engine,id DESC)
+    INCLUDE (level,message,logged_at,received_at);
 CREATE INDEX IF NOT EXISTS core_logs_received_idx ON core_logs(received_at);
 CREATE INDEX IF NOT EXISTS core_log_batches_received_idx ON core_log_batches(received_at);
 

@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -171,6 +172,69 @@ func TestCoreLogLevelAtLeast(t *testing.T) {
 	for _, test := range tests {
 		if got := coreLogLevelAtLeast(test.level, test.minimum); got != test.want {
 			t.Errorf("coreLogLevelAtLeast(%q, %q) = %t, want %t", test.level, test.minimum, got, test.want)
+		}
+	}
+}
+
+// Every column the log window selects must live in the covering index.
+// Otherwise PostgreSQL has to fetch each selected row from the heap, and one
+// random page read per row turns a bounded window into tens of seconds on the
+// small instances this panel targets. Assert the index shape rather than a
+// particular plan: on an empty or tiny fixture the planner legitimately prefers
+// a sequential or primary-key scan.
+func TestCoreLogCoveringIndexCarriesWindowColumns(t *testing.T) {
+	databaseURL := os.Getenv("QCH_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("QCH_TEST_DATABASE_URL is not configured")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	dataStore, err := Open(ctx, databaseURL, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dataStore.Close()
+	rows, err := dataStore.pool.Query(ctx, `
+		SELECT attribute.attname
+		FROM pg_index index
+		JOIN pg_attribute attribute
+		  ON attribute.attrelid = index.indexrelid AND attribute.attnum > 0
+		WHERE index.indexrelid = to_regclass('core_logs_agent_engine_covering_idx')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	columns := map[string]bool{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			t.Fatal(err)
+		}
+		columns[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if len(columns) == 0 {
+		t.Fatalf("covering index core_logs_agent_engine_covering_idx is missing")
+	}
+	for _, column := range []string{"agent_id", "engine", "id", "level", "message", "logged_at", "received_at"} {
+		if !columns[column] {
+			t.Fatalf("covering index is missing %q; the log window would fetch it from the heap (columns: %v)", column, columns)
+		}
+	}
+	// The read path selects exactly these columns; a new one would reintroduce
+	// the heap fetch even though this test would still pass on the old set.
+	query := fmt.Sprintf(coreLogWindowSQL, "engine=selected.engine")
+	selectClause, _, found := strings.Cut(strings.TrimPrefix(query, "\n\t\tSELECT "), "\n")
+	if !found {
+		t.Fatalf("cannot read the log window select list:\n%s", query)
+	}
+	for _, reference := range strings.Split(selectClause, ",") {
+		column := strings.TrimSpace(reference)
+		column = strings.TrimPrefix(column, "logs.")
+		if column != "" && !columns[column] {
+			t.Fatalf("log window selects %q, which the covering index does not carry", column)
 		}
 	}
 }

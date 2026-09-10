@@ -304,22 +304,53 @@ func TestBatchedEnrollmentAvailabilityVerifiesSecrets(t *testing.T) {
 func TestPerformanceIndexesMigrateFromV40(t *testing.T) {
 	s := openPerformanceStore(t)
 	ctx := context.Background()
-	indexes := []string{"core_logs_agent_engine_recent_idx", "tasks_status_created_idx", "tasks_agent_created_idx", "tasks_retention_idx", "metric_samples_retention_idx", "port_traffic_daily_date_idx"}
-	for _, index := range indexes {
+	// v48-era indexes: the core log index was a plain (agent_id,engine,id) index.
+	// Migrating must replace it with the covering variant that serves the log
+	// window as an index-only scan, and recreate the other performance indexes.
+	superseded := []string{"core_logs_agent_engine_covering_idx", "tasks_status_created_idx", "tasks_agent_created_idx", "tasks_retention_idx", "metric_samples_retention_idx", "port_traffic_daily_date_idx"}
+	// Simulate a v48 installation: the covering index does not exist yet and the
+	// plain (agent_id,engine,id) index still serves the log window.
+	if _, err := s.pool.Exec(ctx, `DROP INDEX IF EXISTS core_logs_agent_engine_covering_idx`); err != nil {
+		t.Fatal(err)
+	}
+	// Every other index from that era must also be recreated by the migration.
+	for _, index := range superseded[1:] {
 		if _, err := s.pool.Exec(ctx, "DROP INDEX "+pgx.Identifier{index}.Sanitize()); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if _, err := s.pool.Exec(ctx, `DELETE FROM qcontrolhub_schema_migrations; INSERT INTO qcontrolhub_schema_migrations(version) VALUES (40)`); err != nil {
+	if _, err := s.pool.Exec(ctx, `CREATE INDEX IF NOT EXISTS core_logs_agent_engine_recent_idx ON core_logs(agent_id,engine,id DESC)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.pool.Exec(ctx, `DELETE FROM qcontrolhub_schema_migrations; INSERT INTO qcontrolhub_schema_migrations(version) VALUES (48)`); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.migrate(ctx); err != nil {
 		t.Fatal(err)
 	}
-	for _, index := range indexes {
+	for _, index := range superseded {
 		var exists bool
 		if err := s.pool.QueryRow(ctx, `SELECT to_regclass($1) IS NOT NULL`, index).Scan(&exists); err != nil || !exists {
 			t.Fatalf("missing index %s: %v", index, err)
+		}
+	}
+	var revoked bool
+	if err := s.pool.QueryRow(ctx, `SELECT to_regclass('core_logs_agent_engine_recent_idx') IS NULL`).Scan(&revoked); err != nil || !revoked {
+		t.Fatalf("superseded core log index still present: %v", err)
+	}
+	// The replacement must actually carry the payload columns, otherwise the log
+	// window silently falls back to random heap fetches.
+	included := []string{"level", "message", "logged_at", "received_at"}
+	for _, column := range included {
+		var present bool
+		if err := s.pool.QueryRow(ctx, `
+			SELECT EXISTS (
+				SELECT 1 FROM pg_index index
+				JOIN pg_attribute attribute ON attribute.attrelid = index.indexrelid AND attribute.attnum > 0
+				WHERE index.indexrelid = to_regclass('core_logs_agent_engine_covering_idx')
+				  AND attribute.attname = $1
+			)`, column).Scan(&present); err != nil || !present {
+			t.Fatalf("covering index is missing column %s: %v", column, err)
 		}
 	}
 	if err := s.migrate(ctx); err != nil {

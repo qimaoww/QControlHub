@@ -113,6 +113,26 @@ func (s *Store) PruneCoreLogs(ctx context.Context, olderThan time.Time) (int64, 
 	return command.RowsAffected(), nil
 }
 
+// coreLogWindowSQL bounds each engine's indexed scan before merging the
+// results. A busy engine must not consume the other engines' slots, and we
+// should not rank the entire retained log history just to display a small
+// recent window. The %s placeholder receives the predicate built by
+// ListCoreLogs.
+//
+// Every selected column is carried by core_logs_agent_engine_covering_idx, so
+// this stays an index-only scan. Falling back to heap fetches turns a bounded
+// window into hundreds of random page reads per request.
+const coreLogWindowSQL = `
+		SELECT logs.id,logs.agent_id,logs.engine,logs.level,logs.message,logs.logged_at,logs.received_at
+		FROM unnest($1::text[]) AS selected(engine)
+		CROSS JOIN LATERAL (
+			SELECT id,agent_id,engine,level,message,logged_at,received_at
+			FROM core_logs
+			WHERE %s
+			ORDER BY id DESC LIMIT $2
+		) AS logs
+		ORDER BY logs.id DESC`
+
 func (s *Store) ListCoreLogs(ctx context.Context, query CoreLogQuery) ([]core.CoreLogEntry, error) {
 	if query.Limit == 0 {
 		query.Limit = 1000
@@ -149,16 +169,7 @@ func (s *Store) ListCoreLogs(ctx context.Context, query CoreLogQuery) ([]core.Co
 		args = append(args, query.Before)
 		where += fmt.Sprintf(" AND id<$%d", len(args))
 	}
-	rows, err := s.pool.Query(ctx, `
-		SELECT logs.id,logs.agent_id,logs.engine,logs.level,logs.message,logs.logged_at,logs.received_at
-		FROM unnest($1::text[]) AS selected(engine)
-		CROSS JOIN LATERAL (
-			SELECT id,agent_id,engine,level,message,logged_at,received_at
-			FROM core_logs
-			WHERE `+where+`
-			ORDER BY id DESC LIMIT $2
-		) AS logs
-		ORDER BY logs.id DESC`, args...)
+	rows, err := s.pool.Query(ctx, fmt.Sprintf(coreLogWindowSQL, where), args...)
 	if err != nil {
 		return nil, err
 	}

@@ -1731,6 +1731,13 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
+		if requestAcceptsGzip(request) {
+			// Large JSON lists (kernel log windows in particular) are polled
+			// repeatedly; negotiate gzip before the handler commits the status.
+			compressed := &compressedResponseWriter{ResponseWriter: w, status: http.StatusOK}
+			defer compressed.finish()
+			w = compressed
+		}
 		next.ServeHTTP(w, request)
 		slog.Debug("http request", "method", request.Method, "path", request.URL.Path, "duration", time.Since(started))
 	})
