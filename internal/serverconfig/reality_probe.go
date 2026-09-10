@@ -144,22 +144,44 @@ func probeRealityTarget(ctx context.Context, serverName string, options realityP
 		}
 	}
 
-	var lastErr error
-	for _, address := range unique {
-		attemptCtx, attemptCancel := context.WithTimeout(ctx, options.connectionTimeout)
-		target, probeErr := probeRealityAddress(attemptCtx, normalized, address, options)
-		attemptCancel()
-		if probeErr == nil {
-			target.CNAME = cname
-			return target, nil
-		}
-		lastErr = probeErr
-		if ctx.Err() != nil {
-			break
-		}
+	// All addresses have passed the safety checks above. Try a bounded set
+	// concurrently so one unreachable address does not delay a reachable one
+	// by the entire connection timeout. Cancel losing probes after success.
+	type probeResult struct {
+		target RealityTarget
+		err    error
 	}
-	if lastErr == nil {
-		lastErr = ctx.Err()
+	results := make(chan probeResult, len(unique))
+	addressesToProbe := make(chan netip.Addr, len(unique))
+	for _, address := range unique {
+		addressesToProbe <- address
+	}
+	close(addressesToProbe)
+	for worker := 0; worker < min(4, len(unique)); worker++ {
+		go func() {
+			for address := range addressesToProbe {
+				if ctx.Err() != nil {
+					return
+				}
+				attemptCtx, attemptCancel := context.WithTimeout(ctx, options.connectionTimeout)
+				target, probeErr := probeRealityAddress(attemptCtx, normalized, address, options)
+				attemptCancel()
+				results <- probeResult{target: target, err: probeErr}
+			}
+		}()
+	}
+	var lastErr error
+	for range unique {
+		select {
+		case result := <-results:
+			if result.err == nil {
+				result.target.CNAME = cname
+				return result.target, nil
+			}
+			lastErr = result.err
+		case <-ctx.Done():
+			return RealityTarget{}, fmt.Errorf("Reality SNI TLS 1.3 实时校验失败：%w", ctx.Err())
+		}
 	}
 	return RealityTarget{}, fmt.Errorf("Reality SNI TLS 1.3 实时校验失败：%w", lastErr)
 }

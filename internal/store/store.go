@@ -1239,6 +1239,27 @@ func (s *Store) ExistingConfigIDs(ctx context.Context, ids []string) (map[string
 }
 
 func (s *Store) CreateTask(ctx context.Context, request core.TaskRequest) (core.Task, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return core.Task{}, err
+	}
+	defer tx.Rollback(ctx)
+	task, err := s.createTaskTx(ctx, tx, request)
+	if err != nil {
+		return core.Task{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return core.Task{}, err
+	}
+	if !task.Reused {
+		s.signalTaskReady(task.AgentID)
+	}
+	return task, nil
+}
+
+// The caller commits before notifying the Agent. This also allows a preset
+// revision and its exact task snapshot to be published in one transaction.
+func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRequest) (core.Task, error) {
 	if request.ExpectedConfigVersion < 0 || (request.ExpectedConfigVersion != 0 && request.Action != core.ActionDeploy && request.Action != core.ActionValidate && request.Action != core.ActionImportExisting) {
 		return core.Task{}, fmt.Errorf("%w: expected configuration version requires a configuration task", ErrInvalid)
 	}
@@ -1282,11 +1303,6 @@ func (s *Store) CreateTask(ctx context.Context, request core.TaskRequest) (core.
 		request.CoreSource = ""
 		request.CoreVersion = ""
 	}
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return core.Task{}, err
-	}
-	defer tx.Rollback(ctx)
 	var capabilitiesJSON, featuresJSON, runtimeJSON []byte
 	if err := tx.QueryRow(ctx, `SELECT capabilities,features,runtime FROM agents WHERE id=$1 AND revoked_at IS NULL FOR UPDATE`, request.AgentID).Scan(&capabilitiesJSON, &featuresJSON, &runtimeJSON); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -1409,15 +1425,13 @@ func (s *Store) CreateTask(ctx context.Context, request core.TaskRequest) (core.
 		if task.Action.SystemBBR() && (existing.Action != task.Action || !maps.Equal(existing.TCPSettings, task.TCPSettings)) {
 			return core.Task{}, fmt.Errorf("%w: another system TCP task is pending or running", ErrConflict)
 		}
-		if err := tx.Commit(ctx); err != nil {
-			return core.Task{}, err
-		}
 		existing.Reused = true
 		return existing, nil
 	}
 	if !errors.Is(existingErr, pgx.ErrNoRows) {
 		return core.Task{}, existingErr
 	}
+	var err error
 	task.ID, err = core.NewID("tsk")
 	if err != nil {
 		return core.Task{}, err
@@ -1437,10 +1451,6 @@ func (s *Store) CreateTask(ctx context.Context, request core.TaskRequest) (core.
 	if err != nil {
 		return core.Task{}, mapError(err)
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return core.Task{}, err
-	}
-	s.signalTaskReady(task.AgentID)
 	return task, nil
 }
 
@@ -1516,9 +1526,23 @@ func (s *Store) ListTasksFiltered(ctx context.Context, agentID string, status co
 }
 
 func (s *Store) GetTask(ctx context.Context, id string) (core.Task, error) {
+	return s.getTask(ctx, id, false)
+}
+
+// GetTaskState omits the potentially large execution log from frequent
+// status polls. The full task endpoint still returns that log on demand.
+func (s *Store) GetTaskState(ctx context.Context, id string) (core.Task, error) {
+	return s.getTask(ctx, id, true)
+}
+
+func (s *Store) getTask(ctx context.Context, id string, stateOnly bool) (core.Task, error) {
+	output := "COALESCE(output,'')"
+	if stateOnly {
+		output = "''"
+	}
 	row := s.pool.QueryRow(ctx, `
 		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),COALESCE(core_version,''),COALESCE(core_source,''),status,attempt,
-		       COALESCE(output,''),COALESCE(error,''),created_at,started_at,finished_at,tcp_settings
+		       `+output+`,COALESCE(error,''),created_at,started_at,finished_at,tcp_settings
 		FROM tasks WHERE id=$1`, id)
 	task, err := scanTask(row, false)
 	if errors.Is(err, pgx.ErrNoRows) {

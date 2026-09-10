@@ -34,6 +34,27 @@ func MutateGenerated(engine core.Engine, currentContent, generatedContent, origi
 	return mutateGenerated(engine, currentContent, generatedContent, originalTag, operation)
 }
 
+// Deletion is keyed only by the saved identity. It must not require generating
+// fresh credentials or validating obsolete connection parameters.
+func DeletePresetInbound(engine core.Engine, content, tag string) (string, error) {
+	if tag == "" {
+		return "", fmt.Errorf("删除操作需要现有入站标识")
+	}
+	if engine == core.EngineShadowsocksRust {
+		return MutateSSRustPort(content, "{}", tag, "delete")
+	}
+	listKey, matchKey := "inbounds", "tag"
+	if engine == core.EngineMihomo {
+		listKey, matchKey = "listeners", "name"
+	}
+	// JSON is also valid YAML; only identity is consumed for deletion.
+	generated, err := json.Marshal(map[string]any{listKey: []any{map[string]any{matchKey: tag}}})
+	if err != nil {
+		return "", err
+	}
+	return MutateGenerated(engine, content, string(generated), tag, "delete")
+}
+
 func mutateGenerated(engine core.Engine, currentContent, generatedContent, matchValue, operation string) (string, error) {
 	if engine == core.EngineShadowsocksRust {
 		return mutateShadowsocksRust(currentContent, generatedContent, matchValue, operation)

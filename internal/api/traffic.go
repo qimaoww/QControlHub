@@ -97,8 +97,24 @@ func (s *Server) refreshPortTrafficMonitoring(ctx context.Context, connectedAgen
 	}
 	for _, agentID := range changedAgents {
 		if agentID != connectedAgentID {
-			s.DisconnectAgent(agentID)
+			s.refreshAgentTrafficPolicies(agentID)
 		}
+	}
+}
+
+func (s *Server) refreshSavedAgentTrafficMonitoring(ctx context.Context, agentID string) {
+	configs, err := s.store.AgentConfigs(ctx, agentID)
+	if err != nil {
+		slog.Warn("load saved node traffic endpoints", "agent_id", agentID, "error", err)
+		return
+	}
+	changed, err := s.store.ReconcileAgentPortTrafficEndpoints(ctx, agentID, trafficEndpointsFromConfigs(configs), true)
+	if err != nil {
+		slog.Warn("reconcile saved node traffic endpoints", "agent_id", agentID, "error", err)
+		return
+	}
+	for _, id := range changed {
+		s.refreshAgentTrafficPolicies(id)
 	}
 }
 

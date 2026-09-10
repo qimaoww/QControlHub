@@ -17,6 +17,7 @@ const mime = (path) =>
       : "text/html; charset=utf-8";
 
 const previewFlags = new Map();
+let presetCatalog;
 const server = createServer(async (request, response) => {
   try {
     const path = new URL(request.url, "http://127.0.0.1").pathname;
@@ -24,6 +25,16 @@ const server = createServer(async (request, response) => {
     if (path === "/" || path === "/agents-browser-smoke.html") {
       response.writeHead(200, { "Content-Type": mime(".html") });
       response.end(html);
+      return;
+    }
+    if (path === "/assets/preset-plans.json") {
+      if (!presetCatalog) {
+        const result = spawnSync("go", ["run", join(root, "testdata/preset_plans.go")], {cwd:join(root,".."), encoding:"utf8", timeout:30000});
+        if (result.status !== 0) throw new Error(`generate preset test catalog: ${result.stderr || result.error}`);
+        presetCatalog = result.stdout;
+      }
+      response.writeHead(200, {"Content-Type":"application/json", "Cache-Control":"no-store"});
+      response.end(presetCatalog);
       return;
     }
     if (/^\/api\/v1\/region-flags\/[a-z]{2}$/.test(path)) {
@@ -51,6 +62,8 @@ const server = createServer(async (request, response) => {
       file = join(root, "agents_browser_runtime.mjs");
     else if (path === "/assets/config_migration_browser_runtime.mjs")
       file = join(root, "config_migration_browser_runtime.mjs");
+    else if (path === "/assets/presets_browser_runtime.mjs")
+      file = join(root, "presets_browser_runtime.mjs");
     else if (path.startsWith("/assets/modules/"))
       file = join(root, "modules", path.slice("/assets/modules/".length));
     if (!file) {
@@ -269,7 +282,7 @@ async function runMode(mode) {
 }
 
 try {
-  const modes = process.env.QCH_BROWSER_SMOKE_MODES || process.env.QCH_BROWSER_SMOKE_MODE || "admin,empty,readonly,ports,regions,logs,bbr,bbr-readonly,bbr-writeonly,config-migration,config-layout,traffic-layout,capabilities-settings,capabilities-settings-readonly";
+  const modes = process.env.QCH_BROWSER_SMOKE_MODES || process.env.QCH_BROWSER_SMOKE_MODE || "admin,empty,readonly,ports,regions,logs,bbr,bbr-readonly,bbr-writeonly,config-migration,config-layout,traffic-layout,capabilities-settings,capabilities-settings-readonly,presets";
   for (const mode of modes.split(",")) await runMode(mode);
   process.stdout.write("agents browser runtime smoke passed\n");
 } finally {

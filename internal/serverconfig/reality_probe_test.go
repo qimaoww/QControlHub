@@ -143,6 +143,42 @@ func TestProbeRealityTargetPinsResolvedIPAndVerifiesTLS13(t *testing.T) {
 	}
 }
 
+func TestRealityProbeDoesNotWaitForUnreachableAddress(t *testing.T) {
+	t.Parallel()
+	certificate, roots := newRealityTestCertificate(t, "reality.example")
+	started, cancelled := make(chan struct{}), make(chan struct{})
+	result, err := probeRealityTarget(context.Background(), "reality.example", realityProbeOptions{
+		resolver: staticRealityResolver{cname: "reality.example.", addresses: []netip.Addr{
+			netip.MustParseAddr("93.184.216.34"), netip.MustParseAddr("93.184.216.35"),
+		}},
+		dialContext: func(ctx context.Context, _, address string) (net.Conn, error) {
+			if address == "93.184.216.34:443" {
+				close(started)
+				<-ctx.Done()
+				close(cancelled)
+				return nil, ctx.Err()
+			}
+			<-started
+			client, server := net.Pipe()
+			go func() {
+				defer server.Close()
+				connection := tls.Server(server, &tls.Config{Certificates: []tls.Certificate{certificate}, MinVersion: tls.VersionTLS13})
+				_ = connection.HandshakeContext(ctx)
+			}()
+			return client, nil
+		},
+		rootCAs: roots, totalTimeout: 2 * time.Second, connectionTimeout: 2 * time.Second,
+	})
+	if err != nil || result.Address.String() != "93.184.216.35" {
+		t.Fatalf("reachable address waited behind unreachable address: %+v %v", result, err)
+	}
+	select {
+	case <-cancelled:
+	case <-time.After(time.Second):
+		t.Fatal("successful probe did not cancel the losing connection")
+	}
+}
+
 func TestValidateRealityMLDSATargetRequiresStrictlyMoreThan3500Bytes(t *testing.T) {
 	t.Parallel()
 	for _, size := range []int{0, 3499, 3500} {

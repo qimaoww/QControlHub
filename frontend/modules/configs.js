@@ -1,6 +1,10 @@
 import { diagnosticError } from "./errors.js";
 import { bindEvent } from "./refresh.js";
 import { bindConfigFiles } from "./config-files.js";
+import { createPresetDrafts } from "./preset-drafts.js";
+import { presetRoute } from "./preset-route.js";
+import { createPresetReads, renderPresetIdentity } from "./preset-runtime.js";
+import { createTaskMonitor, taskTerminal } from "./task-monitor.js";
 import { renderConfigSourceStudio, renderGlobalFieldStudio, revealSelectedFields } from "./config-fields.js";
 import { configFieldURL, renderSSRustFieldStudio, ssRustFieldGroups, ssRustPlanBinding } from "./ss-rust-fields.js";
 
@@ -79,6 +83,7 @@ function installGeneratedFieldButtons(form, protocol) {
   generatedFieldActions.forEach(([name, fields, label]) => {
     const control = form.elements.namedItem(name);
     if (!control || control.type === "hidden") return;
+    if (control.parentElement.querySelector?.(`[data-regenerate]`)) return;
     const button = document.createElement("button");
     button.className = "field-generate-button";
     button.type = "button";
@@ -251,6 +256,8 @@ export function bindServerPlanRegeneration({
   protocol,
   report,
   onApplied,
+  canApply = () => true,
+  onBusy = () => {},
 }) {
   let latestRequest = 0;
   let formRevision = 0;
@@ -268,6 +275,7 @@ export function bindServerPlanRegeneration({
   bindEvent(form, "change", markChanged);
   buttons.forEach((button) => {
     bindEvent(button, "click", async () => {
+      if (!canApply()) return;
       const request = ++latestRequest;
       const requestedRevision = formRevision;
       const input = readServerPlanInput(form, protocol);
@@ -276,6 +284,7 @@ export function bindServerPlanRegeneration({
           ? generatedPlanFields
           : button.dataset.regenerate.split(",");
       pendingRequests += 1;
+      onBusy(true);
       buttons.forEach((item) => {
         item.disabled = true;
       });
@@ -286,7 +295,7 @@ export function bindServerPlanRegeneration({
           method: "POST",
           body: JSON.stringify({ protocol: protocol.key, input }),
         });
-        if (request !== latestRequest || form.isConnected === false) return;
+        if (request !== latestRequest || form.isConnected === false || !canApply()) return;
         if (requestedRevision !== formRevision) {
           report("当前参数已变更，未应用过期的生成结果", "error");
           return;
@@ -311,6 +320,7 @@ export function bindServerPlanRegeneration({
             item.textContent = initial.label;
             item.removeAttribute("aria-busy");
           });
+          onBusy(false);
         }
       }
     });
@@ -430,6 +440,22 @@ export async function submitLiveConfigChange({
 export function installConfigPages(ctx) {
   const { api, optionalAPI, state, engines, can, esc, engineName, conciseVersion, date, ago, bytes, confirmAction, notify, shell, submitTask, bindCodeEditors } = ctx;
 let agentConfigRequest = 0;
+let presetSavePending = false;
+let syncPresetControls = () => {};
+let activePresetContext;
+let presetNavigation = 0;
+const presetRead = createPresetReads();
+const drafts = () => state.data.presetDrafts ||= createPresetDrafts();
+const operationFor = (key = `${state.data.agentId}|${state.data.engine}`) =>
+  state.data.presetOperations?.[key] || (state.data.presetOperation?.key === key ? state.data.presetOperation : undefined);
+function saveOperation(operation) {
+  state.data.presetOperations ||= {};
+  state.data.presetOperations[operation.key] = operation;
+  state.data.presetOperation = operation;
+  return operation;
+}
+function capturePresetDrafts() { if (state.route === "agent-config") drafts().capture(); }
+function presetHasUnsavedChanges() { return presetSavePending || Boolean(state.data.presetDrafts?.dirty()); }
 let liveConfigRequest = 0;
 let liveReadRequest = 0;
 let archiveConfigRequest = 0;
@@ -459,17 +485,11 @@ function invalidateLiveSnapshot(agentId, engine) {
   if (state.data.liveSources?.[key]) delete state.data.liveSources[key];
 }
 
-async function waitForDeployTerminal(taskID, signal = () => true) {
-  for (let attempt = 0; attempt < 600; attempt += 1) {
-    if (!signal()) throw new DOMException("Aborted", "AbortError");
-    const task = await api(`/tasks/${encodeURIComponent(taskID)}`);
-    if (!signal()) throw new DOMException("Aborted", "AbortError");
-    if (["succeeded", "failed", "canceled"].includes(task.status))
-      return task;
-    await new Promise((resolve) => setTimeout(resolve, 600));
-  }
-  throw new Error("等待部署结果超时");
-}
+const waitForDeployTerminal = createTaskMonitor({
+  // Explicit GET bypasses render-scoped read caching for live task state.
+  read: id => api(`/tasks/${encodeURIComponent(id)}?view=status`, {method:"GET"}),
+  session: () => state.data,
+});
 
 
 function recordPendingDeploy(taskID, agentId, engine) {
@@ -521,53 +541,47 @@ function maybeRerenderLiveConfig(agentId, engine) {
 
 // Track active reconcilers: Map<key, Set<taskID>> so multiple tasks
 // for the same key can each have their own poller.
-const activeReconcilers = new Map();
+const activeReconcilers = new WeakMap();
 
 // Fire-and-forget monitor for a newly submitted deploy task.
 function monitorDeployTask(taskID, agentId, engine) {
-  void (async () => {
+  if (!can("tasks.read")) return;
+  const sessionData = state.data;
+  let watchers = activeReconcilers.get(sessionData);
+  if (!watchers) activeReconcilers.set(sessionData, watchers = new Map());
+  if (watchers.has(taskID)) return watchers.get(taskID);
+  const monitoring = (async () => {
     try {
       const result = await waitForDeployTerminal(taskID);
+      if (state.data !== sessionData) return null;
       handleDeployTerminal(result, taskID, agentId, engine);
+      return result;
     } catch {
-      // Aborted
-    }
+      return null;
+    } finally { watchers.delete(taskID); }
   })();
+  watchers.set(taskID, monitoring);
+  return monitoring;
 }
 
 // Single-instance recovery poller per key. Survives while the page is open;
 // cleans up on abort so a future visit can restart it.
 function startRecoveryPoller(taskID, agentId, engine) {
-  const key = liveSourceKey(agentId, engine);
-  if (!activeReconcilers.has(key))
-    activeReconcilers.set(key, new Set());
-  const watchers = activeReconcilers.get(key);
-  if (watchers.has(taskID)) return; // already watching this exact task
-  watchers.add(taskID);
-
-  void (async () => {
-    try {
-      const result = await waitForDeployTerminal(taskID);
-      handleDeployTerminal(result, taskID, agentId, engine);
-    } catch {
-    } finally {
-      const s = activeReconcilers.get(key);
-      if (s) {
-        s.delete(taskID);
-        if (!s.size) activeReconcilers.delete(key);
-      }
-    }
-  })();
+  void monitorDeployTask(taskID, agentId, engine);
 }
 
 // Called when entering live-config to resolve any pending deploy that
 // outlived navigation. Uses the current (route-scoped) api context.
 async function reconcilePendingDeploy(agentId, engine) {
+  if (!can("tasks.read")) return;
   const key = liveSourceKey(agentId, engine);
   const pending = state.data.pendingDeployTasks?.[key];
   if (!pending?.taskId) return;
+  const sessionData = state.data;
+  if (activeReconcilers.get(sessionData)?.has(pending.taskId)) return;
   try {
     const task = await api(`/tasks/${encodeURIComponent(pending.taskId)}`);
+    if (state.data !== sessionData) return;
     if (["succeeded", "failed", "canceled"].includes(task.status))
       handleDeployTerminal(task, pending.taskId, agentId, engine);
     else startRecoveryPoller(pending.taskId, agentId, engine);
@@ -576,41 +590,109 @@ async function reconcilePendingDeploy(agentId, engine) {
   }
 }
 
-async function agentConfig() {
+function agentConfig(options = {}) {
+  const sessionData = state.data;
+  const rendering = renderAgentConfig(options);
+  const request = agentConfigRequest;
+  return rendering.catch(error => {
+    const ctx = activePresetContext;
+    if (request === agentConfigRequest && state.data === sessionData && ctx?.sessionData === sessionData &&
+        state.route === "agent-config" && state.data.agentId === ctx.agent.id && state.data.engine === ctx.engine) {
+      // A failed route refresh can leave the old DOM on screen. Give it a
+      // working recovery action instead of dead handlers from an old epoch.
+      ctx.navigationEpoch = state.navigationEpoch;
+      if (!presetSavePending && !ctx.navigating) {
+        const key = `${ctx.agent.id}|${ctx.engine}`;
+        const failure = {key, message:`配置加载失败：${error.message}。草稿已保留，请重新加载后继续编辑。`, tone:"error", reload:true};
+        const operation = operationFor(key);
+        if (operation) Object.assign(operation, failure);
+        else saveOperation(failure);
+      }
+      bindAgentConfigPage(ctx, true);
+    }
+    throw error;
+  });
+}
+
+async function renderAgentConfig({ workspace: loadedWorkspace } = {}) {
+  capturePresetDrafts();
   const request = ++agentConfigRequest;
-  const agents = state.data.agents || (await api("/agents"));
-  if (request !== agentConfigRequest || state.route !== "agent-config") return;
-  state.data.agents = agents;
-  const agent = agents.find((item) => item.id === state.data.agentId);
-  if (!agent) return void (location.hash = "#node-settings");
-  const engine = state.data.engine || agent.capabilities?.[0] || engines[0];
+  const sessionData = state.data;
+  const navigationEpoch = state.navigationEpoch;
+  const routeSignal = state.routeSignal;
+  const isCurrent = () => request === agentConfigRequest && state.route === "agent-config" &&
+    state.data === sessionData && state.navigationEpoch === navigationEpoch && !routeSignal?.aborted;
+  let agents = state.data.agents;
+  let agent = agents?.find(item => item.id === state.data.agentId);
+  let engine = state.data.engine;
+  // Deep links already identify the workspace. Do not fetch the entire fleet
+  // first, or require agents.read just to use agent-config.read.
+  if (!state.data.agentId || !engine) {
+    agents ||= await api("/agents");
+    if (!isCurrent()) return;
+    state.data.agents = agents;
+    agent = agents.find(item => item.id === state.data.agentId);
+    if (!agent) return void (location.hash = "#agents");
+    engine = agent.capabilities?.[0] || engines[0];
+  }
   state.data.engine = engine;
+  const base = `/agents/${encodeURIComponent(state.data.agentId)}/configs/${encodeURIComponent(engine)}`;
+  const workspace = loadedWorkspace || await api(`${base}/workspace`);
+  if (!isCurrent()) return;
+  const prior = activePresetContext;
+  const scope = `${state.data.agentId}|${engine}|`;
+  if (!loadedWorkspace && !presetSavePending && prior?.sessionData === sessionData &&
+      prior.draftScope === scope && prior.draftVersion !== (workspace.config?.version || 0) && drafts().dirty(scope)) {
+    const discard = await confirmAction(
+      `服务端配置已从 v${prior.draftVersion} 更新为 v${workspace.config?.version || 0}。放弃此内核的旧版本草稿并加载新配置？取消会保留当前输入。`, "配置版本已更新",
+    );
+    if (!isCurrent()) return;
+    if (!discard) {
+      prior.navigationEpoch = navigationEpoch;
+      Object.assign(state.data, {protocol:prior.protocol?.key, inboundTag:prior.selectedInbound?.tag || ""});
+      const key = `${prior.agent.id}|${engine}`;
+      saveOperation({key, message:"服务端已有更新版本，当前草稿已保留。请重新加载后再提交，避免覆盖其他修改。", tone:"error", reload:true});
+      // The old editor may have been unmounted while visiting another page.
+      // Recreate that exact revision so its retained drafts remain visible.
+      await renderAgentConfig({workspace:prior.workspace});
+      return;
+    }
+    drafts().clear(scope);
+  }
+  // The workspace carries a fresh runtime snapshot; a cached node list can
+  // still say "not installed" after an installation has completed.
+  agent = workspace.agent || agent;
+  state.data.presetAgent = agent;
+  if (agents) state.data.agents = agents.map((item) => item.id === agent.id ? agent : item);
   const engineInstalled = Boolean(agent.runtime?.[engine]?.installed);
-  const base = `/agents/${encodeURIComponent(agent.id)}/configs/${encodeURIComponent(engine)}`;
-  const workspace = await api(`${base}/workspace`);
-  if (request !== agentConfigRequest || state.route !== "agent-config") return;
   const config = workspace.config;
   let selectedInbound = (workspace.inbounds || []).find(
     (input) => input.tag === state.data.inboundTag,
   );
-  const selectedProtocolKey =
-    state.data.protocol ||
-    selectedInbound?.protocol ||
-    workspace.protocols[0]?.key;
+  const requestedProtocol = selectedInbound?.protocol || state.data.protocol;
+  // Protocol keys are not shared by all engines. A stale key is possible
+  // after switching engines from the preset page, so always fall back to a
+  // protocol advertised by the current workspace.
+  const selectedProtocolKey = workspace.protocols.some(
+    (item) => item.key === requestedProtocol,
+  )
+    ? requestedProtocol
+    : workspace.protocols[0]?.key;
   const protocol = workspace.protocols.find(
     (item) => item.key === selectedProtocolKey,
   );
+  state.data.protocol = selectedProtocolKey;
   let plan = selectedInbound;
   const planKey = `${agent.id}|${engine}|${selectedProtocolKey}`;
   state.data.serverPlans ||= {};
-  if (!plan && can("operator") && protocol) {
+  if (!plan && can("agent-config.write") && protocol) {
     plan = state.data.serverPlans[planKey];
     if (!plan) {
       plan = await api(`${base}/plans`, {
         method: "POST",
         body: JSON.stringify({ protocol: selectedProtocolKey }),
       });
-      if (request !== agentConfigRequest || state.route !== "agent-config") return;
+      if (!isCurrent()) return;
       state.data.serverPlans[planKey] = plan;
     }
   }
@@ -620,7 +702,6 @@ async function agentConfig() {
     port: protocol?.default_port || 443,
     transport: "raw",
   };
-  const operation = selectedInbound ? "modify" : "add";
   const allFields = workspace.catalog.fields || [];
   const ssRustGroups = ssRustFieldGroups(allFields);
   const fields = engine === "ss-rust" ? ssRustGroups.global : allFields;
@@ -633,20 +714,24 @@ async function agentConfig() {
   const hasInboundField = engine === "ss-rust" && config && selectedInbound && selectedInboundField;
   if (hasInboundField)
     state.data.configInboundField = selectedInboundField.key;
-  // Root field, port field, and revision history do not depend on each other.
-  const [fieldValue, inboundFieldValue, revisions] = await Promise.all([
+  // Auxiliary editors must not hold the preset form hostage to a slow field
+  // read or revision query. They replace only their own placeholders below.
+  const fieldRead = path => presetRead(workspace, path, () => api(path).then(value => {
+    if (value.version !== undefined && value.version !== config.version)
+      throw new Error("配置版本已变化，请重新加载配置后编辑字段");
+    return value;
+  }));
+  const fieldValues = [
     config && selectedField
-      ? api(`${base}/fields/${encodeURIComponent(selectedField.key)}`)
-      : { present: false, fragment: "" },
+      ? fieldRead(`${base}/fields/${encodeURIComponent(selectedField.key)}`)
+      : { value: { present: false, fragment: "" } },
     hasInboundField
-      ? api(configFieldURL(base, selectedInboundField.key, selectedInbound.tag)).catch((error) => {
-          if (error.name === "AbortError") throw error;
-          return { present: false, fragment: "", error: error.message };
-        })
-      : { present: false, fragment: "" },
-    config ? api(`/configs/${encodeURIComponent(config.id)}/revisions?limit=50`) : [],
-  ]);
-  if (request !== agentConfigRequest || state.route !== "agent-config") return;
+      ? fieldRead(configFieldURL(base, selectedInboundField.key, selectedInbound.tag))
+      : { value: { present: false, fragment: "" } },
+  ];
+  const fieldValue = fieldValues[0].value || { present: false, fragment: "", error: "正在加载字段" };
+  const inboundFieldValue = fieldValues[1].value || { present: false, fragment: "", error: "正在加载字段" };
+  if (!isCurrent()) return;
   const inboundNav = (workspace.inbounds || [])
     .map(
       (input) =>
@@ -697,11 +782,16 @@ async function agentConfig() {
   const sourceStudio = renderConfigSourceStudio({ config, catalog: workspace.catalog, engineInstalled,
     open: state.data.settings?.default_config_editor === "source", ssRust: engine === "ss-rust" });
   const revisionTimeline = config
-    ? `<details class="revision-timeline node-revision-timeline" id="revisions"><summary><b>版本历史</b><strong>${revisions.length} 个版本</strong></summary><div class="timeline-body"><nav>${revisions.map((revision) => `<span class="${revision.version === config.version ? "current" : ""}"><i></i><span><b>v${revision.version}</b><strong>${esc(revision.name)}</strong><small>${ago(revision.updated_at)}${revision.version === config.version ? " · 当前" : ""}</small></span></span>`).join("")}</nav><div class="timeline-placeholder">当前 v${config.version}</div></div></details>`
+    ? `<details class="revision-timeline node-revision-timeline" id="revisions"><summary><b>版本历史</b><strong>当前 v${config.version}</strong></summary><div class="timeline-body" data-revision-body>展开加载版本历史</div></details>`
     : "";
   const executionCallout = !engineInstalled
     ? `<aside class="config-execution-callout"><span><b>${esc(engineName(engine))} 尚未安装</b><small>可以编辑方案，但校验、部署和服务操作需要先在节点设置中安装该内核。</small></span><a class="button small" href="#node-settings">前往安装内核</a></aside>`
-    : "";
+    : agent.runtime?.[engine]?.existing_config_unsupported_reason
+      ? `<aside class="config-execution-callout"><span><b>当前内核暂不可提交任务</b><small>${esc(agent.runtime[engine].existing_config_unsupported_reason)}</small></span><a class="button small" href="#node-settings">检查节点配置</a></aside>`
+      : agent.status !== "online"
+        ? '<aside class="config-execution-callout"><span><b>节点当前离线</b><small>可以继续编辑草稿，节点上线并重新加载后可校验或部署。</small></span></aside>'
+        : !can("agent-config.write") || !can("tasks.execute")
+          ? '<aside class="config-execution-callout"><span><b>当前账号不可提交预设</b><small>保存并执行需要配置写入和任务执行权限。</small></span></aside>' : "";
   const advancedStudio = engine === "ss-rust"
     ? renderSSRustFieldStudio({ scope: "inbound", fields: ssRustGroups.inbound, selected: selectedInboundField,
         value: inboundFieldValue, config, inbound: selectedInbound }) +
@@ -710,35 +800,25 @@ async function agentConfig() {
     : renderGlobalFieldStudio({ fields, selected: selectedField, value: fieldValue, config,
         catalog: workspace.catalog, presentFields: workspace.present_fields }) + sourceStudio;
   shell(
-    `<section class="config-command-bar loaded"><header class="config-command-head"><div class="config-command-title"><span class="engine-badge ${esc(engine)}">${esc(engineName(engine))}</span><div><p class="eyebrow">Server recipe</p><h2>${esc(protocol?.name || "Protocol")} · ${selectedInbound ? esc(selectedInbound.tag) : "新入站"}</h2><small>${esc(agent.name)} · ${esc(workspace.catalog.name)}</small></div></div><div class="config-command-state"><span class="status-label ${!engineInstalled ? "muted" : config ? "ok" : "warn"}">${!engineInstalled ? "内核未安装" : config ? "已读取" : "新方案"}</span><span class="recipe-version"><b>${config ? `v${config.version}` : "草稿"}</b><small>${esc(workspace.catalog.format)}</small></span><a href="${esc(protocol?.docs)}" target="_blank" rel="noopener noreferrer">文档 ↗</a></div></header><details class="config-hierarchy-menu" open><summary><b>切换入站 / 协议</b><i>＋</i></summary><div class="config-command-selectors${workspace.protocols.length > 5 ? " protocol-catalog-wide" : ""}">${inboundNav ? `<section class="inbound-browser config-selector"><header><span><b>入站</b><small>${workspace.inbounds.length} 个</small></span><button class="button small" type="button" data-new-inbound>＋ 新增</button></header><nav>${inboundNav}</nav></section>` : ""}<section class="protocol-browser config-selector"><header><span><b>协议</b><small>${workspace.protocols.length} 种</small></span></header><nav>${protocolNav}</nav></section></div></details></section>${executionCallout}<article class="recipe-workspace"><form class="server-form" id="server-plan-form"><div class="config-mutation"><label>操作<select name="operation">${selectedInbound ? `<option value="modify">修改 · ${esc(selectedInbound.tag)}</option><option value="add">新增入站</option><option value="delete">删除 · ${esc(selectedInbound.tag)}</option>` : '<option value="add">新增入站</option>'}</select></label></div><div class="builder-layout" data-builder-workbench><nav class="builder-index"><a href="#listen" data-builder-step="listen"><b>01</b><strong>监听</strong></a><a href="#identity" data-builder-step="identity"><b>02</b><strong>认证</strong></a>${protocol?.transport_config ? '<a href="#transport" data-builder-step="transport"><b>03</b><strong>传输</strong></a>' : ""}${protocol?.uses_reality || protocol?.supports_tls ? '<a href="#security" data-builder-step="security"><b>04</b><strong>安全</strong></a>' : ""}</nav><div class="builder-sections"><section class="builder-section" id="listen"><header><span class="section-number">01</span><strong>监听</strong></header><div class="plan-fields three"><label>入站标签<input name="tag" maxlength="64" required value="${esc(plan.tag)}"></label><label>监听地址<input name="listen" required value="${esc(plan.listen)}"></label><label>监听端口<input type="number" name="port" min="1" max="65535" required value="${Number(plan.port)}"></label></div></section><section class="builder-section" id="identity"><header><span class="section-number">02</span><strong>认证</strong></header><div><div class="plan-fields two">${protocol?.ignores_username ? '<input type="hidden" name="username" value="default">' : `<label>用户名或备注<input name="username" maxlength="64" required value="${esc(plan.username)}"></label>`}<label class="secret-input">${esc(protocol?.credential_label || "凭据")}<span class="secret-value-control"><input type="password" name="credential" required value="${esc(plan.credential)}"><button type="button" data-secret-visibility>显示</button></span></label>${protocol?.secondary_credential_label ? `<label class="secret-input">${esc(protocol.secondary_credential_label)}<span class="secret-value-control"><input type="password" name="secondary_credential" required value="${esc(plan.secondary_credential)}"><button type="button" data-secret-visibility>显示</button></span></label>` : '<input type="hidden" name="secondary_credential" value="">'}</div>${methods ? `<div class="plan-fields one"><label>加密方式<select name="method">${methods}</select></label></div>` : '<input type="hidden" name="method" value="">'}</div></section>${protocol?.transport_config ? `<section class="builder-section" id="transport"><header><span class="section-number">03</span><strong>传输</strong></header><div class="plan-fields two"><label>传输<select name="transport">${transports}</select></label><label>路径 / ServiceName<input name="transport_path" value="${esc(plan.transport_path)}"></label></div></section>` : '<input type="hidden" name="transport" value="raw"><input type="hidden" name="transport_path" value="">'}${security}</div></div><footer class="builder-actions compact"><span class="builder-regenerate-status" data-regenerate-status role="status" aria-live="polite"></span><div><button class="button" type="button" data-regenerate>重新生成参数</button><button class="button" type="submit" data-plan-intent="validate" ${agent.status !== "online" || !engineInstalled ? "disabled" : ""}>保存并校验</button><button class="button primary" type="submit" data-plan-intent="deploy" ${agent.status !== "online" || !engineInstalled ? "disabled" : ""}>保存并部署</button></div></footer></form></article>${revisionTimeline}${advancedStudio}`,
+    renderPresetIdentity(`<section class="config-command-bar loaded"><header class="config-command-head"><div class="config-command-title"><span class="engine-badge ${esc(engine)}">${esc(engineName(engine))}</span><div><p class="eyebrow">Server recipe</p><h2>${esc(protocol?.name || "Protocol")} · ${selectedInbound ? esc(selectedInbound.tag) : "新入站"}</h2><small>${esc(agent.name)} · ${esc(workspace.catalog.name)}</small></div></div><div class="config-command-state"><button class="button small" type="button" data-refresh-preset>刷新状态</button><span class="status-label ${!engineInstalled ? "muted" : config ? "ok" : "warn"}">${!engineInstalled ? "内核未安装" : config ? "已读取" : "新方案"}</span><span class="recipe-version"><b>${config ? `v${config.version}` : "草稿"}</b><small>${esc(workspace.catalog.format)}</small></span><a href="${esc(protocol?.docs)}" target="_blank" rel="noopener noreferrer">文档 ↗</a></div></header><details class="config-hierarchy-menu" open><summary><b>切换入站 / 协议</b><i>＋</i></summary><div class="config-command-selectors${workspace.protocols.length > 5 ? " protocol-catalog-wide" : ""}">${inboundNav ? `<section class="inbound-browser config-selector"><header><span><b>入站</b><small>${workspace.inbounds.length} 个</small></span><button class="button small" type="button" data-new-inbound>＋ 新增</button></header><nav>${inboundNav}</nav></section>` : ""}<section class="protocol-browser config-selector"><header><span><b>协议</b><small>${workspace.protocols.length} 种</small></span></header><nav>${protocolNav}</nav></section></div></details></section>${executionCallout}<article class="recipe-workspace"><form class="server-form" id="server-plan-form"><div class="config-mutation"><label>操作<select name="operation">${selectedInbound ? `<option value="modify">修改 · ${esc(selectedInbound.tag)}</option><option value="add">新增入站</option><option value="delete">删除 · ${esc(selectedInbound.tag)}</option>` : '<option value="add">新增入站</option>'}</select></label></div><div class="builder-layout" data-builder-workbench><nav class="builder-index"><a href="#listen" data-builder-step="listen"><b>01</b><strong>监听</strong></a><a href="#identity" data-builder-step="identity"><b>02</b><strong>认证</strong></a>${protocol?.transport_config ? '<a href="#transport" data-builder-step="transport"><b>03</b><strong>传输</strong></a>' : ""}${protocol?.uses_reality || protocol?.supports_tls ? '<a href="#security" data-builder-step="security"><b>04</b><strong>安全</strong></a>' : ""}</nav><div class="builder-sections"><section class="builder-section" id="listen"><header><span class="section-number">01</span><strong>监听</strong></header><div class="plan-fields three"><label>入站标签<input name="tag" maxlength="64" required value="${esc(plan.tag)}"></label><label>监听地址<input name="listen" required value="${esc(plan.listen)}"></label><label>监听端口<input type="number" name="port" min="1" max="65535" required value="${Number(plan.port)}"></label></div></section><section class="builder-section" id="identity"><header><span class="section-number">02</span><strong>认证</strong></header><div><div class="plan-fields two">${protocol?.ignores_username ? '<input type="hidden" name="username" value="default">' : `<label>用户名或备注<input name="username" maxlength="64" required value="${esc(plan.username)}"></label>`}<label class="secret-input">${esc(protocol?.credential_label || "凭据")}<span class="secret-value-control"><input type="password" name="credential" required value="${esc(plan.credential)}"><button type="button" data-secret-visibility>显示</button></span></label>${protocol?.secondary_credential_label ? `<label class="secret-input">${esc(protocol.secondary_credential_label)}<span class="secret-value-control"><input type="password" name="secondary_credential" required value="${esc(plan.secondary_credential)}"><button type="button" data-secret-visibility>显示</button></span></label>` : '<input type="hidden" name="secondary_credential" value="">'}</div>${methods ? `<div class="plan-fields one"><label>加密方式<select name="method">${methods}</select></label></div>` : '<input type="hidden" name="method" value="">'}</div></section>${protocol?.transport_config ? `<section class="builder-section" id="transport"><header><span class="section-number">03</span><strong>传输</strong></header><div class="plan-fields two"><label>传输<select name="transport">${transports}</select></label><label>路径 / ServiceName<input name="transport_path" value="${esc(plan.transport_path)}"></label></div></section>` : '<input type="hidden" name="transport" value="raw"><input type="hidden" name="transport_path" value="">'}${security}</div></div><footer class="builder-actions compact"><span class="builder-regenerate-status" data-regenerate-status role="status" aria-live="polite"></span><div><button class="button" type="button" data-regenerate>重新生成参数</button><button class="button" type="submit" data-plan-intent="validate" ${agent.status !== "online" || !engineInstalled ? "disabled" : ""}>保存并校验</button><button class="button primary" type="submit" data-plan-intent="deploy" ${agent.status !== "online" || !engineInstalled ? "disabled" : ""}>保存并部署</button></div></footer></form></article>${revisionTimeline}${advancedStudio}`, protocolOptions + vlessEncryptionOptions, portForward ? identitySection : ""),
     "节点配置",
     {
-      viewKey: `agent-config-${agent.id}-${engine}-${selectedProtocolKey}-${selectedInbound?.tag || "new"}`,
+      viewKey: `agent-config-${agent.id}-${engine}-${selectedProtocolKey}-${selectedInbound?.tag || "new"}-${config?.version || 0}-${state.data.presetDraftReset || 0}`,
     },
   );
   const serverPlan = document.querySelector("#server-plan-form");
-  if (serverPlan) {
-    const accounting = document.createElement("section");
-    accounting.className = "preset-accounting-summary";
-    accounting.setAttribute("aria-label", "独立出口规划");
-    const ports = workspace.accounting_plan?.ports || [];
-    accounting.innerHTML = `<header><b>独立出口归属</b><span>${workspace.accounting_error ? "需要处理" : ports.length ? `${ports.length} 个入口 · 规划通过` : "保存时自动检查"}</span></header><p>新增、修改入站时重新规划专属出站或标记；保存前检查整份配置。此处是已保存版本的规划，不代表节点已生效。</p>${workspace.accounting_error ? `<p class="error">${esc(workspace.accounting_error)}</p>` : ports.length ? `<ul>${ports.map(port => `<li><span>${esc(port.inbound || "服务端口")} · ${esc(port.port)}</span><code>${esc(port.outbounds?.join("、") || `出口标记 ${port.mark}`)}</code></li>`).join("")}</ul>` : ""}<p>部署后请在<a href="#traffic">流量统计</a>确认“双链路”状态；实际计数方式由 Agent 根据内核能力选择。</p>`;
-    serverPlan.before(accounting);
-  }
   if (serverPlan?.dataset) {
     serverPlan.dataset.blockMainlandDestination = plan.block_mainland_destination
       ? "1"
       : "0";
     serverPlan.dataset.blockMainlandSource = plan.block_mainland_source ? "1" : "0";
   }
-  const identityBody = document.querySelector("#identity > div");
-  if (identityBody) identityBody.insertAdjacentHTML("beforeend", protocolOptions + vlessEncryptionOptions);
   const protocolCatalog = document.querySelector(".protocol-catalog-wide");
   const protocolCatalogNav = protocolCatalog?.querySelector(
     ".protocol-browser > nav",
   );
   const updateProtocolCatalogLayout = () => {
-    if (!protocolCatalogNav) return;
+    if (!protocolCatalogNav || protocolCatalogNav.isConnected === false) return;
     protocolCatalog.classList.remove("protocol-two-rows");
     protocolCatalogNav.style.removeProperty("--protocol-columns");
     if (protocolCatalogNav.scrollWidth > protocolCatalogNav.clientWidth + 1) {
@@ -751,23 +831,19 @@ async function agentConfig() {
   };
   updateProtocolCatalogLayout();
   if (typeof window !== "undefined") {
+    let resizePending = false;
     bindEvent(window, "resize", () => {
-      updateProtocolCatalogLayout();
-      revealSelectedFields();
+      if (resizePending) return;
+      resizePending = true;
+      requestAnimationFrame(() => {
+        resizePending = false;
+        if (!isCurrent()) return;
+        updateProtocolCatalogLayout();
+        revealSelectedFields();
+      });
     });
   }
-  if (portForward) {
-    const identity = document.querySelector("#identity");
-    if (identity) identity.outerHTML = identitySection;
-    const targetStep = document.querySelector('[data-builder-step="identity"]');
-    if (targetStep) {
-      targetStep.href = "#target";
-      targetStep.dataset.builderStep = "target";
-      const label = targetStep.querySelector("strong");
-      if (label) label.textContent = "目标";
-    }
-  }
-  bindAgentConfigPage({
+  const context = {
     agent,
     engine,
     workspace,
@@ -779,10 +855,203 @@ async function agentConfig() {
     fieldValue,
     base,
     engineInstalled,
-  });
+    request,
+    draftScope: `${agent.id}|${engine}|`,
+    draftVersion: config?.version || 0,
+    generating: false,
+    sessionData,
+    navigationEpoch,
+  };
+  activePresetContext = context;
+  if (globalThis.location?.hash.startsWith("#agent-config") && globalThis.history?.replaceState)
+    globalThis.history.replaceState(null, "", presetRoute(state.data));
+  bindAgentConfigPage(context);
+  fieldValues.forEach((entry, index) => {
+    if (entry.value) return;
+    void entry.promise.catch(error => ({present:false, fragment:"", error:error.message})).then(value => {
+    if (!isCurrent()) return;
+    capturePresetDrafts();
+    // Preserve each drawer's open state and the primary form's draft/focus.
+    const replaceStudio = (id, html) => {
+      const current = document.getElementById(id);
+      if (!current) return;
+      const open = current.open;
+      current.outerHTML = html;
+      const updated = document.getElementById(id);
+      if (updated) updated.open = open;
+    };
+    if (engine === "ss-rust") {
+      if (index === 1) replaceStudio("inbound-options", renderSSRustFieldStudio({ scope: "inbound", fields: ssRustGroups.inbound,
+        selected: selectedInboundField, value, config, inbound: selectedInbound }));
+      else replaceStudio("advanced", renderSSRustFieldStudio({ scope: "global", fields, selected: selectedField,
+        value, config, presentFields: workspace.present_fields }));
+    } else if (index === 0) {
+      replaceStudio("advanced", renderGlobalFieldStudio({ fields, selected: selectedField, value,
+        config, catalog: workspace.catalog, presentFields: workspace.present_fields }));
+    }
+    bindAgentConfigPage(context, true);
+  }).catch(error => { if (isCurrent()) notify(`字段加载失败：${error.message}`, "error"); }); });
+  if (!loadedWorkspace && operationFor(`${agent.id}|${engine}`)) {
+    const operation = operationFor(`${agent.id}|${engine}`);
+    if (operation.reload) {
+      operation.message = `已重新加载配置 v${config?.version || 0}，可以继续编辑。`;
+      operation.tone = "";
+      operation.reload = false;
+      renderPresetStatus();
+      syncPresetControls();
+    }
+  }
+  const history = document.querySelector("#revisions");
+  if (history && can("configs.read")) {
+    let loading = false;
+    let loaded = false;
+    const loadHistory = async () => {
+      if (!history.open || loading || loaded) return;
+      loading = true;
+      const body = history.querySelector("[data-revision-body]");
+      body.textContent = "正在加载版本历史…";
+      try {
+        const path = `/configs/${encodeURIComponent(config.id)}/revisions?limit=50`;
+        const revisions = await presetRead(workspace, path, () => api(path)).promise;
+        if (!history.isConnected || !isCurrent()) return;
+        body.innerHTML = `<nav>${revisions.map((revision) => `<span class="${revision.version === config.version ? "current" : ""}"><i></i><span><b>v${revision.version}</b><strong>${esc(revision.name)}</strong><small>${ago(revision.updated_at)}</small></span></span>`).join("")}</nav>`;
+        loaded = true;
+      } catch (error) {
+        if (history.isConnected && isCurrent()) body.textContent = `版本历史加载失败：${error.message}；重新展开可重试。`;
+      } finally { loading = false; }
+    };
+    bindEvent(history, "toggle", loadHistory);
+    void loadHistory();
+  }
 }
 
-function bindAgentConfigPage(ctx) {
+async function refreshPresetPage() {
+  await agentConfig();
+}
+
+function renderPresetStatus() {
+  if (state.route !== "agent-config") return;
+  const operation = operationFor();
+  if (!operation || operation.key !== `${state.data.agentId}|${state.data.engine}`) return;
+  let status = document.querySelector("[data-preset-status]");
+  if (!status) {
+    status = document.createElement("div");
+    status.dataset.presetStatus = "";
+    document.querySelector(".config-command-bar")?.after(status);
+  }
+  status.className = `alert preset-submit-status ${operation.tone}`;
+  status.setAttribute("role", operation.tone === "error" ? "alert" : "status");
+  status.setAttribute("aria-live", "polite");
+  status.textContent = operation.message;
+  if (operation.task?.id) {
+    const link = document.createElement("a");
+    link.href = "#tasks";
+    link.textContent = " 查看执行记录 →";
+    status.append(link);
+  }
+  if (operation.reload) {
+    const retry = document.createElement("button");
+    retry.type = "button";
+    retry.className = "button small";
+    retry.textContent = "重新加载配置";
+    retry.onclick = async () => {
+      if (presetSavePending || activePresetContext?.generating) return;
+      const sessionData = state.data;
+      const epoch = state.navigationEpoch;
+      retry.disabled = true;
+      try {
+        if (drafts().dirty() && !(await confirmAction("重新加载将放弃当前未保存的草稿，是否继续？", "重新加载配置"))) return;
+        if (state.data !== sessionData || state.navigationEpoch !== epoch || operationFor() !== operation || state.route !== "agent-config") return;
+        drafts().clear(operation.key + "|");
+        // Same-version reconciliation normally preserves inputs. An explicit
+        // discard must instead mount fresh controls with saved defaults.
+        state.data.presetDraftReset = (state.data.presetDraftReset || 0) + 1;
+        await refreshPresetPage();
+      }
+      catch (error) {
+        if (operationFor() !== operation) return;
+        operation.reload = true;
+        operation.message = `页面加载失败：${error.message}。请重新加载后继续编辑。`;
+        renderPresetStatus();
+        syncPresetControls();
+      }
+      finally { retry.disabled = false; }
+    };
+    status.append(retry);
+  }
+}
+
+function watchPresetOperation(operation) {
+  if (!operation?.task?.id || operation.monitoring || taskTerminal(operation.task) || !can("tasks.read")) return;
+  const sessionData = state.data;
+  const {key, intent, version, task} = operation;
+  const [agentId, engine] = key.split("|");
+  const tracked = () => sessionData === state.data && operationFor(key) === operation;
+  operation.monitoring = true;
+  const progress = (latest, error) => {
+    if (!tracked() || operation.reload) return;
+    const message = error ? `配置 v${version} 已保存，任务状态连接暂时中断，正在重试…` :
+      `配置 v${version} 已保存，${intent === "deploy" ? "部署" : "校验"}任务${latest.status === "running" ? "正在执行" : "正在排队"}…`;
+    if (operation.message === message) return;
+    operation.message = message;
+    operation.tone = "";
+    renderPresetStatus();
+  };
+  const waiting = waitForDeployTerminal(task.id, progress);
+  if (intent === "deploy") void monitorDeployTask(task.id, agentId, engine);
+  void waiting.then(latest => {
+    if (!tracked()) return;
+    operation.task = latest;
+    operation.message = latest.status === "succeeded"
+      ? `配置 v${version} ${intent === "deploy" ? "部署" : "校验"}成功。`
+      : `配置已保存，任务${latest.status === "canceled" ? "已取消" : "失败"}：${latest.error || "请查看执行记录"}`;
+    if (operation.reload) operation.message += " 请重新加载配置后继续编辑。";
+    operation.tone = latest.status === "succeeded" ? "success" : "error";
+    renderPresetStatus();
+  }).catch(error => {
+    if (!tracked() || error.name === "AbortError") return;
+    operation.message = "配置已保存，任务状态暂不可读取，请查看执行记录。";
+    operation.tone = "error";
+    renderPresetStatus();
+  }).finally(() => { operation.monitoring = false; });
+}
+
+function bindAgentConfigPage(ctx, fieldsOnly = false) {
+  const visible = () => state.route === "agent-config" && activePresetContext === ctx &&
+    state.data === ctx.sessionData && state.navigationEpoch === ctx.navigationEpoch;
+  const current = () => visible() &&
+    state.data.agentId === ctx.agent.id && state.data.engine === ctx.engine;
+  const draftKey = selector => `${ctx.draftScope}${ctx.draftVersion}|${selector}|${
+    selector === "#server-plan-form" ? ctx.selectedInbound?.tag || `new:${ctx.protocol?.key}` :
+    selector === "#field-form" ? ctx.selectedField?.key :
+    selector === "#inbound-field-form" ? `${ctx.selectedInbound?.tag}|${ctx.selectedInboundField?.key}` : "source"}`;
+  const navigate = (selection, reuseWorkspace = true) => {
+    if (presetSavePending || ctx.generating || !visible()) return;
+    const previous = {
+      engine: ctx.engine, protocol: ctx.protocol?.key, inboundTag: ctx.selectedInbound?.tag || "",
+      configField: ctx.selectedField?.key, configInboundField: ctx.selectedInboundField?.key,
+    };
+    if (!ctx.navigating && Object.entries(selection).every(([key,value]) => previous[key] === value)) return;
+    capturePresetDrafts();
+    const navigation = ++presetNavigation;
+    ctx.navigating = navigation;
+    syncPresetControls();
+    Object.assign(state.data, previous, selection);
+    const rendering = agentConfig(reuseWorkspace ? { workspace: ctx.workspace } : {});
+    const request = agentConfigRequest;
+    void rendering.catch(async (error) => {
+      if (request !== agentConfigRequest || !visible()) return;
+      Object.assign(state.data, previous);
+      // Request IDs are monotonic; old async reads stay invalidated.
+      notify(`切换配置失败：${error.message}`, "error");
+      // Rebind any deferred editors whose earlier request was invalidated.
+      try { await agentConfig({workspace:ctx.workspace}); }
+      catch (recoveryError) { if (visible()) notify(recoveryError.message, "error"); }
+    }).finally(() => {
+      if (ctx.navigating === navigation) ctx.navigating = false;
+      syncPresetControls();
+    });
+  };
   revealSelectedFields();
   document.querySelectorAll(".config-field-studio").forEach((studio) => {
     bindEvent(studio, "toggle", () => { if (studio.open) revealSelectedFields(); });
@@ -797,10 +1066,8 @@ function bindAgentConfigPage(ctx) {
     (link) =>
       (link.onclick = (event) => {
         event.preventDefault();
-        state.data.engine = link.dataset.engineSelect;
-        state.data.protocol = "";
-        state.data.inboundTag = "";
-        agentConfig();
+        if (link.dataset.engineSelect === ctx.engine && !ctx.navigating) return;
+        navigate({ engine: link.dataset.engineSelect, protocol: "", inboundTag: "" }, false);
       }),
   );
   document.querySelectorAll("[data-inbound]").forEach(
@@ -810,38 +1077,31 @@ function bindAgentConfigPage(ctx) {
         const input = ctx.workspace.inbounds.find(
           (item) => item.tag === link.dataset.inbound,
         );
-        state.data.inboundTag = input.tag;
-        state.data.protocol = input.protocol;
-        agentConfig();
+        if (input) navigate({ inboundTag: input.tag, protocol: input.protocol });
       }),
   );
   document.querySelectorAll("[data-protocol]").forEach(
     (link) =>
       (link.onclick = (event) => {
         event.preventDefault();
-        state.data.protocol = link.dataset.protocol;
-        state.data.inboundTag = "";
-        agentConfig();
+        navigate({ protocol: link.dataset.protocol, inboundTag: "" });
       }),
   );
   bindEvent(document.querySelector("[data-new-inbound]"), "click", () => {
-      state.data.inboundTag = "";
-      state.data.protocol = ctx.workspace.protocols[0]?.key;
-      agentConfig();
+      if (presetSavePending || ctx.generating || !current()) return;
+      navigate({ inboundTag: "", protocol: ctx.protocol.key });
   });
   document.querySelectorAll("[data-config-field]").forEach(
     (link) =>
       (link.onclick = (event) => {
         event.preventDefault();
-        state.data.configField = link.dataset.configField;
-        agentConfig();
+        navigate({ configField: link.dataset.configField });
       }),
   );
   document.querySelectorAll("[data-inbound-field]").forEach((link) => {
     link.onclick = (event) => {
       event.preventDefault();
-      state.data.configInboundField = link.dataset.inboundField;
-      agentConfig();
+      navigate({ configInboundField: link.dataset.inboundField });
     };
   });
   document.querySelectorAll("[data-secret-visibility]").forEach(
@@ -853,7 +1113,8 @@ function bindAgentConfigPage(ctx) {
       }),
   );
   const serverPlanForm = document.querySelector("#server-plan-form");
-  if (serverPlanForm) {
+  if (serverPlanForm) drafts().bind(serverPlanForm, draftKey("#server-plan-form"));
+  if (serverPlanForm && !fieldsOnly) {
     bindProtocolOptionVisibility(serverPlanForm);
     installGeneratedFieldButtons(serverPlanForm, ctx.protocol);
   }
@@ -863,13 +1124,15 @@ function bindAgentConfigPage(ctx) {
   const regenerateButtons = [
     ...(serverPlanForm?.querySelectorAll("[data-regenerate]") || []),
   ];
-  if (serverPlanForm && regenerateButtons.length && regenerateStatus) {
+  if (!fieldsOnly && serverPlanForm && regenerateButtons.length && regenerateStatus && can("agent-config.write")) {
     bindServerPlanRegeneration({
       form: serverPlanForm,
       buttons: regenerateButtons,
       api,
       base: ctx.base,
       protocol: ctx.protocol,
+      canApply: () => current() && !presetSavePending && !ctx.navigating,
+      onBusy: busy => { ctx.generating = busy; syncPresetControls(); },
       report: (message, tone = "success") => {
         regenerateStatus.classList.toggle("error", tone === "error");
         regenerateStatus.setAttribute(
@@ -879,128 +1142,221 @@ function bindAgentConfigPage(ctx) {
         regenerateStatus.textContent = message;
       },
       onApplied: (plan) => {
-        state.data.serverPlans[
+        if (!ctx.selectedInbound) state.data.serverPlans[
           `${ctx.agent.id}|${ctx.engine}|${ctx.protocol.key}`
         ] = plan;
       },
     });
   }
-  bindEvent(document.querySelector("#server-plan-form"), "submit", async (event) => {
-      event.preventDefault();
-      if (!ctx.engineInstalled) {
-        notify("请先安装当前内核，再提交校验或部署任务", "error");
-        return;
+  const operationKey = `${ctx.agent.id}|${ctx.engine}`;
+  const showStatus = (message, tone = "", task) => {
+    const previous = operationFor(operationKey);
+    const reload = task?.id && previous?.task?.id === task.id && previous.reload;
+    // Preserve the active watcher when only the post-save refresh failed.
+    if (task?.id && previous?.task?.id === task.id) Object.assign(previous, {message, tone, reload});
+    else saveOperation({key:operationKey, message, tone, task, reload});
+    renderPresetStatus();
+  };
+  renderPresetStatus();
+  if (!fieldsOnly) watchPresetOperation(operationFor(operationKey));
+  const forms = ["#server-plan-form", "#field-form", "#inbound-field-form", "#source-config-form"];
+  const canWrite = can("agent-config.write");
+  const canSubmit = canWrite && can("tasks.execute") && ctx.engineInstalled &&
+    ctx.agent.status === "online" && !ctx.agent.runtime?.[ctx.engine]?.existing_config_unsupported_reason;
+  const needsReload = () => operationFor(operationKey)?.reload;
+  const refreshButton = document.querySelector("[data-refresh-preset]");
+  bindEvent(refreshButton, "click", async () => {
+    if (presetSavePending || ctx.generating || ctx.navigating || !current()) return;
+    capturePresetDrafts();
+    ctx.navigating = ++presetNavigation;
+    syncPresetControls();
+    try {
+      await refreshPresetPage();
+    } catch (error) {
+      if (visible()) {
+        showStatus(`刷新失败：${error.message}。草稿已保留，可重试刷新。`, "error");
       }
-      const form = new FormData(event.currentTarget);
-      const input = readServerPlanInput(event.currentTarget, ctx.protocol);
-      try {
-        const result = await api(`${ctx.base}/server-inbounds`, {
-          method: "POST",
-          body: JSON.stringify({
-            operation: form.get("operation"),
-            original_tag: ctx.selectedInbound?.tag || "",
-            expected_version: ctx.workspace.config?.version || 0,
-            name:
-              ctx.workspace.config?.name ||
-              `${ctx.agent.name} · ${engineName(ctx.engine)}`,
-            description: `${ctx.protocol.name} 服务端入站，由 QControlHub 方案生成`,
-            intent: event.submitter?.dataset.planIntent || "validate",
-            preserve_ss_rust_globals: ctx.engine === "ss-rust",
-            input,
-          }),
-        });
-        state.data.inboundTag = input.tag;
-        notify("配置已保存，任务已提交");
-        if ((event.submitter?.dataset.planIntent || "validate") === "deploy" && result?.task?.id)
-          {
-            recordPendingDeploy(result.task.id, ctx.agent.id, ctx.engine);
-            monitorDeployTask(result.task.id, ctx.agent.id, ctx.engine);
-          }
-        await agentConfig();
-      } catch (error) {
-        notify(error.message, "error");
-      }
+    } finally {
+      ctx.navigating = false;
+      syncPresetControls();
+    }
   });
-  for (const perPort of [false, true]) {
-    bindEvent(document.querySelector(perPort ? "#inbound-field-form" : "#field-form"), "submit", async (event) => {
+  syncPresetControls = () => {
+    if (!visible()) return;
+    const blocked = presetSavePending || Boolean(ctx.navigating);
+    if (refreshButton) {
+      refreshButton.disabled = blocked || ctx.generating || needsReload();
+      refreshButton.textContent = ctx.navigating ? "正在加载…" : "刷新状态";
+    }
+    document.querySelector(".config-command-bar")?.setAttribute("aria-busy", String(blocked));
+    for (const selector of forms) {
+      const element = document.querySelector(selector);
+      if (!element) continue;
+      element.inert = blocked;
+      element.querySelectorAll("button[type=submit]").forEach((button) => {
+        button.disabled = !canSubmit || presetSavePending || ctx.generating || ctx.navigating || needsReload();
+      });
+    }
+  };
+  syncPresetControls();
+  for (const selector of forms) {
+    const element = document.querySelector(selector);
+    if (!element) continue;
+    drafts().bind(element, draftKey(selector));
+    element.noValidate = true;
+    element.querySelectorAll("button[type=submit]").forEach((button) => {
+      button.disabled = !canSubmit || presetSavePending || ctx.generating || ctx.navigating || needsReload();
+    });
+    if (!canWrite) element.querySelectorAll("input, select, textarea, [data-regenerate]").forEach((control) => {
+      control.disabled = true;
+    });
+    bindEvent(element, "submit", async (event) => {
       event.preventDefault();
-      if (!ctx.engineInstalled) {
-        notify("请先安装当前内核，再提交校验或部署任务", "error");
+      if (presetSavePending || ctx.generating || ctx.navigating || !current()) return;
+      if (!canSubmit || needsReload()) {
+        notify("当前节点、内核状态或账号权限不允许提交任务", "error");
         return;
       }
-      const form = new FormData(event.currentTarget);
+      // Keep DOM and intent references before the first await: currentTarget
+      // is cleared by the browser when event dispatch returns.
+      const formElement = element;
+      const sessionData = state.data;
+      const submitter = event.submitter;
+      const values = new FormData(formElement);
+      const isPlan = selector === "#server-plan-form";
+      const isSource = selector === "#source-config-form";
+      const perPort = selector === "#inbound-field-form";
+      const intent = submitter?.dataset[isPlan ? "planIntent" : isSource ? "sourceIntent" : "fieldIntent"] || "validate";
+      const operation = values.get("operation");
+      const deleting = isPlan && operation === "delete";
+      if (!deleting) {
+        const invalid = [...formElement.elements].find((control) => control.willValidate && !control.validity.valid);
+        if (invalid) {
+          const section = invalid.closest(".builder-section");
+          if (section) document.querySelector(`[data-builder-step="${section.id}"]`)?.click();
+          for (let parent = invalid.parentElement; parent; parent = parent.parentElement)
+            if (parent.tagName === "DETAILS") parent.open = true;
+          invalid.focus();
+          invalid.reportValidity();
+          showStatus("请检查已标出的必填项或参数格式。", "error");
+          return;
+        }
+      }
+      presetSavePending = true;
+      syncPresetControls();
+      const buttons = forms.flatMap((id) => [...document.querySelectorAll(`${id} button[type=submit]`)]);
+      const originalLabel = submitter?.textContent;
+      buttons.forEach((button) => (button.disabled = true));
+      formElement.setAttribute("aria-busy", "true");
+      if (submitter) submitter.textContent = "正在保存…";
+      let committedConfig, committedTask;
       try {
-        const result = await api(
-          configFieldURL(ctx.base, (perPort ? ctx.selectedInboundField : ctx.selectedField).key,
-            perPort ? ctx.selectedInbound?.tag || "" : undefined),
-          {
+        if (drafts().otherDirty(draftKey(selector), ctx.draftScope) && !(await confirmAction(
+          "本次只保存当前表单。其他入站、字段或源码中有未保存的修改，继续后这些草稿将被清除。是否继续？", "存在其他未保存修改",
+        ))) return;
+        if (deleting && !(await confirmAction(
+          `确定删除入站“${ctx.selectedInbound?.tag}”？${intent === "deploy" ? "将部署配置并重启内核。" : "本次只保存并校验，节点配置需部署后生效。"}`,
+          "删除入站",
+        ))) return;
+        if (!current() || !formElement.isConnected) return;
+        showStatus("正在保存配置并创建任务…");
+        let result;
+        let input;
+        if (isPlan) {
+          input = deleting ? ctx.selectedInbound : readServerPlanInput(formElement, ctx.protocol);
+          result = await api(`${ctx.base}/server-inbounds`, {
             method: "POST",
             body: JSON.stringify({
-              mutation: form.get("mutation"),
-              fragment: form.get("fragment"),
-              expected_version: ctx.workspace.config.version,
-              name: ctx.workspace.config.name,
-              description: ctx.workspace.config.description,
-              intent: event.submitter?.dataset.fieldIntent || "validate",
+              operation,
+              original_tag: operation === "add" ? "" : ctx.selectedInbound?.tag || "",
+              expected_version: ctx.workspace.config?.version || 0,
+              name: ctx.workspace.config?.name || `${ctx.agent.name} · ${engineName(ctx.engine)}`,
+              description: `${ctx.protocol.name} 服务端入站，由 QControlHub 方案生成`,
+              intent,
+              preserve_ss_rust_globals: ctx.engine === "ss-rust",
+              input,
             }),
-          },
-        );
-        notify("字段已保存，任务已提交");
-        if ((event.submitter?.dataset.fieldIntent || "validate") === "deploy" && result?.task?.id)
-          {
-            recordPendingDeploy(result.task.id, ctx.agent.id, ctx.engine);
-            monitorDeployTask(result.task.id, ctx.agent.id, ctx.engine);
+          });
+        } else if (isSource) {
+          result = await api(`${ctx.base}/source`, {
+            method: "POST",
+            body: JSON.stringify({
+              agent_id: ctx.agent.id, engine: ctx.engine, name: values.get("name"),
+              description: values.get("description"), content: values.get("content"),
+              version: ctx.workspace.config.version,
+              intent,
+            }),
+          });
+        } else {
+          result = await api(configFieldURL(ctx.base,
+            (perPort ? ctx.selectedInboundField : ctx.selectedField).key,
+            perPort ? ctx.selectedInbound?.tag || "" : undefined), {
+            method: "POST", body: JSON.stringify({
+              mutation: values.get("mutation"), fragment: values.get("fragment"),
+              expected_version: ctx.workspace.config.version,
+              name: ctx.workspace.config.name, description: ctx.workspace.config.description, intent,
+            }),
+          });
+        }
+        if (state.data !== sessionData) return;
+        committedConfig = result.config;
+        committedTask = result.task;
+        drafts().clear(ctx.draftScope);
+        if (intent === "deploy" && result?.task?.id) {
+          recordPendingDeploy(result.task.id, ctx.agent.id, ctx.engine);
+        }
+        showStatus(`配置 v${result.config.version} 已保存，${intent === "deploy" ? "部署" : "校验"}任务已提交。`, "", result.task);
+        const operationStatus = operationFor(operationKey);
+        Object.assign(operationStatus, {version:result.config.version, intent});
+        watchPresetOperation(operationStatus);
+        if (isPlan) {
+          if (state.data.agentId === ctx.agent.id && state.data.engine === ctx.engine)
+            state.data.inboundTag = deleting ? "" : input.tag;
+          // Never reuse a committed identity when starting another inbound,
+          // even if the user left the preset page while saving.
+          state.data.serverPlans[operationKey + "|" + ctx.protocol.key] = null;
+        }
+        if (!current()) {
+          if (state.route === "agent-config" && state.data.agentId === ctx.agent.id && state.data.engine === ctx.engine) {
+            await refreshPresetPage();
           }
-        await agentConfig();
+          return;
+        }
+        // Keep the whole operation locked until the saved revision is bound.
+        await refreshPresetPage();
       } catch (error) {
-        notify(error.message, "error");
+        if (current()) {
+          if (committedConfig && committedTask) {
+            showStatus(`配置 v${committedConfig.version} 已保存且任务已提交，页面刷新失败：${error.message}。请重新加载后继续编辑。`, "error", committedTask);
+            operationFor(operationKey).reload = true;
+            renderPresetStatus();
+          } else {
+            const uncertain = !error.status || error.status >= 500;
+            showStatus(error.status === 409
+              ? `配置或节点状态已变化：${error.message}。草稿已保留，请重新加载后再编辑。`
+              : uncertain ? `未能确认保存结果：${error.message}。草稿已保留，请重新加载核对版本后再提交。` : error.message, "error");
+            if (error.status === 409 || uncertain) {
+              operationFor(operationKey).reload = true;
+              renderPresetStatus();
+            }
+          }
+          notify(error.message, "error");
+        }
+      } finally {
+        presetSavePending = false;
+        formElement.removeAttribute("aria-busy");
+        if (submitter) submitter.textContent = originalLabel;
+        if (formElement.isConnected && current())
+          buttons.forEach((button) => (button.disabled = !canSubmit));
+        syncPresetControls();
       }
-  });
+    });
   }
-  bindEvent(document.querySelector("#source-config-form"), "submit", async (event) => {
-      event.preventDefault();
-      if (!ctx.engineInstalled) {
-        notify("请先安装当前内核，再提交校验或部署任务", "error");
-        return;
-      }
-      const form = new FormData(event.currentTarget);
-      try {
-        const saved = await api(`${ctx.base}`, {
-          method: "PUT",
-          body: JSON.stringify({
-            agent_id: ctx.agent.id,
-            engine: ctx.engine,
-            name: form.get("name"),
-            description: form.get("description"),
-            content: form.get("content"),
-            version: ctx.workspace.config.version,
-          }),
-        });
-        const task = await api("/tasks", {
-          method: "POST",
-          body: JSON.stringify({
-            agent_id: ctx.agent.id,
-            engine: ctx.engine,
-            action: event.submitter?.dataset.sourceIntent || "validate",
-            config_id: saved.id,
-            expected_config_version: saved.version,
-          }),
-        });
-        notify("源码已保存，任务已提交");
-        if ((event.submitter?.dataset.sourceIntent || "validate") === "deploy" && task?.id)
-          {
-            recordPendingDeploy(task.id, ctx.agent.id, ctx.engine);
-            monitorDeployTask(task.id, ctx.agent.id, ctx.engine);
-          }
-        await agentConfig();
-      } catch (error) {
-        notify(error.message, "error");
-      }
-  });
   document.querySelectorAll("[data-builder-workbench]").forEach((workbench) => {
     const links = [...workbench.querySelectorAll("[data-builder-step]")];
     const sections = [...workbench.querySelectorAll(".builder-sections > .builder-section")];
     if (!links.length || !sections.length) return;
+    links[0].parentElement?.setAttribute("role", "tablist");
     const activate = (id) => {
       const selected = sections.find((section) => section.id === id) || sections[0];
       state.data.builderStep = selected.id;
@@ -1021,6 +1377,14 @@ function bindAgentConfigPage(ctx) {
     links.forEach((link) => bindEvent(link, "click", (event) => {
       event.preventDefault();
       activate(link.dataset.builderStep);
+    }));
+    links.forEach((link,index) => bindEvent(link, "keydown", event => {
+      if (!["ArrowLeft","ArrowRight","Home","End"].includes(event.key)) return;
+      event.preventDefault();
+      const next = event.key === "Home" ? 0 : event.key === "End" ? links.length - 1 :
+        (index + (event.key === "ArrowRight" ? 1 : -1) + links.length) % links.length;
+      activate(links[next].dataset.builderStep);
+      links[next].focus();
     }));
     activate(state.data.builderStep || sections[0].id);
   });
@@ -1120,13 +1484,13 @@ async function liveConfig() {
     sourceContent: source?.content,
     formContent: current?.content,
   });
-  const configFilesSupported = (agent.features || []).includes("config-files-v1");
+  const configFilesSupported = (agent.features || []).includes("config-files-paired-v1");
   const liveActions = unsupportedReason || !can("operator")
     ? ""
     : importSource
       ? '<button class="button primary" type="submit" data-live-intent="import">手动导入并迁移</button>'
       : '<button class="button" type="submit" data-live-intent="validate">保存并校验</button>' +
-        (["xray", "sing-box"].includes(engine) ? `<button class="button" type="submit" data-live-intent="migrate-files" ${configFilesSupported ? "" : 'disabled title="请先升级 Agent 以支持多文件迁移"'}>单文件迁移到多文件</button>` : '') +
+        (["xray", "sing-box"].includes(engine) ? `<button class="button" type="submit" data-live-intent="migrate-files" ${configFilesSupported ? "" : 'disabled title="请先升级 Agent 以支持入站与出口成套文件"'}>生成入站与出口成套文件</button>` : '') +
         '<button class="button primary" type="submit" data-live-intent="deploy">保存并部署</button>';
   let sourceSwitch = existingAvailable
     ? `<nav class="live-config-source-switch" aria-label="配置来源">${managedAvailable ? `<button class="${sourceMode === "managed" ? "active" : ""}" type="button" data-live-source="managed"><b>QAgent 配置</b><small>/etc/qagent 托管</small></button>` : ""}<button class="${sourceMode === "import" ? "active" : ""}" type="button" data-live-source="import"><b>系统服务配置</b><small>可选导入</small></button></nav>`
@@ -1211,8 +1575,8 @@ async function liveConfig() {
           if (importSource || !configFiles || !["xray", "sing-box"].includes(engine))
             throw new Error("多文件迁移仅支持 Xray / sing-box 的 QAgent 托管配置");
           if (!(await confirmAction(
-            `将当前编辑内容保存为一个数据库版本，并在节点生成 ${configFiles.paths().length} 个源码文件（公共配置及独立入站/出站）。Agent 校验、备份后重启内核，失败回滚；内核仍读取固定路径的合并配置。已有多文件包时可安全重新生成。确定迁移？`,
-            "单文件迁移到多文件",
+            `将当前编辑内容保存为一个数据库版本，并在节点生成 ${configFiles.paths().length} 个源码文件（公共配置及成套入站与独立出口）。Agent 校验、备份后重启内核，失败回滚；内核仍读取固定路径的合并配置。已有多文件包时可安全重新生成。确定迁移？`,
+            "生成入站与出口成套文件",
           ))) return;
         }
         if (
@@ -1249,7 +1613,7 @@ async function liveConfig() {
         if (intent === "import") {
           notify("配置已保存，服务迁移任务已提交");
         }
-        if (migrateFiles) notify("多文件迁移任务已提交；完成后可切换查看公共、入站及出站文件");
+        if (migrateFiles) notify("多文件迁移任务已提交；完成后每个入站与独立出口在同一文件中查看");
         state.data.liveSources[sourceKey] = {
           ...source,
           content: result.content,
@@ -1595,5 +1959,5 @@ async function archiveConfigs() {
       }),
   );
 }
-  return { agentConfig, liveConfig, archiveConfigs };
+  return { agentConfig, liveConfig, archiveConfigs, capturePresetDrafts, presetHasUnsavedChanges };
 }

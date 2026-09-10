@@ -339,6 +339,25 @@ func (s *Store) SaveAgentConfigWithClientMetadata(ctx context.Context, input cor
 }
 
 func (s *Store) saveAgentConfig(ctx context.Context, input core.Config, expectedVersion int, metadataMutation *ConfigClientMetadataMutation) (core.Config, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return core.Config{}, err
+	}
+	defer tx.Rollback(ctx)
+	saved, err := s.saveAgentConfigTx(ctx, tx, input, expectedVersion, metadataMutation)
+	if err != nil {
+		return core.Config{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return core.Config{}, err
+	}
+	return saved, nil
+}
+
+func (s *Store) saveAgentConfigTx(ctx context.Context, tx pgx.Tx, input core.Config, expectedVersion int, metadataMutation *ConfigClientMetadataMutation) (core.Config, error) {
+	if metadataMutation != nil && !metadataMutation.Delete && strings.TrimSpace(metadataMutation.Content) != "" && s.cryptor == nil {
+		return core.Config{}, fmt.Errorf("%w: QCH_CONFIG_ENCRYPTION_KEY is required for client-only configuration secrets", ErrSecretUnavailable)
+	}
 	if input.AgentID == "" {
 		return core.Config{}, fmt.Errorf("%w: agent ID is required", ErrInvalid)
 	}
@@ -373,11 +392,6 @@ func (s *Store) saveAgentConfig(ctx context.Context, input core.Config, expected
 			}
 		}
 	}
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return core.Config{}, err
-	}
-	defer tx.Rollback(ctx)
 	var capabilitiesJSON []byte
 	if err := tx.QueryRow(ctx, `SELECT capabilities FROM agents WHERE id=$1 AND revoked_at IS NULL FOR UPDATE`, input.AgentID).Scan(&capabilitiesJSON); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -474,9 +488,6 @@ func (s *Store) saveAgentConfig(ctx context.Context, input core.Config, expected
 				return core.Config{}, mapError(err)
 			}
 		}
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return core.Config{}, err
 	}
 	return saved, nil
 }

@@ -31,3 +31,13 @@ func TestReconcileShadowsocksRustPoliciesKeepsPerPortSourceAndSharesDestination(
 		t.Fatalf("removed inbound policy was retained: %+v", policies)
 	}
 }
+
+func TestSSRustSourceEditsKeepRestrictions(t *testing.T) {
+	existing := []core.MainlandAccessPolicy{{AgentID: "node", Engine: core.EngineShadowsocksRust, Tag: "one", Port: 8388, BlockMainlandSource: true}}
+	for _, entry := range []serverconfig.MainlandAccessPolicy{{Tag: "one", Port: 8389}, {Tag: "renamed", Port: 8388}} {
+		policies := reconcileShadowsocksRustPolicies([]serverconfig.MainlandAccessPolicy{entry}, existing, "node", 2, false, "", 0, false, false)
+		if len(policies) != 1 || !policies[0].BlockMainlandSource || policies[0].Tag != entry.Tag || policies[0].Port != entry.Port {
+			t.Fatalf("edit lost restriction: %+v", policies)
+		}
+	}
+}

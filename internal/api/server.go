@@ -317,9 +317,10 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("PUT /api/v1/agents/{id}/configs/{engine}/files", s.requirePermission(core.PermissionAgentConfigWrite, http.HandlerFunc(s.putAgentConfigFiles)))
 	mux.Handle("GET /api/v1/agents/{id}/configs/{engine}/workspace", s.requirePermission(core.PermissionAgentConfigRead, http.HandlerFunc(s.agentConfigWorkspace)))
 	mux.Handle("POST /api/v1/agents/{id}/configs/{engine}/plans", s.requirePermission(core.PermissionAgentConfigWrite, http.HandlerFunc(s.newServerPlan)))
-	mux.Handle("POST /api/v1/agents/{id}/configs/{engine}/server-inbounds", s.requirePermission(core.PermissionAgentConfigWrite, http.HandlerFunc(s.saveServerInbound)))
+	mux.Handle("POST /api/v1/agents/{id}/configs/{engine}/server-inbounds", s.requireAllPermissions([]core.Permission{core.PermissionAgentConfigWrite, core.PermissionTasksExecute}, http.HandlerFunc(s.saveServerInbound)))
 	mux.Handle("GET /api/v1/agents/{id}/configs/{engine}/fields/{key}", s.requirePermission(core.PermissionAgentConfigRead, http.HandlerFunc(s.getConfigField)))
-	mux.Handle("POST /api/v1/agents/{id}/configs/{engine}/fields/{key}", s.requirePermission(core.PermissionAgentConfigWrite, http.HandlerFunc(s.saveConfigField)))
+	mux.Handle("POST /api/v1/agents/{id}/configs/{engine}/fields/{key}", s.requireAllPermissions([]core.Permission{core.PermissionAgentConfigWrite, core.PermissionTasksExecute}, http.HandlerFunc(s.saveConfigField)))
+	mux.Handle("POST /api/v1/agents/{id}/configs/{engine}/source", s.requireAllPermissions([]core.Permission{core.PermissionAgentConfigWrite, core.PermissionTasksExecute}, http.HandlerFunc(s.savePresetSource)))
 	mux.Handle("GET /api/v1/configs", s.requirePermission(core.PermissionConfigsRead, http.HandlerFunc(s.listConfigs)))
 	mux.Handle("POST /api/v1/configs", s.requirePermission(core.PermissionConfigsWrite, http.HandlerFunc(s.createConfig)))
 	mux.Handle("PUT /api/v1/configs/{id}", s.requirePermission(core.PermissionConfigsWrite, http.HandlerFunc(s.updateConfig)))
@@ -494,7 +495,7 @@ func (s *Server) saveAgentConfigResponse(w http.ResponseWriter, request *http.Re
 		writeStoreError(w, err)
 		return
 	}
-	s.refreshPortTrafficMonitoring(request.Context(), "")
+	s.refreshSavedAgentTrafficMonitoring(request.Context(), config.AgentID)
 	writeJSON(w, http.StatusOK, config)
 }
 
@@ -659,7 +660,11 @@ func (s *Server) createTask(w http.ResponseWriter, request *http.Request) {
 }
 
 func (s *Server) getTask(w http.ResponseWriter, request *http.Request) {
-	task, err := s.store.GetTask(request.Context(), request.PathValue("id"))
+	read := s.store.GetTask
+	if request.URL.Query().Get("view") == "status" {
+		read = s.store.GetTaskState
+	}
+	task, err := read(request.Context(), request.PathValue("id"))
 	if err != nil {
 		writeStoreError(w, err)
 		return

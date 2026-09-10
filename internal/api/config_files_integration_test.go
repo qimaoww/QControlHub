@@ -65,10 +65,10 @@ func TestConfigFilesVersionedWithPostgreSQL(t *testing.T) {
 		Version int                       `json:"version"`
 		Files   []serverconfig.ConfigFile `json:"files"`
 	}
-	if err := json.Unmarshal(response.Body.Bytes(), &bundle); err != nil || response.Code != 200 || len(bundle.Files) != 3 {
+	if err := json.Unmarshal(response.Body.Bytes(), &bundle); err != nil || response.Code != 200 || len(bundle.Files) != 2 {
 		t.Fatalf("read files: %d %s %v", response.Code, response.Body.String(), err)
 	}
-	if bundle.Files[1].Path != "inbounds/a.json" || bundle.Files[2].Path != "outbounds/direct.json" {
+	if bundle.Files[1].Path != "inbounds/a.json" || !strings.Contains(bundle.Files[0].Content, "direct") {
 		t.Fatalf("preset names not exposed: %+v", bundle.Files)
 	}
 	bundle.Files[1].Content = `{"inbounds":[{"tag":"VLESS-REALITY-443","port":2080}]}`

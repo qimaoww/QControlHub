@@ -19,6 +19,7 @@ import {
 import { orderNodesBySavedOrder } from "./modules/node-order.js";
 import { createScopedAPI } from "./modules/requests.js";
 import { errorMessage, requestJSON } from "./modules/errors.js";
+import { readPresetRoute } from "./modules/preset-route.js";
 
 const app = document.querySelector("#app");
 const themeStorageKey = "qcontrolhub-color-theme";
@@ -780,7 +781,7 @@ function contextMarkup(title) {
     return `<nav class="context-menu" aria-label="设置目录"><a class="active" href="#settings-engines"><span>01</span>默认内核能力</a><a href="#settings-basic"><span>02</span>基础设置</a><a href="#settings-runtime"><span>03</span>任务与同步</a><a href="#settings-data"><span>04</span>数据与日志</a><a href="#settings-notify"><span>05</span>事件通知</a><a href="#settings-komari"><span>06</span>Komari 联动</a><a href="#settings-deployment"><span>07</span>部署状态</a></nav>`;
   const agent = (state.data.agents || []).find(
     (item) => item.id === state.data.agentId,
-  );
+  ) || (state.data.presetAgent?.id === state.data.agentId ? state.data.presetAgent : null);
   const caps = agent?.capabilities || engines;
   const installed = installedEngineCount(agent);
   return `<a class="context-back" href="#agents">← 返回内核预设</a><div class="context-section-label"><span>选择内核</span><b>${installed}/${caps.length}</b></div><nav class="context-list engine-context-list">${caps.map((engine) => `<a class="${state.data.engine === engine ? "active" : ""}" href="#agent-config" data-engine-select="${esc(engine)}"><span class="context-engine ${esc(engine)}">${esc(engineName(engine))}</span><span><strong>${esc(engineName(engine))}</strong><small>${agent?.runtime?.[engine]?.installed ? "服务端入站" : "尚未安装"}</small></span></a>`).join("")}</nav><ol class="context-steps"><li class="active"><b>1</b><span>选择入站</span></li><li><b>2</b><span>编辑参数</span></li><li><b>3</b><span>校验或部署</span></li></ol>`;
@@ -816,7 +817,14 @@ async function renderOnce() {
   clearTimeout(state.coreLogPollTimer);
   clearTimeout(state.bbrPollTimer);
   clearTimeout(state.agentPollTimer);
-  const hash = location.hash.slice(1);
+  const presetSelection = readPresetRoute(location.hash);
+  const hash = presetSelection ? "agent-config" : location.hash.slice(1);
+  if (presetSelection) {
+    if (state.data.agentId !== presetSelection.agentId || state.data.engine !== presetSelection.engine) {
+      Object.assign(state.data, {protocol:"", inboundTag:"", configField:"", configInboundField:""});
+    }
+    Object.assign(state.data, presetSelection);
+  }
   const routeMap = {
     summary: "dashboard",
     fleet: "dashboard",
@@ -904,6 +912,8 @@ async function renderOnce() {
       void api("/tasks?limit=7").catch(() => {});
     if (state.route === "settings")
       void api("/settings/deployment").catch(() => {});
+    if (state.route === "agent-config" && state.data.agentId && state.data.engine && can("agent-config.read"))
+      void api(`/agents/${encodeURIComponent(state.data.agentId)}/configs/${encodeURIComponent(state.data.engine)}/workspace`).catch(() => {});
     const hasSharedData =
       state.data.overview !== undefined && state.data.settings !== undefined;
     const sharedDataPromise = Promise.all([
@@ -963,6 +973,13 @@ async function renderOnce() {
       );
   } finally {
     scopedAPI.end();
+    // A same-page load error keeps the existing editor. Always release its
+    // transition indicator, but never clear a newer navigation's state.
+    if (state.routeSignal === renderSignal && !renderSignal.aborted) {
+      const main = app.querySelector(".workspace-main");
+      main?.classList.remove("is-route-pending");
+      main?.removeAttribute("aria-busy");
+    }
   }
 }
 const scheduleRender = createLatestRenderScheduler(renderOnce, {
@@ -976,9 +993,15 @@ function primeRouteTransition() {
   main.setAttribute("aria-busy", "true");
 }
 const render = () => {
+  configModule.capturePresetDrafts();
   primeRouteTransition();
   state.navigationEpoch += 1;
   return scheduleRender();
 };
 window.addEventListener("hashchange", render);
+window.addEventListener("beforeunload", event => {
+  if (!configModule.presetHasUnsavedChanges()) return;
+  event.preventDefault();
+  event.returnValue = "";
+});
 render();

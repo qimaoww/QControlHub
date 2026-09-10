@@ -1,6 +1,8 @@
 package serverconfig
 
 import (
+	"encoding/json"
+	"reflect"
 	"testing"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
@@ -45,6 +47,38 @@ func TestEveryPresetHasIndependentAccounting(t *testing.T) {
 				}
 				if len(plan.Ports) != 2 {
 					t.Fatalf("ports: %+v", plan.Ports)
+				}
+				if engine == core.EngineXray || engine == core.EngineSingBox {
+					files, err := SplitConfigFiles(engine, plan.Content)
+					if err != nil || len(files) != 3 {
+						t.Fatalf("preset must have common + two paired files: %+v %v", files, err)
+					}
+					for i, port := range plan.Ports {
+						var fragment struct {
+							Inbounds  []map[string]any `json:"inbounds"`
+							Outbounds []struct {
+								Tag string `json:"tag"`
+							} `json:"outbounds"`
+						}
+						if err := json.Unmarshal([]byte(files[i+1].Content), &fragment); err != nil || len(fragment.Inbounds) != 1 || len(fragment.Outbounds) == 0 {
+							t.Fatalf("missing paired exit: %s %v", files[i+1].Content, err)
+						}
+						var tags []string
+						for _, out := range fragment.Outbounds {
+							tags = append(tags, out.Tag)
+						}
+						if !reflect.DeepEqual(tags, port.Outbounds) {
+							t.Fatalf("incorrect outbound ownership: %v != %v", tags, port.Outbounds)
+						}
+					}
+					roundTrip, err := MergeConfigFiles(engine, files)
+					if err != nil {
+						t.Fatal(err)
+					}
+					again, err := PrepareAccounting(engine, roundTrip)
+					if err != nil || !reflect.DeepEqual(plan, again) {
+						t.Fatalf("paired files changed preset accounting: %v", err)
+					}
 				}
 				// Editing a deployed preset must rebuild its old per-port copies.
 				source, err = PresetAccountingSource(engine, plan.Content)

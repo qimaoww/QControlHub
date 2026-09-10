@@ -1,0 +1,32 @@
+[
+  {
+    "name": "multiple exits per inbound",
+    "config": {"inbounds":[{"tag":"a","port":1080,"listen_port":1080},{"tag":"b","port":1081,"listen_port":1081}],"outbounds":[{"tag":"direct"},{"tag":"proxy"},{"tag":"qch-trf-1080-111111111111"},{"tag":"qch-trf-1080-222222222222"},{"tag":"qch-trf-1081-111111111111"}],"routing":{"rules":[{"inboundTag":["a"],"outboundTag":"qch-trf-1080-222222222222"}]}},
+    "outbound_counts": [2,2,1]
+  },
+  {
+    "name": "shared exit after dedicated exits preserves order",
+    "config": {"inbounds":[{"tag":"a","port":1080,"listen_port":1080}],"outbounds":[{"tag":"qch-trf-1080-111111111111"},{"tag":"direct"}]},
+    "outbound_counts": [2,0]
+  },
+  {
+    "name": "reordered inbound keeps original default",
+    "config": {"inbounds":[{"tag":"b","port":1081,"listen_port":1081},{"tag":"a","port":1080,"listen_port":1080}],"outbounds":[{"tag":"direct"},{"tag":"qch-trf-1080-111111111111"},{"tag":"qch-trf-1081-111111111111"}]},
+    "outbound_counts": [2,1,0]
+  },
+  {
+    "name": "duplicate port is not assigned to either inbound",
+    "config": {"inbounds":[{"tag":"a","port":1080,"listen_port":1080},{"tag":"b","port":1080,"listen_port":1080}],"outbounds":[{"tag":"qch-trf-1080-111111111111"}]},
+    "outbound_counts": [1,0,0]
+  },
+  {
+    "name": "dedicated default without shared exits",
+    "config": {"inbounds":[{"tag":"a","port":" +1080 ","listen_port":" +1080 "}],"outbounds":[{"tag":"qch-trf-1080-111111111111"}]},
+    "outbound_counts": [0,1]
+  },
+  {
+    "name": "unknown port stays in common",
+    "config": {"inbounds":[{"tag":"a","port":1080,"listen_port":1080}],"outbounds":[{"tag":"qch-trf-1081-111111111111"}]},
+    "outbound_counts": [1,0]
+  }
+]
