@@ -19,7 +19,7 @@ DOM instead of replacing the application tree.
 | Client access | client profiles and agents | route, sidebar/filter/search selection, address mutation | refresh channel plus same-route reconciliation |
 | Config archive | configs, templates, agents, revisions | route, selection, save/restore/delete/template mutation | request sequence guard plus same-route reconciliation |
 | Tasks | tasks, agents, bounded settings cache | route, manual refresh, 0.6–5-second timer, cancel/retry | one effective request; keyed task-card reconciliation and in-place clock patches |
-| Core logs | logs and agents | route, filters, 10-second timer | one timer and refresh channel; keyed log reconciliation |
+| Core logs | logs, agents, stored view | route, restored view, filters, 10-second timer | one timer and refresh channel; keyed log reconciliation |
 | Traffic | agents and traffic policies | route, 5-second timer, create/edit/reset/delete | one timer and refresh channel; keyed policy reconciliation |
 | Settings | panel settings and users | route and settings/user mutations | same-route reconciliation |
 
@@ -66,6 +66,10 @@ snapshot is applied through the guarded live-config route.
 - Mutation notices use a fixed overlay and never scroll or shift the workspace.
 - Leaving node settings explicitly cancels pointer/FLIP state, removes its
   ghost, and discards queued callbacks from the departed page.
+- The kernel log page keeps its node scope, engine, level, keyword, per-engine
+  window, and live-update switch in browser storage. A fresh visit restores
+  that view, while an unreadable or invalid record falls back to the default
+  view instead of sending an invalid filter to the API.
 
 ## Runtime performance contract
 
