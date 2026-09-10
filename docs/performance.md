@@ -238,6 +238,20 @@ go test ./internal/api -run '^(TestLocalDatabasePressure|TestRemoteDatabasePress
 | 拆分：快照入侧表 + `fillfactor=70` | **100%** | **146** | 823 B |
 | 仅瘦身（保留 2 语句侧表写入） | 100% | 299 | 770 B |
 
+这些结论现在由 `internal/store/performance_invariants_test.go` 在 CI 中守着。它们断言的是**数据库不变量**而不是墙钟耗时：
+共享 runner 上的时间阈值只是噪声，而执行计划形状和存储增长是确定的。
+
+| 断言 | 回归后会怎样 |
+| --- | --- |
+| 日志窗口计划必须是 `Index Only Scan` 且 `Heap Fetches = 0` | 投影或索引不再覆盖时，计划退化为每行一次随机回页读 |
+| `port_traffic_policies` 在 200 次上报后增长 ≤ 256 KB | 页预留空间消失后，25 行的表会无界增长 |
+| `agents`/`agent_live_state` 保持 `fillfactor=70`，`last_seen` 索引不存在，`agents.metrics` 不存在 | 从旧备份恢复会把这些设置带回来，静默恢复原有的写放大 |
+
+存储增长断言使用 `pg_relation_size` 而非 `pg_stat_user_tables` 的 HOT 计数：后者属于整个数据库，
+任意测试调用 `pg_stat_reset` 都会清零其他测试的计数，使断言只在单独运行时可复现。同理，
+Agent 写入路径只断言结构与设置，不断言绝对字节数——那会随共享数据库上的 TOAST 与清理时序漂移，
+一个靠运气的 CI 断言比没有断言更糟。
+
 v50 因此做了三件事：
 
 1. Agent 上报的指标快照移入 `agent_live_state`（两列 + 主键，`fillfactor=70`），每次推送只重写一行窄元组；

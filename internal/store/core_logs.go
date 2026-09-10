@@ -120,6 +120,35 @@ func (s *Store) PruneCoreLogBatches(ctx context.Context, olderThan time.Time) (i
 	return command.RowsAffected(), nil
 }
 
+// coreLogWindowStatement renders the window query and its arguments.
+//
+// It is split out so the query plan can be inspected against the production
+// statement itself rather than a copy: the covering index only helps while the
+// projection and the predicate are exactly these, and a copy would let the two
+// drift apart silently.
+func coreLogWindowStatement(query CoreLogQuery, engines []string) (string, []any) {
+	// Bound each engine's indexed scan before merging the results. A busy
+	// engine must not consume the other engines' slots, and we should not rank
+	// the entire retained log history just to display a small recent window.
+	where := "engine=selected.engine"
+	args := []any{engines, query.Limit}
+	for _, filter := range []struct{ column, value string }{{"agent_id", query.AgentID}, {"level", query.Level}} {
+		if filter.value != "" {
+			args = append(args, filter.value)
+			where += fmt.Sprintf(" AND %s=$%d", filter.column, len(args))
+		}
+	}
+	if query.Search != "" {
+		args = append(args, query.Search)
+		where += fmt.Sprintf(" AND position(lower($%d) in lower(message)) > 0", len(args))
+	}
+	if query.Before > 0 {
+		args = append(args, query.Before)
+		where += fmt.Sprintf(" AND id<$%d", len(args))
+	}
+	return fmt.Sprintf(coreLogWindowSQL, where), args
+}
+
 // coreLogWindowSQL bounds each engine's indexed scan before merging the
 // results. A busy engine must not consume the other engines' slots, and we
 // should not rank the entire retained log history just to display a small
@@ -157,26 +186,8 @@ func (s *Store) ListCoreLogs(ctx context.Context, query CoreLogQuery) ([]core.Co
 	if query.Engine != "" {
 		engines = []string{string(query.Engine)}
 	}
-	// Bound each engine's indexed scan before merging the results. A busy
-	// engine must not consume the other engines' slots, and we should not rank
-	// the entire retained log history just to display a small recent window.
-	where := "engine=selected.engine"
-	args := []any{engines, query.Limit}
-	for _, filter := range []struct{ column, value string }{{"agent_id", query.AgentID}, {"level", query.Level}} {
-		if filter.value != "" {
-			args = append(args, filter.value)
-			where += fmt.Sprintf(" AND %s=$%d", filter.column, len(args))
-		}
-	}
-	if query.Search != "" {
-		args = append(args, query.Search)
-		where += fmt.Sprintf(" AND position(lower($%d) in lower(message)) > 0", len(args))
-	}
-	if query.Before > 0 {
-		args = append(args, query.Before)
-		where += fmt.Sprintf(" AND id<$%d", len(args))
-	}
-	rows, err := s.pool.Query(ctx, fmt.Sprintf(coreLogWindowSQL, where), args...)
+	statement, args := coreLogWindowStatement(query, engines)
+	rows, err := s.pool.Query(ctx, statement, args...)
 	if err != nil {
 		return nil, err
 	}

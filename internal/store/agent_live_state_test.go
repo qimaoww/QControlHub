@@ -121,64 +121,6 @@ func TestAgentLiveStateSplitMigratesWideAgentRows(t *testing.T) {
 	}
 }
 
-// TestAgentMetricsPushBecomesHeapOnlyUpdate covers the reason the split exists.
-// A per-second metrics push still refreshes last_seen, so it cannot always be a
-// heap-only update, but on a narrow row it must start qualifying instead of
-// rewriting the row and every index that points at it on every push.
-func TestAgentMetricsPushBecomesHeapOnlyUpdate(t *testing.T) {
-	s := openPerformanceStore(t)
-	ctx := context.Background()
-	agentID := seedLiveStateAgent(t, s, "live state fixture")
-
-	push := func(cpu float64) {
-		t.Helper()
-		if err := s.UpdateAgentMetrics(ctx, agentID, core.HostMetrics{
-			CPUAvailable: true, CPUPercent: cpu,
-			MemoryAvailable: true, MemoryUsedBytes: 100, MemoryTotalBytes: 400,
-			NetworkAvailable: true, NetworkRXBPS: 1, NetworkTXBPS: 2,
-		}); err != nil {
-			t.Fatalf("metrics push: %v", err)
-		}
-	}
-	push(1)
-	if _, err := s.pool.Exec(ctx, `VACUUM (FULL, ANALYZE) agents`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.pool.Exec(ctx, `VACUUM (FULL, ANALYZE) agent_live_state`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.pool.Exec(ctx, `SELECT pg_stat_reset()`); err != nil {
-		t.Fatal(err)
-	}
-
-	const pushes = 200
-	for index := range pushes {
-		push(float64(index % 100))
-	}
-
-	stats := readTableWriteStats(t, s, "agents")
-	if stats.updates == 0 {
-		t.Fatal("metrics pushes did not refresh the agents row")
-	}
-	if stats.hot == 0 {
-		t.Fatalf("agents took %d updates with no heap-only update; the row is still too wide", stats.updates)
-	}
-
-	// The snapshot itself must have landed in the side table.
-	var stored []byte
-	if err := s.pool.QueryRow(ctx, `SELECT metrics FROM agent_live_state WHERE agent_id=$1`, agentID).Scan(&stored); err != nil {
-		t.Fatalf("read live state: %v", err)
-	}
-	var decoded core.HostMetrics
-	if err := json.Unmarshal(stored, &decoded); err != nil {
-		t.Fatal(err)
-	}
-	// Percentage 0 comes back as 0, so assert against the last pushed value.
-	if decoded.CPUPercent != float64((pushes-1)%100) {
-		t.Fatalf("live state cpu percent = %v, want %v", decoded.CPUPercent, float64((pushes-1)%100))
-	}
-}
-
 // TestAgentHeartbeatWithoutMetricsClearsProbes covers the branch a heartbeat
 // takes when it carries no metrics: the Agent can no longer probe, so the
 // addresses it probed earlier must stop being advertised, while the interface
