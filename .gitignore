@@ -19,3 +19,6 @@
 .idea/
 .vscode/
 ".jspace/"  
+
+# Local Go build and module caches used by tooling in this checkout.
+.cache/

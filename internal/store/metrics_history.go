@@ -17,15 +17,16 @@ func (s *Store) RecordAgentMetricSamples(ctx context.Context, sampledAt time.Tim
 		INSERT INTO metric_samples (
 			agent_id, sampled_at, cpu_percent, memory_percent, rx_rate_bps, tx_rate_bps
 		)
-		SELECT id, $1,
-			CASE WHEN metrics->>'cpu_available' = 'true' THEN (metrics->>'cpu_percent')::real ELSE 0 END,
-			CASE WHEN metrics->>'memory_available' = 'true' AND (metrics->>'memory_total_bytes')::bigint > 0
-				THEN round(100.0 * (metrics->>'memory_used_bytes')::bigint / (metrics->>'memory_total_bytes')::bigint)
+		SELECT agents.id, $1,
+			CASE WHEN live.metrics->>'cpu_available' = 'true' THEN (live.metrics->>'cpu_percent')::real ELSE 0 END,
+			CASE WHEN live.metrics->>'memory_available' = 'true' AND (live.metrics->>'memory_total_bytes')::bigint > 0
+				THEN round(100.0 * (live.metrics->>'memory_used_bytes')::bigint / (live.metrics->>'memory_total_bytes')::bigint)
 				ELSE 0 END,
-			CASE WHEN metrics->>'network_available' = 'true' THEN (metrics->>'network_rx_bps')::bigint ELSE 0 END,
-			CASE WHEN metrics->>'network_available' = 'true' THEN (metrics->>'network_tx_bps')::bigint ELSE 0 END
+			CASE WHEN live.metrics->>'network_available' = 'true' THEN (live.metrics->>'network_rx_bps')::bigint ELSE 0 END,
+			CASE WHEN live.metrics->>'network_available' = 'true' THEN (live.metrics->>'network_tx_bps')::bigint ELSE 0 END
 		FROM agents
-		WHERE revoked_at IS NULL AND metrics IS NOT NULL AND metrics <> '{}'::jsonb
+		JOIN agent_live_state live ON live.agent_id = agents.id
+		WHERE revoked_at IS NULL AND live.metrics IS NOT NULL AND live.metrics <> '{}'::jsonb
 		ON CONFLICT (agent_id, sampled_at) DO NOTHING`, sampledAt)
 	if err != nil {
 		return 0, fmt.Errorf("record metric samples: %w", err)

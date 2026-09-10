@@ -840,10 +840,12 @@ func waitRawPublicIPProbeRowAPI(t *testing.T, ctx context.Context, databaseURL, 
 		var gotIPv4, gotIPv4Source, gotIPv6, gotIPv6Source *string
 		var featuresMatch bool
 		err = connection.QueryRow(ctx, `
-			SELECT metrics->>'public_ipv4', metrics->>'public_ipv4_source',
-			       metrics->>'public_ipv6', metrics->>'public_ipv6_source',
-			       CASE WHEN $2::jsonb IS NULL THEN true ELSE features=$2::jsonb END
-			FROM agents WHERE id=$1`, agentID, nullableJSON(features, wantFeatures)).Scan(&gotIPv4, &gotIPv4Source, &gotIPv6, &gotIPv6Source, &featuresMatch)
+			SELECT live.metrics->>'public_ipv4', live.metrics->>'public_ipv4_source',
+			       live.metrics->>'public_ipv6', live.metrics->>'public_ipv6_source',
+			       CASE WHEN $2::jsonb IS NULL THEN true ELSE agents.features=$2::jsonb END
+			FROM agents
+			JOIN agent_live_state live ON live.agent_id = agents.id
+			WHERE agents.id=$1`, agentID, nullableJSON(features, wantFeatures)).Scan(&gotIPv4, &gotIPv4Source, &gotIPv6, &gotIPv6Source, &featuresMatch)
 		deref := func(value *string) string {
 			if value == nil {
 				return ""

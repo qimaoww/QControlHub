@@ -298,11 +298,11 @@ func TestOpenMigratesAppliedV26TrafficColumns(t *testing.T) {
 		);
 		INSERT INTO qcontrolhub_schema_migrations (version) VALUES (26);
 		INSERT INTO agents (
-			id,name,version,os,arch,capabilities,features,labels,runtime,metrics,
+			id,name,version,os,arch,capabilities,features,labels,runtime,
 			public_key,last_seen,enrolled_at
 		) VALUES (
 			'agt_migration_v26','migration-v26','v26','linux','amd64',
-			'["sing-box"]'::jsonb,'["port-traffic-v1"]'::jsonb,'{}'::jsonb,'{}'::jsonb,'{}'::jsonb,
+			'["sing-box"]'::jsonb,'["port-traffic-v1"]'::jsonb,'{}'::jsonb,'{}'::jsonb,
 			decode(repeat('26',32),'hex'),now(),now()
 		);
 		INSERT INTO port_traffic_policies (

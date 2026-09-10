@@ -212,7 +212,7 @@ func assertRawPublicIPProbeRow(t *testing.T, ctx context.Context, dataStore *Sto
 	if err := dataStore.pool.QueryRow(ctx, `
 		SELECT metrics->>'public_ipv4', metrics->>'public_ipv4_source',
 		       metrics->>'public_ipv6', metrics->>'public_ipv6_source'
-		FROM agents WHERE id=$1`, agentID).Scan(&gotIPv4, &gotIPv4Source, &gotIPv6, &gotIPv6Source); err != nil {
+		FROM agent_live_state WHERE agent_id=$1`, agentID).Scan(&gotIPv4, &gotIPv4Source, &gotIPv6, &gotIPv6Source); err != nil {
 		t.Fatalf("read raw public IP probe row: %v", err)
 	}
 	deref := func(value *string) string {
