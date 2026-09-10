@@ -169,7 +169,9 @@ const json = (value, status = 200) =>
     headers: { "Content-Type": "application/json" },
   });
 
+const fixtureFetch = window.fetch.bind(window);
 window.fetch = async (input, options = {}) => {
+  if (input === "/assets/preset-plans.json") return fixtureFetch(input, options);
   const url = new URL(input instanceof Request ? input.url : input, location.href);
   const path = url.pathname.replace(/^\/api\/v1/, "");
   const method = String(options.method || (input instanceof Request ? input.method : "GET")).toUpperCase();
@@ -1589,7 +1591,10 @@ async function testLargeLogRuntime() {
 }
 
 try {
-  if (mode === "config-migration") {
+  if (mode === "presets") {
+    const { testPresetsRuntime } = await import("./presets_browser_runtime.mjs");
+    await testPresetsRuntime(new URLSearchParams(location.search).has("preview"));
+  } else if (mode === "config-migration") {
     const {testConfigMigrationRuntime} = await import("./config_migration_browser_runtime.mjs");
     await testConfigMigrationRuntime(new URLSearchParams(location.search).has("preview"));
   } else {
@@ -1719,7 +1724,8 @@ try {
       await waitFor(()=>document.querySelector('#live-config-form[data-engine="sing-box"]'),"top engine switch failed");
       const input=document.querySelector("[data-code-input]");input.value+="\n";input.dispatchEvent(new Event("input",{bubbles:true}));
       const draft = input.value;
-      assert.equal(document.querySelectorAll(".code-file-meta optgroup").length,3,"file groups missing");
+      assert.equal(document.querySelectorAll(".code-file-meta optgroup").length,2,"paired/shared file groups missing");
+      assert.equal(document.querySelector('optgroup[label="出站"]'),null,"legacy standalone exit group is still visible");
       document.querySelector(".config-file-navigation button").click();
       assert.ok(input.readOnly,"merged preview must be readonly");
       document.querySelector(".config-file-navigation button").click();

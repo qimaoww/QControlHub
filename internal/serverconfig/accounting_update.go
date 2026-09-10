@@ -42,6 +42,35 @@ func AccountingUpdateSource(engine core.Engine, content, previous string) (strin
 	if root == nil || old == nil {
 		return "", fmt.Errorf("invalid accounting configuration")
 	}
+	if engine == core.EngineShadowsocksRust {
+		// Ports and IDs may be edited in source. Only marks present in the
+		// verified previous revision may be removed and replanned; arbitrary
+		// user socket marks must never be silently overwritten.
+		entries := func(document map[string]any) []any {
+			result := []any{document}
+			servers, _ := document["servers"].([]any)
+			return append(result, servers...)
+		}
+		trusted := make(map[int]bool)
+		for _, raw := range entries(old) {
+			trusted[intValue(mapValue(raw)["outbound_fwmark"])] = true
+		}
+		for _, raw := range entries(root) {
+			entry := mapValue(raw)
+			mark, present := entry["outbound_fwmark"]
+			if !present {
+				continue
+			}
+			number, numeric := mark.(json.Number)
+			value, numberErr := number.Int64()
+			if !numeric || numberErr != nil || value < 0 || value > 0xffffffff || (value != 0 && !trusted[int(value)]) {
+				return "", fmt.Errorf("generated outbound marks are read-only; edit the server port or outbound binding")
+			}
+			delete(entry, "outbound_fwmark")
+		}
+		data, err := json.Marshal(root)
+		return string(data), err
+	}
 	outsKey, tagKey, routeKey, targetKey := "outbounds", "tag", "route", "outbound"
 	if engine == core.EngineXray {
 		routeKey, targetKey = "routing", "outboundTag"
@@ -80,6 +109,34 @@ func AccountingUpdateSource(engine core.Engine, content, previous string) (strin
 		currentRoute["rules"], err = strip(currentRules, oldRules, target)
 		if err != nil {
 			return "", err
+		}
+	}
+	if engine == core.EngineSingBox {
+		// The stats allow-list also references generated exits. Normally the
+		// next plan replaces it, but deleting the final inbound has no next
+		// plan and must not leave dangling references in the saved source.
+		stats := mapValue(mapValue(mapValue(root["experimental"])["v2ray_api"])["stats"])
+		oldStats := mapValue(mapValue(mapValue(old["experimental"])["v2ray_api"])["stats"])
+		if stats != nil {
+			currentNames, _ := stats["outbounds"].([]any)
+			oldNames, _ := oldStats["outbounds"].([]any)
+			stats["outbounds"], err = strip(currentNames, oldNames, stringValue)
+			if err != nil {
+				return "", err
+			}
+			tags := make(map[string]bool)
+			inbounds, _ := root["inbounds"].([]any)
+			for _, raw := range inbounds {
+				tags[stringValue(mapValue(raw)["tag"])] = true
+			}
+			names, _ := stats["inbounds"].([]any)
+			kept := []any{}
+			for _, name := range names {
+				if tags[stringValue(name)] {
+					kept = append(kept, name)
+				}
+			}
+			stats["inbounds"] = kept
 		}
 	}
 	var data []byte

@@ -81,7 +81,21 @@ func (s *Store) AgentPortTrafficPolicies(ctx context.Context, agentID string) ([
 // configuration are removed; manual sync keeps every existing record and only
 // adds or updates newly discovered listeners.
 func (s *Store) ReconcilePortTrafficEndpoints(ctx context.Context, raw []core.PortTrafficEndpoint, prune bool) ([]string, error) {
-	return s.reconcilePortTrafficEndpoints(ctx, raw, prune, nil)
+	return s.reconcilePortTrafficEndpoints(ctx, raw, prune, nil, "")
+}
+
+// ReconcileAgentPortTrafficEndpoints limits both discovery and pruning to one
+// node. Other nodes' monitors must never be removed by a partial snapshot.
+func (s *Store) ReconcileAgentPortTrafficEndpoints(ctx context.Context, agentID string, raw []core.PortTrafficEndpoint, prune bool) ([]string, error) {
+	if agentID == "" {
+		return nil, ErrInvalid
+	}
+	for _, endpoint := range raw {
+		if endpoint.AgentID != agentID {
+			return nil, ErrInvalid
+		}
+	}
+	return s.reconcilePortTrafficEndpoints(ctx, raw, prune, nil, agentID)
 }
 
 // TrafficSyncCandidates includes tombstones even when their configuration is gone.
@@ -116,10 +130,10 @@ func (s *Store) SyncSelectedPortTrafficEndpoints(ctx context.Context, raw []core
 	if len(selections) == 0 || len(selections) > 4096 {
 		return nil, fmt.Errorf("%w: select between 1 and 4096 ports", ErrInvalid)
 	}
-	return s.reconcilePortTrafficEndpoints(ctx, raw, false, selections)
+	return s.reconcilePortTrafficEndpoints(ctx, raw, false, selections, "")
 }
 
-func (s *Store) reconcilePortTrafficEndpoints(ctx context.Context, raw []core.PortTrafficEndpoint, prune bool, selections []core.TrafficSyncSelection) ([]string, error) {
+func (s *Store) reconcilePortTrafficEndpoints(ctx context.Context, raw []core.PortTrafficEndpoint, prune bool, selections []core.TrafficSyncSelection, agentID string) ([]string, error) {
 	// Selective sync budgets the selected final set, not every available candidate.
 	endpoints, err := normalizePortTrafficEndpointsWithLimit(raw, selections == nil)
 	if err != nil {
@@ -133,7 +147,13 @@ func (s *Store) reconcilePortTrafficEndpoints(ctx context.Context, raw []core.Po
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('qcontrolhub:traffic-endpoints'))`); err != nil {
 		return nil, err
 	}
-	rows, err := tx.Query(ctx, `SELECT `+trafficPolicyColumns+` FROM port_traffic_policies ORDER BY id FOR UPDATE`)
+	where := ""
+	var args []any
+	if agentID != "" {
+		where = " WHERE agent_id=$1"
+		args = []any{agentID}
+	}
+	rows, err := tx.Query(ctx, `SELECT `+trafficPolicyColumns+` FROM port_traffic_policies`+where+` ORDER BY id FOR UPDATE`, args...)
 	if err != nil {
 		return nil, err
 	}

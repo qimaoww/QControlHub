@@ -236,12 +236,24 @@ func reconcileShadowsocksRustPolicies(entries []serverconfig.MainlandAccessPolic
 	destination bool, selectedTag string, selectedPort int, selectedSource bool, applySelection bool,
 ) []core.MainlandAccessPolicy {
 	existingByKey := make(map[string]core.MainlandAccessPolicy, len(existing))
+	existingByTag := make(map[string]core.MainlandAccessPolicy, len(existing))
+	existingByPort := make(map[int]core.MainlandAccessPolicy, len(existing))
 	for _, policy := range existing {
 		existingByKey[mainlandPolicyKey(agentID, core.EngineShadowsocksRust, policy.Tag, policy.Port)] = policy
+		existingByTag[policy.Tag] = policy
+		existingByPort[policy.Port] = policy
 	}
 	result := make([]core.MainlandAccessPolicy, 0, len(entries))
 	for _, entry := range entries {
-		policy := existingByKey[mainlandPolicyKey(agentID, core.EngineShadowsocksRust, entry.Tag, entry.Port)]
+		policy, found := existingByKey[mainlandPolicyKey(agentID, core.EngineShadowsocksRust, entry.Tag, entry.Port)]
+		// A source/field edit can change a port or rename its ID. Preserve
+		// restrictions by stable identity instead of silently dropping them.
+		if !found {
+			policy, found = existingByTag[entry.Tag]
+			if !found {
+				policy = existingByPort[entry.Port]
+			}
+		}
 		source := policy.BlockMainlandSource
 		if applySelection && entry.Tag == selectedTag && entry.Port == selectedPort {
 			source = selectedSource
@@ -261,9 +273,20 @@ func (s *Server) reconcileSavedShadowsocksRustPolicies(ctx context.Context, save
 	if saved.Engine != core.EngineShadowsocksRust {
 		return nil
 	}
-	existing, err := s.store.ListMainlandAccessPolicies(ctx, saved.AgentID)
+	desired, err := s.planShadowsocksRustPolicies(ctx, saved)
 	if err != nil {
 		return err
+	}
+	return s.store.ReplaceMainlandAccessPolicies(ctx, saved.AgentID, saved.Version, desired)
+}
+
+func (s *Server) planShadowsocksRustPolicies(ctx context.Context, saved core.Config) ([]core.MainlandAccessPolicy, error) {
+	if saved.Engine != core.EngineShadowsocksRust {
+		return nil, nil
+	}
+	existing, err := s.store.ListMainlandAccessPolicies(ctx, saved.AgentID)
+	if err != nil {
+		return nil, err
 	}
 	destination := false
 	for _, policy := range existing {
@@ -271,5 +294,8 @@ func (s *Server) reconcileSavedShadowsocksRustPolicies(ctx context.Context, save
 	}
 	entries := serverconfig.DiscoverMainlandAccessPolicies(saved.Engine, saved.Content)
 	desired := reconcileShadowsocksRustPolicies(entries, existing, saved.AgentID, saved.Version, destination, "", 0, false, false)
-	return s.store.ReplaceMainlandAccessPolicies(ctx, saved.AgentID, saved.Version, desired)
+	if desired == nil {
+		desired = []core.MainlandAccessPolicy{}
+	}
+	return desired, nil
 }

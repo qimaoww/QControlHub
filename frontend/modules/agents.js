@@ -957,7 +957,7 @@ async function nodeSettings(presetMode = false, { overview: preloadedOverview } 
           let primaryActions = "";
           if (presetMode && can("agent-config.read")) {
             primaryActions = drift
-              ? `<button class="button service-config" type="button" data-config="${esc(agent.id)}" data-engine="${esc(engine)}">查看配置</button>${can("tasks.execute") ? `<button class="button primary" type="button" data-deploy="${esc(agent.id)}" data-engine="${esc(engine)}" data-config-id="${esc(saved.id)}">部署 v${saved.version}</button>` : ""}`
+              ? `<button class="button service-config" type="button" data-config="${esc(agent.id)}" data-engine="${esc(engine)}">查看配置</button>${can("tasks.execute") ? `<button class="button primary" type="button" data-deploy="${esc(agent.id)}" data-engine="${esc(engine)}" data-config-id="${esc(saved.id)}" data-config-version="${saved.version}" ${!installed || existingBlocked || agent.status !== "online" ? 'disabled title="请先确认节点在线且内核已安装"' : ""}>部署 v${saved.version}</button>` : ""}`
               : `<button class="button primary service-config" type="button" data-config="${esc(agent.id)}" data-engine="${esc(engine)}">配置 <span>→</span></button>`;
           }
           if (!presetMode) {
@@ -1383,6 +1383,13 @@ function bindAgentPage(agentItems, presetMode = false, enrollmentHistory = {}) {
     button.onclick = () => {
       state.data.agentId = button.dataset.config;
       state.data.engine = button.dataset.engine;
+      // A preset card can be opened after editing another engine. The
+      // protocol and inbound are engine-specific; retaining them can render
+      // an empty editor or submit the wrong generated plan.
+      state.data.protocol = "";
+      state.data.inboundTag = "";
+      state.data.configField = "";
+      state.data.configInboundField = "";
       location.hash = "#agent-config";
     };
   });
@@ -1411,19 +1418,29 @@ function bindAgentPage(agentItems, presetMode = false, enrollmentHistory = {}) {
   });
   document.querySelectorAll("[data-deploy]").forEach((button) => {
     button.onclick = async () => {
-      if (
-        !(await confirmAction(
-          `确定将已保存配置部署到 ${engineName(button.dataset.engine)} 并重启服务？`,
-          button.textContent.trim(),
-        ))
-      )
-        return;
-      await submitTask({
-        agent_id: button.dataset.deploy,
-        engine: button.dataset.engine,
-        action: "deploy",
-        config_id: button.dataset.configId,
-      });
+      if (button.disabled) return;
+      const label = button.textContent;
+      button.disabled = true;
+      try {
+        if (!(await confirmAction(
+          `确定将已保存配置 v${button.dataset.configVersion} 部署到 ${engineName(button.dataset.engine)} 并重启服务？`, label.trim(),
+        ))) return;
+        button.textContent = "正在提交部署…";
+        button.setAttribute("aria-busy", "true");
+        await submitTask({
+          agent_id: button.dataset.deploy,
+          engine: button.dataset.engine,
+          action: "deploy",
+          config_id: button.dataset.configId,
+          expected_config_version: Number(button.dataset.configVersion),
+        });
+      } catch (error) {
+        notify(error.message, "error");
+      } finally {
+        button.textContent = label;
+        button.removeAttribute("aria-busy");
+        button.disabled = false;
+      }
     };
   });
   document.querySelectorAll("[data-manual-import]").forEach((button) => {

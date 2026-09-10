@@ -4,9 +4,9 @@ const assert = (condition, message) => { if (!condition) throw new Error(message
 const pause = () => new Promise(resolve => setTimeout(resolve, 30));
 
 async function fixture(engine, readOnly = false, imported = false, preview = false, legacy = false) {
-  const content = engine === "mihomo" ? "listeners: []\n" : '{"inbounds":[{"tag":"a","port":1080,"listen_port":1080}],"outbounds":[{"tag":"direct"}],"large":9007199254740993}';
+  const content = engine === "mihomo" ? "listeners: []\n" : '{"inbounds":[{"tag":"a","port":1080,"listen_port":1080}],"outbounds":[{"tag":"direct"},{"tag":"qch-trf-1080-111111111111","custom_integer":9007199254740993}],"large":9007199254740993}';
   const sourceKey = `node|${engine}${imported ? "|import" : ""}`;
-  const node = {id:"node",name:"Migration fixture",status:"online",os:"linux",arch:"amd64",features:legacy?["managed-config-read-v1"]:["managed-config-read-v1","config-files-v1"],capabilities:[engine],runtime:{[engine]:{installed:true,existing_config_available:imported,version:"fixture"}}};
+  const node = {id:"node",name:"Migration fixture",status:"online",os:"linux",arch:"amd64",features:legacy?["managed-config-read-v1","config-files-v1"]:["managed-config-read-v1","config-files-v1","config-files-paired-v1"],capabilities:[engine],runtime:{[engine]:{installed:true,existing_config_available:imported,version:"fixture"}}};
   const state = {route:"live-config",navigationEpoch:1,data:{liveAgent:"node",liveEngine:engine,liveConfigSource:imported?"import":"managed",liveSources:{[sourceKey]:{content}}}};
   let saved = {id:"config",version:1,name:"fixture",content};
   const test = {writes:[],tasks:[],confirmations:[],notifications:[],accept:false};
@@ -46,10 +46,12 @@ export async function testConfigMigrationRuntime(preview = false) {
       button.click(); await pause();
       assert(test.writes.length===0 && test.tasks.length===0,"canceling migration wrote data");
       test.accept = true;
-      const select = document.querySelector('select[aria-label="选择入站、出站或公共配置文件"]');
+      const select = document.querySelector('select[aria-label="选择入站与独立出口或公共配置文件"]');
       assert(select.options[1].textContent === "a.json", "filename must follow the preset tag, not the server name");
       select.value = "1"; select.dispatchEvent(new Event("change"));
       const input = document.querySelector("[data-code-input]");
+      assert(JSON.parse(input.value).outbounds?.[0]?.tag === "qch-trf-1080-111111111111", "inbound editor did not include its dedicated exit");
+      assert(!document.querySelector('optgroup[label="出站"]'), "legacy outbound file group remains visible");
       input.value = input.value.replaceAll("1080","2080").replace('"a"','"VLESS-REALITY-443"');
       select.value = "0"; select.dispatchEvent(new Event("change"));
       assert(select.options[1].textContent === "VLESS-REALITY-443.json", "renaming the preset did not refresh its filename");

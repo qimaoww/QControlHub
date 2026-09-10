@@ -46,6 +46,7 @@ func TestManagementAPIRouteAuthorizationMatrix(t *testing.T) {
 		{http.MethodGet, "/api/v1/agents/agt_0123456789abcdef/configs/mihomo/workspace"},
 		{http.MethodPost, "/api/v1/agents/agt_0123456789abcdef/configs/mihomo/plans"},
 		{http.MethodPost, "/api/v1/agents/agt_0123456789abcdef/configs/mihomo/server-inbounds"},
+		{http.MethodPost, "/api/v1/agents/agt_0123456789abcdef/configs/mihomo/source"},
 		{http.MethodGet, "/api/v1/agents/agt_0123456789abcdef/configs/mihomo/fields/dns"},
 		{http.MethodPost, "/api/v1/agents/agt_0123456789abcdef/configs/mihomo/fields/dns"},
 		{http.MethodGet, "/api/v1/configs"},

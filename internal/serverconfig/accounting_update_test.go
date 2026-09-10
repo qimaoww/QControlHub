@@ -84,3 +84,38 @@ func TestAccountingUpdateRemovesObsoleteInboundAndRoutes(t *testing.T) {
 		}
 	}
 }
+
+func TestSSRustSourceEditReplansVerifiedMarks(t *testing.T) {
+	for _, content := range []string{
+		`{"id":"a","server":"0.0.0.0","server_port":1080,"method":"aes-256-gcm","password":"secret"}`,
+		`{"dns":"1.1.1.1","servers":[{"id":"a","server_port":1080,"method":"aes-256-gcm","password":"secret"},{"id":"b","server_port":1081,"method":"aes-256-gcm","password":"secret"}]}`,
+	} {
+		plan, err := PlanPresetAccounting(core.EngineShadowsocksRust, content)
+		if err != nil {
+			t.Fatal(err)
+		}
+		edited := strings.Replace(plan.Content, `"server_port": 1080`, `"server_port": 2080`, 1)
+		source, err := AccountingUpdateSource(core.EngineShadowsocksRust, edited, plan.Content)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(source, "outbounds") || strings.Contains(source, "outbound_fwmark") {
+			t.Fatal("source contains leftover generated artifacts")
+		}
+		updated, err := PlanPresetAccounting(core.EngineShadowsocksRust, source)
+		if err != nil || updated.Ports[0].Port != 2080 || updated.Ports[0].Mark == plan.Ports[0].Mark {
+			t.Fatalf("port edit: %+v %v", updated.Ports, err)
+		}
+		for _, mark := range []string{`123`, `"1363346488"`, `4294967296`, `-1`, `1.5`} {
+			var root map[string]any
+			if err := json.Unmarshal([]byte(plan.Content), &root); err != nil {
+				t.Fatal(err)
+			}
+			root["outbound_fwmark"] = json.RawMessage(mark)
+			data, _ := json.Marshal(root)
+			if _, err := AccountingUpdateSource(core.EngineShadowsocksRust, string(data), plan.Content); err == nil {
+				t.Fatalf("accepted edited mark %s", mark)
+			}
+		}
+	}
+}

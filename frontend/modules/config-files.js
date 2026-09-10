@@ -47,17 +47,46 @@ function entryFilename(tag, kind, index, used) {
 export function splitConfigFiles(engine, content) {
   if (!["xray", "sing-box"].includes(engine)) return [{path: engine === "mihomo" ? "config.yaml" : "config.json", content}];
   const root = members(content);
-  const files = [{path:"common.json", content:""}];
+  const lists = new Map();
   for (const key of ["inbounds", "outbounds"]) {
     if (!root.has(key)) continue;
     const entries = members(root.get(key), true);
-    const used = new Set();
-    entries.forEach((entry, i) => {
-      members(entry);
-      files.push({path:`${key}/${entryFilename(JSON.parse(entry).tag, key, i, used)}`,content:objectText(new Map([[key,`[${entry}]`]]))});
-    });
-    if (entries.length) root.delete(key);
+    entries.forEach(entry => members(entry));
+    lists.set(key, entries);
   }
+  const inbounds = lists.get("inbounds") || [], outbounds = lists.get("outbounds") || [];
+  const owners = new Map(), portKey = engine === "xray" ? "port" : "listen_port";
+  inbounds.forEach((entry, i) => {
+    const raw = JSON.parse(entry)[portKey];
+    const port = typeof raw === "number" || typeof raw === "string" && /^[+]?[0-9]+$/.test(raw.trim()) ? Number(raw) : 0;
+    if (Number.isInteger(port) && port > 0 && port <= 65535) owners.set(port, owners.has(port) ? -1 : i);
+  });
+  const ownerOf = raw => {
+    const tag = JSON.parse(raw).tag;
+    const match = typeof tag === "string" && tag.match(/^qch-trf-([1-9][0-9]{0,4})-[a-f0-9]{12}$/);
+    return match ? owners.get(Number(match[1])) : undefined;
+  };
+  // Shared/default exits remain first. Pair only an ordered dedicated suffix,
+  // so imported routing and default-outbound priority are never changed.
+  let cut = outbounds.length, next = inbounds.length;
+  while (cut > 0) {
+    const owner = ownerOf(outbounds[cut - 1]);
+    if (owner === undefined || owner < 0 || owner > next) break;
+    next = owner; cut--;
+  }
+  const paired = inbounds.map(() => []);
+  for (const raw of outbounds.slice(cut)) paired[ownerOf(raw)].push(raw);
+  if (cut < outbounds.length) {
+    if (cut) root.set("outbounds", `[${outbounds.slice(0, cut).join(",\n")}]`);
+    else root.delete("outbounds");
+  }
+  const files = [{path:"common.json", content:""}], used = new Set();
+  inbounds.forEach((entry, i) => {
+    const fragment = new Map([["inbounds", `[${entry}]`]]);
+    if (paired[i].length) fragment.set("outbounds", `[${paired[i].join(",\n")}]`);
+    files.push({path:`inbounds/${entryFilename(JSON.parse(entry).tag, "inbounds", i, used)}`, content:objectText(fragment)});
+  });
+  if (inbounds.length) root.delete("inbounds");
   files[0].content = objectText(root);
   return files;
 }
@@ -66,6 +95,7 @@ export function mergeConfigFiles(files) {
   if (!files.length || files.length > 1025 || !["common.json","00-common.json"].includes(files[0].path)) throw new Error("无效配置文件列表");
   const root = members(files[0].content), lists = new Map();
   const seen = new Set();
+  let pairedExits = false, standaloneExits = false;
   for (const file of files.slice(1)) {
     const [key, name, extra] = file.path.split("/"), entries = lists.get(key) || [];
     const validName = files[0].path === "00-common.json"
@@ -75,17 +105,30 @@ export function mergeConfigFiles(files) {
       throw new Error("无效配置文件路径或顺序");
     seen.add(file.path);
     const fragment = members(file.content);
-    if (fragment.size !== 1 || !fragment.has(key)) throw new Error(`${file.path} 只能包含 ${key}`);
+    if (!fragment.has(key) || [...fragment.keys()].some(field => field !== key && !(key === "inbounds" && field === "outbounds" && files[0].path === "common.json")))
+      throw new Error(`${file.path} 只能包含 ${key}${key === "inbounds" ? " 和配套 outbounds" : ""}`);
     const values = members(fragment.get(key), true);
     if (values.length !== 1) throw new Error(`${file.path} 必须包含一个入站或出站`);
     members(values[0]);
     entries.push(values[0]); lists.set(key,entries);
+    if (key === "outbounds") standaloneExits = true;
+    else if (fragment.has("outbounds")) {
+      const exits = members(fragment.get("outbounds"), true);
+      exits.forEach(exit => members(exit));
+      pairedExits = true;
+      lists.set("outbounds", [...(lists.get("outbounds") || []), ...exits]);
+    }
   }
-  for (const [key, entries] of lists) {
-    if (root.has(key)) throw new Error(`${key} 同时存在于公共文件和独立文件中`);
+  if (pairedExits && standaloneExits) throw new Error("不能混用成套入站出口和旧版独立出站文件");
+  for (let [key, entries] of lists) {
+    if (root.has(key)) {
+      if (key !== "outbounds" || !pairedExits) throw new Error(`${key} 同时存在于公共文件和独立文件中`);
+      entries = [...members(root.get(key), true), ...entries];
+    }
     root.set(key,`[\n${entries.join(",\n")}\n]`);
   }
   const content = objectText(root);
+  for (const key of ["inbounds", "outbounds"]) if (root.has(key)) members(root.get(key), true).forEach(entry => members(entry));
   if (new TextEncoder().encode(content).length > 2097152) throw new Error("合并配置超过 2 MiB 上限");
   return content;
 }
@@ -110,10 +153,10 @@ export function bindConfigFiles(form, engine, notify) {
   const originals = files.map(file => file.content), readOnly = input.readOnly;
   let selected = 0;
   const select = document.createElement("select");
-  select.setAttribute("aria-label","选择入站、出站或公共配置文件");
+  select.setAttribute("aria-label","选择入站与独立出口或公共配置文件");
   const groups = new Map();
   for (const [i,file] of files.entries()) {
-    const kind = file.path.startsWith("inbounds/") ? "入站" : file.path.startsWith("outbounds/") ? "出站" : "公共配置";
+    const kind = file.path.startsWith("inbounds/") ? "入站与独立出口" : "公共配置";
     if (!groups.has(kind)) {
       const group = document.createElement("optgroup"); group.label = kind; groups.set(kind, group); select.append(group);
     }

@@ -665,6 +665,7 @@ func (c *Client) advertisedFeatures() []string {
 		core.AgentFeatureManagedPolicy,
 		core.AgentFeatureManagedConfigRead,
 		core.AgentFeatureConfigFiles,
+		core.AgentFeaturePairedConfigFiles,
 		core.AgentFeatureSystemBBR,
 	}
 	if c.publicIP.Enabled() {

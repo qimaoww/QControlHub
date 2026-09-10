@@ -181,7 +181,13 @@ func (s *Server) agentConfigWorkspace(w http.ResponseWriter, request *http.Reque
 	}
 	if config.ID != "" {
 		result.Config = &config
-		if plan, planErr := serverconfig.PlanPresetAccounting(engine, config.Content); planErr == nil {
+		// Reading a saved plan only needs one verification pass. Stripping and
+		// compiling it again tripled this work on every post-save page refresh.
+		plan, planErr := serverconfig.PrepareAccounting(engine, config.Content)
+		if planErr != nil && engine == core.EngineSingBox {
+			plan, planErr = serverconfig.PlanPresetAccounting(engine, config.Content)
+		}
+		if planErr == nil {
 			result.AccountingPlan = &plan
 		} else {
 			result.AccountingError = planErr.Error()
@@ -289,27 +295,38 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 		writeError(w, http.StatusBadRequest, "intent must be validate or deploy")
 		return
 	}
-	if _, found := serverconfig.FindProtocol(engine, input.Input.Protocol); !found {
+	if input.Operation == "add" && input.OriginalTag != "" {
+		writeError(w, http.StatusBadRequest, "新增入站不能携带原入站标识")
+		return
+	}
+	if _, found := serverconfig.FindProtocol(engine, input.Input.Protocol); !found && input.Operation != "delete" {
 		writeError(w, http.StatusBadRequest, "unknown server inbound protocol")
 		return
 	}
-	if input.Input.RealityEnabled && input.Operation != "delete" {
-		target, err := serverconfig.ProbeRealityTarget(request.Context(), input.Input.RealityServerName)
+	// Validate local parameters before any DNS/TLS I/O. Invalid credentials
+	// should fail immediately rather than waiting for the camouflage target.
+	var generated string
+	var err error
+	if input.Operation != "delete" {
+		generated, err = serverconfig.Generate(engine, input.Input)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		if input.Input.RealityMLDSA65Seed != "" {
-			if err := serverconfig.ValidateRealityMLDSATarget(target); err != nil {
-				writeError(w, http.StatusBadRequest, err.Error())
-				return
-			}
-		}
-		input.Input.RealityServerName = target.ServerName
 	}
-	generated, err := serverconfig.Generate(engine, input.Input)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+	// Reject already-stale drafts before network probes or full-config
+	// planning. The transactional save still checks again to close races.
+	current, currentErr := s.store.AgentConfig(request.Context(), agent.ID, engine)
+	if currentErr != nil && !errors.Is(currentErr, store.ErrNotFound) {
+		writeStoreError(w, currentErr)
+		return
+	}
+	if input.ExpectedVersion != current.Version {
+		writeStoreError(w, store.ErrConflict)
+		return
+	}
+	if errors.Is(currentErr, store.ErrNotFound) && input.Operation != "add" {
+		writeError(w, http.StatusConflict, "no saved configuration exists for this operation")
 		return
 	}
 	content := generated
@@ -321,14 +338,15 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 			return
 		}
 	}
-	current, currentErr := s.store.AgentConfig(request.Context(), agent.ID, engine)
 	if currentErr == nil {
 		current.Content, err = serverconfig.PresetAccountingSource(engine, current.Content)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "无法安全更新独立出口配置："+err.Error())
 			return
 		}
-		if engine == core.EngineShadowsocksRust && input.PreserveSSRustGlobals {
+		if input.Operation == "delete" {
+			content, err = serverconfig.DeletePresetInbound(engine, current.Content, input.OriginalTag)
+		} else if engine == core.EngineShadowsocksRust && input.PreserveSSRustGlobals {
 			content, err = serverconfig.MutateSSRustPort(current.Content, generated, input.OriginalTag, input.Operation)
 		} else {
 			content, err = serverconfig.MutateGenerated(engine, current.Content, generated, input.OriginalTag, input.Operation)
@@ -337,12 +355,6 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-	} else if !errors.Is(currentErr, store.ErrNotFound) {
-		writeStoreError(w, currentErr)
-		return
-	} else if input.Operation != "add" {
-		writeError(w, http.StatusConflict, "no saved configuration exists for this operation")
-		return
 	} else if engine == core.EngineShadowsocksRust && input.PreserveSSRustGlobals {
 		content, err = serverconfig.MutateGenerated(engine, "{}", generated, "", "add")
 		if err != nil {
@@ -376,6 +388,17 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 			}
 		}
 	}
+	if input.Operation != "add" {
+		next := input.Input.Tag
+		if input.Operation == "delete" {
+			next = ""
+		}
+		content, err = serverconfig.ReconcilePresetInboundReferences(engine, content, input.OriginalTag, next)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
 	// Reject unsupported attribution before saving a version or queuing a task.
 	// Deleting the last inbound must remain possible.
 	if len(serverconfig.DiscoverTrafficPorts(engine, content)) > 0 {
@@ -390,30 +413,33 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 	if name == "" {
 		name = agent.Name + " · " + string(engine)
 	}
-	clientMetadata, err := serverconfig.MarshalClientMetadata(input.Input)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
+	var clientMetadata string
+	if input.Operation != "delete" {
+		clientMetadata, err = serverconfig.MarshalClientMetadata(input.Input)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
-	saved, err := s.store.SaveAgentConfigWithClientMetadata(request.Context(), core.Config{
-		AgentID: agent.ID, Name: name, Description: input.Description, Engine: engine, Content: content,
-	}, input.ExpectedVersion, store.ConfigClientMetadataMutation{
+	metadata := store.ConfigClientMetadataMutation{
 		OriginalTag: input.OriginalTag, Tag: input.Input.Tag, Content: clientMetadata, Delete: input.Operation == "delete",
-	})
-	if err != nil {
-		writeStoreError(w, err)
-		return
 	}
+	if metadata.Delete {
+		metadata.Tag = ""
+	}
+	var desired []core.MainlandAccessPolicy
 	if engine == core.EngineShadowsocksRust {
-		entries := serverconfig.DiscoverMainlandAccessPolicies(engine, saved.Content)
+		entries := serverconfig.DiscoverMainlandAccessPolicies(engine, content)
 		destination := false
 		for _, policy := range existingShadowsocksRustPolicies {
 			destination = destination || policy.BlockMainlandDestination
 		}
 		canonicalTag := input.Input.Tag
 		applySelection := input.Operation != "delete"
-		if applySelection && input.Operation != "add" {
-			destination = input.Input.BlockMainlandDestination
+		if applySelection {
+			if input.Operation != "add" || len(entries) == 1 {
+				destination = input.Input.BlockMainlandDestination
+			}
 			for _, entry := range entries {
 				if entry.Port == input.Input.Port && (entry.Tag == canonicalTag || len(entries) == 1) {
 					canonicalTag = entry.Tag
@@ -421,18 +447,37 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 				}
 			}
 		}
-		desired := reconcileShadowsocksRustPolicies(entries, existingShadowsocksRustPolicies, agent.ID, saved.Version,
-			destination, canonicalTag, input.Input.Port, input.Input.BlockMainlandSource, applySelection)
-		if err := s.store.ReplaceMainlandAccessPolicies(request.Context(), agent.ID, saved.Version, desired); err != nil {
-			writeStoreError(w, err)
+		if destination && len(entries) > 1 {
+			writeError(w, http.StatusBadRequest, "当前 SS Rust 已启用进程级目标限制，请先关闭目标限制或拆分进程后再新增端口")
 			return
 		}
+		desired = reconcileShadowsocksRustPolicies(entries, existingShadowsocksRustPolicies, agent.ID, input.ExpectedVersion+1,
+			destination, canonicalTag, input.Input.Port, input.Input.BlockMainlandSource, applySelection)
 	}
-	s.refreshPortTrafficMonitoring(request.Context(), "")
-	task, ok := s.createConfigMutationTask(w, request, saved, input.Intent)
-	if !ok {
+	// Finish local identity, port, routing and policy checks before spending
+	// time on DNS/TLS. A duplicate inbound should fail immediately.
+	if input.Input.RealityEnabled && input.Operation != "delete" {
+		target, err := serverconfig.ProbeRealityTarget(request.Context(), input.Input.RealityServerName)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if input.Input.RealityMLDSA65Seed != "" {
+			if err := serverconfig.ValidateRealityMLDSATarget(target); err != nil {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+		}
+	}
+	saved, task, err := s.store.SaveAgentConfigAndTask(request.Context(), core.Config{
+		AgentID: agent.ID, Name: name, Description: input.Description, Engine: engine, Content: content,
+	}, input.ExpectedVersion, store.ConfigMutationOptions{Action: core.Action(input.Intent), ClientMetadata: &metadata, MainlandPolicies: desired})
+	if err != nil {
+		writeStoreError(w, err)
 		return
 	}
+	task.ConfigContent = ""
+	s.refreshSavedAgentTrafficMonitoring(request.Context(), saved.AgentID)
 	s.recordAudit(request, "agent_config.server_saved", saved.ID, input.Operation+" "+input.Input.Protocol+" "+agent.ID)
 	writeJSON(w, http.StatusOK, configMutationResult{Config: saved, Task: task})
 }
@@ -483,6 +528,10 @@ func (s *Server) saveConfigField(w http.ResponseWriter, request *http.Request) {
 	current, err := s.store.AgentConfig(request.Context(), agent.ID, engine)
 	if err != nil {
 		writeStoreError(w, err)
+		return
+	}
+	if input.ExpectedVersion != current.Version {
+		writeStoreError(w, store.ErrConflict)
 		return
 	}
 	var present bool
@@ -540,36 +589,34 @@ func (s *Server) saveConfigField(w http.ResponseWriter, request *http.Request) {
 		if engine != core.EngineShadowsocksRust {
 			content, err = serverconfig.AccountingUpdateSource(engine, content, current.Content)
 		}
-		if err == nil && len(serverconfig.DiscoverTrafficPorts(engine, content)) > 0 {
-			var plan serverconfig.AccountingPlan
-			plan, err = serverconfig.PlanPresetAccounting(engine, content)
-			content = plan.Content
-		}
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "字段修改无法保持独立出口归属，未保存："+err.Error())
-			return
-		}
+	}
+	if err == nil && len(serverconfig.DiscoverTrafficPorts(engine, content)) > 0 {
+		var plan serverconfig.AccountingPlan
+		plan, err = serverconfig.PlanPresetAccounting(engine, content)
+		content = plan.Content
+	}
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "字段修改无法保持独立出口归属，未保存："+err.Error())
+		return
 	}
 	name := strings.TrimSpace(input.Name)
 	if name == "" {
 		name = current.Name
 	}
-	saved, err := s.store.SaveAgentConfig(request.Context(), core.Config{
-		AgentID: agent.ID, Name: name, Description: input.Description, Engine: engine, Content: content,
-	}, input.ExpectedVersion)
+	candidate := core.Config{AgentID: agent.ID, Name: name, Description: input.Description, Engine: engine, Content: content, Version: input.ExpectedVersion + 1}
+	desired, err := s.planShadowsocksRustPolicies(request.Context(), candidate)
 	if err != nil {
 		writeStoreError(w, err)
 		return
 	}
-	if err := s.reconcileSavedShadowsocksRustPolicies(request.Context(), saved); err != nil {
+	saved, task, err := s.store.SaveAgentConfigAndTask(request.Context(), candidate, input.ExpectedVersion,
+		store.ConfigMutationOptions{Action: core.Action(input.Intent), MainlandPolicies: desired})
+	if err != nil {
 		writeStoreError(w, err)
 		return
 	}
-	s.refreshPortTrafficMonitoring(request.Context(), "")
-	task, ok := s.createConfigMutationTask(w, request, saved, input.Intent)
-	if !ok {
-		return
-	}
+	task.ConfigContent = ""
+	s.refreshSavedAgentTrafficMonitoring(request.Context(), saved.AgentID)
 	s.recordAudit(request, "agent_config.field_saved", saved.ID, input.Mutation+" "+key+" "+agent.ID+" inbound="+inbound)
 	writeJSON(w, http.StatusOK, configMutationResult{Config: saved, Task: task})
 }
@@ -615,7 +662,7 @@ func (s *Server) getConfigField(w http.ResponseWriter, request *http.Request) {
 		writeError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"key": key, "present": present, "fragment": fragment, "inherited_fragment": inherited})
+	writeJSON(w, http.StatusOK, map[string]any{"key": key, "present": present, "fragment": fragment, "inherited_fragment": inherited, "version": config.Version})
 }
 
 // An empty/unsupported scope must never silently fall back to a global edit.

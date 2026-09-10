@@ -12,6 +12,18 @@ import (
 // ReplaceMainlandAccessPolicies atomically replaces the complete desired
 // Shadowsocks Rust policy set for one exact configuration version.
 func (s *Store) ReplaceMainlandAccessPolicies(ctx context.Context, agentID string, expectedVersion int, policies []core.MainlandAccessPolicy) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if err := s.replaceMainlandAccessPoliciesTx(ctx, tx, agentID, expectedVersion, policies); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func (s *Store) replaceMainlandAccessPoliciesTx(ctx context.Context, tx pgx.Tx, agentID string, expectedVersion int, policies []core.MainlandAccessPolicy) error {
 	if strings.TrimSpace(agentID) == "" || expectedVersion < 1 {
 		return errors.New("agent ID and configuration version are required")
 	}
@@ -21,11 +33,6 @@ func (s *Store) ReplaceMainlandAccessPolicies(ctx context.Context, agentID strin
 			return errors.New("invalid Shadowsocks Rust mainland access policy")
 		}
 	}
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
 	var version int
 	if err := tx.QueryRow(ctx, `SELECT version FROM configs WHERE agent_id=$1 AND engine=$2 AND deleted_at IS NULL FOR UPDATE`, agentID, core.EngineShadowsocksRust).Scan(&version); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -47,7 +54,7 @@ func (s *Store) ReplaceMainlandAccessPolicies(ctx context.Context, agentID strin
 			return mapError(err)
 		}
 	}
-	return tx.Commit(ctx)
+	return nil
 }
 
 // ListMainlandAccessPolicies returns Agent-applied Shadowsocks Rust policies.

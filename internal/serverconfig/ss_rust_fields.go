@@ -64,7 +64,7 @@ func MutateSSRustPort(current, generated, tag, operation string) (string, error)
 	if err := json.Unmarshal([]byte(generated), &incoming); err != nil {
 		return "", err
 	}
-	if _, ok := parseShadowsocksRust(generated); !ok {
+	if _, ok := parseShadowsocksRust(generated); !ok && operation != "delete" {
 		return "", errors.New("生成配置缺少完整服务端字段")
 	}
 	if operation == "add" {

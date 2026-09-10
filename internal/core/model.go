@@ -63,6 +63,10 @@ const AgentFeatureManagedConfigRead = "managed-config-read-v1"
 // of Xray/sing-box source fragments alongside the runtime configuration.
 const AgentFeatureConfigFiles = "config-files-v1"
 
+// AgentFeaturePairedConfigFiles keeps an inbound and its dedicated exits in
+// the same immutable source fragment (sources-v3 layout).
+const AgentFeaturePairedConfigFiles = "config-files-paired-v1"
+
 const AgentFeatureSystemBBR = "system-bbr-v1"
 
 const (
