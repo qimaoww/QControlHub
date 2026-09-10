@@ -257,6 +257,12 @@ func janitor(ctx context.Context, dataStore *store.Store) {
 			if _, err := dataStore.RecordAgentMetricSamples(operationContext, time.Now().UTC()); err != nil {
 				slog.Warn("record agent metric samples", "error", err)
 			}
+			// Inserting a log row without a matching partition is an error, so
+			// the daily partitions are kept a few days ahead on every tick. The
+			// statement is idempotent and normally creates nothing.
+			if err := dataStore.EnsureCoreLogPartitions(operationContext, time.Now().UTC()); err != nil {
+				slog.Error("ensure core log partitions", "error", err)
+			}
 			pruneCounter++
 			if pruneCounter%60 == 0 {
 				now := time.Now().UTC()
@@ -268,8 +274,20 @@ func janitor(ctx context.Context, dataStore *store.Store) {
 						slog.Warn("prune old audit logs", "error", err)
 					}
 				}
-				if _, err := dataStore.PruneCoreLogs(operationContext, now.Add(-time.Duration(settings.CoreLogRetentionDays)*24*time.Hour)); err != nil {
-					slog.Warn("prune old core logs", "error", err)
+				// Expired log days are dropped whole; only the deduplication
+				// markers still need a row-wise delete.
+				if dropped, err := dataStore.PruneCoreLogPartitions(operationContext, now.Add(-time.Duration(settings.CoreLogRetentionDays)*24*time.Hour)); err != nil {
+					slog.Warn("prune old core log partitions", "error", err)
+				} else if dropped > 0 {
+					slog.Info("dropped expired core log partitions", "count", dropped)
+				}
+				if _, err := dataStore.PruneCoreLogBatches(operationContext, now.Add(-time.Duration(settings.CoreLogRetentionDays)*24*time.Hour)); err != nil {
+					slog.Warn("prune old core log batches", "error", err)
+				}
+				if dropped, err := dataStore.DropLegacyCoreLogs(operationContext, now); err != nil {
+					slog.Warn("drop legacy core logs", "error", err)
+				} else if dropped > 0 {
+					slog.Info("dropped legacy core log tables", "count", dropped)
 				}
 				if settings.TaskRetentionDays > 0 {
 					if _, err := dataStore.PruneTasks(operationContext, now.Add(-time.Duration(settings.TaskRetentionDays)*24*time.Hour)); err != nil {
