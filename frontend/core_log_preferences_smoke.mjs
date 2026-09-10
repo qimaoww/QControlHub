@@ -340,6 +340,12 @@ try {
     "a new per-engine window is remembered",
   );
 
+  // Leave a different selection in the store so precedence is observable.
+  saveCoreLogPreferences(
+    { filters: { engine: "sing-box", limit: 500 }, autoRefresh: false },
+    storage,
+    engines,
+  );
   const explicitDom = stubDom();
   globalThis.document = explicitDom.document;
   const explicitCalls = [];
@@ -373,6 +379,16 @@ try {
     explicitState.data.coreLogFilters.engine,
     undefined,
     "browser storage must not overwrite a selection the session already owns",
+  );
+  assert.equal(
+    explicitState.data.coreLogFilters.limit,
+    200,
+    "the session's own window must win over the stored one",
+  );
+  assert.equal(
+    explicitState.data.coreLogAutoRefresh,
+    undefined,
+    "the session keeps control of the live-update switch",
   );
   assert.deepEqual(explicitCalls, ["/agents", "/core-logs?limit=200"]);
   assert.match(explicitMarkup, /<option value="200" selected>/);

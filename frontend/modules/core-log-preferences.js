@@ -8,9 +8,10 @@ export const coreLogPreferenceKey = "qcontrolhub:core-log-preferences";
 export const coreLogFilterLimits = [100, 200, 500, 1000, 2000];
 
 const levelValues = new Set(["info", "warning", "error"]);
-// Agent identifiers are opaque to the browser, but the API rejects any filter
-// that is not an identifier-shaped string. Discarding malformed values here
-// keeps one bad record from turning the page into a persistent 400.
+// Agent identifiers are opaque to the browser, so this only drops values the
+// API cannot accept at all: anything that is not identifier-shaped is answered
+// with a 400. The real format contract stays on the server, and a stale but
+// well-formed record is replaced by the next node selection.
 const agentIDPattern = /^[A-Za-z0-9_-]{1,64}$/;
 const keywordLength = 120;
 
