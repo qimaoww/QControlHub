@@ -218,11 +218,19 @@ func (s *Store) migrate(ctx context.Context) error {
 		return fmt.Errorf("apply PostgreSQL schema: %w", err)
 	}
 	if appliedVersion < 49 {
-		// The plain (agent_id,engine,id DESC) index is superseded by the covering
-		// variant created above. Dropping it frees the duplicated write cost and
-		// disk; the covering index serves the same lookups with index-only reads.
-		if _, err := tx.Exec(ctx, `DROP INDEX IF EXISTS core_logs_agent_engine_recent_idx`); err != nil {
-			return fmt.Errorf("drop superseded core log index: %w", err)
+		// The log window is served by the covering index created above. The
+		// single-column recency indexes were only maintained, never read: the
+		// store's single read path always filters by engine and orders by id
+		// within an agent. Dropping them removes their write cost from every
+		// log insert and frees the disk they occupied.
+		for _, index := range []string{
+			"core_logs_agent_engine_recent_idx",
+			"core_logs_agent_recent_idx",
+			"core_logs_engine_recent_idx",
+		} {
+			if _, err := tx.Exec(ctx, "DROP INDEX IF EXISTS "+index); err != nil {
+				return fmt.Errorf("drop superseded core log index %s: %w", index, err)
+			}
 		}
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO qcontrolhub_schema_migrations (version) VALUES ($1)`, currentSchemaVersion); err != nil {
@@ -2063,12 +2071,11 @@ CREATE TABLE IF NOT EXISTS core_logs (
     UNIQUE (batch_id,entry_index)
 );
 
-CREATE INDEX IF NOT EXISTS core_logs_agent_recent_idx ON core_logs(agent_id,id DESC);
-CREATE INDEX IF NOT EXISTS core_logs_engine_recent_idx ON core_logs(engine,id DESC);
--- The log window query reads every column for a bounded set of rows. Carrying
--- them in the index turns each of those rows into an index-only read instead of
--- a random heap fetch: with a 7 ms page latency that is the difference between
--- a sub-second window and a timeout. See docs/performance.md.
+-- Core log reads have exactly one shape: a bounded newest-first window per
+-- (selected engines × optional agent). The covering index below serves every
+-- variant of it with index-only reads, so the older single-column recency
+-- indexes only added write amplification: every inserted row had to maintain
+-- them while no query used them. See docs/performance.md.
 CREATE INDEX IF NOT EXISTS core_logs_agent_engine_covering_idx ON core_logs(agent_id,engine,id DESC)
     INCLUDE (level,message,logged_at,received_at);
 CREATE INDEX IF NOT EXISTS core_logs_received_idx ON core_logs(received_at);

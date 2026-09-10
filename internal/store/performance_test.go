@@ -304,23 +304,25 @@ func TestBatchedEnrollmentAvailabilityVerifiesSecrets(t *testing.T) {
 func TestPerformanceIndexesMigrateFromV40(t *testing.T) {
 	s := openPerformanceStore(t)
 	ctx := context.Background()
-	// v48-era indexes: the core log index was a plain (agent_id,engine,id) index.
-	// Migrating must replace it with the covering variant that serves the log
-	// window as an index-only scan, and recreate the other performance indexes.
-	superseded := []string{"core_logs_agent_engine_covering_idx", "tasks_status_created_idx", "tasks_agent_created_idx", "tasks_retention_idx", "metric_samples_retention_idx", "port_traffic_daily_date_idx"}
-	// Simulate a v48 installation: the covering index does not exist yet and the
-	// plain (agent_id,engine,id) index still serves the log window.
-	if _, err := s.pool.Exec(ctx, `DROP INDEX IF EXISTS core_logs_agent_engine_covering_idx`); err != nil {
-		t.Fatal(err)
-	}
-	// Every other index from that era must also be recreated by the migration.
-	for _, index := range superseded[1:] {
+	// Indexes the migration must (re)create: the covering core log index plus the
+	// other performance indexes introduced for earlier versions.
+	expected := []string{"core_logs_agent_engine_covering_idx", "tasks_status_created_idx", "tasks_agent_created_idx", "tasks_retention_idx", "metric_samples_retention_idx", "port_traffic_daily_date_idx"}
+	for _, index := range expected {
 		if _, err := s.pool.Exec(ctx, "DROP INDEX "+pgx.Identifier{index}.Sanitize()); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if _, err := s.pool.Exec(ctx, `CREATE INDEX IF NOT EXISTS core_logs_agent_engine_recent_idx ON core_logs(agent_id,engine,id DESC)`); err != nil {
-		t.Fatal(err)
+	// v48 shipped a plain (agent_id,engine,id DESC) index for the log window plus
+	// two recency indexes that no read path ever used. Recreate all three so the
+	// migration has to remove them.
+	for _, statement := range []string{
+		`CREATE INDEX IF NOT EXISTS core_logs_agent_engine_recent_idx ON core_logs(agent_id,engine,id DESC)`,
+		`CREATE INDEX IF NOT EXISTS core_logs_agent_recent_idx ON core_logs(agent_id,id DESC)`,
+		`CREATE INDEX IF NOT EXISTS core_logs_engine_recent_idx ON core_logs(engine,id DESC)`,
+	} {
+		if _, err := s.pool.Exec(ctx, statement); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if _, err := s.pool.Exec(ctx, `DELETE FROM qcontrolhub_schema_migrations; INSERT INTO qcontrolhub_schema_migrations(version) VALUES (48)`); err != nil {
 		t.Fatal(err)
@@ -328,15 +330,19 @@ func TestPerformanceIndexesMigrateFromV40(t *testing.T) {
 	if err := s.migrate(ctx); err != nil {
 		t.Fatal(err)
 	}
-	for _, index := range superseded {
+	for _, index := range expected {
 		var exists bool
 		if err := s.pool.QueryRow(ctx, `SELECT to_regclass($1) IS NOT NULL`, index).Scan(&exists); err != nil || !exists {
 			t.Fatalf("missing index %s: %v", index, err)
 		}
 	}
-	var revoked bool
-	if err := s.pool.QueryRow(ctx, `SELECT to_regclass('core_logs_agent_engine_recent_idx') IS NULL`).Scan(&revoked); err != nil || !revoked {
-		t.Fatalf("superseded core log index still present: %v", err)
+	// The log read path is fully served by the covering index; keeping the
+	// single-column recency indexes would only add write cost per inserted row.
+	for _, index := range []string{"core_logs_agent_engine_recent_idx", "core_logs_agent_recent_idx", "core_logs_engine_recent_idx"} {
+		var revoked bool
+		if err := s.pool.QueryRow(ctx, `SELECT to_regclass($1) IS NULL`, index).Scan(&revoked); err != nil || !revoked {
+			t.Fatalf("superseded index %s still present: %v", index, err)
+		}
 	}
 	// The replacement must actually carry the payload columns, otherwise the log
 	// window silently falls back to random heap fetches.
