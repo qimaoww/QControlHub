@@ -53,8 +53,29 @@ func ReconcilePresetInboundReferences(engine core.Engine, content, previous, nex
 	}
 	if engine == core.EngineMihomo {
 		if subrules, present := root["sub-rules"]; present {
-			data, _ := json.Marshal(subrules)
-			if inboundReference.Match(data) {
+			// Match each rule string, not its JSON encoding: the opening
+			// quote would hide a plain IN-NAME selector at the start.
+			var referencesInbound func(any) bool
+			referencesInbound = func(value any) bool {
+				switch value := value.(type) {
+				case string:
+					return inboundReference.MatchString(value)
+				case []any:
+					for _, item := range value {
+						if referencesInbound(item) {
+							return true
+						}
+					}
+				case map[string]any:
+					for _, item := range value {
+						if referencesInbound(item) {
+							return true
+						}
+					}
+				}
+				return false
+			}
+			if referencesInbound(subrules) {
 				return "", fmt.Errorf("入站 %s 被子规则引用，请在完整源码中同时调整", previous)
 			}
 		}

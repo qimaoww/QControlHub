@@ -55,3 +55,20 @@ func TestPresetInboundDNSReferencesFailClosedWhenAmbiguous(t *testing.T) {
 		}
 	}
 }
+
+func TestPresetInboundMihomoSubruleReferencesFailClosed(t *testing.T) {
+	for _, rule := range []string{"IN-NAME,old,DIRECT", "IN-NAME, old ,DIRECT", "AND,((IN-NAME,old),(DOMAIN,example.com)),DIRECT"} {
+		// After the last inbound is deleted there is no accounting replan
+		// to reject sub-rules; this reference check must still catch them.
+		content := "listeners: []\nrules: ['MATCH,DIRECT']\nsub-rules:\n  custom:\n    - '" + rule + "'\n"
+		for _, next := range []string{"new", ""} {
+			if _, err := ReconcilePresetInboundReferences(core.EngineMihomo, content, "old", next); err == nil {
+				t.Fatalf("sub-rule reference was not rejected: %q -> %q", rule, next)
+			}
+		}
+	}
+	content := "listeners: []\nsub-rules:\n  old:\n    - IN-NAME,old-other,DIRECT\n"
+	if result, err := ReconcilePresetInboundReferences(core.EngineMihomo, content, "old", ""); err != nil || result != content {
+		t.Fatalf("unrelated sub-rule changed: %s %v", result, err)
+	}
+}
