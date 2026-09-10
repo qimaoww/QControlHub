@@ -48,7 +48,7 @@ type storeExecutor interface {
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 48
+const currentSchemaVersion = 49
 
 func Open(ctx context.Context, databaseURL string, allowInsecureRemote bool) (*Store, error) {
 	return OpenWithConfigKey(ctx, databaseURL, allowInsecureRemote, "")
@@ -108,6 +108,14 @@ func OpenWithConfigKeyring(ctx context.Context, databaseURL string, allowInsecur
 	}
 	result := &Store{pool: pool, cryptor: cryptor}
 	if err := result.migrate(ctx); err != nil {
+		pool.Close()
+		return nil, err
+	}
+	// A partitioned log table rejects inserts that match no partition, so the
+	// current window has to exist before this store serves any upload. migrate
+	// only runs on a version change, hence the explicit call on every open; the
+	// maintenance loop keeps it extended while the process runs.
+	if err := result.EnsureCoreLogPartitions(ctx, time.Now().UTC()); err != nil {
 		pool.Close()
 		return nil, err
 	}
@@ -214,6 +222,55 @@ func (s *Store) migrate(ctx context.Context) error {
 			}
 		}
 	}
+	if appliedVersion < 49 {
+		// Kernel logs become a table partitioned by receive day. Converting in
+		// place is impossible, and copying millions of retained rows would turn
+		// a version upgrade into minutes of blocked writes on the instances this
+		// panel targets. Retained logs are time-bounded and already truncated by
+		// retention, so the previous rows are set aside under a timestamped
+		// legacy name and the empty partitioned table takes over immediately.
+		// Janitor reads the age out of that name and drops the copy once the
+		// grace period passes.
+		//
+		// This runs before schemaSQL on purpose: the partitioned table is
+		// created with IF NOT EXISTS, so an existing heap table has to move out
+		// of the way first, and its indexes have to go with it or the covering
+		// index name would already be taken.
+		var partitioned bool
+		if err := tx.QueryRow(ctx, `
+			SELECT COALESCE(bool_or(class.relkind = 'p'), false)
+			FROM pg_class class
+			JOIN pg_namespace namespace ON namespace.oid = class.relnamespace
+			WHERE class.relname = 'core_logs' AND namespace.nspname = current_schema()`).Scan(&partitioned); err != nil {
+			return fmt.Errorf("inspect core log table kind: %w", err)
+		}
+		if !partitioned {
+			if _, err := tx.Exec(ctx, `DROP INDEX IF EXISTS core_logs_agent_engine_covering_idx`); err != nil {
+				return fmt.Errorf("drop previous covering index: %w", err)
+			}
+			// The single-column recency indexes were only maintained, never
+			// read: the store's single read path always filters by engine and
+			// orders by id within an agent.
+			for _, index := range []string{
+				"core_logs_agent_engine_recent_idx",
+				"core_logs_agent_recent_idx",
+				"core_logs_engine_recent_idx",
+			} {
+				if _, err := tx.Exec(ctx, "DROP INDEX IF EXISTS "+index); err != nil {
+					return fmt.Errorf("drop superseded core log index %s: %w", index, err)
+				}
+			}
+			// Copies left by earlier interrupted attempts are released before
+			// this one contributes its own.
+			if err := dropLegacyCoreLogTables(ctx, tx); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `ALTER TABLE IF EXISTS core_logs RENAME TO `+
+				pgx.Identifier{legacyCoreLogsPrefix + time.Now().UTC().Format("20060102150405")}.Sanitize()); err != nil {
+				return fmt.Errorf("set aside previous core logs: %w", err)
+			}
+		}
+	}
 	if _, err := tx.Exec(ctx, schemaSQL); err != nil {
 		return fmt.Errorf("apply PostgreSQL schema: %w", err)
 	}
@@ -222,6 +279,13 @@ func (s *Store) migrate(ctx context.Context) error {
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit schema migration: %w", err)
+	}
+	// The log table is partitioned by receive day and needs a partition for
+	// today before the first upload arrives, so this runs once the migration
+	// committed. Creating the partitions inside the transaction would be fine
+	// too, but keeping it outside lets the maintenance loop reuse the same path.
+	if err := s.EnsureCoreLogPartitions(ctx, time.Now().UTC()); err != nil {
+		return fmt.Errorf("prepare core log partitions: %w", err)
 	}
 	return nil
 }
@@ -1049,6 +1113,15 @@ func (s *Store) DeleteAgent(ctx context.Context, id string) error {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM substore_sync_items WHERE agent_id=$1`, id); err != nil {
+		return err
+	}
+	// A partitioned core_logs table cannot carry ON DELETE CASCADE, so the
+	// node's logs and their deduplication markers are removed here instead. The
+	// covering index serves the lookup, so this stays a bounded delete.
+	if _, err := tx.Exec(ctx, `DELETE FROM core_logs WHERE agent_id=$1`, id); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM core_log_batches WHERE agent_id=$1`, id); err != nil {
 		return err
 	}
 	legacyEnrollmentID := ""
@@ -2042,9 +2115,16 @@ CREATE TABLE IF NOT EXISTS core_log_batches (
     received_at timestamptz NOT NULL
 );
 
+-- Kernel logs are partitioned by receive day. The retention window is
+-- time-bounded, so dropping a partition replaces a bulk DELETE that has to
+-- walk every index, and each partition's indexes stay small enough to remain
+-- cached on the small instances this panel targets. The sequence is created
+-- separately so it survives a table rebuild.
+CREATE SEQUENCE IF NOT EXISTS core_logs_id_seq;
+
 CREATE TABLE IF NOT EXISTS core_logs (
-    id bigserial PRIMARY KEY,
-    batch_id text NOT NULL REFERENCES core_log_batches(id) ON DELETE CASCADE,
+    id bigint NOT NULL DEFAULT nextval('core_logs_id_seq'),
+    batch_id text NOT NULL REFERENCES core_log_batches(id),
     entry_index smallint NOT NULL CHECK (entry_index >= 0),
     agent_id text NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
     engine varchar(20) NOT NULL CHECK (engine IN ('mihomo','xray','sing-box','ss-rust')),
@@ -2052,12 +2132,18 @@ CREATE TABLE IF NOT EXISTS core_logs (
     message text NOT NULL CHECK (octet_length(message) BETWEEN 1 AND 4096),
     logged_at timestamptz NOT NULL,
     received_at timestamptz NOT NULL,
-    UNIQUE (batch_id,entry_index)
-);
+    -- A partitioned table's unique constraints must include the partition key.
+    PRIMARY KEY (id,received_at),
+    UNIQUE (batch_id,entry_index,received_at)
+) PARTITION BY RANGE (received_at);
 
-CREATE INDEX IF NOT EXISTS core_logs_agent_recent_idx ON core_logs(agent_id,id DESC);
-CREATE INDEX IF NOT EXISTS core_logs_engine_recent_idx ON core_logs(engine,id DESC);
-CREATE INDEX IF NOT EXISTS core_logs_agent_engine_recent_idx ON core_logs(agent_id,engine,id DESC);
+-- Core log reads have exactly one shape: a bounded newest-first window per
+-- (selected engines × optional agent). The covering index below serves every
+-- variant of it with index-only reads, so the older single-column recency
+-- indexes only added write amplification: every inserted row had to maintain
+-- them while no query used them. See docs/performance.md.
+CREATE INDEX IF NOT EXISTS core_logs_agent_engine_covering_idx ON core_logs(agent_id,engine,id DESC)
+    INCLUDE (level,message,logged_at,received_at);
 CREATE INDEX IF NOT EXISTS core_logs_received_idx ON core_logs(received_at);
 CREATE INDEX IF NOT EXISTS core_log_batches_received_idx ON core_log_batches(received_at);
 
@@ -2567,4 +2653,17 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 CREATE INDEX IF NOT EXISTS audit_logs_recent_idx ON audit_logs(acted_at DESC);CREATE TABLE IF NOT EXISTS config_templates ( id text PRIMARY KEY, name varchar(100) NOT NULL, engine varchar(20) NOT NULL CHECK (engine IN ('mihomo','xray','sing-box','ss-rust')), content text NOT NULL CHECK (octet_length(content) <= 4194304), created_at timestamptz NOT NULL, updated_at timestamptz NOT NULL ); CREATE INDEX IF NOT EXISTS config_templates_recent_idx ON config_templates(updated_at DESC);
 CREATE INDEX IF NOT EXISTS enrollment_tokens_active_idx ON enrollment_tokens(expires_at) WHERE revoked_at IS NULL;
 CREATE INDEX IF NOT EXISTS agent_nonces_expiry_idx ON agent_nonces(expires_at);
+
+-- Traffic accounting rewrites the same few rows on every agent report (roughly
+-- once per second per policy), and the daily rollups are upserted far more often
+-- than they are read. At the default fillfactor of 100 every new row version
+-- lands at the end of a page, so the page splits as soon as it fills, dead
+-- versions are only marked reusable, and the tables grow without bound. A live
+-- instance showed 25 policy rows occupying 2.4 MB with 94.6% of that free space.
+-- Reserving room per page lets these hot updates stay on-page as heap-only
+-- tuples, which is what keeps the storage bounded.
+ALTER TABLE port_traffic_policies SET (fillfactor = 75);
+ALTER TABLE port_traffic_daily_usage SET (fillfactor = 85);
+ALTER TABLE port_traffic_daily_accounting SET (fillfactor = 85);
+ALTER TABLE port_traffic_accounting_epochs SET (fillfactor = 85);
 `

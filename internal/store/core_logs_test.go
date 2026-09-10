@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -116,13 +117,75 @@ func TestCoreLogsStoreQueryAndDeduplicateWithPostgreSQL(t *testing.T) {
 	if _, err := dataStore.pool.Exec(ctx, `UPDATE core_log_batches SET received_at=$2 WHERE id=$1`, batch.ID, time.Now().UTC().Add(-2*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	pruned, err := dataStore.PruneCoreLogs(ctx, time.Now().UTC().Add(-time.Hour))
-	if err != nil || pruned != 1 {
-		t.Fatalf("pruned batches = %d, %v", pruned, err)
+	retained, err := dataStore.ListCoreLogs(ctx, CoreLogQuery{AgentID: agent.ID, Limit: 20})
+	if err != nil || len(retained) != 4 {
+		t.Fatalf("logs before prune = %+v, %v", retained, err)
+	}
+	// Log rows live in daily partitions now and a partitioned table cannot carry
+	// ON DELETE CASCADE, so a marker whose rows are still retained must survive:
+	// retiring it would let a replayed batch insert duplicates.
+	pruned, err := dataStore.PruneCoreLogBatches(ctx, time.Now().UTC().Add(-time.Hour))
+	if err != nil || pruned != 0 {
+		t.Fatalf("pruned batches = %d, %v (want 0 while rows are retained)", pruned, err)
 	}
 	remaining, err := dataStore.ListCoreLogs(ctx, CoreLogQuery{AgentID: agent.ID, Limit: 20})
-	if err != nil || len(remaining) != 2 {
+	if err != nil || len(remaining) != len(retained) {
 		t.Fatalf("logs after prune = %+v, %v", remaining, err)
+	}
+}
+
+// Dropping an expired partition must take its rows with it, and the dedup
+// markers that only guarded those rows become removable afterwards.
+func TestCoreLogPartitionPruneRemovesExpiredDay(t *testing.T) {
+	databaseURL := os.Getenv("QCH_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("QCH_TEST_DATABASE_URL is not configured")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	dataStore, err := Open(ctx, databaseURL, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dataStore.Close()
+	agent, enrollmentID := enrollTaskTestAgent(t, ctx, dataStore)
+	defer cleanupTaskTestAgent(dataStore, agent.ID, enrollmentID)
+
+	// A day well outside retention, with its own partition.
+	expired := time.Now().UTC().Truncate(24*time.Hour).AddDate(0, 0, -3)
+	if err := dataStore.ensureCoreLogPartitionsFrom(ctx, expired); err != nil {
+		t.Fatal(err)
+	}
+	batchID := "log_0fedcba987654321"
+	if _, err := dataStore.pool.Exec(ctx, `INSERT INTO core_log_batches (id,agent_id,received_at) VALUES ($1,$2,$3)`,
+		batchID, agent.ID, expired.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := dataStore.pool.Exec(ctx, `INSERT INTO core_logs
+		(batch_id,entry_index,agent_id,engine,level,message,logged_at,received_at)
+		VALUES ($1,0,$2,'mihomo','info','expired partition row',$3,$3)`,
+		batchID, agent.ID, expired.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+
+	dropped, err := dataStore.PruneCoreLogPartitions(ctx, time.Now().UTC().Add(-time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dropped == 0 {
+		t.Fatal("expired partition was not dropped")
+	}
+	var rows int
+	if err := dataStore.pool.QueryRow(ctx, `SELECT count(*) FROM core_logs WHERE batch_id=$1`, batchID).Scan(&rows); err != nil {
+		t.Fatal(err)
+	}
+	if rows != 0 {
+		t.Fatalf("expired rows survived the partition drop: %d", rows)
+	}
+	// With its rows gone the marker is now removable.
+	retired, err := dataStore.PruneCoreLogBatches(ctx, time.Now().UTC().Add(-time.Hour))
+	if err != nil || retired != 1 {
+		t.Fatalf("retired batches = %d, %v", retired, err)
 	}
 }
 
@@ -171,6 +234,80 @@ func TestCoreLogLevelAtLeast(t *testing.T) {
 	for _, test := range tests {
 		if got := coreLogLevelAtLeast(test.level, test.minimum); got != test.want {
 			t.Errorf("coreLogLevelAtLeast(%q, %q) = %t, want %t", test.level, test.minimum, got, test.want)
+		}
+	}
+}
+
+// Every column the log window selects must live in the covering index.
+// Otherwise PostgreSQL has to fetch each selected row from the heap, and one
+// random page read per row turns a bounded window into tens of seconds on the
+// small instances this panel targets. Assert the index shape rather than a
+// particular plan: on an empty or tiny fixture the planner legitimately prefers
+// a sequential or primary-key scan.
+func TestCoreLogCoveringIndexCarriesWindowColumns(t *testing.T) {
+	databaseURL := os.Getenv("QCH_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("QCH_TEST_DATABASE_URL is not configured")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	dataStore, err := Open(ctx, databaseURL, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dataStore.Close()
+	if err := dataStore.EnsureCoreLogPartitions(ctx, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	// Core logs are partitioned by day, so the covering index that carries the
+	// payload lives on each partition, hung under the parent's virtual index.
+	// Read the columns of one partition-level index.
+	rows, err := dataStore.pool.Query(ctx, `
+		SELECT attribute.attname
+		FROM pg_index index
+		JOIN pg_attribute attribute
+		  ON attribute.attrelid = index.indexrelid AND attribute.attnum > 0
+		JOIN pg_inherits ON pg_inherits.inhrelid = index.indexrelid
+		JOIN pg_class parent_index ON parent_index.oid = pg_inherits.inhparent
+		JOIN pg_class partition ON partition.oid = index.indrelid
+		WHERE parent_index.relname = 'core_logs_agent_engine_covering_idx'
+		  AND partition.relname LIKE 'core_logs_p%'
+		LIMIT 100`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	columns := map[string]bool{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			t.Fatal(err)
+		}
+		columns[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if len(columns) == 0 {
+		t.Fatalf("no core log partition carries a covering index")
+	}
+	for _, column := range []string{"agent_id", "engine", "id", "level", "message", "logged_at", "received_at"} {
+		if !columns[column] {
+			t.Fatalf("covering index is missing %q; the log window would fetch it from the heap (columns: %v)", column, columns)
+		}
+	}
+	// The read path selects exactly these columns; a new one would reintroduce
+	// the heap fetch even though this test would still pass on the old set.
+	query := fmt.Sprintf(coreLogWindowSQL, "engine=selected.engine")
+	selectClause, _, found := strings.Cut(strings.TrimPrefix(query, "\n\t\tSELECT "), "\n")
+	if !found {
+		t.Fatalf("cannot read the log window select list:\n%s", query)
+	}
+	for _, reference := range strings.Split(selectClause, ",") {
+		column := strings.TrimSpace(reference)
+		column = strings.TrimPrefix(column, "logs.")
+		if column != "" && !columns[column] {
+			t.Fatalf("log window selects %q, which the covering index does not carry", column)
 		}
 	}
 }
