@@ -561,6 +561,47 @@ func TestOpenRCMigrationStopFailureRollbackClosesOnFreshReconcile(t *testing.T) 
 	}
 }
 
+// OpenRC completed migrations follow the same ownership rule as systemd: the
+// retired service must stay retired, while the QAgent-managed service may be
+// stopped by an operator without invalidating the completed record.
+func TestOpenRCCompletedMigrationOwnershipOnlyTracksRetiredService(t *testing.T) {
+	runlevels, initRoot := useOpenRCTestRunlevels(t)
+	stateRoot := filepath.Join(t.TempDir(), "state")
+	if err := os.MkdirAll(stateRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	manager, _ := newOpenRCTestManager(t, stateRoot, runlevels, initRoot)
+	useFakeOpenRCTree(t, t.TempDir(), stateRoot, t.TempDir(), "/sbin/supervise-daemon")
+	writeOpenRCTestService(t, initRoot, "xray")
+	writeOpenRCTestService(t, initRoot, "qagent-xray")
+	writeOpenRCTestActiveState(t, stateRoot, "xray", "inactive")
+	writeOpenRCTestActiveState(t, stateRoot, "qagent-xray", "inactive")
+	// The managed service is enabled but stopped, exactly like an operator stop
+	// before an Agent upgrade.
+	if err := os.Symlink(filepath.Join(initRoot, "qagent-xray"), filepath.Join(runlevels, "default", "qagent-xray")); err != nil {
+		t.Fatal(err)
+	}
+	existing := EngineSpec{Service: "xray"}
+	if err := verifyCompletedCoreMigrationOwnership(context.Background(), existing, manager); err != nil {
+		t.Fatalf("stopped managed service invalidated a completed OpenRC migration: %v", err)
+	}
+	// A retired service that was added back to the boot runlevel fails closed.
+	if err := os.Symlink(filepath.Join(initRoot, "xray"), filepath.Join(runlevels, "default", "xray")); err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyCompletedCoreMigrationOwnership(context.Background(), existing, manager); err == nil || !strings.Contains(err.Error(), "after migration completion") {
+		t.Fatalf("re-enabled retired OpenRC service error = %v", err)
+	}
+	// And so does a retired service that runs again.
+	if err := os.Remove(filepath.Join(runlevels, "default", "xray")); err != nil {
+		t.Fatal(err)
+	}
+	writeOpenRCTestActiveState(t, stateRoot, "xray", "active")
+	if err := verifyCompletedCoreMigrationOwnership(context.Background(), existing, manager); err == nil || !strings.Contains(err.Error(), "after migration completion") {
+		t.Fatalf("reactivated retired OpenRC service error = %v", err)
+	}
+}
+
 // TestOpenRCBoundServiceProcessRealSupervisedService runs only where a real
 // OpenRC supervisor exists: it spins up a supervised service, proves the
 // process binding, and confirms the completion wait only succeeds once the

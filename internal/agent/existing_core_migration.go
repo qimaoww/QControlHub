@@ -53,7 +53,12 @@ func (e *Executor) LoadCoreMigrationState() error {
 			e.specsMu.Unlock()
 		}
 		if record.State == coreMigrationComplete && record.SourceDigest == coreMigrationSourceDigest(existing) {
-			completionErr := verifyCoreMigrationCompletionState(loadContext, existing, managedSpecs[engine], e.serviceManager())
+			// A completed migration is re-checked on every Agent start. Only the
+			// retired legacy service can invalidate it; the current runtime state
+			// of the QAgent-managed unit (stopped, disabled, or failed by an
+			// operator) belongs to the regular core actions and must not
+			// permanently disable the engine.
+			completionErr := verifyCompletedCoreMigrationOwnership(loadContext, existing, e.serviceManager())
 			e.specsMu.Lock()
 			if completionErr == nil {
 				if e.completedMigrations == nil {
@@ -220,6 +225,48 @@ func verifyCoreMigrationCompletionState(ctx context.Context, existing, managed E
 	manager := selectedServiceManager(managers...)
 	if err := waitForCoreMigrationState(ctx, existing.Service, managed.Service, "inactive", "active", "disabled", "enabled", manager); err != nil {
 		return err
+	}
+	if manager.Kind() == ServiceManagerOpenRC {
+		if _, err := boundOpenRCServiceProcess(ctx, existing.Service); !errors.Is(err, errOpenRCServiceProcessUnbound) {
+			if err == nil {
+				return errors.New("existing OpenRC service still owns a supervised process after migration")
+			}
+			return fmt.Errorf("existing OpenRC service process state is not safely absent after migration: %w", err)
+		}
+	}
+	return nil
+}
+
+// verifyCompletedCoreMigrationOwnership re-checks the durable ownership
+// invariants of an already completed migration. Restarting the Agent must fail
+// closed only when the retired legacy service can reclaim the core again: it is
+// running once more, or it would start again on boot. The runtime state of the
+// QAgent-managed unit is intentionally ignored — an operator stopping or
+// disabling the managed core, or the unit failing, is an ordinary condition
+// that the regular core actions handle; treating it as an unsafe migration
+// would disable every task for that engine until an administrator edits the
+// node by hand.
+//
+// The strict transition check stays in verifyCoreMigrationCompletionState,
+// which runs while the migration is still being finalized and therefore must
+// observe the managed service up and running.
+func verifyCompletedCoreMigrationOwnership(ctx context.Context, existing EngineSpec, managers ...*ServiceManager) error {
+	manager := selectedServiceManager(managers...)
+	status, err := serviceStatusWithManager(ctx, manager, existing.Service)
+	if err != nil {
+		return fmt.Errorf("query existing service state: %w", err)
+	}
+	switch status {
+	case "inactive", "failed":
+	default:
+		return fmt.Errorf("existing %s service is %s after migration completion", existing.Service, status)
+	}
+	enableState, err := serviceEnableState(ctx, existing.Service, manager)
+	if err != nil {
+		return err
+	}
+	if enableState == "enabled" || enableState == "enabled-runtime" {
+		return fmt.Errorf("existing %s service is %s after migration completion", existing.Service, enableState)
 	}
 	if manager.Kind() == ServiceManagerOpenRC {
 		if _, err := boundOpenRCServiceProcess(ctx, existing.Service); !errors.Is(err, errOpenRCServiceProcessUnbound) {

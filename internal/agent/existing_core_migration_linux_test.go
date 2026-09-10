@@ -93,19 +93,19 @@ func TestExistingCoreMigrationSwitchesServicesAndPersistsCompletion(t *testing.T
 func TestCompletedCoreMigrationStateDriftBlocksExplicitMappingTasksAfterRestart(t *testing.T) {
 	requireAgentRoot(t)
 	tests := []struct {
-		name           string
-		existingStatus string
-		managedStatus  string
-		managedEnabled string
+		name            string
+		existingStatus  string
+		existingEnabled string
+		managedStatus   string
+		managedEnabled  string
 	}{
-		{name: "original service reactivated", existingStatus: "active", managedStatus: "inactive", managedEnabled: "enabled"},
-		{name: "managed service stopped", existingStatus: "inactive", managedStatus: "inactive", managedEnabled: "enabled"},
-		{name: "managed persistent enable missing", existingStatus: "inactive", managedStatus: "active", managedEnabled: "disabled"},
+		{name: "original service reactivated", existingStatus: "active", existingEnabled: "disabled", managedStatus: "inactive", managedEnabled: "enabled"},
+		{name: "original service re-enabled", existingStatus: "inactive", existingEnabled: "enabled", managedStatus: "inactive", managedEnabled: "enabled"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			fixture := newExistingCoreMigrationFixture(t, false)
-			writeMigrationServiceState(t, fixture.stateDirectory, "xray.service", test.existingStatus, "disabled")
+			writeMigrationServiceState(t, fixture.stateDirectory, "xray.service", test.existingStatus, test.existingEnabled)
 			writeMigrationServiceState(t, fixture.stateDirectory, "qagent-xray.service", test.managedStatus, test.managedEnabled)
 			if err := writeCoreMigrationMarker(fixture.markerPrefix, core.EngineXray, coreMigrationComplete, coreMigrationConfigDigest(fixture.importedConfig), coreMigrationSourceDigest(fixture.existing), "enabled", "disabled"); err != nil {
 				t.Fatal(err)
@@ -141,6 +141,53 @@ func TestCompletedCoreMigrationStateDriftBlocksExplicitMappingTasksAfterRestart(
 				}
 			}
 		})
+	}
+}
+
+// An operator may stop the QAgent-managed core after a migration completed, and
+// an Agent upgrade must not reinterpret that runtime state as an unsafe
+// migration. Only the retired legacy service coming back invalidates the record.
+func TestCompletedCoreMigrationKeepsOwnershipWhenManagedServiceStopped(t *testing.T) {
+	requireAgentRoot(t)
+	fixture := newExistingCoreMigrationFixture(t, false)
+	if err := os.WriteFile(fixture.managed.Binary, []byte("migrated managed core bytes\n"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	writeMigrationServiceState(t, fixture.stateDirectory, "xray.service", "inactive", "disabled")
+	writeMigrationServiceState(t, fixture.stateDirectory, "qagent-xray.service", "inactive", "enabled")
+	if err := writeCoreMigrationMarker(fixture.markerPrefix, core.EngineXray, coreMigrationComplete, coreMigrationConfigDigest(fixture.importedConfig), coreMigrationSourceDigest(fixture.existing), "enabled", "disabled"); err != nil {
+		t.Fatal(err)
+	}
+	restarted := &Executor{
+		Specs:                   map[core.Engine]EngineSpec{core.EngineXray: fixture.managed},
+		ExistingSpecs:           map[core.Engine]EngineSpec{core.EngineXray: fixture.existing},
+		ExistingDiscoveryIssues: make(map[core.Engine]string),
+		MigrationMarkerPrefix:   fixture.markerPrefix,
+	}
+	if err := restarted.LoadCoreMigrationState(); err != nil {
+		t.Fatalf("load completed migration with a stopped managed service: %v", err)
+	}
+	if _, pending := restarted.ExistingSpecs[core.EngineXray]; pending {
+		t.Fatal("a stopped managed service re-armed the pending import mapping")
+	}
+	if _, ok := restarted.completedMigrations[core.EngineXray]; !ok {
+		t.Fatal("verified migration ownership was dropped when the managed service was stopped")
+	}
+	if issue := restarted.ExistingDiscoveryIssues[core.EngineXray]; issue != "" {
+		t.Fatalf("stopped managed service produced a discovery issue: %q", issue)
+	}
+	runtime := restarted.Runtime(context.Background())[core.EngineXray]
+	if runtime.ExistingConfigUnsupportedReason != "" || runtime.ExistingConfigAvailable {
+		t.Fatalf("stopped managed service runtime = %+v", runtime)
+	}
+	if !runtime.Installed || runtime.ServiceStatus != "inactive" {
+		t.Fatalf("stopped managed service was not reported as an installed, stopped core: %+v", runtime)
+	}
+	if _, err := restarted.Execute(context.Background(), core.Task{Action: core.ActionStart, Engine: core.EngineXray}); err != nil {
+		t.Fatalf("start a stopped managed service after Agent restart: %v", err)
+	}
+	if status, err := serviceStatusWithManager(context.Background(), restarted.serviceManager(), fixture.managed.Service); err != nil || status != "active" {
+		t.Fatalf("managed service status after restart task = %q, %v", status, err)
 	}
 }
 

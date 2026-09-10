@@ -226,7 +226,7 @@ sing-box 的 `-C` 表示配置目录，而不是工作目录。QAgent 按 sing-b
 
 脚本只把核验后的 binary、config、可选 config-directory、service executable 和 service 写成精确的 `QCH_EXISTING_*` 只读发现信息，并同时清除、核验对应 `qagent-*` 空白服务的开机启用状态（systemd 的 persistent/runtime；OpenRC 的全部 runlevel 链接）；不会停止、禁用、替换或修改原通用服务。无法精确映射的活动候选会在引导专用服务前中止安装，不能与“没有活动候选”混同。注册请求不包含配置正文，也不会创建配置、修订或部署记录。节点上线后，管理员在 Web 控制台“手动配置”页查看只读的实时节点快照，再显式选择“手动导入并迁移”；迁移完成后才能编辑托管配置。
 
-已有节点通过控制面“升级 Agent”替换二进制并重启后，即使环境文件中没有 `QCH_EXISTING_*`，新版 Agent 也会在启动阶段执行同一套只读发现与真实内核校验。自动发现结果原子保存到 Agent state 文件旁的 `0600` 状态文件，只使用 `/var/lib/qcontrolhub` 既有受保护写权限；每次重启都会按当前 service、systemd `ExecStart` 或 OpenRC 实际进程参数及配置源刷新，不写原服务配置、二进制或任意 `/etc` 路径。显式配置的 `QCH_EXISTING_*` 始终优先，不会被自动结果覆盖；`migrating` 和 `migrated` marker 对应的持久映射会继续保留，用于崩溃恢复或在每次重启时重新证明完成状态仍安全。
+已有节点通过控制面“升级 Agent”替换二进制并重启后，即使环境文件中没有 `QCH_EXISTING_*`，新版 Agent 也会在启动阶段执行同一套只读发现与真实内核校验。自动发现结果原子保存到 Agent state 文件旁的 `0600` 状态文件，只使用 `/var/lib/qcontrolhub` 既有受保护写权限；每次重启都会按当前 service、systemd `ExecStart` 或 OpenRC 实际进程参数及配置源刷新，不写原服务配置、二进制或任意 `/etc` 路径。显式配置的 `QCH_EXISTING_*` 始终优先，不会被自动结果覆盖；`migrating` 和 `migrated` marker 对应的持久映射会继续保留，用于崩溃恢复或在每次重启时重新证明已退役的原服务仍不会重新接管。
 
 如果标准服务及 `-c`/`-C` 配置形式已被检测到，但 executable 是复杂 wrapper、多跳 symlink、路径/权限不安全，或多个标准服务同时 active，Agent 不会执行 wrapper、读取不完整快照或创建迁移映射。该状态及原因会随心跳上报；控制面拒绝创建该内核的全部任务，Agent 执行器也会独立拒绝经旧页面或既有 WSS 会话送达的任务。节点页与“手动配置”页显示“检测到但不可迁移”。管理员应先把单元调整为直接真实二进制、一跳真实二进制链接或前述固定两行转发器，再重启 Agent 触发刷新。
 
@@ -238,7 +238,7 @@ sing-box 的 `-C` 表示配置目录，而不是工作目录。QAgent 按 sing-b
 
 自动识别失败时不会降级为猜测式映射。需要手工提供发现信息时，必须同时核对 `QCH_EXISTING_*_BINARY`、`QCH_EXISTING_*_SERVICE`，以及至少一个配置来源（`QCH_EXISTING_*_CONFIG` 或 `QCH_EXISTING_*_CONFIG_DIRECTORY`）；sing-box 目录模式还必须核对 `QCH_EXISTING_SING_BOX_CONFIG_DIRECTORY`，转发器布局必须核对 `QCH_EXISTING_SING_BOX_SERVICE_BINARY`。Xray 的 confdir 布局同样通过 `QCH_EXISTING_XRAY_CONFIG_DIRECTORY` 提供；目录权威形态下 `QCH_EXISTING_XRAY_CONFIG` 留空即可，但两者不能同时为空。任意 wrapper 无法安全证明时不会提供自动迁移入口，应先由管理员把 systemd 单元或 OpenRC 服务脚本改为直接执行受保护真实二进制或上述固定转发形式，再重启 Agent 触发发现；配置仍由管理员在“手动配置”页显式迁移。
 
-迁移前，Agent 不会获得原配置目录或原核心二进制目录的写权限，也会拒绝部署、启停和内核安装任务。迁移后运行的是复制到 QAgent 私有目录的二进制与专用配置，原服务保持 disabled；后续升级和配置管理只作用于 QAgent 专用服务。每次 Agent 重启都会重新核对 completed marker 的当前服务状态和 enable 层级；若原服务再次 active、托管服务停止或任一 enable 层级漂移，运行态会报告不可安全接管，控制面与 Agent 执行器同时禁用该内核的全部任务，而不是静默复用旧 marker。
+迁移前，Agent 不会获得原配置目录或原核心二进制目录的写权限，也会拒绝部署、启停和内核安装任务。迁移后运行的是复制到 QAgent 私有目录的二进制与专用配置，原服务保持 disabled；后续升级和配置管理只作用于 QAgent 专用服务。每次 Agent 重启都会重新核对 completed marker 的归属，但只以“已退役的原服务不能重新接管”为准：原服务必须仍为 `inactive` 且未被重新 enable（OpenRC 还要求没有遗留的受监管进程）。`qagent-*` 托管服务自身的运行态不再参与这项判定，操作员通过控制台停止、禁用该服务，或该服务启动失败，都只影响当前状态展示，控制台仍可继续用常规启停、部署和版本任务恢复它。若原服务再次 active 或被重新 enable，运行态会报告不可安全接管，控制面与 Agent 执行器同时禁用该内核的全部任务，而不是静默复用旧 marker。
 
 私有 CA 示例：
 
