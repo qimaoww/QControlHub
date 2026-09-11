@@ -286,6 +286,23 @@ systemd 单元的 `ProtectSystem=strict` 只放行固定的 `/etc/qagent` 配置
 
 ## 5. 运维操作
 
+### 排查控制面 CPU
+
+控制面默认不暴露任何 profiling 端点。需要定位 CPU 时，在容器环境里设置 `QCH_PPROF_ADDRESS` 后重启：
+
+```bash
+QCH_PPROF_ADDRESS=127.0.0.1:6060
+```
+
+端点会挂在 `net/http/pprof` 的默认路径下，**不带鉴权**，因此只应绑定回环地址，通过 SSH 隧道访问：
+
+```bash
+ssh -L 6060:127.0.0.1:6060 <host> 'docker restart qcontrolhub-control-plane-1'
+go tool pprof -top -seconds=30 http://127.0.0.1:6060/debug/pprof/profile
+```
+
+抓完取样后应清空该变量并重启，让端点下线。不设置它时该监听不会启动。
+
 ### 更新控制面
 
 ```bash
