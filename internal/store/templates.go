@@ -37,11 +37,11 @@ func (s *Store) CreateConfigTemplate(ctx context.Context, name, engineName strin
 	if err != nil {
 		return core.ConfigTemplate{}, err
 	}
-	template := core.ConfigTemplate{ID: id, Name: name, Engine: engine, Content: content, CreatedAt: now, UpdatedAt: now}
+	template := core.ConfigTemplate{ID: id, OwnerID: scopeForConfig(ctx).OwnerID, Name: name, Engine: engine, Content: content, CreatedAt: now, UpdatedAt: now}
 	_, err = s.pool.Exec(ctx, `
-		INSERT INTO config_templates (id,name,engine,content,created_at,updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6)`,
-		template.ID, template.Name, template.Engine, storedContent, template.CreatedAt, template.UpdatedAt)
+		INSERT INTO config_templates (id,name,engine,content,created_at,updated_at,owner_id)
+		VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+		template.ID, template.Name, template.Engine, storedContent, template.CreatedAt, template.UpdatedAt, template.OwnerID)
 	if err != nil {
 		return core.ConfigTemplate{}, mapError(err)
 	}
@@ -50,9 +50,11 @@ func (s *Store) CreateConfigTemplate(ctx context.Context, name, engineName strin
 
 // ListConfigTemplates returns all templates, newest first.
 func (s *Store) ListConfigTemplates(ctx context.Context) ([]core.ConfigTemplate, error) {
+	args := []any{}
+	ownerWhere := ownerClause(ctx, "owner_id", &args)
 	rows, err := s.pool.Query(ctx, `
-		SELECT id,name,engine,content,created_at,updated_at
-		FROM config_templates ORDER BY updated_at DESC`)
+		SELECT id,name,engine,content,created_at,updated_at,owner_id
+		FROM config_templates WHERE true`+ownerWhere+` ORDER BY updated_at DESC`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list config templates: %w", err)
 	}
@@ -61,7 +63,7 @@ func (s *Store) ListConfigTemplates(ctx context.Context) ([]core.ConfigTemplate,
 	for rows.Next() {
 		var template core.ConfigTemplate
 		if err := rows.Scan(&template.ID, &template.Name, &template.Engine, &template.Content,
-			&template.CreatedAt, &template.UpdatedAt); err != nil {
+			&template.CreatedAt, &template.UpdatedAt, &template.OwnerID); err != nil {
 			return nil, fmt.Errorf("scan config template: %w", err)
 		}
 		template.Content, err = s.decryptContent(template.Content)
@@ -75,7 +77,9 @@ func (s *Store) ListConfigTemplates(ctx context.Context) ([]core.ConfigTemplate,
 
 // DeleteConfigTemplate removes a template by id.
 func (s *Store) DeleteConfigTemplate(ctx context.Context, id string) error {
-	command, err := s.pool.Exec(ctx, `DELETE FROM config_templates WHERE id=$1`, id)
+	args := []any{id}
+	ownerWhere := ownerClause(ctx, "owner_id", &args)
+	command, err := s.pool.Exec(ctx, `DELETE FROM config_templates WHERE id=$1`+ownerWhere, args...)
 	if err != nil {
 		return fmt.Errorf("delete config template: %w", err)
 	}
@@ -118,10 +122,12 @@ func RenderConfigTemplate(content string, agent core.Agent) (string, error) {
 // the result with the engine checker.
 func (s *Store) RenderTemplateForAgent(ctx context.Context, templateID, agentID string) (core.ConfigTemplate, core.Agent, string, error) {
 	var template core.ConfigTemplate
+	args := []any{templateID}
+	ownerWhere := ownerClause(ctx, "owner_id", &args)
 	err := s.pool.QueryRow(ctx, `
-		SELECT id,name,engine,content,created_at,updated_at
-		FROM config_templates WHERE id=$1`, templateID).Scan(
-		&template.ID, &template.Name, &template.Engine, &template.Content, &template.CreatedAt, &template.UpdatedAt)
+		SELECT id,name,engine,content,created_at,updated_at,owner_id
+		FROM config_templates WHERE id=$1`+ownerWhere, args...).Scan(
+		&template.ID, &template.Name, &template.Engine, &template.Content, &template.CreatedAt, &template.UpdatedAt, &template.OwnerID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return core.ConfigTemplate{}, core.Agent{}, "", ErrNotFound
 	}

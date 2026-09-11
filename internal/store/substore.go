@@ -84,13 +84,34 @@ func validateSubStoreTargetName(name string) (string, error) {
 	return name, nil
 }
 
+// SubStoreTargetClaims returns only the identities needed to reserve groups
+// on the shared backend. Callers must not expose another owner's claims.
+func (s *Store) SubStoreTargetClaims(ctx context.Context) ([]core.SubStoreSyncTarget, error) {
+	rows, err := s.pool.Query(ctx, `SELECT id,owner_id,subscription_name,integration_id FROM substore_sync_targets`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]core.SubStoreSyncTarget, 0)
+	for rows.Next() {
+		var target core.SubStoreSyncTarget
+		if err := rows.Scan(&target.ID, &target.OwnerID, &target.SubscriptionName, &target.IntegrationID); err != nil {
+			return nil, err
+		}
+		result = append(result, target)
+	}
+	return result, rows.Err()
+}
+
 func (s *Store) ListSubStoreSyncTargets(ctx context.Context) ([]core.SubStoreSyncTarget, error) {
+	args := []any{}
+	ownerWhere := ownerClause(ctx, "target.owner_id", &args)
 	rows, err := s.pool.Query(ctx, `
 		SELECT target.id,target.display_name,target.subscription_name,target.integration_id,target.sync_mode,target.last_synced_at,
 		       target.last_sync_status,target.last_sync_error,
 		       (SELECT count(*) FROM substore_sync_items item WHERE item.target_id=target.id),
-		       target.created_at,target.updated_at
-		FROM substore_sync_targets target ORDER BY target.created_at,target.id`)
+		       target.created_at,target.updated_at,target.owner_id,target.sync_format
+		FROM substore_sync_targets target WHERE true`+ownerWhere+` ORDER BY target.created_at,target.id`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -100,7 +121,7 @@ func (s *Store) ListSubStoreSyncTargets(ctx context.Context) ([]core.SubStoreSyn
 		var target core.SubStoreSyncTarget
 		if err := rows.Scan(
 			&target.ID, &target.DisplayName, &target.SubscriptionName, &target.IntegrationID, &target.SyncMode, &target.LastSyncedAt,
-			&target.LastSyncStatus, &target.LastSyncError, &target.SelectionCount, &target.CreatedAt, &target.UpdatedAt,
+			&target.LastSyncStatus, &target.LastSyncError, &target.SelectionCount, &target.CreatedAt, &target.UpdatedAt, &target.OwnerID, &target.SyncFormat,
 		); err != nil {
 			return nil, err
 		}
@@ -111,14 +132,16 @@ func (s *Store) ListSubStoreSyncTargets(ctx context.Context) ([]core.SubStoreSyn
 
 func (s *Store) SubStoreSyncTarget(ctx context.Context, id string) (core.SubStoreSyncTarget, error) {
 	var target core.SubStoreSyncTarget
+	args := []any{strings.TrimSpace(id)}
+	ownerWhere := ownerClause(ctx, "target.owner_id", &args)
 	err := s.pool.QueryRow(ctx, `
 		SELECT target.id,target.display_name,target.subscription_name,target.integration_id,target.sync_mode,target.last_synced_at,
 		       target.last_sync_status,target.last_sync_error,
 		       (SELECT count(*) FROM substore_sync_items item WHERE item.target_id=target.id),
-		       target.created_at,target.updated_at
-		FROM substore_sync_targets target WHERE target.id=$1`, strings.TrimSpace(id)).Scan(
+		       target.created_at,target.updated_at,target.owner_id,target.sync_format
+		FROM substore_sync_targets target WHERE target.id=$1`+ownerWhere, args...).Scan(
 		&target.ID, &target.DisplayName, &target.SubscriptionName, &target.IntegrationID, &target.SyncMode, &target.LastSyncedAt,
-		&target.LastSyncStatus, &target.LastSyncError, &target.SelectionCount, &target.CreatedAt, &target.UpdatedAt,
+		&target.LastSyncStatus, &target.LastSyncError, &target.SelectionCount, &target.CreatedAt, &target.UpdatedAt, &target.OwnerID, &target.SyncFormat,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return core.SubStoreSyncTarget{}, ErrNotFound
@@ -126,7 +149,7 @@ func (s *Store) SubStoreSyncTarget(ctx context.Context, id string) (core.SubStor
 	return target, err
 }
 
-func (s *Store) CreateSubStoreSyncTarget(ctx context.Context, name string, modes ...string) (core.SubStoreSyncTarget, error) {
+func (s *Store) CreateSubStoreSyncTarget(ctx context.Context, name string, options ...string) (core.SubStoreSyncTarget, error) {
 	name, err := validateSubStoreTargetName(name)
 	if err != nil {
 		return core.SubStoreSyncTarget{}, err
@@ -136,13 +159,17 @@ func (s *Store) CreateSubStoreSyncTarget(ctx context.Context, name string, modes
 		return core.SubStoreSyncTarget{}, err
 	}
 	mode := core.SubStoreSyncModeIncremental
-	if len(modes) > 0 {
-		mode = modes[0]
+	format := core.SubStoreSyncFormatURL
+	if len(options) > 0 {
+		mode = options[0]
 	}
-	return s.createSubStoreSyncTarget(ctx, name, integrationID, mode)
+	if len(options) > 1 {
+		format = options[1]
+	}
+	return s.createSubStoreSyncTarget(ctx, name, integrationID, mode, format)
 }
 
-func (s *Store) ImportSubStoreSyncTarget(ctx context.Context, name, integrationID string) (core.SubStoreSyncTarget, error) {
+func (s *Store) ImportSubStoreSyncTarget(ctx context.Context, name, integrationID string, formats ...string) (core.SubStoreSyncTarget, error) {
 	name, err := validateSubStoreTargetName(name)
 	if err != nil {
 		return core.SubStoreSyncTarget{}, err
@@ -151,13 +178,21 @@ func (s *Store) ImportSubStoreSyncTarget(ctx context.Context, name, integrationI
 	if !strings.HasPrefix(integrationID, "ssi_") || utf8.RuneCountInString(integrationID) > 100 {
 		return core.SubStoreSyncTarget{}, fmt.Errorf("%w: Sub-Store integration identity is invalid", ErrInvalid)
 	}
-	return s.createSubStoreSyncTarget(ctx, name, integrationID, core.SubStoreSyncModeIncremental)
+	format := core.SubStoreSyncFormatURL
+	if len(formats) > 0 {
+		format = formats[0]
+	}
+	return s.createSubStoreSyncTarget(ctx, name, integrationID, core.SubStoreSyncModeIncremental, format)
 }
 
-func (s *Store) createSubStoreSyncTarget(ctx context.Context, name, integrationID, mode string) (core.SubStoreSyncTarget, error) {
+func (s *Store) createSubStoreSyncTarget(ctx context.Context, name, integrationID, mode, format string) (core.SubStoreSyncTarget, error) {
 	mode, valid := core.NormalizeSubStoreSyncMode(strings.TrimSpace(mode))
 	if !valid {
 		return core.SubStoreSyncTarget{}, fmt.Errorf("%w: Sub-Store sync mode is invalid", ErrInvalid)
+	}
+	format, valid = core.NormalizeSubStoreSyncFormat(strings.TrimSpace(format))
+	if !valid {
+		return core.SubStoreSyncTarget{}, fmt.Errorf("%w: Sub-Store sync format is invalid", ErrInvalid)
 	}
 	id, err := core.NewID("sst")
 	if err != nil {
@@ -166,14 +201,14 @@ func (s *Store) createSubStoreSyncTarget(ctx context.Context, name, integrationI
 	now := time.Now().UTC()
 	if _, err := s.pool.Exec(ctx, `
 		INSERT INTO substore_sync_targets
-			(id,display_name,subscription_name,integration_id,sync_mode,last_sync_status,last_sync_error,created_at,updated_at)
-		VALUES ($1,$2,$2,$3,$4,'never','',$5,$5)`, id, name, integrationID, mode, now); err != nil {
+			(id,display_name,subscription_name,integration_id,sync_mode,last_sync_status,last_sync_error,created_at,updated_at,owner_id,sync_format)
+		VALUES ($1,$2,$2,$3,$4,'never','',$5,$5,$6,$7)`, id, name, integrationID, mode, now, scopeForConfig(ctx).OwnerID, format); err != nil {
 		return core.SubStoreSyncTarget{}, mapError(err)
 	}
 	return s.SubStoreSyncTarget(ctx, id)
 }
 
-func (s *Store) UpdateSubStoreSyncTarget(ctx context.Context, id, displayName, subscriptionName, mode string) (core.SubStoreSyncTarget, error) {
+func (s *Store) UpdateSubStoreSyncTarget(ctx context.Context, id, displayName, subscriptionName, mode string, formats ...string) (core.SubStoreSyncTarget, error) {
 	displayName, err := validateSubStoreTargetName(displayName)
 	if err != nil {
 		return core.SubStoreSyncTarget{}, err
@@ -186,10 +221,19 @@ func (s *Store) UpdateSubStoreSyncTarget(ctx context.Context, id, displayName, s
 	if !valid {
 		return core.SubStoreSyncTarget{}, fmt.Errorf("%w: Sub-Store sync mode is invalid", ErrInvalid)
 	}
+	format := ""
+	if len(formats) > 0 {
+		format, valid = core.NormalizeSubStoreSyncFormat(strings.TrimSpace(formats[0]))
+		if !valid {
+			return core.SubStoreSyncTarget{}, fmt.Errorf("%w: Sub-Store sync format is invalid", ErrInvalid)
+		}
+	}
+	args := []any{strings.TrimSpace(id), displayName, subscriptionName, mode, format}
+	ownerWhere := ownerClause(ctx, "owner_id", &args)
 	command, err := s.pool.Exec(ctx, `
 		UPDATE substore_sync_targets SET
-			display_name=$2,subscription_name=$3,sync_mode=$4,updated_at=now()
-		WHERE id=$1`, strings.TrimSpace(id), displayName, subscriptionName, mode)
+			display_name=$2,subscription_name=$3,sync_mode=$4,sync_format=COALESCE(NULLIF($5,''),sync_format),updated_at=now()
+		WHERE id=$1`+ownerWhere, args...)
 	if err != nil {
 		return core.SubStoreSyncTarget{}, mapError(err)
 	}
@@ -200,7 +244,9 @@ func (s *Store) UpdateSubStoreSyncTarget(ctx context.Context, id, displayName, s
 }
 
 func (s *Store) DeleteSubStoreSyncTarget(ctx context.Context, id string) error {
-	command, err := s.pool.Exec(ctx, `DELETE FROM substore_sync_targets WHERE id=$1`, strings.TrimSpace(id))
+	args := []any{strings.TrimSpace(id)}
+	ownerWhere := ownerClause(ctx, "owner_id", &args)
+	command, err := s.pool.Exec(ctx, `DELETE FROM substore_sync_targets WHERE id=$1`+ownerWhere, args...)
 	if err != nil {
 		return err
 	}
@@ -211,9 +257,12 @@ func (s *Store) DeleteSubStoreSyncTarget(ctx context.Context, id string) error {
 }
 
 func (s *Store) ListSubStoreSyncSelections(ctx context.Context, targetID string) ([]core.SubStoreSyncSelection, error) {
+	args := []any{strings.TrimSpace(targetID)}
+	ownerWhere := ownerClause(ctx, "target.owner_id", &args)
 	rows, err := s.pool.Query(ctx, `
-		SELECT target_id,agent_id,engine,profile_tag,custom_name,address_mode,created_at,updated_at
-		FROM substore_sync_items WHERE target_id=$1 ORDER BY created_at,agent_id,engine,profile_tag`, strings.TrimSpace(targetID))
+		SELECT item.target_id,item.agent_id,item.engine,item.profile_tag,item.custom_name,item.address_mode,item.created_at,item.updated_at,item.config_id
+		FROM substore_sync_items item JOIN substore_sync_targets target ON target.id=item.target_id
+		WHERE item.target_id=$1`+ownerWhere+` ORDER BY item.created_at,item.agent_id,item.engine,item.profile_tag`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -221,7 +270,7 @@ func (s *Store) ListSubStoreSyncSelections(ctx context.Context, targetID string)
 	result := make([]core.SubStoreSyncSelection, 0)
 	for rows.Next() {
 		var item core.SubStoreSyncSelection
-		if err := rows.Scan(&item.TargetID, &item.AgentID, &item.Engine, &item.ProfileTag, &item.CustomName, &item.AddressMode, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.TargetID, &item.AgentID, &item.Engine, &item.ProfileTag, &item.CustomName, &item.AddressMode, &item.CreatedAt, &item.UpdatedAt, &item.ConfigID); err != nil {
 			return nil, err
 		}
 		result = append(result, item)
@@ -240,6 +289,7 @@ func (s *Store) ReplaceSubStoreSyncSelections(ctx context.Context, targetID stri
 	seen := make(map[string]struct{}, len(selections))
 	for index := range selections {
 		selections[index].TargetID = targetID
+		selections[index].ConfigID = strings.TrimSpace(selections[index].ConfigID)
 		selections[index].AgentID = strings.TrimSpace(selections[index].AgentID)
 		selections[index].ProfileTag = strings.TrimSpace(selections[index].ProfileTag)
 		selections[index].CustomName = strings.TrimSpace(selections[index].CustomName)
@@ -279,9 +329,21 @@ func (s *Store) ReplaceSubStoreSyncSelections(ctx context.Context, targetID stri
 		} else if err != nil {
 			return nil, err
 		}
+		if item.ConfigID != "" || !scopeForConfig(ctx).Admin {
+			args := []any{item.ConfigID, item.AgentID, item.Engine}
+			ownerWhere := ownerClause(ctx, "owner_id", &args)
+			var visible bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM configs
+				WHERE id=$1 AND (agent_id IS NULL OR agent_id=$2) AND engine=$3 AND deleted_at IS NULL`+ownerWhere+`)`, args...).Scan(&visible); err != nil {
+				return nil, err
+			}
+			if !visible {
+				return nil, ErrNotFound
+			}
+		}
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO substore_sync_items (target_id,agent_id,engine,profile_tag,custom_name,address_mode,created_at,updated_at)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$7)`, targetID, item.AgentID, item.Engine, item.ProfileTag, item.CustomName, item.AddressMode, now); err != nil {
+			INSERT INTO substore_sync_items (target_id,agent_id,engine,profile_tag,custom_name,address_mode,created_at,updated_at,config_id)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$7,$8)`, targetID, item.AgentID, item.Engine, item.ProfileTag, item.CustomName, item.AddressMode, now, item.ConfigID); err != nil {
 			return nil, mapError(err)
 		}
 	}
@@ -298,10 +360,12 @@ func (s *Store) RecordSubStoreSyncResult(ctx context.Context, targetID string, s
 		status = "failed"
 		message = truncate(strings.TrimSpace(syncErr.Error()), 500)
 	}
+	args := []any{status, message, strings.TrimSpace(targetID)}
+	ownerWhere := ownerClause(ctx, "owner_id", &args)
 	command, err := s.pool.Exec(ctx, `
 		UPDATE substore_sync_targets SET
 			last_synced_at=now(),last_sync_status=$1,last_sync_error=$2,updated_at=now()
-		WHERE id=$3`, status, message, strings.TrimSpace(targetID))
+		WHERE id=$3`+ownerWhere, args...)
 	if err != nil {
 		return err
 	}

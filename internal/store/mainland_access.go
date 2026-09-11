@@ -33,24 +33,21 @@ func (s *Store) replaceMainlandAccessPoliciesTx(ctx context.Context, tx pgx.Tx, 
 			return errors.New("invalid Shadowsocks Rust mainland access policy")
 		}
 	}
-	var version int
-	if err := tx.QueryRow(ctx, `SELECT version FROM configs WHERE agent_id=$1 AND engine=$2 AND deleted_at IS NULL FOR UPDATE`, agentID, core.EngineShadowsocksRust).Scan(&version); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return ErrNotFound
-		}
+	configID, version, err := lockMainlandConfig(ctx, tx, agentID, core.EngineShadowsocksRust)
+	if err != nil {
 		return err
 	}
 	if version != expectedVersion {
 		return ErrConflict
 	}
-	if _, err := tx.Exec(ctx, `DELETE FROM mainland_access_policies WHERE agent_id=$1 AND engine=$2`, agentID, core.EngineShadowsocksRust); err != nil {
+	if _, err := tx.Exec(ctx, `DELETE FROM mainland_access_policies WHERE config_id=$1`, configID); err != nil {
 		return err
 	}
 	for _, policy := range policies {
 		if _, err := tx.Exec(ctx, `INSERT INTO mainland_access_policies
-			(agent_id,engine,tag,kind,port,config_version,block_mainland_destination,block_mainland_source,updated_at)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,now())`, agentID, core.EngineShadowsocksRust, strings.TrimSpace(policy.Tag),
-			strings.TrimSpace(policy.Kind), policy.Port, expectedVersion, policy.BlockMainlandDestination, policy.BlockMainlandSource); err != nil {
+			(agent_id,engine,tag,kind,port,config_version,block_mainland_destination,block_mainland_source,updated_at,config_id)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,now(),$9)`, agentID, core.EngineShadowsocksRust, strings.TrimSpace(policy.Tag),
+			strings.TrimSpace(policy.Kind), policy.Port, expectedVersion, policy.BlockMainlandDestination, policy.BlockMainlandSource, configID); err != nil {
 			return mapError(err)
 		}
 	}
@@ -62,12 +59,14 @@ func (s *Store) replaceMainlandAccessPoliciesTx(ctx context.Context, tx pgx.Tx, 
 func (s *Store) ListMainlandAccessPolicies(ctx context.Context, agentID string) ([]core.MainlandAccessPolicy, error) {
 	query := `SELECT p.agent_id,p.engine,p.tag,p.kind,p.port,p.config_version,p.block_mainland_destination,p.block_mainland_source
 	          FROM mainland_access_policies p
-	          JOIN configs c ON c.agent_id=p.agent_id AND c.engine=p.engine AND c.version=p.config_version AND c.deleted_at IS NULL`
+	          JOIN configs c ON c.id=p.config_id AND c.version=p.config_version AND c.deleted_at IS NULL
+	          WHERE true`
 	args := []any{}
 	if agentID != "" {
-		query += " WHERE p.agent_id=$1"
+		query += " AND p.agent_id=$1"
 		args = append(args, agentID)
 	}
+	query += workspaceOwnerClause(ctx, "c.owner_id", &args)
 	query += " ORDER BY p.agent_id,p.port,p.tag"
 	rows, err := s.pool.Query(ctx, query, args...)
 	if err != nil {
@@ -98,11 +97,8 @@ func (s *Store) SaveMainlandAccessPolicy(ctx context.Context, policy core.Mainla
 		return err
 	}
 	defer tx.Rollback(ctx)
-	var version int
-	if err := tx.QueryRow(ctx, `SELECT version FROM configs WHERE agent_id=$1 AND engine=$2 AND deleted_at IS NULL FOR UPDATE`, policy.AgentID, policy.Engine).Scan(&version); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return ErrNotFound
-		}
+	configID, version, err := lockMainlandConfig(ctx, tx, policy.AgentID, policy.Engine)
+	if err != nil {
 		return err
 	}
 	if expectedVersion > 0 && expectedVersion != version {
@@ -110,16 +106,16 @@ func (s *Store) SaveMainlandAccessPolicy(ctx context.Context, policy core.Mainla
 	}
 	_, err = tx.Exec(ctx, `
 		INSERT INTO mainland_access_policies
-			(agent_id,engine,tag,kind,port,config_version,block_mainland_destination,block_mainland_source,updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,now())
-		ON CONFLICT (agent_id,engine,tag,port) DO UPDATE SET
+		(agent_id,engine,tag,kind,port,config_version,block_mainland_destination,block_mainland_source,updated_at,config_id)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,now(),$9)
+		ON CONFLICT (config_id,tag,port) DO UPDATE SET
 			kind=EXCLUDED.kind,
 			config_version=EXCLUDED.config_version,
 			block_mainland_destination=EXCLUDED.block_mainland_destination,
 			block_mainland_source=EXCLUDED.block_mainland_source,
 			updated_at=now()`,
 		policy.AgentID, policy.Engine, policy.Tag, policy.Kind, policy.Port, version,
-		policy.BlockMainlandDestination, policy.BlockMainlandSource)
+		policy.BlockMainlandDestination, policy.BlockMainlandSource, configID)
 	if err != nil {
 		return mapError(err)
 	}
@@ -132,18 +128,27 @@ func (s *Store) DeleteMainlandAccessPolicy(ctx context.Context, agentID string, 
 		return err
 	}
 	defer tx.Rollback(ctx)
-	var version int
-	if err := tx.QueryRow(ctx, `SELECT version FROM configs WHERE agent_id=$1 AND engine=$2 AND deleted_at IS NULL FOR UPDATE`, agentID, engine).Scan(&version); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return ErrNotFound
-		}
+	configID, version, err := lockMainlandConfig(ctx, tx, agentID, engine)
+	if err != nil {
 		return err
 	}
 	if expectedVersion > 0 && expectedVersion != version {
 		return ErrConflict
 	}
-	if _, err := tx.Exec(ctx, `DELETE FROM mainland_access_policies WHERE agent_id=$1 AND engine=$2 AND tag=$3`, agentID, engine, tag); err != nil {
+	if _, err := tx.Exec(ctx, `DELETE FROM mainland_access_policies WHERE config_id=$1 AND tag=$2`, configID, tag); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
+}
+
+func lockMainlandConfig(ctx context.Context, tx pgx.Tx, agentID string, engine core.Engine) (string, int, error) {
+	var id string
+	var version int
+	err := tx.QueryRow(ctx, `SELECT id,version FROM configs
+		WHERE agent_id=$1 AND engine=$2 AND owner_id=$3 AND deleted_at IS NULL FOR UPDATE`,
+		agentID, engine, scopeForConfig(ctx).OwnerID).Scan(&id, &version)
+	if errors.Is(err, pgx.ErrNoRows) {
+		err = ErrNotFound
+	}
+	return id, version, err
 }

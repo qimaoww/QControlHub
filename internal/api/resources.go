@@ -42,6 +42,7 @@ type clientAccessAddressOption struct {
 
 type clientAccessEntry struct {
 	AgentID         string                      `json:"agent_id"`
+	ConfigID        string                      `json:"config_id"`
 	AgentName       string                      `json:"agent_name"`
 	AgentStatus     string                      `json:"agent_status"`
 	Engine          core.Engine                 `json:"engine"`
@@ -771,14 +772,14 @@ func (s *Server) clientAccessEntries(ctx context.Context) ([]clientAccessEntry, 
 		if len(addressOptions) > 0 {
 			primary := addressOptions[0]
 			entries = append(entries, clientAccessEntry{
-				AgentID: agent.ID, AgentName: agent.Name, AgentStatus: agent.Status, Engine: deployment.Engine,
+				AgentID: agent.ID, ConfigID: config.ID, AgentName: agent.Name, AgentStatus: agent.Status, Engine: deployment.Engine,
 				Address: primary.Address, Source: primary.Source, Profiles: profiles, AddressOptions: addressOptions,
 				AddressMode: clientAddressMode,
 			})
 		}
 		if len(addressOptions) == 0 && len(candidates) == 0 {
 			entries = append(entries, clientAccessEntry{
-				AgentID: agent.ID, AgentName: agent.Name, AgentStatus: agent.Status, Engine: deployment.Engine,
+				AgentID: agent.ID, ConfigID: config.ID, AgentName: agent.Name, AgentStatus: agent.Status, Engine: deployment.Engine,
 				AddressRequired: true, Profiles: []clientAccessProfile{}, AddressMode: clientAddressMode,
 			})
 		}

@@ -101,8 +101,9 @@ func agentHasFeature(features []string, feature string) bool {
 }
 
 type tokenPrincipal struct {
-	Role        core.Role
-	Permissions []core.Permission
+	Role          core.Role
+	ConfigOwnerID string
+	Permissions   []core.Permission
 }
 
 type liveConnection struct {
@@ -126,17 +127,17 @@ func New(dataStore *store.Store, config Config) *Server {
 	roleTokens := map[[32]byte]tokenPrincipal{adminTokenDigest: {Role: core.RoleAdmin, Permissions: core.AllPermissions()}}
 	for _, token := range config.OperatorTokens {
 		if token = strings.TrimSpace(token); token != "" {
-			roleTokens[sha256.Sum256([]byte(token))] = tokenPrincipal{Role: core.RoleUser, Permissions: legacyOperatorPermissions()}
+			roleTokens[sha256.Sum256([]byte(token))] = tokenPrincipal{Role: core.RoleUser, ConfigOwnerID: tokenConfigOwnerID(token), Permissions: legacyOperatorPermissions()}
 		}
 	}
 	for _, token := range config.AuditorTokens {
 		if token = strings.TrimSpace(token); token != "" {
-			roleTokens[sha256.Sum256([]byte(token))] = tokenPrincipal{Role: core.RoleUser, Permissions: legacyAuditorPermissions()}
+			roleTokens[sha256.Sum256([]byte(token))] = tokenPrincipal{Role: core.RoleUser, ConfigOwnerID: tokenConfigOwnerID(token), Permissions: legacyAuditorPermissions()}
 		}
 	}
 	for _, token := range config.ReadonlyTokens {
 		if token = strings.TrimSpace(token); token != "" {
-			roleTokens[sha256.Sum256([]byte(token))] = tokenPrincipal{Role: core.RoleUser, Permissions: legacyReadonlyPermissions()}
+			roleTokens[sha256.Sum256([]byte(token))] = tokenPrincipal{Role: core.RoleUser, ConfigOwnerID: tokenConfigOwnerID(token), Permissions: legacyReadonlyPermissions()}
 		}
 	}
 	komariClient, komariErr := komari.New(config.KomariURL, config.KomariAPIKey, config.KomariHTTPClient)
@@ -673,6 +674,10 @@ func (s *Server) getTask(w http.ResponseWriter, request *http.Request) {
 }
 
 func (s *Server) getTaskConfigSnapshot(w http.ResponseWriter, request *http.Request) {
+	if role, ok := s.sessionRole(request); !ok || role != core.RoleAdmin {
+		writeError(w, http.StatusForbidden, "共享主机的实际配置快照仅限管理员读取；请使用个人配置工作区")
+		return
+	}
 	task, err := s.store.GetTask(request.Context(), request.PathValue("id"))
 	if err != nil {
 		writeStoreError(w, err)
@@ -1612,6 +1617,7 @@ func (s *Server) requireAllPermissions(permissions []core.Permission, next http.
 			}
 		}
 		w.Header().Set("X-QControlHub-Role", string(role))
+		request = request.WithContext(store.WithConfigScope(request.Context(), s.configOwnerID(request), role == core.RoleAdmin))
 		next.ServeHTTP(w, request)
 	})
 }
@@ -1638,6 +1644,12 @@ func (s *Server) roleForToken(token string) (core.Role, bool) {
 func (s *Server) principalForToken(token string) (tokenPrincipal, bool) {
 	principal, ok := s.roleTokens[sha256.Sum256([]byte(token))]
 	return principal, ok
+}
+
+func tokenConfigOwnerID(token string) string {
+	// Domain separation keeps this stable identifier distinct from the token's
+	// authentication digest. Two legacy tokens never share a user workspace.
+	return fmt.Sprintf("token_%x", sha256.Sum256([]byte("qcontrolhub-config-owner\x00"+token)))
 }
 
 func legacyOperatorPermissions() []core.Permission {
@@ -1829,6 +1841,8 @@ func decodeJSON(w http.ResponseWriter, request *http.Request, destination any, l
 
 func writeStoreError(w http.ResponseWriter, err error) {
 	switch {
+	case errors.Is(err, store.ErrForbidden):
+		writeError(w, http.StatusForbidden, err.Error())
 	case errors.Is(err, store.ErrNotFound):
 		writeError(w, http.StatusNotFound, err.Error())
 	case errors.Is(err, store.ErrConflict):

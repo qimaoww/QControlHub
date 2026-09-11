@@ -103,7 +103,7 @@ func (s *Server) refreshPortTrafficMonitoring(ctx context.Context, connectedAgen
 }
 
 func (s *Server) refreshSavedAgentTrafficMonitoring(ctx context.Context, agentID string) {
-	configs, err := s.store.AgentConfigs(ctx, agentID)
+	configs, err := s.store.AgentConfigsForMonitoring(ctx, agentID)
 	if err != nil {
 		slog.Warn("load saved node traffic endpoints", "agent_id", agentID, "error", err)
 		return

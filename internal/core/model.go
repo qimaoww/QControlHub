@@ -377,6 +377,7 @@ type KomariLink struct {
 
 type Config struct {
 	ID          string    `json:"id"`
+	OwnerID     string    `json:"owner_id,omitempty"`
 	AgentID     string    `json:"agent_id,omitempty"`
 	Name        string    `json:"name"`
 	Description string    `json:"description,omitempty"`
@@ -624,6 +625,7 @@ type AuditLogEntry struct {
 // that are rendered per node when the template is applied.
 type ConfigTemplate struct {
 	ID        string    `json:"id"`
+	OwnerID   string    `json:"owner_id,omitempty"`
 	Name      string    `json:"name"`
 	Engine    Engine    `json:"engine"`
 	Content   string    `json:"content"`

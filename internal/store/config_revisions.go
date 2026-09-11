@@ -30,19 +30,23 @@ func (s *Store) ListConfigRevisions(ctx context.Context, configID string, limit 
 		limit = 100
 	}
 	var exists bool
+	existsArgs := []any{configID}
+	existsWhere := ownerClause(ctx, "owner_id", &existsArgs)
 	if err := s.pool.QueryRow(ctx, `SELECT EXISTS(
-		SELECT 1 FROM configs WHERE id=$1 AND deleted_at IS NULL
-	)`, configID).Scan(&exists); err != nil {
+		SELECT 1 FROM configs WHERE id=$1 AND deleted_at IS NULL`+existsWhere+`
+	)`, existsArgs...).Scan(&exists); err != nil {
 		return nil, err
 	}
 	if !exists {
 		return nil, ErrNotFound
 	}
+	args := []any{configID, limit}
+	ownerWhere := ownerClause(ctx, "c.owner_id", &args)
 	rows, err := s.pool.Query(ctx, `
-		SELECT r.config_id,COALESCE(r.agent_id,''),r.name,r.description,r.engine,r.content,r.version,r.created_at,r.created_at
+		SELECT r.config_id,COALESCE(r.agent_id,''),r.name,r.description,r.engine,r.content,r.version,r.created_at,r.created_at,c.owner_id
 		FROM config_revisions r JOIN configs c ON c.id=r.config_id
-		WHERE r.config_id=$1 AND c.deleted_at IS NULL
-		ORDER BY r.version DESC LIMIT $2`, configID, limit)
+		WHERE r.config_id=$1 AND c.deleted_at IS NULL`+ownerWhere+`
+		ORDER BY r.version DESC LIMIT $2`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -51,7 +55,7 @@ func (s *Store) ListConfigRevisions(ctx context.Context, configID string, limit 
 	for rows.Next() {
 		var revision core.Config
 		if err := rows.Scan(&revision.ID, &revision.AgentID, &revision.Name, &revision.Description, &revision.Engine,
-			&revision.Content, &revision.Version, &revision.CreatedAt, &revision.UpdatedAt); err != nil {
+			&revision.Content, &revision.Version, &revision.CreatedAt, &revision.UpdatedAt, &revision.OwnerID); err != nil {
 			return nil, err
 		}
 		revision.Content, err = s.decryptContent(revision.Content)
@@ -68,12 +72,14 @@ func (s *Store) ConfigRevision(ctx context.Context, configID string, version int
 		return core.Config{}, fmt.Errorf("%w: revision version must be positive", ErrInvalid)
 	}
 	var revision core.Config
+	args := []any{configID, version}
+	ownerWhere := ownerClause(ctx, "c.owner_id", &args)
 	err := s.pool.QueryRow(ctx, `
-		SELECT r.config_id,COALESCE(r.agent_id,''),r.name,r.description,r.engine,r.content,r.version,r.created_at,r.created_at
+		SELECT r.config_id,COALESCE(r.agent_id,''),r.name,r.description,r.engine,r.content,r.version,r.created_at,r.created_at,c.owner_id
 		FROM config_revisions r JOIN configs c ON c.id=r.config_id
-		WHERE r.config_id=$1 AND r.version=$2 AND c.deleted_at IS NULL`, configID, version).Scan(
+		WHERE r.config_id=$1 AND r.version=$2 AND c.deleted_at IS NULL`+ownerWhere, args...).Scan(
 		&revision.ID, &revision.AgentID, &revision.Name, &revision.Description, &revision.Engine,
-		&revision.Content, &revision.Version, &revision.CreatedAt, &revision.UpdatedAt)
+		&revision.Content, &revision.Version, &revision.CreatedAt, &revision.UpdatedAt, &revision.OwnerID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return core.Config{}, ErrNotFound
 	}
@@ -104,8 +110,10 @@ func (s *Store) RestoreConfigRevision(ctx context.Context, configID string, revi
 	// Keep the same ordering here so a restore cannot deadlock with
 	// SaveAgentConfig or DeleteAgent while the revision foreign key is checked.
 	var ownerAgentID string
+	args := []any{configID}
+	ownerWhere := ownerClause(ctx, "owner_id", &args)
 	err = tx.QueryRow(ctx, `
-		SELECT COALESCE(agent_id,'') FROM configs WHERE id=$1 AND deleted_at IS NULL`, configID).Scan(&ownerAgentID)
+		SELECT COALESCE(agent_id,'') FROM configs WHERE id=$1 AND deleted_at IS NULL`+ownerWhere, args...).Scan(&ownerAgentID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return core.Config{}, ErrNotFound
 	}
@@ -125,10 +133,10 @@ func (s *Store) RestoreConfigRevision(ctx context.Context, configID string, revi
 
 	var current core.Config
 	err = tx.QueryRow(ctx, `
-		SELECT id,COALESCE(agent_id,''),name,description,engine,content,version,created_at,updated_at
+		SELECT id,COALESCE(agent_id,''),name,description,engine,content,version,created_at,updated_at,owner_id
 		FROM configs WHERE id=$1 AND deleted_at IS NULL FOR UPDATE`, configID).Scan(
 		&current.ID, &current.AgentID, &current.Name, &current.Description, &current.Engine,
-		&current.Content, &current.Version, &current.CreatedAt, &current.UpdatedAt)
+		&current.Content, &current.Version, &current.CreatedAt, &current.UpdatedAt, &current.OwnerID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return core.Config{}, ErrNotFound
 	}
@@ -170,7 +178,7 @@ func (s *Store) RestoreConfigRevision(ctx context.Context, configID string, revi
 	}
 
 	restored := core.Config{
-		ID: configID, AgentID: current.AgentID, Name: name, Description: description,
+		ID: configID, OwnerID: current.OwnerID, AgentID: current.AgentID, Name: name, Description: description,
 		Engine: revision.Engine, Content: revision.Content, Version: current.Version + 1,
 		CreatedAt: current.CreatedAt, UpdatedAt: time.Now().UTC(),
 	}

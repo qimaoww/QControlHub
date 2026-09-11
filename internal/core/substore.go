@@ -9,7 +9,20 @@ const (
 	SubStoreAddressModeBoth     = "both"
 	SubStoreSyncModeIncremental = "incremental"
 	SubStoreSyncModeManaged     = "managed"
+	SubStoreSyncFormatURL       = "url"
+	SubStoreSyncFormatMihomo    = "mihomo"
 )
+
+func NormalizeSubStoreSyncFormat(value string) (string, bool) {
+	switch value {
+	case "", SubStoreSyncFormatURL:
+		return SubStoreSyncFormatURL, true
+	case SubStoreSyncFormatMihomo:
+		return value, true
+	default:
+		return "", false
+	}
+}
 
 func NormalizeSubStoreAddressMode(value string) (string, bool) {
 	switch value {
@@ -43,10 +56,12 @@ type SubStoreSyncSettings struct {
 
 type SubStoreSyncTarget struct {
 	ID               string     `json:"id"`
+	OwnerID          string     `json:"owner_id,omitempty"`
 	DisplayName      string     `json:"display_name"`
 	SubscriptionName string     `json:"subscription_name"`
 	IntegrationID    string     `json:"-"`
 	SyncMode         string     `json:"sync_mode"`
+	SyncFormat       string     `json:"sync_format"`
 	LastSyncedAt     *time.Time `json:"last_synced_at,omitempty"`
 	LastSyncStatus   string     `json:"last_sync_status"`
 	LastSyncError    string     `json:"last_sync_error,omitempty"`
@@ -57,6 +72,7 @@ type SubStoreSyncTarget struct {
 
 type SubStoreSyncSelection struct {
 	TargetID    string    `json:"target_id,omitempty"`
+	ConfigID    string    `json:"config_id,omitempty"`
 	AgentID     string    `json:"agent_id"`
 	Engine      Engine    `json:"engine"`
 	ProfileTag  string    `json:"profile_tag"`
@@ -67,5 +83,5 @@ type SubStoreSyncSelection struct {
 }
 
 func (selection SubStoreSyncSelection) Key() string {
-	return selection.AgentID + "\x00" + string(selection.Engine) + "\x00" + selection.ProfileTag
+	return selection.AgentID + "\x00" + string(selection.Engine) + "\x00" + selection.ProfileTag + "\x00" + selection.ConfigID
 }

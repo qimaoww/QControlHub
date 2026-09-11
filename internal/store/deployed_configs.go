@@ -19,7 +19,9 @@ type DeployedConfig struct {
 // single query instead of downloading all saved bodies and doing two further
 // reads per deployment. Deleted configs and pruned revisions remain hidden.
 func (s *Store) DeployedConfigs(ctx context.Context) ([]DeployedConfig, error) {
-	rows, err := s.pool.Query(ctx, deployedConfigsSQL)
+	args := []any{}
+	ownerWhere := ownerClause(ctx, "config.owner_id", &args)
+	rows, err := s.pool.Query(ctx, deployedConfigsSQL+ownerWhere, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -29,7 +31,7 @@ func (s *Store) DeployedConfigs(ctx context.Context) ([]DeployedConfig, error) {
 		var item DeployedConfig
 		var metadata []byte
 		if err := rows.Scan(&item.Deployment.AgentID, &item.Deployment.Engine, &item.Deployment.ConfigID,
-			&item.Deployment.ConfigVersion, &item.Deployment.DeployedAt, &item.Config.Content, &metadata); err != nil {
+			&item.Deployment.ConfigVersion, &item.Deployment.DeployedAt, &item.Config.Content, &metadata, &item.Config.OwnerID); err != nil {
 			return nil, err
 		}
 		item.Config.ID = item.Deployment.ConfigID
@@ -61,9 +63,10 @@ const deployedConfigsSQL = `
 	SELECT latest.agent_id,latest.engine,latest.config_id,latest.config_version,latest.finished_at,
 	       CASE WHEN config.version=latest.config_version THEN config.content ELSE revision.content END,
 	       COALESCE((SELECT jsonb_object_agg(profile_tag,content) FROM config_client_metadata
-		         WHERE config_id=latest.config_id AND config_version=latest.config_version),'{}'::jsonb)
+		         WHERE config_id=latest.config_id AND config_version=latest.config_version),'{}'::jsonb),
+	       config.owner_id
 	FROM latest JOIN agents agent ON agent.id=latest.agent_id AND agent.revoked_at IS NULL
 	JOIN configs config ON config.id=latest.config_id AND config.deleted_at IS NULL
 	LEFT JOIN config_revisions revision ON revision.config_id=latest.config_id
 	     AND revision.version=latest.config_version AND config.version<>latest.config_version
-	WHERE config.version=latest.config_version OR revision.config_id IS NOT NULL`
+	WHERE (config.version=latest.config_version OR revision.config_id IS NOT NULL)`

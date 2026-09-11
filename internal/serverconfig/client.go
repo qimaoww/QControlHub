@@ -27,6 +27,8 @@ type ClientField struct {
 type ClientProfile struct {
 	Format                 string        `json:"format"`
 	URI                    string        `json:"uri"`
+	Mihomo                 string        `json:"-"`
+	MihomoError            string        `json:"-"`
 	SubscriptionCompatible bool          `json:"subscription_compatible"`
 	Fields                 []ClientField `json:"fields"`
 }
@@ -220,6 +222,12 @@ func BuildClientProfileNamed(input Input, address, serverName, nodeName string) 
 		profile.SubscriptionCompatible = true
 	default:
 		return ClientProfile{}, errors.New("不支持生成此协议的客户端接入资料")
+	}
+	profile.Mihomo, err = buildMihomoClientYAML(input, address, serverName, fragment)
+	if err != nil {
+		// URL export remains available for protocols whose security options
+		// cannot be represented by Mihomo without losing information.
+		profile.MihomoError = err.Error()
 	}
 	return profile, nil
 }

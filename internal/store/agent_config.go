@@ -222,15 +222,15 @@ func (s *Store) setAgentClientPreferences(ctx context.Context, id, nameLabel, ad
 	return tx.Commit(ctx)
 }
 
-// AgentConfig returns the one active configuration owned by an agent/core
-// pair. Node-owned configurations cannot accidentally be deployed elsewhere.
+// AgentConfig returns this user's workspace for an agent/core pair.
+// Node-owned configurations cannot accidentally be deployed elsewhere.
 func (s *Store) AgentConfig(ctx context.Context, agentID string, engine core.Engine) (core.Config, error) {
 	var config core.Config
 	err := s.pool.QueryRow(ctx, `
-		SELECT id,COALESCE(agent_id,''),name,description,engine,content,version,created_at,updated_at
-		FROM configs WHERE agent_id=$1 AND engine=$2 AND deleted_at IS NULL`, agentID, engine).Scan(
+		SELECT id,COALESCE(agent_id,''),name,description,engine,content,version,created_at,updated_at,owner_id
+		FROM configs WHERE agent_id=$1 AND engine=$2 AND owner_id=$3 AND deleted_at IS NULL`, agentID, engine, scopeForConfig(ctx).OwnerID).Scan(
 		&config.ID, &config.AgentID, &config.Name, &config.Description, &config.Engine, &config.Content,
-		&config.Version, &config.CreatedAt, &config.UpdatedAt)
+		&config.Version, &config.CreatedAt, &config.UpdatedAt, &config.OwnerID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return core.Config{}, ErrNotFound
 	}
@@ -248,7 +248,13 @@ func (s *Store) AgentConfig(ctx context.Context, agentID string, engine core.Eng
 // plane uses this for fleet-level deployment drift and listener summaries;
 // general configuration workspaces remain isolated through ListConfigs.
 func (s *Store) ListAgentConfigs(ctx context.Context) ([]core.Config, error) {
-	return s.listAgentConfigs(ctx, "")
+	return s.listAgentConfigs(ctx, "", false)
+}
+
+// AgentConfigsForMonitoring includes every user's workspace when reconciling
+// shared host counters. A user's save must not prune another user's ports.
+func (s *Store) AgentConfigsForMonitoring(ctx context.Context, agentID string) ([]core.Config, error) {
+	return s.listAgentConfigs(ctx, agentID, true)
 }
 
 // AgentConfigs filters before fetching or decrypting configuration bodies.
@@ -256,7 +262,7 @@ func (s *Store) AgentConfigs(ctx context.Context, agentID string) ([]core.Config
 	if agentID == "" {
 		return nil, ErrInvalid
 	}
-	configs, err := s.listAgentConfigs(ctx, agentID)
+	configs, err := s.listAgentConfigs(ctx, agentID, false)
 	if err != nil || len(configs) > 0 {
 		return configs, err
 	}
@@ -270,15 +276,18 @@ func (s *Store) AgentConfigs(ctx context.Context, agentID string) ([]core.Config
 	return configs, nil
 }
 
-func (s *Store) listAgentConfigs(ctx context.Context, agentID string) ([]core.Config, error) {
+func (s *Store) listAgentConfigs(ctx context.Context, agentID string, allOwners bool) ([]core.Config, error) {
 	where := "agent_id IS NOT NULL"
 	var args []any
 	if agentID != "" {
 		where = "agent_id=$1"
 		args = []any{agentID}
 	}
+	if !allOwners {
+		where += workspaceOwnerClause(ctx, "owner_id", &args)
+	}
 	rows, err := s.pool.Query(ctx, `
-		SELECT id,COALESCE(agent_id,''),name,description,engine,content,version,created_at,updated_at
+		SELECT id,COALESCE(agent_id,''),name,description,engine,content,version,created_at,updated_at,owner_id
 		FROM configs WHERE `+where+` AND deleted_at IS NULL
 		  AND agent_id IN (SELECT id FROM agents WHERE revoked_at IS NULL)
 		ORDER BY updated_at DESC`, args...)
@@ -290,7 +299,7 @@ func (s *Store) listAgentConfigs(ctx context.Context, agentID string) ([]core.Co
 	for rows.Next() {
 		var config core.Config
 		if err := rows.Scan(&config.ID, &config.AgentID, &config.Name, &config.Description, &config.Engine, &config.Content,
-			&config.Version, &config.CreatedAt, &config.UpdatedAt); err != nil {
+			&config.Version, &config.CreatedAt, &config.UpdatedAt, &config.OwnerID); err != nil {
 			return nil, err
 		}
 		config.Content, err = s.decryptContent(config.Content)
@@ -303,9 +312,13 @@ func (s *Store) listAgentConfigs(ctx context.Context, agentID string) ([]core.Co
 }
 
 func (s *Store) LatestDeployments(ctx context.Context) ([]core.Deployment, error) {
+	args := []any{}
+	ownerWhere := ownerClause(ctx, "c.owner_id", &args)
 	rows, err := s.pool.Query(ctx, `
-		SELECT agent_id,engine,COALESCE(config_id,''),COALESCE(config_version,0),finished_at
-		FROM (`+latestDeploymentsSQL+`) latest ORDER BY agent_id,engine`)
+		SELECT latest.agent_id,latest.engine,COALESCE(latest.config_id,''),COALESCE(latest.config_version,0),latest.finished_at
+		FROM (`+latestDeploymentsSQL+`) latest
+		LEFT JOIN configs c ON c.id=latest.config_id
+		WHERE true`+ownerWhere+` ORDER BY latest.agent_id,latest.engine`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -433,10 +446,14 @@ func (s *Store) saveAgentConfigTx(ctx context.Context, tx pgx.Tx, input core.Con
 
 	var currentID string
 	var currentVersion int
+	ownerID := scopeForConfig(ctx).OwnerID
 	err = tx.QueryRow(ctx, `SELECT id,version FROM configs
-		WHERE agent_id=$1 AND engine=$2 AND deleted_at IS NULL FOR UPDATE`, input.AgentID, input.Engine).Scan(&currentID, &currentVersion)
+		WHERE agent_id=$1 AND engine=$2 AND owner_id=$3 AND deleted_at IS NULL FOR UPDATE`, input.AgentID, input.Engine, ownerID).Scan(&currentID, &currentVersion)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return core.Config{}, err
+	}
+	if input.ID != "" && input.ID != currentID {
+		return core.Config{}, ErrNotFound
 	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		if expectedVersion != 0 {
@@ -448,9 +465,9 @@ func (s *Store) saveAgentConfigTx(ctx context.Context, tx pgx.Tx, input core.Con
 		}
 		now := time.Now().UTC()
 		_, err = tx.Exec(ctx, `INSERT INTO configs
-			(id,agent_id,name,description,engine,content,version,created_at,updated_at)
-			VALUES ($1,$2,$3,$4,$5,$6,1,$7,$7)`, currentID, input.AgentID, name,
-			description, input.Engine, storedContent, now)
+			(id,agent_id,name,description,engine,content,version,created_at,updated_at,owner_id)
+			VALUES ($1,$2,$3,$4,$5,$6,1,$7,$7,$8)`, currentID, input.AgentID, name,
+			description, input.Engine, storedContent, now, ownerID)
 		if err != nil {
 			return core.Config{}, mapError(err)
 		}
@@ -465,9 +482,9 @@ func (s *Store) saveAgentConfigTx(ctx context.Context, tx pgx.Tx, input core.Con
 		}
 	}
 	var saved core.Config
-	err = tx.QueryRow(ctx, `SELECT id,COALESCE(agent_id,''),name,description,engine,content,version,created_at,updated_at
+	err = tx.QueryRow(ctx, `SELECT id,COALESCE(agent_id,''),name,description,engine,content,version,created_at,updated_at,owner_id
 		FROM configs WHERE id=$1`, currentID).Scan(&saved.ID, &saved.AgentID, &saved.Name, &saved.Description,
-		&saved.Engine, &saved.Content, &saved.Version, &saved.CreatedAt, &saved.UpdatedAt)
+		&saved.Engine, &saved.Content, &saved.Version, &saved.CreatedAt, &saved.UpdatedAt, &saved.OwnerID)
 	if err != nil {
 		return core.Config{}, err
 	}
@@ -487,8 +504,8 @@ func (s *Store) saveAgentConfigTx(ctx context.Context, tx pgx.Tx, input core.Con
 			return core.Config{}, err
 		}
 		if input.Engine == core.EngineShadowsocksRust {
-			if _, err := tx.Exec(ctx, `UPDATE mainland_access_policies SET config_version=$3,updated_at=now()
-				WHERE agent_id=$1 AND engine=$2 AND config_version=$4`, input.AgentID, input.Engine, saved.Version, currentVersion); err != nil {
+			if _, err := tx.Exec(ctx, `UPDATE mainland_access_policies SET config_version=$2,updated_at=now()
+				WHERE config_id=$1 AND config_version=$3`, saved.ID, saved.Version, currentVersion); err != nil {
 				return core.Config{}, err
 			}
 		}
@@ -519,9 +536,12 @@ func (s *Store) ConfigClientMetadata(ctx context.Context, configID string, versi
 	if configID == "" || version < 1 {
 		return nil, fmt.Errorf("%w: configuration ID and version are required", ErrInvalid)
 	}
+	args := []any{configID, version}
+	ownerWhere := ownerClause(ctx, "c.owner_id", &args)
 	rows, err := s.pool.Query(ctx, `
-		SELECT profile_tag,content FROM config_client_metadata
-		WHERE config_id=$1 AND config_version=$2`, configID, version)
+		SELECT m.profile_tag,m.content FROM config_client_metadata m
+		JOIN configs c ON c.id=m.config_id
+		WHERE m.config_id=$1 AND m.config_version=$2 AND c.deleted_at IS NULL`+ownerWhere, args...)
 	if err != nil {
 		return nil, err
 	}

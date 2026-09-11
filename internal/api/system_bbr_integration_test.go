@@ -123,7 +123,8 @@ func TestSystemTCPAPIAndTaskLifecycle(t *testing.T) {
 	if err := db.CompleteTask(ctx, agent.ID, task.ID, core.TaskResultRequest{LeaseID: running.LeaseID, Error: "simulated write failure"}); err != nil {
 		t.Fatal(err)
 	}
-	call("POST", "/tasks/"+task.ID+"/retry", "tcp-operator", nil, 403)
+	// An unrelated user cannot resolve the administrator's task at all.
+	call("POST", "/tasks/"+task.ID+"/retry", "tcp-operator", nil, 404)
 	var retried core.Task
 	if err := json.Unmarshal(call("POST", "/tasks/"+task.ID+"/retry", "tcp-admin", nil, 201).Body.Bytes(), &retried); err != nil {
 		t.Fatal(err)

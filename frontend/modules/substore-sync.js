@@ -26,6 +26,7 @@ export function subStoreSelectionPayload(profiles) {
     .filter((profile) => profile.selected)
     .map((profile) => ({
       agent_id: profile.agent_id,
+      ...(profile.config_id ? { config_id: profile.config_id } : {}),
       engine: profile.engine,
       profile_tag: profile.profile_tag,
       custom_name: String(profile.custom_name || profile.default_name || "").trim(),
@@ -73,12 +74,20 @@ export function installSubStoreSync(ctx) {
   let activeTargetID = "";
   let masonryObserver = null;
   let pendingSelectionSave = null;
+  let sessionData = state.data;
   const refresh = createRefreshChannel({
     isCurrent: () => state.route === "substore-sync",
     getScope: () => state.navigationEpoch,
   });
 
   async function subStoreSync() {
+    if (sessionData !== state.data) {
+      sessionData = state.data;
+      activeTargetID = "";
+      agentFilter = "";
+      query = "";
+      pendingSelectionSave = null;
+    }
     let resource;
     const applied = await refresh.run(
       (signal) =>
@@ -108,7 +117,8 @@ export function installSubStoreSync(ctx) {
     const activeTarget = targets.find((target) => target.id === resource.target_id) || null;
     const profiles = resource.profiles || [];
     const selected = profiles.filter((profile) => profile.selected);
-    const availableSelected = selected.filter((profile) => profile.available);
+    const availableSelected = selected.filter((profile) =>
+      profile.available && !(activeTarget?.sync_format === "mihomo" && profile.mihomo_error));
     const selectedNodeCount = availableSelected.reduce(
       (total, profile) => total + subStoreProfileNodeCount(profile),
       0,
@@ -165,7 +175,8 @@ export function installSubStoreSync(ctx) {
         const checked = items.filter((item) => item.selected).length;
         const rows = items
           .map((profile) => {
-            const unavailable = !profile.available;
+            const formatError = activeTarget?.sync_format === "mihomo" ? profile.mihomo_error : "";
+            const unavailable = !profile.available || Boolean(formatError);
             const name = profile.custom_name || profile.default_name || profile.profile_tag;
             const addressChoices = subStoreAddressChoices(profile);
             const addressMode = profile.address_mode || "auto";
@@ -175,10 +186,10 @@ export function installSubStoreSync(ctx) {
             const settingsRow = profile.selected && !unavailable
               ? `<form class="substore-node-settings-row" data-substore-parameters-form><label><span>同步名称</span><input name="custom_name" required maxlength="100" autocomplete="off" value="${esc(name)}"></label>${addressField}<button class="button primary small" type="submit">保存参数</button></form>`
               : "";
-            return `<div class="substore-node-item ${profile.selected ? "selected" : ""} ${unavailable ? "unavailable" : ""}" data-substore-key="${esc(encodeURIComponent(`${profile.agent_id}\u0000${profile.engine}\u0000${profile.profile_tag}`))}"><div class="substore-node-row">
+            return `<div class="substore-node-item ${profile.selected ? "selected" : ""} ${unavailable ? "unavailable" : ""}" data-substore-key="${esc(encodeURIComponent(`${profile.agent_id}\u0000${profile.engine}\u0000${profile.profile_tag}\u0000${profile.config_id || ""}`))}"><div class="substore-node-row">
                 <label class="substore-node-toggle"><input type="checkbox" data-substore-select ${profile.selected ? "checked" : ""} ${unavailable ? "disabled" : ""}><span></span></label>
                 <span class="engine-badge ${esc(profile.engine)}">${esc(engineName(profile.engine))}</span>
-                <span class="substore-node-source"><b>${esc(profile.profile_tag)}</b><small>${unavailable ? "源节点已失效" : `${esc(profile.protocol)}${profile.port ? ` · :${Number(profile.port)}` : ""}`}</small></span>
+                <span class="substore-node-source"><b>${esc(profile.profile_tag)}</b><small>${formatError ? esc(formatError) : unavailable ? "源配置已变更或不可用" : `${esc(profile.protocol)}${profile.port ? ` · :${Number(profile.port)}` : ""}`}</small></span>
                 <span class="substore-node-preview">${esc(profile.selected ? `${name} · ${subStoreAddressModeLabel(addressMode)}` : name)}</span>
                 ${profile.selected ? `<button class="substore-remove" type="button" data-substore-remove aria-label="移除 ${esc(name)}">移除</button>` : `<button class="button small" type="button" data-substore-add ${unavailable ? "disabled" : ""}>加入同步</button>`}
               </div>${settingsRow}
@@ -203,7 +214,7 @@ export function installSubStoreSync(ctx) {
         ${activeTarget?.last_sync_status === "failed" && activeTarget.last_sync_error ? `<p class="substore-error">${esc(activeTarget.last_sync_error)}</p>` : ""}
         <section class="substore-target-bar"><nav aria-label="同步组">${targetTabs || '<span>还没有同步组</span>'}</nav><label class="substore-target-search"><input type="search" data-substore-query value="${esc(query)}" aria-label="搜索客户端节点" placeholder="搜索节点、协议、入站或端口"></label>${manage ? '<button class="button small" type="button" data-substore-target-add>＋ 新建同步组</button>' : ""}</section>
         <div class="substore-agent-grid qch-swap-panel${activeTarget ? "" : " empty"}" data-refresh-key="substore-results-${esc(activeTarget?.id || "empty")}-${esc(agentFilter || "all")}">${activeTarget ? cards || empty : '<section class="substore-empty"><strong>先新建一个同步组</strong><span>每个同步组独立选择节点并同步。</span></section>'}</div>
-        ${manage ? `<dialog class="traffic-edit-dialog substore-settings-dialog" data-substore-settings-dialog aria-labelledby="substore-settings-title"><header><span class="traffic-edit-icon" aria-hidden="true">↻</span><div><p class="eyebrow">Sub-Store</p><h2 id="substore-settings-title">连接设置</h2></div><button class="deploy-command-close" type="button" data-substore-settings-close aria-label="关闭连接设置">×</button></header><form data-substore-settings-form><div class="traffic-edit-body"><label>后端地址<input type="password" name="endpoint_url" autocomplete="new-password" ${settings.configured ? "" : "required"} placeholder="${settings.configured ? "留空保持当前地址" : "https://substore.example.com/路径口令"}"><small>${esc(settings.endpoint_hint || "地址必须包含后端路径口令")}</small></label></div><footer><button class="button" type="button" data-substore-settings-close>取消</button><button class="button primary" type="submit">保存设置</button></footer></form></dialog><dialog class="traffic-edit-dialog substore-settings-dialog" data-substore-target-dialog aria-labelledby="substore-target-title"><header><span class="traffic-edit-icon" aria-hidden="true">◎</span><div><p class="eyebrow">同步目标</p><h2 id="substore-target-title">同步组设置</h2></div><button class="deploy-command-close" type="button" data-substore-target-close aria-label="关闭同步组设置">×</button></header><form data-substore-target-form><input type="hidden" name="target_id"><div class="traffic-edit-body"><label>同步组名称<input name="display_name" required maxlength="100" autocomplete="off" placeholder="例如：香港节点"></label><fieldset class="substore-mode-options"><legend>同步模式</legend><label><input type="radio" name="sync_mode" value="incremental" checked><span><b>增量模式</b><small>新增或更新所选节点，保留 Sub-Store 远端已有节点</small></span></label><label><input type="radio" name="sync_mode" value="managed"><span><b>完全托管模式</b><small>远端组严格保持为当前选择的节点清单</small></span></label></fieldset><fieldset class="substore-rename-options" data-substore-rename-options hidden><legend>改名范围</legend><label><input type="radio" name="rename_remote" value="false" checked><span><b>仅修改面板名称</b><small>Sub-Store 组名称保持不变</small></span></label><label><input type="radio" name="rename_remote" value="true"><span><b>同时修改远端组名</b><small>同步更新 Sub-Store 订阅组名称</small></span></label></fieldset><div class="substore-remote-import" data-substore-remote-import ${settings.configured ? "" : "hidden"}><span><b>Sub-Store 已有组</b><small>读取远端订阅组并加入同步组</small></span><select data-substore-remote-select aria-label="Sub-Store 已有组" disabled><option>读取中…</option></select><button class="button small" type="button" data-substore-remote-import-button disabled>加入同步组</button></div></div><footer><button class="button danger" type="button" data-substore-target-delete hidden>移除同步组</button><span></span><button class="button" type="button" data-substore-target-close>取消</button><button class="button primary" type="submit">保存同步组</button></footer></form></dialog><dialog class="traffic-edit-dialog substore-settings-dialog" data-substore-delete-dialog aria-labelledby="substore-delete-title"><header><span class="traffic-edit-icon danger" aria-hidden="true">×</span><div><p class="eyebrow">移除同步组</p><h2 id="substore-delete-title">确认移除</h2></div><button class="deploy-command-close" type="button" data-substore-delete-close aria-label="关闭移除确认">×</button></header><form data-substore-delete-form><div class="traffic-edit-body"><p class="substore-delete-message">仅移除面板中的同步关系，Sub-Store 远端组会保留。</p></div><footer><button class="button" type="button" data-substore-delete-close>取消</button><button class="button danger" type="submit">确认移除</button></footer></form></dialog>` : ""}
+        ${manage ? `<dialog class="traffic-edit-dialog substore-settings-dialog" data-substore-settings-dialog aria-labelledby="substore-settings-title"><header><span class="traffic-edit-icon" aria-hidden="true">↻</span><div><p class="eyebrow">Sub-Store</p><h2 id="substore-settings-title">连接设置</h2></div><button class="deploy-command-close" type="button" data-substore-settings-close aria-label="关闭连接设置">×</button></header><form data-substore-settings-form><div class="traffic-edit-body"><label>后端地址<input type="password" name="endpoint_url" autocomplete="new-password" ${settings.configured ? "" : "required"} placeholder="${settings.configured ? "留空保持当前地址" : "https://substore.example.com/路径口令"}"><small>${esc(settings.endpoint_hint || "地址必须包含后端路径口令")}</small></label></div><footer><button class="button" type="button" data-substore-settings-close>取消</button><button class="button primary" type="submit">保存设置</button></footer></form></dialog><dialog class="traffic-edit-dialog substore-settings-dialog" data-substore-target-dialog aria-labelledby="substore-target-title"><header><span class="traffic-edit-icon" aria-hidden="true">◎</span><div><p class="eyebrow">同步目标</p><h2 id="substore-target-title">同步组设置</h2></div><button class="deploy-command-close" type="button" data-substore-target-close aria-label="关闭同步组设置">×</button></header><form data-substore-target-form><input type="hidden" name="target_id"><div class="traffic-edit-body"><label>同步组名称<input name="display_name" required maxlength="100" autocomplete="off" placeholder="例如：香港节点"></label><fieldset class="substore-mode-options"><legend>同步格式</legend><label><input type="radio" name="sync_format" value="url" checked><span><b>URL</b><small>使用分享链接；无通用链接的协议保留原生格式</small></span></label><label><input type="radio" name="sync_format" value="mihomo"><span><b>Mihomo</b><small>将所选节点同步为 Mihomo 代理配置</small></span></label></fieldset><fieldset class="substore-mode-options"><legend>同步模式</legend><label><input type="radio" name="sync_mode" value="incremental" checked><span><b>增量模式</b><small>新增或更新所选节点，保留 Sub-Store 远端已有节点</small></span></label><label><input type="radio" name="sync_mode" value="managed"><span><b>完全托管模式</b><small>远端组严格保持为当前选择的节点清单</small></span></label></fieldset><fieldset class="substore-rename-options" data-substore-rename-options hidden><legend>改名范围</legend><label><input type="radio" name="rename_remote" value="false" checked><span><b>仅修改面板名称</b><small>Sub-Store 组名称保持不变</small></span></label><label><input type="radio" name="rename_remote" value="true"><span><b>同时修改远端组名</b><small>同步更新 Sub-Store 订阅组名称</small></span></label></fieldset><div class="substore-remote-import" data-substore-remote-import ${settings.configured ? "" : "hidden"}><span><b>Sub-Store 已有组</b><small>读取远端订阅组并加入同步组</small></span><select data-substore-remote-select aria-label="Sub-Store 已有组" disabled><option>读取中…</option></select><button class="button small" type="button" data-substore-remote-import-button disabled>加入同步组</button></div></div><footer><button class="button danger" type="button" data-substore-target-delete hidden>移除同步组</button><span></span><button class="button" type="button" data-substore-target-close>取消</button><button class="button primary" type="submit">保存同步组</button></footer></form></dialog><dialog class="traffic-edit-dialog substore-settings-dialog" data-substore-delete-dialog aria-labelledby="substore-delete-title"><header><span class="traffic-edit-icon danger" aria-hidden="true">×</span><div><p class="eyebrow">移除同步组</p><h2 id="substore-delete-title">确认移除</h2></div><button class="deploy-command-close" type="button" data-substore-delete-close aria-label="关闭移除确认">×</button></header><form data-substore-delete-form><div class="traffic-edit-body"><p class="substore-delete-message">仅移除面板中的同步关系，Sub-Store 远端组会保留。</p></div><footer><button class="button" type="button" data-substore-delete-close>取消</button><button class="button danger" type="submit">确认移除</button></footer></form></dialog>` : ""}
       </section>`,
       "Sub-Store 同步",
       { viewKey: `substore-sync-${activeTarget?.id || "empty"}-${agentFilter || "all"}` },
@@ -248,10 +259,14 @@ export function installSubStoreSync(ctx) {
   function trackSelectionSave(profiles) {
     const targetID = activeTargetID;
     const selections = subStoreSelectionPayload(profiles);
+    const selectionSession = state.data;
     // Keep rapid checkbox/name edits in browser order. Replacing the complete
     // selection set concurrently could otherwise let an older response win.
     const previous = pendingSelectionSave?.catch(() => {}) || Promise.resolve();
-    const operation = previous.then(() => saveSelections(targetID, selections));
+    const operation = previous.then(() => {
+      if (state.data !== selectionSession) return;
+      return saveSelections(targetID, selections);
+    });
     pendingSelectionSave = operation;
     operation.then(
       () => {
@@ -267,11 +282,11 @@ export function installSubStoreSync(ctx) {
   function profileForRow(row) {
     const resource = state.data.subStoreSync || {};
     const profiles = resource.profiles || [];
-    const [agentID, engine, tag] = decodeURIComponent(
+    const [agentID, engine, tag, configID = ""] = decodeURIComponent(
       String(row.dataset.substoreKey || ""),
     ).split("\u0000");
     return profiles.find(
-      (profile) => profile.agent_id === agentID && profile.engine === engine && profile.profile_tag === tag,
+      (profile) => profile.agent_id === agentID && profile.engine === engine && profile.profile_tag === tag && (profile.config_id || "") === configID,
     );
   }
 
@@ -426,6 +441,9 @@ export function installSubStoreSync(ctx) {
       const syncMode = target?.sync_mode || "incremental";
       const syncModeInput = targetForm.querySelector(`[name="sync_mode"][value="${syncMode}"]`);
       if (syncModeInput) syncModeInput.checked = true;
+      const syncFormat = target?.sync_format || "url";
+      const syncFormatInput = targetForm.querySelector(`[name="sync_format"][value="${syncFormat}"]`);
+      if (syncFormatInput) syncFormatInput.checked = true;
       const title = targetDialog.querySelector("#substore-target-title");
       if (title) title.textContent = target ? "同步组设置" : "新建同步组";
       const remoteHelp = targetDialog.querySelector("[data-substore-remote-help]");
@@ -454,6 +472,7 @@ export function installSubStoreSync(ctx) {
       const formData = new FormData(form);
       const renameRemote = targetID && formData.get("rename_remote") === "true";
       const syncMode = String(formData.get("sync_mode") || "incremental");
+      const syncFormat = String(formData.get("sync_format") || "url");
       const remoteSelect = targetDialog?.querySelector("[data-substore-remote-select]");
       const remoteName = String(remoteSelect?.value || "");
       const remoteChosen = remoteName && remoteSelect?.dataset.substoreRemoteChosen === "true";
@@ -465,7 +484,7 @@ export function installSubStoreSync(ctx) {
             : "/substore-sync/targets/import";
           const target = await api(route, {
             method: "POST",
-            body: JSON.stringify({ subscription_name: remoteName, display_name: displayName }),
+            body: JSON.stringify({ subscription_name: remoteName, display_name: displayName, sync_format: syncFormat }),
           });
           activeTargetID = target.id;
           targetDialog?.close();
@@ -475,7 +494,7 @@ export function installSubStoreSync(ctx) {
         }
         const target = await api(
           targetID ? `/substore-sync/targets/${encodeURIComponent(targetID)}` : "/substore-sync/targets",
-          { method: targetID ? "PUT" : "POST", body: JSON.stringify({ display_name: displayName, rename_remote: Boolean(renameRemote), sync_mode: syncMode }) },
+          { method: targetID ? "PUT" : "POST", body: JSON.stringify({ display_name: displayName, rename_remote: Boolean(renameRemote), sync_mode: syncMode, sync_format: syncFormat }) },
         );
         activeTargetID = target.id;
         targetDialog?.close();
@@ -510,7 +529,7 @@ export function installSubStoreSync(ctx) {
           : "/substore-sync/targets/import";
         const target = await api(route, {
           method: "POST",
-          body: JSON.stringify({ subscription_name: subscriptionName, display_name: targetForm?.elements.display_name.value || "" }),
+          body: JSON.stringify({ subscription_name: subscriptionName, display_name: targetForm?.elements.display_name.value || "", sync_format: new FormData(targetForm).get("sync_format") || "url" }),
         });
         activeTargetID = target.id;
         targetDialog?.close();
