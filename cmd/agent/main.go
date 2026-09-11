@@ -143,10 +143,9 @@ func main() {
 	defer stop()
 	slog.Info("QControlHub agent starting", "version", version)
 	if err := client.Run(ctx); err != nil {
-		if errors.Is(err, agent.ErrIdentityRejected) {
-			slog.Error("agent identity is no longer valid; remove the state file and enroll again", "error", err)
-			return
-		}
+		// Run retries control-plane identity rejection internally instead of
+		// returning it, so any error here is fatal. Exit non-zero so the service
+		// manager applies Restart=on-failure rather than leaving the node idle.
 		slog.Error("agent stopped", "error", err)
 		os.Exit(1)
 	}

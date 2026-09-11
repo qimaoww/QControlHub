@@ -110,12 +110,31 @@ const (
 	// full heartbeat cycle.
 	defaultMetricsInterval = time.Second
 	minMetricsInterval     = time.Second
+	// maxReconnectBackoff bounds an ordinary transport reconnect so a panel
+	// restart or a transient network failure recovers within seconds.
+	maxReconnectBackoff = 30 * time.Second
+	// identityRejectedMaxBackoff bounds a rejected-identity reconnect. A revoked
+	// identity needs operator action, so once the delay saturates the Agent
+	// retries slowly instead of spending the control plane's authentication
+	// failure budget every 30 seconds.
+	identityRejectedMaxBackoff = 10 * time.Minute
 )
 
-// ErrIdentityRejected means the control plane permanently rejected the
-// persisted Agent identity. Retrying cannot recover until an administrator
-// removes the local state and enrolls a new identity.
+// ErrIdentityRejected means the control plane rejected the persisted Agent
+// identity. It is classified separately from transport failures so the
+// reconnect loop can log actionable guidance, but it is retried like any other
+// failure: clock skew outside the signing window, a control plane restored from
+// a backup, and a re-enrolled identity all recover without a process restart.
 var ErrIdentityRejected = errors.New("agent identity was rejected by the control plane")
+
+// nextReconnectBackoff doubles the reconnect delay without exceeding max.
+func nextReconnectBackoff(current, max time.Duration) time.Duration {
+	next := current * 2
+	if next > max {
+		return max
+	}
+	return next
+}
 
 func NewClient(config ClientConfig, executor *Executor) (*Client, error) {
 	if err := executor.LoadCoreMigrationState(); err != nil {
@@ -275,27 +294,45 @@ func (c *Client) Run(ctx context.Context) error {
 	}
 	slog.Info("agent identity loaded", "agent_id", c.creds.AgentID, "server", c.websocketURL)
 	backoff := time.Second
+	// A rejected identity can recover without a restart, so the first rejection
+	// of a streak drops local policies and logs actionable guidance; later retries
+	// stay quieter until a healthy session resets the streak.
+	identityRejectionHandled := false
 	for {
 		started := time.Now()
 		err := c.runWebSocket(ctx)
 		if ctx.Err() != nil {
 			return nil
 		}
-		if errors.Is(err, ErrIdentityRejected) {
+		rejected := errors.Is(err, ErrIdentityRejected)
+		if rejected && !c.reenrollAttempted && c.config.EnrollmentToken != "" {
 			// A replacement panel serving the same hostname but a fresh identity
 			// store rejects the old identity. When an enrollment token is still
-			// present, rotate the identity once and reconnect instead of giving up;
-			// the local cores, configs, and traffic state are untouched.
-			if !c.reenrollAttempted && c.config.EnrollmentToken != "" {
+			// present, rotate the identity and reconnect instead of giving up; the
+			// local cores, configs, and traffic state are untouched.
+			slog.Warn("control plane rejected identity; attempting one re-enroll", "error", err)
+			reenrolled, reenrollErr := c.reenroll(ctx)
+			if reenrollErr != nil {
+				// A temporary panel outage or an already-consumed token must not
+				// kill the process; the backoff below retries the rotation.
+				slog.Warn("re-enroll after identity rejection failed", "error", reenrollErr)
+			} else {
 				c.reenrollAttempted = true
-				slog.Warn("control plane rejected identity; attempting one re-enroll", "error", err)
-				reenrolled, reenrollErr := c.reenroll(ctx)
-				if reenrollErr != nil {
-					return reenrollErr
-				}
 				c.creds = reenrolled
 				continue
 			}
+		}
+		if rejected && !identityRejectionHandled {
+			// A rejected signature is not necessarily permanent: clock skew
+			// outside the signing window, a control plane restored from a backup,
+			// and a temporarily unavailable identity store all recover without
+			// operator intervention. Retry instead of exiting so the node returns
+			// to service on its own; local policies are dropped once so a revoked
+			// identity stops enforcing stale rules, and the next authenticated
+			// session re-applies the panel's policies.
+			identityRejectionHandled = true
+			slog.Error("control plane rejected the agent identity; retrying with backoff (if this persists, remove the state file and enroll again)",
+				"error", err, "state_path", c.config.StatePath)
 			cleanupContext, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
 			if cleanupErr := c.traffic.ClearPolicies(cleanupContext); cleanupErr != nil {
 				slog.Warn("remove traffic rules for rejected Agent identity", "error", cleanupErr)
@@ -306,12 +343,24 @@ func (c *Client) Run(ctx context.Context) error {
 				}
 			}
 			cleanupCancel()
-			return err
+		} else if rejected {
+			slog.Warn("control plane still rejects the agent identity; retrying", "error", err, "reconnect_in", backoff)
 		}
 		if time.Since(started) > time.Minute {
 			backoff = time.Second
+			identityRejectionHandled = false
 		}
-		slog.Warn("WSS connection lost", "error", err, "reconnect_in", backoff)
+		maxBackoff := maxReconnectBackoff
+		if rejected {
+			maxBackoff = identityRejectedMaxBackoff
+		} else if backoff > maxReconnectBackoff {
+			// A delay grown during a rejection streak must not slow down an
+			// ordinary transport reconnect.
+			backoff = maxReconnectBackoff
+		}
+		if !rejected {
+			slog.Warn("WSS connection lost", "error", err, "reconnect_in", backoff)
+		}
 		timer := time.NewTimer(backoff)
 		select {
 		case <-ctx.Done():
@@ -319,12 +368,7 @@ func (c *Client) Run(ctx context.Context) error {
 			return nil
 		case <-timer.C:
 		}
-		if backoff < 30*time.Second {
-			backoff *= 2
-			if backoff > 30*time.Second {
-				backoff = 30 * time.Second
-			}
-		}
+		backoff = nextReconnectBackoff(backoff, maxBackoff)
 	}
 }
 

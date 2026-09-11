@@ -389,3 +389,104 @@ func TestRunRecoversAfterHandshakeTimeout(t *testing.T) {
 		t.Fatal("recovered Run did not stop")
 	}
 }
+
+// A rejected identity is retried rather than treated as fatal: the panel can
+// reject a signature because of clock skew or a restored identity store, and
+// both recover while the process stays alive.
+func TestRunRecoversAfterPersistedIdentityIsRejected(t *testing.T) {
+	client := reconnectTestClient(t)
+	if err := saveCredentials(client.config.StatePath, client.creds); err != nil {
+		t.Fatal(err)
+	}
+	body := newBlockedWebSocketBody(t)
+	var attempts atomic.Int32
+	client.http.Transport = reconnectTransport(func(request *http.Request) (*http.Response, error) {
+		if attempts.Add(1) == 1 {
+			return &http.Response{
+				StatusCode: http.StatusUnauthorized, Status: "401 Unauthorized",
+				Body: io.NopCloser(strings.NewReader("agent identity is invalid or revoked")),
+			}, nil
+		}
+		return body.response(request), nil
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	finished := make(chan error, 1)
+	go func() { finished <- client.Run(ctx) }()
+	select {
+	case <-body.writeStarted:
+	case err := <-finished:
+		t.Fatalf("Run stopped after a rejected identity instead of reconnecting: %v", err)
+	case <-time.After(7 * time.Second):
+		t.Fatal("Run did not reconnect after the identity rejection")
+	}
+	if attempts.Load() != 2 || ctx.Err() != nil {
+		t.Fatalf("identity rejection recovery: attempts=%d, context=%v", attempts.Load(), ctx.Err())
+	}
+	cancel()
+	select {
+	case err := <-finished:
+		if err != nil {
+			t.Fatalf("Run cancellation = %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("recovered Run did not stop")
+	}
+}
+
+func TestRunKeepsRetryingWhenPersistedIdentityIsRejected(t *testing.T) {
+	client := reconnectTestClient(t)
+	if err := saveCredentials(client.config.StatePath, client.creds); err != nil {
+		t.Fatal(err)
+	}
+	var attempts atomic.Int32
+	client.http.Transport = reconnectTransport(func(request *http.Request) (*http.Response, error) {
+		attempts.Add(1)
+		return &http.Response{
+			StatusCode: http.StatusUnauthorized, Status: "401 Unauthorized",
+			Body: io.NopCloser(strings.NewReader("agent identity is invalid or revoked")),
+		}, nil
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	finished := make(chan error, 1)
+	go func() { finished <- client.Run(ctx) }()
+	deadline := time.NewTimer(6 * time.Second)
+	defer deadline.Stop()
+	for attempts.Load() < 2 {
+		select {
+		case err := <-finished:
+			t.Fatalf("Run terminated on a rejected identity: %v", err)
+		case <-deadline.C:
+			t.Fatalf("rejected identity made %d handshake attempts, want at least 2", attempts.Load())
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+	cancel()
+	select {
+	case err := <-finished:
+		if err != nil {
+			t.Fatalf("Run cancellation after rejected identity = %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Run did not stop after cancellation")
+	}
+}
+
+// The rejected-identity backoff must saturate much later than an ordinary
+// transport reconnect, which keeps its 30 second ceiling.
+func TestNextReconnectBackoffCapsDelays(t *testing.T) {
+	cases := []struct{ current, max, want time.Duration }{
+		{time.Second, maxReconnectBackoff, 2 * time.Second},
+		{16 * time.Second, maxReconnectBackoff, maxReconnectBackoff},
+		{maxReconnectBackoff, maxReconnectBackoff, maxReconnectBackoff},
+		{time.Second, identityRejectedMaxBackoff, 2 * time.Second},
+		{8 * time.Minute, identityRejectedMaxBackoff, identityRejectedMaxBackoff},
+		{identityRejectedMaxBackoff, identityRejectedMaxBackoff, identityRejectedMaxBackoff},
+	}
+	for _, item := range cases {
+		if got := nextReconnectBackoff(item.current, item.max); got != item.want {
+			t.Errorf("nextReconnectBackoff(%s, %s) = %s, want %s", item.current, item.max, got, item.want)
+		}
+	}
+}

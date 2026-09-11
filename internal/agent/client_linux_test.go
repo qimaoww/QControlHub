@@ -134,44 +134,6 @@ func TestNewClientTrustsConfiguredPrivateCA(t *testing.T) {
 	response.Body.Close()
 }
 
-func TestRunStopsRetryingWhenPersistedIdentityIsRejected(t *testing.T) {
-	requireAgentRoot(t)
-	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var requests atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
-		if request.URL.Path != "/agent/v1/connect" {
-			http.NotFound(w, request)
-			return
-		}
-		requests.Add(1)
-		http.Error(w, "agent identity is invalid or revoked", http.StatusUnauthorized)
-	}))
-	defer server.Close()
-
-	statePath := filepath.Join(t.TempDir(), "agent-state.json")
-	if err := saveCredentials(statePath, credentials{
-		AgentID: "agt_0123456789abcdef", PrivateKey: authn.EncodePrivateKey(privateKey),
-	}); err != nil {
-		t.Fatal(err)
-	}
-	executor := testClientExecutor(t)
-	client, err := NewClient(ClientConfig{ServerURL: server.URL, StatePath: statePath}, executor)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	if err := client.Run(ctx); !errors.Is(err, ErrIdentityRejected) {
-		t.Fatalf("Run() error = %v, want ErrIdentityRejected", err)
-	}
-	if got := requests.Load(); got != 1 {
-		t.Fatalf("rejected identity made %d handshakes, want 1", got)
-	}
-}
-
 func TestCompletedTaskResultsPersistAndReuseCurrentLease(t *testing.T) {
 	t.Parallel()
 	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
