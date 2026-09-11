@@ -170,15 +170,15 @@ func TestSystemTCPAPIAndTaskLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	readLatest := func(path string) []core.Task {
+	readLatest := func(path, token string) []core.Task {
 		t.Helper()
 		var tasks []core.Task
-		if err := json.Unmarshal(call("GET", path, "tcp-reader", nil, 200).Body.Bytes(), &tasks); err != nil {
+		if err := json.Unmarshal(call("GET", path, token, nil, 200).Body.Bytes(), &tasks); err != nil {
 			t.Fatal(err)
 		}
 		return tasks
 	}
-	latest := readLatest("/system-tcp/tasks")
+	latest := readLatest("/system-tcp/tasks", "tcp-admin")
 	if len(latest) != 2 {
 		t.Fatalf("latest TCP task set: %+v", latest)
 	}
@@ -188,17 +188,24 @@ func TestSystemTCPAPIAndTaskLifecycle(t *testing.T) {
 			t.Fatalf("incorrect latest TCP task: %+v", task)
 		}
 	}
-	if filtered := readLatest("/system-tcp/tasks?agent_id=" + agent.ID); len(filtered) != 1 || filtered[0].ID != pending.ID {
+	if filtered := readLatest("/system-tcp/tasks?agent_id="+agent.ID, "tcp-admin"); len(filtered) != 1 || filtered[0].ID != pending.ID {
 		t.Fatalf("node filter: %+v", filtered)
 	}
-	if missing := readLatest("/system-tcp/tasks?agent_id=nonexistent"); len(missing) != 0 {
+	if missing := readLatest("/system-tcp/tasks?agent_id=nonexistent", "tcp-admin"); len(missing) != 0 {
 		t.Fatal("unknown node returned another node's tasks")
+	}
+	for _, token := range []string{"tcp-reader", "tcp-operator"} {
+		for _, path := range []string{"/system-tcp/tasks", "/system-tcp/tasks?agent_id=" + agent.ID} {
+			if tasks := readLatest(path, token); len(tasks) != 0 {
+				t.Fatalf("administrator TCP tasks exposed to %s: %+v", token, tasks)
+			}
+		}
 	}
 	call("GET", "/system-tcp/tasks", "invalid-token", nil, 401)
 	if _, err := connection.Exec(ctx, `UPDATE agents SET revoked_at=now() WHERE id='agt_tcp_history'`); err != nil {
 		t.Fatal(err)
 	}
-	if latest = readLatest("/system-tcp/tasks"); len(latest) != 1 || latest[0].ID != pending.ID {
+	if latest = readLatest("/system-tcp/tasks", "tcp-admin"); len(latest) != 1 || latest[0].ID != pending.ID {
 		t.Fatalf("revoked node visible: %+v", latest)
 	}
 	if _, err := connection.Exec(ctx, `UPDATE agents SET last_seen=now()-interval '1 day' WHERE id=$1`, agent.ID); err != nil {

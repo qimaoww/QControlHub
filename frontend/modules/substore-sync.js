@@ -114,6 +114,7 @@ export function installSubStoreSync(ctx) {
     const resource = state.data.subStoreSync || {};
     const settings = resource.settings || {};
     const targets = resource.targets || [];
+    const manage = can("settings.manage");
     const activeTarget = targets.find((target) => target.id === resource.target_id) || null;
     const profiles = resource.profiles || [];
     const selected = profiles.filter((profile) => profile.selected);
@@ -183,15 +184,15 @@ export function installSubStoreSync(ctx) {
             const addressField = addressChoices.length > 1
               ? `<label><span>同步地址</span><select name="address_mode" aria-label="${esc(profile.profile_tag)} 同步地址">${addressChoices.map((choice) => `<option value="${esc(choice.value)}" ${choice.value === addressMode ? "selected" : ""}>${esc(choice.label)}</option>`).join("")}</select></label>`
               : `<input type="hidden" name="address_mode" value="${esc(addressMode)}">`;
-            const settingsRow = profile.selected && !unavailable
+            const settingsRow = manage && profile.selected && !unavailable
               ? `<form class="substore-node-settings-row" data-substore-parameters-form><label><span>同步名称</span><input name="custom_name" required maxlength="100" autocomplete="off" value="${esc(name)}"></label>${addressField}<button class="button primary small" type="submit">保存参数</button></form>`
               : "";
             return `<div class="substore-node-item ${profile.selected ? "selected" : ""} ${unavailable ? "unavailable" : ""}" data-substore-key="${esc(encodeURIComponent(`${profile.agent_id}\u0000${profile.engine}\u0000${profile.profile_tag}\u0000${profile.config_id || ""}`))}"><div class="substore-node-row">
-                <label class="substore-node-toggle"><input type="checkbox" data-substore-select ${profile.selected ? "checked" : ""} ${unavailable ? "disabled" : ""}><span></span></label>
+                <label class="substore-node-toggle"><input type="checkbox" data-substore-select ${profile.selected ? "checked" : ""} ${unavailable || !manage ? "disabled" : ""}><span></span></label>
                 <span class="engine-badge ${esc(profile.engine)}">${esc(engineName(profile.engine))}</span>
                 <span class="substore-node-source"><b>${esc(profile.profile_tag)}</b><small>${formatError ? esc(formatError) : unavailable ? "源配置已变更或不可用" : `${esc(profile.protocol)}${profile.port ? ` · :${Number(profile.port)}` : ""}`}</small></span>
                 <span class="substore-node-preview">${esc(profile.selected ? `${name} · ${subStoreAddressModeLabel(addressMode)}` : name)}</span>
-                ${profile.selected ? `<button class="substore-remove" type="button" data-substore-remove aria-label="移除 ${esc(name)}">移除</button>` : `<button class="button small" type="button" data-substore-add ${unavailable ? "disabled" : ""}>加入同步</button>`}
+                ${!manage ? "" : profile.selected ? `<button class="substore-remove" type="button" data-substore-remove aria-label="移除 ${esc(name)}">移除</button>` : `<button class="button small" type="button" data-substore-add ${unavailable ? "disabled" : ""}>加入同步</button>`}
               </div>${settingsRow}
             </div>`;
           })
@@ -201,7 +202,6 @@ export function installSubStoreSync(ctx) {
       .join("");
 
     const empty = `<section class="substore-empty"><strong>没有匹配的客户端节点</strong><span>请调整节点或搜索条件。</span></section>`;
-    const manage = can("settings.manage");
     masonryObserver?.disconnect();
     masonryObserver = null;
     shell(
@@ -323,6 +323,7 @@ export function installSubStoreSync(ctx) {
       input?.focus();
       input?.setSelectionRange(query.length, query.length);
     });
+    if (!can("settings.manage")) return;
     document.querySelectorAll("[data-substore-add], [data-substore-select]").forEach((control) => {
       control.onclick = async () => {
         const profile = profileForRow(control.closest("[data-substore-key]"));

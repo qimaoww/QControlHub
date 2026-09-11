@@ -16,6 +16,10 @@ type configScope struct {
 // API middleware must set it before calling the store. Background Agent and
 // maintenance operations without a panel principal remain trusted.
 func WithConfigScope(ctx context.Context, ownerID string, admin bool) context.Context {
+	if ownerID == "" && !admin {
+		// Empty ownership is reserved for pre-isolation administrator data.
+		ownerID = "unassigned"
+	}
 	return context.WithValue(ctx, configScopeKey{}, configScope{OwnerID: ownerID, Admin: admin})
 }
 

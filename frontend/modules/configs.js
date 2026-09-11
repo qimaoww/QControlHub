@@ -1393,6 +1393,7 @@ function bindAgentConfigPage(ctx, fieldsOnly = false) {
 
 async function liveConfig() {
   const request = ++liveConfigRequest;
+  const privateWorkspace = Boolean(state.session && state.session.role !== "admin");
   const runtimeScope = state.navigationEpoch;
   const refreshRuntime =
     !liveAgentRuntimeLoaded ||
@@ -1405,7 +1406,7 @@ async function liveConfig() {
   liveAgentRuntimeScope = runtimeScope;
   const eligibleAgents = agents.filter((item) =>
     (item.capabilities || []).some(
-      (engine) => liveConfigEngineEligible(item.runtime?.[engine]),
+      (engine) => privateWorkspace || liveConfigEngineEligible(item.runtime?.[engine]),
     ),
   );
   if (
@@ -1428,7 +1429,7 @@ async function liveConfig() {
     return;
   }
   const installedEngines = (agent.capabilities || []).filter(
-    (item) => liveConfigEngineEligible(agent.runtime?.[item]),
+    (item) => privateWorkspace || liveConfigEngineEligible(agent.runtime?.[item]),
   );
   if (
     !state.data.liveEngine ||
@@ -1443,7 +1444,6 @@ async function liveConfig() {
   );
   if (request !== liveConfigRequest || state.route !== "live-config") return;
   const saved = configWorkspace.config || null;
-  const privateWorkspace = Boolean(state.session && state.session.role !== "admin");
   const runtime = agent.runtime?.[engine] || {};
   const unsupportedReason = String(
     runtime.existing_config_unsupported_reason || "",
@@ -1470,7 +1470,7 @@ async function liveConfig() {
   const source = privateWorkspace
     ? { content: saved?.content || (engine === "mihomo" ? "listeners: []\nrules:\n  - MATCH,DIRECT\n" : "{}\n") }
     : state.data.liveSources[sourceKey] || null;
-  const current = !unsupportedReason && source?.content
+  const current = (privateWorkspace || !unsupportedReason) && source?.content
     ? {
         ...(saved || {
           name: `${agent.name} · ${engineName(engine)}`,
@@ -1489,20 +1489,23 @@ async function liveConfig() {
     formContent: current?.content,
   });
   const configFilesSupported = (agent.features || []).includes("config-files-paired-v1");
-  const liveActions = unsupportedReason || !can("agent-config.write")
+  const canExecute = can("tasks.execute") && !unsupportedReason && (!privateWorkspace || managedAvailable);
+  const liveActions = !can("agent-config.write")
     ? ""
-    : privateWorkspace && !can("tasks.execute")
-      ? '<button class="button primary" type="submit" data-live-intent="save">保存个人配置</button>'
-    : importSource
-      ? '<button class="button primary" type="submit" data-live-intent="import">手动导入并迁移</button>'
-      : '<button class="button" type="submit" data-live-intent="validate">保存并校验</button>' +
+    : (privateWorkspace ? '<button class="button" type="submit" data-live-intent="save">保存个人配置</button>' : "") +
+      (!canExecute ? "" : importSource
+        ? '<button class="button primary" type="submit" data-live-intent="import">手动导入并迁移</button>'
+        : '<button class="button" type="submit" data-live-intent="validate">保存并校验</button>' +
         (["xray", "sing-box"].includes(engine) ? `<button class="button" type="submit" data-live-intent="migrate-files" ${configFilesSupported ? "" : 'disabled title="请先升级 Agent 以支持入站与出口成套文件"'}>生成入站与出口成套文件</button>` : '') +
-        '<button class="button primary" type="submit" data-live-intent="deploy">保存并部署</button>';
+        '<button class="button primary" type="submit" data-live-intent="deploy">保存并部署</button>');
   let sourceSwitch = existingAvailable
     ? `<nav class="live-config-source-switch" aria-label="配置来源">${managedAvailable ? `<button class="${sourceMode === "managed" ? "active" : ""}" type="button" data-live-source="managed"><b>QAgent 配置</b><small>/etc/qagent 托管</small></button>` : ""}<button class="${sourceMode === "import" ? "active" : ""}" type="button" data-live-source="import"><b>系统服务配置</b><small>可选导入</small></button></nav>`
     : "";
   if (importSource && engine === "ss-rust") {
     sourceSwitch += '<p class="validation-note">导入 install-ss-rust：保留多端口、DNS、出站绑定及 IPv6 优先，复制出站 ACL。脚本自有入站防火墙和重应用服务不会迁移；修改端口前请单独处理。日志统一为 QAgent info。SS Rust 无离线检查模式，启动失败会回滚。</p>';
+  }
+  if (privateWorkspace) {
+    sourceSwitch += '<p class="validation-note">仅显示我的配置。可在配置档案中保存多份方案；同一主机每种内核只运行一份配置，部署会替换该内核的当前配置。</p>';
   }
   const liveConfigPhase = current
     ? "ready"
@@ -1573,7 +1576,7 @@ async function liveConfig() {
       event.preventDefault();
       const form = new FormData(event.currentTarget);
       const migrateFiles = event.submitter?.dataset.liveIntent === "migrate-files";
-      const intent = migrateFiles ? "deploy" : event.submitter?.dataset.liveIntent || "validate";
+      const intent = migrateFiles ? "deploy" : event.submitter?.dataset.liveIntent || (privateWorkspace ? "save" : "validate");
       try {
         if (configFiles) form.set("content", configFiles.content());
         if (migrateFiles) {
@@ -1596,7 +1599,7 @@ async function liveConfig() {
         if (
           intent === "deploy" && !migrateFiles &&
           !(await confirmAction(
-            "确定保存当前源码、写入节点固定配置并重启服务？",
+            "确定保存当前源码、替换此主机该内核的当前配置并重启服务？同一内核只运行一份配置，可能影响其他用户的已部署服务。",
             "保存并部署",
           ))
         )
@@ -1773,7 +1776,7 @@ async function archiveConfigs() {
             agent.runtime?.[item.engine]?.installed,
         );
         return `<article class="template-card" data-refresh-key="template-${esc(item.id)}"><header><span class="engine-badge ${esc(item.engine)}">${esc(engineName(item.engine))}</span><h4>${esc(item.name)}</h4><small>${ago(item.updated_at)}</small></header><pre>${esc(item.content)}</pre>${
-            can("agent-config.write")
+            can("templates.write") && can("agent-config.write")
               ? `<footer><form data-template-apply="${esc(item.id)}"><label>应用至<select name="agent_id" required><option value="">${eligibleAgents.length ? "选择在线且已安装内核的节点" : "没有可用节点"}</option>${eligibleAgents
                   .map(
                     (agent) =>
@@ -1867,7 +1870,7 @@ async function archiveConfigs() {
       if (
         form.get("action") === "deploy" &&
         !(await confirmAction(
-          "确定将当前配置部署到所选节点并重启对应服务？",
+          "确定将当前配置部署到所选节点并重启对应服务？同一主机每种内核只运行一份配置，本次部署会替换其当前配置。",
           "部署并重启",
         ))
       )

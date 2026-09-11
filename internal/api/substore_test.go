@@ -124,6 +124,66 @@ func TestSubStoreNodesForAddressMode(t *testing.T) {
 	}
 }
 
+func TestSubStoreMihomoFormatKeepsAddressModesAndDoesNotMutateURLProfiles(t *testing.T) {
+	t.Parallel()
+	profile := subStoreSyncProfile{
+		URI:    "ss://identity@edge.example:443#old",
+		Mihomo: "{name: old, type: ss, server: edge.example, port: 443, cipher: aes-256-gcm, password: fixture}",
+		Addresses: []subStoreSyncAddress{
+			{Family: "ipv4", Address: "198.51.100.10", URI: "ss://identity@198.51.100.10:443#old",
+				Mihomo: "{name: old, type: ss, server: 198.51.100.10, port: 443, cipher: aes-256-gcm, password: fixture}"},
+			{Family: "ipv6", Address: "2001:db8::10", URI: "ss://identity@[2001:db8::10]:443#old",
+				Mihomo: "{name: old, type: ss, server: '2001:db8::10', port: 443, cipher: aes-256-gcm, password: fixture}"},
+		},
+	}
+	for _, mode := range []string{"auto", "ipv4", "ipv6", "both"} {
+		selection := core.SubStoreSyncSelection{CustomName: "Private node", AddressMode: mode}
+		nodes, err := subStoreNodesForSelection(profile, selection, "mihomo")
+		wantCount := 1
+		if mode == "both" {
+			wantCount = 2
+		}
+		if err != nil || len(nodes) != wantCount {
+			t.Fatalf("%s Mihomo nodes: %v %v", mode, nodes, err)
+		}
+		for index, node := range nodes {
+			wantName := "Private node"
+			if mode == "ipv6" || index == 1 {
+				wantName += " v6"
+			}
+			if _, _, ok := subStoreMihomoNode(node); !ok || subStoreNodeName(node) != wantName {
+				t.Fatalf("invalid renamed Mihomo node: %q", node)
+			}
+		}
+		urls, err := subStoreNodesForSelection(profile, selection, "url")
+		if err != nil || len(urls) != wantCount || !strings.HasPrefix(urls[0], "ss://") {
+			t.Fatalf("Mihomo export mutated URL profiles: %v %v", urls, err)
+		}
+	}
+	profile.MihomoError = "unsupported security option"
+	if _, err := subStoreNodesForSelection(profile, core.SubStoreSyncSelection{CustomName: "Private node"}, "mihomo"); err == nil {
+		t.Fatal("unsupported Mihomo security settings fell back to URL")
+	}
+	if _, err := subStoreNodesForSelection(profile, core.SubStoreSyncSelection{CustomName: "Private node"}, "url"); err != nil {
+		t.Fatalf("Mihomo error disabled URL export: %v", err)
+	}
+}
+
+func TestSubStoreFormatSwitchReplacesManagedNodesAndKeepsManualNodes(t *testing.T) {
+	t.Parallel()
+	manual := "ss://manual@manual.example:443#Manual"
+	urlNode := "ss://private@edge.example:443#Private"
+	mihomoNode := "{name: Private, type: ss, server: edge.example, port: 443, cipher: aes-256-gcm, password: private}"
+	content := manual + "\n" + urlNode
+	for _, desired := range []string{mihomoNode, urlNode} {
+		var err error
+		content, err = mergeSubStoreContentByName(content, desired, []string{"Private"})
+		if err != nil || content != manual+"\n"+desired {
+			t.Fatalf("format switch duplicated nodes or removed manual content: %q %v", content, err)
+		}
+	}
+}
+
 func TestSubStoreRemoteTargetHelpers(t *testing.T) {
 	t.Parallel()
 	if count := subStoreContentNodeCount("vless://one#One\r\n\r\nss://two#Two\n"); count != 2 {

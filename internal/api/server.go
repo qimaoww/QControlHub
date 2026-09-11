@@ -369,7 +369,10 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/templates", s.requirePermission(core.PermissionTemplatesRead, http.HandlerFunc(s.listTemplates)))
 	mux.Handle("POST /api/v1/templates", s.requirePermission(core.PermissionTemplatesWrite, http.HandlerFunc(s.createTemplate)))
 	mux.Handle("DELETE /api/v1/templates/{id}", s.requirePermission(core.PermissionTemplatesDelete, http.HandlerFunc(s.deleteTemplate)))
-	mux.Handle("POST /api/v1/templates/{id}/apply", s.requirePermission(core.PermissionTemplatesWrite, http.HandlerFunc(s.applyTemplate)))
+	mux.Handle("POST /api/v1/templates/{id}/apply", s.requireAllPermissions(
+		[]core.Permission{core.PermissionTemplatesWrite, core.PermissionAgentConfigWrite},
+		http.HandlerFunc(s.applyTemplate),
+	))
 
 	mux.HandleFunc("GET /api/v1/agent-binary", s.serveAgentBinary)
 	mux.Handle("GET /agent/v1/binary", s.agent(http.HandlerFunc(s.serveAgentBinaryForAgent)))

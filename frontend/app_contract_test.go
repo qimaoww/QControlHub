@@ -1017,7 +1017,7 @@ func TestManualConfigRequiresExplicitImportOfNodeSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, required := range []string{
-		`(item) => liveConfigEngineEligible(agent.runtime?.[item])`,
+		`(item) => privateWorkspace || liveConfigEngineEligible(agent.runtime?.[item])`,
 		`class="live-engine-bar" aria-label="选择内核"`,
 		`data-live-engine="${esc(item)}" aria-pressed="${active}"`,
 	} {

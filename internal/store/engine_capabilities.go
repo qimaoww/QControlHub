@@ -79,8 +79,8 @@ func (s *Store) ChangeAgentEngineCapability(ctx context.Context, id string, engi
 		if err != nil {
 			return change, err
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO tasks(id,agent_id,engine,action,status,created_at,capability_transition)
-			VALUES($1,$2,$3,$4,'pending',$5,true)`, change.TaskID, id, engine, action, time.Now().UTC()); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO tasks(id,agent_id,engine,action,status,created_at,capability_transition,owner_id)
+			VALUES($1,$2,$3,$4,'pending',$5,true,$6)`, change.TaskID, id, engine, action, time.Now().UTC(), scopeForConfig(ctx).OwnerID); err != nil {
 			return change, err
 		}
 		if err := tx.Commit(ctx); err != nil {

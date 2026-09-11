@@ -1467,6 +1467,19 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 	if request.Action.SystemBBR() && !containsFeature(features, core.AgentFeatureSystemBBR) {
 		return core.Task{}, fmt.Errorf("%w: upgrade this Agent before managing system BBR", ErrConflict)
 	}
+	if request.Action.SystemBBR() {
+		// TCP settings affect the whole host. Keep the shared exclusion even
+		// though task reuse and visibility are scoped to their submitter.
+		var busy bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM tasks
+			WHERE agent_id=$1 AND action IN ('enable-bbr','disable-bbr','configure-tcp')
+			  AND status IN ('pending','running') AND owner_id<>$2)`, request.AgentID, scope.OwnerID).Scan(&busy); err != nil {
+			return core.Task{}, err
+		}
+		if busy {
+			return core.Task{}, fmt.Errorf("%w: another system TCP task is pending or running", ErrConflict)
+		}
+	}
 	if !request.Action.AgentLevel() {
 		if err := rejectPendingCapabilityTransition(ctx, tx, request.AgentID, request.Engine); err != nil {
 			return core.Task{}, err

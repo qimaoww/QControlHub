@@ -23,6 +23,8 @@
 
 权限不足时返回 `403`。同一令牌在 Web 会话与 Bearer 请求中的角色一致。
 
+配置归属由登录身份决定，不能通过 `owner_id` 请求字段指定其他用户。普通用户只能列出和操作自己的配置档案、节点工作区、修订、模板、任务及 Sub-Store 同步组；直接引用其他用户的资源 ID 返回 `404`。管理员保留跨用户管理权限，节点工作区入口则始终使用当前管理员自己的身份。旧版非管理员令牌各自隔离，升级前记录归管理员保管。详见 [多用户配置隔离](security.md#多用户配置隔离)。
+
 失败响应通常是：
 
 ```json
@@ -48,8 +50,8 @@
 | `PUT` | `/api/v1/agents/{id}/name` | 修改面板显示的节点名称，不改变身份和安装凭据（agents.manage） |
 | `POST` | `/api/v1/agents/{id}/enrollment-token` | 为该节点新增一条独立、可重复使用的 Agent 安装凭据；已有凭据继续有效（enrollment.manage） |
 | `POST` | `/api/v1/agents/{id}/enrollment-command` | 幂等读取该节点已有且仍有效的安装命令，不创建或消费凭据（enrollment.manage） |
-| `GET` | `/api/v1/agents/{id}/configs` | 列出节点已有的内核配置 |
-| `GET` | `/api/v1/agents/{id}/configs/{engine}` | 读取节点绑定的内核配置 |
+| `GET` | `/api/v1/agents/{id}/configs` | 列出当前用户在此节点保存的内核配置 |
+| `GET` | `/api/v1/agents/{id}/configs/{engine}` | 读取当前用户在此节点的内核工作区 |
 | `PUT` | `/api/v1/agents/{id}/configs/{engine}` | 以乐观版本锁创建或更新节点配置 |
 | `GET` | `/api/v1/agents/{id}/configs/{engine}/files` | 返回 `{version, files:[{path,content}]}`，单文件内核返回一个文件 |
 | `PUT` | `/api/v1/agents/{id}/configs/{engine}/files` | Xray / sing-box 按 `{name,description,version,files}` 原子保存合并配置；非法路径返回 400，版本冲突返回 409；不自动部署 |
@@ -60,6 +62,16 @@
 | `POST` | `/api/v1/agents/{id}/configs/{engine}/fields/{key}` | 新增、修改或删除顶级配置字段并创建任务 |
 | `GET` | `/api/v1/deployments` | 列出每个节点/内核最近一次真实成功部署 |
 | `GET` | `/api/v1/client-access` | 从已部署入站生成客户端连接资料 |
+| `GET` | `/api/v1/substore-sync?target_id=` | 读取可见同步组、已选节点和可用部署（client-access.read） |
+| `PUT` | `/api/v1/substore-sync/settings` | 保存共用 Sub-Store 后端地址（settings.manage） |
+| `POST` | `/api/v1/substore-sync/targets` | 创建自己的同步组（settings.manage） |
+| `PUT` / `DELETE` | `/api/v1/substore-sync/targets/{id}` | 更新同步组或移除本地同步关系（settings.manage） |
+| `GET` | `/api/v1/substore-sync/remote-targets` | 列出可关联远端组，隐藏其他用户已占用的组（settings.manage） |
+| `POST` | `/api/v1/substore-sync/targets/import` | 关联已有远端组为自己的同步组（settings.manage） |
+| `POST` | `/api/v1/substore-sync/targets/{id}/remote` | 更换同步组关联的远端组（settings.manage） |
+| `PUT` | `/api/v1/substore-sync/selections` | 替换一个同步组的节点选择（settings.manage） |
+| `POST` | `/api/v1/substore-sync/test` | 测试共用后端连接（settings.manage） |
+| `POST` | `/api/v1/substore-sync/run` | 同步指定组（settings.manage） |
 | `GET` | `/api/v1/access-controls` | 按节点、入站标签和端口读取大陆访问限制（agent-config.read） |
 | `PUT` | `/api/v1/access-controls` | 保存单个入站的大陆来源/目标限制并创建校验或部署任务（agent-config.write + tasks.execute） |
 | `GET` | `/api/v1/core-logs` | 查询面板集中保存的内核运行日志 |
@@ -81,7 +93,7 @@
 | `GET` | `/api/v1/tasks?agent_id=&status=&action=&limit=` | 按节点、状态和动作筛选任务；`limit` 为 1–500，默认 100 |
 | `POST` | `/api/v1/tasks` | 创建远程任务 |
 | `GET` | `/api/v1/tasks/{id}` | 读取单个任务及结果 |
-| `GET` | `/api/v1/tasks/{id}/config-snapshot` | 读取已成功 `read-config` 或 `read-managed-config` 任务的短期配置快照（同时需要 `tasks.read` 与 `agent-config.read`） |
+| `GET` | `/api/v1/tasks/{id}/config-snapshot` | 管理员读取已成功 `read-config` 或 `read-managed-config` 任务的短期配置快照 |
 | `DELETE` | `/api/v1/tasks/{id}` | 取消尚未领取的任务 |
 | `POST` | `/api/v1/tasks/{id}/retry` | 按当前配置重试失败或已取消任务 |
 | `GET` | `/api/v1/enrollment-tokens` | 列出添加节点记录，不返回原始凭证（admin） |
@@ -102,7 +114,7 @@
 | `GET` | `/api/v1/templates` | 列出配置模板 |
 | `POST` | `/api/v1/templates` | 创建配置模板 |
 | `DELETE` | `/api/v1/templates/{id}` | 删除配置模板（admin） |
-| `POST` | `/api/v1/templates/{id}/apply` | 渲染模板并保存到指定节点 |
+| `POST` | `/api/v1/templates/{id}/apply` | 渲染模板并保存到自己的节点工作区（templates.write + agent-config.write） |
 
 | `GET` | `/api/v1/agent-installer` | 下载添加节点凭证保护的一键安装脚本 |
 | `GET` | `/api/v1/agent-binary` | 下载添加节点凭证保护的 Agent 可执行文件 |
@@ -204,7 +216,20 @@ schema 44 的策略响应增加 `accounting`：`source` 为 `core-api`、`nft-du
 
 带 `profile` 时 `address` 和 `address_mode`（`auto` / `ipv4` / `ipv6`）按该入站保存，省略表示不修改该端口；新界面仅在字段被改动时提交，且端口已有手动地址时会禁用协议栈选择。不携带 `profile` 的旧客户端仍写入节点级值：节点级连接地址继续作为自动识别候选，节点级名称与协议栈不再影响端口显示。端口名称适用于所有地址族的分享值和 Sub-Store 默认名称，Sub-Store 自己设置的名称优先。名称绑定监听端点，不随 SS Rust 数组位置或标签改名转移到别的端口；改变监听地址/端口会使用新端点的设置。此接口继续要求 `agents.manage`、浏览器 CSRF 和审计记录。
 
+### Sub-Store 同步格式
+
+新建或更新同步组使用 `{"display_name":"我的节点","sync_mode":"incremental","sync_format":"mihomo"}`。`sync_format` 仅接受 `url`、`mihomo`；创建时省略默认为 `url`，更新时省略保留原值。格式按组保存，与 `sync_mode` 的 `incremental`（保留远端手工节点）或 `managed`（以所选清单替换远端内容）独立。关联已有远端组的请求也接受 `sync_format`，不会改变所选节点与 IP 地址模式。
+
+- URL：使用现有客户端分享链接；Snell、Sudoku 等没有通用链接的协议保留可供 Sub-Store 解析的原生格式。
+- Mihomo：逐节点生成单行 YAML 代理映射，保留客户端凭据、Reality、TLS、传输层和协议参数，不复制服务端私钥或文件路径。不支持的安全选项（例如 Reality ML-DSA-65 校验）会明确报错并阻止同步，不自动删掉选项或回退到 URL。
+
+选择请求为 `{"target_id":"sst_…","selections":[{"config_id":"cfg_…","agent_id":"agt_…","engine":"mihomo","profile_tag":"ss-in","custom_name":"我的节点","address_mode":"both"}]}`。`address_mode` 可为 `auto`、`ipv4`、`ipv6`、`both`；双栈模式生成两条，IPv6 节点名追加 ` v6`。旧客户端省略 `config_id` 时，只能从当前可见部署解析并持久化准确 ID。运行请求为 `{"target_id":"sst_…"}`。
+
+同步使用实际成功部署的版本，而非未部署的草稿。同一主机被另一份配置替换后，原组选择会标记失效；再次同步返回 `409` 且不写远端，必须删除失效项或重新选择。普通用户不能选择其他用户的部署。远端组名在共用后端中必须唯一；移除本地同步组不会删除远端组。
+
 ### 创建配置
+
+同一用户可通过 `/configs` 创建多份配置档案，并选择自己的档案校验或部署到同一台主机。节点工作区 `/agents/{id}/configs/{engine}` 按用户、节点、内核保存一份当前草稿，不同用户的版本号和内容互不覆盖。`PUT` 工作区只保存；校验或部署需要另行创建任务。同一主机每种内核仍只有一个活动配置，部署会替换其当前运行配置，不会同时启动多份独立进程。
 
 请求字段：
 
@@ -328,7 +353,7 @@ Mihomo `development` 安装额外接受 `core_source`，取值为 `official`（�
 
 任务成功响应表示目标节点已完成对应操作；失败响应会保留节点返回的错误信息。部署任务只有在目标节点真实写入配置并成功重启服务后，才会进入节点的最新部署记录。
 
-成功的 `read-config` 与 `read-managed-config` 任务不会在普通任务列表或任务详情中返回配置正文。读取完成后，同时具备 `tasks.read` 与 `agent-config.read` 的用户可使用 `GET /api/v1/tasks/{id}/config-snapshot` 获取 `{ "content": "..." }`；仅有 `tasks.read` 仍可查看任务记录，但读取快照会返回 `403`。当快照已被同一节点、内核和读取类型的后续成功读取清理时返回 `404`。
+成功的 `read-config` 与 `read-managed-config` 任务不会在普通任务列表或任务详情中返回配置正文。共享主机的这两类读取、`import-existing` 及快照读取仅限管理员；普通用户即使有 `tasks.execute`、`tasks.read` 和 `agent-config.read` 也会收到 `403`，应使用自己的配置工作区。管理员可使用 `GET /api/v1/tasks/{id}/config-snapshot` 获取 `{ "content": "..." }`；快照已被同一节点、内核和读取类型的后续成功读取清理时返回 `404`。
 
 ### 状态码
 
