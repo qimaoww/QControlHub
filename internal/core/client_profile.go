@@ -14,9 +14,10 @@ const (
 	// to one engine and listening endpoint, so every shared node keeps its own
 	// address instead of rewriting the address of the whole Agent.
 	ClientProfileAddressLabelPrefix = "client_profile_address_"
-	// ClientProfileAddressModeLabelPrefix scopes the selected address family the
-	// same way, so one shared node can pin IPv4 while another stays automatic.
-	ClientProfileAddressModeLabelPrefix = "client_profile_address_mode_"
+	// ClientProfileFamilyLabelPrefix scopes the selected address family the same
+	// way, so one shared node can pin IPv4 while another stays automatic. The
+	// prefix deliberately does not nest inside ClientProfileAddressLabelPrefix.
+	ClientProfileFamilyLabelPrefix = "client_profile_family_"
 )
 
 // SS Rust IDs are descriptive metadata, not firewall identifiers. Share this
@@ -39,10 +40,10 @@ func ClientProfileAddressLabel(engine Engine, listen string, port int) string {
 	return ClientProfileAddressLabelPrefix + clientProfileDigest(engine, listen, port)
 }
 
-// ClientProfileAddressModeLabel scopes the selected client address family to
-// one engine and listening endpoint within one Agent.
-func ClientProfileAddressModeLabel(engine Engine, listen string, port int) string {
-	return ClientProfileAddressModeLabelPrefix + clientProfileDigest(engine, listen, port)
+// ClientProfileFamilyLabel scopes the selected client address family to one
+// engine and listening endpoint within one Agent.
+func ClientProfileFamilyLabel(engine Engine, listen string, port int) string {
+	return ClientProfileFamilyLabelPrefix + clientProfileDigest(engine, listen, port)
 }
 
 func clientProfileDigest(engine Engine, listen string, port int) string {

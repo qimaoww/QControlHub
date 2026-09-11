@@ -247,3 +247,26 @@ func TestClientAddressCandidatesPriorityAndDedup(t *testing.T) {
 		t.Fatalf("verified WSS fallback source = %+v", candidates[3])
 	}
 }
+
+func TestBuildClientAccessAddressOptionsPinsManualAddress(t *testing.T) {
+	input := serverconfig.Input{Tag: "vless-in", Protocol: serverconfig.ProtocolVLESS, Port: 443, Credential: "123e4567-e89b-42d3-a456-426614174000", TLSEnabled: true, Transport: "tcp"}
+	candidates := []clientAddressCandidate{
+		{address: "198.51.100.10", source: "IPv4", family: core.SubStoreAddressModeIPv4},
+		{address: "2001:db8::10", source: "IPv6", family: core.SubStoreAddressModeIPv6},
+	}
+	addressLabel := core.ClientProfileAddressLabel(core.EngineXray, input.Listen, input.Port)
+	shared := buildClientAccessAddressOptions(core.EngineXray, []serverconfig.Input{input}, candidates, "edge.example.com", map[string]string{addressLabel: "198.51.100.10"})
+	counts := map[string]int{}
+	for _, option := range shared {
+		counts[option.Address] = len(option.Profiles)
+	}
+	if counts["198.51.100.10"] != 1 || counts["2001:db8::10"] != 0 {
+		t.Fatalf("manual address leaked across candidates: %+v", counts)
+	}
+	pinned := buildClientAccessAddressOptions(core.EngineXray, []serverconfig.Input{input}, candidates, "edge.example.com", map[string]string{addressLabel: "pinned.example.com"})
+	for _, option := range pinned {
+		if len(option.Profiles) != 0 {
+			t.Fatalf("address outside the candidate list surfaced as a family variant: %+v", option)
+		}
+	}
+}

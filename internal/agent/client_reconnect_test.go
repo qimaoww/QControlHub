@@ -489,4 +489,65 @@ func TestNextReconnectBackoffCapsDelays(t *testing.T) {
 			t.Errorf("nextReconnectBackoff(%s, %s) = %s, want %s", item.current, item.max, got, item.want)
 		}
 	}
+	if got := reconnectBackoffLimit(true); got != identityRejectedMaxBackoff {
+		t.Errorf("reconnectBackoffLimit(true) = %s, want %s", got, identityRejectedMaxBackoff)
+	}
+	if got := reconnectBackoffLimit(false); got != maxReconnectBackoff {
+		t.Errorf("reconnectBackoffLimit(false) = %s, want %s", got, maxReconnectBackoff)
+	}
+}
+
+// A rejected identity must not spend the enrollment token on every reconnect:
+// repeated failed enrollments block the control plane's address for every node
+// behind the same NAT.
+func TestRunRateLimitsReenrollAttempts(t *testing.T) {
+	client := reconnectTestClient(t)
+	client.config.EnrollmentToken = "enrollment-token"
+	if err := saveCredentials(client.config.StatePath, client.creds); err != nil {
+		t.Fatal(err)
+	}
+	var enrollments, handshakes atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/agent/v1/enroll":
+			enrollments.Add(1)
+			http.Error(w, "enrollment rejected", http.StatusUnauthorized)
+		case "/agent/v1/connect":
+			handshakes.Add(1)
+			http.Error(w, "agent identity is invalid or revoked", http.StatusUnauthorized)
+		default:
+			http.NotFound(w, request)
+		}
+	}))
+	defer server.Close()
+	client.config.ServerURL = server.URL
+	client.websocketURL = "ws" + strings.TrimPrefix(server.URL, "http") + "/agent/v1/connect"
+	client.http = &http.Client{}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	finished := make(chan error, 1)
+	go func() { finished <- client.Run(ctx) }()
+	deadline := time.NewTimer(8 * time.Second)
+	defer deadline.Stop()
+	for handshakes.Load() < 3 {
+		select {
+		case err := <-finished:
+			t.Fatalf("Run terminated on a rejected identity: %v", err)
+		case <-deadline.C:
+			t.Fatalf("handshakes=%d enrollments=%d, want repeated reconnects", handshakes.Load(), enrollments.Load())
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+	if got := enrollments.Load(); got != 1 {
+		t.Fatalf("enrollment attempts = %d, want 1 inside the rate limit window", got)
+	}
+	cancel()
+	select {
+	case err := <-finished:
+		if err != nil {
+			t.Fatalf("Run cancellation = %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Run did not stop after cancellation")
+	}
 }

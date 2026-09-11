@@ -50,7 +50,6 @@ type clientAccessEntry struct {
 	AddressRequired bool                        `json:"address_required,omitempty"`
 	Profiles        []clientAccessProfile       `json:"profiles"`
 	AddressOptions  []clientAccessAddressOption `json:"address_options,omitempty"`
-	ClientName      string                      `json:"client_name,omitempty"`
 	AddressMode     string                      `json:"address_mode"`
 }
 
@@ -849,7 +848,7 @@ func buildClientAccessProfiles(engine core.Engine, inputs []serverconfig.Input, 
 	profiles := make([]clientAccessProfile, 0, len(inputs))
 	for _, input := range inputs {
 		mode := core.SubStoreAddressModeAuto
-		if value, exists := labels[core.ClientProfileAddressModeLabel(engine, input.Listen, input.Port)]; exists {
+		if value, exists := labels[core.ClientProfileFamilyLabel(engine, input.Listen, input.Port)]; exists {
 			mode = normalizeClientAddressMode(value)
 		}
 		address, overridden := strings.TrimSpace(labels[core.ClientProfileAddressLabel(engine, input.Listen, input.Port)]), false
@@ -884,6 +883,13 @@ func buildClientAccessAddressOptions(engine core.Engine, inputs []serverconfig.I
 	for _, candidate := range candidates {
 		profiles := make([]clientAccessProfile, 0, len(inputs))
 		for _, input := range inputs {
+			if len(labelSets) > 0 {
+				// A port with a manual address is pinned to exactly one candidate;
+				// exposing it under another family would publish a second URI.
+				if value := strings.TrimSpace(labelSets[0][core.ClientProfileAddressLabel(engine, input.Listen, input.Port)]); value != "" && value != candidate.address {
+					continue
+				}
+			}
 			name, overridden := "", false
 			if len(labelSets) > 0 {
 				if value, exists := labelSets[0][core.ClientProfileNameLabel(engine, input.Listen, input.Port)]; exists {

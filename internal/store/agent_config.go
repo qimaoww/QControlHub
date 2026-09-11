@@ -168,7 +168,7 @@ func (s *Store) SetAgentClientProfilePreferences(ctx context.Context, id, nameLa
 		return fmt.Errorf("%w: invalid client profile name scope", ErrInvalid)
 	}
 	suffix := strings.TrimPrefix(nameLabel, core.ClientProfileNameLabelPrefix)
-	return s.setAgentClientPreferences(ctx, id, nameLabel, core.ClientProfileAddressLabelPrefix+suffix, core.ClientProfileAddressModeLabelPrefix+suffix, address, name, addressMode)
+	return s.setAgentClientPreferences(ctx, id, nameLabel, core.ClientProfileAddressLabelPrefix+suffix, core.ClientProfileFamilyLabelPrefix+suffix, address, name, addressMode)
 }
 
 func (s *Store) setAgentClientPreferences(ctx context.Context, id, nameLabel, addressLabel, addressModeLabel string, address, name, addressMode *string) error {
@@ -195,11 +195,11 @@ func (s *Store) setAgentClientPreferences(ctx context.Context, id, nameLabel, ad
 		}
 	}
 	if addressMode != nil {
-		modeKey, remove := addressModeLabel, false
+		// Automatic selection removes the key for both scopes: an absent label
+		// already means automatic, so storing the literal value adds no meaning.
+		modeKey, remove := addressModeLabel, *addressMode == "" || *addressMode == "auto"
 		if modeKey == "" {
-			// The node-wide label keeps its legacy behavior: automatic selection
-			// removes the key so old Agents and panels see no override.
-			modeKey, remove = "client_address_mode", *addressMode == "" || *addressMode == "auto"
+			modeKey = "client_address_mode"
 		}
 		if remove {
 			if _, err := tx.Exec(ctx, `UPDATE agents SET labels = COALESCE(NULLIF(labels, 'null'::jsonb), '{}'::jsonb) - $2::text WHERE id=$1 AND revoked_at IS NULL`, id, modeKey); err != nil {

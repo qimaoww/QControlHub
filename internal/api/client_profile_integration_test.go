@@ -363,6 +363,18 @@ func TestClientProfileDisplayParametersAreScopedToDeployedPorts(t *testing.T) {
 		"one": {address: "one.example.com", mode: core.SubStoreAddressModeIPv6, overridden: true, host: "one.example.com"},
 		"two": {address: address, mode: core.SubStoreAddressModeAuto, host: address},
 	})
+	subProfiles, err := s.availableSubStoreProfiles(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, profile := range subProfiles {
+		if profile.Engine != core.EngineShadowsocksRust || profile.ProfileTag != "one" {
+			continue
+		}
+		if len(profile.Addresses) != 1 || profile.Addresses[0].Address != "one.example.com" || profile.Addresses[0].Family != "hostname" {
+			t.Fatalf("pinned subscription address = %+v", profile.Addresses)
+		}
+	}
 	if w := request(map[string]any{"profile": selector("one", 20001), "address": ""}); w.Code != http.StatusOK {
 		t.Fatalf("clear profile one address: %d %s", w.Code, w.Body.String())
 	}
