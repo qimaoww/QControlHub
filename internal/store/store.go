@@ -48,7 +48,7 @@ type storeExecutor interface {
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 50
+const currentSchemaVersion = 51
 
 func Open(ctx context.Context, databaseURL string, allowInsecureRemote bool) (*Store, error) {
 	return OpenWithConfigKey(ctx, databaseURL, allowInsecureRemote, "")
@@ -220,6 +220,17 @@ func (s *Store) migrate(ctx context.Context) error {
 			ON CONFLICT DO NOTHING`); err != nil {
 				return fmt.Errorf("migrate legacy Sub-Store sync target: %w", err)
 			}
+		}
+	}
+	if appliedVersion < 51 {
+		// The unique constraint on (agent_id, port) already serves every lookup
+		// this index could: it has the same leading columns, so the planner can
+		// use it for any predicate on agent_id alone. A live instance showed the
+		// duplicate carrying zero scans while it was maintained on every policy
+		// write. schemaSQL no longer creates it either, so this only has to
+		// remove the copies that already exist.
+		if _, err := tx.Exec(ctx, `DROP INDEX IF EXISTS port_traffic_policies_agent_idx`); err != nil {
+			return fmt.Errorf("drop duplicate traffic policy index: %w", err)
 		}
 	}
 	if appliedVersion < 50 {
@@ -2587,7 +2598,9 @@ ALTER TABLE port_traffic_policies DROP CONSTRAINT IF EXISTS port_traffic_policie
 ALTER TABLE port_traffic_policies ADD CONSTRAINT port_traffic_policies_reported_received_bytes_check CHECK (reported_received_bytes >= 0);
 ALTER TABLE port_traffic_policies DROP CONSTRAINT IF EXISTS port_traffic_policies_reported_sent_bytes_check;
 ALTER TABLE port_traffic_policies ADD CONSTRAINT port_traffic_policies_reported_sent_bytes_check CHECK (reported_sent_bytes >= 0);
-CREATE INDEX IF NOT EXISTS port_traffic_policies_agent_idx ON port_traffic_policies(agent_id,port);
+-- port_traffic_policies_agent_idx was retired in v51: it duplicated the
+-- leading columns of the (agent_id, port) unique constraint, which serves the
+-- same lookups, while being maintained on every policy write for zero scans.
 
 CREATE TABLE IF NOT EXISTS port_traffic_daily_usage (
 	policy_id text NOT NULL,

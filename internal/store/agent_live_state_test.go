@@ -121,6 +121,33 @@ func TestAgentLiveStateSplitMigratesWideAgentRows(t *testing.T) {
 	}
 }
 
+// TestDuplicateTrafficPolicyIndexIsRetired covers the v51 cleanup.
+//
+// The unique constraint on (agent_id, port) has the same leading columns, so the
+// separate index only added maintenance on a table that is rewritten roughly
+// once per second per policy. schemaSQL no longer creates it, and this checks
+// that a database which still carries it loses it on upgrade.
+func TestDuplicateTrafficPolicyIndexIsRetired(t *testing.T) {
+	s := openPerformanceStore(t)
+	ctx := context.Background()
+
+	if _, err := s.pool.Exec(ctx, `CREATE INDEX IF NOT EXISTS port_traffic_policies_agent_idx ON port_traffic_policies(agent_id,port)`); err != nil {
+		t.Fatal(err)
+	}
+	assertIndexExists(t, s, "port_traffic_policies_agent_idx", true)
+	if _, err := s.pool.Exec(ctx, `DELETE FROM qcontrolhub_schema_migrations; INSERT INTO qcontrolhub_schema_migrations(version) VALUES (50)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.migrate(ctx); err != nil {
+		t.Fatalf("migrate to v51: %v", err)
+	}
+	assertIndexExists(t, s, "port_traffic_policies_agent_idx", false)
+
+	// The constraint that serves the same lookups has to remain, or the upgrade
+	// would have traded a redundant index for a missing one.
+	assertIndexExists(t, s, "port_traffic_policies_agent_id_port_key", true)
+}
+
 // TestAgentHeartbeatWithoutMetricsClearsProbes covers the branch a heartbeat
 // takes when it carries no metrics: the Agent can no longer probe, so the
 // addresses it probed earlier must stop being advertised, while the interface
