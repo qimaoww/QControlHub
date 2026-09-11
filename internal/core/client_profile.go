@@ -8,7 +8,16 @@ import (
 	"unicode/utf8"
 )
 
-const ClientProfileNameLabelPrefix = "client_profile_name_"
+const (
+	ClientProfileNameLabelPrefix = "client_profile_name_"
+	// ClientProfileAddressLabelPrefix scopes an operator-provided client address
+	// to one engine and listening endpoint, so every shared node keeps its own
+	// address instead of rewriting the address of the whole Agent.
+	ClientProfileAddressLabelPrefix = "client_profile_address_"
+	// ClientProfileAddressModeLabelPrefix scopes the selected address family the
+	// same way, so one shared node can pin IPv4 while another stays automatic.
+	ClientProfileAddressModeLabelPrefix = "client_profile_address_mode_"
+)
 
 // SS Rust IDs are descriptive metadata, not firewall identifiers. Share this
 // validation between preset generation and Agent policy processing; firewall
@@ -21,6 +30,22 @@ func ValidSSRustTag(tag string) bool {
 // endpoint within one Agent. Tags and SS Rust array positions may change; they
 // must not move a name to another port. No credentials enter this key.
 func ClientProfileNameLabel(engine Engine, listen string, port int) string {
+	return ClientProfileNameLabelPrefix + clientProfileDigest(engine, listen, port)
+}
+
+// ClientProfileAddressLabel scopes an operator-provided client connection
+// address to one engine and listening endpoint within one Agent.
+func ClientProfileAddressLabel(engine Engine, listen string, port int) string {
+	return ClientProfileAddressLabelPrefix + clientProfileDigest(engine, listen, port)
+}
+
+// ClientProfileAddressModeLabel scopes the selected client address family to
+// one engine and listening endpoint within one Agent.
+func ClientProfileAddressModeLabel(engine Engine, listen string, port int) string {
+	return ClientProfileAddressModeLabelPrefix + clientProfileDigest(engine, listen, port)
+}
+
+func clientProfileDigest(engine Engine, listen string, port int) string {
 	digest := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%s\x00%d", engine, strings.TrimSpace(listen), port)))
-	return fmt.Sprintf("%s%x", ClientProfileNameLabelPrefix, digest)
+	return fmt.Sprintf("%x", digest)
 }

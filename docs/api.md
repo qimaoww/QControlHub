@@ -63,7 +63,7 @@
 | `GET` | `/api/v1/access-controls` | 按节点、入站标签和端口读取大陆访问限制（agent-config.read） |
 | `PUT` | `/api/v1/access-controls` | 保存单个入站的大陆来源/目标限制并创建校验或部署任务（agent-config.write + tasks.execute） |
 | `GET` | `/api/v1/core-logs` | 查询面板集中保存的内核运行日志 |
-| `PUT` | `/api/v1/agents/{id}/client-address` | 设置客户端访问地址、协议栈或单端口显示名称（agents.manage） |
+| `PUT` | `/api/v1/agents/{id}/client-address` | 按入站设置显示名称、连接地址与地址协议栈（agents.manage） |
 | `GET` | `/api/v1/agents/{id}/region` | 读取手动设置或根据公网 IP 自动识别的国家/地区（agents.read） |
 | `PUT` | `/api/v1/agents/{id}/region` | 保存国家/地区旗帜，空代码恢复自动识别（agents.manage） |
 | `GET` | `/api/v1/regions` | 读取可选择的两位国家/地区代码列表（agents.read） |
@@ -200,7 +200,7 @@ schema 44 的策略响应增加 `accounting`：`source` 为 `core-api`、`nft-du
 
 ### 客户端端口显示名称
 
-客户端页面的“修改显示参数”按入站定位名称。例如 `PUT /api/v1/agents/{id}/client-address` 的请求 `{"profile":{"engine":"ss-rust","tag":"ss-rust-1","port":20001},"name":"香港 · ATT"}` 只修改该内核、监听地址和端口的分享名称；不创建配置版本、不重启内核，也不修改其他端口。名称最多 100 个 Unicode 字符且不能包含控制字符；空名称恢复该端口的入站标签。已有节点级名称继续作为未单独命名端口的默认值。选择器必须匹配实际成功部署的修订；不存在或已变更的入站返回 `404`，不完整的选择器返回 `400`。
+客户端页面的“修改显示参数”按入站（内核、监听地址与端口）定位全部显示参数。例如 `PUT /api/v1/agents/{id}/client-address` 的请求 `{"profile":{"engine":"ss-rust","tag":"ss-rust-1","port":20001},"name":"香港 · ATT","address":"203.0.113.10","address_mode":"ipv6"}` 只修改该入站的分享名称、客户端连接地址与地址协议栈；不创建配置版本、不重启内核，也不修改其他端口。名称最多 100 个 Unicode 字符且不能包含控制字符；空名称恢复该端口的入站标签。空地址恢复该端口的自动识别地址；`address_mode` 为 `auto` 时按协议栈自动选择，`ipv4` / `ipv6` 固定地址族，显式地址优先于地址族选择。节点级名称、连接地址与协议栈继续作为未单独设置端口的默认值。选择器必须匹配实际成功部署的修订；不存在或已变更的入站返回 `404`，不完整的选择器返回 `400`。
 
 `address` 和 `address_mode`（`auto` / `ipv4` / `ipv6`）仍为整台节点共用的可选设置，省略表示不修改；新界面仅在用户改动它们时提交。旧客户端不携带 `profile` 时仍使用节点级名称接口。端口名称适用于所有地址族的分享值和 Sub-Store 默认名称，Sub-Store 自己设置的名称优先。名称绑定监听端点，不随 SS Rust 数组位置或标签改名转移到别的端口；改变监听地址/端口会使用新端点的设置。此接口继续要求 `agents.manage`、浏览器 CSRF 和审计记录。
 

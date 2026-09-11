@@ -149,25 +149,29 @@ func (s *Store) SetAgentClientDetails(ctx context.Context, id string, address, n
 	return s.SetAgentClientPreferences(ctx, id, address, name, nil)
 }
 
-// SetAgentClientPreferences also persists the selected address family. The
-// automatic mode is represented by an absent label so older Agents and
+// SetAgentClientPreferences persists the node-wide client display defaults. The
+// automatic address mode is represented by an absent label so older Agents and
 // control-plane versions keep their original behavior.
 func (s *Store) SetAgentClientPreferences(ctx context.Context, id string, address, name, addressMode *string) error {
-	return s.setAgentClientPreferences(ctx, id, "client_name", address, name, addressMode)
+	return s.setAgentClientPreferences(ctx, id, "client_name", "", "", address, name, addressMode)
 }
 
-// SetAgentClientProfilePreferences preserves legacy node-wide defaults while
-// updating one verified listening endpoint. An explicit empty name opts that
-// endpoint out of the legacy name and restores its inbound tag.
+// SetAgentClientProfilePreferences scopes the client display parameters to one
+// verified listening endpoint. Name, connection address, and address family all
+// live under profile-scoped labels so changing one shared node never rewrites
+// another. An explicit empty name opts that endpoint out of the legacy name and
+// restores its inbound tag; an explicit empty address restores the automatic
+// node address.
 func (s *Store) SetAgentClientProfilePreferences(ctx context.Context, id, nameLabel string, address, name, addressMode *string) error {
 	digest, err := hex.DecodeString(strings.TrimPrefix(nameLabel, core.ClientProfileNameLabelPrefix))
 	if !strings.HasPrefix(nameLabel, core.ClientProfileNameLabelPrefix) || err != nil || len(digest) != 32 {
 		return fmt.Errorf("%w: invalid client profile name scope", ErrInvalid)
 	}
-	return s.setAgentClientPreferences(ctx, id, nameLabel, address, name, addressMode)
+	suffix := strings.TrimPrefix(nameLabel, core.ClientProfileNameLabelPrefix)
+	return s.setAgentClientPreferences(ctx, id, nameLabel, core.ClientProfileAddressLabelPrefix+suffix, core.ClientProfileAddressModeLabelPrefix+suffix, address, name, addressMode)
 }
 
-func (s *Store) setAgentClientPreferences(ctx context.Context, id, nameLabel string, address, name, addressMode *string) error {
+func (s *Store) setAgentClientPreferences(ctx context.Context, id, nameLabel, addressLabel, addressModeLabel string, address, name, addressMode *string) error {
 	if name != nil && (!utf8.ValidString(*name) || utf8.RuneCountInString(*name) > 100 || strings.ContainsFunc(*name, unicode.IsControl)) {
 		return fmt.Errorf("%w: client name must not exceed 100 characters or contain control characters", ErrInvalid)
 	}
@@ -176,8 +180,12 @@ func (s *Store) setAgentClientPreferences(ctx context.Context, id, nameLabel str
 		return err
 	}
 	defer tx.Rollback(ctx)
+	addressKey := addressLabel
+	if addressKey == "" {
+		addressKey = "client_address"
+	}
 	if address != nil {
-		if _, err := tx.Exec(ctx, `UPDATE agents SET labels = CASE WHEN $2 = '' THEN COALESCE(NULLIF(labels, 'null'::jsonb), '{}'::jsonb) - 'client_address' ELSE jsonb_set(COALESCE(NULLIF(labels, 'null'::jsonb), '{}'::jsonb), '{client_address}', to_jsonb($2::text), true) END WHERE id=$1 AND revoked_at IS NULL`, id, *address); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE agents SET labels = CASE WHEN $2 = '' THEN COALESCE(NULLIF(labels, 'null'::jsonb), '{}'::jsonb) - $3::text ELSE jsonb_set(COALESCE(NULLIF(labels, 'null'::jsonb), '{}'::jsonb), ARRAY[$3::text], to_jsonb($2::text), true) END WHERE id=$1 AND revoked_at IS NULL`, id, *address, addressKey); err != nil {
 			return err
 		}
 	}
@@ -187,7 +195,17 @@ func (s *Store) setAgentClientPreferences(ctx context.Context, id, nameLabel str
 		}
 	}
 	if addressMode != nil {
-		if _, err := tx.Exec(ctx, `UPDATE agents SET labels = CASE WHEN $2 = '' OR $2 = 'auto' THEN COALESCE(NULLIF(labels, 'null'::jsonb), '{}'::jsonb) - 'client_address_mode' ELSE jsonb_set(COALESCE(NULLIF(labels, 'null'::jsonb), '{}'::jsonb), '{client_address_mode}', to_jsonb($2::text), true) END WHERE id=$1 AND revoked_at IS NULL`, id, *addressMode); err != nil {
+		modeKey, remove := addressModeLabel, false
+		if modeKey == "" {
+			// The node-wide label keeps its legacy behavior: automatic selection
+			// removes the key so old Agents and panels see no override.
+			modeKey, remove = "client_address_mode", *addressMode == "" || *addressMode == "auto"
+		}
+		if remove {
+			if _, err := tx.Exec(ctx, `UPDATE agents SET labels = COALESCE(NULLIF(labels, 'null'::jsonb), '{}'::jsonb) - $2::text WHERE id=$1 AND revoked_at IS NULL`, id, modeKey); err != nil {
+				return err
+			}
+		} else if _, err := tx.Exec(ctx, `UPDATE agents SET labels = jsonb_set(COALESCE(NULLIF(labels, 'null'::jsonb), '{}'::jsonb), ARRAY[$2::text], to_jsonb($3::text), true) WHERE id=$1 AND revoked_at IS NULL`, id, modeKey, *addressMode); err != nil {
 			return err
 		}
 	}

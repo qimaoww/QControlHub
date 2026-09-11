@@ -169,18 +169,12 @@ export function installClientAccess(ctx) {
     const [entries, agents] = payload;
     state.data.agents = agents;
     state.data.clientAccessEntries = entries;
-    state.data.clientAccessAddressModes = Object.fromEntries(
-      (entries || []).map((entry) => [entry.agent_id, entry.address_mode || "auto"]),
-    );
     renderClientAccess();
     return true;
   }
 
   function renderClientAccess() {
-    const addressModes = state.data.clientAccessAddressModes || {};
-    const entries = (state.data.clientAccessEntries || []).map((entry) =>
-      clientAccessEntryForAddress(entry, addressModes[entry.agent_id] || "auto"),
-    );
+    const entries = state.data.clientAccessEntries || [];
     const agents = state.data.agents || [];
     const filters = normalizeClientAccessFilters(entries, agents, {
       agent: state.data.accessAgent,
@@ -249,7 +243,6 @@ export function installClientAccess(ctx) {
   }
 
   function renderResults(filtered, entries, agents, filters) {
-    const addressModes = state.data.clientAccessAddressModes || {};
     if (!filtered.length) {
       const selectedAgent = agents.find((agent) => agent.id === filters.agent);
       const selectedHasEntries = entries.some(
@@ -277,20 +270,14 @@ export function installClientAccess(ctx) {
         const firstEntry = group.entries[0];
         const agent = agents.find((item) => item.id === group.agent_id) || {};
         const agentStatus = agent.status || "unknown";
-        const managedAddress = Boolean(agent.labels?.client_address);
-        const automaticAddress = firstEntry.address_options?.[0]?.address || firstEntry.address || "";
         const addressChoices = clientAccessAddressChoices(firstEntry);
-        const addressMode = addressModes[group.agent_id] || "auto";
-        const displayAddressModeField = addressChoices.length
-          ? `<label class="client-display-stack-field"><span>客户端地址协议栈</span><select name="address_mode">${addressChoices.map((choice) => `<option value="${esc(choice.value)}" ${choice.value === addressMode ? "selected" : ""}>${esc(choice.label)}</option>`).join("")}</select><small>整台节点共用此选择：自动、IPv4 或 IPv6。</small></label>`
-          : "";
         const displayButton = (displayDialogID) => can("agents.manage")
           ? `<button class="button small client-display-settings-open" type="button" data-client-display-open="${displayDialogID}" aria-haspopup="dialog" aria-controls="${displayDialogID}">修改显示参数</button>`
           : "";
-        const displayDialog = (entry, item, displayDialogID) => {
+        const displayDialog = (entry, item, displayDialogID, modeField) => {
           const displayDialogTitleID = `${displayDialogID}-title`;
           return can("agents.manage")
-          ? `<dialog class="traffic-edit-dialog client-display-dialog" id="${displayDialogID}" aria-labelledby="${displayDialogTitleID}"><header><span class="traffic-edit-icon" aria-hidden="true">✎</span><div><p class="eyebrow">客户端配置</p><h2 id="${displayDialogTitleID}">修改显示参数</h2><p>${esc(firstEntry.agent_name)} · ${esc(item.tag)} · 端口 ${Number(item.port)}</p></div><button class="deploy-command-close" type="button" data-client-display-close aria-label="关闭修改显示参数">×</button></header><form data-client-address-agent="${esc(group.agent_id)}" data-client-profile-engine="${esc(entry.engine)}" data-client-profile-tag="${esc(item.tag)}" data-client-profile-port="${Number(item.port)}"><div class="traffic-edit-body client-display-dialog-body"><div class="client-display-form-grid"><label><span>客户端节点名称</span><input name="name" maxlength="100" autocomplete="off" value="${esc(item.client_name || "")}" placeholder="留空使用入站标签"><small>只修改当前内核、当前监听端口的分享名称，不影响其他端口。</small></label><label><span>客户端连接地址（节点共用）</span><input name="address" required maxlength="253" autocomplete="off" value="${esc(automaticAddress)}" placeholder="例如 203.0.113.10 或 node.example.com"><small>此地址供整台节点的所有端口共用；仅改名称不会变更连接地址。</small></label>${displayAddressModeField}</div></div><footer>${managedAddress ? `<button class="button" type="button" data-clear-client-address="${esc(group.agent_id)}">恢复自动识别</button>` : "<span></span>"}<span></span><button class="button" type="button" data-client-display-close>取消</button><button class="button primary" type="submit">保存参数</button></footer></form></dialog>`
+          ? `<dialog class="traffic-edit-dialog client-display-dialog" id="${displayDialogID}" aria-labelledby="${displayDialogTitleID}"><header><span class="traffic-edit-icon" aria-hidden="true">✎</span><div><p class="eyebrow">客户端配置</p><h2 id="${displayDialogTitleID}">修改显示参数</h2><p>${esc(firstEntry.agent_name)} · ${esc(item.tag)} · 端口 ${Number(item.port)}</p></div><button class="deploy-command-close" type="button" data-client-display-close aria-label="关闭修改显示参数">×</button></header><form data-client-address-agent="${esc(group.agent_id)}" data-client-profile-engine="${esc(entry.engine)}" data-client-profile-tag="${esc(item.tag)}" data-client-profile-port="${Number(item.port)}"><div class="traffic-edit-body client-display-dialog-body"><div class="client-display-form-grid"><label><span>客户端节点名称</span><input name="name" maxlength="100" autocomplete="off" value="${esc(item.client_name || "")}" placeholder="留空使用入站标签"><small>仅对当前内核、当前监听端口生效，不影响其他端口。</small></label><label><span>客户端连接地址</span><input name="address" maxlength="253" autocomplete="off" value="${esc(item.address || "")}" placeholder="留空使用节点自动识别地址"><small>仅对当前内核、当前监听端口生效；清空或恢复自动识别后使用节点探测地址。</small></label>${modeField}</div></div><footer>${item.address_overridden ? `<button class="button" type="button" data-clear-client-address="${esc(group.agent_id)}" data-clear-client-profile-engine="${esc(entry.engine)}" data-clear-client-profile-tag="${esc(item.tag)}" data-clear-client-profile-port="${Number(item.port)}">恢复自动识别</button>` : "<span></span>"}<span></span><button class="button" type="button" data-client-display-close>取消</button><button class="button primary" type="submit">保存参数</button></footer></form></dialog>`
           : "";
         };
         const addressWarning = !can("agents.manage") && firstEntry.address_required
@@ -311,6 +298,10 @@ export function installClientAccess(ctx) {
                 const inputID = `client-share-${groupIndex}-${engineIndex}-${profileIndex}`;
                 const dialogID = `client-parameters-${groupIndex}-${engineIndex}-${profileIndex}`;
                 const dialogTitleID = `${dialogID}-title`;
+                const profileMode = item.address_mode || "auto";
+                const displayAddressModeField = addressChoices.length
+                  ? `<label class="client-display-stack-field"><span>客户端地址协议栈</span><select name="address_mode" data-saved-mode="${esc(profileMode)}">${addressChoices.map((choice) => `<option value="${esc(choice.value)}" ${choice.value === profileMode ? "selected" : ""}>${esc(choice.label)}</option>`).join("")}</select><small>仅对当前内核、当前监听端口生效：自动、IPv4 或 IPv6。</small></label>`
+                  : "";
                 const fields = (item.profile?.fields || [])
                   .map((field, fieldIndex) => {
                     const fieldID = `client-field-${groupIndex}-${engineIndex}-${profileIndex}-${fieldIndex}`;
@@ -321,7 +312,7 @@ export function installClientAccess(ctx) {
                 const shareControl = shareValue.includes("\n")
                   ? `<textarea class="client-share-yaml is-masked" id="${inputID}" readonly autocomplete="off" spellcheck="false">${esc(shareValue)}</textarea>`
                   : `<input id="${inputID}" type="password" readonly autocomplete="off" spellcheck="false" value="${esc(shareValue)}">`;
-                return `<article class="client-profile-row" data-refresh-key="client-profile-${esc(entry.agent_id)}-${esc(entry.engine)}-${esc(item.tag)}"><header><b>${esc(item.client_name || item.tag)}</b><small>${esc(item.protocol)} · ${esc(item.tag)} · ${Number(item.port)} · ${esc(item.profile?.format)}</small></header><form class="secret-value-control client-share-control" action="#">${shareControl}<button type="button" data-secret-visibility aria-controls="${inputID}" aria-pressed="false">显示</button><button type="button" data-copy-target="#${inputID}">复制</button></form><div class="client-profile-actions">${displayButton(displayDialogID)}<button class="button small client-parameter-open" type="button" data-client-parameter-open="${dialogID}" aria-haspopup="dialog" aria-controls="${dialogID}">参数详情 <span aria-hidden="true">→</span></button></div><dialog class="traffic-edit-dialog client-parameter-dialog" id="${dialogID}" aria-labelledby="${dialogTitleID}"><header><span class="traffic-edit-icon client-parameter-icon" aria-hidden="true">&lt;/&gt;</span><div><p class="eyebrow">客户端参数</p><h2 id="${dialogTitleID}">${esc(item.protocol)}</h2><p><span class="engine-badge ${esc(entry.engine)}">${esc(engineName(entry.engine))}</span><span class="client-parameter-meta">${esc(item.tag)} · ${esc(item.profile?.format)}</span></p></div><button class="deploy-command-close" type="button" data-client-parameter-close aria-label="关闭参数详情">×</button></header><div class="traffic-edit-body client-parameter-dialog-body"><dl class="client-parameter-list">${fields || '<div class="empty"><dt>参数</dt><dd>暂无参数</dd></div>'}</dl></div></dialog>${displayDialog(entry, item, displayDialogID)}</article>`;
+                return `<article class="client-profile-row" data-refresh-key="client-profile-${esc(entry.agent_id)}-${esc(entry.engine)}-${esc(item.tag)}"><header><b>${esc(item.client_name || item.tag)}</b><small>${esc(item.protocol)} · ${esc(item.tag)} · ${Number(item.port)} · ${esc(item.profile?.format)}</small></header><form class="secret-value-control client-share-control" action="#">${shareControl}<button type="button" data-secret-visibility aria-controls="${inputID}" aria-pressed="false">显示</button><button type="button" data-copy-target="#${inputID}">复制</button></form><div class="client-profile-actions">${displayButton(displayDialogID)}<button class="button small client-parameter-open" type="button" data-client-parameter-open="${dialogID}" aria-haspopup="dialog" aria-controls="${dialogID}">参数详情 <span aria-hidden="true">→</span></button></div><dialog class="traffic-edit-dialog client-parameter-dialog" id="${dialogID}" aria-labelledby="${dialogTitleID}"><header><span class="traffic-edit-icon client-parameter-icon" aria-hidden="true">&lt;/&gt;</span><div><p class="eyebrow">客户端参数</p><h2 id="${dialogTitleID}">${esc(item.protocol)}</h2><p><span class="engine-badge ${esc(entry.engine)}">${esc(engineName(entry.engine))}</span><span class="client-parameter-meta">${esc(item.tag)} · ${esc(item.profile?.format)}</span></p></div><button class="deploy-command-close" type="button" data-client-parameter-close aria-label="关闭参数详情">×</button></header><div class="traffic-edit-body client-parameter-dialog-body"><dl class="client-parameter-list">${fields || '<div class="empty"><dt>参数</dt><dd>暂无参数</dd></div>'}</dl></div></dialog>${displayDialog(entry, item, displayDialogID, displayAddressModeField)}</article>`;
               })
               .join("");
             return `<section class="client-access-engine-group"><header><span><span class="engine-badge ${esc(entry.engine)}">${esc(engineName(entry.engine))}</span><small>${(entry.profiles || []).length} 个入站</small></span><a href="#agent-config" data-config-agent="${esc(entry.agent_id)}" data-config-engine="${esc(entry.engine)}">服务端配置</a></header><div>${profiles || '<p class="client-access-entry-empty">需要先设置可访问的节点地址。</p>'}</div></section>`;
@@ -426,7 +417,17 @@ export function installClientAccess(ctx) {
       button.onclick = () => button.closest("dialog")?.close();
     });
     document.querySelectorAll("[data-client-display-open]").forEach((button) => {
-      button.onclick = () => document.getElementById(button.dataset.clientDisplayOpen)?.showModal();
+      button.onclick = () => {
+        const dialog = document.getElementById(button.dataset.clientDisplayOpen);
+        // Keyed refresh reuses the dialog node, so a dirty input keeps its old
+        // value even after the attributes were rewritten. Opening the dialog
+        // re-syncs every control with the latest rendered defaults.
+        dialog?.querySelectorAll("input[name], select[name]").forEach((control) => {
+          if (control.tagName === "SELECT") control.value = control.dataset.savedMode || "auto";
+          else control.value = control.defaultValue;
+        });
+        dialog?.showModal();
+      };
     });
     document.querySelectorAll("[data-client-display-close]").forEach((button) => {
       button.onclick = () => button.closest("dialog")?.close();
@@ -480,7 +481,7 @@ export function installClientAccess(ctx) {
         const addressInput = form.elements.namedItem("address");
         if (address !== addressInput.defaultValue.trim()) payload.address = address;
         const modeInput = form.elements.namedItem("address_mode");
-        if (modeInput && modeInput.value !== [...modeInput.options].find((option) => option.defaultSelected)?.value)
+        if (modeInput && modeInput.value !== (modeInput.dataset.savedMode || "auto"))
           payload.address_mode = modeInput.value;
         form.dataset.busy = "1";
         if (button) button.disabled = true;
@@ -511,7 +512,11 @@ export function installClientAccess(ctx) {
         try {
           await api(
             `/agents/${encodeURIComponent(button.dataset.clearClientAddress)}/client-address`,
-            { method: "PUT", body: JSON.stringify({ address: "" }) },
+            { method: "PUT", body: JSON.stringify({ address: "", profile: {
+              engine: button.dataset.clearClientProfileEngine,
+              tag: button.dataset.clearClientProfileTag,
+              port: Number(button.dataset.clearClientProfilePort),
+            } }) },
           );
           const input = button.form?.elements.namedItem("address");
           if (input) {

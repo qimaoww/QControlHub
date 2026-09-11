@@ -91,6 +91,8 @@ const testAPI = {
   renameFailure: false,
   renameGate: null,
   profileNames: {},
+  profileModes: {},
+  profileAddresses: {},
   profileSaves: [],
   profileSaveFailure: false,
   profileSaveGate: null,
@@ -293,7 +295,10 @@ window.fetch = async (input, options = {}) => {
     const profiles = (address) => [20001,20002].map((port,index) => {
       const tag = `ss-rust-${index+1}`;
       const name = testAPI.profileNames[port] || tag;
-      return {tag,port,client_name:testAPI.profileNames[port] || "",protocol:"Shadowsocks",profile:{format:"Shadowsocks SIP002 URI",uri:`ss://example@${address}:${port}#${encodeURIComponent(name)}`,fields:[]}};
+      const mode = testAPI.profileModes[port] || "auto";
+      const override = testAPI.profileAddresses[port] || "";
+      const effective = override || (mode === "ipv6" ? "[2001:db8::1]" : address);
+      return {tag,port,client_name:testAPI.profileNames[port] || "",protocol:"Shadowsocks",address:effective,address_mode:mode,address_overridden:Boolean(override),profile:{format:"Shadowsocks SIP002 URI",uri:`ss://example@${effective}:${port}#${encodeURIComponent(name)}`,fields:[]}};
     });
     return json([{agent_id:"alpha",agent_name:"ALPHA",engine:"ss-rust",address:"edge.example.com",source:"test",address_mode:"auto",profiles:profiles("edge.example.com"),address_options:[
       {address:"edge.example.com",family:"ipv4",source:"test",profiles:profiles("edge.example.com")},
@@ -305,7 +310,11 @@ window.fetch = async (input, options = {}) => {
     testAPI.profileSaves.push(payload);
     if (testAPI.profileSaveFailure) return json({error:"temporary profile save failure"},503);
     if (testAPI.profileSaveGate) await testAPI.profileSaveGate;
-    if (payload.profile) testAPI.profileNames[payload.profile.port] = payload.name;
+    if (payload.profile) {
+      if (payload.name !== undefined) testAPI.profileNames[payload.profile.port] = payload.name;
+      if (payload.address_mode !== undefined) testAPI.profileModes[payload.profile.port] = payload.address_mode;
+      if (payload.address !== undefined) testAPI.profileAddresses[payload.profile.port] = payload.address;
+    }
     return json(payload);
   }
   if (method === "PUT" && /^\/agents\/[^/]+\/name$/.test(path)) {
@@ -1256,6 +1265,33 @@ async function testPortNamesAndRuntimeRefresh() {
   form=open(20001);form.elements.name.value="";form.requestSubmit();
   await waitFor(() => row(20001).querySelector("header b").textContent === "ss-rust-1","清空未恢复入站标签");
   assert.equal(row(20002).querySelector("header b").textContent,"Tokyo 第二端口","清空影响其他端口");
+
+  // 连接地址与地址协议栈都按内核、按监听端口独立保存
+  const share = (port) => row(port).querySelector(".client-share-control input").value;
+  form = open(20002);
+  assert.equal(form.elements.namedItem("address_mode").value, "auto", "第二端口协议栈默认非自动");
+  form.elements.namedItem("address_mode").value = "ipv6";
+  form.requestSubmit();
+  await waitFor(() => testAPI.profileModes[20002] === "ipv6", "协议栈未按端口保存");
+  await waitFor(() => share(20002).includes("2001:db8::1"), "第二端口分享链接未切换到 IPv6");
+  assert.equal(testAPI.profileModes[20001] || "auto", "auto", "协议栈修改影响了第一端口");
+  assert.equal(share(20001).includes("edge.example.com"), true, "协议栈修改改写了第一端口分享链接");
+  form = open(20001);
+  assert.equal(form.elements.namedItem("address_mode").value, "auto", "第一端口继承了第二端口的协议栈");
+  form = open(20002);
+  assert.equal(form.elements.namedItem("address_mode").value, "ipv6", "重渲染丢失协议栈");
+  assert.equal(form.elements.namedItem("address").value, "[2001:db8::1]", "协议栈切换未更新自动地址");
+  form.elements.namedItem("address").value = "two.example.com";
+  form.requestSubmit();
+  await waitFor(() => testAPI.profileAddresses[20002] === "two.example.com", "连接地址未按端口保存");
+  assert.equal(testAPI.profileAddresses[20001] || "", "", "连接地址修改影响了第一端口");
+  await waitFor(() => share(20002).includes("two.example.com"), "第二端口分享链接未切换到手动地址");
+  form = open(20002);
+  assert.equal(form.querySelector("[data-clear-client-address]") === null, false, "手动地址缺少恢复自动识别入口");
+  form.querySelector("[data-clear-client-address]").click();
+  await waitFor(() => (testAPI.profileAddresses[20002] || "") === "", "恢复自动识别未清除端口地址");
+  await waitFor(() => share(20002).includes("2001:db8::1"), "恢复自动识别未回到协议栈地址");
+  assert.equal("address" in testAPI.profileSaves.at(-1), true, "恢复自动识别未按端口提交地址");
 
   location.hash="#settings-node-alpha";
   await waitFor(() => document.querySelector(".node-operations-workspace"),"节点详情未渲染");

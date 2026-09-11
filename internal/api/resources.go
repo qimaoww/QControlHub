@@ -26,6 +26,11 @@ type clientAccessProfile struct {
 	Profile        serverconfig.ClientProfile `json:"profile"`
 	ClientName     string                     `json:"client_name,omitempty"`
 	NameOverridden bool                       `json:"name_overridden,omitempty"`
+	// Address, AddressMode, and AddressOverridden describe this listening
+	// endpoint only; they never inherit another port's override.
+	Address           string `json:"address,omitempty"`
+	AddressMode       string `json:"address_mode,omitempty"`
+	AddressOverridden bool   `json:"address_overridden,omitempty"`
 }
 
 type clientAccessAddressOption struct {
@@ -759,17 +764,17 @@ func (s *Server) clientAccessEntries(ctx context.Context) ([]clientAccessEntry, 
 		}
 		serverName := firstLabel(agent, "tls_server_name", "server_name")
 		clientName := firstLabel(agent, "client_name")
-		clientAddressMode := firstLabel(agent, "client_address_mode")
-		if clientAddressMode != core.SubStoreAddressModeIPv4 && clientAddressMode != core.SubStoreAddressModeIPv6 {
-			clientAddressMode = core.SubStoreAddressModeAuto
-		}
+		clientAddressMode := normalizeClientAddressMode(firstLabel(agent, "client_address_mode"))
 		candidates := clientAddressCandidates(agent)
 		addressOptions := buildClientAccessAddressOptions(deployment.Engine, inputs, candidates, serverName, clientName, agent.Labels)
+		// Every displayed profile resolves its own connection address and address
+		// family, so one listening endpoint never inherits another's settings.
+		profiles := buildClientAccessProfiles(deployment.Engine, inputs, candidates, serverName, clientName, clientAddressMode, agent.Labels)
 		if len(addressOptions) > 0 {
 			primary := addressOptions[0]
 			entries = append(entries, clientAccessEntry{
 				AgentID: agent.ID, AgentName: agent.Name, AgentStatus: agent.Status, Engine: deployment.Engine,
-				Address: primary.Address, Source: primary.Source, Profiles: primary.Profiles, AddressOptions: addressOptions,
+				Address: primary.Address, Source: primary.Source, Profiles: profiles, AddressOptions: addressOptions,
 				ClientName: clientName, AddressMode: clientAddressMode,
 			})
 		}
@@ -810,6 +815,67 @@ type clientAddressCandidate struct {
 	address string
 	source  string
 	family  string
+}
+
+func normalizeClientAddressMode(value string) string {
+	if value == core.SubStoreAddressModeIPv4 || value == core.SubStoreAddressModeIPv6 {
+		return value
+	}
+	return core.SubStoreAddressModeAuto
+}
+
+// clientProfileAddress resolves the automatic address used by one listening
+// endpoint. A requested family without a matching candidate falls back to the
+// first available candidate so a profile never renders an empty address.
+func clientProfileAddress(candidates []clientAddressCandidate, mode string) clientAddressCandidate {
+	if mode == core.SubStoreAddressModeIPv4 || mode == core.SubStoreAddressModeIPv6 {
+		for _, candidate := range candidates {
+			if candidate.family == mode {
+				return candidate
+			}
+		}
+	}
+	if len(candidates) > 0 {
+		return candidates[0]
+	}
+	return clientAddressCandidate{}
+}
+
+// buildClientAccessProfiles renders the effective profile of every listening
+// endpoint: a profile-scoped address, name, or address family overrides the
+// node-wide default, and an absent profile address follows the node candidates.
+func buildClientAccessProfiles(engine core.Engine, inputs []serverconfig.Input, candidates []clientAddressCandidate, serverName, clientName, clientAddressMode string, labels map[string]string) []clientAccessProfile {
+	profiles := make([]clientAccessProfile, 0, len(inputs))
+	for _, input := range inputs {
+		mode := clientAddressMode
+		if value, exists := labels[core.ClientProfileAddressModeLabel(engine, input.Listen, input.Port)]; exists {
+			mode = normalizeClientAddressMode(value)
+		}
+		address, overridden := strings.TrimSpace(labels[core.ClientProfileAddressLabel(engine, input.Listen, input.Port)]), false
+		if address != "" {
+			overridden = true
+		} else {
+			address = clientProfileAddress(candidates, mode).address
+		}
+		name, nameOverridden := clientName, false
+		if value, exists := labels[core.ClientProfileNameLabel(engine, input.Listen, input.Port)]; exists {
+			name, nameOverridden = value, true
+		}
+		profile, err := serverconfig.BuildClientProfileNamed(input, address, serverName, name)
+		if err != nil {
+			continue
+		}
+		protocol, found := serverconfig.FindProtocol(engine, input.Protocol)
+		if !found {
+			continue
+		}
+		profiles = append(profiles, clientAccessProfile{
+			Tag: input.Tag, Protocol: protocol.Name, Port: input.Port, Profile: profile,
+			ClientName: name, NameOverridden: nameOverridden,
+			Address: address, AddressMode: mode, AddressOverridden: overridden,
+		})
+	}
+	return profiles
 }
 
 func buildClientAccessAddressOptions(engine core.Engine, inputs []serverconfig.Input, candidates []clientAddressCandidate, serverName, clientName string, labelSets ...map[string]string) []clientAccessAddressOption {

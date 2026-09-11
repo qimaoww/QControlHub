@@ -3069,7 +3069,11 @@ const accessEntries = [
     profiles: [
       {
         tag: "alpha-in",
+        port: 20001,
         protocol: "test",
+        address: "198.51.100.10",
+        address_mode: "ipv6",
+        address_overridden: true,
         profile: { format: "URI", uri: "test-alpha", fields: [] },
       },
     ],
@@ -3253,6 +3257,11 @@ try {
   assert.equal(accessMarkup.includes("Alpha node"), true);
   assert.equal(accessMarkup.includes("Beta node"), true);
   assert.equal(accessMarkup.includes("客户端地址协议栈"), true);
+  assert.equal(
+    accessMarkup.includes('data-saved-mode="ipv6"'),
+    true,
+    "client profile address family is not scoped to its own port",
+  );
   assert.equal(
     accessAPICalls,
     2,
