@@ -36,8 +36,8 @@ test("accepts breaking-change markers", () => {
 
 test("rejects a free-form title", () => {
   assert.match(
-    validatePullRequest({ title: "Improve CI", body: validBody }).join("\n"),
-    /Conventional Commit/u,
+    validatePullRequest({ title: "improve ci", body: validBody }).join("\n"),
+    /concise English sentence/u,
   );
 });
 
@@ -49,15 +49,14 @@ test("rejects missing and template-only sections", () => {
 - [ ] \`make check\`
 `;
   const errors = validatePullRequest({ title: "ci: improve checks", body });
-  assert.equal(errors.length, 3);
-  assert.match(errors.join("\n"), /Summary/u);
-  assert.match(errors.join("\n"), /Validation/u);
+  assert.equal(errors.length, 2);
+  assert.match(errors.join("\n"), /description must contain meaningful content/u);
   assert.match(errors.join("\n"), /Risk and rollback/u);
 });
 
 test("reports an empty GitHub body instead of throwing", () => {
   const errors = validatePullRequest({ title: "ci: improve checks", body: null });
-  assert.equal(errors.length, 3);
+  assert.equal(errors.length, 4);
 });
 
 test("rejects non-English title and description characters", () => {
@@ -77,4 +76,27 @@ test("rejects titles longer than 100 characters", () => {
     body: validBody,
   });
   assert.match(errors.join("\n"), /100/u);
+});
+
+test("accepts sentence title and intro before template sections", () => {
+  const body = `Removed duplicate line about optional Komari integration in README.
+
+## Summary
+
+<!-- Explain why this change is needed and what it changes. -->
+
+## Validation
+
+<!-- List the checks you actually ran. Explain why if tests were not run. -->
+
+- [ ] \`make check\`
+
+## Risk and rollback
+
+<!-- Describe possible impact and rollback steps. Use "None" when applicable. -->
+`;
+  assert.deepEqual(
+    validatePullRequest({ title: "Fix duplicate line in README regarding Komari integration", body }),
+    [],
+  );
 });

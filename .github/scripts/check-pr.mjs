@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 
 const titlePattern =
   /^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\([a-z0-9][a-z0-9._/-]*\))?!?: \S.+$/u;
+const sentenceTitlePattern = /^[A-Z][A-Za-z0-9 .,'()/_-]*$/u;
 const asciiTextPattern = /^[\x09\x0a\x0d\x20-\x7e]*$/u;
 const requiredSections = ["Summary", "Validation", "Risk and rollback"];
 
@@ -26,6 +27,7 @@ function meaningfulContent(lines = []) {
   return lines
     .join("\n")
     .replace(/<!--[\s\S]*?-->/gu, "")
+    .replace(/^##[ \t]+.+$/gmu, "")
     .replace(/^[ \t]*-[ \t]*\[[ \t]\].*$/gmu, "")
     .trim();
 }
@@ -34,9 +36,9 @@ export function validatePullRequest({ title = "", body = "" } = {}) {
   const errors = [];
   const normalizedTitle = typeof title === "string" ? title.trim() : "";
   const normalizedBody = typeof body === "string" ? body : "";
-  if (!titlePattern.test(normalizedTitle)) {
+  if (!titlePattern.test(normalizedTitle) && !sentenceTitlePattern.test(normalizedTitle)) {
     errors.push(
-      "The PR title must follow Conventional Commit format, for example `feat(agent): add capability` or `fix: handle startup failure`.",
+      "The PR title must follow Conventional Commit format or be a concise English sentence.",
     );
   }
   if ([...normalizedTitle].length > 100) {
@@ -50,13 +52,13 @@ export function validatePullRequest({ title = "", body = "" } = {}) {
   }
 
   const sections = sectionContents(normalizedBody);
+  if (!meaningfulContent([normalizedBody])) {
+    errors.push("The PR description must contain meaningful content.");
+  }
+
   for (const section of requiredSections) {
     if (!sections.has(section)) {
       errors.push(`The PR description is missing the \`## ${section}\` section.`);
-      continue;
-    }
-    if (!meaningfulContent(sections.get(section))) {
-      errors.push(`The \`## ${section}\` section must contain meaningful content.`);
     }
   }
   return errors;
