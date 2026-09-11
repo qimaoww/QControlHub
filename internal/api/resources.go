@@ -763,19 +763,18 @@ func (s *Server) clientAccessEntries(ctx context.Context) ([]clientAccessEntry, 
 			return nil, err
 		}
 		serverName := firstLabel(agent, "tls_server_name", "server_name")
-		clientName := firstLabel(agent, "client_name")
 		clientAddressMode := normalizeClientAddressMode(firstLabel(agent, "client_address_mode"))
 		candidates := clientAddressCandidates(agent)
-		addressOptions := buildClientAccessAddressOptions(deployment.Engine, inputs, candidates, serverName, clientName, agent.Labels)
+		addressOptions := buildClientAccessAddressOptions(deployment.Engine, inputs, candidates, serverName, agent.Labels)
 		// Every displayed profile resolves its own connection address and address
 		// family, so one listening endpoint never inherits another's settings.
-		profiles := buildClientAccessProfiles(deployment.Engine, inputs, candidates, serverName, clientName, clientAddressMode, agent.Labels)
+		profiles := buildClientAccessProfiles(deployment.Engine, inputs, candidates, serverName, agent.Labels)
 		if len(addressOptions) > 0 {
 			primary := addressOptions[0]
 			entries = append(entries, clientAccessEntry{
 				AgentID: agent.ID, AgentName: agent.Name, AgentStatus: agent.Status, Engine: deployment.Engine,
 				Address: primary.Address, Source: primary.Source, Profiles: profiles, AddressOptions: addressOptions,
-				ClientName: clientName, AddressMode: clientAddressMode,
+				AddressMode: clientAddressMode,
 			})
 		}
 		if len(addressOptions) == 0 && len(candidates) == 0 {
@@ -842,12 +841,14 @@ func clientProfileAddress(candidates []clientAddressCandidate, mode string) clie
 }
 
 // buildClientAccessProfiles renders the effective profile of every listening
-// endpoint: a profile-scoped address, name, or address family overrides the
-// node-wide default, and an absent profile address follows the node candidates.
-func buildClientAccessProfiles(engine core.Engine, inputs []serverconfig.Input, candidates []clientAddressCandidate, serverName, clientName, clientAddressMode string, labels map[string]string) []clientAccessProfile {
+// endpoint. Only profile-scoped labels provide a display override: node-wide
+// client display values are deliberately not inherited, so an upgraded node
+// never has to clear the same legacy value on every port. The node-wide
+// client address still participates as an automatic candidate.
+func buildClientAccessProfiles(engine core.Engine, inputs []serverconfig.Input, candidates []clientAddressCandidate, serverName string, labels map[string]string) []clientAccessProfile {
 	profiles := make([]clientAccessProfile, 0, len(inputs))
 	for _, input := range inputs {
-		mode := clientAddressMode
+		mode := core.SubStoreAddressModeAuto
 		if value, exists := labels[core.ClientProfileAddressModeLabel(engine, input.Listen, input.Port)]; exists {
 			mode = normalizeClientAddressMode(value)
 		}
@@ -857,7 +858,7 @@ func buildClientAccessProfiles(engine core.Engine, inputs []serverconfig.Input, 
 		} else {
 			address = clientProfileAddress(candidates, mode).address
 		}
-		name, nameOverridden := clientName, false
+		name, nameOverridden := "", false
 		if value, exists := labels[core.ClientProfileNameLabel(engine, input.Listen, input.Port)]; exists {
 			name, nameOverridden = value, true
 		}
@@ -878,12 +879,12 @@ func buildClientAccessProfiles(engine core.Engine, inputs []serverconfig.Input, 
 	return profiles
 }
 
-func buildClientAccessAddressOptions(engine core.Engine, inputs []serverconfig.Input, candidates []clientAddressCandidate, serverName, clientName string, labelSets ...map[string]string) []clientAccessAddressOption {
+func buildClientAccessAddressOptions(engine core.Engine, inputs []serverconfig.Input, candidates []clientAddressCandidate, serverName string, labelSets ...map[string]string) []clientAccessAddressOption {
 	options := make([]clientAccessAddressOption, 0, len(candidates))
 	for _, candidate := range candidates {
 		profiles := make([]clientAccessProfile, 0, len(inputs))
 		for _, input := range inputs {
-			name, overridden := clientName, false
+			name, overridden := "", false
 			if len(labelSets) > 0 {
 				if value, exists := labelSets[0][core.ClientProfileNameLabel(engine, input.Listen, input.Port)]; exists {
 					name, overridden = value, true

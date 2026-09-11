@@ -176,9 +176,9 @@ func TestClientProfileNamesAreScopedToDeployedPorts(t *testing.T) {
 		}
 	}
 	setName("one", 20001, "香港 & ATT <edge>")
-	checkNames("香港 & ATT <edge>", legacyName, legacyName)
+	checkNames("香港 & ATT <edge>", "two", "one")
 	setName("two", 20002, "另一个端口")
-	checkNames("香港 & ATT <edge>", "另一个端口", legacyName)
+	checkNames("香港 & ATT <edge>", "另一个端口", "one")
 	stored, err := db.GetAgent(ctx, agent.ID)
 	if err != nil || stored.Labels["client_address"] != address || stored.Labels["client_name"] != legacyName {
 		t.Fatalf("node defaults changed: %+v %v", stored, err)
@@ -190,9 +190,9 @@ func TestClientProfileNamesAreScopedToDeployedPorts(t *testing.T) {
 	if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Version: "refresh"}); err != nil {
 		t.Fatal(err)
 	}
-	checkNames("香港 & ATT <edge>", "另一个端口", legacyName)
+	checkNames("香港 & ATT <edge>", "另一个端口", "one")
 	setName("one", 20001, "")
-	checkNames("one", "另一个端口", legacyName)
+	checkNames("one", "另一个端口", "one")
 	setName("one", 20001, "香港 & ATT <edge>")
 	for _, body := range []any{
 		map[string]any{"profile": selector("missing", 20001), "name": "bad"},
@@ -233,7 +233,7 @@ func TestClientProfileNamesAreScopedToDeployedPorts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	checkNames("香港 & ATT <edge>", "另一个端口", legacyName)
+	checkNames("香港 & ATT <edge>", "另一个端口", "one")
 	deploy(config)
 	entries, err := s.clientAccessEntries(ctx)
 	if err != nil {
@@ -346,15 +346,15 @@ func TestClientProfileDisplayParametersAreScopedToDeployedPorts(t *testing.T) {
 		}
 	}
 	check(map[string]displayProfile{
-		"one": {address: address, mode: core.SubStoreAddressModeIPv4, host: address},
-		"two": {address: address, mode: core.SubStoreAddressModeIPv4, host: address},
+		"one": {address: address, mode: core.SubStoreAddressModeAuto, host: address},
+		"two": {address: address, mode: core.SubStoreAddressModeAuto, host: address},
 	})
 	if w := request(map[string]any{"profile": selector("one", 20001), "address": "one.example.com", "address_mode": core.SubStoreAddressModeIPv6}); w.Code != http.StatusOK {
 		t.Fatalf("save profile one: %d %s", w.Code, w.Body.String())
 	}
 	check(map[string]displayProfile{
 		"one": {address: "one.example.com", mode: core.SubStoreAddressModeIPv6, overridden: true, host: "one.example.com"},
-		"two": {address: address, mode: core.SubStoreAddressModeIPv4, host: address},
+		"two": {address: address, mode: core.SubStoreAddressModeAuto, host: address},
 	})
 	if w := request(map[string]any{"profile": selector("two", 20002), "address_mode": core.SubStoreAddressModeAuto}); w.Code != http.StatusOK {
 		t.Fatalf("save profile two mode: %d %s", w.Code, w.Body.String())

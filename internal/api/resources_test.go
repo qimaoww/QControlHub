@@ -104,15 +104,21 @@ func TestClientAddressCandidatesIncludeProbedDualStackAddresses(t *testing.T) {
 
 func TestBuildClientAccessAddressOptionsKeepsBothFamilies(t *testing.T) {
 	input := serverconfig.Input{Tag: "vless-in", Protocol: serverconfig.ProtocolVLESS, Port: 443, Credential: "123e4567-e89b-42d3-a456-426614174000", TLSEnabled: true, Transport: "tcp"}
-	options := buildClientAccessAddressOptions(core.EngineXray, []serverconfig.Input{input}, []clientAddressCandidate{
+	candidates := []clientAddressCandidate{
 		{address: "198.51.100.10", source: "IPv4", family: core.SubStoreAddressModeIPv4},
 		{address: "2001:db8::10", source: "IPv6", family: core.SubStoreAddressModeIPv6},
-	}, "edge.example.com", "Tokyo")
+	}
+	label := core.ClientProfileNameLabel(core.EngineXray, input.Listen, input.Port)
+	options := buildClientAccessAddressOptions(core.EngineXray, []serverconfig.Input{input}, candidates, "edge.example.com", map[string]string{label: "Tokyo"})
 	if len(options) != 2 || len(options[0].Profiles) != 1 || len(options[1].Profiles) != 1 {
 		t.Fatalf("dual-stack options = %+v", options)
 	}
 	if !strings.Contains(options[0].Profiles[0].Profile.URI, "Tokyo") || !strings.Contains(options[1].Profiles[0].Profile.URI, "Tokyo") {
 		t.Fatalf("custom client name missing from profiles = %+v", options)
+	}
+	unlabelled := buildClientAccessAddressOptions(core.EngineXray, []serverconfig.Input{input}, candidates, "edge.example.com", map[string]string{})
+	if strings.Contains(unlabelled[0].Profiles[0].Profile.URI, "Tokyo") || !strings.Contains(unlabelled[0].Profiles[0].Profile.URI, "vless-in") {
+		t.Fatalf("node-wide client name leaked into an unlabelled port = %+v", unlabelled)
 	}
 }
 

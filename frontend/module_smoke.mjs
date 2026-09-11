@@ -3268,6 +3268,11 @@ try {
     "a manual address does not lock the client profile family selector",
   );
   assert.equal(
+    accessMarkup.includes('placeholder="留空使用自动识别地址"'),
+    true,
+    "client profile address field no longer defaults to the automatic address",
+  );
+  assert.equal(
     accessAPICalls,
     2,
     "switching the local node filter does not refetch client access data",
