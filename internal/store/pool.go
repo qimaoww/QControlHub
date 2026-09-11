@@ -15,6 +15,15 @@ func databasePoolConfig(databaseURL string) (*pgxpool.Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Cache prepared statements per connection.
+	//
+	// pgx defaults to the unnamed statement, so PostgreSQL parses and plans
+	// again on every execution. On a live instance the traffic accounting
+	// statement spent 8.4 ms planning against 1.7 ms executing, and it runs
+	// about 26 times per second, which made planning rather than execution the
+	// database's largest CPU cost. Every statement here has a fixed shape with
+	// typed arguments, so a server-side plan is reusable as-is.
+	config.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeCacheStatement
 	// pgxpool removes its settings from RuntimeParams. Parse with pgx as well
 	// to distinguish an explicit value (including zero) from a driver default.
 	raw, err := pgx.ParseConfig(databaseURL)

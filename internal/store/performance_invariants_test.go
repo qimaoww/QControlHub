@@ -228,11 +228,13 @@ type planSnapshot struct {
 }
 
 type planNode struct {
-	NodeType     string     `json:"Node Type"`
-	RelationName string     `json:"Relation Name"`
-	IndexName    string     `json:"Index Name"`
-	HeapFetches  *float64   `json:"Heap Fetches"`
-	Plans        []planNode `json:"Plans"`
+	NodeType         string     `json:"Node Type"`
+	RelationName     string     `json:"Relation Name"`
+	IndexName        string     `json:"Index Name"`
+	HeapFetches      *float64   `json:"Heap Fetches"`
+	SharedHitBlocks  float64    `json:"Shared Hit Blocks"`
+	SharedReadBlocks float64    `json:"Shared Read Blocks"`
+	Plans            []planNode `json:"Plans"`
 }
 
 // explainJSONOnDedicatedConnection plans a statement on a connection of its own
@@ -331,6 +333,32 @@ func planHeapFetches(plan planSnapshot) (float64, bool) {
 	return total, found
 }
 
+// planSharedBlocks totals the buffer traffic of a plan. It is the signal that
+// separates a bounded sweep from one that probes per candidate row, and unlike a
+// wall-clock measurement it does not depend on how busy the runner is.
+func planSharedBlocks(plan planSnapshot) int64 {
+	total := 0.0
+	walkPlan(plan.Plan, func(node planNode) bool {
+		total += node.SharedHitBlocks + node.SharedReadBlocks
+		return false
+	})
+	return int64(total)
+}
+
+// planNodeTypes reports whether the plan contains a nested loop.
+func planNodeTypes(plan planSnapshot) ([]string, bool) {
+	types := make([]string, 0, 8)
+	nested := false
+	walkPlan(plan.Plan, func(node planNode) bool {
+		types = append(types, node.NodeType)
+		if strings.Contains(node.NodeType, "Nested Loop") {
+			nested = true
+		}
+		return false
+	})
+	return types, nested
+}
+
 func planSummary(plan planSnapshot) string {
 	nodes := make([]string, 0, 8)
 	walkPlan(plan.Plan, func(node planNode) bool {
@@ -344,4 +372,63 @@ func planSummary(plan planSnapshot) string {
 		return false
 	})
 	return strings.Join(nodes, " -> ")
+}
+
+// TestCoreLogBatchPruneAvoidsNestedLoopProbe covers the hourly batch-marker
+// sweep.
+//
+// The planner turns the anti-join into a hash right anti join: one indexed scan
+// of the expired markers against one scan of the retained rows. A correlated
+// shape that probes core_logs once per candidate marker would still return
+// correct rows, so the plan is what has to be asserted. That form is exactly
+// what a nested loop in this plan would mean.
+//
+// The block count is deliberately not pinned: the retained side is a full scan
+// of the log partitions, so its cost follows the retention window and the ingest
+// rate rather than the statement. The first pass after a PostgreSQL restart also
+// reads those pages from disk, which on a live instance made a single pass look
+// like 7.1 seconds while a warm pass of the same statement takes 89 ms.
+func TestCoreLogBatchPruneAvoidsNestedLoopProbe(t *testing.T) {
+	s := openPerformanceStore(t)
+	ctx := context.Background()
+	agentID, _ := seedPerformanceAgent(t, s, 0)
+
+	const batches = 200
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	for index := range batches {
+		batch := core.CoreLogBatch{
+			ID: fmt.Sprintf("log_%016x", index),
+			Entries: []core.CoreLogEntry{{
+				Engine: core.EngineMihomo, Level: "info",
+				Message:  fmt.Sprintf("prune fixture %d", index),
+				LoggedAt: now,
+			}},
+		}
+		if err := s.StoreCoreLogs(ctx, agentID, batch); err != nil {
+			t.Fatalf("seed batch %d: %v", index, err)
+		}
+	}
+	if _, err := s.pool.Exec(ctx, `VACUUM (ANALYZE) core_logs`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.pool.Exec(ctx, `VACUUM (ANALYZE) core_log_batches`); err != nil {
+		t.Fatal(err)
+	}
+
+	// Every row is still retained, so the sweep has to retire nothing while
+	// still evaluating every candidate.
+	retired, err := s.PruneCoreLogBatches(ctx, now.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("prune: %v", err)
+	}
+	if retired != 0 {
+		t.Fatalf("pruned %d batches while every row is still retained", retired)
+	}
+
+	plan := explainJSON(t, s, coreLogBatchPruneSQL, now.Add(time.Hour))
+	if nodeTypes, loops := planNodeTypes(plan); loops {
+		t.Fatalf("batch prune plan contains a nested loop, so it may be probing per candidate marker: %s", planSummary(plan))
+	} else if len(nodeTypes) == 0 {
+		t.Fatalf("batch prune plan is empty: %s", planSummary(plan))
+	}
 }

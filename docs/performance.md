@@ -269,6 +269,29 @@ v50 因此做了三件事：
 `agents_active_seen_idx`，但**拆分期间写入 `agent_live_state` 的快照不会被搬回**，回滚后需要等节点
 重新推送一次指标才会恢复。
 
+## 数据库 CPU 的真实构成（pg_stat_statements）
+
+用 `pg_stat_statements` 量出的第一份真实账目（4.3 分钟窗口，数据库总耗时 22.2 秒 = 5.16% 单核）：
+
+| 语句 | 调用 | 总耗时 | 占数据库 CPU |
+| --- | ---: | ---: | ---: |
+| 流量累计 `applyTrafficUsageSQL` | 3977 | 6538 ms | 29% |
+| 日志批次清理 DELETE | 1 | 7109 ms | 32% |
+| 日志批次 INSERT | 487 | 1169 ms | 5% |
+| 日志窗口查询 | 34 | 1163 ms | 5% |
+| Agent 心跳 + 指标写入 | 8300 | 1963 ms | 9% |
+
+两个结论纠正了此前的推断：
+
+**一、日志清理的 7.1 秒不是缺陷，是冷缓存。** 它在生产上被单独 A/B 过：热缓存时同一条语句只要
+**89 ms、只读 3 个块**。7.1 秒 / 7551 块出现在 PostgreSQL 刚重启之后的第一次扫描。因此清理语句保持
+规划器自己选择的形状（哈希反连接，没有逐候选探测），只由测试禁止嵌套循环探测回归。
+
+**二、真正的 CPU 大头是查询规划，不是执行。** 流量累计语句的 `Planning Time: 8.4 ms` 而
+`Execution Time: 1.7 ms`——规划是执行的 5 倍，而它每秒运行约 26 次。原因是 pgx 默认使用
+unnamed prepared statement，PostgreSQL 每次执行都要重新解析并规划。连接池因此改为
+`pgx.QueryExecModeCacheStatement`，按连接缓存服务端计划。本地对比同一条语句为 1.708 → 1.338 ms/exec。
+
 ## 连接池配置
 
 `QCH_DATABASE_URL` 中 pgx 的连接池参数现在会被保留，不再被控制面固定值覆盖。支持 URI query 和 keyword DSN。默认值保持：
