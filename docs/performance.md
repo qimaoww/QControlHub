@@ -287,10 +287,14 @@ v50 因此做了三件事：
 **89 ms、只读 3 个块**。7.1 秒 / 7551 块出现在 PostgreSQL 刚重启之后的第一次扫描。因此清理语句保持
 规划器自己选择的形状（哈希反连接，没有逐候选探测），只由测试禁止嵌套循环探测回归。
 
-**二、真正的 CPU 大头是查询规划，不是执行。** 流量累计语句的 `Planning Time: 8.4 ms` 而
-`Execution Time: 1.7 ms`——规划是执行的 5 倍，而它每秒运行约 26 次。原因是 pgx 默认使用
-unnamed prepared statement，PostgreSQL 每次执行都要重新解析并规划。连接池因此改为
-`pgx.QueryExecModeCacheStatement`，按连接缓存服务端计划。本地对比同一条语句为 1.708 → 1.338 ms/exec。
+**二、查询规划也不是每次调用的成本。** 单次 `EXPLAIN` 流量累计语句给出 `Planning Time: 8.4 ms`
+对 `Execution Time: 1.7 ms`，一度被当作每次上报的成本。生产计数器否定了这一点：窗口内每条语句的
+`mean_plan_time` 与 `total_plan_time` 均为 0，规划本来就可忽略，8.4 ms 只是没有通用计划可复用时的
+一次性冷规划。连接池仍然改为 `pgx.QueryExecModeCacheStatement`（缓存本来就便宜的计划不花什么代价，
+还能省掉重复解析），但不应指望它降低 CPU。
+
+**三、这台数据库不是 CPU 瓶颈。** 3567 秒窗口内所有语句累计执行 110.7 秒，即 **3.1% 单核**；
+宿主全部进程合计 9.03% 单核。真正的约束是内存：1.9 GiB 且已使用 swap，而 `shared_buffers` 只有 128 MB。
 
 ## 连接池配置
 
