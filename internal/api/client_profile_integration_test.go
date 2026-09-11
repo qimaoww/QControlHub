@@ -176,9 +176,9 @@ func TestClientProfileNamesAreScopedToDeployedPorts(t *testing.T) {
 		}
 	}
 	setName("one", 20001, "香港 & ATT <edge>")
-	checkNames("香港 & ATT <edge>", legacyName, legacyName)
+	checkNames("香港 & ATT <edge>", "two", "one")
 	setName("two", 20002, "另一个端口")
-	checkNames("香港 & ATT <edge>", "另一个端口", legacyName)
+	checkNames("香港 & ATT <edge>", "另一个端口", "one")
 	stored, err := db.GetAgent(ctx, agent.ID)
 	if err != nil || stored.Labels["client_address"] != address || stored.Labels["client_name"] != legacyName {
 		t.Fatalf("node defaults changed: %+v %v", stored, err)
@@ -190,9 +190,9 @@ func TestClientProfileNamesAreScopedToDeployedPorts(t *testing.T) {
 	if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Version: "refresh"}); err != nil {
 		t.Fatal(err)
 	}
-	checkNames("香港 & ATT <edge>", "另一个端口", legacyName)
+	checkNames("香港 & ATT <edge>", "另一个端口", "one")
 	setName("one", 20001, "")
-	checkNames("one", "另一个端口", legacyName)
+	checkNames("one", "另一个端口", "one")
 	setName("one", 20001, "香港 & ATT <edge>")
 	for _, body := range []any{
 		map[string]any{"profile": selector("missing", 20001), "name": "bad"},
@@ -233,7 +233,7 @@ func TestClientProfileNamesAreScopedToDeployedPorts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	checkNames("香港 & ATT <edge>", "另一个端口", legacyName)
+	checkNames("香港 & ATT <edge>", "另一个端口", "one")
 	deploy(config)
 	entries, err := s.clientAccessEntries(ctx)
 	if err != nil {
@@ -250,4 +250,140 @@ func TestClientProfileNamesAreScopedToDeployedPorts(t *testing.T) {
 		t.Fatalf("stale selector accepted: %d", w.Code)
 	}
 	setName(plan.Tag, 20001, "部署后仍可改名")
+}
+
+func TestClientProfileDisplayParametersAreScopedToDeployedPorts(t *testing.T) {
+	database := os.Getenv("QCH_TEST_DATABASE_URL")
+	if database == "" {
+		t.Skip("requires PostgreSQL")
+	}
+	ctx := context.Background()
+	schema, err := testdb.IsolatePostgres(ctx, database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer schema.Close(ctx)
+	db, err := store.OpenWithConfigKey(ctx, schema.URL, true, strings.Repeat("p", 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	credential, err := db.CreateEnrollmentToken(ctx, core.EnrollmentTokenRequest{Name: "display"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := db.EnrollAgent(ctx, core.EnrollRequest{Name: "display", OS: "linux", Arch: "amd64", Capabilities: []core.Engine{core.EngineShadowsocksRust}, PublicKey: authn.EncodePublicKey(randomEnrollmentKey(t))}, credential.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Runtime: map[core.Engine]core.RuntimeState{core.EngineShadowsocksRust: {Installed: true}}}); err != nil {
+		t.Fatal(err)
+	}
+	address, mode := "edge.example.com", core.SubStoreAddressModeIPv4
+	if err := db.SetAgentClientPreferences(ctx, agent.ID, &address, nil, &mode); err != nil {
+		t.Fatal(err)
+	}
+	const content = `{"dns":"9.9.9.9","servers":[{"id":"one","server":"::","server_port":20001,"method":"aes-256-gcm","password":"password-one-long"},{"id":"two","server":"::","server_port":20002,"method":"aes-256-gcm","password":"password-two-long"}]}`
+	config, err := db.SaveAgentConfig(ctx, core.Config{AgentID: agent.ID, Name: "display", Engine: core.EngineShadowsocksRust, Content: content}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.CreateTask(ctx, core.TaskRequest{AgentID: agent.ID, Engine: config.Engine, Action: core.ActionDeploy, ConfigID: config.ID}); err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := db.ClaimTask(ctx, agent.ID)
+	if err != nil || claimed == nil {
+		t.Fatalf("claim: %+v %v", claimed, err)
+	}
+	if err := db.CompleteTask(ctx, agent.ID, claimed.ID, core.TaskResultRequest{LeaseID: claimed.LeaseID, Success: true}); err != nil {
+		t.Fatal(err)
+	}
+	admin := strings.Repeat("a", 48)
+	s := New(db, Config{AdminToken: admin})
+	handler := s.Handler()
+	request := func(body any) *httptest.ResponseRecorder {
+		t.Helper()
+		raw, _ := json.Marshal(body)
+		r := httptest.NewRequest(http.MethodPut, "/api/v1/agents/"+agent.ID+"/client-address", bytes.NewReader(raw))
+		r.Header.Set("Authorization", "Bearer "+admin)
+		r.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, r)
+		return w
+	}
+	selector := func(tag string, port int) map[string]any {
+		return map[string]any{"engine": "ss-rust", "tag": tag, "port": port}
+	}
+	type displayProfile struct {
+		address    string
+		mode       string
+		overridden bool
+		host       string
+	}
+	check := func(want map[string]displayProfile) {
+		t.Helper()
+		entries, err := s.clientAccessEntries(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := map[string]displayProfile{}
+		for _, entry := range entries {
+			if entry.Engine != core.EngineShadowsocksRust {
+				continue
+			}
+			for _, profile := range entry.Profiles {
+				parsed, err := url.Parse(profile.Profile.URI)
+				if err != nil {
+					t.Fatal(err)
+				}
+				got[profile.Tag] = displayProfile{address: profile.Address, mode: profile.AddressMode, overridden: profile.AddressOverridden, host: parsed.Hostname()}
+			}
+		}
+		for tag, expected := range want {
+			if got[tag] != expected {
+				t.Fatalf("profile %s = %+v, want %+v (all: %+v)", tag, got[tag], expected, got)
+			}
+		}
+	}
+	check(map[string]displayProfile{
+		"one": {address: address, mode: core.SubStoreAddressModeAuto, host: address},
+		"two": {address: address, mode: core.SubStoreAddressModeAuto, host: address},
+	})
+	if w := request(map[string]any{"profile": selector("one", 20001), "address": "one.example.com", "address_mode": core.SubStoreAddressModeIPv6}); w.Code != http.StatusOK {
+		t.Fatalf("save profile one: %d %s", w.Code, w.Body.String())
+	}
+	check(map[string]displayProfile{
+		"one": {address: "one.example.com", mode: core.SubStoreAddressModeIPv6, overridden: true, host: "one.example.com"},
+		"two": {address: address, mode: core.SubStoreAddressModeAuto, host: address},
+	})
+	if w := request(map[string]any{"profile": selector("two", 20002), "address_mode": core.SubStoreAddressModeAuto}); w.Code != http.StatusOK {
+		t.Fatalf("save profile two mode: %d %s", w.Code, w.Body.String())
+	}
+	check(map[string]displayProfile{
+		"one": {address: "one.example.com", mode: core.SubStoreAddressModeIPv6, overridden: true, host: "one.example.com"},
+		"two": {address: address, mode: core.SubStoreAddressModeAuto, host: address},
+	})
+	subProfiles, err := s.availableSubStoreProfiles(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, profile := range subProfiles {
+		if profile.Engine != core.EngineShadowsocksRust || profile.ProfileTag != "one" {
+			continue
+		}
+		if len(profile.Addresses) != 1 || profile.Addresses[0].Address != "one.example.com" || profile.Addresses[0].Family != "hostname" {
+			t.Fatalf("pinned subscription address = %+v", profile.Addresses)
+		}
+	}
+	if w := request(map[string]any{"profile": selector("one", 20001), "address": ""}); w.Code != http.StatusOK {
+		t.Fatalf("clear profile one address: %d %s", w.Code, w.Body.String())
+	}
+	check(map[string]displayProfile{
+		"one": {address: address, mode: core.SubStoreAddressModeIPv6, host: address},
+		"two": {address: address, mode: core.SubStoreAddressModeAuto, host: address},
+	})
+	stored, err := db.GetAgent(ctx, agent.ID)
+	if err != nil || stored.Labels["client_address"] != address || stored.Labels["client_address_mode"] != core.SubStoreAddressModeIPv4 {
+		t.Fatalf("node defaults changed: %+v %v", stored.Labels, err)
+	}
 }

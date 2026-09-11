@@ -136,7 +136,7 @@ Nginx 示例按真实客户端 IP 对 `/api/v1/auth/login` 和 `/agent/v1/enroll
 
 Agent 使用 `/agent/v1/connect` 的长期 WSS 会话。Nginx 示例已转发 `Upgrade`/`Connection`，并把上游读取空闲超时提高到一小时；删除这些设置会导致 Agent 无法升级或在无任务时周期性断线。
 
-每次 WSS 握手的总超时为 30 秒，覆盖 TCP/TLS 连接及等待 HTTP 升级响应；这个超时不会限制已经建立的会话寿命。瞬时网络错误会按 1、2、4、8、16、30 秒退避持续重试，不设次数上限。会话读写失败会立即取消该会话并释放堵塞的心跳/指标发送队列，再进入重连；不会因此取消正在执行的内核任务。日志中的 `WSS connection lost` 和 `reconnect_in` 可用于核对下一次重试时间；身份被永久拒绝的处理见下文，仍与网络故障区分。
+每次 WSS 握手的总超时为 30 秒，覆盖 TCP/TLS 连接及等待 HTTP 升级响应；这个超时不会限制已经建立的会话寿命。瞬时网络错误会按 1、2、4、8、16、30 秒退避持续重试，不设次数上限。会话读写失败会立即取消该会话并释放堵塞的心跳/指标发送队列，再进入重连；不会因此取消正在执行的内核任务。日志中的 `WSS connection lost`、`control plane still rejects the agent identity` 和 `reconnect_in` 可用于核对下一次重试时间；身份被拒绝时的退避与处理见下文。
 
 双栈节点若某一族只在 NAT 后提供私网接口地址，控制面无法从经 CDN/反向代理的 WSS 跳点安全推断该族出口。默认 managed probe 按族使用有序端点：IPv4 先访问 `https://api.ipify.org/`，失败后才访问同族 `https://4.ident.me`；IPv6 先访问 `https://api6.ipify.org`，失败后才访问同族 `https://6.ident.me`。ipify 的公开应用实现依赖受信前置设施提供的 `X-Forwarded-For`，ident.me handler 使用 `RemoteAddr`；两者都会看到节点公网 IP，ident.me 还可能为少量运行诊断和统计保留/采样来源 IP 信息，不能宣称零日志。其公开说明见 [ident.me API](https://api.ident.me/)、[ident.me 开源 HTTP handler](https://github.com/xmit-co/ident.me/blob/main/backend/http/main.go) 及 [ipify 开源应用](https://github.com/rdegges/ipify-api)。若运维不允许向公共 echo 服务发出节点出口请求，可将控制面 `QCH_AGENT_PUBLIC_IP_PROBE_ENABLED=false` 全局关闭；关闭后两族 endpoint 链均为空、不会访问四个服务，并按既有语义清除 stale 值。也可显式设置 `QCH_AGENT_PUBLIC_IP_PROBE_IPV4_ENDPOINT`、`QCH_AGENT_PUBLIC_IP_PROBE_IPV6_ENDPOINT` 覆盖对应族的完整默认链（不再暗留公共 fallback），及 `QCH_AGENT_PUBLIC_IP_PROBE_INTERVAL`（`1m`–`24h`，默认 `5m`）。未设置或设为空的 endpoint 使用对应默认链；`false`/`0` 关闭值在直接运行和 Compose 中语义一致。fallback 仅允许上述同族 ident.me URL；失败不会静默切换 Cloudflare trace、ip.sb、其他公共 API、控制面/WSS/CDN 或中继。
 
@@ -331,14 +331,14 @@ sudo systemctl status qagent --no-pager
 
 ### 撤销与重新注册
 
-从控制台删除 Agent 会立即使其签名身份失效。收到永久身份拒绝后，Agent 会正常退出而不是把它当作瞬时网络故障持续重连；配套的 `Restart=on-failure` 不会再次拉起它。若需重新注册：
+从控制台删除 Agent 会立即使其签名身份失效。Agent 收到 `401` 身份拒绝后不再退出进程：同样的拒绝也可能来自超出 ±90 秒签名窗口的系统时间偏差、控制面从备份恢复或身份存储暂时不可用，因此 Agent 会按指数退避持续重连（普通断线上限 30 秒，身份被拒时逐步退避到最长 10 分钟一次），原因消除后自动重新上线，无需重启服务。第一次被拒绝时 Agent 会清理本地流量与大陆访问规则，并在 journal 记录一条 `control plane rejected the agent identity` 错误，附带的 `state_path` 就是需要删除的状态文件；若进程仍保留 `QCH_ENROLLMENT_TOKEN`，会先尝试用该凭据重新注册，失败后最多每 5 分钟重试一次，避免触发控制面按地址的注册失败限流。确认身份已被撤销后重新注册：
 
 ```bash
 sudo systemctl stop qagent
 sudo rm /var/lib/qcontrolhub/agent-state.json
 ```
 
-然后重新执行该节点的添加命令。控制面会复用原节点 ID、替换旧签名密钥并关闭旧连接；若添加记录已删除，则需要重新创建。删除状态文件是不可逆身份操作，必须先确认控制台中旧身份已撤销。
+然后重新执行该节点的添加命令。控制面会复用原节点 ID、替换旧签名密钥并关闭旧连接；若添加记录已删除，则需要重新创建。删除状态文件是不可逆身份操作，必须先确认控制台中旧身份已撤销；删除后必须重新执行添加命令提供注册凭据，否则 qagent 会因缺少注册凭据退出，并由服务管理器反复拉起。
 
 ### 外部 PostgreSQL
 

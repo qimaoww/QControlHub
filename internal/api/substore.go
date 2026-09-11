@@ -240,9 +240,6 @@ func (s *Server) availableSubStoreProfiles(ctx context.Context, selections []cor
 	available := make(map[string]struct{})
 	for _, entry := range entries {
 		displayName := entry.AgentName
-		if strings.TrimSpace(entry.ClientName) != "" {
-			displayName = entry.ClientName
-		}
 		for _, item := range entry.Profiles {
 			if !item.Profile.SubscriptionCompatible {
 				continue
@@ -270,8 +267,14 @@ func (s *Server) availableSubStoreProfiles(ctx context.Context, selections []cor
 				}
 			}
 			if len(profile.Addresses) == 0 {
+				// A manual address is not one of the automatic candidates, so this
+				// endpoint stays reachable only through its own pinned address.
+				source := entry.Source
+				if item.AddressOverridden {
+					source = "手动设置"
+				}
 				profile.Addresses = []subStoreSyncAddress{{
-					Address: entry.Address, Source: entry.Source, Family: clientAddressFamily(entry.Address), URI: item.Profile.URI,
+					Address: item.Address, Source: source, Family: clientAddressFamily(item.Address), URI: item.Profile.URI,
 				}}
 			}
 			if selection, ok := selected[profile.key()]; ok {
