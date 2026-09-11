@@ -1288,10 +1288,13 @@ async function testPortNamesAndRuntimeRefresh() {
   await waitFor(() => share(20002).includes("two.example.com"), "第二端口分享链接未切换到手动地址");
   form = open(20002);
   assert.equal(form.querySelector("[data-clear-client-address]") === null, false, "手动地址缺少恢复自动识别入口");
+  assert.equal(form.elements.namedItem("address_mode").disabled, true, "手动地址未锁定协议栈选择");
   form.querySelector("[data-clear-client-address]").click();
   await waitFor(() => (testAPI.profileAddresses[20002] || "") === "", "恢复自动识别未清除端口地址");
   await waitFor(() => share(20002).includes("2001:db8::1"), "恢复自动识别未回到协议栈地址");
   assert.equal("address" in testAPI.profileSaves.at(-1), true, "恢复自动识别未按端口提交地址");
+  form = row(20002).querySelector("dialog.client-display-dialog form");
+  assert.equal(form.elements.namedItem("address_mode").disabled, false, "恢复自动识别未解锁协议栈选择");
 
   location.hash="#settings-node-alpha";
   await waitFor(() => document.querySelector(".node-operations-workspace"),"节点详情未渲染");

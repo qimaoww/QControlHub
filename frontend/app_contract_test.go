@@ -651,6 +651,7 @@ func TestClientAccessUsesContextSidebarAsOnlyNodeFilter(t *testing.T) {
 		`class="traffic-edit-dialog client-display-dialog"`,
 		`修改显示参数`,
 		`客户端地址协议栈`,
+		`当前使用手动连接地址`,
 		`button small client-display-settings-open`,
 		`button small client-parameter-open`,
 		`data-client-parameter-open`,

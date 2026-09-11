@@ -3263,6 +3263,11 @@ try {
     "client profile address family is not scoped to its own port",
   );
   assert.equal(
+    accessMarkup.includes("当前使用手动连接地址"),
+    true,
+    "a manual address does not lock the client profile family selector",
+  );
+  assert.equal(
     accessAPICalls,
     2,
     "switching the local node filter does not refetch client access data",

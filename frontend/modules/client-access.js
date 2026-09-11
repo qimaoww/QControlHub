@@ -299,8 +299,11 @@ export function installClientAccess(ctx) {
                 const dialogID = `client-parameters-${groupIndex}-${engineIndex}-${profileIndex}`;
                 const dialogTitleID = `${dialogID}-title`;
                 const profileMode = item.address_mode || "auto";
+                const addressModeHelp = item.address_overridden
+                  ? "当前使用手动连接地址；先点“恢复自动识别”才能切换协议栈。"
+                  : "仅对当前内核、当前监听端口生效：自动、IPv4 或 IPv6。";
                 const displayAddressModeField = addressChoices.length
-                  ? `<label class="client-display-stack-field"><span>客户端地址协议栈</span><select name="address_mode" data-saved-mode="${esc(profileMode)}">${addressChoices.map((choice) => `<option value="${esc(choice.value)}" ${choice.value === profileMode ? "selected" : ""}>${esc(choice.label)}</option>`).join("")}</select><small>仅对当前内核、当前监听端口生效：自动、IPv4 或 IPv6。</small></label>`
+                  ? `<label class="client-display-stack-field"><span>客户端地址协议栈</span><select name="address_mode" data-saved-mode="${esc(profileMode)}"${item.address_overridden ? " disabled" : ""}>${addressChoices.map((choice) => `<option value="${esc(choice.value)}" ${choice.value === profileMode ? "selected" : ""}>${esc(choice.label)}</option>`).join("")}</select><small>${addressModeHelp}</small></label>`
                   : "";
                 const fields = (item.profile?.fields || [])
                   .map((field, fieldIndex) => {
@@ -481,7 +484,7 @@ export function installClientAccess(ctx) {
         const addressInput = form.elements.namedItem("address");
         if (address !== addressInput.defaultValue.trim()) payload.address = address;
         const modeInput = form.elements.namedItem("address_mode");
-        if (modeInput && modeInput.value !== (modeInput.dataset.savedMode || "auto"))
+        if (modeInput && !modeInput.disabled && modeInput.value !== (modeInput.dataset.savedMode || "auto"))
           payload.address_mode = modeInput.value;
         form.dataset.busy = "1";
         if (button) button.disabled = true;
