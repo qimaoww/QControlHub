@@ -138,7 +138,7 @@ func TestConfigOwnerIsolationWithPostgreSQL(t *testing.T) {
 	if templates, err := db.ListConfigTemplates(bob); err != nil || len(templates) != 0 {
 		t.Fatalf("foreign template list: %+v %v", templates, err)
 	}
-	if _, _, _, err := db.RenderTemplateForAgent(bob, template.ID, agent.ID); !errors.Is(err, ErrNotFound) {
+	if _, _, _, err := db.RenderTemplateForAgent(bob, template.ID, agent.ID, false); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("foreign template rendering: %v", err)
 	}
 	if err := db.DeleteConfigTemplate(bob, template.ID); !errors.Is(err, ErrNotFound) {

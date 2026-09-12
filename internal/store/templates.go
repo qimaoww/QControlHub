@@ -93,9 +93,17 @@ func (s *Store) DeleteConfigTemplate(ctx context.Context, id string) error {
 // values. Unknown placeholders are left untouched so templates can carry
 // literal braces without breaking. Random ports are drawn from 20000-63991
 // (the same range the server plan builder uses).
-func RenderConfigTemplate(content string, agent core.Agent) (string, error) {
+//
+// The {{lan_ip}} placeholder is derived from host metrics, so it fails closed
+// unless the caller holds metrics.read. Rendering it for an unprivileged
+// principal would copy a private interface address into a saved configuration
+// that the template path returns and persists.
+func RenderConfigTemplate(content string, agent core.Agent, allowHostMetrics bool) (string, error) {
+	if !allowHostMetrics && strings.Contains(content, "{{lan_ip}}") {
+		return "", fmt.Errorf("%w: template placeholder {{lan_ip}} requires the metrics.read capability", ErrForbidden)
+	}
 	lanIP := ""
-	if len(agent.Metrics.NetworkInterfaces) > 0 && len(agent.Metrics.NetworkInterfaces[0].Addresses) > 0 {
+	if allowHostMetrics && len(agent.Metrics.NetworkInterfaces) > 0 && len(agent.Metrics.NetworkInterfaces[0].Addresses) > 0 {
 		lanIP = agent.Metrics.NetworkInterfaces[0].Addresses[0]
 	}
 	replacements := map[string]string{
@@ -118,9 +126,10 @@ func RenderConfigTemplate(content string, agent core.Agent) (string, error) {
 	return rendered, nil
 }
 
-// renderTemplateForAgent resolves a template against an agent and validates
-// the result with the engine checker.
-func (s *Store) RenderTemplateForAgent(ctx context.Context, templateID, agentID string) (core.ConfigTemplate, core.Agent, string, error) {
+// RenderTemplateForAgent resolves a template against an agent and validates
+// the result with the engine checker. allowHostMetrics must reflect the
+// caller's metrics.read capability; it gates {{lan_ip}}.
+func (s *Store) RenderTemplateForAgent(ctx context.Context, templateID, agentID string, allowHostMetrics bool) (core.ConfigTemplate, core.Agent, string, error) {
 	var template core.ConfigTemplate
 	args := []any{templateID}
 	ownerWhere := ownerClause(ctx, "owner_id", &args)
@@ -145,7 +154,7 @@ func (s *Store) RenderTemplateForAgent(ctx context.Context, templateID, agentID 
 	if err := requireAgentEngineAccess(ctx, s.pool, agentID, template.Engine); err != nil {
 		return core.ConfigTemplate{}, core.Agent{}, "", err
 	}
-	rendered, err := RenderConfigTemplate(template.Content, agent)
+	rendered, err := RenderConfigTemplate(template.Content, agent, allowHostMetrics)
 	if err != nil {
 		return core.ConfigTemplate{}, core.Agent{}, "", err
 	}

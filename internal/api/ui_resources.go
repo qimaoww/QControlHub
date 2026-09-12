@@ -433,7 +433,11 @@ func (s *Server) applyTemplate(w http.ResponseWriter, request *http.Request) {
 		writeError(w, http.StatusBadRequest, "agent_id is required")
 		return
 	}
-	template, agent, rendered, err := s.store.RenderTemplateForAgent(request.Context(), request.PathValue("id"), input.AgentID)
+	// {{lan_ip}} is derived from host metrics. Reject it before rendering or
+	// saving so a caller without metrics.read cannot copy a private interface
+	// address into a configuration the API returns and persists.
+	template, agent, rendered, err := s.store.RenderTemplateForAgent(request.Context(), request.PathValue("id"), input.AgentID,
+		s.sessionAllows(request, core.PermissionMetricsRead))
 	if err != nil {
 		writeStoreError(w, err)
 		return

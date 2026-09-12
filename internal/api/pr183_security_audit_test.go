@@ -197,3 +197,98 @@ func TestPR183AuditWorkspaceCannotBypassMetricCapability(t *testing.T) {
 			workspace.Agent.Metrics.CPUAvailable, workspace.Agent.Metrics.CPUPercent)
 	}
 }
+
+// A template that expands {{lan_ip}} copies host-metric data into a returned
+// and saved configuration. A principal with templates.write and
+// agent-config.write but no metrics.read must be rejected before rendering.
+func TestPR183AuditTemplateCannotBypassMetricCapability(t *testing.T) {
+	db, ctx, admin, alice, bob := newConfigScopeAPIFixture(t)
+	agent, _ := ownedConfigScopeAPIAgent(t, ctx, db, alice, "template-capability-audit")
+	grantConfigScopeAPIAgent(t, ctx, db, agent, bob, 21001)
+	const privateAddress = "10.83.42.77"
+	if err := db.UpdateAgentMetrics(ctx, agent.ID, core.HostMetrics{
+		CollectedAt:       time.Now().UTC(),
+		NetworkInterfaces: []core.HostNetworkInterface{{Name: "eth0", Addresses: []string{privateAddress}}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	permissions := []core.Permission{
+		core.PermissionAgentsRead, core.PermissionAgentConfigRead, core.PermissionAgentConfigWrite,
+		core.PermissionConfigsRead, core.PermissionTemplatesRead, core.PermissionTemplatesWrite, core.PermissionTasksRead,
+	}
+	admin.call("PUT", "/users/"+bob.userID, core.UserUpdate{Permissions: &permissions}, http.StatusOK, nil)
+	bob = auditPR183Login(bob, "bob")
+	bob.call("GET", "/metrics/"+agent.ID, nil, http.StatusForbidden, nil)
+	list := bob.call("GET", "/agents", nil, http.StatusOK, nil)
+	if bytes.Contains(list, []byte(privateAddress)) {
+		t.Fatal("baseline agent list did not redact metrics")
+	}
+	input := configScopeAPIConfig(t, 21001)
+	input.Content += "\n# template-lan-ip: {{lan_ip}}\n"
+	var template core.ConfigTemplate
+	bob.call("POST", "/templates", map[string]string{
+		"name": "metric-capability-template", "engine": "mihomo", "content": input.Content,
+	}, http.StatusCreated, &template)
+	response := auditPR183Request(bob, "POST", "/templates/"+template.ID+"/apply",
+		map[string]string{"agent_id": agent.ID})
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("template apply without metrics.read: %d %s", response.Code, response.Body.String())
+	}
+	if bytes.Contains(response.Body.Bytes(), []byte(privateAddress)) {
+		t.Fatal("rejected template apply still disclosed the host LAN address")
+	}
+	var configs []core.Config
+	bob.call("GET", "/agents/"+agent.ID+"/configs", nil, http.StatusOK, &configs)
+	if len(configs) != 0 {
+		t.Fatalf("rejected template apply persisted %d configurations", len(configs))
+	}
+	// A caller holding metrics.read keeps the documented placeholder.
+	var allowed core.ConfigTemplate
+	alice.call("POST", "/templates", map[string]string{
+		"name": "metric-capability-allowed", "engine": "mihomo", "content": input.Content,
+	}, http.StatusCreated, &allowed)
+	var saved core.Config
+	alice.call("POST", "/templates/"+allowed.ID+"/apply", map[string]string{"agent_id": agent.ID}, http.StatusOK, &saved)
+	if !strings.Contains(saved.Content, privateAddress) {
+		t.Fatal("metrics.read caller did not receive the rendered LAN address")
+	}
+}
+
+// Holding agents.manage or enrollment.manage does not confer host authority
+// over a node that was merely shared. Every host-administration path must keep
+// failing for the recipient after the grant is accepted.
+func TestPR183AuditSharedRecipientCannotAdministerHost(t *testing.T) {
+	db, ctx, _, alice, bob := newConfigScopeAPIFixture(t)
+	agent, _ := ownedConfigScopeAPIAgent(t, ctx, db, alice, "recipient-admin-audit")
+	grantConfigScopeAPIAgent(t, ctx, db, agent, bob, 21001)
+	var sharing core.AgentSharing
+	alice.call("GET", "/agents/"+agent.ID+"/sharing", nil, http.StatusOK, &sharing)
+	if len(sharing.Shares) != 1 || sharing.Shares[0].UserID != bob.userID || sharing.Shares[0].Status != core.AgentShareAccepted {
+		t.Fatalf("sharing fixture mismatch: %+v", sharing)
+	}
+	for _, operation := range []struct {
+		method, path string
+		body         any
+	}{
+		{"PUT", "/agents/" + agent.ID + "/capabilities/mihomo", map[string]any{"enabled": false}},
+		{"PUT", "/agents/" + agent.ID + "/region", map[string]any{"country_code": "US"}},
+		{"PUT", "/agents/" + agent.ID + "/komari", map[string]any{"uuid": "shared-node-uuid"}},
+		{"GET", "/agents/" + agent.ID + "/sharing", nil},
+		{"PUT", "/agents/" + agent.ID + "/sharing", core.AgentSharingRequest{Revision: sharing.Revision}},
+		{"DELETE", "/agents/" + agent.ID, nil},
+		{"POST", "/agents/" + agent.ID + "/enrollment-token", map[string]any{}},
+		{"POST", "/agents/" + agent.ID + "/enrollment-command", map[string]any{}},
+	} {
+		bob.call(operation.method, operation.path, operation.body, http.StatusForbidden, nil)
+	}
+	// Account administration is unavailable regardless of the users.manage
+	// capability the recipient may also hold.
+	bob.call("GET", "/users/"+alice.userID+"/agent-access", nil, http.StatusForbidden, nil)
+	bob.call("PUT", "/users/"+alice.userID+"/agent-access",
+		core.AgentAccessRequest{Revision: 1, Isolated: true}, http.StatusForbidden, nil)
+	// The owner still sees the accepted grant untouched by the denied calls.
+	alice.call("GET", "/agents/"+agent.ID+"/sharing", nil, http.StatusOK, &sharing)
+	if len(sharing.Shares) != 1 || sharing.Shares[0].Status != core.AgentShareAccepted || !sharing.Shares[0].Enabled {
+		t.Fatalf("denied recipient administration altered the grant: %+v", sharing)
+	}
+}

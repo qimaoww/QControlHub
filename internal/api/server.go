@@ -413,11 +413,21 @@ func (s *Server) overview(w http.ResponseWriter, request *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
-func (s *Server) listAgents(w http.ResponseWriter, request *http.Request) {
+// sessionAllows reports whether the authenticated caller holds a capability.
+// Role and explicit permission lookups are both deny-by-default, so an
+// unresolvable session never grants access.
+func (s *Server) sessionAllows(request *http.Request, permission core.Permission) bool {
 	role, roleOK := s.sessionRole(request)
 	permissions, permissionsOK := s.sessionPermissions(request)
+	if !roleOK || !permissionsOK {
+		return false
+	}
+	return role.Allows(permission) || core.HasPermission(permissions, permission)
+}
+
+func (s *Server) listAgents(w http.ResponseWriter, request *http.Request) {
 	list := s.store.ListAgents
-	if roleOK && permissionsOK && (role.Allows(core.PermissionEnrollmentManage) || core.HasPermission(permissions, core.PermissionEnrollmentManage)) {
+	if s.sessionAllows(request, core.PermissionEnrollmentManage) {
 		list = s.store.ListAgentsWithEnrollmentCommands
 	}
 	agents, err := list(request.Context())
@@ -425,7 +435,7 @@ func (s *Server) listAgents(w http.ResponseWriter, request *http.Request) {
 		writeInternalError(w, err)
 		return
 	}
-	if !roleOK || !permissionsOK || (!role.Allows(core.PermissionMetricsRead) && !core.HasPermission(permissions, core.PermissionMetricsRead)) {
+	if !s.sessionAllows(request, core.PermissionMetricsRead) {
 		for index := range agents {
 			agents[index].Metrics = core.HostMetrics{}
 		}
@@ -434,9 +444,7 @@ func (s *Server) listAgents(w http.ResponseWriter, request *http.Request) {
 }
 
 func (s *Server) redactAgentMetrics(request *http.Request, agent *core.Agent) {
-	role, roleOK := s.sessionRole(request)
-	permissions, permissionsOK := s.sessionPermissions(request)
-	if !roleOK || !permissionsOK || (!role.Allows(core.PermissionMetricsRead) && !core.HasPermission(permissions, core.PermissionMetricsRead)) {
+	if !s.sessionAllows(request, core.PermissionMetricsRead) {
 		agent.Metrics = core.HostMetrics{}
 	}
 }

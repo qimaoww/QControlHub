@@ -310,6 +310,7 @@ var errorMessagePatterns = []struct {
 	{regexp.MustCompile(`^chained, balanced or multiplexed outbound (.+) requires explicit accounting mapping$`), "出口 ${1} 使用了链式、负载均衡或多路复用，需要明确流量统计归属。"},
 	{regexp.MustCompile(`^unknown route target (.+)$`), "路由目标 ${1} 不存在，请检查出口标签。"},
 	{regexp.MustCompile(`^invalid JSON body: json: unknown field "([^"]+)"$`), "请求包含不支持的字段 ${1}，请检查字段名称或刷新页面后重试。"},
+	{regexp.MustCompile(`^template placeholder \{\{lan_ip\}\} requires the metrics\.read capability$`), "模板占位符 {{lan_ip}} 需要 metrics.read 权限，请联系管理员分配该权限，或手动填写节点地址。"},
 }
 
 func chineseErrorMessage(status int, message string) string {
