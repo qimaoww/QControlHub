@@ -61,7 +61,7 @@ Web 仅在本地 `https://localhost:18483` 提供测试入口。Chromium 检查 
 
 独立出口回归覆盖特殊统计标签隐藏真实入站、重复及大小写歧义 JSON、sing-box 备用编译路径、TUN/额外隧道、入站 detour、Xray 动态监听及可变路由管理 API。自有节点的显式空监听配置仍可提交独立出口检查；这不放宽共享部署必须有获分配监听端口的约束。
 
-实际页面截图包括 `engines-allocation-light.png`、`engines-expanded-invitation-light.png`、`engines-invitation-dark.png`、`engines-invitation-mobile.png`、`engines-shared-list-light.png`、`engines-shared-list-dark.png`、`engines-shared-detail-light.png`、`engines-shared-detail-dark.png` 和 `engines-shared-detail-mobile.png`。截图记录各阶段的实际授权状态，未添加说明图层；浅色、深色和触控手机布局均已目视检查。手机验证使用 390 × 844、`isMobile` 和 `hasTouch`，不再仅缩小桌面窗口；自动回归在入场动画完成后检查按钮边界，并检查共享配置按钮和资源区没有裁切。阶段结果保存在 `engines-results.json`。
+实际页面截图包括 `engines-allocation-light.png`、`engines-expanded-invitation-light.png`、`engines-invitation-dark.png`、`engines-invitation-mobile.png`、`engines-shared-list-light.png`、`engines-shared-list-dark.png`、`engines-shared-list-mobile.png`、`engines-shared-detail-light.png`、`engines-shared-detail-dark.png` 和 `engines-shared-detail-mobile.png`。截图记录各阶段的实际授权状态，未添加说明图层；浅色、深色和触控手机布局均已目视检查。列表和详情的“共享”标记均位于“在线”左侧；自动回归检查相邻顺序、同排对齐以及手机列表和详情无横向裁切。手机验证使用 390 × 844、`isMobile` 和 `hasTouch`，不再仅缩小桌面窗口；自动回归在入场动画完成后检查按钮边界，并检查共享配置按钮和资源区没有裁切。桌面保留整页截图，手机保留真实视口截图，避免长页面捕获重置触控模拟。阶段结果保存在 `engines-results.json`。
 
 ## 回归检查
 

@@ -1119,18 +1119,35 @@ async function testEmptyRuntime() {
 }
 
 async function testSharedNodeRuntime() {
+  const assertSharedStatusOrder = (root) => {
+    const badge = root.querySelector(".agent-shared-badge");
+    const status = root.querySelector("[data-agent-status-label]");
+    assert.ok(badge && status, "共享节点缺少共享标记或在线状态");
+    const badgeRect = badge.getBoundingClientRect(), statusRect = status.getBoundingClientRect();
+    assert.ok(badge.nextElementSibling?.matches("[data-agent-status-dot]"), "共享标记未紧邻在线状态左侧");
+    assert.ok(badgeRect.right <= statusRect.left, "共享标记没有显示在在线状态左侧");
+    assert.ok(Math.abs((badgeRect.top + badgeRect.bottom - statusRect.top - statusRect.bottom) / 2) <= 1,
+      "共享标记与在线状态没有同排对齐");
+    if (mode === "shared-node-mobile") {
+      assert.equal(innerWidth, 390, "手机回归没有使用真实的 390px 视口");
+      assert.ok(matchMedia("(pointer:coarse)").matches, "手机回归没有启用触控设备");
+      const rect = root.getBoundingClientRect();
+      assert.ok(rect.left >= 0 && rect.right <= innerWidth + 1 && root.scrollWidth <= root.clientWidth + 1,
+        "手机共享节点列表或详情被裁切");
+    }
+  };
   await waitFor(() => document.querySelector('.node-card[data-agent-node="alpha"]'), "共享节点列表未渲染");
   assert.equal(document.querySelectorAll(".node-card .agent-shared-badge").length, 1, "自有和共享节点没有明确区分");
+  assertSharedStatusOrder(document.querySelector('.node-card[data-agent-node="alpha"]'));
   assert.ok(document.querySelector("[data-open-enrollment]"), "共享接收者无法添加自有节点");
   location.hash = "#settings-node-alpha";
   await waitFor(() => document.querySelector(".node-operations-workspace"), "共享节点详情未渲染");
+  assertSharedStatusOrder(document.querySelector(".node-operations-workspace"));
   assert.equal(document.querySelectorAll(".core-runtime-row").length, 1, "详情显示了未分配的内核");
   assert.equal(document.querySelector(".node-panel-heading h3").textContent, "已分配内核");
   assert.ok(document.querySelector('[data-config="alpha"][data-engine="mihomo"]'), "共享内核没有独立配置入口");
   assert.equal(document.querySelector('[data-open-version-form], [data-version-agent], [data-engine-capability], [data-agent-name-form], [data-komari-form], [data-agent-sharing], [data-upgrade-agent], [data-delete], [data-view-enrollment-command]'), null, "共享详情仍显示宿主管理控件");
   if (mode === "shared-node-mobile") {
-    assert.equal(innerWidth, 390, "手机回归没有使用真实的 390px 视口");
-    assert.ok(matchMedia("(pointer:coarse)").matches, "手机回归没有启用触控设备");
     for (const selector of [".node-operations-workspace", ".node-resource-strip", ".core-runtime-row", '[data-config="alpha"]']) {
       const element = document.querySelector(selector), rect = element.getBoundingClientRect();
       assert.ok(rect.left >= 0 && rect.right <= innerWidth + 1 && element.scrollWidth <= element.clientWidth + 1,
