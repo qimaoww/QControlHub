@@ -1042,7 +1042,7 @@ async function nodeSettings(presetMode = false, { overview: preloadedOverview } 
               ${engineCapabilityToggles(agent.capabilities || [], { supported: agent.supported_capabilities ?? agent.capabilities ?? [], writable: can("agents.manage"), node: true, transitions: agent.capability_transitions || {} })}
               <p class="node-capability-note">启停成功后生效 · 离线节点上线后执行 · 未安装内核仅切换能力，配置保留</p>
             </section>
-            <section class="node-name-settings" aria-label="节点名称"><header><div><b>节点名称</b><small>自定义面板显示名称；不改变节点 ID、连接或安装凭据。</small></div></header><form data-agent-name-form="${esc(agent.id)}"><label><span>显示名称</span><input name="name" maxlength="100" required autocomplete="off" value="${esc(agent.name)}" ${can("agents.manage") ? "" : "disabled"}></label><button class="button small" type="submit" ${can("agents.manage") ? "" : "disabled"}>保存名称</button></form></section><dl class="identity-list node-identity-list"><div><dt>节点 ID</dt><dd><code>${esc(agent.id)}</code></dd></div><div><dt>系统平台</dt><dd>${esc(agent.os)} / ${esc(agent.arch)}</dd></div><div><dt>Agent 版本</dt><dd data-agent-version>${esc(agent.version || "未知")}</dd></div><div><dt>注册时间</dt><dd>${date(agent.enrolled_at)}</dd></div><div><dt>安全通道</dt><dd>WSS · Ed25519 签名</dd></div></dl><section class="node-public-ips" aria-label="公网地址"><header><b>公网地址 · 双栈</b><small>手动设置优先 · 出口探测 · 默认路由接口 · 已验证连接来源</small><small class="node-address-note" data-node-connection-address ${connectionAddressNote ? "" : "hidden"}>${esc(connectionAddressNote)}</small></header>${addressRows.map((row) => `<div class="public-ip-row ${row.ok ? "" : "empty"}" data-ip-family="${row.cls}" data-ip-source="${esc(row.source)}" ${row.value ? "" : "hidden"}><span class="ip-family ${row.cls}">${row.label}</span><code>${esc(row.value || "未探测到")}</code><small>${esc(row.source)}</small></div>`).join("")}</section><section class="node-komari-settings" aria-label="Komari 联动"><header><div><b>Komari 联动</b><small>填写 Komari 服务器 UUID；周期日期、已用量和额度会显示在节点卡片的网络区。</small></div></header><form data-komari-form="${esc(agent.id)}"><label><span>Komari 服务器 UUID</span><input name="uuid" maxlength="100" autocomplete="off" value="${esc(komariUUIDFor(agent))}" placeholder="例如 4addbaf1-7ffb-474c-98ee-4ffd476755ff" ${can("agents.manage") ? "" : "disabled"}></label><button class="button small" type="submit" ${can("agents.manage") ? "" : "disabled"}>保存</button></form>${komariUUIDFor(agent) ? "" : `<p class="node-komari-empty">尚未关联 Komari 服务器</p>`}</section>${labels ? `<div class="labels">${labels}</div>` : ""}<footer class="node-identity-refresh"><span>节点身份已验证</span><div>${can("enrollment.manage") && agent.enrollment_command_available ? `<button class="button small" type="button" data-view-enrollment-command="${esc(agent.id)}">查看安装部署命令</button>` : ""}</div></footer>${can("agents.manage") ? `<section class="node-danger-zone"><span><b>删除节点</b><small>断开节点并清理关联配置；QAgent 不会被远程卸载。</small></span><button class="button small danger-button" type="button" data-delete="${esc(agent.id)}">删除节点</button></section>` : ""}`}</section>
+            <section class="node-name-settings" aria-label="节点名称"><header><div><b>节点名称</b><small>自定义面板显示名称；不改变节点 ID、连接或安装凭据。</small></div></header><form data-agent-name-form="${esc(agent.id)}"><label><span>显示名称</span><input name="name" maxlength="100" required autocomplete="off" value="${esc(agent.name)}" ${can("agents.manage") ? "" : "disabled"}></label><button class="button small" type="submit" ${can("agents.manage") ? "" : "disabled"}>保存名称</button></form></section>${agent.can_hide ? `<section class="node-name-settings" aria-label="管理员可见性"><header><div><b>管理员可见性</b><small>开启后管理员在节点列表、配置、任务、日志、指标和审计中看不到此节点，只能在“其他用户节点”里只读查看；后台采集、计费与 Agent 连接不受影响。</small></div></header><label class="node-visibility-toggle"><input type="checkbox" data-agent-visibility="${esc(agent.id)}" ${agent.admin_hidden ? "checked" : ""} ${can("agents.manage") ? "" : "disabled"}><span>${agent.admin_hidden ? "已对管理员隐藏" : "对管理员可见"}</span></label></section>` : ""}<dl class="identity-list node-identity-list"><div><dt>节点 ID</dt><dd><code>${esc(agent.id)}</code></dd></div><div><dt>系统平台</dt><dd>${esc(agent.os)} / ${esc(agent.arch)}</dd></div><div><dt>Agent 版本</dt><dd data-agent-version>${esc(agent.version || "未知")}</dd></div><div><dt>注册时间</dt><dd>${date(agent.enrolled_at)}</dd></div><div><dt>安全通道</dt><dd>WSS · Ed25519 签名</dd></div></dl><section class="node-public-ips" aria-label="公网地址"><header><b>公网地址 · 双栈</b><small>手动设置优先 · 出口探测 · 默认路由接口 · 已验证连接来源</small><small class="node-address-note" data-node-connection-address ${connectionAddressNote ? "" : "hidden"}>${esc(connectionAddressNote)}</small></header>${addressRows.map((row) => `<div class="public-ip-row ${row.ok ? "" : "empty"}" data-ip-family="${row.cls}" data-ip-source="${esc(row.source)}" ${row.value ? "" : "hidden"}><span class="ip-family ${row.cls}">${row.label}</span><code>${esc(row.value || "未探测到")}</code><small>${esc(row.source)}</small></div>`).join("")}</section><section class="node-komari-settings" aria-label="Komari 联动"><header><div><b>Komari 联动</b><small>填写 Komari 服务器 UUID；周期日期、已用量和额度会显示在节点卡片的网络区。</small></div></header><form data-komari-form="${esc(agent.id)}"><label><span>Komari 服务器 UUID</span><input name="uuid" maxlength="100" autocomplete="off" value="${esc(komariUUIDFor(agent))}" placeholder="例如 4addbaf1-7ffb-474c-98ee-4ffd476755ff" ${can("agents.manage") ? "" : "disabled"}></label><button class="button small" type="submit" ${can("agents.manage") ? "" : "disabled"}>保存</button></form>${komariUUIDFor(agent) ? "" : `<p class="node-komari-empty">尚未关联 Komari 服务器</p>`}</section>${labels ? `<div class="labels">${labels}</div>` : ""}<footer class="node-identity-refresh"><span>节点身份已验证</span><div>${can("enrollment.manage") && agent.enrollment_command_available ? `<button class="button small" type="button" data-view-enrollment-command="${esc(agent.id)}">查看安装部署命令</button>` : ""}</div></footer>${can("agents.manage") ? `<section class="node-danger-zone"><span><b>删除节点</b><small>断开节点并清理关联配置；QAgent 不会被远程卸载。</small></span><button class="button small danger-button" type="button" data-delete="${esc(agent.id)}">删除节点</button></section>` : ""}`}</section>
           </div>
         </section>`;
       }
@@ -1775,10 +1775,10 @@ function bindAgentPage(agentItems, presetMode = false, enrollmentHistory = {}) {
             notify(`添加记录刷新失败：${error.message}`, "error");
           }
         },
-        onSubmit: async (name, close) => {
+        onSubmit: async (name, adminHidden, close) => {
           const created = await api("/enrollment-tokens", {
             method: "POST",
-            body: JSON.stringify({ name }),
+            body: JSON.stringify({ name, admin_hidden: adminHidden }),
           });
           const command = enrollmentInstallCommand(created);
           close();
@@ -1796,6 +1796,26 @@ function bindAgentPage(agentItems, presetMode = false, enrollmentHistory = {}) {
   document
     .querySelectorAll("[data-agent-refresh]")
     .forEach((button) => (button.onclick = () => pollAgentMetrics()));
+  document.querySelectorAll("[data-agent-visibility]").forEach((input) => {
+    input.onchange = async () => {
+      input.disabled = true;
+      try {
+        await api(`/agents/${encodeURIComponent(input.dataset.agentVisibility)}/visibility`, {
+          method: "PUT",
+          body: JSON.stringify({ admin_hidden: input.checked }),
+        });
+        notify(input.checked ? "已对管理员隐藏此节点" : "此节点已对管理员可见");
+        await refreshAgentPage();
+      } catch (error) {
+        input.checked = !input.checked;
+        input.disabled = false;
+        notify(error.message, "error");
+      }
+    };
+  });
+  document.querySelectorAll("[data-open-agent-directory]").forEach((button) => {
+    button.onclick = () => showAgentDirectoryDialog();
+  });
   document.querySelectorAll("[data-node-capabilities]").forEach((section) => {
     const agentID = section.dataset.nodeCapabilities;
     const can = (capability) => permission(capability, agentsByID.get(agentID)) && agentsByID.get(agentID)?.can_manage !== false;
@@ -2685,10 +2705,62 @@ function bindEnrollmentRecordButtons(root, closeParent) {
   });
 }
 
+async function showAgentDirectoryDialog() {
+  let entries;
+  try {
+    entries = await api("/agent-directory");
+  } catch (error) {
+    notify(error.message, "error");
+    return;
+  }
+  const rows = (entries || [])
+    .map((entry) => {
+      const ports = (entry.ports || []).join("、") || "—";
+      const engines = (entry.capabilities || []).map((engine) => engineName(engine)).join("、") || "无内核";
+      const hidden = entry.admin_hidden ? " · 已对管理员隐藏" : "";
+      return `<article data-directory-node="${esc(entry.id)}"><div><strong>${esc(entry.name)}</strong><small>${esc(entry.owner_username || entry.owner_id || "未知账号")} · ${entry.status === "online" ? "在线" : "离线"} · ${esc(engines)} · 端口 ${esc(ports)}${hidden}</small></div><button class="button small danger-button" type="button" data-delete-directory-node="${esc(entry.id)}" data-node-name="${esc(entry.name)}">删除节点</button></article>`;
+    })
+    .join("");
+  const wrap = document.createElement("div");
+  wrap.className = "modal-backdrop";
+  wrap.innerHTML = `<section class="deploy-command-modal enrollment-dialog" role="dialog" aria-modal="true" aria-labelledby="agent-directory-title" aria-describedby="agent-directory-description"><header class="deploy-command-head"><span class="deploy-command-icon" aria-hidden="true">☰</span><div><p class="eyebrow">管理员视图</p><h2 id="agent-directory-title">其他用户节点</h2><p id="agent-directory-description">只读列表，包含已被所有者对管理员隐藏的节点。这里只能删除节点，不能查看配置、日志、指标，也不能代替用户部署或修改配置。</p></div><button class="deploy-command-close" type="button" data-close aria-label="关闭其他用户节点弹窗">×</button></header><div class="deploy-command-body enrollment-dialog-body"><section class="enrollment-history"><header><div><b>节点清单</b><small>删除会断开 Agent 连接并清理关联配置；节点上的 QAgent 不会被远程卸载。</small></div><span>${(entries || []).length}</span></header><div data-agent-directory-list>${rows || '<p class="enrollment-history-empty">没有其他账号的节点</p>'}</div></section></div></section>`;
+  document.body.append(wrap);
+  bindModalLifecycle(wrap);
+  wrap.querySelectorAll("[data-delete-directory-node]").forEach((button) => {
+    button.onclick = async () => {
+      if (button.dataset.confirmDelete !== "1") {
+        button.dataset.confirmDelete = "1";
+        button.textContent = "再次点击确认删除";
+        window.setTimeout(() => {
+          if (!button.isConnected || button.disabled) return;
+          button.dataset.confirmDelete = "";
+          button.textContent = "删除节点";
+        }, 5000);
+        return;
+      }
+      button.disabled = true;
+      try {
+        await api(`/agents/${encodeURIComponent(button.dataset.deleteDirectoryNode)}`, { method: "DELETE" });
+        const name = button.dataset.nodeName || "";
+        button.closest("article")?.remove();
+        notify(name ? `节点 ${name} 已删除` : "节点已删除");
+        try {
+          await refreshAgentPage();
+        } catch (error) {
+          notify(`节点列表刷新失败：${error.message}`, "error");
+        }
+      } catch (error) {
+        button.disabled = false;
+        notify(error.message, "error");
+      }
+    };
+  });
+}
+
 function showEnrollmentDialog({ tokenRows, tokenCount, onDelete, onSubmit }) {
   const wrap = document.createElement("div");
   wrap.className = "modal-backdrop";
-  wrap.innerHTML = `<section class="deploy-command-modal enrollment-dialog" role="dialog" aria-modal="true" aria-labelledby="enrollment-dialog-title" aria-describedby="enrollment-dialog-description"><header class="deploy-command-head"><span class="deploy-command-icon" aria-hidden="true">＋</span><div><p class="eyebrow">添加节点</p><h2 id="enrollment-dialog-title">生成 Agent 部署命令</h2><p id="enrollment-dialog-description">为一台新节点生成长期有效的 enrollment 凭据；命令只会显示供复制，浏览器绝不会执行。</p></div><button class="deploy-command-close" type="button" data-close aria-label="关闭添加节点弹窗">×</button></header><div class="deploy-command-body enrollment-dialog-body"><form class="enrollment-dialog-form"><label>节点名称<input name="name" maxlength="100" required autocomplete="off" placeholder="例如 shanghai-edge-01"></label><p class="enrollment-security-note"><b>命令生成后可重复查看</b><span>凭据由控制面受保护保存；删除、撤销或到期后立即失效，普通页面不会显示命令正文。</span></p><footer class="enrollment-form-actions"><button class="button" type="button" data-close>取消</button><button class="button primary" type="submit">生成部署命令</button></footer></form><section class="enrollment-history" aria-labelledby="enrollment-history-title"><header><div><b id="enrollment-history-title">添加记录</b><small>删除记录只会立即撤销对应凭据，不会删除已注册节点或卸载 Agent。</small></div><span data-enrollment-history-count>${tokenCount || 0}</span></header><div data-enrollment-history-list>${tokenRows || '<p class="enrollment-history-empty">暂无添加记录</p>'}</div></section></div></section>`;
+  wrap.innerHTML = `<section class="deploy-command-modal enrollment-dialog" role="dialog" aria-modal="true" aria-labelledby="enrollment-dialog-title" aria-describedby="enrollment-dialog-description"><header class="deploy-command-head"><span class="deploy-command-icon" aria-hidden="true">＋</span><div><p class="eyebrow">添加节点</p><h2 id="enrollment-dialog-title">生成 Agent 部署命令</h2><p id="enrollment-dialog-description">为一台新节点生成长期有效的 enrollment 凭据；命令只会显示供复制，浏览器绝不会执行。</p></div><button class="deploy-command-close" type="button" data-close aria-label="关闭添加节点弹窗">×</button></header><div class="deploy-command-body enrollment-dialog-body"><form class="enrollment-dialog-form"><label>节点名称<input name="name" maxlength="100" required autocomplete="off" placeholder="例如 shanghai-edge-01"></label><label class="enrollment-visibility"><input type="checkbox" name="admin_hidden"><span>不让管理员查看管理此节点</span></label><p class="enrollment-security-note"><b>命令生成后可重复查看</b><span>凭据由控制面受保护保存；删除、撤销或到期后立即失效，普通页面不会显示命令正文。</span></p><footer class="enrollment-form-actions"><button class="button" type="button" data-close>取消</button><button class="button primary" type="submit">生成部署命令</button></footer></form><section class="enrollment-history" aria-labelledby="enrollment-history-title"><header><div><b id="enrollment-history-title">添加记录</b><small>删除记录只会立即撤销对应凭据，不会删除已注册节点或卸载 Agent。</small></div><span data-enrollment-history-count>${tokenCount || 0}</span></header><div data-enrollment-history-list>${tokenRows || '<p class="enrollment-history-empty">暂无添加记录</p>'}</div></section></div></section>`;
   document.body.append(wrap);
   const close = bindModalLifecycle(wrap);
   bindEnrollmentRecordButtons(wrap, close);
@@ -2733,7 +2805,10 @@ function showEnrollmentDialog({ tokenRows, tokenCount, onDelete, onSubmit }) {
     event.preventDefault();
     const submit = event.currentTarget.querySelector("button[type=submit]");
     submit.disabled = true;
-    try { await onSubmit(String(new FormData(event.currentTarget).get("name") || "").trim(), close); }
+    try {
+      const form = new FormData(event.currentTarget);
+      await onSubmit(String(form.get("name") || "").trim(), form.get("admin_hidden") === "on", close);
+    }
     catch (error) { submit.disabled = false; notify(error.message, "error"); }
   };
   wrap.querySelector("input").focus();

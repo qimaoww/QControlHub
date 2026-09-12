@@ -9,7 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/qimaoww/qcontrolhub/internal/authn"
 	"github.com/qimaoww/qcontrolhub/internal/core"
+	"github.com/qimaoww/qcontrolhub/internal/store"
 )
 
 // Isolated-schema security regressions. No production or live-fixture
@@ -333,4 +335,108 @@ func TestPR183AuditSharedNodeAddressDisclosure(t *testing.T) {
 	if !bytes.Contains(list, []byte(publicAddress)) {
 		t.Fatalf("borrowed node lost its routable address candidate: %s", list)
 	}
+}
+
+// An owner-hidden node stays invisible and unmanageable for every
+// administrator credential, remains usable by its owner and explicit share
+// recipients, appears read-only in the cross-account directory, and stays
+// deletable so a stale node can always be cleaned up.
+func TestPR183AuditOwnerHiddenNodeVisibility(t *testing.T) {
+	db, ctx, admin, alice, bob := newConfigScopeAPIFixture(t)
+	var created core.EnrollmentTokenCreated
+	alice.call("POST", "/enrollment-tokens", map[string]any{
+		"name": "hidden-node-audit", "admin_hidden": true,
+	}, http.StatusCreated, &created)
+	agent, err := db.EnrollAgent(ctx, core.EnrollRequest{
+		Name: "hidden-node-audit", OS: "linux", Arch: "amd64",
+		Capabilities: []core.Engine{core.EngineMihomo},
+		Features: []string{core.AgentFeatureManagedConfigRead, core.AgentFeatureSharedTraffic,
+			core.AgentFeatureSharedEngines, core.AgentFeatureIndependentEgress},
+		PublicKey: authn.EncodePublicKey(randomEnrollmentKey(t)),
+	}, created.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !agent.AdminHidden {
+		t.Fatal("enrollment did not carry the owner-hidden choice")
+	}
+	var adminAgents, ownerAgents []core.Agent
+	admin.call("GET", "/agents", nil, http.StatusOK, &adminAgents)
+	for _, item := range adminAgents {
+		if item.ID == agent.ID {
+			t.Fatal("administrator list exposed an owner-hidden node")
+		}
+	}
+	alice.call("GET", "/agents", nil, http.StatusOK, &ownerAgents)
+	ownerVisible := false
+	for _, item := range ownerAgents {
+		if item.ID == agent.ID {
+			ownerVisible = true
+			if !item.AdminHidden {
+				t.Fatal("owner list lost the hidden marker")
+			}
+		}
+	}
+	if !ownerVisible {
+		t.Fatal("owner lost access to the hidden node")
+	}
+	// Fleet maintenance runs without a request principal and must still see
+	// owner-hidden nodes so accounting and monitoring keep working.
+	systemAgents, err := db.ListAgents(store.WithSystemScope(ctx))
+	if err != nil {
+		t.Fatal(err)
+	}
+	systemVisible := false
+	for _, item := range systemAgents {
+		if item.ID == agent.ID {
+			systemVisible = true
+		}
+	}
+	if !systemVisible {
+		t.Fatal("system maintenance lost access to the owner-hidden node")
+	}
+	for _, path := range []string{
+		"/agents/" + agent.ID + "/configs",
+		"/agents/" + agent.ID + "/sharing",
+		"/agents/" + agent.ID + "/komari",
+		"/agents/" + agent.ID + "/region",
+		"/metrics/" + agent.ID,
+		"/core-logs?agent_id=" + agent.ID,
+	} {
+		admin.call("GET", path, nil, http.StatusNotFound, nil)
+	}
+	admin.call("PUT", "/agents/"+agent.ID+"/name", map[string]string{"name": "stolen"}, http.StatusNotFound, nil)
+	admin.call("PUT", "/agents/"+agent.ID+"/visibility", map[string]bool{"admin_hidden": false}, http.StatusNotFound, nil)
+	admin.call("POST", "/tasks", core.TaskRequest{AgentID: agent.ID, Engine: core.EngineMihomo, Action: core.ActionStop}, http.StatusNotFound, nil)
+	var directory []core.AgentDirectoryEntry
+	admin.call("GET", "/agent-directory", nil, http.StatusOK, &directory)
+	directoryFound := false
+	for _, entry := range directory {
+		if entry.ID == agent.ID {
+			directoryFound = true
+			if !entry.AdminHidden || entry.OwnerUsername != "alice" {
+				t.Fatalf("directory entry mismatch: %+v", entry)
+			}
+		}
+	}
+	if !directoryFound {
+		t.Fatal("directory did not report the hidden node")
+	}
+	// The owner keeps working with the node; no administrator list may leak
+	// its identity or its queued work.
+	var hiddenTask core.Task
+	alice.call("POST", "/tasks", core.TaskRequest{AgentID: agent.ID, Engine: core.EngineMihomo, Action: core.ActionStatus}, http.StatusCreated, &hiddenTask)
+	for _, path := range []string{"/tasks", "/deployments", "/traffic-policies", "/traffic-usage", "/overview"} {
+		body := admin.call("GET", path, nil, http.StatusOK, nil)
+		if bytes.Contains(body, []byte(agent.ID)) || bytes.Contains(body, []byte(hiddenTask.ID)) {
+			t.Fatalf("%s leaked the owner-hidden node or its task", path)
+		}
+	}
+	bob.call("GET", "/agent-directory", nil, http.StatusForbidden, nil)
+	alice.call("PUT", "/agents/"+agent.ID+"/visibility", map[string]bool{"admin_hidden": false}, http.StatusOK, nil)
+	admin.call("GET", "/agents/"+agent.ID+"/configs", nil, http.StatusOK, nil)
+	// Restoring visibility does not hand the toggle to administrators.
+	admin.call("PUT", "/agents/"+agent.ID+"/visibility", map[string]bool{"admin_hidden": true}, http.StatusNotFound, nil)
+	alice.call("PUT", "/agents/"+agent.ID+"/visibility", map[string]bool{"admin_hidden": true}, http.StatusOK, nil)
+	admin.call("DELETE", "/agents/"+agent.ID, nil, http.StatusNoContent, nil)
 }

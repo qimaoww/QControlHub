@@ -280,6 +280,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/overview", s.requirePermission(core.PermissionOverviewRead, http.HandlerFunc(s.overview)))
 	mux.Handle("GET /api/v1/agents", s.requirePermission(core.PermissionAgentsRead, http.HandlerFunc(s.listAgents)))
 	mux.Handle("GET /api/v1/agent-access", s.requireAllPermissions(nil, http.HandlerFunc(s.getOwnAgentAccess)))
+	mux.Handle("GET /api/v1/agent-directory", s.requirePermission(core.PermissionAgentsRead, http.HandlerFunc(s.listAgentDirectory)))
 	mux.Handle("POST /api/v1/agent-access/{id}/response", s.requireAllPermissions(nil, http.HandlerFunc(s.respondAgentShare)))
 	mux.Handle("GET /api/v1/deployments", s.requirePermission(core.PermissionDeploymentsRead, http.HandlerFunc(s.listDeployments)))
 	mux.Handle("GET /api/v1/client-access", s.requirePermission(core.PermissionClientAccessRead, http.HandlerFunc(s.listClientAccess)))
@@ -308,6 +309,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/agents/{id}/komari", s.requirePermission(core.PermissionAgentsRead, http.HandlerFunc(s.getAgentKomari)))
 	mux.Handle("PUT /api/v1/agents/{id}/komari", s.requirePermission(core.PermissionAgentsManage, http.HandlerFunc(s.putAgentKomari)))
 	mux.Handle("PUT /api/v1/agents/{id}/name", s.requirePermission(core.PermissionAgentsManage, http.HandlerFunc(s.putAgentName)))
+	mux.Handle("PUT /api/v1/agents/{id}/visibility", s.requirePermission(core.PermissionAgentsManage, http.HandlerFunc(s.putAgentVisibility)))
 	mux.Handle("GET /api/v1/agents/{id}/sharing", s.requirePermission(core.PermissionAgentsManage, http.HandlerFunc(s.getAgentSharing)))
 	mux.Handle("PUT /api/v1/agents/{id}/sharing", s.requirePermission(core.PermissionAgentsManage, http.HandlerFunc(s.putAgentSharing)))
 	mux.Handle("PUT /api/v1/agents/{id}/capabilities/{engine}", s.requirePermission(core.PermissionAgentsManage, http.HandlerFunc(s.putAgentEngineCapability)))
@@ -1041,13 +1043,14 @@ func ptr[T any](value T) *T { return &value }
 
 func (s *Server) createEnrollmentToken(w http.ResponseWriter, request *http.Request) {
 	var input struct {
-		Name string `json:"name"`
+		Name        string `json:"name"`
+		AdminHidden bool   `json:"admin_hidden"`
 	}
 	if err := decodeJSON(w, request, &input, 16<<10); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	requestData := core.EnrollmentTokenRequest{Name: input.Name, Reusable: true}
+	requestData := core.EnrollmentTokenRequest{Name: input.Name, Reusable: true, AdminHidden: input.AdminHidden}
 	var created core.EnrollmentTokenCreated
 	var err error
 	if s.auditWriter == nil {

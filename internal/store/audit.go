@@ -63,6 +63,7 @@ func (s *Store) ListAuditLogs(ctx context.Context, limit int) ([]core.AuditLogEn
 	}
 	args := []any{limit}
 	where := ownerClause(ctx, "owner_id", &args)
+	where += hiddenAgentClause(ctx, "audit_logs.target", &args)
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, acted_at, actor, action, target, detail, remote_ip
 		FROM audit_logs WHERE true`+where+` ORDER BY acted_at DESC, id DESC LIMIT $1`, args...)

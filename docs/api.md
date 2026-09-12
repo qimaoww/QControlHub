@@ -206,11 +206,18 @@ schema 44 的策略响应增加 `accounting`：`source` 为 `core-api`、`nft-du
 
 ```json
 {
-  "name": "edge-01"
+  "name": "edge-01",
+  "admin_hidden": false
 }
 ```
 
-`name` 同时是凭证绑定的节点名称。接口始终创建无有效期、可重复安装的添加节点命令；重复注册会更新原节点的密钥并复用节点 ID。创建时控制面保存用于认证的 SHA-256 摘要，并使用 `QCH_CONFIG_ENCRYPTION_KEY` 保存受保护的 AEAD 可恢复副本；专用读取接口带有 `Cache-Control: no-store`，普通列表与 Agent API 永不返回凭据。查看是幂等读，不增加记录、使用次数或轮换 secret。缺少当前密钥、密钥不匹配、密文损坏以及升级前仅有摘要的旧记录均 fail closed；旧记录仍可继续安装和删除，但因原文不可逆而无法查看。删除某条添加记录后，仅对应命令立即失效；删除节点会使该节点的全部安装命令失效。
+`name` 同时是凭证绑定的节点名称；`admin_hidden` 可选（缺省为 `false`），为 `true` 时节点首次注册后即对管理员隐藏。接口始终创建无有效期、可重复安装的添加节点命令；重复注册会更新原节点的密钥并复用节点 ID。创建时控制面保存用于认证的 SHA-256 摘要，并使用 `QCH_CONFIG_ENCRYPTION_KEY` 保存受保护的 AEAD 可恢复副本；专用读取接口带有 `Cache-Control: no-store`，普通列表与 Agent API 永不返回凭据。查看是幂等读，不增加记录、使用次数或轮换 secret。缺少当前密钥、密钥不匹配、密文损坏以及升级前仅有摘要的旧记录均 fail closed；旧记录仍可继续安装和删除，但因原文不可逆而无法查看。删除某条添加记录后，仅对应命令立即失效；删除节点会使该节点的全部安装命令失效。
+
+### 节点对管理员的可见性
+
+所有者可在添加节点时勾选、或之后用 `PUT /api/v1/agents/{id}/visibility` 切换，请求与响应为 `{"admin_hidden":true}`。开启后该节点对管理员和兼容令牌在节点列表、详情、配置、任务、部署、日志、指标、流量、审计与安装凭据中一律不可见（直接访问返回 `404`），改名、部署、启停、分享、安装命令以及再次切换隐藏状态等管理动作同样被拒绝；所有者与已接受共享的接收者不受影响，后台采集、计费、通知与 Agent 连接继续按所有者设置执行。接口需要 `agents.manage`、节点所有权与 CSRF，并记录 `agent.visibility.updated` 审计。
+
+`GET /api/v1/agent-directory` 是唯一包含隐藏节点的管理视图，仅限管理员角色或部署时配置的兼容令牌；普通账号即使持有 `agents.read` 也返回 `403`。它返回 `[{"id":"agt_…","name":"edge-01","owner_username":"alice","status":"online","capabilities":["mihomo"],"ports":[21001],"admin_hidden":true}]` 形式的只读摘要，不含配置正文、日志、指标、任务或流量。管理员可据此调用 `DELETE /api/v1/agents/{id}` 删除任意账号的节点（含隐藏节点），删除沿用既有身份吊销与级联清理语义。
 
 ### 修改节点名称
 

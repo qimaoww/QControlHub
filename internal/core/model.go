@@ -356,7 +356,33 @@ type Agent struct {
 	PublicKey                  []byte                          `json:"-"`
 	Status                     string                          `json:"status,omitempty"`
 	EnrollmentCommandAvailable bool                            `json:"enrollment_command_available,omitempty"`
-	Reinstalled                bool                            `json:"-"`
+	// AdminHidden lets the owner keep a node out of every administrator view
+	// while the node keeps running and accounting. Only the owner and explicit
+	// share recipients can see or manage it.
+	AdminHidden bool `json:"admin_hidden,omitempty"`
+	// CanHide tells the UI whether this principal may toggle AdminHidden. Only
+	// the node owner can, so administrators and compatibility tokens never see
+	// the control for someone else's node.
+	CanHide     bool `json:"can_hide,omitempty"`
+	Reinstalled bool `json:"-"`
+}
+
+// AgentDirectoryEntry is the read-only cross-account summary behind the
+// "other users' nodes" dialog. It deliberately excludes configuration bodies,
+// logs, metrics and tasks, and remains readable for hidden nodes so an
+// operator can still confirm that a node exists without managing it.
+type AgentDirectoryEntry struct {
+	ID            string    `json:"id"`
+	Name          string    `json:"name"`
+	OwnerID       string    `json:"owner_id"`
+	OwnerUsername string    `json:"owner_username"`
+	Status        string    `json:"status"`
+	Capabilities  []Engine  `json:"capabilities"`
+	Ports         []int     `json:"ports"`
+	AdminHidden   bool      `json:"admin_hidden"`
+	CanManage     bool      `json:"can_manage"`
+	EnrolledAt    time.Time `json:"enrolled_at"`
+	LastSeen      time.Time `json:"last_seen"`
 }
 
 // KomariNode is the read-only billing and traffic configuration returned by a
@@ -491,6 +517,9 @@ type EnrollmentTokenRequest struct {
 	TTLMinutes int    `json:"ttl_minutes"`
 	MaxUses    int    `json:"max_uses"`
 	Reusable   bool   `json:"reusable,omitempty"`
+	// AdminHidden is chosen when the node is added and copied to the Agent on
+	// first enrollment. The owner can change it later from the node settings.
+	AdminHidden bool `json:"admin_hidden,omitempty"`
 }
 
 type EnrollmentTokenCreated struct {

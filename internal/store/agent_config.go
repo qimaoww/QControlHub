@@ -114,7 +114,7 @@ func (s *Store) GetAgent(ctx context.Context, id string) (core.Agent, error) {
 	where := agentAccessClause(ctx, "agents.id", &args)
 	query := scopedAgentsSQL(ctx, &args)
 	err := s.pool.QueryRow(ctx, query+` AND id=$1`+where, args...).Scan(
-		&agent.ID, &agent.Name, &agent.Version, &agent.OS, &agent.Arch, &capabilities, &features, &labels, &runtimeState, &observedPublicIP, &metricsState, &agent.LastSeen, &agent.EnrolledAt, &offlineThresholdSeconds, &agent.SupportedCapabilities, &agent.CapabilityTransitions, &agent.OwnerID, &agent.SharedEngines)
+		&agent.ID, &agent.Name, &agent.Version, &agent.OS, &agent.Arch, &capabilities, &features, &labels, &runtimeState, &observedPublicIP, &metricsState, &agent.LastSeen, &agent.EnrolledAt, &offlineThresholdSeconds, &agent.SupportedCapabilities, &agent.CapabilityTransitions, &agent.OwnerID, &agent.AdminHidden, &agent.SharedEngines)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return core.Agent{}, ErrNotFound
 	}
@@ -148,6 +148,11 @@ func (s *Store) GetAgent(ctx context.Context, id string) (core.Agent, error) {
 func scopeAgentPresentation(ctx context.Context, agent *core.Agent) {
 	scope := scopeForConfig(ctx)
 	agent.CanManage = scope.Admin || agent.OwnerID == scope.OwnerID || strings.HasPrefix(scope.OwnerID, "token_")
+	if requestScope, requestScoped := requestConfigScope(ctx); requestScoped {
+		agent.CanHide = agent.OwnerID == requestScope.OwnerID
+	} else {
+		agent.CanHide = true
+	}
 	for key := range agent.Labels {
 		if strings.HasPrefix(key, "client_profile_") || (!agent.CanManage && key == komariUUIDLabel) {
 			delete(agent.Labels, key)

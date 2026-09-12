@@ -20,6 +20,8 @@ var errorMessages = map[string]string{
 	"upgrade the Agent before validating or deploying independent exits":                                      "请先升级 Agent，再校验或部署独立出口配置。",
 	"task permission is no longer granted":                                                                    "任务权限已被收回，请刷新页面。",
 	"only administrators may manage Agent sharing":                                                            "仅管理员可管理 Agent 分配。",
+	"only administrators may list other users' nodes":                                                         "仅管理员可查看其他用户的节点。",
+	"admin_hidden is required":                                                                                "请选择是否对管理员隐藏此节点。",
 	"only administrators may manage users":                                                                    "仅管理员可管理用户。",
 	"allocation revision is required; reload before saving":                                                   "请重新读取分配后保存。",
 	"Agent allocation changed; reload before saving":                                                          "分配已变更，请重新读取后保存。",

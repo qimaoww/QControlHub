@@ -119,6 +119,47 @@ func (s *Server) putAgentSharing(w http.ResponseWriter, request *http.Request) {
 	writeJSON(w, http.StatusOK, sharing)
 }
 
+func (s *Server) putAgentVisibility(w http.ResponseWriter, request *http.Request) {
+	var input struct {
+		AdminHidden *bool `json:"admin_hidden"`
+	}
+	if err := decodeJSON(w, request, &input, 8<<10); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if input.AdminHidden == nil {
+		writeError(w, http.StatusBadRequest, "admin_hidden is required")
+		return
+	}
+	if err := s.store.SetAgentAdminHidden(request.Context(), request.PathValue("id"), *input.AdminHidden); err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	detail := "visible to administrators"
+	if *input.AdminHidden {
+		detail = "hidden from administrators"
+	}
+	s.recordAudit(request, "agent.visibility.updated", request.PathValue("id"), detail)
+	writeJSON(w, http.StatusOK, map[string]bool{"admin_hidden": *input.AdminHidden})
+}
+
+// listAgentDirectory backs the "other users' nodes" dialog. It is the only
+// administration view that includes owner-hidden nodes, and it is read-only:
+// every management path keeps failing for those nodes.
+func (s *Server) listAgentDirectory(w http.ResponseWriter, request *http.Request) {
+	role, roleOK := s.sessionRole(request)
+	if !roleOK || (role != core.RoleAdmin && bearerToken(request) == "") {
+		writeError(w, http.StatusForbidden, "only administrators may list other users' nodes")
+		return
+	}
+	entries, err := s.store.ListAgentDirectory(request.Context())
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, entries)
+}
+
 func (s *Server) authorizeAgentResource(w http.ResponseWriter, request *http.Request) bool {
 	if s.store == nil {
 		return true // Unit tests may use an authentication-only server.
@@ -131,6 +172,17 @@ func (s *Server) authorizeAgentResource(w http.ResponseWriter, request *http.Req
 		}
 	}
 	if strings.HasPrefix(path, "/api/v1/agents/") || strings.HasPrefix(path, "/api/v1/metrics/") {
+		if request.Method == http.MethodDelete && strings.HasPrefix(path, "/api/v1/agents/") &&
+			request.PathValue("id") != "" && request.PathValue("engine") == "" && !strings.Contains(path, "/configs") {
+			// Administrators may remove any node, including an owner-hidden one,
+			// so a stale node never becomes undeletable. The store re-checks the
+			// same rule inside the delete transaction.
+			if err := s.store.CheckAgentDeletion(request.Context(), request.PathValue("id")); err != nil {
+				writeStoreError(w, err)
+				return false
+			}
+			return true
+		}
 		administration := request.Method != http.MethodGet && request.Method != http.MethodHead &&
 			!strings.Contains(path, "/configs") && !strings.HasSuffix(path, "/client-address")
 		administration = administration || strings.HasSuffix(path, "/sharing") || strings.HasSuffix(path, "/komari")

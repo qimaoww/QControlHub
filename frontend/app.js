@@ -581,7 +581,7 @@ function shell(content, title, { viewKey = state.route } = {}) {
     (state.route === "archive-config" && id === "live-config");
   const nodeOverviewActions =
     state.route === "node-settings" && state.data.nodeView !== "detail"
-      ? `${can("host.manage") && (state.data.agents || []).length > 1 ? `<button class="button small ${state.data.nodeBatchMode ? "primary" : ""}" type="button" data-node-batch-toggle aria-pressed="${state.data.nodeBatchMode ? "true" : "false"}">${state.data.nodeBatchMode ? "退出批量" : "批量操作"}</button>` : ""}${can("enrollment.manage") ? '<button class="button small" type="button" data-open-enrollment>添加节点</button>' : ""}`
+      ? `${can("host.manage") && (state.data.agents || []).length > 1 ? `<button class="button small ${state.data.nodeBatchMode ? "primary" : ""}" type="button" data-node-batch-toggle aria-pressed="${state.data.nodeBatchMode ? "true" : "false"}">${state.data.nodeBatchMode ? "退出批量" : "批量操作"}</button>` : ""}${can("enrollment.manage") ? '<button class="button small" type="button" data-open-enrollment>添加节点</button>' : ""}${state.session.role === "admin" ? '<button class="button small" type="button" data-open-agent-directory>其他用户节点</button>' : ""}`
       : "";
   const topAction =
     state.route === "dashboard"

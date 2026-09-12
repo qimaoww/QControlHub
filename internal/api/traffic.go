@@ -135,8 +135,9 @@ func (s *Server) refreshPortTrafficMonitoring(ctx context.Context, connectedAgen
 
 func (s *Server) refreshSavedAgentTrafficMonitoring(ctx context.Context, agentID string) {
 	// The authorized save has already committed. Reconciliation is fleet
-	// maintenance and must preserve all users' monitors on this same Agent.
-	ctx = store.WithConfigScope(ctx, "", true)
+	// maintenance and must preserve all users' monitors on this same Agent,
+	// including owner-hidden nodes that a request principal cannot observe.
+	ctx = store.WithSystemScope(ctx)
 	configs, err := s.store.AgentConfigsForMonitoring(ctx, agentID)
 	if err != nil {
 		slog.Warn("load saved node traffic endpoints", "agent_id", agentID, "error", err)

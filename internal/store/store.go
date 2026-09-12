@@ -50,7 +50,7 @@ type storeExecutor interface {
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 57
+const currentSchemaVersion = 58
 
 func Open(ctx context.Context, databaseURL string, allowInsecureRemote bool) (*Store, error) {
 	return OpenWithConfigKey(ctx, databaseURL, allowInsecureRemote, "")
@@ -372,6 +372,15 @@ func (s *Store) migrate(ctx context.Context) error {
 			return fmt.Errorf("scope shared engines and invalidate obsolete tasks: %w", err)
 		}
 	}
+	if appliedVersion < 58 {
+		// Owner-hidden nodes stay invisible to every administrator view while
+		// they keep running and accounting. The flag is chosen when the node is
+		// added and copied from the enrollment credential on first enrollment.
+		if _, err := tx.Exec(ctx, `ALTER TABLE IF EXISTS agents ADD COLUMN IF NOT EXISTS admin_hidden boolean NOT NULL DEFAULT false;
+			ALTER TABLE IF EXISTS enrollment_tokens ADD COLUMN IF NOT EXISTS admin_hidden boolean NOT NULL DEFAULT false;`); err != nil {
+			return fmt.Errorf("add owner-hidden node flag: %w", err)
+		}
+	}
 	if _, err := tx.Exec(ctx, `INSERT INTO qcontrolhub_schema_migrations (version) VALUES ($1)`, currentSchemaVersion); err != nil {
 		return fmt.Errorf("record schema migration version: %w", err)
 	}
@@ -418,13 +427,13 @@ func (s *Store) EnrollAgent(ctx context.Context, request core.EnrollRequest, enr
 	defer tx.Rollback(ctx)
 	var enrollmentID, enrollmentName, enrollmentOwner string
 	var enrollmentAgentID *string
-	var reusable bool
+	var reusable, adminHidden bool
 	err = tx.QueryRow(ctx, `
 		UPDATE enrollment_tokens SET used_count=used_count+1
 		WHERE token_hash=$1 AND revoked_at IS NULL
 		  AND (reusable OR (expires_at>now() AND used_count<max_uses))
 		  AND NOT EXISTS(SELECT 1 FROM panel_users u WHERE u.id=enrollment_tokens.owner_id AND u.disabled)
-		RETURNING id,name,reusable,agent_id,owner_id`, tokenDigest[:]).Scan(&enrollmentID, &enrollmentName, &reusable, &enrollmentAgentID, &enrollmentOwner)
+		RETURNING id,name,reusable,agent_id,owner_id,admin_hidden`, tokenDigest[:]).Scan(&enrollmentID, &enrollmentName, &reusable, &enrollmentAgentID, &enrollmentOwner, &adminHidden)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return core.Agent{}, ErrNotFound
 	}
@@ -442,9 +451,9 @@ func (s *Store) EnrollAgent(ctx context.Context, request core.EnrollRequest, enr
 			boundAgentID = strings.TrimSpace(*enrollmentAgentID)
 		}
 		if boundAgentID != "" {
-			err = tx.QueryRow(ctx, `SELECT id,name FROM agents WHERE id=$1 AND owner_id=$2 AND revoked_at IS NULL FOR UPDATE`, boundAgentID, enrollmentOwner).Scan(&id, &name)
+			err = tx.QueryRow(ctx, `SELECT id,name,admin_hidden FROM agents WHERE id=$1 AND owner_id=$2 AND revoked_at IS NULL FOR UPDATE`, boundAgentID, enrollmentOwner).Scan(&id, &name, &adminHidden)
 		} else {
-			err = tx.QueryRow(ctx, `SELECT id,name FROM agents WHERE enrollment_id=$1 AND owner_id=$2 AND revoked_at IS NULL FOR UPDATE`, enrollmentID, enrollmentOwner).Scan(&id, &name)
+			err = tx.QueryRow(ctx, `SELECT id,name,admin_hidden FROM agents WHERE enrollment_id=$1 AND owner_id=$2 AND revoked_at IS NULL FOR UPDATE`, enrollmentID, enrollmentOwner).Scan(&id, &name, &adminHidden)
 		}
 		if errors.Is(err, pgx.ErrNoRows) {
 			if boundAgentID != "" {
@@ -492,10 +501,10 @@ func (s *Store) EnrollAgent(ctx context.Context, request core.EnrollRequest, enr
 		}
 	} else {
 		_, err = tx.Exec(ctx, `
-			INSERT INTO agents (id,name,version,os,arch,capabilities,features,labels,runtime,public_key,last_seen,enrolled_at,enrollment_id,owner_id)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+			INSERT INTO agents (id,name,version,os,arch,capabilities,features,labels,runtime,public_key,last_seen,enrolled_at,enrollment_id,owner_id,admin_hidden)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
 			id, name, strings.TrimSpace(request.Version), strings.TrimSpace(request.OS), strings.TrimSpace(request.Arch),
-			capabilities, features, labels, runtimeState, publicKey, lastSeen, enrolledAt, nullableEnrollmentID(reusable, enrollmentID), enrollmentOwner)
+			capabilities, features, labels, runtimeState, publicKey, lastSeen, enrolledAt, nullableEnrollmentID(reusable, enrollmentID), enrollmentOwner, adminHidden)
 	}
 	if err != nil {
 		return core.Agent{}, mapError(err)
@@ -519,6 +528,7 @@ func (s *Store) EnrollAgent(ctx context.Context, request core.EnrollRequest, enr
 	}
 	return core.Agent{
 		SupportedCapabilities: supported,
+		AdminHidden:           adminHidden,
 		ID:                    id, Name: name, Version: request.Version,
 		OwnerID: enrollmentOwner,
 		OS:      request.OS, Arch: request.Arch, Capabilities: append([]core.Engine{}, request.Capabilities...), Features: append([]string(nil), request.Features...),
@@ -664,9 +674,9 @@ func (s *Store) createEnrollmentTokenWithExecutor(ctx context.Context, executor 
 		value.ExpiresAt = &expiresAt
 	}
 	_, err = executor.Exec(ctx, `
-		INSERT INTO enrollment_tokens (id,name,token_hash,token_ciphertext,expires_at,max_uses,used_count,reusable,created_at,owner_id)
-		VALUES ($1,$2,$3,$4,$5,$6,0,$7,$8,$9)`,
-		value.ID, value.Name, digest[:], tokenCiphertext, value.ExpiresAt, value.MaxUses, value.Reusable, value.CreatedAt, ownerID)
+		INSERT INTO enrollment_tokens (id,name,token_hash,token_ciphertext,expires_at,max_uses,used_count,reusable,created_at,owner_id,admin_hidden)
+		VALUES ($1,$2,$3,$4,$5,$6,0,$7,$8,$9,$10)`,
+		value.ID, value.Name, digest[:], tokenCiphertext, value.ExpiresAt, value.MaxUses, value.Reusable, value.CreatedAt, ownerID, request.AdminHidden)
 	if err != nil {
 		return core.EnrollmentTokenCreated{}, mapError(err)
 	}
@@ -701,6 +711,7 @@ func (s *Store) EnrollmentCommandByID(ctx context.Context, id string) (core.Enro
 	}
 	args := []any{id}
 	where := ownerClause(ctx, "owner_id", &args)
+	where += hiddenAgentClause(ctx, "enrollment_tokens.agent_id", &args)
 	return s.readEnrollmentCommand(ctx, `
 		SELECT id,COALESCE(agent_id,''),name,expires_at,max_uses,used_count,reusable,created_at,revoked_at,token_ciphertext,token_hash
 		FROM enrollment_tokens
@@ -881,6 +892,7 @@ func (s *Store) EnrollmentTokenUsable(ctx context.Context, rawToken string) bool
 func (s *Store) ListEnrollmentTokens(ctx context.Context) ([]core.EnrollmentToken, error) {
 	args := []any{}
 	where := ownerClause(ctx, "owner_id", &args)
+	where += hiddenAgentClause(ctx, "enrollment_tokens.agent_id", &args)
 	rows, err := s.pool.Query(ctx, `
 		SELECT id,COALESCE(agent_id,''),name,expires_at,max_uses,used_count,reusable,created_at,revoked_at,
 		       token_ciphertext,token_hash
@@ -964,6 +976,7 @@ func (s *Store) scanEnrollmentCommandAvailability(rows pgx.Rows) (map[string]boo
 func (s *Store) DeleteEnrollmentToken(ctx context.Context, id string) error {
 	args := []any{id}
 	where := ownerClause(ctx, "owner_id", &args)
+	where += hiddenAgentClause(ctx, "enrollment_tokens.agent_id", &args)
 	command, err := s.pool.Exec(ctx, `DELETE FROM enrollment_tokens WHERE id=$1`+where, args...)
 	if err != nil {
 		return err
@@ -1182,7 +1195,7 @@ const agentColumnsSQL = `
 			SELECT id,name,version,os,arch,capabilities,features,labels,runtime,observed_public_ip,
 				(SELECT metrics FROM agent_live_state WHERE agent_id=agents.id),
 				last_seen,enrolled_at,
-				` + agentOfflineThresholdSQL + `,supported_capabilities,` + capabilityTransitionsSQL + `,owner_id`
+				` + agentOfflineThresholdSQL + `,supported_capabilities,` + capabilityTransitionsSQL + `,owner_id,admin_hidden`
 
 const agentSelectFromSQL = ` FROM agents WHERE revoked_at IS NULL`
 const listAgentsSQLBase = agentColumnsSQL + `,'{}'::text[]` + agentSelectFromSQL
@@ -1205,7 +1218,7 @@ func scanAgents(ctx context.Context, rows pgx.Rows) ([]core.Agent, error) {
 		var capabilities, features, labels, runtimeState, metricsState []byte
 		var observedPublicIP string
 		var offlineThresholdSeconds int
-		if err := rows.Scan(&agent.ID, &agent.Name, &agent.Version, &agent.OS, &agent.Arch, &capabilities, &features, &labels, &runtimeState, &observedPublicIP, &metricsState, &agent.LastSeen, &agent.EnrolledAt, &offlineThresholdSeconds, &agent.SupportedCapabilities, &agent.CapabilityTransitions, &agent.OwnerID, &agent.SharedEngines); err != nil {
+		if err := rows.Scan(&agent.ID, &agent.Name, &agent.Version, &agent.OS, &agent.Arch, &capabilities, &features, &labels, &runtimeState, &observedPublicIP, &metricsState, &agent.LastSeen, &agent.EnrolledAt, &offlineThresholdSeconds, &agent.SupportedCapabilities, &agent.CapabilityTransitions, &agent.OwnerID, &agent.AdminHidden, &agent.SharedEngines); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal(capabilities, &agent.Capabilities); err != nil {
@@ -1235,7 +1248,7 @@ func scanAgents(ctx context.Context, rows pgx.Rows) ([]core.Agent, error) {
 }
 
 func (s *Store) DeleteAgent(ctx context.Context, id string) error {
-	if err := requireAgentAdministration(ctx, s.pool, id); err != nil {
+	if err := requireAgentDeletion(ctx, s.pool, id); err != nil {
 		return err
 	}
 	tx, err := s.pool.Begin(ctx)
@@ -2444,7 +2457,8 @@ CREATE TABLE IF NOT EXISTS agents (
     public_key bytea NOT NULL CHECK (octet_length(public_key) = 32),
     last_seen timestamptz NOT NULL,
     enrolled_at timestamptz NOT NULL,
-    revoked_at timestamptz
+    revoked_at timestamptz,
+    admin_hidden boolean NOT NULL DEFAULT false
 	);
 
 	-- Agent-reported metrics live in agent_live_state. Keeping that snapshot in
@@ -2461,6 +2475,7 @@ CREATE TABLE IF NOT EXISTS agents (
 	ALTER TABLE agents ADD COLUMN IF NOT EXISTS observed_public_ip text NOT NULL DEFAULT '';
 	ALTER TABLE agents ADD COLUMN IF NOT EXISTS owner_id text NOT NULL DEFAULT '';
 	ALTER TABLE agents ADD COLUMN IF NOT EXISTS sharing_revision bigint NOT NULL DEFAULT 1;
+	ALTER TABLE agents ADD COLUMN IF NOT EXISTS admin_hidden boolean NOT NULL DEFAULT false;
 	CREATE INDEX IF NOT EXISTS agents_owner_idx ON agents(owner_id);
 	COMMENT ON COLUMN agents.observed_public_ip IS 'Public address the control plane observed for this Agent''s authenticated WSS session; written from the socket, never reported by the Agent.';
 	ALTER TABLE agents SET (fillfactor = 70);
@@ -2644,7 +2659,8 @@ CREATE TABLE IF NOT EXISTS enrollment_tokens (
 	    used_count integer NOT NULL DEFAULT 0 CHECK (used_count >= 0),
 	    reusable boolean NOT NULL DEFAULT false,
 	    created_at timestamptz NOT NULL,
-	    revoked_at timestamptz
+	    revoked_at timestamptz,
+	    admin_hidden boolean NOT NULL DEFAULT false
 );
 
 ALTER TABLE enrollment_tokens ADD COLUMN IF NOT EXISTS reusable boolean NOT NULL DEFAULT false;
@@ -2654,6 +2670,7 @@ ALTER TABLE enrollment_tokens DROP CONSTRAINT IF EXISTS enrollment_tokens_max_us
 ALTER TABLE enrollment_tokens ADD CONSTRAINT enrollment_tokens_max_uses_check CHECK (max_uses BETWEEN 0 AND 50);
 ALTER TABLE enrollment_tokens ADD COLUMN IF NOT EXISTS agent_id text;
 ALTER TABLE enrollment_tokens ADD COLUMN IF NOT EXISTS owner_id text NOT NULL DEFAULT '';
+ALTER TABLE enrollment_tokens ADD COLUMN IF NOT EXISTS admin_hidden boolean NOT NULL DEFAULT false;
 CREATE INDEX IF NOT EXISTS enrollment_tokens_owner_idx ON enrollment_tokens(owner_id);
 DROP INDEX IF EXISTS enrollment_tokens_reusable_name_unique_idx;
 

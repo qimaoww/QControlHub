@@ -2,11 +2,13 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/qimaoww/qcontrolhub/internal/core"
@@ -19,17 +21,33 @@ func agentAccessClause(ctx context.Context, column string, args *[]any) string {
 }
 
 func agentEngineAccessClause(ctx context.Context, column, engineColumn string, args *[]any) string {
-	scope := scopeForConfig(ctx)
-	if scope.Admin {
+	scope, requestScoped := requestConfigScope(ctx)
+	if !requestScoped {
+		// Background maintenance and Agent execution have no request
+		// principal, so ownership hiding never blocks fleet operations.
 		return ""
 	}
 	*args = append(*args, scope.OwnerID)
 	owner := fmt.Sprintf("$%d", len(*args))
+	// An owner-hidden node stays visible to its owner and to recipients of an
+	// accepted share. Administrators and compatibility tokens that only hold
+	// fleet-wide access must not see or manage it.
+	hidden := ` AND (NOT EXISTS (SELECT 1 FROM agents hidden_agent WHERE hidden_agent.id=` + column + ` AND hidden_agent.admin_hidden)
+		OR EXISTS (SELECT 1 FROM agents owned_agent WHERE owned_agent.id=` + column + ` AND owned_agent.owner_id=` + owner + `)`
+	if !scope.Admin {
+		hidden += ` OR EXISTS (SELECT 1 FROM agent_shares visibility_share
+			WHERE visibility_share.user_id=` + owner + ` AND visibility_share.agent_id=` + column + `
+				AND visibility_share.enabled AND visibility_share.status='accepted' AND cardinality(visibility_share.engines)>0)`
+	}
+	hidden += `)`
+	if scope.Admin {
+		return hidden
+	}
 	engineWhere := ""
 	if engineColumn != "" {
 		engineWhere = ` AND (` + engineColumn + `='' OR ` + engineColumn + `=ANY(access_share.engines))`
 	}
-	return ` AND (NOT EXISTS (SELECT 1 FROM panel_users access_user WHERE access_user.id=` + owner + `)
+	return hidden + ` AND (NOT EXISTS (SELECT 1 FROM panel_users access_user WHERE access_user.id=` + owner + `)
 		OR EXISTS (SELECT 1 FROM panel_users access_user WHERE access_user.id=` + owner + ` AND NOT access_user.disabled
 			AND (EXISTS (SELECT 1 FROM agents owned_agent WHERE owned_agent.id=` + column + ` AND owned_agent.owner_id=` + owner + `)
 				OR EXISTS (SELECT 1 FROM agent_shares access_share
@@ -38,14 +56,21 @@ func agentEngineAccessClause(ctx context.Context, column, engineColumn string, a
 }
 
 // Host-wide operations belong to the node owner, not to recipients of a
-// sharing grant. Compatibility tokens retain their pre-account authority.
+// sharing grant. Administrators and compatibility tokens keep fleet-wide
+// authority, but an owner-hidden node stays administrable only by its owner.
 func agentAdministrationClause(ctx context.Context, column string, args *[]any) string {
-	if scopeForConfig(ctx).Admin {
+	scope, requestScoped := requestConfigScope(ctx)
+	if !requestScoped {
 		return ""
 	}
-	*args = append(*args, scopeForConfig(ctx).OwnerID)
+	*args = append(*args, scope.OwnerID)
 	owner := fmt.Sprintf("$%d", len(*args))
-	return ` AND (NOT EXISTS(SELECT 1 FROM panel_users owner_user WHERE owner_user.id=` + owner + `)
+	hidden := ` AND (NOT EXISTS(SELECT 1 FROM agents hidden_agent WHERE hidden_agent.id=` + column + ` AND hidden_agent.admin_hidden)
+		OR EXISTS(SELECT 1 FROM agents owned_agent WHERE owned_agent.id=` + column + ` AND owned_agent.owner_id=` + owner + `))`
+	if scope.Admin {
+		return hidden
+	}
+	return hidden + ` AND (NOT EXISTS(SELECT 1 FROM panel_users owner_user WHERE owner_user.id=` + owner + `)
 		OR EXISTS(SELECT 1 FROM agents owned_agent JOIN panel_users owner_user ON owner_user.id=owned_agent.owner_id
 			WHERE owned_agent.id=` + column + ` AND owner_user.id=` + owner + ` AND NOT owner_user.disabled))`
 }
@@ -59,8 +84,14 @@ func configAgentAccessClause(ctx context.Context, column, engineColumn string, a
 }
 
 func requireAgentEngineAccess(ctx context.Context, executor storeExecutor, id string, engine core.Engine) error {
-	if scopeForConfig(ctx).Admin {
+	if _, requestScoped := requestConfigScope(ctx); !requestScoped {
 		return nil
+	}
+	if scopeForConfig(ctx).Admin {
+		// Administrators are not scoped by shared engines, and the owner-hidden
+		// rule needs no engine argument. Delegate so the positional arguments
+		// stay dense instead of leaving an unreferenced $2 for PostgreSQL.
+		return requireAgentAccess(ctx, executor, id)
 	}
 	args := []any{id, engine}
 	where := agentEngineAccessClause(ctx, "agents.id", "$2::text", &args)
@@ -80,7 +111,7 @@ func (s *Store) CheckAgentEngineAccess(ctx context.Context, id string, engine co
 }
 
 func requireAgentAccess(ctx context.Context, executor storeExecutor, id string) error {
-	if scopeForConfig(ctx).Admin {
+	if _, requestScoped := requestConfigScope(ctx); !requestScoped {
 		return nil
 	}
 	args := []any{id}
@@ -101,6 +132,125 @@ func (s *Store) CheckAgentAccess(ctx context.Context, id string, administration 
 		return requireAgentAdministration(ctx, s.pool, id)
 	}
 	return requireAgentAccess(ctx, s.pool, id)
+}
+
+// requireAgentDeletion authorizes node removal. Owners remove their own
+// nodes; administrators and compatibility tokens may remove any node,
+// including an owner-hidden one, so a stale node can always be cleaned up
+// without granting them any other access to it.
+func requireAgentDeletion(ctx context.Context, executor storeExecutor, id string) error {
+	scope, requestScoped := requestConfigScope(ctx)
+	if requestScoped && (scope.Admin || strings.HasPrefix(scope.OwnerID, "token_")) {
+		var exists bool
+		if err := executor.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agents WHERE id=$1 AND revoked_at IS NULL)`, id).Scan(&exists); err != nil {
+			return err
+		}
+		if !exists {
+			return ErrNotFound
+		}
+		return nil
+	}
+	return requireAgentAdministration(ctx, executor, id)
+}
+
+func (s *Store) CheckAgentDeletion(ctx context.Context, id string) error {
+	return requireAgentDeletion(ctx, s.pool, id)
+}
+
+// requireNodeOwner grants host-wide authority only to the node owner. Unlike
+// requireAgentAdministration it never widens to administrators, which is what
+// keeps the hide toggle and every other owner-only decision out of their hands.
+func requireNodeOwner(ctx context.Context, executor storeExecutor, agentID string) error {
+	scope, requestScoped := requestConfigScope(ctx)
+	if !requestScoped {
+		return requireAgentAdministration(ctx, executor, agentID)
+	}
+	args := []any{agentID, scope.OwnerID}
+	var allowed bool
+	if err := executor.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agents
+		WHERE id=$1 AND revoked_at IS NULL AND owner_id=$2
+		  AND NOT EXISTS(SELECT 1 FROM panel_users owner_user WHERE owner_user.id=$2 AND owner_user.disabled))`, args...).Scan(&allowed); err != nil {
+		return err
+	}
+	if !allowed {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// SetAgentAdminHidden toggles owner-hidden visibility. Only the node owner can
+// change it: administrators cannot see or manage a hidden node, and they can
+// never hide or unhide a node that belongs to another account.
+func (s *Store) SetAgentAdminHidden(ctx context.Context, id string, hidden bool) error {
+	if err := requireNodeOwner(ctx, s.pool, id); err != nil {
+		return err
+	}
+	command, err := s.pool.Exec(ctx, `UPDATE agents SET admin_hidden=$2 WHERE id=$1 AND revoked_at IS NULL`, id, hidden)
+	if err != nil {
+		return fmt.Errorf("set node administration visibility: %w", err)
+	}
+	if command.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// ListAgentDirectory returns the read-only cross-account summary behind the
+// "other users' nodes" dialog. Administrators and compatibility tokens see
+// every node, including owner-hidden ones, but only summary fields: bodies,
+// logs, metrics, tasks and traffic stay behind the normal ownership rules.
+func (s *Store) ListAgentDirectory(ctx context.Context) ([]core.AgentDirectoryEntry, error) {
+	scope, requestScoped := requestConfigScope(ctx)
+	if !requestScoped || (!scope.Admin && !strings.HasPrefix(scope.OwnerID, "token_")) {
+		return nil, ErrForbidden
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT agents.id,agents.name,agents.owner_id,COALESCE(owner.username,''),agents.last_seen,
+			`+agentOfflineThresholdSQL+`,agents.capabilities,agents.admin_hidden,agents.enrolled_at,
+			COALESCE((SELECT array_agg(DISTINCT policy.port ORDER BY policy.port)
+				FROM port_traffic_policies policy WHERE policy.agent_id=agents.id),'{}'::int[])
+		FROM agents LEFT JOIN panel_users owner ON owner.id=agents.owner_id
+		WHERE agents.revoked_at IS NULL
+		ORDER BY agents.enrolled_at DESC
+		LIMIT 1000`)
+	if err != nil {
+		return nil, fmt.Errorf("list agent directory: %w", err)
+	}
+	defer rows.Close()
+	now := time.Now().UTC()
+	entries := make([]core.AgentDirectoryEntry, 0, 32)
+	for rows.Next() {
+		var entry core.AgentDirectoryEntry
+		var capabilitiesJSON []byte
+		var offlineThresholdSeconds int
+		if err := rows.Scan(&entry.ID, &entry.Name, &entry.OwnerID, &entry.OwnerUsername, &entry.LastSeen,
+			&offlineThresholdSeconds, &capabilitiesJSON, &entry.AdminHidden, &entry.EnrolledAt, &entry.Ports); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(capabilitiesJSON, &entry.Capabilities); err != nil {
+			return nil, err
+		}
+		entry.Status = "offline"
+		if entry.LastSeen.After(now.Add(-time.Duration(offlineThresholdSeconds) * time.Second)) {
+			entry.Status = "online"
+		}
+		entries = append(entries, entry)
+	}
+	return entries, rows.Err()
+}
+
+// hiddenAgentClause keeps rows tied to an owner-hidden node out of every
+// request principal view except that node owner. Background maintenance runs
+// without a scope and is never filtered.
+func hiddenAgentClause(ctx context.Context, column string, args *[]any) string {
+	scope, requestScoped := requestConfigScope(ctx)
+	if !requestScoped {
+		return ""
+	}
+	*args = append(*args, scope.OwnerID)
+	owner := fmt.Sprintf("$%d", len(*args))
+	return ` AND NOT EXISTS(SELECT 1 FROM agents hidden_agent
+		WHERE hidden_agent.id=` + column + ` AND hidden_agent.admin_hidden AND hidden_agent.owner_id<>` + owner + `)`
 }
 
 func (s *Store) IsAgentIsolated(ctx context.Context) (bool, error) {
@@ -158,11 +308,11 @@ func requireAgentAdministration(ctx context.Context, executor storeExecutor, age
 }
 
 func requireHostConfigRead(ctx context.Context, executor storeExecutor, agentID string, engine core.Engine) error {
-	if scopeForConfig(ctx).Admin {
-		return nil
-	}
 	if err := requireAgentAdministration(ctx, executor, agentID); err != nil {
 		return err
+	}
+	if scopeForConfig(ctx).Admin {
+		return nil
 	}
 	var allowed bool
 	if err := executor.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agents WHERE id=$1 AND owner_id=$2)
