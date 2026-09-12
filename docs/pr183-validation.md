@@ -59,6 +59,13 @@ Web 仅在本地 `https://localhost:18483` 提供测试入口。Chromium 检查 
 
 权限审查先复现、再修复并回归了以下问题：排队的所有者读取任务可能在接收者部署后取得其配置；撤销执行能力后旧队列仍可执行；停用再启用账号可能恢复旧租约；工作区可绕过 `metrics.read` 返回指标。补充检查还确认缺少 `independent-egress-v1` 时共享策略不能解除阻断，邀请、运行策略和界面现在统一要求三项共享安全特性。
 
+### 指标权限与宿主边界的补充复审
+
+- 配置模板的 `{{lan_ip}}` 占位符此前只受 `templates.write` 与 `agent-config.write` 保护。未持有 `metrics.read` 的账号可对可访问节点应用含该占位符的模板，把主机私有接口地址渲染进接口返回并保存的配置，绕过节点列表和工作区已有的指标脱敏。现在渲染前按调用者能力失败关闭：缺少 `metrics.read` 时返回 `403`，既不渲染也不保存；持有能力的账号行为不变。回归覆盖 API 侧 `TestPR183AuditTemplateCannotBypassMetricCapability` 与存储层 `TestRenderConfigTemplateRequiresMetricsCapabilityForLanIP`。
+- 复核共享接收方的宿主管理边界：即使同时持有 `agents.manage`、`enrollment.manage` 与 `users.manage`，对已接受共享的节点执行内核能力切换、区域/Komari 修改、再次分享、删除节点、读取安装凭据或安装命令，以及读写他人账号分配，仍全部被资源所有权检查拒绝。回归覆盖 `TestPR183AuditSharedRecipientCannotAdministerHost`。
+- 复核路由级授权：新增的共享与账号管理端点继续遵循 deny-by-default；`/agent-access` 只以调用者自身账号为对象，管理员也不能代他人响应邀请。
+- CI 失败原因已确认并修复：没有 `with_v2ray_api` 的 sing-box 官方构建改用独立 `routing_mark`，Agent 必须先以 `ip rule show` 确认不存在会劫持这些标记的 fwmark 策略路由。Debian CI 镜像缺少 `iproute2` 使迁移回归失败；CI 与一键安装脚本现在都补齐 `iproute2`（dnf/yum 上为 `iproute`），文档同步说明该运行依赖与失败关闭行为。
+
 独立出口回归覆盖特殊统计标签隐藏真实入站、重复及大小写歧义 JSON、sing-box 备用编译路径、TUN/额外隧道、入站 detour、Xray 动态监听及可变路由管理 API。自有节点的显式空监听配置仍可提交独立出口检查；这不放宽共享部署必须有获分配监听端口的约束。
 
 实际页面截图包括 `engines-allocation-light.png`、`engines-expanded-invitation-light.png`、`engines-invitation-dark.png`、`engines-invitation-mobile.png`、`engines-shared-list-light.png`、`engines-shared-list-dark.png`、`engines-shared-list-mobile.png`、`engines-shared-detail-light.png`、`engines-shared-detail-dark.png` 和 `engines-shared-detail-mobile.png`。截图记录各阶段的实际授权状态，未添加说明图层；浅色、深色和触控手机布局均已目视检查。列表和详情的“共享”标记均位于“在线”左侧；自动回归检查相邻顺序、同排对齐以及手机列表和详情无横向裁切。手机验证使用 390 × 844、`isMobile` 和 `hasTouch`，不再仅缩小桌面窗口；自动回归在入场动画完成后检查按钮边界，并检查共享配置按钮和资源区没有裁切。桌面保留整页截图，手机保留真实视口截图，避免长页面捕获重置触控模拟。阶段结果保存在 `engines-results.json`。
