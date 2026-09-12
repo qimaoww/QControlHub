@@ -64,7 +64,7 @@ func TestMigrateV55SharingRequiresConsentAndPreservesLedger(t *testing.T) {
 			t.Fatalf("legacy task was not invalidated: %+v %v", got, err)
 		}
 	}
-	acceptSharedTestInvitations(t, migrated, ctx, user.ID, access)
+	sharedTestAllocation(t, migrated, ctx, user.ID, agent.ID, pending.LimitBytes, pending.Ports...)
 	reopened, err := OpenWithConfigKey(ctx, databaseURL, true, testEncryptionKey("config-scope"))
 	if err != nil {
 		t.Fatal(err)
@@ -288,7 +288,7 @@ func TestMigrateV52AgentSharingKeepsFailedDeploymentsUncertain(t *testing.T) {
 				t.Fatalf("migration trusted unknown deployed content: %v %v", configUncertain, err)
 			}
 			access, err := migrated.SetUserAgentAccess(ctx, user.ID, core.AgentAccessRequest{Isolated: true,
-				Shares: []core.AgentShareRequest{{AgentID: agent.ID, LimitBytes: 1000, Ports: []int{21001}}}})
+				Shares: []core.AgentShareRequest{{AgentID: agent.ID, Engines: []core.Engine{core.EngineMihomo}, LimitBytes: 1000, Ports: []int{21001}}}})
 			if err != nil {
 				t.Fatal(err)
 			}

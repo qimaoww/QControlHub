@@ -142,6 +142,9 @@ func (s *Store) RenderTemplateForAgent(ctx context.Context, templateID, agentID 
 	if err != nil {
 		return core.ConfigTemplate{}, core.Agent{}, "", err
 	}
+	if err := requireAgentEngineAccess(ctx, s.pool, agentID, template.Engine); err != nil {
+		return core.ConfigTemplate{}, core.Agent{}, "", err
+	}
 	rendered, err := RenderConfigTemplate(template.Content, agent)
 	if err != nil {
 		return core.ConfigTemplate{}, core.Agent{}, "", err

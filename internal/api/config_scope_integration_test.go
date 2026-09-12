@@ -123,7 +123,7 @@ func enrollConfigScopeAPIAgent(t *testing.T, ctx context.Context, db *store.Stor
 		t.Fatal(err)
 	}
 	agent, err := db.EnrollAgent(ctx, core.EnrollRequest{Name: "shared-host", OS: "linux", Arch: "amd64",
-		Capabilities: []core.Engine{core.EngineMihomo}, Features: []string{core.AgentFeatureManagedConfigRead, core.AgentFeatureSharedTraffic},
+		Capabilities: []core.Engine{core.EngineMihomo}, Features: []string{core.AgentFeatureManagedConfigRead, core.AgentFeatureSharedTraffic, core.AgentFeatureSharedEngines, core.AgentFeatureIndependentEgress},
 		PublicKey: authn.EncodePublicKey(randomEnrollmentKey(t))}, token.Token)
 	if err != nil {
 		t.Fatal(err)
@@ -147,9 +147,9 @@ func grantConfigScopeAPIAgent(t *testing.T, ctx context.Context, db *store.Store
 	for _, share := range access.Shares {
 		enabled := share.Enabled
 		request.Shares = append(request.Shares, core.AgentShareRequest{AgentID: share.AgentID,
-			Ports: share.Ports, LimitBytes: share.LimitBytes, Enabled: &enabled})
+			Engines: share.Engines, Ports: share.Ports, LimitBytes: share.LimitBytes, Enabled: &enabled})
 	}
-	request.Shares = append(request.Shares, core.AgentShareRequest{AgentID: agent.ID, Ports: ports})
+	request.Shares = append(request.Shares, core.AgentShareRequest{AgentID: agent.ID, Engines: agent.Capabilities, Ports: ports})
 	if _, err := db.SetUserAgentAccess(ctx, client.userID, request); err != nil {
 		t.Fatal(err)
 	}

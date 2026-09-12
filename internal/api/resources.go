@@ -174,6 +174,7 @@ func (s *Server) agentConfigWorkspace(w http.ResponseWriter, request *http.Reque
 		writeError(w, http.StatusBadRequest, "agent does not support the requested engine")
 		return
 	}
+	s.redactAgentMetrics(request, &agent)
 	catalog, err := configschema.CatalogFor(engine)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())

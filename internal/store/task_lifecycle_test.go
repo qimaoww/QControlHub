@@ -154,7 +154,7 @@ func TestTaskCancelRetryAndFiltersWithPostgreSQL(t *testing.T) {
 
 	agent, enrollmentID := enrollTaskTestAgent(t, ctx, dataStore)
 	defer cleanupTaskTestAgent(dataStore, agent.ID, enrollmentID)
-	firstContent := "mixed-port: 7890\nmode: rule\nrules:\n  - MATCH,DIRECT\n"
+	firstContent := "listeners: [{name: first, type: http, port: 7890}]\nmode: rule\nrules:\n  - MATCH,DIRECT\n"
 	config, err := dataStore.SaveAgentConfig(ctx, core.Config{
 		AgentID: agent.ID, Name: "task lifecycle v1", Engine: core.EngineMihomo, Content: firstContent,
 	}, 0)
@@ -211,7 +211,7 @@ func TestTaskCancelRetryAndFiltersWithPostgreSQL(t *testing.T) {
 		t.Fatalf("canceled task payload cleared = %v, %v", payloadCleared, err)
 	}
 
-	secondContent := "mixed-port: 7891\nmode: global\nrules:\n  - MATCH,DIRECT\n"
+	secondContent := "listeners: [{name: second, type: http, port: 7891}]\nmode: rule\nrules:\n  - MATCH,DIRECT\n"
 	updated, err := dataStore.SaveAgentConfig(ctx, core.Config{
 		AgentID: agent.ID, Name: "task lifecycle v2", Engine: core.EngineMihomo, Content: secondContent,
 	}, config.Version)
@@ -282,7 +282,7 @@ func TestCreateTaskCoalescesEquivalentActiveRequestsWithPostgreSQL(t *testing.T)
 	defer cleanupTaskTestAgent(dataStore, agent.ID, enrollmentID)
 	config, err := dataStore.SaveAgentConfig(ctx, core.Config{
 		AgentID: agent.ID, Name: "coalesced task v1", Engine: core.EngineMihomo,
-		Content: "mixed-port: 7890\nmode: rule\nrules:\n  - MATCH,DIRECT\n",
+		Content: "listeners: [{name: first, type: http, port: 7890}]\nmode: rule\nrules:\n  - MATCH,DIRECT\n",
 	}, 0)
 	if err != nil {
 		t.Fatalf("save initial configuration: %v", err)
@@ -339,7 +339,7 @@ func TestCreateTaskCoalescesEquivalentActiveRequestsWithPostgreSQL(t *testing.T)
 
 	updated, err := dataStore.SaveAgentConfig(ctx, core.Config{
 		AgentID: agent.ID, Name: "coalesced task v2", Engine: core.EngineMihomo,
-		Content: "mixed-port: 7891\nmode: global\nrules:\n  - MATCH,DIRECT\n",
+		Content: "listeners: [{name: second, type: http, port: 7891}]\nmode: rule\nrules:\n  - MATCH,DIRECT\n",
 	}, config.Version)
 	if err != nil {
 		t.Fatalf("save updated configuration: %v", err)
@@ -376,7 +376,7 @@ func TestDeployAdvancesLatestDeploymentWithPostgreSQL(t *testing.T) {
 	defer cleanupTaskTestAgent(dataStore, agent.ID, enrollmentID)
 	config, err := dataStore.SaveAgentConfig(ctx, core.Config{
 		AgentID: agent.ID, Name: "deployment target", Engine: core.EngineMihomo,
-		Content: "mixed-port: 7890\nmode: rule\nrules:\n  - MATCH,DIRECT\n",
+		Content: "listeners: [{name: first, type: http, port: 7890}]\nmode: rule\nrules:\n  - MATCH,DIRECT\n",
 	}, 0)
 	if err != nil {
 		t.Fatalf("save deployment configuration: %v", err)
@@ -876,7 +876,7 @@ func enrollTaskTestAgent(t *testing.T, ctx context.Context, dataStore *Store) (c
 	agent, err := dataStore.EnrollAgent(ctx, core.EnrollRequest{
 		Name: "task-lifecycle-agent", OS: "linux", Arch: "amd64",
 		Capabilities: []core.Engine{core.EngineMihomo},
-		Features:     []string{core.AgentFeatureSelfUpgrade, core.AgentFeatureManagedConfigRead},
+		Features:     []string{core.AgentFeatureSelfUpgrade, core.AgentFeatureManagedConfigRead, core.AgentFeatureIndependentEgress},
 		PublicKey:    base64.RawURLEncoding.EncodeToString(publicKey),
 	}, enrollment.Token)
 	if err != nil {
@@ -900,7 +900,7 @@ func enrollTaskTestAgentWithSource(t *testing.T, ctx context.Context, dataStore 
 	agent, err := dataStore.EnrollAgent(ctx, core.EnrollRequest{
 		Name: "task-lifecycle-source-agent", OS: "linux", Arch: "amd64",
 		Capabilities: []core.Engine{core.EngineMihomo},
-		Features:     []string{core.AgentFeatureSelfUpgrade, core.AgentFeatureMihomoDevelopmentSource},
+		Features:     []string{core.AgentFeatureSelfUpgrade, core.AgentFeatureMihomoDevelopmentSource, core.AgentFeatureIndependentEgress},
 		PublicKey:    base64.RawURLEncoding.EncodeToString(publicKey),
 	}, enrollment.Token)
 	if err != nil {

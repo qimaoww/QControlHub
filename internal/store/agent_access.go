@@ -15,17 +15,26 @@ import (
 // Column names are constants from store code. Evaluate grants in the database,
 // not a login-time cache, so revocation also applies to existing sessions.
 func agentAccessClause(ctx context.Context, column string, args *[]any) string {
+	return agentEngineAccessClause(ctx, column, "", args)
+}
+
+func agentEngineAccessClause(ctx context.Context, column, engineColumn string, args *[]any) string {
 	scope := scopeForConfig(ctx)
 	if scope.Admin {
 		return ""
 	}
 	*args = append(*args, scope.OwnerID)
 	owner := fmt.Sprintf("$%d", len(*args))
+	engineWhere := ""
+	if engineColumn != "" {
+		engineWhere = ` AND (` + engineColumn + `='' OR ` + engineColumn + `=ANY(access_share.engines))`
+	}
 	return ` AND (NOT EXISTS (SELECT 1 FROM panel_users access_user WHERE access_user.id=` + owner + `)
 		OR EXISTS (SELECT 1 FROM panel_users access_user WHERE access_user.id=` + owner + ` AND NOT access_user.disabled
 			AND (EXISTS (SELECT 1 FROM agents owned_agent WHERE owned_agent.id=` + column + ` AND owned_agent.owner_id=` + owner + `)
 				OR EXISTS (SELECT 1 FROM agent_shares access_share
-				WHERE access_share.user_id=access_user.id AND access_share.agent_id=` + column + ` AND access_share.enabled AND access_share.status='accepted'))))`
+				WHERE access_share.user_id=access_user.id AND access_share.agent_id=` + column + `
+					AND access_share.enabled AND access_share.status='accepted' AND cardinality(access_share.engines)>0` + engineWhere + `))))`
 }
 
 // Host-wide operations belong to the node owner, not to recipients of a
@@ -41,12 +50,33 @@ func agentAdministrationClause(ctx context.Context, column string, args *[]any) 
 			WHERE owned_agent.id=` + column + ` AND owner_user.id=` + owner + ` AND NOT owner_user.disabled))`
 }
 
-func configAgentAccessClause(ctx context.Context, column string, args *[]any) string {
-	clause := agentAccessClause(ctx, column, args)
+func configAgentAccessClause(ctx context.Context, column, engineColumn string, args *[]any) string {
+	clause := agentEngineAccessClause(ctx, column, engineColumn, args)
 	if clause == "" {
 		return ""
 	}
 	return ` AND (` + column + ` IS NULL OR (true` + clause + `))`
+}
+
+func requireAgentEngineAccess(ctx context.Context, executor storeExecutor, id string, engine core.Engine) error {
+	if scopeForConfig(ctx).Admin {
+		return nil
+	}
+	args := []any{id, engine}
+	where := agentEngineAccessClause(ctx, "agents.id", "$2::text", &args)
+	var allowed bool
+	if err := executor.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agents
+		WHERE id=$1 AND revoked_at IS NULL`+where+`)`, args...).Scan(&allowed); err != nil {
+		return err
+	}
+	if !allowed {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) CheckAgentEngineAccess(ctx context.Context, id string, engine core.Engine) error {
+	return requireAgentEngineAccess(ctx, s.pool, id, engine)
 }
 
 func requireAgentAccess(ctx context.Context, executor storeExecutor, id string) error {
@@ -163,7 +193,7 @@ func (s *Store) UserAgentAccess(ctx context.Context, userID string) (core.AgentA
 	}
 	rows, err := s.pool.Query(ctx, `SELECT share.id,share.user_id,share.agent_id,agent.name,share.enabled,
 		share.status,share.invitation_revision,COALESCE(agent_owner.username,''),
-		share.limit_bytes,share.used_bytes,share.created_at,share.updated_at,
+		share.limit_bytes,share.used_bytes,share.created_at,share.updated_at,share.engines,
 		ARRAY(SELECT reserved.port FROM agent_share_ports reserved WHERE reserved.share_id=share.id ORDER BY reserved.port)
 		FROM agent_shares share JOIN agents agent ON agent.id=share.agent_id
 		LEFT JOIN panel_users agent_owner ON agent_owner.id=agent.owner_id
@@ -176,7 +206,7 @@ func (s *Store) UserAgentAccess(ctx context.Context, userID string) (core.AgentA
 		var share core.AgentShare
 		if err := rows.Scan(&share.ID, &share.UserID, &share.AgentID, &share.AgentName, &share.Enabled,
 			&share.Status, &share.InvitationRevision, &share.OwnerUsername,
-			&share.LimitBytes, &share.UsedBytes, &share.CreatedAt, &share.UpdatedAt, &share.Ports); err != nil {
+			&share.LimitBytes, &share.UsedBytes, &share.CreatedAt, &share.UpdatedAt, &share.Engines, &share.Ports); err != nil {
 			return result, err
 		}
 		result.Shares = append(result.Shares, share)
@@ -198,6 +228,11 @@ func (s *Store) SetUserAgentAccess(ctx context.Context, userID string, request c
 			share.LimitBytes > math.MaxInt64 || (index > 0 && shares[index-1].AgentID == share.AgentID) {
 			return core.AgentAccess{}, fmt.Errorf("%w: invalid or duplicate Agent allocation", ErrInvalid)
 		}
+		engines, err := normalizeSharedEngines(share.Engines, shareEnabled(share))
+		if err != nil {
+			return core.AgentAccess{}, err
+		}
+		shares[index].Engines = engines
 		ports := append([]int(nil), share.Ports...)
 		sort.Ints(ports)
 		if len(ports) > 256 {
@@ -288,14 +323,19 @@ func (s *Store) SetUserAgentAccess(ctx context.Context, userID string, request c
 	for _, share := range shares {
 		var features []string
 		var ownerID string
-		if err := tx.QueryRow(ctx, `SELECT features,owner_id FROM agents WHERE id=$1 AND revoked_at IS NULL FOR UPDATE`, share.AgentID).Scan(&features, &ownerID); err != nil {
+		var supported []core.Engine
+		if err := tx.QueryRow(ctx, `SELECT features,owner_id,COALESCE(supported_capabilities,capabilities)
+			FROM agents WHERE id=$1 AND revoked_at IS NULL FOR UPDATE`, share.AgentID).Scan(&features, &ownerID, &supported); err != nil {
 			return core.AgentAccess{}, mapError(err)
 		}
 		if ownerID == userID {
 			return core.AgentAccess{}, fmt.Errorf("%w: the user already owns this Agent", ErrInvalid)
 		}
-		if request.Isolated && shareEnabled(share) && !containsFeature(features, core.AgentFeatureSharedTraffic) {
+		if request.Isolated && shareEnabled(share) && !supportsSharedEngines(features) {
 			return core.AgentAccess{}, fmt.Errorf("%w: upgrade the Agent before assigning a shared traffic allowance", ErrConflict)
+		}
+		if shareEnabled(share) && len(core.IntersectEngines(share.Engines, supported)) != len(share.Engines) {
+			return core.AgentAccess{}, fmt.Errorf("%w: an allocated engine is not supported by this Agent", ErrInvalid)
 		}
 	}
 	if _, err := tx.Exec(ctx, `UPDATE panel_users SET agent_isolation=$2,agent_access_revision=agent_access_revision+1,updated_at=now() WHERE id=$1`, userID, request.Isolated); err != nil {
@@ -306,7 +346,7 @@ func (s *Store) SetUserAgentAccess(ctx context.Context, userID string, request c
 		return core.AgentAccess{}, err
 	}
 	for _, share := range shares {
-		if err := s.setAgentShareTx(ctx, tx, userID, share.AgentID, share.LimitBytes, share.Ports, shareEnabled(share), share.Reinvite); err != nil {
+		if err := s.setAgentShareTx(ctx, tx, userID, share.AgentID, share.LimitBytes, share.Engines, share.Ports, shareEnabled(share), share.Reinvite); err != nil {
 			return core.AgentAccess{}, err
 		}
 	}
@@ -325,16 +365,33 @@ func (s *Store) SetUserAgentAccess(ctx context.Context, userID string, request c
 	return s.UserAgentAccess(ctx, userID)
 }
 
+func supportsSharedEngines(features []string) bool {
+	return containsFeature(features, core.AgentFeatureSharedTraffic) &&
+		containsFeature(features, core.AgentFeatureSharedEngines) &&
+		containsFeature(features, core.AgentFeatureIndependentEgress)
+}
+
 func (s *Store) bindUnmeteredSharedDeploymentTx(ctx context.Context, tx pgx.Tx, shareID, userID, agentID string) error {
 	var needed bool
 	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_engine_ownership state
 		WHERE state.agent_id=$1 AND state.owner_id=$2 AND (state.running OR state.uncertain)
+		AND state.engine=ANY((SELECT engines FROM agent_shares WHERE id=$3)::text[])
 		AND NOT EXISTS(SELECT 1 FROM port_traffic_policies p WHERE p.agent_id=state.agent_id
 			AND p.engine=state.engine AND p.share_id=$3))`, agentID, userID, shareID).Scan(&needed)
 	if err != nil || !needed {
 		return err
 	}
 	return s.bindCurrentSharedDeploymentTx(ctx, tx, shareID, userID, agentID)
+}
+
+func normalizeSharedEngines(engines []core.Engine, enabled bool) ([]core.Engine, error) {
+	if err := core.ValidateEngineCapabilities(engines); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalid, err)
+	}
+	if enabled && len(engines) == 0 {
+		return nil, fmt.Errorf("%w: select at least one shared engine", ErrInvalid)
+	}
+	return core.IntersectEngines(core.AllEngines(), engines), nil
 }
 
 func shareEnabled(request core.AgentShareRequest) bool {

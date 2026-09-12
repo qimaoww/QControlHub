@@ -37,11 +37,11 @@ func TestSSRustScopedConfigAPIWithPostgreSQL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := dataStore.EnrollAgent(ctx, core.EnrollRequest{Name: "scopes", OS: "linux", Arch: "amd64", Capabilities: []core.Engine{core.EngineShadowsocksRust}, PublicKey: authn.EncodePublicKey(randomEnrollmentKey(t))}, enrollment.Token)
+	agent, err := dataStore.EnrollAgent(ctx, core.EnrollRequest{Name: "scopes", OS: "linux", Arch: "amd64", Capabilities: []core.Engine{core.EngineShadowsocksRust}, Features: []string{core.AgentFeatureIndependentEgress}, PublicKey: authn.EncodePublicKey(randomEnrollmentKey(t))}, enrollment.Token)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := dataStore.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Runtime: map[core.Engine]core.RuntimeState{core.EngineShadowsocksRust: {Installed: true}}}); err != nil {
+	if err := dataStore.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Features: []string{core.AgentFeatureIndependentEgress}, Runtime: map[core.Engine]core.RuntimeState{core.EngineShadowsocksRust: {Installed: true}}}); err != nil {
 		t.Fatal(err)
 	}
 	const initial = `{"dns":"1.1.1.1","mode":"tcp_and_udp","timeout":75,"servers":[{"id":"one","server":"::","server_port":20001,"method":"aes-256-gcm","password":"password-one-long","mode":"tcp_only"},{"id":"two","server":"::","server_port":20002,"method":"aes-256-gcm","password":"password-two-long","mode":"udp_only"}]}`

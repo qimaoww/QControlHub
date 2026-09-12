@@ -87,7 +87,7 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 	enrollmentBody, _ := json.Marshal(core.EnrollRequest{
 		Name: "integration-agent", OS: "linux", Arch: "amd64",
 		Capabilities: []core.Engine{core.EngineMihomo},
-		Features:     []string{core.AgentFeatureSelfUpgrade, core.AgentFeaturePortTraffic, core.AgentFeatureMihomoDevelopmentSource, core.AgentFeatureManagedConfigRead},
+		Features:     []string{core.AgentFeatureSelfUpgrade, core.AgentFeaturePortTraffic, core.AgentFeatureMihomoDevelopmentSource, core.AgentFeatureManagedConfigRead, core.AgentFeatureIndependentEgress},
 		PublicKey:    authn.EncodePublicKey(publicKey),
 	})
 	request, _ := http.NewRequestWithContext(ctx, http.MethodPost, httpServer.URL+"/agent/v1/enroll", bytes.NewReader(enrollmentBody))
@@ -183,7 +183,7 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 		t.Fatal(err)
 	}
 	heartbeat := core.WireMessage{Type: core.WireHeartbeat, Heartbeat: &core.HeartbeatRequest{
-		Version: "test", Features: []string{core.AgentFeatureSelfUpgrade, core.AgentFeaturePortTraffic, core.AgentFeatureCoreLogs, core.AgentFeatureCoreLogStatus, core.AgentFeatureMihomoDevelopmentSource, core.AgentFeatureManagedConfigRead},
+		Version: "test", Features: []string{core.AgentFeatureSelfUpgrade, core.AgentFeaturePortTraffic, core.AgentFeatureCoreLogs, core.AgentFeatureCoreLogStatus, core.AgentFeatureMihomoDevelopmentSource, core.AgentFeatureManagedConfigRead, core.AgentFeatureIndependentEgress},
 		Runtime: map[core.Engine]core.RuntimeState{core.EngineSingBox: {Installed: true, ServiceStatus: "active", CoreLogStatus: "waiting", CoreLogError: "source-missing"}},
 		TrafficUsage: []core.PortTrafficUsage{{
 			PolicyID: trafficPolicy.ID, ResetGeneration: trafficPolicy.ResetGeneration,
@@ -306,7 +306,7 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 
 	config, err := dataStore.SaveAgentConfig(ctx, core.Config{
 		AgentID: enrolled.AgentID, Name: "integration node configuration", Engine: core.EngineMihomo,
-		Content: "mixed-port: 7890\nproxies: []\nproxy-groups: []\nrules:\n  - MATCH,DIRECT\n",
+		Content: "listeners: [{name: wss, type: http, port: 7890}]\nproxies: []\nrules:\n  - MATCH,DIRECT\n",
 	}, 0)
 	if err != nil {
 		t.Fatalf("create agent config: %v", err)
@@ -380,7 +380,7 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 	// the resumed features are authoritative; send it before resuming.
 	if err := wsjson.Write(ctx, resumedConnection, core.WireMessage{Type: core.WireHeartbeat, Heartbeat: &core.HeartbeatRequest{
 		Version:  "test",
-		Features: []string{core.AgentFeatureSelfUpgrade, core.AgentFeaturePortTraffic, core.AgentFeatureCoreLogs, core.AgentFeatureMihomoDevelopmentSource, core.AgentFeatureManagedConfigRead},
+		Features: []string{core.AgentFeatureSelfUpgrade, core.AgentFeaturePortTraffic, core.AgentFeatureCoreLogs, core.AgentFeatureMihomoDevelopmentSource, core.AgentFeatureManagedConfigRead, core.AgentFeatureIndependentEgress},
 	}}); err != nil {
 		t.Fatalf("write resumed heartbeat: %v", err)
 	}
@@ -507,7 +507,7 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 							t.Fatalf("decode forbidden read-config snapshot response: %v", decodeErr)
 						}
 						_, exposedContent := deniedPayload["content"]
-						if exposedContent || bytes.Contains(body, []byte("mixed-port")) {
+						if exposedContent || bytes.Contains(body, []byte("listeners")) {
 							t.Fatalf("forbidden read-config snapshot exposed plaintext: %q", body)
 						}
 						return

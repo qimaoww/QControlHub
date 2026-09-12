@@ -11,7 +11,7 @@ func TestAgentIsolationAPIRevocationAndAllocationRevision(t *testing.T) {
 	db, ctx, admin, alice, bob := newConfigScopeAPIFixture(t)
 	agent := enrollConfigScopeAPIAgent(t, ctx, db)
 	if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{
-		Features: []string{core.AgentFeatureSharedTraffic, "port-traffic-v1"},
+		Features: []string{core.AgentFeatureSharedTraffic, core.AgentFeatureSharedEngines, core.AgentFeatureIndependentEgress, "port-traffic-v1"},
 		Runtime:  map[core.Engine]core.RuntimeState{core.EngineMihomo: {Installed: true}},
 	}); err != nil {
 		t.Fatal(err)
@@ -22,7 +22,7 @@ func TestAgentIsolationAPIRevocationAndAllocationRevision(t *testing.T) {
 	admin.call("PUT", "/users/"+alice.userID+"/agent-access", map[string]any{"isolated": true}, http.StatusBadRequest, nil)
 	var access core.AgentAccess
 	input := core.AgentAccessRequest{Revision: initial.Revision, Isolated: true,
-		Shares: []core.AgentShareRequest{{AgentID: agent.ID, LimitBytes: 1000, Ports: []int{21001}}}}
+		Shares: []core.AgentShareRequest{{AgentID: agent.ID, Engines: []core.Engine{core.EngineMihomo}, LimitBytes: 1000, Ports: []int{21001}}}}
 	admin.call("PUT", "/users/"+alice.userID+"/agent-access", input, http.StatusOK, &access)
 	admin.call("PUT", "/users/"+alice.userID+"/agent-access", input, http.StatusConflict, nil)
 	access = acceptConfigScopeAPIInvitations(alice)

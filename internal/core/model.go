@@ -69,6 +69,11 @@ const AgentFeaturePairedConfigFiles = "config-files-paired-v1"
 
 const AgentFeatureSystemBBR = "system-bbr-v1"
 
+// Older Agents may fall back to the original config when accounting cannot
+// be compiled. Configuration validation/deployment must negotiate fail-closed
+// independent egress before dispatch.
+const AgentFeatureIndependentEgress = "independent-egress-v1"
+
 const (
 	PublicIPProbeSourceAgent         = "agent-config"
 	PublicIPProbeSourceControlPlane  = "control-plane-config"
@@ -334,6 +339,7 @@ type Agent struct {
 	ID                         string                          `json:"id"`
 	OwnerID                    string                          `json:"-"`
 	CanManage                  bool                            `json:"can_manage"`
+	SharedEngines              []Engine                        `json:"shared_engines,omitempty"`
 	Name                       string                          `json:"name"`
 	Version                    string                          `json:"version,omitempty"`
 	OS                         string                          `json:"os"`

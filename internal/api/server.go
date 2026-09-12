@@ -433,6 +433,14 @@ func (s *Server) listAgents(w http.ResponseWriter, request *http.Request) {
 	writeJSON(w, http.StatusOK, agents)
 }
 
+func (s *Server) redactAgentMetrics(request *http.Request, agent *core.Agent) {
+	role, roleOK := s.sessionRole(request)
+	permissions, permissionsOK := s.sessionPermissions(request)
+	if !roleOK || !permissionsOK || (!role.Allows(core.PermissionMetricsRead) && !core.HasPermission(permissions, core.PermissionMetricsRead)) {
+		agent.Metrics = core.HostMetrics{}
+	}
+}
+
 func (s *Server) putAgentName(w http.ResponseWriter, request *http.Request) {
 	var input struct {
 		Name string `json:"name"`
@@ -1242,7 +1250,7 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 		slog.Error("load agent traffic policies", "agent_id", id, "error", err)
 		return
 	}
-	if err := writeWire(ctx, connection, core.WireMessage{Type: core.WireHello, TrafficPolicies: trafficPoliciesForAgent(trafficPolicies)}); err != nil {
+	if err := writeWire(ctx, connection, core.WireMessage{Type: core.WireHello, TrafficPolicies: trafficPoliciesForSession(trafficPolicies, false)}); err != nil {
 		return
 	}
 	taskTicker := time.NewTicker(2 * time.Second)
@@ -1269,6 +1277,7 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 	var heartbeatReceived bool
 	var managedPublicIPProbe bool
 	var managedAgentPolicy bool
+	var sharedEnginesSupported, independentEgressSupported bool
 	publicIPProbeTrust := func() store.PublicIPProbeTrust {
 		if !heartbeatReceived || !managedPublicIPProbe {
 			return store.PublicIPProbeTrust{}
@@ -1305,7 +1314,7 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 			if err != nil {
 				return err
 			}
-			if err := writeWire(ctx, connection, core.WireMessage{Type: core.WireHello, TrafficPolicies: trafficPoliciesForAgent(policies)}); err != nil {
+			if err := writeWire(ctx, connection, core.WireMessage{Type: core.WireHello, TrafficPolicies: trafficPoliciesForSession(policies, heartbeatReceived)}); err != nil {
 				return err
 			}
 		}
@@ -1328,7 +1337,7 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 			if err != nil {
 				return
 			}
-			if err := writeWire(ctx, connection, core.WireMessage{Type: core.WireHello, TrafficPolicies: trafficPoliciesForAgent(policies)}); err != nil {
+			if err := writeWire(ctx, connection, core.WireMessage{Type: core.WireHello, TrafficPolicies: trafficPoliciesForSession(policies, heartbeatReceived)}); err != nil {
 				return
 			}
 		case <-ctx.Done():
@@ -1354,7 +1363,11 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 				}
 				reportedManagedPublicIPProbe := agentHasFeature(message.Heartbeat.Features, core.AgentFeatureManagedPublicIPProbe)
 				reportedManagedAgentPolicy := agentHasFeature(message.Heartbeat.Features, core.AgentFeatureManagedPolicy)
-				capabilityChanged := heartbeatReceived && (reportedManagedPublicIPProbe != managedPublicIPProbe || reportedManagedAgentPolicy != managedAgentPolicy)
+				reportedSharedEngines := agentHasFeature(message.Heartbeat.Features, core.AgentFeatureSharedEngines)
+				reportedIndependentEgress := agentHasFeature(message.Heartbeat.Features, core.AgentFeatureIndependentEgress)
+				capabilityChanged := heartbeatReceived && (reportedManagedPublicIPProbe != managedPublicIPProbe ||
+					reportedManagedAgentPolicy != managedAgentPolicy || reportedSharedEngines != sharedEnginesSupported ||
+					reportedIndependentEgress != independentEgressSupported)
 				trust := publicIPProbeTrust()
 				if !heartbeatReceived || capabilityChanged {
 					trust = store.PublicIPProbeTrust{}
@@ -1372,6 +1385,23 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 					heartbeatReceived = true
 					managedPublicIPProbe = reportedManagedPublicIPProbe
 					managedAgentPolicy = reportedManagedAgentPolicy
+					sharedEnginesSupported = reportedSharedEngines
+					independentEgressSupported = reportedIndependentEgress
+					// Until this heartbeat, cached features could have belonged
+					// to a newer Agent. Only now may shared ports be unblocked.
+					policies, err := s.store.AgentPortTrafficPolicies(ctx, id)
+					if err != nil {
+						return
+					}
+					for _, policy := range policies {
+						if policy.SharedQuota == nil {
+							continue
+						}
+						if err := writeWire(ctx, connection, core.WireMessage{Type: core.WireHello, TrafficPolicies: trafficPoliciesForSession(policies, true)}); err != nil {
+							return
+						}
+						break
+					}
 					if managedPublicIPProbe {
 						probeConfig := effectivePublicIPProbe
 						if err := writeWire(ctx, connection, core.WireMessage{Type: core.WirePublicIPProbe, PublicIPProbe: &probeConfig}); err != nil {

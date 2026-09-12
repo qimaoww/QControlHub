@@ -44,6 +44,9 @@ func (s *Store) ChangeAgentEngineCapability(ctx context.Context, id string, engi
 	if err := lockAgentUser(ctx, tx); err != nil {
 		return change, err
 	}
+	if err := requireTaskPermission(ctx, tx, core.ActionStop, true); err != nil {
+		return change, err
+	}
 	if err := requireAgentAdministration(ctx, tx, id); err != nil {
 		return change, err
 	}

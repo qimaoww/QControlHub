@@ -164,6 +164,7 @@ export async function testSubStoreScopeRuntime(preview = false) {
   document.querySelector("[data-substore-target-edit]").click();
   form = document.querySelector("[data-substore-target-form]");
   const dialog = document.querySelector("[data-substore-target-dialog]");
+  await Promise.all(dialog.getAnimations().map(animation => animation.finished));
   const body = dialog.querySelector(".traffic-edit-body");
   assert(body.scrollWidth <= body.clientWidth + 1, "sync group options overflow the dialog");
   const footer = form.querySelector("footer").getBoundingClientRect();

@@ -110,13 +110,9 @@ func (s *Store) GetAgent(ctx context.Context, id string) (core.Agent, error) {
 	var offlineThresholdSeconds int
 	args := []any{id}
 	where := agentAccessClause(ctx, "agents.id", &args)
-	err := s.pool.QueryRow(ctx, `
-			SELECT id,name,version,os,arch,capabilities,features,labels,runtime,observed_public_ip,
-				(SELECT metrics FROM agent_live_state WHERE agent_id=agents.id),
-				last_seen,enrolled_at,
-				`+agentOfflineThresholdSQL+`,supported_capabilities,`+capabilityTransitionsSQL+`,owner_id
-			FROM agents WHERE id=$1 AND revoked_at IS NULL`+where, args...).Scan(
-		&agent.ID, &agent.Name, &agent.Version, &agent.OS, &agent.Arch, &capabilities, &features, &labels, &runtimeState, &observedPublicIP, &metricsState, &agent.LastSeen, &agent.EnrolledAt, &offlineThresholdSeconds, &agent.SupportedCapabilities, &agent.CapabilityTransitions, &agent.OwnerID)
+	query := scopedAgentsSQL(ctx, &args)
+	err := s.pool.QueryRow(ctx, query+` AND id=$1`+where, args...).Scan(
+		&agent.ID, &agent.Name, &agent.Version, &agent.OS, &agent.Arch, &capabilities, &features, &labels, &runtimeState, &observedPublicIP, &metricsState, &agent.LastSeen, &agent.EnrolledAt, &offlineThresholdSeconds, &agent.SupportedCapabilities, &agent.CapabilityTransitions, &agent.OwnerID, &agent.SharedEngines)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return core.Agent{}, ErrNotFound
 	}
@@ -157,13 +153,21 @@ func scopeAgentPresentation(ctx context.Context, agent *core.Agent) {
 	}
 	if !agent.CanManage {
 		// Task identities and host log details are not part of a sharing grant.
+		agent.Capabilities = core.IntersectEngines(agent.Capabilities, agent.SharedEngines)
+		agent.SupportedCapabilities = core.IntersectEngines(agent.SupportedCapabilities, agent.SharedEngines)
 		agent.CapabilityTransitions = nil
 		agent.Metrics.BBR = nil
 		for engine, runtime := range agent.Runtime {
-			runtime.CoreLogError = ""
-			runtime.CoreLogStatus = ""
-			agent.Runtime[engine] = runtime
+			if !containsEngine(agent.SharedEngines, engine) {
+				delete(agent.Runtime, engine)
+				continue
+			}
+			agent.Runtime[engine] = core.RuntimeState{
+				Installed: runtime.Installed, Version: runtime.Version, ServiceStatus: runtime.ServiceStatus,
+			}
 		}
+	} else {
+		agent.SharedEngines = nil
 	}
 }
 
@@ -260,7 +264,7 @@ func (s *Store) setAgentClientPreferences(ctx context.Context, id, nameLabel, ad
 // AgentConfig returns this user's workspace for an agent/core pair.
 // Node-owned configurations cannot accidentally be deployed elsewhere.
 func (s *Store) AgentConfig(ctx context.Context, agentID string, engine core.Engine) (core.Config, error) {
-	if err := requireAgentAccess(ctx, s.pool, agentID); err != nil {
+	if err := requireAgentEngineAccess(ctx, s.pool, agentID, engine); err != nil {
 		return core.Config{}, err
 	}
 	var config core.Config
@@ -329,7 +333,7 @@ func (s *Store) listAgentConfigs(ctx context.Context, agentID string, allOwners 
 	}
 	if !allOwners {
 		where += workspaceOwnerClause(ctx, "owner_id", &args)
-		where += agentAccessClause(ctx, "configs.agent_id", &args)
+		where += agentEngineAccessClause(ctx, "configs.agent_id", "configs.engine", &args)
 	} else {
 		// Isolated drafts are not host monitors. Only deployment may bind
 		// their administrator-reserved listeners to cumulative accounting.
@@ -364,7 +368,7 @@ func (s *Store) listAgentConfigs(ctx context.Context, agentID string, allOwners 
 func (s *Store) LatestDeployments(ctx context.Context) ([]core.Deployment, error) {
 	args := []any{}
 	ownerWhere := ownerClause(ctx, "c.owner_id", &args)
-	ownerWhere += agentAccessClause(ctx, "latest.agent_id", &args)
+	ownerWhere += agentEngineAccessClause(ctx, "latest.agent_id", "latest.engine", &args)
 	rows, err := s.pool.Query(ctx, `
 		SELECT latest.agent_id,latest.engine,COALESCE(latest.config_id,''),COALESCE(latest.config_version,0),latest.finished_at
 		FROM (`+latestDeploymentsSQL+`) latest
@@ -443,7 +447,7 @@ func (s *Store) saveAgentConfigTx(ctx context.Context, tx pgx.Tx, input core.Con
 	if err := lockAgentUser(ctx, tx); err != nil {
 		return core.Config{}, err
 	}
-	if err := requireAgentAccess(ctx, tx, input.AgentID); err != nil {
+	if err := requireAgentEngineAccess(ctx, tx, input.AgentID, input.Engine); err != nil {
 		return core.Config{}, err
 	}
 	if metadataMutation != nil && !metadataMutation.Delete && strings.TrimSpace(metadataMutation.Content) != "" && s.cryptor == nil {
@@ -595,7 +599,7 @@ func (s *Store) ConfigClientMetadata(ctx context.Context, configID string, versi
 	}
 	args := []any{configID, version}
 	ownerWhere := ownerClause(ctx, "c.owner_id", &args)
-	ownerWhere += configAgentAccessClause(ctx, "c.agent_id", &args)
+	ownerWhere += configAgentAccessClause(ctx, "c.agent_id", "c.engine", &args)
 	rows, err := s.pool.Query(ctx, `
 		SELECT m.profile_tag,m.content FROM config_client_metadata m
 		JOIN configs c ON c.id=m.config_id

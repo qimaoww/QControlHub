@@ -138,6 +138,17 @@ func (s *Server) authorizeAgentResource(w http.ResponseWriter, request *http.Req
 			writeStoreError(w, err)
 			return false
 		}
+		if value := request.PathValue("engine"); value != "" {
+			engine, err := core.ParseEngine(value)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return false
+			}
+			if err := s.store.CheckAgentEngineAccess(request.Context(), request.PathValue("id"), engine); err != nil {
+				writeStoreError(w, err)
+				return false
+			}
+		}
 	}
 	// Enrollment credentials, settings, integrations and audit entries are
 	// account-owned. Host-wide operations are checked against the specific

@@ -40,11 +40,11 @@ func TestPresetSaveKeepsConnectionAndIndependentExitsWithPostgreSQL(t *testing.T
 		if err != nil {
 			t.Fatal(err)
 		}
-		agent, err := db.EnrollAgent(ctx, core.EnrollRequest{Name: "presets", OS: "linux", Arch: "amd64", Capabilities: []core.Engine{engine}, PublicKey: authn.EncodePublicKey(randomEnrollmentKey(t))}, token.Token)
+		agent, err := db.EnrollAgent(ctx, core.EnrollRequest{Name: "presets", OS: "linux", Arch: "amd64", Capabilities: []core.Engine{engine}, Features: []string{core.AgentFeatureIndependentEgress}, PublicKey: authn.EncodePublicKey(randomEnrollmentKey(t))}, token.Token)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Runtime: map[core.Engine]core.RuntimeState{engine: {Installed: true}}}); err != nil {
+		if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Features: []string{core.AgentFeatureIndependentEgress}, Runtime: map[core.Engine]core.RuntimeState{engine: {Installed: true}}}); err != nil {
 			t.Fatal(err)
 		}
 		return agent
@@ -215,7 +215,7 @@ func TestPresetSaveKeepsConnectionAndIndependentExitsWithPostgreSQL(t *testing.T
 			}
 			// The runtime gate rejects task creation after the store has saved
 			// the candidate inside its transaction. No revision may leak out.
-			if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Runtime: map[core.Engine]core.RuntimeState{engine: {Installed: true, ExistingConfigUnsupportedReason: "test unsafe service"}}}); err != nil {
+			if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Features: []string{core.AgentFeatureIndependentEgress}, Runtime: map[core.Engine]core.RuntimeState{engine: {Installed: true, ExistingConfigUnsupportedReason: "test unsafe service"}}}); err != nil {
 				t.Fatal(err)
 			}
 			call("/source", map[string]any{"name": current.Name, "content": updated.Config.Content, "version": version, "intent": "deploy"}, http.StatusConflict)
@@ -223,7 +223,7 @@ func TestPresetSaveKeepsConnectionAndIndependentExitsWithPostgreSQL(t *testing.T
 			if err != nil || current.Version != version || current.Content != updated.Config.Content {
 				t.Fatal("failed task changed saved revision")
 			}
-			if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Runtime: map[core.Engine]core.RuntimeState{engine: {Installed: true}}}); err != nil {
+			if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Features: []string{core.AgentFeatureIndependentEgress}, Runtime: map[core.Engine]core.RuntimeState{engine: {Installed: true}}}); err != nil {
 				t.Fatal(err)
 			}
 			removed := call("/server-inbounds", map[string]any{"operation": "delete", "original_tag": "first", "expected_version": version, "intent": "validate"}, http.StatusOK)

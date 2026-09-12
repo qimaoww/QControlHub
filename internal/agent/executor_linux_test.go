@@ -381,7 +381,7 @@ func TestManualReadAllowsViewingConfigThatManagedDeployWouldReject(t *testing.T)
 		t.Fatal(err)
 	}
 	configPath := filepath.Join(root, "config.json")
-	content := `{"log":{"access":"/var/log/xray/access.log"},"inbounds":[],"outbounds":[]}`
+	content := `{"log":{"access":"/var/log/xray/access.log"},"inbounds":[{"tag":"a","protocol":"http","port":21001}],"outbounds":[{"protocol":"freedom","tag":"direct"}]}`
 	if err := os.WriteFile(configPath, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}

@@ -26,7 +26,7 @@ func TestAgentInvitationConsentLifecycle(t *testing.T) {
 						t.Fatal(err)
 					}
 					if _, err := db.SetAgentSharing(alice, agent.ID, core.AgentSharingRequest{Revision: sharing.Revision,
-						Shares: []core.AgentSharingRecipient{{Username: user.Username, Enabled: &enabled, Reinvite: reinvite, LimitBytes: limit, Ports: []int{21001}}}}); err != nil {
+						Shares: []core.AgentSharingRecipient{{Username: user.Username, Engines: []core.Engine{core.EngineMihomo}, Enabled: &enabled, Reinvite: reinvite, LimitBytes: limit, Ports: []int{21001}}}}); err != nil {
 						t.Fatal(err)
 					}
 				} else {
@@ -35,7 +35,7 @@ func TestAgentInvitationConsentLifecycle(t *testing.T) {
 						t.Fatal(err)
 					}
 					if _, err := db.SetUserAgentAccess(ctx, user.ID, core.AgentAccessRequest{Revision: access.Revision, Isolated: true,
-						Shares: []core.AgentShareRequest{{AgentID: agent.ID, Enabled: &enabled, Reinvite: reinvite, LimitBytes: limit, Ports: []int{21001}}}}); err != nil {
+						Shares: []core.AgentShareRequest{{AgentID: agent.ID, Engines: []core.Engine{core.EngineMihomo}, Enabled: &enabled, Reinvite: reinvite, LimitBytes: limit, Ports: []int{21001}}}}); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -157,7 +157,7 @@ func TestAgentInvitationResponsesAndEditsSerialize(t *testing.T) {
 			user, bob := sharedTestUser(t, db, ctx, "race-recipient")
 			agent := sharedTestAgent(t, db, alice)
 			sharing, err := db.SetAgentSharing(alice, agent.ID, core.AgentSharingRequest{Revision: 1,
-				Shares: []core.AgentSharingRecipient{{Username: user.Username, LimitBytes: 1000, Ports: []int{21001}}}})
+				Shares: []core.AgentSharingRecipient{{Username: user.Username, Engines: []core.Engine{core.EngineMihomo}, LimitBytes: 1000, Ports: []int{21001}}}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -176,10 +176,10 @@ func TestAgentInvitationResponsesAndEditsSerialize(t *testing.T) {
 				switch change {
 				case "owner-edit":
 					_, err = db.SetAgentSharing(WithConfigScope(timeout, scopeForConfig(alice).OwnerID, false), agent.ID,
-						core.AgentSharingRequest{Revision: sharing.Revision, Shares: []core.AgentSharingRecipient{{Username: user.Username, LimitBytes: 2000, Ports: []int{21001}}}})
+						core.AgentSharingRequest{Revision: sharing.Revision, Shares: []core.AgentSharingRecipient{{Username: user.Username, Engines: []core.Engine{core.EngineMihomo}, LimitBytes: 2000, Ports: []int{21001}}}})
 				case "admin-edit":
 					_, err = db.SetUserAgentAccess(timeout, user.ID, core.AgentAccessRequest{Isolated: true, Revision: access.Revision,
-						Shares: []core.AgentShareRequest{{AgentID: agent.ID, LimitBytes: 2000, Ports: []int{21001}}}})
+						Shares: []core.AgentShareRequest{{AgentID: agent.ID, Engines: []core.Engine{core.EngineMihomo}, LimitBytes: 2000, Ports: []int{21001}}}})
 				default:
 					_, err = db.RespondAgentShare(bob, share.ID, core.AgentShareResponseRequest{Revision: share.InvitationRevision, Decision: "reject"})
 				}
@@ -233,7 +233,7 @@ func TestAgentInvitationRejectInvalidatesRuntimeAndOldLeases(t *testing.T) {
 		t.Fatalf("rejected share exposes traffic page: %+v %v", ownPolicies, err)
 	}
 	if _, err := db.SetUserAgentAccess(ctx, user.ID, core.AgentAccessRequest{Isolated: true, Revision: access.Revision,
-		Shares: []core.AgentShareRequest{{AgentID: agent.ID, Reinvite: true, LimitBytes: 1000, Ports: []int{21001}}}}); err != nil {
+		Shares: []core.AgentShareRequest{{AgentID: agent.ID, Engines: []core.Engine{core.EngineMihomo}, Reinvite: true, LimitBytes: 1000, Ports: []int{21001}}}}); err != nil {
 		t.Fatal(err)
 	}
 	access, _ = db.UserAgentAccess(ctx, user.ID)
@@ -306,8 +306,8 @@ func TestAgentInvitationEditsAndResponsesPreserveTrafficLockOrder(t *testing.T) 
 	carol, _ := sharedTestUser(t, db, ctx, "traffic-carol")
 	agent := sharedTestAgent(t, db, alice)
 	sharing, err := db.SetAgentSharing(alice, agent.ID, core.AgentSharingRequest{Revision: 1, Shares: []core.AgentSharingRecipient{
-		{Username: bob.Username, Ports: []int{21001}, LimitBytes: 1000},
-		{Username: carol.Username, Ports: []int{21002}, LimitBytes: 1000},
+		{Username: bob.Username, Engines: []core.Engine{core.EngineMihomo}, Ports: []int{21001}, LimitBytes: 1000},
+		{Username: carol.Username, Engines: []core.Engine{core.EngineMihomo}, Ports: []int{21002}, LimitBytes: 1000},
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -372,7 +372,7 @@ func TestAgentInvitationEditsAndResponsesPreserveTrafficLockOrder(t *testing.T) 
 			sort.Slice(latest.Shares, func(i, j int) bool { return latest.Shares[i].ID > latest.Shares[j].ID })
 			request := core.AgentSharingRequest{Revision: latest.Revision}
 			for _, share := range latest.Shares {
-				request.Shares = append(request.Shares, core.AgentSharingRecipient{Username: share.Username, Ports: share.Ports, LimitBytes: 1000 + i})
+				request.Shares = append(request.Shares, core.AgentSharingRecipient{Username: share.Username, Engines: share.Engines, Ports: share.Ports, LimitBytes: 1000 + i})
 			}
 			if _, err := db.SetAgentSharing(alice, agent.ID, request); err != nil {
 				errs <- err

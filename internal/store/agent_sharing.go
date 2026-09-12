@@ -19,7 +19,7 @@ func (s *Store) AgentSharing(ctx context.Context, agentID string) (core.AgentSha
 		return result, mapError(err)
 	}
 	rows, err := s.pool.Query(ctx, `SELECT s.id,s.user_id,u.username,u.display_name,s.agent_id,a.name,s.enabled,
-		s.status,s.invitation_revision,s.limit_bytes,s.used_bytes,s.created_at,s.updated_at,
+		s.status,s.invitation_revision,s.limit_bytes,s.used_bytes,s.created_at,s.updated_at,s.engines,
 		ARRAY(SELECT p.port FROM agent_share_ports p WHERE p.share_id=s.id ORDER BY p.port)
 		FROM agent_shares s JOIN panel_users u ON u.id=s.user_id JOIN agents a ON a.id=s.agent_id
 		WHERE s.agent_id=$1 ORDER BY u.username,s.id`, agentID)
@@ -30,7 +30,7 @@ func (s *Store) AgentSharing(ctx context.Context, agentID string) (core.AgentSha
 	for rows.Next() {
 		var share core.AgentShare
 		if err := rows.Scan(&share.ID, &share.UserID, &share.Username, &share.DisplayName, &share.AgentID, &share.AgentName,
-			&share.Enabled, &share.Status, &share.InvitationRevision, &share.LimitBytes, &share.UsedBytes, &share.CreatedAt, &share.UpdatedAt, &share.Ports); err != nil {
+			&share.Enabled, &share.Status, &share.InvitationRevision, &share.LimitBytes, &share.UsedBytes, &share.CreatedAt, &share.UpdatedAt, &share.Engines, &share.Ports); err != nil {
 			return result, err
 		}
 		result.Shares = append(result.Shares, share)
@@ -56,6 +56,11 @@ func (s *Store) SetAgentSharing(ctx context.Context, agentID string, request cor
 		}
 		seen[recipient.Username] = true
 		names = append(names, recipient.Username)
+		engines, err := normalizeSharedEngines(recipient.Engines, recipient.Enabled == nil || *recipient.Enabled)
+		if err != nil {
+			return core.AgentSharing{}, err
+		}
+		recipient.Engines = engines
 		recipient.Ports = append([]int(nil), recipient.Ports...)
 		sort.Ints(recipient.Ports)
 		if len(recipient.Ports) > 256 {
@@ -99,8 +104,9 @@ func (s *Store) SetAgentSharing(ctx context.Context, agentID string, request cor
 	var revision int64
 	var owner string
 	var features []string
-	if err := tx.QueryRow(ctx, `SELECT sharing_revision,owner_id,features FROM agents
-		WHERE id=$1 AND revoked_at IS NULL FOR UPDATE`, agentID).Scan(&revision, &owner, &features); err != nil {
+	var supported []core.Engine
+	if err := tx.QueryRow(ctx, `SELECT sharing_revision,owner_id,features,COALESCE(supported_capabilities,capabilities) FROM agents
+		WHERE id=$1 AND revoked_at IS NULL FOR UPDATE`, agentID).Scan(&revision, &owner, &features, &supported); err != nil {
 		return core.AgentSharing{}, mapError(err)
 	}
 	if revision != request.Revision {
@@ -116,8 +122,11 @@ func (s *Store) SetAgentSharing(ctx context.Context, agentID string, request cor
 		if !exists || user.Role == core.RoleAdmin || user.ID == owner || (enabled && user.Disabled) {
 			return core.AgentSharing{}, fmt.Errorf("%w: recipient is unavailable or already owns this Agent", ErrInvalid)
 		}
-		if enabled && !containsFeature(features, core.AgentFeatureSharedTraffic) {
+		if enabled && !supportsSharedEngines(features) {
 			return core.AgentSharing{}, fmt.Errorf("%w: upgrade the Agent before sharing it", ErrConflict)
+		}
+		if enabled && len(core.IntersectEngines(recipient.Engines, supported)) != len(recipient.Engines) {
+			return core.AgentSharing{}, fmt.Errorf("%w: an allocated engine is not supported by this Agent", ErrInvalid)
 		}
 		userIDs = append(userIDs, user.ID)
 	}
@@ -128,7 +137,7 @@ func (s *Store) SetAgentSharing(ctx context.Context, agentID string, request cor
 	for _, recipient := range recipients {
 		userID := users[recipient.Username].ID
 		enabled := recipient.Enabled == nil || *recipient.Enabled
-		if err := s.setAgentShareTx(ctx, tx, userID, agentID, recipient.LimitBytes, recipient.Ports, enabled, recipient.Reinvite); err != nil {
+		if err := s.setAgentShareTx(ctx, tx, userID, agentID, recipient.LimitBytes, recipient.Engines, recipient.Ports, enabled, recipient.Reinvite); err != nil {
 			return core.AgentSharing{}, err
 		}
 	}

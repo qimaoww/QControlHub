@@ -114,6 +114,12 @@ const testAPI = {
   agents: populatedAgents,
 };
 window.__agentsBrowserTestAPI = testAPI;
+if (mode === "shared-node" || mode === "shared-node-mobile") {
+  testAPI.agents = [
+    { ...populatedAgents[0], can_manage: false, capabilities: ["mihomo"], supported_capabilities: ["mihomo"], shared_engines: ["mihomo"], labels: {}, enrollment_command_available: false },
+    populatedAgents[1],
+  ];
+}
 if (mode === "logs-restore") {
   // Seed the browser store before the application boots so the log page has
   // to restore the previous session's node scope, filters, and live switch.
@@ -245,6 +251,8 @@ window.fetch = async (input, options = {}) => {
   if (method === "GET" && path === "/auth/session")
     return json(mode === "bbr-writeonly"
       ? { role: "user", permissions: ["agents.read", "agents.manage", "tasks.execute"], csrf_token: "browser-test-csrf" }
+      : mode.startsWith("shared-node")
+      ? { role: "user", user_id: "recipient", permissions: ["agents.read", "agents.manage", "enrollment.manage", "agent-config.read", "agent-config.write", "configs.read", "tasks.read", "tasks.execute", "metrics.read"], csrf_token: "browser-test-csrf" }
       : { role: mode === "readonly" || mode.endsWith("-readonly") ? "readonly" : "admin", csrf_token: "browser-test-csrf" });
   if (method === "GET" && path === "/system-tcp/parameters") return json(tcpRules);
   if (method === "GET" && path === "/system-tcp/tasks") {
@@ -1110,6 +1118,40 @@ async function testEmptyRuntime() {
   assert.equal(document.querySelector("#batch-form"), null);
 }
 
+async function testSharedNodeRuntime() {
+  await waitFor(() => document.querySelector('.node-card[data-agent-node="alpha"]'), "共享节点列表未渲染");
+  assert.equal(document.querySelectorAll(".node-card .agent-shared-badge").length, 1, "自有和共享节点没有明确区分");
+  assert.ok(document.querySelector("[data-open-enrollment]"), "共享接收者无法添加自有节点");
+  location.hash = "#settings-node-alpha";
+  await waitFor(() => document.querySelector(".node-operations-workspace"), "共享节点详情未渲染");
+  assert.equal(document.querySelectorAll(".core-runtime-row").length, 1, "详情显示了未分配的内核");
+  assert.equal(document.querySelector(".node-panel-heading h3").textContent, "已分配内核");
+  assert.ok(document.querySelector('[data-config="alpha"][data-engine="mihomo"]'), "共享内核没有独立配置入口");
+  assert.equal(document.querySelector('[data-open-version-form], [data-version-agent], [data-engine-capability], [data-agent-name-form], [data-komari-form], [data-agent-sharing], [data-upgrade-agent], [data-delete], [data-view-enrollment-command]'), null, "共享详情仍显示宿主管理控件");
+  if (mode === "shared-node-mobile") {
+    assert.equal(innerWidth, 390, "手机回归没有使用真实的 390px 视口");
+    assert.ok(matchMedia("(pointer:coarse)").matches, "手机回归没有启用触控设备");
+    for (const selector of [".node-operations-workspace", ".node-resource-strip", ".core-runtime-row", '[data-config="alpha"]']) {
+      const element = document.querySelector(selector), rect = element.getBoundingClientRect();
+      assert.ok(rect.left >= 0 && rect.right <= innerWidth + 1 && element.scrollWidth <= element.clientWidth + 1,
+        `手机共享详情被裁切：${selector}`);
+    }
+  }
+  document.querySelector('[data-node-tab="agent"]').click();
+  assert.ok(document.querySelector('[data-node-panel="agent"] a[href="#my-quota"]'), "共享身份页缺少分配入口");
+  assert.ok(document.querySelector(".node-operations-workspace").scrollWidth <= document.querySelector(".node-operations-workspace").clientWidth + 1, "共享节点详情横向溢出");
+  location.hash = "#settings-node-bravo";
+  await waitFor(() => document.querySelector('[data-agent-name-form="bravo"]'), "自有节点管理未保留");
+  assert.ok(document.querySelector('[data-agent-sharing="bravo"]'), "自有节点不能继续分享");
+  assert.equal(document.querySelector(".agent-shared-badge"), null, "自有节点被标记为共享");
+  location.hash = "#settings-node-alpha";
+  await waitFor(() => document.querySelector('[data-config="alpha"]'), "重新打开共享节点失败");
+  testAPI.agents = [populatedAgents[1]];
+  document.querySelector("[data-agent-refresh]").click();
+  await waitFor(() => document.querySelector("[data-node-missing]"), "撤销后仍保留共享详情");
+  assert.equal(document.querySelector('[data-config="alpha"]'), null, "撤销后保留旧配置操作入口");
+}
+
 async function testReadonlyRuntime() {
   await waitFor(() => document.querySelector(".workspace-main"), "只读聚合页没有完成渲染");
   assertNoPersistentEnrollment();
@@ -1869,6 +1911,7 @@ try {
   else if (mode === "ports") await testPortNamesAndRuntimeRefresh();
   else if (mode === "regions") await testRegionRuntime();
   else if (mode === "empty") await testEmptyRuntime();
+  else if (mode.startsWith("shared-node")) await testSharedNodeRuntime();
   else if (mode === "logs") await testLargeLogRuntime();
   else if (mode === "logs-restore") await testLogPreferenceRestoreRuntime();
   else await testReadonlyRuntime();

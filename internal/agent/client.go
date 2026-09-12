@@ -732,6 +732,8 @@ func (c *Client) advertisedFeatures() []string {
 		core.AgentFeatureSelfUpgrade,
 		core.AgentFeaturePortTraffic,
 		core.AgentFeatureSharedTraffic,
+		core.AgentFeatureSharedEngines,
+		core.AgentFeatureIndependentEgress,
 		core.AgentFeatureCoreLogs,
 		core.AgentFeatureCoreLogStatus,
 		core.AgentFeatureMihomoDevelopmentSource,

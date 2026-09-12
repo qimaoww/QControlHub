@@ -45,6 +45,24 @@ Web 仅在本地 `https://localhost:18483` 提供测试入口。Chromium 检查 
 
 新增截图为 `invitation-dialog-light.png`、`invitation-dialog-dark.png`、`invitation-dialog-mobile-light.png`、`invitation-dialog-mobile-dark.png`；真实状态和流量结果保存在 `invitation-results.json`，均位于上述本地验证目录。
 
+## 内核分配、独立出口与权限复审
+
+继续升级至 schema 57，重新构建并运行控制面、Agent 和 Web。使用 Alice 的个人安装凭据新建专用双内核 Agent，保持此前撤销的共享不变。真实内核为 Mihomo v1.19.30 和 Xray v26.3.27；实机数据库与自动回归数据库分离。
+
+- 首次仅分配 Mihomo。通过真实浏览器完成拒绝、所有者明确重新邀请并保存、接收者接受；邀请弹窗显示内核、端口和总额度。待接受时节点不可访问，所有者和管理员代接受返回 `404`。
+- 接受后，Xray 工作区和任务返回 `404`；再次分享、安装命令、Komari、主机日志及主机服务操作被拒绝。所有者私有配置历史不能被接收者读取；接收者部署后，所有者也不能读取其托管配置快照。
+- `mode: direct` 配置的校验和部署均被独立出口检查拒绝，越权端口不能校验，真实磁盘配置摘要不变。正确的 Mihomo 配置通过真实内核校验并部署，生成独立出站及 routing mark，完成 256 KiB 下载和 64 KiB 上传，累计入账 333,423 字节。
+- 增加 Xray 后重新进入待接受，旧邀请修订返回 `409`，实际 Mihomo 连接阻断。接收者在手机整页弹层重新接受后，由所有者先停止原 Xray 服务并完成交接，再由接收者部署 Xray HTTP 配置。Xray 完成 256 KiB 下载和 64 KiB 上传，Mihomo 同时仍可下载；磁盘上的 Xray 配置包含独立出站。
+- 缩减为仅 Xray 后保留已接受状态，Mihomo 工作区、历史和任务立即不可访问，实际 Mihomo 连接阻断，Xray 仍可传输。Xray 路由转交配置校验失败，未改变运行文件。
+- 两个账号各自的真实 Sub-Store 同步组再次同步成功，可用来源不含其他账号的节点或已撤回内核；请求他人的同步组返回 `404`。
+- 验证结束后停止两个临时内核和客户端、撤销新共享并释放端口，累计 1,200,739 字节账本保留；此前撤销的共享未被恢复，未删除测试数据。
+
+权限审查先复现、再修复并回归了以下问题：排队的所有者读取任务可能在接收者部署后取得其配置；撤销执行能力后旧队列仍可执行；停用再启用账号可能恢复旧租约；工作区可绕过 `metrics.read` 返回指标。补充检查还确认缺少 `independent-egress-v1` 时共享策略不能解除阻断，邀请、运行策略和界面现在统一要求三项共享安全特性。
+
+独立出口回归覆盖特殊统计标签隐藏真实入站、重复及大小写歧义 JSON、sing-box 备用编译路径、TUN/额外隧道、入站 detour、Xray 动态监听及可变路由管理 API。自有节点的显式空监听配置仍可提交独立出口检查；这不放宽共享部署必须有获分配监听端口的约束。
+
+实际页面截图包括 `engines-allocation-light.png`、`engines-expanded-invitation-light.png`、`engines-invitation-dark.png`、`engines-invitation-mobile.png`、`engines-shared-list-light.png`、`engines-shared-list-dark.png`、`engines-shared-detail-light.png`、`engines-shared-detail-dark.png` 和 `engines-shared-detail-mobile.png`。截图记录各阶段的实际授权状态，未添加说明图层；浅色、深色和触控手机布局均已目视检查。手机验证使用 390 × 844、`isMobile` 和 `hasTouch`，不再仅缩小桌面窗口；自动回归在入场动画完成后检查按钮边界，并检查共享配置按钮和资源区没有裁切。阶段结果保存在 `engines-results.json`。
+
 ## 回归检查
 
 使用独立 PostgreSQL 测试库设置 `QCH_TEST_DATABASE_URL`，以下检查通过：
@@ -62,11 +80,19 @@ GOFLAGS='-buildvcs=false -p=1' go test -race ./internal/api \
 GOFLAGS='-buildvcs=false -p=1' go test -race ./internal/store ./internal/api \
   -run 'AgentInvitation|AgentIsolation|SharedTraffic|MigrateV55|AccountsOwn' -count=1
 GOFLAGS='-buildvcs=false -count=1' make test
+GOFLAGS='-buildvcs=false -p=1' go test -race -p 1 \
+  ./internal/store ./internal/api ./internal/agent ./internal/serverconfig \
+  -run 'PR183Audit|SharedEngine|IndependentEgress|SharedTraffic|AgentInvitation|MigrateV5[267]|AccountsOwn|AccountChangesInvalidate|SubStore.*(Independent|Canonical|Concurrent)' \
+  -count=1 -timeout=10m
+GOFLAGS='-buildvcs=false -p=1' go test -race -p 1 ./internal/store ./internal/api \
+  -run 'SharedEngine|PR183Audit|IndependentEgress|SharedPoliciesStayRevoked' -count=1 -timeout=10m
 ```
 
-`make check` 包含前后端测试、全部浏览器模式、vet、格式、文档、迁移策略和安装/升级脚本检查。schema 51 → 56 策略检查通过；迁移回归保留实际部署修订、私有 Sub-Store 后端及客户端显示设置。新增测试还覆盖账号独立保留策略、跨控制面会话撤销、异步审计归属、任务失败 Webhook 发送给任务所有者而不是共享宿主所有者。
+`make check` 包含前后端测试、全部浏览器模式、vet、格式、文档、迁移策略和安装/升级脚本检查。schema 51 → 57 策略检查通过；迁移回归保留实际部署修订、私有 Sub-Store 后端及客户端显示设置。新增测试还覆盖账号独立保留策略、跨控制面会话撤销、异步审计归属、任务失败 Webhook 发送给任务所有者而不是共享宿主所有者。
 
 独立邀请弹窗完成后重跑完整 `make check`、相关浏览器模式及无缓存 `make test`，全部通过，并重新构建、运行控制面及 `qcontrol-web` 镜像。测试入口现在默认按包顺序运行；各测试仍使用独立 schema，避免其他包的长事务干扰 PostgreSQL HOT/表膨胀测量，不放宽性能断言或关闭测试内部并发场景。
+
+内核分配和权限复审完成后再次通过完整 `make check`、上述新增 race 检查及 schema 策略检查，并运行最新构建完成双内核实机流程。触控浏览器回归覆盖共享详情、用户表单、共享弹窗和 Sub-Store；完整前端套件也再次通过。
 
 真实传输测试需预先准备对应内核及测试目录：
 
@@ -80,8 +106,8 @@ go test ./internal/agent \
 
 ## 边界
 
-普通账号资源始终独立，不能关闭隔离。每 Agent 每种内核仍只有一个运行配置；这里的共享是面板权限和固定监听端口计费，不是独立进程或 OS 沙箱。不可信租户需要独立虚拟机/容器及 Agent。约一秒采样可能少量超额。
+普通账号资源始终独立，不能关闭隔离。每 Agent 每种内核仍只有一个运行配置；这里的共享是面板权限和固定监听端口计费，不是独立进程或 OS 沙箱。不可信租户需要独立虚拟机/容器及 Agent。独立出口指每入站可区分的出站标签或 socket mark，不保证不同公网 IP；所有者专用的旧服务精确迁移不等于存量配置已通过新检查。约一秒采样可能少量超额。
 
-本次真实流量、停机交接和故障恢复验证针对 Linux / OpenRC / Mihomo；不代表其他操作系统、所有内核和全部外部集成都已做端到端实测。
+真实流量和停机交接覆盖 Linux / OpenRC / Mihomo、Xray；额度耗尽及离线故障恢复实测针对 Mihomo。不代表其他操作系统、所有内核和全部外部集成都已做端到端实测，也不构成绝对无漏洞保证。
 
 操作及升级要求见 [用户与 Agent 分配](agent-sharing.md)。

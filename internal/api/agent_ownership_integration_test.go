@@ -59,12 +59,15 @@ func TestTaskFailureWebhookUsesTaskOwnerNotSharedHostOwner(t *testing.T) {
 	}
 }
 
-func ownedConfigScopeAPIAgent(t *testing.T, ctx context.Context, db *store.Store, client configScopeAPIClient, name string) (core.Agent, core.EnrollmentTokenCreated) {
+func ownedConfigScopeAPIAgent(t *testing.T, ctx context.Context, db *store.Store, client configScopeAPIClient, name string, engines ...core.Engine) (core.Agent, core.EnrollmentTokenCreated) {
 	t.Helper()
+	if len(engines) == 0 {
+		engines = []core.Engine{core.EngineMihomo}
+	}
 	var token core.EnrollmentTokenCreated
 	client.call("POST", "/enrollment-tokens", map[string]string{"name": name}, http.StatusCreated, &token)
 	agent, err := db.EnrollAgent(ctx, core.EnrollRequest{Name: name, OS: "linux", Arch: "amd64",
-		Capabilities: []core.Engine{core.EngineMihomo}, Features: []string{core.AgentFeatureSharedTraffic, core.AgentFeatureManagedConfigRead},
+		Capabilities: engines, Features: []string{core.AgentFeatureSharedTraffic, core.AgentFeatureSharedEngines, core.AgentFeatureManagedConfigRead, core.AgentFeatureIndependentEgress},
 		PublicKey: authn.EncodePublicKey(randomEnrollmentKey(t))}, token.Token)
 	if err != nil {
 		t.Fatal(err)
@@ -130,7 +133,7 @@ func TestAccountsOwnAgentsSettingsAndSharing(t *testing.T) {
 	var sharing core.AgentSharing
 	alice.call("GET", "/agents/"+own.ID+"/sharing", nil, http.StatusOK, &sharing)
 	request := core.AgentSharingRequest{Revision: sharing.Revision,
-		Shares: []core.AgentSharingRecipient{{Username: "BoB", Ports: []int{21002}, LimitBytes: 1000}}}
+		Shares: []core.AgentSharingRecipient{{Username: "BoB", Engines: []core.Engine{core.EngineMihomo}, Ports: []int{21002}, LimitBytes: 1000}}}
 	alice.call("PUT", "/agents/"+own.ID+"/sharing", request, http.StatusOK, &sharing)
 	alice.call("PUT", "/agents/"+own.ID+"/sharing", request, http.StatusConflict, nil)
 	acceptConfigScopeAPIInvitations(bob)

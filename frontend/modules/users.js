@@ -1,4 +1,5 @@
 import { bindEvent } from "./refresh.js";
+import { sharedEngineChoices, sharedEngineNames } from "./engine-capabilities.js";
 
 const GiB = 1024 ** 3;
 export const userPermissions = [
@@ -20,6 +21,13 @@ export function parseSharedPorts(value) {
   if (ports.length > 256 || ports.some((port) => !Number.isInteger(port) || port < 1 || port > 65535 || port === 10085 || port === 10086) || new Set(ports).size !== ports.length)
     throw new Error("端口须为 1–65535 的不重复整数，不能使用 10085、10086。");
   return ports.sort((left, right) => left - right);
+}
+
+export function selectedSharedEngines(row) {
+  const engines = [...row.querySelectorAll('[name="engines"]:checked')].map(input => input.value);
+  if (row.querySelector('[name="enabled"]').checked && !engines.length)
+    throw new Error("请至少分配一个内核。");
+  return engines;
 }
 
 export function sharedLimitBytes(value) {
@@ -62,6 +70,7 @@ export function installUsers(ctx) {
     rows: [...form.querySelectorAll("[data-share-row]")].map((row) => ({
       agent_id: row.dataset.shareRow,
       enabled: row.querySelector('[name="enabled"]').checked,
+      engines: [...row.querySelectorAll('[name="engines"]:checked')].map(input => input.value),
       limit_gib: row.querySelector('[name="limit_gib"]').value,
       ports_text: row.querySelector('[name="ports"]').value,
       reinvite: row.dataset.reinvite === "true",
@@ -92,11 +101,12 @@ export function installUsers(ctx) {
 
   function shareRow(share, agents) {
     const agent = agents.find((item) => item.id === share.agent_id);
-    const supported = agent?.features?.includes("shared-traffic-v1");
+    const supported = ["shared-traffic-v1", "shared-engines-v1", "independent-egress-v1"].every(feature => agent?.features?.includes(feature));
     return `<div class="user-share-row" data-share-row="${esc(share.agent_id)}" data-reinvite="${Boolean(share.reinvite)}">
       <div class="user-share-identity"><label class="user-share-agent"><input type="checkbox" name="enabled" ${share.enabled ? "checked" : ""}><span><b>${esc(agent?.name || share.agent_name || share.agent_id)}</b><small><span data-share-status>${agentShareStatus(share)}</span> · ${usage(share.used_bytes)} 已用${supported ? "" : " · Agent 需升级"}</small></span></label>${share.status === "rejected" ? `<button class="button small" type="button" data-share-reinvite ${share.reinvite ? "disabled" : ""}>重新邀请</button>` : ""}</div>
       <label class="settings-field"><span>总额度（GiB）</span><input name="limit_gib" type="number" min="0" max="8388607" step="any" required value="${esc(share.limit_gib ?? sharedLimitGiB(share.limit_bytes))}"></label>
       <label class="settings-field"><span>可用端口</span><input name="ports" value="${esc(share.ports_text ?? (share.ports || []).join(", "))}" placeholder="21001, 21002" autocomplete="off"></label>
+      ${sharedEngineChoices(share.engines, agent?.supported_capabilities ?? agent?.capabilities)}
     </div>`;
   }
 
@@ -211,6 +221,7 @@ export function installUsers(ctx) {
         const allocations = [...form.querySelectorAll("[data-share-row]")].map((row) => ({
           agent_id: row.dataset.shareRow,
           enabled: row.querySelector('[name="enabled"]').checked,
+          engines: selectedSharedEngines(row),
           ports: parseSharedPorts(row.querySelector('[name="ports"]').value),
           limit_bytes: sharedLimitBytes(row.querySelector('[name="limit_gib"]').value),
           reinvite: row.dataset.reinvite === "true",
@@ -254,7 +265,7 @@ export function installUsers(ctx) {
         <label>${user ? "新密码（留空不改）" : "密码"}<input name="password" type="password" autocomplete="new-password" minlength="12" maxlength="72" ${user ? "" : "required"}></label>
         <label>角色<select name="role"><option value="user" ${user?.role !== "admin" ? "selected" : ""}>普通用户</option><option value="admin" ${user?.role === "admin" ? "selected" : ""}>管理员</option></select></label>
         ${user ? `<label class="settings-toggle"><span><b>启用账号</b></span><input name="enabled" type="checkbox" ${user.disabled ? "" : "checked"} ${user.id === state.session.user_id ? "disabled" : ""}></label>` : '<p class="settings-hint" data-user-default-isolation>普通用户资源始终独立，可自行添加 Agent，或使用获共享的 Agent。</p>'}
-        <details class="user-permissions" ${user?.role === "admin" ? "hidden" : ""}><summary>操作权限</summary><div>${userPermissions.map(([key, label]) => `<label><input type="checkbox" name="permission" value="${key}" ${selected.has(key) ? "checked" : ""}>${label}</label>`).join("")}</div><p class="settings-hint">主机管理、接入凭据和日志仅限自有 Agent；借用节点只能按分配端口和额度部署个人配置。</p></details>
+        <details class="user-permissions" ${user?.role === "admin" ? "hidden" : ""}><summary>操作权限</summary><div>${userPermissions.map(([key, label]) => `<label><input type="checkbox" name="permission" value="${key}" ${selected.has(key) ? "checked" : ""}>${label}</label>`).join("")}</div><p class="settings-hint">共享节点仅限已分配内核、端口与额度。</p></details>
         <div class="alert error" data-user-error role="alert" hidden></div>
       </div><footer><button class="button" type="button" data-user-close>取消</button><button class="button primary" type="submit">保存账号</button></footer></form>`;
     dialog.querySelectorAll("[data-user-close]").forEach((button) => bindEvent(button, "click", () => dialog.close()));
@@ -321,9 +332,9 @@ export function installUsers(ctx) {
     dialog.innerHTML = `<header><div><h2 id="agent-invitation-title">共享邀请</h2><p id="agent-invitation-origin">所有者 · ${esc(share.owner_username || "管理员")}</p></div><button type="button" class="deploy-command-close" data-invitation-close aria-label="关闭邀请">×</button></header>
       <div class="traffic-edit-body">
         <div class="agent-invitation-node"><span>Agent</span><h3>${esc(share.agent_name)}</h3></div>
-        <dl class="agent-invitation-terms"><div><dt>端口</dt><dd>${esc((share.ports || []).join(", ") || "未分配")}</dd></div><div><dt>总额度</dt><dd>${share.limit_bytes ? usage(share.limit_bytes) : "不限量"}<small>已用 ${usage(share.used_bytes)}</small></dd></div></dl>
+        <dl class="agent-invitation-terms"><div><dt>内核</dt><dd>${sharedEngineNames(share.engines)}</dd></div><div><dt>端口</dt><dd>${esc((share.ports || []).join(", ") || "未分配")}</dd></div><div><dt>总额度</dt><dd>${share.limit_bytes ? usage(share.limit_bytes) : "不限量"}<small>已用 ${usage(share.used_bytes)}</small></dd></div></dl>
         <div class="agent-invitation-error" data-invitation-error hidden><p class="alert error" role="alert"></p><button type="button" class="button small" data-invitation-reload>刷新邀请</button></div>
-      </div><footer><button type="button" class="button" data-share-decision="reject">拒绝</button><button type="button" class="button primary" data-share-decision="accept">接受</button></footer>`;
+      </div><footer><button type="button" class="button" data-share-decision="reject">拒绝</button><button type="button" class="button primary" data-share-decision="accept" ${share.engines?.length ? "" : 'disabled title="等待所有者分配内核"'}>接受</button></footer>`;
     activeInvitation = { dialog, data, share, trigger };
     document.body.append(dialog);
     dialog.showModal();
@@ -338,8 +349,8 @@ export function installUsers(ctx) {
       const button = event.currentTarget, previous = activeInvitation;
       previous.loading = true;
       button.disabled = true;
-      const decisions = [...dialog.querySelectorAll("[data-share-decision]")];
-      decisions.forEach(control => { control.disabled = true; });
+      const decisions = [...dialog.querySelectorAll("[data-share-decision]")].map(control => [control, control.disabled]);
+      decisions.forEach(([control]) => { control.disabled = true; });
       try {
         const latest = await api("/agent-access");
         if (activeInvitation !== previous || data !== state.data || state.route !== "my-quota") return;
@@ -351,7 +362,7 @@ export function installUsers(ctx) {
       } finally {
         previous.loading = false;
         button.disabled = false;
-        decisions.forEach(control => { control.disabled = false; });
+        decisions.forEach(([control, disabled]) => { control.disabled = disabled; });
       }
     });
     if (data.agentShareResponse) lockResponse(data.agentShareResponse);
@@ -403,7 +414,7 @@ export function installUsers(ctx) {
         const accepted = share.enabled && share.status === "accepted";
         const pending = share.enabled && share.status === "pending";
         const status = accepted && exhausted ? "额度已用完" : agentShareStatus(share);
-        return `<article class="workspace-panel user-quota-card" data-quota-share="${esc(share.id)}"><header><div><h3>${esc(share.agent_name)}</h3><small>所有者 · ${esc(share.owner_username || "管理员")}</small></div><span class="status-label ${accepted && !exhausted ? "ok" : "warn"}">${status}</span></header><div><strong>${usage(share.used_bytes)}</strong><span> / ${share.limit_bytes ? usage(share.limit_bytes) : "不限量"}</span>${share.limit_bytes ? `<progress max="100" value="${Math.min(100, share.used_bytes / share.limit_bytes * 100)}" aria-label="已用额度"></progress>` : ""}<small>端口 ${esc((share.ports || []).join(", ") || "未分配")}</small></div>
+        return `<article class="workspace-panel user-quota-card" data-quota-share="${esc(share.id)}"><header><div><h3>${esc(share.agent_name)}</h3><small>所有者 · ${esc(share.owner_username || "管理员")}</small></div><span class="status-label ${accepted && !exhausted ? "ok" : "warn"}">${status}</span></header><div><strong>${usage(share.used_bytes)}</strong><span> / ${share.limit_bytes ? usage(share.limit_bytes) : "不限量"}</span>${share.limit_bytes ? `<progress max="100" value="${Math.min(100, share.used_bytes / share.limit_bytes * 100)}" aria-label="已用额度"></progress>` : ""}<small>内核 ${sharedEngineNames(share.engines)}</small><small>端口 ${esc((share.ports || []).join(", ") || "未分配")}</small></div>
           ${pending || accepted ? `<footer class="user-quota-actions">${pending ? '<button class="button primary small" type="button" data-share-open>查看邀请</button>' : '<button class="button small" type="button" data-share-decision="reject">退出共享</button>'}</footer>` : ""}</article>`;
       }).join("") || '<div class="empty large"><strong>暂无共享邀请</strong></div>'}</section>` : '<section class="workspace-panel"><div class="empty compact"><strong>按账号权限访问节点</strong></div></section>'}
     </div>`, "共享与额度", { viewKey: `my-quota-${++viewSerial}` });

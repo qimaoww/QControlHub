@@ -1,5 +1,6 @@
 import { bindEvent } from "./refresh.js";
-import { agentShareStatus, parseSharedPorts, sharedLimitBytes, sharedLimitGiB } from "./users.js";
+import { agentShareStatus, parseSharedPorts, selectedSharedEngines, sharedLimitBytes, sharedLimitGiB } from "./users.js";
+import { sharedEngineChoices } from "./engine-capabilities.js";
 
 export function createAgentSharing(ctx, interactions) {
   const { api, state, can, esc, notify, confirmAction, bytes = value => `${sharedLimitGiB(value)} GiB` } = ctx;
@@ -8,11 +9,12 @@ export function createAgentSharing(ctx, interactions) {
   const values = (form) => [...form.querySelectorAll("[data-recipient]")].map((row) => ({
     username: row.querySelector('[name="username"]').value,
     enabled: row.querySelector('[name="enabled"]').checked,
+    engines: [...row.querySelectorAll('[name="engines"]:checked')].map(input => input.value),
     ports_text: row.querySelector('[name="ports"]').value,
     limit_gib: row.querySelector('[name="limit_gib"]').value,
     reinvite: row.dataset.reinvite === "true",
   }));
-  const rowMarkup = (share) => `<div class="agent-share-recipient" data-recipient data-reinvite="${Boolean(share.reinvite)}">
+  const rowMarkup = (share, agent) => `<div class="agent-share-recipient" data-recipient data-reinvite="${Boolean(share.reinvite)}">
     <div class="agent-share-recipient-head">
       <label class="settings-field"><span>用户名</span><input name="username" required maxlength="64" autocomplete="off" placeholder="准确用户名" value="${esc(share.username || "")}" ${share.user_id ? "readonly" : ""}></label>
       <div class="agent-share-recipient-actions"><label class="agent-share-enabled"><input type="checkbox" name="enabled" ${share.enabled !== false ? "checked" : ""}><span>启用</span></label>${share.user_id ? "" : '<button type="button" class="deploy-command-close" data-recipient-remove aria-label="移除未保存的用户">×</button>'}</div>
@@ -21,6 +23,7 @@ export function createAgentSharing(ctx, interactions) {
       <label class="settings-field"><span>端口</span><input name="ports" autocomplete="off" placeholder="21001, 21002" value="${esc(share.ports_text ?? (share.ports || []).join(", "))}"></label>
       <label class="settings-field"><span title="累计总额度；0 表示不限量">总额度 · GiB</span><input name="limit_gib" type="number" required min="0" max="8388607" step="any" title="0 表示不限量" value="${esc(share.limit_gib ?? sharedLimitGiB(share.limit_bytes))}"></label>
     </div>
+    ${sharedEngineChoices(share.engines, agent.supported_capabilities ?? agent.capabilities)}
     <div class="agent-share-meta"><small class="agent-share-usage"><span data-share-status>${agentShareStatus(share)}</span> · 已用 ${esc(bytes(share.used_bytes || 0))}</small>${share.status === "rejected" ? `<button type="button" class="button small" data-recipient-reinvite ${share.reinvite ? "disabled" : ""}>重新邀请</button>` : ""}</div>
   </div>`;
   const close = () => {
@@ -60,8 +63,8 @@ export function createAgentSharing(ctx, interactions) {
     dialog.setAttribute("aria-labelledby", "agent-sharing-title");
     dialog.innerHTML = `<header><div><h2 id="agent-sharing-title">共享 Agent</h2><p>${esc(agent.name)}</p></div><button type="button" class="deploy-command-close" data-sharing-close aria-label="关闭共享设置">×</button></header>
       <form><div class="traffic-edit-body">
-        ${agent.features?.includes("shared-traffic-v1") ? "" : '<p class="alert error">请先升级 Agent，再启用共享。</p>'}
-        <div data-recipients>${rows.map(rowMarkup).join("")}</div>
+        ${["shared-traffic-v1", "shared-engines-v1", "independent-egress-v1"].every(feature => agent.features?.includes(feature)) ? "" : '<p class="alert error">请先升级 Agent，再启用共享。</p>'}
+        <div data-recipients>${rows.map(share => rowMarkup(share, agent)).join("")}</div>
         <button type="button" class="button small" data-recipient-add>添加用户</button>
         <p class="alert error" role="alert" data-sharing-error hidden></p>
       </div><footer><div class="agent-sharing-secondary"><button type="button" class="button small" data-sharing-reload>刷新</button><a href="https://github.com/qimaoww/QControlHub/blob/main/docs/agent-sharing.md" target="_blank" rel="noopener noreferrer">共享规则 ↗</a></div><button type="submit" class="button primary">保存</button></footer></form>`;
@@ -97,7 +100,7 @@ export function createAgentSharing(ctx, interactions) {
     dialog.querySelectorAll("[data-sharing-close]").forEach((button) => bindEvent(button, "click", close));
     bindEvent(form.querySelector("[data-recipient-add]"), "click", () => {
       const rows = form.querySelector("[data-recipients]");
-      rows.insertAdjacentHTML("beforeend", rowMarkup({ enabled: true }));
+      rows.insertAdjacentHTML("beforeend", rowMarkup({ enabled: true }, agent));
       rows.lastElementChild.querySelector('[name="username"]').focus();
       capture();
     });
@@ -133,8 +136,10 @@ export function createAgentSharing(ctx, interactions) {
       if (data !== state.data || !dialog.isConnected || data.agentSharingSaves.has(agent.id)) return;
       let saving;
       try {
-        const shares = values(form).map((row) => ({
+        const controls = [...form.querySelectorAll("[data-recipient]")];
+        const shares = values(form).map((row, index) => ({
           username: row.username.trim(), enabled: row.enabled,
+          engines: selectedSharedEngines(controls[index]),
           ports: parseSharedPorts(row.ports_text), limit_bytes: sharedLimitBytes(row.limit_gib),
           reinvite: row.reinvite,
         }));

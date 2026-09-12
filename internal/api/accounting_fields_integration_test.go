@@ -40,7 +40,7 @@ func TestAccountingFieldMutationsWithPostgreSQL(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			agent, err := db.EnrollAgent(ctx, core.EnrollRequest{Name: "fields", OS: "linux", Arch: "amd64", Capabilities: []core.Engine{engine}, PublicKey: authn.EncodePublicKey(randomEnrollmentKey(t))}, enrollment.Token)
+			agent, err := db.EnrollAgent(ctx, core.EnrollRequest{Name: "fields", OS: "linux", Arch: "amd64", Capabilities: []core.Engine{engine}, Features: []string{core.AgentFeatureIndependentEgress}, PublicKey: authn.EncodePublicKey(randomEnrollmentKey(t))}, enrollment.Token)
 			if err != nil {
 				t.Fatal(err)
 			}

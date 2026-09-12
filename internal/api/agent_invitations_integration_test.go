@@ -16,7 +16,7 @@ func TestAgentInvitationAPIConsentAndIdentityBoundaries(t *testing.T) {
 	var sharing core.AgentSharing
 	alice.call("GET", "/agents/"+agent.ID+"/sharing", nil, http.StatusOK, &sharing)
 	alice.call("PUT", "/agents/"+agent.ID+"/sharing", core.AgentSharingRequest{Revision: sharing.Revision,
-		Shares: []core.AgentSharingRecipient{{Username: "bob", LimitBytes: 1000, Ports: []int{21001}}}}, http.StatusOK, &sharing)
+		Shares: []core.AgentSharingRecipient{{Username: "bob", Engines: []core.Engine{core.EngineMihomo}, LimitBytes: 1000, Ports: []int{21001}}}}, http.StatusOK, &sharing)
 	share := sharing.Shares[0]
 	path := "/agent-access/" + share.ID + "/response"
 	input := core.AgentShareResponseRequest{Revision: share.InvitationRevision, Decision: "accept"}
@@ -65,7 +65,7 @@ func TestAgentInvitationAPIConsentAndIdentityBoundaries(t *testing.T) {
 		t.Fatal("owner cannot see rejection")
 	}
 	alice.call("PUT", "/agents/"+agent.ID+"/sharing", core.AgentSharingRequest{Revision: sharing.Revision,
-		Shares: []core.AgentSharingRecipient{{Username: "bob", Reinvite: true, LimitBytes: 1000, Ports: []int{21001}}}}, http.StatusOK, &sharing)
+		Shares: []core.AgentSharingRecipient{{Username: "bob", Engines: []core.Engine{core.EngineMihomo}, Reinvite: true, LimitBytes: 1000, Ports: []int{21001}}}}, http.StatusOK, &sharing)
 	input.Revision = sharing.Shares[0].InvitationRevision
 	bob.call("POST", path, input, http.StatusOK, &access)
 	if access.Shares[0].Status != core.AgentShareAccepted {
@@ -116,7 +116,7 @@ func TestAgentInvitationAPINeedsNoHostPermissionsAndCannotRestoreDisabledUser(t 
 	var access core.AgentAccess
 	admin.call("GET", "/users/"+user.ID+"/agent-access", nil, http.StatusOK, &access)
 	admin.call("PUT", "/users/"+user.ID+"/agent-access", core.AgentAccessRequest{Revision: access.Revision, Isolated: true,
-		Shares: []core.AgentShareRequest{{AgentID: agent.ID, Ports: []int{21001}}}}, http.StatusOK, &access)
+		Shares: []core.AgentShareRequest{{AgentID: agent.ID, Engines: []core.Engine{core.EngineMihomo}, Ports: []int{21001}}}}, http.StatusOK, &access)
 	share := access.Shares[0]
 	client.call("GET", "/agent-access", nil, http.StatusOK, nil)
 	client.call("POST", "/agent-access/"+share.ID+"/response",

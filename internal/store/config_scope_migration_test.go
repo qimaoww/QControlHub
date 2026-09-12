@@ -34,7 +34,7 @@ func TestMigrateV51ConfigOwnershipAndSubStoreFormat(t *testing.T) {
 		t.Fatal(err)
 	}
 	archive, err := db.CreateConfig(ctx, core.Config{
-		Name: "legacy deployed archive", Engine: core.EngineMihomo, Content: "mixed-port: 21002\n",
+		Name: "legacy deployed archive", Engine: core.EngineMihomo, Content: "listeners: [{name: legacy, type: http, port: 21002}]\n",
 	})
 	if err != nil {
 		t.Fatal(err)

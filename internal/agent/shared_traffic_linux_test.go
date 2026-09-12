@@ -21,15 +21,15 @@ func sharedTrafficFixture(t *testing.T) (*TrafficManager, *fakeTrafficBackend, [
 		{ID: "trf_0000000000000001", AgentID: "agt_shared", Name: "one", Engine: core.EngineMihomo, Port: 21001,
 			Protocol: core.TrafficProtocolBoth, Cycle: core.TrafficCycleMonthly, CycleAnchor: core.UTCDate(now),
 			LimitBytes: 0, AutoBlock: true, ResetGeneration: 1,
-			SharedQuota: &core.SharedTrafficQuota{ID: "shr_0000000000000001", LimitBytes: 100}},
+			SharedQuota: &core.SharedTrafficQuota{ID: "shr_0000000000000001", Engines: []core.Engine{core.EngineMihomo}, LimitBytes: 100}},
 		{ID: "trf_0000000000000002", AgentID: "agt_shared", Name: "two", Engine: core.EngineMihomo, Port: 21002,
 			Protocol: core.TrafficProtocolBoth, Cycle: core.TrafficCycleMonthly, CycleAnchor: core.UTCDate(now),
 			LimitBytes: 0, AutoBlock: true, ResetGeneration: 1,
-			SharedQuota: &core.SharedTrafficQuota{ID: "shr_0000000000000001", LimitBytes: 100}},
+			SharedQuota: &core.SharedTrafficQuota{ID: "shr_0000000000000001", Engines: []core.Engine{core.EngineMihomo}, LimitBytes: 100}},
 		{ID: "trf_0000000000000003", AgentID: "agt_shared", Name: "other user", Engine: core.EngineXray, Port: 21003,
 			Protocol: core.TrafficProtocolBoth, Cycle: core.TrafficCycleMonthly, CycleAnchor: core.UTCDate(now),
 			LimitBytes: 0, AutoBlock: true, ResetGeneration: 1,
-			SharedQuota: &core.SharedTrafficQuota{ID: "shr_0000000000000002", LimitBytes: 100}},
+			SharedQuota: &core.SharedTrafficQuota{ID: "shr_0000000000000002", Engines: []core.Engine{core.EngineXray}, LimitBytes: 100}},
 	}
 	return manager, backend, policies, &now
 }
@@ -98,6 +98,49 @@ func TestSharedTrafficCombinesPortsAndSurvivesCalendarRestartAndTopup(t *testing
 	}
 	if snapshot = restarted.Snapshot(); !snapshot[0].Blocked || !snapshot[1].Blocked || snapshot[2].Blocked {
 		t.Fatalf("revocation affected wrong user's ports: %+v", snapshot)
+	}
+}
+
+func TestSharedTrafficEnforcesEngineRevocationWithoutResettingLedger(t *testing.T) {
+	manager, backend, policies, now := sharedTrafficFixture(t)
+	ctx := context.Background()
+	policies[1].Engine = core.EngineXray
+	for index := range policies[:2] {
+		policies[index].SharedQuota.Engines = []core.Engine{core.EngineMihomo, core.EngineXray}
+		policies[index].SharedQuota.LimitBytes = 1000
+	}
+	if err := manager.SetPolicies(ctx, policies, "agt_shared"); err != nil {
+		t.Fatal(err)
+	}
+	for _, policy := range policies[:2] {
+		record := manager.records[policy.ID]
+		backend.counters[trafficCounterName(record, "in", "tcp")] = 40
+	}
+	*now = now.Add(time.Second)
+	manager.collect(ctx, false)
+	for index := range policies[:2] {
+		policies[index].SharedQuota.Engines = []core.Engine{core.EngineMihomo}
+	}
+	if err := manager.SetPolicies(ctx, policies, "agt_shared"); err != nil {
+		t.Fatal(err)
+	}
+	got := manager.Snapshot()
+	if got[0].Blocked || !got[1].Blocked || got[2].Blocked {
+		t.Fatalf("engine revocation affected wrong listeners: %+v", got)
+	}
+	if sharedTrafficUsed(manager.records, policies[0].SharedQuota.ID) != 80 {
+		t.Fatal("engine revocation reset cumulative traffic")
+	}
+	if err := manager.authorizeSharedDeployment(ctx, policies[0].SharedQuota.ID,
+		[]core.PortTrafficEndpoint{{Engine: core.EngineXray, Port: 21002}}); err == nil {
+		t.Fatal("revoked engine could redeploy using its retained reservation")
+	}
+	if err := manager.authorizeSharedDeployment(ctx, policies[0].SharedQuota.ID,
+		[]core.PortTrafficEndpoint{{Engine: core.EngineMihomo, Port: 21001}}); err != nil {
+		t.Fatalf("authorized engine became unusable: %v", err)
+	}
+	if err := manager.authorizeSharedDeployment(ctx, policies[0].SharedQuota.ID, nil); err == nil {
+		t.Fatal("empty listener set bypassed shared authorization")
 	}
 }
 

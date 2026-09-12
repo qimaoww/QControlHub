@@ -22,7 +22,8 @@ func trafficAccessClause(ctx context.Context, agentColumn, policyColumn string, 
 	return clause + ` AND (NOT EXISTS(SELECT 1 FROM panel_users traffic_user WHERE traffic_user.id=` + owner + `)
 		OR EXISTS(SELECT 1 FROM agents owned_agent WHERE owned_agent.id=` + agentColumn + ` AND owned_agent.owner_id=` + owner + `)
 		OR EXISTS(SELECT 1 FROM port_traffic_policies owned_policy JOIN agent_shares owned_share ON owned_share.id=owned_policy.share_id
-			WHERE owned_policy.id=` + policyColumn + ` AND owned_share.user_id=` + owner + `))`
+			WHERE owned_policy.id=` + policyColumn + ` AND owned_share.user_id=` + owner + `
+				AND owned_policy.engine=ANY(owned_share.engines)))`
 }
 
 func lockTrafficMutationPolicy(ctx context.Context, tx pgx.Tx, id string) (string, error) {
@@ -161,7 +162,8 @@ func (s *Store) setSharedPortsTx(ctx context.Context, tx pgx.Tx, shareID, userID
 func (s *Store) bindCurrentSharedDeploymentTx(ctx context.Context, tx pgx.Tx, shareID, userID, agentID string) error {
 	var uncertain bool
 	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_engine_ownership
-		WHERE agent_id=$1 AND owner_id=$2 AND (uncertain OR (running AND config_uncertain)))`, agentID, userID).Scan(&uncertain); err != nil {
+		WHERE agent_id=$1 AND owner_id=$2 AND engine=ANY((SELECT engines FROM agent_shares WHERE id=$3)::text[])
+			AND (uncertain OR (running AND config_uncertain)))`, agentID, userID, shareID).Scan(&uncertain); err != nil {
 		return err
 	}
 	if uncertain {
@@ -170,7 +172,8 @@ func (s *Store) bindCurrentSharedDeploymentTx(ctx context.Context, tx pgx.Tx, sh
 	rows, err := tx.Query(ctx, `SELECT state.engine,COALESCE(revision.content,config.content)
 		FROM agent_engine_ownership state JOIN configs config ON config.id=state.config_id
 		LEFT JOIN config_revisions revision ON revision.config_id=state.config_id AND revision.version=state.config_version
-		WHERE state.agent_id=$1 AND state.owner_id=$2 AND state.running`, agentID, userID)
+		WHERE state.agent_id=$1 AND state.owner_id=$2 AND state.running
+			AND state.engine=ANY((SELECT engines FROM agent_shares WHERE id=$3)::text[])`, agentID, userID, shareID)
 	if err != nil {
 		return err
 	}
@@ -204,8 +207,9 @@ func (s *Store) bindCurrentSharedDeploymentTx(ctx context.Context, tx pgx.Tx, sh
 func bindSharedTrafficPortsTx(ctx context.Context, tx pgx.Tx, shareID, agentID string, endpoints []core.PortTrafficEndpoint) error {
 	for _, endpoint := range endpoints {
 		var reserved bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_share_ports WHERE agent_id=$1 AND port=$2 AND share_id=$3)`,
-			agentID, endpoint.Port, shareID).Scan(&reserved); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_share_ports p JOIN agent_shares s ON s.id=p.share_id
+			WHERE p.agent_id=$1 AND p.port=$2 AND p.share_id=$3 AND $4=ANY(s.engines))`,
+			agentID, endpoint.Port, shareID, endpoint.Engine).Scan(&reserved); err != nil {
 			return err
 		}
 		if !reserved {
@@ -322,7 +326,7 @@ func (s *Store) prepareSharedTaskTx(ctx context.Context, tx pgx.Tx, task *core.T
 	}
 	endpoints := serverconfig.DiscoverTrafficPorts(task.Engine, task.ConfigContent)
 	if isolated {
-		if !containsFeature(features, core.AgentFeatureSharedTraffic) {
+		if !supportsSharedEngines(features) {
 			return fmt.Errorf("%w: upgrade the Agent before shared deployments", ErrConflict)
 		}
 		endpoints, err = serverconfig.SharedTrafficEndpoints(task.Engine, task.ConfigContent)
@@ -330,12 +334,23 @@ func (s *Store) prepareSharedTaskTx(ctx context.Context, tx pgx.Tx, task *core.T
 			return fmt.Errorf("%w: %v", ErrInvalid, err)
 		}
 		var limit, used uint64
-		if err := tx.QueryRow(ctx, `SELECT id,limit_bytes,used_bytes FROM agent_shares WHERE user_id=$1 AND agent_id=$2 AND enabled AND status='accepted'`,
-			configOwner, task.AgentID).Scan(&task.SharedTrafficID, &limit, &used); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT id,limit_bytes,used_bytes FROM agent_shares
+			WHERE user_id=$1 AND agent_id=$2 AND enabled AND status='accepted' AND $3=ANY(engines)`,
+			configOwner, task.AgentID, task.Engine).Scan(&task.SharedTrafficID, &limit, &used); err != nil {
 			return mapError(err)
 		}
 		if limit > 0 && used >= limit {
 			return fmt.Errorf("%w: the user's cumulative Agent traffic allowance is exhausted", ErrConflict)
+		}
+		for _, endpoint := range endpoints {
+			var reserved bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_share_ports
+				WHERE share_id=$1 AND agent_id=$2 AND port=$3)`, task.SharedTrafficID, task.AgentID, endpoint.Port).Scan(&reserved); err != nil {
+				return err
+			}
+			if !reserved {
+				return fmt.Errorf("%w: port %d is not allocated to this user", ErrConflict, endpoint.Port)
+			}
 		}
 		if task.Action == core.ActionDeploy {
 			return bindSharedTrafficPortsTx(ctx, tx, task.SharedTrafficID, task.AgentID, endpoints)
@@ -433,21 +448,32 @@ func cancelUnauthorizedAgentTasksTx(ctx context.Context, tx pgx.Tx, agentID stri
 		WHERE t.agent_id=$1 AND t.status IN ('pending','running') AND (
 			(t.status='pending' AND t.action IN ('start','restart') AND (`+unsafeEngineStartSQL("t.agent_id", "t.engine")+`))
 			OR (`+unauthorizedTaskPrincipalSQL+`)
+			OR (`+unauthorizedHostConfigTaskSQL+`)
+			OR (t.action IN ('validate','deploy') AND NOT $3::boolean)
+			OR (t.engine<>'' AND NOT t.capability_transition AND NOT EXISTS(
+				SELECT 1 FROM agents a WHERE a.id=t.agent_id AND a.capabilities ? t.engine))
 			OR (t.shared_traffic_id<>'' AND (
 				NOT $2::boolean OR NOT EXISTS(
 					SELECT 1 FROM agent_shares s JOIN panel_users u ON u.id=s.user_id
 					WHERE s.id=t.shared_traffic_id AND NOT u.disabled AND s.enabled AND s.status='accepted'
+						AND s.agent_id=t.agent_id AND t.engine=ANY(s.engines)
 						AND (s.limit_bytes=0 OR s.used_bytes<s.limit_bytes)
 				)
 			))
 		)`,
-		agentID, containsFeature(features, core.AgentFeatureSharedTraffic))
+		agentID, supportsSharedEngines(features), containsFeature(features, core.AgentFeatureIndependentEgress))
 	return err
 }
 
 const unauthorizedTaskPrincipalSQL = `EXISTS(SELECT 1 FROM panel_users u JOIN agents a ON a.id=t.agent_id
-	WHERE u.id=t.owner_id AND (u.disabled OR (u.role='user' AND a.owner_id<>u.id AND
-		(t.action NOT IN ('deploy','validate','status') OR (t.action IN ('deploy','validate') AND t.shared_traffic_id='')
-		 OR NOT EXISTS(SELECT 1 FROM agent_shares s WHERE s.user_id=u.id AND s.agent_id=t.agent_id AND s.enabled AND s.status='accepted')))))
+	WHERE u.id=t.owner_id AND (u.disabled OR (u.role<>'admin' AND
+		(NOT u.permissions ? (CASE WHEN t.capability_transition THEN 'agents.manage' ELSE 'tasks.execute' END)
+		 OR (t.action IN ('enable-bbr','disable-bbr','configure-tcp') AND NOT u.permissions ? 'agents.manage')
+		 OR (a.owner_id<>u.id AND
+			(t.action NOT IN ('deploy','validate','status') OR (t.action IN ('deploy','validate') AND t.shared_traffic_id='')
+			 OR NOT EXISTS(SELECT 1 FROM agent_shares s WHERE s.user_id=u.id AND s.agent_id=t.agent_id
+				AND s.enabled AND s.status='accepted' AND t.engine=ANY(s.engines))))))))
 	OR EXISTS(SELECT 1 FROM configs c JOIN panel_users u ON u.id=c.owner_id JOIN agents a ON a.id=t.agent_id
-		WHERE c.id=t.config_id AND (u.disabled OR (u.role='user' AND a.owner_id<>u.id AND t.shared_traffic_id='')))`
+		WHERE c.id=t.config_id AND (u.disabled OR (u.role='user' AND a.owner_id<>u.id AND
+			(t.shared_traffic_id='' OR NOT EXISTS(SELECT 1 FROM agent_shares s WHERE s.id=t.shared_traffic_id
+				AND s.user_id=u.id AND s.agent_id=t.agent_id AND s.enabled AND s.status='accepted' AND t.engine=ANY(s.engines))))))`

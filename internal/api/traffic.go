@@ -35,6 +35,20 @@ func trafficPoliciesForAgent(policies []core.PortTrafficPolicy) []core.PortTraff
 	return prepared
 }
 
+func trafficPoliciesForSession(policies []core.PortTrafficPolicy, heartbeatVerified bool) []core.PortTrafficPolicy {
+	prepared := trafficPoliciesForAgent(policies)
+	if !heartbeatVerified {
+		for index := range prepared {
+			if prepared[index].SharedQuota != nil {
+				quota := *prepared[index].SharedQuota
+				quota.Revoked = true
+				prepared[index].SharedQuota = &quota
+			}
+		}
+	}
+	return prepared
+}
+
 func (s *Server) listPortTrafficUsage(w http.ResponseWriter, request *http.Request) {
 	monthValue := strings.TrimSpace(request.URL.Query().Get("month"))
 	if monthValue == "" {

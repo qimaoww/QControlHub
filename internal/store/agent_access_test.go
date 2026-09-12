@@ -13,7 +13,7 @@ import (
 
 func sharedTestUser(t *testing.T, db *Store, ctx context.Context, name string) (core.User, context.Context) {
 	t.Helper()
-	user, err := db.CreateUser(ctx, core.UserRequest{Username: name, Role: core.RoleUser}, "test-only-hash")
+	user, err := db.CreateUser(ctx, core.UserRequest{Username: name, Role: core.RoleUser, Permissions: core.AllPermissions()}, "test-only-hash")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -23,7 +23,7 @@ func sharedTestUser(t *testing.T, db *Store, ctx context.Context, name string) (
 func sharedTestAgent(t *testing.T, db *Store, ctx context.Context) core.Agent {
 	t.Helper()
 	agent, _ := enrollTaskTestAgent(t, ctx, db)
-	if _, err := db.pool.Exec(ctx, `UPDATE agents SET features='["shared-traffic-v1"]' WHERE id=$1`, agent.ID); err != nil {
+	if _, err := db.pool.Exec(ctx, `UPDATE agents SET features='["shared-traffic-v1","shared-engines-v1","independent-egress-v1"]' WHERE id=$1`, agent.ID); err != nil {
 		t.Fatal(err)
 	}
 	return agent
@@ -32,7 +32,7 @@ func sharedTestAgent(t *testing.T, db *Store, ctx context.Context) core.Agent {
 func sharedTestAllocation(t *testing.T, db *Store, ctx context.Context, userID, agentID string, limit uint64, ports ...int) core.AgentAccess {
 	t.Helper()
 	access, err := db.SetUserAgentAccess(ctx, userID, core.AgentAccessRequest{Isolated: true, Shares: []core.AgentShareRequest{{
-		AgentID: agentID, LimitBytes: limit, Ports: ports,
+		AgentID: agentID, Engines: []core.Engine{core.EngineMihomo}, LimitBytes: limit, Ports: ports,
 	}}})
 	if err != nil {
 		t.Fatal(err)
@@ -75,7 +75,7 @@ func TestAgentIsolationCoversListsAndDirectStoreCalls(t *testing.T) {
 	other, bob := sharedTestUser(t, db, ctx, "isolated-bob")
 	allowed, denied := sharedTestAgent(t, db, ctx), sharedTestAgent(t, db, ctx)
 	access, err := db.SetUserAgentAccess(ctx, user.ID, core.AgentAccessRequest{Isolated: true,
-		Shares: []core.AgentShareRequest{{AgentID: allowed.ID, Ports: []int{21001}}, {AgentID: denied.ID, Ports: []int{21002}}}})
+		Shares: []core.AgentShareRequest{{AgentID: allowed.ID, Engines: []core.Engine{core.EngineMihomo}, Ports: []int{21001}}, {AgentID: denied.ID, Engines: []core.Engine{core.EngineMihomo}, Ports: []int{21002}}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -220,7 +220,7 @@ func TestSharedTrafficCumulativeQuotaAndPortOwnership(t *testing.T) {
 	if access.Shares[0].UsedBytes != 1100 {
 		t.Fatal("regrant reset cumulative usage")
 	}
-	if _, err := db.SetUserAgentAccess(ctx, other.ID, core.AgentAccessRequest{Isolated: true, Shares: []core.AgentShareRequest{{AgentID: agent.ID, Ports: []int{21001}}}}); !errors.Is(err, ErrConflict) {
+	if _, err := db.SetUserAgentAccess(ctx, other.ID, core.AgentAccessRequest{Isolated: true, Shares: []core.AgentShareRequest{{AgentID: agent.ID, Engines: []core.Engine{core.EngineMihomo}, Ports: []int{21001}}}}); !errors.Is(err, ErrConflict) {
 		t.Fatalf("another user stole a reserved port: %v", err)
 	}
 }
@@ -276,7 +276,7 @@ func TestAgentIsolationCreationRevisionAndHostBoundaries(t *testing.T) {
 	}
 	access, _ := db.UserAgentAccess(ctx, user.ID)
 	request := core.AgentAccessRequest{Revision: access.Revision, Isolated: true,
-		Shares: []core.AgentShareRequest{{AgentID: agent.ID, Ports: []int{22001}}}}
+		Shares: []core.AgentShareRequest{{AgentID: agent.ID, Engines: []core.Engine{core.EngineMihomo}, Ports: []int{22001}}}}
 	errs := make(chan error, 2)
 	for range 2 {
 		go func() { _, err := db.SetUserAgentAccess(ctx, user.ID, request); errs <- err }()
@@ -371,7 +371,7 @@ func TestSharedTrafficUncertainDeploymentAndSettledRelease(t *testing.T) {
 			t.Fatal(err)
 		}
 		_, err = db.SetUserAgentAccess(ctx, user.ID, core.AgentAccessRequest{Isolated: true,
-			Shares: []core.AgentShareRequest{{AgentID: agent.ID, LimitBytes: 1000}}})
+			Shares: []core.AgentShareRequest{{AgentID: agent.ID, Engines: []core.Engine{core.EngineMihomo}, LimitBytes: 1000}}})
 		if !settled && !errors.Is(err, ErrConflict) || settled && err != nil {
 			t.Fatalf("port release settled=%v: %v", settled, err)
 		}
@@ -388,7 +388,7 @@ func TestSharedTrafficCapabilityEnableRequiresDeployment(t *testing.T) {
 	db, ctx, _ := isolatedConfigScopeStore(t)
 	user, alice := sharedTestUser(t, db, ctx, "shared-capability")
 	agent := sharedTestAgent(t, db, ctx)
-	if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Features: []string{core.AgentFeatureSharedTraffic},
+	if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Features: []string{core.AgentFeatureSharedTraffic, core.AgentFeatureSharedEngines, core.AgentFeatureIndependentEgress},
 		Runtime: map[core.Engine]core.RuntimeState{core.EngineMihomo: {Installed: true}}}); err != nil {
 		t.Fatal(err)
 	}

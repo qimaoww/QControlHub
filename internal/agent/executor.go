@@ -605,16 +605,16 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (string, erro
 		return e.importExistingConfig(ctx, task.Engine, spec, existing, task.ConfigContent)
 	case core.ActionValidate:
 		prepared, warning := e.prepareNativeAccountingContent(ctx, task.Engine, spec, task.ConfigContent)
-		if warning != "" && (strings.Contains(task.ConfigContent, "qch-trf-") || (task.Engine == core.EngineShadowsocksRust && strings.Contains(task.ConfigContent, "outbound_fwmark"))) {
-			return warning, errors.New("cannot safely regenerate managed accounting configuration")
+		if warning != "" {
+			return warning, errors.New("独立出口校验失败，未执行内核校验")
 		}
 		task.ConfigContent = prepared
 		return e.validate(ctx, task.Engine, spec, task.ConfigContent)
 	case core.ActionDeploy:
 		originalInput := task.ConfigContent
 		prepared, accountingWarning := e.prepareNativeAccountingContent(ctx, task.Engine, spec, task.ConfigContent)
-		if accountingWarning != "" && (strings.Contains(task.ConfigContent, "qch-trf-") || (task.Engine == core.EngineShadowsocksRust && strings.Contains(task.ConfigContent, "outbound_fwmark"))) {
-			return accountingWarning, errors.New("cannot safely regenerate managed accounting configuration")
+		if accountingWarning != "" {
+			return accountingWarning, errors.New("独立出口校验失败，未部署配置")
 		}
 		task.ConfigContent = prepared
 		validation, err := e.validate(ctx, task.Engine, spec, task.ConfigContent)

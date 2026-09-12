@@ -194,13 +194,14 @@ func (manager *TrafficManager) SetPolicies(ctx context.Context, policies []core.
 		}
 		if policy.SharedQuota != nil {
 			quota := *policy.SharedQuota
+			quota.Engines = append([]core.Engine(nil), quota.Engines...)
 			policy.SharedQuota = &quota
 			if policy.Protocol != core.TrafficProtocolBoth {
 				return errors.New("shared traffic requires both listener transports")
 			}
 			group := quota
 			group.PortUsedBytes = 0
-			if previous, exists := groups[quota.ID]; exists && previous != group {
+			if previous, exists := groups[quota.ID]; exists && !sameSharedQuota(&previous, &group) {
 				return errors.New("control plane returned inconsistent shared allocation totals")
 			}
 			groups[quota.ID] = group
@@ -539,7 +540,7 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 	// independently to each port would multiply the user's allowance.
 	for id, record := range desired {
 		if quota := record.Policy.SharedQuota; quota != nil {
-			record.Blocked = quota.Revoked || (quota.LimitBytes > 0 && sharedTrafficUsed(desired, quota.ID) >= quota.LimitBytes)
+			record.Blocked = !quota.AllowsEngine(record.Policy.Engine) || (quota.LimitBytes > 0 && sharedTrafficUsed(desired, quota.ID) >= quota.LimitBytes)
 			if record.Blocked != manager.records[id].Blocked {
 				manager.rulesDirty = true
 			}
@@ -720,7 +721,9 @@ func sharedQuotaID(quota *core.SharedTrafficQuota) string {
 }
 
 func sameSharedQuota(left, right *core.SharedTrafficQuota) bool {
-	return left == nil && right == nil || left != nil && right != nil && *left == *right
+	return left == nil && right == nil || left != nil && right != nil &&
+		left.ID == right.ID && left.LimitBytes == right.LimitBytes && left.UsedBytes == right.UsedBytes &&
+		left.PortUsedBytes == right.PortUsedBytes && left.Revoked == right.Revoked && slices.Equal(left.Engines, right.Engines)
 }
 
 func sharedTrafficUsed(records map[string]*trafficRecord, shareID string) uint64 {
@@ -739,7 +742,7 @@ func sharedTrafficUsed(records map[string]*trafficRecord, shareID string) uint64
 }
 
 func (manager *TrafficManager) authorizeSharedDeployment(ctx context.Context, shareID string, endpoints []core.PortTrafficEndpoint) error {
-	if manager == nil || !core.ValidAgentShareID(shareID) {
+	if manager == nil || !core.ValidAgentShareID(shareID) || len(endpoints) == 0 {
 		return errors.New("shared traffic manager or allocation is unavailable")
 	}
 	manager.mu.Lock()
@@ -752,7 +755,7 @@ func (manager *TrafficManager) authorizeSharedDeployment(ctx context.Context, sh
 		for _, record := range manager.records {
 			quota := record.Policy.SharedQuota
 			if quota != nil && quota.ID == shareID && record.Policy.Port == endpoint.Port && record.Policy.Engine == endpoint.Engine {
-				if quota.Revoked || record.Blocked || (quota.LimitBytes > 0 && sharedTrafficUsed(manager.records, shareID) >= quota.LimitBytes) {
+				if !quota.AllowsEngine(endpoint.Engine) || record.Blocked || (quota.LimitBytes > 0 && sharedTrafficUsed(manager.records, shareID) >= quota.LimitBytes) {
 					return errors.New("shared Agent access is revoked or its cumulative allowance is exhausted")
 				}
 				matched = true

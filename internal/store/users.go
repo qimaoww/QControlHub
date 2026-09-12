@@ -186,9 +186,37 @@ func (s *Store) UpdateUser(ctx context.Context, id string, update core.UserUpdat
 	if err != nil {
 		return core.User{}, err
 	}
-	if disabled {
-		if _, err := tx.Exec(ctx, `UPDATE tasks SET status='canceled',error='user disabled',finished_at=now(),config_content=NULL,lease_id=NULL
-			WHERE owner_id=$1 AND status='pending'`, id); err != nil {
+	// Invalidate work in this transaction, not on the next Agent poll. A
+	// disable/re-enable or revoke/regrant while disconnected must never revive
+	// an old lease. Keep the user -> Agent -> task lock order used by creation.
+	rows, err := tx.Query(ctx, `SELECT id,features FROM agents WHERE id IN (
+		SELECT t.agent_id FROM tasks t LEFT JOIN configs c ON c.id=t.config_id
+		WHERE (t.owner_id=$1 OR c.owner_id=$1) AND t.status IN ('pending','running')
+	) ORDER BY id FOR UPDATE`, id)
+	if err != nil {
+		return core.User{}, err
+	}
+	var affected []core.Agent
+	for rows.Next() {
+		var agent core.Agent
+		if err := rows.Scan(&agent.ID, &agent.Features); err != nil {
+			rows.Close()
+			return core.User{}, err
+		}
+		affected = append(affected, agent)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return core.User{}, err
+	}
+	for _, agent := range affected {
+		if err := cancelUnauthorizedAgentTasksTx(ctx, tx, agent.ID, agent.Features); err != nil {
+			return core.User{}, err
+		}
+	}
+	if disabled || update.Role != nil || update.Permissions != nil {
+		if _, err := tx.Exec(ctx, `UPDATE tasks SET config_content=NULL
+			WHERE owner_id=$1 AND action IN ('read-config','read-managed-config')`, id); err != nil {
 			return core.User{}, err
 		}
 	}

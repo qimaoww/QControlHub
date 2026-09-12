@@ -27,6 +27,7 @@ type AgentShare struct {
 	Enabled            bool             `json:"enabled"`
 	Status             AgentShareStatus `json:"status"`
 	InvitationRevision int64            `json:"invitation_revision"`
+	Engines            []Engine         `json:"engines"`
 	Ports              []int            `json:"ports"`
 	LimitBytes         uint64           `json:"limit_bytes"` // Zero is unlimited.
 	UsedBytes          uint64           `json:"used_bytes"`
@@ -52,19 +53,21 @@ type AgentSharingRequest struct {
 }
 
 type AgentSharingRecipient struct {
-	Username   string `json:"username"`
-	LimitBytes uint64 `json:"limit_bytes"`
-	Ports      []int  `json:"ports"`
-	Enabled    *bool  `json:"enabled,omitempty"`
-	Reinvite   bool   `json:"reinvite,omitempty"`
+	Username   string   `json:"username"`
+	Engines    []Engine `json:"engines"`
+	LimitBytes uint64   `json:"limit_bytes"`
+	Ports      []int    `json:"ports"`
+	Enabled    *bool    `json:"enabled,omitempty"`
+	Reinvite   bool     `json:"reinvite,omitempty"`
 }
 
 type AgentShareRequest struct {
-	AgentID    string `json:"agent_id"`
-	LimitBytes uint64 `json:"limit_bytes"`
-	Ports      []int  `json:"ports"`
-	Enabled    *bool  `json:"enabled,omitempty"`
-	Reinvite   bool   `json:"reinvite,omitempty"`
+	AgentID    string   `json:"agent_id"`
+	Engines    []Engine `json:"engines"`
+	LimitBytes uint64   `json:"limit_bytes"`
+	Ports      []int    `json:"ports"`
+	Enabled    *bool    `json:"enabled,omitempty"`
+	Reinvite   bool     `json:"reinvite,omitempty"`
 }
 
 type AgentShareResponseRequest struct {
@@ -83,14 +86,16 @@ type AgentAccessRequest struct {
 // this port's contribution. The Agent adds unreported local increments to the
 // total, so the combined allowance is enforced even during a disconnection.
 type SharedTrafficQuota struct {
-	ID            string `json:"id"`
-	LimitBytes    uint64 `json:"limit_bytes"`
-	UsedBytes     uint64 `json:"used_bytes"`
-	PortUsedBytes uint64 `json:"port_used_bytes"`
-	Revoked       bool   `json:"revoked"`
+	ID            string   `json:"id"`
+	LimitBytes    uint64   `json:"limit_bytes"`
+	UsedBytes     uint64   `json:"used_bytes"`
+	PortUsedBytes uint64   `json:"port_used_bytes"`
+	Revoked       bool     `json:"revoked"`
+	Engines       []Engine `json:"engines"`
 }
 
 const AgentFeatureSharedTraffic = "shared-traffic-v1"
+const AgentFeatureSharedEngines = "shared-engines-v1"
 
 func ValidAgentShareID(id string) bool {
 	if len(id) != 20 || !strings.HasPrefix(id, "shr_") {
@@ -107,5 +112,18 @@ func ValidAgentShareID(id string) bool {
 func (quota *SharedTrafficQuota) Valid() bool {
 	return quota == nil || (ValidAgentShareID(quota.ID) &&
 		quota.LimitBytes <= math.MaxInt64 && quota.UsedBytes <= math.MaxInt64 &&
-		quota.PortUsedBytes <= quota.UsedBytes)
+		quota.PortUsedBytes <= quota.UsedBytes && ValidateEngineCapabilities(quota.Engines) == nil &&
+		(quota.Revoked || len(quota.Engines) > 0))
+}
+
+func (quota *SharedTrafficQuota) AllowsEngine(engine Engine) bool {
+	if quota == nil || quota.Revoked {
+		return false
+	}
+	for _, allowed := range quota.Engines {
+		if engine == allowed {
+			return true
+		}
+	}
+	return false
 }

@@ -14,6 +14,11 @@ var errorMessages = map[string]string{
 	"an invitation revision and accept or reject decision are required":                                       "请刷新邀请后选择接受或拒绝。",
 	"Agent invitation changed; reload before responding":                                                      "共享邀请已变更，请刷新后重试。",
 	"upgrade the Agent before accepting a share":                                                              "请所有者先升级 Agent，再接受共享。",
+	"select at least one shared engine":                                                                       "请至少分配一个内核。",
+	"an allocated engine is not supported by this Agent":                                                      "分配的内核不在此 Agent 支持范围内。",
+	"the owner must allocate supported engines before acceptance":                                             "请所有者先分配内核，再接受共享。",
+	"upgrade the Agent before validating or deploying independent exits":                                      "请先升级 Agent，再校验或部署独立出口配置。",
+	"task permission is no longer granted":                                                                    "任务权限已被收回，请刷新页面。",
 	"only administrators may manage Agent sharing":                                                            "仅管理员可管理 Agent 分配。",
 	"only administrators may manage users":                                                                    "仅管理员可管理用户。",
 	"allocation revision is required; reload before saving":                                                   "请重新读取分配后保存。",
@@ -44,6 +49,16 @@ var errorMessages = map[string]string{
 	"Mihomo shared groups/providers/sub-rules require explicit accounting mapping":                            "Mihomo 使用了共享代理组、代理提供者或子规则，需要明确流量统计归属。",
 	"Mihomo proxy names must be unique and explicit":                                                          "Mihomo 代理必须填写名称且名称不能重复。",
 	"Mihomo requires tagged listeners using global rules":                                                     "Mihomo 流量统计需要带标签且使用全局路由规则的监听器。",
+	"Mihomo independent exits require rule mode":                                                              "独立出口仅支持 Mihomo 的 rule 模式。",
+	"reverse routing requires explicit independent exit mapping":                                              "反向路由无法确认独立出口归属，请移除后重试。",
+	"inbound fallbacks require explicit independent exit mapping":                                             "入站回落无法确认独立出口归属，请移除后重试。",
+	"dynamic or redirected listeners require explicit independent exit mapping":                               "动态或转交入站无法确认独立出口归属，请使用固定监听。",
+	"TUN and tunnel listeners require explicit independent exit mapping":                                      "TUN 或独立隧道监听无法确认出口归属，请使用具名固定监听。",
+	"mutable routing APIs cannot guarantee independent exits":                                                 "可修改路由的管理 API 会绕过独立出口限制，请关闭后重试。",
+	"routing rules require an explicit outbound":                                                              "路由规则必须明确指定出口。",
+	"non-routing actions cannot select an outbound":                                                           "非路由动作不能指定出口。",
+	"routing action requires explicit independent exit mapping":                                               "此路由动作无法确认独立出口归属，请改用明确的出口路由。",
+	"SS Rust accounting cannot combine root and server-array listeners":                                       "SS Rust 不能同时配置根级监听和 servers 数组。",
 	"unsupported Mihomo routing rule":                                                                         "当前 Mihomo 路由规则不支持自动统计归属，请检查规则。",
 	"invalid Mihomo rule":                                                                                     "Mihomo 路由规则无效，请检查规则格式。",
 	"reserved accounting tags conflict with custom Mihomo routing":                                            "统计专用标签与自定义 Mihomo 路由冲突，请核对配置后再迁移。",
@@ -268,6 +283,9 @@ var errorMessagePatterns = []struct {
 	text    string
 }{
 	{regexp.MustCompile(`^ask an administrator to reserve port ([0-9]+) for this user before deploying$`), "端口 ${1} 未分配，请联系管理员。"},
+	{regexp.MustCompile(`^port ([0-9]+) is not allocated to this user$`), "端口 ${1} 未分配给当前用户。"},
+	{regexp.MustCompile(`^SS Rust (manager_address|local_address|local_port) can bypass fixed independent exits$`), "独立出口配置不支持 SS Rust 的 ${1}。"},
+	{regexp.MustCompile(`^ambiguous routing field "[^"]+"; use "([^"]+)"$`), "路由字段大小写不明确，请使用 ${1}。"},
 	{regexp.MustCompile(`^port ([0-9]+) (?:is already reserved for another user|belongs to another user's deployed configuration|is reserved for another user)$`), "端口 ${1} 已由其他用户占用。"},
 	{regexp.MustCompile(`^stop the (.+) core with successful traffic settlement before releasing reserved port ([0-9]+)$`), "请先停止 ${1} 并完成流量上报，再释放端口 ${2}。"},
 	{regexp.MustCompile(`^shared port ([0-9]+) is bound to a different allocation or core; stop and release it first$`), "端口 ${1} 已绑定其他用户或内核，请先停机并释放。"},
@@ -306,6 +324,7 @@ func chineseErrorMessage(status int, message string) string {
 		}
 	}
 	for _, wrapper := range []struct{ prefix, text string }{
+		{"独立出口校验失败：", "独立出口校验失败："},
 		{"预设配置无法建立独立出口归属，未保存或部署：", "预设配置无法建立独立出口归属，未保存或部署："},
 		{"字段修改无法保持独立出口归属，未保存：", "字段修改无法保持独立出口归属，未保存："},
 		{"无法安全更新独立出口配置：", "无法安全更新独立出口配置："},

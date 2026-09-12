@@ -36,19 +36,9 @@ func accountingTag(port int, original string) string {
 // inbound-constrained routes to independent outbound instances. Unknown
 // routing shapes fail closed, rather than silently bypassing a custom route.
 func PrepareAccounting(engine core.Engine, content string) (AccountingPlan, error) {
-	if err := core.ValidateConfig(engine, content); err != nil {
+	root, err := decodeAccountingRoot(engine, content)
+	if err != nil {
 		return AccountingPlan{}, err
-	}
-	root := decodeTrafficConfiguration(engine, content)
-	if engine != core.EngineMihomo {
-		decoder := json.NewDecoder(strings.NewReader(content))
-		decoder.UseNumber()
-		if err := decoder.Decode(&root); err != nil {
-			return AccountingPlan{}, err
-		}
-	}
-	if root == nil {
-		return AccountingPlan{}, fmt.Errorf("invalid core configuration")
 	}
 	plan := AccountingPlan{Source: "core-api"}
 	if engine == core.EngineShadowsocksRust {
@@ -57,6 +47,14 @@ func PrepareAccounting(engine core.Engine, content string) (AccountingPlan, erro
 			return plan, fmt.Errorf("SS Rust plugin transport requires explicit accounting review")
 		}
 		entries, _ := root["servers"].([]any)
+		if root["servers"] != nil && root["server_port"] != nil {
+			return plan, fmt.Errorf("SS Rust accounting cannot combine root and server-array listeners")
+		}
+		for _, key := range []string{"manager_address", "local_address", "local_port"} {
+			if root[key] != nil {
+				return plan, fmt.Errorf("SS Rust %s can bypass fixed independent exits", key)
+			}
+		}
 		if entries == nil {
 			entries = []any{root}
 		}
@@ -126,6 +124,9 @@ func prepareTaggedAccounting(engine core.Engine, root map[string]any, plan *Acco
 	}
 	if route["balancers"] != nil || root["endpoints"] != nil {
 		return fmt.Errorf("balancer/endpoint routing requires explicit accounting mapping")
+	}
+	if root["reverse"] != nil {
+		return fmt.Errorf("reverse routing requires explicit independent exit mapping")
 	}
 	// Loopback is reachable through direct proxy outbounds. Deny these
 	// destination ports before any user route, including domain-based routes,
@@ -270,6 +271,20 @@ func prepareTaggedAccounting(engine core.Engine, root map[string]any, plan *Acco
 		if rule["balancerTag"] != nil || rule["rules"] != nil || rule["invert"] == true {
 			return fmt.Errorf("logical/balancer rules require explicit accounting mapping")
 		}
+		if !xray {
+			switch stringValue(rule["action"]) {
+			case "", "route":
+				if stringValue(rule[targetKey]) == "" {
+					return fmt.Errorf("routing rules require an explicit outbound")
+				}
+			case "reject", "hijack-dns", "sniff", "resolve", "route-options":
+				if rule[targetKey] != nil {
+					return fmt.Errorf("non-routing actions cannot select an outbound")
+				}
+			default:
+				return fmt.Errorf("routing action requires explicit independent exit mapping")
+			}
+		}
 		originalRules = append(originalRules, raw)
 	}
 	var clones, legacyClones []any
@@ -278,11 +293,19 @@ func prepareTaggedAccounting(engine core.Engine, root map[string]any, plan *Acco
 		in := mapValue(raw)
 		tag := stringValue(in["tag"])
 		port := trafficPortNumber(in[portKey])
-		if tag == "qch-stat-api" || (xray && xrayInternalAPIInbound(root, in)) {
+		if xray && xrayInternalAPIInbound(root, in) {
 			continue
 		}
 		if !tagPattern.MatchString(tag) || port == 0 || seenPorts[port] || seenTags[tag] {
 			return fmt.Errorf("accounting requires unique tagged single-port inbounds")
+		}
+		if settings := mapValue(in["settings"]); settings["fallbacks"] != nil {
+			return fmt.Errorf("inbound fallbacks require explicit independent exit mapping")
+		}
+		for _, key := range []string{"allocate", "detour", "listen_ports"} {
+			if in[key] != nil {
+				return fmt.Errorf("dynamic or redirected listeners require explicit independent exit mapping")
+			}
 		}
 		seenPorts[port], seenTags[tag] = true, true
 		entry := AccountingPort{Port: port, Inbound: tag}
@@ -484,6 +507,15 @@ func cloneAccountingObject(value map[string]any) map[string]any {
 
 func prepareMihomoAccounting(root map[string]any) (AccountingPlan, error) {
 	plan := AccountingPlan{Source: "nft-dual"}
+	if tun := mapValue(root["tun"]); tun != nil && tun["enable"] != false {
+		return plan, fmt.Errorf("TUN and tunnel listeners require explicit independent exit mapping")
+	}
+	if tunnels, ok := root["tunnels"].([]any); root["tunnels"] != nil && (!ok || len(tunnels) != 0) {
+		return plan, fmt.Errorf("TUN and tunnel listeners require explicit independent exit mapping")
+	}
+	if mode := stringValue(root["mode"]); mode != "" && !strings.EqualFold(mode, "rule") {
+		return plan, fmt.Errorf("Mihomo independent exits require rule mode")
+	}
 	if root["proxy-groups"] != nil || root["proxy-providers"] != nil || root["sub-rules"] != nil {
 		return plan, fmt.Errorf("Mihomo shared groups/providers/sub-rules require explicit accounting mapping")
 	}
@@ -524,6 +556,17 @@ func prepareMihomoAccounting(root map[string]any) (AccountingPlan, error) {
 	}
 	if len(originalRules) == 0 {
 		originalRules = []string{"MATCH,DIRECT"}
+	}
+	// Mihomo otherwise falls through to the process-wide DIRECT adapter,
+	// bypassing every per-listener clone when no user rule matches.
+	terminal := false
+	for _, rule := range originalRules {
+		if strings.HasPrefix(rule, "MATCH,") {
+			terminal = true
+		}
+	}
+	if !terminal {
+		originalRules = append(originalRules, "MATCH,DIRECT")
 	}
 	var rules []string
 	var priorRules []any

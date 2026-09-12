@@ -25,12 +25,12 @@ func lockAgentSharesTx(ctx context.Context, tx pgx.Tx, agentIDs []string) error 
 
 // The caller holds the recipient and Agent locks, in that order. Owner and
 // administrator edits share one consent transition, preserving the ledger.
-func (s *Store) setAgentShareTx(ctx context.Context, tx pgx.Tx, userID, agentID string, limit uint64, ports []int, enabled, reinvite bool) error {
+func (s *Store) setAgentShareTx(ctx context.Context, tx pgx.Tx, userID, agentID string, limit uint64, engines []core.Engine, ports []int, enabled, reinvite bool) error {
 	var previous core.AgentShare
-	err := tx.QueryRow(ctx, `SELECT id,enabled,status,limit_bytes,
+	err := tx.QueryRow(ctx, `SELECT id,enabled,status,limit_bytes,engines,
 		ARRAY(SELECT port FROM agent_share_ports WHERE share_id=agent_shares.id ORDER BY port)
 		FROM agent_shares WHERE user_id=$1 AND agent_id=$2`,
-		userID, agentID).Scan(&previous.ID, &previous.Enabled, &previous.Status, &previous.LimitBytes, &previous.Ports)
+		userID, agentID).Scan(&previous.ID, &previous.Enabled, &previous.Status, &previous.LimitBytes, &previous.Engines, &previous.Ports)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return err
 	}
@@ -44,20 +44,21 @@ func (s *Store) setAgentShareTx(ctx context.Context, tx pgx.Tx, userID, agentID 
 			return err
 		}
 		status = core.AgentSharePending
-		if _, err := tx.Exec(ctx, `INSERT INTO agent_shares(id,user_id,agent_id,limit_bytes,enabled)
-			VALUES($1,$2,$3,$4,$5)`, previous.ID, userID, agentID, limit, enabled); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO agent_shares(id,user_id,agent_id,limit_bytes,enabled,engines)
+			VALUES($1,$2,$3,$4,$5,$6)`, previous.ID, userID, agentID, limit, enabled, engines); err != nil {
 			return err
 		}
-	} else if previous.Enabled != enabled || previous.LimitBytes != limit || !slices.Equal(previous.Ports, ports) || reinvite {
+	} else if previous.Enabled != enabled || previous.LimitBytes != limit || !slices.Equal(previous.Ports, ports) || !slices.Equal(previous.Engines, engines) || reinvite {
 		// Ordinary edits cannot undo rejection. Re-enabling a withdrawn share
 		// always requires fresh consent; active accepted shares keep consent
 		// when the owner adjusts their ports or total allowance.
-		if enabled && (!previous.Enabled || reinvite) {
+		expanded := len(core.IntersectEngines(engines, previous.Engines)) != len(engines)
+		if enabled && (!previous.Enabled || reinvite || (status == core.AgentShareAccepted && expanded)) {
 			status = core.AgentSharePending
 		}
 		if _, err := tx.Exec(ctx, `UPDATE agent_shares SET enabled=$2,limit_bytes=$3,status=$4,
-			invitation_revision=invitation_revision+1,updated_at=now() WHERE id=$1`,
-			previous.ID, enabled, limit, status); err != nil {
+			engines=$5,invitation_revision=invitation_revision+1,updated_at=now() WHERE id=$1`,
+			previous.ID, enabled, limit, status, engines); err != nil {
 			return err
 		}
 	}
@@ -94,15 +95,18 @@ func (s *Store) RespondAgentShare(ctx context.Context, shareID string, request c
 		return core.AgentAccess{}, mapError(err)
 	}
 	var features []string
-	if err := tx.QueryRow(ctx, `SELECT features FROM agents WHERE id=$1 AND revoked_at IS NULL FOR UPDATE`,
-		agentID).Scan(&features); err != nil {
+	var supported []core.Engine
+	if err := tx.QueryRow(ctx, `SELECT features,COALESCE(supported_capabilities,capabilities)
+		FROM agents WHERE id=$1 AND revoked_at IS NULL FOR UPDATE`,
+		agentID).Scan(&features, &supported); err != nil {
 		return core.AgentAccess{}, mapError(err)
 	}
 	var enabled bool
 	var status core.AgentShareStatus
 	var revision int64
-	if err := tx.QueryRow(ctx, `SELECT enabled,status,invitation_revision FROM agent_shares WHERE id=$1 FOR NO KEY UPDATE`,
-		shareID).Scan(&enabled, &status, &revision); err != nil {
+	var engines []core.Engine
+	if err := tx.QueryRow(ctx, `SELECT enabled,status,invitation_revision,engines FROM agent_shares WHERE id=$1 FOR NO KEY UPDATE`,
+		shareID).Scan(&enabled, &status, &revision, &engines); err != nil {
 		return core.AgentAccess{}, mapError(err)
 	}
 	if !enabled || revision != request.Revision || status == core.AgentShareRejected ||
@@ -111,7 +115,10 @@ func (s *Store) RespondAgentShare(ctx context.Context, shareID string, request c
 	}
 	next := core.AgentShareRejected
 	if request.Decision == "accept" {
-		if !containsFeature(features, core.AgentFeatureSharedTraffic) {
+		if len(engines) == 0 || len(core.IntersectEngines(engines, supported)) != len(engines) {
+			return core.AgentAccess{}, fmt.Errorf("%w: the owner must allocate supported engines before acceptance", ErrConflict)
+		}
+		if !supportsSharedEngines(features) {
 			return core.AgentAccess{}, fmt.Errorf("%w: upgrade the Agent before accepting a share", ErrConflict)
 		}
 		// Adoption of a legacy service uses its exact deployed snapshot and

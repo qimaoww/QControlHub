@@ -46,7 +46,7 @@ func TestTaskAPIWithPostgreSQL(t *testing.T) {
 	secondaryAgent := enrollTaskAPIAgent(t, ctx, dataStore, enrollment.Token, "task-api-secondary")
 	agentIDs = append(agentIDs, secondaryAgent.ID)
 
-	firstContent := "mixed-port: 7890\nmode: rule\nrules:\n  - MATCH,DIRECT\n"
+	firstContent := "listeners: [{name: first, type: http, port: 7890}]\nmode: rule\nrules:\n  - MATCH,DIRECT\n"
 	config, err := dataStore.SaveAgentConfig(ctx, core.Config{
 		AgentID: primaryAgent.ID, Name: "task API retry v1", Engine: core.EngineMihomo, Content: firstContent,
 	}, 0)
@@ -138,7 +138,7 @@ func TestTaskAPIWithPostgreSQL(t *testing.T) {
 		}
 	}
 
-	secondContent := "mixed-port: 7891\nmode: global\nrules:\n  - MATCH,DIRECT\n"
+	secondContent := "listeners: [{name: second, type: http, port: 7891}]\nmode: rule\nrules:\n  - MATCH,DIRECT\n"
 	updated, err := dataStore.SaveAgentConfig(ctx, core.Config{
 		AgentID: primaryAgent.ID, Name: "task API retry v2", Engine: core.EngineMihomo, Content: secondContent,
 	}, config.Version)
@@ -260,6 +260,7 @@ func enrollTaskAPIAgent(t *testing.T, ctx context.Context, dataStore *store.Stor
 	agent, err := dataStore.EnrollAgent(ctx, core.EnrollRequest{
 		Name: name, OS: "linux", Arch: "amd64",
 		Capabilities: []core.Engine{core.EngineMihomo},
+		Features:     []string{core.AgentFeatureIndependentEgress},
 		PublicKey:    base64.RawURLEncoding.EncodeToString(publicKey),
 	}, enrollmentToken)
 	if err != nil {

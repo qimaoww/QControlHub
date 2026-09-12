@@ -22,6 +22,7 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/authn"
 	"github.com/qimaoww/qcontrolhub/internal/core"
 	"github.com/qimaoww/qcontrolhub/internal/netpolicy"
+	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
 )
 
 var (
@@ -49,7 +50,7 @@ type storeExecutor interface {
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 56
+const currentSchemaVersion = 57
 
 func Open(ctx context.Context, databaseURL string, allowInsecureRemote bool) (*Store, error) {
 	return OpenWithConfigKey(ctx, databaseURL, allowInsecureRemote, "")
@@ -346,6 +347,29 @@ func (s *Store) migrate(ctx context.Context) error {
 			WHERE t.status IN ('pending','running') AND ((`+unauthorizedTaskPrincipalSQL+`)
 				OR EXISTS(SELECT 1 FROM agent_shares s WHERE s.id=t.shared_traffic_id AND s.status<>'accepted'))`); err != nil {
 			return fmt.Errorf("require Agent sharing consent: %w", err)
+		}
+	}
+	if appliedVersion < 57 {
+		// Legacy grants did not name engines. Do not guess or widen them:
+		// owners must allocate engines and recipients must consent again.
+		// Retain reservations and cumulative usage. Obsolete host snapshots
+		// predate dispatch-time read authorization and cannot be trusted.
+		if _, err := tx.Exec(ctx, `UPDATE agent_shares SET engines='{}',
+				status=CASE WHEN status='rejected' THEN status ELSE 'pending' END,
+				invitation_revision=invitation_revision+1,updated_at=now();
+			UPDATE agents SET sharing_revision=sharing_revision+1
+				WHERE id IN(SELECT agent_id FROM agent_shares);
+			UPDATE panel_users SET agent_access_revision=agent_access_revision+1
+				WHERE id IN(SELECT user_id FROM agent_shares);
+			UPDATE tasks SET config_content=NULL
+				WHERE action IN ('read-config','read-managed-config') AND status NOT IN ('pending','running');
+			UPDATE tasks t SET status=CASE WHEN status='running' THEN 'failed' ELSE 'canceled' END,
+				error='task authorization upgraded; submit a new task; previous execution may be unknown',
+				finished_at=now(),config_content=NULL,lease_id=NULL
+				WHERE status IN ('pending','running') AND
+					(t.shared_traffic_id<>'' OR t.action IN ('read-config','read-managed-config','import-existing','validate','deploy')
+						OR (`+unauthorizedTaskPrincipalSQL+`))`); err != nil {
+			return fmt.Errorf("scope shared engines and invalidate obsolete tasks: %w", err)
 		}
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO qcontrolhub_schema_migrations (version) VALUES ($1)`, currentSchemaVersion); err != nil {
@@ -1103,7 +1127,8 @@ func (s *Store) UpdateAgentObservedPublicIP(ctx context.Context, id, address str
 func (s *Store) ListAgents(ctx context.Context) ([]core.Agent, error) {
 	args := []any{}
 	where := agentAccessClause(ctx, "agents.id", &args)
-	rows, err := s.pool.Query(ctx, listAgentsSQLBase+where+` ORDER BY enrolled_at DESC`, args...)
+	query := scopedAgentsSQL(ctx, &args)
+	rows, err := s.pool.Query(ctx, query+where+` ORDER BY enrolled_at DESC`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1116,8 +1141,9 @@ func (s *Store) ListAgents(ctx context.Context) ([]core.Agent, error) {
 func (s *Store) ListAgentsWithEnrollmentCommands(ctx context.Context) ([]core.Agent, error) {
 	args := []any{}
 	where := agentAccessClause(ctx, "agents.id", &args)
+	query := scopedAgentsSQL(ctx, &args)
 	batch := &pgx.Batch{}
-	batch.Queue(listAgentsSQLBase+where+` ORDER BY enrolled_at DESC`, args...)
+	batch.Queue(query+where+` ORDER BY enrolled_at DESC`, args...)
 	enrollmentQuery, enrollmentArgs := enrollmentAvailabilityQuery(ctx, nil)
 	batch.Queue(enrollmentQuery, enrollmentArgs...)
 	results := s.pool.SendBatch(ctx, batch)
@@ -1152,12 +1178,23 @@ const listAgentsSQL = listAgentsSQLBase + ` ORDER BY enrolled_at DESC`
 const agentOfflineThresholdSQL = `(CASE WHEN agents.owner_id='' THEN (SELECT agent_offline_threshold_seconds FROM panel_settings WHERE id=1)
 	ELSE COALESCE((SELECT (runtime->>'agent_offline_threshold_seconds')::integer FROM user_panel_settings WHERE owner_id=agents.owner_id),45) END)`
 
-const listAgentsSQLBase = `
+const agentColumnsSQL = `
 			SELECT id,name,version,os,arch,capabilities,features,labels,runtime,observed_public_ip,
 				(SELECT metrics FROM agent_live_state WHERE agent_id=agents.id),
 				last_seen,enrolled_at,
-				` + agentOfflineThresholdSQL + `,supported_capabilities,` + capabilityTransitionsSQL + `,owner_id
-		FROM agents WHERE revoked_at IS NULL`
+				` + agentOfflineThresholdSQL + `,supported_capabilities,` + capabilityTransitionsSQL + `,owner_id`
+
+const agentSelectFromSQL = ` FROM agents WHERE revoked_at IS NULL`
+const listAgentsSQLBase = agentColumnsSQL + `,'{}'::text[]` + agentSelectFromSQL
+
+func scopedAgentsSQL(ctx context.Context, args *[]any) string {
+	if scopeForConfig(ctx).Admin {
+		return listAgentsSQLBase
+	}
+	*args = append(*args, scopeForConfig(ctx).OwnerID)
+	return agentColumnsSQL + fmt.Sprintf(`,COALESCE((SELECT engines FROM agent_shares
+		WHERE agent_id=agents.id AND user_id=$%d AND enabled AND status='accepted'),'{}'::text[])`, len(*args)) + agentSelectFromSQL
+}
 
 func scanAgents(ctx context.Context, rows pgx.Rows) ([]core.Agent, error) {
 	defer rows.Close()
@@ -1168,7 +1205,7 @@ func scanAgents(ctx context.Context, rows pgx.Rows) ([]core.Agent, error) {
 		var capabilities, features, labels, runtimeState, metricsState []byte
 		var observedPublicIP string
 		var offlineThresholdSeconds int
-		if err := rows.Scan(&agent.ID, &agent.Name, &agent.Version, &agent.OS, &agent.Arch, &capabilities, &features, &labels, &runtimeState, &observedPublicIP, &metricsState, &agent.LastSeen, &agent.EnrolledAt, &offlineThresholdSeconds, &agent.SupportedCapabilities, &agent.CapabilityTransitions, &agent.OwnerID); err != nil {
+		if err := rows.Scan(&agent.ID, &agent.Name, &agent.Version, &agent.OS, &agent.Arch, &capabilities, &features, &labels, &runtimeState, &observedPublicIP, &metricsState, &agent.LastSeen, &agent.EnrolledAt, &offlineThresholdSeconds, &agent.SupportedCapabilities, &agent.CapabilityTransitions, &agent.OwnerID, &agent.SharedEngines); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal(capabilities, &agent.Capabilities); err != nil {
@@ -1440,6 +1477,7 @@ func (s *Store) ExistingConfigIDs(ctx context.Context, ids []string) (map[string
 	}
 	args := []any{ids}
 	ownerWhere := ownerClause(ctx, "owner_id", &args)
+	ownerWhere += configAgentAccessClause(ctx, "configs.agent_id", "configs.engine", &args)
 	rows, err := s.pool.Query(ctx, `SELECT id FROM configs WHERE deleted_at IS NULL AND id=ANY($1::text[])`+ownerWhere, args...)
 	if err != nil {
 		return nil, err
@@ -1479,6 +1517,9 @@ func (s *Store) CreateTask(ctx context.Context, request core.TaskRequest) (core.
 func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRequest) (core.Task, error) {
 	scope := scopeForConfig(ctx)
 	if err := lockAgentUser(ctx, tx); err != nil {
+		return core.Task{}, err
+	}
+	if err := requireTaskPermission(ctx, tx, request.Action, false); err != nil {
 		return core.Task{}, err
 	}
 	if scope.Admin && request.ConfigID != "" {
@@ -1523,6 +1564,11 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 		}
 	} else if !request.Engine.Valid() {
 		return core.Task{}, fmt.Errorf("%w: unsupported engine %q", ErrInvalid, request.Engine)
+	}
+	if !request.Action.AgentLevel() {
+		if err := requireAgentEngineAccess(ctx, tx, request.AgentID, request.Engine); err != nil {
+			return core.Task{}, err
+		}
 	}
 	if request.Action == core.ActionInstall {
 		normalizedVersion, versionErr := core.NormalizeCoreVersionSelector(request.CoreVersion)
@@ -1599,6 +1645,10 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 			return core.Task{}, fmt.Errorf("%w: %s core tasks are disabled because an existing service could not be mapped safely: %s", ErrConflict, request.Engine, reason)
 		}
 	}
+	if (request.Action == core.ActionValidate || request.Action == core.ActionDeploy) &&
+		!containsFeature(features, core.AgentFeatureIndependentEgress) {
+		return core.Task{}, fmt.Errorf("%w: upgrade the Agent before validating or deploying independent exits", ErrConflict)
+	}
 	if request.Action == core.ActionReadManagedConfig && !containsFeature(features, core.AgentFeatureManagedConfigRead) {
 		return core.Task{}, fmt.Errorf("%w: this Agent cannot read the managed configuration independently; upgrade the Agent through the panel first", ErrConflict)
 	}
@@ -1650,6 +1700,11 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 		task.ConfigContent, err = s.decryptContent(task.ConfigContent)
 		if err != nil {
 			return core.Task{}, err
+		}
+		if request.Action == core.ActionValidate || request.Action == core.ActionDeploy {
+			if err := serverconfig.ValidateIndependentEgress(task.Engine, task.ConfigContent); err != nil {
+				return core.Task{}, fmt.Errorf("%w: %v", ErrInvalid, err)
+			}
 		}
 		if err := s.prepareSharedTaskTx(ctx, tx, &task, configOwnerID, features, runtime[request.Engine]); err != nil {
 			return core.Task{}, err
@@ -1775,7 +1830,7 @@ func (s *Store) ListTasksFiltered(ctx context.Context, agentID string, status co
 		}
 	}
 	where += ownerClause(ctx, "owner_id", &args)
-	where += agentAccessClause(ctx, "tasks.agent_id", &args)
+	where += agentEngineAccessClause(ctx, "tasks.agent_id", "tasks.engine", &args)
 	args = append(args, limit)
 	rows, err := s.pool.Query(ctx, `
 		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),COALESCE(core_version,''),COALESCE(core_source,''),status,attempt,
@@ -1814,7 +1869,7 @@ func (s *Store) getTask(ctx context.Context, id string, stateOnly bool) (core.Ta
 	}
 	args := []any{id}
 	ownerWhere := ownerClause(ctx, "owner_id", &args)
-	ownerWhere += agentAccessClause(ctx, "tasks.agent_id", &args)
+	ownerWhere += agentEngineAccessClause(ctx, "tasks.agent_id", "tasks.engine", &args)
 	row := s.pool.QueryRow(ctx, `
 		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),COALESCE(core_version,''),COALESCE(core_source,''),status,attempt,
 		       `+output+`,COALESCE(error,''),created_at,started_at,finished_at,tcp_settings
@@ -1829,7 +1884,7 @@ func (s *Store) getTask(ctx context.Context, id string, stateOnly bool) (core.Ta
 func (s *Store) CancelTask(ctx context.Context, id string) error {
 	args := []any{id}
 	ownerWhere := ownerClause(ctx, "owner_id", &args)
-	ownerWhere += agentAccessClause(ctx, "tasks.agent_id", &args)
+	ownerWhere += agentEngineAccessClause(ctx, "tasks.agent_id", "tasks.engine", &args)
 	command, err := s.pool.Exec(ctx, `
 		UPDATE tasks SET status='canceled',error='canceled by administrator',finished_at=now(),config_content=NULL,lease_id=NULL
 		WHERE id=$1 AND status='pending'`+ownerWhere, args...)
@@ -1901,6 +1956,9 @@ func (s *Store) RunningTask(ctx context.Context, agentID string) (*core.Task, er
 	if err := json.Unmarshal(featuresJSON, &features); err != nil {
 		return nil, err
 	}
+	if err := cancelUnauthorizedAgentTasksTx(ctx, tx, agentID, features); err != nil {
+		return nil, err
+	}
 	row := tx.QueryRow(ctx, `
 		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),
 		       COALESCE(config_content,''),COALESCE(mainland_access_policies,'[]'::jsonb),COALESCE(core_version,''),COALESCE(core_source,''),status,attempt,COALESCE(lease_id,''),
@@ -1918,7 +1976,8 @@ func (s *Store) RunningTask(ctx context.Context, agentID string) (*core.Task, er
 		return nil, err
 	}
 	var unauthorized bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM tasks t WHERE t.id=$1 AND (`+unauthorizedTaskPrincipalSQL+`))`,
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM tasks t WHERE t.id=$1
+		AND ((`+unauthorizedTaskPrincipalSQL+`) OR (`+unauthorizedHostConfigTaskSQL+`)))`,
 		task.ID).Scan(&unauthorized); err != nil {
 		return nil, err
 	}
@@ -1932,8 +1991,9 @@ func (s *Store) RunningTask(ctx context.Context, agentID string) (*core.Task, er
 	if task.SharedTrafficID != "" {
 		var allowed bool
 		if err := tx.QueryRow(ctx, `SELECT $2::boolean AND EXISTS(SELECT 1 FROM agent_shares s JOIN panel_users u ON u.id=s.user_id
-			WHERE s.id=$1 AND NOT u.disabled AND s.enabled AND s.status='accepted' AND (s.limit_bytes=0 OR s.used_bytes<s.limit_bytes))`,
-			task.SharedTrafficID, containsFeature(features, core.AgentFeatureSharedTraffic)).Scan(&allowed); err != nil {
+			WHERE s.id=$1 AND s.agent_id=$3 AND $4=ANY(s.engines) AND NOT u.disabled
+				AND s.enabled AND s.status='accepted' AND (s.limit_bytes=0 OR s.used_bytes<s.limit_bytes))`,
+			task.SharedTrafficID, supportsSharedEngines(features), agentID, task.Engine).Scan(&allowed); err != nil {
 			return nil, err
 		}
 		if !allowed {
@@ -1961,14 +2021,15 @@ func (s *Store) RunningTask(ctx context.Context, agentID string) (*core.Task, er
 		}
 		return nil, nil
 	}
-	if commitErr := tx.Commit(ctx); commitErr != nil {
-		return nil, commitErr
-	}
-	if task.ConfigContent != "" {
-		task.ConfigContent, err = s.decryptContent(task.ConfigContent)
-		if err != nil {
-			return nil, err
+	if err := s.openExecutionConfig(&task); err != nil {
+		if _, updateErr := tx.Exec(ctx, `UPDATE tasks SET status='failed',error=$2,finished_at=now(),
+			config_content=NULL,lease_id=NULL WHERE id=$1`, task.ID, truncate(err.Error(), 8<<10)); updateErr != nil {
+			return nil, updateErr
 		}
+		return nil, tx.Commit(ctx)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
 	}
 	return &task, nil
 }
@@ -2026,6 +2087,13 @@ func (s *Store) ClaimTask(ctx context.Context, agentID string) (*core.Task, erro
 		          t.created_at,t.started_at,t.finished_at,t.tcp_settings,t.shared_traffic_id`, agentID, leaseID, mirrorSupported, containsFeature(features, core.AgentFeatureSystemBBR))
 	task, err := scanTask(row, true)
 	if err == nil {
+		if configErr := s.openExecutionConfig(&task); configErr != nil {
+			if _, updateErr := tx.Exec(ctx, `UPDATE tasks SET status='failed',error=$2,finished_at=now(),
+				config_content=NULL,lease_id=NULL WHERE id=$1`, task.ID, truncate(configErr.Error(), 8<<10)); updateErr != nil {
+				return nil, updateErr
+			}
+			return nil, tx.Commit(ctx)
+		}
 		if markErr := markEngineExecutionTx(ctx, tx, task); markErr != nil {
 			return nil, markErr
 		}
@@ -2038,12 +2106,6 @@ func (s *Store) ClaimTask(ctx context.Context, agentID string) (*core.Task, erro
 	}
 	if err != nil {
 		return nil, err
-	}
-	if task.ConfigContent != "" {
-		task.ConfigContent, err = s.decryptContent(task.ConfigContent)
-		if err != nil {
-			return nil, err
-		}
 	}
 	return &task, nil
 }
@@ -2093,6 +2155,21 @@ func (s *Store) CompleteTask(ctx context.Context, agentID, taskID string, result
 			return ErrNotFound
 		}
 		return fmt.Errorf("%w: task is not running", ErrConflict)
+	}
+	var unauthorized bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM tasks t WHERE t.id=$1
+		AND ((`+unauthorizedTaskPrincipalSQL+`) OR (`+unauthorizedHostConfigTaskSQL+`)))`, taskID).Scan(&unauthorized); err != nil {
+		return err
+	}
+	if unauthorized {
+		// Never retain an unauthorized read, including partial content in an
+		// error. A later owner takeover must not make this result readable.
+		if _, err := tx.Exec(ctx, `UPDATE tasks SET status='failed',output=NULL,
+			error='task authorization changed; previous execution is unknown',
+			finished_at=now(),config_content=NULL,lease_id=NULL WHERE id=$1`, taskID); err != nil {
+			return err
+		}
+		return tx.Commit(ctx)
 	}
 	status := core.TaskFailed
 	if result.Success {
@@ -2225,9 +2302,9 @@ func (s *Store) Overview(ctx context.Context) (core.Overview, error) {
 	var result core.Overview
 	args := []any{}
 	configWhere := ownerClause(ctx, "owner_id", &args)
-	configWhere += configAgentAccessClause(ctx, "configs.agent_id", &args)
+	configWhere += configAgentAccessClause(ctx, "configs.agent_id", "configs.engine", &args)
 	taskWhere := ownerClause(ctx, "owner_id", &args)
-	taskWhere += agentAccessClause(ctx, "tasks.agent_id", &args)
+	taskWhere += agentEngineAccessClause(ctx, "tasks.agent_id", "tasks.engine", &args)
 	agentWhere := agentAccessClause(ctx, "agents.id", &args)
 	err := s.pool.QueryRow(ctx, `
 		SELECT agents.total,agents.online,configs.archived,configs.node,
@@ -2722,6 +2799,8 @@ CREATE TABLE IF NOT EXISTS agent_shares (
 CREATE INDEX IF NOT EXISTS agent_shares_agent_idx ON agent_shares(agent_id);
 ALTER TABLE agent_shares ADD COLUMN IF NOT EXISTS status varchar(10) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','accepted','rejected'));
 ALTER TABLE agent_shares ADD COLUMN IF NOT EXISTS invitation_revision bigint NOT NULL DEFAULT 1 CHECK (invitation_revision>0);
+ALTER TABLE agent_shares ADD COLUMN IF NOT EXISTS engines text[] NOT NULL DEFAULT '{}'
+	CHECK (engines <@ ARRAY['mihomo','xray','sing-box','ss-rust']::text[] AND cardinality(engines)<=4 AND array_position(engines,NULL) IS NULL);
 CREATE TABLE IF NOT EXISTS agent_share_ports (
 	agent_id text NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
 	port integer NOT NULL CHECK (port BETWEEN 1 AND 65535),

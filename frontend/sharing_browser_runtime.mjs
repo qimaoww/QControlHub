@@ -18,8 +18,8 @@ const input = (element, value) => {
 
 export async function testAgentSharingRuntime() {
   const state = { data: {}, session: { user_id: "alice", role: "user" }, navigationEpoch: 1 };
-  const agent = { id: "own", name: "Alice own Agent", can_manage: true, features: ["shared-traffic-v1"] };
-  let sharing = { revision: 2, shares: [{ id: "shr_bob", username: "bob", user_id: "bob-id", status: "accepted", invitation_revision: 2, ports: [21003], limit_bytes: 1024 ** 3, used_bytes: 64, enabled: true }] };
+  const agent = { id: "own", name: "Alice own Agent", can_manage: true, capabilities: ["mihomo", "xray"], features: ["shared-traffic-v1", "shared-engines-v1", "independent-egress-v1"] };
+  let sharing = { revision: 2, shares: [{ id: "shr_bob", username: "bob", user_id: "bob-id", status: "accepted", invitation_revision: 2, engines: ["mihomo"], ports: [21003], limit_bytes: 1024 ** 3, used_bytes: 64, enabled: true }] };
   const writes = [], notifications = [];
   let hold = false, release, gates = 0, confirm = true;
   const editor = createAgentSharing({
@@ -45,8 +45,18 @@ export async function testAgentSharingRuntime() {
   const field = name => form().querySelector(`[name="${name}"]`);
   await editor.open({ ...agent, can_manage: false });
   assert(!dialog(), "borrowed host opened sharing controls");
+  await editor.open({ ...agent, features: agent.features.filter(feature => feature !== "independent-egress-v1") });
+  assert(dialog().querySelector(".alert.error:not([hidden])")?.textContent.includes("升级 Agent"),
+    "missing independent-egress capability was shown as compatible");
+  editor.close();
   await editor.open(agent);
   assert(gates === 1 && field("username").readOnly, "existing recipients or refresh gate not protected");
+  assert(form().querySelectorAll('[name="engines"]').length === 2, "sharing offered unsupported engines");
+  field("engines").click();
+  form().requestSubmit();
+  await waitFor(() => dialog().querySelector("[data-sharing-error]").textContent.includes("内核"), "empty engine allocation has no inline error");
+  assert(writes.length === 0, "implicit engine allocation reached the API");
+  field("engines").click();
   dialog().querySelector("[data-recipient-add]").click();
   assert(form().querySelectorAll("[data-recipient]").length === 2 && editor.hasUnsavedChanges(), "new recipient was not captured");
   dialog().querySelector("[data-recipient-remove]").click();
@@ -56,10 +66,12 @@ export async function testAgentSharingRuntime() {
   await waitFor(() => !dialog().querySelector("[data-sharing-error]").hidden, "invalid port has no inline error");
   assert(writes.length === 0, "invalid port reached API");
   input(field("ports"), "21003, 21004");
+  form().querySelector('[name="engines"][value="xray"]').click();
   editor.close();
   assert(editor.hasUnsavedChanges() && gates === 0, "closing lost the account-scoped draft or leaked the refresh gate");
   await editor.open(agent);
   assert(field("ports").value === "21003, 21004", "reopening did not restore draft");
+  assert(form().querySelector('[name="engines"][value="xray"]').checked, "reopening lost explicit engine allocation");
   sharing.revision++;
   form().requestSubmit();
   await waitFor(() => dialog().querySelector("[data-sharing-error]").textContent.includes("已变更"), "stale revision did not surface conflict");
@@ -72,6 +84,7 @@ export async function testAgentSharingRuntime() {
   dialog().querySelector("[data-sharing-reload]").click();
   await waitFor(() => field("ports").value === "21003", "confirmed reload did not recover current revision");
   assert(!editor.hasUnsavedChanges(), "reload retained stale draft");
+  assert(!form().querySelector('[name="engines"][value="xray"]').checked, "reload retained stale engine allocation");
 
   input(field("limit_gib"), "2.5");
   hold = true;
@@ -86,6 +99,7 @@ export async function testAgentSharingRuntime() {
   await waitFor(() => !field("ports").disabled && !editor.hasUnsavedChanges(), "save did not settle reopened dialog");
   assert(sharing.shares[0].limit_bytes === 2.5 * 1024 ** 3, "GiB conversion changed the allowance");
   assert(sharing.shares[0].ports.length === 1 && sharing.shares[0].username === "bob", "recipient scope changed");
+  assert(writes.at(-1).shares[0].engines.join(",") === "mihomo", "save widened engine allocation");
   assert(dialog().scrollWidth <= dialog().clientWidth + 1, "sharing dialog overflows mobile viewport");
   assert(dialog().querySelector("header>div").getBoundingClientRect().width > 200,
     "header text was squeezed into the inherited traffic icon column");

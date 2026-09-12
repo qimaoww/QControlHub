@@ -23,11 +23,11 @@ export async function testUsersRuntime(preview = false) {
     { id: "bob", username: "bob", display_name: "Bob", role: "user", permissions: ["agents.read"] },
     { id: "admin", username: "admin", role: "admin", permissions: [] },
   ];
-  const agents = [{ id: "shared", name: "共享 Agent", features: ["shared-traffic-v1"] }];
+  const agents = [{ id: "shared", name: "共享 Agent", capabilities: ["mihomo", "xray"], features: ["shared-traffic-v1", "shared-engines-v1", "independent-egress-v1"] }];
   const access = new Map(items.map((user, index) => [user.id, {
     isolated: user.role !== "admin", revision: 4, shares: user.role === "admin" ? [] : [{
       id: `shr_${user.id}`, status: "accepted", invitation_revision: 2,
-      agent_id: "shared", agent_name: "共享 Agent", enabled: true, ports: [31001 + index],
+      agent_id: "shared", agent_name: "共享 Agent", enabled: true, engines: ["mihomo"], ports: [31001 + index],
       used_bytes: 128, limit_bytes: 1024 ** 3,
     }],
   }]));
@@ -90,12 +90,15 @@ export async function testUsersRuntime(preview = false) {
   failedUser = "";
   input(row().querySelector('[name="ports"]'), "31001, invalid");
   input(row().querySelector('[name="limit_gib"]'), "2.5");
+  row().querySelector('[name="engines"][value="xray"]').click();
   assert(pages.hasUnsavedChanges(), "allocation edits were not captured");
   await select("bob");
   assert(row().querySelector('[name="ports"]').value === "31002", "another user's port draft leaked");
+  assert(!row().querySelector('[name="engines"][value="xray"]').checked, "another user's engine draft leaked");
   await select("alice");
   assert(row().querySelector('[name="ports"]').value === "31001, invalid", "switching users lost an invalid draft");
   assert(row().querySelector('[name="limit_gib"]').value === "2.5", "switching users lost the allowance draft");
+  assert(row().querySelector('[name="engines"][value="xray"]').checked, "switching users lost the engine draft");
   form().requestSubmit();
   await waitFor(() => !form().querySelector("[data-user-error]").hidden, "invalid port did not produce a local error");
   assert(writes.length === 0, "invalid port reached the API");
@@ -112,6 +115,7 @@ export async function testUsersRuntime(preview = false) {
   document.querySelector("[data-user-reload]").click();
   await waitFor(() => row().querySelector('[name="ports"]').value === "31001", "confirmed reload retained stale fields");
   assert(!pages.hasUnsavedChanges(), "confirmed reload retained dirty state");
+  assert(!row().querySelector('[name="engines"][value="xray"]').checked, "reload retained a stale engine grant");
   conflict = false;
   input(row().querySelector('[name="limit_gib"]'), "2.5");
   holdSave = true;
@@ -133,6 +137,7 @@ export async function testUsersRuntime(preview = false) {
   await waitFor(() => notifications.includes("分配已保存"), "allocation did not save");
   holdSave = false;
   assert(access.get("alice").shares[0].limit_bytes === 2.5 * 1024 ** 3, "GiB allocation was rounded incorrectly");
+  assert(access.get("alice").shares[0].engines.join(",") === "mihomo", "allocation widened engine scope");
   assert(!state.data.userDrafts.has("alice") && !state.data.userAccessSaves.size, "saving across navigation left a stale draft or request");
   assert(!form().querySelector('[type="submit"]').disabled, "completed save left the current form locked");
   await select("bob");
@@ -160,6 +165,7 @@ export async function testUsersRuntime(preview = false) {
   input(account.elements.username, "new-user");
   input(account.elements.password, "test-password-only");
   account.querySelector("details").open = true;
+  await Promise.all(dialog.getAnimations().map(animation => animation.finished));
   const body = dialog.querySelector(".traffic-edit-body").getBoundingClientRect();
   assert(dialog.scrollWidth <= dialog.clientWidth + 1 && body.width > 0, "user form overflows its dialog");
   let previousBottom = 0;
@@ -170,7 +176,8 @@ export async function testUsersRuntime(preview = false) {
     assert(bounds.width >= body.width - 45 && bounds.top >= previousBottom, "account fields are inline, overlapping or too narrow");
     previousBottom = bounds.bottom;
   }
-  assert(account.querySelector("footer").getBoundingClientRect().bottom <= innerHeight + 1, "account save buttons are clipped");
+  const footerBottom = account.querySelector("footer").getBoundingClientRect().bottom;
+  assert(footerBottom <= innerHeight + 1, `account save buttons are clipped: ${footerBottom} > ${innerHeight}`);
   account.requestSubmit();
   await waitFor(() => writes.some(write => write.path === "/users"), "create user did not submit");
   assert(writes.find(write => write.path === "/users").body.agent_isolation === true, "new regular user was created with unrestricted fleet access");
@@ -193,17 +200,18 @@ export async function testUsersRuntime(preview = false) {
 async function testInvitationRuntime() {
   const state = { route: "my-quota", data: {}, session: { role: "user", user_id: "recipient" } };
   let access = { isolated: true, revision: 4, shares: [
-    { id: "shr_pending", agent_id: "shared", agent_name: "共享 Agent", owner_username: "<img src=x onerror=alert(1)>", enabled: true, status: "pending", invitation_revision: 2, ports: [21001], limit_bytes: 1024 ** 3, used_bytes: 64 },
-    { id: "shr_revoked", agent_id: "revoked", agent_name: "已撤销 Agent", enabled: false, status: "pending", invitation_revision: 8, ports: [], limit_bytes: 0, used_bytes: 0 },
+    { id: "shr_pending", agent_id: "shared", agent_name: "共享 Agent", owner_username: "<img src=x onerror=alert(1)>", enabled: true, status: "pending", invitation_revision: 2, engines: ["mihomo", "xray"], ports: [21001], limit_bytes: 1024 ** 3, used_bytes: 64 },
+    { id: "shr_revoked", agent_id: "revoked", agent_name: "已撤销 Agent", enabled: false, status: "pending", invitation_revision: 8, engines: [], ports: [], limit_bytes: 0, used_bytes: 0 },
   ] };
   const writes = [], notices = [];
-  let hold = false, release, conflict = false, confirm = true, holdRead = false, releaseRead;
+  let hold = false, release, conflict = false, confirm = true, holdRead = false, releaseRead, failRead = false;
   const pages = installUsers({
     state, esc, notify: message => notices.push(message), confirmAction: async () => confirm,
     shell: markup => { document.body.innerHTML = `<main>${markup}</main>`; },
     api: async (path, options = {}) => {
       if (!options.method) {
         assert(path === "/agent-access", "quota page loaded host/user administration");
+        if (failRead) throw new Error("邀请读取失败");
         const result = structuredClone(access);
         if (holdRead) await new Promise(resolve => { releaseRead = resolve; });
         return result;
@@ -233,6 +241,7 @@ async function testInvitationRuntime() {
   open();
   assert(dialog()?.open && accept() && reject(), "dedicated dialog lacks consent actions");
   assert(dialog().textContent.includes("共享 Agent") && dialog().textContent.includes("21001") && !dialog().querySelector("img"), "dialog lost terms or failed to escape the owner");
+  assert(dialog().textContent.includes("Mihomo / Xray") && !dialog().textContent.includes("sing-box"), "consent terms did not show the exact engine allocation");
   // Measure the final layout, not the shared dialog entrance transform.
   await Promise.all(dialog().getAnimations().map(animation => animation.finished));
   const bounds = dialog().getBoundingClientRect(), footer = dialog().querySelector("footer").getBoundingClientRect();
@@ -296,6 +305,19 @@ async function testInvitationRuntime() {
   await waitFor(() => card().textContent.includes("已拒绝"), "pending invitation cannot be rejected");
   assert(!dialog(), "successful response left the invitation dialog open");
 
+  access.shares[0].status = "pending";
+  access.shares[0].engines = [];
+  access.shares[0].invitation_revision++;
+  await pages.myQuota();
+  open();
+  assert(accept().disabled && !reject().disabled, "未分配内核的旧邀请可以被接受");
+  failRead = true;
+  dialog().querySelector("[data-invitation-reload]").click();
+  await waitFor(() => dialog()?.querySelector("[data-invitation-error]").textContent.includes("读取失败"), "刷新失败没有保留错误");
+  assert(accept().disabled && !reject().disabled, "刷新失败解除了接受按钮的安全限制");
+  failRead = false;
+  pages.closeInvitation();
+  access.shares[0].engines = ["mihomo"];
   access.shares[0].status = "pending";
   access.shares[0].invitation_revision++;
   await pages.myQuota();
