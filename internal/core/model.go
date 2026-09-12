@@ -188,11 +188,12 @@ type User struct {
 }
 
 type UserRequest struct {
-	Username    string       `json:"username"`
-	DisplayName string       `json:"display_name"`
-	Role        Role         `json:"role"`
-	Password    string       `json:"password"`
-	Permissions []Permission `json:"permissions,omitempty"`
+	Username       string       `json:"username"`
+	DisplayName    string       `json:"display_name"`
+	Role           Role         `json:"role"`
+	Password       string       `json:"password"`
+	Permissions    []Permission `json:"permissions,omitempty"`
+	AgentIsolation bool         `json:"agent_isolation"`
 }
 
 type UserUpdate struct {
@@ -330,6 +331,8 @@ type HostNetworkInterface struct {
 
 type Agent struct {
 	ID                         string                          `json:"id"`
+	OwnerID                    string                          `json:"-"`
+	CanManage                  bool                            `json:"can_manage"`
 	Name                       string                          `json:"name"`
 	Version                    string                          `json:"version,omitempty"`
 	OS                         string                          `json:"os"`
@@ -406,6 +409,7 @@ const (
 )
 
 type Task struct {
+	SharedTrafficID        string                 `json:"shared_traffic_id,omitempty"`
 	TCPSettings            TCPSettings            `json:"tcp_settings,omitempty"`
 	ID                     string                 `json:"id"`
 	AgentID                string                 `json:"agent_id"`
@@ -498,10 +502,11 @@ type HeartbeatRequest struct {
 }
 
 type TaskResultRequest struct {
-	LeaseID string `json:"lease_id"`
-	Success bool   `json:"success"`
-	Output  string `json:"output,omitempty"`
-	Error   string `json:"error,omitempty"`
+	LeaseID        string `json:"lease_id"`
+	Success        bool   `json:"success"`
+	Output         string `json:"output,omitempty"`
+	Error          string `json:"error,omitempty"`
+	TrafficSettled bool   `json:"traffic_settled,omitempty"`
 }
 
 const (

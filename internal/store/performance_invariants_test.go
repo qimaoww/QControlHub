@@ -109,6 +109,13 @@ func TestTrafficUsageUpdatesStayHeapOnly(t *testing.T) {
 	if _, err := s.pool.Exec(ctx, `VACUUM (FULL, ANALYZE) port_traffic_policies`); err != nil {
 		t.Fatal(err)
 	}
+	// A slow remote sync may hold its ownership lock throughout these reports.
+	// The lock must not pin a database transaction or prevent page reuse.
+	release, err := s.TryLockSubStoreOperation(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
 
 	// Storage growth is the assertion rather than the heap-only counter from
 	// pg_stat_user_tables. Those counters belong to the whole database and other

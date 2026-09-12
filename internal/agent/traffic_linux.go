@@ -35,6 +35,7 @@ type trafficCounterBackend interface {
 }
 
 type trafficRecord struct {
+	ShareUsedBytes        uint64                  `json:"share_used_bytes,omitempty"`
 	Accounting            *core.TrafficAccounting `json:"accounting,omitempty"`
 	AccountingError       string                  `json:"-"`
 	Policy                core.PortTrafficPolicy  `json:"policy"`
@@ -61,16 +62,19 @@ type trafficState struct {
 }
 
 type TrafficManager struct {
-	nativeSource func(context.Context, core.Engine) (nativeAccountingSnapshot, error)
-	mu           sync.Mutex
-	statePath    string
-	backend      trafficCounterBackend
-	records      map[string]*trafficRecord
-	snapshot     []core.PortTrafficUsage
-	dirty        bool
-	rulesDirty   bool
-	bootID       string
-	now          func() time.Time
+	nativeSource     func(context.Context, core.Engine) (nativeAccountingSnapshot, error)
+	haltShared       func(context.Context, core.Engine) error
+	mu               sync.Mutex
+	statePath        string
+	backend          trafficCounterBackend
+	records          map[string]*trafficRecord
+	snapshot         []core.PortTrafficUsage
+	dirty            bool
+	rulesDirty       bool
+	bootID           string
+	now              func() time.Time
+	awaitingPolicies bool
+	recoveryEngines  []core.Engine
 }
 
 func NewTrafficManager(agentStatePath string) *TrafficManager {
@@ -86,8 +90,10 @@ func NewTrafficManagerForServiceManager(agentStatePath string, serviceManager *S
 		manager.bootID = strings.TrimSpace(string(bootID))
 	}
 	state, err := loadTrafficState(manager.statePath)
+	validState := false
 	if err == nil {
 		if err := validateLoadedTrafficState(state, manager.now().UTC()); err == nil {
+			validState = true
 			manager.records = state.Records
 			if state.BootID != "" && state.BootID != manager.bootID {
 				for _, record := range manager.records {
@@ -100,6 +106,26 @@ func NewTrafficManagerForServiceManager(agentStatePath string, serviceManager *S
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		slog.Warn("load port traffic state", "error", err)
+	}
+	guard, guardErr := loadTrafficState(manager.sharedGuardPath())
+	validGuard := guardErr == nil && validateLoadedTrafficState(guard, manager.now().UTC()) == nil
+	if !validState || (validGuard && !sharedTrafficGuardMatches(state, guard)) || (!validGuard && !errors.Is(guardErr, os.ErrNotExist)) {
+		// The activation guard is written before changing enforcement. A
+		// missing, corrupt, or older checkpoint must not undo that policy
+		// transition while the control plane is unreachable.
+		manager.awaitingPolicies = true
+		if validState {
+			manager.recoverSharedEngines(manager.records)
+		}
+		if validGuard {
+			for _, record := range guard.Records {
+				if !slices.Contains(manager.recoveryEngines, record.Policy.Engine) {
+					manager.recoveryEngines = append(manager.recoveryEngines, record.Policy.Engine)
+				}
+			}
+		} else if !errors.Is(guardErr, os.ErrNotExist) || (err != nil && !errors.Is(err, os.ErrNotExist)) || (err == nil && !validState) {
+			manager.recoveryEngines = []core.Engine{core.EngineMihomo, core.EngineXray, core.EngineSingBox, core.EngineShadowsocksRust}
+		}
 	}
 	if manager.records == nil {
 		manager.records = make(map[string]*trafficRecord)
@@ -158,9 +184,30 @@ func (manager *TrafficManager) SetPolicies(ctx context.Context, policies []core.
 	}
 	seenIDs := make(map[string]struct{}, len(policies))
 	seenPorts := make(map[int]struct{}, len(policies))
+	policies = append([]core.PortTrafficPolicy(nil), policies...)
+	groups := make(map[string]core.SharedTrafficQuota)
 	now := manager.now().UTC()
 	for index := range policies {
 		policy := &policies[index]
+		if !policy.SharedQuota.Valid() {
+			return errors.New("control plane returned an invalid shared traffic allocation")
+		}
+		if policy.SharedQuota != nil {
+			quota := *policy.SharedQuota
+			policy.SharedQuota = &quota
+			if policy.Protocol != core.TrafficProtocolBoth {
+				return errors.New("shared traffic requires both listener transports")
+			}
+			group := quota
+			group.PortUsedBytes = 0
+			if previous, exists := groups[quota.ID]; exists && previous != group {
+				return errors.New("control plane returned inconsistent shared allocation totals")
+			}
+			groups[quota.ID] = group
+			// The wire carries zero/auto-block for fail-closed compatibility
+			// with old Agents. Shared quotas replace per-port calendar limits.
+			policy.LimitBytes, policy.AutoBlock = math.MaxInt64, false
+		}
 		if !core.ValidPortTrafficPolicyID(policy.ID) || policy.AgentID != agentID {
 			return errors.New("control plane returned a traffic policy for an invalid identity")
 		}
@@ -194,18 +241,23 @@ func (manager *TrafficManager) SetPolicies(ctx context.Context, policies []core.
 		record := manager.records[policy.ID]
 		if record == nil || !sameTrafficCounter(record.Policy, policy) || record.Policy.AgentID != policy.AgentID ||
 			record.Policy.Name != policy.Name || record.Policy.Engine != policy.Engine ||
-			record.Policy.LimitBytes != policy.LimitBytes || record.Policy.AutoBlock != policy.AutoBlock {
+			record.Policy.LimitBytes != policy.LimitBytes || record.Policy.AutoBlock != policy.AutoBlock ||
+			!sameSharedQuota(record.Policy.SharedQuota, policy.SharedQuota) {
 			unchanged = false
 			break
 		}
 	}
-	if unchanged && !manager.rulesDirty {
+	if unchanged && !manager.rulesDirty && !manager.awaitingPolicies {
 		return nil
 	}
 	_ = manager.collectLocked(ctx, false)
 	next := make(map[string]*trafficRecord, len(policies))
 	for _, policy := range policies {
 		record := manager.records[policy.ID]
+		sharedUsed := uint64(0)
+		if record != nil && record.Policy.SharedQuota != nil && policy.SharedQuota != nil && record.Policy.SharedQuota.ID == policy.SharedQuota.ID {
+			sharedUsed = record.ShareUsedBytes
+		}
 		if record == nil || !sameTrafficCounter(record.Policy, policy) {
 			record = &trafficRecord{KernelCounters: make(map[string]uint64)}
 			// The control plane already billed these bytes. Use them only for
@@ -215,14 +267,42 @@ func (manager *TrafficManager) SetPolicies(ctx context.Context, policies []core.
 				record.QuotaBaselineBytes = saturatedTrafficAdd(policy.ReceivedBytes, policy.SentBytes)
 				record.PeriodStart, record.PeriodEnd = start, end
 			}
+		} else {
+			// Do not partially mutate the current policy snapshot if writing
+			// the activation guard fails.
+			copy := *record
+			record = &copy
+		}
+		if policy.SharedQuota != nil {
+			record.ShareUsedBytes = max(sharedUsed, policy.SharedQuota.PortUsedBytes)
+		} else {
+			record.ShareUsedBytes = 0
 		}
 		record.Policy = policy
 		next[policy.ID] = record
 	}
+	guard := trafficState{Records: make(map[string]*trafficRecord)}
+	for id, record := range next {
+		if record.Policy.SharedQuota != nil {
+			guard.Records[id] = record
+		}
+	}
+	if len(guard.Records) > 0 || len(manager.recoveryEngines) > 0 || hasSharedTraffic(manager.records) {
+		if err := saveTrafficState(manager.sharedGuardPath(), guard); err != nil {
+			manager.awaitingPolicies = true
+			manager.recoverSharedEngines(next)
+			return manager.setUnavailableLocked(fmt.Errorf("persist shared traffic activation guard: %w", err))
+		}
+	}
 	manager.records = next
+	manager.awaitingPolicies = false
+	manager.recoveryEngines = nil
 	manager.dirty = true
 	if err := manager.collectLocked(ctx, true); err != nil {
 		slog.Warn("apply port traffic policies", "error", err)
+		if len(groups) > 0 {
+			return err // Never execute a shared task without working enforcement.
+		}
 	}
 	return nil
 }
@@ -233,7 +313,32 @@ func (manager *TrafficManager) ClearPolicies(ctx context.Context) error {
 	}
 	manager.mu.Lock()
 	defer manager.mu.Unlock()
+	engines := make(map[core.Engine]bool)
+	for _, engine := range manager.recoveryEngines {
+		engines[engine] = true
+	}
+	for _, record := range manager.records {
+		if record.Policy.SharedQuota != nil {
+			engines[record.Policy.Engine] = true
+		}
+	}
+	for engine := range engines {
+		if manager.haltShared == nil {
+			return errors.New("cannot clear shared enforcement before stopping its core")
+		}
+		if err := manager.haltShared(ctx, engine); err != nil {
+			return fmt.Errorf("stop shared core before clearing enforcement: %w", err)
+		}
+	}
 	_ = manager.collectLocked(ctx, false)
+	if len(engines) > 0 {
+		if err := saveTrafficState(manager.sharedGuardPath(), trafficState{Records: map[string]*trafficRecord{}}); err != nil {
+			manager.awaitingPolicies = true
+			return manager.setUnavailableLocked(fmt.Errorf("clear shared traffic activation guard: %w", err))
+		}
+	}
+	manager.awaitingPolicies = false
+	manager.recoveryEngines = nil
 	manager.records = make(map[string]*trafficRecord)
 	manager.dirty = true
 	return manager.collectLocked(ctx, true)
@@ -257,6 +362,9 @@ func (manager *TrafficManager) collect(ctx context.Context, forceRules bool) {
 }
 
 func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules bool) error {
+	if manager.awaitingPolicies {
+		return manager.setUnavailableLocked(errors.New("traffic checkpoint unavailable; waiting for authenticated policies"))
+	}
 	manager.rulesDirty = manager.rulesDirty || forceRules
 	if len(manager.records) == 0 && !manager.rulesDirty {
 		manager.snapshot = nil
@@ -278,6 +386,9 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 	nativeErrors := map[core.Engine]error{}
 	if manager.nativeSource != nil {
 		for _, record := range manager.records {
+			if record.Policy.SharedQuota != nil {
+				continue // Shared allocations use ingress network bytes only.
+			}
 			engine := record.Policy.Engine
 			if _, checked := nativeErrors[engine]; checked {
 				continue
@@ -288,16 +399,17 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 	}
 	for _, id := range sortedTrafficRecordIDs(manager.records) {
 		record := manager.records[id]
-		nativeAllowed := nativeAccountingScopeAllowed(record.Policy, nativeSnapshots[record.Policy.Engine])
+		shared := record.Policy.SharedQuota != nil
+		nativeAllowed := !shared && nativeAccountingScopeAllowed(record.Policy, nativeSnapshots[record.Policy.Engine])
 		// A transient source failure must freeze an established native baseline,
 		// not change its scope or substitute listener bytes.
-		if nativeErrors[record.Policy.Engine] != nil && record.Accounting != nil && record.Accounting.Source != "listener" {
+		if !shared && nativeErrors[record.Policy.Engine] != nil && record.Accounting != nil && record.Accounting.Source != "listener" {
 			nativeAllowed = true
 		}
 		// Core counters and per-port marks do not distinguish the originating
 		// listener transport. A TCP-only policy must not bill another UDP flow
 		// (nor mistake a QUIC outbound carrying TCP for a UDP listener flow).
-		if manager.nativeSource != nil && !nativeAllowed && record.Accounting != nil && record.Accounting.Source != "listener" {
+		if (manager.nativeSource != nil || shared) && !nativeAllowed && record.Accounting != nil && record.Accounting.Source != "listener" {
 			epoch, err := randomSuffix(16)
 			if err != nil {
 				return manager.setUnavailableLocked(err)
@@ -372,7 +484,9 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 				}
 			}
 		}
-		if manager.nativeSource != nil && !nativeAllowed {
+		if shared {
+			record.AccountingError = ""
+		} else if manager.nativeSource != nil && !nativeAllowed {
 			record.AccountingError = "single-protocol policy uses listener-only accounting; exclusive listener transport could not be verified"
 			if sourceErr := nativeErrors[record.Policy.Engine]; sourceErr != nil {
 				record.AccountingError = sourceErr.Error()
@@ -402,6 +516,9 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 		record.SentBytes = saturatedTrafficAdd(record.SentBytes, sentDelta)
 		record.LifetimeReceivedBytes = saturatedTrafficAdd(record.LifetimeReceivedBytes, receivedDelta)
 		record.LifetimeSentBytes = saturatedTrafficAdd(record.LifetimeSentBytes, sentDelta)
+		if shared {
+			record.ShareUsedBytes = saturatedTrafficAdd(record.ShareUsedBytes, saturatedTrafficAdd(receivedDelta, sentDelta))
+		}
 		record.ReceiveBPS, record.SendBPS = 0, 0
 		if !record.LastCollectedAt.IsZero() && now.After(record.LastCollectedAt) {
 			seconds := now.Sub(record.LastCollectedAt).Seconds()
@@ -416,6 +533,16 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 		desired[id] = &next
 		if blocked != record.Blocked {
 			manager.rulesDirty = true
+		}
+	}
+	// One aggregate decision after sampling every port. Billing a full quota
+	// independently to each port would multiply the user's allowance.
+	for id, record := range desired {
+		if quota := record.Policy.SharedQuota; quota != nil {
+			record.Blocked = quota.Revoked || (quota.LimitBytes > 0 && sharedTrafficUsed(desired, quota.ID) >= quota.LimitBytes)
+			if record.Blocked != manager.records[id].Blocked {
+				manager.rulesDirty = true
+			}
 		}
 	}
 
@@ -438,8 +565,7 @@ func (manager *TrafficManager) collectLocked(ctx context.Context, forceRules boo
 	}
 	manager.refreshSnapshotLocked(true, "")
 	if err := manager.saveLocked(); err != nil {
-		manager.refreshSnapshotLocked(false, "persist traffic counters: "+err.Error())
-		return err
+		return manager.setUnavailableLocked(fmt.Errorf("persist traffic counters: %w", err))
 	}
 	return nil
 }
@@ -456,6 +582,30 @@ func (manager *TrafficManager) saveLocked() error {
 }
 
 func (manager *TrafficManager) setUnavailableLocked(err error) error {
+	if manager.haltShared != nil {
+		seen := map[core.Engine]bool{}
+		for _, engine := range manager.recoveryEngines {
+			seen[engine] = true
+			haltContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			haltErr := manager.haltShared(haltContext, engine)
+			cancel()
+			if haltErr != nil {
+				err = errors.Join(err, haltErr)
+			}
+		}
+		for _, record := range manager.records {
+			if record.Policy.SharedQuota == nil || seen[record.Policy.Engine] {
+				continue
+			}
+			seen[record.Policy.Engine] = true
+			haltContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			haltErr := manager.haltShared(haltContext, record.Policy.Engine)
+			cancel()
+			if haltErr != nil {
+				err = errors.Join(err, fmt.Errorf("stop unmetered shared core: %w", haltErr))
+			}
+		}
+	}
 	message := strings.TrimSpace(err.Error())
 	if len(message) > 500 {
 		message = message[:500]
@@ -471,6 +621,50 @@ func (manager *TrafficManager) setUnavailableLocked(err error) error {
 	}
 	manager.refreshSnapshotLocked(false, message)
 	return err
+}
+
+func (manager *TrafficManager) sharedGuardPath() string {
+	return filepath.Join(filepath.Dir(manager.statePath), "shared-traffic-guard.json")
+}
+
+func hasSharedTraffic(records map[string]*trafficRecord) bool {
+	for _, record := range records {
+		if record.Policy.SharedQuota != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func (manager *TrafficManager) recoverSharedEngines(records map[string]*trafficRecord) {
+	for _, record := range records {
+		if record.Policy.SharedQuota != nil && !slices.Contains(manager.recoveryEngines, record.Policy.Engine) {
+			manager.recoveryEngines = append(manager.recoveryEngines, record.Policy.Engine)
+		}
+	}
+}
+
+func sharedTrafficGuardMatches(state, guard trafficState) bool {
+	count := 0
+	for id, record := range state.Records {
+		if record.Policy.SharedQuota == nil {
+			continue
+		}
+		count++
+		activated := guard.Records[id]
+		if activated == nil || record.Policy.AgentID != activated.Policy.AgentID ||
+			!sameTrafficCounter(record.Policy, activated.Policy) || !sameSharedQuota(record.Policy.SharedQuota, activated.Policy.SharedQuota) {
+			return false
+		}
+	}
+	return count == len(guard.Records)
+}
+
+func (manager *TrafficManager) settledSnapshot(ctx context.Context) ([]core.PortTrafficUsage, bool) {
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
+	err := manager.collectLocked(ctx, false)
+	return append([]core.PortTrafficUsage(nil), manager.snapshot...), err == nil
 }
 
 func (manager *TrafficManager) refreshSnapshotLocked(available bool, message string) {
@@ -497,6 +691,7 @@ func (manager *TrafficManager) refreshSnapshotLocked(available bool, message str
 			CollectedAt: record.LastCollectedAt, CounterEpoch: record.CounterEpoch,
 			LifetimeReceivedBytes: record.LifetimeReceivedBytes, LifetimeSentBytes: record.LifetimeSentBytes,
 			Accounting: accounting,
+			ShareID:    sharedQuotaID(record.Policy.SharedQuota), ShareUsedBytes: record.ShareUsedBytes,
 		})
 	}
 	manager.snapshot = result
@@ -515,6 +710,60 @@ func cloneTrafficAccounting(accounting *core.TrafficAccounting) *core.TrafficAcc
 func sameTrafficCounter(left, right core.PortTrafficPolicy) bool {
 	return left.Engine == right.Engine && left.Port == right.Port && left.Protocol == right.Protocol && left.Cycle == right.Cycle &&
 		core.UTCDate(left.CycleAnchor).Equal(core.UTCDate(right.CycleAnchor)) && left.ResetGeneration == right.ResetGeneration
+}
+
+func sharedQuotaID(quota *core.SharedTrafficQuota) string {
+	if quota == nil {
+		return ""
+	}
+	return quota.ID
+}
+
+func sameSharedQuota(left, right *core.SharedTrafficQuota) bool {
+	return left == nil && right == nil || left != nil && right != nil && *left == *right
+}
+
+func sharedTrafficUsed(records map[string]*trafficRecord, shareID string) uint64 {
+	var acknowledged, pending uint64
+	for _, record := range records {
+		quota := record.Policy.SharedQuota
+		if quota == nil || quota.ID != shareID {
+			continue
+		}
+		acknowledged = max(acknowledged, quota.UsedBytes)
+		if record.ShareUsedBytes > quota.PortUsedBytes {
+			pending = saturatedTrafficAdd(pending, record.ShareUsedBytes-quota.PortUsedBytes)
+		}
+	}
+	return saturatedTrafficAdd(acknowledged, pending)
+}
+
+func (manager *TrafficManager) authorizeSharedDeployment(ctx context.Context, shareID string, endpoints []core.PortTrafficEndpoint) error {
+	if manager == nil || !core.ValidAgentShareID(shareID) {
+		return errors.New("shared traffic manager or allocation is unavailable")
+	}
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
+	if err := manager.collectLocked(ctx, false); err != nil {
+		return fmt.Errorf("shared traffic enforcement is unavailable: %w", err)
+	}
+	for _, endpoint := range endpoints {
+		var matched bool
+		for _, record := range manager.records {
+			quota := record.Policy.SharedQuota
+			if quota != nil && quota.ID == shareID && record.Policy.Port == endpoint.Port && record.Policy.Engine == endpoint.Engine {
+				if quota.Revoked || record.Blocked || (quota.LimitBytes > 0 && sharedTrafficUsed(manager.records, shareID) >= quota.LimitBytes) {
+					return errors.New("shared Agent access is revoked or its cumulative allowance is exhausted")
+				}
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return fmt.Errorf("shared port %d has no enforced allocation", endpoint.Port)
+		}
+	}
+	return nil
 }
 
 func sortedTrafficRecordIDs(records map[string]*trafficRecord) []string {
@@ -1090,7 +1339,7 @@ func validateLoadedTrafficState(state trafficState, now time.Time) error {
 		}, now); err != nil {
 			return fmt.Errorf("traffic state contains an invalid policy: %w", err)
 		}
-		if record.ReceivedBytes > math.MaxInt64 || record.SentBytes > math.MaxInt64 || record.LifetimeReceivedBytes > math.MaxInt64 || record.LifetimeSentBytes > math.MaxInt64 || record.QuotaBaselineBytes > math.MaxInt64 ||
+		if record.ReceivedBytes > math.MaxInt64 || record.SentBytes > math.MaxInt64 || record.LifetimeReceivedBytes > math.MaxInt64 || record.LifetimeSentBytes > math.MaxInt64 || record.QuotaBaselineBytes > math.MaxInt64 || record.ShareUsedBytes > math.MaxInt64 ||
 			record.LastKernelReceived > math.MaxInt64 || record.LastKernelSent > math.MaxInt64 {
 			return errors.New("traffic state contains an out-of-range counter")
 		}
@@ -1099,6 +1348,9 @@ func validateLoadedTrafficState(state trafficState, now time.Time) error {
 		}
 		if !record.Accounting.Valid() {
 			return errors.New("traffic state contains invalid accounting metadata")
+		}
+		if !record.Policy.SharedQuota.Valid() {
+			return errors.New("traffic state contains an invalid shared allocation")
 		}
 		if len(record.KernelCounters) > 16 {
 			return errors.New("traffic state contains too many kernel counters")

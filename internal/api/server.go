@@ -279,19 +279,20 @@ func (s *Server) Handler() http.Handler {
 
 	mux.Handle("GET /api/v1/overview", s.requirePermission(core.PermissionOverviewRead, http.HandlerFunc(s.overview)))
 	mux.Handle("GET /api/v1/agents", s.requirePermission(core.PermissionAgentsRead, http.HandlerFunc(s.listAgents)))
+	mux.Handle("GET /api/v1/agent-access", s.requireAllPermissions(nil, http.HandlerFunc(s.getOwnAgentAccess)))
 	mux.Handle("GET /api/v1/deployments", s.requirePermission(core.PermissionDeploymentsRead, http.HandlerFunc(s.listDeployments)))
 	mux.Handle("GET /api/v1/client-access", s.requirePermission(core.PermissionClientAccessRead, http.HandlerFunc(s.listClientAccess)))
 	mux.Handle("GET /api/v1/substore-sync", s.requirePermission(core.PermissionClientAccessRead, http.HandlerFunc(s.getSubStoreSync)))
-	mux.Handle("PUT /api/v1/substore-sync/settings", s.requirePermission(core.PermissionSettingsManage, http.HandlerFunc(s.putSubStoreSettings)))
-	mux.Handle("POST /api/v1/substore-sync/targets", s.requirePermission(core.PermissionSettingsManage, http.HandlerFunc(s.createSubStoreTarget)))
+	mux.Handle("PUT /api/v1/substore-sync/settings", s.requirePermission(core.PermissionSettingsManage, s.subStoreMutation(s.putSubStoreSettings)))
+	mux.Handle("POST /api/v1/substore-sync/targets", s.requirePermission(core.PermissionSettingsManage, s.subStoreMutation(s.createSubStoreTarget)))
 	mux.Handle("GET /api/v1/substore-sync/remote-targets", s.requirePermission(core.PermissionSettingsManage, http.HandlerFunc(s.listSubStoreRemoteTargets)))
-	mux.Handle("POST /api/v1/substore-sync/targets/import", s.requirePermission(core.PermissionSettingsManage, http.HandlerFunc(s.importSubStoreRemoteTarget)))
-	mux.Handle("POST /api/v1/substore-sync/targets/{id}/remote", s.requirePermission(core.PermissionSettingsManage, http.HandlerFunc(s.linkSubStoreRemoteTarget)))
-	mux.Handle("PUT /api/v1/substore-sync/targets/{id}", s.requirePermission(core.PermissionSettingsManage, http.HandlerFunc(s.updateSubStoreTarget)))
-	mux.Handle("DELETE /api/v1/substore-sync/targets/{id}", s.requirePermission(core.PermissionSettingsManage, http.HandlerFunc(s.deleteSubStoreTarget)))
-	mux.Handle("PUT /api/v1/substore-sync/selections", s.requirePermission(core.PermissionSettingsManage, http.HandlerFunc(s.putSubStoreSelections)))
+	mux.Handle("POST /api/v1/substore-sync/targets/import", s.requirePermission(core.PermissionSettingsManage, s.subStoreMutation(s.importSubStoreRemoteTarget)))
+	mux.Handle("POST /api/v1/substore-sync/targets/{id}/remote", s.requirePermission(core.PermissionSettingsManage, s.subStoreMutation(s.linkSubStoreRemoteTarget)))
+	mux.Handle("PUT /api/v1/substore-sync/targets/{id}", s.requirePermission(core.PermissionSettingsManage, s.subStoreMutation(s.updateSubStoreTarget)))
+	mux.Handle("DELETE /api/v1/substore-sync/targets/{id}", s.requirePermission(core.PermissionSettingsManage, s.subStoreMutation(s.deleteSubStoreTarget)))
+	mux.Handle("PUT /api/v1/substore-sync/selections", s.requirePermission(core.PermissionSettingsManage, s.subStoreMutation(s.putSubStoreSelections)))
 	mux.Handle("POST /api/v1/substore-sync/test", s.requirePermission(core.PermissionSettingsManage, http.HandlerFunc(s.testSubStoreConnection)))
-	mux.Handle("POST /api/v1/substore-sync/run", s.requirePermission(core.PermissionSettingsManage, http.HandlerFunc(s.runSubStoreSync)))
+	mux.Handle("POST /api/v1/substore-sync/run", s.requirePermission(core.PermissionSettingsManage, s.subStoreMutation(s.runSubStoreSync)))
 	mux.Handle("GET /api/v1/core-logs", s.requirePermission(core.PermissionCoreLogsRead, http.HandlerFunc(s.listCoreLogs)))
 	mux.Handle("GET /api/v1/access-controls", s.requirePermission(core.PermissionAgentConfigRead, http.HandlerFunc(s.listMainlandAccessPolicies)))
 	mux.Handle("PUT /api/v1/access-controls", s.requireAllPermissions(
@@ -355,6 +356,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/v1/users", s.requirePermission(core.PermissionUsersManage, http.HandlerFunc(s.createUser)))
 	mux.Handle("PUT /api/v1/users/{id}", s.requirePermission(core.PermissionUsersManage, http.HandlerFunc(s.updateUser)))
 	mux.Handle("DELETE /api/v1/users/{id}", s.requirePermission(core.PermissionUsersManage, http.HandlerFunc(s.deleteUser)))
+	mux.Handle("GET /api/v1/users/{id}/agent-access", s.requirePermission(core.PermissionUsersManage, http.HandlerFunc(s.getUserAgentAccess)))
+	mux.Handle("PUT /api/v1/users/{id}/agent-access", s.requirePermission(core.PermissionUsersManage, http.HandlerFunc(s.putUserAgentAccess)))
 	mux.Handle("GET /api/v1/metrics/{id}", s.requirePermission(core.PermissionMetricsRead, http.HandlerFunc(s.metricSamples)))
 	mux.Handle("GET /api/v1/traffic-policies", s.requirePermission(core.PermissionTrafficRead, http.HandlerFunc(s.listPortTrafficPolicies)))
 	mux.Handle("GET /api/v1/traffic-endpoints", s.requirePermission(core.PermissionTrafficRead, http.HandlerFunc(s.listPortTrafficEndpoints)))
@@ -1289,6 +1292,17 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 		if task == nil {
 			return nil
 		}
+		if task.SharedTrafficID != "" {
+			// Send the reservation and its current allowance before execution,
+			// even when task-ready won the select race with policy-refresh.
+			policies, err := s.store.AgentPortTrafficPolicies(ctx, id)
+			if err != nil {
+				return err
+			}
+			if err := writeWire(ctx, connection, core.WireMessage{Type: core.WireHello, TrafficPolicies: trafficPoliciesForAgent(policies)}); err != nil {
+				return err
+			}
+		}
 		if err := writeWire(ctx, connection, core.WireMessage{Type: core.WireTask, Task: task}); err != nil {
 			return err
 		}
@@ -1400,6 +1414,12 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 				if message.Result == nil || message.Result.TaskID == "" || message.Result.TaskID != inFlightTask {
 					_ = connection.Close(websocket.StatusPolicyViolation, "unexpected task result")
 					return
+				}
+				if len(message.TrafficUsage) > 0 {
+					if err := s.store.UpdatePortTrafficUsage(ctx, id, message.TrafficUsage, time.Now().UTC()); err != nil {
+						slog.Warn("flush task traffic result", "agent_id", id, "error", err)
+						return
+					}
 				}
 				if err := s.store.CompleteTask(ctx, id, message.Result.TaskID, message.Result.Result); err != nil {
 					slog.Warn("store task result", "agent_id", id, "task_id", message.Result.TaskID, "error", err)
@@ -1621,6 +1641,9 @@ func (s *Server) requireAllPermissions(permissions []core.Permission, next http.
 		}
 		w.Header().Set("X-QControlHub-Role", string(role))
 		request = request.WithContext(store.WithConfigScope(request.Context(), s.configOwnerID(request), role == core.RoleAdmin))
+		if !s.authorizeAgentResource(w, request) {
+			return
+		}
 		next.ServeHTTP(w, request)
 	})
 }

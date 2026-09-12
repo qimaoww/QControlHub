@@ -18,6 +18,13 @@ import (
 func trafficPoliciesForAgent(policies []core.PortTrafficPolicy) []core.PortTrafficPolicy {
 	prepared := append([]core.PortTrafficPolicy(nil), policies...)
 	for index := range prepared {
+		if prepared[index].SharedQuota != nil {
+			// Fail closed on downgraded Agents that ignore shared_quota.
+			// Supporting Agents recognize this envelope and enforce the group.
+			prepared[index].LimitBytes = 0
+			prepared[index].AutoBlock = true
+			continue
+		}
 		if !prepared[index].QuotaEnabled || !prepared[index].AutoBlock {
 			// Older Agents ignore the auto_block JSON field and always enforce
 			// LimitBytes. Sending an unreachable limit keeps monitor-only
@@ -72,7 +79,7 @@ func (s *Server) listPortTrafficPolicies(w http.ResponseWriter, request *http.Re
 }
 
 func (s *Server) reconcilePortTrafficEndpoints(ctx context.Context, prune bool) ([]core.PortTrafficEndpoint, []string, error) {
-	configs, err := s.store.ListAgentConfigs(ctx)
+	configs, err := s.store.AgentConfigsForMonitoring(ctx, "")
 	if err != nil {
 		return nil, nil, err
 	}
@@ -85,6 +92,16 @@ func (s *Server) reconcilePortTrafficEndpoints(ctx context.Context, prune bool) 
 }
 
 func (s *Server) refreshPortTrafficMonitoring(ctx context.Context, connectedAgentID string) {
+	if connectedAgentID != "" {
+		configs, err := s.store.AgentConfigsForMonitoring(ctx, connectedAgentID)
+		if err == nil {
+			_, err = s.store.ReconcileAgentPortTrafficEndpoints(ctx, connectedAgentID, trafficEndpointsFromConfigs(configs), false)
+		}
+		if err != nil {
+			slog.Warn("reconcile connected Agent traffic endpoints", "agent_id", connectedAgentID, "error", err)
+		}
+		return
+	}
 	// Reconnects also follow metadata edits. Only a saved
 	// configuration change may prune stale discovered monitors, otherwise a
 	// non-destructive sync would delete them as soon as the Agent reconnects.
@@ -103,6 +120,9 @@ func (s *Server) refreshPortTrafficMonitoring(ctx context.Context, connectedAgen
 }
 
 func (s *Server) refreshSavedAgentTrafficMonitoring(ctx context.Context, agentID string) {
+	// The authorized save has already committed. Reconciliation is fleet
+	// maintenance and must preserve all users' monitors on this same Agent.
+	ctx = store.WithConfigScope(ctx, "", true)
 	configs, err := s.store.AgentConfigsForMonitoring(ctx, agentID)
 	if err != nil {
 		slog.Warn("load saved node traffic endpoints", "agent_id", agentID, "error", err)

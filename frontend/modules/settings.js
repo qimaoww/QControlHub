@@ -18,7 +18,7 @@ export function installSettings(ctx) {
     const [item, deployment] = await Promise.all([api("/settings"), api("/settings/deployment")]);
     if (request !== settingsRequest || state.route !== "settings") return;
     state.data.settings = item;
-    const writable = can("settings.manage");
+    const writable = can("settings.manage") && !state.data.agentAccess?.isolated;
     const disabled = writable ? "" : "disabled";
     const securityRows = [
       ["控制面传输", deployment.secure_transport, deployment.secure_transport ? "已启用 HTTPS / TLS 代理" : "未声明安全传输"],

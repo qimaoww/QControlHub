@@ -140,6 +140,10 @@ const coreLogBatchPruneSQL = `
 // projection and the predicate are exactly these, and a copy would let the two
 // drift apart silently.
 func coreLogWindowStatement(query CoreLogQuery, engines []string) (string, []any) {
+	return scopedCoreLogWindowStatement(context.Background(), query, engines)
+}
+
+func scopedCoreLogWindowStatement(ctx context.Context, query CoreLogQuery, engines []string) (string, []any) {
 	// Bound each engine's indexed scan before merging the results. A busy
 	// engine must not consume the other engines' slots, and we should not rank
 	// the entire retained log history just to display a small recent window.
@@ -159,6 +163,7 @@ func coreLogWindowStatement(query CoreLogQuery, engines []string) (string, []any
 		args = append(args, query.Before)
 		where += fmt.Sprintf(" AND id<$%d", len(args))
 	}
+	where += agentAdministrationClause(ctx, "core_logs.agent_id", &args)
 	return fmt.Sprintf(coreLogWindowSQL, where), args
 }
 
@@ -183,6 +188,11 @@ const coreLogWindowSQL = `
 		ORDER BY logs.id DESC`
 
 func (s *Store) ListCoreLogs(ctx context.Context, query CoreLogQuery) ([]core.CoreLogEntry, error) {
+	if query.AgentID != "" {
+		if err := requireAgentAdministration(ctx, s.pool, query.AgentID); err != nil {
+			return nil, err
+		}
+	}
 	if query.Limit == 0 {
 		query.Limit = 1000
 	}
@@ -199,7 +209,7 @@ func (s *Store) ListCoreLogs(ctx context.Context, query CoreLogQuery) ([]core.Co
 	if query.Engine != "" {
 		engines = []string{string(query.Engine)}
 	}
-	statement, args := coreLogWindowStatement(query, engines)
+	statement, args := scopedCoreLogWindowStatement(ctx, query, engines)
 	rows, err := s.pool.Query(ctx, statement, args...)
 	if err != nil {
 		return nil, err

@@ -2,9 +2,12 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -12,14 +15,91 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
+// TryLockSubStoreOperation serializes remote ownership/content changes with
+// local target mutations across control-plane processes. A busy operation
+// fails immediately instead of occupying pool connections waiting for a lock
+// while the holder needs those connections to finish its API workflow.
+func (s *Store) TryLockSubStoreOperation(ctx context.Context, newEndpoints ...string) (func(), error) {
+	connection, err := s.pool.Acquire(ctx)
+	if err != nil {
+		return nil, err
+	}
+	discard := func() {
+		cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = connection.Hijack().Close(cleanup)
+	}
+	keys := []string{}
+	lock := func(key string) error {
+		var locked bool
+		if err := connection.QueryRow(ctx, `SELECT pg_try_advisory_lock(hashtextextended(current_schema() || ':qcontrolhub:substore:' || $1,0))`, key).Scan(&locked); err != nil {
+			return err
+		}
+		if !locked {
+			return fmt.Errorf("%w: 另有 Sub-Store 操作正在执行，请稍后重试", ErrConflict)
+		}
+		keys = append(keys, key)
+		return nil
+	}
+	// A session lock leaves no MVCC transaction open during remote HTTP
+	// requests, so frequent traffic updates can still prune their HOT chains.
+	if err := lock("owner:" + scopeForConfig(ctx).OwnerID); err != nil {
+		discard() // A canceled reply may have acquired the server-side lock.
+		return nil, err
+	}
+	settings, err := s.subStoreSyncSettings(ctx, connection)
+	if err != nil {
+		discard()
+		return nil, err
+	}
+	backends := map[string]bool{}
+	if settings.BackendKey != "" {
+		backends[settings.BackendKey] = true
+	}
+	for _, endpoint := range newEndpoints {
+		if key := subStoreBackendKey(endpoint); key != "" {
+			backends[key] = true
+		}
+	}
+	for key := range backends {
+		if err := lock("backend:" + key); err != nil {
+			discard() // Closing also releases the owner lock.
+			return nil, err
+		}
+	}
+	var once sync.Once
+	release := func() {
+		once.Do(func() {
+			cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			for i := len(keys)-1; i >= 0; i-- {
+				var unlocked bool
+				if err := connection.QueryRow(cleanup, `SELECT pg_advisory_unlock(hashtextextended(current_schema() || ':qcontrolhub:substore:' || $1,0))`, keys[i]).Scan(&unlocked); err != nil || !unlocked {
+					discard() // Never return a possibly locked connection to the pool.
+					return
+				}
+			}
+			connection.Release()
+		})
+	}
+	return release, nil
+}
+
 func (s *Store) SubStoreSyncSettings(ctx context.Context) (core.SubStoreSyncSettings, error) {
+	return s.subStoreSyncSettings(ctx, s.pool)
+}
+
+func (s *Store) subStoreSyncSettings(ctx context.Context, executor storeExecutor) (core.SubStoreSyncSettings, error) {
 	var settings core.SubStoreSyncSettings
 	var endpoint string
-	err := s.pool.QueryRow(ctx, `
-		SELECT endpoint_ciphertext,updated_at
-		FROM substore_sync_settings WHERE id=1`).Scan(
-		&endpoint, &settings.UpdatedAt,
-	)
+	var err error
+	if ownerID := scopeForConfig(ctx).OwnerID; ownerID != "" {
+		err = executor.QueryRow(ctx, `SELECT endpoint_ciphertext,updated_at,backend_key FROM user_substore_settings WHERE owner_id=$1`,
+			ownerID).Scan(&endpoint, &settings.UpdatedAt, &settings.BackendKey)
+	} else {
+		err = executor.QueryRow(ctx, `SELECT endpoint_ciphertext,updated_at,backend_key
+			FROM substore_sync_settings WHERE id=1`).Scan(&endpoint, &settings.UpdatedAt, &settings.BackendKey)
+	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		return core.SubStoreSyncSettings{}, nil
 	}
@@ -35,6 +115,7 @@ func (s *Store) SubStoreSyncSettings(ctx context.Context) (core.SubStoreSyncSett
 }
 
 func (s *Store) SaveSubStoreSyncSettings(ctx context.Context, endpointURL string) (core.SubStoreSyncSettings, error) {
+	ownerID := scopeForConfig(ctx).OwnerID
 	endpointURL = strings.TrimSpace(endpointURL)
 	if endpointURL == "" || utf8.RuneCountInString(endpointURL) > 1000 {
 		return core.SubStoreSyncSettings{}, fmt.Errorf("%w: Sub-Store endpoint is required and must not exceed 1000 characters", ErrInvalid)
@@ -56,24 +137,69 @@ func (s *Store) SaveSubStoreSyncSettings(ctx context.Context, endpointURL string
 		return core.SubStoreSyncSettings{}, err
 	}
 	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, `
+	backendKey := subStoreBackendKey(endpointURL)
+	if ownerID != "" {
+		_, err = tx.Exec(ctx, `INSERT INTO user_substore_settings(owner_id,endpoint_ciphertext,backend_key,updated_at)
+			VALUES($1,$2,$3,$4) ON CONFLICT(owner_id) DO UPDATE SET endpoint_ciphertext=EXCLUDED.endpoint_ciphertext,
+				backend_key=EXCLUDED.backend_key,updated_at=EXCLUDED.updated_at`, ownerID, sealed, backendKey, now)
+	} else {
+		_, err = tx.Exec(ctx, `
 		INSERT INTO substore_sync_settings
-			(id,endpoint_ciphertext,subscription_name,integration_id,last_sync_status,last_sync_error,updated_at)
-		VALUES (1,$1,'QControlHub',$2,'never','',$3)
+			(id,endpoint_ciphertext,subscription_name,integration_id,last_sync_status,last_sync_error,updated_at,backend_key)
+		VALUES (1,$1,'QControlHub',$2,'never','',$3,$4)
 		ON CONFLICT (id) DO UPDATE SET
 			endpoint_ciphertext=EXCLUDED.endpoint_ciphertext,
-			updated_at=EXCLUDED.updated_at`, sealed, integrationID, now); err != nil {
+			backend_key=EXCLUDED.backend_key,updated_at=EXCLUDED.updated_at`, sealed, integrationID, now, backendKey)
+	}
+	if err != nil {
 		return core.SubStoreSyncSettings{}, fmt.Errorf("save Sub-Store sync settings: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE substore_sync_targets SET
-			last_synced_at=NULL,last_sync_status='never',last_sync_error='',updated_at=$1`, now); err != nil {
-		return core.SubStoreSyncSettings{}, fmt.Errorf("reset Sub-Store sync targets: %w", err)
+			last_synced_at=NULL,last_sync_status='never',last_sync_error='',updated_at=$1,backend_key=$3
+			WHERE owner_id=$2`, now, ownerID, backendKey); err != nil {
+		return core.SubStoreSyncSettings{}, mapError(err)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return core.SubStoreSyncSettings{}, err
 	}
 	return s.SubStoreSyncSettings(ctx)
+}
+
+func subStoreBackendKey(endpoint string) string {
+	endpoint = strings.TrimSpace(endpoint)
+	if endpoint == "" {
+		return ""
+	}
+	if parsed, err := url.Parse(endpoint); err == nil {
+		parsed.Scheme, parsed.Host = strings.ToLower(parsed.Scheme), strings.ToLower(parsed.Host)
+		parsed.Path, parsed.RawPath = strings.TrimRight(parsed.Path, "/"), strings.TrimRight(parsed.RawPath, "/")
+		endpoint = parsed.String()
+	}
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(endpoint)))
+}
+
+func (s *Store) migrateSubStoreBackends(ctx context.Context, tx pgx.Tx) error {
+	var endpoint string
+	err := tx.QueryRow(ctx, `SELECT endpoint_ciphertext FROM substore_sync_settings WHERE id=1`).Scan(&endpoint)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	endpoint, err = s.decryptContent(endpoint)
+	if err != nil {
+		return fmt.Errorf("read legacy Sub-Store backend: %w", err)
+	}
+	key := subStoreBackendKey(endpoint)
+	if _, err := tx.Exec(ctx, `UPDATE substore_sync_settings SET backend_key=$1 WHERE id=1`, key); err != nil {
+		return err
+	}
+	// Preserve remote claims, but never copy the administrator's credential
+	// into an ordinary account. That account must configure its own backend.
+	_, err = tx.Exec(ctx, `UPDATE substore_sync_targets SET backend_key=$1 WHERE backend_key=''`, key)
+	return err
 }
 
 func validateSubStoreTargetName(name string) (string, error) {
@@ -87,7 +213,12 @@ func validateSubStoreTargetName(name string) (string, error) {
 // SubStoreTargetClaims returns only the identities needed to reserve groups
 // on the shared backend. Callers must not expose another owner's claims.
 func (s *Store) SubStoreTargetClaims(ctx context.Context) ([]core.SubStoreSyncTarget, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id,owner_id,subscription_name,integration_id FROM substore_sync_targets`)
+	settings, err := s.SubStoreSyncSettings(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.pool.Query(ctx, `SELECT id,owner_id,subscription_name,integration_id FROM substore_sync_targets
+		WHERE backend_key=$1 AND ($1<>'' OR owner_id=$2)`, settings.BackendKey, scopeForConfig(ctx).OwnerID)
 	if err != nil {
 		return nil, err
 	}
@@ -105,7 +236,7 @@ func (s *Store) SubStoreTargetClaims(ctx context.Context) ([]core.SubStoreSyncTa
 
 func (s *Store) ListSubStoreSyncTargets(ctx context.Context) ([]core.SubStoreSyncTarget, error) {
 	args := []any{}
-	ownerWhere := ownerClause(ctx, "target.owner_id", &args)
+	ownerWhere := workspaceOwnerClause(ctx, "target.owner_id", &args)
 	rows, err := s.pool.Query(ctx, `
 		SELECT target.id,target.display_name,target.subscription_name,target.integration_id,target.sync_mode,target.last_synced_at,
 		       target.last_sync_status,target.last_sync_error,
@@ -133,7 +264,7 @@ func (s *Store) ListSubStoreSyncTargets(ctx context.Context) ([]core.SubStoreSyn
 func (s *Store) SubStoreSyncTarget(ctx context.Context, id string) (core.SubStoreSyncTarget, error) {
 	var target core.SubStoreSyncTarget
 	args := []any{strings.TrimSpace(id)}
-	ownerWhere := ownerClause(ctx, "target.owner_id", &args)
+	ownerWhere := workspaceOwnerClause(ctx, "target.owner_id", &args)
 	err := s.pool.QueryRow(ctx, `
 		SELECT target.id,target.display_name,target.subscription_name,target.integration_id,target.sync_mode,target.last_synced_at,
 		       target.last_sync_status,target.last_sync_error,
@@ -199,10 +330,14 @@ func (s *Store) createSubStoreSyncTarget(ctx context.Context, name, integrationI
 		return core.SubStoreSyncTarget{}, err
 	}
 	now := time.Now().UTC()
+	settings, err := s.SubStoreSyncSettings(ctx)
+	if err != nil {
+		return core.SubStoreSyncTarget{}, err
+	}
 	if _, err := s.pool.Exec(ctx, `
 		INSERT INTO substore_sync_targets
-			(id,display_name,subscription_name,integration_id,sync_mode,last_sync_status,last_sync_error,created_at,updated_at,owner_id,sync_format)
-		VALUES ($1,$2,$2,$3,$4,'never','',$5,$5,$6,$7)`, id, name, integrationID, mode, now, scopeForConfig(ctx).OwnerID, format); err != nil {
+			(id,display_name,subscription_name,integration_id,sync_mode,last_sync_status,last_sync_error,created_at,updated_at,owner_id,sync_format,backend_key)
+		VALUES ($1,$2,$2,$3,$4,'never','',$5,$5,$6,$7,$8)`, id, name, integrationID, mode, now, scopeForConfig(ctx).OwnerID, format, settings.BackendKey); err != nil {
 		return core.SubStoreSyncTarget{}, mapError(err)
 	}
 	return s.SubStoreSyncTarget(ctx, id)
@@ -229,7 +364,7 @@ func (s *Store) UpdateSubStoreSyncTarget(ctx context.Context, id, displayName, s
 		}
 	}
 	args := []any{strings.TrimSpace(id), displayName, subscriptionName, mode, format}
-	ownerWhere := ownerClause(ctx, "owner_id", &args)
+	ownerWhere := workspaceOwnerClause(ctx, "owner_id", &args)
 	command, err := s.pool.Exec(ctx, `
 		UPDATE substore_sync_targets SET
 			display_name=$2,subscription_name=$3,sync_mode=$4,sync_format=COALESCE(NULLIF($5,''),sync_format),updated_at=now()
@@ -245,7 +380,7 @@ func (s *Store) UpdateSubStoreSyncTarget(ctx context.Context, id, displayName, s
 
 func (s *Store) DeleteSubStoreSyncTarget(ctx context.Context, id string) error {
 	args := []any{strings.TrimSpace(id)}
-	ownerWhere := ownerClause(ctx, "owner_id", &args)
+	ownerWhere := workspaceOwnerClause(ctx, "owner_id", &args)
 	command, err := s.pool.Exec(ctx, `DELETE FROM substore_sync_targets WHERE id=$1`+ownerWhere, args...)
 	if err != nil {
 		return err
@@ -258,7 +393,7 @@ func (s *Store) DeleteSubStoreSyncTarget(ctx context.Context, id string) error {
 
 func (s *Store) ListSubStoreSyncSelections(ctx context.Context, targetID string) ([]core.SubStoreSyncSelection, error) {
 	args := []any{strings.TrimSpace(targetID)}
-	ownerWhere := ownerClause(ctx, "target.owner_id", &args)
+	ownerWhere := workspaceOwnerClause(ctx, "target.owner_id", &args)
 	rows, err := s.pool.Query(ctx, `
 		SELECT item.target_id,item.agent_id,item.engine,item.profile_tag,item.custom_name,item.address_mode,item.created_at,item.updated_at,item.config_id
 		FROM substore_sync_items item JOIN substore_sync_targets target ON target.id=item.target_id
@@ -361,7 +496,7 @@ func (s *Store) RecordSubStoreSyncResult(ctx context.Context, targetID string, s
 		message = truncate(strings.TrimSpace(syncErr.Error()), 500)
 	}
 	args := []any{status, message, strings.TrimSpace(targetID)}
-	ownerWhere := ownerClause(ctx, "owner_id", &args)
+	ownerWhere := workspaceOwnerClause(ctx, "owner_id", &args)
 	command, err := s.pool.Exec(ctx, `
 		UPDATE substore_sync_targets SET
 			last_synced_at=now(),last_sync_status=$1,last_sync_error=$2,updated_at=now()

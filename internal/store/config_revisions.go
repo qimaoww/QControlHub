@@ -32,6 +32,7 @@ func (s *Store) ListConfigRevisions(ctx context.Context, configID string, limit 
 	var exists bool
 	existsArgs := []any{configID}
 	existsWhere := ownerClause(ctx, "owner_id", &existsArgs)
+	existsWhere += configAgentAccessClause(ctx, "configs.agent_id", &existsArgs)
 	if err := s.pool.QueryRow(ctx, `SELECT EXISTS(
 		SELECT 1 FROM configs WHERE id=$1 AND deleted_at IS NULL`+existsWhere+`
 	)`, existsArgs...).Scan(&exists); err != nil {
@@ -42,6 +43,7 @@ func (s *Store) ListConfigRevisions(ctx context.Context, configID string, limit 
 	}
 	args := []any{configID, limit}
 	ownerWhere := ownerClause(ctx, "c.owner_id", &args)
+	ownerWhere += configAgentAccessClause(ctx, "c.agent_id", &args)
 	rows, err := s.pool.Query(ctx, `
 		SELECT r.config_id,COALESCE(r.agent_id,''),r.name,r.description,r.engine,r.content,r.version,r.created_at,r.created_at,c.owner_id
 		FROM config_revisions r JOIN configs c ON c.id=r.config_id
@@ -74,6 +76,7 @@ func (s *Store) ConfigRevision(ctx context.Context, configID string, version int
 	var revision core.Config
 	args := []any{configID, version}
 	ownerWhere := ownerClause(ctx, "c.owner_id", &args)
+	ownerWhere += configAgentAccessClause(ctx, "c.agent_id", &args)
 	err := s.pool.QueryRow(ctx, `
 		SELECT r.config_id,COALESCE(r.agent_id,''),r.name,r.description,r.engine,r.content,r.version,r.created_at,r.created_at,c.owner_id
 		FROM config_revisions r JOIN configs c ON c.id=r.config_id
@@ -105,6 +108,9 @@ func (s *Store) RestoreConfigRevision(ctx context.Context, configID string, revi
 		return core.Config{}, err
 	}
 	defer tx.Rollback(ctx)
+	if err := lockAgentUser(ctx, tx); err != nil {
+		return core.Config{}, err
+	}
 
 	// Node-owned configuration writes always lock the agent before the config.
 	// Keep the same ordering here so a restore cannot deadlock with
@@ -112,6 +118,7 @@ func (s *Store) RestoreConfigRevision(ctx context.Context, configID string, revi
 	var ownerAgentID string
 	args := []any{configID}
 	ownerWhere := ownerClause(ctx, "owner_id", &args)
+	ownerWhere += configAgentAccessClause(ctx, "configs.agent_id", &args)
 	err = tx.QueryRow(ctx, `
 		SELECT COALESCE(agent_id,'') FROM configs WHERE id=$1 AND deleted_at IS NULL`+ownerWhere, args...).Scan(&ownerAgentID)
 	if errors.Is(err, pgx.ErrNoRows) {

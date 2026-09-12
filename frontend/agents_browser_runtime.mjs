@@ -195,6 +195,7 @@ window.fetch = async (input, options = {}) => {
   const path = url.pathname.replace(/^\/api\/v1/, "");
   const method = String(options.method || (input instanceof Request ? input.method : "GET")).toUpperCase();
   testAPI.calls.push({ method, path, query: url.search });
+  if (method === "GET" && path === "/agent-access") return json({ isolated: false, revision: 1, shares: [] });
   if (mode === "traffic-layout") {
     if (path === "/traffic-policies") return json(testAPI.trafficPolicies);
     if (path === "/traffic-endpoints") return json([]);
@@ -1678,7 +1679,10 @@ async function testLogPreferenceRestoreRuntime() {
 }
 
 try {
-  if (mode === "config-scope" || mode === "substore-scope") {
+  if (mode === "users" || mode === "users-mobile") {
+    const { testUsersRuntime } = await import("./users_browser_runtime.mjs");
+    await testUsersRuntime(new URLSearchParams(location.search).has("preview"));
+  } else if (mode === "config-scope" || mode === "substore-scope") {
     const { testConfigScopeRuntime, testSubStoreScopeRuntime } = await import("./config_scope_browser_runtime.mjs");
     const test = mode === "config-scope" ? testConfigScopeRuntime : testSubStoreScopeRuntime;
     await test(new URLSearchParams(location.search).has("preview"));

@@ -21,6 +21,7 @@ type DeployedConfig struct {
 func (s *Store) DeployedConfigs(ctx context.Context) ([]DeployedConfig, error) {
 	args := []any{}
 	ownerWhere := ownerClause(ctx, "config.owner_id", &args)
+	ownerWhere += agentAccessClause(ctx, "latest.agent_id", &args)
 	rows, err := s.pool.Query(ctx, deployedConfigsSQL+ownerWhere, args...)
 	if err != nil {
 		return nil, err

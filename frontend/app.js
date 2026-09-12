@@ -11,6 +11,7 @@ import { installTraffic } from "./modules/traffic.js";
 import { installAccessControl } from "./modules/access-control.js";
 import { installSystemBBR } from "./modules/system-bbr.js";
 import { installSettings } from "./modules/settings.js";
+import { installUsers } from "./modules/users.js";
 import {
   bindEvent,
   createLatestRenderScheduler,
@@ -72,6 +73,8 @@ const dockIcons = Object.freeze({
     '<path d="M3 5h1M3 12h1M3 19h1M8 5h1M8 12h1M8 19h1M13 5h8M13 12h8M13 19h8"/>',
   listChecks:
     '<path d="M13 5h8M13 12h8M13 19h8M3 17l2 2 4-4M3 7l2 2 4-4"/>',
+  users:
+    '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/><circle cx="9" cy="7" r="4"/>',
   settings:
     '<path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"/><circle cx="12" cy="12" r="3"/>',
   sun:
@@ -207,6 +210,7 @@ const taskActivity = (items, limit = 7) => {
 };
 const serviceActionDisabled = (action, online, installed, serviceStatus) => {
   if (!online || !installed || !can("tasks.execute")) return true;
+  if (action !== "status" && state.data.agentAccess?.isolated) return true;
   if (action === "start")
     return ["active", "activating"].includes(serviceStatus);
   if (action === "stop")
@@ -314,9 +318,15 @@ const rolePermissions = {
 };
 const roleRanks = { readonly: 1, auditor: 1, operator: 2, admin: 3 };
 const can = (capability) => {
-  if (capability === "operator") capability = "tasks.execute";
   const role = state.session?.role;
   if (role === "admin") return true;
+  if (capability === "agent-access.read") return Boolean(state.session);
+  if (capability === "users.manage") return false;
+  const isolated = state.data.agentAccess?.isolated !== false;
+  if (capability === "host.manage") return !isolated && can("tasks.execute");
+  if (capability === "system-bbr.read") return !isolated && can("agents.read");
+  if (isolated && ["agents.manage", "traffic.manage", "enrollment.manage", "audit.read", "core-logs.read"].includes(capability)) return false;
+  if (capability === "operator") capability = "tasks.execute";
   if (role === "user") return (state.session?.permissions || []).includes(capability);
   if (capability in roleRanks)
     return (roleRanks[role] || 0) >= (roleRanks[capability] || 0);
@@ -482,7 +492,9 @@ function renderLogin(message = "") {
     });
 }
 
+let noticeTimer;
 function notify(message, tone = "success") {
+  clearTimeout(noticeTimer);
   if (tone === "error") message = errorMessage(message);
   const main = document.querySelector(".workspace-main");
   if (!main) return;
@@ -495,6 +507,7 @@ function notify(message, tone = "success") {
   notice.setAttribute("role", tone === "error" ? "alert" : "status");
   notice.textContent = message;
   if (!notice.isConnected) main.prepend(notice);
+  if (tone !== "error") noticeTimer = setTimeout(() => notice.remove(), 5000);
 }
 
 function confirmAction(message, label = "确认继续") {
@@ -524,6 +537,7 @@ function shell(content, title, { viewKey = state.route } = {}) {
     ["traffic", "流量", dockIcons.chart, true],
     ["core-logs", "日志", dockIcons.logs, true],
     ["tasks", "任务", dockIcons.listChecks, true],
+    [state.session.role === "admin" ? "users" : "my-quota", state.session.role === "admin" ? "用户" : "额度", dockIcons.users, true],
   ];
   const linkPermissions = {
     dashboard: "overview.read",
@@ -532,12 +546,14 @@ function shell(content, title, { viewKey = state.route } = {}) {
     "client-access": "client-access.read",
     "substore-sync": "client-access.read",
     "access-control": "agent-config.read",
-    "system-bbr": "agents.read",
+    "system-bbr": "system-bbr.read",
     "live-config": "agent-config.read",
     tasks: "tasks.read",
     "core-logs": "core-logs.read",
     traffic: "traffic.read",
     settings: "settings.read",
+    users: "users.manage",
+    "my-quota": "agent-access.read",
   };
   links.splice(0, links.length, ...links.filter(([id]) => can(linkPermissions[id])));
   app.style.display = "";
@@ -555,7 +571,7 @@ function shell(content, title, { viewKey = state.route } = {}) {
     (state.route === "archive-config" && id === "live-config");
   const nodeOverviewActions =
     state.route === "node-settings" && state.data.nodeView !== "detail"
-      ? `${can("operator") && (state.data.agents || []).length > 1 ? `<button class="button small ${state.data.nodeBatchMode ? "primary" : ""}" type="button" data-node-batch-toggle aria-pressed="${state.data.nodeBatchMode ? "true" : "false"}">${state.data.nodeBatchMode ? "退出批量" : "批量操作"}</button>` : ""}${can("enrollment.manage") ? '<button class="button small" type="button" data-open-enrollment>添加节点</button>' : ""}`
+      ? `${can("host.manage") && (state.data.agents || []).length > 1 ? `<button class="button small ${state.data.nodeBatchMode ? "primary" : ""}" type="button" data-node-batch-toggle aria-pressed="${state.data.nodeBatchMode ? "true" : "false"}">${state.data.nodeBatchMode ? "退出批量" : "批量操作"}</button>` : ""}${can("enrollment.manage") ? '<button class="button small" type="button" data-open-enrollment>添加节点</button>' : ""}`
       : "";
   const topAction =
     state.route === "dashboard"
@@ -594,6 +610,7 @@ function shell(content, title, { viewKey = state.route } = {}) {
     ["core-logs", "日志"],
     ["tasks", "任务"],
     ["settings", "设置"],
+    [state.session.role === "admin" ? "users" : "my-quota", state.session.role === "admin" ? "用户" : "我的额度"],
   ];
   const mobileMoreActive = mobileMoreRoutes.some(([id]) => activeDockRoute(id));
   const mobileMoreLinks = mobileMoreRoutes
@@ -678,6 +695,10 @@ function shell(content, title, { viewKey = state.route } = {}) {
 }
 
 function contextMarkup(title) {
+  if (state.route === "users")
+    return `<div class="context-section-label"><span>用户</span><b>${(state.data.users || []).length}</b></div><nav class="context-list" aria-label="用户列表">${(state.data.users || []).map((user) => `<a href="#users" data-user-select="${esc(user.id)}" class="${user.id === state.data.userID ? "active" : ""}"><i class="status-dot ${user.disabled ? "" : "ok"}"></i><span><strong>${esc(user.display_name || user.username)}</strong><small>${esc(user.username)} · ${user.role === "admin" ? "管理员" : "用户"}</small></span></a>`).join("")}</nav>`;
+  if (state.route === "my-quota")
+    return '<nav class="context-menu" aria-label="个人账户"><a class="active" href="#my-quota">我的额度</a></nav>';
   if (state.route === "dashboard")
     return `<nav class="context-menu" aria-label="总览目录"><a class="active" href="#summary"><span>01</span>运行概览</a><a href="#fleet"><span>02</span>节点状态</a><a href="#activity"><span>03</span>最近活动</a></nav><section class="context-metrics"><div><span>在线 / 全部节点</span><b>${state.data.overview?.agents_online || 0} / ${state.data.overview?.agents || 0}</b></div><div><span>节点版本 / 独立档案</span><b>${state.data.overview?.node_configs || 0} / ${state.data.overview?.configs || 0}</b></div><div><span>准备中 / 执行中</span><b>${state.data.overview?.tasks_queued || 0} / ${state.data.overview?.tasks_running || 0}</b></div></section>`;
   if (state.route === "agents") {
@@ -804,6 +825,8 @@ const traffic = installTraffic({ api, state, can, esc, engineName, bytes, rate, 
 const accessControl = installAccessControl({ api, state, can, esc, engineName, shell, notify, confirmAction });
 const systemBBR = installSystemBBR({ api, state, can, esc, date, shell, notify, confirmAction });
 const settings = installSettings({ api, state, esc, date, can, shell, notify, confirmAction, applyUIFontScale });
+const userModule = installUsers({ api, state, esc, shell, notify, confirmAction });
+const { users, myQuota } = userModule;
 
 async function renderOnce() {
   const previousRoute = state.route;
@@ -863,6 +886,8 @@ async function renderOnce() {
     "access-control",
     "system-bbr",
     "settings",
+    "users",
+    "my-quota",
   ].includes(hash)
     ? hash
     : (hash.startsWith("system-bbr-agent-") ? "system-bbr" : routeMap[hash]) ||
@@ -900,6 +925,16 @@ async function renderOnce() {
     if (!state.session && !(await ensureSession())) {
       renderLogin();
       return;
+    }
+    if (state.session.role !== "admin") {
+      const access = await api("/agent-access");
+      if (renderSignal.aborted) return;
+      state.data.agentAccess = access;
+      if (state.route === "users" || (access.isolated && ["core-logs", "system-bbr"].includes(state.route)) ||
+        (state.route === "dashboard" && !can("overview.read")))
+        state.route = "my-quota";
+    } else {
+      state.data.agentAccess = { isolated: false, shares: [] };
     }
     // Start common page reads while the shell settings/overview are loading.
     // The page consumes these same promises through the render-local scope.
@@ -946,6 +981,8 @@ async function renderOnce() {
       "access-control": accessControl,
       "system-bbr": systemBBR,
       settings,
+      users,
+      "my-quota": myQuota,
     };
     await (pages[state.route] || dashboard)({
       overview: state.data.overview,
@@ -994,13 +1031,15 @@ function primeRouteTransition() {
 }
 const render = () => {
   configModule.capturePresetDrafts();
+  userModule.captureDraft();
   primeRouteTransition();
   state.navigationEpoch += 1;
   return scheduleRender();
 };
 window.addEventListener("hashchange", render);
 window.addEventListener("beforeunload", event => {
-  if (!configModule.presetHasUnsavedChanges()) return;
+  userModule.captureDraft();
+  if (!configModule.presetHasUnsavedChanges() && !userModule.hasUnsavedChanges()) return;
   event.preventDefault();
   event.returnValue = "";
 });

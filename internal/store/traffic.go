@@ -18,7 +18,12 @@ import (
 
 const trafficPolicyColumns = `id,agent_id,name,engine,port,protocol,cycle,cycle_anchor,limit_bytes,auto_block,quota_enabled,monitoring_enabled,discovered,reset_generation,
        received_bytes,sent_bytes,used_bytes,receive_bps,send_bps,period_start,period_end,blocked,
-       enforcement_available,enforcement_error,last_reported_at,created_at,updated_at,last_collected_at,accounting,metadata_managed`
+       enforcement_available,enforcement_error,last_reported_at,created_at,updated_at,last_collected_at,accounting,metadata_managed,
+	   COALESCE(share_id,''),share_used_bytes,
+	   (SELECT jsonb_build_object('id',share.id,'limit_bytes',share.limit_bytes,
+			'used_bytes',share.used_bytes,'port_used_bytes',port_traffic_policies.share_used_bytes,
+			'revoked',shared_user.disabled OR NOT share.enabled)
+		FROM agent_shares share JOIN panel_users shared_user ON shared_user.id=share.user_id WHERE share.id=port_traffic_policies.share_id)`
 
 type trafficPolicyScanner interface {
 	Scan(dest ...any) error
@@ -35,12 +40,15 @@ func scanTrafficPolicy(row trafficPolicyScanner) (core.PortTrafficPolicy, error)
 		&policy.EnforcementError, &policy.LastReportedAt, &policy.CreatedAt, &policy.UpdatedAt,
 		&policy.LastCollectedAt, &policy.Accounting,
 		&policy.MetadataManaged,
+		&policy.ShareID, &policy.ShareUsedBytes, &policy.SharedQuota,
 	)
 	return policy, err
 }
 
 func (s *Store) ListPortTrafficPolicies(ctx context.Context) ([]core.PortTrafficPolicy, error) {
-	rows, err := s.pool.Query(ctx, `SELECT `+trafficPolicyColumns+` FROM port_traffic_policies ORDER BY agent_id,port`)
+	args := []any{}
+	where := trafficAccessClause(ctx, "port_traffic_policies.agent_id", "port_traffic_policies.id", &args)
+	rows, err := s.pool.Query(ctx, `SELECT `+trafficPolicyColumns+` FROM port_traffic_policies WHERE true`+where+` ORDER BY agent_id,port`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -57,7 +65,9 @@ func (s *Store) ListPortTrafficPolicies(ctx context.Context) ([]core.PortTraffic
 }
 
 func (s *Store) AgentPortTrafficPolicies(ctx context.Context, agentID string) ([]core.PortTrafficPolicy, error) {
-	rows, err := s.pool.Query(ctx, `SELECT `+trafficPolicyColumns+` FROM port_traffic_policies WHERE agent_id=$1 AND monitoring_enabled=true ORDER BY port`, agentID)
+	args := []any{agentID}
+	where := trafficAccessClause(ctx, "port_traffic_policies.agent_id", "port_traffic_policies.id", &args)
+	rows, err := s.pool.Query(ctx, `SELECT `+trafficPolicyColumns+` FROM port_traffic_policies WHERE agent_id=$1 AND monitoring_enabled=true`+where+` ORDER BY port`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -144,7 +154,35 @@ func (s *Store) reconcilePortTrafficEndpoints(ctx context.Context, raw []core.Po
 		return nil, err
 	}
 	defer tx.Rollback(ctx)
+	if err := lockAgentUser(ctx, tx); err != nil {
+		return nil, err
+	}
+	if agentID != "" {
+		if err := requireAgentAdministration(ctx, tx, agentID); err != nil {
+			return nil, err
+		}
+	}
+	for _, endpoint := range endpoints {
+		if err := requireAgentAdministration(ctx, tx, endpoint.AgentID); err != nil {
+			return nil, err
+		}
+	}
+	for _, selection := range selections {
+		if err := requireAgentAdministration(ctx, tx, selection.AgentID); err != nil {
+			return nil, err
+		}
+	}
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('qcontrolhub:traffic-endpoints'))`); err != nil {
+		return nil, err
+	}
+	// Config/task creation locks Agent -> policy. Match that order before
+	// inserting FK-referencing monitors, including during reconnect.
+	locked, err := tx.Query(ctx, `SELECT id FROM agents WHERE ($1='' OR id=$1) ORDER BY id FOR UPDATE`, agentID)
+	if err != nil {
+		return nil, err
+	}
+	locked.Close()
+	if err := locked.Err(); err != nil {
 		return nil, err
 	}
 	where := ""
@@ -231,6 +269,9 @@ func (s *Store) reconcilePortTrafficEndpoints(ctx context.Context, raw []core.Po
 	for _, endpoint := range endpoints {
 		key := trafficPortKey(endpoint.AgentID, endpoint.Port)
 		if policy, exists := existing[key]; exists {
+			if policy.ShareID != "" {
+				continue // Reservations and cumulative billing survive draft edits.
+			}
 			if selections != nil {
 				// Deleted history stays deleted. Preserve metadata and the reset generation
 				// established by deletion; restoring never re-enables a quota or blocking.
@@ -288,6 +329,9 @@ func (s *Store) reconcilePortTrafficEndpoints(ctx context.Context, raw []core.Po
 	}
 	if prune {
 		for key, policy := range existing {
+			if policy.ShareID != "" {
+				continue
+			}
 			if !policy.Discovered {
 				continue
 			}
@@ -378,6 +422,12 @@ func (s *Store) CreatePortTrafficPolicy(ctx context.Context, raw core.PortTraffi
 		return core.PortTrafficPolicy{}, err
 	}
 	defer tx.Rollback(ctx)
+	if err := lockAgentUser(ctx, tx); err != nil {
+		return core.PortTrafficPolicy{}, err
+	}
+	if err := requireAgentAdministration(ctx, tx, request.AgentID); err != nil {
+		return core.PortTrafficPolicy{}, err
+	}
 	if err := validateTrafficPolicyAgent(ctx, tx, request.AgentID, request.Engine); err != nil {
 		return core.PortTrafficPolicy{}, err
 	}
@@ -385,6 +435,9 @@ func (s *Store) CreatePortTrafficPolicy(ctx context.Context, raw core.PortTraffi
 	var quotaEnabled bool
 	err = tx.QueryRow(ctx, `SELECT id,quota_enabled FROM port_traffic_policies WHERE agent_id=$1 AND port=$2 FOR UPDATE`, request.AgentID, request.Port).Scan(&existingID, &quotaEnabled)
 	if err == nil {
+		if _, err := lockTrafficMutationPolicy(ctx, tx, existingID); err != nil {
+			return core.PortTrafficPolicy{}, err
+		}
 		if quotaEnabled {
 			return core.PortTrafficPolicy{}, fmt.Errorf("%w: this port already has a traffic quota", ErrConflict)
 		}
@@ -439,10 +492,8 @@ func (s *Store) UpdatePortTrafficPolicy(ctx context.Context, id string, raw core
 		return core.PortTrafficPolicy{}, err
 	}
 	defer tx.Rollback(ctx)
-	var currentAgentID string
-	if err := tx.QueryRow(ctx, `SELECT agent_id FROM port_traffic_policies WHERE id=$1 FOR UPDATE`, id).Scan(&currentAgentID); errors.Is(err, pgx.ErrNoRows) {
-		return core.PortTrafficPolicy{}, ErrNotFound
-	} else if err != nil {
+	currentAgentID, err := lockTrafficMutationPolicy(ctx, tx, id)
+	if err != nil {
 		return core.PortTrafficPolicy{}, err
 	}
 	if currentAgentID != request.AgentID {
@@ -495,7 +546,15 @@ func updatePortTrafficPolicyRow(ctx context.Context, tx pgx.Tx, id string, reque
 }
 
 func (s *Store) ResetPortTrafficPolicy(ctx context.Context, id string) (core.PortTrafficPolicy, error) {
-	policy, err := scanTrafficPolicy(s.pool.QueryRow(ctx, `
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return core.PortTrafficPolicy{}, err
+	}
+	defer tx.Rollback(ctx)
+	if _, err := lockTrafficMutationPolicy(ctx, tx, id); err != nil {
+		return core.PortTrafficPolicy{}, err
+	}
+	policy, err := scanTrafficPolicy(tx.QueryRow(ctx, `
 		UPDATE port_traffic_policies SET reset_generation=reset_generation+1,received_bytes=0,sent_bytes=0,
 			last_collected_at=NULL,counter_epoch='',reported_lifetime_received_bytes=0,reported_lifetime_sent_bytes=0,accounting=NULL,
 			reported_received_bytes=0,reported_sent_bytes=0,used_bytes=0,receive_bps=0,send_bps=0,period_start=NULL,period_end=NULL,blocked=false,
@@ -504,7 +563,10 @@ func (s *Store) ResetPortTrafficPolicy(ctx context.Context, id string) (core.Por
 	if errors.Is(err, pgx.ErrNoRows) {
 		return core.PortTrafficPolicy{}, ErrNotFound
 	}
-	return policy, err
+	if err != nil {
+		return core.PortTrafficPolicy{}, err
+	}
+	return policy, tx.Commit(ctx)
 }
 
 func (s *Store) DeletePortTrafficPolicy(ctx context.Context, id string) (string, error) {
@@ -513,6 +575,9 @@ func (s *Store) DeletePortTrafficPolicy(ctx context.Context, id string) (string,
 		return "", err
 	}
 	defer tx.Rollback(ctx)
+	if _, err := lockTrafficMutationPolicy(ctx, tx, id); err != nil {
+		return "", err
+	}
 	var agentID string
 	var discovered bool
 	err = tx.QueryRow(ctx, `SELECT agent_id,discovered FROM port_traffic_policies WHERE id=$1 FOR UPDATE`, id).Scan(&agentID, &discovered)
@@ -542,6 +607,9 @@ func (s *Store) DeletePortTrafficMonitoring(ctx context.Context, id string) (str
 		return "", err
 	}
 	defer tx.Rollback(ctx)
+	if _, err := lockTrafficMutationPolicy(ctx, tx, id); err != nil {
+		return "", err
+	}
 	var agentID string
 	if err := tx.QueryRow(ctx, `SELECT agent_id FROM port_traffic_policies WHERE id=$1 FOR UPDATE`, id).Scan(&agentID); errors.Is(err, pgx.ErrNoRows) {
 		return "", ErrNotFound
@@ -593,6 +661,10 @@ func (s *Store) UpdatePortTrafficUsage(ctx context.Context, agentID string, usag
 	seen := make(map[string]struct{}, len(usages))
 	ids := make([]string, 0, len(usages))
 	for _, usage := range usages {
+		if (usage.ShareID != "" && !core.ValidAgentShareID(usage.ShareID)) ||
+			usage.ShareUsedBytes > math.MaxInt64 || (usage.ShareID == "" && usage.ShareUsedBytes != 0) {
+			return fmt.Errorf("%w: invalid shared traffic usage", ErrInvalid)
+		}
 		if !usage.Accounting.Valid() || usage.Accounting != nil && usage.CounterEpoch == "" {
 			return fmt.Errorf("%w: invalid traffic accounting metadata", ErrInvalid)
 		}
@@ -620,6 +692,24 @@ func (s *Store) UpdatePortTrafficUsage(ctx context.Context, agentID string, usag
 		return err
 	}
 	defer tx.Rollback(ctx)
+	// Grant -> policy is the allocation-update lock order. Only shared
+	// reports need these extra locks; ordinary monitoring keeps its fast path.
+	var shareIDs []string
+	for _, usage := range usages {
+		if usage.ShareID != "" {
+			shareIDs = append(shareIDs, usage.ShareID)
+		}
+	}
+	if len(shareIDs) > 0 {
+		locked, err := tx.Query(ctx, `SELECT id FROM agent_shares WHERE agent_id=$1 AND id=ANY($2::text[]) ORDER BY id FOR NO KEY UPDATE`, agentID, shareIDs)
+		if err != nil {
+			return err
+		}
+		locked.Close()
+		if err := locked.Err(); err != nil {
+			return err
+		}
+	}
 	// Read and lock all baselines together, in a consistent order even when
 	// concurrent reports list ports differently. Ownership and monitoring
 	// checks stay inside the transaction, including for skipped generations.
@@ -835,6 +925,9 @@ func (s *Store) UpdatePortTrafficUsage(ctx context.Context, agentID string, usag
 			return err
 		}
 	}
+	if err := applySharedTrafficUsageTx(ctx, tx, agentID, usages); err != nil {
+		return err
+	}
 	return tx.Commit(ctx)
 }
 
@@ -983,6 +1076,13 @@ func (s *Store) ListPortTrafficDailyUsage(ctx context.Context, agentID, policyID
 			args = append(args, filter.value)
 			where += fmt.Sprintf(" AND %s=$%d", filter.column, len(args))
 		}
+	}
+	where += trafficAccessClause(ctx, "usage.agent_id", "usage.policy_id", &args)
+	if !scopeForConfig(ctx).Admin {
+		args = append(args, scopeForConfig(ctx).OwnerID)
+		where += fmt.Sprintf(` AND (NOT EXISTS(SELECT 1 FROM panel_users u WHERE u.id=$%[1]d)
+			OR EXISTS(SELECT 1 FROM agents a WHERE a.id=usage.agent_id AND a.owner_id=$%[1]d)
+			OR EXISTS(SELECT 1 FROM port_traffic_policies p WHERE p.id=usage.policy_id AND usage.reset_generation>=p.share_generation))`, len(args))
 	}
 	// Aggregate generations and select their latest metadata in one windowed
 	// scan, avoiding the second scan and join of materialized intermediate

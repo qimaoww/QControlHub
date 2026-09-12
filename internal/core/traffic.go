@@ -37,36 +37,39 @@ func (cycle TrafficCycle) Valid() bool {
 // when QuotaEnabled is false; LimitBytes and AutoBlock only take effect after
 // an operator enables a quota.
 type PortTrafficPolicy struct {
-	ID                   string             `json:"id"`
-	AgentID              string             `json:"agent_id"`
-	Name                 string             `json:"name"`
-	Engine               Engine             `json:"engine"`
-	Port                 int                `json:"port"`
-	Protocol             TrafficProtocol    `json:"protocol"`
-	Cycle                TrafficCycle       `json:"cycle"`
-	CycleAnchor          time.Time          `json:"cycle_anchor"`
-	LimitBytes           uint64             `json:"limit_bytes"`
-	AutoBlock            bool               `json:"auto_block"`
-	QuotaEnabled         bool               `json:"quota_enabled"`
-	MonitoringEnabled    bool               `json:"monitoring_enabled"`
-	Discovered           bool               `json:"discovered"`
-	MetadataManaged      bool               `json:"-"` // Explicit operator edits must survive listener discovery.
-	ResetGeneration      uint64             `json:"reset_generation"`
-	ReceivedBytes        uint64             `json:"received_bytes"`
-	SentBytes            uint64             `json:"sent_bytes"`
-	UsedBytes            uint64             `json:"used_bytes"`
-	ReceiveBPS           uint64             `json:"receive_bps"`
-	SendBPS              uint64             `json:"send_bps"`
-	PeriodStart          *time.Time         `json:"period_start,omitempty"`
-	PeriodEnd            *time.Time         `json:"period_end,omitempty"`
-	Blocked              bool               `json:"blocked"`
-	EnforcementAvailable bool               `json:"enforcement_available"`
-	EnforcementError     string             `json:"enforcement_error,omitempty"`
-	LastReportedAt       *time.Time         `json:"last_reported_at,omitempty"`
-	LastCollectedAt      *time.Time         `json:"last_collected_at,omitempty"`
-	Accounting           *TrafficAccounting `json:"accounting,omitempty"`
-	CreatedAt            time.Time          `json:"created_at"`
-	UpdatedAt            time.Time          `json:"updated_at"`
+	SharedQuota          *SharedTrafficQuota `json:"shared_quota,omitempty"`
+	ShareID              string              `json:"-"` // Durable binding, never supplied by a panel request.
+	ShareUsedBytes       uint64              `json:"-"`
+	ID                   string              `json:"id"`
+	AgentID              string              `json:"agent_id"`
+	Name                 string              `json:"name"`
+	Engine               Engine              `json:"engine"`
+	Port                 int                 `json:"port"`
+	Protocol             TrafficProtocol     `json:"protocol"`
+	Cycle                TrafficCycle        `json:"cycle"`
+	CycleAnchor          time.Time           `json:"cycle_anchor"`
+	LimitBytes           uint64              `json:"limit_bytes"`
+	AutoBlock            bool                `json:"auto_block"`
+	QuotaEnabled         bool                `json:"quota_enabled"`
+	MonitoringEnabled    bool                `json:"monitoring_enabled"`
+	Discovered           bool                `json:"discovered"`
+	MetadataManaged      bool                `json:"-"` // Explicit operator edits must survive listener discovery.
+	ResetGeneration      uint64              `json:"reset_generation"`
+	ReceivedBytes        uint64              `json:"received_bytes"`
+	SentBytes            uint64              `json:"sent_bytes"`
+	UsedBytes            uint64              `json:"used_bytes"`
+	ReceiveBPS           uint64              `json:"receive_bps"`
+	SendBPS              uint64              `json:"send_bps"`
+	PeriodStart          *time.Time          `json:"period_start,omitempty"`
+	PeriodEnd            *time.Time          `json:"period_end,omitempty"`
+	Blocked              bool                `json:"blocked"`
+	EnforcementAvailable bool                `json:"enforcement_available"`
+	EnforcementError     string              `json:"enforcement_error,omitempty"`
+	LastReportedAt       *time.Time          `json:"last_reported_at,omitempty"`
+	LastCollectedAt      *time.Time          `json:"last_collected_at,omitempty"`
+	Accounting           *TrafficAccounting  `json:"accounting,omitempty"`
+	CreatedAt            time.Time           `json:"created_at"`
+	UpdatedAt            time.Time           `json:"updated_at"`
 }
 
 // UnmarshalJSON preserves the original enforcement behavior when an older
@@ -119,7 +122,9 @@ type TrafficSyncCandidate struct {
 }
 
 type PortTrafficUsage struct {
-	Accounting *TrafficAccounting `json:"accounting,omitempty"`
+	ShareID        string             `json:"share_id,omitempty"`
+	ShareUsedBytes uint64             `json:"share_used_bytes,omitempty"`
+	Accounting     *TrafficAccounting `json:"accounting,omitempty"`
 	// CollectedAt identifies the actual sample, not the heartbeat or network
 	// arrival. CounterEpoch changes only when the local accounting is reset.
 	CollectedAt           time.Time `json:"collected_at,omitzero"`

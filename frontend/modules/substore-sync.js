@@ -115,6 +115,7 @@ export function installSubStoreSync(ctx) {
     const settings = resource.settings || {};
     const targets = resource.targets || [];
     const manage = can("settings.manage");
+    const manageGlobal = manage && !state.data.agentAccess?.isolated;
     const activeTarget = targets.find((target) => target.id === resource.target_id) || null;
     const profiles = resource.profiles || [];
     const selected = profiles.filter((profile) => profile.selected);
@@ -138,7 +139,7 @@ export function installSubStoreSync(ctx) {
       seenAgents.add(profile.agent_id);
       agents.push({
         id: profile.agent_id,
-        name: profile.agent_name || "已删除节点",
+        name: profile.agent_name || "源节点不可用",
         status: profile.agent_status || "unknown",
       });
     }
@@ -197,7 +198,7 @@ export function installSubStoreSync(ctx) {
             </div>`;
           })
           .join("");
-        return `<article class="substore-agent-card"><header><span class="node-avatar">●</span><span><strong>${esc(first.agent_name || "已删除节点")}</strong><small>${items.length} 个客户端节点</small></span><b>${checked}/${items.length}</b></header><div>${rows}</div></article>`;
+        return `<article class="substore-agent-card"><header><span class="node-avatar">●</span><span><strong>${esc(first.agent_name || "源节点不可用")}</strong><small>${items.length} 个客户端节点</small></span><b>${checked}/${items.length}</b></header><div>${rows}</div></article>`;
       })
       .join("");
 
@@ -209,7 +210,7 @@ export function installSubStoreSync(ctx) {
         <section class="substore-status-bar">
           <div class="substore-connection"><i class="${statusClass}"></i><span><b>Sub-Store</b><small>${esc(settings.endpoint_hint || "尚未设置连接")}</small></span><em>${statusText}</em></div>
           <div class="substore-subscription"><span>当前同步组</span><b>${esc(activeTarget?.display_name || activeTarget?.subscription_name || "—")}</b><small>${esc(activeTarget && activeTarget.display_name !== activeTarget.subscription_name ? `Sub-Store：${activeTarget.subscription_name} · ${targetStatus}` : targetStatus)}</small></div>
-          ${manage ? `<div class="substore-status-actions"><button class="button small" type="button" data-substore-test ${settings.configured ? "" : "disabled"}>测试连接</button><button class="button small" type="button" data-substore-settings>连接设置</button>${activeTarget ? '<button class="button small" type="button" data-substore-target-edit>组设置</button>' : ""}<button class="button primary small" type="button" data-substore-run ${canRunSync ? "" : "disabled"}>同步当前组 · ${selectedNodeCount}</button></div>` : ""}
+          ${manage ? `<div class="substore-status-actions"><button class="button small" type="button" data-substore-test ${settings.configured ? "" : "disabled"}>测试连接</button>${manageGlobal ? '<button class="button small" type="button" data-substore-settings>连接设置</button>' : ""}${activeTarget ? '<button class="button small" type="button" data-substore-target-edit>组设置</button>' : ""}<button class="button primary small" type="button" data-substore-run ${canRunSync ? "" : "disabled"}>同步当前组 · ${selectedNodeCount}</button></div>` : ""}
         </section>
         ${activeTarget?.last_sync_status === "failed" && activeTarget.last_sync_error ? `<p class="substore-error">${esc(activeTarget.last_sync_error)}</p>` : ""}
         <section class="substore-target-bar"><nav aria-label="同步组">${targetTabs || '<span>还没有同步组</span>'}</nav><label class="substore-target-search"><input type="search" data-substore-query value="${esc(query)}" aria-label="搜索客户端节点" placeholder="搜索节点、协议、入站或端口"></label>${manage ? '<button class="button small" type="button" data-substore-target-add>＋ 新建同步组</button>' : ""}</section>
@@ -380,6 +381,7 @@ export function installSubStoreSync(ctx) {
     });
     bindEvent(document.querySelector("[data-substore-settings-form]"), "submit", async (event) => {
       event.preventDefault();
+      if (state.data.agentAccess?.isolated) return;
       const form = event.currentTarget;
       const submit = form.querySelector("button[type=submit]");
       submit.disabled = true;

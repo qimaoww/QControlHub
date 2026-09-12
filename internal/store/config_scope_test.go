@@ -77,8 +77,11 @@ func TestConfigOwnerIsolationWithPostgreSQL(t *testing.T) {
 	if configs, err := db.AgentConfigs(alice, agent.ID); err != nil || len(configs) != 1 || configs[0].ID != workspace.ID {
 		t.Fatalf("private node list: %+v %v", configs, err)
 	}
-	if configs, err := db.AgentConfigsForMonitoring(alice, agent.ID); err != nil || len(configs) != 2 {
+	if configs, err := db.AgentConfigsForMonitoring(admin, agent.ID); err != nil || len(configs) != 2 {
 		t.Fatalf("shared-host monitoring lost another owner's ports: %+v %v", configs, err)
+	}
+	if _, err := db.AgentConfigsForMonitoring(alice, agent.ID); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("user accessed another owner's monitoring configuration: %v", err)
 	}
 	if _, err := db.AgentConfig(admin, agent.ID, base.Engine); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("administrator's editor opened another user's workspace: %v", err)

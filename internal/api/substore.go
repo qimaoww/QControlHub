@@ -191,6 +191,18 @@ func (s *Server) getSubStoreSync(w http.ResponseWriter, request *http.Request) {
 	writeJSON(w, http.StatusOK, resource)
 }
 
+func (s *Server) subStoreMutation(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, request *http.Request) {
+		release, err := s.store.TryLockSubStoreOperation(request.Context())
+		if err != nil {
+			writeStoreError(w, err)
+			return
+		}
+		defer release()
+		next(w, request)
+	}
+}
+
 func (s *Server) subStoreSyncResource(ctx context.Context, targetID string) (subStoreSyncResource, error) {
 	settings, err := s.store.SubStoreSyncSettings(ctx)
 	if err != nil {

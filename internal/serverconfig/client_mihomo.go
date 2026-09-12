@@ -1,9 +1,6 @@
 package serverconfig
 
-import (
-	"errors"
-	"strings"
-)
+import "errors"
 
 // buildMihomoClientYAML uses the same validated, normalized input as the URL
 // builder. Only client credentials are copied; server private keys and paths
@@ -50,11 +47,20 @@ func buildMihomoClientYAML(input Input, address, serverName, name string) (strin
 		proxy["type"], proxy["psk"], proxy["version"] = "snell", input.Credential, input.SnellVersion
 		proxy["udp"], proxy["reuse"], proxy["tfo"] = input.SnellUDP, input.SnellReuse, true
 		if input.SnellObfsMode == SnellObfsShadowTLS {
-			proxy["client-fingerprint"] = input.SnellClientFingerprint
-			proxy["obfs-opts"] = map[string]any{
-				"mode": "shadow-tls", "host": input.SnellObfsHost, "password": input.SnellShadowTLSPassword,
-				"version": input.SnellShadowTLSVersion, "alpn": strings.Split(input.SnellShadowTLSALPN, ","),
+			alpn, err := validatedALPN(input.SnellShadowTLSALPN)
+			if err != nil {
+				return "", err
 			}
+			proxy["client-fingerprint"] = input.SnellClientFingerprint
+			opts := map[string]any{
+				"mode": "shadow-tls", "host": input.SnellObfsHost, "password": input.SnellShadowTLSPassword,
+				"version": input.SnellShadowTLSVersion,
+			}
+			// Omit an empty list so Mihomo keeps its safe ALPN defaults.
+			if len(alpn) > 0 {
+				opts["alpn"] = alpn
+			}
+			proxy["obfs-opts"] = opts
 		}
 	default:
 		return "", errors.New("该协议不支持 Mihomo 同步格式")

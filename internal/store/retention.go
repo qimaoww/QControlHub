@@ -7,7 +7,11 @@ import (
 )
 
 func (s *Store) PruneTasks(ctx context.Context, olderThan time.Time) (int64, error) {
-	result, err := s.pool.Exec(ctx, `DELETE FROM tasks WHERE status IN ('succeeded','failed','canceled') AND COALESCE(finished_at,created_at) < $1`, olderThan)
+	result, err := s.pool.Exec(ctx, `DELETE FROM tasks t WHERE status IN ('succeeded','failed','canceled') AND COALESCE(finished_at,created_at) < $1
+		AND NOT (status='succeeded' AND action IN ('deploy','import-existing') AND NOT EXISTS(
+			SELECT 1 FROM tasks newer WHERE newer.agent_id=t.agent_id AND newer.engine=t.engine
+			AND newer.status='succeeded' AND newer.action IN ('deploy','import-existing')
+			AND (newer.finished_at,newer.id)>(t.finished_at,t.id)))`, olderThan)
 	if err != nil {
 		return 0, fmt.Errorf("prune tasks: %w", err)
 	}
@@ -26,7 +30,11 @@ func (s *Store) PruneConfigRevisions(ctx context.Context, keep int) (int64, erro
 			) ranked WHERE position > $1
 		)
 		DELETE FROM config_revisions revision USING old
-		WHERE revision.config_id=old.config_id AND revision.version=old.version`, keep)
+		WHERE revision.config_id=old.config_id AND revision.version=old.version
+		AND NOT EXISTS(SELECT 1 FROM agent_engine_ownership deployed
+			WHERE deployed.config_id=revision.config_id AND deployed.config_version=revision.version)
+		AND NOT EXISTS(SELECT 1 FROM tasks t WHERE t.config_id=revision.config_id AND t.config_version=revision.version
+			AND t.status IN ('pending','running'))`, keep)
 	if err != nil {
 		return 0, fmt.Errorf("prune config revisions: %w", err)
 	}

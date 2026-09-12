@@ -29,6 +29,9 @@ const capabilityTransitionsSQL = `(SELECT COALESCE(jsonb_object_agg(engine,
 // ChangeAgentEngineCapability starts/stops installed cores using a durable Agent
 // task. The effective capability changes only after a successful acknowledgement.
 func (s *Store) ChangeAgentEngineCapability(ctx context.Context, id string, engine core.Engine, enabled bool) (EngineCapabilityChange, error) {
+	if err := requireAgentAdministration(ctx, s.pool, id); err != nil {
+		return EngineCapabilityChange{}, err
+	}
 	change := EngineCapabilityChange{}
 	if !engine.Valid() {
 		return change, fmt.Errorf("%w: unsupported engine", ErrInvalid)
@@ -38,6 +41,12 @@ func (s *Store) ChangeAgentEngineCapability(ctx context.Context, id string, engi
 		return change, err
 	}
 	defer tx.Rollback(ctx)
+	if err := lockAgentUser(ctx, tx); err != nil {
+		return change, err
+	}
+	if err := requireAgentAdministration(ctx, tx, id); err != nil {
+		return change, err
+	}
 	var selected, supported []core.Engine
 	var runtime map[core.Engine]core.RuntimeState
 	err = tx.QueryRow(ctx, `SELECT capabilities,COALESCE(supported_capabilities,capabilities),runtime
@@ -74,6 +83,18 @@ func (s *Store) ChangeAgentEngineCapability(ctx context.Context, id string, engi
 		action := core.ActionStop
 		if enabled {
 			action = core.ActionStart
+			if err := requireSafeEngineStart(ctx, tx, id, engine); err != nil {
+				if !errors.Is(err, ErrConflict) {
+					return change, err
+				}
+				// Restore management access without starting an unverified
+				// on-disk configuration. The next authorized deploy starts it.
+				if err := setEngineCapability(ctx, tx, id, engine, true, selected); err != nil {
+					return change, err
+				}
+				change.Enabled = true
+				return change, tx.Commit(ctx)
+			}
 		}
 		change.TaskID, err = core.NewID("tsk")
 		if err != nil {

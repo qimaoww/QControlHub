@@ -43,6 +43,10 @@
 | `POST` | `/api/v1/auth/login` | 使用管理令牌创建 SPA 会话，返回角色和 CSRF token |
 | `GET` | `/api/v1/auth/session` | 读取当前 SPA 会话 |
 | `POST` | `/api/v1/auth/logout` | 注销当前 SPA 会话 |
+| `GET` | `/api/v1/agent-access` | 当前账号的 Agent 隔离、分配及累计用量 |
+| `GET` / `POST` | `/api/v1/users` | 列出 / 创建持久用户，仅管理员 |
+| `PUT` / `DELETE` | `/api/v1/users/{id}` | 修改 / 停用账号，仅管理员；停用不删除配置 |
+| `GET` / `PUT` | `/api/v1/users/{id}/agent-access` | 读取 / 保存 Agent 分配，仅管理员 |
 | `GET` | `/api/v1/agents` | 列出未撤销 Agent |
 | `GET` | `/api/v1/system-tcp/parameters` | BBR / TCP 调优字段与取值范围（agents.read） |
 | `GET` | `/api/v1/system-tcp/tasks` | 每个节点最新的 TCP 调优任务（tasks.read，可按 agent_id 筛选） |
@@ -226,6 +230,8 @@ schema 44 的策略响应增加 `accounting`：`source` 为 `core-api`、`nft-du
 选择请求为 `{"target_id":"sst_…","selections":[{"config_id":"cfg_…","agent_id":"agt_…","engine":"mihomo","profile_tag":"ss-in","custom_name":"我的节点","address_mode":"both"}]}`。`address_mode` 可为 `auto`、`ipv4`、`ipv6`、`both`；双栈模式生成两条，IPv6 节点名追加 ` v6`。旧客户端省略 `config_id` 时，只能从当前可见部署解析并持久化准确 ID。运行请求为 `{"target_id":"sst_…"}`。
 
 同步使用实际成功部署的版本，而非未部署的草稿。同一主机被另一份配置替换后，原组选择会标记失效；再次同步返回 `409` 且不写远端，必须删除失效项或重新选择。普通用户不能选择其他用户的部署。远端组名在共用后端中必须唯一；移除本地同步组不会删除远端组。
+
+Sub-Store 写操作在数据库级串行执行，防止并发关联或同步覆盖他人的远端归属。另有操作执行时返回 `409`，稍后重试；读取不受此锁限制。
 
 ### 创建配置
 

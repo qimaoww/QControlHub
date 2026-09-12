@@ -38,6 +38,9 @@ func (s *Store) RecordAgentMetricSamples(ctx context.Context, sampledAt time.Tim
 // The caller picks the window (for example the last 24 hours) and a limit so
 // chart rendering stays bounded.
 func (s *Store) MetricSamples(ctx context.Context, agentID string, since time.Time, limit int) ([]core.MetricSample, error) {
+	if err := requireAgentAccess(ctx, s.pool, agentID); err != nil {
+		return nil, err
+	}
 	rows, err := s.pool.Query(ctx, `
 		SELECT sampled_at, cpu_percent, memory_percent, rx_rate_bps, tx_rate_bps
 		FROM metric_samples

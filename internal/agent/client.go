@@ -28,6 +28,7 @@ import (
 	"github.com/coder/websocket/wsjson"
 	"github.com/qimaoww/qcontrolhub/internal/authn"
 	"github.com/qimaoww/qcontrolhub/internal/core"
+	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
 )
 
 type ClientConfig struct {
@@ -293,6 +294,16 @@ func (c *Client) Run(ctx context.Context) error {
 	c.executor.migrateNativeAccounting(ctx)
 	if c.traffic != nil {
 		c.traffic.nativeSource = c.executor.nativeAccounting
+		c.traffic.haltShared = func(ctx context.Context, engine core.Engine) error {
+			c.executor.specsMu.RLock()
+			spec, exists := c.executor.Specs[engine]
+			c.executor.specsMu.RUnlock()
+			if !exists {
+				return errors.New("shared core service is not configured")
+			}
+			_, err := c.executor.serviceManager().command(ctx, spec.Service, core.ActionStop)
+			return err
+		}
 	}
 	trafficContext, stopTraffic := context.WithCancel(ctx)
 	trafficDone := c.traffic.Start(trafficContext)
@@ -720,6 +731,7 @@ func (c *Client) advertisedFeatures() []string {
 	features := []string{
 		core.AgentFeatureSelfUpgrade,
 		core.AgentFeaturePortTraffic,
+		core.AgentFeatureSharedTraffic,
 		core.AgentFeatureCoreLogs,
 		core.AgentFeatureCoreLogStatus,
 		core.AgentFeatureMihomoDevelopmentSource,
@@ -743,6 +755,9 @@ func (c *Client) executeTask(ctx context.Context, task core.Task, outgoing chan<
 func (c *Client) executeTaskForSession(executionContext, deliveryContext context.Context, task core.Task, outgoing chan<- core.WireMessage) {
 	result := c.resultForTask(executionContext, task)
 	message := core.WireMessage{Type: core.WireResult, Result: &core.TaskResultEnvelope{TaskID: task.ID, Result: result}}
+	if c.traffic != nil {
+		message.TrafficUsage, message.Result.Result.TrafficSettled = c.traffic.settledSnapshot(executionContext)
+	}
 	select {
 	case outgoing <- message:
 	case <-deliveryContext.Done():
@@ -821,22 +836,32 @@ func (c *Client) resultForTask(ctx context.Context, task core.Task) core.TaskRes
 		if execute == nil {
 			execute = c.executor.Execute
 		}
+		if task.SharedTrafficID != "" {
+			endpoints, err := serverconfig.SharedTrafficEndpoints(task.Engine, task.ConfigContent)
+			if err != nil {
+				executionErr = fmt.Errorf("unsafe shared configuration: %w", err)
+			} else if task.Action == core.ActionDeploy {
+				executionErr = c.traffic.authorizeSharedDeployment(ctx, task.SharedTrafficID, endpoints)
+			} else if task.Action != core.ActionValidate {
+				executionErr = errors.New("unsupported shared task action")
+			}
+		}
 		var previousMainlandPolicies []core.MainlandAccessPolicy
-		mainlandChanged := task.Action == core.ActionDeploy && task.Engine == core.EngineShadowsocksRust && c.mainland != nil
+		mainlandChanged := executionErr == nil && task.Action == core.ActionDeploy && task.Engine == core.EngineShadowsocksRust && c.mainland != nil
 		if mainlandChanged {
 			previousMainlandPolicies = c.mainland.Snapshot()
 			if err := c.mainland.Deploy(ctx, task.MainlandAccessPolicies, c.creds.AgentID); err != nil {
 				executionErr = fmt.Errorf("apply Shadowsocks Rust mainland access policy: %w", err)
 			}
 		}
-		if c.logs != nil && task.Engine == core.EngineSingBox &&
+		if executionErr == nil && c.logs != nil && task.Engine == core.EngineSingBox &&
 			(task.Action == core.ActionImportExisting || task.Action == core.ActionDeploy) {
 			if err := c.logs.PrepareImportedSingBoxSource(ctx, c.executor, task.ConfigContent); err != nil {
 				slog.Warn("prepare managed sing-box log capture window", "error", err)
 			} else {
 				preparedLogTransition = true
 			}
-		} else if c.logs != nil && task.Engine == core.EngineSingBox &&
+		} else if executionErr == nil && c.logs != nil && task.Engine == core.EngineSingBox &&
 			(task.Action == core.ActionInstall || task.Action == core.ActionStart || task.Action == core.ActionRestart) {
 			if err := c.logs.waitForConsoleSource(ctx, core.EngineSingBox); err != nil {
 				slog.Warn("wait for managed sing-box console log source", "error", err)

@@ -2,12 +2,79 @@ package serverconfig
 
 import (
 	"encoding/base64"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
 	"gopkg.in/yaml.v3"
 )
+
+func TestMihomoShadowTLSALPNNormalization(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  []string
+	}{
+		{name: "empty"},
+		{name: "whitespace", input: " \t\r\n "},
+		{name: "separators", input: ",,\n,\r"},
+		{name: "default", input: "h2,http/1.1", want: []string{"h2", "http/1.1"}},
+		{name: "spaces", input: " h2 , http/1.1 ", want: []string{"h2", "http/1.1"}},
+		{name: "newlines", input: "h2\r\nhttp/1.1", want: []string{"h2", "http/1.1"}},
+		{name: "trailing separator", input: "h2,http/1.1,", want: []string{"h2", "http/1.1"}},
+		{name: "duplicates", input: "http/1.1,h2,http/1.1", want: []string{"http/1.1", "h2"}},
+		{name: "http1 only", input: " http/1.1 ", want: []string{"http/1.1"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			protocol, _ := FindProtocol(core.EngineMihomo, ProtocolSnellShadowTLS)
+			input, err := NewPlan(protocol)
+			if err != nil {
+				t.Fatal(err)
+			}
+			input.SnellShadowTLSALPN = test.input
+			content, err := Generate(core.EngineMihomo, input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			parsed, ok := Parse(core.EngineMihomo, content)
+			if !ok {
+				t.Fatal("generated configuration did not parse")
+			}
+			metadata, err := MarshalClientMetadata(input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := ApplyClientMetadata(&parsed, metadata); err != nil {
+				t.Fatal(err)
+			}
+			profile, err := BuildClientProfile(parsed, "edge.example.test", "")
+			if err != nil || profile.MihomoError != "" {
+				t.Fatalf("export accepted input: %v %s", err, profile.MihomoError)
+			}
+			var proxy map[string]any
+			if err := yaml.Unmarshal([]byte(profile.Mihomo), &proxy); err != nil {
+				t.Fatal(err)
+			}
+			opts := mapValue(proxy["obfs-opts"])
+			value, present := opts["alpn"]
+			if len(test.want) == 0 {
+				if present {
+					t.Fatalf("empty ALPN must use the client default, got %#v", value)
+				}
+				return
+			}
+			var got []string
+			for _, item := range value.([]any) {
+				got = append(got, item.(string))
+			}
+			if !slices.Equal(got, test.want) {
+				t.Fatalf("ALPN = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
 
 func TestMihomoClientExportProtocolMatrix(t *testing.T) {
 	for _, engine := range core.AllEngines() {

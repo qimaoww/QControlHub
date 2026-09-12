@@ -18,6 +18,9 @@ type userRecord struct {
 }
 
 func (s *Store) ListUsers(ctx context.Context) ([]core.User, error) {
+	if !scopeForConfig(ctx).Admin {
+		return nil, ErrForbidden
+	}
 	rows, err := s.pool.Query(ctx, `
 		SELECT id,username,display_name,role,permissions,disabled,created_at,updated_at,last_login_at
 		FROM panel_users ORDER BY disabled ASC, username ASC`)
@@ -61,6 +64,9 @@ func (s *Store) RecordUserLogin(ctx context.Context, id string) error {
 }
 
 func (s *Store) CreateUser(ctx context.Context, request core.UserRequest, passwordHash string) (core.User, error) {
+	if !scopeForConfig(ctx).Admin {
+		return core.User{}, ErrForbidden
+	}
 	if !request.Role.Valid() || strings.TrimSpace(passwordHash) == "" {
 		return core.User{}, fmt.Errorf("%w: invalid user role or password hash", ErrInvalid)
 	}
@@ -76,10 +82,10 @@ func (s *Store) CreateUser(ctx context.Context, request core.UserRequest, passwo
 	}
 	now := time.Now().UTC()
 	row := s.pool.QueryRow(ctx, `
-		INSERT INTO panel_users (id,username,display_name,role,permissions,password_hash,created_at,updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$7)
+		INSERT INTO panel_users (id,username,display_name,role,permissions,password_hash,created_at,updated_at,agent_isolation)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$7,$8)
 		RETURNING id,username,display_name,role,permissions,disabled,created_at,updated_at,last_login_at`,
-		id, username, displayName, request.Role, permissions, passwordHash, now)
+		id, username, displayName, request.Role, permissions, passwordHash, now, request.Role != core.RoleAdmin)
 	user, err := scanUser(row)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -93,11 +99,19 @@ func (s *Store) CreateUser(ctx context.Context, request core.UserRequest, passwo
 // UpdateUser applies a complete partial update in one transaction. It refuses
 // to remove the last active administrator, keeping the panel recoverable.
 func (s *Store) UpdateUser(ctx context.Context, id string, update core.UserUpdate, passwordHash string) (core.User, error) {
+	if !scopeForConfig(ctx).Admin {
+		return core.User{}, ErrForbidden
+	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return core.User{}, err
 	}
 	defer tx.Rollback(ctx)
+	// Two administrators being demoted concurrently must not both observe
+	// the other as the remaining administrator.
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('qcontrolhub:users'))`); err != nil {
+		return core.User{}, err
+	}
 	row := tx.QueryRow(ctx, `
 		SELECT id,username,display_name,role,permissions,disabled,created_at,updated_at,last_login_at,password_hash
 		FROM panel_users WHERE id=$1 FOR UPDATE`, id)
@@ -128,6 +142,8 @@ func (s *Store) UpdateUser(ctx context.Context, id string, update core.UserUpdat
 	}
 	if update.Permissions != nil {
 		permissions = core.NormalizePermissions(*update.Permissions)
+	} else if current.User.Role == core.RoleAdmin && role != core.RoleAdmin {
+		permissions = []core.Permission{}
 	}
 	if role == core.RoleAdmin {
 		permissions = core.AllPermissions()
@@ -146,7 +162,9 @@ func (s *Store) UpdateUser(ctx context.Context, id string, update core.UserUpdat
 	}
 	var updatedPermissions []byte
 	err = tx.QueryRow(ctx, `
-		UPDATE panel_users SET display_name=$2,role=$3,permissions=$4,disabled=$5,password_hash=$6,updated_at=now()
+		UPDATE panel_users SET display_name=$2,role=$3::varchar(20),permissions=$4,disabled=$5,password_hash=$6,
+			agent_isolation=($3::varchar(20)<>'admin'),
+			agent_access_revision=agent_access_revision+1,updated_at=now()
 		WHERE id=$1
 		RETURNING id,username,display_name,role,permissions,disabled,created_at,updated_at,last_login_at`,
 		id, displayName, role, permissions, disabled, passwordHash).Scan(
@@ -157,6 +175,12 @@ func (s *Store) UpdateUser(ctx context.Context, id string, update core.UserUpdat
 	}
 	if err != nil {
 		return core.User{}, err
+	}
+	if disabled {
+		if _, err := tx.Exec(ctx, `UPDATE tasks SET status='canceled',error='user disabled',finished_at=now(),config_content=NULL,lease_id=NULL
+			WHERE owner_id=$1 AND status='pending'`, id); err != nil {
+			return core.User{}, err
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return core.User{}, err

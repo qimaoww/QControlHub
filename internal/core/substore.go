@@ -50,6 +50,7 @@ func NormalizeSubStoreSyncMode(value string) (string, bool) {
 type SubStoreSyncSettings struct {
 	Configured   bool       `json:"configured"`
 	EndpointURL  string     `json:"-"`
+	BackendKey   string     `json:"-"`
 	EndpointHint string     `json:"endpoint_hint,omitempty"`
 	UpdatedAt    *time.Time `json:"updated_at,omitempty"`
 }

@@ -67,6 +67,7 @@ func (s *Store) ListMainlandAccessPolicies(ctx context.Context, agentID string) 
 		args = append(args, agentID)
 	}
 	query += workspaceOwnerClause(ctx, "c.owner_id", &args)
+	query += agentAccessClause(ctx, "p.agent_id", &args)
 	query += " ORDER BY p.agent_id,p.port,p.tag"
 	rows, err := s.pool.Query(ctx, query, args...)
 	if err != nil {
@@ -142,6 +143,12 @@ func (s *Store) DeleteMainlandAccessPolicy(ctx context.Context, agentID string, 
 }
 
 func lockMainlandConfig(ctx context.Context, tx pgx.Tx, agentID string, engine core.Engine) (string, int, error) {
+	if err := lockAgentUser(ctx, tx); err != nil {
+		return "", 0, err
+	}
+	if err := requireAgentAccess(ctx, tx, agentID); err != nil {
+		return "", 0, err
+	}
 	var id string
 	var version int
 	err := tx.QueryRow(ctx, `SELECT id,version FROM configs

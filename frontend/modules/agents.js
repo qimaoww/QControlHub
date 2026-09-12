@@ -667,7 +667,8 @@ export function clearNodeCardDragState(
 }
 
 export function installAgents(ctx) {
-  const { api, optionalAPI, state, engines, can, esc, engineName, statusTone, serviceStatusName, short, date, ago, heartbeat, percent, bytes, conciseVersion, rate, actionName, serviceActionDisabled, trafficChart, renderConfigDiff, notify, confirmAction, shell } = ctx;
+  const { api, optionalAPI, state, engines, can: permission, esc, engineName, statusTone, serviceStatusName, short, date, ago, heartbeat, percent, bytes, conciseVersion, rate, actionName, serviceActionDisabled, trafficChart, renderConfigDiff, notify, confirmAction, shell } = ctx;
+  const can = (capability) => capability === "operator" && state.data.agentAccess?.isolated ? false : permission(capability);
   const pendingAgentNames = new Set();
   const pendingEngineCapabilities = new Set();
   const komariUUIDFor = (agent) => String(agent?.labels?.komari_uuid || "").trim();

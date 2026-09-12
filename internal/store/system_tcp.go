@@ -16,6 +16,7 @@ func (s *Store) LatestSystemTCPTasks(ctx context.Context, agentID string) ([]cor
 		args = append(args, agentID)
 	}
 	ownerWhere := ownerClause(ctx, "owner_id", &args)
+	where += agentAdministrationClause(ctx, "agent.id", &args)
 	rows, err := s.pool.Query(ctx, `
 		SELECT t.id,t.agent_id,t.action,t.engine,COALESCE(t.config_id,''),COALESCE(t.config_version,0),
 		       COALESCE(t.core_version,''),COALESCE(t.core_source,''),t.status,t.attempt,
