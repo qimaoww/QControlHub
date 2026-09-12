@@ -422,6 +422,40 @@ func TestPR183AuditOwnerHiddenNodeVisibility(t *testing.T) {
 	if !directoryFound {
 		t.Fatal("directory did not report the hidden node")
 	}
+	// A compatibility-scope node (owner_id empty) belongs to the administrator
+	// scope: it stays in the regular list and must never be reported as another
+	// account's node in the cross-account directory.
+	legacyToken, legacyErr := db.CreateProtectedEnrollmentToken(ctx, core.EnrollmentTokenRequest{Name: "legacy-admin-node", Reusable: true})
+	if legacyErr != nil {
+		t.Fatal(legacyErr)
+	}
+	legacyAgent, legacyErr := db.EnrollAgent(ctx, core.EnrollRequest{
+		Name: "legacy-admin-node", OS: "linux", Arch: "amd64",
+		Capabilities: []core.Engine{core.EngineMihomo},
+		Features: []string{core.AgentFeatureManagedConfigRead, core.AgentFeatureSharedTraffic,
+			core.AgentFeatureSharedEngines, core.AgentFeatureIndependentEgress},
+		PublicKey: authn.EncodePublicKey(randomEnrollmentKey(t)),
+	}, legacyToken.Token)
+	if legacyErr != nil {
+		t.Fatal(legacyErr)
+	}
+	admin.call("GET", "/agents", nil, http.StatusOK, &adminAgents)
+	legacyVisible := false
+	for _, item := range adminAgents {
+		if item.ID == legacyAgent.ID {
+			legacyVisible = true
+		}
+	}
+	if !legacyVisible {
+		t.Fatal("administrator lost a compatibility-scope node from the regular list")
+	}
+	var legacyDirectory []core.AgentDirectoryEntry
+	admin.call("GET", "/agent-directory", nil, http.StatusOK, &legacyDirectory)
+	for _, entry := range legacyDirectory {
+		if entry.ID == legacyAgent.ID {
+			t.Fatal("administrator-scope node leaked into the cross-account directory")
+		}
+	}
 	// The owner keeps working with the node; no administrator list may leak
 	// its identity or its queued work.
 	var hiddenTask core.Task

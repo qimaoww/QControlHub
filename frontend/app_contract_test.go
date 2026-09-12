@@ -579,12 +579,15 @@ func TestNodeSidebarsUseDraggedNodeSettingsOrder(t *testing.T) {
 		}
 	}
 	for _, required := range []string{
-		`orderNodesBySavedOrder(agents)`,
+		`orderedNodeList(agents)`,
 		`saveNodeOrder(ids);`,
 	} {
 		if !strings.Contains(agents, required) {
 			t.Errorf("node settings drag ordering is not using shared persistence: missing %q", required)
 		}
+	}
+	if !strings.Contains(agents, `orderedNodeList,`) {
+		t.Error("node settings must migrate the legacy browser-wide order through the shared module")
 	}
 }
 

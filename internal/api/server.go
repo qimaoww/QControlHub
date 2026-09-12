@@ -361,6 +361,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/v1/users", s.requirePermission(core.PermissionUsersManage, http.HandlerFunc(s.createUser)))
 	mux.Handle("PUT /api/v1/users/{id}", s.requirePermission(core.PermissionUsersManage, http.HandlerFunc(s.updateUser)))
 	mux.Handle("DELETE /api/v1/users/{id}", s.requirePermission(core.PermissionUsersManage, http.HandlerFunc(s.deleteUser)))
+	mux.Handle("POST /api/v1/users/{id}/purge", s.requirePermission(core.PermissionUsersManage, http.HandlerFunc(s.purgeUser)))
 	mux.Handle("GET /api/v1/users/{id}/agent-access", s.requirePermission(core.PermissionUsersManage, http.HandlerFunc(s.getUserAgentAccess)))
 	mux.Handle("PUT /api/v1/users/{id}/agent-access", s.requirePermission(core.PermissionUsersManage, http.HandlerFunc(s.putUserAgentAccess)))
 	mux.Handle("GET /api/v1/metrics/{id}", s.requirePermission(core.PermissionMetricsRead, http.HandlerFunc(s.metricSamples)))

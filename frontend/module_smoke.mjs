@@ -140,8 +140,10 @@ assert.match(mihomoAccountingHTML, /traffic-accounting-panel limited/);
 assert.match(mihomoAccountingHTML, /不表示当前一定存在漏计连接/);
 import { createLatestRenderScheduler } from "./modules/refresh.js";
 import {
+  migrateLegacyNodeOrder,
   nodeCardOrderKey,
   orderNodesBySavedOrder,
+  orderedNodeList,
   savedNodeOrder,
   saveNodeOrder,
 } from "./modules/node-order.js";
@@ -178,6 +180,49 @@ assert.deepEqual(
   ),
   ["node-c", "node-a", "node-b", "node-d"],
   "sidebars keep the dragged node order and append unknown nodes stably",
+);
+
+// The browser-wide order written by older builds migrates into the
+// account-scoped key on first use, keeping only nodes this account can see.
+const legacyOrderStorage = {
+  value: JSON.stringify(["node-d", "node-b", "foreign-node"]),
+  getItem(key) {
+    assert.equal(key, nodeCardOrderKey);
+    return this.value;
+  },
+  setItem(key, value) {
+    assert.equal(key, nodeCardOrderKey);
+    this.value = value;
+  },
+};
+const scopedOrderStorage = {
+  value: null,
+  getItem(key) {
+    assert.equal(key, nodeCardOrderKey);
+    return this.value;
+  },
+  setItem(key, value) {
+    assert.equal(key, nodeCardOrderKey);
+    this.value = value;
+  },
+};
+assert.deepEqual(
+  orderedNodeList(unorderedNodes, scopedOrderStorage, legacyOrderStorage).map(
+    (node) => node.id,
+  ),
+  ["node-d", "node-b", "node-a", "node-c"],
+  "legacy browser-wide node order migrates into the account-scoped key",
+);
+assert.deepEqual(
+  JSON.parse(scopedOrderStorage.value),
+  ["node-d", "node-b"],
+  "migration keeps only nodes the current account can see",
+);
+migrateLegacyNodeOrder(unorderedNodes, scopedOrderStorage, legacyOrderStorage);
+assert.deepEqual(
+  JSON.parse(scopedOrderStorage.value),
+  ["node-d", "node-b"],
+  "an existing scoped order is never overwritten by the legacy value",
 );
 assert.deepEqual(
   unorderedNodes.map((node) => node.id),

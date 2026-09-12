@@ -226,6 +226,83 @@ func (s *Store) UpdateUser(ctx context.Context, id string, update core.UserUpdat
 	return current.User, nil
 }
 
+// PurgeUser deletes a panel account without dropping fleet data. Everything the
+// account owned (nodes, configurations, templates, enrollment credentials,
+// task history and engine ownership) moves to the administrator scope, sharing
+// grants that involve the account are revoked, and its personal settings and
+// Sub-Store backends are removed with the account row. Administrator accounts
+// cannot be purged.
+func (s *Store) PurgeUser(ctx context.Context, id string) (core.User, error) {
+	if !scopeForConfig(ctx).Admin {
+		return core.User{}, ErrForbidden
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return core.User{}, err
+	}
+	defer tx.Rollback(ctx)
+	var user core.User
+	var permissions []byte
+	if err := tx.QueryRow(ctx, `SELECT id,username,display_name,role,permissions,disabled,created_at,updated_at,last_login_at,auth_revision
+		FROM panel_users WHERE id=$1 FOR UPDATE`, id).Scan(
+		&user.ID, &user.Username, &user.DisplayName, &user.Role, &permissions, &user.Disabled,
+		&user.CreatedAt, &user.UpdatedAt, &user.LastLoginAt, &user.AuthRevision); err != nil {
+		return core.User{}, mapError(err)
+	}
+	if user.Role == core.RoleAdmin {
+		return core.User{}, fmt.Errorf("%w: administrator accounts cannot be deleted", ErrConflict)
+	}
+	// Detach accounting and task records from the grants that are about to go.
+	if _, err := tx.Exec(ctx, `
+		UPDATE port_traffic_policies SET share_id=NULL
+		WHERE share_id IN (SELECT id FROM agent_shares
+			WHERE user_id=$1 OR agent_id IN (SELECT id FROM agents WHERE owner_id=$1))`, id); err != nil {
+		return core.User{}, err
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE tasks SET shared_traffic_id='' WHERE shared_traffic_id IN
+			(SELECT id FROM agent_shares WHERE user_id=$1 OR agent_id IN (SELECT id FROM agents WHERE owner_id=$1))`, id); err != nil {
+		return core.User{}, err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM agent_shares
+		WHERE user_id=$1 OR agent_id IN (SELECT id FROM agents WHERE owner_id=$1)`, id); err != nil {
+		return core.User{}, err
+	}
+	// The fleet stays intact: owned records join the administrator scope.
+	for _, statement := range []string{
+		`UPDATE agents SET owner_id='' WHERE owner_id=$1`,
+		`UPDATE configs SET owner_id='' WHERE owner_id=$1`,
+		`UPDATE config_templates SET owner_id='' WHERE owner_id=$1`,
+		`UPDATE enrollment_tokens SET owner_id='' WHERE owner_id=$1`,
+		`UPDATE tasks SET owner_id='' WHERE owner_id=$1`,
+		`UPDATE agent_engine_ownership SET owner_id='' WHERE owner_id=$1`,
+	} {
+		if _, err := tx.Exec(ctx, statement, id); err != nil {
+			return core.User{}, err
+		}
+	}
+	// Personal, account-scoped data leaves with the account.
+	for _, statement := range []string{
+		`DELETE FROM user_panel_settings WHERE owner_id=$1`,
+		`DELETE FROM user_substore_settings WHERE owner_id=$1`,
+		`DELETE FROM substore_sync_targets WHERE owner_id=$1`,
+	} {
+		if _, err := tx.Exec(ctx, statement, id); err != nil {
+			return core.User{}, err
+		}
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM panel_users WHERE id=$1`, id); err != nil {
+		if isForeignKeyViolation(err) {
+			return core.User{}, fmt.Errorf("%w: the account still owns records that must be moved first", ErrConflict)
+		}
+		return core.User{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return core.User{}, err
+	}
+	return user, nil
+}
+
 func (s *Store) SetUserDisabled(ctx context.Context, id string, disabled bool) (core.User, error) {
 	return s.UpdateUser(ctx, id, core.UserUpdate{Disabled: &disabled}, "")
 }

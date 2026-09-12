@@ -9,7 +9,7 @@ import { createAgentSharing } from "./agent-sharing.js";
 import { createRegionDisplay, openRegionPicker, regionAvatarMarkup } from "./regions.js";
 export { geoRegionDetails } from "./regions.js";
 import {
-  orderNodesBySavedOrder,
+  orderedNodeList,
   saveNodeOrder,
 } from "./node-order.js";
 
@@ -891,7 +891,7 @@ async function nodeSettings(presetMode = false, { overview: preloadedOverview } 
       ? selectedAgent
         ? [selectedAgent]
         : []
-      : orderNodesBySavedOrder(agents);
+      : orderedNodeList(agents);
   const batchAvailable =
     !presetMode && !detailRoute && agents.filter((agent) => can("operator", agent)).length > 1 && can("operator");
   if (!batchAvailable) state.data.nodeBatchMode = false;
@@ -2718,12 +2718,12 @@ async function showAgentDirectoryDialog() {
       const ports = (entry.ports || []).join("、") || "—";
       const engines = (entry.capabilities || []).map((engine) => engineName(engine)).join("、") || "无内核";
       const hidden = entry.admin_hidden ? " · 已对管理员隐藏" : "";
-      return `<article data-directory-node="${esc(entry.id)}"><div><strong>${esc(entry.name)}</strong><small>${esc(entry.owner_username || entry.owner_id || "未知账号")} · ${entry.status === "online" ? "在线" : "离线"} · ${esc(engines)} · 端口 ${esc(ports)}${hidden}</small></div><button class="button small danger-button" type="button" data-delete-directory-node="${esc(entry.id)}" data-node-name="${esc(entry.name)}">删除节点</button></article>`;
+      return `<article data-directory-node="${esc(entry.id)}"><div><strong>${esc(entry.name)}</strong><small>${esc(entry.owner_username || "未分配账号")} · ${entry.status === "online" ? "在线" : "离线"} · ${esc(engines)} · 端口 ${esc(ports)}${hidden}</small></div><button class="button small danger-button" type="button" data-delete-directory-node="${esc(entry.id)}" data-node-name="${esc(entry.name)}">删除节点</button></article>`;
     })
     .join("");
   const wrap = document.createElement("div");
   wrap.className = "modal-backdrop";
-  wrap.innerHTML = `<section class="deploy-command-modal enrollment-dialog" role="dialog" aria-modal="true" aria-labelledby="agent-directory-title" aria-describedby="agent-directory-description"><header class="deploy-command-head"><span class="deploy-command-icon" aria-hidden="true">☰</span><div><p class="eyebrow">管理员视图</p><h2 id="agent-directory-title">其他用户节点</h2><p id="agent-directory-description">只读列表，包含已被所有者对管理员隐藏的节点。这里只能删除节点，不能查看配置、日志、指标，也不能代替用户部署或修改配置。</p></div><button class="deploy-command-close" type="button" data-close aria-label="关闭其他用户节点弹窗">×</button></header><div class="deploy-command-body enrollment-dialog-body"><section class="enrollment-history"><header><div><b>节点清单</b><small>删除会断开 Agent 连接并清理关联配置；节点上的 QAgent 不会被远程卸载。</small></div><span>${(entries || []).length}</span></header><div data-agent-directory-list>${rows || '<p class="enrollment-history-empty">没有其他账号的节点</p>'}</div></section></div></section>`;
+  wrap.innerHTML = `<section class="deploy-command-modal enrollment-dialog" role="dialog" aria-modal="true" aria-labelledby="agent-directory-title" aria-describedby="agent-directory-description"><header class="deploy-command-head"><span class="deploy-command-icon" aria-hidden="true">☰</span><div><p class="eyebrow">管理员视图</p><h2 id="agent-directory-title">其他用户节点</h2><p id="agent-directory-description">只读列表，仅列出归属其他账号的节点（含被所有者对管理员隐藏的节点）；管理员范围的节点在常规节点列表中管理。这里只能删除节点，不能查看配置、日志、指标，也不能代替用户部署或修改配置。</p></div><button class="deploy-command-close" type="button" data-close aria-label="关闭其他用户节点弹窗">×</button></header><div class="deploy-command-body enrollment-dialog-body"><section class="enrollment-history"><header><div><b>节点清单</b><small>删除会断开 Agent 连接并清理关联配置；节点上的 QAgent 不会被远程卸载。</small></div><span>${(entries || []).length}</span></header><div data-agent-directory-list>${rows || '<p class="enrollment-history-empty">没有其他账号的节点</p>'}</div></section></div></section>`;
   document.body.append(wrap);
   bindModalLifecycle(wrap);
   wrap.querySelectorAll("[data-delete-directory-node]").forEach((button) => {

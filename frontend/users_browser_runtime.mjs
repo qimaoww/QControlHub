@@ -32,7 +32,7 @@ export async function testUsersRuntime(preview = false) {
     }],
   }]));
   const writes = [], notifications = [];
-  let conflict = false, confirm = true, holdSave, releaseSave, failedUser = "";
+  let conflict = false, confirm = true, confirmCount = 0, holdSave, releaseSave, failedUser = "";
   const api = async (path, options = {}) => {
     const body = options.body ? JSON.parse(options.body) : undefined;
     if (options.method) writes.push({ path, body, method: options.method });
@@ -46,6 +46,13 @@ export async function testUsersRuntime(preview = false) {
       return structuredClone(user);
     }
     const userID = path.split("/")[2];
+    if (path.endsWith("/purge") && options.method === "POST") {
+      const index = items.findIndex(user => user.id === userID);
+      if (index < 0) throw new Error("账号不存在");
+      items.splice(index, 1);
+      access.delete(userID);
+      return null;
+    }
     if (path.endsWith("/agent-access")) {
       if (!body && userID === failedUser) throw new Error("用户读取失败");
       if (body) {
@@ -62,7 +69,8 @@ export async function testUsersRuntime(preview = false) {
     throw new Error(`Unexpected users API: ${path}`);
   };
   const pages = installUsers({
-    api, state, esc, notify: message => notifications.push(message), confirmAction: async () => confirm,
+    api, state, esc, notify: message => notifications.push(message),
+    confirmAction: async () => { confirmCount++; return confirm; },
     shell: markup => {
       document.body.innerHTML = `<nav>${items.map(user => `<a href="#users" data-user-select="${user.id}">${user.username}</a>`).join("")}</nav><main>${markup}</main>`;
     },
@@ -183,6 +191,25 @@ export async function testUsersRuntime(preview = false) {
   assert(writes.find(write => write.path === "/users").body.agent_isolation === true, "new regular user was created with unrestricted fleet access");
   assert(["enrollment.manage", "agents.manage", "settings.manage"].every(permission => writes.find(write => write.path === "/users").body.permissions.includes(permission)), "new users cannot manage their own nodes and integrations");
   await waitFor(() => state.data.userID === "new-user" && !document.querySelector("[data-user-dialog]").open, "created user did not load");
+  // Deleting an account is a two-step administrator action; the account row
+  // and its grants disappear, while the fleet itself is untouched.
+  await select("alice");
+  assert(document.querySelector("[data-user-delete]"), "administrator cannot delete a regular account");
+  await select("admin");
+  assert(!document.querySelector("[data-user-delete]"), "administrator account offered deletion");
+  await select("alice");
+  confirm = false;
+  document.querySelector("[data-user-delete]").click();
+  await Promise.resolve();
+  assert(!writes.some(write => write.path === "/users/alice/purge"), "canceling confirmation deleted the account");
+  confirm = true;
+  const confirmsBefore = confirmCount;
+  document.querySelector("[data-user-delete]").click();
+  await waitFor(() => writes.some(write => write.path === "/users/alice/purge"), "account deletion did not submit");
+  assert(confirmCount === confirmsBefore + 2, "account deletion was not double-confirmed");
+  assert(writes.find(write => write.path === "/users/alice/purge").method === "POST", "account deletion used the wrong method");
+  await waitFor(() => !items.some(user => user.id === "alice") && state.data.userID === "bob", "deleted account stayed selected");
+  assert(notifications.includes("账号“Alice”已删除"), "account deletion was not reported");
   state.route = "my-quota";
   state.session = { role: "user", user_id: "bob" };
   access.get("bob").shares[0].enabled = false;
