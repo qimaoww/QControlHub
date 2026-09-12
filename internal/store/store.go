@@ -2427,6 +2427,11 @@ func isUniqueViolation(err error) bool {
 	return errors.As(err, &pgError) && pgError.Code == "23505"
 }
 
+func isForeignKeyViolation(err error) bool {
+	var pgError *pgconn.PgError
+	return errors.As(err, &pgError) && pgError.Code == "23503"
+}
+
 func intervalString(duration time.Duration) string {
 	seconds := int64(duration.Seconds())
 	if seconds < 1 {

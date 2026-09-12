@@ -124,7 +124,7 @@ export function installUsers(ctx) {
     const ownedAgents = agents.filter((agent) => ownedIDs.has(agent.id));
     const available = agents.filter((agent) => !ownedIDs.has(agent.id) && !shares.some((share) => share.agent_id === agent.id));
     shell(`<div class="settings-workspace users-workspace">
-      <header class="users-toolbar"><h2>${user ? esc(user.display_name || user.username) : "用户"}</h2><div>${user ? '<button class="button small" type="button" data-user-edit>编辑账号</button>' : ""}<button class="button primary small" type="button" data-user-create>新增用户</button></div></header>
+      <header class="users-toolbar"><h2>${user ? esc(user.display_name || user.username) : "用户"}</h2><div>${user ? '<button class="button small" type="button" data-user-edit>编辑账号</button>' : ""}${user && editable && user.id !== state.session?.user_id ? '<button class="button small danger-button" type="button" data-user-delete>删除账号</button>' : ""}<button class="button primary small" type="button" data-user-create>新增用户</button></div></header>
       ${items.length ? `<select class="users-mobile-select" data-user-mobile-select aria-label="选择用户">${items.map((item) => `<option value="${esc(item.id)}" ${item.id === user?.id ? "selected" : ""}>${esc(item.display_name || item.username)} · ${esc(item.username)}</option>`).join("")}</select>` : ""}
       ${user ? `<form class="settings-form" data-user-form data-user-access-form>
         <section class="settings-section">
@@ -169,6 +169,28 @@ export function installUsers(ctx) {
     bindEvent(document.querySelector("[data-user-mobile-select]"), "change", (event) => { void selectUser(event.target.value); });
     bindEvent(document.querySelector("[data-user-create]"), "click", () => editUser(null));
     bindEvent(document.querySelector("[data-user-edit]"), "click", () => editUser(user));
+    bindEvent(document.querySelector("[data-user-delete]"), "click", async (event) => {
+      const button = event.currentTarget;
+      const label = user.display_name || user.username;
+      if (button.disabled || data !== state.data || state.route !== "users") return;
+      if (!await confirmAction(`删除账号“${label}”后无法恢复：该账号的节点、配置与模板将移交给管理员，共享与配额记录一并清理。`, "继续删除")) return;
+      if (!await confirmAction(`再次确认删除账号“${label}”（${user.username}）？`, "永久删除")) return;
+      if (data !== state.data || state.route !== "users") return;
+      button.disabled = true;
+      try {
+        await api(`/users/${encodeURIComponent(user.id)}/purge`, { method: "POST" });
+        if (data !== state.data || state.route !== "users") return;
+        data.userDrafts?.delete(user.id);
+        data.userAccessSaves?.delete(user.id);
+        data.userID = "";
+        await users();
+        notify(`账号“${label}”已删除`);
+      } catch (error) {
+        if (error.name !== "AbortError") notify(error.message, "error");
+      } finally {
+        button.disabled = false;
+      }
+    });
     const form = document.querySelector("[data-user-access-form]");
     captureActive = () => {};
     if (!form || !editable) return;

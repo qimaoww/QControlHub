@@ -137,6 +137,28 @@ func (s *Server) deleteUser(w http.ResponseWriter, request *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// purgeUser permanently removes an account. Nodes and configurations move to
+// the administrator scope, grants are revoked and personal data is deleted;
+// the response is 204 so the UI can simply refresh the account list.
+func (s *Server) purgeUser(w http.ResponseWriter, request *http.Request) {
+	if s.store == nil {
+		writeInternalError(w, errors.New("user store is unavailable"))
+		return
+	}
+	if s.sessionUserID(request) == request.PathValue("id") {
+		writeError(w, http.StatusConflict, "cannot delete the current user session")
+		return
+	}
+	user, err := s.store.PurgeUser(request.Context(), request.PathValue("id"))
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	s.recordAudit(request, "user.purged", user.Username, "account deleted; nodes and configurations moved to the administrator scope")
+	s.revokeUserSessions(user.ID)
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func validateUserRequest(input *core.UserRequest) error {
 	username, err := authn.NormalizeUsername(input.Username)
 	if err != nil {

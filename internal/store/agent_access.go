@@ -210,7 +210,7 @@ func (s *Store) ListAgentDirectory(ctx context.Context) ([]core.AgentDirectoryEn
 			COALESCE((SELECT array_agg(DISTINCT policy.port ORDER BY policy.port)
 				FROM port_traffic_policies policy WHERE policy.agent_id=agents.id),'{}'::int[])
 		FROM agents LEFT JOIN panel_users owner ON owner.id=agents.owner_id
-		WHERE agents.revoked_at IS NULL
+		WHERE agents.revoked_at IS NULL AND agents.owner_id <> ''
 		ORDER BY agents.enrolled_at DESC
 		LIMIT 1000`)
 	if err != nil {

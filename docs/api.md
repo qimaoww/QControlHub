@@ -49,6 +49,7 @@
 | `POST` | `/api/v1/agent-access/{id}/response` | 接收账号接受/拒绝共享（revision 为 invitation_revision；decision 为 accept / reject），也可退出已接受的共享 |
 | `GET` / `POST` | `/api/v1/users` | 列出 / 创建持久用户，仅管理员 |
 | `PUT` / `DELETE` | `/api/v1/users/{id}` | 修改 / 停用账号，仅管理员；停用不删除配置 |
+| `POST` | `/api/v1/users/{id}/purge` | 永久删除账号，仅管理员，返回 `204`；节点、配置、模板、安装凭据、任务与内核归属转入管理员范围，共享与个人设置删除，管理员账号、当前会话与不存在的账号返回 `409` / `409` / `404` |
 | `GET` / `PUT` | `/api/v1/users/{id}/agent-access` | 读取 / 保存 Agent 分配，仅管理员 |
 | `GET` / `PUT` | `/api/v1/agents/{id}/sharing` | 所有者按准确用户名读取 / 保存共享端口及累计额度，携带 revision（agents.manage） |
 | `GET` | `/api/v1/agents` | 列出未撤销 Agent |
@@ -217,7 +218,7 @@ schema 44 的策略响应增加 `accounting`：`source` 为 `core-api`、`nft-du
 
 所有者可在添加节点时勾选、或之后用 `PUT /api/v1/agents/{id}/visibility` 切换，请求与响应为 `{"admin_hidden":true}`。开启后该节点对管理员和兼容令牌在节点列表、详情、配置、任务、部署、日志、指标、流量、审计与安装凭据中一律不可见（直接访问返回 `404`），改名、部署、启停、分享、安装命令以及再次切换隐藏状态等管理动作同样被拒绝；所有者与已接受共享的接收者不受影响，后台采集、计费、通知与 Agent 连接继续按所有者设置执行。接口需要 `agents.manage`、节点所有权与 CSRF，并记录 `agent.visibility.updated` 审计。
 
-`GET /api/v1/agent-directory` 是唯一包含隐藏节点的管理视图，仅限管理员角色或部署时配置的兼容令牌；普通账号即使持有 `agents.read` 也返回 `403`。它返回 `[{"id":"agt_…","name":"edge-01","owner_username":"alice","status":"online","capabilities":["mihomo"],"ports":[21001],"admin_hidden":true}]` 形式的只读摘要，不含配置正文、日志、指标、任务或流量。管理员可据此调用 `DELETE /api/v1/agents/{id}` 删除任意账号的节点（含隐藏节点），删除沿用既有身份吊销与级联清理语义。
+`GET /api/v1/agent-directory` 是管理员查看其他账号节点的只读目录，仅限管理员角色或部署时配置的兼容令牌；普通账号即使持有 `agents.read` 也返回 `403`。目录只包含 `owner_id` 非空的节点，即确实归属其他账号的节点；升级前遗留、现由管理员范围（`owner_id=''`）持有的节点继续出现在管理员的常规节点列表中，不会被列成“未知账号”。它返回 `[{"id":"agt_…","name":"edge-01","owner_username":"alice","status":"online","capabilities":["mihomo"],"ports":[21001],"admin_hidden":true}]` 形式的只读摘要，不含配置正文、日志、指标、任务或流量。管理员可据此调用 `DELETE /api/v1/agents/{id}` 删除任意账号的节点（含隐藏节点），删除沿用既有身份吊销与级联清理语义。
 
 ### 修改节点名称
 
