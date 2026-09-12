@@ -19,7 +19,7 @@ func (s *Store) AgentSharing(ctx context.Context, agentID string) (core.AgentSha
 		return result, mapError(err)
 	}
 	rows, err := s.pool.Query(ctx, `SELECT s.id,s.user_id,u.username,u.display_name,s.agent_id,a.name,s.enabled,
-		s.limit_bytes,s.used_bytes,s.created_at,s.updated_at,
+		s.status,s.invitation_revision,s.limit_bytes,s.used_bytes,s.created_at,s.updated_at,
 		ARRAY(SELECT p.port FROM agent_share_ports p WHERE p.share_id=s.id ORDER BY p.port)
 		FROM agent_shares s JOIN panel_users u ON u.id=s.user_id JOIN agents a ON a.id=s.agent_id
 		WHERE s.agent_id=$1 ORDER BY u.username,s.id`, agentID)
@@ -30,7 +30,7 @@ func (s *Store) AgentSharing(ctx context.Context, agentID string) (core.AgentSha
 	for rows.Next() {
 		var share core.AgentShare
 		if err := rows.Scan(&share.ID, &share.UserID, &share.Username, &share.DisplayName, &share.AgentID, &share.AgentName,
-			&share.Enabled, &share.LimitBytes, &share.UsedBytes, &share.CreatedAt, &share.UpdatedAt, &share.Ports); err != nil {
+			&share.Enabled, &share.Status, &share.InvitationRevision, &share.LimitBytes, &share.UsedBytes, &share.CreatedAt, &share.UpdatedAt, &share.Ports); err != nil {
 			return result, err
 		}
 		result.Shares = append(result.Shares, share)
@@ -106,6 +106,10 @@ func (s *Store) SetAgentSharing(ctx context.Context, agentID string, request cor
 	if revision != request.Revision {
 		return core.AgentSharing{}, fmt.Errorf("%w: Agent sharing changed; reload before saving", ErrConflict)
 	}
+	if err := lockAgentSharesTx(ctx, tx, []string{agentID}); err != nil {
+		return core.AgentSharing{}, err
+	}
+	userIDs := make([]string, 0, len(recipients))
 	for _, recipient := range recipients {
 		user, exists := users[recipient.Username]
 		enabled := recipient.Enabled == nil || *recipient.Enabled
@@ -115,30 +119,17 @@ func (s *Store) SetAgentSharing(ctx context.Context, agentID string, request cor
 		if enabled && !containsFeature(features, core.AgentFeatureSharedTraffic) {
 			return core.AgentSharing{}, fmt.Errorf("%w: upgrade the Agent before sharing it", ErrConflict)
 		}
+		userIDs = append(userIDs, user.ID)
 	}
-	if _, err := tx.Exec(ctx, `UPDATE agent_shares SET enabled=false,updated_at=now() WHERE agent_id=$1`, agentID); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE agent_shares SET enabled=false,invitation_revision=invitation_revision+1,updated_at=now()
+		WHERE agent_id=$1 AND enabled AND NOT(user_id=ANY($2::text[]))`, agentID, userIDs); err != nil {
 		return core.AgentSharing{}, err
 	}
 	for _, recipient := range recipients {
 		userID := users[recipient.Username].ID
 		enabled := recipient.Enabled == nil || *recipient.Enabled
-		shareID, err := core.NewID("shr")
-		if err != nil {
+		if err := s.setAgentShareTx(ctx, tx, userID, agentID, recipient.LimitBytes, recipient.Ports, enabled, recipient.Reinvite); err != nil {
 			return core.AgentSharing{}, err
-		}
-		if err := tx.QueryRow(ctx, `INSERT INTO agent_shares(id,user_id,agent_id,limit_bytes,enabled)
-			VALUES($1,$2,$3,$4,$5) ON CONFLICT(user_id,agent_id) DO UPDATE
-			SET limit_bytes=EXCLUDED.limit_bytes,enabled=EXCLUDED.enabled,updated_at=now() RETURNING id`,
-			shareID, userID, agentID, recipient.LimitBytes, enabled).Scan(&shareID); err != nil {
-			return core.AgentSharing{}, err
-		}
-		if err := s.setSharedPortsTx(ctx, tx, shareID, userID, agentID, recipient.Ports); err != nil {
-			return core.AgentSharing{}, err
-		}
-		if enabled {
-			if err := s.bindUnmeteredSharedDeploymentTx(ctx, tx, shareID, userID, agentID); err != nil {
-				return core.AgentSharing{}, err
-			}
 		}
 	}
 	if err := cancelUnauthorizedAgentTasksTx(ctx, tx, agentID, features); err != nil {

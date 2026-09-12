@@ -25,7 +25,7 @@ func agentAccessClause(ctx context.Context, column string, args *[]any) string {
 		OR EXISTS (SELECT 1 FROM panel_users access_user WHERE access_user.id=` + owner + ` AND NOT access_user.disabled
 			AND (EXISTS (SELECT 1 FROM agents owned_agent WHERE owned_agent.id=` + column + ` AND owned_agent.owner_id=` + owner + `)
 				OR EXISTS (SELECT 1 FROM agent_shares access_share
-				WHERE access_share.user_id=access_user.id AND access_share.agent_id=` + column + ` AND access_share.enabled))))`
+				WHERE access_share.user_id=access_user.id AND access_share.agent_id=` + column + ` AND access_share.enabled AND access_share.status='accepted'))))`
 }
 
 // Host-wide operations belong to the node owner, not to recipients of a
@@ -162,9 +162,11 @@ func (s *Store) UserAgentAccess(ctx context.Context, userID string) (core.AgentA
 		return result, err
 	}
 	rows, err := s.pool.Query(ctx, `SELECT share.id,share.user_id,share.agent_id,agent.name,share.enabled,
+		share.status,share.invitation_revision,COALESCE(agent_owner.username,''),
 		share.limit_bytes,share.used_bytes,share.created_at,share.updated_at,
 		ARRAY(SELECT reserved.port FROM agent_share_ports reserved WHERE reserved.share_id=share.id ORDER BY reserved.port)
 		FROM agent_shares share JOIN agents agent ON agent.id=share.agent_id
+		LEFT JOIN panel_users agent_owner ON agent_owner.id=agent.owner_id
 		WHERE share.user_id=$1 AND agent.revoked_at IS NULL ORDER BY agent.name,share.agent_id`, userID)
 	if err != nil {
 		return result, err
@@ -173,6 +175,7 @@ func (s *Store) UserAgentAccess(ctx context.Context, userID string) (core.AgentA
 	for rows.Next() {
 		var share core.AgentShare
 		if err := rows.Scan(&share.ID, &share.UserID, &share.AgentID, &share.AgentName, &share.Enabled,
+			&share.Status, &share.InvitationRevision, &share.OwnerUsername,
 			&share.LimitBytes, &share.UsedBytes, &share.CreatedAt, &share.UpdatedAt, &share.Ports); err != nil {
 			return result, err
 		}
@@ -229,7 +232,7 @@ func (s *Store) SetUserAgentAccess(ctx context.Context, userID string, request c
 	}
 	// Lock every affected Agent, including revoked grants, in stable order.
 	// Creation takes the user lock before the Agent lock as well.
-	rows, err := tx.Query(ctx, `SELECT id FROM agents WHERE id IN
+	rows, err := tx.Query(ctx, `SELECT id,features FROM agents WHERE id IN
 		(SELECT agent_id FROM agent_shares WHERE user_id=$1
 		 UNION SELECT agent_id FROM agent_engine_ownership WHERE owner_id=$1)
 		OR id=ANY($2::text[]) ORDER BY id FOR UPDATE`,
@@ -237,8 +240,22 @@ func (s *Store) SetUserAgentAccess(ctx context.Context, userID string, request c
 	if err != nil {
 		return core.AgentAccess{}, err
 	}
+	var affected []core.Agent
+	var affectedIDs []string
+	for rows.Next() {
+		var agent core.Agent
+		if err := rows.Scan(&agent.ID, &agent.Features); err != nil {
+			rows.Close()
+			return core.AgentAccess{}, err
+		}
+		affected = append(affected, agent)
+		affectedIDs = append(affectedIDs, agent.ID)
+	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
+		return core.AgentAccess{}, err
+	}
+	if err := lockAgentSharesTx(ctx, tx, affectedIDs); err != nil {
 		return core.AgentAccess{}, err
 	}
 	var unsafeRunning bool
@@ -284,36 +301,17 @@ func (s *Store) SetUserAgentAccess(ctx context.Context, userID string, request c
 	if _, err := tx.Exec(ctx, `UPDATE panel_users SET agent_isolation=$2,agent_access_revision=agent_access_revision+1,updated_at=now() WHERE id=$1`, userID, request.Isolated); err != nil {
 		return core.AgentAccess{}, err
 	}
-	if _, err := tx.Exec(ctx, `UPDATE agent_shares SET enabled=false,updated_at=now() WHERE user_id=$1`, userID); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE agent_shares SET enabled=false,invitation_revision=invitation_revision+1,updated_at=now()
+		WHERE user_id=$1 AND enabled AND NOT(agent_id=ANY($2::text[]))`, userID, sharedRequestAgentIDs(shares)); err != nil {
 		return core.AgentAccess{}, err
 	}
 	for _, share := range shares {
-		id, err := core.NewID("shr")
-		if err != nil {
+		if err := s.setAgentShareTx(ctx, tx, userID, share.AgentID, share.LimitBytes, share.Ports, shareEnabled(share), share.Reinvite); err != nil {
 			return core.AgentAccess{}, err
-		}
-		if err := tx.QueryRow(ctx, `INSERT INTO agent_shares(id,user_id,agent_id,limit_bytes,enabled) VALUES($1,$2,$3,$4,$5)
-			ON CONFLICT(user_id,agent_id) DO UPDATE SET enabled=EXCLUDED.enabled,limit_bytes=EXCLUDED.limit_bytes,updated_at=now()
-			RETURNING id`,
-			id, userID, share.AgentID, share.LimitBytes, shareEnabled(share)).Scan(&id); err != nil {
-			return core.AgentAccess{}, err
-		}
-		if err := s.setSharedPortsTx(ctx, tx, id, userID, share.AgentID, share.Ports); err != nil {
-			return core.AgentAccess{}, err
-		}
-		if shareEnabled(share) {
-			if err := s.bindUnmeteredSharedDeploymentTx(ctx, tx, id, userID, share.AgentID); err != nil {
-				return core.AgentAccess{}, err
-			}
 		}
 	}
-	if request.Isolated {
-		// Do not let work queued before a revocation execute afterwards.
-		if _, err := tx.Exec(ctx, `UPDATE tasks SET status='canceled',error='Agent access revoked',finished_at=now(),config_content=NULL,lease_id=NULL
-			WHERE (owner_id=$1 OR EXISTS(SELECT 1 FROM configs c WHERE c.id=tasks.config_id AND c.owner_id=$1))
-			AND EXISTS(SELECT 1 FROM agents a WHERE a.id=tasks.agent_id AND a.owner_id<>$1)
-			AND status='pending' AND (shared_traffic_id='' OR NOT EXISTS(
-				SELECT 1 FROM agent_shares share WHERE share.user_id=$1 AND share.agent_id=tasks.agent_id AND share.enabled))`, userID); err != nil {
+	for _, agent := range affected {
+		if err := cancelUnauthorizedAgentTasksTx(ctx, tx, agent.ID, agent.Features); err != nil {
 			return core.AgentAccess{}, err
 		}
 	}

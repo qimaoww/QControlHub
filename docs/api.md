@@ -25,7 +25,7 @@
 
 配置归属由登录身份决定，不能通过 `owner_id` 请求字段指定其他用户。普通用户只能列出和操作自己的配置档案、节点工作区、修订、模板、任务及 Sub-Store 同步组；直接引用其他用户的资源 ID 返回 `404`。管理员保留跨用户管理权限，节点工作区入口则始终使用当前管理员自己的身份。旧版非管理员令牌各自隔离，升级前记录归管理员保管。详见 [多用户配置隔离](security.md#多用户配置隔离)。
 
-普通账号始终独立，有权限时可自行添加 Agent；Agent 的 `can_manage` 区分自有和借用节点。主机操作除能力外还校验节点所有权；共享不转移配置、安装凭据、日志、设置或集成。登录和会话响应的 `user_id` / `workspace_id` 可用于浏览器偏好分区，不能作为授权依据。密码、权限、角色或停用变更后旧会话返回 `401`。
+普通账号始终独立，有权限时可自行添加 Agent；Agent 的 `can_manage` 区分自有和借用节点。共享仅在启用且接收者已接受时生效，所有者/管理员不能代为同意。主机操作除能力外还校验节点所有权；共享不转移配置、安装凭据、日志、设置或集成。登录和会话响应的 `user_id` / `workspace_id` 可用于浏览器偏好分区，不能作为授权依据。密码、权限、角色或停用变更后旧会话返回 `401`。
 
 失败响应通常是：
 
@@ -45,7 +45,8 @@
 | `POST` | `/api/v1/auth/login` | 使用用户名/密码或管理令牌创建 SPA 会话，返回身份、工作区和 CSRF token |
 | `GET` | `/api/v1/auth/session` | 读取当前 SPA 会话 |
 | `POST` | `/api/v1/auth/logout` | 注销当前 SPA 会话 |
-| `GET` | `/api/v1/agent-access` | 当前账号的 Agent 隔离、分配及累计用量 |
+| `GET` | `/api/v1/agent-access` | 当前账号的 Agent 隔离、邀请状态/修订、分配及累计用量 |
+| `POST` | `/api/v1/agent-access/{id}/response` | 接收账号接受/拒绝共享（revision 为 invitation_revision；decision 为 accept / reject），也可退出已接受的共享 |
 | `GET` / `POST` | `/api/v1/users` | 列出 / 创建持久用户，仅管理员 |
 | `PUT` / `DELETE` | `/api/v1/users/{id}` | 修改 / 停用账号，仅管理员；停用不删除配置 |
 | `GET` / `PUT` | `/api/v1/users/{id}/agent-access` | 读取 / 保存 Agent 分配，仅管理员 |

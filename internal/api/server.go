@@ -280,6 +280,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/overview", s.requirePermission(core.PermissionOverviewRead, http.HandlerFunc(s.overview)))
 	mux.Handle("GET /api/v1/agents", s.requirePermission(core.PermissionAgentsRead, http.HandlerFunc(s.listAgents)))
 	mux.Handle("GET /api/v1/agent-access", s.requireAllPermissions(nil, http.HandlerFunc(s.getOwnAgentAccess)))
+	mux.Handle("POST /api/v1/agent-access/{id}/response", s.requireAllPermissions(nil, http.HandlerFunc(s.respondAgentShare)))
 	mux.Handle("GET /api/v1/deployments", s.requirePermission(core.PermissionDeploymentsRead, http.HandlerFunc(s.listDeployments)))
 	mux.Handle("GET /api/v1/client-access", s.requirePermission(core.PermissionClientAccessRead, http.HandlerFunc(s.listClientAccess)))
 	mux.Handle("GET /api/v1/substore-sync", s.requirePermission(core.PermissionClientAccessRead, http.HandlerFunc(s.getSubStoreSync)))

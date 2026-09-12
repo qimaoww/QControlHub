@@ -1,5 +1,5 @@
 import { bindEvent } from "./refresh.js";
-import { parseSharedPorts, sharedLimitBytes, sharedLimitGiB } from "./users.js";
+import { agentShareStatus, parseSharedPorts, sharedLimitBytes, sharedLimitGiB } from "./users.js";
 
 export function createAgentSharing(ctx, interactions) {
   const { api, state, can, esc, notify, confirmAction, bytes = value => `${sharedLimitGiB(value)} GiB` } = ctx;
@@ -10,8 +10,9 @@ export function createAgentSharing(ctx, interactions) {
     enabled: row.querySelector('[name="enabled"]').checked,
     ports_text: row.querySelector('[name="ports"]').value,
     limit_gib: row.querySelector('[name="limit_gib"]').value,
+    reinvite: row.dataset.reinvite === "true",
   }));
-  const rowMarkup = (share) => `<div class="agent-share-recipient" data-recipient>
+  const rowMarkup = (share) => `<div class="agent-share-recipient" data-recipient data-reinvite="${Boolean(share.reinvite)}">
     <div class="agent-share-recipient-head">
       <label class="settings-field"><span>用户名</span><input name="username" required maxlength="64" autocomplete="off" placeholder="准确用户名" value="${esc(share.username || "")}" ${share.user_id ? "readonly" : ""}></label>
       <div class="agent-share-recipient-actions"><label class="agent-share-enabled"><input type="checkbox" name="enabled" ${share.enabled !== false ? "checked" : ""}><span>启用</span></label>${share.user_id ? "" : '<button type="button" class="deploy-command-close" data-recipient-remove aria-label="移除未保存的用户">×</button>'}</div>
@@ -20,7 +21,7 @@ export function createAgentSharing(ctx, interactions) {
       <label class="settings-field"><span>端口</span><input name="ports" autocomplete="off" placeholder="21001, 21002" value="${esc(share.ports_text ?? (share.ports || []).join(", "))}"></label>
       <label class="settings-field"><span title="累计总额度；0 表示不限量">总额度 · GiB</span><input name="limit_gib" type="number" required min="0" max="8388607" step="any" title="0 表示不限量" value="${esc(share.limit_gib ?? sharedLimitGiB(share.limit_bytes))}"></label>
     </div>
-    <small class="agent-share-usage">已用 ${esc(bytes(share.used_bytes || 0))}</small>
+    <div class="agent-share-meta"><small class="agent-share-usage"><span data-share-status>${agentShareStatus(share)}</span> · 已用 ${esc(bytes(share.used_bytes || 0))}</small>${share.status === "rejected" ? `<button type="button" class="button small" data-recipient-reinvite ${share.reinvite ? "disabled" : ""}>重新邀请</button>` : ""}</div>
   </div>`;
   const close = () => {
     ++serial; // Also discard a pending read after navigation/sign-out.
@@ -101,6 +102,16 @@ export function createAgentSharing(ctx, interactions) {
       capture();
     });
     bindEvent(form.querySelector("[data-recipients]"), "click", (event) => {
+      const reinvite = event.target.closest("[data-recipient-reinvite]");
+      if (reinvite && data === state.data && !data.agentSharingSaves.has(agent.id)) {
+        const row = reinvite.closest("[data-recipient]");
+        row.dataset.reinvite = "true";
+        row.querySelector('[name="enabled"]').checked = true;
+        row.querySelector("[data-share-status]").textContent = "待发送";
+        reinvite.disabled = true;
+        capture();
+        return;
+      }
       const row = event.target.closest("[data-recipient-remove]")?.closest("[data-recipient]");
       if (!row || data !== state.data || data.agentSharingSaves.has(agent.id)) return;
       row.remove();
@@ -125,6 +136,7 @@ export function createAgentSharing(ctx, interactions) {
         const shares = values(form).map((row) => ({
           username: row.username.trim(), enabled: row.enabled,
           ports: parseSharedPorts(row.ports_text), limit_bytes: sharedLimitBytes(row.limit_gib),
+          reinvite: row.reinvite,
         }));
         capture();
         const submitted = data.agentSharingDrafts.get(agent.id);

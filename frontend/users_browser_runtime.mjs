@@ -26,6 +26,7 @@ export async function testUsersRuntime(preview = false) {
   const agents = [{ id: "shared", name: "共享 Agent", features: ["shared-traffic-v1"] }];
   const access = new Map(items.map((user, index) => [user.id, {
     isolated: user.role !== "admin", revision: 4, shares: user.role === "admin" ? [] : [{
+      id: `shr_${user.id}`, status: "accepted", invitation_revision: 2,
       agent_id: "shared", agent_name: "共享 Agent", enabled: true, ports: [31001 + index],
       used_bytes: 128, limit_bytes: 1024 ** 3,
     }],
@@ -50,7 +51,11 @@ export async function testUsersRuntime(preview = false) {
       if (body) {
         if (holdSave) await new Promise(resolve => { releaseSave = resolve; });
         if (conflict || body.revision !== access.get(userID).revision) throw new Error("分配已变更，请重新读取后保存。");
-        access.set(userID, { ...body, revision: body.revision + 1 });
+        access.set(userID, { ...body, revision: body.revision + 1, shares: body.shares.map(share => ({
+          ...access.get(userID).shares.find(prior => prior.agent_id === share.agent_id), ...share,
+          status: share.reinvite ? "pending" : access.get(userID).shares.find(prior => prior.agent_id === share.agent_id)?.status || "pending",
+          reinvite: false,
+        })) });
       }
       return structuredClone(access.get(userID));
     }
@@ -137,6 +142,16 @@ export async function testUsersRuntime(preview = false) {
   await select("alice");
   assert(!pages.hasUnsavedChanges(), "successful save left stale draft state");
   assert(access.get("alice").isolated, "saving allocations disabled resource isolation");
+  access.get("bob").shares[0].status = "rejected";
+  await select("bob");
+  assert(row().querySelector("[data-share-status]").textContent === "已拒绝", "admin cannot see rejection");
+  row().querySelector("[data-share-reinvite]").click();
+  await select("alice");
+  await select("bob");
+  assert(row().dataset.reinvite === "true" && row().querySelector("[data-share-reinvite]").disabled, "user switch lost staged reinvite");
+  form().requestSubmit();
+  await waitFor(() => row().querySelector("[data-share-status]").textContent === "待接受", "admin reinvite did not stay pending");
+  assert(writes.at(-1).body.shares[0].reinvite === true, "admin reinvite was not explicit");
   await select("admin");
   assert(!document.querySelector('[name="isolated"], [data-share-row]'), "administrator can accidentally be isolated");
   document.querySelector("[data-user-create]").click();
@@ -172,4 +187,135 @@ export async function testUsersRuntime(preview = false) {
   state.route = "users";
   await pages.users();
   assert(writes.length === count && !document.querySelector("[data-user-create]"), "regular user opened account administration");
+  await testInvitationRuntime();
+}
+
+async function testInvitationRuntime() {
+  const state = { route: "my-quota", data: {}, session: { role: "user", user_id: "recipient" } };
+  let access = { isolated: true, revision: 4, shares: [
+    { id: "shr_pending", agent_id: "shared", agent_name: "共享 Agent", owner_username: "<img src=x onerror=alert(1)>", enabled: true, status: "pending", invitation_revision: 2, ports: [21001], limit_bytes: 1024 ** 3, used_bytes: 64 },
+    { id: "shr_revoked", agent_id: "revoked", agent_name: "已撤销 Agent", enabled: false, status: "pending", invitation_revision: 8, ports: [], limit_bytes: 0, used_bytes: 0 },
+  ] };
+  const writes = [], notices = [];
+  let hold = false, release, conflict = false, confirm = true, holdRead = false, releaseRead;
+  const pages = installUsers({
+    state, esc, notify: message => notices.push(message), confirmAction: async () => confirm,
+    shell: markup => { document.body.innerHTML = `<main>${markup}</main>`; },
+    api: async (path, options = {}) => {
+      if (!options.method) {
+        assert(path === "/agent-access", "quota page loaded host/user administration");
+        const result = structuredClone(access);
+        if (holdRead) await new Promise(resolve => { releaseRead = resolve; });
+        return result;
+      }
+      assert(path === "/agent-access/shr_pending/response" && options.method === "POST", "response addressed an unintended share");
+      const input = JSON.parse(options.body), target = access;
+      writes.push(input);
+      if (hold) await new Promise(resolve => { release = resolve; });
+      if (conflict || input.revision !== target.shares[0].invitation_revision) throw new Error("共享邀请已变更，请刷新后重试。");
+      target.shares[0].status = input.decision === "accept" ? "accepted" : "rejected";
+      target.shares[0].invitation_revision++;
+      target.revision++;
+      return structuredClone(target);
+    },
+  });
+  const card = () => document.querySelector('[data-quota-share="shr_pending"]');
+  const dialog = () => document.querySelector(".agent-invitation-dialog");
+  const open = () => card().querySelector("[data-share-open]").click();
+  const accept = () => dialog()?.querySelector('[data-share-decision="accept"]');
+  const reject = () => dialog()?.querySelector('[data-share-decision="reject"]') || card()?.querySelector('[data-share-decision="reject"]');
+  await pages.myQuota();
+  assert(card().textContent.includes("待接受") && card().querySelector("[data-share-open]"), "pending invitation lacks a dedicated entry");
+  assert(!card().querySelector("[data-share-decision]"), "accept/reject actions still appear inline on the quota page");
+  assert(!document.querySelector(".user-quota-card img"), "inviter identity was not escaped");
+  assert(!document.querySelector('[data-quota-share="shr_revoked"] :is([data-share-decision],[data-share-open])'), "withdrawn invitation can be accepted");
+  assert(card().scrollWidth <= card().clientWidth + 1, "invitation card overflows mobile viewport");
+  open();
+  assert(dialog()?.open && accept() && reject(), "dedicated dialog lacks consent actions");
+  assert(dialog().textContent.includes("共享 Agent") && dialog().textContent.includes("21001") && !dialog().querySelector("img"), "dialog lost terms or failed to escape the owner");
+  // Measure the final layout, not the shared dialog entrance transform.
+  await Promise.all(dialog().getAnimations().map(animation => animation.finished));
+  const bounds = dialog().getBoundingClientRect(), footer = dialog().querySelector("footer").getBoundingClientRect();
+  assert(dialog().scrollWidth <= dialog().clientWidth + 1 && footer.bottom <= innerHeight + 1, "invitation dialog clips controls or overflows");
+  if (innerWidth <= 600) assert(Math.abs(bounds.width - innerWidth) <= 1 && Math.abs(bounds.height - innerHeight) <= 1, "mobile invitation is not a full-page overlay");
+  dialog().querySelector("[data-invitation-close]").click();
+  assert(!dialog() && writes.length === 0 && card().textContent.includes("待接受"), "closing an invitation rejected it");
+  open();
+  dialog().dispatchEvent(new Event("cancel", { cancelable: true }));
+  assert(!dialog() && writes.length === 0, "Escape changed the invitation decision");
+  open();
+  hold = true;
+  accept().click();
+  reject().click();
+  assert(writes.length === 1 && accept().disabled && reject().disabled && pages.hasUnsavedChanges(), "duplicate response or unlocked in-flight action");
+  await pages.myQuota();
+  assert(accept().disabled && document.querySelector("[data-quota-refresh]").disabled, "refresh bypassed in-flight response lock");
+  // A read begun before acceptance must not restore the old invitation.
+  holdRead = true;
+  const oldRead = pages.myQuota();
+  await waitFor(() => Boolean(releaseRead), "stale read did not start");
+  hold = false;
+  release();
+  await waitFor(() => card().textContent.includes("已接受"), "acceptance did not update the card");
+  releaseRead();
+  holdRead = false;
+  await oldRead;
+  assert(!accept() && card().textContent.includes("已接受") && !pages.hasUnsavedChanges(), "stale read reversed acceptance");
+  confirm = false;
+  reject().click();
+  await Promise.resolve();
+  assert(writes.length === 1, "canceling leave changed consent");
+  confirm = true;
+  reject().click();
+  await waitFor(() => card().textContent.includes("已拒绝"), "recipient cannot leave an accepted share");
+  assert(!accept() && !reject(), "rejected invitation is still actionable");
+
+  access.shares[0].status = "pending";
+  access.shares[0].invitation_revision++;
+  await pages.myQuota();
+  open();
+  conflict = true;
+  accept().click();
+  await waitFor(() => !dialog().querySelector("[data-invitation-error]").hidden, "stale invitation did not report conflict inside its dialog");
+  assert(!accept().disabled && card().textContent.includes("待接受"), "failed response granted access or stranded controls");
+  conflict = false;
+  access.shares[0].ports = [21002];
+  access.shares[0].invitation_revision++;
+  holdRead = true;
+  releaseRead = null;
+  const beforeReload = writes.length;
+  dialog().querySelector("[data-invitation-reload]").click();
+  await waitFor(() => Boolean(releaseRead), "invitation refresh did not start");
+  accept().click();
+  reject().click();
+  assert(accept().disabled && reject().disabled && writes.length === beforeReload, "refresh allowed a decision on stale invitation terms");
+  holdRead = false;
+  releaseRead();
+  await waitFor(() => dialog()?.textContent.includes("21002"), "invitation refresh did not load changed terms");
+  reject().click();
+  await waitFor(() => card().textContent.includes("已拒绝"), "pending invitation cannot be rejected");
+  assert(!dialog(), "successful response left the invitation dialog open");
+
+  access.shares[0].status = "pending";
+  access.shares[0].invitation_revision++;
+  await pages.myQuota();
+  open();
+  pages.closeInvitation();
+  state.route = "tasks";
+  assert(!dialog(), "navigation left a stale invitation overlay");
+  state.route = "my-quota";
+  await pages.myQuota();
+  open();
+  hold = true;
+  release = null;
+  accept().click();
+  await waitFor(() => Boolean(release), "logout-race response did not start");
+  const noticeCount = notices.length;
+  state.data = {};
+  state.session = { role: "user", user_id: "another-account" };
+  access = { isolated: true, revision: 1, shares: [] };
+  await pages.myQuota();
+  release();
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert(!dialog() && !card() && state.data.agentAccess.shares.length === 0 && notices.length === noticeCount, "old response contaminated a different account");
 }

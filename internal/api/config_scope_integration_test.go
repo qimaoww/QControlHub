@@ -153,6 +153,20 @@ func grantConfigScopeAPIAgent(t *testing.T, ctx context.Context, db *store.Store
 	if _, err := db.SetUserAgentAccess(ctx, client.userID, request); err != nil {
 		t.Fatal(err)
 	}
+	acceptConfigScopeAPIInvitations(client)
+}
+
+func acceptConfigScopeAPIInvitations(client configScopeAPIClient) core.AgentAccess {
+	client.t.Helper()
+	var access core.AgentAccess
+	client.call("GET", "/agent-access", nil, http.StatusOK, &access)
+	for _, share := range access.Shares {
+		if share.Enabled && share.Status == core.AgentSharePending {
+			client.call("POST", "/agent-access/"+share.ID+"/response",
+				core.AgentShareResponseRequest{Revision: share.InvitationRevision, Decision: "accept"}, http.StatusOK, &access)
+		}
+	}
+	return access
 }
 
 func completeConfigScopeAPITask(t *testing.T, ctx context.Context, db *store.Store, task core.Task) {

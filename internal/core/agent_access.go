@@ -6,21 +6,32 @@ import (
 	"time"
 )
 
-// AgentShare is a durable per-user allocation. Disabling and re-enabling a
-// share never resets its cumulative usage.
+type AgentShareStatus string
+
+const (
+	AgentSharePending  AgentShareStatus = "pending"
+	AgentShareAccepted AgentShareStatus = "accepted"
+	AgentShareRejected AgentShareStatus = "rejected"
+)
+
+// AgentShare is a durable per-user allocation. Access requires both Enabled
+// and recipient acceptance. Revocation or reinvitation never resets usage.
 type AgentShare struct {
-	ID          string    `json:"id"`
-	UserID      string    `json:"user_id"`
-	Username    string    `json:"username,omitempty"`
-	DisplayName string    `json:"display_name,omitempty"`
-	AgentID     string    `json:"agent_id"`
-	AgentName   string    `json:"agent_name"`
-	Enabled     bool      `json:"enabled"`
-	Ports       []int     `json:"ports"`
-	LimitBytes  uint64    `json:"limit_bytes"` // Zero is unlimited.
-	UsedBytes   uint64    `json:"used_bytes"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID                 string           `json:"id"`
+	UserID             string           `json:"user_id"`
+	Username           string           `json:"username,omitempty"`
+	DisplayName        string           `json:"display_name,omitempty"`
+	AgentID            string           `json:"agent_id"`
+	AgentName          string           `json:"agent_name"`
+	OwnerUsername      string           `json:"owner_username,omitempty"`
+	Enabled            bool             `json:"enabled"`
+	Status             AgentShareStatus `json:"status"`
+	InvitationRevision int64            `json:"invitation_revision"`
+	Ports              []int            `json:"ports"`
+	LimitBytes         uint64           `json:"limit_bytes"` // Zero is unlimited.
+	UsedBytes          uint64           `json:"used_bytes"`
+	CreatedAt          time.Time        `json:"created_at"`
+	UpdatedAt          time.Time        `json:"updated_at"`
 }
 
 type AgentAccess struct {
@@ -45,6 +56,7 @@ type AgentSharingRecipient struct {
 	LimitBytes uint64 `json:"limit_bytes"`
 	Ports      []int  `json:"ports"`
 	Enabled    *bool  `json:"enabled,omitempty"`
+	Reinvite   bool   `json:"reinvite,omitempty"`
 }
 
 type AgentShareRequest struct {
@@ -52,6 +64,12 @@ type AgentShareRequest struct {
 	LimitBytes uint64 `json:"limit_bytes"`
 	Ports      []int  `json:"ports"`
 	Enabled    *bool  `json:"enabled,omitempty"`
+	Reinvite   bool   `json:"reinvite,omitempty"`
+}
+
+type AgentShareResponseRequest struct {
+	Revision int64  `json:"revision"`
+	Decision string `json:"decision"` // accept or reject
 }
 
 type AgentAccessRequest struct {

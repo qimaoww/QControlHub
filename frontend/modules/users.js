@@ -40,11 +40,18 @@ export function sharedLimitGiB(bytes) {
   return String(gib);
 }
 
+export function agentShareStatus(share) {
+  if (share.reinvite || (!share.id && !share.user_id)) return "待发送";
+  if (!share.enabled) return "已撤销";
+  return { pending: "待接受", accepted: "已接受", rejected: "已拒绝" }[share.status] || "待接受";
+}
+
 export function installUsers(ctx) {
   const { api, state, esc, shell, notify, confirmAction } = ctx;
   let serial = 0, viewSerial = 0, captureActive = () => {};
+  let activeInvitation = null;
   const captureDraft = () => captureActive();
-  const hasUnsavedChanges = () => Boolean(state.data.userDrafts?.size || state.data.userAccessSaves?.size);
+  const hasUnsavedChanges = () => Boolean(state.data.userDrafts?.size || state.data.userAccessSaves?.size || state.data.agentShareResponse);
   const lockForm = (form, saving) => {
     const controls = [...form.elements].map((control) => [control, control.disabled]);
     saving.controls.push(...controls);
@@ -57,6 +64,7 @@ export function installUsers(ctx) {
       enabled: row.querySelector('[name="enabled"]').checked,
       limit_gib: row.querySelector('[name="limit_gib"]').value,
       ports_text: row.querySelector('[name="ports"]').value,
+      reinvite: row.dataset.reinvite === "true",
     })),
   });
   const usage = (bytes) => `${(Number(bytes || 0) / GiB).toLocaleString("zh-CN", { maximumFractionDigits: 2 })} GiB`;
@@ -85,8 +93,8 @@ export function installUsers(ctx) {
   function shareRow(share, agents) {
     const agent = agents.find((item) => item.id === share.agent_id);
     const supported = agent?.features?.includes("shared-traffic-v1");
-    return `<div class="user-share-row" data-share-row="${esc(share.agent_id)}">
-      <label class="user-share-agent"><input type="checkbox" name="enabled" ${share.enabled ? "checked" : ""}><span><b>${esc(agent?.name || share.agent_name || share.agent_id)}</b><small>${usage(share.used_bytes)} 已用${supported ? "" : " · Agent 需升级"}</small></span></label>
+    return `<div class="user-share-row" data-share-row="${esc(share.agent_id)}" data-reinvite="${Boolean(share.reinvite)}">
+      <div class="user-share-identity"><label class="user-share-agent"><input type="checkbox" name="enabled" ${share.enabled ? "checked" : ""}><span><b>${esc(agent?.name || share.agent_name || share.agent_id)}</b><small><span data-share-status>${agentShareStatus(share)}</span> · ${usage(share.used_bytes)} 已用${supported ? "" : " · Agent 需升级"}</small></span></label>${share.status === "rejected" ? `<button class="button small" type="button" data-share-reinvite ${share.reinvite ? "disabled" : ""}>重新邀请</button>` : ""}</div>
       <label class="settings-field"><span>总额度（GiB）</span><input name="limit_gib" type="number" min="0" max="8388607" step="any" required value="${esc(share.limit_gib ?? sharedLimitGiB(share.limit_bytes))}"></label>
       <label class="settings-field"><span>可用端口</span><input name="ports" value="${esc(share.ports_text ?? (share.ports || []).join(", "))}" placeholder="21001, 21002" autocomplete="off"></label>
     </div>`;
@@ -115,7 +123,7 @@ export function installUsers(ctx) {
             <div data-share-editor>
               <div data-share-rows>${shares.map((share) => shareRow(share, agents)).join("")}</div>
               <div class="user-share-add"><select data-share-agent aria-label="选择 Agent"><option value="">选择 Agent</option>${available.map((agent) => `<option value="${esc(agent.id)}">${esc(agent.name)}</option>`).join("")}</select><button class="button small" type="button" data-share-add>添加分配</button></div>
-              <p class="settings-hint">累计额度，0 不限量；关闭勾选即撤销访问。1 GiB = 1024³ 字节。</p>
+              <p class="settings-hint">接受后生效；取消勾选撤销共享。累计额度，0 不限量。</p>
             </div>
           ` : '<p class="settings-hint">管理员可访问所有 Agent。</p>'}
         </section>
@@ -168,6 +176,16 @@ export function installUsers(ctx) {
     if (data.userAccessSaves.has(user.id)) lockForm(form, data.userAccessSaves.get(user.id));
     bindEvent(form, "input", capture);
     bindEvent(form, "change", capture);
+    bindEvent(form.querySelector("[data-share-rows]"), "click", (event) => {
+      const button = event.target.closest("[data-share-reinvite]");
+      const row = button?.closest("[data-share-row]");
+      if (!row || form.inert || data !== state.data || data.userAccessSaves.has(user.id)) return;
+      row.dataset.reinvite = "true";
+      row.querySelector('[name="enabled"]').checked = true;
+      row.querySelector("[data-share-status]").textContent = "待发送";
+      button.disabled = true;
+      capture();
+    });
     bindEvent(form.querySelector("[data-share-add]"), "click", () => {
       const select = form.querySelector("[data-share-agent]");
       if (!select.value) return;
@@ -195,6 +213,7 @@ export function installUsers(ctx) {
           enabled: row.querySelector('[name="enabled"]').checked,
           ports: parseSharedPorts(row.querySelector('[name="ports"]').value),
           limit_bytes: sharedLimitBytes(row.querySelector('[name="limit_gib"]').value),
+          reinvite: row.dataset.reinvite === "true",
         }));
         capture();
         const submitted = data.userDrafts.get(user.id);
@@ -272,21 +291,148 @@ export function installUsers(ctx) {
     const request = ++serial, data = state.data;
     const access = await api("/agent-access");
     if (!current(request, data, "my-quota")) return;
+    renderQuota(access, data);
+  }
+
+  function closeInvitation() {
+    if (!activeInvitation) return;
+    const { dialog, trigger } = activeInvitation;
+    activeInvitation = null;
+    dialog.close();
+    dialog.remove();
+    if (trigger?.isConnected) trigger.focus();
+  }
+
+  const lockResponse = (saving) => {
+    document.querySelectorAll("[data-share-decision], [data-share-open], [data-quota-refresh], [data-invitation-reload]").forEach((control) => {
+      if (!saving.controls.has(control)) saving.controls.set(control, control.disabled);
+      control.disabled = true;
+    });
+  };
+
+  function openInvitation(share, trigger) {
+    if (!share?.enabled || share.status !== "pending" || state.route !== "my-quota") return;
+    closeInvitation();
+    const data = state.data;
+    const dialog = document.createElement("dialog");
+    dialog.className = "traffic-edit-dialog agent-invitation-dialog";
+    dialog.setAttribute("aria-labelledby", "agent-invitation-title");
+    dialog.setAttribute("aria-describedby", "agent-invitation-origin");
+    dialog.innerHTML = `<header><div><h2 id="agent-invitation-title">共享邀请</h2><p id="agent-invitation-origin">所有者 · ${esc(share.owner_username || "管理员")}</p></div><button type="button" class="deploy-command-close" data-invitation-close aria-label="关闭邀请">×</button></header>
+      <div class="traffic-edit-body">
+        <div class="agent-invitation-node"><span>Agent</span><h3>${esc(share.agent_name)}</h3></div>
+        <dl class="agent-invitation-terms"><div><dt>端口</dt><dd>${esc((share.ports || []).join(", ") || "未分配")}</dd></div><div><dt>总额度</dt><dd>${share.limit_bytes ? usage(share.limit_bytes) : "不限量"}<small>已用 ${usage(share.used_bytes)}</small></dd></div></dl>
+        <div class="agent-invitation-error" data-invitation-error hidden><p class="alert error" role="alert"></p><button type="button" class="button small" data-invitation-reload>刷新邀请</button></div>
+      </div><footer><button type="button" class="button" data-share-decision="reject">拒绝</button><button type="button" class="button primary" data-share-decision="accept">接受</button></footer>`;
+    activeInvitation = { dialog, data, share, trigger };
+    document.body.append(dialog);
+    dialog.showModal();
+    bindEvent(dialog.querySelector("[data-invitation-close]"), "click", closeInvitation);
+    bindEvent(dialog, "cancel", (event) => { event.preventDefault(); closeInvitation(); });
+    dialog.querySelectorAll("[data-share-decision]").forEach((button) => bindEvent(button, "click", () => {
+      if (activeInvitation?.dialog !== dialog || data !== state.data) return;
+      void respondToShare(share, button.dataset.shareDecision, data);
+    }));
+    bindEvent(dialog.querySelector("[data-invitation-reload]"), "click", async (event) => {
+      if (activeInvitation?.dialog !== dialog || data !== state.data || data.agentShareResponse || activeInvitation.loading) return;
+      const button = event.currentTarget, previous = activeInvitation;
+      previous.loading = true;
+      button.disabled = true;
+      const decisions = [...dialog.querySelectorAll("[data-share-decision]")];
+      decisions.forEach(control => { control.disabled = true; });
+      try {
+        const latest = await api("/agent-access");
+        if (activeInvitation !== previous || data !== state.data || state.route !== "my-quota") return;
+        ++serial;
+        renderQuota(latest, data);
+      } catch (error) {
+        if (activeInvitation === previous && data === state.data && error.name !== "AbortError")
+          dialog.querySelector("[role=alert]").textContent = error.message;
+      } finally {
+        previous.loading = false;
+        button.disabled = false;
+        decisions.forEach(control => { control.disabled = false; });
+      }
+    });
+    if (data.agentShareResponse) lockResponse(data.agentShareResponse);
+  }
+
+  async function respondToShare(share, decision, data) {
+    if (data !== state.data || data.agentShareResponse || state.route !== "my-quota" || activeInvitation?.loading) return;
+    const saving = { controls: new Map() };
+    data.agentShareResponse = saving;
+    lockResponse(saving);
+    try {
+      const saved = await api(`/agent-access/${encodeURIComponent(share.id)}/response`, {
+        method: "POST", body: JSON.stringify({ revision: share.invitation_revision, decision }),
+      });
+      if (data !== state.data) return;
+      delete data.agentShareResponse;
+      if (activeInvitation?.data === data && activeInvitation.share.id === share.id) closeInvitation();
+      if (state.route === "my-quota") {
+        ++serial; // Discard a read begun before the response committed.
+        renderQuota(saved, data);
+      }
+      notify(decision === "accept" ? "已接受共享" : share.status === "accepted" ? "已退出共享" : "已拒绝共享");
+    } catch (error) {
+      if (data !== state.data || error.name === "AbortError") return;
+      if (activeInvitation?.data === data && activeInvitation.share.id === share.id) {
+        const output = activeInvitation.dialog.querySelector("[data-invitation-error]");
+        output.hidden = false;
+        output.querySelector("[role=alert]").textContent = error.message;
+      } else {
+        const output = state.route === "my-quota" && document.querySelector("[data-quota-error]");
+        if (output) { output.textContent = error.message; output.hidden = false; }
+        else notify(error.message, "error");
+      }
+    } finally {
+      if (data.agentShareResponse === saving) delete data.agentShareResponse;
+      saving.controls.forEach((disabled, control) => { control.disabled = disabled; });
+    }
+  }
+
+  function renderQuota(access, data) {
+    const openedID = activeInvitation?.data === data ? activeInvitation.share.id : null;
+    closeInvitation();
     data.agentAccess = access;
     shell(`<div class="settings-workspace users-workspace">
-      <header class="users-toolbar"><h2>我的额度</h2><button class="button small" type="button" data-quota-refresh>刷新</button></header>
+      <header class="users-toolbar"><h2>共享与额度</h2><button class="button small" type="button" data-quota-refresh>刷新</button></header>
+      <p class="alert error" role="alert" data-quota-error hidden></p>
       ${access.isolated ? `<section class="user-quota-grid">${(access.shares || []).map((share) => {
         const exhausted = share.limit_bytes > 0 && share.used_bytes >= share.limit_bytes;
-        const status = !share.enabled ? "已撤销" : exhausted ? "额度已用完" : "可用";
-        return `<article class="workspace-panel user-quota-card"><header><h3>${esc(share.agent_name)}</h3><span class="status-label ${!share.enabled || exhausted ? "warn" : "ok"}">${status}</span></header><div><strong>${usage(share.used_bytes)}</strong><span> / ${share.limit_bytes ? usage(share.limit_bytes) : "不限量"}</span>${share.limit_bytes ? `<progress max="100" value="${Math.min(100, share.used_bytes / share.limit_bytes * 100)}" aria-label="已用额度"></progress>` : ""}<small>端口 ${(share.ports || []).join(", ") || "未分配"}</small></div></article>`;
-      }).join("") || '<div class="empty large"><strong>暂无 Agent 分配</strong></div>'}</section><p class="settings-hint">监听端口上传 + 下载累计计费，不按月清零。</p>` : '<section class="workspace-panel"><div class="empty compact"><strong>未启用 Agent 隔离</strong><p>按账号权限访问节点。</p></div></section>'}
-    </div>`, "我的额度");
+        const accepted = share.enabled && share.status === "accepted";
+        const pending = share.enabled && share.status === "pending";
+        const status = accepted && exhausted ? "额度已用完" : agentShareStatus(share);
+        return `<article class="workspace-panel user-quota-card" data-quota-share="${esc(share.id)}"><header><div><h3>${esc(share.agent_name)}</h3><small>所有者 · ${esc(share.owner_username || "管理员")}</small></div><span class="status-label ${accepted && !exhausted ? "ok" : "warn"}">${status}</span></header><div><strong>${usage(share.used_bytes)}</strong><span> / ${share.limit_bytes ? usage(share.limit_bytes) : "不限量"}</span>${share.limit_bytes ? `<progress max="100" value="${Math.min(100, share.used_bytes / share.limit_bytes * 100)}" aria-label="已用额度"></progress>` : ""}<small>端口 ${esc((share.ports || []).join(", ") || "未分配")}</small></div>
+          ${pending || accepted ? `<footer class="user-quota-actions">${pending ? '<button class="button primary small" type="button" data-share-open>查看邀请</button>' : '<button class="button small" type="button" data-share-decision="reject">退出共享</button>'}</footer>` : ""}</article>`;
+      }).join("") || '<div class="empty large"><strong>暂无共享邀请</strong></div>'}</section>` : '<section class="workspace-panel"><div class="empty compact"><strong>按账号权限访问节点</strong></div></section>'}
+    </div>`, "共享与额度", { viewKey: `my-quota-${++viewSerial}` });
+    const selectedShare = button => access.shares.find(share => share.id === button.closest("[data-quota-share]").dataset.quotaShare);
+    document.querySelectorAll("[data-share-open]").forEach((button) => bindEvent(button, "click", () => {
+      if (data !== state.data || data.agentShareResponse || state.route !== "my-quota") return;
+      openInvitation(selectedShare(button), button);
+    }));
+    if (openedID) {
+      const share = access.shares.find(share => share.id === openedID);
+      const trigger = [...document.querySelectorAll("[data-share-open]")].find(button => selectedShare(button)?.id === openedID);
+      if (share) openInvitation(share, trigger);
+    }
+    if (data.agentShareResponse) lockResponse(data.agentShareResponse);
+    document.querySelectorAll(".user-quota-card [data-share-decision]").forEach((button) => bindEvent(button, "click", async () => {
+      if (data !== state.data || data.agentShareResponse || state.route !== "my-quota") return;
+      const share = selectedShare(button);
+      if (!share) return;
+      if (!await confirmAction("退出后将失去此节点的访问权限。", "退出共享")) return;
+      if (data !== state.data || data.agentShareResponse || state.route !== "my-quota" || !button.isConnected) return;
+      await respondToShare(share, "reject", data);
+    }));
     bindEvent(document.querySelector("[data-quota-refresh]"), "click", async (event) => {
+      if (data !== state.data || data.agentShareResponse) return;
       const button = event.currentTarget;
       button.disabled = true;
       try { await myQuota(); } catch (error) { if (error.name !== "AbortError") notify(error.message, "error"); }
       finally { button.disabled = false; }
     });
   }
-  return { users, myQuota, captureDraft, hasUnsavedChanges };
+  return { users, myQuota, closeInvitation, captureDraft, hasUnsavedChanges };
 }

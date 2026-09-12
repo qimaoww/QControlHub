@@ -25,6 +25,7 @@ func TestAgentIsolationAPIRevocationAndAllocationRevision(t *testing.T) {
 		Shares: []core.AgentShareRequest{{AgentID: agent.ID, LimitBytes: 1000, Ports: []int{21001}}}}
 	admin.call("PUT", "/users/"+alice.userID+"/agent-access", input, http.StatusOK, &access)
 	admin.call("PUT", "/users/"+alice.userID+"/agent-access", input, http.StatusConflict, nil)
+	access = acceptConfigScopeAPIInvitations(alice)
 	// A quota update must take effect in the same authenticated session.
 	var own core.AgentAccess
 	alice.call("GET", "/agent-access", nil, http.StatusOK, &own)

@@ -37,6 +37,22 @@ func sharedTestAllocation(t *testing.T, db *Store, ctx context.Context, userID, 
 	if err != nil {
 		t.Fatal(err)
 	}
+	return acceptSharedTestInvitations(t, db, ctx, userID, access)
+}
+
+func acceptSharedTestInvitations(t *testing.T, db *Store, ctx context.Context, userID string, access core.AgentAccess) core.AgentAccess {
+	t.Helper()
+	for _, share := range access.Shares {
+		if !share.Enabled || share.Status != core.AgentSharePending {
+			continue
+		}
+		var err error
+		access, err = db.RespondAgentShare(WithConfigScope(ctx, userID, false), share.ID,
+			core.AgentShareResponseRequest{Revision: share.InvitationRevision, Decision: "accept"})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	return access
 }
 
@@ -58,11 +74,12 @@ func TestAgentIsolationCoversListsAndDirectStoreCalls(t *testing.T) {
 	user, alice := sharedTestUser(t, db, ctx, "isolated-alice")
 	other, bob := sharedTestUser(t, db, ctx, "isolated-bob")
 	allowed, denied := sharedTestAgent(t, db, ctx), sharedTestAgent(t, db, ctx)
-	_, err := db.SetUserAgentAccess(ctx, user.ID, core.AgentAccessRequest{Isolated: true,
+	access, err := db.SetUserAgentAccess(ctx, user.ID, core.AgentAccessRequest{Isolated: true,
 		Shares: []core.AgentShareRequest{{AgentID: allowed.ID, Ports: []int{21001}}, {AgentID: denied.ID, Ports: []int{21002}}}})
 	if err != nil {
 		t.Fatal(err)
 	}
+	acceptSharedTestInvitations(t, db, ctx, user.ID, access)
 	sharedTestAllocation(t, db, ctx, other.ID, allowed.ID, 1000, 21003)
 	own := sharedTestConfig(t, db, alice, allowed.ID, 21001)
 	hidden := sharedTestConfig(t, db, alice, denied.ID, 21002)
@@ -278,6 +295,8 @@ func TestAgentIsolationCreationRevisionAndHostBoundaries(t *testing.T) {
 	if succeeded != 1 || conflicted != 1 {
 		t.Fatalf("stale allocation overwrote concurrent save: %d success, %d conflicts", succeeded, conflicted)
 	}
+	access, _ = db.UserAgentAccess(ctx, user.ID)
+	acceptSharedTestInvitations(t, db, ctx, user.ID, access)
 	for _, check := range []func() error{
 		func() error { return db.SetAgentName(alice, agent.ID, "unauthorized") },
 		func() error { return db.SetAgentRegionCode(alice, agent.ID, "US") },

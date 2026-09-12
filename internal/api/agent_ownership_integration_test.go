@@ -133,6 +133,8 @@ func TestAccountsOwnAgentsSettingsAndSharing(t *testing.T) {
 		Shares: []core.AgentSharingRecipient{{Username: "BoB", Ports: []int{21002}, LimitBytes: 1000}}}
 	alice.call("PUT", "/agents/"+own.ID+"/sharing", request, http.StatusOK, &sharing)
 	alice.call("PUT", "/agents/"+own.ID+"/sharing", request, http.StatusConflict, nil)
+	acceptConfigScopeAPIInvitations(bob)
+	alice.call("GET", "/agents/"+own.ID+"/sharing", nil, http.StatusOK, &sharing)
 	bob.call("GET", "/agents", nil, http.StatusOK, &agents)
 	if len(agents) != 2 {
 		t.Fatal("explicit sharing was not visible alongside owned nodes")

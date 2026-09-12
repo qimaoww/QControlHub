@@ -9,6 +9,72 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
+func TestMigrateV55SharingRequiresConsentAndPreservesLedger(t *testing.T) {
+	db, ctx, databaseURL := isolatedConfigScopeStore(t)
+	user, bob := sharedTestUser(t, db, ctx, "migration-consent")
+	agent := sharedTestAgent(t, db, ctx)
+	access := sharedTestAllocation(t, db, ctx, user.ID, agent.ID, 1000, 21001)
+	share := access.Shares[0]
+	config := sharedTestConfig(t, db, bob, agent.ID, 21001)
+	task, err := db.CreateTask(bob, core.TaskRequest{AgentID: agent.ID, Engine: config.Engine, ConfigID: config.ID, Action: core.ActionDeploy})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if running, err := db.ClaimTask(ctx, agent.ID); err != nil || running == nil {
+		t.Fatalf("claim: %+v %v", running, err)
+	}
+	queued, err := db.CreateTask(bob, core.TaskRequest{AgentID: agent.ID, Engine: config.Engine, Action: core.ActionStatus})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.pool.Exec(ctx, `UPDATE agent_shares SET used_bytes=123 WHERE id=$1`, share.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.pool.Exec(ctx, `ALTER TABLE agent_shares DROP COLUMN status, DROP COLUMN invitation_revision;
+		DELETE FROM qcontrolhub_schema_migrations WHERE version>=56;
+		INSERT INTO qcontrolhub_schema_migrations(version) VALUES(55) ON CONFLICT DO NOTHING`); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+	migrated, err := OpenWithConfigKey(ctx, databaseURL, true, testEncryptionKey("config-scope"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer migrated.Close()
+	access, err = migrated.UserAgentAccess(bob, user.ID)
+	if err != nil || len(access.Shares) != 1 {
+		t.Fatalf("migration lost invitation: %+v %v", access, err)
+	}
+	pending := access.Shares[0]
+	if pending.Status != core.AgentSharePending || pending.ID != share.ID || pending.UsedBytes != 123 ||
+		pending.LimitBytes != 1000 || len(pending.Ports) != 1 || pending.Ports[0] != 21001 {
+		t.Fatalf("migration lost consent/accounting boundary: %+v", pending)
+	}
+	if _, err := migrated.GetAgent(bob, agent.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("legacy share bypassed consent: %v", err)
+	}
+	if policies, err := migrated.AgentPortTrafficPolicies(ctx, agent.ID); err != nil || len(policies) != 1 || !policies[0].SharedQuota.Revoked {
+		t.Fatalf("legacy runtime policy still grants access: %+v %v", policies, err)
+	}
+	for _, prior := range []struct {
+		id     string
+		status core.TaskStatus
+	}{{task.ID, core.TaskFailed}, {queued.ID, core.TaskCanceled}} {
+		if got, err := migrated.GetTask(ctx, prior.id); err != nil || got.Status != prior.status {
+			t.Fatalf("legacy task was not invalidated: %+v %v", got, err)
+		}
+	}
+	acceptSharedTestInvitations(t, migrated, ctx, user.ID, access)
+	reopened, err := OpenWithConfigKey(ctx, databaseURL, true, testEncryptionKey("config-scope"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	if access, err := reopened.UserAgentAccess(bob, user.ID); err != nil || access.Shares[0].Status != core.AgentShareAccepted || access.Shares[0].UsedBytes != 123 {
+		t.Fatalf("restart repeated migration or reset usage: %+v %v", access, err)
+	}
+}
+
 func TestMigrateV54PreservesPrivateBackendsAndDeployedProfilePreferences(t *testing.T) {
 	db, ctx, databaseURL := isolatedConfigScopeStore(t)
 	_, alice := sharedTestUser(t, db, ctx, "migration-alice")
@@ -221,8 +287,13 @@ func TestMigrateV52AgentSharingKeepsFailedDeploymentsUncertain(t *testing.T) {
 				agent.ID, config.Engine).Scan(&configUncertain); err != nil || !configUncertain {
 				t.Fatalf("migration trusted unknown deployed content: %v %v", configUncertain, err)
 			}
-			_, err = migrated.SetUserAgentAccess(ctx, user.ID, core.AgentAccessRequest{Isolated: true,
+			access, err := migrated.SetUserAgentAccess(ctx, user.ID, core.AgentAccessRequest{Isolated: true,
 				Shares: []core.AgentShareRequest{{AgentID: agent.ID, LimitBytes: 1000, Ports: []int{21001}}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = migrated.RespondAgentShare(alice, access.Shares[0].ID,
+				core.AgentShareResponseRequest{Revision: access.Shares[0].InvitationRevision, Decision: "accept"})
 			if !errors.Is(err, ErrConflict) {
 				t.Fatalf("migration allowed billing an uncertain listener set: %v", err)
 			}

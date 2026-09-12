@@ -330,7 +330,7 @@ func (s *Store) prepareSharedTaskTx(ctx context.Context, tx pgx.Tx, task *core.T
 			return fmt.Errorf("%w: %v", ErrInvalid, err)
 		}
 		var limit, used uint64
-		if err := tx.QueryRow(ctx, `SELECT id,limit_bytes,used_bytes FROM agent_shares WHERE user_id=$1 AND agent_id=$2 AND enabled`,
+		if err := tx.QueryRow(ctx, `SELECT id,limit_bytes,used_bytes FROM agent_shares WHERE user_id=$1 AND agent_id=$2 AND enabled AND status='accepted'`,
 			configOwner, task.AgentID).Scan(&task.SharedTrafficID, &limit, &used); err != nil {
 			return mapError(err)
 		}
@@ -423,16 +423,20 @@ func applySharedTrafficUsageTx(ctx context.Context, tx pgx.Tx, agentID string, u
 
 // Called while the Agent row is locked. A revoked/disabled principal and
 // stale tasks created before isolation must never be dispatched on reconnect.
+// Invalidating running leases also prevents later reacceptance from reviving
+// pre-revocation work. Execution already in flight may remain uncertain.
 func cancelUnauthorizedAgentTasksTx(ctx context.Context, tx pgx.Tx, agentID string, features []string) error {
-	_, err := tx.Exec(ctx, `UPDATE tasks t SET status='canceled',error='Agent sharing authorization changed; submit a new task',
+	_, err := tx.Exec(ctx, `UPDATE tasks t SET status=CASE WHEN t.status='running' THEN 'failed' ELSE 'canceled' END,
+		error=CASE WHEN t.status='running' THEN 'Agent sharing authorization changed; previous execution is unknown'
+			ELSE 'Agent sharing authorization changed; submit a new task' END,
 		finished_at=now(),config_content=NULL,lease_id=NULL
-		WHERE t.agent_id=$1 AND t.status='pending' AND (
-			(t.action IN ('start','restart') AND (`+unsafeEngineStartSQL("t.agent_id", "t.engine")+`))
+		WHERE t.agent_id=$1 AND t.status IN ('pending','running') AND (
+			(t.status='pending' AND t.action IN ('start','restart') AND (`+unsafeEngineStartSQL("t.agent_id", "t.engine")+`))
 			OR (`+unauthorizedTaskPrincipalSQL+`)
 			OR (t.shared_traffic_id<>'' AND (
 				NOT $2::boolean OR NOT EXISTS(
 					SELECT 1 FROM agent_shares s JOIN panel_users u ON u.id=s.user_id
-					WHERE s.id=t.shared_traffic_id AND NOT u.disabled AND s.enabled
+					WHERE s.id=t.shared_traffic_id AND NOT u.disabled AND s.enabled AND s.status='accepted'
 						AND (s.limit_bytes=0 OR s.used_bytes<s.limit_bytes)
 				)
 			))
@@ -444,6 +448,6 @@ func cancelUnauthorizedAgentTasksTx(ctx context.Context, tx pgx.Tx, agentID stri
 const unauthorizedTaskPrincipalSQL = `EXISTS(SELECT 1 FROM panel_users u JOIN agents a ON a.id=t.agent_id
 	WHERE u.id=t.owner_id AND (u.disabled OR (u.role='user' AND a.owner_id<>u.id AND
 		(t.action NOT IN ('deploy','validate','status') OR (t.action IN ('deploy','validate') AND t.shared_traffic_id='')
-		 OR NOT EXISTS(SELECT 1 FROM agent_shares s WHERE s.user_id=u.id AND s.agent_id=t.agent_id AND s.enabled)))))
+		 OR NOT EXISTS(SELECT 1 FROM agent_shares s WHERE s.user_id=u.id AND s.agent_id=t.agent_id AND s.enabled AND s.status='accepted')))))
 	OR EXISTS(SELECT 1 FROM configs c JOIN panel_users u ON u.id=c.owner_id JOIN agents a ON a.id=t.agent_id
 		WHERE c.id=t.config_id AND (u.disabled OR (u.role='user' AND a.owner_id<>u.id AND t.shared_traffic_id='')))`

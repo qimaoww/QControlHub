@@ -10,6 +10,10 @@ import (
 // Translate at the HTTP boundary: internal errors remain stable for errors.Is,
 // agent diagnostics and logs. Never expose an unknown internal error verbatim.
 var errorMessages = map[string]string{
+	"only a rejected share can be reinvited":                                                                  "仅已拒绝的共享可重新邀请。",
+	"an invitation revision and accept or reject decision are required":                                       "请刷新邀请后选择接受或拒绝。",
+	"Agent invitation changed; reload before responding":                                                      "共享邀请已变更，请刷新后重试。",
+	"upgrade the Agent before accepting a share":                                                              "请所有者先升级 Agent，再接受共享。",
 	"only administrators may manage Agent sharing":                                                            "仅管理员可管理 Agent 分配。",
 	"only administrators may manage users":                                                                    "仅管理员可管理用户。",
 	"allocation revision is required; reload before saving":                                                   "请重新读取分配后保存。",

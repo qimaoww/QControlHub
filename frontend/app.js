@@ -454,6 +454,7 @@ function toggleTheme() {
 }
 
 function renderLogin(message = "") {
+  userModule.closeInvitation();
   scopedAPI.end();
   if (state.route === "node-settings") agentModule.cancelAgentInteractions();
   const confirmResolver = state.confirmResolver;
@@ -533,6 +534,7 @@ function confirmAction(message, label = "确认继续") {
 function shell(content, title, { viewKey = state.route } = {}) {
   const previousMain = document.querySelector(".workspace-main");
   const previousRoute = document.body.className.match(/(?:^|\s)page-([^\s]+)/)?.[1];
+  const pendingShares = (state.data.agentAccess?.shares || []).filter(share => share.enabled && share.status === "pending").length;
   const links = [
     ["dashboard", "总览", dockIcons.layoutDashboard],
     ["node-settings", "节点设置", dockIcons.server],
@@ -545,7 +547,7 @@ function shell(content, title, { viewKey = state.route } = {}) {
     ["traffic", "流量", dockIcons.chart, true],
     ["core-logs", "日志", dockIcons.logs, true],
     ["tasks", "任务", dockIcons.listChecks, true],
-    [state.session.role === "admin" ? "users" : "my-quota", state.session.role === "admin" ? "用户" : "额度", dockIcons.users, true],
+    [state.session.role === "admin" ? "users" : "my-quota", state.session.role === "admin" ? "用户" : "共享", dockIcons.users, true],
   ];
   const linkPermissions = {
     dashboard: "overview.read",
@@ -602,7 +604,7 @@ function shell(content, title, { viewKey = state.route } = {}) {
   const navigationMarkup = links
     .map(([id, text, icon, mobileSecondary]) => {
       const active = activeDockRoute(id);
-      return `<a class="${active ? "active" : ""}${mobileSecondary ? " dock-mobile-secondary" : ""}" href="#${id}" title="${text}" ${active ? 'aria-current="page"' : ""}><svg viewBox="0 0 24 24" aria-hidden="true">${icon}</svg><span class="dock-label">${text}</span>${id === "agents" ? `<b data-online-count ${overview.agents_online ? "" : "hidden"}>${overview.agents_online || 0}</b>` : ""}${id === "live-config" && overview.node_configs ? `<b>${overview.node_configs}</b>` : ""}${id === "tasks" ? `<b class="hot" data-task-active-count ${overview.tasks_pending ? "" : "hidden"}>${overview.tasks_pending || 0}</b>` : ""}</a>`;
+      return `<a class="${active ? "active" : ""}${mobileSecondary ? " dock-mobile-secondary" : ""}" href="#${id}" title="${text}" ${active ? 'aria-current="page"' : ""}><svg viewBox="0 0 24 24" aria-hidden="true">${icon}</svg><span class="dock-label">${text}</span>${id === "agents" ? `<b data-online-count ${overview.agents_online ? "" : "hidden"}>${overview.agents_online || 0}</b>` : ""}${id === "live-config" && overview.node_configs ? `<b>${overview.node_configs}</b>` : ""}${id === "tasks" ? `<b class="hot" data-task-active-count ${overview.tasks_pending ? "" : "hidden"}>${overview.tasks_pending || 0}</b>` : ""}${id === "my-quota" && pendingShares ? `<b aria-label="${pendingShares} 个待接受邀请">${pendingShares}</b>` : ""}</a>`;
     })
     .join("");
   const settingsActive = activeDockRoute("settings");
@@ -618,7 +620,7 @@ function shell(content, title, { viewKey = state.route } = {}) {
     ["core-logs", "日志"],
     ["tasks", "任务"],
     ["settings", "设置"],
-    [state.session.role === "admin" ? "users" : "my-quota", state.session.role === "admin" ? "用户" : "我的额度"],
+    [state.session.role === "admin" ? "users" : "my-quota", state.session.role === "admin" ? "用户" : `共享与额度${pendingShares ? ` · ${pendingShares}` : ""}`],
   ];
   const mobileMoreActive = mobileMoreRoutes.some(([id]) => activeDockRoute(id));
   const mobileMoreLinks = mobileMoreRoutes
@@ -707,7 +709,7 @@ function contextMarkup(title) {
   if (state.route === "users")
     return `<div class="context-section-label"><span>用户</span><b>${(state.data.users || []).length}</b></div><nav class="context-list" aria-label="用户列表">${(state.data.users || []).map((user) => `<a href="#users" data-user-select="${esc(user.id)}" class="${user.id === state.data.userID ? "active" : ""}"><i class="status-dot ${user.disabled ? "" : "ok"}"></i><span><strong>${esc(user.display_name || user.username)}</strong><small>${esc(user.username)} · ${user.role === "admin" ? "管理员" : "用户"}</small></span></a>`).join("")}</nav>`;
   if (state.route === "my-quota")
-    return '<nav class="context-menu" aria-label="个人账户"><a class="active" href="#my-quota">我的额度</a></nav>';
+    return '<nav class="context-menu" aria-label="个人账户"><a class="active" href="#my-quota">共享与额度</a></nav>';
   if (state.route === "dashboard")
     return `<nav class="context-menu" aria-label="总览目录"><a class="active" href="#summary"><span>01</span>运行概览</a><a href="#fleet"><span>02</span>节点状态</a><a href="#activity"><span>03</span>最近活动</a></nav><section class="context-metrics"><div><span>在线 / 全部节点</span><b>${state.data.overview?.agents_online || 0} / ${state.data.overview?.agents || 0}</b></div><div><span>节点版本 / 独立档案</span><b>${state.data.overview?.node_configs || 0} / ${state.data.overview?.configs || 0}</b></div><div><span>准备中 / 执行中</span><b>${state.data.overview?.tasks_queued || 0} / ${state.data.overview?.tasks_running || 0}</b></div></section>`;
   if (state.route === "agents") {
@@ -838,6 +840,7 @@ const userModule = installUsers({ api, state, esc, shell, notify, confirmAction 
 const { users, myQuota } = userModule;
 
 async function renderOnce() {
+  userModule.closeInvitation();
   const previousRoute = state.route;
   routeController?.abort();
   routeController = new AbortController();

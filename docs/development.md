@@ -88,16 +88,16 @@ go run ./cmd/agent
 make check
 ```
 
-该命令检查 gofmt、执行 `go vet ./...` 和 `go test ./...`。
+该命令检查 gofmt、执行前端与脚本检查、`go vet ./...` 和 `go test -p 1 ./...`。
 
 默认测试不依赖外部服务。要同时执行 PostgreSQL 集成测试，设置专用测试库连接：
 
 ```bash
 QCH_TEST_DATABASE_URL="postgresql://qcontrolhub:password@127.0.0.1:5432/qcontrolhub_test?sslmode=disable" \
-go test ./... -count=1
+go test -p 1 ./... -count=1
 ```
 
-API 与存储测试会分别创建随机临时 schema，并在测试结束后删除，不共享业务测试数据。PostgreSQL 的 MVCC 回收仍会受其他 schema 的长事务影响；包含 HOT/表膨胀断言的整仓检查使用 `GOFLAGS='-buildvcs=false -p=1' make check` 串行运行包，避免并行集成测试干扰物理表大小。仍应使用专用测试数据库账户，不要指向生产数据库。
+API 与存储测试会分别创建随机临时 schema，并在测试结束后删除，不共享业务测试数据。PostgreSQL 的 MVCC 回收仍会受其他 schema 的长事务影响；`make test` 和 `make alpine-test` 默认按包顺序执行，避免并行集成测试干扰 HOT/表膨胀断言。测试内部的并发场景照常执行，性能阈值不变。仍应使用专用测试数据库账户，不要指向生产数据库。
 
 本地数据库和远程模拟延迟 benchmark、查询预算及高压测试见 [本地与远程 PostgreSQL 性能](performance.md)。
 

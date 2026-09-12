@@ -34,6 +34,28 @@ func (s *Server) getUserAgentAccess(w http.ResponseWriter, request *http.Request
 	writeJSON(w, http.StatusOK, access)
 }
 
+func (s *Server) respondAgentShare(w http.ResponseWriter, request *http.Request) {
+	var input core.AgentShareResponseRequest
+	if err := decodeJSON(w, request, &input, 4<<10); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	id := request.PathValue("id")
+	access, err := s.store.RespondAgentShare(request.Context(), id, input)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	for _, share := range access.Shares {
+		if share.ID == id {
+			s.refreshAgentTrafficPolicies(share.AgentID)
+			break
+		}
+	}
+	s.recordAudit(request, "agent.sharing."+input.Decision, id, "Recipient responded to Agent sharing")
+	writeJSON(w, http.StatusOK, access)
+}
+
 func (s *Server) putUserAgentAccess(w http.ResponseWriter, request *http.Request) {
 	if role, _ := s.sessionRole(request); role != core.RoleAdmin {
 		writeError(w, http.StatusForbidden, "only administrators may manage Agent sharing")

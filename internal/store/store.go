@@ -49,7 +49,7 @@ type storeExecutor interface {
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 55
+const currentSchemaVersion = 56
 
 func Open(ctx context.Context, databaseURL string, allowInsecureRemote bool) (*Store, error) {
 	return OpenWithConfigKey(ctx, databaseURL, allowInsecureRemote, "")
@@ -330,6 +330,22 @@ func (s *Store) migrate(ctx context.Context) error {
 			WHERE entry.key ~ '^client_profile_(name|address|family)_[0-9a-f]{64}$'
 			ON CONFLICT DO NOTHING`); err != nil {
 			return fmt.Errorf("scope client display preferences: %w", err)
+		}
+	}
+	if appliedVersion < 56 {
+		// Pre-consent grants become pending, never silently accepted. Preserve
+		// accounting and reservations, but invalidate cached allocation forms
+		// and work queued under the former immediate-access model.
+		if _, err := tx.Exec(ctx, `UPDATE agents SET sharing_revision=sharing_revision+1
+			WHERE id IN(SELECT agent_id FROM agent_shares WHERE status<>'accepted');
+			UPDATE panel_users SET agent_access_revision=agent_access_revision+1
+			WHERE id IN(SELECT user_id FROM agent_shares WHERE status<>'accepted');
+			UPDATE tasks t SET status=CASE WHEN t.status='pending' THEN 'canceled' ELSE 'failed' END,
+				error='Agent sharing requires recipient acceptance; previous execution may be unknown',
+				finished_at=now(),config_content=NULL,lease_id=NULL
+			WHERE t.status IN ('pending','running') AND ((`+unauthorizedTaskPrincipalSQL+`)
+				OR EXISTS(SELECT 1 FROM agent_shares s WHERE s.id=t.shared_traffic_id AND s.status<>'accepted'))`); err != nil {
+			return fmt.Errorf("require Agent sharing consent: %w", err)
 		}
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO qcontrolhub_schema_migrations (version) VALUES ($1)`, currentSchemaVersion); err != nil {
@@ -1916,7 +1932,7 @@ func (s *Store) RunningTask(ctx context.Context, agentID string) (*core.Task, er
 	if task.SharedTrafficID != "" {
 		var allowed bool
 		if err := tx.QueryRow(ctx, `SELECT $2::boolean AND EXISTS(SELECT 1 FROM agent_shares s JOIN panel_users u ON u.id=s.user_id
-			WHERE s.id=$1 AND NOT u.disabled AND s.enabled AND (s.limit_bytes=0 OR s.used_bytes<s.limit_bytes))`,
+			WHERE s.id=$1 AND NOT u.disabled AND s.enabled AND s.status='accepted' AND (s.limit_bytes=0 OR s.used_bytes<s.limit_bytes))`,
 			task.SharedTrafficID, containsFeature(features, core.AgentFeatureSharedTraffic)).Scan(&allowed); err != nil {
 			return nil, err
 		}
@@ -2704,6 +2720,8 @@ CREATE TABLE IF NOT EXISTS agent_shares (
 	UNIQUE (user_id,agent_id)
 );
 CREATE INDEX IF NOT EXISTS agent_shares_agent_idx ON agent_shares(agent_id);
+ALTER TABLE agent_shares ADD COLUMN IF NOT EXISTS status varchar(10) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','accepted','rejected'));
+ALTER TABLE agent_shares ADD COLUMN IF NOT EXISTS invitation_revision bigint NOT NULL DEFAULT 1 CHECK (invitation_revision>0);
 CREATE TABLE IF NOT EXISTS agent_share_ports (
 	agent_id text NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
 	port integer NOT NULL CHECK (port BETWEEN 1 AND 65535),

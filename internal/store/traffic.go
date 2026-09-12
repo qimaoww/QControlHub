@@ -22,7 +22,7 @@ const trafficPolicyColumns = `id,agent_id,name,engine,port,protocol,cycle,cycle_
 	   COALESCE(share_id,''),share_used_bytes,
 	   (SELECT jsonb_build_object('id',share.id,'limit_bytes',share.limit_bytes,
 			'used_bytes',share.used_bytes,'port_used_bytes',port_traffic_policies.share_used_bytes,
-			'revoked',shared_user.disabled OR NOT share.enabled)
+			'revoked',shared_user.disabled OR NOT share.enabled OR share.status<>'accepted')
 		FROM agent_shares share JOIN panel_users shared_user ON shared_user.id=share.user_id WHERE share.id=port_traffic_policies.share_id)`
 
 type trafficPolicyScanner interface {

@@ -19,7 +19,7 @@ const input = (element, value) => {
 export async function testAgentSharingRuntime() {
   const state = { data: {}, session: { user_id: "alice", role: "user" }, navigationEpoch: 1 };
   const agent = { id: "own", name: "Alice own Agent", can_manage: true, features: ["shared-traffic-v1"] };
-  let sharing = { revision: 2, shares: [{ username: "bob", user_id: "bob-id", ports: [21003], limit_bytes: 1024 ** 3, used_bytes: 64, enabled: true }] };
+  let sharing = { revision: 2, shares: [{ id: "shr_bob", username: "bob", user_id: "bob-id", status: "accepted", invitation_revision: 2, ports: [21003], limit_bytes: 1024 ** 3, used_bytes: 64, enabled: true }] };
   const writes = [], notifications = [];
   let hold = false, release, gates = 0, confirm = true;
   const editor = createAgentSharing({
@@ -32,7 +32,10 @@ export async function testAgentSharingRuntime() {
         writes.push(body);
         if (hold) await new Promise(resolve => { release = resolve; });
         if (body.revision !== sharing.revision) throw new Error("共享分配已变更，请重新读取");
-        sharing = { revision: sharing.revision + 1, shares: body.shares.map(row => ({ ...row, user_id: `${row.username}-id`, used_bytes: 64 })) };
+        sharing = { revision: sharing.revision + 1, shares: body.shares.map(row => ({
+          ...row, id: `shr_${row.username}`, user_id: `${row.username}-id`, used_bytes: 64,
+          status: row.reinvite ? "pending" : sharing.shares.find(share => share.username === row.username)?.status || "pending", reinvite: false,
+        })) };
       }
       return structuredClone(sharing);
     },
@@ -86,6 +89,20 @@ export async function testAgentSharingRuntime() {
   assert(dialog().scrollWidth <= dialog().clientWidth + 1, "sharing dialog overflows mobile viewport");
   assert(dialog().querySelector("header>div").getBoundingClientRect().width > 200,
     "header text was squeezed into the inherited traffic icon column");
+
+  editor.close();
+  sharing.shares[0].status = "rejected";
+  sharing.revision++;
+  await editor.open(agent);
+  assert(dialog().querySelector("[data-share-status]").textContent === "已拒绝", "owner cannot see recipient rejection");
+  dialog().querySelector("[data-recipient-reinvite]").click();
+  assert(editor.hasUnsavedChanges() && dialog().querySelector("[data-share-status]").textContent === "待发送", "reinvite was not staged explicitly");
+  editor.close();
+  await editor.open(agent);
+  assert(dialog().querySelector("[data-recipient-reinvite]").disabled, "reopening lost staged reinvitation");
+  form().requestSubmit();
+  await waitFor(() => dialog().querySelector("[data-share-status]").textContent === "待接受", "reinvite did not become pending");
+  assert(writes.at(-1).shares[0].reinvite && !dialog().querySelector("[data-recipient-reinvite]"), "reinvite was not explicit or could be immediately duplicated");
 
   input(field("ports"), "21003, 21005");
   hold = true;
