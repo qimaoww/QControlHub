@@ -938,6 +938,13 @@ func (s *Server) getAgentRegion(w http.ResponseWriter, request *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"country_code": code, "source": "manual"})
 		return
 	}
+	// Automatic detection derives the address and country from host metrics,
+	// which metrics.read gates. Without the capability this endpoint must stay
+	// empty instead of disclosing the node address or its GeoIP.
+	if !s.sessionAllows(request, core.PermissionMetricsRead) {
+		writeJSON(w, http.StatusOK, map[string]string{})
+		return
+	}
 	address := agentGeoIP(agent)
 	if !address.IsValid() {
 		writeJSON(w, http.StatusOK, map[string]string{})

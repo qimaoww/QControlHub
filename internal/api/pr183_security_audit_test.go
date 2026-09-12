@@ -292,3 +292,45 @@ func TestPR183AuditSharedRecipientCannotAdministerHost(t *testing.T) {
 		t.Fatalf("denied recipient administration altered the grant: %+v", sharing)
 	}
 }
+
+// Automatic region detection and the interface list are both derived from host
+// metrics. A recipient must not learn a host address without metrics.read, and
+// even with the capability a borrowed node must expose only globally routable
+// addresses.
+func TestPR183AuditSharedNodeAddressDisclosure(t *testing.T) {
+	db, ctx, admin, alice, bob := newConfigScopeAPIFixture(t)
+	agent, _ := ownedConfigScopeAPIAgent(t, ctx, db, alice, "address-disclosure-audit")
+	grantConfigScopeAPIAgent(t, ctx, db, agent, bob, 21001)
+	const privateAddress, publicAddress = "10.83.42.77", "8.8.4.4"
+	if err := db.UpdateAgentMetrics(ctx, agent.ID, core.HostMetrics{
+		CollectedAt:       time.Now().UTC(),
+		CPUAvailable:      true,
+		CPUPercent:        12.5,
+		PublicIPv4:        publicAddress,
+		PublicIPv4Source:  core.PublicIPProbeSourceAgent,
+		NetworkInterfaces: []core.HostNetworkInterface{{Name: "eth0", Addresses: []string{privateAddress, publicAddress}}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	permissions := []core.Permission{core.PermissionAgentsRead, core.PermissionAgentConfigRead, core.PermissionAgentConfigWrite}
+	admin.call("PUT", "/users/"+bob.userID, core.UserUpdate{Permissions: &permissions}, http.StatusOK, nil)
+	bob = auditPR183Login(bob, "bob")
+	region := bob.call("GET", "/agents/"+agent.ID+"/region", nil, http.StatusOK, nil)
+	if bytes.Contains(region, []byte(publicAddress)) || bytes.Contains(region, []byte(privateAddress)) || bytes.Contains(region, []byte(`"country"`)) {
+		t.Fatalf("region endpoint disclosed a host address without metrics.read: %s", region)
+	}
+	permissions = append(permissions, core.PermissionMetricsRead)
+	admin.call("PUT", "/users/"+bob.userID, core.UserUpdate{Permissions: &permissions}, http.StatusOK, nil)
+	bob = auditPR183Login(bob, "bob")
+	region = bob.call("GET", "/agents/"+agent.ID+"/region", nil, http.StatusOK, nil)
+	if !bytes.Contains(region, []byte(publicAddress)) {
+		t.Fatalf("metrics.read caller lost automatic region detection: %s", region)
+	}
+	list := bob.call("GET", "/agents", nil, http.StatusOK, nil)
+	if bytes.Contains(list, []byte(privateAddress)) {
+		t.Fatalf("borrowed node exposed private interface addresses: %s", list)
+	}
+	if !bytes.Contains(list, []byte(publicAddress)) {
+		t.Fatalf("borrowed node lost its routable address candidate: %s", list)
+	}
+}

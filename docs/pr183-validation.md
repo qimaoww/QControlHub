@@ -65,6 +65,8 @@ Web 仅在本地 `https://localhost:18483` 提供测试入口。Chromium 检查 
 - 复核共享接收方的宿主管理边界：即使同时持有 `agents.manage`、`enrollment.manage` 与 `users.manage`，对已接受共享的节点执行内核能力切换、区域/Komari 修改、再次分享、删除节点、读取安装凭据或安装命令，以及读写他人账号分配，仍全部被资源所有权检查拒绝。回归覆盖 `TestPR183AuditSharedRecipientCannotAdministerHost`。
 - 复核路由级授权：新增的共享与账号管理端点继续遵循 deny-by-default；`/agent-access` 只以调用者自身账号为对象，管理员也不能代他人响应邀请。
 - CI 失败原因已确认并修复：没有 `with_v2ray_api` 的 sing-box 官方构建改用独立 `routing_mark`，Agent 必须先以 `ip rule show` 确认不存在会劫持这些标记的 fwmark 策略路由。Debian CI 镜像缺少 `iproute2` 使迁移回归失败；CI 与一键安装脚本现在都补齐 `iproute2`（dnf/yum 上为 `iproute`），文档同步说明该运行依赖与失败关闭行为。
+- 独立复审确认原有指标门禁仍有两个派生旁路并已修复：未持有 `metrics.read` 的借用者可通过 `GET /agents/{id}/region` 拿到由主机指标推导的公网 IP 与 GeoIP，现已要求该能力，手动区域码不受影响；持有 `metrics.read` 的借用者可从节点列表看到被借用主机的内网接口地址，现在只保留全局可路由地址，客户端连接候选不受影响。回归覆盖 `TestPR183AuditSharedNodeAddressDisclosure`（修复前可复现两个泄露）。
+- 兼容令牌复核：operator/auditor/readonly 令牌按设计保留升级前的全局节点访问能力（跨账号运维、读取主机日志与指标），不属于账号隔离身份，本轮不改其行为，改为在 [安全说明](security.md) 中明确等价权限、轮换与迁移要求；具名账号之间的越权路径在本轮未发现。
 
 独立出口回归覆盖特殊统计标签隐藏真实入站、重复及大小写歧义 JSON、sing-box 备用编译路径、TUN/额外隧道、入站 detour、Xray 动态监听及可变路由管理 API。自有节点的显式空监听配置仍可提交独立出口检查；这不放宽共享部署必须有获分配监听端口的约束。
 
