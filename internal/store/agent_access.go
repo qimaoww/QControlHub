@@ -242,6 +242,28 @@ func (s *Store) ListAgentDirectory(ctx context.Context) ([]core.AgentDirectoryEn
 // hiddenAgentClause keeps rows tied to an owner-hidden node out of every
 // request principal view except that node owner. Background maintenance runs
 // without a scope and is never filtered.
+// auditHiddenNodeClause drops audit rows that name an owner-hidden node
+// directly, through one of its tasks or configurations, or inside the
+// free-form detail text. Credentials created for a node that is hidden from
+// the start are dropped as well because their row already carries the flag.
+// Request principals keep their own rows; system maintenance is never filtered.
+func auditHiddenNodeClause(ctx context.Context, args *[]any) string {
+	scope, requestScoped := requestConfigScope(ctx)
+	if !requestScoped {
+		return ""
+	}
+	*args = append(*args, scope.OwnerID)
+	owner := fmt.Sprintf("$%d", len(*args))
+	return ` AND NOT EXISTS(SELECT 1 FROM agents hidden_agent
+		WHERE hidden_agent.admin_hidden AND hidden_agent.owner_id<>` + owner + `
+		  AND (hidden_agent.id=audit_logs.target
+		    OR position(hidden_agent.id in COALESCE(audit_logs.detail,'')) > 0
+		    OR EXISTS(SELECT 1 FROM tasks hidden_task WHERE hidden_task.id=audit_logs.target AND hidden_task.agent_id=hidden_agent.id)
+		    OR EXISTS(SELECT 1 FROM configs hidden_config WHERE hidden_config.id=audit_logs.target AND hidden_config.agent_id=hidden_agent.id)))
+		AND NOT EXISTS(SELECT 1 FROM enrollment_tokens hidden_token
+			WHERE hidden_token.admin_hidden AND hidden_token.owner_id<>` + owner + ` AND hidden_token.id=audit_logs.target)`
+}
+
 func hiddenAgentClause(ctx context.Context, column string, args *[]any) string {
 	scope, requestScoped := requestConfigScope(ctx)
 	if !requestScoped {

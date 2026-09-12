@@ -426,11 +426,17 @@ func TestPR183AuditOwnerHiddenNodeVisibility(t *testing.T) {
 	// its identity or its queued work.
 	var hiddenTask core.Task
 	alice.call("POST", "/tasks", core.TaskRequest{AgentID: agent.ID, Engine: core.EngineMihomo, Action: core.ActionStatus}, http.StatusCreated, &hiddenTask)
-	for _, path := range []string{"/tasks", "/deployments", "/traffic-policies", "/traffic-usage", "/overview"} {
+	for _, path := range []string{"/tasks", "/deployments", "/traffic-policies", "/traffic-usage", "/overview", "/audit"} {
 		body := admin.call("GET", path, nil, http.StatusOK, nil)
-		if bytes.Contains(body, []byte(agent.ID)) || bytes.Contains(body, []byte(hiddenTask.ID)) {
-			t.Fatalf("%s leaked the owner-hidden node or its task", path)
+		if bytes.Contains(body, []byte(agent.ID)) || bytes.Contains(body, []byte(hiddenTask.ID)) ||
+			bytes.Contains(body, []byte("hidden-node-audit")) {
+			t.Fatalf("%s leaked the owner-hidden node, its task or its credential name", path)
 		}
+	}
+	// The owner keeps the full audit trail of its own hidden node.
+	ownerAudit := alice.call("GET", "/audit", nil, http.StatusOK, nil)
+	if !bytes.Contains(ownerAudit, []byte(agent.ID)) {
+		t.Fatalf("owner lost its own audit trail for the hidden node: %s", ownerAudit)
 	}
 	bob.call("GET", "/agent-directory", nil, http.StatusForbidden, nil)
 	alice.call("PUT", "/agents/"+agent.ID+"/visibility", map[string]bool{"admin_hidden": false}, http.StatusOK, nil)
