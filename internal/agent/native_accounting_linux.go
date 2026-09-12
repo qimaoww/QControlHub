@@ -237,19 +237,22 @@ func accountingListenerProtocols(engine core.Engine, content string) map[int]cor
 }
 
 func (e *Executor) prepareNativeAccountingContent(ctx context.Context, engine core.Engine, spec EngineSpec, content string) (string, string) {
-	if spec != DefaultSpecsForServiceManager(e.serviceManager().Kind())[engine] {
-		return content, ""
+	initial, compilationErr := serverconfig.PrepareIndependentEgress(engine, content)
+	if compilationErr == nil && initial.Source == "disabled" {
+		return initial.Content, ""
 	}
-	_, compilationErr := serverconfig.PrepareAccounting(engine, content)
-	if compilationErr != nil && engine == core.EngineSingBox {
-		_, compilationErr = serverconfig.PrepareMarkedSingBoxAccounting(content)
-	}
-	if compilationErr != nil && strings.Contains(content, "qch-trf-") {
+	if compilationErr != nil {
+		if !strings.Contains(content, "qch-trf-") {
+			return content, "independent egress unavailable: " + compilationErr.Error()
+		}
 		source, err := accountingUpdateInput(engine, spec.ConfigPath, content)
 		if err != nil {
 			return content, "accounting update rejected: " + err.Error()
 		}
 		content = source
+		if _, err := serverconfig.PrepareIndependentEgress(engine, content); err != nil {
+			return content, "independent egress unavailable: " + err.Error()
+		}
 	}
 	if engine == core.EngineSingBox {
 		if err := validatePrivilegedExecutable(spec.Binary); err != nil {

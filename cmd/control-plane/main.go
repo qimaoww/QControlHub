@@ -242,13 +242,9 @@ func janitor(ctx context.Context, dataStore *store.Store) {
 			return
 		case <-ticker.C:
 			operationContext, cancel := context.WithTimeout(ctx, 15*time.Second)
-			settings, settingsErr := dataStore.PanelSettings(operationContext)
-			if settingsErr != nil {
-				slog.Warn("load maintenance settings", "error", settingsErr)
-				settings = core.DefaultPanelSettings()
-			}
-			if err := dataStore.RequeueStaleTasks(operationContext, time.Duration(settings.TaskStaleTimeoutSeconds)*time.Second, time.Duration(settings.InstallTaskStaleTimeoutSeconds)*time.Second, settings.TaskMaxAttempts); err != nil {
-				slog.Error("requeue stale tasks", "error", err)
+			pruneCounter++
+			if err := dataStore.MaintainAccountData(operationContext, time.Now().UTC(), pruneCounter%60 == 0); err != nil {
+				slog.Error("maintain account data", "error", err)
 			}
 			if err := dataStore.CleanupNonces(operationContext); err != nil {
 				slog.Error("clean signed-request nonces", "error", err)
@@ -264,41 +260,6 @@ func janitor(ctx context.Context, dataStore *store.Store) {
 			// statement is idempotent and normally creates nothing.
 			if err := dataStore.EnsureCoreLogPartitions(operationContext, time.Now().UTC()); err != nil {
 				slog.Error("ensure core log partitions", "error", err)
-			}
-			pruneCounter++
-			if pruneCounter%60 == 0 {
-				now := time.Now().UTC()
-				if _, err := dataStore.PruneMetricSamples(operationContext, now.Add(-time.Duration(settings.MetricRetentionDays)*24*time.Hour)); err != nil {
-					slog.Warn("prune old metric samples", "error", err)
-				}
-				if settings.AuditRetentionDays > 0 {
-					if _, err := dataStore.PruneAuditLogs(operationContext, now.Add(-time.Duration(settings.AuditRetentionDays)*24*time.Hour)); err != nil {
-						slog.Warn("prune old audit logs", "error", err)
-					}
-				}
-				// Expired log days are dropped whole; only the deduplication
-				// markers still need a row-wise delete.
-				if dropped, err := dataStore.PruneCoreLogPartitions(operationContext, now.Add(-time.Duration(settings.CoreLogRetentionDays)*24*time.Hour)); err != nil {
-					slog.Warn("prune old core log partitions", "error", err)
-				} else if dropped > 0 {
-					slog.Info("dropped expired core log partitions", "count", dropped)
-				}
-				if _, err := dataStore.PruneCoreLogBatches(operationContext, now.Add(-time.Duration(settings.CoreLogRetentionDays)*24*time.Hour)); err != nil {
-					slog.Warn("prune old core log batches", "error", err)
-				}
-				if dropped, err := dataStore.DropLegacyCoreLogs(operationContext, now); err != nil {
-					slog.Warn("drop legacy core logs", "error", err)
-				} else if dropped > 0 {
-					slog.Info("dropped legacy core log tables", "count", dropped)
-				}
-				if settings.TaskRetentionDays > 0 {
-					if _, err := dataStore.PruneTasks(operationContext, now.Add(-time.Duration(settings.TaskRetentionDays)*24*time.Hour)); err != nil {
-						slog.Warn("prune old tasks", "error", err)
-					}
-				}
-				if _, err := dataStore.PruneConfigRevisions(operationContext, settings.ConfigRevisionRetention); err != nil {
-					slog.Warn("prune config revisions", "error", err)
-				}
 			}
 			cancel()
 		}

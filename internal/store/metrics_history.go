@@ -38,6 +38,9 @@ func (s *Store) RecordAgentMetricSamples(ctx context.Context, sampledAt time.Tim
 // The caller picks the window (for example the last 24 hours) and a limit so
 // chart rendering stays bounded.
 func (s *Store) MetricSamples(ctx context.Context, agentID string, since time.Time, limit int) ([]core.MetricSample, error) {
+	if err := requireAgentAccess(ctx, s.pool, agentID); err != nil {
+		return nil, err
+	}
 	rows, err := s.pool.Query(ctx, `
 		SELECT sampled_at, cpu_percent, memory_percent, rx_rate_bps, tx_rate_bps
 		FROM metric_samples
@@ -68,7 +71,10 @@ func (s *Store) MetricSamples(ctx context.Context, agentID string, since time.Ti
 // PruneMetricSamples deletes samples older than the retention window and
 // returns the number of removed rows.
 func (s *Store) PruneMetricSamples(ctx context.Context, olderThan time.Time) (int64, error) {
-	result, err := s.pool.Exec(ctx, `DELETE FROM metric_samples WHERE sampled_at < $1`, olderThan)
+	args := []any{olderThan}
+	where := workspaceOwnerClause(ctx, "owner_id", &args)
+	result, err := s.pool.Exec(ctx, `DELETE FROM metric_samples WHERE sampled_at < $1
+		AND agent_id IN(SELECT id FROM agents WHERE true`+where+`)`, args...)
 	if err != nil {
 		return 0, fmt.Errorf("prune metric samples: %w", err)
 	}

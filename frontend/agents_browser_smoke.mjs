@@ -62,6 +62,12 @@ const server = createServer(async (request, response) => {
       file = join(root, "agents_browser_runtime.mjs");
     else if (path === "/assets/config_migration_browser_runtime.mjs")
       file = join(root, "config_migration_browser_runtime.mjs");
+    else if (path === "/assets/config_scope_browser_runtime.mjs")
+      file = join(root, "config_scope_browser_runtime.mjs");
+    else if (path === "/assets/users_browser_runtime.mjs")
+      file = join(root, "users_browser_runtime.mjs");
+    else if (path === "/assets/sharing_browser_runtime.mjs")
+      file = join(root, "sharing_browser_runtime.mjs");
     else if (path === "/assets/presets_browser_runtime.mjs")
       file = join(root, "presets_browser_runtime.mjs");
     else if (path.startsWith("/assets/modules/"))
@@ -130,7 +136,7 @@ async function waitForPageTarget(debugOrigin, expectedURL) {
   throw new Error(`无法连接浏览器页面调试目标：${lastError || expectedURL}`);
 }
 
-async function observeSmokeResult(webSocketURL) {
+async function observeSmokeResult(webSocketURL, mobileURL) {
   const socket = new WebSocket(webSocketURL);
   await Promise.race([
     new Promise((resolve, reject) => {
@@ -161,6 +167,13 @@ async function observeSmokeResult(webSocketURL) {
     });
 
   try {
+    if (mobileURL) {
+      // A narrow desktop window is not a touch device and Chrome may clamp its
+      // width. Apply actual mobile metrics before the fixture starts running.
+      await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+      await send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 1 });
+      await send("Page.navigate", { url: mobileURL });
+    }
     const deadline = Date.now() + 45000;
     let evaluation;
     while (!evaluation && Date.now() < deadline) {
@@ -218,6 +231,8 @@ async function runMode(mode) {
   try {
     await chmod(profile, 0o700);
     const url = `http://127.0.0.1:${address.port}/agents-browser-smoke.html?mode=${mode}#node-settings`;
+    const mobile = ["substore-scope", "users-mobile", "sharing-mobile", "shared-node-mobile"].includes(mode);
+    const initialURL = mobile ? "about:blank" : url;
     child = spawn(
       chrome,
       [
@@ -236,10 +251,10 @@ async function runMode(mode) {
         "--no-first-run",
         "--disable-features=AutofillServerCommunication,CertificateTransparencyComponentUpdater,MediaRouter,OptimizationHints",
         "--hide-scrollbars",
-        "--window-size=1280,900",
+        mobile ? "--window-size=390,844" : "--window-size=1280,900",
         `--user-data-dir=${profile}`,
         "--remote-debugging-port=0",
-        url,
+        initialURL,
       ],
       { stdio: ["ignore", "ignore", "pipe"] },
     );
@@ -262,8 +277,8 @@ async function runMode(mode) {
         throw new Error(`Chrome ${mode} 调试端口启动超时：${stderr}`);
       }),
     ]);
-    const pageTarget = await waitForPageTarget(debugOrigin, url);
-    const result = await observeSmokeResult(pageTarget);
+    const pageTarget = await waitForPageTarget(debugOrigin, initialURL);
+    const result = await observeSmokeResult(pageTarget, mobile ? url : undefined);
     assert.equal(
       result?.status,
       "passed",
@@ -282,7 +297,7 @@ async function runMode(mode) {
 }
 
 try {
-  const modes = process.env.QCH_BROWSER_SMOKE_MODES || process.env.QCH_BROWSER_SMOKE_MODE || "admin,empty,readonly,ports,regions,logs,logs-restore,bbr,bbr-readonly,bbr-writeonly,config-migration,config-layout,traffic-layout,capabilities-settings,capabilities-settings-readonly,presets";
+  const modes = process.env.QCH_BROWSER_SMOKE_MODES || process.env.QCH_BROWSER_SMOKE_MODE || "admin,empty,readonly,ports,regions,logs,logs-restore,bbr,bbr-readonly,bbr-writeonly,config-migration,config-scope,substore-scope,users,users-mobile,sharing,sharing-mobile,shared-node,shared-node-mobile,config-layout,traffic-layout,capabilities-settings,capabilities-settings-readonly,presets";
   for (const mode of modes.split(",")) await runMode(mode);
   process.stdout.write("agents browser runtime smoke passed\n");
 } finally {

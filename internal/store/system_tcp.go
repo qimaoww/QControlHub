@@ -15,13 +15,15 @@ func (s *Store) LatestSystemTCPTasks(ctx context.Context, agentID string) ([]cor
 		where += " AND agent.id=$1"
 		args = append(args, agentID)
 	}
+	ownerWhere := ownerClause(ctx, "owner_id", &args)
+	where += agentAdministrationClause(ctx, "agent.id", &args)
 	rows, err := s.pool.Query(ctx, `
 		SELECT t.id,t.agent_id,t.action,t.engine,COALESCE(t.config_id,''),COALESCE(t.config_version,0),
 		       COALESCE(t.core_version,''),COALESCE(t.core_source,''),t.status,t.attempt,
 		       '',COALESCE(t.error,''),t.created_at,t.started_at,t.finished_at,t.tcp_settings
 		FROM agents agent CROSS JOIN LATERAL (
 			SELECT * FROM tasks WHERE agent_id=agent.id
-			AND action IN ('enable-bbr','disable-bbr','configure-tcp')
+			AND action IN ('enable-bbr','disable-bbr','configure-tcp')`+ownerWhere+`
 			ORDER BY created_at DESC,id DESC LIMIT 1
 		) t WHERE `+where+` ORDER BY agent.id`, args...)
 	if err != nil {

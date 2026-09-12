@@ -18,8 +18,11 @@ type userRecord struct {
 }
 
 func (s *Store) ListUsers(ctx context.Context) ([]core.User, error) {
+	if !scopeForConfig(ctx).Admin {
+		return nil, ErrForbidden
+	}
 	rows, err := s.pool.Query(ctx, `
-		SELECT id,username,display_name,role,permissions,disabled,created_at,updated_at,last_login_at
+		SELECT id,username,display_name,role,permissions,disabled,created_at,updated_at,last_login_at,auth_revision
 		FROM panel_users ORDER BY disabled ASC, username ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("list users: %w", err)
@@ -38,7 +41,7 @@ func (s *Store) ListUsers(ctx context.Context) ([]core.User, error) {
 
 func (s *Store) UserForLogin(ctx context.Context, username string) (core.User, string, error) {
 	row := s.pool.QueryRow(ctx, `
-		SELECT id,username,display_name,role,permissions,disabled,created_at,updated_at,last_login_at,password_hash
+		SELECT id,username,display_name,role,permissions,disabled,created_at,updated_at,last_login_at,auth_revision,password_hash
 		FROM panel_users WHERE username=$1 AND disabled=false`, username)
 	var record userRecord
 	if err := scanUserWithHash(row, &record); errors.Is(err, pgx.ErrNoRows) {
@@ -47,6 +50,16 @@ func (s *Store) UserForLogin(ctx context.Context, username string) (core.User, s
 		return core.User{}, "", err
 	}
 	return record.User, record.PasswordHash, nil
+}
+
+// UserForSession rechecks the durable authentication revision on each request.
+// A password/role/permission change or disable on another control-plane
+// process must invalidate this process's previously cached login too.
+func (s *Store) UserForSession(ctx context.Context, id string) (core.User, error) {
+	user, err := scanUser(s.pool.QueryRow(ctx, `
+		SELECT id,username,display_name,role,permissions,disabled,created_at,updated_at,last_login_at,auth_revision
+		FROM panel_users WHERE id=$1 AND NOT disabled`, id))
+	return user, mapError(err)
 }
 
 func (s *Store) RecordUserLogin(ctx context.Context, id string) error {
@@ -61,6 +74,9 @@ func (s *Store) RecordUserLogin(ctx context.Context, id string) error {
 }
 
 func (s *Store) CreateUser(ctx context.Context, request core.UserRequest, passwordHash string) (core.User, error) {
+	if !scopeForConfig(ctx).Admin {
+		return core.User{}, ErrForbidden
+	}
 	if !request.Role.Valid() || strings.TrimSpace(passwordHash) == "" {
 		return core.User{}, fmt.Errorf("%w: invalid user role or password hash", ErrInvalid)
 	}
@@ -76,10 +92,10 @@ func (s *Store) CreateUser(ctx context.Context, request core.UserRequest, passwo
 	}
 	now := time.Now().UTC()
 	row := s.pool.QueryRow(ctx, `
-		INSERT INTO panel_users (id,username,display_name,role,permissions,password_hash,created_at,updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$7)
-		RETURNING id,username,display_name,role,permissions,disabled,created_at,updated_at,last_login_at`,
-		id, username, displayName, request.Role, permissions, passwordHash, now)
+		INSERT INTO panel_users (id,username,display_name,role,permissions,password_hash,created_at,updated_at,agent_isolation)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$7,$8)
+		RETURNING id,username,display_name,role,permissions,disabled,created_at,updated_at,last_login_at,auth_revision`,
+		id, username, displayName, request.Role, permissions, passwordHash, now, request.Role != core.RoleAdmin)
 	user, err := scanUser(row)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -93,13 +109,21 @@ func (s *Store) CreateUser(ctx context.Context, request core.UserRequest, passwo
 // UpdateUser applies a complete partial update in one transaction. It refuses
 // to remove the last active administrator, keeping the panel recoverable.
 func (s *Store) UpdateUser(ctx context.Context, id string, update core.UserUpdate, passwordHash string) (core.User, error) {
+	if !scopeForConfig(ctx).Admin {
+		return core.User{}, ErrForbidden
+	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return core.User{}, err
 	}
 	defer tx.Rollback(ctx)
+	// Two administrators being demoted concurrently must not both observe
+	// the other as the remaining administrator.
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('qcontrolhub:users'))`); err != nil {
+		return core.User{}, err
+	}
 	row := tx.QueryRow(ctx, `
-		SELECT id,username,display_name,role,permissions,disabled,created_at,updated_at,last_login_at,password_hash
+		SELECT id,username,display_name,role,permissions,disabled,created_at,updated_at,last_login_at,auth_revision,password_hash
 		FROM panel_users WHERE id=$1 FOR UPDATE`, id)
 	var current userRecord
 	if err := scanUserWithHash(row, &current); errors.Is(err, pgx.ErrNoRows) {
@@ -128,6 +152,8 @@ func (s *Store) UpdateUser(ctx context.Context, id string, update core.UserUpdat
 	}
 	if update.Permissions != nil {
 		permissions = core.NormalizePermissions(*update.Permissions)
+	} else if current.User.Role == core.RoleAdmin && role != core.RoleAdmin {
+		permissions = []core.Permission{}
 	}
 	if role == core.RoleAdmin {
 		permissions = core.AllPermissions()
@@ -146,17 +172,53 @@ func (s *Store) UpdateUser(ctx context.Context, id string, update core.UserUpdat
 	}
 	var updatedPermissions []byte
 	err = tx.QueryRow(ctx, `
-		UPDATE panel_users SET display_name=$2,role=$3,permissions=$4,disabled=$5,password_hash=$6,updated_at=now()
+		UPDATE panel_users SET display_name=$2,role=$3::varchar(20),permissions=$4,disabled=$5,password_hash=$6,
+			agent_isolation=($3::varchar(20)<>'admin'),
+			agent_access_revision=agent_access_revision+1,auth_revision=auth_revision+1,updated_at=now()
 		WHERE id=$1
-		RETURNING id,username,display_name,role,permissions,disabled,created_at,updated_at,last_login_at`,
+		RETURNING id,username,display_name,role,permissions,disabled,created_at,updated_at,last_login_at,auth_revision`,
 		id, displayName, role, permissions, disabled, passwordHash).Scan(
 		&current.User.ID, &current.User.Username, &current.User.DisplayName, &current.User.Role, &updatedPermissions,
-		&current.User.Disabled, &current.User.CreatedAt, &current.User.UpdatedAt, &current.User.LastLoginAt)
+		&current.User.Disabled, &current.User.CreatedAt, &current.User.UpdatedAt, &current.User.LastLoginAt, &current.User.AuthRevision)
 	if err == nil {
 		err = json.Unmarshal(updatedPermissions, &current.User.Permissions)
 	}
 	if err != nil {
 		return core.User{}, err
+	}
+	// Invalidate work in this transaction, not on the next Agent poll. A
+	// disable/re-enable or revoke/regrant while disconnected must never revive
+	// an old lease. Keep the user -> Agent -> task lock order used by creation.
+	rows, err := tx.Query(ctx, `SELECT id,features FROM agents WHERE id IN (
+		SELECT t.agent_id FROM tasks t LEFT JOIN configs c ON c.id=t.config_id
+		WHERE (t.owner_id=$1 OR c.owner_id=$1) AND t.status IN ('pending','running')
+	) ORDER BY id FOR UPDATE`, id)
+	if err != nil {
+		return core.User{}, err
+	}
+	var affected []core.Agent
+	for rows.Next() {
+		var agent core.Agent
+		if err := rows.Scan(&agent.ID, &agent.Features); err != nil {
+			rows.Close()
+			return core.User{}, err
+		}
+		affected = append(affected, agent)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return core.User{}, err
+	}
+	for _, agent := range affected {
+		if err := cancelUnauthorizedAgentTasksTx(ctx, tx, agent.ID, agent.Features); err != nil {
+			return core.User{}, err
+		}
+	}
+	if disabled || update.Role != nil || update.Permissions != nil {
+		if _, err := tx.Exec(ctx, `UPDATE tasks SET config_content=NULL
+			WHERE owner_id=$1 AND action IN ('read-config','read-managed-config')`, id); err != nil {
+			return core.User{}, err
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return core.User{}, err
@@ -171,7 +233,7 @@ func (s *Store) SetUserDisabled(ctx context.Context, id string, disabled bool) (
 func scanUser(row pgx.Row) (core.User, error) {
 	var user core.User
 	var permissions []byte
-	err := row.Scan(&user.ID, &user.Username, &user.DisplayName, &user.Role, &permissions, &user.Disabled, &user.CreatedAt, &user.UpdatedAt, &user.LastLoginAt)
+	err := row.Scan(&user.ID, &user.Username, &user.DisplayName, &user.Role, &permissions, &user.Disabled, &user.CreatedAt, &user.UpdatedAt, &user.LastLoginAt, &user.AuthRevision)
 	if err == nil {
 		err = json.Unmarshal(permissions, &user.Permissions)
 		if err == nil && user.Role == core.RoleAdmin {
@@ -184,7 +246,7 @@ func scanUser(row pgx.Row) (core.User, error) {
 func scanUserWithHash(row pgx.Row, record *userRecord) error {
 	var permissions []byte
 	err := row.Scan(&record.User.ID, &record.User.Username, &record.User.DisplayName, &record.User.Role, &permissions, &record.User.Disabled,
-		&record.User.CreatedAt, &record.User.UpdatedAt, &record.User.LastLoginAt, &record.PasswordHash)
+		&record.User.CreatedAt, &record.User.UpdatedAt, &record.User.LastLoginAt, &record.User.AuthRevision, &record.PasswordHash)
 	if err == nil {
 		err = json.Unmarshal(permissions, &record.User.Permissions)
 		if err == nil && record.User.Role == core.RoleAdmin {

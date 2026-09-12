@@ -42,6 +42,7 @@ type clientAccessAddressOption struct {
 
 type clientAccessEntry struct {
 	AgentID         string                      `json:"agent_id"`
+	ConfigID        string                      `json:"config_id"`
 	AgentName       string                      `json:"agent_name"`
 	AgentStatus     string                      `json:"agent_status"`
 	Engine          core.Engine                 `json:"engine"`
@@ -173,6 +174,7 @@ func (s *Server) agentConfigWorkspace(w http.ResponseWriter, request *http.Reque
 		writeError(w, http.StatusBadRequest, "agent does not support the requested engine")
 		return
 	}
+	s.redactAgentMetrics(request, &agent)
 	catalog, err := configschema.CatalogFor(engine)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -754,6 +756,7 @@ func (s *Server) clientAccessEntries(ctx context.Context) ([]clientAccessEntry, 
 		if !ok {
 			continue
 		}
+		agent.Labels = cloneClientLabels(agent.Labels, deployed.Preferences)
 		inputs := serverconfig.ParseAll(deployment.Engine, config.Content)
 		if len(inputs) == 0 {
 			continue
@@ -771,14 +774,14 @@ func (s *Server) clientAccessEntries(ctx context.Context) ([]clientAccessEntry, 
 		if len(addressOptions) > 0 {
 			primary := addressOptions[0]
 			entries = append(entries, clientAccessEntry{
-				AgentID: agent.ID, AgentName: agent.Name, AgentStatus: agent.Status, Engine: deployment.Engine,
+				AgentID: agent.ID, ConfigID: config.ID, AgentName: agent.Name, AgentStatus: agent.Status, Engine: deployment.Engine,
 				Address: primary.Address, Source: primary.Source, Profiles: profiles, AddressOptions: addressOptions,
 				AddressMode: clientAddressMode,
 			})
 		}
 		if len(addressOptions) == 0 && len(candidates) == 0 {
 			entries = append(entries, clientAccessEntry{
-				AgentID: agent.ID, AgentName: agent.Name, AgentStatus: agent.Status, Engine: deployment.Engine,
+				AgentID: agent.ID, ConfigID: config.ID, AgentName: agent.Name, AgentStatus: agent.Status, Engine: deployment.Engine,
 				AddressRequired: true, Profiles: []clientAccessProfile{}, AddressMode: clientAddressMode,
 			})
 		}
@@ -790,6 +793,19 @@ func (s *Server) clientAccessEntries(ctx context.Context) ([]clientAccessEntry, 
 		return entries[i].Engine < entries[j].Engine
 	})
 	return entries, nil
+}
+
+func cloneClientLabels(labels, preferences map[string]string) map[string]string {
+	result := make(map[string]string, len(labels)+len(preferences))
+	for key, value := range labels {
+		if !strings.HasPrefix(key, "client_profile_") {
+			result[key] = value
+		}
+	}
+	for key, value := range preferences {
+		result[key] = value
+	}
+	return result
 }
 
 func (s *Server) hydrateClientMetadata(ctx context.Context, config core.Config, inputs []serverconfig.Input) error {
@@ -810,9 +826,10 @@ func applyClientMetadata(inputs []serverconfig.Input, metadata map[string]string
 }
 
 type clientAddressCandidate struct {
-	address string
-	source  string
-	family  string
+	address     string
+	source      string
+	family      string
+	profileOnly bool
 }
 
 func normalizeClientAddressMode(value string) string {
@@ -879,6 +896,23 @@ func buildClientAccessProfiles(engine core.Engine, inputs []serverconfig.Input, 
 }
 
 func buildClientAccessAddressOptions(engine core.Engine, inputs []serverconfig.Input, candidates []clientAddressCandidate, serverName string, labelSets ...map[string]string) []clientAccessAddressOption {
+	// A per-profile manual hostname may differ from every host-wide address.
+	// Publish it only for that profile; do not use it as another port's
+	// automatic candidate or discard the entire entry when all ports override.
+	candidates = append([]clientAddressCandidate(nil), candidates...)
+	if len(labelSets) > 0 {
+		for _, input := range inputs {
+			address := strings.TrimSpace(labelSets[0][core.ClientProfileAddressLabel(engine, input.Listen, input.Port)])
+			found := address == ""
+			for _, candidate := range candidates {
+				found = found || candidate.address == address
+			}
+			if !found {
+				candidates = append(candidates, clientAddressCandidate{address: address,
+					source: "入站手动设置", family: clientAddressFamily(address), profileOnly: true})
+			}
+		}
+	}
 	options := make([]clientAccessAddressOption, 0, len(candidates))
 	for _, candidate := range candidates {
 		profiles := make([]clientAccessProfile, 0, len(inputs))
@@ -886,7 +920,7 @@ func buildClientAccessAddressOptions(engine core.Engine, inputs []serverconfig.I
 			if len(labelSets) > 0 {
 				// A port with a manual address is pinned to exactly one candidate;
 				// exposing it under another family would publish a second URI.
-				if value := strings.TrimSpace(labelSets[0][core.ClientProfileAddressLabel(engine, input.Listen, input.Port)]); value != "" && value != candidate.address {
+				if value := strings.TrimSpace(labelSets[0][core.ClientProfileAddressLabel(engine, input.Listen, input.Port)]); (value != "" && value != candidate.address) || (candidate.profileOnly && value == "") {
 					continue
 				}
 			}

@@ -2,7 +2,9 @@ package agent
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"net"
@@ -33,6 +35,20 @@ func TestMihomoSnellAndSudokuPresetsTransferRealTraffic(t *testing.T) {
 		_, _ = io.WriteString(writer, response)
 	}))
 	defer backend.Close()
+	// Keep ShadowTLS handshakes local while retaining strict certificate
+	// verification in the generated Mihomo client.
+	cover := httptest.NewUnstartedServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(writer, "local TLS cover")
+	}))
+	cover.EnableHTTP2 = true
+	cover.TLS = &tls.Config{MinVersion: tls.VersionTLS13}
+	cover.StartTLS()
+	defer cover.Close()
+	caFile := filepath.Join(t.TempDir(), "cover-ca.pem")
+	if err := os.WriteFile(caFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cover.Certificate().Raw}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SSL_CERT_FILE", caFile)
 
 	tests := []struct {
 		name, protocol string
@@ -40,6 +56,12 @@ func TestMihomoSnellAndSudokuPresetsTransferRealTraffic(t *testing.T) {
 	}{
 		{name: "snell-v5", protocol: serverconfig.ProtocolSnell},
 		{name: "snell-shadow-tls-v3", protocol: serverconfig.ProtocolSnellShadowTLS},
+		{name: "snell-shadow-tls-blank-alpn", protocol: serverconfig.ProtocolSnellShadowTLS, edit: func(input *serverconfig.Input) {
+			input.SnellShadowTLSALPN = ""
+		}},
+		{name: "snell-shadow-tls-trailing-alpn", protocol: serverconfig.ProtocolSnellShadowTLS, edit: func(input *serverconfig.Input) {
+			input.SnellShadowTLSALPN = " h2, http/1.1, ,"
+		}},
 		{name: "sudoku-ed25519-websocket"},
 		{name: "sudoku-stream", edit: func(input *serverconfig.Input) { input.SudokuHTTPMaskMode = "stream" }},
 		{name: "sudoku-poll", edit: func(input *serverconfig.Input) { input.SudokuHTTPMaskMode = "poll" }},
@@ -66,6 +88,10 @@ func TestMihomoSnellAndSudokuPresetsTransferRealTraffic(t *testing.T) {
 			}
 			input.Listen = "127.0.0.1"
 			input.Port = availableTCPPort(t)
+			if key == serverconfig.ProtocolSnellShadowTLS {
+				input.SnellObfsHost = "example.com"
+				input.SnellShadowTLSHandshake = cover.Listener.Addr().String()
+			}
 			if test.edit != nil {
 				test.edit(&input)
 			}
@@ -78,7 +104,7 @@ func TestMihomoSnellAndSudokuPresetsTransferRealTraffic(t *testing.T) {
 				t.Fatal(err)
 			}
 			var proxy map[string]any
-			if err := yaml.Unmarshal([]byte(profile.URI), &proxy); err != nil {
+			if err := yaml.Unmarshal([]byte(profile.Mihomo), &proxy); err != nil {
 				t.Fatal(err)
 			}
 			clientPort := availableTCPPort(t)

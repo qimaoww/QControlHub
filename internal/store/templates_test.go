@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -18,7 +19,7 @@ func TestRenderConfigTemplatePlaceholders(t *testing.T) {
 	}
 	rendered, err := RenderConfigTemplate(
 		"server: {{node_name}}\nid: {{node_id}}\nip: {{lan_ip}}\nport: {{random_port}}\nliteral: {{unknown}}",
-		agent)
+		agent, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,12 +31,35 @@ func TestRenderConfigTemplatePlaceholders(t *testing.T) {
 	if !strings.Contains(rendered, "port: 2") && !strings.Contains(rendered, "port: 3") && !strings.Contains(rendered, "port: 4") && !strings.Contains(rendered, "port: 5") && !strings.Contains(rendered, "port: 6") {
 		t.Fatalf("random port outside 20000-63991: %s", rendered)
 	}
-	again, err := RenderConfigTemplate("port: {{random_port}}", agent)
+	again, err := RenderConfigTemplate("port: {{random_port}}", agent, true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if again == rendered {
 		t.Fatal("two renders produced the same random port")
+	}
+}
+
+// The LAN address is host-metric data. A principal without metrics.read must
+// not be able to render it into a configuration the API returns and saves.
+func TestRenderConfigTemplateRequiresMetricsCapabilityForLanIP(t *testing.T) {
+	t.Parallel()
+	agent := core.Agent{
+		ID: "agt_0123456789abcdef", Name: "edge-01",
+		Metrics: core.HostMetrics{NetworkInterfaces: []core.HostNetworkInterface{{Name: "eth0", Addresses: []string{"192.168.31.205"}}}},
+	}
+	if _, err := RenderConfigTemplate("server: {{lan_ip}}", agent, false); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("lan_ip rendered without metrics.read: %v", err)
+	}
+	rendered, err := RenderConfigTemplate("server: {{node_name}}/{{node_id}}", agent, false)
+	if err != nil {
+		t.Fatalf("non-metric placeholders must stay available: %v", err)
+	}
+	if rendered != "server: edge-01/agt_0123456789abcdef" {
+		t.Fatalf("unexpected render without metrics.read: %q", rendered)
+	}
+	if _, err := RenderConfigTemplate("server: {{lan_ip}}", agent, true); err != nil {
+		t.Fatalf("metrics.read rendering was rejected: %v", err)
 	}
 }
 

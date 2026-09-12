@@ -61,7 +61,9 @@ jobs:
           DEBIAN_FRONTEND: noninteractive
         run: |
           apt-get update
-          apt-get install --no-install-recommends --yes chromium openssl
+          # iproute2 provides the ip binary that sing-box dual accounting uses
+          # to prove existing policy routing cannot hijack outbound marks.
+          apt-get install --no-install-recommends --yes chromium openssl iproute2
 
       - name: Run project checks with PostgreSQL
         run: make check

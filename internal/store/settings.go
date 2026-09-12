@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -34,11 +35,91 @@ func scanPanelSettings(row pgx.Row) (core.PanelSettings, error) {
 }
 
 func (s *Store) PanelSettings(ctx context.Context) (core.PanelSettings, error) {
-	settings, err := scanPanelSettings(s.pool.QueryRow(ctx, `SELECT `+panelSettingsColumns+` FROM panel_settings WHERE id=1`))
+	return s.panelSettingsForOwner(ctx, s.pool, scopeForConfig(ctx).OwnerID)
+}
+
+func (s *Store) panelSettingsForOwner(ctx context.Context, executor storeExecutor, ownerID string) (core.PanelSettings, error) {
+	if ownerID != "" {
+		var content string
+		var revision int64
+		var updatedAt time.Time
+		err := executor.QueryRow(ctx, `SELECT content,revision,updated_at FROM user_panel_settings WHERE owner_id=$1`, ownerID).
+			Scan(&content, &revision, &updatedAt)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return core.DefaultPanelSettings(), nil
+		}
+		if err != nil {
+			return core.PanelSettings{}, err
+		}
+		content, err = s.decryptContent(content)
+		if err != nil {
+			return core.PanelSettings{}, err
+		}
+		var settings core.PanelSettings
+		if err := json.Unmarshal([]byte(content), &settings); err != nil {
+			return core.PanelSettings{}, err
+		}
+		settings.Revision, settings.UpdatedAt = revision, updatedAt
+		return settings, nil
+	}
+	settings, err := scanPanelSettings(executor.QueryRow(ctx, `SELECT `+panelSettingsColumns+` FROM panel_settings WHERE id=1`))
 	if err != nil {
 		return core.PanelSettings{}, fmt.Errorf("read panel settings: %w", err)
 	}
 	return settings, nil
+}
+
+// Agent runtime policy always follows its owner, never the current viewer or
+// a user to whom the node happens to be shared.
+func (s *Store) AgentPanelSettings(ctx context.Context, agentID string) (core.PanelSettings, error) {
+	if !scopeForConfig(ctx).Admin {
+		if err := requireAgentAdministration(ctx, s.pool, agentID); err != nil {
+			return core.PanelSettings{}, err
+		}
+	}
+	var owner string
+	if err := s.pool.QueryRow(ctx, `SELECT owner_id FROM agents WHERE id=$1 AND revoked_at IS NULL`, agentID).Scan(&owner); err != nil {
+		return core.PanelSettings{}, mapError(err)
+	}
+	return s.panelSettingsForOwner(ctx, s.pool, owner)
+}
+
+func (s *Store) TaskPanelSettings(ctx context.Context, taskID string) (core.PanelSettings, error) {
+	args := []any{taskID}
+	where := ownerClause(ctx, "owner_id", &args)
+	var owner string
+	if err := s.pool.QueryRow(ctx, `SELECT owner_id FROM tasks WHERE id=$1`+where, args...).Scan(&owner); err != nil {
+		return core.PanelSettings{}, mapError(err)
+	}
+	return s.panelSettingsForOwner(ctx, s.pool, owner)
+}
+
+// OwnedAgentIDs intentionally uses workspace ownership even for an
+// administrator. Saving personal settings must not reconnect borrowed nodes
+// or the rest of the fleet.
+func (s *Store) OwnedAgentIDs(ctx context.Context) ([]string, error) {
+	args := []any{}
+	where := workspaceOwnerClause(ctx, "owner_id", &args)
+	rows, err := s.pool.Query(ctx, `SELECT id FROM agents WHERE revoked_at IS NULL`+where+` ORDER BY id`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+// Arguments are store-owned SQL identifiers/literals, never request input.
+func agentRuntimeSettingSQL(agentAlias, field, fallback string) string {
+	return `CASE WHEN ` + agentAlias + `.owner_id='' THEN (SELECT ` + field + ` FROM panel_settings WHERE id=1)
+		ELSE COALESCE((SELECT runtime->>'` + field + `' FROM user_panel_settings WHERE owner_id=` + agentAlias + `.owner_id),` + fallback + `) END`
 }
 
 // SavePanelSettings is the compatibility path for internal callers and older
@@ -55,6 +136,9 @@ func (s *Store) SavePanelSettingsRevision(ctx context.Context, settings core.Pan
 }
 
 func (s *Store) savePanelSettings(ctx context.Context, settings core.PanelSettings, expectedRevision int64) (core.PanelSettings, error) {
+	if scope := scopeForConfig(ctx); scope.OwnerID == "" && !scope.Admin {
+		return core.PanelSettings{}, ErrForbidden
+	}
 	settings.PanelName = strings.TrimSpace(settings.PanelName)
 	settings.PanelDescription = strings.TrimSpace(settings.PanelDescription)
 	settings.CoreLogMinimumLevel = strings.ToLower(strings.TrimSpace(settings.CoreLogMinimumLevel))
@@ -110,6 +194,12 @@ func (s *Store) savePanelSettings(ctx context.Context, settings core.PanelSettin
 		return core.PanelSettings{}, fmt.Errorf("%w: %v", ErrInvalid, err)
 	}
 	settings.UpdatedAt = time.Now().UTC()
+	if ownerID := scopeForConfig(ctx).OwnerID; ownerID != "" {
+		if expectedRevision == 0 {
+			expectedRevision = current.Revision
+		}
+		return s.saveUserPanelSettings(ctx, ownerID, settings, expectedRevision)
+	}
 	where := "id=1"
 	args := []any{
 		settings.PanelName, settings.PanelDescription, settings.TimeZone, settings.TimeDisplay, settings.UIFontScale, settings.DefaultConfigEditor,
@@ -141,6 +231,34 @@ func (s *Store) savePanelSettings(ctx context.Context, settings core.PanelSettin
 		return core.PanelSettings{}, fmt.Errorf("save panel settings: %w", err)
 	}
 	return saved, nil
+}
+
+func (s *Store) saveUserPanelSettings(ctx context.Context, ownerID string, settings core.PanelSettings, revision int64) (core.PanelSettings, error) {
+	payload, err := json.Marshal(settings)
+	if err != nil {
+		return core.PanelSettings{}, err
+	}
+	content, err := s.encryptContent(string(payload))
+	if err != nil {
+		return core.PanelSettings{}, err
+	}
+	// Only operational, non-secret values are available to background SQL.
+	runtime := settings
+	runtime.WebhookURL, runtime.KomariURL, runtime.KomariAPIKey = "", "", ""
+	runtimeJSON, err := json.Marshal(runtime)
+	if err != nil {
+		return core.PanelSettings{}, err
+	}
+	err = s.pool.QueryRow(ctx, `INSERT INTO user_panel_settings(owner_id,content,runtime,revision,updated_at)
+		SELECT $1,$2,$3,2,$5 WHERE $4=1 OR EXISTS(SELECT 1 FROM user_panel_settings WHERE owner_id=$1)
+		ON CONFLICT(owner_id) DO UPDATE SET content=EXCLUDED.content,runtime=EXCLUDED.runtime,
+			revision=user_panel_settings.revision+1,updated_at=EXCLUDED.updated_at
+		WHERE user_panel_settings.revision=$4
+		RETURNING revision,updated_at`, ownerID, content, runtimeJSON, revision, settings.UpdatedAt).Scan(&settings.Revision, &settings.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return core.PanelSettings{}, fmt.Errorf("%w: settings were changed in another session", ErrConflict)
+	}
+	return settings, err
 }
 
 // InitializeDefaultAgentEngines seeds installation preferences once. Subsequent

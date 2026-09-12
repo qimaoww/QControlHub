@@ -28,7 +28,7 @@ func TestPresetMutationCommitsOrRollsBackTogether(t *testing.T) {
 	}
 	defer db.Close()
 	agent, _ := enrollTaskTestAgent(t, ctx, db)
-	input := core.Config{AgentID: agent.ID, Engine: core.EngineMihomo, Name: "atomic preset", Content: "listeners: [{name: a, port: 1080, type: socks}]\nrules: [MATCH,DIRECT]\n"}
+	input := core.Config{AgentID: agent.ID, Engine: core.EngineMihomo, Name: "atomic preset", Content: "listeners: [{name: a, port: 1080, type: socks}]\nrules: ['MATCH,DIRECT']\n"}
 	metadata := &ConfigClientMetadataMutation{Tag: "a", Content: `{"client":"private"}`}
 	options := ConfigMutationOptions{Action: core.ActionDeploy, ClientMetadata: metadata}
 	// A task-side failure happens after INSERT/UPDATE of config + revision.

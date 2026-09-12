@@ -38,6 +38,7 @@ const tcpRules = [
 ];
 const onlineAgent = (id, features = ["agent-self-upgrade-v1"]) => ({
   id,
+  can_manage: true,
   name: id.toUpperCase(),
   os: "linux",
   arch: "amd64",
@@ -113,6 +114,12 @@ const testAPI = {
   agents: populatedAgents,
 };
 window.__agentsBrowserTestAPI = testAPI;
+if (mode === "shared-node" || mode === "shared-node-mobile") {
+  testAPI.agents = [
+    { ...populatedAgents[0], can_manage: false, capabilities: ["mihomo"], supported_capabilities: ["mihomo"], shared_engines: ["mihomo"], labels: {}, enrollment_command_available: false },
+    populatedAgents[1],
+  ];
+}
 if (mode === "logs-restore") {
   // Seed the browser store before the application boots so the log page has
   // to restore the previous session's node scope, filters, and live switch.
@@ -121,7 +128,8 @@ if (mode === "logs-restore") {
     features: [...(agent.features || []), "core-logs-v1", "core-log-status-v1"],
     runtime: { ...agent.runtime, xray: { installed: true, core_log_status: "active" } },
   }));
-  localStorage.setItem("qcontrolhub:core-log-preferences", JSON.stringify({
+  setStorageAccount({ role: "admin" });
+  accountStorage.setItem("qcontrolhub:core-log-preferences", JSON.stringify({
     agent_id: "bravo",
     engine: "xray",
     level: "warning",
@@ -195,6 +203,7 @@ window.fetch = async (input, options = {}) => {
   const path = url.pathname.replace(/^\/api\/v1/, "");
   const method = String(options.method || (input instanceof Request ? input.method : "GET")).toUpperCase();
   testAPI.calls.push({ method, path, query: url.search });
+  if (method === "GET" && path === "/agent-access") return json({ isolated: false, revision: 1, shares: [] });
   if (mode === "traffic-layout") {
     if (path === "/traffic-policies") return json(testAPI.trafficPolicies);
     if (path === "/traffic-endpoints") return json([]);
@@ -242,6 +251,8 @@ window.fetch = async (input, options = {}) => {
   if (method === "GET" && path === "/auth/session")
     return json(mode === "bbr-writeonly"
       ? { role: "user", permissions: ["agents.read", "agents.manage", "tasks.execute"], csrf_token: "browser-test-csrf" }
+      : mode.startsWith("shared-node")
+      ? { role: "user", user_id: "recipient", permissions: ["agents.read", "agents.manage", "enrollment.manage", "agent-config.read", "agent-config.write", "configs.read", "tasks.read", "tasks.execute", "metrics.read"], csrf_token: "browser-test-csrf" }
       : { role: mode === "readonly" || mode.endsWith("-readonly") ? "readonly" : "admin", csrf_token: "browser-test-csrf" });
   if (method === "GET" && path === "/system-tcp/parameters") return json(tcpRules);
   if (method === "GET" && path === "/system-tcp/tasks") {
@@ -1107,6 +1118,57 @@ async function testEmptyRuntime() {
   assert.equal(document.querySelector("#batch-form"), null);
 }
 
+async function testSharedNodeRuntime() {
+  const assertSharedStatusOrder = (root) => {
+    const badge = root.querySelector(".agent-shared-badge");
+    const status = root.querySelector("[data-agent-status-label]");
+    assert.ok(badge && status, "共享节点缺少共享标记或在线状态");
+    const badgeRect = badge.getBoundingClientRect(), statusRect = status.getBoundingClientRect();
+    assert.ok(badge.nextElementSibling?.matches("[data-agent-status-dot]"), "共享标记未紧邻在线状态左侧");
+    assert.ok(badgeRect.right <= statusRect.left, "共享标记没有显示在在线状态左侧");
+    assert.ok(Math.abs((badgeRect.top + badgeRect.bottom - statusRect.top - statusRect.bottom) / 2) <= 1,
+      "共享标记与在线状态没有同排对齐");
+    if (mode === "shared-node-mobile") {
+      assert.equal(innerWidth, 390, "手机回归没有使用真实的 390px 视口");
+      assert.ok(matchMedia("(pointer:coarse)").matches, "手机回归没有启用触控设备");
+      const rect = root.getBoundingClientRect();
+      assert.ok(rect.left >= 0 && rect.right <= innerWidth + 1 && root.scrollWidth <= root.clientWidth + 1,
+        "手机共享节点列表或详情被裁切");
+    }
+  };
+  await waitFor(() => document.querySelector('.node-card[data-agent-node="alpha"]'), "共享节点列表未渲染");
+  assert.equal(document.querySelectorAll(".node-card .agent-shared-badge").length, 1, "自有和共享节点没有明确区分");
+  assertSharedStatusOrder(document.querySelector('.node-card[data-agent-node="alpha"]'));
+  assert.ok(document.querySelector("[data-open-enrollment]"), "共享接收者无法添加自有节点");
+  location.hash = "#settings-node-alpha";
+  await waitFor(() => document.querySelector(".node-operations-workspace"), "共享节点详情未渲染");
+  assertSharedStatusOrder(document.querySelector(".node-operations-workspace"));
+  assert.equal(document.querySelectorAll(".core-runtime-row").length, 1, "详情显示了未分配的内核");
+  assert.equal(document.querySelector(".node-panel-heading h3").textContent, "已分配内核");
+  assert.ok(document.querySelector('[data-config="alpha"][data-engine="mihomo"]'), "共享内核没有独立配置入口");
+  assert.equal(document.querySelector('[data-open-version-form], [data-version-agent], [data-engine-capability], [data-agent-name-form], [data-komari-form], [data-agent-sharing], [data-upgrade-agent], [data-delete], [data-view-enrollment-command]'), null, "共享详情仍显示宿主管理控件");
+  if (mode === "shared-node-mobile") {
+    for (const selector of [".node-operations-workspace", ".node-resource-strip", ".core-runtime-row", '[data-config="alpha"]']) {
+      const element = document.querySelector(selector), rect = element.getBoundingClientRect();
+      assert.ok(rect.left >= 0 && rect.right <= innerWidth + 1 && element.scrollWidth <= element.clientWidth + 1,
+        `手机共享详情被裁切：${selector}`);
+    }
+  }
+  document.querySelector('[data-node-tab="agent"]').click();
+  assert.ok(document.querySelector('[data-node-panel="agent"] a[href="#my-quota"]'), "共享身份页缺少分配入口");
+  assert.ok(document.querySelector(".node-operations-workspace").scrollWidth <= document.querySelector(".node-operations-workspace").clientWidth + 1, "共享节点详情横向溢出");
+  location.hash = "#settings-node-bravo";
+  await waitFor(() => document.querySelector('[data-agent-name-form="bravo"]'), "自有节点管理未保留");
+  assert.ok(document.querySelector('[data-agent-sharing="bravo"]'), "自有节点不能继续分享");
+  assert.equal(document.querySelector(".agent-shared-badge"), null, "自有节点被标记为共享");
+  location.hash = "#settings-node-alpha";
+  await waitFor(() => document.querySelector('[data-config="alpha"]'), "重新打开共享节点失败");
+  testAPI.agents = [populatedAgents[1]];
+  document.querySelector("[data-agent-refresh]").click();
+  await waitFor(() => document.querySelector("[data-node-missing]"), "撤销后仍保留共享详情");
+  assert.equal(document.querySelector('[data-config="alpha"]'), null, "撤销后保留旧配置操作入口");
+}
+
 async function testReadonlyRuntime() {
   await waitFor(() => document.querySelector(".workspace-main"), "只读聚合页没有完成渲染");
   assertNoPersistentEnrollment();
@@ -1645,7 +1707,7 @@ async function testLargeLogRuntime() {
   const cachedTime = performance.now() - cachedAt;
   refreshGate.resolve();
   await waitFor(() => document.querySelector("[data-core-log-refresh-label]")?.textContent === "自动更新已暂停", "cache revalidation did not settle");
-  const storedPreference = JSON.parse(localStorage.getItem("qcontrolhub:core-log-preferences"));
+  const storedPreference = JSON.parse(accountStorage.getItem("qcontrolhub:core-log-preferences"));
   assert.equal(storedPreference.agent_id, "bravo", "the selected node must be remembered");
   assert.equal(storedPreference.limit, 2000, "the expanded per-engine window must be remembered");
   assert.equal(storedPreference.auto_refresh, false, "a paused live stream must be remembered");
@@ -1674,11 +1736,21 @@ async function testLogPreferenceRestoreRuntime() {
   assert.match(document.querySelector(".core-log-status").textContent, /显示 1 条结果/);
   assert.match(document.querySelector(".core-log-row pre").textContent, /pressure entry 1999/);
   document.querySelector("[data-toggle-core-log-refresh]").click();
-  assert.equal(JSON.parse(localStorage.getItem("qcontrolhub:core-log-preferences")).auto_refresh, true, "resuming the restored stream must be remembered");
+  assert.equal(JSON.parse(accountStorage.getItem("qcontrolhub:core-log-preferences")).auto_refresh, true, "resuming the restored stream must be remembered");
 }
 
 try {
-  if (mode === "presets") {
+  if (mode === "sharing" || mode === "sharing-mobile") {
+    const { testAgentSharingRuntime } = await import("./sharing_browser_runtime.mjs");
+    await testAgentSharingRuntime();
+  } else if (mode === "users" || mode === "users-mobile") {
+    const { testUsersRuntime } = await import("./users_browser_runtime.mjs");
+    await testUsersRuntime(new URLSearchParams(location.search).has("preview"));
+  } else if (mode === "config-scope" || mode === "substore-scope") {
+    const { testConfigScopeRuntime, testSubStoreScopeRuntime } = await import("./config_scope_browser_runtime.mjs");
+    const test = mode === "config-scope" ? testConfigScopeRuntime : testSubStoreScopeRuntime;
+    await test(new URLSearchParams(location.search).has("preview"));
+  } else if (mode === "presets") {
     const { testPresetsRuntime } = await import("./presets_browser_runtime.mjs");
     await testPresetsRuntime(new URLSearchParams(location.search).has("preview"));
   } else if (mode === "config-migration") {
@@ -1856,6 +1928,7 @@ try {
   else if (mode === "ports") await testPortNamesAndRuntimeRefresh();
   else if (mode === "regions") await testRegionRuntime();
   else if (mode === "empty") await testEmptyRuntime();
+  else if (mode.startsWith("shared-node")) await testSharedNodeRuntime();
   else if (mode === "logs") await testLargeLogRuntime();
   else if (mode === "logs-restore") await testLogPreferenceRestoreRuntime();
   else await testReadonlyRuntime();
@@ -1869,3 +1942,4 @@ try {
   document.querySelector("#browser-smoke-result").textContent = String(error?.stack || error);
   console.error(error);
 }
+import { accountStorage, setStorageAccount } from "./modules/account-storage.js";

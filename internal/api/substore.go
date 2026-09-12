@@ -29,10 +29,12 @@ type subStoreSyncAddress struct {
 	Source  string `json:"source"`
 	Family  string `json:"family"`
 	URI     string `json:"-"`
+	Mihomo  string `json:"-"`
 }
 
 type subStoreSyncProfile struct {
 	AgentID     string                `json:"agent_id"`
+	ConfigID    string                `json:"config_id"`
 	AgentName   string                `json:"agent_name"`
 	AgentStatus string                `json:"agent_status"`
 	Engine      core.Engine           `json:"engine"`
@@ -46,10 +48,12 @@ type subStoreSyncProfile struct {
 	Selected    bool                  `json:"selected"`
 	Available   bool                  `json:"available"`
 	URI         string                `json:"-"`
+	Mihomo      string                `json:"-"`
+	MihomoError string                `json:"mihomo_error,omitempty"`
 }
 
 func (profile subStoreSyncProfile) key() string {
-	return profile.AgentID + "\x00" + string(profile.Engine) + "\x00" + profile.ProfileTag
+	return profile.AgentID + "\x00" + string(profile.Engine) + "\x00" + profile.ProfileTag + "\x00" + profile.ConfigID
 }
 
 type subStoreSyncResource struct {
@@ -73,6 +77,7 @@ type subStoreTargetRequest struct {
 	DisplayName      string `json:"display_name"`
 	SubscriptionName string `json:"subscription_name"`
 	SyncMode         string `json:"sync_mode"`
+	SyncFormat       string `json:"sync_format"`
 	RenameRemote     bool   `json:"rename_remote"`
 }
 
@@ -90,6 +95,7 @@ type subStoreSyncResult struct {
 type subStoreImportTargetRequest struct {
 	SubscriptionName string `json:"subscription_name"`
 	DisplayName      string `json:"display_name"`
+	SyncFormat       string `json:"sync_format"`
 }
 
 type subStoreRemoteTarget struct {
@@ -185,6 +191,18 @@ func (s *Server) getSubStoreSync(w http.ResponseWriter, request *http.Request) {
 	writeJSON(w, http.StatusOK, resource)
 }
 
+func (s *Server) subStoreMutation(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, request *http.Request) {
+		release, err := s.store.TryLockSubStoreOperation(request.Context())
+		if err != nil {
+			writeStoreError(w, err)
+			return
+		}
+		defer release()
+		next(w, request)
+	}
+}
+
 func (s *Server) subStoreSyncResource(ctx context.Context, targetID string) (subStoreSyncResource, error) {
 	settings, err := s.store.SubStoreSyncSettings(ctx)
 	if err != nil {
@@ -245,8 +263,9 @@ func (s *Server) availableSubStoreProfiles(ctx context.Context, selections []cor
 				continue
 			}
 			profile := subStoreSyncProfile{
-				AgentID: entry.AgentID, AgentName: displayName, AgentStatus: entry.AgentStatus, Engine: entry.Engine,
+				AgentID: entry.AgentID, ConfigID: entry.ConfigID, AgentName: displayName, AgentStatus: entry.AgentStatus, Engine: entry.Engine,
 				ProfileTag: item.Tag, Protocol: item.Protocol, Port: item.Port, URI: item.Profile.URI, Available: true,
+				Mihomo: item.Profile.Mihomo, MihomoError: item.Profile.MihomoError,
 				AddressMode: core.SubStoreAddressModeAuto,
 				DefaultName: strings.TrimSpace(displayName + " · " + item.Tag),
 			}
@@ -260,7 +279,7 @@ func (s *Server) availableSubStoreProfiles(ctx context.Context, selections []cor
 				for _, candidate := range option.Profiles {
 					if candidate.Tag == item.Tag {
 						profile.Addresses = append(profile.Addresses, subStoreSyncAddress{
-							Address: option.Address, Source: option.Source, Family: option.Family, URI: candidate.Profile.URI,
+							Address: option.Address, Source: option.Source, Family: option.Family, URI: candidate.Profile.URI, Mihomo: candidate.Profile.Mihomo,
 						})
 						break
 					}
@@ -274,7 +293,7 @@ func (s *Server) availableSubStoreProfiles(ctx context.Context, selections []cor
 					source = "手动设置"
 				}
 				profile.Addresses = []subStoreSyncAddress{{
-					Address: item.Address, Source: source, Family: clientAddressFamily(item.Address), URI: item.Profile.URI,
+					Address: item.Address, Source: source, Family: clientAddressFamily(item.Address), URI: item.Profile.URI, Mihomo: item.Profile.Mihomo,
 				}}
 			}
 			if selection, ok := selected[profile.key()]; ok {
@@ -291,7 +310,7 @@ func (s *Server) availableSubStoreProfiles(ctx context.Context, selections []cor
 			continue
 		}
 		profiles = append(profiles, subStoreSyncProfile{
-			AgentID: selection.AgentID, Engine: selection.Engine, ProfileTag: selection.ProfileTag,
+			AgentID: selection.AgentID, ConfigID: selection.ConfigID, Engine: selection.Engine, ProfileTag: selection.ProfileTag,
 			DefaultName: selection.CustomName, CustomName: selection.CustomName, AddressMode: selection.AddressMode,
 			Addresses: []subStoreSyncAddress{}, Selected: true, Available: false,
 		})
@@ -314,12 +333,28 @@ func (s *Server) putSubStoreSettings(w http.ResponseWriter, request *http.Reques
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	// Serialize both the account and the backend being joined. Locking only
+	// the previous backend lets a concurrent relink race a credential change.
+	endpoint := strings.TrimSpace(input.EndpointURL)
+	if endpoint != "" {
+		var err error
+		endpoint, err = normalizeSubStoreEndpoint(endpoint)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+	release, err := s.store.TryLockSubStoreOperation(request.Context(), endpoint)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	defer release()
 	current, err := s.store.SubStoreSyncSettings(request.Context())
 	if err != nil {
 		writeStoreError(w, err)
 		return
 	}
-	endpoint := strings.TrimSpace(input.EndpointURL)
 	if endpoint == "" && current.Configured {
 		endpoint = current.EndpointURL
 	}
@@ -356,7 +391,7 @@ func (s *Server) createSubStoreTarget(w http.ResponseWriter, request *http.Reque
 	if mode == "" {
 		mode = core.SubStoreSyncModeIncremental
 	}
-	target, err := s.store.CreateSubStoreSyncTarget(request.Context(), name, mode)
+	target, err := s.store.CreateSubStoreSyncTarget(request.Context(), name, mode, input.SyncFormat)
 	if err != nil {
 		writeStoreError(w, err)
 		return
@@ -385,6 +420,10 @@ func (s *Server) updateSubStoreTarget(w http.ResponseWriter, request *http.Reque
 	if mode == "" {
 		mode = target.SyncMode
 	}
+	format := strings.TrimSpace(input.SyncFormat)
+	if format == "" {
+		format = target.SyncFormat
+	}
 	if input.RenameRemote {
 		subscriptionName = displayName
 		settings, settingsErr := s.store.SubStoreSyncSettings(request.Context())
@@ -397,7 +436,7 @@ func (s *Server) updateSubStoreTarget(w http.ResponseWriter, request *http.Reque
 			return
 		}
 	}
-	updated, err := s.store.UpdateSubStoreSyncTarget(request.Context(), target.ID, displayName, subscriptionName, mode)
+	updated, err := s.store.UpdateSubStoreSyncTarget(request.Context(), target.ID, displayName, subscriptionName, mode, format)
 	if err != nil {
 		writeStoreError(w, err)
 		return
@@ -408,7 +447,7 @@ func (s *Server) updateSubStoreTarget(w http.ResponseWriter, request *http.Reque
 			_, settingsErr = s.renameSubStoreSubscription(request.Context(), settings, target, subscriptionName)
 		}
 		if settingsErr != nil {
-			if _, rollbackErr := s.store.UpdateSubStoreSyncTarget(request.Context(), target.ID, target.DisplayName, target.SubscriptionName, target.SyncMode); rollbackErr != nil {
+			if _, rollbackErr := s.store.UpdateSubStoreSyncTarget(request.Context(), target.ID, target.DisplayName, target.SubscriptionName, target.SyncMode, target.SyncFormat); rollbackErr != nil {
 				writeInternalError(w, fmt.Errorf("rename Sub-Store group: %v; roll back local target: %w", settingsErr, rollbackErr))
 				return
 			}
@@ -442,9 +481,16 @@ func (s *Server) listSubStoreRemoteTargets(w http.ResponseWriter, request *http.
 	}
 	importedNames := make(map[string]struct{}, len(targets))
 	importedOwners := make(map[string]struct{}, len(targets))
+	visibleTargets := make(map[string]bool, len(targets))
 	for _, target := range targets {
+		visibleTargets[target.ID] = true
 		importedNames[target.SubscriptionName] = struct{}{}
 		importedOwners[target.IntegrationID] = struct{}{}
+	}
+	claims, err := s.store.SubStoreTargetClaims(request.Context())
+	if err != nil {
+		writeStoreError(w, err)
+		return
 	}
 	result := make([]subStoreRemoteTarget, 0, len(subscriptions))
 	for _, subscription := range subscriptions {
@@ -454,6 +500,16 @@ func (s *Server) listSubStoreRemoteTargets(w http.ResponseWriter, request *http.
 			continue
 		}
 		owner, _ := subscription["qcontrolhub_integration_id"].(string)
+		hidden := false
+		for _, claim := range claims {
+			if !visibleTargets[claim.ID] && (claim.SubscriptionName == name || (owner != "" && claim.IntegrationID == owner)) {
+				hidden = true
+				break
+			}
+		}
+		if hidden {
+			continue
+		}
 		_, importedByName := importedNames[name]
 		_, importedByOwner := importedOwners[owner]
 		content, _ := subscription["content"].(string)
@@ -518,6 +574,17 @@ func (s *Server) importSubStoreRemoteTarget(w http.ResponseWriter, request *http
 	}
 	integrationID, _ := remote["qcontrolhub_integration_id"].(string)
 	integrationID = strings.TrimSpace(integrationID)
+	claims, err := s.store.SubStoreTargetClaims(request.Context())
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	for _, claim := range claims {
+		if claim.SubscriptionName == name || (integrationID != "" && claim.IntegrationID == integrationID) {
+			writeError(w, http.StatusConflict, "该 Sub-Store 组已关联其他同步组")
+			return
+		}
+	}
 	originalIntegrationID := integrationID
 	// A newly created local target must own the remote group with a fresh
 	// identity. Reusing an identity left by another control plane would make the
@@ -531,7 +598,7 @@ func (s *Server) importSubStoreRemoteTarget(w http.ResponseWriter, request *http
 			return
 		}
 	}
-	target, err := s.store.ImportSubStoreSyncTarget(request.Context(), name, integrationID)
+	target, err := s.store.ImportSubStoreSyncTarget(request.Context(), name, integrationID, input.SyncFormat)
 	if err != nil {
 		writeStoreError(w, err)
 		return
@@ -581,6 +648,15 @@ func (s *Server) linkSubStoreRemoteTarget(w http.ResponseWriter, request *http.R
 		writeStoreError(w, err)
 		return
 	}
+	format := target.SyncFormat
+	if strings.TrimSpace(input.SyncFormat) != "" {
+		var valid bool
+		format, valid = core.NormalizeSubStoreSyncFormat(strings.TrimSpace(input.SyncFormat))
+		if !valid {
+			writeError(w, http.StatusBadRequest, "Sub-Store 同步格式必须是 url 或 mihomo")
+			return
+		}
+	}
 	settings, err := s.store.SubStoreSyncSettings(request.Context())
 	if err != nil {
 		writeStoreError(w, err)
@@ -624,7 +700,7 @@ func (s *Server) linkSubStoreRemoteTarget(w http.ResponseWriter, request *http.R
 		writeError(w, http.StatusNotFound, "Sub-Store 中没有找到该订阅组")
 		return
 	}
-	localTargets, err := s.store.ListSubStoreSyncTargets(request.Context())
+	localTargets, err := s.store.SubStoreTargetClaims(request.Context())
 	if err != nil {
 		writeStoreError(w, err)
 		return
@@ -645,8 +721,8 @@ func (s *Server) linkSubStoreRemoteTarget(w http.ResponseWriter, request *http.R
 		}
 	}
 	if name == target.SubscriptionName && remoteOwner == target.IntegrationID {
-		if displayName != target.DisplayName {
-			updated, updateErr := s.store.UpdateSubStoreSyncTarget(request.Context(), target.ID, displayName, target.SubscriptionName, target.SyncMode)
+		if displayName != target.DisplayName || format != target.SyncFormat {
+			updated, updateErr := s.store.UpdateSubStoreSyncTarget(request.Context(), target.ID, displayName, target.SubscriptionName, target.SyncMode, format)
 			if updateErr != nil {
 				writeStoreError(w, updateErr)
 				return
@@ -718,7 +794,7 @@ func (s *Server) linkSubStoreRemoteTarget(w http.ResponseWriter, request *http.R
 			return
 		}
 	}
-	updated, updateErr := s.store.UpdateSubStoreSyncTarget(request.Context(), target.ID, displayName, name, target.SyncMode)
+	updated, updateErr := s.store.UpdateSubStoreSyncTarget(request.Context(), target.ID, displayName, name, target.SyncMode, format)
 	if updateErr != nil {
 		if restoreErr := restoreOwnership(); restoreErr != nil {
 			writeInternalError(w, fmt.Errorf("link Sub-Store group: %v; restore ownership: %w", updateErr, restoreErr))
@@ -865,6 +941,16 @@ func (s *Server) putSubStoreSelections(w http.ResponseWriter, request *http.Requ
 		available[profile.key()] = profile
 	}
 	for index := range input.Selections {
+		if input.Selections[index].ConfigID == "" {
+			// Older clients omit config_id. Resolve it only from the currently
+			// visible deployment, then persist the exact identity.
+			for _, profile := range profiles {
+				if profile.AgentID == input.Selections[index].AgentID && profile.Engine == input.Selections[index].Engine && profile.ProfileTag == input.Selections[index].ProfileTag {
+					input.Selections[index].ConfigID = profile.ConfigID
+					break
+				}
+			}
+		}
 		profile, ok := available[input.Selections[index].Key()]
 		if !ok || !profile.Available {
 			writeError(w, http.StatusBadRequest, "选择中包含已不可用的客户端节点，请刷新后重试")
@@ -956,7 +1042,7 @@ func (s *Server) runSubStoreSync(w http.ResponseWriter, request *http.Request) {
 			writeError(w, http.StatusConflict, err.Error())
 			return
 		}
-		nodes, selectionErr := subStoreNodesForSelection(profile, selection)
+		nodes, selectionErr := subStoreNodesForSelection(profile, selection, target.SyncFormat)
 		if selectionErr != nil {
 			err = fmt.Errorf("客户端节点 %s 无法同步: %w", selection.CustomName, selectionErr)
 			_ = s.store.RecordSubStoreSyncResult(request.Context(), target.ID, err)
@@ -1017,7 +1103,25 @@ func subStoreIPv6NodeName(name string) string {
 	return name + suffix
 }
 
-func subStoreNodesForSelection(profile subStoreSyncProfile, selection core.SubStoreSyncSelection) ([]string, error) {
+func subStoreNodesForSelection(profile subStoreSyncProfile, selection core.SubStoreSyncSelection, formats ...string) ([]string, error) {
+	format := core.SubStoreSyncFormatURL
+	if len(formats) > 0 {
+		var valid bool
+		format, valid = core.NormalizeSubStoreSyncFormat(formats[0])
+		if !valid {
+			return nil, errors.New("Sub-Store 同步格式必须是 url 或 mihomo")
+		}
+	}
+	if format == core.SubStoreSyncFormatMihomo {
+		if profile.MihomoError != "" {
+			return nil, errors.New(profile.MihomoError)
+		}
+		profile.URI = profile.Mihomo
+		profile.Addresses = append([]subStoreSyncAddress(nil), profile.Addresses...)
+		for index := range profile.Addresses {
+			profile.Addresses[index].URI = profile.Addresses[index].Mihomo
+		}
+	}
 	mode, valid := core.NormalizeSubStoreAddressMode(selection.AddressMode)
 	if !valid || !subStoreProfileSupportsMode(profile, mode) {
 		return nil, errors.New("所选 IP 地址已不可用，请重新选择地址模式")

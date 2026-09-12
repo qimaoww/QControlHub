@@ -1,6 +1,17 @@
 const engines = ["mihomo", "xray", "sing-box", "ss-rust"];
 const names = { mihomo: "Mihomo", xray: "Xray", "sing-box": "sing-box", "ss-rust": "Shadowsocks Rust" };
 
+export function sharedEngineNames(selected = []) {
+  return engines.filter(engine => selected.includes(engine)).map(engine => names[engine]).join(" / ") || "未分配";
+}
+
+export function sharedEngineChoices(selected = [], supported = []) {
+  return `<fieldset class="shared-engine-options"><legend>内核</legend><div>${engines
+    .filter(engine => supported.includes(engine) || selected.includes(engine))
+    .map(engine => `<label><input type="checkbox" name="engines" value="${engine}" ${selected.includes(engine) ? "checked" : ""}><span>${names[engine]}${supported.includes(engine) ? "" : " · 不可用"}</span></label>`)
+    .join("") || '<span class="settings-hint">Agent 尚未声明内核</span>'}</div></fieldset>`;
+}
+
 export function engineCapabilityToggles(selected, { supported = engines, writable = true, node = false, transitions = {} } = {}) {
   return `<div class="core-capability-list" role="group" aria-label="${node ? "节点内核能力" : "新 Agent 默认内核能力"}">${engines.map((engine) => {
     const available = supported.includes(engine);

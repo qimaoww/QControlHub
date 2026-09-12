@@ -51,11 +51,13 @@ func TestChineseErrorMessages(t *testing.T) {
 	}
 	for original, want := range map[string]string{
 		"conflict: sing-box core tasks are disabled because an existing service could not be mapped safely: unsupported executable wrapper": "现有 sing-box 服务无法安全接管，已禁用该内核的任务。请检查现有服务布局后重新发现。原始原因（供排查）：unsupported executable wrapper",
-		"net.ipv4.tcp_rmem requires 3 integers":                   "参数 net.ipv4.tcp_rmem 需要填写 3 个整数。",
-		"net.ipv4.tcp_rmem requires ordered integers in [1, 100]": "参数 net.ipv4.tcp_rmem 需要按从小到大的顺序填写整数，范围为 1 到 100。",
-		`invalid JSON body: json: unknown field "typo"`:           "请求包含不支持的字段 typo，请检查字段名称或刷新页面后重试。",
-		"conflict: invalid or duplicate engine \"xray\"":          "内核 xray 无效或重复，请重新选择。",
-		"预设配置无法建立独立出口归属，未保存或部署：no explicit default outbound":      "预设配置无法建立独立出口归属，未保存或部署：未配置明确的默认出口，请先设置默认出口再启用统计。",
+		"net.ipv4.tcp_rmem requires 3 integers":                              "参数 net.ipv4.tcp_rmem 需要填写 3 个整数。",
+		"net.ipv4.tcp_rmem requires ordered integers in [1, 100]":            "参数 net.ipv4.tcp_rmem 需要按从小到大的顺序填写整数，范围为 1 到 100。",
+		`invalid JSON body: json: unknown field "typo"`:                      "请求包含不支持的字段 typo，请检查字段名称或刷新页面后重试。",
+		"conflict: invalid or duplicate engine \"xray\"":                     "内核 xray 无效或重复，请重新选择。",
+		"预设配置无法建立独立出口归属，未保存或部署：no explicit default outbound":                 "预设配置无法建立独立出口归属，未保存或部署：未配置明确的默认出口，请先设置默认出口再启用统计。",
+		"invalid input: 独立出口校验失败：Mihomo independent exits require rule mode": "独立出口校验失败：独立出口仅支持 Mihomo 的 rule 模式。",
+		"独立出口校验失败：unknown internal detail /private/path":                     "独立出口校验失败：提交的参数或配置无效，请检查输入并刷新页面后重试。",
 	} {
 		if got := chineseErrorMessage(400, original); got != want {
 			t.Errorf("got %q, want %q", got, want)

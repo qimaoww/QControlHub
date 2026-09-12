@@ -74,4 +74,27 @@ await assert.rejects(requestJSON("/test", { signal: AbortSignal.abort(timeout) }
 await assert.rejects(send(null, { fetchImpl: async () => { throw abort; } }), (error) => error === abort);
 await assert.rejects(send({ ok: true, status: 200, json: async () => { throw abort; } }), (error) => error === abort);
 await assert.rejects(send({ ok: false, status: 503, json: async () => { throw abort; } }), (error) => error === abort);
+for (const status of [200, 401, 403, 500]) {
+  let current = true;
+  await assert.rejects(send(null, {
+    isCurrent: () => current,
+    fetchImpl: async () => {
+      current = false;
+      return new Response('{"private":"previous account"}', { status });
+    },
+  }), error => error.name === "AbortError");
+}
+assert.equal(unauthorized, 1, "a previous account's 401 must not expire the new session");
+for (const ok of [true, false]) {
+  let current = true;
+  await assert.rejects(send({
+    ok, status: ok ? 200 : 409,
+    json: async () => { current = false; return { private: "previous account" }; },
+  }, { isCurrent: () => current }), error => error.name === "AbortError",
+  "a slow JSON response must not cross an account switch");
+}
+await assert.rejects(send(null, {
+  isCurrent: () => false,
+  fetchImpl: async () => { throw new Error("old private network diagnostic"); },
+}), error => error.name === "AbortError");
 console.log("Chinese error messages smoke tests passed");

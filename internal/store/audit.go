@@ -37,9 +37,9 @@ func recordAuditWithExecutor(ctx context.Context, executor auditExecutor, entry 
 		entry.ActedAt = time.Now().UTC()
 	}
 	_, err := executor.Exec(ctx, `
-		INSERT INTO audit_logs (acted_at, actor, action, target, detail, remote_ip)
-		VALUES ($1,$2,$3,$4,$5,$6)`,
-		entry.ActedAt, entry.Actor, entry.Action, entry.Target, entry.Detail, entry.RemoteIP)
+		INSERT INTO audit_logs (acted_at, actor, action, target, detail, remote_ip,owner_id)
+		VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+		entry.ActedAt, entry.Actor, entry.Action, entry.Target, entry.Detail, entry.RemoteIP, scopeForConfig(ctx).OwnerID)
 	if err != nil {
 		return fmt.Errorf("record audit log: %w", err)
 	}
@@ -61,9 +61,12 @@ func (s *Store) ListAuditLogs(ctx context.Context, limit int) ([]core.AuditLogEn
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
+	args := []any{limit}
+	where := ownerClause(ctx, "owner_id", &args)
+	where += auditHiddenNodeClause(ctx, &args)
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, acted_at, actor, action, target, detail, remote_ip
-		FROM audit_logs ORDER BY acted_at DESC, id DESC LIMIT $1`, limit)
+		FROM audit_logs WHERE true`+where+` ORDER BY acted_at DESC, id DESC LIMIT $1`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list audit logs: %w", err)
 	}
@@ -85,7 +88,9 @@ func (s *Store) ListAuditLogs(ctx context.Context, limit int) ([]core.AuditLogEn
 // PruneAuditLogs deletes entries older than the retention window and returns
 // the number of removed rows.
 func (s *Store) PruneAuditLogs(ctx context.Context, olderThan time.Time) (int64, error) {
-	result, err := s.pool.Exec(ctx, `DELETE FROM audit_logs WHERE acted_at < $1`, olderThan)
+	args := []any{olderThan}
+	where := workspaceOwnerClause(ctx, "owner_id", &args)
+	result, err := s.pool.Exec(ctx, `DELETE FROM audit_logs WHERE acted_at < $1`+where, args...)
 	if err != nil {
 		return 0, fmt.Errorf("prune audit logs: %w", err)
 	}

@@ -38,11 +38,11 @@ func TestClientProfileNamesAreScopedToDeployedPorts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := db.EnrollAgent(ctx, core.EnrollRequest{Name: "ports", OS: "linux", Arch: "amd64", Capabilities: []core.Engine{core.EngineShadowsocksRust, core.EngineXray}, PublicKey: authn.EncodePublicKey(randomEnrollmentKey(t))}, credential.Token)
+	agent, err := db.EnrollAgent(ctx, core.EnrollRequest{Name: "ports", OS: "linux", Arch: "amd64", Capabilities: []core.Engine{core.EngineShadowsocksRust, core.EngineXray}, Features: []string{core.AgentFeatureIndependentEgress}, PublicKey: authn.EncodePublicKey(randomEnrollmentKey(t))}, credential.Token)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Runtime: map[core.Engine]core.RuntimeState{core.EngineShadowsocksRust: {Installed: true}, core.EngineXray: {Installed: true}}}); err != nil {
+	if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Features: []string{core.AgentFeatureIndependentEgress}, Runtime: map[core.Engine]core.RuntimeState{core.EngineShadowsocksRust: {Installed: true}, core.EngineXray: {Installed: true}}}); err != nil {
 		t.Fatal(err)
 	}
 	address, legacyName := "edge.example.com", "Legacy node name"
@@ -187,7 +187,7 @@ func TestClientProfileNamesAreScopedToDeployedPorts(t *testing.T) {
 	if err != nil || unchanged.Version != config.Version || unchanged.Content != config.Content {
 		t.Fatal("display rename mutated core configuration")
 	}
-	if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Version: "refresh"}); err != nil {
+	if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Version: "refresh", Features: []string{core.AgentFeatureIndependentEgress}}); err != nil {
 		t.Fatal(err)
 	}
 	checkNames("香港 & ATT <edge>", "另一个端口", "one")
@@ -272,11 +272,11 @@ func TestClientProfileDisplayParametersAreScopedToDeployedPorts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := db.EnrollAgent(ctx, core.EnrollRequest{Name: "display", OS: "linux", Arch: "amd64", Capabilities: []core.Engine{core.EngineShadowsocksRust}, PublicKey: authn.EncodePublicKey(randomEnrollmentKey(t))}, credential.Token)
+	agent, err := db.EnrollAgent(ctx, core.EnrollRequest{Name: "display", OS: "linux", Arch: "amd64", Capabilities: []core.Engine{core.EngineShadowsocksRust}, Features: []string{core.AgentFeatureIndependentEgress}, PublicKey: authn.EncodePublicKey(randomEnrollmentKey(t))}, credential.Token)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Runtime: map[core.Engine]core.RuntimeState{core.EngineShadowsocksRust: {Installed: true}}}); err != nil {
+	if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Features: []string{core.AgentFeatureIndependentEgress}, Runtime: map[core.Engine]core.RuntimeState{core.EngineShadowsocksRust: {Installed: true}}}); err != nil {
 		t.Fatal(err)
 	}
 	address, mode := "edge.example.com", core.SubStoreAddressModeIPv4

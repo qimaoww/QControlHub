@@ -70,7 +70,7 @@ func (s *Server) updateUser(w http.ResponseWriter, request *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if input.DisplayName == nil && input.Role == nil && input.Password == nil && input.Disabled == nil {
+	if input.DisplayName == nil && input.Role == nil && input.Password == nil && input.Disabled == nil && input.Permissions == nil {
 		writeError(w, http.StatusBadRequest, "at least one user field must be provided")
 		return
 	}
@@ -113,6 +113,7 @@ func (s *Server) updateUser(w http.ResponseWriter, request *http.Request) {
 	}
 	s.recordAudit(request, "user.updated", user.ID, user.Username)
 	s.revokeUserSessions(user.ID)
+	s.refreshUserAgentTrafficPolicies(request, user.ID)
 	writeJSON(w, http.StatusOK, user)
 }
 
@@ -132,6 +133,7 @@ func (s *Server) deleteUser(w http.ResponseWriter, request *http.Request) {
 	}
 	s.recordAudit(request, "user.disabled", user.ID, user.Username)
 	s.revokeUserSessions(user.ID)
+	s.refreshUserAgentTrafficPolicies(request, user.ID)
 	w.WriteHeader(http.StatusNoContent)
 }
 

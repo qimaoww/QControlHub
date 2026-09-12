@@ -12,11 +12,11 @@ import (
 // Official builds may omit with_v2ray_api. Linux routing_mark supplies the
 // same dedicated-outbound attribution without requiring a custom binary.
 func PrepareMarkedSingBoxAccounting(content string) (AccountingPlan, error) {
-	var root map[string]any
-	decoder := json.NewDecoder(strings.NewReader(content))
-	decoder.UseNumber()
-	if err := decoder.Decode(&root); err != nil || root == nil {
-		return AccountingPlan{}, fmt.Errorf("invalid sing-box configuration")
+	// Validate the original document before normalization. Decoding and
+	// re-encoding first would erase duplicate fields and trailing JSON.
+	root, err := decodeAccountingRoot(core.EngineSingBox, content)
+	if err != nil {
+		return AccountingPlan{}, err
 	}
 	outs, _ := root["outbounds"].([]any)
 	for _, raw := range outs {
@@ -42,7 +42,7 @@ func PrepareMarkedSingBoxAccounting(content string) (AccountingPlan, error) {
 	if err != nil {
 		return plan, err
 	}
-	decoder = json.NewDecoder(strings.NewReader(plan.Content))
+	decoder := json.NewDecoder(strings.NewReader(plan.Content))
 	decoder.UseNumber()
 	if err := decoder.Decode(&root); err != nil {
 		return plan, err

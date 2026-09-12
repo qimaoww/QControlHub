@@ -10,11 +10,13 @@ build:
 	CGO_ENABLED=0 go build -buildvcs=false -trimpath -ldflags '$(LDFLAGS)' -o bin/qcontrol-plane ./cmd/control-plane
 	CGO_ENABLED=0 go build -buildvcs=false -trimpath -ldflags '$(LDFLAGS)' -o bin/qagent ./cmd/agent
 
+# Schemas isolate data, not PostgreSQL's database-wide vacuum horizon.
+# Keep packages sequential so migration tests cannot pin HOT-page measurements.
 test:
-	go test ./...
+	go test -p 1 ./...
 
 alpine-test:
-	@packages="$$(go list ./... | sed '\|/internal/agent$$|d')"; go test $$packages
+	@packages="$$(go list ./... | sed '\|/internal/agent$$|d')"; go test -p 1 $$packages
 	go test ./internal/agent -run 'OpenRC|PerServiceManager|AgentUpgrade|ManagedCorePrerequisites|SystemBBR'
 
 upgrade-sandbox-test:

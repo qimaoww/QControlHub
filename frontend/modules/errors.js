@@ -62,14 +62,19 @@ export function diagnosticError(value) {
 export async function requestJSON(url, options, {
   fetchImpl = globalThis.fetch,
   isLogin = false,
+  isCurrent = () => true,
   onUnauthorized = () => {},
 } = {}) {
+  const assertCurrent = () => {
+    if (!isCurrent()) throw new DOMException("Account changed", "AbortError");
+  };
   const canceled = (cause) => cause?.name !== "TimeoutError"
     && (cause?.name === "AbortError" || options?.signal?.aborted);
   let response;
   try {
     response = await fetchImpl(url, options);
   } catch (cause) {
+    assertCurrent();
     // Navigation cancellation must remain silent and retain its identity.
     if (canceled(cause)) throw cause;
     const message = cause?.name === "TimeoutError"
@@ -77,6 +82,7 @@ export async function requestJSON(url, options, {
       : "无法连接服务器，请检查网络和面板地址；若刚提交了操作，请刷新确认结果，避免重复提交。";
     throw new Error(message, { cause });
   }
+  assertCurrent();
   if (!response.ok) {
     // Rendering login aborts the route signal. Do not read the response body
     // afterward: that would replace the authentication failure with AbortError.
@@ -90,9 +96,11 @@ export async function requestJSON(url, options, {
     try {
       body = await response.json();
     } catch (cause) {
+      assertCurrent();
       if (canceled(cause)) throw cause;
       // A proxy may return HTML instead of JSON.
     }
+    assertCurrent();
     const message = errorMessage(body?.error, response.status);
     const error = new Error(message);
     error.status = response.status;
@@ -100,8 +108,11 @@ export async function requestJSON(url, options, {
   }
   if (response.status === 204) return null;
   try {
-    return await response.json();
+    const body = await response.json();
+    assertCurrent();
+    return body;
   } catch (cause) {
+    assertCurrent();
     if (canceled(cause)) throw cause;
     const error = new Error("服务器响应不完整或格式无效，请刷新确认操作结果；若持续失败，请联系管理员检查后端和反向代理。", { cause });
     error.status = response.status;

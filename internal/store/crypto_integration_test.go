@@ -31,7 +31,7 @@ func TestEncryptedConfigStorageRoundTrip(t *testing.T) {
 	agent, enrollmentID := enrollTaskTestAgent(t, ctx, dataStore)
 	defer cleanupTaskTestAgent(dataStore, agent.ID, enrollmentID)
 
-	content := "mixed-port: 7890\nmode: rule\nproxies: []\nrules:\n  - MATCH,DIRECT\n"
+	content := "listeners: [{name: encrypted, type: http, port: 7890}]\nmode: rule\nproxies: []\nrules:\n  - MATCH,DIRECT\n"
 	saved, err := dataStore.SaveAgentConfig(ctx, core.Config{
 		AgentID: agent.ID, Name: "encrypted config", Engine: core.EngineMihomo, Content: content,
 	}, 0)
@@ -48,7 +48,7 @@ func TestEncryptedConfigStorageRoundTrip(t *testing.T) {
 	if err := dataStore.pool.QueryRow(ctx, `SELECT content FROM configs WHERE id=$1`, saved.ID).Scan(&stored); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(stored, "mixed-port") || !strings.HasPrefix(stored, keyedEncryptedPrefix) {
+	if strings.Contains(stored, "listeners") || !strings.HasPrefix(stored, keyedEncryptedPrefix) {
 		t.Fatalf("stored content is not sealed: %q", stored)
 	}
 	var revisionStored string

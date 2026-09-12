@@ -11,6 +11,7 @@ import (
 
 	"github.com/qimaoww/qcontrolhub/internal/authn"
 	"github.com/qimaoww/qcontrolhub/internal/core"
+	"github.com/qimaoww/qcontrolhub/internal/store"
 )
 
 const (
@@ -20,13 +21,17 @@ const (
 )
 
 type apiSession struct {
-	CSRF        string
-	ExpiresAt   time.Time
-	Role        core.Role
-	UserID      string
-	Username    string
-	Permissions []core.Permission
+	CSRF          string
+	ExpiresAt     time.Time
+	Role          core.Role
+	UserID        string
+	ConfigOwnerID string
+	Username      string
+	Permissions   []core.Permission
+	AuthRevision  int64
 }
+
+type validatedSessionKey struct{}
 
 func sessionTTL(value time.Duration) time.Duration {
 	if value <= 0 {
@@ -69,11 +74,15 @@ func (s *Server) login(w http.ResponseWriter, request *http.Request) {
 	role, ok := core.Role(""), false
 	permissions := []core.Permission(nil)
 	userID := ""
+	configOwnerID := ""
+	var authRevision int64
 	if username != "" && secret != "" && s.store != nil {
 		user, hash, lookupErr := s.store.UserForLogin(request.Context(), strings.ToLower(username))
 		if lookupErr == nil {
 			if authn.CheckPassword(hash, secret) {
 				role, ok, userID, permissions = user.Role, true, user.ID, user.Permissions
+				configOwnerID = user.ID
+				authRevision = user.AuthRevision
 				username = user.Username
 			}
 		} else {
@@ -88,6 +97,7 @@ func (s *Server) login(w http.ResponseWriter, request *http.Request) {
 	if !ok && (username == "" || strings.EqualFold(username, "admin")) {
 		if principal, found := s.principalForToken(secret); found {
 			role, ok, permissions = principal.Role, true, principal.Permissions
+			configOwnerID = principal.ConfigOwnerID
 		}
 	}
 	if !ok {
@@ -109,29 +119,35 @@ func (s *Server) login(w http.ResponseWriter, request *http.Request) {
 	expires := now.Add(s.sessionTTL)
 	s.sessionsMu.Lock()
 	s.pruneSessionsLocked(now)
-	s.sessions[token] = apiSession{CSRF: csrf, ExpiresAt: expires, Role: role, UserID: userID, Username: username, Permissions: append([]core.Permission(nil), permissions...)}
+	s.sessions[token] = apiSession{CSRF: csrf, ExpiresAt: expires, Role: role, UserID: userID, ConfigOwnerID: configOwnerID, Username: username, Permissions: append([]core.Permission(nil), permissions...), AuthRevision: authRevision}
 	s.sessionsMu.Unlock()
 	http.SetCookie(w, &http.Cookie{
 		Name: s.cookieName(), Value: token, Path: "/", Expires: expires,
 		MaxAge: int(s.sessionTTL.Seconds()), HttpOnly: true, Secure: s.secureTransport,
 		SameSite: http.SameSiteStrictMode,
 	})
-	s.recordAudit(request, "login.succeeded", "", string(role))
+	auditRequest := request.WithContext(store.WithConfigScope(request.Context(), configOwnerID, role == core.RoleAdmin))
+	s.recordAudit(auditRequest, "login.succeeded", "", string(role))
 	w.Header().Set("Cache-Control", "no-store")
 	if userID != "" && s.store != nil {
 		_ = s.store.RecordUserLogin(request.Context(), userID)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"role": role, "user_id": userID, "username": username, "permissions": permissions, "csrf_token": csrf, "expires_at": expires})
+	writeJSON(w, http.StatusOK, map[string]any{"role": role, "user_id": userID, "workspace_id": configOwnerID, "username": username, "permissions": permissions, "csrf_token": csrf, "expires_at": expires})
 }
 
 func (s *Server) session(w http.ResponseWriter, request *http.Request) {
+	var valid bool
+	request, valid = s.validateSession(w, request)
+	if !valid {
+		return
+	}
 	value, ok := s.sessionForRequest(request)
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "session expired")
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, http.StatusOK, map[string]any{"role": value.Role, "user_id": value.UserID, "username": value.Username, "permissions": value.Permissions, "csrf_token": value.CSRF, "expires_at": value.ExpiresAt})
+	writeJSON(w, http.StatusOK, map[string]any{"role": value.Role, "user_id": value.UserID, "workspace_id": value.ConfigOwnerID, "username": value.Username, "permissions": value.Permissions, "csrf_token": value.CSRF, "expires_at": value.ExpiresAt})
 }
 
 func (s *Server) logout(w http.ResponseWriter, request *http.Request) {
@@ -148,6 +164,9 @@ func (s *Server) logout(w http.ResponseWriter, request *http.Request) {
 }
 
 func (s *Server) sessionForRequest(request *http.Request) (apiSession, bool) {
+	if value, ok := request.Context().Value(validatedSessionKey{}).(apiSession); ok {
+		return value, true
+	}
 	cookie, err := request.Cookie(s.cookieName())
 	if err != nil || cookie.Value == "" {
 		return apiSession{}, false
@@ -158,6 +177,28 @@ func (s *Server) sessionForRequest(request *http.Request) (apiSession, bool) {
 	s.pruneSessionsLocked(now)
 	value, ok := s.sessions[cookie.Value]
 	return value, ok && value.ExpiresAt.After(now)
+}
+
+func (s *Server) validateSession(w http.ResponseWriter, request *http.Request) (*http.Request, bool) {
+	if bearerToken(request) != "" {
+		return request, true
+	}
+	value, ok := s.sessionForRequest(request)
+	if !ok || value.UserID == "" || s.store == nil {
+		return request, true // The normal authentication path handles no cookie.
+	}
+	user, err := s.store.UserForSession(request.Context(), value.UserID)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		writeInternalError(w, err)
+		return request, false
+	}
+	if err != nil || user.AuthRevision != value.AuthRevision {
+		s.revokeUserSessions(value.UserID)
+		writeError(w, http.StatusUnauthorized, "session expired")
+		return request, false
+	}
+	value.Role, value.Permissions, value.Username = user.Role, user.Permissions, user.Username
+	return request.WithContext(context.WithValue(request.Context(), validatedSessionKey{}, value)), true
 }
 
 func (s *Server) pruneSessionsLocked(now time.Time) {
@@ -194,6 +235,25 @@ func (s *Server) sessionUserID(request *http.Request) string {
 		return ""
 	}
 	return value.UserID
+}
+
+func (s *Server) configOwnerID(request *http.Request) string {
+	if token := bearerToken(request); token != "" {
+		principal, _ := s.principalForToken(token)
+		if principal.ConfigOwnerID == "" && principal.Role != core.RoleAdmin {
+			return tokenConfigOwnerID(token)
+		}
+		return principal.ConfigOwnerID
+	}
+	value, _ := s.sessionForRequest(request)
+	if value.UserID != "" {
+		return value.UserID
+	}
+	if value.ConfigOwnerID != "" || value.Role == core.RoleAdmin {
+		return value.ConfigOwnerID
+	}
+	// A principal without a durable identity must never inherit legacy data.
+	return "unassigned"
 }
 
 func (s *Server) revokeUserSessions(userID string) {
@@ -261,8 +321,10 @@ func (s *Server) recordAudit(request *http.Request, action, target, detail strin
 		return
 	}
 	entry := s.auditEntry(request, action, target, detail)
+	// Preserve the authenticated account even after its HTTP request ends.
+	auditContext := context.WithoutCancel(request.Context())
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		ctx, cancel := context.WithTimeout(auditContext, 2*time.Second)
 		defer cancel()
 		_ = s.writeAudit(ctx, entry)
 	}()

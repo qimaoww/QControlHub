@@ -69,6 +69,11 @@ const AgentFeaturePairedConfigFiles = "config-files-paired-v1"
 
 const AgentFeatureSystemBBR = "system-bbr-v1"
 
+// Older Agents may fall back to the original config when accounting cannot
+// be compiled. Configuration validation/deployment must negotiate fail-closed
+// independent egress before dispatch.
+const AgentFeatureIndependentEgress = "independent-egress-v1"
+
 const (
 	PublicIPProbeSourceAgent         = "agent-config"
 	PublicIPProbeSourceControlPlane  = "control-plane-config"
@@ -176,23 +181,25 @@ func (role Role) Valid() bool {
 // User is a durable panel login identity. Password hashes are intentionally
 // never included in this public model.
 type User struct {
-	ID          string       `json:"id"`
-	Username    string       `json:"username"`
-	DisplayName string       `json:"display_name,omitempty"`
-	Role        Role         `json:"role"`
-	Permissions []Permission `json:"permissions,omitempty"`
-	Disabled    bool         `json:"disabled"`
-	CreatedAt   time.Time    `json:"created_at"`
-	UpdatedAt   time.Time    `json:"updated_at"`
-	LastLoginAt *time.Time   `json:"last_login_at,omitempty"`
+	ID           string       `json:"id"`
+	Username     string       `json:"username"`
+	DisplayName  string       `json:"display_name,omitempty"`
+	Role         Role         `json:"role"`
+	Permissions  []Permission `json:"permissions,omitempty"`
+	Disabled     bool         `json:"disabled"`
+	CreatedAt    time.Time    `json:"created_at"`
+	UpdatedAt    time.Time    `json:"updated_at"`
+	LastLoginAt  *time.Time   `json:"last_login_at,omitempty"`
+	AuthRevision int64        `json:"-"`
 }
 
 type UserRequest struct {
-	Username    string       `json:"username"`
-	DisplayName string       `json:"display_name"`
-	Role        Role         `json:"role"`
-	Password    string       `json:"password"`
-	Permissions []Permission `json:"permissions,omitempty"`
+	Username       string       `json:"username"`
+	DisplayName    string       `json:"display_name"`
+	Role           Role         `json:"role"`
+	Password       string       `json:"password"`
+	Permissions    []Permission `json:"permissions,omitempty"`
+	AgentIsolation bool         `json:"agent_isolation"`
 }
 
 type UserUpdate struct {
@@ -330,6 +337,9 @@ type HostNetworkInterface struct {
 
 type Agent struct {
 	ID                         string                          `json:"id"`
+	OwnerID                    string                          `json:"-"`
+	CanManage                  bool                            `json:"can_manage"`
+	SharedEngines              []Engine                        `json:"shared_engines,omitempty"`
 	Name                       string                          `json:"name"`
 	Version                    string                          `json:"version,omitempty"`
 	OS                         string                          `json:"os"`
@@ -346,7 +356,33 @@ type Agent struct {
 	PublicKey                  []byte                          `json:"-"`
 	Status                     string                          `json:"status,omitempty"`
 	EnrollmentCommandAvailable bool                            `json:"enrollment_command_available,omitempty"`
-	Reinstalled                bool                            `json:"-"`
+	// AdminHidden lets the owner keep a node out of every administrator view
+	// while the node keeps running and accounting. Only the owner and explicit
+	// share recipients can see or manage it.
+	AdminHidden bool `json:"admin_hidden,omitempty"`
+	// CanHide tells the UI whether this principal may toggle AdminHidden. Only
+	// the node owner can, so administrators and compatibility tokens never see
+	// the control for someone else's node.
+	CanHide     bool `json:"can_hide,omitempty"`
+	Reinstalled bool `json:"-"`
+}
+
+// AgentDirectoryEntry is the read-only cross-account summary behind the
+// "other users' nodes" dialog. It deliberately excludes configuration bodies,
+// logs, metrics and tasks, and remains readable for hidden nodes so an
+// operator can still confirm that a node exists without managing it.
+type AgentDirectoryEntry struct {
+	ID            string    `json:"id"`
+	Name          string    `json:"name"`
+	OwnerID       string    `json:"owner_id"`
+	OwnerUsername string    `json:"owner_username"`
+	Status        string    `json:"status"`
+	Capabilities  []Engine  `json:"capabilities"`
+	Ports         []int     `json:"ports"`
+	AdminHidden   bool      `json:"admin_hidden"`
+	CanManage     bool      `json:"can_manage"`
+	EnrolledAt    time.Time `json:"enrolled_at"`
+	LastSeen      time.Time `json:"last_seen"`
 }
 
 // KomariNode is the read-only billing and traffic configuration returned by a
@@ -377,6 +413,7 @@ type KomariLink struct {
 
 type Config struct {
 	ID          string    `json:"id"`
+	OwnerID     string    `json:"owner_id,omitempty"`
 	AgentID     string    `json:"agent_id,omitempty"`
 	Name        string    `json:"name"`
 	Description string    `json:"description,omitempty"`
@@ -405,6 +442,7 @@ const (
 )
 
 type Task struct {
+	SharedTrafficID        string                 `json:"shared_traffic_id,omitempty"`
 	TCPSettings            TCPSettings            `json:"tcp_settings,omitempty"`
 	ID                     string                 `json:"id"`
 	AgentID                string                 `json:"agent_id"`
@@ -479,6 +517,9 @@ type EnrollmentTokenRequest struct {
 	TTLMinutes int    `json:"ttl_minutes"`
 	MaxUses    int    `json:"max_uses"`
 	Reusable   bool   `json:"reusable,omitempty"`
+	// AdminHidden is chosen when the node is added and copied to the Agent on
+	// first enrollment. The owner can change it later from the node settings.
+	AdminHidden bool `json:"admin_hidden,omitempty"`
 }
 
 type EnrollmentTokenCreated struct {
@@ -497,10 +538,11 @@ type HeartbeatRequest struct {
 }
 
 type TaskResultRequest struct {
-	LeaseID string `json:"lease_id"`
-	Success bool   `json:"success"`
-	Output  string `json:"output,omitempty"`
-	Error   string `json:"error,omitempty"`
+	LeaseID        string `json:"lease_id"`
+	Success        bool   `json:"success"`
+	Output         string `json:"output,omitempty"`
+	Error          string `json:"error,omitempty"`
+	TrafficSettled bool   `json:"traffic_settled,omitempty"`
 }
 
 const (
@@ -624,6 +666,7 @@ type AuditLogEntry struct {
 // that are rendered per node when the template is applied.
 type ConfigTemplate struct {
 	ID        string    `json:"id"`
+	OwnerID   string    `json:"owner_id,omitempty"`
 	Name      string    `json:"name"`
 	Engine    Engine    `json:"engine"`
 	Content   string    `json:"content"`

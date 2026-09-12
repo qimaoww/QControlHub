@@ -35,7 +35,7 @@ function normalizedFilters(value, engines) {
 
 export function savedCoreLogPreferences(storage, engines = []) {
   try {
-    const source = storage ?? globalThis.localStorage;
+    const source = storage ?? accountStorage;
     const parsed = JSON.parse(source?.getItem(coreLogPreferenceKey));
     const record =
       parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
@@ -54,7 +54,7 @@ export function saveCoreLogPreferences(
   engines = [],
 ) {
   try {
-    const target = storage ?? globalThis.localStorage;
+    const target = storage ?? accountStorage;
     const record = normalizedFilters(filters, engines);
     record.auto_refresh = autoRefresh !== false;
     target?.setItem(coreLogPreferenceKey, JSON.stringify(record));
@@ -62,3 +62,4 @@ export function saveCoreLogPreferences(
     // Private mode or a full quota must not break log filtering.
   }
 }
+import { accountStorage } from "./account-storage.js";

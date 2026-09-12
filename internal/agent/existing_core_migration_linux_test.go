@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
+	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
 )
 
 func TestExistingCoreMigrationSwitchesServicesAndPersistsCompletion(t *testing.T) {
@@ -396,6 +397,14 @@ func TestExistingSingBoxOfficialRelativeLogOutputMigrationSucceeds(t *testing.T)
 	importedSingBoxLogRoot = logRoot
 	t.Cleanup(func() { importedSingBoxLogRoot = previousLogRoot })
 	fixture, _ := configureSingBoxOfficialFixture(t, newExistingCoreMigrationFixture(t, false))
+	if err := os.WriteFile(fixture.existing.ConfigPath,
+		[]byte(`{"inbounds":[{"tag":"primary","type":"http","listen_port":21001}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(fixture.existing.ConfigDirectory, "10-outbounds.json"),
+		[]byte(`{"outbounds":[{"type":"direct","tag":"direct"}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(fixture.existing.ConfigDirectory, "20-log.json"),
 		[]byte(`{"log":{"level":"info","timestamp":true,"output":"runtime.log"}}`), 0o600); err != nil {
 		t.Fatal(err)
@@ -437,7 +446,7 @@ func TestExistingSingBoxOfficialRelativeLogOutputMigrationSucceeds(t *testing.T)
 	}); err != nil {
 		t.Fatalf("validate unchanged imported file log configuration: %v", err)
 	}
-	replacementConfig := `{"log":{"level":"info","output":"replacement.log"},"inbounds":[],"outbounds":[]}`
+	replacementConfig := `{"log":{"level":"info","output":"replacement.log"},"inbounds":[{"tag":"primary","type":"http","listen_port":21001}],"outbounds":[{"type":"direct","tag":"direct"}]}`
 	if _, err := restarted.Execute(context.Background(), core.Task{
 		Action: core.ActionDeploy, Engine: core.EngineSingBox, ConfigContent: replacementConfig,
 	}); err != nil {
@@ -457,7 +466,7 @@ func TestExistingSingBoxOfficialRelativeLogOutputMigrationSucceeds(t *testing.T)
 	if filePath != filepath.Join(logRoot, "replacement.log") {
 		t.Fatalf("file-to-file source path = %q", filePath)
 	}
-	failedConfig := `{"log":{"level":"info","output":"failed.log"},"inbounds":[],"outbounds":[]}`
+	failedConfig := `{"log":{"level":"info","output":"failed.log"},"inbounds":[{"tag":"primary","type":"http","listen_port":21001}],"outbounds":[{"type":"direct","tag":"direct"}]}`
 	if err := os.WriteFile(filepath.Join(fixture.stateDirectory, "fail-managed-restart"), []byte("1"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -483,7 +492,7 @@ func TestExistingSingBoxOfficialRelativeLogOutputMigrationSucceeds(t *testing.T)
 	if filePath != filepath.Join(logRoot, "replacement.log") {
 		t.Fatalf("rollback source path = %q", filePath)
 	}
-	consoleConfig := `{"log":{"level":"info","timestamp":true},"inbounds":[],"outbounds":[]}`
+	consoleConfig := `{"log":{"level":"info","timestamp":true},"inbounds":[{"tag":"primary","type":"http","listen_port":21001}],"outbounds":[{"type":"direct","tag":"direct"}]}`
 	if _, err := restarted.Execute(context.Background(), core.Task{
 		Action: core.ActionDeploy, Engine: core.EngineSingBox, ConfigContent: consoleConfig,
 	}); err != nil {
@@ -655,8 +664,13 @@ func TestPendingExistingServiceDoesNotBlockManagedCoreOperations(t *testing.T) {
 	if _, err := copyExistingCoreBinary(fixture.existing.Binary, fixture.managed.Binary); err != nil {
 		t.Fatalf("stage independently installed managed core: %v", err)
 	}
+	managedConfig := `{"inbounds":[{"tag":"managed","protocol":"http","port":21001}],"outbounds":[{"protocol":"freedom","tag":"direct"}]}`
+	accounted, err := serverconfig.PrepareAccounting(core.EngineXray, managedConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := fixture.executor.Execute(context.Background(), core.Task{
-		Action: core.ActionDeploy, Engine: core.EngineXray, ConfigContent: fixture.originalManagedConfig,
+		Action: core.ActionDeploy, Engine: core.EngineXray, ConfigContent: managedConfig,
 	}); err != nil {
 		t.Fatalf("deploy managed configuration while optional import remains: %v", err)
 	}
@@ -669,7 +683,7 @@ func TestPendingExistingServiceDoesNotBlockManagedCoreOperations(t *testing.T) {
 	managedSnapshot, err := fixture.executor.Execute(context.Background(), core.Task{
 		Action: core.ActionReadManagedConfig, Engine: core.EngineXray,
 	})
-	if err != nil || managedSnapshot != fixture.originalManagedConfig {
+	if err != nil || managedSnapshot != accounted.Content {
 		t.Fatalf("managed configuration snapshot = %q, %v", managedSnapshot, err)
 	}
 	fixture.assertServiceState(t, "xray.service", "active", "enabled")

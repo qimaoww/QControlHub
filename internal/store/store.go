@@ -22,10 +22,12 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/authn"
 	"github.com/qimaoww/qcontrolhub/internal/core"
 	"github.com/qimaoww/qcontrolhub/internal/netpolicy"
+	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
 )
 
 var (
 	ErrNotFound          = errors.New("not found")
+	ErrForbidden         = errors.New("forbidden")
 	ErrConflict          = errors.New("conflict")
 	ErrReplay            = errors.New("replayed request")
 	ErrInvalid           = errors.New("invalid input")
@@ -48,7 +50,7 @@ type storeExecutor interface {
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 51
+const currentSchemaVersion = 58
 
 func Open(ctx context.Context, databaseURL string, allowInsecureRemote bool) (*Store, error) {
 	return OpenWithConfigKey(ctx, databaseURL, allowInsecureRemote, "")
@@ -294,6 +296,91 @@ func (s *Store) migrate(ctx context.Context) error {
 	if _, err := tx.Exec(ctx, schemaSQL); err != nil {
 		return fmt.Errorf("apply PostgreSQL schema: %w", err)
 	}
+	if appliedVersion < 52 {
+		// Legacy selections referred only to a node/engine/tag. Pin them to the
+		// deployed configuration before independent user workspaces can replace
+		// that service with another user's identically named inbound.
+		if _, err := tx.Exec(ctx, `UPDATE substore_sync_items item SET config_id=COALESCE((
+			SELECT task.config_id FROM tasks task
+			WHERE task.agent_id=item.agent_id AND task.engine=item.engine
+			  AND task.action IN ('deploy','import-existing') AND task.status='succeeded'
+			ORDER BY task.finished_at DESC,task.created_at DESC,task.id DESC LIMIT 1
+		),'') WHERE item.config_id=''`); err != nil {
+			return fmt.Errorf("pin legacy Sub-Store configurations: %w", err)
+		}
+	}
+	if appliedVersion < 54 {
+		// Legacy nodes and add-node credentials have no trustworthy creator
+		// identity; keep them with the administrator instead of guessing an
+		// owner from whichever user most recently deployed a configuration.
+		if _, err := tx.Exec(ctx, `UPDATE panel_users SET agent_isolation=(role<>'admin')`); err != nil {
+			return fmt.Errorf("isolate panel accounts: %w", err)
+		}
+	}
+	if appliedVersion < 55 {
+		if err := s.migrateSubStoreBackends(ctx, tx); err != nil {
+			return err
+		}
+		// Legacy port display overrides belong to the exact last deployed
+		// configuration, not to the next account that reuses its listener.
+		if _, err := tx.Exec(ctx, `INSERT INTO config_client_preferences(config_id,label,value)
+			SELECT DISTINCT deployed.config_id,entry.key,entry.value
+			FROM (`+latestDeploymentsSQL+`) deployed JOIN agents agent ON agent.id=deployed.agent_id
+			JOIN configs config ON config.id=deployed.config_id
+			CROSS JOIN LATERAL jsonb_each_text(COALESCE(NULLIF(agent.labels,'null'::jsonb),'{}'::jsonb)) entry
+			WHERE entry.key ~ '^client_profile_(name|address|family)_[0-9a-f]{64}$'
+			ON CONFLICT DO NOTHING`); err != nil {
+			return fmt.Errorf("scope client display preferences: %w", err)
+		}
+	}
+	if appliedVersion < 56 {
+		// Pre-consent grants become pending, never silently accepted. Preserve
+		// accounting and reservations, but invalidate cached allocation forms
+		// and work queued under the former immediate-access model.
+		if _, err := tx.Exec(ctx, `UPDATE agents SET sharing_revision=sharing_revision+1
+			WHERE id IN(SELECT agent_id FROM agent_shares WHERE status<>'accepted');
+			UPDATE panel_users SET agent_access_revision=agent_access_revision+1
+			WHERE id IN(SELECT user_id FROM agent_shares WHERE status<>'accepted');
+			UPDATE tasks t SET status=CASE WHEN t.status='pending' THEN 'canceled' ELSE 'failed' END,
+				error='Agent sharing requires recipient acceptance; previous execution may be unknown',
+				finished_at=now(),config_content=NULL,lease_id=NULL
+			WHERE t.status IN ('pending','running') AND ((`+unauthorizedTaskPrincipalSQL+`)
+				OR EXISTS(SELECT 1 FROM agent_shares s WHERE s.id=t.shared_traffic_id AND s.status<>'accepted'))`); err != nil {
+			return fmt.Errorf("require Agent sharing consent: %w", err)
+		}
+	}
+	if appliedVersion < 57 {
+		// Legacy grants did not name engines. Do not guess or widen them:
+		// owners must allocate engines and recipients must consent again.
+		// Retain reservations and cumulative usage. Obsolete host snapshots
+		// predate dispatch-time read authorization and cannot be trusted.
+		if _, err := tx.Exec(ctx, `UPDATE agent_shares SET engines='{}',
+				status=CASE WHEN status='rejected' THEN status ELSE 'pending' END,
+				invitation_revision=invitation_revision+1,updated_at=now();
+			UPDATE agents SET sharing_revision=sharing_revision+1
+				WHERE id IN(SELECT agent_id FROM agent_shares);
+			UPDATE panel_users SET agent_access_revision=agent_access_revision+1
+				WHERE id IN(SELECT user_id FROM agent_shares);
+			UPDATE tasks SET config_content=NULL
+				WHERE action IN ('read-config','read-managed-config') AND status NOT IN ('pending','running');
+			UPDATE tasks t SET status=CASE WHEN status='running' THEN 'failed' ELSE 'canceled' END,
+				error='task authorization upgraded; submit a new task; previous execution may be unknown',
+				finished_at=now(),config_content=NULL,lease_id=NULL
+				WHERE status IN ('pending','running') AND
+					(t.shared_traffic_id<>'' OR t.action IN ('read-config','read-managed-config','import-existing','validate','deploy')
+						OR (`+unauthorizedTaskPrincipalSQL+`))`); err != nil {
+			return fmt.Errorf("scope shared engines and invalidate obsolete tasks: %w", err)
+		}
+	}
+	if appliedVersion < 58 {
+		// Owner-hidden nodes stay invisible to every administrator view while
+		// they keep running and accounting. The flag is chosen when the node is
+		// added and copied from the enrollment credential on first enrollment.
+		if _, err := tx.Exec(ctx, `ALTER TABLE IF EXISTS agents ADD COLUMN IF NOT EXISTS admin_hidden boolean NOT NULL DEFAULT false;
+			ALTER TABLE IF EXISTS enrollment_tokens ADD COLUMN IF NOT EXISTS admin_hidden boolean NOT NULL DEFAULT false;`); err != nil {
+			return fmt.Errorf("add owner-hidden node flag: %w", err)
+		}
+	}
 	if _, err := tx.Exec(ctx, `INSERT INTO qcontrolhub_schema_migrations (version) VALUES ($1)`, currentSchemaVersion); err != nil {
 		return fmt.Errorf("record schema migration version: %w", err)
 	}
@@ -338,14 +425,15 @@ func (s *Store) EnrollAgent(ctx context.Context, request core.EnrollRequest, enr
 		return core.Agent{}, err
 	}
 	defer tx.Rollback(ctx)
-	var enrollmentID, enrollmentName string
+	var enrollmentID, enrollmentName, enrollmentOwner string
 	var enrollmentAgentID *string
-	var reusable bool
+	var reusable, adminHidden bool
 	err = tx.QueryRow(ctx, `
 		UPDATE enrollment_tokens SET used_count=used_count+1
 		WHERE token_hash=$1 AND revoked_at IS NULL
 		  AND (reusable OR (expires_at>now() AND used_count<max_uses))
-		RETURNING id,name,reusable,agent_id`, tokenDigest[:]).Scan(&enrollmentID, &enrollmentName, &reusable, &enrollmentAgentID)
+		  AND NOT EXISTS(SELECT 1 FROM panel_users u WHERE u.id=enrollment_tokens.owner_id AND u.disabled)
+		RETURNING id,name,reusable,agent_id,owner_id,admin_hidden`, tokenDigest[:]).Scan(&enrollmentID, &enrollmentName, &reusable, &enrollmentAgentID, &enrollmentOwner, &adminHidden)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return core.Agent{}, ErrNotFound
 	}
@@ -363,9 +451,9 @@ func (s *Store) EnrollAgent(ctx context.Context, request core.EnrollRequest, enr
 			boundAgentID = strings.TrimSpace(*enrollmentAgentID)
 		}
 		if boundAgentID != "" {
-			err = tx.QueryRow(ctx, `SELECT id,name FROM agents WHERE id=$1 AND revoked_at IS NULL FOR UPDATE`, boundAgentID).Scan(&id, &name)
+			err = tx.QueryRow(ctx, `SELECT id,name,admin_hidden FROM agents WHERE id=$1 AND owner_id=$2 AND revoked_at IS NULL FOR UPDATE`, boundAgentID, enrollmentOwner).Scan(&id, &name, &adminHidden)
 		} else {
-			err = tx.QueryRow(ctx, `SELECT id,name FROM agents WHERE enrollment_id=$1 AND revoked_at IS NULL FOR UPDATE`, enrollmentID).Scan(&id, &name)
+			err = tx.QueryRow(ctx, `SELECT id,name,admin_hidden FROM agents WHERE enrollment_id=$1 AND owner_id=$2 AND revoked_at IS NULL FOR UPDATE`, enrollmentID, enrollmentOwner).Scan(&id, &name, &adminHidden)
 		}
 		if errors.Is(err, pgx.ErrNoRows) {
 			if boundAgentID != "" {
@@ -387,11 +475,11 @@ func (s *Store) EnrollAgent(ctx context.Context, request core.EnrollRequest, enr
 		}
 		request.Capabilities = core.IntersectEngines(selected, request.Capabilities)
 	} else {
-		var defaults []core.Engine
-		if err := tx.QueryRow(ctx, `SELECT COALESCE(default_agent_engines, '["mihomo","xray","sing-box","ss-rust"]'::jsonb) FROM panel_settings WHERE id=1`).Scan(&defaults); err != nil {
+		settings, err := s.panelSettingsForOwner(ctx, tx, enrollmentOwner)
+		if err != nil {
 			return core.Agent{}, err
 		}
-		request.Capabilities = core.IntersectEngines(defaults, request.Capabilities)
+		request.Capabilities = core.IntersectEngines(settings.DefaultAgentEngines, request.Capabilities)
 	}
 	capabilities, _ := json.Marshal(request.Capabilities)
 	if reinstalled {
@@ -413,10 +501,10 @@ func (s *Store) EnrollAgent(ctx context.Context, request core.EnrollRequest, enr
 		}
 	} else {
 		_, err = tx.Exec(ctx, `
-			INSERT INTO agents (id,name,version,os,arch,capabilities,features,labels,runtime,public_key,last_seen,enrolled_at,enrollment_id)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+			INSERT INTO agents (id,name,version,os,arch,capabilities,features,labels,runtime,public_key,last_seen,enrolled_at,enrollment_id,owner_id,admin_hidden)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
 			id, name, strings.TrimSpace(request.Version), strings.TrimSpace(request.OS), strings.TrimSpace(request.Arch),
-			capabilities, features, labels, runtimeState, publicKey, lastSeen, enrolledAt, nullableEnrollmentID(reusable, enrollmentID))
+			capabilities, features, labels, runtimeState, publicKey, lastSeen, enrolledAt, nullableEnrollmentID(reusable, enrollmentID), enrollmentOwner, adminHidden)
 	}
 	if err != nil {
 		return core.Agent{}, mapError(err)
@@ -440,8 +528,10 @@ func (s *Store) EnrollAgent(ctx context.Context, request core.EnrollRequest, enr
 	}
 	return core.Agent{
 		SupportedCapabilities: supported,
+		AdminHidden:           adminHidden,
 		ID:                    id, Name: name, Version: request.Version,
-		OS: request.OS, Arch: request.Arch, Capabilities: append([]core.Engine{}, request.Capabilities...), Features: append([]string(nil), request.Features...),
+		OwnerID: enrollmentOwner,
+		OS:      request.OS, Arch: request.Arch, Capabilities: append([]core.Engine{}, request.Capabilities...), Features: append([]string(nil), request.Features...),
 		Labels: cloneLabels(request.Labels), Runtime: map[core.Engine]core.RuntimeState{},
 		LastSeen: lastSeen, EnrolledAt: enrolledAt, Status: "offline", Reinstalled: reinstalled,
 	}, nil
@@ -520,6 +610,7 @@ func (s *Store) CreateProtectedEnrollmentTokenWithAudit(ctx context.Context, req
 }
 
 func (s *Store) createEnrollmentTokenWithExecutor(ctx context.Context, executor storeExecutor, request core.EnrollmentTokenRequest, protect bool) (core.EnrollmentTokenCreated, error) {
+	ownerID := scopeForConfig(ctx).OwnerID
 	name := strings.TrimSpace(request.Name)
 	if name == "" {
 		name = "Add node"
@@ -546,11 +637,11 @@ func (s *Store) createEnrollmentTokenWithExecutor(ctx context.Context, executor 
 		if err := executor.QueryRow(ctx, `
 			SELECT EXISTS(
 				SELECT 1 FROM enrollment_tokens
-				WHERE reusable=TRUE AND revoked_at IS NULL AND lower(name)=lower($1)
+				WHERE reusable=TRUE AND revoked_at IS NULL AND lower(name)=lower($1) AND owner_id=$2
 				UNION ALL
 				SELECT 1 FROM agents
-				WHERE revoked_at IS NULL AND lower(name)=lower($1)
-			)`, name).Scan(&exists); err != nil {
+				WHERE revoked_at IS NULL AND lower(name)=lower($1) AND owner_id=$2
+			)`, name, ownerID).Scan(&exists); err != nil {
 			return core.EnrollmentTokenCreated{}, err
 		}
 		if exists {
@@ -583,9 +674,9 @@ func (s *Store) createEnrollmentTokenWithExecutor(ctx context.Context, executor 
 		value.ExpiresAt = &expiresAt
 	}
 	_, err = executor.Exec(ctx, `
-		INSERT INTO enrollment_tokens (id,name,token_hash,token_ciphertext,expires_at,max_uses,used_count,reusable,created_at)
-		VALUES ($1,$2,$3,$4,$5,$6,0,$7,$8)`,
-		value.ID, value.Name, digest[:], tokenCiphertext, value.ExpiresAt, value.MaxUses, value.Reusable, value.CreatedAt)
+		INSERT INTO enrollment_tokens (id,name,token_hash,token_ciphertext,expires_at,max_uses,used_count,reusable,created_at,owner_id,admin_hidden)
+		VALUES ($1,$2,$3,$4,$5,$6,0,$7,$8,$9,$10)`,
+		value.ID, value.Name, digest[:], tokenCiphertext, value.ExpiresAt, value.MaxUses, value.Reusable, value.CreatedAt, ownerID, request.AdminHidden)
 	if err != nil {
 		return core.EnrollmentTokenCreated{}, mapError(err)
 	}
@@ -595,16 +686,21 @@ func (s *Store) createEnrollmentTokenWithExecutor(ctx context.Context, executor 
 // EnrollmentCommandForAgent returns an already-persisted credential without
 // creating, consuming, rotating, or otherwise mutating enrollment state.
 func (s *Store) EnrollmentCommandForAgent(ctx context.Context, agentID string) (core.EnrollmentTokenCreated, error) {
+	if err := requireAgentAdministration(ctx, s.pool, agentID); err != nil {
+		return core.EnrollmentTokenCreated{}, err
+	}
 	agentID = strings.TrimSpace(agentID)
 	if agentID == "" {
 		return core.EnrollmentTokenCreated{}, ErrInvalid
 	}
+	args := []any{agentID}
+	where := ownerClause(ctx, "owner_id", &args)
 	return s.readEnrollmentCommand(ctx, `
 		SELECT id,COALESCE(agent_id,''),name,expires_at,max_uses,used_count,reusable,created_at,revoked_at,token_ciphertext,token_hash
 		FROM enrollment_tokens
 		WHERE agent_id=$1 AND revoked_at IS NULL AND token_ciphertext IS NOT NULL
 		  AND (expires_at IS NULL OR expires_at>now()) AND (reusable OR used_count<max_uses)
-		ORDER BY created_at DESC`, agentID)
+		`+where+` ORDER BY created_at DESC`, args...)
 }
 
 // EnrollmentCommandByID reveals one explicitly selected add-node record.
@@ -613,15 +709,18 @@ func (s *Store) EnrollmentCommandByID(ctx context.Context, id string) (core.Enro
 	if id == "" {
 		return core.EnrollmentTokenCreated{}, ErrInvalid
 	}
+	args := []any{id}
+	where := ownerClause(ctx, "owner_id", &args)
+	where += hiddenAgentClause(ctx, "enrollment_tokens.agent_id", &args)
 	return s.readEnrollmentCommand(ctx, `
 		SELECT id,COALESCE(agent_id,''),name,expires_at,max_uses,used_count,reusable,created_at,revoked_at,token_ciphertext,token_hash
 		FROM enrollment_tokens
 		WHERE id=$1 AND revoked_at IS NULL
-		  AND (expires_at IS NULL OR expires_at>now()) AND (reusable OR used_count<max_uses)`, id)
+		  AND (expires_at IS NULL OR expires_at>now()) AND (reusable OR used_count<max_uses)`+where, args...)
 }
 
-func (s *Store) readEnrollmentCommand(ctx context.Context, query, id string) (core.EnrollmentTokenCreated, error) {
-	rows, err := s.pool.Query(ctx, query, id)
+func (s *Store) readEnrollmentCommand(ctx context.Context, query string, args ...any) (core.EnrollmentTokenCreated, error) {
+	rows, err := s.pool.Query(ctx, query, args...)
 	if err != nil {
 		return core.EnrollmentTokenCreated{}, err
 	}
@@ -726,6 +825,9 @@ func (s *Store) CreateAgentEnrollmentTokenWithAudit(ctx context.Context, agentID
 }
 
 func (s *Store) createAgentEnrollmentTokenTx(ctx context.Context, tx pgx.Tx, agentID string) (core.EnrollmentTokenCreated, error) {
+	if err := requireAgentAdministration(ctx, tx, agentID); err != nil {
+		return core.EnrollmentTokenCreated{}, err
+	}
 	rawToken, err := core.NewToken()
 	if err != nil {
 		return core.EnrollmentTokenCreated{}, err
@@ -737,10 +839,10 @@ func (s *Store) createAgentEnrollmentTokenTx(ctx context.Context, tx pgx.Tx, age
 	}
 	now := time.Now().UTC()
 
-	var name string
+	var name, ownerID string
 	if err := tx.QueryRow(ctx, `
-		SELECT name FROM agents
-		WHERE id=$1 AND revoked_at IS NULL FOR UPDATE`, agentID).Scan(&name); err != nil {
+		SELECT name,owner_id FROM agents
+		WHERE id=$1 AND revoked_at IS NULL FOR UPDATE`, agentID).Scan(&name, &ownerID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return core.EnrollmentTokenCreated{}, ErrNotFound
 		}
@@ -760,9 +862,9 @@ func (s *Store) createAgentEnrollmentTokenTx(ctx context.Context, tx pgx.Tx, age
 	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO enrollment_tokens
-			(id,agent_id,name,token_hash,token_ciphertext,expires_at,max_uses,used_count,reusable,created_at)
-		VALUES ($1,$2,$3,$4,$5,NULL,0,0,TRUE,$6)`,
-		value.ID, value.AgentID, value.Name, digest[:], sealed, now); err != nil {
+			(id,agent_id,name,token_hash,token_ciphertext,expires_at,max_uses,used_count,reusable,created_at,owner_id)
+		VALUES ($1,$2,$3,$4,$5,NULL,0,0,TRUE,$6,$7)`,
+		value.ID, value.AgentID, value.Name, digest[:], sealed, now, ownerID); err != nil {
 		return core.EnrollmentTokenCreated{}, mapError(err)
 	}
 	return core.EnrollmentTokenCreated{EnrollmentToken: value, Token: rawToken}, nil
@@ -782,15 +884,19 @@ func (s *Store) EnrollmentTokenUsable(ctx context.Context, rawToken string) bool
 	var revokedAt *time.Time
 	err := s.pool.QueryRow(ctx, `
 		SELECT expires_at,max_uses,used_count,reusable,revoked_at
-		FROM enrollment_tokens WHERE token_hash=$1`, digest[:]).Scan(&expiresAt, &maxUses, &usedCount, &reusable, &revokedAt)
+		FROM enrollment_tokens WHERE token_hash=$1
+			AND NOT EXISTS(SELECT 1 FROM panel_users u WHERE u.id=enrollment_tokens.owner_id AND u.disabled)`, digest[:]).Scan(&expiresAt, &maxUses, &usedCount, &reusable, &revokedAt)
 	return err == nil && revokedAt == nil && (reusable || (expiresAt != nil && usedCount < maxUses && time.Now().Before(*expiresAt)))
 }
 
 func (s *Store) ListEnrollmentTokens(ctx context.Context) ([]core.EnrollmentToken, error) {
+	args := []any{}
+	where := ownerClause(ctx, "owner_id", &args)
+	where += hiddenAgentClause(ctx, "enrollment_tokens.agent_id", &args)
 	rows, err := s.pool.Query(ctx, `
 		SELECT id,COALESCE(agent_id,''),name,expires_at,max_uses,used_count,reusable,created_at,revoked_at,
 		       token_ciphertext,token_hash
-		FROM enrollment_tokens ORDER BY created_at DESC LIMIT 100`)
+		FROM enrollment_tokens WHERE true`+where+` ORDER BY created_at DESC LIMIT 100`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -824,7 +930,8 @@ func (s *Store) ListEnrollmentCommandAvailability(ctx context.Context, agentIDs 
 	if len(agentIDs) == 0 {
 		return available, nil
 	}
-	rows, err := s.pool.Query(ctx, enrollmentCommandAvailabilitySQL, agentIDs)
+	query, args := enrollmentAvailabilityQuery(ctx, agentIDs)
+	rows, err := s.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -838,7 +945,13 @@ const enrollmentCommandAvailabilitySQL = `
 		  AND agent_id IN (SELECT id FROM agents WHERE revoked_at IS NULL)
 		  AND token_ciphertext IS NOT NULL
 		  AND (expires_at IS NULL OR expires_at>now()) AND (reusable OR used_count<max_uses)
-		ORDER BY created_at DESC`
+`
+
+func enrollmentAvailabilityQuery(ctx context.Context, agentIDs []string) (string, []any) {
+	args := []any{agentIDs}
+	where := ownerClause(ctx, "owner_id", &args)
+	return enrollmentCommandAvailabilitySQL + where + ` ORDER BY created_at DESC`, args
+}
 
 func (s *Store) scanEnrollmentCommandAvailability(rows pgx.Rows) (map[string]bool, error) {
 	defer rows.Close()
@@ -861,7 +974,10 @@ func (s *Store) scanEnrollmentCommandAvailability(rows pgx.Rows) (map[string]boo
 }
 
 func (s *Store) DeleteEnrollmentToken(ctx context.Context, id string) error {
-	command, err := s.pool.Exec(ctx, `DELETE FROM enrollment_tokens WHERE id=$1`, id)
+	args := []any{id}
+	where := ownerClause(ctx, "owner_id", &args)
+	where += hiddenAgentClause(ctx, "enrollment_tokens.agent_id", &args)
+	command, err := s.pool.Exec(ctx, `DELETE FROM enrollment_tokens WHERE id=$1`+where, args...)
 	if err != nil {
 		return err
 	}
@@ -1022,27 +1138,34 @@ func (s *Store) UpdateAgentObservedPublicIP(ctx context.Context, id, address str
 }
 
 func (s *Store) ListAgents(ctx context.Context) ([]core.Agent, error) {
-	rows, err := s.pool.Query(ctx, listAgentsSQL)
+	args := []any{}
+	where := agentAccessClause(ctx, "agents.id", &args)
+	query := scopedAgentsSQL(ctx, &args)
+	rows, err := s.pool.Query(ctx, query+where+` ORDER BY enrolled_at DESC`, args...)
 	if err != nil {
 		return nil, err
 	}
-	return scanAgents(rows)
+	return scanAgents(ctx, rows)
 }
 
 // ListAgentsWithEnrollmentCommands pipelines the panel's two independent
 // reads on one connection. Only callers authorized to manage enrollment should
 // use it; ciphertext is verified locally and never included in the response.
 func (s *Store) ListAgentsWithEnrollmentCommands(ctx context.Context) ([]core.Agent, error) {
+	args := []any{}
+	where := agentAccessClause(ctx, "agents.id", &args)
+	query := scopedAgentsSQL(ctx, &args)
 	batch := &pgx.Batch{}
-	batch.Queue(listAgentsSQL)
-	batch.Queue(enrollmentCommandAvailabilitySQL, nil)
+	batch.Queue(query+where+` ORDER BY enrolled_at DESC`, args...)
+	enrollmentQuery, enrollmentArgs := enrollmentAvailabilityQuery(ctx, nil)
+	batch.Queue(enrollmentQuery, enrollmentArgs...)
 	results := s.pool.SendBatch(ctx, batch)
 	defer results.Close()
 	rows, err := results.Query()
 	if err != nil {
 		return nil, err
 	}
-	agents, err := scanAgents(rows)
+	agents, err := scanAgents(ctx, rows)
 	if err != nil {
 		return nil, err
 	}
@@ -1063,14 +1186,30 @@ func (s *Store) ListAgentsWithEnrollmentCommands(ctx context.Context) ([]core.Ag
 	return agents, nil
 }
 
-const listAgentsSQL = `
+const listAgentsSQL = listAgentsSQLBase + ` ORDER BY enrolled_at DESC`
+
+const agentOfflineThresholdSQL = `(CASE WHEN agents.owner_id='' THEN (SELECT agent_offline_threshold_seconds FROM panel_settings WHERE id=1)
+	ELSE COALESCE((SELECT (runtime->>'agent_offline_threshold_seconds')::integer FROM user_panel_settings WHERE owner_id=agents.owner_id),45) END)`
+
+const agentColumnsSQL = `
 			SELECT id,name,version,os,arch,capabilities,features,labels,runtime,observed_public_ip,
 				(SELECT metrics FROM agent_live_state WHERE agent_id=agents.id),
 				last_seen,enrolled_at,
-				(SELECT agent_offline_threshold_seconds FROM panel_settings WHERE id=1),supported_capabilities,` + capabilityTransitionsSQL + `
-		FROM agents WHERE revoked_at IS NULL ORDER BY enrolled_at DESC`
+				` + agentOfflineThresholdSQL + `,supported_capabilities,` + capabilityTransitionsSQL + `,owner_id,admin_hidden`
 
-func scanAgents(rows pgx.Rows) ([]core.Agent, error) {
+const agentSelectFromSQL = ` FROM agents WHERE revoked_at IS NULL`
+const listAgentsSQLBase = agentColumnsSQL + `,'{}'::text[]` + agentSelectFromSQL
+
+func scopedAgentsSQL(ctx context.Context, args *[]any) string {
+	if scopeForConfig(ctx).Admin {
+		return listAgentsSQLBase
+	}
+	*args = append(*args, scopeForConfig(ctx).OwnerID)
+	return agentColumnsSQL + fmt.Sprintf(`,COALESCE((SELECT engines FROM agent_shares
+		WHERE agent_id=agents.id AND user_id=$%d AND enabled AND status='accepted'),'{}'::text[])`, len(*args)) + agentSelectFromSQL
+}
+
+func scanAgents(ctx context.Context, rows pgx.Rows) ([]core.Agent, error) {
 	defer rows.Close()
 	agents := make([]core.Agent, 0)
 	now := time.Now().UTC()
@@ -1079,7 +1218,7 @@ func scanAgents(rows pgx.Rows) ([]core.Agent, error) {
 		var capabilities, features, labels, runtimeState, metricsState []byte
 		var observedPublicIP string
 		var offlineThresholdSeconds int
-		if err := rows.Scan(&agent.ID, &agent.Name, &agent.Version, &agent.OS, &agent.Arch, &capabilities, &features, &labels, &runtimeState, &observedPublicIP, &metricsState, &agent.LastSeen, &agent.EnrolledAt, &offlineThresholdSeconds, &agent.SupportedCapabilities, &agent.CapabilityTransitions); err != nil {
+		if err := rows.Scan(&agent.ID, &agent.Name, &agent.Version, &agent.OS, &agent.Arch, &capabilities, &features, &labels, &runtimeState, &observedPublicIP, &metricsState, &agent.LastSeen, &agent.EnrolledAt, &offlineThresholdSeconds, &agent.SupportedCapabilities, &agent.CapabilityTransitions, &agent.OwnerID, &agent.AdminHidden, &agent.SharedEngines); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal(capabilities, &agent.Capabilities); err != nil {
@@ -1102,12 +1241,16 @@ func scanAgents(rows pgx.Rows) ([]core.Agent, error) {
 		} else {
 			agent.Status = "offline"
 		}
+		scopeAgentPresentation(ctx, &agent)
 		agents = append(agents, agent)
 	}
 	return agents, rows.Err()
 }
 
 func (s *Store) DeleteAgent(ctx context.Context, id string) error {
+	if err := requireAgentDeletion(ctx, s.pool, id); err != nil {
+		return err
+	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -1176,6 +1319,9 @@ func (s *Store) DeleteAgent(ctx context.Context, id string) error {
 
 // AgentName returns the display name of an active registered agent.
 func (s *Store) AgentName(ctx context.Context, id string) (string, error) {
+	if err := requireAgentAccess(ctx, s.pool, id); err != nil {
+		return "", err
+	}
 	var name string
 	if err := s.pool.QueryRow(ctx, `SELECT name FROM agents WHERE id=$1 AND revoked_at IS NULL`, id).Scan(&name); err != nil {
 		return "", err
@@ -1204,7 +1350,7 @@ func (s *Store) CreateConfig(ctx context.Context, input core.Config) (core.Confi
 	}
 	now := time.Now().UTC()
 	config := core.Config{
-		ID: id, AgentID: input.AgentID, Name: name, Description: description,
+		ID: id, OwnerID: scopeForConfig(ctx).OwnerID, AgentID: input.AgentID, Name: name, Description: description,
 		Engine: input.Engine, Content: input.Content, Version: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	tx, err := s.pool.Begin(ctx)
@@ -1213,9 +1359,9 @@ func (s *Store) CreateConfig(ctx context.Context, input core.Config) (core.Confi
 	}
 	defer tx.Rollback(ctx)
 	_, err = tx.Exec(ctx, `
-			INSERT INTO configs (id,agent_id,name,description,engine,content,version,created_at,updated_at)
-		VALUES ($1,NULLIF($2,''),$3,$4,$5,$6,$7,$8,$8)`,
-		config.ID, config.AgentID, config.Name, config.Description, config.Engine, storedContent, config.Version, now)
+			INSERT INTO configs (id,agent_id,name,description,engine,content,version,created_at,updated_at,owner_id)
+		VALUES ($1,NULLIF($2,''),$3,$4,$5,$6,$7,$8,$8,$9)`,
+		config.ID, config.AgentID, config.Name, config.Description, config.Engine, storedContent, config.Version, now, config.OwnerID)
 	if err != nil {
 		return core.Config{}, mapError(err)
 	}
@@ -1249,16 +1395,20 @@ func (s *Store) UpdateConfig(ctx context.Context, id string, input core.Config) 
 	}
 	defer tx.Rollback(ctx)
 	var config core.Config
+	args := []any{id, name, description, input.Engine, storedContent, input.Version}
+	ownerWhere := ownerClause(ctx, "owner_id", &args)
 	err = tx.QueryRow(ctx, `
 		UPDATE configs SET name=$2,description=$3,engine=$4,content=$5,version=version+1,updated_at=now()
-		WHERE id=$1 AND deleted_at IS NULL AND agent_id IS NULL AND version=$6
-		RETURNING id,COALESCE(agent_id,''),name,description,engine,content,version,created_at,updated_at`,
-		id, name, description, input.Engine, storedContent, input.Version).Scan(
-		&config.ID, &config.AgentID, &config.Name, &config.Description, &config.Engine, &config.Content, &config.Version, &config.CreatedAt, &config.UpdatedAt)
+		WHERE id=$1 AND deleted_at IS NULL AND agent_id IS NULL AND version=$6`+ownerWhere+`
+		RETURNING id,COALESCE(agent_id,''),name,description,engine,content,version,created_at,updated_at,owner_id`,
+		args...).Scan(
+		&config.ID, &config.AgentID, &config.Name, &config.Description, &config.Engine, &config.Content, &config.Version, &config.CreatedAt, &config.UpdatedAt, &config.OwnerID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			var exists bool
-			if existsErr := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM configs WHERE id=$1 AND deleted_at IS NULL AND agent_id IS NULL)`, id).Scan(&exists); existsErr != nil {
+			existsArgs := []any{id}
+			existsWhere := ownerClause(ctx, "owner_id", &existsArgs)
+			if existsErr := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM configs WHERE id=$1 AND deleted_at IS NULL AND agent_id IS NULL`+existsWhere+`)`, existsArgs...).Scan(&exists); existsErr != nil {
 				return core.Config{}, existsErr
 			}
 			if exists {
@@ -1287,7 +1437,9 @@ func (s *Store) DeleteConfig(ctx context.Context, id string) error {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	command, err := tx.Exec(ctx, `UPDATE configs SET deleted_at=now(),content='' WHERE id=$1 AND deleted_at IS NULL AND agent_id IS NULL`, id)
+	args := []any{id}
+	ownerWhere := ownerClause(ctx, "owner_id", &args)
+	command, err := tx.Exec(ctx, `UPDATE configs SET deleted_at=now(),content='' WHERE id=$1 AND deleted_at IS NULL AND agent_id IS NULL`+ownerWhere, args...)
 	if err != nil {
 		return err
 	}
@@ -1307,9 +1459,11 @@ func (s *Store) DeleteConfig(ctx context.Context, id string) error {
 }
 
 func (s *Store) ListConfigs(ctx context.Context) ([]core.Config, error) {
+	args := []any{}
+	ownerWhere := ownerClause(ctx, "owner_id", &args)
 	rows, err := s.pool.Query(ctx, `
-		SELECT id,COALESCE(agent_id,''),name,description,engine,content,version,created_at,updated_at
-		FROM configs WHERE deleted_at IS NULL AND agent_id IS NULL ORDER BY updated_at DESC`)
+		SELECT id,COALESCE(agent_id,''),name,description,engine,content,version,created_at,updated_at,owner_id
+		FROM configs WHERE deleted_at IS NULL AND agent_id IS NULL`+ownerWhere+` ORDER BY updated_at DESC`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1317,7 +1471,7 @@ func (s *Store) ListConfigs(ctx context.Context) ([]core.Config, error) {
 	configs := make([]core.Config, 0)
 	for rows.Next() {
 		var config core.Config
-		if err := rows.Scan(&config.ID, &config.AgentID, &config.Name, &config.Description, &config.Engine, &config.Content, &config.Version, &config.CreatedAt, &config.UpdatedAt); err != nil {
+		if err := rows.Scan(&config.ID, &config.AgentID, &config.Name, &config.Description, &config.Engine, &config.Content, &config.Version, &config.CreatedAt, &config.UpdatedAt, &config.OwnerID); err != nil {
 			return nil, err
 		}
 		config.Content, err = s.decryptContent(config.Content)
@@ -1334,7 +1488,10 @@ func (s *Store) ExistingConfigIDs(ctx context.Context, ids []string) (map[string
 	if len(ids) == 0 {
 		return existing, nil
 	}
-	rows, err := s.pool.Query(ctx, `SELECT id FROM configs WHERE deleted_at IS NULL AND id=ANY($1::text[])`, ids)
+	args := []any{ids}
+	ownerWhere := ownerClause(ctx, "owner_id", &args)
+	ownerWhere += configAgentAccessClause(ctx, "configs.agent_id", "configs.engine", &args)
+	rows, err := s.pool.Query(ctx, `SELECT id FROM configs WHERE deleted_at IS NULL AND id=ANY($1::text[])`+ownerWhere, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1371,6 +1528,34 @@ func (s *Store) CreateTask(ctx context.Context, request core.TaskRequest) (core.
 // The caller commits before notifying the Agent. This also allows a preset
 // revision and its exact task snapshot to be published in one transaction.
 func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRequest) (core.Task, error) {
+	scope := scopeForConfig(ctx)
+	if err := lockAgentUser(ctx, tx); err != nil {
+		return core.Task{}, err
+	}
+	if err := requireTaskPermission(ctx, tx, request.Action, false); err != nil {
+		return core.Task{}, err
+	}
+	if scope.Admin && request.ConfigID != "" {
+		// An administrator may deploy someone else's configuration. Lock its
+		// durable owner before the Agent, just like the owner's own request.
+		rows, err := tx.Query(ctx, `SELECT id FROM panel_users
+			WHERE id=(SELECT owner_id FROM configs WHERE id=$1) FOR SHARE`, request.ConfigID)
+		if err != nil {
+			return core.Task{}, err
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return core.Task{}, err
+		}
+	}
+	if err := requireAgentAccess(ctx, tx, request.AgentID); err != nil {
+		return core.Task{}, err
+	}
+	if request.Action != core.ActionDeploy && request.Action != core.ActionValidate && request.Action != core.ActionStatus {
+		if err := requireAgentAdministration(ctx, tx, request.AgentID); err != nil {
+			return core.Task{}, err
+		}
+	}
 	if request.ExpectedConfigVersion < 0 || (request.ExpectedConfigVersion != 0 && request.Action != core.ActionDeploy && request.Action != core.ActionValidate && request.Action != core.ActionImportExisting) {
 		return core.Task{}, fmt.Errorf("%w: expected configuration version requires a configuration task", ErrInvalid)
 	}
@@ -1392,6 +1577,11 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 		}
 	} else if !request.Engine.Valid() {
 		return core.Task{}, fmt.Errorf("%w: unsupported engine %q", ErrInvalid, request.Engine)
+	}
+	if !request.Action.AgentLevel() {
+		if err := requireAgentEngineAccess(ctx, tx, request.AgentID, request.Engine); err != nil {
+			return core.Task{}, err
+		}
 	}
 	if request.Action == core.ActionInstall {
 		normalizedVersion, versionErr := core.NormalizeCoreVersionSelector(request.CoreVersion)
@@ -1433,11 +1623,29 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 	if err := json.Unmarshal(runtimeJSON, &runtime); err != nil {
 		return core.Task{}, err
 	}
+	if request.Action == core.ActionReadConfig || request.Action == core.ActionReadManagedConfig || request.Action == core.ActionImportExisting {
+		if err := requireHostConfigRead(ctx, tx, request.AgentID, request.Engine); err != nil {
+			return core.Task{}, err
+		}
+	}
 	if request.Action == core.ActionUpgradeAgent && !containsFeature(features, core.AgentFeatureSelfUpgrade) {
 		return core.Task{}, fmt.Errorf("%w: this Agent does not support remote upgrades; run the current one-click installation once", ErrConflict)
 	}
 	if request.Action.SystemBBR() && !containsFeature(features, core.AgentFeatureSystemBBR) {
 		return core.Task{}, fmt.Errorf("%w: upgrade this Agent before managing system BBR", ErrConflict)
+	}
+	if request.Action.SystemBBR() {
+		// TCP settings affect the whole host. Keep the shared exclusion even
+		// though task reuse and visibility are scoped to their submitter.
+		var busy bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM tasks
+			WHERE agent_id=$1 AND action IN ('enable-bbr','disable-bbr','configure-tcp')
+			  AND status IN ('pending','running') AND owner_id<>$2)`, request.AgentID, scope.OwnerID).Scan(&busy); err != nil {
+			return core.Task{}, err
+		}
+		if busy {
+			return core.Task{}, fmt.Errorf("%w: another system TCP task is pending or running", ErrConflict)
+		}
 	}
 	if !request.Action.AgentLevel() {
 		if err := rejectPendingCapabilityTransition(ctx, tx, request.AgentID, request.Engine); err != nil {
@@ -1450,8 +1658,17 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 			return core.Task{}, fmt.Errorf("%w: %s core tasks are disabled because an existing service could not be mapped safely: %s", ErrConflict, request.Engine, reason)
 		}
 	}
+	if (request.Action == core.ActionValidate || request.Action == core.ActionDeploy) &&
+		!containsFeature(features, core.AgentFeatureIndependentEgress) {
+		return core.Task{}, fmt.Errorf("%w: upgrade the Agent before validating or deploying independent exits", ErrConflict)
+	}
 	if request.Action == core.ActionReadManagedConfig && !containsFeature(features, core.AgentFeatureManagedConfigRead) {
 		return core.Task{}, fmt.Errorf("%w: this Agent cannot read the managed configuration independently; upgrade the Agent through the panel first", ErrConflict)
+	}
+	if request.Action == core.ActionStart || request.Action == core.ActionRestart {
+		if err := requireSafeEngineStart(ctx, tx, request.AgentID, request.Engine); err != nil {
+			return core.Task{}, err
+		}
 	}
 	if request.Action == core.ActionInstall && request.Engine == core.EngineMihomo &&
 		request.CoreVersion == core.CoreVersionDevelopment &&
@@ -1471,8 +1688,10 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 	}
 	if request.Action == core.ActionDeploy || request.Action == core.ActionValidate || request.Action == core.ActionImportExisting {
 		var configEngine core.Engine
-		var configAgentID string
-		err := tx.QueryRow(ctx, `SELECT engine,content,version,COALESCE(agent_id,'') FROM configs WHERE id=$1 AND deleted_at IS NULL FOR UPDATE`, request.ConfigID).Scan(&configEngine, &task.ConfigContent, &task.ConfigVersion, &configAgentID)
+		var configAgentID, configOwnerID string
+		configArgs := []any{request.ConfigID}
+		configWhere := ownerClause(ctx, "owner_id", &configArgs)
+		err := tx.QueryRow(ctx, `SELECT engine,content,version,COALESCE(agent_id,''),owner_id FROM configs WHERE id=$1 AND deleted_at IS NULL`+configWhere+` FOR UPDATE`, configArgs...).Scan(&configEngine, &task.ConfigContent, &task.ConfigVersion, &configAgentID, &configOwnerID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return core.Task{}, fmt.Errorf("configuration: %w", ErrNotFound)
 		}
@@ -1495,9 +1714,17 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 		if err != nil {
 			return core.Task{}, err
 		}
+		if request.Action == core.ActionValidate || request.Action == core.ActionDeploy {
+			if err := serverconfig.ValidateIndependentEgress(task.Engine, task.ConfigContent); err != nil {
+				return core.Task{}, fmt.Errorf("%w: %v", ErrInvalid, err)
+			}
+		}
+		if err := s.prepareSharedTaskTx(ctx, tx, &task, configOwnerID, features, runtime[request.Engine]); err != nil {
+			return core.Task{}, err
+		}
 		if request.Engine == core.EngineShadowsocksRust {
 			rows, policyErr := tx.Query(ctx, `SELECT agent_id,engine,tag,kind,port,config_version,block_mainland_destination,block_mainland_source
-				FROM mainland_access_policies WHERE agent_id=$1 AND engine=$2 AND config_version=$3 ORDER BY port,tag`, request.AgentID, request.Engine, task.ConfigVersion)
+				FROM mainland_access_policies WHERE config_id=$1 AND config_version=$2 ORDER BY port,tag`, request.ConfigID, task.ConfigVersion)
 			if policyErr != nil {
 				return core.Task{}, policyErr
 			}
@@ -1529,9 +1756,9 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 		            THEN 'official' ELSE COALESCE($7,'') END)
 		    = (CASE WHEN action='install' AND engine='mihomo' AND core_version='development' AND COALESCE(core_source,'') IN ('','official')
 		            THEN 'official' ELSE COALESCE(core_source,'') END)
-		  AND status IN ('pending','running')
+		  AND owner_id=$8 AND status IN ('pending','running')
 		ORDER BY created_at DESC LIMIT 1`,
-		task.AgentID, task.Action, task.Engine, task.ConfigID, task.ConfigVersion, task.CoreVersion, task.CoreSource), false)
+		task.AgentID, task.Action, task.Engine, task.ConfigID, task.ConfigVersion, task.CoreVersion, task.CoreSource, scope.OwnerID), false)
 	if existingErr == nil {
 		if task.Action.SystemBBR() && (existing.Action != task.Action || !maps.Equal(existing.TCPSettings, task.TCPSettings)) {
 			return core.Task{}, fmt.Errorf("%w: another system TCP task is pending or running", ErrConflict)
@@ -1556,9 +1783,9 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 		return core.Task{}, err
 	}
 	_, err = tx.Exec(ctx, `
-			INSERT INTO tasks (id,agent_id,action,engine,config_id,config_version,config_content,mainland_access_policies,core_version,core_source,status,attempt,created_at,tcp_settings)
-			VALUES ($1,$2,$3,$4,NULLIF($5,''),NULLIF($6,0),NULLIF($7,''),$8,NULLIF($9,''),NULLIF($10,''),$11,0,$12,$13)`,
-		task.ID, task.AgentID, task.Action, task.Engine, task.ConfigID, task.ConfigVersion, storedConfigContent, mainlandPoliciesJSON, task.CoreVersion, task.CoreSource, task.Status, task.CreatedAt, task.TCPSettings)
+			INSERT INTO tasks (id,agent_id,action,engine,config_id,config_version,config_content,mainland_access_policies,core_version,core_source,status,attempt,created_at,tcp_settings,owner_id,shared_traffic_id)
+			VALUES ($1,$2,$3,$4,NULLIF($5,''),NULLIF($6,0),NULLIF($7,''),$8,NULLIF($9,''),NULLIF($10,''),$11,0,$12,$13,$14,$15)`,
+		task.ID, task.AgentID, task.Action, task.Engine, task.ConfigID, task.ConfigVersion, storedConfigContent, mainlandPoliciesJSON, task.CoreVersion, task.CoreSource, task.Status, task.CreatedAt, task.TCPSettings, scope.OwnerID, task.SharedTrafficID)
 	if err != nil {
 		return core.Task{}, mapError(err)
 	}
@@ -1615,6 +1842,8 @@ func (s *Store) ListTasksFiltered(ctx context.Context, agentID string, status co
 			where += fmt.Sprintf(" AND %s=$%d", filter.column, len(args))
 		}
 	}
+	where += ownerClause(ctx, "owner_id", &args)
+	where += agentEngineAccessClause(ctx, "tasks.agent_id", "tasks.engine", &args)
 	args = append(args, limit)
 	rows, err := s.pool.Query(ctx, `
 		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),COALESCE(core_version,''),COALESCE(core_source,''),status,attempt,
@@ -1651,10 +1880,13 @@ func (s *Store) getTask(ctx context.Context, id string, stateOnly bool) (core.Ta
 	if stateOnly {
 		output = "''"
 	}
+	args := []any{id}
+	ownerWhere := ownerClause(ctx, "owner_id", &args)
+	ownerWhere += agentEngineAccessClause(ctx, "tasks.agent_id", "tasks.engine", &args)
 	row := s.pool.QueryRow(ctx, `
 		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),COALESCE(core_version,''),COALESCE(core_source,''),status,attempt,
 		       `+output+`,COALESCE(error,''),created_at,started_at,finished_at,tcp_settings
-		FROM tasks WHERE id=$1`, id)
+		FROM tasks WHERE id=$1`+ownerWhere, args...)
 	task, err := scanTask(row, false)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return core.Task{}, ErrNotFound
@@ -1663,9 +1895,12 @@ func (s *Store) getTask(ctx context.Context, id string, stateOnly bool) (core.Ta
 }
 
 func (s *Store) CancelTask(ctx context.Context, id string) error {
+	args := []any{id}
+	ownerWhere := ownerClause(ctx, "owner_id", &args)
+	ownerWhere += agentEngineAccessClause(ctx, "tasks.agent_id", "tasks.engine", &args)
 	command, err := s.pool.Exec(ctx, `
 		UPDATE tasks SET status='canceled',error='canceled by administrator',finished_at=now(),config_content=NULL,lease_id=NULL
-		WHERE id=$1 AND status='pending'`, id)
+		WHERE id=$1 AND status='pending'`+ownerWhere, args...)
 	if err != nil {
 		return err
 	}
@@ -1673,7 +1908,7 @@ func (s *Store) CancelTask(ctx context.Context, id string) error {
 		return nil
 	}
 	var exists bool
-	if err := s.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM tasks WHERE id=$1)`, id).Scan(&exists); err != nil {
+	if err := s.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM tasks WHERE id=$1`+ownerWhere+`)`, args...).Scan(&exists); err != nil {
 		return err
 	}
 	if !exists {
@@ -1734,10 +1969,13 @@ func (s *Store) RunningTask(ctx context.Context, agentID string) (*core.Task, er
 	if err := json.Unmarshal(featuresJSON, &features); err != nil {
 		return nil, err
 	}
+	if err := cancelUnauthorizedAgentTasksTx(ctx, tx, agentID, features); err != nil {
+		return nil, err
+	}
 	row := tx.QueryRow(ctx, `
 		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),
 		       COALESCE(config_content,''),COALESCE(mainland_access_policies,'[]'::jsonb),COALESCE(core_version,''),COALESCE(core_source,''),status,attempt,COALESCE(lease_id,''),
-		       COALESCE(output,''),COALESCE(error,''),created_at,started_at,finished_at,tcp_settings
+		       COALESCE(output,''),COALESCE(error,''),created_at,started_at,finished_at,tcp_settings,shared_traffic_id
 		FROM tasks WHERE agent_id=$1 AND status='running'
 		ORDER BY started_at DESC LIMIT 1`, agentID)
 	task, err := scanTask(row, true)
@@ -1749,6 +1987,35 @@ func (s *Store) RunningTask(ctx context.Context, agentID string) (*core.Task, er
 	}
 	if err != nil {
 		return nil, err
+	}
+	var unauthorized bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM tasks t WHERE t.id=$1
+		AND ((`+unauthorizedTaskPrincipalSQL+`) OR (`+unauthorizedHostConfigTaskSQL+`)))`,
+		task.ID).Scan(&unauthorized); err != nil {
+		return nil, err
+	}
+	if unauthorized {
+		if _, err := tx.Exec(ctx, `UPDATE tasks SET status='failed',error='user authorization changed; execution before disconnect is unknown',
+			finished_at=now(),config_content=NULL,lease_id=NULL WHERE id=$1 AND status='running'`, task.ID); err != nil {
+			return nil, err
+		}
+		return nil, tx.Commit(ctx)
+	}
+	if task.SharedTrafficID != "" {
+		var allowed bool
+		if err := tx.QueryRow(ctx, `SELECT $2::boolean AND EXISTS(SELECT 1 FROM agent_shares s JOIN panel_users u ON u.id=s.user_id
+			WHERE s.id=$1 AND s.agent_id=$3 AND $4=ANY(s.engines) AND NOT u.disabled
+				AND s.enabled AND s.status='accepted' AND (s.limit_bytes=0 OR s.used_bytes<s.limit_bytes))`,
+			task.SharedTrafficID, supportsSharedEngines(features), agentID, task.Engine).Scan(&allowed); err != nil {
+			return nil, err
+		}
+		if !allowed {
+			if _, err := tx.Exec(ctx, `UPDATE tasks SET status='failed',error='shared Agent authorization changed; execution before disconnect is unknown',
+				finished_at=now(),config_content=NULL,lease_id=NULL WHERE id=$1 AND status='running'`, task.ID); err != nil {
+				return nil, err
+			}
+			return nil, tx.Commit(ctx)
+		}
 	}
 	if (isMihomoMirrorTask(task) && !containsFeature(features, core.AgentFeatureMihomoDevelopmentSource)) ||
 		(task.Action.SystemBBR() && !containsFeature(features, core.AgentFeatureSystemBBR)) {
@@ -1767,14 +2034,15 @@ func (s *Store) RunningTask(ctx context.Context, agentID string) (*core.Task, er
 		}
 		return nil, nil
 	}
-	if commitErr := tx.Commit(ctx); commitErr != nil {
-		return nil, commitErr
-	}
-	if task.ConfigContent != "" {
-		task.ConfigContent, err = s.decryptContent(task.ConfigContent)
-		if err != nil {
-			return nil, err
+	if err := s.openExecutionConfig(&task); err != nil {
+		if _, updateErr := tx.Exec(ctx, `UPDATE tasks SET status='failed',error=$2,finished_at=now(),
+			config_content=NULL,lease_id=NULL WHERE id=$1`, task.ID, truncate(err.Error(), 8<<10)); updateErr != nil {
+			return nil, updateErr
 		}
+		return nil, tx.Commit(ctx)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
 	}
 	return &task, nil
 }
@@ -1812,6 +2080,9 @@ func (s *Store) ClaimTask(ctx context.Context, agentID string) (*core.Task, erro
 	if err := json.Unmarshal(featuresJSON, &features); err != nil {
 		return nil, err
 	}
+	if err := cancelUnauthorizedAgentTasksTx(ctx, tx, agentID, features); err != nil {
+		return nil, err
+	}
 	mirrorSupported := containsFeature(features, core.AgentFeatureMihomoDevelopmentSource)
 	row := tx.QueryRow(ctx, `
 		WITH next_task AS (
@@ -1826,8 +2097,20 @@ func (s *Store) ClaimTask(ctx context.Context, agentID string) (*core.Task, erro
 		FROM next_task n WHERE t.id=n.id
 		RETURNING t.id,t.agent_id,t.action,t.engine,COALESCE(t.config_id,''),COALESCE(t.config_version,0),
 		          COALESCE(t.config_content,''),COALESCE(t.mainland_access_policies,'[]'::jsonb),COALESCE(t.core_version,''),COALESCE(t.core_source,''),t.status,t.attempt,COALESCE(t.lease_id,''),COALESCE(t.output,''),COALESCE(t.error,''),
-		          t.created_at,t.started_at,t.finished_at,t.tcp_settings`, agentID, leaseID, mirrorSupported, containsFeature(features, core.AgentFeatureSystemBBR))
+		          t.created_at,t.started_at,t.finished_at,t.tcp_settings,t.shared_traffic_id`, agentID, leaseID, mirrorSupported, containsFeature(features, core.AgentFeatureSystemBBR))
 	task, err := scanTask(row, true)
+	if err == nil {
+		if configErr := s.openExecutionConfig(&task); configErr != nil {
+			if _, updateErr := tx.Exec(ctx, `UPDATE tasks SET status='failed',error=$2,finished_at=now(),
+				config_content=NULL,lease_id=NULL WHERE id=$1`, task.ID, truncate(configErr.Error(), 8<<10)); updateErr != nil {
+				return nil, updateErr
+			}
+			return nil, tx.Commit(ctx)
+		}
+		if markErr := markEngineExecutionTx(ctx, tx, task); markErr != nil {
+			return nil, markErr
+		}
+	}
 	if commitErr := tx.Commit(ctx); commitErr != nil {
 		return nil, commitErr
 	}
@@ -1836,12 +2119,6 @@ func (s *Store) ClaimTask(ctx context.Context, agentID string) (*core.Task, erro
 	}
 	if err != nil {
 		return nil, err
-	}
-	if task.ConfigContent != "" {
-		task.ConfigContent, err = s.decryptContent(task.ConfigContent)
-		if err != nil {
-			return nil, err
-		}
 	}
 	return &task, nil
 }
@@ -1891,6 +2168,21 @@ func (s *Store) CompleteTask(ctx context.Context, agentID, taskID string, result
 			return ErrNotFound
 		}
 		return fmt.Errorf("%w: task is not running", ErrConflict)
+	}
+	var unauthorized bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM tasks t WHERE t.id=$1
+		AND ((`+unauthorizedTaskPrincipalSQL+`) OR (`+unauthorizedHostConfigTaskSQL+`)))`, taskID).Scan(&unauthorized); err != nil {
+		return err
+	}
+	if unauthorized {
+		// Never retain an unauthorized read, including partial content in an
+		// error. A later owner takeover must not make this result readable.
+		if _, err := tx.Exec(ctx, `UPDATE tasks SET status='failed',output=NULL,
+			error='task authorization changed; previous execution is unknown',
+			finished_at=now(),config_content=NULL,lease_id=NULL WHERE id=$1`, taskID); err != nil {
+			return err
+		}
+		return tx.Commit(ctx)
 	}
 	status := core.TaskFailed
 	if result.Success {
@@ -1949,15 +2241,25 @@ func (s *Store) CompleteTask(ctx context.Context, agentID, taskID string, result
 			return err
 		}
 	}
+	if status == core.TaskSucceeded {
+		if err := recordEngineOwnershipTx(ctx, tx, taskID, action, result.TrafficSettled); err != nil {
+			return err
+		}
+	}
 	return tx.Commit(ctx)
 }
 
 func (s *Store) ReadTaskConfigSnapshot(ctx context.Context, taskID, agentID string, engine core.Engine) (string, error) {
+	if err := requireHostConfigRead(ctx, s.pool, agentID, engine); err != nil {
+		return "", err
+	}
 	var content string
+	args := []any{taskID, agentID, engine, core.ActionReadConfig, core.ActionReadManagedConfig}
+	where := ownerClause(ctx, "owner_id", &args)
 	err := s.pool.QueryRow(ctx, `
 		SELECT COALESCE(config_content,'') FROM tasks
-		WHERE id=$1 AND agent_id=$2 AND engine=$3 AND action IN ($4,$5) AND status='succeeded'`,
-		taskID, agentID, engine, core.ActionReadConfig, core.ActionReadManagedConfig).Scan(&content)
+		WHERE id=$1 AND agent_id=$2 AND engine=$3 AND action IN ($4,$5) AND status='succeeded'`+where,
+		args...).Scan(&content)
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && content == "") {
 		return "", ErrNotFound
 	}
@@ -1968,16 +2270,21 @@ func (s *Store) ReadTaskConfigSnapshot(ctx context.Context, taskID, agentID stri
 }
 
 func (s *Store) RecentReadTask(ctx context.Context, agentID string, engine core.Engine, maxAge time.Duration) (core.Task, error) {
+	if err := requireHostConfigRead(ctx, s.pool, agentID, engine); err != nil {
+		return core.Task{}, ErrNotFound
+	}
 	if maxAge <= 0 {
 		return core.Task{}, ErrNotFound
 	}
+	args := []any{agentID, engine, core.ActionReadConfig, intervalString(maxAge)}
+	where := ownerClause(ctx, "owner_id", &args)
 	row := s.pool.QueryRow(ctx, `
 		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),COALESCE(core_version,''),COALESCE(core_source,''),status,attempt,
 		       COALESCE(output,''),COALESCE(error,''),created_at,started_at,finished_at,tcp_settings
 		FROM tasks
 		WHERE agent_id=$1 AND engine=$2 AND action=$3 AND status='succeeded'
-		  AND config_content IS NOT NULL AND finished_at > now()-$4::interval
-		ORDER BY finished_at DESC LIMIT 1`, agentID, engine, core.ActionReadConfig, intervalString(maxAge))
+		  AND config_content IS NOT NULL AND finished_at > now()-$4::interval`+where+`
+		ORDER BY finished_at DESC LIMIT 1`, args...)
 	task, err := scanTask(row, false)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return core.Task{}, ErrNotFound
@@ -1989,6 +2296,8 @@ func (s *Store) RequeueStaleTasks(ctx context.Context, age, installAge time.Dura
 	if installAge < age {
 		installAge = age
 	}
+	args := []any{intervalString(age), intervalString(installAge), maxAttempts}
+	where := workspaceOwnerClause(ctx, "owner_id", &args)
 	_, err := s.pool.Exec(ctx, `
 		UPDATE tasks SET
 			status=CASE WHEN attempt >= $3 THEN 'failed' ELSE 'pending' END,
@@ -1997,31 +2306,36 @@ func (s *Store) RequeueStaleTasks(ctx context.Context, age, installAge time.Dura
 			started_at=CASE WHEN attempt >= $3 THEN started_at ELSE NULL END,
 			config_content=CASE WHEN attempt >= $3 THEN NULL ELSE config_content END,
 			lease_id=NULL
-		WHERE status='running' AND started_at < now() - CASE WHEN action='install' THEN $2::interval ELSE $1::interval END`,
-		intervalString(age), intervalString(installAge), maxAttempts)
+		WHERE status='running' AND started_at < now() - CASE WHEN action='install' THEN $2::interval ELSE $1::interval END`+where,
+		args...)
 	return err
 }
 
 func (s *Store) Overview(ctx context.Context) (core.Overview, error) {
 	var result core.Overview
+	args := []any{}
+	configWhere := ownerClause(ctx, "owner_id", &args)
+	configWhere += configAgentAccessClause(ctx, "configs.agent_id", "configs.engine", &args)
+	taskWhere := ownerClause(ctx, "owner_id", &args)
+	taskWhere += agentEngineAccessClause(ctx, "tasks.agent_id", "tasks.engine", &args)
+	agentWhere := agentAccessClause(ctx, "agents.id", &args)
 	err := s.pool.QueryRow(ctx, `
 		SELECT agents.total,agents.online,configs.archived,configs.node,
 		       tasks.queued+tasks.running,tasks.queued,tasks.running,tasks.failed
 		FROM (
 			SELECT count(*) AS total,
-			       count(*) FILTER (WHERE last_seen > now() - make_interval(secs =>
-			         (SELECT agent_offline_threshold_seconds FROM panel_settings WHERE id=1))) AS online
-			FROM agents WHERE revoked_at IS NULL
+			       count(*) FILTER (WHERE last_seen > now() - make_interval(secs => `+agentOfflineThresholdSQL+`)) AS online
+			FROM agents WHERE revoked_at IS NULL`+agentWhere+`
 		) agents CROSS JOIN (
 			SELECT count(*) FILTER (WHERE agent_id IS NULL) AS archived,
 			       count(*) FILTER (WHERE agent_id IS NOT NULL) AS node
-			FROM configs WHERE deleted_at IS NULL
+			FROM configs WHERE deleted_at IS NULL`+configWhere+`
 		) configs CROSS JOIN (
 			SELECT count(*) FILTER (WHERE status='pending') AS queued,
 			       count(*) FILTER (WHERE status='running') AS running,
 			       count(*) FILTER (WHERE status='failed') AS failed
-			FROM tasks WHERE status IN ('pending','running','failed')
-		) tasks`).Scan(
+			FROM tasks WHERE status IN ('pending','running','failed')`+taskWhere+`
+		) tasks`, args...).Scan(
 		&result.Agents, &result.AgentsOnline, &result.Configs, &result.NodeConfigs,
 		&result.TasksPending, &result.TasksQueued, &result.TasksRunning, &result.TasksFailed)
 	return result, err
@@ -2039,7 +2353,7 @@ func scanTask(row rowScanner, includeContent bool) (core.Task, error) {
 		var mainlandPoliciesJSON []byte
 		err = row.Scan(&task.ID, &task.AgentID, &task.Action, &task.Engine, &task.ConfigID, &task.ConfigVersion,
 			&task.ConfigContent, &mainlandPoliciesJSON, &task.CoreVersion, &task.CoreSource, &task.Status, &task.Attempt, &task.LeaseID, &task.Output, &task.Error,
-			&task.CreatedAt, &task.StartedAt, &task.FinishedAt, &tcpSettingsJSON)
+			&task.CreatedAt, &task.StartedAt, &task.FinishedAt, &tcpSettingsJSON, &task.SharedTrafficID)
 		if err == nil && len(mainlandPoliciesJSON) > 0 {
 			err = json.Unmarshal(mainlandPoliciesJSON, &task.MainlandAccessPolicies)
 		}
@@ -2099,6 +2413,9 @@ func mapError(err error) error {
 	if err == nil {
 		return nil
 	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	}
 	if isUniqueViolation(err) {
 		return fmt.Errorf("%w: duplicate value", ErrConflict)
 	}
@@ -2140,7 +2457,8 @@ CREATE TABLE IF NOT EXISTS agents (
     public_key bytea NOT NULL CHECK (octet_length(public_key) = 32),
     last_seen timestamptz NOT NULL,
     enrolled_at timestamptz NOT NULL,
-    revoked_at timestamptz
+    revoked_at timestamptz,
+    admin_hidden boolean NOT NULL DEFAULT false
 	);
 
 	-- Agent-reported metrics live in agent_live_state. Keeping that snapshot in
@@ -2155,6 +2473,10 @@ CREATE TABLE IF NOT EXISTS agents (
 	-- updated on its own schedule and cannot live inside the Agent's snapshot:
 	-- a later push would have overwritten it.
 	ALTER TABLE agents ADD COLUMN IF NOT EXISTS observed_public_ip text NOT NULL DEFAULT '';
+	ALTER TABLE agents ADD COLUMN IF NOT EXISTS owner_id text NOT NULL DEFAULT '';
+	ALTER TABLE agents ADD COLUMN IF NOT EXISTS sharing_revision bigint NOT NULL DEFAULT 1;
+	ALTER TABLE agents ADD COLUMN IF NOT EXISTS admin_hidden boolean NOT NULL DEFAULT false;
+	CREATE INDEX IF NOT EXISTS agents_owner_idx ON agents(owner_id);
 	COMMENT ON COLUMN agents.observed_public_ip IS 'Public address the control plane observed for this Agent''s authenticated WSS session; written from the socket, never reported by the Agent.';
 	ALTER TABLE agents SET (fillfactor = 70);
 
@@ -2218,6 +2540,7 @@ ALTER TABLE configs DROP CONSTRAINT IF EXISTS configs_content_check;
 ALTER TABLE configs ADD CONSTRAINT configs_content_check CHECK (octet_length(content) <= 4194304);
 
 	ALTER TABLE configs ADD COLUMN IF NOT EXISTS agent_id text REFERENCES agents(id);
+	ALTER TABLE configs ADD COLUMN IF NOT EXISTS owner_id text NOT NULL DEFAULT '';
 
 	CREATE TABLE IF NOT EXISTS config_revisions (
 	    config_id text NOT NULL REFERENCES configs(id),
@@ -2244,6 +2567,12 @@ ALTER TABLE configs ADD CONSTRAINT configs_content_check CHECK (octet_length(con
 	);
 	CREATE INDEX IF NOT EXISTS config_client_metadata_config_idx
 	    ON config_client_metadata(config_id,config_version);
+	CREATE TABLE IF NOT EXISTS config_client_preferences (
+	    config_id text NOT NULL REFERENCES configs(id) ON DELETE CASCADE,
+	    label text NOT NULL,
+	    value text NOT NULL,
+	    PRIMARY KEY(config_id,label)
+	);
 
 	INSERT INTO config_revisions (config_id,version,agent_id,name,description,engine,content,created_at)
 	SELECT id,version,agent_id,name,description,engine,content,updated_at FROM configs
@@ -2272,6 +2601,13 @@ CREATE INDEX IF NOT EXISTS mainland_access_policies_agent_idx
 	WHERE p.config_version IS NULL AND c.agent_id=p.agent_id AND c.engine=p.engine AND c.deleted_at IS NULL;
 	DELETE FROM mainland_access_policies WHERE config_version IS NULL;
 	ALTER TABLE mainland_access_policies ALTER COLUMN config_version SET NOT NULL;
+	ALTER TABLE mainland_access_policies ADD COLUMN IF NOT EXISTS config_id text REFERENCES configs(id);
+	UPDATE mainland_access_policies p SET config_id=c.id FROM configs c
+	WHERE p.config_id IS NULL AND c.agent_id=p.agent_id AND c.engine=p.engine AND c.deleted_at IS NULL;
+	DELETE FROM mainland_access_policies WHERE config_id IS NULL;
+	ALTER TABLE mainland_access_policies ALTER COLUMN config_id SET NOT NULL;
+	ALTER TABLE mainland_access_policies DROP CONSTRAINT IF EXISTS mainland_access_policies_pkey;
+	ALTER TABLE mainland_access_policies ADD CONSTRAINT mainland_access_policies_pkey PRIMARY KEY (config_id,tag,port);
 
 CREATE TABLE IF NOT EXISTS tasks (
     id text PRIMARY KEY,
@@ -2323,7 +2659,8 @@ CREATE TABLE IF NOT EXISTS enrollment_tokens (
 	    used_count integer NOT NULL DEFAULT 0 CHECK (used_count >= 0),
 	    reusable boolean NOT NULL DEFAULT false,
 	    created_at timestamptz NOT NULL,
-	    revoked_at timestamptz
+	    revoked_at timestamptz,
+	    admin_hidden boolean NOT NULL DEFAULT false
 );
 
 ALTER TABLE enrollment_tokens ADD COLUMN IF NOT EXISTS reusable boolean NOT NULL DEFAULT false;
@@ -2332,6 +2669,9 @@ ALTER TABLE enrollment_tokens ALTER COLUMN expires_at DROP NOT NULL;
 ALTER TABLE enrollment_tokens DROP CONSTRAINT IF EXISTS enrollment_tokens_max_uses_check;
 ALTER TABLE enrollment_tokens ADD CONSTRAINT enrollment_tokens_max_uses_check CHECK (max_uses BETWEEN 0 AND 50);
 ALTER TABLE enrollment_tokens ADD COLUMN IF NOT EXISTS agent_id text;
+ALTER TABLE enrollment_tokens ADD COLUMN IF NOT EXISTS owner_id text NOT NULL DEFAULT '';
+ALTER TABLE enrollment_tokens ADD COLUMN IF NOT EXISTS admin_hidden boolean NOT NULL DEFAULT false;
+CREATE INDEX IF NOT EXISTS enrollment_tokens_owner_idx ON enrollment_tokens(owner_id);
 DROP INDEX IF EXISTS enrollment_tokens_reusable_name_unique_idx;
 
 ALTER TABLE agents ADD COLUMN IF NOT EXISTS enrollment_id text;
@@ -2349,7 +2689,8 @@ WHERE agent.enrollment_id=token.id AND token.agent_id IS NULL;
 ALTER TABLE enrollment_tokens DROP CONSTRAINT IF EXISTS enrollment_tokens_agent_id_fkey;
 ALTER TABLE enrollment_tokens ADD CONSTRAINT enrollment_tokens_agent_id_fkey FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE;
 CREATE INDEX IF NOT EXISTS enrollment_tokens_agent_id_idx ON enrollment_tokens(agent_id,created_at DESC);
-CREATE UNIQUE INDEX IF NOT EXISTS enrollment_tokens_reusable_unbound_name_unique_idx ON enrollment_tokens(lower(name)) WHERE reusable AND agent_id IS NULL;
+DROP INDEX IF EXISTS enrollment_tokens_reusable_unbound_name_unique_idx;
+CREATE UNIQUE INDEX IF NOT EXISTS enrollment_tokens_owner_unbound_name_unique_idx ON enrollment_tokens(owner_id,lower(name)) WHERE reusable AND agent_id IS NULL;
 
 CREATE TABLE IF NOT EXISTS agent_nonces (
     agent_id text NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
@@ -2445,6 +2786,45 @@ UPDATE panel_users SET role='user' WHERE role IN ('operator','auditor','readonly
 ALTER TABLE panel_users ADD CONSTRAINT panel_users_role_check CHECK (role IN ('admin','user'));
 CREATE UNIQUE INDEX IF NOT EXISTS panel_users_username_unique_idx ON panel_users(lower(username));
 CREATE INDEX IF NOT EXISTS panel_users_status_idx ON panel_users(disabled,username);
+ALTER TABLE panel_users ADD COLUMN IF NOT EXISTS agent_isolation boolean NOT NULL DEFAULT false;
+ALTER TABLE panel_users ADD COLUMN IF NOT EXISTS auth_revision bigint NOT NULL DEFAULT 1;
+CREATE TABLE IF NOT EXISTS user_panel_settings (
+    owner_id text PRIMARY KEY,
+    content text NOT NULL,
+    runtime jsonb NOT NULL DEFAULT '{}'::jsonb,
+    revision bigint NOT NULL DEFAULT 1,
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS user_substore_settings (
+    owner_id text PRIMARY KEY,
+    endpoint_ciphertext text NOT NULL,
+    backend_key text NOT NULL,
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE panel_users ADD COLUMN IF NOT EXISTS agent_access_revision bigint NOT NULL DEFAULT 1;
+CREATE TABLE IF NOT EXISTS agent_shares (
+	id text PRIMARY KEY,
+	user_id text NOT NULL REFERENCES panel_users(id),
+	agent_id text NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+	enabled boolean NOT NULL DEFAULT true,
+	limit_bytes bigint NOT NULL DEFAULT 0 CHECK (limit_bytes>=0),
+	used_bytes bigint NOT NULL DEFAULT 0 CHECK (used_bytes>=0),
+	created_at timestamptz NOT NULL DEFAULT now(),
+	updated_at timestamptz NOT NULL DEFAULT now(),
+	UNIQUE (user_id,agent_id)
+);
+CREATE INDEX IF NOT EXISTS agent_shares_agent_idx ON agent_shares(agent_id);
+ALTER TABLE agent_shares ADD COLUMN IF NOT EXISTS status varchar(10) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','accepted','rejected'));
+ALTER TABLE agent_shares ADD COLUMN IF NOT EXISTS invitation_revision bigint NOT NULL DEFAULT 1 CHECK (invitation_revision>0);
+ALTER TABLE agent_shares ADD COLUMN IF NOT EXISTS engines text[] NOT NULL DEFAULT '{}'
+	CHECK (engines <@ ARRAY['mihomo','xray','sing-box','ss-rust']::text[] AND cardinality(engines)<=4 AND array_position(engines,NULL) IS NULL);
+CREATE TABLE IF NOT EXISTS agent_share_ports (
+	agent_id text NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+	port integer NOT NULL CHECK (port BETWEEN 1 AND 65535),
+	share_id text NOT NULL REFERENCES agent_shares(id) ON DELETE CASCADE,
+	PRIMARY KEY (agent_id,port)
+);
+CREATE INDEX IF NOT EXISTS agent_share_ports_share_idx ON agent_share_ports(share_id);
 
 INSERT INTO panel_settings (
     id,panel_name,panel_description,task_page_size,task_poll_interval_ms,updated_at
@@ -2459,7 +2839,9 @@ ON CONFLICT (id) DO NOTHING;
 -- answers at least as cheaply.
 CREATE UNIQUE INDEX IF NOT EXISTS agents_public_key_unique_idx ON agents(public_key);
 	CREATE INDEX IF NOT EXISTS configs_active_updated_idx ON configs(updated_at DESC) WHERE deleted_at IS NULL;
-	CREATE UNIQUE INDEX IF NOT EXISTS configs_agent_engine_unique_idx ON configs(agent_id,engine) WHERE agent_id IS NOT NULL AND deleted_at IS NULL;
+	DROP INDEX IF EXISTS configs_agent_engine_unique_idx;
+	CREATE UNIQUE INDEX IF NOT EXISTS configs_agent_engine_owner_unique_idx ON configs(agent_id,engine,owner_id) WHERE agent_id IS NOT NULL AND deleted_at IS NULL;
+	CREATE INDEX IF NOT EXISTS configs_owner_updated_idx ON configs(owner_id,updated_at DESC) WHERE deleted_at IS NULL;
 	CREATE INDEX IF NOT EXISTS config_revisions_recent_idx ON config_revisions(config_id,version DESC);
 CREATE INDEX IF NOT EXISTS tasks_agent_queue_idx ON tasks(agent_id, status, created_at);
 CREATE INDEX IF NOT EXISTS tasks_created_idx ON tasks(created_at DESC);
@@ -2469,6 +2851,44 @@ CREATE INDEX IF NOT EXISTS tasks_system_tcp_recent_idx ON tasks(agent_id,created
 CREATE INDEX IF NOT EXISTS tasks_retention_idx ON tasks((COALESCE(finished_at,created_at))) WHERE status IN ('succeeded','failed','canceled');
 CREATE INDEX IF NOT EXISTS tasks_latest_deployment_idx ON tasks(agent_id,engine,finished_at DESC) WHERE action IN ('deploy','import-existing') AND status='succeeded';
 CREATE UNIQUE INDEX IF NOT EXISTS tasks_one_running_per_agent_idx ON tasks(agent_id) WHERE status='running';
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS owner_id text NOT NULL DEFAULT '';
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS shared_traffic_id text NOT NULL DEFAULT '';
+CREATE TABLE IF NOT EXISTS agent_engine_ownership (
+	agent_id text NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+	engine varchar(20) NOT NULL,
+	owner_id text NOT NULL,
+	config_id text NOT NULL,
+	config_version integer NOT NULL,
+	running boolean NOT NULL DEFAULT true,
+	updated_at timestamptz NOT NULL,
+	PRIMARY KEY (agent_id,engine)
+);
+ALTER TABLE agent_engine_ownership ADD COLUMN IF NOT EXISTS uncertain boolean NOT NULL DEFAULT false;
+ALTER TABLE agent_engine_ownership ADD COLUMN IF NOT EXISTS config_uncertain boolean NOT NULL DEFAULT false;
+ALTER TABLE agent_engine_ownership ADD COLUMN IF NOT EXISTS traffic_settled boolean NOT NULL DEFAULT false;
+INSERT INTO agent_engine_ownership(agent_id,engine,owner_id,config_id,config_version,running,uncertain,config_uncertain,updated_at)
+SELECT latest.agent_id,latest.engine,COALESCE(c.owner_id,deployed.owner_id,latest.owner_id),
+	COALESCE(deployed.config_id,latest.config_id,''),COALESCE(deployed.config_version,latest.config_version,0),
+	NOT(latest.action='stop' AND latest.status='succeeded'),
+	latest.status<>'succeeded',
+	EXISTS(
+		SELECT 1 FROM tasks failed WHERE failed.agent_id=latest.agent_id AND failed.engine=latest.engine
+			AND failed.action IN ('deploy','import-existing') AND failed.status<>'succeeded'
+			AND failed.started_at IS NOT NULL AND failed.started_at>COALESCE(deployed.finished_at,'-infinity'::timestamptz)),
+	COALESCE(latest.finished_at,latest.started_at,latest.created_at)
+FROM (SELECT DISTINCT ON(agent_id,engine) *
+	FROM tasks WHERE action IN ('deploy','import-existing','start','restart','stop')
+		AND (started_at IS NOT NULL OR status='succeeded')
+	ORDER BY agent_id,engine,COALESCE(started_at,finished_at,created_at) DESC,created_at DESC,id DESC) latest
+LEFT JOIN LATERAL (
+	SELECT owner_id,config_id,config_version,finished_at FROM tasks
+	WHERE agent_id=latest.agent_id AND engine=latest.engine AND action IN ('deploy','import-existing')
+		AND status='succeeded' AND config_id IS NOT NULL AND finished_at IS NOT NULL
+	ORDER BY finished_at DESC,id DESC LIMIT 1
+) deployed ON true
+LEFT JOIN configs c ON c.id=COALESCE(deployed.config_id,latest.config_id)
+ON CONFLICT(agent_id,engine) DO NOTHING;
+CREATE INDEX IF NOT EXISTS tasks_owner_created_idx ON tasks(owner_id,created_at DESC);
 CREATE TABLE IF NOT EXISTS metric_samples (
     agent_id text NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
     sampled_at timestamptz NOT NULL,
@@ -2519,6 +2939,10 @@ ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS quota_enabled boolean
 ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS monitoring_enabled boolean NOT NULL DEFAULT true;
 ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS discovered boolean NOT NULL DEFAULT false;
 ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS metadata_managed boolean NOT NULL DEFAULT false;
+ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS share_id text REFERENCES agent_shares(id);
+ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS share_used_bytes bigint NOT NULL DEFAULT 0 CHECK (share_used_bytes >= 0);
+ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS share_generation bigint NOT NULL DEFAULT 0 CHECK (share_generation >= 0);
+CREATE INDEX IF NOT EXISTS port_traffic_share_idx ON port_traffic_policies(share_id) WHERE share_id IS NOT NULL;
 ALTER TABLE port_traffic_policies DROP CONSTRAINT IF EXISTS port_traffic_policies_limit_bytes_check;
 ALTER TABLE port_traffic_policies ADD CONSTRAINT port_traffic_policies_limit_bytes_check CHECK (limit_bytes >= 0);
 ALTER TABLE port_traffic_policies ADD COLUMN IF NOT EXISTS traffic_history_initialized boolean NOT NULL DEFAULT false;
@@ -2635,6 +3059,7 @@ CREATE TABLE IF NOT EXISTS substore_sync_settings (
 	last_sync_error varchar(500) NOT NULL DEFAULT '',
 	updated_at timestamptz NOT NULL
 );
+ALTER TABLE substore_sync_settings ADD COLUMN IF NOT EXISTS backend_key text NOT NULL DEFAULT '';
 CREATE TABLE IF NOT EXISTS substore_sync_targets (
 	id text PRIMARY KEY,
 	display_name varchar(100) NOT NULL,
@@ -2649,11 +3074,21 @@ CREATE TABLE IF NOT EXISTS substore_sync_targets (
 );
 ALTER TABLE substore_sync_targets ADD COLUMN IF NOT EXISTS display_name varchar(100);
 ALTER TABLE substore_sync_targets ADD COLUMN IF NOT EXISTS sync_mode varchar(12) NOT NULL DEFAULT 'managed';
+ALTER TABLE substore_sync_targets ADD COLUMN IF NOT EXISTS owner_id text NOT NULL DEFAULT '';
+ALTER TABLE substore_sync_targets ADD COLUMN IF NOT EXISTS backend_key text NOT NULL DEFAULT '';
+ALTER TABLE substore_sync_targets DROP CONSTRAINT IF EXISTS substore_sync_targets_subscription_name_key;
+ALTER TABLE substore_sync_targets DROP CONSTRAINT IF EXISTS substore_sync_targets_integration_id_key;
+CREATE UNIQUE INDEX IF NOT EXISTS substore_sync_targets_owner_name_idx ON substore_sync_targets(owner_id,subscription_name);
+CREATE UNIQUE INDEX IF NOT EXISTS substore_sync_targets_backend_name_idx ON substore_sync_targets(backend_key,subscription_name) WHERE backend_key<>'';
+CREATE UNIQUE INDEX IF NOT EXISTS substore_sync_targets_owner_integration_idx ON substore_sync_targets(owner_id,integration_id);
+CREATE UNIQUE INDEX IF NOT EXISTS substore_sync_targets_backend_integration_idx ON substore_sync_targets(backend_key,integration_id) WHERE backend_key<>'';
+ALTER TABLE substore_sync_targets ADD COLUMN IF NOT EXISTS sync_format varchar(8) NOT NULL DEFAULT 'url' CHECK (sync_format IN ('url','mihomo'));
 ALTER TABLE substore_sync_targets DROP CONSTRAINT IF EXISTS substore_sync_targets_sync_mode_check;
 ALTER TABLE substore_sync_targets ADD CONSTRAINT substore_sync_targets_sync_mode_check CHECK (sync_mode IN ('incremental','managed'));
 UPDATE substore_sync_targets SET display_name=subscription_name WHERE display_name IS NULL;
 ALTER TABLE substore_sync_targets ALTER COLUMN display_name SET NOT NULL;
-CREATE UNIQUE INDEX IF NOT EXISTS substore_sync_targets_display_name_idx ON substore_sync_targets(display_name);
+DROP INDEX IF EXISTS substore_sync_targets_display_name_idx;
+CREATE UNIQUE INDEX IF NOT EXISTS substore_sync_targets_owner_display_name_idx ON substore_sync_targets(owner_id,display_name);
 CREATE TABLE IF NOT EXISTS substore_sync_items (
 	target_id text NOT NULL REFERENCES substore_sync_targets(id) ON DELETE CASCADE,
 	agent_id text NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
@@ -2666,6 +3101,7 @@ CREATE TABLE IF NOT EXISTS substore_sync_items (
 	PRIMARY KEY (target_id,agent_id,engine,profile_tag)
 );
 ALTER TABLE substore_sync_items ADD COLUMN IF NOT EXISTS target_id text;
+ALTER TABLE substore_sync_items ADD COLUMN IF NOT EXISTS config_id text NOT NULL DEFAULT '';
 ALTER TABLE substore_sync_items ADD COLUMN IF NOT EXISTS address_mode varchar(8) NOT NULL DEFAULT 'auto';
 ALTER TABLE substore_sync_items DROP CONSTRAINT IF EXISTS substore_sync_items_address_mode_check;
 ALTER TABLE substore_sync_items ADD CONSTRAINT substore_sync_items_address_mode_check CHECK (address_mode IN ('auto','ipv4','ipv6','both'));
@@ -2712,7 +3148,11 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     detail text NOT NULL DEFAULT '',
     remote_ip varchar(64) NOT NULL DEFAULT ''
 );
+ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS owner_id text NOT NULL DEFAULT '';
+CREATE INDEX IF NOT EXISTS audit_logs_owner_recent_idx ON audit_logs(owner_id,acted_at DESC);
 CREATE INDEX IF NOT EXISTS audit_logs_recent_idx ON audit_logs(acted_at DESC);CREATE TABLE IF NOT EXISTS config_templates ( id text PRIMARY KEY, name varchar(100) NOT NULL, engine varchar(20) NOT NULL CHECK (engine IN ('mihomo','xray','sing-box','ss-rust')), content text NOT NULL CHECK (octet_length(content) <= 4194304), created_at timestamptz NOT NULL, updated_at timestamptz NOT NULL ); CREATE INDEX IF NOT EXISTS config_templates_recent_idx ON config_templates(updated_at DESC);
+ALTER TABLE config_templates ADD COLUMN IF NOT EXISTS owner_id text NOT NULL DEFAULT '';
+CREATE INDEX IF NOT EXISTS config_templates_owner_updated_idx ON config_templates(owner_id,updated_at DESC);
 CREATE INDEX IF NOT EXISTS enrollment_tokens_active_idx ON enrollment_tokens(expires_at) WHERE revoked_at IS NULL;
 CREATE INDEX IF NOT EXISTS agent_nonces_expiry_idx ON agent_nonces(expires_at);
 

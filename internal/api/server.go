@@ -101,8 +101,9 @@ func agentHasFeature(features []string, feature string) bool {
 }
 
 type tokenPrincipal struct {
-	Role        core.Role
-	Permissions []core.Permission
+	Role          core.Role
+	ConfigOwnerID string
+	Permissions   []core.Permission
 }
 
 type liveConnection struct {
@@ -126,17 +127,17 @@ func New(dataStore *store.Store, config Config) *Server {
 	roleTokens := map[[32]byte]tokenPrincipal{adminTokenDigest: {Role: core.RoleAdmin, Permissions: core.AllPermissions()}}
 	for _, token := range config.OperatorTokens {
 		if token = strings.TrimSpace(token); token != "" {
-			roleTokens[sha256.Sum256([]byte(token))] = tokenPrincipal{Role: core.RoleUser, Permissions: legacyOperatorPermissions()}
+			roleTokens[sha256.Sum256([]byte(token))] = tokenPrincipal{Role: core.RoleUser, ConfigOwnerID: tokenConfigOwnerID(token), Permissions: legacyOperatorPermissions()}
 		}
 	}
 	for _, token := range config.AuditorTokens {
 		if token = strings.TrimSpace(token); token != "" {
-			roleTokens[sha256.Sum256([]byte(token))] = tokenPrincipal{Role: core.RoleUser, Permissions: legacyAuditorPermissions()}
+			roleTokens[sha256.Sum256([]byte(token))] = tokenPrincipal{Role: core.RoleUser, ConfigOwnerID: tokenConfigOwnerID(token), Permissions: legacyAuditorPermissions()}
 		}
 	}
 	for _, token := range config.ReadonlyTokens {
 		if token = strings.TrimSpace(token); token != "" {
-			roleTokens[sha256.Sum256([]byte(token))] = tokenPrincipal{Role: core.RoleUser, Permissions: legacyReadonlyPermissions()}
+			roleTokens[sha256.Sum256([]byte(token))] = tokenPrincipal{Role: core.RoleUser, ConfigOwnerID: tokenConfigOwnerID(token), Permissions: legacyReadonlyPermissions()}
 		}
 	}
 	komariClient, komariErr := komari.New(config.KomariURL, config.KomariAPIKey, config.KomariHTTPClient)
@@ -278,19 +279,22 @@ func (s *Server) Handler() http.Handler {
 
 	mux.Handle("GET /api/v1/overview", s.requirePermission(core.PermissionOverviewRead, http.HandlerFunc(s.overview)))
 	mux.Handle("GET /api/v1/agents", s.requirePermission(core.PermissionAgentsRead, http.HandlerFunc(s.listAgents)))
+	mux.Handle("GET /api/v1/agent-access", s.requireAllPermissions(nil, http.HandlerFunc(s.getOwnAgentAccess)))
+	mux.Handle("GET /api/v1/agent-directory", s.requirePermission(core.PermissionAgentsRead, http.HandlerFunc(s.listAgentDirectory)))
+	mux.Handle("POST /api/v1/agent-access/{id}/response", s.requireAllPermissions(nil, http.HandlerFunc(s.respondAgentShare)))
 	mux.Handle("GET /api/v1/deployments", s.requirePermission(core.PermissionDeploymentsRead, http.HandlerFunc(s.listDeployments)))
 	mux.Handle("GET /api/v1/client-access", s.requirePermission(core.PermissionClientAccessRead, http.HandlerFunc(s.listClientAccess)))
 	mux.Handle("GET /api/v1/substore-sync", s.requirePermission(core.PermissionClientAccessRead, http.HandlerFunc(s.getSubStoreSync)))
 	mux.Handle("PUT /api/v1/substore-sync/settings", s.requirePermission(core.PermissionSettingsManage, http.HandlerFunc(s.putSubStoreSettings)))
-	mux.Handle("POST /api/v1/substore-sync/targets", s.requirePermission(core.PermissionSettingsManage, http.HandlerFunc(s.createSubStoreTarget)))
+	mux.Handle("POST /api/v1/substore-sync/targets", s.requirePermission(core.PermissionSettingsManage, s.subStoreMutation(s.createSubStoreTarget)))
 	mux.Handle("GET /api/v1/substore-sync/remote-targets", s.requirePermission(core.PermissionSettingsManage, http.HandlerFunc(s.listSubStoreRemoteTargets)))
-	mux.Handle("POST /api/v1/substore-sync/targets/import", s.requirePermission(core.PermissionSettingsManage, http.HandlerFunc(s.importSubStoreRemoteTarget)))
-	mux.Handle("POST /api/v1/substore-sync/targets/{id}/remote", s.requirePermission(core.PermissionSettingsManage, http.HandlerFunc(s.linkSubStoreRemoteTarget)))
-	mux.Handle("PUT /api/v1/substore-sync/targets/{id}", s.requirePermission(core.PermissionSettingsManage, http.HandlerFunc(s.updateSubStoreTarget)))
-	mux.Handle("DELETE /api/v1/substore-sync/targets/{id}", s.requirePermission(core.PermissionSettingsManage, http.HandlerFunc(s.deleteSubStoreTarget)))
-	mux.Handle("PUT /api/v1/substore-sync/selections", s.requirePermission(core.PermissionSettingsManage, http.HandlerFunc(s.putSubStoreSelections)))
+	mux.Handle("POST /api/v1/substore-sync/targets/import", s.requirePermission(core.PermissionSettingsManage, s.subStoreMutation(s.importSubStoreRemoteTarget)))
+	mux.Handle("POST /api/v1/substore-sync/targets/{id}/remote", s.requirePermission(core.PermissionSettingsManage, s.subStoreMutation(s.linkSubStoreRemoteTarget)))
+	mux.Handle("PUT /api/v1/substore-sync/targets/{id}", s.requirePermission(core.PermissionSettingsManage, s.subStoreMutation(s.updateSubStoreTarget)))
+	mux.Handle("DELETE /api/v1/substore-sync/targets/{id}", s.requirePermission(core.PermissionSettingsManage, s.subStoreMutation(s.deleteSubStoreTarget)))
+	mux.Handle("PUT /api/v1/substore-sync/selections", s.requirePermission(core.PermissionSettingsManage, s.subStoreMutation(s.putSubStoreSelections)))
 	mux.Handle("POST /api/v1/substore-sync/test", s.requirePermission(core.PermissionSettingsManage, http.HandlerFunc(s.testSubStoreConnection)))
-	mux.Handle("POST /api/v1/substore-sync/run", s.requirePermission(core.PermissionSettingsManage, http.HandlerFunc(s.runSubStoreSync)))
+	mux.Handle("POST /api/v1/substore-sync/run", s.requirePermission(core.PermissionSettingsManage, s.subStoreMutation(s.runSubStoreSync)))
 	mux.Handle("GET /api/v1/core-logs", s.requirePermission(core.PermissionCoreLogsRead, http.HandlerFunc(s.listCoreLogs)))
 	mux.Handle("GET /api/v1/access-controls", s.requirePermission(core.PermissionAgentConfigRead, http.HandlerFunc(s.listMainlandAccessPolicies)))
 	mux.Handle("PUT /api/v1/access-controls", s.requireAllPermissions(
@@ -305,6 +309,9 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/agents/{id}/komari", s.requirePermission(core.PermissionAgentsRead, http.HandlerFunc(s.getAgentKomari)))
 	mux.Handle("PUT /api/v1/agents/{id}/komari", s.requirePermission(core.PermissionAgentsManage, http.HandlerFunc(s.putAgentKomari)))
 	mux.Handle("PUT /api/v1/agents/{id}/name", s.requirePermission(core.PermissionAgentsManage, http.HandlerFunc(s.putAgentName)))
+	mux.Handle("PUT /api/v1/agents/{id}/visibility", s.requirePermission(core.PermissionAgentsManage, http.HandlerFunc(s.putAgentVisibility)))
+	mux.Handle("GET /api/v1/agents/{id}/sharing", s.requirePermission(core.PermissionAgentsManage, http.HandlerFunc(s.getAgentSharing)))
+	mux.Handle("PUT /api/v1/agents/{id}/sharing", s.requirePermission(core.PermissionAgentsManage, http.HandlerFunc(s.putAgentSharing)))
 	mux.Handle("PUT /api/v1/agents/{id}/capabilities/{engine}", s.requirePermission(core.PermissionAgentsManage, http.HandlerFunc(s.putAgentEngineCapability)))
 	mux.Handle("GET /api/v1/config-catalogs/{engine}", s.requirePermission(core.PermissionCatalogsRead, http.HandlerFunc(s.configCatalog)))
 	mux.Handle("DELETE /api/v1/agents/{id}", s.requirePermission(core.PermissionAgentsManage, http.HandlerFunc(s.deleteAgent)))
@@ -354,6 +361,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/v1/users", s.requirePermission(core.PermissionUsersManage, http.HandlerFunc(s.createUser)))
 	mux.Handle("PUT /api/v1/users/{id}", s.requirePermission(core.PermissionUsersManage, http.HandlerFunc(s.updateUser)))
 	mux.Handle("DELETE /api/v1/users/{id}", s.requirePermission(core.PermissionUsersManage, http.HandlerFunc(s.deleteUser)))
+	mux.Handle("GET /api/v1/users/{id}/agent-access", s.requirePermission(core.PermissionUsersManage, http.HandlerFunc(s.getUserAgentAccess)))
+	mux.Handle("PUT /api/v1/users/{id}/agent-access", s.requirePermission(core.PermissionUsersManage, http.HandlerFunc(s.putUserAgentAccess)))
 	mux.Handle("GET /api/v1/metrics/{id}", s.requirePermission(core.PermissionMetricsRead, http.HandlerFunc(s.metricSamples)))
 	mux.Handle("GET /api/v1/traffic-policies", s.requirePermission(core.PermissionTrafficRead, http.HandlerFunc(s.listPortTrafficPolicies)))
 	mux.Handle("GET /api/v1/traffic-endpoints", s.requirePermission(core.PermissionTrafficRead, http.HandlerFunc(s.listPortTrafficEndpoints)))
@@ -368,7 +377,10 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/templates", s.requirePermission(core.PermissionTemplatesRead, http.HandlerFunc(s.listTemplates)))
 	mux.Handle("POST /api/v1/templates", s.requirePermission(core.PermissionTemplatesWrite, http.HandlerFunc(s.createTemplate)))
 	mux.Handle("DELETE /api/v1/templates/{id}", s.requirePermission(core.PermissionTemplatesDelete, http.HandlerFunc(s.deleteTemplate)))
-	mux.Handle("POST /api/v1/templates/{id}/apply", s.requirePermission(core.PermissionTemplatesWrite, http.HandlerFunc(s.applyTemplate)))
+	mux.Handle("POST /api/v1/templates/{id}/apply", s.requireAllPermissions(
+		[]core.Permission{core.PermissionTemplatesWrite, core.PermissionAgentConfigWrite},
+		http.HandlerFunc(s.applyTemplate),
+	))
 
 	mux.HandleFunc("GET /api/v1/agent-binary", s.serveAgentBinary)
 	mux.Handle("GET /agent/v1/binary", s.agent(http.HandlerFunc(s.serveAgentBinaryForAgent)))
@@ -403,11 +415,21 @@ func (s *Server) overview(w http.ResponseWriter, request *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
-func (s *Server) listAgents(w http.ResponseWriter, request *http.Request) {
+// sessionAllows reports whether the authenticated caller holds a capability.
+// Role and explicit permission lookups are both deny-by-default, so an
+// unresolvable session never grants access.
+func (s *Server) sessionAllows(request *http.Request, permission core.Permission) bool {
 	role, roleOK := s.sessionRole(request)
 	permissions, permissionsOK := s.sessionPermissions(request)
+	if !roleOK || !permissionsOK {
+		return false
+	}
+	return role.Allows(permission) || core.HasPermission(permissions, permission)
+}
+
+func (s *Server) listAgents(w http.ResponseWriter, request *http.Request) {
 	list := s.store.ListAgents
-	if roleOK && permissionsOK && (role.Allows(core.PermissionEnrollmentManage) || core.HasPermission(permissions, core.PermissionEnrollmentManage)) {
+	if s.sessionAllows(request, core.PermissionEnrollmentManage) {
 		list = s.store.ListAgentsWithEnrollmentCommands
 	}
 	agents, err := list(request.Context())
@@ -415,12 +437,18 @@ func (s *Server) listAgents(w http.ResponseWriter, request *http.Request) {
 		writeInternalError(w, err)
 		return
 	}
-	if !roleOK || !permissionsOK || (!role.Allows(core.PermissionMetricsRead) && !core.HasPermission(permissions, core.PermissionMetricsRead)) {
+	if !s.sessionAllows(request, core.PermissionMetricsRead) {
 		for index := range agents {
 			agents[index].Metrics = core.HostMetrics{}
 		}
 	}
 	writeJSON(w, http.StatusOK, agents)
+}
+
+func (s *Server) redactAgentMetrics(request *http.Request, agent *core.Agent) {
+	if !s.sessionAllows(request, core.PermissionMetricsRead) {
+		agent.Metrics = core.HostMetrics{}
+	}
 }
 
 func (s *Server) putAgentName(w http.ResponseWriter, request *http.Request) {
@@ -678,6 +706,10 @@ func (s *Server) getTaskConfigSnapshot(w http.ResponseWriter, request *http.Requ
 		writeStoreError(w, err)
 		return
 	}
+	if err := s.store.CheckAgentAccess(request.Context(), task.AgentID, true); err != nil {
+		writeStoreError(w, err)
+		return
+	}
 	if (task.Action != core.ActionReadConfig && task.Action != core.ActionReadManagedConfig) || task.Status != core.TaskSucceeded {
 		writeStoreError(w, store.ErrNotFound)
 		return
@@ -781,7 +813,7 @@ func (s *Server) putAgentClientAddress(w http.ResponseWriter, request *http.Requ
 			writeStoreError(w, err)
 			return
 		}
-		saveErr = s.store.SetAgentClientProfilePreferences(request.Context(), request.PathValue("id"), label, address, name, addressMode)
+		saveErr = s.store.SetConfigClientPreferences(request.Context(), request.PathValue("id"), label, address, name, addressMode)
 	} else {
 		saveErr = s.store.SetAgentClientPreferences(request.Context(), request.PathValue("id"), address, name, addressMode)
 	}
@@ -818,7 +850,7 @@ func komariNodeResource(node komari.Node) core.KomariNode {
 	}
 }
 
-func (s *Server) komariForRequest(ctx context.Context) (*komari.Client, error) {
+func (s *Server) komariForRequest(ctx context.Context, allowEnvironment bool) (*komari.Client, error) {
 	if s.store == nil {
 		if s.komariConfigError != nil {
 			return nil, s.komariConfigError
@@ -830,6 +862,9 @@ func (s *Server) komariForRequest(ctx context.Context) (*komari.Client, error) {
 		return nil, err
 	}
 	if strings.TrimSpace(settings.KomariURL) == "" {
+		if !allowEnvironment {
+			return nil, nil
+		}
 		return s.komari, s.komariConfigError
 	}
 	client, err := komari.New(settings.KomariURL, settings.KomariAPIKey, s.komariHTTPClient)
@@ -851,7 +886,7 @@ func (s *Server) getAgentKomari(w http.ResponseWriter, request *http.Request) {
 		writeJSON(w, http.StatusOK, result)
 		return
 	}
-	komariClient, clientErr := s.komariForRequest(request.Context())
+	komariClient, clientErr := s.komariForRequest(request.Context(), s.configOwnerID(request) == "")
 	if clientErr != nil {
 		writeError(w, http.StatusServiceUnavailable, clientErr.Error())
 		return
@@ -903,6 +938,13 @@ func (s *Server) getAgentRegion(w http.ResponseWriter, request *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	if code := store.AgentRegionCode(agent); code != "" {
 		writeJSON(w, http.StatusOK, map[string]string{"country_code": code, "source": "manual"})
+		return
+	}
+	// Automatic detection derives the address and country from host metrics,
+	// which metrics.read gates. Without the capability this endpoint must stay
+	// empty instead of disclosing the node address or its GeoIP.
+	if !s.sessionAllows(request, core.PermissionMetricsRead) {
+		writeJSON(w, http.StatusOK, map[string]string{})
 		return
 	}
 	address := agentGeoIP(agent)
@@ -1001,13 +1043,14 @@ func ptr[T any](value T) *T { return &value }
 
 func (s *Server) createEnrollmentToken(w http.ResponseWriter, request *http.Request) {
 	var input struct {
-		Name string `json:"name"`
+		Name        string `json:"name"`
+		AdminHidden bool   `json:"admin_hidden"`
 	}
 	if err := decodeJSON(w, request, &input, 16<<10); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	requestData := core.EnrollmentTokenRequest{Name: input.Name, Reusable: true}
+	requestData := core.EnrollmentTokenRequest{Name: input.Name, Reusable: true, AdminHidden: input.AdminHidden}
 	var created core.EnrollmentTokenCreated
 	var err error
 	if s.auditWriter == nil {
@@ -1173,7 +1216,7 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 	connection.SetReadLimit(core.MaxCoreLogWireBytes)
 
 	id := agentID(request)
-	panelSettings, settingsErr := s.store.PanelSettings(request.Context())
+	panelSettings, settingsErr := s.store.AgentPanelSettings(request.Context(), id)
 	if settingsErr != nil {
 		slog.Warn("load agent policy settings", "agent_id", id, "error", settingsErr)
 		panelSettings = core.DefaultPanelSettings()
@@ -1225,7 +1268,7 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 		slog.Error("load agent traffic policies", "agent_id", id, "error", err)
 		return
 	}
-	if err := writeWire(ctx, connection, core.WireMessage{Type: core.WireHello, TrafficPolicies: trafficPoliciesForAgent(trafficPolicies)}); err != nil {
+	if err := writeWire(ctx, connection, core.WireMessage{Type: core.WireHello, TrafficPolicies: trafficPoliciesForSession(trafficPolicies, false)}); err != nil {
 		return
 	}
 	taskTicker := time.NewTicker(2 * time.Second)
@@ -1252,6 +1295,7 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 	var heartbeatReceived bool
 	var managedPublicIPProbe bool
 	var managedAgentPolicy bool
+	var sharedEnginesSupported, independentEgressSupported bool
 	publicIPProbeTrust := func() store.PublicIPProbeTrust {
 		if !heartbeatReceived || !managedPublicIPProbe {
 			return store.PublicIPProbeTrust{}
@@ -1281,6 +1325,17 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 		if task == nil {
 			return nil
 		}
+		if task.SharedTrafficID != "" {
+			// Send the reservation and its current allowance before execution,
+			// even when task-ready won the select race with policy-refresh.
+			policies, err := s.store.AgentPortTrafficPolicies(ctx, id)
+			if err != nil {
+				return err
+			}
+			if err := writeWire(ctx, connection, core.WireMessage{Type: core.WireHello, TrafficPolicies: trafficPoliciesForSession(policies, heartbeatReceived)}); err != nil {
+				return err
+			}
+		}
 		if err := writeWire(ctx, connection, core.WireMessage{Type: core.WireTask, Task: task}); err != nil {
 			return err
 		}
@@ -1300,7 +1355,7 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 			if err != nil {
 				return
 			}
-			if err := writeWire(ctx, connection, core.WireMessage{Type: core.WireHello, TrafficPolicies: trafficPoliciesForAgent(policies)}); err != nil {
+			if err := writeWire(ctx, connection, core.WireMessage{Type: core.WireHello, TrafficPolicies: trafficPoliciesForSession(policies, heartbeatReceived)}); err != nil {
 				return
 			}
 		case <-ctx.Done():
@@ -1326,7 +1381,11 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 				}
 				reportedManagedPublicIPProbe := agentHasFeature(message.Heartbeat.Features, core.AgentFeatureManagedPublicIPProbe)
 				reportedManagedAgentPolicy := agentHasFeature(message.Heartbeat.Features, core.AgentFeatureManagedPolicy)
-				capabilityChanged := heartbeatReceived && (reportedManagedPublicIPProbe != managedPublicIPProbe || reportedManagedAgentPolicy != managedAgentPolicy)
+				reportedSharedEngines := agentHasFeature(message.Heartbeat.Features, core.AgentFeatureSharedEngines)
+				reportedIndependentEgress := agentHasFeature(message.Heartbeat.Features, core.AgentFeatureIndependentEgress)
+				capabilityChanged := heartbeatReceived && (reportedManagedPublicIPProbe != managedPublicIPProbe ||
+					reportedManagedAgentPolicy != managedAgentPolicy || reportedSharedEngines != sharedEnginesSupported ||
+					reportedIndependentEgress != independentEgressSupported)
 				trust := publicIPProbeTrust()
 				if !heartbeatReceived || capabilityChanged {
 					trust = store.PublicIPProbeTrust{}
@@ -1344,6 +1403,23 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 					heartbeatReceived = true
 					managedPublicIPProbe = reportedManagedPublicIPProbe
 					managedAgentPolicy = reportedManagedAgentPolicy
+					sharedEnginesSupported = reportedSharedEngines
+					independentEgressSupported = reportedIndependentEgress
+					// Until this heartbeat, cached features could have belonged
+					// to a newer Agent. Only now may shared ports be unblocked.
+					policies, err := s.store.AgentPortTrafficPolicies(ctx, id)
+					if err != nil {
+						return
+					}
+					for _, policy := range policies {
+						if policy.SharedQuota == nil {
+							continue
+						}
+						if err := writeWire(ctx, connection, core.WireMessage{Type: core.WireHello, TrafficPolicies: trafficPoliciesForSession(policies, true)}); err != nil {
+							return
+						}
+						break
+					}
 					if managedPublicIPProbe {
 						probeConfig := effectivePublicIPProbe
 						if err := writeWire(ctx, connection, core.WireMessage{Type: core.WirePublicIPProbe, PublicIPProbe: &probeConfig}); err != nil {
@@ -1393,6 +1469,12 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 					_ = connection.Close(websocket.StatusPolicyViolation, "unexpected task result")
 					return
 				}
+				if len(message.TrafficUsage) > 0 {
+					if err := s.store.UpdatePortTrafficUsage(ctx, id, message.TrafficUsage, time.Now().UTC()); err != nil {
+						slog.Warn("flush task traffic result", "agent_id", id, "error", err)
+						return
+					}
+				}
 				if err := s.store.CompleteTask(ctx, id, message.Result.TaskID, message.Result.Result); err != nil {
 					slog.Warn("store task result", "agent_id", id, "task_id", message.Result.TaskID, "error", err)
 					_ = connection.Close(websocket.StatusPolicyViolation, "task result rejected")
@@ -1435,7 +1517,7 @@ func (s *Server) notifyTaskFailure(agentID, taskID string, result core.TaskResul
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		settings, err := s.store.PanelSettings(ctx)
+		settings, err := s.store.TaskPanelSettings(ctx, taskID)
 		if err != nil || !settings.NotifyTaskFailed || strings.TrimSpace(settings.WebhookURL) == "" {
 			return
 		}
@@ -1469,22 +1551,31 @@ func (s *Server) MonitorAgentPresence(ctx context.Context) {
 				transitions, err = s.store.AgentPresenceTransitions(operationContext, now.UTC(), time.Duration(settings.AgentOfflineThresholdSeconds)*time.Second)
 				if err == nil {
 					for _, transition := range transitions {
-						if strings.TrimSpace(settings.WebhookURL) == "" || (transition.Online && !settings.NotifyAgentOnline) || (!transition.Online && !settings.NotifyAgentOffline) {
+						ownerSettings, settingsErr := s.store.AgentPanelSettings(operationContext, transition.Agent.ID)
+						if settingsErr != nil {
+							slog.Warn("load agent notification settings", "agent_id", transition.Agent.ID, "error", settingsErr)
+							continue
+						}
+						if strings.TrimSpace(ownerSettings.WebhookURL) == "" || (transition.Online && !ownerSettings.NotifyAgentOnline) || (!transition.Online && !ownerSettings.NotifyAgentOffline) {
 							continue
 						}
 						event := notify.AgentOfflineEvent(transition.Agent)
 						if transition.Online {
 							event = notify.AgentOnlineEvent(transition.Agent)
 						}
-						if sendErr := s.notifier.Send(operationContext, settings.WebhookURL, event); sendErr != nil {
+						if sendErr := s.notifier.Send(operationContext, ownerSettings.WebhookURL, event); sendErr != nil {
 							slog.Warn("deliver agent presence webhook", "agent_id", transition.Agent.ID, "error", sendErr)
 						}
 					}
 					var quotaTransitions []store.TrafficQuotaTransition
 					quotaTransitions, err = s.store.ClaimTrafficQuotaTransitions(operationContext)
-					if err == nil && settings.NotifyTrafficQuota && strings.TrimSpace(settings.WebhookURL) != "" {
+					if err == nil {
 						for _, transition := range quotaTransitions {
-							if sendErr := s.notifier.Send(operationContext, settings.WebhookURL, notify.TrafficQuotaEvent(transition.Policy, transition.AgentName)); sendErr != nil {
+							ownerSettings, settingsErr := s.store.AgentPanelSettings(operationContext, transition.Policy.AgentID)
+							if settingsErr != nil || !ownerSettings.NotifyTrafficQuota || strings.TrimSpace(ownerSettings.WebhookURL) == "" {
+								continue
+							}
+							if sendErr := s.notifier.Send(operationContext, ownerSettings.WebhookURL, notify.TrafficQuotaEvent(transition.Policy, transition.AgentName)); sendErr != nil {
 								slog.Warn("deliver traffic quota webhook", "policy_id", transition.Policy.ID, "error", sendErr)
 							}
 						}
@@ -1579,6 +1670,11 @@ func (s *Server) requirePermission(permission core.Permission, next http.Handler
 // visibility and content access are separate capabilities.
 func (s *Server) requireAllPermissions(permissions []core.Permission, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		var valid bool
+		request, valid = s.validateSession(w, request)
+		if !valid {
+			return
+		}
 		key := authn.ClientIP(request, s.trustedProxies)
 		now := time.Now().UTC()
 		if !s.adminLimiter.Allow(key, now) {
@@ -1612,6 +1708,10 @@ func (s *Server) requireAllPermissions(permissions []core.Permission, next http.
 			}
 		}
 		w.Header().Set("X-QControlHub-Role", string(role))
+		request = request.WithContext(store.WithConfigScope(request.Context(), s.configOwnerID(request), role == core.RoleAdmin))
+		if !s.authorizeAgentResource(w, request) {
+			return
+		}
 		next.ServeHTTP(w, request)
 	})
 }
@@ -1638,6 +1738,12 @@ func (s *Server) roleForToken(token string) (core.Role, bool) {
 func (s *Server) principalForToken(token string) (tokenPrincipal, bool) {
 	principal, ok := s.roleTokens[sha256.Sum256([]byte(token))]
 	return principal, ok
+}
+
+func tokenConfigOwnerID(token string) string {
+	// Domain separation keeps this stable identifier distinct from the token's
+	// authentication digest. Two legacy tokens never share a user workspace.
+	return fmt.Sprintf("token_%x", sha256.Sum256([]byte("qcontrolhub-config-owner\x00"+token)))
 }
 
 func legacyOperatorPermissions() []core.Permission {
@@ -1829,6 +1935,8 @@ func decodeJSON(w http.ResponseWriter, request *http.Request, destination any, l
 
 func writeStoreError(w http.ResponseWriter, err error) {
 	switch {
+	case errors.Is(err, store.ErrForbidden):
+		writeError(w, http.StatusForbidden, err.Error())
 	case errors.Is(err, store.ErrNotFound):
 		writeError(w, http.StatusNotFound, err.Error())
 	case errors.Is(err, store.ErrConflict):

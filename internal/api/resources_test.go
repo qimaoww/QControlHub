@@ -264,9 +264,17 @@ func TestBuildClientAccessAddressOptionsPinsManualAddress(t *testing.T) {
 		t.Fatalf("manual address leaked across candidates: %+v", counts)
 	}
 	pinned := buildClientAccessAddressOptions(core.EngineXray, []serverconfig.Input{input}, candidates, "edge.example.com", map[string]string{addressLabel: "pinned.example.com"})
+	if len(pinned) != 1 || pinned[0].Address != "pinned.example.com" || len(pinned[0].Profiles) != 1 {
+		t.Fatalf("a manual-only hostname did not remain usable: %+v", pinned)
+	}
+	other := input
+	other.Tag, other.Port = "other-port", 8443
+	pinned = buildClientAccessAddressOptions(core.EngineXray, []serverconfig.Input{input, other}, candidates, "edge.example.com", map[string]string{addressLabel: "pinned.example.com"})
 	for _, option := range pinned {
-		if len(option.Profiles) != 0 {
-			t.Fatalf("address outside the candidate list surfaced as a family variant: %+v", option)
+		for _, profile := range option.Profiles {
+			if (option.Address == "pinned.example.com") != (profile.Tag == input.Tag) {
+				t.Fatalf("manual address was inherited by a different port: %+v", option)
+			}
 		}
 	}
 }
