@@ -18,6 +18,7 @@ import {
   reconcileView,
 } from "./modules/refresh.js";
 import { orderNodesBySavedOrder } from "./modules/node-order.js";
+import { setStorageAccount } from "./modules/account-storage.js";
 import { createScopedAPI } from "./modules/requests.js";
 import { errorMessage, requestJSON } from "./modules/errors.js";
 import { readPresetRoute } from "./modules/preset-route.js";
@@ -208,9 +209,9 @@ const taskActivity = (items, limit = 7) => {
   }
   return groups;
 };
-const serviceActionDisabled = (action, online, installed, serviceStatus) => {
+const serviceActionDisabled = (action, online, installed, serviceStatus, agent) => {
   if (!online || !installed || !can("tasks.execute")) return true;
-  if (action !== "status" && state.data.agentAccess?.isolated) return true;
+  if (action !== "status" && !can("host.manage", agent)) return true;
   if (action === "start")
     return ["active", "activating"].includes(serviceStatus);
   if (action === "stop")
@@ -317,15 +318,15 @@ const rolePermissions = {
   ]),
 };
 const roleRanks = { readonly: 1, auditor: 1, operator: 2, admin: 3 };
-const can = (capability) => {
+const can = (capability, agent) => {
   const role = state.session?.role;
   if (role === "admin") return true;
   if (capability === "agent-access.read") return Boolean(state.session);
   if (capability === "users.manage") return false;
-  const isolated = state.data.agentAccess?.isolated !== false;
-  if (capability === "host.manage") return !isolated && can("tasks.execute");
-  if (capability === "system-bbr.read") return !isolated && can("agents.read");
-  if (isolated && ["agents.manage", "traffic.manage", "enrollment.manage", "audit.read", "core-logs.read"].includes(capability)) return false;
+  if (agent && ["host.manage", "operator", "agents.manage", "traffic.manage", "enrollment.manage"].includes(capability) &&
+    (agent.can_manage === false || (role === "user" && agent.can_manage !== true))) return false;
+  if (capability === "host.manage") return can("tasks.execute");
+  if (capability === "system-bbr.read") return can("agents.read");
   if (capability === "operator") capability = "tasks.execute";
   if (role === "user") return (state.session?.permissions || []).includes(capability);
   if (capability in roleRanks)
@@ -354,6 +355,7 @@ const scopedAPI = createScopedAPI(sendAPI);
 const api = (path, options) => scopedAPI.request(path, options);
 
 async function sendAPI(path, options = {}) {
+  const session = state.session;
   const method = String(options.method || "GET").toUpperCase();
   const headers = {
     Accept: "application/json",
@@ -361,10 +363,10 @@ async function sendAPI(path, options = {}) {
     ...(options.headers || {}),
   };
   if (
-    state.session?.csrf_token &&
+    session?.csrf_token &&
     !["GET", "HEAD", "OPTIONS"].includes(method)
   )
-    headers["X-QControlHub-CSRF"] = state.session.csrf_token;
+    headers["X-QControlHub-CSRF"] = session.csrf_token;
   const routeSignal = ["GET", "HEAD", "OPTIONS"].includes(method)
     ? state.routeSignal
     : null;
@@ -377,8 +379,10 @@ async function sendAPI(path, options = {}) {
       credentials: "same-origin",
     }, {
       isLogin: path === "/auth/login",
+      isCurrent: () => state.session === session,
       onUnauthorized(message) {
         state.session = null;
+        setStorageAccount(null);
         state.data = {};
         renderLogin(message);
       },
@@ -400,9 +404,11 @@ async function optionalAPI(path) {
 async function ensureSession() {
   try {
     state.session = await api("/auth/session");
+    setStorageAccount(state.session);
     return true;
   } catch {
     state.session = null;
+    setStorageAccount(null);
     state.data = {};
     return false;
   }
@@ -448,6 +454,7 @@ function toggleTheme() {
 }
 
 function renderLogin(message = "") {
+  scopedAPI.end();
   if (state.route === "node-settings") agentModule.cancelAgentInteractions();
   const confirmResolver = state.confirmResolver;
   state.confirmResolver = null;
@@ -484,6 +491,7 @@ function renderLogin(message = "") {
         });
         state.data = {};
         state.session = session;
+        setStorageAccount(session);
         location.hash = "#dashboard";
         await render();
       } catch (error) {
@@ -651,6 +659,7 @@ function shell(content, title, { viewKey = state.route } = {}) {
       await api("/auth/logout", { method: "POST" });
     } catch {}
     state.session = null;
+    setStorageAccount(null);
     state.data = {};
     renderLogin();
   };
@@ -930,7 +939,7 @@ async function renderOnce() {
       const access = await api("/agent-access");
       if (renderSignal.aborted) return;
       state.data.agentAccess = access;
-      if (state.route === "users" || (access.isolated && ["core-logs", "system-bbr"].includes(state.route)) ||
+      if (state.route === "users" ||
         (state.route === "dashboard" && !can("overview.read")))
         state.route = "my-quota";
     } else {
@@ -1039,7 +1048,7 @@ const render = () => {
 window.addEventListener("hashchange", render);
 window.addEventListener("beforeunload", event => {
   userModule.captureDraft();
-  if (!configModule.presetHasUnsavedChanges() && !userModule.hasUnsavedChanges()) return;
+  if (!configModule.presetHasUnsavedChanges() && !userModule.hasUnsavedChanges() && !agentModule.sharingHasUnsavedChanges()) return;
   event.preventDefault();
   event.returnValue = "";
 });

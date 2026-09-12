@@ -5,6 +5,7 @@ import {
 } from "./refresh.js";
 import { ConfigFormatError, formatConfigContent } from "./code-format.js";
 import { engineCapabilityToggles } from "./engine-capabilities.js";
+import { createAgentSharing } from "./agent-sharing.js";
 import { createRegionDisplay, openRegionPicker, regionAvatarMarkup } from "./regions.js";
 export { geoRegionDetails } from "./regions.js";
 import {
@@ -67,6 +68,8 @@ export function komariCycleRange(resetDay, now = new Date()) {
 }
 
 export function batchAgentEligibility(agent, action, engine) {
+  if (agent?.can_manage === false)
+    return { eligible: false, reason: "共享节点的主机操作仅限所有者" };
   if (!agent || agent.status !== "online")
     return { eligible: false, reason: "节点离线，不能执行当前动作" };
   if (action === "upgrade-agent") {
@@ -105,6 +108,7 @@ export function agentStructureSignature(agents = []) {
     [...agents]
       .map((agent) => JSON.stringify([
         String(agent?.id || ""),
+        agent.can_manage,
         [...(agent.capabilities || [])].sort(),
         [...(agent.supported_capabilities || agent.capabilities || [])].sort(),
         Object.entries(agent.capability_transitions || {}).map(([engine, task]) => [engine, task.task_id, task.status]).sort(),
@@ -668,7 +672,8 @@ export function clearNodeCardDragState(
 
 export function installAgents(ctx) {
   const { api, optionalAPI, state, engines, can: permission, esc, engineName, statusTone, serviceStatusName, short, date, ago, heartbeat, percent, bytes, conciseVersion, rate, actionName, serviceActionDisabled, trafficChart, renderConfigDiff, notify, confirmAction, shell } = ctx;
-  const can = (capability) => capability === "operator" && state.data.agentAccess?.isolated ? false : permission(capability);
+  const can = (capability, agent) => agent?.can_manage === false &&
+    ["operator", "agents.manage", "enrollment.manage"].includes(capability) ? false : permission(capability, agent);
   const pendingAgentNames = new Set();
   const pendingEngineCapabilities = new Set();
   const komariUUIDFor = (agent) => String(agent?.labels?.komari_uuid || "").trim();
@@ -739,6 +744,7 @@ export function installAgents(ctx) {
     getScope: () => state.navigationEpoch,
   });
   const cardInteractions = createInteractionGate();
+  const sharing = createAgentSharing(ctx, cardInteractions);
   let cancelCardDrag = () => {};
   let agentPageRequest = 0;
   let syncActiveBatchSnapshot = null;
@@ -887,7 +893,7 @@ async function nodeSettings(presetMode = false, { overview: preloadedOverview } 
         : []
       : orderNodesBySavedOrder(agents);
   const batchAvailable =
-    !presetMode && !detailRoute && agents.length > 1 && can("operator");
+    !presetMode && !detailRoute && agents.filter((agent) => can("operator", agent)).length > 1 && can("operator");
   if (!batchAvailable) state.data.nodeBatchMode = false;
   const batchMode = batchAvailable && Boolean(state.data.nodeBatchMode);
   const serviceActionIcons = {
@@ -902,6 +908,8 @@ async function nodeSettings(presetMode = false, { overview: preloadedOverview } 
   };
   const nodeCards = visibleAgents
     .map((agent) => {
+      const can = (capability) => permission(capability, agent) &&
+        !(agent.can_manage === false && ["operator", "agents.manage", "enrollment.manage"].includes(capability));
       const metrics = can("metrics.read") ? agent.metrics || {} : {};
       const addressRows = publicAddressRows(
         metrics,
@@ -948,7 +956,7 @@ async function nodeSettings(presetMode = false, { overview: preloadedOverview } 
             : installed
             ? statusTone(runtime.service_status)
             : "muted";
-          const optionalImportChip = !can("agent-config.read")
+          const optionalImportChip = !can("agent-config.read") || agent.can_manage === false
             ? ""
             : existingBlocked
               ? `<button class="service-import-chip blocked" type="button" data-manual-import data-manual-agent="${esc(agent.id)}" data-manual-engine="${esc(engine)}" aria-label="查看现有服务不可导入原因" title="查看现有服务不可导入原因">不可导入</button>`
@@ -966,7 +974,7 @@ async function nodeSettings(presetMode = false, { overview: preloadedOverview } 
               ? ["status", "start", "restart", "stop"]
                   .map(
                     (action) =>
-                      `<button class="core-action ${action === "stop" ? "danger" : ""}" type="button" data-task-agent="${esc(agent.id)}" data-task-engine="${esc(engine)}" data-task-action="${action}" data-service-action="${action}" aria-label="${esc(`${actionName(action)} ${engineName(engine)}`)}" title="${esc(actionName(action))}" ${existingBlocked || serviceActionDisabled(action, agent.status === "online", installed, runtime.service_status) ? "disabled" : ""}>${serviceActionIcons[action]}</button>`,
+                      `<button class="core-action ${action === "stop" ? "danger" : ""}" type="button" data-task-agent="${esc(agent.id)}" data-task-engine="${esc(engine)}" data-task-action="${action}" data-service-action="${action}" aria-label="${esc(`${actionName(action)} ${engineName(engine)}`)}" title="${esc(actionName(action))}" ${existingBlocked || (action !== "status" && !can("operator")) || serviceActionDisabled(action, agent.status === "online", installed, runtime.service_status, agent) ? "disabled" : ""}>${serviceActionIcons[action]}</button>`,
                   )
                   .join("")
               : "";
@@ -1016,6 +1024,7 @@ async function nodeSettings(presetMode = false, { overview: preloadedOverview } 
             </section>
             <section id="${esc(tabID("metrics-panel"))}" class="node-tab-panel node-metrics-panel" data-node-panel="metrics" role="tabpanel" aria-labelledby="${esc(tabID("metrics-tab"))}" ${activeTab === "metrics" ? "" : "hidden"}><header class="node-panel-heading"><div><h3>流量趋势</h3><small>最近 24 小时</small></div><span data-metric-text="stamp">${metrics.collected_at ? `采集于 ${ago(metrics.collected_at)}` : "等待资源数据"}</span></header><section class="metric-trend-empty" data-metric-history="${esc(agent.id)}" aria-label="暂无指标趋势"><span>⌁</span><b>正在载入指标趋势</b><small>节点上报指标后显示最近 24 小时的上下行速率。</small></section></section>
           <section id="${esc(tabID("agent-panel"))}" class="node-tab-panel node-agent-panel" data-node-panel="agent" role="tabpanel" aria-labelledby="${esc(tabID("agent-tab"))}" ${activeTab === "agent" ? "" : "hidden"}><header class="node-panel-heading"><div><h3>Agent 与身份</h3><small>注册信息和安全通道</small></div><span data-agent-version>${esc(agent.version || "未知")}</span></header>
+            ${can("agents.manage") ? `<section class="node-name-settings"><header><div><b>共享 Agent</b><small>按用户分配端口与额度</small></div><button class="button small" type="button" data-agent-sharing="${esc(agent.id)}">管理共享</button></header></section>` : agent.can_manage === false ? '<p class="settings-hint">共享节点：仅可使用已分配的端口与额度。</p>' : ""}
             <section class="node-capability-settings" aria-label="节点内核能力" data-node-capabilities="${esc(agent.id)}">
               <header><b>内核能力</b><small>关闭即停止服务，开启恢复管理并启动已安装内核。</small></header>
               ${engineCapabilityToggles(agent.capabilities || [], { supported: agent.supported_capabilities ?? agent.capabilities ?? [], writable: can("agents.manage"), node: true, transitions: agent.capability_transitions || {} })}
@@ -1118,6 +1127,7 @@ function refreshAgentPage() {
 }
 
 function cancelAgentInteractions() {
+  sharing.close();
   cardInteractions.cancel();
   cancelCardDrag();
   cancelCardDrag = () => {};
@@ -1295,6 +1305,9 @@ function compactPresetPage() {
 
 function bindAgentPage(agentItems, presetMode = false, enrollmentHistory = {}) {
   const agentsByID = new Map(agentItems.map((agent) => [agent.id, agent]));
+  document.querySelectorAll("[data-agent-sharing]").forEach((button) => {
+    bindEvent(button, "click", () => sharing.open(agentsByID.get(button.dataset.agentSharing)));
+  });
   syncActiveBatchSnapshot = null;
   document
     .querySelectorAll(
@@ -1773,6 +1786,7 @@ function bindAgentPage(agentItems, presetMode = false, enrollmentHistory = {}) {
     .forEach((button) => (button.onclick = () => pollAgentMetrics()));
   document.querySelectorAll("[data-node-capabilities]").forEach((section) => {
     const agentID = section.dataset.nodeCapabilities;
+    const can = (capability) => permission(capability, agentsByID.get(agentID)) && agentsByID.get(agentID)?.can_manage !== false;
     section.querySelectorAll("[data-engine-capability]").forEach((input) => {
       const engine = input.dataset.engineCapability;
       const key = `${agentID}|${engine}`;
@@ -1817,6 +1831,7 @@ function bindAgentPage(agentItems, presetMode = false, enrollmentHistory = {}) {
   });
   document.querySelectorAll("[data-agent-name-form]").forEach((form) => {
     const agentID = form.dataset.agentNameForm;
+    const can = (capability) => permission(capability, agentsByID.get(agentID)) && agentsByID.get(agentID)?.can_manage !== false;
     const button = form.querySelector("button[type=submit]");
     if (button) button.disabled = !can("agents.manage") || pendingAgentNames.has(agentID);
     bindEvent(form, "submit", async (event) => {
@@ -1855,6 +1870,7 @@ function bindAgentPage(agentItems, presetMode = false, enrollmentHistory = {}) {
     });
   });
   document.querySelectorAll("[data-komari-form]").forEach((form) => {
+    const can = (capability) => permission(capability, agentsByID.get(form.dataset.komariForm)) && agentsByID.get(form.dataset.komariForm)?.can_manage !== false;
     form.onsubmit = async (event) => {
       event.preventDefault();
       if (!can("agents.manage")) return;
@@ -1891,9 +1907,8 @@ function bindAgentPage(agentItems, presetMode = false, enrollmentHistory = {}) {
     button.onclick = (event) => {
       event.preventDefault();
       event.stopPropagation();
-      if (!can("agents.manage")) return;
       const agent = (state.data.agents || []).find((item) => item.id === button.dataset.regionAvatar) || agentsByID.get(button.dataset.regionAvatar);
-      if (!agent) return;
+      if (!agent || !can("agents.manage", agent)) return;
       const release = cardInteractions.begin();
       openRegionPicker(agent, {
         api, esc, onClose: release,
@@ -2024,6 +2039,9 @@ function bindBatchRetries(form, action, engine, agentsByID, setBatchBusy) {
 
 async function submitTask(payload) {
   try {
+    const agent = state.data.agents?.find((item) => item.id === payload.agent_id);
+    if (agent?.can_manage === false && !["deploy", "validate", "status"].includes(payload.action))
+      throw new Error("共享节点的主机操作仅限所有者");
     const task = await api("/tasks", {
       method: "POST",
       body: JSON.stringify(payload),
@@ -2066,6 +2084,8 @@ async function loadMetricHistory(agentID) {
 }
 
 function updateAgentMetrics(item) {
+  const can = (capability) => permission(capability, item) &&
+    !(item.can_manage === false && ["operator", "agents.manage", "enrollment.manage"].includes(capability));
   const root = document.querySelector(
     `[data-agent-metrics="${CSS.escape(item.id)}"]`,
   );
@@ -2210,7 +2230,8 @@ function updateAgentMetrics(item) {
             online,
             installed,
             runtime.service_status,
-          ) || Boolean(existingUnsupportedReason);
+            item,
+          ) || (button.dataset.serviceAction !== "status" && !can("operator")) || Boolean(existingUnsupportedReason);
         });
     }
   });
@@ -2755,6 +2776,7 @@ function showCommand(command, onClose, heading = "复制 QAgent 部署命令") {
     pollAgentMetrics,
     updateAgentMetrics,
     cancelAgentInteractions,
+    sharingHasUnsavedChanges: sharing.hasUnsavedChanges,
     compactPresetPage,
   };
 }

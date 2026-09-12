@@ -38,6 +38,7 @@ const tcpRules = [
 ];
 const onlineAgent = (id, features = ["agent-self-upgrade-v1"]) => ({
   id,
+  can_manage: true,
   name: id.toUpperCase(),
   os: "linux",
   arch: "amd64",
@@ -121,7 +122,8 @@ if (mode === "logs-restore") {
     features: [...(agent.features || []), "core-logs-v1", "core-log-status-v1"],
     runtime: { ...agent.runtime, xray: { installed: true, core_log_status: "active" } },
   }));
-  localStorage.setItem("qcontrolhub:core-log-preferences", JSON.stringify({
+  setStorageAccount({ role: "admin" });
+  accountStorage.setItem("qcontrolhub:core-log-preferences", JSON.stringify({
     agent_id: "bravo",
     engine: "xray",
     level: "warning",
@@ -1646,7 +1648,7 @@ async function testLargeLogRuntime() {
   const cachedTime = performance.now() - cachedAt;
   refreshGate.resolve();
   await waitFor(() => document.querySelector("[data-core-log-refresh-label]")?.textContent === "自动更新已暂停", "cache revalidation did not settle");
-  const storedPreference = JSON.parse(localStorage.getItem("qcontrolhub:core-log-preferences"));
+  const storedPreference = JSON.parse(accountStorage.getItem("qcontrolhub:core-log-preferences"));
   assert.equal(storedPreference.agent_id, "bravo", "the selected node must be remembered");
   assert.equal(storedPreference.limit, 2000, "the expanded per-engine window must be remembered");
   assert.equal(storedPreference.auto_refresh, false, "a paused live stream must be remembered");
@@ -1675,11 +1677,14 @@ async function testLogPreferenceRestoreRuntime() {
   assert.match(document.querySelector(".core-log-status").textContent, /显示 1 条结果/);
   assert.match(document.querySelector(".core-log-row pre").textContent, /pressure entry 1999/);
   document.querySelector("[data-toggle-core-log-refresh]").click();
-  assert.equal(JSON.parse(localStorage.getItem("qcontrolhub:core-log-preferences")).auto_refresh, true, "resuming the restored stream must be remembered");
+  assert.equal(JSON.parse(accountStorage.getItem("qcontrolhub:core-log-preferences")).auto_refresh, true, "resuming the restored stream must be remembered");
 }
 
 try {
-  if (mode === "users" || mode === "users-mobile") {
+  if (mode === "sharing" || mode === "sharing-mobile") {
+    const { testAgentSharingRuntime } = await import("./sharing_browser_runtime.mjs");
+    await testAgentSharingRuntime();
+  } else if (mode === "users" || mode === "users-mobile") {
     const { testUsersRuntime } = await import("./users_browser_runtime.mjs");
     await testUsersRuntime(new URLSearchParams(location.search).has("preview"));
   } else if (mode === "config-scope" || mode === "substore-scope") {
@@ -1877,3 +1882,4 @@ try {
   document.querySelector("#browser-smoke-result").textContent = String(error?.stack || error);
   console.error(error);
 }
+import { accountStorage, setStorageAccount } from "./modules/account-storage.js";

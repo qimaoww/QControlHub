@@ -106,8 +106,8 @@ func requireFleetAdministration(ctx context.Context, executor storeExecutor) err
 	return nil
 }
 
-// Shared users manage their configurations, not host-wide services,
-// enrollment credentials or accounting infrastructure.
+// A sharing recipient manages personal configurations, not the owner's
+// host-wide services, enrollment credentials or accounting infrastructure.
 func requireAgentAdministration(ctx context.Context, executor storeExecutor, agentID string) error {
 	if err := requireAgentAccess(ctx, executor, agentID); err != nil {
 		return err
@@ -119,7 +119,30 @@ func requireAgentAdministration(ctx context.Context, executor storeExecutor, age
 		return err
 	}
 	if !allowed {
+		if scopeForConfig(ctx).Admin {
+			return ErrNotFound
+		}
 		return fmt.Errorf("%w: only the Agent owner may manage its host", ErrForbidden)
+	}
+	return nil
+}
+
+func requireHostConfigRead(ctx context.Context, executor storeExecutor, agentID string, engine core.Engine) error {
+	if scopeForConfig(ctx).Admin {
+		return nil
+	}
+	if err := requireAgentAdministration(ctx, executor, agentID); err != nil {
+		return err
+	}
+	var allowed bool
+	if err := executor.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agents WHERE id=$1 AND owner_id=$2)
+		AND NOT EXISTS(SELECT 1 FROM agent_engine_ownership WHERE agent_id=$1 AND engine=$3
+			AND (config_uncertain OR (owner_id<>$2 AND config_id<>'')))`,
+		agentID, scopeForConfig(ctx).OwnerID, engine).Scan(&allowed); err != nil {
+		return err
+	}
+	if !allowed {
+		return fmt.Errorf("%w: another user's deployed configuration cannot be read or imported", ErrForbidden)
 	}
 	return nil
 }
@@ -220,7 +243,9 @@ func (s *Store) SetUserAgentAccess(ctx context.Context, userID string, request c
 	}
 	var unsafeRunning bool
 	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM tasks t LEFT JOIN configs c ON c.id=t.config_id
-		WHERE (t.owner_id=$1 OR c.owner_id=$1) AND t.status='running' AND t.shared_traffic_id='')`, userID).Scan(&unsafeRunning); err != nil {
+		JOIN agents a ON a.id=t.agent_id
+		WHERE (t.owner_id=$1 OR c.owner_id=$1) AND a.owner_id<>$1
+			AND t.status='running' AND t.shared_traffic_id='')`, userID).Scan(&unsafeRunning); err != nil {
 		return core.AgentAccess{}, err
 	}
 	if request.Isolated && unsafeRunning {
@@ -234,8 +259,8 @@ func (s *Store) SetUserAgentAccess(ctx context.Context, userID string, request c
 			}
 		}
 		var unallocated bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_engine_ownership
-			WHERE owner_id=$1 AND (running OR uncertain) AND NOT(agent_id=ANY($2::text[])))`,
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_engine_ownership state JOIN agents a ON a.id=state.agent_id
+			WHERE state.owner_id=$1 AND a.owner_id<>$1 AND (running OR uncertain) AND NOT(agent_id=ANY($2::text[])))`,
 			userID, enabledAgents).Scan(&unallocated); err != nil {
 			return core.AgentAccess{}, err
 		}

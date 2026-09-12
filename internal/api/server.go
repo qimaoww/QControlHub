@@ -283,7 +283,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/deployments", s.requirePermission(core.PermissionDeploymentsRead, http.HandlerFunc(s.listDeployments)))
 	mux.Handle("GET /api/v1/client-access", s.requirePermission(core.PermissionClientAccessRead, http.HandlerFunc(s.listClientAccess)))
 	mux.Handle("GET /api/v1/substore-sync", s.requirePermission(core.PermissionClientAccessRead, http.HandlerFunc(s.getSubStoreSync)))
-	mux.Handle("PUT /api/v1/substore-sync/settings", s.requirePermission(core.PermissionSettingsManage, s.subStoreMutation(s.putSubStoreSettings)))
+	mux.Handle("PUT /api/v1/substore-sync/settings", s.requirePermission(core.PermissionSettingsManage, http.HandlerFunc(s.putSubStoreSettings)))
 	mux.Handle("POST /api/v1/substore-sync/targets", s.requirePermission(core.PermissionSettingsManage, s.subStoreMutation(s.createSubStoreTarget)))
 	mux.Handle("GET /api/v1/substore-sync/remote-targets", s.requirePermission(core.PermissionSettingsManage, http.HandlerFunc(s.listSubStoreRemoteTargets)))
 	mux.Handle("POST /api/v1/substore-sync/targets/import", s.requirePermission(core.PermissionSettingsManage, s.subStoreMutation(s.importSubStoreRemoteTarget)))
@@ -307,6 +307,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/agents/{id}/komari", s.requirePermission(core.PermissionAgentsRead, http.HandlerFunc(s.getAgentKomari)))
 	mux.Handle("PUT /api/v1/agents/{id}/komari", s.requirePermission(core.PermissionAgentsManage, http.HandlerFunc(s.putAgentKomari)))
 	mux.Handle("PUT /api/v1/agents/{id}/name", s.requirePermission(core.PermissionAgentsManage, http.HandlerFunc(s.putAgentName)))
+	mux.Handle("GET /api/v1/agents/{id}/sharing", s.requirePermission(core.PermissionAgentsManage, http.HandlerFunc(s.getAgentSharing)))
+	mux.Handle("PUT /api/v1/agents/{id}/sharing", s.requirePermission(core.PermissionAgentsManage, http.HandlerFunc(s.putAgentSharing)))
 	mux.Handle("PUT /api/v1/agents/{id}/capabilities/{engine}", s.requirePermission(core.PermissionAgentsManage, http.HandlerFunc(s.putAgentEngineCapability)))
 	mux.Handle("GET /api/v1/config-catalogs/{engine}", s.requirePermission(core.PermissionCatalogsRead, http.HandlerFunc(s.configCatalog)))
 	mux.Handle("DELETE /api/v1/agents/{id}", s.requirePermission(core.PermissionAgentsManage, http.HandlerFunc(s.deleteAgent)))
@@ -680,12 +682,12 @@ func (s *Server) getTask(w http.ResponseWriter, request *http.Request) {
 }
 
 func (s *Server) getTaskConfigSnapshot(w http.ResponseWriter, request *http.Request) {
-	if role, ok := s.sessionRole(request); !ok || role != core.RoleAdmin {
-		writeError(w, http.StatusForbidden, "共享主机的实际配置快照仅限管理员读取；请使用个人配置工作区")
-		return
-	}
 	task, err := s.store.GetTask(request.Context(), request.PathValue("id"))
 	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	if err := s.store.CheckAgentAccess(request.Context(), task.AgentID, true); err != nil {
 		writeStoreError(w, err)
 		return
 	}
@@ -792,7 +794,7 @@ func (s *Server) putAgentClientAddress(w http.ResponseWriter, request *http.Requ
 			writeStoreError(w, err)
 			return
 		}
-		saveErr = s.store.SetAgentClientProfilePreferences(request.Context(), request.PathValue("id"), label, address, name, addressMode)
+		saveErr = s.store.SetConfigClientPreferences(request.Context(), request.PathValue("id"), label, address, name, addressMode)
 	} else {
 		saveErr = s.store.SetAgentClientPreferences(request.Context(), request.PathValue("id"), address, name, addressMode)
 	}
@@ -829,7 +831,7 @@ func komariNodeResource(node komari.Node) core.KomariNode {
 	}
 }
 
-func (s *Server) komariForRequest(ctx context.Context) (*komari.Client, error) {
+func (s *Server) komariForRequest(ctx context.Context, allowEnvironment bool) (*komari.Client, error) {
 	if s.store == nil {
 		if s.komariConfigError != nil {
 			return nil, s.komariConfigError
@@ -841,6 +843,9 @@ func (s *Server) komariForRequest(ctx context.Context) (*komari.Client, error) {
 		return nil, err
 	}
 	if strings.TrimSpace(settings.KomariURL) == "" {
+		if !allowEnvironment {
+			return nil, nil
+		}
 		return s.komari, s.komariConfigError
 	}
 	client, err := komari.New(settings.KomariURL, settings.KomariAPIKey, s.komariHTTPClient)
@@ -862,7 +867,7 @@ func (s *Server) getAgentKomari(w http.ResponseWriter, request *http.Request) {
 		writeJSON(w, http.StatusOK, result)
 		return
 	}
-	komariClient, clientErr := s.komariForRequest(request.Context())
+	komariClient, clientErr := s.komariForRequest(request.Context(), s.configOwnerID(request) == "")
 	if clientErr != nil {
 		writeError(w, http.StatusServiceUnavailable, clientErr.Error())
 		return
@@ -1184,7 +1189,7 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 	connection.SetReadLimit(core.MaxCoreLogWireBytes)
 
 	id := agentID(request)
-	panelSettings, settingsErr := s.store.PanelSettings(request.Context())
+	panelSettings, settingsErr := s.store.AgentPanelSettings(request.Context(), id)
 	if settingsErr != nil {
 		slog.Warn("load agent policy settings", "agent_id", id, "error", settingsErr)
 		panelSettings = core.DefaultPanelSettings()
@@ -1463,7 +1468,7 @@ func (s *Server) notifyTaskFailure(agentID, taskID string, result core.TaskResul
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		settings, err := s.store.PanelSettings(ctx)
+		settings, err := s.store.TaskPanelSettings(ctx, taskID)
 		if err != nil || !settings.NotifyTaskFailed || strings.TrimSpace(settings.WebhookURL) == "" {
 			return
 		}
@@ -1497,22 +1502,31 @@ func (s *Server) MonitorAgentPresence(ctx context.Context) {
 				transitions, err = s.store.AgentPresenceTransitions(operationContext, now.UTC(), time.Duration(settings.AgentOfflineThresholdSeconds)*time.Second)
 				if err == nil {
 					for _, transition := range transitions {
-						if strings.TrimSpace(settings.WebhookURL) == "" || (transition.Online && !settings.NotifyAgentOnline) || (!transition.Online && !settings.NotifyAgentOffline) {
+						ownerSettings, settingsErr := s.store.AgentPanelSettings(operationContext, transition.Agent.ID)
+						if settingsErr != nil {
+							slog.Warn("load agent notification settings", "agent_id", transition.Agent.ID, "error", settingsErr)
+							continue
+						}
+						if strings.TrimSpace(ownerSettings.WebhookURL) == "" || (transition.Online && !ownerSettings.NotifyAgentOnline) || (!transition.Online && !ownerSettings.NotifyAgentOffline) {
 							continue
 						}
 						event := notify.AgentOfflineEvent(transition.Agent)
 						if transition.Online {
 							event = notify.AgentOnlineEvent(transition.Agent)
 						}
-						if sendErr := s.notifier.Send(operationContext, settings.WebhookURL, event); sendErr != nil {
+						if sendErr := s.notifier.Send(operationContext, ownerSettings.WebhookURL, event); sendErr != nil {
 							slog.Warn("deliver agent presence webhook", "agent_id", transition.Agent.ID, "error", sendErr)
 						}
 					}
 					var quotaTransitions []store.TrafficQuotaTransition
 					quotaTransitions, err = s.store.ClaimTrafficQuotaTransitions(operationContext)
-					if err == nil && settings.NotifyTrafficQuota && strings.TrimSpace(settings.WebhookURL) != "" {
+					if err == nil {
 						for _, transition := range quotaTransitions {
-							if sendErr := s.notifier.Send(operationContext, settings.WebhookURL, notify.TrafficQuotaEvent(transition.Policy, transition.AgentName)); sendErr != nil {
+							ownerSettings, settingsErr := s.store.AgentPanelSettings(operationContext, transition.Policy.AgentID)
+							if settingsErr != nil || !ownerSettings.NotifyTrafficQuota || strings.TrimSpace(ownerSettings.WebhookURL) == "" {
+								continue
+							}
+							if sendErr := s.notifier.Send(operationContext, ownerSettings.WebhookURL, notify.TrafficQuotaEvent(transition.Policy, transition.AgentName)); sendErr != nil {
 								slog.Warn("deliver traffic quota webhook", "policy_id", transition.Policy.ID, "error", sendErr)
 							}
 						}
@@ -1607,6 +1621,11 @@ func (s *Server) requirePermission(permission core.Permission, next http.Handler
 // visibility and content access are separate capabilities.
 func (s *Server) requireAllPermissions(permissions []core.Permission, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		var valid bool
+		request, valid = s.validateSession(w, request)
+		if !valid {
+			return
+		}
 		key := authn.ClientIP(request, s.trustedProxies)
 		now := time.Now().UTC()
 		if !s.adminLimiter.Allow(key, now) {

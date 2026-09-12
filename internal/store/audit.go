@@ -87,7 +87,9 @@ func (s *Store) ListAuditLogs(ctx context.Context, limit int) ([]core.AuditLogEn
 // PruneAuditLogs deletes entries older than the retention window and returns
 // the number of removed rows.
 func (s *Store) PruneAuditLogs(ctx context.Context, olderThan time.Time) (int64, error) {
-	result, err := s.pool.Exec(ctx, `DELETE FROM audit_logs WHERE acted_at < $1`, olderThan)
+	args := []any{olderThan}
+	where := workspaceOwnerClause(ctx, "owner_id", &args)
+	result, err := s.pool.Exec(ctx, `DELETE FROM audit_logs WHERE acted_at < $1`+where, args...)
 	if err != nil {
 		return 0, fmt.Errorf("prune audit logs: %w", err)
 	}

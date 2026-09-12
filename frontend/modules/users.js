@@ -7,12 +7,12 @@ export const userPermissions = [
   ["configs.read", "配置存档"], ["configs.write", "存档编辑"], ["configs.restore", "版本恢复"],
   ["configs.delete", "存档删除"], ["deployments.read", "部署记录"], ["tasks.read", "任务查看"],
   ["tasks.execute", "部署与执行"], ["client-access.read", "客户端"], ["traffic.read", "流量查看"],
-  ["settings.read", "设置查看"], ["settings.manage", "同步管理 / 系统设置"],
+  ["settings.read", "设置查看"], ["settings.manage", "个人同步 / 设置"],
   ["templates.read", "模板查看"], ["templates.write", "模板编辑"], ["templates.delete", "模板删除"],
-  ["agents.manage", "主机管理"], ["traffic.manage", "端口配额管理"], ["enrollment.manage", "节点接入"],
-  ["core-logs.read", "主机日志"], ["audit.read", "审计记录"],
+  ["agents.manage", "自有主机 / 共享管理"], ["traffic.manage", "自有节点配额"], ["enrollment.manage", "添加自有节点"],
+  ["core-logs.read", "自有主机日志"], ["audit.read", "个人审计记录"],
 ];
-const defaultPermissions = userPermissions.slice(0, 20).map(([permission]) => permission);
+const defaultPermissions = userPermissions.map(([permission]) => permission);
 
 export function parseSharedPorts(value) {
   const parts = String(value || "").trim().split(/[\s,，]+/).filter(Boolean);
@@ -51,7 +51,7 @@ export function installUsers(ctx) {
     controls.forEach(([control]) => { control.disabled = true; });
   };
   const formValues = (form) => ({
-    isolated: form.elements.isolated.checked,
+    isolated: true,
     rows: [...form.querySelectorAll("[data-share-row]")].map((row) => ({
       agent_id: row.dataset.shareRow,
       enabled: row.querySelector('[name="enabled"]').checked,
@@ -102,21 +102,21 @@ export function installUsers(ctx) {
     const latestShares = access?.shares || [];
     if (draft) access = draft.access; // Retain the revision the edit was based on.
     const shares = draft ? draft.values.rows.map((row) => ({ ...latestShares.find((share) => share.agent_id === row.agent_id), ...row })) : latestShares;
-    const isolated = draft ? draft.values.isolated : access?.isolated;
-    const available = agents.filter((agent) => !shares.some((share) => share.agent_id === agent.id));
+    const ownedIDs = new Set(access?.owned_agent_ids || []);
+    const ownedAgents = agents.filter((agent) => ownedIDs.has(agent.id));
+    const available = agents.filter((agent) => !ownedIDs.has(agent.id) && !shares.some((share) => share.agent_id === agent.id));
     shell(`<div class="settings-workspace users-workspace">
       <header class="users-toolbar"><h2>${user ? esc(user.display_name || user.username) : "用户"}</h2><div>${user ? '<button class="button small" type="button" data-user-edit>编辑账号</button>' : ""}<button class="button primary small" type="button" data-user-create>新增用户</button></div></header>
       ${items.length ? `<select class="users-mobile-select" data-user-mobile-select aria-label="选择用户">${items.map((item) => `<option value="${esc(item.id)}" ${item.id === user?.id ? "selected" : ""}>${esc(item.display_name || item.username)} · ${esc(item.username)}</option>`).join("")}</select>` : ""}
       ${user ? `<form class="settings-form" data-user-form data-user-access-form>
         <section class="settings-section">
           <header><span class="settings-section-number">01</span><div><h3>Agent 分配</h3><p>${esc(user.username)} · ${user.disabled ? "已停用" : user.role === "admin" ? "管理员" : "普通用户"}</p></div></header>
-          ${editable ? `<label class="settings-toggle user-isolation"><span><b>Agent 隔离</b><small>仅可访问已分配节点；配置始终按用户独立。</small></span><input type="checkbox" name="isolated" ${isolated ? "checked" : ""}></label>
-            <div data-share-editor ${isolated ? "" : "hidden"}>
+          ${editable ? `<div class="settings-hint user-isolation"><b>账号资源始终独立</b><p>可自行添加 Agent，并使用明确共享的节点。自有节点 ${ownedAgents.length} 个${ownedAgents.length ? `：${ownedAgents.map((agent) => esc(agent.name)).join("、")}` : ""}。</p></div>
+            <div data-share-editor>
               <div data-share-rows>${shares.map((share) => shareRow(share, agents)).join("")}</div>
               <div class="user-share-add"><select data-share-agent aria-label="选择 Agent"><option value="">选择 Agent</option>${available.map((agent) => `<option value="${esc(agent.id)}">${esc(agent.name)}</option>`).join("")}</select><button class="button small" type="button" data-share-add>添加分配</button></div>
               <p class="settings-hint">累计额度，0 不限量；关闭勾选即撤销访问。1 GiB = 1024³ 字节。</p>
             </div>
-            <p class="settings-hint" data-isolation-warning ${isolated ? "hidden" : ""}>未隔离：可按账号权限访问所有节点，不限制共享额度。</p>
           ` : '<p class="settings-hint">管理员可访问所有 Agent。</p>'}
         </section>
         ${editable ? '<div class="alert error" data-user-error role="alert" hidden></div><footer class="settings-savebar"><button class="button" type="button" data-user-reload>重新读取</button><button class="button primary" type="submit">保存分配</button></footer>' : ""}
@@ -154,7 +154,6 @@ export function installUsers(ctx) {
     const form = document.querySelector("[data-user-access-form]");
     captureActive = () => {};
     if (!form || !editable) return;
-    const toggle = form.elements.isolated;
     const baseline = draft?.baseline || JSON.stringify(formValues(form));
     const capture = () => {
       if (!form.isConnected || data !== state.data) return;
@@ -169,10 +168,6 @@ export function installUsers(ctx) {
     if (data.userAccessSaves.has(user.id)) lockForm(form, data.userAccessSaves.get(user.id));
     bindEvent(form, "input", capture);
     bindEvent(form, "change", capture);
-    bindEvent(toggle, "change", () => {
-      form.querySelector("[data-share-editor]").hidden = !toggle.checked;
-      form.querySelector("[data-isolation-warning]").hidden = toggle.checked;
-    });
     bindEvent(form.querySelector("[data-share-add]"), "click", () => {
       const select = form.querySelector("[data-share-agent]");
       if (!select.value) return;
@@ -194,8 +189,6 @@ export function installUsers(ctx) {
       if (button.disabled || form.inert || data.userAccessSaves.has(user.id) || data !== state.data || state.route !== "users" || data.userID !== user.id) return;
       let saving;
       try {
-        const isolated = toggle.checked;
-        if (!isolated && access.isolated && !await confirmAction("关闭隔离后，该用户可按权限访问所有节点，且不再限制共享额度。", "关闭隔离")) return;
         if (data.userAccessSaves.has(user.id) || !form.isConnected || data !== state.data) return;
         const allocations = [...form.querySelectorAll("[data-share-row]")].map((row) => ({
           agent_id: row.dataset.shareRow,
@@ -209,7 +202,7 @@ export function installUsers(ctx) {
         data.userAccessSaves.set(user.id, saving);
         lockForm(form, saving);
         const saved = await api(`/users/${encodeURIComponent(user.id)}/agent-access`, {
-          method: "PUT", body: JSON.stringify({ isolated, shares: allocations, revision: access.revision }),
+          method: "PUT", body: JSON.stringify({ isolated: true, shares: allocations, revision: access.revision }),
         });
         if (data !== state.data) return;
         if (data.userDrafts.get(user.id) === submitted) data.userDrafts.delete(user.id);
@@ -241,8 +234,8 @@ export function installUsers(ctx) {
         <label>显示名称<input name="display_name" maxlength="100" value="${esc(user?.display_name || "")}"></label>
         <label>${user ? "新密码（留空不改）" : "密码"}<input name="password" type="password" autocomplete="new-password" minlength="12" maxlength="72" ${user ? "" : "required"}></label>
         <label>角色<select name="role"><option value="user" ${user?.role !== "admin" ? "selected" : ""}>普通用户</option><option value="admin" ${user?.role === "admin" ? "selected" : ""}>管理员</option></select></label>
-        ${user ? `<label class="settings-toggle"><span><b>启用账号</b></span><input name="enabled" type="checkbox" ${user.disabled ? "" : "checked"} ${user.id === state.session.user_id ? "disabled" : ""}></label>` : '<p class="settings-hint" data-user-default-isolation>普通用户默认隔离，创建后分配 Agent。</p>'}
-        <details class="user-permissions" ${user?.role === "admin" ? "hidden" : ""}><summary>操作权限</summary><div>${userPermissions.map(([key, label]) => `<label><input type="checkbox" name="permission" value="${key}" ${selected.has(key) ? "checked" : ""}>${label}</label>`).join("")}</div><p class="settings-hint">隔离用户不可管理主机、接入凭据、全局设置或读取主机日志。</p></details>
+        ${user ? `<label class="settings-toggle"><span><b>启用账号</b></span><input name="enabled" type="checkbox" ${user.disabled ? "" : "checked"} ${user.id === state.session.user_id ? "disabled" : ""}></label>` : '<p class="settings-hint" data-user-default-isolation>普通用户资源始终独立，可自行添加 Agent，或使用获共享的 Agent。</p>'}
+        <details class="user-permissions" ${user?.role === "admin" ? "hidden" : ""}><summary>操作权限</summary><div>${userPermissions.map(([key, label]) => `<label><input type="checkbox" name="permission" value="${key}" ${selected.has(key) ? "checked" : ""}>${label}</label>`).join("")}</div><p class="settings-hint">主机管理、接入凭据和日志仅限自有 Agent；借用节点只能按分配端口和额度部署个人配置。</p></details>
         <div class="alert error" data-user-error role="alert" hidden></div>
       </div><footer><button class="button" type="button" data-user-close>取消</button><button class="button primary" type="submit">保存账号</button></footer></form>`;
     dialog.querySelectorAll("[data-user-close]").forEach((button) => bindEvent(button, "click", () => dialog.close()));

@@ -428,10 +428,15 @@ func cancelUnauthorizedAgentTasksTx(ctx context.Context, tx pgx.Tx, agentID stri
 		finished_at=now(),config_content=NULL,lease_id=NULL
 		WHERE t.agent_id=$1 AND t.status='pending' AND (
 			(t.action IN ('start','restart') AND (`+unsafeEngineStartSQL("t.agent_id", "t.engine")+`))
-			OR `+unauthorizedTaskPrincipalSQL+`
-			OR (t.shared_traffic_id<>'' AND (NOT $2::boolean OR NOT EXISTS(
-				SELECT 1 FROM agent_shares s JOIN panel_users u ON u.id=s.user_id WHERE s.id=t.shared_traffic_id
-				AND NOT u.disabled AND s.enabled AND (s.limit_bytes=0 OR s.used_bytes<s.limit_bytes))))))`,
+			OR (`+unauthorizedTaskPrincipalSQL+`)
+			OR (t.shared_traffic_id<>'' AND (
+				NOT $2::boolean OR NOT EXISTS(
+					SELECT 1 FROM agent_shares s JOIN panel_users u ON u.id=s.user_id
+					WHERE s.id=t.shared_traffic_id AND NOT u.disabled AND s.enabled
+						AND (s.limit_bytes=0 OR s.used_bytes<s.limit_bytes)
+				)
+			))
+		)`,
 		agentID, containsFeature(features, core.AgentFeatureSharedTraffic))
 	return err
 }

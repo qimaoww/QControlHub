@@ -70,7 +70,7 @@ export async function testUsersRuntime(preview = false) {
     document.querySelector(`[data-user-select="${id}"]`).click();
     await waitFor(() => document.querySelector(".users-toolbar h2")?.textContent === (id === "admin" ? "admin" : id === "alice" ? "Alice" : "Bob"), "user switch did not complete");
   };
-  assert(form().elements.isolated.checked, "isolated account rendered unrestricted");
+  assert(!form().elements.isolated && form().textContent.includes("账号资源始终独立"), "regular accounts must always be private");
   if (innerWidth <= 820) {
     assert(document.querySelector("[data-user-mobile-select]").getBoundingClientRect().height > 0, "mobile user selector is unavailable");
   }
@@ -97,7 +97,7 @@ export async function testUsersRuntime(preview = false) {
   input(row().querySelector('[name="ports"]'), "31001, 31003");
   conflict = true;
   form().requestSubmit();
-  await waitFor(() => form().querySelector("[data-user-error]").textContent.includes("分配已变更") && !form().elements.isolated.disabled, "stale allocation conflict did not recover");
+  await waitFor(() => form().querySelector("[data-user-error]").textContent.includes("分配已变更") && !form().querySelector('[type="submit"]').disabled, "stale allocation conflict did not recover");
   assert(row().querySelector('[name="ports"]').value === "31001, 31003", "conflict discarded entered ports");
   confirm = false;
   document.querySelector("[data-user-reload]").click();
@@ -111,7 +111,7 @@ export async function testUsersRuntime(preview = false) {
   input(row().querySelector('[name="limit_gib"]'), "2.5");
   holdSave = true;
   form().requestSubmit();
-  await waitFor(() => form().elements.isolated.disabled, "save did not prevent mid-request edits");
+  await waitFor(() => form().querySelector('[type="submit"]').disabled, "save did not prevent mid-request edits");
   await select("bob");
   input(row().querySelector('[name="ports"]'), "31002, pending-draft");
   pages.captureDraft();
@@ -120,7 +120,7 @@ export async function testUsersRuntime(preview = false) {
   state.route = "users";
   state.data.userID = "alice";
   await pages.users();
-  assert(form().elements.isolated.disabled, "returning to a pending save unlocked the allocation");
+  assert(form().querySelector('[type="submit"]').disabled, "returning to a pending save unlocked the allocation");
   const pendingWrites = writes.length;
   form().requestSubmit();
   assert(writes.length === pendingWrites, "navigation allowed a duplicate in-flight save");
@@ -129,17 +129,14 @@ export async function testUsersRuntime(preview = false) {
   holdSave = false;
   assert(access.get("alice").shares[0].limit_bytes === 2.5 * 1024 ** 3, "GiB allocation was rounded incorrectly");
   assert(!state.data.userDrafts.has("alice") && !state.data.userAccessSaves.size, "saving across navigation left a stale draft or request");
-  assert(!form().elements.isolated.disabled, "completed save left the current form locked");
+  assert(!form().querySelector('[type="submit"]').disabled, "completed save left the current form locked");
   await select("bob");
   assert(row().querySelector('[name="ports"]').value === "31002, pending-draft", "another user's pending draft was lost after saving");
   document.querySelector("[data-user-reload]").click();
   await waitFor(() => row().querySelector('[name="ports"]').value === "31002", "second user's draft did not reload");
   await select("alice");
   assert(!pages.hasUnsavedChanges(), "successful save left stale draft state");
-  form().elements.isolated.click();
-  form().requestSubmit();
-  await waitFor(() => !access.get("alice").isolated, "turning off isolation failed");
-  assert(access.get("alice").shares[0].limit_bytes === 2.5 * 1024 ** 3, "turning off isolation erased its dormant allowance");
+  assert(access.get("alice").isolated, "saving allocations disabled resource isolation");
   await select("admin");
   assert(!document.querySelector('[name="isolated"], [data-share-row]'), "administrator can accidentally be isolated");
   document.querySelector("[data-user-create]").click();
@@ -162,6 +159,7 @@ export async function testUsersRuntime(preview = false) {
   account.requestSubmit();
   await waitFor(() => writes.some(write => write.path === "/users"), "create user did not submit");
   assert(writes.find(write => write.path === "/users").body.agent_isolation === true, "new regular user was created with unrestricted fleet access");
+  assert(["enrollment.manage", "agents.manage", "settings.manage"].every(permission => writes.find(write => write.path === "/users").body.permissions.includes(permission)), "new users cannot manage their own nodes and integrations");
   await waitFor(() => state.data.userID === "new-user" && !document.querySelector("[data-user-dialog]").open, "created user did not load");
   state.route = "my-quota";
   state.session = { role: "user", user_id: "bob" };

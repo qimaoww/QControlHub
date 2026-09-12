@@ -71,7 +71,10 @@ func (s *Store) MetricSamples(ctx context.Context, agentID string, since time.Ti
 // PruneMetricSamples deletes samples older than the retention window and
 // returns the number of removed rows.
 func (s *Store) PruneMetricSamples(ctx context.Context, olderThan time.Time) (int64, error) {
-	result, err := s.pool.Exec(ctx, `DELETE FROM metric_samples WHERE sampled_at < $1`, olderThan)
+	args := []any{olderThan}
+	where := workspaceOwnerClause(ctx, "owner_id", &args)
+	result, err := s.pool.Exec(ctx, `DELETE FROM metric_samples WHERE sampled_at < $1
+		AND agent_id IN(SELECT id FROM agents WHERE true`+where+`)`, args...)
 	if err != nil {
 		return 0, fmt.Errorf("prune metric samples: %w", err)
 	}

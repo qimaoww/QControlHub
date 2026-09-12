@@ -13,6 +13,7 @@ import "./preset_runtime_smoke.mjs";
 import "./traffic_smoke.mjs";
 import "./engine_capabilities_smoke.mjs";
 import "./users_smoke.mjs";
+import "./account_storage_smoke.mjs";
 
 import {
   agentStructureSignature,

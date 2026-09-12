@@ -4,6 +4,7 @@ import {
   createRefreshChannel,
 } from "./refresh.js";
 import { createCoreLogCache } from "./core-log-cache.js";
+import { accountStorage } from "./account-storage.js";
 import {
   coreLogFilterLimits,
   saveCoreLogPreferences,
@@ -45,7 +46,7 @@ export function installCoreLogs(ctx) {
     engineName,
     date,
     shell,
-    storage = globalThis.localStorage,
+    storage = accountStorage,
     now = Date.now,
     setTimer = (callback, delay) => {
       state.coreLogPollTimer = setTimeout(callback, delay);
@@ -98,6 +99,7 @@ export function installCoreLogs(ctx) {
   };
 
   const renderCoreLogs = (sourceEntries, agents, filters) => {
+    agents = agents.filter((agent) => agent.can_manage !== false);
     const entries = filterCoreLogEntries(sourceEntries, filters);
     const counts = coreLogFilterCounts(sourceEntries, engines);
     state.data.coreLogEntries = sourceEntries;
@@ -352,7 +354,7 @@ export function installCoreLogs(ctx) {
     const changed = data.coreLogDataScope !== key;
     let rendered = false;
     let previewed = false;
-    let agents = can("agents.read") ? data.agents || [] : [];
+    let agents = can("agents.read") ? (data.agents || []).filter((agent) => agent.can_manage !== false) : [];
     const current = (signal) => !signal.aborted && state.data === data &&
       state.navigationEpoch === epoch && state.route === "core-logs";
     const paint = (entries, phase) => {
@@ -372,8 +374,8 @@ export function installCoreLogs(ctx) {
           if (can("agents.read") && (!scopeChange || !data.coreLogAgentsAt || now() - data.coreLogAgentsAt >= 10_000)) {
             void api("/agents", { signal }).then((freshAgents) => {
               if (!current(signal)) return;
-              agents = freshAgents;
-              data.agents = freshAgents;
+              agents = freshAgents.filter((agent) => agent.can_manage !== false);
+              data.agents = agents;
               data.coreLogAgentsAt = now();
               if (rendered) paint(data.coreLogEntries || [], data.coreLogPhase);
             }).catch(() => {
@@ -407,6 +409,17 @@ export function installCoreLogs(ctx) {
       return applied;
     } catch (error) {
       if (state.data !== data || state.route !== "core-logs" || state.navigationEpoch !== epoch) return false;
+      if ([403, 404].includes(error.status) && filters.agent_id) {
+        // A saved selection can outlive ownership/access. Return to the
+        // account's permitted logs instead of trapping the page on that ID.
+        refresh.invalidate();
+        delete data.coreLogCache;
+        data.coreLogEntries = [];
+        data.coreLogs = [];
+        data.coreLogFilters = { ...data.coreLogFilters, agent_id: "" };
+        rememberSelection();
+        return coreLogs({ scopeChange: true });
+      }
       const permissionDenied = error.status === 403;
       const incomplete = previewed || ["preview", "incomplete"].includes(data.coreLogPhase);
       if (permissionDenied) {

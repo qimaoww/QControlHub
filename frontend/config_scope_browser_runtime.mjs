@@ -13,9 +13,10 @@ const waitFor = async (condition, message) => {
   }
 };
 
-async function configFixture({ writable = true, executable = false, installed = true, saved = true } = {}) {
+async function configFixture({ writable = true, executable = false, installed = true, saved = true, owned = false } = {}) {
   const content = "mixed-port: 21001\n# alice-private-workspace\n";
   const agent = { id: "shared", name: "共享主机", status: "online", os: "linux", arch: "amd64",
+    can_manage: owned,
     capabilities: ["mihomo"], features: ["managed-config-read-v1"],
     runtime: { mihomo: { installed, existing_config_available: true } } };
   const state = { route: "live-config", navigationEpoch: 1, session: { role: "user", user_id: "alice" },
@@ -73,7 +74,10 @@ export async function testConfigScopeRuntime(preview = false) {
   }
   await configFixture({ executable: true });
   assert(document.querySelector('[data-live-intent="save"]') && document.querySelector('[data-live-intent="deploy"]'), "authorized user must have separate save and deploy controls");
-  assert(document.body.textContent.includes("部署会替换"), "shared-host deployment boundary is not explained");
+  assert(document.body.textContent.includes("不能覆盖其他用户"), "shared-host deployment boundary is not explained");
+  const owned = await configFixture({ owned: true });
+  assert(document.querySelector('[data-live-source="managed"]') && document.querySelector('[data-live-source="import"]'), "owner cannot explicitly read/import its host configuration");
+  assert(!owned.records.calls.includes("/tasks") && !owned.records.tasks.length, "owner's personal editor auto-read a host snapshot");
   await configFixture({ writable: false });
   assert(document.querySelector("[data-code-input]").readOnly && !document.querySelector("[data-live-intent]"), "read-only workspace is writable");
 

@@ -71,6 +71,32 @@ func (s *Server) refreshUserAgentTrafficPolicies(request *http.Request, userID s
 	}
 }
 
+func (s *Server) getAgentSharing(w http.ResponseWriter, request *http.Request) {
+	sharing, err := s.store.AgentSharing(request.Context(), request.PathValue("id"))
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, sharing)
+}
+
+func (s *Server) putAgentSharing(w http.ResponseWriter, request *http.Request) {
+	var input core.AgentSharingRequest
+	if err := decodeJSON(w, request, &input, 128<<10); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	id := request.PathValue("id")
+	sharing, err := s.store.SetAgentSharing(request.Context(), id, input)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	s.refreshAgentTrafficPolicies(id)
+	s.recordAudit(request, "agent.sharing.updated", id, "Agent recipients, ports and cumulative allowances updated")
+	writeJSON(w, http.StatusOK, sharing)
+}
+
 func (s *Server) authorizeAgentResource(w http.ResponseWriter, request *http.Request) bool {
 	if s.store == nil {
 		return true // Unit tests may use an authentication-only server.
@@ -84,29 +110,15 @@ func (s *Server) authorizeAgentResource(w http.ResponseWriter, request *http.Req
 	}
 	if strings.HasPrefix(path, "/api/v1/agents/") || strings.HasPrefix(path, "/api/v1/metrics/") {
 		administration := request.Method != http.MethodGet && request.Method != http.MethodHead &&
-			!strings.Contains(path, "/configs")
+			!strings.Contains(path, "/configs") && !strings.HasSuffix(path, "/client-address")
+		administration = administration || strings.HasSuffix(path, "/sharing") || strings.HasSuffix(path, "/komari")
 		if err := s.store.CheckAgentAccess(request.Context(), request.PathValue("id"), administration); err != nil {
 			writeStoreError(w, err)
 			return false
 		}
 	}
-	// These capabilities expose or modify fleet-wide infrastructure. A shared
-	// user cannot bypass an allowance by re-enrolling a node or editing global
-	// credentials; per-target Sub-Store operations remain available.
-	global := strings.HasPrefix(path, "/api/v1/enrollment-tokens") ||
-		strings.HasPrefix(path, "/api/v1/users") || path == "/api/v1/audit" ||
-		path == "/api/v1/core-logs" ||
-		(request.Method != http.MethodGet && (path == "/api/v1/settings" || path == "/api/v1/substore-sync/settings"))
-	if global {
-		isolated, err := s.store.IsAgentIsolated(request.Context())
-		if err != nil {
-			writeStoreError(w, err)
-			return false
-		}
-		if isolated {
-			writeError(w, http.StatusForbidden, "shared users cannot manage fleet-wide infrastructure")
-			return false
-		}
-	}
+	// Enrollment credentials, settings, integrations and audit entries are
+	// account-owned. Host-wide operations are checked against the specific
+	// Agent; receiving a share never grants its enrollment or administration.
 	return true
 }

@@ -69,9 +69,13 @@ func (s *Server) putSettings(w http.ResponseWriter, request *http.Request) {
 	}
 	// The browser never receives the actual key. An empty or masked value means
 	// keep the currently saved key; an explicit clear flag removes it.
+	ids, err := s.store.OwnedAgentIDs(request.Context())
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
 	expectedRevision := settings.Revision
 	var saved core.PanelSettings
-	var err error
 	if expectedRevision > 0 {
 		saved, err = s.store.SavePanelSettingsRevision(request.Context(), settings, expectedRevision)
 	} else {
@@ -86,7 +90,9 @@ func (s *Server) putSettings(w http.ResponseWriter, request *http.Request) {
 	}
 	s.recordAudit(request, "settings.saved", "", "api")
 	if agentPolicyChanged(previous, saved) {
-		s.DisconnectAllAgents()
+		for _, id := range ids {
+			s.DisconnectAgent(id)
+		}
 	}
 	writeJSON(w, http.StatusOK, panelSettingsResponse(saved))
 }

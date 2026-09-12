@@ -1017,7 +1017,7 @@ func TestManualConfigRequiresExplicitImportOfNodeSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, required := range []string{
-		`(item) => privateWorkspace || liveConfigEngineEligible(agent.runtime?.[item])`,
+		`(item) => privateAccount || liveConfigEngineEligible(agent.runtime?.[item])`,
 		`class="live-engine-bar" aria-label="选择内核"`,
 		`data-live-engine="${esc(item)}" aria-pressed="${active}"`,
 	} {
@@ -1097,8 +1097,8 @@ func TestCoreLogPageSelectionPersistsInBrowserStorage(t *testing.T) {
 			t.Errorf("core-log selection persistence is missing %q", required)
 		}
 	}
-	if strings.Count(content, "rememberSelection();") != 4 {
-		t.Errorf("every core-log selection surface must persist its own change; got %d call sites", strings.Count(content, "rememberSelection();"))
+	if strings.Count(content, "rememberSelection();") != 5 {
+		t.Errorf("log controls and revoked-node fallback must persist selection; got %d call sites", strings.Count(content, "rememberSelection();"))
 	}
 	store, err := os.ReadFile("modules/core-log-preferences.js")
 	if err != nil {

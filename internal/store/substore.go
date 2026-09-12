@@ -5,7 +5,11 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"net"
+	"net/netip"
 	"net/url"
+	"path"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -13,6 +17,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/qimaoww/qcontrolhub/internal/core"
+	"golang.org/x/net/idna"
 )
 
 // TryLockSubStoreOperation serializes remote ownership/content changes with
@@ -72,7 +77,7 @@ func (s *Store) TryLockSubStoreOperation(ctx context.Context, newEndpoints ...st
 		once.Do(func() {
 			cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			for i := len(keys)-1; i >= 0; i-- {
+			for i := len(keys) - 1; i >= 0; i-- {
 				var unlocked bool
 				if err := connection.QueryRow(cleanup, `SELECT pg_advisory_unlock(hashtextextended(current_schema() || ':qcontrolhub:substore:' || $1,0))`, keys[i]).Scan(&unlocked); err != nil || !unlocked {
 					discard() // Never return a possibly locked connection to the pool.
@@ -172,34 +177,74 @@ func subStoreBackendKey(endpoint string) string {
 		return ""
 	}
 	if parsed, err := url.Parse(endpoint); err == nil {
-		parsed.Scheme, parsed.Host = strings.ToLower(parsed.Scheme), strings.ToLower(parsed.Host)
-		parsed.Path, parsed.RawPath = strings.TrimRight(parsed.Path, "/"), strings.TrimRight(parsed.RawPath, "/")
+		parsed.Scheme = strings.ToLower(parsed.Scheme)
+		host := strings.TrimSuffix(strings.ToLower(parsed.Hostname()), ".")
+		if address, err := netip.ParseAddr(host); err == nil {
+			host = address.String()
+		} else if ascii, err := idna.Lookup.ToASCII(host); err == nil {
+			host = ascii
+		}
+		port := parsed.Port()
+		if number, err := strconv.Atoi(port); err == nil {
+			port = strconv.Itoa(number)
+		}
+		if (parsed.Scheme == "http" && port == "80") || (parsed.Scheme == "https" && port == "443") {
+			port = ""
+		}
+		parsed.Host = host
+		if port != "" {
+			parsed.Host = net.JoinHostPort(host, port)
+		} else if strings.Contains(host, ":") {
+			parsed.Host = "[" + host + "]"
+		}
+		parsed.Path, parsed.RawPath = path.Clean("/"+strings.Trim(parsed.Path, "/")), ""
 		endpoint = parsed.String()
 	}
 	return fmt.Sprintf("%x", sha256.Sum256([]byte(endpoint)))
 }
 
 func (s *Store) migrateSubStoreBackends(ctx context.Context, tx pgx.Tx) error {
-	var endpoint string
-	err := tx.QueryRow(ctx, `SELECT endpoint_ciphertext FROM substore_sync_settings WHERE id=1`).Scan(&endpoint)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil
-	}
+	rows, err := tx.Query(ctx, `SELECT '' AS owner_id,endpoint_ciphertext,backend_key FROM substore_sync_settings WHERE id=1
+		UNION ALL SELECT owner_id,endpoint_ciphertext,backend_key FROM user_substore_settings`)
 	if err != nil {
 		return err
 	}
-	endpoint, err = s.decryptContent(endpoint)
-	if err != nil {
-		return fmt.Errorf("read legacy Sub-Store backend: %w", err)
+	type backend struct{ owner, endpoint, oldKey string }
+	var backends []backend
+	for rows.Next() {
+		var item backend
+		if err := rows.Scan(&item.owner, &item.endpoint, &item.oldKey); err != nil {
+			rows.Close()
+			return err
+		}
+		backends = append(backends, item)
 	}
-	key := subStoreBackendKey(endpoint)
-	if _, err := tx.Exec(ctx, `UPDATE substore_sync_settings SET backend_key=$1 WHERE id=1`, key); err != nil {
+	rows.Close()
+	if err := rows.Err(); err != nil {
 		return err
 	}
-	// Preserve remote claims, but never copy the administrator's credential
-	// into an ordinary account. That account must configure its own backend.
-	_, err = tx.Exec(ctx, `UPDATE substore_sync_targets SET backend_key=$1 WHERE backend_key=''`, key)
-	return err
+	for _, item := range backends {
+		endpoint, err := s.decryptContent(item.endpoint)
+		if err != nil {
+			return fmt.Errorf("read legacy Sub-Store backend: %w", err)
+		}
+		key := subStoreBackendKey(endpoint)
+		if item.owner == "" {
+			_, err = tx.Exec(ctx, `UPDATE substore_sync_settings SET backend_key=$1 WHERE id=1`, key)
+		} else {
+			_, err = tx.Exec(ctx, `UPDATE user_substore_settings SET backend_key=$1 WHERE owner_id=$2`, key, item.owner)
+		}
+		if err != nil {
+			return err
+		}
+		// Preserve existing claims on aliases and on legacy shared backends,
+		// but never copy an administrator's credentials into another account.
+		if _, err := tx.Exec(ctx, `UPDATE substore_sync_targets SET backend_key=$1
+			WHERE backend_key=$2 AND ($2<>'' OR owner_id=$3 OR $3='')`, key, item.oldKey, item.owner); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func validateSubStoreTargetName(name string) (string, error) {

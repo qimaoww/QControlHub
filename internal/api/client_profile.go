@@ -18,13 +18,13 @@ type clientProfileSelector struct {
 
 // Resolve only the actually deployed revision, not a pending server draft or
 // an arbitrary client-supplied label key. Ambiguous/stale selections fail closed.
-func (s *Server) clientProfileNameLabel(ctx context.Context, agentID string, selected clientProfileSelector) (string, error) {
+func (s *Server) clientProfileNameLabel(ctx context.Context, agentID string, selected clientProfileSelector) (store.ClientProfileScope, error) {
 	if !selected.Engine.Valid() || strings.TrimSpace(selected.Tag) == "" || selected.Port < 1 || selected.Port > 65535 {
-		return "", fmt.Errorf("%w: profile requires engine, tag, and port", store.ErrInvalid)
+		return store.ClientProfileScope{}, fmt.Errorf("%w: profile requires engine, tag, and port", store.ErrInvalid)
 	}
 	deployments, err := s.store.LatestDeployments(ctx)
 	if err != nil {
-		return "", err
+		return store.ClientProfileScope{}, err
 	}
 	for _, deployment := range deployments {
 		if deployment.AgentID != agentID || deployment.Engine != selected.Engine {
@@ -32,20 +32,20 @@ func (s *Server) clientProfileNameLabel(ctx context.Context, agentID string, sel
 		}
 		config, err := s.store.ConfigRevision(ctx, deployment.ConfigID, deployment.ConfigVersion)
 		if err != nil {
-			return "", err
+			return store.ClientProfileScope{}, err
 		}
 		label := ""
 		for _, input := range serverconfig.ParseAll(selected.Engine, config.Content) {
 			if input.Tag == selected.Tag && input.Port == selected.Port {
 				if label != "" {
-					return "", fmt.Errorf("%w: ambiguous deployed profile", store.ErrConflict)
+					return store.ClientProfileScope{}, fmt.Errorf("%w: ambiguous deployed profile", store.ErrConflict)
 				}
 				label = core.ClientProfileNameLabel(selected.Engine, input.Listen, input.Port)
 			}
 		}
 		if label != "" {
-			return label, nil
+			return store.ClientProfileScope{ConfigID: config.ID, Version: config.Version, Label: label}, nil
 		}
 	}
-	return "", fmt.Errorf("%w: deployed profile changed; refresh before saving", store.ErrNotFound)
+	return store.ClientProfileScope{}, fmt.Errorf("%w: deployed profile changed; refresh before saving", store.ErrNotFound)
 }

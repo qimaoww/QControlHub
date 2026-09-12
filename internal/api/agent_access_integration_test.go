@@ -32,9 +32,9 @@ func TestAgentIsolationAPIRevocationAndAllocationRevision(t *testing.T) {
 		t.Fatalf("cached session lost current sharing state: %+v", own)
 	}
 	alice.call("PUT", "/agents/"+agent.ID+"/name", map[string]string{"name": "stolen"}, http.StatusForbidden, nil)
-	alice.call("PUT", "/substore-sync/settings", map[string]string{"endpoint_url": "http://127.0.0.1/forbidden"}, http.StatusForbidden, nil)
+	alice.call("PUT", "/substore-sync/settings", map[string]string{"endpoint_url": "http://127.0.0.1/private"}, http.StatusOK, nil)
 	alice.call("POST", "/tasks", core.TaskRequest{AgentID: agent.ID, Engine: core.EngineMihomo, Action: core.ActionStop}, http.StatusForbidden, nil)
-	// Personal sync groups remain available despite host-wide setting denial.
+	// Personal integration settings and groups do not grant host operations.
 	alice.call("POST", "/substore-sync/targets", map[string]string{"display_name": "private", "sync_format": "mihomo"}, http.StatusCreated, nil)
 	admin.call("PUT", "/users/"+alice.userID+"/agent-access", core.AgentAccessRequest{Revision: access.Revision, Isolated: true}, http.StatusOK, &access)
 	var agents []core.Agent

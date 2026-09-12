@@ -2,7 +2,7 @@ export const nodeCardOrderKey = "qcontrolhub:node-card-order";
 
 export function savedNodeOrder(storage) {
   try {
-    const source = storage ?? globalThis.localStorage;
+    const source = storage ?? accountStorage;
     const parsed = JSON.parse(source?.getItem(nodeCardOrderKey));
     if (!Array.isArray(parsed)) return [];
     const seen = new Set();
@@ -18,7 +18,7 @@ export function savedNodeOrder(storage) {
 
 export function saveNodeOrder(ids, storage) {
   try {
-    const target = storage ?? globalThis.localStorage;
+    const target = storage ?? accountStorage;
     target?.setItem(nodeCardOrderKey, JSON.stringify(ids));
   } catch {}
 }
@@ -32,3 +32,4 @@ export function orderNodesBySavedOrder(nodes = [], saved = savedNodeOrder()) {
       (position.get(right.id) ?? saved.length),
   );
 }
+import { accountStorage } from "./account-storage.js";

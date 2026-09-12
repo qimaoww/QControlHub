@@ -117,3 +117,46 @@ func TestSameOriginRequiresExactSchemeAndHost(t *testing.T) {
 		})
 	}
 }
+
+func TestLegacySessionsExposeDistinctStableWorkspaceIDs(t *testing.T) {
+	server := New(nil, Config{OperatorTokens: []string{"legacy-alice-token", "legacy-bob-token"}})
+	ids := map[string]string{}
+	for _, token := range []string{"legacy-alice-token", "legacy-bob-token", "legacy-alice-token"} {
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(`{"token":"`+token+`"}`))
+		response := httptest.NewRecorder()
+		server.Handler().ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("login: %d %s", response.Code, response.Body.String())
+		}
+		var login struct {
+			UserID      string `json:"user_id"`
+			WorkspaceID string `json:"workspace_id"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &login); err != nil {
+			t.Fatal(err)
+		}
+		if login.UserID != "" || login.WorkspaceID != tokenConfigOwnerID(token) || strings.Contains(login.WorkspaceID, token) {
+			t.Fatalf("invalid opaque legacy workspace: %+v", login)
+		}
+		if previous := ids[token]; previous != "" && previous != login.WorkspaceID {
+			t.Fatal("workspace changed on relogin")
+		}
+		ids[token] = login.WorkspaceID
+		request = httptest.NewRequest(http.MethodGet, "/api/v1/auth/session", nil)
+		request.AddCookie(response.Result().Cookies()[0])
+		response = httptest.NewRecorder()
+		server.Handler().ServeHTTP(response, request)
+		var session struct {
+			WorkspaceID string `json:"workspace_id"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &session); err != nil {
+			t.Fatal(err)
+		}
+		if response.Code != http.StatusOK || session.WorkspaceID != login.WorkspaceID {
+			t.Fatalf("session lost its namespace: %d %+v", response.Code, session)
+		}
+	}
+	if ids["legacy-alice-token"] == ids["legacy-bob-token"] {
+		t.Fatal("separate tokens share browser preferences")
+	}
+}

@@ -72,11 +72,48 @@ func (s *Store) panelSettingsForOwner(ctx context.Context, executor storeExecuto
 // Agent runtime policy always follows its owner, never the current viewer or
 // a user to whom the node happens to be shared.
 func (s *Store) AgentPanelSettings(ctx context.Context, agentID string) (core.PanelSettings, error) {
+	if !scopeForConfig(ctx).Admin {
+		if err := requireAgentAdministration(ctx, s.pool, agentID); err != nil {
+			return core.PanelSettings{}, err
+		}
+	}
 	var owner string
 	if err := s.pool.QueryRow(ctx, `SELECT owner_id FROM agents WHERE id=$1 AND revoked_at IS NULL`, agentID).Scan(&owner); err != nil {
 		return core.PanelSettings{}, mapError(err)
 	}
 	return s.panelSettingsForOwner(ctx, s.pool, owner)
+}
+
+func (s *Store) TaskPanelSettings(ctx context.Context, taskID string) (core.PanelSettings, error) {
+	args := []any{taskID}
+	where := ownerClause(ctx, "owner_id", &args)
+	var owner string
+	if err := s.pool.QueryRow(ctx, `SELECT owner_id FROM tasks WHERE id=$1`+where, args...).Scan(&owner); err != nil {
+		return core.PanelSettings{}, mapError(err)
+	}
+	return s.panelSettingsForOwner(ctx, s.pool, owner)
+}
+
+// OwnedAgentIDs intentionally uses workspace ownership even for an
+// administrator. Saving personal settings must not reconnect borrowed nodes
+// or the rest of the fleet.
+func (s *Store) OwnedAgentIDs(ctx context.Context) ([]string, error) {
+	args := []any{}
+	where := workspaceOwnerClause(ctx, "owner_id", &args)
+	rows, err := s.pool.Query(ctx, `SELECT id FROM agents WHERE revoked_at IS NULL`+where+` ORDER BY id`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 // Arguments are store-owned SQL identifiers/literals, never request input.

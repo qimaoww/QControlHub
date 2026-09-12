@@ -68,7 +68,8 @@ func (s *Store) StoreCoreLogs(ctx context.Context, agentID string, batch core.Co
 		return tx.Commit(ctx)
 	}
 	var minimumLevel string
-	if err := tx.QueryRow(ctx, `SELECT core_log_minimum_level FROM panel_settings WHERE id=1`).Scan(&minimumLevel); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT `+agentRuntimeSettingSQL("agents", "core_log_minimum_level", "'debug'")+`
+		FROM agents WHERE id=$1`, agentID).Scan(&minimumLevel); err != nil {
 		return fmt.Errorf("read core log minimum level: %w", err)
 	}
 	minimumLevel = normalizeCoreLogMinimumLevel(minimumLevel)

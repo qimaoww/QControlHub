@@ -94,6 +94,8 @@ func newConfigScopeAPIFixture(t *testing.T) (*store.Store, context.Context, conf
 				core.PermissionTemplatesRead, core.PermissionTemplatesWrite, core.PermissionTemplatesDelete,
 				core.PermissionTasksRead, core.PermissionTasksExecute, core.PermissionClientAccessRead,
 				core.PermissionDeploymentsRead, core.PermissionSettingsManage,
+				core.PermissionSettingsRead, core.PermissionEnrollmentManage, core.PermissionAuditRead,
+				core.PermissionCoreLogsRead, core.PermissionMetricsRead, core.PermissionTrafficRead, core.PermissionTrafficManage,
 			}}, http.StatusCreated, &user)
 		payload, _ := json.Marshal(map[string]string{"username": name, "token": password})
 		request := httptest.NewRequest("POST", "/api/v1/auth/login", bytes.NewReader(payload))
@@ -121,18 +123,49 @@ func enrollConfigScopeAPIAgent(t *testing.T, ctx context.Context, db *store.Stor
 		t.Fatal(err)
 	}
 	agent, err := db.EnrollAgent(ctx, core.EnrollRequest{Name: "shared-host", OS: "linux", Arch: "amd64",
-		Capabilities: []core.Engine{core.EngineMihomo}, Features: []string{core.AgentFeatureManagedConfigRead},
+		Capabilities: []core.Engine{core.EngineMihomo}, Features: []string{core.AgentFeatureManagedConfigRead, core.AgentFeatureSharedTraffic},
 		PublicKey: authn.EncodePublicKey(randomEnrollmentKey(t))}, token.Token)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Runtime: map[core.Engine]core.RuntimeState{core.EngineMihomo: {Installed: true}}}); err != nil {
+	if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Features: agent.Features, Runtime: map[core.Engine]core.RuntimeState{core.EngineMihomo: {Installed: true}}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.SetAgentClientAddress(ctx, agent.ID, "edge.example.test"); err != nil {
 		t.Fatal(err)
 	}
 	return agent
+}
+
+func grantConfigScopeAPIAgent(t *testing.T, ctx context.Context, db *store.Store, agent core.Agent, client configScopeAPIClient, ports ...int) {
+	t.Helper()
+	access, err := db.UserAgentAccess(ctx, client.userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := core.AgentAccessRequest{Isolated: true, Revision: access.Revision}
+	for _, share := range access.Shares {
+		enabled := share.Enabled
+		request.Shares = append(request.Shares, core.AgentShareRequest{AgentID: share.AgentID,
+			Ports: share.Ports, LimitBytes: share.LimitBytes, Enabled: &enabled})
+	}
+	request.Shares = append(request.Shares, core.AgentShareRequest{AgentID: agent.ID, Ports: ports})
+	if _, err := db.SetUserAgentAccess(ctx, client.userID, request); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func completeConfigScopeAPITask(t *testing.T, ctx context.Context, db *store.Store, task core.Task) {
+	t.Helper()
+	claimed, err := db.ClaimTask(ctx, task.AgentID)
+	if err != nil || claimed == nil || claimed.ID != task.ID {
+		t.Fatalf("claim: %+v %v, want %s", claimed, err, task.ID)
+	}
+	if err := db.CompleteTask(ctx, task.AgentID, task.ID, core.TaskResultRequest{
+		LeaseID: claimed.LeaseID, Success: true, TrafficSettled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func configScopeAPIConfig(t *testing.T, port int) core.Config {
@@ -153,6 +186,8 @@ func configScopeAPIConfig(t *testing.T, port int) core.Config {
 func TestAuthenticatedUsersCannotSelectForeignConfigurations(t *testing.T) {
 	db, ctx, admin, alice, bob := newConfigScopeAPIFixture(t)
 	agent := enrollConfigScopeAPIAgent(t, ctx, db)
+	grantConfigScopeAPIAgent(t, ctx, db, agent, alice, 21001)
+	grantConfigScopeAPIAgent(t, ctx, db, agent, bob, 21002)
 	base := "/agents/" + agent.ID + "/configs/mihomo"
 	aliceInput, bobInput := configScopeAPIConfig(t, 21001), configScopeAPIConfig(t, 21002)
 	aliceInput.OwnerID = bob.userID
@@ -245,6 +280,8 @@ func TestAuthenticatedUsersCannotSelectForeignConfigurations(t *testing.T) {
 func TestSubStoreSyncFormatsAndReplacementDeploymentIsolation(t *testing.T) {
 	db, ctx, admin, alice, bob := newConfigScopeAPIFixture(t)
 	agent := enrollConfigScopeAPIAgent(t, ctx, db)
+	grantConfigScopeAPIAgent(t, ctx, db, agent, alice, 21001)
+	grantConfigScopeAPIAgent(t, ctx, db, agent, bob, 21002)
 	var mu sync.Mutex
 	var remoteGroup map[string]any
 	mutations := 0
@@ -268,6 +305,9 @@ func TestSubStoreSyncFormatsAndReplacementDeploymentIsolation(t *testing.T) {
 	}))
 	defer remote.Close()
 	admin.call("PUT", "/substore-sync/settings", subStoreSettingsRequest{EndpointURL: remote.URL + "/fixture-secret"}, http.StatusOK, nil)
+	// Sharing an Agent never inherits the owner's integration credentials.
+	alice.call("PUT", "/substore-sync/settings", subStoreSettingsRequest{EndpointURL: remote.URL + "/fixture-secret"}, http.StatusOK, nil)
+	bob.call("PUT", "/substore-sync/settings", subStoreSettingsRequest{EndpointURL: remote.URL + "/fixture-secret"}, http.StatusOK, nil)
 	var own, other core.Config
 	base := "/agents/" + agent.ID + "/configs/mihomo"
 	alice.call("PUT", base, configScopeAPIConfig(t, 21001), http.StatusOK, &own)
@@ -276,13 +316,7 @@ func TestSubStoreSyncFormatsAndReplacementDeploymentIsolation(t *testing.T) {
 		t.Helper()
 		var task core.Task
 		client.call("POST", "/tasks", core.TaskRequest{AgentID: agent.ID, Engine: config.Engine, Action: core.ActionDeploy, ConfigID: config.ID}, http.StatusCreated, &task)
-		claimed, err := db.ClaimTask(ctx, agent.ID)
-		if err != nil || claimed == nil || claimed.ID != task.ID {
-			t.Fatalf("claim deploy: %+v %v", claimed, err)
-		}
-		if err := db.CompleteTask(ctx, agent.ID, task.ID, core.TaskResultRequest{LeaseID: claimed.LeaseID, Success: true}); err != nil {
-			t.Fatal(err)
-		}
+		completeConfigScopeAPITask(t, ctx, db, task)
 	}
 	deploy(alice, own)
 	var target core.SubStoreSyncTarget
@@ -325,6 +359,10 @@ func TestSubStoreSyncFormatsAndReplacementDeploymentIsolation(t *testing.T) {
 		t.Fatal("another user's remote group appeared as importable")
 	}
 	bob.call("POST", "/substore-sync/targets/import", subStoreImportTargetRequest{SubscriptionName: target.SubscriptionName}, http.StatusConflict, nil)
+	bob.call("POST", "/tasks", core.TaskRequest{AgentID: agent.ID, Engine: other.Engine, Action: core.ActionDeploy, ConfigID: other.ID}, http.StatusConflict, nil)
+	var stop core.Task
+	admin.call("POST", "/tasks", core.TaskRequest{AgentID: agent.ID, Engine: other.Engine, Action: core.ActionStop}, http.StatusCreated, &stop)
+	completeConfigScopeAPITask(t, ctx, db, stop)
 	deploy(bob, other)
 	alice.call("GET", "/substore-sync", nil, http.StatusOK, &resource)
 	if len(resource.Profiles) != 1 || resource.Profiles[0].Available || resource.Profiles[0].ConfigID != own.ID {
@@ -337,7 +375,7 @@ func TestSubStoreSyncFormatsAndReplacementDeploymentIsolation(t *testing.T) {
 		t.Fatal("replaced deployment exposed the new owner's credentials")
 	}
 	// Even the administrator must not silently rebind a target's pinned config.
-	admin.call("POST", "/substore-sync/run", subStoreRunRequest{TargetID: target.ID}, http.StatusConflict, nil)
+	admin.call("POST", "/substore-sync/run", subStoreRunRequest{TargetID: target.ID}, http.StatusNotFound, nil)
 	mu.Lock()
 	defer mu.Unlock()
 	if mutations != 3 {
@@ -348,7 +386,13 @@ func TestSubStoreSyncFormatsAndReplacementDeploymentIsolation(t *testing.T) {
 func TestApplyingPrivateTemplatePreservesOtherUsersTraffic(t *testing.T) {
 	db, ctx, _, alice, bob := newConfigScopeAPIFixture(t)
 	agent := enrollConfigScopeAPIAgent(t, ctx, db)
-	bob.call("PUT", "/agents/"+agent.ID+"/configs/mihomo", configScopeAPIConfig(t, 21002), http.StatusOK, nil)
+	grantConfigScopeAPIAgent(t, ctx, db, agent, alice, 21003)
+	grantConfigScopeAPIAgent(t, ctx, db, agent, bob, 21002)
+	var bobConfig core.Config
+	bob.call("PUT", "/agents/"+agent.ID+"/configs/mihomo", configScopeAPIConfig(t, 21002), http.StatusOK, &bobConfig)
+	var task core.Task
+	bob.call("POST", "/tasks", core.TaskRequest{AgentID: agent.ID, Engine: bobConfig.Engine, Action: core.ActionDeploy, ConfigID: bobConfig.ID}, http.StatusCreated, &task)
+	completeConfigScopeAPITask(t, ctx, db, task)
 	unrelated := enrollConfigScopeAPIAgent(t, ctx, db)
 	endpoint := core.PortTrafficEndpoint{AgentID: unrelated.ID, Engine: core.EngineMihomo, Name: "unrelated", Port: 21004, Protocol: core.TrafficProtocolBoth}
 	if _, err := db.ReconcilePortTrafficEndpoints(ctx, []core.PortTrafficEndpoint{endpoint}, false); err != nil {
@@ -361,13 +405,16 @@ func TestApplyingPrivateTemplatePreservesOtherUsersTraffic(t *testing.T) {
 	for _, item := range []struct {
 		agentID string
 		port    int
-	}{{agent.ID, 21002}, {agent.ID, 21003}, {unrelated.ID, 21004}} {
+	}{{agent.ID, 21002}, {unrelated.ID, 21004}} {
 		policies, err := db.AgentPortTrafficPolicies(ctx, item.agentID)
 		if err != nil {
 			t.Fatal(err)
 		}
 		found := false
 		for _, policy := range policies {
+			if policy.Port == 21003 {
+				t.Fatal("an undeployed shared draft created a host firewall monitor")
+			}
 			found = found || policy.Port == item.port
 		}
 		if !found {

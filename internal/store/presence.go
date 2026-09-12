@@ -26,18 +26,22 @@ func (s *Store) AgentPresenceTransitions(ctx context.Context, now time.Time, off
 	// heartbeat or another monitor. Skipped transitions are retried next tick.
 	// Keeping observation and update in one statement avoids holding every
 	// Agent row across N remote UPDATE round trips.
+	threshold := `CASE WHEN agents.owner_id='' THEN $2::integer
+		ELSE COALESCE((SELECT (runtime->>'agent_offline_threshold_seconds')::integer
+			FROM user_panel_settings WHERE owner_id=agents.owner_id),45) END`
+	online := `last_seen > $1::timestamptz - make_interval(secs => (` + threshold + `))`
 	rows, err := s.pool.Query(ctx, `
 		WITH changed AS MATERIALIZED (
 			SELECT id,presence_notification_state AS previous,
-			       CASE WHEN last_seen > $1 THEN 'online' ELSE 'offline' END AS current
+			       CASE WHEN `+online+` THEN 'online' ELSE 'offline' END AS current
 			FROM agents
 			WHERE revoked_at IS NULL AND presence_notification_state <>
-			      CASE WHEN last_seen > $1 THEN 'online' ELSE 'offline' END
+			      CASE WHEN `+online+` THEN 'online' ELSE 'offline' END
 			FOR UPDATE SKIP LOCKED
 		)
 		UPDATE agents AS agent SET presence_notification_state=changed.current
 		FROM changed WHERE agent.id=changed.id
-		RETURNING agent.id,agent.name,agent.last_seen,changed.previous,changed.current`, now.UTC().Add(-offlineAfter))
+		RETURNING agent.id,agent.name,agent.last_seen,changed.previous,changed.current`, now.UTC(), int(offlineAfter/time.Second))
 	if err != nil {
 		return nil, fmt.Errorf("record agent presence transitions: %w", err)
 	}

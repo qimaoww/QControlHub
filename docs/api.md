@@ -25,6 +25,8 @@
 
 配置归属由登录身份决定，不能通过 `owner_id` 请求字段指定其他用户。普通用户只能列出和操作自己的配置档案、节点工作区、修订、模板、任务及 Sub-Store 同步组；直接引用其他用户的资源 ID 返回 `404`。管理员保留跨用户管理权限，节点工作区入口则始终使用当前管理员自己的身份。旧版非管理员令牌各自隔离，升级前记录归管理员保管。详见 [多用户配置隔离](security.md#多用户配置隔离)。
 
+普通账号始终独立，有权限时可自行添加 Agent；Agent 的 `can_manage` 区分自有和借用节点。主机操作除能力外还校验节点所有权；共享不转移配置、安装凭据、日志、设置或集成。登录和会话响应的 `user_id` / `workspace_id` 可用于浏览器偏好分区，不能作为授权依据。密码、权限、角色或停用变更后旧会话返回 `401`。
+
 失败响应通常是：
 
 ```json
@@ -40,13 +42,14 @@
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | `GET` | `/api/v1/overview` | 节点、配置和任务计数 |
-| `POST` | `/api/v1/auth/login` | 使用管理令牌创建 SPA 会话，返回角色和 CSRF token |
+| `POST` | `/api/v1/auth/login` | 使用用户名/密码或管理令牌创建 SPA 会话，返回身份、工作区和 CSRF token |
 | `GET` | `/api/v1/auth/session` | 读取当前 SPA 会话 |
 | `POST` | `/api/v1/auth/logout` | 注销当前 SPA 会话 |
 | `GET` | `/api/v1/agent-access` | 当前账号的 Agent 隔离、分配及累计用量 |
 | `GET` / `POST` | `/api/v1/users` | 列出 / 创建持久用户，仅管理员 |
 | `PUT` / `DELETE` | `/api/v1/users/{id}` | 修改 / 停用账号，仅管理员；停用不删除配置 |
 | `GET` / `PUT` | `/api/v1/users/{id}/agent-access` | 读取 / 保存 Agent 分配，仅管理员 |
+| `GET` / `PUT` | `/api/v1/agents/{id}/sharing` | 所有者按准确用户名读取 / 保存共享端口及累计额度，携带 revision（agents.manage） |
 | `GET` | `/api/v1/agents` | 列出未撤销 Agent |
 | `GET` | `/api/v1/system-tcp/parameters` | BBR / TCP 调优字段与取值范围（agents.read） |
 | `GET` | `/api/v1/system-tcp/tasks` | 每个节点最新的 TCP 调优任务（tasks.read，可按 agent_id 筛选） |
@@ -67,14 +70,14 @@
 | `GET` | `/api/v1/deployments` | 列出每个节点/内核最近一次真实成功部署 |
 | `GET` | `/api/v1/client-access` | 从已部署入站生成客户端连接资料 |
 | `GET` | `/api/v1/substore-sync?target_id=` | 读取可见同步组、已选节点和可用部署（client-access.read） |
-| `PUT` | `/api/v1/substore-sync/settings` | 保存共用 Sub-Store 后端地址（settings.manage） |
+| `PUT` | `/api/v1/substore-sync/settings` | 保存本账号的 Sub-Store 后端地址（settings.manage） |
 | `POST` | `/api/v1/substore-sync/targets` | 创建自己的同步组（settings.manage） |
 | `PUT` / `DELETE` | `/api/v1/substore-sync/targets/{id}` | 更新同步组或移除本地同步关系（settings.manage） |
 | `GET` | `/api/v1/substore-sync/remote-targets` | 列出可关联远端组，隐藏其他用户已占用的组（settings.manage） |
 | `POST` | `/api/v1/substore-sync/targets/import` | 关联已有远端组为自己的同步组（settings.manage） |
 | `POST` | `/api/v1/substore-sync/targets/{id}/remote` | 更换同步组关联的远端组（settings.manage） |
 | `PUT` | `/api/v1/substore-sync/selections` | 替换一个同步组的节点选择（settings.manage） |
-| `POST` | `/api/v1/substore-sync/test` | 测试共用后端连接（settings.manage） |
+| `POST` | `/api/v1/substore-sync/test` | 测试本账号的后端连接（settings.manage） |
 | `POST` | `/api/v1/substore-sync/run` | 同步指定组（settings.manage） |
 | `GET` | `/api/v1/access-controls` | 按节点、入站标签和端口读取大陆访问限制（agent-config.read） |
 | `PUT` | `/api/v1/access-controls` | 保存单个入站的大陆来源/目标限制并创建校验或部署任务（agent-config.write + tasks.execute） |
@@ -97,15 +100,15 @@
 | `GET` | `/api/v1/tasks?agent_id=&status=&action=&limit=` | 按节点、状态和动作筛选任务；`limit` 为 1–500，默认 100 |
 | `POST` | `/api/v1/tasks` | 创建远程任务 |
 | `GET` | `/api/v1/tasks/{id}` | 读取单个任务及结果 |
-| `GET` | `/api/v1/tasks/{id}/config-snapshot` | 管理员读取已成功 `read-config` 或 `read-managed-config` 任务的短期配置快照 |
+| `GET` | `/api/v1/tasks/{id}/config-snapshot` | 所有者安全读取自有主机配置，或管理员读取成功任务的短期快照 |
 | `DELETE` | `/api/v1/tasks/{id}` | 取消尚未领取的任务 |
 | `POST` | `/api/v1/tasks/{id}/retry` | 按当前配置重试失败或已取消任务 |
-| `GET` | `/api/v1/enrollment-tokens` | 列出添加节点记录，不返回原始凭证（admin） |
+| `GET` | `/api/v1/enrollment-tokens` | 列出自己的添加节点记录，不返回原始凭证（enrollment.manage） |
 | `POST` | `/api/v1/enrollment-tokens` | 创建节点绑定、可重复安装的添加命令 |
 | `DELETE` | `/api/v1/enrollment-tokens/{id}` | 删除添加节点记录并立即使命令失效 |
 | `POST` | `/api/v1/enrollment-tokens/{id}/command` | 幂等读取指定添加记录的已有命令（enrollment.manage） |
 | `GET` | `/api/v1/settings` | 读取面板设置；Komari API Key 只返回已配置的掩码，不返回原文 |
-| `PUT` | `/api/v1/settings` | 保存面板设置（admin） |
+| `PUT` | `/api/v1/settings` | 保存本账号的面板/运行设置，仅重连自有 Agent（settings.manage） |
 | `GET` | `/api/v1/audit?limit=` | 读取最近审计记录 |
 | `GET` | `/api/v1/metrics/{agent_id}` | 读取节点最近 24 小时资源样本 |
 | `GET` | `/api/v1/traffic-policies` | 读取所有端口流量配额及 Agent 最新计数（traffic.read） |
@@ -218,7 +221,7 @@ schema 44 的策略响应增加 `accounting`：`source` 为 `core-api`、`nft-du
 
 客户端页面的“修改显示参数”按入站（内核、监听地址与端口）定位全部显示参数。例如 `PUT /api/v1/agents/{id}/client-address` 的请求 `{"profile":{"engine":"ss-rust","tag":"ss-rust-1","port":20001},"name":"香港 · ATT","address":"203.0.113.10","address_mode":"ipv6"}` 只修改该入站的分享名称、客户端连接地址与地址协议栈；不创建配置版本、不重启内核，也不修改其他端口。名称最多 100 个 Unicode 字符且不能包含控制字符；空名称恢复该端口的入站标签。空地址恢复该端口的自动识别地址；`address_mode` 为 `auto` 时按协议栈自动选择，`ipv4` / `ipv6` 固定地址族，显式地址优先于地址族选择，因此面板对话框在端口存在手动地址时会禁用协议栈选择，需先点“恢复自动识别”。节点级名称与协议栈不再作为端口默认值：未单独设置的端口使用入站标签与自动协议栈；节点级连接地址仅作为自动识别候选参与选择，因此对话框的地址字段默认留空。固定了连接地址的端口在 Sub-Store 中只提供该地址，IPv4 / IPv6 / 双栈地址模式不可用。选择器必须匹配实际成功部署的修订；不存在或已变更的入站返回 `404`，不完整的选择器返回 `400`。
 
-带 `profile` 时 `address` 和 `address_mode`（`auto` / `ipv4` / `ipv6`）按该入站保存，省略表示不修改该端口；新界面仅在字段被改动时提交，且端口已有手动地址时会禁用协议栈选择。不携带 `profile` 的旧客户端仍写入节点级值：节点级连接地址继续作为自动识别候选，节点级名称与协议栈不再影响端口显示。端口名称适用于所有地址族的分享值和 Sub-Store 默认名称，Sub-Store 自己设置的名称优先。名称绑定监听端点，不随 SS Rust 数组位置或标签改名转移到别的端口；改变监听地址/端口会使用新端点的设置。此接口继续要求 `agents.manage`、浏览器 CSRF 和审计记录。
+带 `profile` 时 `address` 和 `address_mode`（`auto` / `ipv4` / `ipv6`）按本账号实际部署的配置 ID 与入站保存，省略表示不修改；端口已有手动地址时会禁用协议栈选择。不携带 `profile` 的旧客户端仍写入节点级值，但仅允许节点所有者或管理员使用。端口名称适用于所有地址族的分享值和 Sub-Store 默认名称，Sub-Store 自己设置的名称优先。名称不随 SS Rust 数组位置或标签改名转移；另一配置/账号复用相同端口不会继承显示设置。此接口要求 `agents.manage`、浏览器 CSRF 和审计记录。
 
 ### Sub-Store 同步格式
 
@@ -229,9 +232,9 @@ schema 44 的策略响应增加 `accounting`：`source` 为 `core-api`、`nft-du
 
 选择请求为 `{"target_id":"sst_…","selections":[{"config_id":"cfg_…","agent_id":"agt_…","engine":"mihomo","profile_tag":"ss-in","custom_name":"我的节点","address_mode":"both"}]}`。`address_mode` 可为 `auto`、`ipv4`、`ipv6`、`both`；双栈模式生成两条，IPv6 节点名追加 ` v6`。旧客户端省略 `config_id` 时，只能从当前可见部署解析并持久化准确 ID。运行请求为 `{"target_id":"sst_…"}`。
 
-同步使用实际成功部署的版本，而非未部署的草稿。同一主机被另一份配置替换后，原组选择会标记失效；再次同步返回 `409` 且不写远端，必须删除失效项或重新选择。普通用户不能选择其他用户的部署。远端组名在共用后端中必须唯一；移除本地同步组不会删除远端组。
+同步使用实际成功部署的版本，而非未部署的草稿。同一主机被另一份配置替换后，原组选择会标记失效；再次同步返回 `409` 且不写远端，必须删除失效项或重新选择。普通用户不能选择其他用户的部署。后端连接按账号独立；相同后端中远端组名必须唯一，不同后端允许重名。移除本地同步组不会删除远端组。
 
-Sub-Store 写操作在数据库级串行执行，防止并发关联或同步覆盖他人的远端归属。另有操作执行时返回 `409`，稍后重试；读取不受此锁限制。
+Sub-Store 写操作按账号及规范化的后端地址取得数据库锁，防止并发关联或同步覆盖他人的远端归属。相同后端另有操作时返回 `409`；不同后端可并行，读取不受此锁限制。大小写、默认端口与路径别名不能绕过同后端锁。
 
 ### 创建配置
 
@@ -359,7 +362,7 @@ Mihomo `development` 安装额外接受 `core_source`，取值为 `official`（�
 
 任务成功响应表示目标节点已完成对应操作；失败响应会保留节点返回的错误信息。部署任务只有在目标节点真实写入配置并成功重启服务后，才会进入节点的最新部署记录。
 
-成功的 `read-config` 与 `read-managed-config` 任务不会在普通任务列表或任务详情中返回配置正文。共享主机的这两类读取、`import-existing` 及快照读取仅限管理员；普通用户即使有 `tasks.execute`、`tasks.read` 和 `agent-config.read` 也会收到 `403`，应使用自己的配置工作区。管理员可使用 `GET /api/v1/tasks/{id}/config-snapshot` 获取 `{ "content": "..." }`；快照已被同一节点、内核和读取类型的后续成功读取清理时返回 `404`。
+成功的 `read-config` 与 `read-managed-config` 任务不会在普通任务列表或任务详情中返回配置正文。借用者执行这两类读取、`import-existing` 或读取快照会收到 `403`。所有者具备所需能力且节点没有他人/状态不明的配置时可显式读取自己的主机；读取快照时再次核验部署归属。管理员保留跨用户权限。`GET /api/v1/tasks/{id}/config-snapshot` 返回 `{ "content": "..." }`；快照已被同一节点、内核和读取类型的后续成功读取清理时返回 `404`。
 
 ### 状态码
 
@@ -453,4 +456,4 @@ Agent 对象中 `capabilities` 为当前启用能力，`supported_capabilities` 
 
 未安装内核或无需变更：返回 HTTP 200 和 `{"enabled":...}`，不创建启停任务，记录 `agent.capability.updated` 审计。参数非法/Agent 不支持返回 400，节点不存在或已撤销返回 404，已有待处理/执行中内核任务阻止切换并返回 409。
 
-开关不会删除配置、卸载内核或取消已有流量规则。所有能力关闭的 Agent 仍可连接、上报监控和执行 Agent 级操作。重新使用原安装凭据注册会保留节点选择；若新 Agent 不再声明某种内核，该内核不再启用。全局默认能力依然只影响新节点注册，不批量启停已有服务。
+开关不会删除配置、卸载内核或取消已有流量规则。所有能力关闭的 Agent 仍可连接、上报监控和执行 Agent 级操作。重新使用原安装凭据注册会保留节点选择；若新 Agent 不再声明某种内核，该内核不再启用。默认能力取自安装凭据所属账号，只影响该账号新节点注册，不批量启停已有服务。

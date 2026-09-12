@@ -9,42 +9,42 @@ import (
 // AgentShare is a durable per-user allocation. Disabling and re-enabling a
 // share never resets its cumulative usage.
 type AgentShare struct {
-	ID         string    `json:"id"`
-	UserID     string    `json:"user_id"`
-	Username   string    `json:"username,omitempty"`
-	DisplayName string   `json:"display_name,omitempty"`
-	AgentID    string    `json:"agent_id"`
-	AgentName  string    `json:"agent_name"`
-	Enabled    bool      `json:"enabled"`
-	Ports      []int     `json:"ports"`
-	LimitBytes uint64    `json:"limit_bytes"` // Zero is unlimited.
-	UsedBytes  uint64    `json:"used_bytes"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	ID          string    `json:"id"`
+	UserID      string    `json:"user_id"`
+	Username    string    `json:"username,omitempty"`
+	DisplayName string    `json:"display_name,omitempty"`
+	AgentID     string    `json:"agent_id"`
+	AgentName   string    `json:"agent_name"`
+	Enabled     bool      `json:"enabled"`
+	Ports       []int     `json:"ports"`
+	LimitBytes  uint64    `json:"limit_bytes"` // Zero is unlimited.
+	UsedBytes   uint64    `json:"used_bytes"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 type AgentAccess struct {
-	Isolated bool         `json:"isolated"`
-	Shares   []AgentShare `json:"shares"`
-	Revision int64        `json:"revision"`
-	OwnedAgentIDs []string `json:"owned_agent_ids"`
+	Isolated      bool         `json:"isolated"`
+	Shares        []AgentShare `json:"shares"`
+	Revision      int64        `json:"revision"`
+	OwnedAgentIDs []string     `json:"owned_agent_ids"`
 }
 
 type AgentSharing struct {
-	Revision int64 `json:"revision"`
-	Shares []AgentShare `json:"shares"`
+	Revision int64        `json:"revision"`
+	Shares   []AgentShare `json:"shares"`
 }
 
 type AgentSharingRequest struct {
-	Revision int64 `json:"revision"`
-	Shares []AgentSharingRecipient `json:"shares"`
+	Revision int64                   `json:"revision"`
+	Shares   []AgentSharingRecipient `json:"shares"`
 }
 
 type AgentSharingRecipient struct {
-	Username string `json:"username"`
+	Username   string `json:"username"`
 	LimitBytes uint64 `json:"limit_bytes"`
-	Ports []int `json:"ports"`
-	Enabled *bool `json:"enabled,omitempty"`
+	Ports      []int  `json:"ports"`
+	Enabled    *bool  `json:"enabled,omitempty"`
 }
 
 type AgentShareRequest struct {

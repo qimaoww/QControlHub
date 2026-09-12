@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
+	"github.com/qimaoww/qcontrolhub/internal/store"
 )
 
 func TestSubStoreMutationsShareDatabaseLock(t *testing.T) {
@@ -87,9 +88,8 @@ func TestSubStoreConcurrentRelinkCannotOverwriteAnotherUsersClaim(t *testing.T) 
 	defer upstream.Close()
 	// Release the blocked HTTP request before closing its test server.
 	defer release()
-	if _, err := db.SaveSubStoreSyncSettings(ctx, upstream.URL+"/secret"); err != nil {
-		t.Fatal(err)
-	}
+	alice.call("PUT", "/substore-sync/settings", subStoreSettingsRequest{EndpointURL: upstream.URL + "/secret"}, http.StatusOK, nil)
+	bob.call("PUT", "/substore-sync/settings", subStoreSettingsRequest{EndpointURL: upstream.URL + "/secret"}, http.StatusOK, nil)
 	body, _ := json.Marshal(map[string]string{"subscription_name": "unclaimed", "sync_format": "mihomo"})
 	request := httptest.NewRequest("POST", "/api/v1/substore-sync/targets/"+first.ID+"/remote", bytes.NewReader(body))
 	request.Header.Set("Content-Type", "application/json")
@@ -123,11 +123,26 @@ func TestSubStoreConcurrentRelinkCannotOverwriteAnotherUsersClaim(t *testing.T) 
 	owner := remote["qcontrolhub_integration_id"]
 	remoteMu.Unlock()
 	alice.call("GET", "/substore-sync?target_id="+first.ID, nil, http.StatusOK, nil)
-	saved, err := db.SubStoreSyncTarget(ctx, first.ID)
+	saved, err := db.SubStoreSyncTarget(store.WithConfigScope(ctx, alice.userID, false), first.ID)
 	if err != nil || saved.SubscriptionName != "unclaimed" || saved.SyncFormat != core.SubStoreSyncFormatMihomo {
 		t.Fatalf("winning relink was not persisted: %+v %v", saved, err)
 	}
 	if owner != saved.IntegrationID || patches.Load() != 1 {
 		t.Fatalf("competing relink rewrote the remote owner: %v, patches=%d", owner, patches.Load())
 	}
+}
+
+func TestSubStoreIndependentBackendsDoNotBlockAPIWrites(t *testing.T) {
+	db, ctx, _, alice, bob := newConfigScopeAPIFixture(t)
+	alice.call("PUT", "/substore-sync/settings", subStoreSettingsRequest{EndpointURL: "https://substore.example/alice"}, http.StatusOK, nil)
+	bob.call("PUT", "/substore-sync/settings", subStoreSettingsRequest{EndpointURL: "https://substore.example/bob"}, http.StatusOK, nil)
+	release, err := db.TryLockSubStoreOperation(store.WithConfigScope(ctx, alice.userID, false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	alice.call("POST", "/substore-sync/targets", map[string]string{"display_name": "same-name"}, http.StatusConflict, nil)
+	bob.call("POST", "/substore-sync/targets", map[string]string{"display_name": "same-name"}, http.StatusCreated, nil)
+	// Changing to the other user's busy backend also takes its canonical lock.
+	bob.call("PUT", "/substore-sync/settings", subStoreSettingsRequest{EndpointURL: "https://SUBSTORE.example:443/alice/"}, http.StatusConflict, nil)
 }

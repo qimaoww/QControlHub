@@ -176,15 +176,16 @@ func (role Role) Valid() bool {
 // User is a durable panel login identity. Password hashes are intentionally
 // never included in this public model.
 type User struct {
-	ID          string       `json:"id"`
-	Username    string       `json:"username"`
-	DisplayName string       `json:"display_name,omitempty"`
-	Role        Role         `json:"role"`
-	Permissions []Permission `json:"permissions,omitempty"`
-	Disabled    bool         `json:"disabled"`
-	CreatedAt   time.Time    `json:"created_at"`
-	UpdatedAt   time.Time    `json:"updated_at"`
-	LastLoginAt *time.Time   `json:"last_login_at,omitempty"`
+	ID           string       `json:"id"`
+	Username     string       `json:"username"`
+	DisplayName  string       `json:"display_name,omitempty"`
+	Role         Role         `json:"role"`
+	Permissions  []Permission `json:"permissions,omitempty"`
+	Disabled     bool         `json:"disabled"`
+	CreatedAt    time.Time    `json:"created_at"`
+	UpdatedAt    time.Time    `json:"updated_at"`
+	LastLoginAt  *time.Time   `json:"last_login_at,omitempty"`
+	AuthRevision int64        `json:"-"`
 }
 
 type UserRequest struct {

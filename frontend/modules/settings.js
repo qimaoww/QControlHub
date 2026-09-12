@@ -15,10 +15,11 @@ export function installSettings(ctx) {
 
   async function settings() {
     const request = ++settingsRequest;
+    const accountData = state.data;
     const [item, deployment] = await Promise.all([api("/settings"), api("/settings/deployment")]);
-    if (request !== settingsRequest || state.route !== "settings") return;
+    if (request !== settingsRequest || state.route !== "settings" || state.data !== accountData) return;
     state.data.settings = item;
-    const writable = can("settings.manage") && !state.data.agentAccess?.isolated;
+    const writable = can("settings.manage");
     const disabled = writable ? "" : "disabled";
     const securityRows = [
       ["控制面传输", deployment.secure_transport, deployment.secure_transport ? "已启用 HTTPS / TLS 代理" : "未声明安全传输"],
@@ -39,7 +40,7 @@ export function installSettings(ctx) {
           ${select(item, "task_page_size", "任务默认显示数量", [[50, "50 条"], [100, "100 条"], [500, "500 条"]], disabled)}
           ${select(item, "default_config_editor", "配置编辑器默认模式", [["structured", "结构化表单"], ["source", "源文件"]], disabled)}
         </div>`)}
-        ${section("settings-runtime", "03", "任务与同步", "策略保存后，在线 Agent 自动重连并立即获取新配置，不会重启内核。", `<div class="settings-subsection"><h4>节点上报策略</h4><div class="settings-grid settings-grid-three">
+        ${section("settings-runtime", "03", "任务与同步", "仅影响本账号的数据和自有 Agent；策略保存后，自有在线 Agent 自动重连，不会重启内核或影响借用的共享节点。", `<div class="settings-subsection"><h4>节点上报策略</h4><div class="settings-grid settings-grid-three">
           ${select(item, "agent_heartbeat_interval_seconds", "心跳间隔", [[10, "10 秒"], [15, "15 秒"], [30, "30 秒"]], disabled)}
           ${select(item, "agent_metrics_interval_seconds", "指标采集间隔", [[1, "1 秒"], [5, "5 秒"], [15, "15 秒"], [30, "30 秒"]], disabled)}
           ${select(item, "agent_offline_threshold_seconds", "离线判定时间", [[45, "45 秒"], [60, "60 秒"], [90, "90 秒"], [180, "180 秒"]], disabled, "不得少于心跳间隔的 3 倍")}
@@ -114,6 +115,7 @@ export function installSettings(ctx) {
       saveButton.disabled = true;
       try {
         const saved = await api("/settings", { method: "PUT", body: JSON.stringify(body) });
+        if (state.data !== accountData) return;
         state.data.settings = saved;
         item.revision = saved.revision;
         applyUIFontScale?.(saved.ui_font_scale);
@@ -122,6 +124,7 @@ export function installSettings(ctx) {
         if (saveTitle) saveTitle.textContent = "所有更改已保存";
         notify("设置已保存；运行策略变更会由在线 Agent 自动应用");
       } catch (error) {
+        if (state.data !== accountData || error.name === "AbortError") return;
         saveButton.disabled = false;
         notify(error.message, "error");
       }
@@ -134,6 +137,7 @@ export function installSettings(ctx) {
       output.textContent = "正在检查 GitHub 最新正式版…";
       try {
         const result = await api("/settings/check-update", { method: "POST" });
+        if (state.data !== accountData) return;
         if (!result.comparable) {
           output.innerHTML = `GHCR latest 当前为 <a href="${esc(result.release_url)}" target="_blank" rel="noopener">${esc(result.latest_version)}</a>；当前构建 ${esc(result.current_control_plane)} 不是可比较的提交或版本号。`;
         } else if (result.update_available) {
@@ -142,6 +146,7 @@ export function installSettings(ctx) {
           output.textContent = `已是 GHCR latest 对应版本（${result.latest_version}）。`;
         }
       } catch (error) {
+        if (state.data !== accountData || error.name === "AbortError") return;
         output.textContent = `检查失败：${error.message}`;
       } finally {
         button.disabled = false;

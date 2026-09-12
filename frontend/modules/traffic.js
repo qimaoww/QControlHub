@@ -8,6 +8,7 @@ import {
   animateNodeCardDrop,
   nodeCardDropIndex,
 } from "./agents.js";
+import { accountStorage } from "./account-storage.js";
 
 const trafficPortIdentity = (item) => `${item.agent_id}:${item.port}`;
 const trafficEndpointKey = (item) => `endpoint:${item.agent_id}:${item.engine}:${item.port}:${item.protocol}`;
@@ -129,7 +130,7 @@ export function installTraffic(ctx) {
   const {
     api, state, can, esc, engineName, bytes, rate, percent, ago, shell,
     notify, confirmAction,
-    storage = globalThis.localStorage,
+    storage = accountStorage,
     setTimer = (callback, delay) => {
       state.trafficPollTimer = setTimeout(callback, delay);
       return state.trafficPollTimer;
@@ -180,7 +181,7 @@ export function installTraffic(ctx) {
     return ["监控中", "ok"];
   };
   const eligibleAgents = (agents) => agents.filter((agent) =>
-    (agent.features || []).includes("port-traffic-v1") && (agent.capabilities || []).length,
+    agent.can_manage !== false && (agent.features || []).includes("port-traffic-v1") && (agent.capabilities || []).length,
   );
   const engineOptions = (agent, selected = "") =>
     (agent?.capabilities || [])
@@ -450,7 +451,7 @@ export function installTraffic(ctx) {
       const agent = agentByID.get(policy.agent_id);
       const [status, tone] = policyStatus(policy, agent);
       const quotaEnabled = policy.quota_enabled !== false;
-      const editable = can("traffic.manage") && !policy.shared_quota;
+      const editable = can("traffic.manage", agent) && agent?.can_manage !== false && !policy.shared_quota;
       const usedPercent = percent(policy.used_bytes, policy.limit_bytes);
       const sampledAt = policy.last_collected_at || policy.last_reported_at;
       const receiveBPS = policy.enforcement_available === false ? 0 : trafficRateForDisplay(policy.receive_bps, sampledAt, agent?.status);

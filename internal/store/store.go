@@ -49,7 +49,7 @@ type storeExecutor interface {
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 54
+const currentSchemaVersion = 55
 
 func Open(ctx context.Context, databaseURL string, allowInsecureRemote bool) (*Store, error) {
 	return OpenWithConfigKey(ctx, databaseURL, allowInsecureRemote, "")
@@ -315,8 +315,21 @@ func (s *Store) migrate(ctx context.Context) error {
 		if _, err := tx.Exec(ctx, `UPDATE panel_users SET agent_isolation=(role<>'admin')`); err != nil {
 			return fmt.Errorf("isolate panel accounts: %w", err)
 		}
+	}
+	if appliedVersion < 55 {
 		if err := s.migrateSubStoreBackends(ctx, tx); err != nil {
 			return err
+		}
+		// Legacy port display overrides belong to the exact last deployed
+		// configuration, not to the next account that reuses its listener.
+		if _, err := tx.Exec(ctx, `INSERT INTO config_client_preferences(config_id,label,value)
+			SELECT DISTINCT deployed.config_id,entry.key,entry.value
+			FROM (`+latestDeploymentsSQL+`) deployed JOIN agents agent ON agent.id=deployed.agent_id
+			JOIN configs config ON config.id=deployed.config_id
+			CROSS JOIN LATERAL jsonb_each_text(COALESCE(NULLIF(agent.labels,'null'::jsonb),'{}'::jsonb)) entry
+			WHERE entry.key ~ '^client_profile_(name|address|family)_[0-9a-f]{64}$'
+			ON CONFLICT DO NOTHING`); err != nil {
+			return fmt.Errorf("scope client display preferences: %w", err)
 		}
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO qcontrolhub_schema_migrations (version) VALUES ($1)`, currentSchemaVersion); err != nil {
@@ -468,7 +481,7 @@ func (s *Store) EnrollAgent(ctx context.Context, request core.EnrollRequest, enr
 		SupportedCapabilities: supported,
 		ID:                    id, Name: name, Version: request.Version,
 		OwnerID: enrollmentOwner,
-		OS: request.OS, Arch: request.Arch, Capabilities: append([]core.Engine{}, request.Capabilities...), Features: append([]string(nil), request.Features...),
+		OS:      request.OS, Arch: request.Arch, Capabilities: append([]core.Engine{}, request.Capabilities...), Features: append([]string(nil), request.Features...),
 		Labels: cloneLabels(request.Labels), Runtime: map[core.Engine]core.RuntimeState{},
 		LastSeen: lastSeen, EnrolledAt: enrolledAt, Status: "offline", Reinstalled: reinstalled,
 	}, nil
@@ -1162,8 +1175,7 @@ func scanAgents(ctx context.Context, rows pgx.Rows) ([]core.Agent, error) {
 		} else {
 			agent.Status = "offline"
 		}
-		scope := scopeForConfig(ctx)
-		agent.CanManage = scope.Admin || agent.OwnerID == scope.OwnerID || strings.HasPrefix(scope.OwnerID, "token_")
+		scopeAgentPresentation(ctx, &agent)
 		agents = append(agents, agent)
 	}
 	return agents, rows.Err()
@@ -1474,16 +1486,6 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 			return core.Task{}, err
 		}
 	}
-	if !scope.Admin && (request.Action == core.ActionReadConfig || request.Action == core.ActionReadManagedConfig || request.Action == core.ActionImportExisting) {
-		var foreign bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_engine_ownership
-			WHERE agent_id=$1 AND engine=$2 AND owner_id<>$3 AND config_id<>'')`, request.AgentID, request.Engine, scope.OwnerID).Scan(&foreign); err != nil {
-			return core.Task{}, err
-		}
-		if foreign {
-			return core.Task{}, fmt.Errorf("%w: another user's deployed configuration cannot be read or imported", ErrForbidden)
-		}
-	}
 	if request.ExpectedConfigVersion < 0 || (request.ExpectedConfigVersion != 0 && request.Action != core.ActionDeploy && request.Action != core.ActionValidate && request.Action != core.ActionImportExisting) {
 		return core.Task{}, fmt.Errorf("%w: expected configuration version requires a configuration task", ErrInvalid)
 	}
@@ -1545,6 +1547,11 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 	var runtime map[core.Engine]core.RuntimeState
 	if err := json.Unmarshal(runtimeJSON, &runtime); err != nil {
 		return core.Task{}, err
+	}
+	if request.Action == core.ActionReadConfig || request.Action == core.ActionReadManagedConfig || request.Action == core.ActionImportExisting {
+		if err := requireHostConfigRead(ctx, tx, request.AgentID, request.Engine); err != nil {
+			return core.Task{}, err
+		}
 	}
 	if request.Action == core.ActionUpgradeAgent && !containsFeature(features, core.AgentFeatureSelfUpgrade) {
 		return core.Task{}, fmt.Errorf("%w: this Agent does not support remote upgrades; run the current one-click installation once", ErrConflict)
@@ -1909,7 +1916,7 @@ func (s *Store) RunningTask(ctx context.Context, agentID string) (*core.Task, er
 	if task.SharedTrafficID != "" {
 		var allowed bool
 		if err := tx.QueryRow(ctx, `SELECT $2::boolean AND EXISTS(SELECT 1 FROM agent_shares s JOIN panel_users u ON u.id=s.user_id
-			WHERE s.id=$1 AND NOT u.disabled AND s.enabled AND (s.limit_bytes=0 OR s.used_bytes<s.limit_bytes)))`,
+			WHERE s.id=$1 AND NOT u.disabled AND s.enabled AND (s.limit_bytes=0 OR s.used_bytes<s.limit_bytes))`,
 			task.SharedTrafficID, containsFeature(features, core.AgentFeatureSharedTraffic)).Scan(&allowed); err != nil {
 			return nil, err
 		}
@@ -2137,14 +2144,16 @@ func (s *Store) CompleteTask(ctx context.Context, agentID, taskID string, result
 }
 
 func (s *Store) ReadTaskConfigSnapshot(ctx context.Context, taskID, agentID string, engine core.Engine) (string, error) {
-	if !scopeForConfig(ctx).Admin {
-		return "", fmt.Errorf("%w: shared host configuration snapshots require an administrator", ErrForbidden)
+	if err := requireHostConfigRead(ctx, s.pool, agentID, engine); err != nil {
+		return "", err
 	}
 	var content string
+	args := []any{taskID, agentID, engine, core.ActionReadConfig, core.ActionReadManagedConfig}
+	where := ownerClause(ctx, "owner_id", &args)
 	err := s.pool.QueryRow(ctx, `
 		SELECT COALESCE(config_content,'') FROM tasks
-		WHERE id=$1 AND agent_id=$2 AND engine=$3 AND action IN ($4,$5) AND status='succeeded'`,
-		taskID, agentID, engine, core.ActionReadConfig, core.ActionReadManagedConfig).Scan(&content)
+		WHERE id=$1 AND agent_id=$2 AND engine=$3 AND action IN ($4,$5) AND status='succeeded'`+where,
+		args...).Scan(&content)
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && content == "") {
 		return "", ErrNotFound
 	}
@@ -2155,19 +2164,21 @@ func (s *Store) ReadTaskConfigSnapshot(ctx context.Context, taskID, agentID stri
 }
 
 func (s *Store) RecentReadTask(ctx context.Context, agentID string, engine core.Engine, maxAge time.Duration) (core.Task, error) {
-	if !scopeForConfig(ctx).Admin {
+	if err := requireHostConfigRead(ctx, s.pool, agentID, engine); err != nil {
 		return core.Task{}, ErrNotFound
 	}
 	if maxAge <= 0 {
 		return core.Task{}, ErrNotFound
 	}
+	args := []any{agentID, engine, core.ActionReadConfig, intervalString(maxAge)}
+	where := ownerClause(ctx, "owner_id", &args)
 	row := s.pool.QueryRow(ctx, `
 		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),COALESCE(core_version,''),COALESCE(core_source,''),status,attempt,
 		       COALESCE(output,''),COALESCE(error,''),created_at,started_at,finished_at,tcp_settings
 		FROM tasks
 		WHERE agent_id=$1 AND engine=$2 AND action=$3 AND status='succeeded'
-		  AND config_content IS NOT NULL AND finished_at > now()-$4::interval
-		ORDER BY finished_at DESC LIMIT 1`, agentID, engine, core.ActionReadConfig, intervalString(maxAge))
+		  AND config_content IS NOT NULL AND finished_at > now()-$4::interval`+where+`
+		ORDER BY finished_at DESC LIMIT 1`, args...)
 	task, err := scanTask(row, false)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return core.Task{}, ErrNotFound
@@ -2179,6 +2190,8 @@ func (s *Store) RequeueStaleTasks(ctx context.Context, age, installAge time.Dura
 	if installAge < age {
 		installAge = age
 	}
+	args := []any{intervalString(age), intervalString(installAge), maxAttempts}
+	where := workspaceOwnerClause(ctx, "owner_id", &args)
 	_, err := s.pool.Exec(ctx, `
 		UPDATE tasks SET
 			status=CASE WHEN attempt >= $3 THEN 'failed' ELSE 'pending' END,
@@ -2187,8 +2200,8 @@ func (s *Store) RequeueStaleTasks(ctx context.Context, age, installAge time.Dura
 			started_at=CASE WHEN attempt >= $3 THEN started_at ELSE NULL END,
 			config_content=CASE WHEN attempt >= $3 THEN NULL ELSE config_content END,
 			lease_id=NULL
-		WHERE status='running' AND started_at < now() - CASE WHEN action='install' THEN $2::interval ELSE $1::interval END`,
-		intervalString(age), intervalString(installAge), maxAttempts)
+		WHERE status='running' AND started_at < now() - CASE WHEN action='install' THEN $2::interval ELSE $1::interval END`+where,
+		args...)
 	return err
 }
 
@@ -2205,8 +2218,7 @@ func (s *Store) Overview(ctx context.Context) (core.Overview, error) {
 		       tasks.queued+tasks.running,tasks.queued,tasks.running,tasks.failed
 		FROM (
 			SELECT count(*) AS total,
-			       count(*) FILTER (WHERE last_seen > now() - make_interval(secs =>
-			         (SELECT agent_offline_threshold_seconds FROM panel_settings WHERE id=1))) AS online
+			       count(*) FILTER (WHERE last_seen > now() - make_interval(secs => `+agentOfflineThresholdSQL+`)) AS online
 			FROM agents WHERE revoked_at IS NULL`+agentWhere+`
 		) agents CROSS JOIN (
 			SELECT count(*) FILTER (WHERE agent_id IS NULL) AS archived,
@@ -2294,6 +2306,9 @@ func containsFeature(values []string, expected string) bool {
 func mapError(err error) error {
 	if err == nil {
 		return nil
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
 	}
 	if isUniqueViolation(err) {
 		return fmt.Errorf("%w: duplicate value", ErrConflict)
@@ -2444,6 +2459,12 @@ ALTER TABLE configs ADD CONSTRAINT configs_content_check CHECK (octet_length(con
 	);
 	CREATE INDEX IF NOT EXISTS config_client_metadata_config_idx
 	    ON config_client_metadata(config_id,config_version);
+	CREATE TABLE IF NOT EXISTS config_client_preferences (
+	    config_id text NOT NULL REFERENCES configs(id) ON DELETE CASCADE,
+	    label text NOT NULL,
+	    value text NOT NULL,
+	    PRIMARY KEY(config_id,label)
+	);
 
 	INSERT INTO config_revisions (config_id,version,agent_id,name,description,engine,content,created_at)
 	SELECT id,version,agent_id,name,description,engine,content,updated_at FROM configs
@@ -2656,6 +2677,7 @@ ALTER TABLE panel_users ADD CONSTRAINT panel_users_role_check CHECK (role IN ('a
 CREATE UNIQUE INDEX IF NOT EXISTS panel_users_username_unique_idx ON panel_users(lower(username));
 CREATE INDEX IF NOT EXISTS panel_users_status_idx ON panel_users(disabled,username);
 ALTER TABLE panel_users ADD COLUMN IF NOT EXISTS agent_isolation boolean NOT NULL DEFAULT false;
+ALTER TABLE panel_users ADD COLUMN IF NOT EXISTS auth_revision bigint NOT NULL DEFAULT 1;
 CREATE TABLE IF NOT EXISTS user_panel_settings (
     owner_id text PRIMARY KEY,
     content text NOT NULL,

@@ -333,12 +333,28 @@ func (s *Server) putSubStoreSettings(w http.ResponseWriter, request *http.Reques
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	// Serialize both the account and the backend being joined. Locking only
+	// the previous backend lets a concurrent relink race a credential change.
+	endpoint := strings.TrimSpace(input.EndpointURL)
+	if endpoint != "" {
+		var err error
+		endpoint, err = normalizeSubStoreEndpoint(endpoint)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+	release, err := s.store.TryLockSubStoreOperation(request.Context(), endpoint)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	defer release()
 	current, err := s.store.SubStoreSyncSettings(request.Context())
 	if err != nil {
 		writeStoreError(w, err)
 		return
 	}
-	endpoint := strings.TrimSpace(input.EndpointURL)
 	if endpoint == "" && current.Configured {
 		endpoint = current.EndpointURL
 	}

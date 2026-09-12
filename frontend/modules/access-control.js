@@ -50,6 +50,7 @@ export function installAccessControl(ctx) {
   }
 
   function bind(entries) {
+    const data = state.data;
     const confirmDiscard = async (event) => {
       const dirty = document.querySelector(
         "[data-access-control-form].is-dirty",
@@ -63,7 +64,7 @@ export function installAccessControl(ctx) {
     };
     document.querySelectorAll("[data-access-control-agent]").forEach((link) => {
       link.onclick = async (event) => {
-        if (!(await confirmDiscard(event))) return;
+        if (!(await confirmDiscard(event)) || state.data !== data) return;
         state.data.accessControlAgent = link.dataset.accessControlAgent;
         if (event.defaultPrevented) {
           const href = link.getAttribute("href");
@@ -74,7 +75,7 @@ export function installAccessControl(ctx) {
     });
     document.querySelectorAll('.app-dock a[href^="#"]').forEach((link) => {
       link.onclick = async (event) => {
-        if (!(await confirmDiscard(event))) return;
+        if (!(await confirmDiscard(event)) || state.data !== data) return;
         if (event.defaultPrevented) location.hash = link.getAttribute("href");
       };
     });
@@ -132,6 +133,7 @@ export function installAccessControl(ctx) {
           ))
         )
           return;
+        if (state.data !== data) return;
         const buttons = form.querySelectorAll("button");
         buttons.forEach((button) => (button.disabled = true));
         try {
@@ -150,13 +152,15 @@ export function installAccessControl(ctx) {
               intent,
             }),
           });
-          await accessControl();
+          if (state.data !== data) return;
+          if (state.route === "access-control") await accessControl();
           notify(
             intent === "deploy"
               ? `访问限制已保存，部署任务 ${result.task.id.slice(0, 12)} 已创建`
               : `访问限制已保存，校验任务 ${result.task.id.slice(0, 12)} 已创建`,
           );
         } catch (error) {
+          if (state.data !== data || error.name === "AbortError") return;
           notify(error.message, "error");
           buttons.forEach((button) => (button.disabled = false));
         }
@@ -165,7 +169,9 @@ export function installAccessControl(ctx) {
   }
 
   async function accessControl() {
+    const data = state.data, epoch = state.navigationEpoch;
     const entries = await api("/access-controls");
+    if (state.data !== data || state.navigationEpoch !== epoch || state.route !== "access-control") return;
     state.data.accessControls = entries;
     render(entries);
   }

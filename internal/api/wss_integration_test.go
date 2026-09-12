@@ -479,7 +479,7 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 				wantContent bool
 			}{
 				{name: "admin", token: adminToken, wantStatus: http.StatusOK, wantContent: true},
-				{name: "configuration reader cannot read shared snapshot", token: configSnapshotReadToken, wantStatus: http.StatusForbidden},
+				{name: "configuration reader cannot read shared snapshot", token: configSnapshotReadToken, wantStatus: http.StatusNotFound},
 				{name: "default auditor", token: auditorToken, wantStatus: http.StatusForbidden},
 				{name: "tasks read only", token: tasksReadToken, wantStatus: http.StatusForbidden},
 			} {

@@ -444,6 +444,7 @@ let agentConfigRequest = 0;
 let presetSavePending = false;
 let syncPresetControls = () => {};
 let activePresetContext;
+let presetSessionData = state.data;
 let presetNavigation = 0;
 const presetRead = createPresetReads();
 const drafts = () => state.data.presetDrafts ||= createPresetDrafts();
@@ -456,7 +457,7 @@ function saveOperation(operation) {
   return operation;
 }
 function capturePresetDrafts() { if (state.route === "agent-config") drafts().capture(); }
-function presetHasUnsavedChanges() { return presetSavePending || Boolean(state.data.presetDrafts?.dirty()); }
+function presetHasUnsavedChanges() { return (presetSessionData === state.data && presetSavePending) || Boolean(state.data.presetDrafts?.dirty()); }
 let liveConfigRequest = 0;
 let liveReadRequest = 0;
 let archiveConfigRequest = 0;
@@ -616,6 +617,12 @@ function agentConfig(options = {}) {
 }
 
 async function renderAgentConfig({ workspace: loadedWorkspace } = {}) {
+  if (presetSessionData !== state.data) {
+    presetSessionData = state.data;
+    presetSavePending = false;
+    activePresetContext = null;
+    syncPresetControls = () => {};
+  }
   capturePresetDrafts();
   const request = ++agentConfigRequest;
   const sessionData = state.data;
@@ -1344,12 +1351,12 @@ function bindAgentConfigPage(ctx, fieldsOnly = false) {
           notify(error.message, "error");
         }
       } finally {
-        presetSavePending = false;
+        if (state.data === sessionData) presetSavePending = false;
         formElement.removeAttribute("aria-busy");
         if (submitter) submitter.textContent = originalLabel;
         if (formElement.isConnected && current())
           buttons.forEach((button) => (button.disabled = !canSubmit));
-        syncPresetControls();
+        if (state.data === sessionData) syncPresetControls();
       }
     });
   }
@@ -1393,20 +1400,21 @@ function bindAgentConfigPage(ctx, fieldsOnly = false) {
 
 async function liveConfig() {
   const request = ++liveConfigRequest;
-  const privateWorkspace = Boolean(state.session && state.session.role !== "admin");
+  const privateAccount = Boolean(state.session && state.session.role !== "admin");
+  const accountData = state.data;
   const runtimeScope = state.navigationEpoch;
   const refreshRuntime =
     !liveAgentRuntimeLoaded ||
     liveAgentRuntimeScope !== runtimeScope ||
     !state.data.agents;
   const agents = refreshRuntime ? await api("/agents") : state.data.agents;
-  if (request !== liveConfigRequest || state.route !== "live-config") return;
+  if (accountData !== state.data || request !== liveConfigRequest || state.route !== "live-config") return;
   state.data.agents = agents;
   liveAgentRuntimeLoaded = true;
   liveAgentRuntimeScope = runtimeScope;
   const eligibleAgents = agents.filter((item) =>
     (item.capabilities || []).some(
-      (engine) => privateWorkspace || liveConfigEngineEligible(item.runtime?.[engine]),
+      (engine) => privateAccount || liveConfigEngineEligible(item.runtime?.[engine]),
     ),
   );
   if (
@@ -1428,8 +1436,13 @@ async function liveConfig() {
     );
     return;
   }
+  // An ordinary account starts with its private configuration. Only the host
+  // owner can explicitly request a live/legacy snapshot; never auto-read a
+  // shared host when the account has no configuration of its own.
+  const privateWorkspace = privateAccount && (agent.can_manage !== true ||
+    !["managed", "import"].includes(state.data.liveConfigSource));
   const installedEngines = (agent.capabilities || []).filter(
-    (item) => privateWorkspace || liveConfigEngineEligible(agent.runtime?.[item]),
+    (item) => privateAccount || liveConfigEngineEligible(agent.runtime?.[item]),
   );
   if (
     !state.data.liveEngine ||
@@ -1442,19 +1455,19 @@ async function liveConfig() {
   const configWorkspace = await api(
     `/agents/${encodeURIComponent(agent.id)}/configs/${encodeURIComponent(engine)}/workspace`,
   );
-  if (request !== liveConfigRequest || state.route !== "live-config") return;
+  if (accountData !== state.data || request !== liveConfigRequest || state.route !== "live-config") return;
   const saved = configWorkspace.config || null;
   const runtime = agent.runtime?.[engine] || {};
   const unsupportedReason = String(
     runtime.existing_config_unsupported_reason || "",
   );
-  const existingAvailable = !privateWorkspace && Boolean(runtime.existing_config_available);
+  const existingAvailable = (!privateAccount || agent.can_manage === true) && Boolean(runtime.existing_config_available);
   const managedAvailable = Boolean(runtime.installed);
   const managedReadSupported = (agent.features || []).includes(
     "managed-config-read-v1",
   );
   const sourceMode =
-    existingAvailable &&
+    privateWorkspace ? "personal" : existingAvailable &&
     (state.data.liveConfigSource === "import" || !managedAvailable)
       ? "import"
       : "managed";
@@ -1505,7 +1518,11 @@ async function liveConfig() {
     sourceSwitch += '<p class="validation-note">导入 install-ss-rust：保留多端口、DNS、出站绑定及 IPv6 优先，复制出站 ACL。脚本自有入站防火墙和重应用服务不会迁移；修改端口前请单独处理。日志统一为 QAgent info。SS Rust 无离线检查模式，启动失败会回滚。</p>';
   }
   if (privateWorkspace) {
-    sourceSwitch += '<p class="validation-note">仅显示我的配置。可在配置档案中保存多份方案；同一主机每种内核只运行一份配置，部署会替换该内核的当前配置。</p>';
+    sourceSwitch = '<p class="validation-note">仅显示我的配置。可保存多份方案；同一主机每种内核只运行一份配置，不能覆盖其他用户正在运行的配置。</p>';
+  }
+  if (privateAccount && agent.can_manage === true) {
+    sourceSwitch = `<nav class="live-config-source-switch" aria-label="配置来源"><button type="button" data-live-source="personal" class="${privateWorkspace ? "active" : ""}"><b>我的配置</b><small>个人工作区</small></button>${managedAvailable ? `<button type="button" data-live-source="managed" class="${sourceMode === "managed" ? "active" : ""}"><b>读取自有主机配置</b><small>当前托管文件</small></button>` : ""}${existingAvailable ? `<button type="button" data-live-source="import" class="${importSource ? "active" : ""}"><b>系统服务配置</b><small>可选导入</small></button>` : ""}</nav>` +
+      (privateWorkspace ? sourceSwitch : '<p class="validation-note">只允许读取自有主机且未被其他账号占用的配置；共享给他人不授予读取其配置的权限。</p>');
   }
   const liveConfigPhase = current
     ? "ready"
@@ -1562,6 +1579,7 @@ async function liveConfig() {
       (button.onclick = async () => {
         if (button.dataset.liveSource === sourceMode) return;
         if (!(await confirmSwitch("切换配置来源"))) return;
+        if (accountData !== state.data) return;
         state.data.liveConfigSource = button.dataset.liveSource;
         liveConfig();
       }),
@@ -1574,6 +1592,7 @@ async function liveConfig() {
   bindCodeEditors();
   bindEvent(document.querySelector("#live-config-form"), "submit", async (event) => {
       event.preventDefault();
+      if (accountData !== state.data) return;
       const form = new FormData(event.currentTarget);
       const migrateFiles = event.submitter?.dataset.liveIntent === "migrate-files";
       const intent = migrateFiles ? "deploy" : event.submitter?.dataset.liveIntent || (privateWorkspace ? "save" : "validate");
@@ -1619,6 +1638,7 @@ async function liveConfig() {
             monitorDeployTask(taskId, agent.id, engine);
           },
         });
+        if (accountData !== state.data) return;
         if (intent === "save") notify("个人配置已保存");
         if (intent === "import") {
           notify("配置已保存，服务迁移任务已提交");
@@ -1647,7 +1667,9 @@ async function liveConfig() {
 async function readCurrentConfig(agent, engine, sourceKey, readAction) {
   if (state.data.liveSources?.[sourceKey]?.reading) return;
   const request = ++liveReadRequest;
+  const data = state.data;
   const isCurrent = () =>
+    data === state.data &&
     request === liveReadRequest &&
     state.route === "live-config" &&
     state.data.liveAgent === agent.id &&

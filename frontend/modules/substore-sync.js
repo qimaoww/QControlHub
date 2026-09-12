@@ -115,7 +115,7 @@ export function installSubStoreSync(ctx) {
     const settings = resource.settings || {};
     const targets = resource.targets || [];
     const manage = can("settings.manage");
-    const manageGlobal = manage && !state.data.agentAccess?.isolated;
+    const manageGlobal = manage;
     const activeTarget = targets.find((target) => target.id === resource.target_id) || null;
     const profiles = resource.profiles || [];
     const selected = profiles.filter((profile) => profile.selected);
@@ -381,7 +381,7 @@ export function installSubStoreSync(ctx) {
     });
     bindEvent(document.querySelector("[data-substore-settings-form]"), "submit", async (event) => {
       event.preventDefault();
-      if (state.data.agentAccess?.isolated) return;
+      if (!can("settings.manage")) return;
       const form = event.currentTarget;
       const submit = form.querySelector("button[type=submit]");
       submit.disabled = true;

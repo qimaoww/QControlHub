@@ -56,8 +56,14 @@ func sharedTestConfig(t *testing.T, db *Store, ctx context.Context, agentID stri
 func TestAgentIsolationCoversListsAndDirectStoreCalls(t *testing.T) {
 	db, ctx, _ := isolatedConfigScopeStore(t)
 	user, alice := sharedTestUser(t, db, ctx, "isolated-alice")
-	_, bob := sharedTestUser(t, db, ctx, "isolated-bob")
+	other, bob := sharedTestUser(t, db, ctx, "isolated-bob")
 	allowed, denied := sharedTestAgent(t, db, ctx), sharedTestAgent(t, db, ctx)
+	_, err := db.SetUserAgentAccess(ctx, user.ID, core.AgentAccessRequest{Isolated: true,
+		Shares: []core.AgentShareRequest{{AgentID: allowed.ID, Ports: []int{21001}}, {AgentID: denied.ID, Ports: []int{21002}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sharedTestAllocation(t, db, ctx, other.ID, allowed.ID, 1000, 21003)
 	own := sharedTestConfig(t, db, alice, allowed.ID, 21001)
 	hidden := sharedTestConfig(t, db, alice, denied.ID, 21002)
 	sharedTestConfig(t, db, bob, allowed.ID, 21003)
@@ -278,19 +284,25 @@ func TestAgentIsolationCreationRevisionAndHostBoundaries(t *testing.T) {
 		func() error { return db.SetAgentKomariUUID(alice, agent.ID, "unauthorized") },
 		func() error { return db.SetAgentClientAddress(alice, agent.ID, "foreign.example") },
 		func() error { return db.SetAgentEngineCapability(alice, agent.ID, core.EngineMihomo, false) },
-		func() error { _, err := db.CreateEnrollmentToken(alice, core.EnrollmentTokenRequest{}); return err },
-		func() error {
-			_, err := db.SaveSubStoreSyncSettings(alice, "https://substore.example/private")
-			return err
-		},
-		func() error { _, err := db.SavePanelSettings(alice, core.PanelSettings{}); return err },
 		func() error { _, err := db.EnrollmentCommandForAgent(alice, agent.ID); return err },
-		func() error { _, err := db.ListCoreLogs(alice, CoreLogQuery{}); return err },
+		func() error { _, err := db.ListCoreLogs(alice, CoreLogQuery{AgentID: agent.ID}); return err },
 		func() error { _, err := db.AgentConfigsForMonitoring(alice, agent.ID); return err },
 	} {
 		if err := check(); !errors.Is(err, ErrForbidden) {
 			t.Fatalf("shared user reached a host-wide operation: %v", err)
 		}
+	}
+	if _, err := db.CreateEnrollmentToken(alice, core.EnrollmentTokenRequest{Name: "my-own-node"}); err != nil {
+		t.Fatalf("personal enrollment denied: %v", err)
+	}
+	if _, err := db.SaveSubStoreSyncSettings(alice, "https://substore.example/private"); err != nil {
+		t.Fatalf("personal Sub-Store denied: %v", err)
+	}
+	if _, err := db.SavePanelSettings(alice, core.DefaultPanelSettings()); err != nil {
+		t.Fatalf("personal settings denied: %v", err)
+	}
+	if entries, err := db.ListCoreLogs(alice, CoreLogQuery{}); err != nil || len(entries) != 0 {
+		t.Fatalf("personal logs exposed a shared host: %+v %v", entries, err)
 	}
 	sharedTestConfig(t, db, alice, agent.ID, 22222)
 	if configs, err := db.AgentConfigsForMonitoring(ctx, agent.ID); err != nil || len(configs) != 0 {
@@ -397,18 +409,27 @@ func TestSharedTrafficCapabilityEnableRequiresDeployment(t *testing.T) {
 func TestAgentIsolationAdoptsOnlyKnownAllocatedDeployments(t *testing.T) {
 	db, ctx, _ := isolatedConfigScopeStore(t)
 	user, alice := sharedTestUser(t, db, ctx, "adopt-alice")
-	agent := sharedTestAgent(t, db, ctx)
+	agent := sharedTestAgent(t, db, alice)
 	config := sharedTestConfig(t, db, alice, agent.ID, 21001)
 	request := core.TaskRequest{AgentID: agent.ID, Engine: config.Engine, ConfigID: config.ID, Action: core.ActionDeploy}
 	task, err := db.CreateTask(ctx, request) // Administrator acts for the owner.
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Simulate a pre-ownership account/Agent, never reopen unrestricted access
+	// through the production allocation API.
+	if _, err := db.pool.Exec(ctx, `WITH changed AS (UPDATE agents SET owner_id='' WHERE id=$1)
+		UPDATE panel_users SET agent_isolation=false WHERE id=$2`, agent.ID, user.ID); err != nil {
+		t.Fatal(err)
+	}
 	sharedTestAllocation(t, db, ctx, user.ID, agent.ID, 1000, 21001)
 	if prior, err := db.GetTask(ctx, task.ID); err != nil || prior.Status != core.TaskCanceled {
 		t.Fatalf("admin-created unshared task survived isolation: %+v %v", prior, err)
 	}
-	if _, err := db.SetUserAgentAccess(ctx, user.ID, core.AgentAccessRequest{}); err != nil {
+	if _, err := db.SetUserAgentAccess(ctx, user.ID, core.AgentAccessRequest{}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("regular account isolation was disabled: %v", err)
+	}
+	if _, err := db.pool.Exec(ctx, `UPDATE agents SET owner_id=$2 WHERE id=$1`, agent.ID, user.ID); err != nil {
 		t.Fatal(err)
 	}
 	task, err = db.CreateTask(ctx, request)
@@ -420,6 +441,10 @@ func TestAgentIsolationAdoptsOnlyKnownAllocatedDeployments(t *testing.T) {
 		t.Fatalf("claim: %+v %v", claimed, err)
 	}
 	if err := db.CompleteTask(ctx, agent.ID, task.ID, core.TaskResultRequest{LeaseID: claimed.LeaseID, Success: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.pool.Exec(ctx, `WITH changed AS (UPDATE agents SET owner_id='' WHERE id=$1)
+		UPDATE panel_users SET agent_isolation=false WHERE id=$2`, agent.ID, user.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.SetUserAgentAccess(ctx, user.ID, core.AgentAccessRequest{Isolated: true}); !errors.Is(err, ErrConflict) {

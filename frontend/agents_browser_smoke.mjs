@@ -66,6 +66,8 @@ const server = createServer(async (request, response) => {
       file = join(root, "config_scope_browser_runtime.mjs");
     else if (path === "/assets/users_browser_runtime.mjs")
       file = join(root, "users_browser_runtime.mjs");
+    else if (path === "/assets/sharing_browser_runtime.mjs")
+      file = join(root, "sharing_browser_runtime.mjs");
     else if (path === "/assets/presets_browser_runtime.mjs")
       file = join(root, "presets_browser_runtime.mjs");
     else if (path.startsWith("/assets/modules/"))
@@ -240,7 +242,7 @@ async function runMode(mode) {
         "--no-first-run",
         "--disable-features=AutofillServerCommunication,CertificateTransparencyComponentUpdater,MediaRouter,OptimizationHints",
         "--hide-scrollbars",
-        ["substore-scope", "users-mobile"].includes(mode) ? "--window-size=390,844" : "--window-size=1280,900",
+        ["substore-scope", "users-mobile", "sharing-mobile"].includes(mode) ? "--window-size=390,844" : "--window-size=1280,900",
         `--user-data-dir=${profile}`,
         "--remote-debugging-port=0",
         url,
@@ -286,7 +288,7 @@ async function runMode(mode) {
 }
 
 try {
-  const modes = process.env.QCH_BROWSER_SMOKE_MODES || process.env.QCH_BROWSER_SMOKE_MODE || "admin,empty,readonly,ports,regions,logs,logs-restore,bbr,bbr-readonly,bbr-writeonly,config-migration,config-scope,substore-scope,users,users-mobile,config-layout,traffic-layout,capabilities-settings,capabilities-settings-readonly,presets";
+  const modes = process.env.QCH_BROWSER_SMOKE_MODES || process.env.QCH_BROWSER_SMOKE_MODE || "admin,empty,readonly,ports,regions,logs,logs-restore,bbr,bbr-readonly,bbr-writeonly,config-migration,config-scope,substore-scope,users,users-mobile,sharing,sharing-mobile,config-layout,traffic-layout,capabilities-settings,capabilities-settings-readonly,presets";
   for (const mode of modes.split(",")) await runMode(mode);
   process.stdout.write("agents browser runtime smoke passed\n");
 } finally {

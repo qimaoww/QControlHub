@@ -143,9 +143,28 @@ func (s *Store) GetAgent(ctx context.Context, id string) (core.Agent, error) {
 	} else {
 		agent.Status = "offline"
 	}
+	scopeAgentPresentation(ctx, &agent)
+	return agent, nil
+}
+
+func scopeAgentPresentation(ctx context.Context, agent *core.Agent) {
 	scope := scopeForConfig(ctx)
 	agent.CanManage = scope.Admin || agent.OwnerID == scope.OwnerID || strings.HasPrefix(scope.OwnerID, "token_")
-	return agent, nil
+	for key := range agent.Labels {
+		if strings.HasPrefix(key, "client_profile_") || (!agent.CanManage && key == komariUUIDLabel) {
+			delete(agent.Labels, key)
+		}
+	}
+	if !agent.CanManage {
+		// Task identities and host log details are not part of a sharing grant.
+		agent.CapabilityTransitions = nil
+		agent.Metrics.BBR = nil
+		for engine, runtime := range agent.Runtime {
+			runtime.CoreLogError = ""
+			runtime.CoreLogStatus = ""
+			agent.Runtime[engine] = runtime
+		}
+	}
 }
 
 // SetAgentClientAddress stores the operator-provided address used when
