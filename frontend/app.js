@@ -17,7 +17,7 @@ import {
   createLatestRenderScheduler,
   reconcileView,
 } from "./modules/refresh.js";
-import { orderNodesBySavedOrder } from "./modules/node-order.js";
+import { migrateLegacyNodeOrder, orderNodesBySavedOrder } from "./modules/node-order.js";
 import { setStorageAccount } from "./modules/account-storage.js";
 import { createScopedAPI } from "./modules/requests.js";
 import { errorMessage, requestJSON } from "./modules/errors.js";
@@ -372,7 +372,7 @@ async function sendAPI(path, options = {}) {
     : null;
   const request = combineAbortSignals(options.signal, routeSignal);
   try {
-    return await requestJSON(`/api/v1${path}`, {
+    const result = await requestJSON(`/api/v1${path}`, {
       ...options,
       signal: request.signal,
       headers,
@@ -387,6 +387,9 @@ async function sendAPI(path, options = {}) {
         renderLogin(message);
       },
     });
+    if (path === "/agents" && method === "GET" && session && state.session === session && Array.isArray(result))
+      migrateLegacyNodeOrder(result);
+    return result;
   } finally {
     request.release();
   }

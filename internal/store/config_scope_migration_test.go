@@ -91,7 +91,7 @@ func TestMigrateV51ConfigOwnershipAndSubStoreFormat(t *testing.T) {
 	}
 	defer upgraded.Close()
 	admin := WithConfigScope(ctx, "", true)
-	user := WithConfigScope(ctx, "usr_new", false)
+	user := WithConfigScope(ctx, "token_new", false)
 	if got, err := upgraded.AgentConfig(admin, agent.ID, workspace.Engine); err != nil || got.ID != workspace.ID || got.Content != workspace.Content || got.OwnerID != "" {
 		t.Fatalf("legacy workspace not preserved: %+v %v", got, err)
 	}
@@ -152,7 +152,7 @@ func TestMainlandPoliciesStayWithTheirOwnerConfiguration(t *testing.T) {
 	if _, err := db.pool.Exec(ctx, `UPDATE agents SET capabilities='["mihomo","ss-rust"]' WHERE id=$1`, agent.ID); err != nil {
 		t.Fatal(err)
 	}
-	alice, bob := WithConfigScope(ctx, "usr_alice", false), WithConfigScope(ctx, "usr_bob", false)
+	alice, bob := WithConfigScope(ctx, "token_alice", false), WithConfigScope(ctx, "token_bob", false)
 	input := core.Config{AgentID: agent.ID, Name: "private SS", Engine: core.EngineShadowsocksRust,
 		Content: `{"server":"0.0.0.0","server_port":21001,"method":"aes-256-gcm","password":"private-fixture"}`}
 	own, err := db.SaveAgentConfig(alice, input, 0)

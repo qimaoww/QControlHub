@@ -1083,7 +1083,7 @@ func (s *Store) ListPortTrafficDailyUsage(ctx context.Context, agentID, policyID
 	where += trafficAccessClause(ctx, "usage.agent_id", "usage.policy_id", &args)
 	if !scopeForConfig(ctx).Admin {
 		args = append(args, scopeForConfig(ctx).OwnerID)
-		where += fmt.Sprintf(` AND (NOT EXISTS(SELECT 1 FROM panel_users u WHERE u.id=$%[1]d)
+		where += fmt.Sprintf(` AND (starts_with($%[1]d::text,'token_')
 			OR EXISTS(SELECT 1 FROM agents a WHERE a.id=usage.agent_id AND a.owner_id=$%[1]d)
 			OR EXISTS(SELECT 1 FROM port_traffic_policies p WHERE p.id=usage.policy_id AND usage.reset_generation>=p.share_generation))`, len(args))
 	}

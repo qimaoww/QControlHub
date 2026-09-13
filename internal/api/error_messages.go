@@ -23,6 +23,7 @@ var errorMessages = map[string]string{
 	"cannot delete the current user session":                                                                  "不能删除当前登录的账号。",
 	"administrator accounts cannot be deleted":                                                                "管理员账号不能删除。",
 	"the account still owns records that must be moved first":                                                 "该账号仍有未转移的数据，请先处理其节点或共享。",
+	"sharing changed while deleting the account; reload and retry":                                            "删除期间节点共享已变更，请刷新后重试。",
 	"only administrators may list other users' nodes":                                                         "仅管理员可查看其他用户的节点。",
 	"admin_hidden is required":                                                                                "请选择是否对管理员隐藏此节点。",
 	"only administrators may manage users":                                                                    "仅管理员可管理用户。",

@@ -568,7 +568,9 @@ func TestNodeSidebarsUseDraggedNodeSettingsOrder(t *testing.T) {
 		t.Fatalf("all eight node sidebars must use the shared dragged order; got %d call sites", strings.Count(app, "orderNodesBySavedOrder("))
 	}
 	for _, required := range []string{
-		`import { orderNodesBySavedOrder } from "./modules/node-order.js";`,
+		`import { migrateLegacyNodeOrder, orderNodesBySavedOrder } from "./modules/node-order.js";`,
+		`if (path === "/agents" && method === "GET" && session && state.session === session && Array.isArray(result))`,
+		`migrateLegacyNodeOrder(result);`,
 		`const items = orderNodesBySavedOrder(state.data.agents || []);`,
 		`const orderedAgents = orderNodesBySavedOrder(agents);`,
 		`const agents = orderNodesBySavedOrder(state.data.agents || []);`,

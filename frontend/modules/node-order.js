@@ -31,25 +31,32 @@ export function saveNodeOrder(ids, storage) {
 // another account's node identifiers. The legacy value is left in place so the
 // next account can migrate its own visible subset.
 export function migrateLegacyNodeOrder(nodes = [], storage, legacyStorage) {
-  const target = storage ?? accountStorage;
-  const legacy = legacyStorage ?? globalThis.localStorage;
   try {
-    if (target?.getItem(nodeCardOrderKey)) return;
-    const parsed = JSON.parse(legacy?.getItem(nodeCardOrderKey) ?? "null");
-    if (!Array.isArray(parsed)) return;
-    const visible = new Set((nodes || []).map((node) => node?.id).filter(Boolean));
-    const seen = new Set();
-    const migrated = parsed.filter((id) => {
-      if (typeof id !== "string" || !visible.has(id) || seen.has(id)) return false;
-      seen.add(id);
-      return true;
-    });
+    const target = storage ?? accountStorage;
+    if (target?.getItem(nodeCardOrderKey) != null) return;
+    const migrated = visibleLegacyOrder(nodes, legacyStorage);
     if (!migrated.length) return;
     target.setItem(nodeCardOrderKey, JSON.stringify(migrated));
   } catch {}
 }
 
-export function orderNodesBySavedOrder(nodes = [], saved = savedNodeOrder()) {
+function visibleLegacyOrder(nodes, legacyStorage) {
+  const legacy = legacyStorage ?? globalThis.localStorage;
+  const visible = new Set((nodes || []).map((node) => node?.id).filter(Boolean));
+  return savedNodeOrder(legacy).filter((id) => visible.has(id));
+}
+
+export function orderNodesBySavedOrder(nodes = [], saved) {
+  if (saved === undefined) {
+    saved = savedNodeOrder();
+    try {
+      // Some sidebars only have nodes with a deployment or profile. Apply
+      // legacy order without persisting a partial list; /agents performs
+      // the one-time migration using the complete account-visible fleet.
+      if (accountStorage.getItem(nodeCardOrderKey) == null)
+        saved = visibleLegacyOrder(nodes);
+    } catch {}
+  }
   if (!saved.length) return nodes;
   const position = new Map(saved.map((id, index) => [id, index]));
   return [...nodes].sort(
@@ -59,7 +66,7 @@ export function orderNodesBySavedOrder(nodes = [], saved = savedNodeOrder()) {
   );
 }
 
-// Sidebar entry point: migrate any legacy browser-wide order, then apply it.
+// Full-fleet entry point: migrate legacy order, then apply it.
 export function orderedNodeList(nodes = [], storage, legacyStorage) {
   migrateLegacyNodeOrder(nodes, storage, legacyStorage);
   return orderNodesBySavedOrder(nodes, savedNodeOrder(storage));

@@ -19,7 +19,7 @@ func trafficAccessClause(ctx context.Context, agentColumn, policyColumn string, 
 	}
 	*args = append(*args, scopeForConfig(ctx).OwnerID)
 	owner := fmt.Sprintf("$%d", len(*args))
-	return clause + ` AND (NOT EXISTS(SELECT 1 FROM panel_users traffic_user WHERE traffic_user.id=` + owner + `)
+	return clause + ` AND (starts_with(` + owner + `::text,'token_')
 		OR EXISTS(SELECT 1 FROM agents owned_agent WHERE owned_agent.id=` + agentColumn + ` AND owned_agent.owner_id=` + owner + `)
 		OR EXISTS(SELECT 1 FROM port_traffic_policies owned_policy JOIN agent_shares owned_share ON owned_share.id=owned_policy.share_id
 			WHERE owned_policy.id=` + policyColumn + ` AND owned_share.user_id=` + owner + `
@@ -465,7 +465,11 @@ func cancelUnauthorizedAgentTasksTx(ctx context.Context, tx pgx.Tx, agentID stri
 	return err
 }
 
-const unauthorizedTaskPrincipalSQL = `EXISTS(SELECT 1 FROM panel_users u JOIN agents a ON a.id=t.agent_id
+const unauthorizedTaskPrincipalSQL = `(t.owner_id<>'' AND NOT starts_with(t.owner_id,'token_')
+	AND NOT EXISTS(SELECT 1 FROM panel_users u WHERE u.id=t.owner_id))
+	OR EXISTS(SELECT 1 FROM configs c WHERE c.id=t.config_id AND c.owner_id<>''
+		AND NOT starts_with(c.owner_id,'token_') AND NOT EXISTS(SELECT 1 FROM panel_users u WHERE u.id=c.owner_id))
+	OR EXISTS(SELECT 1 FROM panel_users u JOIN agents a ON a.id=t.agent_id
 	WHERE u.id=t.owner_id AND (u.disabled OR (u.role<>'admin' AND
 		(NOT u.permissions ? (CASE WHEN t.capability_transition THEN 'agents.manage' ELSE 'tasks.execute' END)
 		 OR (t.action IN ('enable-bbr','disable-bbr','configure-tcp') AND NOT u.permissions ? 'agents.manage')
