@@ -70,7 +70,7 @@ func Parse(data []byte, format string) ([]string, error) {
 	case "srs":
 		prefixes, err = parseSRS(data)
 	default:
-		return nil, errors.New("CN IP 格式必须为 TXT、DAT 或 SRS")
+		return nil, errors.New("CN IP 格式必须为 TXT、DAT、SRS 或 MMDB")
 	}
 	if err != nil {
 		return nil, err
@@ -128,12 +128,22 @@ func parseDAT(data []byte) ([]netip.Prefix, error) {
 			return errors.New("不是 GeoIP DAT 数据库")
 		}
 		country := ""
+		// Locate CN before retaining ranges: unrelated country lists can be huge.
+		if err := fields(b, func(n protowire.Number, t protowire.Type, value []byte, _ uint64) error {
+			if n == 1 && t == protowire.BytesType {
+				country = string(value)
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+		if !strings.EqualFold(country, "cn") {
+			return nil
+		}
 		var cidrs [][]byte
 		inverted := false
 		if err := fields(b, func(n protowire.Number, t protowire.Type, b []byte, v uint64) error {
 			switch n {
-			case 1:
-				country = string(b)
 			case 2:
 				cidrs = append(cidrs, b)
 			case 3:
@@ -145,9 +155,6 @@ func parseDAT(data []byte) ([]netip.Prefix, error) {
 			return nil
 		}); err != nil {
 			return err
-		}
-		if !strings.EqualFold(country, "cn") {
-			return nil
 		}
 		if inverted {
 			return errors.New("DAT cn 不能使用反向匹配")

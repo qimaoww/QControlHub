@@ -41,6 +41,18 @@ func TestDAT(t *testing.T) {
 		t.Fatal("accepted truncated DAT")
 	}
 }
+func TestDATSkipsLargeUnrelatedCountry(t *testing.T) {
+	cidr := append(protoBytes(1, []byte{1, 0, 1, 0}), protowire.AppendVarint(protowire.AppendTag(nil, 2, protowire.VarintType), 24)...)
+	unrelated := bytes.Repeat(protoBytes(2, cidr), MaxPrefixes+1)
+	unrelated = append(unrelated, protoBytes(1, []byte("US"))...)
+	cn := append(protoBytes(2, cidr), protoBytes(1, []byte("CN"))...)
+	data := append(protoBytes(1, unrelated), protoBytes(1, cn)...)
+	got, err := Parse(data, "auto")
+	if err != nil || !reflect.DeepEqual(got, []string{"1.0.1.0/24"}) {
+		t.Fatalf("%v %v", got, err)
+	}
+}
+
 func makeSRS(item byte, invert byte) []byte {
 	var raw bytes.Buffer
 	raw.WriteByte(1)
