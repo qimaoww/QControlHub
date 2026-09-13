@@ -874,8 +874,8 @@ try {
   assert.equal(staleMarkup.includes('data-live-intent="import"'), true);
   assert.equal(
     staleWorkspaceRequests,
-    1,
-    "the superseded runtime never loads a workspace",
+    2,
+    "parallel workspace reads must not cause an extra read after runtime resolves",
   );
 } finally {
   if (staleRuntimeDocument === undefined) delete globalThis.document;

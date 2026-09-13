@@ -1524,6 +1524,13 @@ async function liveConfig() {
     !state.data.agents;
   // Preserve narrow config-only deep links: their workspace includes the
   // authorized node, so opening one need not require a fleet-read permission.
+  // Start independent reads together for an already selected workspace.
+  // Do not prefetch across pending deployment reconciliation or access scopes.
+  const selectedAgent = state.data.liveAgent, selectedEngine = state.data.liveEngine;
+  const prefetchWorkspace = can("agents.read") && selectedAgent && selectedEngine &&
+    !state.data.pendingDeployTasks?.[liveSourceKey(selectedAgent, selectedEngine)]
+    ? api(`/agents/${encodeURIComponent(selectedAgent)}/configs/${encodeURIComponent(selectedEngine)}/workspace`)
+      .then(value => ({value}), error => ({error})) : null;
   const targetedWorkspace = state.session && !can("agents.read") && state.data.liveAgent && state.data.liveEngine
     ? await api(`/agents/${encodeURIComponent(state.data.liveAgent)}/configs/${encodeURIComponent(state.data.liveEngine)}/workspace`)
     : null;
@@ -1573,7 +1580,10 @@ async function liveConfig() {
   if (globalThis.location?.hash.startsWith("#live-config") && globalThis.history?.replaceState)
     globalThis.history.replaceState(null, "", presetRoute({agentId:agent.id, engine}));
   await reconcilePendingDeploy(agent.id, engine);
-  const configWorkspace = targetedWorkspace || await api(
+  const prefetched = prefetchWorkspace && selectedAgent === agent.id && selectedEngine === engine
+    ? await prefetchWorkspace : null;
+  if (prefetched?.error) throw prefetched.error;
+  const configWorkspace = targetedWorkspace || prefetched?.value || await api(
     `/agents/${encodeURIComponent(agent.id)}/configs/${encodeURIComponent(engine)}/workspace`,
   );
   if (accountData !== state.data || request !== liveConfigRequest || state.route !== "live-config") return;
@@ -1703,23 +1713,25 @@ async function liveConfig() {
         liveConfig();
       }),
   );
+  let engineSwitch = 0;
   document.querySelectorAll("[data-live-engine]").forEach(
     (link) =>
       (link.onclick = async (event) => {
         event.preventDefault();
-        if (link.dataset.liveEngine === engine) return;
+        if (link.dataset.liveEngine === state.data.liveEngine) return;
         if (!(await confirmSwitch("切换内核"))) return;
-        if (accountData !== state.data || workspaceElement.getAttribute("aria-busy") === "true") return;
-        const previousSource = state.data.liveConfigSource;
+        if (accountData !== state.data || !workspaceElement.isConnected) return;
+        const switchRequest = ++engineSwitch;
+        const previousSource = sourceMode;
         state.data.liveEngine = link.dataset.liveEngine;
         state.data.liveConfigSource = "";
         workspaceElement.setAttribute("aria-busy", "true");
         const tabs = [...workspaceElement.querySelectorAll("[data-live-engine]")];
         tabs.forEach(tab => {
-          tab.disabled = true;
           tab.classList.toggle("active", tab === link);
           tab.setAttribute("aria-pressed", String(tab === link));
         });
+        workspaceElement.querySelector(".live-engine-loading")?.remove();
         const status = document.createElement("span");
         status.className = "live-engine-loading";
         status.setAttribute("role", "status");
@@ -1727,7 +1739,7 @@ async function liveConfig() {
         workspaceElement.querySelector(".live-config-details").append(status);
         try { await liveConfig(); }
         catch (error) {
-          if (accountData !== state.data || state.data.liveEngine !== link.dataset.liveEngine) return;
+          if (accountData !== state.data || engineSwitch !== switchRequest || state.data.liveEngine !== link.dataset.liveEngine) return;
           state.data.liveEngine = engine;
           state.data.liveConfigSource = previousSource;
           if (globalThis.history?.replaceState) globalThis.history.replaceState(null, "", presetRoute({agentId:agent.id, engine}));
@@ -1738,7 +1750,7 @@ async function liveConfig() {
           });
           notify(`切换内核失败：${error.message}`, "error");
         } finally {
-          if (workspaceElement.isConnected) {
+          if (workspaceElement.isConnected && engineSwitch === switchRequest) {
             workspaceElement.removeAttribute("aria-busy"); status.remove();
             tabs.forEach(tab => { tab.disabled = false; });
           }
@@ -1952,7 +1964,7 @@ async function waitForTask(taskID, isCurrent = () => true) {
     const task = await api(`/tasks/${encodeURIComponent(taskID)}`);
     if (!isCurrent()) return null;
     if (["succeeded", "failed", "canceled"].includes(task.status)) return task;
-    await new Promise((resolve) => setTimeout(resolve, 600));
+    await new Promise((resolve) => setTimeout(resolve, attempt < 5 ? 200 : 600));
   }
   throw new Error("等待节点返回配置超时");
 }

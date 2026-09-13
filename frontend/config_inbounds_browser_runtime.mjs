@@ -301,6 +301,14 @@ export async function testConfigInboundsRuntime(preview = false) {
   releaseSwitch();
   await waitFor(()=>switcher.notices.some(message=>message.includes("切换内核失败")), "failed switch lost feedback");
   assert(switcher.state.data.liveEngine === "xray" && !missingTab.disabled, "failed switch did not restore usable previous editor");
+  switcher.workspaceGate = new Promise(resolve=>{releaseSwitch=resolve;});
+  missingTab.click();
+  await waitFor(()=>document.querySelector(".live-engine-loading"), "second switch not started");
+  document.querySelector('[data-live-engine="xray"]').click();
+  await waitFor(()=>switcher.state.data.liveEngine === "xray", "latest selection was blocked by previous request");
+  releaseSwitch();
+  await waitFor(()=>!document.querySelector(".live-engine-loading"), "latest switch did not finish");
+  assert(document.querySelector('[data-live-engine="xray"]').classList.contains("active"), "old response replaced latest selection");
   switcher.dispose();
   const drift = await fixture("xray", {drift:true});
   drift.click("add");
