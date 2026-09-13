@@ -1883,7 +1883,17 @@ try {
       await waitFor(()=>document.querySelector('#live-config-form[data-engine="sing-box"]'),"top engine switch failed");
       const input=document.querySelector("[data-code-input]");input.value+="\n";input.dispatchEvent(new Event("input",{bubbles:true}));
       const draft = input.value;
-      assert.equal(document.querySelectorAll(".code-file-meta optgroup").length,2,"paired/shared file groups missing");
+      const fileButtons = document.querySelectorAll("[data-config-file]");
+      assert.ok(fileButtons.length >= 2,"shared/inbound buttons missing");
+      fileButtons[1].click();
+      assert.equal(fileButtons[1].getAttribute("aria-pressed"),"true","inbound selection missing");
+      input.value += "\n"; input.dispatchEvent(new Event("input",{bubbles:true}));
+      const inboundDraft = input.value;
+      fileButtons[0].click();
+      assert.equal(input.value,draft,"switch lost common draft");
+      fileButtons[1].click();
+      assert.equal(input.value,inboundDraft,"switch lost inbound draft");
+      fileButtons[0].click();
       assert.equal(document.querySelector('optgroup[label="出站"]'),null,"legacy standalone exit group is still visible");
       document.querySelector(".config-file-navigation button").click();
       assert.ok(input.readOnly,"merged preview must be readonly");
