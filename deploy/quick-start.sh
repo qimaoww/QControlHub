@@ -770,13 +770,16 @@ start_external_services() {
 wait_ready() {
     local url="$1" timeout="$2" deadline
     deadline=$(( $(date +%s) + timeout ))
-    while [ "$(date +%s)" -lt "$deadline" ]; do
+    # Probe before consulting the clock: with a one-second timeout the deadline
+    # can pass between its computation and the first loop test, which would skip
+    # the only request and report a healthy deployment as unavailable.
+    while :; do
         if curl -sf -m 3 "$url" >/dev/null 2>&1; then
             return 0
         fi
+        [ "$(date +%s)" -lt "$deadline" ] || return 1
         sleep 2
     done
-    return 1
 }
 
 validate_external_update_env() {
