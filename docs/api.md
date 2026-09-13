@@ -132,6 +132,8 @@
 
 `GET /api/v1/agents/{id}/region` 优先返回节点的手动设置（`country_code` 和 `source: "manual"`）；否则只使用节点已验证的公网 IP，控制面向 GeoJS 查询国家/地区并缓存 48 小时（`source: "auto"`）。没有可用公网 IP 时返回空对象。前端通过同源接口读取 [lipis/flag-icons](https://github.com/lipis/flag-icons) 的统一 4:3 SVG 旗帜并由控制面缓存；该流程独立于 Komari 关联配置。
 
+旗帜目录包含 249 个 ISO 国家/地区代码。单张 SVG 的读取上限为 512 KiB，以兼容西班牙、玻利维亚、墨西哥、塞尔维亚和萨尔瓦多等包含复杂纹章的图片；超限或未通过现有 SVG 安全检查的响应不会缓存。可运行 `QCH_TEST_LIVE_REGION_FLAGS=1 go test ./internal/geoip -run '^TestFlagLiveCatalog$' -parallel 8 -count=1` 联网核对完整目录，常规测试使用本地响应，不依赖旗帜供应商。
+
 在节点设置中点击旗帜可搜索、选择国家/地区；保存后节点设置及客户端卡片左上角使用同一旗帜。`PUT /api/v1/agents/{id}/region` 接收 `{"country_code":"SG"}`，代码由 `/api/v1/regions` 提供，保存时去除首尾空格并转大写；`{"country_code":""}` 清除手动设置并恢复自动识别。缺少字段、`null` 或不支持的代码返回 400。设置持久化为节点的 `region_code` 标签，重连后保留，不修改其他标签、公网 IP 或客户端连接配置。只读用户只能查看；写入沿用管理权限、CSRF 和审计保护。
 
 `GET /api/v1/overview` 中的 `configs` 只统计可在“配置档案”工作区跨节点下发的全局配置；`node_configs` 单独统计绑定到具体 Agent/内核的节点配置，避免将两类配置混为一个不可解释的总数。为兼容既有调用方，`tasks_pending` 仍表示 `pending + running` 的活动任务总数；`tasks_queued` 和 `tasks_running` 分别给出排队与执行中的精确数量。

@@ -10,7 +10,7 @@ func TestRegionCatalog(t *testing.T) {
 	if len(codes) != 249 || !slices.IsSorted(codes) || len(slices.Compact(slices.Clone(codes))) != len(codes) {
 		t.Fatalf("unexpected country/region catalog (%d): %v", len(codes), codes)
 	}
-	for _, code := range []string{"CN", "HK", "MO", "TW", "US", "SG", "JP", "AQ", "AX", "BQ", "SS", "UM", " us "} {
+	for _, code := range []string{"CN", "HK", "MO", "TW", "US", "SG", "JP", "AQ", "AX", "BO", "BQ", "ES", "MX", "RS", "SS", "SV", "UM", " us "} {
 		if !ValidRegionCode(code) {
 			t.Errorf("valid region rejected: %q", code)
 		}

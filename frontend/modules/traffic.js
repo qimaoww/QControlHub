@@ -9,6 +9,7 @@ import {
   nodeCardDropIndex,
 } from "./agents.js";
 import { accountStorage } from "./account-storage.js";
+import { orderedNodeList } from "./node-order.js";
 
 const trafficPortIdentity = (item) => `${item.agent_id}:${item.port}`;
 const trafficEndpointKey = (item) => `endpoint:${item.agent_id}:${item.engine}:${item.port}:${item.protocol}`;
@@ -56,13 +57,18 @@ export function renderTrafficAccounting(policy, esc, bytes) {
 export const trafficCardIdentity = (item) =>
   trafficPortIdentity(item.policy || item.endpoint || item);
 
-export function orderTrafficItems(items = [], savedOrder = []) {
-  if (!savedOrder.length) return items;
+export function orderTrafficItems(items = [], savedOrder = [], nodeOrder = []) {
+  if (!savedOrder.length && !nodeOrder.length) return items;
   const position = new Map(savedOrder.map((key, index) => [key, index]));
+  const nodePosition = new Map(nodeOrder.map((id, index) => [id, index]));
+  const nodeRank = (item) =>
+    nodePosition.get((item.policy || item.endpoint || item).agent_id) ?? nodeOrder.length;
+  // Explicit card positions win; the remaining cards follow the node list.
   return [...items].sort(
     (left, right) =>
       (position.get(trafficCardIdentity(left)) ?? savedOrder.length) -
-      (position.get(trafficCardIdentity(right)) ?? savedOrder.length),
+      (position.get(trafficCardIdentity(right)) ?? savedOrder.length) ||
+      nodeRank(left) - nodeRank(right),
   );
 }
 
@@ -401,7 +407,8 @@ export function installTraffic(ctx) {
     }
     const agentByID = new Map(agents.map((agent) => [agent.id, agent]));
     const items = mergeTrafficPorts(policies, endpoints);
-    const orderedItems = orderTrafficItems(items, savedTrafficCardOrder());
+    const nodeOrder = orderedNodeList(agents, storage).map((agent) => agent.id);
+    const orderedItems = orderTrafficItems(items, savedTrafficCardOrder(), nodeOrder);
     const filteredItems = orderedItems.filter((item) => {
       const value = item.policy || item.endpoint;
       if (currentFilters.agent_id && value.agent_id !== currentFilters.agent_id) return false;

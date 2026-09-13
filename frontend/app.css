@@ -985,19 +985,9 @@ dialog.config-access-dialog::backdrop{background:rgba(17,20,36,.34);backdrop-fil
 .users-workspace{display:grid;gap:16px}
 .users-toolbar,.users-toolbar>div{display:flex;align-items:center;justify-content:space-between;gap:10px}
 .users-toolbar h2{margin:0;font-size:calc(20px * var(--ui-font-scale));letter-spacing:-.02em;overflow-wrap:anywhere}
-.users-workspace .user-isolation{margin-top:18px}
 .users-mobile-select{display:none}
 .users-workspace .settings-toggle input{accent-color:var(--accent)}
-.user-share-row{display:grid;grid-template-columns:minmax(140px,1fr) minmax(110px,.65fr) minmax(150px,1fr);gap:16px;align-items:center;padding:16px 20px;border-top:1px solid var(--line)}
-.user-share-agent{display:flex;align-items:center;gap:10px;min-width:0}
-.user-share-identity{display:grid;gap:8px;min-width:0}.user-share-identity>.button{justify-self:start;margin-left:26px}
-.user-share-agent input,.user-permissions input{width:16px;height:16px;flex:none;accent-color:var(--accent)}
-.user-share-agent b,.user-share-agent small{display:block;overflow-wrap:anywhere}
-.user-share-agent b{font-size:calc(12px * var(--ui-font-scale))}
-.user-share-agent small{margin-top:4px;color:var(--muted);font-size:calc(10px * var(--ui-font-scale))}
-.user-share-add{display:flex;gap:10px;padding:16px 20px}
-.user-share-add select{flex:1;min-width:0}
-.users-workspace [data-share-editor]>.settings-hint{padding:0 20px 18px}
+.user-permissions input{width:16px;height:16px;flex:none;accent-color:var(--accent)}
 .user-edit-dialog{width:min(560px,calc(100% - 28px))}
 .user-edit-dialog .traffic-edit-body{display:grid;gap:14px;max-height:min(65vh,calc(100dvh - 180px));overflow:auto}
 .user-edit-dialog .traffic-edit-body>label:not(.settings-toggle){display:grid;gap:6px;color:var(--ink-2);font-size:calc(12px * var(--ui-font-scale));font-weight:700}
@@ -1016,8 +1006,8 @@ dialog.config-access-dialog::backdrop{background:rgba(17,20,36,.34);backdrop-fil
 .user-quota-card>div>span,.user-quota-card small{color:var(--muted);font-size:calc(11px * var(--ui-font-scale))}
 .user-quota-card small{display:block;margin-top:12px;overflow-wrap:anywhere}
 .user-quota-card progress{display:block;width:100%;height:6px;margin-top:12px;accent-color:var(--accent)}
-@media(max-width:700px){.user-share-row{grid-template-columns:1fr 1fr;padding:16px;gap:12px}.user-share-identity{grid-column:1/-1}.user-share-add{padding:16px}.user-quota-grid{grid-template-columns:1fr}.users-toolbar{flex-wrap:wrap}}
-@media(max-width:820px){.users-mobile-select{display:block;width:100%}.page-users .context-sidebar{display:none}.page-users .desktop-app{grid-template-columns:82px minmax(0,1fr)}.users-workspace .settings-savebar{display:grid;grid-template-columns:1fr 1fr;gap:10px}}
+@media(max-width:700px){.user-quota-grid{grid-template-columns:1fr}.users-toolbar{flex-wrap:wrap}}
+@media(max-width:820px){.users-mobile-select{display:block;width:100%}.page-users .context-sidebar{display:none}.page-users .desktop-app{grid-template-columns:82px minmax(0,1fr)}}
 @media(max-width:820px) and (pointer:coarse){.user-edit-dialog{width:100%}.user-edit-dialog>form>footer>.button{flex:1}}
 .agent-sharing-dialog{width:min(560px,calc(100% - 32px))}
 .agent-sharing-dialog[open]{display:flex;flex-direction:column;max-height:calc(100dvh - 32px)}
@@ -1044,7 +1034,6 @@ dialog.config-access-dialog::backdrop{background:rgba(17,20,36,.34);backdrop-fil
 .shared-engine-options>div{display:flex;flex-wrap:wrap;gap:8px 16px}
 .shared-engine-options>div>label{display:flex;align-items:center;gap:7px;min-height:28px;color:var(--ink-2);font-size:calc(12px * var(--ui-font-scale));cursor:pointer}
 .shared-engine-options input[type=checkbox]{width:16px;height:16px;min-width:16px;margin:0;accent-color:var(--accent)}
-.user-share-row>.shared-engine-options{grid-column:1/-1}
 @media(max-width:600px){.agent-sharing-dialog>header{padding:16px}.agent-sharing-dialog .traffic-edit-body{padding:16px}.agent-sharing-dialog>form>footer{padding:12px 16px}.agent-sharing-dialog>header h2{font-size:calc(19px * var(--ui-font-scale))}.agent-share-fields{grid-template-columns:minmax(0,1fr)}}
 .agent-invitation-dialog{width:min(480px,calc(100% - 32px))}
 .agent-invitation-dialog[open]{display:flex;flex-direction:column;max-height:calc(100dvh - 32px)}
@@ -1061,4 +1050,107 @@ dialog.config-access-dialog::backdrop{background:rgba(17,20,36,.34);backdrop-fil
 .agent-invitation-dialog>footer>.button{min-width:88px}
 .agent-invitation-error .alert{margin:0 0 10px}
 @media(max-width:600px){.agent-invitation-dialog[open]{width:100%;height:100dvh;max-height:100dvh;max-width:100%;margin:0;border:0;border-radius:0}.agent-invitation-dialog>header{padding:calc(20px + env(safe-area-inset-top)) 20px 20px}.agent-invitation-dialog .traffic-edit-body{flex:1;align-content:start;padding:28px 20px}.agent-invitation-dialog>footer{padding:16px 20px calc(16px + env(safe-area-inset-bottom))}.agent-invitation-dialog>footer>.button{flex:1;min-height:46px}}
-\n.enrollment-dialog-form>label.enrollment-visibility{display:flex;align-items:center;gap:8px;font-weight:600}.enrollment-dialog-form>label.enrollment-visibility input{width:16px;height:16px;min-height:0;margin:0}.enrollment-dialog-form>label.enrollment-visibility span{color:var(--ink-2);font-size:calc(9px * var(--ui-font-scale))}.node-visibility-toggle{display:flex;align-items:center;gap:8px;font-size:calc(10px * var(--ui-font-scale));font-weight:700}.node-visibility-toggle input{width:16px;height:16px;margin:0}.node-visibility-toggle span{color:var(--muted);font-size:max(9px,calc(8px * var(--ui-font-scale)))}
+.node-visibility-toggle{display:flex;align-items:center;gap:8px;font-size:calc(10px * var(--ui-font-scale));font-weight:700}.node-visibility-toggle input{width:16px;height:16px;margin:0}.node-visibility-toggle span{color:var(--muted);font-size:max(9px,calc(8px * var(--ui-font-scale)))}
+
+/* Keep the enrollment form compact without changing command or directory dialogs. */
+.enrollment-create-dialog{width:min(600px,100%);max-height:calc(100dvh - 48px)}
+.enrollment-create-dialog>.deploy-command-head{grid-template-columns:36px minmax(0,1fr) 34px;gap:12px;flex-shrink:0;padding:20px 24px}
+.enrollment-create-dialog .deploy-command-icon{width:36px;height:36px;border-radius:10px;font-size:calc(22px * var(--ui-font-scale))}
+.enrollment-create-dialog .deploy-command-head h2{margin-top:1px;font-size:calc(20px * var(--ui-font-scale))}
+.enrollment-create-dialog .deploy-command-head div>p:last-child{display:block;margin-top:6px;font-size:calc(11px * var(--ui-font-scale));line-height:1.6}
+.enrollment-create-dialog>.enrollment-dialog-body{min-height:0;gap:18px;padding:20px 24px 14px;background:var(--surface);overscroll-behavior:contain}
+.enrollment-create-dialog .enrollment-dialog-form{gap:16px}
+.enrollment-create-dialog .enrollment-name{gap:8px;color:var(--ink-2);font-size:calc(12px * var(--ui-font-scale));font-weight:650}
+.enrollment-create-dialog .enrollment-name input{width:100%;min-height:42px;font-size:calc(13px * var(--ui-font-scale));font-weight:400}
+.enrollment-create-dialog .enrollment-dialog-form>.enrollment-visibility{display:flex;align-items:flex-start;gap:12px;min-width:0;padding:13px 14px;border:1px solid var(--line);border-radius:10px;background:var(--surface);font-weight:400;cursor:pointer}
+.enrollment-create-dialog .enrollment-visibility:hover{border-color:var(--line-2);background:var(--surface-2)}
+.enrollment-create-dialog .enrollment-visibility:has(input:checked){border-color:var(--accent);background:color-mix(in srgb,var(--accent-soft) 55%,var(--surface))}
+.enrollment-create-dialog .enrollment-visibility:focus-within{box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 14%,transparent)}
+.enrollment-create-dialog .enrollment-visibility>input{flex:0 0 18px;width:18px;height:18px;min-height:18px;margin:1px 0 0;accent-color:var(--accent);transform:none;cursor:pointer}
+.enrollment-create-dialog .enrollment-visibility>span{min-width:0;flex:1}
+.enrollment-create-dialog .enrollment-visibility strong{display:block;color:var(--ink-2);font-size:calc(12px * var(--ui-font-scale));font-weight:650}
+.enrollment-create-dialog .enrollment-visibility small{display:block;margin-top:4px;color:var(--muted);font-size:calc(11px * var(--ui-font-scale));line-height:1.6}
+.enrollment-create-dialog .enrollment-form-actions{gap:10px}
+.enrollment-create-dialog .enrollment-form-actions .button{min-width:84px;min-height:40px}
+.enrollment-create-dialog .enrollment-history-disclosure{min-width:0;padding-top:6px}
+.enrollment-history-disclosure>summary{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:40px;border-radius:6px;color:var(--ink-2);cursor:pointer}
+.enrollment-history-disclosure>summary>span{display:flex;align-items:center;gap:8px}
+.enrollment-history-disclosure>summary b{font-size:calc(12px * var(--ui-font-scale));font-weight:650}
+.enrollment-history-disclosure [data-enrollment-history-count]{min-width:22px;padding:1px 6px;border-radius:6px;background:var(--surface-3);color:var(--muted);font-size:calc(10px * var(--ui-font-scale));text-align:center}
+.enrollment-history-chevron{width:16px;height:16px;fill:none;stroke:var(--muted);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.enrollment-history-disclosure[open]>summary .enrollment-history-chevron{transform:rotate(180deg)}
+.enrollment-history-description{margin:2px 0 10px;color:var(--muted);font-size:calc(10px * var(--ui-font-scale));line-height:1.6}
+.enrollment-create-dialog .enrollment-history article{flex-wrap:wrap;gap:8px 12px}
+.enrollment-create-dialog .enrollment-history article>div:first-child{flex:1 1 180px;min-width:0;overflow-wrap:anywhere}
+.enrollment-create-dialog .enrollment-history article strong{font-size:calc(11px * var(--ui-font-scale));font-weight:600}
+.enrollment-create-dialog .enrollment-history .access-history-actions{flex:0 0 auto;margin-left:auto}
+.enrollment-create-dialog .enrollment-history-empty{padding:12px;border:0;background:var(--surface-2);font-size:calc(11px * var(--ui-font-scale))}
+@media(max-width:620px){.enrollment-backdrop{align-items:center;padding:12px}.enrollment-create-dialog{width:100%;max-height:calc(100dvh - 24px);border:1px solid var(--line);border-radius:14px}.enrollment-create-dialog>.deploy-command-head{padding:18px 16px;gap:10px}.enrollment-create-dialog>.enrollment-dialog-body{padding:16px 16px calc(12px + env(safe-area-inset-bottom));gap:16px}.enrollment-create-dialog .enrollment-form-actions{display:grid;grid-template-columns:1fr 1.5fr}.enrollment-create-dialog .enrollment-form-actions .button{min-width:0;min-height:44px}.enrollment-history-disclosure>summary{min-height:44px}}
+
+/* Saved allocations stay readable; each change is confirmed in its own dialog. */
+.user-admin-workspace{gap:14px}
+.user-admin-workspace .users-toolbar{flex-wrap:wrap;gap:12px}
+.user-admin-workspace .users-title{min-width:0;justify-content:flex-start;flex-wrap:wrap;gap:10px}
+.user-admin-workspace .users-toolbar-actions{margin-left:auto;justify-content:flex-end;flex-wrap:wrap;gap:8px}
+.user-account-state{color:var(--muted);font-size:calc(11px * var(--ui-font-scale));white-space:nowrap}
+.user-allocation-panel{container:user-allocation / inline-size;border-color:var(--line);box-shadow:none}
+.user-allocation-panel>.user-allocation-head{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:16px 20px;background:var(--surface)}
+.user-allocation-title{display:flex;align-items:center;flex-wrap:wrap;gap:8px;min-width:0}
+.user-allocation-panel .user-allocation-title h3{font-size:calc(16px * var(--ui-font-scale));font-weight:650}
+.user-allocation-count{min-width:24px;padding:2px 7px;border-radius:6px;background:var(--surface-3);color:var(--muted);font-size:calc(11px * var(--ui-font-scale));text-align:center}
+.user-allocation-tools,.user-allocation-row-actions{display:flex;align-items:center;flex-wrap:wrap;gap:8px}
+.user-allocation-row{display:grid;grid-template-columns:minmax(140px,.85fr) minmax(0,2fr) auto;align-items:start;gap:20px;padding:20px}
+.user-allocation-row+.user-allocation-row{border-top:1px solid var(--line)}
+.user-allocation-node{display:flex;align-items:flex-start;flex-direction:column;gap:8px;min-width:0}
+.user-allocation-node strong{font-size:calc(14px * var(--ui-font-scale));font-weight:650;overflow-wrap:anywhere}
+.user-allocation-node .status-label{font-size:calc(10px * var(--ui-font-scale));white-space:nowrap}
+.user-allocation-node .status-label.muted{color:var(--muted);background:var(--surface-3)}
+.user-allocation-node>small{color:var(--amber);font-size:calc(10px * var(--ui-font-scale))}
+.user-allocation-terms{display:grid;grid-template-columns:minmax(0,1.4fr) repeat(2,minmax(0,1fr));gap:14px;min-width:0;margin:0}
+.user-allocation-terms>div{min-width:0}
+.user-allocation-terms dt{margin-bottom:6px;color:var(--muted);font-size:calc(11px * var(--ui-font-scale))}
+.user-allocation-terms dd{margin:0;color:var(--ink-2);font-size:calc(12px * var(--ui-font-scale));line-height:1.65;overflow-wrap:anywhere}
+.user-allocation-terms small{display:block;margin-top:3px;color:var(--muted);font-size:calc(10px * var(--ui-font-scale))}
+.user-allocation-row-actions{justify-content:flex-end}
+.user-share-empty{margin:0;padding:42px 20px;color:var(--muted);font-size:calc(12px * var(--ui-font-scale));text-align:center}
+.user-allocation-panel>.user-allocation-error{margin:0 20px 16px}
+.user-allocation-panel>.user-allocation-readonly{padding:20px;font-size:calc(12px * var(--ui-font-scale))}
+.user-owned-nodes{border:1px solid var(--line);border-radius:12px;background:var(--surface)}
+.user-owned-nodes>summary{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 20px;color:var(--ink-2);font-size:calc(12px * var(--ui-font-scale));cursor:pointer}
+.user-owned-nodes>summary small{margin-left:6px;color:var(--muted);font-size:inherit}
+.user-owned-nodes>summary svg{width:16px;height:16px;fill:none;stroke:var(--muted);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.user-owned-nodes[open]>summary svg{transform:rotate(180deg)}
+.user-owned-nodes>ul{display:grid;gap:8px;margin:0;padding:0 20px 16px;list-style:none;color:var(--muted);font-size:calc(12px * var(--ui-font-scale));overflow-wrap:anywhere}
+.user-allocation-dialog{width:min(560px,calc(100% - 32px))}
+.user-allocation-dialog[open]{display:flex;flex-direction:column;max-height:calc(100dvh - 48px)}
+.user-allocation-dialog>header{grid-template-columns:minmax(0,1fr) 34px;flex-shrink:0;padding:20px 24px}
+.user-allocation-dialog>header>div{min-width:0;overflow-wrap:anywhere}
+.user-allocation-dialog .traffic-edit-body{display:grid;align-content:start;gap:20px;padding:22px 24px;background:var(--surface);overscroll-behavior:contain}
+.user-allocation-target{display:grid;gap:7px;min-width:0}
+.user-allocation-target>span,.user-allocation-dialog .settings-field>span,.user-allocation-dialog fieldset>legend{color:var(--ink-2);font-size:calc(12px * var(--ui-font-scale));font-weight:600}
+.user-allocation-target>div{display:flex;align-items:baseline;flex-wrap:wrap;gap:6px 12px}
+.user-allocation-target strong{min-width:0;font-size:calc(15px * var(--ui-font-scale));font-weight:650;overflow-wrap:anywhere}
+.user-allocation-target small{color:var(--muted);font-size:calc(11px * var(--ui-font-scale));white-space:nowrap}
+.user-allocation-fields,.user-allocation-quota{display:grid;gap:18px;min-width:0;margin:0;padding:0;border:0}
+.user-allocation-fields:disabled{opacity:.55}
+.user-allocation-dialog .settings-field{min-width:0;gap:8px}
+.user-allocation-dialog .settings-field input,.user-allocation-dialog .settings-field select{min-width:0;min-height:40px;font-size:calc(13px * var(--ui-font-scale))}
+.user-allocation-dialog fieldset>legend{margin-bottom:10px;padding:0}
+.user-allocation-dialog .shared-engine-options>div{gap:8px}
+.user-allocation-dialog .shared-engine-options>div>label{min-height:36px;padding:6px 10px;border:1px solid var(--line);border-radius:7px;background:var(--surface);font-size:calc(12px * var(--ui-font-scale))}
+.user-allocation-dialog .shared-engine-options>div>label:has(input:checked){border-color:color-mix(in srgb,var(--accent) 45%,var(--line));background:var(--accent-soft)}
+.user-allocation-dialog .shared-engine-options>div>label:focus-within{outline:2px solid var(--accent);outline-offset:2px}
+.user-allocation-quota{gap:10px}
+.user-quota-options{display:flex;flex-wrap:wrap;gap:8px 24px}
+.user-quota-options>label{display:flex;align-items:center;gap:8px;min-height:30px;color:var(--ink-2);font-size:calc(12px * var(--ui-font-scale));cursor:pointer}
+.user-quota-options input{width:16px;height:16px;min-width:16px;min-height:16px;margin:0;accent-color:var(--accent)}
+.user-allocation-quota>small,.user-allocation-consent{color:var(--muted);font-size:calc(11px * var(--ui-font-scale));line-height:1.6}
+.user-allocation-consent{margin:0}
+.user-allocation-failure .alert{margin:0 0 10px}
+.user-allocation-dialog>form>footer{display:flex;justify-content:flex-end;flex-shrink:0;gap:10px;padding:16px 24px}
+.user-allocation-dialog>form>footer>.button{min-width:88px;min-height:40px}
+@container user-allocation (max-width:860px){.user-allocation-row{grid-template-columns:minmax(0,1fr) auto;gap:16px}.user-allocation-terms{grid-column:1/-1;grid-row:2}.user-allocation-row-actions{grid-column:2;grid-row:1}}
+@container user-allocation (max-width:520px){.user-allocation-row{grid-template-columns:minmax(0,1fr)}.user-allocation-node{flex-direction:row;align-items:center;flex-wrap:wrap}.user-allocation-terms{grid-template-columns:repeat(2,minmax(0,1fr));grid-row:auto}.user-allocation-terms>div:first-child{grid-column:1/-1}.user-allocation-row-actions{grid-column:1;grid-row:auto}}
+@media(max-width:620px){.user-admin-workspace .users-toolbar-actions{width:100%;margin-left:0;justify-content:flex-start}.user-allocation-panel>.user-allocation-head,.user-allocation-row{padding:16px}.user-owned-nodes>summary{padding:14px 16px}}
+@media(max-width:600px){.user-allocation-dialog[open]{width:100%;height:100dvh;max-height:100dvh;max-width:100%;margin:0;border:0;border-radius:0}.user-allocation-dialog>header{padding:calc(20px + env(safe-area-inset-top)) 20px 20px}.user-allocation-dialog>form{flex:1}.user-allocation-dialog .traffic-edit-body{flex:1;padding:24px 20px}.user-allocation-dialog>form>footer{padding:16px 20px calc(16px + env(safe-area-inset-bottom))}.user-allocation-dialog>form>footer>.button{flex:1;min-height:46px}}
+@media(pointer:coarse){.user-admin-workspace .button,.user-admin-workspace .users-mobile-select,.user-allocation-dialog .settings-field input,.user-allocation-dialog .settings-field select,.user-allocation-dialog .shared-engine-options>div>label,.user-quota-options>label{min-height:44px}.user-admin-workspace .users-mobile-select,.user-allocation-dialog .settings-field input,.user-allocation-dialog .settings-field select{font-size:max(16px,calc(13px * var(--ui-font-scale)))}}

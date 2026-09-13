@@ -114,6 +114,30 @@ const testAPI = {
   agents: populatedAgents,
 };
 window.__agentsBrowserTestAPI = testAPI;
+if (mode.startsWith("enrollment")) testAPI.enrollmentRecords = [];
+if (mode.startsWith("users-layout")) {
+  location.hash = "#users";
+  testAPI.users = [
+    { id: "cdn", username: "cdn", role: "user" },
+    { id: "new-user", username: "new-user", display_name: "未分配用户", role: "user" },
+    { id: "admin", username: "admin", role: "admin" },
+  ];
+  testAPI.agents = populatedAgents.map((agent, index) => ({
+    ...agent,
+    name: ["Catixs HK", "Tokyo Edge", `Frankfurt-${"long-node-name-".repeat(6)}`, "自有节点"][index],
+    features: ["shared-traffic-v1", "shared-engines-v1", "independent-egress-v1"],
+    capabilities: ["mihomo", "xray", "sing-box", "ss-rust"],
+  }));
+  testAPI.userAccess = {
+    cdn: { isolated: true, revision: 4, owned_agent_ids: ["delta"], shares: [
+      { id: "shr_alpha", agent_id: "alpha", enabled: true, status: "pending", engines: ["mihomo", "xray", "sing-box", "ss-rust"], ports: [], limit_bytes: 0, used_bytes: 0 },
+      { id: "shr_bravo", agent_id: "bravo", enabled: true, status: "accepted", engines: ["mihomo", "xray"], ports: [31001, 31002], limit_bytes: 50 * 1024 ** 3, used_bytes: 12 * 1024 ** 3 },
+    ] },
+    "new-user": { isolated: true, revision: 1, owned_agent_ids: [], shares: [] },
+    admin: { isolated: false, revision: 1, owned_agent_ids: [], shares: [] },
+  };
+  testAPI.allocationWrites = [];
+}
 if (mode === "shared-node" || mode === "shared-node-mobile") {
   testAPI.agents = [
     { ...populatedAgents[0], can_manage: false, capabilities: ["mihomo"], supported_capabilities: ["mihomo"], shared_engines: ["mihomo"], labels: {}, enrollment_command_available: false },
@@ -140,6 +164,8 @@ if (mode === "logs-restore") {
 }
 if (mode === "traffic-layout") {
   location.hash = "#traffic";
+  setStorageAccount({ role: "admin" });
+  accountStorage.setItem("qcontrolhub:node-card-order", JSON.stringify(["alpha", "delta", "bravo", "charlie"]));
   testAPI.trafficCandidates = [
     { agent_id: "alpha", name: "误删的 VLESS 入口", engine: "xray", port: 443, protocol: "both", kind: "deleted" },
     { agent_id: "bravo", name: "新增的香港入口", engine: "sing-box", port: 9443, protocol: "tcp", kind: "new" },
@@ -279,6 +305,35 @@ window.fetch = async (input, options = {}) => {
     return json({ agents: mode === "empty" ? 0 : populatedAgents.length, agents_online: mode === "empty" ? 0 : 3 });
   if (method === "GET" && path === "/settings")
     return json(testAPI.settings || { panel_name: "QControlHub Browser Smoke" });
+  if (mode.startsWith("users-layout") && method === "GET" && path === "/users")
+    return json(testAPI.users);
+  if (mode.startsWith("users-layout") && /^\/users\/[^/]+\/agent-access$/.test(path)) {
+    const id = decodeURIComponent(path.split("/")[2]);
+    const access = testAPI.userAccess[id];
+    if (method === "GET") return json(access);
+    if (method === "PUT") {
+      const payload = JSON.parse(options.body);
+      if (payload.revision !== access.revision) return json({ error: "stale allocation" }, 409);
+      for (const share of payload.shares) {
+        const previous = access.shares.find(item => item.agent_id === share.agent_id);
+        if (share.reinvite && (!share.enabled || previous?.status !== "rejected"))
+          return json({ error: "only a rejected share can be reinvited" }, 400);
+      }
+      testAPI.allocationWrites.push({ user_id: id, ...payload });
+      testAPI.userAccess[id] = {
+        ...access, ...payload, revision: access.revision + 1,
+        shares: payload.shares.map(share => {
+          const previous = access.shares.find(item => item.agent_id === share.agent_id);
+          const invite = share.enabled && (share.reinvite || !previous?.enabled || (previous.status === "accepted" && share.engines.some(engine => !previous.engines.includes(engine))));
+          return {
+            id: `shr_${share.agent_id}`, used_bytes: 0, ...previous, ...share,
+            status: invite ? "pending" : previous?.status || "pending", reinvite: false,
+          };
+        }),
+      };
+      return json(testAPI.userAccess[id]);
+    }
+  }
   if (path === "/settings/deployment" && mode.startsWith("capabilities-settings"))
     return json({ secure_transport: true, database_tls_verified: true, config_encryption_configured: true, webhook_signing_configured: true, trusted_proxy_count: 1, control_plane_version: "preview", agent_package_version: "preview" });
   if (method === "PUT" && path === "/settings" && mode.startsWith("capabilities-settings")) {
@@ -352,7 +407,7 @@ window.fetch = async (input, options = {}) => {
     return json({ enabled });
   }
   if (method === "GET" && path === "/regions")
-    return testAPI.regionCatalogFailure ? json({ error: "temporary catalog failure" }, 503) : json(["CN", "HK", "MO", "TW", "US", "SG", "JP", "GB", "DE", "FR", "AQ", "KR", "CA", "AU", "NL", "IN", "AT", "BE", "BR", "CH", "ES", "FI", "IE", "IS", "IT", "LU", "MY", "NO", "NZ", "PH", "PL", "RU", "SE", "TH", "TR", "VN", "ZA"]);
+    return testAPI.regionCatalogFailure ? json({ error: "temporary catalog failure" }, 503) : json(["CN", "HK", "MO", "TW", "US", "SG", "JP", "GB", "DE", "FR", "AQ", "KR", "CA", "AU", "NL", "IN", "AT", "BE", "BO", "BR", "CH", "ES", "FI", "IE", "IS", "IT", "LU", "MX", "MY", "NO", "NZ", "PH", "PL", "RS", "RU", "SE", "SV", "TH", "TR", "VN", "ZA"]);
   if (method === "PUT" && /^\/agents\/[^/]+\/region$/.test(path)) {
     if (testAPI.regionSaveFailure) return json({ error: "temporary region save failure" }, 503);
     if (testAPI.regionSaveGate) await testAPI.regionSaveGate;
@@ -385,6 +440,7 @@ window.fetch = async (input, options = {}) => {
   if (method === "GET" && /^\/agents\/[^/]+\/configs$/.test(path)) return json(testAPI.savedConfigs.filter((item) => path.includes(item.agent_id)));
   if (method === "GET" && path.startsWith("/metrics/")) return json([]);
   if (method === "POST" && path === "/enrollment-tokens") {
+    testAPI.lastEnrollmentRequest = JSON.parse(options.body);
     if (testAPI.enrollmentFailure) return json({ error: "temporary enrollment failure" }, 503);
     return json({ token: "browser-test-enrollment", name: "browser-node" });
   }
@@ -1126,6 +1182,281 @@ async function testEmptyRuntime() {
   assert.equal(document.querySelector("#batch-form"), null);
 }
 
+async function testEnrollmentLayoutRuntime() {
+  const open = async () => {
+    const launcher = await waitFor(() => document.querySelector("[data-open-enrollment]"), "添加节点入口没有载入");
+    launcher.click();
+    const dialog = await waitFor(() => document.querySelector(".enrollment-create-dialog"), "添加节点弹窗没有打开");
+    await Promise.all(dialog.getAnimations().map(animation => animation.finished));
+    return dialog;
+  };
+  const assertFits = (dialog) => {
+    const rect = dialog.getBoundingClientRect();
+    assert.ok(rect.left >= -1 && rect.right <= innerWidth + 1 && rect.top >= -1 && rect.bottom <= innerHeight + 1,
+      "添加节点弹窗超出视口");
+    for (const selector of [".enrollment-dialog-body", "form", ".enrollment-visibility", ".enrollment-form-actions", ".enrollment-history"]) {
+      const element = dialog.querySelector(selector);
+      assert.ok(element.scrollWidth <= element.clientWidth + 1, `添加节点内容横向溢出：${selector}`);
+    }
+    const checkbox = dialog.querySelector('[name="admin_hidden"]').getBoundingClientRect();
+    const title = dialog.querySelector("#enrollment-visibility-title").getBoundingClientRect();
+    assert.ok(title.left > checkbox.right && Math.abs(title.top - checkbox.top) < 3,
+      "权限复选框与说明不在同一行");
+    assert.equal(checkbox.width, 18, "权限复选框被普通文本输入框样式拉伸");
+    assert.equal(checkbox.height, 18, "权限复选框高度异常");
+    const [cancel, submit] = [...dialog.querySelectorAll(".enrollment-form-actions .button")].map(button => button.getBoundingClientRect());
+    assert.ok(cancel.right <= submit.left && Math.abs(cancel.top - submit.top) < 1, "表单按钮未同排对齐");
+  };
+  const dialog = await open();
+  assert.equal(dialog.querySelector(".eyebrow"), null, "添加节点不应重复展示部署标题");
+  assert.equal(dialog.querySelector(".enrollment-security-note"), null, "添加节点不应重复展示命令页的凭据说明");
+  assert.equal(dialog.querySelector("#enrollment-dialog-description").textContent, "命令仅供复制，不会自动执行。");
+  const history = dialog.querySelector(".enrollment-history-disclosure");
+  assert.ok(history && !history.open, "空的添加记录应默认收起");
+  assert.equal(history.querySelector("[data-enrollment-history-count]").textContent, "0");
+  history.querySelector("summary").click();
+  assert.ok(history.open && history.querySelector(".enrollment-history-empty").getClientRects().length,
+    "仍应能展开查看空记录说明");
+  history.querySelector("summary").click();
+  const checkbox = dialog.querySelector('[name="admin_hidden"]');
+  assert.equal(checkbox.checked, false, "优化布局不能改变管理员可见性默认值");
+  dialog.querySelector("#enrollment-visibility-title").click();
+  assert.equal(checkbox.checked, true, "点击权限说明应切换复选框");
+
+  if (mode.endsWith("-mobile")) {
+    assert.equal(innerWidth, 390);
+    assert.ok(matchMedia("(pointer:coarse)").matches, "手机回归必须使用真实触控视口");
+  }
+  const root = document.documentElement;
+  const previousTheme = root.dataset.theme;
+  const previousScale = root.style.getPropertyValue("--ui-font-scale");
+  for (const theme of ["light", "dark"]) {
+    root.dataset.theme = theme;
+    for (const scale of ["1", "1.35"]) {
+      root.style.setProperty("--ui-font-scale", scale);
+      await delay(350);
+      assertFits(dialog);
+    }
+  }
+  if (previousTheme) root.dataset.theme = previousTheme;
+  else delete root.dataset.theme;
+  if (previousScale) root.style.setProperty("--ui-font-scale", previousScale);
+  else root.style.removeProperty("--ui-font-scale");
+  if (new URLSearchParams(location.search).has("preview")) await new Promise(() => {});
+
+  const form = dialog.querySelector("form");
+  const submit = form.querySelector('[type="submit"]');
+  form.elements.name.value = "browser-node";
+  testAPI.enrollmentFailure = true;
+  form.requestSubmit(submit);
+  await waitFor(() => !submit.disabled, "生成失败后按钮未恢复");
+  assert.ok(checkbox.checked && form.elements.name.value === "browser-node", "失败后丢失了节点名称或可见性选择");
+  testAPI.enrollmentFailure = false;
+  form.requestSubmit(submit);
+  let command = await waitFor(() => document.querySelector(".deploy-command-modal:not(.enrollment-dialog)"), "部署命令未显示");
+  assert.equal(JSON.stringify(testAPI.lastEnrollmentRequest), JSON.stringify({ name: "browser-node", admin_hidden: true }),
+    "勾选后的权限值没有提交");
+  assert.ok(command.querySelector("[data-command]").readOnly, "命令必须保持只读复制模式");
+  assert.equal(testAPI.calls.some(call => call.path === "/tasks" && call.method === "POST"), false,
+    "生成命令不能自动执行远程任务");
+  command.querySelector("[data-close]").click();
+
+  const next = await open();
+  assert.equal(next.querySelector('[name="admin_hidden"]').checked, false, "重新打开不能继承上次的权限选择");
+  next.querySelector('[name="name"]').value = "browser-node";
+  next.querySelector("form").requestSubmit();
+  command = await waitFor(() => document.querySelector(".deploy-command-modal:not(.enrollment-dialog)"), "未勾选时不能生成命令");
+  assert.equal(testAPI.lastEnrollmentRequest.admin_hidden, false, "未勾选时权限值被改变");
+  command.querySelector("[data-close]").click();
+
+  testAPI.enrollmentRecords = [{
+    id: "enr-alpha", name: `上海边缘节点-${"long-name-".repeat(9)}`,
+    reusable: true, used_count: 2, command_available: true,
+  }];
+  location.hash = "#dashboard";
+  await waitFor(() => document.querySelector(".dashboard-head"), "未离开节点页");
+  location.hash = "#node-settings";
+  const populated = await open();
+  const records = populated.querySelector(".enrollment-history-disclosure");
+  assert.ok(records.open, "已有添加记录应默认展开");
+  assert.equal(records.querySelector("[data-enrollment-history-count]").textContent, "1");
+  assert.equal(records.querySelectorAll("article").length, 1, "已有记录不能丢失");
+  assertFits(populated);
+  records.querySelector("summary").click();
+  const summary = records.querySelector("summary");
+  const close = populated.querySelector("[data-close]");
+  summary.focus();
+  document.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }));
+  assert.equal(document.activeElement, close, "折叠记录后 Tab 不能跳出弹窗");
+  document.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true, cancelable: true }));
+  assert.equal(document.activeElement, summary, "折叠记录后的焦点不能落到隐藏按钮");
+  summary.click();
+  assert.ok(records.querySelector("[data-view-enrollment-record]").getClientRects().length,
+    "重新展开后原记录操作应仍可见");
+  close.click();
+}
+
+async function testUsersLayoutRuntime() {
+  await waitFor(() => document.querySelector(".user-admin-workspace"), "用户分配页未载入");
+  if (new URLSearchParams(location.search).has("preview")) await new Promise(() => {});
+  const workspace = () => document.querySelector(".user-admin-workspace");
+  const form = () => document.querySelector("[data-user-access-form]");
+  const dialog = () => document.querySelector("[data-allocation-dialog]");
+  const row = id => document.querySelector(`[data-allocation-agent="${id}"]`);
+  const status = id => row(id)?.querySelector("[data-share-status]").textContent;
+  const change = (element, value) => {
+    element.value = value;
+    element.dispatchEvent(new Event(element.tagName === "SELECT" ? "change" : "input", { bubbles: true }));
+  };
+  const assertFits = async () => {
+    await Promise.all(dialog().getAnimations().map(animation => animation.finished));
+    for (const element of workspace().querySelectorAll(".users-toolbar, .user-allocation-head, .user-allocation-row, .user-allocation-terms, .user-owned-nodes, .user-allocation-dialog[open], .user-allocation-dialog .traffic-edit-body, .user-allocation-dialog .shared-engine-options, .user-quota-options")) {
+      if (!element.getClientRects().length) continue;
+      assert.ok(element.scrollWidth <= element.clientWidth + 1, `用户分配内容横向溢出：${element.className}`);
+      const bounds = element.getBoundingClientRect();
+      assert.ok(bounds.left >= -1 && bounds.right <= innerWidth + 1, "用户分配内容超出视口");
+    }
+    if (dialog().open) {
+      const footer = form().querySelector("footer").getBoundingClientRect();
+      const body = form().querySelector(".traffic-edit-body").getBoundingClientRect();
+      assert.ok(footer.bottom <= innerHeight + 1 && footer.top >= body.bottom - 1, `分配弹窗的保存按钮被裁切或覆盖：${footer.bottom} / ${innerHeight}`);
+      if (mode.endsWith("-mobile")) {
+        const bounds = dialog().getBoundingClientRect();
+        assert.ok(Math.abs(bounds.width - innerWidth) <= 1 && Math.abs(bounds.height - innerHeight) <= 1, "手机分配不是整页弹层");
+      }
+    }
+  };
+  const save = async () => {
+    const before = testAPI.allocationWrites.length;
+    form().requestSubmit();
+    await waitFor(() => testAPI.allocationWrites.length === before + 1 && !form(), "分配未保存并返回列表");
+    return testAPI.allocationWrites.at(-1);
+  };
+  assert.equal(form(), null, "分配结果仍是未保存的勾选表单");
+  assert.equal(workspace().querySelectorAll("[data-allocation-agent]").length, 2);
+  assert.equal(workspace().querySelector("[data-share-count]").textContent, "2");
+  assert.equal(workspace().querySelector("[data-share-empty]"), null, "有分配时不应显示空状态");
+  assert.equal(workspace().querySelector(".user-isolation, .settings-section-number, .settings-savebar"), null, "用户分配保留了重复说明或全局保存栏");
+  assert.ok(workspace().querySelector(".user-allocation-head [data-allocation-add]"), "分配入口应集中在标题栏");
+  const owned = workspace().querySelector(".user-owned-nodes");
+  assert.ok(owned && !owned.open && !row("delta"), "自有节点未与共享分配分开");
+  owned.querySelector("summary").click();
+  assert.equal(owned.querySelector("li").textContent, "自有节点");
+  owned.querySelector("summary").click();
+  if (mode.endsWith("-mobile")) {
+    assert.equal(innerWidth, 390);
+    assert.ok(matchMedia("(pointer:coarse)").matches, "分配页手机测试未使用触控视口");
+    assert.ok(document.querySelector("[data-user-mobile-select]").getClientRects().length, "手机缺少用户选择器");
+  }
+  const root = document.documentElement;
+  const previousTheme = root.dataset.theme;
+  const previousScale = root.style.getPropertyValue("--ui-font-scale");
+  row("bravo").querySelector("[data-allocation-edit]").click();
+  assert.ok(dialog().open && form().textContent.includes("Tokyo Edge"));
+  assert.equal(form().elements.limit_gib.value, "50");
+  assert.ok(form().querySelector('[name="quota_mode"][value="limited"]').checked);
+  for (const theme of ["light", "dark"]) {
+    root.dataset.theme = theme;
+    for (const scale of ["1", "1.35"]) {
+      root.style.setProperty("--ui-font-scale", scale);
+      await delay(350);
+      await assertFits();
+    }
+  }
+  if (previousTheme) root.dataset.theme = previousTheme;
+  else delete root.dataset.theme;
+  if (previousScale) root.style.setProperty("--ui-font-scale", previousScale);
+  else root.style.removeProperty("--ui-font-scale");
+  change(form().elements.limit_gib, "75");
+  assert.ok(row("bravo").textContent.includes("50 GiB") && !row("bravo").textContent.includes("75 GiB"), "列表提前展示未保存的额度");
+  form().querySelector("[data-allocation-close]").click();
+  assert.equal(testAPI.allocationWrites.length, 0, "取消编辑不能保存");
+  assert.ok(!dialog().open && document.activeElement.matches('[data-allocation-edit="bravo"]'), "取消编辑没有恢复操作焦点");
+  document.querySelector("[data-allocation-add]").click();
+  assert.ok(dialog().open && form().querySelector('[type="submit"]').disabled, "未选择节点时应禁用发送邀请");
+  assert.ok(form().querySelector("[data-allocation-fields]").hidden, "未选择节点就显示了无关的内核说明");
+  assert.equal(form().querySelector('[data-share-agent] option[value="delta"]'), null, "自有节点不能被重复分配");
+  assert.equal(form().querySelector('[data-share-agent] option[value="alpha"]'), null, "已有共享不能重复添加");
+  change(form().querySelector("[data-share-agent]"), "charlie");
+  assert.ok(!form().querySelector('[type="submit"]').disabled && !form().querySelector("[data-allocation-fields]").hidden);
+  assert.equal(workspace().querySelector("[data-share-count]").textContent, "2", "未发送的邀请提前进入分配结果");
+  assert.equal(form().querySelectorAll('[name="engines"]:checked').length, 0, "新分配不能默认扩大内核授权");
+  assert.ok(form().querySelector('[name="quota_mode"][value="unlimited"]').checked && form().elements.limit_gib.disabled, "不限量仍要求填写魔法数字");
+  await assertFits();
+  form().requestSubmit();
+  await waitFor(() => !form().querySelector("[data-user-error]").hidden, "未选内核应提示错误");
+  assert.equal(testAPI.allocationWrites.length, 0, "无效分配不能提交");
+  form().querySelector('[name="engines"][value="xray"]').click();
+  form().querySelector('[name="quota_mode"][value="limited"]').click();
+  change(form().elements.limit_gib, "0");
+  form().requestSubmit();
+  assert.ok(form().querySelector("[data-user-error]").textContent.includes("大于 0"), "限量选项把零额度静默解释为不限量");
+  assert.equal(testAPI.allocationWrites.length, 0);
+  change(form().elements.limit_gib, "2.5");
+  change(form().elements.ports, "31003, 39003");
+  await assertFits();
+  const saved = await save();
+  assert.ok(saved.isolated && saved.user_id === "cdn" && saved.revision === 4, "保存改变了账号隔离或覆盖保护");
+  const allocation = saved.shares.find(share => share.agent_id === "charlie");
+  assert.equal(allocation.limit_bytes, 2.5 * 1024 ** 3);
+  assert.equal(allocation.ports.join(","), "31003,39003");
+  assert.equal(allocation.engines.join(","), "xray", "保存扩大了内核授权");
+  assert.equal(saved.shares.find(share => share.agent_id === "alpha").limit_bytes, 0, "零额度的不限量语义改变");
+  assert.equal(saved.shares.length, 3, "添加一个节点时遗漏了既有分配");
+  assert.equal(status("alpha"), "待接受", "待接受的共享不能提前生效");
+  assert.equal(status("charlie"), "待接受", "发送邀请被展示为已接受");
+  assert.ok(document.querySelector("[data-allocation-add]").disabled, "没有剩余节点时分配入口应禁用");
+  await assertFits();
+  row("bravo").querySelector("[data-allocation-edit]").click();
+  change(form().elements.limit_gib, "75");
+  await save();
+  assert.equal(status("bravo"), "已接受", "仅增加额度不应重新邀请");
+  row("bravo").querySelector("[data-allocation-edit]").click();
+  form().querySelector('[name="quota_mode"][value="unlimited"]').click();
+  const unlimited = await save();
+  assert.equal(unlimited.shares.find(share => share.agent_id === "bravo").limit_bytes, 0, "不限量选择没有转成 API 的零额度");
+  row("bravo").querySelector("[data-allocation-edit]").click();
+  assert.ok(form().querySelector("[data-allocation-consent]").hidden, "未改变内核时重复提示邀请");
+  form().querySelector('[name="engines"][value="sing-box"]').click();
+  assert.ok(!form().querySelector("[data-allocation-consent]").hidden, "增加内核没有提示重新接受");
+  await save();
+  assert.equal(status("bravo"), "待接受", "增加内核跳过用户同意");
+  const beforeRevoke = testAPI.allocationWrites.length;
+  row("alpha").querySelector("[data-allocation-revoke]").click();
+  let confirmation = await waitFor(() => document.querySelector("[data-confirm-dialog][open]"), "撤销共享没有独立确认");
+  assert.ok(confirmation.textContent.includes("Catixs HK") && confirmation.textContent.includes("端口预留会保留"), "撤销确认缺少对象或保留说明");
+  assert.equal(testAPI.allocationWrites.length, beforeRevoke, "确认前已撤销");
+  confirmation.querySelector("[data-confirm-cancel]").click();
+  await waitFor(() => !row("alpha").querySelector("[data-allocation-revoke]").disabled, "取消撤销未解锁");
+  assert.equal(testAPI.allocationWrites.length, beforeRevoke);
+  row("alpha").querySelector("[data-allocation-revoke]").click();
+  confirmation = await waitFor(() => document.querySelector("[data-confirm-dialog][open]"), "再次撤销未确认");
+  confirmation.querySelector("[data-confirm-accept]").click();
+  await waitFor(() => status("alpha") === "已撤销", "确认后未撤销分配");
+  assert.equal(testAPI.allocationWrites.at(-1).shares.find(share => share.agent_id === "alpha").enabled, false);
+  row("alpha").querySelector("[data-allocation-invite]").click();
+  assert.equal(testAPI.allocationWrites.length, beforeRevoke + 1, "打开重新邀请弹窗就发送了请求");
+  await save();
+  assert.equal(status("alpha"), "待接受", "恢复共享跳过用户同意");
+  const restored = testAPI.allocationWrites.at(-1).shares.find(share => share.agent_id === "alpha");
+  assert.equal(restored.enabled, true, "恢复共享没有重新启用");
+  assert.equal(restored.reinvite, false, "恢复撤销前待接受的共享误传了仅适用于已拒绝共享的标记");
+  assert.equal(testAPI.calls.some(call => call.path === "/tasks" && call.method === "POST"), false, "分配页面不能自行执行远程任务");
+
+  if (mode.endsWith("-mobile")) change(document.querySelector("[data-user-mobile-select]"), "new-user");
+  else document.querySelector('[data-user-select="new-user"]').click();
+  await waitFor(() => document.querySelector(".users-toolbar h2").textContent === "未分配用户", "未切换到空分配用户");
+  assert.ok(workspace().querySelector("[data-share-empty]"));
+  assert.equal(workspace().querySelector("[data-share-count]").textContent, "0");
+  document.querySelector("[data-allocation-add]").click();
+  change(form().querySelector("[data-share-agent]"), "bravo");
+  form().querySelector('[name="engines"][value="mihomo"]').click();
+  await save();
+  assert.equal(workspace().querySelector("[data-share-empty]"), null, "发送首个邀请后空状态未隐藏");
+  assert.equal(workspace().querySelector("[data-share-count]").textContent, "1");
+  assert.equal(testAPI.allocationWrites.at(-1).user_id, "new-user", "分配被写入上一个账号");
+}
+
 async function testSharedNodeRuntime() {
   const assertSharedStatusOrder = (root) => {
     const badge = root.querySelector(".agent-shared-badge");
@@ -1216,6 +1547,17 @@ async function testRegionRuntime() {
   assert.equal(location.hash, initialHash, "点击旗帜不应打开节点卡片");
   assert.ok(form.closest("dialog").querySelector("h2").getBoundingClientRect().width > 200, "弹窗标题被挤入图标列");
   const search = form.elements.namedItem("query");
+  for (const [code, name] of [["BO", "玻利维亚"], ["ES", "西班牙"], ["MX", "墨西哥"], ["RS", "塞尔维亚"], ["SV", "萨尔瓦多"]]) {
+    search.value = name;
+    search.dispatchEvent(new Event("input", { bubbles: true }));
+    const choice = form.querySelector(`[data-region-choice="${code}"]`);
+    assert.ok(choice, `${name}旗帜不在搜索结果中`);
+    choice.click();
+    await waitFor(() => {
+      const image = flag(form.querySelector("[data-region-preview]"), code.toLowerCase());
+      return image?.complete && image.naturalWidth > 0;
+    }, `${name}旗帜预览没有加载`);
+  }
   search.value = "japan";
   search.dispatchEvent(new Event("input", { bubbles: true }));
   assert.equal(form.querySelectorAll("[data-region-choice]").length, 1, "英文搜索未筛选国家/地区");
@@ -1771,6 +2113,11 @@ try {
   await import("./app.js");
   if (mode === "traffic-layout") {
     await waitFor(()=>document.querySelectorAll(".traffic-accounting-panel").length===4,"traffic accounting cards did not load");
+    const cardNodes = () => [...document.querySelectorAll(".traffic-policy-grid > [data-traffic-agent-card]")].map(card => card.dataset.trafficAgentCard).join(",");
+    const sidebarNodes = () => [...document.querySelectorAll(".context-list [data-context-traffic-agent]")].map(link => link.dataset.contextTrafficAgent).join(",");
+    assert.equal(cardNodes(), "alpha,delta,bravo,charlie", "default traffic cards must follow saved node order");
+    assert.equal(cardNodes(), sidebarNodes(), "default traffic cards and the node sidebar must agree");
+    assert.equal(accountStorage.getItem("qcontrolhub:traffic-card-order"), null, "default rendering must not freeze a custom card order");
     assert.equal(document.querySelectorAll(".traffic-accounting-panel.bad").length,1,"scope limitation must not be rendered as an error");
     assert.equal(document.querySelectorAll(".traffic-accounting-details[open]").length,0,"diagnostics should be collapsed initially");
     assert.equal(document.querySelectorAll(".traffic-status-dialog[open]").length,0,"status dialogs must start closed");
@@ -1801,6 +2148,15 @@ try {
     assert.ok(quota.checkValidity(), "zero must be a valid monitor-only quota");
     quota.value = "";
     if (new URLSearchParams(location.search).has("preview")) await new Promise(() => {});
+    accountStorage.setItem("qcontrolhub:node-card-order", JSON.stringify(["bravo", "alpha", "delta", "charlie"]));
+    await waitFor(() => cardNodes() === "bravo,alpha,delta,charlie", "polling did not apply the updated node order");
+    assert.equal(cardNodes(), sidebarNodes(), "polling must keep cards and the sidebar in the same node order");
+    accountStorage.setItem("qcontrolhub:traffic-card-order", JSON.stringify(["charlie:8445", "alpha:8443"]));
+    await waitFor(() => cardNodes() === "charlie,alpha,bravo,delta", "custom traffic order must take priority over node order");
+    document.querySelector('[href="#traffic-agent-bravo"]').click();
+    await waitFor(() => cardNodes() === "bravo", "node filtering did not keep the selected node's card");
+    document.querySelector('[href="#traffic-all"]').click();
+    await waitFor(() => cardNodes() === "charlie,alpha,bravo,delta", "clearing a filter did not restore custom card order");
     const posts = () => testAPI.calls.filter(call => call.path === "/traffic-endpoints/sync" && call.method === "POST").length;
     const openSync = async () => {
       document.querySelector("[data-traffic-sync]").click();
@@ -1949,6 +2305,8 @@ try {
   else if (mode === "ports") await testPortNamesAndRuntimeRefresh();
   else if (mode === "regions") await testRegionRuntime();
   else if (mode === "empty") await testEmptyRuntime();
+  else if (mode.startsWith("enrollment")) await testEnrollmentLayoutRuntime();
+  else if (mode.startsWith("users-layout")) await testUsersLayoutRuntime();
   else if (mode.startsWith("shared-node")) await testSharedNodeRuntime();
   else if (mode === "logs") await testLargeLogRuntime();
   else if (mode === "logs-restore") await testLogPreferenceRestoreRuntime();

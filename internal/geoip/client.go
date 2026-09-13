@@ -21,7 +21,7 @@ const (
 	defaultFlagEndpoint = "https://raw.githubusercontent.com/lipis/flag-icons/main/flags/4x3"
 	requestTimeout      = 5 * time.Second
 	maxResponseBytes    = 64 << 10
-	maxFlagBytes        = 64 << 10
+	maxFlagBytes        = 512 << 10 // Detailed coats of arms (e.g. Spain and Serbia) exceed 64 KiB.
 	cacheTTL            = 48 * time.Hour
 	maxCachedRegions    = 4096
 	maxCachedFlags      = 512

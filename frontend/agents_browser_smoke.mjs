@@ -233,7 +233,7 @@ async function runMode(mode) {
   try {
     await chmod(profile, 0o700);
     const url = `http://127.0.0.1:${address.port}/agents-browser-smoke.html?mode=${mode}#node-settings`;
-    const mobile = ["substore-scope", "users-mobile", "sharing-mobile", "shared-node-mobile"].includes(mode);
+    const mobile = ["substore-scope", "users-mobile", "users-layout-mobile", "sharing-mobile", "shared-node-mobile", "enrollment-mobile"].includes(mode);
     const initialURL = mobile ? "about:blank" : url;
     child = spawn(
       chrome,
@@ -299,7 +299,7 @@ async function runMode(mode) {
 }
 
 try {
-  const modes = process.env.QCH_BROWSER_SMOKE_MODES || process.env.QCH_BROWSER_SMOKE_MODE || "admin,empty,readonly,ports,regions,logs,logs-restore,bbr,bbr-readonly,bbr-writeonly,config-restrictions,config-migration,config-scope,substore-scope,users,users-mobile,sharing,sharing-mobile,shared-node,shared-node-mobile,config-layout,traffic-layout,capabilities-settings,capabilities-settings-readonly,presets";
+  const modes = process.env.QCH_BROWSER_SMOKE_MODES || process.env.QCH_BROWSER_SMOKE_MODE || "admin,empty,enrollment,enrollment-mobile,readonly,ports,regions,logs,logs-restore,bbr,bbr-readonly,bbr-writeonly,config-restrictions,config-migration,config-scope,substore-scope,users,users-mobile,users-layout,users-layout-mobile,sharing,sharing-mobile,shared-node,shared-node-mobile,config-layout,traffic-layout,capabilities-settings,capabilities-settings-readonly,presets";
   for (const mode of modes.split(",")) await runMode(mode);
   process.stdout.write("agents browser runtime smoke passed\n");
 } finally {

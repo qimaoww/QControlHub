@@ -2625,7 +2625,12 @@ function bindModalLifecycle(wrap, onClose) {
     ...wrap.querySelectorAll(
       'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [href], [tabindex]:not([tabindex="-1"])',
     ),
-  ].filter((element) => !element.hidden);
+  ].filter((element) =>
+    !element.hidden &&
+    element.getClientRects().length > 0 &&
+    // Closed details can retain layout boxes, but their content cannot be focused.
+    !element.closest("details:not([open]) > :not(summary)"),
+  );
   const close = () => {
     if (closed) return;
     closed = true;
@@ -2759,8 +2764,29 @@ async function showAgentDirectoryDialog() {
 
 function showEnrollmentDialog({ tokenRows, tokenCount, onDelete, onSubmit }) {
   const wrap = document.createElement("div");
-  wrap.className = "modal-backdrop";
-  wrap.innerHTML = `<section class="deploy-command-modal enrollment-dialog" role="dialog" aria-modal="true" aria-labelledby="enrollment-dialog-title" aria-describedby="enrollment-dialog-description"><header class="deploy-command-head"><span class="deploy-command-icon" aria-hidden="true">＋</span><div><p class="eyebrow">添加节点</p><h2 id="enrollment-dialog-title">生成 Agent 部署命令</h2><p id="enrollment-dialog-description">为一台新节点生成长期有效的 enrollment 凭据；命令只会显示供复制，浏览器绝不会执行。</p></div><button class="deploy-command-close" type="button" data-close aria-label="关闭添加节点弹窗">×</button></header><div class="deploy-command-body enrollment-dialog-body"><form class="enrollment-dialog-form"><label>节点名称<input name="name" maxlength="100" required autocomplete="off" placeholder="例如 shanghai-edge-01"></label><label class="enrollment-visibility"><input type="checkbox" name="admin_hidden"><span>不让管理员查看管理此节点</span></label><p class="enrollment-security-note"><b>命令生成后可重复查看</b><span>凭据由控制面受保护保存；删除、撤销或到期后立即失效，普通页面不会显示命令正文。</span></p><footer class="enrollment-form-actions"><button class="button" type="button" data-close>取消</button><button class="button primary" type="submit">生成部署命令</button></footer></form><section class="enrollment-history" aria-labelledby="enrollment-history-title"><header><div><b id="enrollment-history-title">添加记录</b><small>删除记录只会立即撤销对应凭据，不会删除已注册节点或卸载 Agent。</small></div><span data-enrollment-history-count>${tokenCount || 0}</span></header><div data-enrollment-history-list>${tokenRows || '<p class="enrollment-history-empty">暂无添加记录</p>'}</div></section></div></section>`;
+  wrap.className = "modal-backdrop enrollment-backdrop";
+  wrap.innerHTML = `<section class="deploy-command-modal enrollment-dialog enrollment-create-dialog" role="dialog" aria-modal="true" aria-labelledby="enrollment-dialog-title" aria-describedby="enrollment-dialog-description">
+    <header class="deploy-command-head">
+      <span class="deploy-command-icon" aria-hidden="true">＋</span>
+      <div><h2 id="enrollment-dialog-title">添加节点</h2><p id="enrollment-dialog-description">命令仅供复制，不会自动执行。</p></div>
+      <button class="deploy-command-close" type="button" data-close aria-label="关闭添加节点弹窗">×</button>
+    </header>
+    <div class="deploy-command-body enrollment-dialog-body">
+      <form class="enrollment-dialog-form">
+        <label class="enrollment-name">节点名称<input name="name" maxlength="100" required autocomplete="off" placeholder="例如 shanghai-edge-01"></label>
+        <label class="enrollment-visibility">
+          <input type="checkbox" name="admin_hidden" aria-labelledby="enrollment-visibility-title" aria-describedby="enrollment-visibility-description">
+          <span><strong id="enrollment-visibility-title">对管理员隐藏</strong><small id="enrollment-visibility-description">管理员仍可在目录查看基本信息、删除节点。</small></span>
+        </label>
+        <footer class="enrollment-form-actions"><button class="button" type="button" data-close>取消</button><button class="button primary" type="submit">生成部署命令</button></footer>
+      </form>
+      <details class="enrollment-history enrollment-history-disclosure" aria-labelledby="enrollment-history-title" ${tokenCount ? "open" : ""}>
+        <summary tabindex="0"><span><b id="enrollment-history-title">添加记录</b><span data-enrollment-history-count>${tokenCount || 0}</span></span><svg class="enrollment-history-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary>
+        <p class="enrollment-history-description">删除仅撤销凭据，不影响已注册节点。</p>
+        <div data-enrollment-history-list>${tokenRows || '<p class="enrollment-history-empty">暂无添加记录</p>'}</div>
+      </details>
+    </div>
+  </section>`;
   document.body.append(wrap);
   const close = bindModalLifecycle(wrap);
   bindEnrollmentRecordButtons(wrap, close);

@@ -23,12 +23,19 @@ export async function testUsersRuntime(preview = false) {
     { id: "bob", username: "bob", display_name: "Bob", role: "user", permissions: ["agents.read"] },
     { id: "admin", username: "admin", role: "admin", permissions: [] },
   ];
-  const agents = [{ id: "shared", name: "共享 Agent", capabilities: ["mihomo", "xray"], features: ["shared-traffic-v1", "shared-engines-v1", "independent-egress-v1"] }];
+  const agents = ["shared", "reserved", "available", "owned"].map(id => ({
+    id, name: id === "shared" ? "共享 Agent" : id, capabilities: ["mihomo", "xray"],
+    features: ["shared-traffic-v1", "shared-engines-v1", "independent-egress-v1"],
+  }));
   const access = new Map(items.map((user, index) => [user.id, {
-    isolated: user.role !== "admin", revision: 4, shares: user.role === "admin" ? [] : [{
+    isolated: user.role !== "admin", revision: 4, owned_agent_ids: ["owned"], shares: user.role === "admin" ? [] : [{
       id: `shr_${user.id}`, status: "accepted", invitation_revision: 2,
       agent_id: "shared", agent_name: "共享 Agent", enabled: true, engines: ["mihomo"], ports: [31001 + index],
       used_bytes: 128, limit_bytes: 1024 ** 3,
+    }, {
+      id: `shr_reserved_${user.id}`, status: "rejected", invitation_revision: 3,
+      agent_id: "reserved", enabled: false, engines: ["xray"], ports: [32001 + index],
+      used_bytes: 256, limit_bytes: 15250032,
     }],
   }]));
   const writes = [], notifications = [];
@@ -60,11 +67,17 @@ export async function testUsersRuntime(preview = false) {
       if (body) {
         if (holdSave) await new Promise(resolve => { releaseSave = resolve; });
         if (conflict || body.revision !== access.get(userID).revision) throw new Error("分配已变更，请重新读取后保存。");
-        access.set(userID, { ...body, revision: body.revision + 1, shares: body.shares.map(share => ({
-          ...access.get(userID).shares.find(prior => prior.agent_id === share.agent_id), ...share,
-          status: share.reinvite ? "pending" : access.get(userID).shares.find(prior => prior.agent_id === share.agent_id)?.status || "pending",
-          reinvite: false,
-        })) });
+        const previous = access.get(userID);
+        for (const share of body.shares) {
+          const prior = previous.shares.find(item => item.agent_id === share.agent_id);
+          if (share.reinvite && (!share.enabled || prior?.status !== "rejected"))
+            throw new Error("only a rejected share can be reinvited");
+        }
+        access.set(userID, { ...previous, ...body, revision: body.revision + 1, shares: body.shares.map(share => {
+          const prior = previous.shares.find(item => item.agent_id === share.agent_id);
+          const invite = share.enabled && (share.reinvite || !prior?.enabled || (prior.status === "accepted" && share.engines.some(engine => !prior.engines.includes(engine))));
+          return { id: `shr_${userID}_${share.agent_id}`, ...prior, ...share, status: invite ? "pending" : prior?.status || "pending", reinvite: false };
+        }) });
       }
       return structuredClone(access.get(userID));
     }
@@ -85,14 +98,30 @@ export async function testUsersRuntime(preview = false) {
   if (preview) return;
   const form = () => document.querySelector("[data-user-access-form]");
   const row = () => form().querySelector("[data-share-row]");
+  const savedRow = () => document.querySelector('[data-allocation-agent="shared"]');
+  const open = () => document.querySelector('[data-allocation-edit="shared"]').click();
+  const cancel = () => form().querySelector("[data-allocation-close]").click();
   const select = async id => {
     document.querySelector(`[data-user-select="${id}"]`).click();
-    await waitFor(() => document.querySelector(".users-toolbar h2")?.textContent === (id === "admin" ? "admin" : id === "alice" ? "Alice" : "Bob"), "user switch did not complete");
+    const user = items.find(item => item.id === id);
+    await waitFor(() => document.querySelector(".users-toolbar h2")?.textContent === (user.display_name || user.username), "user switch did not complete");
   };
-  assert(!form().elements.isolated && form().textContent.includes("账号资源始终独立"), "regular accounts must always be private");
+  assert(!form() && !document.querySelector("[data-allocation-list] input"), "saved allocations are still a bulk edit form");
+  assert(!document.querySelector('[name="isolated"], .user-isolation, .settings-section-number'), "allocation page repeats account setup or exposes isolation");
+  assert(document.querySelector(".user-owned-nodes li")?.textContent === "owned", "owned nodes are not separate from shared allocations");
   if (innerWidth <= 820) {
     assert(document.querySelector("[data-user-mobile-select]").getBoundingClientRect().height > 0, "mobile user selector is unavailable");
   }
+  open();
+  input(row().querySelector('[name="ports"]'), "31009");
+  assert(!savedRow().textContent.includes("31009"), "unsaved fields changed the saved allocation list");
+  cancel();
+  assert(!form() && !pages.hasUnsavedChanges() && writes.length === 0, "canceling edit saved or retained a draft");
+  open();
+  input(row().querySelector('[name="ports"]'), "31008");
+  form().closest("dialog").dispatchEvent(new Event("cancel", { cancelable: true }));
+  assert(!form() && !pages.hasUnsavedChanges() && writes.length === 0, "Escape changed an allocation");
+  open();
   failedUser = "bob";
   document.querySelector('[data-user-select="bob"]').click();
   assert(form().inert, "switching users left the previous allocation editable");
@@ -107,6 +136,8 @@ export async function testUsersRuntime(preview = false) {
   row().querySelector('[name="engines"][value="xray"]').click();
   assert(pages.hasUnsavedChanges(), "allocation edits were not captured");
   await select("bob");
+  assert(!form(), "an unedited user inherited another user's editor");
+  open();
   assert(row().querySelector('[name="ports"]').value === "31002", "another user's port draft leaked");
   assert(!row().querySelector('[name="engines"][value="xray"]').checked, "another user's engine draft leaked");
   await select("alice");
@@ -122,11 +153,11 @@ export async function testUsersRuntime(preview = false) {
   await waitFor(() => form().querySelector("[data-user-error]").textContent.includes("分配已变更") && !form().querySelector('[type="submit"]').disabled, "stale allocation conflict did not recover");
   assert(row().querySelector('[name="ports"]').value === "31001, 31003", "conflict discarded entered ports");
   confirm = false;
-  document.querySelector("[data-user-reload]").click();
+  form().querySelector("[data-allocation-reload]").click();
   await new Promise(resolve => setTimeout(resolve, 20));
-  assert(pages.hasUnsavedChanges(), "canceling reload discarded the draft");
+  assert(pages.hasUnsavedChanges() && !form().querySelector('[type="submit"]').disabled, "canceling reload discarded or locked the draft");
   confirm = true;
-  document.querySelector("[data-user-reload]").click();
+  form().querySelector("[data-allocation-reload]").click();
   await waitFor(() => row().querySelector('[name="ports"]').value === "31001", "confirmed reload retained stale fields");
   assert(!pages.hasUnsavedChanges(), "confirmed reload retained dirty state");
   assert(!row().querySelector('[name="engines"][value="xray"]').checked, "reload retained a stale engine grant");
@@ -135,7 +166,11 @@ export async function testUsersRuntime(preview = false) {
   holdSave = true;
   form().requestSubmit();
   await waitFor(() => form().querySelector('[type="submit"]').disabled, "save did not prevent mid-request edits");
+  assert([...form().querySelectorAll("input, button")].every(control => control.disabled), "save left allocation controls editable");
+  form().closest("dialog").dispatchEvent(new Event("cancel", { cancelable: true }));
+  assert(form(), "Escape closed an in-flight save");
   await select("bob");
+  open();
   input(row().querySelector('[name="ports"]'), "31002, pending-draft");
   pages.captureDraft();
   state.route = "my-quota";
@@ -152,25 +187,77 @@ export async function testUsersRuntime(preview = false) {
   holdSave = false;
   assert(access.get("alice").shares[0].limit_bytes === 2.5 * 1024 ** 3, "GiB allocation was rounded incorrectly");
   assert(access.get("alice").shares[0].engines.join(",") === "mihomo", "allocation widened engine scope");
+  assert(access.get("alice").shares[1].limit_bytes === 15250032 && access.get("alice").shares[1].ports[0] === 32001 && !access.get("alice").shares[1].enabled,
+    "editing one allocation lost another node's quota or revoked port reservation");
+  assert(!("reinvite" in writes.at(-1).body.shares[1]), "saving one node replayed another invitation");
   assert(!state.data.userDrafts.has("alice") && !state.data.userAccessSaves.size, "saving across navigation left a stale draft or request");
-  assert(!form().querySelector('[type="submit"]').disabled, "completed save left the current form locked");
+  assert(!form() && !document.querySelector('[data-allocation-edit="shared"]').disabled, "completed save did not return to the unlocked result list");
   await select("bob");
   assert(row().querySelector('[name="ports"]').value === "31002, pending-draft", "another user's pending draft was lost after saving");
-  document.querySelector("[data-user-reload]").click();
-  await waitFor(() => row().querySelector('[name="ports"]').value === "31002", "second user's draft did not reload");
+  cancel();
   await select("alice");
   assert(!pages.hasUnsavedChanges(), "successful save left stale draft state");
   assert(access.get("alice").isolated, "saving allocations disabled resource isolation");
   access.get("bob").shares[0].status = "rejected";
   await select("bob");
-  assert(row().querySelector("[data-share-status]").textContent === "已拒绝", "admin cannot see rejection");
-  row().querySelector("[data-share-reinvite]").click();
+  assert(savedRow().querySelector("[data-share-status]").textContent === "已拒绝", "admin cannot see rejection");
+  open();
+  input(row().querySelector('[name="limit_gib"]'), "3");
+  form().requestSubmit();
+  await waitFor(() => !form(), "editing rejected terms did not finish");
+  assert(savedRow().querySelector("[data-share-status]").textContent === "已拒绝" && !writes.at(-1).body.shares[0].reinvite,
+    "ordinary edit silently resent a rejected invitation");
+  savedRow().querySelector("[data-allocation-invite]").click();
+  assert(pages.hasUnsavedChanges() && savedRow().textContent.includes("已拒绝"), "opening reinvite changed saved status or lost its intent");
   await select("alice");
   await select("bob");
-  assert(row().dataset.reinvite === "true" && row().querySelector("[data-share-reinvite]").disabled, "user switch lost staged reinvite");
+  assert(row().dataset.reinvite === "true" && document.querySelector("#user-allocation-dialog-title").textContent === "重新邀请", "user switch lost staged reinvite");
   form().requestSubmit();
-  await waitFor(() => row().querySelector("[data-share-status]").textContent === "待接受", "admin reinvite did not stay pending");
+  await waitFor(() => !form() && savedRow().querySelector("[data-share-status]").textContent === "待接受", "admin reinvite did not stay pending");
   assert(writes.at(-1).body.shares[0].reinvite === true, "admin reinvite was not explicit");
+  const beforeRevoke = writes.length, beforeRevokeConfirms = confirmCount;
+  confirm = false;
+  savedRow().querySelector("[data-allocation-revoke]").click();
+  await waitFor(() => !state.data.userAccessSaves.size, "canceled revocation stayed locked");
+  assert(writes.length === beforeRevoke && confirmCount === beforeRevokeConfirms + 1, "canceling revocation changed sharing");
+  confirm = true;
+  savedRow().querySelector("[data-allocation-revoke]").click();
+  await waitFor(() => savedRow().textContent.includes("已撤销"), "explicit revocation did not update the list");
+  assert(access.get("bob").shares[0].ports[0] === 31002 && access.get("bob").shares[0].used_bytes === 128, "revocation cleared ports or usage");
+  open();
+  input(row().querySelector('[name="ports"]'), "");
+  form().requestSubmit();
+  await waitFor(() => !form(), "revoked allocation could not release its ports");
+  assert(!access.get("bob").shares[0].enabled && access.get("bob").shares[0].ports.length === 0, "editing revoked sharing implicitly restored it");
+  for (const [userID, previousStatus, otherUser] of [["bob", "pending", "alice"], ["alice", "accepted", "bob"]]) {
+    await select(userID);
+    const before = structuredClone(access.get(userID).shares[0]);
+    assert(before.status === previousStatus, `restore fixture is not ${previousStatus}`);
+    if (before.enabled) {
+      savedRow().querySelector("[data-allocation-revoke]").click();
+      await waitFor(() => savedRow().textContent.includes("已撤销"), `could not revoke ${previousStatus} sharing`);
+    }
+    const beforeRestore = writes.length, restoreRevision = access.get(userID).revision;
+    savedRow().querySelector("[data-allocation-invite]").click();
+    assert(pages.hasUnsavedChanges() && !access.get(userID).shares[0].enabled && writes.length === beforeRestore,
+      "opening restore lost its intent or changed the saved allocation");
+    await select(otherUser);
+    await select(userID);
+    assert(form() && row().dataset.reinvite === "false" && row().querySelector('[name="enabled"]').checked
+      && document.querySelector("#user-allocation-dialog-title").textContent === "重新邀请",
+      `switching users lost the revoked ${previousStatus} restoration or staged an invalid reinvite`);
+    form().requestSubmit();
+    await waitFor(() => !form() && savedRow().querySelector("[data-share-status]").textContent === "待接受",
+      `restoring revoked ${previousStatus} sharing did not stay pending`);
+    const write = writes.at(-1).body, restored = access.get(userID).shares[0];
+    assert(write.revision === restoreRevision && write.shares[0].enabled && write.shares[0].reinvite === false,
+      `restoring revoked ${previousStatus} sharing sent an invalid reinvite or revision`);
+    assert(restored.enabled && restored.status === "pending" && restored.limit_bytes === before.limit_bytes
+      && restored.used_bytes === before.used_bytes && restored.ports.join(",") === before.ports.join(",")
+      && restored.engines.join(",") === before.engines.join(","),
+      `restoring revoked ${previousStatus} sharing changed its terms or skipped consent`);
+    assert(!pages.hasUnsavedChanges(), "restoring sharing retained a stale draft");
+  }
   await select("admin");
   assert(!document.querySelector('[name="isolated"], [data-share-row]'), "administrator can accidentally be isolated");
   document.querySelector("[data-user-create]").click();
@@ -227,6 +314,7 @@ export async function testUsersRuntime(preview = false) {
   await waitFor(() => !state.data.userDeletions.size, "stale confirmation did not settle");
   assert(!writes.some(write => write.path === "/users/alice/purge"), "switching accounts during confirmation deleted the previous selection");
   await select("alice");
+  open();
   input(row().querySelector('[name="ports"]'), "31001, unsaved-before-delete");
   assert(state.data.userDrafts.has("alice"), "delete test did not capture the unsaved draft");
 
@@ -258,7 +346,129 @@ export async function testUsersRuntime(preview = false) {
   state.route = "users";
   await pages.users();
   assert(writes.length === count && !document.querySelector("[data-user-create]"), "regular user opened account administration");
+  await testAllocationRaceRuntime();
   await testInvitationRuntime();
+}
+
+async function testAllocationRaceRuntime() {
+  const state = { route: "users", data: {}, session: { role: "admin", user_id: "admin" } };
+  const users = ["alice", "bob"].map(id => ({ id, username: id, role: "user" }));
+  const agents = [{ id: "shared", name: "Shared", capabilities: ["mihomo"], features: ["shared-traffic-v1", "shared-engines-v1", "independent-egress-v1"] }];
+  const access = new Map(users.map(user => [user.id, { isolated: true, revision: 4, shares: [{
+    id: `share_${user.id}`, agent_id: "shared", enabled: true, status: "accepted",
+    engines: ["mihomo"], ports: [31001], limit_bytes: 1024 ** 3, used_bytes: 128,
+  }] }]));
+  const writes = [], notices = [];
+  let delayRead = false, releaseRead, failRead = false, delayWrite = false, releaseWrite;
+  let delayConfirm = false, releaseConfirm, confirmations = 0;
+  const pages = installUsers({
+    state, esc, notify: message => notices.push(message),
+    shell: markup => { document.body.innerHTML = `<main>${markup}</main>`; },
+    confirmAction: async () => {
+      confirmations++;
+      if (delayConfirm) await new Promise(resolve => { releaseConfirm = resolve; });
+      return true;
+    },
+    api: async (path, options = {}) => {
+      if (path === "/users") return structuredClone(users);
+      if (path === "/agents") return structuredClone(agents);
+      const id = path.split("/")[2];
+      assert(path.endsWith("/agent-access") && access.has(id), "allocation race used an unexpected API");
+      if (!options.method) {
+        if (failRead) throw new Error("读取分配失败");
+        const result = structuredClone(access.get(id));
+        if (delayRead) {
+          delayRead = false;
+          await new Promise(resolve => { releaseRead = resolve; });
+        }
+        return result;
+      }
+      const body = JSON.parse(options.body);
+      writes.push(body);
+      if (delayWrite) await new Promise(resolve => { releaseWrite = resolve; });
+      const previous = access.get(id);
+      if (body.revision !== previous.revision) throw new Error("分配已变更，请重新读取后保存。");
+      access.set(id, { ...body, revision: body.revision + 1, shares: body.shares.map(share => ({ ...previous.shares.find(item => item.agent_id === share.agent_id), ...share })) });
+      return structuredClone(access.get(id));
+    },
+  });
+  const form = () => document.querySelector("[data-user-access-form]");
+  const open = () => document.querySelector('[data-allocation-edit="shared"]').click();
+  const cancel = () => form().querySelector("[data-allocation-close]").click();
+  const reload = () => form().querySelector("[data-allocation-reload]");
+  const error = () => form().querySelector("[data-user-error]").textContent;
+  await pages.users();
+  open();
+  input(form().elements.ports, "31001, invalid");
+  form().requestSubmit();
+  delayRead = true;
+  reload().click();
+  reload().click();
+  await waitFor(() => releaseRead, "allocation reload did not start");
+  assert(confirmations === 1 && form().querySelector('[type="submit"]').disabled, "reload allowed duplicate confirmations or a concurrent save");
+  cancel();
+  open();
+  const reopened = form();
+  input(reopened.elements.ports, "33001, invalid");
+  releaseRead();
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert(form() === reopened && form().elements.ports.value === "33001, invalid", "stale reload overwrote a newly opened editor in the same dialog");
+  form().requestSubmit();
+  failRead = true;
+  reload().click();
+  await waitFor(() => error().includes("读取分配失败"), "reload failure was not reported");
+  assert(form().elements.ports.value === "33001, invalid" && !form().querySelector('[type="submit"]').disabled && pages.hasUnsavedChanges(),
+    "failed reload discarded or locked the current draft");
+  failRead = false;
+  cancel();
+  open();
+  input(form().elements.ports, "31007");
+  access.get("alice").revision++;
+  access.get("alice").shares[0].ports = [31008];
+  await pages.users();
+  assert(form().elements.ports.value === "31007" && document.querySelector("[data-allocation-list]").textContent.includes("31008"),
+    "refresh did not distinguish an unsaved draft from the latest saved result");
+  form().requestSubmit();
+  await waitFor(() => error().includes("分配已变更"), "restored draft silently adopted a newer revision");
+  assert(writes.at(-1).revision === 4 && access.get("alice").shares[0].ports[0] === 31008, "draft overwrote a concurrent allocation edit");
+  reload().click();
+  await waitFor(() => form().elements.ports.value === "31008", "confirmed reload did not load the current revision");
+  input(form().elements.ports, "31009");
+  form().requestSubmit();
+  await waitFor(() => !form(), "reloaded allocation could not save");
+  assert(writes.at(-1).revision === 5 && access.get("alice").shares[0].used_bytes === 128, "reload lost revision protection or usage");
+
+  delayConfirm = true;
+  const beforeRevoke = writes.length;
+  document.querySelector("[data-allocation-revoke]").click();
+  await waitFor(() => releaseConfirm, "revocation confirmation did not start");
+  state.data.userID = "bob";
+  await pages.users();
+  delayConfirm = false;
+  releaseConfirm();
+  await waitFor(() => !state.data.userAccessSaves.size, "stale revocation confirmation did not settle");
+  assert(writes.length === beforeRevoke && access.get("alice").shares[0].enabled, "navigating away during confirmation revoked the former selection");
+
+  state.data.userID = "alice";
+  await pages.users();
+  open();
+  input(form().elements.limit_gib, "2");
+  delayWrite = true;
+  form().requestSubmit();
+  await waitFor(() => releaseWrite, "delayed allocation save did not start");
+  const previousData = state.data, beforeNotices = notices.length;
+  state.data = {};
+  state.session = { role: "admin", user_id: "another-admin" };
+  await pages.users();
+  open();
+  const newSessionForm = form();
+  input(newSessionForm.elements.ports, "31111");
+  releaseWrite();
+  await waitFor(() => !previousData.userAccessSaves.size, "old-session save did not settle");
+  assert(form() === newSessionForm && form().elements.ports.value === "31111" && state.data.userDrafts.has("alice"),
+    "old-session save replaced the new session's editor or draft");
+  assert(notices.length === beforeNotices, "old-session save leaked a notification into the new session");
+  cancel();
 }
 
 async function testInvitationRuntime() {
