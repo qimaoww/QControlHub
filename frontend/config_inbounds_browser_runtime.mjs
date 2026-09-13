@@ -161,6 +161,7 @@ export async function testConfigInboundsRuntime(preview = false) {
   for (const engine of ["xray", "sing-box", "mihomo", "ss-rust"]) {
     const test = await fixture(engine);
     const action = kind => document.querySelector(`[data-inbound-action="${kind}"]`);
+    assert(!document.querySelector('[data-live-intent="migrate-files"]'), "configuration page still renders the removed bundle action");
     assert(document.querySelector(".config-inbound-menu").previousElementSibling?.matches("[data-config-access-open]"), "inbound menu must be beside restrictions");
     assert(action("modify").disabled && action("delete").disabled, "public config allows inbound mutation");
     test.select("second");

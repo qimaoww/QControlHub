@@ -1,5 +1,7 @@
 import { installConfigPages } from "./modules/configs.js";
 
+// Paired source files are saved through regular deployment. The dedicated
+// bundle-generation button has been removed from the configuration page.
 const assert = (condition, message) => { if (!condition) throw new Error(message); };
 const pause = () => new Promise(resolve => setTimeout(resolve, 30));
 
@@ -39,12 +41,14 @@ export async function testConfigMigrationRuntime(preview = false) {
   for (const engine of ["xray","sing-box","mihomo","ss-rust"]) {
     for (const restricted of [false,true]) {
       const test = await fixture(engine, restricted);
-      const button = document.querySelector('[data-live-intent="migrate-files"]');
+      assert(!document.querySelector('[data-live-intent="migrate-files"]'), "removed bundle-generation action is still rendered");
+      assert(!document.body.textContent.includes("生成入站与出口成套文件"), "removed bundle-generation label is still visible");
+      const button = document.querySelector('[data-live-intent="deploy"]');
+      assert(Boolean(button) === !restricted, `regular deployment permission changed: ${engine}/${restricted}`);
       const supported = ["xray","sing-box"].includes(engine) && !restricted;
-      assert(Boolean(button) === supported, `incorrect migration permission/engine visibility: ${engine}/${restricted}`);
       if (!supported) continue;
       button.click(); await pause();
-      assert(test.writes.length===0 && test.tasks.length===0,"canceling migration wrote data");
+      assert(test.writes.length===0 && test.tasks.length===0,"canceling source deployment wrote data");
       test.accept = true;
       const buttons = document.querySelectorAll("[data-config-file]");
       assert(buttons[1].querySelector("b").textContent === "a", "filename must follow the preset tag, not the server name");
@@ -55,21 +59,28 @@ export async function testConfigMigrationRuntime(preview = false) {
       input.value = input.value.replaceAll("1080","2080").replace('"a"','"VLESS-REALITY-443"');
       buttons[0].click();
       assert(buttons[1].querySelector("b").textContent === "VLESS-REALITY-443", "renaming the preset did not refresh its filename");
-      document.querySelector('[data-live-intent="migrate-files"]').click(); await pause();
-      assert(test.writes.length===1 && test.tasks.length===1,"migration did not save and submit exactly once");
-      assert(test.tasks[0].action==="deploy","migration must use validated rollback-capable deployment");
-      assert(test.tasks[0].expected_config_version===2,"migration must deploy the exact newly saved version");
-      assert(test.writes[0].content.includes("9007199254740993") && test.writes[0].content.includes("2080"),"migration corrupted integer or discarded fragment draft");
-      assert(test.confirmations.length===2,"migration presented duplicate confirmations");
+      document.querySelector('[data-live-intent="deploy"]').click(); await pause();
+      assert(test.writes.length===1 && test.tasks.length===1,"source deployment did not save and submit exactly once");
+      assert(test.tasks[0].action==="deploy","source save must use validated rollback-capable deployment");
+      assert(test.tasks[0].expected_config_version===2,"source deployment must use the exact newly saved version");
+      assert(test.writes[0].content.includes("9007199254740993") && test.writes[0].content.includes("2080"),"source deployment corrupted integer or discarded fragment draft");
+      assert(test.confirmations.length===2,"source deployment presented duplicate confirmations");
     }
     await fixture(engine,false,true);
     assert(!document.querySelector('[data-live-intent="migrate-files"]'),"external service must not expose managed-file migration");
+    assert(document.querySelector('[data-live-intent="import"]') && !document.querySelector('[data-live-intent="deploy"]'),
+      "removing bundle generation changed explicit external-service import");
     if (["xray","sing-box"].includes(engine)) {
       const legacy = await fixture(engine,false,false,false,true);
-      const button = document.querySelector('[data-live-intent="migrate-files"]');
-      assert(button?.disabled,"legacy Agent must not offer unsupported migration");
+      assert(!document.querySelector('[data-live-intent="migrate-files"]'), "legacy Agent still exposes the removed bundle action");
+      const button = document.querySelector('[data-live-intent="deploy"]');
+      assert(button && !button.disabled,"legacy Agent lost its regular deployment action");
       button.click(); await pause();
-      assert(legacy.writes.length===0 && legacy.tasks.length===0,"legacy migration wrote data");
+      assert(legacy.writes.length===0 && legacy.tasks.length===0,"canceling legacy source deployment wrote data");
+      legacy.accept = true;
+      button.click(); await pause();
+      assert(legacy.writes.length===1 && legacy.tasks.length===1 && legacy.tasks[0].action==="deploy",
+        "removing bundle generation blocked normal deployment to a legacy Agent");
     }
   }
 }

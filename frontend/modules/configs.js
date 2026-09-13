@@ -1629,7 +1629,6 @@ async function liveConfig() {
     sourceContent: source?.content,
     formContent: current?.content,
   });
-  const configFilesSupported = (agent.features || []).includes("config-files-paired-v1");
   const canExecute = can("tasks.execute") && !unsupportedReason && (importSource || managedAvailable);
   const liveActions = !can("agent-config.write")
     ? ""
@@ -1637,7 +1636,6 @@ async function liveConfig() {
       (!canExecute ? "" : importSource
         ? '<button class="button primary" type="submit" data-live-intent="import">手动导入并迁移</button>'
         : '<button class="button" type="submit" data-live-intent="validate">保存并校验</button>' +
-        (["xray", "sing-box"].includes(engine) ? `<button class="button" type="submit" data-live-intent="migrate-files" ${configFilesSupported ? "" : 'disabled title="请先升级 Agent 以支持入站与出口成套文件"'}>生成入站与出口成套文件</button>` : '') +
         '<button class="button primary" type="submit" data-live-intent="deploy">保存并部署</button>');
   let sourceSwitch = existingAvailable
     ? `<nav class="live-config-source-switch" aria-label="配置来源">${managedAvailable ? `<button class="${sourceMode === "managed" ? "active" : ""}" type="button" data-live-source="managed"><b>QAgent 配置</b><small>/etc/qagent 托管</small></button>` : ""}<button class="${sourceMode === "import" ? "active" : ""}" type="button" data-live-source="import"><b>系统服务配置</b><small>可选导入</small></button></nav>`
@@ -1787,19 +1785,9 @@ async function liveConfig() {
       event.preventDefault();
       if (accountData !== state.data) return;
       const form = new FormData(event.currentTarget);
-      const migrateFiles = event.submitter?.dataset.liveIntent === "migrate-files";
-      const intent = migrateFiles ? "deploy" : event.submitter?.dataset.liveIntent || (privateWorkspace ? "save" : "validate");
+      const intent = event.submitter?.dataset.liveIntent || (privateWorkspace ? "save" : "validate");
       try {
         if (configFiles) form.set("content", configFiles.content());
-        if (migrateFiles) {
-          if (!configFilesSupported) throw new Error("请先升级 Agent 以支持多文件迁移");
-          if (importSource || !configFiles || !["xray", "sing-box"].includes(engine))
-            throw new Error("多文件迁移仅支持 Xray / sing-box 的 QAgent 托管配置");
-          if (!(await confirmAction(
-            `将当前编辑内容保存为一个数据库版本，并在节点生成 ${configFiles.paths().length} 个源码文件（公共配置及成套入站与独立出口）。Agent 校验、备份后重启内核，失败回滚；内核仍读取固定路径的合并配置。已有多文件包时可安全重新生成。确定迁移？`,
-            "生成入站与出口成套文件",
-          ))) return;
-        }
         if (
           intent === "import" &&
           !(await confirmAction(
@@ -1809,7 +1797,7 @@ async function liveConfig() {
         )
           return;
         if (
-          intent === "deploy" && !migrateFiles &&
+          intent === "deploy" &&
           !(await confirmAction(
             "确定保存当前源码、替换此主机该内核的当前配置并重启服务？同一内核只运行一份配置，可能影响其他用户的已部署服务。",
             "保存并部署",
@@ -1836,7 +1824,6 @@ async function liveConfig() {
         if (intent === "import") {
           notify("配置已保存，服务迁移任务已提交");
         }
-        if (migrateFiles) notify("多文件迁移任务已提交；完成后每个入站与独立出口在同一文件中查看");
         state.data.liveSources[sourceKey] = {
           ...source,
           content: result.content,
