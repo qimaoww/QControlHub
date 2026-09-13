@@ -63,10 +63,16 @@ jobs:
           apt-get update
           # iproute2 provides the ip binary that sing-box dual accounting uses
           # to prove existing policy routing cannot hijack outbound marks.
-          apt-get install --no-install-recommends --yes chromium openssl iproute2
+          # postgresql-client creates one isolated database per test shard.
+          apt-get install --no-install-recommends --yes chromium openssl iproute2 postgresql-client
 
       - name: Run project checks with PostgreSQL
-        run: make check
+        env:
+          QCH_TEST_SHARDS: "4"
+        run: |
+          bash .github/scripts/run-ci-tests.sh \
+            --checks "make browser-checks" \
+            --checks "make non-browser-checks"
 
       - name: Build release binaries
         run: make build VERSION="${{ github.sha }}"
@@ -118,10 +124,15 @@ jobs:
           docker run --rm --network host \
             -e QCH_CHROME_BIN=/usr/bin/chromium-browser \
             -e QCH_TEST_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/qcontrolhub?sslmode=disable \
+            -e QCH_TEST_SHARDS=4 \
             -e VERSION="${{ github.sha }}" \
             -v "$PWD:/src" -w /src golang:1.25-alpine sh -euxc '
-              apk add --no-cache bash chromium coreutils findutils libcap make nftables nodejs openrc openssl
-              make fmt-check frontend-check pr-policy-test schema-policy-test installer-test quick-start-test docs-check vet alpine-test
+              apk add --no-cache bash chromium coreutils findutils libcap make nftables nodejs openrc openssl postgresql-client
+              bash .github/scripts/run-ci-tests.sh \
+                --checks "make browser-checks" \
+                --checks "make alpine-non-browser-checks" \
+                --exclude "/internal/agent$" \
+                --extra "make alpine-agent-test"
               make build VERSION="$VERSION"
               sh deploy/tests/existing-core-openrc.sh
               sh -n deploy/remote/install-agent.sh
