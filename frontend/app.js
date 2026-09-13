@@ -541,7 +541,6 @@ function shell(content, title, { viewKey = state.route } = {}) {
   const links = [
     ["dashboard", "总览", dockIcons.layoutDashboard],
     ["node-settings", "节点设置", dockIcons.server],
-    ["agents", "内核预设", dockIcons.layers, true],
     ["live-config", "配置", dockIcons.fileCode],
     ["client-access", "客户端", dockIcons.monitorSmartphone],
     ["substore-sync", "同步", dockIcons.refreshCw, true],
@@ -579,7 +578,7 @@ function shell(content, title, { viewKey = state.route } = {}) {
   ];
   const activeDockRoute = (id) =>
     state.route === id ||
-    (state.route === "agent-config" && id === "agents") ||
+    (state.route === "agent-config" && id === "live-config") ||
     (state.route === "archive-config" && id === "live-config");
   const nodeOverviewActions =
     state.route === "node-settings" && state.data.nodeView !== "detail"
@@ -599,7 +598,7 @@ function shell(content, title, { viewKey = state.route } = {}) {
             : state.route === "archive-config"
               ? '<a class="button small" href="#live-config">节点实际配置</a>'
               : state.route === "agent-config"
-                ? '<a class="button small" href="#agents">返回内核预设</a>'
+                ? '<a class="button small" href="#live-config">返回配置</a>'
                 : state.route === "tasks"
                   ? '<button id="refresh" class="button small task-refresh-link" type="button">刷新</button>'
                   : "";
@@ -614,7 +613,6 @@ function shell(content, title, { viewKey = state.route } = {}) {
     ? `<a class="dock-settings ${settingsActive ? "active" : ""}" href="#settings" title="设置" ${settingsActive ? 'aria-current="page"' : ""}><svg viewBox="0 0 24 24" aria-hidden="true">${dockIcons.settings}</svg><span class="dock-label">设置</span></a>`
     : "";
   const mobileMoreRoutes = [
-    ["agents", "内核预设"],
     ["substore-sync", "Sub-Store 同步"],
     ["access-control", "访问限制"],
     ["system-bbr", "BBR / TCP 调优"],
@@ -829,7 +827,7 @@ const { agents, nodeSettings, submitTask, bindCodeEditors, showCommand } = agent
 const clientAccess = installClientAccess({ api, state, engines, esc, engineName, short, can, notify, shell });
 const subStoreSync = installSubStoreSync({ api, state, can, esc, engineName, notify, shell });
 
-const configModule = installConfigPages({ api, optionalAPI, state, engines, can, esc, engineName, conciseVersion, date, ago, bytes, confirmAction, notify, shell, submitTask, bindCodeEditors });
+const configModule = installConfigPages({ api, optionalAPI, state, engines, can, esc, engineName, conciseVersion, date, ago, bytes, confirmAction, notify, shell, submitTask, bindCodeEditors, renderConfigDiff });
 const { agentConfig, liveConfig, archiveConfigs } = configModule;
 
 const tasks = installTasks({ api, state, actions, can, esc, statusName, engineName, short, date, ago, actionName, statusTone, notify, confirmAction, shell });
@@ -855,12 +853,32 @@ async function renderOnce() {
   clearTimeout(state.bbrPollTimer);
   clearTimeout(state.agentPollTimer);
   const presetSelection = readPresetRoute(location.hash);
-  const hash = presetSelection ? "agent-config" : location.hash.slice(1);
+  let hash = presetSelection ? "live-config" : location.hash.slice(1);
   if (presetSelection) {
     if (state.data.agentId !== presetSelection.agentId || state.data.engine !== presetSelection.engine) {
       Object.assign(state.data, {protocol:"", inboundTag:"", configField:"", configInboundField:""});
     }
     Object.assign(state.data, presetSelection);
+    if (state.data.liveAgent !== presetSelection.agentId || state.data.liveEngine !== presetSelection.engine)
+      state.data.liveConfigSource = "";
+    Object.assign(state.data, {liveAgent:presetSelection.agentId, liveEngine:presetSelection.engine});
+  }
+  if (hash === "agents" || hash === "agent-config" || hash === "preset-node" || hash.startsWith("preset-node-")) {
+    if (hash === "agent-config") {
+      state.data.liveAgent = state.data.agentId || state.data.liveAgent;
+      state.data.liveEngine = state.data.engine || state.data.liveEngine;
+    } else if (hash.startsWith("preset-node-")) {
+      state.data.liveAgent = hash.slice(12);
+      state.data.liveEngine = "";
+    }
+    state.data.liveConfigSource = "";
+    hash = "live-config";
+  }
+  if (hash === "live-config" && !location.hash.startsWith("#live-config")) {
+    const params = new URLSearchParams();
+    if (state.data.liveAgent) params.set("agent", state.data.liveAgent);
+    if (state.data.liveEngine) params.set("engine", state.data.liveEngine);
+    history.replaceState(null, "", `#live-config${params.size ? `?${params}` : ""}`);
   }
   const routeMap = {
     summary: "dashboard",
@@ -877,7 +895,7 @@ async function renderOnce() {
     "settings-komari": "settings",
     "settings-cnip": "settings",
     "settings-deployment": "settings",
-    "preset-node": "agents",
+    "preset-node": "live-config",
     "settings-node": "node-settings",
     "new-config": "archive-config",
     templates: "archive-config",
@@ -907,7 +925,7 @@ async function renderOnce() {
     ? hash
     : (hash.startsWith("system-bbr-agent-") ? "system-bbr" : routeMap[hash]) ||
       (hash.startsWith("preset-node-")
-        ? "agents"
+        ? "live-config"
         : hash.startsWith("settings-node-")
           ? "node-settings"
             : hash.startsWith("node-")
@@ -1054,7 +1072,7 @@ const render = () => {
 window.addEventListener("hashchange", render);
 window.addEventListener("beforeunload", event => {
   userModule.captureDraft();
-  if (!configModule.presetHasUnsavedChanges() && !userModule.hasUnsavedChanges() && !agentModule.sharingHasUnsavedChanges()) return;
+  if (!configModule.configHasUnsavedChanges() && !userModule.hasUnsavedChanges() && !agentModule.sharingHasUnsavedChanges()) return;
   event.preventDefault();
   event.returnValue = "";
 });

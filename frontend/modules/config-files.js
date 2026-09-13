@@ -34,6 +34,18 @@ function members(text, array = false) {
 }
 const objectText = (map) => `{\n${[...map].map(([key,value]) => `  ${JSON.stringify(key)}: ${value}`).join(",\n")}\n}\n`;
 
+// Compare JSON snapshots without rounding large numeric tokens or depending
+// on object-key order. Arrays and scalar spellings retain their exact meaning.
+export function canonicalConfigJSON(content) {
+  const text = String(content).trim();
+  JSON.parse(text);
+  if (text.startsWith("{"))
+    return `{${[...members(text)].sort(([a], [b]) => a.localeCompare(b)).map(([key, value]) => `${JSON.stringify(key)}:${canonicalConfigJSON(value)}`).join(",")}}`;
+  if (text.startsWith("["))
+    return `[${members(text, true).map(canonicalConfigJSON).join(",")}]`;
+  return text;
+}
+
 function entryFilename(tag, kind, index, used) {
   let base = typeof tag === "string" ? tag.replace(/\.json$/, "") : "";
   base = Array.from(base.replace(/[^\p{L}\p{N}_.-]/gu, "_").replace(/^\.+|\.+$/g, "")).slice(0,48).join("");

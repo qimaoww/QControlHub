@@ -20,7 +20,7 @@ func (s *Store) LatestSystemTCPTasks(ctx context.Context, agentID string) ([]cor
 	rows, err := s.pool.Query(ctx, `
 		SELECT t.id,t.agent_id,t.action,t.engine,COALESCE(t.config_id,''),COALESCE(t.config_version,0),
 		       COALESCE(t.core_version,''),COALESCE(t.core_source,''),t.status,t.attempt,
-		       '',COALESCE(t.error,''),t.created_at,t.started_at,t.finished_at,t.tcp_settings
+		       '',COALESCE(t.error,''),t.created_at,t.started_at,t.finished_at,t.tcp_settings,t.install_if_missing
 		FROM agents agent CROSS JOIN LATERAL (
 			SELECT * FROM tasks WHERE agent_id=agent.id
 			AND action IN ('enable-bbr','disable-bbr','configure-tcp')`+ownerWhere+`

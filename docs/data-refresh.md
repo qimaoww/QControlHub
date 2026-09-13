@@ -13,9 +13,8 @@ DOM instead of replacing the application tree.
 | All routes | overview and settings | initial route, hash change, task refresh button | latest-route scheduler; same-route keyed reconciliation |
 | Dashboard | agents, recent tasks, preloaded overview | route render | same-route reconciliation |
 | Node settings | agents, enrollment tokens, preloaded overview, metric history | route render, manual metrics refresh, 2-second metrics timer, node mutations | metric fields patch in place; structural changes coalesce behind drag and FLIP completion |
-| Kernel presets | agents, deployments, client access, per-node configs, preloaded overview | route and selected-node hash | one selected keyed workspace; no background timer |
-| Node config | config workspace, generated plans, fields, revisions | route, node/engine/protocol/field selection, saved mutation | request sequence guard plus same-route reconciliation; generated parameters patch only their controls |
-| Live config | agents, node config workspace, task result and snapshot | route, node/engine selection, manual read, post-task completion | request sequence guard plus same-route reconciliation |
+| Config inbound dialog | config workspace, generated plans, fields, revisions | inbound action, protocol/field selection, saved mutation | scoped form reconciliation; generated parameters patch only their controls; no duplicate source editor |
+| Live config | agents, node config workspace, task result and snapshot, on-demand revisions/deployments | route, node/engine selection, manual read, inbound mutation, post-task completion | request sequence guard plus same-route reconciliation; skip background application while a dialog or source draft is active |
 | Client access | client profiles and agents | route, sidebar/filter/search selection, address mutation | refresh channel plus same-route reconciliation |
 | Config archive | configs, templates, agents, revisions | route, selection, save/restore/delete/template mutation | request sequence guard plus same-route reconciliation |
 | Tasks | tasks, agents, bounded settings cache | route, manual refresh, 0.6–5-second timer, cancel/retry | one effective request; keyed task-card reconciliation and in-place clock patches |
@@ -49,6 +48,16 @@ snapshot is applied through the guarded live-config route.
 - Object switches intentionally replace the keyed main workspace so a draft
   from one node, engine, inbound, field, or revision cannot leak into another.
   Ordinary refreshes of that same object preserve its local state.
+- Legacy preset links resolve to the live configuration workspace, preserving
+  node/core identity. Node-settings links keep their original destination.
+- Inbound dialogs bind queries and events to their own root. Public files and
+  merged previews have no mutation target. Source drafts and divergent node
+  snapshots must be reconciled before any inbound/field mutation.
+- Dialog close confirms unsaved changes; route abort disposes the dialog and
+  retains revision-scoped drafts in session memory. Saving locks the form.
+  Conflicts retain inputs and require an explicit reload before resubmission.
+- Installing a missing core and validating/deploying the saved revision is one
+  durable Agent task, not a browser-driven sequence of task submissions.
 
 ## Interaction invariants
 
@@ -89,7 +98,7 @@ workspace scroll, nested scroll, and window scroll. It also asserts:
 | Representative path | Requests and timers per background cycle | DOM/interaction result |
 | --- | --- | --- |
 | Node settings, 3 agents | 1 fleet request; 1 future 2-second timer | metrics patch existing nodes; structural patches wait for drag/FLIP |
-| Selected-node preset | 0 background requests; 0 timers | exactly 1 selected workspace and 0 unselected node workspaces |
+| Config inbound dialog | 0 background workspace requests; task status monitoring only after submission | one scoped editor over the existing configuration page |
 | Tasks | 2 requests; 1 future configured timer; settings adds 1 request only after its 30-second cache expires | unchanged cards retain identity; changed fields patch inside their keyed card |
 | Core logs | 2 requests; 1 future 10-second timer | keyed rows reconcile in the existing stream and retain its scroll position |
 | Traffic | 2 requests; 1 future 5-second timer | keyed policy cards and dirty open edit forms retain identity |

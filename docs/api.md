@@ -285,6 +285,16 @@ jq -n \
     https://qcontrolhub.example.com/api/v1/configs
 ```
 
+### 入站操作与自动安装
+
+配置页使用 `POST /agents/{id}/configs/{engine}/server-inbounds`，请求携带 `operation`（`add` / `modify` / `delete`）、`expected_version`、`intent`（`validate` / `deploy`）、`input`，修改或删除还需 `original_tag`。返回 `{config, task}`；配置、修订、凭据元数据及任务快照原子提交，任务创建失败会回滚本次保存。
+
+`operation: "add"` 可携带 `install_if_missing: true`。内核未安装时生成带该标志的校验/部署任务，执行前自动安装官方最新稳定版；已安装时生成普通任务，不更换版本。其他操作携带该标志返回 `400`。自动安装要求节点管理权和 Agent feature `preset-auto-install-v1`，不允许共享节点使用者执行。
+
+工作区响应的 `inbounds` 是可还原为预设表单的入站，`inbound_targets` 则提供所有可安全选中的命名入站的 `tag`、`port` 和 `kind`。配置页使用后者选择原生监听器的限制或删除目标；不能还原为预设的入站仍通过源码/高级字段修改。
+
+schema 61 在任务表增加 `install_if_missing`，任务查询与 WSS 下发保留该字段。自动安装使用安装任务的较长租约，Agent 重新检查二进制是否存在，安装失败不执行后续配置。重连不会重复执行仍在运行的同一任务；重试保持原 `config_version`，数据库已有新版本时返回 `409`。通用 `/tasks` 创建接口不接受 `install_if_missing`，只能通过原子入站新增及其重试产生。
+
 ### 配置修订与恢复
 
 全局配置档案和节点绑定配置每次成功创建、更新或恢复时，都会在同一数据库事务中保留一份完整修订。修订列表按版本号倒序返回，默认 20 条，`limit` 可设为 1–100：

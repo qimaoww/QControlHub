@@ -466,6 +466,10 @@ export function installClientAccess(ctx) {
       link.onclick = () => {
         state.data.agentId = link.dataset.configAgent;
         state.data.engine = link.dataset.configEngine;
+        state.data.liveAgent = link.dataset.configAgent;
+        state.data.liveEngine = link.dataset.configEngine;
+        state.data.liveConfigSource = "";
+        link.href = `#live-config?${new URLSearchParams({agent:state.data.liveAgent, engine:state.data.liveEngine})}`;
       };
     });
     document.querySelectorAll("[data-client-address-agent]").forEach((form) => {

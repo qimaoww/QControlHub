@@ -1416,7 +1416,10 @@ function bindAgentPage(agentItems, presetMode = false, enrollmentHistory = {}) {
       state.data.inboundTag = "";
       state.data.configField = "";
       state.data.configInboundField = "";
-      location.hash = "#agent-config";
+      state.data.liveAgent = state.data.agentId;
+      state.data.liveEngine = state.data.engine;
+      state.data.liveConfigSource = "";
+      location.hash = `#live-config?${new URLSearchParams({agent:state.data.agentId, engine:state.data.engine})}`;
     };
   });
   document.querySelectorAll("[data-client-agent]").forEach((link) => {

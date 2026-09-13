@@ -43,6 +43,8 @@ export function diagnosticError(value) {
   const raw = String(value);
   if (/\p{Script=Han}/u.test(raw)) return raw;
   const explanations = [
+    [/stable core installation failed/i, "稳定版内核安装失败，未继续校验或部署配置。请检查安装错误后重试；已有内核不会自动切换版本。"],
+    [/preset-auto-install-v1/i, "Agent 版本不支持自动安装，请到节点设置升级 Agent 后重新提交。断线前的执行结果可能需要核对。"],
     [/rollback (?:also )?failed|service recovery failed|binary rollback also failed/i, "变更失败，且回滚或服务恢复失败，请立即检查节点服务状态；确认恢复前不要重复部署。"],
     [/rolled back/i, "变更失败，已自动回滚，请确认服务状态并检查配置后重试。"],
     [/rejected the configuration|invalid configuration|configuration validation failed/i, "配置未通过内核校验，请根据下方诊断修正配置后重试。"],

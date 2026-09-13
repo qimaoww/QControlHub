@@ -2,6 +2,7 @@ import { diagnosticError } from "./errors.js";
 import { bindEvent } from "./refresh.js";
 import { bindConfigFiles } from "./config-files.js";
 import { bindConfigRestrictions } from "./config-restrictions.js";
+import { bindConfigInbounds, renderEmbeddedPreset, sameConfigContent } from "./config-inbounds.js";
 import { createPresetDrafts } from "./preset-drafts.js";
 import { presetRoute } from "./preset-route.js";
 import { createPresetReads, renderPresetIdentity } from "./preset-runtime.js";
@@ -340,9 +341,9 @@ export function liveConfigEditorState({
   };
 }
 
-export function liveConfigEngineEligible(runtime) {
+export function liveConfigEngineEligible(runtime, canAdd = false) {
   return Boolean(
-    runtime?.installed ||
+    canAdd || runtime?.installed ||
       runtime?.existing_config_available ||
       runtime?.existing_config_unsupported_reason,
   );
@@ -445,6 +446,10 @@ let agentConfigRequest = 0;
 let presetSavePending = false;
 let syncPresetControls = () => {};
 let activePresetContext;
+// The preset form has one controller whether rendered on a legacy test page
+// or mounted in the configuration workspace's scoped dialog.
+let presetHost = null;
+const presetVisible = () => presetHost ? presetHost.isCurrent() : state.route === "agent-config";
 let presetSessionData = state.data;
 let presetNavigation = 0;
 const presetRead = createPresetReads();
@@ -457,8 +462,15 @@ function saveOperation(operation) {
   state.data.presetOperation = operation;
   return operation;
 }
-function capturePresetDrafts() { if (state.route === "agent-config") drafts().capture(); }
+function capturePresetDrafts() { if (presetVisible()) drafts().capture(); }
 function presetHasUnsavedChanges() { return (presetSessionData === state.data && presetSavePending) || Boolean(state.data.presetDrafts?.dirty()); }
+function configHasUnsavedChanges() {
+  const editor = document.querySelector("#live-config-form [data-code-editor]");
+  const input = editor?.querySelector("[data-code-input]");
+  const sourceDirty = editor?.configFileController ? editor.configFileController.dirty() :
+    input && !input.readOnly && input.value !== input.defaultValue;
+  return presetHasUnsavedChanges() || Boolean(sourceDirty || document.querySelector('.config-inbound-dialog[data-saving="1"]'));
+}
 let liveConfigRequest = 0;
 let liveReadRequest = 0;
 let archiveConfigRequest = 0;
@@ -534,6 +546,11 @@ function handleDeployTerminal(result, taskID, agentId, engine) {
 }
 
 function maybeRerenderLiveConfig(agentId, engine) {
+  const editor = document.querySelector("#live-config-form [data-code-editor]");
+  const input = editor?.querySelector("[data-code-input]");
+  const sourceDirty = editor?.configFileController ? editor.configFileController.dirty() :
+    input && !input.readOnly && input.value !== input.defaultValue;
+  if (presetHost || presetSavePending || sourceDirty) return;
   if (
     state.route === "live-config" &&
     state.data.liveAgent === agentId &&
@@ -600,7 +617,7 @@ function agentConfig(options = {}) {
   return rendering.catch(error => {
     const ctx = activePresetContext;
     if (request === agentConfigRequest && state.data === sessionData && ctx?.sessionData === sessionData &&
-        state.route === "agent-config" && state.data.agentId === ctx.agent.id && state.data.engine === ctx.engine) {
+        presetVisible() && state.data.agentId === ctx.agent.id && state.data.engine === ctx.engine) {
       // A failed route refresh can leave the old DOM on screen. Give it a
       // working recovery action instead of dead handlers from an old epoch.
       ctx.navigationEpoch = state.navigationEpoch;
@@ -626,10 +643,12 @@ async function renderAgentConfig({ workspace: loadedWorkspace } = {}) {
   }
   capturePresetDrafts();
   const request = ++agentConfigRequest;
+  const host = presetHost;
+  const root = host?.root || document;
   const sessionData = state.data;
   const navigationEpoch = state.navigationEpoch;
   const routeSignal = state.routeSignal;
-  const isCurrent = () => request === agentConfigRequest && state.route === "agent-config" &&
+  const isCurrent = () => request === agentConfigRequest && host === presetHost && presetVisible() &&
     state.data === sessionData && state.navigationEpoch === navigationEpoch && !routeSignal?.aborted;
   let agents = state.data.agents;
   let agent = agents?.find(item => item.id === state.data.agentId);
@@ -694,7 +713,8 @@ async function renderAgentConfig({ workspace: loadedWorkspace } = {}) {
   let plan = selectedInbound;
   const planKey = `${agent.id}|${engine}|${selectedProtocolKey}`;
   state.data.serverPlans ||= {};
-  if (!plan && can("agent-config.write") && protocol) {
+  const editingPlan = !host || ["add", "modify"].includes(host.kind);
+  if (!plan && editingPlan && can("agent-config.write") && protocol) {
     plan = state.data.serverPlans[planKey];
     if (!plan) {
       plan = await api(`${base}/plans`, {
@@ -731,10 +751,10 @@ async function renderAgentConfig({ workspace: loadedWorkspace } = {}) {
     return value;
   }));
   const fieldValues = [
-    config && selectedField
+    config && selectedField && (!host || host.kind === "advanced")
       ? fieldRead(`${base}/fields/${encodeURIComponent(selectedField.key)}`)
       : { value: { present: false, fragment: "" } },
-    hasInboundField
+    hasInboundField && (!host || host.kind === "advanced")
       ? fieldRead(configFieldURL(base, selectedInboundField.key, selectedInbound.tag))
       : { value: { present: false, fragment: "" } },
   ];
@@ -793,8 +813,10 @@ async function renderAgentConfig({ workspace: loadedWorkspace } = {}) {
   const revisionTimeline = config
     ? `<details class="revision-timeline node-revision-timeline" id="revisions"><summary><b>版本历史</b><strong>当前 v${config.version}</strong></summary><div class="timeline-body" data-revision-body>展开加载版本历史</div></details>`
     : "";
+  const canAutoInstall = !engineInstalled && (state.session?.role === "admin" || agent.can_manage === true) &&
+    (agent.features || []).includes("preset-auto-install-v1");
   const executionCallout = !engineInstalled
-    ? `<aside class="config-execution-callout"><span><b>${esc(engineName(engine))} 尚未安装</b><small>可以编辑方案，但校验、部署和服务操作需要先在节点设置中安装该内核。</small></span><a class="button small" href="#node-settings">前往安装内核</a></aside>`
+    ? `<aside class="config-execution-callout"><span><b>${esc(engineName(engine))} 尚未安装</b><small>${canAutoInstall ? "增加入站并提交时，将自动安装最新稳定版，再执行校验或部署。切换版本请到节点设置。" : "自动安装需要节点管理权及新版 Agent；请到节点设置检查权限或升级 Agent。"}</small></span><a class="button small" href="#node-${esc(agent.id)}">节点设置</a></aside>`
     : agent.runtime?.[engine]?.existing_config_unsupported_reason
       ? `<aside class="config-execution-callout"><span><b>当前内核暂不可提交任务</b><small>${esc(agent.runtime[engine].existing_config_unsupported_reason)}</small></span><a class="button small" href="#node-settings">检查节点配置</a></aside>`
       : agent.status !== "online"
@@ -808,21 +830,21 @@ async function renderAgentConfig({ workspace: loadedWorkspace } = {}) {
         config, presentFields: workspace.present_fields }) + sourceStudio
     : renderGlobalFieldStudio({ fields, selected: selectedField, value: fieldValue, config,
         catalog: workspace.catalog, presentFields: workspace.present_fields }) + sourceStudio;
-  shell(
+  (host ? (markup, _title, options) => renderEmbeddedPreset(host, markup, options) : shell)(
     renderPresetIdentity(`<section class="config-command-bar loaded"><header class="config-command-head"><div class="config-command-title"><span class="engine-badge ${esc(engine)}">${esc(engineName(engine))}</span><div><p class="eyebrow">Server recipe</p><h2>${esc(protocol?.name || "Protocol")} · ${selectedInbound ? esc(selectedInbound.tag) : "新入站"}</h2><small>${esc(agent.name)} · ${esc(workspace.catalog.name)}</small></div></div><div class="config-command-state"><button class="button small" type="button" data-refresh-preset>刷新状态</button><span class="status-label ${!engineInstalled ? "muted" : config ? "ok" : "warn"}">${!engineInstalled ? "内核未安装" : config ? "已读取" : "新方案"}</span><span class="recipe-version"><b>${config ? `v${config.version}` : "草稿"}</b><small>${esc(workspace.catalog.format)}</small></span><a href="${esc(protocol?.docs)}" target="_blank" rel="noopener noreferrer">文档 ↗</a></div></header><details class="config-hierarchy-menu" open><summary><b>切换入站 / 协议</b><i>＋</i></summary><div class="config-command-selectors${workspace.protocols.length > 5 ? " protocol-catalog-wide" : ""}">${inboundNav ? `<section class="inbound-browser config-selector"><header><span><b>入站</b><small>${workspace.inbounds.length} 个</small></span><button class="button small" type="button" data-new-inbound>＋ 新增</button></header><nav>${inboundNav}</nav></section>` : ""}<section class="protocol-browser config-selector"><header><span><b>协议</b><small>${workspace.protocols.length} 种</small></span></header><nav>${protocolNav}</nav></section></div></details></section>${executionCallout}<article class="recipe-workspace"><form class="server-form" id="server-plan-form"><div class="config-mutation"><label>操作<select name="operation">${selectedInbound ? `<option value="modify">修改 · ${esc(selectedInbound.tag)}</option><option value="add">新增入站</option><option value="delete">删除 · ${esc(selectedInbound.tag)}</option>` : '<option value="add">新增入站</option>'}</select></label></div><div class="builder-layout" data-builder-workbench><nav class="builder-index"><a href="#listen" data-builder-step="listen"><b>01</b><strong>监听</strong></a><a href="#identity" data-builder-step="identity"><b>02</b><strong>认证</strong></a>${protocol?.transport_config ? '<a href="#transport" data-builder-step="transport"><b>03</b><strong>传输</strong></a>' : ""}${protocol?.uses_reality || protocol?.supports_tls ? '<a href="#security" data-builder-step="security"><b>04</b><strong>安全</strong></a>' : ""}</nav><div class="builder-sections"><section class="builder-section" id="listen"><header><span class="section-number">01</span><strong>监听</strong></header><div class="plan-fields three"><label>入站标签<input name="tag" maxlength="64" required value="${esc(plan.tag)}"></label><label>监听地址<input name="listen" required value="${esc(plan.listen)}"></label><label>监听端口<input type="number" name="port" min="1" max="65535" required value="${Number(plan.port)}"></label></div></section><section class="builder-section" id="identity"><header><span class="section-number">02</span><strong>认证</strong></header><div><div class="plan-fields two">${protocol?.ignores_username ? '<input type="hidden" name="username" value="default">' : `<label>用户名或备注<input name="username" maxlength="64" required value="${esc(plan.username)}"></label>`}<label class="secret-input">${esc(protocol?.credential_label || "凭据")}<span class="secret-value-control"><input type="password" name="credential" required value="${esc(plan.credential)}"><button type="button" data-secret-visibility>显示</button></span></label>${protocol?.secondary_credential_label ? `<label class="secret-input">${esc(protocol.secondary_credential_label)}<span class="secret-value-control"><input type="password" name="secondary_credential" required value="${esc(plan.secondary_credential)}"><button type="button" data-secret-visibility>显示</button></span></label>` : '<input type="hidden" name="secondary_credential" value="">'}</div>${methods ? `<div class="plan-fields one"><label>加密方式<select name="method">${methods}</select></label></div>` : '<input type="hidden" name="method" value="">'}</div></section>${protocol?.transport_config ? `<section class="builder-section" id="transport"><header><span class="section-number">03</span><strong>传输</strong></header><div class="plan-fields two"><label>传输<select name="transport">${transports}</select></label><label>路径 / ServiceName<input name="transport_path" value="${esc(plan.transport_path)}"></label></div></section>` : '<input type="hidden" name="transport" value="raw"><input type="hidden" name="transport_path" value="">'}${security}</div></div><footer class="builder-actions compact"><span class="builder-regenerate-status" data-regenerate-status role="status" aria-live="polite"></span><div><button class="button" type="button" data-regenerate>重新生成参数</button><button class="button" type="submit" data-plan-intent="validate" ${agent.status !== "online" || !engineInstalled ? "disabled" : ""}>保存并校验</button><button class="button primary" type="submit" data-plan-intent="deploy" ${agent.status !== "online" || !engineInstalled ? "disabled" : ""}>保存并部署</button></div></footer></form></article>${revisionTimeline}${advancedStudio}`, protocolOptions + vlessEncryptionOptions, portForward ? identitySection : ""),
     "节点配置",
     {
       viewKey: `agent-config-${agent.id}-${engine}-${selectedProtocolKey}-${selectedInbound?.tag || "new"}-${config?.version || 0}-${state.data.presetDraftReset || 0}`,
     },
   );
-  const serverPlan = document.querySelector("#server-plan-form");
+  const serverPlan = root.querySelector("#server-plan-form");
   if (serverPlan?.dataset) {
     serverPlan.dataset.blockMainlandDestination = plan.block_mainland_destination
       ? "1"
       : "0";
     serverPlan.dataset.blockMainlandSource = plan.block_mainland_source ? "1" : "0";
   }
-  const protocolCatalog = document.querySelector(".protocol-catalog-wide");
+  const protocolCatalog = root.querySelector(".protocol-catalog-wide");
   const protocolCatalogNav = protocolCatalog?.querySelector(
     ".protocol-browser > nav",
   );
@@ -848,7 +870,7 @@ async function renderAgentConfig({ workspace: loadedWorkspace } = {}) {
         resizePending = false;
         if (!isCurrent()) return;
         updateProtocolCatalogLayout();
-        revealSelectedFields();
+        revealSelectedFields(root);
       });
     });
   }
@@ -864,6 +886,9 @@ async function renderAgentConfig({ workspace: loadedWorkspace } = {}) {
     fieldValue,
     base,
     engineInstalled,
+    canAutoInstall,
+    host,
+    root,
     request,
     draftScope: `${agent.id}|${engine}|`,
     draftVersion: config?.version || 0,
@@ -882,11 +907,11 @@ async function renderAgentConfig({ workspace: loadedWorkspace } = {}) {
     capturePresetDrafts();
     // Preserve each drawer's open state and the primary form's draft/focus.
     const replaceStudio = (id, html) => {
-      const current = document.getElementById(id);
+      const current = root.querySelector(`#${id}`);
       if (!current) return;
       const open = current.open;
       current.outerHTML = html;
-      const updated = document.getElementById(id);
+      const updated = root.querySelector(`#${id}`);
       if (updated) updated.open = open;
     };
     if (engine === "ss-rust") {
@@ -910,7 +935,7 @@ async function renderAgentConfig({ workspace: loadedWorkspace } = {}) {
       syncPresetControls();
     }
   }
-  const history = document.querySelector("#revisions");
+  const history = root.querySelector("#revisions");
   if (history && can("configs.read")) {
     let loading = false;
     let loaded = false;
@@ -939,14 +964,18 @@ async function refreshPresetPage() {
 }
 
 function renderPresetStatus() {
-  if (state.route !== "agent-config") return;
-  const operation = operationFor();
-  if (!operation || operation.key !== `${state.data.agentId}|${state.data.engine}`) return;
-  let status = document.querySelector("[data-preset-status]");
+  const key = state.route === "live-config" ? `${state.data.liveAgent}|${state.data.liveEngine}` : `${state.data.agentId}|${state.data.engine}`;
+  if (state.route !== "live-config" && !presetVisible()) return;
+  const operation = operationFor(key);
+  if (!operation) return;
+  const root = presetHost?.root || document;
+  let status = root.querySelector("[data-preset-status]");
   if (!status) {
     status = document.createElement("div");
     status.dataset.presetStatus = "";
-    document.querySelector(".config-command-bar")?.after(status);
+    const anchor = root.querySelector(".config-command-bar, .live-config-details");
+    if (anchor) anchor.after(status);
+    else if (presetHost) root.prepend(status);
   }
   status.className = `alert preset-submit-status ${operation.tone}`;
   status.setAttribute("role", operation.tone === "error" ? "alert" : "status");
@@ -970,15 +999,19 @@ function renderPresetStatus() {
       retry.disabled = true;
       try {
         if (drafts().dirty() && !(await confirmAction("重新加载将放弃当前未保存的草稿，是否继续？", "重新加载配置"))) return;
-        if (state.data !== sessionData || state.navigationEpoch !== epoch || operationFor() !== operation || state.route !== "agent-config") return;
+        if (state.data !== sessionData || state.navigationEpoch !== epoch || operationFor(key) !== operation) return;
         drafts().clear(operation.key + "|");
         // Same-version reconciliation normally preserves inputs. An explicit
         // discard must instead mount fresh controls with saved defaults.
         state.data.presetDraftReset = (state.data.presetDraftReset || 0) + 1;
-        await refreshPresetPage();
+        if (presetVisible()) await refreshPresetPage();
+        else {
+          operation.reload = false;
+          await liveConfig();
+        }
       }
       catch (error) {
-        if (operationFor() !== operation) return;
+        if (operationFor(key) !== operation) return;
         operation.reload = true;
         operation.message = `页面加载失败：${error.message}。请重新加载后继续编辑。`;
         renderPresetStatus();
@@ -1000,7 +1033,7 @@ function watchPresetOperation(operation) {
   const progress = (latest, error) => {
     if (!tracked() || operation.reload) return;
     const message = error ? `配置 v${version} 已保存，任务状态连接暂时中断，正在重试…` :
-      `配置 v${version} 已保存，${intent === "deploy" ? "部署" : "校验"}任务${latest.status === "running" ? "正在执行" : "正在排队"}…`;
+      `配置 v${version} 已保存，${task.install_if_missing ? "稳定版安装及" : ""}${intent === "deploy" ? "部署" : "校验"}任务${latest.status === "running" ? "正在执行" : "正在排队"}…`;
     if (operation.message === message) return;
     operation.message = message;
     operation.tone = "";
@@ -1016,6 +1049,10 @@ function watchPresetOperation(operation) {
       : `配置已保存，任务${latest.status === "canceled" ? "已取消" : "失败"}：${latest.error || "请查看执行记录"}`;
     if (operation.reload) operation.message += " 请重新加载配置后继续编辑。";
     operation.tone = latest.status === "succeeded" ? "success" : "error";
+    if (task.install_if_missing) {
+      liveAgentRuntimeLoaded = false;
+      maybeRerenderLiveConfig(agentId, engine);
+    }
     renderPresetStatus();
   }).catch(error => {
     if (!tracked() || error.name === "AbortError") return;
@@ -1026,7 +1063,8 @@ function watchPresetOperation(operation) {
 }
 
 function bindAgentConfigPage(ctx, fieldsOnly = false) {
-  const visible = () => state.route === "agent-config" && activePresetContext === ctx &&
+  const root = ctx.root;
+  const visible = () => ctx.host === presetHost && presetVisible() && activePresetContext === ctx &&
     state.data === ctx.sessionData && state.navigationEpoch === ctx.navigationEpoch;
   const current = () => visible() &&
     state.data.agentId === ctx.agent.id && state.data.engine === ctx.engine;
@@ -1061,17 +1099,17 @@ function bindAgentConfigPage(ctx, fieldsOnly = false) {
       syncPresetControls();
     });
   };
-  revealSelectedFields();
-  document.querySelectorAll(".config-field-studio").forEach((studio) => {
-    bindEvent(studio, "toggle", () => { if (studio.open) revealSelectedFields(); });
+  revealSelectedFields(root);
+  root.querySelectorAll(".config-field-studio").forEach((studio) => {
+    bindEvent(studio, "toggle", () => { if (studio.open) revealSelectedFields(root); });
   });
   if (!ctx.engineInstalled)
-    document
+    root
       .querySelectorAll(
         "#field-form button[type=submit], #inbound-field-form button[type=submit], #source-config-form button[type=submit]",
       )
       .forEach((button) => (button.disabled = true));
-  document.querySelectorAll("[data-engine-select]").forEach(
+  root.querySelectorAll("[data-engine-select]").forEach(
     (link) =>
       (link.onclick = (event) => {
         event.preventDefault();
@@ -1079,7 +1117,7 @@ function bindAgentConfigPage(ctx, fieldsOnly = false) {
         navigate({ engine: link.dataset.engineSelect, protocol: "", inboundTag: "" }, false);
       }),
   );
-  document.querySelectorAll("[data-inbound]").forEach(
+  root.querySelectorAll("[data-inbound]").forEach(
     (link) =>
       (link.onclick = (event) => {
         event.preventDefault();
@@ -1089,31 +1127,34 @@ function bindAgentConfigPage(ctx, fieldsOnly = false) {
         if (input) navigate({ inboundTag: input.tag, protocol: input.protocol });
       }),
   );
-  document.querySelectorAll("[data-protocol]").forEach(
+  root.querySelectorAll("[data-protocol]").forEach(
     (link) =>
       (link.onclick = (event) => {
         event.preventDefault();
         navigate({ protocol: link.dataset.protocol, inboundTag: "" });
       }),
   );
-  bindEvent(document.querySelector("[data-new-inbound]"), "click", () => {
+  bindEvent(root.querySelector("[data-preset-protocol]"), "change", event => {
+    navigate({protocol:event.target.value, inboundTag:""});
+  });
+  bindEvent(root.querySelector("[data-new-inbound]"), "click", () => {
       if (presetSavePending || ctx.generating || !current()) return;
       navigate({ inboundTag: "", protocol: ctx.protocol.key });
   });
-  document.querySelectorAll("[data-config-field]").forEach(
+  root.querySelectorAll("[data-config-field]").forEach(
     (link) =>
       (link.onclick = (event) => {
         event.preventDefault();
         navigate({ configField: link.dataset.configField });
       }),
   );
-  document.querySelectorAll("[data-inbound-field]").forEach((link) => {
+  root.querySelectorAll("[data-inbound-field]").forEach((link) => {
     link.onclick = (event) => {
       event.preventDefault();
       navigate({ configInboundField: link.dataset.inboundField });
     };
   });
-  document.querySelectorAll("[data-secret-visibility]").forEach(
+  root.querySelectorAll("[data-secret-visibility]").forEach(
     (button) =>
       (button.onclick = () => {
         const input = button.parentElement.querySelector("input");
@@ -1121,7 +1162,7 @@ function bindAgentConfigPage(ctx, fieldsOnly = false) {
         button.textContent = input.type === "password" ? "显示" : "隐藏";
       }),
   );
-  const serverPlanForm = document.querySelector("#server-plan-form");
+  const serverPlanForm = root.querySelector("#server-plan-form");
   if (serverPlanForm) drafts().bind(serverPlanForm, draftKey("#server-plan-form"));
   if (serverPlanForm && !fieldsOnly) {
     bindProtocolOptionVisibility(serverPlanForm);
@@ -1170,10 +1211,12 @@ function bindAgentConfigPage(ctx, fieldsOnly = false) {
   if (!fieldsOnly) watchPresetOperation(operationFor(operationKey));
   const forms = ["#server-plan-form", "#field-form", "#inbound-field-form", "#source-config-form"];
   const canWrite = can("agent-config.write");
-  const canSubmit = canWrite && can("tasks.execute") && ctx.engineInstalled &&
+  const canSubmit = canWrite && can("tasks.execute") &&
     ctx.agent.status === "online" && !ctx.agent.runtime?.[ctx.engine]?.existing_config_unsupported_reason;
+  const canSubmitForm = selector => canSubmit && (ctx.engineInstalled ||
+    (selector === "#server-plan-form" && ctx.canAutoInstall && serverPlanForm?.elements.operation.value === "add"));
   const needsReload = () => operationFor(operationKey)?.reload;
-  const refreshButton = document.querySelector("[data-refresh-preset]");
+  const refreshButton = root.querySelector("[data-refresh-preset]");
   bindEvent(refreshButton, "click", async () => {
     if (presetSavePending || ctx.generating || ctx.navigating || !current()) return;
     capturePresetDrafts();
@@ -1197,24 +1240,26 @@ function bindAgentConfigPage(ctx, fieldsOnly = false) {
       refreshButton.disabled = blocked || ctx.generating || needsReload();
       refreshButton.textContent = ctx.navigating ? "正在加载…" : "刷新状态";
     }
-    document.querySelector(".config-command-bar")?.setAttribute("aria-busy", String(blocked));
+    root.querySelector(".config-command-bar")?.setAttribute("aria-busy", String(blocked));
+    const protocolSelect = root.querySelector("[data-preset-protocol]");
+    if (protocolSelect) protocolSelect.disabled = blocked || ctx.generating;
     for (const selector of forms) {
-      const element = document.querySelector(selector);
+      const element = root.querySelector(selector);
       if (!element) continue;
       element.inert = blocked;
       element.querySelectorAll("button[type=submit]").forEach((button) => {
-        button.disabled = !canSubmit || presetSavePending || ctx.generating || ctx.navigating || needsReload();
+        button.disabled = !canSubmitForm(selector) || presetSavePending || ctx.generating || ctx.navigating || needsReload();
       });
     }
   };
   syncPresetControls();
   for (const selector of forms) {
-    const element = document.querySelector(selector);
+    const element = root.querySelector(selector);
     if (!element) continue;
     drafts().bind(element, draftKey(selector));
     element.noValidate = true;
     element.querySelectorAll("button[type=submit]").forEach((button) => {
-      button.disabled = !canSubmit || presetSavePending || ctx.generating || ctx.navigating || needsReload();
+      button.disabled = !canSubmitForm(selector) || presetSavePending || ctx.generating || ctx.navigating || needsReload();
     });
     if (!canWrite) element.querySelectorAll("input, select, textarea, [data-regenerate]").forEach((control) => {
       control.disabled = true;
@@ -1222,7 +1267,7 @@ function bindAgentConfigPage(ctx, fieldsOnly = false) {
     bindEvent(element, "submit", async (event) => {
       event.preventDefault();
       if (presetSavePending || ctx.generating || ctx.navigating || !current()) return;
-      if (!canSubmit || needsReload()) {
+      if (!canSubmitForm(selector) || needsReload()) {
         notify("当前节点、内核状态或账号权限不允许提交任务", "error");
         return;
       }
@@ -1242,7 +1287,7 @@ function bindAgentConfigPage(ctx, fieldsOnly = false) {
         const invalid = [...formElement.elements].find((control) => control.willValidate && !control.validity.valid);
         if (invalid) {
           const section = invalid.closest(".builder-section");
-          if (section) document.querySelector(`[data-builder-step="${section.id}"]`)?.click();
+          if (section) root.querySelector(`[data-builder-step="${section.id}"]`)?.click();
           for (let parent = invalid.parentElement; parent; parent = parent.parentElement)
             if (parent.tagName === "DETAILS") parent.open = true;
           invalid.focus();
@@ -1253,7 +1298,7 @@ function bindAgentConfigPage(ctx, fieldsOnly = false) {
       }
       presetSavePending = true;
       syncPresetControls();
-      const buttons = forms.flatMap((id) => [...document.querySelectorAll(`${id} button[type=submit]`)]);
+      const buttons = forms.flatMap((id) => [...root.querySelectorAll(`${id} button[type=submit]`)]);
       const originalLabel = submitter?.textContent;
       buttons.forEach((button) => (button.disabled = true));
       formElement.setAttribute("aria-busy", "true");
@@ -1277,6 +1322,7 @@ function bindAgentConfigPage(ctx, fieldsOnly = false) {
             method: "POST",
             body: JSON.stringify({
               operation,
+              install_if_missing: operation === "add" && !ctx.engineInstalled,
               original_tag: operation === "add" ? "" : ctx.selectedInbound?.tag || "",
               expected_version: ctx.workspace.config?.version || 0,
               name: ctx.workspace.config?.name || `${ctx.agent.name} · ${engineName(ctx.engine)}`,
@@ -1325,6 +1371,12 @@ function bindAgentConfigPage(ctx, fieldsOnly = false) {
           // even if the user left the preset page while saving.
           state.data.serverPlans[operationKey + "|" + ctx.protocol.key] = null;
         }
+        if (ctx.host) {
+          // The parent replaces its saved snapshot only after the atomic
+          // mutation succeeds, then refreshes the existing source editor.
+          await ctx.host.onSaved(result, input);
+          return;
+        }
         if (!current()) {
           if (state.route === "agent-config" && state.data.agentId === ctx.agent.id && state.data.engine === ctx.engine) {
             await refreshPresetPage();
@@ -1356,12 +1408,12 @@ function bindAgentConfigPage(ctx, fieldsOnly = false) {
         formElement.removeAttribute("aria-busy");
         if (submitter) submitter.textContent = originalLabel;
         if (formElement.isConnected && current())
-          buttons.forEach((button) => (button.disabled = !canSubmit));
+          buttons.forEach((button) => (button.disabled = !canSubmitForm(selector)));
         if (state.data === sessionData) syncPresetControls();
       }
     });
   }
-  document.querySelectorAll("[data-builder-workbench]").forEach((workbench) => {
+  root.querySelectorAll("[data-builder-workbench]").forEach((workbench) => {
     const links = [...workbench.querySelectorAll("[data-builder-step]")];
     const sections = [...workbench.querySelectorAll(".builder-sections > .builder-section")];
     if (!links.length || !sections.length) return;
@@ -1399,6 +1451,34 @@ function bindAgentConfigPage(ctx, fieldsOnly = false) {
   });
 }
 
+function mountPresetEditor(host, workspace, chosen) {
+  capturePresetDrafts();
+  presetHost = host;
+  activePresetContext = null;
+  const sessionData = state.data;
+  const scope = `${workspace.agent.id}|${workspace.engine || state.data.liveEngine}|`;
+  Object.assign(state.data, {
+    agentId: workspace.agent.id, engine: state.data.liveEngine,
+    inboundTag: chosen?.tag || "", protocol: workspace.inbounds?.find(item => item.tag === chosen?.tag)?.protocol || "",
+    builderStep: "listen",
+  });
+  return {
+    ready: agentConfig({workspace}),
+    busy: () => presetSavePending || Boolean(activePresetContext?.generating || activePresetContext?.navigating),
+    dirty: () => sessionData === state.data && drafts().dirty(scope),
+    dispose(discard) {
+      if (presetHost !== host) return;
+      if (sessionData === state.data) {
+        drafts().capture();
+        if (discard) drafts().clear(scope);
+      }
+      presetHost = null;
+      activePresetContext = null;
+      agentConfigRequest += 1;
+    },
+  };
+}
+
 async function liveConfig() {
   const request = ++liveConfigRequest;
   const privateAccount = Boolean(state.session && state.session.role !== "admin");
@@ -1408,14 +1488,20 @@ async function liveConfig() {
     !liveAgentRuntimeLoaded ||
     liveAgentRuntimeScope !== runtimeScope ||
     !state.data.agents;
-  const agents = refreshRuntime ? await api("/agents") : state.data.agents;
+  // Preserve narrow config-only deep links: their workspace includes the
+  // authorized node, so opening one need not require a fleet-read permission.
+  const targetedWorkspace = state.session && !can("agents.read") && state.data.liveAgent && state.data.liveEngine
+    ? await api(`/agents/${encodeURIComponent(state.data.liveAgent)}/configs/${encodeURIComponent(state.data.liveEngine)}/workspace`)
+    : null;
+  const agents = targetedWorkspace ? [targetedWorkspace.agent].filter(Boolean) :
+    state.session && !can("agents.read") ? [] : refreshRuntime ? await api("/agents") : state.data.agents;
   if (accountData !== state.data || request !== liveConfigRequest || state.route !== "live-config") return;
   state.data.agents = agents;
   liveAgentRuntimeLoaded = true;
   liveAgentRuntimeScope = runtimeScope;
   const eligibleAgents = agents.filter((item) =>
     (item.capabilities || []).some(
-      (engine) => privateAccount || liveConfigEngineEligible(item.runtime?.[engine]),
+      (engine) => privateAccount || liveConfigEngineEligible(item.runtime?.[engine], can("agent-config.write")),
     ),
   );
   if (
@@ -1427,23 +1513,21 @@ async function liveConfig() {
       eligibleAgents[0]?.id ||
       "";
   }
-  const agent = eligibleAgents.find(
+  let agent = eligibleAgents.find(
     (item) => item.id === state.data.liveAgent,
   );
   if (!agent) {
     shell(
-      '<section class="empty large live-config-empty"><strong>没有可读取的节点配置</strong><p>请先让节点上线并安装支持的内核。</p><a class="button primary" href="#node-settings">前往节点设置</a></section>',
-      "手动配置",
+      '<section class="empty large live-config-empty"><strong>没有可配置的节点</strong><p>请先添加节点并启用需要的内核类型。</p><a class="button primary" href="#node-settings">前往节点设置</a></section>',
+      "配置",
     );
     return;
   }
   // An ordinary account starts with its private configuration. Only the host
   // owner can explicitly request a live/legacy snapshot; never auto-read a
   // shared host when the account has no configuration of its own.
-  const privateWorkspace = privateAccount && (agent.can_manage !== true ||
-    !["managed", "import"].includes(state.data.liveConfigSource));
   const installedEngines = (agent.capabilities || []).filter(
-    (item) => privateAccount || liveConfigEngineEligible(agent.runtime?.[item]),
+    (item) => privateAccount || liveConfigEngineEligible(agent.runtime?.[item], can("agent-config.write")),
   );
   if (
     !state.data.liveEngine ||
@@ -1452,11 +1536,17 @@ async function liveConfig() {
     state.data.liveEngine = installedEngines[0];
   }
   const engine = state.data.liveEngine;
+  if (globalThis.location?.hash.startsWith("#live-config") && globalThis.history?.replaceState)
+    globalThis.history.replaceState(null, "", presetRoute({agentId:agent.id, engine}));
   await reconcilePendingDeploy(agent.id, engine);
-  const configWorkspace = await api(
+  const configWorkspace = targetedWorkspace || await api(
     `/agents/${encodeURIComponent(agent.id)}/configs/${encodeURIComponent(engine)}/workspace`,
   );
   if (accountData !== state.data || request !== liveConfigRequest || state.route !== "live-config") return;
+  agent = configWorkspace.agent || agent;
+  state.data.agents = agents.map(item => item.id === agent.id ? agent : item);
+  const privateWorkspace = privateAccount && (agent.can_manage !== true ||
+    !["managed", "import"].includes(state.data.liveConfigSource));
   const saved = configWorkspace.config || null;
   const runtime = agent.runtime?.[engine] || {};
   const unsupportedReason = String(
@@ -1464,6 +1554,7 @@ async function liveConfig() {
   );
   const existingAvailable = (!privateAccount || agent.can_manage === true) && Boolean(runtime.existing_config_available);
   const managedAvailable = Boolean(runtime.installed);
+  const emptyManaged = !managedAvailable && !existingAvailable && !unsupportedReason;
   const managedReadSupported = (agent.features || []).includes(
     "managed-config-read-v1",
   );
@@ -1474,7 +1565,7 @@ async function liveConfig() {
       : "managed";
   state.data.liveConfigSource = sourceMode;
   const importSource = sourceMode === "import";
-  const readAction = privateWorkspace ? "" : liveConfigReadAction({
+  const readAction = privateWorkspace || emptyManaged ? "" : liveConfigReadAction({
     sourceMode,
     managedReadSupported,
     existingAvailable,
@@ -1483,7 +1574,10 @@ async function liveConfig() {
   state.data.liveSources ||= {};
   const source = privateWorkspace
     ? { content: saved?.content || (engine === "mihomo" ? "listeners: []\nrules:\n  - MATCH,DIRECT\n" : "{}\n") }
-    : state.data.liveSources[sourceKey] || null;
+    : state.data.liveSources[sourceKey] || (emptyManaged ? {
+      content: saved?.content || (engine === "mihomo" ? "listeners: []\nrules:\n  - MATCH,DIRECT\n" : "{}\n"),
+      saved: true,
+    } : null);
   const current = (privateWorkspace || !unsupportedReason) && source?.content
     ? {
         ...(saved || {
@@ -1503,7 +1597,7 @@ async function liveConfig() {
     formContent: current?.content,
   });
   const configFilesSupported = (agent.features || []).includes("config-files-paired-v1");
-  const canExecute = can("tasks.execute") && !unsupportedReason && (!privateWorkspace || managedAvailable);
+  const canExecute = can("tasks.execute") && !unsupportedReason && (importSource || managedAvailable);
   const liveActions = !can("agent-config.write")
     ? ""
     : (privateWorkspace ? '<button class="button" type="submit" data-live-intent="save">保存个人配置</button>' : "") +
@@ -1539,13 +1633,26 @@ async function liveConfig() {
   const engineBar = `<nav class="live-engine-bar" aria-label="选择内核">${installedEngines.map(item => {
     const info = agent.runtime?.[item] || {};
     const active = item === engine;
-    return `<button type="button" class="live-engine-tab ${active ? "active" : ""}" data-live-engine="${esc(item)}" aria-pressed="${active}" aria-label="${esc(engineName(item))} · ${info.installed ? "已安装" : "待导入"}" title="${info.installed ? "已安装" : "待导入"}" ${active ? 'aria-current="true"' : ""}>${esc(engineName(item))}</button>`;
+    const label = info.installed ? "已安装" : info.existing_config_available ? "待导入" : "未安装";
+    return `<button type="button" class="live-engine-tab ${active ? "active" : ""}" data-live-engine="${esc(item)}" aria-pressed="${active}" aria-label="${esc(engineName(item))} · ${label}" title="${label}" ${active ? 'aria-current="true"' : ""}>${esc(engineName(item))}</button>`;
   }).join("")}</nav>`;
   shell(
     `<article class="live-config-workspace" data-refresh-key="live-config-content-${esc(agent.id)}-${esc(engine)}-${esc(sourceMode)}-${esc(liveConfigPhase)}" data-live-config-phase="${esc(liveConfigPhase)}"><header class="editor-toolbar"><div><p class="live-config-eyebrow">${privateWorkspace ? "我的节点配置" : "节点配置工作区"}</p><h2>${esc(agent.name)}</h2>${sourceSwitch}</div><div class="editor-toolbar-state"><span class="engine-badge ${esc(engine)}">${esc(engineName(engine))}</span><b>${unsupportedReason ? "不可自动迁移" : importSource ? "可导入" : saved?.version ? `v${saved.version}` : "未保存"}</b></div></header>${engineBar}<div class="live-config-details"><span><i class="status-dot ${agent.status === "online" ? "ok" : ""}"></i>${agent.status === "online" ? "节点在线" : "节点离线"}</span><span>${esc(agent.os)} / ${esc(agent.arch)}</span><span>${esc(engineName(engine))} · ${esc(conciseVersion(engine, runtime.version))}</span><span>${privateWorkspace ? "个人配置 · 可保存并部署到此主机" : importSource ? "系统服务 · 只读快照" : "QAgent 托管 · 编辑后需保存部署"}</span></div>${current ? `<form class="live-config-editor" id="live-config-form" data-profile-editor data-new-config="0" data-engine="${esc(engine)}"><section class="code-workspace" data-code-editor data-code-language="${language}" data-code-max-bytes="2097152"><header class="code-editor-toolbar"><div class="code-file-meta"><span class="code-file-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7 3.5h7l4 4V20.5H7zM14 3.5v4h4M10 12h5M10 16h3"/></svg></span><b>${engine === "mihomo" ? "config.yaml" : "config.json"}</b></div><div class="code-editor-meta"><span class="code-language">${language}</span><span data-code-status aria-live="polite">${importSource ? "系统服务只读快照" : "QAgent 配置"}</span><span data-code-bytes>—</span><span data-code-position>行 1，列 1</span></div></header><div class="code-editor-frame"><aside class="code-gutter" aria-hidden="true" data-line-numbers>1</aside><textarea class="code-editor-input" name="content" data-code-input aria-label="${esc(engineName(engine))} 节点配置源码" spellcheck="false" required ${editorState.readOnly ? "readonly" : ""}>${esc(current.content)}</textarea></div><footer><span><i class="code-status-dot" data-code-status-dot></i><span data-code-validation aria-live="polite"></span></span><div><button class="button code-reset" type="button" data-code-reset disabled>恢复原文</button>${can("agent-config.write") && !editorState.readOnly ? '<button class="button code-format" type="button" data-code-format>格式化配置</button>' : ""}${liveActions}</div></footer></section><input type="hidden" name="name" value="${esc(current.name)}"><input type="hidden" name="description" value="${esc(current.description)}"><input type="hidden" name="version" value="${current.version}"></form>` : agent.status !== "online" ? '<section class="node-config-source"><h2>节点离线</h2><span class="status-label warn">无法读取</span></section>' : unsupportedReason ? `<section class="node-config-source" role="status"><h2>检测到现有服务，但不可自动迁移</h2><span class="status-label bad">${esc(unsupportedReason)}</span><p>QAgent 未执行或接管该服务。所有相关内核任务均已禁用；请按提示调整为受支持的精确布局并重启 Agent 重新发现。</p></section>` : !importSource && !readAction ? '<section class="node-config-source"><h2>需要升级 Agent</h2><span class="status-label warn">暂不可读取 QAgent 配置</span><p>升级后即可在不影响系统服务可选导入的情况下独立读取 QAgent 托管配置。</p></section>' : source?.error ? `<section class="node-config-source"><h2>读取配置失败</h2><span class="status-label bad">${esc(diagnosticError(source.error))}</span><button class="button" type="button" data-read-current>重新读取</button></section>` : `<section class="node-config-source" role="status" aria-live="polite"><h2>正在读取${importSource ? "系统服务配置" : "QAgent 配置"}</h2><span class="status-label warn">读取中</span><form data-auto-read-current hidden></form></section>`}</article>`,
-    "手动配置",
+    "配置",
     { viewKey: `live-config-${agent.id}-${engine}` },
   );
+  const workspaceElement = document.querySelector(".live-config-workspace");
+  if (emptyManaged) {
+    const hint = document.createElement("p");
+    hint.className = "config-install-hint";
+    hint.textContent = `${engineName(engine)} 尚未安装。通过“入站操作 → 增加入站”提交时，将自动安装最新稳定版；切换版本请到节点设置。`;
+    workspaceElement.querySelector(".live-config-details").after(hint);
+  } else if (source?.saved) {
+    const hint = document.createElement("p");
+    hint.className = "config-install-hint";
+    hint.textContent = "当前显示已保存配置；需部署成功后才会在节点生效。";
+    workspaceElement.querySelector(".live-config-details").after(hint);
+  }
   state.data.liveEngines = installedEngines;
   const confirmSwitch = async (title) => {
     const editor = document.querySelector("#live-config-form [data-code-editor]");
@@ -1591,20 +1698,58 @@ async function liveConfig() {
   });
   const configFiles = bindConfigFiles(document.querySelector("#live-config-form"), engine, notify);
   bindCodeEditors();
-  void bindConfigRestrictions({
-    ...ctx, form: document.querySelector("#live-config-form"), files: configFiles,
-    agent, engine, saved, sourceMode,
-    onSaved: async (result, chosen) => {
-      if (accountData !== state.data) return;
-      state.data.liveSources[sourceKey] = { ...source, content: result.config.content };
-      if (result.task?.action === "deploy") {
+  const applyInboundMutation = async (result, chosen) => {
+    if (accountData !== state.data) return;
+    const key = `${agent.id}|${engine}`;
+    state.data.liveSources[sourceKey] = { content: result.config.content, saved:true };
+    if (result.task?.id) {
+      let operation = operationFor(key);
+      if (operation?.task?.id !== result.task.id) operation = saveOperation({
+        key, task:result.task, version:result.config.version, intent:result.task.action,
+        message:`配置 v${result.config.version} 已保存，任务已提交。`,
+      });
+      watchPresetOperation(operation);
+      if (result.task.action === "deploy") {
         recordPendingDeploy(result.task.id, agent.id, engine);
-        monitorDeployTask(result.task.id, agent.id, engine);
+        void monitorDeployTask(result.task.id, agent.id, engine);
       }
+    }
+    state.data.liveSelectedInbound = chosen ? {agentId:agent.id, engine, ...chosen} : null;
+    if (state.route === "live-config" && state.data.liveAgent === agent.id && state.data.liveEngine === engine) {
+      try { await liveConfig(); }
+      catch (error) {
+        if (accountData !== state.data) return;
+        // The mutation is already durable. Do not report it as a failed save
+        // or silently lose the error after the embedded editor is disposed.
+        const message = `配置 v${result.config.version} 已保存且任务已提交，页面刷新失败：${error.message}。请重新加载后继续编辑。`;
+        const operation = operationFor(key);
+        if (operation?.task?.id === result.task?.id) Object.assign(operation, {message, tone:"error", reload:true});
+        renderPresetStatus();
+        notify(message, "error");
+      }
+    }
+  };
+  const restrictionSelection = await bindConfigRestrictions({
+    ...ctx, form: document.querySelector("#live-config-form"), files: configFiles,
+    agent, engine, saved, sourceMode, inbounds:configWorkspace.inbound_targets || configWorkspace.inbounds || [],
+    sourceMatches: !saved || sameConfigContent(saved.content, current?.content),
+    onSaved: applyInboundMutation,
+  });
+  if (accountData !== state.data || request !== liveConfigRequest || state.route !== "live-config") return;
+  const selected = state.data.liveSelectedInbound;
+  if (selected?.agentId === agent.id && selected.engine === engine)
+    (configFiles || restrictionSelection)?.selectInbound(selected.tag, selected.port);
+  bindConfigInbounds({
+    ...ctx, form:document.querySelector("#live-config-form"), container:workspaceElement, files:configFiles,
+    selection:restrictionSelection, agent, engine, saved, workspace:configWorkspace, sourceMode,
+    sourceContent:current?.content, mountEditor:mountPresetEditor, onSaved:applyInboundMutation,
+    onRefresh:async () => {
+      liveAgentRuntimeLoaded = false;
+      delete state.data.liveSources[sourceKey];
       await liveConfig();
-      document.querySelector("#live-config-form [data-code-editor]")?.configFileController?.selectInbound(chosen.tag, chosen.port);
     },
   });
+  renderPresetStatus();
   bindEvent(document.querySelector("#live-config-form"), "submit", async (event) => {
       event.preventDefault();
       if (accountData !== state.data) return;
@@ -2006,5 +2151,5 @@ async function archiveConfigs() {
       }),
   );
 }
-  return { agentConfig, liveConfig, archiveConfigs, capturePresetDrafts, presetHasUnsavedChanges };
+  return { agentConfig, liveConfig, archiveConfigs, capturePresetDrafts, presetHasUnsavedChanges, configHasUnsavedChanges };
 }
