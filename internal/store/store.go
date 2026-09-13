@@ -50,7 +50,7 @@ type storeExecutor interface {
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 59
+const currentSchemaVersion = 60
 
 func Open(ctx context.Context, databaseURL string, allowInsecureRemote bool) (*Store, error) {
 	return OpenWithConfigKey(ctx, databaseURL, allowInsecureRemote, "")
@@ -2876,6 +2876,7 @@ ALTER TABLE agent_shares ADD COLUMN IF NOT EXISTS status varchar(10) NOT NULL DE
 ALTER TABLE agent_shares ADD COLUMN IF NOT EXISTS invitation_revision bigint NOT NULL DEFAULT 1 CHECK (invitation_revision>0);
 ALTER TABLE agent_shares ADD COLUMN IF NOT EXISTS engines text[] NOT NULL DEFAULT '{}'
 	CHECK (engines <@ ARRAY['mihomo','xray','sing-box','ss-rust']::text[] AND cardinality(engines)<=4 AND array_position(engines,NULL) IS NULL);
+ALTER TABLE agent_shares ADD COLUMN IF NOT EXISTS ports_unrestricted boolean NOT NULL DEFAULT false;
 CREATE TABLE IF NOT EXISTS agent_share_ports (
 	agent_id text NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
 	port integer NOT NULL CHECK (port BETWEEN 1 AND 65535),

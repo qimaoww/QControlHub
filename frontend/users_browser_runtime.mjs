@@ -147,11 +147,14 @@ export async function testUsersRuntime(preview = false) {
   form().requestSubmit();
   await waitFor(() => !form().querySelector("[data-user-error]").hidden, "invalid port did not produce a local error");
   assert(writes.length === 0, "invalid port reached the API");
-  input(row().querySelector('[name="ports"]'), "31001, 31003");
+  input(row().querySelector('[name="ports"]'), "31001-31003");
+  await select("bob");
+  await select("alice");
+  assert(row().querySelector('[name="ports"]').value === "31001-31003", "switching users discarded the range draft");
   conflict = true;
   form().requestSubmit();
   await waitFor(() => form().querySelector("[data-user-error]").textContent.includes("分配已变更") && !form().querySelector('[type="submit"]').disabled, "stale allocation conflict did not recover");
-  assert(row().querySelector('[name="ports"]').value === "31001, 31003", "conflict discarded entered ports");
+  assert(row().querySelector('[name="ports"]').value === "31001-31003", "conflict discarded the entered range");
   confirm = false;
   form().querySelector("[data-allocation-reload]").click();
   await new Promise(resolve => setTimeout(resolve, 20));
@@ -474,7 +477,7 @@ async function testAllocationRaceRuntime() {
 async function testInvitationRuntime() {
   const state = { route: "my-quota", data: {}, session: { role: "user", user_id: "recipient" } };
   let access = { isolated: true, revision: 4, shares: [
-    { id: "shr_pending", agent_id: "shared", agent_name: "共享 Agent", owner_username: "<img src=x onerror=alert(1)>", enabled: true, status: "pending", invitation_revision: 2, engines: ["mihomo", "xray"], ports: [21001], limit_bytes: 1024 ** 3, used_bytes: 64 },
+    { id: "shr_pending", agent_id: "shared", agent_name: "共享 Agent", owner_username: "<img src=x onerror=alert(1)>", enabled: true, status: "pending", invitation_revision: 2, engines: ["mihomo", "xray"], ports: Array.from({ length: 101 }, (_, index) => 21000 + index), limit_bytes: 1024 ** 3, used_bytes: 64 },
     { id: "shr_revoked", agent_id: "revoked", agent_name: "已撤销 Agent", enabled: false, status: "pending", invitation_revision: 8, engines: [], ports: [], limit_bytes: 0, used_bytes: 0 },
   ] };
   const writes = [], notices = [];
@@ -508,13 +511,14 @@ async function testInvitationRuntime() {
   const reject = () => dialog()?.querySelector('[data-share-decision="reject"]') || card()?.querySelector('[data-share-decision="reject"]');
   await pages.myQuota();
   assert(card().textContent.includes("待接受") && card().querySelector("[data-share-open]"), "pending invitation lacks a dedicated entry");
+  assert(card().textContent.includes("端口 21000-21100"), "quota card did not compact the allocated port range");
   assert(!card().querySelector("[data-share-decision]"), "accept/reject actions still appear inline on the quota page");
   assert(!document.querySelector(".user-quota-card img"), "inviter identity was not escaped");
   assert(!document.querySelector('[data-quota-share="shr_revoked"] :is([data-share-decision],[data-share-open])'), "withdrawn invitation can be accepted");
   assert(card().scrollWidth <= card().clientWidth + 1, "invitation card overflows mobile viewport");
   open();
   assert(dialog()?.open && accept() && reject(), "dedicated dialog lacks consent actions");
-  assert(dialog().textContent.includes("共享 Agent") && dialog().textContent.includes("21001") && !dialog().querySelector("img"), "dialog lost terms or failed to escape the owner");
+  assert(dialog().textContent.includes("共享 Agent") && dialog().textContent.includes("21000-21100") && !dialog().querySelector("img"), "dialog lost its port range or failed to escape the owner");
   assert(dialog().textContent.includes("Mihomo / Xray") && !dialog().textContent.includes("sing-box"), "consent terms did not show the exact engine allocation");
   // Measure the final layout, not the shared dialog entrance transform.
   await Promise.all(dialog().getAnimations().map(animation => animation.finished));
@@ -526,6 +530,16 @@ async function testInvitationRuntime() {
   open();
   dialog().dispatchEvent(new Event("cancel", { cancelable: true }));
   assert(!dialog() && writes.length === 0, "Escape changed the invitation decision");
+  for (const [ports, label] of [[[0], "无限制"], [[], "未分配"]]) {
+    access.shares[0].ports = ports;
+    access.shares[0].invitation_revision++;
+    await pages.myQuota();
+    assert(card().textContent.includes(`端口 ${label}`), "quota card lost the port permission mode");
+    open();
+    assert(dialog().querySelector(".agent-invitation-terms").textContent.includes(`端口${label}`),
+      "invitation displayed a sentinel or silently widened empty port authority");
+    dialog().querySelector("[data-invitation-close]").click();
+  }
   open();
   hold = true;
   accept().click();

@@ -61,31 +61,39 @@ export async function testAgentSharingRuntime() {
   assert(form().querySelectorAll("[data-recipient]").length === 2 && editor.hasUnsavedChanges(), "new recipient was not captured");
   dialog().querySelector("[data-recipient-remove]").click();
   assert(form().querySelectorAll("[data-recipient]").length === 1 && !editor.hasUnsavedChanges(), "removing an accidental blank recipient lost the original allocation");
-  input(field("ports"), "0");
+  input(field("ports"), "0,21001");
   form().requestSubmit();
   await waitFor(() => !dialog().querySelector("[data-sharing-error]").hidden, "invalid port has no inline error");
   assert(writes.length === 0, "invalid port reached API");
-  input(field("ports"), "21003, 21004");
+  assert(field("ports").placeholder.includes("21000-21100"), "owner sharing has no port-range example");
+  for (const [ports, error] of [["21000-21256", "256"], ["21000-21002,21001", "重叠"], ["10084-10087", "保留"]]) {
+    input(field("ports"), ports);
+    form().requestSubmit();
+    assert(dialog().querySelector("[data-sharing-error]").textContent.includes(error), `invalid range has no specific error: ${ports}`);
+    assert(writes.length === 0, "invalid owner-sharing range reached the API");
+  }
+  input(field("ports"), "21003 - 21005, 22000");
   form().querySelector('[name="engines"][value="xray"]').click();
   editor.close();
   assert(editor.hasUnsavedChanges() && gates === 0, "closing lost the account-scoped draft or leaked the refresh gate");
   await editor.open(agent);
-  assert(field("ports").value === "21003, 21004", "reopening did not restore draft");
+  assert(field("ports").value === "21003 - 21005, 22000", "reopening did not restore the range draft");
   assert(form().querySelector('[name="engines"][value="xray"]').checked, "reopening lost explicit engine allocation");
   sharing.revision++;
   form().requestSubmit();
   await waitFor(() => dialog().querySelector("[data-sharing-error]").textContent.includes("已变更"), "stale revision did not surface conflict");
-  assert(editor.hasUnsavedChanges() && field("ports").value === "21003, 21004", "conflict lost unsaved input");
+  assert(editor.hasUnsavedChanges() && field("ports").value === "21003 - 21005, 22000", "conflict lost the unsaved range");
   confirm = false;
   dialog().querySelector("[data-sharing-reload]").click();
   await Promise.resolve();
-  assert(field("ports").value === "21003, 21004", "canceling reload discarded the draft");
+  assert(field("ports").value === "21003 - 21005, 22000", "canceling reload discarded the range draft");
   confirm = true;
   dialog().querySelector("[data-sharing-reload]").click();
   await waitFor(() => field("ports").value === "21003", "confirmed reload did not recover current revision");
   assert(!editor.hasUnsavedChanges(), "reload retained stale draft");
   assert(!form().querySelector('[name="engines"][value="xray"]').checked, "reload retained stale engine allocation");
 
+  input(field("ports"), "21000 - 21100，22000");
   input(field("limit_gib"), "2.5");
   hold = true;
   form().requestSubmit();
@@ -98,11 +106,31 @@ export async function testAgentSharingRuntime() {
   const finish = release; release = null; hold = false; finish();
   await waitFor(() => !field("ports").disabled && !editor.hasUnsavedChanges(), "save did not settle reopened dialog");
   assert(sharing.shares[0].limit_bytes === 2.5 * 1024 ** 3, "GiB conversion changed the allowance");
-  assert(sharing.shares[0].ports.length === 1 && sharing.shares[0].username === "bob", "recipient scope changed");
+  assert(sharing.shares[0].username === "bob" && sharing.shares[0].ports.join(",") === [...Array.from({ length: 101 }, (_, index) => 21000 + index), 22000].join(","),
+    "owner sharing changed the recipient or did not submit the complete port range");
+  assert(field("ports").value === "21000-21100, 22000", "saved owner-sharing range expanded into a long input");
   assert(writes.at(-1).shares[0].engines.join(",") === "mihomo", "save widened engine allocation");
   assert(dialog().scrollWidth <= dialog().clientWidth + 1, "sharing dialog overflows mobile viewport");
   assert(dialog().querySelector("header>div").getBoundingClientRect().width > 200,
     "header text was squeezed into the inherited traffic icon column");
+
+  for (const [text, expected] of [["0", [0]], ["", []], ["21001-21003", [21001, 21002, 21003]], ["0", [0]]]) {
+    input(field("ports"), text);
+    editor.close();
+    await editor.open(agent);
+    assert(field("ports").value === text, "reopening lost a blank or unrestricted port draft");
+    const before = writes.length;
+    form().requestSubmit();
+    await waitFor(() => writes.length === before + 1 && !editor.hasUnsavedChanges(), "port mode did not save");
+    assert(JSON.stringify(sharing.shares[0].ports) === JSON.stringify(expected), `wrong saved port mode: ${text}`);
+    assert(field("ports").value === text, "saved port mode did not round-trip in the owner editor");
+    assert(sharing.shares[0].limit_bytes === 2.5 * 1024 ** 3 && sharing.shares[0].used_bytes === 64,
+      "changing port mode changed traffic quota or usage");
+  }
+  input(field("limit_gib"), "3");
+  form().requestSubmit();
+  await waitFor(() => !editor.hasUnsavedChanges(), "quota edit did not save");
+  assert(sharing.shares[0].ports.join(",") === "0", "quota-only edit cleared unrestricted port authority");
 
   editor.close();
   sharing.shares[0].status = "rejected";

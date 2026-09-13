@@ -16,11 +16,41 @@ export const userPermissions = [
 const defaultPermissions = userPermissions.map(([permission]) => permission);
 
 export function parseSharedPorts(value) {
-  const parts = String(value || "").trim().split(/[\s,，]+/).filter(Boolean);
-  const ports = parts.map((part) => /^\d+$/.test(part) ? Number(part) : NaN);
-  if (ports.length > 256 || ports.some((port) => !Number.isInteger(port) || port < 1 || port > 65535 || port === 10085 || port === 10086) || new Set(ports).size !== ports.length)
-    throw new Error("端口须为 1–65535 的不重复整数，不能使用 10085、10086。");
-  return ports.sort((left, right) => left - right);
+  const parts = String(value ?? "").trim().replace(/(\d)\s*-\s*(?=\d)/g, "$1-").split(/[\s,，]+/).filter(Boolean);
+  if (parts.length === 1 && parts[0] === "0") return [0];
+  if (parts.includes("0")) throw new Error("0 表示端口无限制，不能与其他端口或范围混用。");
+  const ports = new Set();
+  for (const part of parts) {
+    const match = /^(\d+)(?:-(\d+))?$/.exec(part);
+    if (!match) throw new Error("请填写单个端口或范围，如 21000-21100，多个用逗号分隔。");
+    const start = Number(match[1]), end = Number(match[2] ?? match[1]);
+    if (!Number.isInteger(start) || !Number.isInteger(end) || start < 1 || end > 65535 || start > end)
+      throw new Error("端口须为 1–65535，范围起始端口不能大于结束端口。");
+    if (start <= 10086 && end >= 10085) throw new Error("10085、10086 是保留端口，不能分配。");
+    // Bound expansion before allocating or iterating through the range.
+    if (ports.size + end - start + 1 > 256) throw new Error("最多分配 256 个端口，范围按实际端口数量计算。");
+    for (let port = start; port <= end; port++) {
+      if (ports.has(port)) throw new Error("端口不能重复，范围不能重叠。");
+      ports.add(port);
+    }
+  }
+  return [...ports].sort((left, right) => left - right);
+}
+
+export function formatSharedPorts(ports) {
+  const sorted = [...(ports || [])].sort((left, right) => left - right);
+  const ranges = [];
+  for (let index = 0; index < sorted.length; index++) {
+    const start = sorted[index];
+    let end = start;
+    while (sorted[index + 1] === end + 1) end = sorted[++index];
+    ranges.push(start === end ? String(start) : `${start}-${end}`);
+  }
+  return ranges.join(", ");
+}
+
+export function sharedPortsLabel(ports) {
+  return ports?.length === 1 && ports[0] === 0 ? "无限制" : formatSharedPorts(ports) || "未分配";
 }
 
 export function selectedSharedEngines(row) {
@@ -117,7 +147,7 @@ export function installUsers(ctx) {
     const statusClass = !share.enabled ? "muted" : share.status === "accepted" ? "ok" : "warn";
     return `<article class="user-allocation-row" data-allocation-agent="${esc(share.agent_id)}">
       <div class="user-allocation-node"><strong>${esc(name)}</strong><span class="status-label ${statusClass}" data-share-status>${agentShareStatus(share)}</span>${supported ? "" : `<small>${agent ? "Agent 需升级" : "节点不可用"}</small>`}</div>
-      <dl class="user-allocation-terms"><div><dt>内核</dt><dd>${sharedEngineNames(share.engines)}</dd></div><div><dt>端口</dt><dd>${esc((share.ports || []).join(", ") || "未分配")}</dd></div><div><dt>总额度</dt><dd>${share.limit_bytes ? usage(share.limit_bytes) : "不限量"}<small>已用 ${usage(share.used_bytes)}</small></dd></div></dl>
+      <dl class="user-allocation-terms"><div><dt>内核</dt><dd>${sharedEngineNames(share.engines)}</dd></div><div><dt>端口</dt><dd>${esc(sharedPortsLabel(share.ports))}</dd></div><div><dt>总额度</dt><dd>${share.limit_bytes ? usage(share.limit_bytes) : "不限量"}<small>已用 ${usage(share.used_bytes)}</small></dd></div></dl>
       <div class="user-allocation-row-actions"><button class="button small" type="button" data-allocation-edit="${esc(share.agent_id)}" aria-label="编辑 ${esc(name)} 的分配">编辑</button>${!share.enabled || share.status === "rejected" ? `<button class="button small" type="button" data-allocation-invite="${esc(share.agent_id)}" aria-label="重新邀请使用 ${esc(name)}">重新邀请</button>` : ""}${share.enabled ? `<button class="button small danger-button" type="button" data-allocation-revoke="${esc(share.agent_id)}" aria-label="撤销 ${esc(name)} 的共享">撤销</button>` : ""}</div>
     </article>`;
   }
@@ -278,7 +308,7 @@ export function installUsers(ctx) {
     const limit = share.limit_gib ?? sharedLimitGiB(share.limit_bytes);
     const unlimited = share.unlimited ?? Number(limit) === 0;
     return `${sharedEngineChoices(share.engines, agent?.supported_capabilities ?? agent?.capabilities)}
-      <label class="settings-field"><span>可用端口</span><input name="ports" value="${esc(share.ports_text ?? (share.ports || []).join(", "))}" placeholder="21001, 21002" autocomplete="off"></label>
+      <label class="settings-field"><span>可用端口</span><input name="ports" value="${esc(share.ports_text ?? formatSharedPorts(share.ports))}" placeholder="21000-21100, 22000" autocomplete="off"><small>留空未分配，0 无限制；最多指定 256 个端口</small></label>
       <fieldset class="user-allocation-quota"><legend>流量额度</legend><div class="user-quota-options"><label><input type="radio" name="quota_mode" value="unlimited" ${unlimited ? "checked" : ""}>不限量</label><label><input type="radio" name="quota_mode" value="limited" ${unlimited ? "" : "checked"}>设置总额度</label></div><label class="settings-field" data-quota-amount ${unlimited ? "hidden" : ""}><span>累计总额度（GiB）</span><input name="limit_gib" type="number" min="0" max="8388607" step="any" required value="${esc(limit)}" placeholder="例如 100" ${unlimited ? "disabled" : ""}></label><small>已用 ${usage(share.used_bytes)}</small></fieldset>`;
   }
 
@@ -512,7 +542,7 @@ export function installUsers(ctx) {
     dialog.innerHTML = `<header><div><h2 id="agent-invitation-title">共享邀请</h2><p id="agent-invitation-origin">所有者 · ${esc(share.owner_username || "管理员")}</p></div><button type="button" class="deploy-command-close" data-invitation-close aria-label="关闭邀请">×</button></header>
       <div class="traffic-edit-body">
         <div class="agent-invitation-node"><span>Agent</span><h3>${esc(share.agent_name)}</h3></div>
-        <dl class="agent-invitation-terms"><div><dt>内核</dt><dd>${sharedEngineNames(share.engines)}</dd></div><div><dt>端口</dt><dd>${esc((share.ports || []).join(", ") || "未分配")}</dd></div><div><dt>总额度</dt><dd>${share.limit_bytes ? usage(share.limit_bytes) : "不限量"}<small>已用 ${usage(share.used_bytes)}</small></dd></div></dl>
+        <dl class="agent-invitation-terms"><div><dt>内核</dt><dd>${sharedEngineNames(share.engines)}</dd></div><div><dt>端口</dt><dd>${esc(sharedPortsLabel(share.ports))}</dd></div><div><dt>总额度</dt><dd>${share.limit_bytes ? usage(share.limit_bytes) : "不限量"}<small>已用 ${usage(share.used_bytes)}</small></dd></div></dl>
         <div class="agent-invitation-error" data-invitation-error hidden><p class="alert error" role="alert"></p><button type="button" class="button small" data-invitation-reload>刷新邀请</button></div>
       </div><footer><button type="button" class="button" data-share-decision="reject">拒绝</button><button type="button" class="button primary" data-share-decision="accept" ${share.engines?.length ? "" : 'disabled title="等待所有者分配内核"'}>接受</button></footer>`;
     activeInvitation = { dialog, data, share, trigger };
@@ -594,7 +624,7 @@ export function installUsers(ctx) {
         const accepted = share.enabled && share.status === "accepted";
         const pending = share.enabled && share.status === "pending";
         const status = accepted && exhausted ? "额度已用完" : agentShareStatus(share);
-        return `<article class="workspace-panel user-quota-card" data-quota-share="${esc(share.id)}"><header><div><h3>${esc(share.agent_name)}</h3><small>所有者 · ${esc(share.owner_username || "管理员")}</small></div><span class="status-label ${accepted && !exhausted ? "ok" : "warn"}">${status}</span></header><div><strong>${usage(share.used_bytes)}</strong><span> / ${share.limit_bytes ? usage(share.limit_bytes) : "不限量"}</span>${share.limit_bytes ? `<progress max="100" value="${Math.min(100, share.used_bytes / share.limit_bytes * 100)}" aria-label="已用额度"></progress>` : ""}<small>内核 ${sharedEngineNames(share.engines)}</small><small>端口 ${esc((share.ports || []).join(", ") || "未分配")}</small></div>
+        return `<article class="workspace-panel user-quota-card" data-quota-share="${esc(share.id)}"><header><div><h3>${esc(share.agent_name)}</h3><small>所有者 · ${esc(share.owner_username || "管理员")}</small></div><span class="status-label ${accepted && !exhausted ? "ok" : "warn"}">${status}</span></header><div><strong>${usage(share.used_bytes)}</strong><span> / ${share.limit_bytes ? usage(share.limit_bytes) : "不限量"}</span>${share.limit_bytes ? `<progress max="100" value="${Math.min(100, share.used_bytes / share.limit_bytes * 100)}" aria-label="已用额度"></progress>` : ""}<small>内核 ${sharedEngineNames(share.engines)}</small><small>端口 ${esc(sharedPortsLabel(share.ports))}</small></div>
           ${pending || accepted ? `<footer class="user-quota-actions">${pending ? '<button class="button primary small" type="button" data-share-open>查看邀请</button>' : '<button class="button small" type="button" data-share-decision="reject">退出共享</button>'}</footer>` : ""}</article>`;
       }).join("") || '<div class="empty large"><strong>暂无共享邀请</strong></div>'}</section>` : '<section class="workspace-panel"><div class="empty compact"><strong>按账号权限访问节点</strong></div></section>'}
     </div>`, "共享与额度", { viewKey: `my-quota-${++viewSerial}` });

@@ -28,7 +28,7 @@ type AgentShare struct {
 	Status             AgentShareStatus `json:"status"`
 	InvitationRevision int64            `json:"invitation_revision"`
 	Engines            []Engine         `json:"engines"`
-	Ports              []int            `json:"ports"`
+	Ports              []int            `json:"ports"`       // Empty is unallocated; [0] permits any available port.
 	LimitBytes         uint64           `json:"limit_bytes"` // Zero is unlimited.
 	UsedBytes          uint64           `json:"used_bytes"`
 	CreatedAt          time.Time        `json:"created_at"`
@@ -56,7 +56,7 @@ type AgentSharingRecipient struct {
 	Username   string   `json:"username"`
 	Engines    []Engine `json:"engines"`
 	LimitBytes uint64   `json:"limit_bytes"`
-	Ports      []int    `json:"ports"`
+	Ports      []int    `json:"ports"` // Empty is unallocated; [0] permits any available port.
 	Enabled    *bool    `json:"enabled,omitempty"`
 	Reinvite   bool     `json:"reinvite,omitempty"`
 }
@@ -65,7 +65,7 @@ type AgentShareRequest struct {
 	AgentID    string   `json:"agent_id"`
 	Engines    []Engine `json:"engines"`
 	LimitBytes uint64   `json:"limit_bytes"`
-	Ports      []int    `json:"ports"`
+	Ports      []int    `json:"ports"` // Empty is unallocated; [0] permits any available port.
 	Enabled    *bool    `json:"enabled,omitempty"`
 	Reinvite   bool     `json:"reinvite,omitempty"`
 }
@@ -79,6 +79,12 @@ type AgentAccessRequest struct {
 	Isolated bool                `json:"isolated"`
 	Shares   []AgentShareRequest `json:"shares"`
 	Revision int64               `json:"revision"`
+}
+
+// UnrestrictedSharedPorts recognizes the allocation sentinel, never a real
+// listener. Zero may not be combined with other ports.
+func UnrestrictedSharedPorts(ports []int) bool {
+	return len(ports) == 1 && ports[0] == 0
 }
 
 // SharedTrafficQuota accompanies every reserved port on the Agent. UsedBytes

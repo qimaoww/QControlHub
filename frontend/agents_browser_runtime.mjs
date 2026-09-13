@@ -1335,6 +1335,7 @@ async function testUsersLayoutRuntime() {
   assert.equal(form(), null, "分配结果仍是未保存的勾选表单");
   assert.equal(workspace().querySelectorAll("[data-allocation-agent]").length, 2);
   assert.equal(workspace().querySelector("[data-share-count]").textContent, "2");
+  assert.ok(row("alpha").textContent.includes("未分配"), "空端口应显示为未分配");
   assert.equal(workspace().querySelector("[data-share-empty]"), null, "有分配时不应显示空状态");
   assert.equal(workspace().querySelector(".user-isolation, .settings-section-number, .settings-savebar"), null, "用户分配保留了重复说明或全局保存栏");
   assert.ok(workspace().querySelector(".user-allocation-head [data-allocation-add]"), "分配入口应集中在标题栏");
@@ -1393,19 +1394,44 @@ async function testUsersLayoutRuntime() {
   assert.ok(form().querySelector("[data-user-error]").textContent.includes("大于 0"), "限量选项把零额度静默解释为不限量");
   assert.equal(testAPI.allocationWrites.length, 0);
   change(form().elements.limit_gib, "2.5");
-  change(form().elements.ports, "31003, 39003");
+  assert.ok(form().elements.ports.placeholder.includes("21000-21100"), "端口输入没有范围示例");
+  for (const [ports, error] of [["21000-21256", "256"], ["21000-21002,21001", "重叠"], ["10084-10087", "保留"], ["21100-21000", "起始"], ["0,21001", "混用"]]) {
+    change(form().elements.ports, ports);
+    form().requestSubmit();
+    assert.ok(form().querySelector("[data-user-error]").textContent.includes(error), `无效范围没有明确提示：${ports}`);
+    assert.equal(testAPI.allocationWrites.length, 0, "无效端口范围不能提交");
+  }
+  change(form().elements.ports, "21000-21100, 22000");
   await assertFits();
   const saved = await save();
   assert.ok(saved.isolated && saved.user_id === "cdn" && saved.revision === 4, "保存改变了账号隔离或覆盖保护");
   const allocation = saved.shares.find(share => share.agent_id === "charlie");
   assert.equal(allocation.limit_bytes, 2.5 * 1024 ** 3);
-  assert.equal(allocation.ports.join(","), "31003,39003");
+  assert.equal(allocation.ports.join(","), [...Array.from({ length: 101 }, (_, index) => 21000 + index), 22000].join(","),
+    "范围没有按首尾包含的完整端口列表提交");
   assert.equal(allocation.engines.join(","), "xray", "保存扩大了内核授权");
   assert.equal(saved.shares.find(share => share.agent_id === "alpha").limit_bytes, 0, "零额度的不限量语义改变");
   assert.equal(saved.shares.length, 3, "添加一个节点时遗漏了既有分配");
   assert.equal(status("alpha"), "待接受", "待接受的共享不能提前生效");
   assert.equal(status("charlie"), "待接受", "发送邀请被展示为已接受");
   assert.ok(document.querySelector("[data-allocation-add]").disabled, "没有剩余节点时分配入口应禁用");
+  assert.ok(row("charlie").textContent.includes("21000-21100, 22000"), "已保存的端口范围展开成了长列表");
+  row("charlie").querySelector("[data-allocation-edit]").click();
+  assert.equal(form().elements.ports.value, "21000-21100, 22000", "重新编辑没有保留完整范围");
+  form().querySelector("[data-allocation-close]").click();
+  assert.equal(testAPI.allocationWrites.length, 1, "关闭范围编辑意外保存");
+  for (const [text, ports, label] of [["0", [0], "无限制"], ["", [], "未分配"], ["21001-21003", [21001, 21002, 21003], "21001-21003"], ["0", [0], "无限制"]]) {
+    row("charlie").querySelector("[data-allocation-edit]").click();
+    change(form().elements.ports, text);
+    const saved = await save(), share = saved.shares.find(share => share.agent_id === "charlie");
+    assert.equal(JSON.stringify(share.ports), JSON.stringify(ports), "端口权限模式未正确保存");
+    assert.equal(share.limit_bytes, 2.5 * 1024 ** 3, "端口模式改变了流量额度");
+    assert.ok(row("charlie").textContent.includes(label), "端口权限模式未正确显示");
+    row("charlie").querySelector("[data-allocation-edit]").click();
+    assert.equal(form().elements.ports.value, text, "重新编辑丢失端口模式");
+    await assertFits();
+    form().querySelector("[data-allocation-close]").click();
+  }
   await assertFits();
   row("bravo").querySelector("[data-allocation-edit]").click();
   change(form().elements.limit_gib, "75");
@@ -1415,6 +1441,7 @@ async function testUsersLayoutRuntime() {
   form().querySelector('[name="quota_mode"][value="unlimited"]').click();
   const unlimited = await save();
   assert.equal(unlimited.shares.find(share => share.agent_id === "bravo").limit_bytes, 0, "不限量选择没有转成 API 的零额度");
+  assert.equal(unlimited.shares.find(share => share.agent_id === "charlie").ports.join(","), "0", "编辑其他节点清除了无限制端口授权");
   row("bravo").querySelector("[data-allocation-edit]").click();
   assert.ok(form().querySelector("[data-allocation-consent]").hidden, "未改变内核时重复提示邀请");
   form().querySelector('[name="engines"][value="sing-box"]').click();
@@ -1452,6 +1479,8 @@ async function testUsersLayoutRuntime() {
   change(form().querySelector("[data-share-agent]"), "bravo");
   form().querySelector('[name="engines"][value="mihomo"]').click();
   await save();
+  assert.equal(testAPI.allocationWrites.at(-1).shares[0].ports.length, 0, "新分配留空时隐式授予了端口权限");
+  assert.ok(row("bravo").textContent.includes("未分配"), "新分配留空时没有显示未分配");
   assert.equal(workspace().querySelector("[data-share-empty]"), null, "发送首个邀请后空状态未隐藏");
   assert.equal(workspace().querySelector("[data-share-count]").textContent, "1");
   assert.equal(testAPI.allocationWrites.at(-1).user_id, "new-user", "分配被写入上一个账号");

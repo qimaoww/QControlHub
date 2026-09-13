@@ -370,7 +370,8 @@ func (s *Store) UserAgentAccess(ctx context.Context, userID string) (core.AgentA
 	rows, err := s.pool.Query(ctx, `SELECT share.id,share.user_id,share.agent_id,agent.name,share.enabled,
 		share.status,share.invitation_revision,COALESCE(agent_owner.username,''),
 		share.limit_bytes,share.used_bytes,share.created_at,share.updated_at,share.engines,
-		ARRAY(SELECT reserved.port FROM agent_share_ports reserved WHERE reserved.share_id=share.id ORDER BY reserved.port)
+		CASE WHEN share.ports_unrestricted THEN ARRAY[0]
+			ELSE ARRAY(SELECT reserved.port FROM agent_share_ports reserved WHERE reserved.share_id=share.id ORDER BY reserved.port) END
 		FROM agent_shares share JOIN agents agent ON agent.id=share.agent_id
 		LEFT JOIN panel_users agent_owner ON agent_owner.id=agent.owner_id
 		WHERE share.user_id=$1 AND agent.revoked_at IS NULL ORDER BY agent.name,share.agent_id`, userID)
@@ -409,15 +410,9 @@ func (s *Store) SetUserAgentAccess(ctx context.Context, userID string, request c
 			return core.AgentAccess{}, err
 		}
 		shares[index].Engines = engines
-		ports := append([]int(nil), share.Ports...)
-		sort.Ints(ports)
-		if len(ports) > 256 {
-			return core.AgentAccess{}, fmt.Errorf("%w: at most 256 ports per Agent", ErrInvalid)
-		}
-		for i, port := range ports {
-			if port < 1 || port > 65535 || port == 10085 || port == 10086 || (i > 0 && ports[i-1] == port) {
-				return core.AgentAccess{}, fmt.Errorf("%w: invalid, reserved or duplicate shared port", ErrInvalid)
-			}
+		ports, err := normalizeSharedPorts(share.Ports)
+		if err != nil {
+			return core.AgentAccess{}, err
 		}
 		shares[index].Ports = ports
 	}
@@ -568,6 +563,23 @@ func normalizeSharedEngines(engines []core.Engine, enabled bool) ([]core.Engine,
 		return nil, fmt.Errorf("%w: select at least one shared engine", ErrInvalid)
 	}
 	return core.IntersectEngines(core.AllEngines(), engines), nil
+}
+
+func normalizeSharedPorts(ports []int) ([]int, error) {
+	ports = append([]int(nil), ports...)
+	if core.UnrestrictedSharedPorts(ports) {
+		return ports, nil
+	}
+	if len(ports) > 256 {
+		return nil, fmt.Errorf("%w: at most 256 ports per Agent", ErrInvalid)
+	}
+	sort.Ints(ports)
+	for i, port := range ports {
+		if port < 1 || port > 65535 || port == 10085 || port == 10086 || (i > 0 && ports[i-1] == port) {
+			return nil, fmt.Errorf("%w: invalid, reserved or duplicate shared port", ErrInvalid)
+		}
+	}
+	return ports, nil
 }
 
 func shareEnabled(request core.AgentShareRequest) bool {
