@@ -140,6 +140,8 @@ if (mode === "logs-restore") {
 }
 if (mode === "traffic-layout") {
   location.hash = "#traffic";
+  setStorageAccount({ role: "admin" });
+  accountStorage.setItem("qcontrolhub:node-card-order", JSON.stringify(["alpha", "delta", "bravo", "charlie"]));
   testAPI.trafficCandidates = [
     { agent_id: "alpha", name: "误删的 VLESS 入口", engine: "xray", port: 443, protocol: "both", kind: "deleted" },
     { agent_id: "bravo", name: "新增的香港入口", engine: "sing-box", port: 9443, protocol: "tcp", kind: "new" },
@@ -351,7 +353,7 @@ window.fetch = async (input, options = {}) => {
     return json({ enabled });
   }
   if (method === "GET" && path === "/regions")
-    return testAPI.regionCatalogFailure ? json({ error: "temporary catalog failure" }, 503) : json(["CN", "HK", "MO", "TW", "US", "SG", "JP", "GB", "DE", "FR", "AQ", "KR", "CA", "AU", "NL", "IN", "AT", "BE", "BR", "CH", "ES", "FI", "IE", "IS", "IT", "LU", "MY", "NO", "NZ", "PH", "PL", "RU", "SE", "TH", "TR", "VN", "ZA"]);
+    return testAPI.regionCatalogFailure ? json({ error: "temporary catalog failure" }, 503) : json(["CN", "HK", "MO", "TW", "US", "SG", "JP", "GB", "DE", "FR", "AQ", "KR", "CA", "AU", "NL", "IN", "AT", "BE", "BO", "BR", "CH", "ES", "FI", "IE", "IS", "IT", "LU", "MX", "MY", "NO", "NZ", "PH", "PL", "RS", "RU", "SE", "SV", "TH", "TR", "VN", "ZA"]);
   if (method === "PUT" && /^\/agents\/[^/]+\/region$/.test(path)) {
     if (testAPI.regionSaveFailure) return json({ error: "temporary region save failure" }, 503);
     if (testAPI.regionSaveGate) await testAPI.regionSaveGate;
@@ -1208,6 +1210,17 @@ async function testRegionRuntime() {
   assert.equal(location.hash, initialHash, "点击旗帜不应打开节点卡片");
   assert.ok(form.closest("dialog").querySelector("h2").getBoundingClientRect().width > 200, "弹窗标题被挤入图标列");
   const search = form.elements.namedItem("query");
+  for (const [code, name] of [["BO", "玻利维亚"], ["ES", "西班牙"], ["MX", "墨西哥"], ["RS", "塞尔维亚"], ["SV", "萨尔瓦多"]]) {
+    search.value = name;
+    search.dispatchEvent(new Event("input", { bubbles: true }));
+    const choice = form.querySelector(`[data-region-choice="${code}"]`);
+    assert.ok(choice, `${name}旗帜不在搜索结果中`);
+    choice.click();
+    await waitFor(() => {
+      const image = flag(form.querySelector("[data-region-preview]"), code.toLowerCase());
+      return image?.complete && image.naturalWidth > 0;
+    }, `${name}旗帜预览没有加载`);
+  }
   search.value = "japan";
   search.dispatchEvent(new Event("input", { bubbles: true }));
   assert.equal(form.querySelectorAll("[data-region-choice]").length, 1, "英文搜索未筛选国家/地区");
@@ -1760,6 +1773,11 @@ try {
   await import("./app.js");
   if (mode === "traffic-layout") {
     await waitFor(()=>document.querySelectorAll(".traffic-accounting-panel").length===4,"traffic accounting cards did not load");
+    const cardNodes = () => [...document.querySelectorAll(".traffic-policy-grid > [data-traffic-agent-card]")].map(card => card.dataset.trafficAgentCard).join(",");
+    const sidebarNodes = () => [...document.querySelectorAll(".context-list [data-context-traffic-agent]")].map(link => link.dataset.contextTrafficAgent).join(",");
+    assert.equal(cardNodes(), "alpha,delta,bravo,charlie", "default traffic cards must follow saved node order");
+    assert.equal(cardNodes(), sidebarNodes(), "default traffic cards and the node sidebar must agree");
+    assert.equal(accountStorage.getItem("qcontrolhub:traffic-card-order"), null, "default rendering must not freeze a custom card order");
     assert.equal(document.querySelectorAll(".traffic-accounting-panel.bad").length,1,"scope limitation must not be rendered as an error");
     assert.equal(document.querySelectorAll(".traffic-accounting-details[open]").length,0,"diagnostics should be collapsed initially");
     assert.equal(document.querySelectorAll(".traffic-status-dialog[open]").length,0,"status dialogs must start closed");
@@ -1790,6 +1808,15 @@ try {
     assert.ok(quota.checkValidity(), "zero must be a valid monitor-only quota");
     quota.value = "";
     if (new URLSearchParams(location.search).has("preview")) await new Promise(() => {});
+    accountStorage.setItem("qcontrolhub:node-card-order", JSON.stringify(["bravo", "alpha", "delta", "charlie"]));
+    await waitFor(() => cardNodes() === "bravo,alpha,delta,charlie", "polling did not apply the updated node order");
+    assert.equal(cardNodes(), sidebarNodes(), "polling must keep cards and the sidebar in the same node order");
+    accountStorage.setItem("qcontrolhub:traffic-card-order", JSON.stringify(["charlie:8445", "alpha:8443"]));
+    await waitFor(() => cardNodes() === "charlie,alpha,bravo,delta", "custom traffic order must take priority over node order");
+    document.querySelector('[href="#traffic-agent-bravo"]').click();
+    await waitFor(() => cardNodes() === "bravo", "node filtering did not keep the selected node's card");
+    document.querySelector('[href="#traffic-all"]').click();
+    await waitFor(() => cardNodes() === "charlie,alpha,bravo,delta", "clearing a filter did not restore custom card order");
     const posts = () => testAPI.calls.filter(call => call.path === "/traffic-endpoints/sync" && call.method === "POST").length;
     const openSync = async () => {
       document.querySelector("[data-traffic-sync]").click();
