@@ -26,7 +26,7 @@ func auditPR183Request(client configScopeAPIClient, method, path string, body an
 	request.Header.Set("Content-Type", "application/json")
 	if client.token != "" {
 		request.Header.Set("Authorization", "Bearer "+client.token)
-	} else {
+	} else if client.cookie != nil {
 		request.AddCookie(client.cookie)
 		request.Header.Set(csrfHeader, client.csrf)
 	}

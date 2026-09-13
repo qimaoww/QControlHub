@@ -41,8 +41,9 @@ func isolatedConfigScopeStore(t *testing.T) (*Store, context.Context, string) {
 
 func TestConfigOwnerIsolationWithPostgreSQL(t *testing.T) {
 	db, ctx, _ := isolatedConfigScopeStore(t)
-	alice := WithConfigScope(ctx, "usr_alice", false)
-	bob := WithConfigScope(ctx, "usr_bob", false)
+	// These workspace-only fixtures have no durable user rows.
+	alice := WithConfigScope(ctx, "token_alice", false)
+	bob := WithConfigScope(ctx, "token_bob", false)
 	admin := WithConfigScope(ctx, "", true)
 	agent, _ := enrollTaskTestAgent(t, ctx, db)
 	base := core.Config{Name: "private", Engine: core.EngineMihomo, Content: "mixed-port: 21001\n"}
@@ -51,7 +52,7 @@ func TestConfigOwnerIsolationWithPostgreSQL(t *testing.T) {
 		t.Fatal(err)
 	}
 	archive, err := db.CreateConfig(alice, base)
-	if err != nil || archive.OwnerID != "usr_alice" {
+	if err != nil || archive.OwnerID != "token_alice" {
 		t.Fatalf("create owned archive: %+v %v", archive, err)
 	}
 	other, err := db.CreateConfig(bob, base)
@@ -63,10 +64,10 @@ func TestConfigOwnerIsolationWithPostgreSQL(t *testing.T) {
 		t.Fatalf("multiple configurations per user: %+v %v", second, err)
 	}
 	base.AgentID = agent.ID
-	base.OwnerID = "usr_bob" // Untrusted input cannot assign ownership.
+	base.OwnerID = "token_bob" // Untrusted input cannot assign ownership.
 	workspace, err := db.SaveAgentConfigWithClientMetadata(alice, base, 0,
 		ConfigClientMetadataMutation{Tag: "private", Content: `{"client_private":"alice-secret"}`})
-	if err != nil || workspace.OwnerID != "usr_alice" {
+	if err != nil || workspace.OwnerID != "token_alice" {
 		t.Fatalf("create private workspace: %+v %v", workspace, err)
 	}
 	base.Content = "mixed-port: 21002\n"
@@ -151,7 +152,7 @@ func TestConfigOwnerIsolationWithPostgreSQL(t *testing.T) {
 
 func TestTaskOwnerIsolationAndSharedHostExclusionWithPostgreSQL(t *testing.T) {
 	db, ctx, _ := isolatedConfigScopeStore(t)
-	alice, bob := WithConfigScope(ctx, "usr_alice", false), WithConfigScope(ctx, "usr_bob", false)
+	alice, bob := WithConfigScope(ctx, "token_alice", false), WithConfigScope(ctx, "token_bob", false)
 	agent, _ := enrollTaskTestAgent(t, ctx, db)
 	request := core.TaskRequest{AgentID: agent.ID, Engine: core.EngineMihomo, Action: core.ActionStatus}
 	task, err := db.CreateTask(alice, request)
@@ -229,14 +230,14 @@ func TestTaskOwnerIsolationAndSharedHostExclusionWithPostgreSQL(t *testing.T) {
 
 func TestSubStoreOwnerAndFormatIsolationWithPostgreSQL(t *testing.T) {
 	db, ctx, _ := isolatedConfigScopeStore(t)
-	alice, bob := WithConfigScope(ctx, "usr_alice", false), WithConfigScope(ctx, "usr_bob", false)
+	alice, bob := WithConfigScope(ctx, "token_alice", false), WithConfigScope(ctx, "token_bob", false)
 	agent, _ := enrollTaskTestAgent(t, ctx, db)
 	config, err := db.SaveAgentConfig(alice, core.Config{AgentID: agent.ID, Name: "private", Engine: core.EngineMihomo, Content: "mixed-port: 21001\n"}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	target, err := db.CreateSubStoreSyncTarget(alice, "Alice group", core.SubStoreSyncModeIncremental, core.SubStoreSyncFormatMihomo)
-	if err != nil || target.OwnerID != "usr_alice" || target.SyncFormat != core.SubStoreSyncFormatMihomo {
+	if err != nil || target.OwnerID != "token_alice" || target.SyncFormat != core.SubStoreSyncFormatMihomo {
 		t.Fatalf("owned format target: %+v %v", target, err)
 	}
 	bobTarget, err := db.CreateSubStoreSyncTarget(bob, "Bob group")

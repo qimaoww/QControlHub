@@ -154,8 +154,11 @@ func (s *Server) purgeUser(w http.ResponseWriter, request *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
-	s.recordAudit(request, "user.purged", user.Username, "account deleted; nodes and configurations moved to the administrator scope")
+	s.recordAudit(request, "user.purged", user.ID, user.Username+" deleted; fleet transferred, installation credentials and outstanding tasks revoked")
 	s.revokeUserSessions(user.ID)
+	for _, agentID := range user.AgentIDs {
+		s.refreshAgentTrafficPolicies(agentID)
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 

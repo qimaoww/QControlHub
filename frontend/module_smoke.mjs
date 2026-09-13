@@ -14,6 +14,7 @@ import "./traffic_smoke.mjs";
 import "./engine_capabilities_smoke.mjs";
 import "./users_smoke.mjs";
 import "./account_storage_smoke.mjs";
+import "./node_order_smoke.mjs";
 
 import {
   agentStructureSignature,

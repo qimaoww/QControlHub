@@ -59,7 +59,7 @@ export function installUsers(ctx) {
   let serial = 0, viewSerial = 0, captureActive = () => {};
   let activeInvitation = null;
   const captureDraft = () => captureActive();
-  const hasUnsavedChanges = () => Boolean(state.data.userDrafts?.size || state.data.userAccessSaves?.size || state.data.agentShareResponse);
+  const hasUnsavedChanges = () => Boolean(state.data.userDrafts?.size || state.data.userAccessSaves?.size || state.data.userDeletions?.size || state.data.agentShareResponse);
   const lockForm = (form, saving) => {
     const controls = [...form.elements].map((control) => [control, control.disabled]);
     saving.controls.push(...controls);
@@ -115,6 +115,7 @@ export function installUsers(ctx) {
     const data = state.data;
     data.userDrafts ||= new Map();
     data.userAccessSaves ||= new Map();
+    data.userDeletions ||= new Set();
     if (!editable) data.userDrafts.delete(user?.id);
     const draft = data.userDrafts.get(user?.id);
     const latestShares = access?.shares || [];
@@ -124,7 +125,7 @@ export function installUsers(ctx) {
     const ownedAgents = agents.filter((agent) => ownedIDs.has(agent.id));
     const available = agents.filter((agent) => !ownedIDs.has(agent.id) && !shares.some((share) => share.agent_id === agent.id));
     shell(`<div class="settings-workspace users-workspace">
-      <header class="users-toolbar"><h2>${user ? esc(user.display_name || user.username) : "用户"}</h2><div>${user ? '<button class="button small" type="button" data-user-edit>编辑账号</button>' : ""}${user && editable && user.id !== state.session?.user_id ? '<button class="button small danger-button" type="button" data-user-delete>删除账号</button>' : ""}<button class="button primary small" type="button" data-user-create>新增用户</button></div></header>
+      <header class="users-toolbar"><h2>${user ? esc(user.display_name || user.username) : "用户"}</h2><div>${user ? '<button class="button small" type="button" data-user-edit>编辑账号</button>' : ""}${user && editable && user.id !== state.session?.user_id ? `<button class="button small danger-button" type="button" data-user-delete ${data.userDeletions.has(user.id) ? "disabled" : ""}>删除账号</button>` : ""}<button class="button primary small" type="button" data-user-create>新增用户</button></div></header>
       ${items.length ? `<select class="users-mobile-select" data-user-mobile-select aria-label="选择用户">${items.map((item) => `<option value="${esc(item.id)}" ${item.id === user?.id ? "selected" : ""}>${esc(item.display_name || item.username)} · ${esc(item.username)}</option>`).join("")}</select>` : ""}
       ${user ? `<form class="settings-form" data-user-form data-user-access-form>
         <section class="settings-section">
@@ -172,23 +173,37 @@ export function installUsers(ctx) {
     bindEvent(document.querySelector("[data-user-delete]"), "click", async (event) => {
       const button = event.currentTarget;
       const label = user.display_name || user.username;
-      if (button.disabled || data !== state.data || state.route !== "users") return;
-      if (!await confirmAction(`删除账号“${label}”后无法恢复：该账号的节点、配置与模板将移交给管理员，共享与配额记录一并清理。`, "继续删除")) return;
-      if (!await confirmAction(`再次确认删除账号“${label}”（${user.username}）？`, "永久删除")) return;
-      if (data !== state.data || state.route !== "users") return;
+      const currentUser = () => data === state.data && state.route === "users" && data.userID === user.id && button.isConnected;
+      if (button.disabled || !currentUser() || data.userDeletions.has(user.id) || data.userAccessSaves.has(user.id)) return;
+      data.userDeletions.add(user.id);
       button.disabled = true;
       try {
+        if (!await confirmAction(`删除账号“${label}”后无法恢复：节点（含隐藏节点）、配置与模板将移交给管理员；旧安装凭据失效，未完成任务作废，共享与个人设置删除，流量历史保留。`, "继续删除")) return;
+        if (!currentUser()) return;
+        if (!await confirmAction(`再次确认删除账号“${label}”（${user.username}）？`, "永久删除")) return;
+        if (!currentUser()) return;
         await api(`/users/${encodeURIComponent(user.id)}/purge`, { method: "POST" });
-        if (data !== state.data || state.route !== "users") return;
+        if (data !== state.data) return;
         data.userDrafts?.delete(user.id);
         data.userAccessSaves?.delete(user.id);
-        data.userID = "";
-        await users();
+        data.users = data.users?.filter((item) => item.id !== user.id);
+        if (state.route === "users" && data.userID === user.id) {
+          // users() captures the visible form before refreshing. It must
+          // not resurrect an unsaved draft for the just-deleted account.
+          captureActive = () => {};
+          data.userID = "";
+          await users();
+        }
         notify(`账号“${label}”已删除`);
       } catch (error) {
         if (error.name !== "AbortError") notify(error.message, "error");
       } finally {
+        data.userDeletions.delete(user.id);
         button.disabled = false;
+        if (data === state.data && state.route === "users" && data.userID === user.id) {
+          const activeButton = document.querySelector("[data-user-delete]");
+          if (activeButton) activeButton.disabled = false;
+        }
       }
     });
     const form = document.querySelector("[data-user-access-form]");

@@ -47,7 +47,7 @@ func agentEngineAccessClause(ctx context.Context, column, engineColumn string, a
 	if engineColumn != "" {
 		engineWhere = ` AND (` + engineColumn + `='' OR ` + engineColumn + `=ANY(access_share.engines))`
 	}
-	return hidden + ` AND (NOT EXISTS (SELECT 1 FROM panel_users access_user WHERE access_user.id=` + owner + `)
+	return hidden + ` AND (starts_with(` + owner + `::text,'token_')
 		OR EXISTS (SELECT 1 FROM panel_users access_user WHERE access_user.id=` + owner + ` AND NOT access_user.disabled
 			AND (EXISTS (SELECT 1 FROM agents owned_agent WHERE owned_agent.id=` + column + ` AND owned_agent.owner_id=` + owner + `)
 				OR EXISTS (SELECT 1 FROM agent_shares access_share
@@ -70,7 +70,7 @@ func agentAdministrationClause(ctx context.Context, column string, args *[]any) 
 	if scope.Admin {
 		return hidden
 	}
-	return hidden + ` AND (NOT EXISTS(SELECT 1 FROM panel_users owner_user WHERE owner_user.id=` + owner + `)
+	return hidden + ` AND (starts_with(` + owner + `::text,'token_')
 		OR EXISTS(SELECT 1 FROM agents owned_agent JOIN panel_users owner_user ON owner_user.id=owned_agent.owner_id
 			WHERE owned_agent.id=` + column + ` AND owner_user.id=` + owner + ` AND NOT owner_user.disabled))`
 }
@@ -169,7 +169,8 @@ func requireNodeOwner(ctx context.Context, executor storeExecutor, agentID strin
 	var allowed bool
 	if err := executor.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agents
 		WHERE id=$1 AND revoked_at IS NULL AND owner_id=$2
-		  AND NOT EXISTS(SELECT 1 FROM panel_users owner_user WHERE owner_user.id=$2 AND owner_user.disabled))`, args...).Scan(&allowed); err != nil {
+		  AND ($2='' OR starts_with($2::text,'token_') OR EXISTS(
+			SELECT 1 FROM panel_users owner_user WHERE owner_user.id=$2 AND NOT owner_user.disabled)))`, args...).Scan(&allowed); err != nil {
 		return err
 	}
 	if !allowed {
@@ -210,9 +211,9 @@ func (s *Store) ListAgentDirectory(ctx context.Context) ([]core.AgentDirectoryEn
 			COALESCE((SELECT array_agg(DISTINCT policy.port ORDER BY policy.port)
 				FROM port_traffic_policies policy WHERE policy.agent_id=agents.id),'{}'::int[])
 		FROM agents LEFT JOIN panel_users owner ON owner.id=agents.owner_id
-		WHERE agents.revoked_at IS NULL AND agents.owner_id <> ''
+		WHERE agents.revoked_at IS NULL AND agents.owner_id <> '' AND agents.owner_id <> $1
 		ORDER BY agents.enrolled_at DESC
-		LIMIT 1000`)
+		LIMIT 1000`, scope.OwnerID)
 	if err != nil {
 		return nil, fmt.Errorf("list agent directory: %w", err)
 	}
@@ -280,13 +281,16 @@ func (s *Store) IsAgentIsolated(ctx context.Context) (bool, error) {
 }
 
 func lockAgentUser(ctx context.Context, tx pgx.Tx) error {
-	if scopeForConfig(ctx).Admin {
+	scope := scopeForConfig(ctx)
+	if scope.Admin || strings.HasPrefix(scope.OwnerID, "token_") {
 		return nil
 	}
 	var id string
-	err := tx.QueryRow(ctx, `SELECT id FROM panel_users WHERE id=$1 FOR SHARE`, scopeForConfig(ctx).OwnerID).Scan(&id)
+	err := tx.QueryRow(ctx, `SELECT id FROM panel_users WHERE id=$1 AND NOT disabled FOR SHARE`, scope.OwnerID).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil // Compatibility token identities have no panel-user row.
+		// A request that waited behind account deletion must fail closed.
+		// Only explicit token identities may lack a durable panel-user row.
+		return ErrNotFound
 	}
 	return err
 }

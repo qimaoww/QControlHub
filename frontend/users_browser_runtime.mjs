@@ -33,6 +33,7 @@ export async function testUsersRuntime(preview = false) {
   }]));
   const writes = [], notifications = [];
   let conflict = false, confirm = true, confirmCount = 0, holdSave, releaseSave, failedUser = "";
+  let confirmGate, releaseConfirm, purgeGate, releasePurge, rejectConfirmation = 0;
   const api = async (path, options = {}) => {
     const body = options.body ? JSON.parse(options.body) : undefined;
     if (options.method) writes.push({ path, body, method: options.method });
@@ -47,6 +48,7 @@ export async function testUsersRuntime(preview = false) {
     }
     const userID = path.split("/")[2];
     if (path.endsWith("/purge") && options.method === "POST") {
+      if (purgeGate) await new Promise(resolve => { releasePurge = resolve; });
       const index = items.findIndex(user => user.id === userID);
       if (index < 0) throw new Error("账号不存在");
       items.splice(index, 1);
@@ -70,7 +72,11 @@ export async function testUsersRuntime(preview = false) {
   };
   const pages = installUsers({
     api, state, esc, notify: message => notifications.push(message),
-    confirmAction: async () => { confirmCount++; return confirm; },
+    confirmAction: async () => {
+      confirmCount++;
+      if (confirmGate) await new Promise(resolve => { releaseConfirm = resolve; });
+      return confirm && confirmCount !== rejectConfirmation;
+    },
     shell: markup => {
       document.body.innerHTML = `<nav>${items.map(user => `<a href="#users" data-user-select="${user.id}">${user.username}</a>`).join("")}</nav><main>${markup}</main>`;
     },
@@ -203,13 +209,44 @@ export async function testUsersRuntime(preview = false) {
   await Promise.resolve();
   assert(!writes.some(write => write.path === "/users/alice/purge"), "canceling confirmation deleted the account");
   confirm = true;
+  rejectConfirmation = confirmCount + 2;
+  document.querySelector("[data-user-delete]").click();
+  await waitFor(() => !document.querySelector("[data-user-delete]").disabled, "canceling the second confirmation left deletion locked");
+  assert(!writes.some(write => write.path === "/users/alice/purge"), "canceling the second confirmation deleted the account");
+  rejectConfirmation = 0;
+
+  confirmGate = true;
+  const confirmButton = document.querySelector("[data-user-delete]");
+  const beforeDuplicate = confirmCount;
+  confirmButton.click();
+  confirmButton.click();
+  assert(confirmCount === beforeDuplicate + 1 && confirmButton.disabled, "confirmation allowed overlapping delete flows");
+  await select("bob");
+  confirmGate = false;
+  releaseConfirm();
+  await waitFor(() => !state.data.userDeletions.size, "stale confirmation did not settle");
+  assert(!writes.some(write => write.path === "/users/alice/purge"), "switching accounts during confirmation deleted the previous selection");
+  await select("alice");
+  input(row().querySelector('[name="ports"]'), "31001, unsaved-before-delete");
+  assert(state.data.userDrafts.has("alice"), "delete test did not capture the unsaved draft");
+
   const confirmsBefore = confirmCount;
+  purgeGate = true;
   document.querySelector("[data-user-delete]").click();
   await waitFor(() => writes.some(write => write.path === "/users/alice/purge"), "account deletion did not submit");
   assert(confirmCount === confirmsBefore + 2, "account deletion was not double-confirmed");
   assert(writes.find(write => write.path === "/users/alice/purge").method === "POST", "account deletion used the wrong method");
+  await select("bob");
+  await select("alice");
+  assert(document.querySelector("[data-user-delete]").disabled, "returning to an in-flight deletion allowed duplicate submission");
+  document.querySelector("[data-user-delete]").click();
+  assert(writes.filter(write => write.path === "/users/alice/purge").length === 1, "deletion submitted more than once");
+  purgeGate = false;
+  releasePurge();
   await waitFor(() => !items.some(user => user.id === "alice") && state.data.userID === "bob", "deleted account stayed selected");
   assert(notifications.includes("账号“Alice”已删除"), "account deletion was not reported");
+  assert(!state.data.userDrafts.has("alice") && !state.data.userDeletions.size && !pages.hasUnsavedChanges(),
+    "refresh resurrected the deleted account's draft or pending state");
   state.route = "my-quota";
   state.session = { role: "user", user_id: "bob" };
   access.get("bob").shares[0].enabled = false;

@@ -432,7 +432,8 @@ func (s *Store) EnrollAgent(ctx context.Context, request core.EnrollRequest, enr
 		UPDATE enrollment_tokens SET used_count=used_count+1
 		WHERE token_hash=$1 AND revoked_at IS NULL
 		  AND (reusable OR (expires_at>now() AND used_count<max_uses))
-		  AND NOT EXISTS(SELECT 1 FROM panel_users u WHERE u.id=enrollment_tokens.owner_id AND u.disabled)
+		  AND (owner_id='' OR starts_with(owner_id,'token_') OR EXISTS(
+			SELECT 1 FROM panel_users u WHERE u.id=enrollment_tokens.owner_id AND NOT u.disabled))
 		RETURNING id,name,reusable,agent_id,owner_id,admin_hidden`, tokenDigest[:]).Scan(&enrollmentID, &enrollmentName, &reusable, &enrollmentAgentID, &enrollmentOwner, &adminHidden)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return core.Agent{}, ErrNotFound
@@ -581,7 +582,22 @@ func (s *Store) CreateProtectedEnrollmentToken(ctx context.Context, request core
 }
 
 func (s *Store) createEnrollmentToken(ctx context.Context, request core.EnrollmentTokenRequest, protect bool) (core.EnrollmentTokenCreated, error) {
-	return s.createEnrollmentTokenWithExecutor(ctx, s.pool, request, protect)
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return core.EnrollmentTokenCreated{}, err
+	}
+	defer tx.Rollback(ctx)
+	if err := lockAgentUser(ctx, tx); err != nil {
+		return core.EnrollmentTokenCreated{}, err
+	}
+	created, err := s.createEnrollmentTokenWithExecutor(ctx, tx, request, protect)
+	if err != nil {
+		return core.EnrollmentTokenCreated{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return core.EnrollmentTokenCreated{}, err
+	}
+	return created, nil
 }
 
 // CreateProtectedEnrollmentTokenWithAudit commits the recoverable credential
@@ -593,6 +609,9 @@ func (s *Store) CreateProtectedEnrollmentTokenWithAudit(ctx context.Context, req
 		return core.EnrollmentTokenCreated{}, err
 	}
 	defer tx.Rollback(ctx)
+	if err := lockAgentUser(ctx, tx); err != nil {
+		return core.EnrollmentTokenCreated{}, err
+	}
 	created, err := s.createEnrollmentTokenWithExecutor(ctx, tx, request, true)
 	if err != nil {
 		return core.EnrollmentTokenCreated{}, err
@@ -825,6 +844,22 @@ func (s *Store) CreateAgentEnrollmentTokenWithAudit(ctx context.Context, agentID
 }
 
 func (s *Store) createAgentEnrollmentTokenTx(ctx context.Context, tx pgx.Tx, agentID string) (core.EnrollmentTokenCreated, error) {
+	if err := lockAgentUser(ctx, tx); err != nil {
+		return core.EnrollmentTokenCreated{}, err
+	}
+	// Administrators can issue a command for another user's node. Serialize
+	// that issuance with purge before locking the Agent or inserting a token.
+	if scopeForConfig(ctx).Admin {
+		rows, err := tx.Query(ctx, `SELECT id FROM panel_users
+			WHERE id=(SELECT owner_id FROM agents WHERE id=$1) FOR SHARE`, agentID)
+		if err != nil {
+			return core.EnrollmentTokenCreated{}, err
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return core.EnrollmentTokenCreated{}, err
+		}
+	}
 	if err := requireAgentAdministration(ctx, tx, agentID); err != nil {
 		return core.EnrollmentTokenCreated{}, err
 	}
@@ -885,7 +920,8 @@ func (s *Store) EnrollmentTokenUsable(ctx context.Context, rawToken string) bool
 	err := s.pool.QueryRow(ctx, `
 		SELECT expires_at,max_uses,used_count,reusable,revoked_at
 		FROM enrollment_tokens WHERE token_hash=$1
-			AND NOT EXISTS(SELECT 1 FROM panel_users u WHERE u.id=enrollment_tokens.owner_id AND u.disabled)`, digest[:]).Scan(&expiresAt, &maxUses, &usedCount, &reusable, &revokedAt)
+			AND (owner_id='' OR starts_with(owner_id,'token_') OR EXISTS(
+				SELECT 1 FROM panel_users u WHERE u.id=enrollment_tokens.owner_id AND NOT u.disabled))`, digest[:]).Scan(&expiresAt, &maxUses, &usedCount, &reusable, &revokedAt)
 	return err == nil && revokedAt == nil && (reusable || (expiresAt != nil && usedCount < maxUses && time.Now().Before(*expiresAt)))
 }
 
