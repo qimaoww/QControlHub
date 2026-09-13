@@ -1137,7 +1137,7 @@ func TestCoreLogStoragePolicyNavigationAndVisibility(t *testing.T) {
 		`href="#settings-data"><span>04</span>数据与日志`,
 		`href="#settings-notify"><span>05</span>事件通知`,
 		`href="#settings-komari"><span>06</span>Komari 联动`,
-		`href="#settings-deployment"><span>07</span>部署状态`,
+		`href="#settings-deployment"><span>08</span>部署状态`,
 		`"settings-engines": "settings"`,
 		`"settings-data": "settings"`,
 	} {

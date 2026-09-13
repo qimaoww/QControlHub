@@ -212,6 +212,20 @@ export function bindConfigFiles(form, engine, notify) {
     } catch { /* A syntax error must not discard a draft or block switching. */ }
   };
   const controller = {
+    selectedInbound() {
+      if (selected === "preview" || selected === 0) return null;
+      try {
+        const entry = JSON.parse(input.value).inbounds?.[0];
+        return entry && { tag: entry.tag, port: Number(entry.port ?? entry.listen_port) };
+      } catch { return null; }
+    },
+    selectInbound(tag, port) {
+      const index = files.findIndex((file, i) => {
+        if (!i) return false;
+        try { const entry = JSON.parse(file.content).inbounds?.[0]; return entry?.tag === tag && Number(entry.port ?? entry.listen_port) === port; } catch { return false; }
+      });
+      if (index > 0) switchFile(index);
+    },
     content() { save(); return mergeConfigFiles(files); },
     paths() { save(); refreshNames(); return files.map(file => file.path); },
     original() { return selected === "preview" ? input.value : originals[selected]; },

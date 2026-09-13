@@ -1,6 +1,7 @@
 import { diagnosticError } from "./errors.js";
 import { bindEvent } from "./refresh.js";
 import { bindConfigFiles } from "./config-files.js";
+import { bindConfigRestrictions } from "./config-restrictions.js";
 import { createPresetDrafts } from "./preset-drafts.js";
 import { presetRoute } from "./preset-route.js";
 import { createPresetReads, renderPresetIdentity } from "./preset-runtime.js";
@@ -1590,6 +1591,20 @@ async function liveConfig() {
   });
   const configFiles = bindConfigFiles(document.querySelector("#live-config-form"), engine, notify);
   bindCodeEditors();
+  void bindConfigRestrictions({
+    ...ctx, form: document.querySelector("#live-config-form"), files: configFiles,
+    agent, engine, saved, sourceMode,
+    onSaved: async (result, chosen) => {
+      if (accountData !== state.data) return;
+      state.data.liveSources[sourceKey] = { ...source, content: result.config.content };
+      if (result.task?.action === "deploy") {
+        recordPendingDeploy(result.task.id, agent.id, engine);
+        monitorDeployTask(result.task.id, agent.id, engine);
+      }
+      await liveConfig();
+      document.querySelector("#live-config-form [data-code-editor]")?.configFileController?.selectInbound(chosen.tag, chosen.port);
+    },
+  });
   bindEvent(document.querySelector("#live-config-form"), "submit", async (event) => {
       event.preventDefault();
       if (accountData !== state.data) return;

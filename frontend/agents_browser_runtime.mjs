@@ -227,6 +227,7 @@ window.fetch = async (input, options = {}) => {
     }
   }
   if (mode === "config-layout") {
+    if (path === "/access-controls") return json(testAPI.agents.flatMap(agent => ["xray","sing-box"].flatMap(engine => ["socks-in","http-in"].map((tag,i) => ({agent_id:agent.id,agent_name:agent.name,agent_status:agent.status,engine,tag,port:i?8080:1080,config_version:8,block_mainland_destination:!i,block_mainland_source:Boolean(i)})))));
     if (path === "/settings") return json({panel_name:"QControlHub"});
     if (path.endsWith("/workspace")) {
       const engine = path.split("/")[4];
@@ -462,8 +463,12 @@ async function testCapabilitySettingsRuntime() {
     assert.equal(form.querySelector("[data-save-settings]"), null, "只读页不得提供保存入口");
     return;
   }
+  const ipv4 = form.querySelector('[name="cnip_ipv4_url"]'), ipv6 = form.querySelector('[name="cnip_ipv6_url"]');
+  assert.ok(ipv4 && ipv6 && !form.querySelector('[name="cnip_format"]'), "CN IP sources must use automatic format and both families");
   const save = form.querySelector("[data-save-settings]");
   assert.ok(save.disabled, "初始状态不应需要保存");
+  ipv4.value = "https://example.com/cn.mmdb";
+  ipv6.value = "https://example.com/cn6.srs";
   inputs[1].click();
   assert.ok(!save.disabled, "切换应标记待保存");
   assert.notEqual(getComputedStyle(inputs[1].closest("label").querySelector(".when-enabled")).display, "none", "状态文字须随开关即时更新");
@@ -476,6 +481,9 @@ async function testCapabilitySettingsRuntime() {
   form.requestSubmit(save);
   await waitFor(() => testAPI.settings.revision === 2, "全局能力未保存");
   assert.equal(testAPI.settings.default_agent_engines.length, 0, "必须允许全部关闭");
+  assert.equal(testAPI.settings.cnip_source.ipv4_url, ipv4.value, "IPv4 source missing from save");
+  assert.equal(testAPI.settings.cnip_source.ipv6_url, ipv6.value, "IPv6 source missing from save");
+  assert.equal(testAPI.settings.cnip_source.format, "auto", "format must be automatic");
   assert.ok(save.disabled, "保存成功后应清除待保存状态");
 }
 
@@ -1753,6 +1761,9 @@ try {
   } else if (mode === "presets") {
     const { testPresetsRuntime } = await import("./presets_browser_runtime.mjs");
     await testPresetsRuntime(new URLSearchParams(location.search).has("preview"));
+  } else if (mode === "config-restrictions") {
+    const { testConfigRestrictionsRuntime } = await import("./config_restrictions_browser_runtime.mjs");
+    await testConfigRestrictionsRuntime();
   } else if (mode === "config-migration") {
     const {testConfigMigrationRuntime} = await import("./config_migration_browser_runtime.mjs");
     await testConfigMigrationRuntime(new URLSearchParams(location.search).has("preview"));

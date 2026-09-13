@@ -69,7 +69,8 @@ export function installSettings(ctx) {
           ${toggle(item, "notify_traffic_quota", "流量配额事件", "端口达到配额并触发阻断", disabled)}
         </div>`)}
         ${section("settings-komari", "06", "Komari 联动", "配置 Komari 监控服务后，可在节点卡片网络区读取当前周期、已用量和月度流量额度。", `<div class="settings-grid one-column">${field("komari_url", "Komari 地址", `<input name="komari_url" type="url" value="${esc(item.komari_url || "")}" maxlength="500" placeholder="https://komari.example.com" ${disabled}>`, "填写 Komari 站点根地址，不要填写 /api/nodes。")}${field("komari_api_key", "Komari API Key", `<input name="komari_api_key" type="password" value="" maxlength="500" autocomplete="new-password" placeholder="${item.komari_api_key ? "已配置，留空保持" : "可选，填写后保存"}" ${disabled}>`, "API Key 仅用于控制面读取节点信息，已保存的 Key 不会回显。")}</div>${item.komari_api_key ? `<label class="settings-toggle"><span><b>清除 API Key</b><small>下次保存时删除已保存的认证密钥</small></span><input type="checkbox" name="clear_komari_api_key" ${disabled}></label>` : ""}<p class="settings-hint">配置完成后，在“节点设置”中为每个节点填写对应的 Komari 服务器 UUID。</p>`)}
-        ${section("settings-deployment", "07", "部署状态", "高风险密钥、数据库地址和代理信任范围只读展示，仍由部署环境管理。", `<div class="settings-deployment-grid"><div><h4>安全状态</h4><ul class="settings-health-list">${securityRows}<li><span><b>可信代理</b><small>已配置 ${esc(deployment.trusted_proxy_count)} 条网段</small></span><em>${esc(deployment.trusted_proxy_count)}</em></li></ul></div><div class="settings-version-card"><header><h4>组件版本</h4><button class="button small" type="button" data-check-update>检查更新</button></header><dl><div><dt>Control Plane</dt><dd><code>${esc(deployment.control_plane_version || "unknown")}</code><span>当前</span></dd></div><div><dt>QAgent 安装包</dt><dd><code>${esc(deployment.agent_package_version || "unknown")}</code><span>当前</span></dd></div></dl><p data-update-result>尚未检查 GHCR latest；只检查，不会自动升级。</p></div></div>`)}
+        ${section("settings-cnip", "07", "CN IP 数据源", "当前账号独立设置，下次配置校验或部署时生效。", `<div class="settings-grid one-column">${field("cnip_ipv4_url", "IPv4 数据源", `<input type="url" name="cnip_ipv4_url" value="${esc(item.cnip_source?.ipv4_url || "")}" placeholder="留空使用默认大陆 IPv4 源" maxlength="2000" ${disabled}>`, "填写 HTTPS 文件直链，自动提取 IPv4 网段。")}${field("cnip_ipv6_url", "IPv6 数据源", `<input type="url" name="cnip_ipv6_url" value="${esc(item.cnip_source?.ipv6_url || "")}" placeholder="留空使用默认大陆 IPv6 源" maxlength="2000" ${disabled}>`, "填写 HTTPS 文件直链，自动提取 IPv6 网段；双栈文件可与 IPv4 使用同一地址。")}</div><p class="settings-hint">自动识别 TXT / DAT / SRS / MMDB，无需选择格式。DAT / MMDB 提取 CN；SRS 仅接受纯 IP 规则。任一地址留空即使用该地址族的默认源。</p>`)}
+        ${section("settings-deployment", "08", "部署状态", "高风险密钥、数据库地址和代理信任范围只读展示，仍由部署环境管理。", `<div class="settings-deployment-grid"><div><h4>安全状态</h4><ul class="settings-health-list">${securityRows}<li><span><b>可信代理</b><small>已配置 ${esc(deployment.trusted_proxy_count)} 条网段</small></span><em>${esc(deployment.trusted_proxy_count)}</em></li></ul></div><div class="settings-version-card"><header><h4>组件版本</h4><button class="button small" type="button" data-check-update>检查更新</button></header><dl><div><dt>Control Plane</dt><dd><code>${esc(deployment.control_plane_version || "unknown")}</code><span>当前</span></dd></div><div><dt>QAgent 安装包</dt><dd><code>${esc(deployment.agent_package_version || "unknown")}</code><span>当前</span></dd></div></dl><p data-update-result>尚未检查 GHCR latest；只检查，不会自动升级。</p></div></div>`)}
         ${writable ? `<footer class="settings-savebar"><div class="settings-savebar-copy"><b data-save-title>所有更改已保存</b><small><span class="settings-saved-state" data-settings-state>已保存 · v${esc(item.revision)}</span> 修改任一选项后可统一保存。</small></div><button class="button primary" type="submit" data-save-settings disabled>保存更改</button></footer>` : `<p class="settings-hint"><span class="settings-saved-state" data-settings-state>已保存 · v${esc(item.revision)}</span> 当前账号仅可查看设置。</p>`}
       </form>
     </div>`, "系统设置");
@@ -95,6 +96,7 @@ export function installSettings(ctx) {
       const number = (name) => Number(data.get(name));
       const body = {
         revision: item.revision,
+        cnip_source: { ipv4_url: String(data.get("cnip_ipv4_url") || "").trim(), ipv6_url: String(data.get("cnip_ipv6_url") || "").trim(), format: "auto" },
         default_agent_engines: selectedDefaultEngines(data),
         panel_name: data.get("panel_name"), panel_description: data.get("panel_description"),
         time_zone: data.get("time_zone"), time_display: data.get("time_display"), ui_font_scale: number("ui_font_scale"), default_config_editor: data.get("default_config_editor"),
@@ -122,7 +124,7 @@ export function installSettings(ctx) {
         stateBadge.textContent = `已保存 · v${saved.revision}`;
         stateBadge.classList.remove("dirty");
         if (saveTitle) saveTitle.textContent = "所有更改已保存";
-        notify("设置已保存；运行策略变更会由在线 Agent 自动应用");
+        notify("设置已保存；CN IP 源将在下次配置校验或部署时生效。");
       } catch (error) {
         if (state.data !== accountData || error.name === "AbortError") return;
         saveButton.disabled = false;

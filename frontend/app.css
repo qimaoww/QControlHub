@@ -710,6 +710,29 @@ dialog[open]::backdrop{animation:qch-backdrop-enter 220ms ease both}
 .settings-field input,.settings-field select{min-width:0}
 .settings-field small{overflow-wrap:anywhere}
 @media(max-width:820px) and (pointer:coarse){.settings-section>.settings-hint{padding:0 16px 16px}.settings-section>.settings-toggle{margin-inline:16px}}
+/* Contextual restrictions use the currently selected configuration inbound. */
+.config-file-buttons>.config-access-trigger{align-self:center;flex:0 0 auto;gap:8px;height:38px;margin-left:auto;padding:8px 16px}
+.config-access-trigger svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.7}
+dialog.config-access-dialog{position:fixed;inset:0;width:min(720px,calc(100vw - 48px));max-width:none;max-height:calc(100dvh - 64px);height:fit-content;min-height:0;margin:auto;padding:0 24px 20px;border:1px solid var(--line);border-radius:16px;background:var(--surface-2);color:var(--ink);box-shadow:0 32px 100px #11142433;overflow-y:auto}
+dialog.config-access-dialog:not([open]){display:none}
+dialog.config-access-dialog[open]{display:block}
+dialog.config-access-dialog::backdrop{background:rgba(17,20,36,.34);backdrop-filter:blur(3px)}
+.config-access-heading{position:sticky;top:0;z-index:1;display:flex;align-items:center;justify-content:space-between;gap:16px;background:var(--surface-2);margin:0 -24px 20px;padding:22px 24px 18px;border-bottom:1px solid var(--line)}
+.config-access-heading>div{min-width:0}
+.config-access-heading h2{margin:0 0 5px;font-size:calc(18px * var(--ui-font-scale))}
+.config-access-heading p{font-size:calc(12px * var(--ui-font-scale));color:var(--muted);overflow-wrap:anywhere}
+.config-access-close{display:flex;align-items:center;justify-content:center;flex:0 0 34px;width:34px;height:34px;padding:0;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--muted);font-size:calc(24px * var(--ui-font-scale));line-height:1}
+.config-access-dialog .access-control-card{border-radius:10px;box-shadow:none}
+.config-access-dialog .access-control-card>header{display:none}
+.config-access-dialog .access-control-card form{grid-template-columns:1fr}
+.config-access-dialog .access-control-option{padding:22px 18px}
+.config-access-dialog .access-control-option+.access-control-option{border-left:0}
+.config-access-dialog .access-control-option b{font-size:calc(13px * var(--ui-font-scale))}
+.config-access-dialog .access-control-option small{font-size:calc(11px * var(--ui-font-scale));margin-top:3px}
+.config-access-note{display:flex;justify-content:space-between;gap:16px;margin-top:18px;font-size:calc(11px * var(--ui-font-scale));color:var(--muted)}
+.config-access-note a{color:var(--accent);white-space:nowrap}
+@media(max-width:650px){dialog.config-access-dialog{width:calc(100vw - 24px);max-height:calc(100dvh - 32px);padding:0 12px 16px;border-radius:12px}.config-access-heading{margin:0 -12px 16px;padding:16px 12px}.config-access-heading h2{font-size:calc(16px * var(--ui-font-scale))}.config-access-dialog .access-control-card form>footer{flex-wrap:wrap}.config-access-note{flex-direction:column;gap:6px}}
+
 /* Field workspaces share the compact, token-based panel theme across engines.
    A two-column row never relies on an optional status-dot placeholder. */
 .config-field-studio,.config-source-studio{min-width:0;margin-top:12px;border:1px solid var(--line);border-radius:12px;background:var(--surface);box-shadow:none;overflow:hidden;container:field-studio / inline-size;scroll-margin-top:12px}

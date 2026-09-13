@@ -320,12 +320,22 @@ func mainlandMihomoProviderReferenced(rule string) bool {
 }
 
 func mainlandMihomoManagedIPv6Provider(provider map[string]any) bool {
+	if mainlandMihomoInlineProvider(provider) {
+		return true
+	}
 	return len(provider) == 6 && stringValue(provider["type"]) == "http" && stringValue(provider["behavior"]) == "ipcidr" &&
 		stringValue(provider["format"]) == "text" && stringValue(provider["url"]) == ChinaRoutesIPv6URL &&
 		stringValue(provider["path"]) == "./ruleset/qch-china-cn-ipv6.txt" && intValue(provider["interval"]) == 86400
 }
 
+func mainlandMihomoInlineProvider(provider map[string]any) bool {
+	return len(provider) == 3 && stringValue(provider["type"]) == "inline" && stringValue(provider["behavior"]) == "ipcidr" && len(stringSliceValue(provider["payload"])) > 0
+}
+
 func mainlandMihomoManagedProvider(provider map[string]any) bool {
+	if mainlandMihomoInlineProvider(provider) {
+		return true
+	}
 	return len(provider) == 6 && stringValue(provider["type"]) == "http" && stringValue(provider["behavior"]) == "ipcidr" &&
 		stringValue(provider["format"]) == "text" && stringValue(provider["url"]) == ChinaRoutesURL &&
 		stringValue(provider["path"]) == "./ruleset/qch-chnroutes2-cn.txt" && intValue(provider["interval"]) == 3600
@@ -661,7 +671,7 @@ func mainlandSingBoxManagedRuleSet(ruleSet map[string]any) bool {
 		}
 		return stringValue(ruleSet["format"]) == "source" && stringValue(ruleSet["url"]) == expectedURL
 	}
-	if tag != mainlandSingBoxRuleSetTag || stringValue(ruleSet["type"]) != "inline" {
+	if stringValue(ruleSet["type"]) != "inline" {
 		return false
 	}
 	rules, _ := ruleSet["rules"].([]any)

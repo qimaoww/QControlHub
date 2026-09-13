@@ -27,6 +27,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 	"github.com/qimaoww/qcontrolhub/internal/authn"
+	"github.com/qimaoww/qcontrolhub/internal/cnip"
 	"github.com/qimaoww/qcontrolhub/internal/core"
 	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
 )
@@ -742,6 +743,7 @@ func (c *Client) advertisedFeatures() []string {
 		core.AgentFeatureManagedConfigRead,
 		core.AgentFeatureConfigFiles,
 		core.AgentFeaturePairedConfigFiles,
+		core.AgentFeatureCNIPSource,
 		core.AgentFeatureSystemBBR,
 	}
 	if c.publicIP.Enabled() {
@@ -847,6 +849,9 @@ func (c *Client) resultForTask(ctx context.Context, task core.Task) core.TaskRes
 			} else if task.Action != core.ActionValidate {
 				executionErr = errors.New("unsupported shared task action")
 			}
+		}
+		if executionErr == nil {
+			task, executionErr = prepareCNIPTask(ctx, task, cnip.FetchRoutes)
 		}
 		var previousMainlandPolicies []core.MainlandAccessPolicy
 		mainlandChanged := executionErr == nil && task.Action == core.ActionDeploy && task.Engine == core.EngineShadowsocksRust && c.mainland != nil
