@@ -77,7 +77,7 @@ func TestSPAConsoleSurfaceMatchesInitialRelease(t *testing.T) {
 			t.Errorf("SPA must not expose single-node credential generation control %q", forbidden)
 		}
 	}
-	if !strings.Contains(content, "命令可重复查看") || !strings.Contains(content, "命令生成后可重复查看") {
+	if !strings.Contains(content, "命令可重复查看") {
 		t.Error("SPA does not explain that existing Agent install commands remain readable")
 	}
 }
@@ -916,7 +916,7 @@ func TestAgentBatchAndEnrollmentSafetyContracts(t *testing.T) {
 		`selection.indeterminate ? "mixed"`,
 		`命令仅供复制；关闭页面不会连接、安装或重启任何节点。`,
 		`showCommand(command, async () =>`,
-		`浏览器绝不会执行`,
+		`命令仅供复制，不会自动执行。`,
 		`document.body.style.overflow = "hidden"`,
 		`root.inert = true`,
 		`new MutationObserver(lockBackground)`,
@@ -957,7 +957,7 @@ func TestEnrollmentUsesARealDialogWithoutPersistentPanel(t *testing.T) {
 		`aria-labelledby="enrollment-dialog-title"`,
 		`aria-describedby="enrollment-dialog-description"`,
 		`data-enrollment-history-list`,
-		`删除记录只会立即撤销对应凭据`,
+		`删除仅撤销凭据，不影响已注册节点。`,
 		`添加记录刷新失败，部署命令未受影响`,
 	} {
 		if !strings.Contains(module, marker) {

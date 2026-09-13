@@ -1025,4 +1025,39 @@ dialog[open]::backdrop{animation:qch-backdrop-enter 220ms ease both}
 .agent-invitation-dialog>footer>.button{min-width:88px}
 .agent-invitation-error .alert{margin:0 0 10px}
 @media(max-width:600px){.agent-invitation-dialog[open]{width:100%;height:100dvh;max-height:100dvh;max-width:100%;margin:0;border:0;border-radius:0}.agent-invitation-dialog>header{padding:calc(20px + env(safe-area-inset-top)) 20px 20px}.agent-invitation-dialog .traffic-edit-body{flex:1;align-content:start;padding:28px 20px}.agent-invitation-dialog>footer{padding:16px 20px calc(16px + env(safe-area-inset-bottom))}.agent-invitation-dialog>footer>.button{flex:1;min-height:46px}}
-\n.enrollment-dialog-form>label.enrollment-visibility{display:flex;align-items:center;gap:8px;font-weight:600}.enrollment-dialog-form>label.enrollment-visibility input{width:16px;height:16px;min-height:0;margin:0}.enrollment-dialog-form>label.enrollment-visibility span{color:var(--ink-2);font-size:calc(9px * var(--ui-font-scale))}.node-visibility-toggle{display:flex;align-items:center;gap:8px;font-size:calc(10px * var(--ui-font-scale));font-weight:700}.node-visibility-toggle input{width:16px;height:16px;margin:0}.node-visibility-toggle span{color:var(--muted);font-size:max(9px,calc(8px * var(--ui-font-scale)))}
+.node-visibility-toggle{display:flex;align-items:center;gap:8px;font-size:calc(10px * var(--ui-font-scale));font-weight:700}.node-visibility-toggle input{width:16px;height:16px;margin:0}.node-visibility-toggle span{color:var(--muted);font-size:max(9px,calc(8px * var(--ui-font-scale)))}
+
+/* Keep the enrollment form compact without changing command or directory dialogs. */
+.enrollment-create-dialog{width:min(600px,100%);max-height:calc(100dvh - 48px)}
+.enrollment-create-dialog>.deploy-command-head{grid-template-columns:36px minmax(0,1fr) 34px;gap:12px;flex-shrink:0;padding:20px 24px}
+.enrollment-create-dialog .deploy-command-icon{width:36px;height:36px;border-radius:10px;font-size:calc(22px * var(--ui-font-scale))}
+.enrollment-create-dialog .deploy-command-head h2{margin-top:1px;font-size:calc(20px * var(--ui-font-scale))}
+.enrollment-create-dialog .deploy-command-head div>p:last-child{display:block;margin-top:6px;font-size:calc(11px * var(--ui-font-scale));line-height:1.6}
+.enrollment-create-dialog>.enrollment-dialog-body{min-height:0;gap:18px;padding:20px 24px 14px;background:var(--surface);overscroll-behavior:contain}
+.enrollment-create-dialog .enrollment-dialog-form{gap:16px}
+.enrollment-create-dialog .enrollment-name{gap:8px;color:var(--ink-2);font-size:calc(12px * var(--ui-font-scale));font-weight:650}
+.enrollment-create-dialog .enrollment-name input{width:100%;min-height:42px;font-size:calc(13px * var(--ui-font-scale));font-weight:400}
+.enrollment-create-dialog .enrollment-dialog-form>.enrollment-visibility{display:flex;align-items:flex-start;gap:12px;min-width:0;padding:13px 14px;border:1px solid var(--line);border-radius:10px;background:var(--surface);font-weight:400;cursor:pointer}
+.enrollment-create-dialog .enrollment-visibility:hover{border-color:var(--line-2);background:var(--surface-2)}
+.enrollment-create-dialog .enrollment-visibility:has(input:checked){border-color:var(--accent);background:color-mix(in srgb,var(--accent-soft) 55%,var(--surface))}
+.enrollment-create-dialog .enrollment-visibility:focus-within{box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 14%,transparent)}
+.enrollment-create-dialog .enrollment-visibility>input{flex:0 0 18px;width:18px;height:18px;min-height:18px;margin:1px 0 0;accent-color:var(--accent);transform:none;cursor:pointer}
+.enrollment-create-dialog .enrollment-visibility>span{min-width:0;flex:1}
+.enrollment-create-dialog .enrollment-visibility strong{display:block;color:var(--ink-2);font-size:calc(12px * var(--ui-font-scale));font-weight:650}
+.enrollment-create-dialog .enrollment-visibility small{display:block;margin-top:4px;color:var(--muted);font-size:calc(11px * var(--ui-font-scale));line-height:1.6}
+.enrollment-create-dialog .enrollment-form-actions{gap:10px}
+.enrollment-create-dialog .enrollment-form-actions .button{min-width:84px;min-height:40px}
+.enrollment-create-dialog .enrollment-history-disclosure{min-width:0;padding-top:6px}
+.enrollment-history-disclosure>summary{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:40px;border-radius:6px;color:var(--ink-2);cursor:pointer}
+.enrollment-history-disclosure>summary>span{display:flex;align-items:center;gap:8px}
+.enrollment-history-disclosure>summary b{font-size:calc(12px * var(--ui-font-scale));font-weight:650}
+.enrollment-history-disclosure [data-enrollment-history-count]{min-width:22px;padding:1px 6px;border-radius:6px;background:var(--surface-3);color:var(--muted);font-size:calc(10px * var(--ui-font-scale));text-align:center}
+.enrollment-history-chevron{width:16px;height:16px;fill:none;stroke:var(--muted);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.enrollment-history-disclosure[open]>summary .enrollment-history-chevron{transform:rotate(180deg)}
+.enrollment-history-description{margin:2px 0 10px;color:var(--muted);font-size:calc(10px * var(--ui-font-scale));line-height:1.6}
+.enrollment-create-dialog .enrollment-history article{flex-wrap:wrap;gap:8px 12px}
+.enrollment-create-dialog .enrollment-history article>div:first-child{flex:1 1 180px;min-width:0;overflow-wrap:anywhere}
+.enrollment-create-dialog .enrollment-history article strong{font-size:calc(11px * var(--ui-font-scale));font-weight:600}
+.enrollment-create-dialog .enrollment-history .access-history-actions{flex:0 0 auto;margin-left:auto}
+.enrollment-create-dialog .enrollment-history-empty{padding:12px;border:0;background:var(--surface-2);font-size:calc(11px * var(--ui-font-scale))}
+@media(max-width:620px){.enrollment-backdrop{align-items:center;padding:12px}.enrollment-create-dialog{width:100%;max-height:calc(100dvh - 24px);border:1px solid var(--line);border-radius:14px}.enrollment-create-dialog>.deploy-command-head{padding:18px 16px;gap:10px}.enrollment-create-dialog>.enrollment-dialog-body{padding:16px 16px calc(12px + env(safe-area-inset-bottom));gap:16px}.enrollment-create-dialog .enrollment-form-actions{display:grid;grid-template-columns:1fr 1.5fr}.enrollment-create-dialog .enrollment-form-actions .button{min-width:0;min-height:44px}.enrollment-history-disclosure>summary{min-height:44px}}
