@@ -10,6 +10,9 @@ import (
 // Translate at the HTTP boundary: internal errors remain stable for errors.Is,
 // agent diagnostics and logs. Never expose an unknown internal error verbatim.
 var errorMessages = map[string]string{
+	"automatic installation is only supported when adding an inbound":                                         "仅增加入站时可自动安装内核。",
+	"upgrade the Agent before automatically installing a stable core with an inbound":                         "请先在节点设置升级 Agent，再使用增加入站时自动安装稳定版。",
+	"automatic installation requires an exact configuration revision and validate or deploy intent":           "自动安装必须绑定已保存的配置版本，并选择校验或部署。",
 	"only a rejected share can be reinvited":                                                                  "仅已拒绝的共享可重新邀请。",
 	"an invitation revision and accept or reject decision are required":                                       "请刷新邀请后选择接受或拒绝。",
 	"Agent invitation changed; reload before responding":                                                      "共享邀请已变更，请刷新后重试。",

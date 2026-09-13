@@ -82,6 +82,7 @@ export function installTasks(ctx) {
         item.config_version,
         item.core_version,
         item.core_source,
+        item.install_if_missing,
         item.created_at,
         item.started_at,
         item.finished_at,
@@ -107,7 +108,20 @@ export function installTasks(ctx) {
               : engineName(item.engine);
           const resultOpen = openResults.has(item.id) ? " open" : "";
           const sourceLabel = coreSourceLabel(item.engine, item.core_version, item.core_source);
-          return `<article id="task-${esc(item.id)}" class="audit-event task-event" data-task-id="${esc(item.id)}" data-task-status="${esc(item.status)}" aria-busy="${item.status === "pending" || item.status === "running"}"><div class="timeline-marker"><i class="${tone}"></i><span></span></div><div class="task-event-card"><header><div class="event-action"><span class="status-label ${tone}">${esc(statusLabel)}</span><strong>${esc(actionName(item.action))}</strong><small><code title="${esc(item.id)}">${esc(short(item.id))}</code> · ${item.attempt ? `第 ${item.attempt} 次执行` : "尚未开始"}</small>${item.status === "pending" && can("tasks.execute") ? `<button class="button small task-inline-action" data-cancel="${esc(item.id)}">取消任务</button>` : ""}${["failed", "canceled"].includes(item.status) && can("tasks.execute") ? `<button class="button small task-inline-action" data-retry="${esc(item.id)}">${item.config_id ? "使用当前配置重试" : "重试任务"}</button>` : ""}</div><time><b>${date(item.created_at)}</b><small data-task-age>${ago(item.created_at)}</small></time></header><div class="task-event-body"><div class="event-target"><span class="engine-badge ${esc(taskEngine)}">${esc(taskEngineLabel)}</span><span><b>节点</b><small>${esc(agent?.name || short(item.agent_id))}</small></span>${item.config_id ? `<span><b>配置</b><small>${esc(short(item.config_id))} · v${item.config_version}</small></span>` : item.core_version ? `<span><b>版本</b><small>${esc(item.core_version)}${sourceLabel ? ` · ${esc(sourceLabel)}` : ""}</small></span>` : ""}<span class="task-lifecycle"><b>耗时</b><small data-task-timing>${esc(taskTiming(item))}</small></span></div><div class="event-result">${diagnostic ? `<div class="task-diagnostic"><b>${esc(diagnostic.title)}</b><small>${esc(diagnostic.advice)}</small></div>` : ""}${item.error || item.output ? `<details data-task-result${resultOpen}><summary>节点结果 <span>→</span></summary>${item.error ? `<div class="task-result-block"><header><b>错误</b></header><pre class="task-error">${esc(diagnosticError(item.error))}</pre></div>` : ""}${item.output ? `<div class="task-result-block"><header><b>输出</b></header><pre>${esc(item.output)}</pre></div>` : ""}</details>` : item.status === "pending" || item.status === "running" ? "<span>执行中</span>" : ""}</div></div></div></article>`;
+          const actionLabel = `${item.install_if_missing ? "准备内核并" : ""}${actionName(item.action)}`;
+          const retryLabel = item.install_if_missing ? `重试配置 v${item.config_version}` : item.config_id ? "使用当前配置重试" : "重试任务";
+          return `<article id="task-${esc(item.id)}" class="audit-event task-event" data-task-id="${esc(item.id)}" data-task-status="${esc(item.status)}" aria-busy="${item.status === "pending" || item.status === "running"}"><div class="timeline-marker"><i class="${tone}"></i><span></span></div><div class="task-event-card">
+            <header><div class="event-action"><span class="status-label ${tone}">${esc(statusLabel)}</span><strong>${esc(actionLabel)}</strong><small><code title="${esc(item.id)}">${esc(short(item.id))}</code> · ${item.attempt ? `第 ${item.attempt} 次执行` : "尚未开始"}</small>
+              ${item.status === "pending" && can("tasks.execute") ? `<button class="button small task-inline-action" data-cancel="${esc(item.id)}">取消任务</button>` : ""}
+              ${["failed", "canceled"].includes(item.status) && can("tasks.execute") ? `<button class="button small task-inline-action" data-retry="${esc(item.id)}" data-retry-version="${item.install_if_missing ? item.config_version : ""}">${esc(retryLabel)}</button>` : ""}
+            </div><time><b>${date(item.created_at)}</b><small data-task-age>${ago(item.created_at)}</small></time></header>
+            <div class="task-event-body"><div class="event-target"><span class="engine-badge ${esc(taskEngine)}">${esc(taskEngineLabel)}</span><span><b>节点</b><small>${esc(agent?.name || short(item.agent_id))}</small></span>
+              ${item.config_id ? `<span><b>配置</b><small>${esc(short(item.config_id))} · v${item.config_version}</small></span>` : item.core_version ? `<span><b>版本</b><small>${esc(item.core_version)}${sourceLabel ? ` · ${esc(sourceLabel)}` : ""}</small></span>` : ""}
+              ${item.install_if_missing ? "<span><b>自动安装</b><small>缺少时安装稳定版；已有内核保持版本</small></span>" : ""}
+              <span class="task-lifecycle"><b>耗时</b><small data-task-timing>${esc(taskTiming(item))}</small></span></div>
+            <div class="event-result">${diagnostic ? `<div class="task-diagnostic"><b>${esc(diagnostic.title)}</b><small>${esc(diagnostic.advice)}</small></div>` : ""}
+              ${item.error || item.output ? `<details data-task-result${resultOpen}><summary>节点结果 <span>→</span></summary>${item.error ? `<div class="task-result-block"><header><b>错误</b></header><pre class="task-error">${esc(diagnosticError(item.error))}</pre></div>` : ""}${item.output ? `<div class="task-result-block"><header><b>输出</b></header><pre>${esc(item.output)}</pre></div>` : ""}</details>` : item.status === "pending" || item.status === "running" ? "<span>执行中</span>" : ""}
+            </div></div></div></article>`;
         })
         .join("") ||
       '<div class="empty large"><strong>没有符合条件的任务</strong></div>'
@@ -278,7 +292,9 @@ export function installTasks(ctx) {
         (button.onclick = async () => {
           if (
             !(await confirmAction(
-              "确定使用当前配置重新提交这个任务？",
+              button.dataset.retryVersion
+                ? `确定重试配置 v${button.dataset.retryVersion}？仅缺少内核时安装稳定版，已安装的内核不会切换版本。配置已有新版本时会拒绝本次重试。`
+                : "确定使用当前配置重新提交这个任务？",
               "重试任务",
             ))
           )
@@ -470,6 +486,8 @@ export function installTasks(ctx) {
   function diagnoseTask(task) {
     if (task.status !== "failed") return null;
     const error = String(task.error || "").toLowerCase();
+    if (task.install_if_missing && error.includes("stable core installation failed"))
+      return {title:"稳定版安装失败，未继续执行配置", advice:"检查下载、校验或服务启动错误后重试；切换版本请到节点设置。"};
     if (error.includes("rolled back"))
       return {
         title: "变更失败，已自动回滚",

@@ -568,6 +568,31 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (string, erro
 	if !safeServiceName(spec.Service) {
 		return "", errors.New("configured service name is unsafe")
 	}
+	if task.InstallIfMissing {
+		if (task.Action != core.ActionValidate && task.Action != core.ActionDeploy) ||
+			task.ConfigVersion < 1 || task.ConfigContent == "" || task.SharedTrafficID != "" ||
+			task.CoreVersion != "" || task.CoreSource != "" {
+			return "", errors.New("invalid automatic core installation task")
+		}
+		// This is one durable task with one immutable configuration snapshot.
+		// Recheck locally: a retry or a preceding task may have installed the
+		// core since the heartbeat. Never update an already installed binary.
+		ctx, cancel := context.WithTimeout(parent, 4*time.Minute+45*time.Second)
+		defer cancel()
+		output := "core already installed; keeping the current version"
+		if _, err := exec.LookPath(spec.Binary); err != nil {
+			var installErr error
+			output, installErr = e.Execute(ctx, core.Task{
+				Action: core.ActionInstall, Engine: task.Engine, CoreVersion: core.CoreVersionStable,
+			})
+			if installErr != nil {
+				return output, fmt.Errorf("stable core installation failed; configuration was not executed: %w", installErr)
+			}
+		}
+		task.InstallIfMissing = false
+		result, err := e.Execute(ctx, task)
+		return output + "\n" + result, err
+	}
 	timeout := 45 * time.Second
 	if task.Action == core.ActionInstall {
 		timeout = 4 * time.Minute

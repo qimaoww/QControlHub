@@ -86,16 +86,23 @@ type configCatalogResource struct {
 	Protocols []serverconfig.Protocol `json:"protocols"`
 }
 
+type configInboundTargetResource struct {
+	Tag  string `json:"tag"`
+	Port int    `json:"port"`
+	Kind string `json:"kind"`
+}
+
 type agentConfigWorkspaceResource struct {
-	AccountingPlan  *serverconfig.AccountingPlan `json:"accounting_plan,omitempty"`
-	AccountingError string                       `json:"accounting_error,omitempty"`
-	Agent           core.Agent                   `json:"agent"`
-	Config          *core.Config                 `json:"config,omitempty"`
-	Catalog         configschema.Catalog         `json:"catalog"`
-	Protocols       []serverconfig.Protocol      `json:"protocols"`
-	Inbounds        []serverconfig.Input         `json:"inbounds"`
-	PresentFields   map[string]bool              `json:"present_fields"`
-	RealityPresets  []string                     `json:"reality_presets"`
+	AccountingPlan  *serverconfig.AccountingPlan  `json:"accounting_plan,omitempty"`
+	AccountingError string                        `json:"accounting_error,omitempty"`
+	Agent           core.Agent                    `json:"agent"`
+	Config          *core.Config                  `json:"config,omitempty"`
+	Catalog         configschema.Catalog          `json:"catalog"`
+	Protocols       []serverconfig.Protocol       `json:"protocols"`
+	Inbounds        []serverconfig.Input          `json:"inbounds"`
+	InboundTargets  []configInboundTargetResource `json:"inbound_targets"`
+	PresentFields   map[string]bool               `json:"present_fields"`
+	RealityPresets  []string                      `json:"reality_presets"`
 }
 
 type configMutationResult struct {
@@ -183,6 +190,7 @@ func (s *Server) agentConfigWorkspace(w http.ResponseWriter, request *http.Reque
 	result := agentConfigWorkspaceResource{
 		Agent: agent, Catalog: catalog, Protocols: serverconfig.Protocols(engine),
 		Inbounds: []serverconfig.Input{}, PresentFields: map[string]bool{},
+		InboundTargets: []configInboundTargetResource{},
 		RealityPresets: serverconfig.RealityServerNamePresets(),
 	}
 	if config.ID != "" {
@@ -199,6 +207,13 @@ func (s *Server) agentConfigWorkspace(w http.ResponseWriter, request *http.Reque
 			result.AccountingError = planErr.Error()
 		}
 		result.Inbounds = serverconfig.ParseAll(engine, config.Content)
+		// Selection for restrictions/deletion also includes native named
+		// listeners that cannot be reconstructed as a preset form.
+		for _, inbound := range serverconfig.DiscoverMainlandAccessPolicies(engine, config.Content) {
+			result.InboundTargets = append(result.InboundTargets, configInboundTargetResource{
+				Tag: inbound.Tag, Port: inbound.Port, Kind: inbound.Kind,
+			})
+		}
 		if err := s.hydrateClientMetadata(request.Context(), config, result.Inbounds); err != nil {
 			writeInternalError(w, err)
 			return
@@ -281,6 +296,7 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 	}
 	var input struct {
 		Operation             string             `json:"operation"`
+		InstallIfMissing      bool               `json:"install_if_missing"`
 		PreserveSSRustGlobals bool               `json:"preserve_ss_rust_globals"`
 		OriginalTag           string             `json:"original_tag"`
 		ExpectedVersion       int                `json:"expected_version"`
@@ -299,6 +315,10 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 	}
 	if input.Intent != "validate" && input.Intent != "deploy" {
 		writeError(w, http.StatusBadRequest, "intent must be validate or deploy")
+		return
+	}
+	if input.InstallIfMissing && input.Operation != "add" {
+		writeError(w, http.StatusBadRequest, "automatic installation is only supported when adding an inbound")
 		return
 	}
 	if input.Operation == "add" && input.OriginalTag != "" {
@@ -477,7 +497,10 @@ func (s *Server) saveServerInbound(w http.ResponseWriter, request *http.Request)
 	}
 	saved, task, err := s.store.SaveAgentConfigAndTask(request.Context(), core.Config{
 		AgentID: agent.ID, Name: name, Description: input.Description, Engine: engine, Content: content,
-	}, input.ExpectedVersion, store.ConfigMutationOptions{Action: core.Action(input.Intent), ClientMetadata: &metadata, MainlandPolicies: desired})
+	}, input.ExpectedVersion, store.ConfigMutationOptions{
+		Action: core.Action(input.Intent), ClientMetadata: &metadata, MainlandPolicies: desired,
+		InstallIfMissing: input.InstallIfMissing && !agent.Runtime[engine].Installed,
+	})
 	if err != nil {
 		writeStoreError(w, err)
 		return

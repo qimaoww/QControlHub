@@ -3,7 +3,7 @@ import { installAccessControl } from "./access-control.js";
 // The server identifies saved restrictions by node, engine, tag and port.
 // Never infer identity from a display label or apply them over a source draft.
 export async function bindConfigRestrictions(ctx) {
-  const { form, files, agent, engine, saved, sourceMode, state, api, notify, onSaved } = ctx;
+  const { form, files, agent, engine, saved, sourceMode, state, api, notify, onSaved, inbounds } = ctx;
   if (!form || sourceMode === "import") return;
   const input = form.querySelector("[data-code-input]");
   if (!input) return;
@@ -11,7 +11,7 @@ export async function bindConfigRestrictions(ctx) {
   const current = () => data === state.data && epoch === state.navigationEpoch && form.isConnected &&
     state.route === "live-config" && state.data.liveAgent === agent.id && state.data.liveEngine === engine;
   const access = installAccessControl(ctx);
-  let navigation = form.querySelector(".config-file-buttons"), selected = null, busy = false;
+  let navigation = form.querySelector(".config-file-buttons"), selected = null, commonSelected = false, busy = false;
   const button = document.createElement("button");
   button.type = "button";
   button.className = "button config-access-trigger";
@@ -33,8 +33,27 @@ export async function bindConfigRestrictions(ctx) {
     // YAML and native ssserver configs remain whole-file editors. Use the
     // server's parsed saved inbounds for their restriction selection.
     try {
-      const entries = await api("/access-controls");
+      const entries = inbounds ? inbounds.map(entry => ({...entry, agent_id:agent.id, engine})) : await api("/access-controls");
       if (!current()) return;
+      if (inbounds) {
+        const common = document.createElement("button");
+        common.type = "button"; common.className = "config-file-button active";
+        common.dataset.configCommon = "";
+        common.innerHTML = "<b>公共配置</b><small>完整配置源码</small>";
+        common.setAttribute("aria-pressed", "true");
+        commonSelected = true;
+        common.onclick = () => {
+          selected = null;
+          commonSelected = true;
+          navigation.querySelectorAll(".config-file-button").forEach(other => {
+            other.classList.toggle("active", other === common);
+            other.setAttribute("aria-pressed", String(other === common));
+          });
+          update();
+          input.dispatchEvent(new Event("config-selection"));
+        };
+        navigation.append(common);
+      }
       entries.filter(entry => entry.agent_id === agent.id && entry.engine === engine).forEach(entry => {
         const tab = document.createElement("button");
         tab.type = "button"; tab.className = "config-file-button";
@@ -45,11 +64,13 @@ export async function bindConfigRestrictions(ctx) {
         tab.setAttribute("aria-pressed", "false");
         tab.onclick = () => {
           selected = entry;
-          navigation.querySelectorAll("[data-access-inbound]").forEach(other => {
+          commonSelected = false;
+          navigation.querySelectorAll(".config-file-button").forEach(other => {
             other.classList.toggle("active", other === tab);
             other.setAttribute("aria-pressed", String(other === tab));
           });
           update();
+          input.dispatchEvent(new Event("config-selection"));
         };
         navigation.append(tab);
       });
@@ -64,6 +85,7 @@ export async function bindConfigRestrictions(ctx) {
   button.onclick = async () => {
     if (busy || !target() || !current()) return;
     if (dirty()) { notify("配置源码有未保存修改，请先保存，再设置入站限制。", "error"); return; }
+    if (ctx.sourceMatches === false) { notify("当前节点快照与已保存配置不同，请先保存当前源码，再设置入站限制。", "error"); return; }
     const chosen = { ...target() };
     busy = true; update();
     try {
@@ -80,5 +102,14 @@ export async function bindConfigRestrictions(ctx) {
     } catch (error) {
       if (current() && error.name !== "AbortError") notify(error.message, "error");
     } finally { busy = false; if (current()) update(); }
+  };
+  return {
+    selectedCommon: () => files ? files.selectedCommon() : commonSelected,
+    selectedInbound: target,
+    selectInbound(tag, port) {
+      if (files) return files.selectInbound(tag, port);
+      const entry = inbounds?.find(item => item.tag === tag && item.port === port);
+      if (entry) [...navigation.querySelectorAll("[data-access-inbound]")].find(tab => tab.dataset.accessInbound === tag)?.click();
+    },
   };
 }

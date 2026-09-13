@@ -67,6 +67,10 @@ const AgentFeatureConfigFiles = "config-files-v1"
 // the same immutable source fragment (sources-v3 layout).
 const AgentFeaturePairedConfigFiles = "config-files-paired-v1"
 
+// AgentFeaturePresetAutoInstall negotiates install-if-missing configuration
+// tasks. Older Agents would silently ignore the flag and must not receive one.
+const AgentFeaturePresetAutoInstall = "preset-auto-install-v1"
+
 const AgentFeatureSystemBBR = "system-bbr-v1"
 
 // Older Agents may fall back to the original config when accounting cannot
@@ -456,6 +460,7 @@ type Task struct {
 	MainlandAccessPolicies []MainlandAccessPolicy `json:"mainland_access_policies,omitempty"`
 	CoreVersion            string                 `json:"core_version,omitempty"`
 	CoreSource             string                 `json:"core_source,omitempty"`
+	InstallIfMissing       bool                   `json:"install_if_missing,omitempty"`
 	Status                 TaskStatus             `json:"status"`
 	Attempt                int                    `json:"attempt"`
 	LeaseID                string                 `json:"lease_id,omitempty"`
@@ -468,6 +473,8 @@ type Task struct {
 }
 
 type TaskRequest struct {
+	// Only the atomic inbound mutation and its retries may request installation.
+	InstallIfMissing      bool        `json:"-"`
 	ExpectedConfigVersion int         `json:"expected_config_version,omitempty"`
 	TCPSettings           TCPSettings `json:"tcp_settings,omitempty"`
 	AgentID               string      `json:"agent_id"`

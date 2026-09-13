@@ -562,7 +562,7 @@ const unauthorizedTaskPrincipalSQL = `(t.owner_id<>'' AND NOT starts_with(t.owne
 		(NOT u.permissions ? (CASE WHEN t.capability_transition THEN 'agents.manage' ELSE 'tasks.execute' END)
 		 OR (t.action IN ('enable-bbr','disable-bbr','configure-tcp') AND NOT u.permissions ? 'agents.manage')
 		 OR (a.owner_id<>u.id AND
-			(t.action NOT IN ('deploy','validate','status') OR (t.action IN ('deploy','validate') AND t.shared_traffic_id='')
+			(t.install_if_missing OR t.action NOT IN ('deploy','validate','status') OR (t.action IN ('deploy','validate') AND t.shared_traffic_id='')
 			 OR NOT EXISTS(SELECT 1 FROM agent_shares s WHERE s.user_id=u.id AND s.agent_id=t.agent_id
 				AND s.enabled AND s.status='accepted' AND t.engine=ANY(s.engines))))))))
 	OR EXISTS(SELECT 1 FROM configs c JOIN panel_users u ON u.id=c.owner_id JOIN agents a ON a.id=t.agent_id

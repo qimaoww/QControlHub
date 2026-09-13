@@ -743,6 +743,7 @@ func (c *Client) advertisedFeatures() []string {
 		core.AgentFeatureManagedConfigRead,
 		core.AgentFeatureConfigFiles,
 		core.AgentFeaturePairedConfigFiles,
+		core.AgentFeaturePresetAutoInstall,
 		core.AgentFeatureCNIPSource,
 		core.AgentFeatureSystemBBR,
 	}
@@ -774,6 +775,12 @@ func (c *Client) executeTaskForSession(executionContext, deliveryContext context
 	switch task.Action {
 	case core.ActionInstall, core.ActionDeploy, core.ActionImportExisting,
 		core.ActionStart, core.ActionStop, core.ActionRestart, core.ActionEnableBBR, core.ActionDisableBBR, core.ActionConfigureTCP:
+		select {
+		case c.runtimeRefresh <- struct{}{}:
+		default:
+		}
+	}
+	if task.InstallIfMissing && task.Action == core.ActionValidate {
 		select {
 		case c.runtimeRefresh <- struct{}{}:
 		default:
@@ -891,7 +898,7 @@ func (c *Client) resultForTask(ctx context.Context, task core.Task) core.TaskRes
 			}
 		}
 	}
-	if c.logs != nil && task.Engine == core.EngineSingBox && coreLogSourceMayChange(task.Action) {
+	if c.logs != nil && task.Engine == core.EngineSingBox && (coreLogSourceMayChange(task.Action) || task.InstallIfMissing) {
 		collectorTransitionComplete := preparedLogTransition &&
 			(task.Action == core.ActionImportExisting || task.Action == core.ActionDeploy)
 		if !collectorTransitionComplete {
@@ -1026,6 +1033,11 @@ func limitStateValue(value string, limit int) string {
 }
 
 func (c *Client) validTask(task core.Task) bool {
+	if task.InstallIfMissing && ((task.Action != core.ActionValidate && task.Action != core.ActionDeploy) ||
+		task.ConfigVersion < 1 || task.ConfigID == "" || task.ConfigContent == "" || task.SharedTrafficID != "" ||
+		task.CoreVersion != "" || task.CoreSource != "") {
+		return false
+	}
 	if task.Action.SystemBBR() {
 		if _, err := settingsForTCPAction(task.Action, task.TCPSettings); err != nil {
 			return false

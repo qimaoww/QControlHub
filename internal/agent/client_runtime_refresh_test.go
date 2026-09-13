@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"testing"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
@@ -38,6 +39,29 @@ func TestLifecycleResultsRequestImmediateRuntimeRefresh(t *testing.T) {
 					t.Fatal("refresh requests were not coalesced")
 				}
 			})
+		}
+	}
+}
+
+func TestPresetAutoInstallValidationRefreshesRuntime(t *testing.T) {
+	for _, success := range []bool{false, true} {
+		client := &Client{executor: &Executor{}, runtimeRefresh: make(chan struct{}, 1),
+			config: ClientConfig{StatePath: filepath.Join(t.TempDir(), "agent-state.json")},
+			executeFunc: func(context.Context, core.Task) (string, error) {
+				if !success {
+					return "", errors.New("validation failed after installation")
+				}
+				return "installed and validated", nil
+			}}
+		outgoing := make(chan core.WireMessage, 2)
+		task := core.Task{ID: "auto-install-refresh", Action: core.ActionValidate, Engine: core.EngineXray, InstallIfMissing: true}
+		client.executeTaskForSession(context.Background(), context.Background(), task, outgoing)
+		if len(client.runtimeRefresh) != 1 {
+			t.Fatal("compound validation did not refresh the installed state")
+		}
+		client.executeTaskForSession(context.Background(), context.Background(), task, outgoing)
+		if len(client.runtimeRefresh) != 1 {
+			t.Fatal("cached refresh was not coalesced")
 		}
 	}
 }

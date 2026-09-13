@@ -8,8 +8,9 @@ import (
 )
 
 type ConfigMutationOptions struct {
-	Action         core.Action
-	ClientMetadata *ConfigClientMetadataMutation
+	Action           core.Action
+	ClientMetadata   *ConfigClientMetadataMutation
+	InstallIfMissing bool
 	// nil preserves existing policies; a non-nil empty slice clears them.
 	MainlandPolicies []core.MainlandAccessPolicy
 }
@@ -41,6 +42,7 @@ func (s *Store) SaveAgentConfigAndTask(ctx context.Context, input core.Config, e
 	task, err := s.createTaskTx(ctx, tx, core.TaskRequest{
 		AgentID: saved.AgentID, Engine: saved.Engine, Action: options.Action,
 		ConfigID: saved.ID, ExpectedConfigVersion: saved.Version,
+		InstallIfMissing: options.InstallIfMissing,
 	})
 	if err != nil {
 		return core.Config{}, core.Task{}, err

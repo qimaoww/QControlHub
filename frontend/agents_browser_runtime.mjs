@@ -1756,24 +1756,20 @@ async function testPortNamesAndRuntimeRefresh() {
   runtime(false,"");
   await waitFor(() => document.querySelector('.service-sing-box[data-core-installed="0"]'),"卸载状态未自动刷新");
 
-  location.hash="#preset-node-alpha";
-  await waitFor(() => document.querySelector(".preset-node-workspace"),"预设页未渲染");
+  // Core installation and version changes now live only in node settings.
+  document.querySelector('[data-node-tab="cores"]').click();
   const card = () => document.querySelector(".service-sing-box");
   card().querySelector("[data-open-version-form]").click();
   card().querySelector('[name="release_channel"][value="custom"]').click();
   card().querySelector('[name="custom_version"]').value="1.14.0-draft";
   runtime(true,"1.13.1");
-  await waitFor(() => card().dataset.coreInstalled==="1","预设页安装状态未自动刷新");
+  await waitFor(() => card().dataset.coreInstalled==="1","节点设置安装状态未自动刷新");
   assert.match(card().querySelector('[data-core-version]').textContent,/1\.13\.1/);
   assert.equal(card().querySelector('[name="custom_version"]').value,"1.14.0-draft","安装刷新覆盖版本草稿");
   assert.equal(card().querySelector(".version-drawer").open,true,"刷新关闭版本抽屉");
   runtime(true,"1.13.2","inactive");
   await waitFor(() => card().querySelector('[data-core-version]').textContent.includes("1.13.2"),"版本切换未自动刷新");
   assert.equal(card().querySelector('[data-core-service]').textContent,"已停止");
-  testAPI.savedConfigs=[{id:"cfg-preset",agent_id:"alpha",engine:"sing-box",name:"preset",version:2,content:'{"inbounds":[]}'}];
-  testAPI.deployments=[{agent_id:"alpha",engine:"sing-box",config_id:"cfg-preset",config_version:2}];
-  await waitFor(() => card().querySelector(".service-facts").textContent.includes("v2"),"部署/保存版本未自动刷新");
-  assert.equal(card().querySelector('[name="custom_version"]').value,"1.14.0-draft","部署刷新覆盖草稿");
   testAPI.agentsFailure=true;
   await delay(2200);
   assert.match(card().querySelector('[data-core-version]').textContent,/1\.13\.2/,"获取失败丢失最后状态");
@@ -1781,11 +1777,11 @@ async function testPortNamesAndRuntimeRefresh() {
   runtime(false,"");
   await waitFor(() => card().dataset.coreInstalled==="0","失败后没有恢复轮询");
   location.hash="#client-access";
-  await waitFor(() => row(20001),"离开预设页失败");
+  await waitFor(() => row(20001),"离开节点设置失败");
   await delay(2200);
   const before = testAPI.calls.filter((call) => call.path==="/agents").length;
   await delay(2200);
-  assert.equal(testAPI.calls.filter((call) => call.path==="/agents").length,before,"离开预设页仍后台轮询");
+  assert.equal(testAPI.calls.filter((call) => call.path==="/agents").length,before,"离开节点设置仍后台轮询");
 }
 
 async function testSystemTCPRuntime() {
@@ -2132,6 +2128,9 @@ try {
   } else if (mode === "presets") {
     const { testPresetsRuntime } = await import("./presets_browser_runtime.mjs");
     await testPresetsRuntime(new URLSearchParams(location.search).has("preview"));
+  } else if (mode === "config-inbounds" || mode === "config-inbounds-mobile") {
+    const { testConfigInboundsRuntime } = await import("./config_inbounds_browser_runtime.mjs");
+    await testConfigInboundsRuntime(new URLSearchParams(location.search).has("preview"));
   } else if (mode === "config-restrictions") {
     const { testConfigRestrictionsRuntime } = await import("./config_restrictions_browser_runtime.mjs");
     await testConfigRestrictionsRuntime();
@@ -2274,9 +2273,26 @@ try {
     await waitFor(()=>document.querySelector("#live-config-form"),"manual editor did not load");
     assert.equal(document.querySelectorAll(".live-engine-bar [data-live-engine]").length,4,"top bar must expose all installed engines");
     assert.equal(document.querySelectorAll(".context-sidebar [data-live-engine]").length,0,"sidebar must not duplicate engine navigation");
+    assert.equal(document.querySelectorAll('.dock-nav a[href="#agents"], .mobile-account-menu a[href="#agents"]').length,0,"independent preset navigation remains");
     if (!new URLSearchParams(location.search).has("preview")) {
+      for (const [hash, node, engine] of [
+        ["#agents", "alpha", "xray"],
+        ["#preset-node-bravo", "bravo", "xray"],
+        ["#agent-config?agent=charlie&engine=sing-box", "charlie", "sing-box"],
+        ["#live-config?agent=alpha&engine=xray", "alpha", "xray"],
+      ]) {
+        location.hash = hash;
+        await waitFor(()=>{
+          const workspace = document.querySelector(`[data-refresh-key^="live-config-content-${node}-${engine}-"]`);
+          return location.hash.startsWith("#live-config") && workspace &&
+            (testAPI.agents.find(agent=>agent.id === node).status === "offline"
+              ? workspace.querySelector(".node-config-source")?.textContent.includes("节点离线")
+              : workspace.querySelector("#live-config-form"));
+        }, "legacy config link did not preserve node/core: " + hash);
+      }
       document.querySelector('[data-live-engine="sing-box"]').click();
       await waitFor(()=>document.querySelector('#live-config-form[data-engine="sing-box"]'),"top engine switch failed");
+      assert.ok(location.hash.includes("engine=sing-box"),"engine switch not reflected in safe deep link");
       const input=document.querySelector("[data-code-input]");input.value+="\n";input.dispatchEvent(new Event("input",{bubbles:true}));
       const draft = input.value;
       const fileButtons = document.querySelectorAll("[data-config-file]");
@@ -2291,9 +2307,9 @@ try {
       assert.equal(input.value,inboundDraft,"switch lost inbound draft");
       fileButtons[0].click();
       assert.equal(document.querySelector('optgroup[label="出站"]'),null,"legacy standalone exit group is still visible");
-      document.querySelector(".config-file-navigation button").click();
+      document.querySelector("[data-config-preview]").click();
       assert.ok(input.readOnly,"merged preview must be readonly");
-      document.querySelector(".config-file-navigation button").click();
+      document.querySelector("[data-config-preview]").click();
       assert.equal(input.value,draft,"preview lost file draft");
       assert.ok(!input.readOnly,"return from preview must restore editing");
       document.querySelectorAll("[data-live-agent]")[1].click();

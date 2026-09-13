@@ -50,7 +50,7 @@ type storeExecutor interface {
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 60
+const currentSchemaVersion = 61
 
 func Open(ctx context.Context, databaseURL string, allowInsecureRemote bool) (*Store, error) {
 	return OpenWithConfigKey(ctx, databaseURL, allowInsecureRemote, "")
@@ -1587,10 +1587,14 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 	if err := requireAgentAccess(ctx, tx, request.AgentID); err != nil {
 		return core.Task{}, err
 	}
-	if request.Action != core.ActionDeploy && request.Action != core.ActionValidate && request.Action != core.ActionStatus {
+	if request.InstallIfMissing || (request.Action != core.ActionDeploy && request.Action != core.ActionValidate && request.Action != core.ActionStatus) {
 		if err := requireAgentAdministration(ctx, tx, request.AgentID); err != nil {
 			return core.Task{}, err
 		}
+	}
+	if request.InstallIfMissing && (request.Action != core.ActionValidate && request.Action != core.ActionDeploy ||
+		request.ExpectedConfigVersion < 1 || request.CoreVersion != "" || request.CoreSource != "") {
+		return core.Task{}, fmt.Errorf("%w: automatic installation requires an exact configuration revision and validate or deploy intent", ErrInvalid)
 	}
 	if request.ExpectedConfigVersion < 0 || (request.ExpectedConfigVersion != 0 && request.Action != core.ActionDeploy && request.Action != core.ActionValidate && request.Action != core.ActionImportExisting) {
 		return core.Task{}, fmt.Errorf("%w: expected configuration version requires a configuration task", ErrInvalid)
@@ -1698,6 +1702,9 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 		!containsFeature(features, core.AgentFeatureIndependentEgress) {
 		return core.Task{}, fmt.Errorf("%w: upgrade the Agent before validating or deploying independent exits", ErrConflict)
 	}
+	if request.InstallIfMissing && !containsFeature(features, core.AgentFeaturePresetAutoInstall) {
+		return core.Task{}, fmt.Errorf("%w: upgrade the Agent before automatically installing a stable core with an inbound", ErrConflict)
+	}
 	if request.Action == core.ActionReadManagedConfig && !containsFeature(features, core.AgentFeatureManagedConfigRead) {
 		return core.Task{}, fmt.Errorf("%w: this Agent cannot read the managed configuration independently; upgrade the Agent through the panel first", ErrConflict)
 	}
@@ -1714,8 +1721,9 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 	}
 
 	task := core.Task{
-		TCPSettings: request.TCPSettings,
-		AgentID:     request.AgentID, Action: request.Action, Engine: request.Engine,
+		InstallIfMissing: request.InstallIfMissing,
+		TCPSettings:      request.TCPSettings,
+		AgentID:          request.AgentID, Action: request.Action, Engine: request.Engine,
 		ConfigID: request.ConfigID, CoreVersion: request.CoreVersion, CoreSource: request.CoreSource,
 		Status: core.TaskPending, CreatedAt: time.Now().UTC(),
 	}
@@ -1795,7 +1803,7 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 	}
 	existing, existingErr := scanTask(tx.QueryRow(ctx, `
 		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),COALESCE(core_version,''),COALESCE(core_source,''),status,attempt,
-		       COALESCE(output,''),COALESCE(error,''),created_at,started_at,finished_at,tcp_settings
+		       COALESCE(output,''),COALESCE(error,''),created_at,started_at,finished_at,tcp_settings,install_if_missing
 		FROM tasks
 		WHERE agent_id=$1 AND (action=$2 OR ($2 IN ('enable-bbr','disable-bbr','configure-tcp') AND action IN ('enable-bbr','disable-bbr','configure-tcp'))) AND engine=$3
 		  AND COALESCE(config_id,'')=$4 AND COALESCE(config_version,0)=$5 AND COALESCE(core_version,'')=$6
@@ -1803,9 +1811,9 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 		            THEN 'official' ELSE COALESCE($7,'') END)
 		    = (CASE WHEN action='install' AND engine='mihomo' AND core_version='development' AND COALESCE(core_source,'') IN ('','official')
 		            THEN 'official' ELSE COALESCE(core_source,'') END)
-		  AND owner_id=$8 AND status IN ('pending','running')
+		  AND owner_id=$8 AND install_if_missing=$9 AND status IN ('pending','running')
 		ORDER BY created_at DESC LIMIT 1`,
-		task.AgentID, task.Action, task.Engine, task.ConfigID, task.ConfigVersion, task.CoreVersion, task.CoreSource, scope.OwnerID), false)
+		task.AgentID, task.Action, task.Engine, task.ConfigID, task.ConfigVersion, task.CoreVersion, task.CoreSource, scope.OwnerID, task.InstallIfMissing), false)
 	if existingErr == nil {
 		if task.Action.SystemBBR() && (existing.Action != task.Action || !maps.Equal(existing.TCPSettings, task.TCPSettings)) {
 			return core.Task{}, fmt.Errorf("%w: another system TCP task is pending or running", ErrConflict)
@@ -1830,9 +1838,9 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 		return core.Task{}, err
 	}
 	_, err = tx.Exec(ctx, `
-			INSERT INTO tasks (id,agent_id,action,engine,config_id,config_version,config_content,mainland_access_policies,core_version,core_source,status,attempt,created_at,tcp_settings,owner_id,shared_traffic_id,cnip_source)
-			VALUES ($1,$2,$3,$4,NULLIF($5,''),NULLIF($6,0),NULLIF($7,''),$8,NULLIF($9,''),NULLIF($10,''),$11,0,$12,$13,$14,$15,$16)`,
-		task.ID, task.AgentID, task.Action, task.Engine, task.ConfigID, task.ConfigVersion, storedConfigContent, mainlandPoliciesJSON, task.CoreVersion, task.CoreSource, task.Status, task.CreatedAt, task.TCPSettings, scope.OwnerID, task.SharedTrafficID, task.CNIPSource)
+			INSERT INTO tasks (id,agent_id,action,engine,config_id,config_version,config_content,mainland_access_policies,core_version,core_source,status,attempt,created_at,tcp_settings,owner_id,shared_traffic_id,cnip_source,install_if_missing)
+			VALUES ($1,$2,$3,$4,NULLIF($5,''),NULLIF($6,0),NULLIF($7,''),$8,NULLIF($9,''),NULLIF($10,''),$11,0,$12,$13,$14,$15,$16,$17)`,
+		task.ID, task.AgentID, task.Action, task.Engine, task.ConfigID, task.ConfigVersion, storedConfigContent, mainlandPoliciesJSON, task.CoreVersion, task.CoreSource, task.Status, task.CreatedAt, task.TCPSettings, scope.OwnerID, task.SharedTrafficID, task.CNIPSource, task.InstallIfMissing)
 	if err != nil {
 		return core.Task{}, mapError(err)
 	}
@@ -1894,7 +1902,7 @@ func (s *Store) ListTasksFiltered(ctx context.Context, agentID string, status co
 	args = append(args, limit)
 	rows, err := s.pool.Query(ctx, `
 		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),COALESCE(core_version,''),COALESCE(core_source,''),status,attempt,
-		       COALESCE(output,''),COALESCE(error,''),created_at,started_at,finished_at,tcp_settings
+		       COALESCE(output,''),COALESCE(error,''),created_at,started_at,finished_at,tcp_settings,install_if_missing
 		FROM tasks
 		WHERE `+where+fmt.Sprintf(` ORDER BY created_at DESC LIMIT $%d`, len(args)), args...)
 	if err != nil {
@@ -1932,7 +1940,7 @@ func (s *Store) getTask(ctx context.Context, id string, stateOnly bool) (core.Ta
 	ownerWhere += agentEngineAccessClause(ctx, "tasks.agent_id", "tasks.engine", &args)
 	row := s.pool.QueryRow(ctx, `
 		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),COALESCE(core_version,''),COALESCE(core_source,''),status,attempt,
-		       `+output+`,COALESCE(error,''),created_at,started_at,finished_at,tcp_settings
+		       `+output+`,COALESCE(error,''),created_at,started_at,finished_at,tcp_settings,install_if_missing
 		FROM tasks WHERE id=$1`+ownerWhere, args...)
 	task, err := scanTask(row, false)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -1986,7 +1994,14 @@ func (s *Store) RetryTask(ctx context.Context, id string) (core.Task, error) {
 		}
 		return s.GetTask(ctx, change.TaskID)
 	}
+	expectedVersion := 0
+	if previous.InstallIfMissing {
+		// Never silently deploy a newer draft when retrying a partially
+		// completed install + configuration operation.
+		expectedVersion = previous.ConfigVersion
+	}
 	return s.CreateTask(ctx, core.TaskRequest{
+		InstallIfMissing: previous.InstallIfMissing, ExpectedConfigVersion: expectedVersion,
 		TCPSettings: previous.TCPSettings,
 		AgentID:     previous.AgentID, Action: previous.Action, Engine: previous.Engine,
 		ConfigID: previous.ConfigID, CoreVersion: previous.CoreVersion, CoreSource: previous.CoreSource,
@@ -2022,7 +2037,7 @@ func (s *Store) RunningTask(ctx context.Context, agentID string) (*core.Task, er
 	row := tx.QueryRow(ctx, `
 		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),
 		       COALESCE(config_content,''),COALESCE(mainland_access_policies,'[]'::jsonb),COALESCE(core_version,''),COALESCE(core_source,''),status,attempt,COALESCE(lease_id,''),
-		       COALESCE(output,''),COALESCE(error,''),created_at,started_at,finished_at,tcp_settings,shared_traffic_id,cnip_source
+		       COALESCE(output,''),COALESCE(error,''),created_at,started_at,finished_at,tcp_settings,shared_traffic_id,cnip_source,install_if_missing
 		FROM tasks WHERE agent_id=$1 AND status='running'
 		ORDER BY started_at DESC LIMIT 1`, agentID)
 	task, err := scanTask(row, true)
@@ -2068,10 +2083,14 @@ func (s *Store) RunningTask(ctx context.Context, agentID string) (*core.Task, er
 		}
 	}
 	if (isMihomoMirrorTask(task) && !containsFeature(features, core.AgentFeatureMihomoDevelopmentSource)) ||
-		(task.Action.SystemBBR() && !containsFeature(features, core.AgentFeatureSystemBBR)) {
+		(task.Action.SystemBBR() && !containsFeature(features, core.AgentFeatureSystemBBR)) ||
+		(task.InstallIfMissing && !containsFeature(features, core.AgentFeaturePresetAutoInstall)) {
 		message := "Agent no longer advertises mihomo-development-source-v1; the mirror development task cannot be safely resumed and it is unknown whether the previous Agent executed it before the connection was lost"
 		if task.Action.SystemBBR() {
 			message = "Agent no longer advertises system-bbr-v1; TCP tuning cannot safely resume and previous execution before disconnect is unknown"
+		}
+		if task.InstallIfMissing {
+			message = "Agent no longer advertises preset-auto-install-v1; automatic installation cannot safely resume and previous execution before disconnect is unknown"
 		}
 		if _, updateErr := tx.Exec(ctx, `
 			UPDATE tasks SET status='failed', error=$2, finished_at=now(), config_content=NULL, lease_id=NULL
@@ -2142,13 +2161,14 @@ func (s *Store) ClaimTask(ctx context.Context, agentID string) (*core.Task, erro
 			  AND ($3::boolean OR NOT (t.action='install' AND t.engine='mihomo' AND t.core_version='development' AND COALESCE(t.core_source,'')='mirror'))
 			  AND ($4::boolean OR t.action NOT IN ('enable-bbr','disable-bbr','configure-tcp'))
               AND ($5::boolean OR t.cnip_source IS NULL)
+			  AND ($6::boolean OR NOT t.install_if_missing)
 			ORDER BY t.created_at ASC FOR UPDATE OF t SKIP LOCKED LIMIT 1
 		)
 		UPDATE tasks t SET status='running',started_at=now(),attempt=attempt+1,lease_id=$2
 		FROM next_task n WHERE t.id=n.id
 		RETURNING t.id,t.agent_id,t.action,t.engine,COALESCE(t.config_id,''),COALESCE(t.config_version,0),
 		          COALESCE(t.config_content,''),COALESCE(t.mainland_access_policies,'[]'::jsonb),COALESCE(t.core_version,''),COALESCE(t.core_source,''),t.status,t.attempt,COALESCE(t.lease_id,''),COALESCE(t.output,''),COALESCE(t.error,''),
-		          t.created_at,t.started_at,t.finished_at,t.tcp_settings,t.shared_traffic_id,t.cnip_source`, agentID, leaseID, mirrorSupported, containsFeature(features, core.AgentFeatureSystemBBR), containsFeature(features, core.AgentFeatureCNIPSource))
+		          t.created_at,t.started_at,t.finished_at,t.tcp_settings,t.shared_traffic_id,t.cnip_source,t.install_if_missing`, agentID, leaseID, mirrorSupported, containsFeature(features, core.AgentFeatureSystemBBR), containsFeature(features, core.AgentFeatureCNIPSource), containsFeature(features, core.AgentFeaturePresetAutoInstall))
 	task, err := scanTask(row, true)
 	if err == nil {
 		if configErr := s.openExecutionConfig(&task); configErr != nil {
@@ -2331,7 +2351,7 @@ func (s *Store) RecentReadTask(ctx context.Context, agentID string, engine core.
 	where := ownerClause(ctx, "owner_id", &args)
 	row := s.pool.QueryRow(ctx, `
 		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),COALESCE(core_version,''),COALESCE(core_source,''),status,attempt,
-		       COALESCE(output,''),COALESCE(error,''),created_at,started_at,finished_at,tcp_settings
+		       COALESCE(output,''),COALESCE(error,''),created_at,started_at,finished_at,tcp_settings,install_if_missing
 		FROM tasks
 		WHERE agent_id=$1 AND engine=$2 AND action=$3 AND status='succeeded'
 		  AND config_content IS NOT NULL AND finished_at > now()-$4::interval`+where+`
@@ -2357,7 +2377,7 @@ func (s *Store) RequeueStaleTasks(ctx context.Context, age, installAge time.Dura
 			started_at=CASE WHEN attempt >= $3 THEN started_at ELSE NULL END,
 			config_content=CASE WHEN attempt >= $3 THEN NULL ELSE config_content END,
 			lease_id=NULL
-		WHERE status='running' AND started_at < now() - CASE WHEN action='install' THEN $2::interval ELSE $1::interval END`+where,
+		WHERE status='running' AND started_at < now() - CASE WHEN action='install' OR install_if_missing THEN $2::interval ELSE $1::interval END`+where,
 		args...)
 	return err
 }
@@ -2404,14 +2424,14 @@ func scanTask(row rowScanner, includeContent bool) (core.Task, error) {
 		var mainlandPoliciesJSON []byte
 		err = row.Scan(&task.ID, &task.AgentID, &task.Action, &task.Engine, &task.ConfigID, &task.ConfigVersion,
 			&task.ConfigContent, &mainlandPoliciesJSON, &task.CoreVersion, &task.CoreSource, &task.Status, &task.Attempt, &task.LeaseID, &task.Output, &task.Error,
-			&task.CreatedAt, &task.StartedAt, &task.FinishedAt, &tcpSettingsJSON, &task.SharedTrafficID, &task.CNIPSource)
+			&task.CreatedAt, &task.StartedAt, &task.FinishedAt, &tcpSettingsJSON, &task.SharedTrafficID, &task.CNIPSource, &task.InstallIfMissing)
 		if err == nil && len(mainlandPoliciesJSON) > 0 {
 			err = json.Unmarshal(mainlandPoliciesJSON, &task.MainlandAccessPolicies)
 		}
 	} else {
 		err = row.Scan(&task.ID, &task.AgentID, &task.Action, &task.Engine, &task.ConfigID, &task.ConfigVersion,
 			&task.CoreVersion, &task.CoreSource, &task.Status, &task.Attempt, &task.Output, &task.Error,
-			&task.CreatedAt, &task.StartedAt, &task.FinishedAt, &tcpSettingsJSON)
+			&task.CreatedAt, &task.StartedAt, &task.FinishedAt, &tcpSettingsJSON, &task.InstallIfMissing)
 	}
 	if err == nil && len(tcpSettingsJSON) > 0 {
 		err = json.Unmarshal(tcpSettingsJSON, &task.TCPSettings)
@@ -2686,6 +2706,11 @@ CREATE TABLE IF NOT EXISTS tasks (
 );
 
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS lease_id text;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS install_if_missing boolean NOT NULL DEFAULT false;
+ALTER TABLE tasks DROP CONSTRAINT IF EXISTS tasks_install_if_missing_check;
+ALTER TABLE tasks ADD CONSTRAINT tasks_install_if_missing_check CHECK (
+	NOT install_if_missing OR (action IN ('validate','deploy') AND config_id IS NOT NULL AND config_version IS NOT NULL AND config_version > 0)
+);
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS capability_transition boolean NOT NULL DEFAULT false;
 CREATE INDEX IF NOT EXISTS tasks_capability_transition_idx ON tasks(agent_id,engine,created_at DESC,id DESC) WHERE capability_transition;
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS tcp_settings jsonb NOT NULL DEFAULT '{}'::jsonb;

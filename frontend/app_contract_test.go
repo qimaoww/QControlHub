@@ -52,7 +52,7 @@ func TestSPAConsoleSurfaceMatchesInitialRelease(t *testing.T) {
 	for _, required := range []string{
 		`data-theme-toggle`, `qcontrolhub-color-theme`, `login-theme-toggle`,
 		`app.style.display = "contents"`, `X-QControlHub-Enrollment`,
-		`/install-agent.sh`, `执行记录`, `手动配置`, `系统设置`,
+		`/install-agent.sh`, `执行记录`, `入站操作`, `高级字段`, `系统设置`,
 		`data-delete-enrollment`, `可重复安装`, `删除添加命令`,
 		`enrollment-token`, `/enrollment-command`,
 		`heartbeat, percent`, `serviceActionDisabled, trafficChart, renderConfigDiff`,
@@ -360,7 +360,7 @@ func TestSidebarNavigationUsesWorkflowOrderAndResponsiveGrouping(t *testing.T) {
 	navigation := content[start : start+end]
 	previous := -1
 	for _, route := range []string{
-		"dashboard", "node-settings", "agents", "live-config",
+		"dashboard", "node-settings", "live-config",
 		"client-access", "substore-sync", "traffic", "core-logs", "tasks",
 	} {
 		position := strings.Index(navigation, `"`+route+`"`)
@@ -376,10 +376,12 @@ func TestSidebarNavigationUsesWorkflowOrderAndResponsiveGrouping(t *testing.T) {
 	if strings.Contains(navigation, `"settings"`) {
 		t.Error("settings must remain separated from the primary desktop navigation")
 	}
+	if strings.Contains(navigation, `"agents"`) || strings.Contains(content, `["agents", "内核预设"]`) {
+		t.Error("preset actions belong in the configuration page, not standalone desktop or mobile navigation")
+	}
 	for _, required := range []string{
 		`const dockIcons = Object.freeze({`,
 		`["node-settings", "节点设置", dockIcons.server]`,
-		`["agents", "内核预设", dockIcons.layers, true]`,
 		`["live-config", "配置", dockIcons.fileCode]`,
 		`["client-access", "客户端", dockIcons.monitorSmartphone]`,
 		`["substore-sync", "同步", dockIcons.refreshCw, true]`,
@@ -487,7 +489,7 @@ func TestTrafficUsesOneNodeFilterSurface(t *testing.T) {
 	}
 }
 
-func TestPresetSidebarShowsOnlySelectedNodeContent(t *testing.T) {
+func TestLegacyPresetLinksAndRendererKeepScopedNodeSelection(t *testing.T) {
 	app, err := os.ReadFile("app.js")
 	if err != nil {
 		t.Fatal(err)
@@ -513,8 +515,9 @@ func TestPresetSidebarShowsOnlySelectedNodeContent(t *testing.T) {
 		t.Error("preset sidebar nodes must not enter the node settings workflow")
 	}
 	for _, required := range []string{
-		"hash.startsWith(\"preset-node-\")\n        ? \"agents\"",
-		`if (hash.startsWith("preset-node-")) state.data.selectedAgent = hash.slice(12);`,
+		"hash.startsWith(\"preset-node-\")\n        ? \"live-config\"",
+		`state.data.liveAgent = hash.slice(12);`,
+		`let hash = presetSelection ? "live-config"`,
 	} {
 		if !strings.Contains(string(app), required) {
 			t.Errorf("preset sidebar routing is missing %q", required)
@@ -1022,7 +1025,7 @@ func TestManualConfigRequiresExplicitImportOfNodeSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, required := range []string{
-		`(item) => privateAccount || liveConfigEngineEligible(agent.runtime?.[item])`,
+		`(item) => privateAccount || liveConfigEngineEligible(agent.runtime?.[item], can("agent-config.write"))`,
 		`class="live-engine-bar" aria-label="选择内核"`,
 		`data-live-engine="${esc(item)}" aria-pressed="${active}"`,
 	} {

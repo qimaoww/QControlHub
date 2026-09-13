@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { renderConfigSourceStudio, renderFieldEditor, renderFieldRail, renderGlobalFieldStudio, revealSelectedFields } from "./modules/config-fields.js";
+import { commonConfigFields, renderCommonFieldStudio, renderConfigSourceStudio, renderFieldEditor, renderFieldRail, renderGlobalFieldStudio, revealSelectedFields } from "./modules/config-fields.js";
 import { renderSSRustFieldStudio, ssRustFieldGroups } from "./modules/ss-rust-fields.js";
 
 const fields = [
@@ -82,6 +82,42 @@ assert.equal(renderConfigSourceStudio({ config: null }), "");
 assert.match(renderFieldEditor({ selected: fields[1], value: {} }), /mutation-mode-unset/);
 assert.match(renderFieldEditor({ selected: fields[1], value: {} }), /value-mode-unset/);
 assert.match(renderFieldEditor({ selected: fields[1], value: {} }), /<option value="add" selected>/);
+
+const structuralFields = ["inbounds", "outbounds", "listeners", "servers", "shadowsocks"]
+  .map(key => ({key, label:key}));
+for (const engine of ["xray", "sing-box", "mihomo", "ss-rust"]) {
+  assert.deepEqual(commonConfigFields(engine, [...fields, ...structuralFields]).map(field => field.key),
+    ["mode", "dns", "outbound_udp_allow_fragmentation"], `${engine} common fields include inbound structures`);
+}
+assert.deepEqual(commonConfigFields("mihomo", [
+  ...["port", "socks-port", "mixed-port", "redir-port", "tproxy-port", "tun", "tunnels", "tuic-server", "ss-config", "vmess-config"].map(key => ({key})),
+  {key:"dns"}, {key:"log-level"},
+]).map(field => field.key), ["dns", "log-level"], "native listeners must not be common-only edits");
+assert.deepEqual(commonConfigFields("ss-rust", [{key:"unknown"}, {key:"dns", scope:"global"}]).map(field => field.key), ["dns"]);
+for (const mutation of ["add", "modify", "delete"]) {
+  const html = renderCommonFieldStudio({engine:"xray", fields:[fields[2]], selected:fields[2],
+    value:{present:mutation !== "add", fragment:malicious}, config, catalog:{format:"JSON"}, mutation});
+  assert.match(html, /id="common-options"/);
+  assert.match(html, new RegExp(`<input type="hidden" name="mutation" value="${mutation}">`));
+  assert.ok(!html.includes('select name="mutation"'), "common dialog exposes another operation selector");
+  assert.ok(!html.includes("<img"), "common field fragment must be escaped");
+  assert.equal(html.includes(" readonly"), mutation === "delete");
+  assert.equal(html.includes("删除并部署"), mutation === "delete");
+  assert.ok(!html.includes('id="inbound-field-form"'));
+  assert.ok(!html.includes('id="source-config-form"'));
+  assert.ok(!renderFieldEditor({selected:fields[2], value:{present:mutation === "add"}, mutation}).includes("<form"),
+    "a changed presence state must not silently switch the locked mutation");
+}
+for (const mutation of ["add", "modify", "delete"]) {
+  const html = renderCommonFieldStudio({engine:"xray", fields:[], config, catalog:{format:"JSON"}, mutation});
+  assert.ok(!html.includes("<form"), "an empty field selection must not have a save target");
+  assert.match(html, mutation === "add" ? /没有可增加/ : /尚无可操作/);
+}
+const commonSSRust = renderCommonFieldStudio({engine:"ss-rust", fields:[fields[1]], selected:fields[1],
+  value, config, catalog:{format:"JSON"}, mutation:"modify"});
+assert.match(commonSSRust, /已有端口覆盖保持不变/);
+assert.match(commonSSRust, /仅检查配置结构/);
+assert.ok(!commonSSRust.includes("尚未选择端口"));
 
 const railBounds = { left: 0, right: 200, top: 0, bottom: 400 };
 let selectedBounds = { left: 420, right: 600, top: 2, bottom: 55 };
