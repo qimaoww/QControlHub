@@ -905,6 +905,12 @@ dialog.config-access-dialog::backdrop{background:rgba(17,20,36,.34);backdrop-fil
 .live-engine-tab{display:flex;align-items:center;justify-content:center;flex:0 0 140px;width:140px;min-width:140px;height:40px;box-sizing:border-box;padding:0 14px;border:0;border-bottom:2px solid transparent;border-radius:6px 6px 0 0;background:transparent;color:var(--muted);font:inherit;font-size:calc(13px * var(--ui-font-scale));font-weight:600;cursor:pointer;transition:background .15s,color .15s}
 .live-engine-tab:hover{background:var(--surface-2);color:var(--ink)}
 .live-engine-tab.active{background:var(--accent-soft);border-bottom-color:var(--accent);color:var(--accent)}
+.live-engine-tab{gap:6px}
+.live-engine-status{font-size:calc(10px * var(--ui-font-scale));font-weight:500;color:var(--muted);white-space:nowrap}
+.live-engine-status.installed{color:var(--accent)}
+.live-engine-status::before{content:"○";margin-right:4px}
+.live-engine-status.installed::before{content:"●"}
+.live-engine-loading{color:var(--accent)}
 .live-engine-tab:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 /* Each inbound has its own persistent draft and visible switch button. */
 .config-file-buttons{display:flex;flex-wrap:wrap;gap:8px;padding:16px 18px;border-bottom:1px solid var(--line);background:var(--surface)}
@@ -920,9 +926,10 @@ dialog.config-access-dialog::backdrop{background:rgba(17,20,36,.34);backdrop-fil
 .config-inbound-menu>summary{list-style:none;gap:12px;cursor:pointer;min-height:40px}
 .config-inbound-menu>summary::-webkit-details-marker{display:none}
 .config-inbound-menu[open]>summary{border-color:var(--accent);color:var(--accent)}
-.config-inbound-menu-items{position:absolute;top:calc(100% + 6px);right:0;z-index:20;width:180px;padding:6px;border:1px solid var(--line);border-radius:10px;background:var(--surface);box-shadow:var(--shadow-lift)}
-.config-inbound-menu-items button{display:block;width:100%;padding:12px;border:0;border-radius:6px;text-align:left;background:transparent;color:var(--ink);font:inherit;cursor:pointer}
+.config-inbound-menu-items{position:absolute;top:calc(100% + 6px);right:0;z-index:20;width:200px;max-width:calc(100vw - 40px);padding:6px;border:1px solid var(--line);border-radius:10px;background:var(--surface);box-shadow:var(--shadow-lift)}
+.config-inbound-menu-items button{display:block;width:100%;min-height:40px;padding:10px 12px;border:0;border-radius:6px;text-align:left;background:transparent;color:var(--ink);font:inherit;font-size:calc(12px * var(--ui-font-scale));cursor:pointer}
 .config-inbound-menu-items button:hover:not(:disabled){background:var(--surface-2)}
+.config-inbound-menu-items button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;background:var(--surface-2)}
 .config-inbound-menu-items button:disabled{opacity:.42;cursor:not-allowed}
 .config-inbound-menu-items .danger-text{color:var(--red)}
 .config-workspace-tools{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:14px 18px;background:var(--surface);border-top:1px solid var(--line)}
@@ -950,6 +957,30 @@ dialog.config-access-dialog::backdrop{background:rgba(17,20,36,.34);backdrop-fil
 .config-inbound-delete{width:min(560px,calc(100vw - 32px))}
 .config-common-dialog{width:min(800px,calc(100vw - 32px))}
 .config-common-studio .field-canvas{min-width:0}
+.config-outbound-dialog{width:min(800px,calc(100vw - 32px))}
+.config-outbound-dialog[open]{display:flex;flex-direction:column;overflow:hidden}
+.config-outbound-dialog .config-inbound-heading{flex-shrink:0}
+.config-outbound-dialog .config-inbound-heading>div{min-width:0}
+.config-outbound-dialog .config-inbound-body{min-height:0;overflow:auto;overscroll-behavior:contain}
+.config-outbound-dialog .config-outbound-studio{margin:0;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.config-outbound-binding{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px 16px;padding-bottom:12px;margin-bottom:12px;border-bottom:1px solid var(--line);color:var(--muted);font-size:calc(11px * var(--ui-font-scale));line-height:1.7}
+.config-outbound-binding>span{min-width:0;overflow-wrap:anywhere}
+.config-outbound-binding strong{color:var(--ink-2)}
+.config-outbound-binding .status-label{flex:none;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
+.config-outbound-studio .field-mutation>label{flex:1;min-width:0}
+.config-outbound-studio .field-mutation select{flex:1;min-width:0;max-width:100%}
+.config-outbound-studio .field-value-state{overflow-wrap:anywhere}
+.config-outbound-studio [data-outbound-status]:empty{display:none}
+.config-outbound-studio [data-outbound-status]{margin-top:12px;color:var(--accent)}
+.config-outbound-studio form[aria-busy=true]{cursor:progress}
+.config-outbound-studio form[aria-busy=true] textarea{opacity:.7}
+.config-outbound-presets{display:grid;gap:14px;padding-bottom:16px;border-bottom:1px solid var(--line)}
+.config-outbound-presets>label{font-size:calc(11px * var(--ui-font-scale))}
+.config-outbound-presets fieldset{min-width:0;margin:0;padding:0;border:0}
+.config-outbound-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:12px}
+.config-outbound-fields>label{display:grid;gap:6px;min-width:0;color:var(--ink-2);font-size:calc(11px * var(--ui-font-scale));font-weight:600}
+.config-outbound-presets :is(input,select){width:100%;min-width:0;min-height:36px;font-size:calc(12px * var(--ui-font-scale))}
+.config-outbound-presets .field-editor-note{margin:10px 0;overflow-wrap:anywhere}
 .inbound-delete-actions{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:8px;margin-top:20px}
 @media(max-width:600px){
   .config-inbound-dialog{width:calc(100vw - 16px);max-height:calc(100dvh - 16px);border-radius:10px}
@@ -960,6 +991,15 @@ dialog.config-access-dialog::backdrop{background:rgba(17,20,36,.34);backdrop-fil
   .config-inbound-dialog .builder-index a{min-width:max-content;align-items:center}
   .config-inbound-dialog .plan-fields.three,.config-inbound-dialog .plan-fields.two{grid-template-columns:1fr}
   .config-inbound-menu-items{right:auto;left:0}
+  .config-inbound-menu:last-child .config-inbound-menu-items{left:auto;right:0}
+  .config-inbound-menu>summary,.config-inbound-menu-items button{min-height:44px}
+  .config-outbound-dialog .field-canvas{padding:14px}
+  .config-outbound-studio .field-canvas form>footer>div{display:flex;flex-wrap:wrap;width:100%;gap:8px}
+  .config-outbound-studio .field-canvas form>footer .button{flex:1;min-width:0;min-height:44px;white-space:normal}
+  .config-outbound-studio .field-mutation{align-items:stretch;flex-direction:column}
+  .config-outbound-studio .field-mutation select{height:40px}
+  .config-outbound-fields{grid-template-columns:minmax(0,1fr)}
+  .config-outbound-presets :is(input,select){min-height:44px;font-size:max(16px,calc(12px * var(--ui-font-scale)))}
   .config-workspace-tools [data-config-refresh]{margin-left:0}
   .config-inbound-dialog .builder-actions{padding:10px}
   .config-inbound-dialog .builder-actions>div:last-child{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;width:100%}
@@ -983,6 +1023,9 @@ dialog.config-access-dialog::backdrop{background:rgba(17,20,36,.34);backdrop-fil
 .live-config-workspace .code-gutter{font-size:calc(12px * var(--ui-font-scale));line-height:calc(22.75px * var(--ui-font-scale));padding-top:18px}
 .live-config-workspace .code-workspace>footer{padding:14px 18px;flex-wrap:wrap;border-top:1px solid var(--line);background:var(--surface)}
 .live-config-workspace .code-workspace>footer>div{flex-wrap:wrap;justify-content:flex-end;margin-left:auto}
+.live-config-workspace [data-live-save-status]{flex:1 0 100%;color:var(--accent);font-size:calc(12px * var(--ui-font-scale));line-height:1.7;overflow-wrap:anywhere}
+.live-config-workspace [data-live-save-status][role=alert]{color:var(--red)}
+.live-config-editor[aria-busy=true]{cursor:progress}
 @media(max-width:820px){
   .page-live-config .desktop-app{display:block;height:auto;overflow:visible}
   .page-live-config .context-sidebar{position:relative;width:auto;height:auto;margin:0;padding:12px;border:0;border-radius:0}

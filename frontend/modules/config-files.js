@@ -1,6 +1,6 @@
 // Keep JSON tokens verbatim: parsing and stringifying an entire configuration
 // through JS numbers would corrupt integers larger than Number.MAX_SAFE_INTEGER.
-function members(text, array = false) {
+export function configJSONMembers(text, array = false) {
   const parsed = JSON.parse(text);
   if (array ? !Array.isArray(parsed) : !parsed || Array.isArray(parsed) || typeof parsed !== "object")
     throw new Error(array ? "入站/出站必须是数组" : "配置文件必须是 JSON 对象");
@@ -32,6 +32,7 @@ function members(text, array = false) {
   }
   return result;
 }
+const members = configJSONMembers;
 const objectText = (map) => `{\n${[...map].map(([key,value]) => `  ${JSON.stringify(key)}: ${value}`).join(",\n")}\n}\n`;
 
 // Compare JSON snapshots without rounding large numeric tokens or depending

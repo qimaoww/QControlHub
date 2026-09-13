@@ -8,6 +8,7 @@ import "./core_log_preferences_smoke.mjs";
 import "./config_fields_smoke.mjs";
 import "./system_bbr_smoke.mjs";
 import "./config_files_smoke.mjs";
+import "./config_outbounds_smoke.mjs";
 import "./preset_drafts_smoke.mjs";
 import "./preset_runtime_smoke.mjs";
 import "./traffic_smoke.mjs";
@@ -876,8 +877,8 @@ try {
   assert.equal(staleMarkup.includes('data-live-intent="import"'), true);
   assert.equal(
     staleWorkspaceRequests,
-    1,
-    "the superseded runtime never loads a workspace",
+    2,
+    "parallel workspace reads must not cause an extra read after runtime resolves",
   );
 } finally {
   if (staleRuntimeDocument === undefined) delete globalThis.document;
@@ -933,7 +934,9 @@ for (const install of [
     before(element) { this.accountingSummary = element; }
     constructor(elements = {}) {
       this.isConnected = true;
-      this.querySelector = () => null;
+      this.dataset = {};
+      this.footer = { prepend: element => { this.saveStatus = element; } };
+      this.querySelector = selector => selector === ".code-workspace>footer" ? this.footer : null;
       this.querySelectorAll = () => [];
       this._el = new Map(
         Object.entries(elements).map(([k, v]) => [
@@ -1056,11 +1059,17 @@ for (const install of [
       querySelector: (sel) => forms[sel] ?? null,
       querySelectorAll: selector => lists[selector] || [],
       getElementById: () => null,
-      createElement: () => ({
-        className: "", type: "", dataset: {}, textContent: "",
-        setAttribute() {}, removeAttribute() {}, append() {}, before() {}, addEventListener() {},
-        parentElement: { classList: { contains: () => false }, append() {} },
-      }),
+      createElement: () => {
+        const attributes = new Map();
+        return {
+          className: "", type: "", dataset: {}, textContent: "",
+          setAttribute: (name, value) => attributes.set(name, value),
+          getAttribute: name => attributes.get(name) ?? null,
+          removeAttribute: name => attributes.delete(name),
+          remove() {}, append() {}, before() {}, addEventListener() {},
+          parentElement: { classList: { contains: () => false }, append() {} },
+        };
+      },
     };
     return installConfigPages(ctx);
   };

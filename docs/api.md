@@ -67,10 +67,12 @@
 | `GET` | `/api/v1/agents/{id}/configs/{engine}/workspace` | 读取服务端入站、字段目录和节点配置工作区数据 |
 | `POST` | `/api/v1/agents/{id}/configs/{engine}/plans` | 生成带安全随机凭据的服务端入站方案；可传当前 `input` 以保留用户选择并重新生成随机字段 |
 | `POST` | `/api/v1/agents/{id}/configs/{engine}/server-inbounds` | 新增、修改或删除服务端入站并创建校验/部署任务 |
+| `POST` | `/api/v1/agents/{id}/configs/{engine}/source` | 原子保存源码并创建校验/部署任务，出站绑定复用此接口 |
 | `GET` | `/api/v1/agents/{id}/configs/{engine}/fields/{key}` | 读取官方目录中的一个顶级配置字段 |
 | `POST` | `/api/v1/agents/{id}/configs/{engine}/fields/{key}` | 新增、修改或删除顶级配置字段并创建任务 |
 | `GET` | `/api/v1/deployments` | 列出每个节点/内核最近一次真实成功部署 |
 | `GET` | `/api/v1/client-access` | 从已部署入站生成客户端连接资料 |
+| `GET` | `/api/v1/client-access?outbound_engine=xray` | 为已授权的已部署入站增加客户端出站对象，目标内核也可为 sing-box（client-access.read） |
 | `GET` | `/api/v1/substore-sync?target_id=` | 读取可见同步组、已选节点和可用部署（client-access.read） |
 | `PUT` | `/api/v1/substore-sync/settings` | 保存本账号的 Sub-Store 后端地址（settings.manage） |
 | `POST` | `/api/v1/substore-sync/targets` | 创建自己的同步组（settings.manage） |
@@ -137,6 +139,14 @@
 在节点设置中点击旗帜可搜索、选择国家/地区；保存后节点设置及客户端卡片左上角使用同一旗帜。`PUT /api/v1/agents/{id}/region` 接收 `{"country_code":"SG"}`，代码由 `/api/v1/regions` 提供，保存时去除首尾空格并转大写；`{"country_code":""}` 清除手动设置并恢复自动识别。缺少字段、`null` 或不支持的代码返回 400。设置持久化为节点的 `region_code` 标签，重连后保留，不修改其他标签、公网 IP 或客户端连接配置。只读用户只能查看；写入沿用管理权限、CSRF 和审计保护。
 
 `GET /api/v1/overview` 中的 `configs` 只统计可在“配置档案”工作区跨节点下发的全局配置；`node_configs` 单独统计绑定到具体 Agent/内核的节点配置，避免将两类配置混为一个不可解释的总数。为兼容既有调用方，`tasks_pending` 仍表示 `pending + running` 的活动任务总数；`tasks_queued` 和 `tasks_running` 分别给出排队与执行中的精确数量。
+
+### 从节点入站生成出站
+
+`GET /api/v1/client-access` 可选 `outbound_engine=xray` 或 `outbound_engine=sing-box`。有此参数时，顶层条目的 `profiles[]` 增加 `outbound`（可直接用作目标内核出站的 JSON 对象），无法安全转换的协议或安全参数返回 `outbound_error`，不降级连接安全选项。其他内核值返回 `400`；不传参数时保持原响应，不附加出站对象。
+
+权限与原客户端资料接口一致，需要 `client-access.read`。数据只来自当前身份可见的成功部署修订，未部署草稿和其他账号无权读取的凭据不会成为候选；沿用每个入站自己的连接地址与协议栈偏好。导出仅包含客户端认证及公开连接参数，不包含服务端私钥、证书路径、Reality 私钥/签名种子或 VLESS 服务端解密密钥。该请求只读，不修改任何节点。
+
+前端排除当前节点，并把选中的 `outbound` 复制到当前配置，用本地唯一标签绑定所选入站；它不是自动跟随目标更新的远程引用。保存通过 `POST /api/v1/agents/{id}/configs/{engine}/source`，请求包含 `name`、`description`、`content`、`version` 和 `intent`（`validate` / `deploy`）。配置版本锁、独立出口及标记规划、任务创建在同一原子保存流程中完成；版本冲突返回 `409`。只保存校验不会改变节点运行配置。
 
 ### 内核日志查询
 

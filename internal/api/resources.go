@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -28,9 +29,11 @@ type clientAccessProfile struct {
 	NameOverridden bool                       `json:"name_overridden,omitempty"`
 	// Address, AddressMode, and AddressOverridden describe this listening
 	// endpoint only; they never inherit another port's override.
-	Address           string `json:"address,omitempty"`
-	AddressMode       string `json:"address_mode,omitempty"`
-	AddressOverridden bool   `json:"address_overridden,omitempty"`
+	Address           string          `json:"address,omitempty"`
+	AddressMode       string          `json:"address_mode,omitempty"`
+	AddressOverridden bool            `json:"address_overridden,omitempty"`
+	Outbound          json.RawMessage `json:"outbound,omitempty"`
+	OutboundError     string          `json:"outbound_error,omitempty"`
 }
 
 type clientAccessAddressOption struct {
@@ -753,7 +756,12 @@ func (s *Server) createConfigMutationTask(w http.ResponseWriter, request *http.R
 }
 
 func (s *Server) listClientAccess(w http.ResponseWriter, request *http.Request) {
-	entries, err := s.clientAccessEntries(request.Context())
+	outboundEngine := core.Engine(request.URL.Query().Get("outbound_engine"))
+	if outboundEngine != "" && outboundEngine != core.EngineXray && outboundEngine != core.EngineSingBox {
+		writeError(w, http.StatusBadRequest, "outbound_engine must be xray or sing-box")
+		return
+	}
+	entries, err := s.clientAccessEntries(request.Context(), outboundEngine)
 	if err != nil {
 		writeInternalError(w, err)
 		return
@@ -761,7 +769,7 @@ func (s *Server) listClientAccess(w http.ResponseWriter, request *http.Request) 
 	writeJSON(w, http.StatusOK, entries)
 }
 
-func (s *Server) clientAccessEntries(ctx context.Context) ([]clientAccessEntry, error) {
+func (s *Server) clientAccessEntries(ctx context.Context, outboundEngine ...core.Engine) ([]clientAccessEntry, error) {
 	snapshot, err := loadClientAccessSnapshot(ctx, s.store)
 	if err != nil {
 		return nil, err
@@ -794,6 +802,25 @@ func (s *Server) clientAccessEntries(ctx context.Context) ([]clientAccessEntry, 
 		// Every displayed profile resolves its own connection address and address
 		// family, so one listening endpoint never inherits another's settings.
 		profiles := buildClientAccessProfiles(deployment.Engine, inputs, candidates, serverName, agent.Labels)
+		if len(outboundEngine) > 0 && outboundEngine[0] != "" {
+			// Reuse the same permission-scoped deployed snapshot and per-port
+			// address overrides; do not read arbitrary node workspaces.
+			for index := range profiles {
+				profile := &profiles[index]
+				for _, input := range inputs {
+					if input.Tag != profile.Tag || input.Port != profile.Port {
+						continue
+					}
+					outbound, err := serverconfig.BuildClientOutbound(outboundEngine[0], input, profile.Address, serverName)
+					if err != nil {
+						profile.OutboundError = err.Error()
+					} else {
+						profile.Outbound = outbound
+					}
+					break
+				}
+			}
+		}
 		if len(addressOptions) > 0 {
 			primary := addressOptions[0]
 			entries = append(entries, clientAccessEntry{

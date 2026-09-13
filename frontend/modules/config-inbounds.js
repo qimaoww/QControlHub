@@ -1,16 +1,6 @@
 import { bindEvent, reconcileView } from "./refresh.js";
-import { canonicalConfigJSON } from "./config-files.js";
-
-// Formatting and JSON object-key order do not constitute a different source.
-// YAML remains conservative: an unrecognized difference requires an explicit
-// source save, never a silent replacement by the database's preset snapshot.
-export function sameConfigContent(left, right) {
-  const clean = value => String(value ?? "").replaceAll("\r\n", "\n").trim();
-  if (clean(left) === clean(right)) return true;
-  try { return canonicalConfigJSON(left) === canonicalConfigJSON(right); }
-  catch { return false; }
-}
-
+import { bindConfigOutbounds } from "./config-outbounds.js";
+import { bindConfigMenu } from "./config-menu.js";
 // Reuse the actual preset form and field editors, not a second implementation
 // of protocol options. Only the requested editor is mounted: no second source
 // editor, inbound sidebar, engine selector or top-level page tabs.
@@ -105,6 +95,8 @@ export function bindConfigInbounds(ctx) {
       <button type="button" role="menuitem" class="danger-text" data-inbound-action="delete">删除入站</button>
     </div>`;
   navigation.append(menu);
+  bindConfigMenu(menu);
+  bindConfigOutbounds({ navigation, api, agent, engine, saved, current, dirty, writable, notify, confirmAction, onSaved, state, selectedInbound:target, input, canReadPeers:can("client-access.read") });
   // Adding an inbound is independent of the selected file. Keep one persistent
   // button directly before merged preview, never inside the common-field menu.
   let sourceActions = form?.querySelector(".config-file-actions");
@@ -158,20 +150,6 @@ export function bindConfigInbounds(ctx) {
   input?.addEventListener("input", update);
   input?.addEventListener("config-selection", update);
   update();
-  bindEvent(menu, "keydown", event => {
-    if (event.key === "Escape") { menu.open = false; menu.querySelector("summary").focus(); }
-    if (!["ArrowDown", "ArrowUp"].includes(event.key)) return;
-    event.preventDefault();
-    menu.open = true;
-    const items = [...menu.querySelectorAll("button:not(:disabled)")].filter(button => !button.closest("[hidden]"));
-    if (items.length) {
-      const index = items.indexOf(document.activeElement);
-      const next = index < 0 ? event.key === "ArrowDown" ? 0 : items.length - 1 :
-        (index + (event.key === "ArrowDown" ? 1 : items.length - 1)) % items.length;
-      items[next].focus();
-    }
-  });
-  bindEvent(menu, "focusout", event => { if (!menu.contains(event.relatedTarget)) menu.open = false; });
   bindEvent(tools.querySelector("[data-config-client]"), "click", () => {
     state.data.accessAgent = agent.id;
     state.data.accessEngine = engine;
@@ -190,10 +168,6 @@ export function bindConfigInbounds(ctx) {
       notify("请先读取当前节点配置，再操作配置项。", "error"); return false;
     }
     if (dirty()) { notify("配置源码有未保存修改，请先保存，再操作配置项。", "error"); return false; }
-    if (!sameConfigContent(saved?.content, sourceContent) && !(sourceMode !== "import" && !agent.runtime?.[engine]?.installed && !saved)) {
-      notify("当前节点快照与已保存配置不同，请先保存当前源码，再操作配置项，避免覆盖节点配置。", "error");
-      return false;
-    }
     return true;
   };
   const open = async (kind, trigger) => {
