@@ -8,6 +8,7 @@ import "./core_log_preferences_smoke.mjs";
 import "./config_fields_smoke.mjs";
 import "./system_bbr_smoke.mjs";
 import "./config_files_smoke.mjs";
+import "./config_outbounds_smoke.mjs";
 import "./preset_drafts_smoke.mjs";
 import "./preset_runtime_smoke.mjs";
 import "./traffic_smoke.mjs";

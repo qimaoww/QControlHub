@@ -85,7 +85,6 @@ export async function bindConfigRestrictions(ctx) {
   button.onclick = async () => {
     if (busy || !target() || !current()) return;
     if (dirty()) { notify("配置源码有未保存修改，请先保存，再设置入站限制。", "error"); return; }
-    if (ctx.sourceMatches === false) { notify("当前节点快照与已保存配置不同，请先保存当前源码，再设置入站限制。", "error"); return; }
     const chosen = { ...target() };
     busy = true; update();
     try {

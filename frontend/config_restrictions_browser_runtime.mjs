@@ -14,7 +14,7 @@ export async function testConfigRestrictionsRuntime(){
    const state={route:'live-config',navigationEpoch:1,routeSignal:abort.signal,data:{liveAgent:'node',liveEngine:engine}};
    let accept=false, saved=0, writes=[], notices=[],hold=null;
    const entries=['first','second'].map((tag,i)=>({agent_id:'node',engine,tag,port:1080+i*1000,config_version:3,agent_status:'online',agent_name:'Node',block_mainland_source:false,block_mainland_destination:false}));
-   await bindConfigRestrictions({form,files,agent:{id:'node'},engine,saved:{version:3},sourceMode:'managed',state,esc,engineName:v=>v,can:()=>!locked,
+   await bindConfigRestrictions({form,files,agent:{id:'node'},engine,saved:{version:3},sourceMode:'managed',sourceMatches:false,state,esc,engineName:v=>v,can:()=>!locked,
     confirmAction:async()=>accept,notify:msg=>notices.push(msg),onSaved:async()=>saved++,api:async(path,opts={})=>{
      if(opts.method==='PUT'){writes.push(JSON.parse(opts.body));return {config:{content:original},task:{id:'task-123'}};}
      if(hold)await hold;return entries;

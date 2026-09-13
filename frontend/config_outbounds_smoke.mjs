@@ -1,0 +1,13 @@
+import assert from "node:assert/strict";
+import {outboundEntries, mutateOutbound} from "./modules/config-outbounds.js";
+const source = '{"large":9007199254740993,"outbounds":[{"tag":"direct","type":"direct"},{"tag":"unused","type":"direct"},{"tag":"qch-trf-443-abcdef012345","type":"direct"}],"route":{"final":"direct"}}';
+assert.deepEqual(outboundEntries(source).map(o=>o.tag), ["direct","unused"]);
+assert.throws(()=>mutateOutbound(source,"delete",0,""), /引用/);
+assert.throws(()=>mutateOutbound(source,"modify",0,'{"tag":"renamed","type":"direct"}'), /引用/);
+assert.throws(()=>mutateOutbound(source,"add",-1,'{"tag":"direct"}'), /已存在/);
+assert.throws(()=>mutateOutbound(source,"delete",2,""), /选择/);
+const changed = mutateOutbound(source,"delete",1,"");
+assert(changed.includes("9007199254740993"));
+assert.deepEqual(JSON.parse(changed).outbounds.map(o=>o.tag), ["direct","qch-trf-443-abcdef012345"]);
+assert.equal(JSON.parse(mutateOutbound(source,"modify",1,'{"tag":"proxy","type":"socks"}')).outbounds[1].tag,"proxy");
+console.log("Outbound editing smoke passed");

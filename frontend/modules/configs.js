@@ -2,7 +2,7 @@ import { diagnosticError } from "./errors.js";
 import { bindEvent } from "./refresh.js";
 import { bindConfigFiles } from "./config-files.js";
 import { bindConfigRestrictions } from "./config-restrictions.js";
-import { bindConfigInbounds, renderEmbeddedPreset, sameConfigContent } from "./config-inbounds.js";
+import { bindConfigInbounds, renderEmbeddedPreset } from "./config-inbounds.js";
 import { createPresetDrafts } from "./preset-drafts.js";
 import { presetRoute } from "./preset-route.js";
 import { createPresetReads, renderPresetIdentity } from "./preset-runtime.js";
@@ -469,7 +469,7 @@ function configHasUnsavedChanges() {
   const input = editor?.querySelector("[data-code-input]");
   const sourceDirty = editor?.configFileController ? editor.configFileController.dirty() :
     input && !input.readOnly && input.value !== input.defaultValue;
-  return presetHasUnsavedChanges() || Boolean(sourceDirty || document.querySelector('.config-inbound-dialog[data-saving="1"]'));
+  return presetHasUnsavedChanges() || Boolean(sourceDirty || document.querySelector('.config-inbound-dialog[data-saving="1"], .config-inbound-dialog[data-dirty="1"]'));
 }
 let liveConfigRequest = 0;
 let liveReadRequest = 0;
@@ -550,7 +550,8 @@ function maybeRerenderLiveConfig(agentId, engine) {
   const input = editor?.querySelector("[data-code-input]");
   const sourceDirty = editor?.configFileController ? editor.configFileController.dirty() :
     input && !input.readOnly && input.value !== input.defaultValue;
-  if (presetHost || presetSavePending || sourceDirty) return;
+  if (presetHost || presetSavePending || sourceDirty ||
+      document.querySelector(".config-inbound-dialog[open], .config-access-dialog[open]")) return;
   if (
     state.route === "live-config" &&
     state.data.liveAgent === agentId &&
@@ -1763,7 +1764,6 @@ async function liveConfig() {
   const restrictionSelection = await bindConfigRestrictions({
     ...ctx, form: document.querySelector("#live-config-form"), files: configFiles,
     agent, engine, saved, sourceMode, inbounds:configWorkspace.inbound_targets || configWorkspace.inbounds || [],
-    sourceMatches: !saved || sameConfigContent(saved.content, current?.content),
     onSaved: applyInboundMutation,
   });
   if (accountData !== state.data || request !== liveConfigRequest || state.route !== "live-config") return;

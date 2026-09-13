@@ -1,5 +1,4 @@
 import { installConfigPages } from "./modules/configs.js";
-import { sameConfigContent } from "./modules/config-inbounds.js";
 
 const assert = (value, message) => { if (!value) throw new Error(message); };
 const pause = () => new Promise(resolve => setTimeout(resolve, 30));
@@ -77,6 +76,14 @@ async function fixture(engine, options = {}) {
     if (path.includes("/revisions/")) return {...saved, content:"{}"};
     if (path.includes("/revisions")) return [{...saved, updated_at:new Date().toISOString()}];
     if (path === "/deployments") return [{agent_id:agent.id, engine, config_id:"cfg", config_version:1}];
+    if (request.method === "POST" && path.endsWith("/source")) {
+      assert(body.version === saved.version, "outbound save lost version check");
+      test.writes.push({path, ...body});
+      saved = {...saved, content:body.content, version:saved.version+1};
+      const task = {id:`task-${saved.version}`, action:body.intent, config_version:saved.version, status:"pending"};
+      tasks.set(task.id, task);
+      return {config:saved, task};
+    }
     if (request.method === "POST" && (path.endsWith("/server-inbounds") || path.includes("/fields/"))) {
       if (test.gate) await test.gate;
       if (test.fail) throw Object.assign(new Error("fixture version conflict"), {status:409});
@@ -149,8 +156,6 @@ async function fixture(engine, options = {}) {
 }
 
 export async function testConfigInboundsRuntime(preview = false) {
-  assert(sameConfigContent('{"n":9007199254740993,"a":[1]}', '{ "a":[1], "n":9007199254740993 }'), "format-only changes block presets");
-  assert(!sameConfigContent('{"n":9007199254740993}', '{"n":9007199254740992}'), "snapshot comparison rounded a large integer");
   if (preview) {
     const params = new URLSearchParams(location.search);
     window.inboundFixture = await fixture(params.get("engine") || "xray", {missing:params.has("missing")});
@@ -273,13 +278,46 @@ export async function testConfigInboundsRuntime(preview = false) {
     }
     test.dispose();
   }
-  for (const options of [{readonly:true}, {drift:true}]) {
+  for (const options of [{readonly:true}]) {
     const test = await fixture("xray", options);
     test.click("add"); await pause();
     assert(!document.querySelector("dialog"), "read-only or diverged snapshot permitted mutation");
-    if (options.drift) assert(test.notices.some(message=>message.includes("快照")), "snapshot drift not explained");
     test.dispose();
   }
+  const drift = await fixture("xray", {drift:true});
+  drift.click("add");
+  await waitFor(()=>document.querySelector("#server-plan-form"), "node snapshot drift blocked saved config editing");
+  assert(drift.writes.length === 0, "opening drifted config unexpectedly saved or deployed");
+  drift.dispose();
+  for (const engine of ["xray", "sing-box"]) {
+    const exits = await fixture(engine, {drift:true});
+    const menu = document.querySelector('[data-outbound-action="add"]').closest("details");
+    assert(menu.previousElementSibling.querySelector("[data-inbound-action]"), "outbound menu is not next to inbound operations");
+    document.querySelector('[data-outbound-action="add"]').click();
+    await waitFor(()=>document.querySelector('textarea[aria-label="出站配置 JSON"]'), "outbound editor missing");
+    const outboundInput = document.querySelector('textarea[aria-label="出站配置 JSON"]');
+    outboundInput.value = outboundInput.value.replace("new-outbound", "new-outbound-edited");
+    outboundInput.dispatchEvent(new Event("input"));
+    assert(exits.pages.configHasUnsavedChanges(), "outbound draft was not protected during navigation");
+    document.querySelector('dialog [data-intent="validate"]').click();
+    await waitFor(()=>exits.writes.length === 1 && !document.querySelector("dialog"), "outbound creation failed");
+    assert(exits.writes[0].path.endsWith("/source") && JSON.parse(exits.saved().content).outbounds.some(o=>o.tag === "new-outbound-edited"), "outbound source not saved atomically");
+    exits.dispose();
+  }
+  const background = await fixture("xray");
+  background.confirm = true;
+  background.click("add");
+  await waitFor(()=>document.querySelector("#server-plan-form"), "background fixture did not open");
+  document.querySelector("[data-plan-intent=deploy]").click();
+  await waitFor(()=>background.writes.length === 1 && !document.querySelector("dialog"), "background deployment not submitted");
+  background.select("first"); background.click("delete");
+  await waitFor(()=>document.querySelector("[data-delete-intent]"), "delete fixture did not open");
+  const workspaceReads = background.calls.filter(call=>call.path.endsWith("/workspace")).length;
+  background.taskStatus = "succeeded";
+  await new Promise(resolve=>setTimeout(resolve, 1800));
+  assert(background.calls.filter(call=>call.path.endsWith("/workspace")).length === workspaceReads,
+    "background deployment invalidated the open delete dialog");
+  background.dispose();
   const stale = await fixture("xray");
   let release;
   stale.workspaceGate = new Promise(resolve=>{release=resolve;});
@@ -505,7 +543,7 @@ async function testCommonConfigRuntime() {
     !document.querySelector('.config-inbound-menu [data-inbound-action="add"]'),
     "native non-preset listeners changed the standalone add action");
   nativeCommon.dispose();
-  for (const options of [{readonly:true}, {noTasks:true}, {drift:true}, {import:true}]) {
+  for (const options of [{readonly:true}, {noTasks:true}, {import:true}]) {
     const test = await fixture("xray", options);
     assert(!document.querySelector('[data-inbound-action="add"]').hidden, "permission or source state should disable, not hide, the add action");
     for (const operation of ["add", "modify", "delete"]) {
