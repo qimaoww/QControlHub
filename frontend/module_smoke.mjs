@@ -149,6 +149,9 @@ import {
   saveNodeOrder,
 } from "./modules/node-order.js";
 
+// Finish the imported async suites before these checks replace the global DOM.
+await import("./client_access_order_smoke.mjs");
+
 const state = { data: {}, session: { role: "admin" } };
 const noop = () => {};
 

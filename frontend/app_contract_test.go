@@ -667,7 +667,8 @@ func TestClientAccessUsesContextSidebarAsOnlyNodeFilter(t *testing.T) {
 		`dialog?.showModal();`,
 		`new ResizeObserver(layout)`,
 		`card.style.gridRowEnd = `,
-		`groupClientAccessEntries(filtered)`,
+		`groupClientAccessEntries(filtered, agents)`,
+		`import { orderNodesBySavedOrder } from "./node-order.js";`,
 		`normalizeClientAccessFilters(entries, agents`,
 		`renderClientAccess();`,
 	} {
