@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"sort"
 	"strings"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
@@ -20,7 +19,8 @@ func (s *Store) AgentSharing(ctx context.Context, agentID string) (core.AgentSha
 	}
 	rows, err := s.pool.Query(ctx, `SELECT s.id,s.user_id,u.username,u.display_name,s.agent_id,a.name,s.enabled,
 		s.status,s.invitation_revision,s.limit_bytes,s.used_bytes,s.created_at,s.updated_at,s.engines,
-		ARRAY(SELECT p.port FROM agent_share_ports p WHERE p.share_id=s.id ORDER BY p.port)
+		CASE WHEN s.ports_unrestricted THEN ARRAY[0]
+			ELSE ARRAY(SELECT p.port FROM agent_share_ports p WHERE p.share_id=s.id ORDER BY p.port) END
 		FROM agent_shares s JOIN panel_users u ON u.id=s.user_id JOIN agents a ON a.id=s.agent_id
 		WHERE s.agent_id=$1 ORDER BY u.username,s.id`, agentID)
 	if err != nil {
@@ -61,15 +61,9 @@ func (s *Store) SetAgentSharing(ctx context.Context, agentID string, request cor
 			return core.AgentSharing{}, err
 		}
 		recipient.Engines = engines
-		recipient.Ports = append([]int(nil), recipient.Ports...)
-		sort.Ints(recipient.Ports)
-		if len(recipient.Ports) > 256 {
-			return core.AgentSharing{}, fmt.Errorf("%w: at most 256 shared ports", ErrInvalid)
-		}
-		for j, port := range recipient.Ports {
-			if port < 1 || port > 65535 || port == 10085 || port == 10086 || (j > 0 && recipient.Ports[j-1] == port) {
-				return core.AgentSharing{}, fmt.Errorf("%w: invalid, reserved or duplicate shared port", ErrInvalid)
-			}
+		recipient.Ports, err = normalizeSharedPorts(recipient.Ports)
+		if err != nil {
+			return core.AgentSharing{}, err
 		}
 	}
 	tx, err := s.pool.Begin(ctx)

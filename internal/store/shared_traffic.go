@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -50,10 +51,13 @@ func lockTrafficMutationPolicy(ctx context.Context, tx pgx.Tx, id string) (strin
 	return agentID, nil
 }
 
-// A reservation is administrator-controlled, independent of saved drafts.
-// It prevents an untrusted shared user from creating a firewall rule for an
-// unrelated host service just by entering its port in a configuration.
+// Reservations require an explicit allocation or unrestricted port authority.
+// Drafts and validation never reserve ports or create firewall policies.
+// The caller holds the Agent lock, serializing grants and deployments.
 func (s *Store) setSharedPortsTx(ctx context.Context, tx pgx.Tx, shareID, userID, agentID string, ports []int) error {
+	if err := s.checkSharedPortsAvailableTx(ctx, tx, shareID, userID, agentID, ports); err != nil {
+		return err
+	}
 	wanted := map[int]bool{}
 	for _, port := range ports {
 		wanted[port] = true
@@ -108,14 +112,6 @@ func (s *Store) setSharedPortsTx(ctx context.Context, tx pgx.Tx, shareID, userID
 		}
 	}
 	for _, port := range ports {
-		var current string
-		err := tx.QueryRow(ctx, `SELECT share_id FROM agent_share_ports WHERE agent_id=$1 AND port=$2`, agentID, port).Scan(&current)
-		if err == nil && current != shareID {
-			return fmt.Errorf("%w: port %d is already reserved for another user", ErrConflict, port)
-		}
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return err
-		}
 		if _, err := tx.Exec(ctx, `INSERT INTO agent_share_ports(agent_id,port,share_id) VALUES($1,$2,$3) ON CONFLICT DO NOTHING`,
 			agentID, port, shareID); err != nil {
 			return mapError(err)
@@ -128,12 +124,58 @@ func (s *Store) setSharedPortsTx(ctx context.Context, tx pgx.Tx, shareID, userID
 	if total > 256 {
 		return fmt.Errorf("%w: an Agent supports at most 256 reserved shared ports", ErrConflict)
 	}
-	// A new allocation must not appropriate an already deployed foreign
-	// listener, even when that older deployment had no traffic monitor.
-	rows, err = tx.Query(ctx, `SELECT state.engine,COALESCE(revision.content,config.content)
-		FROM agent_engine_ownership state JOIN configs config ON config.id=state.config_id
+	return nil
+}
+
+// Validation uses the same read-only conflict checks as reservation, without
+// claiming a port or affecting another user's future deployment.
+func (s *Store) checkSharedPortsAvailableTx(ctx context.Context, tx pgx.Tx, shareID, userID, agentID string, ports []int) error {
+	if len(ports) == 0 {
+		return nil
+	}
+	wanted := make(map[int]bool, len(ports))
+	for _, port := range ports {
+		wanted[port] = true
+	}
+	rows, err := tx.Query(ctx, `SELECT port,share_id FROM agent_share_ports
+		WHERE agent_id=$1 AND port=ANY($2::int[]) ORDER BY port`, agentID, ports)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var port int
+		var reservedFor string
+		if err := rows.Scan(&port, &reservedFor); err != nil {
+			rows.Close()
+			return err
+		}
+		if reservedFor != shareID {
+			rows.Close()
+			return fmt.Errorf("%w: port %d is already reserved for another user", ErrConflict, port)
+		}
+		delete(wanted, port)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	// Existing reservations already authorize these ports. A foreign
+	// uncertain service must not prevent revocation, quota edits or release.
+	if len(wanted) == 0 {
+		return nil
+	}
+	// Include queued deployment snapshots: a different core may be about
+	// to start a foreign listener which has no shared traffic monitor yet.
+	rows, err = tx.Query(ctx, `SELECT state.engine,COALESCE(revision.content,config.content,''),
+			state.uncertain OR state.config_uncertain OR config.id IS NULL OR config.deleted_at IS NOT NULL
+				OR (revision.config_id IS NULL AND config.version<>state.config_version)
+		FROM agent_engine_ownership state LEFT JOIN configs config ON config.id=state.config_id
 		LEFT JOIN config_revisions revision ON revision.config_id=state.config_id AND revision.version=state.config_version
-		WHERE state.agent_id=$1 AND state.running AND state.owner_id<>$2`, agentID, userID)
+		WHERE state.agent_id=$1 AND (state.running OR state.uncertain) AND state.owner_id<>$2
+		UNION ALL
+		SELECT task.engine,task.config_content,false FROM tasks task LEFT JOIN configs config ON config.id=task.config_id
+		WHERE task.agent_id=$1 AND task.status IN ('pending','running') AND task.action IN ('deploy','import-existing')
+			AND COALESCE(config.owner_id,task.owner_id)<>$2 AND task.config_content IS NOT NULL`, agentID, userID)
 	if err != nil {
 		return err
 	}
@@ -141,8 +183,12 @@ func (s *Store) setSharedPortsTx(ctx context.Context, tx pgx.Tx, shareID, userID
 	for rows.Next() {
 		var engine core.Engine
 		var content string
-		if err := rows.Scan(&engine, &content); err != nil {
+		var uncertain bool
+		if err := rows.Scan(&engine, &content, &uncertain); err != nil {
 			return err
+		}
+		if uncertain {
+			return fmt.Errorf("%w: stop the uncertain %s core before reserving shared ports", ErrConflict, engine)
 		}
 		content, err = s.decryptContent(content)
 		if err != nil {
@@ -155,6 +201,29 @@ func (s *Store) setSharedPortsTx(ctx context.Context, tx pgx.Tx, shareID, userID
 		}
 	}
 	return rows.Err()
+}
+
+// Unrestricted means no port allowlist, not unmetered execution. Reserve only
+// the real fixed listeners as part of the deployment transaction, retaining
+// old bindings until an explicit, settled release by the owner/administrator.
+func (s *Store) reserveSharedDeploymentPortsTx(ctx context.Context, tx pgx.Tx, shareID, userID, agentID string, endpoints []core.PortTrafficEndpoint) error {
+	var unrestricted bool
+	var ports []int
+	if err := tx.QueryRow(ctx, `SELECT ports_unrestricted,
+		ARRAY(SELECT port FROM agent_share_ports WHERE share_id=$1 ORDER BY port)
+		FROM agent_shares WHERE id=$1`, shareID).Scan(&unrestricted, &ports); err != nil {
+		return err
+	}
+	if !unrestricted {
+		return nil
+	}
+	for _, endpoint := range endpoints {
+		if !slices.Contains(ports, endpoint.Port) {
+			ports = append(ports, endpoint.Port)
+		}
+	}
+	slices.Sort(ports)
+	return s.setSharedPortsTx(ctx, tx, shareID, userID, agentID, ports)
 }
 
 // Adopt the exact running version, not a newer saved draft. Enabling a quota
@@ -199,6 +268,9 @@ func (s *Store) bindCurrentSharedDeploymentTx(ctx context.Context, tx pgx.Tx, sh
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
+		return err
+	}
+	if err := s.reserveSharedDeploymentPortsTx(ctx, tx, shareID, userID, agentID, endpoints); err != nil {
 		return err
 	}
 	return bindSharedTrafficPortsTx(ctx, tx, shareID, agentID, endpoints)
@@ -334,27 +406,43 @@ func (s *Store) prepareSharedTaskTx(ctx context.Context, tx pgx.Tx, task *core.T
 			return fmt.Errorf("%w: %v", ErrInvalid, err)
 		}
 		var limit, used uint64
-		if err := tx.QueryRow(ctx, `SELECT id,limit_bytes,used_bytes FROM agent_shares
+		var unrestricted bool
+		if err := tx.QueryRow(ctx, `SELECT id,limit_bytes,used_bytes,ports_unrestricted FROM agent_shares
 			WHERE user_id=$1 AND agent_id=$2 AND enabled AND status='accepted' AND $3=ANY(engines)`,
-			configOwner, task.AgentID, task.Engine).Scan(&task.SharedTrafficID, &limit, &used); err != nil {
+			configOwner, task.AgentID, task.Engine).Scan(&task.SharedTrafficID, &limit, &used, &unrestricted); err != nil {
 			return mapError(err)
 		}
 		if limit > 0 && used >= limit {
 			return fmt.Errorf("%w: the user's cumulative Agent traffic allowance is exhausted", ErrConflict)
 		}
-		for _, endpoint := range endpoints {
-			var reserved bool
-			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_share_ports
-				WHERE share_id=$1 AND agent_id=$2 AND port=$3)`, task.SharedTrafficID, task.AgentID, endpoint.Port).Scan(&reserved); err != nil {
-				return err
+		if unrestricted {
+			if task.Action == core.ActionDeploy {
+				if err := s.reserveSharedDeploymentPortsTx(ctx, tx, task.SharedTrafficID, configOwner, task.AgentID, endpoints); err != nil {
+					return err
+				}
+			} else {
+				ports := make([]int, 0, len(endpoints))
+				for _, endpoint := range endpoints {
+					ports = append(ports, endpoint.Port)
+				}
+				return s.checkSharedPortsAvailableTx(ctx, tx, task.SharedTrafficID, configOwner, task.AgentID, ports)
 			}
-			if !reserved {
-				return fmt.Errorf("%w: port %d is not allocated to this user", ErrConflict, endpoint.Port)
+		} else {
+			for _, endpoint := range endpoints {
+				var reserved bool
+				if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_share_ports
+					WHERE share_id=$1 AND agent_id=$2 AND port=$3)`, task.SharedTrafficID, task.AgentID, endpoint.Port).Scan(&reserved); err != nil {
+					return err
+				}
+				if !reserved {
+					return fmt.Errorf("%w: port %d is not allocated to this user", ErrConflict, endpoint.Port)
+				}
 			}
 		}
 		if task.Action == core.ActionDeploy {
 			return bindSharedTrafficPortsTx(ctx, tx, task.SharedTrafficID, task.AgentID, endpoints)
 		}
+		return nil
 	}
 	// An unrestricted operator must not accidentally deploy over another
 	// user's reserved ports. Administrators can explicitly release/reassign.

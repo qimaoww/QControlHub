@@ -27,15 +27,22 @@ func lockAgentSharesTx(ctx context.Context, tx pgx.Tx, agentIDs []string) error 
 // administrator edits share one consent transition, preserving the ledger.
 func (s *Store) setAgentShareTx(ctx context.Context, tx pgx.Tx, userID, agentID string, limit uint64, engines []core.Engine, ports []int, enabled, reinvite bool) error {
 	var previous core.AgentShare
-	err := tx.QueryRow(ctx, `SELECT id,enabled,status,limit_bytes,engines,
+	var previousUnrestricted bool
+	unrestricted := core.UnrestrictedSharedPorts(ports)
+	err := tx.QueryRow(ctx, `SELECT id,enabled,status,limit_bytes,engines,ports_unrestricted,
 		ARRAY(SELECT port FROM agent_share_ports WHERE share_id=agent_shares.id ORDER BY port)
 		FROM agent_shares WHERE user_id=$1 AND agent_id=$2`,
-		userID, agentID).Scan(&previous.ID, &previous.Enabled, &previous.Status, &previous.LimitBytes, &previous.Engines, &previous.Ports)
+		userID, agentID).Scan(&previous.ID, &previous.Enabled, &previous.Status, &previous.LimitBytes, &previous.Engines, &previousUnrestricted, &previous.Ports)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return err
 	}
 	if reinvite && (!enabled || previous.Status != core.AgentShareRejected) {
 		return fmt.Errorf("%w: only a rejected share can be reinvited", ErrInvalid)
+	}
+	if unrestricted {
+		// Keep real reservations and their ledger when changing modes or
+		// editing quota. The API sentinel must never reach runtime policies.
+		ports = previous.Ports
 	}
 	status := previous.Status
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -44,11 +51,11 @@ func (s *Store) setAgentShareTx(ctx context.Context, tx pgx.Tx, userID, agentID 
 			return err
 		}
 		status = core.AgentSharePending
-		if _, err := tx.Exec(ctx, `INSERT INTO agent_shares(id,user_id,agent_id,limit_bytes,enabled,engines)
-			VALUES($1,$2,$3,$4,$5,$6)`, previous.ID, userID, agentID, limit, enabled, engines); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO agent_shares(id,user_id,agent_id,limit_bytes,enabled,engines,ports_unrestricted)
+			VALUES($1,$2,$3,$4,$5,$6,$7)`, previous.ID, userID, agentID, limit, enabled, engines, unrestricted); err != nil {
 			return err
 		}
-	} else if previous.Enabled != enabled || previous.LimitBytes != limit || !slices.Equal(previous.Ports, ports) || !slices.Equal(previous.Engines, engines) || reinvite {
+	} else if previous.Enabled != enabled || previous.LimitBytes != limit || previousUnrestricted != unrestricted || !slices.Equal(previous.Ports, ports) || !slices.Equal(previous.Engines, engines) || reinvite {
 		// Ordinary edits cannot undo rejection. Re-enabling a withdrawn share
 		// always requires fresh consent; active accepted shares keep consent
 		// when the owner adjusts their ports or total allowance.
@@ -57,8 +64,24 @@ func (s *Store) setAgentShareTx(ctx context.Context, tx pgx.Tx, userID, agentID 
 			status = core.AgentSharePending
 		}
 		if _, err := tx.Exec(ctx, `UPDATE agent_shares SET enabled=$2,limit_bytes=$3,status=$4,
-			engines=$5,invitation_revision=invitation_revision+1,updated_at=now() WHERE id=$1`,
-			previous.ID, enabled, limit, status, engines); err != nil {
+			engines=$5,ports_unrestricted=$6,invitation_revision=invitation_revision+1,updated_at=now() WHERE id=$1`,
+			previous.ID, enabled, limit, status, engines, unrestricted); err != nil {
+			return err
+		}
+	}
+	narrowed := previousUnrestricted && !unrestricted
+	if !unrestricted {
+		for _, port := range previous.Ports {
+			narrowed = narrowed || !slices.Contains(ports, port)
+		}
+	}
+	if narrowed {
+		// Validation has no reservations of its own. Invalidate snapshots
+		// checked against the old scope, including already issued leases.
+		if _, err := tx.Exec(ctx, `UPDATE tasks SET status=CASE WHEN status='running' THEN 'failed' ELSE 'canceled' END,
+			error='Agent sharing authorization changed; submit a new task',
+			finished_at=now(),config_content=NULL,lease_id=NULL
+			WHERE shared_traffic_id=$1 AND action='validate' AND status IN ('pending','running')`, previous.ID); err != nil {
 			return err
 		}
 	}

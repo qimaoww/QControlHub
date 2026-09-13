@@ -1,5 +1,5 @@
 import { bindEvent } from "./refresh.js";
-import { agentShareStatus, parseSharedPorts, selectedSharedEngines, sharedLimitBytes, sharedLimitGiB } from "./users.js";
+import { agentShareStatus, formatSharedPorts, parseSharedPorts, selectedSharedEngines, sharedLimitBytes, sharedLimitGiB } from "./users.js";
 import { sharedEngineChoices } from "./engine-capabilities.js";
 
 export function createAgentSharing(ctx, interactions) {
@@ -20,7 +20,7 @@ export function createAgentSharing(ctx, interactions) {
       <div class="agent-share-recipient-actions"><label class="agent-share-enabled"><input type="checkbox" name="enabled" ${share.enabled !== false ? "checked" : ""}><span>启用</span></label>${share.user_id ? "" : '<button type="button" class="deploy-command-close" data-recipient-remove aria-label="移除未保存的用户">×</button>'}</div>
     </div>
     <div class="agent-share-fields">
-      <label class="settings-field"><span>端口</span><input name="ports" autocomplete="off" placeholder="21001, 21002" value="${esc(share.ports_text ?? (share.ports || []).join(", "))}"></label>
+      <label class="settings-field"><span>端口</span><input name="ports" autocomplete="off" placeholder="21000-21100, 22000" value="${esc(share.ports_text ?? formatSharedPorts(share.ports))}"><small>留空未分配，0 无限制；最多指定 256 个端口</small></label>
       <label class="settings-field"><span title="累计总额度；0 表示不限量">总额度 · GiB</span><input name="limit_gib" type="number" required min="0" max="8388607" step="any" title="0 表示不限量" value="${esc(share.limit_gib ?? sharedLimitGiB(share.limit_bytes))}"></label>
     </div>
     ${sharedEngineChoices(share.engines, agent.supported_capabilities ?? agent.capabilities)}
