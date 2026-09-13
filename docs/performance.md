@@ -252,6 +252,11 @@ go test ./internal/api -run '^(TestLocalDatabasePressure|TestRemoteDatabasePress
 Agent 写入路径只断言结构与设置，不断言绝对字节数——那会随共享数据库上的 TOAST 与清理时序漂移，
 一个靠运气的 CI 断言比没有断言更糟。
 
+死元组能否在更新时被页内清理，还取决于 PostgreSQL 的 xmin 视界：它取整个**集群**中最旧的活动快照，
+所以另一个数据库里的长事务同样会让本表的 HOT 更新退化为页分裂。CI 并行运行测试时，
+所有连接测试数据库的包仍留在同一个分片内按包顺序执行，只并行不连接数据库的包；
+这样既缩短流水线，也不改变上述断言的成立条件。
+
 v50 因此做了三件事：
 
 1. Agent 上报的指标快照移入 `agent_live_state`（两列 + 主键，`fillfactor=70`），每次推送只重写一行窄元组；
