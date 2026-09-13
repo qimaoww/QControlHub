@@ -54,17 +54,27 @@ export function agentShareStatus(share) {
   return { pending: "待接受", accepted: "已接受", rejected: "已拒绝" }[share.status] || "待接受";
 }
 
+export function mergeUserAllocation(shares, allocation) {
+  // The API replaces the full allocation set. Keep every untouched share,
+  // including revoked reservations, without replaying invitation actions.
+  const rows = (shares || []).map(share => ({
+    agent_id: share.agent_id, enabled: share.enabled,
+    engines: [...(share.engines || [])], ports: [...(share.ports || [])],
+    limit_bytes: share.limit_bytes || 0,
+  }));
+  const index = rows.findIndex(row => row.agent_id === allocation.agent_id);
+  if (index < 0) rows.push(allocation);
+  else rows[index] = { ...rows[index], ...allocation };
+  return rows;
+}
+
 export function installUsers(ctx) {
   const { api, state, esc, shell, notify, confirmAction } = ctx;
   let serial = 0, viewSerial = 0, captureActive = () => {};
   let activeInvitation = null;
+  let activeAllocation = null;
   const captureDraft = () => captureActive();
   const hasUnsavedChanges = () => Boolean(state.data.userDrafts?.size || state.data.userAccessSaves?.size || state.data.userDeletions?.size || state.data.agentShareResponse);
-  const lockForm = (form, saving) => {
-    const controls = [...form.elements].map((control) => [control, control.disabled]);
-    saving.controls.push(...controls);
-    controls.forEach(([control]) => { control.disabled = true; });
-  };
   const formValues = (form) => ({
     isolated: true,
     rows: [...form.querySelectorAll("[data-share-row]")].map((row) => ({
@@ -72,6 +82,7 @@ export function installUsers(ctx) {
       enabled: row.querySelector('[name="enabled"]').checked,
       engines: [...row.querySelectorAll('[name="engines"]:checked')].map(input => input.value),
       limit_gib: row.querySelector('[name="limit_gib"]').value,
+      unlimited: row.querySelector('[name="quota_mode"]:checked').value === "unlimited",
       ports_text: row.querySelector('[name="ports"]').value,
       reinvite: row.dataset.reinvite === "true",
     })),
@@ -101,13 +112,14 @@ export function installUsers(ctx) {
 
   function shareRow(share, agents) {
     const agent = agents.find((item) => item.id === share.agent_id);
+    const name = agent?.name || share.agent_name || share.agent_id;
     const supported = ["shared-traffic-v1", "shared-engines-v1", "independent-egress-v1"].every(feature => agent?.features?.includes(feature));
-    return `<div class="user-share-row" data-share-row="${esc(share.agent_id)}" data-reinvite="${Boolean(share.reinvite)}">
-      <div class="user-share-identity"><label class="user-share-agent"><input type="checkbox" name="enabled" ${share.enabled ? "checked" : ""}><span><b>${esc(agent?.name || share.agent_name || share.agent_id)}</b><small><span data-share-status>${agentShareStatus(share)}</span> · ${usage(share.used_bytes)} 已用${supported ? "" : " · Agent 需升级"}</small></span></label>${share.status === "rejected" ? `<button class="button small" type="button" data-share-reinvite ${share.reinvite ? "disabled" : ""}>重新邀请</button>` : ""}</div>
-      <label class="settings-field"><span>总额度（GiB）</span><input name="limit_gib" type="number" min="0" max="8388607" step="any" required value="${esc(share.limit_gib ?? sharedLimitGiB(share.limit_bytes))}"></label>
-      <label class="settings-field"><span>可用端口</span><input name="ports" value="${esc(share.ports_text ?? (share.ports || []).join(", "))}" placeholder="21001, 21002" autocomplete="off"></label>
-      ${sharedEngineChoices(share.engines, agent?.supported_capabilities ?? agent?.capabilities)}
-    </div>`;
+    const statusClass = !share.enabled ? "muted" : share.status === "accepted" ? "ok" : "warn";
+    return `<article class="user-allocation-row" data-allocation-agent="${esc(share.agent_id)}">
+      <div class="user-allocation-node"><strong>${esc(name)}</strong><span class="status-label ${statusClass}" data-share-status>${agentShareStatus(share)}</span>${supported ? "" : `<small>${agent ? "Agent 需升级" : "节点不可用"}</small>`}</div>
+      <dl class="user-allocation-terms"><div><dt>内核</dt><dd>${sharedEngineNames(share.engines)}</dd></div><div><dt>端口</dt><dd>${esc((share.ports || []).join(", ") || "未分配")}</dd></div><div><dt>总额度</dt><dd>${share.limit_bytes ? usage(share.limit_bytes) : "不限量"}<small>已用 ${usage(share.used_bytes)}</small></dd></div></dl>
+      <div class="user-allocation-row-actions"><button class="button small" type="button" data-allocation-edit="${esc(share.agent_id)}" aria-label="编辑 ${esc(name)} 的分配">编辑</button>${!share.enabled || share.status === "rejected" ? `<button class="button small" type="button" data-allocation-invite="${esc(share.agent_id)}" aria-label="重新邀请使用 ${esc(name)}">重新邀请</button>` : ""}${share.enabled ? `<button class="button small danger-button" type="button" data-allocation-revoke="${esc(share.agent_id)}" aria-label="撤销 ${esc(name)} 的共享">撤销</button>` : ""}</div>
+    </article>`;
   }
 
   function renderUsers(items, agents, user, access) {
@@ -118,28 +130,22 @@ export function installUsers(ctx) {
     data.userDeletions ||= new Set();
     if (!editable) data.userDrafts.delete(user?.id);
     const draft = data.userDrafts.get(user?.id);
-    const latestShares = access?.shares || [];
-    if (draft) access = draft.access; // Retain the revision the edit was based on.
-    const shares = draft ? draft.values.rows.map((row) => ({ ...latestShares.find((share) => share.agent_id === row.agent_id), ...row })) : latestShares;
+    const shares = access?.shares || [];
     const ownedIDs = new Set(access?.owned_agent_ids || []);
     const ownedAgents = agents.filter((agent) => ownedIDs.has(agent.id));
     const available = agents.filter((agent) => !ownedIDs.has(agent.id) && !shares.some((share) => share.agent_id === agent.id));
-    shell(`<div class="settings-workspace users-workspace">
-      <header class="users-toolbar"><h2>${user ? esc(user.display_name || user.username) : "用户"}</h2><div>${user ? '<button class="button small" type="button" data-user-edit>编辑账号</button>' : ""}${user && editable && user.id !== state.session?.user_id ? `<button class="button small danger-button" type="button" data-user-delete ${data.userDeletions.has(user.id) ? "disabled" : ""}>删除账号</button>` : ""}<button class="button primary small" type="button" data-user-create>新增用户</button></div></header>
-      ${items.length ? `<select class="users-mobile-select" data-user-mobile-select aria-label="选择用户">${items.map((item) => `<option value="${esc(item.id)}" ${item.id === user?.id ? "selected" : ""}>${esc(item.display_name || item.username)} · ${esc(item.username)}</option>`).join("")}</select>` : ""}
-      ${user ? `<form class="settings-form" data-user-form data-user-access-form>
-        <section class="settings-section">
-          <header><span class="settings-section-number">01</span><div><h3>Agent 分配</h3><p>${esc(user.username)} · ${user.disabled ? "已停用" : user.role === "admin" ? "管理员" : "普通用户"}</p></div></header>
-          ${editable ? `<div class="settings-hint user-isolation"><b>账号资源始终独立</b><p>可自行添加 Agent，并使用明确共享的节点。自有节点 ${ownedAgents.length} 个${ownedAgents.length ? `：${ownedAgents.map((agent) => esc(agent.name)).join("、")}` : ""}。</p></div>
-            <div data-share-editor>
-              <div data-share-rows>${shares.map((share) => shareRow(share, agents)).join("")}</div>
-              <div class="user-share-add"><select data-share-agent aria-label="选择 Agent"><option value="">选择 Agent</option>${available.map((agent) => `<option value="${esc(agent.id)}">${esc(agent.name)}</option>`).join("")}</select><button class="button small" type="button" data-share-add>添加分配</button></div>
-              <p class="settings-hint">接受后生效；取消勾选撤销共享。累计额度，0 不限量。</p>
-            </div>
-          ` : '<p class="settings-hint">管理员可访问所有 Agent。</p>'}
-        </section>
-        ${editable ? '<div class="alert error" data-user-error role="alert" hidden></div><footer class="settings-savebar"><button class="button" type="button" data-user-reload>重新读取</button><button class="button primary" type="submit">保存分配</button></footer>' : ""}
-      </form>` : '<div class="empty large"><strong>尚无用户</strong></div>'}
+    activeAllocation?.dialog.close();
+    activeAllocation = null;
+    captureActive = () => {};
+    shell(`<div class="settings-workspace users-workspace user-admin-workspace">
+      <header class="users-toolbar"><div class="users-title"><h2>${user ? esc(user.display_name || user.username) : "用户"}</h2>${user ? `<span class="user-account-state">${user.disabled ? "已停用" : user.role === "admin" ? "管理员" : "普通用户"}</span>` : ""}</div><div class="users-toolbar-actions">${user ? '<button class="button small" type="button" data-user-edit>编辑账号</button>' : ""}${user && editable && user.id !== state.session?.user_id ? `<button class="button small danger-button" type="button" data-user-delete ${data.userDeletions.has(user.id) ? "disabled" : ""}>删除账号</button>` : ""}<button class="button primary small" type="button" data-user-create>新增用户</button></div></header>
+      ${items.length ? `<select class="users-mobile-select" data-user-mobile-select aria-label="选择用户">${items.map((item) => `<option value="${esc(item.id)}" ${item.id === user?.id ? "selected" : ""}>${esc(item.display_name && item.display_name !== item.username ? `${item.display_name} · ${item.username}` : item.username)}</option>`).join("")}</select>` : ""}
+      ${user ? `<section class="settings-section user-allocation-panel" data-user-allocations aria-labelledby="user-allocation-title">
+        <header class="user-allocation-head"><div class="user-allocation-title"><h3 id="user-allocation-title">共享节点</h3><span class="user-allocation-count" data-share-count>${shares.length}</span></div><div class="user-allocation-tools"><button class="button small" type="button" data-user-reload>刷新</button>${editable ? `<button class="button primary small" type="button" data-allocation-add ${available.length ? "" : 'disabled title="没有可分配的节点"'}>分配节点</button>` : ""}</div></header>
+        ${editable ? `<div data-allocation-list>${shares.map((share) => shareRow(share, agents)).join("") || '<p class="user-share-empty" data-share-empty>尚未分配共享节点</p>'}</div>` : '<p class="settings-hint user-allocation-readonly">管理员按自身权限访问节点，无需分配。</p>'}
+        <div class="alert error user-allocation-error" data-user-error role="alert" hidden></div>
+      </section>${ownedAgents.length ? `<details class="user-owned-nodes"><summary><span>自有节点 <small>${ownedAgents.length}</small></span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary><ul>${ownedAgents.map(agent => `<li>${esc(agent.name)}</li>`).join("")}</ul></details>` : ""}` : '<div class="empty large"><strong>尚无用户</strong></div>'}
+      <dialog class="traffic-edit-dialog user-allocation-dialog" data-allocation-dialog aria-labelledby="user-allocation-dialog-title"></dialog>
       <dialog class="traffic-edit-dialog user-edit-dialog" data-user-dialog aria-labelledby="user-dialog-title"></dialog>
     </div>`, "用户", { viewKey: `users-${user?.id || "new"}-${++viewSerial}` });
 
@@ -147,7 +153,7 @@ export function installUsers(ctx) {
       if (id === state.data.userID) return;
       captureDraft();
       state.data.userID = id;
-      const previousForm = document.querySelector("[data-user-access-form]");
+      const previousForm = document.querySelector("[data-user-access-form]") || document.querySelector("[data-user-allocations]");
       if (previousForm) { previousForm.inert = true; previousForm.setAttribute("aria-busy", "true"); }
       const loading = users(), selectionRequest = serial;
       try { await loading; } catch (error) {
@@ -206,90 +212,223 @@ export function installUsers(ctx) {
         }
       }
     });
-    const form = document.querySelector("[data-user-access-form]");
+    const scope = () => data === state.data && state.route === "users" && data.userID === user?.id;
+    const busy = () => !scope() || document.querySelector("[data-user-allocations]")?.inert || data.userAccessSaves.has(user.id) || data.userDeletions.has(user.id);
+    bindEvent(document.querySelector("[data-user-reload]"), "click", async (event) => {
+      const button = event.currentTarget;
+      if (busy() || button.disabled) return;
+      const panel = document.querySelector("[data-user-allocations]");
+      button.disabled = true;
+      panel.inert = true;
+      panel.setAttribute("aria-busy", "true");
+      try { await users(); } catch (error) { if (scope()) report(error, panel); }
+      finally {
+        button.disabled = false;
+        panel.inert = false;
+        panel.removeAttribute("aria-busy");
+      }
+    });
+    if (!user || !editable) return;
+    bindEvent(document.querySelector("[data-allocation-add]"), "click", (event) => {
+      if (!busy()) openAllocation(user, agents, access, { mode: "add", trigger: event.currentTarget });
+    });
+    document.querySelectorAll("[data-allocation-edit], [data-allocation-invite]").forEach(button => bindEvent(button, "click", () => {
+      if (!busy()) openAllocation(user, agents, access, {
+        mode: button.hasAttribute("data-allocation-invite") ? "invite" : "edit",
+        agentID: button.dataset.allocationEdit || button.dataset.allocationInvite, trigger: button,
+      });
+    }));
+    document.querySelectorAll("[data-allocation-revoke]").forEach(button => bindEvent(button, "click", () => {
+      if (busy()) return;
+      const share = shares.find(item => item.agent_id === button.dataset.allocationRevoke);
+      const name = agents.find(agent => agent.id === share.agent_id)?.name || share.agent_name || share.agent_id;
+      void saveAllocation(user, agents, access, { agent_id: share.agent_id, enabled: false }, {
+        data, trigger: button, notice: "共享已撤销",
+        confirmation: `撤销“${name}”对“${user.display_name || user.username}”的共享？已用流量和端口预留会保留。`,
+      });
+    }));
+    if (draft) openAllocation(user, agents, access, { mode: draft.mode, draft });
+    const pending = data.userAccessSaves.get(user.id);
+    if (pending) lockAllocationControls(data, user.id, pending);
+  }
+
+  function lockAllocationControls(data, userID, saving) {
+    if (data !== state.data || state.route !== "users" || data.userID !== userID) return;
+    const dialog = document.querySelector("[data-allocation-dialog]");
+    const controls = [...document.querySelectorAll("[data-allocation-add], [data-allocation-edit], [data-allocation-invite], [data-allocation-revoke], [data-user-reload], [data-user-delete], [data-user-edit]"), ...(dialog?.querySelector("form")?.elements || []), ...(dialog?.querySelectorAll("[data-allocation-close]") || [])];
+    for (const control of controls) {
+      if (!saving.controls.has(control)) saving.controls.set(control, control.disabled);
+      control.disabled = true;
+    }
+  }
+
+  function closeAllocation() {
+    if (!activeAllocation) return;
+    const previous = activeAllocation;
+    if (previous.data.userAccessSaves.has(previous.userID)) return;
+    previous.data.userDrafts.delete(previous.userID);
+    activeAllocation = null;
     captureActive = () => {};
-    if (!form || !editable) return;
-    const baseline = draft?.baseline || JSON.stringify(formValues(form));
+    previous.dialog.close();
+    previous.dialog.innerHTML = "";
+    if (previous.trigger?.isConnected) previous.trigger.focus();
+  }
+
+  function allocationFields(share, agent) {
+    const limit = share.limit_gib ?? sharedLimitGiB(share.limit_bytes);
+    const unlimited = share.unlimited ?? Number(limit) === 0;
+    return `${sharedEngineChoices(share.engines, agent?.supported_capabilities ?? agent?.capabilities)}
+      <label class="settings-field"><span>可用端口</span><input name="ports" value="${esc(share.ports_text ?? (share.ports || []).join(", "))}" placeholder="21001, 21002" autocomplete="off"></label>
+      <fieldset class="user-allocation-quota"><legend>流量额度</legend><div class="user-quota-options"><label><input type="radio" name="quota_mode" value="unlimited" ${unlimited ? "checked" : ""}>不限量</label><label><input type="radio" name="quota_mode" value="limited" ${unlimited ? "" : "checked"}>设置总额度</label></div><label class="settings-field" data-quota-amount ${unlimited ? "hidden" : ""}><span>累计总额度（GiB）</span><input name="limit_gib" type="number" min="0" max="8388607" step="any" required value="${esc(limit)}" placeholder="例如 100" ${unlimited ? "disabled" : ""}></label><small>已用 ${usage(share.used_bytes)}</small></fieldset>`;
+  }
+
+  function openAllocation(user, agents, latest, options) {
+    const data = state.data, draft = options.draft;
+    const access = draft?.access || latest;
+    let mode = options.mode || "edit";
+    const value = draft?.values.rows[0];
+    let agentID = value?.agent_id || options.agentID || "";
+    const shares = access.shares || [];
+    const available = agents.filter(item => !(access.owned_agent_ids || []).includes(item.id) && !shares.some(row => row.agent_id === item.id));
+    if (mode === "add" && !available.some(item => item.id === agentID)) agentID = "";
+    const original = shares.find(share => share.agent_id === agentID);
+    if (mode !== "add" && !original) return;
+    if (mode === "invite" && original.enabled && original.status !== "rejected") mode = "edit";
+    const share = { enabled: true, ...original, ...value };
+    if (mode === "invite") { share.enabled = true; share.reinvite = true; }
+    const agent = agents.find(item => item.id === agentID);
+    const dialog = document.querySelector("[data-allocation-dialog]");
+    const title = mode === "add" ? "分配节点" : mode === "invite" ? "重新邀请" : "编辑分配";
+    dialog.innerHTML = `<header><div><h2 id="user-allocation-dialog-title">${title}</h2><p>接收用户 · ${esc(user.display_name || user.username)}${user.display_name && user.display_name !== user.username ? `（${esc(user.username)}）` : ""}</p></div><button type="button" class="deploy-command-close" data-allocation-close aria-label="关闭分配弹窗">×</button></header>
+      <form data-user-access-form data-user-form><div class="traffic-edit-body" data-share-row="${esc(agentID)}" data-reinvite="${Boolean(share.reinvite)}">
+        <input type="checkbox" name="enabled" hidden ${share.enabled ? "checked" : ""}>
+        ${mode === "add" ? `<label class="settings-field"><span>节点</span><select name="agent_id" data-share-agent required autofocus><option value="">选择节点</option>${available.map(item => `<option value="${esc(item.id)}" ${item.id === agentID ? "selected" : ""}>${esc(item.name)}</option>`).join("")}</select></label>` : `<div class="user-allocation-target"><span>节点</span><div><strong>${esc(agent?.name || original?.agent_name || agentID)}</strong><small>${agentShareStatus(original)}</small></div></div>`}
+        <fieldset class="user-allocation-fields" data-allocation-fields ${agentID ? "" : "hidden disabled"}>${allocationFields(share, agent)}</fieldset>
+        <p class="user-allocation-consent" data-allocation-consent></p>
+        <div class="user-allocation-failure" hidden><p class="alert error" data-user-error role="alert" hidden></p><button type="button" class="button small" data-allocation-reload>重新读取</button></div>
+      </div><footer><button class="button" type="button" data-allocation-close>取消</button><button class="button primary" type="submit" ${agentID ? "" : "disabled"}>${mode === "edit" ? "保存修改" : "发送邀请"}</button></footer></form>`;
+    const form = dialog.querySelector("form");
+    const initial = formValues(form);
+    if (mode === "invite") initial.rows[0].reinvite = false;
+    const baseline = draft?.baseline || JSON.stringify(initial);
     const capture = () => {
       if (!form.isConnected || data !== state.data) return;
-      const values = formValues(form);
-      const serialized = JSON.stringify(values);
+      const values = formValues(form), serialized = JSON.stringify(values);
       const previous = data.userDrafts.get(user.id);
       if (serialized === baseline) data.userDrafts.delete(user.id);
       else if (previous?.access.revision !== access.revision || previous.baseline !== baseline || JSON.stringify(previous.values) !== serialized)
-        data.userDrafts.set(user.id, { access, values, baseline });
+        data.userDrafts.set(user.id, { access, values, baseline, mode });
     };
+    const editor = { dialog, userID: user.id, data, trigger: options.trigger, reloading: false };
+    const isCurrent = () => activeAllocation === editor && data === state.data && state.route === "users" && data.userID === user.id;
+    const updateConsent = () => {
+      const message = form.querySelector("[data-allocation-consent]");
+      const addedEngines = [...form.querySelectorAll('[name="engines"]:checked')].some(input => !original?.engines?.includes(input.value));
+      message.textContent = mode !== "edit" ? "用户接受邀请后才能使用节点。"
+        : !original.enabled ? "保存修改不会恢复共享。"
+        : original.status === "rejected" ? "保存修改不会重新发送邀请。"
+        : original.status === "accepted" && addedEngines ? "增加内核后，用户需重新接受。"
+        : "";
+      message.hidden = !message.textContent || !form.querySelector("[data-share-row]").dataset.shareRow;
+    };
+    activeAllocation = editor;
     captureActive = capture;
-    if (data.userAccessSaves.has(user.id)) lockForm(form, data.userAccessSaves.get(user.id));
+    if (!dialog.open) dialog.showModal();
+    updateConsent();
+    capture();
     bindEvent(form, "input", capture);
-    bindEvent(form, "change", capture);
-    bindEvent(form.querySelector("[data-share-rows]"), "click", (event) => {
-      const button = event.target.closest("[data-share-reinvite]");
-      const row = button?.closest("[data-share-row]");
-      if (!row || form.inert || data !== state.data || data.userAccessSaves.has(user.id)) return;
-      row.dataset.reinvite = "true";
-      row.querySelector('[name="enabled"]').checked = true;
-      row.querySelector("[data-share-status]").textContent = "待发送";
-      button.disabled = true;
+    bindEvent(form, "change", (event) => {
+      if (event.target.matches("[data-share-agent]")) {
+        const id = event.target.value;
+        form.querySelector("[data-share-row]").dataset.shareRow = id;
+        const fields = form.querySelector("[data-allocation-fields]");
+        fields.innerHTML = allocationFields({}, agents.find(item => item.id === id));
+        fields.disabled = !id;
+        fields.hidden = !id;
+        form.querySelector('[type="submit"]').disabled = !id;
+      }
+      if (event.target.name === "quota_mode") {
+        const unlimited = event.target.value === "unlimited";
+        form.querySelector("[data-quota-amount]").hidden = unlimited;
+        form.elements.limit_gib.disabled = unlimited;
+        if (!unlimited && Number(form.elements.limit_gib.value) === 0) form.elements.limit_gib.value = "";
+      }
+      updateConsent();
       capture();
     });
-    bindEvent(form.querySelector("[data-share-add]"), "click", () => {
-      const select = form.querySelector("[data-share-agent]");
-      if (!select.value) return;
-      form.querySelector("[data-share-rows]").insertAdjacentHTML("beforeend", shareRow({ agent_id: select.value, enabled: true, ports: [] }, agents));
-      select.selectedOptions[0].remove();
-      select.value = "";
-      capture();
-    });
-    bindEvent(form.querySelector("[data-user-reload]"), "click", async () => {
-      if (await confirmAction("重新读取会丢弃未保存的分配。", "重新读取")) {
+    dialog.querySelectorAll("[data-allocation-close]").forEach(button => bindEvent(button, "click", () => closeAllocation()));
+    bindEvent(dialog, "cancel", event => { event.preventDefault(); closeAllocation(); });
+    bindEvent(form.querySelector("[data-allocation-reload]"), "click", async () => {
+      if (!isCurrent() || editor.reloading || data.userAccessSaves.has(user.id) || data.userDeletions.has(user.id)) return;
+      editor.reloading = true;
+      const controls = [...form.elements].filter(control => !control.hasAttribute("data-allocation-close")).map(control => [control, control.disabled]);
+      controls.forEach(([control]) => { control.disabled = true; });
+      try {
+        if (!await confirmAction("重新读取会丢弃未保存的分配。", "重新读取") || !isCurrent()) return;
+        const selectedID = formValues(form).rows[0].agent_id;
+        const refreshed = await api(`/users/${encodeURIComponent(user.id)}/agent-access`);
+        if (!isCurrent()) return;
         data.userDrafts.delete(user.id);
-        captureActive = () => {};
-        try { await users(); } catch (error) { captureActive = capture; capture(); report(error, form); }
+        ++serial;
+        renderUsers(data.users, agents, user, refreshed);
+        openAllocation(user, agents, refreshed, { mode, agentID: selectedID, trigger: document.querySelector(mode === "add" ? "[data-allocation-add]" : `[data-allocation-edit="${CSS.escape(selectedID)}"]`) });
+      } catch (error) { if (isCurrent()) reportAllocationError(error, data, user.id); }
+      finally {
+        editor.reloading = false;
+        controls.forEach(([control, disabled]) => { control.disabled = disabled; });
       }
     });
     bindEvent(form, "submit", async (event) => {
       event.preventDefault();
-      const button = form.querySelector('button[type="submit"]');
-      if (button.disabled || form.inert || data.userAccessSaves.has(user.id) || data !== state.data || state.route !== "users" || data.userID !== user.id) return;
-      let saving;
+      if (!isCurrent() || editor.reloading || form.inert || data.userAccessSaves.has(user.id) || data.userDeletions.has(user.id)) return;
       try {
-        if (data.userAccessSaves.has(user.id) || !form.isConnected || data !== state.data) return;
-        const allocations = [...form.querySelectorAll("[data-share-row]")].map((row) => ({
-          agent_id: row.dataset.shareRow,
-          enabled: row.querySelector('[name="enabled"]').checked,
-          engines: selectedSharedEngines(row),
-          ports: parseSharedPorts(row.querySelector('[name="ports"]').value),
-          limit_bytes: sharedLimitBytes(row.querySelector('[name="limit_gib"]').value),
-          reinvite: row.dataset.reinvite === "true",
-        }));
+        const row = form.querySelector("[data-share-row]"), values = formValues(form).rows[0];
+        if (!values.agent_id) throw new Error("请选择节点。");
+        const limit = values.unlimited ? 0 : sharedLimitBytes(values.limit_gib);
+        if (!values.unlimited && limit === 0) throw new Error("请输入大于 0 的总额度，或选择不限量。");
+        const allocation = { agent_id: values.agent_id, enabled: values.enabled, engines: selectedSharedEngines(row), ports: parseSharedPorts(values.ports_text), limit_bytes: limit, reinvite: values.reinvite };
         capture();
-        const submitted = data.userDrafts.get(user.id);
-        saving = { controls: [] };
-        data.userAccessSaves.set(user.id, saving);
-        lockForm(form, saving);
-        const saved = await api(`/users/${encodeURIComponent(user.id)}/agent-access`, {
-          method: "PUT", body: JSON.stringify({ isolated: true, shares: allocations, revision: access.revision }),
-        });
-        if (data !== state.data) return;
-        if (data.userDrafts.get(user.id) === submitted) data.userDrafts.delete(user.id);
-        data.userAccessSaves.delete(user.id);
-        if (state.route === "users" && data.userID === user.id) {
-          ++serial;
-          const latestItems = data.users || items;
-          renderUsers(latestItems, agents, latestItems.find((item) => item.id === user.id) || user, saved);
-        }
-        notify("分配已保存");
-      } catch (error) {
-        if (data !== state.data || error.name === "AbortError") return;
-        const activeForm = state.route === "users" && data.userID === user.id && document.querySelector("[data-user-access-form]");
-        if (activeForm) report(error, activeForm);
-        else notify(error.message, "error");
-      } finally {
-        if (data.userAccessSaves.get(user.id) === saving) data.userAccessSaves.delete(user.id);
-        saving?.controls.forEach(([control, disabled]) => { control.disabled = disabled; });
-      }
+        await saveAllocation(user, agents, access, allocation, { data, trigger: form, notice: mode === "edit" ? "分配已保存" : "共享邀请已发送" });
+      } catch (error) { reportAllocationError(error, data, user.id); }
     });
+    const pending = data.userAccessSaves.get(user.id);
+    if (pending) lockAllocationControls(data, user.id, pending);
+  }
+
+  function reportAllocationError(error, data, userID) {
+    if (error.name === "AbortError" || data !== state.data) return;
+    if (activeAllocation?.data === data && activeAllocation.userID === userID && activeAllocation.dialog.isConnected) {
+      activeAllocation.dialog.querySelector(".user-allocation-failure").hidden = false;
+      report(error, activeAllocation.dialog);
+    } else if (state.route === "users" && data.userID === userID) report(error, document.querySelector("[data-user-allocations]"));
+    else notify(error.message, "error");
+  }
+
+  async function saveAllocation(user, agents, access, allocation, { data, trigger, notice, confirmation }) {
+    const currentUser = () => data === state.data && state.route === "users" && data.userID === user.id && trigger.isConnected;
+    if (!currentUser() || data.userAccessSaves.has(user.id) || data.userDeletions.has(user.id)) return;
+    const submitted = data.userDrafts.get(user.id), saving = { controls: new Map() };
+    data.userAccessSaves.set(user.id, saving);
+    lockAllocationControls(data, user.id, saving);
+    try {
+      if (confirmation && (!await confirmAction(confirmation, "撤销共享") || !currentUser())) return;
+      const saved = await api(`/users/${encodeURIComponent(user.id)}/agent-access`, {
+        method: "PUT", body: JSON.stringify({ isolated: true, shares: mergeUserAllocation(access.shares, allocation), revision: access.revision }),
+      });
+      if (data !== state.data) return;
+      if (data.userDrafts.get(user.id) === submitted) data.userDrafts.delete(user.id);
+      data.userAccessSaves.delete(user.id);
+      if (state.route === "users" && data.userID === user.id) {
+        ++serial;
+        captureActive = () => {};
+        renderUsers(data.users, agents, data.users.find(item => item.id === user.id) || user, saved);
+      }
+      notify(notice);
+    } catch (error) { reportAllocationError(error, data, user.id); }
+    finally {
+      if (data.userAccessSaves.get(user.id) === saving) data.userAccessSaves.delete(user.id);
+      saving.controls.forEach((disabled, control) => { control.disabled = disabled; });
+    }
   }
 
   function editUser(user) {
