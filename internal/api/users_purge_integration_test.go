@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
@@ -78,13 +79,21 @@ func TestPurgeUserRefreshesLivePoliciesAndRevokesRemoteSessions(t *testing.T) {
 	if db.EnrollmentTokenUsable(ctx, credential.Token) {
 		t.Fatal("deleted account can reinstall the retained node")
 	}
-	entries, err := db.ListAuditLogs(ctx, 100)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !slices.ContainsFunc(entries, func(entry core.AuditLogEntry) bool {
-		return entry.Action == "user.purged" && entry.Target == alice.userID && strings.Contains(entry.Detail, "alice")
-	}) {
-		t.Fatal("purge audit is not tied to the durable account ID and username")
+	// recordAudit writes asynchronously after the response has completed.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		entries, err := db.ListAuditLogs(ctx, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if slices.ContainsFunc(entries, func(entry core.AuditLogEntry) bool {
+			return entry.Action == "user.purged" && entry.Target == alice.userID && strings.Contains(entry.Detail, "alice")
+		}) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("purge audit is not tied to the durable account ID and username")
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }

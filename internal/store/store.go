@@ -50,7 +50,7 @@ type storeExecutor interface {
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 58
+const currentSchemaVersion = 59
 
 func Open(ctx context.Context, databaseURL string, allowInsecureRemote bool) (*Store, error) {
 	return OpenWithConfigKey(ctx, databaseURL, allowInsecureRemote, "")
@@ -1750,6 +1750,17 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 		if err != nil {
 			return core.Task{}, err
 		}
+		settings, settingsErr := s.panelSettingsForOwner(ctx, tx, scopeForConfig(ctx).OwnerID)
+		if settingsErr != nil {
+			return core.Task{}, settingsErr
+		}
+		if settings.CNIPSource != nil && settings.CNIPSource.Custom() && request.Action != core.ActionImportExisting {
+			if !containsFeature(features, core.AgentFeatureCNIPSource) {
+				return core.Task{}, fmt.Errorf("%w: 请先升级 Agent，以支持自定义 CN IP 数据源", ErrConflict)
+			}
+			source := *settings.CNIPSource
+			task.CNIPSource = &source
+		}
 		if request.Action == core.ActionValidate || request.Action == core.ActionDeploy {
 			if err := serverconfig.ValidateIndependentEgress(task.Engine, task.ConfigContent); err != nil {
 				return core.Task{}, fmt.Errorf("%w: %v", ErrInvalid, err)
@@ -1819,9 +1830,9 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 		return core.Task{}, err
 	}
 	_, err = tx.Exec(ctx, `
-			INSERT INTO tasks (id,agent_id,action,engine,config_id,config_version,config_content,mainland_access_policies,core_version,core_source,status,attempt,created_at,tcp_settings,owner_id,shared_traffic_id)
-			VALUES ($1,$2,$3,$4,NULLIF($5,''),NULLIF($6,0),NULLIF($7,''),$8,NULLIF($9,''),NULLIF($10,''),$11,0,$12,$13,$14,$15)`,
-		task.ID, task.AgentID, task.Action, task.Engine, task.ConfigID, task.ConfigVersion, storedConfigContent, mainlandPoliciesJSON, task.CoreVersion, task.CoreSource, task.Status, task.CreatedAt, task.TCPSettings, scope.OwnerID, task.SharedTrafficID)
+			INSERT INTO tasks (id,agent_id,action,engine,config_id,config_version,config_content,mainland_access_policies,core_version,core_source,status,attempt,created_at,tcp_settings,owner_id,shared_traffic_id,cnip_source)
+			VALUES ($1,$2,$3,$4,NULLIF($5,''),NULLIF($6,0),NULLIF($7,''),$8,NULLIF($9,''),NULLIF($10,''),$11,0,$12,$13,$14,$15,$16)`,
+		task.ID, task.AgentID, task.Action, task.Engine, task.ConfigID, task.ConfigVersion, storedConfigContent, mainlandPoliciesJSON, task.CoreVersion, task.CoreSource, task.Status, task.CreatedAt, task.TCPSettings, scope.OwnerID, task.SharedTrafficID, task.CNIPSource)
 	if err != nil {
 		return core.Task{}, mapError(err)
 	}
@@ -2011,7 +2022,7 @@ func (s *Store) RunningTask(ctx context.Context, agentID string) (*core.Task, er
 	row := tx.QueryRow(ctx, `
 		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),
 		       COALESCE(config_content,''),COALESCE(mainland_access_policies,'[]'::jsonb),COALESCE(core_version,''),COALESCE(core_source,''),status,attempt,COALESCE(lease_id,''),
-		       COALESCE(output,''),COALESCE(error,''),created_at,started_at,finished_at,tcp_settings,shared_traffic_id
+		       COALESCE(output,''),COALESCE(error,''),created_at,started_at,finished_at,tcp_settings,shared_traffic_id,cnip_source
 		FROM tasks WHERE agent_id=$1 AND status='running'
 		ORDER BY started_at DESC LIMIT 1`, agentID)
 	task, err := scanTask(row, true)
@@ -2036,6 +2047,9 @@ func (s *Store) RunningTask(ctx context.Context, agentID string) (*core.Task, er
 			return nil, err
 		}
 		return nil, tx.Commit(ctx)
+	}
+	if task.CNIPSource != nil && !containsFeature(features, core.AgentFeatureCNIPSource) {
+		return nil, fmt.Errorf("%w: Agent no longer supports CN IP sources", ErrConflict)
 	}
 	if task.SharedTrafficID != "" {
 		var allowed bool
@@ -2127,13 +2141,14 @@ func (s *Store) ClaimTask(ctx context.Context, agentID string) (*core.Task, erro
 			  AND NOT EXISTS (SELECT 1 FROM tasks running WHERE running.agent_id=$1 AND running.status='running')
 			  AND ($3::boolean OR NOT (t.action='install' AND t.engine='mihomo' AND t.core_version='development' AND COALESCE(t.core_source,'')='mirror'))
 			  AND ($4::boolean OR t.action NOT IN ('enable-bbr','disable-bbr','configure-tcp'))
+              AND ($5::boolean OR t.cnip_source IS NULL)
 			ORDER BY t.created_at ASC FOR UPDATE OF t SKIP LOCKED LIMIT 1
 		)
 		UPDATE tasks t SET status='running',started_at=now(),attempt=attempt+1,lease_id=$2
 		FROM next_task n WHERE t.id=n.id
 		RETURNING t.id,t.agent_id,t.action,t.engine,COALESCE(t.config_id,''),COALESCE(t.config_version,0),
 		          COALESCE(t.config_content,''),COALESCE(t.mainland_access_policies,'[]'::jsonb),COALESCE(t.core_version,''),COALESCE(t.core_source,''),t.status,t.attempt,COALESCE(t.lease_id,''),COALESCE(t.output,''),COALESCE(t.error,''),
-		          t.created_at,t.started_at,t.finished_at,t.tcp_settings,t.shared_traffic_id`, agentID, leaseID, mirrorSupported, containsFeature(features, core.AgentFeatureSystemBBR))
+		          t.created_at,t.started_at,t.finished_at,t.tcp_settings,t.shared_traffic_id,t.cnip_source`, agentID, leaseID, mirrorSupported, containsFeature(features, core.AgentFeatureSystemBBR), containsFeature(features, core.AgentFeatureCNIPSource))
 	task, err := scanTask(row, true)
 	if err == nil {
 		if configErr := s.openExecutionConfig(&task); configErr != nil {
@@ -2389,7 +2404,7 @@ func scanTask(row rowScanner, includeContent bool) (core.Task, error) {
 		var mainlandPoliciesJSON []byte
 		err = row.Scan(&task.ID, &task.AgentID, &task.Action, &task.Engine, &task.ConfigID, &task.ConfigVersion,
 			&task.ConfigContent, &mainlandPoliciesJSON, &task.CoreVersion, &task.CoreSource, &task.Status, &task.Attempt, &task.LeaseID, &task.Output, &task.Error,
-			&task.CreatedAt, &task.StartedAt, &task.FinishedAt, &tcpSettingsJSON, &task.SharedTrafficID)
+			&task.CreatedAt, &task.StartedAt, &task.FinishedAt, &tcpSettingsJSON, &task.SharedTrafficID, &task.CNIPSource)
 		if err == nil && len(mainlandPoliciesJSON) > 0 {
 			err = json.Unmarshal(mainlandPoliciesJSON, &task.MainlandAccessPolicies)
 		}
@@ -2775,6 +2790,8 @@ ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS install_task_stale_timeout_s
 ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS task_max_attempts integer NOT NULL DEFAULT 3;
 ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS public_ip_probe_interval_seconds integer NOT NULL DEFAULT 300;
 ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS core_log_retention_days integer NOT NULL DEFAULT 7;
+ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS cnip_source jsonb;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS cnip_source jsonb;
 ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS agent_core_log_max_mib integer NOT NULL DEFAULT 16;
 ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS agent_core_log_rotate_count integer NOT NULL DEFAULT 1;
 ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS metric_retention_days integer NOT NULL DEFAULT 7;

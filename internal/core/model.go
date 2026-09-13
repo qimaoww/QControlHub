@@ -89,14 +89,15 @@ const (
 // without routing support (for example Shadowsocks Rust) apply the same
 // policy through an Agent-managed native ACL and per-port firewall rules.
 type MainlandAccessPolicy struct {
-	AgentID                  string `json:"agent_id,omitempty"`
-	ConfigVersion            int    `json:"config_version,omitempty"`
-	Tag                      string `json:"tag"`
-	Port                     int    `json:"port"`
-	Kind                     string `json:"kind"`
-	Engine                   Engine `json:"engine"`
-	BlockMainlandDestination bool   `json:"block_mainland_destination"`
-	BlockMainlandSource      bool   `json:"block_mainland_source"`
+	CNIPPrefixes             []string `json:"cnip_prefixes,omitempty"`
+	AgentID                  string   `json:"agent_id,omitempty"`
+	ConfigVersion            int      `json:"config_version,omitempty"`
+	Tag                      string   `json:"tag"`
+	Port                     int      `json:"port"`
+	Kind                     string   `json:"kind"`
+	Engine                   Engine   `json:"engine"`
+	BlockMainlandDestination bool     `json:"block_mainland_destination"`
+	BlockMainlandSource      bool     `json:"block_mainland_source"`
 }
 
 // PublicIPProbeConfig is an operator-controlled, per-family direct egress
@@ -442,6 +443,7 @@ const (
 )
 
 type Task struct {
+	CNIPSource             *CNIPSource            `json:"cnip_source,omitempty"`
 	SharedTrafficID        string                 `json:"shared_traffic_id,omitempty"`
 	TCPSettings            TCPSettings            `json:"tcp_settings,omitempty"`
 	ID                     string                 `json:"id"`
@@ -675,39 +677,40 @@ type ConfigTemplate struct {
 }
 
 type PanelSettings struct {
-	DefaultAgentEngines            []Engine  `json:"default_agent_engines"`
-	Revision                       int64     `json:"revision"`
-	PanelName                      string    `json:"panel_name"`
-	PanelDescription               string    `json:"panel_description"`
-	TimeZone                       string    `json:"time_zone"`
-	TimeDisplay                    string    `json:"time_display"`
-	UIFontScale                    int       `json:"ui_font_scale"`
-	DefaultConfigEditor            string    `json:"default_config_editor"`
-	TaskPageSize                   int       `json:"task_page_size"`
-	TaskPollIntervalMS             int       `json:"task_poll_interval_ms"`
-	AgentHeartbeatIntervalSeconds  int       `json:"agent_heartbeat_interval_seconds"`
-	AgentMetricsIntervalSeconds    int       `json:"agent_metrics_interval_seconds"`
-	AgentOfflineThresholdSeconds   int       `json:"agent_offline_threshold_seconds"`
-	TaskStaleTimeoutSeconds        int       `json:"task_stale_timeout_seconds"`
-	InstallTaskStaleTimeoutSeconds int       `json:"install_task_stale_timeout_seconds"`
-	TaskMaxAttempts                int       `json:"task_max_attempts"`
-	PublicIPProbeIntervalSeconds   int       `json:"public_ip_probe_interval_seconds"`
-	CoreLogMinimumLevel            string    `json:"core_log_minimum_level"`
-	CoreLogRetentionDays           int       `json:"core_log_retention_days"`
-	AgentCoreLogMaxMiB             int       `json:"agent_core_log_max_mib"`
-	AgentCoreLogRotateCount        int       `json:"agent_core_log_rotate_count"`
-	MetricRetentionDays            int       `json:"metric_retention_days"`
-	AuditRetentionDays             int       `json:"audit_retention_days"`
-	TaskRetentionDays              int       `json:"task_retention_days"`
-	ConfigRevisionRetention        int       `json:"config_revision_retention"`
-	WebhookURL                     string    `json:"webhook_url"`
-	NotifyTaskFailed               bool      `json:"notify_task_failed"`
-	NotifyAgentOffline             bool      `json:"notify_agent_offline"`
-	NotifyAgentOnline              bool      `json:"notify_agent_online"`
-	NotifyTrafficQuota             bool      `json:"notify_traffic_quota"`
-	KomariURL                      string    `json:"komari_url"`
-	KomariAPIKey                   string    `json:"komari_api_key"`
-	UpdatedAt                      time.Time `json:"updated_at"`
+	CNIPSource                     *CNIPSource `json:"cnip_source"`
+	DefaultAgentEngines            []Engine    `json:"default_agent_engines"`
+	Revision                       int64       `json:"revision"`
+	PanelName                      string      `json:"panel_name"`
+	PanelDescription               string      `json:"panel_description"`
+	TimeZone                       string      `json:"time_zone"`
+	TimeDisplay                    string      `json:"time_display"`
+	UIFontScale                    int         `json:"ui_font_scale"`
+	DefaultConfigEditor            string      `json:"default_config_editor"`
+	TaskPageSize                   int         `json:"task_page_size"`
+	TaskPollIntervalMS             int         `json:"task_poll_interval_ms"`
+	AgentHeartbeatIntervalSeconds  int         `json:"agent_heartbeat_interval_seconds"`
+	AgentMetricsIntervalSeconds    int         `json:"agent_metrics_interval_seconds"`
+	AgentOfflineThresholdSeconds   int         `json:"agent_offline_threshold_seconds"`
+	TaskStaleTimeoutSeconds        int         `json:"task_stale_timeout_seconds"`
+	InstallTaskStaleTimeoutSeconds int         `json:"install_task_stale_timeout_seconds"`
+	TaskMaxAttempts                int         `json:"task_max_attempts"`
+	PublicIPProbeIntervalSeconds   int         `json:"public_ip_probe_interval_seconds"`
+	CoreLogMinimumLevel            string      `json:"core_log_minimum_level"`
+	CoreLogRetentionDays           int         `json:"core_log_retention_days"`
+	AgentCoreLogMaxMiB             int         `json:"agent_core_log_max_mib"`
+	AgentCoreLogRotateCount        int         `json:"agent_core_log_rotate_count"`
+	MetricRetentionDays            int         `json:"metric_retention_days"`
+	AuditRetentionDays             int         `json:"audit_retention_days"`
+	TaskRetentionDays              int         `json:"task_retention_days"`
+	ConfigRevisionRetention        int         `json:"config_revision_retention"`
+	WebhookURL                     string      `json:"webhook_url"`
+	NotifyTaskFailed               bool        `json:"notify_task_failed"`
+	NotifyAgentOffline             bool        `json:"notify_agent_offline"`
+	NotifyAgentOnline              bool        `json:"notify_agent_online"`
+	NotifyTrafficQuota             bool        `json:"notify_traffic_quota"`
+	KomariURL                      string      `json:"komari_url"`
+	KomariAPIKey                   string      `json:"komari_api_key"`
+	UpdatedAt                      time.Time   `json:"updated_at"`
 }
 
 func DefaultPanelSettings() PanelSettings {
@@ -745,6 +748,11 @@ func DefaultPanelSettings() PanelSettings {
 }
 
 func (settings PanelSettings) Validate() error {
+	if settings.CNIPSource != nil {
+		if err := settings.CNIPSource.Validate(); err != nil {
+			return err
+		}
+	}
 	if err := ValidateEngineCapabilities(settings.DefaultAgentEngines); err != nil {
 		return err
 	}

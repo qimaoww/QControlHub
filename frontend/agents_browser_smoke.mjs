@@ -60,6 +60,8 @@ const server = createServer(async (request, response) => {
     else if (path === "/assets/app.js") file = join(root, "app.js");
     else if (path === "/assets/agents_browser_runtime.mjs")
       file = join(root, "agents_browser_runtime.mjs");
+    else if (path === "/assets/config_restrictions_browser_runtime.mjs")
+      file = join(root, "config_restrictions_browser_runtime.mjs");
     else if (path === "/assets/config_migration_browser_runtime.mjs")
       file = join(root, "config_migration_browser_runtime.mjs");
     else if (path === "/assets/config_scope_browser_runtime.mjs")
@@ -297,7 +299,7 @@ async function runMode(mode) {
 }
 
 try {
-  const modes = process.env.QCH_BROWSER_SMOKE_MODES || process.env.QCH_BROWSER_SMOKE_MODE || "admin,empty,enrollment,enrollment-mobile,readonly,ports,regions,logs,logs-restore,bbr,bbr-readonly,bbr-writeonly,config-migration,config-scope,substore-scope,users,users-mobile,users-layout,users-layout-mobile,sharing,sharing-mobile,shared-node,shared-node-mobile,config-layout,traffic-layout,capabilities-settings,capabilities-settings-readonly,presets";
+  const modes = process.env.QCH_BROWSER_SMOKE_MODES || process.env.QCH_BROWSER_SMOKE_MODE || "admin,empty,enrollment,enrollment-mobile,readonly,ports,regions,logs,logs-restore,bbr,bbr-readonly,bbr-writeonly,config-restrictions,config-migration,config-scope,substore-scope,users,users-mobile,users-layout,users-layout-mobile,sharing,sharing-mobile,shared-node,shared-node-mobile,config-layout,traffic-layout,capabilities-settings,capabilities-settings-readonly,presets";
   for (const mode of modes.split(",")) await runMode(mode);
   process.stdout.write("agents browser runtime smoke passed\n");
 } finally {
