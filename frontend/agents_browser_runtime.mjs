@@ -114,6 +114,19 @@ const testAPI = {
   agents: populatedAgents,
 };
 window.__agentsBrowserTestAPI = testAPI;
+if (mode.startsWith("client-order")) {
+  location.hash = "#client-access";
+  testAPI.clientAccessEntries = [
+    ["bravo", "mihomo"], ["alpha", "xray"], ["charlie", "xray"], ["alpha", "mihomo"],
+  ].map(([agent_id, engine]) => ({
+    agent_id, agent_name: agent_id.toUpperCase(), engine,
+    address: `${agent_id}.example.test`, source: "test",
+    profiles: [20002, 20001].map(port => ({
+      tag: `${agent_id}-${port}`, port, protocol: "test",
+      profile: { format: "URI", uri: `test-${agent_id}-${port}`, fields: [] },
+    })),
+  }));
+}
 if (mode.startsWith("enrollment")) testAPI.enrollmentRecords = [];
 if (mode.startsWith("users-layout")) {
   location.hash = "#users";
@@ -358,6 +371,8 @@ window.fetch = async (input, options = {}) => {
       }))));
   }
   if (method === "GET" && path === "/deployments") return json(testAPI.deployments);
+  if (method === "GET" && path === "/client-access" && mode.startsWith("client-order"))
+    return json(testAPI.clientAccessEntries);
   if (method === "GET" && path === "/client-access" && ["ports","readonly","regions","regions-preview"].includes(mode)) {
     const profiles = (address) => [20001,20002].map((port,index) => {
       const tag = `ss-rust-${index+1}`;
@@ -1784,6 +1799,55 @@ async function testPortNamesAndRuntimeRefresh() {
   assert.equal(testAPI.calls.filter((call) => call.path==="/agents").length,before,"离开节点设置仍后台轮询");
 }
 
+async function testClientNodeOrderRuntime() {
+  const cards = () => [...document.querySelectorAll(".client-access-node-card")];
+  const cardNodes = () => cards().map(card => card.querySelector("[data-region-avatar]").dataset.regionAvatar).join(",");
+  const sidebarNodes = () => [...document.querySelectorAll(".context-list [data-access-agent]")]
+    .map(link => link.dataset.accessAgent)
+    .filter(id => testAPI.clientAccessEntries.some(entry => entry.agent_id === id)).join(",");
+  await waitFor(() => cards().length === 3, "client cards did not load");
+  assert.equal(cardNodes(), "alpha,bravo,charlie", "default client cards must follow the API node list");
+  assert.equal(cardNodes(), sidebarNodes(), "client cards and their sidebar must agree");
+  assert.equal(accountStorage.getItem("qcontrolhub:node-card-order"), null, "opening clients must not freeze a custom node order");
+  const alpha = cards().find(card => card.dataset.refreshKey === "client-access-node-alpha");
+  assert.equal([...alpha.querySelectorAll("[data-config-engine]")].map(link => link.dataset.configEngine).join(","),
+    "xray,mihomo", "sorting nodes must preserve engine order within each node");
+  assert.equal([...alpha.querySelectorAll(".client-profile-row>header>b")].map(title => title.textContent).join(","),
+    "alpha-20002,alpha-20001,alpha-20002,alpha-20001", "sorting nodes must preserve profile order");
+
+  const saved = JSON.stringify(["charlie", "delta", "bravo", "alpha"]);
+  accountStorage.setItem("qcontrolhub:node-card-order", saved);
+  location.hash = "#node-settings";
+  await waitFor(() => document.querySelectorAll(".node-card-grid>[data-agent-node]").length === 4, "node cards did not load");
+  assert.equal([...document.querySelectorAll(".node-card-grid>[data-agent-node]")].map(card => card.dataset.agentNode).join(","),
+    "charlie,delta,bravo,alpha", "node settings must use the saved order");
+  location.hash = "#client-access";
+  await waitFor(() => cardNodes() === "charlie,bravo,alpha", "client navigation did not apply the saved node order");
+  assert.equal(cardNodes(), sidebarNodes(), "nodes without exports must not disrupt client order");
+
+  document.querySelector('[data-filter-engine="xray"]').click();
+  assert.equal(cardNodes(), "charlie,alpha", "engine filtering must preserve node order");
+  document.querySelector('[data-access-agent="alpha"]').click();
+  assert.equal(cardNodes(), "alpha", "node filtering must select the requested card");
+  document.querySelector('[data-access-agent=""]').click();
+  assert.equal(cardNodes(), "charlie,alpha", "clearing the node filter must restore node order");
+  document.querySelector(".client-access-search-menu").open = true;
+  document.querySelector('#client-search [name="q"]').value = "20001";
+  document.querySelector("#client-search").requestSubmit();
+  assert.equal(cardNodes(), "charlie,alpha", "profile search must preserve node order");
+  assert.equal(document.querySelectorAll(".client-profile-row").length, 2, "profile search must narrow the results");
+  document.querySelector("[data-clear-search]").click();
+  document.querySelector('[data-filter-engine=""]').click();
+  assert.equal(cardNodes(), "charlie,bravo,alpha", "clearing all filters must restore node order");
+  assert.equal(accountStorage.getItem("qcontrolhub:node-card-order"), saved, "filters must not rewrite node order");
+
+  accountStorage.setItem("qcontrolhub:node-card-order", JSON.stringify(["bravo", "alpha"]));
+  testAPI.clientAccessEntries.reverse();
+  document.querySelector("[data-refresh-client-access]").click();
+  await waitFor(() => cardNodes() === "bravo,alpha,charlie", "refresh did not apply updated node order");
+  assert.equal(cardNodes(), sidebarNodes(), "refresh must keep the cards and sidebar aligned");
+}
+
 async function testSystemTCPRuntime() {
   await waitFor(() => document.querySelector(".bbr-card"), "TCP 页面未加载");
   assert.equal(document.querySelector(".bbr-intro"), null, "不应恢复冗余的顶部说明卡");
@@ -2347,6 +2411,7 @@ try {
   else if (mode === "bbr-preview" || mode === "regions-preview") await new Promise(() => {});
   else if (mode.startsWith("bbr")) await testSystemTCPRuntime();
   else if (mode === "admin") await testAdminRuntime();
+  else if (mode.startsWith("client-order")) await testClientNodeOrderRuntime();
   else if (mode === "ports") await testPortNamesAndRuntimeRefresh();
   else if (mode === "regions") await testRegionRuntime();
   else if (mode === "empty") await testEmptyRuntime();

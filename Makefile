@@ -3,7 +3,17 @@ SHELL := /bin/sh
 VERSION ?= dev
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
-.PHONY: build test alpine-test upgrade-sandbox-test ss-rust-runtime-test vet fmt-check frontend-check pr-policy-test schema-policy-test installer-test agent-redeploy-test quick-start-test web-image-test docs-check check init-env compose-config up dev-up down logs
+.PHONY: build test alpine-test alpine-agent-test upgrade-sandbox-test ss-rust-runtime-test vet fmt-check frontend-check pr-policy-test schema-policy-test installer-test agent-redeploy-test quick-start-test web-image-test docs-check check checks browser-checks non-browser-checks alpine-non-browser-checks init-env compose-config up dev-up down logs
+
+# Non-Go checks. CI runs each group as its own task next to the Go test shards,
+# so keep the Go suite out of these targets.
+BROWSER_CHECK_TARGETS := frontend-check
+CHECK_TARGETS := fmt-check pr-policy-test schema-policy-test installer-test agent-redeploy-test quick-start-test docs-check vet
+# Alpine validates the same checks without the Debian-only agent redeploy flow.
+ALPINE_CHECK_TARGETS := fmt-check pr-policy-test schema-policy-test installer-test quick-start-test docs-check vet
+# Alpine leaves internal/agent out of the package sweep and runs the OpenRC and
+# lifecycle regressions instead; the upgrade sandbox job covers the rest.
+ALPINE_AGENT_TESTS := go test ./internal/agent -run 'OpenRC|PerServiceManager|AgentUpgrade|ManagedCorePrerequisites|SystemBBR'
 
 build:
 	mkdir -p bin
@@ -15,9 +25,11 @@ build:
 test:
 	go test -p 1 ./...
 
-alpine-test:
+alpine-agent-test:
+	$(ALPINE_AGENT_TESTS)
+
+alpine-test: alpine-agent-test
 	@packages="$$(go list ./... | sed '\|/internal/agent$$|d')"; go test -p 1 $$packages
-	go test ./internal/agent -run 'OpenRC|PerServiceManager|AgentUpgrade|ManagedCorePrerequisites|SystemBBR'
 
 upgrade-sandbox-test:
 	docker build -f deploy/tests/Dockerfile.upgrade-lifecycle -t qch-upgrade-lifecycle-test .
@@ -68,7 +80,14 @@ web-image-test:
 docs-check:
 	node docs/check_docs.mjs
 
-check: fmt-check frontend-check pr-policy-test schema-policy-test installer-test agent-redeploy-test quick-start-test docs-check vet test
+check: $(BROWSER_CHECK_TARGETS) $(CHECK_TARGETS) test
+
+# CI runs the same checks in parallel groups; these targets keep one source of
+# truth for the targets that "make check" covers.
+checks: $(BROWSER_CHECK_TARGETS) $(CHECK_TARGETS)
+browser-checks: $(BROWSER_CHECK_TARGETS)
+non-browser-checks: $(CHECK_TARGETS)
+alpine-non-browser-checks: $(ALPINE_CHECK_TARGETS)
 
 init-env:
 	@command -v openssl >/dev/null 2>&1 || { printf '%s\n' 'openssl is required'; exit 1; }
