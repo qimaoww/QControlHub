@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/qimaoww/qcontrolhub/internal/cnip"
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
@@ -69,7 +70,7 @@ func (manager *MainlandAccessManager) Restore(ctx context.Context, agentID strin
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
-	if err != nil || len(contents) > 256<<10 {
+	if err != nil || len(contents) > 32<<20 {
 		return errors.New("read saved mainland access state")
 	}
 	var policies []core.MainlandAccessPolicy
@@ -106,6 +107,9 @@ func (manager *MainlandAccessManager) Deploy(ctx context.Context, policies []cor
 		return err
 	}
 	encoded, err := json.Marshal(policies)
+	if len(encoded) > 32<<20 {
+		err = errors.New("mainland access state exceeds 32 MiB")
+	}
 	if err == nil {
 		_, err = atomicDeploy(manager.statePath, string(encoded)+"\n")
 	}
@@ -173,7 +177,25 @@ func (manager *MainlandAccessManager) Apply(ctx context.Context, policies []core
 			loader = manager.loadRoutes
 		}
 		var err error
-		ranges, err = loader(ctx)
+		var custom []string
+		for _, policy := range policies {
+			if len(policy.CNIPPrefixes) > 0 {
+				custom = policy.CNIPPrefixes
+				break
+			}
+		}
+		if len(custom) > 0 {
+			validated, parseErr := cnip.Parse([]byte(strings.Join(custom, "\n")), "txt")
+			if parseErr != nil {
+				return parseErr
+			}
+			ranges = cnip.IPv4Ranges(validated)
+			if len(ranges) == 0 {
+				return errors.New("ss-rust CN IP 源需要包含 IPv4 网段")
+			}
+		} else {
+			ranges, err = loader(ctx)
+		}
 		if err != nil {
 			return err
 		}

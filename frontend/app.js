@@ -545,7 +545,6 @@ function shell(content, title, { viewKey = state.route } = {}) {
     ["live-config", "配置", dockIcons.fileCode],
     ["client-access", "客户端", dockIcons.monitorSmartphone],
     ["substore-sync", "同步", dockIcons.refreshCw, true],
-    ["access-control", "限制", dockIcons.shield, true],
     ["system-bbr", "TCP 调优", dockIcons.sliders, true],
     ["traffic", "流量", dockIcons.chart, true],
     ["core-logs", "日志", dockIcons.logs, true],
@@ -813,7 +812,7 @@ function contextMarkup(title) {
     return `<a class="context-primary ${selected ? "" : "active"}" href="#access-control-all" data-access-control-agent="">全部节点</a><div class="context-section-label"><span>按节点查看</span><b>${orderedAgents.length}</b></div><nav class="context-list" aria-label="访问限制节点">${orderedAgents.map((agent) => `<a class="${selected === agent.id ? "active" : ""}" href="#access-control-agent-${esc(agent.id)}" data-access-control-agent="${esc(agent.id)}"><i class="status-dot ${agent.status === "online" ? "ok" : ""}"></i><span><strong>${esc(agent.name)}</strong><small>${agent.count} 个入站端口${agent.enabled ? ` · ${agent.enabled} 个已限制` : ""}</small></span></a>`).join("") || "<p>还没有可限制的入站</p>"}</nav>`;
   }
   if (state.route === "settings")
-    return `<nav class="context-menu" aria-label="设置目录"><a class="active" href="#settings-engines"><span>01</span>默认内核能力</a><a href="#settings-basic"><span>02</span>基础设置</a><a href="#settings-runtime"><span>03</span>任务与同步</a><a href="#settings-data"><span>04</span>数据与日志</a><a href="#settings-notify"><span>05</span>事件通知</a><a href="#settings-komari"><span>06</span>Komari 联动</a><a href="#settings-deployment"><span>07</span>部署状态</a></nav>`;
+    return `<nav class="context-menu" aria-label="设置目录"><a class="active" href="#settings-engines"><span>01</span>默认内核能力</a><a href="#settings-basic"><span>02</span>基础设置</a><a href="#settings-runtime"><span>03</span>任务与同步</a><a href="#settings-data"><span>04</span>数据与日志</a><a href="#settings-notify"><span>05</span>事件通知</a><a href="#settings-komari"><span>06</span>Komari 联动</a><a href="#settings-cnip"><span>07</span>CN IP 数据源</a><a href="#settings-deployment"><span>08</span>部署状态</a></nav>`;
   const agent = (state.data.agents || []).find(
     (item) => item.id === state.data.agentId,
   ) || (state.data.presetAgent?.id === state.data.agentId ? state.data.presetAgent : null);
@@ -876,6 +875,7 @@ async function renderOnce() {
     "settings-data": "settings",
     "settings-notify": "settings",
     "settings-komari": "settings",
+    "settings-cnip": "settings",
     "settings-deployment": "settings",
     "preset-node": "agents",
     "settings-node": "node-settings",

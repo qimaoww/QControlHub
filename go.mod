@@ -9,6 +9,7 @@ require (
 	github.com/cloudflare/circl v1.6.3
 	github.com/coder/websocket v1.8.15
 	github.com/jackc/pgx/v5 v5.9.2
+	github.com/oschwald/maxminddb-golang v1.13.1
 	github.com/ulikunitz/xz v0.5.15
 	golang.org/x/crypto v0.41.0
 	golang.org/x/net v0.42.0
