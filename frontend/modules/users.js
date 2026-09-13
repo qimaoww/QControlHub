@@ -295,7 +295,7 @@ export function installUsers(ctx) {
     if (mode !== "add" && !original) return;
     if (mode === "invite" && original.enabled && original.status !== "rejected") mode = "edit";
     const share = { enabled: true, ...original, ...value };
-    if (mode === "invite") { share.enabled = true; share.reinvite = true; }
+    if (mode === "invite") { share.enabled = true; share.reinvite = original.status === "rejected"; }
     const agent = agents.find(item => item.id === agentID);
     const dialog = document.querySelector("[data-allocation-dialog]");
     const title = mode === "add" ? "分配节点" : mode === "invite" ? "重新邀请" : "编辑分配";
@@ -309,7 +309,11 @@ export function installUsers(ctx) {
       </div><footer><button class="button" type="button" data-allocation-close>取消</button><button class="button primary" type="submit" ${agentID ? "" : "disabled"}>${mode === "edit" ? "保存修改" : "发送邀请"}</button></footer></form>`;
     const form = dialog.querySelector("form");
     const initial = formValues(form);
-    if (mode === "invite") initial.rows[0].reinvite = false;
+    if (mode === "invite") {
+      // Restoring a revoked share changes enabled even without a reinvite flag.
+      initial.rows[0].enabled = original.enabled;
+      initial.rows[0].reinvite = false;
+    }
     const baseline = draft?.baseline || JSON.stringify(initial);
     const capture = () => {
       if (!form.isConnected || data !== state.data) return;

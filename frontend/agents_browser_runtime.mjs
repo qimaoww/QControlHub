@@ -314,6 +314,11 @@ window.fetch = async (input, options = {}) => {
     if (method === "PUT") {
       const payload = JSON.parse(options.body);
       if (payload.revision !== access.revision) return json({ error: "stale allocation" }, 409);
+      for (const share of payload.shares) {
+        const previous = access.shares.find(item => item.agent_id === share.agent_id);
+        if (share.reinvite && (!share.enabled || previous?.status !== "rejected"))
+          return json({ error: "only a rejected share can be reinvited" }, 400);
+      }
       testAPI.allocationWrites.push({ user_id: id, ...payload });
       testAPI.userAccess[id] = {
         ...access, ...payload, revision: access.revision + 1,
@@ -1433,7 +1438,9 @@ async function testUsersLayoutRuntime() {
   assert.equal(testAPI.allocationWrites.length, beforeRevoke + 1, "打开重新邀请弹窗就发送了请求");
   await save();
   assert.equal(status("alpha"), "待接受", "恢复共享跳过用户同意");
-  assert.ok(testAPI.allocationWrites.at(-1).shares.find(share => share.agent_id === "alpha").reinvite);
+  const restored = testAPI.allocationWrites.at(-1).shares.find(share => share.agent_id === "alpha");
+  assert.equal(restored.enabled, true, "恢复共享没有重新启用");
+  assert.equal(restored.reinvite, false, "恢复撤销前待接受的共享误传了仅适用于已拒绝共享的标记");
   assert.equal(testAPI.calls.some(call => call.path === "/tasks" && call.method === "POST"), false, "分配页面不能自行执行远程任务");
 
   if (mode.endsWith("-mobile")) change(document.querySelector("[data-user-mobile-select]"), "new-user");

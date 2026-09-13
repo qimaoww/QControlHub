@@ -68,6 +68,11 @@ export async function testUsersRuntime(preview = false) {
         if (holdSave) await new Promise(resolve => { releaseSave = resolve; });
         if (conflict || body.revision !== access.get(userID).revision) throw new Error("分配已变更，请重新读取后保存。");
         const previous = access.get(userID);
+        for (const share of body.shares) {
+          const prior = previous.shares.find(item => item.agent_id === share.agent_id);
+          if (share.reinvite && (!share.enabled || prior?.status !== "rejected"))
+            throw new Error("only a rejected share can be reinvited");
+        }
         access.set(userID, { ...previous, ...body, revision: body.revision + 1, shares: body.shares.map(share => {
           const prior = previous.shares.find(item => item.agent_id === share.agent_id);
           const invite = share.enabled && (share.reinvite || !prior?.enabled || (prior.status === "accepted" && share.engines.some(engine => !prior.engines.includes(engine))));
@@ -224,6 +229,35 @@ export async function testUsersRuntime(preview = false) {
   form().requestSubmit();
   await waitFor(() => !form(), "revoked allocation could not release its ports");
   assert(!access.get("bob").shares[0].enabled && access.get("bob").shares[0].ports.length === 0, "editing revoked sharing implicitly restored it");
+  for (const [userID, previousStatus, otherUser] of [["bob", "pending", "alice"], ["alice", "accepted", "bob"]]) {
+    await select(userID);
+    const before = structuredClone(access.get(userID).shares[0]);
+    assert(before.status === previousStatus, `restore fixture is not ${previousStatus}`);
+    if (before.enabled) {
+      savedRow().querySelector("[data-allocation-revoke]").click();
+      await waitFor(() => savedRow().textContent.includes("已撤销"), `could not revoke ${previousStatus} sharing`);
+    }
+    const beforeRestore = writes.length, restoreRevision = access.get(userID).revision;
+    savedRow().querySelector("[data-allocation-invite]").click();
+    assert(pages.hasUnsavedChanges() && !access.get(userID).shares[0].enabled && writes.length === beforeRestore,
+      "opening restore lost its intent or changed the saved allocation");
+    await select(otherUser);
+    await select(userID);
+    assert(form() && row().dataset.reinvite === "false" && row().querySelector('[name="enabled"]').checked
+      && document.querySelector("#user-allocation-dialog-title").textContent === "重新邀请",
+      `switching users lost the revoked ${previousStatus} restoration or staged an invalid reinvite`);
+    form().requestSubmit();
+    await waitFor(() => !form() && savedRow().querySelector("[data-share-status]").textContent === "待接受",
+      `restoring revoked ${previousStatus} sharing did not stay pending`);
+    const write = writes.at(-1).body, restored = access.get(userID).shares[0];
+    assert(write.revision === restoreRevision && write.shares[0].enabled && write.shares[0].reinvite === false,
+      `restoring revoked ${previousStatus} sharing sent an invalid reinvite or revision`);
+    assert(restored.enabled && restored.status === "pending" && restored.limit_bytes === before.limit_bytes
+      && restored.used_bytes === before.used_bytes && restored.ports.join(",") === before.ports.join(",")
+      && restored.engines.join(",") === before.engines.join(","),
+      `restoring revoked ${previousStatus} sharing changed its terms or skipped consent`);
+    assert(!pages.hasUnsavedChanges(), "restoring sharing retained a stale draft");
+  }
   await select("admin");
   assert(!document.querySelector('[name="isolated"], [data-share-row]'), "administrator can accidentally be isolated");
   document.querySelector("[data-user-create]").click();
