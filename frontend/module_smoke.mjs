@@ -934,7 +934,9 @@ for (const install of [
     before(element) { this.accountingSummary = element; }
     constructor(elements = {}) {
       this.isConnected = true;
-      this.querySelector = () => null;
+      this.dataset = {};
+      this.footer = { prepend: element => { this.saveStatus = element; } };
+      this.querySelector = selector => selector === ".code-workspace>footer" ? this.footer : null;
       this.querySelectorAll = () => [];
       this._el = new Map(
         Object.entries(elements).map(([k, v]) => [
@@ -1057,11 +1059,17 @@ for (const install of [
       querySelector: (sel) => forms[sel] ?? null,
       querySelectorAll: selector => lists[selector] || [],
       getElementById: () => null,
-      createElement: () => ({
-        className: "", type: "", dataset: {}, textContent: "",
-        setAttribute() {}, removeAttribute() {}, append() {}, before() {}, addEventListener() {},
-        parentElement: { classList: { contains: () => false }, append() {} },
-      }),
+      createElement: () => {
+        const attributes = new Map();
+        return {
+          className: "", type: "", dataset: {}, textContent: "",
+          setAttribute: (name, value) => attributes.set(name, value),
+          getAttribute: name => attributes.get(name) ?? null,
+          removeAttribute: name => attributes.delete(name),
+          remove() {}, append() {}, before() {}, addEventListener() {},
+          parentElement: { classList: { contains: () => false }, append() {} },
+        };
+      },
     };
     return installConfigPages(ctx);
   };

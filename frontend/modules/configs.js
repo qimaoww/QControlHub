@@ -373,6 +373,7 @@ export async function submitLiveConfigChange({
   existingAvailable,
   savedConfig,
   onDeployTask,
+  onSavedConfig,
 }) {
   const editor = liveConfigEditorState({
     existingAvailable,
@@ -402,6 +403,7 @@ export async function submitLiveConfigChange({
         }),
       },
     );
+    onSavedConfig?.(saved);
   }
   if (intent === "save") return { saved, content: editor.content };
   if (intent === "deploy" || intent === "validate") {
@@ -469,7 +471,7 @@ function configHasUnsavedChanges() {
   const input = editor?.querySelector("[data-code-input]");
   const sourceDirty = editor?.configFileController ? editor.configFileController.dirty() :
     input && !input.readOnly && input.value !== input.defaultValue;
-  return presetHasUnsavedChanges() || Boolean(sourceDirty || document.querySelector('.config-inbound-dialog[data-saving="1"], .config-inbound-dialog[data-dirty="1"]'));
+  return presetHasUnsavedChanges() || Boolean(sourceDirty || document.querySelector('#live-config-form[data-saving="1"], .config-inbound-dialog[data-saving="1"], .config-inbound-dialog[data-dirty="1"]'));
 }
 let liveConfigRequest = 0;
 let liveReadRequest = 0;
@@ -550,7 +552,7 @@ function maybeRerenderLiveConfig(agentId, engine) {
   const input = editor?.querySelector("[data-code-input]");
   const sourceDirty = editor?.configFileController ? editor.configFileController.dirty() :
     input && !input.readOnly && input.value !== input.defaultValue;
-  if (presetHost || presetSavePending || sourceDirty ||
+  if (presetHost || presetSavePending || sourceDirty || document.querySelector('#live-config-form[data-saving="1"]') ||
       document.querySelector(".config-inbound-dialog[open], .config-access-dialog[open]")) return;
   if (
     state.route === "live-config" &&
@@ -1697,6 +1699,10 @@ async function liveConfig() {
   }
   state.data.liveEngines = installedEngines;
   const confirmSwitch = async (title) => {
+    if (document.querySelector('#live-config-form[data-saving="1"]')) {
+      notify("配置正在保存，请等待提交结果后再切换。", "error");
+      return false;
+    }
     const editor = document.querySelector("#live-config-form [data-code-editor]");
     const input = editor?.querySelector("[data-code-input]");
     const dirty = editor?.configFileController?.dirty() ?? (input && !input.readOnly && input.value !== current?.content);
@@ -1714,18 +1720,23 @@ async function liveConfig() {
       }),
   );
   let engineSwitch = 0;
+  const frozenForSwitch = new Map();
   document.querySelectorAll("[data-live-engine]").forEach(
     (link) =>
       (link.onclick = async (event) => {
         event.preventDefault();
         if (link.dataset.liveEngine === state.data.liveEngine) return;
         if (!(await confirmSwitch("切换内核"))) return;
-        if (accountData !== state.data || !workspaceElement.isConnected) return;
+        if (accountData !== state.data || !workspaceElement.isConnected || link.dataset.liveEngine === state.data.liveEngine) return;
         const switchRequest = ++engineSwitch;
         const previousSource = sourceMode;
         state.data.liveEngine = link.dataset.liveEngine;
         state.data.liveConfigSource = "";
         workspaceElement.setAttribute("aria-busy", "true");
+        workspaceElement.querySelectorAll(".live-config-editor, .config-workspace-tools, .config-empty-actions, .live-config-source-switch").forEach(element => {
+          if (!frozenForSwitch.has(element)) frozenForSwitch.set(element, element.inert);
+          element.inert = true;
+        });
         const tabs = [...workspaceElement.querySelectorAll("[data-live-engine]")];
         tabs.forEach(tab => {
           tab.classList.toggle("active", tab === link);
@@ -1752,6 +1763,8 @@ async function liveConfig() {
         } finally {
           if (workspaceElement.isConnected && engineSwitch === switchRequest) {
             workspaceElement.removeAttribute("aria-busy"); status.remove();
+            frozenForSwitch.forEach((inert, element) => { element.inert = inert; });
+            frozenForSwitch.clear();
             tabs.forEach(tab => { tab.disabled = false; });
           }
         }
@@ -1824,11 +1837,29 @@ async function liveConfig() {
     },
   });
   renderPresetStatus();
+  let liveSaving = false, liveSaveUncertain = false;
   bindEvent(document.querySelector("#live-config-form"), "submit", async (event) => {
       event.preventDefault();
-      if (accountData !== state.data) return;
-      const form = new FormData(event.currentTarget);
+      const formElement = event.currentTarget;
+      if (accountData !== state.data || liveSaving || liveSaveUncertain || !formElement.isConnected ||
+          state.data.liveAgent !== agent.id || state.data.liveEngine !== engine) return;
+      const form = new FormData(formElement);
       const intent = event.submitter?.dataset.liveIntent || (privateWorkspace ? "save" : "validate");
+      if (!["save", "import", "deploy", "validate"].includes(intent)) return;
+      const controls = [...(workspaceElement || formElement).querySelectorAll("button, input, select, textarea")]
+        .map(element => [element, element.disabled]);
+      const submitter = event.submitter, label = submitter?.textContent;
+      let submitted = false, persisted;
+      liveSaving = true;
+      formElement.dataset.saving = "1";
+      formElement.setAttribute("aria-busy", "true");
+      controls.forEach(([element]) => { element.disabled = true; });
+      formElement.querySelector("[data-live-save-status]")?.remove();
+      const status = document.createElement("span");
+      status.dataset.liveSaveStatus = "";
+      status.setAttribute("role", "status");
+      status.textContent = "正在检查配置…";
+      formElement.querySelector(".code-workspace>footer").prepend(status);
       try {
         if (configFiles) form.set("content", configFiles.content());
         if (
@@ -1847,6 +1878,10 @@ async function liveConfig() {
           ))
         )
           return;
+        if (accountData !== state.data || !formElement.isConnected) return;
+        submitted = true;
+        if (submitter) submitter.textContent = "正在提交…";
+        status.textContent = "正在保存配置并提交任务…";
         const result = await submitLiveConfigChange({
           api,
           submitTask,
@@ -1857,6 +1892,7 @@ async function liveConfig() {
           source,
           existingAvailable: importSource,
           savedConfig: saved,
+          onSavedConfig: value => { persisted = value; },
           onDeployTask: (taskId) => {
             recordPendingDeploy(taskId, agent.id, engine);
             monitorDeployTask(taskId, agent.id, engine);
@@ -1870,11 +1906,24 @@ async function liveConfig() {
         state.data.liveSources[sourceKey] = {
           ...source,
           content: result.content,
+          saved: !importSource,
         };
-        await liveConfig();
+        if (state.route === "live-config" && state.data.liveAgent === agent.id && state.data.liveEngine === engine && formElement.isConnected)
+          await liveConfig();
       } catch (error) {
-        notify(error.message, "error");
-        if (importSource) await liveConfig();
+        if (accountData !== state.data || !formElement.isConnected) return;
+        liveSaveUncertain = submitted && Boolean(persisted || !error.status || error.status === 409 || error.status >= 500);
+        const message = `${persisted ? `配置 v${persisted.version} 已保存，后续任务或页面刷新未完成：` : ""}${diagnosticError(error.message)}${liveSaveUncertain ? " 当前内容已保留，请重新读取并核对结果后再提交。" : ""}`;
+        status.textContent = message;
+        status.setAttribute("role", "alert");
+        notify(message, "error");
+      } finally {
+        liveSaving = false;
+        delete formElement.dataset.saving;
+        formElement.removeAttribute("aria-busy");
+        controls.forEach(([element, disabled]) => { element.disabled = disabled || liveSaveUncertain && element.matches("[data-live-intent]"); });
+        if (submitter) submitter.textContent = label;
+        if (status.getAttribute("role") !== "alert") status.remove();
       }
   });
   if (

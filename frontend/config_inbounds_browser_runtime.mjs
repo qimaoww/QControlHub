@@ -64,6 +64,17 @@ async function fixture(engine, options = {}) {
     test.calls.push({path, method:request.method || "GET"});
     const body = request.body && JSON.parse(request.body);
     if (path === "/agents") return [structuredClone(agent)];
+    if (path.startsWith("/client-access?")) {
+      if (test.peerGate) await test.peerGate;
+      const outgoing = engine === "xray" ? {tag:"peer", protocol:"vless", settings:{vnext:[{address:"203.0.113.10", port:2443,
+        users:[{id:"123e4567-e89b-42d3-a456-426614174000", encryption:"none"}]}]}, streamSettings:{network:"tcp", security:"tls", tlsSettings:{serverName:"peer.example"}}} :
+        {tag:"peer", type:"vless", server:"203.0.113.10", server_port:2443, uuid:"123e4567-e89b-42d3-a456-426614174000", tls:{enabled:true, server_name:"peer.example"}};
+      return test.peerEntries || [{agent_id:agent.id, agent_name:"当前节点", profiles:[{tag:"self", outbound:outgoing}]},
+        {agent_id:"peer-node", agent_name:"出口 · JP", agent_status:"online", engine:"xray",
+          profiles:[{tag:"remote-inbound", protocol:"VLESS", port:2443, address:"203.0.113.10", outbound:outgoing}]},
+        {agent_id:"incompatible", agent_name:"不兼容节点", engine:"mihomo",
+          profiles:[{tag:"snell", protocol:"Snell", port:2444, outbound_error:"当前内核不支持此 Snell 入站"}]}];
+    }
     if (path.endsWith("/workspace")) {
       if (test.workspaceGate) await test.workspaceGate;
       if (test.failSwitch && path.includes("/mihomo/")) throw new Error("fixture switch failed");
@@ -78,6 +89,8 @@ async function fixture(engine, options = {}) {
     if (path.includes("/revisions")) return [{...saved, updated_at:new Date().toISOString()}];
     if (path === "/deployments") return [{agent_id:agent.id, engine, config_id:"cfg", config_version:1}];
     if (request.method === "POST" && path.endsWith("/source")) {
+      if (test.gate) await test.gate;
+      if (test.sourceFailure) throw Object.assign(new Error("fixture source save failed"), test.sourceFailure);
       assert(body.version === saved.version, "outbound save lost version check");
       test.writes.push({path, ...body});
       saved = {...saved, content:body.content, version:saved.version+1};
@@ -123,7 +136,8 @@ async function fixture(engine, options = {}) {
   };
   const pages = installConfigPages({state, api, optionalAPI:api, engines:[engine], esc, engineName:value=>value,
     conciseVersion:(_engine, version)=>version, date:String, ago:()=> "刚刚", bytes:String,
-    can:permission=>!options.readonly && !(options.noFleet && permission === "agents.read") && !(options.noTasks && permission === "tasks.execute"),
+    can:permission=>!options.readonly && !(options.noFleet && permission === "agents.read") && !(options.noTasks && permission === "tasks.execute") &&
+      !(options.noPeerRead && permission === "client-access.read"),
     confirmAction:async(message, title)=>{test.confirmations.push({message, title}); return test.confirm;}, notify:message=>test.notices.push(message),
     renderConfigDiff:()=>'<pre class="config-diff">fixture diff</pre>', bindCodeEditors:()=>{},
     submitTask:async()=>{throw new Error("inbounds must use atomic mutation, not a second task request");},
@@ -159,8 +173,12 @@ async function fixture(engine, options = {}) {
 export async function testConfigInboundsRuntime(preview = false) {
   if (preview) {
     const params = new URLSearchParams(location.search);
-    window.inboundFixture = await fixture(params.get("engine") || "xray", {missing:params.has("missing")});
+    window.inboundFixture = await fixture(params.get("engine") || "xray", {missing:params.has("missing"), multi:params.has("multi")});
     if (params.has("common")) window.inboundFixture.common(params.get("common") || "modify");
+    else if (params.has("outbound")) {
+      window.inboundFixture.select("first");
+      document.querySelector(`[data-outbound-action="${params.get("outbound") || "add"}"]`).click();
+    }
     else if (params.has("modal")) window.inboundFixture.click("add");
     return;
   }
@@ -295,12 +313,14 @@ export async function testConfigInboundsRuntime(preview = false) {
   const missingTab = document.querySelector('[data-live-engine="mihomo"]');
   missingTab.click();
   await waitFor(()=>document.querySelector(".live-engine-loading"), "switch did not acknowledge input");
+  assert(document.querySelector("#live-config-form").inert, "old source remains editable while switching engines");
   missingTab.click();
   const switchReads = switcher.calls.filter(call=>call.path.includes("/mihomo/")).length;
   assert(switchReads === 1, "repeated click duplicated switch request");
   releaseSwitch();
   await waitFor(()=>switcher.notices.some(message=>message.includes("切换内核失败")), "failed switch lost feedback");
   assert(switcher.state.data.liveEngine === "xray" && !missingTab.disabled, "failed switch did not restore usable previous editor");
+  assert(!document.querySelector("#live-config-form").inert, "failed switch left the source inert");
   switcher.workspaceGate = new Promise(resolve=>{releaseSwitch=resolve;});
   missingTab.click();
   await waitFor(()=>document.querySelector(".live-engine-loading"), "second switch not started");
@@ -315,21 +335,7 @@ export async function testConfigInboundsRuntime(preview = false) {
   await waitFor(()=>document.querySelector("#server-plan-form"), "node snapshot drift blocked saved config editing");
   assert(drift.writes.length === 0, "opening drifted config unexpectedly saved or deployed");
   drift.dispose();
-  for (const engine of ["xray", "sing-box"]) {
-    const exits = await fixture(engine, {drift:true});
-    const menu = document.querySelector('[data-outbound-action="add"]').closest("details");
-    assert(menu.previousElementSibling.querySelector("[data-inbound-action]"), "outbound menu is not next to inbound operations");
-    document.querySelector('[data-outbound-action="add"]').click();
-    await waitFor(()=>document.querySelector('textarea[aria-label="出站配置 JSON"]'), "outbound editor missing");
-    const outboundInput = document.querySelector('textarea[aria-label="出站配置 JSON"]');
-    outboundInput.value = outboundInput.value.replace("new-outbound", "new-outbound-edited");
-    outboundInput.dispatchEvent(new Event("input"));
-    assert(exits.pages.configHasUnsavedChanges(), "outbound draft was not protected during navigation");
-    document.querySelector('dialog [data-intent="validate"]').click();
-    await waitFor(()=>exits.writes.length === 1 && !document.querySelector("dialog"), "outbound creation failed");
-    assert(exits.writes[0].path.endsWith("/source") && JSON.parse(exits.saved().content).outbounds.some(o=>o.tag === "new-outbound-edited"), "outbound source not saved atomically");
-    exits.dispose();
-  }
+  await testConfigOutboundsRuntime();
   const background = await fixture("xray");
   background.confirm = true;
   background.click("add");
@@ -395,6 +401,247 @@ export async function testConfigInboundsRuntime(preview = false) {
   assert(refreshFailure.writes.length === 1, "reload repeated the inbound mutation");
   refreshFailure.dispose();
   await testCommonConfigRuntime();
+}
+
+async function testConfigOutboundsRuntime() {
+  const action = kind => document.querySelector(`[data-outbound-action="${kind}"]`);
+  const input = () => document.querySelector('textarea[aria-label="出站配置 JSON"]');
+  const save = () => document.querySelector('dialog [data-intent="validate"]').click();
+  const open = async kind => {
+    action(kind).click();
+    await waitFor(input, `${kind} outbound editor missing`);
+  };
+  const changeInput = value => {
+    const mode = document.querySelector("[data-outbound-mode]");
+    if (mode && mode.value !== "json") { mode.value = "json"; mode.dispatchEvent(new Event("change")); }
+    input().value = value;
+    input().dispatchEvent(new Event("input"));
+  };
+  const close = async () => {
+    document.querySelector("[data-outbound-close]").click();
+    await pause();
+  };
+  for (const engine of ["xray", "sing-box"]) {
+    const test = await fixture(engine, {drift:true});
+    const menu = action("add").closest("details");
+    assert(menu.previousElementSibling.querySelector("[data-inbound-action]"), "outbound menu is not next to inbound operations");
+    assert(["add", "bind", "modify", "delete"].every(kind=>action(kind).disabled), "outbound operation has no inbound scope");
+    test.select("first");
+    assert(!action("add").disabled && !action("bind").disabled && action("modify").disabled && action("delete").disabled,
+      "unbound inbound must allow creation/binding, not editing another exit");
+    const inboundMenu = menu.previousElementSibling;
+    inboundMenu.querySelector("summary").click();
+    menu.querySelector("summary").click();
+    assert(!inboundMenu.open && menu.open && menu.querySelector("summary").getAttribute("aria-expanded") === "true",
+      "opening outbound menu did not close inbound menu");
+    const menuBounds = menu.querySelector('[role="menu"]').getBoundingClientRect();
+    assert(menuBounds.left >= 0 && menuBounds.right <= innerWidth, "outbound menu exceeds viewport");
+    menu.querySelector("summary").focus();
+    menu.dispatchEvent(new KeyboardEvent("keydown", {key:"ArrowDown", bubbles:true}));
+    assert(document.activeElement === action("add"), "outbound keyboard entry differs from inbound menu");
+    menu.dispatchEvent(new KeyboardEvent("keydown", {key:"End", bubbles:true}));
+    assert(document.activeElement === action("bind"), "keyboard focused disabled outbound action");
+    menu.dispatchEvent(new KeyboardEvent("keydown", {key:"Escape", bubbles:true}));
+    assert(!menu.open && document.activeElement === menu.querySelector("summary"), "Escape did not restore outbound menu focus");
+
+    let release;
+    test.workspaceGate = new Promise(resolve=>{release=resolve;});
+    action("add").click();
+    assert(document.querySelector('dialog[open] [role="status"]')?.textContent.includes("正在读取"), "outbound click gives no immediate loading feedback");
+    await close();
+    release(); test.workspaceGate = null; await pause();
+    assert(!document.querySelector("dialog"), "late read reopened a canceled outbound dialog");
+    await open("add");
+    assert(document.querySelector("[data-bound-inbound]").textContent.includes("first") &&
+      document.querySelector("[data-outbound-mark]").textContent.includes("0x51435209"), "binding identity or required mark missing");
+    if (innerWidth <= 600) {
+      const dialog = document.querySelector("dialog"), rect = dialog.getBoundingClientRect();
+      assert(dialog.scrollWidth <= dialog.clientWidth + 1 && rect.left >= 0 && rect.right <= innerWidth,
+        "mobile outbound dialog overflows");
+      assert(document.querySelector('[data-intent="deploy"]').getBoundingClientRect().height >= 40, "outbound touch actions too small");
+    }
+    changeInput(input().value.replace("exit-21001", "exit-a"));
+    assert(test.pages.configHasUnsavedChanges(), "outbound draft not protected during navigation");
+    await close();
+    assert(input()?.value.includes("exit-a"), "canceling close lost outbound draft");
+    test.gate = new Promise(resolve=>{release=resolve;});
+    save(); save(); await pause();
+    assert(document.querySelector("dialog form").getAttribute("aria-busy") === "true" &&
+      document.querySelector("[data-outbound-close]").disabled && input().disabled &&
+      document.querySelector("[data-outbound-status]").textContent.includes("正在保存"), "pending outbound save has no consistent lock/status");
+    document.querySelector("dialog").dispatchEvent(new Event("cancel", {cancelable:true}));
+    assert(document.querySelector("dialog[open]"), "Escape closed an uncertain outbound write");
+    release();
+    await waitFor(()=>test.writes.length === 1 && !document.querySelector("dialog"), "outbound creation failed");
+    test.gate = null;
+    const routeKey = engine === "xray" ? "routing" : "route", targetKey = engine === "xray" ? "outboundTag" : "outbound";
+    const binding = () => JSON.parse(test.saved().content)[routeKey].rules.find(rule=>rule[targetKey] === "exit-a");
+    assert(test.writes[0].path.endsWith("/source") && binding() && !action("modify").disabled,
+      "atomic outbound save lost binding or selected inbound");
+    await open("modify");
+    changeInput(input().value.replace("exit-a", "exit-b"));
+    save();
+    await waitFor(()=>test.writes.length === 2 && !document.querySelector("dialog"), "bound rename failed");
+    assert(!binding() && JSON.parse(test.saved().content)[routeKey].rules.some(rule=>rule[targetKey] === "exit-b"),
+      "renaming did not update inbound route");
+    await open("bind");
+    assert(input().readOnly, "binding an existing template must show a read-only preview");
+    const select = document.querySelector('dialog select');
+    select.value = "0"; select.dispatchEvent(new Event("change"));
+    assert(input().value.includes("direct") && test.pages.configHasUnsavedChanges(), "existing outbound selection did not update/protect its preview");
+    save(); await pause();
+    assert(test.writes.length === 2 && document.querySelector("dialog"), "canceled rebinding wrote data");
+    test.confirm = true;
+    save();
+    await waitFor(()=>test.writes.length === 3 && !document.querySelector("dialog"), "existing binding failed");
+    await open("modify");
+    save();
+    await waitFor(()=>document.querySelector("[data-outbound-error]")?.textContent.includes("共享出口"), "default/shared exit was not protected");
+    assert(test.writes.length === 3, "inbound edit altered global default");
+    await close();
+    await open("bind");
+    const rebound = document.querySelector('dialog select');
+    rebound.value = [...rebound.options].find(option=>option.textContent === "exit-b").value;
+    rebound.dispatchEvent(new Event("change"));
+    save();
+    await waitFor(()=>test.writes.length === 4 && !document.querySelector("dialog"), "rebinding previous template failed");
+    await open("delete");
+    assert(input().readOnly && input().value.includes("exit-b") &&
+      document.querySelector('[data-intent="deploy"]').classList.contains("danger"), "deletion lost readonly preview or danger style");
+    test.confirm = false;
+    save(); await pause();
+    assert(test.writes.length === 4 && document.querySelector("dialog"), "canceled deletion wrote data");
+    test.confirm = true;
+    save();
+    await waitFor(()=>test.writes.length === 5 && !document.querySelector("dialog"), "bound deletion failed");
+    const final = JSON.parse(test.saved().content);
+    assert(!final.outbounds.some(entry=>entry.tag === "exit-b") && !final[routeKey].rules.length &&
+      final.inbounds.length === 2 && action("modify").disabled, "deletion left a binding or changed another inbound");
+    test.dispose();
+  }
+  for (const status of [400, 409, 503, undefined]) {
+    const test = await fixture("xray");
+    test.select("first");
+    await open("add");
+    changeInput(input().value.replace("exit-21001", "retained-draft"));
+    test.sourceFailure = {status};
+    save();
+    await waitFor(()=>!document.querySelector("[data-outbound-error]").hidden, "save error not visible");
+    assert(input().value.includes("retained-draft") && !input().disabled && !test.writes.length, "save failure lost draft or left inputs locked");
+    assert(document.querySelector('[data-intent="validate"]').disabled === (status !== 400), "uncertain/conflicting writes allow duplicate submission");
+    test.confirm = true;
+    await close();
+    test.dispose();
+  }
+  const late = await fixture("xray");
+  late.select("first");
+  let release;
+  late.workspaceGate = new Promise(resolve=>{release=resolve;});
+  action("add").click();
+  late.dispose();
+  release(); await pause();
+  assert(!document.querySelector("dialog") && !late.writes.length, "outbound read escaped its route");
+  for (const options of [{readonly:true}, {noTasks:true}, {import:true}]) {
+    const test = await fixture("xray", options);
+    test.select("first");
+    assert(["add", "bind", "modify", "delete"].every(kind=>action(kind).disabled), "outbound actions bypass permission/source gates");
+    test.dispose();
+  }
+  await testOutboundPresetsRuntime();
+}
+
+async function testOutboundPresetsRuntime() {
+  const change = (element, value) => {
+    element.value = value;
+    element.dispatchEvent(new Event(element.tagName === "SELECT" ? "change" : "input", {bubbles:true}));
+  };
+  const open = async () => {
+    document.querySelector('[data-outbound-action="add"]').click();
+    await waitFor(()=>document.querySelector("[data-outbound-mode]"), "outbound preset selector missing");
+  };
+  for (const engine of ["xray", "sing-box"]) {
+    const test = await fixture(engine);
+    test.select("first");
+    await open();
+    const field = key => document.querySelector(`[data-outbound-value="${key}"]`);
+    const input = document.querySelector('textarea[aria-label="出站配置 JSON"]');
+    const mode = document.querySelector("[data-outbound-mode]");
+    assert(mode.value === "preset" && input.readOnly, "new outbound should start with a preset, not raw JSON");
+    change(document.querySelector("[data-outbound-protocol]"), "vless");
+    assert(document.querySelector("[data-outbound-credential-label]").textContent.includes("UUID"), "VLESS preset mislabels its credential as a password");
+    document.querySelector('[data-intent="validate"]').click();
+    await waitFor(()=>document.querySelector("[data-outbound-error]").textContent.includes("服务器地址"), "incomplete preset submitted");
+    assert(!test.writes.length, "incomplete preset wrote source");
+    change(field("server"), "edge.example");
+    change(field("credential"), "123e4567-e89b-42d3-a456-426614174000");
+    change(field("security"), "reality");
+    assert(field("serverName").placeholder.includes("必填"), "Reality placeholder conflicts with required ServerName validation");
+    change(field("serverName"), "tls.example");
+    change(field("publicKey"), "public-only");
+    change(field("shortId"), "aabb");
+    assert(input.value.includes("public-only") && input.value.includes("tls.example"), "preset did not produce Reality parameters");
+    change(mode, "json");
+    assert(!input.readOnly && input.value.includes("public-only"), "switching to JSON lost preset output");
+    input.value = input.value.replace('"tag":', '"large":9007199254740993,"tag":');
+    input.dispatchEvent(new Event("input"));
+    change(mode, "preset");
+    change(mode, "json");
+    assert(input.value.includes("9007199254740993"), "mode switch lost advanced JSON draft");
+    test.confirm = true;
+    document.querySelector('[data-outbound-close]').click();
+    await waitFor(()=>!document.querySelector("dialog"), "preset draft did not close");
+    await open();
+    let release;
+    test.peerGate = new Promise(resolve=>{release=resolve;});
+    change(document.querySelector("[data-outbound-mode]"), "node");
+    assert(document.querySelector("[data-outbound-peer-status]").textContent.includes("正在读取"), "peer picker gave no loading feedback");
+    release();
+    await waitFor(()=>document.querySelector('[data-outbound-node-select] option[value="peer-node"]'), "deployed peer listing missing");
+    const node = document.querySelector("[data-outbound-node-select]");
+    assert(![...node.options].some(option=>option.value === test.agent.id), "peer picker permits selecting this same node");
+    change(node, "incompatible");
+    assert(document.querySelector("[data-outbound-peer-status]").textContent.includes("Snell"), "unsupported peer has no explanation");
+    document.querySelector('[data-intent="validate"]').click(); await pause();
+    assert(!test.writes.length, "incompatible node silently reused another node's outbound");
+    change(node, "peer-node");
+    change(field("tag"), "node-exit");
+    const preview = document.querySelector('textarea[aria-label="出站配置 JSON"]');
+    assert(preview.readOnly && preview.value.includes("203.0.113.10") && preview.value.includes("peer.example"), "peer address or TLS not filled");
+    const originalPeer = JSON.parse(preview.value);
+    const peerSelect = document.querySelector("[data-outbound-peer-select]");
+    test.peerEntries = [{agent_id:"peer-node", agent_name:"出口 · JP", engine:"xray", profiles:[
+      {tag:"new-first", protocol:"VLESS", port:3443, outbound:{...originalPeer, tag:"new-first"}},
+      {tag:"remote-inbound", protocol:"VLESS", port:2443, address:"203.0.113.10", outbound:originalPeer},
+    ]}];
+    document.querySelector("[data-outbound-peer-reload]").click();
+    await waitFor(()=>!document.querySelector("[data-outbound-peer-reload]").disabled, "peer refresh did not finish");
+    assert(peerSelect.selectedOptions[0].textContent.includes("remote-inbound"), "refresh silently switched to a different target inbound");
+    test.peerEntries[0].profiles.pop();
+    document.querySelector("[data-outbound-peer-reload]").click();
+    await waitFor(()=>!document.querySelector("[data-outbound-peer-reload]").disabled, "peer removal refresh did not finish");
+    assert(peerSelect.value === "" && preview.value === "" &&
+      document.querySelector("[data-outbound-peer-status]").textContent.includes("不会自动"), "removed peer silently fell back to another target");
+    document.querySelector('[data-intent="validate"]').click(); await pause();
+    assert(!test.writes.length, "removed peer could still submit its stale credentials");
+    test.peerEntries = undefined;
+    document.querySelector("[data-outbound-peer-reload]").click();
+    await waitFor(()=>!document.querySelector("[data-outbound-peer-reload]").disabled, "restored peer refresh did not finish");
+    assert(peerSelect.value === "", "refresh selected an inbound without the user's choice");
+    change(peerSelect, "0");
+    document.querySelector('[data-intent="validate"]').click();
+    await waitFor(()=>test.writes.length === 1 && !document.querySelector("dialog"), "peer outbound did not save");
+    const saved = JSON.parse(test.saved().content), route = engine === "xray" ? saved.routing : saved.route;
+    assert(saved.outbounds.some(entry=>entry.tag === "node-exit") &&
+      route.rules.some(rule=>(rule.outboundTag || rule.outbound) === "node-exit"), "peer outbound lost local inbound binding");
+    assert(test.calls.filter(call=>call.method !== "GET").every(call=>!call.path.includes("peer-node")), "peer selection modified target node");
+    test.dispose();
+  }
+  const restricted = await fixture("xray", {noPeerRead:true});
+  restricted.select("first");
+  await open();
+  assert(document.querySelector('[data-outbound-mode] option[value="node"]').disabled &&
+    !restricted.calls.some(call=>call.path.startsWith("/client-access")), "peer selector bypassed client-access permission");
+  restricted.dispose();
 }
 
 async function testCommonConfigRuntime() {

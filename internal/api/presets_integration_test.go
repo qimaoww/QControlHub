@@ -213,6 +213,28 @@ func TestPresetSaveKeepsConnectionAndIndependentExitsWithPostgreSQL(t *testing.T
 			if err != nil || compiled.Content != updated.Config.Content {
 				t.Fatalf("field edit lost independent exits: %v", err)
 			}
+			if engine == core.EngineXray || engine == core.EngineSingBox {
+				var root map[string]any
+				if err := json.Unmarshal([]byte(updated.Config.Content), &root); err != nil {
+					t.Fatal(err)
+				}
+				routeKey, targetKey, inboundKey := "route", "outbound", "inbound"
+				binding := map[string]any{}
+				if engine == core.EngineXray {
+					routeKey, targetKey, inboundKey = "routing", "outboundTag", "inboundTag"
+					binding["type"] = "field"
+				}
+				route := root[routeKey].(map[string]any)
+				binding[inboundKey] = []string{"first"}
+				binding[targetKey] = root["outbounds"].([]any)[0].(map[string]any)["tag"]
+				route["rules"] = append(route["rules"].([]any), binding)
+				data, _ := json.Marshal(root)
+				updated = call("/source", map[string]any{"name": current.Name, "content": string(data), "version": version, "intent": "validate"}, http.StatusOK)
+				compiled, err = serverconfig.PrepareAccounting(engine, updated.Config.Content)
+				if err != nil || compiled.Source != "nft-dual" || compiled.Ports[0].Mark != uint32(0x51430000|22001) || compiled.Content != updated.Config.Content {
+					t.Fatalf("atomic outbound source save omitted required mark: %v", err)
+				}
+			}
 			// The runtime gate rejects task creation after the store has saved
 			// the candidate inside its transaction. No revision may leak out.
 			if err := db.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{Features: []string{core.AgentFeatureIndependentEgress}, Runtime: map[core.Engine]core.RuntimeState{engine: {Installed: true, ExistingConfigUnsupportedReason: "test unsafe service"}}}); err != nil {

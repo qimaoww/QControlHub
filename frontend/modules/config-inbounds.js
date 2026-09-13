@@ -1,5 +1,6 @@
 import { bindEvent, reconcileView } from "./refresh.js";
 import { bindConfigOutbounds } from "./config-outbounds.js";
+import { bindConfigMenu } from "./config-menu.js";
 // Reuse the actual preset form and field editors, not a second implementation
 // of protocol options. Only the requested editor is mounted: no second source
 // editor, inbound sidebar, engine selector or top-level page tabs.
@@ -94,7 +95,8 @@ export function bindConfigInbounds(ctx) {
       <button type="button" role="menuitem" class="danger-text" data-inbound-action="delete">删除入站</button>
     </div>`;
   navigation.append(menu);
-  bindConfigOutbounds({ navigation, api, agent, engine, saved, current, dirty, writable, notify, confirmAction, onSaved, state });
+  bindConfigMenu(menu);
+  bindConfigOutbounds({ navigation, api, agent, engine, saved, current, dirty, writable, notify, confirmAction, onSaved, state, selectedInbound:target, input, canReadPeers:can("client-access.read") });
   // Adding an inbound is independent of the selected file. Keep one persistent
   // button directly before merged preview, never inside the common-field menu.
   let sourceActions = form?.querySelector(".config-file-actions");
@@ -148,20 +150,6 @@ export function bindConfigInbounds(ctx) {
   input?.addEventListener("input", update);
   input?.addEventListener("config-selection", update);
   update();
-  bindEvent(menu, "keydown", event => {
-    if (event.key === "Escape") { menu.open = false; menu.querySelector("summary").focus(); }
-    if (!["ArrowDown", "ArrowUp"].includes(event.key)) return;
-    event.preventDefault();
-    menu.open = true;
-    const items = [...menu.querySelectorAll("button:not(:disabled)")].filter(button => !button.closest("[hidden]"));
-    if (items.length) {
-      const index = items.indexOf(document.activeElement);
-      const next = index < 0 ? event.key === "ArrowDown" ? 0 : items.length - 1 :
-        (index + (event.key === "ArrowDown" ? 1 : items.length - 1)) % items.length;
-      items[next].focus();
-    }
-  });
-  bindEvent(menu, "focusout", event => { if (!menu.contains(event.relatedTarget)) menu.open = false; });
   bindEvent(tools.querySelector("[data-config-client]"), "click", () => {
     state.data.accessAgent = agent.id;
     state.data.accessEngine = engine;

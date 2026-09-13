@@ -6,8 +6,8 @@
 
 双链路统计按代理入口归属四个方向：客户端→代理、代理→客户端、目标→代理、代理→目标。接收为前者与目标回包之和，发送为客户端回包与出口请求之和。因此常规转发的接收/发送累计通常接近，但协议握手、加密封装、重传、拦截和缓冲会产生真实差额，绝不强行配平或乘二。
 
-- Xray：独立出站 tag；仅直接出口时使用只读 Stats API，入站可能包含代理协议握手开销。包含已支持的代理协议出口时改用独立 socket mark 与 nftables/conntrack，避免协议写入路径绕过 API 计数。
-- sing-box：具有 `with_v2ray_api` 的构建使用原生 API；没有该功能的官方构建自动使用独立出站 `routing_mark` 与 nftables/conntrack。标记前 Agent 用 `ip rule show` 确认本机没有会劫持该标记的 fwmark 策略路由，因此 Agent 主机必须安装 `iproute2`；缺失时校验和部署按失败关闭处理并给出原因，不会退回无法归属出口的统计口径。
+- Xray：独立出站 tag；仅直接出口且没有显式入站绑定时使用只读 Stats API，入站可能包含代理协议握手开销。包含已支持的代理协议出口，或显式绑定入站出口（包括直连）时，整份配置改用逐端口 socket mark 与 nftables/conntrack，避免协议写入路径绕过 API 计数。
+- sing-box：没有显式入站绑定且具有 `with_v2ray_api` 的构建使用原生 API；显式绑定出口或没有该功能的官方构建使用独立出站 `routing_mark` 与 nftables/conntrack。标记前 Agent 用 `ip rule show` 确认本机没有会劫持该标记的 fwmark 策略路由，因此 Agent 主机必须安装 `iproute2`；缺失时校验和部署按失败关闭处理并给出原因，不会退回无法归属出口的统计口径。
 - Mihomo、SS Rust：独立出口标记与 nftables/conntrack，不通过轮询活跃连接列表推算已结束连接。统计包含网络层包头、加密开销和重传。Mihomo 不标记回环等非全局单播目标，这类目标的出口链路不在完整归属范围内。
 - 未迁移或复杂配置无法安全建立独立出口时，保留原监听端口统计并显示原因，不宣称双链路可用。已启用双链路后遇到采集错误时保留旧基线，不替换成另一种口径的字节数。
 - 仅 TCP / 仅 UDP 策略在托管配置可验证该端口独占相同入口协议时使用双链路统计，包括纯 UDP 入站。混合协议、未知传输或重复端口仍退回 `listener-only`，不将共享统计混入单协议配额。出口可使用不同于入口的协议，标记出口始终累计 TCP 和 UDP。来源故障保留已有原生基线，恢复后不重复计费；口径变更保留已用配额，不重算历史。
@@ -78,7 +78,9 @@ go test ./internal/agent -run '^$' -bench 'BenchmarkAccountingConfiguration|Benc
 
 配置页通过“增加入站”或“修改入站”保存预设前检查整份配置的独立出口规划，编译后的专属出站、入站路由和出口标记随配置版本一起加密存入 PostgreSQL，而不只留在 Agent 磁盘。无法建立安全归属时拒绝保存，不提交部署任务；可在同页源码区处理复杂自定义配置。修改已编译预设时先验证并移除旧自动副本，再按新增、修改或删除后的端口重新生成；SS Rust 单端口根级标记也会在扩展为多端口前清理并重建。内部统计 API 入站不参与端口自动发现和计费。
 
-已保存版本的独立出口规划不代表节点部署或采样已成功。Agent 仍根据 sing-box 构建能力选择 API 或标记路径；标记配置无法安全应用时部署失败，不以旧监听口径宣称成功。上线前应升级 Agent，并在部署成功后检查流量页实际统计来源。公网出口 IP 不因独立 tag 或标记而改变。
+已保存版本的独立出口规划不代表节点部署或采样已成功。没有显式绑定时，Agent 仍根据 sing-box 构建能力选择 API 或标记路径；显式绑定时强制标记路径。标记配置无法安全应用时部署失败，不以旧监听口径宣称成功。上线前应升级 Agent，并在部署成功后检查流量页实际统计来源。公网出口 IP 不因独立 tag 或标记而改变。
+
+配置页的出站预设和其他节点入站选择都建立明确的单入站兜底绑定。每个入站的所有独立流量出口使用 `0x51430000 | port`，同端口的条件分流与兜底共享该端口标记，不同端口不混用。原始出站模板保持未标记，实际转发使用后端生成的带标记副本；修改端口、改绑或删除后重新规划，不能手工修改 `qch-trf-` 副本。普通条件路由和生成的兜底副本不会被误判为新绑定。控制面和 Agent 都需升级到支持绑定标记的版本；旧 Agent 不能保证接受新生成的直连标记配置。无需新增数据库 schema，不重算历史用量。
 
 高级字段修改也会重建托管出口映射，无法保持安全归属时不保存。配置页的入站与字段弹窗保存和任务创建使用同一事务，携带期望版本并在数据库锁定配置后核对；任务创建失败会回滚本次配置、修订及关联元数据，不留下半次保存。新增时缺少内核的稳定版安装也由这个固定版本的任务完成，不改变共享节点权限和独立出口检查。源码及档案编辑仍分别保存和提交任务，提交时同样核对期望版本；任务提交失败不撤销这些入口已保存的版本。
 
@@ -94,10 +96,10 @@ Xray / sing-box 手动配置页支持成套入站与独立出口文件切换及�
 
 Xray / sing-box 的无 tag 默认出站由统计编译器补齐稳定的 `qch-outbound-N` 标签，避开已有标签、API 标签和路由引用，保留原有默认出口顺序与显式路由。sing-box 的内核 API 与网络层标记模式使用相同规则。已存在的重复 tag 不会被自动合并或随意改名：此时无法无歧义地判断路由归属，诊断会定位到重复项的 `outbounds[index].tag`。升级 Agent 后，已验证的托管服务使用现有迁移流程校验、备份并启用独立出口配置，失败保留原配置与累计基线。
 
-带协议的出站（VLESS、VMess、Trojan、Shadowsocks、SOCKS、HTTP）同样按入站生成独立 tag；显式关闭的 `mux` / `multiplex` 不会被误判为已开启复用。真实 Xray VLESS 出口测试复现了 API 出站上传返回 0 的情况，因此 Xray 配置含这些代理出口时，整组计量切换为独立 socket mark 的网络层双链路统计，包含协议封装、包头和重传；不拿入口数值补齐 API 的缺失值。direct-only Xray 继续使用内核 API。sing-box 支持内核 API 或逐入站 `routing_mark`，两个模式均实测 VLESS TCP/UDP 端口隔离。标记模式需要托管服务具备 `CAP_NET_ADMIN`（systemd drop-in / OpenRC 脚本由 Agent 受保护流程维护），发现已有自定义 mark 或 fwmark 路由规则时拒绝自动覆盖。自定义路由链、启用复用和未知出站仍需明确归属后才能启用。
+带协议的出站（VLESS、VMess、Trojan、Shadowsocks、SOCKS、HTTP）同样按入站生成独立 tag；显式关闭的 `mux` / `multiplex` 不会被误判为已开启复用。真实 Xray VLESS 出口测试复现了 API 出站上传返回 0 的情况，因此 Xray 配置含这些代理出口时，整组计量切换为独立 socket mark 的网络层双链路统计，包含协议封装、包头和重传；不拿入口数值补齐 API 的缺失值。没有显式入站绑定的 direct-only Xray 继续使用内核 API。sing-box 支持内核 API 或逐入站 `routing_mark`，两个模式均实测 VLESS TCP/UDP 端口隔离。标记模式需要托管服务具备 `CAP_NET_ADMIN`（systemd drop-in / OpenRC 脚本由 Agent 受保护流程维护），发现已有自定义 mark 或 fwmark 路由规则时拒绝自动覆盖。自定义路由链、启用复用和未知出站仍需明确归属后才能启用。
 
 ```sh
-QCH_TEST_DATABASE_URL='postgres://postgres:password@127.0.0.1:5432/postgres?sslmode=disable' go test ./internal/store ./internal/api
+QCH_TEST_DATABASE_URL='postgres://postgres:password@127.0.0.1:5432/postgres?sslmode=disable' go test -p 1 ./internal/store ./internal/api
 go test -race ./internal/agent ./internal/store -run 'Traffic|NFT'
 QCH_TEST_NFTABLES=1 go test ./internal/agent -run '^TestTrafficNFTablesNetworkNamespace$' -v
 QCH_TEST_NFTABLES=1 go test ./internal/agent -run '^TestMarkedTrafficNetworkNamespace$' -v

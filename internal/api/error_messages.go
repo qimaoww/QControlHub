@@ -73,6 +73,7 @@ var errorMessages = map[string]string{
 	"reserved accounting tags conflict with custom Mihomo routing":                                            "统计专用标签与自定义 Mihomo 路由冲突，请核对配置后再迁移。",
 	"name is required and must not exceed 100 characters":                                                     "名称不能为空且不能超过 100 个字符。",
 	"engine must be mihomo, xray, sing-box, or ss-rust":                                                       "内核必须选择 Mihomo、Xray、sing-box 或 Shadowsocks Rust。",
+	"outbound_engine must be xray or sing-box":                                                                "出站目标内核必须选择 Xray 或 sing-box。",
 	"port must be between 1 and 65535":                                                                        "端口必须在 1 到 65535 之间。",
 	"protocol must be tcp, udp, or both":                                                                      "协议必须选择 TCP、UDP 或 TCP + UDP。",
 	"cycle must be monthly or yearly":                                                                         "流量周期必须选择按月或按年。",

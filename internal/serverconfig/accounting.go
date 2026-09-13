@@ -36,6 +36,10 @@ func accountingTag(port int, original string) string {
 // inbound-constrained routes to independent outbound instances. Unknown
 // routing shapes fail closed, rather than silently bypassing a custom route.
 func PrepareAccounting(engine core.Engine, content string) (AccountingPlan, error) {
+	return prepareAccounting(engine, content, false)
+}
+
+func prepareAccounting(engine core.Engine, content string, forceMarks bool) (AccountingPlan, error) {
 	root, err := decodeAccountingRoot(engine, content)
 	if err != nil {
 		return AccountingPlan{}, err
@@ -82,7 +86,7 @@ func PrepareAccounting(engine core.Engine, content string) (AccountingPlan, erro
 	} else if engine == core.EngineMihomo {
 		return prepareMihomoAccounting(root)
 	} else if engine == core.EngineXray || engine == core.EngineSingBox {
-		if err := prepareTaggedAccounting(engine, root, &plan); err != nil {
+		if err := prepareTaggedAccounting(engine, root, &plan, forceMarks); err != nil {
 			return plan, err
 		}
 	} else {
@@ -96,7 +100,7 @@ func PrepareAccounting(engine core.Engine, content string) (AccountingPlan, erro
 	return plan, err
 }
 
-func prepareTaggedAccounting(engine core.Engine, root map[string]any, plan *AccountingPlan) error {
+func prepareTaggedAccounting(engine core.Engine, root map[string]any, plan *AccountingPlan, forceMarks bool) error {
 	inbounds, _ := root["inbounds"].([]any)
 	outbounds, _ := root["outbounds"].([]any)
 	if len(outbounds) == 0 {
@@ -232,26 +236,53 @@ func prepareTaggedAccounting(engine core.Engine, root map[string]any, plan *Acco
 	// native VLESS regression reproduces an uplink of zero). Use socket marks
 	// for the whole configuration when protocol exits are present, never mix
 	// listener bytes with an incomplete API counter or estimate missing bytes.
-	xrayMarked := false
+	// An explicit inbound-to-outbound binding always uses per-port marks,
+	// including direct exits and sing-box builds with a native statistics API.
+	// Generated fallback rules are not user bindings and must not change the
+	// accounting source merely because an existing plan is compiled again.
+	marked := forceMarks
+	for _, raw := range routeRules {
+		rule := mapValue(raw)
+		target := byTag[stringValue(rule[targetKey])]
+		if target == nil || target[kindKey] == "block" || target[kindKey] == "blackhole" || target[kindKey] == "dns" {
+			continue
+		}
+		if tag := accountingBoundInbound(rule, xray); tag != "" {
+			for _, rawIn := range inbounds {
+				in := mapValue(rawIn)
+				if in["tag"] == tag && trafficPortNumber(in[portKey]) != 0 && !(xray && xrayInternalAPIInbound(root, in)) {
+					marked = true
+				}
+			}
+		}
+	}
 	if xray {
 		for _, raw := range originals {
 			switch stringValue(mapValue(raw)[kindKey]) {
 			case "freedom", "blackhole", "dns":
 			case "vless", "vmess", "trojan", "shadowsocks", "socks", "http":
-				xrayMarked = true
+				marked = true
 			default:
 				return fmt.Errorf("outbound protocol requires explicit accounting mapping")
 			}
 		}
-		if xrayMarked {
+		if marked {
 			for _, raw := range originals {
 				mark := mapValue(mapValue(mapValue(raw)["streamSettings"])["sockopt"])["mark"]
 				if mark != nil && mark != json.Number("0") {
 					return fmt.Errorf("custom outbound socket mark requires manual review")
 				}
 			}
-			plan.Source = "nft-dual"
 		}
+	} else if marked {
+		for _, raw := range originals {
+			if mapValue(raw)["routing_mark"] != nil {
+				return fmt.Errorf("custom routing_mark requires manual review")
+			}
+		}
+	}
+	if marked {
+		plan.Source = "nft-dual"
 	}
 	var originalRules []any
 	var priorRules []any
@@ -309,7 +340,7 @@ func prepareTaggedAccounting(engine core.Engine, root map[string]any, plan *Acco
 		}
 		seenPorts[port], seenTags[tag] = true, true
 		entry := AccountingPort{Port: port, Inbound: tag}
-		if xrayMarked {
+		if marked {
 			entry.Mark = uint32(0x51430000) | uint32(port)
 		}
 		for _, rawOut := range originals {
@@ -320,8 +351,10 @@ func prepareTaggedAccounting(engine core.Engine, root map[string]any, plan *Acco
 			}
 			clone := cloneAccountingObject(out)
 			clone["tag"] = accountingTag(port, original)
-			if xrayMarked {
+			if marked {
 				legacyClones = append(legacyClones, cloneAccountingObject(clone))
+			}
+			if marked && xray {
 				stream := mapValue(clone["streamSettings"])
 				if stream == nil {
 					stream = map[string]any{}
@@ -332,6 +365,8 @@ func prepareTaggedAccounting(engine core.Engine, root map[string]any, plan *Acco
 				}
 				sockopt["mark"] = entry.Mark
 				stream["sockopt"], clone["streamSettings"] = sockopt, stream
+			} else if marked {
+				clone["routing_mark"] = entry.Mark
 			}
 			clones = append(clones, clone)
 			entry.Outbounds = append(entry.Outbounds, stringValue(clone["tag"]))
@@ -449,6 +484,13 @@ func prepareTaggedAccounting(engine core.Engine, root map[string]any, plan *Acco
 		}
 		experimental["v2ray_api"] = map[string]any{"listen": plan.API, "stats": map[string]any{"enabled": true, "inbounds": ins, "outbounds": outs}}
 		root["experimental"] = experimental
+		if marked {
+			delete(experimental, "v2ray_api")
+			if len(experimental) == 0 {
+				delete(root, "experimental")
+			}
+			plan.API = ""
+		}
 	}
 	for _, entry := range plan.Ports {
 		if entry.Port == 10085 || entry.Port == 10086 {
@@ -456,6 +498,32 @@ func prepareTaggedAccounting(engine core.Engine, root map[string]any, plan *Acco
 		}
 	}
 	return nil
+}
+
+// Only a plain, single-inbound fallback is an editable outbound binding.
+// Conditional policy routes and internal/generated exits keep their meaning.
+func accountingBoundInbound(rule map[string]any, xray bool) string {
+	inKey, targetKey, actionKey := "inbound", "outbound", "action"
+	if xray {
+		inKey, targetKey, actionKey = "inboundTag", "outboundTag", "type"
+		if rule[actionKey] != "field" {
+			return ""
+		}
+	} else if action := stringValue(rule[actionKey]); action != "" && action != "route" {
+		return ""
+	}
+	for key := range rule {
+		if key != inKey && key != targetKey && key != actionKey {
+			return ""
+		}
+	}
+	if tag, ok := rule[inKey].(string); ok && !xray {
+		return tag
+	}
+	if tags, ok := rule[inKey].([]any); ok && len(tags) == 1 {
+		return stringValue(tags[0])
+	}
+	return ""
 }
 
 func accountingMultiplexDisabled(value any) bool {
