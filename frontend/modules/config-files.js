@@ -204,8 +204,11 @@ export function bindConfigFiles(form, engine, notify) {
   const navigation = document.createElement("div"); navigation.className = "config-file-navigation";
   const summary = document.createElement("span"); summary.textContent = `${files.length} 个源码文件 · 切换文件保留当前草稿`;
   const previewButton = document.createElement("button"); previewButton.type = "button"; previewButton.className = "button"; previewButton.textContent = "合并预览";
+  previewButton.dataset.configPreview = "";
   previewButton.setAttribute("aria-pressed", "false");
-  navigation.append(summary, previewButton);
+  const actions = document.createElement("div"); actions.className = "config-file-actions";
+  actions.append(previewButton);
+  navigation.append(summary, actions);
   editor.querySelector(".code-editor-toolbar").after(navigation);
   let lastFile = 0;
   previewButton.addEventListener("click", () => {
@@ -224,6 +227,7 @@ export function bindConfigFiles(form, engine, notify) {
     } catch { /* A syntax error must not discard a draft or block switching. */ }
   };
   const controller = {
+    selectedCommon() { return selected === 0; },
     selectedInbound() {
       if (selected === "preview" || selected === 0) return null;
       try {

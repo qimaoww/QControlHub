@@ -14,7 +14,7 @@ export function sameConfigContent(left, right) {
 // Reuse the actual preset form and field editors, not a second implementation
 // of protocol options. Only the requested editor is mounted: no second source
 // editor, inbound sidebar, engine selector or top-level page tabs.
-export function renderEmbeddedPreset(host, markup, { viewKey }) {
+export function renderEmbeddedPreset(host, markup, { viewKey, commonFields = [], selectedField }) {
   const template = document.createElement("template");
   template.innerHTML = markup;
   const source = template.content;
@@ -34,6 +34,17 @@ export function renderEmbeddedPreset(host, markup, { viewKey }) {
     });
     label.append(select);
     toolbar.append(label);
+  } else if (host.kind.startsWith("common-") && commonFields.length) {
+    const label = document.createElement("label");
+    label.append("通用配置项");
+    const select = document.createElement("select");
+    select.dataset.commonField = "";
+    commonFields.forEach(field => {
+      select.append(new Option(`${field.label} · ${field.key}`, field.key,
+        field.key === selectedField?.key, field.key === selectedField?.key));
+    });
+    label.append(select);
+    toolbar.append(label);
   }
   const refresh = source.querySelector("[data-refresh-preset]");
   if (refresh) toolbar.append(refresh);
@@ -47,6 +58,8 @@ export function renderEmbeddedPreset(host, markup, { viewKey }) {
     hidden.type = "hidden"; hidden.name = "operation"; hidden.value = host.kind;
     operation.replaceWith(hidden);
     content.append(recipe);
+  } else if (host.kind.startsWith("common-")) {
+    content.append(source.querySelector("#common-options"));
   } else {
     source.querySelectorAll(host.kind === "history" ? "#revisions" : "#inbound-options, #advanced").forEach(studio => {
       studio.open = true;
@@ -67,6 +80,7 @@ export function bindConfigInbounds(ctx) {
   const input = form?.querySelector("[data-code-input]");
   const baseline = input?.value;
   const target = () => files?.selectedInbound() || (!files && selection?.selectedInbound()) || null;
+  const commonSelected = () => Boolean(files ? files.selectedCommon() : selection?.selectedCommon());
   const dirty = () => files ? files.dirty() : Boolean(input && input.value !== baseline);
   const writable = () => can("agent-config.write") && can("tasks.execute") && sourceMode !== "import" &&
     !agent.runtime?.[engine]?.existing_config_unsupported_reason;
@@ -80,13 +94,38 @@ export function bindConfigInbounds(ctx) {
   }
   const menu = document.createElement("details");
   menu.className = "config-inbound-menu";
-  menu.innerHTML = `<summary class="button" aria-haspopup="menu">入站操作 <span aria-hidden="true">▾</span></summary>
+  menu.innerHTML = `<summary class="button" aria-haspopup="menu"><span data-config-operation-label>入站操作</span> <span aria-hidden="true">▾</span></summary>
     <div class="config-inbound-menu-items" role="menu">
-      <button type="button" role="menuitem" data-inbound-action="add">＋ 增加入站</button>
+      <div data-common-actions role="group" aria-label="通用配置操作" hidden>
+        <button type="button" role="menuitem" data-common-action="add">＋ 增加通用配置项</button>
+        <button type="button" role="menuitem" data-common-action="modify">修改通用配置项</button>
+        <button type="button" role="menuitem" class="danger-text" data-common-action="delete">删除通用配置项</button>
+      </div>
       <button type="button" role="menuitem" data-inbound-action="modify">修改入站</button>
       <button type="button" role="menuitem" class="danger-text" data-inbound-action="delete">删除入站</button>
     </div>`;
   navigation.append(menu);
+  // Adding an inbound is independent of the selected file. Keep one persistent
+  // button directly before merged preview, never inside the common-field menu.
+  let sourceActions = form?.querySelector(".config-file-actions");
+  if (!sourceActions) {
+    const row = document.createElement("div");
+    row.className = "config-file-navigation";
+    const label = document.createElement("span");
+    label.textContent = form ? "完整配置源码" : "入站配置";
+    sourceActions = document.createElement("div");
+    sourceActions.className = "config-file-actions";
+    row.append(label, sourceActions);
+    const toolbar = form?.querySelector(".code-editor-toolbar");
+    if (toolbar) toolbar.after(row);
+    else navigation.after(row);
+  }
+  const addInbound = document.createElement("button");
+  addInbound.type = "button";
+  addInbound.className = "button";
+  addInbound.dataset.inboundAction = "add";
+  addInbound.textContent = "＋ 增加入站";
+  sourceActions.prepend(addInbound);
   const tools = document.createElement("nav");
   tools.className = "config-workspace-tools";
   tools.setAttribute("aria-label", "配置工具");
@@ -96,14 +135,23 @@ export function bindConfigInbounds(ctx) {
     ${can("client-access.read") ? '<a class="button small" href="#client-access" data-config-client>客户端配置 ↗</a>' : ""}
     <button class="button small" type="button" data-config-refresh>${sourceMode === "personal" ? "刷新我的配置" : agent.runtime?.[engine]?.installed ? "重新读取节点配置" : "刷新配置"}</button>`;
   container.append(tools);
-  const triggers = [...menu.querySelectorAll("[data-inbound-action]"), ...tools.querySelectorAll("[data-inbound-action]")];
+  const actionKind = button => button.dataset.commonAction ? `common-${button.dataset.commonAction}` : button.dataset.inboundAction;
+  const isMutation = kind => ["add", "modify", "delete", "advanced", "common-add", "common-modify", "common-delete"].includes(kind);
+  const triggers = [addInbound, ...menu.querySelectorAll("[data-inbound-action], [data-common-action]"),
+    ...tools.querySelectorAll("[data-inbound-action]")];
   const update = () => {
+    const common = commonSelected();
+    menu.querySelector("[data-common-actions]").hidden = !common;
+    menu.querySelector("[data-config-operation-label]").textContent = common ? "通用配置操作" : target() || !files ? "入站操作" : "配置操作";
     for (const button of triggers) {
-      const kind = button.dataset.inboundAction;
-      button.disabled = busy || (["add", "modify", "delete", "advanced"].includes(kind) && !writable()) ||
+      const kind = actionKind(button), commonAction = kind.startsWith("common-");
+      button.hidden = ["modify", "delete"].includes(kind) && common;
+      button.disabled = busy || (isMutation(kind) && !writable()) || (commonAction && !common) ||
         (kind !== "add" && !saved) || (["modify", "delete"].includes(kind) && !target()) ||
         (kind === "modify" && !editable(target()));
-      button.title = ["modify", "delete"].includes(kind) && !target() ? "请先选择一个入站；公共配置和合并预览不可修改或删除" :
+      button.title = commonAction && !saved ? "请先通过“增加入站”创建配置，再编辑通用配置项" :
+        commonAction && !common ? "请先选择公共配置；合并预览不可操作通用配置项" :
+        ["modify", "delete"].includes(kind) && !target() ? "请先选择一个入站；公共配置和合并预览不可修改或删除" :
         kind === "modify" && !editable(target()) ? "此入站无法还原为预设参数，请使用源码或高级字段编辑" : "";
     }
   };
@@ -115,8 +163,13 @@ export function bindConfigInbounds(ctx) {
     if (!["ArrowDown", "ArrowUp"].includes(event.key)) return;
     event.preventDefault();
     menu.open = true;
-    const items = [...menu.querySelectorAll("button:not(:disabled)")];
-    if (items.length) items[(items.indexOf(document.activeElement) + (event.key === "ArrowDown" ? 1 : items.length - 1) + items.length) % items.length].focus();
+    const items = [...menu.querySelectorAll("button:not(:disabled)")].filter(button => !button.closest("[hidden]"));
+    if (items.length) {
+      const index = items.indexOf(document.activeElement);
+      const next = index < 0 ? event.key === "ArrowDown" ? 0 : items.length - 1 :
+        (index + (event.key === "ArrowDown" ? 1 : items.length - 1)) % items.length;
+      items[next].focus();
+    }
   });
   bindEvent(menu, "focusout", event => { if (!menu.contains(event.relatedTarget)) menu.open = false; });
   bindEvent(tools.querySelector("[data-config-client]"), "click", () => {
@@ -134,11 +187,11 @@ export function bindConfigInbounds(ctx) {
   const mutationReady = () => {
     if (!writable()) return false;
     if (agent.runtime?.[engine]?.installed && sourceContent === undefined) {
-      notify("请先读取当前节点配置，再操作入站。", "error"); return false;
+      notify("请先读取当前节点配置，再操作配置项。", "error"); return false;
     }
-    if (dirty()) { notify("配置源码有未保存修改，请先保存，再操作入站。", "error"); return false; }
+    if (dirty()) { notify("配置源码有未保存修改，请先保存，再操作配置项。", "error"); return false; }
     if (!sameConfigContent(saved?.content, sourceContent) && !(sourceMode !== "import" && !agent.runtime?.[engine]?.installed && !saved)) {
-      notify("当前节点快照与已保存配置不同，请先保存当前源码，再操作入站，避免覆盖节点配置。", "error");
+      notify("当前节点快照与已保存配置不同，请先保存当前源码，再操作配置项，避免覆盖节点配置。", "error");
       return false;
     }
     return true;
@@ -146,18 +199,20 @@ export function bindConfigInbounds(ctx) {
   const open = async (kind, trigger) => {
     menu.open = false;
     if (busy || dialog || !current()) return;
-    const mutation = ["add", "modify", "delete", "advanced"].includes(kind);
+    const mutation = isMutation(kind), commonAction = kind.startsWith("common-");
+    if (commonAction && (!commonSelected() || !saved)) return;
     if (mutation && !mutationReady()) return;
-    const chosen = target() ? { ...target() } : null;
+    const chosen = !commonAction && target() ? { ...target() } : null;
     if (["modify", "delete"].includes(kind) && !chosen) return;
     busy = true; update();
     let editor, confirming = false;
     dialog = document.createElement("dialog");
     const opened = dialog;
-    opened.className = `config-inbound-dialog${kind === "delete" ? " config-inbound-delete" : ""}`;
+    opened.className = `config-inbound-dialog${kind === "delete" ? " config-inbound-delete" : commonAction ? " config-common-dialog" : ""}`;
     opened.setAttribute("aria-labelledby", "config-inbound-title");
-    const titles = { add:"增加入站", modify:"修改入站", delete:"删除入站", advanced:"高级字段", history:"版本历史", diff:"配置差异" };
-    opened.innerHTML = `<header class="config-inbound-heading"><div><h2 id="config-inbound-title">${titles[kind]}</h2><p>${esc(agent.name)} / ${esc(engineName(engine))}${chosen && kind !== "add" ? ` / ${esc(chosen.tag)} · :${Number(chosen.port)}` : ""}</p></div><button class="config-access-close" type="button" data-inbound-close aria-label="关闭弹窗">×</button></header><div class="config-inbound-body" data-inbound-body><p role="status">正在加载…</p></div>`;
+    const titles = { add:"增加入站", modify:"修改入站", delete:"删除入站", advanced:"高级字段", history:"版本历史", diff:"配置差异",
+      "common-add":"增加通用配置项", "common-modify":"修改通用配置项", "common-delete":"删除通用配置项" };
+    opened.innerHTML = `<header class="config-inbound-heading"><div><h2 id="config-inbound-title">${titles[kind]}</h2><p>${esc(agent.name)} / ${esc(engineName(engine))}${commonAction ? " / 公共配置" : chosen && kind !== "add" ? ` / ${esc(chosen.tag)} · :${Number(chosen.port)}` : ""}</p></div><button class="config-access-close" type="button" data-inbound-close aria-label="关闭弹窗">×</button></header><div class="config-inbound-body" data-inbound-body><p role="status">正在加载…</p></div>`;
     const body = opened.querySelector("[data-inbound-body]");
     const active = () => current() && dialog === opened && opened.isConnected;
     const dispose = (discard = false) => {
@@ -198,6 +253,7 @@ export function bindConfigInbounds(ctx) {
         throw new Error("配置版本已变化，请关闭弹窗并重新读取、核对配置后再编辑。");
       }
       if (mutation && !mutationReady()) { dispose(); return; }
+      if (commonAction && !commonSelected()) { dispose(); return; }
       if (["modify", "delete"].includes(kind) && (target()?.tag !== chosen.tag || target()?.port !== chosen.port)) {
         dispose(); return;
       }
@@ -244,6 +300,6 @@ export function bindConfigInbounds(ctx) {
       if (current()) update();
     }
   };
-  triggers.forEach(trigger => bindEvent(trigger, "click", () => open(trigger.dataset.inboundAction, trigger)));
-  return { selectedInbound:target };
+  triggers.forEach(trigger => bindEvent(trigger, "click", () => open(actionKind(trigger), trigger)));
+  return { selectedInbound:target, selectedCommon:commonSelected };
 }

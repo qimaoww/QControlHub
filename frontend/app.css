@@ -948,6 +948,8 @@ dialog.config-access-dialog::backdrop{background:rgba(17,20,36,.34);backdrop-fil
 .config-inbound-dialog .config-field-studio,.config-inbound-dialog .revision-timeline{margin:0 0 12px}
 .config-inbound-dialog .config-execution-callout{margin:0 0 14px}
 .config-inbound-delete{width:min(560px,calc(100vw - 32px))}
+.config-common-dialog{width:min(800px,calc(100vw - 32px))}
+.config-common-studio .field-canvas{min-width:0}
 .inbound-delete-actions{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:8px;margin-top:20px}
 @media(max-width:600px){
   .config-inbound-dialog{width:calc(100vw - 16px);max-height:calc(100dvh - 16px);border-radius:10px}
@@ -968,6 +970,8 @@ dialog.config-access-dialog::backdrop{background:rgba(17,20,36,.34);backdrop-fil
 @media(max-width:600px){.config-file-buttons{padding:12px;gap:8px}.config-file-button{flex-basis:calc(50% - 4px)}}
 .config-file-navigation{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 18px;border-bottom:1px solid var(--line);background:var(--surface);color:var(--muted);font-size:calc(11px * var(--ui-font-scale))}
 .config-file-navigation .button{flex-shrink:0;min-height:32px;padding:5px 12px}
+.config-file-actions{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:8px;margin-left:auto;min-width:0}
+.config-file-navigation .config-file-actions .button{margin-left:0}
 .live-config-details{display:flex;flex-wrap:wrap;gap:8px 22px;padding:12px 24px;background:var(--surface-2);border-bottom:1px solid var(--line);color:var(--muted);font-size:calc(11px * var(--ui-font-scale))}
 .live-config-details>span{display:flex;align-items:center;gap:6px}
 .live-config-workspace .live-config-editor{display:block;min-width:0}

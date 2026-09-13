@@ -11,7 +11,7 @@ export async function bindConfigRestrictions(ctx) {
   const current = () => data === state.data && epoch === state.navigationEpoch && form.isConnected &&
     state.route === "live-config" && state.data.liveAgent === agent.id && state.data.liveEngine === engine;
   const access = installAccessControl(ctx);
-  let navigation = form.querySelector(".config-file-buttons"), selected = null, busy = false;
+  let navigation = form.querySelector(".config-file-buttons"), selected = null, commonSelected = false, busy = false;
   const button = document.createElement("button");
   button.type = "button";
   button.className = "button config-access-trigger";
@@ -38,10 +38,13 @@ export async function bindConfigRestrictions(ctx) {
       if (inbounds) {
         const common = document.createElement("button");
         common.type = "button"; common.className = "config-file-button active";
+        common.dataset.configCommon = "";
         common.innerHTML = "<b>公共配置</b><small>完整配置源码</small>";
         common.setAttribute("aria-pressed", "true");
+        commonSelected = true;
         common.onclick = () => {
           selected = null;
+          commonSelected = true;
           navigation.querySelectorAll(".config-file-button").forEach(other => {
             other.classList.toggle("active", other === common);
             other.setAttribute("aria-pressed", String(other === common));
@@ -61,6 +64,7 @@ export async function bindConfigRestrictions(ctx) {
         tab.setAttribute("aria-pressed", "false");
         tab.onclick = () => {
           selected = entry;
+          commonSelected = false;
           navigation.querySelectorAll(".config-file-button").forEach(other => {
             other.classList.toggle("active", other === tab);
             other.setAttribute("aria-pressed", String(other === tab));
@@ -100,6 +104,7 @@ export async function bindConfigRestrictions(ctx) {
     } finally { busy = false; if (current()) update(); }
   };
   return {
+    selectedCommon: () => files ? files.selectedCommon() : commonSelected,
     selectedInbound: target,
     selectInbound(tag, port) {
       if (files) return files.selectInbound(tag, port);

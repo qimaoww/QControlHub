@@ -2307,9 +2307,9 @@ try {
       assert.equal(input.value,inboundDraft,"switch lost inbound draft");
       fileButtons[0].click();
       assert.equal(document.querySelector('optgroup[label="出站"]'),null,"legacy standalone exit group is still visible");
-      document.querySelector(".config-file-navigation button").click();
+      document.querySelector("[data-config-preview]").click();
       assert.ok(input.readOnly,"merged preview must be readonly");
-      document.querySelector(".config-file-navigation button").click();
+      document.querySelector("[data-config-preview]").click();
       assert.equal(input.value,draft,"preview lost file draft");
       assert.ok(!input.readOnly,"return from preview must restore editing");
       document.querySelectorAll("[data-live-agent]")[1].click();

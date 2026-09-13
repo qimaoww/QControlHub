@@ -295,6 +295,12 @@ jq -n \
 
 schema 61 在任务表增加 `install_if_missing`，任务查询与 WSS 下发保留该字段。自动安装使用安装任务的较长租约，Agent 重新检查二进制是否存在，安装失败不执行后续配置。重连不会重复执行仍在运行的同一任务；重试保持原 `config_version`，数据库已有新版本时返回 `409`。通用 `/tasks` 创建接口不接受 `install_if_missing`，只能通过原子入站新增及其重试产生。
 
+### 通用配置项操作
+
+配置页选中公共配置后的操作菜单复用 `GET /agents/{id}/configs/{engine}/fields/{key}` 读取当前片段，以及 `POST` 同一路径原子保存并创建任务。提交包含 `mutation`（`add` / `modify` / `delete`）、`fragment`、`expected_version`、`name`、`description` 和 `intent`（`validate` / `deploy`）。工作区的 `present_fields` 用于筛选增加或修改/删除的候选项；字段读取的版本仍须与工作区一致，保存时服务端再次检查版本与字段存在状态。
+
+该菜单只操作通用顶层字段，不提交 `inbound` 查询参数，也不携带 `install_if_missing`；需要已有配置和已安装内核。入站结构和包含成套出口的 `outbounds` 不在通用配置候选项中，SS Rust 仅展示 `global` / `override` 字段。底层字段接口仍保留高级编辑功能和独立出口归属校验。
+
 ### 配置修订与恢复
 
 全局配置档案和节点绑定配置每次成功创建、更新或恢复时，都会在同一数据库事务中保留一份完整修订。修订列表按版本号倒序返回，默认 20 条，`limit` 可设为 1–100：

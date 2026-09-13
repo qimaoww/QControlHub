@@ -2,6 +2,19 @@
 const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (char) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
 
+// The existing root-field API replaces a whole field. Inbound structures and
+// outbounds (which include exits paired with individual JSON files) must not be
+// presented as common-only mutations. They remain in the source/advanced editor.
+export function commonConfigFields(engine, fields) {
+  const structural = new Set(["inbounds", "listeners", "servers", "shadowsocks", "outbounds"]);
+  if (engine === "mihomo") {
+    for (const key of ["port", "socks-port", "redir-port", "tproxy-port", "mixed-port",
+      "ss-config", "vmess-config", "tunnels", "tun", "tuic-server"]) structural.add(key);
+  }
+  return fields.filter(field => !structural.has(field.key) &&
+    (engine === "ss-rust" ? ["global", "override"].includes(field.scope) : !["inbound", "structure"].includes(field.scope)));
+}
+
 export function renderFieldSummary(title, context) {
   return `<summary><b>${esc(title)}</b><span class="field-studio-context"><small>${esc(context)}</small><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m7 4 6 6-6 6"/></svg></span></summary>`;
 }
@@ -38,17 +51,38 @@ export function revealSelectedFields(root = document) {
   });
 }
 
-export function renderFieldEditor({ selected, value, perPort = false, format = "JSON", hint = "", inheritance = "", note = "", refreshKey = "" }) {
+export function renderFieldEditor({ selected, value, perPort = false, format = "JSON", hint = "", inheritance = "", note = "", refreshKey = "", mutation = "" }) {
   // Scalar values should not look like an empty, full-file code editor.
   const rows = Math.min(16, Math.max(5, String(value.fragment || "").split("\n").length + 1));
+  const locked = ["add", "modify", "delete"].includes(mutation);
+  const deleting = locked && mutation === "delete";
+  const error = value.error || (locked && Boolean(value.present) !== (mutation !== "add") ?
+    "配置项状态已变化，请重新加载后再编辑" : "");
   return `<section class="field-canvas" data-refresh-key="${esc(refreshKey)}">
     <header><div class="field-editor-heading"><h2>${esc(selected.label)}</h2><code>${perPort ? "servers[]." : ""}${esc(selected.key)}</code></div><a href="${esc(selected.docs)}" target="_blank" rel="noopener noreferrer">文档 ↗</a></header>
     ${hint ? `<p class="field-scope-hint">${esc(hint)}</p>` : ""}${selected.description ? `<p class="field-description">${esc(selected.description)}</p>` : ""}
-    ${value.error ? renderFieldEmpty("字段暂不可编辑", `${value.error}；可在下方完整源码中检查配置。`) : `${inheritance}<form id="${perPort ? "inbound-field-form" : "field-form"}" data-refresh-key="${perPort ? "inbound" : "global"}-value-${esc(selected.key)}-${value.present ? "set" : "unset"}">
-      <div class="field-mutation"><label>操作<select name="mutation" data-refresh-key="${perPort ? "inbound" : "global"}-mutation-${esc(selected.key)}-${value.present ? "set" : "unset"}">${value.present ? '<option value="modify" selected>修改字段</option><option value="delete">删除字段</option>' : '<option value="add" selected>新增字段</option>'}</select></label><span class="field-value-state">${value.present ? perPort ? "已设置端口值" : "已设置字段值" : "未单独设置"}</span></div>
-      <label class="field-value-label">${esc(format)} 字段值<textarea name="fragment" rows="${rows}" spellcheck="false">${esc(value.fragment)}</textarea></label>
-      <footer>${note ? `<p class="field-editor-note">${esc(note)}</p>` : ""}<div><button class="button" type="submit" data-field-intent="validate">保存并校验</button><button class="button primary" type="submit" data-field-intent="deploy">保存并部署</button></div></footer>
+    ${error ? renderFieldEmpty("字段暂不可编辑", `${error}；可返回配置页的完整源码检查配置。`) : `${inheritance}<form id="${perPort ? "inbound-field-form" : "field-form"}" data-refresh-key="${perPort ? "inbound" : "global"}-value-${esc(selected.key)}-${value.present ? "set" : "unset"}${locked ? `-${mutation}` : ""}">
+      <div class="field-mutation">${locked ? `<input type="hidden" name="mutation" value="${mutation}">` : `<label>操作<select name="mutation" data-refresh-key="${perPort ? "inbound" : "global"}-mutation-${esc(selected.key)}-${value.present ? "set" : "unset"}">${value.present ? '<option value="modify" selected>修改字段</option><option value="delete">删除字段</option>' : '<option value="add" selected>新增字段</option>'}</select></label>`}<span class="field-value-state">${value.present ? perPort ? "已设置端口值" : "已设置字段值" : "未单独设置"}</span></div>
+      <label class="field-value-label">${deleting ? "当前 " : ""}${esc(format)} 字段值<textarea name="fragment" rows="${rows}" spellcheck="false"${deleting ? " readonly" : ""}>${esc(value.fragment)}</textarea></label>
+      <footer>${note ? `<p class="field-editor-note">${esc(note)}</p>` : ""}<div><button class="button" type="submit" data-field-intent="validate">${deleting ? "删除" : "保存"}并校验</button><button class="button ${deleting ? "danger" : "primary"}" type="submit" data-field-intent="deploy">${deleting ? "删除" : "保存"}并部署</button></div></footer>
     </form>`}
+  </section>`;
+}
+
+export function renderCommonFieldStudio({ engine, fields, selected, value, config, catalog, mutation }) {
+  const hint = engine === "ss-rust"
+    ? "通用配置影响所有端口；默认值仅由未设置端口覆盖的端口继承，已有端口覆盖保持不变。"
+    : "仅编辑所选通用配置项；入站结构与成套出口请通过入站操作、源码或高级字段管理。";
+  const note = (mutation === "delete" ? "只删除所选配置项，不删除公共配置文件或其他入站。" : "") +
+    (engine === "ss-rust" ? "部署会重启整个 ssserver，可能短暂影响所有端口；保存并校验仅检查配置结构，不是完整启动校验。" :
+      "仅校验不会改变节点运行配置；部署会应用通用配置并重启内核。");
+  return `<section class="config-field-studio config-common-studio" id="common-options">
+    ${!config ? renderFieldEmpty("尚未保存配置", "先通过“增加入站”创建配置，再编辑通用配置项。") :
+      selected && fields.length ? renderFieldEditor({ selected, value, format:catalog.format, hint, note, mutation,
+        refreshKey:`common-field-${mutation}-${selected.key}` }) :
+        renderFieldEmpty(mutation === "add" ? "没有可增加的通用配置项" : "尚无可操作的通用配置项",
+          mutation === "add" ? "已收录的通用配置项均已存在，可通过“修改通用配置项”编辑；其他字段仍可在源码或高级字段中管理。" :
+            "当前配置尚未设置已收录的通用配置项，请先通过“增加通用配置项”添加。")}
   </section>`;
 }
 

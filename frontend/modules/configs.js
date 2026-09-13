@@ -7,7 +7,7 @@ import { createPresetDrafts } from "./preset-drafts.js";
 import { presetRoute } from "./preset-route.js";
 import { createPresetReads, renderPresetIdentity } from "./preset-runtime.js";
 import { createTaskMonitor, taskTerminal } from "./task-monitor.js";
-import { renderConfigSourceStudio, renderGlobalFieldStudio, revealSelectedFields } from "./config-fields.js";
+import { commonConfigFields, renderCommonFieldStudio, renderConfigSourceStudio, renderGlobalFieldStudio, revealSelectedFields } from "./config-fields.js";
 import { configFieldURL, renderSSRustFieldStudio, ssRustFieldGroups, ssRustPlanBinding } from "./ss-rust-fields.js";
 
 // Config views render user-controlled values into HTML before binding their
@@ -733,7 +733,10 @@ async function renderAgentConfig({ workspace: loadedWorkspace } = {}) {
   };
   const allFields = workspace.catalog.fields || [];
   const ssRustGroups = ssRustFieldGroups(allFields);
-  const fields = engine === "ss-rust" ? ssRustGroups.global : allFields;
+  const commonMutation = host?.kind.startsWith("common-") ? host.kind.slice("common-".length) : "";
+  const fields = commonMutation
+    ? commonConfigFields(engine, allFields).filter(field => Boolean(workspace.present_fields?.[field.key]) === (commonMutation !== "add"))
+    : engine === "ss-rust" ? ssRustGroups.global : allFields;
   const selectedField =
     fields.find((field) => field.key === state.data.configField) || fields[0];
   state.data.configField = selectedField?.key || "";
@@ -751,7 +754,7 @@ async function renderAgentConfig({ workspace: loadedWorkspace } = {}) {
     return value;
   }));
   const fieldValues = [
-    config && selectedField && (!host || host.kind === "advanced")
+    config && selectedField && (!host || host.kind === "advanced" || commonMutation)
       ? fieldRead(`${base}/fields/${encodeURIComponent(selectedField.key)}`)
       : { value: { present: false, fragment: "" } },
     hasInboundField && (!host || host.kind === "advanced")
@@ -816,14 +819,17 @@ async function renderAgentConfig({ workspace: loadedWorkspace } = {}) {
   const canAutoInstall = !engineInstalled && (state.session?.role === "admin" || agent.can_manage === true) &&
     (agent.features || []).includes("preset-auto-install-v1");
   const executionCallout = !engineInstalled
-    ? `<aside class="config-execution-callout"><span><b>${esc(engineName(engine))} 尚未安装</b><small>${canAutoInstall ? "增加入站并提交时，将自动安装最新稳定版，再执行校验或部署。切换版本请到节点设置。" : "自动安装需要节点管理权及新版 Agent；请到节点设置检查权限或升级 Agent。"}</small></span><a class="button small" href="#node-${esc(agent.id)}">节点设置</a></aside>`
+    ? `<aside class="config-execution-callout"><span><b>${esc(engineName(engine))} 尚未安装</b><small>${commonMutation ? "通用配置提交需要已安装内核。增加入站可自动安装稳定版；管理内核版本请到节点设置。" : canAutoInstall ? "增加入站并提交时，将自动安装最新稳定版，再执行校验或部署。切换版本请到节点设置。" : "自动安装需要节点管理权及新版 Agent；请到节点设置检查权限或升级 Agent。"}</small></span><a class="button small" href="#node-${esc(agent.id)}">节点设置</a></aside>`
     : agent.runtime?.[engine]?.existing_config_unsupported_reason
       ? `<aside class="config-execution-callout"><span><b>当前内核暂不可提交任务</b><small>${esc(agent.runtime[engine].existing_config_unsupported_reason)}</small></span><a class="button small" href="#node-settings">检查节点配置</a></aside>`
       : agent.status !== "online"
         ? '<aside class="config-execution-callout"><span><b>节点当前离线</b><small>可以继续编辑草稿，节点上线并重新加载后可校验或部署。</small></span></aside>'
         : !can("agent-config.write") || !can("tasks.execute")
           ? '<aside class="config-execution-callout"><span><b>当前账号不可提交预设</b><small>保存并执行需要配置写入和任务执行权限。</small></span></aside>' : "";
-  const advancedStudio = engine === "ss-rust"
+  const advancedStudio = commonMutation
+    ? renderCommonFieldStudio({ engine, fields, selected:selectedField, value:fieldValue, config,
+        catalog:workspace.catalog, mutation:commonMutation })
+    : engine === "ss-rust"
     ? renderSSRustFieldStudio({ scope: "inbound", fields: ssRustGroups.inbound, selected: selectedInboundField,
         value: inboundFieldValue, config, inbound: selectedInbound }) +
       renderSSRustFieldStudio({ scope: "global", fields, selected: selectedField, value: fieldValue,
@@ -835,6 +841,8 @@ async function renderAgentConfig({ workspace: loadedWorkspace } = {}) {
     "节点配置",
     {
       viewKey: `agent-config-${agent.id}-${engine}-${selectedProtocolKey}-${selectedInbound?.tag || "new"}-${config?.version || 0}-${state.data.presetDraftReset || 0}`,
+      commonFields: commonMutation ? fields : [],
+      selectedField,
     },
   );
   const serverPlan = root.querySelector("#server-plan-form");
@@ -882,6 +890,8 @@ async function renderAgentConfig({ workspace: loadedWorkspace } = {}) {
     plan,
     selectedInbound,
     selectedField,
+    commonMutation,
+    commonFields: commonMutation ? fields : [],
     selectedInboundField,
     fieldValue,
     base,
@@ -914,7 +924,11 @@ async function renderAgentConfig({ workspace: loadedWorkspace } = {}) {
       const updated = root.querySelector(`#${id}`);
       if (updated) updated.open = open;
     };
-    if (engine === "ss-rust") {
+    if (index === 0) context.fieldValue = value;
+    if (commonMutation && index === 0) {
+      replaceStudio("common-options", renderCommonFieldStudio({ engine, fields, selected:selectedField, value, config,
+        catalog:workspace.catalog, mutation:commonMutation }));
+    } else if (engine === "ss-rust") {
       if (index === 1) replaceStudio("inbound-options", renderSSRustFieldStudio({ scope: "inbound", fields: ssRustGroups.inbound,
         selected: selectedInboundField, value, config, inbound: selectedInbound }));
       else replaceStudio("advanced", renderSSRustFieldStudio({ scope: "global", fields, selected: selectedField,
@@ -1070,7 +1084,7 @@ function bindAgentConfigPage(ctx, fieldsOnly = false) {
     state.data.agentId === ctx.agent.id && state.data.engine === ctx.engine;
   const draftKey = selector => `${ctx.draftScope}${ctx.draftVersion}|${selector}|${
     selector === "#server-plan-form" ? ctx.selectedInbound?.tag || `new:${ctx.protocol?.key}` :
-    selector === "#field-form" ? ctx.selectedField?.key :
+    selector === "#field-form" ? `${ctx.selectedField?.key}|${ctx.commonMutation || "advanced"}` :
     selector === "#inbound-field-form" ? `${ctx.selectedInbound?.tag}|${ctx.selectedInboundField?.key}` : "source"}`;
   const navigate = (selection, reuseWorkspace = true) => {
     if (presetSavePending || ctx.generating || !visible()) return;
@@ -1136,6 +1150,10 @@ function bindAgentConfigPage(ctx, fieldsOnly = false) {
   );
   bindEvent(root.querySelector("[data-preset-protocol]"), "change", event => {
     navigate({protocol:event.target.value, inboundTag:""});
+  });
+  bindEvent(root.querySelector("[data-common-field]"), "change", event => {
+    if (ctx.commonFields.some(field => field.key === event.target.value))
+      navigate({configField:event.target.value});
   });
   bindEvent(root.querySelector("[data-new-inbound]"), "click", () => {
       if (presetSavePending || ctx.generating || !current()) return;
@@ -1243,6 +1261,8 @@ function bindAgentConfigPage(ctx, fieldsOnly = false) {
     root.querySelector(".config-command-bar")?.setAttribute("aria-busy", String(blocked));
     const protocolSelect = root.querySelector("[data-preset-protocol]");
     if (protocolSelect) protocolSelect.disabled = blocked || ctx.generating;
+    const commonSelect = root.querySelector("[data-common-field]");
+    if (commonSelect) commonSelect.disabled = blocked || ctx.generating;
     for (const selector of forms) {
       const element = root.querySelector(selector);
       if (!element) continue;
@@ -1283,7 +1303,15 @@ function bindAgentConfigPage(ctx, fieldsOnly = false) {
       const intent = submitter?.dataset[isPlan ? "planIntent" : isSource ? "sourceIntent" : "fieldIntent"] || "validate";
       const operation = values.get("operation");
       const deleting = isPlan && operation === "delete";
-      if (!deleting) {
+      const commonField = selector === "#field-form" && ctx.commonMutation;
+      const deletingCommon = commonField && ctx.commonMutation === "delete";
+      if (commonField && (values.get("mutation") !== ctx.commonMutation ||
+          !ctx.commonFields.some(field => field.key === ctx.selectedField?.key) || ctx.fieldValue.error ||
+          Boolean(ctx.fieldValue.present) !== (ctx.commonMutation !== "add"))) {
+        notify("通用配置项状态或操作已变化，请重新加载后再提交。", "error");
+        return;
+      }
+      if (!deleting && !deletingCommon) {
         const invalid = [...formElement.elements].find((control) => control.willValidate && !control.validity.valid);
         if (invalid) {
           const section = invalid.closest(".builder-section");
@@ -1311,6 +1339,10 @@ function bindAgentConfigPage(ctx, fieldsOnly = false) {
         if (deleting && !(await confirmAction(
           `确定删除入站“${ctx.selectedInbound?.tag}”？${intent === "deploy" ? "将部署配置并重启内核。" : "本次只保存并校验，节点配置需部署后生效。"}`,
           "删除入站",
+        ))) return;
+        if (deletingCommon && !(await confirmAction(
+          `确定删除通用配置项“${ctx.selectedField.label}”（${ctx.selectedField.key}）？不会删除公共配置文件或其他入站。${intent === "deploy" ? "将部署配置并重启内核。" : "本次只保存并校验，节点配置需部署后生效。"}`,
+          "删除通用配置项",
         ))) return;
         if (!current() || !formElement.isConnected) return;
         showStatus("正在保存配置并创建任务…");
@@ -1347,7 +1379,8 @@ function bindAgentConfigPage(ctx, fieldsOnly = false) {
             (perPort ? ctx.selectedInboundField : ctx.selectedField).key,
             perPort ? ctx.selectedInbound?.tag || "" : undefined), {
             method: "POST", body: JSON.stringify({
-              mutation: values.get("mutation"), fragment: values.get("fragment"),
+              mutation: commonField ? ctx.commonMutation : values.get("mutation"),
+              fragment: deletingCommon ? "" : values.get("fragment"),
               expected_version: ctx.workspace.config.version,
               name: ctx.workspace.config.name, description: ctx.workspace.config.description, intent,
             }),
@@ -1645,7 +1678,7 @@ async function liveConfig() {
   if (emptyManaged) {
     const hint = document.createElement("p");
     hint.className = "config-install-hint";
-    hint.textContent = `${engineName(engine)} 尚未安装。通过“入站操作 → 增加入站”提交时，将自动安装最新稳定版；切换版本请到节点设置。`;
+    hint.textContent = `${engineName(engine)} 尚未安装。通过源码工具栏的“＋ 增加入站”提交时，将自动安装最新稳定版；切换版本请到节点设置。`;
     workspaceElement.querySelector(".live-config-details").after(hint);
   } else if (source?.saved) {
     const hint = document.createElement("p");
