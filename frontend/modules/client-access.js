@@ -1,5 +1,6 @@
 import { bindEvent, createRefreshChannel } from "./refresh.js";
 import { createRegionDisplay, regionAvatarMarkup } from "./regions.js";
+import { orderNodesBySavedOrder } from "./node-order.js";
 
 export function normalizeClientAccessFilters(entries, agents, filters = {}) {
   const agentIDs = new Set((agents || []).map((agent) => agent.id));
@@ -54,7 +55,7 @@ export function filterClientAccessEntries(entries, filters = {}) {
   });
 }
 
-export function groupClientAccessEntries(entries) {
+export function groupClientAccessEntries(entries, agents = []) {
   const groups = [];
   const byAgent = new Map();
   for (const entry of entries || []) {
@@ -66,7 +67,16 @@ export function groupClientAccessEntries(entries) {
     }
     group.entries.push(entry);
   }
-  return groups;
+  // Match the node cards and sidebar, even when exports arrive in another order.
+  const nodes = agents.length ? agents : groups.map((group) => ({ id: group.agent_id }));
+  const position = new Map(
+    orderNodesBySavedOrder(nodes).map((node, index) => [node.id, index]),
+  );
+  return groups.sort(
+    (left, right) =>
+      (position.get(left.agent_id) ?? nodes.length) -
+      (position.get(right.agent_id) ?? nodes.length),
+  );
 }
 
 export function clientAccessAddressChoices(entry) {
@@ -265,7 +275,7 @@ export function installClientAccess(ctx) {
       return `<section class="client-access-empty-state"><span>⌁</span><h2>${esc(title)}</h2><p>${description}</p>${action}</section>`;
     }
 
-    return groupClientAccessEntries(filtered)
+    return groupClientAccessEntries(filtered, agents)
       .map((group, groupIndex) => {
         const firstEntry = group.entries[0];
         const agent = agents.find((item) => item.id === group.agent_id) || {};
