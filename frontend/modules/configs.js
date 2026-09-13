@@ -1567,7 +1567,7 @@ async function liveConfig() {
     !state.data.liveEngine ||
     !installedEngines.includes(state.data.liveEngine)
   ) {
-    state.data.liveEngine = installedEngines[0];
+    state.data.liveEngine = installedEngines.find(item => agent.runtime?.[item]?.installed) || installedEngines[0];
   }
   const engine = state.data.liveEngine;
   if (globalThis.location?.hash.startsWith("#live-config") && globalThis.history?.replaceState)
@@ -1666,7 +1666,7 @@ async function liveConfig() {
     const info = agent.runtime?.[item] || {};
     const active = item === engine;
     const label = info.installed ? "已安装" : info.existing_config_available ? "待导入" : "未安装";
-    return `<button type="button" class="live-engine-tab ${active ? "active" : ""}" data-live-engine="${esc(item)}" aria-pressed="${active}" aria-label="${esc(engineName(item))} · ${label}" title="${label}" ${active ? 'aria-current="true"' : ""}>${esc(engineName(item))}</button>`;
+    return `<button type="button" class="live-engine-tab ${active ? "active" : ""}" data-live-engine="${esc(item)}" aria-pressed="${active}" aria-label="${esc(engineName(item))} · ${label}" title="${label}" ${active ? 'aria-current="true"' : ""}><span>${esc(engineName(item))}</span><small class="live-engine-status${info.installed ? " installed" : ""}">${info.installed ? "已安装" : "未安装"}</small></button>`;
   }).join("")}</nav>`;
   shell(
     `<article class="live-config-workspace" data-refresh-key="live-config-content-${esc(agent.id)}-${esc(engine)}-${esc(sourceMode)}-${esc(liveConfigPhase)}" data-live-config-phase="${esc(liveConfigPhase)}"><header class="editor-toolbar"><div><p class="live-config-eyebrow">${privateWorkspace ? "我的节点配置" : "节点配置工作区"}</p><h2>${esc(agent.name)}</h2>${sourceSwitch}</div><div class="editor-toolbar-state"><span class="engine-badge ${esc(engine)}">${esc(engineName(engine))}</span><b>${unsupportedReason ? "不可自动迁移" : importSource ? "可导入" : saved?.version ? `v${saved.version}` : "未保存"}</b></div></header>${engineBar}<div class="live-config-details"><span><i class="status-dot ${agent.status === "online" ? "ok" : ""}"></i>${agent.status === "online" ? "节点在线" : "节点离线"}</span><span>${esc(agent.os)} / ${esc(agent.arch)}</span><span>${esc(engineName(engine))} · ${esc(conciseVersion(engine, runtime.version))}</span><span>${privateWorkspace ? "个人配置 · 可保存并部署到此主机" : importSource ? "系统服务 · 只读快照" : "QAgent 托管 · 编辑后需保存部署"}</span></div>${current ? `<form class="live-config-editor" id="live-config-form" data-profile-editor data-new-config="0" data-engine="${esc(engine)}"><section class="code-workspace" data-code-editor data-code-language="${language}" data-code-max-bytes="2097152"><header class="code-editor-toolbar"><div class="code-file-meta"><span class="code-file-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7 3.5h7l4 4V20.5H7zM14 3.5v4h4M10 12h5M10 16h3"/></svg></span><b>${engine === "mihomo" ? "config.yaml" : "config.json"}</b></div><div class="code-editor-meta"><span class="code-language">${language}</span><span data-code-status aria-live="polite">${importSource ? "系统服务只读快照" : "QAgent 配置"}</span><span data-code-bytes>—</span><span data-code-position>行 1，列 1</span></div></header><div class="code-editor-frame"><aside class="code-gutter" aria-hidden="true" data-line-numbers>1</aside><textarea class="code-editor-input" name="content" data-code-input aria-label="${esc(engineName(engine))} 节点配置源码" spellcheck="false" required ${editorState.readOnly ? "readonly" : ""}>${esc(current.content)}</textarea></div><footer><span><i class="code-status-dot" data-code-status-dot></i><span data-code-validation aria-live="polite"></span></span><div><button class="button code-reset" type="button" data-code-reset disabled>恢复原文</button>${can("agent-config.write") && !editorState.readOnly ? '<button class="button code-format" type="button" data-code-format>格式化配置</button>' : ""}${liveActions}</div></footer></section><input type="hidden" name="name" value="${esc(current.name)}"><input type="hidden" name="description" value="${esc(current.description)}"><input type="hidden" name="version" value="${current.version}"></form>` : agent.status !== "online" ? '<section class="node-config-source"><h2>节点离线</h2><span class="status-label warn">无法读取</span></section>' : unsupportedReason ? `<section class="node-config-source" role="status"><h2>检测到现有服务，但不可自动迁移</h2><span class="status-label bad">${esc(unsupportedReason)}</span><p>QAgent 未执行或接管该服务。所有相关内核任务均已禁用；请按提示调整为受支持的精确布局并重启 Agent 重新发现。</p></section>` : !importSource && !readAction ? '<section class="node-config-source"><h2>需要升级 Agent</h2><span class="status-label warn">暂不可读取 QAgent 配置</span><p>升级后即可在不影响系统服务可选导入的情况下独立读取 QAgent 托管配置。</p></section>' : source?.error ? `<section class="node-config-source"><h2>读取配置失败</h2><span class="status-label bad">${esc(diagnosticError(source.error))}</span><button class="button" type="button" data-read-current>重新读取</button></section>` : `<section class="node-config-source" role="status" aria-live="polite"><h2>正在读取${importSource ? "系统服务配置" : "QAgent 配置"}</h2><span class="status-label warn">读取中</span><form data-auto-read-current hidden></form></section>`}</article>`,
@@ -1709,9 +1709,40 @@ async function liveConfig() {
         event.preventDefault();
         if (link.dataset.liveEngine === engine) return;
         if (!(await confirmSwitch("切换内核"))) return;
+        if (accountData !== state.data || workspaceElement.getAttribute("aria-busy") === "true") return;
+        const previousSource = state.data.liveConfigSource;
         state.data.liveEngine = link.dataset.liveEngine;
         state.data.liveConfigSource = "";
-        liveConfig();
+        workspaceElement.setAttribute("aria-busy", "true");
+        const tabs = [...workspaceElement.querySelectorAll("[data-live-engine]")];
+        tabs.forEach(tab => {
+          tab.disabled = true;
+          tab.classList.toggle("active", tab === link);
+          tab.setAttribute("aria-pressed", String(tab === link));
+        });
+        const status = document.createElement("span");
+        status.className = "live-engine-loading";
+        status.setAttribute("role", "status");
+        status.textContent = `正在切换到 ${engineName(link.dataset.liveEngine)}…`;
+        workspaceElement.querySelector(".live-config-details").append(status);
+        try { await liveConfig(); }
+        catch (error) {
+          if (accountData !== state.data || state.data.liveEngine !== link.dataset.liveEngine) return;
+          state.data.liveEngine = engine;
+          state.data.liveConfigSource = previousSource;
+          if (globalThis.history?.replaceState) globalThis.history.replaceState(null, "", presetRoute({agentId:agent.id, engine}));
+          tabs.forEach(tab => {
+            const active = tab.dataset.liveEngine === engine;
+            tab.classList.toggle("active", active);
+            tab.setAttribute("aria-pressed", String(active));
+          });
+          notify(`切换内核失败：${error.message}`, "error");
+        } finally {
+          if (workspaceElement.isConnected) {
+            workspaceElement.removeAttribute("aria-busy"); status.remove();
+            tabs.forEach(tab => { tab.disabled = false; });
+          }
+        }
       }),
   );
   document.querySelectorAll("[data-live-source]").forEach(

@@ -19,9 +19,9 @@ async function fixture(engine, options = {}) {
   const basePlan = structuredClone(entries[0].plan);
   let controller = new AbortController();
   const agent = {id:"node", name:"香港 · HK-01", os:"linux", arch:"amd64", status:options.offline ? "offline" : "online",
-    can_manage:options.shared !== true, capabilities:[engine], features:["managed-config-read-v1", "independent-egress-v1",
+    can_manage:options.shared !== true, capabilities:options.multi ? ["mihomo", engine] : [engine], features:["managed-config-read-v1", "independent-egress-v1",
       ...(options.legacy ? [] : ["preset-auto-install-v1"])],
-    runtime:{[engine]:{installed:!options.missing, version:"test-development", existing_config_available:Boolean(options.import)}}};
+    runtime:{...(options.multi ? {mihomo:{installed:false}} : {}), [engine]:{installed:!options.missing, version:"test-development", existing_config_available:Boolean(options.import)}}};
   const test = {writes:[], calls:[], notices:[], confirmations:[], confirm:false, serial:0, fail:false, gate:null, taskStatus:"pending"};
   let inbounds = options.missing || options.emptyInbounds ? [] : ["first", "second"].map((tag, index) => ({...basePlan, tag, port:21001+index}));
   const primaryField = engine === "ss-rust" ? "timeout" : engine === "mihomo" ? "log-level" : "log";
@@ -51,7 +51,7 @@ async function fixture(engine, options = {}) {
   const content = () => JSON.stringify(root(), null, 2);
   let saved = options.missing && !options.savedMissing ? null : {id:"cfg", agent_id:agent.id, engine, name:"配置", version:1, content:content()};
   const state = {route:"live-config", navigationEpoch:1, routeSignal:controller.signal,
-    session:{role:options.shared ? "user" : "admin"}, data:{liveAgent:agent.id, liveEngine:engine, liveConfigSource:options.import ? "import" : "",
+    session:{role:options.shared ? "user" : "admin"}, data:{liveAgent:agent.id, liveEngine:options.multi ? "" : engine, liveConfigSource:options.import ? "import" : "",
       liveSources:saved ? {[`node|${engine}${options.import ? "|import" : ""}`]:{content:options.drift ? saved.content + "\n# node-only" : saved.content}} : {}}};
   const tasks = new Map();
   const workspace = () => ({agent:structuredClone(agent), config:saved && {...saved, version:saved.version+(test.stale?1:0)},
@@ -66,6 +66,7 @@ async function fixture(engine, options = {}) {
     if (path === "/agents") return [structuredClone(agent)];
     if (path.endsWith("/workspace")) {
       if (test.workspaceGate) await test.workspaceGate;
+      if (test.failSwitch && path.includes("/mihomo/")) throw new Error("fixture switch failed");
       if (test.failRefresh && test.writes.length) throw Object.assign(new Error("fixture refresh unavailable"), {status:503});
       return workspace();
     }
@@ -284,6 +285,23 @@ export async function testConfigInboundsRuntime(preview = false) {
     assert(!document.querySelector("dialog"), "read-only or diverged snapshot permitted mutation");
     test.dispose();
   }
+  const switcher = await fixture("xray", {multi:true});
+  assert(switcher.state.data.liveEngine === "xray", "default selected an uninstalled core");
+  assert(document.querySelector('[data-live-engine="xray"] small').textContent === "已安装", "installed status not visible");
+  assert(document.querySelector('[data-live-engine="mihomo"] small').textContent === "未安装", "missing status not visible");
+  let releaseSwitch;
+  switcher.workspaceGate = new Promise(resolve=>{releaseSwitch=resolve;});
+  switcher.failSwitch = true;
+  const missingTab = document.querySelector('[data-live-engine="mihomo"]');
+  missingTab.click();
+  await waitFor(()=>document.querySelector(".live-engine-loading"), "switch did not acknowledge input");
+  missingTab.click();
+  const switchReads = switcher.calls.filter(call=>call.path.includes("/mihomo/")).length;
+  assert(switchReads === 1, "repeated click duplicated switch request");
+  releaseSwitch();
+  await waitFor(()=>switcher.notices.some(message=>message.includes("切换内核失败")), "failed switch lost feedback");
+  assert(switcher.state.data.liveEngine === "xray" && !missingTab.disabled, "failed switch did not restore usable previous editor");
+  switcher.dispose();
   const drift = await fixture("xray", {drift:true});
   drift.click("add");
   await waitFor(()=>document.querySelector("#server-plan-form"), "node snapshot drift blocked saved config editing");
