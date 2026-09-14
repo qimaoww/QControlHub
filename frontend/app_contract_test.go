@@ -194,6 +194,7 @@ func TestRefreshPathsUseStableViewsAndScopedCoordinators(t *testing.T) {
 		"const hasSharedData =",
 		"const sharedDataPromise = Promise.all([",
 		"function primeRouteTransition()",
+		"main.inert = true",
 		"main.classList.add(\"is-route-pending\")",
 		"const firstScreenClass = !previousMain ? \" first-screen\" : \"\"",
 		"const contextChanged = routeChanged || state.data.contextMotionKey !== contextKey",
@@ -201,7 +202,7 @@ func TestRefreshPathsUseStableViewsAndScopedCoordinators(t *testing.T) {
 		"data-refresh-key=\"context-${esc(contextKey)}\"",
 		"state.navigationEpoch += 1",
 		"cancelActive: () => routeController?.abort()",
-		"agentModule.cancelAgentInteractions()",
+		`routeModules.peek("agents")?.cancelAgentInteractions()`,
 		"confirmResolver?.(false)",
 		"state.route = \"login\"",
 		"if (!state.session || state.route === \"login\") return",
@@ -219,6 +220,7 @@ func TestRefreshPathsUseStableViewsAndScopedCoordinators(t *testing.T) {
 		"const preserveInert = current.classList?.contains(\"desktop-app\") && current.inert",
 		"scope !== getScope()",
 		"state.active.focus({ preventScroll: true })",
+		`typeof current.isEqualNode === "function"`,
 	} {
 		if !strings.Contains(refresh, required) {
 			t.Errorf("shared refresh runtime is missing %q", required)
@@ -515,7 +517,7 @@ func TestLegacyPresetLinksAndRendererKeepScopedNodeSelection(t *testing.T) {
 		t.Error("preset sidebar nodes must not enter the node settings workflow")
 	}
 	for _, required := range []string{
-		"hash.startsWith(\"preset-node-\")\n        ? \"live-config\"",
+		`if (hash.startsWith("preset-node-")) return "live-config";`,
 		`state.data.liveAgent = hash.slice(12);`,
 		`let hash = presetSelection ? "live-config"`,
 	} {
@@ -708,7 +710,7 @@ func TestSubStoreSyncUsesCompactPanelPatterns(t *testing.T) {
 	module := string(mustReadFrontendFile(t, "modules/substore-sync.js"))
 	styles := string(mustReadFrontendFile(t, "app.css"))
 	for _, required := range []string{
-		`installSubStoreSync`, `"substore-sync": subStoreSync`, `href="#client-access"`,
+		`installSubStoreSync`, `async "substore-sync"()`, `href="#client-access"`,
 		`import { orderNodesBySavedOrder } from "./node-order.js";`,
 		`groupSubStoreProfiles(filtered, agents)`,
 		`data-substore-settings-dialog`, `dialog?.showModal()`, `data-substore-run`,
@@ -867,6 +869,7 @@ func TestStaticAssetsUseBuildGeneratedCacheKeys(t *testing.T) {
 	for _, required := range []string{
 		`/assets/app.css?v=__QCH_CSS_VERSION__`,
 		`/assets/app.js?v=__QCH_JS_VERSION__`,
+		`rel="modulepreload" href="/assets/modules/dashboard.js?v=__QCH_JS_VERSION__"`,
 	} {
 		if !strings.Contains(content, required) {
 			t.Errorf("index.html is missing cache key placeholder %q", required)
@@ -884,8 +887,60 @@ func TestStaticAssetsUseBuildGeneratedCacheKeys(t *testing.T) {
 	if !strings.Contains(string(dockerfile), `modules/[^\"]+\\.js`) || !strings.Contains(string(dockerfile), `?v=${js_version}`) {
 		t.Error("Dockerfile does not add the aggregate JavaScript cache key to module imports")
 	}
+	if !strings.Contains(string(dockerfile), `import\\(\"\\./modules/`) {
+		t.Error("Dockerfile does not add the aggregate JavaScript cache key to lazy module imports")
+	}
 	if !strings.Contains(string(dockerfile), `js_content_version`) || !strings.Contains(string(dockerfile), `${VERSION}`) {
 		t.Error("Dockerfile JavaScript cache key must include both content and release version")
+	}
+	nginx := string(mustReadFrontendFile(t, "nginx.conf"))
+	for _, required := range []string{
+		`map "$uri:$arg_v" $qcontrol_cache_control`,
+		`public, max-age=31536000, immutable`,
+		`gzip on`,
+		`gzip_static on`,
+		`gzip_types application/javascript application/json image/svg+xml text/css`,
+	} {
+		if !strings.Contains(nginx, required) {
+			t.Errorf("static asset delivery is missing %q", required)
+		}
+	}
+	if !strings.Contains(string(dockerfile), `-exec gzip -9 -k {} +`) {
+		t.Error("web image does not precompress static JavaScript and CSS")
+	}
+}
+
+func TestRouteModulesLoadOnDemandAndWarmFromNavigationIntent(t *testing.T) {
+	app := string(mustReadFrontendFile(t, "app.js"))
+	for _, module := range []string{
+		"dashboard", "agents", "client-access", "substore-sync", "configs",
+		"tasks", "core-logs", "traffic", "access-control", "system-bbr",
+		"settings", "users",
+	} {
+		lazyImport := fmt.Sprintf(`import("./modules/%s.js")`, module)
+		if !strings.Contains(app, lazyImport) {
+			t.Errorf("route module %q is not loaded lazily", module)
+		}
+		staticImport := fmt.Sprintf(`from "./modules/%s.js"`, module)
+		if strings.Contains(app, staticImport) {
+			t.Errorf("route module %q is still part of the eager application graph", module)
+		}
+	}
+	for _, required := range []string{
+		`createRouteModuleLoader({`,
+		`routeModules.preload(routeModuleNames[route] || "dashboard")`,
+		`document.addEventListener("pointerover", preloadNavigationRoute`,
+		`document.addEventListener("pointerdown", preloadNavigationRoute`,
+		`document.addEventListener("focusin", preloadNavigationRoute`,
+		`window.requestIdleCallback(warm, { timeout: 1500 })`,
+		`connection?.saveData`,
+		`connection?.effectiveType?.includes("2g")`,
+		`const routeModulePromise = routeModules.load(`,
+		`const sharedDataPromise = Promise.all([`,
+	} {
+		if !strings.Contains(app, required) {
+			t.Errorf("route loading performance contract is missing %q", required)
+		}
 	}
 }
 
@@ -899,6 +954,7 @@ func TestSPAModulesArePublished(t *testing.T) {
 		"tasks.js",
 		"traffic.js",
 		"settings.js",
+		"route-loader.js",
 		"core-log-preferences.js",
 		"../module_smoke.mjs",
 	} {

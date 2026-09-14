@@ -213,6 +213,14 @@ function reconcileNode(current, fresh, metrics) {
     metrics.replaced += 1;
     return replacement;
   }
+  // Native equality checks can discard an unchanged branch in one browser
+  // call. This keeps frequent metric/log refreshes out of thousands of
+  // attribute and text comparisons while preserving the existing live DOM.
+  if (
+    typeof current.isEqualNode === "function" &&
+    current.isEqualNode(fresh)
+  )
+    return current;
   if (current.nodeType === 3) {
     if (current.data !== fresh.data) {
       current.data = fresh.data;

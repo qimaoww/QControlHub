@@ -2312,7 +2312,7 @@ try {
     assert.equal(posts(), 2, "navigation must not write");
     testAPI.trafficPreviewGate = null;
     location.hash = "#traffic";
-    await waitFor(() => document.querySelector("[data-traffic-sync]"), "traffic return failed");
+    await waitFor(() => !document.querySelector(".workspace-main[aria-busy]") && document.querySelector("[data-traffic-sync]"), "traffic return failed");
     testAPI.trafficCandidates = [{agent_id:"alpha",name:"late selection",engine:"xray",port:11443,protocol:"both",kind:"new"}];
     dialog = await openSync();
     await waitFor(() => dialog.querySelector("[data-sync-choice]"), "late selection missing");
