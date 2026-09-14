@@ -1,4 +1,5 @@
 import { bindEvent, createRefreshChannel } from "./refresh.js";
+import { orderNodesBySavedOrder } from "./node-order.js";
 
 export function filterSubStoreProfiles(profiles, agentID = "", search = "") {
   const normalizedQuery = String(search || "").trim().toLowerCase();
@@ -19,6 +20,33 @@ export function filterSubStoreProfiles(profiles, agentID = "", search = "") {
       .toLowerCase()
       .includes(normalizedQuery);
   });
+}
+
+export function groupSubStoreProfiles(profiles, agents = [], savedOrder) {
+  const groups = [];
+  const byAgent = new Map();
+  for (const profile of profiles || []) {
+    const agentID = profile.agent_id || "missing";
+    let group = byAgent.get(agentID);
+    if (!group) {
+      group = { agent_id: agentID, profiles: [] };
+      byAgent.set(agentID, group);
+      groups.push(group);
+    }
+    group.profiles.push(profile);
+  }
+
+  const nodes = agents.length
+    ? agents
+    : groups.map((group) => ({ id: group.agent_id }));
+  const position = new Map(
+    orderNodesBySavedOrder(nodes, savedOrder).map((node, index) => [node.id, index]),
+  );
+  return groups.sort(
+    (left, right) =>
+      (position.get(left.agent_id) ?? nodes.length) -
+      (position.get(right.agent_id) ?? nodes.length),
+  );
 }
 
 export function subStoreSelectionPayload(profiles) {
@@ -148,12 +176,7 @@ export function installSubStoreSync(ctx) {
       state.data.subStoreAgent = "";
     }
     const filtered = visibleProfiles(profiles);
-    const grouped = new Map();
-    for (const profile of filtered) {
-      const key = profile.agent_id || "missing";
-      if (!grouped.has(key)) grouped.set(key, []);
-      grouped.get(key).push(profile);
-    }
+    const grouped = groupSubStoreProfiles(filtered, agents);
 
     const statusClass = settings.configured ? "ok" : "muted";
     const statusText = settings.configured ? "已配置" : "未配置";
@@ -171,8 +194,9 @@ export function installSubStoreSync(ctx) {
       )
       .join("");
 
-    const cards = [...grouped.values()]
-      .map((items) => {
+    const cards = grouped
+      .map((group) => {
+        const items = group.profiles;
         const first = items[0];
         const checked = items.filter((item) => item.selected).length;
         const rows = items

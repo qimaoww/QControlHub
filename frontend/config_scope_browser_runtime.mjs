@@ -1,4 +1,6 @@
 import { installConfigPages } from "./modules/configs.js";
+import { accountStorage, setStorageAccount } from "./modules/account-storage.js";
+import { nodeCardOrderKey } from "./modules/node-order.js";
 import { installSubStoreSync, subStoreSelectionPayload } from "./modules/substore-sync.js";
 
 const assert = (value, message) => { if (!value) throw new Error(message); };
@@ -94,6 +96,8 @@ export async function testConfigScopeRuntime(preview = false) {
 
 async function subStoreFixture(manage = true) {
   const state = { route: "substore-sync", navigationEpoch: 1, data: {}, session: { role: "user", user_id: "alice" } };
+  setStorageAccount(state.session);
+  accountStorage.setItem(nodeCardOrderKey, JSON.stringify(["shared", "charlie", "alpha"]));
   const targets = [
     { id: "url-group", display_name: "我的 URL 组", subscription_name: "Alice URL", sync_format: "url", sync_mode: "incremental" },
     { id: "mihomo-group", display_name: "我的 Mihomo 组", subscription_name: "Alice Mihomo", sync_format: "mihomo", sync_mode: "incremental" },
@@ -101,6 +105,10 @@ async function subStoreFixture(manage = true) {
   const active = { agent_id: "shared", agent_name: "共享主机", agent_status: "online", config_id: "cfg_current",
     engine: "mihomo", profile_tag: "same-tag", protocol: "Shadowsocks 2022", port: 21001, default_name: "我的节点",
     available: true, addresses: [{ family: "ipv4", address: "198.51.100.10" }, { family: "ipv6", address: "2001:db8::10" }] };
+  const passive = [
+    { ...active, agent_id: "alpha", agent_name: "Alpha 主机", config_id: "cfg_alpha", profile_tag: "alpha-tag", default_name: "Alpha 节点" },
+    { ...active, agent_id: "charlie", agent_name: "Charlie 主机", config_id: "cfg_charlie", profile_tag: "charlie-tag", default_name: "Charlie 节点" },
+  ];
   const stale = { ...active, config_id: "cfg_previous", default_name: "失效的旧配置", available: false, addresses: [] };
   const selections = new Map([["url-group", [{ ...stale, custom_name: stale.default_name, selected: true }]], ["mihomo-group", []]]);
   const calls = [];
@@ -126,7 +134,7 @@ async function subStoreFixture(manage = true) {
     if (path.startsWith("/substore-sync")) {
       const id = new URL(path, location.origin).searchParams.get("target_id") || targets[0].id;
       const selected = selections.get(id) || [];
-      const profiles = [active, ...(selected.some(item => item.config_id === stale.config_id) ? [stale] : [])].map(profile => {
+      const profiles = [active, ...passive, ...(selected.some(item => item.config_id === stale.config_id) ? [stale] : [])].map(profile => {
         const selection = selected.find(item => item.config_id === profile.config_id);
         return { ...profile, ...selection, selected: Boolean(selection) };
       });
@@ -149,6 +157,10 @@ export async function testSubStoreScopeRuntime(preview = false) {
     document.querySelector("[data-substore-target-edit]").click();
     return;
   }
+  assert(
+    [...document.querySelectorAll(".substore-agent-card>header strong")].map(node => node.textContent).join(",") === "共享主机,Charlie 主机,Alpha 主机",
+    "Sub-Store cards did not follow the saved node order",
+  );
   document.querySelector("[data-substore-remove]").click();
   await waitFor(() => !document.querySelector("[data-substore-remove]"), "stale selection was not removed");
   document.querySelector("[data-substore-add]").click();

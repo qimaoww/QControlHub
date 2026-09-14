@@ -107,6 +107,7 @@ import {
 import { installSettings } from "./modules/settings.js";
 import {
   filterSubStoreProfiles,
+  groupSubStoreProfiles,
   installSubStoreSync,
   subStoreAddressChoices,
   subStoreProfileNodeCount,
@@ -3393,6 +3394,25 @@ assert.deepEqual(
   filterSubStoreProfiles(subStoreProfiles, "", "8443"),
   [subStoreProfiles[1]],
   "Sub-Store profiles can be searched by listening port",
+);
+const subStoreGroups = groupSubStoreProfiles(
+  [
+    subStoreProfiles[1],
+    subStoreProfiles[0],
+    { ...subStoreProfiles[0], engine: "mihomo", profile_tag: "second-alpha" },
+  ],
+  [{ id: "alpha" }, { id: "beta" }, { id: "empty" }],
+  ["beta", "alpha"],
+);
+assert.deepEqual(
+  subStoreGroups.map((group) => group.agent_id),
+  ["beta", "alpha"],
+  "Sub-Store cards follow the saved node order",
+);
+assert.deepEqual(
+  subStoreGroups[1].profiles.map((profile) => profile.profile_tag),
+  ["vless-in", "second-alpha"],
+  "Sub-Store node ordering retains profile order within each node",
 );
 assert.deepEqual(subStoreSelectionPayload(subStoreProfiles), [
   {
