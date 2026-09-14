@@ -79,6 +79,8 @@ type Server struct {
 	komari                     *komari.Client
 	komariHTTPClient           *http.Client
 	komariConfigError          error
+	komariCacheMu              sync.Mutex
+	komariCache                map[string]cachedKomariNode
 	webhookSigningConfigured   bool
 	notifier                   *notify.Client
 	subStoreHTTP               *http.Client
@@ -441,9 +443,10 @@ func (s *Server) listAgents(w http.ResponseWriter, request *http.Request) {
 		writeInternalError(w, err)
 		return
 	}
-	// Resolve regions before the metrics redaction below: automatic detection
-	// reads the public address out of those metrics.
+	// Resolve derived display data before the metrics redaction below: region
+	// detection reads the public address out of those metrics.
 	s.resolveAgentRegions(request, agents)
+	s.attachAgentKomari(request, agents)
 	if !s.sessionAllows(request, core.PermissionMetricsRead) {
 		for index := range agents {
 			agents[index].Metrics = core.HostMetrics{}
@@ -949,12 +952,20 @@ func (s *Server) getAgentKomari(w http.ResponseWriter, request *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "Komari integration is not configured")
 		return
 	}
+	if node, fresh := s.freshKomariNode(agent.ID, uuid, time.Now()); fresh {
+		result.Server = ptr(node)
+		w.Header().Set("Cache-Control", "no-store")
+		writeJSON(w, http.StatusOK, result)
+		return
+	}
 	node, err := komariClient.GetNode(request.Context(), uuid)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	result.Server = ptr(komariNodeResource(node))
+	resource := komariNodeResource(node)
+	s.storeKomariNode(agent.ID, uuid, resource, time.Now())
+	result.Server = ptr(resource)
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, result)
 }
@@ -1089,6 +1100,8 @@ func (s *Server) putAgentKomari(w http.ResponseWriter, request *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
+	// A new binding must not display the previous server's traffic.
+	s.forgetKomariNode(request.PathValue("id"))
 	s.recordAudit(request, "agent.komari.updated", request.PathValue("id"), "Komari UUID linked")
 	writeJSON(w, http.StatusOK, core.KomariLink{UUID: uuid})
 }

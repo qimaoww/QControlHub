@@ -84,7 +84,22 @@ const populatedAgents = [
   // carries the code and must not need a per-node lookup request.
   { ...onlineAgent("bravo"), region_code: "SG" },
   { ...onlineAgent("charlie"), status: "offline" },
-  onlineAgent("delta", []),
+  // The control plane inlines the Komari resource it already cached, so this
+  // node renders its monthly traffic without a request of its own.
+  {
+    ...onlineAgent("delta", []),
+    labels: { komari_uuid: "komari-delta" },
+    komari: {
+      uuid: "komari-delta",
+      name: "Osaka edge-02",
+      billing_cycle: 30,
+      traffic_limit: 21474836480,
+      traffic_limit_type: "sum",
+      traffic_used: 5368709120,
+      traffic_used_available: true,
+      traffic_reset_day: 1,
+    },
+  },
 ];
 
 const testAPI = {
@@ -609,6 +624,20 @@ async function testAdminRuntime() {
     ),
     false,
     "列表已解析地区的节点不应再逐节点查询地区",
+  );
+  await waitFor(() => {
+    const inline = document.querySelector('[data-komari-link="delta"]');
+    return inline?.querySelector("[data-komari-traffic]")?.textContent ===
+      "5.0 GB / 20.0 GB"
+      ? inline
+      : null;
+  }, "节点列表内联 Komari 资源没有渲染月流量");
+  assert.equal(
+    testAPI.calls.some(
+      (call) => call.method === "GET" && call.path === "/agents/delta/komari",
+    ),
+    false,
+    "列表已内联 Komari 资源的节点不应再逐节点读取",
   );
   assert.equal(document.querySelector(".node-card-komari"), null, "Komari 不应再渲染为独立卡片");
   assert.ok(

@@ -727,8 +727,10 @@ export function installAgents(ctx) {
   };
   const loadRegionDisplay = createRegionDisplay(ctx);
   // Komari resolves through an external provider, so each node's monthly
-  // traffic is read at most once per account session: a rebuilt card reuses the
-  // cached link instead of repeating a round trip that costs about a second.
+  // traffic is read at most once per account session: the node list inlines the
+  // resource the control plane already cached, and a rebuilt card reuses the
+  // account-scoped result instead of repeating a round trip that costs about a
+  // second.
   const loadKomariDisplay = (agent, root) => {
     const uuid = komariUUIDFor(agent);
     if (!uuid || !root) return;
@@ -736,6 +738,12 @@ export function installAgents(ctx) {
     const known = cache[agent.id];
     if (known?.uuid === uuid) {
       if (known.ready) updateKomariDisplay(root, known.link, known.error);
+      return;
+    }
+    if (agent.komari?.uuid === uuid) {
+      const inline = { uuid, server: agent.komari };
+      cache[agent.id] = { uuid, ready: true, link: inline, error: "" };
+      updateKomariDisplay(root, inline);
       return;
     }
     const entry = { uuid, ready: false, link: null, error: "" };
