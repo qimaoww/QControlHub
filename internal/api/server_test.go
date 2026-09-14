@@ -15,10 +15,17 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
 	"github.com/qimaoww/qcontrolhub/internal/komari"
 )
+
+func TestAutomaticConfigReadCacheWindow(t *testing.T) {
+	if automaticConfigReadCacheTTL != 600*time.Second {
+		t.Fatalf("automatic configuration read cache TTL = %s, want 600s", automaticConfigReadCacheTTL)
+	}
+}
 
 func TestKomariNodeResourceIncludesCurrentPeriodUsage(t *testing.T) {
 	resource := komariNodeResource(komari.Node{

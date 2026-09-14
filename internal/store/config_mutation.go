@@ -43,7 +43,7 @@ func (s *Store) SaveAgentConfigAndTask(ctx context.Context, input core.Config, e
 		AgentID: saved.AgentID, Engine: saved.Engine, Action: options.Action,
 		ConfigID: saved.ID, ExpectedConfigVersion: saved.Version,
 		InstallIfMissing: options.InstallIfMissing,
-	})
+	}, 0)
 	if err != nil {
 		return core.Config{}, core.Task{}, err
 	}

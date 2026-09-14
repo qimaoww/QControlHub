@@ -143,7 +143,7 @@ export function changeInboundOutbound(content, engine, inbound, operation, index
 }
 
 export function bindConfigOutbounds({ navigation, api, agent, engine, saved, current, dirty, writable, notify,
-  confirmAction, onSaved, state, selectedInbound, input:sourceInput, canReadPeers }) {
+  confirmAction, beforeDeploy, onSaved, state, selectedInbound, input:sourceInput, canReadPeers }) {
   if (!["xray", "sing-box"].includes(engine)) return;
   const menu = document.createElement("details");
   menu.className = "config-inbound-menu";
@@ -313,6 +313,11 @@ export function bindConfigOutbounds({ navigation, api, agent, engine, saved, cur
           if ((deleting || selecting && bound && tag !== bound || intent === "deploy") &&
               !(await confirmAction(`${deleting ? "删除出站并恢复全局路由" : "保存出站绑定"}：${inbound.tag} :${inbound.port} → ${tag}。${intent === "deploy" ? "将部署并重启当前内核，确定继续？" : "仅保存并校验，确定继续？"}`, "确认出站操作"))) return;
           if (!active()) return;
+          if (intent === "deploy" && beforeDeploy) {
+            status.textContent = "正在核验 Agent 当前配置…";
+            await beforeDeploy();
+            if (!active()) return;
+          }
           status.textContent = "正在保存配置并提交任务…";
           submitted = true;
           const result = await api(`${base}/source`, {method:"POST", body:JSON.stringify({
