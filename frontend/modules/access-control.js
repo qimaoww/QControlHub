@@ -1,7 +1,7 @@
 import { bindEvent } from "./refresh.js";
 
 export function installAccessControl(ctx) {
-  const { api, state, can, esc, engineName, shell, notify, confirmAction } = ctx;
+  const { api, state, can, esc, engineName, shell, notify, confirmAction, beforeDeploy } = ctx;
 
   const editable = () => can("agent-config.write") && can("tasks.execute");
 
@@ -135,8 +135,15 @@ export function installAccessControl(ctx) {
           { delete form.dataset.busy; return; }
         if (state.data !== data || !isCurrent()) { delete form.dataset.busy; return; }
         const buttons = form.querySelectorAll("button");
+        const stateText = form.querySelector("[data-access-control-state-text]");
         buttons.forEach((button) => (button.disabled = true));
         try {
+          if (intent === "deploy" && beforeDeploy) {
+            if (stateText) stateText.textContent = "正在核验 Agent 当前配置…";
+            await beforeDeploy();
+            if (state.data !== data || !isCurrent()) return;
+          }
+          if (stateText) stateText.textContent = "正在保存配置并提交任务…";
           const result = await api("/access-controls", {
             method: "PUT",
             body: JSON.stringify({
@@ -163,6 +170,7 @@ export function installAccessControl(ctx) {
         } catch (error) {
           delete form.dataset.busy;
           if (state.data !== data || error.name === "AbortError") return;
+          if (stateText) stateText.textContent = error.deployPreflight ? "Agent 配置已变化，未保存" : "保存失败，可重试";
           notify(error.message, "error");
           buttons.forEach((button) => (button.disabled = false));
         }

@@ -176,6 +176,95 @@ func TestTaskAPIWithPostgreSQL(t *testing.T) {
 	}
 }
 
+func TestTaskAPIPrefersRecentConfigurationSnapshot(t *testing.T) {
+	databaseURL := os.Getenv("QCH_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("QCH_TEST_DATABASE_URL is not configured")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	dataStore, err := store.Open(ctx, databaseURL, true)
+	if err != nil {
+		t.Fatalf("open PostgreSQL: %v", err)
+	}
+	defer dataStore.Close()
+	enrollment, err := dataStore.CreateEnrollmentToken(ctx, core.EnrollmentTokenRequest{
+		Name: "task API cached read", TTLMinutes: 5, MaxUses: 1,
+	})
+	if err != nil {
+		t.Fatalf("create enrollment token: %v", err)
+	}
+	agent := enrollTaskAPIAgent(t, ctx, dataStore, enrollment.Token, "task-api-cached-read")
+	t.Cleanup(func() { cleanupTaskAPIFixture(t, databaseURL, enrollment.ID, []string{agent.ID}) })
+
+	read, err := dataStore.CreateTask(ctx, core.TaskRequest{
+		AgentID: agent.ID, Action: core.ActionReadConfig, Engine: core.EngineMihomo,
+	})
+	if err != nil {
+		t.Fatalf("create initial read task: %v", err)
+	}
+	claimed, err := dataStore.ClaimTask(ctx, agent.ID)
+	if err != nil || claimed == nil || claimed.ID != read.ID {
+		t.Fatalf("claim initial read task = %+v, %v", claimed, err)
+	}
+	content := "mixed-port: 7890\nmode: rule\nproxies: []\n"
+	if err := dataStore.CompleteTask(ctx, agent.ID, read.ID, core.TaskResultRequest{
+		LeaseID: claimed.LeaseID, Success: true, Output: content,
+	}); err != nil {
+		t.Fatalf("complete initial read task: %v", err)
+	}
+
+	adminToken := strings.Repeat("c", 48)
+	handler := New(dataStore, Config{AdminToken: adminToken}).Handler()
+	post := func(payload any) *httptest.ResponseRecorder {
+		t.Helper()
+		encoded, err := json.Marshal(payload)
+		if err != nil {
+			t.Fatalf("encode task request: %v", err)
+		}
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/tasks", bytes.NewReader(encoded))
+		request.Header.Set("Authorization", "Bearer "+adminToken)
+		request.Header.Set("Content-Type", "application/json")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		return response
+	}
+
+	cachedResponse := post(map[string]any{
+		"agent_id": agent.ID, "action": core.ActionReadConfig, "engine": core.EngineMihomo,
+		"prefer_cached": true,
+	})
+	if cachedResponse.Code != http.StatusOK {
+		t.Fatalf("cached read status=%d body=%s", cachedResponse.Code, cachedResponse.Body.String())
+	}
+	var cached core.Task
+	if err := json.Unmarshal(cachedResponse.Body.Bytes(), &cached); err != nil ||
+		!cached.Reused || cached.ID != read.ID || cached.Status != core.TaskSucceeded || cached.ConfigContent != "" {
+		t.Fatalf("cached read task = %+v, %v", cached, err)
+	}
+	snapshotResponse := taskAPIRequest(t, handler, adminToken, http.MethodGet, "/api/v1/tasks/"+cached.ID+"/config-snapshot")
+	if snapshotResponse.Code != http.StatusOK || !strings.Contains(snapshotResponse.Body.String(), "mixed-port") {
+		t.Fatalf("cached snapshot status=%d body=%s", snapshotResponse.Code, snapshotResponse.Body.String())
+	}
+
+	if response := post(map[string]any{
+		"agent_id": agent.ID, "action": core.ActionStatus, "engine": core.EngineMihomo,
+		"prefer_cached": true,
+	}); response.Code != http.StatusBadRequest {
+		t.Fatalf("non-read cache hint status=%d body=%s", response.Code, response.Body.String())
+	}
+	freshResponse := post(core.TaskRequest{
+		AgentID: agent.ID, Action: core.ActionReadConfig, Engine: core.EngineMihomo,
+	})
+	if freshResponse.Code != http.StatusCreated {
+		t.Fatalf("forced fresh read status=%d body=%s", freshResponse.Code, freshResponse.Body.String())
+	}
+	var fresh core.Task
+	if err := json.Unmarshal(freshResponse.Body.Bytes(), &fresh); err != nil || fresh.ID == read.ID || fresh.Reused || fresh.Status != core.TaskPending {
+		t.Fatalf("forced fresh read task = %+v, %v", fresh, err)
+	}
+}
+
 func TestTaskAPIRejectsEveryCoreActionForUnsupportedExistingService(t *testing.T) {
 	databaseURL := os.Getenv("QCH_TEST_DATABASE_URL")
 	if databaseURL == "" {

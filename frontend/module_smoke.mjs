@@ -87,11 +87,13 @@ import {
 import { ConfigFormatError, formatConfigContent } from "./modules/code-format.js";
 import { configFieldURL, renderSSRustFieldStudio, ssRustFieldGroups, ssRustPlanBinding } from "./modules/ss-rust-fields.js";
 import {
+  assertAgentConfigBaseline,
   bindServerPlanRegeneration,
   installConfigPages,
   liveConfigEngineEligible,
   liveConfigEditorState,
   liveConfigReadAction,
+  liveConfigSnapshotReusable,
   readServerPlanInput,
   submitLiveConfigChange,
 } from "./modules/configs.js";
@@ -498,6 +500,63 @@ assert.equal(
   }),
   "read-config",
 );
+const snapshotNow = Date.now();
+assert.equal(liveConfigSnapshotReusable({ content:"node", readAt:snapshotNow - 599_999 }, snapshotNow), true);
+assert.equal(liveConfigSnapshotReusable({ content:"node", readAt:snapshotNow - 600_000 }, snapshotNow), false,
+  "volatile Agent snapshots must not outlive the PostgreSQL 600-second cache window");
+assert.equal(liveConfigSnapshotReusable({ content:"saved draft", saved:true, readAt:0 }, snapshotNow), true,
+  "saved drafts are not Agent snapshot cache entries and must remain available");
+
+assert.doesNotThrow(() => assertAgentConfigBaseline("agent bytes\n", "agent bytes\n"));
+let baselineConflict;
+try { assertAgentConfigBaseline("cached bytes\n", "changed on agent\n"); }
+catch (error) { baselineConflict = error; }
+assert.match(baselineConflict?.message || "", /部署前核验发现 Agent 当前配置已在页面读取后发生变化/);
+assert.equal(baselineConflict.deployPreflight, true);
+
+const deployOrder = [];
+const deployForm = new Map([
+  ["name", "verified deployment"],
+  ["description", "preflight order"],
+  ["content", "edited target\n"],
+  ["version", "0"],
+]);
+await submitLiveConfigChange({
+  api: async (_path, options) => {
+    deployOrder.push("save");
+    return { id: "cfg_verified", version: 1, ...JSON.parse(options.body) };
+  },
+  submitTask: async () => {
+    deployOrder.push("deploy");
+    return { id: "tsk_verified" };
+  },
+  agent: { id: "agt_verified" },
+  engine: "xray",
+  intent: "deploy",
+  form: deployForm,
+  source: { content: "cached bytes\n", agentContent: "cached bytes\n" },
+  existingAvailable: false,
+  savedConfig: null,
+  beforeDeploy: async () => { deployOrder.push("verify"); },
+});
+assert.deepEqual(deployOrder, ["verify", "save", "deploy"],
+  "deployment must force Agent verification before persisting the draft or creating its task");
+
+let preflightMutationAttempted = false;
+await assert.rejects(submitLiveConfigChange({
+  api: async () => { preflightMutationAttempted = true; },
+  submitTask: async () => { preflightMutationAttempted = true; },
+  agent: { id: "agt_conflict" },
+  engine: "xray",
+  intent: "deploy",
+  form: deployForm,
+  source: { content: "cached bytes\n", agentContent: "cached bytes\n" },
+  existingAvailable: false,
+  savedConfig: null,
+  beforeDeploy: async () => assertAgentConfigBaseline("cached bytes\n", "changed on agent\n"),
+}), /已停止保存和部署/);
+assert.equal(preflightMutationAttempted, false,
+  "a changed Agent baseline must block both the config save and deploy task");
 
 const dualSourceDocument = globalThis.document;
 globalThis.document = {
@@ -1152,7 +1211,7 @@ for (const install of [
       data: {
         agents: [makeAgent()], agentId: AGENT_ID, engine: ENGINE,
         liveAgent: AGENT_ID, liveEngine: ENGINE,
-        liveSources: { [KEY]: { content: OLD_CONTENT, reading: false } },
+        liveSources: { [KEY]: { content: OLD_CONTENT, agentContent: OLD_CONTENT, reading: false } },
       },
       session: { role: "admin" },
     };
@@ -1189,6 +1248,8 @@ for (const install of [
       "POST /tasks": (options) => {
         const body = JSON.parse(options?.body || "{}");
         if (body.action === "read-managed-config") {
+          assert.equal(body.prefer_cached, true,
+            "automatic live-config reads should request the 600-second server snapshot cache");
           freshReadCount += 1;
           return { id: `read-${freshReadCount}` };
         }
@@ -1468,11 +1529,12 @@ for (const install of [
       data: {
         agents: [makeAgent()], agentId: AGENT_ID, engine: ENGINE,
         liveAgent: AGENT_ID, liveEngine: ENGINE,
-        liveSources: { [KEY]: { content: OLD_CONTENT, reading: false } },
+        liveSources: { [KEY]: { content: OLD_CONTENT, agentContent: OLD_CONTENT, reading: false } },
       },
       session: { role: "admin" },
     };
     let editorReadCount = 0;
+    const editorReadCacheHints = [];
 
     const liveForm = new FakeForm({
       content: NEW_CONTENT, name: "e", description: "d", version: "1",
@@ -1486,6 +1548,7 @@ for (const install of [
         const body = JSON.parse(options?.body || "{}");
         if (body.action === "deploy") return { id: "lc-deploy-task" };
         editorReadCount += 1;
+        editorReadCacheHints.push(body.prefer_cached);
         return { id: `editor-read-${editorReadCount}` };
       },
       "GET /tasks/lc-deploy-task": () => ({
@@ -1494,7 +1557,9 @@ for (const install of [
       "GET /tasks/editor-read-\\d+": (_o, p) => ({
         status: "succeeded", id: p.split("/").pop(),
       }),
-      "GET /tasks/editor-read-\\d+/config-snapshot": { content: NEW_CONTENT },
+      "GET /tasks/editor-read-\\d+/config-snapshot": (_o, path) => ({
+        content: path.includes("editor-read-1/") ? OLD_CONTENT : NEW_CONTENT,
+      }),
     });
 
     const pages = installForms(ctx, { "#live-config-form": liveForm });
@@ -1504,8 +1569,12 @@ for (const install of [
 
     assert.equal(state.data.pendingDeployTasks?.[KEY], undefined,
       "[F] pending cleared after editor deploy succeeded");
-    assert.ok(editorReadCount >= 1,
-      "[F] fresh managed-config read fired after editor deploy succeeded");
+    assert.ok(editorReadCount >= 2,
+      "[F] forced preflight and post-deploy reads both ran");
+    assert.equal(editorReadCacheHints[0], undefined,
+      "[F] deploy preflight must bypass the 600-second cache");
+    assert.ok(editorReadCacheHints.slice(1).includes(true),
+      "[F] ordinary post-deploy page reads may request the cache");
     assert.equal(state.data.liveSources?.[KEY]?.content, NEW_CONTENT,
       "[F] cache contains post-deploy content after convergence");
   }

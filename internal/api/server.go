@@ -665,16 +665,55 @@ func (s *Server) listTasks(w http.ResponseWriter, request *http.Request) {
 	writeJSON(w, http.StatusOK, tasks)
 }
 
+// Automatic page entry may reuse an already validated encrypted task snapshot.
+// Deployment preflight deliberately omits prefer_cached, so this longer display
+// window cannot become a stale-write window.
+const automaticConfigReadCacheTTL = 600 * time.Second
+
 func (s *Server) createTask(w http.ResponseWriter, request *http.Request) {
-	var input core.TaskRequest
+	var input struct {
+		core.TaskRequest
+		PreferCached bool `json:"prefer_cached,omitempty"`
+	}
 	if err := decodeJSON(w, request, &input, 64<<10); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if input.PreferCached && input.Action != core.ActionReadConfig && input.Action != core.ActionReadManagedConfig {
+		writeError(w, http.StatusBadRequest, "prefer_cached is only supported for configuration read tasks")
 		return
 	}
 	if input.Action.SystemBBR() && !s.authorizeSystemBBR(w, request, input.AgentID) {
 		return
 	}
-	task, err := s.store.CreateTask(request.Context(), input)
+	if input.PreferCached {
+		recent, err := s.store.RecentReadTask(
+			request.Context(), input.AgentID, input.Engine, input.Action, automaticConfigReadCacheTTL,
+		)
+		if err == nil {
+			// Verify that the selected ciphertext is still present and decryptable
+			// before advertising a cache hit. A concurrent invalidation may still
+			// win after this check; the client handles that narrow 404 race by
+			// issuing one forced read.
+			if _, snapshotErr := s.store.ReadTaskConfigSnapshot(
+				request.Context(), recent.ID, recent.AgentID, recent.Engine,
+			); snapshotErr == nil {
+				recent.ConfigContent = ""
+				recent.Reused = true
+				writeJSON(w, http.StatusOK, recent)
+				return
+			} else if !errors.Is(snapshotErr, store.ErrNotFound) {
+				writeStoreError(w, snapshotErr)
+				return
+			}
+			err = store.ErrNotFound
+		}
+		if !errors.Is(err, store.ErrNotFound) {
+			writeStoreError(w, err)
+			return
+		}
+	}
+	task, err := s.store.CreateTask(request.Context(), input.TaskRequest)
 	if err != nil {
 		writeStoreError(w, err)
 		return

@@ -2313,6 +2313,25 @@ func (s *Store) CompleteTask(ctx context.Context, agentID, taskID string, result
 		}
 	}
 	if status == core.TaskSucceeded {
+		// Automatic configuration reads may reuse a very recent validated
+		// snapshot. Drop both read-action variants after a task that can change
+		// the managed file or the validating core so a hard refresh can never
+		// resurrect a pre-mutation result. Older Agents use read-config for their
+		// managed file, so invalidation cannot safely distinguish the sources.
+		var invalidatedReadActions []string
+		switch action {
+		case core.ActionDeploy, core.ActionInstall, core.ActionImportExisting:
+			invalidatedReadActions = []string{string(core.ActionReadConfig), string(core.ActionReadManagedConfig)}
+		}
+		if len(invalidatedReadActions) > 0 {
+			if _, err := tx.Exec(ctx, `UPDATE tasks SET config_content=NULL
+				WHERE agent_id=$1 AND engine=$2 AND action=ANY($3::varchar[]) AND config_content IS NOT NULL`,
+				agentID, engine, invalidatedReadActions); err != nil {
+				return err
+			}
+		}
+	}
+	if status == core.TaskSucceeded {
 		if err := recordEngineOwnershipTx(ctx, tx, taskID, action, result.TrafficSettled); err != nil {
 			return err
 		}
@@ -2340,14 +2359,17 @@ func (s *Store) ReadTaskConfigSnapshot(ctx context.Context, taskID, agentID stri
 	return s.decryptContent(content)
 }
 
-func (s *Store) RecentReadTask(ctx context.Context, agentID string, engine core.Engine, maxAge time.Duration) (core.Task, error) {
+func (s *Store) RecentReadTask(ctx context.Context, agentID string, engine core.Engine, action core.Action, maxAge time.Duration) (core.Task, error) {
 	if err := requireHostConfigRead(ctx, s.pool, agentID, engine); err != nil {
 		return core.Task{}, ErrNotFound
+	}
+	if action != core.ActionReadConfig && action != core.ActionReadManagedConfig {
+		return core.Task{}, fmt.Errorf("%w: recent configuration snapshots require a read action", ErrInvalid)
 	}
 	if maxAge <= 0 {
 		return core.Task{}, ErrNotFound
 	}
-	args := []any{agentID, engine, core.ActionReadConfig, intervalString(maxAge)}
+	args := []any{agentID, engine, action, intervalString(maxAge)}
 	where := ownerClause(ctx, "owner_id", &args)
 	row := s.pool.QueryRow(ctx, `
 		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),COALESCE(core_version,''),COALESCE(core_source,''),status,attempt,

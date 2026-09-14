@@ -22,9 +22,9 @@ async function fixture(engine, readOnly = false, imported = false, preview = fal
     node.runtime[other] = {installed:true};
     node.runtime[engine].existing_config_available = true;
   }
-  const state = {route:"live-config",navigationEpoch:1,data:{liveAgent:"node",liveEngine:engine,liveConfigSource:imported?"import":"managed",liveSources:{[sourceKey]:{content}}}};
+  const state = {route:"live-config",navigationEpoch:1,data:{liveAgent:"node",liveEngine:engine,liveConfigSource:imported?"import":"managed",liveSources:{[sourceKey]:{content,agentContent:content}}}};
   let saved = {id:"config",version:1,name:"fixture",content};
-  const test = {writes:[],tasks:[],confirmations:[],notifications:[],accept:false};
+  const test = {writes:[],tasks:[],reads:[],confirmations:[],notifications:[],accept:false};
   const api = async (path, options = {}) => {
     if (path === "/agents") return [node];
     if (path.endsWith("/workspace")) {
@@ -37,6 +37,12 @@ async function fixture(engine, readOnly = false, imported = false, preview = fal
       if (test.saveError) throw test.saveError;
       saved = {...input,id:"config",version:saved.version+1}; return saved;
     }
+    if (options.method === "POST" && path === "/tasks") {
+      const input = JSON.parse(options.body);
+      test.reads.push(input);
+      return {id:`read-${test.reads.length}`,action:input.action,status:"succeeded"};
+    }
+    if (path.startsWith("/tasks/read-") && path.endsWith("/config-snapshot")) return {content};
     if (path.startsWith("/tasks/")) return {status:"failed",error:"Fixture: node execution is intentionally not performed"};
     throw new Error(`unexpected API ${path}`);
   };
@@ -84,6 +90,8 @@ export async function testConfigMigrationRuntime(preview = false) {
       assert(buttons[1].querySelector("b").textContent === "VLESS-REALITY-443", "renaming the preset did not refresh its filename");
       document.querySelector('[data-live-intent="deploy"]').click(); await pause();
       assert(test.writes.length===1 && test.tasks.length===1,"source deployment did not save and submit exactly once");
+      assert(test.reads.length===1 && test.reads[0].prefer_cached===undefined,
+        "source deployment preflight reused the display cache");
       assert(test.tasks[0].action==="deploy","source save must use validated rollback-capable deployment");
       assert(test.tasks[0].expected_config_version===2,"source deployment must use the exact newly saved version");
       assert(test.writes[0].content.includes("9007199254740993") && test.writes[0].content.includes("2080"),"source deployment corrupted integer or discarded fragment draft");
@@ -104,6 +112,8 @@ export async function testConfigMigrationRuntime(preview = false) {
       button.click(); await pause();
       assert(legacy.writes.length===1 && legacy.tasks.length===1 && legacy.tasks[0].action==="deploy",
         "removing bundle generation blocked normal deployment to a legacy Agent");
+      assert(legacy.reads.length===1 && legacy.reads[0].prefer_cached===undefined,
+        "legacy source deployment skipped its forced Agent read");
     }
   }
   await testSourceSaveRuntime();
