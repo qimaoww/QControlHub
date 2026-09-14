@@ -123,6 +123,13 @@ export QCH_SYSTEMD_UNIT_ROOT="$test_root/unit"
 export QCH_OPENRC_INIT_ROOT="$test_root/init"
 export QCH_OPENRC_CONF_DIR="$test_root/conf"
 export QCH_OPENRC_RUNLEVELS_ROOT="$test_root/runlevels"
+# The sandbox control plane is reached as http://sandbox.local. A bare host now
+# defaults to https:// and plaintext is refused for a non-loopback host unless a
+# CA file is configured, so the harness states its cleartext intent explicitly
+# -- exactly the private-CA shape a real deployment uses.
+ca_file="$test_root/control-plane-ca.pem"
+printf '%s\n' 'sandbox placeholder CA' > "$ca_file"
+export QCH_TLS_CA_FILE="$ca_file"
 export PATH="$fake_bin:$PATH"
 
 control="http://sandbox.local"
@@ -225,6 +232,26 @@ if grep -q '^QCH_ENROLLMENT_TOKEN=' "$QCH_AGENT_ENV_FILE"; then
   printf '%s\n' 'migration retry: temporary credentials were not scrubbed' >&2
   exit 1
 fi
+
+echo '== bare host defaults to https (no plaintext downgrade) =='
+sh "$installer" update sandbox.example.com "$token" > "$test_root/bare-host.log"
+assert_env_once QCH_SERVER_URL 'https://sandbox.example.com'
+if grep -q '^QCH_ALLOW_HTTP=' "$QCH_AGENT_ENV_FILE"; then
+  printf '%s\n' 'bare host: QCH_ALLOW_HTTP was set for an https control plane' >&2
+  exit 1
+fi
+
+echo '== explicit http on a non-loopback host is refused without a CA file =='
+if QCH_TLS_CA_FILE= sh "$installer" update http://cleartext-panel.local "$token" > "$test_root/cleartext.log" 2>&1; then
+  printf '%s\n' 'cleartext guard: installer accepted a plaintext control plane' >&2
+  exit 1
+fi
+grep -qi 'refusing a plaintext control-plane URL' "$test_root/cleartext.log" || {
+  printf '%s\n' 'cleartext guard: refusal reason missing from output' >&2
+  exit 1
+}
+# The refused run must not have rewritten the endpoint.
+assert_env_once QCH_SERVER_URL 'https://sandbox.example.com'
 
 echo '== uninstall agent =='
 sh "$installer" uninstall > "$test_root/uninstall.log"

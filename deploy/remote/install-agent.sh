@@ -2,10 +2,14 @@
 # install-agent.sh — QControlHub agent 一键安装（root 执行，无需预装仓库）
 #
 # 用法：
-#   sh deploy/remote/install-agent.sh install   <control-plane-url|ip[:port]> <add-node-credential> [agent-name]
-#   sh deploy/remote/install-agent.sh update    <control-plane-url|ip[:port]> <add-node-credential> [agent-name]
-#   sh deploy/remote/install-agent.sh migrate   <new-control-plane-url|ip[:port]> <add-node-credential> [agent-name]
+#   sh deploy/remote/install-agent.sh install   <control-plane-url|host[:port]> <add-node-credential> [agent-name]
+#   sh deploy/remote/install-agent.sh update    <control-plane-url|host[:port]> <add-node-credential> [agent-name]
+#   sh deploy/remote/install-agent.sh migrate   <new-control-plane-url|host[:port]> <add-node-credential> [agent-name]
 #   sh deploy/remote/install-agent.sh uninstall
+#
+# 省略协议时按 https:// 处理：裸主机名或 IP 只会升级为 HTTPS，不会降级为明文。
+# 添加节点凭证经请求头发送、下载的 Agent 以 root 安装，因此明文链路必须显式选择：
+# 传 http:// URL，且非回环地址还须设置 QCH_TLS_CA_FILE。
 #
 # 示例：
 #   QCH_TLS_CA_FILE=/etc/qcontrolhub/control-plane-ca.pem \
@@ -238,8 +242,8 @@ fi
 install_nftables
 install_iproute2
 
-control="${1:?usage: install-agent.sh install|update <control-plane-url|ip[:port]> <add-node-credential> [agent-name]}"
-token="${2:?usage: install-agent.sh install|update <control-plane-url|ip[:port]> <add-node-credential> [agent-name]}"
+control="${1:?usage: install-agent.sh install|update <control-plane-url|host[:port]> <add-node-credential> [agent-name]}"
+token="${2:?usage: install-agent.sh install|update <control-plane-url|host[:port]> <add-node-credential> [agent-name]}"
 name_arg="${3:-}"
 default_name=$(hostname)
 name=${name_arg:-$default_name}
@@ -252,9 +256,14 @@ validate_environment_value QCH_AGENT_NAME "$name"
 validate_environment_value QCH_TLS_CA_FILE "$ca_file"
 validate_environment_value QCH_ALLOW_INSECURE_LIVE "$allow_insecure_live"
 
+# A bare host or IP is upgraded to HTTPS, never downgraded to plaintext. The
+# add-node credential travels in a request header and the downloaded Agent runs
+# as root, so an unencrypted control-plane URL would expose both to anyone on
+# the path. Cleartext is therefore an explicit choice: pass an http:// (or
+# ws://) URL and, unless it is loopback, also set QCH_TLS_CA_FILE.
 case "$control" in
   http://*|https://*|ws://*|wss://*) server_url="$control" ;;
-  *) server_url="http://$control" ;;
+  *) server_url="https://$control" ;;
 esac
 case "$server_url" in */) server_url=${server_url%/} ;; esac
 case "$server_url" in
@@ -269,6 +278,26 @@ case "$server_host" in
 esac
 case "$server_host" in
   *[[:space:]]*) printf '%s\n' 'control-plane URL must not contain whitespace' >&2; exit 1 ;;
+esac
+# Plaintext is allowed only for a loopback control plane or alongside a
+# configured CA file, which is how a deliberate private-TLS or sandbox setup
+# states its intent instead of losing the scheme by accident.
+case "$server_url" in
+  http://*|ws://*)
+    cleartext_host=${server_host%%:*}
+    case "$cleartext_host" in
+      localhost|127.*|\[::1\]|::1) ;;
+      *)
+        if [ -z "$ca_file" ]; then
+          printf '%s\n' \
+            'refusing a plaintext control-plane URL for a non-loopback host.' \
+            'A bare host or IP now defaults to https://; use that, or pass an explicit' \
+            'http:// URL together with QCH_TLS_CA_FILE when cleartext is intended.' >&2
+          exit 1
+        fi
+        ;;
+    esac
+    ;;
 esac
 
 work_dir=$(mktemp -d "${TMPDIR:-/tmp}/qcontrolhub-agent.XXXXXX")
