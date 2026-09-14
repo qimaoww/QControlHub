@@ -49,9 +49,45 @@ var rolePermissions = map[Role]map[Permission]struct{}{}
 
 func AllPermissions() []Permission { return append([]Permission(nil), allPermissions...) }
 
-func NormalizePermissions(values []Permission) []Permission {
-	allowed := make(map[Permission]struct{}, len(allPermissions))
-	for _, value := range allPermissions {
+// PermissionGrantsAdministration reports whether holding this capability is
+// equivalent to being an administrator.
+//
+// users.manage is admin-equivalent by construction rather than merely strong:
+// UpdateUser authorizes on scope.Admin, scope.Admin is derived from the stored
+// role, and an admin resolves every agent, config and task without an owner
+// filter. An account that can edit users can therefore set its own role to
+// admin and take over the whole fleet.
+//
+// The console never offers this capability for a user account, so the
+// invariant enforced by GrantablePermissions is defence in depth: it also
+// covers a direct API call, a future console change, and a database restored
+// from an older schema.
+func PermissionGrantsAdministration(permission Permission) bool {
+	return permission == PermissionUsersManage
+}
+
+// GrantablePermissions returns the capabilities an administrator may assign
+// explicitly. It is AllPermissions minus the admin-equivalent ones, so
+// NormalizePermissions rejects an attempt to store an administrator capability
+// on a user row instead of quietly dropping it.
+func GrantablePermissions() []Permission {
+	result := make([]Permission, 0, len(allPermissions))
+	for _, permission := range allPermissions {
+		if PermissionGrantsAdministration(permission) {
+			continue
+		}
+		result = append(result, permission)
+	}
+	return result
+}
+
+// NormalizePermissions keeps only known capabilities. assignable is used for
+// requests that attach capabilities to an account, so an admin-equivalent
+// capability cannot be stored on a user row; pass AllPermissions to normalize
+// a role that already carries full authority.
+func NormalizePermissions(values []Permission, assignable []Permission) []Permission {
+	allowed := make(map[Permission]struct{}, len(assignable))
+	for _, value := range assignable {
 		allowed[value] = struct{}{}
 	}
 	seen := make(map[Permission]struct{}, len(values))

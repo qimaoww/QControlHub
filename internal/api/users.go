@@ -37,7 +37,10 @@ func (s *Server) createUser(w http.ResponseWriter, request *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	normalizedPermissions := core.NormalizePermissions(input.Permissions)
+	// An admin-equivalent capability on a user account would let that account
+	// promote itself, so it is not assignable here. It is not rejected when an
+	// administrator is created: that role resolves every capability anyway.
+	normalizedPermissions := core.NormalizePermissions(input.Permissions, core.GrantablePermissions())
 	if len(normalizedPermissions) != len(input.Permissions) {
 		writeError(w, http.StatusBadRequest, "invalid user permission")
 		return
@@ -79,7 +82,10 @@ func (s *Server) updateUser(w http.ResponseWriter, request *http.Request) {
 		return
 	}
 	if input.Permissions != nil {
-		normalized := core.NormalizePermissions(*input.Permissions)
+		// Same rule as account creation: a user row may not carry an
+		// admin-equivalent capability. The store re-checks this against the
+		// account's current role inside the update transaction.
+		normalized := core.NormalizePermissions(*input.Permissions, core.GrantablePermissions())
 		if len(normalized) != len(*input.Permissions) {
 			writeError(w, http.StatusBadRequest, "invalid user permission")
 			return

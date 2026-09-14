@@ -86,9 +86,20 @@ func (s *Store) CreateUser(ctx context.Context, request core.UserRequest, passwo
 	}
 	username := strings.TrimSpace(request.Username)
 	displayName := strings.TrimSpace(request.DisplayName)
-	permissions, _ := json.Marshal(core.NormalizePermissions(request.Permissions))
+	permissions, _ := json.Marshal(core.NormalizePermissions(request.Permissions, core.GrantablePermissions()))
 	if request.Role == core.RoleAdmin {
 		permissions, _ = json.Marshal(core.AllPermissions())
+	}
+	// Same final-state invariant as UpdateUser: an admin-equivalent capability
+	// may only be stored alongside the administrator role.
+	if request.Role != core.RoleAdmin {
+		var stored []core.Permission
+		if err := json.Unmarshal(permissions, &stored); err != nil {
+			return core.User{}, err
+		}
+		if core.HasPermission(stored, core.PermissionUsersManage) {
+			return core.User{}, fmt.Errorf("%w: users.manage may not be granted to a user account", ErrInvalid)
+		}
 	}
 	now := time.Now().UTC()
 	row := s.pool.QueryRow(ctx, `
@@ -151,12 +162,22 @@ func (s *Store) UpdateUser(ctx context.Context, id string, update core.UserUpdat
 		displayName = strings.TrimSpace(*update.DisplayName)
 	}
 	if update.Permissions != nil {
-		permissions = core.NormalizePermissions(*update.Permissions)
+		permissions = core.NormalizePermissions(*update.Permissions, core.GrantablePermissions())
 	} else if current.User.Role == core.RoleAdmin && role != core.RoleAdmin {
 		permissions = []core.Permission{}
 	}
 	if role == core.RoleAdmin {
 		permissions = core.AllPermissions()
+	}
+	// Final-state invariant, checked against the locked row so role and
+	// permissions cannot be validated apart. An admin-equivalent capability on
+	// a non-administrator row is a privilege-escalation grant: the holder could
+	// promote itself and then read every account's nodes. The console cannot
+	// express this, so reaching it means a direct API call, a console
+	// regression, or an older database restored into this build; reject rather
+	// than silently store a second administrator.
+	if role != core.RoleAdmin && core.HasPermission(permissions, core.PermissionUsersManage) {
+		return core.User{}, fmt.Errorf("%w: users.manage may not be granted to a user account", ErrInvalid)
 	}
 	if current.User.Role == core.RoleAdmin && (!current.User.Disabled && (role != core.RoleAdmin || disabled)) {
 		var otherAdmins int
