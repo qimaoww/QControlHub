@@ -2603,7 +2603,7 @@ CREATE TABLE IF NOT EXISTS core_logs (
 -- (selected engines × optional agent). The covering index below serves every
 -- variant of it with index-only reads, so the older single-column recency
 -- indexes only added write amplification: every inserted row had to maintain
--- them while no query used them. See docs/performance.md.
+-- them while no query used them.
 CREATE INDEX IF NOT EXISTS core_logs_agent_engine_covering_idx ON core_logs(agent_id,engine,id DESC)
     INCLUDE (level,message,logged_at,received_at);
 CREATE INDEX IF NOT EXISTS core_logs_received_idx ON core_logs(received_at);
