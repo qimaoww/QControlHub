@@ -743,6 +743,19 @@ func TestSubStoreSyncUsesCompactPanelPatterns(t *testing.T) {
 	}
 }
 
+func TestSystemBBRCardsUseDraggedNodeSettingsOrder(t *testing.T) {
+	module := string(mustReadFrontendFile(t, "modules/system-bbr.js"))
+	for _, required := range []string{
+		`import { orderNodesBySavedOrder } from "./node-order.js";`,
+		`agents = orderNodesBySavedOrder(`,
+		`agents.filter((agent) => agent.can_manage !== false),`,
+	} {
+		if !strings.Contains(module, required) {
+			t.Errorf("system BBR cards are not using shared node ordering: missing %q", required)
+		}
+	}
+}
+
 func TestAgentWebSocketProxyForwardsSourceChain(t *testing.T) {
 	nginx, err := os.ReadFile("nginx.conf")
 	if err != nil {

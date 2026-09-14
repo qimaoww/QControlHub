@@ -1,4 +1,5 @@
 import { diagnosticError } from "./errors.js";
+import { orderNodesBySavedOrder } from "./node-order.js";
 import { bindEvent, createPoller, createRefreshChannel } from "./refresh.js";
 
 export const systemBBRFeature = "system-bbr-v1";
@@ -101,7 +102,9 @@ export function installSystemBBR(ctx) {
   }
 
   function render(agents) {
-    agents = agents.filter((agent) => agent.can_manage !== false);
+    agents = orderNodesBySavedOrder(
+      agents.filter((agent) => agent.can_manage !== false),
+    );
     const focused = document.activeElement;
     state.data.agents = agents;
     state.data.bbrAgent = selectedID();
