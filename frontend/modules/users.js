@@ -4,6 +4,7 @@ import { sharedEngineChoices, sharedEngineNames } from "./engine-capabilities.js
 const GiB = 1024 ** 3;
 export const userPermissions = [
   ["overview.read", "总览"], ["agents.read", "节点查看"], ["metrics.read", "性能指标"],
+  ["panel-metrics.read", "面板主机指标"],
   ["agent-config.read", "配置查看"], ["agent-config.write", "配置编辑"], ["catalogs.read", "内核预设"],
   ["configs.read", "配置存档"], ["configs.write", "存档编辑"], ["configs.restore", "版本恢复"],
   ["configs.delete", "存档删除"], ["deployments.read", "部署记录"], ["tasks.read", "任务查看"],
@@ -13,7 +14,10 @@ export const userPermissions = [
   ["agents.manage", "自有主机 / 共享管理"], ["traffic.manage", "自有节点配额"], ["enrollment.manage", "添加自有节点"],
   ["core-logs.read", "自有主机日志"], ["audit.read", "个人审计记录"],
 ];
-const defaultPermissions = userPermissions.map(([permission]) => permission);
+// Panel-host counters are global infrastructure data, not a user's node
+// metrics. Only an explicit administrator grant may expose them to a user.
+const defaultPermissions = userPermissions.map(([permission]) => permission)
+  .filter((permission) => permission !== "panel-metrics.read");
 
 export function parseSharedPorts(value) {
   const parts = String(value ?? "").trim().replace(/(\d)\s*-\s*(?=\d)/g, "$1-").split(/[\s,，]+/).filter(Boolean);

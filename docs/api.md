@@ -42,6 +42,7 @@
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | `GET` | `/api/v1/overview` | 节点、配置和任务计数 |
+| `GET` | `/api/v1/panel-metrics` | 控制面所在环境的 CPU、内存、根文件系统及网络快照，需 `panel-metrics.read` |
 | `POST` | `/api/v1/auth/login` | 使用用户名/密码或管理令牌创建 SPA 会话，返回身份、工作区和 CSRF token |
 | `GET` | `/api/v1/auth/session` | 读取当前 SPA 会话 |
 | `POST` | `/api/v1/auth/logout` | 注销当前 SPA 会话 |
@@ -139,6 +140,29 @@
 在节点设置中点击旗帜可搜索、选择国家/地区；保存后节点设置及客户端卡片左上角使用同一旗帜。`PUT /api/v1/agents/{id}/region` 接收 `{"country_code":"SG"}`，代码由 `/api/v1/regions` 提供，保存时去除首尾空格并转大写；`{"country_code":""}` 清除手动设置并恢复自动识别。缺少字段、`null` 或不支持的代码返回 400。设置持久化为节点的 `region_code` 标签，重连后保留，不修改其他标签、公网 IP 或客户端连接配置。只读用户只能查看；写入沿用管理权限、CSRF 和审计保护。
 
 `GET /api/v1/overview` 中的 `configs` 只统计可在“配置档案”工作区跨节点下发的全局配置；`node_configs` 单独统计绑定到具体 Agent/内核的节点配置，避免将两类配置混为一个不可解释的总数。为兼容既有调用方，`tasks_pending` 仍表示 `pending + running` 的活动任务总数；`tasks_queued` 和 `tasks_running` 分别给出排队与执行中的精确数量。
+
+### 面板主机资源
+
+`GET /api/v1/panel-metrics` 读取控制面每 2 秒采集的内存快照，不查询 PostgreSQL，
+不依赖已注册 Agent，也不写入节点指标历史。它需要独立的 `panel-metrics.read`：
+管理员默认拥有；普通用户创建时默认不选中，只有管理员显式授予后才能读取。
+已有 `metrics.read` 和兼容 operator/auditor/readonly 令牌不会自动获得此能力。
+
+响应使用主机指标字段：`collected_at`、`cpu_available` / `cpu_percent`，
+`memory_available` / `memory_used_bytes` / `memory_total_bytes`，
+`disk_available` / `disk_used_bytes` / `disk_total_bytes`，以及 `network_available`、
+`network_rx_bytes` / `network_tx_bytes`、`network_rx_bps` / `network_tx_bps`。
+容量为字节，网络速率为字节/秒，CPU 为所有可见逻辑核心的平均使用率（0–100）。
+初始 CPU 采样窗口尚未形成或某项采集失败时，对应 `*_available` 为 `false`；
+不能把不可用当成 0% 使用率。部分采集失败不会清空其他可用指标。
+接口不返回网卡地址、公网 IP 或 BBR 配置，响应设置 `Cache-Control: no-store`。
+
+采集范围是控制面进程可见的运行环境，不是 Go 进程本身的资源占用，也不是远程节点总和。
+Linux 下 CPU 和内存优先读取 `/proc`，受限环境可回退到 cgroup/系统计数；
+磁盘统计当前根文件系统，网络统计默认路由网卡。容器部署时，尤其不能把容器可见的
+磁盘和网络当作完整宿主机的挂载与网卡统计；无需增加特权或挂载宿主机目录。
+前端仅在总览可见时每 2 秒刷新此卡片；刷新失败保留旧值并标记异常，超过 15 秒的
+样本标记为过期，不影响月份选择、流量明细弹窗或其他总览内容。
 
 ### 从节点入站生成出站
 

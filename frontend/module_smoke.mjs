@@ -17,6 +17,7 @@ import "./engine_capabilities_smoke.mjs";
 import "./users_smoke.mjs";
 import "./account_storage_smoke.mjs";
 import "./node_order_smoke.mjs";
+import "./panel_metrics_smoke.mjs";
 
 import {
   agentStructureSignature,
@@ -3014,7 +3015,7 @@ try {
             return { days: [{ day: "2026-08-27", received_bytes: 6, sent_bytes: 4, used_bytes: 10, peak_receive_bps: 2, peak_send_bps: 1 }] };
           assert.fail(`unexpected dashboard preload API path ${path}`);
         },
-        can: (capability) => capability === "traffic.read",
+        can: (capability) => ["traffic.read", "agents.read", "tasks.read"].includes(capability),
         esc: (value) => String(value ?? ""),
         bytes: (value) => `${value || 0} B`,
         rate: (value) => `${value || 0} B/s`,

@@ -11,7 +11,8 @@ DOM instead of replacing the application tree.
 | Page or flow | Data sources | Refresh entry | View application |
 | --- | --- | --- | --- |
 | All routes | overview and settings | initial route, hash change, task refresh button | latest-route scheduler; same-route keyed reconciliation |
-| Dashboard | agents, recent tasks, preloaded overview | route render | same-route reconciliation |
+| Dashboard | permitted agents/recent tasks, monthly traffic, preloaded overview | route render and month selection | same-route reconciliation; saved node order |
+| Dashboard host card | `/panel-metrics` in-memory snapshot, separate `panel-metrics.read` permission | initial card mount, manual refresh, 2-second visible-page timer | scoped card-only reconciliation; unavailable/stale/error states; abort and stop on route departure or hidden page |
 | Node settings | agents, enrollment tokens, preloaded overview, metric history | route render, manual metrics refresh, 2-second metrics timer, node mutations | metric fields patch in place; structural changes coalesce behind drag and FLIP completion |
 | Config inbound/common-field dialog | config workspace, generated plans, fields, revisions | inbound/common-field action, protocol/field selection, saved mutation | scoped form reconciliation; generated parameters patch only their controls; no duplicate source editor |
 | Live config | agents, node config workspace, task result and snapshot, on-demand revisions/deployments | route, node/engine selection, manual read, inbound/field mutation, post-task completion | request sequence guard plus same-route reconciliation; skip background application while a dialog or source draft is active |
@@ -75,6 +76,10 @@ snapshot is applied through the guarded live-config route.
   the drop target, and the FLIP transition or fallback cleanup have settled.
 - A failed background refresh marks the page-local status without clearing or
   replacing the current data. Its single timer remains available for recovery.
+- Panel-host polling never refetches overview, agents, tasks, or monthly
+  traffic. It keeps the active month picker and traffic detail modal intact.
+  Showing the tab again restarts polling immediately; logging out, navigating
+  away, or changing the render scope discards late responses.
 - Mutation notices use a fixed overlay and never scroll or shift the workspace.
 - Leaving node settings explicitly cancels pointer/FLIP state, removes its
   ghost, and discards queued callbacks from the departed page.
