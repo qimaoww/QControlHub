@@ -285,7 +285,6 @@ var errorMessages = map[string]string{
 	"agent label is too long":                                           "节点标签过长，请缩短后重试。",
 	"agent must provide a valid Ed25519 public key":                     "节点必须提供有效的 Ed25519 公钥。",
 	"Sub-Store redirects are not allowed":                               "Sub-Store 地址不允许重定向，请填写实际后端地址。",
-	"users.manage may not be granted to a user account":                 "用户管理权限仅属于管理员角色，不能授予普通账号。",
 }
 
 // Keep field names, indices and numeric limits useful without leaking parser

@@ -37,9 +37,7 @@ func (s *Server) createUser(w http.ResponseWriter, request *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	// Validate names here. The store validates the final role/permission pair;
-	// an administrator's returned AllPermissions list is a valid API input.
-	normalizedPermissions := core.NormalizePermissions(input.Permissions, core.AllPermissions())
+	normalizedPermissions := core.NormalizePermissions(input.Permissions)
 	if len(normalizedPermissions) != len(input.Permissions) {
 		writeError(w, http.StatusBadRequest, "invalid user permission")
 		return
@@ -81,9 +79,7 @@ func (s *Server) updateUser(w http.ResponseWriter, request *http.Request) {
 		return
 	}
 	if input.Permissions != nil {
-		// Role may be omitted on a partial update. Check membership here and
-		// let the store check the resulting role against the locked row.
-		normalized := core.NormalizePermissions(*input.Permissions, core.AllPermissions())
+		normalized := core.NormalizePermissions(*input.Permissions)
 		if len(normalized) != len(*input.Permissions) {
 			writeError(w, http.StatusBadRequest, "invalid user permission")
 			return

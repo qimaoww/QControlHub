@@ -13,7 +13,7 @@ import (
 
 func sharedTestUser(t *testing.T, db *Store, ctx context.Context, name string) (core.User, context.Context) {
 	t.Helper()
-	user, err := db.CreateUser(ctx, core.UserRequest{Username: name, Role: core.RoleUser, Permissions: core.GrantablePermissions()}, "test-only-hash")
+	user, err := db.CreateUser(ctx, core.UserRequest{Username: name, Role: core.RoleUser, Permissions: core.AllPermissions()}, "test-only-hash")
 	if err != nil {
 		t.Fatal(err)
 	}
