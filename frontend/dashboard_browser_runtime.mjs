@@ -87,6 +87,11 @@ export async function testDashboardRuntime(mode, preview = false) {
   const cpu = () => panel()?.querySelector('[data-panel-metric="cpu"] [data-panel-value]');
   const reads = (path) => fixture.calls.filter((call) => call.path === path).length;
   assert(!document.body.textContent.includes("undefined"), "missing overview fields leaked into the page");
+  if (!limited) {
+    const nodeLink = document.querySelector('.dock-nav a[href="#node-settings"]');
+    assert(nodeLink?.title === "节点", "node navigation tooltip must use the short label");
+    assert(nodeLink.querySelector(".dock-label")?.textContent === "节点", "desktop and mobile node navigation labels must match");
+  }
   if (!hasPanel) {
     assert(!panel(), "global panel-host card leaked to an unprivileged user");
     assert(reads("/panel-metrics") === 0, "unprivileged dashboard polled panel metrics");

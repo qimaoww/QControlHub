@@ -529,7 +529,7 @@ function shell(content, title, { viewKey = state.route } = {}) {
   const pendingShares = (state.data.agentAccess?.shares || []).filter(share => share.enabled && share.status === "pending").length;
   const links = [
     ["dashboard", "总览", dockIcons.layoutDashboard],
-    ["node-settings", "节点设置", dockIcons.server],
+    ["node-settings", "节点", dockIcons.server],
     ["live-config", "配置", dockIcons.fileCode],
     ["client-access", "客户端", dockIcons.monitorSmartphone],
     ["substore-sync", "同步", dockIcons.refreshCw, true],

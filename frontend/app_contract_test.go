@@ -396,7 +396,7 @@ func TestSidebarNavigationUsesWorkflowOrderAndResponsiveGrouping(t *testing.T) {
 	}
 	for _, required := range []string{
 		`const dockIcons = Object.freeze({`,
-		`["node-settings", "节点设置", dockIcons.server]`,
+		`["node-settings", "节点", dockIcons.server]`,
 		`["live-config", "配置", dockIcons.fileCode]`,
 		`["client-access", "客户端", dockIcons.monitorSmartphone]`,
 		`["substore-sync", "同步", dockIcons.refreshCw, true]`,
