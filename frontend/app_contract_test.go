@@ -709,6 +709,8 @@ func TestSubStoreSyncUsesCompactPanelPatterns(t *testing.T) {
 	styles := string(mustReadFrontendFile(t, "app.css"))
 	for _, required := range []string{
 		`installSubStoreSync`, `"substore-sync": subStoreSync`, `href="#client-access"`,
+		`import { orderNodesBySavedOrder } from "./node-order.js";`,
+		`groupSubStoreProfiles(filtered, agents)`,
 		`data-substore-settings-dialog`, `dialog?.showModal()`, `data-substore-run`,
 		`data-substore-select`, `data-substore-parameters-form`, `data-substore-remove`,
 		`substore-node-settings-row`, `name="sync_mode" value="incremental"`,
