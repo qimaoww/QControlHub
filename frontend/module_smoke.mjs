@@ -18,6 +18,7 @@ import "./users_smoke.mjs";
 import "./account_storage_smoke.mjs";
 import "./node_order_smoke.mjs";
 import "./panel_metrics_smoke.mjs";
+import "./panel_reads_smoke.mjs";
 
 import {
   agentStructureSignature,
@@ -3172,8 +3173,8 @@ try {
   );
   assert.equal(
     taskCalls.filter((path) => path === "/agents").length,
-    2,
-    "each task refresh issues one agent request",
+    1,
+    "background task polling reuses the cached node list",
   );
   assert.equal(taskTimers.size, 1, "task polling keeps a single timer");
   const expiredPoll = [...taskTimers.values()][0];
@@ -3184,6 +3185,11 @@ try {
     taskCalls.filter((path) => path === "/settings").length,
     1,
     "task polling refreshes cached settings after the bounded interval",
+  );
+  assert.equal(
+    taskCalls.filter((path) => path === "/agents").length,
+    2,
+    "task polling refreshes the cached node list after the bounded interval",
   );
   assert.equal(taskTimers.size, 1, "expired settings refresh keeps one timer");
   taskTimers.clear();
