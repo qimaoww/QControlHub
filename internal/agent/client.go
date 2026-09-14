@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -29,6 +30,7 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/authn"
 	"github.com/qimaoww/qcontrolhub/internal/cnip"
 	"github.com/qimaoww/qcontrolhub/internal/core"
+	"github.com/qimaoww/qcontrolhub/internal/release"
 	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
 )
 
@@ -45,6 +47,13 @@ type ClientConfig struct {
 	AllowHTTP         bool
 	AllowInsecureLive bool
 	TLSCAFile         string
+	// ReleasePublicKey is the pinned Ed25519 release key. When it is set, the
+	// upgrade path only accepts an Agent binary whose digest and version appear
+	// in a release manifest signed by that key, so a control plane that has been
+	// taken over can serve a substituted binary but cannot make it verify. An
+	// empty value keeps the previous behaviour for nodes enrolled before the key
+	// was provisioned, and NewClient reports that state during an upgrade.
+	ReleasePublicKey string
 	// PublicIPProbe enables the outbound dual-stack egress probe; the interval
 	// is clamped to between one minute and one day.
 	PublicIPProbe      bool
@@ -71,30 +80,36 @@ type completedTask struct {
 }
 
 type Client struct {
-	config            ClientConfig
-	executor          *Executor
-	http              *http.Client
-	creds             credentials
-	websocketURL      string
-	metrics           *MetricsCollector
-	traffic           *TrafficManager
-	mainland          *MainlandAccessManager
-	logs              *CoreLogCollector
-	publicIP          *PublicIPProber
-	bbr               *SystemBBRManager
-	serverHost        string
-	reenrollAttempted bool
-	lastReenrollAt    time.Time
-	credentialsMu     sync.Mutex
-	executionsMu      sync.Mutex
-	executions        map[string]*taskExecution
-	restartAfterTask  string
-	taskLifecycleMu   sync.Mutex
-	upgradePending    bool
-	upgradeCommitted  *agentUpgradeTransaction
-	runtimeRefresh    chan struct{}
-	reexecFunc        func(string, []string, []string) error
-	executeFunc       func(context.Context, core.Task) (string, error)
+	config       ClientConfig
+	executor     *Executor
+	http         *http.Client
+	creds        credentials
+	websocketURL string
+	metrics      *MetricsCollector
+	traffic      *TrafficManager
+	mainland     *MainlandAccessManager
+	logs         *CoreLogCollector
+	publicIP     *PublicIPProber
+	bbr          *SystemBBRManager
+	serverHost   string
+	// controlPlaneVersion is the build the connected control plane reported in
+	// its agent policy. The upgrade path requires the signed manifest to describe
+	// this exact version, so a node cannot be moved to a build the panel does not
+	// consider current.
+	agentPolicyMu       sync.RWMutex
+	controlPlaneVersion string
+	reenrollAttempted   bool
+	lastReenrollAt      time.Time
+	credentialsMu       sync.Mutex
+	executionsMu        sync.Mutex
+	executions          map[string]*taskExecution
+	restartAfterTask    string
+	taskLifecycleMu     sync.Mutex
+	upgradePending      bool
+	upgradeCommitted    *agentUpgradeTransaction
+	runtimeRefresh      chan struct{}
+	reexecFunc          func(string, []string, []string) error
+	executeFunc         func(context.Context, core.Task) (string, error)
 }
 
 type taskExecution struct {
@@ -656,6 +671,10 @@ func (c *Client) applyAgentPolicy(ctx context.Context, policy core.AgentPolicy) 
 		return err
 	}
 	c.logs.ApplyPolicy(policy)
+	// Upgrade downloads run outside the session loop and survive reconnects.
+	c.agentPolicyMu.Lock()
+	c.controlPlaneVersion = strings.TrimSpace(policy.ControlPlaneVersion)
+	c.agentPolicyMu.Unlock()
 	if c.executor.serviceManager().Kind() == ServiceManagerSystemd {
 		if err := ensureManagedCoreLogStreamingWithPolicy(ctx, c.executor.Specs, policy, c.executor.serviceManager()); err != nil {
 			// Local log tuning is best-effort just like initial journal setup. A
@@ -1182,6 +1201,24 @@ func (c *Client) downloadAgentBinaryOnce(ctx context.Context, client *http.Clien
 		cleanup()
 		return "", "", 0, errors.New("downloaded Agent binary checksum mismatch")
 	}
+	// The checksum header above only proves the transfer was intact: the control
+	// plane sends that header, so it cannot vouch for the payload. When a release
+	// key is pinned, the served binary must also match a manifest signed by that
+	// key, and the version reported to the preflight step comes from the signed
+	// manifest rather than from a header the control plane controls.
+	c.agentPolicyMu.RLock()
+	controlPlaneVersion := c.controlPlaneVersion
+	c.agentPolicyMu.RUnlock()
+	verifiedVersion, err := c.verifyUpgradeRelease(ctx, client, hash.Sum(nil), written, controlPlaneVersion)
+	if err != nil {
+		cleanup()
+		return "", "", 0, err
+	}
+	if strings.TrimSpace(c.config.ReleasePublicKey) == "" {
+		// Legacy deployments still need the existing preflight version check.
+		// Only pinned releases replace this label with a signed version.
+		verifiedVersion = strings.TrimSpace(response.Header.Get("X-QControlHub-Agent-Version"))
+	}
 	if err := temporary.Sync(); err != nil {
 		cleanup()
 		return "", "", 0, fmt.Errorf("sync downloaded Agent binary: %w", err)
@@ -1190,7 +1227,88 @@ func (c *Client) downloadAgentBinaryOnce(ctx context.Context, client *http.Clien
 		_ = os.Remove(temporaryPath)
 		return "", "", 0, fmt.Errorf("close downloaded Agent binary: %w", err)
 	}
-	return temporaryPath, strings.TrimSpace(response.Header.Get("X-QControlHub-Agent-Version")), written, nil
+	return temporaryPath, verifiedVersion, written, nil
+}
+
+// releaseManifestPath is the control-plane endpoint serving the signed release
+// manifest. It is served to an authenticated Agent alongside the binary.
+const releaseManifestPath = "/agent/v1/release-manifest"
+
+// maxReleaseManifestBytes bounds the manifest body. A release with a few hundred
+// artifacts stays well inside this, and an oversized response is refused instead
+// of being buffered.
+const maxReleaseManifestBytes = 1 << 20
+
+// verifyUpgradeRelease checks a downloaded Agent binary against the signed
+// release manifest and returns the verified version label.
+//
+// It fails closed whenever a release key is pinned: an operator who provisioned
+// the key expects the upgrade path to be authenticated, so a control plane that
+// serves no manifest, an unverifiable manifest, or a manifest describing a
+// different binary must abort the upgrade rather than silently fall back to
+// trusting the control plane. An empty key keeps the previous behaviour, which
+// also covers nodes that enrolled before the key existed.
+func (c *Client) verifyUpgradeRelease(ctx context.Context, client *http.Client, digest []byte, size int64, controlPlaneVersion string) (string, error) {
+	if strings.TrimSpace(c.config.ReleasePublicKey) == "" {
+		slog.Warn("Agent upgrade is not signature verified: no release public key is configured",
+			"hint", "set QCH_RELEASE_PUBLIC_KEY in the Agent environment to require a signed release manifest")
+		return "", nil
+	}
+	publicKey, err := decodeReleasePublicKey(c.config.ReleasePublicKey)
+	if err != nil {
+		return "", err
+	}
+	manifest, err := c.fetchReleaseManifest(ctx, client)
+	if err != nil {
+		return "", fmt.Errorf("signed release manifest is required because QCH_RELEASE_PUBLIC_KEY is configured: %w", err)
+	}
+	if err := manifest.Verify(publicKey); err != nil {
+		return "", err
+	}
+	return manifest.VerifyAgentBinary(hex.EncodeToString(digest), size, controlPlaneVersion)
+}
+
+// fetchReleaseManifest retrieves and parses the control plane's release
+// manifest. The request is signed like the binary download so the endpoint stays
+// limited to authenticated Agents.
+func (c *Client) fetchReleaseManifest(ctx context.Context, client *http.Client) (release.Manifest, error) {
+	privateKey, err := authn.DecodePrivateKey(c.creds.PrivateKey)
+	if err != nil {
+		return release.Manifest{}, err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, c.config.ServerURL+releaseManifestPath, nil)
+	if err != nil {
+		return release.Manifest{}, err
+	}
+	if err := authn.SignRequest(request, nil, c.creds.AgentID, privateKey, time.Now().UTC()); err != nil {
+		return release.Manifest{}, err
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		return release.Manifest{}, explainTLSError(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return release.Manifest{}, fmt.Errorf("control plane returned %s", response.Status)
+	}
+	body, err := io.ReadAll(io.LimitReader(response.Body, maxReleaseManifestBytes+1))
+	if err != nil {
+		return release.Manifest{}, err
+	}
+	if len(body) > maxReleaseManifestBytes {
+		return release.Manifest{}, fmt.Errorf("release manifest exceeds %d bytes", maxReleaseManifestBytes)
+	}
+	return release.Parse(body)
+}
+
+// decodeReleasePublicKey shares the installer's PEM-path contract while
+// retaining compatibility with an inline raw-URL public key.
+func decodeReleasePublicKey(value string) (ed25519.PublicKey, error) {
+	key, err := release.LoadPublicKey(value)
+	if err != nil {
+		return nil, fmt.Errorf("QCH_RELEASE_PUBLIC_KEY: %w", err)
+	}
+	return key, nil
 }
 
 func (c *Client) reexecAfterUpgrade() {

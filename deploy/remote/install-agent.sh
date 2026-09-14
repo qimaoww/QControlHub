@@ -2,10 +2,15 @@
 # install-agent.sh — QControlHub agent 一键安装（root 执行，无需预装仓库）
 #
 # 用法：
-#   sh deploy/remote/install-agent.sh install   <control-plane-url|ip[:port]> <add-node-credential> [agent-name]
-#   sh deploy/remote/install-agent.sh update    <control-plane-url|ip[:port]> <add-node-credential> [agent-name]
-#   sh deploy/remote/install-agent.sh migrate   <new-control-plane-url|ip[:port]> <add-node-credential> [agent-name]
+#   sh deploy/remote/install-agent.sh install   <control-plane-url|host[:port]> <add-node-credential> [agent-name]
+#   sh deploy/remote/install-agent.sh update    <control-plane-url|host[:port]> <add-node-credential> [agent-name]
+#   sh deploy/remote/install-agent.sh migrate   <new-control-plane-url|host[:port]> <add-node-credential> [agent-name]
 #   sh deploy/remote/install-agent.sh uninstall
+#
+# 省略协议时按 https:// 处理：裸主机名或 IP 只会升级为 HTTPS，不会降级为明文。
+# 添加节点凭证经请求头发送、下载的 Agent 以 root 安装，因此明文链路必须显式选择：
+# 传 http:// URL，且非回环地址还须设置 QCH_ALLOW_INSECURE_LIVE=true。
+# QCH_TLS_CA_FILE 只用于验证 HTTPS/WSS 证书，不能保护明文连接。
 #
 # 示例：
 #   QCH_TLS_CA_FILE=/etc/qcontrolhub/control-plane-ca.pem \
@@ -66,7 +71,7 @@ service_manager=${QCH_SERVICE_MANAGER:-}
 if [ -z "$service_manager" ]; then
   if [ -f /etc/alpine-release ]; then
     command -v apk >/dev/null 2>&1 || { printf '%s\n' 'Alpine apk is unavailable' >&2; exit 1; }
-    apk add --no-cache ca-certificates coreutils curl iproute2 libcap nftables openrc >/dev/null
+    apk add --no-cache ca-certificates coreutils curl iproute2 libcap nftables openrc openssl >/dev/null
     service_manager=openrc
   elif command -v "$systemctl_cmd" >/dev/null 2>&1; then
     service_manager=systemd
@@ -235,11 +240,8 @@ if [ "$action" = uninstall ]; then
   exit 0
 fi
 
-install_nftables
-install_iproute2
-
-control="${1:?usage: install-agent.sh install|update <control-plane-url|ip[:port]> <add-node-credential> [agent-name]}"
-token="${2:?usage: install-agent.sh install|update <control-plane-url|ip[:port]> <add-node-credential> [agent-name]}"
+control="${1:?usage: install-agent.sh install|update <control-plane-url|host[:port]> <add-node-credential> [agent-name]}"
+token="${2:?usage: install-agent.sh install|update <control-plane-url|host[:port]> <add-node-credential> [agent-name]}"
 name_arg="${3:-}"
 default_name=$(hostname)
 name=${name_arg:-$default_name}
@@ -251,10 +253,20 @@ validate_environment_value QCH_ENROLLMENT_TOKEN "$token"
 validate_environment_value QCH_AGENT_NAME "$name"
 validate_environment_value QCH_TLS_CA_FILE "$ca_file"
 validate_environment_value QCH_ALLOW_INSECURE_LIVE "$allow_insecure_live"
+case "$allow_insecure_live" in
+  1|t|T|TRUE|true|True) allow_insecure_live=true ;;
+  0|f|F|FALSE|false|False) allow_insecure_live=false ;;
+  *) printf '%s\n' 'QCH_ALLOW_INSECURE_LIVE must be a boolean' >&2; exit 1 ;;
+esac
 
+# A bare host or IP is upgraded to HTTPS, never downgraded to plaintext. The
+# add-node credential travels in a request header and the downloaded Agent runs
+# as root, so an unencrypted control-plane URL would expose both to anyone on
+# the path. Cleartext is therefore an explicit choice: pass an http:// (or
+# ws://) URL and, unless it is loopback, also set QCH_ALLOW_INSECURE_LIVE=true.
 case "$control" in
   http://*|https://*|ws://*|wss://*) server_url="$control" ;;
-  *) server_url="http://$control" ;;
+  *) server_url="https://$control" ;;
 esac
 case "$server_url" in */) server_url=${server_url%/} ;; esac
 case "$server_url" in
@@ -270,20 +282,190 @@ esac
 case "$server_host" in
   *[[:space:]]*) printf '%s\n' 'control-plane URL must not contain whitespace' >&2; exit 1 ;;
 esac
+# Match NewClient's loopback exceptions exactly. A 127.* DNS name is not a
+# loopback IP, and splitting at the first colon breaks bracketed IPv6.
+# A CA file only authenticates TLS; it cannot authorize plaintext transport.
+case "$server_url" in
+  http://*|ws://*)
+    case "$server_host" in
+      localhost|localhost:*|127.0.0.1|127.0.0.1:*|\[::1\]|\[::1\]:*) ;;
+      *)
+        if [ "$allow_insecure_live" != true ]; then
+          printf '%s\n' \
+            'refusing a plaintext control-plane URL for a non-loopback host.' \
+            'A bare host or IP now defaults to https://; use that, or pass an explicit' \
+            'http:// URL with QCH_ALLOW_INSECURE_LIVE=true only on a trusted network.' \
+            'QCH_TLS_CA_FILE does not encrypt or protect an HTTP connection.' >&2
+          exit 1
+        fi
+        printf '%s\n' 'warning: remote plaintext transport explicitly enabled; enrollment credentials and downloads are exposed on the network.' >&2
+        ;;
+    esac
+    ;;
+esac
+
+install_nftables
+install_iproute2
 
 work_dir=$(mktemp -d "${TMPDIR:-/tmp}/qcontrolhub-agent.XXXXXX")
 trap 'rm -rf "$work_dir"' EXIT HUP INT TERM
 repository_dir="$work_dir/qcontrolhub"
-mkdir -p "$repository_dir/deploy/$service_manager" "$repository_dir/examples/configs"
+asset_dir="$work_dir/install-assets"
+mkdir -p "$repository_dir/deploy/$service_manager" "$repository_dir/examples/configs" "$asset_dir"
+
+# Release verification. The installer and every file it places on the host come
+# from the control plane over one connection, so a checksum fetched from that
+# same connection proves only that the transfer was intact. The signature is what
+# makes the download trustworthy, and it can only do that when the public key
+# arrives from outside the download: set QCH_RELEASE_PUBLIC_KEY to the PEM file
+# published with the release. An attacker who controls the responses cannot forge
+# a signature, so each file is checked against a key it cannot replace.
+#
+# Setting the key is the operator's statement that this deployment ships signed
+# releases, so a missing or unverifiable signature is then a hard failure.
+# QCH_ALLOW_UNSIGNED_RELEASE=true is the explicit opt-out for a control plane
+# that does not publish signatures yet.
+saved_release_key=""
+if [ -r "$agent_env_file" ]; then
+  saved_release_key=$(sed -n 's/^QCH_RELEASE_PUBLIC_KEY=//p' "$agent_env_file" | tail -n 1)
+fi
+release_public_key=${QCH_RELEASE_PUBLIC_KEY:-$saved_release_key}
+validate_environment_value QCH_RELEASE_PUBLIC_KEY "$release_public_key"
+final_release_key=$saved_release_key
+allow_unsigned_release=${QCH_ALLOW_UNSIGNED_RELEASE:-false}
+checksums_url="/install-assets/SHA256SUMS"
+checksums_signature_url="/install-assets/SHA256SUMS.sig"
+verify_required=true
+case "$allow_unsigned_release" in
+  true|1|yes) allow_unsigned_release=true ;;
+  *) allow_unsigned_release=false ;;
+esac
+if [ -z "$release_public_key" ] || [ "$allow_unsigned_release" = true ]; then
+  verify_required=false
+  if [ "$allow_unsigned_release" = true ]; then
+    printf '%s\n' 'warning: unsigned installation explicitly allowed; any existing Agent release-key pin is preserved.' >&2
+  else
+    printf '%s\n' \
+      'warning: QCH_RELEASE_PUBLIC_KEY is not set, so the installer files and the Agent' \
+      'warning: binary are NOT signature verified. Anyone able to modify the response or' \
+      'warning: the control plane can substitute them. Publish a signed release and set' \
+      'warning: QCH_RELEASE_PUBLIC_KEY to close this.' >&2
+  fi
+fi
+if [ "$verify_required" = true ] && [ ! -r "$release_public_key" ]; then
+  printf '%s\n' "QCH_RELEASE_PUBLIC_KEY is not a readable file: $release_public_key" >&2
+  exit 1
+fi
+if [ "$verify_required" = true ] && ! command -v openssl >/dev/null 2>&1; then
+  printf '%s\n' \
+    'openssl is required to verify the signed release; install it, or set' \
+    'QCH_ALLOW_UNSIGNED_RELEASE=true to accept unverified downloads.' >&2
+  exit 1
+fi
+if [ "$verify_required" = true ]; then
+  # Verify and persist the same snapshot, even if the caller's source file is
+  # replaced during the download.
+  cp "$release_public_key" "$work_dir/release-key.pub.pem"
+  release_public_key="$work_dir/release-key.pub.pem"
+fi
 
 download() {
   source_path=$1
   destination=$2
+  # Assets live in nested directories (deploy/systemd/..., examples/configs/...)
+  # and the checksum list keys on those relative paths, so create the parent
+  # before the transfer rather than flattening the layout.
+  install -d "$(dirname "$destination")"
   if [ -n "$ca_file" ]; then
     "$download_cmd" --fail --silent --show-error --compressed --cacert "$ca_file" -H "X-QControlHub-Enrollment: $token" "$http_origin$source_path" -o "$destination"
   else
     "$download_cmd" --fail --silent --show-error --compressed -H "X-QControlHub-Enrollment: $token" "$http_origin$source_path" -o "$destination"
   fi
+}
+
+required_assets="$work_dir/required-assets"
+: > "$required_assets"
+download_install_asset() {
+  download "/install-assets/$1" "$asset_dir/$1"
+  printf '%s\n' "$1" >> "$required_assets"
+}
+
+# verify_release_checksums authenticates the checksum list. The signature covers
+# the raw bytes of a `sha256sum -c` compatible list, so no canonical encoding has
+# to be reproduced here. Ed25519 is PureEdDSA, which is why this uses
+# `pkeyutl -rawin`: `openssl dgst -sha256` refuses an Ed25519 key outright.
+verify_release_checksums() {
+  download "$checksums_url" "$work_dir/SHA256SUMS" || {
+    printf '%s\n' 'failed to download the signed checksum list SHA256SUMS' >&2
+    return 1
+  }
+  download "$checksums_signature_url" "$work_dir/SHA256SUMS.sig" || {
+    printf '%s\n' 'failed to download the checksum signature SHA256SUMS.sig' >&2
+    return 1
+  }
+  # The published signature travels as base64 text so it survives text
+  # transports, while `openssl -sigfile` needs the raw bytes.
+  if [ "$(wc -c < "$work_dir/SHA256SUMS.sig")" -eq 64 ]; then
+    cp "$work_dir/SHA256SUMS.sig" "$work_dir/SHA256SUMS.sig.bin"
+  elif openssl base64 -d -A -in "$work_dir/SHA256SUMS.sig" -out "$work_dir/SHA256SUMS.sig.bin" 2>/dev/null; then
+    :
+  else
+    printf '%s\n' 'checksum signature is neither raw nor base64 encoded' >&2
+    return 1
+  fi
+  if [ "$(wc -c < "$work_dir/SHA256SUMS.sig.bin")" -ne 64 ]; then
+    printf '%s\n' 'checksum signature must be 64 bytes' >&2
+    return 1
+  fi
+  if ! openssl pkeyutl -verify -pubin -inkey "$release_public_key" -rawin \
+    -in "$work_dir/SHA256SUMS" -sigfile "$work_dir/SHA256SUMS.sig.bin" >/dev/null 2>&1; then
+    printf '%s\n' \
+      'RELEASE SIGNATURE VERIFICATION FAILED: SHA256SUMS is not signed by the key in' \
+      "QCH_RELEASE_PUBLIC_KEY ($release_public_key)." \
+      'Refusing to install. Either the release key changed (republish and redistribute the' \
+      'new key deliberately) or the download was tampered with.' >&2
+    return 1
+  fi
+  # Releases cover both init systems, but a node only downloads its own units.
+  # Select the required entries from the authenticated list and require exact
+  # coverage. --ignore-missing alone would also ignore a missing required file.
+  if ! awk '
+    NR == FNR { required[$0] = 1; next }
+    {
+      digest = substr($0, 1, 64)
+      path = substr($0, 67)
+      if (length(digest) != 64 || digest ~ /[^0-9a-f]/ || substr($0, 65, 2) != "  " || path == "") {
+        print "malformed signed checksum entry" > "/dev/stderr"
+        failed = 1
+        next
+      }
+      if (path in seen) {
+        print "duplicate signed checksum entry: " path > "/dev/stderr"
+        failed = 1
+        next
+      }
+      seen[path] = 1
+      if (path in required) print
+    }
+    END {
+      for (path in required) {
+        if (!(path in seen)) {
+          print "required download is absent from signed checksum list: " path > "/dev/stderr"
+          failed = 1
+        }
+      }
+      exit failed
+    }
+  ' "$required_assets" "$work_dir/SHA256SUMS" > "$work_dir/SHA256SUMS.required"; then
+    printf '%s\n' 'signed checksum list does not cover every required download' >&2
+    return 1
+  fi
+  if ! (cd "$asset_dir" && sha256sum -c "$work_dir/SHA256SUMS.required" >/dev/null 2>&1); then
+    printf '%s\n' 'one or more downloaded files do not match the signed checksum list:' >&2
+    (cd "$asset_dir" && sha256sum -c "$work_dir/SHA256SUMS.required" 2>&1 | grep -v ': OK$' | head -20) >&2 || true
+    return 1
+  fi
+  printf '%s\n' 'release signature verified; every downloaded file matches the signed list'
 }
 
 echo '== 1/6 下载安装资源 =='
@@ -295,25 +477,62 @@ for asset in \
   examples/configs/sing-box-minimal.json \
   examples/configs/shadowsocks-rust-minimal.json
 do
-  download "/install-assets/$asset" "$repository_dir/$asset"
+  download_install_asset "$asset"
 done
 if [ "$service_manager" = openrc ]; then
   service_assets="qagent qagent-mihomo qagent-xray qagent-sing-box qagent-shadowsocks-rust"
   for service_asset in $service_assets; do
-    download "/install-assets/deploy/openrc/$service_asset" "$repository_dir/deploy/openrc/$service_asset"
+    download_install_asset "deploy/openrc/$service_asset"
   done
 else
   service_assets="qagent.service qagent-core-journal.conf qagent-mihomo.service qagent-xray.service qagent-sing-box.service qagent-shadowsocks-rust.service"
   for service_asset in $service_assets; do
-    download "/install-assets/deploy/systemd/$service_asset" "$repository_dir/deploy/systemd/$service_asset"
+    download_install_asset "deploy/systemd/$service_asset"
   done
 fi
-. "$repository_dir/deploy/existing-core-mapping.sh"
 
 echo "== 2/6 下载 agent 二进制（控制面 GET /api/v1/agent-binary）=="
-download /api/v1/agent-binary "$work_dir/qagent"
-[ -s "$work_dir/qagent" ] || { printf '%s\n' 'downloaded agent binary is empty' >&2; exit 1; }
+# The binary is fetched before verification so the signed list can cover it, and
+# it is only executed after the checks below pass.
+mkdir -p "$asset_dir/api/v1"
+download /api/v1/agent-binary "$asset_dir/api/v1/agent-binary"
+printf '%s\n' 'api/v1/agent-binary' >> "$required_assets"
+[ -s "$asset_dir/api/v1/agent-binary" ] || { printf '%s\n' 'downloaded agent binary is empty' >&2; exit 1; }
+
+if [ "$verify_required" = true ]; then
+  echo '== 验证下载内容签名 =='
+  verify_release_checksums
+fi
+
+# Only now may the tree be trusted. Copy the verified files into the layout the
+# rest of the script reads, so nothing below this point sources or executes a
+# file that a verified signature did not cover.
+for asset in \
+  deploy/bootstrap-core-services.sh \
+  deploy/existing-core-mapping.sh \
+  examples/configs/mihomo-minimal.yaml \
+  examples/configs/xray-minimal.json \
+  examples/configs/sing-box-minimal.json \
+  examples/configs/shadowsocks-rust-minimal.json \
+  deploy/systemd/qagent.service \
+  deploy/systemd/qagent-core-journal.conf \
+  deploy/systemd/qagent-mihomo.service \
+  deploy/systemd/qagent-xray.service \
+  deploy/systemd/qagent-sing-box.service \
+  deploy/systemd/qagent-shadowsocks-rust.service \
+  deploy/openrc/qagent \
+  deploy/openrc/qagent-mihomo \
+  deploy/openrc/qagent-xray \
+  deploy/openrc/qagent-sing-box \
+  deploy/openrc/qagent-shadowsocks-rust
+do
+  [ -f "$asset_dir/$asset" ] || continue
+  install -d "$repository_dir/$(dirname "$asset")"
+  cp "$asset_dir/$asset" "$repository_dir/$asset"
+done
+cp "$asset_dir/api/v1/agent-binary" "$work_dir/qagent"
 chmod 0755 "$work_dir/qagent"
+. "$repository_dir/deploy/existing-core-mapping.sh"
 
 echo '== 3/6 检测现有核心并暂存按需安装资源 =='
 run_discovery() {
@@ -394,9 +613,25 @@ if [ -x "$qagent_bin_dir/qagent" ] || [ -f "$agent_env_file" ] || \
 fi
 
 # 本次安装由脚本显式管理的配置键：这些始终以本次为准，不继承上次的值。
-managed_env_keys="QCH_SERVER_URL QCH_ENROLLMENT_TOKEN QCH_REENROLL QCH_TLS_CA_FILE QCH_ALLOW_INSECURE_LIVE QCH_ALLOW_HTTP QCH_SERVICE_MANAGER QCH_EXISTING_XRAY_BINARY QCH_EXISTING_XRAY_CONFIG QCH_EXISTING_XRAY_CONFIG_DIRECTORY QCH_EXISTING_XRAY_SERVICE QCH_EXISTING_SING_BOX_BINARY QCH_EXISTING_SING_BOX_CONFIG QCH_EXISTING_SING_BOX_CONFIG_DIRECTORY QCH_EXISTING_SING_BOX_WORK_DIRECTORY QCH_EXISTING_SING_BOX_SERVICE_BINARY QCH_EXISTING_SING_BOX_SERVICE"
+managed_env_keys="QCH_SERVER_URL QCH_ENROLLMENT_TOKEN QCH_REENROLL QCH_TLS_CA_FILE QCH_RELEASE_PUBLIC_KEY QCH_ALLOW_INSECURE_LIVE QCH_ALLOW_HTTP QCH_SERVICE_MANAGER QCH_EXISTING_XRAY_BINARY QCH_EXISTING_XRAY_CONFIG QCH_EXISTING_XRAY_CONFIG_DIRECTORY QCH_EXISTING_XRAY_SERVICE QCH_EXISTING_SING_BOX_BINARY QCH_EXISTING_SING_BOX_CONFIG QCH_EXISTING_SING_BOX_CONFIG_DIRECTORY QCH_EXISTING_SING_BOX_WORK_DIRECTORY QCH_EXISTING_SING_BOX_SERVICE_BINARY QCH_EXISTING_SING_BOX_SERVICE"
 
 install -d -o root -g root -m 0700 "$agent_conf_dir"
+if [ "$verify_required" = true ]; then
+  # systemd does not inherit the installer's environment. Persist the verified
+  # public key under a stable, protected path for subsequent Agent upgrades.
+  final_release_key="$agent_conf_dir/release-key.pub.pem"
+  [ ! -L "$final_release_key" ] || { printf '%s\n' "refusing symlinked release public key: $final_release_key" >&2; exit 1; }
+  [ ! -e "$final_release_key" ] || [ -f "$final_release_key" ] || {
+    printf '%s\n' "refusing non-regular release public key: $final_release_key" >&2
+    exit 1
+  }
+  if ! cmp -s "$release_public_key" "$final_release_key"; then
+    install -o root -g root -m 0644 "$release_public_key" "$final_release_key"
+  else
+    chown root:root "$final_release_key"
+    chmod 0644 "$final_release_key"
+  fi
+fi
 install -d -o root -g root -m 0755 "$qagent_bin_dir"
 [ ! -L "$qagent_bin_dir/qagent" ] || { printf '%s\n' "refusing symlinked Agent binary: $qagent_bin_dir/qagent" >&2; exit 1; }
 [ ! -e "$qagent_bin_dir/qagent" ] || [ -f "$qagent_bin_dir/qagent" ] || {
@@ -460,6 +695,7 @@ umask 077
 {
   printf '%s\n' "QCH_SERVER_URL=$server_url"
   if [ -n "$ca_file" ]; then printf '%s\n' "QCH_TLS_CA_FILE=$ca_file"; fi
+  if [ -n "$final_release_key" ]; then printf '%s\n' "QCH_RELEASE_PUBLIC_KEY=$final_release_key"; fi
   case "$server_url" in
     http://*|ws://*) printf '%s\n' 'QCH_ALLOW_HTTP=true' ;;
   esac

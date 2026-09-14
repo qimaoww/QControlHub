@@ -583,6 +583,10 @@ type AgentPolicy struct {
 	MetricsIntervalSeconds   uint32 `json:"metrics_interval_seconds"`
 	CoreLogMaxMiB            uint32 `json:"core_log_max_mib"`
 	CoreLogRotateCount       uint32 `json:"core_log_rotate_count"`
+	// ControlPlaneVersion binds an upgrade to the version reported by the
+	// authenticated session. It detects mismatched release packages, not replay
+	// by a compromised control plane, which still owns the reported version.
+	ControlPlaneVersion string `json:"control_plane_version,omitempty"`
 }
 
 func (policy AgentPolicy) Validate() error {

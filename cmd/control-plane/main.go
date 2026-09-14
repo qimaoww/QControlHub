@@ -126,6 +126,12 @@ func main() {
 		agentInstaller = data
 		slog.Info("serving add-node-credential-protected agent installer", "path", installerPath, "bytes", len(data))
 	}
+	releaseManifest, err := loadReleaseManifest(os.Getenv("QCH_RELEASE_MANIFEST_PATH"),
+		packagedReleaseManifestPath, os.Getenv("QCH_RELEASE_PUBLIC_KEY"), agentBinary, version)
+	if err != nil {
+		slog.Error("invalid Agent release package", "error", err)
+		os.Exit(1)
+	}
 
 	apiServer := api.New(dataStore, api.Config{
 		AdminTokenDigest:           adminTokenDigest,
@@ -141,6 +147,7 @@ func main() {
 		AgentVersion:               version,
 		ControlPlaneVersion:        version,
 		AgentInstaller:             agentInstaller,
+		ReleaseManifest:            releaseManifest,
 		WebhookSecret:              strings.TrimSpace(os.Getenv("QCH_WEBHOOK_SECRET")),
 		KomariURL:                  strings.TrimSpace(os.Getenv("QCH_KOMARI_URL")),
 		KomariAPIKey:               strings.TrimSpace(os.Getenv("QCH_KOMARI_API_KEY")),

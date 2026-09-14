@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-FROM golang:1.25-alpine AS build-base
+FROM golang:1.25.14-alpine@sha256:1ae0735f00daffa3aaf1363a5184c0d2dc55c78e3db4ec70241cdac97bf84b59 AS build-base
 
 WORKDIR /src
 
@@ -29,6 +29,26 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
     -o /out/qagent \
     ./cmd/agent
 
+# Export exactly the executable copied into the runtime images for signing.
+# A host-side rebuild may use another Go toolchain and produce another digest.
+FROM scratch AS agent-release
+COPY --from=build-qagent /out/qagent /qagent
+
+# Local/source builds remain usable without release credentials. If a release
+# directory exists, require the complete bundle; never package a partial one.
+# A read-only bind lets a clean checkout omit dist/release without a failed COPY.
+FROM alpine:3.22 AS release-artifacts
+ARG RELEASE_ARTIFACTS=dist/release
+RUN --mount=type=bind,target=/context \
+    mkdir -p /out \
+    && if [ -e "/context/${RELEASE_ARTIFACTS}" ]; then \
+      for artifact in SHA256SUMS SHA256SUMS.sig release-manifest.json; do \
+        test -s "/context/${RELEASE_ARTIFACTS}/${artifact}" \
+          || { echo "incomplete release bundle: missing ${artifact}" >&2; exit 1; }; \
+        cp "/context/${RELEASE_ARTIFACTS}/${artifact}" /out/; \
+      done; \
+    fi
+
 FROM alpine:3.22 AS runtime-base
 
 ARG VERSION=dev
@@ -50,6 +70,7 @@ FROM runtime-base AS qcontrol-plane
 COPY --from=build-qcontrol-plane /out/qcontrol-plane /usr/local/bin/qcontrol-plane
 COPY --from=build-qagent /out/qagent /usr/local/lib/qcontrolhub/qagent
 COPY deploy/remote/install-agent.sh /usr/local/lib/qcontrolhub/install-agent.sh
+COPY --from=release-artifacts /out/ /usr/local/lib/qcontrolhub/release/
 
 ENV QCH_AGENT_BINARY_PATH=/usr/local/lib/qcontrolhub/qagent
 ENV QCH_AGENT_INSTALLER_PATH=/usr/local/lib/qcontrolhub/install-agent.sh
@@ -86,6 +107,9 @@ COPY deploy/systemd/qagent-sing-box.service /usr/share/nginx/html/install-assets
 COPY deploy/systemd/qagent-shadowsocks-rust.service /usr/share/nginx/html/install-assets/deploy/systemd/qagent-shadowsocks-rust.service
 COPY deploy/systemd/qagent.service /usr/share/nginx/html/install-assets/deploy/systemd/qagent.service
 COPY examples/configs /usr/share/nginx/html/install-assets/examples/configs
+# Use the same bundle as the control-plane image. Missing signatures on an
+# unsigned development build still cause pinned installers/Agents to fail closed.
+COPY --from=release-artifacts /out/ /usr/share/nginx/html/install-assets/
 COPY frontend/nginx.conf /etc/nginx/nginx.conf
 RUN css_version="$(sha256sum /usr/share/nginx/html/assets/app.css | cut -c1-16)" \
     && js_content_version="$(find /usr/share/nginx/html/assets -type f -name '*.js' -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -c1-10)" \

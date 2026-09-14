@@ -11,6 +11,61 @@ installer="$repo_root/deploy/remote/install-agent.sh"
 test_root=$(mktemp -d "${TMPDIR:-/tmp}/qcontrolhub-redeploy.XXXXXX")
 trap 'rm -rf "$test_root"' EXIT HUP INT TERM
 
+# Release signature fixtures. The installer verifies a `sha256sum -c` list signed
+# with an Ed25519 release key, so the sandbox signs a real list with a throwaway
+# key. openssl is present in both CI images; without it the redeploy flow cannot
+# exercise the verification path, so say so instead of silently skipping it.
+if ! command -v openssl >/dev/null 2>&1; then
+  printf '%s\n' "install-agent redeploy test: skipped (needs openssl)"
+  exit 0
+fi
+release_key="$test_root/release-key.pem"
+release_pub="$test_root/release-key.pub"
+openssl genpkey -algorithm ED25519 -out "$release_key" 2>/dev/null
+openssl pkey -in "$release_key" -pubout -out "$release_pub" 2>/dev/null
+
+# write_release_checksums builds and signs the artifact list the fake control
+# plane serves. It hashes exactly what the fake curl hands out, so the happy path
+# and the tampering path differ only by the bytes on the wire.
+write_release_checksums() {
+  list="$1"
+  signature="$2"
+  (
+    cd "$repo_root"
+    printf '%s  %s\n' "$(sha256sum /bin/true | cut -d' ' -f1)" "api/v1/agent-binary"
+    bash deploy/tests/release-assets.sh --files | while IFS= read -r asset
+    do
+      printf '%s  %s\n' "$(sha256sum "$asset" | cut -d' ' -f1)" "$asset"
+    done
+  ) | LC_ALL=C sort > "$list"
+  openssl pkeyutl -sign -inkey "$release_key" -rawin -in "$list" -out "$test_root/checksums.raw"
+  openssl base64 -A -in "$test_root/checksums.raw" -out "$signature"
+}
+# The signed list is served from an override directory, so the repository tree is
+# never written to and every case can swap the bytes the control plane returns.
+checksums_root="$test_root/checksums"
+mkdir -p "$checksums_root/install-assets"
+write_release_checksums "$checksums_root/install-assets/SHA256SUMS" "$checksums_root/install-assets/SHA256SUMS.sig"
+# A correctly signed list whose digest does not match the served bytes exercises
+# artifact substitution: the signature is fine, the content is not.
+mkdir -p "$test_root/substituted/install-assets"
+write_release_checksums "$test_root/substituted/install-assets/SHA256SUMS" "$test_root/substituted/install-assets/SHA256SUMS.sig"
+awk '{
+  if ($2 == "deploy/existing-core-mapping.sh") $0 = (substr($0, 1, 1) == "0" ? "1" : "0") substr($0, 2)
+  print
+}' "$test_root/substituted/install-assets/SHA256SUMS" > "$test_root/substituted/install-assets/SHA256SUMS.next"
+mv "$test_root/substituted/install-assets/SHA256SUMS.next" "$test_root/substituted/install-assets/SHA256SUMS"
+openssl pkeyutl -sign -inkey "$release_key" -rawin -in "$test_root/substituted/install-assets/SHA256SUMS" -out "$test_root/checksums.raw"
+openssl base64 -A -in "$test_root/checksums.raw" -out "$test_root/substituted/install-assets/SHA256SUMS.sig"
+# A list whose bytes changed after signing exercises the signature check.
+mkdir -p "$test_root/broken-signature/install-assets"
+write_release_checksums "$test_root/broken-signature/install-assets/SHA256SUMS" "$test_root/broken-signature/install-assets/SHA256SUMS.sig"
+printf 'garbage\n' >> "$test_root/broken-signature/install-assets/SHA256SUMS"
+mkdir -p "$test_root/missing-entry/install-assets"
+grep -v '  deploy/existing-core-mapping.sh$' "$checksums_root/install-assets/SHA256SUMS" > "$test_root/missing-entry/install-assets/SHA256SUMS"
+openssl pkeyutl -sign -inkey "$release_key" -rawin -in "$test_root/missing-entry/install-assets/SHA256SUMS" -out "$test_root/checksums.raw"
+openssl base64 -A -in "$test_root/checksums.raw" -out "$test_root/missing-entry/install-assets/SHA256SUMS.sig"
+
 fake_bin="$test_root/bin"
 mkdir -p \
   "$fake_bin" \
@@ -48,6 +103,11 @@ fi
 asset_path=${path#/install-assets}
 [ "$asset_path" != "$path" ] || { printf '%s\n' "fake curl: unknown path $path" >&2; exit 1; }
 src="$asset_root$asset_path"
+# QCH_ASSET_OVERRIDE lets a case swap one served asset (the signed checksum list,
+# its signature, or an agent binary) without rebuilding the whole asset root.
+if [ -n "${QCH_ASSET_OVERRIDE:-}" ] && [ -f "$QCH_ASSET_OVERRIDE$path" ]; then
+  src="$QCH_ASSET_OVERRIDE$path"
+fi
 [ -f "$src" ] || { printf '%s\n' "fake curl: missing asset $src" >&2; exit 1; }
 cp "$src" "$dest"
 EOF
@@ -69,6 +129,23 @@ if [ "$*" = 'restart qagent.service' ] && [ "${QCH_SIMULATE_AGENT_ENROLLMENT:-tr
 fi
 exit 0
 EOF
+
+cat > "$fake_bin/rc-service" <<'EOF'
+#!/bin/sh
+set -eu
+case "$*" in
+  'qagent status') [ -e "$QCH_OPENRC_INIT_ROOT/.running" ]; exit ;;
+  'qagent start'|'qagent restart')
+    server_url=$(sed -n 's/^QCH_SERVER_URL=//p' "$QCH_AGENT_ENV_FILE" | tail -n 1)
+    state_path=$(sed -n 's/^QCH_AGENT_STATE=//p' "$QCH_AGENT_ENV_FILE" | tail -n 1)
+    mkdir -p "$(dirname "$state_path")"
+    printf '{"agent_id":"abc123","private_key":"fake-openrc-key","server":"%s"}\n' "${server_url#*://}" > "$state_path"
+    touch "$QCH_OPENRC_INIT_ROOT/.running"
+    ;;
+esac
+exit 0
+EOF
+chmod 0755 "$fake_bin/rc-service"
 
 cat > "$fake_bin/apt-get" <<'EOF'
 #!/bin/sh
@@ -99,7 +176,7 @@ esac
 exit 2
 EOF
 
-for helper_name in groupadd useradd; do
+for helper_name in groupadd useradd addgroup adduser rc-update supervise-daemon; do
   printf '%s\n' '#!/bin/sh' 'exit 0' > "$fake_bin/$helper_name"
   chmod 0755 "$fake_bin/$helper_name"
 done
@@ -123,10 +200,20 @@ export QCH_SYSTEMD_UNIT_ROOT="$test_root/unit"
 export QCH_OPENRC_INIT_ROOT="$test_root/init"
 export QCH_OPENRC_CONF_DIR="$test_root/conf"
 export QCH_OPENRC_RUNLEVELS_ROOT="$test_root/runlevels"
+# The fake service uses a non-loopback HTTP origin. Opt in with the same flag
+# the real Agent requires; a CA file does not turn HTTP into TLS.
+ca_file="$test_root/control-plane-ca.pem"
+printf '%s\n' 'sandbox placeholder CA' > "$ca_file"
+export QCH_TLS_CA_FILE="$ca_file"
+export QCH_ALLOW_INSECURE_LIVE=true
 export PATH="$fake_bin:$PATH"
 
 control="http://sandbox.local"
 token="test-enrollment-token"
+# The fake control plane serves the signed checksum list, so every install below
+# verifies the release unless a case deliberately overrides this.
+export QCH_RELEASE_PUBLIC_KEY="$release_pub"
+export QCH_ASSET_OVERRIDE="$checksums_root"
 
 echo '== first install (fresh node) =='
 sh "$installer" "$control" "$token" > "$test_root/first.log"
@@ -134,6 +221,9 @@ sh "$installer" "$control" "$token" > "$test_root/first.log"
 grep -q '^update -qq$' "$QCH_PACKAGE_LOG" || { printf '%s\n' 'first install: APT metadata was not updated for nftables' >&2; exit 1; }
 grep -q '^install -y --no-install-recommends nftables$' "$QCH_PACKAGE_LOG" || { printf '%s\n' 'first install: nftables APT package was not installed' >&2; exit 1; }
 [ -f "$QCH_AGENT_ENV_FILE" ] || { printf '%s\n' 'first install: agent env missing' >&2; exit 1; }
+installed_release_key="$test_root/env/release-key.pub.pem"
+grep -Fxq "QCH_RELEASE_PUBLIC_KEY=$installed_release_key" "$QCH_AGENT_ENV_FILE"
+cmp "$release_pub" "$installed_release_key"
 grep -q '^QCH_AGENT_LABELS=region=cn-east$' "$QCH_AGENT_ENV_FILE" || { printf '%s\n' 'first install: default label missing' >&2; exit 1; }
 grep -q '^QCH_AGENT_NAME=' "$QCH_AGENT_ENV_FILE" || { printf '%s\n' 'first install: agent name missing' >&2; exit 1; }
 if grep -q '^QCH_ENROLLMENT_TOKEN=' "$QCH_AGENT_ENV_FILE"; then
@@ -225,6 +315,105 @@ if grep -q '^QCH_ENROLLMENT_TOKEN=' "$QCH_AGENT_ENV_FILE"; then
   printf '%s\n' 'migration retry: temporary credentials were not scrubbed' >&2
   exit 1
 fi
+
+echo '== bare host defaults to https (no plaintext downgrade) =='
+sh "$installer" update sandbox.example.com "$token" > "$test_root/bare-host.log"
+assert_env_once QCH_SERVER_URL 'https://sandbox.example.com'
+if grep -q '^QCH_ALLOW_HTTP=' "$QCH_AGENT_ENV_FILE"; then
+  printf '%s\n' 'bare host: QCH_ALLOW_HTTP was set for an https control plane' >&2
+  exit 1
+fi
+
+echo '== a CA file cannot authorize remote plaintext or loopback-looking DNS =='
+for cleartext_url in \
+  http://cleartext-panel.local \
+  http://127.attacker.invalid \
+  http://127.0.0.1.attacker.invalid \
+  ws://cleartext-panel.local
+do
+  if QCH_ALLOW_INSECURE_LIVE=false sh "$installer" update "$cleartext_url" "$token" > "$test_root/cleartext.log" 2>&1; then
+    printf '%s\n' "cleartext guard: installer accepted $cleartext_url without explicit opt-in" >&2
+    exit 1
+  fi
+  grep -qi 'refusing a plaintext control-plane URL' "$test_root/cleartext.log"
+  assert_env_once QCH_SERVER_URL 'https://sandbox.example.com'
+done
+
+echo '== explicit remote plaintext opt-in does not require a meaningless CA file =='
+QCH_TLS_CA_FILE= sh "$installer" update "$control" "$token" > "$test_root/insecure-opt-in.log"
+assert_env_once QCH_ALLOW_HTTP true
+assert_env_once QCH_ALLOW_INSECURE_LIVE true
+
+echo '== IPv4 and bracketed IPv6 loopback work without insecure-live opt-in =='
+for loopback_url in http://localhost:8080 http://127.0.0.1:8080 'http://[::1]:8080' 'ws://[::1]:8080'
+do
+  QCH_ALLOW_INSECURE_LIVE=false QCH_TLS_CA_FILE= \
+    sh "$installer" update "$loopback_url" "$token" > "$test_root/loopback.log"
+  grep -Fxq "QCH_SERVER_URL=$loopback_url" "$QCH_AGENT_ENV_FILE"
+done
+
+# A control plane that substitutes an artifact must be rejected even though the
+# substituted file arrives over a valid connection from the expected host.
+echo '== tampered artifact is rejected =='
+if QCH_ASSET_OVERRIDE="$test_root/substituted" sh "$installer" update "$control" "$token" > "$test_root/tampered.log" 2>&1; then
+  printf '%s\n' 'tampered artifact: installer accepted content that failed the signed list' >&2
+  exit 1
+fi
+grep -q 'do not match the signed checksum list' "$test_root/tampered.log" || {
+  printf '%s\n' 'tampered artifact: expected checksum mismatch was not reported' >&2
+  sed 's/^/  installer: /' "$test_root/tampered.log" >&2
+  exit 1
+}
+
+# Editing the checksum list after it was signed must break the signature check,
+# otherwise the list would be no better than an unsigned one.
+echo '== modified checksum list is rejected =='
+if QCH_ASSET_OVERRIDE="$test_root/broken-signature" sh "$installer" update "$control" "$token" > "$test_root/broken.log" 2>&1; then
+  printf '%s\n' 'modified checksum list: installer accepted a list that no longer matches its signature' >&2
+  exit 1
+fi
+grep -q 'RELEASE SIGNATURE VERIFICATION FAILED' "$test_root/broken.log" || {
+  printf '%s\n' 'modified checksum list: expected signature failure was not reported' >&2
+  exit 1
+}
+
+echo '== a valid signature must cover every required download =='
+if QCH_ASSET_OVERRIDE="$test_root/missing-entry" sh "$installer" update "$control" "$token" > "$test_root/missing-entry.log" 2>&1; then
+  printf '%s\n' 'missing checksum entry: installer accepted an unverified required script' >&2
+  exit 1
+fi
+grep -q 'required download is absent from signed checksum list: deploy/existing-core-mapping.sh' "$test_root/missing-entry.log"
+
+# A pinned key with no published signature must fail closed, so removing the
+# endpoint cannot silently downgrade the deployment to unverified installs.
+echo '== pinned key without a published signature fails closed =='
+mkdir -p "$test_root/no-checksums"
+if QCH_RELEASE_PUBLIC_KEY= QCH_ASSET_OVERRIDE="$test_root/no-checksums" sh "$installer" update "$control" "$token" > "$test_root/nosig.log" 2>&1; then
+  printf '%s\n' 'missing signature: installer proceeded despite a pinned release key' >&2
+  exit 1
+fi
+grep -q 'failed to download the signed checksum list' "$test_root/nosig.log" || {
+  printf '%s\n' 'missing signature: expected download failure was not reported' >&2
+  exit 1
+}
+
+# The explicit opt-out keeps a control plane that publishes no signature usable.
+echo '== explicit opt-out allows an unsigned release =='
+if ! QCH_ASSET_OVERRIDE="$test_root/no-checksums" QCH_RELEASE_PUBLIC_KEY= QCH_ALLOW_UNSIGNED_RELEASE=true \
+  sh "$installer" update "$control" "$token" > "$test_root/unsigned.log" 2>&1; then
+  printf '%s\n' 'unsigned opt-out: installer refused an explicitly allowed unsigned release' >&2
+  exit 1
+fi
+assert_env_once QCH_RELEASE_PUBLIC_KEY "$installed_release_key"
+
+echo '== signed OpenRC install uses the same complete release list =='
+QCH_RELEASE_PUBLIC_KEY= QCH_SERVICE_MANAGER=openrc QCH_RC_SERVICE="$fake_bin/rc-service" QCH_RC_UPDATE=/bin/true \
+  sh "$installer" update "$control" "$token" > "$test_root/openrc.log"
+grep -q 'release signature verified' "$test_root/openrc.log"
+assert_env_once QCH_RELEASE_PUBLIC_KEY "$installed_release_key"
+grep -Fxq "export QCH_RELEASE_PUBLIC_KEY='$installed_release_key'" "$QCH_OPENRC_CONF_DIR/qagent"
+QCH_SERVICE_MANAGER=openrc QCH_RC_SERVICE="$fake_bin/rc-service" QCH_RC_UPDATE=/bin/true \
+  sh "$installer" uninstall > "$test_root/openrc-uninstall.log"
 
 echo '== uninstall agent =='
 sh "$installer" uninstall > "$test_root/uninstall.log"

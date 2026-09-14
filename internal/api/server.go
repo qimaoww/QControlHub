@@ -48,8 +48,14 @@ type Config struct {
 	AgentVersion               string
 	ControlPlaneVersion        string
 	AgentInstaller             []byte
-	WebhookSecret              string
-	PublicIPProbe              core.PublicIPProbeConfig
+	// ReleaseManifest is the signed manifest describing the artifacts served to
+	// Agents that verify their upgrades. It is optional: without it the binary
+	// endpoint keeps its previous behaviour, and an Agent that has pinned a
+	// release key refuses to upgrade instead of trusting a control plane that
+	// cannot produce a signed manifest.
+	ReleaseManifest []byte
+	WebhookSecret   string
+	PublicIPProbe   core.PublicIPProbeConfig
 	// KomariURL and KomariAPIKey configure the optional read-only Komari
 	// integration. The key is never exposed through the panel API.
 	KomariURL        string
@@ -74,6 +80,7 @@ type Server struct {
 	agentVersion               string
 	controlPlaneVersion        string
 	agentInstaller             []byte
+	releaseManifest            []byte
 	publicIPProbe              core.PublicIPProbeConfig
 	geoip                      *geoip.Client
 	komari                     *komari.Client
@@ -171,6 +178,7 @@ func New(dataStore *store.Store, config Config) *Server {
 		agentVersion:               strings.TrimSpace(config.AgentVersion),
 		controlPlaneVersion:        strings.TrimSpace(config.ControlPlaneVersion),
 		agentInstaller:             config.AgentInstaller,
+		releaseManifest:            config.ReleaseManifest,
 		publicIPProbe:              config.PublicIPProbe,
 		geoip:                      geoipClient,
 		komari:                     komariClient,
@@ -255,6 +263,21 @@ func (s *Server) serveAgentBinaryForAgent(w http.ResponseWriter, r *http.Request
 		w.Header().Set("X-QControlHub-Agent-Version", s.agentVersion)
 	}
 	s.writeAgentBinary(w, r)
+}
+
+// serveReleaseManifest returns the signed manifest an Agent verifies its
+// upgrade against. An unset manifest answers 404 so an Agent with a pinned
+// release key fails closed with a clear reason instead of upgrading unverified.
+func (s *Server) serveReleaseManifest(w http.ResponseWriter, r *http.Request) {
+	if len(s.releaseManifest) == 0 {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Length", strconv.Itoa(len(s.releaseManifest)))
+	_, _ = w.Write(s.releaseManifest)
 }
 
 func (s *Server) serveAgentInstaller(w http.ResponseWriter, r *http.Request) {
@@ -390,6 +413,10 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("GET /api/v1/agent-binary", s.serveAgentBinary)
 	mux.Handle("GET /agent/v1/binary", s.agent(http.HandlerFunc(s.serveAgentBinaryForAgent)))
+	// The signed release manifest is served to an authenticated Agent so it can
+	// check the binary it just downloaded against a signature the control plane
+	// cannot produce on its own.
+	mux.Handle("GET /agent/v1/release-manifest", s.agent(http.HandlerFunc(s.serveReleaseManifest)))
 
 	mux.HandleFunc("POST /agent/v1/enroll", s.enrollAgent)
 	mux.Handle("GET /agent/v1/connect", s.agent(http.HandlerFunc(s.agentConnect)))
@@ -1295,6 +1322,9 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 		MetricsIntervalSeconds:   uint32(panelSettings.AgentMetricsIntervalSeconds),
 		CoreLogMaxMiB:            uint32(panelSettings.AgentCoreLogMaxMiB),
 		CoreLogRotateCount:       uint32(panelSettings.AgentCoreLogRotateCount),
+		// Tell the Agent which build this control plane runs, so a verifying
+		// Agent can require the upgrade manifest to describe that exact version.
+		ControlPlaneVersion: s.controlPlaneVersion,
 	}
 	effectivePublicIPProbe := s.publicIPProbe
 	effectivePublicIPProbe.IntervalSeconds = uint32(panelSettings.PublicIPProbeIntervalSeconds)

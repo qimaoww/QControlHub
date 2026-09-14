@@ -3,14 +3,14 @@ SHELL := /bin/sh
 VERSION ?= dev
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
-.PHONY: build test alpine-test alpine-agent-test upgrade-sandbox-test ss-rust-runtime-test vet fmt-check frontend-check pr-policy-test schema-policy-test installer-test agent-redeploy-test quick-start-test web-image-test docs-check check checks browser-checks non-browser-checks alpine-non-browser-checks init-env compose-config up dev-up down logs
+.PHONY: build test release-checksums release-image-agent release-image-checksums release-image-test signing-key check-install-assets alpine-test alpine-agent-test upgrade-sandbox-test ss-rust-runtime-test vet fmt-check frontend-check pr-policy-test schema-policy-test installer-test agent-redeploy-test quick-start-test web-image-test docs-check check checks browser-checks non-browser-checks alpine-non-browser-checks init-env compose-config up dev-up down logs
 
 # Non-Go checks. CI runs each group as its own task next to the Go test shards,
 # so keep the Go suite out of these targets.
 BROWSER_CHECK_TARGETS := frontend-check
-CHECK_TARGETS := fmt-check pr-policy-test schema-policy-test installer-test agent-redeploy-test quick-start-test docs-check vet
+CHECK_TARGETS := fmt-check pr-policy-test schema-policy-test installer-test agent-redeploy-test quick-start-test check-install-assets docs-check vet
 # Alpine validates the same checks without the Debian-only agent redeploy flow.
-ALPINE_CHECK_TARGETS := fmt-check pr-policy-test schema-policy-test installer-test quick-start-test docs-check vet
+ALPINE_CHECK_TARGETS := fmt-check pr-policy-test schema-policy-test installer-test quick-start-test check-install-assets docs-check vet
 # Alpine leaves internal/agent out of the package sweep and runs the OpenRC and
 # lifecycle regressions instead; the upgrade sandbox job covers the rest.
 ALPINE_AGENT_TESTS := go test ./internal/agent -run 'OpenRC|PerServiceManager|AgentUpgrade|ManagedCorePrerequisites|SystemBBR'
@@ -19,6 +19,7 @@ build:
 	mkdir -p bin
 	CGO_ENABLED=0 go build -buildvcs=false -trimpath -ldflags '$(LDFLAGS)' -o bin/qcontrol-plane ./cmd/control-plane
 	CGO_ENABLED=0 go build -buildvcs=false -trimpath -ldflags '$(LDFLAGS)' -o bin/qagent ./cmd/agent
+	CGO_ENABLED=0 go build -buildvcs=false -trimpath -ldflags '$(LDFLAGS)' -o bin/release-sign ./cmd/release-sign
 
 # Schemas isolate data, not PostgreSQL's database-wide vacuum horizon.
 # Keep packages sequential so migration tests cannot pin HOT-page measurements.
@@ -73,6 +74,52 @@ quick-start-test:
 	bash deploy/tests/quick-start-update.sh
 	bash deploy/tests/quick-start-modes.sh
 	bash deploy/tests/quick-start-compose.sh
+
+# Signed release artifacts. The web image embeds SHA256SUMS and its signature so
+# an installer that pins QCH_RELEASE_PUBLIC_KEY can verify every file it places
+# on a node. Generate them before building the image:
+#   make signing-key                     (once, on the release machine)
+#   make release-image-checksums RELEASE_KEY=release.key
+# The private key stays on the release machine; only dist/release/ is published.
+# The signed list covers both init systems; nodes verify the subset they need.
+# Required files absent from the signed list fail closed. deploy/tests/release-assets.sh
+# derives that file list from the installer and refuses to answer when the two
+# disagree, so a new download cannot quietly fall outside the signature.
+RELEASE_DIR ?= dist/release
+RELEASE_KEY ?= release.key
+RELEASE_AGENT ?= bin/qagent
+RELEASE_IMAGE_DIR ?= dist/agent-image
+
+# One-time release keypair. Keep the private key on the release machine or in a
+# protected CI environment: a key that reaches the control plane would let whoever
+# takes the control plane over sign a replacement for every downloaded file.
+signing-key: build
+	@test ! -e $(RELEASE_KEY) || { printf '%s\n' '$(RELEASE_KEY) already exists; refusing to overwrite it'; exit 1; }
+	./bin/release-sign keygen -private $(RELEASE_KEY) -public $(RELEASE_KEY).pub
+	./bin/release-sign pubkey -public $(RELEASE_KEY).pub -out $(RELEASE_KEY).pub.pem
+	@printf '%s\n' 'publish $(RELEASE_KEY).pub.pem and set QCH_RELEASE_PUBLIC_KEY to it on each node'
+
+check-install-assets:
+	bash deploy/tests/release-assets.sh --check
+
+release-checksums: build check-install-assets
+	@assets="$$(bash deploy/tests/release-assets.sh --files | sed 's/^/-assets /' | tr '\n' ' ')" || exit 1; \
+	./bin/release-sign checksums -key $(RELEASE_KEY) -agent '$(RELEASE_AGENT)' $$assets \
+		-out $(RELEASE_DIR) || exit 1; \
+	./bin/release-sign sign -key $(RELEASE_KEY) -release '$(VERSION)' \
+		-agent '$(RELEASE_AGENT)' -agent-version '$(VERSION)' \
+		$$assets -out $(RELEASE_DIR)/release-manifest.json
+
+# Docker distributions must sign the image's Agent, not a host-toolchain build.
+release-image-agent:
+	docker build --target agent-release --build-arg VERSION='$(VERSION)' \
+		--output 'type=local,dest=$(RELEASE_IMAGE_DIR)' .
+
+release-image-checksums: release-image-agent
+	$(MAKE) release-checksums RELEASE_AGENT='$(RELEASE_IMAGE_DIR)/qagent'
+
+release-image-test:
+	VERSION='$(VERSION)' sh deploy/tests/release-image.sh
 
 web-image-test:
 	docker build --target qcontrol-web --build-arg VERSION='$(VERSION)' .
