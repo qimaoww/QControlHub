@@ -18,7 +18,7 @@ func buildMihomoClientYAML(input Input, address, serverName, name string) (strin
 	switch input.Protocol {
 	case ProtocolShadowsocks, ProtocolSS2022:
 		proxy["type"], proxy["cipher"], proxy["password"] = "ss", input.Method, input.Credential
-	case ProtocolVLESS, ProtocolVLESSXHTTP, ProtocolVLESSEncTCP, ProtocolVLESSEncXHTTP:
+	case ProtocolVLESS, ProtocolVLESSXHTTP, ProtocolVLESSEncTCP, ProtocolVLESSEncXHTTP, ProtocolVLESSEncPlain:
 		proxy["type"], proxy["uuid"] = "vless", input.Credential
 		if input.Flow != "" {
 			proxy["flow"] = input.Flow
@@ -27,7 +27,14 @@ func buildMihomoClientYAML(input Input, address, serverName, name string) (strin
 			proxy["encryption"] = input.VLESSEncryption
 		}
 		if input.RealityEnabled {
-			proxy["reality-opts"] = map[string]any{"public-key": input.RealityPublicKey, "short-id": input.RealityShortID}
+			// Mihomo keeps post-quantum key exchange behind an explicit
+			// switch. REALITY negotiates X25519MLKEM768 as soon as the target
+			// supports it, so every synced Reality node turns it on and falls
+			// back to X25519 when the peer does not offer the group.
+			proxy["reality-opts"] = map[string]any{
+				"public-key": input.RealityPublicKey, "short-id": input.RealityShortID,
+				"support-x25519mlkem768": true,
+			}
 			proxy["client-fingerprint"] = "chrome"
 		}
 	case ProtocolVMess:

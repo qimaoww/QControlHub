@@ -167,7 +167,7 @@ func TestServerPlanRegenerationStaysLocalAndUsesCurrentFormState(t *testing.T) {
 	if !strings.Contains(string(styles), ".protocol-catalog-wide.protocol-two-rows .protocol-browser>nav{display:grid") ||
 		!strings.Contains(content, `protocolCatalogNav.scrollWidth > protocolCatalogNav.clientWidth + 1`) ||
 		!strings.Contains(content, `String(Math.ceil(workspace.protocols.length / 2))`) ||
-		!strings.Contains(content, `"vless-enc-xhttp-reality-vision": "XHTTP + Reality + Vision"`) {
+		!strings.Contains(content, `"vless-enc-xhttp-reality-vision": "VLESS-ENC-XHTTP-Vision-uTLS-REALITY"`) {
 		t.Error("large protocol preset catalogs must render as exactly two rows")
 	}
 }

@@ -123,7 +123,7 @@ func TestMihomoClientExportProtocolMatrix(t *testing.T) {
 					if proxy["cipher"] != input.Method || proxy["password"] != input.Credential {
 						t.Fatal("Shadowsocks credentials changed")
 					}
-				case ProtocolVLESS, ProtocolVLESSXHTTP, ProtocolVLESSEncTCP, ProtocolVLESSEncXHTTP:
+				case ProtocolVLESS, ProtocolVLESSXHTTP, ProtocolVLESSEncTCP, ProtocolVLESSEncXHTTP, ProtocolVLESSEncPlain:
 					wantType = "vless"
 					if proxy["uuid"] != input.Credential {
 						t.Fatal("VLESS UUID changed")
@@ -133,6 +133,11 @@ func TestMihomoClientExportProtocolMatrix(t *testing.T) {
 						if proxy["tls"] != true || reality["public-key"] != input.RealityPublicKey || reality["short-id"] != input.RealityShortID || proxy["servername"] != input.RealityServerName {
 							t.Fatal("Reality client settings were lost")
 						}
+						if reality["support-x25519mlkem768"] != true {
+							t.Fatal("Mihomo Reality clients must opt into X25519MLKEM768")
+						}
+					} else if proxy["reality-opts"] != nil {
+						t.Fatal("non-Reality client unexpectedly carries reality-opts")
 					}
 					if isVLESSEncryptionProtocol(input.Protocol) && proxy["encryption"] != input.VLESSEncryption {
 						t.Fatal("VLESS client encryption was lost")
