@@ -149,6 +149,7 @@ var errorMessages = map[string]string{
 	"task is not running":                                                                                         "任务已不在执行中，请刷新任务状态。",
 	"invalid task lease":                                                                                          "任务执行凭据已失效，请等待节点重新获取任务。",
 	"task engine does not match configuration engine":                                                             "任务内核与配置内核不一致，请重新选择配置。",
+	"prefer_cached is only supported for configuration read tasks":                                                "只有读取节点配置时才能请求复用最近快照。",
 	"node-owned configuration cannot be deployed to another agent":                                                "节点专属配置不能部署到其他节点，请选择原节点。",
 	"existing service migration requires this agent's saved snapshot":                                             "迁移现有服务需要此节点已保存的配置快照，请重新读取并保存。",
 	"node-owned configurations must use the agent configuration workflow":                                         "节点专属配置请在对应节点的配置页面中编辑。",

@@ -1,6 +1,6 @@
 //go:build linux
 
-package agent
+package hostmetrics
 
 import (
 	"bufio"
@@ -185,7 +185,7 @@ func collectHostMetrics(ctx context.Context, previous metricSample) (core.HostMe
 		}
 	}
 
-	if !metricsHaveData(metrics) {
+	if !HasData(metrics) {
 		metrics.CollectedAt = time.Time{}
 	}
 	return metrics, next, errors.Join(problems...)

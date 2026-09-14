@@ -25,6 +25,7 @@ const (
 	PermissionSettingsManage   Permission = "settings.manage"
 	PermissionAuditRead        Permission = "audit.read"
 	PermissionMetricsRead      Permission = "metrics.read"
+	PermissionPanelMetricsRead Permission = "panel-metrics.read"
 	PermissionCoreLogsRead     Permission = "core-logs.read"
 	PermissionTrafficRead      Permission = "traffic.read"
 	PermissionTrafficManage    Permission = "traffic.manage"
@@ -41,7 +42,7 @@ var allPermissions = []Permission{
 	PermissionConfigsWrite, PermissionConfigsDelete, PermissionConfigsRestore,
 	PermissionTasksRead, PermissionTasksExecute, PermissionEnrollmentManage,
 	PermissionSettingsRead, PermissionSettingsManage, PermissionAuditRead,
-	PermissionMetricsRead, PermissionCoreLogsRead, PermissionTrafficRead, PermissionTrafficManage, PermissionUsersManage, PermissionTemplatesRead,
+	PermissionMetricsRead, PermissionPanelMetricsRead, PermissionCoreLogsRead, PermissionTrafficRead, PermissionTrafficManage, PermissionUsersManage, PermissionTemplatesRead,
 	PermissionTemplatesWrite, PermissionTemplatesDelete,
 }
 

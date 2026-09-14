@@ -197,6 +197,7 @@ func main() {
 	defer stop()
 	go janitor(ctx, dataStore)
 	go apiServer.MonitorAgentPresence(ctx)
+	go apiServer.MonitorPanelMetrics(ctx)
 	startDiagnosticListener(ctx)
 	go func() {
 		<-ctx.Done()

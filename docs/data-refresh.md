@@ -11,10 +11,11 @@ DOM instead of replacing the application tree.
 | Page or flow | Data sources | Refresh entry | View application |
 | --- | --- | --- | --- |
 | All routes | overview and settings | initial route, hash change, task refresh button | latest-route scheduler; same-route keyed reconciliation |
-| Dashboard | agents, recent tasks, preloaded overview | route render | same-route reconciliation |
+| Dashboard | permitted agents/recent tasks, monthly traffic, preloaded overview | route render and month selection | same-route reconciliation; saved node order |
+| Dashboard host card | `/panel-metrics` in-memory snapshot, separate `panel-metrics.read` permission | initial card mount, manual refresh, 2-second visible-page timer | scoped card-only reconciliation; unavailable/stale/error states; abort and stop on route departure or hidden page |
 | Node settings | agents, enrollment tokens, preloaded overview, metric history | route render, manual metrics refresh, 2-second metrics timer, node mutations | metric fields patch in place; structural changes coalesce behind drag and FLIP completion |
 | Config inbound/common-field dialog | config workspace, generated plans, fields, revisions | inbound/common-field action, protocol/field selection, saved mutation | scoped form reconciliation; generated parameters patch only their controls; no duplicate source editor |
-| Live config | agents, node config workspace, task result and snapshot, on-demand revisions/deployments | route, node/engine selection, manual read, inbound/field mutation, post-task completion | request sequence guard plus same-route reconciliation; skip background application while a dialog or source draft is active |
+| Live config | agents, node config workspace, task result and validated snapshot, on-demand revisions/deployments | route, node/engine selection, manual read, inbound/field mutation, post-task completion | automatic reads may reuse a 600-second server snapshot; manual reads and deploy preflight bypass it; request sequence guard plus same-route reconciliation; skip background application while a dialog or source draft is active |
 | Client access | client profiles and agents | route, sidebar/filter/search selection, address mutation | refresh channel plus same-route reconciliation |
 | Config archive | configs, templates, agents, revisions | route, selection, save/restore/delete/template mutation | request sequence guard plus same-route reconciliation |
 | Tasks | tasks, agents, bounded settings cache | route, manual refresh, 0.6–5-second timer, cancel/retry | one effective request; keyed task-card reconciliation and in-place clock patches |
@@ -25,6 +26,33 @@ DOM instead of replacing the application tree.
 The task-result wait loop remains a bounded 600 ms status read used only after
 an explicit live-config action. It does not render while waiting; the final
 snapshot is applied through the guarded live-config route.
+
+An automatic live-config entry asks the task endpoint to prefer a successful
+snapshot from the same principal, node, engine, and source action for at most
+600 seconds. A cache hit skips Agent dispatch and real-core startup. Explicit
+refreshes and the managed-config deploy preflight always create or join a fresh
+read, never one queued before a pending configuration mutation; volatile
+in-page Agent snapshots expire on the same 600-second boundary.
+The preflight compares those bytes with the Agent baseline originally
+shown by the page and stops before saving or creating a deploy task if they
+differ. This is a UI-level drift check, not an atomic compare-and-swap at the
+Agent: a later external edit or concurrent deployment can still race execution.
+
+Cache selection runs after normal task validation and current authorization,
+under the same Agent lock used for task creation and dispatch. It is scoped to
+the exact submitting principal, including administrators. Pending/running
+deploy, import, core-install, and install-if-missing tasks bypass the cache.
+Dispatching these tasks invalidates both read-action variants before execution,
+even if the mutation later fails or loses its result. Canceling a task before
+dispatch does not invalidate the unchanged snapshot; ordinary validation also
+preserves it.
+
+Unreadable cached ciphertext is treated as a miss, while database and permission
+errors remain failures. If a snapshot is retired between task selection and its
+GET, the page retries once with an uncached read, including during preflight.
+Route, navigation epoch, source, and account guards prevent an abandoned retry
+from submitting new work or clearing a newer read. Snapshot contents remain
+encrypted in PostgreSQL and are never persisted in browser storage.
 
 ## Render and binding audit
 
@@ -75,6 +103,13 @@ snapshot is applied through the guarded live-config route.
   the drop target, and the FLIP transition or fallback cleanup have settled.
 - A failed background refresh marks the page-local status without clearing or
   replacing the current data. Its single timer remains available for recovery.
+- Panel-host polling never refetches overview, agents, tasks, or monthly
+  traffic. It keeps the active month picker and traffic detail modal intact.
+  Showing the tab again restarts polling immediately; logging out, navigating
+  away, or changing the render scope discards late responses.
+- Dashboard metric widths and month-axis columns are applied through CSSOM
+  after reconciliation, not inline HTML styles. Dashboard browser fixtures
+  enforce the production CSP read directly from `frontend/nginx.conf`.
 - Mutation notices use a fixed overlay and never scroll or shift the workspace.
 - Leaving node settings explicitly cancels pointer/FLIP state, removes its
   ghost, and discards queued callbacks from the departed page.

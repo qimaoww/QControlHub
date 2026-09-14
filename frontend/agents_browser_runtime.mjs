@@ -210,6 +210,8 @@ if (mode === "config-layout") {
   location.hash = "#live-config";
 }
 if (mode.startsWith("bbr")) {
+  setStorageAccount({ role: mode === "bbr-readonly" ? "readonly" : mode === "bbr-writeonly" ? "user" : "admin" });
+  accountStorage.setItem("qcontrolhub:node-card-order", JSON.stringify(["alpha", "delta", "bravo", "charlie"]));
   testAPI.tcpTasks = [];
   testAPI.tcpMutations = [];
   testAPI.agents = populatedAgents.map((agent, index) => ({
@@ -1850,6 +1852,13 @@ async function testClientNodeOrderRuntime() {
 
 async function testSystemTCPRuntime() {
   await waitFor(() => document.querySelector(".bbr-card"), "TCP 页面未加载");
+  assert.equal(
+    [...document.querySelectorAll(".bbr-card")]
+      .map((entry) => entry.dataset.refreshKey.replace("bbr-", ""))
+      .join(","),
+    "alpha,delta,bravo,charlie",
+    "TCP 卡片未使用已保存的节点顺序",
+  );
   assert.equal(document.querySelector(".bbr-intro"), null, "不应恢复冗余的顶部说明卡");
   if (mode !== "bbr-writeonly")
     assert.notEqual(document.querySelector('.dock-nav a[href="#system-bbr"] svg').innerHTML, document.querySelector('.dock-nav a[href="#traffic"] svg').innerHTML, "TCP 调优和流量侧栏图标重复");
@@ -2179,7 +2188,10 @@ async function testLogPreferenceRestoreRuntime() {
 }
 
 try {
-  if (mode === "sharing" || mode === "sharing-mobile") {
+  if (mode.startsWith("dashboard")) {
+    const { testDashboardRuntime } = await import("./dashboard_browser_runtime.mjs");
+    await testDashboardRuntime(mode, new URLSearchParams(location.search).has("preview"));
+  } else if (mode === "sharing" || mode === "sharing-mobile") {
     const { testAgentSharingRuntime } = await import("./sharing_browser_runtime.mjs");
     await testAgentSharingRuntime();
   } else if (mode === "users" || mode === "users-mobile") {
