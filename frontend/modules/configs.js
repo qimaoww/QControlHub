@@ -76,9 +76,9 @@ const generatedFieldActions = Object.freeze([
 ]);
 
 const protocolNavigationNames = Object.freeze({
-  "vless-xhttp-reality": "VLESS + XHTTP + Reality",
-  "vless-enc-tcp-reality-vision": "VLESS + ENC + TCP + Reality + Vision",
-  "vless-enc-xhttp-reality-vision": "VLESS + ENC + XHTTP + Reality + Vision",
+  "vless-xhttp-reality": "VLESS-XHTTP-uTLS-REALITY",
+  "vless-enc-tcp-reality-vision": "VLESS-ENC-TCP-Vision-uTLS-REALITY",
+  "vless-enc-xhttp-reality-vision": "VLESS-ENC-XHTTP-Vision-uTLS-REALITY",
 });
 
 function installGeneratedFieldButtons(form, protocol) {
