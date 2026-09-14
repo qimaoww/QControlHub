@@ -60,5 +60,13 @@ func validateVLESSEncryptionPair(decryption, encryption string) error {
 }
 
 func isVLESSEncryptionProtocol(protocol string) bool {
-	return protocol == ProtocolVLESSEncTCP || protocol == ProtocolVLESSEncXHTTP
+	return protocol == ProtocolVLESSEncTCP || protocol == ProtocolVLESSEncXHTTP || protocol == ProtocolVLESSEncPlain
+}
+
+// isVLESSRealityProtocol lists the built-in VLESS presets that terminate
+// Reality and, except for the XHTTP preset, carry the Vision Flow. The plain
+// VLESS+ENC+TCP preset is deliberately absent: it runs without TLS or Reality.
+func isVLESSRealityProtocol(protocol string) bool {
+	return protocol == ProtocolVLESS || protocol == ProtocolVLESSXHTTP ||
+		protocol == ProtocolVLESSEncTCP || protocol == ProtocolVLESSEncXHTTP
 }

@@ -76,9 +76,9 @@ const generatedFieldActions = Object.freeze([
 ]);
 
 const protocolNavigationNames = Object.freeze({
-  "vless-xhttp-reality": "XHTTP + Reality",
-  "vless-enc-tcp-reality-vision": "TCP + Reality + Vision",
-  "vless-enc-xhttp-reality-vision": "XHTTP + Reality + Vision",
+  "vless-xhttp-reality": "VLESS + XHTTP + Reality",
+  "vless-enc-tcp-reality-vision": "VLESS + ENC + TCP + Reality + Vision",
+  "vless-enc-xhttp-reality-vision": "VLESS + ENC + XHTTP + Reality + Vision",
 });
 
 function installGeneratedFieldButtons(form, protocol) {
@@ -128,7 +128,8 @@ export function readServerPlanInput(form, protocol) {
     secondary_credential: values.get("secondary_credential"),
     method: values.get("method"),
     flow:
-      protocol.key === "vless" || protocol.uses_vless_encryption
+      protocol.key === "vless" ||
+      (protocol.uses_vless_encryption && protocol.uses_reality)
         ? "xtls-rprx-vision"
         : "",
     transport: values.get("transport"),

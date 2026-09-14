@@ -18,7 +18,7 @@ func buildMihomoClientYAML(input Input, address, serverName, name string) (strin
 	switch input.Protocol {
 	case ProtocolShadowsocks, ProtocolSS2022:
 		proxy["type"], proxy["cipher"], proxy["password"] = "ss", input.Method, input.Credential
-	case ProtocolVLESS, ProtocolVLESSXHTTP, ProtocolVLESSEncTCP, ProtocolVLESSEncXHTTP:
+	case ProtocolVLESS, ProtocolVLESSXHTTP, ProtocolVLESSEncTCP, ProtocolVLESSEncXHTTP, ProtocolVLESSEncPlain:
 		proxy["type"], proxy["uuid"] = "vless", input.Credential
 		if input.Flow != "" {
 			proxy["flow"] = input.Flow

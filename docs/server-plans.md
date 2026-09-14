@@ -14,7 +14,8 @@
 | --- | --- | --- | --- | --- | --- |
 | Shadowsocks | 否 | 否 | 否 | 是 | 高位端口、密码、标准 AEAD 方法 |
 | Shadowsocks 2022 | 是 | 是 | 是 | 是 | 高位端口、用户名、16/32 字节 Base64 PSK |
-| VLESS Vision + Reality | 是 | 是 | 是 | 否 | 高位端口、UUID、X25519 密钥对、Short ID |
+| VLESS Vision + uTLS + Reality | 是 | 是 | 是 | 否 | 高位端口、UUID、X25519 密钥对、Short ID |
+| VLESS + ENC + TCP（不启用 TLS / Reality） | 是 | 是 | 否 | 否 | 高位端口、UUID、VLESS-ENC X25519 密钥对 |
 | VLESS-ENC + TCP + Reality + Vision | 是 | 是 | 否 | 否 | 高位端口、UUID、VLESS-ENC X25519 密钥对、Reality X25519 密钥对、Short ID |
 | VLESS-ENC + XHTTP + Reality + Vision | 是 | 是 | 否 | 否 | 高位端口、UUID、随机 XHTTP 路径、VLESS-ENC X25519 密钥对、Reality X25519 密钥对、Short ID |
 | VMess + WebSocket + TLS | 是 | 是 | 是 | 否 | 高位端口、UUID、WebSocket 路径 |
@@ -29,7 +30,7 @@
 
 随机端口来自 20000–49151。密码、PSK、UUID、路径、X25519 密钥和 Short ID 均使用 Go `crypto/rand`。点击“重新生成参数”会直接读取当前表单并只替换随机字段，不会重载页面或恢复协议默认值；例如当前选择 SS2022 AES-128 时会保留该方法并生成匹配的 16 字节 PSK，端口转发方案会保留当前目标地址、目标端口和网络协议。标签、端口、用户名、凭据、路径、Reality 密钥对和 Short ID 也提供就地生成按钮，其中密钥对始终原子更新 Public Key 与 Private Key。页面中的所有方案字段仍可自定义。
 
-Mihomo 与 Xray 的 VLESS-ENC 预设使用独立的 X25519 密钥对：服务端配置只保存 `decryption` 私有值，客户端分享资料只导出 `encryption` 公开值。Xray Reality 还可自定义 `minClientVer` 和可选的 `mldsa65Seed`；启用 ML-DSA-65 时，保存前会按 `xray tls ping` 的口径计算 target 实际发送的 DER 证书链总长度，要求严格大于 3500 bytes，并要求协商 `X25519MLKEM768`。不满足时拒绝保存；未启用 ML-DSA-65 的普通 Reality 不受此限制。
+Mihomo 与 Xray 的 VLESS-ENC 预设使用独立的 X25519 密钥对：服务端配置只保存 `decryption` 私有值，客户端分享资料只导出 `encryption` 公开值。其中的“VLESS + ENC + TCP”不生成 TLS、Reality 与 Vision Flow：Xray 只在启用 VLESS Encryption 时才允许 `security: "none"`，Mihomo 的 vless listener 也把 `decryption` 视为与证书、Reality 同级的必要项，因此这类入站可以裸跑原生 TCP。sing-box 官方内核的 VLESS inbound 没有 `decryption` 字段，因此不提供该方案。Reality 的 ML-DSA-65 只在 Xray 上提供：Xray 自定义 `minClientVer` 和可选的 `mldsa65Seed`，Mihomo 的 `reality-config`、`reality-opts` 与 sing-box 的 `tls.reality` 都没有对应字段，预设因此只在 Xray 的 Reality 方案上显示 ML-DSA-65 字段，Mihomo 客户端 YAML 也不会导出该参数（需要时改用分享 URL 的 `pqv`）。启用 ML-DSA-65 时，保存前会按 `xray tls ping` 的口径计算 target 实际发送的 DER 证书链总长度，要求严格大于 3500 bytes，并要求协商 `X25519MLKEM768`。不满足时拒绝保存；未启用 ML-DSA-65 的普通 Reality 不受此限制。
 
 Snell 预设只生成 Mihomo 当前支持的 v5，不提供旧版本或 v6 字段。ShadowTLS 方案固定 v3，PSK 与 ShadowTLS 密码相互独立，服务端启用严格模式，客户端不生成证书校验绕过。Sudoku 预设只提供 `chacha20-poly1305` 和 `aes-128-gcm`，不提供无 AEAD 的 `none`；服务端只保存 Master Public Key，64 字节 Available Private Key 按配置版本和入站标签单独加密保存，仅用于生成客户端 YAML。HTTPMask 服务端固定使用上游推荐的 `auto`，客户端可选经过 Mihomo 双端真实流量验证的 `stream`、`poll`、`auto` 或 `ws`；当前 Mihomo 1.19.30 的 `legacy`、`custom-table` 与 `custom-tables` 虽能通过配置检查，但双端传输会失败或损坏响应，预设因此不提供。四种内置 Table Type、raw TCP、纯/压缩下行、两种安全 AEAD 与原生 `multiplex` 均已验证；原生复用不与通用 SMux 或 TCP Brutal 叠加。
 

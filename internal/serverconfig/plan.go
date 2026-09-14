@@ -110,8 +110,8 @@ func NewPlan(protocol Protocol) (Input, error) {
 		input.SudokuHTTPMaskMode = "ws"
 		input.SudokuMultiplex = "off"
 	}
-	if protocol.Key == ProtocolVLESS || protocol.Key == ProtocolVLESSXHTTP || isVLESSEncryptionProtocol(protocol.Key) {
-		if protocol.Key == ProtocolVLESS || isVLESSEncryptionProtocol(protocol.Key) {
+	if isVLESSRealityProtocol(protocol.Key) {
+		if protocol.Key != ProtocolVLESSXHTTP {
 			input.Flow = "xtls-rprx-vision"
 		}
 		privateKey, err := ecdh.X25519().GenerateKey(rand.Reader)

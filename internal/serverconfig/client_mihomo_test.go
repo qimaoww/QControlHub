@@ -123,7 +123,7 @@ func TestMihomoClientExportProtocolMatrix(t *testing.T) {
 					if proxy["cipher"] != input.Method || proxy["password"] != input.Credential {
 						t.Fatal("Shadowsocks credentials changed")
 					}
-				case ProtocolVLESS, ProtocolVLESSXHTTP, ProtocolVLESSEncTCP, ProtocolVLESSEncXHTTP:
+				case ProtocolVLESS, ProtocolVLESSXHTTP, ProtocolVLESSEncTCP, ProtocolVLESSEncXHTTP, ProtocolVLESSEncPlain:
 					wantType = "vless"
 					if proxy["uuid"] != input.Credential {
 						t.Fatal("VLESS UUID changed")

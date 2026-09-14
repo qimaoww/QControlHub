@@ -11,6 +11,7 @@ const (
 	ProtocolVLESSXHTTP     = "vless-xhttp-reality"
 	ProtocolVLESSEncTCP    = "vless-enc-tcp-reality-vision"
 	ProtocolVLESSEncXHTTP  = "vless-enc-xhttp-reality-vision"
+	ProtocolVLESSEncPlain  = "vless-enc-tcp"
 	ProtocolVMess          = "vmess"
 	ProtocolTrojan         = "trojan"
 	ProtocolHy2            = "hysteria2"
@@ -166,8 +167,8 @@ func Protocols(engine core.Engine) []Protocol {
 			Transports: []string{"raw"}, IgnoresUsername: true,
 		},
 		{
-			Key: ProtocolVLESS, Name: "VLESS", Badge: "VLESS",
-			Description: "自动生成 UUID、X25519 密钥对与 Short ID 的 VLESS Vision + Reality 方案。",
+			Key: ProtocolVLESS, Name: "VLESS-Vision-uTLS-REALITY", Badge: "VLESS",
+			Description: "自动生成 UUID、X25519 密钥对与 Short ID 的 VLESS Vision + Reality 方案；客户端分享链接固定使用 uTLS chrome 指纹。",
 			Docs:        base + vlessPath, DefaultPort: 443, Credential: "用户 UUID",
 			Transports: []string{"raw"}, UsesReality: true, SupportsRealityMLDSA: engine == core.EngineXray,
 		},
@@ -196,9 +197,27 @@ func Protocols(engine core.Engine) []Protocol {
 			Transports: []string{"raw"}, IgnoresUsername: true, PortForward: true,
 		},
 	}
+	// VLESS Encryption 可以直接跑在原生 TCP 上：Xray 允许在启用 VLESS Encryption 时
+	// 使用 security: none，Mihomo 的 vless listener 也把 decryption 视为与证书、Reality
+	// 同级的必要项，因此两者都不生成 TLS/Reality，也不使用 Vision Flow。
+	// sing-box 官方内核不支持 VLESS Encryption，不提供该预设。
+	if engine == core.EngineMihomo || engine == core.EngineXray {
+		plain := Protocol{
+			Key: ProtocolVLESSEncPlain, Name: "VLESS+ENC+TCP", Badge: "VLESS ENC",
+			Description: "VLESS Encryption 直接运行在原生 TCP 上，不启用 TLS 或 Reality；客户端分享链接通过 encryption 参数携带加密值。",
+			Docs:        base + vlessPath, DefaultPort: 443, Credential: "用户 UUID",
+			Transports: []string{"raw"}, UsesVLESSEncryption: true,
+		}
+		for index, item := range protocols {
+			if item.Key == ProtocolVLESS {
+				protocols = append(protocols[:index+1], append([]Protocol{plain}, protocols[index+1:]...)...)
+				break
+			}
+		}
+	}
 	if engine == core.EngineMihomo || engine == core.EngineXray {
 		protocols = append(protocols, Protocol{
-			Key: ProtocolVLESSXHTTP, Name: "VLESS-XHTTP-Reality", Badge: "VLESS XHTTP",
+			Key: ProtocolVLESSXHTTP, Name: "VLESS + XHTTP + Reality", Badge: "VLESS XHTTP",
 			Description: "独立的 VLESS XHTTP + Reality 方案；自动生成 UUID、X25519 密钥、Short ID 与随机路径。",
 			Docs:        "https://github.com/XTLS/Xray-examples/tree/main/VLESS-XHTTP-Reality/minimal-steal_others",
 			DefaultPort: 443, Credential: "用户 UUID", Transports: []string{"xhttp"},
@@ -208,13 +227,13 @@ func Protocols(engine core.Engine) []Protocol {
 	if engine == core.EngineMihomo || engine == core.EngineXray {
 		protocols = append(protocols,
 			Protocol{
-				Key: ProtocolVLESSEncTCP, Name: "VLESS-ENC-TCP-Reality-Vision", Badge: "VLESS ENC TCP",
+				Key: ProtocolVLESSEncTCP, Name: "VLESS + ENC + TCP + Reality + Vision", Badge: "VLESS ENC TCP",
 				Description: "VLESS Encryption + Raw/TCP + Reality + Vision；自动生成独立的服务端 Decryption 与客户端 Encryption。",
 				Docs:        base + vlessPath, DefaultPort: 443, Credential: "用户 UUID",
 				Transports: []string{"raw"}, UsesReality: true, SupportsRealityMLDSA: engine == core.EngineXray, UsesVLESSEncryption: true,
 			},
 			Protocol{
-				Key: ProtocolVLESSEncXHTTP, Name: "VLESS-ENC-XHTTP-Reality-Vision", Badge: "VLESS ENC XHTTP",
+				Key: ProtocolVLESSEncXHTTP, Name: "VLESS + ENC + XHTTP + Reality + Vision", Badge: "VLESS ENC XHTTP",
 				Description: "VLESS Encryption + XHTTP + Reality + Vision；Vision 穿透 VLESS Encryption，不依赖 XHTTP 底层直拷。",
 				Docs:        base + vlessPath, DefaultPort: 443, Credential: "用户 UUID",
 				Transports: []string{"xhttp"}, UsesReality: true, SupportsRealityMLDSA: engine == core.EngineXray, UsesVLESSEncryption: true, TransportConfig: true,

@@ -16,7 +16,7 @@ func generateXray(input Input) (string, error) {
 		inbound["settings"] = map[string]any{
 			"network": "tcp,udp", "method": input.Method, "password": input.Credential,
 		}
-	case ProtocolVLESS, ProtocolVLESSXHTTP, ProtocolVLESSEncTCP, ProtocolVLESSEncXHTTP:
+	case ProtocolVLESS, ProtocolVLESSXHTTP, ProtocolVLESSEncTCP, ProtocolVLESSEncXHTTP, ProtocolVLESSEncPlain:
 		inbound["protocol"] = "vless"
 		user := map[string]any{"id": input.Credential, "level": 0, "email": input.Username}
 		if input.Flow != "" {
@@ -176,6 +176,9 @@ func parseXray(content string) (Input, bool) {
 		}
 		if input.Transport == "xhttp" {
 			input.Protocol = ProtocolVLESSEncXHTTP
+		} else if security := stringValue(stream["security"]); security != "tls" && security != "reality" {
+			// Xray 允许 VLESS Encryption 在裸 TCP 上运行（security: none）。
+			input.Protocol = ProtocolVLESSEncPlain
 		} else {
 			input.Protocol = ProtocolVLESSEncTCP
 		}
