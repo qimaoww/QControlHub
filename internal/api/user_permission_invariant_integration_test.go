@@ -7,11 +7,8 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
-// users.manage is administrator-equivalent: UpdateUser authorizes on
-// scope.Admin, scope.Admin comes from the stored role, and an administrator
-// resolves every agent without an owner filter. An account holding it can
-// therefore promote itself and read every other account's fleet, so it must
-// never be stored on a user row.
+// User management belongs to the administrator role. Explicit grants must
+// agree with the store's existing role-based administrator scope.
 //
 // The console does not offer the capability, which is exactly why this needs a
 // regression test: the invariant is only observable on the server side.
@@ -79,8 +76,7 @@ func TestGrantablePermissionsExcludeAdministratorCapabilities(t *testing.T) {
 		t.Fatalf("grantable permissions = %d, all = %d; expected exactly one administrator-only capability",
 			len(grantable), len(core.AllPermissions()))
 	}
-	// Normalization must drop the capability so the API layer's length check
-	// reports an invalid request instead of storing a second administrator.
+	// Resolving an old non-administrator row must drop impossible grants.
 	stored := core.NormalizePermissions(
 		[]core.Permission{core.PermissionOverviewRead, core.PermissionUsersManage},
 		grantable,
@@ -91,5 +87,37 @@ func TestGrantablePermissionsExcludeAdministratorCapabilities(t *testing.T) {
 	// A role that already carries full authority normalizes against the full set.
 	if got := core.NormalizePermissions([]core.Permission{core.PermissionUsersManage}, core.AllPermissions()); len(got) != 1 {
 		t.Fatalf("administrator normalization dropped users.manage: %v", got)
+	}
+}
+
+func TestAdministratorPermissionsRoundTrip(t *testing.T) {
+	_, _, admin, alice, _ := newConfigScopeAPIFixture(t)
+	var created core.User
+	admin.call("POST", "/users", core.UserRequest{
+		Username: "another-admin", Password: "administrator password fixture",
+		Role: core.RoleAdmin, Permissions: core.AllPermissions(),
+	}, http.StatusCreated, &created)
+	if !core.HasPermission(created.Permissions, core.PermissionUsersManage) {
+		t.Fatal("administrator creation dropped user management")
+	}
+	// A client may send back the permission list from GET /users without
+	// including a role change. It is valid for an existing administrator.
+	admin.call("PUT", "/users/"+created.ID, core.UserUpdate{
+		Permissions: &created.Permissions,
+	}, http.StatusOK, &created)
+
+	role := core.RoleAdmin
+	all := core.AllPermissions()
+	admin.call("PUT", "/users/"+alice.userID, core.UserUpdate{
+		Role: &role, Permissions: &all,
+	}, http.StatusOK, nil)
+	role = core.RoleUser
+	admin.call("PUT", "/users/"+alice.userID, core.UserUpdate{
+		Role: &role, Permissions: &all,
+	}, http.StatusBadRequest, nil)
+	var demoted core.User
+	admin.call("PUT", "/users/"+alice.userID, core.UserUpdate{Role: &role}, http.StatusOK, &demoted)
+	if len(demoted.Permissions) != 0 {
+		t.Fatalf("demoted administrator retained permissions: %v", demoted.Permissions)
 	}
 }

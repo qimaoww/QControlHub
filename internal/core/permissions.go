@@ -50,27 +50,16 @@ var rolePermissions = map[Role]map[Permission]struct{}{}
 
 func AllPermissions() []Permission { return append([]Permission(nil), allPermissions...) }
 
-// PermissionGrantsAdministration reports whether holding this capability is
-// equivalent to being an administrator.
-//
-// users.manage is admin-equivalent by construction rather than merely strong:
-// UpdateUser authorizes on scope.Admin, scope.Admin is derived from the stored
-// role, and an admin resolves every agent, config and task without an owner
-// filter. An account that can edit users can therefore set its own role to
-// admin and take over the whole fleet.
-//
-// The console never offers this capability for a user account, so the
-// invariant enforced by GrantablePermissions is defence in depth: it also
-// covers a direct API call, a future console change, and a database restored
-// from an older schema.
+// PermissionGrantsAdministration identifies administrator-only capabilities.
+// Explicit user grants must agree with the store's existing administrator
+// scope instead of implying authority that the stored role does not have.
 func PermissionGrantsAdministration(permission Permission) bool {
 	return permission == PermissionUsersManage
 }
 
 // GrantablePermissions returns the capabilities an administrator may assign
-// explicitly. It is AllPermissions minus the admin-equivalent ones, so
-// NormalizePermissions rejects an attempt to store an administrator capability
-// on a user row instead of quietly dropping it.
+// to a non-administrator. Store writes reject administrator-only requests;
+// reads use this allowlist to filter impossible grants in older backups.
 func GrantablePermissions() []Permission {
 	result := make([]Permission, 0, len(allPermissions))
 	for _, permission := range allPermissions {
