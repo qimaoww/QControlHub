@@ -113,7 +113,7 @@ func BuildClientProfileNamed(input Input, address, serverName, nodeName string) 
 		profile.Format = "Shadowsocks SIP002 URI"
 		profile.URI = (&url.URL{Scheme: "ss", User: url.User(identity), Host: host, Fragment: fragment}).String()
 		profile.SubscriptionCompatible = true
-	case ProtocolVLESS, ProtocolVLESSXHTTP, ProtocolVLESSEncTCP, ProtocolVLESSEncXHTTP:
+	case ProtocolVLESS, ProtocolVLESSXHTTP, ProtocolVLESSEncTCP, ProtocolVLESSEncXHTTP, ProtocolVLESSEncPlain:
 		encryption := "none"
 		if isVLESSEncryptionProtocol(input.Protocol) {
 			encryption = input.VLESSEncryption
@@ -386,7 +386,7 @@ func clientFields(input Input, address, serverName string) []ClientField {
 		credentialLabel = "密码"
 	case ProtocolSS2022:
 		credentialLabel = "Base64 PSK"
-	case ProtocolVLESS, ProtocolVLESSXHTTP, ProtocolVLESSEncTCP, ProtocolVLESSEncXHTTP, ProtocolVMess, ProtocolTUIC:
+	case ProtocolVLESS, ProtocolVLESSXHTTP, ProtocolVLESSEncTCP, ProtocolVLESSEncXHTTP, ProtocolVLESSEncPlain, ProtocolVMess, ProtocolTUIC:
 		credentialLabel = "用户 UUID"
 	case ProtocolSudoku:
 		credentialLabel = "Master Public Key"
