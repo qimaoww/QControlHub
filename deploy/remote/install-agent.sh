@@ -303,16 +303,107 @@ esac
 work_dir=$(mktemp -d "${TMPDIR:-/tmp}/qcontrolhub-agent.XXXXXX")
 trap 'rm -rf "$work_dir"' EXIT HUP INT TERM
 repository_dir="$work_dir/qcontrolhub"
-mkdir -p "$repository_dir/deploy/$service_manager" "$repository_dir/examples/configs"
+asset_dir="$work_dir/install-assets"
+mkdir -p "$repository_dir/deploy/$service_manager" "$repository_dir/examples/configs" "$asset_dir"
+
+# Release verification. The installer and every file it places on the host come
+# from the control plane over one connection, so a checksum fetched from that
+# same connection proves only that the transfer was intact. The signature is what
+# makes the download trustworthy, and it can only do that when the public key
+# arrives from outside the download: set QCH_RELEASE_PUBLIC_KEY to the PEM file
+# published with the release. An attacker who controls the responses cannot forge
+# a signature, so each file is checked against a key it cannot replace.
+#
+# Setting the key is the operator's statement that this deployment ships signed
+# releases, so a missing or unverifiable signature is then a hard failure.
+# QCH_ALLOW_UNSIGNED_RELEASE=true is the explicit opt-out for a control plane
+# that does not publish signatures yet.
+release_public_key=${QCH_RELEASE_PUBLIC_KEY:-}
+allow_unsigned_release=${QCH_ALLOW_UNSIGNED_RELEASE:-false}
+checksums_url="/install-assets/SHA256SUMS"
+checksums_signature_url="/install-assets/SHA256SUMS.sig"
+verify_required=true
+case "$allow_unsigned_release" in
+  true|1|yes) allow_unsigned_release=true ;;
+  *) allow_unsigned_release=false ;;
+esac
+if [ -z "$release_public_key" ] || [ "$allow_unsigned_release" = true ]; then
+  verify_required=false
+  if [ "$allow_unsigned_release" != true ]; then
+    printf '%s\n' \
+      'warning: QCH_RELEASE_PUBLIC_KEY is not set, so the installer files and the Agent' \
+      'warning: binary are NOT signature verified. Anyone able to modify the response or' \
+      'warning: the control plane can substitute them. Publish a signed release and set' \
+      'warning: QCH_RELEASE_PUBLIC_KEY to close this.' >&2
+  fi
+fi
+if [ "$verify_required" = true ] && [ ! -r "$release_public_key" ]; then
+  printf '%s\n' "QCH_RELEASE_PUBLIC_KEY is not a readable file: $release_public_key" >&2
+  exit 1
+fi
+if [ "$verify_required" = true ] && ! command -v openssl >/dev/null 2>&1; then
+  printf '%s\n' \
+    'openssl is required to verify the signed release; install it, or set' \
+    'QCH_ALLOW_UNSIGNED_RELEASE=true to accept unverified downloads.' >&2
+  exit 1
+fi
 
 download() {
   source_path=$1
   destination=$2
+  # Assets live in nested directories (deploy/systemd/..., examples/configs/...)
+  # and the checksum list keys on those relative paths, so create the parent
+  # before the transfer rather than flattening the layout.
+  install -d "$(dirname "$destination")"
   if [ -n "$ca_file" ]; then
     "$download_cmd" --fail --silent --show-error --compressed --cacert "$ca_file" -H "X-QControlHub-Enrollment: $token" "$http_origin$source_path" -o "$destination"
   else
     "$download_cmd" --fail --silent --show-error --compressed -H "X-QControlHub-Enrollment: $token" "$http_origin$source_path" -o "$destination"
   fi
+}
+
+# verify_release_checksums authenticates the checksum list. The signature covers
+# the raw bytes of a `sha256sum -c` compatible list, so no canonical encoding has
+# to be reproduced here. Ed25519 is PureEdDSA, which is why this uses
+# `pkeyutl -rawin`: `openssl dgst -sha256` refuses an Ed25519 key outright.
+verify_release_checksums() {
+  download "$checksums_url" "$work_dir/SHA256SUMS" || {
+    printf '%s\n' 'failed to download the signed checksum list SHA256SUMS' >&2
+    return 1
+  }
+  download "$checksums_signature_url" "$work_dir/SHA256SUMS.sig" || {
+    printf '%s\n' 'failed to download the checksum signature SHA256SUMS.sig' >&2
+    return 1
+  }
+  # The published signature travels as base64 text so it survives text
+  # transports, while `openssl -sigfile` needs the raw bytes.
+  if [ "$(wc -c < "$work_dir/SHA256SUMS.sig")" -eq 64 ]; then
+    cp "$work_dir/SHA256SUMS.sig" "$work_dir/SHA256SUMS.sig.bin"
+  elif openssl base64 -d -A -in "$work_dir/SHA256SUMS.sig" -out "$work_dir/SHA256SUMS.sig.bin" 2>/dev/null; then
+    :
+  else
+    printf '%s\n' 'checksum signature is neither raw nor base64 encoded' >&2
+    return 1
+  fi
+  if [ "$(wc -c < "$work_dir/SHA256SUMS.sig.bin")" -ne 64 ]; then
+    printf '%s\n' 'checksum signature must be 64 bytes' >&2
+    return 1
+  fi
+  if ! openssl pkeyutl -verify -pubin -inkey "$release_public_key" -rawin \
+    -in "$work_dir/SHA256SUMS" -sigfile "$work_dir/SHA256SUMS.sig.bin" >/dev/null 2>&1; then
+    printf '%s\n' \
+      'RELEASE SIGNATURE VERIFICATION FAILED: SHA256SUMS is not signed by the key in' \
+      "QCH_RELEASE_PUBLIC_KEY ($release_public_key)." \
+      'Refusing to install. Either the release key changed (republish and redistribute the' \
+      'new key deliberately) or the download was tampered with.' >&2
+    return 1
+  fi
+  if ! (cd "$asset_dir" && sha256sum -c "$work_dir/SHA256SUMS" >/dev/null 2>&1); then
+    printf '%s\n' 'one or more downloaded files do not match the signed checksum list:' >&2
+    (cd "$asset_dir" && sha256sum -c "$work_dir/SHA256SUMS" 2>&1 | grep -v ': OK$' | head -20) >&2 || true
+    return 1
+  fi
+  printf '%s\n' 'release signature verified; every downloaded file matches the signed list'
 }
 
 echo '== 1/6 下载安装资源 =='
@@ -324,25 +415,61 @@ for asset in \
   examples/configs/sing-box-minimal.json \
   examples/configs/shadowsocks-rust-minimal.json
 do
-  download "/install-assets/$asset" "$repository_dir/$asset"
+  download "/install-assets/$asset" "$asset_dir/$asset"
 done
 if [ "$service_manager" = openrc ]; then
   service_assets="qagent qagent-mihomo qagent-xray qagent-sing-box qagent-shadowsocks-rust"
   for service_asset in $service_assets; do
-    download "/install-assets/deploy/openrc/$service_asset" "$repository_dir/deploy/openrc/$service_asset"
+    download "/install-assets/deploy/openrc/$service_asset" "$asset_dir/deploy/openrc/$service_asset"
   done
 else
   service_assets="qagent.service qagent-core-journal.conf qagent-mihomo.service qagent-xray.service qagent-sing-box.service qagent-shadowsocks-rust.service"
   for service_asset in $service_assets; do
-    download "/install-assets/deploy/systemd/$service_asset" "$repository_dir/deploy/systemd/$service_asset"
+    download "/install-assets/deploy/systemd/$service_asset" "$asset_dir/deploy/systemd/$service_asset"
   done
 fi
-. "$repository_dir/deploy/existing-core-mapping.sh"
 
 echo "== 2/6 下载 agent 二进制（控制面 GET /api/v1/agent-binary）=="
-download /api/v1/agent-binary "$work_dir/qagent"
-[ -s "$work_dir/qagent" ] || { printf '%s\n' 'downloaded agent binary is empty' >&2; exit 1; }
+# The binary is fetched before verification so the signed list can cover it, and
+# it is only executed after the checks below pass.
+mkdir -p "$asset_dir/api/v1"
+download /api/v1/agent-binary "$asset_dir/api/v1/agent-binary"
+[ -s "$asset_dir/api/v1/agent-binary" ] || { printf '%s\n' 'downloaded agent binary is empty' >&2; exit 1; }
+
+if [ "$verify_required" = true ]; then
+  echo '== 验证下载内容签名 =='
+  verify_release_checksums
+fi
+
+# Only now may the tree be trusted. Copy the verified files into the layout the
+# rest of the script reads, so nothing below this point sources or executes a
+# file that a verified signature did not cover.
+for asset in \
+  deploy/bootstrap-core-services.sh \
+  deploy/existing-core-mapping.sh \
+  examples/configs/mihomo-minimal.yaml \
+  examples/configs/xray-minimal.json \
+  examples/configs/sing-box-minimal.json \
+  examples/configs/shadowsocks-rust-minimal.json \
+  deploy/systemd/qagent.service \
+  deploy/systemd/qagent-core-journal.conf \
+  deploy/systemd/qagent-mihomo.service \
+  deploy/systemd/qagent-xray.service \
+  deploy/systemd/qagent-sing-box.service \
+  deploy/systemd/qagent-shadowsocks-rust.service \
+  deploy/openrc/qagent \
+  deploy/openrc/qagent-mihomo \
+  deploy/openrc/qagent-xray \
+  deploy/openrc/qagent-sing-box \
+  deploy/openrc/qagent-shadowsocks-rust
+do
+  [ -f "$asset_dir/$asset" ] || continue
+  install -d "$repository_dir/$(dirname "$asset")"
+  cp "$asset_dir/$asset" "$repository_dir/$asset"
+done
+cp "$asset_dir/api/v1/agent-binary" "$work_dir/qagent"
 chmod 0755 "$work_dir/qagent"
+. "$repository_dir/deploy/existing-core-mapping.sh"
 
 echo '== 3/6 检测现有核心并暂存按需安装资源 =='
 run_discovery() {

@@ -10,6 +10,7 @@
 /.preview/
 /.stage/
 /coverage.out
+/dist/
 /output/playwright/
 /output/imagegen/
 /.playwright-cli/

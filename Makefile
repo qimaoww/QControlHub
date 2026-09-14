@@ -3,7 +3,7 @@ SHELL := /bin/sh
 VERSION ?= dev
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
-.PHONY: build test alpine-test alpine-agent-test upgrade-sandbox-test ss-rust-runtime-test vet fmt-check frontend-check pr-policy-test schema-policy-test installer-test agent-redeploy-test quick-start-test web-image-test docs-check check checks browser-checks non-browser-checks alpine-non-browser-checks init-env compose-config up dev-up down logs
+.PHONY: build test release-checksums signing-key alpine-test alpine-agent-test upgrade-sandbox-test ss-rust-runtime-test vet fmt-check frontend-check pr-policy-test schema-policy-test installer-test agent-redeploy-test quick-start-test web-image-test docs-check check checks browser-checks non-browser-checks alpine-non-browser-checks init-env compose-config up dev-up down logs
 
 # Non-Go checks. CI runs each group as its own task next to the Go test shards,
 # so keep the Go suite out of these targets.
@@ -19,6 +19,7 @@ build:
 	mkdir -p bin
 	CGO_ENABLED=0 go build -buildvcs=false -trimpath -ldflags '$(LDFLAGS)' -o bin/qcontrol-plane ./cmd/control-plane
 	CGO_ENABLED=0 go build -buildvcs=false -trimpath -ldflags '$(LDFLAGS)' -o bin/qagent ./cmd/agent
+	CGO_ENABLED=0 go build -buildvcs=false -trimpath -ldflags '$(LDFLAGS)' -o bin/release-sign ./cmd/release-sign
 
 # Schemas isolate data, not PostgreSQL's database-wide vacuum horizon.
 # Keep packages sequential so migration tests cannot pin HOT-page measurements.
@@ -73,6 +74,32 @@ quick-start-test:
 	bash deploy/tests/quick-start-update.sh
 	bash deploy/tests/quick-start-modes.sh
 	bash deploy/tests/quick-start-compose.sh
+
+# Signed release artifacts. The web image embeds SHA256SUMS and its signature so
+# an installer that pins QCH_RELEASE_PUBLIC_KEY can verify every file it places
+# on a node. Generate them before building the image:
+#   make signing-key                     (once, on the release machine)
+#   make release-checksums RELEASE_KEY=release.key
+# The private key stays on the release machine; only dist/release/ is published.
+RELEASE_DIR ?= dist/release
+RELEASE_KEY ?= release.key
+INSTALLER_ASSETS ?= deploy examples/configs
+
+# One-time release keypair. Keep the private key on the release machine or in a
+# protected CI environment: a key that reaches the control plane would let whoever
+# takes the control plane over sign a replacement for every downloaded file.
+signing-key: build
+	@test ! -e $(RELEASE_KEY) || { printf '%s\n' '$(RELEASE_KEY) already exists; refusing to overwrite it'; exit 1; }
+	./bin/release-sign keygen -private $(RELEASE_KEY) -public $(RELEASE_KEY).pub
+	./bin/release-sign pubkey -public $(RELEASE_KEY).pub -out $(RELEASE_KEY).pub.pem
+	@printf '%s\n' 'publish $(RELEASE_KEY).pub.pem and set QCH_RELEASE_PUBLIC_KEY to it on each node'
+
+release-checksums: build
+	./bin/release-sign checksums -key $(RELEASE_KEY) \
+		-agent bin/qagent -assets $(INSTALLER_ASSETS) -out $(RELEASE_DIR)
+	./bin/release-sign sign -key $(RELEASE_KEY) -release '$(VERSION)' \
+		-agent bin/qagent -agent-version '$(VERSION)' \
+		-assets $(INSTALLER_ASSETS) -out $(RELEASE_DIR)/release-manifest.json
 
 web-image-test:
 	docker build --target qcontrol-web --build-arg VERSION='$(VERSION)' .

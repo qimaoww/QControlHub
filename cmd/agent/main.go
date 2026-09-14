@@ -126,6 +126,10 @@ func main() {
 		AllowHTTP:         envBool("QCH_ALLOW_HTTP", false),
 		AllowInsecureLive: envBool("QCH_ALLOW_INSECURE_LIVE", false),
 		TLSCAFile:         strings.TrimSpace(os.Getenv("QCH_TLS_CA_FILE")),
+		// The release key authenticates the upgrade path. It is provisioned in
+		// the Agent environment so a control plane that has been taken over
+		// cannot push a substituted binary.
+		ReleasePublicKey: strings.TrimSpace(os.Getenv("QCH_RELEASE_PUBLIC_KEY")),
 		// Dual-stack egress probing is opt-in because it queries operator
 		// supplied echo endpoints and adds an outbound dependency. Keep it off
 		// unless a control-plane-owned echo service is configured.

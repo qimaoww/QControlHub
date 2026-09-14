@@ -11,6 +11,80 @@ installer="$repo_root/deploy/remote/install-agent.sh"
 test_root=$(mktemp -d "${TMPDIR:-/tmp}/qcontrolhub-redeploy.XXXXXX")
 trap 'rm -rf "$test_root"' EXIT HUP INT TERM
 
+# Release signature fixtures. The installer verifies a `sha256sum -c` list signed
+# with an Ed25519 release key, so the sandbox signs a real list with a throwaway
+# key. openssl is present in both CI images; without it the redeploy flow cannot
+# exercise the verification path, so say so instead of silently skipping it.
+if ! command -v openssl >/dev/null 2>&1; then
+  printf '%s\n' "install-agent redeploy test: skipped (needs openssl)"
+  exit 0
+fi
+release_key="$test_root/release-key.pem"
+release_pub="$test_root/release-key.pub"
+openssl genpkey -algorithm ED25519 -out "$release_key" 2>/dev/null
+openssl pkey -in "$release_key" -pubout -out "$release_pub" 2>/dev/null
+
+# write_release_checksums builds and signs the artifact list the fake control
+# plane serves. It hashes exactly what the fake curl hands out, so the happy path
+# and the tampering path differ only by the bytes on the wire.
+write_release_checksums() {
+  list="$1"
+  signature="$2"
+  (
+    cd "$repo_root"
+    printf '%s  %s\n' "$(sha256sum /bin/true | cut -d' ' -f1)" "api/v1/agent-binary"
+    for asset in \
+      deploy/bootstrap-core-services.sh \
+      deploy/existing-core-mapping.sh \
+      examples/configs/mihomo-minimal.yaml \
+      examples/configs/xray-minimal.json \
+      examples/configs/sing-box-minimal.json \
+      examples/configs/shadowsocks-rust-minimal.json \
+      deploy/systemd/qagent.service \
+      deploy/systemd/qagent-core-journal.conf \
+      deploy/systemd/qagent-mihomo.service \
+      deploy/systemd/qagent-xray.service \
+      deploy/systemd/qagent-sing-box.service \
+      deploy/systemd/qagent-shadowsocks-rust.service
+    do
+      [ -f "$asset" ] || continue
+      printf '%s  %s\n' "$(sha256sum "$asset" | cut -d' ' -f1)" "$asset"
+    done
+  ) | LC_ALL=C sort > "$list"
+  openssl pkeyutl -sign -inkey "$release_key" -rawin -in "$list" -out "$test_root/checksums.raw"
+  openssl base64 -A -in "$test_root/checksums.raw" -out "$signature"
+}
+# The signed list is served from an override directory, so the repository tree is
+# never written to and every case can swap the bytes the control plane returns.
+checksums_root="$test_root/checksums"
+mkdir -p "$checksums_root/install-assets"
+write_release_checksums "$checksums_root/install-assets/SHA256SUMS" "$checksums_root/install-assets/SHA256SUMS.sig"
+# A correctly signed list whose digest does not match the served bytes exercises
+# artifact substitution: the signature is fine, the content is not.
+mkdir -p "$test_root/substituted/install-assets"
+write_release_checksums "$test_root/substituted/install-assets/SHA256SUMS" "$test_root/substituted/install-assets/SHA256SUMS.sig"
+sed -i 's/  deploy\/systemd\/qagent.service$/  deploy\/systemd\/qagent.service/' "$test_root/substituted/install-assets/SHA256SUMS"
+python3 - "$test_root/substituted/install-assets/SHA256SUMS" <<'PYEOF'
+import sys
+path = sys.argv[1]
+lines = open(path).read().splitlines(True)
+for index, line in enumerate(lines):
+    # Flip the digest of the first asset while keeping the signed list internally
+    # consistent, so only the served file disagrees with it.
+    if "deploy/" in line:
+        digest, name = line.split("  ", 1)
+        digest = ("0" if digest[0] != "0" else "1") + digest[1:]
+        lines[index] = digest + "  " + name
+        break
+open(path, "w").writelines(lines)
+PYEOF
+openssl pkeyutl -sign -inkey "$release_key" -rawin -in "$test_root/substituted/install-assets/SHA256SUMS" -out "$test_root/checksums.raw"
+openssl base64 -A -in "$test_root/checksums.raw" -out "$test_root/substituted/install-assets/SHA256SUMS.sig"
+# A list whose bytes changed after signing exercises the signature check.
+mkdir -p "$test_root/broken-signature/install-assets"
+write_release_checksums "$test_root/broken-signature/install-assets/SHA256SUMS" "$test_root/broken-signature/install-assets/SHA256SUMS.sig"
+printf 'garbage\n' >> "$test_root/broken-signature/install-assets/SHA256SUMS"
+
 fake_bin="$test_root/bin"
 mkdir -p \
   "$fake_bin" \
@@ -48,6 +122,11 @@ fi
 asset_path=${path#/install-assets}
 [ "$asset_path" != "$path" ] || { printf '%s\n' "fake curl: unknown path $path" >&2; exit 1; }
 src="$asset_root$asset_path"
+# QCH_ASSET_OVERRIDE lets a case swap one served asset (the signed checksum list,
+# its signature, or an agent binary) without rebuilding the whole asset root.
+if [ -n "${QCH_ASSET_OVERRIDE:-}" ] && [ -f "$QCH_ASSET_OVERRIDE$path" ]; then
+  src="$QCH_ASSET_OVERRIDE$path"
+fi
 [ -f "$src" ] || { printf '%s\n' "fake curl: missing asset $src" >&2; exit 1; }
 cp "$src" "$dest"
 EOF
@@ -134,6 +213,10 @@ export PATH="$fake_bin:$PATH"
 
 control="http://sandbox.local"
 token="test-enrollment-token"
+# The fake control plane serves the signed checksum list, so every install below
+# verifies the release unless a case deliberately overrides this.
+export QCH_RELEASE_PUBLIC_KEY="$release_pub"
+export QCH_ASSET_OVERRIDE="$checksums_root"
 
 echo '== first install (fresh node) =='
 sh "$installer" "$control" "$token" > "$test_root/first.log"
@@ -252,6 +335,52 @@ grep -qi 'refusing a plaintext control-plane URL' "$test_root/cleartext.log" || 
 }
 # The refused run must not have rewritten the endpoint.
 assert_env_once QCH_SERVER_URL 'https://sandbox.example.com'
+
+# A control plane that substitutes an artifact must be rejected even though the
+# substituted file arrives over a valid connection from the expected host.
+echo '== tampered artifact is rejected =='
+if QCH_ASSET_OVERRIDE="$test_root/substituted" sh "$installer" update "$control" "$token" > "$test_root/tampered.log" 2>&1; then
+  printf '%s\n' 'tampered artifact: installer accepted content that failed the signed list' >&2
+  exit 1
+fi
+grep -q 'do not match the signed checksum list' "$test_root/tampered.log" || {
+  printf '%s\n' 'tampered artifact: expected checksum mismatch was not reported' >&2
+  sed 's/^/  installer: /' "$test_root/tampered.log" >&2
+  exit 1
+}
+
+# Editing the checksum list after it was signed must break the signature check,
+# otherwise the list would be no better than an unsigned one.
+echo '== modified checksum list is rejected =='
+if QCH_ASSET_OVERRIDE="$test_root/broken-signature" sh "$installer" update "$control" "$token" > "$test_root/broken.log" 2>&1; then
+  printf '%s\n' 'modified checksum list: installer accepted a list that no longer matches its signature' >&2
+  exit 1
+fi
+grep -q 'RELEASE SIGNATURE VERIFICATION FAILED' "$test_root/broken.log" || {
+  printf '%s\n' 'modified checksum list: expected signature failure was not reported' >&2
+  exit 1
+}
+
+# A pinned key with no published signature must fail closed, so removing the
+# endpoint cannot silently downgrade the deployment to unverified installs.
+echo '== pinned key without a published signature fails closed =='
+mkdir -p "$test_root/no-checksums"
+if QCH_ASSET_OVERRIDE="$test_root/no-checksums" sh "$installer" update "$control" "$token" > "$test_root/nosig.log" 2>&1; then
+  printf '%s\n' 'missing signature: installer proceeded despite a pinned release key' >&2
+  exit 1
+fi
+grep -q 'failed to download the signed checksum list' "$test_root/nosig.log" || {
+  printf '%s\n' 'missing signature: expected download failure was not reported' >&2
+  exit 1
+}
+
+# The explicit opt-out keeps a control plane that publishes no signature usable.
+echo '== explicit opt-out allows an unsigned release =='
+if ! QCH_ASSET_OVERRIDE="$test_root/no-checksums" QCH_RELEASE_PUBLIC_KEY= QCH_ALLOW_UNSIGNED_RELEASE=true \
+  sh "$installer" update "$control" "$token" > "$test_root/unsigned.log" 2>&1; then
+  printf '%s\n' 'unsigned opt-out: installer refused an explicitly allowed unsigned release' >&2
+  exit 1
+fi
 
 echo '== uninstall agent =='
 sh "$installer" uninstall > "$test_root/uninstall.log"

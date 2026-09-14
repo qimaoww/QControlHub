@@ -575,6 +575,13 @@ type AgentPolicy struct {
 	MetricsIntervalSeconds   uint32 `json:"metrics_interval_seconds"`
 	CoreLogMaxMiB            uint32 `json:"core_log_max_mib"`
 	CoreLogRotateCount       uint32 `json:"core_log_rotate_count"`
+	// ControlPlaneVersion is the version of the control plane that owns this
+	// session. An Agent that verifies its upgrades requires the signed release
+	// manifest to describe this exact version, so a node can never be moved onto
+	// a build the panel does not consider current. It arrives over the
+	// authenticated session rather than a header, so it cannot be set by a
+	// response the Agent merely received.
+	ControlPlaneVersion string `json:"control_plane_version,omitempty"`
 }
 
 func (policy AgentPolicy) Validate() error {

@@ -86,6 +86,13 @@ COPY deploy/systemd/qagent-sing-box.service /usr/share/nginx/html/install-assets
 COPY deploy/systemd/qagent-shadowsocks-rust.service /usr/share/nginx/html/install-assets/deploy/systemd/qagent-shadowsocks-rust.service
 COPY deploy/systemd/qagent.service /usr/share/nginx/html/install-assets/deploy/systemd/qagent.service
 COPY examples/configs /usr/share/nginx/html/install-assets/examples/configs
+# The signed release artifacts. Sign them before building this image (see
+# docs/release-signing.md): an installer that pins QCH_RELEASE_PUBLIC_KEY fetches
+# SHA256SUMS beside the assets and refuses to continue without it, so the files
+# have to be part of the image rather than generated at run time.
+ARG RELEASE_ARTIFACTS=dist/release
+COPY ${RELEASE_ARTIFACTS}/SHA256SUMS /usr/share/nginx/html/install-assets/SHA256SUMS
+COPY ${RELEASE_ARTIFACTS}/SHA256SUMS.sig /usr/share/nginx/html/install-assets/SHA256SUMS.sig
 COPY frontend/nginx.conf /etc/nginx/nginx.conf
 RUN css_version="$(sha256sum /usr/share/nginx/html/assets/app.css | cut -c1-16)" \
     && js_content_version="$(find /usr/share/nginx/html/assets -type f -name '*.js' -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -c1-10)" \
