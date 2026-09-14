@@ -1543,12 +1543,16 @@ func (s *Store) ExistingConfigIDs(ctx context.Context, ids []string) (map[string
 }
 
 func (s *Store) CreateTask(ctx context.Context, request core.TaskRequest) (core.Task, error) {
+	return s.createTask(ctx, request, 0)
+}
+
+func (s *Store) createTask(ctx context.Context, request core.TaskRequest, readCacheMaxAge time.Duration) (core.Task, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return core.Task{}, err
 	}
 	defer tx.Rollback(ctx)
-	task, err := s.createTaskTx(ctx, tx, request)
+	task, err := s.createTaskTx(ctx, tx, request, readCacheMaxAge)
 	if err != nil {
 		return core.Task{}, err
 	}
@@ -1563,7 +1567,7 @@ func (s *Store) CreateTask(ctx context.Context, request core.TaskRequest) (core.
 
 // The caller commits before notifying the Agent. This also allows a preset
 // revision and its exact task snapshot to be published in one transaction.
-func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRequest) (core.Task, error) {
+func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRequest, readCacheMaxAge time.Duration) (core.Task, error) {
 	scope := scopeForConfig(ctx)
 	if err := lockAgentUser(ctx, tx); err != nil {
 		return core.Task{}, err
@@ -1719,6 +1723,19 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 		!containsFeature(features, core.AgentFeatureMihomoDevelopmentSource) {
 		return core.Task{}, fmt.Errorf("%w: this Agent does not support the Mihomo Alpha mirror source; upgrade the Agent through the panel first", ErrConflict)
 	}
+	if readCacheMaxAge > 0 {
+		// Cache reuse is a task-creation optimization, never an authorization or
+		// validation shortcut. The Agent lock also serializes it with dispatch
+		// and snapshot invalidation.
+		recent, err := s.recentReadTask(ctx, tx, request.AgentID, request.Engine, request.Action, readCacheMaxAge)
+		if err == nil {
+			recent.Reused = true
+			return recent, nil
+		}
+		if !errors.Is(err, ErrNotFound) {
+			return core.Task{}, err
+		}
+	}
 
 	task := core.Task{
 		InstallIfMissing: request.InstallIfMissing,
@@ -1804,7 +1821,7 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 	existing, existingErr := scanTask(tx.QueryRow(ctx, `
 		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),COALESCE(core_version,''),COALESCE(core_source,''),status,attempt,
 		       COALESCE(output,''),COALESCE(error,''),created_at,started_at,finished_at,tcp_settings,install_if_missing
-		FROM tasks
+		FROM tasks existing
 		WHERE agent_id=$1 AND (action=$2 OR ($2 IN ('enable-bbr','disable-bbr','configure-tcp') AND action IN ('enable-bbr','disable-bbr','configure-tcp'))) AND engine=$3
 		  AND COALESCE(config_id,'')=$4 AND COALESCE(config_version,0)=$5 AND COALESCE(core_version,'')=$6
 		  AND (CASE WHEN $2='install' AND $3='mihomo' AND $6='development' AND COALESCE($7,'') IN ('','official')
@@ -1812,6 +1829,11 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 		    = (CASE WHEN action='install' AND engine='mihomo' AND core_version='development' AND COALESCE(core_source,'') IN ('','official')
 		            THEN 'official' ELSE COALESCE(core_source,'') END)
 		  AND owner_id=$8 AND install_if_missing=$9 AND status IN ('pending','running')
+		  AND ($2 NOT IN ('read-config','read-managed-config') OR NOT EXISTS(
+		      SELECT 1 FROM tasks mutation
+		      WHERE mutation.agent_id=existing.agent_id AND mutation.engine=existing.engine
+		        AND (mutation.action IN ('deploy','install','import-existing') OR mutation.install_if_missing)
+		        AND mutation.status IN ('pending','running') AND mutation.created_at>existing.created_at))
 		ORDER BY created_at DESC LIMIT 1`,
 		task.AgentID, task.Action, task.Engine, task.ConfigID, task.ConfigVersion, task.CoreVersion, task.CoreSource, scope.OwnerID, task.InstallIfMissing), false)
 	if existingErr == nil {
@@ -2181,6 +2203,9 @@ func (s *Store) ClaimTask(ctx context.Context, agentID string) (*core.Task, erro
 		if markErr := markEngineExecutionTx(ctx, tx, task); markErr != nil {
 			return nil, markErr
 		}
+		if err := invalidateConfigReadSnapshotsTx(ctx, tx, task); err != nil {
+			return nil, err
+		}
 	}
 	if commitErr := tx.Commit(ctx); commitErr != nil {
 		return nil, commitErr
@@ -2223,11 +2248,11 @@ func (s *Store) CompleteTask(ctx context.Context, agentID, taskID string, result
 	}
 	var action core.Action
 	var engine core.Engine
-	var transition bool
+	var transition, installIfMissing bool
 	if err := tx.QueryRow(ctx, `
-		SELECT action,engine,capability_transition FROM tasks
+		SELECT action,engine,capability_transition,install_if_missing FROM tasks
 		WHERE id=$1 AND agent_id=$2 AND lease_id=$3 AND status='running'
-		FOR UPDATE`, taskID, agentID, result.LeaseID).Scan(&action, &engine, &transition); err != nil {
+		FOR UPDATE`, taskID, agentID, result.LeaseID).Scan(&action, &engine, &transition, &installIfMissing); err != nil {
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
@@ -2239,6 +2264,13 @@ func (s *Store) CompleteTask(ctx context.Context, agentID, taskID string, result
 			return ErrNotFound
 		}
 		return fmt.Errorf("%w: task is not running", ErrConflict)
+	}
+	// Also cover tasks dispatched before this server version was deployed.
+	// Failed or unauthorized results cannot prove the host stayed unchanged.
+	if err := invalidateConfigReadSnapshotsTx(ctx, tx, core.Task{
+		AgentID: agentID, Engine: engine, Action: action, InstallIfMissing: installIfMissing,
+	}); err != nil {
+		return err
 	}
 	var unauthorized bool
 	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM tasks t WHERE t.id=$1
@@ -2313,25 +2345,6 @@ func (s *Store) CompleteTask(ctx context.Context, agentID, taskID string, result
 		}
 	}
 	if status == core.TaskSucceeded {
-		// Automatic configuration reads may reuse a very recent validated
-		// snapshot. Drop both read-action variants after a task that can change
-		// the managed file or the validating core so a hard refresh can never
-		// resurrect a pre-mutation result. Older Agents use read-config for their
-		// managed file, so invalidation cannot safely distinguish the sources.
-		var invalidatedReadActions []string
-		switch action {
-		case core.ActionDeploy, core.ActionInstall, core.ActionImportExisting:
-			invalidatedReadActions = []string{string(core.ActionReadConfig), string(core.ActionReadManagedConfig)}
-		}
-		if len(invalidatedReadActions) > 0 {
-			if _, err := tx.Exec(ctx, `UPDATE tasks SET config_content=NULL
-				WHERE agent_id=$1 AND engine=$2 AND action=ANY($3::varchar[]) AND config_content IS NOT NULL`,
-				agentID, engine, invalidatedReadActions); err != nil {
-				return err
-			}
-		}
-	}
-	if status == core.TaskSucceeded {
 		if err := recordEngineOwnershipTx(ctx, tx, taskID, action, result.TrafficSettled); err != nil {
 			return err
 		}
@@ -2357,32 +2370,6 @@ func (s *Store) ReadTaskConfigSnapshot(ctx context.Context, taskID, agentID stri
 		return "", err
 	}
 	return s.decryptContent(content)
-}
-
-func (s *Store) RecentReadTask(ctx context.Context, agentID string, engine core.Engine, action core.Action, maxAge time.Duration) (core.Task, error) {
-	if err := requireHostConfigRead(ctx, s.pool, agentID, engine); err != nil {
-		return core.Task{}, ErrNotFound
-	}
-	if action != core.ActionReadConfig && action != core.ActionReadManagedConfig {
-		return core.Task{}, fmt.Errorf("%w: recent configuration snapshots require a read action", ErrInvalid)
-	}
-	if maxAge <= 0 {
-		return core.Task{}, ErrNotFound
-	}
-	args := []any{agentID, engine, action, intervalString(maxAge)}
-	where := ownerClause(ctx, "owner_id", &args)
-	row := s.pool.QueryRow(ctx, `
-		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),COALESCE(core_version,''),COALESCE(core_source,''),status,attempt,
-		       COALESCE(output,''),COALESCE(error,''),created_at,started_at,finished_at,tcp_settings,install_if_missing
-		FROM tasks
-		WHERE agent_id=$1 AND engine=$2 AND action=$3 AND status='succeeded'
-		  AND config_content IS NOT NULL AND finished_at > now()-$4::interval`+where+`
-		ORDER BY finished_at DESC LIMIT 1`, args...)
-	task, err := scanTask(row, false)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return core.Task{}, ErrNotFound
-	}
-	return task, err
 }
 
 func (s *Store) RequeueStaleTasks(ctx context.Context, age, installAge time.Duration, maxAttempts int) error {

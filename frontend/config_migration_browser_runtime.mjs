@@ -22,9 +22,11 @@ async function fixture(engine, readOnly = false, imported = false, preview = fal
     node.runtime[other] = {installed:true};
     node.runtime[engine].existing_config_available = true;
   }
-  const state = {route:"live-config",navigationEpoch:1,data:{liveAgent:"node",liveEngine:engine,liveConfigSource:imported?"import":"managed",liveSources:{[sourceKey]:{content,agentContent:content}}}};
+  const state = {route:"live-config",navigationEpoch:1,data:{liveAgent:"node",liveEngine:engine,liveConfigSource:imported?"import":"managed",
+    liveSources:options.readFromAgent ? {} : {[sourceKey]:{content,agentContent:content}}}};
   let saved = {id:"config",version:1,name:"fixture",content};
-  const test = {writes:[],tasks:[],reads:[],confirmations:[],notifications:[],accept:false};
+  const test = {writes:[],tasks:[],reads:[],confirmations:[],notifications:[],accept:false,
+    snapshotReads:0, taskPolls:0, missingSnapshots:options.missingSnapshots || 0, snapshotGate:options.snapshotGate};
   const api = async (path, options = {}) => {
     if (path === "/agents") return [node];
     if (path.endsWith("/workspace")) {
@@ -40,10 +42,19 @@ async function fixture(engine, readOnly = false, imported = false, preview = fal
     if (options.method === "POST" && path === "/tasks") {
       const input = JSON.parse(options.body);
       test.reads.push(input);
-      return {id:`read-${test.reads.length}`,action:input.action,status:"succeeded"};
+      return {id:`read-${test.reads.length}`,action:input.action,status:"succeeded",
+        reused:Boolean(input.prefer_cached),finished_at:new Date().toISOString()};
     }
-    if (path.startsWith("/tasks/read-") && path.endsWith("/config-snapshot")) return {content};
-    if (path.startsWith("/tasks/")) return {status:"failed",error:"Fixture: node execution is intentionally not performed"};
+    if (path.startsWith("/tasks/read-") && path.endsWith("/config-snapshot")) {
+      test.snapshotReads++;
+      if (test.snapshotGate) await test.snapshotGate;
+      if (test.missingSnapshots-- > 0) throw Object.assign(new Error("snapshot retired"), {status:404});
+      return {content};
+    }
+    if (path.startsWith("/tasks/")) {
+      test.taskPolls++;
+      return {status:"failed",error:"Fixture: node execution is intentionally not performed"};
+    }
     throw new Error(`unexpected API ${path}`);
   };
   const pages = installConfigPages({state,api,optionalAPI:api,engines:[engine],can:()=>!readOnly,esc:String,engineName:v=>v,conciseVersion:()=>"fixture",date:String,ago:String,bytes:String,
@@ -117,6 +128,63 @@ export async function testConfigMigrationRuntime(preview = false) {
     }
   }
   await testSourceSaveRuntime();
+  await testConfigReadCacheRuntime();
+}
+
+async function testConfigReadCacheRuntime() {
+  const key = "node|xray";
+  for (const missingSnapshots of [0, 1, 2]) {
+    const test = await fixture("xray", false, false, false, false, {readFromAgent:true, missingSnapshots});
+    await waitFor(()=>test.state.data.liveSources[key] && !test.state.data.liveSources[key].reading,
+      "automatic cached read did not finish");
+    assert(test.reads.length === (missingSnapshots ? 2 : 1), "snapshot recovery must issue at most one forced read");
+    assert(test.reads[0].prefer_cached === true, "automatic read lost its cache preference");
+    assert(test.taskPolls === 0, "already terminal cached reads still poll task status");
+    if (missingSnapshots) assert(test.reads[1].prefer_cached === undefined, "snapshot recovery reused the failed cache");
+    if (missingSnapshots === 2) {
+      assert(test.state.data.liveSources[key].error, "exhausted snapshot recovery hid its error");
+    } else {
+      assert(Boolean(test.state.data.liveSources[key].cached) === !missingSnapshots, "cache provenance is incorrect");
+      assert(test.state.data.liveSources[key].agentContent === test.state.data.liveSources[key].content, "Agent baseline was lost");
+      const previousReads = test.reads.length;
+      await waitFor(()=>document.querySelector("[data-config-refresh]"), "configuration refresh control is missing");
+      document.querySelector("[data-config-refresh]").click();
+      await waitFor(()=>test.reads.length === previousReads + 1 && test.state.data.liveSources[key]?.taskId,
+        "explicit refresh did not finish");
+      assert(test.reads.at(-1).prefer_cached === undefined && !test.state.data.liveSources[key].cached,
+        "explicit refresh reused the display cache");
+    }
+    test.dispose();
+  }
+
+  // A fresh read can also be retired by another tab before its snapshot GET.
+  const deploy = await fixture("xray", false, false, false, false, {missingSnapshots:1});
+  deploy.accept = true;
+  document.querySelector('[data-live-intent="deploy"]').click();
+  await waitFor(()=>deploy.tasks.length === 1, "fresh preflight did not recover a concurrent snapshot retirement");
+  assert(deploy.reads.length === 2 && deploy.reads.every(read=>read.prefer_cached === undefined),
+    "fresh preflight recovery used a cached read");
+  assert(deploy.writes.length === 1, "preflight recovery duplicated configuration persistence");
+  await pause();
+  deploy.dispose();
+
+  for (const change of ["account", "route", "epoch", "source"]) {
+    let release;
+    const snapshotGate = new Promise(resolve=>{release=resolve;});
+    const test = await fixture("xray", false, false, false, false, {readFromAgent:true, missingSnapshots:1, snapshotGate});
+    await waitFor(()=>test.snapshotReads === 1, "late-snapshot fixture did not start");
+    if (change === "account") test.state.data = {...test.state.data, liveSources:{}};
+    if (change === "route") test.state.route = "tasks";
+    if (change === "epoch") test.state.navigationEpoch++;
+    if (change === "source") test.state.data.liveConfigSource = "import";
+    const newerRead = {reading:true, pendingTaskId:"newer-read"};
+    test.state.data.liveSources[key] = newerRead;
+    release();
+    await pause();
+    assert(test.reads.length === 1, `${change} change allowed an abandoned cache fallback to create a task`);
+    assert(test.state.data.liveSources[key] === newerRead, `${change} change let an old read clear the newer read state`);
+    test.dispose();
+  }
 }
 
 async function testSourceSaveRuntime() {

@@ -669,8 +669,8 @@ func (s *Server) listTasks(w http.ResponseWriter, request *http.Request) {
 }
 
 // Automatic page entry may reuse an already validated encrypted task snapshot.
-// Deployment preflight deliberately omits prefer_cached, so this longer display
-// window cannot become a stale-write window.
+// Deployment preflight deliberately omits prefer_cached. It is an early drift
+// check, not an atomic compare-and-swap of the Agent's configuration.
 const automaticConfigReadCacheTTL = 600 * time.Second
 
 func (s *Server) createTask(w http.ResponseWriter, request *http.Request) {
@@ -689,40 +689,21 @@ func (s *Server) createTask(w http.ResponseWriter, request *http.Request) {
 	if input.Action.SystemBBR() && !s.authorizeSystemBBR(w, request, input.AgentID) {
 		return
 	}
+	var task core.Task
+	var err error
 	if input.PreferCached {
-		recent, err := s.store.RecentReadTask(
-			request.Context(), input.AgentID, input.Engine, input.Action, automaticConfigReadCacheTTL,
-		)
-		if err == nil {
-			// Verify that the selected ciphertext is still present and decryptable
-			// before advertising a cache hit. A concurrent invalidation may still
-			// win after this check; the client handles that narrow 404 race by
-			// issuing one forced read.
-			if _, snapshotErr := s.store.ReadTaskConfigSnapshot(
-				request.Context(), recent.ID, recent.AgentID, recent.Engine,
-			); snapshotErr == nil {
-				recent.ConfigContent = ""
-				recent.Reused = true
-				writeJSON(w, http.StatusOK, recent)
-				return
-			} else if !errors.Is(snapshotErr, store.ErrNotFound) {
-				writeStoreError(w, snapshotErr)
-				return
-			}
-			err = store.ErrNotFound
-		}
-		if !errors.Is(err, store.ErrNotFound) {
-			writeStoreError(w, err)
-			return
-		}
+		task, err = s.store.CreateTaskWithReadCache(request.Context(), input.TaskRequest, automaticConfigReadCacheTTL)
+	} else {
+		task, err = s.store.CreateTask(request.Context(), input.TaskRequest)
 	}
-	task, err := s.store.CreateTask(request.Context(), input.TaskRequest)
 	if err != nil {
 		writeStoreError(w, err)
 		return
 	}
 	task.ConfigContent = ""
-	s.recordAudit(request, "task.created", task.ID, string(task.Action)+" "+string(task.Engine)+" "+task.AgentID)
+	if !(task.Reused && task.Status == core.TaskSucceeded) {
+		s.recordAudit(request, "task.created", task.ID, string(task.Action)+" "+string(task.Engine)+" "+task.AgentID)
+	}
 	status := http.StatusCreated
 	if task.Reused {
 		status = http.StatusOK

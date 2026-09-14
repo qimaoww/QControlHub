@@ -169,8 +169,8 @@ export function installAccessControl(ctx) {
           );
         } catch (error) {
           delete form.dataset.busy;
-          if (state.data !== data || error.name === "AbortError") return;
-          if (stateText) stateText.textContent = error.deployPreflight ? "Agent 配置已变化，未保存" : "保存失败，可重试";
+          if (state.data !== data || !isCurrent() || error.name === "AbortError") return;
+          if (stateText) stateText.textContent = error.deployPreflight ? "部署前核验未通过，未保存" : "保存失败，可重试";
           notify(error.message, "error");
           buttons.forEach((button) => (button.disabled = false));
         }

@@ -1680,6 +1680,7 @@ async function liveConfig(options = {}) {
         }
         const isCurrent = () =>
           accountData === state.data &&
+          runtimeScope === state.navigationEpoch &&
           request === liveConfigRequest &&
           state.route === "live-config" &&
           state.data.liveAgent === agent.id &&
@@ -2042,6 +2043,7 @@ async function requestCurrentConfigSnapshot(
   readAction,
   { preferCached = false, isCurrent = () => true, onTask = () => {} } = {},
 ) {
+  if (!isCurrent()) return null;
   const createReadTask = (allowCached) => api("/tasks", {
     method: "POST",
     body: JSON.stringify({
@@ -2070,10 +2072,11 @@ async function requestCurrentConfigSnapshot(
   try {
     snapshot = await api(`/tasks/${encodeURIComponent(finished.id)}/config-snapshot`);
   } catch (error) {
-    // A newer successful read can retire the cached row between the cache
-    // lookup and snapshot fetch. Fall back to one forced read instead of
-    // surfacing a transient cache race to the editor.
-    if (!preferCached || !task.reused || error?.status !== 404) throw error;
+    // Another tab or a mutation can retire any read snapshot before its GET,
+    // including a fresh preflight result. Retry once without the cache, but
+    // never create work for an abandoned page or a different account.
+    if (!isCurrent()) return null;
+    if (error?.status !== 404) throw error;
     task = await createReadTask(false);
     cacheHit = false;
     finished = await finishReadTask(task);
@@ -2097,15 +2100,19 @@ async function readCurrentConfig(agent, engine, sourceKey, readAction, preferCac
   if (state.data.liveSources?.[sourceKey]?.reading) return;
   const request = ++liveReadRequest;
   const data = state.data;
+  const epoch = state.navigationEpoch, sourceMode = data.liveConfigSource;
+  const reading = { reading: true };
   const isCurrent = () =>
     data === state.data &&
+    epoch === state.navigationEpoch &&
     request === liveReadRequest &&
     state.route === "live-config" &&
     state.data.liveAgent === agent.id &&
-    state.data.liveEngine === engine;
+    state.data.liveEngine === engine &&
+    state.data.liveConfigSource === sourceMode;
   const discardReading = () => {
-    if (state.data.liveSources?.[sourceKey]?.reading)
-      delete state.data.liveSources[sourceKey];
+    if (data.liveSources?.[sourceKey] === reading)
+      delete data.liveSources[sourceKey];
   };
   state.data.staleReadTasks ||= {};
   const staleTaskId = state.data.staleReadTasks[sourceKey];
@@ -2123,14 +2130,14 @@ async function readCurrentConfig(agent, engine, sourceKey, readAction, preferCac
     if (!isCurrent()) return;
   }
   state.data.liveSources ||= {};
-  state.data.liveSources[sourceKey] = { reading: true };
+  state.data.liveSources[sourceKey] = reading;
   try {
     const snapshot = await requestCurrentConfigSnapshot(agent, engine, readAction, {
       preferCached,
       isCurrent,
       onTask: taskId => {
-        if (isCurrent() && state.data.liveSources?.[sourceKey])
-          state.data.liveSources[sourceKey].pendingTaskId = taskId;
+        if (isCurrent() && data.liveSources?.[sourceKey] === reading)
+          reading.pendingTaskId = taskId;
       },
     });
     if (!snapshot || !isCurrent()) return discardReading();

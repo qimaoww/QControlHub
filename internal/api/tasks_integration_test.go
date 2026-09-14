@@ -183,7 +183,7 @@ func TestTaskAPIPrefersRecentConfigurationSnapshot(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	dataStore, err := store.Open(ctx, databaseURL, true)
+	dataStore, err := store.OpenWithConfigKey(ctx, databaseURL, true, strings.Repeat("cache-test-key-", 3))
 	if err != nil {
 		t.Fatalf("open PostgreSQL: %v", err)
 	}
@@ -229,6 +229,11 @@ func TestTaskAPIPrefersRecentConfigurationSnapshot(t *testing.T) {
 		handler.ServeHTTP(response, request)
 		return response
 	}
+	connection, err := pgx.Connect(ctx, databaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.Close(ctx)
 
 	cachedResponse := post(map[string]any{
 		"agent_id": agent.ID, "action": core.ActionReadConfig, "engine": core.EngineMihomo,
@@ -253,6 +258,74 @@ func TestTaskAPIPrefersRecentConfigurationSnapshot(t *testing.T) {
 	}); response.Code != http.StatusBadRequest {
 		t.Fatalf("non-read cache hint status=%d body=%s", response.Code, response.Body.String())
 	}
+	for name, extra := range map[string]map[string]any{
+		"expected revision": {"expected_config_version": 1},
+		"automatic install": {"install_if_missing": true},
+		"TCP settings":      {"tcp_settings": map[string]string{"net.core.somaxconn": "4096"}},
+		"install source":    {"core_source": "mirror"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			payload := map[string]any{
+				"agent_id": agent.ID, "action": core.ActionReadConfig, "engine": core.EngineMihomo,
+				"prefer_cached": true,
+			}
+			for key, value := range extra {
+				payload[key] = value
+			}
+			if response := post(payload); response.Code != http.StatusBadRequest {
+				t.Fatalf("cached read bypassed validation: status=%d body=%s", response.Code, response.Body.String())
+			}
+		})
+	}
+	for _, test := range []struct {
+		name, update, restore string
+		status                int
+	}{
+		{"disabled engine", `UPDATE agents SET capabilities='[]' WHERE id=$1`,
+			`UPDATE agents SET capabilities='["mihomo"]' WHERE id=$1`, http.StatusBadRequest},
+		{"unsafe existing service", `UPDATE agents SET runtime='{"mihomo":{"existing_config_unsupported_reason":"ambiguous service"}}' WHERE id=$1`,
+			`UPDATE agents SET runtime='{}' WHERE id=$1`, http.StatusConflict},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := connection.Exec(ctx, test.update, agent.ID); err != nil {
+				t.Fatal(err)
+			}
+			defer connection.Exec(ctx, test.restore, agent.ID)
+			if response := post(map[string]any{
+				"agent_id": agent.ID, "action": core.ActionReadConfig, "engine": core.EngineMihomo,
+				"prefer_cached": true,
+			}); response.Code != test.status {
+				t.Fatalf("cached read bypassed eligibility: status=%d body=%s", response.Code, response.Body.String())
+			}
+		})
+	}
+	t.Run("unreadable cache falls back", func(t *testing.T) {
+		var ciphertext string
+		if err := connection.QueryRow(ctx, `SELECT config_content FROM tasks WHERE id=$1`, read.ID).Scan(&ciphertext); err != nil {
+			t.Fatal(err)
+		}
+		defer connection.Exec(ctx, `UPDATE tasks SET config_content=$2 WHERE id=$1`, read.ID, ciphertext)
+		for _, broken := range []string{"rf2:missing-key:unreadable", "rf2:malformed", ""} {
+			if _, err := connection.Exec(ctx, `UPDATE tasks SET config_content=$2 WHERE id=$1`, read.ID, broken); err != nil {
+				t.Fatal(err)
+			}
+			response := post(map[string]any{
+				"agent_id": agent.ID, "action": core.ActionReadConfig, "engine": core.EngineMihomo,
+				"prefer_cached": true,
+			})
+			if response.Code != http.StatusCreated {
+				t.Errorf("unreadable cached snapshot did not trigger a read: status=%d body=%s", response.Code, response.Body.String())
+				continue
+			}
+			var fresh core.Task
+			if err := json.Unmarshal(response.Body.Bytes(), &fresh); err != nil || fresh.ID == read.ID || fresh.Reused || fresh.Status != core.TaskPending || fresh.ConfigContent != "" {
+				t.Fatalf("fallback task = %+v, %v", fresh, err)
+			}
+			if err := dataStore.CancelTask(ctx, fresh.ID); err != nil {
+				t.Fatal(err)
+			}
+		}
+	})
 	freshResponse := post(core.TaskRequest{
 		AgentID: agent.ID, Action: core.ActionReadConfig, Engine: core.EngineMihomo,
 	})

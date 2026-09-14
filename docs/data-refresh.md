@@ -31,12 +31,28 @@ An automatic live-config entry asks the task endpoint to prefer a successful
 snapshot from the same principal, node, engine, and source action for at most
 600 seconds. A cache hit skips Agent dispatch and real-core startup. Explicit
 refreshes and the managed-config deploy preflight always create or join a fresh
-read; volatile in-page Agent snapshots expire on the same 600-second boundary.
+read, never one queued before a pending configuration mutation; volatile
+in-page Agent snapshots expire on the same 600-second boundary.
 The preflight compares those bytes with the Agent baseline originally
 shown by the page and stops before saving or creating a deploy task if they
-differ. Successful deploy, import, or core-install tasks invalidate both
-read-action variants before their result is acknowledged. Snapshot contents
-remain encrypted in PostgreSQL and are never persisted in browser storage.
+differ. This is a UI-level drift check, not an atomic compare-and-swap at the
+Agent: a later external edit or concurrent deployment can still race execution.
+
+Cache selection runs after normal task validation and current authorization,
+under the same Agent lock used for task creation and dispatch. It is scoped to
+the exact submitting principal, including administrators. Pending/running
+deploy, import, core-install, and install-if-missing tasks bypass the cache.
+Dispatching these tasks invalidates both read-action variants before execution,
+even if the mutation later fails or loses its result. Canceling a task before
+dispatch does not invalidate the unchanged snapshot; ordinary validation also
+preserves it.
+
+Unreadable cached ciphertext is treated as a miss, while database and permission
+errors remain failures. If a snapshot is retired between task selection and its
+GET, the page retries once with an uncached read, including during preflight.
+Route, navigation epoch, source, and account guards prevent an abandoned retry
+from submitting new work or clearing a newer read. Snapshot contents remain
+encrypted in PostgreSQL and are never persisted in browser storage.
 
 ## Render and binding audit
 
