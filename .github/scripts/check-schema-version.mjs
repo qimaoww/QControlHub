@@ -28,33 +28,53 @@ export function validateSchemaVersionChange(baseSource, currentSource) {
   return { baseVersion: base.version, currentVersion: current.version, schemaChanged: current.schemaSQL !== base.schemaSQL };
 }
 
+function git(args) {
+  return execFileSync("git", ["-c", `safe.directory=${process.cwd()}`, ...args], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+}
+
+function basePathExists(baseRef, path) {
+  // Resolve the commit before this lookup. `ls-tree` returns success for a
+  // missing path, while an invalid revision remains a distinct, actionable
+  // failure instead of being mistaken for the pre-schema layout.
+  const entries = git(["ls-tree", "-z", "--name-only", baseRef, "--", path]).split("\0");
+  return entries.includes(path);
+}
+
+export function readBaseSchemaContractSource(baseRef) {
+  try {
+    git(["rev-parse", "--verify", `${baseRef}^{commit}`]);
+  } catch (error) {
+    throw new Error(`could not resolve QCH_SCHEMA_BASE_REF ${JSON.stringify(baseRef)} as a commit: ${error.message}`);
+  }
+  const basePath = basePathExists(baseRef, storePath) ? storePath : legacyStorePath;
+  if (basePath === legacyStorePath && !basePathExists(baseRef, legacyStorePath)) {
+    throw new Error(`base commit ${baseRef} contains neither ${storePath} nor ${legacyStorePath}`);
+  }
+  try {
+    return { basePath, source: git(["show", `${baseRef}:${basePath}`]) };
+  } catch (error) {
+    throw new Error(`could not read ${basePath} from base commit ${baseRef}: ${error.message}`);
+  }
+}
+
+export function checkSchemaVersion(baseRef) {
+  const { basePath, source: baseSource } = readBaseSchemaContractSource(baseRef);
+  const currentSource = readFileSync(storePath, "utf8");
+  const result = validateSchemaVersionChange(baseSource, currentSource);
+  return { basePath, ...result };
+}
+
 function main() {
   const baseRef = process.env.QCH_SCHEMA_BASE_REF?.trim();
   if (!baseRef || /^0+$/.test(baseRef)) {
     throw new Error("QCH_SCHEMA_BASE_REF must name the pull request base or previous push commit");
   }
-  let baseSource;
-  let basePath = storePath;
-  try {
-    baseSource = execFileSync(
-      "git",
-      ["-c", `safe.directory=${process.cwd()}`, "show", `${baseRef}:${storePath}`],
-      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
-    );
-  } catch {
-    // The schema declaration moved out of store.go in this refactor. Keep
-    // the policy usable for the first PR whose base predates schema.go.
-    basePath = legacyStorePath;
-    baseSource = execFileSync(
-      "git",
-      ["-c", `safe.directory=${process.cwd()}`, "show", `${baseRef}:${legacyStorePath}`],
-      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
-    );
-  }
-  const currentSource = readFileSync(storePath, "utf8");
-  const result = validateSchemaVersionChange(baseSource, currentSource);
+  const result = checkSchemaVersion(baseRef);
   process.stdout.write(
-    `schema contract valid (${basePath} -> ${storePath}): v${result.baseVersion} -> v${result.currentVersion}, schemaSQL changed=${result.schemaChanged}\n`,
+    `schema contract valid (${result.basePath} -> ${storePath}): v${result.baseVersion} -> v${result.currentVersion}, schemaSQL changed=${result.schemaChanged}\n`,
   );
 }
 

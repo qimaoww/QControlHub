@@ -1,37 +1,62 @@
 # Module Architecture
 
-QControlHub keeps feature boundaries explicit across the web console and Go
-services. A module owns one cohesive responsibility and exposes a small API;
-composition belongs at the application boundary.
+QControlHub keeps feature boundaries explicit across the console, control
+plane, node runtime, and deployment artifacts. A module owns one cohesive
+responsibility and exposes a small API. Composition belongs at the application
+boundary.
 
-## Go packages
+## Go ownership
 
-- `internal/core` contains shared domain models and validation. It does not
-  depend on transport, persistence, or operating-system adapters.
-- `internal/store` contains PostgreSQL persistence. Keep schema declarations in
-  `schema.go` and split persistence workflows by domain (for example
-  `enrollment.go`, `agent_config.go`, and `traffic.go`).
-- `internal/api` contains HTTP and WebSocket adapters. Authentication,
-  resource handlers, and transport helpers should live in focused files while
-  sharing the `Server` type.
-- `internal/agent` contains node-side execution and platform adapters. Linux
-  implementations use `_linux.go`; portable protocol and validation code stays
-  in platform-neutral files.
+| Area | Owns | Main composition point |
+| --- | --- | --- |
+| `cmd/control-plane` | Process configuration, lifecycle wiring, diagnostics, and maintenance loops | `main.go` plus focused command helpers |
+| `cmd/agent` | Agent process configuration and executable wiring | `main.go` plus focused command helpers |
+| `internal/core` | Domain contracts, permissions, validation, task protocol, and public model values | Focused contracts such as `agents.go`, `tasks.go`, `configs.go`, and `protocol.go` |
+| `internal/store` | PostgreSQL access, transactions, migration execution, and per-domain persistence workflows | `store.go` opens the pool; `schema.go` holds the ordered schema contract; domain files own agent, configuration, task, traffic, enrollment, and SubStore workflows |
+| `internal/api` | HTTP routes, authentication/session middleware, WebSocket transport, and resource handlers | `server.go` constructs `Server`; `routes.go` composes endpoints; focused handler files own agents, configs, tasks, enrollment, regions, Komari, downloads, resources, and SubStore sync |
+| `internal/serverconfig` | Parsing, generating, validating, and transforming core configurations | Shared plans/models remain engine-neutral; engine transforms live in Mihomo, Xray, sing-box, and Shadowsocks Rust files, including access-control and accounting variants |
+| `internal/agent` | Node-side task execution, service lifecycle, core installation, discovery, migration, and operating-system adapters | Executor and lifecycle composition call focused runtime and platform files |
+| `internal/hostmetrics` | Host resource collection without control-plane or node-runtime dependencies | Focused CPU, memory, filesystem, and network collectors |
+| Supporting packages | Authentication (`authn`), geo/IP data (`geoip`, `cnip`), network policy (`netpolicy`), notifications, Komari, and configuration catalog utilities | Small package APIs consumed by adapters |
 
-New functionality should be added to the owning package or a new focused
-package. Avoid adding unrelated handlers, SQL workflows, or platform code to a
-large entrypoint file. Keep dependencies directed toward domain code and
-adapters; avoid importing an application entrypoint from a feature module.
+Dependencies point from adapters toward domain code. `internal/core` must not
+depend on adapters. `internal/store` does not depend on `api`, `agent`, or
+`cmd`; `api` does not depend on `agent` or `cmd`; `hostmetrics` does not depend
+on `agent`, `api`, or `store`; and command packages are never imported. The Go
+part of `make module-policy-test` parses every production Go source file, so
+these rules apply across build-tag variants as well as the current platform.
 
-## Frontend
+`schema.go` is intentionally a large, atomic source: migration ordering,
+`currentSchemaVersion`, and `schemaSQL` form one contract. Schema changes must
+increase the version when required and pass `make schema-policy-test`.
 
-The web console follows the more detailed [frontend module
-contract](frontend-modules.md). `frontend/app.js` owns shared state and route
-composition, while feature rendering and reusable helpers live under
-`frontend/modules/`. `make module-policy-test` checks the boundary on every
-pull request.
+## Frontend ownership
 
-When moving a responsibility, preserve the public API at the composition
-boundary, add focused smoke coverage, and run the package tests that exercise
-the moved code. This keeps refactors reviewable and allows future work to grow
-through new modules instead of expanding monolithic entrypoints.
+`frontend/app.js` owns shared console state and route composition. Feature
+rendering and reusable helpers live under `frontend/modules/`; the detailed
+public boundary is in [frontend-modules.md](frontend-modules.md).
+
+The frontend policy test prevents modules from importing `app.js`. Add a new
+feature to its owning module or create a focused module with a named export;
+keep route and shell composition in the application boundary.
+
+## Deployment artifacts
+
+The remotely consumed scripts stay standalone at their established paths:
+`deploy/quick-start.sh`, `deploy/existing-core-mapping.sh`, and
+`deploy/remote/install-agent.sh`. Their editable source slices live under
+`deploy/modules/`, grouped by bootstrap, options, state/configuration,
+discovery, installation, lifecycle, and dispatch responsibilities. The
+standard-library generator concatenates an explicit manifest into the
+distribution scripts. Run its `--check` mode (included in the deployment
+checks) after editing a source slice, or run `make generate-deploy-scripts` to
+write the standalone outputs. This preserves `curl` use, embedded assets,
+Docker builds, and existing installer paths.
+
+## Working on a feature
+
+Add behavior to the module that already owns its domain. Keep entrypoints thin,
+avoid reverse dependencies, and put focused tests beside the implementation.
+When mechanically moving declarations, preserve public names, comments, SQL,
+and initialization order. Run the relevant package tests, then run
+`make module-policy-test` when a boundary changes.
