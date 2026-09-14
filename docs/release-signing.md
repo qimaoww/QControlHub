@@ -57,6 +57,15 @@ docker build --target qcontrol-web \
   --build-arg RELEASE_ARTIFACTS=dist/release .
 ```
 
+**清单范围**：这份清单同时也是节点从 `/install-assets/` 下载的文件清单，所以它必须**精确等于** web 镜像实际提供的文件。多列一个：该文件下载不到，安装直接失败在 404；少列一个：该资源会被放进节点但从未被签名校验过。`deploy/` 是仓库的工具目录（含 `deploy/tests`、`deploy/nginx` 等），因此它**不能**整体签进去。
+
+`release-checksums` 依赖 `check-install-assets`，后者运行 `deploy/tests/release-assets.sh`：从 `deploy/remote/install-agent.sh` 自己的下载循环推导资产列表，与可签名集合逐条比对，不一致就拒绝出包。往安装器里新增一个下载而不更新发布集合，会被这里挡住。
+
+```bash
+make check-install-assets        # 只校验：安装器下载集 == 发布资产集
+bash deploy/tests/release-assets.sh --files   # 打印本次要签的文件
+```
+
 **版本一致性**：`release-checksums` 把 `VERSION` 同时写进 `-release` 与 `-agent-version`，而控制面把自身构建版本通过已认证的 WSS 策略下发给 Agent。升级时 Agent 要求签名清单里的 Agent 版本**等于**面板版本，否则拒绝安装。这样“面板版本”与“Agent 版本”由签名绑定在一起，控制面无法一边声称版本 1.2.3、一边下发别的构建。
 
 > `qcontrol-web` 阶段会无条件 `COPY dist/release/SHA256SUMS`，所以**必须有签名产物才能构建 web 镜像**。全新检出直接 `docker build --target qcontrol-web .` 会因缺文件失败：先跑一次 `make release-checksums`（本地测试可用一次性密钥），或在 CI 中让签名 job 先产出 `dist/release/`。`dist/` 已被 gitignore，不要提交。

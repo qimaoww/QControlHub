@@ -182,6 +182,23 @@ jobs:
           docker compose config --quiet
           bash deploy/tests/quick-start-compose.sh
 
+      # The web image embeds SHA256SUMS and its signature. A node that pins
+      # QCH_RELEASE_PUBLIC_KEY fetches them from /install-assets/ beside the
+      # assets, so a web image built without them is not a usable release image.
+      # Build the same inputs here that a release uses: real checksums over the
+      # real installer assets, over a key generated for this run only. The
+      # throwaway key is fine because this job only proves the image builds; it
+      # never publishes one, and a published web image is bound to the version
+      # and key of the release that produced it.
+      - uses: actions/setup-go@v7
+        if: matrix.target == 'qcontrol-web'
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - name: Build signed release artifacts for the web image
+        if: matrix.target == 'qcontrol-web'
+        run: make signing-key release-checksums RELEASE_KEY=release.key VERSION=${{ github.sha }}
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
@@ -204,6 +221,13 @@ jobs:
     permissions:
       contents: read
       packages: write
+    # A published web image has to carry a signature made with the release key:
+    # an installer that pins QCH_RELEASE_PUBLIC_KEY verifies SHA256SUMS against
+    # it, so a web image signed with a throwaway key fails on every pinned node.
+    # Publish it only when the key is configured; the web build step is skipped
+    # otherwise instead of pushing an image nobody can verify.
+    env:
+      RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
     strategy:
       fail-fast: false
       matrix:
@@ -218,6 +242,22 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v6
 
+      # release-checksums needs the toolchain to build the Agent binary and the
+      # signing tool before it can write the checksum list.
+      - uses: actions/setup-go@v7
+        if: env.RELEASE_SIGNING_KEY != ''
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - name: Write release signing key
+        if: matrix.target == 'qcontrol-web' && env.RELEASE_SIGNING_KEY != ''
+        run: |
+          install -m 0600 /dev/null release.key
+          printf '%s' "${RELEASE_SIGNING_KEY}" > release.key
+      - name: Build signed release artifacts for the web image
+        if: matrix.target == 'qcontrol-web' && env.RELEASE_SIGNING_KEY != ''
+        run: make release-checksums RELEASE_KEY=release.key VERSION=${{ github.sha }}
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
@@ -229,6 +269,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and publish image
+        if: matrix.target != 'qcontrol-web' || env.RELEASE_SIGNING_KEY != ''
         uses: docker/build-push-action@v7
         with:
           context: .
