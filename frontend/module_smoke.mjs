@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import "./refresh_smoke.mjs";
+import "./route_loader_smoke.mjs";
 import "./requests_smoke.mjs";
 import "./errors_smoke.mjs";
 import "./core_logs_smoke.mjs";

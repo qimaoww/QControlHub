@@ -1,22 +1,9 @@
-import { installDashboard } from "./modules/dashboard.js";
-import { installAgents } from "./modules/agents.js";
-import { installClientAccess } from "./modules/client-access.js";
-import { installSubStoreSync } from "./modules/substore-sync.js";
-import {
-  installConfigPages,
-} from "./modules/configs.js";
-import { installCoreLogs } from "./modules/core-logs.js";
-import { installTasks } from "./modules/tasks.js";
-import { installTraffic } from "./modules/traffic.js";
-import { installAccessControl } from "./modules/access-control.js";
-import { installSystemBBR } from "./modules/system-bbr.js";
-import { installSettings } from "./modules/settings.js";
-import { installUsers } from "./modules/users.js";
 import {
   bindEvent,
   createLatestRenderScheduler,
   reconcileView,
 } from "./modules/refresh.js";
+import { createRouteModuleLoader } from "./modules/route-loader.js";
 import { migrateLegacyNodeOrder, orderNodesBySavedOrder } from "./modules/node-order.js";
 import { setStorageAccount } from "./modules/account-storage.js";
 import { createScopedAPI } from "./modules/requests.js";
@@ -457,9 +444,11 @@ function toggleTheme() {
 }
 
 function renderLogin(message = "") {
-  userModule.closeInvitation();
+  stopRouteWarmup();
+  routeModules.peek("users")?.closeInvitation();
   scopedAPI.end();
-  if (state.route === "node-settings") agentModule.cancelAgentInteractions();
+  if (state.route === "node-settings")
+    routeModules.peek("agents")?.cancelAgentInteractions();
   const confirmResolver = state.confirmResolver;
   state.confirmResolver = null;
   state.confirmOpen = false;
@@ -653,6 +642,7 @@ function shell(content, title, { viewKey = state.route } = {}) {
     app.innerHTML = markup;
   }
   const renderedMain = app.querySelector(".workspace-main");
+  if (renderedMain) renderedMain.inert = false;
   renderedMain?.classList.remove("is-route-pending");
   renderedMain?.removeAttribute("aria-busy");
   applyTheme();
@@ -819,28 +809,228 @@ function contextMarkup(title) {
   return `<a class="context-back" href="#agents">← 返回内核预设</a><div class="context-section-label"><span>选择内核</span><b>${installed}/${caps.length}</b></div><nav class="context-list engine-context-list">${caps.map((engine) => `<a class="${state.data.engine === engine ? "active" : ""}" href="#agent-config" data-engine-select="${esc(engine)}"><span class="context-engine ${esc(engine)}">${esc(engineName(engine))}</span><span><strong>${esc(engineName(engine))}</strong><small>${agent?.runtime?.[engine]?.installed ? "服务端入站" : "尚未安装"}</small></span></a>`).join("")}</nav><ol class="context-steps"><li class="active"><b>1</b><span>选择入站</span></li><li><b>2</b><span>编辑参数</span></li><li><b>3</b><span>校验或部署</span></li></ol>`;
 }
 
-const dashboard = installDashboard({ api, state, can, esc, engineName, heartbeat, statusTone, ago, short, actionName, bytes, rate, shell });
+const routeModuleNames = Object.freeze({
+  dashboard: "dashboard",
+  agents: "agents",
+  "node-settings": "agents",
+  "client-access": "client-access",
+  "substore-sync": "substore-sync",
+  "agent-config": "configs",
+  "live-config": "configs",
+  "archive-config": "configs",
+  tasks: "tasks",
+  "core-logs": "core-logs",
+  traffic: "traffic",
+  "access-control": "access-control",
+  "system-bbr": "system-bbr",
+  settings: "settings",
+  users: "users",
+  "my-quota": "users",
+});
 
-const agentModule = installAgents({ api, optionalAPI, state, engines, can, esc, engineName, statusTone, serviceStatusName, short, date, ago, heartbeat, percent, bytes, conciseVersion, rate, actionName, serviceActionDisabled, trafficChart, renderConfigDiff, notify, confirmAction, shell });
-const { agents, nodeSettings, submitTask, bindCodeEditors, showCommand } = agentModule;
+const supportedRoutes = new Set(Object.keys(routeModuleNames));
+const routeAliases = Object.freeze({
+  summary: "dashboard",
+  fleet: "dashboard",
+  activity: "dashboard",
+  enrollment: "node-settings",
+  "settings-engines": "settings",
+  "settings-basic": "settings",
+  "settings-runtime": "settings",
+  "settings-data": "settings",
+  "settings-notify": "settings",
+  "settings-komari": "settings",
+  "settings-cnip": "settings",
+  "settings-deployment": "settings",
+  "preset-node": "live-config",
+  "settings-node": "node-settings",
+  "new-config": "archive-config",
+  templates: "archive-config",
+  archive: "archive-config",
+  "traffic-new": "traffic",
+  "traffic-all": "traffic",
+  "access-control-all": "access-control",
+});
 
-const clientAccess = installClientAccess({ api, state, engines, esc, engineName, short, can, notify, shell });
-const subStoreSync = installSubStoreSync({ api, state, can, esc, engineName, notify, shell });
+function routeForHash(value) {
+  const hash = String(value || "")
+    .replace(/^#/, "")
+    .split("?", 1)[0];
+  if (supportedRoutes.has(hash)) return hash;
+  if (hash.startsWith("system-bbr-agent-")) return "system-bbr";
+  if (routeAliases[hash]) return routeAliases[hash];
+  if (hash.startsWith("preset-node-")) return "live-config";
+  if (hash.startsWith("settings-node-") || hash.startsWith("node-"))
+    return "node-settings";
+  if (hash.startsWith("traffic-agent-")) return "traffic";
+  if (hash.startsWith("access-control-agent-")) return "access-control";
+  if (hash.startsWith("config-")) return "archive-config";
+  return "dashboard";
+}
 
-const configModule = installConfigPages({ api, optionalAPI, state, engines, can, esc, engineName, conciseVersion, date, ago, bytes, confirmAction, notify, shell, submitTask, bindCodeEditors, renderConfigDiff });
-const { agentConfig, liveConfig, archiveConfigs } = configModule;
+const routeModules = createRouteModuleLoader({
+  async dashboard() {
+    const { installDashboard } = await import("./modules/dashboard.js");
+    return installDashboard({
+      api, state, can, esc, engineName, heartbeat, statusTone, ago, short,
+      actionName, bytes, rate, shell,
+    });
+  },
+  async agents() {
+    const { installAgents } = await import("./modules/agents.js");
+    return installAgents({
+      api, optionalAPI, state, engines, can, esc, engineName, statusTone,
+      serviceStatusName, short, date, ago, heartbeat, percent, bytes,
+      conciseVersion, rate, actionName, serviceActionDisabled, trafficChart,
+      renderConfigDiff, notify, confirmAction, shell,
+    });
+  },
+  async "client-access"() {
+    const { installClientAccess } = await import("./modules/client-access.js");
+    return installClientAccess({
+      api, state, engines, esc, engineName, short, can, notify, shell,
+    });
+  },
+  async "substore-sync"() {
+    const { installSubStoreSync } = await import("./modules/substore-sync.js");
+    return installSubStoreSync({
+      api, state, can, esc, engineName, notify, shell,
+    });
+  },
+  async configs() {
+    const [{ installConfigPages }, agentModule] = await Promise.all([
+      import("./modules/configs.js"),
+      routeModules.load("agents"),
+    ]);
+    return installConfigPages({
+      api, optionalAPI, state, engines, can, esc, engineName, conciseVersion,
+      date, ago, bytes, confirmAction, notify, shell,
+      submitTask: agentModule.submitTask,
+      bindCodeEditors: agentModule.bindCodeEditors,
+      renderConfigDiff,
+    });
+  },
+  async tasks() {
+    const { installTasks } = await import("./modules/tasks.js");
+    return installTasks({
+      api, state, actions, can, esc, statusName, engineName, short, date, ago,
+      actionName, statusTone, notify, confirmAction, shell,
+    });
+  },
+  async "core-logs"() {
+    const { installCoreLogs } = await import("./modules/core-logs.js");
+    return installCoreLogs({
+      api, state, engines, can, esc, engineName, date, shell,
+    });
+  },
+  async traffic() {
+    const { installTraffic } = await import("./modules/traffic.js");
+    return installTraffic({
+      api, state, can, esc, engineName, bytes, rate, percent, ago, shell,
+      notify, confirmAction,
+    });
+  },
+  async "access-control"() {
+    const { installAccessControl } = await import("./modules/access-control.js");
+    return installAccessControl({
+      api, state, can, esc, engineName, shell, notify, confirmAction,
+    });
+  },
+  async "system-bbr"() {
+    const { installSystemBBR } = await import("./modules/system-bbr.js");
+    return installSystemBBR({
+      api, state, can, esc, date, shell, notify, confirmAction,
+    });
+  },
+  async settings() {
+    const { installSettings } = await import("./modules/settings.js");
+    return installSettings({
+      api, state, esc, date, can, shell, notify, confirmAction,
+      applyUIFontScale,
+    });
+  },
+  async users() {
+    const { installUsers } = await import("./modules/users.js");
+    return installUsers({ api, state, esc, shell, notify, confirmAction });
+  },
+});
 
-const tasks = installTasks({ api, state, actions, can, esc, statusName, engineName, short, date, ago, actionName, statusTone, notify, confirmAction, shell });
-const coreLogs = installCoreLogs({ api, state, engines, can, esc, engineName, date, shell });
-const traffic = installTraffic({ api, state, can, esc, engineName, bytes, rate, percent, ago, shell, notify, confirmAction });
-const accessControl = installAccessControl({ api, state, can, esc, engineName, shell, notify, confirmAction });
-const systemBBR = installSystemBBR({ api, state, can, esc, date, shell, notify, confirmAction });
-const settings = installSettings({ api, state, esc, date, can, shell, notify, confirmAction, applyUIFontScale });
-const userModule = installUsers({ api, state, esc, shell, notify, confirmAction });
-const { users, myQuota } = userModule;
+function preloadNavigationRoute(event) {
+  const link = event.target.closest?.('a[href^="#"]');
+  if (!link) return;
+  if (event.type === "pointerover" && link.contains(event.relatedTarget)) return;
+  const route = routeForHash(link.getAttribute("href"));
+  void routeModules.preload(routeModuleNames[route] || "dashboard");
+}
+
+document.addEventListener("pointerover", preloadNavigationRoute, {
+  passive: true,
+});
+document.addEventListener("pointerdown", preloadNavigationRoute, {
+  passive: true,
+});
+document.addEventListener("focusin", preloadNavigationRoute);
+
+const nextRouteModules = Object.freeze({
+  dashboard: "agents",
+  agents: "configs",
+  configs: "client-access",
+  "client-access": "substore-sync",
+  "substore-sync": "traffic",
+  traffic: "core-logs",
+  "core-logs": "tasks",
+  tasks: "settings",
+  settings: "users",
+});
+let cancelRouteWarmup = () => {};
+
+function stopRouteWarmup() {
+  cancelRouteWarmup();
+  cancelRouteWarmup = () => {};
+}
+
+function scheduleRouteWarmup(route) {
+  stopRouteWarmup();
+  const current = routeModuleNames[route] || "dashboard";
+  const next = nextRouteModules[current];
+  const connection = navigator.connection;
+  if (
+    !next ||
+    routeModules.peek(next) ||
+    document.hidden ||
+    connection?.saveData ||
+    connection?.effectiveType?.includes("2g")
+  )
+    return;
+  const warm = () => {
+    cancelRouteWarmup = () => {};
+    void routeModules.preload(next);
+  };
+  if (typeof window.requestIdleCallback === "function") {
+    const handle = window.requestIdleCallback(warm, { timeout: 1500 });
+    cancelRouteWarmup =
+      typeof window.cancelIdleCallback === "function"
+        ? () => window.cancelIdleCallback(handle)
+        : () => {};
+  } else {
+    const handle = window.setTimeout(warm, 600);
+    cancelRouteWarmup = () => window.clearTimeout(handle);
+  }
+}
+
+function renderRouteModule(route, module, options) {
+  if (route === "agents") return module.agents(options);
+  if (route === "node-settings") return module.nodeSettings(false, options);
+  if (route === "agent-config") return module.agentConfig(options);
+  if (route === "live-config") return module.liveConfig(options);
+  if (route === "archive-config") return module.archiveConfigs(options);
+  if (route === "users") return module.users(options);
+  if (route === "my-quota") return module.myQuota(options);
+  return module(options);
+}
 
 async function renderOnce() {
-  userModule.closeInvitation();
+  routeModules.peek("users")?.closeInvitation();
   const previousRoute = state.route;
   routeController?.abort();
   routeController = new AbortController();
@@ -880,67 +1070,11 @@ async function renderOnce() {
     if (state.data.liveEngine) params.set("engine", state.data.liveEngine);
     history.replaceState(null, "", `#live-config${params.size ? `?${params}` : ""}`);
   }
-  const routeMap = {
-    summary: "dashboard",
-    fleet: "dashboard",
-    activity: "dashboard",
-    enrollment: "node-settings",
-    "client-access": "client-access",
-    "substore-sync": "substore-sync",
-    "settings-engines": "settings",
-    "settings-basic": "settings",
-    "settings-runtime": "settings",
-    "settings-data": "settings",
-    "settings-notify": "settings",
-    "settings-komari": "settings",
-    "settings-cnip": "settings",
-    "settings-deployment": "settings",
-    "preset-node": "live-config",
-    "settings-node": "node-settings",
-    "new-config": "archive-config",
-    templates: "archive-config",
-    archive: "archive-config",
-    "traffic-new": "traffic",
-    "traffic-all": "traffic",
-    "access-control-all": "access-control",
-  };
-  state.route = [
-    "dashboard",
-    "agents",
-    "node-settings",
-    "agent-config",
-    "client-access",
-    "substore-sync",
-    "live-config",
-    "archive-config",
-    "tasks",
-    "core-logs",
-    "traffic",
-    "access-control",
-    "system-bbr",
-    "settings",
-    "users",
-    "my-quota",
-  ].includes(hash)
-    ? hash
-    : (hash.startsWith("system-bbr-agent-") ? "system-bbr" : routeMap[hash]) ||
-      (hash.startsWith("preset-node-")
-        ? "live-config"
-        : hash.startsWith("settings-node-")
-          ? "node-settings"
-            : hash.startsWith("node-")
-              ? "node-settings"
-              : hash.startsWith("traffic-agent-")
-                ? "traffic"
-                : hash.startsWith("access-control-agent-")
-                  ? "access-control"
-            : hash.startsWith("config-")
-              ? "archive-config"
-              : "dashboard");
+  state.route = routeForHash(hash);
   state.anchor = hash;
   if (previousRoute === "node-settings" && state.route !== previousRoute) {
     state.data.nodeBatchMode = false;
-    agentModule.cancelAgentInteractions();
+    routeModules.peek("agents")?.cancelAgentInteractions();
   }
   if (hash.startsWith("preset-node-")) state.data.selectedAgent = hash.slice(12);
   if (hash.startsWith("settings-node-")) state.data.selectedAgent = hash.slice(14);
@@ -969,6 +1103,13 @@ async function renderOnce() {
     } else {
       state.data.agentAccess = { isolated: false, shares: [] };
     }
+    const route = state.route;
+    const routeModulePromise = routeModules.load(
+      routeModuleNames[route] || "dashboard",
+    );
+    // Keep the module fetch concurrent with API reads without reporting an
+    // unhandled rejection if the network fails before those reads settle.
+    void routeModulePromise.catch(() => {});
     // Start common page reads while the shell settings/overview are loading.
     // The page consumes these same promises through the render-local scope.
     // Pages with their own refresh AbortSignal must start their own request;
@@ -999,28 +1140,13 @@ async function renderOnce() {
         })
         .catch(() => {});
     }
-    const pages = {
-      dashboard,
-      agents,
-      "node-settings": (options) => nodeSettings(false, options),
-      "client-access": clientAccess,
-      "substore-sync": subStoreSync,
-      "agent-config": agentConfig,
-      "live-config": liveConfig,
-      "archive-config": archiveConfigs,
-      tasks,
-      "core-logs": coreLogs,
-      traffic,
-      "access-control": accessControl,
-      "system-bbr": systemBBR,
-      settings,
-      users,
-      "my-quota": myQuota,
-    };
-    await (pages[state.route] || dashboard)({
+    const routeModule = await routeModulePromise;
+    if (renderSignal.aborted) return;
+    await renderRouteModule(route, routeModule, {
       overview: state.data.overview,
       settings: state.data.settings,
     });
+    scheduleRouteWarmup(route);
     if (state.anchor === "new-config")
       document.querySelector("#new-config")?.click();
     else if (state.anchor && state.anchor !== state.route)
@@ -1047,6 +1173,7 @@ async function renderOnce() {
     // transition indicator, but never clear a newer navigation's state.
     if (state.routeSignal === renderSignal && !renderSignal.aborted) {
       const main = app.querySelector(".workspace-main");
+      if (main) main.inert = false;
       main?.classList.remove("is-route-pending");
       main?.removeAttribute("aria-busy");
     }
@@ -1059,20 +1186,25 @@ function primeRouteTransition() {
   if (!state.session) return;
   const main = app.querySelector(".workspace-main");
   if (!main) return;
+  main.inert = true;
   main.classList.add("is-route-pending");
   main.setAttribute("aria-busy", "true");
 }
 const render = () => {
-  configModule.capturePresetDrafts();
-  userModule.captureDraft();
+  stopRouteWarmup();
+  routeModules.peek("configs")?.capturePresetDrafts();
+  routeModules.peek("users")?.captureDraft();
   primeRouteTransition();
   state.navigationEpoch += 1;
   return scheduleRender();
 };
 window.addEventListener("hashchange", render);
 window.addEventListener("beforeunload", event => {
-  userModule.captureDraft();
-  if (!configModule.configHasUnsavedChanges() && !userModule.hasUnsavedChanges() && !agentModule.sharingHasUnsavedChanges()) return;
+  const configModule = routeModules.peek("configs");
+  const userModule = routeModules.peek("users");
+  const agentModule = routeModules.peek("agents");
+  userModule?.captureDraft();
+  if (!configModule?.configHasUnsavedChanges() && !userModule?.hasUnsavedChanges() && !agentModule?.sharingHasUnsavedChanges()) return;
   event.preventDefault();
   event.returnValue = "";
 });
