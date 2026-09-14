@@ -35,6 +35,8 @@ Mihomo 与 Xray 的 VLESS-ENC 预设使用独立的 X25519 密钥对：服务端
 
 Mihomo 把后量子密钥交换放在显式开关后面，因此同步格式会为每个 Reality 节点写入 `reality-opts.support-x25519mlkem768: true`：它只表示客户端愿意使用 X25519MLKEM768，target 支持时 Reality 就会协商该混合组，不支持时照常回退 X25519；非 Reality 节点不会出现 `reality-opts`。该字段与 ML-DSA-65 无关，后者需要在 Reality 握手时校验后量子签名，Mihomo 没有对应实现。
 
+Xray Reality 的 `minClientVer` 始终显式写入，默认 `0.0.0`。Xray v26.7.11 起省略该字段会默认要求客户端版本不低于 `26.3.27`，而 Mihomo 在 REALITY ClientHello 中固定声明 `1.8.2`，握手会在进入 VLESS 之前被拒绝并报 `REALITY authentication failed`；显式写入可跨版本避开这一默认值，v26.9.9 已在代码中注释掉该默认值与相关告警，此时省略与显式 `0.0.0` 等价。Reality 目标域名还应避开 `.ru`、`.ir`、`.cn` 后缀与 `apple`、`icloud`、`microsoft`：v26.9.9 会为这类 target 输出“增加 IP 被 GFW 封锁概率”的告警，默认的 `www.amazon.com` 不在其中。
+
 Snell 预设只生成 Mihomo 当前支持的 v5，不提供旧版本或 v6 字段。ShadowTLS 方案固定 v3，PSK 与 ShadowTLS 密码相互独立，服务端启用严格模式，客户端不生成证书校验绕过。Sudoku 预设只提供 `chacha20-poly1305` 和 `aes-128-gcm`，不提供无 AEAD 的 `none`；服务端只保存 Master Public Key，64 字节 Available Private Key 按配置版本和入站标签单独加密保存，仅用于生成客户端 YAML。HTTPMask 服务端固定使用上游推荐的 `auto`，客户端可选经过 Mihomo 双端真实流量验证的 `stream`、`poll`、`auto` 或 `ws`；当前 Mihomo 1.19.30 的 `legacy`、`custom-table` 与 `custom-tables` 虽能通过配置检查，但双端传输会失败或损坏响应，预设因此不提供。四种内置 Table Type、raw TCP、纯/压缩下行、两种安全 AEAD 与原生 `multiplex` 均已验证；原生复用不与通用 SMux 或 TCP Brutal 叠加。
 
 ## 生成和部署
