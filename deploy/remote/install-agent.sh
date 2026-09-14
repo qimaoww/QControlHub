@@ -318,7 +318,13 @@ mkdir -p "$repository_dir/deploy/$service_manager" "$repository_dir/examples/con
 # releases, so a missing or unverifiable signature is then a hard failure.
 # QCH_ALLOW_UNSIGNED_RELEASE=true is the explicit opt-out for a control plane
 # that does not publish signatures yet.
-release_public_key=${QCH_RELEASE_PUBLIC_KEY:-}
+saved_release_key=""
+if [ -r "$agent_env_file" ]; then
+  saved_release_key=$(sed -n 's/^QCH_RELEASE_PUBLIC_KEY=//p' "$agent_env_file" | tail -n 1)
+fi
+release_public_key=${QCH_RELEASE_PUBLIC_KEY:-$saved_release_key}
+validate_environment_value QCH_RELEASE_PUBLIC_KEY "$release_public_key"
+final_release_key=$saved_release_key
 allow_unsigned_release=${QCH_ALLOW_UNSIGNED_RELEASE:-false}
 checksums_url="/install-assets/SHA256SUMS"
 checksums_signature_url="/install-assets/SHA256SUMS.sig"
@@ -329,7 +335,9 @@ case "$allow_unsigned_release" in
 esac
 if [ -z "$release_public_key" ] || [ "$allow_unsigned_release" = true ]; then
   verify_required=false
-  if [ "$allow_unsigned_release" != true ]; then
+  if [ "$allow_unsigned_release" = true ]; then
+    printf '%s\n' 'warning: unsigned installation explicitly allowed; any existing Agent release-key pin is preserved.' >&2
+  else
     printf '%s\n' \
       'warning: QCH_RELEASE_PUBLIC_KEY is not set, so the installer files and the Agent' \
       'warning: binary are NOT signature verified. Anyone able to modify the response or' \
@@ -360,6 +368,13 @@ download() {
   else
     "$download_cmd" --fail --silent --show-error --compressed -H "X-QControlHub-Enrollment: $token" "$http_origin$source_path" -o "$destination"
   fi
+}
+
+required_assets="$work_dir/required-assets"
+: > "$required_assets"
+download_install_asset() {
+  download "/install-assets/$1" "$asset_dir/$1"
+  printf '%s\n' "$1" >> "$required_assets"
 }
 
 # verify_release_checksums authenticates the checksum list. The signature covers
@@ -398,9 +413,43 @@ verify_release_checksums() {
       'new key deliberately) or the download was tampered with.' >&2
     return 1
   fi
-  if ! (cd "$asset_dir" && sha256sum -c "$work_dir/SHA256SUMS" >/dev/null 2>&1); then
+  # Releases cover both init systems, but a node only downloads its own units.
+  # Select the required entries from the authenticated list and require exact
+  # coverage. --ignore-missing alone would also ignore a missing required file.
+  if ! awk '
+    NR == FNR { required[$0] = 1; next }
+    {
+      digest = substr($0, 1, 64)
+      path = substr($0, 67)
+      if (length(digest) != 64 || digest ~ /[^0-9a-f]/ || substr($0, 65, 2) != "  " || path == "") {
+        print "malformed signed checksum entry" > "/dev/stderr"
+        failed = 1
+        next
+      }
+      if (path in seen) {
+        print "duplicate signed checksum entry: " path > "/dev/stderr"
+        failed = 1
+        next
+      }
+      seen[path] = 1
+      if (path in required) print
+    }
+    END {
+      for (path in required) {
+        if (!(path in seen)) {
+          print "required download is absent from signed checksum list: " path > "/dev/stderr"
+          failed = 1
+        }
+      }
+      exit failed
+    }
+  ' "$required_assets" "$work_dir/SHA256SUMS" > "$work_dir/SHA256SUMS.required"; then
+    printf '%s\n' 'signed checksum list does not cover every required download' >&2
+    return 1
+  fi
+  if ! (cd "$asset_dir" && sha256sum -c "$work_dir/SHA256SUMS.required" >/dev/null 2>&1); then
     printf '%s\n' 'one or more downloaded files do not match the signed checksum list:' >&2
-    (cd "$asset_dir" && sha256sum -c "$work_dir/SHA256SUMS" 2>&1 | grep -v ': OK$' | head -20) >&2 || true
+    (cd "$asset_dir" && sha256sum -c "$work_dir/SHA256SUMS.required" 2>&1 | grep -v ': OK$' | head -20) >&2 || true
     return 1
   fi
   printf '%s\n' 'release signature verified; every downloaded file matches the signed list'
@@ -415,17 +464,17 @@ for asset in \
   examples/configs/sing-box-minimal.json \
   examples/configs/shadowsocks-rust-minimal.json
 do
-  download "/install-assets/$asset" "$asset_dir/$asset"
+  download_install_asset "$asset"
 done
 if [ "$service_manager" = openrc ]; then
   service_assets="qagent qagent-mihomo qagent-xray qagent-sing-box qagent-shadowsocks-rust"
   for service_asset in $service_assets; do
-    download "/install-assets/deploy/openrc/$service_asset" "$asset_dir/deploy/openrc/$service_asset"
+    download_install_asset "deploy/openrc/$service_asset"
   done
 else
   service_assets="qagent.service qagent-core-journal.conf qagent-mihomo.service qagent-xray.service qagent-sing-box.service qagent-shadowsocks-rust.service"
   for service_asset in $service_assets; do
-    download "/install-assets/deploy/systemd/$service_asset" "$asset_dir/deploy/systemd/$service_asset"
+    download_install_asset "deploy/systemd/$service_asset"
   done
 fi
 
@@ -434,6 +483,7 @@ echo "== 2/6 下载 agent 二进制（控制面 GET /api/v1/agent-binary）=="
 # it is only executed after the checks below pass.
 mkdir -p "$asset_dir/api/v1"
 download /api/v1/agent-binary "$asset_dir/api/v1/agent-binary"
+printf '%s\n' 'api/v1/agent-binary' >> "$required_assets"
 [ -s "$asset_dir/api/v1/agent-binary" ] || { printf '%s\n' 'downloaded agent binary is empty' >&2; exit 1; }
 
 if [ "$verify_required" = true ]; then
@@ -550,9 +600,25 @@ if [ -x "$qagent_bin_dir/qagent" ] || [ -f "$agent_env_file" ] || \
 fi
 
 # 本次安装由脚本显式管理的配置键：这些始终以本次为准，不继承上次的值。
-managed_env_keys="QCH_SERVER_URL QCH_ENROLLMENT_TOKEN QCH_REENROLL QCH_TLS_CA_FILE QCH_ALLOW_INSECURE_LIVE QCH_ALLOW_HTTP QCH_SERVICE_MANAGER QCH_EXISTING_XRAY_BINARY QCH_EXISTING_XRAY_CONFIG QCH_EXISTING_XRAY_CONFIG_DIRECTORY QCH_EXISTING_XRAY_SERVICE QCH_EXISTING_SING_BOX_BINARY QCH_EXISTING_SING_BOX_CONFIG QCH_EXISTING_SING_BOX_CONFIG_DIRECTORY QCH_EXISTING_SING_BOX_WORK_DIRECTORY QCH_EXISTING_SING_BOX_SERVICE_BINARY QCH_EXISTING_SING_BOX_SERVICE"
+managed_env_keys="QCH_SERVER_URL QCH_ENROLLMENT_TOKEN QCH_REENROLL QCH_TLS_CA_FILE QCH_RELEASE_PUBLIC_KEY QCH_ALLOW_INSECURE_LIVE QCH_ALLOW_HTTP QCH_SERVICE_MANAGER QCH_EXISTING_XRAY_BINARY QCH_EXISTING_XRAY_CONFIG QCH_EXISTING_XRAY_CONFIG_DIRECTORY QCH_EXISTING_XRAY_SERVICE QCH_EXISTING_SING_BOX_BINARY QCH_EXISTING_SING_BOX_CONFIG QCH_EXISTING_SING_BOX_CONFIG_DIRECTORY QCH_EXISTING_SING_BOX_WORK_DIRECTORY QCH_EXISTING_SING_BOX_SERVICE_BINARY QCH_EXISTING_SING_BOX_SERVICE"
 
 install -d -o root -g root -m 0700 "$agent_conf_dir"
+if [ "$verify_required" = true ]; then
+  # systemd does not inherit the installer's environment. Persist the verified
+  # public key under a stable, protected path for subsequent Agent upgrades.
+  final_release_key="$agent_conf_dir/release-key.pub.pem"
+  [ ! -L "$final_release_key" ] || { printf '%s\n' "refusing symlinked release public key: $final_release_key" >&2; exit 1; }
+  [ ! -e "$final_release_key" ] || [ -f "$final_release_key" ] || {
+    printf '%s\n' "refusing non-regular release public key: $final_release_key" >&2
+    exit 1
+  }
+  if ! cmp -s "$release_public_key" "$final_release_key"; then
+    install -o root -g root -m 0644 "$release_public_key" "$final_release_key"
+  else
+    chown root:root "$final_release_key"
+    chmod 0644 "$final_release_key"
+  fi
+fi
 install -d -o root -g root -m 0755 "$qagent_bin_dir"
 [ ! -L "$qagent_bin_dir/qagent" ] || { printf '%s\n' "refusing symlinked Agent binary: $qagent_bin_dir/qagent" >&2; exit 1; }
 [ ! -e "$qagent_bin_dir/qagent" ] || [ -f "$qagent_bin_dir/qagent" ] || {
@@ -616,6 +682,7 @@ umask 077
 {
   printf '%s\n' "QCH_SERVER_URL=$server_url"
   if [ -n "$ca_file" ]; then printf '%s\n' "QCH_TLS_CA_FILE=$ca_file"; fi
+  if [ -n "$final_release_key" ]; then printf '%s\n' "QCH_RELEASE_PUBLIC_KEY=$final_release_key"; fi
   case "$server_url" in
     http://*|ws://*) printf '%s\n' 'QCH_ALLOW_HTTP=true' ;;
   esac

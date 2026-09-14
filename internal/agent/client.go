@@ -8,7 +8,6 @@ import (
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -97,6 +96,7 @@ type Client struct {
 	// its agent policy. The upgrade path requires the signed manifest to describe
 	// this exact version, so a node cannot be moved to a build the panel does not
 	// consider current.
+	agentPolicyMu       sync.RWMutex
 	controlPlaneVersion string
 	reenrollAttempted   bool
 	lastReenrollAt      time.Time
@@ -671,9 +671,10 @@ func (c *Client) applyAgentPolicy(ctx context.Context, policy core.AgentPolicy) 
 		return err
 	}
 	c.logs.ApplyPolicy(policy)
-	// Record the panel build from the authenticated policy message. The read loop
-	// already holds the session lock for this connection.
+	// Upgrade downloads run outside the session loop and survive reconnects.
+	c.agentPolicyMu.Lock()
 	c.controlPlaneVersion = strings.TrimSpace(policy.ControlPlaneVersion)
+	c.agentPolicyMu.Unlock()
 	if c.executor.serviceManager().Kind() == ServiceManagerSystemd {
 		if err := ensureManagedCoreLogStreamingWithPolicy(ctx, c.executor.Specs, policy, c.executor.serviceManager()); err != nil {
 			// Local log tuning is best-effort just like initial journal setup. A
@@ -1205,10 +1206,18 @@ func (c *Client) downloadAgentBinaryOnce(ctx context.Context, client *http.Clien
 	// key is pinned, the served binary must also match a manifest signed by that
 	// key, and the version reported to the preflight step comes from the signed
 	// manifest rather than from a header the control plane controls.
-	verifiedVersion, err := c.verifyUpgradeRelease(ctx, client, hash.Sum(nil), c.controlPlaneVersion)
+	c.agentPolicyMu.RLock()
+	controlPlaneVersion := c.controlPlaneVersion
+	c.agentPolicyMu.RUnlock()
+	verifiedVersion, err := c.verifyUpgradeRelease(ctx, client, hash.Sum(nil), controlPlaneVersion)
 	if err != nil {
 		cleanup()
 		return "", "", 0, err
+	}
+	if strings.TrimSpace(c.config.ReleasePublicKey) == "" {
+		// Legacy deployments still need the existing preflight version check.
+		// Only pinned releases replace this label with a signed version.
+		verifiedVersion = strings.TrimSpace(response.Header.Get("X-QControlHub-Agent-Version"))
 	}
 	if err := temporary.Sync(); err != nil {
 		cleanup()
@@ -1316,14 +1325,14 @@ func (c *Client) fetchReleaseManifest(ctx context.Context, client *http.Client) 
 	return release.Parse(body)
 }
 
-// decodeReleasePublicKey accepts the raw-URL base64 form written by
-// `release-sign keygen`.
+// decodeReleasePublicKey shares the installer's PEM-path contract while
+// retaining compatibility with an inline raw-URL public key.
 func decodeReleasePublicKey(value string) (ed25519.PublicKey, error) {
-	decoded, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(value))
-	if err != nil || len(decoded) != ed25519.PublicKeySize {
-		return nil, errors.New("QCH_RELEASE_PUBLIC_KEY is not a raw-URL base64 Ed25519 public key")
+	key, err := release.LoadPublicKey(value)
+	if err != nil {
+		return nil, fmt.Errorf("QCH_RELEASE_PUBLIC_KEY: %w", err)
 	}
-	return ed25519.PublicKey(decoded), nil
+	return key, nil
 }
 
 func (c *Client) reexecAfterUpgrade() {

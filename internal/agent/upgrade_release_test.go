@@ -4,9 +4,13 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/x509"
 	"encoding/base64"
+	"encoding/pem"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -115,6 +119,72 @@ func TestUpgradeReleaseAcceptsSignedBinary(t *testing.T) {
 	// control plane chooses.
 	if version != "v1.2.3" {
 		t.Fatalf("version = %q, want v1.2.3 from the signed manifest", version)
+	}
+}
+
+func TestUpgradeReleaseAcceptsInstallerPEMPath(t *testing.T) {
+	binary := []byte("agent-binary-payload")
+	manifest, publicKey, _ := upgradeReleaseFixture(t, binary, "v1.2.3")
+	body, err := manifest.Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	der, err := x509.MarshalPKIXPublicKey(publicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyPath := filepath.Join(t.TempDir(), "release-key.pub.pem")
+	if err := os.WriteFile(keyPath, pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der}), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	server := releaseServer(t, body)
+	defer server.Close()
+	client := upgradeReleaseClient(t, server.URL, keyPath, "v1.2.3")
+	version, err := client.verifyUpgradeRelease(context.Background(), server.Client(), release.DigestBytes(binary), "v1.2.3")
+	if err != nil || version != "v1.2.3" {
+		t.Fatalf("installer-provisioned PEM key did not verify the upgrade: %q %v", version, err)
+	}
+}
+
+func TestUpgradeReleaseDownloadVersionSource(t *testing.T) {
+	for _, pinned := range []bool{false, true} {
+		name := "legacy-header"
+		if pinned {
+			name = "signed-manifest"
+		}
+		t.Run(name, func(t *testing.T) {
+			binary := []byte("agent-binary-payload")
+			manifest, publicKey, _ := upgradeReleaseFixture(t, binary, "v1.2.3")
+			body, err := manifest.Marshal()
+			if err != nil {
+				t.Fatal(err)
+			}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/agent/v1/binary":
+					w.Header().Set("X-QControlHub-Agent-SHA256", release.Digest(binary))
+					w.Header().Set("X-QControlHub-Agent-Version", "header-version")
+					_, _ = w.Write(binary)
+				case releaseManifestPath:
+					if !pinned {
+						t.Error("legacy Agent unexpectedly required a manifest")
+					}
+					_, _ = w.Write(body)
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer server.Close()
+			key, expected := "", "header-version"
+			if pinned {
+				key, expected = base64.RawURLEncoding.EncodeToString(publicKey), "v1.2.3"
+			}
+			client := upgradeReleaseClient(t, server.URL, key, "v1.2.3")
+			_, version, _, err := client.downloadAgentBinaryOnce(context.Background(), server.Client(), t.TempDir())
+			if err != nil || version != expected {
+				t.Fatalf("wrong preflight version source: got %q, want %q, error %v", version, expected, err)
+			}
+		})
 	}
 }
 

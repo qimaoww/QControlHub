@@ -199,11 +199,7 @@ func runVerify(args []string) error {
 		return err
 	}
 	if *keyPath != "" {
-		content, err := os.ReadFile(*keyPath)
-		if err != nil {
-			return err
-		}
-		publicKey, err := decodePublicKey(string(content))
+		publicKey, err := release.LoadPublicKey(*keyPath)
 		if err != nil {
 			return err
 		}

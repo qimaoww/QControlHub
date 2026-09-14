@@ -3,7 +3,7 @@ SHELL := /bin/sh
 VERSION ?= dev
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
-.PHONY: build test release-checksums signing-key check-install-assets alpine-test alpine-agent-test upgrade-sandbox-test ss-rust-runtime-test vet fmt-check frontend-check pr-policy-test schema-policy-test installer-test agent-redeploy-test quick-start-test web-image-test docs-check check checks browser-checks non-browser-checks alpine-non-browser-checks init-env compose-config up dev-up down logs
+.PHONY: build test release-checksums release-image-agent release-image-checksums signing-key check-install-assets alpine-test alpine-agent-test upgrade-sandbox-test ss-rust-runtime-test vet fmt-check frontend-check pr-policy-test schema-policy-test installer-test agent-redeploy-test quick-start-test web-image-test docs-check check checks browser-checks non-browser-checks alpine-non-browser-checks init-env compose-config up dev-up down logs
 
 # Non-Go checks. CI runs each group as its own task next to the Go test shards,
 # so keep the Go suite out of these targets.
@@ -79,16 +79,16 @@ quick-start-test:
 # an installer that pins QCH_RELEASE_PUBLIC_KEY can verify every file it places
 # on a node. Generate them before building the image:
 #   make signing-key                     (once, on the release machine)
-#   make release-checksums RELEASE_KEY=release.key
+#   make release-image-checksums RELEASE_KEY=release.key
 # The private key stays on the release machine; only dist/release/ is published.
-# The signed list is also the list of files a node downloads from
-# /install-assets/, so it has to name exactly what the web image serves: a listed
-# path that is not served fails the install with a 404, and a served asset that is
-# not listed is placed on the node unverified. deploy/tests/release-assets.sh
+# The signed list covers both init systems; nodes verify the subset they need.
+# Required files absent from the signed list fail closed. deploy/tests/release-assets.sh
 # derives that file list from the installer and refuses to answer when the two
 # disagree, so a new download cannot quietly fall outside the signature.
 RELEASE_DIR ?= dist/release
 RELEASE_KEY ?= release.key
+RELEASE_AGENT ?= bin/qagent
+RELEASE_IMAGE_DIR ?= dist/agent-image
 
 # One-time release keypair. Keep the private key on the release machine or in a
 # protected CI environment: a key that reaches the control plane would let whoever
@@ -104,11 +104,19 @@ check-install-assets:
 
 release-checksums: build check-install-assets
 	@assets="$$(bash deploy/tests/release-assets.sh --files | sed 's/^/-assets /' | tr '\n' ' ')" || exit 1; \
-	./bin/release-sign checksums -key $(RELEASE_KEY) -agent bin/qagent $$assets \
+	./bin/release-sign checksums -key $(RELEASE_KEY) -agent '$(RELEASE_AGENT)' $$assets \
 		-out $(RELEASE_DIR) || exit 1; \
 	./bin/release-sign sign -key $(RELEASE_KEY) -release '$(VERSION)' \
-		-agent bin/qagent -agent-version '$(VERSION)' \
+		-agent '$(RELEASE_AGENT)' -agent-version '$(VERSION)' \
 		$$assets -out $(RELEASE_DIR)/release-manifest.json
+
+# Docker distributions must sign the image's Agent, not a host-toolchain build.
+release-image-agent:
+	docker build --target agent-release --build-arg VERSION='$(VERSION)' \
+		--output 'type=local,dest=$(RELEASE_IMAGE_DIR)' .
+
+release-image-checksums: release-image-agent
+	$(MAKE) release-checksums RELEASE_AGENT='$(RELEASE_IMAGE_DIR)/qagent'
 
 web-image-test:
 	docker build --target qcontrol-web --build-arg VERSION='$(VERSION)' .

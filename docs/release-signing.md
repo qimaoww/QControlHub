@@ -2,7 +2,9 @@
 
 QControlHub 的控制面同时是**分发者**：它把 Agent 可执行文件和安装脚本交给全新节点，也把新的 Agent 二进制推给已上线节点。因此控制面不能同时充当自己的信任根——校验和与被校验的文件走同一条连接，谁能改响应谁就能同时改这两样。
 
-本方案把信任根移出控制面：**发布私钥只在发布机（或受保护的 CI 环境）使用，控制面永远拿不到它。** 节点与安装器只携带公钥，因此控制面被完全攻破时，攻击者可以换掉文件，但**签不出匹配的签名**，升级会被拒绝。
+本方案把信任根移出控制面：**发布私钥只在发布机（或受保护的 CI 环境）使用，控制面永远拿不到它。** 已固定公钥的 Agent 和可信安装器会拒绝被替换且没有有效签名的下载。
+
+安装器本身必须先从独立可信的发布渠道取得并核对；从已被攻破的控制面下载脚本再直接执行，无法靠脚本内部的验签建立信任。签名认证发布内容，不阻止重放仍由同一密钥签名的历史版本。
 
 覆盖范围：
 
@@ -42,11 +44,13 @@ make signing-key RELEASE_KEY=release.key
 QCH_RELEASE_PUBLIC_KEY=/etc/qcontrolhub/release-key.pub.pem
 ```
 
+将该 PEM 路径传给安装命令后，安装器会把验证过的公钥保存到 Agent 配置目录，并写入 `agent.env`（OpenRC 同时写入服务环境）。后续更新默认沿用已保存的公钥，不会因漏传环境变量而关闭验签。Agent 和控制面也兼容早期使用的 inline raw-URL base64 公钥，但安装器使用 PEM 文件。
+
 ## 3. 每次发布
 
 ```bash
-make build VERSION=1.2.3
-make release-checksums VERSION=1.2.3 RELEASE_KEY=release.key
+# Docker 部署：导出并签名镜像实际使用的 Agent，不能签名另一份宿主机编译产物。
+make release-image-checksums VERSION=1.2.3 RELEASE_KEY=release.key
 ```
 
 `dist/release/` 下会得到 `SHA256SUMS`、`SHA256SUMS.sig`、`release-manifest.json`。随后构建带这些产物的 web 镜像：
@@ -57,9 +61,13 @@ docker build --target qcontrol-web \
   --build-arg RELEASE_ARTIFACTS=dist/release .
 ```
 
-**清单范围**：这份清单同时也是节点从 `/install-assets/` 下载的文件清单，所以它必须**精确等于** web 镜像实际提供的文件。多列一个：该文件下载不到，安装直接失败在 404；少列一个：该资源会被放进节点但从未被签名校验过。`deploy/` 是仓库的工具目录（含 `deploy/tests`、`deploy/nginx` 等），因此它**不能**整体签进去。
+原生二进制部署可用 `make release-checksums VERSION=1.2.3` 签名 `bin/qagent`；也可用 `RELEASE_AGENT=/path/to/qagent` 指定真正要分发的文件。Docker 流程从与运行镜像相同的构建阶段导出 Agent，固定构建镜像摘要，避免宿主机与容器 Go 版本不同导致摘要不一致。
+
+**清单范围**：清单包含 systemd 和 OpenRC 安装资源的并集。节点仅下载自己使用的一套，验签后提取所需条目逐个校验；所需条目缺失、重复或内容不符都会失败，不使用会忽略必需文件的 `--ignore-missing`。`deploy/` 含 `deploy/tests` 等非发布工具，不能整体签进去。
 
 `release-checksums` 依赖 `check-install-assets`，后者运行 `deploy/tests/release-assets.sh`：从 `deploy/remote/install-agent.sh` 自己的下载循环推导资产列表，与可签名集合逐条比对，不一致就拒绝出包。往安装器里新增一个下载而不更新发布集合，会被这里挡住。
+
+控制面还需要只读挂载 `dist/release/release-manifest.json`，并把 `QCH_RELEASE_MANIFEST_PATH` 指向容器内的该文件；可同时挂载公钥并设置 `QCH_RELEASE_PUBLIC_KEY` 做启动期自检。Web 镜像中的校验清单不会自动代替这个 Agent 升级接口。
 
 ```bash
 make check-install-assets        # 只校验：安装器下载集 == 发布资产集
@@ -68,7 +76,7 @@ bash deploy/tests/release-assets.sh --files   # 打印本次要签的文件
 
 **版本一致性**：`release-checksums` 把 `VERSION` 同时写进 `-release` 与 `-agent-version`，而控制面把自身构建版本通过已认证的 WSS 策略下发给 Agent。升级时 Agent 要求签名清单里的 Agent 版本**等于**面板版本，否则拒绝安装。这样“面板版本”与“Agent 版本”由签名绑定在一起，控制面无法一边声称版本 1.2.3、一边下发别的构建。
 
-> `qcontrol-web` 阶段会无条件 `COPY dist/release/SHA256SUMS`，所以**必须有签名产物才能构建 web 镜像**。全新检出直接 `docker build --target qcontrol-web .` 会因缺文件失败：先跑一次 `make release-checksums`（本地测试可用一次性密钥），或在 CI 中让签名 job 先产出 `dist/release/`。`dist/` 已被 gitignore，不要提交。
+> `qcontrol-web` 阶段会无条件 `COPY dist/release/SHA256SUMS`，所以**必须有签名产物才能构建 web 镜像**。全新检出直接 `docker build --target qcontrol-web .` 会因缺文件失败：先跑一次 `make release-image-checksums`（本地测试可用一次性密钥），或在 CI 中让签名 job 先产出 `dist/release/`。`dist/` 已被 gitignore，不要提交。没有配置 `RELEASE_SIGNING_KEY` 时，当前 CI 不发布 web 镜像；发布前应确认三个镜像使用同一版本。
 
 ## 4. 在 GitHub Actions 里签名
 
@@ -91,10 +99,15 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: docker/setup-buildx-action@v4
       - name: Build the artifacts to sign
         run: |
-          make build VERSION="${GITHUB_REF_NAME}"
-          make release-checksums VERSION="${GITHUB_REF_NAME}" RELEASE_KEY="$RUNNER_TEMP/release.key"
+          install -m 0600 /dev/null "$RUNNER_TEMP/release.key"
+          printf '%s' "$RELEASE_SIGNING_KEY" > "$RUNNER_TEMP/release.key"
+          make release-image-checksums VERSION="${GITHUB_REF_NAME}" RELEASE_KEY="$RUNNER_TEMP/release.key"
         env:
           RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
       - name: Publish the signed artifacts
@@ -113,9 +126,9 @@ jobs:
 | 变量 | 作用 |
 | --- | --- |
 | `QCH_RELEASE_PUBLIC_KEY` | 安装器与 Agent 的公钥路径。设置即表示“本部署有签名发布”，此时缺失或无法验证的签名是**硬失败** |
-| `QCH_ALLOW_UNSIGNED_RELEASE=true` | 显式放弃校验（用于尚未发布签名的控制面）。安装器会打印告警 |
+| `QCH_ALLOW_UNSIGNED_RELEASE=true` | 本次安装显式放弃校验并打印告警；不会清除已保存的 Agent 公钥，也不关闭 Agent 后续升级验签 |
 | `QCH_RELEASE_MANIFEST_PATH` | 控制面读取 `release-manifest.json` 的路径；供 Agent 升级校验使用 |
-| `QCH_RELEASE_PUBLIC_KEY`（控制面侧，可选） | 与控制面读取的清单做一次启动期自检：不匹配则拒绝启动 |
+| `QCH_RELEASE_PUBLIC_KEY`（控制面侧，可选） | PEM/raw-URL 公钥文件路径，或 inline raw-URL 公钥；与控制面读取的清单做一次启动期自检 |
 
 未设置 `QCH_RELEASE_PUBLIC_KEY` 的节点保持原有行为（升级不验签，但会记录告警），因此既有节点不会因为引入校验而无法升级。**建议在下次重装或轮换时给所有节点加上公钥。**
 

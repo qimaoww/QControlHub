@@ -16,9 +16,11 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
@@ -223,6 +225,45 @@ func DecodePublicKey(value string) (ed25519.PublicKey, error) {
 		return nil, errors.New("release: value is not a raw-URL base64 Ed25519 public key")
 	}
 	return ed25519.PublicKey(decoded), nil
+}
+
+// LoadPublicKey accepts a PEM/raw-URL public key file, or the inline raw-URL
+// encoding used by early signed-release Agents. Installers provision a PEM file
+// so the same QCH_RELEASE_PUBLIC_KEY setting works with OpenSSL and the Agent.
+func LoadPublicKey(value string) (ed25519.PublicKey, error) {
+	value = strings.TrimSpace(value)
+	if key, err := DecodePublicKey(value); err == nil {
+		return key, nil
+	}
+	file, err := os.Open(value)
+	if err != nil {
+		return nil, fmt.Errorf("release: open public key file: %w", err)
+	}
+	defer file.Close()
+	const limit = 16 << 10
+	content, err := io.ReadAll(io.LimitReader(file, limit+1))
+	if err != nil {
+		return nil, fmt.Errorf("release: read public key file: %w", err)
+	}
+	if len(content) > limit {
+		return nil, errors.New("release: public key file exceeds 16 KiB")
+	}
+	block, rest := pem.Decode(content)
+	if block == nil {
+		return DecodePublicKey(string(content))
+	}
+	if block.Type != "PUBLIC KEY" || len(block.Headers) != 0 || len(bytes.TrimSpace(rest)) != 0 {
+		return nil, errors.New("release: expected one PEM PUBLIC KEY block")
+	}
+	parsed, err := x509.ParsePKIXPublicKey(block.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("release: parse PEM public key: %w", err)
+	}
+	key, ok := parsed.(ed25519.PublicKey)
+	if !ok {
+		return nil, errors.New("release: public key must use Ed25519")
+	}
+	return key, nil
 }
 
 // ValidateDigest reports whether value is a lowercase hex SHA-256 digest.

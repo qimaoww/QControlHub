@@ -33,21 +33,8 @@ write_release_checksums() {
   (
     cd "$repo_root"
     printf '%s  %s\n' "$(sha256sum /bin/true | cut -d' ' -f1)" "api/v1/agent-binary"
-    for asset in \
-      deploy/bootstrap-core-services.sh \
-      deploy/existing-core-mapping.sh \
-      examples/configs/mihomo-minimal.yaml \
-      examples/configs/xray-minimal.json \
-      examples/configs/sing-box-minimal.json \
-      examples/configs/shadowsocks-rust-minimal.json \
-      deploy/systemd/qagent.service \
-      deploy/systemd/qagent-core-journal.conf \
-      deploy/systemd/qagent-mihomo.service \
-      deploy/systemd/qagent-xray.service \
-      deploy/systemd/qagent-sing-box.service \
-      deploy/systemd/qagent-shadowsocks-rust.service
+    bash deploy/tests/release-assets.sh --files | while IFS= read -r asset
     do
-      [ -f "$asset" ] || continue
       printf '%s  %s\n' "$(sha256sum "$asset" | cut -d' ' -f1)" "$asset"
     done
   ) | LC_ALL=C sort > "$list"
@@ -63,27 +50,21 @@ write_release_checksums "$checksums_root/install-assets/SHA256SUMS" "$checksums_
 # artifact substitution: the signature is fine, the content is not.
 mkdir -p "$test_root/substituted/install-assets"
 write_release_checksums "$test_root/substituted/install-assets/SHA256SUMS" "$test_root/substituted/install-assets/SHA256SUMS.sig"
-sed -i 's/  deploy\/systemd\/qagent.service$/  deploy\/systemd\/qagent.service/' "$test_root/substituted/install-assets/SHA256SUMS"
-python3 - "$test_root/substituted/install-assets/SHA256SUMS" <<'PYEOF'
-import sys
-path = sys.argv[1]
-lines = open(path).read().splitlines(True)
-for index, line in enumerate(lines):
-    # Flip the digest of the first asset while keeping the signed list internally
-    # consistent, so only the served file disagrees with it.
-    if "deploy/" in line:
-        digest, name = line.split("  ", 1)
-        digest = ("0" if digest[0] != "0" else "1") + digest[1:]
-        lines[index] = digest + "  " + name
-        break
-open(path, "w").writelines(lines)
-PYEOF
+awk '{
+  if ($2 == "deploy/existing-core-mapping.sh") $0 = (substr($0, 1, 1) == "0" ? "1" : "0") substr($0, 2)
+  print
+}' "$test_root/substituted/install-assets/SHA256SUMS" > "$test_root/substituted/install-assets/SHA256SUMS.next"
+mv "$test_root/substituted/install-assets/SHA256SUMS.next" "$test_root/substituted/install-assets/SHA256SUMS"
 openssl pkeyutl -sign -inkey "$release_key" -rawin -in "$test_root/substituted/install-assets/SHA256SUMS" -out "$test_root/checksums.raw"
 openssl base64 -A -in "$test_root/checksums.raw" -out "$test_root/substituted/install-assets/SHA256SUMS.sig"
 # A list whose bytes changed after signing exercises the signature check.
 mkdir -p "$test_root/broken-signature/install-assets"
 write_release_checksums "$test_root/broken-signature/install-assets/SHA256SUMS" "$test_root/broken-signature/install-assets/SHA256SUMS.sig"
 printf 'garbage\n' >> "$test_root/broken-signature/install-assets/SHA256SUMS"
+mkdir -p "$test_root/missing-entry/install-assets"
+grep -v '  deploy/existing-core-mapping.sh$' "$checksums_root/install-assets/SHA256SUMS" > "$test_root/missing-entry/install-assets/SHA256SUMS"
+openssl pkeyutl -sign -inkey "$release_key" -rawin -in "$test_root/missing-entry/install-assets/SHA256SUMS" -out "$test_root/checksums.raw"
+openssl base64 -A -in "$test_root/checksums.raw" -out "$test_root/missing-entry/install-assets/SHA256SUMS.sig"
 
 fake_bin="$test_root/bin"
 mkdir -p \
@@ -149,6 +130,23 @@ fi
 exit 0
 EOF
 
+cat > "$fake_bin/rc-service" <<'EOF'
+#!/bin/sh
+set -eu
+case "$*" in
+  'qagent status') [ -e "$QCH_OPENRC_INIT_ROOT/.running" ]; exit ;;
+  'qagent start'|'qagent restart')
+    server_url=$(sed -n 's/^QCH_SERVER_URL=//p' "$QCH_AGENT_ENV_FILE" | tail -n 1)
+    state_path=$(sed -n 's/^QCH_AGENT_STATE=//p' "$QCH_AGENT_ENV_FILE" | tail -n 1)
+    mkdir -p "$(dirname "$state_path")"
+    printf '{"agent_id":"abc123","private_key":"fake-openrc-key","server":"%s"}\n' "${server_url#*://}" > "$state_path"
+    touch "$QCH_OPENRC_INIT_ROOT/.running"
+    ;;
+esac
+exit 0
+EOF
+chmod 0755 "$fake_bin/rc-service"
+
 cat > "$fake_bin/apt-get" <<'EOF'
 #!/bin/sh
 set -eu
@@ -178,7 +176,7 @@ esac
 exit 2
 EOF
 
-for helper_name in groupadd useradd; do
+for helper_name in groupadd useradd addgroup adduser rc-update supervise-daemon; do
   printf '%s\n' '#!/bin/sh' 'exit 0' > "$fake_bin/$helper_name"
   chmod 0755 "$fake_bin/$helper_name"
 done
@@ -224,6 +222,9 @@ sh "$installer" "$control" "$token" > "$test_root/first.log"
 grep -q '^update -qq$' "$QCH_PACKAGE_LOG" || { printf '%s\n' 'first install: APT metadata was not updated for nftables' >&2; exit 1; }
 grep -q '^install -y --no-install-recommends nftables$' "$QCH_PACKAGE_LOG" || { printf '%s\n' 'first install: nftables APT package was not installed' >&2; exit 1; }
 [ -f "$QCH_AGENT_ENV_FILE" ] || { printf '%s\n' 'first install: agent env missing' >&2; exit 1; }
+installed_release_key="$test_root/env/release-key.pub.pem"
+grep -Fxq "QCH_RELEASE_PUBLIC_KEY=$installed_release_key" "$QCH_AGENT_ENV_FILE"
+cmp "$release_pub" "$installed_release_key"
 grep -q '^QCH_AGENT_LABELS=region=cn-east$' "$QCH_AGENT_ENV_FILE" || { printf '%s\n' 'first install: default label missing' >&2; exit 1; }
 grep -q '^QCH_AGENT_NAME=' "$QCH_AGENT_ENV_FILE" || { printf '%s\n' 'first install: agent name missing' >&2; exit 1; }
 if grep -q '^QCH_ENROLLMENT_TOKEN=' "$QCH_AGENT_ENV_FILE"; then
@@ -361,11 +362,18 @@ grep -q 'RELEASE SIGNATURE VERIFICATION FAILED' "$test_root/broken.log" || {
   exit 1
 }
 
+echo '== a valid signature must cover every required download =='
+if QCH_ASSET_OVERRIDE="$test_root/missing-entry" sh "$installer" update "$control" "$token" > "$test_root/missing-entry.log" 2>&1; then
+  printf '%s\n' 'missing checksum entry: installer accepted an unverified required script' >&2
+  exit 1
+fi
+grep -q 'required download is absent from signed checksum list: deploy/existing-core-mapping.sh' "$test_root/missing-entry.log"
+
 # A pinned key with no published signature must fail closed, so removing the
 # endpoint cannot silently downgrade the deployment to unverified installs.
 echo '== pinned key without a published signature fails closed =='
 mkdir -p "$test_root/no-checksums"
-if QCH_ASSET_OVERRIDE="$test_root/no-checksums" sh "$installer" update "$control" "$token" > "$test_root/nosig.log" 2>&1; then
+if QCH_RELEASE_PUBLIC_KEY= QCH_ASSET_OVERRIDE="$test_root/no-checksums" sh "$installer" update "$control" "$token" > "$test_root/nosig.log" 2>&1; then
   printf '%s\n' 'missing signature: installer proceeded despite a pinned release key' >&2
   exit 1
 fi
@@ -381,6 +389,16 @@ if ! QCH_ASSET_OVERRIDE="$test_root/no-checksums" QCH_RELEASE_PUBLIC_KEY= QCH_AL
   printf '%s\n' 'unsigned opt-out: installer refused an explicitly allowed unsigned release' >&2
   exit 1
 fi
+assert_env_once QCH_RELEASE_PUBLIC_KEY "$installed_release_key"
+
+echo '== signed OpenRC install uses the same complete release list =='
+QCH_RELEASE_PUBLIC_KEY= QCH_SERVICE_MANAGER=openrc QCH_RC_SERVICE="$fake_bin/rc-service" QCH_RC_UPDATE=/bin/true \
+  sh "$installer" update "$control" "$token" > "$test_root/openrc.log"
+grep -q 'release signature verified' "$test_root/openrc.log"
+assert_env_once QCH_RELEASE_PUBLIC_KEY "$installed_release_key"
+grep -Fxq "export QCH_RELEASE_PUBLIC_KEY='$installed_release_key'" "$QCH_OPENRC_CONF_DIR/qagent"
+QCH_SERVICE_MANAGER=openrc QCH_RC_SERVICE="$fake_bin/rc-service" QCH_RC_UPDATE=/bin/true \
+  sh "$installer" uninstall > "$test_root/openrc-uninstall.log"
 
 echo '== uninstall agent =='
 sh "$installer" uninstall > "$test_root/uninstall.log"

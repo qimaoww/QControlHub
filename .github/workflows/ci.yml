@@ -197,7 +197,7 @@ jobs:
           cache-dependency-path: go.sum
       - name: Build signed release artifacts for the web image
         if: matrix.target == 'qcontrol-web'
-        run: make signing-key release-checksums RELEASE_KEY=release.key VERSION=${{ github.sha }}
+        run: make signing-key release-image-checksums RELEASE_KEY=release.key VERSION=${{ github.sha }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -256,7 +256,7 @@ jobs:
           printf '%s' "${RELEASE_SIGNING_KEY}" > release.key
       - name: Build signed release artifacts for the web image
         if: matrix.target == 'qcontrol-web' && env.RELEASE_SIGNING_KEY != ''
-        run: make release-checksums RELEASE_KEY=release.key VERSION=${{ github.sha }}
+        run: make release-image-checksums RELEASE_KEY=release.key VERSION=${{ github.sha }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4

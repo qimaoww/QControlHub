@@ -15,7 +15,7 @@ import (
 // signed with the same release key.
 //
 // The list is the exact format `sha256sum -c` consumes, and the signature covers
-// those raw bytes, so a shell can check it with the stock `openssl dgst -verify`
+// those raw bytes, so a shell can check it with stock `openssl pkeyutl -rawin`
 // and nothing has to reproduce a canonical JSON encoding in shell.
 //
 // Use ChecksumList to build the signed bytes and VerifyChecksums to check them.
@@ -75,7 +75,7 @@ func SignChecksums(artifacts []Artifact, privateKey ed25519.PrivateKey) (list []
 }
 
 // VerifyChecksums checks a detached signature over a checksum list. It is the
-// exact operation the installer performs with `openssl dgst -sha256 -verify`.
+// exact operation the installer performs with `openssl pkeyutl -verify -rawin`.
 func VerifyChecksums(list, signature []byte, publicKey ed25519.PublicKey) error {
 	if len(publicKey) != ed25519.PublicKeySize {
 		return ErrNoPublicKey

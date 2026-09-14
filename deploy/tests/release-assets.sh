@@ -2,10 +2,10 @@
 # release-assets.sh — name the installer assets the signed release list has to
 # cover, and refuse to answer if they no longer match what the installer serves.
 #
-# The signed SHA256SUMS is both the verification list and the list of files a node
-# fetches from /install-assets/, so drifting from it is not harmless in either
-# direction: a signed path the web image does not serve stops the install with a
-# 404, and an asset that is served but not signed is placed on the node unverified.
+# The signed SHA256SUMS covers the union of files fetched by both init systems
+# from /install-assets/, so drifting from it is not harmless in either
+# direction: a required path the web image does not serve stops the install with a
+# 404, and an unsigned required asset must be rejected by the installer.
 #
 # Everything here is derived from deploy/remote/install-agent.sh and from git, so a
 # download added to the installer or a file added to a service tree fails this check
@@ -69,7 +69,7 @@ scattered="$(
 
 units=""
 for manager in systemd openrc; do
-  grep -q "install-assets/deploy/$manager/" "$installer" || continue
+  grep -q "download_install_asset \"deploy/$manager/" "$installer" || continue
   tree="$(printf '%s\n' "$signable" | grep "^deploy/$manager/" || true)"
   [ -n "$tree" ] || { printf '%s\n' "the installer downloads deploy/$manager but the release publishes none of it" >&2; exit 1; }
   units="$(printf '%s\n%s\n' "$units" "$tree" | grep -v '^$' | sort)"

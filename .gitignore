@@ -11,6 +11,9 @@
 /.stage/
 /coverage.out
 /dist/
+/release.key
+/release.key.pub
+/release.key.pub.pem
 /output/playwright/
 /output/imagegen/
 /.playwright-cli/

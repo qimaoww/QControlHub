@@ -7,6 +7,10 @@
 .stage
 .playwright-cli
 bin
+dist/agent-image
+release.key
+release.key.pub
+release.key.pub.pem
 data
 docs
 deploy/*

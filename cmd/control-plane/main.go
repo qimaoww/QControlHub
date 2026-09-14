@@ -145,9 +145,9 @@ func main() {
 			os.Exit(1)
 		}
 		if rawKey := strings.TrimSpace(os.Getenv("QCH_RELEASE_PUBLIC_KEY")); rawKey != "" {
-			publicKey, err := release.DecodePublicKey(rawKey)
+			publicKey, err := release.LoadPublicKey(rawKey)
 			if err != nil {
-				slog.Error("QCH_RELEASE_PUBLIC_KEY is not a raw-URL base64 Ed25519 public key", "error", err)
+				slog.Error("load QCH_RELEASE_PUBLIC_KEY", "error", err)
 				os.Exit(1)
 			}
 			if err := parsed.Verify(publicKey); err != nil {
