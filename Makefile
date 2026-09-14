@@ -3,14 +3,14 @@ SHELL := /bin/sh
 VERSION ?= dev
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
-.PHONY: build test release-checksums signing-key alpine-test alpine-agent-test upgrade-sandbox-test ss-rust-runtime-test vet fmt-check frontend-check pr-policy-test schema-policy-test installer-test agent-redeploy-test quick-start-test web-image-test docs-check check checks browser-checks non-browser-checks alpine-non-browser-checks init-env compose-config up dev-up down logs
+.PHONY: build test release-checksums signing-key check-install-assets alpine-test alpine-agent-test upgrade-sandbox-test ss-rust-runtime-test vet fmt-check frontend-check pr-policy-test schema-policy-test installer-test agent-redeploy-test quick-start-test web-image-test docs-check check checks browser-checks non-browser-checks alpine-non-browser-checks init-env compose-config up dev-up down logs
 
 # Non-Go checks. CI runs each group as its own task next to the Go test shards,
 # so keep the Go suite out of these targets.
 BROWSER_CHECK_TARGETS := frontend-check
-CHECK_TARGETS := fmt-check pr-policy-test schema-policy-test installer-test agent-redeploy-test quick-start-test docs-check vet
+CHECK_TARGETS := fmt-check pr-policy-test schema-policy-test installer-test agent-redeploy-test quick-start-test check-install-assets docs-check vet
 # Alpine validates the same checks without the Debian-only agent redeploy flow.
-ALPINE_CHECK_TARGETS := fmt-check pr-policy-test schema-policy-test installer-test quick-start-test docs-check vet
+ALPINE_CHECK_TARGETS := fmt-check pr-policy-test schema-policy-test installer-test quick-start-test check-install-assets docs-check vet
 # Alpine leaves internal/agent out of the package sweep and runs the OpenRC and
 # lifecycle regressions instead; the upgrade sandbox job covers the rest.
 ALPINE_AGENT_TESTS := go test ./internal/agent -run 'OpenRC|PerServiceManager|AgentUpgrade|ManagedCorePrerequisites|SystemBBR'
@@ -81,9 +81,14 @@ quick-start-test:
 #   make signing-key                     (once, on the release machine)
 #   make release-checksums RELEASE_KEY=release.key
 # The private key stays on the release machine; only dist/release/ is published.
+# The signed list is also the list of files a node downloads from
+# /install-assets/, so it has to name exactly what the web image serves: a listed
+# path that is not served fails the install with a 404, and a served asset that is
+# not listed is placed on the node unverified. deploy/tests/release-assets.sh
+# derives that file list from the installer and refuses to answer when the two
+# disagree, so a new download cannot quietly fall outside the signature.
 RELEASE_DIR ?= dist/release
 RELEASE_KEY ?= release.key
-INSTALLER_ASSETS ?= deploy examples/configs
 
 # One-time release keypair. Keep the private key on the release machine or in a
 # protected CI environment: a key that reaches the control plane would let whoever
@@ -94,12 +99,16 @@ signing-key: build
 	./bin/release-sign pubkey -public $(RELEASE_KEY).pub -out $(RELEASE_KEY).pub.pem
 	@printf '%s\n' 'publish $(RELEASE_KEY).pub.pem and set QCH_RELEASE_PUBLIC_KEY to it on each node'
 
-release-checksums: build
-	./bin/release-sign checksums -key $(RELEASE_KEY) \
-		-agent bin/qagent -assets $(INSTALLER_ASSETS) -out $(RELEASE_DIR)
+check-install-assets:
+	bash deploy/tests/release-assets.sh --check
+
+release-checksums: build check-install-assets
+	@assets="$$(bash deploy/tests/release-assets.sh --files | sed 's/^/-assets /' | tr '\n' ' ')" || exit 1; \
+	./bin/release-sign checksums -key $(RELEASE_KEY) -agent bin/qagent $$assets \
+		-out $(RELEASE_DIR) || exit 1; \
 	./bin/release-sign sign -key $(RELEASE_KEY) -release '$(VERSION)' \
 		-agent bin/qagent -agent-version '$(VERSION)' \
-		-assets $(INSTALLER_ASSETS) -out $(RELEASE_DIR)/release-manifest.json
+		$$assets -out $(RELEASE_DIR)/release-manifest.json
 
 web-image-test:
 	docker build --target qcontrol-web --build-arg VERSION='$(VERSION)' .

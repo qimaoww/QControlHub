@@ -11,7 +11,8 @@
 //
 //	release-sign keygen   [-private key.txt] [-public key.pub]
 //	release-sign sign     -key key.txt -release v1.2.3 -agent <file> -agent-version <label>
-//	                      -assets <dir> [-asset-root <dir>] [-out release-manifest.json]
+//	                      -assets <file> [-assets <file>...] [-asset-root <dir>]
+//	                      [-out release-manifest.json]
 //	release-sign verify   -manifest release-manifest.json [-key key.pub]
 package main
 
@@ -24,7 +25,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
@@ -69,14 +69,18 @@ func usage() {
 
   keygen  -private <path> [-public <path>]            generate an Ed25519 keypair
   sign    -key <path> -release <id> -agent <path>
-          -agent-version <label> -assets <dir>
+          -agent-version <label> [-assets <file>...]
           [-asset-root <dir>] [-out <path>]           build and sign a manifest
   verify  -manifest <path> [-key <path>]              verify a manifest
   pubkey  -public <path> [-out <path>]               convert the public key to
                                                       PEM for openssl pkeyutl
-  checksums -key <path> -agent <path> -assets <dir>
+  checksums -key <path> -agent <path> -assets <file>...
           [-asset-root <dir>] [-out <dir>]            write SHA256SUMS and its
                                                       signature for the installer
+
+Assets are named one file at a time: the signed list is also the list of files a
+node downloads, so it must name exactly what the web image serves. Generate it
+with deploy/tests/release-assets.sh, which derives the files from the installer.
 
 The private key never belongs on a control plane: ship only the public key and
 the signed manifest there.
@@ -124,15 +128,19 @@ func runSign(args []string) error {
 	releaseID := flags.String("release", "", "release identifier, usually a tag or commit (required)")
 	agentPath := flags.String("agent", "", "Agent executable to sign (required)")
 	agentVersion := flags.String("agent-version", "", "Agent version label bound into the manifest (required)")
-	assetsDir := flags.String("assets", "", "directory of installer assets to sign (required)")
-	assetRoot := flags.String("asset-root", "", "path prefix the assets are served under (default: the assets directory itself)")
+	var assetFiles stringList
+	flags.Var(&assetFiles, "assets", "installer asset file to sign (repeat for each; required)")
+	assetRoot := flags.String("asset-root", "", "directory the asset paths are written relative to (default: the current directory)")
 	outPath := flags.String("out", "release-manifest.json", "manifest output path")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
+	if err := rejectOperands("sign", flags.Args()); err != nil {
+		return err
+	}
 	for name, value := range map[string]string{
 		"-key": *keyPath, "-release": *releaseID, "-agent": *agentPath,
-		"-agent-version": *agentVersion, "-assets": *assetsDir,
+		"-agent-version": *agentVersion,
 	} {
 		if strings.TrimSpace(value) == "" {
 			return fmt.Errorf("sign requires %s", name)
@@ -143,7 +151,7 @@ func runSign(args []string) error {
 		return err
 	}
 
-	artifacts, err := collectArtifacts(*agentPath, *assetsDir, *assetRoot)
+	artifacts, err := collectArtifacts(*agentPath, assetFiles, *assetRoot)
 	if err != nil {
 		return err
 	}
@@ -255,14 +263,18 @@ func runChecksums(args []string) error {
 	flags := flag.NewFlagSet("checksums", flag.ContinueOnError)
 	keyPath := flags.String("key", "", "private key file (required)")
 	agentPath := flags.String("agent", "", "Agent executable to include (required)")
-	assetsDir := flags.String("assets", "", "directory of installer assets to include (required)")
-	assetRoot := flags.String("asset-root", "", "path prefix the assets are served under (default: the assets directory itself)")
+	var assetFiles stringList
+	flags.Var(&assetFiles, "assets", "installer asset file to include (repeat for each; required)")
+	assetRoot := flags.String("asset-root", "", "directory the asset paths are written relative to (default: the current directory)")
 	outDir := flags.String("out", ".", "directory to write SHA256SUMS and SHA256SUMS.sig into")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
+	if err := rejectOperands("checksums", flags.Args()); err != nil {
+		return err
+	}
 	for name, value := range map[string]string{
-		"-key": *keyPath, "-agent": *agentPath, "-assets": *assetsDir,
+		"-key": *keyPath, "-agent": *agentPath,
 	} {
 		if strings.TrimSpace(value) == "" {
 			return fmt.Errorf("checksums requires %s", name)
@@ -272,7 +284,7 @@ func runChecksums(args []string) error {
 	if err != nil {
 		return err
 	}
-	artifacts, err := collectArtifacts(*agentPath, *assetsDir, *assetRoot)
+	artifacts, err := collectArtifacts(*agentPath, assetFiles, *assetRoot)
 	if err != nil {
 		return err
 	}
@@ -304,7 +316,19 @@ func runChecksums(args []string) error {
 // collectArtifacts hashes the Agent binary and every installer asset. Both the
 // JSON manifest and the shell-consumable checksum list are built from this one
 // list, so the two can never describe different bytes.
-func collectArtifacts(agentPath, assetsDir, assetRoot string) ([]release.Artifact, error) {
+//
+// Assets are named as files rather than directories on purpose. The signed list
+// is also the list of files a node downloads, so it has to name exactly what the
+// web image serves: signing a directory would silently cover files the image
+// never ships (deploy/tests and friends), and every one of those becomes a 404
+// during install. deploy/tests/release-assets.sh derives the file list from the
+// installer for that reason.
+//
+// Asset paths are written relative to assetRoot, which defaults to the directory
+// the signer runs in. The installer verifies the list from the root it downloads
+// into (install-assets/ in the web image), so the release is signed from the
+// repository root and assetRoot is left alone.
+func collectArtifacts(agentPath string, assets []string, assetRoot string) ([]release.Artifact, error) {
 	agentInfo, err := os.Stat(agentPath)
 	if err != nil {
 		return nil, err
@@ -323,43 +347,45 @@ func collectArtifacts(agentPath, assetsDir, assetRoot string) ([]release.Artifac
 		Size:   int64(len(agentContent)),
 	}}
 
+	if len(assets) == 0 {
+		return nil, errors.New("at least one -assets file is required")
+	}
 	assetRootPath := assetRoot
 	if assetRootPath == "" {
-		assetRootPath = assetsDir
+		assetRootPath = "."
 	}
-	// Walk deterministically so the same inputs produce the same manifest.
-	var relativeAssets []string
-	err = filepath.WalkDir(assetRootPath, func(current string, entry fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if entry.IsDir() {
-			return nil
-		}
-		if !entry.Type().IsRegular() {
-			return fmt.Errorf("asset %s is not a regular file", current)
-		}
-		relative, err := filepath.Rel(assetRootPath, current)
+	assetRootPath = filepath.Clean(assetRootPath)
+
+	// Sort so the same inputs produce the same manifest.
+	sortedAssets := append([]string(nil), assets...)
+	sort.Strings(sortedAssets)
+	seenPaths := make(map[string]struct{}, len(sortedAssets))
+	for _, assetFile := range sortedAssets {
+		cleaned := filepath.Clean(assetFile)
+		fileInfo, err := os.Stat(cleaned)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		relativeAssets = append(relativeAssets, filepath.ToSlash(relative))
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	if len(relativeAssets) == 0 {
-		return nil, fmt.Errorf("no assets found under %s", assetRootPath)
-	}
-	sort.Strings(relativeAssets)
-	for _, relative := range relativeAssets {
+		if !fileInfo.Mode().IsRegular() {
+			return nil, fmt.Errorf("asset %s is not a regular file", cleaned)
+		}
+		relative, err := filepath.Rel(assetRootPath, cleaned)
+		if err != nil {
+			return nil, fmt.Errorf("asset %s cannot be written relative to the asset root %s: %w", cleaned, assetRootPath, err)
+		}
+		relative = filepath.ToSlash(relative)
+		// A path claimed twice would let one asset shadow another in the checksum
+		// list, so refuse to emit an ambiguous release.
+		if _, duplicate := seenPaths[relative]; duplicate {
+			return nil, fmt.Errorf("asset path %q is listed more than once", relative)
+		}
+		seenPaths[relative] = struct{}{}
 		// Reject a traversal-shaped name instead of emitting a path a client
 		// would resolve somewhere unexpected.
 		if strings.HasPrefix(relative, "../") || path.IsAbs(relative) || strings.Contains(relative, "/../") {
-			return nil, fmt.Errorf("asset path %q escapes the asset root", relative)
+			return nil, fmt.Errorf("asset path %q escapes the asset root %s", relative, assetRootPath)
 		}
-		content, err := os.ReadFile(filepath.Join(assetRootPath, filepath.FromSlash(relative)))
+		content, err := os.ReadFile(cleaned)
 		if err != nil {
 			return nil, err
 		}
@@ -414,4 +440,28 @@ func runPubkey(args []string) error {
 	fmt.Printf("wrote %s\n", *outPath)
 	fmt.Printf("installers verify the release signature with:\n  openssl pkeyutl -verify -pubin -inkey %s -rawin -in SHA256SUMS -sigfile SHA256SUMS.sig.bin\n", *outPath)
 	return nil
+}
+
+// stringList collects a flag that may be given more than once, so several asset
+// directories can be signed in one release.
+type stringList []string
+
+func (l *stringList) String() string { return strings.Join(*l, " ") }
+
+func (l *stringList) Set(value string) error {
+	*l = append(*l, value)
+	return nil
+}
+
+// rejectOperands turns a leftover positional argument into an error. Go's flag
+// package stops parsing at the first operand, so without this check an
+// accidentally split value (for example -assets deploy examples/configs, where
+// -assets takes one value) would silently discard every flag after it instead of
+// failing the release.
+func rejectOperands(command string, operands []string) error {
+	if len(operands) == 0 {
+		return nil
+	}
+	return fmt.Errorf("%s does not accept %s, and it stops flag parsing; pass one value per flag (repeat -assets for several directories)",
+		command, strings.Join(operands, " "))
 }
