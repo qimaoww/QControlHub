@@ -2188,7 +2188,10 @@ async function testLogPreferenceRestoreRuntime() {
 }
 
 try {
-  if (mode === "sharing" || mode === "sharing-mobile") {
+  if (mode.startsWith("dashboard")) {
+    const { testDashboardRuntime } = await import("./dashboard_browser_runtime.mjs");
+    await testDashboardRuntime(mode, new URLSearchParams(location.search).has("preview"));
+  } else if (mode === "sharing" || mode === "sharing-mobile") {
     const { testAgentSharingRuntime } = await import("./sharing_browser_runtime.mjs");
     await testAgentSharingRuntime();
   } else if (mode === "users" || mode === "users-mobile") {

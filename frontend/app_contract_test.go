@@ -257,6 +257,19 @@ func TestRefreshPathsUseStableViewsAndScopedCoordinators(t *testing.T) {
 			"data-dashboard-traffic-month",
 			"data-dashboard-traffic-dialog",
 			"trafficDetailsDialog.showModal()",
+			`can("panel-metrics.read")`,
+			"panelMetrics.mount()",
+			"orderNodesBySavedOrder(agents)",
+		},
+		"modules/panel-metrics.js": {
+			"createPoller({",
+			"createRefreshChannel({",
+			`api("/panel-metrics", { signal })`,
+			"!document.hidden",
+			`scope?.addEventListener("abort", stop`,
+			"state.session === session",
+			"reconcileView(root, template.content.firstElementChild)",
+			"刷新失败 · 保留上次数据",
 		},
 		"modules/traffic.js": {
 			"createPoller({",
@@ -383,7 +396,7 @@ func TestSidebarNavigationUsesWorkflowOrderAndResponsiveGrouping(t *testing.T) {
 	}
 	for _, required := range []string{
 		`const dockIcons = Object.freeze({`,
-		`["node-settings", "节点设置", dockIcons.server]`,
+		`["node-settings", "节点", dockIcons.server]`,
 		`["live-config", "配置", dockIcons.fileCode]`,
 		`["client-access", "客户端", dockIcons.monitorSmartphone]`,
 		`["substore-sync", "同步", dockIcons.refreshCw, true]`,

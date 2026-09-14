@@ -22,6 +22,7 @@ func TestManagementAPIRouteAuthorizationMatrix(t *testing.T) {
 	type route struct{ method, path string }
 	managementRoutes := []route{
 		{http.MethodGet, "/api/v1/overview"},
+		{http.MethodGet, "/api/v1/panel-metrics"},
 		{http.MethodGet, "/api/v1/agents"},
 		{http.MethodGet, "/api/v1/deployments"},
 		{http.MethodGet, "/api/v1/client-access"},
@@ -103,6 +104,7 @@ func TestManagementAPIRouteAuthorizationMatrix(t *testing.T) {
 		}
 	}
 	readonlyDenied := []route{
+		{http.MethodGet, "/api/v1/panel-metrics"},
 		{http.MethodGet, "/api/v1/traffic-endpoints/sync"},
 		{http.MethodDelete, "/api/v1/agents/agt_0123456789abcdef"},
 		{http.MethodPost, "/api/v1/agents/agt_0123456789abcdef/enrollment-token"},
@@ -125,6 +127,7 @@ func TestManagementAPIRouteAuthorizationMatrix(t *testing.T) {
 		}
 	}
 	operatorDenied := []route{
+		{http.MethodGet, "/api/v1/panel-metrics"},
 		{http.MethodDelete, "/api/v1/agents/agt_0123456789abcdef"},
 		{http.MethodPost, "/api/v1/agents/agt_0123456789abcdef/enrollment-token"},
 		{http.MethodPost, "/api/v1/agents/agt_0123456789abcdef/enrollment-command"},
@@ -141,6 +144,7 @@ func TestManagementAPIRouteAuthorizationMatrix(t *testing.T) {
 		}
 	}
 	auditorDenied := []route{
+		{http.MethodGet, "/api/v1/panel-metrics"},
 		{http.MethodPost, "/api/v1/tasks"},
 		{http.MethodGet, "/api/v1/tasks/tsk_test/config-snapshot"},
 		{http.MethodPost, "/api/v1/configs"},

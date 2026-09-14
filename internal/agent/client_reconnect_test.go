@@ -217,8 +217,9 @@ func TestRunWebSocketReleasesSaturatedQueue(t *testing.T) {
 				client := reconnectTestClient(t)
 				if producer == "queueMetrics" {
 					client.config.HeartbeatEvery, client.config.MetricsEvery = time.Hour, time.Millisecond
+					// Prime the shared collector through its public API. The
+					// producer starts enqueueing once a stable CPU window exists.
 					_, _ = client.metrics.Collect(context.Background())
-					client.metrics.previous.cpuAt = time.Now().Add(-time.Second)
 				}
 				body := newBlockedWebSocketBody(t)
 				client.http.Transport = reconnectTransport(func(request *http.Request) (*http.Response, error) {
