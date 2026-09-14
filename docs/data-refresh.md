@@ -80,6 +80,9 @@ snapshot is applied through the guarded live-config route.
   traffic. It keeps the active month picker and traffic detail modal intact.
   Showing the tab again restarts polling immediately; logging out, navigating
   away, or changing the render scope discards late responses.
+- Dashboard metric widths and month-axis columns are applied through CSSOM
+  after reconciliation, not inline HTML styles. Dashboard browser fixtures
+  enforce the production CSP read directly from `frontend/nginx.conf`.
 - Mutation notices use a fixed overlay and never scroll or shift the workspace.
 - Leaving node settings explicitly cancels pointer/FLIP state, removes its
   ghost, and discards queued callbacks from the departed page.

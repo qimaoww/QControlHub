@@ -7,6 +7,9 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = dirname(fileURLToPath(import.meta.url));
+const productionCSP = (await readFile(join(root, "nginx.conf"), "utf8"))
+  .match(/add_header Content-Security-Policy "([^"]+)" always;/)?.[1];
+assert.ok(productionCSP, "browser smoke must read the production content security policy");
 const html = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/assets/app.css"></head><body><div id="app"><div class="boot">测试载入中</div></div><script type="module" src="/assets/agents_browser_runtime.mjs"></script></body></html>`;
 
 const mime = (path) =>
@@ -20,9 +23,12 @@ const previewFlags = new Map();
 let presetCatalog;
 const server = createServer(async (request, response) => {
   try {
-    const path = new URL(request.url, "http://127.0.0.1").pathname;
+    const url = new URL(request.url, "http://127.0.0.1");
+    const path = url.pathname;
     if (process.env.QCH_BROWSER_SMOKE_DEBUG) process.stderr.write(`${path}\n`);
     if (path === "/" || path === "/agents-browser-smoke.html") {
+      if (url.searchParams.get("mode")?.startsWith("dashboard"))
+        response.setHeader("Content-Security-Policy", productionCSP);
       response.writeHead(200, { "Content-Type": mime(".html") });
       response.end(html);
       return;

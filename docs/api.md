@@ -143,8 +143,9 @@
 
 ### 面板主机资源
 
-`GET /api/v1/panel-metrics` 读取控制面每 2 秒采集的内存快照，不查询 PostgreSQL，
-不依赖已注册 Agent，也不写入节点指标历史。它需要独立的 `panel-metrics.read`：
+`GET /api/v1/panel-metrics` 读取控制面每 2 秒采集的内存快照。指标采集和读取本身不查询
+PostgreSQL，不依赖已注册 Agent，也不写入节点指标历史；具名账号仍沿用现有的数据库
+会话校验。它需要独立的 `panel-metrics.read`：
 管理员默认拥有；普通用户创建时默认不选中，只有管理员显式授予后才能读取。
 已有 `metrics.read` 和兼容 operator/auditor/readonly 令牌不会自动获得此能力。
 

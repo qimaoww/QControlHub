@@ -1291,7 +1291,7 @@ dialog.config-access-dialog::backdrop{background:rgba(17,20,36,.34);backdrop-fil
 .panel-metric-value small{margin-left:3px;color:var(--muted);font-size:calc(12px * var(--ui-font-scale));font-weight:600}
 .panel-metric.high .panel-metric-value{color:var(--red)}
 .panel-metric-track{height:4px;border-radius:4px;background:var(--surface-3);overflow:hidden}
-.panel-metric-track>span{display:block;height:100%;border-radius:inherit;background:var(--metric-color);transition:width var(--motion-base) var(--motion-ease-out),background var(--motion-base)}
+.panel-metric-track>span{display:block;width:0;height:100%;border-radius:inherit;background:var(--metric-color);transition:width var(--motion-base) var(--motion-ease-out),background var(--motion-base)}
 .panel-metric-detail{color:var(--muted);font-size:calc(10px * var(--ui-font-scale));line-height:1.5;overflow-wrap:anywhere}
 .panel-metric-network dl{display:grid;gap:8px;margin:0}
 .panel-metric-network dl>div{display:flex;align-items:baseline;justify-content:space-between;gap:8px}

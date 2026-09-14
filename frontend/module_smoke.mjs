@@ -3037,6 +3037,7 @@ try {
   assert.equal(dashboardMarkup.includes('data-dashboard-traffic-details'), true, "dashboard daily traffic opens from a dedicated action");
   assert.equal(dashboardMarkup.includes('data-dashboard-traffic-dialog'), true, "dashboard daily traffic is rendered in a modal dialog");
   assert.equal(dashboardMarkup.includes('class="dashboard-traffic-axis"'), true, "dashboard chart keeps dates on a stable external axis");
+  assert.doesNotMatch(dashboardMarkup, /\sstyle=/, "dashboard markup must respect the production CSP");
   assert.equal(dashboardMarkup.includes("31日"), true, "dashboard chart labels natural days explicitly");
   assert.equal(dashboardMarkup.includes('class="dashboard-month-picker"'), true, "dashboard uses a theme-native month picker");
   assert.equal(dashboardMarkup.includes('type="month"'), false, "dashboard does not open the browser-native month panel");

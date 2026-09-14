@@ -40,7 +40,7 @@ export function renderPanelMetrics(metrics, {
     return `<div class="panel-metric ${level}" data-panel-metric="${kind}">
       <div class="panel-metric-label">${icon(kind)}<span>${label}</span></div>
       <strong class="panel-metric-value" data-panel-value>${available ? `${value.toFixed(1)}<small>%</small>` : "—"}</strong>
-      <div class="panel-metric-track" aria-hidden="true"><span style="width:${available ? value.toFixed(1) : 0}%"></span></div>
+      <div class="panel-metric-track" aria-hidden="true"><span data-panel-usage="${available ? value.toFixed(1) : 0}"></span></div>
       <small class="panel-metric-detail">${esc(detail)}</small>
     </div>`;
   };
@@ -77,12 +77,21 @@ export function installPanelMetrics({ api, state, can, esc, bytes, rate }) {
     let disposed = false;
     const isCurrent = () => !disposed && root.isConnected && state.route === "dashboard" &&
       state.routeSignal === scope && state.navigationEpoch === epoch && state.session === session && !scope?.aborted;
+    // Production CSP rejects style attributes parsed from HTML. Apply the
+    // numeric widths through CSSOM after reconciliation, keeping that policy.
+    const paintUsage = () => {
+      root.querySelectorAll("[data-panel-usage]").forEach((bar) => {
+        const usage = Number(bar.dataset.panelUsage);
+        bar.style.width = `${finiteCounter(usage) ? clampPercent(usage) : 0}%`;
+      });
+    };
     const channel = createRefreshChannel({ isCurrent, getScope: () => state.navigationEpoch });
     const apply = (options) => {
       if (!isCurrent()) return;
       const template = document.createElement("template");
       template.innerHTML = render(options);
       reconcileView(root, template.content.firstElementChild);
+      paintUsage();
       bindRefresh();
     };
     const poller = createPoller({
@@ -123,6 +132,7 @@ export function installPanelMetrics({ api, state, can, esc, bytes, rate }) {
     document.addEventListener("visibilitychange", onVisibility);
     scope?.addEventListener("abort", stop, { once: true });
     bindRefresh();
+    paintUsage();
     void poller.trigger();
   };
   return { render, mount };

@@ -14,6 +14,8 @@ const waitFor = async (test, message) => {
 const GiB = 1024 ** 3;
 
 export async function testDashboardRuntime(mode, preview = false) {
+  const cspViolations = [];
+  document.addEventListener("securitypolicyviolation", (event) => cspViolations.push(event.effectiveDirective));
   const limited = mode === "dashboard-limited";
   const readonly = mode === "dashboard-readonly";
   const hasPanel = !limited && !readonly;
@@ -85,6 +87,10 @@ export async function testDashboardRuntime(mode, preview = false) {
   await waitFor(() => document.querySelector(".dashboard-workspace"), "dashboard did not render");
   const panel = () => document.querySelector("#panel-host");
   const cpu = () => panel()?.querySelector('[data-panel-metric="cpu"] [data-panel-value]');
+  const cpuFill = () => {
+    const track = panel().querySelector('[data-panel-metric="cpu"] .panel-metric-track');
+    return track.firstElementChild.getBoundingClientRect().width / track.getBoundingClientRect().width * 100;
+  };
   const reads = (path) => fixture.calls.filter((call) => call.path === path).length;
   assert(!document.body.textContent.includes("undefined"), "missing overview fields leaked into the page");
   if (!limited) {
@@ -114,6 +120,7 @@ export async function testDashboardRuntime(mode, preview = false) {
     panel().querySelector("[data-panel-metrics-refresh]").click();
     await waitFor(() => cpu()?.textContent === "23.6%", "first-sample failure did not recover");
   }
+  await waitFor(() => Math.abs(cpuFill() - 23.6) < 0.2, "CPU progress bar ignored its value under the production CSP");
   assert(document.querySelector("[data-dashboard-agent]")?.dataset.dashboardAgent === "tokyo", "dashboard ignored the saved node order");
   assert(document.querySelector(".recent-tasks").textContent.includes("香港 · HK-01"), "recent tasks did not show recognizable node names");
   const assertLayout = async () => {
@@ -149,6 +156,7 @@ export async function testDashboardRuntime(mode, preview = false) {
   fixture.metrics.cpu_percent = 92;
   panel().querySelector("[data-panel-metrics-refresh]").click();
   await waitFor(() => cpu()?.textContent === "92.0%", "manual panel refresh did not update");
+  await waitFor(() => Math.abs(cpuFill() - 92) < 0.2, "CPU progress bar did not refresh under the production CSP");
   assert(panel() === stablePanel && cpu() === stableCPU, "host refresh replaced stable metric elements");
   assert(picker.open, "host refresh closed the active month picker");
   assert(panel().querySelector('[data-panel-metric="cpu"]').classList.contains("high"), "high resource usage is not distinguished");
@@ -177,6 +185,7 @@ export async function testDashboardRuntime(mode, preview = false) {
   fixture.metrics.network_available = false;
   panel().querySelector("[data-panel-metrics-refresh]").click();
   await waitFor(() => cpu()?.textContent === "0.0%", "idle CPU did not recover as a real zero");
+  await waitFor(() => cpuFill() === 0, "idle CPU progress bar did not clear");
   assert(panel().querySelector('[data-panel-metric="memory"] [data-panel-value]').textContent === "—", "missing memory sample was rendered as zero");
   assert(panel().querySelector("[data-panel-rx]").textContent === "—", "missing network sample was rendered as zero");
   fixture.metrics.collected_at = new Date(Date.now() - 60000).toISOString();
@@ -215,6 +224,7 @@ export async function testDashboardRuntime(mode, preview = false) {
     await waitFor(() => reads("/panel-metrics") > beforeHidden, "visible dashboard did not resume polling");
   }
 
+  assert(cspViolations.length === 0, `dashboard violated the production CSP: ${cspViolations.join(", ")}`);
   let release;
   fixture.gate = new Promise((resolve) => { release = resolve; });
   const beforeGate = reads("/panel-metrics");
