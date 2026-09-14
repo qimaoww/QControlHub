@@ -315,7 +315,7 @@ docker compose ps
 
 ### 更新 Agent
 
-在线升级的校验、备份、异常恢复及覆盖范围见 [Agent 升级与恢复边界](agent-upgrade-lifecycle.md)。OU-SB 证书新导入使用 `/etc/qagent/sing-box/ou-sb/<摘要>/`，SS Rust ACL 使用对应的 `/etc/qagent/shadowsocks-rust/` 子目录，兼容旧 Agent 的只读沙箱。
+在线升级会核对候选程序的大小、SHA-256 与 ELF 架构，并在原进程的权限限制下运行 `upgrade-preflight`；准备失败保持旧程序不变，替换前保存 `.previous-<sha256>` 备份，结果写入失败或 `exec` 失败会回滚到校验通过的备份，确认丢失后重新建立连接也会完成待处理的重启。没有预检协议的旧程序不会被在线降级执行，需要人工回退。OU-SB 证书新导入使用 `/etc/qagent/sing-box/ou-sb/<摘要>/`，SS Rust ACL 使用对应的 `/etc/qagent/shadowsocks-rust/` 子目录，兼容旧 Agent 的只读沙箱。
 
 面板“升级 Agent”仍原子替换二进制并重启进程；新版二进制内置同一构建的内核安装脚本、systemd/OpenRC 模板和最小配置。升级后首次显式安装或导入内核时，Agent 将完整资源包按 SHA-256 摘要原子释放到 `/usr/local/lib/qagent/core-install/<摘要>/`，复用前逐文件核验内容、权限和所有权。这个目录位于已有 QAgent 服务的可写范围内，因此旧节点只需升级一次二进制，不要求重新部署或放宽服务权限。
 
@@ -344,8 +344,6 @@ sudo rm /var/lib/qcontrolhub/agent-state.json
 
 使用脚本的 `external` 模式，它会从终端读取 `QCH_DATABASE_URL` 并生成 `docker-compose.external.yml`：
 
-本地和远程数据库的性能优化、连接池参数及 schema 41 索引升级注意事项见 [本地与远程 PostgreSQL 性能](performance.md)。
-
 ```bash
 bash <(curl -fsSL "https://raw.githubusercontent.com/qimaoww/qcontrolhub/main/deploy/quick-start.sh") -m external
 ```
@@ -367,6 +365,10 @@ external 更新拒绝 `-d`、`-a`、`-n`、`-f` 配置变更参数，并逐字�
 更新前检查原连接串及 `/healthz`、`/readyz`，保存完整旧 Compose、`.env` 和正在使用的镜像；依次拉取 control-plane、qcontrol-web 的 `latest`，运行 `docker compose config --quiet`，然后 `up -d --force-recreate`，最后检查两个健康端点。拉取或配置校验失败时不重建原容器；重建或健康检查失败时恢复旧配置和旧镜像并重启原版本，恢复失败则保留回滚材料并报错。
 
 此回滚仅覆盖应用配置和镜像，不回滚数据库。脚本不执行数据库搬迁、清空或独立初始化命令；控制面原有的自动 schema 初始化/升级行为保持不变，因此首次安装空库仍然可用，但跨 schema 版本更新前必须备份并验证恢复方案。自定义 CA、挂载等站点配置应保留在独立 override，并由运维显式带入其部署命令；脚本不会自动合并任意站点 override。
+
+`QCH_DATABASE_URL` 中的 pgx 连接池参数会被保留，不再被控制面固定值覆盖，URI query 与 keyword DSN 都支持。默认值为 `pool_max_conns=20`、`pool_min_conns=2`（最大连接数为 1 时自动降为 1）、`pool_min_idle_conns=0`、`pool_max_conn_lifetime=30m`、`pool_max_conn_idle_time=5m`、`pool_health_check_period=30s`；最小连接数和最小空闲连接数不得超过最大连接数，生命周期、空闲超时和健康检查周期必须大于零。旧连接串填写过这些参数但此前未生效的，升级前应重新核对，原有的 `sslmode`、证书与鉴权参数必须保留。不要单纯调大连接数：它是每个控制面进程的上限，需要与 PostgreSQL `max_connections`、其他应用和数据库代理的限额共同核算。
+
+内核日志的存储与 IO 成本几乎线性取决于保留窗口内的行数，而 `core_logs` 是纯追加表，缩短保留期即可让旧行自然过期，不需要 `ALTER TABLE`、停机或搬运历史数据。保留期允许 `1|3|7|14|30` 天，默认 7 天，`off` 表示停止保存新日志（历史仍按保留期清理）；同一实例上 7 天约 250 万行 / 1.5 GB，30 天约 1070 万行 / 6.4 GB。Agent 侧还有 `core_log_minimum_level`（保存级别以下的日志不落库）与 `AgentCoreLogMaxMiB`／`AgentCoreLogRotateCount`（节点本地日志文件上限）：默认最低级别是 `debug`，即内核输出的每一行都入库，提到 `info` 或 `warning` 往往比调整保留期减少更多行数。这些都是运行时可调项而非 schema 变更，控制面启动时的清理任务会逐步收敛到新窗口，可以随时回退。
 
 ## 6. 监控建议
 

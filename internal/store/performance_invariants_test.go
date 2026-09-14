@@ -12,8 +12,8 @@ import (
 )
 
 // This file pins the storage-level properties the panel's throughput depends
-// on. Each of them was established by measurement (see docs/performance.md) and
-// each of them regresses silently: the queries keep returning correct rows
+// on. Each of them was established by measurement, and each of them regresses
+// silently: the queries keep returning correct rows
 // while doing hundreds of extra page reads, or a hot update quietly stops being
 // a heap-only update and starts rewriting every index that points at the row.
 //
