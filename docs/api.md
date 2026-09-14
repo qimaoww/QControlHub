@@ -276,7 +276,7 @@ schema 44 的策略响应增加 `accounting`：`source` 为 `core-api`、`nft-du
 新建或更新同步组使用 `{"display_name":"我的节点","sync_mode":"incremental","sync_format":"mihomo"}`。`sync_format` 仅接受 `url`、`mihomo`；创建时省略默认为 `url`，更新时省略保留原值。格式按组保存，与 `sync_mode` 的 `incremental`（保留远端手工节点）或 `managed`（以所选清单替换远端内容）独立。关联已有远端组的请求也接受 `sync_format`，不会改变所选节点与 IP 地址模式。
 
 - URL：使用现有客户端分享链接；Snell、Sudoku 等没有通用链接的协议保留可供 Sub-Store 解析的原生格式。
-- Mihomo：逐节点生成单行 YAML 代理映射，保留客户端凭据、Reality、TLS、传输层和协议参数，不复制服务端私钥或文件路径。不支持的安全选项（例如 Reality ML-DSA-65 校验）会明确报错并阻止同步，不自动删掉选项或回退到 URL。
+- Mihomo：逐节点生成单行 YAML 代理映射，保留客户端凭据、Reality、TLS、传输层和协议参数，不复制服务端私钥或文件路径。Mihomo 无法表达的 Reality ML-DSA-65 校验值不会写入映射，也不会因此让节点停止同步：该参数只在 Xray 客户端校验服务端证书，服务端启用它不影响不校验的客户端，需要校验的客户端可继续使用分享 URL 的 `pqv`。其余真正不兼容的协议或参数仍会明确报错并阻止同步，不静默降级。
 
 选择请求为 `{"target_id":"sst_…","selections":[{"config_id":"cfg_…","agent_id":"agt_…","engine":"mihomo","profile_tag":"ss-in","custom_name":"我的节点","address_mode":"both"}]}`。`address_mode` 可为 `auto`、`ipv4`、`ipv6`、`both`；双栈模式生成两条，IPv6 节点名追加 ` v6`。旧客户端省略 `config_id` 时，只能从当前可见部署解析并持久化准确 ID。运行请求为 `{"target_id":"sst_…"}`。
 
