@@ -318,7 +318,7 @@ function shell(content, title, { viewKey = state.route } = {}) {
   const pendingShares = (state.data.agentAccess?.shares || []).filter(share => share.enabled && share.status === "pending").length;
   const links = [
     ["dashboard", "总览", dockIcons.layoutDashboard],
-    ["node-settings", "节点设置", dockIcons.server],
+    ["node-settings", "节点", dockIcons.server],
     ["live-config", "配置", dockIcons.fileCode],
     ["client-access", "客户端", dockIcons.monitorSmartphone],
     ["substore-sync", "同步", dockIcons.refreshCw, true],
@@ -364,7 +364,7 @@ function shell(content, title, { viewKey = state.route } = {}) {
       : "";
   const topAction =
     state.route === "dashboard"
-      ? '<a class="button small" href="#node-settings">节点设置</a>'
+      ? (can("agents.read") ? '<a class="button small" href="#node-settings">节点设置</a>' : "")
       : state.route === "agents"
         ? ""
         : state.route === "node-settings"
@@ -489,8 +489,17 @@ function contextMarkup(title) {
     return `<div class="context-section-label"><span>用户</span><b>${(state.data.users || []).length}</b></div><nav class="context-list" aria-label="用户列表">${(state.data.users || []).map((user) => `<a href="#users" data-user-select="${esc(user.id)}" class="${user.id === state.data.userID ? "active" : ""}"><i class="status-dot ${user.disabled ? "" : "ok"}"></i><span><strong>${esc(user.display_name || user.username)}</strong><small>${esc(user.username)} · ${user.role === "admin" ? "管理员" : "用户"}</small></span></a>`).join("")}</nav>`;
   if (state.route === "my-quota")
     return '<nav class="context-menu" aria-label="个人账户"><a class="active" href="#my-quota">共享与额度</a></nav>';
-  if (state.route === "dashboard")
-    return `<nav class="context-menu" aria-label="总览目录"><a class="active" href="#summary"><span>01</span>运行概览</a><a href="#fleet"><span>02</span>节点状态</a><a href="#activity"><span>03</span>最近活动</a></nav><section class="context-metrics"><div><span>在线 / 全部节点</span><b>${state.data.overview?.agents_online || 0} / ${state.data.overview?.agents || 0}</b></div><div><span>节点版本 / 独立档案</span><b>${state.data.overview?.node_configs || 0} / ${state.data.overview?.configs || 0}</b></div><div><span>准备中 / 执行中</span><b>${state.data.overview?.tasks_queued || 0} / ${state.data.overview?.tasks_running || 0}</b></div></section>`;
+  if (state.route === "dashboard") {
+    const sections = [
+      ["summary", "运行概览", true],
+      ["panel-host", "面板主机", can("panel-metrics.read")],
+      ["traffic-usage", "节点流量", can("traffic.read")],
+      ["fleet", "节点状态", can("agents.read")],
+      ["activity", "最近任务", can("tasks.read")],
+    ].filter(([, , visible]) => visible);
+    const selected = sections.some(([id]) => id === state.anchor) ? state.anchor : "summary";
+    return `<nav class="context-menu" aria-label="总览目录">${sections.map(([id, label], index) => `<a${selected === id ? ' class="active" aria-current="location"' : ""} href="#${id}"><span>${String(index + 1).padStart(2, "0")}</span>${label}</a>`).join("")}</nav>`;
+  }
   if (state.route === "agents") {
     const items = orderNodesBySavedOrder(state.data.agents || []);
     return `<div class="context-section-label"><span>内核配置预设</span><b>${items.length}</b></div><nav class="context-list" aria-label="节点内核预设">${items.map((agent) => `<a class="${state.data.selectedAgent === agent.id ? "active" : ""}" href="#node-${esc(agent.id)}" data-context-agent="${esc(agent.id)}"><span class="context-engine">${(agent.capabilities || []).length}</span><span><strong>${esc(agent.name)}</strong><small>${esc(agent.os)} / ${esc(agent.arch)}</small></span><em>${agent.status === "online" ? "在线" : "离线"}</em></a>`).join("") || "<p>还没有节点</p>"}</nav>`;
@@ -620,6 +629,8 @@ const routeModuleNames = Object.freeze({
 const supportedRoutes = new Set(Object.keys(routeModuleNames));
 const routeAliases = Object.freeze({
   summary: "dashboard",
+  "panel-host": "dashboard",
+  "traffic-usage": "dashboard",
   fleet: "dashboard",
   activity: "dashboard",
   enrollment: "node-settings",

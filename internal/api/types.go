@@ -68,5 +68,7 @@ type Server struct {
 	sessionTTL                 time.Duration
 	connectionsMu              sync.Mutex
 	connections                map[string]liveConnection
+	panelMetricsMu             sync.RWMutex
+	panelMetrics               core.HostMetrics
 	auditWriter                func(context.Context, core.AuditLogEntry) error
 }
