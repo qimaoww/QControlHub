@@ -943,6 +943,14 @@ func (s *Server) getAgentKomari(w http.ResponseWriter, request *http.Request) {
 		writeJSON(w, http.StatusOK, result)
 		return
 	}
+	// A fresh cached resource answers without resolving the provider, so a
+	// temporarily misconfigured integration does not hide known traffic.
+	if node, fresh := s.freshKomariNode(agent.ID, uuid, time.Now()); fresh {
+		result.Server = ptr(node)
+		w.Header().Set("Cache-Control", "no-store")
+		writeJSON(w, http.StatusOK, result)
+		return
+	}
 	komariClient, clientErr := s.komariForRequest(request.Context(), s.configOwnerID(request) == "")
 	if clientErr != nil {
 		writeError(w, http.StatusServiceUnavailable, clientErr.Error())
@@ -950,12 +958,6 @@ func (s *Server) getAgentKomari(w http.ResponseWriter, request *http.Request) {
 	}
 	if komariClient == nil {
 		writeError(w, http.StatusServiceUnavailable, "Komari integration is not configured")
-		return
-	}
-	if node, fresh := s.freshKomariNode(agent.ID, uuid, time.Now()); fresh {
-		result.Server = ptr(node)
-		w.Header().Set("Cache-Control", "no-store")
-		writeJSON(w, http.StatusOK, result)
 		return
 	}
 	node, err := komariClient.GetNode(request.Context(), uuid)

@@ -133,6 +133,8 @@
 
 系统设置中的 `komari_url` 为 Komari 站点根地址，`komari_api_key` 可选；读取接口只返回掩码。节点的 Komari UUID 通过上面的节点接口保存。成功读取关联节点时，`GET /api/v1/agents/{id}/komari` 返回 Komari 的流量上限、按配置口径计算的 `server.traffic_used`（字节）及 `server.traffic_used_available`，并在 Komari 提供时返回 `effective_traffic_limit` / `traffic_reset_day`。前端按重置日显示实际周期日期范围，不把 `billing_cycle`（天）直接显示成“30 天”。
 
+控制面按节点缓存最近一次 Komari 响应 60 秒，并在 `GET /api/v1/agents` 中内联为 `komari` 字段，节点网格因此无需逐节点读取；列表读取不会等待 Komari，缓存过期时由后台刷新，期间继续返回上一次结果。换绑或清除 UUID 会立即丢弃该节点的缓存。`GET /api/v1/agents/{id}/komari` 在缓存新鲜时直接返回缓存值（不再依赖当前 Komari 配置是否可用），否则穿透读取并刷新缓存；响应中缺少 `komari` 字段的旧版控制面下，前端回退到逐节点读取。
+
 `GET /api/v1/agents/{id}/region` 优先返回节点的手动设置（`country_code` 和 `source: "manual"`）；否则只使用节点已验证的公网 IP，控制面向 GeoJS 查询国家/地区并缓存 48 小时（`source: "auto"`）。没有可用公网 IP 时返回空对象。前端通过同源接口读取 [lipis/flag-icons](https://github.com/lipis/flag-icons) 的统一 4:3 SVG 旗帜并由控制面缓存；该流程独立于 Komari 关联配置。
 
 旗帜目录包含 249 个 ISO 国家/地区代码。单张 SVG 的读取上限为 512 KiB，以兼容西班牙、玻利维亚、墨西哥、塞尔维亚和萨尔瓦多等包含复杂纹章的图片；超限或未通过现有 SVG 安全检查的响应不会缓存。可运行 `QCH_TEST_LIVE_REGION_FLAGS=1 go test ./internal/geoip -run '^TestFlagLiveCatalog$' -parallel 8 -count=1` 联网核对完整目录，常规测试使用本地响应，不依赖旗帜供应商。
