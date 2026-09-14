@@ -441,12 +441,42 @@ func (s *Server) listAgents(w http.ResponseWriter, request *http.Request) {
 		writeInternalError(w, err)
 		return
 	}
+	// Resolve regions before the metrics redaction below: automatic detection
+	// reads the public address out of those metrics.
+	s.resolveAgentRegions(request, agents)
 	if !s.sessionAllows(request, core.PermissionMetricsRead) {
 		for index := range agents {
 			agents[index].Metrics = core.HostMetrics{}
 		}
 	}
 	writeJSON(w, http.StatusOK, agents)
+}
+
+// resolveAgentRegions attaches the display region to every node in a list
+// response, so a node grid renders its flags without one request per card.
+// Manual preferences always win; automatic detection reuses the GeoIP client's
+// cache, and a provider failure only leaves that node without a flag instead of
+// failing the whole page.
+func (s *Server) resolveAgentRegions(request *http.Request, agents []core.Agent) {
+	auto := s.sessionAllows(request, core.PermissionMetricsRead)
+	for index := range agents {
+		if code := store.AgentRegionCode(agents[index]); code != "" {
+			agents[index].RegionCode = code
+			continue
+		}
+		if !auto {
+			continue
+		}
+		address := agentGeoIP(agents[index])
+		if !address.IsValid() {
+			continue
+		}
+		region, err := s.geoip.Lookup(request.Context(), address)
+		if err != nil {
+			continue
+		}
+		agents[index].RegionCode = region.ISOCode
+	}
 }
 
 func (s *Server) redactAgentMetrics(request *http.Request, agent *core.Agent) {

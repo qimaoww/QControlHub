@@ -80,7 +80,9 @@ const populatedAgents = [
       collected_at: "2026-08-30T09:00:00Z",
     },
   },
-  onlineAgent("bravo"),
+  // The control plane resolves automatic GeoIP in the node list, so this node
+  // carries the code and must not need a per-node lookup request.
+  { ...onlineAgent("bravo"), region_code: "SG" },
   { ...onlineAgent("charlie"), status: "offline" },
   onlineAgent("delta", []),
 ];
@@ -592,6 +594,22 @@ async function testAdminRuntime() {
   assert.equal(alphaAvatar.classList.contains("has-region"), true);
   assert.equal(alphaAvatar.title, "中国台湾 (TW) · 点击选择国家/地区旗帜");
   assert.equal(alphaAvatar.getAttribute("aria-label"), "选择国家/地区旗帜：中国台湾 (TW)");
+  // A node whose region the list already resolved renders its flag without a
+  // per-node lookup; that is what keeps a node grid from costing one request
+  // per card on a link where a single read takes about a second.
+  await waitFor(() => {
+    const flag = document.querySelector(
+      '[data-agent-node="bravo"] [data-region-avatar] img[src="/api/v1/region-flags/sg"]',
+    );
+    return flag?.complete && flag.naturalWidth > 0 ? flag : null;
+  }, "节点列表内联地区没有渲染旗帜");
+  assert.equal(
+    testAPI.calls.some(
+      (call) => call.method === "GET" && call.path === "/agents/bravo/region",
+    ),
+    false,
+    "列表已解析地区的节点不应再逐节点查询地区",
+  );
   assert.equal(document.querySelector(".node-card-komari"), null, "Komari 不应再渲染为独立卡片");
   assert.ok(
     komariInline.closest(".node-card-network").querySelector("[data-metric-text=download-rate]"),
@@ -909,6 +927,7 @@ async function testAdminRuntime() {
   const agentPollsBefore = callsFor("/agents");
   const overviewCallsBefore = callsFor("/overview");
   const enrollmentCallsBefore = callsFor("/enrollment-tokens");
+  const komariReadsBefore = callsFor("/agents/alpha/komari");
   const alphaCard = document.querySelector('[data-agent-metrics="alpha"]');
   const singBoxChip = alphaCard.querySelector(".service-sing-box");
   const singBoxService = singBoxChip.querySelector('[data-core-service="sing-box"]');
@@ -947,6 +966,11 @@ async function testAdminRuntime() {
     callsFor("/enrollment-tokens"),
     enrollmentCallsBefore,
     "指标 poll 不应重复加载 enrollment history",
+  );
+  assert.equal(
+    callsFor("/agents/alpha/komari"),
+    komariReadsBefore,
+    "重建节点卡片不应重复读取 Komari 月流量",
   );
   assert.equal(
     document.querySelector("#batch-form"),

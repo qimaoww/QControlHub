@@ -18,6 +18,7 @@ import "./users_smoke.mjs";
 import "./account_storage_smoke.mjs";
 import "./node_order_smoke.mjs";
 import "./panel_metrics_smoke.mjs";
+import "./panel_reads_smoke.mjs";
 
 import {
   agentStructureSignature,

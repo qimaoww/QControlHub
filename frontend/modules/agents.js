@@ -726,11 +726,30 @@ export function installAgents(ctx) {
     card.classList.remove("unavailable");
   };
   const loadRegionDisplay = createRegionDisplay(ctx);
+  // Komari resolves through an external provider, so each node's monthly
+  // traffic is read at most once per account session: a rebuilt card reuses the
+  // cached link instead of repeating a round trip that costs about a second.
   const loadKomariDisplay = (agent, root) => {
-    if (!komariUUIDFor(agent) || !root) return;
+    const uuid = komariUUIDFor(agent);
+    if (!uuid || !root) return;
+    const cache = (state.data.agentKomari ||= {});
+    const known = cache[agent.id];
+    if (known?.uuid === uuid) {
+      if (known.ready) updateKomariDisplay(root, known.link, known.error);
+      return;
+    }
+    const entry = { uuid, ready: false, link: null, error: "" };
+    cache[agent.id] = entry;
     api(`/agents/${encodeURIComponent(agent.id)}/komari`)
-      .then((link) => updateKomariDisplay(root, link))
-      .catch((error) => updateKomariDisplay(root, null, error?.message || "Komari 读取失败"));
+      .then((link) => {
+        entry.ready = true;
+        entry.link = link;
+        updateKomariDisplay(root, link);
+      })
+      .catch((error) => {
+        if (cache[agent.id] === entry) delete cache[agent.id];
+        updateKomariDisplay(root, null, error?.message || "Komari 读取失败");
+      });
   };
   const cardIPRow = (row) => {
     const value = row.value || "";

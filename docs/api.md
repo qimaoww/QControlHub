@@ -53,7 +53,7 @@
 | `POST` | `/api/v1/users/{id}/purge` | 永久删除账号，仅管理员，返回 `204`；节点（含隐藏节点）、配置、模板、任务历史与内核归属转入管理员范围，旧安装凭据吊销、未完成任务作废，共享与个人设置删除；管理员账号、当前会话与不存在的账号返回 `409` / `409` / `404`，并发共享变化返回 `409`，刷新后重试 |
 | `GET` / `PUT` | `/api/v1/users/{id}/agent-access` | 读取 / 保存 Agent 分配，仅管理员 |
 | `GET` / `PUT` | `/api/v1/agents/{id}/sharing` | 所有者按准确用户名读取 / 保存共享端口及累计额度，携带 revision（agents.manage） |
-| `GET` | `/api/v1/agents` | 列出未撤销 Agent |
+| `GET` | `/api/v1/agents` | 列出未撤销 Agent；每项内联 `region_code`（手动设置优先，否则为自动识别结果），列表视图无需逐节点查询地区 |
 | `GET` | `/api/v1/system-tcp/parameters` | BBR / TCP 调优字段与取值范围（agents.read） |
 | `GET` | `/api/v1/system-tcp/tasks` | 每个节点最新的 TCP 调优任务（tasks.read，可按 agent_id 筛选） |
 | `DELETE` | `/api/v1/agents/{id}` | 永久撤销 Agent、立即断开 WSS 并终止其未完成任务 |
@@ -138,6 +138,8 @@
 旗帜目录包含 249 个 ISO 国家/地区代码。单张 SVG 的读取上限为 512 KiB，以兼容西班牙、玻利维亚、墨西哥、塞尔维亚和萨尔瓦多等包含复杂纹章的图片；超限或未通过现有 SVG 安全检查的响应不会缓存。可运行 `QCH_TEST_LIVE_REGION_FLAGS=1 go test ./internal/geoip -run '^TestFlagLiveCatalog$' -parallel 8 -count=1` 联网核对完整目录，常规测试使用本地响应，不依赖旗帜供应商。
 
 在节点设置中点击旗帜可搜索、选择国家/地区；保存后节点设置及客户端卡片左上角使用同一旗帜。`PUT /api/v1/agents/{id}/region` 接收 `{"country_code":"SG"}`，代码由 `/api/v1/regions` 提供，保存时去除首尾空格并转大写；`{"country_code":""}` 清除手动设置并恢复自动识别。缺少字段、`null` 或不支持的代码返回 400。设置持久化为节点的 `region_code` 标签，重连后保留，不修改其他标签、公网 IP 或客户端连接配置。只读用户只能查看；写入沿用管理权限、CSRF 和审计保护。
+
+`GET /api/v1/agents` 已内联同一解析结果，因此节点网格、客户端卡片等列表视图不再逐节点调用 `GET /api/v1/agents/{id}/region`；该接口保留给单节点的旗帜详情，以及旧版控制面（响应中缺少 `region_code`）的前端回退路径。
 
 `GET /api/v1/overview` 中的 `configs` 只统计可在“配置档案”工作区跨节点下发的全局配置；`node_configs` 单独统计绑定到具体 Agent/内核的节点配置，避免将两类配置混为一个不可解释的总数。为兼容既有调用方，`tasks_pending` 仍表示 `pending + running` 的活动任务总数；`tasks_queued` 和 `tasks_running` 分别给出排队与执行中的精确数量。
 
