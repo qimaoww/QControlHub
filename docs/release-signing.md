@@ -59,6 +59,8 @@ docker build --target qcontrol-web \
 
 **版本一致性**：`release-checksums` 把 `VERSION` 同时写进 `-release` 与 `-agent-version`，而控制面把自身构建版本通过已认证的 WSS 策略下发给 Agent。升级时 Agent 要求签名清单里的 Agent 版本**等于**面板版本，否则拒绝安装。这样“面板版本”与“Agent 版本”由签名绑定在一起，控制面无法一边声称版本 1.2.3、一边下发别的构建。
 
+> `qcontrol-web` 阶段会无条件 `COPY dist/release/SHA256SUMS`，所以**必须有签名产物才能构建 web 镜像**。全新检出直接 `docker build --target qcontrol-web .` 会因缺文件失败：先跑一次 `make release-checksums`（本地测试可用一次性密钥），或在 CI 中让签名 job 先产出 `dist/release/`。`dist/` 已被 gitignore，不要提交。
+
 ## 4. 在 GitHub Actions 里签名
 
 私钥放**环境级** secret，而不是仓库级：环境可以要求人工审批，并限制只有 tag 能触发，于是改了 workflow 也拿不到密钥。
