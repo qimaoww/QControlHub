@@ -62,7 +62,7 @@ export function renderEmbeddedPreset(host, markup, { viewKey, commonFields = [],
 
 export function bindConfigInbounds(ctx) {
   const { state, api, can, esc, engineName, notify, confirmAction, agent, engine, saved, workspace,
-    form, files, selection, container, sourceMode, sourceContent, mountEditor, onSaved, onRefresh, renderConfigDiff } = ctx;
+    form, files, selection, container, sourceMode, sourceContent, mountEditor, beforeDeploy, onSaved, onRefresh, renderConfigDiff } = ctx;
   if (!container) return;
   const data = state.data, epoch = state.navigationEpoch;
   const current = () => state.data === data && state.navigationEpoch === epoch && container.isConnected &&
@@ -96,7 +96,7 @@ export function bindConfigInbounds(ctx) {
     </div>`;
   navigation.append(menu);
   bindConfigMenu(menu);
-  bindConfigOutbounds({ navigation, api, agent, engine, saved, current, dirty, writable, notify, confirmAction, onSaved, state, selectedInbound:target, input, canReadPeers:can("client-access.read") });
+  bindConfigOutbounds({ navigation, api, agent, engine, saved, current, dirty, writable, notify, confirmAction, beforeDeploy, onSaved, state, selectedInbound:target, input, canReadPeers:can("client-access.read") });
   // Adding an inbound is independent of the selected file. Keep one persistent
   // button directly before merged preview, never inside the common-field menu.
   let sourceActions = form?.querySelector(".config-file-actions");
@@ -251,6 +251,12 @@ export function bindConfigInbounds(ctx) {
             opened.dataset.saving = "1";
             buttons.forEach(item => { item.disabled = true; });
             try {
+              if (button.dataset.deleteIntent === "deploy" && beforeDeploy) {
+                body.querySelector("[data-inbound-error]").textContent = "正在核验 Agent 当前配置…";
+                await beforeDeploy();
+                if (!active()) return;
+                body.querySelector("[data-inbound-error]").textContent = "";
+              }
               const result = await api(`${base}/server-inbounds`, {method:"POST", body:JSON.stringify({
                 operation:"delete", original_tag:chosen.tag, input:{tag:chosen.tag, port:chosen.port}, expected_version:fresh.config.version,
                 name:fresh.config.name, description:fresh.config.description, intent:button.dataset.deleteIntent,
@@ -259,12 +265,13 @@ export function bindConfigInbounds(ctx) {
             } catch (error) {
               if (!active()) return;
               body.querySelector("[data-inbound-error]").textContent = `${error.message}${error.status === 409 || !error.status ? " 请重新读取核对配置后再提交。" : ""}`;
-              if (error.status && error.status < 500 && error.status !== 409) buttons.forEach(item => { item.disabled = false; });
+              if (error.deployPreflight || error.status && error.status < 500 && error.status !== 409)
+                buttons.forEach(item => { item.disabled = false; });
             } finally { delete opened.dataset.saving; }
           };
         });
       } else {
-        editor = mountEditor({ root:body, kind, isCurrent:active, onSaved:commit }, fresh, kind === "add" ? null : chosen);
+        editor = mountEditor({ root:body, kind, isCurrent:active, beforeDeploy, onSaved:commit }, fresh, kind === "add" ? null : chosen);
         await editor.ready;
       }
     } catch (error) {

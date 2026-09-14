@@ -604,22 +604,42 @@ func (s *Server) listTasks(w http.ResponseWriter, request *http.Request) {
 	writeJSON(w, http.StatusOK, tasks)
 }
 
+// Automatic page entry may reuse an already validated encrypted task snapshot.
+// Deployment preflight deliberately omits prefer_cached. It is an early drift
+// check, not an atomic compare-and-swap of the Agent's configuration.
+const automaticConfigReadCacheTTL = 600 * time.Second
+
 func (s *Server) createTask(w http.ResponseWriter, request *http.Request) {
-	var input core.TaskRequest
+	var input struct {
+		core.TaskRequest
+		PreferCached bool `json:"prefer_cached,omitempty"`
+	}
 	if err := decodeJSON(w, request, &input, 64<<10); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if input.PreferCached && input.Action != core.ActionReadConfig && input.Action != core.ActionReadManagedConfig {
+		writeError(w, http.StatusBadRequest, "prefer_cached is only supported for configuration read tasks")
 		return
 	}
 	if input.Action.SystemBBR() && !s.authorizeSystemBBR(w, request, input.AgentID) {
 		return
 	}
-	task, err := s.store.CreateTask(request.Context(), input)
+	var task core.Task
+	var err error
+	if input.PreferCached {
+		task, err = s.store.CreateTaskWithReadCache(request.Context(), input.TaskRequest, automaticConfigReadCacheTTL)
+	} else {
+		task, err = s.store.CreateTask(request.Context(), input.TaskRequest)
+	}
 	if err != nil {
 		writeStoreError(w, err)
 		return
 	}
 	task.ConfigContent = ""
-	s.recordAudit(request, "task.created", task.ID, string(task.Action)+" "+string(task.Engine)+" "+task.AgentID)
+	if !(task.Reused && task.Status == core.TaskSucceeded) {
+		s.recordAudit(request, "task.created", task.ID, string(task.Action)+" "+string(task.Engine)+" "+task.AgentID)
+	}
 	status := http.StatusCreated
 	if task.Reused {
 		status = http.StatusOK

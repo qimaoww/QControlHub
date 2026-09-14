@@ -22,7 +22,7 @@ async function fixture(engine, options = {}) {
     can_manage:options.shared !== true, capabilities:options.multi ? ["mihomo", engine] : [engine], features:["managed-config-read-v1", "independent-egress-v1",
       ...(options.legacy ? [] : ["preset-auto-install-v1"])],
     runtime:{...(options.multi ? {mihomo:{installed:false}} : {}), [engine]:{installed:!options.missing, version:"test-development", existing_config_available:Boolean(options.import)}}};
-  const test = {writes:[], calls:[], notices:[], confirmations:[], confirm:false, serial:0, fail:false, gate:null, taskStatus:"pending"};
+  const test = {writes:[], calls:[], readRequests:[], notices:[], confirmations:[], confirm:false, serial:0, fail:false, gate:null, taskStatus:"pending"};
   let inbounds = options.missing || options.emptyInbounds ? [] : ["first", "second"].map((tag, index) => ({...basePlan, tag, port:21001+index}));
   const primaryField = engine === "ss-rust" ? "timeout" : engine === "mihomo" ? "log-level" : "log";
   const secondaryField = engine === "xray" ? "stats" : engine === "sing-box" ? "experimental" : "mode";
@@ -50,9 +50,10 @@ async function fixture(engine, options = {}) {
         ...inbounds.map(item=>({tag:`qch-trf-${item.port}-abcdef012345`, protocol:"freedom", type:"direct"}))]})});
   const content = () => JSON.stringify(root(), null, 2);
   let saved = options.missing && !options.savedMissing ? null : {id:"cfg", agent_id:agent.id, engine, name:"配置", version:1, content:content()};
+  let agentContent = saved ? options.drift ? saved.content + "\n# node-only" : saved.content : "";
   const state = {route:"live-config", navigationEpoch:1, routeSignal:controller.signal,
     session:{role:options.shared ? "user" : "admin"}, data:{liveAgent:agent.id, liveEngine:options.multi ? "" : engine, liveConfigSource:options.import ? "import" : "",
-      liveSources:saved ? {[`node|${engine}${options.import ? "|import" : ""}`]:{content:options.drift ? saved.content + "\n# node-only" : saved.content}} : {}}};
+      liveSources:saved ? {[`node|${engine}${options.import ? "|import" : ""}`]:{content:agentContent, agentContent}} : {}}};
   const tasks = new Map();
   const workspace = () => ({agent:structuredClone(agent), config:saved && {...saved, version:saved.version+(test.stale?1:0)},
     engine, inbounds:structuredClone(options.native ? [] : inbounds),
@@ -88,6 +89,13 @@ async function fixture(engine, options = {}) {
     if (path.includes("/revisions/")) return {...saved, content:"{}"};
     if (path.includes("/revisions")) return [{...saved, updated_at:new Date().toISOString()}];
     if (path === "/deployments") return [{agent_id:agent.id, engine, config_id:"cfg", config_version:1}];
+    if (request.method === "POST" && path === "/tasks") {
+      assert(body.action === "read-managed-config" || body.action === "read-config", "deploy preflight created a non-read task");
+      test.readRequests.push(body);
+      const task = {id:`read-${++test.serial}`, action:body.action, engine, status:"succeeded", snapshot:agentContent};
+      tasks.set(task.id, task);
+      return task;
+    }
     if (request.method === "POST" && path.endsWith("/source")) {
       if (test.gate) await test.gate;
       if (test.sourceFailure) throw Object.assign(new Error("fixture source save failed"), test.sourceFailure);
@@ -130,6 +138,8 @@ async function fixture(engine, options = {}) {
     }
     if (path.startsWith("/tasks/")) {
       const task = tasks.get(path.split("/")[2].split("?")[0]);
+      if (path.endsWith("/config-snapshot")) return {content:task?.snapshot || ""};
+      if (task?.action === "deploy" && test.taskStatus === "succeeded") agentContent = saved.content;
       return {...task, status:test.taskStatus};
     }
     throw new Error(`Unexpected fixture API: ${path}`);
@@ -166,6 +176,7 @@ async function fixture(engine, options = {}) {
   };
   const dispose = () => { controller.abort(); state.data = {}; };
   Object.assign(test, {state, agent, pages, click, common, select, selectCommon, reenter, dispose,
+    setAgentContent:value=>{agentContent=value;},
     primaryField, secondaryField, extraField, saved:()=>saved});
   return test;
 }
@@ -342,6 +353,8 @@ export async function testConfigInboundsRuntime(preview = false) {
   await waitFor(()=>document.querySelector("#server-plan-form"), "background fixture did not open");
   document.querySelector("[data-plan-intent=deploy]").click();
   await waitFor(()=>background.writes.length === 1 && !document.querySelector("dialog"), "background deployment not submitted");
+  assert(background.readRequests.length === 1 && background.readRequests[0].prefer_cached === undefined,
+    "deployment preflight reused the 600-second display cache");
   background.select("first"); background.click("delete");
   await waitFor(()=>document.querySelector("[data-delete-intent]"), "delete fixture did not open");
   const workspaceReads = background.calls.filter(call=>call.path.endsWith("/workspace")).length;
@@ -350,6 +363,22 @@ export async function testConfigInboundsRuntime(preview = false) {
   assert(background.calls.filter(call=>call.path.endsWith("/workspace")).length === workspaceReads,
     "background deployment invalidated the open delete dialog");
   background.dispose();
+  const deployConflict = await fixture("xray");
+  deployConflict.confirm = true;
+  deployConflict.click("add");
+  await waitFor(()=>document.querySelector("#server-plan-form"), "deploy-conflict fixture did not open");
+  const conflictForm = document.querySelector("#server-plan-form");
+  conflictForm.elements.tag.value = "keep-conflicting-draft";
+  deployConflict.setAgentContent(deployConflict.saved().content + "\n");
+  conflictForm.querySelector("[data-plan-intent=deploy]").click();
+  await waitFor(()=>document.querySelector("dialog [data-preset-status]")?.textContent.includes("部署前核验发现"),
+    "changed Agent configuration did not stop deployment");
+  assert(deployConflict.writes.length === 0 && document.querySelector("dialog[open]") &&
+    conflictForm.elements.tag.value === "keep-conflicting-draft",
+    "deployment conflict saved data, closed the draft, or lost its input");
+  assert(deployConflict.readRequests.length === 1 && deployConflict.readRequests[0].prefer_cached === undefined,
+    "deployment conflict was checked through a cached read");
+  deployConflict.dispose();
   const stale = await fixture("xray");
   let release;
   stale.workspaceGate = new Promise(resolve=>{release=resolve;});

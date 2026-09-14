@@ -362,6 +362,25 @@ export function liveConfigReadAction({
   return existingAvailable ? "" : "read-config";
 }
 
+function deployPreflightError(message) {
+  const error = new Error(message);
+  error.deployPreflight = true;
+  return error;
+}
+
+export function assertAgentConfigBaseline(expected, actual) {
+  if (typeof expected !== "string") {
+    throw deployPreflightError(
+      "部署前没有可核验的 Agent 配置基线，已停止保存和部署。请先重新读取节点配置。",
+    );
+  }
+  if (actual !== expected) {
+    throw deployPreflightError(
+      "部署前核验发现 Agent 当前配置已在页面读取后发生变化，已停止保存和部署。当前草稿已保留，请重新读取节点配置并合并修改。",
+    );
+  }
+}
+
 export async function submitLiveConfigChange({
   api,
   submitTask,
@@ -372,6 +391,7 @@ export async function submitLiveConfigChange({
   source,
   existingAvailable,
   savedConfig,
+  beforeDeploy,
   onDeployTask,
   onSavedConfig,
 }) {
@@ -383,6 +403,10 @@ export async function submitLiveConfigChange({
   });
   if (intent === "import" && !editor.content)
     throw new Error("待迁移的原始节点快照已失效，请重新读取");
+  // A managed configuration can be cached for fast page entry, but deployment
+  // must never persist a draft or enqueue a task until a fresh Agent read has
+  // been compared with the exact baseline that the editor was opened from.
+  if (intent === "deploy") await beforeDeploy?.();
   let saved = savedConfig;
   if (
     !existingAvailable ||
@@ -440,6 +464,18 @@ export async function submitLiveConfigChange({
   });
   if (!task?.id) throw new Error("迁移任务未创建");
   return { saved, content: editor.content, task };
+}
+
+const liveConfigSnapshotCacheTTL = 600 * 1000;
+
+export function liveConfigSnapshotReusable(source, now = Date.now()) {
+  if (!source || source.saved || source.reading || source.error) return true;
+  const readAt = Number(source.readAt);
+  // Entries created by an older frontend build have no timestamp. They exist
+  // only in volatile page state and disappear on the build reload; retaining
+  // them avoids treating an in-flight upgrade as a configuration conflict.
+  if (!Number.isFinite(readAt)) return true;
+  return now - readAt < liveConfigSnapshotCacheTTL;
 }
 
 export function installConfigPages(ctx) {
@@ -900,6 +936,7 @@ async function renderAgentConfig({ workspace: loadedWorkspace } = {}) {
     base,
     engineInstalled,
     canAutoInstall,
+    beforeDeploy: host?.beforeDeploy,
     host,
     root,
     request,
@@ -1348,7 +1385,14 @@ function bindAgentConfigPage(ctx, fieldsOnly = false) {
           "删除通用配置项",
         ))) return;
         if (!current() || !formElement.isConnected) return;
+        if (intent === "deploy" && ctx.beforeDeploy) {
+          showStatus("正在核验 Agent 当前配置…");
+          if (submitter) submitter.textContent = "正在核验…";
+          await ctx.beforeDeploy();
+          if (!current() || !formElement.isConnected) return;
+        }
         showStatus("正在保存配置并创建任务…");
+        if (submitter) submitter.textContent = "正在保存…";
         let result;
         let input;
         if (isPlan) {
@@ -1428,11 +1472,11 @@ function bindAgentConfigPage(ctx, fieldsOnly = false) {
             operationFor(operationKey).reload = true;
             renderPresetStatus();
           } else {
-            const uncertain = !error.status || error.status >= 500;
-            showStatus(error.status === 409
+            const uncertain = !error.deployPreflight && (!error.status || error.status >= 500);
+            showStatus(error.deployPreflight ? error.message : error.status === 409
               ? `配置或节点状态已变化：${error.message}。草稿已保留，请重新加载后再编辑。`
               : uncertain ? `未能确认保存结果：${error.message}。草稿已保留，请重新加载核对版本后再提交。` : error.message, "error");
-            if (error.status === 409 || uncertain) {
+            if (!error.deployPreflight && (error.status === 409 || uncertain)) {
               operationFor(operationKey).reload = true;
               renderPresetStatus();
             }
@@ -1515,7 +1559,8 @@ function mountPresetEditor(host, workspace, chosen) {
   };
 }
 
-async function liveConfig() {
+async function liveConfig(options = {}) {
+  const preferCachedRead = options.preferCachedRead !== false;
   const request = ++liveConfigRequest;
   const privateAccount = Boolean(state.session && state.session.role !== "admin");
   const accountData = state.data;
@@ -1618,12 +1663,49 @@ async function liveConfig() {
   });
   const sourceKey = liveSourceKey(agent.id, engine, sourceMode);
   state.data.liveSources ||= {};
+  if (!liveConfigSnapshotReusable(state.data.liveSources[sourceKey]))
+    delete state.data.liveSources[sourceKey];
   const source = privateWorkspace
     ? { content: saved?.content || (engine === "mihomo" ? "listeners: []\nrules:\n  - MATCH,DIRECT\n" : "{}\n") }
     : state.data.liveSources[sourceKey] || (emptyManaged ? {
       content: saved?.content || (engine === "mihomo" ? "listeners: []\nrules:\n  - MATCH,DIRECT\n" : "{}\n"),
       saved: true,
     } : null);
+  const beforeDeploy = !privateWorkspace && sourceMode === "managed" && managedAvailable
+    ? async () => {
+        if (!readAction) {
+          throw deployPreflightError(
+            "当前 Agent 版本无法在部署前独立读取 QAgent 托管配置，已停止保存和部署。请先升级 Agent。",
+          );
+        }
+        const isCurrent = () =>
+          accountData === state.data &&
+          runtimeScope === state.navigationEpoch &&
+          request === liveConfigRequest &&
+          state.route === "live-config" &&
+          state.data.liveAgent === agent.id &&
+          state.data.liveEngine === engine &&
+          state.data.liveConfigSource === sourceMode;
+        let fresh;
+        try {
+          // Deliberately omit prefer_cached. This read runs immediately before
+          // any save/API mutation and therefore cannot trust the 600s display
+          // cache that supplied the editor baseline.
+          fresh = await requestCurrentConfigSnapshot(agent, engine, readAction, { isCurrent });
+        } catch (error) {
+          if (error?.deployPreflight) throw error;
+          throw deployPreflightError(
+            `部署前无法核验 Agent 当前配置，已停止保存和部署：${diagnosticError(error.message)}`,
+          );
+        }
+        if (!fresh || !isCurrent()) {
+          throw deployPreflightError(
+            "部署前页面状态已变化，已停止保存和部署。当前草稿已保留，请重新确认节点与内核。",
+          );
+        }
+        assertAgentConfigBaseline(source?.agentContent, fresh.content);
+      }
+    : null;
   const current = (privateWorkspace || !unsupportedReason) && source?.content
     ? {
         ...(saved || {
@@ -1690,6 +1772,11 @@ async function liveConfig() {
     const hint = document.createElement("p");
     hint.className = "config-install-hint";
     hint.textContent = `${engineName(engine)} 尚未安装。通过源码工具栏的“＋ 增加入站”提交时，将自动安装最新稳定版；切换版本请到节点设置。`;
+    workspaceElement.querySelector(".live-config-details").after(hint);
+  } else if (source?.cached) {
+    const hint = document.createElement("p");
+    hint.className = "config-install-hint";
+    hint.textContent = "当前显示最近 600 秒内已校验的节点快照；手动刷新及部署前核验会跳过缓存。";
     workspaceElement.querySelector(".live-config-details").after(hint);
   } else if (source?.saved) {
     const hint = document.createElement("p");
@@ -1789,7 +1876,12 @@ async function liveConfig() {
   const applyInboundMutation = async (result, chosen) => {
     if (accountData !== state.data) return;
     const key = `${agent.id}|${engine}`;
-    state.data.liveSources[sourceKey] = { content: result.config.content, saved:true };
+    state.data.liveSources[sourceKey] = {
+      ...(state.data.liveSources[sourceKey] || source),
+      content: result.config.content,
+      saved: true,
+      cached: false,
+    };
     if (result.task?.id) {
       let operation = operationFor(key);
       if (operation?.task?.id !== result.task.id) operation = saveOperation({
@@ -1820,7 +1912,7 @@ async function liveConfig() {
   const restrictionSelection = await bindConfigRestrictions({
     ...ctx, form: document.querySelector("#live-config-form"), files: configFiles,
     agent, engine, saved, sourceMode, inbounds:configWorkspace.inbound_targets || configWorkspace.inbounds || [],
-    onSaved: applyInboundMutation,
+    beforeDeploy, onSaved: applyInboundMutation,
   });
   if (accountData !== state.data || request !== liveConfigRequest || state.route !== "live-config") return;
   const selected = state.data.liveSelectedInbound;
@@ -1829,11 +1921,11 @@ async function liveConfig() {
   bindConfigInbounds({
     ...ctx, form:document.querySelector("#live-config-form"), container:workspaceElement, files:configFiles,
     selection:restrictionSelection, agent, engine, saved, workspace:configWorkspace, sourceMode,
-    sourceContent:current?.content, mountEditor:mountPresetEditor, onSaved:applyInboundMutation,
+    sourceContent:current?.content, mountEditor:mountPresetEditor, beforeDeploy, onSaved:applyInboundMutation,
     onRefresh:async () => {
       liveAgentRuntimeLoaded = false;
       delete state.data.liveSources[sourceKey];
-      await liveConfig();
+      await liveConfig({ preferCachedRead: false });
     },
   });
   renderPresetStatus();
@@ -1892,6 +1984,13 @@ async function liveConfig() {
           source,
           existingAvailable: importSource,
           savedConfig: saved,
+          beforeDeploy: beforeDeploy ? async () => {
+            status.textContent = "正在核验 Agent 当前配置…";
+            if (submitter) submitter.textContent = "正在核验…";
+            await beforeDeploy();
+            status.textContent = "正在保存配置并提交任务…";
+            if (submitter) submitter.textContent = "正在提交…";
+          } : null,
           onSavedConfig: value => { persisted = value; },
           onDeployTask: (taskId) => {
             recordPendingDeploy(taskId, agent.id, engine);
@@ -1907,12 +2006,14 @@ async function liveConfig() {
           ...source,
           content: result.content,
           saved: !importSource,
+          cached: false,
         };
         if (state.route === "live-config" && state.data.liveAgent === agent.id && state.data.liveEngine === engine && formElement.isConnected)
           await liveConfig();
       } catch (error) {
         if (accountData !== state.data || !formElement.isConnected) return;
-        liveSaveUncertain = submitted && Boolean(persisted || !error.status || error.status === 409 || error.status >= 500);
+        liveSaveUncertain = !error.deployPreflight && submitted &&
+          Boolean(persisted || !error.status || error.status === 409 || error.status >= 500);
         const message = `${persisted ? `配置 v${persisted.version} 已保存，后续任务或页面刷新未完成：` : ""}${diagnosticError(error.message)}${liveSaveUncertain ? " 当前内容已保留，请重新读取并核对结果后再提交。" : ""}`;
         status.textContent = message;
         status.setAttribute("role", "alert");
@@ -1933,22 +2034,85 @@ async function liveConfig() {
     readAction &&
     !source?.error
   )
-    void readCurrentConfig(agent, engine, sourceKey, readAction);
+    void readCurrentConfig(agent, engine, sourceKey, readAction, preferCachedRead);
 }
 
-async function readCurrentConfig(agent, engine, sourceKey, readAction) {
+async function requestCurrentConfigSnapshot(
+  agent,
+  engine,
+  readAction,
+  { preferCached = false, isCurrent = () => true, onTask = () => {} } = {},
+) {
+  if (!isCurrent()) return null;
+  const createReadTask = (allowCached) => api("/tasks", {
+    method: "POST",
+    body: JSON.stringify({
+      agent_id: agent.id,
+      engine,
+      action: readAction,
+      ...(allowCached ? { prefer_cached: true } : {}),
+    }),
+  });
+  const finishReadTask = async (task) => {
+    if (!isCurrent()) return null;
+    onTask(task.id);
+    const finished = ["succeeded", "failed", "canceled"].includes(task.status)
+      ? task
+      : await waitForTask(task.id, isCurrent);
+    if (!finished || !isCurrent()) return null;
+    if (finished.status !== "succeeded")
+      throw new Error(finished.error || "节点未能读取当前配置");
+    return finished;
+  };
+  let task = await createReadTask(preferCached);
+  let cacheHit = Boolean(preferCached && task.reused && task.status === "succeeded");
+  let finished = await finishReadTask(task);
+  if (!finished || !isCurrent()) return null;
+  let snapshot;
+  try {
+    snapshot = await api(`/tasks/${encodeURIComponent(finished.id)}/config-snapshot`);
+  } catch (error) {
+    // Another tab or a mutation can retire any read snapshot before its GET,
+    // including a fresh preflight result. Retry once without the cache, but
+    // never create work for an abandoned page or a different account.
+    if (!isCurrent()) return null;
+    if (error?.status !== 404) throw error;
+    task = await createReadTask(false);
+    cacheHit = false;
+    finished = await finishReadTask(task);
+    if (!finished || !isCurrent()) return null;
+    snapshot = await api(`/tasks/${encodeURIComponent(finished.id)}/config-snapshot`);
+  }
+  if (!isCurrent()) return null;
+  if (!snapshot.content)
+    throw new Error("节点返回的配置快照已失效，请重新读取");
+  return {
+    content: snapshot.content,
+    taskId: finished.id,
+    cached: cacheHit,
+    readAt: Number.isFinite(Date.parse(finished.finished_at || ""))
+      ? Date.parse(finished.finished_at)
+      : Date.now(),
+  };
+}
+
+async function readCurrentConfig(agent, engine, sourceKey, readAction, preferCached = false) {
   if (state.data.liveSources?.[sourceKey]?.reading) return;
   const request = ++liveReadRequest;
   const data = state.data;
+  const epoch = state.navigationEpoch, sourceMode = data.liveConfigSource;
+  const reading = { reading: true };
   const isCurrent = () =>
     data === state.data &&
+    epoch === state.navigationEpoch &&
     request === liveReadRequest &&
     state.route === "live-config" &&
     state.data.liveAgent === agent.id &&
-    state.data.liveEngine === engine;
+    state.data.liveEngine === engine &&
+    state.data.liveConfigSource === sourceMode;
   const discardReading = () => {
-    if (state.data.liveSources?.[sourceKey]?.reading)
-      delete state.data.liveSources[sourceKey];
+    if (data.liveSources?.[sourceKey] === reading)
+      delete data.liveSources[sourceKey];
   };
   state.data.staleReadTasks ||= {};
   const staleTaskId = state.data.staleReadTasks[sourceKey];
@@ -1966,30 +2130,26 @@ async function readCurrentConfig(agent, engine, sourceKey, readAction) {
     if (!isCurrent()) return;
   }
   state.data.liveSources ||= {};
-  state.data.liveSources[sourceKey] = { reading: true };
+  state.data.liveSources[sourceKey] = reading;
   try {
-    const task = await api("/tasks", {
-      method: "POST",
-      body: JSON.stringify({
-        agent_id: agent.id,
-        engine,
-        action: readAction,
-      }),
+    const snapshot = await requestCurrentConfigSnapshot(agent, engine, readAction, {
+      preferCached,
+      isCurrent,
+      onTask: taskId => {
+        if (isCurrent() && data.liveSources?.[sourceKey] === reading)
+          reading.pendingTaskId = taskId;
+      },
     });
-    if (!isCurrent()) return discardReading();
-    state.data.liveSources[sourceKey].pendingTaskId = task.id;
-    const finished = await waitForTask(task.id, isCurrent);
-    if (!finished || !isCurrent()) return discardReading();
-    if (finished.status !== "succeeded")
-      throw new Error(finished.error || "节点未能读取当前配置");
-    const snapshot = await api(`/tasks/${encodeURIComponent(finished.id)}/config-snapshot`);
-    if (!isCurrent()) return discardReading();
-    if (!snapshot.content)
-      throw new Error("节点返回的配置快照已失效，请重新读取");
+    if (!snapshot || !isCurrent()) return discardReading();
     state.data.liveSources[sourceKey] = {
       content: snapshot.content,
-      taskId: finished.id,
+      // Keep the Agent bytes separate from later saved-but-not-deployed edits.
+      // Deployment preflight compares against this immutable editor baseline.
+      agentContent: snapshot.content,
+      taskId: snapshot.taskId,
+      readAt: snapshot.readAt,
       reading: false,
+      cached: snapshot.cached,
     };
   } catch (error) {
     if (error?.name === "AbortError" || !isCurrent())
