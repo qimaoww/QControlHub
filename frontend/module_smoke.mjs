@@ -17,6 +17,7 @@ import "./engine_capabilities_smoke.mjs";
 import "./users_smoke.mjs";
 import "./account_storage_smoke.mjs";
 import "./node_order_smoke.mjs";
+import "./panel_metrics_smoke.mjs";
 
 import {
   agentStructureSignature,
@@ -3014,7 +3015,7 @@ try {
             return { days: [{ day: "2026-08-27", received_bytes: 6, sent_bytes: 4, used_bytes: 10, peak_receive_bps: 2, peak_send_bps: 1 }] };
           assert.fail(`unexpected dashboard preload API path ${path}`);
         },
-        can: (capability) => capability === "traffic.read",
+        can: (capability) => ["traffic.read", "agents.read", "tasks.read"].includes(capability),
         esc: (value) => String(value ?? ""),
         bytes: (value) => `${value || 0} B`,
         rate: (value) => `${value || 0} B/s`,
@@ -3036,6 +3037,7 @@ try {
   assert.equal(dashboardMarkup.includes('data-dashboard-traffic-details'), true, "dashboard daily traffic opens from a dedicated action");
   assert.equal(dashboardMarkup.includes('data-dashboard-traffic-dialog'), true, "dashboard daily traffic is rendered in a modal dialog");
   assert.equal(dashboardMarkup.includes('class="dashboard-traffic-axis"'), true, "dashboard chart keeps dates on a stable external axis");
+  assert.doesNotMatch(dashboardMarkup, /\sstyle=/, "dashboard markup must respect the production CSP");
   assert.equal(dashboardMarkup.includes("31日"), true, "dashboard chart labels natural days explicitly");
   assert.equal(dashboardMarkup.includes('class="dashboard-month-picker"'), true, "dashboard uses a theme-native month picker");
   assert.equal(dashboardMarkup.includes('type="month"'), false, "dashboard does not open the browser-native month panel");

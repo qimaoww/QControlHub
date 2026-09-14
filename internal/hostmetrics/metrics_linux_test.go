@@ -1,6 +1,6 @@
 //go:build linux
 
-package agent
+package hostmetrics
 
 import (
 	"context"
@@ -146,14 +146,14 @@ func TestSampledCPUPercentIgnoresBackToBackTickerSample(t *testing.T) {
 }
 
 func TestMetricsCollectorReadsLiveLinuxHost(t *testing.T) {
-	collector := NewMetricsCollector()
+	collector := NewCollector()
 	first, err := collector.Collect(context.Background())
-	if err != nil && !metricsHaveData(first) {
+	if err != nil && !HasData(first) {
 		t.Fatalf("first metrics collection: %v", err)
 	}
 	time.Sleep(20 * time.Millisecond)
 	second, err := collector.Collect(context.Background())
-	if err != nil && !metricsHaveData(second) {
+	if err != nil && !HasData(second) {
 		t.Fatalf("second metrics collection: %v", err)
 	}
 	if second.CollectedAt.IsZero() || !second.MemoryAvailable || !second.DiskAvailable || !second.NetworkAvailable {
