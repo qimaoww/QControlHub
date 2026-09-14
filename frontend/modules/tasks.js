@@ -44,6 +44,10 @@ export function installTasks(ctx) {
     getScope: () => state.navigationEpoch,
   });
   const settingsCacheDuration = 30_000;
+  // The task list changes on every tick, but the node names and the panel
+  // settings it renders with do not. Re-reading both per poll tripled the load
+  // of a page that already polls, so they ride the same short cache.
+  const agentsCacheDuration = 30_000;
 
   function scheduleTaskRefresh(delay) {
     clearTimer(state.taskPollTimer);
@@ -341,6 +345,14 @@ export function installTasks(ctx) {
       settingsCacheAge < settingsCacheDuration
         ? state.data.settings
         : null;
+    const agentsCacheAge = now() - Number(state.data.taskAgentsLoadedAt || 0);
+    const cachedAgents =
+      background &&
+      Array.isArray(state.data.taskAgents) &&
+      agentsCacheAge >= 0 &&
+      agentsCacheAge < agentsCacheDuration
+        ? state.data.taskAgents
+        : null;
     let payload;
     let applied;
     try {
@@ -348,7 +360,7 @@ export function installTasks(ctx) {
         (signal) =>
           Promise.all([
             api(`/tasks?${query}`, { signal }),
-            api("/agents", { signal }),
+            cachedAgents || api("/agents", { signal }),
             preloadedSettings ||
               cachedSettings ||
               api("/settings", { signal }),
@@ -386,6 +398,10 @@ export function installTasks(ctx) {
     const pollInterval = settings.task_poll_interval_ms || 1000;
     state.data.settings = settings;
     if (settings !== cachedSettings) state.data.taskSettingsLoadedAt = now();
+    if (agents !== cachedAgents) {
+      state.data.taskAgents = agents;
+      state.data.taskAgentsLoadedAt = now();
+    }
     if (state.confirmOpen) {
       scheduleTaskRefresh(300);
       return;

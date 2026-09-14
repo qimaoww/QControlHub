@@ -361,6 +361,14 @@ type Agent struct {
 	PublicKey                  []byte                          `json:"-"`
 	Status                     string                          `json:"status,omitempty"`
 	EnrollmentCommandAvailable bool                            `json:"enrollment_command_available,omitempty"`
+	// RegionCode is the node's resolved country/region: the owner's manual
+	// preference when one is set, otherwise the control plane's GeoIP result.
+	// List views render the flag from this instead of one request per node.
+	RegionCode string `json:"region_code,omitempty"`
+	// Komari carries the cached monthly traffic of a bound node so a list view
+	// renders it without one request per card. The node settings endpoint stays
+	// the authoritative read.
+	Komari *KomariNode `json:"komari,omitempty"`
 	// AdminHidden lets the owner keep a node out of every administrator view
 	// while the node keeps running and accounting. Only the owner and explicit
 	// share recipients can see or manage it.

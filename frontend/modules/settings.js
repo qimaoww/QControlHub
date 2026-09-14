@@ -2,7 +2,7 @@ import { bindEvent } from "./refresh.js";
 import { engineCapabilityToggles, selectedDefaultEngines } from "./engine-capabilities.js";
 
 export function installSettings(ctx) {
-  const { api, state, esc, can, shell, notify, applyUIFontScale } = ctx;
+  const { api, state, esc, can, shell, notify, applyUIFontScale, invalidatePanelReads = () => {} } = ctx;
   let settingsRequest = 0;
 
   const options = (selected, values) => values
@@ -118,6 +118,8 @@ export function installSettings(ctx) {
       try {
         const saved = await api("/settings", { method: "PUT", body: JSON.stringify(body) });
         if (state.data !== accountData) return;
+        // Other routes read the panel settings from the shell cache.
+        invalidatePanelReads("settings");
         state.data.settings = saved;
         item.revision = saved.revision;
         applyUIFontScale?.(saved.ui_font_scale);

@@ -86,6 +86,8 @@ type Server struct {
 	komari                     *komari.Client
 	komariHTTPClient           *http.Client
 	komariConfigError          error
+	komariCacheMu              sync.Mutex
+	komariCache                map[string]cachedKomariNode
 	webhookSigningConfigured   bool
 	notifier                   *notify.Client
 	subStoreHTTP               *http.Client
@@ -468,12 +470,43 @@ func (s *Server) listAgents(w http.ResponseWriter, request *http.Request) {
 		writeInternalError(w, err)
 		return
 	}
+	// Resolve derived display data before the metrics redaction below: region
+	// detection reads the public address out of those metrics.
+	s.resolveAgentRegions(request, agents)
+	s.attachAgentKomari(request, agents)
 	if !s.sessionAllows(request, core.PermissionMetricsRead) {
 		for index := range agents {
 			agents[index].Metrics = core.HostMetrics{}
 		}
 	}
 	writeJSON(w, http.StatusOK, agents)
+}
+
+// resolveAgentRegions attaches the display region to every node in a list
+// response, so a node grid renders its flags without one request per card.
+// Manual preferences always win; automatic detection reuses the GeoIP client's
+// cache, and a provider failure only leaves that node without a flag instead of
+// failing the whole page.
+func (s *Server) resolveAgentRegions(request *http.Request, agents []core.Agent) {
+	auto := s.sessionAllows(request, core.PermissionMetricsRead)
+	for index := range agents {
+		if code := store.AgentRegionCode(agents[index]); code != "" {
+			agents[index].RegionCode = code
+			continue
+		}
+		if !auto {
+			continue
+		}
+		address := agentGeoIP(agents[index])
+		if !address.IsValid() {
+			continue
+		}
+		region, err := s.geoip.Lookup(request.Context(), address)
+		if err != nil {
+			continue
+		}
+		agents[index].RegionCode = region.ISOCode
+	}
 }
 
 func (s *Server) redactAgentMetrics(request *http.Request, agent *core.Agent) {
@@ -937,6 +970,14 @@ func (s *Server) getAgentKomari(w http.ResponseWriter, request *http.Request) {
 		writeJSON(w, http.StatusOK, result)
 		return
 	}
+	// A fresh cached resource answers without resolving the provider, so a
+	// temporarily misconfigured integration does not hide known traffic.
+	if node, fresh := s.freshKomariNode(agent.ID, uuid, time.Now()); fresh {
+		result.Server = ptr(node)
+		w.Header().Set("Cache-Control", "no-store")
+		writeJSON(w, http.StatusOK, result)
+		return
+	}
 	komariClient, clientErr := s.komariForRequest(request.Context(), s.configOwnerID(request) == "")
 	if clientErr != nil {
 		writeError(w, http.StatusServiceUnavailable, clientErr.Error())
@@ -951,7 +992,9 @@ func (s *Server) getAgentKomari(w http.ResponseWriter, request *http.Request) {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	result.Server = ptr(komariNodeResource(node))
+	resource := komariNodeResource(node)
+	s.storeKomariNode(agent.ID, uuid, resource, time.Now())
+	result.Server = ptr(resource)
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, result)
 }
@@ -1086,6 +1129,8 @@ func (s *Server) putAgentKomari(w http.ResponseWriter, request *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
+	// A new binding must not display the previous server's traffic.
+	s.forgetKomariNode(request.PathValue("id"))
 	s.recordAudit(request, "agent.komari.updated", request.PathValue("id"), "Komari UUID linked")
 	writeJSON(w, http.StatusOK, core.KomariLink{UUID: uuid})
 }

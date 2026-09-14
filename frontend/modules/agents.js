@@ -726,11 +726,38 @@ export function installAgents(ctx) {
     card.classList.remove("unavailable");
   };
   const loadRegionDisplay = createRegionDisplay(ctx);
+  // Komari resolves through an external provider, so each node's monthly
+  // traffic is read at most once per account session: the node list inlines the
+  // resource the control plane already cached, and a rebuilt card reuses the
+  // account-scoped result instead of repeating a round trip that costs about a
+  // second.
   const loadKomariDisplay = (agent, root) => {
-    if (!komariUUIDFor(agent) || !root) return;
+    const uuid = komariUUIDFor(agent);
+    if (!uuid || !root) return;
+    const cache = (state.data.agentKomari ||= {});
+    const known = cache[agent.id];
+    if (known?.uuid === uuid) {
+      if (known.ready) updateKomariDisplay(root, known.link, known.error);
+      return;
+    }
+    if (agent.komari?.uuid === uuid) {
+      const inline = { uuid, server: agent.komari };
+      cache[agent.id] = { uuid, ready: true, link: inline, error: "" };
+      updateKomariDisplay(root, inline);
+      return;
+    }
+    const entry = { uuid, ready: false, link: null, error: "" };
+    cache[agent.id] = entry;
     api(`/agents/${encodeURIComponent(agent.id)}/komari`)
-      .then((link) => updateKomariDisplay(root, link))
-      .catch((error) => updateKomariDisplay(root, null, error?.message || "Komari 读取失败"));
+      .then((link) => {
+        entry.ready = true;
+        entry.link = link;
+        updateKomariDisplay(root, link);
+      })
+      .catch((error) => {
+        if (cache[agent.id] === entry) delete cache[agent.id];
+        updateKomariDisplay(root, null, error?.message || "Komari 读取失败");
+      });
   };
   const cardIPRow = (row) => {
     const value = row.value || "";
