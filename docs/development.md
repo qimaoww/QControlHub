@@ -88,6 +88,13 @@ go run ./cmd/agent
 make check
 ```
 
+前端功能按 ES module 拆分到 [`frontend/modules/`](../frontend/modules/)，入口只负责
+共享状态和路由装配。新增功能请遵循[前端模块约定](frontend-modules.md)；可单独运行
+`make module-policy-test` 检查模块导出和依赖方向。
+
+跨前端和 Go 服务的职责边界见[模块架构约定](module-architecture.md)。持久化、API
+适配器和 Agent 平台代码应按领域放在所属包的独立文件中，入口文件只负责组合。
+
 该命令检查 gofmt、执行前端与脚本检查、`go vet ./...` 和 `go test -p 1 ./...`。本地入口保持串行，便于逐项排查失败；CI 运行同一批目标，但把浏览器回归、其余脚本检查和按包分片的 Go 测试拆成并行任务（`.github/scripts/run-ci-tests.sh`），以缩短流水线。
 
 默认测试不依赖外部服务。要同时执行 PostgreSQL 集成测试，设置专用测试库连接：

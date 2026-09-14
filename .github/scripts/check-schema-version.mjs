@@ -2,7 +2,8 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-const storePath = "internal/store/store.go";
+const storePath = "internal/store/schema.go";
+const legacyStorePath = "internal/store/store.go";
 
 export function readSchemaContract(source) {
   const versionMatch = source.match(/const\s+currentSchemaVersion\s*=\s*(\d+)/);
@@ -32,15 +33,28 @@ function main() {
   if (!baseRef || /^0+$/.test(baseRef)) {
     throw new Error("QCH_SCHEMA_BASE_REF must name the pull request base or previous push commit");
   }
-  const baseSource = execFileSync(
-    "git",
-    ["-c", `safe.directory=${process.cwd()}`, "show", `${baseRef}:${storePath}`],
-    { encoding: "utf8" },
-  );
+  let baseSource;
+  let basePath = storePath;
+  try {
+    baseSource = execFileSync(
+      "git",
+      ["-c", `safe.directory=${process.cwd()}`, "show", `${baseRef}:${storePath}`],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+    );
+  } catch {
+    // The schema declaration moved out of store.go in this refactor. Keep
+    // the policy usable for the first PR whose base predates schema.go.
+    basePath = legacyStorePath;
+    baseSource = execFileSync(
+      "git",
+      ["-c", `safe.directory=${process.cwd()}`, "show", `${baseRef}:${legacyStorePath}`],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+    );
+  }
   const currentSource = readFileSync(storePath, "utf8");
   const result = validateSchemaVersionChange(baseSource, currentSource);
   process.stdout.write(
-    `schema contract valid: v${result.baseVersion} -> v${result.currentVersion}, schemaSQL changed=${result.schemaChanged}\n`,
+    `schema contract valid (${basePath} -> ${storePath}): v${result.baseVersion} -> v${result.currentVersion}, schemaSQL changed=${result.schemaChanged}\n`,
   );
 }
 
