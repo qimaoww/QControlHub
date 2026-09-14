@@ -86,10 +86,16 @@ func (s *Store) CreateUser(ctx context.Context, request core.UserRequest, passwo
 	}
 	username := strings.TrimSpace(request.Username)
 	displayName := strings.TrimSpace(request.DisplayName)
-	permissions, _ := json.Marshal(core.NormalizePermissions(request.Permissions))
+	normalized := core.NormalizePermissions(request.Permissions, core.AllPermissions())
 	if request.Role == core.RoleAdmin {
-		permissions, _ = json.Marshal(core.AllPermissions())
+		normalized = core.AllPermissions()
 	}
+	// Reject the requested grant before filtering it out. Otherwise direct
+	// store callers receive success for an invalid role/permission pair.
+	if request.Role != core.RoleAdmin && core.HasPermission(normalized, core.PermissionUsersManage) {
+		return core.User{}, fmt.Errorf("%w: users.manage may not be granted to a user account", ErrInvalid)
+	}
+	permissions, _ := json.Marshal(normalized)
 	now := time.Now().UTC()
 	row := s.pool.QueryRow(ctx, `
 		INSERT INTO panel_users (id,username,display_name,role,permissions,password_hash,created_at,updated_at,agent_isolation)
@@ -151,12 +157,17 @@ func (s *Store) UpdateUser(ctx context.Context, id string, update core.UserUpdat
 		displayName = strings.TrimSpace(*update.DisplayName)
 	}
 	if update.Permissions != nil {
-		permissions = core.NormalizePermissions(*update.Permissions)
+		permissions = core.NormalizePermissions(*update.Permissions, core.AllPermissions())
 	} else if current.User.Role == core.RoleAdmin && role != core.RoleAdmin {
 		permissions = []core.Permission{}
 	}
 	if role == core.RoleAdmin {
 		permissions = core.AllPermissions()
+	}
+	// Validate the final state while holding the row lock, including updates
+	// that omit Role and demotions that supply an explicit permission list.
+	if role != core.RoleAdmin && core.HasPermission(permissions, core.PermissionUsersManage) {
+		return core.User{}, fmt.Errorf("%w: users.manage may not be granted to a user account", ErrInvalid)
 	}
 	if current.User.Role == core.RoleAdmin && (!current.User.Disabled && (role != core.RoleAdmin || disabled)) {
 		var otherAdmins int
@@ -427,8 +438,8 @@ func scanUser(row pgx.Row) (core.User, error) {
 	err := row.Scan(&user.ID, &user.Username, &user.DisplayName, &user.Role, &permissions, &user.Disabled, &user.CreatedAt, &user.UpdatedAt, &user.LastLoginAt, &user.AuthRevision)
 	if err == nil {
 		err = json.Unmarshal(permissions, &user.Permissions)
-		if err == nil && user.Role == core.RoleAdmin {
-			user.Permissions = core.AllPermissions()
+		if err == nil {
+			user.Permissions = effectiveUserPermissions(user.Role, user.Permissions)
 		}
 	}
 	return user, err
@@ -440,9 +451,19 @@ func scanUserWithHash(row pgx.Row, record *userRecord) error {
 		&record.User.CreatedAt, &record.User.UpdatedAt, &record.User.LastLoginAt, &record.User.AuthRevision, &record.PasswordHash)
 	if err == nil {
 		err = json.Unmarshal(permissions, &record.User.Permissions)
-		if err == nil && record.User.Role == core.RoleAdmin {
-			record.User.Permissions = core.AllPermissions()
+		if err == nil {
+			record.User.Permissions = effectiveUserPermissions(record.User.Role, record.User.Permissions)
 		}
 	}
 	return err
+}
+
+// Old backups may contain a non-administrator with users.manage. Do not expose
+// that grant to login/session authorization, and do not let it prevent disabling
+// the account. A subsequent update persists this sanitized state.
+func effectiveUserPermissions(role core.Role, permissions []core.Permission) []core.Permission {
+	if role == core.RoleAdmin {
+		return core.AllPermissions()
+	}
+	return core.NormalizePermissions(permissions, core.GrantablePermissions())
 }

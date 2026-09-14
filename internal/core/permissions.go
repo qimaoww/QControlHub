@@ -50,9 +50,34 @@ var rolePermissions = map[Role]map[Permission]struct{}{}
 
 func AllPermissions() []Permission { return append([]Permission(nil), allPermissions...) }
 
-func NormalizePermissions(values []Permission) []Permission {
-	allowed := make(map[Permission]struct{}, len(allPermissions))
-	for _, value := range allPermissions {
+// PermissionGrantsAdministration identifies administrator-only capabilities.
+// Explicit user grants must agree with the store's existing administrator
+// scope instead of implying authority that the stored role does not have.
+func PermissionGrantsAdministration(permission Permission) bool {
+	return permission == PermissionUsersManage
+}
+
+// GrantablePermissions returns the capabilities an administrator may assign
+// to a non-administrator. Store writes reject administrator-only requests;
+// reads use this allowlist to filter impossible grants in older backups.
+func GrantablePermissions() []Permission {
+	result := make([]Permission, 0, len(allPermissions))
+	for _, permission := range allPermissions {
+		if PermissionGrantsAdministration(permission) {
+			continue
+		}
+		result = append(result, permission)
+	}
+	return result
+}
+
+// NormalizePermissions keeps only known capabilities. assignable is used for
+// requests that attach capabilities to an account, so an admin-equivalent
+// capability cannot be stored on a user row; pass AllPermissions to normalize
+// a role that already carries full authority.
+func NormalizePermissions(values []Permission, assignable []Permission) []Permission {
+	allowed := make(map[Permission]struct{}, len(assignable))
+	for _, value := range assignable {
 		allowed[value] = struct{}{}
 	}
 	seen := make(map[Permission]struct{}, len(values))
