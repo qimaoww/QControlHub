@@ -49,10 +49,8 @@ const (
 // KnownRoles lists the role values a manifest may declare.
 var KnownRoles = []string{RoleAgentBinary, RoleInstallAsset}
 
-// AgentBinaryKey is the manifest key of the Agent executable. Clients look it up
-// by this constant rather than by scanning the artifact list, so a manifest that
-// omits it is rejected instead of silently verifying nothing.
-const AgentBinaryKey = RoleAgentBinary
+// AgentBinaryPath is the installer endpoint for the one supported Agent binary.
+const AgentBinaryPath = "/api/v1/agent-binary"
 
 // Artifact is one signed downloadable file.
 type Artifact struct {
@@ -168,6 +166,9 @@ func (m Manifest) Verify(publicKey ed25519.PublicKey) error {
 	if !ed25519.Verify(publicKey, payload, signature) {
 		return errors.New("release: manifest signature does not match the pinned release key")
 	}
+	if m.Signature.PublicKey != base64.RawURLEncoding.EncodeToString(publicKey) {
+		return errors.New("release: manifest public key does not match the verified signing key")
+	}
 	return m.validateShape()
 }
 
@@ -187,6 +188,7 @@ func (m Manifest) validateShape() error {
 		return errors.New("release: manifest declares no artifacts")
 	}
 	seen := make(map[string]struct{}, len(m.Artifacts))
+	agentBinaries := 0
 	for _, artifact := range m.Artifacts {
 		if !knownRole(artifact.Role) {
 			return fmt.Errorf("release: unknown artifact role %q", artifact.Role)
@@ -204,6 +206,17 @@ func (m Manifest) validateShape() error {
 		if err := ValidateDigest(artifact.SHA256); err != nil {
 			return fmt.Errorf("release: artifact %q: %w", artifact.Path, err)
 		}
+		if artifact.Role == RoleAgentBinary {
+			agentBinaries++
+			if artifact.Path != AgentBinaryPath || strings.TrimSpace(artifact.Version) == "" || artifact.Size == 0 {
+				return errors.New("release: Agent binary must declare its canonical path, version, and nonzero size")
+			}
+		}
+	}
+	// payload canonicalizes the order. Multiple Agent roles would otherwise let
+	// a reordered (still validly signed) list change which entry a client uses.
+	if agentBinaries != 1 {
+		return errors.New("release: manifest must describe exactly one Agent binary")
 	}
 	return nil
 }
@@ -330,11 +343,39 @@ func (m Manifest) Marshal() ([]byte, error) {
 // AgentBinary returns the artifact describing the Agent executable.
 func (m Manifest) AgentBinary() (Artifact, bool) {
 	for _, artifact := range m.Artifacts {
-		if artifact.Role == RoleAgentBinary {
+		if artifact.Role == RoleAgentBinary && artifact.Path == AgentBinaryPath {
 			return artifact, true
 		}
 	}
 	return Artifact{}, false
+}
+
+// VerifyAgentBinary checks the served bytes and panel version after Verify has
+// authenticated the manifest. It is shared by the Agent and startup validation
+// so an incorrectly packaged release is rejected before deployment is healthy.
+func (m Manifest) VerifyAgentBinary(digest string, size int64, controlPlaneVersion string) (string, error) {
+	artifact, ok := m.AgentBinary()
+	if !ok {
+		return "", errors.New("signed release manifest does not describe an Agent binary")
+	}
+	if artifact.SHA256 != digest {
+		return "", fmt.Errorf("downloaded Agent binary is not the signed release artifact for %s", m.Release)
+	}
+	if artifact.Size != size {
+		return "", fmt.Errorf("downloaded Agent binary size does not match the signed release artifact for %s", m.Release)
+	}
+	controlPlaneVersion = strings.TrimSpace(controlPlaneVersion)
+	artifactVersion := strings.TrimSpace(artifact.Version)
+	if controlPlaneVersion == "" {
+		return "", errors.New("control plane did not report its version; deploy a panel with a matching signed release")
+	}
+	if artifactVersion == "" {
+		return "", fmt.Errorf("signed release manifest for %s does not declare an Agent version", m.Release)
+	}
+	if artifactVersion != controlPlaneVersion {
+		return "", fmt.Errorf("signed release Agent version %q does not match control plane version %q; refusing to install a mismatched build", artifactVersion, controlPlaneVersion)
+	}
+	return artifactVersion, nil
 }
 
 // ArtifactAt returns the artifact served at the given request path.

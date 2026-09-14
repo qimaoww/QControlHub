@@ -9,7 +9,8 @@
 #
 # 省略协议时按 https:// 处理：裸主机名或 IP 只会升级为 HTTPS，不会降级为明文。
 # 添加节点凭证经请求头发送、下载的 Agent 以 root 安装，因此明文链路必须显式选择：
-# 传 http:// URL，且非回环地址还须设置 QCH_TLS_CA_FILE。
+# 传 http:// URL，且非回环地址还须设置 QCH_ALLOW_INSECURE_LIVE=true。
+# QCH_TLS_CA_FILE 只用于验证 HTTPS/WSS 证书，不能保护明文连接。
 #
 # 示例：
 #   QCH_TLS_CA_FILE=/etc/qcontrolhub/control-plane-ca.pem \
@@ -70,7 +71,7 @@ service_manager=${QCH_SERVICE_MANAGER:-}
 if [ -z "$service_manager" ]; then
   if [ -f /etc/alpine-release ]; then
     command -v apk >/dev/null 2>&1 || { printf '%s\n' 'Alpine apk is unavailable' >&2; exit 1; }
-    apk add --no-cache ca-certificates coreutils curl iproute2 libcap nftables openrc >/dev/null
+    apk add --no-cache ca-certificates coreutils curl iproute2 libcap nftables openrc openssl >/dev/null
     service_manager=openrc
   elif command -v "$systemctl_cmd" >/dev/null 2>&1; then
     service_manager=systemd
@@ -239,9 +240,6 @@ if [ "$action" = uninstall ]; then
   exit 0
 fi
 
-install_nftables
-install_iproute2
-
 control="${1:?usage: install-agent.sh install|update <control-plane-url|host[:port]> <add-node-credential> [agent-name]}"
 token="${2:?usage: install-agent.sh install|update <control-plane-url|host[:port]> <add-node-credential> [agent-name]}"
 name_arg="${3:-}"
@@ -255,12 +253,17 @@ validate_environment_value QCH_ENROLLMENT_TOKEN "$token"
 validate_environment_value QCH_AGENT_NAME "$name"
 validate_environment_value QCH_TLS_CA_FILE "$ca_file"
 validate_environment_value QCH_ALLOW_INSECURE_LIVE "$allow_insecure_live"
+case "$allow_insecure_live" in
+  1|t|T|TRUE|true|True) allow_insecure_live=true ;;
+  0|f|F|FALSE|false|False) allow_insecure_live=false ;;
+  *) printf '%s\n' 'QCH_ALLOW_INSECURE_LIVE must be a boolean' >&2; exit 1 ;;
+esac
 
 # A bare host or IP is upgraded to HTTPS, never downgraded to plaintext. The
 # add-node credential travels in a request header and the downloaded Agent runs
 # as root, so an unencrypted control-plane URL would expose both to anyone on
 # the path. Cleartext is therefore an explicit choice: pass an http:// (or
-# ws://) URL and, unless it is loopback, also set QCH_TLS_CA_FILE.
+# ws://) URL and, unless it is loopback, also set QCH_ALLOW_INSECURE_LIVE=true.
 case "$control" in
   http://*|https://*|ws://*|wss://*) server_url="$control" ;;
   *) server_url="https://$control" ;;
@@ -279,26 +282,30 @@ esac
 case "$server_host" in
   *[[:space:]]*) printf '%s\n' 'control-plane URL must not contain whitespace' >&2; exit 1 ;;
 esac
-# Plaintext is allowed only for a loopback control plane or alongside a
-# configured CA file, which is how a deliberate private-TLS or sandbox setup
-# states its intent instead of losing the scheme by accident.
+# Match NewClient's loopback exceptions exactly. A 127.* DNS name is not a
+# loopback IP, and splitting at the first colon breaks bracketed IPv6.
+# A CA file only authenticates TLS; it cannot authorize plaintext transport.
 case "$server_url" in
   http://*|ws://*)
-    cleartext_host=${server_host%%:*}
-    case "$cleartext_host" in
-      localhost|127.*|\[::1\]|::1) ;;
+    case "$server_host" in
+      localhost|localhost:*|127.0.0.1|127.0.0.1:*|\[::1\]|\[::1\]:*) ;;
       *)
-        if [ -z "$ca_file" ]; then
+        if [ "$allow_insecure_live" != true ]; then
           printf '%s\n' \
             'refusing a plaintext control-plane URL for a non-loopback host.' \
             'A bare host or IP now defaults to https://; use that, or pass an explicit' \
-            'http:// URL together with QCH_TLS_CA_FILE when cleartext is intended.' >&2
+            'http:// URL with QCH_ALLOW_INSECURE_LIVE=true only on a trusted network.' \
+            'QCH_TLS_CA_FILE does not encrypt or protect an HTTP connection.' >&2
           exit 1
         fi
+        printf '%s\n' 'warning: remote plaintext transport explicitly enabled; enrollment credentials and downloads are exposed on the network.' >&2
         ;;
     esac
     ;;
 esac
+
+install_nftables
+install_iproute2
 
 work_dir=$(mktemp -d "${TMPDIR:-/tmp}/qcontrolhub-agent.XXXXXX")
 trap 'rm -rf "$work_dir"' EXIT HUP INT TERM
@@ -354,6 +361,12 @@ if [ "$verify_required" = true ] && ! command -v openssl >/dev/null 2>&1; then
     'openssl is required to verify the signed release; install it, or set' \
     'QCH_ALLOW_UNSIGNED_RELEASE=true to accept unverified downloads.' >&2
   exit 1
+fi
+if [ "$verify_required" = true ]; then
+  # Verify and persist the same snapshot, even if the caller's source file is
+  # replaced during the download.
+  cp "$release_public_key" "$work_dir/release-key.pub.pem"
+  release_public_key="$work_dir/release-key.pub.pem"
 fi
 
 download() {

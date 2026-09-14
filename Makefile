@@ -3,7 +3,7 @@ SHELL := /bin/sh
 VERSION ?= dev
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
-.PHONY: build test release-checksums release-image-agent release-image-checksums signing-key check-install-assets alpine-test alpine-agent-test upgrade-sandbox-test ss-rust-runtime-test vet fmt-check frontend-check pr-policy-test schema-policy-test installer-test agent-redeploy-test quick-start-test web-image-test docs-check check checks browser-checks non-browser-checks alpine-non-browser-checks init-env compose-config up dev-up down logs
+.PHONY: build test release-checksums release-image-agent release-image-checksums release-image-test signing-key check-install-assets alpine-test alpine-agent-test upgrade-sandbox-test ss-rust-runtime-test vet fmt-check frontend-check pr-policy-test schema-policy-test installer-test agent-redeploy-test quick-start-test web-image-test docs-check check checks browser-checks non-browser-checks alpine-non-browser-checks init-env compose-config up dev-up down logs
 
 # Non-Go checks. CI runs each group as its own task next to the Go test shards,
 # so keep the Go suite out of these targets.
@@ -117,6 +117,9 @@ release-image-agent:
 
 release-image-checksums: release-image-agent
 	$(MAKE) release-checksums RELEASE_AGENT='$(RELEASE_IMAGE_DIR)/qagent'
+
+release-image-test:
+	VERSION='$(VERSION)' sh deploy/tests/release-image.sh
 
 web-image-test:
 	docker build --target qcontrol-web --build-arg VERSION='$(VERSION)' .

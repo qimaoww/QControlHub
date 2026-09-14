@@ -91,7 +91,7 @@ func TestUpgradeReleaseSkipsWithoutPinnedKey(t *testing.T) {
 	defer server.Close()
 	client := upgradeReleaseClient(t, server.URL, "", "v1.2.3")
 
-	version, err := client.verifyUpgradeRelease(context.Background(), server.Client(), []byte("whatever"), client.controlPlaneVersion)
+	version, err := client.verifyUpgradeRelease(context.Background(), server.Client(), []byte("whatever"), 0, client.controlPlaneVersion)
 	if err != nil {
 		t.Fatalf("upgrade without a pinned key failed: %v", err)
 	}
@@ -111,7 +111,7 @@ func TestUpgradeReleaseAcceptsSignedBinary(t *testing.T) {
 	defer server.Close()
 	client := upgradeReleaseClient(t, server.URL, base64.RawURLEncoding.EncodeToString(publicKey), "v1.2.3")
 
-	version, err := client.verifyUpgradeRelease(context.Background(), server.Client(), []byte(release.DigestBytes(binary)), client.controlPlaneVersion)
+	version, err := client.verifyUpgradeRelease(context.Background(), server.Client(), release.DigestBytes(binary), int64(len(binary)), client.controlPlaneVersion)
 	if err != nil {
 		t.Fatalf("signed release was rejected: %v", err)
 	}
@@ -140,7 +140,7 @@ func TestUpgradeReleaseAcceptsInstallerPEMPath(t *testing.T) {
 	server := releaseServer(t, body)
 	defer server.Close()
 	client := upgradeReleaseClient(t, server.URL, keyPath, "v1.2.3")
-	version, err := client.verifyUpgradeRelease(context.Background(), server.Client(), release.DigestBytes(binary), "v1.2.3")
+	version, err := client.verifyUpgradeRelease(context.Background(), server.Client(), release.DigestBytes(binary), int64(len(binary)), "v1.2.3")
 	if err != nil || version != "v1.2.3" {
 		t.Fatalf("installer-provisioned PEM key did not verify the upgrade: %q %v", version, err)
 	}
@@ -203,7 +203,7 @@ func TestUpgradeReleaseRejectsSubstitutedBinary(t *testing.T) {
 
 	// The attacker-controlled control plane handed us a different payload.
 	substituted := []byte("a-substituted-backdoor-binary")
-	if _, err := client.verifyUpgradeRelease(context.Background(), server.Client(), []byte(release.DigestBytes(substituted)), client.controlPlaneVersion); err == nil {
+	if _, err := client.verifyUpgradeRelease(context.Background(), server.Client(), release.DigestBytes(substituted), int64(len(substituted)), client.controlPlaneVersion); err == nil {
 		t.Fatal("a substituted binary passed release verification")
 	}
 }
@@ -216,7 +216,7 @@ func TestUpgradeReleaseFailsClosedWithoutManifest(t *testing.T) {
 	_, publicKey, _ := upgradeReleaseFixture(t, []byte("binary"), "v1.2.3")
 	client := upgradeReleaseClient(t, server.URL, base64.RawURLEncoding.EncodeToString(publicKey), "v1.2.3")
 
-	if _, err := client.verifyUpgradeRelease(context.Background(), server.Client(), []byte(release.DigestBytes([]byte("binary"))), client.controlPlaneVersion); err == nil {
+	if _, err := client.verifyUpgradeRelease(context.Background(), server.Client(), release.DigestBytes([]byte("binary")), 6, client.controlPlaneVersion); err == nil {
 		t.Fatal("a pinned key with no manifest did not fail closed")
 	} else if !strings.Contains(err.Error(), "QCH_RELEASE_PUBLIC_KEY") {
 		t.Fatalf("error does not explain the misconfiguration: %v", err)
@@ -237,7 +237,7 @@ func TestUpgradeReleaseRejectsManifestFromAnotherKey(t *testing.T) {
 	_, pinnedKey, _ := upgradeReleaseFixture(t, []byte("unrelated"), "v9.9.9")
 	client := upgradeReleaseClient(t, server.URL, base64.RawURLEncoding.EncodeToString(pinnedKey), "v1.2.3")
 
-	if _, err := client.verifyUpgradeRelease(context.Background(), server.Client(), []byte(release.DigestBytes(binary)), client.controlPlaneVersion); err == nil {
+	if _, err := client.verifyUpgradeRelease(context.Background(), server.Client(), release.DigestBytes(binary), int64(len(binary)), client.controlPlaneVersion); err == nil {
 		t.Fatal("a manifest signed by an unpinned key was accepted")
 	}
 }
@@ -246,7 +246,7 @@ func TestUpgradeReleaseRejectsMalformedPinnedKey(t *testing.T) {
 	server := releaseServer(t, []byte(`{}`))
 	defer server.Close()
 	client := upgradeReleaseClient(t, server.URL, "not-a-key", "v1.2.3")
-	if _, err := client.verifyUpgradeRelease(context.Background(), server.Client(), []byte(release.DigestBytes([]byte("binary"))), client.controlPlaneVersion); err == nil {
+	if _, err := client.verifyUpgradeRelease(context.Background(), server.Client(), release.DigestBytes([]byte("binary")), 6, client.controlPlaneVersion); err == nil {
 		t.Fatal("a malformed pinned key was accepted")
 	}
 }
@@ -269,7 +269,7 @@ func TestUpgradeReleaseRequiresPanelVersionMatch(t *testing.T) {
 
 	t.Run("matching version", func(t *testing.T) {
 		client := upgradeReleaseClient(t, server.URL, pinned, "v1.2.3")
-		version, err := client.verifyUpgradeRelease(context.Background(), server.Client(), digest, client.controlPlaneVersion)
+		version, err := client.verifyUpgradeRelease(context.Background(), server.Client(), digest, int64(len(binary)), client.controlPlaneVersion)
 		if err != nil {
 			t.Fatalf("matching panel version was rejected: %v", err)
 		}
@@ -279,7 +279,7 @@ func TestUpgradeReleaseRequiresPanelVersionMatch(t *testing.T) {
 	})
 	t.Run("mismatched version", func(t *testing.T) {
 		client := upgradeReleaseClient(t, server.URL, pinned, "v9.9.9")
-		_, err := client.verifyUpgradeRelease(context.Background(), server.Client(), digest, client.controlPlaneVersion)
+		_, err := client.verifyUpgradeRelease(context.Background(), server.Client(), digest, int64(len(binary)), client.controlPlaneVersion)
 		if err == nil {
 			t.Fatal("a release for a different panel version was accepted")
 		}
@@ -289,7 +289,7 @@ func TestUpgradeReleaseRequiresPanelVersionMatch(t *testing.T) {
 	})
 	t.Run("panel reports no version", func(t *testing.T) {
 		client := upgradeReleaseClient(t, server.URL, pinned, "")
-		if _, err := client.verifyUpgradeRelease(context.Background(), server.Client(), digest, client.controlPlaneVersion); err == nil {
+		if _, err := client.verifyUpgradeRelease(context.Background(), server.Client(), digest, int64(len(binary)), client.controlPlaneVersion); err == nil {
 			t.Fatal("an upgrade proceeded without a panel version to bind to")
 		}
 	})

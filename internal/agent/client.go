@@ -1209,7 +1209,7 @@ func (c *Client) downloadAgentBinaryOnce(ctx context.Context, client *http.Clien
 	c.agentPolicyMu.RLock()
 	controlPlaneVersion := c.controlPlaneVersion
 	c.agentPolicyMu.RUnlock()
-	verifiedVersion, err := c.verifyUpgradeRelease(ctx, client, hash.Sum(nil), controlPlaneVersion)
+	verifiedVersion, err := c.verifyUpgradeRelease(ctx, client, hash.Sum(nil), written, controlPlaneVersion)
 	if err != nil {
 		cleanup()
 		return "", "", 0, err
@@ -1248,7 +1248,7 @@ const maxReleaseManifestBytes = 1 << 20
 // different binary must abort the upgrade rather than silently fall back to
 // trusting the control plane. An empty key keeps the previous behaviour, which
 // also covers nodes that enrolled before the key existed.
-func (c *Client) verifyUpgradeRelease(ctx context.Context, client *http.Client, digest []byte, controlPlaneVersion string) (string, error) {
+func (c *Client) verifyUpgradeRelease(ctx context.Context, client *http.Client, digest []byte, size int64, controlPlaneVersion string) (string, error) {
 	if strings.TrimSpace(c.config.ReleasePublicKey) == "" {
 		slog.Warn("Agent upgrade is not signature verified: no release public key is configured",
 			"hint", "set QCH_RELEASE_PUBLIC_KEY in the Agent environment to require a signed release manifest")
@@ -1265,31 +1265,7 @@ func (c *Client) verifyUpgradeRelease(ctx context.Context, client *http.Client, 
 	if err := manifest.Verify(publicKey); err != nil {
 		return "", err
 	}
-	artifact, ok := manifest.AgentBinary()
-	if !ok {
-		return "", errors.New("signed release manifest does not describe an Agent binary")
-	}
-	if !strings.EqualFold(artifact.SHA256, hex.EncodeToString(digest)) {
-		return "", fmt.Errorf("downloaded Agent binary is not the signed release artifact for %s", manifest.Release)
-	}
-	// The Agent must not run a build the panel does not consider current. The
-	// version label lives inside the signed payload, so the panel cannot claim one
-	// version while shipping another: the signature would no longer match.
-	// A panel that reports no version at all predates this check, and an empty
-	// artifact version cannot be compared, so both are refused rather than
-	// silently accepted as a match.
-	controlPlaneVersion = strings.TrimSpace(controlPlaneVersion)
-	artifactVersion := strings.TrimSpace(artifact.Version)
-	if controlPlaneVersion == "" {
-		return "", errors.New("control plane did not report its version, so the Agent cannot confirm the upgrade matches it; upgrade the panel or clear QCH_RELEASE_PUBLIC_KEY")
-	}
-	if artifactVersion == "" {
-		return "", fmt.Errorf("signed release manifest for %s does not declare an Agent version", manifest.Release)
-	}
-	if artifactVersion != controlPlaneVersion {
-		return "", fmt.Errorf("signed release Agent version %q does not match control plane version %q; refusing to install a mismatched build", artifactVersion, controlPlaneVersion)
-	}
-	return artifact.Version, nil
+	return manifest.VerifyAgentBinary(hex.EncodeToString(digest), size, controlPlaneVersion)
 }
 
 // fetchReleaseManifest retrieves and parses the control plane's release

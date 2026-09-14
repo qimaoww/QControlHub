@@ -200,13 +200,12 @@ export QCH_SYSTEMD_UNIT_ROOT="$test_root/unit"
 export QCH_OPENRC_INIT_ROOT="$test_root/init"
 export QCH_OPENRC_CONF_DIR="$test_root/conf"
 export QCH_OPENRC_RUNLEVELS_ROOT="$test_root/runlevels"
-# The sandbox control plane is reached as http://sandbox.local. A bare host now
-# defaults to https:// and plaintext is refused for a non-loopback host unless a
-# CA file is configured, so the harness states its cleartext intent explicitly
-# -- exactly the private-CA shape a real deployment uses.
+# The fake service uses a non-loopback HTTP origin. Opt in with the same flag
+# the real Agent requires; a CA file does not turn HTTP into TLS.
 ca_file="$test_root/control-plane-ca.pem"
 printf '%s\n' 'sandbox placeholder CA' > "$ca_file"
 export QCH_TLS_CA_FILE="$ca_file"
+export QCH_ALLOW_INSECURE_LIVE=true
 export PATH="$fake_bin:$PATH"
 
 control="http://sandbox.local"
@@ -325,17 +324,33 @@ if grep -q '^QCH_ALLOW_HTTP=' "$QCH_AGENT_ENV_FILE"; then
   exit 1
 fi
 
-echo '== explicit http on a non-loopback host is refused without a CA file =='
-if QCH_TLS_CA_FILE= sh "$installer" update http://cleartext-panel.local "$token" > "$test_root/cleartext.log" 2>&1; then
-  printf '%s\n' 'cleartext guard: installer accepted a plaintext control plane' >&2
-  exit 1
-fi
-grep -qi 'refusing a plaintext control-plane URL' "$test_root/cleartext.log" || {
-  printf '%s\n' 'cleartext guard: refusal reason missing from output' >&2
-  exit 1
-}
-# The refused run must not have rewritten the endpoint.
-assert_env_once QCH_SERVER_URL 'https://sandbox.example.com'
+echo '== a CA file cannot authorize remote plaintext or loopback-looking DNS =='
+for cleartext_url in \
+  http://cleartext-panel.local \
+  http://127.attacker.invalid \
+  http://127.0.0.1.attacker.invalid \
+  ws://cleartext-panel.local
+do
+  if QCH_ALLOW_INSECURE_LIVE=false sh "$installer" update "$cleartext_url" "$token" > "$test_root/cleartext.log" 2>&1; then
+    printf '%s\n' "cleartext guard: installer accepted $cleartext_url without explicit opt-in" >&2
+    exit 1
+  fi
+  grep -qi 'refusing a plaintext control-plane URL' "$test_root/cleartext.log"
+  assert_env_once QCH_SERVER_URL 'https://sandbox.example.com'
+done
+
+echo '== explicit remote plaintext opt-in does not require a meaningless CA file =='
+QCH_TLS_CA_FILE= sh "$installer" update "$control" "$token" > "$test_root/insecure-opt-in.log"
+assert_env_once QCH_ALLOW_HTTP true
+assert_env_once QCH_ALLOW_INSECURE_LIVE true
+
+echo '== IPv4 and bracketed IPv6 loopback work without insecure-live opt-in =='
+for loopback_url in http://localhost:8080 http://127.0.0.1:8080 'http://[::1]:8080' 'ws://[::1]:8080'
+do
+  QCH_ALLOW_INSECURE_LIVE=false QCH_TLS_CA_FILE= \
+    sh "$installer" update "$loopback_url" "$token" > "$test_root/loopback.log"
+  grep -Fxq "QCH_SERVER_URL=$loopback_url" "$QCH_AGENT_ENV_FILE"
+done
 
 # A control plane that substitutes an artifact must be rejected even though the
 # substituted file arrives over a valid connection from the expected host.

@@ -22,7 +22,6 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/api"
 	"github.com/qimaoww/qcontrolhub/internal/authn"
 	"github.com/qimaoww/qcontrolhub/internal/core"
-	"github.com/qimaoww/qcontrolhub/internal/release"
 	"github.com/qimaoww/qcontrolhub/internal/store"
 )
 
@@ -127,38 +126,11 @@ func main() {
 		agentInstaller = data
 		slog.Info("serving add-node-credential-protected agent installer", "path", installerPath, "bytes", len(data))
 	}
-	// The release manifest is what lets an Agent verify an upgrade it downloads
-	// from this process. Parse it here so a malformed file fails at startup, and
-	// when the operator also pinned the matching public key, verify the signature
-	// now: a control plane cannot sign, so serving a manifest that does not match
-	// the key would only break every upgrade later.
-	var releaseManifest []byte
-	if manifestPath := strings.TrimSpace(os.Getenv("QCH_RELEASE_MANIFEST_PATH")); manifestPath != "" {
-		data, err := os.ReadFile(manifestPath)
-		if err != nil {
-			slog.Error("read QCH_RELEASE_MANIFEST_PATH", "error", err)
-			os.Exit(1)
-		}
-		parsed, err := release.Parse(data)
-		if err != nil {
-			slog.Error("parse release manifest", "path", manifestPath, "error", err)
-			os.Exit(1)
-		}
-		if rawKey := strings.TrimSpace(os.Getenv("QCH_RELEASE_PUBLIC_KEY")); rawKey != "" {
-			publicKey, err := release.LoadPublicKey(rawKey)
-			if err != nil {
-				slog.Error("load QCH_RELEASE_PUBLIC_KEY", "error", err)
-				os.Exit(1)
-			}
-			if err := parsed.Verify(publicKey); err != nil {
-				slog.Error("release manifest does not match the pinned release key", "path", manifestPath, "error", err)
-				os.Exit(1)
-			}
-		}
-		releaseManifest = data
-		agent, _ := parsed.AgentBinary()
-		slog.Info("serving signed release manifest", "path", manifestPath,
-			"release", parsed.Release, "artifacts", len(parsed.Artifacts), "agent_version", agent.Version)
+	releaseManifest, err := loadReleaseManifest(os.Getenv("QCH_RELEASE_MANIFEST_PATH"),
+		packagedReleaseManifestPath, os.Getenv("QCH_RELEASE_PUBLIC_KEY"), agentBinary, version)
+	if err != nil {
+		slog.Error("invalid Agent release package", "error", err)
+		os.Exit(1)
 	}
 
 	apiServer := api.New(dataStore, api.Config{

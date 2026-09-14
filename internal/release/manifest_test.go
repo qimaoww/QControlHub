@@ -155,6 +155,13 @@ func TestVerifyRejectsTampering(t *testing.T) {
 			t.Fatal("an algorithm downgrade verified")
 		}
 	})
+	t.Run("embedded key mismatch", func(t *testing.T) {
+		manifest := clone()
+		manifest.Signature.PublicKey = base64.RawURLEncoding.EncodeToString(make([]byte, ed25519.PublicKeySize))
+		if err := manifest.Verify(publicKey); err == nil {
+			t.Fatal("a misleading embedded public key was accepted")
+		}
+	})
 	t.Run("manifest format version", func(t *testing.T) {
 		manifest := clone()
 		manifest.ManifestVersion = ManifestVersion + 1
@@ -203,6 +210,13 @@ func TestSignRejectsInvalidInput(t *testing.T) {
 		"short digest":     func(m *Manifest) { m.Artifacts[0].SHA256 = "abc" },
 		"uppercase digest": func(m *Manifest) { m.Artifacts[0].SHA256 = strings.ToUpper(m.Artifacts[0].SHA256) },
 		"negative size":    func(m *Manifest) { m.Artifacts[0].Size = -1 },
+		"empty Agent":      func(m *Manifest) { m.Artifacts[0].Size = 0 },
+		"no Agent role":    func(m *Manifest) { m.Artifacts[0].Role = RoleInstallAsset },
+		"two Agent roles": func(m *Manifest) {
+			m.Artifacts[1].Role = RoleAgentBinary
+		},
+		"wrong Agent path": func(m *Manifest) { m.Artifacts[0].Path = "/another-agent" },
+		"no Agent version": func(m *Manifest) { m.Artifacts[0].Version = "" },
 	} {
 		t.Run(name, func(t *testing.T) {
 			manifest := testManifest(t)
@@ -211,6 +225,14 @@ func TestSignRejectsInvalidInput(t *testing.T) {
 				t.Fatal("signing accepted an invalid manifest")
 			}
 		})
+	}
+}
+
+func TestVerifyAgentBinaryRejectsWrongSize(t *testing.T) {
+	manifest := testManifest(t)
+	binary := []byte("agent-binary-contents")
+	if _, err := manifest.VerifyAgentBinary(Digest(binary), int64(len(binary))+1, "v1.2.3"); err == nil || !strings.Contains(err.Error(), "size") {
+		t.Fatalf("incorrect download size was accepted: %v", err)
 	}
 }
 

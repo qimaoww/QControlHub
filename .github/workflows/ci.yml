@@ -182,22 +182,20 @@ jobs:
           docker compose config --quiet
           bash deploy/tests/quick-start-compose.sh
 
-      # The web image embeds SHA256SUMS and its signature. A node that pins
-      # QCH_RELEASE_PUBLIC_KEY fetches them from /install-assets/ beside the
-      # assets, so a web image built without them is not a usable release image.
-      # Build the same inputs here that a release uses: real checksums over the
-      # real installer assets, over a key generated for this run only. The
-      # throwaway key is fine because this job only proves the image builds; it
-      # never publishes one, and a published web image is bound to the version
-      # and key of the release that produced it.
-      - uses: actions/setup-go@v7
+      - name: Build unsigned development web image from a clean checkout
         if: matrix.target == 'qcontrol-web'
+        run: make web-image-test VERSION=${{ github.sha }}
+
+      # Both distribution images carry the same kind of signed release bundle.
+      # These keys are disposable and are never used by the publication jobs.
+      - uses: actions/setup-go@v7
+        if: matrix.target != 'qagent'
         with:
           go-version-file: go.mod
           cache-dependency-path: go.sum
-      - name: Build signed release artifacts for the web image
-        if: matrix.target == 'qcontrol-web'
-        run: make signing-key release-image-checksums RELEASE_KEY=release.key VERSION=${{ github.sha }}
+      - name: Build signed test release artifacts
+        if: matrix.target != 'qagent'
+        run: make signing-key release-image-checksums RELEASE_KEY="$RUNNER_TEMP/test-release.key" VERSION=${{ github.sha }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -212,22 +210,57 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.target }}
           cache-to: type=gha,mode=max,scope=${{ matrix.target }}
 
-  publish:
-    name: Publish ${{ matrix.target }} image
+      - name: Verify signed images through a real enrollment and upgrade download
+        if: matrix.target == 'qcontrol-plane'
+        run: make release-image-test VERSION=${{ github.sha }}
+
+  sign-release:
+    name: Sign release bundle
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'qimaoww/qcontrolhub'
     needs: images
+    environment: release-signing
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - uses: docker/setup-buildx-action@v4
+      # Fail before ANY image is published. An absent key must not leave web
+      # on an older version while the control-plane and Agent tags advance.
+      # Only this step receives the private key; publish jobs get public files.
+      - name: Sign the exact image Agent and installer assets
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          if [ -z "$RELEASE_SIGNING_KEY" ]; then
+            echo "::error::Configure RELEASE_SIGNING_KEY in the protected release-signing environment. No images were published."
+            exit 1
+          fi
+          signing_key="$RUNNER_TEMP/qch-release.key"
+          trap 'rm -f "$signing_key"' EXIT
+          install -m 0600 /dev/null "$signing_key"
+          printf '%s' "$RELEASE_SIGNING_KEY" > "$signing_key"
+          unset RELEASE_SIGNING_KEY
+          make release-image-checksums RELEASE_KEY="$signing_key" VERSION=${{ github.sha }}
+      - name: Share public release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: signed-release-${{ github.sha }}
+          path: dist/release/
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    name: Publish ${{ matrix.target }} image
+    needs: sign-release
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: read
       packages: write
-    # A published web image has to carry a signature made with the release key:
-    # an installer that pins QCH_RELEASE_PUBLIC_KEY verifies SHA256SUMS against
-    # it, so a web image signed with a throwaway key fails on every pinned node.
-    # Publish it only when the key is configured; the web build step is skipped
-    # otherwise instead of pushing an image nobody can verify.
-    env:
-      RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
     strategy:
       fail-fast: false
       matrix:
@@ -242,21 +275,11 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v6
 
-      # release-checksums needs the toolchain to build the Agent binary and the
-      # signing tool before it can write the checksum list.
-      - uses: actions/setup-go@v7
-        if: env.RELEASE_SIGNING_KEY != ''
+      - name: Download the shared signed release bundle
+        uses: actions/download-artifact@v4
         with:
-          go-version-file: go.mod
-          cache-dependency-path: go.sum
-      - name: Write release signing key
-        if: matrix.target == 'qcontrol-web' && env.RELEASE_SIGNING_KEY != ''
-        run: |
-          install -m 0600 /dev/null release.key
-          printf '%s' "${RELEASE_SIGNING_KEY}" > release.key
-      - name: Build signed release artifacts for the web image
-        if: matrix.target == 'qcontrol-web' && env.RELEASE_SIGNING_KEY != ''
-        run: make release-image-checksums RELEASE_KEY=release.key VERSION=${{ github.sha }}
+          name: signed-release-${{ github.sha }}
+          path: dist/release/
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -269,7 +292,6 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and publish image
-        if: matrix.target != 'qcontrol-web' || env.RELEASE_SIGNING_KEY != ''
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -279,6 +301,29 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.target }}
           provenance: mode=max
           sbom: true
-          tags: |
-            ghcr.io/qimaoww/${{ matrix.image }}:latest
-            ghcr.io/qimaoww/${{ matrix.image }}:${{ github.sha }}
+          tags: ghcr.io/qimaoww/${{ matrix.image }}:${{ github.sha }}
+
+  promote:
+    name: Promote complete release to latest
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      packages: write
+    steps:
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # All immutable image tags must exist before any mutable tag advances.
+      # Registries cannot update three tags atomically; pin QCH_IMAGE_TAG to a
+      # commit for deployments that must not observe a promotion in progress.
+      - name: Promote all images
+        run: |
+          for image in qcontrol-plane qagent qcontrol-web; do
+            docker buildx imagetools create \
+              --tag "ghcr.io/qimaoww/$image:latest" \
+              "ghcr.io/qimaoww/$image:${{ github.sha }}"
+          done
