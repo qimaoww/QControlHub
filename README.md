@@ -94,6 +94,7 @@ Agent 以高权限 root 服务运行，远程任务会真实修改配置、服�
 
 - [HTTP API 与 Agent 协议](docs/api.md)
 - [服务端入站方案](docs/server-plans.md)
+- [入站限制与 CN IP 数据源](docs/cnip-sources.md)
 - [最小配置样例](examples/configs/)
 
 ## License
