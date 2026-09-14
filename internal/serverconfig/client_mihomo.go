@@ -6,9 +6,11 @@ import "errors"
 // builder. Only client credentials are copied; server private keys and paths
 // must never enter a subscription. Keys follow Mihomo's adapter/outbound types.
 func buildMihomoClientYAML(input Input, address, serverName, name string) (string, error) {
-	if input.RealityMLDSA65Verify != "" {
-		return "", errors.New("Mihomo 暂不支持此配置的 Reality ML-DSA-65 校验，请选择 URL 格式")
-	}
+	// Mihomo's reality-opts has no mldsa65Verify field. Xray only appends the
+	// post-quantum signature to its temporary certificate and leaves clients
+	// that do not verify it working, so a node using mldsa65Seed is exported
+	// without the parameter instead of failing the whole Mihomo subscription.
+	// The URL format still carries it as pqv for clients that can verify it.
 	if input.Protocol == ProtocolSudoku {
 		return buildSudokuMihomoYAML(input, address, name)
 	}
@@ -18,7 +20,7 @@ func buildMihomoClientYAML(input Input, address, serverName, name string) (strin
 	switch input.Protocol {
 	case ProtocolShadowsocks, ProtocolSS2022:
 		proxy["type"], proxy["cipher"], proxy["password"] = "ss", input.Method, input.Credential
-	case ProtocolVLESS, ProtocolVLESSXHTTP, ProtocolVLESSEncTCP, ProtocolVLESSEncXHTTP:
+	case ProtocolVLESS, ProtocolVLESSXHTTP, ProtocolVLESSEncTCP, ProtocolVLESSEncXHTTP, ProtocolVLESSEncPlain:
 		proxy["type"], proxy["uuid"] = "vless", input.Credential
 		if input.Flow != "" {
 			proxy["flow"] = input.Flow
@@ -27,7 +29,14 @@ func buildMihomoClientYAML(input Input, address, serverName, name string) (strin
 			proxy["encryption"] = input.VLESSEncryption
 		}
 		if input.RealityEnabled {
-			proxy["reality-opts"] = map[string]any{"public-key": input.RealityPublicKey, "short-id": input.RealityShortID}
+			// Mihomo keeps post-quantum key exchange behind an explicit
+			// switch. REALITY negotiates X25519MLKEM768 as soon as the target
+			// supports it, so every synced Reality node turns it on and falls
+			// back to X25519 when the peer does not offer the group.
+			proxy["reality-opts"] = map[string]any{
+				"public-key": input.RealityPublicKey, "short-id": input.RealityShortID,
+				"support-x25519mlkem768": true,
+			}
 			proxy["client-fingerprint"] = "chrome"
 		}
 	case ProtocolVMess:

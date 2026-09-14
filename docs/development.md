@@ -99,8 +99,6 @@ go test -p 1 ./... -count=1
 
 API 与存储测试会分别创建随机临时 schema，并在测试结束后删除，不共享业务测试数据。PostgreSQL 的 MVCC 回收仍会受其他 schema 的长事务影响；`make test` 和 `make alpine-test` 默认按包顺序执行，避免并行集成测试干扰 HOT/表膨胀断言。CI 的 Go 测试分片各自使用独立数据库（在 `QCH_TEST_DATABASE_URL` 的库名后追加 `_shardN`，分片数量由 `QCH_TEST_SHARDS` 控制），分片内部仍按包顺序执行，因此既加快流水线，又不会让不同分片的迁移测试共享同一个 MVCC 回收窗口。测试内部的并发场景照常执行，性能阈值不变。仍应使用专用测试数据库账户，不要指向生产数据库。
 
-本地数据库和远程模拟延迟 benchmark、查询预算及高压测试见 [本地与远程 PostgreSQL 性能](performance.md)。
-
 构建发布二进制：
 
 ```bash

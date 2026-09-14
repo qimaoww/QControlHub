@@ -29,7 +29,7 @@ func generateMihomo(input Input) (string, error) {
 		listener["cipher"] = input.Method
 		listener["password"] = input.Credential
 		listener["udp"] = true
-	case ProtocolVLESS, ProtocolVLESSXHTTP, ProtocolVLESSEncTCP, ProtocolVLESSEncXHTTP:
+	case ProtocolVLESS, ProtocolVLESSXHTTP, ProtocolVLESSEncTCP, ProtocolVLESSEncXHTTP, ProtocolVLESSEncPlain:
 		listener["type"] = "vless"
 		user := map[string]any{"username": input.Username, "uuid": input.Credential}
 		if input.Flow != "" {
@@ -262,6 +262,9 @@ func parseMihomo(content string) (Input, bool) {
 		}
 		if input.Transport == "xhttp" {
 			input.Protocol = ProtocolVLESSEncXHTTP
+		} else if !input.TLSEnabled && !input.RealityEnabled {
+			// Mihomo 把 decryption 视为与证书、Reality 同级的必要项，允许裸 TCP。
+			input.Protocol = ProtocolVLESSEncPlain
 		} else {
 			input.Protocol = ProtocolVLESSEncTCP
 		}

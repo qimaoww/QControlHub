@@ -26,7 +26,7 @@ func BuildClientOutbound(engine core.Engine, input Input, address, serverName st
 	switch protocol {
 	case ProtocolShadowsocks, ProtocolSS2022:
 		protocol = "shadowsocks"
-	case ProtocolVLESS, ProtocolVLESSXHTTP, ProtocolVLESSEncTCP, ProtocolVLESSEncXHTTP:
+	case ProtocolVLESS, ProtocolVLESSXHTTP, ProtocolVLESSEncTCP, ProtocolVLESSEncXHTTP, ProtocolVLESSEncPlain:
 		protocol = "vless"
 	case ProtocolVMess, ProtocolTrojan:
 	case ProtocolHy2, ProtocolTUIC, ProtocolAnyTLS:

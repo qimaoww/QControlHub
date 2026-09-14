@@ -123,7 +123,7 @@ func TestMihomoClientExportProtocolMatrix(t *testing.T) {
 					if proxy["cipher"] != input.Method || proxy["password"] != input.Credential {
 						t.Fatal("Shadowsocks credentials changed")
 					}
-				case ProtocolVLESS, ProtocolVLESSXHTTP, ProtocolVLESSEncTCP, ProtocolVLESSEncXHTTP:
+				case ProtocolVLESS, ProtocolVLESSXHTTP, ProtocolVLESSEncTCP, ProtocolVLESSEncXHTTP, ProtocolVLESSEncPlain:
 					wantType = "vless"
 					if proxy["uuid"] != input.Credential {
 						t.Fatal("VLESS UUID changed")
@@ -133,6 +133,11 @@ func TestMihomoClientExportProtocolMatrix(t *testing.T) {
 						if proxy["tls"] != true || reality["public-key"] != input.RealityPublicKey || reality["short-id"] != input.RealityShortID || proxy["servername"] != input.RealityServerName {
 							t.Fatal("Reality client settings were lost")
 						}
+						if reality["support-x25519mlkem768"] != true {
+							t.Fatal("Mihomo Reality clients must opt into X25519MLKEM768")
+						}
+					} else if proxy["reality-opts"] != nil {
+						t.Fatal("non-Reality client unexpectedly carries reality-opts")
 					}
 					if isVLESSEncryptionProtocol(input.Protocol) && proxy["encryption"] != input.VLESSEncryption {
 						t.Fatal("VLESS client encryption was lost")
@@ -213,18 +218,32 @@ func TestMihomoClientTransportOptions(t *testing.T) {
 	}
 }
 
-func TestMihomoRejectsUnsupportedRealityVerificationWithoutDowngrade(t *testing.T) {
+// Mihomo's reality-opts has no mldsa65Verify field, and Xray only appends the
+// post-quantum signature to its temporary certificate, so clients that do not
+// verify it still connect. The Mihomo export therefore omits the parameter and
+// keeps the node usable, while the URL format still carries it as pqv.
+func TestMihomoOmitsRealityVerificationItCannotExpress(t *testing.T) {
 	protocol, _ := FindProtocol(core.EngineXray, ProtocolVLESS)
 	input, err := NewPlan(protocol)
 	if err != nil {
 		t.Fatal(err)
 	}
 	input.RealityMLDSA65Seed = base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat("q", 32)))
+	verify, err := mldsa65VerifyFromSeed(input.RealityMLDSA65Seed)
+	if err != nil {
+		t.Fatal(err)
+	}
 	profile, err := BuildClientProfile(input, "edge.example.test", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if profile.Mihomo != "" || !strings.Contains(profile.MihomoError, "ML-DSA-65") || !strings.Contains(profile.URI, "pqv=") {
-		t.Fatal("unsupported Reality verification was silently removed or URL export broke")
+	if profile.Mihomo == "" || profile.MihomoError != "" {
+		t.Fatalf("Mihomo export refused a Reality node: %q %s", profile.Mihomo, profile.MihomoError)
+	}
+	if strings.Contains(profile.Mihomo, "mldsa") || strings.Contains(profile.Mihomo, verify) {
+		t.Fatal("Mihomo export leaked a verification value it cannot express")
+	}
+	if !strings.Contains(profile.URI, "pqv=") {
+		t.Fatal("URL export dropped the Reality verification value")
 	}
 }
