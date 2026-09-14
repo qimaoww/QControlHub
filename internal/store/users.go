@@ -86,7 +86,7 @@ func (s *Store) CreateUser(ctx context.Context, request core.UserRequest, passwo
 	}
 	username := strings.TrimSpace(request.Username)
 	displayName := strings.TrimSpace(request.DisplayName)
-	normalized := core.NormalizePermissions(request.Permissions, core.AllPermissions())
+	normalized := core.NormalizePermissions(request.Permissions)
 	if request.Role == core.RoleAdmin {
 		normalized = core.AllPermissions()
 	}
@@ -157,7 +157,7 @@ func (s *Store) UpdateUser(ctx context.Context, id string, update core.UserUpdat
 		displayName = strings.TrimSpace(*update.DisplayName)
 	}
 	if update.Permissions != nil {
-		permissions = core.NormalizePermissions(*update.Permissions, core.AllPermissions())
+		permissions = core.NormalizePermissions(*update.Permissions)
 	} else if current.User.Role == core.RoleAdmin && role != core.RoleAdmin {
 		permissions = []core.Permission{}
 	}
@@ -465,5 +465,5 @@ func effectiveUserPermissions(role core.Role, permissions []core.Permission) []c
 	if role == core.RoleAdmin {
 		return core.AllPermissions()
 	}
-	return core.NormalizePermissions(permissions, core.GrantablePermissions())
+	return core.NormalizeGrantablePermissions(permissions)
 }

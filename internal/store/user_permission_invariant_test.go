@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"reflect"
 	"testing"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
@@ -18,6 +19,9 @@ func TestUserPermissionStoreRejectsAdministratorGrant(t *testing.T) {
 		if !errors.Is(err, ErrInvalid) {
 			t.Fatalf("direct store create should reject the grant, got %v", err)
 		}
+		if _, _, err := db.UserForLogin(ctx, "forbidden-grant"); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("rejected creation left an account behind: %v", err)
+		}
 	})
 	t.Run("update", func(t *testing.T) {
 		user, err := db.CreateUser(admin, core.UserRequest{
@@ -26,8 +30,33 @@ func TestUserPermissionStoreRejectsAdministratorGrant(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := db.UpdateUser(admin, user.ID, core.UserUpdate{Permissions: &forbidden}, ""); !errors.Is(err, ErrInvalid) {
+		displayName, disabled := "must not be saved", true
+		if _, err := db.UpdateUser(admin, user.ID, core.UserUpdate{
+			Permissions: &forbidden, DisplayName: &displayName, Disabled: &disabled,
+		}, "must not replace the hash"); !errors.Is(err, ErrInvalid) {
 			t.Fatalf("direct store update should reject the grant, got %v", err)
+		}
+		stored, hash, err := db.UserForLogin(ctx, user.Username)
+		if err != nil || !reflect.DeepEqual(stored, user) || hash != "password hash fixture" {
+			t.Fatalf("rejected update changed the account or authentication revision: %+v %v", stored, err)
+		}
+	})
+	t.Run("demotion", func(t *testing.T) {
+		user, err := db.CreateUser(admin, core.UserRequest{
+			Username: "administrator", Role: core.RoleAdmin, Permissions: core.AllPermissions(),
+		}, "password hash fixture")
+		if err != nil {
+			t.Fatal(err)
+		}
+		role := core.RoleUser
+		if _, err := db.UpdateUser(admin, user.ID, core.UserUpdate{
+			Role: &role, Permissions: &forbidden,
+		}, ""); !errors.Is(err, ErrInvalid) {
+			t.Fatalf("direct store demotion should reject the grant, got %v", err)
+		}
+		stored, err := db.UserForSession(ctx, user.ID)
+		if err != nil || !reflect.DeepEqual(stored, user) {
+			t.Fatalf("rejected demotion changed the account or authentication revision: %+v %v", stored, err)
 		}
 	})
 }

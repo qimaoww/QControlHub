@@ -46,7 +46,13 @@ var allPermissions = []Permission{
 	PermissionTemplatesWrite, PermissionTemplatesDelete,
 }
 
-var rolePermissions = map[Role]map[Permission]struct{}{}
+// These sets are built once during package initialization and never exposed
+// for mutation. Login/session reads can share them without rebuilding policy.
+var (
+	rolePermissions        = map[Role]map[Permission]struct{}{}
+	grantablePermissions   []Permission
+	grantablePermissionSet map[Permission]struct{}
+)
 
 func AllPermissions() []Permission { return append([]Permission(nil), allPermissions...) }
 
@@ -61,27 +67,25 @@ func PermissionGrantsAdministration(permission Permission) bool {
 // to a non-administrator. Store writes reject administrator-only requests;
 // reads use this allowlist to filter impossible grants in older backups.
 func GrantablePermissions() []Permission {
-	result := make([]Permission, 0, len(allPermissions))
-	for _, permission := range allPermissions {
-		if PermissionGrantsAdministration(permission) {
-			continue
-		}
-		result = append(result, permission)
-	}
-	return result
+	return append([]Permission(nil), grantablePermissions...)
 }
 
-// NormalizePermissions keeps only known capabilities. assignable is used for
-// requests that attach capabilities to an account, so an admin-equivalent
-// capability cannot be stored on a user row; pass AllPermissions to normalize
-// a role that already carries full authority.
-func NormalizePermissions(values []Permission, assignable []Permission) []Permission {
-	allowed := make(map[Permission]struct{}, len(assignable))
-	for _, value := range assignable {
-		allowed[value] = struct{}{}
-	}
-	seen := make(map[Permission]struct{}, len(values))
-	result := make([]Permission, 0, len(values))
+// NormalizePermissions keeps known capabilities in their original order,
+// without duplicates. Account writes must also validate the resulting role.
+func NormalizePermissions(values []Permission) []Permission {
+	return normalizePermissions(values, rolePermissions[RoleAdmin])
+}
+
+// NormalizeGrantablePermissions also removes administrator-only capabilities
+// when resolving an existing non-administrator account.
+func NormalizeGrantablePermissions(values []Permission) []Permission {
+	return normalizePermissions(values, grantablePermissionSet)
+}
+
+func normalizePermissions(values []Permission, allowed map[Permission]struct{}) []Permission {
+	capacity := min(len(values), len(allowed))
+	seen := make(map[Permission]struct{}, capacity)
+	result := make([]Permission, 0, capacity)
 	for _, value := range values {
 		if _, ok := allowed[value]; !ok {
 			continue
@@ -100,6 +104,12 @@ func NormalizePermissions(values []Permission, assignable []Permission) []Permis
 // complete break-glass role while lower roles stay deny-by-default.
 func init() {
 	rolePermissions[RoleAdmin] = permissionSet(allPermissions...)
+	for _, permission := range allPermissions {
+		if !PermissionGrantsAdministration(permission) {
+			grantablePermissions = append(grantablePermissions, permission)
+		}
+	}
+	grantablePermissionSet = permissionSet(grantablePermissions...)
 }
 
 func permissionSet(values ...Permission) map[Permission]struct{} {

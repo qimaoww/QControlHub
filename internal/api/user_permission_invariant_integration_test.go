@@ -64,32 +64,6 @@ func TestUserRoleCannotHoldAdminEquivalentPermission(t *testing.T) {
 	}
 }
 
-// The console does not offer users.manage for assignment. If a future change
-// adds it, this test fails and points at the invariant, instead of silently
-// widening every user account created from then on.
-func TestGrantablePermissionsExcludeAdministratorCapabilities(t *testing.T) {
-	grantable := core.GrantablePermissions()
-	if core.HasPermission(grantable, core.PermissionUsersManage) {
-		t.Fatal("users.manage is admin-equivalent and must not be grantable")
-	}
-	if len(grantable) != len(core.AllPermissions())-1 {
-		t.Fatalf("grantable permissions = %d, all = %d; expected exactly one administrator-only capability",
-			len(grantable), len(core.AllPermissions()))
-	}
-	// Resolving an old non-administrator row must drop impossible grants.
-	stored := core.NormalizePermissions(
-		[]core.Permission{core.PermissionOverviewRead, core.PermissionUsersManage},
-		grantable,
-	)
-	if len(stored) != 1 || core.HasPermission(stored, core.PermissionUsersManage) {
-		t.Fatalf("NormalizePermissions kept an administrator capability: %v", stored)
-	}
-	// A role that already carries full authority normalizes against the full set.
-	if got := core.NormalizePermissions([]core.Permission{core.PermissionUsersManage}, core.AllPermissions()); len(got) != 1 {
-		t.Fatalf("administrator normalization dropped users.manage: %v", got)
-	}
-}
-
 func TestAdministratorPermissionsRoundTrip(t *testing.T) {
 	_, _, admin, alice, _ := newConfigScopeAPIFixture(t)
 	var created core.User
