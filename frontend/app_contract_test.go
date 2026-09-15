@@ -83,17 +83,13 @@ func TestSPAConsoleSurfaceMatchesInitialRelease(t *testing.T) {
 }
 
 func TestServerPlanRegenerationStaysLocalAndUsesCurrentFormState(t *testing.T) {
-	configs, err := os.ReadFile("modules/configs.js")
-	if err != nil {
-		t.Fatal(err)
+	form := string(mustReadFrontendFile(t, "modules/server-plan-form.js"))
+	content := form + "\n" + string(mustReadFrontendFile(t, "modules/configs.js"))
+	start := strings.Index(form, "export function bindServerPlanRegeneration")
+	if start < 0 {
+		t.Fatal("server-plan-form.js is missing the isolated server-plan regeneration handler")
 	}
-	content := string(configs)
-	start := strings.Index(content, "export function bindServerPlanRegeneration")
-	end := strings.Index(content, "export function installConfigPages")
-	if start < 0 || end <= start {
-		t.Fatal("configs.js is missing the isolated server-plan regeneration handler")
-	}
-	handler := content[start:end]
+	handler := form[start:]
 	for _, required := range []string{
 		"readServerPlanInput(form, protocol)",
 		"JSON.stringify({ protocol: protocol.key, input })",
@@ -995,32 +991,45 @@ func TestSPAModulesArePublished(t *testing.T) {
 
 func TestAgentBatchAndEnrollmentSafetyContracts(t *testing.T) {
 	content := string(mustReadFrontendFile(t, "modules/agents.js"))
-	for _, marker := range []string{
-		`agent-self-upgrade-v1`,
-		`旧版 Agent 缺少远程升级能力`,
-		`batchForm.dataset.busy === "1"`,
-		`batchForm.dataset.confirming === "1"`,
-		`for (const input of selected)`,
-		`data-batch-retry`,
-		`data-batch-select-all`,
-		`selectAll.indeterminate = selection.indeterminate`,
-		`selection.indeterminate ? "mixed"`,
-		`命令仅供复制；关闭页面不会连接、安装或重启任何节点。`,
-		`showCommand(command, async () =>`,
-		`命令仅供复制，不会自动执行。`,
-		`document.body.style.overflow = "hidden"`,
-		`root.inert = true`,
-		`new MutationObserver(lockBackground)`,
-		`event.key !== "Tab"`,
-		`button.dataset.confirmDelete !== "1"`,
+	for file, markers := range map[string][]string{
+		"modules/agents.js": {
+			`batchForm.dataset.busy === "1"`,
+			`batchForm.dataset.confirming === "1"`,
+			`for (const input of selected)`,
+			`data-batch-retry`,
+			`data-batch-select-all`,
+			`selectAll.indeterminate = selection.indeterminate`,
+			`selection.indeterminate ? "mixed"`,
+			`showCommand(command, async () =>`,
+			`createAgentEnrollment({`,
+		},
+		"modules/agent-batch.js": {
+			`agent-self-upgrade-v1`,
+			`旧版 Agent 缺少远程升级能力`,
+		},
+		"modules/agent-enrollment.js": {
+			`命令仅供复制；关闭页面不会连接、安装或重启任何节点。`,
+			`命令仅供复制，不会自动执行。`,
+			`document.body.style.overflow = "hidden"`,
+			`root.inert = true`,
+			`new MutationObserver(lockBackground)`,
+			`event.key !== "Tab"`,
+			`button.dataset.confirmDelete !== "1"`,
+		},
 	} {
-		if !strings.Contains(content, marker) {
-			t.Errorf("agent batch/enrollment safety contract is missing %q", marker)
+		source := string(mustReadFrontendFile(t, file))
+		for _, marker := range markers {
+			if !strings.Contains(source, marker) {
+				t.Errorf("%s is missing batch/enrollment safety contract %q", file, marker)
+			}
 		}
 	}
 	created := strings.Index(content, `const created = await api("/enrollment-tokens"`)
+	if created < 0 {
+		t.Fatal("enrollment flow must create an enrollment token")
+	}
 	shown := strings.Index(content[created:], `showCommand(command`)
-	if created < 0 || shown < 0 {
+	if shown < 0 {
 		t.Fatal("enrollment flow must show the generated command")
 	}
 	shown += created
@@ -1031,7 +1040,8 @@ func TestAgentBatchAndEnrollmentSafetyContracts(t *testing.T) {
 }
 
 func TestEnrollmentUsesARealDialogWithoutPersistentPanel(t *testing.T) {
-	module := string(mustReadFrontendFile(t, "modules/agents.js"))
+	module := string(mustReadFrontendFile(t, "modules/agents.js")) + "\n" +
+		string(mustReadFrontendFile(t, "modules/agent-enrollment.js"))
 	css := string(mustReadFrontendFile(t, "app.css"))
 	app := string(mustReadFrontendFile(t, "app.js"))
 	if strings.Contains(app, `href="#enrollment"`) || !strings.Contains(app, `type="button" data-open-enrollment`) {
@@ -1070,11 +1080,8 @@ func mustReadFrontendFile(t *testing.T, name string) []byte {
 }
 
 func TestManualConfigRequiresExplicitImportOfNodeSnapshot(t *testing.T) {
-	configs, err := os.ReadFile("modules/configs.js")
-	if err != nil {
-		t.Fatal(err)
-	}
-	content := string(configs)
+	content := string(mustReadFrontendFile(t, "modules/configs.js")) + "\n" +
+		string(mustReadFrontendFile(t, "modules/live-config-state.js"))
 	for _, required := range []string{
 		`data-live-intent="import">手动导入并迁移`,
 		`迁移任一步失败都会自动恢复原服务`,
@@ -1393,7 +1400,7 @@ func TestAgentPollingRefreshesNewlyEnrolledNodeStructure(t *testing.T) {
 		t.Fatal("Agent roster polling function boundary is missing")
 	}
 	pollBody := agents[pollStart:]
-	pollEnd := strings.Index(pollBody, "function bindCodeEditors()")
+	pollEnd := strings.Index(pollBody, "\n  return {\n    agents,")
 	if pollEnd < 0 {
 		t.Fatal("Agent roster polling function end is missing")
 	}
@@ -1458,7 +1465,8 @@ func TestPanelReadsAndNodeRegionsAvoidPerRenderRequests(t *testing.T) {
 			t.Errorf("node list region rendering is missing %q", required)
 		}
 	}
-	if !strings.Contains(read("modules/agents.js"), "state.data.agentKomari") {
+	if !strings.Contains(read("modules/agent-komari.js"), "state.data.agentKomari") ||
+		!strings.Contains(read("modules/agents.js"), "createAgentKomariDisplay({") {
 		t.Error("node cards must cache the Komari read per node")
 	}
 	if !strings.Contains(read("module_smoke.mjs"), `import "./panel_reads_smoke.mjs"`) {
