@@ -88,6 +88,10 @@ const routeModules = createRouteModuleLoader({
       actionName, bytes, rate, shell,
     });
   },
+  async "ip-quality"() {
+    const { installIPQuality } = await import("./modules/ip-quality.js");
+    return installIPQuality({ api, state, shell });
+  },
   async agents() {
     const { installAgents } = await import("./modules/agents.js");
     return installAgents({

@@ -12,6 +12,7 @@ function shell(content, title, { viewKey = state.route } = {}) {
   const pendingShares = (state.data.agentAccess?.shares || []).filter(share => share.enabled && share.status === "pending").length;
   const links = [
     ["dashboard", "总览", dockIcons.layoutDashboard],
+    ["ip-quality", "IP 质量", dockIcons.chart, true],
     ["node-settings", "节点", dockIcons.server],
     ["live-config", "配置", dockIcons.fileCode],
     ["client-access", "客户端", dockIcons.monitorSmartphone],
@@ -24,6 +25,7 @@ function shell(content, title, { viewKey = state.route } = {}) {
   ];
   const linkPermissions = {
     dashboard: "overview.read",
+    "ip-quality": "overview.read",
     agents: "agents.read",
     "node-settings": "agents.read",
     "client-access": "client-access.read",
@@ -86,6 +88,7 @@ function shell(content, title, { viewKey = state.route } = {}) {
     : "";
   const mobileMoreRoutes = [
     ["substore-sync", "Sub-Store 同步"],
+    ["ip-quality", "IP 质量检测"],
     ["access-control", "访问限制"],
     ["system-bbr", "BBR / TCP 调优"],
     ["traffic", "流量"],
