@@ -12,6 +12,11 @@ EnvironmentFile=/etc/qcontrolhub/agent.env
 WorkingDirectory=/var/lib/qcontrolhub
 StateDirectory=qcontrolhub
 StateDirectoryMode=0700
+RuntimeDirectory=qagent-core-logs
+RuntimeDirectoryMode=0700
+# Keep the volatile transport cache while qagent itself is restarted so cores
+# never continue writing to an unlinked inode. /run is still cleared on reboot.
+RuntimeDirectoryPreserve=yes
 UMask=0077
 ExecStart=/usr/local/bin/qagent
 Restart=on-failure

@@ -284,7 +284,12 @@ else
     printf '%s\n' "refusing symlinked journal configuration: $journal_config" >&2
     exit 1
   fi
-  install -o root -g root -m 0644 "$script_dir/systemd/qagent-core-journal.conf" "$journal_config"
+  # A policy already written by the running Agent belongs to the panel. Keep
+  # it when adding another core; otherwise install the smallest valid startup
+  # budget until the Agent receives the panel policy.
+  if [ ! -f "$journal_config" ] || ! grep -qx '# qcontrolhub-node-budget-v2' "$journal_config"; then
+    install -o root -g root -m 0644 "$script_dir/systemd/qagent-core-journal.conf" "$journal_config"
+  fi
   systemctl daemon-reload
   for engine in $skipped_engines; do
     disable_skipped_core_service "$engine"

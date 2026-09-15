@@ -16,10 +16,55 @@ import (
 func TestManagedCoreJournalConfigForPolicy(t *testing.T) {
 	t.Parallel()
 	config := string(managedCoreJournalConfigForPolicy(core.AgentPolicy{CoreLogMaxMiB: 1, CoreLogRotateCount: 1}))
-	for _, expected := range []string{"Storage=volatile", "RuntimeMaxUse=1048576", "RuntimeMaxFileSize=524288"} {
+	for _, expected := range []string{"Storage=volatile", "RuntimeMaxUse=524288", "RuntimeMaxFileSize=262144"} {
 		if !strings.Contains(config, expected) {
 			t.Errorf("journal policy missing %q:\n%s", expected, config)
 		}
+	}
+}
+
+func TestManagedCoreJournalPolicyRecognitionRejectsOldUnboundedAllocation(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "10-qcontrolhub-volatile.conf")
+	managed := managedCoreJournalConfigForPolicy(core.AgentPolicy{CoreLogMaxMiB: 16, CoreLogRotateCount: 1})
+	if err := os.WriteFile(path, managed, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := hasManagedCoreJournalPolicy(path); err != nil || !ok {
+		t.Fatalf("current managed policy = %v, %v", ok, err)
+	}
+	legacy := strings.Replace(string(managed), "# qcontrolhub-node-budget-v2\n", "", 1)
+	legacy = strings.Replace(legacy, "RuntimeMaxUse=8388608", "RuntimeMaxUse=16777216", 1)
+	legacy = strings.Replace(legacy, "RuntimeMaxFileSize=4194304", "RuntimeMaxFileSize=8388608", 1)
+	if err := os.WriteFile(path, []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := hasManagedCoreJournalPolicy(path); err != nil || ok {
+		t.Fatalf("old full-budget journal policy = %v, %v", ok, err)
+	}
+}
+
+func TestCoreLogCollectorStartsBelowEveryValidPanelLimit(t *testing.T) {
+	t.Parallel()
+	collector := NewCoreLogCollector()
+	if collector.coreLogMaxBytes != 1<<20 || collector.coreLogRotateCount != 0 {
+		t.Fatalf("startup policy = %d bytes/%d snapshots, want 1 MiB/0", collector.coreLogMaxBytes, collector.coreLogRotateCount)
+	}
+}
+
+func TestSystemdCoreLogBackendsShareNodeWideBudget(t *testing.T) {
+	t.Parallel()
+	collector := NewCoreLogCollector()
+	collector.coreLogMaxBytes = 1 << 20
+	collector.coreLogRotateCount = 1
+	fileBytes, rotations := collector.rotationPolicy()
+	if rotations != 1 {
+		t.Fatalf("rotation count = %d, want 1", rotations)
+	}
+	fallbackBudget := fileBytes * int64(len(collector.fileSources)) * int64(rotations+1)
+	journalBudget := int64(1 << 19)
+	if total := fallbackBudget + journalBudget; total > 1<<20 {
+		t.Fatalf("combined cache budget = %d, exceeds panel limit %d", total, 1<<20)
 	}
 }
 
@@ -40,6 +85,32 @@ func TestOpenRCCoreLogPolicyWithoutArchivesTruncatesInPlace(t *testing.T) {
 	}
 	if _, err := os.Stat(path + ".old"); !os.IsNotExist(err) {
 		t.Fatalf("zero-archive policy created a snapshot: %v", err)
+	}
+}
+
+func TestSystemdFallbackRotationTruncatesWithoutLogBackup(t *testing.T) {
+	previousRoot := systemdFallbackCoreLogRoot
+	systemdFallbackCoreLogRoot = t.TempDir()
+	t.Cleanup(func() { systemdFallbackCoreLogRoot = previousRoot })
+	path, err := systemdFallbackCoreLogPath("qagent-xray.service")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, bytes.Repeat([]byte("x"), 1<<20), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	source := coreLogFileSource{path: path, root: systemdFallbackCoreLogRoot, engine: core.EngineXray, kind: "systemd-fallback"}
+	collector := &CoreLogCollector{
+		coreLogMaxBytes: 1 << 20, coreLogRotateCount: 1, fileBudgetDivisor: 2,
+		fileSources: []coreLogFileSource{source},
+	}
+	collector.rotateFile(source)
+	info, err := os.Stat(path)
+	if err != nil || info.Size() != 0 {
+		t.Fatalf("fallback cache after rotation = %+v, %v", info, err)
+	}
+	if _, err := os.Stat(path + ".old"); !os.IsNotExist(err) {
+		t.Fatalf("fallback rotation retained a log backup: %v", err)
 	}
 }
 

@@ -528,7 +528,7 @@ func TestAgentUpgradeNormalizesCompletedSingBoxExternalLogAndReclaimsIt(t *testi
 	if err := executor.LoadCoreMigrationState(); err != nil {
 		t.Fatal(err)
 	}
-	if err := executor.upgradeCompletedCoreLogPolicies(context.Background()); err != nil {
+	if err := executor.upgradeManagedCoreLogPolicies(context.Background()); err != nil {
 		t.Fatalf("upgrade completed sing-box log policy: %v", err)
 	}
 	contents, err := os.ReadFile(managed.ConfigPath)
@@ -586,7 +586,7 @@ func TestAgentUpgradeRollsBackCompletedSingBoxLogNormalizationOnRestartFailure(t
 	if err := executor.LoadCoreMigrationState(); err != nil {
 		t.Fatal(err)
 	}
-	if err := executor.upgradeCompletedCoreLogPolicies(context.Background()); err == nil {
+	if err := executor.upgradeManagedCoreLogPolicies(context.Background()); err == nil {
 		t.Fatal("failed managed restart accepted the log policy upgrade")
 	}
 	contents, err := os.ReadFile(managed.ConfigPath)
@@ -594,6 +594,101 @@ func TestAgentUpgradeRollsBackCompletedSingBoxLogNormalizationOnRestartFailure(t
 		t.Fatalf("failed upgrade did not restore configuration: %v\n%s", err, contents)
 	}
 	fixture.assertServiceState(t, managed.Service, "active", "enabled")
+}
+
+func TestAgentUpgradeRepairsPersistentLogsForEveryAffectedCore(t *testing.T) {
+	requireAgentRoot(t)
+	for _, test := range []struct {
+		engine  core.Engine
+		content func(string) string
+		logs    func(string) map[string]string
+	}{
+		{
+			engine: core.EngineXray,
+			content: func(root string) string {
+				return fmt.Sprintf(`{"log":{"access":%q,"error":%q,"loglevel":"info"},"inbounds":[],"outbounds":[]}`,
+					filepath.Join(root, "xray", "access.log"), filepath.Join(root, "xray", "error.log"))
+			},
+			logs: func(root string) map[string]string {
+				return map[string]string{
+					filepath.Join(root, "xray", "access.log"): "old xray access log\n",
+					filepath.Join(root, "xray", "error.log"):  "old xray error log\n",
+				}
+			},
+		},
+		{
+			engine: core.EngineShadowsocksRust,
+			content: func(root string) string {
+				return fmt.Sprintf(`{"server":"::","server_port":20001,"method":"aes-256-gcm","password":"test-password","log":{"level":1,"writers":[{"file":{"directory":%q,"prefix":"ssserver","suffix":"log","rotation":"daily","max_files":5}},{"syslog":{}}]}}`, filepath.Join(root, "ss-rust"))
+			},
+			logs: func(root string) map[string]string {
+				return map[string]string{
+					filepath.Join(root, "ss-rust", "ssserver.2026-09-14.log"): "old SS Rust log one\n",
+					filepath.Join(root, "ss-rust", "ssserver.2026-09-15.log"): "old SS Rust log two\n",
+				}
+			},
+		},
+	} {
+		t.Run(string(test.engine), func(t *testing.T) {
+			fixture := newExistingCoreMigrationFixture(t, false)
+			logRoot := t.TempDir()
+			previousLegacyRoot := legacyCoreLogRoot
+			legacyCoreLogRoot = logRoot
+			t.Cleanup(func() { legacyCoreLogRoot = previousLegacyRoot })
+			managed := fixture.managed
+			managed.Service = "qagent-" + string(test.engine) + ".service"
+			if err := os.WriteFile(managed.Binary, existingDiscoveryCoreHelper, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			content := test.content(logRoot)
+			if err := os.WriteFile(managed.ConfigPath, []byte(content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			logs := test.logs(logRoot)
+			for path, contents := range logs {
+				if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			unrelated := filepath.Join(logRoot, "ss-rust", "operator.txt")
+			if test.engine == core.EngineShadowsocksRust {
+				if err := os.WriteFile(unrelated, []byte("keep me"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			writeMigrationServiceState(t, fixture.stateDirectory, managed.Service, "active", "enabled")
+			executor := &Executor{Specs: map[core.Engine]EngineSpec{test.engine: managed}}
+			if err := executor.upgradeManagedCoreLogPolicies(context.Background()); err != nil {
+				t.Fatalf("upgrade %s log policy: %v", test.engine, err)
+			}
+			normalized, err := os.ReadFile(managed.ConfigPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := validateNoPersistentCoreLogs(test.engine, string(normalized)); err != nil {
+				t.Fatalf("normalized %s configuration still persists logs: %v\n%s", test.engine, err, normalized)
+			}
+			for path := range logs {
+				info, err := os.Stat(path)
+				if err != nil || info.Size() != 0 {
+					t.Fatalf("retired %s log %s was not cleared: %+v, %v", test.engine, path, info, err)
+				}
+			}
+			if test.engine == core.EngineShadowsocksRust {
+				contents, err := os.ReadFile(unrelated)
+				if err != nil || string(contents) != "keep me" {
+					t.Fatalf("unrelated SS Rust file changed: %q, %v", contents, err)
+				}
+			}
+			commands, err := os.ReadFile(filepath.Join(fixture.stateDirectory, "commands.log"))
+			if err != nil || !strings.Contains(string(commands), "restart "+managed.Service) {
+				t.Fatalf("managed %s service was not restarted: %v\n%s", test.engine, err, commands)
+			}
+		})
+	}
 }
 
 func TestRetiredCoreLogCleanupUsesRestrictedSystemdHelperWhenSandboxed(t *testing.T) {
