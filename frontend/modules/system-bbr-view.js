@@ -12,7 +12,8 @@ export function createSystemBBRView({ state, can, esc, date, shell }, { lifecycl
   }
 
   function dialogButton(agent, kind, title) {
-    return `<button class="bbr-dialog-open" type="button" data-bbr-dialog-open="${esc(dialogID(agent.id, kind))}" aria-haspopup="dialog" aria-controls="${esc(dialogID(agent.id, kind))}"><span>${title}${kind === "editor" ? `<small data-bbr-draft-label="${esc(agent.id)}" ${Object.keys(lifecycle.drafts[agent.id] || {}).length ? "" : "hidden"}>有未提交草稿</small>` : ""}</span><span aria-hidden="true">→</span></button>`;
+    const shortTitle = kind === "editor" ? "编辑参数" : "参数详情";
+    return `<button class="bbr-dialog-open" type="button" data-bbr-dialog-open="${esc(dialogID(agent.id, kind))}" aria-label="${esc(title)}" aria-haspopup="dialog" aria-controls="${esc(dialogID(agent.id, kind))}"><span>${shortTitle}${kind === "editor" ? `<small data-bbr-draft-label="${esc(agent.id)}" ${Object.keys(lifecycle.drafts[agent.id] || {}).length ? "" : "hidden"}>有草稿</small>` : ""}</span><span aria-hidden="true">→</span></button>`;
   }
 
   function editor(agent, disabled) {
@@ -55,12 +56,12 @@ export function createSystemBBRView({ state, can, esc, date, shell }, { lifecycl
       const hasFeature = (agent.features || []).includes(systemBBRFeature);
       const value = (entry) => esc(entry || "未上报");
       const persistence = status?.persistence === "managed"
-        ? `面板管理 ${Object.keys(status.configured_parameters || {}).length} 项`
-        : status?.persistence === "error" ? "配置冲突，需人工核对" : "未由 QControlHub 管理";
+        ? `托管 ${Object.keys(status.configured_parameters || {}).length} 项`
+        : status?.persistence === "error" ? "配置冲突" : "未托管";
       const drift = status?.persistence === "managed" && Object.entries(status.configured_parameters || {}).some(([key, value]) => String(status.parameters?.[key] || "").trim().replace(/\s+/g, " ") !== value);
       return `<article class="bbr-card" data-refresh-key="bbr-${esc(agent.id)}" aria-busy="${busy}">
         <header><div><h2>${esc(agent.name)}</h2><span>${value(status?.kernel_release)} · ${esc(agent.os)} / ${esc(agent.arch)}</span></div><span class="status-label ${info.tone}">${esc(info.text)}</span></header>
-        ${hasFeature && status ? `<dl class="bbr-primary-values"><div><dt>当前默认拥塞算法</dt><dd>${value(status.congestion_control)}</dd></div><div><dt>当前默认队列</dt><dd>${value(status.default_qdisc)}</dd></div><div><dt>已保存的重启配置</dt><dd>${esc(persistence)}</dd></div></dl>
+        ${hasFeature && status ? `<dl class="bbr-primary-values"><div><dt>算法</dt><dd>${value(status.congestion_control)}</dd></div><div><dt>队列</dt><dd>${value(status.default_qdisc)}</dd></div><div><dt>配置</dt><dd>${esc(persistence)}</dd></div></dl>
         ${drift ? '<p class="bbr-warning" role="status">当前生效参数与已保存配置不一致，请核对其他系统配置是否覆盖。</p>' : ""}
         ${status.error ? `<p class="bbr-warning" role="status">${esc(diagnosticError(status.error))}</p>` : ""}
         ${dialogButton(agent, "parameters", "生效参数与网卡队列")}

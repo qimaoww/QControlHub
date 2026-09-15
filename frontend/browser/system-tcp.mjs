@@ -15,7 +15,7 @@ await waitFor(() => document.querySelector(".bbr-card"), "TCP 页面未加载");
     assert.notEqual(document.querySelector('.dock-nav a[href="#system-bbr"] svg').innerHTML, document.querySelector('.dock-nav a[href="#traffic"] svg').innerHTML, "TCP 调优和流量侧栏图标重复");
   const card = () => document.querySelector('[data-refresh-key="bbr-alpha"]');
   assert.match(card().textContent, /BBR 已启用/);
-  assert.match(card().textContent, /未由 QControlHub 管理/);
+  assert.match(card().textContent, /未托管/);
   assert.match(card().textContent, /fq_codel/);
   assert.equal(card().querySelector("details"), null, "BBR 二级入口仍使用内联折叠面板");
   const parameters = () => card().querySelector(".bbr-parameters");
