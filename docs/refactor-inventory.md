@@ -83,7 +83,9 @@ Source comparison against the pre-continuation baseline (`70376fb`):
   are preserved with their platform constraints. Only ten frontend source
   contracts select explicit owner files instead of the former monolith; their
   assertions are unchanged. The new source-owner helper is the only added Go
-  test declaration.
+  test declaration. The final CI repair also injects the existing fake traffic
+  backend into the managed-public-IP WebSocket test; its protocol assertions,
+  timeout, and production implementation remain unchanged.
 - The audit caught and corrected an accidental `core_logs_windows_test.go`
   filename: `core_logs_window_test.go` keeps the log-window regression enabled
   on Linux as well as other platforms.
@@ -110,6 +112,11 @@ Validation performed on the completed sources:
 - Production web image: all 127 modules and 129 matching gzip assets are
   present, all 273 import/re-export URLs share the index asset version, and
   browser fixtures, smoke tests, and stylesheet sources are excluded.
+- Final CI repair: the public-IP WebSocket regression and nftables startup
+  regressions pass 20 repetitions, and the related public-IP/traffic tests pass
+  under the race detector. The WebSocket regression also passes 50 repetitions
+  in a Debian container without nftables or external networking, with a
+  read-only root filesystem and a guard confirming no package command runs.
 
 Permanent policies now reject unreachable production/test modules, imports
 through route facades, cyclic production dependencies, unregistered CSS

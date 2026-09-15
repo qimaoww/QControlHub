@@ -55,6 +55,9 @@ func TestRunWebSocketAppliesCapabilityGatedPublicIPProbeMessage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new Client: %v", err)
 	}
+	// WireHello applies traffic policies before the probe message. Keep this
+	// protocol test independent of host nftables and package installation.
+	client.traffic.backend = &fakeTrafficBackend{counters: map[string]uint64{}}
 	client.creds = credentials{AgentID: "agt_0123456789abcdef", PrivateKey: authn.EncodePrivateKey(privateKey)}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
