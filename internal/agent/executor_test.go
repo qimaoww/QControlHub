@@ -298,8 +298,20 @@ func TestNormalizeImportedSingBoxLogDestination(t *testing.T) {
 	for name, content := range map[string]string{
 		"relative file": `{"log":{"output":"runtime.log"}}`,
 		"managed file":  `{"log":{"output":"` + filepath.ToSlash(filepath.Join(root, "runtime.log")) + `"}}`,
-		"console":       `{"log":{"output":"stderr"}}`,
-		"disabled":      `{"log":{"disabled":true,"output":"/var/log/sing-box/box.log"}}`,
+	} {
+		got, err := normalizeImportedSingBoxLogDestination(content)
+		if err != nil {
+			t.Errorf("%s normalization failed: %v", name, err)
+			continue
+		}
+		output, destination, err := singBoxLogOutput(got)
+		if err != nil || output != "stdout" || destination != singBoxLogDestinationConsole {
+			t.Errorf("%s normalized to %q/%d: %v", name, output, destination, err)
+		}
+	}
+	for name, content := range map[string]string{
+		"console":  `{"log":{"output":"stderr"}}`,
+		"disabled": `{"log":{"disabled":true,"output":"/var/log/sing-box/box.log"}}`,
 	} {
 		if got, err := normalizeImportedSingBoxLogDestination(content); err != nil || got != content {
 			t.Errorf("%s changed: %q, %v", name, got, err)

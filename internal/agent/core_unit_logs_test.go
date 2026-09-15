@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -74,5 +75,9 @@ func TestManagedCoreLogFallbackIsProjectManaged(t *testing.T) {
 	}
 	if matchesAnyManagedDropIn([]byte("[Service]\nEnvironment=UNSAFE=1\n"), [][]byte{[]byte(managedCoreLogDropIn), []byte(managedCoreLogFallbackDropIn)}) {
 		t.Fatal("unknown managed log drop-in was accepted")
+	}
+	if strings.Contains(managedCoreLogFallbackDropIn, "StandardOutput=journal") ||
+		!strings.Contains(managedCoreLogFallbackDropIn, "StandardOutput=null") {
+		t.Fatal("unsupported namespace fallback can write to the unbounded host journal")
 	}
 }

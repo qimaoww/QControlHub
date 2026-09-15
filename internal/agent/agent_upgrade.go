@@ -10,6 +10,8 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
@@ -42,6 +44,97 @@ type agentUpgradeTransaction struct {
 	originalDigest  string
 	candidateDigest string
 	metadata        fileMetadata
+}
+
+const retainedAgentUpgradeBackups = 1
+
+// cleanupAgentUpgradeBackups bounds successful self-upgrade artifacts beside
+// the running executable. The newest verified backup remains available for a
+// manual rollback; every older digest-named copy is stale once the new process
+// has started. Invalid lookalikes are ignored, while a digest-named artifact
+// that is not the protected file its name claims to be fails closed.
+func cleanupAgentUpgradeBackups(executable string) (int, int64, error) {
+	if !filepath.IsAbs(executable) || filepath.Base(executable) == "." || filepath.Base(executable) == string(filepath.Separator) {
+		return 0, 0, errors.New("Agent executable path is invalid")
+	}
+	if err := validatePrivilegedExecutable(executable); err != nil {
+		return 0, 0, fmt.Errorf("validate running Agent executable: %w", err)
+	}
+	directory := filepath.Dir(executable)
+	root, err := os.OpenRoot(directory)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer root.Close()
+	handle, err := root.Open(".")
+	if err != nil {
+		return 0, 0, err
+	}
+	entries, readErr := handle.ReadDir(-1)
+	closeErr := handle.Close()
+	if err := errors.Join(readErr, closeErr); err != nil {
+		return 0, 0, err
+	}
+
+	prefix := filepath.Base(executable) + ".previous-"
+	type backup struct {
+		name     string
+		size     int64
+		modified time.Time
+	}
+	backups := make([]backup, 0)
+	for _, entry := range entries {
+		name := entry.Name()
+		encodedDigest, matched := strings.CutPrefix(name, prefix)
+		if !matched || len(encodedDigest) != 64 {
+			continue
+		}
+		if _, err := hex.DecodeString(encodedDigest); err != nil || strings.ToLower(encodedDigest) != encodedDigest {
+			continue
+		}
+		info, err := root.Lstat(name)
+		if err != nil {
+			return 0, 0, err
+		}
+		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() || info.Mode().Perm()&0o022 != 0 {
+			return 0, 0, fmt.Errorf("Agent upgrade backup %s is unsafe", name)
+		}
+		if err := validateOwner(info, "Agent upgrade backup"); err != nil {
+			return 0, 0, err
+		}
+		digest, exists, err := protectedCoreMigrationFileDigest(filepath.Join(directory, name), core.MaxAgentBinaryBytes)
+		if err != nil || !exists || digest != encodedDigest {
+			if err == nil {
+				err = errors.New("digest does not match its file name")
+			}
+			return 0, 0, fmt.Errorf("validate Agent upgrade backup %s: %w", name, err)
+		}
+		backups = append(backups, backup{name: name, size: info.Size(), modified: info.ModTime()})
+	}
+	sort.Slice(backups, func(left, right int) bool {
+		if backups[left].modified.Equal(backups[right].modified) {
+			return backups[left].name > backups[right].name
+		}
+		return backups[left].modified.After(backups[right].modified)
+	})
+	removed := 0
+	var reclaimed int64
+	if len(backups) <= retainedAgentUpgradeBackups {
+		return 0, 0, nil
+	}
+	for _, backup := range backups[retainedAgentUpgradeBackups:] {
+		if err := root.Remove(backup.name); err != nil {
+			return removed, reclaimed, err
+		}
+		removed++
+		reclaimed += backup.size
+	}
+	if removed > 0 {
+		if err := syncRootDirectory(root); err != nil {
+			return removed, reclaimed, err
+		}
+	}
+	return removed, reclaimed, nil
 }
 
 func prepareAgentUpgrade(ctx context.Context, executable, candidate, version, managerKind string) (*agentUpgradeTransaction, error) {

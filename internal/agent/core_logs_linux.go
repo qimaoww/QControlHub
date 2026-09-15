@@ -172,14 +172,25 @@ func (collector *CoreLogCollector) ApplyPolicy(policy core.AgentPolicy) {
 			for index := 1; index <= 5; index++ {
 				_ = os.Remove(coreLogArchivePath(source.path, index))
 			}
-			maxFileBytes, _ := collector.rotationPolicy()
-			if validated, err := openValidatedCoreLogFileContext(context.Background(), source); err == nil {
-				if validated.identity.Size() > maxFileBytes {
-					if err := validated.file.Truncate(0); err != nil {
-						slog.Warn("apply managed core log capacity", "path", source.path, "error", err)
-					}
+		}
+		maxFileBytes, _ := collector.rotationPolicy()
+		if validated, err := openValidatedCoreLogFileContextMode(context.Background(), source, true); err == nil {
+			// Enforce the panel limit even when it equals the Agent default. An
+			// older Agent may have left an oversized file without changing the
+			// selected policy value.
+			if validated.identity.Size() > maxFileBytes {
+				if err := validated.file.Truncate(0); err != nil {
+					slog.Warn("apply managed core log capacity", "path", source.path, "error", err)
 				}
-				_ = validated.file.Close()
+			}
+			_ = validated.file.Close()
+		}
+		for index := 1; index <= int(policy.CoreLogRotateCount); index++ {
+			path := coreLogArchivePath(source.path, index)
+			if info, err := os.Lstat(path); err == nil && info.Size() > maxFileBytes {
+				// These lines were already streamed. Remove an archive left by an
+				// older policy rather than let it evade the node-wide budget.
+				_ = os.Remove(path)
 			}
 		}
 	}
@@ -738,7 +749,7 @@ func (collector *CoreLogCollector) followFile(ctx context.Context, source coreLo
 			continue
 		}
 		rotateBytes, _ := collector.rotationPolicy()
-		if source.kind == "openrc" && info.Size() >= rotateBytes {
+		if info.Size() >= rotateBytes {
 			collector.rotateFile(source)
 		}
 		timer := time.NewTimer(time.Second)
@@ -802,26 +813,51 @@ func coreLogFileIdentity(info os.FileInfo) (uint64, uint64, bool) {
 	return uint64(stat.Dev), uint64(stat.Ino), true
 }
 
-// rotateFile copies the live file beside itself and truncates it, keeping the
-// configured number of bounded snapshots.
+// rotateFile copies a bounded tail of the live file beside itself and truncates
+// it, keeping the configured number of bounded snapshots.
 // supervise-daemon keeps writing with O_APPEND,
 // so truncation is seamless for the writer and bounds the volatile log
 // footprint like the journald RuntimeMaxUse cap does on systemd. A failed
 // snapshot only costs the archived copy; truncation still proceeds so a
 // persistently failing copy can never let the live file grow unbounded.
 func (collector *CoreLogCollector) rotateFile(source coreLogFileSource) {
-	_, rotateCount := collector.rotationPolicy()
+	rotateBytes, rotateCount := collector.rotationPolicy()
 	if rotateCount == 0 {
 		if err := os.Truncate(source.path, 0); err != nil {
 			slog.Warn("managed core log rotation failed", "path", source.path, "error", err)
 		}
 		return
 	}
-	contents, err := os.ReadFile(source.path)
+	file, err := os.Open(source.path)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		slog.Warn("managed core log rotation snapshot failed", "path", source.path, "error", err)
 	}
-	if len(contents) > 0 && rotateCount > 0 {
+	var contents []byte
+	if err == nil {
+		if info, statErr := file.Stat(); statErr != nil {
+			slog.Warn("managed core log rotation snapshot failed", "path", source.path, "error", statErr)
+		} else {
+			start := info.Size() - rotateBytes
+			if start < 0 {
+				start = 0
+			}
+			if _, seekErr := file.Seek(start, io.SeekStart); seekErr != nil {
+				slog.Warn("managed core log rotation snapshot failed", "path", source.path, "error", seekErr)
+			} else if tail, readErr := io.ReadAll(io.LimitReader(file, rotateBytes)); readErr != nil {
+				slog.Warn("managed core log rotation snapshot failed", "path", source.path, "error", readErr)
+			} else {
+				contents = tail
+			}
+		}
+		_ = file.Close()
+	}
+	if len(contents) > 0 {
+		for index := 1; index <= rotateCount; index++ {
+			path := coreLogArchivePath(source.path, index)
+			if info, statErr := os.Lstat(path); statErr == nil && info.Size() > rotateBytes {
+				_ = os.Remove(path)
+			}
+		}
 		for index := rotateCount; index >= 2; index-- {
 			_ = os.Rename(coreLogArchivePath(source.path, index-1), coreLogArchivePath(source.path, index))
 		}
@@ -1414,6 +1450,10 @@ type validatedCoreLogFile struct {
 }
 
 func openValidatedCoreLogFileContext(ctx context.Context, source coreLogFileSource) (*validatedCoreLogFile, error) {
+	return openValidatedCoreLogFileContextMode(ctx, source, false)
+}
+
+func openValidatedCoreLogFileContextMode(ctx context.Context, source coreLogFileSource, writable bool) (*validatedCoreLogFile, error) {
 	if source.root == "" || !filepath.IsAbs(source.path) || !pathWithin(source.path, source.root) {
 		return nil, errors.New("core log source is outside its protected root")
 	}
@@ -1453,7 +1493,7 @@ func openValidatedCoreLogFileContext(ctx context.Context, source coreLogFileSour
 		(source.kind == "file" && rootOwnerKnown && ownerKnown && uid != rootUID) {
 		return nil, errors.New("core log source is not a protected regular file")
 	}
-	file, err := openCoreLogFileNoSymlinks(source.root, source.path, rootUID, rootOwnerKnown)
+	file, err := openCoreLogFileNoSymlinks(source.root, source.path, rootUID, rootOwnerKnown, writable)
 	if err != nil {
 		return nil, err
 	}
@@ -1492,7 +1532,7 @@ func coreLogFileHasSingleLink(info os.FileInfo) bool {
 	return ok && stat.Nlink == 1
 }
 
-func openCoreLogFileNoSymlinks(rootPath, path string, expectedUID int, ownerKnown bool) (*os.File, error) {
+func openCoreLogFileNoSymlinks(rootPath, path string, expectedUID int, ownerKnown, writable bool) (*os.File, error) {
 	relative, err := filepath.Rel(rootPath, path)
 	if err != nil || relative == "." || filepath.IsAbs(relative) || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
 		return nil, errors.New("core log source escapes its root")
@@ -1523,7 +1563,11 @@ func openCoreLogFileNoSymlinks(rootPath, path string, expectedUID int, ownerKnow
 		}
 		currentFD = nextFD
 	}
-	fileFD, err := syscall.Openat(currentFD, parts[len(parts)-1], syscall.O_RDONLY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW, 0)
+	fileFlags := syscall.O_RDONLY
+	if writable {
+		fileFlags = syscall.O_RDWR
+	}
+	fileFD, err := syscall.Openat(currentFD, parts[len(parts)-1], fileFlags|syscall.O_CLOEXEC|syscall.O_NOFOLLOW, 0)
 	if currentFD != rootFD {
 		syscall.Close(currentFD)
 	}

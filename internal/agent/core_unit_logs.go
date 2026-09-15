@@ -26,8 +26,8 @@ StandardError=journal
 `
 	managedCoreLogFallbackDropIn = `[Service]
 LogNamespace=
-StandardOutput=journal
-StandardError=journal
+StandardOutput=null
+StandardError=null
 `
 )
 
