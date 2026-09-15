@@ -1,0 +1,1 @@
+.node-visibility-toggle{display:flex;align-items:center;gap:8px;font-size:calc(10px * var(--ui-font-scale));font-weight:700}.node-visibility-toggle input{width:16px;height:16px;margin:0}.node-visibility-toggle span{color:var(--muted);font-size:max(9px,calc(8px * var(--ui-font-scale)))}

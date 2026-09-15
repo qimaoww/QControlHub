@@ -127,7 +127,7 @@ jobs:
             -e QCH_TEST_SHARDS=4 \
             -e VERSION="${{ github.sha }}" \
             -v "$PWD:/src" -w /src golang:1.25-alpine sh -euxc '
-              apk add --no-cache bash chromium coreutils findutils libcap make nftables nodejs openrc openssl postgresql-client
+              apk add --no-cache bash chromium coreutils findutils git libcap make nftables nodejs openrc openssl postgresql-client
               bash .github/scripts/run-ci-tests.sh \
                 --checks "make browser-checks" \
                 --checks "make alpine-non-browser-checks" \

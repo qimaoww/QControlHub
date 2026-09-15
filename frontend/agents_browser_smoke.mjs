@@ -82,6 +82,8 @@ const server = createServer(async (request, response) => {
       file = join(root, "presets_browser_runtime.mjs");
     else if (path === "/assets/dashboard_browser_runtime.mjs")
       file = join(root, "dashboard_browser_runtime.mjs");
+    else if (/^\/assets\/browser\/[a-z0-9-]+\.mjs$/.test(path))
+      file = join(root, "browser", path.slice("/assets/browser/".length));
     else if (path.startsWith("/assets/modules/"))
       file = join(root, "modules", path.slice("/assets/modules/".length));
     if (!file) {

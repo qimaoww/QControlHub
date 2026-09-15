@@ -1,4 +1,4 @@
-import { installAccessControl } from "./access-control.js";
+import { createAccessControlController } from "./access-control-controller.js";
 
 // The server identifies saved restrictions by node, engine, tag and port.
 // Never infer identity from a display label or apply them over a source draft.
@@ -10,7 +10,7 @@ export async function bindConfigRestrictions(ctx) {
   const baseline = input.value, data = state.data, epoch = state.navigationEpoch;
   const current = () => data === state.data && epoch === state.navigationEpoch && form.isConnected &&
     state.route === "live-config" && state.data.liveAgent === agent.id && state.data.liveEngine === engine;
-  const access = installAccessControl(ctx);
+  const access = createAccessControlController(ctx);
   let navigation = form.querySelector(".config-file-buttons"), selected = null, commonSelected = false, busy = false;
   const button = document.createElement("button");
   button.type = "button";

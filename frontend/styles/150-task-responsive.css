@@ -1,0 +1,4 @@
+
+/* Mobile task batching v33: preserve the full audit while keeping long histories navigable. */
+.task-load-more{display:flex;align-items:center;justify-content:center;gap:12px;margin:14px 0 4px;padding:14px;border:1px solid var(--line);border-radius:14px;background:var(--surface);box-shadow:var(--shadow)}.task-load-more span{color:var(--muted);font-size:calc(10px * var(--ui-font-scale))}.task-load-more b{color:var(--ink)}
+@media(max-width:820px) and (pointer:coarse){.task-load-more{margin-bottom:10px;flex-direction:column}.task-load-more .button{width:100%}}

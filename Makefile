@@ -3,14 +3,14 @@ SHELL := /bin/sh
 VERSION ?= dev
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
-.PHONY: build test alpine-test alpine-agent-test upgrade-sandbox-test ss-rust-runtime-test vet fmt-check frontend-check pr-policy-test schema-policy-test installer-test agent-redeploy-test quick-start-test web-image-test docs-check check checks browser-checks non-browser-checks alpine-non-browser-checks init-env compose-config up dev-up down logs
+.PHONY: build test alpine-test alpine-agent-test upgrade-sandbox-test ss-rust-runtime-test vet fmt-check frontend-check module-policy-test pr-policy-test schema-policy-test generate-deploy-scripts deploy-modules-check generate-styles styles-check installer-test agent-redeploy-test quick-start-test web-image-test docs-check check checks browser-checks non-browser-checks alpine-non-browser-checks init-env compose-config up dev-up down logs
 
 # Non-Go checks. CI runs each group as its own task next to the Go test shards,
 # so keep the Go suite out of these targets.
 BROWSER_CHECK_TARGETS := frontend-check
-CHECK_TARGETS := fmt-check pr-policy-test schema-policy-test installer-test agent-redeploy-test quick-start-test docs-check vet
+CHECK_TARGETS := fmt-check module-policy-test pr-policy-test schema-policy-test deploy-modules-check styles-check installer-test agent-redeploy-test quick-start-test docs-check vet
 # Alpine validates the same checks without the Debian-only agent redeploy flow.
-ALPINE_CHECK_TARGETS := fmt-check pr-policy-test schema-policy-test installer-test quick-start-test docs-check vet
+ALPINE_CHECK_TARGETS := fmt-check module-policy-test pr-policy-test schema-policy-test deploy-modules-check styles-check installer-test quick-start-test docs-check vet
 # Alpine leaves internal/agent out of the package sweep and runs the OpenRC and
 # lifecycle regressions instead; the upgrade sandbox job covers the rest.
 ALPINE_AGENT_TESTS := go test ./internal/agent -run 'OpenRC|PerServiceManager|AgentUpgrade|ManagedCorePrerequisites|SystemBBR'
@@ -51,6 +51,11 @@ frontend-check:
 	node frontend/module_smoke.mjs
 	node frontend/agents_browser_smoke.mjs
 
+module-policy-test:
+	node --test frontend/module_policy_test.mjs
+	node --test frontend/smoke_policy_test.mjs
+	go test -buildvcs=false ./internal/architecture
+
 ss-rust-runtime-test:
 	sh deploy/tests/ss-rust-runtime.sh
 
@@ -59,6 +64,23 @@ pr-policy-test:
 
 schema-policy-test:
 	node --test .github/scripts/check-schema-version.test.mjs
+
+generate-deploy-scripts:
+	node scripts/generate-deploy-scripts.mjs --write
+
+generate-styles:
+	node scripts/generate-styles.mjs --write
+
+styles-check:
+	node scripts/generate-styles.mjs --check
+	node --test .github/scripts/generate-styles.test.mjs
+
+deploy-modules-check:
+	node scripts/generate-deploy-scripts.mjs --check
+	node --test .github/scripts/generate-deploy-scripts.test.mjs
+	bash -n deploy/quick-start.sh
+	sh -n deploy/existing-core-mapping.sh
+	sh -n deploy/remote/install-agent.sh
 
 installer-test:
 	sh deploy/tests/inherit-existing-core.sh

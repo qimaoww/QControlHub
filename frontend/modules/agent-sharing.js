@@ -1,5 +1,5 @@
 import { bindEvent } from "./refresh.js";
-import { agentShareStatus, formatSharedPorts, parseSharedPorts, selectedSharedEngines, sharedLimitBytes, sharedLimitGiB } from "./users.js";
+import { agentShareStatus, formatSharedPorts, parseSharedPorts, selectedSharedEngines, sharedLimitBytes, sharedLimitGiB } from "./user-model.js";
 import { sharedEngineChoices } from "./engine-capabilities.js";
 
 export function createAgentSharing(ctx, interactions) {

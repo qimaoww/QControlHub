@@ -1,0 +1,8 @@
+.task-event,.core-log-row{content-visibility:auto;contain-intrinsic-size:0 96px}
+.core-log-result-toolbar,.core-log-result-footer{display:flex;align-items:center;justify-content:space-between;gap:12px;color:var(--muted);font-size:calc(10px * var(--ui-font-scale))}
+.core-log-result-toolbar{min-height:30px;margin-top:-6px;padding-inline:4px}.core-log-result-footer{justify-content:flex-end;padding:0 4px 4px}
+.core-log-pagination{display:flex;align-items:center;justify-content:flex-end;gap:10px;white-space:nowrap;color:var(--muted);font-size:calc(10px * var(--ui-font-scale));font-variant-numeric:tabular-nums}
+.core-log-pagination .button{min-height:30px;padding:5px 10px;font-size:inherit;background:var(--surface);box-shadow:none}.core-log-pagination .button:disabled{opacity:.45;cursor:default}
+.core-log-status{flex-wrap:wrap}.core-log-status>span:last-child{flex-wrap:wrap}
+.core-log-filter-group>div{min-width:0}
+@media(max-width:480px){.core-log-result-toolbar{flex-wrap:wrap}.core-log-result-toolbar>.core-log-pagination{margin-left:auto}.core-log-pagination{gap:6px}}
