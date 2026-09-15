@@ -45,24 +45,42 @@ export function updateRegionAvatar(avatar, region) {
 }
 
 // Per-avatar request identity prevents a slow automatic lookup from replacing
-// a newer manual choice. Reconciled views reuse pending/completed lookups.
-export function createRegionDisplay({ api, can }) {
+// a newer manual choice. Reconciled views reuse pending/completed lookups, and
+// the resolved value is kept per node in the account state so a rebuilt card
+// does not repeat a lookup the panel already answered.
+export function createRegionDisplay({ api, can, state }) {
   const displays = new WeakMap();
+  // Read through the account state on every render: signing out replaces it,
+  // and a cache filled by the previous account must not outlive it.
+  const resolvedNow = () =>
+    state?.data ? (state.data.agentRegions ||= {}) : null;
   return (agent, root) => {
     const avatar = root?.querySelector?.("[data-region-avatar]");
     if (!avatar || !can("agents.read")) return;
+    // The node list resolves both the manual preference and the automatic
+    // GeoIP result, so a card normally renders without any request. The
+    // per-node endpoint stays as a fallback for older control planes.
     const manual = geoRegionDetails(agent.labels?.region_code);
+    const inline = manual || geoRegionDetails(agent.region_code);
     const metrics = agent.metrics || {};
-    const key = JSON.stringify([agent.id, manual?.code, metrics.public_ipv4, metrics.public_ipv6, metrics.observed_public_ip, metrics.network_interfaces]);
+    const key = JSON.stringify([agent.id, inline?.code, metrics.public_ipv4, metrics.public_ipv6, metrics.observed_public_ip, metrics.network_interfaces]);
     const previous = displays.get(avatar);
     if (previous?.key === key) {
       if (previous.ready) updateRegionAvatar(avatar, previous.region);
       return;
     }
-    const entry = { key, ready: Boolean(manual), region: manual };
+    const known = resolvedNow()?.[agent.id];
+    if (known?.key === key) {
+      displays.set(avatar, known);
+      if (known.ready) updateRegionAvatar(avatar, known.region);
+      return;
+    }
+    const entry = { key, ready: Boolean(inline), region: inline };
     displays.set(avatar, entry);
-    updateRegionAvatar(avatar, manual);
-    if (manual) return;
+    const resolved = resolvedNow();
+    if (resolved) resolved[agent.id] = entry;
+    updateRegionAvatar(avatar, inline);
+    if (inline) return;
     api(`/agents/${encodeURIComponent(agent.id)}/region`)
       .then((payload) => {
         entry.ready = true;
@@ -72,6 +90,7 @@ export function createRegionDisplay({ api, can }) {
       })
       .catch(() => {
         if (displays.get(avatar) === entry) displays.delete(avatar);
+        if (resolved?.[agent.id] === entry) delete resolved[agent.id];
       });
   };
 }

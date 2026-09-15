@@ -8,23 +8,7 @@ import (
 )
 
 func (e *Executor) validateImportedSnapshot(ctx context.Context, engine core.Engine, spec EngineSpec, content string) (string, error) {
-	if engine != core.EngineSingBox {
-		return e.validate(ctx, engine, spec, content)
-	}
-	output, destination, err := singBoxLogOutput(content)
-	if err != nil {
-		return "", err
-	}
-	if destination == singBoxLogDestinationFile {
-		if _, err := importedSingBoxLogPath(output); err != nil {
-			return "", fmt.Errorf("imported sing-box log output is unsafe: %w", err)
-		}
-	}
-	defaultSpec, managed := DefaultSpecsForServiceManager(e.serviceManager().Kind())[engine]
-	if managed && spec == defaultSpec {
-		return e.validateManagedServiceSnapshot(ctx, engine, spec, content)
-	}
-	return e.validateSnapshot(ctx, engine, spec, content)
+	return e.validate(ctx, engine, spec, content)
 }
 
 func requireManagedServiceSafeInactive(ctx context.Context, engine core.Engine, managed EngineSpec, managers ...*ServiceManager) error {

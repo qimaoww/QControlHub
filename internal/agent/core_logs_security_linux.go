@@ -30,59 +30,7 @@ type validatedCoreLogFile struct {
 }
 
 func openValidatedCoreLogFileContext(ctx context.Context, source coreLogFileSource) (*validatedCoreLogFile, error) {
-	if source.root == "" || !filepath.IsAbs(source.path) || !pathWithin(source.path, source.root) {
-		return nil, errors.New("core log source is outside its protected root")
-	}
-	if err := validateCoreLogSourceBinding(ctx, source); err != nil {
-		return nil, err
-	}
-	rootInfo, err := os.Lstat(source.root)
-	if err != nil {
-		return nil, err
-	}
-	if rootInfo.Mode()&os.ModeSymlink != 0 || !rootInfo.IsDir() || rootInfo.Mode().Perm()&0o022 != 0 {
-		return nil, errors.New("core log source root is unsafe")
-	}
-	if err := validateProtectedDirectoryChain(filepath.Dir(source.root)); err != nil {
-		return nil, err
-	}
-	rootUID, _, rootOwnerKnown := fileOwnership(rootInfo)
-	for directory := filepath.Dir(source.path); directory != filepath.Dir(source.root); directory = filepath.Dir(directory) {
-		info, statErr := os.Lstat(directory)
-		if statErr != nil {
-			return nil, statErr
-		}
-		uid, _, ownerKnown := fileOwnership(info)
-		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() || info.Mode().Perm()&0o022 != 0 || (rootOwnerKnown && ownerKnown && uid != rootUID) {
-			return nil, errors.New("core log source parent is unsafe")
-		}
-		if directory == source.root {
-			break
-		}
-	}
-	expected, err := os.Lstat(source.path)
-	if err != nil {
-		return nil, err
-	}
-	uid, _, ownerKnown := fileOwnership(expected)
-	if expected.Mode()&os.ModeSymlink != 0 || !expected.Mode().IsRegular() || !coreLogFileHasSingleLink(expected) || expected.Mode().Perm()&0o022 != 0 ||
-		(source.kind == "file" && rootOwnerKnown && ownerKnown && uid != rootUID) {
-		return nil, errors.New("core log source is not a protected regular file")
-	}
-	file, err := openCoreLogFileNoSymlinks(source.root, source.path, rootUID, rootOwnerKnown)
-	if err != nil {
-		return nil, err
-	}
-	opened, err := file.Stat()
-	if err != nil || !os.SameFile(expected, opened) || !opened.Mode().IsRegular() || !coreLogFileHasSingleLink(opened) ||
-		metadataFromFileInfo(opened) != metadataFromFileInfo(expected) {
-		file.Close()
-		return nil, errors.New("core log source changed while it was being opened")
-	}
-	return &validatedCoreLogFile{
-		file: file, identity: opened, metadata: metadataFromFileInfo(opened),
-		rootUID: rootUID, rootOwnerKnown: rootOwnerKnown,
-	}, nil
+	return openValidatedCoreLogFileContextMode(ctx, source, false)
 }
 
 func validateOpenedCoreLogFile(source coreLogFileSource, file *os.File, trusted *validatedCoreLogFile) (os.FileInfo, error) {
@@ -108,7 +56,7 @@ func coreLogFileHasSingleLink(info os.FileInfo) bool {
 	return ok && stat.Nlink == 1
 }
 
-func openCoreLogFileNoSymlinks(rootPath, path string, expectedUID int, ownerKnown bool) (*os.File, error) {
+func openCoreLogFileNoSymlinks(rootPath, path string, expectedUID int, ownerKnown, writable bool) (*os.File, error) {
 	relative, err := filepath.Rel(rootPath, path)
 	if err != nil || relative == "." || filepath.IsAbs(relative) || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
 		return nil, errors.New("core log source escapes its root")
@@ -139,7 +87,11 @@ func openCoreLogFileNoSymlinks(rootPath, path string, expectedUID int, ownerKnow
 		}
 		currentFD = nextFD
 	}
-	fileFD, err := syscall.Openat(currentFD, parts[len(parts)-1], syscall.O_RDONLY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW, 0)
+	fileFlags := syscall.O_RDONLY
+	if writable {
+		fileFlags = syscall.O_RDWR
+	}
+	fileFD, err := syscall.Openat(currentFD, parts[len(parts)-1], fileFlags|syscall.O_CLOEXEC|syscall.O_NOFOLLOW, 0)
 	if currentFD != rootFD {
 		syscall.Close(currentFD)
 	}
@@ -181,4 +133,60 @@ func validateCoreLogSourceBinding(ctx context.Context, source coreLogFileSource)
 		return errors.New("core log source configuration drifted")
 	}
 	return nil
+}
+
+func openValidatedCoreLogFileContextMode(ctx context.Context, source coreLogFileSource, writable bool) (*validatedCoreLogFile, error) {
+	if source.root == "" || !filepath.IsAbs(source.path) || !pathWithin(source.path, source.root) {
+		return nil, errors.New("core log source is outside its protected root")
+	}
+	if err := validateCoreLogSourceBinding(ctx, source); err != nil {
+		return nil, err
+	}
+	rootInfo, err := os.Lstat(source.root)
+	if err != nil {
+		return nil, err
+	}
+	if rootInfo.Mode()&os.ModeSymlink != 0 || !rootInfo.IsDir() || rootInfo.Mode().Perm()&0o022 != 0 {
+		return nil, errors.New("core log source root is unsafe")
+	}
+	if err := validateProtectedDirectoryChain(filepath.Dir(source.root)); err != nil {
+		return nil, err
+	}
+	rootUID, _, rootOwnerKnown := fileOwnership(rootInfo)
+	for directory := filepath.Dir(source.path); directory != filepath.Dir(source.root); directory = filepath.Dir(directory) {
+		info, statErr := os.Lstat(directory)
+		if statErr != nil {
+			return nil, statErr
+		}
+		uid, _, ownerKnown := fileOwnership(info)
+		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() || info.Mode().Perm()&0o022 != 0 || (rootOwnerKnown && ownerKnown && uid != rootUID) {
+			return nil, errors.New("core log source parent is unsafe")
+		}
+		if directory == source.root {
+			break
+		}
+	}
+	expected, err := os.Lstat(source.path)
+	if err != nil {
+		return nil, err
+	}
+	uid, _, ownerKnown := fileOwnership(expected)
+	if expected.Mode()&os.ModeSymlink != 0 || !expected.Mode().IsRegular() || !coreLogFileHasSingleLink(expected) || expected.Mode().Perm()&0o022 != 0 ||
+		(source.kind == "file" && rootOwnerKnown && ownerKnown && uid != rootUID) {
+		return nil, errors.New("core log source is not a protected regular file")
+	}
+	file, err := openCoreLogFileNoSymlinks(source.root, source.path, rootUID, rootOwnerKnown, writable)
+	if err != nil {
+		return nil, err
+	}
+	opened, err := file.Stat()
+	if err != nil || !os.SameFile(expected, opened) || !opened.Mode().IsRegular() || !coreLogFileHasSingleLink(opened) ||
+		metadataFromFileInfo(opened) != metadataFromFileInfo(expected) {
+		file.Close()
+		return nil, errors.New("core log source changed while it was being opened")
+	}
+	return &validatedCoreLogFile{
+		file: file, identity: opened, metadata: metadataFromFileInfo(opened),
+		rootUID: rootUID, rootOwnerKnown: rootOwnerKnown,
+	}, nil
 }

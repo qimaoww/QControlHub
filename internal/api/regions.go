@@ -114,3 +114,30 @@ func (s *Server) getRegionFlag(w http.ResponseWriter, request *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	_, _ = w.Write(flag)
 }
+
+// resolveAgentRegions attaches the display region to every node in a list
+// response, so a node grid renders its flags without one request per card.
+// Manual preferences always win; automatic detection reuses the GeoIP client's
+// cache, and a provider failure only leaves that node without a flag instead of
+// failing the whole page.
+func (s *Server) resolveAgentRegions(request *http.Request, agents []core.Agent) {
+	auto := s.sessionAllows(request, core.PermissionMetricsRead)
+	for index := range agents {
+		if code := store.AgentRegionCode(agents[index]); code != "" {
+			agents[index].RegionCode = code
+			continue
+		}
+		if !auto {
+			continue
+		}
+		address := agentGeoIP(agents[index])
+		if !address.IsValid() {
+			continue
+		}
+		region, err := s.geoip.Lookup(request.Context(), address)
+		if err != nil {
+			continue
+		}
+		agents[index].RegionCode = region.ISOCode
+	}
+}

@@ -2,7 +2,7 @@ import { bindEvent } from "./refresh.js";
 import { engineCapabilityToggles, selectedDefaultEngines } from "./engine-capabilities.js";
 
 export function installSettings(ctx) {
-  const { api, state, esc, can, shell, notify, applyUIFontScale } = ctx;
+  const { api, state, esc, can, shell, notify, applyUIFontScale, invalidatePanelReads = () => {} } = ctx;
   let settingsRequest = 0;
 
   const options = (selected, values) => values
@@ -51,9 +51,9 @@ export function installSettings(ctx) {
           ${select(item, "task_max_attempts", "最大尝试次数", [[1, "1 次"], [3, "3 次"], [5, "5 次"]], disabled)}
           ${select(item, "public_ip_probe_interval_seconds", "公网 IP 探测间隔", [[300, "5 分钟"], [900, "15 分钟"], [3600, "1 小时"]], disabled)}
         </div></div>`)}
-        ${section("settings-data", "04", "数据与日志", "Agent 本地缓存与 PostgreSQL 历史数据分别控制。", `<div class="settings-subsection settings-local-log"><h4>Agent 本地内核日志</h4><p>限制每个节点的易失性内核日志空间；可继续调小到 1 MiB。systemd 使用独立 journal 总容量，OpenRC 使用受控文件轮转。</p><div class="settings-grid">
+        ${section("settings-data", "04", "数据与日志", "Agent 传输缓存与 PostgreSQL 历史数据分别控制。", `<div class="settings-subsection settings-local-log"><h4>Agent 内核日志传输缓存</h4><p>限制每个节点全部来源、当前文件与轮转文件合计使用的缓存空间；可继续调小到 1 MiB。systemd 使用独立 volatile journal，OpenRC 使用受控文件轮转，历史只在面板保存。</p><div class="settings-grid">
           ${select(item, "agent_core_log_max_mib", "单节点容量上限", [[1, "1 MiB"], [2, "2 MiB"], [4, "4 MiB"], [8, "8 MiB"], [16, "16 MiB"], [32, "32 MiB"], [64, "64 MiB"], [128, "128 MiB"]], disabled)}
-          ${select(item, "agent_core_log_rotate_count", "旧文件保留数量", [[0, "0（仅当前日志）"], [1, "1 个"], [2, "2 个"], [3, "3 个"], [5, "5 个"]], disabled)}
+          ${select(item, "agent_core_log_rotate_count", "轮转缓存数量", [[0, "0（仅当前缓存）"], [1, "1 个"], [2, "2 个"], [3, "3 个"], [5, "5 个"]], disabled)}
         </div></div><div class="settings-subsection"><h4>PostgreSQL 数据保留</h4><div class="settings-grid settings-grid-three">
           ${select(item, "core_log_minimum_level", "内核日志最低级别", [["debug", "调试及以上"], ["info", "信息及以上"], ["warning", "警告及以上"], ["error", "错误及以上"], ["critical", "仅严重错误"], ["off", "停止保存新日志"]], disabled)}
           ${select(item, "core_log_retention_days", "内核日志保留", [[1, "1 天"], [3, "3 天"], [7, "7 天"], [14, "14 天"], [30, "30 天"]], disabled, "每小时按时间清理；不是固定条数")}
@@ -118,6 +118,8 @@ export function installSettings(ctx) {
       try {
         const saved = await api("/settings", { method: "PUT", body: JSON.stringify(body) });
         if (state.data !== accountData) return;
+        // Other routes read the panel settings from the shell cache.
+        invalidatePanelReads("settings");
         state.data.settings = saved;
         item.revision = saved.revision;
         applyUIFontScale?.(saved.ui_font_scale);

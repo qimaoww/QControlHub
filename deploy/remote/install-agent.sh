@@ -227,6 +227,7 @@ run_uninstall() {
   esac
   rm -f "$agent_env_file" "$openrc_conf_dir/qagent" "$qagent_bin_link"
   rm -rf "$qagent_bin_dir" "$qagent_etc_dir" "$core_asset_root"
+  rm -rf /run/qagent-core-logs
   printf '%s\n' "已卸载 QControlHub Agent；保留节点状态目录 $agent_state_dir，如需彻底清理请手动删除。"
 }
 

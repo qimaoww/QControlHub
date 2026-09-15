@@ -14,9 +14,12 @@ import (
 )
 
 const (
-	coreLogQueueLimit         = 2048
-	defaultCoreLogMaxBytes    = 16 << 20
-	defaultCoreLogRotateCount = 1
+	coreLogQueueLimit = 2048
+	// Until the panel sends its policy, start at the smallest valid allowance
+	// with no snapshots. An Agent restart must never temporarily restore the
+	// product default over a smaller panel-selected limit.
+	defaultCoreLogMaxBytes    = 1 << 20
+	defaultCoreLogRotateCount = 0
 	coreLogFileMaxLine        = 256 << 10
 	coreLogRevalidateBytes    = 256 << 10
 	coreLogRevalidateEvery    = time.Second
@@ -55,6 +58,7 @@ type CoreLogCollector struct {
 	sourceReady        map[core.Engine]chan struct{}
 	coreLogMaxBytes    int64
 	coreLogRotateCount int
+	fileBudgetDivisor  int
 }
 
 type coreLogFileRun struct {
@@ -121,6 +125,7 @@ func NewCoreLogCollectorForServiceManager(manager *ServiceManager, specs ...map[
 		preferredKind: make(map[core.Engine]string), consoleKind: make(map[core.Engine]string),
 		transitions: make(map[core.Engine]*coreLogSourceTransition), sourceReady: make(map[core.Engine]chan struct{}),
 		coreLogMaxBytes: defaultCoreLogMaxBytes, coreLogRotateCount: defaultCoreLogRotateCount,
+		fileBudgetDivisor: 1,
 	}
 	if manager != nil && manager.Kind() == ServiceManagerOpenRC {
 		collector.fileSources = coreLogFileSources(specs...)
@@ -132,6 +137,11 @@ func NewCoreLogCollectorForServiceManager(manager *ServiceManager, specs ...map[
 		return collector
 	}
 	collector.sources = coreLogJournalSources(specs...)
+	collector.fileSources = systemdFallbackCoreLogFileSources(specs...)
+	// A node may temporarily contain cores started under both the private
+	// journal and /run fallback drop-ins. Reserve half of the node-wide budget
+	// for each backend so their combined transport caches cannot exceed policy.
+	collector.fileBudgetDivisor = 2
 	for _, source := range collector.sources {
 		for _, engine := range source.unitEngines {
 			collector.consoleKind[engine] = "journal"
@@ -159,14 +169,35 @@ func (collector *CoreLogCollector) ApplyPolicy(policy core.AgentPolicy) {
 			for index := 1; index <= 5; index++ {
 				_ = os.Remove(coreLogArchivePath(source.path, index))
 			}
-			maxFileBytes, _ := collector.rotationPolicy()
+		}
+		maxFileBytes, _ := collector.rotationPolicy()
+		if source.kind == "systemd-fallback" {
 			if validated, err := openValidatedCoreLogFileContext(context.Background(), source); err == nil {
-				if validated.identity.Size() > maxFileBytes {
-					if err := validated.file.Truncate(0); err != nil {
+				size := validated.identity.Size()
+				_ = validated.file.Close()
+				if size > maxFileBytes {
+					if err := truncateSystemdFallbackCoreLog(context.Background(), source); err != nil {
 						slog.Warn("apply managed core log capacity", "path", source.path, "error", err)
 					}
 				}
-				_ = validated.file.Close()
+			}
+		} else if validated, err := openValidatedCoreLogFileContextMode(context.Background(), source, true); err == nil {
+			// Enforce the panel limit even when it equals the Agent default. An
+			// older Agent may have left an oversized file without changing the
+			// selected policy value.
+			if validated.identity.Size() > maxFileBytes {
+				if err := validated.file.Truncate(0); err != nil {
+					slog.Warn("apply managed core log capacity", "path", source.path, "error", err)
+				}
+			}
+			_ = validated.file.Close()
+		}
+		for index := 1; index <= int(policy.CoreLogRotateCount); index++ {
+			path := coreLogArchivePath(source.path, index)
+			if info, err := os.Lstat(path); err == nil && info.Size() > maxFileBytes {
+				// These lines were already streamed. Remove an archive left by an
+				// older policy rather than let it evade the node-wide budget.
+				_ = os.Remove(path)
 			}
 		}
 	}
@@ -180,7 +211,11 @@ func (collector *CoreLogCollector) rotationPolicy() (int64, int) {
 	if sources < 1 {
 		sources = 1
 	}
-	bytes := collector.coreLogMaxBytes / int64((count+1)*sources)
+	divisor := collector.fileBudgetDivisor
+	if divisor < 1 {
+		divisor = 1
+	}
+	bytes := collector.coreLogMaxBytes / int64(divisor*(count+1)*sources)
 	if bytes < 1 {
 		bytes = 1
 	}
@@ -247,6 +282,12 @@ func (collector *CoreLogCollector) setFileSourceStatus(source coreLogFileSource,
 	active := collector.activeFiles[coreLogFileSourceKey(source)]
 	if active == nil || active.bindingID != coreLogFileBindingID(source) {
 		return
+	}
+	if source.kind == "systemd-fallback" && status == "active" {
+		// The fallback file only exists when systemd could not start the private
+		// journal. Once observed, expose that live transport instead of leaving
+		// the panel on a failed journal-reader status.
+		collector.preferredKind[source.engine] = source.kind
 	}
 	collector.setSourceStatusLocked(source.engine, source.kind, status, code)
 }

@@ -193,6 +193,9 @@ func TestRefreshPathsUseStableViewsAndScopedCoordinators(t *testing.T) {
 		"workspace-main${motionClass}",
 		"const hasSharedData =",
 		"const sharedDataPromise = Promise.all([",
+		"const panelReads = createPanelReads(",
+		`readPanelData("overview", { live: state.route === "dashboard" })`,
+		`readPanelData("settings", { live: state.route === "settings" })`,
 		"function primeRouteTransition()",
 		"main.inert = true",
 		"main.classList.add(\"is-route-pending\")",
@@ -1422,5 +1425,46 @@ func TestTaskPollingKeepsTheScrollContainerStable(t *testing.T) {
 	}
 	if strings.Contains(content, `setTimeout(() => tasks(),`) {
 		t.Error("task polling must not rebuild the complete application shell")
+	}
+}
+
+// Node grids and the application shell render on every navigation. These
+// contracts keep the two shapes that made a page switch cost a request per
+// card: per-node region lookups and a per-route shell refetch.
+func TestPanelReadsAndNodeRegionsAvoidPerRenderRequests(t *testing.T) {
+	read := func(path string) string {
+		t.Helper()
+		content, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(content)
+	}
+	for _, required := range []string{
+		"export function createPanelReads(",
+		"overview: 30_000",
+		"settings: 300_000",
+	} {
+		if !strings.Contains(read("modules/panel-reads.js"), required) {
+			t.Errorf("panel read cache is missing %q", required)
+		}
+	}
+	regions := read("modules/regions.js")
+	for _, required := range []string{
+		"geoRegionDetails(agent.region_code)",
+		"state.data.agentRegions",
+	} {
+		if !strings.Contains(regions, required) {
+			t.Errorf("node list region rendering is missing %q", required)
+		}
+	}
+	if !strings.Contains(read("modules/agents.js"), "state.data.agentKomari") {
+		t.Error("node cards must cache the Komari read per node")
+	}
+	if !strings.Contains(read("module_smoke.mjs"), `import "./panel_reads_smoke.mjs"`) {
+		t.Error("frontend smoke must execute the panel read cache runtime")
+	}
+	if !strings.Contains(regions, "api(`/agents/${encodeURIComponent(agent.id)}/region`)") {
+		t.Error("nodes without a resolved region still need the per-node fallback")
 	}
 }

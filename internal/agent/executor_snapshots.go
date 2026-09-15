@@ -164,20 +164,14 @@ func (e *Executor) validateManagedLogPolicy(ctx context.Context, engine core.Eng
 	if engine != core.EngineSingBox {
 		return validateNoPersistentCoreLogs(engine, content)
 	}
-	output, destination, err := singBoxLogOutput(content)
+	_, destination, err := singBoxLogOutput(content)
 	if err != nil {
 		return err
 	}
 	if destination != singBoxLogDestinationFile {
 		return nil
 	}
-	if _, err := e.completedMigrationOwnership(ctx, engine, spec); err != nil {
-		return validateNoPersistentCoreLogs(engine, content)
-	}
-	if _, err := importedSingBoxLogPath(output); err != nil {
-		return fmt.Errorf("imported sing-box log output is unsafe: %w", err)
-	}
-	return nil
+	return validateNoPersistentCoreLogs(engine, content)
 }
 
 func (e *Executor) validateSnapshot(ctx context.Context, engine core.Engine, spec EngineSpec, content string) (string, error) {
@@ -373,7 +367,17 @@ func (e *Executor) runSystemdValidationIdentityCommand(ctx context.Context, dire
 }
 
 func validateNoPersistentCoreLogs(engine core.Engine, content string) error {
-	if engine != core.EngineXray && engine != core.EngineSingBox {
+	if engine != core.EngineXray && engine != core.EngineSingBox && engine != core.EngineShadowsocksRust {
+		return nil
+	}
+	if engine == core.EngineShadowsocksRust {
+		normalized, err := normalizeImportedSSRustLogDestinations(content)
+		if err != nil {
+			return err
+		}
+		if normalized != content {
+			return errors.New("persistent SS Rust log writer is disabled; managed core logs are stored by the control plane")
+		}
 		return nil
 	}
 	var root map[string]any

@@ -47,6 +47,13 @@ func reconnectBackoffLimit(rejected bool) time.Duration {
 }
 
 func (c *Client) Run(ctx context.Context) error {
+	if executable, err := os.Executable(); err != nil {
+		slog.Warn("locate running Agent executable for upgrade cleanup", "error", err)
+	} else if removed, reclaimed, err := cleanupAgentUpgradeBackups(executable); err != nil {
+		slog.Warn("clean stale Agent upgrade backups", "error", err)
+	} else if removed > 0 {
+		slog.Info("cleaned stale Agent upgrade backups", "files", removed, "bytes", reclaimed)
+	}
 	loaded, err := loadCredentials(c.config.StatePath)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("load agent credentials: %w", err)
@@ -89,6 +96,10 @@ func (c *Client) Run(ctx context.Context) error {
 	if err := ensureManagedCoreLogStreaming(ctx, c.executor.Specs, c.executor.serviceManager()); err != nil {
 		slog.Warn("prepare volatile managed core logs", "error", err)
 	}
+	// Reclaim snapshots and oversized live cache files before reconnecting.
+	// The panel policy will expand this fail-safe minimum after authentication;
+	// until then an Agent restart must not retain a larger prior allocation.
+	c.logs.ApplyPolicy(core.AgentPolicy{CoreLogMaxMiB: 1, CoreLogRotateCount: 0})
 	go c.logs.Run(ctx)
 	go c.publicIP.Run(ctx)
 	c.executor.migrateNativeAccounting(ctx)

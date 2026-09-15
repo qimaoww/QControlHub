@@ -121,6 +121,12 @@ func NewClient(config ClientConfig, executor *Executor) (*Client, error) {
 		return nil, fmt.Errorf("reconcile existing core migration: %w", err)
 	}
 	reconcileCancel()
+	logUpgradeContext, logUpgradeCancel := context.WithTimeout(context.Background(), 45*time.Second)
+	if err := executor.upgradeManagedCoreLogPolicies(logUpgradeContext); err != nil {
+		logUpgradeCancel()
+		return nil, fmt.Errorf("upgrade managed core logging policy: %w", err)
+	}
+	logUpgradeCancel()
 	parsed, err := url.Parse(config.ServerURL)
 	if err != nil || parsed.Host == "" {
 		return nil, errors.New("QCH_SERVER_URL must be a valid absolute URL")

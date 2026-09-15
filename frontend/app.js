@@ -7,6 +7,7 @@ import { createRouteModuleLoader } from "./modules/route-loader.js";
 import { migrateLegacyNodeOrder, orderNodesBySavedOrder } from "./modules/node-order.js";
 import { setStorageAccount } from "./modules/account-storage.js";
 import { createScopedAPI } from "./modules/requests.js";
+import { createPanelReads } from "./modules/panel-reads.js";
 import { errorMessage, requestJSON } from "./modules/errors.js";
 import { readPresetRoute } from "./modules/preset-route.js";
 import { createDisplayHelpers } from "./modules/formatting.js";
@@ -129,6 +130,24 @@ function combineAbortSignals(...values) {
 
 const scopedAPI = createScopedAPI(sendAPI);
 const api = (path, options) => scopedAPI.request(path, options);
+
+// The shell renders on every navigation, but its overview counters and panel
+// settings change slowly. Refetching both for every route costs two round trips
+// where one read already takes most of a second, so the account keeps a short
+// cache instead. Pages that display a value live still read through it.
+const panelReadPaths = { overview: "/overview", settings: "/settings" };
+const panelReads = createPanelReads((key) => api(panelReadPaths[key]));
+
+function readPanelData(key, { live = false } = {}) {
+  return panelReads.get(key, {
+    scope: state.session?.csrf_token || "",
+    live,
+  });
+}
+
+function invalidatePanelReads(...keys) {
+  panelReads.invalidate(...keys);
+}
 
 async function sendAPI(path, options = {}) {
   const session = state.session;
@@ -746,7 +765,7 @@ const routeModules = createRouteModuleLoader({
     const { installSettings } = await import("./modules/settings.js");
     return installSettings({
       api, state, esc, date, can, shell, notify, confirmAction,
-      applyUIFontScale,
+      applyUIFontScale, invalidatePanelReads,
     });
   },
   async users() {
@@ -926,8 +945,12 @@ async function renderOnce() {
     const hasSharedData =
       state.data.overview !== undefined && state.data.settings !== undefined;
     const sharedDataPromise = Promise.all([
-      can("overview.read") ? api("/overview") : Promise.resolve({}),
-      can("settings.read") ? api("/settings") : Promise.resolve({}),
+      can("overview.read")
+        ? readPanelData("overview", { live: state.route === "dashboard" })
+        : Promise.resolve({}),
+      can("settings.read")
+        ? readPanelData("settings", { live: state.route === "settings" })
+        : Promise.resolve({}),
     ]);
     if (!hasSharedData) {
       [state.data.overview, state.data.settings] = await sharedDataPromise;

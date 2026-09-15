@@ -51,3 +51,31 @@ func coreLogFileSources(specSets ...map[core.Engine]EngineSpec) []coreLogFileSou
 	sort.Slice(sources, func(i, j int) bool { return sources[i].path < sources[j].path })
 	return sources
 }
+
+func systemdFallbackCoreLogFileSources(specSets ...map[core.Engine]EngineSpec) []coreLogFileSource {
+	engines := make(map[string]core.Engine)
+	ambiguous := make(map[string]bool)
+	for _, specs := range specSets {
+		for engine, spec := range specs {
+			path, err := systemdFallbackCoreLogPath(spec.Service)
+			if err != nil {
+				continue
+			}
+			if ambiguous[path] {
+				continue
+			}
+			if existing, ok := engines[path]; ok && existing != engine {
+				delete(engines, path)
+				ambiguous[path] = true
+				continue
+			}
+			engines[path] = engine
+		}
+	}
+	sources := make([]coreLogFileSource, 0, len(engines))
+	for path, engine := range engines {
+		sources = append(sources, coreLogFileSource{path: path, root: systemdFallbackCoreLogRoot, engine: engine, kind: "systemd-fallback"})
+	}
+	sort.Slice(sources, func(i, j int) bool { return sources[i].path < sources[j].path })
+	return sources
+}

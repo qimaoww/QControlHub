@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
 	"github.com/qimaoww/qcontrolhub/internal/komari"
@@ -61,6 +62,14 @@ func (s *Server) getAgentKomari(w http.ResponseWriter, request *http.Request) {
 		writeJSON(w, http.StatusOK, result)
 		return
 	}
+	// A fresh cached resource answers without resolving the provider, so a
+	// temporarily misconfigured integration does not hide known traffic.
+	if node, fresh := s.freshKomariNode(agent.ID, uuid, time.Now()); fresh {
+		result.Server = ptr(node)
+		w.Header().Set("Cache-Control", "no-store")
+		writeJSON(w, http.StatusOK, result)
+		return
+	}
 	komariClient, clientErr := s.komariForRequest(request.Context(), s.configOwnerID(request) == "")
 	if clientErr != nil {
 		writeError(w, http.StatusServiceUnavailable, clientErr.Error())
@@ -75,7 +84,9 @@ func (s *Server) getAgentKomari(w http.ResponseWriter, request *http.Request) {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	result.Server = ptr(komariNodeResource(node))
+	resource := komariNodeResource(node)
+	s.storeKomariNode(agent.ID, uuid, resource, time.Now())
+	result.Server = ptr(resource)
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, result)
 }
@@ -106,6 +117,8 @@ func (s *Server) putAgentKomari(w http.ResponseWriter, request *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
+	// A new binding must not display the previous server's traffic.
+	s.forgetKomariNode(request.PathValue("id"))
 	s.recordAudit(request, "agent.komari.updated", request.PathValue("id"), "Komari UUID linked")
 	writeJSON(w, http.StatusOK, core.KomariLink{UUID: uuid})
 }

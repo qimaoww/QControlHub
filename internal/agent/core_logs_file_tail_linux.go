@@ -265,7 +265,7 @@ func (collector *CoreLogCollector) followFile(ctx context.Context, source coreLo
 			continue
 		}
 		rotateBytes, _ := collector.rotationPolicy()
-		if source.kind == "openrc" && info.Size() >= rotateBytes {
+		if info.Size() >= rotateBytes {
 			collector.rotateFile(source)
 		}
 		timer := time.NewTimer(time.Second)

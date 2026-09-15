@@ -59,6 +59,8 @@ type Server struct {
 	komari                     *komari.Client
 	komariHTTPClient           *http.Client
 	komariConfigError          error
+	komariCacheMu              sync.Mutex
+	komariCache                map[string]cachedKomariNode
 	webhookSigningConfigured   bool
 	notifier                   *notify.Client
 	subStoreHTTP               *http.Client
