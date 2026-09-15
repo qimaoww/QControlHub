@@ -1,5 +1,12 @@
 import assert from "node:assert/strict";
 import { installAgentFixture } from "./browser/agent-fixture.mjs";
+import { testConfigInboundsRuntime } from "./config_inbounds_browser_runtime.mjs";
+import { testConfigInboundsRuntime as inboundsScenario } from "./browser/config-inbounds.mjs";
+import { testUsersRuntime } from "./users_browser_runtime.mjs";
+import { testUsersRuntime as allocationsScenario } from "./browser/users-allocations.mjs";
+
+assert.equal(testConfigInboundsRuntime, inboundsScenario, "configuration browser entrypoint must retain its scenario API");
+assert.equal(testUsersRuntime, allocationsScenario, "user browser entrypoint must retain its scenario API");
 
 const originals = new Map(["window", "location"].map((key) => [
   key, Object.getOwnPropertyDescriptor(globalThis, key),

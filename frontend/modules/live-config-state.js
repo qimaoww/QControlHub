@@ -150,3 +150,9 @@ export function liveConfigSnapshotReusable(source, now = Date.now()) {
 }
 
 export { deployPreflightError };
+
+export function liveSourceKey(agentId, engine, source = "managed") {
+  return source === "import"
+    ? `${agentId}|${engine}|import`
+    : `${agentId}|${engine}`;
+}

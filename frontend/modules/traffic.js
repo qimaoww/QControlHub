@@ -7,7 +7,7 @@ import {
 import {
   animateNodeCardDrop,
   nodeCardDropIndex,
-} from "./agents.js";
+} from "./agent-card-drag.js";
 import { accountStorage } from "./account-storage.js";
 import { orderedNodeList } from "./node-order.js";
 

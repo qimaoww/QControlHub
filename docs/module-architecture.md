@@ -32,13 +32,17 @@ increase the version when required and pass `make schema-policy-test`.
 
 ## Frontend ownership
 
-`frontend/app.js` owns shared console state and route composition. Feature
-rendering and reusable helpers live under `frontend/modules/`; the detailed
-public boundary is in [frontend-modules.md](frontend-modules.md).
+`frontend/app.js` owns shared console state, navigation lifecycle, and lazy route
+composition. Shell/session collaborators own transport, login, stable shell
+rendering, appearance, feedback, and preloading. Feature rendering and reusable
+helpers live under `frontend/modules/`; the detailed public boundary and
+controller lifetimes are in [frontend-modules.md](frontend-modules.md).
 
-The frontend policy test prevents modules from importing `app.js`. Add a new
+The frontend policy test prevents modules from importing `app.js` or the
+Agent/configuration composition facades and rejects dependency cycles. Add a
 feature to its owning module or create a focused module with a named export;
-keep route and shell composition in the application boundary.
+keep composition at the application boundary. Controller construction is inert,
+and asynchronous work must retain account and navigation isolation.
 
 ## Deployment artifacts
 

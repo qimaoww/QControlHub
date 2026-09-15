@@ -4,6 +4,8 @@ import * as addresses from "./modules/agent-addresses.js";
 import * as batch from "./modules/agent-batch.js";
 import * as drag from "./modules/agent-card-drag.js";
 import * as komari from "./modules/agent-komari.js";
+import * as coreActions from "./modules/agent-core-actions.js";
+import * as agentRefresh from "./modules/agent-refresh.js";
 import * as configs from "./modules/configs.js";
 import * as plan from "./modules/server-plan-form.js";
 import * as live from "./modules/live-config-state.js";
@@ -17,6 +19,8 @@ for (const [facade, owner, names] of [
   [agents, batch, ["batchAgentEligibility", "batchSelectAllState"]],
   [agents, drag, ["animateNodeCardDrop", "clearNodeCardDragState", "nodeCardDropIndex"]],
   [agents, komari, ["komariCycleRange", "komariResetDay"]],
+  [agents, coreActions, ["developmentSourceVisible", "coreSourceForInstall"]],
+  [agents, agentRefresh, ["agentStructureSignature"]],
   [configs, plan, ["bindServerPlanRegeneration", "readServerPlanInput"]],
   [configs, live, ["assertAgentConfigBaseline", "liveConfigEditorState", "liveConfigEngineEligible", "liveConfigReadAction", "liveConfigSnapshotReusable", "submitLiveConfigChange"]],
 ]) {

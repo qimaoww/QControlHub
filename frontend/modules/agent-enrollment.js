@@ -277,5 +277,57 @@ function showCommand(command, onClose, heading = "复制 QAgent 部署命令") {
   };
   copyButton.focus();
 }
-  return { bindEnrollmentRecordButtons, showAgentDirectoryDialog, showEnrollmentDialog, enrollmentInstallCommand, showCommand };
+  function bindEnrollmentPage(enrollmentHistory = {}) {
+  document.querySelectorAll("[data-open-enrollment]").forEach((button) => {
+    button.onclick = () =>
+      showEnrollmentDialog({
+        tokenRows: enrollmentHistory.tokenRows || "",
+        tokenCount: enrollmentHistory.tokenCount || 0,
+        onDelete: async (id) => {
+          await api(`/enrollment-tokens/${encodeURIComponent(id)}`, {
+            method: "DELETE",
+          });
+          try {
+            await refreshAgentPage();
+          } catch (error) {
+            notify(`添加记录刷新失败：${error.message}`, "error");
+          }
+        },
+        onSubmit: async (name, adminHidden, close) => {
+          const created = await api("/enrollment-tokens", {
+            method: "POST",
+            body: JSON.stringify({ name, admin_hidden: adminHidden }),
+          });
+          const command = enrollmentInstallCommand(created);
+          close();
+          showCommand(command, async () => {
+            try {
+              await refreshAgentPage();
+            } catch (error) {
+              notify(`添加记录刷新失败，部署命令未受影响：${error.message}`, "error");
+            }
+          });
+        },
+      });
+  });
+  bindEnrollmentRecordButtons(document);
+  document.querySelectorAll("[data-open-agent-directory]").forEach((button) => {
+    button.onclick = () => showAgentDirectoryDialog();
+  });
+  document.querySelectorAll("[data-view-enrollment-command]").forEach((button) => {
+    button.onclick = async () => {
+      try {
+        const created = await api(
+          `/agents/${encodeURIComponent(button.dataset.viewEnrollmentCommand)}/enrollment-command`,
+          { method: "POST" },
+        );
+        showCommand(enrollmentInstallCommand(created), null, "复制 Agent 安装命令");
+      } catch (error) {
+        notify(error.message, "error");
+      }
+    };
+  });
+
+  }
+  return { bindEnrollmentPage, bindEnrollmentRecordButtons, showAgentDirectoryDialog, showEnrollmentDialog, enrollmentInstallCommand, showCommand };
 }

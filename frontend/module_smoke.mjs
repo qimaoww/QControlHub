@@ -162,6 +162,9 @@ import {
 await import("./client_access_order_smoke.mjs");
 await import("./feature_modules_smoke.mjs");
 await import("./browser_fixture_smoke.mjs");
+await import("./controller_modules_smoke.mjs");
+await import("./session_api_smoke.mjs");
+await import("./shell_modules_smoke.mjs");
 
 const state = { data: {}, session: { role: "admin" } };
 const noop = () => {};

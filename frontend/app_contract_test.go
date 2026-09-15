@@ -55,7 +55,7 @@ func TestSPAConsoleSurfaceMatchesInitialRelease(t *testing.T) {
 		`/install-agent.sh`, `执行记录`, `入站操作`, `高级字段`, `系统设置`,
 		`data-delete-enrollment`, `可重复安装`, `删除添加命令`,
 		`enrollment-token`, `/enrollment-command`,
-		`heartbeat, percent`, `serviceActionDisabled, trafficChart, renderConfigDiff`,
+		`heartbeat, percent`, `serviceActionDisabled`, `trafficChart`, `renderConfigDiff`,
 	} {
 		if !strings.Contains(content, required) {
 			t.Errorf("SPA is missing initial visual/installation contract %q", required)
@@ -84,7 +84,8 @@ func TestSPAConsoleSurfaceMatchesInitialRelease(t *testing.T) {
 
 func TestServerPlanRegenerationStaysLocalAndUsesCurrentFormState(t *testing.T) {
 	form := string(mustReadFrontendFile(t, "modules/server-plan-form.js"))
-	content := form + "\n" + string(mustReadFrontendFile(t, "modules/configs.js"))
+	content := form + "\n" + frontendSources(t,
+		"modules/preset-editor.js", "modules/preset-view.js", "modules/preset-bindings.js")
 	start := strings.Index(form, "export function bindServerPlanRegeneration")
 	if start < 0 {
 		t.Fatal("server-plan-form.js is missing the isolated server-plan regeneration handler")
@@ -177,9 +178,11 @@ func TestRefreshPathsUseStableViewsAndScopedCoordinators(t *testing.T) {
 		}
 		return string(content)
 	}
-	app := read("app.js")
+	app := frontendSources(t, "app.js", "modules/session-api.js", "modules/shell-view.js")
 	refresh := read("modules/refresh.js")
 	for _, required := range []string{
+		"createSessionAPI({ state, renderLogin })",
+		"const shell = createShellView({",
 		"combineAbortSignals(options.signal, routeSignal)",
 		"[\"GET\", \"HEAD\", \"OPTIONS\"].includes(method)",
 		"reconcileView(currentView, template.content.firstElementChild",
@@ -231,7 +234,16 @@ func TestRefreshPathsUseStableViewsAndScopedCoordinators(t *testing.T) {
 			"requestAgentStructureRefresh()",
 			"cardInteractions.activeCount() > 0",
 			"cardInteractions.cancel()",
+			"createAgentRefresh(ctx,",
+			"refresh.markRendered(",
+		},
+		"modules/agent-view.js": {
 			"data-refresh-key=\"agent-${esc(agent.id)}\"",
+		},
+		"modules/agent-refresh.js": {
+			"createRefreshChannel({",
+			"getScope: () => state.navigationEpoch",
+			"syncBatchSnapshot(items)",
 		},
 		"modules/client-access.js": {
 			"createRefreshChannel({",
@@ -342,7 +354,7 @@ func TestMotionSystemCoversWorkspaceInteractions(t *testing.T) {
 	if !strings.Contains(string(refresh), "markInsertedMotion(freshChild.cloneNode(true))") {
 		t.Error("reconciled dynamic content must animate only when inserted")
 	}
-	configs, err := os.ReadFile("modules/configs.js")
+	configs, err := os.ReadFile("modules/live-config-view.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -358,18 +370,14 @@ func TestMotionSystemCoversWorkspaceInteractions(t *testing.T) {
 }
 
 func TestSidebarNavigationUsesWorkflowOrderAndResponsiveGrouping(t *testing.T) {
-	app, err := os.ReadFile("app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
-	content := string(app)
+	content := frontendSources(t, "modules/shell-view.js", "modules/shell-icons.js")
 	start := strings.Index(content, "  const links = [")
 	if start < 0 {
-		t.Fatal("app.js is missing the sidebar navigation list")
+		t.Fatal("shell-view.js is missing the sidebar navigation list")
 	}
 	end := strings.Index(content[start:], "  ];\n  const linkPermissions")
 	if end < 0 {
-		t.Fatal("app.js sidebar navigation list has no closing boundary")
+		t.Fatal("shell-view.js sidebar navigation list has no closing boundary")
 	}
 	navigation := content[start : start+end]
 	previous := -1
@@ -431,7 +439,7 @@ func TestSidebarNavigationUsesWorkflowOrderAndResponsiveGrouping(t *testing.T) {
 }
 
 func TestLoginDoesNotPreFillAdministratorUsername(t *testing.T) {
-	app, err := os.ReadFile("app.js")
+	app, err := os.ReadFile("modules/login-page.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -464,11 +472,7 @@ func TestSettingsDoesNotRepeatTheContextNavigation(t *testing.T) {
 }
 
 func TestTrafficUsesOneNodeFilterSurface(t *testing.T) {
-	app, err := os.ReadFile("app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
-	content := string(app)
+	content := frontendSources(t, "modules/shell-context.js", "modules/routes.js")
 	for _, required := range []string{
 		"端口流量节点",
 		`href="#traffic-all" data-context-traffic-agent="">全部节点`,
@@ -504,14 +508,8 @@ func TestTrafficUsesOneNodeFilterSurface(t *testing.T) {
 }
 
 func TestLegacyPresetLinksAndRendererKeepScopedNodeSelection(t *testing.T) {
-	app, err := os.ReadFile("app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
-	agents, err := os.ReadFile("modules/agents.js")
-	if err != nil {
-		t.Fatal(err)
-	}
+	app := frontendSources(t, "app.js", "modules/routes.js", "modules/shell-context.js")
+	agents := frontendSources(t, "modules/agents.js", "modules/agent-view.js")
 	styles, err := os.ReadFile("app.css")
 	if err != nil {
 		t.Fatal(err)
@@ -546,7 +544,7 @@ func TestLegacyPresetLinksAndRendererKeepScopedNodeSelection(t *testing.T) {
 		`const prefix = presetMode ? "preset-node" : "settings-node";`,
 		"link.href = `#${prefix}-${link.dataset.contextAgent}`;",
 	} {
-		if !strings.Contains(string(agents), required) {
+		if !strings.Contains(agents, required) {
 			t.Errorf("focused preset workspace is missing %q", required)
 		}
 	}
@@ -556,7 +554,7 @@ func TestLegacyPresetLinksAndRendererKeepScopedNodeSelection(t *testing.T) {
 		`<header class="node-page-intro"><div><p class="eyebrow">节点配置</p>`,
 		`agent.id === state.data.selectedAgent ? "open" : ""`,
 	} {
-		if strings.Contains(string(agents), forbidden) {
+		if strings.Contains(agents, forbidden) {
 			t.Errorf("focused preset workspace still renders node accordion contract %q", forbidden)
 		}
 	}
@@ -574,8 +572,8 @@ func TestLegacyPresetLinksAndRendererKeepScopedNodeSelection(t *testing.T) {
 }
 
 func TestNodeSidebarsUseDraggedNodeSettingsOrder(t *testing.T) {
-	app := string(mustReadFrontendFile(t, "app.js"))
-	agents := string(mustReadFrontendFile(t, "modules/agents.js"))
+	app := frontendSources(t, "modules/shell-context.js", "modules/session-api.js")
+	agents := frontendSources(t, "modules/agent-view.js", "modules/agent-card-interactions.js")
 	order := string(mustReadFrontendFile(t, "modules/node-order.js"))
 
 	if !strings.Contains(order, `export const nodeCardOrderKey = "qcontrolhub:node-card-order"`) {
@@ -585,7 +583,8 @@ func TestNodeSidebarsUseDraggedNodeSettingsOrder(t *testing.T) {
 		t.Fatalf("all eight node sidebars must use the shared dragged order; got %d call sites", strings.Count(app, "orderNodesBySavedOrder("))
 	}
 	for _, required := range []string{
-		`import { migrateLegacyNodeOrder, orderNodesBySavedOrder } from "./modules/node-order.js";`,
+		`import { migrateLegacyNodeOrder } from "./node-order.js";`,
+		`import { orderNodesBySavedOrder } from "./node-order.js";`,
 		`if (path === "/agents" && method === "GET" && session && state.session === session && Array.isArray(result))`,
 		`migrateLegacyNodeOrder(result);`,
 		`const items = orderNodesBySavedOrder(state.data.agents || []);`,
@@ -605,14 +604,14 @@ func TestNodeSidebarsUseDraggedNodeSettingsOrder(t *testing.T) {
 			t.Errorf("node settings drag ordering is not using shared persistence: missing %q", required)
 		}
 	}
-	if !strings.Contains(agents, `orderedNodeList,`) {
+	if !strings.Contains(agents, `import { orderedNodeList } from "./node-order.js";`) {
 		t.Error("node settings must migrate the legacy browser-wide order through the shared module")
 	}
 }
 
 func TestNodeSettingsStartsWithOperationsAndCards(t *testing.T) {
-	app := string(mustReadFrontendFile(t, "app.js"))
-	agents := string(mustReadFrontendFile(t, "modules/agents.js"))
+	app := string(mustReadFrontendFile(t, "modules/shell-view.js"))
+	agents := frontendSources(t, "modules/agent-view.js", "modules/agent-batch-controller.js")
 	styles := string(mustReadFrontendFile(t, "app.css"))
 	if strings.Contains(agents, `class="node-page-intro"`) || strings.Contains(styles, `.node-page-intro`) {
 		t.Fatal("node settings must not repeat its page title in a separate introduction panel")
@@ -639,7 +638,7 @@ func TestNodeSettingsStartsWithOperationsAndCards(t *testing.T) {
 }
 
 func TestClientAccessUsesContextSidebarAsOnlyNodeFilter(t *testing.T) {
-	app, err := os.ReadFile("app.js")
+	app, err := os.ReadFile("modules/shell-context.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -718,7 +717,7 @@ func TestClientAccessUsesContextSidebarAsOnlyNodeFilter(t *testing.T) {
 }
 
 func TestSubStoreSyncUsesCompactPanelPatterns(t *testing.T) {
-	app := string(mustReadFrontendFile(t, "app.js"))
+	app := frontendSources(t, "app.js", "modules/shell-context.js")
 	module := string(mustReadFrontendFile(t, "modules/substore-sync.js"))
 	styles := string(mustReadFrontendFile(t, "app.css"))
 	for _, required := range []string{
@@ -951,8 +950,11 @@ func TestRouteModulesLoadOnDemandAndWarmFromNavigationIntent(t *testing.T) {
 			t.Errorf("route module %q is still part of the eager application graph", module)
 		}
 	}
+	warmup := string(mustReadFrontendFile(t, "modules/route-warmup.js"))
 	for _, required := range []string{
 		`createRouteModuleLoader({`,
+		`createRouteWarmup(routeModules)`,
+		`bindNavigationPreload();`,
 		`routeModules.preload(routeModuleNames[route] || "dashboard")`,
 		`document.addEventListener("pointerover", preloadNavigationRoute`,
 		`document.addEventListener("pointerdown", preloadNavigationRoute`,
@@ -963,7 +965,7 @@ func TestRouteModulesLoadOnDemandAndWarmFromNavigationIntent(t *testing.T) {
 		`const routeModulePromise = routeModules.load(`,
 		`const sharedDataPromise = Promise.all([`,
 	} {
-		if !strings.Contains(app, required) {
+		if !strings.Contains(app+warmup, required) {
 			t.Errorf("route loading performance contract is missing %q", required)
 		}
 	}
@@ -990,9 +992,14 @@ func TestSPAModulesArePublished(t *testing.T) {
 }
 
 func TestAgentBatchAndEnrollmentSafetyContracts(t *testing.T) {
-	content := string(mustReadFrontendFile(t, "modules/agents.js"))
+	content := string(mustReadFrontendFile(t, "modules/agent-enrollment.js"))
 	for file, markers := range map[string][]string{
 		"modules/agents.js": {
+			`createAgentEnrollment({`,
+			`enrollment.bindEnrollmentPage(enrollmentHistory)`,
+			`batch.bind(agentsByID)`,
+		},
+		"modules/agent-batch-controller.js": {
 			`batchForm.dataset.busy === "1"`,
 			`batchForm.dataset.confirming === "1"`,
 			`for (const input of selected)`,
@@ -1000,14 +1007,13 @@ func TestAgentBatchAndEnrollmentSafetyContracts(t *testing.T) {
 			`data-batch-select-all`,
 			`selectAll.indeterminate = selection.indeterminate`,
 			`selection.indeterminate ? "mixed"`,
-			`showCommand(command, async () =>`,
-			`createAgentEnrollment({`,
 		},
 		"modules/agent-batch.js": {
 			`agent-self-upgrade-v1`,
 			`旧版 Agent 缺少远程升级能力`,
 		},
 		"modules/agent-enrollment.js": {
+			`showCommand(command, async () =>`,
 			`命令仅供复制；关闭页面不会连接、安装或重启任何节点。`,
 			`命令仅供复制，不会自动执行。`,
 			`document.body.style.overflow = "hidden"`,
@@ -1043,7 +1049,7 @@ func TestEnrollmentUsesARealDialogWithoutPersistentPanel(t *testing.T) {
 	module := string(mustReadFrontendFile(t, "modules/agents.js")) + "\n" +
 		string(mustReadFrontendFile(t, "modules/agent-enrollment.js"))
 	css := string(mustReadFrontendFile(t, "app.css"))
-	app := string(mustReadFrontendFile(t, "app.js"))
+	app := string(mustReadFrontendFile(t, "modules/shell-view.js"))
 	if strings.Contains(app, `href="#enrollment"`) || !strings.Contains(app, `type="button" data-open-enrollment`) {
 		t.Fatal("populated and empty node settings must expose a top dialog button without changing routes")
 	}
@@ -1079,9 +1085,19 @@ func mustReadFrontendFile(t *testing.T, name string) []byte {
 	return data
 }
 
+func frontendSources(t *testing.T, names ...string) string {
+	t.Helper()
+	var source strings.Builder
+	for _, name := range names {
+		source.Write(mustReadFrontendFile(t, name))
+		source.WriteByte('\n')
+	}
+	return source.String()
+}
+
 func TestManualConfigRequiresExplicitImportOfNodeSnapshot(t *testing.T) {
-	content := string(mustReadFrontendFile(t, "modules/configs.js")) + "\n" +
-		string(mustReadFrontendFile(t, "modules/live-config-state.js"))
+	content := frontendSources(t, "modules/live-config-page.js", "modules/live-config-state.js",
+		"modules/live-config-view.js", "modules/live-config-submit.js", "modules/live-config-reader.js")
 	for _, required := range []string{
 		`data-live-intent="import">手动导入并迁移`,
 		`迁移任一步失败都会自动恢复原服务`,
@@ -1110,7 +1126,7 @@ func TestManualConfigRequiresExplicitImportOfNodeSnapshot(t *testing.T) {
 			t.Errorf("manual configuration flow is missing %q", required)
 		}
 	}
-	agents, err := os.ReadFile("modules/agents.js")
+	agents, err := os.ReadFile("modules/agent-view.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1123,7 +1139,7 @@ func TestManualConfigRequiresExplicitImportOfNodeSnapshot(t *testing.T) {
 			t.Errorf("node service controls do not represent pending migration state %q", required)
 		}
 	}
-	app, err := os.ReadFile("app.js")
+	app, err := os.ReadFile("modules/shell-context.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1143,7 +1159,7 @@ func TestManualConfigRequiresExplicitImportOfNodeSnapshot(t *testing.T) {
 }
 
 func TestCoreLogsLabelFollowsAdvertisedFeature(t *testing.T) {
-	app, err := os.ReadFile("app.js")
+	app, err := os.ReadFile("modules/shell-context.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1231,11 +1247,7 @@ func TestCoreLogPageSelectionPersistsInBrowserStorage(t *testing.T) {
 }
 
 func TestCoreLogStoragePolicyNavigationAndVisibility(t *testing.T) {
-	app, err := os.ReadFile("app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
-	appContent := string(app)
+	appContent := frontendSources(t, "modules/shell-context.js", "modules/routes.js", "modules/shell-appearance.js")
 	for _, required := range []string{
 		`href="#settings-engines"><span>01</span>默认内核能力`,
 		`href="#settings-basic"><span>02</span>基础设置`,
@@ -1345,7 +1357,7 @@ func TestCoreLogsResizeWithinTheirWorkspace(t *testing.T) {
 }
 
 func TestAgentStructureRefreshDoesNotPrecommitComparisonMarkers(t *testing.T) {
-	agents, err := os.ReadFile("modules/agents.js")
+	agents, err := os.ReadFile("modules/agent-refresh.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1353,7 +1365,7 @@ func TestAgentStructureRefreshDoesNotPrecommitComparisonMarkers(t *testing.T) {
 	start := strings.Index(content, "function updateAgentMetrics")
 	end := strings.Index(content, "async function pollAgentMetrics")
 	if start < 0 || end <= start {
-		t.Fatal("agents.js is missing the updateAgentMetrics body boundary")
+		t.Fatal("agent-refresh.js is missing the updateAgentMetrics body boundary")
 	}
 	body := content[start:end]
 	for _, required := range []string{
@@ -1381,7 +1393,7 @@ func TestAgentStructureRefreshDoesNotPrecommitComparisonMarkers(t *testing.T) {
 }
 
 func TestAgentPollingRefreshesNewlyEnrolledNodeStructure(t *testing.T) {
-	agents := string(mustReadFrontendFile(t, "modules/agents.js"))
+	agents := frontendSources(t, "modules/agents.js", "modules/agent-refresh.js")
 	for _, required := range []string{
 		`export function agentStructureSignature(agents = [])`,
 		`renderedAgentStructure = agentStructureSignature(visibleAgents)`,
@@ -1400,7 +1412,7 @@ func TestAgentPollingRefreshesNewlyEnrolledNodeStructure(t *testing.T) {
 		t.Fatal("Agent roster polling function boundary is missing")
 	}
 	pollBody := agents[pollStart:]
-	pollEnd := strings.Index(pollBody, "\n  return {\n    agents,")
+	pollEnd := strings.Index(pollBody, "\n  return {\n    pollAgentMetrics,")
 	if pollEnd < 0 {
 		t.Fatal("Agent roster polling function end is missing")
 	}
