@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import "./formatting_smoke.mjs";
+import "./permissions_smoke.mjs";
 import "./refresh_smoke.mjs";
 import "./route_loader_smoke.mjs";
 import "./requests_smoke.mjs";
