@@ -109,6 +109,21 @@ func TestSSRustScriptACLPlanIsReadOnlyAndTracksDrift(t *testing.T) {
 	}
 }
 
+func TestSSRustImportNormalizesPersistentLogWriters(t *testing.T) {
+	t.Parallel()
+	content := `{"server":"::","server_port":20001,"method":"aes-256-gcm","password":"test-password","log":{"writers":[{"file":{"directory":"/var/log/shadowsocks-rust","rotation":"daily"}}]}}`
+	plan, err := prepareSSRustImport(EngineSpec{ConfigPath: "/etc/shadowsocks-rust/config.json"}, content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.managedContent == content {
+		t.Fatal("persistent SS Rust writer survived import planning")
+	}
+	if err := validateNoPersistentCoreLogs(core.EngineShadowsocksRust, plan.managedContent); err != nil {
+		t.Fatalf("normalized import still persists logs: %v\n%s", err, plan.managedContent)
+	}
+}
+
 func TestSSRustMigrationLifecycleWithACLAndActiveManagedService(t *testing.T) {
 	requireAgentRoot(t)
 	if _, err := managedCoreServiceIdentity(); err != nil {

@@ -28,6 +28,11 @@ func prepareSSRustImport(existing EngineSpec, content string) (coreImportPlan, e
 	if existing.ConfigDirectory != "" || existing.WorkingDirectory != "" {
 		return coreImportPlan{}, errors.New("SS Rust import supports a single configuration file only")
 	}
+	normalized, err := normalizeImportedSSRustLogDestinations(content)
+	if err != nil {
+		return coreImportPlan{}, fmt.Errorf("normalize SS Rust log destinations: %w", err)
+	}
+	content = normalized
 	var root map[string]any
 	decoder := json.NewDecoder(strings.NewReader(content))
 	decoder.UseNumber()

@@ -611,8 +611,12 @@ func validateManagedUnitDropIns(ctx context.Context, service string) error {
 	allowed := map[string][][]byte{
 		filepath.Join(existingDiscoveryManagedUnitRoot, service+".d", "10-qcontrolhub-bind-low-ports.conf"): managedCapabilityDropInVariants(service),
 		filepath.Join(existingDiscoveryManagedUnitRoot, service+".d", "20-qcontrolhub-volatile-logs.conf"): {
-			[]byte(managedCoreLogDropIn), []byte(managedCoreLogFallbackDropIn),
+			[]byte(managedCoreLogDropIn),
 		},
+	}
+	if fallback, fallbackErr := managedCoreLogFallbackDropIn(service); fallbackErr == nil {
+		path := filepath.Join(existingDiscoveryManagedUnitRoot, service+".d", "20-qcontrolhub-volatile-logs.conf")
+		allowed[path] = append(allowed[path], fallback)
 	}
 	if service == "qagent-shadowsocks-rust.service" {
 		allowed[filepath.Join(existingDiscoveryManagedUnitRoot, service+".d", "30-qcontrolhub-ss-rust-logs.conf")] = [][]byte{[]byte(managedSSRustLogDropIn)}

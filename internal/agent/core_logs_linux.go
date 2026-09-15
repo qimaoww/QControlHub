@@ -27,9 +27,12 @@ import (
 )
 
 const (
-	coreLogQueueLimit         = 2048
-	defaultCoreLogMaxBytes    = 16 << 20
-	defaultCoreLogRotateCount = 1
+	coreLogQueueLimit = 2048
+	// Until the panel sends its policy, start at the smallest valid allowance
+	// with no snapshots. An Agent restart must never temporarily restore the
+	// product default over a smaller panel-selected limit.
+	defaultCoreLogMaxBytes    = 1 << 20
+	defaultCoreLogRotateCount = 0
 	coreLogFileMaxLine        = 256 << 10
 	coreLogRevalidateBytes    = 256 << 10
 	coreLogRevalidateEvery    = time.Second
@@ -68,6 +71,7 @@ type CoreLogCollector struct {
 	sourceReady        map[core.Engine]chan struct{}
 	coreLogMaxBytes    int64
 	coreLogRotateCount int
+	fileBudgetDivisor  int
 }
 
 type coreLogFileRun struct {
@@ -134,6 +138,7 @@ func NewCoreLogCollectorForServiceManager(manager *ServiceManager, specs ...map[
 		preferredKind: make(map[core.Engine]string), consoleKind: make(map[core.Engine]string),
 		transitions: make(map[core.Engine]*coreLogSourceTransition), sourceReady: make(map[core.Engine]chan struct{}),
 		coreLogMaxBytes: defaultCoreLogMaxBytes, coreLogRotateCount: defaultCoreLogRotateCount,
+		fileBudgetDivisor: 1,
 	}
 	if manager != nil && manager.Kind() == ServiceManagerOpenRC {
 		collector.fileSources = coreLogFileSources(specs...)
@@ -145,6 +150,11 @@ func NewCoreLogCollectorForServiceManager(manager *ServiceManager, specs ...map[
 		return collector
 	}
 	collector.sources = coreLogJournalSources(specs...)
+	collector.fileSources = systemdFallbackCoreLogFileSources(specs...)
+	// A node may temporarily contain cores started under both the private
+	// journal and /run fallback drop-ins. Reserve half of the node-wide budget
+	// for each backend so their combined transport caches cannot exceed policy.
+	collector.fileBudgetDivisor = 2
 	for _, source := range collector.sources {
 		for _, engine := range source.unitEngines {
 			collector.consoleKind[engine] = "journal"
@@ -174,7 +184,17 @@ func (collector *CoreLogCollector) ApplyPolicy(policy core.AgentPolicy) {
 			}
 		}
 		maxFileBytes, _ := collector.rotationPolicy()
-		if validated, err := openValidatedCoreLogFileContextMode(context.Background(), source, true); err == nil {
+		if source.kind == "systemd-fallback" {
+			if validated, err := openValidatedCoreLogFileContext(context.Background(), source); err == nil {
+				size := validated.identity.Size()
+				_ = validated.file.Close()
+				if size > maxFileBytes {
+					if err := truncateSystemdFallbackCoreLog(context.Background(), source); err != nil {
+						slog.Warn("apply managed core log capacity", "path", source.path, "error", err)
+					}
+				}
+			}
+		} else if validated, err := openValidatedCoreLogFileContextMode(context.Background(), source, true); err == nil {
 			// Enforce the panel limit even when it equals the Agent default. An
 			// older Agent may have left an oversized file without changing the
 			// selected policy value.
@@ -204,7 +224,11 @@ func (collector *CoreLogCollector) rotationPolicy() (int64, int) {
 	if sources < 1 {
 		sources = 1
 	}
-	bytes := collector.coreLogMaxBytes / int64((count+1)*sources)
+	divisor := collector.fileBudgetDivisor
+	if divisor < 1 {
+		divisor = 1
+	}
+	bytes := collector.coreLogMaxBytes / int64(divisor*(count+1)*sources)
 	if bytes < 1 {
 		bytes = 1
 	}
@@ -271,6 +295,12 @@ func (collector *CoreLogCollector) setFileSourceStatus(source coreLogFileSource,
 	active := collector.activeFiles[coreLogFileSourceKey(source)]
 	if active == nil || active.bindingID != coreLogFileBindingID(source) {
 		return
+	}
+	if source.kind == "systemd-fallback" && status == "active" {
+		// The fallback file only exists when systemd could not start the private
+		// journal. Once observed, expose that live transport instead of leaving
+		// the panel on a failed journal-reader status.
+		collector.preferredKind[source.engine] = source.kind
 	}
 	collector.setSourceStatusLocked(source.engine, source.kind, status, code)
 }
@@ -821,6 +851,12 @@ func coreLogFileIdentity(info os.FileInfo) (uint64, uint64, bool) {
 // snapshot only costs the archived copy; truncation still proceeds so a
 // persistently failing copy can never let the live file grow unbounded.
 func (collector *CoreLogCollector) rotateFile(source coreLogFileSource) {
+	if source.kind == "systemd-fallback" {
+		if err := truncateSystemdFallbackCoreLog(context.Background(), source); err != nil {
+			slog.Warn("managed core log rotation failed", "path", source.path, "error", err)
+		}
+		return
+	}
 	rotateBytes, rotateCount := collector.rotationPolicy()
 	if rotateCount == 0 {
 		if err := os.Truncate(source.path, 0); err != nil {
@@ -868,6 +904,61 @@ func (collector *CoreLogCollector) rotateFile(source coreLogFileSource) {
 	if err := os.Truncate(source.path, 0); err != nil {
 		slog.Warn("managed core log rotation failed", "path", source.path, "error", err)
 	}
+}
+
+func truncateSystemdFallbackCoreLog(ctx context.Context, source coreLogFileSource) error {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if source.kind != "systemd-fallback" || source.root != systemdFallbackCoreLogRoot {
+		return errors.New("core log cache is not a managed systemd fallback source")
+	}
+	trusted := false
+	for _, spec := range DefaultSpecs() {
+		path, err := systemdFallbackCoreLogPath(spec.Service)
+		if err == nil && source.path == path {
+			trusted = true
+			break
+		}
+	}
+	if !trusted {
+		return errors.New("core log cache path is not project-managed")
+	}
+	validated, err := openValidatedCoreLogFileContext(ctx, source)
+	if err != nil {
+		return err
+	}
+	identity := validated.identity
+	_ = validated.file.Close()
+	if err := os.Truncate(source.path, 0); err == nil {
+		return nil
+	}
+	// Binary-only upgrades may still run under an older qagent unit without the
+	// RuntimeDirectory write exception. Use a short-lived root unit exposing
+	// only this already-validated cache file, and retain no rotated copy.
+	for _, executable := range []string{retiredLogSystemdRunPath, retiredLogTruncatePath} {
+		if err := validatePrivilegedExecutable(executable); err != nil {
+			return fmt.Errorf("unsafe core-log cache helper %s: %w", executable, err)
+		}
+	}
+	arguments := []string{
+		"--pipe", "--wait", "--collect", "--quiet", "--service-type=exec",
+		"--property=User=root", "--property=UMask=0077", "--property=NoNewPrivileges=yes",
+		"--property=CapabilityBoundingSet=", "--property=AmbientCapabilities=",
+		"--property=ProtectSystem=strict", "--property=ProtectHome=yes", "--property=PrivateTmp=yes",
+		"--property=PrivateDevices=yes", "--property=RestrictAddressFamilies=AF_UNIX",
+		"--property=ReadWritePaths=" + source.path, "--", retiredLogTruncatePath, "--size=0", "--", source.path,
+	}
+	if output, err := run(ctx, retiredLogSystemdRunPath, arguments...); err != nil {
+		return fmt.Errorf("truncate systemd fallback core log: %w: %s", err, strings.TrimSpace(output))
+	}
+	after, err := os.Lstat(source.path)
+	if err != nil || !os.SameFile(identity, after) {
+		if err == nil {
+			err = errors.New("systemd fallback core log changed during cleanup")
+		}
+		return err
+	}
+	return nil
 }
 
 func coreLogArchivePath(path string, index int) string {
@@ -996,6 +1087,34 @@ func coreLogFileSources(specSets ...map[core.Engine]EngineSpec) []coreLogFileSou
 	sources := make([]coreLogFileSource, 0, len(engines))
 	for path, engine := range engines {
 		sources = append(sources, coreLogFileSource{path: path, root: openRCCoreLogRoot, engine: engine, kind: "openrc"})
+	}
+	sort.Slice(sources, func(i, j int) bool { return sources[i].path < sources[j].path })
+	return sources
+}
+
+func systemdFallbackCoreLogFileSources(specSets ...map[core.Engine]EngineSpec) []coreLogFileSource {
+	engines := make(map[string]core.Engine)
+	ambiguous := make(map[string]bool)
+	for _, specs := range specSets {
+		for engine, spec := range specs {
+			path, err := systemdFallbackCoreLogPath(spec.Service)
+			if err != nil {
+				continue
+			}
+			if ambiguous[path] {
+				continue
+			}
+			if existing, ok := engines[path]; ok && existing != engine {
+				delete(engines, path)
+				ambiguous[path] = true
+				continue
+			}
+			engines[path] = engine
+		}
+	}
+	sources := make([]coreLogFileSource, 0, len(engines))
+	for path, engine := range engines {
+		sources = append(sources, coreLogFileSource{path: path, root: systemdFallbackCoreLogRoot, engine: engine, kind: "systemd-fallback"})
 	}
 	sort.Slice(sources, func(i, j int) bool { return sources[i].path < sources[j].path })
 	return sources

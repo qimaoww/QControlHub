@@ -24,27 +24,49 @@ LogNamespace=qagent-cores
 StandardOutput=journal
 StandardError=journal
 `
-	managedCoreLogFallbackDropIn = `[Service]
-LogNamespace=
-StandardOutput=null
-StandardError=null
-`
 )
 
+var systemdFallbackCoreLogRoot = "/run/qagent-core-logs"
+
+func managedCoreLogFallbackDropIn(service string) ([]byte, error) {
+	path, err := systemdFallbackCoreLogPath(service)
+	if err != nil {
+		return nil, err
+	}
+	return []byte(fmt.Sprintf("[Service]\nLogNamespace=\nStandardOutput=append:%s\nStandardError=inherit\n", path)), nil
+}
+
+func systemdFallbackCoreLogPath(service string) (string, error) {
+	if !managedCoreServiceName(service) {
+		return "", errors.New("systemd fallback core log service is not project-managed")
+	}
+	return filepath.Join(systemdFallbackCoreLogRoot, "qagent-core-log-"+service+".log"), nil
+}
+
 func ensureManagedCoreLogStreaming(ctx context.Context, specs map[core.Engine]EngineSpec, managers ...*ServiceManager) error {
-	return ensureManagedCoreLogStreamingWithPolicy(ctx, specs, core.AgentPolicy{CoreLogMaxMiB: 16, CoreLogRotateCount: 1}, managers...)
+	return ensureManagedCoreLogStreamingInternal(ctx, specs, core.AgentPolicy{CoreLogMaxMiB: 1}, false, managers...)
 }
 
 func managedCoreJournalConfigForPolicy(policy core.AgentPolicy) []byte {
-	maxBytes := uint64(policy.CoreLogMaxMiB) << 20
+	// Reserve the other half of the node-wide cache budget for the bounded
+	// /run fallback. A service can retain its previous drop-in until restart,
+	// so both backends may contain data at the same time during an upgrade.
+	maxBytes := (uint64(policy.CoreLogMaxMiB) << 20) / 2
+	if maxBytes < 1 {
+		maxBytes = 1
+	}
 	fileBytes := maxBytes / uint64(policy.CoreLogRotateCount+1)
-	return []byte(fmt.Sprintf("[Journal]\nStorage=volatile\nRuntimeMaxUse=%d\nRuntimeMaxFileSize=%d\nMaxRetentionSec=15min\n", maxBytes, fileBytes))
+	return []byte(fmt.Sprintf("# qcontrolhub-node-budget-v2\n[Journal]\nStorage=volatile\nRuntimeMaxUse=%d\nRuntimeMaxFileSize=%d\nMaxRetentionSec=15min\n", maxBytes, fileBytes))
 }
 
 func ensureManagedCoreLogStreamingWithPolicy(ctx context.Context, specs map[core.Engine]EngineSpec, policy core.AgentPolicy, managers ...*ServiceManager) error {
+	return ensureManagedCoreLogStreamingInternal(ctx, specs, policy, true, managers...)
+}
+
+func ensureManagedCoreLogStreamingInternal(ctx context.Context, specs map[core.Engine]EngineSpec, policy core.AgentPolicy, enforcePolicy bool, managers ...*ServiceManager) error {
 	if policy.CoreLogMaxMiB == 0 {
-		policy.CoreLogMaxMiB = 16
-		policy.CoreLogRotateCount = 1
+		policy.CoreLogMaxMiB = 1
+		policy.CoreLogRotateCount = 0
 	}
 	manager := selectedServiceManager(managers...)
 	installedSpecs := make(map[core.Engine]EngineSpec, len(specs))
@@ -85,9 +107,20 @@ func ensureManagedCoreLogStreamingWithPolicy(ctx context.Context, specs map[core
 		return err
 	}
 
-	journalChanged, err := installManagedLogFile(ensureContext, base,
-		"/etc/systemd/journald@qagent-cores.conf.d/10-qcontrolhub-volatile.conf",
-		managedCoreJournalConfigForPolicy(policy))
+	journalPath := "/etc/systemd/journald@qagent-cores.conf.d/10-qcontrolhub-volatile.conf"
+	var err error
+	preservePolicy := false
+	if !enforcePolicy {
+		preservePolicy, err = hasManagedCoreJournalPolicy(journalPath)
+		if err != nil {
+			return fmt.Errorf("inspect volatile core journal policy: %w", err)
+		}
+	}
+	journalChanged := false
+	if !preservePolicy {
+		journalChanged, err = installManagedLogFile(ensureContext, base, journalPath,
+			managedCoreJournalConfigForPolicy(policy))
+	}
 	if err != nil {
 		return fmt.Errorf("configure volatile core journal: %w", err)
 	}
@@ -99,12 +132,22 @@ func ensureManagedCoreLogStreamingWithPolicy(ctx context.Context, specs map[core
 		// this isolated namespace does not affect the host journal or proxy cores.
 		_, _ = run(ensureContext, base.systemctlPath, "restart", managedCoreJournalService)
 	}
-	dropIn := []byte(managedCoreLogDropIn)
-	if err := startManagedCoreJournal(ensureContext, base.systemctlPath); err != nil {
-		dropIn = []byte(managedCoreLogFallbackDropIn)
+	useFallback := startManagedCoreJournal(ensureContext, base.systemctlPath) != nil
+	if useFallback {
+		if err := ensureSystemdFallbackCoreLogDirectory(ensureContext, base); err != nil {
+			return err
+		}
 	}
 	changed := false
+	changedServices := make(map[string]struct{})
 	for engine, spec := range installedSpecs {
+		dropIn := []byte(managedCoreLogDropIn)
+		if useFallback {
+			dropIn, err = managedCoreLogFallbackDropIn(spec.Service)
+			if err != nil {
+				return err
+			}
+		}
 		installed, installErr := installManagedLogFile(ensureContext, base,
 			filepath.Join("/etc/systemd/system", spec.Service+".d", "20-qcontrolhub-volatile-logs.conf"),
 			dropIn)
@@ -112,6 +155,9 @@ func ensureManagedCoreLogStreamingWithPolicy(ctx context.Context, specs map[core
 			return fmt.Errorf("configure volatile logs for %s: %w", spec.Service, installErr)
 		}
 		changed = changed || installed
+		if installed {
+			changedServices[spec.Service] = struct{}{}
+		}
 		if engine == core.EngineShadowsocksRust {
 			installed, installErr = installManagedLogFile(ensureContext, base,
 				filepath.Join("/etc/systemd/system", spec.Service+".d", "30-qcontrolhub-ss-rust-logs.conf"),
@@ -120,14 +166,67 @@ func ensureManagedCoreLogStreamingWithPolicy(ctx context.Context, specs map[core
 				return fmt.Errorf("configure SS Rust connection logs: %w", installErr)
 			}
 			changed = changed || installed
+			if installed {
+				changedServices[spec.Service] = struct{}{}
+			}
 		}
 	}
 	if changed {
 		if output, err := run(ensureContext, base.systemctlPath, "daemon-reload"); err != nil {
 			return fmt.Errorf("reload systemd after core log update: %w: %s", err, output)
 		}
+		for service := range changedServices {
+			status, statusErr := serviceStatusWithManager(ensureContext, manager, service)
+			if statusErr != nil {
+				return fmt.Errorf("query %s after core log update: %w", service, statusErr)
+			}
+			if status == "active" || status == "failed" {
+				if _, restartErr := serviceCommandAndVerifyWithManager(ensureContext, manager, service, core.ActionRestart); restartErr != nil {
+					return fmt.Errorf("restart %s after core log update: %w", service, restartErr)
+				}
+			}
+		}
 	}
 	return nil
+}
+
+func ensureSystemdFallbackCoreLogDirectory(ctx context.Context, base coreUnitCapabilitySyncer) error {
+	runtimeSyncer := base
+	runtimeSyncer.dropInRoot = "/run"
+	if err := runtimeSyncer.runHelper(ctx, nil, runtimeSyncer.installPath,
+		"-d", "-o", "root", "-g", "root", "-m", "0700", systemdFallbackCoreLogRoot); err != nil {
+		return fmt.Errorf("create systemd fallback core log cache: %w", err)
+	}
+	if err := validateProtectedDirectoryChain(systemdFallbackCoreLogRoot); err != nil {
+		return fmt.Errorf("validate systemd fallback core log cache: %w", err)
+	}
+	return nil
+}
+
+func hasManagedCoreJournalPolicy(path string) (bool, error) {
+	if _, err := os.Lstat(path); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, err
+	}
+	if err := validateManagedUnitFile(path); err != nil {
+		return false, err
+	}
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		return false, err
+	}
+	for _, maxMiB := range []uint32{1, 2, 4, 8, 16, 32, 64, 128} {
+		for _, rotations := range []uint32{0, 1, 2, 3, 5} {
+			if bytes.Equal(contents, managedCoreJournalConfigForPolicy(core.AgentPolicy{
+				CoreLogMaxMiB: maxMiB, CoreLogRotateCount: rotations,
+			})) {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }
 
 // ensureOpenRCCoreLogDirectory prepares the root that supervise-daemon

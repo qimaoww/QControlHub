@@ -167,9 +167,9 @@ func NewClient(config ClientConfig, executor *Executor) (*Client, error) {
 	}
 	reconcileCancel()
 	logUpgradeContext, logUpgradeCancel := context.WithTimeout(context.Background(), 45*time.Second)
-	if err := executor.upgradeCompletedCoreLogPolicies(logUpgradeContext); err != nil {
+	if err := executor.upgradeManagedCoreLogPolicies(logUpgradeContext); err != nil {
 		logUpgradeCancel()
-		return nil, fmt.Errorf("upgrade completed core logging policy: %w", err)
+		return nil, fmt.Errorf("upgrade managed core logging policy: %w", err)
 	}
 	logUpgradeCancel()
 	parsed, err := url.Parse(config.ServerURL)
@@ -303,6 +303,10 @@ func (c *Client) Run(ctx context.Context) error {
 	if err := ensureManagedCoreLogStreaming(ctx, c.executor.Specs, c.executor.serviceManager()); err != nil {
 		slog.Warn("prepare volatile managed core logs", "error", err)
 	}
+	// Reclaim snapshots and oversized live cache files before reconnecting.
+	// The panel policy will expand this fail-safe minimum after authentication;
+	// until then an Agent restart must not retain a larger prior allocation.
+	c.logs.ApplyPolicy(core.AgentPolicy{CoreLogMaxMiB: 1, CoreLogRotateCount: 0})
 	go c.logs.Run(ctx)
 	go c.publicIP.Run(ctx)
 	c.executor.migrateNativeAccounting(ctx)
