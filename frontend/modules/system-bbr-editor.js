@@ -1,5 +1,6 @@
 import { bindEvent } from "./refresh.js";
 import { validateTCPSelection, systemBBRState, systemBBRActions, actionLabel, dialogID } from "./system-bbr-model.js";
+import { prepareTCPPreset } from "./system-bbr-presets.js";
 export function createSystemBBREditor({ api, state, can, notify, confirmAction }, { lifecycle, editable, render, systemBBR }) {
   function editorError(agentID, message) {
     lifecycle.editorErrors.set(agentID, message);
@@ -94,6 +95,19 @@ export function createSystemBBREditor({ api, state, can, notify, confirmAction }
         });
       });
       form.querySelectorAll("[data-tcp-selected]").forEach((input) => bindEvent(input, "change", capture));
+      form.querySelectorAll("[data-tcp-preset]").forEach((button) => {
+        bindEvent(button, "click", () => {
+          const current = lifecycle.lastAgents?.find((entry) => entry.id === agent.id);
+          if (button.disabled || state.route !== "system-bbr" || lifecycle.accountData !== state.data || state.confirmOpen || !current || !editable(current) || !systemBBRState(current).controllable || lifecycle.submitting.has(agent.id) || ["pending", "running"].includes(lifecycle.localTasks.get(agent.id)?.status)) return;
+          try {
+            lifecycle.drafts[agent.id] = prepareTCPPreset(button.dataset.tcpPreset, lifecycle.rules, current.metrics?.bbr?.parameters, lifecycle.drafts[agent.id]);
+            lifecycle.editorErrors.delete(agent.id);
+            render(lifecycle.lastAgents);
+          } catch (error) {
+            editorError(agent.id, error.message);
+          }
+        });
+      });
       bindEvent(form.querySelector("[data-tcp-reset]"), "click", async () => {
         const epoch = state.navigationEpoch;
         const accepted = !Object.keys(lifecycle.drafts[agent.id] || {}).length || await confirmAction("确定清空此节点未提交的 TCP 参数选择？已保存的系统配置不受影响。", "清空选择");

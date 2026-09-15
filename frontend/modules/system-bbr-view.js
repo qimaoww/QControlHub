@@ -1,5 +1,6 @@
 import { diagnosticError } from "./errors.js";
 import { orderNodesBySavedOrder } from "./node-order.js";
+import { prepareTCPPreset, systemTCPPresets } from "./system-bbr-presets.js";
 
 import { systemBBRState, systemBBRFeature, taskLabel, actionLabel, dialogID } from "./system-bbr-model.js";
 export function createSystemBBRView({ state, can, esc, date, shell }, { lifecycle, editable, selectedID }) {
@@ -18,7 +19,13 @@ export function createSystemBBRView({ state, can, esc, date, shell }, { lifecycl
     if (!editable(agent) || !agent.metrics?.bbr || !(agent.features || []).includes(systemBBRFeature)) return "";
     const current = agent.metrics.bbr.parameters || {};
     const draft = lifecycle.drafts[agent.id] || {};
-    const content = `<form novalidate data-tcp-form="${esc(agent.id)}"><div class="bbr-dialog-body" data-refresh-scroll><p class="bbr-note">勾选需要管理的参数；编辑会自动勾选。仅应用勾选项，其他系统参数和既有托管项保持不变。关闭弹窗保留草稿，刷新浏览器会丢失。</p><div class="bbr-fields">${lifecycle.rules.map((rule) => {
+    const presets = systemTCPPresets.map((preset) => {
+      let unavailable = "";
+      try { prepareTCPPreset(preset.id, lifecycle.rules, current); }
+      catch (error) { unavailable = error.message; }
+      return `<div class="bbr-preset"><div><strong>${esc(preset.name)}</strong><p>BBR + fq；收发缓冲区上限 32 MiB，TCP 最小 / 默认缓冲区 4 / 64 KiB；开启 MTU 黑洞探测和窗口缩放。</p><small>填入并勾选 ${Object.keys(preset.settings).length} 项，覆盖同名草稿，保留其他选择。核对下方参数后保存并应用。缓冲区上限需结合节点内存与并发连接评估。</small>${unavailable ? `<p class="bbr-preset-unavailable">${esc(unavailable)}</p>` : ""}</div><button class="button small" type="button" data-tcp-preset="${esc(preset.id)}" ${disabled || unavailable ? "disabled" : ""}>填入预设</button></div>`;
+    }).join("");
+    const content = `<form novalidate data-tcp-form="${esc(agent.id)}"><div class="bbr-dialog-body" data-refresh-scroll><p class="bbr-note">勾选需要管理的参数；编辑会自动勾选。仅应用勾选项，其他系统参数和既有托管项保持不变。关闭弹窗保留草稿，刷新浏览器会丢失。</p><section class="bbr-presets" aria-label="BBR 参数预设">${presets}</section><div class="bbr-fields">${lifecycle.rules.map((rule) => {
       const available = Object.hasOwn(current, rule.key);
       const value = draft[rule.key] ?? current[rule.key] ?? "";
       const choices = rule.choices || [];
