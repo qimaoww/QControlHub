@@ -12,6 +12,21 @@
 
 自定义编辑支持拥塞算法、默认队列、TCP 收发缓冲区、核心缓冲区上限、SYN/监听/网卡队列、MTU 探测、ECN、Fast Open、SACK 和窗口缩放；服务端和 Agent 共用字段白名单及数值校验。算法选项不保证系统内核已提供，实际写入失败会报告原因并回滚，不下载安装新内核或第三方模块。系统原有参数超出本面板编辑范围时仍原样显示，不会静默归一化覆盖。
 
+编辑弹窗提供“BBR · 32 MiB 缓冲区”预设，填入并勾选以下八项：
+
+| 参数 | 预设值 |
+| --- | --- |
+| `net.core.default_qdisc` | `fq` |
+| `net.ipv4.tcp_congestion_control` | `bbr` |
+| `net.core.rmem_max` | `33554432` |
+| `net.core.wmem_max` | `33554432` |
+| `net.ipv4.tcp_rmem` | `4096 65536 33554432` |
+| `net.ipv4.tcp_wmem` | `4096 65536 33554432` |
+| `net.ipv4.tcp_mtu_probing` | `1` |
+| `net.ipv4.tcp_window_scaling` | `1` |
+
+填入预设只更新草稿：替换同名参数的草稿值，保留其他已勾选项，仍需检查后点击“保存并应用选中参数”并确认提交。节点缺少任何一项上报参数，或控制面字段规则不接受预设值时，整套预设都不会填入。预设不会重置未列出的系统值或已有托管项；32 MiB 是缓冲区上限，应结合节点内存和并发连接量评估，预设名称不代表性能保证。
+
 配置固定保存到 `/etc/sysctl.d/90-qcontrolhub-bbr.conf`，不写 `/etc/sysctl.conf`，不运行 `sysctl --system`。新配置与已有面板托管项合并，未选择的项目保持不变；文件被外部改写或替换成符号链接时拒绝覆盖。启用/关闭快捷按钮分别设置 `bbr + fq` / `cubic + fq`，保留其他已托管 TCP 项。写入失败、回读不一致、持久化失败会尝试回滚，并保留有限数量的原文件备份。进程被强制终止或主机掉电不能保证事务完成；下次采集会展示当前值与保存值的差异。
 
 这些参数不是“越大越快”，应根据内存、并发连接和网络条件选择。本功能不重启网络、不修改现有网卡队列，也不保证现有 socket 切换拥塞算法；应用仍可为 socket 指定算法。默认队列与网卡当前队列分开展示。Linux 4.20 及以后 BBR 不严格要求 `fq`，不能仅因为网卡是 `fq_codel/noqueue/mq` 就判定 BBR 未启用。参见 [Linux TCP 参数文档](https://kernel.org/doc/html/latest/networking/ip-sysctl.html)、[默认队列语义](https://www.kernel.org/doc/html/latest/admin-guide/sysctl/net.html) 和 [BBR 项目说明](https://github.com/google/bbr/blob/master/Documentation/bbr-quick-start.md)。

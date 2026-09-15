@@ -1,5 +1,6 @@
 import { diagnosticError } from "./errors.js";
 import { orderNodesBySavedOrder } from "./node-order.js";
+import { prepareTCPPreset, systemTCPPresets } from "./system-bbr-presets.js";
 
 import { systemBBRState, systemBBRFeature, taskLabel, actionLabel, dialogID } from "./system-bbr-model.js";
 export function createSystemBBRView({ state, can, esc, date, shell }, { lifecycle, editable, selectedID }) {
@@ -11,14 +12,21 @@ export function createSystemBBRView({ state, can, esc, date, shell }, { lifecycl
   }
 
   function dialogButton(agent, kind, title) {
-    return `<button class="bbr-dialog-open" type="button" data-bbr-dialog-open="${esc(dialogID(agent.id, kind))}" aria-haspopup="dialog" aria-controls="${esc(dialogID(agent.id, kind))}"><span>${title}${kind === "editor" ? `<small data-bbr-draft-label="${esc(agent.id)}" ${Object.keys(lifecycle.drafts[agent.id] || {}).length ? "" : "hidden"}>有未提交草稿</small>` : ""}</span><span aria-hidden="true">→</span></button>`;
+    const shortTitle = kind === "editor" ? "编辑参数" : "参数详情";
+    return `<button class="bbr-dialog-open" type="button" data-bbr-dialog-open="${esc(dialogID(agent.id, kind))}" aria-label="${esc(title)}" aria-haspopup="dialog" aria-controls="${esc(dialogID(agent.id, kind))}"><span>${shortTitle}${kind === "editor" ? `<small data-bbr-draft-label="${esc(agent.id)}" ${Object.keys(lifecycle.drafts[agent.id] || {}).length ? "" : "hidden"}>有草稿</small>` : ""}</span><span aria-hidden="true">→</span></button>`;
   }
 
   function editor(agent, disabled) {
     if (!editable(agent) || !agent.metrics?.bbr || !(agent.features || []).includes(systemBBRFeature)) return "";
     const current = agent.metrics.bbr.parameters || {};
     const draft = lifecycle.drafts[agent.id] || {};
-    const content = `<form novalidate data-tcp-form="${esc(agent.id)}"><div class="bbr-dialog-body" data-refresh-scroll><p class="bbr-note">勾选需要管理的参数；编辑会自动勾选。仅应用勾选项，其他系统参数和既有托管项保持不变。关闭弹窗保留草稿，刷新浏览器会丢失。</p><div class="bbr-fields">${lifecycle.rules.map((rule) => {
+    const presets = systemTCPPresets.map((preset) => {
+      let unavailable = "";
+      try { prepareTCPPreset(preset.id, lifecycle.rules, current); }
+      catch (error) { unavailable = error.message; }
+      return `<div class="bbr-preset"><div><strong>${esc(preset.name)}</strong><p>BBR + fq；收发缓冲区上限 32 MiB，TCP 最小 / 默认缓冲区 4 / 64 KiB；开启 MTU 黑洞探测和窗口缩放。</p><small>填入并勾选 ${Object.keys(preset.settings).length} 项，覆盖同名草稿，保留其他选择。核对下方参数后保存并应用。缓冲区上限需结合节点内存与并发连接评估。</small>${unavailable ? `<p class="bbr-preset-unavailable">${esc(unavailable)}</p>` : ""}</div><button class="button small" type="button" data-tcp-preset="${esc(preset.id)}" ${disabled || unavailable ? "disabled" : ""}>填入预设</button></div>`;
+    }).join("");
+    const content = `<form novalidate data-tcp-form="${esc(agent.id)}"><div class="bbr-dialog-body" data-refresh-scroll><p class="bbr-note">勾选需要管理的参数；编辑会自动勾选。仅应用勾选项，其他系统参数和既有托管项保持不变。关闭弹窗保留草稿，刷新浏览器会丢失。</p><section class="bbr-presets" aria-label="BBR 参数预设">${presets}</section><div class="bbr-fields">${lifecycle.rules.map((rule) => {
       const available = Object.hasOwn(current, rule.key);
       const value = draft[rule.key] ?? current[rule.key] ?? "";
       const choices = rule.choices || [];
@@ -48,13 +56,12 @@ export function createSystemBBRView({ state, can, esc, date, shell }, { lifecycl
       const hasFeature = (agent.features || []).includes(systemBBRFeature);
       const value = (entry) => esc(entry || "未上报");
       const persistence = status?.persistence === "managed"
-        ? `面板管理 ${Object.keys(status.configured_parameters || {}).length} 项`
-        : status?.persistence === "error" ? "配置冲突，需人工核对" : "未由 QControlHub 管理";
+        ? `托管 ${Object.keys(status.configured_parameters || {}).length} 项`
+        : status?.persistence === "error" ? "配置冲突" : "未托管";
       const drift = status?.persistence === "managed" && Object.entries(status.configured_parameters || {}).some(([key, value]) => String(status.parameters?.[key] || "").trim().replace(/\s+/g, " ") !== value);
       return `<article class="bbr-card" data-refresh-key="bbr-${esc(agent.id)}" aria-busy="${busy}">
         <header><div><h2>${esc(agent.name)}</h2><span>${value(status?.kernel_release)} · ${esc(agent.os)} / ${esc(agent.arch)}</span></div><span class="status-label ${info.tone}">${esc(info.text)}</span></header>
-        ${hasFeature && status ? `<dl class="bbr-primary-values"><div><dt>当前默认拥塞算法</dt><dd>${value(status.congestion_control)}</dd></div><div><dt>当前默认队列</dt><dd>${value(status.default_qdisc)}</dd></div><div><dt>已保存的重启配置</dt><dd>${esc(persistence)}</dd></div></dl>
-        <div class="bbr-note"><strong>已加载算法</strong><span>${value((status.available_algorithms || []).join(" · "))}</span><small>未列出 BBR 不一定代表内核不支持；启用时由系统尝试加载自带模块。</small></div>
+        ${hasFeature && status ? `<dl class="bbr-primary-values"><div><dt>算法</dt><dd>${value(status.congestion_control)}</dd></div><div><dt>队列</dt><dd>${value(status.default_qdisc)}</dd></div><div><dt>配置</dt><dd>${esc(persistence)}</dd></div></dl>
         ${drift ? '<p class="bbr-warning" role="status">当前生效参数与已保存配置不一致，请核对其他系统配置是否覆盖。</p>' : ""}
         ${status.error ? `<p class="bbr-warning" role="status">${esc(diagnosticError(status.error))}</p>` : ""}
         ${dialogButton(agent, "parameters", "生效参数与网卡队列")}
@@ -65,7 +72,7 @@ export function createSystemBBRView({ state, can, esc, date, shell }, { lifecycl
         </div><footer class="bbr-dialog-footer"><small>参数采集：${status.collected_at ? esc(date(status.collected_at)) : "尚未上报"}</small><button class="button small" type="button" data-bbr-dialog-close>关闭</button></footer>`)}` : `<div class="empty"><strong>${hasFeature ? "等待 Agent 上报系统参数" : "请先升级此节点的 Agent"}</strong><p>本页不会把未上报或旧版本节点显示为 BBR 已关闭。</p></div>`}
         ${editor(agent, disabled)}
         ${task ? `<div class="bbr-task" role="status"><span>${esc(actionLabel(task.action))} · ${esc(taskLabel(task.status))}</span>${can("tasks.read") ? `<a href="#tasks">查看任务记录 →</a>` : ""}${task.error ? `<p>${esc(diagnosticError(task.error))}</p>` : ""}</div>` : ""}
-        <footer><small>参数采集：${status?.collected_at ? esc(date(status.collected_at)) : "尚未上报"}</small>${editable(agent) ? `<div class="bbr-actions"><button class="button small" type="button" data-bbr-agent="${esc(agent.id)}" data-bbr-action="disable-bbr" ${presetDisabled ? "disabled" : ""}>关闭 BBR / 切换 CUBIC</button><button class="button small primary" type="button" data-bbr-agent="${esc(agent.id)}" data-bbr-action="enable-bbr" ${presetDisabled ? "disabled" : ""}>启用 BBR</button></div>` : '<span class="bbr-readonly">只读权限</span>'}</footer>
+        <footer>${editable(agent) ? `<div class="bbr-actions"><button class="button small" type="button" data-bbr-agent="${esc(agent.id)}" data-bbr-action="disable-bbr" ${presetDisabled ? "disabled" : ""}>关闭 BBR / 切换 CUBIC</button><button class="button small primary" type="button" data-bbr-agent="${esc(agent.id)}" data-bbr-action="enable-bbr" ${presetDisabled ? "disabled" : ""}>启用 BBR</button></div>` : '<span class="bbr-readonly">只读权限</span>'}</footer>
       </article>`;
     }).join("");
     shell(`<div class="bbr-workspace"><div class="bbr-toolbar"><small data-bbr-refresh-status aria-live="polite">${lifecycle.refreshFailed ? "刷新失败，显示上次数据 · 将自动重试" : "自动刷新 · Agent 心跳采集"}</small><button class="button small" type="button" data-bbr-refresh>刷新状态</button></div><section class="bbr-grid">${cards || '<div class="empty large"><strong>当前范围没有节点</strong><p>添加节点后即可查看系统 BBR 状态。</p></div>'}</section></div>`, "BBR / TCP 调优", { viewKey: `system-bbr-${selectedID() || "all"}` });
