@@ -26,6 +26,16 @@ const generatedPlanFields = Object.freeze([
   "vless_encryption",
   "sudoku_client_key",
   "snell_shadow_tls_password",
+  "wireguard_server_private_key",
+  "wireguard_server_public_key",
+  "wireguard_client_private_key",
+  "wireguard_client_public_key",
+  "wireguard_preshared_key",
+  "wireguard_server_address",
+  "wireguard_client_address",
+  "wireguard_allowed_ips",
+  "wireguard_mtu",
+  "wireguard_keepalive",
 ]);
 
 const generatedFieldActions = Object.freeze([
@@ -176,7 +186,21 @@ export function readServerPlanInput(form, protocol) {
     block_mainland_destination:
       form.dataset?.blockMainlandDestination === "1",
     block_mainland_source: form.dataset?.blockMainlandSource === "1",
+    wireguard_server_private_key: values.get("wireguard_server_private_key") || "",
+    wireguard_server_public_key: values.get("wireguard_server_public_key") || "",
+    wireguard_client_private_key: values.get("wireguard_client_private_key") || "",
+    wireguard_client_public_key: values.get("wireguard_client_public_key") || "",
+    wireguard_preshared_key: values.get("wireguard_preshared_key") || "",
+    wireguard_client_address: values.get("wireguard_client_address") || "",
+    wireguard_server_address: values.get("wireguard_server_address") || "",
+    wireguard_allowed_ips: values.get("wireguard_allowed_ips") || "",
+    wireguard_mtu: Number(values.get("wireguard_mtu") || 0),
+    wireguard_keepalive: Number(values.get("wireguard_keepalive") || 0),
   };
+}
+
+function wireguardProtocolOptions(plan) {
+  return `<div class="preset-protocol-options" data-wireguard-options><details class="preset-option-panel" open><summary><b>WireGuard 密钥与客户端</b><small>客户端私钥只保存在控制面元数据，不写入节点配置</small></summary><div class="plan-fields two"><label class="secret-input">服务端私钥<span class="secret-value-control"><input type="password" name="wireguard_server_private_key" required value="${esc(plan.wireguard_server_private_key || "")}" autocomplete="off"><button type="button" data-secret-visibility>显示</button></span></label><label>服务端公钥<input name="wireguard_server_public_key" readonly value="${esc(plan.wireguard_server_public_key || "")}"></label><label>服务端隧道地址<input name="wireguard_server_address" required value="${esc(plan.wireguard_server_address || "10.66.66.1/24")}"></label><label class="secret-input">客户端私钥（仅面板保存）<span class="secret-value-control"><input type="password" name="wireguard_client_private_key" required value="${esc(plan.wireguard_client_private_key || "")}" autocomplete="off"><button type="button" data-secret-visibility>显示</button></span></label><label>客户端公钥<input name="wireguard_client_public_key" readonly value="${esc(plan.wireguard_client_public_key || "")}"></label><label class="secret-input">预共享密钥<span class="secret-value-control"><input type="password" name="wireguard_preshared_key" required value="${esc(plan.wireguard_preshared_key || "")}" autocomplete="off"><button type="button" data-secret-visibility>显示</button></span></label><label>客户端地址<input name="wireguard_client_address" required value="${esc(plan.wireguard_client_address || "10.66.66.2/32")}"></label><label>允许的客户端路由<input name="wireguard_allowed_ips" required value="${esc(plan.wireguard_allowed_ips || "0.0.0.0/0, ::/0")}"></label><label>MTU<input type="number" name="wireguard_mtu" min="576" max="65535" value="${Number(plan.wireguard_mtu || 1420)}"></label><label>客户端 Keepalive（秒）<input type="number" name="wireguard_keepalive" min="0" max="65535" value="${Number(plan.wireguard_keepalive || 25)}"></label></div></details></div>`;
 }
 
 function optionSecret(name, label, value, help = "") {
@@ -320,4 +344,4 @@ export function bindServerPlanRegeneration({
   });
 }
 
-export { installGeneratedFieldButtons, protocolNavigationNames, snellProtocolOptions, sudokuProtocolOptions, bindProtocolOptionVisibility };
+export { installGeneratedFieldButtons, protocolNavigationNames, snellProtocolOptions, sudokuProtocolOptions, wireguardProtocolOptions, bindProtocolOptionVisibility };

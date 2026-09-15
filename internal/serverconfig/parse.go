@@ -96,6 +96,26 @@ func ParseAll(engine core.Engine, content string) []Input {
 			result = append(result, parsed)
 		}
 	}
+	// sing-box endpoints are a peer to inbounds in the native document. Keep
+	// the same parser/catalog gate as inbounds so unsupported or custom entries
+	// remain source-only and are never silently rewritten.
+	if engine == core.EngineSingBox {
+		endpoints, _ := root["endpoints"].([]any)
+		for _, item := range endpoints {
+			candidate := mapValue(item)
+			protocol := protocolKey(stringValue(candidate["type"]))
+			if _, supported := FindProtocol(engine, protocol); !supported {
+				continue
+			}
+			single, err := json.Marshal(map[string]any{"endpoints": []any{candidate}})
+			if err != nil {
+				continue
+			}
+			if parsed, ok := parseSingBoxEndpoint(string(single)); ok {
+				result = append(result, parsed)
+			}
+		}
+	}
 	return result
 }
 
@@ -161,6 +181,9 @@ func firstSupportedInbound(engine core.Engine, value any, protocolField string) 
 		candidate := mapValue(item)
 		protocol := protocolKey(stringValue(candidate[protocolField]))
 		if _, ok := FindProtocol(engine, protocol); ok {
+			if engine == core.EngineXray && protocol == ProtocolWireGuard && !managedXrayWireGuardInbound(candidate) {
+				continue
+			}
 			if protocol == ProtocolPortForward && !completePortForwardInbound(engine, candidate) {
 				continue
 			}
@@ -201,6 +224,9 @@ func firstString(value any) string {
 }
 
 func parsedInputValid(input Input) bool {
+	if input.Protocol == ProtocolWireGuard {
+		return validateWireGuardInput(input, false) == nil
+	}
 	if input.Protocol == ProtocolPortForward {
 		return input.Tag != "" && input.Port != 0 && input.TargetAddress != "" && input.TargetPort != 0 &&
 			(input.Network == "tcp" || input.Network == "udp" || input.Network == "tcp,udp")
@@ -288,6 +314,8 @@ func protocolKey(value string) string {
 		return ProtocolTUIC
 	case "anytls":
 		return ProtocolAnyTLS
+	case "wireguard":
+		return ProtocolWireGuard
 	case "tunnel", "dokodemo-door", "direct":
 		return ProtocolPortForward
 	default:

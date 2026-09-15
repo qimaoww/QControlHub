@@ -12,6 +12,9 @@ func TestEveryPresetHasIndependentAccounting(t *testing.T) {
 	for _, engine := range []core.Engine{core.EngineXray, core.EngineSingBox, core.EngineMihomo, core.EngineShadowsocksRust} {
 		for _, protocol := range Protocols(engine) {
 			t.Run(string(engine)+"/"+protocol.Key, func(t *testing.T) {
+				if protocol.Key == ProtocolTailscale {
+					t.Skip("Tailscale relay traffic is validated from endpoint status, not port accounting")
+				}
 				input, err := NewPlan(protocol)
 				if err != nil {
 					t.Fatal(err)
@@ -48,7 +51,7 @@ func TestEveryPresetHasIndependentAccounting(t *testing.T) {
 				if len(plan.Ports) != 2 {
 					t.Fatalf("ports: %+v", plan.Ports)
 				}
-				if engine == core.EngineXray || engine == core.EngineSingBox {
+				if (engine == core.EngineXray || engine == core.EngineSingBox) && !protocol.UsesWireGuard && !protocol.UsesEndpoint {
 					files, err := SplitConfigFiles(engine, plan.Content)
 					if err != nil || len(files) != 3 {
 						t.Fatalf("preset must have common + two paired files: %+v %v", files, err)

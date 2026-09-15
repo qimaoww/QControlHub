@@ -110,6 +110,44 @@ func NewPlan(protocol Protocol) (Input, error) {
 		input.SudokuHTTPMaskMode = "ws"
 		input.SudokuMultiplex = "off"
 	}
+	if protocol.Key == ProtocolWireGuard {
+		var err error
+		input.WireGuardServerPrivateKey, input.WireGuardServerPublicKey, err = newWireGuardKeyPair()
+		if err != nil {
+			return Input{}, err
+		}
+		input.WireGuardClientPrivateKey, input.WireGuardClientPublicKey, err = newWireGuardKeyPair()
+		if err != nil {
+			return Input{}, err
+		}
+		input.WireGuardPresharedKey, err = newWireGuardSecret()
+		if err != nil {
+			return Input{}, err
+		}
+		input.WireGuardClientAddress = "10.66.66.2/32"
+		input.WireGuardServerAddress = "10.66.66.1/24"
+		input.WireGuardAllowedIPs = "0.0.0.0/0,::/0"
+		input.WireGuardMTU, input.WireGuardKeepalive = 1420, 25
+		input.Username = "qch-" + suffix
+	}
+	if protocol.Key == ProtocolTailscale {
+		input.Port = protocol.DefaultPort
+		input.TailscaleStateDirectory = "/var/lib/qcontrolhub/tailscale/" + input.Tag
+		input.TailscaleControlURL = "https://controlplane.tailscale.com"
+		input.TailscaleHostname = input.Tag
+	}
+	if protocol.Key == ProtocolOpenVPNServer {
+		input.Port = protocol.DefaultPort
+		input.OpenVPNServerCertificatePath = "/etc/qcontrolhub/openvpn/" + input.Tag + ".crt"
+		input.OpenVPNServerKeyPath = "/etc/qcontrolhub/openvpn/" + input.Tag + ".key"
+		input.OpenVPNClientCAPath = "/etc/qcontrolhub/openvpn/" + input.Tag + "-ca.crt"
+		input.OpenVPNUsername = "qch-" + suffix
+		input.OpenVPNPassword, err = NewCredential(ProtocolTrojan, "")
+		if err != nil {
+			return Input{}, err
+		}
+		input.OpenVPNAddress = "10.77.0.1/24"
+	}
 	if isVLESSRealityProtocol(protocol.Key) {
 		if protocol.Key != ProtocolVLESSXHTTP {
 			input.Flow = "xtls-rprx-vision"
@@ -245,6 +283,18 @@ func RegeneratePlan(protocol Protocol, current Input) (Input, error) {
 		plan.TargetAddress = current.TargetAddress
 		plan.TargetPort = current.TargetPort
 		plan.Network = current.Network
+	}
+	if protocol.Key == ProtocolWireGuard {
+		plan.WireGuardServerAddress = current.WireGuardServerAddress
+		plan.WireGuardClientAddress, plan.WireGuardAllowedIPs = current.WireGuardClientAddress, current.WireGuardAllowedIPs
+		plan.WireGuardMTU, plan.WireGuardKeepalive = current.WireGuardMTU, current.WireGuardKeepalive
+	}
+	if protocol.Key == ProtocolTailscale {
+		plan.TailscaleStateDirectory, plan.TailscaleControlURL, plan.TailscaleHostname = current.TailscaleStateDirectory, current.TailscaleControlURL, current.TailscaleHostname
+	}
+	if protocol.Key == ProtocolOpenVPNServer {
+		plan.OpenVPNServerCertificatePath, plan.OpenVPNServerKeyPath, plan.OpenVPNClientCAPath = current.OpenVPNServerCertificatePath, current.OpenVPNServerKeyPath, current.OpenVPNClientCAPath
+		plan.OpenVPNUsername, plan.OpenVPNPassword, plan.OpenVPNAddress = current.OpenVPNUsername, current.OpenVPNPassword, current.OpenVPNAddress
 	}
 	return plan, nil
 }

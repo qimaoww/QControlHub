@@ -84,6 +84,34 @@ func prepareAccounting(engine core.Engine, content string, forceMarks bool) (Acc
 	} else if engine == core.EngineMihomo {
 		return prepareMihomoAccounting(root)
 	} else if engine == core.EngineXray || engine == core.EngineSingBox {
+		// sing-box server endpoints live outside `inbounds` and therefore do
+		// not expose the core API counters used by tagged accounting. Their
+		// fixed listener port can still be isolated at the network layer; keep
+		// the native endpoint untouched and report the accounting source
+		// explicitly instead of pretending it has core counters.
+		if engine == core.EngineSingBox && root["endpoints"] != nil {
+			inbounds, _ := root["inbounds"].([]any)
+			if len(inbounds) == 0 {
+				entries, err := DiscoverSingBoxEntries(content)
+				if err != nil {
+					return plan, err
+				}
+				plan.Source = "nft-dual"
+				seen := map[int]bool{}
+				for _, entry := range entries {
+					if entry.Section != "endpoints" || entry.Port == 0 || seen[entry.Port] || entry.Port == 10085 || entry.Port == 10086 {
+						return plan, fmt.Errorf("sing-box endpoint accounting requires unique fixed listen ports")
+					}
+					seen[entry.Port] = true
+					plan.Ports = append(plan.Ports, AccountingPort{Port: entry.Port, Inbound: entry.Tag, Mark: uint32(0x51430000) | uint32(entry.Port)})
+				}
+				if len(plan.Ports) == 0 {
+					return plan, fmt.Errorf("no attributable endpoints")
+				}
+				plan.Content = content
+				return plan, nil
+			}
+		}
 		if err := prepareTaggedAccounting(engine, root, &plan, forceMarks); err != nil {
 			return plan, err
 		}

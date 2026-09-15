@@ -79,7 +79,7 @@ func TestMihomoShadowTLSALPNNormalization(t *testing.T) {
 func TestMihomoClientExportProtocolMatrix(t *testing.T) {
 	for _, engine := range core.AllEngines() {
 		for _, protocol := range Protocols(engine) {
-			if protocol.PortForward {
+			if protocol.PortForward || protocol.UsesEndpoint || (engine == core.EngineXray && protocol.UsesWireGuard) {
 				continue
 			}
 			t.Run(string(engine)+"/"+protocol.Key, func(t *testing.T) {
