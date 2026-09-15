@@ -11,6 +11,13 @@ func generateXray(input Input) (string, error) {
 		"tag": input.Tag, "listen": input.Listen, "port": input.Port,
 	}
 	switch input.Protocol {
+	case ProtocolWireGuard:
+		inbound["protocol"] = "wireguard"
+		peer := map[string]any{"publicKey": input.WireGuardClientPublicKey, "allowedIPs": splitWireGuardList(input.WireGuardClientAddress), "email": input.Username, "level": 0}
+		if input.WireGuardPresharedKey != "" {
+			peer["preSharedKey"] = input.WireGuardPresharedKey
+		}
+		inbound["settings"] = map[string]any{"secretKey": input.WireGuardServerPrivateKey, "peers": []any{peer}, "mtu": input.WireGuardMTU}
 	case ProtocolSS2022:
 		inbound["protocol"] = "shadowsocks"
 		inbound["settings"] = map[string]any{
@@ -49,7 +56,7 @@ func generateXray(input Input) (string, error) {
 			"rewritePort": input.TargetPort, "followRedirect": false, "userLevel": 0,
 		}
 	}
-	if input.Protocol != ProtocolSS2022 && input.Protocol != ProtocolPortForward {
+	if input.Protocol != ProtocolSS2022 && input.Protocol != ProtocolPortForward && input.Protocol != ProtocolWireGuard {
 		stream := xrayStream(input)
 		if input.Protocol == ProtocolHy2 {
 			stream["network"] = "hysteria"
@@ -120,6 +127,11 @@ func parseXray(content string) (Input, bool) {
 	inbound := firstSupportedInbound(core.EngineXray, root["inbounds"], "protocol")
 	if inbound == nil {
 		return Input{}, false
+	}
+	if stringValue(inbound["protocol"]) == ProtocolWireGuard {
+		input, ok := parseXrayWireGuardInbound(inbound)
+		input.BlockMainlandDestination, input.BlockMainlandSource = mainlandXrayFlags(root, input.Tag)
+		return input, ok
 	}
 	input := Input{
 		Protocol: protocolKey(stringValue(inbound["protocol"])), Tag: stringValue(inbound["tag"]),

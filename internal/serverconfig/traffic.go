@@ -51,6 +51,16 @@ func DiscoverTrafficPorts(engine core.Engine, content string) []core.PortTraffic
 		result = discoverTrafficList(business, engine, "tag", "protocol", "port", core.TrafficProtocolBoth)
 	case core.EngineSingBox:
 		result = discoverTrafficList(root["inbounds"], engine, "tag", "type", "listen_port", core.TrafficProtocolBoth)
+		// Fixed-port server endpoints are native listeners alongside inbounds.
+		// Tailscale endpoints with no fixed listen_port remain unmetered here;
+		// relay counters must come from their peer status, not port accounting.
+		if entries, err := DiscoverSingBoxEntries(content); err == nil {
+			for _, entry := range entries {
+				if entry.Section == "endpoints" && entry.Port > 0 && entry.Kind != "tailscale" {
+					result = append(result, trafficEndpoint(engine, entry.Tag, entry.Port, core.TrafficProtocolBoth))
+				}
+			}
+		}
 	case core.EngineShadowsocksRust:
 		mode := trafficProtocol(root["mode"], core.TrafficProtocolBoth)
 		if entries, ok := root["servers"].([]any); ok {

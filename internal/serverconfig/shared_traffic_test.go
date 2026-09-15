@@ -57,6 +57,11 @@ func TestSharedTrafficEndpointsFailClosed(t *testing.T) {
 func TestSharedTrafficSupportsGeneratedServerPresets(t *testing.T) {
 	for _, engine := range []core.Engine{core.EngineMihomo, core.EngineXray, core.EngineSingBox, core.EngineShadowsocksRust} {
 		for _, protocol := range Protocols(engine) {
+			if protocol.Key == ProtocolTailscale {
+				// DERP relay traffic has no port-level counter; it is validated
+				// through the endpoint status API instead of shared port stats.
+				continue
+			}
 			input, err := NewPlan(protocol)
 			if err != nil {
 				t.Fatal(err)

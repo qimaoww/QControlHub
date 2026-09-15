@@ -21,6 +21,9 @@ const (
 	ProtocolSnellShadowTLS = "snell-shadow-tls-v3"
 	ProtocolSudoku         = "sudoku"
 	ProtocolPortForward    = "port-forward"
+	ProtocolWireGuard      = "wireguard"
+	ProtocolTailscale      = "tailscale"
+	ProtocolOpenVPNServer  = "openvpn-server"
 )
 
 type Protocol struct {
@@ -44,69 +47,91 @@ type Protocol struct {
 	UsesVLESSEncryption  bool     `json:"uses_vless_encryption"`
 	PortForward          bool     `json:"port_forward"`
 	DefaultListen        string   `json:"default_listen,omitempty"`
+	UsesWireGuard        bool     `json:"uses_wireguard,omitempty"`
+	UsesEndpoint         bool     `json:"uses_endpoint,omitempty"`
 }
 
 type Input struct {
-	Protocol                 string `json:"protocol"`
-	Tag                      string `json:"tag"`
-	Listen                   string `json:"listen"`
-	Port                     int    `json:"port"`
-	Username                 string `json:"username"`
-	Credential               string `json:"credential"`
-	SecondaryCredential      string `json:"secondary_credential"`
-	Method                   string `json:"method"`
-	Flow                     string `json:"flow"`
-	Transport                string `json:"transport"`
-	TransportPath            string `json:"transport_path"`
-	TLSEnabled               bool   `json:"tls_enabled"`
-	CertificatePath          string `json:"certificate_path"`
-	PrivateKeyPath           string `json:"private_key_path"`
-	RealityEnabled           bool   `json:"reality_enabled"`
-	RealityPrivateKey        string `json:"reality_private_key"`
-	RealityPublicKey         string `json:"reality_public_key"`
-	RealityShortID           string `json:"reality_short_id"`
-	RealityServerName        string `json:"reality_server_name"`
-	RealityMinClientVer      string `json:"reality_min_client_ver"`
-	RealityMLDSA65Seed       string `json:"reality_mldsa65_seed"`
-	RealityMLDSA65Verify     string `json:"reality_mldsa65_verify"`
-	VLESSDecryption          string `json:"vless_decryption"`
-	VLESSEncryption          string `json:"vless_encryption"`
-	ListenerRoutingMark      int    `json:"listener_routing_mark"`
-	ListenerRule             string `json:"listener_rule"`
-	ListenerProxy            string `json:"listener_proxy"`
-	SnellVersion             int    `json:"snell_version"`
-	SnellUDP                 bool   `json:"snell_udp"`
-	SnellReuse               bool   `json:"snell_reuse"`
-	SnellObfsMode            string `json:"snell_obfs_mode"`
-	SnellObfsHost            string `json:"snell_obfs_host"`
-	SnellClientFingerprint   string `json:"snell_client_fingerprint"`
-	SnellShadowTLSVersion    int    `json:"snell_shadow_tls_version"`
-	SnellShadowTLSPassword   string `json:"snell_shadow_tls_password"`
-	SnellShadowTLSUser       string `json:"snell_shadow_tls_user"`
-	SnellShadowTLSHandshake  string `json:"snell_shadow_tls_handshake"`
-	SnellShadowTLSProxy      string `json:"snell_shadow_tls_proxy"`
-	SnellShadowTLSALPN       string `json:"snell_shadow_tls_alpn"`
-	SudokuClientKey          string `json:"sudoku_client_key"`
-	SudokuPaddingMin         int    `json:"sudoku_padding_min"`
-	SudokuPaddingMax         int    `json:"sudoku_padding_max"`
-	SudokuTableType          string `json:"sudoku_table_type"`
-	SudokuHandshakeTimeout   int    `json:"sudoku_handshake_timeout"`
-	SudokuEnablePureDownlink bool   `json:"sudoku_enable_pure_downlink"`
-	SudokuHTTPMaskEnabled    bool   `json:"sudoku_httpmask_enabled"`
-	SudokuHTTPMaskMode       string `json:"sudoku_httpmask_mode"`
-	SudokuHTTPMaskTLS        bool   `json:"sudoku_httpmask_tls"`
-	SudokuHTTPMaskHost       string `json:"sudoku_httpmask_host"`
-	SudokuHTTPMaskPathRoot   string `json:"sudoku_httpmask_path_root"`
-	SudokuMultiplex          string `json:"sudoku_multiplex"`
-	SudokuFallback           string `json:"sudoku_fallback"`
-	TargetAddress            string `json:"target_address"`
-	TargetPort               int    `json:"target_port"`
-	Network                  string `json:"network"`
-	SSRustDNS                string `json:"ss_rust_dns"`
-	SSRustOutboundBindAddr   string `json:"ss_rust_outbound_bind_addr"`
-	SSRustIPv6First          bool   `json:"ss_rust_ipv6_first"`
-	BlockMainlandDestination bool   `json:"block_mainland_destination"`
-	BlockMainlandSource      bool   `json:"block_mainland_source"`
+	Protocol                     string `json:"protocol"`
+	Tag                          string `json:"tag"`
+	Listen                       string `json:"listen"`
+	Port                         int    `json:"port"`
+	Username                     string `json:"username"`
+	Credential                   string `json:"credential"`
+	SecondaryCredential          string `json:"secondary_credential"`
+	Method                       string `json:"method"`
+	Flow                         string `json:"flow"`
+	Transport                    string `json:"transport"`
+	TransportPath                string `json:"transport_path"`
+	TLSEnabled                   bool   `json:"tls_enabled"`
+	CertificatePath              string `json:"certificate_path"`
+	PrivateKeyPath               string `json:"private_key_path"`
+	RealityEnabled               bool   `json:"reality_enabled"`
+	RealityPrivateKey            string `json:"reality_private_key"`
+	RealityPublicKey             string `json:"reality_public_key"`
+	RealityShortID               string `json:"reality_short_id"`
+	RealityServerName            string `json:"reality_server_name"`
+	RealityMinClientVer          string `json:"reality_min_client_ver"`
+	RealityMLDSA65Seed           string `json:"reality_mldsa65_seed"`
+	RealityMLDSA65Verify         string `json:"reality_mldsa65_verify"`
+	VLESSDecryption              string `json:"vless_decryption"`
+	VLESSEncryption              string `json:"vless_encryption"`
+	ListenerRoutingMark          int    `json:"listener_routing_mark"`
+	ListenerRule                 string `json:"listener_rule"`
+	ListenerProxy                string `json:"listener_proxy"`
+	SnellVersion                 int    `json:"snell_version"`
+	SnellUDP                     bool   `json:"snell_udp"`
+	SnellReuse                   bool   `json:"snell_reuse"`
+	SnellObfsMode                string `json:"snell_obfs_mode"`
+	SnellObfsHost                string `json:"snell_obfs_host"`
+	SnellClientFingerprint       string `json:"snell_client_fingerprint"`
+	SnellShadowTLSVersion        int    `json:"snell_shadow_tls_version"`
+	SnellShadowTLSPassword       string `json:"snell_shadow_tls_password"`
+	SnellShadowTLSUser           string `json:"snell_shadow_tls_user"`
+	SnellShadowTLSHandshake      string `json:"snell_shadow_tls_handshake"`
+	SnellShadowTLSProxy          string `json:"snell_shadow_tls_proxy"`
+	SnellShadowTLSALPN           string `json:"snell_shadow_tls_alpn"`
+	SudokuClientKey              string `json:"sudoku_client_key"`
+	SudokuPaddingMin             int    `json:"sudoku_padding_min"`
+	SudokuPaddingMax             int    `json:"sudoku_padding_max"`
+	SudokuTableType              string `json:"sudoku_table_type"`
+	SudokuHandshakeTimeout       int    `json:"sudoku_handshake_timeout"`
+	SudokuEnablePureDownlink     bool   `json:"sudoku_enable_pure_downlink"`
+	SudokuHTTPMaskEnabled        bool   `json:"sudoku_httpmask_enabled"`
+	SudokuHTTPMaskMode           string `json:"sudoku_httpmask_mode"`
+	SudokuHTTPMaskTLS            bool   `json:"sudoku_httpmask_tls"`
+	SudokuHTTPMaskHost           string `json:"sudoku_httpmask_host"`
+	SudokuHTTPMaskPathRoot       string `json:"sudoku_httpmask_path_root"`
+	SudokuMultiplex              string `json:"sudoku_multiplex"`
+	SudokuFallback               string `json:"sudoku_fallback"`
+	TargetAddress                string `json:"target_address"`
+	TargetPort                   int    `json:"target_port"`
+	Network                      string `json:"network"`
+	SSRustDNS                    string `json:"ss_rust_dns"`
+	SSRustOutboundBindAddr       string `json:"ss_rust_outbound_bind_addr"`
+	SSRustIPv6First              bool   `json:"ss_rust_ipv6_first"`
+	BlockMainlandDestination     bool   `json:"block_mainland_destination"`
+	BlockMainlandSource          bool   `json:"block_mainland_source"`
+	WireGuardServerPrivateKey    string `json:"wireguard_server_private_key,omitempty"`
+	WireGuardServerPublicKey     string `json:"wireguard_server_public_key,omitempty"`
+	WireGuardClientPrivateKey    string `json:"wireguard_client_private_key,omitempty"`
+	WireGuardClientPublicKey     string `json:"wireguard_client_public_key,omitempty"`
+	WireGuardPresharedKey        string `json:"wireguard_preshared_key,omitempty"`
+	WireGuardServerAddress       string `json:"wireguard_server_address,omitempty"`
+	WireGuardClientAddress       string `json:"wireguard_client_address,omitempty"`
+	WireGuardAllowedIPs          string `json:"wireguard_allowed_ips,omitempty"`
+	WireGuardMTU                 int    `json:"wireguard_mtu,omitempty"`
+	WireGuardKeepalive           int    `json:"wireguard_keepalive,omitempty"`
+	TailscaleStateDirectory      string `json:"tailscale_state_directory,omitempty"`
+	TailscaleAuthKey             string `json:"tailscale_auth_key,omitempty"`
+	TailscaleControlURL          string `json:"tailscale_control_url,omitempty"`
+	TailscaleHostname            string `json:"tailscale_hostname,omitempty"`
+	OpenVPNServerCertificatePath string `json:"openvpn_server_certificate_path,omitempty"`
+	OpenVPNServerKeyPath         string `json:"openvpn_server_key_path,omitempty"`
+	OpenVPNClientCAPath          string `json:"openvpn_client_ca_path,omitempty"`
+	OpenVPNUsername              string `json:"openvpn_username,omitempty"`
+	OpenVPNPassword              string `json:"openvpn_password,omitempty"`
+	OpenVPNAddress               string `json:"openvpn_address,omitempty"`
 }
 
 func Protocols(engine core.Engine) []Protocol {
@@ -280,6 +305,16 @@ func Protocols(engine core.Engine) []Protocol {
 				Docs:        base + anyTLSPath, DefaultPort: 443, Credential: "用户密码",
 				Transports: []string{"raw"}, SupportsTLS: true, RequiresTLS: true, DefaultTLS: true,
 			},
+		)
+	}
+	if engine == core.EngineXray {
+		protocols = append(protocols, Protocol{Key: ProtocolWireGuard, Name: "WireGuard", Badge: "WG", Description: "Xray 用户态 WireGuard 服务端，单客户端预设。客户端私钥仅保存在加密元数据中。", Docs: base + "wireguard.html", DefaultPort: 51820, Credential: "客户端公钥", Transports: []string{"raw"}, UsesWireGuard: true, IgnoresUsername: true})
+	}
+	if engine == core.EngineSingBox {
+		protocols = append(protocols, Protocol{Key: ProtocolWireGuard, Name: "WireGuard 端点", Badge: "WG", Description: "sing-box 原生 WireGuard 端点；客户端私钥仅保存在加密元数据中。", Docs: base + "endpoint/wireguard/", DefaultPort: 51820, Credential: "客户端公钥", Transports: []string{"raw"}, UsesWireGuard: true, UsesEndpoint: true, IgnoresUsername: true})
+		protocols = append(protocols,
+			Protocol{Key: ProtocolTailscale, Name: "Tailscale 端点", Badge: "TS", Description: "sing-box 原生 Tailscale 端点；登录状态保存在独立状态目录。", Docs: base + "endpoint/tailscale/", DefaultPort: 41641, Credential: "Tailscale Auth Key", Transports: []string{"raw"}, UsesEndpoint: true, IgnoresUsername: true},
+			Protocol{Key: ProtocolOpenVPNServer, Name: "OpenVPN 服务端端点", Badge: "OVPN", Description: "sing-box 原生 OpenVPN TLS 服务端端点。", Docs: base + "endpoint/openvpn-server/", DefaultPort: 1194, Credential: "OpenVPN 密码", Transports: []string{"raw"}, UsesEndpoint: true, IgnoresUsername: true},
 		)
 	}
 	return protocols

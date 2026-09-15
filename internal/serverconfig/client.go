@@ -53,7 +53,17 @@ func BuildClientProfileNamed(input Input, address, serverName, nodeName string) 
 	if input.Port < 1 || input.Port > 65535 {
 		return ClientProfile{}, errors.New("客户端接入端口必须在 1 到 65535 之间")
 	}
-	if err := validateCredential(input); err != nil {
+	if input.Protocol == ProtocolWireGuard {
+		if err := validateWireGuardInput(input, true); err != nil {
+			return ClientProfile{}, err
+		}
+	} else if input.Protocol == ProtocolTailscale {
+		return ClientProfile{}, errors.New("Tailscale 端点通过 sing-box 登录状态管理，没有通用客户端配置")
+	} else if input.Protocol == ProtocolOpenVPNServer {
+		if strings.TrimSpace(input.OpenVPNClientCAPath) == "" || strings.TrimSpace(input.OpenVPNUsername) == "" || strings.TrimSpace(input.OpenVPNPassword) == "" {
+			return ClientProfile{}, errors.New("OpenVPN 客户端证书或凭据不完整")
+		}
+	} else if err := validateCredential(input); err != nil {
 		return ClientProfile{}, err
 	}
 	if input.Transport == "" {
@@ -85,6 +95,18 @@ func BuildClientProfileNamed(input Input, address, serverName, nodeName string) 
 	}
 
 	switch input.Protocol {
+	case ProtocolOpenVPNServer:
+		profile.Format = "OpenVPN native config"
+		profile.URI = "client\nproto udp\nremote " + address + " " + strconv.Itoa(input.Port) + "\ndev tun\nca " + input.OpenVPNClientCAPath + "\nauth-user-pass\n<auth-user-pass>\n" + input.OpenVPNUsername + "\n" + input.OpenVPNPassword + "\n</auth-user-pass>\n"
+		profile.SubscriptionCompatible = false
+		return profile, nil
+	case ProtocolWireGuard:
+		profile.Format = "WireGuard native config"
+		profile.URI, err = wireguardClientConfig(input, address)
+		if err != nil {
+			return ClientProfile{}, err
+		}
+		profile.SubscriptionCompatible = false
 	case ProtocolShadowsocks, ProtocolSS2022:
 		identity := base64.RawURLEncoding.EncodeToString([]byte(input.Method + ":" + input.Credential))
 		profile.Format = "Shadowsocks SIP002 URI"

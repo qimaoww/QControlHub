@@ -63,11 +63,17 @@ func Generate(engine core.Engine, input Input) (string, error) {
 			return "", errors.New("转发协议必须是 TCP、UDP 或 TCP + UDP")
 		}
 	} else {
-		if !protocol.IgnoresUsername && (strings.TrimSpace(input.Username) == "" || len(input.Username) > 64) {
-			return "", errors.New("用户名不能为空且不能超过 64 个字符")
-		}
-		if err := validateCredential(input); err != nil {
-			return "", err
+		if input.Protocol == ProtocolWireGuard {
+			if err := validateWireGuardInput(input, true); err != nil {
+				return "", err
+			}
+		} else {
+			if !protocol.IgnoresUsername && (strings.TrimSpace(input.Username) == "" || len(input.Username) > 64) {
+				return "", errors.New("用户名不能为空且不能超过 64 个字符")
+			}
+			if err := validateCredential(input); err != nil {
+				return "", err
+			}
 		}
 	}
 	if input.Transport == "" {

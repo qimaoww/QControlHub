@@ -7,6 +7,9 @@ import (
 )
 
 func generateSingBox(input Input) (string, error) {
+	if input.Protocol == ProtocolWireGuard || input.Protocol == ProtocolTailscale || input.Protocol == ProtocolOpenVPNServer {
+		return generateSingBoxEndpoint(input)
+	}
 	inbound := map[string]any{
 		"tag": input.Tag, "listen": input.Listen, "listen_port": input.Port,
 	}
@@ -92,6 +95,16 @@ func parseSingBox(content string) (Input, bool) {
 	}
 	inbound := firstSupportedInbound(core.EngineSingBox, root["inbounds"], "type")
 	if inbound == nil {
+		if endpoints, ok := root["endpoints"].([]any); ok {
+			for _, raw := range endpoints {
+				entry := mapValue(raw)
+				if protocol := protocolKey(stringValue(entry["type"])); protocol == ProtocolWireGuard || protocol == ProtocolTailscale || protocol == ProtocolOpenVPNServer {
+					if parsed, valid := parseSingBoxEndpointProtocol(entry); valid {
+						return parsed, true
+					}
+				}
+			}
+		}
 		return Input{}, false
 	}
 	input := Input{

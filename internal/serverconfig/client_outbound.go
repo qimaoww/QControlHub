@@ -10,6 +10,9 @@ import (
 // BuildClientOutbound exports only client connection material from a deployed
 // inbound. Never serialize Input: it also contains server private keys.
 func BuildClientOutbound(engine core.Engine, input Input, address, serverName string) (json.RawMessage, error) {
+	if input.Protocol == ProtocolTailscale || input.Protocol == ProtocolOpenVPNServer {
+		return nil, fmt.Errorf("%s 服务端端点没有 sing-box 出站等价物", input.Protocol)
+	}
 	if engine != core.EngineXray && engine != core.EngineSingBox {
 		return nil, fmt.Errorf("此内核不支持节点入站转出站")
 	}

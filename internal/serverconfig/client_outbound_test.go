@@ -19,7 +19,7 @@ func TestClientOutboundsFromDeployedPresets(t *testing.T) {
 					}
 					input.CertificatePath, input.PrivateKeyPath = "/private/server.crt", "/private/server.key"
 					outbound, err := BuildClientOutbound(target, input, "2001:db8::12", "tls.example.test")
-					unsupported := isSnellProtocol(input.Protocol) || input.Protocol == ProtocolSudoku || input.Protocol == ProtocolPortForward ||
+					unsupported := protocol.UsesEndpoint || input.Protocol == ProtocolWireGuard || isSnellProtocol(input.Protocol) || input.Protocol == ProtocolSudoku || input.Protocol == ProtocolPortForward ||
 						target == core.EngineXray && (input.Protocol == ProtocolHy2 || input.Protocol == ProtocolTUIC || input.Protocol == ProtocolAnyTLS) ||
 						target == core.EngineSingBox && (input.Transport == "xhttp" || isVLESSEncryptionProtocol(input.Protocol) || input.RealityMLDSA65Verify != "")
 					if unsupported {
