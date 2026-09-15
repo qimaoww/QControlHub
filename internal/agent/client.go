@@ -166,6 +166,12 @@ func NewClient(config ClientConfig, executor *Executor) (*Client, error) {
 		return nil, fmt.Errorf("reconcile existing core migration: %w", err)
 	}
 	reconcileCancel()
+	logUpgradeContext, logUpgradeCancel := context.WithTimeout(context.Background(), 45*time.Second)
+	if err := executor.upgradeCompletedCoreLogPolicies(logUpgradeContext); err != nil {
+		logUpgradeCancel()
+		return nil, fmt.Errorf("upgrade completed core logging policy: %w", err)
+	}
+	logUpgradeCancel()
 	parsed, err := url.Parse(config.ServerURL)
 	if err != nil || parsed.Host == "" {
 		return nil, errors.New("QCH_SERVER_URL must be a valid absolute URL")
@@ -248,6 +254,13 @@ func NewClient(config ClientConfig, executor *Executor) (*Client, error) {
 }
 
 func (c *Client) Run(ctx context.Context) error {
+	if executable, err := os.Executable(); err != nil {
+		slog.Warn("locate running Agent executable for upgrade cleanup", "error", err)
+	} else if removed, reclaimed, err := cleanupAgentUpgradeBackups(executable); err != nil {
+		slog.Warn("clean stale Agent upgrade backups", "error", err)
+	} else if removed > 0 {
+		slog.Info("cleaned stale Agent upgrade backups", "files", removed, "bytes", reclaimed)
+	}
 	loaded, err := loadCredentials(c.config.StatePath)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("load agent credentials: %w", err)

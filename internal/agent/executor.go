@@ -1022,9 +1022,9 @@ func normalizeImportedXrayLogDestinations(content string) (string, error) {
 	return string(normalized) + "\n", nil
 }
 
-// normalizeImportedSingBoxLogDestination moves an existing absolute file log
-// outside the managed state directory onto the managed service's console log.
-// Safe relative/managed-state file outputs and disabled logging are preserved.
+// normalizeImportedSingBoxLogDestination moves every existing file log onto
+// the managed service's console stream. The Agent's bounded journal/OpenRC
+// transport is the only node-local cache; durable history belongs to the panel.
 func normalizeImportedSingBoxLogDestination(content string) (string, error) {
 	output, destination, err := singBoxLogOutput(content)
 	if err != nil {
@@ -1035,9 +1035,6 @@ func normalizeImportedSingBoxLogDestination(content string) (string, error) {
 	}
 	if strings.ContainsAny(output, "\x00\r\n") {
 		return "", errors.New("sing-box log output contains a control character")
-	}
-	if _, err := importedSingBoxLogPath(output); err == nil {
-		return content, nil
 	}
 
 	var root map[string]json.RawMessage
@@ -1781,20 +1778,14 @@ func (e *Executor) validateManagedLogPolicy(ctx context.Context, engine core.Eng
 	if engine != core.EngineSingBox {
 		return validateNoPersistentCoreLogs(engine, content)
 	}
-	output, destination, err := singBoxLogOutput(content)
+	_, destination, err := singBoxLogOutput(content)
 	if err != nil {
 		return err
 	}
 	if destination != singBoxLogDestinationFile {
 		return nil
 	}
-	if _, err := e.completedMigrationOwnership(ctx, engine, spec); err != nil {
-		return validateNoPersistentCoreLogs(engine, content)
-	}
-	if _, err := importedSingBoxLogPath(output); err != nil {
-		return fmt.Errorf("imported sing-box log output is unsafe: %w", err)
-	}
-	return nil
+	return validateNoPersistentCoreLogs(engine, content)
 }
 
 func (e *Executor) validateSnapshot(ctx context.Context, engine core.Engine, spec EngineSpec, content string) (string, error) {

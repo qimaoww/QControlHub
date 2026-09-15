@@ -93,6 +93,55 @@ func TestAgentUpgradeCandidatePreflightCommitAndRollback(t *testing.T) {
 	}
 }
 
+func TestAgentUpgradeCleanupRetainsOnlyNewestVerifiedBackup(t *testing.T) {
+	requireAgentRoot(t)
+	root := t.TempDir()
+	executable := filepath.Join(root, "qagent")
+	if err := os.WriteFile(executable, existingDiscoveryCoreHelper, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	var backups []string
+	var expectedReclaimed int64
+	for index, content := range [][]byte{[]byte("oldest"), []byte("middle"), []byte("newest")} {
+		digest := fmt.Sprintf("%x", sha256.Sum256(content))
+		path := executable + ".previous-" + digest
+		if err := os.WriteFile(path, content, 0o750); err != nil {
+			t.Fatal(err)
+		}
+		stamp := time.Unix(int64(index+1), 0)
+		if err := os.Chtimes(path, stamp, stamp); err != nil {
+			t.Fatal(err)
+		}
+		backups = append(backups, path)
+		if index < 2 {
+			expectedReclaimed += int64(len(content))
+		}
+	}
+	lookalike := executable + ".previous-not-a-digest"
+	if err := os.WriteFile(lookalike, []byte("operator file"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	removed, reclaimed, err := cleanupAgentUpgradeBackups(executable)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed != 2 || reclaimed != expectedReclaimed {
+		t.Fatalf("cleanup = %d files/%d bytes, want 2/%d", removed, reclaimed, expectedReclaimed)
+	}
+	for index, path := range backups {
+		_, err := os.Stat(path)
+		if index == 2 && err != nil {
+			t.Fatalf("newest backup was removed: %v", err)
+		}
+		if index < 2 && !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("stale backup %s survived: %v", path, err)
+		}
+	}
+	if _, err := os.Stat(lookalike); err != nil {
+		t.Fatalf("unrelated lookalike was removed: %v", err)
+	}
+}
+
 func TestAgentUpgradeRejectsCandidateWithoutChangingCurrent(t *testing.T) {
 	requireAgentRoot(t)
 	for _, scenario := range []string{"text", "wrong-architecture", "wrong-version", "unsafe-assets", "tamper-after-preflight", "unsafe-backup"} {

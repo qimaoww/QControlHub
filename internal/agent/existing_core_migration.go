@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -23,6 +24,10 @@ var (
 	openRCRunlevelsRoot        = "/etc/runlevels"
 	openRCInitRoot             = "/etc/init.d"
 	openRCSupervisorExecutable = openRCHelperExecutable("supervise-daemon", "/sbin/supervise-daemon")
+	legacyCoreLogRoot          = "/var/log"
+	retiredLogSystemdRunPath   = "/usr/bin/systemd-run"
+	retiredLogTruncatePath     = "/usr/bin/truncate"
+	truncateRetiredLogDirect   = os.Truncate
 )
 
 func (e *Executor) LoadCoreMigrationState() error {
@@ -186,6 +191,179 @@ func (e *Executor) ReconcileExistingCoreServices(ctx context.Context) error {
 		e.specsMu.Unlock()
 	}
 	return nil
+}
+
+// upgradeCompletedCoreLogPolicies repairs migrations completed by Agent builds
+// that still allowed sing-box to write an absolute /var/log file. New imports
+// already normalize this to stdout, but a binary-only Agent upgrade must also
+// fix the configuration that is already running. The managed service is
+// restarted only when it was active; an operator-stopped service stays stopped.
+func (e *Executor) upgradeCompletedCoreLogPolicies(ctx context.Context) error {
+	if e == nil {
+		return nil
+	}
+	e.migrationMu.Lock()
+	defer e.migrationMu.Unlock()
+	e.specsMu.RLock()
+	migrations := make(map[core.Engine]completedCoreMigration, len(e.completedMigrations))
+	for engine, migration := range e.completedMigrations {
+		migrations[engine] = migration
+	}
+	e.specsMu.RUnlock()
+	for engine, migration := range migrations {
+		if engine != core.EngineSingBox {
+			continue
+		}
+		content, err := readConfigurationFile(migration.Managed.ConfigPath)
+		if err != nil {
+			return fmt.Errorf("read completed %s migration configuration for log upgrade: %w", engine, err)
+		}
+		normalized, err := normalizeImportedSingBoxLogDestination(content)
+		if err != nil {
+			return fmt.Errorf("normalize completed %s migration log output: %w", engine, err)
+		}
+		if normalized == content {
+			continue
+		}
+		legacyPath := retiredSingBoxLogPath(content)
+		if err := core.ValidateConfig(engine, normalized); err != nil {
+			return fmt.Errorf("validate completed %s migration log upgrade: %w", engine, err)
+		}
+		if _, destination, err := singBoxLogOutput(normalized); err != nil || destination == singBoxLogDestinationFile {
+			if err == nil {
+				err = errors.New("normalized sing-box configuration still uses file logging")
+			}
+			return err
+		}
+		defaultSpec, managed := DefaultSpecsForServiceManager(e.serviceManager().Kind())[engine]
+		if managed && migration.Managed == defaultSpec {
+			_, err = e.validateManagedServiceSnapshot(ctx, engine, migration.Managed, normalized)
+		} else {
+			_, err = e.validateSnapshot(ctx, engine, migration.Managed, normalized)
+		}
+		if err != nil {
+			return fmt.Errorf("managed %s core rejected normalized log output: %w", engine, err)
+		}
+		status, err := serviceStatusWithManager(ctx, e.serviceManager(), migration.Managed.Service)
+		if err != nil {
+			return fmt.Errorf("query managed %s service before log upgrade: %w", engine, err)
+		}
+		if status != "active" && status != "inactive" && status != "failed" {
+			return fmt.Errorf("managed %s service is %s during log upgrade", engine, status)
+		}
+		backup, err := atomicDeployManagedConfiguration(engine, migration.Managed, e.serviceManager(), normalized)
+		if err != nil {
+			return fmt.Errorf("deploy normalized %s log output: %w", engine, err)
+		}
+		rollback := func(cause error) error {
+			_, restoreErr := rollbackDeploy(migration.Managed.ConfigPath, backup)
+			if status == "active" && restoreErr == nil {
+				recoveryContext, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				_, restartErr := serviceCommandAndVerifyWithManager(recoveryContext, e.serviceManager(), migration.Managed.Service, core.ActionRestart)
+				cancel()
+				restoreErr = errors.Join(restoreErr, restartErr)
+			}
+			return errors.Join(cause, restoreErr)
+		}
+		if status == "active" {
+			if _, err := serviceCommandAndVerifyWithManager(ctx, e.serviceManager(), migration.Managed.Service, core.ActionRestart); err != nil {
+				return fmt.Errorf("restart %s after log output upgrade: %w", engine, rollback(err))
+			}
+		}
+		slog.Info("upgraded completed core migration to panel-managed logging", "engine", engine)
+		if legacyPath != "" {
+			reclaimed, cleanupErr := truncateRetiredCoreLog(ctx, legacyPath, e.serviceManager())
+			if cleanupErr != nil {
+				// The running configuration no longer writes this path, so failure
+				// cannot let it grow again. Keep the Agent online and leave an
+				// actionable warning for manual reclamation.
+				slog.Warn("truncate retired core log", "path", legacyPath, "error", cleanupErr)
+			} else if reclaimed > 0 {
+				slog.Info("truncated retired core log", "path", legacyPath, "bytes", reclaimed)
+			}
+		}
+	}
+	return nil
+}
+
+func retiredSingBoxLogPath(content string) string {
+	output, destination, err := singBoxLogOutput(content)
+	if err != nil || destination != singBoxLogDestinationFile {
+		return ""
+	}
+	path, err := importedSingBoxLogPath(output)
+	if filepath.IsAbs(output) {
+		path, err = filepath.Clean(output), nil
+	}
+	if err != nil || !retiredCoreLogRootContains(path) {
+		return ""
+	}
+	return path
+}
+
+func truncateRetiredCoreLog(ctx context.Context, path string, manager *ServiceManager) (int64, error) {
+	path = filepath.Clean(path)
+	if !filepath.IsAbs(path) || !retiredCoreLogRootContains(path) {
+		return 0, errors.New("retired core log is outside an Agent-managed cleanup root")
+	}
+	if err := validateProtectedDirectoryChain(filepath.Dir(path)); err != nil {
+		return 0, fmt.Errorf("retired core log directory is unsafe: %w", err)
+	}
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() || !coreLogFileHasSingleLink(info) || info.Mode().Perm()&0o022 != 0 {
+		return 0, errors.New("retired core log is not a protected regular file")
+	}
+	reclaimed := info.Size()
+	if err := truncateRetiredLogDirect(path, 0); err == nil {
+		return reclaimed, nil
+	} else if selectedServiceManager(manager).Kind() != ServiceManagerSystemd {
+		return 0, err
+	}
+	// Installed systemd Agents use ProtectSystem=strict and cannot directly
+	// write /var/log. A short-lived root unit exposes only the already-validated
+	// file and carries only DAC_OVERRIDE so installer-owned logs can be truncated
+	// after the legacy service is retired.
+	for _, executable := range []string{retiredLogSystemdRunPath, retiredLogTruncatePath} {
+		if err := validatePrivilegedExecutable(executable); err != nil {
+			return 0, fmt.Errorf("unsafe retired-log helper %s: %w", executable, err)
+		}
+	}
+	arguments := []string{
+		"--pipe", "--wait", "--collect", "--quiet", "--service-type=exec",
+		"--property=User=root", "--property=UMask=0077", "--property=NoNewPrivileges=yes",
+		"--property=CapabilityBoundingSet=CAP_DAC_OVERRIDE", "--property=AmbientCapabilities=CAP_DAC_OVERRIDE",
+		"--property=ProtectSystem=strict", "--property=ProtectHome=yes", "--property=PrivateTmp=yes",
+		"--property=PrivateDevices=yes", "--property=RestrictAddressFamilies=AF_UNIX",
+		"--property=ReadWritePaths=" + path, "--", retiredLogTruncatePath, "--size=0", "--", path,
+	}
+	if output, err := run(ctx, retiredLogSystemdRunPath, arguments...); err != nil {
+		return 0, fmt.Errorf("truncate retired core log: %w: %s", err, strings.TrimSpace(output))
+	}
+	after, err := os.Lstat(path)
+	if err != nil || !os.SameFile(info, after) || after.Size() != 0 {
+		if err == nil {
+			err = errors.New("retired core log changed during cleanup")
+		}
+		return 0, err
+	}
+	return reclaimed, nil
+}
+
+func retiredCoreLogRootContains(path string) bool {
+	path = filepath.Clean(path)
+	for _, candidate := range []string{legacyCoreLogRoot, importedSingBoxLogRoot} {
+		root := filepath.Clean(candidate)
+		if path != root && pathWithin(path, root) {
+			return true
+		}
+	}
+	return false
 }
 
 func waitForCoreMigrationServicePairStable(ctx context.Context, existingService, managedService string, managers ...*ServiceManager) (string, string, error) {
