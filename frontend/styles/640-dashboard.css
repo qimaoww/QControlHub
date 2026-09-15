@@ -1,0 +1,143 @@
+
+/* Dashboard: compact fleet totals, local host telemetry beside node traffic,
+   and a shared reading width. Container queries also cover narrow mouse-driven
+   windows without changing the layout of other workspaces. */
+.app-body.page-dashboard .desktop-app{min-width:0}
+.page-dashboard .context-menu{margin-top:18px}
+.dashboard-workspace{container:dashboard / inline-size;display:grid;gap:16px;width:100%;max-width:1240px;margin:0 auto}
+.dashboard-workspace> *{min-width:0}
+.dashboard-workspace .dashboard-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0}
+.dashboard-workspace .dashboard-head h2{margin:0;font-size:calc(25px * var(--ui-font-scale));letter-spacing:-.03em}
+.dashboard-workspace .dashboard-head p{margin:7px 0 0;color:var(--muted);font-size:calc(11px * var(--ui-font-scale));line-height:1.5}
+.dashboard-workspace .trust-badge{flex-shrink:0;margin:0;white-space:nowrap}
+.dashboard-workspace .ops-stats{grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:0}
+.dashboard-workspace .ops-stats>.dashboard-stat{position:relative;grid-column:auto;display:grid;grid-template-columns:38px minmax(0,1fr);align-items:center;gap:12px;min-height:94px;padding:16px;border:1px solid var(--line);border-radius:12px;background:var(--surface);box-shadow:none}
+.dashboard-workspace .ops-stats>.dashboard-stat:hover{transform:none}
+.dashboard-workspace .ops-stats>a:hover{border-color:color-mix(in srgb,var(--accent) 45%,var(--line));background:var(--accent-soft)}
+.dashboard-workspace .ops-stats>.dashboard-stat .stat-icon{display:grid;width:38px;height:38px;border-radius:10px}
+.dashboard-workspace .ops-stats small{margin-bottom:6px;font-size:calc(11px * var(--ui-font-scale))}
+.dashboard-workspace .ops-stats strong{font-size:calc(27px * var(--ui-font-scale));font-variant-numeric:tabular-nums;line-height:1.1;overflow-wrap:anywhere}
+.dashboard-workspace .ops-stats strong em{font-size:calc(12px * var(--ui-font-scale));letter-spacing:0;white-space:nowrap}
+.dashboard-stat>i{position:absolute;top:12px;right:12px;color:var(--muted);font-size:calc(12px * var(--ui-font-scale));font-style:normal}
+.dashboard-monitoring{display:grid;grid-template-columns:minmax(0,1fr);gap:16px}
+.dashboard-monitoring.has-two-panels{grid-template-columns:minmax(0,.95fr) minmax(0,1.35fr)}
+.dashboard-workspace .workspace-panel,.dashboard-workspace .dashboard-traffic-history{min-width:0;margin:0;border:1px solid var(--line);border-radius:12px;background:var(--surface);box-shadow:none}
+.dashboard-workspace .workspace-panel>header{min-height:68px;padding:14px 18px;gap:12px}
+.dashboard-workspace .workspace-panel h3,.dashboard-workspace .dashboard-traffic-title h3{margin:0;font-size:calc(15px * var(--ui-font-scale));letter-spacing:0}
+.dashboard-section-heading{min-width:0}
+.dashboard-section-heading>small,.dashboard-workspace .dashboard-traffic-title small{display:block;margin-top:5px;color:var(--muted);font-size:calc(10px * var(--ui-font-scale));line-height:1.5}
+.dashboard-host{display:flex;flex-direction:column}
+.dashboard-host .panel-metrics-refresh{width:34px;min-width:34px;height:34px;flex-shrink:0;padding:7px}
+.panel-metrics-refresh svg,.panel-metric-label svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.panel-metrics-grid{flex:1;display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
+.panel-metric{--metric-color:var(--accent);min-width:0;display:grid;align-content:start;gap:9px;padding:16px 18px;border-right:1px solid var(--line)}
+.panel-metric:nth-child(even){border-right:0}
+.panel-metric:nth-child(-n+2){border-bottom:1px solid var(--line)}
+.panel-metric.elevated{--metric-color:var(--amber)}
+.panel-metric.high{--metric-color:var(--red)}
+.panel-metric-label{display:flex;align-items:center;gap:7px;color:var(--ink-2);font-size:calc(11px * var(--ui-font-scale));line-height:1.4}
+.panel-metric-label svg{flex-shrink:0;color:var(--muted)}
+.panel-metric-value{color:var(--ink);font-size:calc(27px * var(--ui-font-scale));font-weight:750;font-variant-numeric:tabular-nums;line-height:1.1;letter-spacing:-.03em}
+.panel-metric-value small{margin-left:3px;color:var(--muted);font-size:calc(12px * var(--ui-font-scale));font-weight:600}
+.panel-metric.high .panel-metric-value{color:var(--red)}
+.panel-metric-track{height:4px;border-radius:4px;background:var(--surface-3);overflow:hidden}
+.panel-metric-track>span{display:block;width:0;height:100%;border-radius:inherit;background:var(--metric-color);transition:width var(--motion-base) var(--motion-ease-out),background var(--motion-base)}
+.panel-metric-detail{color:var(--muted);font-size:calc(10px * var(--ui-font-scale));line-height:1.5;overflow-wrap:anywhere}
+.panel-metric-network dl{display:grid;gap:8px;margin:0}
+.panel-metric-network dl>div{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+.panel-metric-network dt{color:var(--muted);font-size:calc(10px * var(--ui-font-scale));white-space:nowrap}
+.panel-metric-network dt span{color:var(--accent)}
+.panel-metric-network dl>div:last-child dt span{color:var(--green)}
+.panel-metric-network dd{margin:0;font-size:calc(13px * var(--ui-font-scale));font-weight:700;font-variant-numeric:tabular-nums;text-align:right;overflow-wrap:anywhere}
+.dashboard-host>footer{padding:12px 18px;border-top:1px solid var(--line)}
+.panel-metrics-status{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:calc(10px * var(--ui-font-scale));line-height:1.5}
+.panel-metrics-status>i{width:6px;height:6px;flex-shrink:0;border-radius:50%;background:var(--muted)}
+.panel-metrics-status.ok>i{background:var(--green)}
+.panel-metrics-status.warn{color:var(--amber)}
+.panel-metrics-status.warn>i{background:var(--amber)}
+.panel-metrics-status time{margin-left:auto;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+.dashboard-host>footer p{margin:5px 0 0;color:var(--muted);font-size:calc(9px * var(--ui-font-scale));line-height:1.5}
+.dashboard-workspace .dashboard-traffic-history{display:flex;flex-direction:column;overflow:visible}
+.dashboard-workspace .dashboard-traffic-head{grid-template-columns:minmax(0,1fr) auto;min-height:68px;padding:14px 18px!important;gap:12px!important}
+.dashboard-workspace .dashboard-traffic-title,.dashboard-workspace .dashboard-traffic-month{grid-column:auto}
+.dashboard-workspace .dashboard-month-picker{width:146px}
+.dashboard-workspace .dashboard-month-picker>summary{font-size:calc(11px * var(--ui-font-scale));font-weight:650}
+.dashboard-workspace .dashboard-month-popover{left:auto;right:0;top:calc(100% + 6px)}
+.dashboard-traffic-summary{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:16px 18px 10px}
+.dashboard-workspace .dashboard-traffic-total{min-width:0;padding:0;border:0}
+.dashboard-traffic-total>span{color:var(--muted);font-size:calc(10px * var(--ui-font-scale))}
+.dashboard-workspace .dashboard-traffic-total strong{font-size:calc(25px * var(--ui-font-scale))!important;font-variant-numeric:tabular-nums;line-height:1.3;white-space:nowrap}
+.dashboard-traffic-summary dl{display:flex;flex-wrap:wrap;gap:12px 24px;min-width:0;margin:0}
+.dashboard-traffic-summary dl>div{min-width:0}
+.dashboard-traffic-summary dt{display:flex;align-items:center;gap:5px;font-size:calc(10px * var(--ui-font-scale))}
+.dashboard-traffic-summary dt i{width:6px;height:6px;border-radius:2px;background:var(--accent)}
+.dashboard-traffic-summary dt i.sent{background:color-mix(in srgb,var(--accent) 35%,var(--green))}
+.dashboard-traffic-summary dd{margin:5px 0 0;font-size:calc(12px * var(--ui-font-scale));font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
+.dashboard-workspace .dashboard-traffic-history .traffic-chart-legend{padding:4px 18px 0;gap:12px;font-size:calc(9px * var(--ui-font-scale))}
+.dashboard-workspace .traffic-chart-legend small{font-size:calc(9px * var(--ui-font-scale))}
+.dashboard-workspace .dashboard-traffic-chart{position:relative;flex:1;min-height:110px;height:126px;max-height:220px;margin:8px 18px 0;padding:8px 0 0}
+.dashboard-traffic-empty{position:absolute;inset:0;display:grid;place-items:center;color:var(--muted);font-size:calc(11px * var(--ui-font-scale))}
+.dashboard-workspace .dashboard-traffic-axis{margin:0 18px;padding:8px 0 12px;font-size:calc(9px * var(--ui-font-scale));font-weight:500;color:var(--muted)}
+.dashboard-workspace .dashboard-traffic-actions{min-height:51px;margin-top:auto;padding:8px 18px;flex-wrap:wrap}
+.dashboard-workspace .dashboard-columns{grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:16px;margin:0}
+.dashboard-workspace .dashboard-columns.single-panel{grid-template-columns:minmax(0,1fr)}
+.dashboard-workspace .fleet-overview-list>a{grid-template-columns:32px minmax(0,1fr) auto 64px 8px;gap:10px;min-height:78px;margin:0;padding:12px 18px;border-radius:0}
+.dashboard-workspace .node-avatar{width:32px;height:32px;border-radius:9px;font-size:calc(10px * var(--ui-font-scale));color:var(--green);background:var(--green-soft);box-shadow:none}
+.dashboard-workspace .node-avatar.bad{color:var(--muted);background:var(--surface-3)}
+.dashboard-workspace .fleet-overview-list time{text-align:right;font-size:calc(9px * var(--ui-font-scale))}
+.fleet-node-info{min-width:0}
+.dashboard-workspace .fleet-overview-list strong,.dashboard-workspace .recent-tasks strong{font-size:calc(12px * var(--ui-font-scale));line-height:1.4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dashboard-workspace .fleet-overview-list small{margin-top:3px;font-size:calc(9px * var(--ui-font-scale))}
+.dashboard-workspace .recent-tasks>div>a{min-height:78px;grid-template-columns:8px minmax(0,1fr) auto 8px;gap:10px;margin:0;padding:12px 18px;border-radius:0}
+.dashboard-workspace .recent-tasks small{margin-top:5px;font-size:calc(10px * var(--ui-font-scale));overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dashboard-workspace .recent-tasks time{font-size:calc(9px * var(--ui-font-scale));white-space:nowrap}
+.dashboard-workspace section[id]{scroll-margin-top:12px}
+@container dashboard (max-width:840px){
+  .dashboard-monitoring.has-two-panels,.dashboard-workspace .dashboard-columns{grid-template-columns:minmax(0,1fr)}
+}
+@container dashboard (min-width:601px) and (max-width:840px){
+  .panel-metrics-grid{grid-template-columns:repeat(4,minmax(0,1fr))}
+  .panel-metric:nth-child(n){border-bottom:0;border-right:1px solid var(--line)}
+  .panel-metric:last-child{border-right:0}
+}
+@container dashboard (max-width:600px){
+  .dashboard-workspace .ops-stats{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+  .dashboard-workspace .ops-stats>.dashboard-stat{min-height:86px;padding:13px;gap:10px}
+  .dashboard-workspace .ops-stats strong{font-size:calc(25px * var(--ui-font-scale))}
+  .dashboard-workspace .dashboard-head h2{font-size:calc(23px * var(--ui-font-scale))}
+  .dashboard-workspace .dashboard-head p{max-width:210px;font-size:calc(10px * var(--ui-font-scale))}
+  .dashboard-traffic-summary{flex-wrap:wrap}
+  .dashboard-traffic-summary dl{gap:18px}
+  .dashboard-workspace .fleet-overview-list>a{grid-template-columns:32px minmax(0,1fr) auto 8px}
+  .dashboard-workspace .fleet-overview-list time{display:none}
+}
+@container dashboard (max-width:380px){
+  .panel-metric{padding:14px}
+  .panel-metric-label{font-size:calc(10px * var(--ui-font-scale))}
+  .panel-metric-network dl>div{gap:4px}
+  .panel-metric-network dd{font-size:calc(12px * var(--ui-font-scale))}
+  .dashboard-workspace .ops-stats>.dashboard-stat{grid-template-columns:32px minmax(0,1fr)}
+  .dashboard-workspace .ops-stats>.dashboard-stat .stat-icon{width:32px;height:32px}
+  .dashboard-stat>i{display:none}
+  .dashboard-workspace .dashboard-month-picker{width:136px}
+  .dashboard-traffic-summary dl{justify-content:space-between;flex:1}
+  .dashboard-workspace .traffic-chart-legend small{display:none}
+  .dashboard-workspace .dashboard-traffic-axis{font-size:max(9px,calc(8px * var(--ui-font-scale)))}
+}
+@media(max-width:1020px) and (pointer:fine){
+  .page-dashboard .desktop-app{grid-template-columns:68px minmax(0,1fr)}
+  .page-dashboard .context-sidebar{display:none}
+}
+@media(max-width:820px) and (pointer:coarse){
+  .dashboard-workspace{gap:14px}
+  .dashboard-host .panel-metrics-refresh{width:44px;height:44px;min-width:44px}
+  .dashboard-workspace .workspace-panel>header,.dashboard-workspace .dashboard-traffic-head{padding:12px 14px!important}
+  .dashboard-workspace .dashboard-month-picker>summary{min-height:44px}
+  .dashboard-workspace .dashboard-month-popover>header{height:44px;grid-template-columns:44px minmax(0,1fr) 44px}
+  .dashboard-workspace .dashboard-month-popover>header button{width:44px;height:44px}
+  .dashboard-workspace .dashboard-month-grid button,.dashboard-workspace .dashboard-month-popover>footer button{min-height:44px}
+  .dashboard-workspace .dashboard-traffic-actions{padding-inline:14px}
+  .dashboard-workspace .dashboard-traffic-actions>a{display:inline-flex;align-items:center}
+  .dashboard-workspace section[id]{scroll-margin-top:64px}
+}
+@media(prefers-reduced-motion:reduce){.panel-metric-track>span{transition:none}}

@@ -65,6 +65,48 @@ Preserve these shared lifetimes when changing a controller:
 - Preset bindings and status share the editor's private lifecycle record.
   Do not copy its request counter, host, save lock, or current context.
 
+## Remaining route ownership
+
+All twelve route facades retain their public installer/helper exports. The
+remaining ten routes have the following focused owners:
+
+| Route | Owners |
+| --- | --- |
+| Dashboard | `dashboard-model`, `dashboard-view`, `dashboard-bindings`; panel metrics keep their own lifecycle |
+| Settings | `settings-view`, `settings-bindings`; the route loads account-scoped settings |
+| Access control | `access-control-controller`, `access-control-view`, `access-control-bindings`, `access-control-dialog` |
+| System TCP/BBR | `system-bbr-model`, `system-bbr-view`, `system-bbr-editor` |
+| Client access | `client-access-model`, `client-access-view`, `client-access-results`, `client-access-bindings`, `client-access-profiles`, `client-clipboard` |
+| SubStore | `substore-model`, `substore-view`, `substore-bindings`, `substore-selections`, `substore-targets` |
+| Tasks | `task-model`, `task-view`, `task-timeline`, `task-bindings` |
+| Core logs | `core-log-model`, `core-log-source-status`, `core-log-selection`, `core-log-view`, `core-log-bindings` |
+| Traffic | `traffic-model`, `traffic-accounting-view`, `traffic-form-model`, `traffic-form-view`, `traffic-order`, `traffic-card-interactions`, `traffic-view`, `traffic-sync-dialog`, `traffic-forms`, `traffic-bindings` |
+| Users and quota | `user-model`, `user-view`, `user-bindings`, `user-allocations`, `user-allocation-view`, `user-account-editor`, `user-quota`, `user-quota-view` |
+
+The access-control controller is shared by the standalone route and embedded
+configuration restrictions. Embedded consumers import that controller, not the
+route. Client access and SubStore share `card-masonry`, but every factory call
+owns a separate observer; rendering disconnects that route's previous observer
+before binding the new cards.
+
+Preserve these lifecycle boundaries:
+
+- User loading, allocation editing, draft capture, and quota views share one
+  lifecycle record. Read and view serials remain monotonic; allocation saves
+  keep their original account, draft, and connected-element guards.
+- System TCP loading and editing share the same task map, drafts, pending
+  submissions, errors, and account identity. Account changes reset them in the
+  route before loading.
+- SubStore loading and selection/target actions share one account-scoped
+  record, including the current target and pending selection-save promise.
+- Traffic keeps one interaction gate and one deferred render at the route.
+  The card controller owns drag cancellation, and the synchronization dialog
+  owns its pending flag. Cancel, render, and rebind keep their original order.
+- Task loading retains polling/cache coordination while `task-timeline` owns
+  reconciliation, pagination, and scroll anchors. Core-log loading retains
+  staged reads and account/navigation guards; selection persistence, source
+  status, markup, and bindings have separate owners.
+
 ## Changes and checks
 
 New frontend functionality should follow these rules:
@@ -78,11 +120,47 @@ New frontend functionality should follow these rules:
   module initialization idempotent where a route can be revisited.
 
 `make module-policy-test` checks named exports, existing import targets,
-one-way composition dependencies, and an acyclic module graph. It is also part
-of `make check`, while `make frontend-check` runs behavior smoke tests.
+one-way composition dependencies for all twelve route facades, an acyclic module
+graph, reachability of every production module from the application, and
+reachability of every extracted smoke/browser test module from its runner.
+It is also part of `make check`, while `make frontend-check` runs behavior smoke tests.
 `controller_modules_smoke.mjs`, `session_api_smoke.mjs`, and
 `shell_modules_smoke.mjs` cover the extracted lifecycle and composition
 contracts alongside the feature and browser regressions.
+`route_modules_smoke.mjs` verifies inert construction and compatibility exports
+for the remaining routes.
+
+## Smoke and source-contract ownership
+
+`module_smoke.mjs` is the ordered regression runner. It keeps the existing
+side-effect smoke imports, then awaits the domain suites under `frontend/smoke/`.
+Those suites expose inert `run` functions. Only the original shared read-only
+fixtures cross suite boundaries; temporary DOM globals retain their original
+setup and restore order. Deployment recovery phases explicitly receive one
+fixture and restore it in `finally`. Public-address checks separate models,
+DOM/CSS contracts, overview rendering, and live metric updates.
+
+Go source-level frontend contracts live in focused `*_contract_test.go` files.
+`feature_sources_test.go` names each feature's source owners explicitly: do not
+traverse arbitrary dependencies, where an unrelated feature could accidentally
+satisfy a missing assertion. Keep existing test names and assertions when
+moving a contract.
+
+## Stylesheet source and distribution
+
+`frontend/styles/manifest.json` lists all authoritative CSS slices in cascade
+order. Their numeric prefixes document the historical layering; shared theme
+and responsive layers must not be regrouped by route in a way that changes
+which rule wins. Source boundaries occur between complete rules or conditional
+groups, never inside a selector, declaration, string, or comment.
+
+Edit the owning source slice, register any new slice exactly once in the
+manifest, then run `make generate-styles` and `make styles-check`. The generator
+concatenates bytes without adding separators or reformatting. The check rejects
+unlisted, missing, duplicate, non-regular, or incomplete sources and a stale
+generated file. Both Debian and Alpine non-browser check groups run it.
+`frontend/app.css` remains the single distributed stylesheet; the web image
+ships that artifact, not the source manifest or test modules.
 
 ## Browser regression ownership
 
@@ -104,3 +182,7 @@ Importing a scenario must not install its fixture. Fixture installation must
 finish before importing `app.js`, and each Agent scenario receives its page-local
 fixture explicitly. Preserve scenario order and all 38 desktop, mobile,
 permission, stale-response, and navigation modes when moving assertions.
+
+`browser/agent-actions.mjs` runs overview, enrollment, batch, detail, and rename
+phases in that order with the same page-local fixture. Each phase owns its
+assertions, not a second fixture installation or application import.

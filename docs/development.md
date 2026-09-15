@@ -92,6 +92,10 @@ make check
 共享状态和路由装配。新增功能请遵循[前端模块约定](frontend-modules.md)；可单独运行
 `make module-policy-test` 检查模块导出和依赖方向。
 
+样式的权威源在 `frontend/styles/`，`manifest.json` 固定历史级联顺序。
+修改对应源文件后运行 `make generate-styles`，再用 `make styles-check`
+核对完整登记、规则边界和生成结果；不要直接修改生成的 `frontend/app.css`。
+
 跨前端和 Go 服务的职责边界见[模块架构约定](module-architecture.md)。持久化、API
 适配器和 Agent 平台代码应按领域放在所属包的独立文件中，入口文件只负责组合。
 

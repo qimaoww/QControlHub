@@ -1,0 +1,51 @@
+.client-access-toolbar>nav a.active,.substore-target-bar>nav>button.active,.core-log-filter-group button[aria-pressed=true],.dashboard-month-grid button.active{animation:qch-nav-active 280ms var(--motion-ease-spring) both}
+.substore-node-row{transition:background-color var(--motion-base) ease,border-color var(--motion-fast) ease}
+.substore-node-toggle span{transition:transform var(--motion-fast) var(--motion-ease-spring),background-color var(--motion-fast) ease,border-color var(--motion-fast) ease}
+.substore-node-toggle input:checked+span{transform:scale(1.04)}
+.settings-saved-state{transition:background-color var(--motion-base) ease,color var(--motion-base) ease,transform var(--motion-fast) var(--motion-ease-spring)}
+.settings-saved-state.dirty{animation:qch-alert-enter 300ms var(--motion-ease-out) both}
+.access-control-card form.is-dirty>footer{animation:qch-alert-enter 300ms var(--motion-ease-out) both}
+.context-sidebar.context-enter>*:not(.context-brand){animation:qch-context-enter 360ms var(--motion-ease-out) both}
+.context-sidebar.context-enter>*:nth-child(3){animation-delay:30ms}
+.context-sidebar.context-enter>*:nth-child(4){animation-delay:60ms}
+.context-sidebar.context-enter>*:nth-child(5){animation-delay:90ms}
+.context-sidebar.context-enter>*:nth-child(n+6){animation-delay:115ms}
+.context-sidebar :is(.context-menu,.context-list)>a{transition:transform var(--motion-fast) var(--motion-ease-spring),background-color var(--motion-fast) ease,border-color var(--motion-fast) ease,color var(--motion-fast) ease,box-shadow var(--motion-fast) ease}
+.context-sidebar :is(.context-menu,.context-list)>a:hover{transform:translate3d(3px,0,0)}
+.context-sidebar :is(.context-menu,.context-list)>a:active{transform:translate3d(1px,0,0) scale(.985)}
+.context-sidebar :is(.context-menu,.context-list)>a.active{animation:qch-nav-active 300ms var(--motion-ease-spring) both}
+.page-tasks [data-task-result]>summary{display:flex;align-items:center;justify-content:flex-end;gap:7px;cursor:pointer;transition:color var(--motion-fast) ease,transform var(--motion-fast) var(--motion-ease-spring)}
+.page-tasks [data-task-result]>summary:active{transform:translate3d(0,1px,0)}
+.page-tasks [data-task-result]>summary span{display:inline-block;transition:transform var(--motion-base) var(--motion-ease-spring)}
+.page-tasks [data-task-result][open]>summary span{transform:rotate(90deg)}
+.page-tasks [data-task-result][open]>.task-result-block{animation:qch-task-result-enter 340ms var(--motion-ease-out) both}
+.page-tasks [data-task-result][open]>.task-result-block:nth-of-type(2){animation-delay:45ms}
+.page-tasks [data-task-result][open] pre{animation:qch-alert-enter 300ms var(--motion-ease-out) 35ms both}
+
+:is(.node-card,.workspace-panel,.service-card,.traffic-policy-card,.task-event-card,.client-access-node-card,.access-control-card,.substore-agent-card,.settings-version-card,.template-card){transition:transform var(--motion-base) var(--motion-ease-out),box-shadow var(--motion-base) var(--motion-ease-out),border-color var(--motion-base) ease}
+:is(.node-card,.workspace-panel,.service-card,.traffic-policy-card,.task-event-card,.client-access-node-card,.access-control-card,.substore-agent-card,.settings-version-card,.template-card):not(.dragging):hover{transform:translate3d(0,-3px,0);box-shadow:var(--shadow-lift)}
+:is(.button,.core-action,.service-version-toggle,.node-card-open,.task-inline-action,.client-parameter-open):not(:disabled){transition:transform var(--motion-fast) var(--motion-ease-spring),background-color var(--motion-fast) ease,border-color var(--motion-fast) ease,box-shadow var(--motion-fast) ease}
+:is(.button,.core-action,.service-version-toggle,.node-card-open,.task-inline-action,.client-parameter-open):not(:disabled):active{transform:translate3d(0,1px,0) scale(.975)}
+.dock-nav a.active{animation:qch-nav-active 320ms var(--motion-ease-spring) both}
+.dock-nav a,.dock-tools button,.mobile-account-menu>summary,.context-menu a,.context-list>a{transition:transform var(--motion-fast) var(--motion-ease-spring),background-color var(--motion-fast) ease,border-color var(--motion-fast) ease,color var(--motion-fast) ease}
+:is(.dock-nav a,.dock-tools button,.mobile-account-menu>summary,.context-menu a,.context-list>a):active{transform:scale(.96)}
+:is(input,select,textarea):focus{transform:translate3d(0,-1px,0)}
+details>summary>i{transition:transform var(--motion-base) var(--motion-ease-spring),color var(--motion-fast) ease}
+:is(.task-filter-panel,.dashboard-month-picker)[open]>summary>i{transform:rotate(180deg)}
+:is(.runtime-drawer,.version-drawer,.advanced-studio,.config-hierarchy-menu,.config-diff-drawer)[open]>summary>i{transform:rotate(45deg)}
+:is(.task-filter-panel,.dashboard-month-picker,.runtime-drawer,.version-drawer,.advanced-studio,.config-hierarchy-menu,.config-diff-drawer)[open]>:not(summary){animation:qch-expand-enter 260ms var(--motion-ease-out) both}
+dialog[open]{animation:qch-dialog-enter 320ms var(--motion-ease-spring) both}
+dialog[open]::backdrop{animation:qch-backdrop-enter 220ms ease both}
+.modal-backdrop{animation:qch-backdrop-enter 220ms ease both}
+.modal-backdrop>[role=dialog]{animation:qch-dialog-enter 320ms var(--motion-ease-spring) both}
+:is(.alert,.task-feedback,.audit-live,.deploy-command-notice,.core-log-source-notice){animation:qch-alert-enter 320ms var(--motion-ease-out) both}
+.sync-state i,.context-live i,.trust-badge i{transition:box-shadow var(--motion-base) ease,transform var(--motion-base) ease}
+:is(.sync-state,.context-live,.trust-badge):not(.inactive) i{box-shadow:0 0 0 4px color-mix(in srgb,currentColor 12%,transparent);animation:task-feedback-pulse 1.8s ease-in-out infinite}
+
+@media(max-width:820px) and (pointer:coarse){
+  .workspace-main.page-enter> *{animation-duration:380ms}
+  dialog[open]{animation-name:qch-dialog-enter}
+}
+@media(prefers-reduced-motion:reduce){
+  *,*:before,*:after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important}
+}

@@ -21,6 +21,9 @@ not accumulate handler, SQL, platform, or rendering workflows.
 - `frontend/app.js` and the shell modules compose the console. Feature UI and
   reusable helpers belong under `frontend/modules/`; follow
   `docs/frontend-modules.md` for its public module boundary.
+- `frontend/styles/` contains authoritative stylesheet source slices.
+  `manifest.json` fixes their cascade order. Run `make generate-styles` after
+  editing a source; do not edit the generated `frontend/app.css` directly.
 - `deploy/modules/` contains authoritative deployment-script source slices.
   Regenerate the standalone deployment entrypoints through the checked-in
   generator; do not edit generated distribution scripts directly.
@@ -28,6 +31,8 @@ not accumulate handler, SQL, platform, or rendering workflows.
 Put tests beside the module they verify. Run `make module-policy-test` after
 changing dependency boundaries and the focused package tests after moving
 behavior. Preserve public declarations and ordered initialization when a
-refactor is mechanical.
+refactor is mechanical. Preserve test entrypoints, assertions, build tags, and
+platform filename suffixes when moving tests; a domain name such as "windows"
+must not accidentally make a cross-platform test Windows-only.
 
 Do not merge a pull request unless the user explicitly requests that merge.
