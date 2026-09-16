@@ -80,14 +80,12 @@ func SharedTrafficEndpoints(engine core.Engine, content string) ([]core.PortTraf
 	}
 	entries, ok := root[listKey].([]any)
 	if engine == core.EngineSingBox {
-		if endpointEntries, exists := root["endpoints"]; exists {
-			endpointList, endpointOK := endpointEntries.([]any)
-			if !endpointOK {
-				return nil, fmt.Errorf("shared sing-box endpoints must be an array")
-			}
-			entries = append(entries, endpointList...)
-			ok = true
+		var err error
+		entries, err = singBoxAccountingEntries(root)
+		if err != nil {
+			return nil, err
 		}
+		ok = true
 	}
 	if engine == core.EngineShadowsocksRust && root[listKey] == nil {
 		entries, ok = []any{root}, true
@@ -141,7 +139,7 @@ func SharedTrafficEndpoints(engine core.Engine, content string) ([]core.PortTraf
 		case core.EngineXray:
 			kinds = "http shadowsocks vmess vless trojan hysteria tunnel dokodemo-door wireguard"
 		case core.EngineSingBox:
-			kinds = "http shadowsocks vmess vless trojan hysteria2 tuic anytls direct wireguard openvpn-server"
+			kinds = "http shadowsocks vmess vless trojan hysteria2 tuic anytls direct wireguard"
 		}
 		if kindKey != "" && !containsSharedKey(kinds, kind) {
 			return nil, fmt.Errorf("shared listener type %q is not supported", kind)

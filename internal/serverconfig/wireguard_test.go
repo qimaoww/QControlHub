@@ -92,22 +92,21 @@ func TestSingBoxWireGuardEndpointKeepsClientPrivateKeyOutOfServer(t *testing.T) 
 }
 
 func TestSingBoxEndpointClientProfiles(t *testing.T) {
-	p, _ := FindProtocol(core.EngineSingBox, ProtocolOpenVPNServer)
-	in, err := NewPlan(p)
-	if err != nil {
-		t.Fatal(err)
+	for _, key := range []string{ProtocolTailscale, ProtocolOpenVPNServer} {
+		if _, ok := FindProtocol(core.EngineSingBox, key); ok {
+			t.Fatalf("%s is offered before its lifecycle is implemented", key)
+		}
+		protocol := Protocol{Key: key, Transports: []string{"raw"}, UsesEndpoint: true}
+		if _, err := NewPlan(protocol); err == nil {
+			t.Fatalf("%s unexpectedly generated a preset", key)
+		}
+		input := Input{Protocol: key, Tag: "vpn", Port: 1194, Listen: "::",
+			OpenVPNClientCAPath: "/server-only/ca.crt", OpenVPNUsername: "test", OpenVPNPassword: "test-password"}
+		if _, err := BuildClientProfile(input, "vpn.example.com", ""); err == nil {
+			t.Fatalf("%s unexpectedly exported an unusable client profile", key)
+		}
+		if _, err := Generate(core.EngineSingBox, input); err == nil {
+			t.Fatalf("%s bypassed the preset catalog gate", key)
+		}
 	}
-	profile, err := BuildClientProfile(in, "vpn.example.com", "")
-	if err != nil || !strings.Contains(profile.URI, "proto udp") || strings.Contains(profile.URI, in.OpenVPNServerKeyPath) {
-		t.Fatalf("OpenVPN profile: %v %#v", err, profile)
-	}
-	ts, _ := NewPlan(mustProtocol(core.EngineSingBox, ProtocolTailscale))
-	if _, err := BuildClientProfile(ts, "ts.example.com", ""); err == nil {
-		t.Fatal("Tailscale unexpectedly exported a generic client profile")
-	}
-}
-
-func mustProtocol(engine core.Engine, key string) Protocol {
-	p, _ := FindProtocol(engine, key)
-	return p
 }

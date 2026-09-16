@@ -112,6 +112,7 @@ func ParseAll(engine core.Engine, content string) []Input {
 				continue
 			}
 			if parsed, ok := parseSingBoxEndpoint(string(single)); ok {
+				parsed.BlockMainlandDestination, parsed.BlockMainlandSource = mainlandSingBoxFlags(root, parsed.Tag)
 				result = append(result, parsed)
 			}
 		}
@@ -181,6 +182,10 @@ func firstSupportedInbound(engine core.Engine, value any, protocolField string) 
 		candidate := mapValue(item)
 		protocol := protocolKey(stringValue(candidate[protocolField]))
 		if _, ok := FindProtocol(engine, protocol); ok {
+			if engine == core.EngineSingBox && protocol == ProtocolWireGuard {
+				// Native WireGuard is an endpoint, never an inbound.
+				continue
+			}
 			if engine == core.EngineXray && protocol == ProtocolWireGuard && !managedXrayWireGuardInbound(candidate) {
 				continue
 			}

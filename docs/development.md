@@ -110,6 +110,20 @@ go test -p 1 ./... -count=1
 
 API 与存储测试会分别创建随机临时 schema，并在测试结束后删除，不共享业务测试数据。PostgreSQL 的 MVCC 回收仍会受其他 schema 的长事务影响；`make test` 和 `make alpine-test` 默认按包顺序执行，避免并行集成测试干扰 HOT/表膨胀断言。CI 的 Go 测试分片各自使用独立数据库（在 `QCH_TEST_DATABASE_URL` 的库名后追加 `_shardN`，分片数量由 `QCH_TEST_SHARDS` 控制），分片内部仍按包顺序执行，因此既加快流水线，又不会让不同分片的迁移测试共享同一个 MVCC 回收窗口。测试内部的并发场景照常执行，性能阈值不变。仍应使用专用测试数据库账户，不要指向生产数据库。
 
+WireGuard 可选真实内核回归同时验证 Xray 和 sing-box 配置，并经用户态 WireGuard 隧道传输
+双向 HTTP 数据。它使用临时配置和本机端口，不创建系统网卡、不修改路由或防火墙；需有本机
+非回环 IPv4 地址，以及支持 WireGuard/gVisor 的 sing-box 二进制：
+
+```bash
+QCH_TEST_SINGBOX_BIN=/absolute/path/to/sing-box \
+QCH_TEST_XRAY_BIN=/absolute/path/to/xray \
+go test ./internal/serverconfig -run TestWireGuardNativeCoreRoundTrip -count=1 -v
+```
+
+PostgreSQL 的 `TestWireGuardPresetLifecycleWithPostgreSQL` 覆盖混合入站、客户端元数据加密、
+标签/端口冲突、版本冲突、任务写入失败的事务回滚、密钥轮换、历史版本恢复与最终删除。
+浏览器回归的桌面和移动端配置流程同时覆盖 WireGuard 文件选择、密钥对生成、修改和删除。
+
 构建发布二进制：
 
 ```bash

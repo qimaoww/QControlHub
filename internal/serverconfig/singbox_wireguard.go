@@ -4,35 +4,22 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/netip"
 	"strings"
 )
 
 func generateSingBoxEndpoint(input Input) (string, error) {
-	if input.Protocol == ProtocolTailscale {
-		return generateSingBoxTailscaleEndpoint(input)
-	}
-	if input.Protocol == ProtocolOpenVPNServer {
-		return generateSingBoxOpenVPNEndpoint(input)
-	}
 	if err := validateWireGuardInput(input, true); err != nil {
+		return "", err
+	}
+	if err := validateSingBoxWireGuardAddress(input); err != nil {
 		return "", err
 	}
 	allowed := splitWireGuardList(input.WireGuardClientAddress)
 	addresses := splitWireGuardList(input.WireGuardServerAddress)
-	if len(addresses) == 0 {
-		return "", fmt.Errorf("WireGuard 服务端地址不能为空")
-	}
-	for _, address := range addresses {
-		if _, _, err := net.ParseCIDR(address); err != nil {
-			return "", fmt.Errorf("WireGuard 服务端地址无效: %s", address)
-		}
-	}
 	peer := map[string]any{"public_key": input.WireGuardClientPublicKey, "allowed_ips": allowed}
 	if input.WireGuardPresharedKey != "" {
 		peer["pre_shared_key"] = input.WireGuardPresharedKey
-	}
-	if input.WireGuardKeepalive > 0 {
-		peer["persistent_keepalive_interval"] = input.WireGuardKeepalive
 	}
 	endpoint := map[string]any{
 		"type": "wireguard", "tag": input.Tag, "system": false,
@@ -45,39 +32,16 @@ func generateSingBoxEndpoint(input Input) (string, error) {
 	return string(value) + "\n", err
 }
 
-func generateSingBoxTailscaleEndpoint(input Input) (string, error) {
-	if input.TailscaleStateDirectory == "" {
-		return "", fmt.Errorf("Tailscale 状态目录不能为空")
-	}
-	endpoint := map[string]any{"type": "tailscale", "tag": input.Tag, "state_directory": input.TailscaleStateDirectory, "hostname": input.TailscaleHostname}
-	if input.TailscaleControlURL != "" {
-		endpoint["control_url"] = input.TailscaleControlURL
-	}
-	if input.Port > 0 {
-		endpoint["listen_port"] = input.Port
-	}
-	root := map[string]any{"log": map[string]any{"level": "info"}, "endpoints": []any{endpoint}, "outbounds": []any{map[string]any{"type": "direct", "tag": "direct"}}}
-	value, err := json.MarshalIndent(root, "", "  ")
-	return string(value) + "\n", err
-}
-
-func generateSingBoxOpenVPNEndpoint(input Input) (string, error) {
-	if input.OpenVPNServerCertificatePath == "" || input.OpenVPNServerKeyPath == "" || input.OpenVPNClientCAPath == "" {
-		return "", fmt.Errorf("OpenVPN 证书路径不能为空")
-	}
-	if input.OpenVPNAddress == "" {
-		input.OpenVPNAddress = "10.77.0.1/24"
-	}
-	endpoint := map[string]any{"type": "openvpn-server", "tag": input.Tag, "listen_port": input.Port, "network": "udp", "address": []string{input.OpenVPNAddress}, "mode": "tls", "max_clients": 1024,
-		"users": []any{map[string]any{"username": input.OpenVPNUsername, "password": input.OpenVPNPassword}},
-		"tls":   map[string]any{"certificate_path": input.OpenVPNServerCertificatePath, "key_path": input.OpenVPNServerKeyPath, "client_certificate_path": input.OpenVPNClientCAPath, "verify_client_certificate": "require"}}
-	root := map[string]any{"log": map[string]any{"level": "info"}, "endpoints": []any{endpoint}, "outbounds": []any{map[string]any{"type": "direct", "tag": "direct"}}}
-	value, err := json.MarshalIndent(root, "", "  ")
-	return string(value) + "\n", err
-}
-
 func parseSingBoxWireGuardEndpoint(entry map[string]any) (Input, bool) {
 	if stringValue(entry["type"]) != "wireguard" {
+		return Input{}, false
+	}
+	for key := range entry {
+		if !containsSharedKey("type tag system mtu address private_key listen_port peers", key) {
+			return Input{}, false
+		}
+	}
+	if value, exists := entry["system"]; exists && value != false {
 		return Input{}, false
 	}
 	peers, ok := entry["peers"].([]any)
@@ -88,26 +52,73 @@ func parseSingBoxWireGuardEndpoint(entry map[string]any) (Input, bool) {
 	if peer == nil || stringValue(entry["private_key"]) == "" || stringValue(peer["public_key"]) == "" {
 		return Input{}, false
 	}
-	input := Input{Protocol: ProtocolWireGuard, Tag: stringValue(entry["tag"]), Port: intValue(entry["listen_port"]), Listen: "0.0.0.0", Transport: "raw", Username: "default", WireGuardServerPrivateKey: stringValue(entry["private_key"]), WireGuardServerPublicKey: wireguardServerPublic(stringValue(entry["private_key"])), WireGuardServerAddress: strings.Join(stringSliceValue(entry["address"]), ","), WireGuardClientPublicKey: stringValue(peer["public_key"]), WireGuardClientAddress: strings.Join(stringSliceValue(peer["allowed_ips"]), ","), WireGuardPresharedKey: stringValue(peer["pre_shared_key"]), WireGuardMTU: intValue(entry["mtu"]), WireGuardKeepalive: intValue(peer["persistent_keepalive_interval"])}
+	for key := range peer {
+		if !containsSharedKey("public_key pre_shared_key allowed_ips persistent_keepalive_interval", key) {
+			return Input{}, false
+		}
+	}
+	addresses, validAddresses := wireGuardConfigStrings(entry["address"])
+	allowed, validAllowed := wireGuardConfigStrings(peer["allowed_ips"])
+	port, validPort := wireGuardConfigInteger(entry["listen_port"])
+	mtu, validMTU := wireGuardConfigInteger(entry["mtu"])
+	keepalive, validKeepalive := wireGuardConfigInteger(peer["persistent_keepalive_interval"])
+	if !validAddresses || !validAllowed || !validPort || !validMTU || !validKeepalive || keepalive != 0 {
+		return Input{}, false
+	}
+	if value, exists := peer["pre_shared_key"]; exists {
+		if _, ok := value.(string); !ok {
+			return Input{}, false
+		}
+	}
+	input := Input{
+		Protocol: ProtocolWireGuard, Tag: stringValue(entry["tag"]), Port: port, Listen: "::", Transport: "raw", Username: "default",
+		WireGuardServerPrivateKey: stringValue(entry["private_key"]), WireGuardServerPublicKey: wireguardServerPublic(stringValue(entry["private_key"])),
+		WireGuardServerAddress: strings.Join(addresses, ","), WireGuardClientPublicKey: stringValue(peer["public_key"]),
+		WireGuardClientAddress: strings.Join(allowed, ","), WireGuardPresharedKey: stringValue(peer["pre_shared_key"]),
+		WireGuardMTU: mtu,
+	}
 	if input.WireGuardMTU == 0 {
 		input.WireGuardMTU = 1408
 	}
-	return input, validateWireGuardInput(input, false) == nil
+	return input, validateWireGuardInput(input, false) == nil && validateSingBoxWireGuardAddress(input) == nil
 }
 
 func parseSingBoxEndpointProtocol(entry map[string]any) (Input, bool) {
 	switch stringValue(entry["type"]) {
 	case "wireguard":
 		return parseSingBoxWireGuardEndpoint(entry)
-	case "tailscale":
-		input := Input{Protocol: ProtocolTailscale, Tag: stringValue(entry["tag"]), Port: intValue(entry["listen_port"]), TailscaleStateDirectory: stringValue(entry["state_directory"]), TailscaleAuthKey: stringValue(entry["auth_key"]), TailscaleControlURL: stringValue(entry["control_url"]), TailscaleHostname: stringValue(entry["hostname"])}
-		return input, input.Tag != "" && input.TailscaleStateDirectory != ""
-	case "openvpn-server":
-		tls := mapValue(entry["tls"])
-		users := firstMap(entry["users"])
-		input := Input{Protocol: ProtocolOpenVPNServer, Tag: stringValue(entry["tag"]), Port: intValue(entry["listen_port"]), OpenVPNAddress: firstString(entry["address"]), OpenVPNUsername: stringValue(users["username"]), OpenVPNPassword: stringValue(users["password"]), OpenVPNServerCertificatePath: stringValue(tls["certificate_path"]), OpenVPNServerKeyPath: stringValue(tls["key_path"]), OpenVPNClientCAPath: stringValue(tls["client_certificate_path"])}
-		return input, input.Tag != "" && input.Port > 0 && input.OpenVPNServerCertificatePath != ""
 	default:
 		return Input{}, false
 	}
+}
+
+func validateSingBoxWireGuardAddress(input Input) error {
+	// Native WireGuard exposes listen_port, not a listen-address selector.
+	if ip := net.ParseIP(input.Listen); ip == nil || !ip.IsUnspecified() {
+		return fmt.Errorf("sing-box WireGuard 端点监听所有接口，不支持自定义监听地址")
+	}
+	addresses := splitWireGuardList(input.WireGuardServerAddress)
+	if len(addresses) == 0 || len(addresses) > 2 {
+		return fmt.Errorf("WireGuard 服务端须填写一个 IPv4 地址和/或一个 IPv6 地址")
+	}
+	families := map[int]bool{}
+	local := map[netip.Addr]bool{}
+	for _, address := range addresses {
+		prefix, err := netip.ParsePrefix(address)
+		if err != nil || !prefix.Addr().IsGlobalUnicast() || prefix.Addr().Is4In6() || families[prefix.Addr().BitLen()] {
+			return fmt.Errorf("WireGuard 服务端地址无效: %s", address)
+		}
+		families[prefix.Addr().BitLen()] = true
+		local[prefix.Addr()] = true
+	}
+	for _, address := range splitWireGuardList(input.WireGuardClientAddress) {
+		prefix, err := netip.ParsePrefix(address)
+		if err != nil || local[prefix.Addr()] || !families[prefix.Addr().BitLen()] {
+			return fmt.Errorf("WireGuard 客户端地址须与服务端地址分离，且服务端须配置相应地址族")
+		}
+	}
+	if families[128] && input.WireGuardMTU < 1280 {
+		return fmt.Errorf("WireGuard IPv6 接口 MTU 至少需要 1280")
+	}
+	return nil
 }

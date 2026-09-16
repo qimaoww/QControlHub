@@ -61,15 +61,17 @@ export function splitConfigFiles(engine, content) {
   if (!["xray", "sing-box"].includes(engine)) return [{path: engine === "mihomo" ? "config.yaml" : "config.json", content}];
   const root = members(content);
   const lists = new Map();
-  for (const key of ["inbounds", "outbounds"]) {
+  const ingressKeys = engine === "sing-box" ? ["inbounds", "endpoints"] : ["inbounds"];
+  for (const key of [...ingressKeys, "outbounds"]) {
     if (!root.has(key)) continue;
     const entries = members(root.get(key), true);
     entries.forEach(entry => members(entry));
     lists.set(key, entries);
   }
-  const inbounds = lists.get("inbounds") || [], outbounds = lists.get("outbounds") || [];
+  const listeners = ingressKeys.flatMap(key => (lists.get(key) || []).map((entry, index) => ({key, entry, index})));
+  const outbounds = lists.get("outbounds") || [];
   const owners = new Map(), portKey = engine === "xray" ? "port" : "listen_port";
-  inbounds.forEach((entry, i) => {
+  listeners.forEach(({entry}, i) => {
     const raw = JSON.parse(entry)[portKey];
     const port = typeof raw === "number" || typeof raw === "string" && /^[+]?[0-9]+$/.test(raw.trim()) ? Number(raw) : 0;
     if (Number.isInteger(port) && port > 0 && port <= 65535) owners.set(port, owners.has(port) ? -1 : i);
@@ -81,25 +83,25 @@ export function splitConfigFiles(engine, content) {
   };
   // Shared/default exits remain first. Pair only an ordered dedicated suffix,
   // so imported routing and default-outbound priority are never changed.
-  let cut = outbounds.length, next = inbounds.length;
+  let cut = outbounds.length, next = listeners.length;
   while (cut > 0) {
     const owner = ownerOf(outbounds[cut - 1]);
     if (owner === undefined || owner < 0 || owner > next) break;
     next = owner; cut--;
   }
-  const paired = inbounds.map(() => []);
+  const paired = listeners.map(() => []);
   for (const raw of outbounds.slice(cut)) paired[ownerOf(raw)].push(raw);
   if (cut < outbounds.length) {
     if (cut) root.set("outbounds", `[${outbounds.slice(0, cut).join(",\n")}]`);
     else root.delete("outbounds");
   }
   const files = [{path:"common.json", content:""}], used = new Set();
-  inbounds.forEach((entry, i) => {
-    const fragment = new Map([["inbounds", `[${entry}]`]]);
+  listeners.forEach(({key, entry, index}, i) => {
+    const fragment = new Map([[key, `[${entry}]`]]);
     if (paired[i].length) fragment.set("outbounds", `[${paired[i].join(",\n")}]`);
-    files.push({path:`inbounds/${entryFilename(JSON.parse(entry).tag, "inbounds", i, used)}`, content:objectText(fragment)});
+    files.push({path:`${key}/${entryFilename(JSON.parse(entry).tag, key, index, used)}`, content:objectText(fragment)});
   });
-  if (inbounds.length) root.delete("inbounds");
+  for (const key of ingressKeys) if (lists.get(key)?.length) root.delete(key);
   files[0].content = objectText(root);
   return files;
 }
@@ -114,12 +116,12 @@ export function mergeConfigFiles(files) {
     const validName = files[0].path === "00-common.json"
       ? file.path === `${key}/${String(entries.length).padStart(4,"0")}.json`
       : extra === undefined && typeof name === "string" && new TextEncoder().encode(name).length <= 220 && /^[\p{L}\p{N}_-][\p{L}\p{N}_.-]*\.json$/u.test(name);
-    if (!["inbounds","outbounds"].includes(key) || !validName || seen.has(file.path))
+    if (!["inbounds","endpoints","outbounds"].includes(key) || !validName || seen.has(file.path))
       throw new Error("无效配置文件路径或顺序");
     seen.add(file.path);
     const fragment = members(file.content);
-    if (!fragment.has(key) || [...fragment.keys()].some(field => field !== key && !(key === "inbounds" && field === "outbounds" && files[0].path === "common.json")))
-      throw new Error(`${file.path} 只能包含 ${key}${key === "inbounds" ? " 和配套 outbounds" : ""}`);
+    if (!fragment.has(key) || [...fragment.keys()].some(field => field !== key && !(key !== "outbounds" && field === "outbounds" && files[0].path === "common.json")))
+      throw new Error(`${file.path} 只能包含 ${key}${key !== "outbounds" ? " 和配套 outbounds" : ""}`);
     const values = members(fragment.get(key), true);
     if (values.length !== 1) throw new Error(`${file.path} 必须包含一个入站或出站`);
     members(values[0]);
@@ -141,7 +143,7 @@ export function mergeConfigFiles(files) {
     root.set(key,`[\n${entries.join(",\n")}\n]`);
   }
   const content = objectText(root);
-  for (const key of ["inbounds", "outbounds"]) if (root.has(key)) members(root.get(key), true).forEach(entry => members(entry));
+  for (const key of ["inbounds", "endpoints", "outbounds"]) if (root.has(key)) members(root.get(key), true).forEach(entry => members(entry));
   if (new TextEncoder().encode(content).length > 2097152) throw new Error("合并配置超过 2 MiB 上限");
   return content;
 }
@@ -188,7 +190,7 @@ export function bindConfigFiles(form, engine, notify) {
       else {
         detail = "入站配置";
         try {
-          const entry = JSON.parse(file.content).inbounds?.[0];
+          const entry = JSON.parse(file.content)[file.path.split("/")[0]]?.[0];
           name = typeof entry?.tag === "string" && entry.tag ? entry.tag : name;
           detail = [entry?.type || entry?.protocol, entry?.listen_port ?? entry?.port].filter(value => value !== undefined && value !== "").join(" · ") || detail;
         } catch { /* Invalid drafts keep their navigation identity. */ }
@@ -232,14 +234,14 @@ export function bindConfigFiles(form, engine, notify) {
     selectedInbound() {
       if (selected === "preview" || selected === 0) return null;
       try {
-        const entry = JSON.parse(input.value).inbounds?.[0];
+        const entry = JSON.parse(input.value)[files[selected].path.split("/")[0]]?.[0];
         return entry && { tag: entry.tag, port: Number(entry.port ?? entry.listen_port) };
       } catch { return null; }
     },
     selectInbound(tag, port) {
       const index = files.findIndex((file, i) => {
         if (!i) return false;
-        try { const entry = JSON.parse(file.content).inbounds?.[0]; return entry?.tag === tag && Number(entry.port ?? entry.listen_port) === port; } catch { return false; }
+        try { const entry = JSON.parse(file.content)[file.path.split("/")[0]]?.[0]; return entry?.tag === tag && Number(entry.port ?? entry.listen_port) === port; } catch { return false; }
       });
       if (index > 0) switchFile(index);
     },

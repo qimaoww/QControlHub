@@ -3,7 +3,6 @@ package serverconfig
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -70,113 +69,6 @@ func normalizeSudokuInput(input *Input) {
 	if input.SudokuMultiplex == "" {
 		input.SudokuMultiplex = "off"
 	}
-}
-
-type clientMetadata struct {
-	Version                   int    `json:"version"`
-	Protocol                  string `json:"protocol"`
-	SnellReuse                bool   `json:"snell_reuse,omitempty"`
-	SnellObfsHost             string `json:"snell_obfs_host,omitempty"`
-	SnellClientFingerprint    string `json:"snell_client_fingerprint,omitempty"`
-	SnellShadowTLSALPN        string `json:"snell_shadow_tls_alpn,omitempty"`
-	SudokuClientKey           string `json:"sudoku_client_key,omitempty"`
-	SudokuHTTPMaskMode        string `json:"sudoku_httpmask_mode,omitempty"`
-	SudokuHTTPMaskTLS         bool   `json:"sudoku_httpmask_tls,omitempty"`
-	SudokuHTTPMaskHost        string `json:"sudoku_httpmask_host,omitempty"`
-	SudokuMultiplex           string `json:"sudoku_multiplex,omitempty"`
-	WireGuardClientPrivateKey string `json:"wireguard_client_private_key,omitempty"`
-	WireGuardClientPublicKey  string `json:"wireguard_client_public_key,omitempty"`
-	WireGuardPresharedKey     string `json:"wireguard_preshared_key,omitempty"`
-	WireGuardClientAddress    string `json:"wireguard_client_address,omitempty"`
-	WireGuardAllowedIPs       string `json:"wireguard_allowed_ips,omitempty"`
-	WireGuardMTU              int    `json:"wireguard_mtu,omitempty"`
-	WireGuardKeepalive        int    `json:"wireguard_keepalive,omitempty"`
-	TailscaleAuthKey          string `json:"tailscale_auth_key,omitempty"`
-	OpenVPNPassword           string `json:"openvpn_password,omitempty"`
-}
-
-// MarshalClientMetadata extracts values that are required to build a client
-// profile but either must not be written to the server configuration (for
-// example a Sudoku private key) or have no server-side equivalent.
-func MarshalClientMetadata(input Input) (string, error) {
-	if !isSnellProtocol(input.Protocol) && input.Protocol != ProtocolSudoku && input.Protocol != ProtocolWireGuard && input.Protocol != ProtocolTailscale && input.Protocol != ProtocolOpenVPNServer {
-		return "", nil
-	}
-	if isSnellProtocol(input.Protocol) {
-		normalizeSnellInput(&input)
-	} else {
-		if input.Protocol == ProtocolSudoku {
-			normalizeSudokuInput(&input)
-		}
-	}
-	metadata := clientMetadata{
-		Version: 1, Protocol: input.Protocol,
-		SnellReuse: input.SnellReuse, SnellObfsHost: input.SnellObfsHost,
-		SnellClientFingerprint: input.SnellClientFingerprint,
-		SnellShadowTLSALPN:     input.SnellShadowTLSALPN,
-		SudokuClientKey:        input.SudokuClientKey, SudokuHTTPMaskMode: input.SudokuHTTPMaskMode,
-		SudokuHTTPMaskTLS: input.SudokuHTTPMaskTLS, SudokuHTTPMaskHost: input.SudokuHTTPMaskHost,
-		SudokuMultiplex:           input.SudokuMultiplex,
-		WireGuardClientPrivateKey: input.WireGuardClientPrivateKey, WireGuardClientPublicKey: input.WireGuardClientPublicKey, WireGuardPresharedKey: input.WireGuardPresharedKey,
-		WireGuardClientAddress: input.WireGuardClientAddress, WireGuardAllowedIPs: input.WireGuardAllowedIPs, WireGuardMTU: input.WireGuardMTU, WireGuardKeepalive: input.WireGuardKeepalive,
-		TailscaleAuthKey: input.TailscaleAuthKey, OpenVPNPassword: input.OpenVPNPassword,
-	}
-	encoded, err := json.Marshal(metadata)
-	if err != nil {
-		return "", err
-	}
-	return string(encoded), nil
-}
-
-// ApplyClientMetadata hydrates parsed server configuration with its separately
-// protected client-only values. Metadata is scoped by configuration version
-// and inbound tag by the store.
-func ApplyClientMetadata(input *Input, encoded string) error {
-	if input == nil || strings.TrimSpace(encoded) == "" {
-		return nil
-	}
-	var metadata clientMetadata
-	if err := json.Unmarshal([]byte(encoded), &metadata); err != nil {
-		return fmt.Errorf("decode client metadata: %w", err)
-	}
-	if metadata.Version != 1 {
-		return errors.New("unsupported client metadata version")
-	}
-	// Full-source edits can remove an inbound and later reuse its tag for a
-	// different protocol while metadata is copied forward with the revision.
-	// Ignore that stale entry: applying it would be incorrect, but it must not
-	// make the otherwise valid configuration workspace unavailable.
-	if metadata.Protocol != input.Protocol {
-		return nil
-	}
-	if input.Protocol == ProtocolWireGuard && metadata.WireGuardClientPublicKey != "" && metadata.WireGuardClientPublicKey != input.WireGuardClientPublicKey {
-		return nil
-	}
-	input.SnellReuse = metadata.SnellReuse
-	input.SnellObfsHost = metadata.SnellObfsHost
-	input.SnellClientFingerprint = metadata.SnellClientFingerprint
-	input.SnellShadowTLSALPN = metadata.SnellShadowTLSALPN
-	input.SudokuClientKey = metadata.SudokuClientKey
-	input.SudokuHTTPMaskMode = metadata.SudokuHTTPMaskMode
-	input.SudokuHTTPMaskTLS = metadata.SudokuHTTPMaskTLS
-	input.SudokuHTTPMaskHost = metadata.SudokuHTTPMaskHost
-	input.SudokuMultiplex = metadata.SudokuMultiplex
-	// The server source remains authoritative for peer public key, PSK,
-	// addresses and MTU. Only client-only material and client route preferences
-	// are hydrated from encrypted metadata.
-	input.WireGuardClientPrivateKey = metadata.WireGuardClientPrivateKey
-	input.TailscaleAuthKey = metadata.TailscaleAuthKey
-	input.OpenVPNPassword = metadata.OpenVPNPassword
-	if metadata.WireGuardClientPublicKey != "" {
-		input.WireGuardClientPublicKey = metadata.WireGuardClientPublicKey
-	}
-	if metadata.WireGuardAllowedIPs != "" {
-		input.WireGuardAllowedIPs = metadata.WireGuardAllowedIPs
-	}
-	if metadata.WireGuardKeepalive != 0 {
-		input.WireGuardKeepalive = metadata.WireGuardKeepalive
-	}
-	return nil
 }
 
 func newSudokuKeyPair() (privateKey, publicKey string, err error) {

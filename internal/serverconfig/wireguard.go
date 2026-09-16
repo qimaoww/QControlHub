@@ -4,6 +4,7 @@ import (
 	"crypto/ecdh"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -147,4 +148,33 @@ func wireguardServerPublic(private string) string {
 		return ""
 	}
 	return base64.StdEncoding.EncodeToString(k.PublicKey().Bytes())
+}
+
+func wireGuardConfigInteger(value any) (int, bool) {
+	if value == nil {
+		return 0, true
+	}
+	raw, err := json.Marshal(value)
+	var number int
+	if err != nil || json.Unmarshal(raw, &number) != nil {
+		return 0, false
+	}
+	return number, true
+}
+
+func wireGuardConfigStrings(value any) ([]string, bool) {
+	if text, ok := value.(string); ok {
+		return []string{text}, text != ""
+	}
+	raw, err := json.Marshal(value)
+	var values []string
+	if err != nil || json.Unmarshal(raw, &values) != nil || len(values) == 0 {
+		return nil, false
+	}
+	for _, text := range values {
+		if text == "" {
+			return nil, false
+		}
+	}
+	return values, true
 }

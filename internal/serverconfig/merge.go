@@ -14,27 +14,12 @@ import (
 // configuration. If the current document has no recognizable generated
 // inbound, the new inbound is appended.
 func MergeGenerated(engine core.Engine, currentContent, generatedContent string) (string, error) {
+	if engine == core.EngineSingBox {
+		return mergeSingBoxGenerated(currentContent, generatedContent)
+	}
 	matchValue := ""
 	if current, ok := Parse(engine, currentContent); ok {
 		matchValue = current.Tag
-	}
-	if engine == core.EngineSingBox && strings.Contains(generatedContent, `"endpoints"`) {
-		// Parse historically selected only inbounds. For endpoint upserts, use
-		// the generated identity when that endpoint already exists so a save
-		// replaces it instead of appending a duplicate.
-		var generated map[string]any
-		if json.Unmarshal([]byte(generatedContent), &generated) == nil {
-			if items, ok := generated["endpoints"].([]any); ok && len(items) == 1 {
-				tag := stringValue(mapValue(items[0])["tag"])
-				if entries, err := DiscoverSingBoxEntries(currentContent); err == nil {
-					for _, entry := range entries {
-						if entry.Section == "endpoints" && entry.Tag == tag {
-							matchValue = tag
-						}
-					}
-				}
-			}
-		}
 	}
 	return mutateGenerated(engine, currentContent, generatedContent, matchValue, "upsert")
 }
@@ -61,6 +46,9 @@ func DeletePresetInbound(engine core.Engine, content, tag string) (string, error
 	if engine == core.EngineShadowsocksRust {
 		return MutateSSRustPort(content, "{}", tag, "delete")
 	}
+	if engine == core.EngineSingBox {
+		return deleteSingBoxPresetEntry(content, tag)
+	}
 	listKey, matchKey := "inbounds", "tag"
 	if engine == core.EngineMihomo {
 		listKey, matchKey = "listeners", "name"
@@ -77,7 +65,10 @@ func mutateGenerated(engine core.Engine, currentContent, generatedContent, match
 	if engine == core.EngineShadowsocksRust {
 		return mutateShadowsocksRust(currentContent, generatedContent, matchValue, operation)
 	}
-	if engine == core.EngineXray && matchValue != "" {
+	if engine == core.EngineSingBox {
+		return mutateSingBoxGenerated(currentContent, generatedContent, matchValue, operation)
+	}
+	if engine == core.EngineXray && matchValue != "" && operation != "delete" {
 		var root map[string]any
 		if json.Unmarshal([]byte(currentContent), &root) == nil {
 			if entries, ok := root["inbounds"].([]any); ok {
@@ -89,38 +80,6 @@ func mutateGenerated(engine core.Engine, currentContent, generatedContent, match
 				}
 			}
 		}
-	}
-	// Endpoints are a native sing-box root list, separate from inbounds. The
-	// generic list mutator cannot enforce identity collisions across both lists,
-	// so validate the candidate before replacing/appending it and mutate only
-	// the endpoint list. Unknown fields on an existing endpoint are retained by
-	// configschema's merge semantics; protocol-specific callers decide whether
-	// an entry is safe to edit.
-	if engine == core.EngineSingBox && strings.Contains(generatedContent, `"endpoints"`) {
-		if err := validateSingBoxEntryMutation(currentContent, generatedContent, matchValue, operation); err != nil {
-			return "", fmt.Errorf("sing-box endpoint identity check failed: %w", err)
-		}
-		endpointKeys := []string{
-			"type", "tag", "system", "name", "mtu", "address", "private_key", "peers",
-			"state_directory", "auth_key", "control_url", "ephemeral", "hostname", "accept_routes",
-			"exit_node", "exit_node_allow_lan_access", "advertise_routes", "advertise_exit_node",
-			"advertise_tags", "listen_port", "relay_server_port", "relay_server_static_endpoints",
-			"system_interface", "system_interface_name", "system_interface_mtu", "udp_timeout", "ssh_server",
-			"taildrop_directory", "workers", "on_demand", "detour", "bind_interface", "bind_address",
-			"mode", "network", "address", "peer_address", "peer_address_ipv6", "topology", "duplicate_cn", "users", "static_key", "static_key_path", "key_direction", "tls", "cipher", "data_ciphers", "auth", "push", "max_clients",
-			"routing_mark", "reuse_addr", "connect_timeout", "tcp_fast_open", "tcp_multi_path", "udp_fragment",
-		}
-		merged, err := configschema.MutateListItem(engine, currentContent, generatedContent, "endpoints", "tag", matchValue, operation, endpointKeys...)
-		if err != nil {
-			return "", fmt.Errorf("合并 sing-box endpoint 失败：%w", err)
-		}
-		if operation != "delete" {
-			merged, err = enforceCentralLogging(engine, merged)
-			if err != nil {
-				return "", fmt.Errorf("启用集中内核日志失败：%w", err)
-			}
-		}
-		return merged, nil
 	}
 	listKey, matchKey := "inbounds", "tag"
 	managedKeys := []string{
@@ -135,11 +94,6 @@ func mutateGenerated(engine core.Engine, currentContent, generatedContent, match
 			"routing-mark", "rule", "proxy", "psk", "version", "obfs-opts", "shadow-tls",
 			"key", "aead-method", "padding-min", "padding-max", "table-type", "custom-table", "custom-tables",
 			"handshake-timeout", "enable-pure-downlink", "httpmask", "disable-http-mask", "http-mask-mode", "path-root", "fallback", "mux-option",
-		}
-	} else if engine == core.EngineSingBox {
-		managedKeys = []string{
-			"tag", "listen", "listen_port", "type", "method", "password", "users", "up_mbps", "down_mbps",
-			"congestion_control", "auth_timeout", "heartbeat", "tls", "transport", "network", "override_address", "override_port",
 		}
 	}
 	var (

@@ -31,11 +31,6 @@ const generatedPlanFields = Object.freeze([
   "wireguard_client_private_key",
   "wireguard_client_public_key",
   "wireguard_preshared_key",
-  "wireguard_server_address",
-  "wireguard_client_address",
-  "wireguard_allowed_ips",
-  "wireguard_mtu",
-  "wireguard_keepalive",
 ]);
 
 const generatedFieldActions = Object.freeze([
@@ -73,6 +68,11 @@ const generatedFieldActions = Object.freeze([
   ],
   ["sudoku_client_key", "credential,sudoku_client_key", "生成 Sudoku 密钥对"],
   ["snell_shadow_tls_password", "snell_shadow_tls_password", "生成 ShadowTLS 密码"],
+  ["wireguard_server_private_key", "wireguard_server_private_key,wireguard_server_public_key", "生成 WireGuard 服务端密钥对"],
+  ["wireguard_server_public_key", "wireguard_server_private_key,wireguard_server_public_key", "生成 WireGuard 服务端密钥对"],
+  ["wireguard_client_private_key", "wireguard_client_private_key,wireguard_client_public_key", "生成 WireGuard 客户端密钥对"],
+  ["wireguard_client_public_key", "wireguard_client_private_key,wireguard_client_public_key", "生成 WireGuard 客户端密钥对"],
+  ["wireguard_preshared_key", "wireguard_preshared_key", "生成 WireGuard 预共享密钥"],
 ]);
 
 const protocolNavigationNames = Object.freeze({
@@ -199,8 +199,22 @@ export function readServerPlanInput(form, protocol) {
   };
 }
 
-function wireguardProtocolOptions(plan) {
-  return `<div class="preset-protocol-options" data-wireguard-options><details class="preset-option-panel" open><summary><b>WireGuard 密钥与客户端</b><small>客户端私钥只保存在控制面元数据，不写入节点配置</small></summary><div class="plan-fields two"><label class="secret-input">服务端私钥<span class="secret-value-control"><input type="password" name="wireguard_server_private_key" required value="${esc(plan.wireguard_server_private_key || "")}" autocomplete="off"><button type="button" data-secret-visibility>显示</button></span></label><label>服务端公钥<input name="wireguard_server_public_key" readonly value="${esc(plan.wireguard_server_public_key || "")}"></label><label>服务端隧道地址<input name="wireguard_server_address" required value="${esc(plan.wireguard_server_address || "10.66.66.1/24")}"></label><label class="secret-input">客户端私钥（仅面板保存）<span class="secret-value-control"><input type="password" name="wireguard_client_private_key" required value="${esc(plan.wireguard_client_private_key || "")}" autocomplete="off"><button type="button" data-secret-visibility>显示</button></span></label><label>客户端公钥<input name="wireguard_client_public_key" readonly value="${esc(plan.wireguard_client_public_key || "")}"></label><label class="secret-input">预共享密钥<span class="secret-value-control"><input type="password" name="wireguard_preshared_key" required value="${esc(plan.wireguard_preshared_key || "")}" autocomplete="off"><button type="button" data-secret-visibility>显示</button></span></label><label>客户端地址<input name="wireguard_client_address" required value="${esc(plan.wireguard_client_address || "10.66.66.2/32")}"></label><label>允许的客户端路由<input name="wireguard_allowed_ips" required value="${esc(plan.wireguard_allowed_ips || "0.0.0.0/0, ::/0")}"></label><label>MTU<input type="number" name="wireguard_mtu" min="576" max="65535" value="${Number(plan.wireguard_mtu || 1420)}"></label><label>客户端 Keepalive（秒）<input type="number" name="wireguard_keepalive" min="0" max="65535" value="${Number(plan.wireguard_keepalive || 25)}"></label></div></details></div>`;
+function wireguardProtocolOptions(plan, endpoint = false) {
+  return `<div class="preset-protocol-options" data-wireguard-options ${endpoint ? "data-wireguard-endpoint" : ""}>
+    <details class="preset-option-panel" open><summary><b>WireGuard 密钥与客户端</b><small>客户端私钥只保存在控制面加密元数据，不写入节点配置</small></summary>
+    ${endpoint ? "<p>sing-box 原生端点监听所有接口，不支持指定监听地址；需要 with_wireguard 与 with_gvisor。</p>" : ""}
+    <div class="plan-fields two">
+      <label class="secret-input">服务端私钥<span class="secret-value-control"><input type="password" name="wireguard_server_private_key" required maxlength="44" value="${esc(plan.wireguard_server_private_key || "")}" autocomplete="off"><button type="button" data-secret-visibility>显示</button></span></label>
+      <label>服务端公钥<input name="wireguard_server_public_key" required maxlength="44" value="${esc(plan.wireguard_server_public_key || "")}"><small>导入私钥时须同时填写匹配的公钥。</small></label>
+      ${endpoint ? `<label>服务端隧道地址<input name="wireguard_server_address" required value="${esc(plan.wireguard_server_address || "10.66.66.1/24")}"></label>` : ""}
+      <label class="secret-input">客户端私钥（仅面板保存）<span class="secret-value-control"><input type="password" name="wireguard_client_private_key" required maxlength="44" value="${esc(plan.wireguard_client_private_key || "")}" autocomplete="off"><button type="button" data-secret-visibility>显示</button></span></label>
+      <label>客户端公钥<input name="wireguard_client_public_key" required maxlength="44" value="${esc(plan.wireguard_client_public_key || "")}"><small>导入私钥时须同时填写匹配的公钥。</small></label>
+      <label class="secret-input">预共享密钥（可选）<span class="secret-value-control"><input type="password" name="wireguard_preshared_key" maxlength="44" value="${esc(plan.wireguard_preshared_key || "")}" autocomplete="off"><button type="button" data-secret-visibility>显示</button></span></label>
+      <label>客户端地址<input name="wireguard_client_address" required value="${esc(plan.wireguard_client_address || "10.66.66.2/32")}"></label>
+      <label>允许的客户端路由<input name="wireguard_allowed_ips" value="${esc(plan.wireguard_allowed_ips || "")}" placeholder="留空时按客户端地址族生成默认路由"></label>
+      <label>MTU<input type="number" name="wireguard_mtu" min="576" max="65535" value="${Number(plan.wireguard_mtu ?? 1420)}"></label>
+      <label>客户端 Keepalive（秒）<input type="number" name="wireguard_keepalive" min="0" max="65535" value="${Number(plan.wireguard_keepalive ?? 25)}"><small>0 表示关闭。</small></label>
+    </div></details></div>`;
 }
 
 function optionSecret(name, label, value, help = "") {
@@ -227,6 +241,10 @@ function sudokuProtocolOptions(plan) {
 }
 
 function bindProtocolOptionVisibility(form) {
+  if (form.querySelector("[data-wireguard-endpoint]")) {
+    const listen = form.elements.namedItem("listen");
+    if (listen) listen.readOnly = true;
+  }
   const show = (selector, visible) => {
     form.querySelectorAll(selector).forEach((element) => {
       element.hidden = !visible;

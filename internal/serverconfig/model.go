@@ -311,11 +311,9 @@ func Protocols(engine core.Engine) []Protocol {
 		protocols = append(protocols, Protocol{Key: ProtocolWireGuard, Name: "WireGuard", Badge: "WG", Description: "Xray 用户态 WireGuard 服务端，单客户端预设。客户端私钥仅保存在加密元数据中。", Docs: base + "wireguard.html", DefaultPort: 51820, Credential: "客户端公钥", Transports: []string{"raw"}, UsesWireGuard: true, IgnoresUsername: true})
 	}
 	if engine == core.EngineSingBox {
-		protocols = append(protocols, Protocol{Key: ProtocolWireGuard, Name: "WireGuard 端点", Badge: "WG", Description: "sing-box 原生 WireGuard 端点；客户端私钥仅保存在加密元数据中。", Docs: base + "endpoint/wireguard/", DefaultPort: 51820, Credential: "客户端公钥", Transports: []string{"raw"}, UsesWireGuard: true, UsesEndpoint: true, IgnoresUsername: true})
-		protocols = append(protocols,
-			Protocol{Key: ProtocolTailscale, Name: "Tailscale 端点", Badge: "TS", Description: "sing-box 原生 Tailscale 端点；登录状态保存在独立状态目录。", Docs: base + "endpoint/tailscale/", DefaultPort: 41641, Credential: "Tailscale Auth Key", Transports: []string{"raw"}, UsesEndpoint: true, IgnoresUsername: true},
-			Protocol{Key: ProtocolOpenVPNServer, Name: "OpenVPN 服务端端点", Badge: "OVPN", Description: "sing-box 原生 OpenVPN TLS 服务端端点。", Docs: base + "endpoint/openvpn-server/", DefaultPort: 1194, Credential: "OpenVPN 密码", Transports: []string{"raw"}, UsesEndpoint: true, IgnoresUsername: true},
-		)
+		protocols = append(protocols, Protocol{Key: ProtocolWireGuard, Name: "WireGuard 端点", Badge: "WG", Description: "sing-box 1.11+ 用户态 WireGuard 端点，监听所有接口；需要 with_wireguard 与 with_gvisor。客户端私钥仅保存在加密元数据中。", Docs: base + "endpoint/wireguard/", DefaultPort: 51820, DefaultListen: "::", Credential: "客户端公钥", Transports: []string{"raw"}, UsesWireGuard: true, UsesEndpoint: true, IgnoresUsername: true})
+		// Tailscale login/state and OpenVPN certificate lifecycle are not
+		// implemented yet. Keep their native source opaque, not preset-editable.
 	}
 	return protocols
 }

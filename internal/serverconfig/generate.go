@@ -67,6 +67,9 @@ func Generate(engine core.Engine, input Input) (string, error) {
 			if err := validateWireGuardInput(input, true); err != nil {
 				return "", err
 			}
+			if input.BlockMainlandSource {
+				return "", errors.New("WireGuard 路由只能识别隧道内源地址，公网来源限制须在节点防火墙配置")
+			}
 		} else {
 			if !protocol.IgnoresUsername && (strings.TrimSpace(input.Username) == "" || len(input.Username) > 64) {
 				return "", errors.New("用户名不能为空且不能超过 64 个字符")

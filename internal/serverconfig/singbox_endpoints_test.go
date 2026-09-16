@@ -20,16 +20,25 @@ func TestDiscoverSingBoxEntriesIncludesInboundAndEndpoint(t *testing.T) {
 
 func TestMutateGeneratedSingBoxEndpointChecksCrossListIdentity(t *testing.T) {
 	current := `{"inbounds":[{"tag":"web","type":"socks","listen_port":1080}],"endpoints":[]}`
-	generated := `{"endpoints":[{"tag":"wg","type":"wireguard","listen_port":1080,"private_key":"secret"}]}`
-	if _, err := MutateGenerated(core.EngineSingBox, current, generated, "", "add"); err == nil || !strings.Contains(err.Error(), "port") {
+	input, generated := wireGuardEndpointFixture(t)
+	input.Port = 1080
+	conflicting, err := Generate(core.EngineSingBox, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := MutateGenerated(core.EngineSingBox, current, conflicting, "", "add"); err == nil || !strings.Contains(err.Error(), "port") {
 		t.Fatalf("expected cross-list port collision, got %v", err)
 	}
-	generated = `{"endpoints":[{"tag":"wg","type":"wireguard","listen_port":51820,"private_key":"secret"}]}`
 	added, err := MutateGenerated(core.EngineSingBox, current, generated, "", "add")
 	if err != nil || !strings.Contains(added, `"endpoints"`) {
 		t.Fatalf("add endpoint error=%v\n%s", err, added)
 	}
-	modified, err := MutateGenerated(core.EngineSingBox, added, `{"endpoints":[{"tag":"wg2","type":"wireguard","listen_port":51821,"private_key":"new"}]}`, "wg", "modify")
+	input.Tag, input.Port = "wg2", 51821
+	generated, err = Generate(core.EngineSingBox, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	modified, err := MutateGenerated(core.EngineSingBox, added, generated, "wg", "modify")
 	if err != nil || strings.Contains(modified, `"tag": "wg"`) || !strings.Contains(modified, `"tag": "wg2"`) {
 		t.Fatalf("rename endpoint error=%v\n%s", err, modified)
 	}
@@ -40,9 +49,12 @@ func TestMutateGeneratedSingBoxEndpointChecksCrossListIdentity(t *testing.T) {
 }
 
 func TestMutateGeneratedSingBoxEndpointPreservesUnknownCustomFields(t *testing.T) {
-	current := `{"endpoints":[{"tag":"wg","type":"wireguard","listen_port":51820,"private_key":"old","custom_vendor_field":{"keep":true}}]}`
-	generated := `{"endpoints":[{"tag":"wg","type":"wireguard","listen_port":51821,"private_key":"new"}]}`
-	updated, err := MutateGenerated(core.EngineSingBox, current, generated, "wg", "modify")
+	_, generated := wireGuardEndpointFixture(t)
+	current := strings.Replace(generated, `"type": "wireguard"`, `"type": "wireguard", "custom_vendor_field":{"keep":true}`, 1)
+	if _, err := MutateGenerated(core.EngineSingBox, current, generated, "wg", "modify"); err == nil {
+		t.Fatal("custom endpoint was accepted for lossy preset editing")
+	}
+	updated, err := MutateGenerated(core.EngineSingBox, current, `{"inbounds":[{"tag":"web","type":"socks","listen_port":1080}]}`, "", "add")
 	if err != nil {
 		t.Fatal(err)
 	}

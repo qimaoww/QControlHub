@@ -83,7 +83,7 @@ assert.match(renderFieldEditor({ selected: fields[1], value: {} }), /mutation-mo
 assert.match(renderFieldEditor({ selected: fields[1], value: {} }), /value-mode-unset/);
 assert.match(renderFieldEditor({ selected: fields[1], value: {} }), /<option value="add" selected>/);
 
-const structuralFields = ["inbounds", "outbounds", "listeners", "servers", "shadowsocks"]
+const structuralFields = ["inbounds", "endpoints", "outbounds", "listeners", "servers", "shadowsocks"]
   .map(key => ({key, label:key}));
 for (const engine of ["xray", "sing-box", "mihomo", "ss-rust"]) {
   assert.deepEqual(commonConfigFields(engine, [...fields, ...structuralFields]).map(field => field.key),

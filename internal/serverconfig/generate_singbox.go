@@ -7,7 +7,7 @@ import (
 )
 
 func generateSingBox(input Input) (string, error) {
-	if input.Protocol == ProtocolWireGuard || input.Protocol == ProtocolTailscale || input.Protocol == ProtocolOpenVPNServer {
+	if input.Protocol == ProtocolWireGuard {
 		return generateSingBoxEndpoint(input)
 	}
 	inbound := map[string]any{
@@ -98,10 +98,9 @@ func parseSingBox(content string) (Input, bool) {
 		if endpoints, ok := root["endpoints"].([]any); ok {
 			for _, raw := range endpoints {
 				entry := mapValue(raw)
-				if protocol := protocolKey(stringValue(entry["type"])); protocol == ProtocolWireGuard || protocol == ProtocolTailscale || protocol == ProtocolOpenVPNServer {
-					if parsed, valid := parseSingBoxEndpointProtocol(entry); valid {
-						return parsed, true
-					}
+				if parsed, valid := parseSingBoxEndpointProtocol(entry); valid {
+					parsed.BlockMainlandDestination, parsed.BlockMainlandSource = mainlandSingBoxFlags(root, parsed.Tag)
+					return parsed, true
 				}
 			}
 		}

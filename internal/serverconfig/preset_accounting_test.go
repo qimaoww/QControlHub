@@ -12,9 +12,6 @@ func TestEveryPresetHasIndependentAccounting(t *testing.T) {
 	for _, engine := range []core.Engine{core.EngineXray, core.EngineSingBox, core.EngineMihomo, core.EngineShadowsocksRust} {
 		for _, protocol := range Protocols(engine) {
 			t.Run(string(engine)+"/"+protocol.Key, func(t *testing.T) {
-				if protocol.Key == ProtocolTailscale {
-					t.Skip("Tailscale relay traffic is validated from endpoint status, not port accounting")
-				}
 				input, err := NewPlan(protocol)
 				if err != nil {
 					t.Fatal(err)
@@ -51,7 +48,7 @@ func TestEveryPresetHasIndependentAccounting(t *testing.T) {
 				if len(plan.Ports) != 2 {
 					t.Fatalf("ports: %+v", plan.Ports)
 				}
-				if (engine == core.EngineXray || engine == core.EngineSingBox) && !protocol.UsesWireGuard && !protocol.UsesEndpoint {
+				if engine == core.EngineXray || engine == core.EngineSingBox {
 					files, err := SplitConfigFiles(engine, plan.Content)
 					if err != nil || len(files) != 3 {
 						t.Fatalf("preset must have common + two paired files: %+v %v", files, err)
@@ -59,11 +56,12 @@ func TestEveryPresetHasIndependentAccounting(t *testing.T) {
 					for i, port := range plan.Ports {
 						var fragment struct {
 							Inbounds  []map[string]any `json:"inbounds"`
+							Endpoints []map[string]any `json:"endpoints"`
 							Outbounds []struct {
 								Tag string `json:"tag"`
 							} `json:"outbounds"`
 						}
-						if err := json.Unmarshal([]byte(files[i+1].Content), &fragment); err != nil || len(fragment.Inbounds) != 1 || len(fragment.Outbounds) == 0 {
+						if err := json.Unmarshal([]byte(files[i+1].Content), &fragment); err != nil || len(fragment.Inbounds)+len(fragment.Endpoints) != 1 || len(fragment.Outbounds) == 0 {
 							t.Fatalf("missing paired exit: %s %v", files[i+1].Content, err)
 						}
 						var tags []string

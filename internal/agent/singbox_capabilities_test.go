@@ -21,13 +21,39 @@ func TestValidateSingBoxCapabilitiesChecksVersionAndTags(t *testing.T) {
 	if err := validateSingBoxCapabilities(context.Background(), binary, content); err == nil {
 		t.Fatal("accepted WireGuard endpoint on old sing-box")
 	}
-	write("'sing-box version 1.11.0'; printf '%s\\n' 'Tags: with_wireguard'")
+	write("'sing-box version 1.11.0'; printf '%s\\n' 'Tags: with_wireguard,with_gvisor'")
 	if err := validateSingBoxCapabilities(context.Background(), binary, content); err != nil {
 		t.Fatalf("rejected supported WireGuard build: %v", err)
 	}
 	write("'sing-box version 1.11.0'; printf '%s\\n' 'Tags: with_gvisor'")
 	if err := validateSingBoxCapabilities(context.Background(), binary, content); err == nil {
 		t.Fatal("accepted WireGuard endpoint without with_wireguard")
+	}
+}
+
+func TestValidateSingBoxCapabilitiesDefaultsAndExactTags(t *testing.T) {
+	for _, test := range []struct {
+		name, content, output string
+		allowed               bool
+	}{
+		{"WireGuard default stack", `{"endpoints":[{"type":"wireguard"}]}`, "sing-box version 1.11.0\nTags: with_wireguard", false},
+		{"OpenVPN default stack", `{"endpoints":[{"type":"openvpn-server"}]}`, "sing-box version 1.14.0\nTags: with_openvpn", false},
+		{"explicit system stack", `{"endpoints":[{"type":"wireguard","system":true}]}`, "sing-box version 1.11.0\nTags: with_wireguard", true},
+		{"tag suffix", `{"endpoints":[{"type":"wireguard"}]}`, "sing-box version 1.11.0\nTags: with_wireguard_disabled,with_gvisor", false},
+		{"gvisor suffix", `{"endpoints":[{"type":"wireguard"}]}`, "sing-box version 1.11.0\nTags: with_wireguard,with_gvisor_disabled", false},
+		{"tag outside Tags line", `{"endpoints":[{"type":"wireguard"}]}`, "sing-box version 1.11.0\nTags: with_gvisor\nRevision: with_wireguard", false},
+		{"invalid system flag", `{"endpoints":[{"type":"wireguard","system":"false"}]}`, "sing-box version 1.14.0\nTags: with_wireguard,with_gvisor", false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			binary := filepath.Join(t.TempDir(), "sing-box")
+			if err := os.WriteFile(binary, []byte("#!/bin/sh\nprintf '%s\\n' '"+test.output+"'\n"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			err := validateSingBoxCapabilities(context.Background(), binary, test.content)
+			if (err == nil) != test.allowed {
+				t.Fatalf("allowed=%v, error=%v", test.allowed, err)
+			}
+		})
 	}
 }
 

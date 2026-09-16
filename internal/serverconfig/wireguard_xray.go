@@ -29,8 +29,19 @@ func parseXrayWireGuardInbound(inbound map[string]any) (Input, bool) {
 			return Input{}, false
 		}
 	}
-	if intValue(peer["level"]) != 0 || intValue(peer["keepAlive"]) != 0 {
+	level, validLevel := wireGuardConfigInteger(peer["level"])
+	keepalive, validKeepalive := wireGuardConfigInteger(peer["keepAlive"])
+	port, validPort := wireGuardConfigInteger(inbound["port"])
+	mtu, validMTU := wireGuardConfigInteger(settings["mtu"])
+	if !validLevel || level != 0 || !validKeepalive || keepalive != 0 || !validPort || !validMTU {
 		return Input{}, false
+	}
+	for _, key := range []string{"preSharedKey", "email"} {
+		if value, exists := peer[key]; exists {
+			if _, ok := value.(string); !ok {
+				return Input{}, false
+			}
+		}
 	}
 	rawAddresses, ok := peer["allowedIPs"].([]any)
 	addresses := stringSliceValue(peer["allowedIPs"])
@@ -38,9 +49,9 @@ func parseXrayWireGuardInbound(inbound map[string]any) (Input, bool) {
 		return Input{}, false
 	}
 	input := Input{
-		Protocol: ProtocolWireGuard, Tag: stringValue(inbound["tag"]), Listen: stringValue(inbound["listen"]), Port: intValue(inbound["port"]), Transport: "raw", Username: stringValue(peer["email"]),
+		Protocol: ProtocolWireGuard, Tag: stringValue(inbound["tag"]), Listen: stringValue(inbound["listen"]), Port: port, Transport: "raw", Username: stringValue(peer["email"]),
 		WireGuardServerPrivateKey: stringValue(settings["secretKey"]), WireGuardServerPublicKey: wireguardServerPublic(stringValue(settings["secretKey"])),
-		WireGuardClientPublicKey: stringValue(peer["publicKey"]), WireGuardPresharedKey: stringValue(peer["preSharedKey"]), WireGuardClientAddress: strings.Join(addresses, ","), WireGuardMTU: intValue(settings["mtu"]),
+		WireGuardClientPublicKey: stringValue(peer["publicKey"]), WireGuardPresharedKey: stringValue(peer["preSharedKey"]), WireGuardClientAddress: strings.Join(addresses, ","), WireGuardMTU: mtu,
 	}
 	if input.WireGuardMTU == 0 {
 		input.WireGuardMTU = 1420

@@ -18,7 +18,14 @@ func wireguardClientConfig(input Input, address string) (string, error) {
 	addresses := splitWireGuardList(input.WireGuardClientAddress)
 	routes := splitWireGuardList(input.WireGuardAllowedIPs)
 	if len(routes) == 0 {
-		routes = []string{"0.0.0.0/0", "::/0"}
+		for _, address := range addresses {
+			ip, _, _ := net.ParseCIDR(address)
+			if ip.To4() != nil {
+				routes = append(routes, "0.0.0.0/0")
+			} else {
+				routes = append(routes, "::/0")
+			}
+		}
 	}
 	var b strings.Builder
 	b.WriteString("[Interface]\nPrivateKey = " + input.WireGuardClientPrivateKey + "\nAddress = " + strings.Join(addresses, ", ") + "\nMTU = " + strconv.Itoa(input.WireGuardMTU) + "\n\n[Peer]\nPublicKey = " + serverPub + "\n")

@@ -43,7 +43,7 @@ export function createPresetView({ state, can, esc, engineName, shell }) {
       : selectedProtocolKey === "sudoku"
         ? sudokuProtocolOptions(plan)
         : protocol?.uses_wireguard
-          ? wireguardProtocolOptions(plan)
+          ? wireguardProtocolOptions(plan, protocol.uses_endpoint)
         : "";
   const vlessEncryptionOptions = protocol?.uses_vless_encryption
     ? `<div class="plan-fields one"><label class="secret-input">服务端 VLESS Decryption<span class="secret-value-control"><input type="password" name="vless_decryption" required value="${esc(plan.vless_decryption || "")}" autocomplete="off"><button type="button" data-secret-visibility>显示</button></span><small>由 xray vlessenc 兼容算法生成的 X25519 私有值；只写入服务端，客户端配置不得包含。</small></label><label>客户端 VLESS Encryption<input name="vless_encryption" required value="${esc(plan.vless_encryption || "")}"><small>由服务端 Decryption 自动推导的公开值；分享链接的 encryption 参数使用此值。</small></label></div>`
