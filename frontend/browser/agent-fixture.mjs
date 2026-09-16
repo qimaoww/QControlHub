@@ -227,6 +227,12 @@ if (mode.startsWith("bbr")) {
       qdiscs: [{ device: "eth0", kind: "mq", root: true }, { device: "eth0", kind: "fq_codel", parent: "1:1", handle: "0:" }],
     } },
   }));
+  if (mode === "bbr-preview") {
+    testAPI.settings = { panel_name: "QControlHub" };
+    testAPI.agents.forEach((agent, index) => {
+      agent.name = ["香港 · HK-01", "新加坡 · SG-02", "东京 · JP-03", "美国 · US-04"][index];
+    });
+  }
   location.hash = "#system-bbr";
 }
 
@@ -358,6 +364,10 @@ window.fetch = async (input, options = {}) => {
   if (method === "GET" && path === "/agents" && testAPI.agentsFailure) return json({error:"temporary runtime failure"},503);
   if (method === "GET" && path === "/agents") {
     if (testAPI.agentsGate) await testAPI.agentsGate;
+    if (mode === "bbr-preview") {
+      for (const agent of testAPI.agents)
+        if (agent.status === "online") agent.metrics.bbr.collected_at = new Date().toISOString();
+    }
     return json(mode === "empty" ? [] : testAPI.agents);
   }
   if (method === "GET" && path === "/core-logs" && (mode === "logs" || mode === "logs-restore")) {

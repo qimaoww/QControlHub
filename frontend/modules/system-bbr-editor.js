@@ -1,6 +1,11 @@
 import { bindEvent } from "./refresh.js";
-import { validateTCPSelection, systemBBRState, systemBBRActions, actionLabel, dialogID } from "./system-bbr-model.js";
+import { hasTCPParameter, validateTCPAvailability, validateTCPSelection, systemBBRState, systemBBRActions, actionLabel, dialogID } from "./system-bbr-model.js";
+import { prepareTCPPreset } from "./system-bbr-presets.js";
 export function createSystemBBREditor({ api, state, can, notify, confirmAction }, { lifecycle, editable, render, systemBBR }) {
+  const writable = (agent) => agent && state.route === "system-bbr" && lifecycle.accountData === state.data
+    && editable(agent) && systemBBRState(agent).controllable && !lifecycle.submitting.has(agent.id)
+    && !["pending", "running"].includes(lifecycle.localTasks.get(agent.id)?.status);
+
   function editorError(agentID, message) {
     lifecycle.editorErrors.set(agentID, message);
     const dialog = document.getElementById(dialogID(agentID, "editor"));
@@ -72,16 +77,18 @@ export function createSystemBBREditor({ api, state, can, notify, confirmAction }
         if (input.value !== desired) input.value = desired;
       });
       const capture = () => {
+        if (!writable(agent) || state.confirmOpen) return;
         const draft = {};
         form.querySelectorAll("[data-tcp-selected]").forEach((checkbox) => {
           if (checkbox.checked) draft[checkbox.dataset.tcpSelected] = form.querySelector(`[data-tcp-value="${checkbox.dataset.tcpSelected}"]`).value;
+          checkbox.disabled = !hasTCPParameter(agent.metrics?.bbr?.parameters, checkbox.dataset.tcpSelected) && !checkbox.checked;
         });
         lifecycle.drafts[agent.id] = draft;
         editorError(agent.id, "");
         const draftLabel = document.querySelector(`[data-bbr-draft-label="${agent.id}"]`);
         if (draftLabel) draftLabel.hidden = !Object.keys(draft).length;
         const label = form.querySelector("[data-tcp-draft-status]");
-        if (label) label.textContent = `${Object.keys(draft).length} 项待提交 · 草稿已保留`;
+        if (label) label.textContent = `${Object.keys(draft).length} 项待应用`;
       };
       form.querySelectorAll("[data-tcp-value]").forEach((input) => {
         bindEvent(input, "input", () => {
@@ -94,10 +101,24 @@ export function createSystemBBREditor({ api, state, can, notify, confirmAction }
         });
       });
       form.querySelectorAll("[data-tcp-selected]").forEach((input) => bindEvent(input, "change", capture));
+      form.querySelectorAll("[data-tcp-preset]").forEach((button) => {
+        bindEvent(button, "click", () => {
+          const current = lifecycle.lastAgents?.find((entry) => entry.id === agent.id);
+          if (button.disabled || state.confirmOpen || !writable(current)) return;
+          try {
+            lifecycle.drafts[agent.id] = prepareTCPPreset(button.dataset.tcpPreset, lifecycle.rules, current.metrics?.bbr?.parameters, lifecycle.drafts[agent.id]);
+            lifecycle.editorErrors.delete(agent.id);
+            render(lifecycle.lastAgents);
+          } catch (error) {
+            editorError(agent.id, error.message);
+          }
+        });
+      });
       bindEvent(form.querySelector("[data-tcp-reset]"), "click", async () => {
-        const epoch = state.navigationEpoch;
+        if (!writable(agent) || state.confirmOpen) return;
+        const epoch = state.navigationEpoch, data = state.data;
         const accepted = !Object.keys(lifecycle.drafts[agent.id] || {}).length || await confirmAction("确定清空此节点未提交的 TCP 参数选择？已保存的系统配置不受影响。", "清空选择");
-        if (state.route !== "system-bbr" || epoch !== state.navigationEpoch) return;
+        if (data !== state.data || state.route !== "system-bbr" || epoch !== state.navigationEpoch) return;
         if (accepted) {
           delete lifecycle.drafts[agent.id];
           lifecycle.editorErrors.delete(agent.id);
@@ -109,6 +130,7 @@ export function createSystemBBREditor({ api, state, can, notify, confirmAction }
       });
       bindEvent(form, "submit", async (event) => {
         event.preventDefault();
+        if (!writable(agent) || state.confirmOpen) return;
         capture();
         try {
           const settings = validateTCPSelection(lifecycle.drafts[agent.id], lifecycle.rules);
@@ -121,7 +143,8 @@ export function createSystemBBREditor({ api, state, can, notify, confirmAction }
   }
 
   async function submitChange(agent, action, settings) {
-    if (!agent || !editable(agent) || !systemBBRActions.includes(action) || !systemBBRState(agent).controllable || lifecycle.submitting.has(agent.id) || ["pending", "running"].includes(lifecycle.localTasks.get(agent.id)?.status)) return;
+    agent = lifecycle.lastAgents?.find((entry) => entry.id === agent?.id);
+    if (!writable(agent) || state.confirmOpen || !systemBBRActions.includes(action)) return;
     lifecycle.submitting.add(agent.id);
     document.querySelectorAll("[data-bbr-action]").forEach((entry) => {
       if (entry.dataset.bbrAgent === agent.id) entry.disabled = true;
@@ -135,14 +158,21 @@ export function createSystemBBREditor({ api, state, can, notify, confirmAction }
         "net.ipv4.tcp_congestion_control": action === "enable-bbr" ? "bbr" : "cubic",
         "net.core.default_qdisc": "fq",
       };
-      const summary = Object.entries(changes).map(([key, value]) => `${key}: ${agent.metrics?.bbr?.parameters?.[key] || "未知"} → ${value}`).join("\n");
-      if (!(await confirmAction(`确定对「${agent.name}」应用以下系统参数？\n${summary}\n保存到 /etc/sysctl.d/90-qcontrolhub-bbr.conf；未选参数保持不变，不重启网络或重置现有连接、网卡队列。请确认这些值适合该节点。`, actionLabel(action)))) return;
+      validateTCPAvailability(changes, agent.metrics?.bbr?.parameters);
+      const baseline = Object.fromEntries(Object.keys(changes).map((key) => [key, agent.metrics.bbr.parameters[key].trim().replace(/\s+/g, " ")]));
+      const summary = Object.entries(changes).map(([key, value]) => `${key}: ${baseline[key]} → ${value}`).join("\n");
+      const bufferNote = Object.keys(changes).some((key) => /(?:rmem|wmem)/.test(key))
+        ? "\n缓冲区上限请结合节点内存与并发连接数评估。" : "";
+      if (!(await confirmAction(`应用到「${agent.name}」？\n${summary}\n\n仅修改以上参数，保存到 /etc/sysctl.d/90-qcontrolhub-bbr.conf。\n不重启网络，不重置现有连接或网卡队列。${bufferNote}`, actionLabel(action)))) return;
       if (data !== state.data || state.route !== "system-bbr" || epoch !== state.navigationEpoch) return;
       const current = lifecycle.lastAgents?.find((entry) => entry.id === agent.id);
       if (!editable(current) || !current || !systemBBRState(current).controllable || ["pending", "running"].includes(lifecycle.localTasks.get(agent.id)?.status)) {
         editorError(agent.id, "节点或任务状态已变化，请刷新核对后重新操作。");
         return;
       }
+      validateTCPAvailability(changes, current.metrics?.bbr?.parameters);
+      if (Object.keys(changes).some((key) => current.metrics.bbr.parameters[key].trim().replace(/\s+/g, " ") !== baseline[key]))
+        throw new Error("参数已变化，请核对当前值后重新确认。");
       const task = await api("/tasks", { method: "POST", body: JSON.stringify({
         agent_id: agent.id, action, engine: "", ...(settings ? { tcp_settings: settings } : {}),
       }) });
@@ -153,7 +183,7 @@ export function createSystemBBREditor({ api, state, can, notify, confirmAction }
         lifecycle.editorErrors.delete(agent.id);
         document.getElementById(dialogID(agent.id, "editor"))?.close();
       }
-      notify("TCP 调优任务已提交，等待 Agent 执行；实际参数以采集结果为准。");
+      notify("TCP 调优任务已提交，等待 Agent 执行。");
     } catch (error) {
       if (data === state.data) editorError(agent.id, error.message);
     } finally {

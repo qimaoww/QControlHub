@@ -75,7 +75,7 @@ remaining ten routes have the following focused owners:
 | Dashboard | `dashboard-model`, `dashboard-view`, `dashboard-bindings`; panel metrics keep their own lifecycle |
 | Settings | `settings-view`, `settings-bindings`; the route loads account-scoped settings |
 | Access control | `access-control-controller`, `access-control-view`, `access-control-bindings`, `access-control-dialog` |
-| System TCP/BBR | `system-bbr-model`, `system-bbr-view`, `system-bbr-editor` |
+| System TCP/BBR | `system-bbr-model`, `system-bbr-view`, `system-bbr-editor`, `system-bbr-presets` |
 | Client access | `client-access-model`, `client-access-view`, `client-access-results`, `client-access-bindings`, `client-access-profiles`, `client-clipboard` |
 | SubStore | `substore-model`, `substore-view`, `substore-bindings`, `substore-selections`, `substore-targets` |
 | Tasks | `task-model`, `task-view`, `task-timeline`, `task-bindings` |
@@ -96,7 +96,13 @@ Preserve these lifecycle boundaries:
   keep their original account, draft, and connected-element guards.
 - System TCP loading and editing share the same task map, drafts, pending
   submissions, errors, and account identity. Account changes reset them in the
-  route before loading.
+  route before loading. `system-bbr-presets` owns the preset catalog and pure
+  draft preparation. It validates every preset field against the server rules
+  and reported parameter availability before merging into a fresh draft;
+  unrelated selections remain intact. The editor retains confirmation and
+  submission through the existing `configure-tcp` workflow. Before submission,
+  it rechecks selected parameters against the confirmed baseline; missing or
+  changed values retain the draft and require another confirmation.
 - SubStore loading and selection/target actions share one account-scoped
   record, including the current target and pending selection-save promise.
 - Traffic keeps one interaction gate and one deferred render at the route.
