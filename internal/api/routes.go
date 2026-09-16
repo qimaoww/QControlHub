@@ -18,6 +18,11 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/overview", s.requirePermission(core.PermissionOverviewRead, http.HandlerFunc(s.overview)))
 	mux.Handle("GET /api/v1/panel-metrics", s.requirePermission(core.PermissionPanelMetricsRead, http.HandlerFunc(s.getPanelMetrics)))
 	mux.Handle("GET /api/v1/agents", s.requirePermission(core.PermissionAgentsRead, http.HandlerFunc(s.listAgents)))
+	mux.Handle("GET /api/v1/ip-quality", s.requirePermission(core.PermissionAgentsRead, http.HandlerFunc(s.ipQualityHistory)))
+	mux.Handle("POST /api/v1/ip-quality", s.requireAllPermissions(
+		[]core.Permission{core.PermissionAgentsManage, core.PermissionTasksExecute}, http.HandlerFunc(s.createIPQualityCheck)))
+	mux.Handle("PUT /api/v1/ip-quality/schedules/{id}", s.requireAllPermissions(
+		[]core.Permission{core.PermissionAgentsManage, core.PermissionTasksExecute}, http.HandlerFunc(s.putIPQualitySchedule)))
 	mux.Handle("GET /api/v1/agent-access", s.requireAllPermissions(nil, http.HandlerFunc(s.getOwnAgentAccess)))
 	mux.Handle("GET /api/v1/agent-directory", s.requirePermission(core.PermissionAgentsRead, http.HandlerFunc(s.listAgentDirectory)))
 	mux.Handle("POST /api/v1/agent-access/{id}/response", s.requireAllPermissions(nil, http.HandlerFunc(s.respondAgentShare)))

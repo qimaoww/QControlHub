@@ -25,7 +25,7 @@ function shell(content, title, { viewKey = state.route } = {}) {
   ];
   const linkPermissions = {
     dashboard: "overview.read",
-    "ip-quality": "overview.read",
+    "ip-quality": "agents.read",
     agents: "agents.read",
     "node-settings": "agents.read",
     "client-access": "client-access.read",

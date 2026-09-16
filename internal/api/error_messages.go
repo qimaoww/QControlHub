@@ -10,6 +10,10 @@ import (
 // Translate at the HTTP boundary: internal errors remain stable for errors.Is,
 // agent diagnostics and logs. Never expose an unknown internal error verbatim.
 var errorMessages = map[string]string{
+	"IPQuality requires agents.manage and tasks.execute":                                                      "IP 质量检测需要节点管理和任务执行权限。",
+	"date must use YYYY-MM-DD":                                                                                "检测日期须使用 YYYY-MM-DD 格式。",
+	"date must be a valid YYYY-MM-DD":                                                                         "检测日期无效，请选择有效的年月日。",
+	"timezone must be an IANA time zone":                                                                      "检测时区须为有效的 IANA 时区，例如 Asia/Shanghai。",
 	"automatic installation is only supported when adding an inbound":                                         "仅增加入站时可自动安装内核。",
 	"upgrade the Agent before automatically installing a stable core with an inbound":                         "请先在节点设置升级 Agent，再使用增加入站时自动安装稳定版。",
 	"automatic installation requires an exact configuration revision and validate or deploy intent":           "自动安装必须绑定已保存的配置版本，并选择校验或部署。",

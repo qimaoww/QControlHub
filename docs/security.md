@@ -10,6 +10,26 @@ BBR / TCP 调优同时需要 `agents.manage` 和 `tasks.execute`，读取状态�
 
 systemd helper 保留 `ProtectSystem=strict`、`NoNewPrivileges`，仅有 `CAP_NET_ADMIN`，整个 `/proc/sys` 只读，只放行本次选中的固定参数文件和 `/etc/sysctl.d`。使用受保护的 Agent 本身执行固定 utility，无 shell、无任意命令。它有独立超时和跨进程锁，不改变常驻 Agent 的服务单元。OpenRC 复用相同校验和事务，遵循宿主机权限。常规失败恢复原参数和原托管文件；强制杀进程/掉电不保证回滚完成，需核对实际状态。
 
+### IP 质量检测边界
+
+IPQuality 仅由有节点管理权且同时具备 `agents.manage`、`tasks.execute` 的身份
+显式提交或开启每日计划，读取需要 `agents.read`；共享不授予报告或主机检测权限。
+通用任务创建/重试同样校验，旧 Agent 必须先声明 `ip-quality-v1`。计划默认关闭，
+每次调度从数据库重新核验当前账号及节点权限；账号永久删除时计划一起删除。
+报告与计划沿用管理员隐藏规则，完整报告不出现在普通任务列表。
+
+Agent 下载固定修订的 [xykt/IPQuality](https://github.com/xykt/IPQuality)，
+验证 SHA-256 后以固定参数在私有临时目录运行，不接受面板提供的 shell、脚本 URL、
+路径或代理参数，不自动安装依赖。报告有结构、大小、地址族和文件类型校验，
+运行超时终止进程组；辅助资源同样指向固定修订，子进程不继承敏感环境。
+这些措施不是不可信程序沙箱：上游脚本继承 Agent 当前身份及平台隔离，
+本功能不增加权限，也不弱化现有 systemd 限制，OpenRC 的主机边界仍较弱。
+
+隐私模式不上传在线分享报告，但仍访问第三方 IP、媒体、邮件、DNS 及统计服务；
+完整出口 IP 和供应商结果会保存于数据库及 Agent 的私有重传缓存。
+供应商不可用、未知值和单项失败不能当作安全结论。执行、许可、依赖、保留期限及
+schema 62 升级/回滚要求见 [IP 质量检测](ip-quality.md)。
+
 ### 管理 API
 
 - `/api/v1/*` 要求 `Authorization: Bearer <QCH_ADMIN_TOKEN>`。

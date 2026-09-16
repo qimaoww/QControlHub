@@ -87,6 +87,7 @@ func (s *Store) RunningTask(ctx context.Context, agentID string) (*core.Task, er
 	}
 	if (isMihomoMirrorTask(task) && !containsFeature(features, core.AgentFeatureMihomoDevelopmentSource)) ||
 		(task.Action.SystemBBR() && !containsFeature(features, core.AgentFeatureSystemBBR)) ||
+		(task.Action == core.ActionIPQuality && !containsFeature(features, core.AgentFeatureIPQuality)) ||
 		(task.InstallIfMissing && !containsFeature(features, core.AgentFeaturePresetAutoInstall)) {
 		message := "Agent no longer advertises mihomo-development-source-v1; the mirror development task cannot be safely resumed and it is unknown whether the previous Agent executed it before the connection was lost"
 		if task.Action.SystemBBR() {
@@ -94,6 +95,9 @@ func (s *Store) RunningTask(ctx context.Context, agentID string) (*core.Task, er
 		}
 		if task.InstallIfMissing {
 			message = "Agent no longer advertises preset-auto-install-v1; automatic installation cannot safely resume and previous execution before disconnect is unknown"
+		}
+		if task.Action == core.ActionIPQuality {
+			message = "Agent no longer advertises ip-quality-v1; the IP quality check cannot safely resume and previous execution before disconnect is unknown"
 		}
 		if _, updateErr := tx.Exec(ctx, `
 			UPDATE tasks SET status='failed', error=$2, finished_at=now(), config_content=NULL, lease_id=NULL
@@ -165,13 +169,14 @@ func (s *Store) ClaimTask(ctx context.Context, agentID string) (*core.Task, erro
 			  AND ($4::boolean OR t.action NOT IN ('enable-bbr','disable-bbr','configure-tcp'))
               AND ($5::boolean OR t.cnip_source IS NULL)
 			  AND ($6::boolean OR NOT t.install_if_missing)
+			  AND ($7::boolean OR t.action<>'ip-quality')
 			ORDER BY t.created_at ASC FOR UPDATE OF t SKIP LOCKED LIMIT 1
 		)
 		UPDATE tasks t SET status='running',started_at=now(),attempt=attempt+1,lease_id=$2
 		FROM next_task n WHERE t.id=n.id
 		RETURNING t.id,t.agent_id,t.action,t.engine,COALESCE(t.config_id,''),COALESCE(t.config_version,0),
 		          COALESCE(t.config_content,''),COALESCE(t.mainland_access_policies,'[]'::jsonb),COALESCE(t.core_version,''),COALESCE(t.core_source,''),t.status,t.attempt,COALESCE(t.lease_id,''),COALESCE(t.output,''),COALESCE(t.error,''),
-		          t.created_at,t.started_at,t.finished_at,t.tcp_settings,t.shared_traffic_id,t.cnip_source,t.install_if_missing`, agentID, leaseID, mirrorSupported, containsFeature(features, core.AgentFeatureSystemBBR), containsFeature(features, core.AgentFeatureCNIPSource), containsFeature(features, core.AgentFeaturePresetAutoInstall))
+		          t.created_at,t.started_at,t.finished_at,t.tcp_settings,t.shared_traffic_id,t.cnip_source,t.install_if_missing`, agentID, leaseID, mirrorSupported, containsFeature(features, core.AgentFeatureSystemBBR), containsFeature(features, core.AgentFeatureCNIPSource), containsFeature(features, core.AgentFeaturePresetAutoInstall), containsFeature(features, core.AgentFeatureIPQuality))
 	task, err := scanTask(row, true)
 	if err == nil {
 		if configErr := s.openExecutionConfig(&task); configErr != nil {
@@ -213,7 +218,7 @@ func (s *Store) RequeueStaleTasks(ctx context.Context, age, installAge time.Dura
 	if installAge < age {
 		installAge = age
 	}
-	args := []any{intervalString(age), intervalString(installAge), maxAttempts}
+	args := []any{intervalString(age), intervalString(installAge), maxAttempts, intervalString(core.IPQualityLeaseTimeout)}
 	where := workspaceOwnerClause(ctx, "owner_id", &args)
 	_, err := s.pool.Exec(ctx, `
 		UPDATE tasks SET
@@ -223,7 +228,7 @@ func (s *Store) RequeueStaleTasks(ctx context.Context, age, installAge time.Dura
 			started_at=CASE WHEN attempt >= $3 THEN started_at ELSE NULL END,
 			config_content=CASE WHEN attempt >= $3 THEN NULL ELSE config_content END,
 			lease_id=NULL
-		WHERE status='running' AND started_at < now() - CASE WHEN action='install' OR install_if_missing THEN $2::interval ELSE $1::interval END`+where,
+		WHERE status='running' AND started_at < now() - CASE WHEN action='ip-quality' THEN GREATEST($1::interval,$4::interval) WHEN action='install' OR install_if_missing THEN $2::interval ELSE $1::interval END`+where,
 		args...)
 	return err
 }

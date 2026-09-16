@@ -54,6 +54,9 @@
 | `GET` / `PUT` | `/api/v1/users/{id}/agent-access` | 读取 / 保存 Agent 分配，仅管理员 |
 | `GET` / `PUT` | `/api/v1/agents/{id}/sharing` | 所有者按准确用户名读取 / 保存共享端口及累计额度，携带 revision（agents.manage） |
 | `GET` | `/api/v1/agents` | 列出未撤销 Agent；每项内联 `region_code`（手动设置优先，否则为自动识别结果），列表视图无需逐节点查询地区 |
+| `GET` | `/api/v1/ip-quality?date=YYYY-MM-DD&timezone=Asia/Shanghai` | 指定本地提交日每节点最新一次 IP 检测，以及当前计划（agents.read） |
+| `POST` | `/api/v1/ip-quality` | 为 `agent_id` 提交真实 IPQuality 检测（agents.manage + tasks.execute） |
+| `PUT` | `/api/v1/ip-quality/schedules/{id}` | 按 `{"enabled":true}` / `false` 开关节点每日检测（agents.manage + tasks.execute） |
 | `GET` | `/api/v1/system-tcp/parameters` | BBR / TCP 调优字段与取值范围（agents.read） |
 | `GET` | `/api/v1/system-tcp/tasks` | 每个节点最新的 TCP 调优任务（tasks.read，可按 agent_id 筛选） |
 | `DELETE` | `/api/v1/agents/{id}` | 永久撤销 Agent、立即断开 WSS 并终止其未完成任务 |
@@ -144,6 +147,38 @@
 `GET /api/v1/agents` 已内联同一解析结果，因此节点网格、客户端卡片等列表视图不再逐节点调用 `GET /api/v1/agents/{id}/region`；该接口保留给单节点的旗帜详情，以及旧版控制面（响应中缺少 `region_code`）的前端回退路径。
 
 `GET /api/v1/overview` 中的 `configs` 只统计可在“配置档案”工作区跨节点下发的全局配置；`node_configs` 单独统计绑定到具体 Agent/内核的节点配置，避免将两类配置混为一个不可解释的总数。为兼容既有调用方，`tasks_pending` 仍表示 `pending + running` 的活动任务总数；`tasks_queued` 和 `tasks_running` 分别给出排队与执行中的精确数量。
+
+### IP 质量检测
+
+`GET /api/v1/ip-quality` 必须提供 `date=YYYY-MM-DD`，`timezone` 为 IANA
+时区、省略时为 `UTC`；非法日期/时区返回 `400`。响应为
+`{date, timezone, records:[], schedules:[]}`，空结果同样返回数组。
+按任务 `created_at` 在指定时区内的日期选择每个节点最新一次尝试，而不是按完成日
+或只选择成功任务。管理员隐藏、任务所有者及当前主机管理权在 SQL 查询中共同过滤；
+共享接收者不能读取主机检测报告。读取本身需要 `agents.read`，不要求执行权限。
+
+`records[]` 包含 `task_id`、`agent_id`、`status`、`created_at`、可选的
+`started_at` / `finished_at` / `error`；成功报告保存在
+`result.reports[]`，每个元素是保留上游字段及数据类型的 IPv4 或 IPv6 JSON 对象。
+失败或仍在执行的任务不带成功报告。普通 `/tasks` 响应不携带这些报告字节。
+`schedules[]` 包含 `agent_id`、`enabled`、`next_run_at`，表示当前计划，
+不随历史日期回溯。
+
+`POST /api/v1/ip-quality` 接受 `{"agent_id":"agt_…"}`，返回普通任务对象：
+创建为 `201`，复用同账号同节点的未完成检测为 `200` 且 `reused=true`。
+此入口与 `POST /api/v1/tasks` 的 `{"agent_id":"agt_…","action":"ip-quality"}`
+等价；重试也使用相同的权限和能力校验。需要 `agents.manage`、
+`tasks.execute` 及节点管理权；离线、缺少 `ip-quality-v1` 或其他账号已有活动检测
+返回 `409`。不接受代理内核、配置、安装、TCP 参数、URL 或自定义命令。
+
+`PUT /api/v1/ip-quality/schedules/{id}` 接受且必须提供布尔 `enabled`，
+返回该节点当前计划。每个节点只有一个计划，归最后设置者所有；默认关闭，
+启用后在节点在线且支持检测时尽快提交一次，随后按提交时间间隔 24 小时。
+重复启用不重置下一次时间；离线不补跑多个错过的日期。
+关闭不会取消已提交任务。调度器每次重检持久账号权限/角色及节点管理权，
+不使用旧角色快照；旧版低权限兼容令牌不能设置计划。写操作沿用 CSRF 和审计。
+依赖、数据解释、上游许可、隐私及 schema 62 回滚要求见
+[IP 质量检测](ip-quality.md)。
 
 ### 面板主机资源
 
@@ -364,7 +399,7 @@ Content-Type: application/json
 
 ### 列出任务
 
-任务列表筛选条件可组合使用。`agent_id` 接受完整 Agent ID；`status` 允许 `pending`、`running`、`succeeded`、`failed`、`canceled`；`action` 允许 `validate`、`deploy`、`import-existing`、`read-config`、`read-managed-config`、`start`、`stop`、`restart`、`status`、`install`。`limit` 默认为 100，最大为 500；无效的 `status` 或 `action` 返回 `400`。
+任务列表筛选条件可组合使用。`agent_id` 接受完整 Agent ID；`status` 允许 `pending`、`running`、`succeeded`、`failed`、`canceled`；`action` 允许 `validate`、`deploy`、`import-existing`、`read-config`、`read-managed-config`、`start`、`stop`、`restart`、`status`、`install`、`upgrade-agent`、`enable-bbr`、`disable-bbr`、`configure-tcp`、`ip-quality`。`limit` 默认为 100，最大为 500；无效的 `status` 或 `action` 返回 `400`。
 
 ### 创建任务
 
@@ -408,7 +443,7 @@ Content-Type: application/json
 }
 ```
 
-允许的 `action` 为 `validate`、`deploy`、`import-existing`、`read-config`、`read-managed-config`、`start`、`stop`、`restart`、`status`、`install`。Agent 必须在注册能力中声明对应内核。若心跳报告某内核检测到现有服务但无法安全映射，或 completed migration 在重启时不再满足原服务 inactive/disabled、托管服务 active/persistent-enabled 的完成态，控制面会对该内核的全部 action 返回 `409`，Agent 执行器也会独立拒绝已在途任务。`import-existing` 只接受该节点自己保存的可导入配置快照，并且只在 Agent 已精确识别、仍等待管理员确认的现有 Xray 或 sing-box 服务上执行；常规使用应从“手动配置”页的“可导入配置”视图提交。稳定版和自定义版本使用对应内核的官方 GitHub Release，不接受自定义 URL；某来源没有可用二进制时，对应任务失败而不会降级到另一来源或稳定版。
+内核级 `action` 为 `validate`、`deploy`、`import-existing`、`read-config`、`read-managed-config`、`start`、`stop`、`restart`、`status`、`install`。Agent 必须在注册能力中声明对应内核。若心跳报告某内核检测到现有服务但无法安全映射，或 completed migration 在重启时不再满足原服务 inactive/disabled、托管服务 active/persistent-enabled 的完成态，控制面会对该内核的全部 action 返回 `409`，Agent 执行器也会独立拒绝已在途任务。`import-existing` 只接受该节点自己保存的可导入配置快照，并且只在 Agent 已精确识别、仍等待管理员确认的现有 Xray 或 sing-box 服务上执行；常规使用应从“手动配置”页的“可导入配置”视图提交。稳定版和自定义版本使用对应内核的官方 GitHub Release，不接受自定义 URL；某来源没有可用二进制时，对应任务失败而不会降级到另一来源或稳定版。
 
 Mihomo `development` 安装额外接受 `core_source`，取值为 `official`（默认、推荐，省略该字段等价于 `official`）或 `mirror`（显式选择第三方 `vernesong/mihomo` Alpha 镜像）：
 
@@ -461,6 +496,18 @@ Agent 协议端点如下：
 | `GET` | `/agent/v1/connect` | Agent 签名的 WebSocket Upgrade |
 
 WSS 握手必须协商子协议 `qcontrolhub.agent.v1`。服务端先发送只含该节点端口流量策略的 `hello`；当前连接首次完整 `heartbeat` 声明 `managed-public-ip-probe-v1` 且成功持久化后，服务端才以独立的 `public_ip_probe` 消息下发公网探针配置。零配置时该消息按族携带有序 primary/fallback：IPv4 为 `https://api.ipify.org/`、`https://4.ident.me`，IPv6 为 `https://api6.ipify.org`、`https://6.ident.me`；自定义族 endpoint 会替换该族完整默认链，禁用配置则两族为空。服务端不会复用数据库中的历史 feature，并按当前会话与已配置地址族约束 `control-plane-config` 来源；空 feature、降级或重连会清除失效来源，旧 Agent 忽略未知 fallback 字段并至少使用 primary。Agent 定期发送 `heartbeat`，心跳包含内核运行状态、主机资源以及端口配额的收发计数和封禁状态；`runtime.<engine>.existing_config_available` 表示已有服务可在手动配置页读取并迁移，`existing_config_unsupported_reason` 表示检测到已有服务但精确 argv、路径、歧义或 wrapper 安全边界不允许自动读取/接管，控制面只展示该原因并禁用相关操作。服务端下发带随机 lease ID 的 `task`，Agent 返回包含 `success` 和结果正文的 `result`，服务端确认 `result_ack`。连接压缩关闭，服务端要求 50 秒内收到消息，官方 Agent 默认每 15 秒心跳并在断线后指数退避重连。
+
+### IPQuality 任务结果扩展
+
+声明 `ip-quality-v1` 的 Agent 可以接收 `action="ip-quality"`、
+`engine=""` 的任务；旧 Agent 不会领取或恢复该动作。检测最多 10 分钟，
+重试租约至少 12 分钟，连接心跳不因检测停止。
+Agent 在 `result.result.ip_quality.reports` 发送一至两个上游 JSON 对象，
+结构化结果总上限 128 KiB；各对象必须有完整公网 IP 的 `Head` 及对象类型的
+`Info`、`Type`、`Score`、`Factor`、`Media`、`Mail`，地址族不能重复。
+控制面再次验证后与任务状态原子保存，才发送 `result_ack`；
+仅设置 `success=true` 而没有有效报告会记为失败。Agent 的持久缓存支持断线/重启
+后复用报告并使用当前 lease ID 重传，不把报告塞入会截断的普通 `output`。
 
 ## Webhook 事件
 

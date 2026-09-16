@@ -13,7 +13,7 @@ CHECK_TARGETS := fmt-check module-policy-test pr-policy-test schema-policy-test 
 ALPINE_CHECK_TARGETS := fmt-check module-policy-test pr-policy-test schema-policy-test deploy-modules-check styles-check installer-test quick-start-test docs-check vet
 # Alpine leaves internal/agent out of the package sweep and runs the OpenRC and
 # lifecycle regressions instead; the upgrade sandbox job covers the rest.
-ALPINE_AGENT_TESTS := go test ./internal/agent -run 'OpenRC|PerServiceManager|AgentUpgrade|ManagedCorePrerequisites|SystemBBR'
+ALPINE_AGENT_TESTS := go test ./internal/agent -run 'OpenRC|PerServiceManager|AgentUpgrade|ManagedCorePrerequisites|SystemBBR|IPQuality'
 
 build:
 	mkdir -p bin

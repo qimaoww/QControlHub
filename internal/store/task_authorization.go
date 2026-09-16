@@ -22,7 +22,7 @@ func requireTaskPermission(ctx context.Context, executor storeExecutor, action c
 	if err := executor.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM panel_users
 		WHERE id=$1 AND (disabled OR (role<>'admin' AND
 			(NOT permissions ? $2 OR ($3::boolean AND NOT permissions ? 'agents.manage')))))`,
-		scopeForConfig(ctx).OwnerID, permission, action.SystemBBR()).Scan(&denied); err != nil {
+		scopeForConfig(ctx).OwnerID, permission, action.RequiresAgentManagement()).Scan(&denied); err != nil {
 		return err
 	}
 	if denied {

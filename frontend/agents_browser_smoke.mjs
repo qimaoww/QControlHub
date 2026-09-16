@@ -27,7 +27,7 @@ const server = createServer(async (request, response) => {
     const path = url.pathname;
     if (process.env.QCH_BROWSER_SMOKE_DEBUG) process.stderr.write(`${path}\n`);
     if (path === "/" || path === "/agents-browser-smoke.html") {
-      if (url.searchParams.get("mode")?.startsWith("dashboard"))
+      if (url.searchParams.get("mode")?.startsWith("dashboard") || url.searchParams.get("mode")?.startsWith("ip-quality"))
         response.setHeader("Content-Security-Policy", productionCSP);
       response.writeHead(200, { "Content-Type": mime(".html") });
       response.end(html);
@@ -245,7 +245,7 @@ async function runMode(mode) {
   try {
     await chmod(profile, 0o700);
     const url = `http://127.0.0.1:${address.port}/agents-browser-smoke.html?mode=${mode}#node-settings`;
-    const mobile = ["config-inbounds-mobile", "substore-scope", "users-mobile", "users-layout-mobile", "sharing-mobile", "shared-node-mobile", "enrollment-mobile", "client-order-mobile", "dashboard-mobile", "bbr-mobile"].includes(mode);
+    const mobile = ["config-inbounds-mobile", "substore-scope", "users-mobile", "users-layout-mobile", "sharing-mobile", "shared-node-mobile", "enrollment-mobile", "client-order-mobile", "dashboard-mobile", "bbr-mobile", "ip-quality-mobile"].includes(mode);
     const initialURL = mobile ? "about:blank" : url;
     child = spawn(
       chrome,
@@ -314,7 +314,7 @@ async function runMode(mode) {
 }
 
 try {
-  const modes = process.env.QCH_BROWSER_SMOKE_MODES || process.env.QCH_BROWSER_SMOKE_MODE || "admin,empty,enrollment,enrollment-mobile,readonly,ports,client-order,client-order-mobile,dashboard,dashboard-mobile,dashboard-readonly,dashboard-limited,dashboard-unavailable,regions,logs,logs-restore,bbr,bbr-mobile,bbr-readonly,bbr-writeonly,config-restrictions,config-inbounds,config-inbounds-mobile,config-migration,config-scope,substore-scope,users,users-mobile,users-layout,users-layout-mobile,sharing,sharing-mobile,shared-node,shared-node-mobile,config-layout,traffic-layout,capabilities-settings,capabilities-settings-readonly,presets";
+  const modes = process.env.QCH_BROWSER_SMOKE_MODES || process.env.QCH_BROWSER_SMOKE_MODE || "admin,empty,enrollment,enrollment-mobile,readonly,ports,client-order,client-order-mobile,dashboard,dashboard-mobile,dashboard-readonly,dashboard-limited,dashboard-unavailable,regions,logs,logs-restore,bbr,bbr-mobile,bbr-readonly,bbr-writeonly,config-restrictions,config-inbounds,config-inbounds-mobile,config-migration,config-scope,substore-scope,users,users-mobile,users-layout,users-layout-mobile,sharing,sharing-mobile,shared-node,shared-node-mobile,config-layout,traffic-layout,capabilities-settings,capabilities-settings-readonly,presets,ip-quality,ip-quality-mobile,ip-quality-readonly";
   for (const mode of modes.split(",")) await runMode(mode);
   process.stdout.write("agents browser runtime smoke passed\n");
 } finally {

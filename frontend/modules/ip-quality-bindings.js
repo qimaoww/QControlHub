@@ -1,28 +1,24 @@
-export function createIPQualityBindings({ state, render, load }) {
+import { bindEvent } from "./refresh.js";
+import { ipQualityToday, nextIPQualityDay } from "./ip-quality-model.js";
+
+export function createIPQualityBindings({ state, load, runCheck, setSchedule }) {
   return () => {
-    const localDate = (date) => [date.getFullYear(), String(date.getMonth() + 1).padStart(2, "0"), String(date.getDate()).padStart(2, "0")].join("-");
-    const today = localDate(new Date());
     const input = document.querySelector("[data-ip-quality-date]");
-    input?.addEventListener("change", () => {
-      const value = input.value;
-      if (!value) return;
-      state.data.ipQualityDate = value;
-      void load(value);
-    });
+    bindEvent(input, "change", () => { void load(input.value); });
     document.querySelectorAll("[data-ip-quality-day]").forEach((button) => {
-      button.addEventListener("click", () => {
-        const current = state.data.ipQualityDate || input?.value;
-        if (!current) return;
-        const next = new Date(`${current}T00:00:00`);
-        next.setDate(next.getDate() + Number(button.dataset.ipQualityDay || 0));
-        const value = localDate(next);
-        if (value > today) return;
-        state.data.ipQualityDate = value;
-        void load(value);
+      bindEvent(button, "click", () => {
+        const date = nextIPQualityDay(state.data.ipQualityDate, Number(button.dataset.ipQualityDay));
+        if (date && date <= ipQualityToday()) void load(date);
       });
     });
-    document.querySelector("[data-ip-quality-refresh]")?.addEventListener("click", () => {
-      void load(state.data.ipQualityDate, { force: true });
+    bindEvent(document.querySelector("[data-ip-quality-refresh]"), "click", () => { void load(); });
+    document.querySelectorAll("[data-ip-quality-run]").forEach((button) => {
+      bindEvent(button, "click", () => { if (!button.disabled) void runCheck(button.dataset.ipQualityRun); });
+    });
+    document.querySelectorAll("[data-ip-quality-schedule]").forEach((button) => {
+      bindEvent(button, "click", () => {
+        if (!button.disabled) void setSchedule(button.dataset.ipQualitySchedule, button.dataset.enabled !== "true");
+      });
     });
   };
 }

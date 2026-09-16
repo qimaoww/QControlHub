@@ -90,9 +90,24 @@ func (c *Client) resultForTask(ctx context.Context, task core.Task) core.TaskRes
 	execute := c.executeFunc
 	var output string
 	var executionErr error
+	var ipQuality *core.IPQualityResult
 	preparedLogTransition := false
 	if c.upgradePending {
 		executionErr = errors.New("Agent upgrade is waiting for restart; retry after the new Agent reconnects")
+	} else if task.Action == core.ActionIPQuality {
+		check := c.ipQualityFunc
+		if check == nil {
+			check = runIPQuality
+		}
+		report, err := check(ctx)
+		if err == nil {
+			report, err = core.NormalizeIPQualityResult(&report)
+		}
+		executionErr = err
+		if err == nil {
+			ipQuality = &report
+			output = "IPQuality check completed"
+		}
 	} else if task.Action.SystemBBR() {
 		output, executionErr = c.bbr.Execute(ctx, task.Action, task.TCPSettings)
 	} else if task.Action == core.ActionUpgradeAgent {
@@ -169,6 +184,7 @@ func (c *Client) resultForTask(ctx context.Context, task core.Task) core.TaskRes
 	}
 	result := core.TaskResultRequest{
 		LeaseID: task.LeaseID, Success: executionErr == nil, Output: output,
+		IPQuality: ipQuality,
 	}
 	if executionErr != nil {
 		result.Error = executionErr.Error()
@@ -258,6 +274,7 @@ func (c *Client) cachedTaskResult(task core.Task) (core.TaskResultRequest, bool)
 	}
 	return core.TaskResultRequest{
 		LeaseID: task.LeaseID, Success: cached.Success, Output: cached.Output, Error: cached.Error,
+		IPQuality: cached.IPQuality,
 	}, true
 }
 
@@ -280,6 +297,10 @@ func (c *Client) rememberTaskResult(taskID string, result core.TaskResultRequest
 	c.creds.CompletedTasks[taskID] = completedTask{
 		Success: result.Success, Output: limitStateValue(result.Output, 4<<10),
 		Error: limitStateValue(result.Error, 2<<10), CompletedAt: time.Now().UTC(),
+		IPQuality: result.IPQuality,
+	}
+	if err := c.boundCompletedTaskCache(taskID); err != nil {
+		return err
 	}
 	return saveCredentials(c.config.StatePath, c.creds)
 }
@@ -309,7 +330,7 @@ func (c *Client) validTask(task core.Task) bool {
 	if task.Action.AgentLevel() {
 		engineValid = task.Engine == ""
 	}
-	if task.Action.SystemBBR() && (task.ConfigID != "" || task.ConfigContent != "" || task.CoreVersion != "" || task.CoreSource != "" || len(task.MainlandAccessPolicies) != 0) {
+	if task.Action.RequiresAgentManagement() && (task.ConfigID != "" || task.ConfigContent != "" || task.CoreVersion != "" || task.CoreSource != "" || len(task.MainlandAccessPolicies) != 0 || task.SharedTrafficID != "" || task.CNIPSource != nil) {
 		return false
 	}
 	return task.AgentID == c.creds.AgentID && validTaskID(task.ID) && len(task.LeaseID) >= 32 &&
