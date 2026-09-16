@@ -71,6 +71,8 @@ func buildMihomoClientYAML(input Input, address, serverName, name string) (strin
 			}
 			proxy["obfs-opts"] = opts
 		}
+	case ProtocolTailscale, ProtocolOpenVPNServer:
+		return "", errors.New("该服务端端点没有 Mihomo 出站等价物")
 	default:
 		return "", errors.New("该协议不支持 Mihomo 同步格式")
 	}

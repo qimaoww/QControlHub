@@ -6,7 +6,7 @@ const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (char) =>
 // outbounds (which include exits paired with individual JSON files) must not be
 // presented as common-only mutations. They remain in the source/advanced editor.
 export function commonConfigFields(engine, fields) {
-  const structural = new Set(["inbounds", "listeners", "servers", "shadowsocks", "outbounds"]);
+  const structural = new Set(["inbounds", "endpoints", "listeners", "servers", "shadowsocks", "outbounds"]);
   if (engine === "mihomo") {
     for (const key of ["port", "socks-port", "redir-port", "tproxy-port", "mixed-port",
       "ss-config", "vmess-config", "tunnels", "tun", "tuic-server"]) structural.add(key);

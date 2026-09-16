@@ -110,7 +110,18 @@ func explicitlyEmptyProxyConfig(engine core.Engine, root map[string]any) bool {
 			}
 		}
 	case core.EngineSingBox:
-		listKey, allowed = "inbounds", "$schema log dns ntp inbounds outbounds route experimental"
+		listKey, allowed = "inbounds", "$schema log dns ntp inbounds endpoints outbounds route experimental"
+		if _, exists := root["inbounds"]; !exists {
+			listKey = "endpoints"
+		}
+		for _, key := range []string{"inbounds", "endpoints"} {
+			if raw, exists := root[key]; exists {
+				entries, ok := raw.([]any)
+				if !ok || len(entries) != 0 {
+					return false
+				}
+			}
+		}
 		for key := range mapValue(root["experimental"]) {
 			if key != "v2ray_api" && key != "cache_file" {
 				return false

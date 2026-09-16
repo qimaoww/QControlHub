@@ -1,1 +1,2 @@
-@media(max-width:820px){.bbr-primary-values{grid-template-columns:1fr 1fr}.bbr-primary-values>div:last-child{grid-column:1/-1}.bbr-card>footer{align-items:stretch}.bbr-actions{width:100%}.bbr-actions>.button{flex:1;min-height:44px}.bbr-toolbar .button{min-height:44px}}
+@media(max-width:820px){.bbr-card>footer{align-items:stretch}.bbr-actions>.button,.bbr-card-tools>.bbr-dialog-open,.bbr-toolbar .button{min-height:44px}}
+@media(max-width:360px){.bbr-preset{flex-wrap:wrap}.bbr-preset>.button{width:100%}}

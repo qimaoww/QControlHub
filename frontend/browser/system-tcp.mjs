@@ -1,7 +1,13 @@
 import { assert, delay, waitFor } from "./assertions.mjs";
+import { fillBBRPresetWithoutTask, testSystemTCPPresets } from "./system-tcp-presets.mjs";
+import { testSystemTCPSafety } from "./system-tcp-safety.mjs";
+import { assertTCPDialogLayout, testSystemTCPLayout } from "./system-tcp-layout.mjs";
 
 export async function testSystemTCPRuntime({ mode, testAPI }) {
 await waitFor(() => document.querySelector(".bbr-card"), "TCP 页面未加载");
+  if (mode !== "bbr-mobile")
+    assert.ok(matchMedia("(pointer: fine)").matches, "桌面 TCP 测试未启用鼠标媒体规则");
+  assert.ok(document.documentElement.scrollWidth <= innerWidth + 1, "TCP 页面继承桌面最小宽度而横向溢出");
   assert.equal(
     [...document.querySelectorAll(".bbr-card")]
       .map((entry) => entry.dataset.refreshKey.replace("bbr-", ""))
@@ -14,7 +20,7 @@ await waitFor(() => document.querySelector(".bbr-card"), "TCP 页面未加载");
     assert.notEqual(document.querySelector('.dock-nav a[href="#system-bbr"] svg').innerHTML, document.querySelector('.dock-nav a[href="#traffic"] svg').innerHTML, "TCP 调优和流量侧栏图标重复");
   const card = () => document.querySelector('[data-refresh-key="bbr-alpha"]');
   assert.match(card().textContent, /BBR 已启用/);
-  assert.match(card().textContent, /未由 QControlHub 管理/);
+  assert.match(card().textContent, /未托管/);
   assert.match(card().textContent, /fq_codel/);
   assert.equal(card().querySelector("details"), null, "BBR 二级入口仍使用内联折叠面板");
   const parameters = () => card().querySelector(".bbr-parameters");
@@ -25,17 +31,23 @@ await waitFor(() => document.querySelector(".bbr-card"), "TCP 页面未加载");
   assert.ok(parameters().matches(":modal"), "参数详情不是模态弹窗");
   assert.equal(card().offsetHeight, height, "打开详情撑开了卡片");
   assert.match(parameters().textContent, /网卡实际队列/);
+  assert.equal(parameters().querySelector("[data-bbr-algorithms]").textContent, "reno · cubic · bbr", "详情漏掉已加载算法");
+  await assertTCPDialogLayout(parameters());
   parameters().querySelector("[data-bbr-dialog-close]").click();
   await delay(50);
   assert.equal(document.activeElement, parametersButton(), "关闭弹窗未恢复入口焦点");
   if (mode === "bbr-readonly") {
     assert.equal(document.querySelector("[data-tcp-form]"), null);
     assert.equal(document.querySelector("[data-bbr-action]"), null);
+    assert.equal(document.querySelector("[data-tcp-preset]"), null, "只读用户看到了可写 BBR 预设");
     return;
   }
   assert.ok(document.querySelector('[data-bbr-agent="charlie"]').disabled, "离线节点允许提交");
   assert.ok(document.querySelector('[data-bbr-agent="delta"]').disabled, "旧 Agent 允许提交");
+  assert.ok(document.querySelector('[data-refresh-key="bbr-charlie"] [data-tcp-preset="bbr-32m"]').disabled, "离线节点允许填入 BBR 预设");
+  assert.equal(document.querySelector('[data-refresh-key="bbr-delta"] [data-tcp-preset]'), null, "旧 Agent 展示了 BBR 预设编辑器");
   if (mode === "bbr-writeonly") {
+    fillBBRPresetWithoutTask({ card, testAPI });
     card().querySelector('[data-bbr-action="enable-bbr"]').click();
     (await waitFor(() => document.querySelector("[data-confirm-dialog][open]"), "无任务读权限时未显示确认框")).querySelector("[data-confirm-accept]").click();
     await waitFor(() => card().textContent.includes("已提交（无任务查看权限）"), "无任务读权限时状态卡在等待执行");
@@ -201,12 +213,16 @@ await waitFor(() => document.querySelector(".bbr-card"), "TCP 页面未加载");
   await refresh();
   assert.ok(card().querySelector("[data-bbr-action]").disabled);
   assert.ok(field().disabled, "打开的编辑器未随任务状态禁用");
+  assert.ok(editor().querySelector('[data-tcp-preset="bbr-32m"]').disabled, "进行中任务未禁用 BBR 预设");
   assert.match(editor().querySelector("[data-bbr-dialog-status]").textContent, /等待执行/);
   testAPI.tcpTasks = [];
   await refresh();
   assert.ok(!card().querySelector("[data-bbr-action]").disabled, "已被服务端移除的任务仍永久阻塞操作");
   assert.equal(card().querySelector(".bbr-task"), null, "仍显示被清理的任务历史");
   assert.ok(!field().disabled, "打开的编辑器未随任务清理解锁");
+  await testSystemTCPPresets({ card, editor, openEditor, refresh, testAPI, mode });
+  await testSystemTCPSafety({ card, editor, openEditor, refresh, testAPI });
+  await testSystemTCPLayout({ card, editor, refresh, testAPI });
   editor().querySelector("[data-bbr-dialog-close]").click();
   card().querySelector('[data-bbr-action="enable-bbr"]').click();
   await waitFor(() => document.querySelector("[data-confirm-dialog][open]"), "节点状态变化测试未显示弹窗");

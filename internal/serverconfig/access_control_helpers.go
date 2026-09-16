@@ -28,9 +28,40 @@ func mainlandInboundExists(engine core.Engine, root map[string]any, tag string, 
 		field, portField, values = "tag", "listen_port", root["inbounds"]
 	}
 	entries, _ := values.([]any)
+	if engine == core.EngineSingBox {
+		entries = append(append([]any(nil), entries...), singBoxRoutableEndpoints(root)...)
+	}
 	for _, value := range entries {
 		entry, _ := value.(map[string]any)
 		if stringValue(entry[field]) == tag && trafficPortNumber(entry[portField]) == port {
+			return true
+		}
+	}
+	return false
+}
+
+func singBoxRoutableEndpoints(root map[string]any) []any {
+	var result []any
+	endpoints, _ := root["endpoints"].([]any)
+	for _, raw := range endpoints {
+		if _, ok := parseSingBoxWireGuardEndpoint(mapValue(raw)); ok {
+			result = append(result, raw)
+		}
+	}
+	return result
+}
+
+func mainlandWireGuardTarget(engine core.Engine, root map[string]any, tag string) bool {
+	section, kind := "inbounds", "protocol"
+	if engine == core.EngineSingBox {
+		section, kind = "endpoints", "type"
+	} else if engine != core.EngineXray {
+		return false
+	}
+	entries, _ := root[section].([]any)
+	for _, raw := range entries {
+		entry := mapValue(raw)
+		if entry["tag"] == tag && entry[kind] == ProtocolWireGuard {
 			return true
 		}
 	}

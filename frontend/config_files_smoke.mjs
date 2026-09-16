@@ -46,4 +46,14 @@ for (const common of ["common.json", "00-common.json"]) {
 }
 for (const outbounds of ["null", "[null]", "{}", "[1]"]) assert.throws(() => mergeConfigFiles([{path:"common.json",content:'{}'}, {path:"inbounds/a.json",content:`{"inbounds":[{}],"outbounds":${outbounds}}`}]));
 assert.throws(() => mergeConfigFiles([{path:"common.json",content:'{}'}, {path:"inbounds/a.json",content:'{"inbounds":[{}],"outbounds":[{}]}'}, {path:"outbounds/b.json",content:'{"outbounds":[{}]}'}]));
+const endpointConfig = '{"inbounds":[{"tag":"web","type":"socks","listen_port":1080}],"endpoints":[{"tag":"wg","type":"wireguard","listen_port":51820},{"tag":"custom","type":"tailscale","custom":9007199254740993}],"outbounds":[{"tag":"direct","type":"direct"},{"tag":"qch-trf-1080-abcdef012345","type":"direct"},{"tag":"qch-trf-51820-abcdef012345","type":"direct"}]}';
+const endpointFiles = splitConfigFiles("sing-box", endpointConfig);
+assert.deepEqual(endpointFiles.map(file => file.path), ["common.json", "inbounds/web.json", "endpoints/wg.json", "endpoints/custom.json"]);
+assert.ok(endpointFiles[2].content.includes("qch-trf-51820"));
+assert.ok(!endpointFiles[0].content.includes("qch-trf-"));
+assert.deepEqual(JSON.parse(mergeConfigFiles(endpointFiles)), JSON.parse(endpointConfig));
+assert.ok(mergeConfigFiles(endpointFiles).includes("9007199254740993"));
+assert.equal(configFileDisplayName(endpointFiles[2].path, endpointFiles[2].content), "wg.json · wireguard");
+assert.throws(() => mergeConfigFiles([{path:"common.json",content:'{}'}, {path:"endpoints/../escape.json",content:'{"endpoints":[{}]}'}]));
+assert.throws(() => mergeConfigFiles([{path:"common.json",content:'{}'}, {path:"endpoints/a.json",content:'{"endpoints":[{}],"outbounds":[null]}'}]));
 console.log("Config file split/merge smoke passed");

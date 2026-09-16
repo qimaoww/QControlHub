@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
 	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
@@ -28,6 +29,14 @@ func writeManagedConfigFiles(engine core.Engine, configPath, content string, met
 	// Version the paired layout: neither numbered v1 nor split-outbound v2
 	// snapshots may be overwritten during upgrade or rollback.
 	name := "sources-v3-" + hex.EncodeToString(sum[:])
+	for _, file := range files {
+		if strings.HasPrefix(file.Path, "endpoints/") {
+			// Older v3 snapshots kept endpoints in common.json. Retain those
+			// immutable bundles for rollback; publish the new pairing as v4.
+			name = "sources-v4-" + hex.EncodeToString(sum[:])
+			break
+		}
+	}
 	directory := filepath.Dir(configPath)
 	root, err := os.OpenRoot(directory)
 	if err != nil {
@@ -102,7 +111,7 @@ func writeManagedConfigFiles(engine core.Engine, configPath, content string, met
 			return closeErr
 		}
 	}
-	for _, path := range []string{"inbounds", "outbounds", "."} {
+	for _, path := range []string{"inbounds", "endpoints", "outbounds", "."} {
 		f, err := os.Open(filepath.Join(stage, path))
 		if errors.Is(err, os.ErrNotExist) {
 			continue

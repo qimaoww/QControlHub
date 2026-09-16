@@ -87,6 +87,11 @@ func applyControl(executable string) {
 
 func main() {
 	arguments := os.Args[1:]
+	if len(arguments) == 1 && arguments[0] == "version" {
+		fmt.Println("sing-box version 1.14.0")
+		fmt.Println("Tags: with_wireguard,with_tailscale,with_openvpn,with_gvisor")
+		return
+	}
 	executable, err := os.Executable()
 	if err != nil {
 		os.Exit(3)

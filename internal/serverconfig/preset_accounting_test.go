@@ -56,11 +56,12 @@ func TestEveryPresetHasIndependentAccounting(t *testing.T) {
 					for i, port := range plan.Ports {
 						var fragment struct {
 							Inbounds  []map[string]any `json:"inbounds"`
+							Endpoints []map[string]any `json:"endpoints"`
 							Outbounds []struct {
 								Tag string `json:"tag"`
 							} `json:"outbounds"`
 						}
-						if err := json.Unmarshal([]byte(files[i+1].Content), &fragment); err != nil || len(fragment.Inbounds) != 1 || len(fragment.Outbounds) == 0 {
+						if err := json.Unmarshal([]byte(files[i+1].Content), &fragment); err != nil || len(fragment.Inbounds)+len(fragment.Endpoints) != 1 || len(fragment.Outbounds) == 0 {
 							t.Fatalf("missing paired exit: %s %v", files[i+1].Content, err)
 						}
 						var tags []string
