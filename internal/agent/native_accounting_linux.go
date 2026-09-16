@@ -105,6 +105,9 @@ func exclusiveXrayProtocols(engine core.Engine, content string) map[int]core.Tra
 		}
 		seen[inbound.Port] = true
 		switch inbound.Protocol {
+		case "wireguard":
+			// WireGuard's outer listener is UDP even for tunneled TCP.
+			ports[inbound.Port] = core.TrafficProtocolUDP
 		case "vless", "vmess", "trojan":
 			switch inbound.Stream.Network {
 			case "", "tcp", "raw", "ws", "grpc", "http", "h2", "httpupgrade":
@@ -163,6 +166,10 @@ func accountingListenerProtocols(engine core.Engine, content string) map[int]cor
 					Type string `json:"type"`
 				} `json:"transport"`
 			} `json:"inbounds"`
+			Endpoints []struct {
+				Port int    `json:"listen_port"`
+				Type string `json:"type"`
+			} `json:"endpoints"`
 		}
 		if json.Unmarshal([]byte(content), &root) != nil {
 			return nil
@@ -179,9 +186,28 @@ func accountingListenerProtocols(engine core.Engine, content string) map[int]cor
 				result[in.Port] = core.TrafficProtocolTCP
 			case "hysteria", "hysteria2", "tuic":
 				result[in.Port] = core.TrafficProtocolUDP
+			case "direct", "shadowsocks":
+				// These listener types honor discovery's explicit network
+				// selection. Other kinds must not authorize billing by hint.
+			default:
+				result[in.Port] = core.TrafficProtocolBoth
 			}
 			if in.Transport.Type != "" && in.Transport.Type != "tcp" && in.Transport.Type != "ws" && in.Transport.Type != "http" && in.Transport.Type != "httpupgrade" && in.Transport.Type != "grpc" {
 				result[in.Port] = core.TrafficProtocolBoth
+			}
+		}
+		for _, endpoint := range root.Endpoints {
+			if endpoint.Port < 1 || endpoint.Port > 65535 {
+				continue // Dynamic endpoints have no verifiable fixed listener.
+			}
+			if seen[endpoint.Port] {
+				result[endpoint.Port] = core.TrafficProtocolBoth
+				continue
+			}
+			seen[endpoint.Port] = true
+			result[endpoint.Port] = core.TrafficProtocolBoth
+			if endpoint.Type == "wireguard" {
+				result[endpoint.Port] = core.TrafficProtocolUDP
 			}
 		}
 	}

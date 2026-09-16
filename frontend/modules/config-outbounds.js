@@ -67,10 +67,11 @@ export function mutateOutbound(content, operation, index, fragment, ignoredRefer
 
 function bindingState(content, engine, inbound) {
   const keys = fields(engine), root = configJSONMembers(content);
-  const inbounds = configJSONMembers(root.get("inbounds") || "[]", true).map(raw => JSON.parse(raw));
+  const sections = engine === "sing-box" ? ["inbounds", "endpoints"] : ["inbounds"];
+  const listeners = sections.flatMap(section => configJSONMembers(root.get(section) || "[]", true).map(raw => JSON.parse(raw)));
   if (!inbound?.tag || !Number.isInteger(inbound.port) || inbound.port < 1 || inbound.port > 65535 ||
-      inbounds.filter(entry => entry.tag === inbound.tag).length !== 1 ||
-      !inbounds.some(entry => entry.tag === inbound.tag && Number(entry[keys.portKey]) === inbound.port))
+      listeners.filter(entry => entry.tag === inbound.tag).length !== 1 ||
+      !listeners.some(entry => entry.tag === inbound.tag && Number(entry[keys.portKey]) === inbound.port))
     throw Error("入站已变化，请重新选择入站");
   const route = configJSONMembers(root.get(keys.routeKey) || "{}");
   const rules = configJSONMembers(route.get("rules") || "[]", true);

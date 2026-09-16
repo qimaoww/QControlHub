@@ -43,6 +43,17 @@ func TestWireGuardMetadataKeepsSourceAuthoritative(t *testing.T) {
 				parsed.WireGuardPresharedKey != input.WireGuardPresharedKey || parsed.WireGuardClientAddress != input.WireGuardClientAddress {
 				t.Fatal("client-only metadata did not round trip")
 			}
+			raw, err := json.Marshal(parsed)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var payload map[string]json.RawMessage
+			if err := json.Unmarshal(raw, &payload); err != nil {
+				t.Fatal(err)
+			}
+			if string(payload["wireguard_keepalive"]) != "0" {
+				t.Fatal("disabled keepalive must remain an explicit zero in the API JSON")
+			}
 			profile, err := BuildClientProfile(parsed, "2001:db8::1", "")
 			if err != nil || !strings.Contains(profile.URI, "Endpoint = [2001:db8::1]:") ||
 				strings.Contains(profile.URI, "PersistentKeepalive") || strings.Contains(profile.URI, input.WireGuardServerPrivateKey) {

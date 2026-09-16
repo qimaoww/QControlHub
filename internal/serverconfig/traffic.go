@@ -57,7 +57,7 @@ func DiscoverTrafficPorts(engine core.Engine, content string) []core.PortTraffic
 		if entries, err := DiscoverSingBoxEntries(content); err == nil {
 			for _, entry := range entries {
 				if entry.Section == "endpoints" && entry.Port > 0 && entry.Kind != "tailscale" {
-					result = append(result, trafficEndpoint(engine, entry.Tag, entry.Port, core.TrafficProtocolBoth))
+					result = append(result, trafficEndpoint(engine, entry.Tag, entry.Port, trafficProtocolForKind(entry.Kind, core.TrafficProtocolBoth)))
 				}
 			}
 		}
@@ -217,7 +217,7 @@ func trafficProtocol(value any, fallback core.TrafficProtocol) core.TrafficProto
 
 func trafficProtocolForKind(kind string, fallback core.TrafficProtocol) core.TrafficProtocol {
 	switch strings.ToLower(strings.TrimSpace(kind)) {
-	case "hysteria2", "hy2", "tuic", "quic":
+	case "hysteria2", "hy2", "tuic", "quic", "wireguard":
 		return core.TrafficProtocolUDP
 	case "vless", "vmess", "trojan", "anytls", "http", "httpupgrade":
 		return core.TrafficProtocolTCP

@@ -16,8 +16,8 @@ let catalog;
 export async function createConfigFixture(engine, options = {}) {
   catalog ||= await (await fetch("/assets/preset-plans.json")).json();
   const entries = catalog.filter(entry => entry.engine === engine);
-  const basePlan = structuredClone((entries.find(entry => entry.protocol.key === options.protocol) || entries[0]).plan);
-  if (basePlan.protocol === "wireguard") basePlan.wireguard_keepalive = 0;
+  const preset = entries.find(entry => entry.protocol.key === options.protocol) || entries[0];
+  const basePlan = structuredClone(preset.saved_plan || preset.plan);
   let controller = new AbortController();
   const agent = {id:"node", name:"香港 · HK-01", os:"linux", arch:"amd64", status:options.offline ? "offline" : "online",
     can_manage:options.shared !== true, capabilities:options.multi ? ["mihomo", engine] : [engine], features:["managed-config-read-v1", "independent-egress-v1",

@@ -121,7 +121,7 @@ type Input struct {
 	WireGuardClientAddress       string `json:"wireguard_client_address,omitempty"`
 	WireGuardAllowedIPs          string `json:"wireguard_allowed_ips,omitempty"`
 	WireGuardMTU                 int    `json:"wireguard_mtu,omitempty"`
-	WireGuardKeepalive           int    `json:"wireguard_keepalive,omitempty"`
+	WireGuardKeepalive           int    `json:"wireguard_keepalive"`
 	TailscaleStateDirectory      string `json:"tailscale_state_directory,omitempty"`
 	TailscaleAuthKey             string `json:"tailscale_auth_key,omitempty"`
 	TailscaleControlURL          string `json:"tailscale_control_url,omitempty"`

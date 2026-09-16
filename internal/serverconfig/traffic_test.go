@@ -20,13 +20,13 @@ func TestDiscoverTrafficPortsIncludesExistingUnsupportedListeners(t *testing.T) 
 		},
 		{
 			engine:  core.EngineXray,
-			content: `{"inbounds":[{"tag":"reality-in","protocol":"vless","port":443},{"tag":"custom","protocol":"future","port":"8443","settings":{"network":"udp"}}]}`,
-			want:    map[int]core.TrafficProtocol{443: core.TrafficProtocolTCP, 8443: core.TrafficProtocolUDP},
+			content: `{"inbounds":[{"tag":"reality-in","protocol":"vless","port":443},{"tag":"custom","protocol":"future","port":"8443","settings":{"network":"udp"}},{"tag":"wg","protocol":"wireguard","port":51820}]}`,
+			want:    map[int]core.TrafficProtocol{443: core.TrafficProtocolTCP, 8443: core.TrafficProtocolUDP, 51820: core.TrafficProtocolUDP},
 		},
 		{
 			engine:  core.EngineSingBox,
-			content: `{"inbounds":[{"tag":"hy2-in","type":"hysteria2","listen_port":2096},{"tag":"tun","type":"tun"}]}`,
-			want:    map[int]core.TrafficProtocol{2096: core.TrafficProtocolUDP},
+			content: `{"inbounds":[{"tag":"hy2-in","type":"hysteria2","listen_port":2096},{"tag":"tun","type":"tun"}],"endpoints":[{"tag":"wg","type":"wireguard","listen_port":51820},{"tag":"custom","type":"future","listen_port":51821},{"tag":"ts","type":"tailscale"}]}`,
+			want:    map[int]core.TrafficProtocol{2096: core.TrafficProtocolUDP, 51820: core.TrafficProtocolUDP, 51821: core.TrafficProtocolBoth},
 		},
 		{
 			engine:  core.EngineShadowsocksRust,

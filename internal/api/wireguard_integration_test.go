@@ -88,12 +88,27 @@ func TestWireGuardPresetLifecycleWithPostgreSQL(t *testing.T) {
 			workspaceInput := func(tag string) serverconfig.Input {
 				t.Helper()
 				response := revisionAPIRequest(t, handler, token, http.MethodGet, base+"/workspace", nil)
-				var workspace agentConfigWorkspaceResource
+				var workspace struct {
+					Inbounds []json.RawMessage `json:"inbounds"`
+				}
 				if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &workspace) != nil {
 					t.Fatalf("workspace: status=%d", response.Code)
 				}
-				for _, input := range workspace.Inbounds {
+				for _, raw := range workspace.Inbounds {
+					var input serverconfig.Input
+					if err := json.Unmarshal(raw, &input); err != nil {
+						t.Fatal(err)
+					}
 					if input.Tag == tag {
+						if input.Protocol == serverconfig.ProtocolWireGuard {
+							var fields map[string]json.RawMessage
+							if err := json.Unmarshal(raw, &fields); err != nil {
+								t.Fatal(err)
+							}
+							if string(fields["wireguard_keepalive"]) != strconv.Itoa(input.WireGuardKeepalive) {
+								t.Fatal("workspace JSON omitted the explicit WireGuard keepalive value")
+							}
+						}
 						return input
 					}
 				}

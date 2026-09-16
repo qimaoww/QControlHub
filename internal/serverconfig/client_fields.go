@@ -61,7 +61,7 @@ func clientFields(input Input, address, serverName string) []ClientField {
 		fields = append(fields, ClientField{Label: credentialLabel, Value: credential, Secret: secret})
 	}
 	if input.Protocol == ProtocolWireGuard {
-		fields = append(fields, ClientField{Label: "客户端私钥", Value: input.WireGuardClientPrivateKey, Secret: true}, ClientField{Label: "服务端公钥", Value: input.WireGuardServerPublicKey}, ClientField{Label: "客户端地址", Value: input.WireGuardClientAddress}, ClientField{Label: "AllowedIPs", Value: input.WireGuardAllowedIPs}, ClientField{Label: "MTU", Value: strconv.Itoa(input.WireGuardMTU)})
+		fields = append(fields, wireguardClientFields(input)...)
 	}
 	if input.SecondaryCredential != "" {
 		fields = append(fields, ClientField{Label: "用户密码", Value: input.SecondaryCredential, Secret: true})
