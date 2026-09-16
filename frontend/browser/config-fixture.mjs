@@ -16,7 +16,8 @@ let catalog;
 export async function createConfigFixture(engine, options = {}) {
   catalog ||= await (await fetch("/assets/preset-plans.json")).json();
   const entries = catalog.filter(entry => entry.engine === engine);
-  const basePlan = structuredClone(entries[0].plan);
+  const preset = entries.find(entry => entry.protocol.key === options.protocol) || entries[0];
+  const basePlan = structuredClone(preset.saved_plan || preset.plan);
   let controller = new AbortController();
   const agent = {id:"node", name:"香港 · HK-01", os:"linux", arch:"amd64", status:options.offline ? "offline" : "online",
     can_manage:options.shared !== true, capabilities:options.multi ? ["mihomo", engine] : [engine], features:["managed-config-read-v1", "independent-egress-v1",
@@ -32,7 +33,7 @@ export async function createConfigFixture(engine, options = {}) {
     {key:"dns", label:"DNS", scope:"global"},
     {key:extraField, label:engine === "ss-rust" ? "IPv6 优先" : engine === "xray" ? "本地策略" : "NTP", scope:"global"},
     {key:secondaryField, label:engine === "xray" ? "统计" : engine === "sing-box" ? "实验功能" : "运行模式", scope:engine === "ss-rust" ? "override" : "global"},
-    ...["inbounds", "outbounds", "listeners", "servers", "shadowsocks", "server_port"].map(key=>({key, label:key, scope:"inbound"})),
+    ...["inbounds", "endpoints", "outbounds", "listeners", "servers", "shadowsocks", "server_port"].map(key=>({key, label:key, scope:"inbound"})),
   ].map(field=>({...field, kind:"object", docs:"https://example.invalid/config"}));
   const values = new Map(options.noCommon ? [] : [
     [primaryField, engine === "ss-rust" ? "300" : engine === "mihomo" ? '"info"' : '{"level":"info"}'],
@@ -45,7 +46,14 @@ export async function createConfigFixture(engine, options = {}) {
     ...(engine === "mihomo"
     ? {listeners:inbounds.map(item => ({name:item.tag, port:item.port, type:"socks"})), rules:["MATCH,DIRECT"]}
     : engine === "ss-rust" ? {servers:inbounds.map(item => ({remarks:item.tag, server_port:item.port, method:item.method, password:item.credential}))}
-    : {inbounds:inbounds.map(item => ({tag:item.tag, port:item.port, listen_port:item.port, protocol:"shadowsocks", type:"shadowsocks"})),
+    : {inbounds:inbounds.filter(item => engine !== "sing-box" || item.protocol !== "wireguard").map(item => ({tag:item.tag, port:item.port, listen_port:item.port, protocol:item.protocol === "wireguard" ? "wireguard" : "shadowsocks", type:"shadowsocks"})),
+      ...(engine === "sing-box" && inbounds.some(item => item.protocol === "wireguard") ? {
+        endpoints:inbounds.filter(item => item.protocol === "wireguard").map(item => ({
+          type:"wireguard", tag:item.tag, listen_port:item.port, system:false, mtu:item.wireguard_mtu,
+          address:[item.wireguard_server_address], private_key:item.wireguard_server_private_key,
+          peers:[{public_key:item.wireguard_client_public_key, pre_shared_key:item.wireguard_preshared_key, allowed_ips:[item.wireguard_client_address]}],
+        })),
+      } : {}),
       outbounds:[{tag:"direct", protocol:"freedom", type:"direct"},
         ...inbounds.map(item=>({tag:`qch-trf-${item.port}-abcdef012345`, protocol:"freedom", type:"direct"}))]})});
   const content = () => JSON.stringify(root(), null, 2);

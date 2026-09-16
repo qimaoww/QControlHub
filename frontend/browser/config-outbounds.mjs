@@ -19,8 +19,13 @@ export async function testConfigOutboundsRuntime() {
     document.querySelector("[data-outbound-close]").click();
     await pause();
   };
-  for (const engine of ["xray", "sing-box"]) {
-    const test = await fixture(engine, {drift:true});
+  for (const {engine, protocol} of [
+    {engine:"xray"}, {engine:"sing-box"},
+    {engine:"xray", protocol:"wireguard"}, {engine:"sing-box", protocol:"wireguard"},
+  ]) {
+    const test = await fixture(engine, {drift:true, protocol});
+    const section = engine === "sing-box" && protocol === "wireguard" ? "endpoints" : "inbounds";
+    const originalListeners = JSON.parse(test.saved().content)[section];
     const menu = action("add").closest("details");
     assert(menu.previousElementSibling.querySelector("[data-inbound-action]"), "outbound menu is not next to inbound operations");
     assert(["add", "bind", "modify", "delete"].every(kind=>action(kind).disabled), "outbound operation has no inbound scope");
@@ -114,7 +119,8 @@ export async function testConfigOutboundsRuntime() {
     await waitFor(()=>test.writes.length === 5 && !document.querySelector("dialog"), "bound deletion failed");
     const final = JSON.parse(test.saved().content);
     assert(!final.outbounds.some(entry=>entry.tag === "exit-b") && !final[routeKey].rules.length &&
-      final.inbounds.length === 2 && action("modify").disabled, "deletion left a binding or changed another inbound");
+      JSON.stringify(final[section]) === JSON.stringify(originalListeners) && action("modify").disabled,
+    "deletion left a binding or changed another inbound/endpoint");
     test.dispose();
   }
   for (const status of [400, 409, 503, undefined]) {

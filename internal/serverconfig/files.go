@@ -56,7 +56,11 @@ func SplitConfigFiles(engine core.Engine, content string) ([]ConfigFile, error) 
 		return nil, fmt.Errorf("multi-file configuration must be a JSON object")
 	}
 	lists := map[string][]json.RawMessage{}
-	for _, key := range []string{"inbounds", "outbounds"} {
+	ingressKeys := []string{"inbounds"}
+	if engine == core.EngineSingBox {
+		ingressKeys = append(ingressKeys, "endpoints")
+	}
+	for _, key := range append(append([]string(nil), ingressKeys...), "outbounds") {
 		raw, exists := root[key]
 		if !exists {
 			continue
@@ -76,6 +80,17 @@ func SplitConfigFiles(engine core.Engine, content string) ([]ConfigFile, error) 
 		}
 		lists[key] = entries
 	}
+	type listenerFile struct {
+		section string
+		index   int
+		entry   json.RawMessage
+	}
+	var listeners []listenerFile
+	for _, key := range ingressKeys {
+		for i, entry := range lists[key] {
+			listeners = append(listeners, listenerFile{section: key, index: i, entry: entry})
+		}
+	}
 	// Only move an ordered suffix of dedicated exits. The shared/default
 	// outbounds stay first in common, including arbitrary imported configs.
 	// This preserves exact array order without hidden metadata or re-routing.
@@ -84,9 +99,9 @@ func SplitConfigFiles(engine core.Engine, content string) ([]ConfigFile, error) 
 	if engine == core.EngineXray {
 		portKey = "port"
 	}
-	for i, entry := range lists["inbounds"] {
+	for i, listener := range listeners {
 		var in map[string]any
-		_ = json.Unmarshal(entry, &in)
+		_ = json.Unmarshal(listener.entry, &in)
 		if port := trafficPortNumber(in[portKey]); port != 0 {
 			if _, exists := owners[port]; exists {
 				owners[port] = -1
@@ -95,7 +110,7 @@ func SplitConfigFiles(engine core.Engine, content string) ([]ConfigFile, error) 
 			}
 		}
 	}
-	paired := make([][]json.RawMessage, len(lists["inbounds"]))
+	paired := make([][]json.RawMessage, len(listeners))
 	outs := lists["outbounds"]
 	cut, next := len(outs), len(paired)
 	for cut > 0 {
@@ -133,21 +148,23 @@ func SplitConfigFiles(engine core.Engine, content string) ([]ConfigFile, error) 
 	}
 	files := []ConfigFile{{Path: "common.json"}}
 	used := map[string]bool{}
-	for i, entry := range lists["inbounds"] {
-		fragment := map[string]any{"inbounds": []json.RawMessage{entry}}
+	for i, listener := range listeners {
+		fragment := map[string]any{listener.section: []json.RawMessage{listener.entry}}
 		if len(paired[i]) > 0 {
 			fragment["outbounds"] = paired[i]
 		}
 		var in struct {
 			Tag string `json:"tag"`
 		}
-		_ = json.Unmarshal(entry, &in)
+		_ = json.Unmarshal(listener.entry, &in)
 		value, _ := json.MarshalIndent(fragment, "", "  ")
-		files = append(files, ConfigFile{Path: "inbounds/" + configEntryFilename(in.Tag, "inbounds", i, used), Content: string(value) + "\n"})
+		files = append(files, ConfigFile{Path: listener.section + "/" + configEntryFilename(in.Tag, listener.section, listener.index, used), Content: string(value) + "\n"})
 	}
 	// Keep empty arrays in common to preserve their presence.
-	if len(lists["inbounds"]) > 0 {
-		delete(root, "inbounds")
+	for _, key := range ingressKeys {
+		if len(lists[key]) > 0 {
+			delete(root, key)
+		}
 	}
 	value, _ := json.MarshalIndent(root, "", "  ")
 	files[0].Content = string(value) + "\n"
@@ -186,7 +203,8 @@ func MergeConfigFiles(engine core.Engine, files []ConfigFile) (string, error) {
 		if files[0].Path == "00-common.json" {
 			validName = file.Path == fmt.Sprintf("%s/%04d.json", key, len(lists[key]))
 		}
-		if !ok || (key != "inbounds" && key != "outbounds") || !validName {
+		ingress := key == "inbounds" || (engine == core.EngineSingBox && key == "endpoints")
+		if !ok || (!ingress && key != "outbounds") || !validName {
 			return "", fmt.Errorf("invalid ordered configuration path %q", file.Path)
 		}
 		var fragment map[string]json.RawMessage
@@ -194,7 +212,7 @@ func MergeConfigFiles(engine core.Engine, files []ConfigFile) (string, error) {
 			return "", fmt.Errorf("invalid configuration fragment %s", file.Path)
 		}
 		for field := range fragment {
-			if field != key && !(key == "inbounds" && field == "outbounds" && files[0].Path == "common.json") {
+			if field != key && !(ingress && field == "outbounds" && files[0].Path == "common.json") {
 				return "", fmt.Errorf("%s contains unsupported field %s", file.Path, field)
 			}
 		}

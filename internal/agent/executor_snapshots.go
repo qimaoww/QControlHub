@@ -197,6 +197,11 @@ func (e *Executor) validateSnapshotWithIdentity(ctx context.Context, engine core
 	if _, err := exec.LookPath(spec.Binary); err != nil {
 		return "", fmt.Errorf("%s binary not found in PATH", spec.Binary)
 	}
+	if engine == core.EngineSingBox {
+		if err := validateSingBoxCapabilities(ctx, spec.Binary, content); err != nil {
+			return "", err
+		}
+	}
 	extension := ".json"
 	if engine == core.EngineMihomo {
 		extension = ".yaml"

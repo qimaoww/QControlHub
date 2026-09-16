@@ -14,6 +14,9 @@ import (
 // configuration. If the current document has no recognizable generated
 // inbound, the new inbound is appended.
 func MergeGenerated(engine core.Engine, currentContent, generatedContent string) (string, error) {
+	if engine == core.EngineSingBox {
+		return mergeSingBoxGenerated(currentContent, generatedContent)
+	}
 	matchValue := ""
 	if current, ok := Parse(engine, currentContent); ok {
 		matchValue = current.Tag
@@ -43,6 +46,9 @@ func DeletePresetInbound(engine core.Engine, content, tag string) (string, error
 	if engine == core.EngineShadowsocksRust {
 		return MutateSSRustPort(content, "{}", tag, "delete")
 	}
+	if engine == core.EngineSingBox {
+		return deleteSingBoxPresetEntry(content, tag)
+	}
 	listKey, matchKey := "inbounds", "tag"
 	if engine == core.EngineMihomo {
 		listKey, matchKey = "listeners", "name"
@@ -59,6 +65,22 @@ func mutateGenerated(engine core.Engine, currentContent, generatedContent, match
 	if engine == core.EngineShadowsocksRust {
 		return mutateShadowsocksRust(currentContent, generatedContent, matchValue, operation)
 	}
+	if engine == core.EngineSingBox {
+		return mutateSingBoxGenerated(currentContent, generatedContent, matchValue, operation)
+	}
+	if engine == core.EngineXray && matchValue != "" && operation != "delete" {
+		var root map[string]any
+		if json.Unmarshal([]byte(currentContent), &root) == nil {
+			if entries, ok := root["inbounds"].([]any); ok {
+				for _, raw := range entries {
+					entry := mapValue(raw)
+					if stringValue(entry["tag"]) == matchValue && stringValue(entry["protocol"]) == "wireguard" && !managedXrayWireGuardInbound(entry) {
+						return "", fmt.Errorf("Xray WireGuard 入站 %q 包含自定义字段或多客户端配置，请使用完整源码编辑，避免覆盖", matchValue)
+					}
+				}
+			}
+		}
+	}
 	listKey, matchKey := "inbounds", "tag"
 	managedKeys := []string{
 		"tag", "listen", "port", "protocol", "settings", "streamSettings",
@@ -72,11 +94,6 @@ func mutateGenerated(engine core.Engine, currentContent, generatedContent, match
 			"routing-mark", "rule", "proxy", "psk", "version", "obfs-opts", "shadow-tls",
 			"key", "aead-method", "padding-min", "padding-max", "table-type", "custom-table", "custom-tables",
 			"handshake-timeout", "enable-pure-downlink", "httpmask", "disable-http-mask", "http-mask-mode", "path-root", "fallback", "mux-option",
-		}
-	} else if engine == core.EngineSingBox {
-		managedKeys = []string{
-			"tag", "listen", "listen_port", "type", "method", "password", "users", "up_mbps", "down_mbps",
-			"congestion_control", "auth_timeout", "heartbeat", "tls", "transport", "network", "override_address", "override_port",
 		}
 	}
 	var (

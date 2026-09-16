@@ -18,13 +18,19 @@ var ErrInvalidPlanInput = errors.New("invalid server plan input")
 // the dynamic/private range; the remote core remains the authority that checks
 // whether the chosen port is actually free before deployment.
 func NewPlan(protocol Protocol) (Input, error) {
+	if protocol.Key == "" || len(protocol.Transports) == 0 {
+		return Input{}, fmt.Errorf("%w: unsupported server protocol", ErrInvalidPlanInput)
+	}
+	if protocol.Key == ProtocolTailscale || protocol.Key == ProtocolOpenVPNServer {
+		return Input{}, fmt.Errorf("%w: endpoint login/certificate lifecycle is not available yet", ErrInvalidPlanInput)
+	}
 	method := ""
 	if len(protocol.Methods) > 0 {
 		method = protocol.Methods[0]
 	}
 	credential := ""
 	var err error
-	if !protocol.PortForward {
+	if !protocol.PortForward && !protocol.UsesWireGuard {
 		credential, err = NewCredential(protocol.Key, method)
 		if err != nil {
 			return Input{}, err
@@ -109,6 +115,26 @@ func NewPlan(protocol Protocol) (Input, error) {
 		input.SudokuHTTPMaskEnabled = true
 		input.SudokuHTTPMaskMode = "ws"
 		input.SudokuMultiplex = "off"
+	}
+	if protocol.Key == ProtocolWireGuard {
+		var err error
+		input.WireGuardServerPrivateKey, input.WireGuardServerPublicKey, err = newWireGuardKeyPair()
+		if err != nil {
+			return Input{}, err
+		}
+		input.WireGuardClientPrivateKey, input.WireGuardClientPublicKey, err = newWireGuardKeyPair()
+		if err != nil {
+			return Input{}, err
+		}
+		input.WireGuardPresharedKey, err = newWireGuardSecret()
+		if err != nil {
+			return Input{}, err
+		}
+		input.WireGuardClientAddress = "10.66.66.2/32"
+		input.WireGuardServerAddress = "10.66.66.1/24"
+		input.WireGuardAllowedIPs = "0.0.0.0/0"
+		input.WireGuardMTU, input.WireGuardKeepalive = 1420, 25
+		input.Username = "qch-" + suffix
 	}
 	if isVLESSRealityProtocol(protocol.Key) {
 		if protocol.Key != ProtocolVLESSXHTTP {
@@ -245,6 +271,11 @@ func RegeneratePlan(protocol Protocol, current Input) (Input, error) {
 		plan.TargetAddress = current.TargetAddress
 		plan.TargetPort = current.TargetPort
 		plan.Network = current.Network
+	}
+	if protocol.Key == ProtocolWireGuard {
+		plan.WireGuardServerAddress = current.WireGuardServerAddress
+		plan.WireGuardClientAddress, plan.WireGuardAllowedIPs = current.WireGuardClientAddress, current.WireGuardAllowedIPs
+		plan.WireGuardMTU, plan.WireGuardKeepalive = current.WireGuardMTU, current.WireGuardKeepalive
 	}
 	return plan, nil
 }
