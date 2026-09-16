@@ -32,6 +32,31 @@ export async function testTrafficLayoutRuntime({ testAPI }) {
     details.querySelector("summary").click();
     document.querySelector("[data-traffic-status-close]").click();
     assert.ok(!document.querySelector(".traffic-status-dialog").open,"status dialog should close");
+    document.querySelector("[data-traffic-edit-open]").click();
+    const editDialog = document.querySelector("[data-traffic-edit-dialog][open]");
+    const root = document.documentElement;
+    const originalScale = root.style.getPropertyValue("--ui-font-scale");
+    try {
+      for (const scale of ["1", "1.35"]) {
+        root.style.setProperty("--ui-font-scale", scale);
+        for (const animation of editDialog.getAnimations()) animation.finish();
+        const bounds = editDialog.getBoundingClientRect();
+        assert.ok(bounds.top >= -1 && bounds.bottom <= innerHeight + 1, "quota dialog extends outside the viewport");
+        assert.ok(editDialog.scrollWidth <= editDialog.clientWidth + 1, "quota dialog overflows horizontally");
+        for (const button of editDialog.querySelectorAll("footer button")) {
+          const box = button.getBoundingClientRect();
+          assert.ok(box.top >= bounds.top && box.bottom <= bounds.bottom && box.bottom <= innerHeight,
+            "quota actions must remain visible when the form body scrolls");
+        }
+        const body = editDialog.querySelector(".traffic-edit-body").getBoundingClientRect();
+        const footer = editDialog.querySelector("footer").getBoundingClientRect();
+        assert.ok(body.bottom <= footer.top + 1, "quota fields overlap the actions");
+      }
+    } finally {
+      if (originalScale) root.style.setProperty("--ui-font-scale", originalScale);
+      else root.style.removeProperty("--ui-font-scale");
+      editDialog.querySelector("[data-traffic-edit-close]").click();
+    }
     const quota = document.querySelector('[data-traffic-edit-form] [name="limit_gb"]');
     assert.ok(quota && !quota.required && quota.value === "" && quota.checkValidity(), "monitor-only quota must allow an empty value");
     quota.value = "0";

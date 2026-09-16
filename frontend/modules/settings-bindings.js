@@ -5,13 +5,11 @@ export function createSettingsBindings({ api, state, esc, notify, applyUIFontSca
     const form = document.querySelector("#settings-form");
     const saveButton = form?.querySelector("[data-save-settings]");
     const stateBadge = document.querySelector("[data-settings-state]");
-    const saveTitle = form?.querySelector("[data-save-title]");
     const markDirty = () => {
       if (!saveButton) return;
       saveButton.disabled = false;
       stateBadge.textContent = "有未保存更改";
       stateBadge.classList.add("dirty");
-      if (saveTitle) saveTitle.textContent = "有未保存更改";
     };
     bindEvent(form, "input", markDirty);
     bindEvent(form, "change", markDirty);
@@ -52,8 +50,7 @@ export function createSettingsBindings({ api, state, esc, notify, applyUIFontSca
         applyUIFontScale?.(saved.ui_font_scale);
         stateBadge.textContent = `已保存 · v${saved.revision}`;
         stateBadge.classList.remove("dirty");
-        if (saveTitle) saveTitle.textContent = "所有更改已保存";
-        notify("设置已保存；CN IP 源将在下次配置校验或部署时生效。");
+        notify("设置已保存");
       } catch (error) {
         if (state.data !== accountData || error.name === "AbortError") return;
         saveButton.disabled = false;

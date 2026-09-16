@@ -88,8 +88,8 @@ func TestLoginDoesNotPreFillAdministratorUsername(t *testing.T) {
 	if !strings.Contains(content, `name="username" type="text" autocomplete="username"`) {
 		t.Fatal("login username must retain browser autocomplete support")
 	}
-	if !strings.Contains(content, `placeholder="输入用户名"`) {
-		t.Fatal("login username must explain the empty field")
+	if !strings.Contains(content, `<label>用户名<input name="username"`) {
+		t.Fatal("login username must have a persistent label, not only a placeholder")
 	}
 }
 

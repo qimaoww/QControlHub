@@ -147,7 +147,7 @@ try {
   coreAgents = [{ id: "alpha", name: "Alpha", status: "offline", features: ["core-logs-v1", "core-log-status-v1"], runtime: { "sing-box": { installed: true, core_log_status: "active" } } }];
   await renderCoreLogs({ syncFilters: true });
   assert.equal(coreMarkup.includes("节点离线"), true, "persisted runtime state is not trusted after an Agent goes offline");
-  assert.equal(coreMarkup.includes("当前来源工作正常"), false, "offline runtime state is not presented as current health");
+  assert.equal(coreMarkup.includes("采集正常"), false, "offline runtime state is not presented as current health");
   coreEntries = [{ id: "offline-history", agent_id: "alpha", engine: "sing-box", level: "info", message: "offline historical entry", logged_at: "2026-08-24T00:00:00Z" }];
   await renderCoreLogs({ syncFilters: true });
   assert.equal(coreMarkup.includes("offline historical entry"), true, "offline Agents retain historical log rows");
@@ -157,8 +157,8 @@ try {
   coreAgents = [{ id: "alpha", name: "Alpha", status: "online", features: ["core-logs-v1", "core-log-status-v1"], runtime: { "sing-box": { installed: true, core_log_status: "active" } } }];
   coreState.data.coreLogFilters = {};
   await renderCoreLogs({ syncFilters: true });
-  assert.equal(coreMarkup.includes("尚未收到符合当前筛选条件的运行记录"), true, "aggregate empty state remains neutral");
-  assert.equal(coreMarkup.includes("当前来源工作正常"), false, "aggregate filters do not claim every source is healthy");
+  assert.equal(coreMarkup.includes('<div class="core-log-empty"><strong>暂无日志</strong></div>'), true, "aggregate empty state remains neutral without a redundant explanation");
+  assert.equal(coreMarkup.includes("采集正常"), false, "aggregate filters do not claim every source is healthy");
 
   let releaseStaleCoreLogs;
   const staleCoreLogs = new Promise((resolve) => { releaseStaleCoreLogs = resolve; });

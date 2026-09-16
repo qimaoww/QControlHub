@@ -15,10 +15,10 @@ export function createClientAccessResults({ esc, engineName, can }) {
           ? `${selectedAgent.name} 尚无客户端配置`
           : "没有匹配的客户端配置";
       const description = !entries.length
-        ? "安装内核并成功部署可解析的服务端入站后，客户端连接信息会自动出现在这里。"
+        ? "部署支持的服务端入站后自动生成。"
         : selectedAgent && !selectedHasEntries
-          ? "为该节点部署一个支持生成客户端连接信息的服务端入站后即可查看。"
-          : "请调整搜索词或内核筛选条件。";
+          ? "请为该节点部署支持的服务端入站。"
+          : "请调整搜索或筛选条件。";
       const action = hasActiveFilter
         ? '<button class="button primary" type="button" data-clear-client-filters>清除筛选</button>'
         : '<a class="button primary" href="#node-settings">前往节点设置</a>';
@@ -37,11 +37,11 @@ export function createClientAccessResults({ esc, engineName, can }) {
         const displayDialog = (entry, item, displayDialogID, modeField) => {
           const displayDialogTitleID = `${displayDialogID}-title`;
           return can("agents.manage")
-          ? `<dialog class="traffic-edit-dialog client-display-dialog" id="${displayDialogID}" aria-labelledby="${displayDialogTitleID}"><header><span class="traffic-edit-icon" aria-hidden="true">✎</span><div><p class="eyebrow">客户端配置</p><h2 id="${displayDialogTitleID}">修改显示参数</h2><p>${esc(firstEntry.agent_name)} · ${esc(item.tag)} · 端口 ${Number(item.port)}</p></div><button class="deploy-command-close" type="button" data-client-display-close aria-label="关闭修改显示参数">×</button></header><form data-client-address-agent="${esc(group.agent_id)}" data-client-profile-engine="${esc(entry.engine)}" data-client-profile-tag="${esc(item.tag)}" data-client-profile-port="${Number(item.port)}"><div class="traffic-edit-body client-display-dialog-body"><div class="client-display-form-grid"><label><span>客户端节点名称</span><input name="name" maxlength="100" autocomplete="off" value="${esc(item.client_name || "")}" placeholder="留空使用入站标签"><small>仅对当前内核、当前监听端口生效，不影响其他端口。</small></label><label><span>客户端连接地址</span><input name="address" maxlength="253" autocomplete="off" value="${item.address_overridden ? esc(item.address || "") : ""}" placeholder="留空使用自动识别地址"><small>仅对当前内核、当前监听端口生效；留空时使用自动识别地址（当前 ${esc(item.address || "未识别")}）。</small></label>${modeField}</div></div><footer>${item.address_overridden ? `<button class="button" type="button" data-clear-client-address="${esc(group.agent_id)}" data-clear-client-profile-engine="${esc(entry.engine)}" data-clear-client-profile-tag="${esc(item.tag)}" data-clear-client-profile-port="${Number(item.port)}">恢复自动识别</button>` : "<span></span>"}<span></span><button class="button" type="button" data-client-display-close>取消</button><button class="button primary" type="submit">保存参数</button></footer></form></dialog>`
+          ? `<dialog class="traffic-edit-dialog client-display-dialog" id="${displayDialogID}" aria-labelledby="${displayDialogTitleID}"><header><span class="traffic-edit-icon" aria-hidden="true">✎</span><div><p class="eyebrow">客户端配置</p><h2 id="${displayDialogTitleID}">修改显示参数</h2><p>${esc(firstEntry.agent_name)} · ${esc(item.tag)} · 端口 ${Number(item.port)}</p></div><button class="deploy-command-close" type="button" data-client-display-close aria-label="关闭修改显示参数">×</button></header><form data-client-address-agent="${esc(group.agent_id)}" data-client-profile-engine="${esc(entry.engine)}" data-client-profile-tag="${esc(item.tag)}" data-client-profile-port="${Number(item.port)}"><div class="traffic-edit-body client-display-dialog-body"><p class="client-display-scope">仅当前内核、当前端口生效。</p><div class="client-display-form-grid"><label><span>客户端节点名称</span><input name="name" maxlength="100" autocomplete="off" value="${esc(item.client_name || "")}" placeholder="留空使用入站标签"></label><label><span>客户端连接地址</span><input name="address" maxlength="253" autocomplete="off" value="${item.address_overridden ? esc(item.address || "") : ""}" placeholder="留空使用自动识别地址">${item.address_overridden ? "" : `<small>自动识别：${esc(item.address || "未识别")}</small>`}</label>${modeField}</div></div><footer>${item.address_overridden ? `<button class="button" type="button" data-clear-client-address="${esc(group.agent_id)}" data-clear-client-profile-engine="${esc(entry.engine)}" data-clear-client-profile-tag="${esc(item.tag)}" data-clear-client-profile-port="${Number(item.port)}">恢复自动识别</button>` : "<span></span>"}<span></span><button class="button" type="button" data-client-display-close>取消</button><button class="button primary" type="submit">保存参数</button></footer></form></dialog>`
           : "";
         };
         const addressWarning = !can("agents.manage") && firstEntry.address_required
-          ? '<p class="client-address-missing">管理员尚未设置客户端连接地址，请联系节点管理员。</p>'
+          ? '<p class="client-address-missing">请联系节点管理员设置连接地址。</p>'
           : "";
         const statusLabel = firstEntry.address_required
           ? "待设置地址"
@@ -60,10 +60,10 @@ export function createClientAccessResults({ esc, engineName, can }) {
                 const dialogTitleID = `${dialogID}-title`;
                 const profileMode = item.address_mode || "auto";
                 const addressModeHelp = item.address_overridden
-                  ? "当前使用手动连接地址；先点“恢复自动识别”才能切换协议栈。"
-                  : "仅对当前内核、当前监听端口生效：自动、IPv4 或 IPv6。";
+                  ? "使用手动地址中；恢复自动识别后可切换协议栈。"
+                  : "";
                 const displayAddressModeField = addressChoices.length
-                  ? `<label class="client-display-stack-field"><span>客户端地址协议栈</span><select name="address_mode" data-saved-mode="${esc(profileMode)}"${item.address_overridden ? " disabled" : ""}>${addressChoices.map((choice) => `<option value="${esc(choice.value)}" ${choice.value === profileMode ? "selected" : ""}>${esc(choice.label)}</option>`).join("")}</select><small>${addressModeHelp}</small></label>`
+                  ? `<label class="client-display-stack-field"><span>客户端地址协议栈</span><select name="address_mode" data-saved-mode="${esc(profileMode)}"${item.address_overridden ? " disabled" : ""}>${addressChoices.map((choice) => `<option value="${esc(choice.value)}" ${choice.value === profileMode ? "selected" : ""}>${esc(choice.label)}</option>`).join("")}</select>${addressModeHelp ? `<small>${addressModeHelp}</small>` : ""}</label>`
                   : "";
                 const fields = (item.profile?.fields || [])
                   .map((field, fieldIndex) => {
