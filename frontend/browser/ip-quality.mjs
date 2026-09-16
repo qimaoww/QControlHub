@@ -33,7 +33,12 @@ export async function testIPQualityRuntime(mode, preview = false) {
     created_at: `${today}T06:00:00Z`, finished_at: `${today}T06:05:00Z`,
     result: { reports: [report("203.0.113.10"), report("2001:db8:1234:5678:90ab:cdef:1234:5678")] },
   });
-  const fixture = { records: [completeRecord()], schedules: [], calls: [], failed: false, checks: 0, scheduleWrites: 0 };
+  const fixture = {
+    records: [completeRecord()],
+    // A plan enabled by another administrator is still the node's active plan.
+    schedules: [{ agent_id: "quality-a", enabled: true, next_run_at: new Date(Date.now() + 86400000).toISOString() }],
+    calls: [], failed: false, checks: 0, scheduleWrites: 0,
+  };
   window.__ipQualityFixture = fixture;
   const json = (value, status = 200) => new Response(JSON.stringify(value), { status, headers: { "Content-Type": "application/json" } });
   window.fetch = async (input, options = {}) => {
@@ -76,6 +81,12 @@ export async function testIPQualityRuntime(mode, preview = false) {
   assert.ok(document.querySelector('[data-ip-quality-day="1"]').disabled, "future day is selectable");
   card().querySelector(".ip-quality-details>summary").click();
   assert.equal(card().querySelectorAll(".ip-quality-report").length, 2, "dual-stack report lost a family");
+  const [ipv4Report, ipv6Report] = card().querySelectorAll(".ip-quality-report");
+  assert.ok(ipv4Report.textContent.includes("干净"), "IPv4 lost its DNS blacklist results");
+  assert.ok(ipv6Report.textContent.includes("未检测：当前上游仅查询 IPv4 DNS 黑名单"), "IPv6 blacklist was presented as measured");
+  assert.ok(![...ipv6Report.querySelectorAll("dt")].some((term) => term.textContent === "干净"), "IPv4 DNS counts leaked into the IPv6 summary");
+  assert.equal(JSON.parse(ipv6Report.querySelector(".ip-quality-raw pre").textContent).Mail.DNSBlacklist.Total, 439,
+    "original IPv6 JSON was rewritten");
   assert.ok(card().textContent.includes("0.47%"), "provider scores were rewritten");
   assert.ok(card().textContent.includes("未知"), "missing result became a zero score");
   assert.equal(card().querySelector("script"), null, "upstream text became executable HTML");
@@ -85,9 +96,21 @@ export async function testIPQualityRuntime(mode, preview = false) {
     assert.equal(document.querySelector("[data-ip-quality-run]"), null, "read-only session has mutation controls");
     assert.equal(document.querySelector("[data-ip-quality-schedule]"), null, "read-only session can enable a schedule");
   } else {
+    assert.equal(card().querySelector("[data-ip-quality-schedule]").getAttribute("aria-pressed"), "true",
+      "an existing administrator plan was shown as disabled");
     assert.ok(document.querySelector('[data-ip-quality-run="quality-b"]').disabled, "legacy Agent is executable");
     assert.ok(document.querySelector('[data-ip-quality-run="quality-c"]').disabled, "offline Agent is executable");
   }
+  const dateInput = document.querySelector("[data-ip-quality-date]");
+  const readsBeforeClear = fixture.calls.filter((call) => call.path === "/ip-quality" && call.method === "GET").length;
+  dateInput.value = "";
+  dateInput.dispatchEvent(new Event("change", { bubbles: true }));
+  assert.equal(dateInput.value, today, "clearing the date did not restore the selected day");
+  // The real five-second timer must survive rejected input, not just a manual
+  // refresh. Leave enough of its interval for the shared four-second wait.
+  await delay(2000);
+  await waitFor(() => fixture.calls.filter((call) => call.path === "/ip-quality" && call.method === "GET").length > readsBeforeClear,
+    "clearing the date stopped automatic refresh");
   const refresh = async () => {
     const before = fixture.calls.filter((call) => call.path === "/ip-quality").length;
     document.querySelector("[data-ip-quality-refresh]").click();
@@ -110,9 +133,9 @@ export async function testIPQualityRuntime(mode, preview = false) {
   fixture.failed = false;
   await refresh();
   if (!readonly) {
-    const confirm = async () => {
+    const confirm = async (external = true) => {
       const dialog = await waitFor(() => document.querySelector("[data-confirm-dialog][open]"), "confirmation did not open");
-      assert.ok(dialog.textContent.includes("第三方"), "confirmation omitted external service access");
+      if (external) assert.ok(dialog.textContent.includes("第三方"), "confirmation omitted external service access");
       dialog.querySelector("[data-confirm-accept]").click();
     };
     card().querySelector("[data-ip-quality-run]").click();
@@ -123,9 +146,14 @@ export async function testIPQualityRuntime(mode, preview = false) {
     fixture.records = [completeRecord("new-quality-task")];
     await refresh();
     card().querySelector("[data-ip-quality-schedule]").click();
+    await confirm(false);
+    await waitFor(() => card()?.querySelector("[data-ip-quality-schedule]").getAttribute("aria-pressed") === "false",
+      "existing daily schedule could not be disabled");
+    assert.equal(fixture.scheduleWrites, 1, "schedule disable was submitted more than once");
+    card().querySelector("[data-ip-quality-schedule]").click();
     await confirm();
     await waitFor(() => card()?.querySelector("[data-ip-quality-schedule]").getAttribute("aria-pressed") === "true", "daily schedule did not enable");
-    assert.equal(fixture.scheduleWrites, 1, "schedule was submitted more than once");
+    assert.equal(fixture.scheduleWrites, 2, "schedule enable was submitted more than once");
   }
   card().querySelector(".ip-quality-details>summary").click();
   await delay(60);

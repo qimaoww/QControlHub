@@ -3,9 +3,12 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
@@ -35,8 +38,26 @@ func saveIPQualityResultTx(ctx context.Context, tx pgx.Tx, taskID string, result
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO ip_quality_reports(task_id,result) VALUES($1,$2)`, taskID, content)
-	return err
+	// Valid JSON can still contain strings/numbers JSONB cannot represent.
+	// Isolate those data errors so the parent transaction can fail and ACK
+	// the task instead of replaying an unsavable result on every reconnect.
+	savepoint, err := tx.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer savepoint.Rollback(ctx)
+	if _, err := savepoint.Exec(ctx, `INSERT INTO ip_quality_reports(task_id,result) VALUES($1,$2)`, taskID, content); err != nil {
+		if rollbackErr := savepoint.Rollback(ctx); rollbackErr != nil {
+			return rollbackErr
+		}
+		var pgError *pgconn.PgError
+		if errors.As(err, &pgError) && (strings.HasPrefix(pgError.Code, "22") ||
+			pgError.Code == "23514" && pgError.TableName == "ip_quality_reports") {
+			return fmt.Errorf("%w: IPQuality report contains unsupported text, numbers, or an oversized stored representation", ErrInvalid)
+		}
+		return err
+	}
+	return savepoint.Commit(ctx)
 }
 
 // ListIPQualityRecords returns the latest attempt per node on the requested

@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"sync"
@@ -143,6 +144,106 @@ func TestIPQualityInvalidResultsAndFeatureDowngrade(t *testing.T) {
 	}
 	if stored, _ := db.GetTask(ctx, retried.ID); stored.Status != core.TaskFailed || !strings.Contains(stored.Error, core.AgentFeatureIPQuality) {
 		t.Fatalf("downgrade result = %+v", stored)
+	}
+}
+
+func TestIPQualityUnstorableReportsSettleWithoutBlockingTasks(t *testing.T) {
+	db, ctx, _ := isolatedConfigScopeStore(t)
+	agent, _ := enrollTaskTestAgent(t, ctx, db)
+	qualityHeartbeat(t, db, ctx, agent.ID)
+	for _, test := range []struct{ name, info string }{
+		{"nul-value", `{"Organization":"provider\u0000value"}`},
+		{"nul-key", `{"nested":[{"\u0000":"value"}]}`},
+		{"unpaired-surrogate", `{"Organization":"\ud800"}`},
+		{"numeric-overflow", `{"provider":1e200000}`},
+		{"expanded-size", `{"provider":[1e100000,1e100000,1e100000]}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			report := &core.IPQualityResult{Reports: []json.RawMessage{json.RawMessage(
+				`{"Head":{"IP":"203.0.113.1"},"Info":` + test.info + `,"Type":{},"Score":{},"Factor":{},"Media":{},"Mail":{}}`)}}
+			// All are syntactically valid, bounded JSON. Persistence owns the
+			// additional JSONB text, numeric and stored-size constraints.
+			if _, err := core.NormalizeIPQualityResult(report); err != nil {
+				t.Fatal(err)
+			}
+			task, err := db.CreateTask(ctx, core.TaskRequest{AgentID: agent.ID, Action: core.ActionIPQuality})
+			if err != nil {
+				t.Fatal(err)
+			}
+			lease, err := db.ClaimTask(ctx, agent.ID)
+			if err != nil || lease == nil || lease.ID != task.ID {
+				t.Fatalf("claim: %+v %v", lease, err)
+			}
+			if err := db.CompleteTask(ctx, agent.ID, task.ID, core.TaskResultRequest{
+				LeaseID: lease.LeaseID, Success: true, IPQuality: report,
+			}); err != nil {
+				t.Fatalf("unsavable result prevented acknowledgement: %v", err)
+			}
+			stored, err := db.GetTask(ctx, task.ID)
+			if err != nil || stored.Status != core.TaskFailed || stored.Output != "" ||
+				!strings.Contains(stored.Error, "invalid IPQuality report") {
+				t.Fatalf("unsavable report was not failed: %+v %v", stored, err)
+			}
+			if running, err := db.RunningTask(ctx, agent.ID); err != nil || running != nil {
+				t.Fatalf("unsavable report retained a running lease: %+v %v", running, err)
+			}
+		})
+	}
+	var count int
+	if err := db.pool.QueryRow(ctx, `SELECT count(*) FROM ip_quality_reports`).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("invalid reports were retained: %d %v", count, err)
+	}
+	task, err := db.CreateTask(ctx, core.TaskRequest{AgentID: agent.ID, Action: core.ActionIPQuality})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease, err := db.ClaimTask(ctx, agent.ID)
+	if err != nil || lease == nil || lease.ID != task.ID {
+		t.Fatalf("valid follow-up claim: %+v %v", lease, err)
+	}
+	report := storeQualityResult(t)
+	if err := db.CompleteTask(ctx, agent.ID, task.ID, core.TaskResultRequest{
+		LeaseID: lease.LeaseID, Success: true, IPQuality: report,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if stored, err := db.GetTask(ctx, task.ID); err != nil || stored.Status != core.TaskSucceeded {
+		t.Fatalf("invalid reports blocked a valid follow-up: %+v %v", stored, err)
+	}
+}
+
+func TestIPQualityStorageFailureRemainsRetryable(t *testing.T) {
+	db, ctx, _ := isolatedConfigScopeStore(t)
+	agent, _ := enrollTaskTestAgent(t, ctx, db)
+	qualityHeartbeat(t, db, ctx, agent.ID)
+	task, err := db.CreateTask(ctx, core.TaskRequest{AgentID: agent.ID, Action: core.ActionIPQuality})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease, err := db.ClaimTask(ctx, agent.ID)
+	if err != nil || lease == nil {
+		t.Fatalf("claim: %+v %v", lease, err)
+	}
+	// This schema belongs only to this test. Simulate a persistence failure,
+	// not bad report data, and verify that the same lease can retry it.
+	if _, err := db.pool.Exec(ctx, `ALTER TABLE ip_quality_reports RENAME TO ip_quality_reports_unavailable`); err != nil {
+		t.Fatal(err)
+	}
+	result := core.TaskResultRequest{LeaseID: lease.LeaseID, Success: true, IPQuality: storeQualityResult(t)}
+	if err := db.CompleteTask(ctx, agent.ID, task.ID, result); err == nil {
+		t.Fatal("storage failure was swallowed as a completed task")
+	}
+	if stored, err := db.GetTask(ctx, task.ID); err != nil || stored.Status != core.TaskRunning {
+		t.Fatalf("storage failure ended the retryable lease: %+v %v", stored, err)
+	}
+	if _, err := db.pool.Exec(ctx, `ALTER TABLE ip_quality_reports_unavailable RENAME TO ip_quality_reports`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.CompleteTask(ctx, agent.ID, task.ID, result); err != nil {
+		t.Fatalf("same lease could not retry after recovery: %v", err)
+	}
+	if stored, err := db.GetTask(ctx, task.ID); err != nil || stored.Status != core.TaskSucceeded {
+		t.Fatalf("recovered storage did not complete the task: %+v %v", stored, err)
 	}
 }
 

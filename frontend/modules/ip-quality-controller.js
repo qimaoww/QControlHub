@@ -22,7 +22,6 @@ export function createIPQualityController(ctx, view) {
     bind();
   }
   async function load(requestedDate, { background = false } = {}) {
-    poller.stop();
     const data = state.data, epoch = state.navigationEpoch;
     if (accountData !== data) {
       accountData = data;
@@ -34,6 +33,7 @@ export function createIPQualityController(ctx, view) {
     // The shell supplies route options as the first argument on page entry.
     const date = typeof requestedDate === "string" ? requestedDate : data.ipQualityDate || ipQualityToday();
     if (!validIPQualityDate(date) || date > ipQualityToday()) return false;
+    poller.stop();
     const request = ++serial;
     data.ipQualityDate = date;
     if (snapshot?.date !== date) snapshot = null;

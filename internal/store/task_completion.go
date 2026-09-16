@@ -89,14 +89,17 @@ func (s *Store) CompleteTask(ctx context.Context, agentID, taskID string, result
 	storedError := truncate(result.Error, 8<<10)
 	if action == core.ActionIPQuality && result.Success {
 		report, validationErr := core.NormalizeIPQualityResult(result.IPQuality)
+		if validationErr == nil {
+			validationErr = saveIPQualityResultTx(ctx, tx, taskID, report)
+			if validationErr != nil && !errors.Is(validationErr, ErrInvalid) {
+				return validationErr
+			}
+		}
 		if validationErr != nil {
 			status = core.TaskFailed
 			storedOutput = ""
 			storedError = "Agent returned an invalid IPQuality report: " + validationErr.Error()
 		} else {
-			if err := saveIPQualityResultTx(ctx, tx, taskID, report); err != nil {
-				return err
-			}
 			storedOutput = "IPQuality report saved"
 			storedError = ""
 		}

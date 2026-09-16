@@ -162,7 +162,9 @@
 `result.reports[]`，每个元素是保留上游字段及数据类型的 IPv4 或 IPv6 JSON 对象。
 失败或仍在执行的任务不带成功报告。普通 `/tasks` 响应不携带这些报告字节。
 `schedules[]` 包含 `agent_id`、`enabled`、`next_run_at`，表示当前计划，
-不随历史日期回溯。
+不随历史日期回溯。计划状态按节点管理权可见，不按计划设置者过滤；
+节点所有者能看到并关闭管理员开启的计划，但不能因此读取管理员的私有报告。
+共享接收者不能读取或修改计划，管理员隐藏规则保持不变。
 
 `POST /api/v1/ip-quality` 接受 `{"agent_id":"agt_…"}`，返回普通任务对象：
 创建为 `201`，复用同账号同节点的未完成检测为 `200` 且 `reused=true`。
@@ -506,7 +508,9 @@ Agent 在 `result.result.ip_quality.reports` 发送一至两个上游 JSON 对�
 结构化结果总上限 128 KiB；各对象必须有完整公网 IP 的 `Head` 及对象类型的
 `Info`、`Type`、`Score`、`Factor`、`Media`、`Mail`，地址族不能重复。
 控制面再次验证后与任务状态原子保存，才发送 `result_ack`；
-仅设置 `success=true` 而没有有效报告会记为失败。Agent 的持久缓存支持断线/重启
+仅设置 `success=true` 而没有有效报告会记为失败。JSONB 无法表示的 Unicode、
+数字或超出存储大小限制的报告同样记为失败并确认，不让坏数据反复阻断 WSS；
+数据库故障等非数据错误仍允许重传。Agent 的持久缓存支持断线/重启
 后复用报告并使用当前 lease ID 重传，不把报告塞入会截断的普通 `output`。
 
 ## Webhook 事件

@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/netip"
 	"time"
-	_ "time/tzdata" // Date-scoped history must also work on minimal Agent/panel images.
 	"unicode/utf8"
 )
 
@@ -125,28 +124,4 @@ func NormalizeIPQualityResult(input *IPQualityResult) (IPQualityResult, error) {
 		return IPQualityResult{}, errors.New("encoded IPQuality result exceeds the size limit")
 	}
 	return result, nil
-}
-
-// IPQualityDateRange uses local calendar boundaries (including DST), while
-// persistence and task timestamps remain UTC. Empty timezone means UTC.
-func IPQualityDateRange(date, timezone string) (time.Time, time.Time, error) {
-	if len(date) != len(time.DateOnly) {
-		return time.Time{}, time.Time{}, errors.New("date must use YYYY-MM-DD")
-	}
-	day, err := time.Parse(time.DateOnly, date)
-	if err != nil {
-		return time.Time{}, time.Time{}, errors.New("date must be a valid YYYY-MM-DD")
-	}
-	if timezone == "" {
-		timezone = "UTC"
-	}
-	if len(timezone) > 100 || timezone == "Local" {
-		return time.Time{}, time.Time{}, errors.New("timezone must be an IANA time zone")
-	}
-	location, err := time.LoadLocation(timezone)
-	if err != nil {
-		return time.Time{}, time.Time{}, errors.New("timezone must be an IANA time zone")
-	}
-	start := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, location)
-	return start.UTC(), start.AddDate(0, 0, 1).UTC(), nil
 }

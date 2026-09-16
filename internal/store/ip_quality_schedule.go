@@ -13,8 +13,10 @@ import (
 
 func (s *Store) ListIPQualitySchedules(ctx context.Context) ([]core.IPQualitySchedule, error) {
 	args := []any{}
-	where := ownerClause(ctx, "q.owner_id", &args)
-	where += agentAdministrationClause(ctx, "q.agent_id", &args)
+	// A plan controls the whole node, even when an administrator enabled it.
+	// Its state follows host-management visibility, not the submitter's private
+	// report workspace. Do not expose the submitter identity or report data.
+	where := agentAdministrationClause(ctx, "q.agent_id", &args)
 	rows, err := s.pool.Query(ctx, `SELECT q.agent_id,q.enabled,q.next_run_at
 		FROM ip_quality_schedules q JOIN agents a ON a.id=q.agent_id
 		WHERE a.revoked_at IS NULL`+where+` ORDER BY q.agent_id`, args...)

@@ -155,4 +155,38 @@ func TestIPQualityAPIAndWebSocketLifecycle(t *testing.T) {
 	if strings.Contains(reader.Body.String(), "203.0.113.1") {
 		t.Fatal("read-only token inherited another principal's report")
 	}
+
+	// An otherwise valid result that JSONB cannot store must be ACKed as a
+	// failed task, and the same authenticated connection must remain usable.
+	bad := core.IPQualityResult{Reports: []json.RawMessage{
+		json.RawMessage(`{"Head":{"IP":"203.0.113.1"},"Info":{"Organization":"provider\u0000value"},"Type":{},"Score":{},"Factor":{},"Media":{},"Mail":{}}`),
+	}}
+	for _, test := range []struct {
+		report core.IPQualityResult
+		status core.TaskStatus
+	}{{bad, core.TaskFailed}, {report, core.TaskSucceeded}} {
+		if err := json.Unmarshal(call("POST", "/ip-quality", "quality-admin", input, 201).Body.Bytes(), &task); err != nil {
+			t.Fatal(err)
+		}
+		if err := wsjson.Read(ctx, connection, &message); err != nil || message.Type != core.WireTask ||
+			message.Task == nil || message.Task.ID != task.ID {
+			t.Fatalf("follow-up task = %+v %v", message, err)
+		}
+		if err := wsjson.Write(ctx, connection, core.WireMessage{Type: core.WireResult, Result: &core.TaskResultEnvelope{
+			TaskID: task.ID, Result: core.TaskResultRequest{LeaseID: message.Task.LeaseID, Success: true, IPQuality: &test.report},
+		}}); err != nil {
+			t.Fatal(err)
+		}
+		if err := wsjson.Read(ctx, connection, &message); err != nil || message.Type != core.WireResultAck || message.TaskID != task.ID {
+			t.Fatalf("unsavable/follow-up result was not acknowledged: %+v %v", message, err)
+		}
+		var history core.IPQualityHistory
+		if err := json.Unmarshal(call("GET", "/ip-quality?date="+day, "quality-admin", nil, 200).Body.Bytes(), &history); err != nil {
+			t.Fatal(err)
+		}
+		if len(history.Records) != 1 || history.Records[0].TaskID != task.ID || history.Records[0].Status != test.status ||
+			(history.Records[0].Result != nil) != (test.status == core.TaskSucceeded) {
+			t.Fatalf("follow-up history: %+v", history)
+		}
+	}
 }

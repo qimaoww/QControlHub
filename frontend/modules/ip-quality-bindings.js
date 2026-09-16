@@ -1,10 +1,16 @@
 import { bindEvent } from "./refresh.js";
-import { ipQualityToday, nextIPQualityDay } from "./ip-quality-model.js";
+import { ipQualityToday, nextIPQualityDay, validIPQualityDate } from "./ip-quality-model.js";
 
 export function createIPQualityBindings({ state, load, runCheck, setSchedule }) {
   return () => {
     const input = document.querySelector("[data-ip-quality-date]");
-    bindEvent(input, "change", () => { void load(input.value); });
+    bindEvent(input, "change", () => {
+      if (!validIPQualityDate(input.value) || input.value > ipQualityToday()) {
+        input.value = state.data.ipQualityDate || ipQualityToday();
+        return;
+      }
+      void load(input.value);
+    });
     document.querySelectorAll("[data-ip-quality-day]").forEach((button) => {
       bindEvent(button, "click", () => {
         const date = nextIPQualityDay(state.data.ipQualityDate, Number(button.dataset.ipQualityDay));

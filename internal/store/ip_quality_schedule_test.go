@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -153,5 +154,57 @@ func TestIPQualitySchedulePurgeAndAdministratorDemotion(t *testing.T) {
 	}
 	if tasks, err := db.ListTasks(admin, agent.ID, 100); err != nil || len(tasks) != 0 {
 		t.Fatalf("former administrator scheduled another owner's node: %+v %v", tasks, err)
+	}
+}
+
+func TestIPQualityOwnerCanSeeAndDisableAdministratorSchedule(t *testing.T) {
+	db, ctx, _ := isolatedConfigScopeStore(t)
+	_, owner := sharedTestUser(t, db, ctx, "quality-plan-owner")
+	recipient, shared := sharedTestUser(t, db, ctx, "quality-plan-shared")
+	_, unrelated := sharedTestUser(t, db, ctx, "quality-plan-unrelated")
+	agent, _ := enrollTaskTestAgent(t, owner, db)
+	qualityHeartbeat(t, db, ctx, agent.ID)
+	sharedTestAllocation(t, db, ctx, recipient.ID, agent.ID, 0, 25000)
+	admin := WithConfigScope(ctx, "", true)
+	if _, err := db.SetIPQualitySchedule(admin, agent.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if schedules, err := db.ListIPQualitySchedules(owner); err != nil ||
+		len(schedules) != 1 || !schedules[0].Enabled || schedules[0].AgentID != agent.ID {
+		t.Fatalf("owner cannot see administrator's host-wide plan: %+v %v", schedules, err)
+	}
+	for name, scoped := range map[string]context.Context{"share": shared, "unrelated": unrelated} {
+		if schedules, err := db.ListIPQualitySchedules(scoped); err != nil || len(schedules) != 0 {
+			t.Fatalf("%s can see another host's plan: %+v %v", name, schedules, err)
+		}
+	}
+	if err := db.QueueDueIPQualityChecks(ctx, time.Now().Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	tasks, err := db.ListTasks(admin, agent.ID, 100)
+	if err != nil || len(tasks) != 1 {
+		t.Fatalf("administrator's plan did not run: %+v %v", tasks, err)
+	}
+	day := tasks[0].CreatedAt.Format(time.DateOnly)
+	if records, err := db.ListIPQualityRecords(owner, day, "UTC"); err != nil || len(records) != 0 {
+		t.Fatalf("plan visibility exposed the administrator's private task: %+v %v", records, err)
+	}
+	if _, err := db.pool.Exec(ctx, `UPDATE agents SET admin_hidden=true WHERE id=$1`, agent.ID); err != nil {
+		t.Fatal(err)
+	}
+	if schedules, err := db.ListIPQualitySchedules(admin); err != nil || len(schedules) != 0 {
+		t.Fatalf("administrator saw a hidden node's plan: %+v %v", schedules, err)
+	}
+	if schedules, err := db.ListIPQualitySchedules(owner); err != nil || len(schedules) != 1 || !schedules[0].Enabled {
+		t.Fatalf("hiding a node hid its plan from its owner: %+v %v", schedules, err)
+	}
+	if schedule, err := db.SetIPQualitySchedule(owner, agent.ID, false); err != nil || schedule.Enabled {
+		t.Fatalf("owner cannot disable administrator's plan: %+v %v", schedule, err)
+	}
+	if err := db.QueueDueIPQualityChecks(ctx, time.Now().Add(48*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if tasks, err := db.ListTasks(ctx, agent.ID, 100); err != nil || len(tasks) != 1 {
+		t.Fatalf("disabled plan queued more work: %+v %v", tasks, err)
 	}
 }

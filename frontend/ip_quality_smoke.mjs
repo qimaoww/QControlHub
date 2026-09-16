@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createIPQualityController } from "./modules/ip-quality-controller.js";
 import { createIPQualityView } from "./modules/ip-quality-view.js";
+import { createIPQualityReportView } from "./modules/ip-quality-report-view.js";
 import { ipQualityToday, validIPQualityDate, nextIPQualityDay, ipQualityValue, ipQualitySummary } from "./modules/ip-quality-model.js";
 
 assert.equal(validIPQualityDate("2026-02-30"), false);
@@ -42,15 +43,33 @@ render({ date: "2025-09-16", timezone: "UTC", error: "无法读取", agents: [],
 assert.ok(!markup.includes("203.0.113.1"), "failed reads must never create example nodes");
 assert.ok(!markup.includes("data-ip-quality-run"));
 
+const renderReport = createIPQualityReportView({ esc });
+const blacklistReport = {
+  ...report,
+  Mail: { ...report.Mail, DNSBlacklist: { Total: 439, Clean: 411, Marked: 28, Blacklisted: 0 } },
+};
+assert.ok(renderReport(blacklistReport).includes("<dt>干净</dt><dd>411</dd>"));
+const ipv6Report = { ...blacklistReport, Head: { ...report.Head, IP: "2001:db8::1" } };
+const originalIPv6Report = JSON.stringify(ipv6Report);
+const ipv6Markup = renderReport(ipv6Report);
+assert.ok(ipv6Markup.includes("未检测：当前上游仅查询 IPv4 DNS 黑名单"));
+assert.ok(!ipv6Markup.includes("<dt>干净</dt>"), "IPv4 blacklist counts were attributed to IPv6");
+assert.ok(ipv6Markup.includes("&quot;Total&quot;: 439"), "source JSON lost the upstream values");
+assert.equal(JSON.stringify(ipv6Report), originalIPv6Report, "rendering rewrote the source report");
+
 const originalDocument = globalThis.document;
 globalThis.document = { querySelector: () => null, querySelectorAll: () => [] };
 try {
   const state = { data: {}, route: "ip-quality", navigationEpoch: 0 };
   const views = [], calls = [], notices = [], gates = new Map();
+  const timers = new Map();
+  let timerID = 0;
   let confirmation = true, failReads = false, mutations = 0, permitWrites = true;
   const ctx = {
     state, can: () => permitWrites, notify: (...args) => notices.push(args),
-    confirmAction: async () => confirmation, setTimer: () => 1, clearTimer: () => {},
+    confirmAction: async () => confirmation,
+    setTimer: (callback) => { timers.set(++timerID, callback); return timerID; },
+    clearTimer: (id) => { timers.delete(id); },
     api: async (path, options = {}) => {
       calls.push({ path, options });
       if (options.method) { mutations += 1; return { id: "queued" }; }
@@ -68,9 +87,17 @@ try {
   assert.deepEqual(views.at(-1).agents.map((item) => item.id), ["alpha"]);
   assert.ok(calls.some((call) => call.path.includes("timezone=")));
   const count = calls.length;
+  const scheduledTimer = timerID;
+  await controller.load("");
   await controller.load("2026-02-30");
   await controller.load(nextIPQualityDay(ipQualityToday(), 1));
   assert.equal(calls.length, count, "invalid/future dates requested the API");
+  assert.equal(state.data.ipQualityDate, ipQualityToday(), "invalid date replaced the active date");
+  assert.equal(timers.size, 1, "invalid date stopped automatic refresh");
+  assert.ok(timers.has(scheduledTimer), "invalid date replaced the pending poll");
+  await timers.get(scheduledTimer)();
+  assert.equal(calls.length, count + 2, "polling did not continue after an invalid date");
+  assert.equal(timers.size, 1, "polling duplicated its timer");
 
   function gate(day) {
     let resolve;
