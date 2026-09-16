@@ -48,6 +48,7 @@ func DiscoverMainlandAccessPolicies(engine core.Engine, content string) []Mainla
 		nameField, kindField, portField = "tag", "protocol", "port"
 	case core.EngineSingBox:
 		entries, _ = root["inbounds"].([]any)
+		entries = append(append([]any(nil), entries...), singBoxRoutableEndpoints(root)...)
 		nameField, kindField, portField = "tag", "type", "listen_port"
 	case core.EngineShadowsocksRust:
 		// ssserver stores one service at the document root or several services
@@ -118,6 +119,9 @@ func ApplyMainlandAccessPolicyWithPrefixes(engine core.Engine, content string, p
 	}
 	if !mainlandInboundExists(engine, root, policy.Tag, policy.Port) {
 		return "", errors.New("当前配置中不存在匹配的入站标签和端口")
+	}
+	if policy.BlockMainlandSource && mainlandWireGuardTarget(engine, root, policy.Tag) {
+		return "", errors.New("WireGuard 路由只能识别隧道内源地址，公网来源限制须在节点防火墙配置")
 	}
 	var err error
 	switch engine {

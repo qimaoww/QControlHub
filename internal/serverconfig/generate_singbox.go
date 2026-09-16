@@ -7,6 +7,9 @@ import (
 )
 
 func generateSingBox(input Input) (string, error) {
+	if input.Protocol == ProtocolWireGuard {
+		return generateSingBoxEndpoint(input)
+	}
 	inbound := map[string]any{
 		"tag": input.Tag, "listen": input.Listen, "listen_port": input.Port,
 	}
@@ -92,6 +95,15 @@ func parseSingBox(content string) (Input, bool) {
 	}
 	inbound := firstSupportedInbound(core.EngineSingBox, root["inbounds"], "type")
 	if inbound == nil {
+		if endpoints, ok := root["endpoints"].([]any); ok {
+			for _, raw := range endpoints {
+				entry := mapValue(raw)
+				if parsed, valid := parseSingBoxEndpointProtocol(entry); valid {
+					parsed.BlockMainlandDestination, parsed.BlockMainlandSource = mainlandSingBoxFlags(root, parsed.Tag)
+					return parsed, true
+				}
+			}
+		}
 		return Input{}, false
 	}
 	input := Input{

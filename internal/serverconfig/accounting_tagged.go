@@ -11,6 +11,17 @@ import (
 
 func prepareTaggedAccounting(engine core.Engine, root map[string]any, plan *AccountingPlan, forceMarks bool) error {
 	inbounds, _ := root["inbounds"].([]any)
+	if engine == core.EngineSingBox {
+		var err error
+		inbounds, err = singBoxAccountingEntries(root)
+		if err != nil {
+			return err
+		}
+		endpoints, _ := root["endpoints"].([]any)
+		// Endpoint byte counters are not exposed by the core statistics API.
+		// Route every listener through real, marked per-port outbound copies.
+		forceMarks = forceMarks || len(endpoints) > 0
+	}
 	outbounds, _ := root["outbounds"].([]any)
 	if len(outbounds) == 0 {
 		return fmt.Errorf("no explicit default outbound")
@@ -35,7 +46,7 @@ func prepareTaggedAccounting(engine core.Engine, root map[string]any, plan *Acco
 	if route == nil {
 		route = map[string]any{}
 	}
-	if route["balancers"] != nil || root["endpoints"] != nil {
+	if route["balancers"] != nil || (xray && root["endpoints"] != nil) {
 		return fmt.Errorf("balancer/endpoint routing requires explicit accounting mapping")
 	}
 	if root["reverse"] != nil {

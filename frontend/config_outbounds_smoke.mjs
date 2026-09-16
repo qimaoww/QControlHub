@@ -60,6 +60,50 @@ for (const engine of ["xray", "sing-box"]) {
   assert.throws(()=>outboundPreset(engine, "vless", {...values, security:"none", flow:"xtls-rprx-vision"}), /Vision/);
   assert.throws(()=>outboundPreset(engine, "vless", {...values, transport:"ws", flow:"xtls-rprx-vision"}), /Vision/);
 }
+for (const mixed of [false, true]) {
+  const selected = {tag:"wg", port:51820}, other = {tag:"other", port:1080};
+  const endpoint = {type:"wireguard", tag:selected.tag, listen_port:selected.port};
+  const sibling = {type:mixed ? "socks" : "wireguard", tag:other.tag, listen_port:other.port};
+  const document = {
+    ...(mixed ? {inbounds:[sibling]} : {}),
+    endpoints:mixed ? [endpoint] : [endpoint, sibling],
+    outbounds:[{type:"direct", tag:"direct"}, {type:"direct", tag:"qch-trf-51820-abcdef012345"}],
+    route:{final:"direct", rules:[{inbound:["wg"], domain:["policy.test"], outbound:"direct"}]},
+  };
+  const base = JSON.stringify(document);
+  assert.equal(inboundOutbound(base, "sing-box", selected), "");
+  assert.equal(inboundOutbound(changeInboundOutbound(base, "sing-box", selected, "bind", -1, "direct"), "sing-box", selected), "direct");
+  const bound = changeInboundOutbound(base, "sing-box", selected, "add", -1, '{"type":"direct","tag":"wg-exit","custom":9007199254740993}');
+  assert(bound.includes("9007199254740993"), "endpoint outbound edit lost native precision");
+  assert.equal(inboundOutbound(bound, "sing-box", selected), "wg-exit");
+  assert.equal(JSON.parse(bound).outbounds[1].tag, "wg-exit");
+  const renamed = changeInboundOutbound(bound, "sing-box", selected, "modify", 1, '{"type":"direct","tag":"renamed"}');
+  assert.equal(inboundOutbound(renamed, "sing-box", selected), "renamed");
+  const removed = changeInboundOutbound(renamed, "sing-box", selected, "delete", 1, "");
+  assert.equal(inboundOutbound(removed, "sing-box", selected), "");
+  assert.deepEqual(JSON.parse(removed), document, "endpoint outbound lifecycle changed unrelated native configuration");
+  const shared = bindOutbound(bound, "sing-box", other, "wg-exit");
+  assert.throws(() => changeInboundOutbound(shared, "sing-box", selected, "modify", 1, '{"type":"direct","tag":"renamed"}'), /共享/);
+  assert.throws(() => changeInboundOutbound(shared, "sing-box", selected, "delete", 1, ""), /共享/);
+  const defaultBound = bindOutbound(base, "sing-box", selected, "direct");
+  assert.throws(() => changeInboundOutbound(defaultBound, "sing-box", selected, "delete", 0, ""), /默认或共享/);
+  const referenced = JSON.parse(bound);
+  referenced.endpoints[0].detour = "wg-exit";
+  assert.throws(() => changeInboundOutbound(JSON.stringify(referenced), "sing-box", selected, "delete", 1, ""), /共享/);
+  assert.throws(() => bindOutbound(base, "sing-box", {...selected, port:51821}, "direct"), /入站已变化/);
+  for (const section of ["inbounds", "endpoints"]) {
+    const duplicate = structuredClone(document);
+    (duplicate[section] ||= []).push({...endpoint, listen_port:51821});
+    assert.throws(() => inboundOutbound(JSON.stringify(duplicate), "sing-box", selected), /入站已变化/);
+  }
+  const blocked = structuredClone(document);
+  blocked.route.rules.push({action:"reject"});
+  assert.throws(() => bindOutbound(JSON.stringify(blocked), "sing-box", selected, "direct"), /拦截/);
+  const multiInbound = structuredClone(document);
+  multiInbound.route.rules.push({inbound:["wg", "other"], outbound:"direct"});
+  assert.throws(() => bindOutbound(JSON.stringify(multiInbound), "sing-box", selected, "direct"), /多入站共享/);
+  assert.throws(() => inboundOutbound(base, "xray", selected), /入站已变化/, "Xray must not treat endpoints as inbounds");
+}
 assert.throws(()=>outboundPreset("sing-box", "vless", {tag:"t", transport:"xhttp"}, false), /传输/);
 assert.throws(()=>outboundPreset("xray", "hysteria2", {}, false), /不支持/);
 assert.deepEqual(outboundPeers([{agent_id:"self",profiles:[{tag:"private"}]},{agent_id:"other",profiles:[{tag:"peer"}]}],"self").map(peer=>peer.tag), ["peer"]);

@@ -45,7 +45,7 @@ func SharedTrafficEndpoints(engine core.Engine, content string) ([]core.PortTraf
 			}
 		}
 	case core.EngineSingBox:
-		allowed = "$schema log dns ntp inbounds outbounds route experimental"
+		allowed = "$schema log dns ntp inbounds endpoints outbounds route experimental"
 		listKey, portKey, nameKey, kindKey = "inbounds", "listen_port", "tag", "type"
 		if experimental := mapValue(root["experimental"]); experimental != nil {
 			for key := range experimental {
@@ -79,6 +79,14 @@ func SharedTrafficEndpoints(engine core.Engine, content string) ([]core.PortTraf
 		}
 	}
 	entries, ok := root[listKey].([]any)
+	if engine == core.EngineSingBox {
+		var err error
+		entries, err = singBoxAccountingEntries(root)
+		if err != nil {
+			return nil, err
+		}
+		ok = true
+	}
 	if engine == core.EngineShadowsocksRust && root[listKey] == nil {
 		entries, ok = []any{root}, true
 	}
@@ -129,9 +137,9 @@ func SharedTrafficEndpoints(engine core.Engine, content string) ([]core.PortTraf
 		case core.EngineMihomo:
 			kinds = "http shadowsocks vmess vless trojan snell sudoku hysteria2 tuic anytls tunnel"
 		case core.EngineXray:
-			kinds = "http shadowsocks vmess vless trojan hysteria tunnel dokodemo-door"
+			kinds = "http shadowsocks vmess vless trojan hysteria tunnel dokodemo-door wireguard"
 		case core.EngineSingBox:
-			kinds = "http shadowsocks vmess vless trojan hysteria2 tuic anytls direct"
+			kinds = "http shadowsocks vmess vless trojan hysteria2 tuic anytls direct wireguard"
 		}
 		if kindKey != "" && !containsSharedKey(kinds, kind) {
 			return nil, fmt.Errorf("shared listener type %q is not supported", kind)

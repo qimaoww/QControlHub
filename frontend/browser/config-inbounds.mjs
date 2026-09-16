@@ -1,19 +1,25 @@
 import { assert, pause, waitFor, createConfigFixture as fixture } from "./config-fixture.mjs";
 import { testConfigOutboundsRuntime } from "./config-outbounds.mjs";
 import { testCommonConfigRuntime } from "./config-common.mjs";
+import { testWireGuardConfigRuntime } from "./config-wireguard.mjs";
 
 export async function testConfigInboundsRuntime(preview = false) {
   if (preview) {
     const params = new URLSearchParams(location.search);
-    window.inboundFixture = await fixture(params.get("engine") || "xray", {missing:params.has("missing"), multi:params.has("multi")});
+    window.inboundFixture = await fixture(params.get("engine") || "xray", {missing:params.has("missing"), multi:params.has("multi"), protocol:params.get("protocol")});
     if (params.has("common")) window.inboundFixture.common(params.get("common") || "modify");
     else if (params.has("outbound")) {
       window.inboundFixture.select("first");
       document.querySelector(`[data-outbound-action="${params.get("outbound") || "add"}"]`).click();
     }
+    else if (params.has("modify")) {
+      window.inboundFixture.select("second");
+      window.inboundFixture.click("modify");
+    }
     else if (params.has("modal")) window.inboundFixture.click("add");
     return;
   }
+  await testWireGuardConfigRuntime();
   for (const engine of ["xray", "sing-box", "mihomo", "ss-rust"]) {
     const test = await fixture(engine);
     const action = kind => document.querySelector(`[data-inbound-action="${kind}"]`);

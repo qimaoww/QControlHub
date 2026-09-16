@@ -53,7 +53,15 @@ func BuildClientProfileNamed(input Input, address, serverName, nodeName string) 
 	if input.Port < 1 || input.Port > 65535 {
 		return ClientProfile{}, errors.New("客户端接入端口必须在 1 到 65535 之间")
 	}
-	if err := validateCredential(input); err != nil {
+	if input.Protocol == ProtocolWireGuard {
+		if err := validateWireGuardInput(input, true); err != nil {
+			return ClientProfile{}, err
+		}
+	} else if input.Protocol == ProtocolTailscale {
+		return ClientProfile{}, errors.New("Tailscale 登录状态生命周期尚未接入，暂不提供客户端配置")
+	} else if input.Protocol == ProtocolOpenVPNServer {
+		return ClientProfile{}, errors.New("OpenVPN 证书生命周期尚未接入，暂不提供客户端配置")
+	} else if err := validateCredential(input); err != nil {
 		return ClientProfile{}, err
 	}
 	if input.Transport == "" {
@@ -85,6 +93,13 @@ func BuildClientProfileNamed(input Input, address, serverName, nodeName string) 
 	}
 
 	switch input.Protocol {
+	case ProtocolWireGuard:
+		profile.Format = "WireGuard native config"
+		profile.URI, err = wireguardClientConfig(input, address)
+		if err != nil {
+			return ClientProfile{}, err
+		}
+		profile.SubscriptionCompatible = false
 	case ProtocolShadowsocks, ProtocolSS2022:
 		identity := base64.RawURLEncoding.EncodeToString([]byte(input.Method + ":" + input.Credential))
 		profile.Format = "Shadowsocks SIP002 URI"

@@ -2,7 +2,7 @@
 
 配置页保留节点侧栏、顶部内核栏、公共/入站文件切换、源码编辑和合并预览。点击文件卡片只切换源码或选中目标，不自动打开弹窗。“＋ 增加入站”独立放在源码工具栏的“合并预览”左侧，始终显示，不受是否首次配置或当前文件选择影响；没有合并预览的内核也在同一工具栏提供该按钮。“限制”旁的操作菜单随选择切换：选中入站时提供“修改入站 / 删除入站”，新增和修改复用预设表单弹窗，删除先确认当前选中的标签与端口；选中公共配置时始终只提供“增加通用配置项 / 修改通用配置项 / 删除通用配置项”。合并预览不视为公共配置，也不可修改或删除入站。高级字段、版本历史、已部署差异及客户端入口位于源码编辑区下方，不再提供独立的内核预设导航。
 
-通用配置弹窗使用配置项下拉选择与字段表单：增加只列出尚未设置的项，修改和删除只列出已设置的项，操作类型由菜单确定。删除先只读展示当前值，再确认所选字段与校验/部署影响；不会删除整个公共文件。切换字段保留各自草稿，草稿按节点、内核、版本、字段和操作隔离。入站结构（包括 Mihomo 顶层监听器）和包含成套出口的 `outbounds` 不作为通用字段操作，仍通过入站、源码或高级字段编辑；SS Rust 只展示全局与可覆盖默认值，不混入端口字段。
+通用配置弹窗使用配置项下拉选择与字段表单：增加只列出尚未设置的项，修改和删除只列出已设置的项，操作类型由菜单确定。删除先只读展示当前值，再确认所选字段与校验/部署影响；不会删除整个公共文件。切换字段保留各自草稿，草稿按节点、内核、版本、字段和操作隔离。入站结构（包括 Mihomo 顶层监听器、sing-box `endpoints`）和包含成套出口的 `outbounds` 不作为通用字段操作，仍通过入站、源码或高级字段编辑；SS Rust 只展示全局与可覆盖默认值，不混入端口字段。
 
 管理员可以先通过 WSS 读取节点白名单路径中的实际配置文件；只有文件权限安全、结构正确且通过目标节点真实内核校验时，控制面才会把它作为短期快照载入源码编辑器。源码有未保存修改，或节点快照与数据库当前版本不同，须先保存并核对源码，才能使用入站或字段操作。旧 `#agents`、`#preset-node-{id}`、`#agent-config?agent=...&engine=...` 链接兼容跳转到配置页；`#node-{id}` 仍打开节点设置。
 
@@ -27,6 +27,7 @@
 | Snell v5 | 是 | 否 | 否 | 否 | 高位端口、PSK；默认 UDP、连接复用和客户端 TCP Fast Open |
 | Snell v5 + ShadowTLS v3 | 是 | 否 | 否 | 否 | Snell v5 参数、独立 ShadowTLS 用户与强密码；默认可信握手目标和严格模式 |
 | Sudoku | 是 | 否 | 否 | 否 | 高位端口、上游兼容 Ed25519 Master Public / Available Private 分割密钥、AEAD、5–15% Padding、HTTPMask |
+| WireGuard | 否 | 是 | 是（原生 endpoint） | 否 | 高位 UDP 端口、独立的服务端/客户端 X25519 密钥对、预共享密钥 |
 | 端口转发 | 是（`tunnel` listener） | 是（`tunnel` inbound） | 是（`direct` inbound） | 否 | 高位监听端口；默认转发到 `127.0.0.1:80`，可选 TCP、UDP 或双协议 |
 
 随机端口来自 20000–49151。密码、PSK、UUID、路径、X25519 密钥和 Short ID 均使用 Go `crypto/rand`。点击“重新生成参数”会直接读取当前表单并只替换随机字段，不会重载页面或恢复协议默认值；例如当前选择 SS2022 AES-128 时会保留该方法并生成匹配的 16 字节 PSK，端口转发方案会保留当前目标地址、目标端口和网络协议。标签、端口、用户名、凭据、路径、Reality 密钥对和 Short ID 也提供就地生成按钮，其中密钥对始终原子更新 Public Key 与 Private Key。页面中的所有方案字段仍可自定义。
@@ -39,9 +40,42 @@ Xray Reality 的 `minClientVer` 始终显式写入，默认 `0.0.0`。Xray v26.7
 
 Snell 预设只生成 Mihomo 当前支持的 v5，不提供旧版本或 v6 字段。ShadowTLS 方案固定 v3，PSK 与 ShadowTLS 密码相互独立，服务端启用严格模式，客户端不生成证书校验绕过。Sudoku 预设只提供 `chacha20-poly1305` 和 `aes-128-gcm`，不提供无 AEAD 的 `none`；服务端只保存 Master Public Key，64 字节 Available Private Key 按配置版本和入站标签单独加密保存，仅用于生成客户端 YAML。HTTPMask 服务端固定使用上游推荐的 `auto`，客户端可选经过 Mihomo 双端真实流量验证的 `stream`、`poll`、`auto` 或 `ws`；当前 Mihomo 1.19.30 的 `legacy`、`custom-table` 与 `custom-tables` 虽能通过配置检查，但双端传输会失败或损坏响应，预设因此不提供。四种内置 Table Type、raw TCP、纯/压缩下行、两种安全 AEAD 与原生 `multiplex` 均已验证；原生复用不与通用 SMux 或 TCP Brutal 叠加。
 
+### WireGuard 与原生端点
+
+WireGuard 预设面向单客户端服务端：Xray 使用原生 `wireguard` inbound，sing-box 使用
+`system: false` 的用户态 `wireguard` endpoint。sing-box 需 1.11+，且二进制同时包含
+`with_wireguard`、`with_gvisor`；Agent 先检查实际版本和构建标签，再执行原生配置检查。
+sing-box 只提供 `listen_port`，固定监听所有接口，不提供可被忽略的监听地址选项。
+预设不创建系统网卡、不调整主机路由，也不自动放行防火墙。
+
+默认客户端地址为 `10.66.66.2/32`、客户端路由为 `0.0.0.0/0`；sing-box 服务端隧道地址为
+`10.66.66.1/24`。可配置一个 IPv4 和/或一个 IPv6 客户端地址，须使用 `/32` 或 `/128`，
+sing-box 服务端须配置对应地址族且不能与客户端使用同一地址。启用 IPv6 时 MTU 至少为 1280。
+预共享密钥可留空；客户端 Keepalive 默认 25 秒，明确填写 0 会关闭并在保存、回填和导出时保留。
+Keepalive 不写入没有固定远端地址的服务端 peer。
+早期草稿若生成了非零的 `peers[].persistent_keepalive_interval`，需先在源码编辑器删除该
+服务端字段再保存，才能重新使用预设表单；客户端 Keepalive 仍从匹配的加密元数据恢复。
+
+客户端私钥只按配置版本和标签单独加密保存，不进入节点配置或 Agent 任务。
+服务端私钥、客户端公钥、PSK、地址和 MTU 以源配置为准；客户端元数据只补充匹配当前 peer
+的私钥、客户端路由和 Keepalive。源配置轮换 peer 公钥后，旧私钥不再自动回填；
+须提供匹配私钥或重新生成密钥对。恢复历史版本会恢复该版本对应的客户端元数据。
+密钥对的就地生成按钮原子更新公私钥，修改、改名、删除及任务创建与版本检查在同一事务内完成。
+
+sing-box 的入站和端点共用页面操作，但保留原生列表：端点及其专用出口位于
+`endpoints/<tag>.json`，普通入站位于 `inbounds/<tag>.json`。跨列表重复标签或非零监听端口
+会拒绝。多 peer、带远端拨号地址、系统接口或其他自定义端点不转换成可编辑预设，
+须使用完整源码编辑；无法证明独立出口归属的配置不会被宣称支持双链路计量。
+用户态服务端 WireGuard 会生成实际的按端口标记出口，并支持与普通入站混合配置。
+Agent 新端点分片使用不可变的 `sources-v4-<sha256>`，旧 `sources-v3-*` 不改写；
+校验失败不激活配置，重启失败恢复上一份运行配置。
+
+Tailscale、OpenVPN Server 暂不开放预设、登录或客户端导出入口。原生端点可作为源码被识别和
+分片保留，但这不表示其部署、登录状态、证书生命周期或中继计量已受支持；这些能力仍待后续验收。
+
 ## 生成和部署
 
-生成器按内核输出原生格式：Mihomo 使用 `listeners` YAML，Xray 和 sing-box 使用 `inbounds` JSON。Shadowsocks Rust 的单入站片段在新增时合并为官方 `servers` 多端口 JSON；向旧单端口配置新增时自动保留旧端口并转换为多端口，重复端口会拒绝。端口转发分别生成 Mihomo `tunnel` listener、Xray `tunnel` inbound 和 sing-box `direct` inbound，并把统一的 TCP / UDP 选择转换为各内核的原生字段。保存时执行以下检查：
+生成器按内核输出原生格式：Mihomo 使用 `listeners` YAML，Xray 和 sing-box 使用 `inbounds` JSON，sing-box WireGuard 使用原生 `endpoints` JSON。Shadowsocks Rust 的单入站片段在新增时合并为官方 `servers` 多端口 JSON；向旧单端口配置新增时自动保留旧端口并转换为多端口，重复端口会拒绝。端口转发分别生成 Mihomo `tunnel` listener、Xray `tunnel` inbound 和 sing-box `direct` inbound，并把统一的 TCP / UDP 选择转换为各内核的原生字段。保存时执行以下检查：
 
 - 节点必须存在并声明对应内核能力；
 - 配置固定绑定到该节点和内核，不能部署到其他 Agent；
@@ -66,6 +100,9 @@ Agent 收到部署任务后仍会调用目标内核自身的配置检查命令�
 
 独立的“访问限制”页面按节点、内核、入站标签和实际监听端口管理两个开关：“禁止此入站访问大陆目标”和“禁止大陆来源连接此入站”。Mihomo、Xray 与 sing-box 均使用内核原生入站路由规则实现，不创建节点级全局防火墙规则，因此不会影响 QAgent 控制连接、内核更新、DNS 或同节点其他端口。新建 VLESS-XHTTP-Reality 与 VLESS-ENC-XHTTP-Reality-Vision 方案默认启用目标大陆限制；已有配置保持原状，由管理员明确保存后生效。
 
+WireGuard 支持目标限制，但不提供公网来源限制：内核路由看到的是隧道内地址，不能据此判断
+客户端公网来源。该来源开关不可新启用，旧规则可关闭；需要公网来源限制时须在节点防火墙配置。
+
 IPv4 地址使用 [misakaio/chnroutes2](https://github.com/misakaio/chnroutes2) 每小时更新的 BGP 聚合列表；该项目不提供 IPv6，因此 IPv6 使用 [gaoyifan/china-operator-ip](https://github.com/gaoyifan/china-operator-ip) 的每日 BGP 列表补齐。控制端下载后逐条校验 CIDR，最多缓存一小时；Mihomo 使用只含 CIDR 的远程 rule provider，Xray 和 sing-box 在保存时嵌入同一批已校验地址。规则只按 IP 地址匹配，不把域名后缀当作国家归属。
 
 ## 客户端接入资料
@@ -75,6 +112,9 @@ IPv4 地址使用 [misakaio/chnroutes2](https://github.com/misakaio/chnroutes2) 
 Shadowsocks 2022、VLESS、VMess、Trojan、Hysteria 2、TUIC v5 和 AnyTLS 使用各协议的分享 URI。Snell v5 与 Snell v5 + ShadowTLS v3 没有通用 URI，按 `jinqians/snell.sh` 和 Surge 的实际客户端格式生成单行 Surge 配置；Sudoku 按 Mihomo 原生字段生成单行流式 YAML。Sub-Store 会逐行识别 URI、Surge 和 Mihomo 节点，因此这两类原生配置也可在同步页面选择、按地址模式重命名并与普通 URI 一起同步；最终导出目标仍须支持相应协议。端口转发是节点侧监听与目标映射，不生成代理客户端分享资料。客户端对分享格式的支持可能因产品和版本不同而变化；无法直接导入时，应使用页面列出的逐项参数。分享值和认证字段默认以密码输入框遮罩，复制时无需先显示。
 
 客户端资料只包含连接所需的公开参数与用户凭据。Reality 服务端 Private Key、TLS 私钥路径和证书路径不会进入客户端 URI 或逐项参数。页面不会代替网络侧配置；部署完成后仍需确认 DNS 指向、证书覆盖域名，以及主机和上游防火墙已放行方案使用的 TCP / UDP 端口。
+
+WireGuard 的原生导出是包含 `[Interface]`、`[Peer]` 的客户端配置文本，不是分享 URI；
+其中包含客户端私钥及可选 PSK，应按敏感凭据保存。导出不会包含服务端私钥。
 
 ## 官方依据
 
@@ -87,8 +127,10 @@ Shadowsocks 2022、VLESS、VMess、Trojan、Hysteria 2、TUIC v5 和 AnyTLS 使�
 - [SUDOKU-ASCII upstream configuration](https://github.com/SUDOKU-ASCII/sudoku/blob/main/configs/README.zh_CN.md)
 - [Xray inbounds](https://xtls.github.io/config/inbound.html)
 - [Xray tunnel inbound](https://xtls.github.io/config/inbounds/tunnel.html)
+- [Xray WireGuard inbound](https://xtls.github.io/config/inbounds/wireguard.html)
 - [sing-box inbounds](https://sing-box.sagernet.org/configuration/inbound/)
 - [sing-box direct inbound](https://sing-box.sagernet.org/configuration/inbound/direct/)
+- [sing-box WireGuard endpoint](https://sing-box.sagernet.org/configuration/endpoint/wireguard/)
 - [sing-box JSON Schema](https://sing-box.sagernet.org/schema.json)
 
 页面底部的“高级字段”入口保留完整字段目录和官方参考链接；方案之外的字段与新版本选项也可直接在配置页源码中编辑。
