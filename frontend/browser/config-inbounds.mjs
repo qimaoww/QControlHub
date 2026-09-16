@@ -2,6 +2,7 @@ import { assert, pause, waitFor, createConfigFixture as fixture } from "./config
 import { testConfigOutboundsRuntime } from "./config-outbounds.mjs";
 import { testCommonConfigRuntime } from "./config-common.mjs";
 import { testWireGuardConfigRuntime } from "./config-wireguard.mjs";
+import { testPresetFieldLayoutRuntime } from "./preset-layout.mjs";
 
 export async function testConfigInboundsRuntime(preview = false) {
   if (preview) {
@@ -20,6 +21,7 @@ export async function testConfigInboundsRuntime(preview = false) {
     return;
   }
   await testWireGuardConfigRuntime();
+  await testPresetFieldLayoutRuntime();
   for (const engine of ["xray", "sing-box", "mihomo", "ss-rust"]) {
     const test = await fixture(engine);
     const action = kind => document.querySelector(`[data-inbound-action="${kind}"]`);

@@ -10,6 +10,12 @@ const form = await waitFor(() => document.querySelector("#settings-form"), "系�
   for (const link of document.querySelectorAll('[aria-label="设置目录"] a')) {
     assert.equal(link.querySelector("span").textContent, document.querySelector(`${link.hash} .settings-section-number`).textContent, "目录与设置分区编号须一致");
   }
+  assert.equal(form.querySelectorAll("[data-settings-state]").length, 1, "设置页只保留一处保存状态");
+  assert.equal(form.querySelector("header p:empty, .settings-toggle small:empty"), null, "省略说明后不应留下空文案行");
+  if (!mode.endsWith("-readonly")) {
+    assert.ok(form.querySelector("[data-settings-state]").getBoundingClientRect().height > 0,
+      "手机和桌面都应显示保存状态");
+  }
   if (new URLSearchParams(location.search).has("preview")) return;
   if (mode.endsWith("-readonly")) {
     assert.ok(inputs.every(input => input.disabled), "只读用户不得修改全局能力");

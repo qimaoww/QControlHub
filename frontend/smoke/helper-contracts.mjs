@@ -50,8 +50,8 @@ assert.match(accountingHTML({enforcement_error: `; ${scopeDiagnostic}`}), /traff
 assert.match(accountingHTML({enforcement_error: `${scopeDiagnostic}; read failed`}), /traffic-accounting-panel bad/);
 assert.match(accountingHTML({enforcement_available:false}), /暂未提供详细诊断/);
 assert.match(accountingHTML({enforcement_error:"<script>"}), /&lt;script>/);
-assert.match(accountingHTML({enforcement_error:"dual accounting unavailable: outbound tags must be present and unique"}), /新版 Agent 可自动补齐缺失标签/);
-assert.match(accountingHTML({enforcement_error:"dual accounting unavailable: outbounds[1].tag duplicates an earlier outbound; assign distinct tags and update the intended route targets"}), /多个出口使用了相同标签/);
+assert.match(accountingHTML({enforcement_error:"dual accounting unavailable: outbound tags must be present and unique"}), /新版 Agent 可补齐缺失项；重复标签须修改配置，不能合并计数/);
+assert.match(accountingHTML({enforcement_error:"dual accounting unavailable: outbounds[1].tag duplicates an earlier outbound; assign distinct tags and update the intended route targets"}), /出口标签重复.*使用不同标签并同步修改路由/);
 const dualAccountingHTML = accountingHTML({accounting:{source:"core-api",client_received:1,client_sent:2,target_received:3,target_sent:4}});
 assert.match(dualAccountingHTML, /不等同于本月总量/);
 assert.match(dualAccountingHTML, /<dl class="traffic-accounting-legs">/);
@@ -60,7 +60,8 @@ const mihomoAccountingHTML = accountingHTML({engine:"mihomo",accounting:{source:
 assert.match(mihomoAccountingHTML, /双链路 · 范围受限/);
 assert.match(mihomoAccountingHTML, /入口 \+ 已标记出口/);
 assert.match(mihomoAccountingHTML, /traffic-accounting-panel limited/);
-assert.match(mihomoAccountingHTML, /不表示当前一定存在漏计连接/);
+assert.match(mihomoAccountingHTML, /不代表已发生漏计/);
+assert.match(mihomoAccountingHTML, /非全局单播目标仅计入口，出口不计入、不补算或翻倍/);
 
 // Finish the imported async suites before these checks replace the global DOM.
 await import("../client_access_order_smoke.mjs");

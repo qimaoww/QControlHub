@@ -20,10 +20,10 @@ export function engineCapabilityToggles(selected, { supported = engines, writabl
     const pending = ["pending", "running"].includes(transition?.status);
     const failed = ["failed", "canceled"].includes(transition?.status);
     const hint = pending
-      ? `${transition.enabled ? "等待启动服务并开启能力" : "等待停止服务并关闭能力"}；离线节点上线后执行`
+      ? `${transition.enabled ? "启动成功后开启能力" : "停止成功后关闭能力"}；离线节点上线后执行`
       : failed
-        ? "上次启停失败或取消，能力未变更；可重试开关，详情见任务页"
-        : !available ? "Agent 未声明支持，请调整 Agent 安装配置后重新注册"
+        ? "上次启停失败或取消；可重试，详情见任务页"
+        : !available ? "请调整 Agent 安装配置后重新注册"
         : "";
     const hintID = `${node ? "node" : "default"}-capability-${engine}-hint`;
     const status = pending ? (transition.enabled ? "等待启动" : "等待停止") : failed ? "未变更" : !available ? "不支持" : "";

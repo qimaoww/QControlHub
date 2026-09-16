@@ -216,7 +216,7 @@ try {
     "client profile address family is not scoped to its own port",
   );
   assert.equal(
-    accessMarkup.includes("当前使用手动连接地址"),
+    accessMarkup.includes("使用手动地址中；恢复自动识别后可切换协议栈"),
     true,
     "a manual address does not lock the client profile family selector",
   );

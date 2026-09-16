@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { installCoreLogs } from "./modules/core-logs.js";
 import { createCoreLogCache } from "./modules/core-log-cache.js";
+import { createCoreLogView } from "./modules/core-log-view.js";
 
 const deferred = () => {
   let resolve, reject;
@@ -31,6 +32,33 @@ assert.equal(byteCache.get("a"), null, "byte budget also evicts snapshots below 
 const previousDocument = globalThis.document;
 globalThis.document = { querySelector: () => null, querySelectorAll: () => [] };
 try {
+  const policyState = { data: {} };
+  let policyMarkup = "", canReadSettings = true;
+  const policyView = createCoreLogView({
+    state: policyState, engines: ["xray"],
+    can: permission => permission !== "settings.read" || canReadSettings,
+    esc: value => String(value ?? ""), engineName: String, date: String,
+    shell: markup => { policyMarkup = markup; },
+  });
+  for (const days of [1, 3, 7, 14, 30]) {
+    policyState.data.settings = { core_log_minimum_level: "warning", core_log_retention_days: days };
+    policyView([], [], {});
+    assert.match(policyMarkup, new RegExp(`保存警告及以上 · 保留 ${days} 天`),
+      "the log page must use the account's actual retention period");
+    assert.equal((policyMarkup.match(/保留 \d+ 天/g) || []).length, 1);
+  }
+  for (const days of [undefined, null, 0, -1, 1.5, "unknown"]) {
+    policyState.data.settings.core_log_retention_days = days;
+    policyView([], [], {});
+    assert.doesNotMatch(policyMarkup, /保留 \d+ 天/, "unknown retention must not be fabricated");
+  }
+  policyState.data.settings = { core_log_minimum_level: "warning", core_log_retention_days: 30 };
+  canReadSettings = false;
+  policyView([], [], {});
+  assert.match(policyMarkup, /保存策略不可见/);
+  assert.doesNotMatch(policyMarkup, /保存警告及以上|保留 \d+ 天/,
+    "cached settings must not leak a policy after read permission is revoked");
+
   const state = { route: "core-logs", navigationEpoch: 1, data: { coreLogFilters: { agent_id: "alpha", limit: 2000 } } };
   const calls = [];
   let markup = "";

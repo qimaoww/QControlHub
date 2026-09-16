@@ -26,7 +26,7 @@ for (const scope of ["inbound", "global"]) {
   assert.match(html, /value-mode-set/);
   assert.match(html, /<option value="modify" selected>/);
   assert.match(html, /部署会重启整个 ssserver/);
-  assert.match(html, /仅检查配置结构/);
+  assert.match(html, /校验仅检查结构，不检查启动/);
   assert.equal(html.includes('id="inbound-field-form"'), scope === "inbound");
   assert.equal(html.includes('id="field-form"'), scope === "global");
   assert.ok(!html.includes('data-inbound-field="dns"'));
@@ -115,8 +115,8 @@ for (const mutation of ["add", "modify", "delete"]) {
 }
 const commonSSRust = renderCommonFieldStudio({engine:"ss-rust", fields:[fields[1]], selected:fields[1],
   value, config, catalog:{format:"JSON"}, mutation:"modify"});
-assert.match(commonSSRust, /已有端口覆盖保持不变/);
-assert.match(commonSSRust, /仅检查配置结构/);
+assert.match(commonSSRust, /未设置端口覆盖时继承默认值/);
+assert.match(commonSSRust, /校验仅检查结构，不检查启动/);
 assert.ok(!commonSSRust.includes("尚未选择端口"));
 
 const railBounds = { left: 0, right: 200, top: 0, bottom: 400 };

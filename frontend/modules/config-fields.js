@@ -61,7 +61,7 @@ export function renderFieldEditor({ selected, value, perPort = false, format = "
   return `<section class="field-canvas" data-refresh-key="${esc(refreshKey)}">
     <header><div class="field-editor-heading"><h2>${esc(selected.label)}</h2><code>${perPort ? "servers[]." : ""}${esc(selected.key)}</code></div><a href="${esc(selected.docs)}" target="_blank" rel="noopener noreferrer">文档 ↗</a></header>
     ${hint ? `<p class="field-scope-hint">${esc(hint)}</p>` : ""}${selected.description ? `<p class="field-description">${esc(selected.description)}</p>` : ""}
-    ${error ? renderFieldEmpty("字段暂不可编辑", `${error}；可返回配置页的完整源码检查配置。`) : `${inheritance}<form id="${perPort ? "inbound-field-form" : "field-form"}" data-refresh-key="${perPort ? "inbound" : "global"}-value-${esc(selected.key)}-${value.present ? "set" : "unset"}${locked ? `-${mutation}` : ""}">
+    ${error ? renderFieldEmpty("字段暂不可编辑", `${error}；请检查完整源码。`) : `${inheritance}<form id="${perPort ? "inbound-field-form" : "field-form"}" data-refresh-key="${perPort ? "inbound" : "global"}-value-${esc(selected.key)}-${value.present ? "set" : "unset"}${locked ? `-${mutation}` : ""}">
       <div class="field-mutation">${locked ? `<input type="hidden" name="mutation" value="${mutation}">` : `<label>操作<select name="mutation" data-refresh-key="${perPort ? "inbound" : "global"}-mutation-${esc(selected.key)}-${value.present ? "set" : "unset"}">${value.present ? '<option value="modify" selected>修改字段</option><option value="delete">删除字段</option>' : '<option value="add" selected>新增字段</option>'}</select></label>`}<span class="field-value-state">${value.present ? perPort ? "已设置端口值" : "已设置字段值" : "未单独设置"}</span></div>
       <label class="field-value-label">${deleting ? "当前 " : ""}${esc(format)} 字段值<textarea name="fragment" rows="${rows}" spellcheck="false"${deleting ? " readonly" : ""}>${esc(value.fragment)}</textarea></label>
       <footer>${note ? `<p class="field-editor-note">${esc(note)}</p>` : ""}<div><button class="button" type="submit" data-field-intent="validate">${deleting ? "删除" : "保存"}并校验</button><button class="button ${deleting ? "danger" : "primary"}" type="submit" data-field-intent="deploy">${deleting ? "删除" : "保存"}并部署</button></div></footer>
@@ -71,18 +71,18 @@ export function renderFieldEditor({ selected, value, perPort = false, format = "
 
 export function renderCommonFieldStudio({ engine, fields, selected, value, config, catalog, mutation }) {
   const hint = engine === "ss-rust"
-    ? "通用配置影响所有端口；默认值仅由未设置端口覆盖的端口继承，已有端口覆盖保持不变。"
-    : "仅编辑所选通用配置项；入站结构与成套出口请通过入站操作、源码或高级字段管理。";
-  const note = (mutation === "delete" ? "只删除所选配置项，不删除公共配置文件或其他入站。" : "") +
-    (engine === "ss-rust" ? "部署会重启整个 ssserver，可能短暂影响所有端口；保存并校验仅检查配置结构，不是完整启动校验。" :
-      "仅校验不会改变节点运行配置；部署会应用通用配置并重启内核。");
+    ? "影响所有端口；未设置端口覆盖时继承默认值。"
+    : "仅编辑所选通用项；入站与出口请用对应操作、源码或高级字段管理。";
+  const note = (mutation === "delete" ? "仅删除所选项，保留配置文件与其他入站。" : "") +
+    (engine === "ss-rust" ? "部署会重启整个 ssserver，短暂影响所有端口；校验仅检查结构，不检查启动。" :
+      "校验不改变节点配置；部署会重启内核。");
   return `<section class="config-field-studio config-common-studio" id="common-options">
     ${!config ? renderFieldEmpty("尚未保存配置", "先通过“增加入站”创建配置，再编辑通用配置项。") :
       selected && fields.length ? renderFieldEditor({ selected, value, format:catalog.format, hint, note, mutation,
         refreshKey:`common-field-${mutation}-${selected.key}` }) :
         renderFieldEmpty(mutation === "add" ? "没有可增加的通用配置项" : "尚无可操作的通用配置项",
-          mutation === "add" ? "已收录的通用配置项均已存在，可通过“修改通用配置项”编辑；其他字段仍可在源码或高级字段中管理。" :
-            "当前配置尚未设置已收录的通用配置项，请先通过“增加通用配置项”添加。")}
+          mutation === "add" ? "已有项请用“修改通用配置项”；未收录字段请用源码或高级字段。" :
+            "请先增加通用配置项。")}
   </section>`;
 }
 
@@ -90,7 +90,7 @@ export function renderGlobalFieldStudio({ fields, selected, value, config, catal
   const topics = catalog.topic_groups || [];
   return `<details class="advanced-studio config-field-studio" id="advanced">
     ${renderFieldSummary("全局字段", `${fields.length} 项 · ${catalog.format}`)}
-    ${config && selected ? `<div class="advanced-studio-body scoped-field-body">${renderFieldRail({ fields, selected, presentFields })}${renderFieldEditor({ selected, value, format: catalog.format, hint: "编辑配置顶层字段；完整配置在下方源码区单独保存。", refreshKey: `config-field-${selected.key}` })}</div>` : renderFieldEmpty("尚未保存配置", "先在上方创建并保存一个服务端入站，再编辑全局字段。")}
+    ${config && selected ? `<div class="advanced-studio-body scoped-field-body">${renderFieldRail({ fields, selected, presentFields })}${renderFieldEditor({ selected, value, format: catalog.format, hint: "顶层字段与完整源码分别保存。", refreshKey: `config-field-${selected.key}` })}</div>` : renderFieldEmpty("尚未保存配置", "请先创建并保存服务端入站。")}
     ${topics.length ? `<details class="field-docs"><summary><b>配置参考文档</b><small>${catalog.topic_count} 个主题 ↗</small></summary><div>${topics.map((group) => `<details><summary>${esc(group.name)}<small>${group.topics.length}</small></summary><nav>${group.topics.map((topic) => `<a href="${esc(topic.docs)}" target="_blank" rel="noopener noreferrer">${esc(topic.label)} ↗</a>`).join("")}</nav></details>`).join("")}</div></details>` : ""}
   </details>`;
 }

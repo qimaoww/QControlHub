@@ -7,6 +7,12 @@ location.hash = "#client-access";
   await waitFor(() => row(20002), "两个端口没有渲染");
   const open = (port) => {row(port).querySelector("[data-client-display-open]").click(); return row(port).querySelector("dialog.client-display-dialog form");};
   let form = open(20001);
+  assert.equal(form.querySelectorAll(".client-display-scope").length, 1, "端口作用范围只说明一次");
+  const nameBox = form.elements.name.getBoundingClientRect();
+  const addressBox = form.elements.address.getBoundingClientRect();
+  const stacked = getComputedStyle(form.querySelector(".client-display-form-grid")).gridTemplateColumns.split(" ").length === 1;
+  assert.ok(stacked ? addressBox.top > nameBox.bottom : Math.abs(nameBox.top - addressBox.top) <= 1,
+    "客户端参数的帮助文本不得挤压相邻输入框");
   assert.equal(form.dataset.clientProfileTag,"ss-rust-1");
   form.elements.name.value = "香港 & ATT <edge>";
   testAPI.profileSaveFailure = true;

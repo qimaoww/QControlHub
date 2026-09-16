@@ -174,7 +174,7 @@ if (mode === "logs-restore") {
     auto_refresh: false,
   }));
 }
-if (mode === "traffic-layout") {
+if (mode.startsWith("traffic-layout")) {
   location.hash = "#traffic";
   setStorageAccount({ role: "admin" });
   accountStorage.setItem("qcontrolhub:node-card-order", JSON.stringify(["alpha", "delta", "bravo", "charlie"]));
@@ -250,7 +250,7 @@ window.fetch = async (input, options = {}) => {
   const method = String(options.method || (input instanceof Request ? input.method : "GET")).toUpperCase();
   testAPI.calls.push({ method, path, query: url.search });
   if (method === "GET" && path === "/agent-access") return json({ isolated: false, revision: 1, shares: [] });
-  if (mode === "traffic-layout") {
+  if (mode.startsWith("traffic-layout")) {
     if (path === "/traffic-policies") return json(testAPI.trafficPolicies);
     if (path === "/traffic-endpoints") return json([]);
     if (path === "/traffic-endpoints/sync") {
@@ -384,7 +384,7 @@ window.fetch = async (input, options = {}) => {
   if (method === "GET" && path === "/deployments") return json(testAPI.deployments);
   if (method === "GET" && path === "/client-access" && mode.startsWith("client-order"))
     return json(testAPI.clientAccessEntries);
-  if (method === "GET" && path === "/client-access" && ["ports","readonly","regions","regions-preview"].includes(mode)) {
+  if (method === "GET" && path === "/client-access" && ["ports","ports-mobile","shell-layout","shell-layout-mobile","readonly","regions","regions-preview"].includes(mode)) {
     const profiles = (address) => [20001,20002].map((port,index) => {
       const tag = `ss-rust-${index+1}`;
       const name = testAPI.profileNames[port] || tag;

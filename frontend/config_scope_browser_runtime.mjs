@@ -2,6 +2,7 @@ import { installConfigPages } from "./modules/configs.js";
 import { accountStorage, setStorageAccount } from "./modules/account-storage.js";
 import { nodeCardOrderKey } from "./modules/node-order.js";
 import { installSubStoreSync, subStoreSelectionPayload } from "./modules/substore-sync.js";
+import { testSubStoreCardLayout } from "./browser/substore-layout.mjs";
 
 const assert = (value, message) => { if (!value) throw new Error(message); };
 const esc = value => String(value ?? "").replace(/[&<>"']/g, char => ({
@@ -157,6 +158,7 @@ export async function testSubStoreScopeRuntime(preview = false) {
     document.querySelector("[data-substore-target-edit]").click();
     return;
   }
+  testSubStoreCardLayout();
   assert(
     [...document.querySelectorAll(".substore-agent-card>header strong")].map(node => node.textContent).join(",") === "共享主机,Charlie 主机,Alpha 主机",
     "Sub-Store cards did not follow the saved node order",
@@ -165,6 +167,7 @@ export async function testSubStoreScopeRuntime(preview = false) {
   await waitFor(() => !document.querySelector("[data-substore-remove]"), "stale selection was not removed");
   document.querySelector("[data-substore-add]").click();
   await waitFor(() => document.querySelector("[data-substore-parameters-form]"), "current configuration selection did not render");
+  testSubStoreCardLayout();
   let form = document.querySelector("[data-substore-parameters-form]");
   form.elements.custom_name.value = "我的双栈节点";
   form.elements.address_mode.value = "both";
