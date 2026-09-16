@@ -1,4 +1,4 @@
-import { validateTCPSelection } from "./system-bbr-model.js";
+import { validateTCPAvailability, validateTCPSelection } from "./system-bbr-model.js";
 
 export const systemTCPPresets = Object.freeze([
   Object.freeze({
@@ -20,8 +20,7 @@ export const systemTCPPresets = Object.freeze([
 export function prepareTCPPreset(presetID, rules, currentParameters, draft = {}) {
   const preset = systemTCPPresets.find((entry) => entry.id === presetID);
   if (!preset) throw new Error("未找到此 TCP 预设，请刷新页面后重试。");
-  const missing = Object.keys(preset.settings).filter((key) => !Object.hasOwn(currentParameters || {}, key));
-  if (missing.length) throw new Error(`此节点未上报预设所需参数：${missing.join("、")}`);
+  validateTCPAvailability(preset.settings, currentParameters);
   const settings = validateTCPSelection(preset.settings, rules);
   return { ...draft, ...settings };
 }

@@ -29,6 +29,7 @@ func frontendFeatureSources(t *testing.T, route string) string {
 		},
 		"modules/system-bbr.js": {
 			"modules/system-bbr.js", "modules/system-bbr-model.js", "modules/system-bbr-view.js", "modules/system-bbr-editor.js",
+			"modules/system-bbr-presets.js",
 		},
 		"modules/traffic.js": {
 			"modules/traffic.js", "modules/traffic-model.js", "modules/traffic-view.js", "modules/traffic-accounting-view.js",

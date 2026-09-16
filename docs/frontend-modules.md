@@ -100,7 +100,9 @@ Preserve these lifecycle boundaries:
   draft preparation. It validates every preset field against the server rules
   and reported parameter availability before merging into a fresh draft;
   unrelated selections remain intact. The editor retains confirmation and
-  submission through the existing `configure-tcp` workflow.
+  submission through the existing `configure-tcp` workflow. Before submission,
+  it rechecks selected parameters against the confirmed baseline; missing or
+  changed values retain the draft and require another confirmation.
 - SubStore loading and selection/target actions share one account-scoped
   record, including the current target and pending selection-save promise.
 - Traffic keeps one interaction gate and one deferred render at the route.

@@ -1,8 +1,13 @@
 import { assert, delay, waitFor } from "./assertions.mjs";
 import { fillBBRPresetWithoutTask, testSystemTCPPresets } from "./system-tcp-presets.mjs";
+import { testSystemTCPSafety } from "./system-tcp-safety.mjs";
+import { assertTCPDialogLayout, testSystemTCPLayout } from "./system-tcp-layout.mjs";
 
 export async function testSystemTCPRuntime({ mode, testAPI }) {
 await waitFor(() => document.querySelector(".bbr-card"), "TCP 页面未加载");
+  if (mode !== "bbr-mobile")
+    assert.ok(matchMedia("(pointer: fine)").matches, "桌面 TCP 测试未启用鼠标媒体规则");
+  assert.ok(document.documentElement.scrollWidth <= innerWidth + 1, "TCP 页面继承桌面最小宽度而横向溢出");
   assert.equal(
     [...document.querySelectorAll(".bbr-card")]
       .map((entry) => entry.dataset.refreshKey.replace("bbr-", ""))
@@ -26,6 +31,8 @@ await waitFor(() => document.querySelector(".bbr-card"), "TCP 页面未加载");
   assert.ok(parameters().matches(":modal"), "参数详情不是模态弹窗");
   assert.equal(card().offsetHeight, height, "打开详情撑开了卡片");
   assert.match(parameters().textContent, /网卡实际队列/);
+  assert.equal(parameters().querySelector("[data-bbr-algorithms]").textContent, "reno · cubic · bbr", "详情漏掉已加载算法");
+  await assertTCPDialogLayout(parameters());
   parameters().querySelector("[data-bbr-dialog-close]").click();
   await delay(50);
   assert.equal(document.activeElement, parametersButton(), "关闭弹窗未恢复入口焦点");
@@ -214,6 +221,8 @@ await waitFor(() => document.querySelector(".bbr-card"), "TCP 页面未加载");
   assert.equal(card().querySelector(".bbr-task"), null, "仍显示被清理的任务历史");
   assert.ok(!field().disabled, "打开的编辑器未随任务清理解锁");
   await testSystemTCPPresets({ card, editor, openEditor, refresh, testAPI, mode });
+  await testSystemTCPSafety({ card, editor, openEditor, refresh, testAPI });
+  await testSystemTCPLayout({ card, editor, refresh, testAPI });
   editor().querySelector("[data-bbr-dialog-close]").click();
   card().querySelector('[data-bbr-action="enable-bbr"]').click();
   await waitFor(() => document.querySelector("[data-confirm-dialog][open]"), "节点状态变化测试未显示弹窗");

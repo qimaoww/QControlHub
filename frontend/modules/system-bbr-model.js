@@ -1,6 +1,15 @@
 export const systemBBRFeature = "system-bbr-v1";
 export const systemBBRActions = ["enable-bbr", "disable-bbr", "configure-tcp"];
 
+export function hasTCPParameter(parameters, key) {
+  return Object.hasOwn(parameters || {}, key) && typeof parameters[key] === "string" && parameters[key].trim() !== "";
+}
+
+export function validateTCPAvailability(settings, parameters) {
+  const missing = Object.keys(settings).filter((key) => !hasTCPParameter(parameters, key));
+  if (missing.length) throw new Error(`节点未上报参数：${missing.join("、")}`);
+}
+
 export function validateTCPSelection(input, rules) {
   if (!Object.keys(input || {}).length) throw new Error("请至少勾选一个需要保存的参数");
   return Object.fromEntries(Object.entries(input).map(([key, raw]) => {

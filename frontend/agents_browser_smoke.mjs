@@ -265,6 +265,9 @@ async function runMode(mode) {
         "--no-first-run",
         "--disable-features=AutofillServerCommunication,CertificateTransparencyComponentUpdater,MediaRouter,OptimizationHints",
         "--hide-scrollbars",
+        // Match a mouse-equipped desktop for TCP layout checks. Headless
+        // Chromium otherwise reports pointer:none and misses desktop CSS.
+        ...(mode.startsWith("bbr") && !mobile ? ["--blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4"] : []),
         mobile ? "--window-size=390,844" : "--window-size=1280,900",
         `--user-data-dir=${profile}`,
         "--remote-debugging-port=0",

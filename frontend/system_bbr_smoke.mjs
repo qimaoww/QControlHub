@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { systemBBRState, validateTCPSelection } from "./modules/system-bbr.js";
+import { hasTCPParameter, validateTCPAvailability } from "./modules/system-bbr-model.js";
 import { systemTCPPresets, prepareTCPPreset } from "./modules/system-bbr-presets.js";
 
 const now = Date.now();
@@ -79,7 +80,17 @@ for (const key of Object.keys(expectedPreset)) {
   delete missingParameter[key];
   assert.throws(() => prepareTCPPreset("bbr-32m", presetRules, missingParameter, originalDraft), `missing reported ${key} rejects the whole preset`);
   assert.throws(() => prepareTCPPreset("bbr-32m", presetRules.filter((rule) => rule.key !== key), currentParameters, originalDraft), `missing rule for ${key} rejects the whole preset`);
+  for (const missing of ["", " \t ", null, undefined, 0]) {
+    const parameters = { ...currentParameters, [key]: missing };
+    assert.equal(hasTCPParameter(parameters, key), false);
+    assert.throws(() => prepareTCPPreset("bbr-32m", presetRules, parameters, originalDraft), /未上报/, `empty reported ${key} rejects the whole preset`);
+    assert.throws(() => validateTCPAvailability(expectedPreset, parameters), /未上报/, `selected ${key} must still be reported at submission`);
+  }
 }
+assert.equal(hasTCPParameter({ "net.ipv4.tcp_ecn": "0" }, "net.ipv4.tcp_ecn"), true, "zero is a reported parameter, not a missing value");
+assert.equal(hasTCPParameter(Object.create({ "net.ipv4.tcp_ecn": "0" }), "net.ipv4.tcp_ecn"), false, "inherited parameters are not node reports");
+assert.doesNotThrow(() => validateTCPAvailability(expectedPreset, currentParameters));
+assert.throws(() => validateTCPAvailability(expectedPreset, undefined), /未上报/);
 for (const incompatibleRule of [
   { key: "net.ipv4.tcp_congestion_control", label: "算法", choices: ["cubic"] },
   { key: "net.core.default_qdisc", label: "队列", choices: ["fq_codel"] },
