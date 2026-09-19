@@ -235,11 +235,17 @@ export async function testPresetsRuntime(preview = false) {
       assert(control("credential").type === "password", "Mieru password is not masked");
       edit("mieru_transport", "UDP");
       edit("username", "mieru-user");
+      edit("listener_routing_mark", "42");
+      edit("listener_rule", "test-rule");
+      edit("listener_proxy", "test-proxy");
       button("validate").click();
       await waitFor(() => test.saved?.version === 2 && !button("validate").disabled, "Mieru UDP save stalled");
       const saved = submissions(test).at(-1).body.input;
       assert(saved.mieru_transport === "UDP" && saved.username === "mieru-user", "Mieru form lost transport or username");
       assert(control("mieru_transport").value === "UDP", "Mieru saved UDP transport did not reopen");
+      for (const [name, value] of [["listener_routing_mark", 42], ["listener_rule", "test-rule"], ["listener_proxy", "test-proxy"]]) {
+        assert(saved[name] === value && control(name).value === String(value), `Mieru lost ${name} during save/reopen`);
+      }
     }
   }
   assert(covered.size === 4 && catalog.length >= 33, "not all engine presets were covered");

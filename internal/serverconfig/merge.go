@@ -81,6 +81,11 @@ func mutateGenerated(engine core.Engine, currentContent, generatedContent, match
 			}
 		}
 	}
+	if engine == core.EngineMihomo && matchValue != "" && operation != "delete" {
+		if err := validateMieruPresetMutation(currentContent, matchValue); err != nil {
+			return "", err
+		}
+	}
 	listKey, matchKey := "inbounds", "tag"
 	managedKeys := []string{
 		"tag", "listen", "port", "protocol", "settings", "streamSettings",

@@ -128,6 +128,8 @@ func TestMieruCustomListenersRemainSourceOnly(t *testing.T) {
 		{"multiple users", func(in map[string]any) { mapValue(in["users"])["second"] = input.Credential }},
 		{"traffic pattern", func(in map[string]any) { in["traffic-pattern"] = "custom" }},
 		{"user hint", func(in map[string]any) { in["user-hint-is-mandatory"] = true }},
+		{"oversized port", func(in map[string]any) { in["port"] = 65536 }},
+		{"negative port", func(in map[string]any) { in["port"] = -1 }},
 		{"port range", func(in map[string]any) { in["port"] = "20000-20010" }},
 		{"missing transport", func(in map[string]any) { delete(in, "transport") }},
 		{"invalid transport", func(in map[string]any) { in["transport"] = "QUIC" }},
@@ -145,6 +147,12 @@ func TestMieruCustomListenersRemainSourceOnly(t *testing.T) {
 			}
 			if _, ok := Parse(core.EngineMihomo, string(custom)); ok || len(ParseAll(core.EngineMihomo, string(custom))) != 0 {
 				t.Fatal("custom Mieru configuration exposed as a lossy preset")
+			}
+			if _, err := MutateGenerated(core.EngineMihomo, string(custom), content, input.Tag, "modify"); err == nil {
+				t.Fatal("direct preset modification overwrote a custom Mieru listener")
+			}
+			if _, err := DeletePresetInbound(core.EngineMihomo, string(custom), input.Tag); err != nil {
+				t.Fatalf("source-only listener cannot be explicitly deleted: %v", err)
 			}
 		})
 	}

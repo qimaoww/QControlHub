@@ -27,6 +27,17 @@ export async function testPresetFieldLayoutRuntime() {
             root.style.setProperty("--ui-font-scale", scale);
             const context = `${entry.engine}/${entry.protocol.key}/${tab.dataset.builderStep}/${scale}`;
             assert(dialog.scrollWidth <= dialog.clientWidth + 1, `${context}: dialog overflows`);
+            if (entry.protocol.key === "mieru") {
+              assert(document.documentElement.scrollWidth <= innerWidth, `${context}: page overflows`);
+              const dialogBounds = dialog.getBoundingClientRect();
+              assert(dialogBounds.left >= -1 && dialogBounds.right <= innerWidth + 1, `${context}: dialog escapes viewport`);
+              for (const element of form.querySelectorAll(".preset-protocol-options, .preset-option-panel, .preset-option-panel summary, .preset-option-panel label, .preset-option-panel small")) {
+                if (!element.checkVisibility()) continue;
+                const bounds = element.getBoundingClientRect();
+                assert(element.scrollWidth <= element.clientWidth + 1, `${context}: ${element.tagName} content overflows`);
+                assert(bounds.left >= dialogBounds.left && bounds.right <= dialogBounds.right, `${context}: option escapes dialog`);
+              }
+            }
             for (const grid of form.querySelectorAll(".plan-fields")) {
               if (!grid.checkVisibility()) continue;
               assert(grid.scrollWidth <= grid.clientWidth + 1, `${context}: fields overflow`);

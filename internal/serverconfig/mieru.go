@@ -2,7 +2,10 @@ package serverconfig
 
 import (
 	"errors"
+	"fmt"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 func mieruProtocol(base string) Protocol {
@@ -49,6 +52,10 @@ func parseMieruListener(listener map[string]any, input *Input) bool {
 			return false
 		}
 	}
+	port, numericPort := listener["port"].(int)
+	if !numericPort || port < 1 || port > 65535 {
+		return false
+	}
 	users := mapValue(listener["users"])
 	if len(users) != 1 {
 		return false
@@ -66,4 +73,25 @@ func buildMieruMihomoYAML(input Input, address, name string) (string, error) {
 		"transport": input.MieruTransport, "username": input.Username,
 		"password": input.Credential, "udp": true,
 	})
+}
+
+// Recheck the saved listener at the mutation boundary: source-only listeners
+// must not lose extra users or native options through a direct preset request.
+func validateMieruPresetMutation(content, tag string) error {
+	var root map[string]any
+	if err := yaml.Unmarshal([]byte(content), &root); err != nil {
+		return err
+	}
+	listeners, _ := root["listeners"].([]any)
+	for _, raw := range listeners {
+		listener := mapValue(raw)
+		if stringValue(listener["type"]) != ProtocolMieru || stringValue(listener["name"]) != tag {
+			continue
+		}
+		input := Input{Protocol: ProtocolMieru}
+		if !parseMieruListener(listener, &input) {
+			return fmt.Errorf("Mieru 入站 %q 包含自定义字段或多用户配置，请使用完整源码编辑，避免覆盖", tag)
+		}
+	}
+	return nil
 }
