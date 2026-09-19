@@ -307,6 +307,8 @@ func protocolKey(value string) string {
 		return ProtocolVLESS
 	case "snell":
 		return ProtocolSnell
+	case "mieru":
+		return ProtocolMieru
 	case "sudoku":
 		return ProtocolSudoku
 	case "vmess":

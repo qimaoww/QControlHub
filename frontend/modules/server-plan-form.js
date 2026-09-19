@@ -155,6 +155,7 @@ export function readServerPlanInput(form, protocol) {
     ss_rust_outbound_bind_addr: values.get("ss_rust_outbound_bind_addr") || "",
     ss_rust_ipv6_first: values.get("ss_rust_ipv6_first") === "1",
     listener_proxy: values.get("listener_proxy") || "",
+    mieru_transport: values.get("mieru_transport") || "TCP",
     snell_version: Number(values.get("snell_version") || 0),
     snell_udp: values.get("snell_udp") === "1",
     snell_reuse: values.get("snell_reuse") === "1",
@@ -221,7 +222,7 @@ function optionSecret(name, label, value, help = "") {
   return `<label class="secret-input">${label}<span class="secret-value-control"><input type="password" name="${name}" value="${esc(value || "")}" autocomplete="off"><button type="button" data-secret-visibility>显示</button></span>${help ? `<small>${help}</small>` : ""}</label>`;
 }
 
-function listenerAdvancedOptions(plan) {
+export function listenerAdvancedOptions(plan) {
   return `<details class="preset-option-panel"><summary><b>监听高级选项</b><small>路由标记、子规则与前置代理</small></summary><div class="plan-fields three"><label>Routing Mark<input type="number" name="listener_routing_mark" min="0" value="${Number(plan.listener_routing_mark || 0)}"><small>仅 Linux；0 表示不设置。</small></label><label>Rule<input name="listener_rule" maxlength="64" value="${esc(plan.listener_rule || "")}" placeholder="可选子规则名称"></label><label>Proxy<input name="listener_proxy" maxlength="64" value="${esc(plan.listener_proxy || "")}" placeholder="可选前置代理名称"></label></div></details>`;
 }
 

@@ -26,6 +26,7 @@
 | AnyTLS | 是 | 否 | 是 | 否 | 高位端口、用户名、密码 |
 | Snell v5 | 是 | 否 | 否 | 否 | 高位端口、PSK；默认 UDP、连接复用和客户端 TCP Fast Open |
 | Snell v5 + ShadowTLS v3 | 是 | 否 | 否 | 否 | Snell v5 参数、独立 ShadowTLS 用户与强密码；默认可信握手目标和严格模式 |
+| Mieru | 是 | 否 | 否 | 否 | 高位端口、随机用户名与密码；默认 TCP，可选 UDP，导出匹配的 Mihomo YAML |
 | Sudoku | 是 | 否 | 否 | 否 | 高位端口、上游兼容 Ed25519 Master Public / Available Private 分割密钥、AEAD、5–15% Padding、HTTPMask |
 | WireGuard | 否 | 是 | 是（原生 endpoint） | 否 | 高位 UDP 端口、独立的服务端/客户端 X25519 密钥对、预共享密钥 |
 | 端口转发 | 是（`tunnel` listener） | 是（`tunnel` inbound） | 是（`direct` inbound） | 否 | 高位监听端口；默认转发到 `127.0.0.1:80`，可选 TCP、UDP 或双协议 |
@@ -37,6 +38,8 @@ Mihomo 与 Xray 的 VLESS-ENC 预设使用独立的 X25519 密钥对：服务端
 Mihomo 把后量子密钥交换放在显式开关后面，因此同步格式会为每个 Reality 节点写入 `reality-opts.support-x25519mlkem768: true`：它只表示客户端愿意使用 X25519MLKEM768，target 支持时 Reality 就会协商该混合组，不支持时照常回退 X25519；非 Reality 节点不会出现 `reality-opts`。该字段与 ML-DSA-65 无关，后者需要在 Reality 握手时校验后量子签名，Mihomo 没有对应实现。
 
 Xray Reality 的 `minClientVer` 始终显式写入，默认 `0.0.0`。Xray v26.7.11 起省略该字段会默认要求客户端版本不低于 `26.3.27`，而 Mihomo 在 REALITY ClientHello 中固定声明 `1.8.2`，握手会在进入 VLESS 之前被拒绝并报 `REALITY authentication failed`；显式写入可跨版本避开这一默认值，v26.9.9 已在代码中注释掉该默认值与相关告警，此时省略与显式 `0.0.0` 等价。Reality 目标域名还应避开 `.ru`、`.ir`、`.cn` 后缀与 `apple`、`icloud`、`microsoft`：v26.9.9 会为这类 target 输出“增加 IP 被 GFW 封锁概率”的告警，默认的 `www.amazon.com` 不在其中。
+
+Mieru 预设提供单端口、单用户的 TCP / UDP 服务端，无需 TLS 证书；客户端同时支持代理 TCP 与 UDP 流量。传输默认为 TCP，重新生成参数时保留所选传输。多用户、端口范围、`traffic-pattern` 和 `user-hint-is-mandatory` 等自定义配置保留在完整源码中，不作为预设回读。需要支持 Mieru listener 的 Mihomo 版本。
 
 Snell 预设只生成 Mihomo 当前支持的 v5，不提供旧版本或 v6 字段。ShadowTLS 方案固定 v3，PSK 与 ShadowTLS 密码相互独立，服务端启用严格模式，客户端不生成证书校验绕过。Sudoku 预设只提供 `chacha20-poly1305` 和 `aes-128-gcm`，不提供无 AEAD 的 `none`；服务端只保存 Master Public Key，64 字节 Available Private Key 按配置版本和入站标签单独加密保存，仅用于生成客户端 YAML。HTTPMask 服务端固定使用上游推荐的 `auto`，客户端可选经过 Mihomo 双端真实流量验证的 `stream`、`poll`、`auto` 或 `ws`；当前 Mihomo 1.19.30 的 `legacy`、`custom-table` 与 `custom-tables` 虽能通过配置检查，但双端传输会失败或损坏响应，预设因此不提供。四种内置 Table Type、raw TCP、纯/压缩下行、两种安全 AEAD 与原生 `multiplex` 均已验证；原生复用不与通用 SMux 或 TCP Brutal 叠加。
 
@@ -109,7 +112,7 @@ IPv4 地址使用 [misakaio/chnroutes2](https://github.com/misakaio/chnroutes2) 
 
 方案保存后，页面中的“客户端接入”区可根据客户端实际访问的域名或 IP 生成可复制的客户端配置，并同时列出服务器、端口、认证、传输、TLS / Reality 等逐项参数。连接地址和 TLS ServerName 只保留在当前页面 URL，不写入内核配置，也不会成为配置版本的一部分。
 
-Shadowsocks 2022、VLESS、VMess、Trojan、Hysteria 2、TUIC v5 和 AnyTLS 使用各协议的分享 URI。Snell v5 与 Snell v5 + ShadowTLS v3 没有通用 URI，按 `jinqians/snell.sh` 和 Surge 的实际客户端格式生成单行 Surge 配置；Sudoku 按 Mihomo 原生字段生成单行流式 YAML。Sub-Store 会逐行识别 URI、Surge 和 Mihomo 节点，因此这两类原生配置也可在同步页面选择、按地址模式重命名并与普通 URI 一起同步；最终导出目标仍须支持相应协议。端口转发是节点侧监听与目标映射，不生成代理客户端分享资料。客户端对分享格式的支持可能因产品和版本不同而变化；无法直接导入时，应使用页面列出的逐项参数。分享值和认证字段默认以密码输入框遮罩，复制时无需先显示。
+Shadowsocks 2022、VLESS、VMess、Trojan、Hysteria 2、TUIC v5 和 AnyTLS 使用各协议的分享 URI。Snell v5 与 Snell v5 + ShadowTLS v3 没有通用 URI，按 `jinqians/snell.sh` 和 Surge 的实际客户端格式生成单行 Surge 配置；Mieru 和 Sudoku 按 Mihomo 原生字段生成单行流式 YAML。Sub-Store 会逐行识别 URI、Surge 和 Mihomo 节点，因此这两类原生配置也可在同步页面选择、按地址模式重命名并与普通 URI 一起同步；最终导出目标仍须支持相应协议。端口转发是节点侧监听与目标映射，不生成代理客户端分享资料。客户端对分享格式的支持可能因产品和版本不同而变化；无法直接导入时，应使用页面列出的逐项参数。分享值和认证字段默认以密码输入框遮罩，复制时无需先显示。
 
 客户端资料只包含连接所需的公开参数与用户凭据。Reality 服务端 Private Key、TLS 私钥路径和证书路径不会进入客户端 URI 或逐项参数。页面不会代替网络侧配置；部署完成后仍需确认 DNS 指向、证书覆盖域名，以及主机和上游防火墙已放行方案使用的 TCP / UDP 端口。
 
@@ -122,6 +125,8 @@ WireGuard 的原生导出是包含 `[Interface]`、`[Peer]` 的客户端配置�
 - [Mihomo tunnel listener](https://wiki.metacubex.one/config/inbound/listeners/tunnel/)
 - [Mihomo Snell listener](https://wiki.metacubex.one/config/inbound/listeners/snell/)
 - [Mihomo Snell proxy](https://wiki.metacubex.one/config/proxies/snell/)
+- [Mihomo Mieru listener](https://wiki.metacubex.one/config/inbound/listeners/mieru/)
+- [Mihomo Mieru proxy](https://wiki.metacubex.one/config/proxies/mieru/)
 - [Mihomo Sudoku listener](https://wiki.metacubex.one/config/inbound/listeners/sudoku/)
 - [Mihomo Sudoku proxy](https://wiki.metacubex.one/config/proxies/sudoku/)
 - [SUDOKU-ASCII upstream configuration](https://github.com/SUDOKU-ASCII/sudoku/blob/main/configs/README.zh_CN.md)

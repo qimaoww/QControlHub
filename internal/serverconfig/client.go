@@ -46,6 +46,12 @@ func BuildClientProfileNamed(input Input, address, serverName, nodeName string) 
 			return ClientProfile{}, err
 		}
 	}
+	if input.Protocol == ProtocolMieru {
+		normalizeMieruInput(&input)
+		if err := validateMieruInput(input); err != nil {
+			return ClientProfile{}, err
+		}
+	}
 	address, err := NormalizeClientAddress(address)
 	if err != nil {
 		return ClientProfile{}, err
@@ -137,6 +143,13 @@ func BuildClientProfileNamed(input Input, address, serverName, nodeName string) 
 			profile.Format = "Surge Snell + ShadowTLS"
 		}
 		profile.URI = buildSnellSurgeConfig(input, address, fragment)
+		profile.SubscriptionCompatible = true
+	case ProtocolMieru:
+		profile.Format = "Mihomo Mieru YAML"
+		profile.URI, err = buildMieruMihomoYAML(input, address, fragment)
+		if err != nil {
+			return ClientProfile{}, err
+		}
 		profile.SubscriptionCompatible = true
 	case ProtocolSudoku:
 		profile.Format = "Mihomo Sudoku YAML"

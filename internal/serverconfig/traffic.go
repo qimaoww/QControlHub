@@ -119,6 +119,9 @@ func discoverTrafficList(value any, engine core.Engine, nameField, typeField, po
 		kind := strings.TrimSpace(stringValue(entry[typeField]))
 		name := trafficEndpointName(entry[nameField], kind, string(engine)+" :"+strconv.Itoa(port))
 		protocol := trafficProtocol(entry["network"], trafficProtocolForKind(kind, fallback))
+		if engine == core.EngineMihomo && kind == ProtocolMieru {
+			protocol = trafficProtocol(entry["transport"], protocol)
+		}
 		if engine == core.EngineXray {
 			if settings, ok := entry["settings"].(map[string]any); ok {
 				protocol = trafficProtocol(settings["network"], protocol)

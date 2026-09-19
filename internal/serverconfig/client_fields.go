@@ -36,7 +36,9 @@ func clientFields(input Input, address, serverName string) []ClientField {
 		{Label: "服务器", Value: address},
 		{Label: "端口", Value: strconv.Itoa(input.Port)},
 	}
-	if input.Username != "" && input.Username != "default" {
+	if input.Protocol == ProtocolMieru {
+		fields = append(fields, ClientField{Label: "用户名", Value: input.Username})
+	} else if input.Username != "" && input.Username != "default" {
 		fields = append(fields, ClientField{Label: "用户备注", Value: input.Username})
 	}
 	credentialLabel := "密码"
@@ -83,7 +85,11 @@ func clientFields(input Input, address, serverName string) []ClientField {
 			ClientField{Label: "Sudoku Multiplex", Value: input.SudokuMultiplex},
 		)
 	}
-	fields = append(fields, ClientField{Label: "传输", Value: input.Transport})
+	transport := input.Transport
+	if input.Protocol == ProtocolMieru {
+		transport = input.MieruTransport
+	}
+	fields = append(fields, ClientField{Label: "传输", Value: transport})
 	if isVLESSEncryptionProtocol(input.Protocol) {
 		fields = append(fields, ClientField{Label: "VLESS Encryption", Value: input.VLESSEncryption})
 	}
