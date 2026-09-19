@@ -64,5 +64,6 @@
   "frontend/styles/620-enrollment-dialog.css",
   "frontend/styles/630-user-allocations.css",
   "frontend/styles/640-dashboard.css",
-  "frontend/styles/650-ip-quality.css"
+  "frontend/styles/650-ip-quality.css",
+  "frontend/styles/660-shell-feedback.css"
 ]

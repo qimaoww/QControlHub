@@ -18,7 +18,7 @@ scheduler; it does not own feature markup or HTTP transport.
 | `login-page` | Login markup and submission; failures return to the application's login-cleanup callback |
 | `shell-view`, `shell-context`, `shell-icons` | Stable shell reconciliation, workflow navigation, context sidebars, and icon data |
 | `shell-appearance` | Theme persistence and the current account's font scale |
-| `shell-feedback` | Notifications and confirmation-dialog bindings |
+| `shell-feedback`, `shell-feedback-view` | Notifications and confirmation-dialog bindings |
 | `routes`, `route-warmup` | Hash resolution, navigation-intent preloading, and cancellable idle warmup |
 
 Factories are inert: construction must not request data, render, register
@@ -39,7 +39,7 @@ focused owner directly, not these compatibility facades.
 | Agent page loading and composition | `agents` |
 | Agent rendering and workspace navigation | `agent-view`, `agent-workspace` |
 | Polling, structural signatures, and interaction-aware refresh | `agent-refresh` |
-| Core operations, settings, batch actions, and card interactions | `agent-core-actions`, `agent-settings`, `agent-batch-controller`, `agent-card-interactions` |
+| Core operations, settings, batch actions, and card interactions | `agent-core-actions`, `agent-settings`, `agent-batch-controller`, `agent-batch-view`, `agent-batch-feedback`, `agent-card-interactions` |
 | Enrollment dialogs and page bindings | `agent-enrollment` |
 | Live configuration loading, snapshot reads, and deployment recovery | `live-config-page`, `live-config-reader`, `config-deployment` |
 | Live editor markup, navigation, and submission | `live-config-view`, `live-config-navigation`, `live-config-submit` |

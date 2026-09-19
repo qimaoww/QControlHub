@@ -18,6 +18,8 @@ export function batchAgentEligibility(agent, action, engine) {
       eligible: false,
       reason: `未安装 ${engine || "所选内核"}，不能执行当前动作`,
     };
+  if (action === "install" && agent.runtime[engine].existing_config_unsupported_reason)
+    return { eligible: false, reason: agent.runtime[engine].existing_config_unsupported_reason };
   return { eligible: true, reason: "在线 · 已安装所选内核" };
 }
 
@@ -34,4 +36,25 @@ export function batchSelectAllState(inputs) {
     checked: eligible.length > 0 && selected.length === eligible.length,
     indeterminate: selected.length > 0 && selected.length < eligible.length,
   };
+}
+
+// Capture the version once so confirmation and retries use the same request.
+export function batchTaskOptions(values) {
+  const action = String(values.get("action"));
+  if (action === "upgrade-agent") return { action };
+  const options = { action, engine: String(values.get("engine")) };
+  if (action === "install") {
+    const channel = String(values.get("release_channel"));
+    const version = channel === "custom"
+      ? String(values.get("custom_version") || "").trim()
+      : channel;
+    if (!version) throw new Error("请填写指定版本号");
+    options.core_version = version;
+  }
+  return options;
+}
+
+export function batchCoreVersionLabel(version) {
+  return version === "stable" ? "最新稳定版"
+    : version === "development" ? "最新开发版" : version;
 }
