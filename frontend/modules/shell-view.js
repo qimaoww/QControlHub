@@ -19,7 +19,7 @@ function shell(content, title, { viewKey = state.route } = {}) {
     ["system-bbr", "TCP 调优", dockIcons.sliders, true],
     ["traffic", "流量", dockIcons.chart, true],
     ["core-logs", "日志", dockIcons.logs, true],
-    ["client-connections", "连接 IP", dockIcons.monitorSmartphone, true],
+    ["client-connections", "连接 IP", dockIcons.network, true],
     ["tasks", "任务", dockIcons.listChecks, true],
     [state.session.role === "admin" ? "users" : "my-quota", state.session.role === "admin" ? "用户" : "共享", dockIcons.users, true],
   ];

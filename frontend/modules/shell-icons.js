@@ -9,6 +9,8 @@ export const dockIcons = Object.freeze({
     '<path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"/><path d="M14 2v5a1 1 0 0 0 1 1h5"/><path d="M10 12.5 8 15l2 2.5"/><path d="m14 12.5 2 2.5-2 2.5"/>',
   monitorSmartphone:
     '<path d="M18 8V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h8"/><path d="M10 19v-3.96 3.15M7 19h5"/><rect width="6" height="10" x="16" y="12" rx="2"/>',
+  network:
+    '<rect x="9" y="3" width="6" height="6" rx="1"/><path d="M12 9v3M6 15v-3h12v3"/><rect x="3" y="15" width="6" height="6" rx="1"/><rect x="15" y="15" width="6" height="6" rx="1"/>',
   refreshCw:
     '<path d="M20 7h-5V2"/><path d="m20 2-3.5 3.5A8 8 0 1 0 20.8 14"/>',
   chart:
