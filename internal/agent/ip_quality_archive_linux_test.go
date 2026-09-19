@@ -70,8 +70,31 @@ printf '%s' "$ipjson" > "$6"
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := executeIPQualityScript(context.Background(), "/bin/bash", prepared); err == nil || !strings.Contains(err.Error(), "未生成报告下载链接") {
+	if _, err := executeIPQualityScript(context.Background(), "/bin/bash", prepared); err == nil || !strings.Contains(err.Error(), "上游上传未返回报告链接") {
 		t.Fatalf("empty upstream link error: %v", err)
+	}
+}
+
+func TestIPQualityLinkExportReportsBlockedUpload(t *testing.T) {
+	// The live upload endpoint answers 403 (Cloudflare). curl -f then fails
+	// without a body, so no row is written and the task must name the blocked
+	// upstream instead of claiming an invalid link.
+	script := `mode_lite=0; mode_privacy=0; IP=203.0.113.1
+ipjson='` + agentQualityReport("203.0.113.1", "fixture") + `'
+ip_report='fixture'
+curl() { return 22; }
+[[ $mode_lite -eq 0 && mode_privacy -eq 0 ]]&&report_link=$(curl -$2 -s -X POST https://upload.check.place -d "type=ip" --data-urlencode "json=$ipjson" --data-urlencode "content=$ip_report")
+printf '%s' "$ipjson" > "$6"
+`
+	prepared, err := prepareIPQualityArchiveScript([]byte(script))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(prepared), "curl -$2 -s -f --max-time 20 --max-filesize 2048") {
+		t.Fatal("upload curl does not fail on HTTP errors")
+	}
+	if _, err := executeIPQualityScript(context.Background(), "/bin/bash", prepared); err == nil || !strings.Contains(err.Error(), "Cloudflare") {
+		t.Fatalf("blocked upstream error: %v", err)
 	}
 }
 

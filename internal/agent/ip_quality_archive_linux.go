@@ -19,10 +19,14 @@ import (
 //
 // Upstream skips the upload once it cannot reach ipinfo.check.place and falls
 // back to its lite report. That fallback is a data-source downgrade, not a
-// privacy choice, and the panel still needs a link to archive the
-// structurally valid lite report, so drop only the mode_lite guard. A row is
-// written only for a non-empty link; an empty value must surface as a missing
-// link instead of being reported as an invalid one.
+// privacy choice, so drop only the mode_lite guard: a structurally valid lite
+// report still deserves a link while the upload endpoint is reachable.
+// mode_privacy still disables the upload.
+//
+// The link stays mandatory, because the panel archives the SVG next to the
+// report. A row is written only for a non-empty link and curl fails without a
+// body on HTTP errors, so an unreachable or rejected upload surfaces as a
+// missing link with an explicit upstream message instead of an invalid one.
 func prepareIPQualityArchiveScript(script []byte) ([]byte, error) {
 	line := []byte(`[[ $mode_lite -eq 0 && mode_privacy -eq 0 ]]&&report_link=$(curl -$2 -s -X POST https://upload.check.place -d "type=ip" --data-urlencode "json=$ipjson" --data-urlencode "content=$ip_report")`)
 	if bytes.Count(script, line) != 1 {
@@ -31,7 +35,7 @@ func prepareIPQualityArchiveScript(script []byte) ([]byte, error) {
 	replacement := bytes.Replace(line,
 		[]byte(`[[ $mode_lite -eq 0 && mode_privacy -eq 0 ]]`),
 		[]byte(`[[ $mode_privacy -eq 0 ]]`), 1)
-	replacement = bytes.Replace(replacement, []byte("curl -$2 -s"), []byte("curl -$2 -s --max-time 20 --max-filesize 2048"), 1)
+	replacement = bytes.Replace(replacement, []byte("curl -$2 -s"), []byte("curl -$2 -s -f --max-time 20 --max-filesize 2048"), 1)
 	replacement = append(replacement, []byte("\n[[ -n $report_link ]]&&printf '%s\\t%s\\n' \"$IP\" \"$report_link\" >> \"$QCH_IPQUALITY_LINKS\"")...)
 	return bytes.Replace(script, line, replacement, 1), nil
 }
@@ -44,7 +48,7 @@ func readIPQualityReportLinks(directory string, result core.IPQualityResult) (co
 	defer root.Close()
 	file, err := root.OpenFile("links.tsv", os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
 	if err != nil {
-		return core.IPQualityResult{}, errors.New("IPQuality 未生成报告下载链接")
+		return core.IPQualityResult{}, errors.New("IPQuality 上游上传未返回报告链接：节点无法访问 upload.check.place，或请求被 Cloudflare 等防护拦截；请检查节点出站网络后重试")
 	}
 	defer file.Close()
 	info, err := file.Stat()
@@ -59,7 +63,7 @@ func readIPQualityReportLinks(directory string, result core.IPQualityResult) (co
 	for _, line := range strings.Split(strings.TrimSuffix(string(content), "\n"), "\n") {
 		ip, link, ok := strings.Cut(line, "\t")
 		if !ok || !core.ValidIPQualityReportURL(link) || links[ip] != "" {
-			return core.IPQualityResult{}, errors.New("IPQuality 上游未返回有效的 SVG 报告链接")
+			return core.IPQualityResult{}, errors.New("IPQuality 上游返回的报告链接无效：上传接口返回了非 SVG 内容，可能被 Cloudflare 等防护拦截")
 		}
 		links[ip] = link
 	}
