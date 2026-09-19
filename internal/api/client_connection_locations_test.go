@@ -52,7 +52,7 @@ func TestClientConnectionGeographyPersistsAcrossServerRestart(t *testing.T) {
 		// Recreate the GeoIP client too, so only the database can avoid new requests.
 		admin.handler = New(db, Config{AdminToken: admin.token, GeoIPHTTPClient: client}).Handler()
 		var history core.ClientConnectionHistory
-		admin.call("GET", "/client-connections?agent_id="+agent.ID, nil, http.StatusOK, &history)
+		admin.call("GET", "/client-connections?include_non_public=true&agent_id="+agent.ID, nil, http.StatusOK, &history)
 		if len(history.Records) != 5 {
 			t.Fatalf("history unavailable: %+v", history)
 		}
@@ -86,7 +86,7 @@ func TestClientConnectionGeographyPersistsAcrossServerRestart(t *testing.T) {
 		}
 	}
 	var hidden core.ClientConnectionHistory
-	bob.call("GET", "/client-connections?agent_id="+agent.ID, nil, http.StatusOK, &hidden)
+	bob.call("GET", "/client-connections?include_non_public=true&agent_id="+agent.ID, nil, http.StatusOK, &hidden)
 	if len(hidden.Records) != 0 {
 		t.Fatalf("geography leaked across owners: %+v", hidden)
 	}

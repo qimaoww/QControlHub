@@ -10,7 +10,7 @@ import (
 func TestClientConnectionsRejectInvalidQueries(t *testing.T) {
 	token := strings.Repeat("a", 48)
 	handler := New(nil, Config{AdminToken: token}).Handler()
-	for _, query := range []string{"limit=201", "port=65536", "port=0", "before=-1", "engine=unknown", "transport=quic", "client_ip=bad", "since=bad", "bucket=week", "since=2026-01-01T00:00:00Z&until=2026-02-01T00:00:00Z"} {
+	for _, query := range []string{"include_non_public=invalid", "limit=201", "port=65536", "port=0", "before=-1", "engine=unknown", "transport=quic", "client_ip=bad", "since=bad", "bucket=week", "since=2026-01-01T00:00:00Z&until=2026-02-01T00:00:00Z"} {
 		request := httptest.NewRequest(http.MethodGet, "/api/v1/client-connections?"+query, nil)
 		request.Header.Set("Authorization", "Bearer "+token)
 		response := httptest.NewRecorder()

@@ -13,6 +13,13 @@ import (
 
 func parseClientConnectionQuery(values url.Values, now time.Time) (store.ClientConnectionQuery, error) {
 	q := store.ClientConnectionQuery{AgentID: values.Get("agent_id"), Engine: core.Engine(values.Get("engine")), Protocol: values.Get("protocol"), Inbound: values.Get("inbound"), Transport: values.Get("transport"), ClientIP: values.Get("client_ip"), Since: now.Add(-24 * time.Hour), Until: now, Limit: 100, Bucket: "hour"}
+	if value := values.Get("include_non_public"); value != "" {
+		parsed, err := strconv.ParseBool(value)
+		if err != nil {
+			return q, fmt.Errorf("invalid include_non_public")
+		}
+		q.IncludeNonPublic = parsed
+	}
 	if q.AgentID != "" && !validAgentID(q.AgentID) {
 		return q, fmt.Errorf("invalid agent_id")
 	}

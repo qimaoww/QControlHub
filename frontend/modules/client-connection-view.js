@@ -16,7 +16,7 @@ export function createClientConnectionView({ esc, engineName, date }) {
       return `<g><title>${esc(date(bucket.time))} · ${bucket.flows} 连接 · ${bucket.ips} IP</title><rect x="${x}" y="${110 - height}" width="${Math.min(barWidth, width - x)}" height="${height}" rx="2"/></g>`;
     }).join("");
     const warnings = sources.filter(source => source.status !== "ok" || source.truncated || !source.updated_at || Date.now() - new Date(source.updated_at).getTime() > 90000);
-    const advanced = filters.protocol || filters.inbound || filters.transport;
+    const advanced = filters.protocol || filters.inbound || filters.transport || filters.include_non_public === "true";
     return `<div class="client-connections">
       <form id="connection-query" data-connection-filters class="workspace-panel connection-filter-panel">
         <div class="connection-filters">
@@ -32,6 +32,7 @@ export function createClientConnectionView({ esc, engineName, date }) {
             ${input("protocol", "入站协议", "text", 'placeholder="vless / shadowsocks" maxlength="40"')}
             ${input("inbound", "入站名称", "text", 'placeholder="全部入站" maxlength="400"')}
             ${select("transport", "传输", [["tcp", "TCP"], ["udp", "UDP"]])}
+            <label>来源范围<select name="include_non_public"><option value=""${filters.include_non_public === "true" ? "" : " selected"}>仅公网</option><option value="true"${filters.include_non_public === "true" ? " selected" : ""}>包含非公网</option></select></label>
           </div></details>
           <div class="connection-query-actions"><button class="button small" type="button" data-connection-recent${loading ? " disabled" : ""}>最近 24 小时</button><button class="button primary small" type="submit"${loading ? " disabled" : ""}>${loading ? "查询中…" : "查询"}</button></div>
         </footer>

@@ -12,6 +12,12 @@ port, and time range. All filters also apply to the summary and timeline;
 pagination only changes the detail rows. Time inputs use the browser's local
 time zone. Timeline buckets use UTC boundaries and display in local time.
 
+Queries default to public source IPs only, excluding private, loopback, link-local,
+CGNAT and other special-use addresses from details, counts and timelines. Under
+More filters, select Include non-public to query all stored observations
+(`include_non_public=true` in the API). This filter applies to the source IP,
+not the local listening address. Collection and panel retention include both.
+
 ## Collection and interpretation
 
 Upgrade the panel and Agent to enable collection. Linux Agents read established

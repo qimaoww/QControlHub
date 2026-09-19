@@ -6,12 +6,12 @@ export function connectionDateInput(value) {
 }
 
 export function defaultConnectionFilters(now = Date.now()) {
-  return { since: connectionDateInput(now - 86400000), until: connectionDateInput(now + 60000), bucket: "hour" };
+  return { since: connectionDateInput(now - 86400000), until: connectionDateInput(now + 60000), bucket: "hour", include_non_public: "" };
 }
 
 export function connectionQuery(filters, before = "") {
   const params = new URLSearchParams();
-  for (const key of ["agent_id", "engine", "protocol", "inbound", "transport", "client_ip", "port", "bucket"]) {
+  for (const key of ["agent_id", "engine", "protocol", "inbound", "transport", "client_ip", "port", "bucket", "include_non_public"]) {
     if (filters[key]) params.set(key, filters[key]);
   }
   const since = new Date(filters.since), until = new Date(filters.until);

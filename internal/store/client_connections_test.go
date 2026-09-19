@@ -1,10 +1,66 @@
 package store
 
 import (
-	"github.com/qimaoww/qcontrolhub/internal/core"
+	"net/netip"
 	"testing"
 	"time"
+
+	"github.com/qimaoww/qcontrolhub/internal/core"
+	"github.com/qimaoww/qcontrolhub/internal/netpolicy"
 )
+
+func TestClientConnectionHistoryDefaultsToPublicSources(t *testing.T) {
+	db, ctx, _ := isolatedConfigScopeStore(t)
+	agent := sharedTestAgent(t, db, ctx)
+	addresses := []string{"8.8.8.8", "2606:4700:4700::1111", "::ffff:1.1.1.1", "::ffff:192.168.1.1", "172.16.1.1", "192.168.1.1", "127.0.0.1", "100.127.255.255", "fe80::1234", "fd12::1"}
+	for _, prefix := range netpolicy.NonPublicPrefixes() {
+		address := prefix.Addr()
+		if address.IsUnspecified() || address.IsMulticast() {
+			continue // These cannot enter history: report validation rejects them.
+		}
+		addresses = append(addresses, address.String())
+	}
+	report := core.ClientConnectionReport{Status: "ok"}
+	publicCount := 0
+	for i, ip := range addresses {
+		if netpolicy.IsPublicAddress(netip.MustParseAddr(ip)) {
+			publicCount++
+		}
+		report.Connections = append(report.Connections, core.ClientConnection{Engine: core.EngineXray, Protocol: "vless", Inbound: "entry", Transport: "tcp", ClientIP: ip, ClientPort: 50000 + i, LocalIP: "127.0.0.1", LocalPort: 443})
+	}
+	if err := db.StoreClientConnections(ctx, agent.ID, report); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	query := ClientConnectionQuery{Since: now.Add(-time.Hour), Until: now.Add(time.Minute), Limit: 2, Bucket: "hour"}
+	result, err := db.ClientConnectionHistory(ctx, query)
+	if err != nil || result.Flows != int64(publicCount) || result.IPs != int64(publicCount) || len(result.Records) != 2 || result.NextBefore == 0 || len(result.Timeline) != 1 || result.Timeline[0].Flows != int64(publicCount) {
+		t.Fatalf("public history=%+v err=%v", result, err)
+	}
+	for _, row := range result.Records {
+		if !netpolicy.IsPublicAddress(netip.MustParseAddr(row.ClientIP)) {
+			t.Fatalf("non-public source leaked: %+v", row)
+		}
+	}
+	query.Before = result.NextBefore
+	next, err := db.ClientConnectionHistory(ctx, query)
+	if err != nil || len(next.Records) != 1 || next.NextBefore != 0 || next.Flows != int64(publicCount) || next.Records[0].ClientIP != "8.8.8.8" {
+		t.Fatalf("public pagination=%+v err=%v", next, err)
+	}
+	query.Before = 0
+	query.ClientIP = "::ffff:192.168.1.1"
+	private, err := db.ClientConnectionHistory(ctx, query)
+	if err != nil || private.Flows != 0 || len(private.Records) != 0 || len(private.Timeline) != 0 {
+		t.Fatalf("private exact search bypassed default: %+v %v", private, err)
+	}
+	query.ClientIP = ""
+	query.IncludeNonPublic = true
+	query.Limit = 200
+	all, err := db.ClientConnectionHistory(ctx, query)
+	if err != nil || len(all.Records) != len(addresses) || all.Flows != int64(len(addresses)) || len(all.Timeline) != 1 || all.Timeline[0].Flows != all.Flows {
+		t.Fatalf("opt-in history=%+v err=%v", all, err)
+	}
+}
 
 func TestClientConnectionHistoryPersistenceAndIsolation(t *testing.T) {
 	db, ctx, _ := isolatedConfigScopeStore(t)
@@ -28,7 +84,7 @@ func TestClientConnectionHistoryPersistenceAndIsolation(t *testing.T) {
 		}
 	}
 	now := time.Now().UTC()
-	query := ClientConnectionQuery{Since: now.Add(-time.Hour), Until: now.Add(time.Minute), Limit: 1, Bucket: "minute"}
+	query := ClientConnectionQuery{IncludeNonPublic: true, Since: now.Add(-time.Hour), Until: now.Add(time.Minute), Limit: 1, Bucket: "minute"}
 	result, err := db.ClientConnectionHistory(ownerCtx, query)
 	if err != nil || result.Flows != 2 || result.IPs != 2 || len(result.Records) != 1 || result.NextBefore == 0 || len(result.Timeline) != 1 || result.Timeline[0].Flows != 2 || len(result.Sources) != 1 || result.Sources[0].Status != "partial" {
 		t.Fatalf("history=%+v err=%v", result, err)

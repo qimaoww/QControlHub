@@ -9,21 +9,23 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/qimaoww/qcontrolhub/internal/core"
+	"github.com/qimaoww/qcontrolhub/internal/netpolicy"
 )
 
 type ClientConnectionQuery struct {
-	AgentID   string
-	Engine    core.Engine
-	Protocol  string
-	Inbound   string
-	Transport string
-	ClientIP  string
-	Port      int
-	Since     time.Time
-	Until     time.Time
-	Before    int64
-	Limit     int
-	Bucket    string
+	IncludeNonPublic bool
+	AgentID          string
+	Engine           core.Engine
+	Protocol         string
+	Inbound          string
+	Transport        string
+	ClientIP         string
+	Port             int
+	Since            time.Time
+	Until            time.Time
+	Before           int64
+	Limit            int
+	Bucket           string
 }
 
 func (q ClientConnectionQuery) Validate() error {
@@ -85,6 +87,10 @@ func (s *Store) StoreClientConnections(ctx context.Context, agentID string, repo
 func connectionHistoryWhere(ctx context.Context, q ClientConnectionQuery) (string, []any) {
 	args := []any{q.Since.UTC().Truncate(time.Minute), q.Until.UTC(), q.Since.UTC()}
 	where := ` WHERE c.bucket >= $1 AND c.bucket < $2 AND c.last_seen >= $3 AND c.first_seen < $2 AND a.revoked_at IS NULL`
+	if !q.IncludeNonPublic {
+		args = append(args, netpolicy.NonPublicPrefixes())
+		where += fmt.Sprintf(" AND NOT (c.client_ip <<= ANY($%d::inet[]))", len(args))
+	}
 	add := func(column string, value any) {
 		args = append(args, value)
 		where += fmt.Sprintf(" AND %s=$%d", column, len(args))

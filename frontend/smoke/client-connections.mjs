@@ -9,6 +9,8 @@ const query = connectionQuery({ ...filters, client_ip: "2001:db8::1", port: "443
 assert.equal(query.get("client_ip"), "2001:db8::1");
 assert.equal(query.get("inbound"), "a&b");
 assert.equal(query.get("before"), "7");
+assert.equal(query.has("include_non_public"), false);
+assert.equal(connectionQuery({ ...filters, include_non_public: "true" }, 7).get("include_non_public"), "true");
 assert.throws(() => connectionQuery({ since: "bad", until: "bad" }), /7/);
 assert.throws(() => connectionQuery({ since: "2026-01-01", until: "2026-02-01" }), /7/);
 assert.equal(connectionLocationLabel({ country_code: "CN", province: "广东" }), "中国 · 广东");

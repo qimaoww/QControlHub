@@ -214,7 +214,7 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 	}
 
 	for attempt := 0; attempt < 50; attempt++ {
-		history, err := dataStore.ClientConnectionHistory(ctx, store.ClientConnectionQuery{AgentID: enrolled.AgentID, Since: time.Now().Add(-time.Hour), Until: time.Now().Add(time.Minute), Limit: 100, Bucket: "hour"})
+		history, err := dataStore.ClientConnectionHistory(ctx, store.ClientConnectionQuery{IncludeNonPublic: true, AgentID: enrolled.AgentID, Since: time.Now().Add(-time.Hour), Until: time.Now().Add(time.Minute), Limit: 100, Bucket: "hour"})
 		if err == nil && len(history.Records) == 1 && history.Records[0].ClientIP == "198.51.100.9" {
 			break
 		}

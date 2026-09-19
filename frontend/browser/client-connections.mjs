@@ -28,19 +28,25 @@ export async function testClientConnectionsRuntime(preview = false) {
   assert.ok(document.querySelector('.connection-sources [title*="conntrack"]'));
   assert.equal(document.querySelectorAll(".client-connections p").length, 0, "connection page should not contain explanatory paragraphs");
   const form = document.querySelector("[data-connection-filters]");
+  assert.equal(form.elements.include_non_public.value, "");
+  assert.ok(!requests.at(-1).has("include_non_public"));
   form.elements.client_ip.value = "2001:db8::8";
   document.querySelector(".connection-advanced").open = true;
   form.elements.inbound.value = "vless-443";
   form.elements.port.value = "443";
+  form.elements.include_non_public.value = "true";
   const beforeQuery = requests.length;
   form.requestSubmit();
   await waitFor(() => requests.length > beforeQuery && !document.querySelector('[type="submit"]').disabled, "filter request missing");
   assert.equal(requests.at(-1).get("client_ip"), "2001:db8::8");
   assert.equal(requests.at(-1).get("inbound"), "vless-443");
   assert.equal(requests.at(-1).get("port"), "443");
+  assert.equal(requests.at(-1).get("include_non_public"), "true");
+  assert.equal(document.querySelector('[name="include_non_public"]').value, "true");
   document.querySelector("[data-connection-next]").click();
   await waitFor(() => document.querySelector("tbody")?.textContent.includes("51000"), "next page missing");
   assert.equal(requests.at(-1).get("before"), "2");
+  assert.equal(requests.at(-1).get("include_non_public"), "true");
   assert.match(document.querySelector(".connection-summary").textContent, /观测连接 2/g);
   document.querySelector("[data-connection-previous]").click();
   await waitFor(() => document.querySelector("tbody")?.textContent.includes("52000"), "previous page missing");
@@ -51,6 +57,11 @@ export async function testClientConnectionsRuntime(preview = false) {
   bucket.dispatchEvent(new Event("change", { bubbles: true }));
   await waitFor(() => requests.length > beforeBucket && !document.querySelector('[type="submit"]').disabled, "time bucket change missing");
   assert.equal(requests.at(-1).get("bucket"), "day");
+  const beforeRecent = requests.length;
+  document.querySelector("[data-connection-recent]").click();
+  await waitFor(() => requests.length > beforeRecent && !document.querySelector('[type="submit"]').disabled, "recent query missing");
+  assert.ok(!requests.at(-1).has("include_non_public"));
+  assert.equal(document.querySelector('[name="include_non_public"]').value, "");
   assert.ok(document.documentElement.scrollWidth <= innerWidth + 1, "connection page overflows viewport");
 
 }
