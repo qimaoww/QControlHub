@@ -58,6 +58,7 @@ func (s *Server) listClientConnections(w http.ResponseWriter, request *http.Requ
 		writeStoreError(w, err)
 		return
 	}
+	s.resolveClientConnectionLocations(request.Context(), history.Records)
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, history)
 }

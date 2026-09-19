@@ -3,7 +3,7 @@ import { assert, waitFor } from "./assertions.mjs";
 export async function testClientConnectionsRuntime(preview = false) {
   const fallback = window.fetch.bind(window), requests = [];
   const now = new Date().toISOString();
-  const row = { id: 2, agent_id: "alpha", agent_name: "Alpha · 东京", engine: "xray", protocol: "vless", inbound: "vless-443", transport: "tcp", client_ip: "2001:db8::8", client_port: 52000, local_ip: "192.0.2.1", local_port: 443, first_seen: now, last_seen: now };
+  const row = { id: 2, agent_id: "alpha", agent_name: "Alpha · 东京", engine: "xray", protocol: "vless", inbound: "vless-443", transport: "tcp", client_ip: "2001:db8::8", location: { country_code: "CN", country: "China", province: "广东" }, client_port: 52000, local_ip: "192.0.2.1", local_port: 443, first_seen: now, last_seen: now };
   window.fetch = async (input, options) => {
     const url = new URL(typeof input === "string" ? input : input.url, location.href);
     if (url.pathname === "/api/v1/client-connections") {
@@ -21,6 +21,7 @@ export async function testClientConnectionsRuntime(preview = false) {
   location.hash = "#client-connections";
   await import("../app.js");
   await waitFor(() => document.querySelector("tbody")?.textContent.includes("52000"), "connection page did not load");
+  assert.match(document.querySelector("tbody").textContent, /中国 · 广东/);
   assert.ok(document.querySelector('a[href="#client-connections"]'), "connection navigation missing");
   assert.ok(document.body.classList.contains("no-context"), "connection page must not show the configuration sidebar");
   assert.match(document.querySelector(".connection-summary").textContent, /观测连接 2/g);

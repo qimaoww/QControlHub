@@ -114,6 +114,7 @@ func (s *Store) MaintainAccountData(ctx context.Context, now time.Time, prune bo
 	}
 	if prune {
 		failures = append(failures, s.PruneClientConnections(ctx, now.Add(-core.ClientConnectionRetention)))
+		failures = append(failures, s.PruneClientConnectionLocations(ctx))
 		cutoff := now.Add(-time.Duration(longestLogRetention) * 24 * time.Hour)
 		_, err = s.PruneCoreLogPartitions(ctx, cutoff)
 		failures = append(failures, err)

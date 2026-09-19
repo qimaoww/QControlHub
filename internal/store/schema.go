@@ -3,7 +3,7 @@ package store
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 62
+const currentSchemaVersion = 63
 
 const schemaSQL = `
 CREATE TABLE IF NOT EXISTS agents (
@@ -767,4 +767,12 @@ CREATE TABLE IF NOT EXISTS client_connections (
 CREATE INDEX IF NOT EXISTS client_connections_time_idx ON client_connections(bucket);
 CREATE INDEX IF NOT EXISTS client_connections_agent_time_idx ON client_connections(agent_id,bucket DESC);
 CREATE INDEX IF NOT EXISTS client_connections_ip_time_idx ON client_connections(client_ip,bucket DESC);
+
+CREATE TABLE IF NOT EXISTS client_connection_locations (
+ client_ip inet PRIMARY KEY,
+ country_code varchar(2) NOT NULL DEFAULT '',
+ country varchar(200) NOT NULL DEFAULT '',
+ province varchar(100) NOT NULL DEFAULT '',
+ retry_after timestamptz NOT NULL
+);
 `

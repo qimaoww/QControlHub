@@ -54,7 +54,15 @@ func (r ClientConnectionReport) Validate() error {
 	return nil
 }
 
+type ClientIPLocation struct {
+	CountryCode string `json:"country_code,omitempty"`
+	Country     string `json:"country,omitempty"`
+	Province    string `json:"province,omitempty"`
+	NonPublic   bool   `json:"non_public,omitempty"`
+}
+
 type ClientConnectionRecord struct {
+	Location ClientIPLocation `json:"location"`
 	ClientConnection
 	ID        int64     `json:"id"`
 	AgentID   string    `json:"agent_id"`

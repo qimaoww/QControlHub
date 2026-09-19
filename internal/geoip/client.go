@@ -29,8 +29,9 @@ const (
 
 // Region is the country/region returned by the GeoIP provider.
 type Region struct {
-	ISOCode string
-	Name    string
+	ISOCode  string
+	Name     string
+	Province string
 }
 
 type cachedRegion struct {
@@ -111,15 +112,22 @@ func (client *Client) Lookup(ctx context.Context, address netip.Addr) (Region, e
 	var payload struct {
 		CountryCode string `json:"country_code"`
 		Country     string `json:"country"`
+		Region      string `json:"region"`
 	}
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return Region{}, fmt.Errorf("decode GeoIP response: %w", err)
 	}
 	code := strings.ToUpper(strings.TrimSpace(payload.CountryCode))
-	if len(code) != 2 || code[0] < 'A' || code[0] > 'Z' || code[1] < 'A' || code[1] > 'Z' {
+	if !ValidRegionCode(code) {
 		return Region{}, errors.New("GeoIP provider returned an invalid country code")
 	}
+	if len(payload.Country) > 200 || strings.ContainsRune(payload.Country, '\x00') {
+		return Region{}, errors.New("GeoIP provider returned an invalid country name")
+	}
 	region := Region{ISOCode: code, Name: strings.TrimSpace(payload.Country)}
+	if code == "CN" {
+		region.Province = chinaProvince(payload.Region)
+	}
 	client.mu.Lock()
 	if len(client.cache) >= maxCachedRegions {
 		client.cache = make(map[string]cachedRegion)

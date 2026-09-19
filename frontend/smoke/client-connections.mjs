@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { connectionQuery, connectionAddress, connectionSourceLabel, defaultConnectionFilters } from "../modules/client-connection-model.js";
+import { connectionQuery, connectionAddress, connectionSourceLabel, defaultConnectionFilters, connectionLocationLabel } from "../modules/client-connection-model.js";
 import { createClientConnectionView } from "../modules/client-connection-view.js";
 import { installClientConnections } from "../modules/client-connections.js";
 
@@ -11,6 +11,11 @@ assert.equal(query.get("inbound"), "a&b");
 assert.equal(query.get("before"), "7");
 assert.throws(() => connectionQuery({ since: "bad", until: "bad" }), /7/);
 assert.throws(() => connectionQuery({ since: "2026-01-01", until: "2026-02-01" }), /7/);
+assert.equal(connectionLocationLabel({ country_code: "CN", province: "广东" }), "中国 · 广东");
+assert.equal(connectionLocationLabel({ country_code: "US", province: "California" }), "美国");
+assert.equal(connectionLocationLabel({ country_code: "CN" }), "中国");
+assert.equal(connectionLocationLabel({ non_public: true }), "非公网");
+assert.equal(connectionLocationLabel({}), "—");
 assert.equal(connectionAddress("2001:db8::1", 443), "[2001:db8::1]:443");
 assert.match(connectionSourceLabel({}), /升级/);
 assert.match(connectionSourceLabel({ updated_at: "2020-01-01" }), /过期/);

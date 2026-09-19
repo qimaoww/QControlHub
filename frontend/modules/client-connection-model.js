@@ -1,3 +1,5 @@
+import { geoRegionDetails } from "./regions.js";
+
 export function connectionDateInput(value) {
   const date = new Date(value);
   return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
@@ -30,4 +32,11 @@ export function connectionSourceLabel(source, now = Date.now()) {
 
 export function connectionAddress(ip, port) {
   return `${String(ip).includes(":") ? `[${ip}]` : ip}:${port}`;
+}
+
+export function connectionLocationLabel(location) {
+  if (location?.non_public) return "非公网";
+  const region = geoRegionDetails(location?.country_code);
+  if (!region) return "—";
+  return region.code === "CN" && location.province ? `${region.name} · ${location.province}` : region.name;
 }

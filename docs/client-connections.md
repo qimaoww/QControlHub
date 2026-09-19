@@ -59,7 +59,25 @@ visible nodes, and an engine-sharing grant does not expose another owner's
 client IP telemetry. Owner-hidden nodes remain private from fleet administrators.
 Revoked nodes are excluded from queries.
 
-Schema version 62 adds `client_connections` and `client_connection_sources`.
+Schema version 63 adds `client_connections`, `client_connection_sources`, and
+the `client_connection_locations` cache.
 Retention bounds time, not database bytes: size depends on observed tuples and
 node count. No port traffic counters or quotas are changed. Rolling back binaries
 leaves the additive tables intact; preserve the database if history is needed.
+
+## Country and province
+
+The country/region column resolves the inbound source IP on the panel through
+its existing GeoJS provider. Chinese (`CN`) results include a recognized province,
+autonomous region or municipality in Chinese. Other countries display only the
+country/region; unknown subdivisions are left blank. Non-public addresses are
+labelled separately and are never sent to the provider.
+
+Only IPs from an authorized detail page are looked up. Results are persisted in
+panel PostgreSQL for 48 hours; failures retry after five minutes and retain any
+previous result. Unreferenced cache entries are pruned with connection history.
+Lookups are deduplicated within a page, use at most eight concurrent requests,
+and share a three-second deadline. Provider failure leaves connection history
+available, and IPs not reached within the deadline can resolve on a later query.
+The browser and Agent do not contact the provider. GeoJS receives the public
+source addresses being resolved; location is an IP database estimate.
