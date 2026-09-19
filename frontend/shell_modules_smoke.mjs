@@ -136,10 +136,10 @@ try {
   assert.equal(await feedback.confirmAction("fallback"), true);
   let nativeMessage;
   setGlobal("window", { confirm: message => { nativeMessage = message; return true; } });
-  await feedback.confirmAction("", "查询状态", {title: "批量查询状态", details: [["目标内核", "Mihomo"]], targets: ["ALPHA"]});
+  await feedback.confirmAction("1 个节点 · Mihomo", "确认", {title: "批量查询状态"});
   assert.match(nativeMessage, /批量查询状态/);
   assert.match(nativeMessage, /Mihomo/);
-  assert.match(nativeMessage, /ALPHA/);
+  assert.match(nativeMessage, /1 个节点/);
 
   const events = [], timers = new Map(), canceledTimers = [];
   let serial = 0;

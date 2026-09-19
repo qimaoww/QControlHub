@@ -43,7 +43,7 @@ export async function testAgentBatchActions({ testAPI, onlineAgent }) {
   all.click();
   assert.equal(alpha.checked, true);
   assert.equal(bravo.checked, true);
-  assert.equal(count.textContent, "已选择 2 个节点 · 当前可选 2 个");
+  assert.equal(count.textContent, "已选 2/2");
   assert.equal(all.checked, true);
   assert.equal(all.indeterminate, false);
   assert.equal(all.getAttribute("aria-checked"), "true");
@@ -65,7 +65,7 @@ export async function testAgentBatchActions({ testAPI, onlineAgent }) {
     "刷新后没有撤销刚变离线的节点",
   );
   assert.equal(bravo.checked, true, "刷新不应清除仍合格节点的选择");
-  assert.equal(count.textContent, "已选择 1 个节点 · 当前可选 1 个");
+  assert.equal(count.textContent, "已选 1/1");
   assert.equal(all.checked, true);
   assert.equal(all.indeterminate, false);
   assert.equal(all.getAttribute("aria-checked"), "true");
@@ -84,6 +84,11 @@ export async function testAgentBatchActions({ testAPI, onlineAgent }) {
   confirmDialog.querySelector("[data-confirm-accept]").click();
   await delay(30);
   assert.equal(testAPI.pendingTasks.length, 0, "确认后仍向已离线节点提交任务");
+  const notice = document.querySelector("[data-spa-notice]");
+  assert.equal(notice.getAttribute("role"), "alert");
+  notice.querySelector(".notice-close").click();
+  assert.equal(document.querySelector("[data-spa-notice]"), null);
+
 
   replaceAgent("alpha", () => onlineAgent("alpha"));
   await refreshAgents(() => !alpha.disabled, "恢复在线快照后节点仍不可选");
@@ -130,17 +135,16 @@ export async function testAgentBatchActions({ testAPI, onlineAgent }) {
   confirmDialog.querySelector("[data-confirm-accept]").click();
   await waitFor(() => testAPI.pendingTasks.length === 1, "首个串行任务未提交");
   assert.equal(testAPI.pendingTasks.length, 1, "确认防重入产生了重复任务");
-  assert.equal(form.querySelector(".batch-progress").max, 2);
-  assert.match(form.querySelector("[data-batch-result-summary]").textContent, /已处理 0\/2/);
+  assert.equal(form.querySelector(".batch-progress"), null, "进度只需一行文字");
+  assert.match(form.querySelector("[data-batch-result-summary]").textContent, /提交中 0\/2/);
   assert.equal(document.querySelector("[data-node-batch-toggle]").disabled, true);
   assert.equal(alpha.checked && bravo.checked, true, "busy 不应清除选中状态");
   assert.equal(alpha.disabled && bravo.disabled, true, "busy 应锁定节点选择控件");
   assert.equal(all.disabled, true, "busy 应锁定全选控件");
-  assert.equal(form.querySelector("[data-batch-clear]").disabled, true, "busy 应锁定清空控件");
   assert.equal(submit.disabled, true, "busy 应锁定提交控件");
   assert.equal(form.elements.action.disabled, true, "busy 应锁定动作控件");
   assert.equal(form.elements.engine.disabled, true, "busy 应锁定内核控件");
-  assert.equal(count.textContent, "已选择 2 个节点 · 当前可选 2 个");
+  assert.equal(count.textContent, "已选 2/2");
   assert.equal(all.checked, true);
   assert.equal(all.indeterminate, false);
   assert.equal(all.getAttribute("aria-checked"), "true");
@@ -148,40 +152,23 @@ export async function testAgentBatchActions({ testAPI, onlineAgent }) {
   testAPI.pendingTasks[0].ok({ id: "task-alpha" });
   await waitFor(() => testAPI.pendingTasks.length === 2, "第二个任务没有在首个完成后串行提交");
   assert.equal(testAPI.pendingTasks[1].payload.agent_id, "bravo");
-  assert.match(form.querySelector("[data-batch-result-summary]").textContent, /已处理 1\/2/);
+  assert.match(form.querySelector("[data-batch-result-summary]").textContent, /提交中 1\/2/);
   testAPI.pendingTasks[1].fail("bravo temporary failure");
   await waitFor(() => form.dataset.busy !== "1", "部分失败后 busy 未恢复");
   let rows = [...form.querySelectorAll(".batch-result-row")];
-  assert.equal(rows.length, 2);
-  assert.equal(rows.filter((row) => row.classList.contains("ok")).length, 1);
-  assert.equal(rows.filter((row) => row.classList.contains("error")).length, 1);
-  assert.equal(form.querySelector("[data-batch-result-summary]").textContent, "1 个已提交 · 1 个失败");
-  const succeededRow = form.querySelector(".batch-result-row.ok");
-  assert.equal(getComputedStyle(succeededRow).display, "none", "部分失败应先展示失败节点");
-  form.querySelector('[data-batch-result-filter="all"]').click();
-  assert.notEqual(getComputedStyle(succeededRow).display, "none", "全部筛选没有恢复成功节点");
-  form.querySelector('[data-batch-result-filter="error"]').click();
-  const resultsToggle = form.querySelector("[data-batch-results-toggle]");
-  resultsToggle.click();
-  assert.equal(form.querySelector("[data-batch-result-details]").hidden, true);
-  assert.equal(resultsToggle.getAttribute("aria-expanded"), "false");
-  resultsToggle.click();
-  assert.equal(form.querySelector("[data-batch-result-details]").hidden, false);
-
-  const failureNotice = document.querySelector("[data-spa-notice]");
-  assert.equal(failureNotice.getAttribute("role"), "alert");
-  failureNotice.querySelector(".notice-close").click();
-  assert.equal(document.querySelector("[data-spa-notice]"), null, "错误提示必须支持关闭");
+  assert.equal(rows.length, 1, "仅显示失败节点");
+  assert.equal(rows[0].classList.contains("error"), true);
+  assert.equal(form.querySelector("[data-batch-result-summary]").textContent, "已提交 1，失败 1");
+  assert.equal(form.querySelector("[data-batch-result-filter]"), null);
+  assert.equal(form.querySelector("[data-batch-results-toggle]"), null);
   let retry = form.querySelector("[data-batch-retry]");
   assert.equal(retry.dataset.batchRetry, "bravo", "部分失败只应重试失败节点");
   retry.click();
   await waitFor(() => testAPI.pendingTasks.length === 3, "部分失败项重试未提交");
   testAPI.pendingTasks[2].ok({ id: "task-bravo-retry" });
   await waitFor(() => !form.querySelector("[data-batch-retry]"), "成功重试后仍残留重试入口");
-  assert.equal(form.querySelector("[data-batch-result-summary]").textContent, "2 个已提交 · 0 个失败", "重试成功后汇总没有更新");
-  assert.equal(form.querySelector("[data-batch-result-filters]").hidden, true, "没有失败项时应隐藏筛选");
-  assert.notEqual(getComputedStyle(succeededRow).display, "none", "最后一次重试成功后应展示全部节点");
-  assert.equal(document.querySelector("[data-spa-notice]").getAttribute("role"), "status");
+  assert.equal(form.querySelector("[data-batch-result-summary]").textContent, "已提交 2", "重试成功后汇总没有更新");
+  assert.equal(form.querySelectorAll(".batch-result-row").length, 0, "成功后移除失败明细");
 
   form.requestSubmit(submit);
   confirmDialog = await waitFor(() => document.querySelector("[data-confirm-dialog][open]"), "第二轮批量提交没有进入确认流程");
@@ -275,7 +262,7 @@ export async function testAgentBatchActions({ testAPI, onlineAgent }) {
   );
   retries = [...form.querySelectorAll("[data-batch-retry]")];
   assert.equal(retries.length, 2, "连续 poll 后两个 retry 必须保留");
-  assert.equal(count.textContent, "已选择 2 个节点 · 当前可选 2 个");
+  assert.equal(count.textContent, "已选 2/2");
   assert.equal(all.checked, true);
   assert.equal(all.indeterminate, false);
   assert.equal(all.getAttribute("aria-checked"), "true");
@@ -309,7 +296,7 @@ export async function testAgentBatchActions({ testAPI, onlineAgent }) {
   assert.equal(batchBar.isConnected, true);
   assert.equal(location.hash, aggregateHash);
   assert.equal(aggregateWorkspace.scrollTop, aggregateScrollTop);
-  assert.equal(count.textContent, "已选择 2 个节点 · 当前可选 2 个");
+  assert.equal(count.textContent, "已选 2/2");
   assert.equal(all.checked, true);
   assert.equal(all.indeterminate, false);
   assert.equal(all.getAttribute("aria-checked"), "true");
@@ -322,9 +309,8 @@ export async function testAgentBatchActions({ testAPI, onlineAgent }) {
   assert.equal(testAPI.pendingTasks.length, 6, "共享 busy 未阻止并行 retry 或主提交");
   assert.equal(retries.every((button) => button.disabled), true, "retry busy 未锁定全部重试控件");
   assert.equal(alpha.disabled && bravo.disabled && all.disabled, true, "retry busy 未锁定选择控件");
-  assert.equal(form.querySelector("[data-batch-clear]").disabled, true, "retry busy 未锁定清空控件");
   assert.equal(submit.disabled && form.elements.action.disabled && form.elements.engine.disabled, true, "retry busy 未锁定动作控件");
-  assert.equal(count.textContent, "已选择 2 个节点 · 当前可选 2 个");
+  assert.equal(count.textContent, "已选 2/2");
   assert.equal(all.checked, true);
   assert.equal(all.getAttribute("aria-checked"), "true");
   testAPI.pendingTasks[5].fail("alpha retry still failing");

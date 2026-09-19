@@ -1,5 +1,5 @@
 import { bindEvent } from "./refresh.js";
-import { renderNotice, renderConfirmationDetails } from "./shell-feedback-view.js";
+import { renderNotice } from "./shell-feedback-view.js";
 import { errorMessage } from "./errors.js";
 
 export function createShellFeedback(state) {
@@ -24,14 +24,11 @@ function notify(message, tone = "success") {
 function confirmAction(message, label = "确认继续", options = {}) {
   const dialog = document.querySelector("[data-confirm-dialog]");
   if (!dialog?.showModal) {
-    const summary = (options.details || []).map(([key, value]) => `${key}：${value}`);
-    if (options.targets?.length) summary.push(`目标节点：${options.targets.join("、")}`);
-    return Promise.resolve(window.confirm([options.title, message, ...summary].filter(Boolean).join("\n")));
+    return Promise.resolve(window.confirm([options.title, message].filter(Boolean).join("\n")));
   }
   dialog.dataset.tone = options.tone || "danger";
   const title = dialog.querySelector("[data-confirm-title]");
   if (title) title.textContent = options.title || "确认继续？";
-  renderConfirmationDetails(dialog.querySelector("[data-confirm-details]"), options.details, options.targets);
   dialog.querySelector("[data-confirm-message]").textContent = message;
   dialog.querySelector("[data-confirm-message]").hidden = !message;
   dialog.querySelector("[data-confirm-accept]").textContent = label;

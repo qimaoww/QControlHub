@@ -8,7 +8,7 @@ export async function testBatchCoreUpdates({ testAPI }) {
   };
   const submit = form.querySelector('[type="submit"]');
   const alpha = form.querySelector('[data-batch-checkbox][value="alpha"]');
-  form.querySelector("[data-batch-clear]").click();
+  form.querySelectorAll("[data-batch-checkbox]:checked").forEach((input) => input.click());
   change("action", "install");
   change("engine", "mihomo");
   assert.equal(form.querySelector("[data-batch-version-wrap]").hidden, false);
@@ -35,9 +35,8 @@ export async function testBatchCoreUpdates({ testAPI }) {
     assert.equal(form.elements.release_channel.disabled, true, "提交时未锁定版本选项");
     testAPI.pendingTasks[next++].ok({ id: `core-${channel}` });
     await waitFor(() => form.dataset.busy !== "1", "版本提交后未解除 busy");
-    assert.equal(form.querySelector("[data-batch-result-details]").hidden, true, "全部提交成功后应收起明细");
-    form.querySelector("[data-batch-results-toggle]").click();
-    assert.equal(form.querySelector("[data-batch-result-details]").hidden, false, "成功结果应可重新展开");
+    assert.equal(form.querySelector("[data-batch-result-summary]").textContent, "已提交 1");
+    assert.equal(form.querySelector(".batch-result-row"), null, "成功后不展示多余明细");
   }
   change("release_channel", "custom");
   assert.equal(form.elements.custom_version.required, true);

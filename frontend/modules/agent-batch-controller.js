@@ -1,7 +1,7 @@
 import { bindEvent } from "./refresh.js";
 import { batchAgentEligibility, batchSelectAllState, batchTaskOptions } from "./agent-batch.js";
 
-import { batchActionFeedback, batchConfirmation, batchResultsMarkup, bindBatchResultControls, updateBatchResultSummary } from "./agent-batch-feedback.js";
+import { batchActionFeedback, batchConfirmation, batchResultsMarkup, updateBatchResultSummary } from "./agent-batch-feedback.js";
 
 export function createAgentBatchController({ api, state, esc, notify, confirmAction, engineName }, { renderAgentPage, cancelCardDrag }) {
   let syncActiveBatchSnapshot = null;
@@ -67,15 +67,15 @@ export function createAgentBatchController({ api, state, esc, notify, confirmAct
     const button = batchForm?.querySelector("button[type=submit]");
     if (button) {
       button.disabled = selection.selected === 0 || busy;
-      button.textContent = busy ? "正在提交…" : `${feedback.submit}${selection.selected ? `（${selection.selected}）` : ""}`;
+      button.textContent = busy ? "提交中" : "执行";
       button.classList.toggle("batch-danger", feedback.tone === "danger");
     }
     document.querySelectorAll("[data-node-batch-toggle]").forEach((toggle) => { toggle.disabled = busy; });
-    const clear = batchForm.querySelector("[data-batch-clear]");
-    if (clear) clear.disabled = busy || selection.selected === 0;
     const label = batchForm?.querySelector("[data-batch-count]");
-    if (label)
-      label.textContent = `已选择 ${selection.selected} 个节点 · 当前可选 ${selection.eligible} 个`;
+    if (label) {
+      label.textContent = `已选 ${selection.selected}/${selection.eligible}`;
+      label.title = `已选择 ${selection.selected} 个节点，可选 ${selection.eligible} 个`;
+    }
     const engineWrap = batchForm.querySelector("[data-batch-engine-wrap]");
     if (engineWrap) engineWrap.hidden = action === "upgrade-agent";
     const installing = action === "install";
@@ -134,14 +134,6 @@ export function createAgentBatchController({ api, state, esc, notify, confirmAct
         .forEach((input) => (input.checked = shouldSelect));
       updateBatch();
     };
-  const clearBatch = batchForm?.querySelector("[data-batch-clear]");
-  if (clearBatch)
-    clearBatch.onclick = () => {
-      batchForm
-        .querySelectorAll("[data-batch-checkbox]")
-        .forEach((input) => (input.checked = false));
-      updateBatch();
-    };
   const closeBatch = batchForm?.querySelector("[data-close-node-batch]");
   if (closeBatch)
     closeBatch.onclick = () => setNodeBatchMode(false, closeBatch);
@@ -190,12 +182,8 @@ export function createAgentBatchController({ api, state, esc, notify, confirmAct
       batchForm.dataset.confirming = "1";
       let confirmed = false;
       try {
-        const feedback = batchActionFeedback(action);
-        confirmed = await confirmAction(
-          feedback.hint,
-          `确认${feedback.submit}`,
-          batchConfirmation(options, selected.map((input) => agentsByID.get(input.value)), engineName),
-        );
+        const confirmation = batchConfirmation(options, selected.map((input) => agentsByID.get(input.value)), engineName);
+        confirmed = await confirmAction(confirmation.message, "确认", confirmation);
       } finally {
         batchForm.dataset.confirming = "";
       }
@@ -247,9 +235,6 @@ export function createAgentBatchController({ api, state, esc, notify, confirmAct
       }
       if (!isCurrent()) return;
       setBatchBusy(false);
-      bindBatchResultControls(results);
-      const success = settled.filter((item) => item.ok).length;
-      notify(success === settled.length ? `已提交 ${success} 个任务` : `${success} 个已提交，${settled.length - success} 个失败`, success === settled.length ? "success" : "error");
       bindBatchRetries(
         batchForm,
         options,
@@ -294,16 +279,11 @@ function bindBatchRetries(form, options, agentsByID, setBatchBusy, isCurrent) {
           }),
         });
         if (!isCurrent()) return;
-        button.closest(".batch-result-row").className = "batch-result-row ok";
-        button.closest(".batch-result-row").querySelector("small").hidden = true;
-        button.closest(".batch-result-row").querySelector(".batch-result-status").textContent = "已提交";
-        button.remove();
+        button.closest(".batch-result-row").remove();
         updateBatchResultSummary(form);
-        notify("重试任务已提交");
       } catch (error) {
         if (isCurrent()) {
           button.closest(".batch-result-row").querySelector("small").textContent = error.message;
-          notify(error.message, "error");
         }
       } finally {
         if (isCurrent()) setBatchBusy(false);
