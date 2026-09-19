@@ -39,6 +39,9 @@ func janitor(ctx context.Context, dataStore *store.Store) {
 			if err := dataStore.EnsureCoreLogPartitions(operationContext, time.Now().UTC()); err != nil {
 				slog.Error("ensure core log partitions", "error", err)
 			}
+			if err := dataStore.QueueDueIPQualityChecks(operationContext, time.Now().UTC()); err != nil {
+				slog.Error("queue daily IP quality checks", "error", err)
+			}
 			cancel()
 		}
 	}
