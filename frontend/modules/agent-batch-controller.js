@@ -1,9 +1,15 @@
 import { bindEvent } from "./refresh.js";
-import { batchAgentEligibility, batchSelectAllState } from "./agent-batch.js";
+import { batchAgentEligibility, batchSelectAllState, batchTaskOptions } from "./agent-batch.js";
 
-export function createAgentBatchController({ api, state, esc, notify, confirmAction, engineName, actionName }, { renderAgentPage, cancelCardDrag }) {
+import { batchActionFeedback, batchConfirmation, batchResultsMarkup, updateBatchResultSummary } from "./agent-batch-feedback.js";
+
+export function createAgentBatchController({ api, state, esc, notify, confirmAction, engineName }, { renderAgentPage, cancelCardDrag }) {
   let syncActiveBatchSnapshot = null;
+  let batchResizeObserver = null;
   function bind(agentsByID) {
+  batchResizeObserver?.disconnect();
+  const accountData = state.data;
+  const isCurrent = () => state.data === accountData && batchForm?.isConnected;
   const setNodeBatchMode = async (enabled, trigger) => {
     if (trigger?.disabled) return;
     if (trigger) trigger.disabled = true;
@@ -27,6 +33,8 @@ export function createAgentBatchController({ api, state, esc, notify, confirmAct
     const engine = batchForm.elements.engine.value;
     const action = batchForm.elements.action.value;
     const busy = batchForm.dataset.busy === "1";
+    const feedback = batchActionFeedback(action);
+    batchForm.querySelector(".node-batch-bar").dataset.batchAction = action;
     const inputs = [...batchForm.querySelectorAll("[data-batch-checkbox]")];
     inputs.forEach((input) => {
       const agent = agentsByID.get(input.value);
@@ -55,17 +63,29 @@ export function createAgentBatchController({ api, state, esc, notify, confirmAct
       "[data-batch-select-all-label]",
     );
     if (selectAllLabel)
-      selectAllLabel.textContent = selection.checked ? "取消全选" : "全选";
+      selectAllLabel.textContent = "全选";
     const button = batchForm?.querySelector("button[type=submit]");
-    if (button)
-      button.disabled = selection.selected === 0 || batchForm.dataset.busy === "1";
-    const clear = batchForm.querySelector("[data-batch-clear]");
-    if (clear) clear.disabled = busy || selection.selected === 0;
+    if (button) {
+      button.disabled = selection.selected === 0 || busy;
+      button.textContent = busy ? "提交中" : "执行";
+      button.classList.toggle("batch-danger", feedback.tone === "danger");
+    }
+    document.querySelectorAll("[data-node-batch-toggle]").forEach((toggle) => { toggle.disabled = busy; });
     const label = batchForm?.querySelector("[data-batch-count]");
-    if (label)
-      label.textContent = `已选择 ${selection.selected} 个节点 · 当前可选 ${selection.eligible} 个`;
+    if (label) {
+      label.textContent = `已选 ${selection.selected}`;
+      label.title = `已选择 ${selection.selected} 个节点，可选 ${selection.eligible} 个`;
+    }
     const engineWrap = batchForm.querySelector("[data-batch-engine-wrap]");
     if (engineWrap) engineWrap.hidden = action === "upgrade-agent";
+    const installing = action === "install";
+    const channel = batchForm.elements.release_channel.value;
+    const custom = installing && channel === "custom";
+    batchForm.querySelector("[data-batch-version-wrap]").hidden = !installing;
+    batchForm.querySelector("[data-batch-custom-wrap]").hidden = !custom;
+    batchForm.elements.release_channel.disabled = busy || !installing;
+    batchForm.elements.custom_version.disabled = busy || !custom;
+    batchForm.elements.custom_version.required = custom;
     batchForm.elements.action.disabled = busy;
     batchForm.elements.engine.disabled = busy;
     const close = batchForm.querySelector("[data-close-node-batch]");
@@ -114,26 +134,43 @@ export function createAgentBatchController({ api, state, esc, notify, confirmAct
         .forEach((input) => (input.checked = shouldSelect));
       updateBatch();
     };
-  const clearBatch = batchForm?.querySelector("[data-batch-clear]");
-  if (clearBatch)
-    clearBatch.onclick = () => {
-      batchForm
-        .querySelectorAll("[data-batch-checkbox]")
-        .forEach((input) => (input.checked = false));
-      updateBatch();
-    };
   const closeBatch = batchForm?.querySelector("[data-close-node-batch]");
   if (closeBatch)
     closeBatch.onclick = () => setNodeBatchMode(false, closeBatch);
   bindEvent(batchForm?.elements.engine, "change", updateBatch);
   bindEvent(batchForm?.elements.action, "change", updateBatch);
+  bindEvent(batchForm?.elements.release_channel, "change", updateBatch);
+  const clearVersionError = () => {
+    batchForm.querySelector("[data-batch-error]").hidden = true;
+    batchForm.elements.custom_version.removeAttribute("aria-invalid");
+  };
+  bindEvent(batchForm, "change", clearVersionError);
+  bindEvent(batchForm?.elements.custom_version, "input", clearVersionError);
+  if (batchForm && typeof ResizeObserver !== "undefined") {
+    const bar = batchForm.querySelector(".node-batch-bar");
+    batchResizeObserver = new ResizeObserver(() => {
+      batchForm.style.setProperty("--batch-bar-height", `${bar.getBoundingClientRect().height}px`);
+    });
+    batchResizeObserver.observe(bar);
+  }
   updateBatch();
   if (batchForm)
     batchForm.onsubmit = async (event) => {
       event.preventDefault();
-      const values = new FormData(batchForm);
-      const action = String(values.get("action"));
-      const engine = String(values.get("engine"));
+      if (!isCurrent() || batchForm.dataset.busy === "1" || batchForm.dataset.confirming === "1") return;
+      let options;
+      try {
+        options = batchTaskOptions(new FormData(batchForm));
+      } catch (error) {
+        const errorText = batchForm.querySelector("[data-batch-error]");
+        errorText.textContent = error.message;
+        errorText.hidden = false;
+        batchForm.elements.custom_version.setAttribute("aria-invalid", "true");
+        batchForm.elements.custom_version.focus();
+        return;
+      }
+      clearVersionError();
+      const { action, engine } = options;
       let selected = [
         ...batchForm.querySelectorAll("[data-batch-checkbox]:checked"),
       ].filter((input) =>
@@ -145,29 +182,32 @@ export function createAgentBatchController({ api, state, esc, notify, confirmAct
       batchForm.dataset.confirming = "1";
       let confirmed = false;
       try {
-        confirmed = await confirmAction(
-          action === "upgrade-agent"
-            ? `确定在 ${selected.length} 个在线节点上批量更新 Agent？升级期间节点会短暂离线。`
-            : `确定在 ${selected.length} 个节点上执行 ${engineName(engine)} ${actionName(action)}？`,
-          "提交批量任务",
-        );
+        const confirmation = batchConfirmation(options, selected.map((input) => agentsByID.get(input.value)), engineName);
+        confirmed = await confirmAction(confirmation.message, "确认", confirmation);
       } finally {
         batchForm.dataset.confirming = "";
       }
-      if (!confirmed || batchForm.dataset.busy === "1")
+      if (!confirmed || !isCurrent() || batchForm.dataset.busy === "1")
         return;
       updateBatch();
-      selected = [
-        ...batchForm.querySelectorAll("[data-batch-checkbox]:checked"),
-      ].filter((input) =>
-        batchAgentEligibility(agentsByID.get(input.value), action, engine)
-          .eligible,
+      selected = selected.filter((input) => input.checked &&
+        batchAgentEligibility(agentsByID.get(input.value), action, engine).eligible,
       );
-      if (!selected.length) return;
+      if (!selected.length) {
+        notify("节点状态已变化，请重新选择。", "error");
+        return;
+      }
       setBatchBusy(true);
       const results = batchForm.querySelector("[data-batch-results]");
       const settled = [];
+      const renderResults = () => {
+        if (!results || !isCurrent()) return;
+        results.hidden = false;
+        results.innerHTML = batchResultsMarkup(settled, selected.length, options, { esc, engineName });
+      };
+      renderResults();
       for (const input of selected) {
+        if (!isCurrent()) break;
         const agent = agentsByID.get(input.value);
         const eligibility = batchAgentEligibility(agent, action, engine);
         if (!eligibility.eligible) {
@@ -176,44 +216,41 @@ export function createAgentBatchController({ api, state, esc, notify, confirmAct
             error: new Error(`节点状态已变化：${eligibility.reason}`),
             ok: false,
           });
+          renderResults();
           continue;
         }
         try {
-          const task = await api("/tasks", {
+          await api("/tasks", {
             method: "POST",
             body: JSON.stringify({
               agent_id: input.value,
-              ...(action === "upgrade-agent" ? {} : { engine }),
-              action,
+              ...options,
             }),
           });
-          settled.push({ agent, task, ok: true });
+          settled.push({ agent, ok: true });
         } catch (error) {
           settled.push({ agent, error, ok: false });
         }
+        renderResults();
       }
-      if (results) {
-        results.hidden = false;
-        results.innerHTML = `<header><b>批量结果</b><small>${settled.filter((item) => item.ok).length}/${settled.length} 成功</small></header>${settled.map((item) => `<div class="batch-result-row ${item.ok ? "ok" : "error"}"><span><b>${esc(item.agent?.name || item.agent?.id || "节点")}</b><small>${item.ok ? `任务 ${esc(item.task?.id || "已提交")}` : esc(item.error?.message || "提交失败")}</small></span>${item.ok ? "" : `<button type="button" class="button small" data-batch-retry="${esc(item.agent?.id || "")}" data-batch-retry-action="${esc(action)}" data-batch-retry-engine="${esc(engine)}">重试</button>`}</div>`).join("")}`;
-      }
+      if (!isCurrent()) return;
       setBatchBusy(false);
-      const success = settled.filter((item) => item.ok).length;
-      notify(success === settled.length ? `已提交 ${success} 个任务` : `已提交 ${success}/${settled.length} 个任务`, success === settled.length ? "success" : "error");
       bindBatchRetries(
         batchForm,
-        action,
-        engine,
+        options,
         agentsByID,
         setBatchBusy,
+        isCurrent,
       );
     };
 
     return batchForm;
   }
-function bindBatchRetries(form, action, engine, agentsByID, setBatchBusy) {
+function bindBatchRetries(form, options, agentsByID, setBatchBusy, isCurrent) {
+  const { action, engine } = options;
   form.querySelectorAll("[data-batch-retry]").forEach((button) => {
     button.onclick = async () => {
-      if (form.dataset.busy === "1") return;
+      if (!isCurrent() || form.dataset.busy === "1") return;
       const agentID = button.dataset.batchRetry;
       const agent = agentsByID.get(agentID);
       if (!agent) return;
@@ -234,22 +271,22 @@ function bindBatchRetries(form, action, engine, agentsByID, setBatchBusy) {
           notify(`无法重试：${currentEligibility.reason}`, "error");
           return;
         }
-        const task = await api("/tasks", {
+        await api("/tasks", {
           method: "POST",
           body: JSON.stringify({
             agent_id: agentID,
-            ...(action === "upgrade-agent" ? {} : { engine }),
-            action,
+            ...options,
           }),
         });
-        button.closest(".batch-result-row").className = "batch-result-row ok";
-        button.closest(".batch-result-row").querySelector("small").textContent = `任务 ${task?.id || "已提交"}`;
-        button.remove();
-        notify("重试任务已提交");
+        if (!isCurrent()) return;
+        button.closest(".batch-result-row").remove();
+        updateBatchResultSummary(form);
       } catch (error) {
-        notify(error.message, "error");
+        if (isCurrent()) {
+          button.closest(".batch-result-row").querySelector("small").textContent = error.message;
+        }
       } finally {
-        setBatchBusy(false);
+        if (isCurrent()) setBatchBusy(false);
       }
     };
   });
@@ -258,7 +295,7 @@ function bindBatchRetries(form, action, engine, agentsByID, setBatchBusy) {
 
   return {
     bind,
-    reset() { syncActiveBatchSnapshot = null; },
+    reset() { syncActiveBatchSnapshot = null; batchResizeObserver?.disconnect(); },
     syncSnapshot(items) { syncActiveBatchSnapshot?.(items); },
   };
 }

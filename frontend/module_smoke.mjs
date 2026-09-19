@@ -53,3 +53,4 @@ Object.assign(fixtures, await (await import("./smoke/archive-readonly.mjs")).run
 Object.assign(fixtures, await (await import("./smoke/public-addresses.mjs")).run(fixtures));
 Object.assign(fixtures, await (await import("./smoke/public-address-runtime.mjs")).run(fixtures));
 await import("./route_modules_smoke.mjs");
+await import("./ip_quality_smoke.mjs");

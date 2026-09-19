@@ -302,7 +302,7 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 						return
 					}
 				}
-				if err := s.store.CompleteTask(ctx, id, message.Result.TaskID, message.Result.Result); err != nil {
+				if err := s.completeAgentTask(ctx, id, message.Result.TaskID, &message.Result.Result); err != nil {
 					slog.Warn("store task result", "agent_id", id, "task_id", message.Result.TaskID, "error", err)
 					_ = connection.Close(websocket.StatusPolicyViolation, "task result rejected")
 					return

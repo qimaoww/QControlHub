@@ -106,6 +106,7 @@ func (c *Client) advertisedFeatures() []string {
 		core.AgentFeaturePresetAutoInstall,
 		core.AgentFeatureCNIPSource,
 		core.AgentFeatureSystemBBR,
+		core.AgentFeatureIPQuality,
 	}
 	if c.publicIP.Enabled() {
 		features = append(features, core.AgentFeaturePublicIPProbe)

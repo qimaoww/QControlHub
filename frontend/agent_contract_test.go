@@ -46,7 +46,7 @@ func TestNodeSidebarsUseDraggedNodeSettingsOrder(t *testing.T) {
 
 func TestNodeSettingsStartsWithOperationsAndCards(t *testing.T) {
 	app := string(mustReadFrontendFile(t, "modules/shell-view.js"))
-	agents := frontendSources(t, "modules/agent-view.js", "modules/agent-batch-controller.js")
+	agents := frontendSources(t, "modules/agent-view.js", "modules/agent-batch-view.js", "modules/agent-batch-controller.js")
 	styles := string(mustReadFrontendFile(t, "app.css"))
 	if strings.Contains(agents, `class="node-page-intro"`) || strings.Contains(styles, `.node-page-intro`) {
 		t.Fatal("node settings must not repeat its page title in a separate introduction panel")

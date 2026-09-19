@@ -1,6 +1,7 @@
 import { formatHostPort, manualConnectionAddressNote, publicAddressRows } from "./agent-addresses.js";
 import { engineCapabilityToggles } from "./engine-capabilities.js";
 import { regionAvatarMarkup } from "./regions.js";
+import { agentBatchBarMarkup } from "./agent-batch-view.js";
 import { orderedNodeList } from "./node-order.js";
 
 function mihomoDevelopmentSourceFieldset(canMirror) {
@@ -241,8 +242,8 @@ export function createAgentView(ctx, { can, komariUUIDFor, komariNetworkMarkup }
     .join("");
 
   const batchBar = batchMode
-      ? `<aside class="node-batch-bar" aria-label="批量操作栏"><div class="batch-selection-head"><label class="batch-select-all"><input type="checkbox" data-batch-select-all aria-label="全选当前合格节点" aria-checked="false"><span data-batch-select-all-label>全选</span></label><strong data-batch-count aria-live="polite">已选择 0 个节点</strong></div><div class="batch-controls"><label><span>动作</span><select name="action"><option value="upgrade-agent">批量更新 Agent</option><option value="restart">重启服务</option><option value="status">查询状态</option><option value="start">启动服务</option><option value="stop">停止服务</option></select></label><label data-batch-engine-wrap><span>内核</span><select name="engine">${engines.map((engine) => `<option value="${engine}">${esc(engineName(engine))}</option>`).join("")}</select></label><button class="button small" type="button" data-batch-clear disabled>清空</button><button class="button small primary" type="submit" disabled>执行</button><button class="node-batch-close" type="button" data-close-node-batch aria-label="退出批量操作" title="退出批量操作">×</button></div><section class="batch-results" data-batch-results aria-live="polite" hidden></section></aside>`
-      : "";
+    ? agentBatchBarMarkup({ engines, engineName, esc })
+    : "";
   const detailMissingState = detailMissing
     ? '<section class="node-settings-missing" data-node-missing role="status"><strong>节点不可用</strong><p>该节点已删除、撤销或不再属于当前作用域。</p><a class="button small" href="#node-settings">返回全部节点</a></section>'
     : "";

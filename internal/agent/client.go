@@ -45,10 +45,11 @@ type credentials struct {
 }
 
 type completedTask struct {
-	Success     bool      `json:"success"`
-	Output      string    `json:"output,omitempty"`
-	Error       string    `json:"error,omitempty"`
-	CompletedAt time.Time `json:"completed_at"`
+	Success     bool                  `json:"success"`
+	Output      string                `json:"output,omitempty"`
+	Error       string                `json:"error,omitempty"`
+	CompletedAt time.Time             `json:"completed_at"`
+	IPQuality   *core.IPQualityResult `json:"ip_quality,omitempty"`
 }
 
 type Client struct {
@@ -76,6 +77,7 @@ type Client struct {
 	runtimeRefresh    chan struct{}
 	reexecFunc        func(string, []string, []string) error
 	executeFunc       func(context.Context, core.Task) (string, error)
+	ipQualityFunc     func(context.Context) (core.IPQualityResult, error)
 
 	connectionSampleMu   sync.Mutex
 	nextConnectionSample time.Time

@@ -3,7 +3,7 @@ package store
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 63
+const currentSchemaVersion = 64
 
 const schemaSQL = `
 CREATE TABLE IF NOT EXISTS agents (
@@ -174,8 +174,8 @@ CREATE INDEX IF NOT EXISTS mainland_access_policies_agent_idx
 CREATE TABLE IF NOT EXISTS tasks (
     id text PRIMARY KEY,
     agent_id text NOT NULL REFERENCES agents(id),
-    action varchar(20) NOT NULL CHECK (action IN ('validate','deploy','import-existing','read-config','read-managed-config','start','stop','restart','status','install','upgrade-agent','enable-bbr','disable-bbr','configure-tcp')),
-	    engine varchar(20) NOT NULL CHECK (engine IN ('mihomo','xray','sing-box','ss-rust') OR (action IN ('upgrade-agent','enable-bbr','disable-bbr','configure-tcp') AND engine='')),
+    action varchar(20) NOT NULL CHECK (action IN ('validate','deploy','import-existing','read-config','read-managed-config','start','stop','restart','status','install','upgrade-agent','enable-bbr','disable-bbr','configure-tcp','ip-quality')),
+	    engine varchar(20) NOT NULL CHECK (engine IN ('mihomo','xray','sing-box','ss-rust') OR (action IN ('upgrade-agent','enable-bbr','disable-bbr','configure-tcp','ip-quality') AND engine='')),
     config_id text REFERENCES configs(id),
     config_version integer,
 	    config_content text,
@@ -206,7 +206,7 @@ ALTER TABLE tasks ADD COLUMN IF NOT EXISTS tcp_settings jsonb NOT NULL DEFAULT '
 	DROP INDEX IF EXISTS tasks_latest_deployment_idx;
 	ALTER TABLE tasks DROP COLUMN IF EXISTS simulated;
 	ALTER TABLE tasks DROP CONSTRAINT IF EXISTS tasks_action_check;
-	ALTER TABLE tasks ADD CONSTRAINT tasks_action_check CHECK (action IN ('validate','deploy','import-existing','read-config','read-managed-config','start','stop','restart','status','install','upgrade-agent','enable-bbr','disable-bbr','configure-tcp'));
+	ALTER TABLE tasks ADD CONSTRAINT tasks_action_check CHECK (action IN ('validate','deploy','import-existing','read-config','read-managed-config','start','stop','restart','status','install','upgrade-agent','enable-bbr','disable-bbr','configure-tcp','ip-quality'));
 	ALTER TABLE tasks DROP CONSTRAINT IF EXISTS tasks_status_check;
 	ALTER TABLE tasks ADD CONSTRAINT tasks_status_check CHECK (status IN ('pending','running','succeeded','failed','canceled'));
 	ALTER TABLE configs DROP CONSTRAINT IF EXISTS configs_engine_check;
@@ -214,7 +214,34 @@ ALTER TABLE tasks ADD COLUMN IF NOT EXISTS tcp_settings jsonb NOT NULL DEFAULT '
 	ALTER TABLE config_revisions DROP CONSTRAINT IF EXISTS config_revisions_engine_check;
 	ALTER TABLE config_revisions ADD CONSTRAINT config_revisions_engine_check CHECK (engine IN ('mihomo','xray','sing-box','ss-rust'));
 	ALTER TABLE tasks DROP CONSTRAINT IF EXISTS tasks_engine_check;
-	ALTER TABLE tasks ADD CONSTRAINT tasks_engine_check CHECK (engine IN ('mihomo','xray','sing-box','ss-rust') OR (action IN ('upgrade-agent','enable-bbr','disable-bbr','configure-tcp') AND engine=''));
+	ALTER TABLE tasks ADD CONSTRAINT tasks_engine_check CHECK (engine IN ('mihomo','xray','sing-box','ss-rust') OR (action IN ('upgrade-agent','enable-bbr','disable-bbr','configure-tcp','ip-quality') AND engine=''));
+
+-- Reports inherit the task's durable ownership, lifecycle and retention.
+-- Large provider payloads stay out of ordinary task/status polling.
+CREATE TABLE IF NOT EXISTS ip_quality_reports (
+    task_id text PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+    result jsonb NOT NULL CHECK (jsonb_typeof(result)='object' AND octet_length(result::text)<=262144)
+);
+CREATE TABLE IF NOT EXISTS ip_quality_archives (
+    task_id text NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    family integer NOT NULL CHECK (family IN (4,6)),
+    source_url text NOT NULL,
+    sha256 text NOT NULL CHECK (length(sha256)=64),
+    downloaded_at timestamptz NOT NULL,
+    content bytea NOT NULL CHECK (octet_length(content)>0 AND octet_length(content)<=2097152),
+    PRIMARY KEY(task_id,family)
+);
+CREATE INDEX IF NOT EXISTS tasks_ip_quality_history_idx
+    ON tasks(created_at DESC,agent_id,id DESC) WHERE action='ip-quality';
+CREATE TABLE IF NOT EXISTS ip_quality_schedules (
+    agent_id text PRIMARY KEY REFERENCES agents(id) ON DELETE CASCADE,
+    owner_id text NOT NULL,
+    enabled boolean NOT NULL DEFAULT false,
+    next_run_at timestamptz NOT NULL,
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ip_quality_schedules_due_idx
+    ON ip_quality_schedules(next_run_at) WHERE enabled;
 
 CREATE TABLE IF NOT EXISTS enrollment_tokens (
     id text PRIMARY KEY,

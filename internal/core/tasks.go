@@ -30,11 +30,12 @@ const (
 	ActionEnableBBR         Action = "enable-bbr"
 	ActionDisableBBR        Action = "disable-bbr"
 	ActionConfigureTCP      Action = "configure-tcp"
+	ActionIPQuality         Action = "ip-quality"
 )
 
 func (a Action) Valid() bool {
 	switch a {
-	case ActionValidate, ActionDeploy, ActionStart, ActionStop, ActionRestart, ActionStatus, ActionInstall, ActionReadConfig, ActionReadManagedConfig, ActionImportExisting, ActionUpgradeAgent, ActionEnableBBR, ActionDisableBBR, ActionConfigureTCP:
+	case ActionValidate, ActionDeploy, ActionStart, ActionStop, ActionRestart, ActionStatus, ActionInstall, ActionReadConfig, ActionReadManagedConfig, ActionImportExisting, ActionUpgradeAgent, ActionEnableBBR, ActionDisableBBR, ActionConfigureTCP, ActionIPQuality:
 		return true
 	default:
 		return false
@@ -45,7 +46,11 @@ func (a Action) SystemBBR() bool {
 	return a == ActionEnableBBR || a == ActionDisableBBR || a == ActionConfigureTCP
 }
 
-func (a Action) AgentLevel() bool { return a == ActionUpgradeAgent || a.SystemBBR() }
+func (a Action) AgentLevel() bool {
+	return a == ActionUpgradeAgent || a.SystemBBR() || a == ActionIPQuality
+}
+
+func (a Action) RequiresAgentManagement() bool { return a.SystemBBR() || a == ActionIPQuality }
 
 type TaskStatus string
 
@@ -104,9 +109,10 @@ type TaskRequest struct {
 }
 
 type TaskResultRequest struct {
-	LeaseID        string `json:"lease_id"`
-	Success        bool   `json:"success"`
-	Output         string `json:"output,omitempty"`
-	Error          string `json:"error,omitempty"`
-	TrafficSettled bool   `json:"traffic_settled,omitempty"`
+	LeaseID        string           `json:"lease_id"`
+	Success        bool             `json:"success"`
+	Output         string           `json:"output,omitempty"`
+	Error          string           `json:"error,omitempty"`
+	TrafficSettled bool             `json:"traffic_settled,omitempty"`
+	IPQuality      *IPQualityResult `json:"ip_quality,omitempty"`
 }

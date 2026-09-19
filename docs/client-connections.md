@@ -65,7 +65,7 @@ visible nodes, and an engine-sharing grant does not expose another owner's
 client IP telemetry. Owner-hidden nodes remain private from fleet administrators.
 Revoked nodes are excluded from queries.
 
-Schema version 63 adds `client_connections`, `client_connection_sources`, and
+Schema version 64 adds `client_connections`, `client_connection_sources`, and
 the `client_connection_locations` cache.
 Retention bounds time, not database bytes: size depends on observed tuples and
 node count. No port traffic counters or quotas are changed. Rolling back binaries
