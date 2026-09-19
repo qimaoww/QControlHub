@@ -130,6 +130,9 @@ export async function testAgentBatchActions({ testAPI, onlineAgent }) {
   confirmDialog.querySelector("[data-confirm-accept]").click();
   await waitFor(() => testAPI.pendingTasks.length === 1, "首个串行任务未提交");
   assert.equal(testAPI.pendingTasks.length, 1, "确认防重入产生了重复任务");
+  assert.equal(form.querySelector(".batch-progress").max, 2);
+  assert.match(form.querySelector("[data-batch-result-summary]").textContent, /已处理 0\/2/);
+  assert.equal(document.querySelector("[data-node-batch-toggle]").disabled, true);
   assert.equal(alpha.checked && bravo.checked, true, "busy 不应清除选中状态");
   assert.equal(alpha.disabled && bravo.disabled, true, "busy 应锁定节点选择控件");
   assert.equal(all.disabled, true, "busy 应锁定全选控件");
@@ -145,18 +148,26 @@ export async function testAgentBatchActions({ testAPI, onlineAgent }) {
   testAPI.pendingTasks[0].ok({ id: "task-alpha" });
   await waitFor(() => testAPI.pendingTasks.length === 2, "第二个任务没有在首个完成后串行提交");
   assert.equal(testAPI.pendingTasks[1].payload.agent_id, "bravo");
+  assert.match(form.querySelector("[data-batch-result-summary]").textContent, /已处理 1\/2/);
   testAPI.pendingTasks[1].fail("bravo temporary failure");
   await waitFor(() => form.dataset.busy !== "1", "部分失败后 busy 未恢复");
   let rows = [...form.querySelectorAll(".batch-result-row")];
   assert.equal(rows.length, 2);
   assert.equal(rows.filter((row) => row.classList.contains("ok")).length, 1);
   assert.equal(rows.filter((row) => row.classList.contains("error")).length, 1);
+  assert.equal(form.querySelector("[data-batch-result-summary]").textContent, "1 个已提交 · 1 个失败");
+  const failureNotice = document.querySelector("[data-spa-notice]");
+  assert.equal(failureNotice.getAttribute("role"), "alert");
+  failureNotice.querySelector(".notice-close").click();
+  assert.equal(document.querySelector("[data-spa-notice]"), null, "错误提示必须支持关闭");
   let retry = form.querySelector("[data-batch-retry]");
   assert.equal(retry.dataset.batchRetry, "bravo", "部分失败只应重试失败节点");
   retry.click();
   await waitFor(() => testAPI.pendingTasks.length === 3, "部分失败项重试未提交");
   testAPI.pendingTasks[2].ok({ id: "task-bravo-retry" });
   await waitFor(() => !form.querySelector("[data-batch-retry]"), "成功重试后仍残留重试入口");
+  assert.equal(form.querySelector("[data-batch-result-summary]").textContent, "2 个已提交 · 0 个失败", "重试成功后汇总没有更新");
+  assert.equal(document.querySelector("[data-spa-notice]").getAttribute("role"), "status");
 
   form.requestSubmit(submit);
   confirmDialog = await waitFor(() => document.querySelector("[data-confirm-dialog][open]"), "第二轮批量提交没有进入确认流程");

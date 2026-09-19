@@ -63,5 +63,6 @@
   "frontend/styles/610-agent-visibility.css",
   "frontend/styles/620-enrollment-dialog.css",
   "frontend/styles/630-user-allocations.css",
-  "frontend/styles/640-dashboard.css"
+  "frontend/styles/640-dashboard.css",
+  "frontend/styles/650-shell-feedback.css"
 ]

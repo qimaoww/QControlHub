@@ -1,4 +1,5 @@
 import { bindEvent } from "./refresh.js";
+import { renderNotice, renderConfirmationDetails } from "./shell-feedback-view.js";
 import { errorMessage } from "./errors.js";
 
 export function createShellFeedback(state) {
@@ -15,18 +16,27 @@ function notify(message, tone = "success") {
   notice.dataset.spaNotice = "";
   notice.dataset.refreshKey = "spa-notice";
   notice.setAttribute("role", tone === "error" ? "alert" : "status");
-  notice.textContent = message;
+  renderNotice(notice, message, tone);
   if (!notice.isConnected) main.prepend(notice);
   if (tone !== "error") noticeTimer = setTimeout(() => notice.remove(), 5000);
 }
 
-function confirmAction(message, label = "确认继续") {
+function confirmAction(message, label = "确认继续", options = {}) {
   const dialog = document.querySelector("[data-confirm-dialog]");
-  if (!dialog?.showModal) return Promise.resolve(window.confirm(message));
+  if (!dialog?.showModal) {
+    const summary = (options.details || []).map(([key, value]) => `${key}：${value}`);
+    if (options.targets?.length) summary.push(`目标节点：${options.targets.join("、")}`);
+    return Promise.resolve(window.confirm([message, ...summary].join("\n")));
+  }
+  dialog.dataset.tone = options.tone || "danger";
+  const title = dialog.querySelector("[data-confirm-title]");
+  if (title) title.textContent = options.title || "确认继续？";
+  renderConfirmationDetails(dialog.querySelector("[data-confirm-details]"), options.details, options.targets);
   dialog.querySelector("[data-confirm-message]").textContent = message;
   dialog.querySelector("[data-confirm-accept]").textContent = label;
   state.confirmOpen = true;
   dialog.showModal();
+  dialog.querySelector("[data-confirm-cancel]")?.focus?.();
   return new Promise((resolve) => {
     state.confirmResolver = resolve;
   });

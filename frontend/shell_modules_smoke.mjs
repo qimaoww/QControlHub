@@ -102,17 +102,20 @@ try {
   appearance.toggleTheme();
   assert.equal(root.dataset.theme, "dark", "theme toggles remain usable without storage");
 
-  const nodes = new Map(["message", "accept", "cancel"].map(key => [key, {}]));
+  const nodes = new Map(["message", "accept", "cancel", "title"].map(key => [key, {}]));
   const dialog = Object.assign(new EventTarget(), {
     querySelector: selector => nodes.get(selector.match(/data-confirm-(\w+)/)[1]),
+    dataset: {},
     showModal() { this.open = true; },
     close() { this.open = false; },
   });
   setGlobal("document", { querySelector: () => dialog });
   feedback.bindConfirmationDialog();
   feedback.bindConfirmationDialog();
-  const confirmed = feedback.confirmAction("确认目标节点", "部署");
+  const confirmed = feedback.confirmAction("确认目标节点", "部署", {title: "部署配置", tone: "primary"});
   assert.equal(dialog.open, true);
+  assert.equal(nodes.get("title").textContent, "部署配置");
+  assert.equal(dialog.dataset.tone, "primary");
   assert.equal(state.confirmOpen, true);
   assert.equal(nodes.get("message").textContent, "确认目标节点");
   assert.equal(nodes.get("accept").textContent, "部署");
@@ -121,6 +124,8 @@ try {
   assert.equal(state.confirmResolver, null);
   assert.equal(state.confirmOpen, false);
   const canceled = feedback.confirmAction("取消");
+  assert.equal(nodes.get("title").textContent, "确认继续？", "普通确认不能残留批量标题");
+  assert.equal(dialog.dataset.tone, "danger", "普通确认恢复原有危险操作语义");
   const cancel = new Event("cancel", { cancelable: true });
   dialog.dispatchEvent(cancel);
   assert.equal(cancel.defaultPrevented, true);
