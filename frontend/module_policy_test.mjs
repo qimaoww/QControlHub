@@ -10,7 +10,7 @@ const dependencies = new Map();
 const compositionModules = new Set([
   "agents.js", "configs.js", "dashboard.js", "settings.js", "access-control.js",
   "system-bbr.js", "client-access.js", "substore-sync.js", "tasks.js",
-  "core-logs.js", "traffic.js", "users.js",
+  "core-logs.js", "client-connections.js", "traffic.js", "users.js",
 ].map(name => resolve(modulesDir, name)));
 
 assert.ok(files.length > 0, "frontend/modules must contain ES modules");

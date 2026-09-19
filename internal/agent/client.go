@@ -76,6 +76,9 @@ type Client struct {
 	runtimeRefresh    chan struct{}
 	reexecFunc        func(string, []string, []string) error
 	executeFunc       func(context.Context, core.Task) (string, error)
+
+	connectionSampleMu   sync.Mutex
+	nextConnectionSample time.Time
 }
 
 type taskExecution struct {

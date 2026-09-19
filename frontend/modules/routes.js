@@ -9,6 +9,7 @@ export const routeModuleNames = Object.freeze({
   "archive-config": "configs",
   tasks: "tasks",
   "core-logs": "core-logs",
+  "client-connections": "client-connections",
   traffic: "traffic",
   "access-control": "access-control",
   "system-bbr": "system-bbr",

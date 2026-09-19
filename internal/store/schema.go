@@ -3,7 +3,7 @@ package store
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 61
+const currentSchemaVersion = 62
 
 const schemaSQL = `
 CREATE TABLE IF NOT EXISTS agents (
@@ -738,4 +738,33 @@ ALTER TABLE port_traffic_policies SET (fillfactor = 75);
 ALTER TABLE port_traffic_daily_usage SET (fillfactor = 85);
 ALTER TABLE port_traffic_daily_accounting SET (fillfactor = 85);
 ALTER TABLE port_traffic_accounting_epochs SET (fillfactor = 85);
+
+-- Connection observations are durable on the panel only. Minute buckets
+-- coalesce repeated heartbeat samples without pretending they are new sessions.
+CREATE TABLE IF NOT EXISTS client_connection_sources (
+ agent_id text PRIMARY KEY REFERENCES agents(id) ON DELETE CASCADE,
+ updated_at timestamptz NOT NULL,
+ status text NOT NULL CHECK(status IN ('ok','partial','unavailable')),
+ detail text NOT NULL DEFAULT '',
+ truncated boolean NOT NULL DEFAULT false
+);
+CREATE TABLE IF NOT EXISTS client_connections (
+ id bigserial PRIMARY KEY,
+ agent_id text NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+ bucket timestamptz NOT NULL,
+ engine text NOT NULL,
+ protocol text NOT NULL,
+ inbound text NOT NULL,
+ transport text NOT NULL CHECK(transport IN ('tcp','udp')),
+ client_ip inet NOT NULL,
+ client_port integer NOT NULL CHECK(client_port BETWEEN 1 AND 65535),
+ local_ip inet NOT NULL,
+ local_port integer NOT NULL CHECK(local_port BETWEEN 1 AND 65535),
+ first_seen timestamptz NOT NULL,
+ last_seen timestamptz NOT NULL,
+ UNIQUE(agent_id,bucket,engine,protocol,inbound,transport,client_ip,client_port,local_ip,local_port)
+);
+CREATE INDEX IF NOT EXISTS client_connections_time_idx ON client_connections(bucket);
+CREATE INDEX IF NOT EXISTS client_connections_agent_time_idx ON client_connections(agent_id,bucket DESC);
+CREATE INDEX IF NOT EXISTS client_connections_ip_time_idx ON client_connections(client_ip,bucket DESC);
 `

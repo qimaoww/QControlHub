@@ -34,6 +34,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("PUT /api/v1/substore-sync/selections", s.requirePermission(core.PermissionSettingsManage, s.subStoreMutation(s.putSubStoreSelections)))
 	mux.Handle("POST /api/v1/substore-sync/test", s.requirePermission(core.PermissionSettingsManage, http.HandlerFunc(s.testSubStoreConnection)))
 	mux.Handle("POST /api/v1/substore-sync/run", s.requirePermission(core.PermissionSettingsManage, s.subStoreMutation(s.runSubStoreSync)))
+	mux.Handle("GET /api/v1/client-connections", s.requirePermission(core.PermissionCoreLogsRead, http.HandlerFunc(s.listClientConnections)))
 	mux.Handle("GET /api/v1/core-logs", s.requirePermission(core.PermissionCoreLogsRead, http.HandlerFunc(s.listCoreLogs)))
 	mux.Handle("GET /api/v1/access-controls", s.requirePermission(core.PermissionAgentConfigRead, http.HandlerFunc(s.listMainlandAccessPolicies)))
 	mux.Handle("PUT /api/v1/access-controls", s.requireAllPermissions(

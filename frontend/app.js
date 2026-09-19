@@ -129,6 +129,10 @@ const routeModules = createRouteModuleLoader({
       actionName, statusTone, notify, confirmAction, shell,
     });
   },
+  async "client-connections"() {
+    const { installClientConnections } = await import("./modules/client-connections.js");
+    return installClientConnections({ api, state, shell, esc, engineName, date });
+  },
   async "core-logs"() {
     const { installCoreLogs } = await import("./modules/core-logs.js");
     return installCoreLogs({

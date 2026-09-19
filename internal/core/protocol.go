@@ -8,6 +8,8 @@ type HeartbeatRequest struct {
 	Metrics      *HostMetrics            `json:"metrics,omitempty"`
 	TrafficUsage []PortTrafficUsage      `json:"traffic_usage,omitempty"`
 	Features     []string                `json:"features,omitempty"`
+
+	ClientConnections *ClientConnectionReport `json:"client_connections,omitempty"`
 }
 
 const (

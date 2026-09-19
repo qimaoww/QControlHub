@@ -16,7 +16,10 @@ const mode = new URLSearchParams(location.search).get("mode") || "admin";
 const scenario = installAgentFixture(mode);
 
 try {
-  if (mode.startsWith("dashboard")) {
+  if (mode.startsWith("connections")) {
+    const { testClientConnectionsRuntime } = await import("./browser/client-connections.mjs");
+    await testClientConnectionsRuntime(new URLSearchParams(location.search).has("preview"));
+  } else if (mode.startsWith("dashboard")) {
     const { testDashboardRuntime } = await import("./dashboard_browser_runtime.mjs");
     await testDashboardRuntime(mode, new URLSearchParams(location.search).has("preview"));
   } else if (mode === "sharing" || mode === "sharing-mobile") {
