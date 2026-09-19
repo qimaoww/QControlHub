@@ -50,7 +50,7 @@ try {
     else if (mode.startsWith("capabilities-settings")) await testCapabilitySettingsRuntime(scenario);
     else if (mode === "bbr-preview" || mode === "regions-preview") await new Promise(() => {});
     else if (mode.startsWith("bbr")) await testSystemTCPRuntime(scenario);
-    else if (mode.startsWith("batch-layout")) await testAgentBatchLayout();
+    else if (mode.startsWith("batch-layout")) await testAgentBatchLayout(scenario);
     else if (mode === "admin") await testAdminRuntime(scenario);
     else if (mode.startsWith("client-order")) await testClientNodeOrderRuntime(scenario);
     else if (mode === "ports" || mode === "ports-mobile") await testPortNamesAndRuntimeRefresh(scenario);

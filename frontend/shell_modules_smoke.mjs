@@ -134,6 +134,12 @@ try {
   setGlobal("document", { querySelector: () => null });
   setGlobal("window", { confirm: message => message === "fallback" });
   assert.equal(await feedback.confirmAction("fallback"), true);
+  let nativeMessage;
+  setGlobal("window", { confirm: message => { nativeMessage = message; return true; } });
+  await feedback.confirmAction("", "查询状态", {title: "批量查询状态", details: [["目标内核", "Mihomo"]], targets: ["ALPHA"]});
+  assert.match(nativeMessage, /批量查询状态/);
+  assert.match(nativeMessage, /Mihomo/);
+  assert.match(nativeMessage, /ALPHA/);
 
   const events = [], timers = new Map(), canceledTimers = [];
   let serial = 0;

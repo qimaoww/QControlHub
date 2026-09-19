@@ -156,6 +156,18 @@ export async function testAgentBatchActions({ testAPI, onlineAgent }) {
   assert.equal(rows.filter((row) => row.classList.contains("ok")).length, 1);
   assert.equal(rows.filter((row) => row.classList.contains("error")).length, 1);
   assert.equal(form.querySelector("[data-batch-result-summary]").textContent, "1 个已提交 · 1 个失败");
+  const succeededRow = form.querySelector(".batch-result-row.ok");
+  assert.equal(getComputedStyle(succeededRow).display, "none", "部分失败应先展示失败节点");
+  form.querySelector('[data-batch-result-filter="all"]').click();
+  assert.notEqual(getComputedStyle(succeededRow).display, "none", "全部筛选没有恢复成功节点");
+  form.querySelector('[data-batch-result-filter="error"]').click();
+  const resultsToggle = form.querySelector("[data-batch-results-toggle]");
+  resultsToggle.click();
+  assert.equal(form.querySelector("[data-batch-result-details]").hidden, true);
+  assert.equal(resultsToggle.getAttribute("aria-expanded"), "false");
+  resultsToggle.click();
+  assert.equal(form.querySelector("[data-batch-result-details]").hidden, false);
+
   const failureNotice = document.querySelector("[data-spa-notice]");
   assert.equal(failureNotice.getAttribute("role"), "alert");
   failureNotice.querySelector(".notice-close").click();
@@ -167,6 +179,8 @@ export async function testAgentBatchActions({ testAPI, onlineAgent }) {
   testAPI.pendingTasks[2].ok({ id: "task-bravo-retry" });
   await waitFor(() => !form.querySelector("[data-batch-retry]"), "成功重试后仍残留重试入口");
   assert.equal(form.querySelector("[data-batch-result-summary]").textContent, "2 个已提交 · 0 个失败", "重试成功后汇总没有更新");
+  assert.equal(form.querySelector("[data-batch-result-filters]").hidden, true, "没有失败项时应隐藏筛选");
+  assert.notEqual(getComputedStyle(succeededRow).display, "none", "最后一次重试成功后应展示全部节点");
   assert.equal(document.querySelector("[data-spa-notice]").getAttribute("role"), "status");
 
   form.requestSubmit(submit);

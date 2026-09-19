@@ -1,7 +1,7 @@
 import { bindEvent } from "./refresh.js";
 import { batchAgentEligibility, batchSelectAllState, batchTaskOptions } from "./agent-batch.js";
 
-import { batchActionFeedback, batchConfirmation, batchResultsMarkup, updateBatchResultSummary } from "./agent-batch-feedback.js";
+import { batchActionFeedback, batchConfirmation, batchResultsMarkup, bindBatchResultControls, updateBatchResultSummary } from "./agent-batch-feedback.js";
 
 export function createAgentBatchController({ api, state, esc, notify, confirmAction, engineName }, { renderAgentPage, cancelCardDrag }) {
   let syncActiveBatchSnapshot = null;
@@ -86,8 +86,6 @@ export function createAgentBatchController({ api, state, esc, notify, confirmAct
     batchForm.elements.release_channel.disabled = busy || !installing;
     batchForm.elements.custom_version.disabled = busy || !custom;
     batchForm.elements.custom_version.required = custom;
-    batchForm.querySelector("[data-batch-action-title]").textContent = feedback.title;
-    batchForm.querySelector("[data-batch-hint]").textContent = feedback.hint;
     batchForm.elements.action.disabled = busy;
     batchForm.elements.engine.disabled = busy;
     const close = batchForm.querySelector("[data-close-node-batch]");
@@ -234,14 +232,14 @@ export function createAgentBatchController({ api, state, esc, notify, confirmAct
           continue;
         }
         try {
-          const task = await api("/tasks", {
+          await api("/tasks", {
             method: "POST",
             body: JSON.stringify({
               agent_id: input.value,
               ...options,
             }),
           });
-          settled.push({ agent, task, ok: true });
+          settled.push({ agent, ok: true });
         } catch (error) {
           settled.push({ agent, error, ok: false });
         }
@@ -249,8 +247,9 @@ export function createAgentBatchController({ api, state, esc, notify, confirmAct
       }
       if (!isCurrent()) return;
       setBatchBusy(false);
+      bindBatchResultControls(results);
       const success = settled.filter((item) => item.ok).length;
-      notify(success === settled.length ? `已提交 ${success} 个任务，可在任务页查看执行进度。` : `${success} 个已提交，${settled.length - success} 个提交失败；请在批量结果中重试。`, success === settled.length ? "success" : "error");
+      notify(success === settled.length ? `已提交 ${success} 个任务` : `${success} 个已提交，${settled.length - success} 个失败`, success === settled.length ? "success" : "error");
       bindBatchRetries(
         batchForm,
         options,
@@ -287,7 +286,7 @@ function bindBatchRetries(form, options, agentsByID, setBatchBusy, isCurrent) {
           notify(`无法重试：${currentEligibility.reason}`, "error");
           return;
         }
-        const task = await api("/tasks", {
+        await api("/tasks", {
           method: "POST",
           body: JSON.stringify({
             agent_id: agentID,
@@ -296,7 +295,7 @@ function bindBatchRetries(form, options, agentsByID, setBatchBusy, isCurrent) {
         });
         if (!isCurrent()) return;
         button.closest(".batch-result-row").className = "batch-result-row ok";
-        button.closest(".batch-result-row").querySelector("small").textContent = `任务 ${task?.id || "已提交"}`;
+        button.closest(".batch-result-row").querySelector("small").hidden = true;
         button.closest(".batch-result-row").querySelector(".batch-result-status").textContent = "已提交";
         button.remove();
         updateBatchResultSummary(form);

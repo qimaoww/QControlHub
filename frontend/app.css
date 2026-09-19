@@ -345,33 +345,25 @@ a.node-card:hover .node-card-open i{transform:translateX(3px)}
 .node-batch-bar .batch-controls label{min-width:0;display:grid;gap:5px;color:var(--muted);font-size:calc(10px * var(--ui-font-scale));font-weight:700}
 .node-batch-bar .batch-controls select,.node-batch-bar .batch-controls input{width:100%;min-width:0;height:38px;min-height:38px;padding:0 9px;font-size:calc(11px * var(--ui-font-scale))}
 .node-batch-bar [hidden]{display:none!important}
-.batch-submit-row{display:flex;align-items:center;justify-content:space-between;gap:12px}
-.batch-submit-row>small{min-width:0;color:var(--muted);font-size:calc(10px * var(--ui-font-scale));line-height:1.5}
-.batch-submit-row>.button{flex-shrink:0;min-width:132px;min-height:38px}
+.batch-operation-row{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:12px}
+.batch-operation-row>.button{min-width:132px;min-height:38px}
 .node-batch-close{width:36px;height:36px;display:grid;place-items:center;flex:0 0 36px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--muted);font-size:calc(18px * var(--ui-font-scale));line-height:1}
 .node-batch-close:hover{border-color:var(--accent);color:var(--accent)}
-.node-batch-bar .batch-results{max-height:180px;display:grid;gap:6px;overflow:auto}
+.node-batch-bar .batch-results{display:grid;gap:8px;padding-top:10px}
 .node-batch-bar .batch-result-row>span{min-width:0;overflow-wrap:anywhere}
 .node-back-link{display:inline-flex;align-items:center;gap:5px;margin:2px 2px 10px;color:var(--muted);font-size:calc(10px * var(--ui-font-scale));font-weight:700}
 .node-back-link:hover{color:var(--accent)}
-@media(max-width:820px){.node-batch-bar{left:12px;right:12px;bottom:16px;width:auto;padding:10px;transform:none}.node-batch-bar .batch-controls{grid-template-columns:repeat(2,minmax(0,1fr))}.node-batch-bar .batch-selection-head{gap:6px}.node-batch-bar .batch-selection-head>strong{font-size:calc(9px * var(--ui-font-scale))}.batch-submit-row{align-items:stretch;flex-direction:column}.batch-submit-row>.button{width:100%}}
+@media(max-width:820px){.node-batch-bar{left:12px;right:12px;bottom:16px;width:auto;padding:10px;transform:none}.node-batch-bar .batch-controls{grid-template-columns:repeat(2,minmax(0,1fr))}.node-batch-bar .batch-selection-head{gap:6px}.node-batch-bar .batch-selection-head>strong{font-size:calc(9px * var(--ui-font-scale))}.batch-operation-row{grid-template-columns:1fr;gap:10px}.batch-operation-row>.button{width:100%}}
 @media(max-width:820px) and (pointer:coarse){.node-batch-form>.node-card-grid{padding-bottom:calc(var(--batch-bar-height,360px) + 120px)}.node-card-grid{grid-template-columns:1fr}.node-back-link{margin-bottom:8px}.node-batch-bar{bottom:calc(84px + env(safe-area-inset-bottom,0px));max-height:calc(100dvh - 160px - env(safe-area-inset-bottom,0px))}.node-batch-bar .batch-controls select,.node-batch-bar .batch-controls input,.node-batch-bar .button,.node-batch-bar .batch-select-all,.node-batch-close{min-height:44px}.node-batch-close{width:44px;flex-basis:44px}}
 @media(prefers-reduced-motion:reduce){.node-card,.node-card-open i{transition:none}}
 /* Original service actions share the same compact workspace and feedback. */
 .node-batch-bar:not([data-batch-action="install"]) .batch-controls{grid-template-columns:repeat(2,minmax(0,1fr))}
 .node-batch-bar[data-batch-action="upgrade-agent"] .batch-controls{grid-template-columns:minmax(0,1fr)}
-.batch-action-guide{min-width:0;display:grid;gap:4px}
-.batch-action-guide>strong{color:var(--ink);font-size:calc(11px * var(--ui-font-scale));line-height:1.4}
-.batch-action-guide>small{color:var(--muted);font-size:calc(10px * var(--ui-font-scale));line-height:1.6}
 .node-batch-bar .button.batch-danger{border-color:var(--red);background:var(--red);color:var(--on-accent)}
 .batch-field-error{margin:0;padding:9px 11px;border:1px solid color-mix(in srgb,var(--red) 30%,var(--line));border-radius:8px;background:var(--red-soft);color:var(--red);font-size:calc(11px * var(--ui-font-scale));line-height:1.5}
-.node-batch-bar .batch-results{max-height:none;overflow:visible;gap:8px;padding-top:12px}
-.batch-results>header>div{min-width:0;display:grid;gap:4px}
-.batch-results>header b{font-size:calc(12px * var(--ui-font-scale))}
-.batch-results>header small{overflow-wrap:anywhere;line-height:1.4}
+.batch-results>header b{min-width:0;overflow-wrap:anywhere;font-size:calc(12px * var(--ui-font-scale))}
 .batch-tasks-link{flex-shrink:0;color:var(--accent);font-size:calc(11px * var(--ui-font-scale));font-weight:700}
 .batch-result-summary{margin:0;color:var(--ink-2);font-size:calc(11px * var(--ui-font-scale));font-weight:700}
-.batch-result-note{margin:0;color:var(--muted);font-size:calc(10px * var(--ui-font-scale));line-height:1.5}
 .batch-progress{width:100%;height:6px;accent-color:var(--accent)}
 .batch-result-list{display:grid;gap:6px;max-height:170px;overflow:auto;overscroll-behavior:contain}
 .batch-result-list:empty{display:none}
@@ -380,7 +372,14 @@ a.node-card:hover .node-card-open i{transform:translateX(3px)}
 .node-batch-bar .batch-result-row small{margin-top:4px;line-height:1.5}
 .batch-result-status{color:var(--green);font-size:calc(10px * var(--ui-font-scale));font-weight:700;white-space:nowrap}
 .batch-result-row.error .batch-result-status{color:var(--red)}
-@media(max-width:820px){.batch-result-list{max-height:150px}.node-batch-bar .batch-result-row{grid-template-columns:minmax(0,1fr) auto}.batch-result-row .batch-result-status{grid-column:1}.batch-result-row>[data-batch-retry]{grid-column:2;grid-row:1/3}.batch-results>header{align-items:start}}
+@media(max-width:820px){.batch-result-list{max-height:150px}.node-batch-bar .batch-result-row{grid-template-columns:minmax(0,1fr) auto}.batch-result-row.error .batch-result-status{grid-column:1}.batch-result-row>[data-batch-retry]{grid-column:2;grid-row:1/3}.batch-results>header{align-items:start}}
+.batch-result-actions{display:flex;align-items:center;gap:12px;flex-shrink:0}
+.batch-result-toggle{min-height:32px;padding:4px 8px;border:1px solid var(--line);border-radius:7px;background:var(--surface);color:var(--muted);font-size:calc(11px * var(--ui-font-scale))}
+.batch-result-filters{display:flex;gap:4px;margin-bottom:8px}
+.batch-result-filters button{min-height:32px;padding:4px 9px;border:1px solid transparent;border-radius:6px;background:transparent;color:var(--muted);font-size:calc(11px * var(--ui-font-scale))}
+.batch-result-filters button[aria-pressed="true"]{border-color:var(--line);background:var(--surface-2);color:var(--ink);font-weight:700}
+.batch-result-list[data-result-filter="error"] .batch-result-row.ok{display:none}
+@media(pointer:coarse){.batch-result-toggle,.batch-result-filters button,.batch-tasks-link{min-height:44px;display:inline-flex;align-items:center}}
 /* Keep narrow desktop windows within the viewport without changing navigation. */
 @media (pointer:fine){.app-body .desktop-app{min-width:0}}
 /* Sidebar navigation: distinct workflow icons and compact mobile overflow. */
@@ -1468,3 +1467,7 @@ dialog.config-access-dialog::backdrop{background:rgba(17,20,36,.34);backdrop-fil
 .page-agents .confirm-dialog footer{gap:10px;margin-top:2px;padding-top:16px}
 .page-agents .confirm-dialog footer button{min-width:100px;min-height:42px}
 @media(max-width:820px){.workspace-main>[data-spa-notice]{right:12px;top:64px;width:calc(100vw - 24px);grid-template-columns:24px minmax(0,1fr) 36px;gap:8px;padding:12px}.notice-close{width:36px;height:36px}.page-agents .confirm-dialog{width:calc(100% - 24px);max-height:calc(100dvh - 24px)}.page-agents .confirm-dialog-card{padding:18px;gap:12px}.page-agents .confirm-dialog footer{display:grid;grid-template-columns:1fr 1fr}.page-agents .confirm-dialog footer button{width:100%;min-width:0;min-height:46px}.confirm-facts>div{grid-template-columns:76px minmax(0,1fr)}}
+.page-agents .confirm-dialog .eyebrow{display:none}
+.page-agents .confirm-dialog [data-confirm-message][hidden]{display:none}
+.page-agents .confirm-dialog footer{position:sticky;bottom:-22px;background:var(--surface);padding-bottom:4px}
+@media(max-width:820px){.page-agents .confirm-dialog footer{bottom:-18px}}

@@ -41,6 +41,7 @@ export function renderConfirmationDetails(host, details = [], targets = []) {
     const list = document.createElement("ul");
     list.className = "confirm-targets";
     list.setAttribute("aria-label", "目标节点");
+    list.tabIndex = 0;
     targets.forEach((name) => {
       const item = document.createElement("li");
       item.textContent = name;

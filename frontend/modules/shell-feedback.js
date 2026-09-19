@@ -26,13 +26,14 @@ function confirmAction(message, label = "确认继续", options = {}) {
   if (!dialog?.showModal) {
     const summary = (options.details || []).map(([key, value]) => `${key}：${value}`);
     if (options.targets?.length) summary.push(`目标节点：${options.targets.join("、")}`);
-    return Promise.resolve(window.confirm([message, ...summary].join("\n")));
+    return Promise.resolve(window.confirm([options.title, message, ...summary].filter(Boolean).join("\n")));
   }
   dialog.dataset.tone = options.tone || "danger";
   const title = dialog.querySelector("[data-confirm-title]");
   if (title) title.textContent = options.title || "确认继续？";
   renderConfirmationDetails(dialog.querySelector("[data-confirm-details]"), options.details, options.targets);
   dialog.querySelector("[data-confirm-message]").textContent = message;
+  dialog.querySelector("[data-confirm-message]").hidden = !message;
   dialog.querySelector("[data-confirm-accept]").textContent = label;
   state.confirmOpen = true;
   dialog.showModal();
