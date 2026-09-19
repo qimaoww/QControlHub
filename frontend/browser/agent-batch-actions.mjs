@@ -1,3 +1,4 @@
+import { testBatchCoreUpdates } from "./agent-batch-core.mjs";
 import { assert, delay, waitFor } from "./assertions.mjs";
 export async function testAgentBatchActions({ testAPI, onlineAgent }) {
   document.querySelector(".enrollment-dialog [data-close]")?.click();
@@ -317,5 +318,7 @@ export async function testAgentBatchActions({ testAPI, onlineAgent }) {
   const pendingBeforeRetry = testAPI.pendingTasks.length;
   await remainingRetry.onclick();
   assert.equal(testAPI.pendingTasks.length, pendingBeforeRetry, "retry 实际 POST 前未使用最新离线快照 fail closed");
+
+  await testBatchCoreUpdates({ testAPI });
 
 }

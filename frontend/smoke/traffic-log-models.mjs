@@ -91,6 +91,15 @@ assert.equal(
   ).eligible,
   false,
 );
+for (const agent of [
+  { status: "offline", runtime: { mihomo: { installed: true } } },
+  { status: "online", can_manage: false, runtime: { mihomo: { installed: true } } },
+  { status: "online", runtime: { mihomo: { installed: false } } },
+  { status: "online", runtime: { mihomo: { installed: true, existing_config_unsupported_reason: "不可自动迁移" } } },
+]) {
+  assert.equal(batchAgentEligibility(agent, "install", "mihomo").eligible, false);
+}
+assert.equal(batchAgentEligibility({ status: "online", runtime: { mihomo: { installed: true } } }, "install", "mihomo").eligible, true);
 assert.deepEqual(
   batchSelectAllState([
     { disabled: false, checked: true },

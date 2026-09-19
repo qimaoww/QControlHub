@@ -39,7 +39,7 @@ focused owner directly, not these compatibility facades.
 | Agent page loading and composition | `agents` |
 | Agent rendering and workspace navigation | `agent-view`, `agent-workspace` |
 | Polling, structural signatures, and interaction-aware refresh | `agent-refresh` |
-| Core operations, settings, batch actions, and card interactions | `agent-core-actions`, `agent-settings`, `agent-batch-controller`, `agent-card-interactions` |
+| Core operations, settings, batch actions, and card interactions | `agent-core-actions`, `agent-settings`, `agent-batch-controller`, `agent-batch-view`, `agent-card-interactions` |
 | Enrollment dialogs and page bindings | `agent-enrollment` |
 | Live configuration loading, snapshot reads, and deployment recovery | `live-config-page`, `live-config-reader`, `config-deployment` |
 | Live editor markup, navigation, and submission | `live-config-view`, `live-config-navigation`, `live-config-submit` |
