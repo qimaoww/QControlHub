@@ -1,6 +1,6 @@
 /* Manual configuration: node navigation on the left, engine navigation on top. */
 .page-live-config .desktop-app{min-width:0}
-.live-config-workspace{max-width:1500px;border-radius:12px}
+.live-config-workspace{container:live-config / inline-size;max-width:1500px;border-radius:12px;box-shadow:none}
 .live-config-workspace>.editor-toolbar{padding:20px 24px;gap:16px;background:var(--surface)}
 .live-config-eyebrow{margin:0 0 6px;color:var(--muted);font-size:calc(11px * var(--ui-font-scale));letter-spacing:.08em}
 .live-config-workspace>.editor-toolbar h2{margin:0;font-size:calc(20px * var(--ui-font-scale));line-height:1.4}

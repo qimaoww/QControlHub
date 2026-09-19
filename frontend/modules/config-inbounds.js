@@ -126,7 +126,8 @@ export function bindConfigInbounds(ctx) {
     ${can("deployments.read") && can("configs.read") ? '<button class="button small" type="button" data-inbound-action="diff">配置差异</button>' : ""}
     ${can("client-access.read") ? '<a class="button small" href="#client-access" data-config-client>客户端配置 ↗</a>' : ""}
     <button class="button small" type="button" data-config-refresh>${sourceMode === "personal" ? "刷新我的配置" : agent.runtime?.[engine]?.installed ? "重新读取节点配置" : "刷新配置"}</button>`;
-  container.append(tools);
+  if (form) form.before(tools);
+  else container.append(tools);
   const actionKind = button => button.dataset.commonAction ? `common-${button.dataset.commonAction}` : button.dataset.inboundAction;
   const isMutation = kind => ["add", "modify", "delete", "advanced", "common-add", "common-modify", "common-delete"].includes(kind);
   const triggers = [addInbound, ...menu.querySelectorAll("[data-inbound-action], [data-common-action]"),
