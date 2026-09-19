@@ -108,7 +108,7 @@ func TestAgentBatchAndEnrollmentSafetyContracts(t *testing.T) {
 		},
 		"modules/agent-enrollment.js": {
 			`showCommand(command, async () =>`,
-			`命令仅供复制；关闭页面不会连接、安装或重启任何节点。`,
+			`id="deploy-command-description">命令仅供复制，不会自动执行。`,
 			`命令仅供复制，不会自动执行。`,
 			`document.body.style.overflow = "hidden"`,
 			`root.inert = true`,

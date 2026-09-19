@@ -43,11 +43,11 @@ export function createCoreLogView({ state, engines, can, esc, engineName, date, 
     }[phase] || (state.data.coreLogAutoRefresh !== false ? "正在实时更新" : "自动更新已暂停");
     if (phase === "loading") {
       emptyTitle = "正在加载日志";
-      emptyDetail = "正在读取当前节点的最新日志，请稍候。";
+      emptyDetail = "";
     }
     if (phase === "failed" && !entries.length) {
       emptyTitle = "日志加载失败";
-      emptyDetail = "无法读取当前节点的日志，请稍后重试。";
+      emptyDetail = "请稍后重试。";
     }
     const sourceNotice = sourceNoticeTitle && rows
       ? `<div class="core-log-source-notice" role="status"><strong>${esc(sourceNoticeTitle)}</strong><span>${esc(sourceNoticeDetail)}</span></div>`
@@ -78,11 +78,15 @@ export function createCoreLogView({ state, engines, can, esc, engineName, date, 
       .join("");
     const autoRefresh = state.data.coreLogAutoRefresh !== false;
     const scopeName = selectedAgent?.name || (filters.agent_id ? filters.agent_id : "全部节点");
+    const retentionDays = Number(state.data.settings?.core_log_retention_days);
     const storagePolicy = can("settings.read")
-      ? storagePolicyName(state.data.settings?.core_log_minimum_level)
+      ? [
+          storagePolicyName(state.data.settings?.core_log_minimum_level),
+          Number.isInteger(retentionDays) && retentionDays > 0 ? `保留 ${retentionDays} 天` : "",
+        ].filter(Boolean).join(" · ")
       : "保存策略不可见";
     shell(
-      `<div class="core-log-workspace" data-core-log-page><header class="core-log-header"><div><h2>内核日志</h2><p>当前范围：<strong>${esc(scopeName)}</strong></p></div><label class="core-log-auto"><button type="button" role="switch" aria-checked="${String(autoRefresh)}" data-toggle-core-log-refresh><i></i></button><span>自动更新</span></label></header><section class="core-log-filters" id="core-log-filters" aria-label="日志筛选"><div class="core-log-filter-group core-log-engine-filter"><span>内核</span><div role="group" aria-label="日志内核">${engineButtons}</div></div><div class="core-log-filter-group core-log-level-filter"><span>级别</span><div role="group" aria-label="日志级别">${levelButtons}</div></div><label class="core-log-search">关键词<input name="q" type="search" maxlength="120" value="${esc(filters.q || "")}" placeholder="搜索日志内容，输入即筛选" autocomplete="off"></label><label class="core-log-limit" title="每种内核分别取最新日志，不共用总条数上限">每内核上限<select name="limit">${coreLogFilterLimits.map((limit) => `<option value="${limit}" ${Number(filters.limit || 1000) === limit ? "selected" : ""}>${limit} 条</option>`).join("")}</select></label><button class="button core-log-reset" type="button" data-reset-core-logs>清除筛选</button></section><div class="core-log-status" role="status" data-core-log-refresh-status><span>显示 <strong>${entries.length}</strong> 条结果 · 已加载 ${sourceEntries.length} 条${entries.length > pageSize ? ` · 每页 ${pageSize} 条` : ""}</span><span><span class="core-log-live"><i></i><span data-core-log-refresh-label>${refreshLabel}</span></span><span>${esc(storagePolicy)} · 保留 7 天</span></span></div><div class="core-log-result-toolbar"><span>${entries.length ? `当前 ${page * pageSize + 1}–${Math.min((page + 1) * pageSize, entries.length)} 条` : ""}</span>${pagination}</div><section class="core-log-stream qch-swap-panel" aria-label="内核运行日志" data-refresh-scroll data-refresh-key="core-log-results-${esc(filters.agent_id || "all")}-${esc(filters.engine || "all")}-${esc(filters.level || "all")}"><header class="core-log-columns" aria-hidden="true"><span>时间</span><span>内核</span><span>级别</span><span>节点</span><span>日志内容</span></header>${sourceNotice}${rows || `<div class="core-log-empty"><strong>${esc(emptyTitle)}</strong><span>${esc(emptyDetail)}</span></div>`}</section>${pagination ? `<footer class="core-log-result-footer">${pagination}</footer>` : ""}</div>`,
+      `<div class="core-log-workspace" data-core-log-page><header class="core-log-header"><div><h2>内核日志</h2><p>当前范围：<strong>${esc(scopeName)}</strong></p></div><label class="core-log-auto"><button type="button" role="switch" aria-checked="${String(autoRefresh)}" data-toggle-core-log-refresh><i></i></button><span>自动更新</span></label></header><section class="core-log-filters" id="core-log-filters" aria-label="日志筛选"><div class="core-log-filter-group core-log-engine-filter"><span>内核</span><div role="group" aria-label="日志内核">${engineButtons}</div></div><div class="core-log-filter-group core-log-level-filter"><span>级别</span><div role="group" aria-label="日志级别">${levelButtons}</div></div><label class="core-log-search">关键词<input name="q" type="search" maxlength="120" value="${esc(filters.q || "")}" placeholder="搜索日志内容" autocomplete="off"></label><label class="core-log-limit" title="每种内核分别取最新日志，不共用总条数上限">每内核上限<select name="limit">${coreLogFilterLimits.map((limit) => `<option value="${limit}" ${Number(filters.limit || 1000) === limit ? "selected" : ""}>${limit} 条</option>`).join("")}</select></label><button class="button core-log-reset" type="button" data-reset-core-logs>清除筛选</button></section><div class="core-log-status" role="status" data-core-log-refresh-status><span>显示 <strong>${entries.length}</strong> 条结果 · 已加载 ${sourceEntries.length} 条${entries.length > pageSize ? ` · 每页 ${pageSize} 条` : ""}</span><span><span class="core-log-live"><i></i><span data-core-log-refresh-label>${refreshLabel}</span></span><span>${esc(storagePolicy)}</span></span></div><div class="core-log-result-toolbar"><span>${entries.length ? `当前 ${page * pageSize + 1}–${Math.min((page + 1) * pageSize, entries.length)} 条` : ""}</span>${pagination}</div><section class="core-log-stream qch-swap-panel" aria-label="内核运行日志" data-refresh-scroll data-refresh-key="core-log-results-${esc(filters.agent_id || "all")}-${esc(filters.engine || "all")}-${esc(filters.level || "all")}"><header class="core-log-columns" aria-hidden="true"><span>时间</span><span>内核</span><span>级别</span><span>节点</span><span>日志内容</span></header>${sourceNotice}${rows || `<div class="core-log-empty"><strong>${esc(emptyTitle)}</strong>${emptyDetail ? `<span>${esc(emptyDetail)}</span>` : ""}</div>`}</section>${pagination ? `<footer class="core-log-result-footer">${pagination}</footer>` : ""}</div>`,
       "内核日志",
     );
 

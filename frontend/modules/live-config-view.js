@@ -25,10 +25,10 @@ export function createLiveConfigView({ can, esc, engineName, conciseVersion, she
     ? `<nav class="live-config-source-switch" aria-label="配置来源">${managedAvailable ? `<button class="${sourceMode === "managed" ? "active" : ""}" type="button" data-live-source="managed"><b>QAgent 配置</b><small>/etc/qagent 托管</small></button>` : ""}<button class="${sourceMode === "import" ? "active" : ""}" type="button" data-live-source="import"><b>系统服务配置</b><small>可选导入</small></button></nav>`
     : "";
   if (importSource && engine === "ss-rust") {
-    sourceSwitch += '<p class="validation-note">导入 install-ss-rust：保留多端口、DNS、出站绑定及 IPv6 优先，复制出站 ACL。脚本自有入站防火墙和重应用服务不会迁移；修改端口前请单独处理。日志统一为 QAgent info。SS Rust 无离线检查模式，启动失败会回滚。</p>';
+    sourceSwitch += '<p class="validation-note">导入保留多端口、DNS、出站绑定、IPv6 优先及出站 ACL。install-ss-rust 的入站防火墙与重应用服务不迁移，修改端口前须另行处理。日志改为 QAgent info；无离线校验，启动失败会回滚。</p>';
   }
   if (privateWorkspace) {
-    sourceSwitch = '<p class="validation-note">仅显示我的配置。可保存多份方案；同一主机每种内核只运行一份配置，不能覆盖其他用户正在运行的配置。</p>';
+    sourceSwitch = '<p class="validation-note">可保存多份方案；每台主机的每种内核仅运行一份配置，不能覆盖其他用户正在运行的配置。</p>';
   }
   if (privateAccount && agent.can_manage === true) {
     sourceSwitch = `<nav class="live-config-source-switch" aria-label="配置来源"><button type="button" data-live-source="personal" class="${privateWorkspace ? "active" : ""}"><b>我的配置</b><small>个人工作区</small></button>${managedAvailable ? `<button type="button" data-live-source="managed" class="${sourceMode === "managed" ? "active" : ""}"><b>读取自有主机配置</b><small>当前托管文件</small></button>` : ""}${existingAvailable ? `<button type="button" data-live-source="import" class="${importSource ? "active" : ""}"><b>系统服务配置</b><small>可选导入</small></button>` : ""}</nav>` +
@@ -60,17 +60,17 @@ export function createLiveConfigView({ can, esc, engineName, conciseVersion, she
   if (emptyManaged) {
     const hint = document.createElement("p");
     hint.className = "config-install-hint";
-    hint.textContent = `${engineName(engine)} 尚未安装。通过源码工具栏的“＋ 增加入站”提交时，将自动安装最新稳定版；切换版本请到节点设置。`;
+    hint.textContent = `${engineName(engine)} 未安装；提交“增加入站”时自动安装最新稳定版，切换版本请到节点设置。`;
     workspaceElement.querySelector(".live-config-details").after(hint);
   } else if (source?.cached) {
     const hint = document.createElement("p");
     hint.className = "config-install-hint";
-    hint.textContent = "当前显示最近 600 秒内已校验的节点快照；手动刷新及部署前核验会跳过缓存。";
+    hint.textContent = "最近 600 秒内已校验的节点快照；手动刷新及部署前核验会跳过缓存。";
     workspaceElement.querySelector(".live-config-details").after(hint);
   } else if (source?.saved) {
     const hint = document.createElement("p");
     hint.className = "config-install-hint";
-    hint.textContent = "当前显示已保存配置；需部署成功后才会在节点生效。";
+    hint.textContent = "已保存配置，部署成功后在节点生效。";
     workspaceElement.querySelector(".live-config-details").after(hint);
   }
 

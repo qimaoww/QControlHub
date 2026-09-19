@@ -135,7 +135,7 @@ func SharedTrafficEndpoints(engine core.Engine, content string) ([]core.PortTraf
 		kinds := ""
 		switch engine {
 		case core.EngineMihomo:
-			kinds = "http shadowsocks vmess vless trojan snell sudoku hysteria2 tuic anytls tunnel"
+			kinds = "http shadowsocks vmess vless trojan snell sudoku mieru hysteria2 tuic anytls tunnel"
 		case core.EngineXray:
 			kinds = "http shadowsocks vmess vless trojan hysteria tunnel dokodemo-door wireguard"
 		case core.EngineSingBox:

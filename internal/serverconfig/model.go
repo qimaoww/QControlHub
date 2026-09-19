@@ -19,6 +19,7 @@ const (
 	ProtocolAnyTLS         = "anytls"
 	ProtocolSnell          = "snell"
 	ProtocolSnellShadowTLS = "snell-shadow-tls-v3"
+	ProtocolMieru          = "mieru"
 	ProtocolSudoku         = "sudoku"
 	ProtocolPortForward    = "port-forward"
 	ProtocolWireGuard      = "wireguard"
@@ -79,6 +80,7 @@ type Input struct {
 	ListenerRoutingMark          int    `json:"listener_routing_mark"`
 	ListenerRule                 string `json:"listener_rule"`
 	ListenerProxy                string `json:"listener_proxy"`
+	MieruTransport               string `json:"mieru_transport,omitempty"`
 	SnellVersion                 int    `json:"snell_version"`
 	SnellUDP                     bool   `json:"snell_udp"`
 	SnellReuse                   bool   `json:"snell_reuse"`
@@ -267,6 +269,7 @@ func Protocols(engine core.Engine) []Protocol {
 	}
 	if engine == core.EngineMihomo {
 		protocols = append(protocols,
+			mieruProtocol(base),
 			Protocol{
 				Key: ProtocolSnell, Name: "Snell v5", Badge: "SNELL v5",
 				Description: "固定 Snell v5 的原生服务端，支持 UDP over TCP 与连接复用。",

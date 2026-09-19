@@ -1,4 +1,39 @@
-import { assert, waitFor, createConfigFixture } from "./config-fixture.mjs";
+import { assert, pause, waitFor, createConfigFixture } from "./config-fixture.mjs";
+
+async function assertWireGuardFieldLayout(form, engine) {
+  form.querySelector('[data-builder-step="identity"]').click();
+  await pause();
+  const panel = form.querySelector("[data-wireguard-options]");
+  const panelBox = panel.getBoundingClientRect();
+  const groups = panel.querySelectorAll(".secret-value-control, .generated-input-control");
+  assert(groups.length === 5, `${engine}: WireGuard key controls are missing`);
+  for (const group of groups) {
+    const input = group.querySelector("input");
+    const inputBox = input.getBoundingClientRect();
+    assert(inputBox.width > 0 && inputBox.height > 0, `${engine}: ${input.name} is not visible`);
+    for (const control of [group, ...group.querySelectorAll("button")]) {
+      const box = control.getBoundingClientRect();
+      assert(Math.abs(box.top - inputBox.top) <= 1 && Math.abs(box.bottom - inputBox.bottom) <= 1,
+        `${engine}: ${input.name} input and actions have mismatched heights or vertical alignment`);
+      assert(box.left >= panelBox.left && box.right <= panelBox.right,
+        `${engine}: ${input.name} actions overflow the options panel`);
+    }
+    const help = group.parentElement.querySelector("small");
+    assert(!help || help.getBoundingClientRect().top >= inputBox.bottom,
+      `${engine}: ${input.name} help overlaps the input`);
+  }
+  for (const side of ["server", "client"]) {
+    const privateBox = form.elements[`wireguard_${side}_private_key`].getBoundingClientRect();
+    const publicBox = form.elements[`wireguard_${side}_public_key`].getBoundingClientRect();
+    if (innerWidth > 600) {
+      assert(Math.abs(privateBox.top - publicBox.top) <= 1 && publicBox.left > privateBox.right,
+        `${engine}: ${side} key pair does not share an aligned row`);
+    } else {
+      assert(Math.abs(privateBox.left - publicBox.left) <= 1 && publicBox.top > privateBox.bottom,
+        `${engine}: ${side} key pair does not stack on mobile`);
+    }
+  }
+}
 
 export async function testWireGuardConfigRuntime() {
   for (const engine of ["xray", "sing-box"]) {
@@ -11,6 +46,7 @@ export async function testWireGuardConfigRuntime() {
     fixture.click("modify");
     await waitFor(() => document.querySelector("#server-plan-form"), "WireGuard editor did not open");
     let form = document.querySelector("#server-plan-form");
+    await assertWireGuardFieldLayout(form, engine);
     assert(form.elements.wireguard_keepalive.value === "0", "disabled keepalive became 25 on edit");
     assert(form.elements.wireguard_client_private_key.type === "password" &&
       form.elements.wireguard_server_private_key.type === "password", "private keys are visible by default");
@@ -53,6 +89,7 @@ export async function testWireGuardConfigRuntime() {
     }
     await waitFor(() => document.querySelector("[data-wireguard-options]"), "WireGuard add form missing");
     form = document.querySelector("#server-plan-form");
+    await assertWireGuardFieldLayout(form, engine);
     form.querySelector("[data-plan-intent=validate]").click();
     await waitFor(() => fixture.writes.length === 3 && !document.querySelector("dialog"), "new WireGuard preset did not save");
     assert(fixture.writes[2].operation === "add" && fixture.writes[2].input.protocol === "wireguard", "new endpoint used the wrong protocol");

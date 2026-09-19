@@ -40,6 +40,8 @@ func generateMihomo(input Input) (string, error) {
 			listener["decryption"] = input.VLESSDecryption
 		}
 		mihomoTransport(listener, input)
+	case ProtocolMieru:
+		configureMieruListener(listener, input)
 	case ProtocolSnell, ProtocolSnellShadowTLS:
 		listener["type"] = "snell"
 		listener["psk"] = input.Credential
@@ -299,6 +301,9 @@ func parseMihomo(content string) (Input, bool) {
 				break
 			}
 		}
+	}
+	if input.Protocol == ProtocolMieru && !parseMieruListener(listener, &input) {
+		return Input{}, false
 	}
 	input.BlockMainlandDestination, input.BlockMainlandSource = mainlandMihomoFlags(root, input.Tag)
 	return input, parsedInputValid(input)

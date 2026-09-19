@@ -81,6 +81,11 @@ func mutateGenerated(engine core.Engine, currentContent, generatedContent, match
 			}
 		}
 	}
+	if engine == core.EngineMihomo && matchValue != "" && operation != "delete" {
+		if err := validateMieruPresetMutation(currentContent, matchValue); err != nil {
+			return "", err
+		}
+	}
 	listKey, matchKey := "inbounds", "tag"
 	managedKeys := []string{
 		"tag", "listen", "port", "protocol", "settings", "streamSettings",
@@ -88,7 +93,7 @@ func mutateGenerated(engine core.Engine, currentContent, generatedContent, match
 	if engine == core.EngineMihomo {
 		listKey, matchKey = "listeners", "name"
 		managedKeys = []string{
-			"name", "listen", "port", "type", "cipher", "password", "udp", "users",
+			"name", "listen", "port", "type", "cipher", "password", "udp", "users", "transport",
 			"up", "down", "alpn", "congestion-controller", "max-idle-time", "authentication-timeout",
 			"certificate", "private-key", "reality-config", "decryption", "ws-path", "grpc-service-name", "xhttp-config", "network", "target",
 			"routing-mark", "rule", "proxy", "psk", "version", "obfs-opts", "shadow-tls",

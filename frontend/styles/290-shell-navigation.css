@@ -1,7 +1,5 @@
-/* Desktop (fine-pointer) browsers keep one fixed layout: zooming scales the
-   whole page uniformly and narrower windows scroll instead of reflowing into
-   the compact layout, which stays reserved for coarse-pointer devices. */
-@media (pointer:fine){.app-body .desktop-app{min-width:1404px}}
+/* Keep narrow desktop windows within the viewport without changing navigation. */
+@media (pointer:fine){.app-body .desktop-app{min-width:0}}
 /* Sidebar navigation: distinct workflow icons and compact mobile overflow. */
 .dock-tools .dock-settings{position:relative;width:46px;min-height:46px;display:grid;place-items:center;margin:0 auto;border:0;border-radius:10px;background:transparent;color:#7e8597}
 .dock-tools .dock-settings:hover{background:color-mix(in srgb,var(--dock-2) 84%,var(--accent));color:#fff}

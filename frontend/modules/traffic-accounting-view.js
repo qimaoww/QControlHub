@@ -10,9 +10,9 @@ export function renderTrafficAccounting(policy, esc, bytes) {
   const tone = failed ? "bad" : dual && !partialEgress ? "ok" : "limited";
   const title = failed ? "统计异常" : partialEgress ? "双链路 · 范围受限" : dual ? "双链路统计" : "仅监听端口";
   const outboundTagHint = raw.endsWith("outbound tags must be present and unique")
-    ? "出口缺少标签或标签重复，独立出口统计未启用。新版 Agent 可自动补齐缺失标签；重复标签需修正配置，不能直接合并计数。"
+    ? "出口标签缺失或重复，无法独立统计。新版 Agent 可补齐缺失项；重复标签须修改配置，不能合并计数。"
     : /outbounds\[\d+\]\.tag duplicates an earlier outbound;/.test(raw)
-      ? "多个出口使用了相同标签，无法确定路由与统计归属。请为这些出口设置不同标签，并同步修改对应路由。"
+      ? "出口标签重复，无法确定统计归属；请使用不同标签并同步修改路由。"
       : "";
   const hint = failed
     ? outboundTagHint || (raw ? "请查看诊断信息，确认统计是否完整。" : "Agent 报告监控不可用，暂未提供详细诊断。")
@@ -28,7 +28,7 @@ export function renderTrafficAccounting(policy, esc, bytes) {
   const content = `<section class="traffic-accounting-panel ${tone}" aria-label="统计口径">
     <div class="traffic-accounting-heading"><span class="traffic-accounting-badge"><i aria-hidden="true"></i>${title}</span><span class="traffic-accounting-caption">${partialEgress ? "入口 + 已标记出口" : dual ? "入口 + 出口" : "入口收发"}</span></div>
     <p class="traffic-accounting-hint">${hint}</p>
-    ${partialEgress ? '<p class="traffic-accounting-note">Mihomo 不为回环（127.0.0.1、::1）等非全局单播目标设置出口标记。这些连接仍统计入口收发，但出口未计入；当前无法可靠补算，也不按入口流量翻倍估算。此提示说明能力限制，不表示当前一定存在漏计连接。</p>' : ""}
+    ${partialEgress ? '<p class="traffic-accounting-note">回环（127.0.0.1、::1）等非全局单播目标仅计入口，出口不计入、不补算或翻倍。此为 Mihomo 能力限制，不代表已发生漏计。</p>' : ""}
     ${dual || raw ? `<details class="traffic-accounting-details">
       <summary>${failed ? "查看诊断" : dual ? "查看链路明细" : "查看统计说明"}<span aria-hidden="true">⌄</span></summary>
       <div class="traffic-accounting-detail-body">${dual ? `<p>本计量代次累计，不等同于本月总量</p>${legs}` : ""}${raw ? `<p>Agent 原始诊断</p><pre>${esc(raw)}</pre>` : ""}</div>
