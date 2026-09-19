@@ -43,7 +43,7 @@ export async function testAgentBatchActions({ testAPI, onlineAgent }) {
   all.click();
   assert.equal(alpha.checked, true);
   assert.equal(bravo.checked, true);
-  assert.equal(count.textContent, "已选 2/2");
+  assert.equal(count.textContent, "已选 2");
   assert.equal(all.checked, true);
   assert.equal(all.indeterminate, false);
   assert.equal(all.getAttribute("aria-checked"), "true");
@@ -65,7 +65,7 @@ export async function testAgentBatchActions({ testAPI, onlineAgent }) {
     "刷新后没有撤销刚变离线的节点",
   );
   assert.equal(bravo.checked, true, "刷新不应清除仍合格节点的选择");
-  assert.equal(count.textContent, "已选 1/1");
+  assert.equal(count.textContent, "已选 1");
   assert.equal(all.checked, true);
   assert.equal(all.indeterminate, false);
   assert.equal(all.getAttribute("aria-checked"), "true");
@@ -144,7 +144,7 @@ export async function testAgentBatchActions({ testAPI, onlineAgent }) {
   assert.equal(submit.disabled, true, "busy 应锁定提交控件");
   assert.equal(form.elements.action.disabled, true, "busy 应锁定动作控件");
   assert.equal(form.elements.engine.disabled, true, "busy 应锁定内核控件");
-  assert.equal(count.textContent, "已选 2/2");
+  assert.equal(count.textContent, "已选 2");
   assert.equal(all.checked, true);
   assert.equal(all.indeterminate, false);
   assert.equal(all.getAttribute("aria-checked"), "true");
@@ -262,7 +262,7 @@ export async function testAgentBatchActions({ testAPI, onlineAgent }) {
   );
   retries = [...form.querySelectorAll("[data-batch-retry]")];
   assert.equal(retries.length, 2, "连续 poll 后两个 retry 必须保留");
-  assert.equal(count.textContent, "已选 2/2");
+  assert.equal(count.textContent, "已选 2");
   assert.equal(all.checked, true);
   assert.equal(all.indeterminate, false);
   assert.equal(all.getAttribute("aria-checked"), "true");
@@ -296,7 +296,7 @@ export async function testAgentBatchActions({ testAPI, onlineAgent }) {
   assert.equal(batchBar.isConnected, true);
   assert.equal(location.hash, aggregateHash);
   assert.equal(aggregateWorkspace.scrollTop, aggregateScrollTop);
-  assert.equal(count.textContent, "已选 2/2");
+  assert.equal(count.textContent, "已选 2");
   assert.equal(all.checked, true);
   assert.equal(all.indeterminate, false);
   assert.equal(all.getAttribute("aria-checked"), "true");
@@ -310,7 +310,7 @@ export async function testAgentBatchActions({ testAPI, onlineAgent }) {
   assert.equal(retries.every((button) => button.disabled), true, "retry busy 未锁定全部重试控件");
   assert.equal(alpha.disabled && bravo.disabled && all.disabled, true, "retry busy 未锁定选择控件");
   assert.equal(submit.disabled && form.elements.action.disabled && form.elements.engine.disabled, true, "retry busy 未锁定动作控件");
-  assert.equal(count.textContent, "已选 2/2");
+  assert.equal(count.textContent, "已选 2");
   assert.equal(all.checked, true);
   assert.equal(all.getAttribute("aria-checked"), "true");
   testAPI.pendingTasks[5].fail("alpha retry still failing");

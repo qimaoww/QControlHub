@@ -1,12 +1,12 @@
 import { batchCoreVersionLabel } from "./agent-batch.js";
 
 const actions = {
-  "upgrade-agent": { title: "批量更新 Agent", submit: "更新 Agent", hint: "更新期间节点会短暂离线。", tone: "primary" },
-  install: { title: "批量更新内核", submit: "更新内核", hint: "更新后服务会重启。", tone: "primary" },
-  restart: { title: "批量重启服务", submit: "重启服务", hint: "现有连接会短暂中断。", tone: "danger" },
-  stop: { title: "批量停止服务", submit: "停止服务", hint: "现有连接会立即中断。", tone: "danger" },
-  start: { title: "批量启动服务", submit: "启动服务", hint: "", tone: "primary" },
-  status: { title: "批量查询状态", submit: "查询状态", hint: "", tone: "primary" },
+  "upgrade-agent": { title: "更新 Agent", submit: "更新 Agent", hint: "更新期间短暂离线。", tone: "primary" },
+  install: { title: "更新内核", submit: "更新内核", hint: "更新后服务重启。", tone: "primary" },
+  restart: { title: "重启服务", submit: "重启服务", hint: "连接会短暂中断。", tone: "danger" },
+  stop: { title: "停止服务", submit: "停止服务", hint: "连接会立即中断。", tone: "danger" },
+  start: { title: "启动服务", submit: "启动服务", hint: "", tone: "primary" },
+  status: { title: "查询状态", submit: "查询状态", hint: "", tone: "primary" },
 };
 
 export function batchActionFeedback(action) {

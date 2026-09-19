@@ -63,7 +63,7 @@ export function createAgentBatchController({ api, state, esc, notify, confirmAct
       "[data-batch-select-all-label]",
     );
     if (selectAllLabel)
-      selectAllLabel.textContent = selection.checked ? "取消全选" : "全选";
+      selectAllLabel.textContent = "全选";
     const button = batchForm?.querySelector("button[type=submit]");
     if (button) {
       button.disabled = selection.selected === 0 || busy;
@@ -73,7 +73,7 @@ export function createAgentBatchController({ api, state, esc, notify, confirmAct
     document.querySelectorAll("[data-node-batch-toggle]").forEach((toggle) => { toggle.disabled = busy; });
     const label = batchForm?.querySelector("[data-batch-count]");
     if (label) {
-      label.textContent = `已选 ${selection.selected}/${selection.eligible}`;
+      label.textContent = `已选 ${selection.selected}`;
       label.title = `已选择 ${selection.selected} 个节点，可选 ${selection.eligible} 个`;
     }
     const engineWrap = batchForm.querySelector("[data-batch-engine-wrap]");
@@ -194,7 +194,7 @@ export function createAgentBatchController({ api, state, esc, notify, confirmAct
         batchAgentEligibility(agentsByID.get(input.value), action, engine).eligible,
       );
       if (!selected.length) {
-        notify("所选节点状态已变化，本次未提交任务，请重新选择。", "error");
+        notify("节点状态已变化，请重新选择。", "error");
         return;
       }
       setBatchBusy(true);

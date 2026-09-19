@@ -28,12 +28,12 @@ export async function testAgentBatchLayout({ testAPI, onlineAgent }) {
   const cards = [...form.querySelectorAll("[data-node-batch-card]")];
   assert.ok(cards.at(-1).getBoundingClientRect().bottom <= bounds.top, "最后一个节点被批量操作栏遮挡");
   for (const [action, title, tone] of [
-    ["upgrade-agent", "批量更新 Agent", "primary"],
-    ["start", "批量启动服务", "primary"],
-    ["stop", "批量停止服务", "danger"],
-    ["restart", "批量重启服务", "danger"],
-    ["status", "批量查询状态", "primary"],
-    ["install", "批量更新内核", "primary"],
+    ["upgrade-agent", "更新 Agent", "primary"],
+    ["start", "启动服务", "primary"],
+    ["stop", "停止服务", "danger"],
+    ["restart", "重启服务", "danger"],
+    ["status", "查询状态", "primary"],
+    ["install", "更新内核", "primary"],
   ]) {
     form.elements.action.value = action;
     form.elements.action.dispatchEvent(new Event("change", { bubbles: true }));
