@@ -37,6 +37,12 @@ func Generate(engine core.Engine, input Input) (string, error) {
 	if input.Protocol == ProtocolSudoku {
 		normalizeSudokuInput(&input)
 	}
+	if input.Protocol == ProtocolMieru {
+		normalizeMieruInput(&input)
+		if err := validateMieruInput(input); err != nil {
+			return "", err
+		}
+	}
 	if engine == core.EngineShadowsocksRust {
 		if !core.ValidSSRustTag(input.Tag) {
 			return "", errors.New("SS Rust 入站名称须为 1–64 个字符，不得包含控制字符或首尾空白")

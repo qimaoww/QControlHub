@@ -102,6 +102,9 @@ func NewPlan(protocol Protocol) (Input, error) {
 			}
 		}
 	}
+	if protocol.Key == ProtocolMieru {
+		normalizeMieruInput(&input)
+	}
 	if protocol.Key == ProtocolSudoku {
 		input.SudokuClientKey, input.Credential, err = newSudokuKeyPair()
 		if err != nil {
@@ -266,6 +269,10 @@ func RegeneratePlan(protocol Protocol, current Input) (Input, error) {
 		plan.SudokuHTTPMaskPathRoot = current.SudokuHTTPMaskPathRoot
 		plan.SudokuMultiplex = current.SudokuMultiplex
 		plan.SudokuFallback = current.SudokuFallback
+	}
+	if protocol.Key == ProtocolMieru {
+		plan.MieruTransport = current.MieruTransport
+		normalizeMieruInput(&plan)
 	}
 	if protocol.PortForward {
 		plan.TargetAddress = current.TargetAddress

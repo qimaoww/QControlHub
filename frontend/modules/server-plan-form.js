@@ -155,6 +155,7 @@ export function readServerPlanInput(form, protocol) {
     ss_rust_outbound_bind_addr: values.get("ss_rust_outbound_bind_addr") || "",
     ss_rust_ipv6_first: values.get("ss_rust_ipv6_first") === "1",
     listener_proxy: values.get("listener_proxy") || "",
+    mieru_transport: values.get("mieru_transport") || "TCP",
     snell_version: Number(values.get("snell_version") || 0),
     snell_udp: values.get("snell_udp") === "1",
     snell_reuse: values.get("snell_reuse") === "1",
