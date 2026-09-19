@@ -38,6 +38,12 @@ var specialUsePrefixes = mustParsePrefixes([]string{
 	"ff00::/8",
 })
 
+// NonPublicPrefixes returns the excluded ranges for filtering normalized,
+// unzoned IP addresses in persistence queries. Callers own the returned slice.
+func NonPublicPrefixes() []netip.Prefix {
+	return append([]netip.Prefix(nil), specialUsePrefixes...)
+}
+
 // IsPublicAddress accepts only globally routable unicast addresses. Go's
 // IsGlobalUnicast also includes documentation, benchmarking, CGNAT, and other
 // IANA special-purpose ranges, so those ranges require an explicit denylist.

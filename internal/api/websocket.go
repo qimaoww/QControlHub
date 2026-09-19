@@ -215,6 +215,12 @@ func (s *Server) agentConnect(w http.ResponseWriter, request *http.Request) {
 					slog.Error("store agent heartbeat", "agent_id", id, "error", err)
 					return
 				}
+				if report := message.Heartbeat.ClientConnections; report != nil {
+					if err := s.store.StoreClientConnections(ctx, id, *report); err != nil {
+						slog.Error("store client connections", "agent_id", id, "error", err)
+						return
+					}
+				}
 				resetHeartbeatDeadline()
 				if capabilityChanged {
 					_ = connection.Close(websocket.StatusPolicyViolation, "agent features changed during session")

@@ -182,7 +182,8 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 		t.Fatal(err)
 	}
 	heartbeat := core.WireMessage{Type: core.WireHeartbeat, Heartbeat: &core.HeartbeatRequest{
-		Version: "test", Features: []string{core.AgentFeatureSelfUpgrade, core.AgentFeaturePortTraffic, core.AgentFeatureCoreLogs, core.AgentFeatureCoreLogStatus, core.AgentFeatureMihomoDevelopmentSource, core.AgentFeatureManagedConfigRead, core.AgentFeatureIndependentEgress},
+		ClientConnections: &core.ClientConnectionReport{Status: "ok", Connections: []core.ClientConnection{{Engine: core.EngineSingBox, Protocol: "vless", Inbound: "entry", Transport: "tcp", ClientIP: "198.51.100.9", ClientPort: 50123, LocalIP: "192.0.2.1", LocalPort: 443}}},
+		Version:           "test", Features: []string{core.AgentFeatureSelfUpgrade, core.AgentFeaturePortTraffic, core.AgentFeatureCoreLogs, core.AgentFeatureCoreLogStatus, core.AgentFeatureMihomoDevelopmentSource, core.AgentFeatureManagedConfigRead, core.AgentFeatureIndependentEgress},
 		Runtime: map[core.Engine]core.RuntimeState{core.EngineSingBox: {Installed: true, ServiceStatus: "active", CoreLogStatus: "waiting", CoreLogError: "source-missing"}},
 		TrafficUsage: []core.PortTrafficUsage{{
 			PolicyID: trafficPolicy.ID, ResetGeneration: trafficPolicy.ResetGeneration,
@@ -208,6 +209,17 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 		}
 		if attempt == 49 {
 			t.Fatalf("traffic heartbeat was not stored: policies=%+v error=%v", policies, listErr)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	for attempt := 0; attempt < 50; attempt++ {
+		history, err := dataStore.ClientConnectionHistory(ctx, store.ClientConnectionQuery{IncludeNonPublic: true, AgentID: enrolled.AgentID, Since: time.Now().Add(-time.Hour), Until: time.Now().Add(time.Minute), Limit: 100, Bucket: "hour"})
+		if err == nil && len(history.Records) == 1 && history.Records[0].ClientIP == "198.51.100.9" {
+			break
+		}
+		if attempt == 49 {
+			t.Fatalf("WSS inbound connections not persisted: %+v %v", history, err)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}

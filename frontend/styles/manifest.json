@@ -51,6 +51,7 @@
   "frontend/styles/490-config-field-studio.css",
   "frontend/styles/500-system-tcp.css",
   "frontend/styles/510-traffic-accounting.css",
+  "frontend/styles/515-client-connections.css",
   "frontend/styles/520-live-config-navigation.css",
   "frontend/styles/530-config-file-drafts.css",
   "frontend/styles/540-shell-narrow-dock.css",

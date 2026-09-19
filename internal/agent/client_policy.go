@@ -46,6 +46,7 @@ func (c *Client) queueHeartbeat(ctx context.Context, outgoing chan<- core.WireMe
 	heartbeat := &core.HeartbeatRequest{
 		Version: c.config.Version, OS: operatingSystemPlatform(), Arch: runtime.GOARCH, Runtime: runtimeState,
 		Features: c.advertisedFeatures(), TrafficUsage: c.traffic.Snapshot(),
+		ClientConnections: c.clientConnectionReport(ctx),
 	}
 	if metricsHaveData(metrics) || metrics.BBR != nil {
 		heartbeat.Metrics = &metrics
@@ -89,6 +90,7 @@ func (c *Client) queueMetrics(ctx context.Context, outgoing chan<- core.WireMess
 func (c *Client) advertisedFeatures() []string {
 	features := []string{
 		core.AgentFeatureSelfUpgrade,
+		core.AgentFeatureClientConnections,
 		core.AgentFeaturePortTraffic,
 		core.AgentFeatureSharedTraffic,
 		core.AgentFeatureSharedEngines,

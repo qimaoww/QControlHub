@@ -20,6 +20,7 @@ function shell(content, title, { viewKey = state.route } = {}) {
     ["system-bbr", "TCP 调优", dockIcons.sliders, true],
     ["traffic", "流量", dockIcons.chart, true],
     ["core-logs", "日志", dockIcons.logs, true],
+    ["client-connections", "连接 IP", dockIcons.network, true],
     ["tasks", "任务", dockIcons.listChecks, true],
     [state.session.role === "admin" ? "users" : "my-quota", state.session.role === "admin" ? "用户" : "共享", dockIcons.users, true],
   ];
@@ -35,6 +36,7 @@ function shell(content, title, { viewKey = state.route } = {}) {
     "live-config": "agent-config.read",
     tasks: "tasks.read",
     "core-logs": "core-logs.read",
+    "client-connections": "core-logs.read",
     traffic: "traffic.read",
     settings: "settings.read",
     users: "users.manage",
@@ -42,7 +44,7 @@ function shell(content, title, { viewKey = state.route } = {}) {
   };
   links.splice(0, links.length, ...links.filter(([id]) => can(linkPermissions[id])));
   app.style.display = "";
-  document.body.className = `app-body page-${state.route}${state.route === "node-settings" ? " page-agents no-context" : ""}`;
+  document.body.className = `app-body page-${state.route}${state.route === "node-settings" ? " page-agents no-context" : ""}${state.route === "client-connections" ? " no-context" : ""}`;
   applyTheme();
   const context = contextMarkup(title);
   const overview = state.data.overview || {};

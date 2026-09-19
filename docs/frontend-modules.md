@@ -67,8 +67,8 @@ Preserve these shared lifetimes when changing a controller:
 
 ## Remaining route ownership
 
-All thirteen route facades retain their public installer/helper exports. The
-remaining eleven routes have the following focused owners:
+All fourteen route facades retain their public installer/helper exports. The
+remaining twelve routes have the following focused owners:
 
 | Route | Owners |
 | --- | --- |
@@ -80,6 +80,7 @@ remaining eleven routes have the following focused owners:
 | Client access | `client-access-model`, `client-access-view`, `client-access-results`, `client-access-bindings`, `client-access-profiles`, `client-clipboard` |
 | SubStore | `substore-model`, `substore-view`, `substore-bindings`, `substore-selections`, `substore-targets` |
 | Tasks | `task-model`, `task-view`, `task-timeline`, `task-bindings` |
+| Client connection IP | `client-connection-model`, `client-connection-view`, `client-connection-bindings` |
 | Core logs | `core-log-model`, `core-log-source-status`, `core-log-selection`, `core-log-view`, `core-log-bindings` |
 | Traffic | `traffic-model`, `traffic-accounting-view`, `traffic-form-model`, `traffic-form-view`, `traffic-order`, `traffic-card-interactions`, `traffic-view`, `traffic-sync-dialog`, `traffic-forms`, `traffic-bindings` |
 | Users and quota | `user-model`, `user-view`, `user-bindings`, `user-allocations`, `user-allocation-view`, `user-account-editor`, `user-quota`, `user-quota-view` |
@@ -132,7 +133,7 @@ New frontend functionality should follow these rules:
   module initialization idempotent where a route can be revisited.
 
 `make module-policy-test` checks named exports, existing import targets,
-one-way composition dependencies for all thirteen route facades, an acyclic module
+one-way composition dependencies for all fourteen route facades, an acyclic module
 graph, reachability of every production module from the application, and
 reachability of every extracted smoke/browser test module from its runner.
 It is also part of `make check`, while `make frontend-check` runs behavior smoke tests.

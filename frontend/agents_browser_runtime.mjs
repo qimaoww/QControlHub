@@ -17,7 +17,10 @@ const mode = new URLSearchParams(location.search).get("mode") || "admin";
 const scenario = installAgentFixture(mode);
 
 try {
-  if (mode.startsWith("ip-quality")) {
+  if (mode.startsWith("connections")) {
+    const { testClientConnectionsRuntime } = await import("./browser/client-connections.mjs");
+    await testClientConnectionsRuntime(new URLSearchParams(location.search).has("preview"));
+  } else if (mode.startsWith("ip-quality")) {
     const { testIPQualityRuntime } = await import("./browser/ip-quality.mjs");
     await testIPQualityRuntime(mode, new URLSearchParams(location.search).has("preview"));
   } else if (mode.startsWith("dashboard")) {

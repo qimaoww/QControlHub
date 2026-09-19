@@ -1,6 +1,11 @@
 /* Keep narrow desktop windows within the viewport without changing navigation. */
 @media (pointer:fine){.app-body .desktop-app{min-width:0}}
 /* Sidebar navigation: distinct workflow icons and compact mobile overflow. */
+@media(min-width:821px),(pointer:fine){
+  .app-dock{min-height:0}
+  .app-dock>.dock-logo,.app-dock>.dock-tools{flex-shrink:0}
+  .dock-nav{min-height:0;overflow-y:auto;scrollbar-width:none}
+}
 .dock-tools .dock-settings{position:relative;width:46px;min-height:46px;display:grid;place-items:center;margin:0 auto;border:0;border-radius:10px;background:transparent;color:#7e8597}
 .dock-tools .dock-settings:hover{background:color-mix(in srgb,var(--dock-2) 84%,var(--accent));color:#fff}
 .dock-tools .dock-settings.active{background:var(--accent);color:var(--on-accent)}
