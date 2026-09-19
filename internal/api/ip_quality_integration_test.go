@@ -6,12 +6,10 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/json"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -41,16 +39,6 @@ func TestIPQualityAPIAndWebSocketLifecycle(t *testing.T) {
 	}
 	defer db.Close()
 	server := New(db, Config{AdminToken: "quality-admin", OperatorTokens: []string{"quality-operator"}, ReadonlyTokens: []string{"quality-reader"}})
-	var downloads atomic.Int32
-	var upstreamOffline atomic.Bool
-	server.ipQualityArchiveHTTP = &http.Client{Transport: ipQualityRoundTripFunc(func(r *http.Request) (*http.Response, error) {
-		downloads.Add(1)
-		status := http.StatusOK
-		if upstreamOffline.Load() {
-			status = http.StatusServiceUnavailable
-		}
-		return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(archiveFixture)), Header: make(http.Header), Request: r}, nil
-	})}
 	handler := server.Handler()
 	call := func(method, path, token string, body any, want int) *httptest.ResponseRecorder {
 		t.Helper()
@@ -148,7 +136,6 @@ func TestIPQualityAPIAndWebSocketLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	report.ReportURLs = []string{"https://Report.Check.Place/ip/fixture.svg"}
 	if err := wsjson.Write(ctx, connection, core.WireMessage{Type: core.WireResult, Result: &core.TaskResultEnvelope{
 		TaskID: task.ID, Result: core.TaskResultRequest{LeaseID: message.Task.LeaseID, Success: true, IPQuality: &report},
 	}}); err != nil {
@@ -164,28 +151,25 @@ func TestIPQualityAPIAndWebSocketLifecycle(t *testing.T) {
 	if len(history.Records) != 1 || history.Records[0].Result == nil || history.Records[0].Status != core.TaskSucceeded {
 		t.Fatalf("wire result was not persisted: %+v", history)
 	}
-	if downloads.Load() != 1 || len(history.Records[0].Archives) != 1 {
-		t.Fatal("report was not downloaded and archived")
+	if len(history.Records[0].Archives) != 1 {
+		t.Fatal("report was not archived")
 	}
 	archivePath := "/ip-quality/" + task.ID + "/archives/4"
-	upstreamOffline.Store(true)
 	for _, suffix := range []string{"", "?download=1"} {
 		response := call("GET", archivePath+suffix, "quality-admin", nil, 200)
-		if response.Body.String() != archiveFixture || response.Header().Get("Cache-Control") != "no-store" || !strings.Contains(response.Header().Get("Content-Security-Policy"), "sandbox") {
-			t.Fatal("archive changed or lost browser isolation")
+		if !strings.HasPrefix(response.Body.String(), "<svg") || !strings.Contains(response.Body.String(), "203.0.113.1") ||
+			response.Header().Get("Content-Type") != "image/svg+xml" || response.Header().Get("Cache-Control") != "no-store" ||
+			!strings.Contains(response.Header().Get("Content-Security-Policy"), "sandbox") {
+			t.Fatal("archive is not a panel-rendered SVG or lost browser isolation")
 		}
 		if (suffix == "") != strings.HasPrefix(response.Header().Get("Content-Disposition"), "inline;") {
 			t.Fatal("incorrect preview/download disposition")
 		}
 	}
-	if downloads.Load() != 1 {
-		t.Fatal("database preview contacted upstream")
-	}
 	call("GET", archivePath, "", nil, 401)
 	call("GET", archivePath, "quality-reader", nil, 404)
 	call("GET", "/ip-quality/"+task.ID+"/archives/6", "quality-admin", nil, 404)
 	call("GET", "/ip-quality/"+task.ID+"/archives/7", "quality-admin", nil, 400)
-	upstreamOffline.Store(false)
 	reader := call("GET", "/ip-quality?date="+day, "quality-reader", nil, 200)
 	if strings.Contains(reader.Body.String(), "203.0.113.1") {
 		t.Fatal("read-only token inherited another principal's report")
@@ -193,7 +177,7 @@ func TestIPQualityAPIAndWebSocketLifecycle(t *testing.T) {
 
 	// An otherwise valid result that JSONB cannot store must be ACKed as a
 	// failed task, and the same authenticated connection must remain usable.
-	bad := core.IPQualityResult{ReportURLs: report.ReportURLs, Reports: []json.RawMessage{
+	bad := core.IPQualityResult{Reports: []json.RawMessage{
 		json.RawMessage(`{"Head":{"IP":"203.0.113.1"},"Info":{"Organization":"provider\u0000value"},"Type":{},"Score":{},"Factor":{},"Media":{},"Mail":{}}`),
 	}}
 	for _, test := range []struct {
@@ -223,27 +207,8 @@ func TestIPQualityAPIAndWebSocketLifecycle(t *testing.T) {
 			(history.Records[0].Result != nil) != (test.status == core.TaskSucceeded) {
 			t.Fatalf("follow-up history: %+v", history)
 		}
+		if test.status == core.TaskFailed {
+			call("GET", "/ip-quality/"+task.ID+"/archives/4", "quality-admin", nil, 404)
+		}
 	}
-	// A missing upstream file must never be acknowledged as a saved report.
-	upstreamOffline.Store(true)
-	if err := json.Unmarshal(call("POST", "/ip-quality", "quality-admin", input, 201).Body.Bytes(), &task); err != nil {
-		t.Fatal(err)
-	}
-	if err := wsjson.Read(ctx, connection, &message); err != nil || message.Type != core.WireTask {
-		t.Fatalf("archive-failure task: %+v %v", message, err)
-	}
-	if err := wsjson.Write(ctx, connection, core.WireMessage{Type: core.WireResult, Result: &core.TaskResultEnvelope{TaskID: task.ID, Result: core.TaskResultRequest{LeaseID: message.Task.LeaseID, Success: true, IPQuality: &report}}}); err != nil {
-		t.Fatal(err)
-	}
-	if err := wsjson.Read(ctx, connection, &message); err != nil || message.Type != core.WireResultAck {
-		t.Fatalf("archive failure was not acknowledged: %+v %v", message, err)
-	}
-	if err := json.Unmarshal(call("GET", "/ip-quality?date="+day, "quality-admin", nil, 200).Body.Bytes(), &history); err != nil {
-		t.Fatal(err)
-	}
-	if history.Records[0].Status != core.TaskFailed || !strings.Contains(history.Records[0].Error, "未存档") {
-		t.Fatalf("failed archive was shown as success: %+v", history)
-	}
-	call("GET", "/ip-quality/"+task.ID+"/archives/4", "quality-admin", nil, 404)
-
 }

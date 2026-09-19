@@ -161,9 +161,8 @@
 `records[]` 包含 `task_id`、`agent_id`、`status`、`created_at`、可选的
 `started_at` / `finished_at` / `error`；成功报告保存在
 `result.reports[]`，每个元素是保留上游字段及数据类型的 IPv4 或 IPv6 JSON 对象。
-`result.report_urls[]` 按 JSON 对象顺序记录来源链接；`archives[]` 返回 `family`（4/6）、
-`source_url`、`sha256`、`size` 和 `downloaded_at`，不包含 SVG 字节。
-面板从 `/ip-quality/{task_id}/archives/{family}` 读取已存储的 SVG，默认用于图片内嵌，
+`archives[]` 返回 `family`（4/6）、`sha256`、`size` 和 `rendered_at`，不包含 SVG 字节。
+面板从 `/ip-quality/{task_id}/archives/{family}` 读取自己渲染并存储的 SVG，默认用于图片内嵌，
 `?download=1` 返回附件。无权限或不存在返回 `404`，未登录返回 `401`。
 失败或仍在执行的任务不带成功报告。普通 `/tasks` 响应不携带这些报告字节。
 `schedules[]` 包含 `agent_id`、`enabled`、`next_run_at`，表示当前计划，

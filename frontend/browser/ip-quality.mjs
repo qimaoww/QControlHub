@@ -31,7 +31,7 @@ export async function testIPQualityRuntime(mode, preview = false) {
   const completeRecord = (taskID = "quality-task") => ({
     task_id: taskID, agent_id: "quality-a", status: "succeeded",
     created_at: `${today}T06:00:00Z`, finished_at: `${today}T06:05:00Z`,
-    archives: [4, 6].map((family) => ({ family, downloaded_at: `${today}T06:05:00Z`, sha256: "a".repeat(64) })),
+    archives: [4, 6].map((family) => ({ family, rendered_at: `${today}T06:05:00Z`, sha256: "a".repeat(64) })),
     result: { reports: [report("203.0.113.10"), report("2001:db8:1234:5678:90ab:cdef:1234:5678")] },
   });
   const fixture = {

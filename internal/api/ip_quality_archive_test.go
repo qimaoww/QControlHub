@@ -1,67 +1,113 @@
 package api
 
 import (
-	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"encoding/xml"
 	"errors"
 	"io"
-	"net/http"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
-type ipQualityRoundTripFunc func(*http.Request) (*http.Response, error)
+const ipQualityRenderFixture = `{"Head":{"IP":"203.0.113.1","Time":"2026-09-19 13:56:33 UTC","Version":"v2026-09-16"},` +
+	`"Info":{"ASN":"210634","Organization":"YSTRONTEK NETWORKS","DMS":"114°10′29″E","Map":"https://check.place/1,2,12,en",` +
+	`"TimeZone":"Asia/Hong_Kong","City":{"Name":"香港","PostalCode":"999077"},"Region":{"Code":"HK","Name":"香港"},` +
+	`"Continent":{"Code":"AS","Name":"亚洲"},"RegisteredRegion":{"Code":"US","Name":"美国"},"Type":"广播IP"},` +
+	`"Type":{"Usage":{"IPinfo":"机房","ipapi":"商业"},"Company":{"IPinfo":"机房"}},` +
+	`"Score":{"IP2LOCATION":"3","ipapi":"5.47%","IPQS":"null"},` +
+	`"Factor":{"CountryCode":{"IPinfo":"HK","ipapi":"HK"},"Proxy":{"IPinfo":false,"ipapi":true}},` +
+	`"Media":{"TikTok":{"Status":"解锁","Region":"ALISG","Type":"原生"},"ChatGPT":{"Status":"仅APP","Region":"HK","Type":"DNS"}},` +
+	`"Mail":{"Port25":true,"Gmail":true,"QQ":false,"DNSBlacklist":{"Total":423,"Clean":404,"Marked":18,"Blacklisted":1}}}`
 
-func (f ipQualityRoundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
-
-const archiveFixture = `<svg xmlns="http://www.w3.org/2000/svg" width="900" height="500"><style>text{fill:black}</style><text x="10" y="30">IPQuality fixture</text></svg>`
-
-func TestIPQualityArchiveDownloadLimits(t *testing.T) {
-	for _, test := range []struct {
-		name, body string
-		status     int
-		wantError  bool
-	}{
-		{"valid", archiveFixture, 200, false},
-		{"not-found", archiveFixture, 404, true},
-		{"redirect", archiveFixture, 302, true},
-		{"html", "<html>error page</html>", 200, true},
-		{"truncated", `<svg xmlns="http://www.w3.org/2000/svg">`, 200, true},
-		{"two-roots", archiveFixture + archiveFixture, 200, true},
-		{"trailing-garbage", archiveFixture + "broken", 200, true},
-		{"oversized", strings.Repeat("x", core.MaxIPQualityArchiveBytes+1), 200, true},
+func TestIPQualityRenderDrawsStoredReport(t *testing.T) {
+	archives, err := renderIPQualityArchives(&core.IPQualityResult{Reports: []json.RawMessage{json.RawMessage(ipQualityRenderFixture)}})
+	if err != nil || len(archives) != 1 {
+		t.Fatalf("render: %+v %v", archives, err)
+	}
+	archive := archives[0]
+	if archive.Family != 4 || archive.Size != len(archive.Content) || len(archive.SHA256) != 64 || archive.RenderedAt.IsZero() {
+		t.Fatalf("incomplete archive metadata: %+v", archive)
+	}
+	digest := sha256.Sum256(archive.Content)
+	if archive.SHA256 != hex.EncodeToString(digest[:]) {
+		t.Fatal("archive digest does not match its content")
+	}
+	content := string(archive.Content)
+	for _, want := range []string{
+		"<svg", "IP质量体检报告：203.0.113.1", "脚本版本：v2026-09-16", "AS210634", "YSTRONTEK NETWORKS",
+		"[HK]香港", "广播IP", "机房", "商业", "低风险", "高风险", "解锁", "仅APP", "DNS",
+		"Gmail", "已标记 ", "黑名单 ", "风险等级：", "有效 ",
 	} {
-		t.Run(test.name, func(t *testing.T) {
-			client := newIPQualityArchiveClient()
-			client.Transport = ipQualityRoundTripFunc(func(r *http.Request) (*http.Response, error) {
-				if r.URL.Host != "Report.Check.Place" || r.Header.Get("Authorization") != "" || r.Header.Get("Cookie") != "" {
-					t.Fatal("incorrect download destination or leaked credentials")
+		if !strings.Contains(content, want) {
+			t.Fatalf("rendered report is missing %q", want)
+		}
+	}
+	// The panel must not carry an upstream report link any more.
+	if strings.Contains(content, "report.check.place") {
+		t.Fatal("rendered report still references the upstream report host")
+	}
+	if err := validateRenderedSVG([]byte(content)); err != nil {
+		t.Fatalf("rendered report is not a single SVG document: %v", err)
+	}
+}
+
+func TestIPQualityRenderEscapesAndRejectsBadReports(t *testing.T) {
+	hostile := `{"Head":{"IP":"203.0.113.1"},"Info":{"Organization":"<script>alert(1)</script>"},"Type":{},"Score":{},"Factor":{},"Media":{},"Mail":{}}`
+	archives, err := renderIPQualityArchives(&core.IPQualityResult{Reports: []json.RawMessage{json.RawMessage(hostile)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(archives[0].Content), "<script>") {
+		t.Fatal("provider text was not escaped")
+	}
+	for _, raw := range []string{`not json`, `{"Info":{}}`, `{"Head":{"IP":""}}`, `[]`} {
+		if _, err := renderIPQualitySVG(json.RawMessage(raw)); err == nil {
+			t.Fatalf("accepted malformed report %q", raw)
+		}
+	}
+}
+
+func TestIPQualityRenderAssignsAddressFamilies(t *testing.T) {
+	reports := []json.RawMessage{
+		json.RawMessage(`{"Head":{"IP":"203.0.113.1"},"Info":{},"Type":{},"Score":{},"Factor":{},"Media":{},"Mail":{}}`),
+		json.RawMessage(`{"Head":{"IP":"2001:db8::1"},"Info":{},"Type":{},"Score":{},"Factor":{},"Media":{},"Mail":{}}`),
+	}
+	archives, err := renderIPQualityArchives(&core.IPQualityResult{Reports: reports})
+	if err != nil || len(archives) != 2 {
+		t.Fatalf("render: %+v %v", archives, err)
+	}
+	if archives[0].Family != 4 || archives[1].Family != 6 {
+		t.Fatalf("families = %d, %d", archives[0].Family, archives[1].Family)
+	}
+}
+
+// validateRenderedSVG mirrors what a browser needs: exactly one SVG root.
+func validateRenderedSVG(content []byte) error {
+	decoder := xml.NewDecoder(strings.NewReader(string(content)))
+	depth, roots := 0, 0
+	for {
+		token, err := decoder.Token()
+		if errors.Is(err, io.EOF) && roots == 1 && depth == 0 {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		switch token := token.(type) {
+		case xml.StartElement:
+			if depth == 0 {
+				roots++
+				if roots != 1 || token.Name.Local != "svg" || token.Name.Space != "http://www.w3.org/2000/svg" {
+					return errors.New("not a single svg root")
 				}
-				return &http.Response{StatusCode: test.status, Header: http.Header{"Location": []string{"http://127.0.0.1/private"}}, Body: io.NopCloser(strings.NewReader(test.body)), Request: r}, nil
-			})
-			archive, err := downloadIPQualityArchive(context.Background(), client, "https://Report.Check.Place/IP/fixture.svg", 4)
-			if (err != nil) != test.wantError {
-				t.Fatalf("download: %v", err)
 			}
-			if err == nil && (string(archive.Content) != test.body || archive.Size != len(test.body) || len(archive.SHA256) != 64 || archive.DownloadedAt.IsZero()) {
-				t.Fatalf("incomplete archive: %+v", archive)
-			}
-		})
-	}
-	client := newIPQualityArchiveClient()
-	client.Transport = ipQualityRoundTripFunc(func(r *http.Request) (*http.Response, error) {
-		t.Fatal("requested an untrusted URL")
-		return nil, errors.New("unreachable")
-	})
-	if _, err := downloadIPQualityArchive(context.Background(), client, "http://127.0.0.1/a.svg", 4); err == nil {
-		t.Fatal("accepted unsafe URL")
-	}
-	client.Transport = ipQualityRoundTripFunc(func(r *http.Request) (*http.Response, error) { <-r.Context().Done(); return nil, r.Context().Err() })
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
-	defer cancel()
-	if _, err := downloadIPQualityArchive(ctx, client, "https://Report.Check.Place/IP/fixture.svg", 4); err == nil {
-		t.Fatal("ignored cancellation")
+			depth++
+		case xml.EndElement:
+			depth--
+		}
 	}
 }
