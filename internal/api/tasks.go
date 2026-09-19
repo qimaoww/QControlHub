@@ -61,6 +61,9 @@ func (s *Server) createTask(w http.ResponseWriter, request *http.Request) {
 	if input.Action.SystemBBR() && !s.authorizeSystemBBR(w, request, input.AgentID) {
 		return
 	}
+	if input.Action == core.ActionIPQuality && !s.authorizeIPQuality(w, request) {
+		return
+	}
 	var task core.Task
 	var err error
 	if input.PreferCached {
@@ -134,6 +137,9 @@ func (s *Server) retryTask(w http.ResponseWriter, request *http.Request) {
 		return
 	}
 	if previous.Action.SystemBBR() && !s.authorizeSystemBBR(w, request, previous.AgentID) {
+		return
+	}
+	if previous.Action == core.ActionIPQuality && !s.authorizeIPQuality(w, request) {
 		return
 	}
 	task, err := s.store.RetryTask(request.Context(), request.PathValue("id"))

@@ -10,7 +10,7 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
-func (s *Store) CompleteTask(ctx context.Context, agentID, taskID string, result core.TaskResultRequest) error {
+func (s *Store) CompleteTask(ctx context.Context, agentID, taskID string, result core.TaskResultRequest, archives ...core.IPQualityArchive) error {
 	if len(result.LeaseID) < 32 {
 		return fmt.Errorf("%w: invalid task lease", ErrConflict)
 	}
@@ -87,6 +87,23 @@ func (s *Store) CompleteTask(ctx context.Context, agentID, taskID string, result
 	storedContent := ""
 	storedOutput := truncate(result.Output, 64<<10)
 	storedError := truncate(result.Error, 8<<10)
+	if action == core.ActionIPQuality && result.Success {
+		report, validationErr := core.NormalizeIPQualityResult(result.IPQuality)
+		if validationErr == nil {
+			validationErr = saveIPQualityResultTx(ctx, tx, taskID, report, archives)
+			if validationErr != nil && !errors.Is(validationErr, ErrInvalid) {
+				return validationErr
+			}
+		}
+		if validationErr != nil {
+			status = core.TaskFailed
+			storedOutput = ""
+			storedError = "Agent returned an invalid IPQuality report: " + validationErr.Error()
+		} else {
+			storedOutput = "IPQuality report saved"
+			storedError = ""
+		}
+	}
 	if (action == core.ActionReadConfig || action == core.ActionReadManagedConfig) && result.Success {
 		content := result.Output
 		if !utf8.ValidString(content) {

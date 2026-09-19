@@ -67,12 +67,13 @@ Preserve these shared lifetimes when changing a controller:
 
 ## Remaining route ownership
 
-All twelve route facades retain their public installer/helper exports. The
-remaining ten routes have the following focused owners:
+All thirteen route facades retain their public installer/helper exports. The
+remaining eleven routes have the following focused owners:
 
 | Route | Owners |
 | --- | --- |
 | Dashboard | `dashboard-model`, `dashboard-view`, `dashboard-bindings`; panel metrics keep their own lifecycle |
+| IP quality | `ip-quality-controller`, `ip-quality-model`, `ip-quality-view`, `ip-quality-report-view`, `ip-quality-archive-view`, `ip-quality-bindings` |
 | Settings | `settings-view`, `settings-bindings`; the route loads account-scoped settings |
 | Access control | `access-control-controller`, `access-control-view`, `access-control-bindings`, `access-control-dialog` |
 | System TCP/BBR | `system-bbr-model`, `system-bbr-view`, `system-bbr-editor`, `system-bbr-presets` |
@@ -91,6 +92,11 @@ before binding the new cards.
 
 Preserve these lifecycle boundaries:
 
+- IP quality keeps its report snapshot, date/request serial, mutation guard and
+  poller inside one controller. Only same-account, same-navigation, latest-date
+  responses render. Failed reads never introduce demo data; a retained same-date
+  snapshot is explicitly stale and cannot authorize writes. Reconciliation
+  preserves expanded reports without retaining another date's records.
 - User loading, allocation editing, draft capture, and quota views share one
   lifecycle record. Read and view serials remain monotonic; allocation saves
   keep their original account, draft, and connected-element guards.
@@ -126,7 +132,7 @@ New frontend functionality should follow these rules:
   module initialization idempotent where a route can be revisited.
 
 `make module-policy-test` checks named exports, existing import targets,
-one-way composition dependencies for all twelve route facades, an acyclic module
+one-way composition dependencies for all thirteen route facades, an acyclic module
 graph, reachability of every production module from the application, and
 reachability of every extracted smoke/browser test module from its runner.
 It is also part of `make check`, while `make frontend-check` runs behavior smoke tests.
@@ -145,6 +151,8 @@ fixtures cross suite boundaries; temporary DOM globals retain their original
 setup and restore order. Deployment recovery phases explicitly receive one
 fixture and restore it in `finally`. Public-address checks separate models,
 DOM/CSS contracts, overview rendering, and live metric updates.
+The IP quality controller smoke runs through an awaited import after these
+suites, so its temporary DOM globals cannot overlap their asynchronous checks.
 
 Go source-level frontend contracts live in focused `*_contract_test.go` files.
 `feature_sources_test.go` names each feature's source owners explicitly: do not
@@ -186,9 +194,11 @@ their cohesive fixtures.
 
 Importing a scenario must not install its fixture. Fixture installation must
 finish before importing `app.js`, and each Agent scenario receives its page-local
-fixture explicitly. Preserve scenario order and all 38 desktop, mobile,
+fixture explicitly. Preserve scenario order and all registered desktop, mobile,
 permission, stale-response, and navigation modes when moving assertions.
 
 `browser/agent-actions.mjs` runs overview, enrollment, batch, detail, and rename
 phases in that order with the same page-local fixture. Each phase owns its
 assertions, not a second fixture installation or application import.
+`browser/ip-quality.mjs` owns desktop, real touch-mobile, and read-only report
+scenarios, including third-party text escaping and the production CSP.

@@ -179,6 +179,7 @@ func (s *Store) PurgeUser(ctx context.Context, id string) (PurgedUser, error) {
 	// Personal, account-scoped data leaves with the account.
 	for _, statement := range []string{
 		`DELETE FROM user_panel_settings WHERE owner_id=$1`,
+		`DELETE FROM ip_quality_schedules WHERE owner_id=$1`,
 		`DELETE FROM user_substore_settings WHERE owner_id=$1`,
 		`DELETE FROM substore_sync_targets WHERE owner_id=$1`,
 	} {

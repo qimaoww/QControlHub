@@ -150,6 +150,11 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 	if request.Action.SystemBBR() && !containsFeature(features, core.AgentFeatureSystemBBR) {
 		return core.Task{}, fmt.Errorf("%w: upgrade this Agent before managing system BBR", ErrConflict)
 	}
+	if request.Action == core.ActionIPQuality {
+		if err := s.checkIPQualityTaskTx(ctx, tx, request.AgentID, features); err != nil {
+			return core.Task{}, err
+		}
+	}
 	if request.Action.SystemBBR() {
 		// TCP settings affect the whole host. Keep the shared exclusion even
 		// though task reuse and visibility are scoped to their submitter.

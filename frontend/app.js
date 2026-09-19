@@ -30,6 +30,7 @@ const actions = [
   "enable-bbr",
   "disable-bbr",
   "configure-tcp",
+  "ip-quality",
 ];
 const state = {
   session: null,
@@ -77,6 +78,7 @@ function renderLogin(message = "") {
   clearTimeout(state.trafficPollTimer);
   clearTimeout(state.coreLogPollTimer);
   clearTimeout(state.agentPollTimer);
+  clearTimeout(state.ipQualityPollTimer);
   loginPage(message);
 }
 
@@ -87,6 +89,10 @@ const routeModules = createRouteModuleLoader({
       api, state, can, esc, engineName, heartbeat, statusTone, ago, short,
       actionName, bytes, rate, shell,
     });
+  },
+  async "ip-quality"() {
+    const { installIPQuality } = await import("./modules/ip-quality.js");
+    return installIPQuality({ api, state, shell, can, esc, date, notify, confirmAction });
   },
   async agents() {
     const { installAgents } = await import("./modules/agents.js");
@@ -194,6 +200,7 @@ async function renderOnce() {
   clearTimeout(state.coreLogPollTimer);
   clearTimeout(state.bbrPollTimer);
   clearTimeout(state.agentPollTimer);
+  clearTimeout(state.ipQualityPollTimer);
   const presetSelection = readPresetRoute(location.hash);
   let hash = presetSelection ? "live-config" : location.hash.slice(1);
   if (presetSelection) {

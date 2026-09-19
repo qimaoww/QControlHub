@@ -18,6 +18,8 @@ function contextMarkup(title) {
     const selected = sections.some(([id]) => id === state.anchor) ? state.anchor : "summary";
     return `<nav class="context-menu" aria-label="总览目录">${sections.map(([id, label], index) => `<a${selected === id ? ' class="active" aria-current="location"' : ""} href="#${id}"><span>${String(index + 1).padStart(2, "0")}</span>${label}</a>`).join("")}</nav>`;
   }
+  if (state.route === "ip-quality")
+    return `<nav class="context-menu" aria-label="IP 质量检测目录"><a class="active" href="#ip-quality"><span>01</span>按日期查看</a></nav><p class="ip-quality-context-note">数据来源：节点执行的 IPQuality 检测任务。每日检测需手动启用。</p>`;
   if (state.route === "agents") {
     const items = orderNodesBySavedOrder(state.data.agents || []);
     return `<div class="context-section-label"><span>内核配置预设</span><b>${items.length}</b></div><nav class="context-list" aria-label="节点内核预设">${items.map((agent) => `<a class="${state.data.selectedAgent === agent.id ? "active" : ""}" href="#node-${esc(agent.id)}" data-context-agent="${esc(agent.id)}"><span class="context-engine">${(agent.capabilities || []).length}</span><span><strong>${esc(agent.name)}</strong><small>${esc(agent.os)} / ${esc(agent.arch)}</small></span><em>${agent.status === "online" ? "在线" : "离线"}</em></a>`).join("") || "<p>还没有节点</p>"}</nav>`;

@@ -9,8 +9,10 @@ import * as tasks from "./modules/tasks.js";
 import * as logs from "./modules/core-logs.js";
 import * as traffic from "./modules/traffic.js";
 import * as users from "./modules/users.js";
+import * as quality from "./modules/ip-quality.js";
 
 const boundaries = [
+  [quality, "installIPQuality"],
   [dashboard, "installDashboard", "dashboard-model", ["dashboardTrafficMonthDays", "aggregateDashboardTrafficDays"]],
   [settings, "installSettings"],
   [access, "installAccessControl"],

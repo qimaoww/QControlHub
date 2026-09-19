@@ -64,6 +64,7 @@ type Server struct {
 	webhookSigningConfigured   bool
 	notifier                   *notify.Client
 	subStoreHTTP               *http.Client
+	ipQualityArchiveHTTP       *http.Client
 	roleTokens                 map[[32]byte]tokenPrincipal
 	sessionsMu                 sync.Mutex
 	sessions                   map[string]apiSession

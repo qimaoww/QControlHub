@@ -69,6 +69,7 @@ func loadCredentials(path string) (credentials, error) {
 }
 
 func saveCredentials(path string, value credentials) error {
+	value = credentialsWithoutIPQualityReports(value)
 	directory := filepath.Dir(path)
 	if err := os.MkdirAll(directory, 0o700); err != nil {
 		return err
