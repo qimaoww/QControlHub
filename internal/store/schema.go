@@ -3,7 +3,7 @@ package store
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 62
+const currentSchemaVersion = 63
 
 const schemaSQL = `
 CREATE TABLE IF NOT EXISTS agents (
@@ -221,6 +221,15 @@ ALTER TABLE tasks ADD COLUMN IF NOT EXISTS tcp_settings jsonb NOT NULL DEFAULT '
 CREATE TABLE IF NOT EXISTS ip_quality_reports (
     task_id text PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
     result jsonb NOT NULL CHECK (jsonb_typeof(result)='object' AND octet_length(result::text)<=262144)
+);
+CREATE TABLE IF NOT EXISTS ip_quality_archives (
+    task_id text NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    family integer NOT NULL CHECK (family IN (4,6)),
+    source_url text NOT NULL,
+    sha256 text NOT NULL CHECK (length(sha256)=64),
+    downloaded_at timestamptz NOT NULL,
+    content bytea NOT NULL CHECK (octet_length(content)>0 AND octet_length(content)<=2097152),
+    PRIMARY KEY(task_id,family)
 );
 CREATE INDEX IF NOT EXISTS tasks_ip_quality_history_idx
     ON tasks(created_at DESC,agent_id,id DESC) WHERE action='ip-quality';

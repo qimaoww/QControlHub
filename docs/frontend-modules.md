@@ -73,7 +73,7 @@ remaining eleven routes have the following focused owners:
 | Route | Owners |
 | --- | --- |
 | Dashboard | `dashboard-model`, `dashboard-view`, `dashboard-bindings`; panel metrics keep their own lifecycle |
-| IP quality | `ip-quality-controller`, `ip-quality-model`, `ip-quality-view`, `ip-quality-report-view`, `ip-quality-bindings` |
+| IP quality | `ip-quality-controller`, `ip-quality-model`, `ip-quality-view`, `ip-quality-report-view`, `ip-quality-archive-view`, `ip-quality-bindings` |
 | Settings | `settings-view`, `settings-bindings`; the route loads account-scoped settings |
 | Access control | `access-control-controller`, `access-control-view`, `access-control-bindings`, `access-control-dialog` |
 | System TCP/BBR | `system-bbr-model`, `system-bbr-view`, `system-bbr-editor`, `system-bbr-presets` |

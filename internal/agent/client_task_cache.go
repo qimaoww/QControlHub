@@ -6,9 +6,8 @@ import (
 	"time"
 )
 
-// Called with credentialsMu held. Structured reports must survive restart
-// without the ordinary 4 KiB output truncation, but the credentials file still
-// has to fit its existing 512 KiB read limit. Always retain the current result.
+// Called with credentialsMu held. Bound the in-memory retransmission cache
+// as well as the ordinary credential state. Always retain the current result.
 func (c *Client) boundCompletedTaskCache(currentID string) error {
 	for {
 		content, err := json.Marshal(c.creds)
@@ -30,4 +29,17 @@ func (c *Client) boundCompletedTaskCache(currentID string) error {
 		}
 		delete(c.creds.CompletedTasks, oldestID)
 	}
+}
+
+// Reports are persisted only in the panel database. Keep the live cache for
+// reconnect retransmission, but never serialize its report entries to disk.
+func credentialsWithoutIPQualityReports(value credentials) credentials {
+	copy := make(map[string]completedTask, len(value.CompletedTasks))
+	for id, item := range value.CompletedTasks {
+		if item.IPQuality == nil {
+			copy[id] = item
+		}
+	}
+	value.CompletedTasks = copy
+	return value
 }

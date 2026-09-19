@@ -1437,12 +1437,12 @@ dialog.config-access-dialog::backdrop{background:rgba(17,20,36,.34);backdrop-fil
 .ip-quality-node-card dl>div{min-width:0}
 .ip-quality-node-card dt{color:var(--muted);font-size:calc(9px * var(--ui-font-scale));overflow-wrap:anywhere}
 .ip-quality-node-card dd{margin:3px 0 0;font-size:calc(11px * var(--ui-font-scale));font-weight:650;overflow-wrap:anywhere}
-.ip-quality-node-card .ip-quality-addresses{grid-template-columns:1fr}
+.ip-quality-node-card .ip-quality-addresses{grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--surface-2)}
 .ip-quality-alert,.ip-quality-error{margin:0;overflow-wrap:anywhere}
 .ip-quality-no-report,.ip-quality-source{margin:0;color:var(--muted);font-size:calc(11px * var(--ui-font-scale));line-height:1.7}
 .ip-quality-source a{color:var(--accent)}
-.ip-quality-actions{display:flex;flex-wrap:wrap;gap:8px;padding-top:12px;border-top:1px solid var(--line)}
-.ip-quality-actions small{flex-basis:100%;color:var(--muted);font-size:calc(9px * var(--ui-font-scale));line-height:1.6}
+.ip-quality-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.ip-quality-actions small{margin-left:auto;color:var(--muted);font-size:calc(9px * var(--ui-font-scale));line-height:1.6}
 .ip-quality-actions [aria-pressed=true]{color:var(--accent);border-color:var(--accent)}
 .ip-quality-workspace .empty{grid-column:1/-1;border:1px dashed var(--line);border-radius:12px;background:var(--surface)}
 .ip-quality-details{min-width:0;border-top:1px solid var(--line);padding-top:10px}
@@ -1451,7 +1451,7 @@ dialog.config-access-dialog::backdrop{background:rgba(17,20,36,.34);backdrop-fil
 .ip-quality-details[open]>summary span{transform:rotate(180deg)}
 .ip-quality-report{display:grid;gap:9px;min-width:0;margin-top:14px;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--surface-2)}
 .ip-quality-report h4{margin:0;font-size:calc(12px * var(--ui-font-scale));overflow-wrap:anywhere}
-.ip-quality-report h5{margin:7px 0 0;font-size:calc(11px * var(--ui-font-scale))}
+.ip-quality-report h5{margin:0 0 12px;font-size:calc(11px * var(--ui-font-scale))}
 .ip-quality-report .ip-quality-report-fields{padding-top:7px;gap:8px}
 .ip-quality-factor summary,.ip-quality-raw summary{font-size:calc(10px * var(--ui-font-scale));color:var(--muted);cursor:pointer;overflow-wrap:anywhere}
 .ip-quality-media{display:grid;gap:7px}
@@ -1464,4 +1464,54 @@ dialog.config-access-dialog::backdrop{background:rgba(17,20,36,.34);backdrop-fil
   .ip-quality-summary{grid-template-columns:1fr 1fr}
   .ip-quality-toolbar{align-items:flex-start;flex-direction:column}
   .ip-quality-toolbar .button{width:100%}
+}
+
+.ip-quality-archive{display:grid;gap:10px;min-width:0;margin:0;padding-top:12px;border-top:1px solid var(--line)}
+.ip-quality-archive figcaption{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:calc(12px * var(--ui-font-scale))}
+.ip-quality-archive img{display:block;width:100%;height:auto;max-width:100%;border-radius:8px;background:var(--surface-2)}
+.ip-quality-archive small,.ip-quality-archive details{color:var(--muted);font-size:calc(10px * var(--ui-font-scale));overflow-wrap:anywhere}
+.ip-quality-archive summary{cursor:pointer}
+
+.ip-quality-node-card:has(.ip-quality-archives){grid-column:1/-1}
+.ip-quality-archives{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,360px),1fr));gap:16px;min-width:0}
+.ip-quality-archive>a{display:grid;place-items:center;min-width:0;padding:16px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2)}
+.ip-quality-archive img{max-width:760px}
+@container (max-width:700px){.ip-quality-archives{grid-template-columns:1fr}}
+
+/* Keep long reports readable without hiding their independent source values. */
+.ip-quality-details>summary{min-height:40px;font-size:calc(12px * var(--ui-font-scale))}
+.ip-quality-report{gap:16px;padding:16px}
+.ip-quality-report>h4{font-size:calc(14px * var(--ui-font-scale))}
+.ip-quality-report>.ip-quality-report-fields{grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.ip-quality-report-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;align-items:start;min-width:0}
+.ip-quality-report-group{min-width:0;padding:16px;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+.ip-quality-report-group p{color:var(--muted);font-size:calc(11px * var(--ui-font-scale));line-height:1.7}
+.ip-quality-node-card .ip-quality-report-group dl{border:0;padding-top:0;gap:14px}
+.ip-quality-node-card .ip-quality-report-group dt{font-size:calc(10px * var(--ui-font-scale))}
+.ip-quality-node-card .ip-quality-report-group dd{font-size:calc(12px * var(--ui-font-scale));line-height:1.5}
+.ip-quality-factors{display:grid;gap:6px}
+.ip-quality-factor{padding:0 10px;border:1px solid var(--line);border-radius:6px;background:var(--surface-2)}
+.ip-quality-factor summary{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:42px;padding:10px 0;font-size:calc(11px * var(--ui-font-scale))}
+.ip-quality-factor summary::after{content:"＋";color:var(--accent)}
+.ip-quality-factor[open]>summary::after{content:"−"}
+.ip-quality-node-card .ip-quality-factor dl{padding-bottom:12px}
+.ip-quality-media{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.ip-quality-media>div{padding:10px;background:var(--surface-2);border-radius:6px;align-content:start}
+.ip-quality-media>div>span{text-align:right}
+.ip-quality-raw{padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--surface)}
+.ip-quality-raw summary,.ip-quality-archive summary{min-height:28px;line-height:1.7;padding:4px 0}
+.ip-quality-workspace :is(a,button,input,summary):focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+@container (max-width:700px){
+  .ip-quality-report-grid{grid-template-columns:1fr}
+  .ip-quality-report>.ip-quality-report-fields{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .ip-quality-actions>.button{flex:1;min-height:42px}
+  .ip-quality-actions small{margin-left:0;flex-basis:100%}
+  .ip-quality-archive>a{padding:0;border:0}
+  .ip-quality-report{padding:10px}
+  .ip-quality-report-group{padding:12px}
+  .ip-quality-date input,.ip-quality-date-picker>.button{height:42px}
+}
+@media(max-width:700px){
+  .page-ip-quality .context-sidebar{display:none}
+  .ip-quality-workspace{padding-bottom:calc(80px + env(safe-area-inset-bottom))}
 }

@@ -55,6 +55,7 @@
 | `GET` / `PUT` | `/api/v1/agents/{id}/sharing` | 所有者按准确用户名读取 / 保存共享端口及累计额度，携带 revision（agents.manage） |
 | `GET` | `/api/v1/agents` | 列出未撤销 Agent；每项内联 `region_code`（手动设置优先，否则为自动识别结果），列表视图无需逐节点查询地区 |
 | `GET` | `/api/v1/ip-quality?date=YYYY-MM-DD&timezone=Asia/Shanghai` | 指定本地提交日每节点最新一次 IP 检测，以及当前计划（agents.read） |
+| `GET` | `/api/v1/ip-quality/{task_id}/archives/{4或6}` | 从数据库读取 SVG 图片，`?download=1` 下载；与报告历史相同的 agents.read、所有权及可见性校验 |
 | `POST` | `/api/v1/ip-quality` | 为 `agent_id` 提交真实 IPQuality 检测（agents.manage + tasks.execute） |
 | `PUT` | `/api/v1/ip-quality/schedules/{id}` | 按 `{"enabled":true}` / `false` 开关节点每日检测（agents.manage + tasks.execute） |
 | `GET` | `/api/v1/system-tcp/parameters` | BBR / TCP 调优字段与取值范围（agents.read） |
@@ -160,6 +161,10 @@
 `records[]` 包含 `task_id`、`agent_id`、`status`、`created_at`、可选的
 `started_at` / `finished_at` / `error`；成功报告保存在
 `result.reports[]`，每个元素是保留上游字段及数据类型的 IPv4 或 IPv6 JSON 对象。
+`result.report_urls[]` 按 JSON 对象顺序记录来源链接；`archives[]` 返回 `family`（4/6）、
+`source_url`、`sha256`、`size` 和 `downloaded_at`，不包含 SVG 字节。
+面板从 `/ip-quality/{task_id}/archives/{family}` 读取已存储的 SVG，默认用于图片内嵌，
+`?download=1` 返回附件。无权限或不存在返回 `404`，未登录返回 `401`。
 失败或仍在执行的任务不带成功报告。普通 `/tasks` 响应不携带这些报告字节。
 `schedules[]` 包含 `agent_id`、`enabled`、`next_run_at`，表示当前计划，
 不随历史日期回溯。计划状态按节点管理权可见，不按计划设置者过滤；
@@ -179,7 +184,7 @@
 重复启用不重置下一次时间；离线不补跑多个错过的日期。
 关闭不会取消已提交任务。调度器每次重检持久账号权限/角色及节点管理权，
 不使用旧角色快照；旧版低权限兼容令牌不能设置计划。写操作沿用 CSRF 和审计。
-依赖、数据解释、上游许可、隐私及 schema 62 回滚要求见
+依赖、数据解释、上游许可、隐私及 schema 63 回滚要求见
 [IP 质量检测](ip-quality.md)。
 
 ### 面板主机资源
@@ -505,13 +510,16 @@ WSS 握手必须协商子协议 `qcontrolhub.agent.v1`。服务端先发送只�
 `engine=""` 的任务；旧 Agent 不会领取或恢复该动作。检测最多 10 分钟，
 重试租约至少 12 分钟，连接心跳不因检测停止。
 Agent 在 `result.result.ip_quality.reports` 发送一至两个上游 JSON 对象，
+并在同层 `report_urls` 数组发送逐一对应的固定域名 SVG 链接；不发送 SVG 字节。
 结构化结果总上限 128 KiB；各对象必须有完整公网 IP 的 `Head` 及对象类型的
 `Info`、`Type`、`Score`、`Factor`、`Media`、`Mail`，地址族不能重复。
-控制面再次验证后与任务状态原子保存，才发送 `result_ack`；
+控制面再次验证、下载链接指向的 SVG 后，将原文和摘要与任务状态原子保存，才发送 `result_ack`；
 仅设置 `success=true` 而没有有效报告会记为失败。JSONB 无法表示的 Unicode、
 数字或超出存储大小限制的报告同样记为失败并确认，不让坏数据反复阻断 WSS；
-数据库故障等非数据错误仍允许重传。Agent 的持久缓存支持断线/重启
-后复用报告并使用当前 lease ID 重传，不把报告塞入会截断的普通 `output`。
+下载失败、缺少链接或无效 SVG 同样标记失败并确认，数据库故障等非数据错误仍允许重传。
+Agent 仅以内存缓存支持断线后复用报告并使用当前 lease ID 重传，不把报告写入凭据文件
+或会截断的普通 `output`。Agent 重启后尚未确认的任务可能重新执行。
+SVG 归档每份上限 2 MiB，仅存于面板数据库，通过鉴权接口读取；不在历史轮询中传输。
 
 ## Webhook 事件
 

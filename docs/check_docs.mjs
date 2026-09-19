@@ -22,7 +22,7 @@ const required = {
   "docs/api.md": ["core_source", "vernesong/mihomo", "mihomo-development-source-v1", "受保护的 AEAD 可恢复副本", "删除该节点的全部添加凭证"],
   "docs/production.md": ["vernesong/mihomo", "mihomo-development-source-v1", "checksums.txt", "受保护的 AEAD 可恢复副本"],
   "docs/security.md": ["受保护的 AEAD 可恢复副本", "可重复查看有效命令"],
-  "docs/ip-quality.md": ["ip-quality-v1", "AGPL-3.0", "SHA-256", "128 KiB", "schema 62", "第三方网络请求"],
+  "docs/ip-quality.md": ["ip-quality-v1", "AGPL-3.0", "SHA-256", "128 KiB", "schema 63", "第三方网络请求", "SVG", "面板数据库"],
 };
 
 let failures = 0;

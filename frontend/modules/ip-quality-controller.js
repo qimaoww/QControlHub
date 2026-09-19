@@ -75,7 +75,7 @@ export function createIPQualityController(ctx, view) {
     try {
       const message = scheduling && !enabled
         ? `关闭 ${agent.name} 的每日 IPQuality 检测？已提交的任务不会因此中止。`
-        : `${scheduling ? "启用每日检测" : "检测"} ${agent.name} 的出口 IP？Agent 将运行固定版本的 IPQuality，联系第三方 IP 数据库、媒体和邮件服务，通常需要数分钟；不上传在线报告，也不自动安装依赖。`;
+        : `${scheduling ? "启用每日检测" : "检测"} ${agent.name} 的出口 IP？Agent 将运行固定版本的 IPQuality，联系第三方 IP 数据库、媒体和邮件服务，通常需要数分钟；会向上游上传含完整 IP 的检测报告以生成链接，再由面板下载并存入数据库；不会自动安装依赖。`;
       if (!(await confirmAction(message, scheduling ? "每日 IP 检测" : "开始 IP 检测")) ||
           !current(data, epoch) || selectedDate !== data.ipQualityDate) return false;
       await api(scheduling ? `/ip-quality/schedules/${encodeURIComponent(agentID)}` : "/ip-quality", {

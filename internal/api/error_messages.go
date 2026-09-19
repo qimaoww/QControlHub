@@ -10,6 +10,7 @@ import (
 // Translate at the HTTP boundary: internal errors remain stable for errors.Is,
 // agent diagnostics and logs. Never expose an unknown internal error verbatim.
 var errorMessages = map[string]string{
+	"family must be 4 or 6":                                                                                   "报告地址族必须为 IPv4 或 IPv6。",
 	"IPQuality requires agents.manage and tasks.execute":                                                      "IP 质量检测需要节点管理和任务执行权限。",
 	"date must use YYYY-MM-DD":                                                                                "检测日期须使用 YYYY-MM-DD 格式。",
 	"date must be a valid YYYY-MM-DD":                                                                         "检测日期无效，请选择有效的年月日。",

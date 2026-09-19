@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createIPQualityController } from "./modules/ip-quality-controller.js";
 import { createIPQualityView } from "./modules/ip-quality-view.js";
+import { createIPQualityArchiveView } from "./modules/ip-quality-archive-view.js";
 import { createIPQualityReportView } from "./modules/ip-quality-report-view.js";
 import { ipQualityToday, validIPQualityDate, nextIPQualityDay, ipQualityValue, ipQualitySummary } from "./modules/ip-quality-model.js";
 
@@ -167,3 +168,11 @@ try {
   else globalThis.document = originalDocument;
 }
 console.log("IP quality model, rendering, request races and mutation guards passed");
+
+const archiveMarkup = createIPQualityArchiveView({ esc, date: String })({ task_id: "task-1", archives: [
+  { family: 4, downloaded_at: "2026-09-19T00:00:00Z", sha256: "abc", source_url: "https://Report.Check.Place/IP/fixture.svg" },
+] });
+assert.ok(archiveMarkup.includes('<img src="/api/v1/ip-quality/task-1/archives/4"'));
+assert.ok(archiveMarkup.includes('?download=1'));
+assert.ok(!archiveMarkup.includes("Report.Check.Place"), "browser must never contact the upstream report host");
+assert.ok(!archiveMarkup.includes("iframe") && !archiveMarkup.includes("<svg"), "SVG must remain an inert image");

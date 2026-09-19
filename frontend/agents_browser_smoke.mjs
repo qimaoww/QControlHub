@@ -61,6 +61,13 @@ const server = createServer(async (request, response) => {
       response.end('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 48"><rect width="64" height="48" fill="#d80027"/></svg>');
       return;
     }
+    if (/^\/api\/v1\/ip-quality\/[a-z-]+\/archives\/[46]$/.test(path)) {
+      response.writeHead(200, { "Content-Type": "image/svg+xml", "Cache-Control": "no-store", "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox" });
+      let svg = await readFile(join(root, "testdata/ip-quality-report.svg"), "utf8");
+      if (path.endsWith("/6")) svg = svg.replace("203.0.113.10", "2001:db8::10").replace("黑名单数据库：439", "IPv6 黑名单：未检测");
+      response.end(svg);
+      return;
+    }
     let file;
     if (path === "/assets/app.css") file = join(root, "app.css");
     else if (path === "/assets/app.js") file = join(root, "app.js");

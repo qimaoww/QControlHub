@@ -10,7 +10,7 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
-func (s *Store) CompleteTask(ctx context.Context, agentID, taskID string, result core.TaskResultRequest) error {
+func (s *Store) CompleteTask(ctx context.Context, agentID, taskID string, result core.TaskResultRequest, archives ...core.IPQualityArchive) error {
 	if len(result.LeaseID) < 32 {
 		return fmt.Errorf("%w: invalid task lease", ErrConflict)
 	}
@@ -90,7 +90,7 @@ func (s *Store) CompleteTask(ctx context.Context, agentID, taskID string, result
 	if action == core.ActionIPQuality && result.Success {
 		report, validationErr := core.NormalizeIPQualityResult(result.IPQuality)
 		if validationErr == nil {
-			validationErr = saveIPQualityResultTx(ctx, tx, taskID, report)
+			validationErr = saveIPQualityResultTx(ctx, tx, taskID, report, archives)
 			if validationErr != nil && !errors.Is(validationErr, ErrInvalid) {
 				return validationErr
 			}

@@ -22,18 +22,20 @@ const (
 // IPQuality retains the upstream database-specific values. The databases do
 // not share a scoring scale; missing results must not become zero-risk scores.
 type IPQualityResult struct {
-	Reports []json.RawMessage `json:"reports"`
+	Reports    []json.RawMessage `json:"reports"`
+	ReportURLs []string          `json:"report_urls,omitempty"`
 }
 
 type IPQualityRecord struct {
-	TaskID     string           `json:"task_id"`
-	AgentID    string           `json:"agent_id"`
-	Status     TaskStatus       `json:"status"`
-	Error      string           `json:"error,omitempty"`
-	CreatedAt  time.Time        `json:"created_at"`
-	StartedAt  *time.Time       `json:"started_at,omitempty"`
-	FinishedAt *time.Time       `json:"finished_at,omitempty"`
-	Result     *IPQualityResult `json:"result,omitempty"`
+	TaskID     string                 `json:"task_id"`
+	AgentID    string                 `json:"agent_id"`
+	Status     TaskStatus             `json:"status"`
+	Error      string                 `json:"error,omitempty"`
+	CreatedAt  time.Time              `json:"created_at"`
+	StartedAt  *time.Time             `json:"started_at,omitempty"`
+	FinishedAt *time.Time             `json:"finished_at,omitempty"`
+	Result     *IPQualityResult       `json:"result,omitempty"`
+	Archives   []IPQualityArchiveInfo `json:"archives,omitempty"`
 }
 
 type IPQualitySchedule struct {
@@ -118,6 +120,19 @@ func NormalizeIPQualityResult(input *IPQualityResult) (IPQualityResult, error) {
 			return IPQualityResult{}, err
 		}
 		result.Reports = append(result.Reports, json.RawMessage(compact.Bytes()))
+	}
+	if len(input.ReportURLs) != 0 {
+		if len(input.ReportURLs) != len(result.Reports) {
+			return IPQualityResult{}, errors.New("IPQuality report links do not match address families")
+		}
+		seen := make(map[string]bool)
+		for _, link := range input.ReportURLs {
+			if !ValidIPQualityReportURL(link) || seen[link] {
+				return IPQualityResult{}, errors.New("IPQuality returned an invalid or duplicate report link")
+			}
+			seen[link] = true
+			result.ReportURLs = append(result.ReportURLs, link)
+		}
 	}
 	encoded, err := json.Marshal(result)
 	if err != nil || len(encoded) > MaxIPQualityResultBytes {

@@ -52,6 +52,10 @@ func runIPQuality(ctx context.Context) (core.IPQualityResult, error) {
 	// its shell workers. Pin these data files to the reviewed revision as well.
 	script = bytes.ReplaceAll(script, []byte("${rawgithub}main/"),
 		[]byte("https://raw.githubusercontent.com/xykt/IPQuality/"+ipQualityRevision+"/"))
+	script, err = prepareIPQualityArchiveScript(script)
+	if err != nil {
+		return core.IPQualityResult{}, err
+	}
 	return executeIPQualityScript(ctx, bash, script)
 }
 
@@ -141,11 +145,11 @@ func executeIPQualityScript(ctx context.Context, bash string, script []byte) (co
 	// process group (curl, DNSBL workers and progress-bar subprocesses).
 	command := exec.CommandContext(ctx, bash, "--noprofile", "--norc", "-c",
 		`ulimit -f 256 || exit; exec "$@"`, "ip-quality",
-		bash, "--noprofile", "--norc", scriptPath, "-n", "-p", "-f", "-E", "-j",
+		bash, "--noprofile", "--norc", scriptPath, "-n", "-f", "-E", "-j",
 		"-o", filepath.Join(directory, "report.json"))
 	command.Dir = directory
 	command.Env = append(commandEnvironment(""), "TERM=dumb", "CURL_HOME="+directory,
-		"XDG_CONFIG_HOME="+directory, "TMPDIR="+directory)
+		"XDG_CONFIG_HOME="+directory, "TMPDIR="+directory, "QCH_IPQUALITY_LINKS="+filepath.Join(directory, "links.tsv"))
 	configureCommand(command)
 	// Progress output can be verbose. Truncate diagnostics without interrupting
 	// a healthy run; only the bounded JSON report is accepted as result data.
@@ -166,7 +170,7 @@ func executeIPQualityScript(ctx context.Context, bash string, script []byte) (co
 	}
 	// Upstream's final [[ IPv6 available ]] returns 1 on IPv4-only hosts even
 	// after a valid IPv4 report. A validated report, not that status, is decisive.
-	return result, nil
+	return readIPQualityReportLinks(directory, result)
 }
 
 func readIPQualityReport(directory string) (core.IPQualityResult, error) {

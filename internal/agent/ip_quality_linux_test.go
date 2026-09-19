@@ -98,17 +98,17 @@ func TestIPQualityScriptExecutionContract(t *testing.T) {
 		name, script string
 		wantError    bool
 	}{
-		{"ipv4-final-status-one", `test "$*" = "-n -p -f -E -j -o $7" || exit 2
+		{"ipv4-final-status-one", `test "$*" = "-n -f -E -j -o $6" || exit 2
 test -z "$QCH_IPQUALITY_SECRET" || exit 3
 test -z "$HTTP_PROXY" || exit 4
 test -z "$BASH_ENV" || exit 5
-printf '%s\n' '` + report + `' > "$7"
+printf '%s\n' '` + report + `' > "$6"
 exit 1`, false},
-		{"dual-stack", `printf '%s\n' '` + report + `' '` + agentQualityReport("2001:db8::1", "fixture") + `' > "$7"`, false},
+		{"dual-stack", `printf '%s\n' '` + report + `' '` + agentQualityReport("2001:db8::1", "fixture") + `' > "$6"`, false},
 		{"missing-report", "exit 0", true},
-		{"malformed-report", `printf 'not JSON' > "$7"`, true},
-		{"partial-report", `printf '%s\n' '` + report + `' '{' > "$7"`, true},
-		{"symlink-report", `ln -s /etc/passwd "$7"`, true},
+		{"malformed-report", `printf 'not JSON' > "$6"`, true},
+		{"partial-report", `printf '%s\n' '` + report + `' '{' > "$6"`, true},
+		{"symlink-report", `ln -s /etc/passwd "$6"`, true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Setenv("QCH_IPQUALITY_SECRET", "must-not-leak")
@@ -116,7 +116,15 @@ exit 1`, false},
 			t.Setenv("BASH_ENV", "/nonexistent")
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			result, err := executeIPQualityScript(ctx, bash, []byte(test.script))
+			script := test.script
+			if !test.wantError {
+				links := "203.0.113.1\thttps://Report.Check.Place/IP/fixture4.svg\n"
+				if test.name == "dual-stack" {
+					links += "2001:db8::1\thttps://Report.Check.Place/IP/fixture6.svg\n"
+				}
+				script = "printf '%s' '" + links + "' > \"$QCH_IPQUALITY_LINKS\"\n" + script
+			}
+			result, err := executeIPQualityScript(ctx, bash, []byte(script))
 			if (err != nil) != test.wantError {
 				t.Fatalf("%+v, %v", result, err)
 			}
@@ -156,7 +164,7 @@ func TestIPQualityCancellationAndBoundedReport(t *testing.T) {
 	}
 }
 
-func TestIPQualityResultSurvivesAgentRestartWithoutTruncation(t *testing.T) {
+func TestIPQualityResultStaysInMemoryAndIsNotPersisted(t *testing.T) {
 	_, key, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -198,7 +206,14 @@ func TestIPQualityResultSurvivesAgentRestartWithoutTruncation(t *testing.T) {
 	if info.Size() >= 512<<10 {
 		t.Fatal("reports exceeded the credentials read budget")
 	}
-	restarted := &Client{creds: loaded}
+	if len(loaded.CompletedTasks) != 0 {
+		t.Fatal("IPQuality reports were persisted on the Agent")
+	}
+	contents, err := os.ReadFile(statePath)
+	if err != nil || strings.Contains(string(contents), "203.0.113.1") {
+		t.Fatal("Agent state contains report data")
+	}
+	restarted := client // Live reconnects still reuse the complete in-memory result.
 	task.ID, task.LeaseID = "tsk_0000000000000011", strings.Repeat("b", 32)
 	cached, ok := restarted.cachedTaskResult(task)
 	if !ok || cached.LeaseID != task.LeaseID || cached.IPQuality == nil {

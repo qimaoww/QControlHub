@@ -33,7 +33,10 @@ func (s *Store) checkIPQualityTaskTx(ctx context.Context, tx pgx.Tx, agentID str
 	return nil
 }
 
-func saveIPQualityResultTx(ctx context.Context, tx pgx.Tx, taskID string, result core.IPQualityResult) error {
+func saveIPQualityResultTx(ctx context.Context, tx pgx.Tx, taskID string, result core.IPQualityResult, archives []core.IPQualityArchive) error {
+	if err := validateIPQualityArchives(result, archives); err != nil {
+		return err
+	}
 	content, err := json.Marshal(result)
 	if err != nil {
 		return err
@@ -57,6 +60,9 @@ func saveIPQualityResultTx(ctx context.Context, tx pgx.Tx, taskID string, result
 		}
 		return err
 	}
+	if err := saveIPQualityArchivesTx(ctx, savepoint, taskID, archives); err != nil {
+		return err
+	}
 	return savepoint.Commit(ctx)
 }
 
@@ -71,7 +77,10 @@ func (s *Store) ListIPQualityRecords(ctx context.Context, date, timezone string)
 	where := ownerClause(ctx, "t.owner_id", &args)
 	where += agentAdministrationClause(ctx, "t.agent_id", &args)
 	rows, err := s.pool.Query(ctx, `SELECT latest.id,latest.agent_id,latest.status,COALESCE(latest.error,''),
-		latest.created_at,latest.started_at,latest.finished_at,r.result FROM (
+		latest.created_at,latest.started_at,latest.finished_at,r.result,
+        COALESCE((SELECT jsonb_agg(jsonb_build_object('family',a.family,'source_url',a.source_url,
+            'sha256',a.sha256,'size',octet_length(a.content),'downloaded_at',a.downloaded_at) ORDER BY a.family)
+            FROM ip_quality_archives a WHERE a.task_id=latest.id),'[]'::jsonb) FROM (
 			SELECT DISTINCT ON (t.agent_id) t.id,t.agent_id,t.status,t.error,t.created_at,t.started_at,t.finished_at
 			FROM tasks t JOIN agents a ON a.id=t.agent_id AND a.revoked_at IS NULL
 			WHERE t.action='ip-quality' AND t.created_at>=$1 AND t.created_at<$2`+where+`
@@ -85,15 +94,18 @@ func (s *Store) ListIPQualityRecords(ctx context.Context, date, timezone string)
 	records := make([]core.IPQualityRecord, 0)
 	for rows.Next() {
 		var record core.IPQualityRecord
-		var content []byte
+		var content, archives []byte
 		if err := rows.Scan(&record.TaskID, &record.AgentID, &record.Status, &record.Error,
-			&record.CreatedAt, &record.StartedAt, &record.FinishedAt, &content); err != nil {
+			&record.CreatedAt, &record.StartedAt, &record.FinishedAt, &content, &archives); err != nil {
 			return nil, err
 		}
 		if len(content) > 0 {
 			if err := json.Unmarshal(content, &record.Result); err != nil {
 				return nil, err
 			}
+		}
+		if err := json.Unmarshal(archives, &record.Archives); err != nil {
+			return nil, err
 		}
 		records = append(records, record)
 	}

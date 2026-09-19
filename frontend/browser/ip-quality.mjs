@@ -31,6 +31,7 @@ export async function testIPQualityRuntime(mode, preview = false) {
   const completeRecord = (taskID = "quality-task") => ({
     task_id: taskID, agent_id: "quality-a", status: "succeeded",
     created_at: `${today}T06:00:00Z`, finished_at: `${today}T06:05:00Z`,
+    archives: [4, 6].map((family) => ({ family, downloaded_at: `${today}T06:05:00Z`, sha256: "a".repeat(64) })),
     result: { reports: [report("203.0.113.10"), report("2001:db8:1234:5678:90ab:cdef:1234:5678")] },
   });
   const fixture = {
@@ -80,6 +81,10 @@ export async function testIPQualityRuntime(mode, preview = false) {
   assert.ok(document.querySelector('.dock-nav a[href="#ip-quality"]'), "IP quality navigation is missing");
   assert.ok(document.querySelector('[data-ip-quality-day="1"]').disabled, "future day is selectable");
   card().querySelector(".ip-quality-details>summary").click();
+  const images = [...card().querySelectorAll(".ip-quality-archive img")];
+  assert.equal(images.length, 2, "database report images are missing");
+  await waitFor(() => images.every((image) => image.complete && image.naturalWidth > 0), "archived SVG images failed to load");
+  assert.ok(images.every((image) => image.src.startsWith(location.origin+"/api/v1/ip-quality/")), "preview fetched an upstream URL");
   assert.equal(card().querySelectorAll(".ip-quality-report").length, 2, "dual-stack report lost a family");
   const [ipv4Report, ipv6Report] = card().querySelectorAll(".ip-quality-report");
   assert.ok(ipv4Report.textContent.includes("干净"), "IPv4 lost its DNS blacklist results");

@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="830" viewBox="0 0 900 830">
+  <rect width="900" height="830" fill="#161b22"/>
+  <g font-family="monospace" font-size="20" fill="#d8dee9">
+    <text x="40" y="42" fill="#e8b65d">IPQuality · 浏览器测试报告 / TEST FIXTURE</text>
+    <text x="40" y="87" font-size="29" fill="#f0f6fc">IP 质量体检报告：203.0.113.10</text>
+    <text x="40" y="120" fill="#8996a8">xykt/IPQuality · 数据仅用于界面验收</text>
+    <path d="M40 145H860 M40 286H860 M40 416H860 M40 586H860 M40 711H860" stroke="#394351"/>
+    <text x="40" y="184" fill="#80b9f4">一、基础信息</text>
+    <text x="40" y="225">自治系统号：AS64500    组织：Example Network</text>
+    <text x="40" y="262">使用地：日本 · 东京    IP 类型：机房</text>
+    <text x="40" y="325" fill="#80b9f4">二、风险评分 · 各数据源独立</text>
+    <text x="40" y="369">SCAMALYTICS</text><text x="315" y="369" fill="#86d9a0">0</text>
+    <text x="420" y="369">ipapi</text><text x="560" y="369" fill="#86d9a0">0.47%</text>
+    <text x="690" y="369">IPQS 未知</text>
+    <text x="40" y="456" fill="#80b9f4">三、流媒体及 AI 服务解锁</text>
+    <text x="40" y="500">Netflix</text><text x="315" y="500" fill="#86d9a0">Yes</text><text x="560" y="500">JP · Native</text>
+    <text x="40" y="544">ChatGPT</text><text x="315" y="544" fill="#e8b65d">Failed</text><text x="560" y="544">以实际服务为准</text>
+    <text x="40" y="626" fill="#80b9f4">四、邮件连通性及 DNS 黑名单</text>
+    <text x="40" y="671">端口 25：阻断    黑名单数据库：439</text>
+    <text x="40" y="755" fill="#8996a8">此 SVG 为自动化测试夹具，不代表任何真实节点的检测结果。</text>
+    <text x="40" y="795" fill="#8996a8">生产页面直接展示面板数据库归档的上游 SVG 原文。</text>
+  </g>
+</svg>
