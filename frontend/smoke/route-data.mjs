@@ -7,6 +7,7 @@ import {
 } from "../modules/dashboard.js";
 
 import { installTasks } from "../modules/tasks.js";
+import { summarizeDashboardTraffic } from "../modules/dashboard-model.js";
 
 // Inert on import. The runner owns ordering and the few shared read-only fixtures.
 export async function run({ noop }) {
@@ -70,6 +71,29 @@ try {
     { day: "2026-08-01", received_bytes: 9, sent_bytes: 5, used_bytes: 14, peak_receive_bps: 8, peak_send_bps: 0 },
     "same-day policy rows are aggregated for the dashboard chart",
   );
+  const trendDays = aggregateDashboardTrafficDays([
+    { day: "2024-02-01", received_bytes: 30, sent_bytes: 10, used_bytes: 40 },
+    { day: "2024-02-02", received_bytes: 10, sent_bytes: 20, used_bytes: 30 },
+    { day: "2024-02-02", received_bytes: 5, sent_bytes: 5, used_bytes: 10 },
+  ], "2024-02");
+  assert.deepEqual(summarizeDashboardTraffic(trendDays, "2024-02", "2024-02-02T23:00:00Z"), {
+    isCurrentMonth: true, todayBytes: 40, averageBytes: 40, elapsedDays: 2,
+    peakDay: "2024-02-01", peakBytes: 40,
+  }, "current averages exclude future dates, aggregate policies and choose the earliest tied peak");
+  const missingToday = summarizeDashboardTraffic(trendDays, "2024-02", "2024-02-04T01:00:00+08:00");
+  assert.equal(missingToday.todayBytes, 0, "a UTC day without usage displays zero");
+  assert.equal(missingToday.elapsedDays, 3, "trend date boundaries use UTC rather than local time");
+  assert.equal(missingToday.averageBytes, 80 / 3, "zero-usage days participate in the daily average");
+  const historical = summarizeDashboardTraffic(trendDays, "2024-02", "2024-03-01T00:00:00Z");
+  assert.equal(historical.todayBytes, null, "historical months cannot claim to show today's traffic");
+  assert.equal(historical.averageBytes, 80 / 29, "historical leap-year averages include all calendar days");
+  const future = summarizeDashboardTraffic(trendDays, "2024-02", "2024-01-31T23:59:59Z");
+  assert.equal(future.averageBytes, null, "future months have no elapsed-day average");
+  assert.equal(future.peakDay, null, "future dates cannot become a peak");
+  const emptyTrend = summarizeDashboardTraffic(aggregateDashboardTrafficDays([], "2024-02"), "2024-02", "2024-02-01T00:00:00Z");
+  assert.equal(emptyTrend.averageBytes, 0, "empty current-month traffic has a zero average");
+  assert.equal(emptyTrend.peakDay, null, "empty traffic must not invent a peak date");
+  assert.match(dashboardMarkup, /aria-label="流量趋势摘要"/, "dashboard exposes the trend summary");
 
   const taskCalls = [];
   const taskTimers = new Map();

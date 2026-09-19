@@ -1,6 +1,6 @@
 import { orderNodesBySavedOrder } from "./node-order.js";
 
-import { utcMonth, aggregateDashboardTrafficDays, taskActivity } from "./dashboard-model.js";
+import { aggregateDashboardTrafficDays, summarizeDashboardTraffic, taskActivity } from "./dashboard-model.js";
 // Keep the shared edge between stacked segments square so the two colors
 // touch without the small gap created by two independently rounded rects.
 const trafficBarPath = (x, top, bottom, width, corners) => {
@@ -52,6 +52,7 @@ export function createDashboardView(ctx, panelMetrics) {
   } = ctx;
   return ({ overview, agents, tasks, trafficUsage, trafficMonth }) => {
   const dailyTraffic = aggregateDashboardTrafficDays(trafficUsage.days, trafficMonth);
+  const trend = summarizeDashboardTraffic(dailyTraffic, trafficMonth);
   const receivedTraffic = dailyTraffic.reduce((sum, day) => sum + day.received_bytes, 0);
   const sentTraffic = dailyTraffic.reduce((sum, day) => sum + day.sent_bytes, 0);
   const usedTraffic = receivedTraffic + sentTraffic;
@@ -77,7 +78,12 @@ export function createDashboardView(ctx, panelMetrics) {
   const trafficDetailRows = dailyTraffic.map((day) => `<tr><td>${esc(day.day)}</td><td>${bytes(day.received_bytes)}</td><td>${bytes(day.sent_bytes)}</td><td><b>${bytes(day.used_bytes)}</b></td><td>${rate(day.peak_receive_bps)} / ${rate(day.peak_send_bps)}</td></tr>`).join("");
   const trafficHistory = can("traffic.read") ? `<section class="traffic-history dashboard-traffic-history qch-swap-panel" id="traffic-usage" data-refresh-key="dashboard-traffic-${esc(trafficMonth)}">
     <header class="dashboard-traffic-head"><div class="dashboard-traffic-title"><h3>节点流量</h3><small>UTC 自然日</small></div><div class="dashboard-traffic-month"><details class="dashboard-month-picker" data-dashboard-traffic-month><summary aria-label="选择流量月份"><b data-dashboard-month-summary>${esc(trafficMonthLabel)}</b><i>⌄</i></summary><div class="dashboard-month-popover"><header><button type="button" data-dashboard-month-year-shift="-1" aria-label="上一年">‹</button><strong data-dashboard-month-year>${trafficYear}</strong><button type="button" data-dashboard-month-year-shift="1" aria-label="下一年">›</button></header><div class="dashboard-month-grid">${trafficMonthOptions}</div><footer><button type="button" data-dashboard-current-month>回到本月</button></footer></div></details></div></header>
-    <div class="dashboard-traffic-summary"><div class="dashboard-traffic-total"><span>${trafficMonth === utcMonth() ? "本月累计" : "当月累计"}</span><strong>${bytes(usedTraffic)}</strong></div><dl><div><dt><i class="received" aria-hidden="true"></i>接收</dt><dd>${bytes(receivedTraffic)}</dd></div><div><dt><i class="sent" aria-hidden="true"></i>发送</dt><dd>${bytes(sentTraffic)}</dd></div></dl></div>
+    <div class="dashboard-traffic-summary"><div class="dashboard-traffic-total"><span>${trend.isCurrentMonth ? "本月累计" : "当月累计"}</span><strong>${bytes(usedTraffic)}</strong></div><dl><div><dt><i class="received" aria-hidden="true"></i>接收</dt><dd>${bytes(receivedTraffic)}</dd></div><div><dt><i class="sent" aria-hidden="true"></i>发送</dt><dd>${bytes(sentTraffic)}</dd></div></dl></div>
+    <dl class="dashboard-traffic-trends" aria-label="流量趋势摘要">
+      <div data-dashboard-trend="today"><dt>今日用量</dt><dd><strong>${trend.todayBytes === null ? "—" : bytes(trend.todayBytes)}</strong><small>${trend.isCurrentMonth ? "UTC 今日累计" : "非当前月份"}</small></dd></div>
+      <div data-dashboard-trend="average"><dt>日均用量</dt><dd><strong>${trend.averageBytes === null ? "—" : bytes(trend.averageBytes)}</strong><small>${trend.elapsedDays ? `按 ${trend.elapsedDays} 天${trend.isCurrentMonth ? "（含今日）" : "计算"}` : "月份尚未开始"}</small></dd></div>
+      <div data-dashboard-trend="peak"><dt>${trend.isCurrentMonth ? "本月" : "当月"}峰值日</dt><dd><strong>${trend.peakDay ? `${Number(trend.peakDay.slice(5, 7))}月${Number(trend.peakDay.slice(8))}日` : "—"}</strong><small>${trend.peakDay ? `${bytes(trend.peakBytes)} · 单日用量` : "暂无流量"}</small></dd></div>
+    </dl>
     <div class="traffic-month-chart dashboard-traffic-chart"><svg viewBox="0 0 ${trafficChartWidth} ${trafficChartHeight}" preserveAspectRatio="none" role="img" aria-label="${esc(trafficMonth)} 每日接收和发送流量图">${trafficBars}</svg>${usedTraffic ? "" : '<span class="dashboard-traffic-empty">当月暂无流量记录</span>'}</div><div class="dashboard-traffic-axis" aria-hidden="true">${trafficAxis}</div>
     <footer class="dashboard-traffic-actions"><button class="button small" type="button" data-dashboard-traffic-details>查看 ${dailyTraffic.length} 天明细</button><a href="#traffic">管理流量配额 →</a></footer>
     <dialog class="traffic-edit-dialog dashboard-traffic-dialog" data-dashboard-traffic-dialog aria-labelledby="dashboard-traffic-dialog-title"><header><span class="traffic-edit-icon" aria-hidden="true">↕</span><div><p class="eyebrow">每日用量</p><h2 id="dashboard-traffic-dialog-title">${esc(trafficMonth)} 流量明细</h2><p>接收、发送和峰值按 UTC 自然日汇总</p></div><button class="deploy-command-close" type="button" data-dashboard-traffic-close aria-label="关闭流量明细弹窗">×</button></header><div class="dashboard-traffic-detail-body"><table><thead><tr><th>日期</th><th>接收</th><th>发送</th><th>合计</th><th>接收 / 发送峰值</th></tr></thead><tbody>${trafficDetailRows}</tbody></table></div><footer class="dashboard-traffic-dialog-actions"><span>共 ${dailyTraffic.length} 个自然日</span><button class="button" type="button" data-dashboard-traffic-close>关闭</button></footer></dialog>
