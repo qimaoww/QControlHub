@@ -203,7 +203,7 @@ if (mode.startsWith("capabilities-settings")) {
   location.hash = "#settings-engines";
   testAPI.settings = { panel_name: "QControlHub Browser Smoke", panel_description: "可信远程编排", revision: 1, ui_font_scale: 100, default_agent_engines: ["mihomo", "sing-box"] };
 }
-if (mode === "config-layout") {
+if (mode.startsWith("config-layout")) {
   testAPI.agents = populatedAgents.map((agent,index)=>({...agent,name:["香港 · HK-01","新加坡 · SG-02","东京 · JP-03","美国 · US-04"][index],features:["managed-config-read-v1","config-files-v1"],capabilities:["xray","sing-box","mihomo","ss-rust"],runtime:Object.fromEntries(["xray","sing-box","mihomo","ss-rust"].map(engine=>[engine,{installed:true,service_status:"running",version:{xray:"26.3.27","sing-box":"1.13.19",mihomo:"1.19.0","ss-rust":"1.25.0"}[engine]}]))}));
   testAPI.layoutTasks = new Map();
   location.hash = "#live-config";
@@ -272,7 +272,7 @@ window.fetch = async (input, options = {}) => {
       return json({ changed_agents: [...new Set(body.selections.map(item => item.agent_id))] });
     }
   }
-  if (mode === "config-layout") {
+  if (mode.startsWith("config-layout")) {
     if (path === "/access-controls") return json(testAPI.agents.flatMap(agent => ["xray","sing-box"].flatMap(engine => ["socks-in","http-in"].map((tag,i) => ({agent_id:agent.id,agent_name:agent.name,agent_status:agent.status,engine,tag,port:i?8080:1080,config_version:8,block_mainland_destination:!i,block_mainland_source:Boolean(i)})))));
     if (path === "/settings") return json({panel_name:"QControlHub"});
     if (path.endsWith("/workspace")) {

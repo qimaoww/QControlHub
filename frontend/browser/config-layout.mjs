@@ -28,10 +28,14 @@ export async function testConfigLayoutRuntime({ testAPI }) {
       const draft = input.value;
       const fileButtons = document.querySelectorAll("[data-config-file]");
       assert.ok(fileButtons.length >= 2,"shared/inbound buttons missing");
+      assert.ok(fileButtons[0].classList.contains("is-dirty"),"edited common file is not marked unsaved");
+      assert.ok(document.querySelector(".config-draft-summary").textContent.includes("1 个未保存"),"draft summary did not count the edited file");
       fileButtons[1].click();
       assert.equal(fileButtons[1].getAttribute("aria-pressed"),"true","inbound selection missing");
+      assert.ok(document.querySelector("[data-code-reset]").disabled,"a clean file can be reset because another file is dirty");
       input.value += "\n"; input.dispatchEvent(new Event("input",{bubbles:true}));
       const inboundDraft = input.value;
+      assert.ok(document.querySelector(".config-draft-summary").textContent.includes("2 个未保存"),"multiple drafts are not counted");
       fileButtons[0].click();
       assert.equal(input.value,draft,"switch lost common draft");
       fileButtons[1].click();
@@ -40,9 +44,17 @@ export async function testConfigLayoutRuntime({ testAPI }) {
       assert.equal(document.querySelector('optgroup[label="出站"]'),null,"legacy standalone exit group is still visible");
       document.querySelector("[data-config-preview]").click();
       assert.ok(input.readOnly,"merged preview must be readonly");
+      assert.ok(document.querySelector(".config-draft-summary").textContent.includes("2 个未保存"),"merged preview hid pending drafts");
       document.querySelector("[data-config-preview]").click();
       assert.equal(input.value,draft,"preview lost file draft");
       assert.ok(!input.readOnly,"return from preview must restore editing");
+      fileButtons[1].click();
+      document.querySelector("[data-code-reset]").click();
+      assert.ok(!fileButtons[1].classList.contains("is-dirty") && fileButtons[0].classList.contains("is-dirty"),"reset changed drafts outside the current file");
+      assert.ok(document.querySelector(".config-draft-summary").textContent.includes("1 个未保存"),"reset did not update the draft summary");
+      assert.ok(document.querySelector("[data-code-reset]").disabled,"reset remains enabled for a restored file");
+      fileButtons[0].click();
+      assert.equal(input.value,draft,"resetting an inbound lost the common-file draft");
       document.querySelectorAll("[data-live-agent]")[1].click();
       await waitFor(()=>document.querySelector("[data-confirm-dialog][open]"),"dirty node switch did not prompt");
       document.querySelector("[data-confirm-cancel]").click();
@@ -57,6 +69,14 @@ export async function testConfigLayoutRuntime({ testAPI }) {
       await waitFor(()=>document.querySelector('#live-config-form[data-engine="mihomo"]'),"confirmed engine switch failed");
     }
     assert.ok(document.documentElement.scrollWidth<=innerWidth,"manual page overflows viewport");
+    const tools = document.querySelector(".config-workspace-tools").getBoundingClientRect();
+    const editor = document.querySelector("#live-config-form").getBoundingClientRect();
+    assert.ok(tools.bottom <= editor.top + 1,"configuration tools remain below the source editor");
+    const workspace = document.querySelector(".live-config-workspace");
+    const nav = workspace.querySelector(".config-file-buttons").getBoundingClientRect();
+    const frame = workspace.querySelector(".code-editor-frame").getBoundingClientRect();
+    if (workspace.clientWidth >= 850) assert.ok(nav.right <= frame.left + 1,"desktop files do not form an independent left rail");
+    else assert.ok(nav.bottom <= frame.top + 1,"narrow file navigation overlaps the source");
     document.querySelectorAll(".live-engine-tab").forEach(tab => {
       assert.equal(tab.offsetWidth,140,"engine buttons must have fixed width");
       assert.equal(tab.offsetHeight,40,"engine buttons must have fixed height");
