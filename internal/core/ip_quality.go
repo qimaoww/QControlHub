@@ -21,9 +21,9 @@ const (
 
 // IPQuality retains the upstream database-specific values. The databases do
 // not share a scoring scale; missing results must not become zero-risk scores.
+// The panel renders its own report image from these bytes.
 type IPQualityResult struct {
-	Reports    []json.RawMessage `json:"reports"`
-	ReportURLs []string          `json:"report_urls,omitempty"`
+	Reports []json.RawMessage `json:"reports"`
 }
 
 type IPQualityRecord struct {
@@ -120,19 +120,6 @@ func NormalizeIPQualityResult(input *IPQualityResult) (IPQualityResult, error) {
 			return IPQualityResult{}, err
 		}
 		result.Reports = append(result.Reports, json.RawMessage(compact.Bytes()))
-	}
-	if len(input.ReportURLs) != 0 {
-		if len(input.ReportURLs) != len(result.Reports) {
-			return IPQualityResult{}, errors.New("IPQuality report links do not match address families")
-		}
-		seen := make(map[string]bool)
-		for _, link := range input.ReportURLs {
-			if !ValidIPQualityReportURL(link) || seen[link] {
-				return IPQualityResult{}, errors.New("IPQuality returned an invalid or duplicate report link")
-			}
-			seen[link] = true
-			result.ReportURLs = append(result.ReportURLs, link)
-		}
 	}
 	encoded, err := json.Marshal(result)
 	if err != nil || len(encoded) > MaxIPQualityResultBytes {

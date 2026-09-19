@@ -29,11 +29,10 @@ func TestIPQualityArchiveOwnershipAndRetention(t *testing.T) {
 		t.Fatalf("live lease rejected: %v %v", allowed, err)
 	}
 	report := storeQualityResult(t)
-	report.ReportURLs = []string{"https://Report.Check.Place/IP/fixture.svg"}
 	content := []byte(`<svg xmlns="http://www.w3.org/2000/svg"/>`)
 	digest := sha256.Sum256(content)
 	archive := core.IPQualityArchive{IPQualityArchiveInfo: core.IPQualityArchiveInfo{
-		Family: 4, SourceURL: report.ReportURLs[0], SHA256: hex.EncodeToString(digest[:]), Size: len(content), DownloadedAt: time.Now().UTC(),
+		Family: 4, SHA256: hex.EncodeToString(digest[:]), Size: len(content), RenderedAt: time.Now().UTC(),
 	}, Content: content}
 	if err := db.CompleteTask(ctx, agent.ID, task.ID, core.TaskResultRequest{LeaseID: lease.LeaseID, Success: true, IPQuality: report}, archive); err != nil {
 		t.Fatal(err)
@@ -46,7 +45,7 @@ func TestIPQualityArchiveOwnershipAndRetention(t *testing.T) {
 		t.Fatalf("archive leaked to another owner: %v", err)
 	}
 	if allowed, err := db.CanArchiveIPQualityResult(ctx, agent.ID, task.ID, lease.LeaseID); err != nil || allowed {
-		t.Fatalf("completed task authorized a new download: %v %v", allowed, err)
+		t.Fatalf("completed task authorized a new render: %v %v", allowed, err)
 	}
 	if _, err := db.pool.Exec(ctx, `UPDATE agents SET revoked_at=now() WHERE id=$1`, agent.ID); err != nil {
 		t.Fatal(err)
@@ -76,5 +75,36 @@ func TestIPQualityArchiveMigrationFrom62(t *testing.T) {
 	var exists bool
 	if err := db.pool.QueryRow(ctx, `SELECT to_regclass('ip_quality_archives') IS NOT NULL`).Scan(&exists); err != nil || !exists {
 		t.Fatalf("schema 62 did not gain SVG archives: %v", err)
+	}
+}
+
+// v65 replaced the downloaded upstream SVG with a panel-rendered one: the
+// report link is gone and the timestamp is a render time.
+func TestIPQualityArchiveRenderMigrationFrom64(t *testing.T) {
+	db, ctx, _ := isolatedConfigScopeStore(t)
+	if _, err := db.pool.Exec(ctx, `DROP TABLE ip_quality_archives;
+		CREATE TABLE ip_quality_archives (
+			task_id text NOT NULL,
+			family integer NOT NULL,
+			source_url text NOT NULL,
+			sha256 text NOT NULL,
+			downloaded_at timestamptz NOT NULL,
+			content bytea NOT NULL,
+			PRIMARY KEY(task_id,family));
+		DELETE FROM qcontrolhub_schema_migrations WHERE version>=65;
+		INSERT INTO qcontrolhub_schema_migrations(version) VALUES(64) ON CONFLICT DO NOTHING`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var rendered, source bool
+	if err := db.pool.QueryRow(ctx, `SELECT
+		EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='ip_quality_archives' AND column_name='rendered_at'),
+		EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='ip_quality_archives' AND column_name='source_url')`).Scan(&rendered, &source); err != nil {
+		t.Fatal(err)
+	}
+	if !rendered || source {
+		t.Fatalf("v65 migration left rendered_at=%v source_url=%v", rendered, source)
 	}
 }

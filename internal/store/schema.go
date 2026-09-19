@@ -3,7 +3,7 @@ package store
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 64
+const currentSchemaVersion = 65
 
 const schemaSQL = `
 CREATE TABLE IF NOT EXISTS agents (
@@ -225,12 +225,25 @@ CREATE TABLE IF NOT EXISTS ip_quality_reports (
 CREATE TABLE IF NOT EXISTS ip_quality_archives (
     task_id text NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
     family integer NOT NULL CHECK (family IN (4,6)),
-    source_url text NOT NULL,
     sha256 text NOT NULL CHECK (length(sha256)=64),
-    downloaded_at timestamptz NOT NULL,
+    rendered_at timestamptz NOT NULL,
     content bytea NOT NULL CHECK (octet_length(content)>0 AND octet_length(content)<=2097152),
     PRIMARY KEY(task_id,family)
 );
+-- v65: the panel renders the archived image from the stored JSON, so an archive
+-- no longer records an upstream report link and its timestamp is a render time.
+DO $ip_quality_render$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema=current_schema() AND table_name='ip_quality_archives' AND column_name='downloaded_at'
+    ) THEN
+        ALTER TABLE ip_quality_archives RENAME COLUMN downloaded_at TO rendered_at;
+    END IF;
+    ALTER TABLE ip_quality_archives ADD COLUMN IF NOT EXISTS rendered_at timestamptz NOT NULL DEFAULT now();
+    ALTER TABLE ip_quality_archives DROP COLUMN IF EXISTS source_url;
+END
+$ip_quality_render$;
 CREATE INDEX IF NOT EXISTS tasks_ip_quality_history_idx
     ON tasks(created_at DESC,agent_id,id DESC) WHERE action='ip-quality';
 CREATE TABLE IF NOT EXISTS ip_quality_schedules (

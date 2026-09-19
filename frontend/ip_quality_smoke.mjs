@@ -170,9 +170,10 @@ try {
 console.log("IP quality model, rendering, request races and mutation guards passed");
 
 const archiveMarkup = createIPQualityArchiveView({ esc, date: String })({ task_id: "task-1", archives: [
-  { family: 4, downloaded_at: "2026-09-19T00:00:00Z", sha256: "abc", source_url: "https://Report.Check.Place/IP/fixture.svg" },
+  { family: 4, rendered_at: "2026-09-19T00:00:00Z", sha256: "abc" },
 ] });
 assert.ok(archiveMarkup.includes('<img src="/api/v1/ip-quality/task-1/archives/4"'));
 assert.ok(archiveMarkup.includes('?download=1'));
+assert.ok(archiveMarkup.includes("面板重绘"), "archive caption must state the panel drew it");
 assert.ok(!archiveMarkup.includes("Report.Check.Place"), "browser must never contact the upstream report host");
 assert.ok(!archiveMarkup.includes("iframe") && !archiveMarkup.includes("<svg"), "SVG must remain an inert image");

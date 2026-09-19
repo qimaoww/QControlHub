@@ -3,30 +3,30 @@
 package agent
 
 import (
-	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"syscall"
-	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
-// The third-party program is downloaded only for an explicitly queued task.
-// Keep the immutable revision and checksum together when reviewing upgrades.
-const ipQualityRevision = "2384a67c756eb35231f5982b34731e522be3653e"
-const ipQualityScriptURL = "https://raw.githubusercontent.com/xykt/IPQuality/" + ipQualityRevision + "/ip.sh"
-const ipQualityScriptSHA256 = "b30df5a3c2204276c54e99dcc5080b46f8a627667730aee7de63b109b8ecaecf"
-const maxIPQualityScriptBytes = 512 << 10
+// Upstream publishes the detector as a one-liner that pipes its script straight
+// into bash. Follow that source instead of pinning a revision and a checksum,
+// so the detector keeps working when upstream moves `main`.
+const ipQualityScriptURL = "https://IP.Check.Place"
+
+// ipQualityProgram runs the official one-liner with the fixed detection
+// arguments: accept upstream's dependency installation, stay in privacy mode so
+// nothing is uploaded to the upstream report host, and keep the full IP and the
+// machine-readable JSON. The default locale is kept so the JSON carries the same
+// localized labels the detector prints, which the panel renders.
+const ipQualityProgram = `ulimit -f 256 || exit
+exec bash --noprofile --norc <(curl -Ls ` + ipQualityScriptURL + `) -y -p -f -j -o "$1"`
 
 func runIPQuality(ctx context.Context) (core.IPQualityResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, core.IPQualityTimeout)
@@ -35,34 +35,16 @@ func runIPQuality(ctx context.Context) (core.IPQualityResult, error) {
 	if err != nil {
 		return core.IPQualityResult{}, err
 	}
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.Proxy = nil
-	client := &http.Client{
-		Transport: transport, Timeout: 30 * time.Second,
-		CheckRedirect: func(*http.Request, []*http.Request) error {
-			return errors.New("IPQuality script redirects are disabled")
-		},
-	}
-	defer transport.CloseIdleConnections()
-	script, err := downloadIPQualityScript(ctx, client, ipQualityScriptURL, ipQualityScriptSHA256)
-	if err != nil {
-		return core.IPQualityResult{}, err
-	}
-	// ip.sh normally loads ref/* from main, including the DNSBL list passed to
-	// its shell workers. Pin these data files to the reviewed revision as well.
-	script = bytes.ReplaceAll(script, []byte("${rawgithub}main/"),
-		[]byte("https://raw.githubusercontent.com/xykt/IPQuality/"+ipQualityRevision+"/"))
-	script, err = prepareIPQualityArchiveScript(script)
-	if err != nil {
-		return core.IPQualityResult{}, err
-	}
-	return executeIPQualityScript(ctx, bash, script)
+	return executeIPQualityProgram(ctx, bash, ipQualityProgram)
 }
 
+// ipQualityPrerequisites resolves the shell that runs the one-liner. Only bash
+// and curl are required up front, because curl fetches the script itself. Every
+// other probe dependency is installed by upstream when it is missing; the Agent
+// passes -y so that installation stays non-interactive.
 func ipQualityPrerequisites() (string, error) {
-	var missing []string
 	bash := ""
-	for _, name := range []string{"bash", "curl", "jq", "bc", "nc", "dig", "ip", "timeout", "grep"} {
+	for _, name := range []string{"bash", "curl"} {
 		binary := ""
 		// Match the child's fixed PATH, including the first executable it
 		// would find. Do not skip an unsafe earlier executable for a safe one.
@@ -77,14 +59,11 @@ func ipQualityPrerequisites() (string, error) {
 			}
 		}
 		if binary == "" {
-			missing = append(missing, name)
+			return "", fmt.Errorf("IPQuality 缺少依赖：%s；bash 与 curl 是获取上游脚本的前提，请先在节点安装", name)
 		}
 		if name == "bash" {
 			bash = binary
 		}
-	}
-	if len(missing) != 0 {
-		return "", fmt.Errorf("IPQuality 缺少依赖：%s；请按 docs/ip-quality.md 安装，检测任务不会自动安装软件", strings.Join(missing, ", "))
 	}
 	return bash, nil
 }
@@ -103,53 +82,20 @@ func ipQualityExecutable(path string) (string, error) {
 	return resolved, nil
 }
 
-func downloadIPQualityScript(ctx context.Context, client *http.Client, url, checksum string) ([]byte, error) {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
-	}
-	response, err := client.Do(request)
-	if err != nil {
-		return nil, fmt.Errorf("下载 IPQuality 脚本失败：%w", err)
-	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("下载 IPQuality 脚本失败：HTTP %d", response.StatusCode)
-	}
-	content, err := io.ReadAll(io.LimitReader(response.Body, maxIPQualityScriptBytes+1))
-	if err != nil {
-		return nil, err
-	}
-	if len(content) > maxIPQualityScriptBytes {
-		return nil, errors.New("IPQuality 脚本超过大小限制")
-	}
-	digest := sha256.Sum256(content)
-	if hex.EncodeToString(digest[:]) != checksum {
-		return nil, errors.New("IPQuality 脚本 SHA-256 校验失败，未执行")
-	}
-	return content, nil
-}
-
-func executeIPQualityScript(ctx context.Context, bash string, script []byte) (core.IPQualityResult, error) {
+// executeIPQualityProgram runs a bash program inside a private working
+// directory and accepts only the bounded JSON report. Cancellation kills the
+// whole process group (curl, DNSBL workers and progress-bar subprocesses).
+func executeIPQualityProgram(ctx context.Context, bash, program string) (core.IPQualityResult, error) {
 	directory, err := os.MkdirTemp("", "qagent-ip-quality-")
 	if err != nil {
 		return core.IPQualityResult{}, err
 	}
 	defer os.RemoveAll(directory)
-	scriptPath := filepath.Join(directory, "ip.sh")
-	if err := os.WriteFile(scriptPath, script, 0o600); err != nil {
-		return core.IPQualityResult{}, err
-	}
-	// The shell fragment is fixed; all arguments are separate argv entries.
-	// A file-size limit bounds report writes, and cancellation kills the entire
-	// process group (curl, DNSBL workers and progress-bar subprocesses).
-	command := exec.CommandContext(ctx, bash, "--noprofile", "--norc", "-c",
-		`ulimit -f 256 || exit; exec "$@"`, "ip-quality",
-		bash, "--noprofile", "--norc", scriptPath, "-n", "-f", "-E", "-j",
-		"-o", filepath.Join(directory, "report.json"))
+	command := exec.CommandContext(ctx, bash, "--noprofile", "--norc", "-c", program,
+		"ip-quality", filepath.Join(directory, "report.json"))
 	command.Dir = directory
 	command.Env = append(commandEnvironment(""), "TERM=dumb", "CURL_HOME="+directory,
-		"XDG_CONFIG_HOME="+directory, "TMPDIR="+directory, "QCH_IPQUALITY_LINKS="+filepath.Join(directory, "links.tsv"))
+		"XDG_CONFIG_HOME="+directory, "TMPDIR="+directory)
 	configureCommand(command)
 	// Progress output can be verbose. Truncate diagnostics without interrupting
 	// a healthy run; only the bounded JSON report is accepted as result data.
@@ -170,7 +116,7 @@ func executeIPQualityScript(ctx context.Context, bash string, script []byte) (co
 	}
 	// Upstream's final [[ IPv6 available ]] returns 1 on IPv4-only hosts even
 	// after a valid IPv4 report. A validated report, not that status, is decisive.
-	return readIPQualityReportLinks(directory, result)
+	return result, nil
 }
 
 func readIPQualityReport(directory string) (core.IPQualityResult, error) {

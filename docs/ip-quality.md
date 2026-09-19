@@ -9,8 +9,10 @@ Agent 所在环境的出口 IP，保存真实的 IPv4 / IPv6 报告和任务状�
 
 1. 备份 PostgreSQL，更新控制面、Web 和需要检测的 Linux Agent。
    新 Agent 心跳声明 `ip-quality-v1`；旧 Agent 不会领取这个任务。
-2. 在目标节点手动准备 Bash 4+、`curl`、`jq`、`bc`、`nc`、`dig`、
-   `ip`、`timeout`、`grep`、CA 证书及常规系统工具。任务不会自动安装软件。
+2. 节点至少要有 Bash 4+ 与 `curl`：`curl` 用于取回上游脚本。其余探针依赖
+   （`jq`、`bc`、`nc`、`dig`、`ip` 等）缺失时，上游一行命令会用节点的包管理器
+   自动安装；Agent 传 `-y` 使其非交互执行。以非 root 身份运行且无免密 `sudo`
+   时安装会失败，请先手动准备。
 3. 以节点所有者或有权管理该节点的管理员登录。读取需要 `agents.read`，
    手动检测和修改每日计划同时需要 `agents.manage` 与 `tasks.execute`。
    接受共享并不授予主机检测权限。
@@ -30,8 +32,8 @@ Alpine 的依赖安装示例（以 root 执行）：
 apk add bash ca-certificates curl jq bc netcat-openbsd bind-tools iproute2 coreutils grep
 ```
 
-没有依赖、下载失败、校验失败或没有有效 JSON 报告时，任务明确失败；
-安装依赖或修复网络后可重新检测。不要为使单项探测通过而放宽 Agent 服务权限。
+脚本获取失败、依赖安装失败、注入点不匹配或没有有效 JSON 报告时，任务明确失败；
+修复网络或依赖后可重新检测。不要为使单项探测通过而放宽 Agent 服务权限。
 
 ## 每日计划与日期
 
@@ -64,7 +66,7 @@ apk add bash ca-certificates curl jq bc netcat-openbsd bind-tools iproute2 coreu
 - 邮件结果受防火墙、运营商出站限制、NAT、源端口绑定以及 Agent 运行权限影响。
   单项失败不自动证明 IP 被封禁。
 - DNS 黑名单是上游黑名单查询，不是 DNS 泄漏或 DNS 可用性测试。
-  当前固定版本只查询 IPv4；IPv6 此项显示“未检测”。上游 IPv6 原始 JSON
+  当前上游脚本只查询 IPv4；IPv6 此项显示“未检测”。上游 IPv6 原始 JSON
   可能沿用 IPv4 黑名单计数，因此保留原文但不把这些数字显示为 IPv6 检测结论。
   本集成**不检测延迟、丢包率、DNS / WebRTC 泄漏**，不会显示虚构的正常状态。
 - 成功意味着得到一至两个结构有效、地址族不重复的报告，不意味着所有供应商都可用。
@@ -73,30 +75,27 @@ apk add bash ca-certificates curl jq bc netcat-openbsd bind-tools iproute2 coreu
 
 ## 执行、隐私与上游来源
 
-IPQuality 由上游按 [AGPL-3.0](https://github.com/xykt/IPQuality/blob/2384a67c756eb35231f5982b34731e522be3653e/LICENSE)
+IPQuality 由上游按 [AGPL-3.0](https://github.com/xykt/IPQuality/blob/main/LICENSE)
 发布。本集成保留来源署名，通过独立进程及 JSON 文件交互；仓库不打包上游脚本。
-当前固定来源：
+Agent 仅在收到检测任务时运行上游官方一行命令
+`bash <(curl -Ls https://IP.Check.Place)`（302 到 `xykt/IPQuality` 的 `main`
+分支 `ip.sh`）。本集成不固定修订、不校验 SHA-256，DNS 黑名单、国家代码等辅助
+文件也随上游 `main` 更新；脚本内容由上游控制。
 
-- 修订：`2384a67c756eb35231f5982b34731e522be3653e`（脚本版本 `v2026-09-16`）。
-- [固定修订的 ip.sh](https://github.com/xykt/IPQuality/blob/2384a67c756eb35231f5982b34731e522be3653e/ip.sh)。
-- 原始脚本 SHA-256：`b30df5a3c2204276c54e99dcc5080b46f8a627667730aee7de63b109b8ecaecf`。
-- 下载后只将 `${rawgithub}main/` 引用替换为同一固定修订的
-  `raw.githubusercontent.com` 地址，使 DNS 黑名单、国家代码等辅助文件不跟随
-  `main` 漂移。该变换在 [Agent 实现](../internal/agent/ip_quality_linux.go) 中公开；
-  不改变上游检测与评分算法。更新时必须一并审阅修订、摘要及辅助资源。
+固定参数为 `-y -p -f -j -o <私有报告路径>`：非交互接受上游安装缺失依赖，
+以**隐私模式**运行——不向 `upload.check.place` 上传报告、不生成上游链接——并保存
+完整 IP 与机器可读 JSON（保留上游默认语言，使 JSON 中的机房/解锁/原生等标签与终端一致）。不接受调用者传入脚本 URL、路径、接口、代理地址或额外
+shell 参数。
 
-Agent 仅在收到检测任务时下载脚本，下载上限 512 KiB、超时 30 秒、拒绝重定向，
-通过 SHA-256 核验后才执行。固定参数为 `-n -f -E -j -o <私有报告路径>`：
-跳过自动依赖安装，保存完整 IP 与机器可读 JSON，并让上游生成 SVG 报告链接。
-校验后还会在上游上传步骤后导出地址与链接；不解析终端日志，也不改变评分算法。
-上游上传限时 20 秒，返回链接最多 2 KiB。
-不接受调用者传入脚本 URL、路径、接口、代理地址或额外 shell 参数。
+**面板根据返回的 JSON 自己绘制报告图片**（[Agent 实现](../internal/agent/ip_quality_linux.go)、
+[渲染实现](../internal/api/ip_quality_render.go)）：不下载上游 SVG、不要求报告链接，
+按上游终端输出的版式（列宽、配色、各库评分阈值）生成 SVG，存入面板数据库并以
+图片内嵌。检测不再依赖上游上传端点的可用性，有效 JSON 报告一定会有对应存档图。
 
-**生成链接会向 `upload.check.place` 上传含完整 IP 的 JSON 与文本报告。**
-手动检测和开启每日计划前会明确提示。检测也会发起第三方网络请求，联系
-上游及其 IP 数据库、媒体/AI、邮件、DNS 和统计服务，对方可观察节点出口 IP。
-上游部分探针使用自身的 TLS 选项；不能把 Agent 的脚本下载校验等同于所有探针
-都具有相同的安全保证。请仅在获授权、允许此类出站访问的节点启用。
+检测仍会发起第三方网络请求，联系上游及其 IP 数据库、媒体/AI、邮件、DNS 和统计
+服务，对方可观察节点出口 IP；隐私模式只关闭报告上传，不减少这些探测。脚本不再
+经过固定修订与摘要校验，节点执行的是上游 `main` 上的当前内容；上游各探针也各自
+使用自己的 TLS 选项。请仅在获授权、允许此类出站访问的节点启用。
 
 脚本继承现有 Agent 身份及其 systemd/OpenRC 隔离边界，通常仍是高权限身份，
 不是不可信脚本沙箱。本功能不增加 capabilities、不更改服务单元、不绕过系统限制。
@@ -105,16 +104,15 @@ Agent 仅在收到检测任务时下载脚本，下载上限 512 KiB、超时 30
 进程组；任务租约至少 12 分钟，为结果传输留出时间。它占用节点的既有串行任务通道，
 可能延后同一节点的部署或运维任务。
 
-每次结构化结果（包含链接）上限 128 KiB，普通任务列表只含状态及“报告已保存”。
-Agent 的报告和链接仅在临时工作目录与有界内存重传缓存中存在，不写入凭据文件；
+每次结构化结果上限 128 KiB，普通任务列表只含状态及“报告已保存”。
+Agent 的报告仅在临时工作目录与有界内存重传缓存中存在，不写入凭据文件；
 临时目录在任务结束时清除。同进程断线可重传，Agent 重启后尚未确认的任务可能重新检测。
 
-面板根据 Agent 返回的链接下载 SVG：仅允许 HTTPS 的 `Report.Check.Place/ip/*.svg`（兼容旧 `/IP/` 路径），
-禁止重定向、代理与私网目标，每份最多 2 MiB、15 秒，最多 IPv4 / IPv6 各一份。
-只接收完整 SVG，HTTP 错误、HTML 错误页、下载超时或文件过大均将任务记为失败并确认，
-不会显示“已存档”；需要修复上游或面板网络后重新检测。数据库故障仍允许 Agent 重传。
-SVG 原文字节、来源链接、SHA-256 和下载时间与结构化报告在同一事务写入**面板数据库**，
-不会生成面板磁盘文件、对象存储副本或 Agent 归档。旧 JSON 历史仍可读，不伪造 SVG 存档。
+面板把 Agent 返回的 JSON 逐份渲染成 SVG：每份最多 2 MiB，只接受完整的单一 SVG
+文档，最多 IPv4 / IPv6 各一份。渲染或入库失败会将任务记为失败并确认，不会显示
+“已存档”；数据库故障仍允许 Agent 重传。SVG 原文、SHA-256 和渲染时间与结构化
+报告在同一事务写入**面板数据库**，不会生成面板磁盘文件、对象存储副本或 Agent
+归档。旧 JSON 历史仍可读，不伪造 SVG 存档。
 
 前端通过面板鉴权接口把 SVG 作为图片直接嵌入页面，IPv4 / IPv6 分开展示；支持放大及下载。
 不把上游 SVG 插入 DOM 或 iframe，不让浏览器请求上游链接。响应使用 `no-store`、
