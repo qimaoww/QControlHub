@@ -348,3 +348,35 @@ func TestIPQualityRenderRebuildsThePrintedLines(t *testing.T) {
 		}
 	}
 }
+
+// TestIPQualityRenderKeepsBrightForegroundAsText guards the SGR classification:
+// 90-97 are the bright foreground range, not backgrounds.
+func TestIPQualityRenderKeepsBrightForegroundAsText(t *testing.T) {
+	svg := mustRenderIPQualitySVG(t, "\x1b[92m明亮绿\x1b[0m")
+	if strings.Contains(svg, "<rect x=") {
+		t.Fatalf("bright foreground painted a background block: %s", svg)
+	}
+	if !strings.Contains(svg, `fill="`+ipQualityGreen+`"`) {
+		t.Fatalf("bright green was not applied to the text: %s", svg)
+	}
+	dim := mustRenderIPQualitySVG(t, "\x1b[90m暗灰\x1b[0m")
+	if !strings.Contains(dim, `fill="`+ipQualityDim+`"`) {
+		t.Fatalf("bright black did not become a visible foreground: %s", dim)
+	}
+	background := mustRenderIPQualitySVG(t, "\x1b[102m绿底\x1b[0m")
+	if !strings.Contains(background, `<rect x="18" y="16" width="40" height="22" fill="`+ipQualityGreen+`"/>`) {
+		t.Fatalf("bright background was not painted: %s", background)
+	}
+}
+
+// TestIPQualityRenderSkipsUnknownControlSequences guards against a control
+// sequence the renderer does not understand swallowing the text after it.
+func TestIPQualityRenderSkipsUnknownControlSequences(t *testing.T) {
+	svg := mustRenderIPQualitySVG(t, "\x1b[2KIPinfo\x1b[0m 数据库\x1b[?25l\x1b[")
+	if strings.Contains(svg, "\x1b") {
+		t.Fatal("ANSI escapes leaked into the SVG")
+	}
+	if rebuilt := strings.Join(ipQualityRenderedLines(svg), "\n"); rebuilt != "IPinfo 数据库" {
+		t.Fatalf("rebuilt %q, want %q", rebuilt, "IPinfo 数据库")
+	}
+}

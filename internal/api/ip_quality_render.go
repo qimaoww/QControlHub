@@ -32,18 +32,23 @@ const (
 	ipQualityBlue       = "#78b8eb"
 	ipQualityMagenta    = "#c586c0"
 	ipQualityCyan       = "#21c7a8"
+	// Bright black is the terminal's dim grey. The rest of the bright range
+	// mirrors the normal colours, so only this entry needs its own value.
+	ipQualityDim        = "#5f7e97"
 	ipQualityFontFamily = "ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', monospace"
 )
 
-// ipQualityANSI maps the SGR codes upstream emits onto that palette.
+// ipQualityANSI maps the SGR codes upstream emits onto that palette. Plain black
+// stays the page colour because upstream uses it for the mail-row separators,
+// which are invisible in the terminal.
 var ipQualityANSI = map[int]string{
 	30: ipQualityBackground, 31: ipQualityRed, 32: ipQualityGreen, 33: ipQualityYellow,
 	34: ipQualityBlue, 35: ipQualityMagenta, 36: ipQualityCyan, 37: ipQualityDefault,
 	40: ipQualityBackground, 41: ipQualityRed, 42: ipQualityGreen, 43: ipQualityYellow,
 	44: ipQualityBlue, 45: ipQualityMagenta, 46: ipQualityCyan, 47: ipQualityDefault,
-	90: ipQualityBackground, 91: ipQualityRed, 92: ipQualityGreen, 93: ipQualityYellow,
+	90: ipQualityDim, 91: ipQualityRed, 92: ipQualityGreen, 93: ipQualityYellow,
 	94: ipQualityBlue, 95: ipQualityMagenta, 96: ipQualityCyan, 97: ipQualityDefault,
-	100: ipQualityBackground, 101: ipQualityRed, 102: ipQualityGreen, 103: ipQualityYellow,
+	100: ipQualityDim, 101: ipQualityRed, 102: ipQualityGreen, 103: ipQualityYellow,
 	104: ipQualityBlue, 105: ipQualityMagenta, 106: ipQualityCyan, 107: ipQualityDefault,
 }
 
@@ -106,49 +111,58 @@ func ipQualityStyledLine(raw string) ipQualityLine {
 		pending.Reset()
 	}
 	for index := 0; index < len(raw); {
-		if raw[index] == 0x1b && index+1 < len(raw) && raw[index+1] == '[' {
-			end := strings.IndexByte(raw[index+2:], 'm')
-			if end < 0 {
-				break
+		if raw[index] == 0x1b {
+			parameters, next := ipQualityCSISequence(raw, index)
+			if next < 0 {
+				// A stray escape byte is not a sequence: drop it and keep the
+				// text on either side.
+				index++
+				continue
 			}
-			flush()
-			for _, field := range strings.Split(raw[index+2:index+2+end], ";") {
-				code, err := strconv.Atoi(strings.TrimSpace(field))
-				if err != nil {
-					continue
-				}
-				switch {
-				case code == 0:
-					fill, bg, bold, italic, underline = ipQualityDefault, "", false, false, false
-				case code == 1:
-					bold = true
-				case code == 3:
-					italic = true
-				case code == 4:
-					underline = true
-				case code == 22:
-					bold = false
-				case code == 23:
-					italic = false
-				case code == 24:
-					underline = false
-				case code == 39:
-					fill = ipQualityDefault
-				case code == 49:
-					bg = ""
-				default:
-					color, ok := ipQualityANSI[code]
-					if !ok {
+			if raw[next-1] == 'm' {
+				flush()
+				for _, field := range strings.Split(parameters, ";") {
+					code, err := strconv.Atoi(strings.TrimSpace(field))
+					if err != nil {
 						continue
 					}
-					if code >= 40 {
-						bg = color
-					} else {
-						fill = color
+					switch {
+					case code == 0:
+						fill, bg, bold, italic, underline = ipQualityDefault, "", false, false, false
+					case code == 1:
+						bold = true
+					case code == 3:
+						italic = true
+					case code == 4:
+						underline = true
+					case code == 22:
+						bold = false
+					case code == 23:
+						italic = false
+					case code == 24:
+						underline = false
+					case code == 39:
+						fill = ipQualityDefault
+					case code == 49:
+						bg = ""
+					default:
+						color, ok := ipQualityANSI[code]
+						if !ok {
+							continue
+						}
+						// 90-97 and 100-107 are the bright variants of the
+						// foreground and background ranges; classifying by
+						// "code >= 40" would paint bright foreground text as a
+						// background block.
+						if code >= 40 && code <= 49 || code >= 100 && code <= 107 {
+							bg = color
+						} else {
+							fill = color
+						}
 					}
 				}
 			}
-			index += 2 + end + 1
+			index = next
 			continue
 		}
 		if character := raw[index]; character >= 0x20 || character == '\t' {
@@ -158,6 +172,28 @@ func ipQualityStyledLine(raw string) ipQualityLine {
 	}
 	flush()
 	return line
+}
+
+// ipQualityCSISequence reads the CSI sequence starting at index and returns its
+// parameter bytes with the index just past it. The index is -1 when the bytes
+// are not a complete sequence. Only the parameters are returned, so a caller can
+// skip a sequence it does not understand without dropping the text after it.
+func ipQualityCSISequence(raw string, index int) (string, int) {
+	if index+2 > len(raw) || raw[index] != 0x1b || raw[index+1] != '[' {
+		return "", -1
+	}
+	for offset := index + 2; offset < len(raw); offset++ {
+		switch character := raw[offset]; {
+		case character >= 0x40 && character <= 0x7e:
+			return raw[index+2 : offset], offset + 1
+		case character >= 0x20 && character <= 0x3f:
+		default:
+			return "", -1
+		}
+	}
+	// The text ends mid-sequence, which a bounded capture can do: drop the
+	// partial sequence instead of leaking its parameters as report text.
+	return raw[index+2:], len(raw)
 }
 
 func buildIPQualitySVG(lines []ipQualityLine) []byte {
