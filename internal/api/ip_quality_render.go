@@ -24,25 +24,27 @@ const (
 )
 
 const (
-	ipQualityColorDefault = "#d7d7d7"
-	ipQualityColorLabel   = "#3fc6d8"
-	ipQualityColorGreen   = "#37c871"
-	ipQualityColorYellow  = "#e0b93c"
-	ipQualityColorRed     = "#e8544c"
-	ipQualityColorDim     = "#8f8f8f"
-	ipQualityColorLink    = "#6f8fd0"
+	// Palette sampled from the detector's terminal output.
+	ipQualityColorDefault = "#d6deeb"
+	ipQualityColorLabel   = "#21c7a8"
+	ipQualityColorGreen   = "#22da6e"
+	ipQualityColorYellow  = "#c5e478"
+	ipQualityColorRed     = "#ef5350"
+	ipQualityColorDim     = "#7b8794"
+	ipQualityColorLink    = "#78b8eb"
 	ipQualityColorWhite   = "#ffffff"
-	ipQualityColorBlack   = "#0b0b0b"
-	ipQualityColorBanner  = "#e6e6e6"
+	ipQualityColorBlack   = "#011627"
+	ipQualityColorBanner  = "#d6deeb"
+	ipQualityBackground   = "#011627"
 
-	ipQualityBadgeGreen   = "#1c7a44"
-	ipQualityBadgeYellow  = "#8a6a1c"
-	ipQualityBadgeRed     = "#8f2f2a"
-	ipQualityBadgeNeutral = "#3a3a3a"
+	ipQualityBadgeGreen   = "#22da6e"
+	ipQualityBadgeYellow  = "#c5e478"
+	ipQualityBadgeRed     = "#ef5350"
+	ipQualityBadgeNeutral = "#3a4657"
 
-	ipQualityBarGreen  = "#1f9d55"
-	ipQualityBarYellow = "#c9971b"
-	ipQualityBarRed    = "#c0392b"
+	ipQualityBarGreen  = "#22da6e"
+	ipQualityBarYellow = "#c5e478"
+	ipQualityBarRed    = "#ef5350"
 
 	ipQualityFontFamily     = "ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', monospace"
 	ipQualityProvenanceNote = "本图由 QControlHub 面板根据上游 JSON 重绘，未使用上游上传的报告链接"
@@ -690,7 +692,7 @@ func buildIPQualitySVG(lines []ipQualityLine) []byte {
 	height := ipQualityRenderPaddingY*2 + len(lines)*ipQualityRenderLineHeight
 	var builder strings.Builder
 	fmt.Fprintf(&builder, `<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d" viewBox="0 0 %d %d" role="img">`, width, height, width, height)
-	builder.WriteString(`<title>IPQuality report</title><rect width="100%" height="100%" fill="#0b0b0b"/>`)
+	fmt.Fprintf(&builder, `<title>IPQuality report</title><rect width="100%%" height="100%%" fill="%s"/>`, ipQualityBackground)
 	fmt.Fprintf(&builder, `<g font-family="%s" font-size="%d">`, ipQualityFontFamily, ipQualityRenderFontSize)
 	for index, line := range lines {
 		top := ipQualityRenderPaddingY + index*ipQualityRenderLineHeight
