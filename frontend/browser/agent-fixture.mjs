@@ -418,6 +418,13 @@ window.fetch = async (input, options = {}) => {
     testAPI.agents = testAPI.agents.map((agent) => agent.id === agentID ? { ...agent, name } : agent);
     return json({ name });
   }
+  if (method === "DELETE" && /^\/agents\/[^/]+$/.test(path)) {
+    if (testAPI.deleteGate) await testAPI.deleteGate;
+    if (testAPI.deleteFailure) return json({ error: "temporary delete failure" }, 503);
+    const agentID = decodeURIComponent(path.split("/")[2]);
+    testAPI.agents = testAPI.agents.filter((agent) => agent.id !== agentID);
+    return json(null, 204);
+  }
   if (method === "PUT" && /^\/agents\/[^/]+\/capabilities\/[^/]+$/.test(path)) {
     if (testAPI.capabilityFailure) return json({ error: "capability save failure" }, 409);
     const [, , id, , engine] = path.split("/");
