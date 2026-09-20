@@ -236,7 +236,7 @@ func buildIPQualitySVG(lines []ipQualityLine) []byte {
 				runWidth := run.cells * ipQualityRenderCellWidth
 				if run.text != "" {
 					fmt.Fprintf(&builder, `<text x="%d" y="%d" fill="%s"%s%s xml:space="preserve">%s</text>`,
-						x, baseline, cell.fill, ipQualityStyleAttributes(cell), ipQualityLengthAttributes(runWidth),
+						x, baseline, cell.fill, ipQualityStyleAttributes(cell, run.text), ipQualityLengthAttributes(runWidth),
 						ipQualityEscape(run.text))
 				}
 				x += runWidth
@@ -247,19 +247,35 @@ func buildIPQualitySVG(lines []ipQualityLine) []byte {
 	return []byte(builder.String())
 }
 
-// ipQualityStyleAttributes renders the SGR state a run inherits.
-func ipQualityStyleAttributes(cell ipQualityCell) string {
+// ipQualityStyleAttributes renders the SGR state a run inherits. Italic is
+// dropped for a run that contains a full-width character: no terminal font
+// ships a true italic CJK face, so the browser synthesises an oblique that
+// visibly skews those glyphs, while the terminal the report was captured from
+// shows them upright. Latin runs keep the italic upstream asks for.
+func ipQualityStyleAttributes(cell ipQualityCell, text string) string {
 	attributes := ""
 	if cell.bold {
 		attributes += ` font-weight="bold"`
 	}
-	if cell.italic {
+	if cell.italic && !ipQualityWideText(text) {
 		attributes += ` font-style="italic"`
 	}
 	if cell.underline {
 		attributes += ` text-decoration="underline"`
 	}
 	return attributes
+}
+
+// ipQualityWideText reports whether a run contains a double-width character.
+// ipQualityRuns never mixes cell widths inside one run, so the first wide
+// character decides the whole run.
+func ipQualityWideText(text string) bool {
+	for _, character := range text {
+		if ipQualityRuneWidth(character) == 2 {
+			return true
+		}
+	}
+	return false
 }
 
 // ipQualityLengthAttributes pins a run to the terminal grid. A browser picks a

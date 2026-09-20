@@ -44,7 +44,7 @@ function shell(content, title, { viewKey = state.route } = {}) {
   };
   links.splice(0, links.length, ...links.filter(([id]) => can(linkPermissions[id])));
   app.style.display = "";
-  document.body.className = `app-body page-${state.route}${state.route === "node-settings" ? " page-agents no-context" : ""}${["client-connections", "ip-quality"].includes(state.route) ? " no-context" : ""}`;
+  document.body.className = `app-body page-${state.route}${state.route === "node-settings" ? " page-agents no-context" : ""}${state.route === "client-connections" ? " no-context" : ""}`;
   applyTheme();
   const context = contextMarkup(title);
   const overview = state.data.overview || {};

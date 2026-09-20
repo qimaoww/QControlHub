@@ -286,10 +286,41 @@ func ipQualityRunStartingAt(runs []ipQualityDrawnRun, x int) *ipQualityDrawnRun 
 
 func TestIPQualityRenderKeepsTerminalStyles(t *testing.T) {
 	svg := mustRenderIPQualitySVG(t, "\x1b[1m\x1b[3m\x1b[4m报告\x1b[0m")
-	for _, want := range []string{`font-weight="bold"`, `font-style="italic"`, `text-decoration="underline"`} {
+	for _, want := range []string{`font-weight="bold"`, `text-decoration="underline"`} {
 		if !strings.Contains(svg, want) {
 			t.Fatalf("rendered report is missing %s", want)
 		}
+	}
+	if strings.Contains(svg, `font-style="italic"`) {
+		t.Fatal("a full-width run was drawn with a synthetic oblique")
+	}
+}
+
+// Upstream marks database names and score rows italic. No terminal font ships a
+// true italic CJK face, so the browser synthesises an oblique that skews glyphs
+// the reference terminal shows upright; Latin runs keep the upstream emphasis.
+func TestIPQualityRenderKeepsItalicOnLatinRunsOnly(t *testing.T) {
+	svg := mustRenderIPQualitySVG(t, "\x1b[3mMaxmind 数据库\x1b[0m\x1b[3mIPinfo\x1b[0m")
+	runs := ipQualityDrawnRuns(svg)
+	italic := map[string]bool{}
+	for _, run := range runs {
+		italic[run.content] = strings.Contains(run.attributes, `font-style="italic"`)
+	}
+	for _, latin := range []string{"Maxmind ", "IPinfo"} {
+		applied, drawn := italic[latin]
+		if !drawn {
+			t.Fatalf("Latin run %q is missing from %+v", latin, runs)
+		}
+		if !applied {
+			t.Fatalf("Latin run %q lost the italic upstream asked for: %+v", latin, runs)
+		}
+	}
+	applied, drawn := italic["数据库"]
+	if !drawn {
+		t.Fatalf("full-width run is missing from %+v", runs)
+	}
+	if applied {
+		t.Fatalf("full-width run was drawn with a synthetic oblique: %+v", runs)
 	}
 }
 

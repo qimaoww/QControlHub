@@ -11,7 +11,7 @@ export function createIPQualityController(ctx, view) {
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
   const current = (data, epoch) => data === state.data && epoch === state.navigationEpoch && state.route === "ip-quality";
   const editable = (agent) => agent?.can_manage !== false && can("agents.manage", agent) && can("tasks.execute");
-  const bind = createIPQualityBindings({ state, load, runCheck, setSchedule });
+  const bind = createIPQualityBindings({ state, load, runCheck, setSchedule, select });
   const poller = createPoller({
     run: () => load(undefined, { background: true }),
     isActive: () => state.route === "ip-quality",
@@ -98,5 +98,14 @@ export function createIPQualityController(ctx, view) {
   }
   function runCheck(agentID) { return mutate(agentID); }
   function setSchedule(agentID, enabled) { return mutate(agentID, enabled); }
-  return { load, runCheck, setSchedule };
+  // Switching the selected node repaints from the loaded snapshot: the sidebar
+  // only ever offers nodes the current day already returned, so no read is
+  // needed, and the repaint is what moves the sidebar highlight.
+  function select(agentID) {
+    if (state.data.ipQualityAgent === agentID) return false;
+    state.data.ipQualityAgent = agentID;
+    render(state.data.ipQualityDate);
+    return true;
+  }
+  return { load, runCheck, setSchedule, select };
 }

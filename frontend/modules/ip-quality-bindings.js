@@ -1,8 +1,14 @@
 import { bindEvent } from "./refresh.js";
 import { ipQualityToday, nextIPQualityDay, validIPQualityDate } from "./ip-quality-model.js";
 
-export function createIPQualityBindings({ state, load, runCheck, setSchedule }) {
+export function createIPQualityBindings({ state, load, runCheck, setSchedule, select }) {
   return () => {
+    document.querySelectorAll("[data-ip-quality-agent]").forEach((link) => {
+      bindEvent(link, "click", (event) => {
+        event.preventDefault();
+        select(link.dataset.ipQualityAgent || "");
+      });
+    });
     const input = document.querySelector("[data-ip-quality-date]");
     bindEvent(input, "change", () => {
       if (!validIPQualityDate(input.value) || input.value > ipQualityToday()) {

@@ -25,12 +25,15 @@ const report = {
   Mail: { Port25: false, DNSBlacklist: { Total: null, Blacklisted: null } },
 };
 const agent = { id: "alpha", name: "Node A", can_manage: true, status: "online", features: ["ip-quality-v2"] };
+const legacyAgent = { id: "beta", name: "Node B", can_manage: true, status: "offline", features: [] };
 const history = (day, records = []) => ({ date: day, timezone: "UTC", records, schedules: [] });
 let markup = "";
-const render = createIPQualityView({ shell: (html) => { markup = html; }, esc, date: (value) => value || "—" });
-render({ date: "2025-09-16", timezone: "UTC", history: history("2025-09-16", [{
-  task_id: "task-1", agent_id: "alpha", status: "succeeded", result: { reports: [report] },
-}]), agents: [agent], submitting: new Set(), editable: () => true });
+const viewState = { data: {} };
+const render = createIPQualityView({ shell: (html) => { markup = html; }, state: viewState, esc, date: (value) => value || "—" });
+const renderDay = (date, records = [], agents = [agent, legacyAgent], options = {}) =>
+  render({ date, timezone: "UTC", history: history(date, records), agents, submitting: new Set(), editable: () => true, ...options });
+const todayRecord = { task_id: "task-1", agent_id: "alpha", status: "succeeded", result: { reports: [report] } };
+renderDay("2025-09-16", [todayRecord]);
 assert.ok(markup.includes("&lt;img"));
 assert.ok(!markup.includes("<img"));
 assert.ok(markup.includes("<dd>未知</dd>"));
@@ -44,12 +47,35 @@ assert.ok(!markup.includes("data-ip-quality-run"), "historical report has a run 
 assert.ok(!markup.includes("data-ip-quality-schedule"), "historical report has schedule controls");
 assert.ok(!markup.includes("节点在线"), "historical report presents the current online state");
 assert.ok(markup.includes("data-ip-quality-today"), "history has no return-to-today control");
-render({ date: "2025-09-16", timezone: "UTC", history: history("2025-09-16"), agents: [agent], submitting: new Set(), editable: () => true });
-assert.ok(markup.includes("当天没有检测记录"));
-assert.ok(!markup.includes("data-ip-quality-agent"), "history rendered nodes without records");
-render({ date: ipQualityToday(), timezone: "UTC", history: history(ipQualityToday()), agents: [agent], submitting: new Set(), editable: () => true });
+// The page shows one node, and publishes the same list the sidebar renders.
+assert.equal(markup.match(/data-ip-quality-panel=/g).length, 1, "the page rendered more than one node");
+assert.ok(markup.includes('data-ip-quality-panel="alpha"'), "the recorded node is not the selected panel");
+assert.equal(viewState.data.ipQualityAgent, "alpha", "selection was not published for the sidebar");
+assert.deepEqual(viewState.data.ipQualityNodes.map((node) => node.id), ["alpha"], "history offered nodes without records");
+assert.deepEqual(viewState.data.ipQualityNodes[0], { id: "alpha", name: "Node A", note: "已完成", dot: "ok" },
+  "the sidebar projection lost its per-node status");
+renderDay(ipQualityToday());
 assert.ok(markup.includes("data-ip-quality-run"), "today lost its run button");
 assert.ok(markup.includes("data-ip-quality-schedule"), "today lost its schedule controls");
+assert.deepEqual(viewState.data.ipQualityNodes.map((node) => node.id), ["alpha", "beta"], "today hid a managed node");
+assert.deepEqual(viewState.data.ipQualityNodes.map((node) => node.note), ["当天未检测", "需升级 Agent"],
+  "the sidebar lost its per-node status");
+// A remembered node that the day does not list falls back to the first visible
+// one, so the sidebar highlight and the panel can never disagree.
+viewState.data.ipQualityAgent = "beta";
+renderDay("2025-09-16", [todayRecord]);
+assert.equal(viewState.data.ipQualityAgent, "alpha", "history kept a node it does not list");
+// A foreground read with no data yet must not drop the selection or blink the
+// sidebar away: only a completed read may publish an empty node list.
+viewState.data.ipQualityAgent = "beta";
+render({ date: ipQualityToday(), timezone: "UTC", agents: [], submitting: new Set(), editable: () => true, loading: true });
+assert.equal(viewState.data.ipQualityAgent, "beta", "a loading read dropped the selected node");
+assert.deepEqual(viewState.data.ipQualityNodes.map((node) => node.id), ["alpha"], "a loading read cleared the sidebar");
+assert.ok(markup.includes("正在读取检测记录…"));
+renderDay("2025-09-16", []);
+assert.ok(markup.includes("当天没有检测记录"));
+assert.ok(!markup.includes("data-ip-quality-panel"), "history rendered nodes without records");
+assert.deepEqual(viewState.data.ipQualityNodes, [], "history listed nodes without records");
 render({ date: "2025-09-16", timezone: "UTC", error: "无法读取", agents: [], submitting: new Set(), editable: () => false });
 assert.ok(!markup.includes("203.0.113.1"), "failed reads must never create example nodes");
 assert.ok(!markup.includes("data-ip-quality-run"));
@@ -109,6 +135,16 @@ try {
   await timers.get(scheduledTimer)();
   assert.equal(calls.length, count + 2, "polling did not continue after an invalid date");
   assert.equal(timers.size, 1, "polling duplicated its timer");
+
+  // Switching the selected node repaints from the loaded snapshot: the sidebar
+  // only offers nodes the day already returned, so no read is issued.
+  const readsBeforeSelect = calls.length, paintsBeforeSelect = views.length;
+  assert.equal(controller.select("beta"), true, "selecting a node did not repaint");
+  assert.equal(state.data.ipQualityAgent, "beta");
+  assert.equal(calls.length, readsBeforeSelect, "selecting a node re-read the API");
+  assert.equal(views.length, paintsBeforeSelect + 1, "selecting a node did not repaint exactly once");
+  assert.equal(controller.select("beta"), false, "re-selecting the same node repainted again");
+  assert.equal(views.length, paintsBeforeSelect + 1, "re-selecting the same node repainted again");
 
   function gate(day) {
     let resolve;

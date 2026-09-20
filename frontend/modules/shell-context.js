@@ -3,7 +3,14 @@ import { installedEngineCount } from "./agent-service-state.js";
 
 export function createShellContext({ state, can, esc, engineName, ago, engines }) {
 function contextMarkup(title) {
-  if (["client-connections", "ip-quality"].includes(state.route)) return "";
+  if (state.route === "client-connections") return "";
+  if (state.route === "ip-quality") {
+    // One node at a time: the page owns the selection and publishes the exact
+    // list it renders, so the sidebar can never link to a node the panel hides.
+    const nodes = state.data.ipQualityNodes || [];
+    const selected = state.data.ipQualityAgent || "";
+    return `<div class="context-section-label"><span>选择节点</span><b>${nodes.length}</b></div><nav class="context-list" aria-label="IP 质量检测节点">${nodes.map((node) => `<a class="${selected === node.id ? "active" : ""}" href="#ip-quality" data-ip-quality-agent="${esc(node.id)}"><i class="status-dot ${esc(node.dot)}"></i><span><strong>${esc(node.name)}</strong><small>${esc(node.note)}</small></span></a>`).join("") || "<p>还没有节点</p>"}</nav>`;
+  }
   if (state.route === "users")
     return `<div class="context-section-label"><span>用户</span><b>${(state.data.users || []).length}</b></div><nav class="context-list" aria-label="用户列表">${(state.data.users || []).map((user) => `<a href="#users" data-user-select="${esc(user.id)}" class="${user.id === state.data.userID ? "active" : ""}"><i class="status-dot ${user.disabled ? "" : "ok"}"></i><span><strong>${esc(user.display_name || user.username)}</strong><small>${esc(user.username)} · ${user.role === "admin" ? "管理员" : "用户"}</small></span></a>`).join("")}</nav>`;
   if (state.route === "my-quota")
