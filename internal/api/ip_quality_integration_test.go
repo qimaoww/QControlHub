@@ -136,6 +136,7 @@ func TestIPQualityAPIAndWebSocketLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	report.ReportsText = []string{"IP质量体检报告：203.0.113.1\nIP2Location：  3|低风险\n"}
 	if err := wsjson.Write(ctx, connection, core.WireMessage{Type: core.WireResult, Result: &core.TaskResultEnvelope{
 		TaskID: task.ID, Result: core.TaskResultRequest{LeaseID: message.Task.LeaseID, Success: true, IPQuality: &report},
 	}}); err != nil {
@@ -179,7 +180,7 @@ func TestIPQualityAPIAndWebSocketLifecycle(t *testing.T) {
 	// failed task, and the same authenticated connection must remain usable.
 	bad := core.IPQualityResult{Reports: []json.RawMessage{
 		json.RawMessage(`{"Head":{"IP":"203.0.113.1"},"Info":{"Organization":"provider\u0000value"},"Type":{},"Score":{},"Factor":{},"Media":{},"Mail":{}}`),
-	}}
+	}, ReportsText: []string{"IP质量体检报告：203.0.113.1\n"}}
 	for _, test := range []struct {
 		report core.IPQualityResult
 		status core.TaskStatus

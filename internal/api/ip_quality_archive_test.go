@@ -13,18 +13,29 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
-const ipQualityRenderFixture = `{"Head":{"IP":"203.0.113.1","Time":"2026-09-19 13:56:33 UTC","Version":"v2026-09-16"},` +
-	`"Info":{"ASN":"210634","Organization":"YSTRONTEK NETWORKS","DMS":"114°10′29″E","Map":"https://check.place/1,2,12,en",` +
-	`"TimeZone":"Asia/Hong_Kong","City":{"Name":"香港","PostalCode":"999077"},"Region":{"Code":"HK","Name":"香港"},` +
-	`"Continent":{"Code":"AS","Name":"亚洲"},"RegisteredRegion":{"Code":"US","Name":"美国"},"Type":"广播IP"},` +
-	`"Type":{"Usage":{"IPinfo":"机房","ipapi":"商业"},"Company":{"IPinfo":"机房"}},` +
-	`"Score":{"IP2LOCATION":"3","ipapi":"5.47%","IPQS":"null"},` +
-	`"Factor":{"CountryCode":{"IPinfo":"HK","ipapi":"HK"},"Proxy":{"IPinfo":false,"ipapi":true}},` +
-	`"Media":{"TikTok":{"Status":"解锁","Region":"ALISG","Type":"原生"},"ChatGPT":{"Status":"仅APP","Region":"HK","Type":"DNS"}},` +
-	`"Mail":{"Port25":true,"Gmail":true,"QQ":false,"DNSBlacklist":{"Total":423,"Clean":404,"Marked":18,"Blacklisted":1}}}`
+// ipQualityPrintedFixture mirrors what ip.sh prints, ANSI colours included.
+const ipQualityPrintedFixture = "\x1b[36m########################################################################\x1b[0m\n" +
+	"                 \x1b[1mIP质量体检报告：\x1b[36m203.0.113.1\x1b[0m\n" +
+	"                   https://github.com/xykt/IPQuality\n" +
+	"                bash <(curl -sL https://Check.Place) -I\n" +
+	"        报告时间：2026-09-19 13:56:33 CST  脚本版本：v2026-09-16\n" +
+	"\x1b[36m########################################################################\x1b[0m\n" +
+	"一、基础信息（Maxmind 数据库）\n" +
+	"\x1b[36m自治系统号：            \x1b[32mAS210634\x1b[0m\n" +
+	"\x1b[36mIP类型：                \x1b[41m\x1b[37m\x1b[1m 广播IP \x1b[0m\n" +
+	"三、风险评分\n" +
+	"\x1b[36mIP2Location：\x1b[37m\x1b[1m  3\x1b[42m              31|\x1b[0m\x1b[32m低风险\x1b[0m\n" +
+	"\x1b[36mipapi：\x1b[37m\x1b[1m    0.00%\x1b[41m 5.47%|\x1b[0m\x1b[31m极低风险\x1b[0m\n" +
+	"五、流媒体及AI服务解锁检测\n" +
+	"状态：   \x1b[42m\x1b[37m 解锁 \x1b[0m  \x1b[41m\x1b[37m 屏蔽 \x1b[0m  \x1b[43m\x1b[37m 仅APP \x1b[0m\n" +
+	"========================================================================\n" +
+	"今日IP检测量：565；总检测量：2204309。感谢使用xy系列脚本！\n"
 
-func TestIPQualityRenderDrawsStoredReport(t *testing.T) {
-	archives, err := renderIPQualityArchives(&core.IPQualityResult{Reports: []json.RawMessage{json.RawMessage(ipQualityRenderFixture)}})
+func TestIPQualityRenderDrawsPrintedReport(t *testing.T) {
+	reports := []json.RawMessage{
+		json.RawMessage(`{"Head":{"IP":"203.0.113.1"},"Info":{},"Type":{},"Score":{},"Factor":{},"Media":{},"Mail":{}}`),
+	}
+	archives, err := renderIPQualityArchives(&core.IPQualityResult{Reports: reports, ReportsText: []string{ipQualityPrintedFixture}})
 	if err != nil || len(archives) != 1 {
 		t.Fatalf("render: %+v %v", archives, err)
 	}
@@ -38,35 +49,40 @@ func TestIPQualityRenderDrawsStoredReport(t *testing.T) {
 	}
 	content := string(archive.Content)
 	for _, want := range []string{
-		"<svg", "IP质量体检报告：203.0.113.1", "脚本版本：v2026-09-16", "AS210634", "YSTRONTEK NETWORKS",
-		"[HK]香港", "广播IP", "机房", "商业", "低风险", "高风险", "解锁", "仅APP", "DNS",
-		"Gmail", "已标记 ", "黑名单 ", "风险等级：", "有效 ",
+		"<svg", "IP质量体检报告：", "203.0.113.1", "AS210634", "广播IP", "低风险", "极低风险",
+		"今日IP检测量：565；总检测量：2204309", ipQualityGreen, ipQualityRed, ipQualityYellow,
 	} {
 		if !strings.Contains(content, want) {
 			t.Fatalf("rendered report is missing %q", want)
 		}
 	}
-	// The panel must not carry an upstream report link any more.
-	if strings.Contains(content, "report.check.place") {
-		t.Fatal("rendered report still references the upstream report host")
+	if strings.Contains(content, "\x1b") {
+		t.Fatal("ANSI escapes leaked into the SVG")
 	}
-	if err := validateRenderedSVG([]byte(content)); err != nil {
+	if err := validateRenderedSVG(archive.Content); err != nil {
 		t.Fatalf("rendered report is not a single SVG document: %v", err)
 	}
 }
 
-func TestIPQualityRenderEscapesAndRejectsBadReports(t *testing.T) {
-	hostile := `{"Head":{"IP":"203.0.113.1"},"Info":{"Organization":"<script>alert(1)</script>"},"Type":{},"Score":{},"Factor":{},"Media":{},"Mail":{}}`
-	archives, err := renderIPQualityArchives(&core.IPQualityResult{Reports: []json.RawMessage{json.RawMessage(hostile)}})
+func TestIPQualityRenderEscapesAndRejectsBadText(t *testing.T) {
+	hostile := "报告：<script>alert(1)</script> & <b>\x07\x1b[31m红色\x1b[0m"
+	svg, err := renderIPQualitySVG(hostile)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(archives[0].Content), "<script>") {
-		t.Fatal("provider text was not escaped")
+	rendered := string(svg)
+	if strings.Contains(rendered, "<script>") || strings.Contains(rendered, "& <b>") {
+		t.Fatal("report text was not escaped")
 	}
-	for _, raw := range []string{`not json`, `{"Info":{}}`, `{"Head":{"IP":""}}`, `[]`} {
-		if _, err := renderIPQualitySVG(json.RawMessage(raw), nil); err == nil {
-			t.Fatalf("accepted malformed report %q", raw)
+	if !strings.Contains(rendered, "&lt;script&gt;") || !strings.Contains(rendered, "&amp;") {
+		t.Fatal("expected escaped markup in the SVG")
+	}
+	if err := validateRenderedSVG(svg); err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []string{"", "   \n  ", strings.Repeat("x", ipQualityRenderMaxText+1), string([]byte{0xff, 0xfe})} {
+		if _, err := renderIPQualitySVG(bad); err == nil {
+			t.Fatalf("accepted invalid report text %q", bad)
 		}
 	}
 }
@@ -76,12 +92,17 @@ func TestIPQualityRenderAssignsAddressFamilies(t *testing.T) {
 		json.RawMessage(`{"Head":{"IP":"203.0.113.1"},"Info":{},"Type":{},"Score":{},"Factor":{},"Media":{},"Mail":{}}`),
 		json.RawMessage(`{"Head":{"IP":"2001:db8::1"},"Info":{},"Type":{},"Score":{},"Factor":{},"Media":{},"Mail":{}}`),
 	}
-	archives, err := renderIPQualityArchives(&core.IPQualityResult{Reports: reports})
+	archives, err := renderIPQualityArchives(&core.IPQualityResult{
+		Reports: reports, ReportsText: []string{"报告一\n", "报告二\n"},
+	})
 	if err != nil || len(archives) != 2 {
 		t.Fatalf("render: %+v %v", archives, err)
 	}
 	if archives[0].Family != 4 || archives[1].Family != 6 {
 		t.Fatalf("families = %d, %d", archives[0].Family, archives[1].Family)
+	}
+	if _, err := renderIPQualityArchives(&core.IPQualityResult{Reports: reports}); err == nil {
+		t.Fatal("accepted a result without the printed report")
 	}
 }
 

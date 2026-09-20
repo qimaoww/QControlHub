@@ -44,7 +44,7 @@ export function createIPQualityView({ shell, esc, date: formatDate }) {
       </section>
       <section class="ip-quality-toolbar"><div><h3>${esc(date)}</h3><span>按任务提交日归档 · 每日检测默认关闭 · 延迟、丢包和 DNS / WebRTC 泄漏未检测</span></div><button type="button" class="button small" data-ip-quality-refresh${loading ? " disabled" : ""}>${loading ? "正在读取…" : "重新读取"}</button></section>
       <div class="ip-quality-grid" aria-busy="${loading}">${cards || `<div class="empty large"><strong>${loading ? "正在读取检测记录…" : error ? "无法读取检测记录" : "没有可查看的自有节点"}</strong><p>${loading || error ? "请稍候或重新读取。" : "IP 检测仅面向节点所有者和有权限的管理员；共享不授予主机检测权限。"}</p></div>`}</div>
-      <p class="ip-quality-source">检测程序：<a href="https://github.com/xykt/IPQuality" target="_blank" rel="noopener noreferrer">xykt/IPQuality</a>（AGPL-3.0）· 检测会向上游上传报告以生成下载链接；面板下载 SVG 后仅存入数据库。结果仅供参考。</p>
+      <p class="ip-quality-source">检测程序：<a href="https://github.com/xykt/IPQuality" target="_blank" rel="noopener noreferrer">xykt/IPQuality</a>（AGPL-3.0）· 检测在节点上以隐私模式运行（不上传报告）；面板根据节点回传的报告原文自行绘制图片并存入数据库。结果仅供参考。</p>
     </div>`, "IP 质量", { viewKey: `ip-quality-${date}` });
   };
 }

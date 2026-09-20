@@ -4,9 +4,11 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
@@ -18,11 +20,10 @@ import (
 func renderIPQualityArchives(result *core.IPQualityResult) ([]core.IPQualityArchive, error) {
 	archives := make([]core.IPQualityArchive, 0, len(result.Reports))
 	for index, report := range result.Reports {
-		var levels map[string]string
-		if index < len(result.Levels) {
-			levels = result.Levels[index]
+		if index >= len(result.ReportsText) || strings.TrimSpace(result.ReportsText[index]) == "" {
+			return nil, errors.New("Agent 未返回报告原文，请升级 Agent 后重新检测")
 		}
-		content, err := renderIPQualitySVG(report, levels)
+		content, err := renderIPQualitySVG(result.ReportsText[index])
 		if err != nil {
 			return nil, err
 		}

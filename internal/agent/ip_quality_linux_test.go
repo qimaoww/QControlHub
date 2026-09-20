@@ -71,26 +71,35 @@ func TestIPQualityProgramUsesOfficialOneLiner(t *testing.T) {
 	}
 }
 
-func TestIPQualityLevelsFromPrintedReport(t *testing.T) {
-	// The Agent keeps upstream's printed report on stdout to recover the risk
-	// wording ipapi and DB-IP return from their own APIs.
-	printed := "\x1b[36mIP质量体检报告：203.0.113.1\x1b[0m\n" +
+func TestIPQualityReportTextsFromPrintedOutput(t *testing.T) {
+	// The Agent keeps upstream's printed report so the panel can render exactly
+	// what the terminal shows, instead of re-deriving the layout from the JSON.
+	printed := "\x1b[36m########################################################################\x1b[0m\n" +
+		"                 \x1b[1mIP质量体检报告(Lite)：\x1b[36m203.0.113.1\x1b[0m\n" +
+		"        报告时间：2026-09-19 13:56:33 CST  脚本版本：v2026-09-16\n" +
+		"\x1b[36m########################################################################\x1b[0m\n" +
 		"三、风险评分\n" +
-		"IP2Location：\x1b[32m  3\x1b[0m|\x1b[32m低风险\x1b[0m\n" +
-		"ipapi：\x1b[32m    0.00%\x1b[0m|\x1b[32m极低风险\x1b[0m\n" +
-		"IP质量体检报告(Lite)：2001:db8::1\n" +
-		"ipapi：\x1b[31m    5.47%\x1b[0m|\x1b[31m高风险\x1b[0m\n" +
-		"DB-IP：\x1b[33m  40\x1b[0m|\x1b[33m中风险\x1b[0m\n"
-	levels := parseIPQualityLevels(printed)
-	if len(levels) != 2 || len(levels[0]) != 2 || len(levels[1]) != 2 {
-		t.Fatalf("parsed levels = %+v", levels)
+		"DB-IP：         |低风险\n" +
+		"========================================================================\n" +
+		"今日IP检测量：565；总检测量：2204309。感谢使用xy系列脚本！\n" +
+		"########################################################################\n" +
+		"                 IP质量体检报告：2001:db8::1\n" +
+		"ipapi：    0.00%|极低风险\n" +
+		"========================================================================\n"
+	texts := parseIPQualityReportTexts(printed)
+	if len(texts) != 2 {
+		t.Fatalf("parsed %d reports: %q", len(texts), texts)
 	}
-	if levels[0]["IP2LOCATION"] != "低风险" || levels[0]["ipapi"] != "极低风险" ||
-		levels[1]["ipapi"] != "高风险" || levels[1]["DBIP"] != "中风险" {
-		t.Fatalf("parsed levels = %+v", levels)
+	if !strings.Contains(texts[0], "IP质量体检报告(Lite)：") || !strings.Contains(texts[0], "DB-IP：         |低风险") ||
+		!strings.Contains(texts[0], "今日IP检测量：565") {
+		t.Fatalf("lite report = %q", texts[0])
 	}
-	if got := parseIPQualityLevels("no report here"); len(got) != 0 {
-		t.Fatalf("parsed levels from empty output = %+v", got)
+	if !strings.Contains(texts[1], "IP质量体检报告：2001:db8::1") || strings.Contains(texts[1], "DB-IP") ||
+		!strings.Contains(texts[1], "ipapi：    0.00%|极低风险") {
+		t.Fatalf("full report = %q", texts[1])
+	}
+	if got := parseIPQualityReportTexts("no report here"); len(got) != 0 {
+		t.Fatalf("parsed reports from unrelated output = %+v", got)
 	}
 }
 

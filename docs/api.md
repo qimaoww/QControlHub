@@ -509,10 +509,11 @@ WSS 握手必须协商子协议 `qcontrolhub.agent.v1`。服务端先发送只�
 `engine=""` 的任务；旧 Agent 不会领取或恢复该动作。检测最多 10 分钟，
 重试租约至少 12 分钟，连接心跳不因检测停止。
 Agent 在 `result.result.ip_quality.reports` 发送一至两个上游 JSON 对象，
-并在同层 `report_urls` 数组发送逐一对应的固定域名 SVG 链接；不发送 SVG 字节。
-结构化结果总上限 128 KiB；各对象必须有完整公网 IP 的 `Head` 及对象类型的
-`Info`、`Type`、`Score`、`Factor`、`Media`、`Mail`，地址族不能重复。
-控制面再次验证、下载链接指向的 SVG 后，将原文和摘要与任务状态原子保存，才发送 `result_ack`；
+并在同层 `reports_text` 数组发送逐一对应的上游打印报告原文（含 ANSI 颜色码，
+有界 UTF-8 文本）；不发送 SVG 字节。结构化结果总上限 128 KiB；各对象必须有
+完整公网 IP 的 `Head` 及对象类型的 `Info`、`Type`、`Score`、`Factor`、`Media`、
+`Mail`，地址族不能重复。控制面再次验证并把报告原文渲染成 SVG 后，
+将原文和摘要与任务状态原子保存，才发送 `result_ack`；
 仅设置 `success=true` 而没有有效报告会记为失败。JSONB 无法表示的 Unicode、
 数字或超出存储大小限制的报告同样记为失败并确认，不让坏数据反复阻断 WSS；
 下载失败、缺少链接或无效 SVG 同样标记失败并确认，数据库故障等非数据错误仍允许重传。

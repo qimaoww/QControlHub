@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"syscall"
 
@@ -119,55 +118,45 @@ func executeIPQualityProgram(ctx context.Context, bash, program string) (core.IP
 		// a successful result. The exit status still helps diagnose missing tools.
 		return core.IPQualityResult{}, fmt.Errorf("IPQuality 未生成有效报告（执行状态：%v）：%w", runErr, err)
 	}
-	if levels := parseIPQualityLevels(output.String()); len(levels) == len(result.Reports) {
-		result.Levels = levels
+	if texts := parseIPQualityReportTexts(output.String()); len(texts) == len(result.Reports) {
+		result.ReportsText = texts
 	}
 	// Upstream's final [[ IPv6 available ]] returns 1 on IPv4-only hosts even
 	// after a valid IPv4 report. A validated report, not that status, is decisive.
 	return result, nil
 }
 
-// ipQualityLevelLabels maps the detector's printed provider names to the keys
-// the panel renders.
-var ipQualityLevelLabels = map[string]string{
-	"IP2Location": "IP2LOCATION",
-	"Scamalytics": "SCAMALYTICS",
-	"ipapi":       "ipapi",
-	"AbuseIPDB":   "AbuseIPDB",
-	"IPQS":        "IPQS",
-	"DB-IP":       "DBIP",
+// parseIPQualityReportTexts splits the detector's printed output into one entry
+// per address family. The panel renders the archived image from this text, so
+// the image is exactly what the terminal shows.
+func parseIPQualityReportTexts(output string) []string {
+	lines := strings.Split(strings.ReplaceAll(output, "\r\n", "\n"), "\n")
+	starts := make([]int, 0, 2)
+	for index, line := range lines {
+		if !strings.Contains(line, "IP质量体检报告") {
+			continue
+		}
+		if start := index - 1; start >= 0 && isIPQualityBanner(lines[start]) {
+			index = start
+		}
+		starts = append(starts, index)
+	}
+	texts := make([]string, 0, len(starts))
+	for index, start := range starts {
+		end := len(lines)
+		if index+1 < len(starts) {
+			end = starts[index+1]
+		}
+		if text := strings.TrimRight(strings.Join(lines[start:end], "\n"), "\n"); text != "" {
+			texts = append(texts, text)
+		}
+	}
+	return texts
 }
 
-var (
-	ipQualityANSIPattern = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
-	ipQualityLevelLine   = regexp.MustCompile(`^([^：:]+)[：:][^|]*[|](\S+)$`)
-)
-
-// parseIPQualityLevels reads the risk wording upstream prints, one map per
-// address family. ipapi and DB-IP return it from their own APIs, so it is not
-// recoverable from the score in the JSON.
-func parseIPQualityLevels(output string) []map[string]string {
-	text := ipQualityANSIPattern.ReplaceAllString(output, "")
-	sections := strings.Split(text, "IP质量体检报告")
-	levels := make([]map[string]string, 0, len(sections)-1)
-	for _, section := range sections[1:] {
-		found := map[string]string{}
-		for _, line := range strings.Split(section, "\n") {
-			match := ipQualityLevelLine.FindStringSubmatch(strings.TrimSpace(line))
-			if match == nil {
-				continue
-			}
-			key, ok := ipQualityLevelLabels[strings.TrimSpace(match[1])]
-			if !ok {
-				continue
-			}
-			if label := strings.TrimSpace(match[2]); label != "" {
-				found[key] = label
-			}
-		}
-		levels = append(levels, found)
-	}
-	return levels
+func isIPQualityBanner(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	return len(trimmed) >= 32 && strings.Trim(trimmed, "#") == ""
 }
 
 func readIPQualityReport(directory string) (core.IPQualityResult, error) {

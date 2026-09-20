@@ -11,13 +11,6 @@ import (
 	"unicode/utf8"
 )
 
-// ipQualityLevelProviders bounds the provider keys the Agent may send back with
-// the risk wording it read from the detector output.
-var ipQualityLevelProviders = map[string]bool{
-	"IP2LOCATION": true, "SCAMALYTICS": true, "ipapi": true,
-	"AbuseIPDB": true, "IPQS": true, "DBIP": true,
-}
-
 const (
 	AgentFeatureIPQuality   = "ip-quality-v1"
 	MaxIPQualityResultBytes = 128 << 10
@@ -31,10 +24,11 @@ const (
 // The panel renders its own report image from these bytes.
 type IPQualityResult struct {
 	Reports []json.RawMessage `json:"reports"`
-	// Levels preserves the risk wording upstream printed for each report, keyed
-	// by provider. ipapi and DB-IP take that wording from their own APIs, so it
-	// cannot be derived from the score the report stores.
-	Levels []map[string]string `json:"levels,omitempty"`
+	// ReportsText carries the detector's own printed report, one entry per
+	// address family, including its ANSI colour codes. The panel renders the
+	// archived image from this text, so the image is exactly what the terminal
+	// shows instead of a re-derived approximation.
+	ReportsText []string `json:"reports_text,omitempty"`
 }
 
 type IPQualityRecord struct {
@@ -132,21 +126,18 @@ func NormalizeIPQualityResult(input *IPQualityResult) (IPQualityResult, error) {
 		}
 		result.Reports = append(result.Reports, json.RawMessage(compact.Bytes()))
 	}
-	if len(input.Levels) != 0 {
-		if len(input.Levels) != len(result.Reports) {
-			return IPQualityResult{}, errors.New("IPQuality risk wording does not match address families")
+	if len(input.ReportsText) != 0 {
+		if len(input.ReportsText) != len(result.Reports) {
+			return IPQualityResult{}, errors.New("IPQuality printed report does not match address families")
 		}
-		for _, levels := range input.Levels {
-			if len(levels) > len(ipQualityLevelProviders) {
-				return IPQualityResult{}, errors.New("IPQuality returned too many risk labels")
-			}
-			for provider, label := range levels {
-				if !ipQualityLevelProviders[provider] || label == "" || len(label) > 32 || !utf8.ValidString(label) {
-					return IPQualityResult{}, errors.New("IPQuality returned an invalid risk label")
-				}
+		total := 0
+		for _, text := range input.ReportsText {
+			total += len(text)
+			if text == "" || total > MaxIPQualityResultBytes || !utf8.ValidString(text) {
+				return IPQualityResult{}, errors.New("IPQuality printed report is too large or is not UTF-8")
 			}
 		}
-		result.Levels = input.Levels
+		result.ReportsText = input.ReportsText
 	}
 	encoded, err := json.Marshal(result)
 	if err != nil || len(encoded) > MaxIPQualityResultBytes {
