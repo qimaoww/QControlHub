@@ -58,7 +58,7 @@ func TestIPQualityExecutableChecksMetadata(t *testing.T) {
 func TestIPQualityProgramUsesOfficialOneLiner(t *testing.T) {
 	for _, want := range []string{
 		"curl -Ls https://IP.Check.Place",
-		`-y -p -f -j -o "$1"`,
+		`-y -p -f -o "$1"`,
 	} {
 		if !strings.Contains(ipQualityProgram, want) {
 			t.Fatalf("IPQuality program is missing %q", want)
@@ -68,6 +68,29 @@ func TestIPQualityProgramUsesOfficialOneLiner(t *testing.T) {
 	// panel renders the image from the returned JSON instead.
 	if strings.Contains(ipQualityProgram, "upload.check.place") || strings.Contains(ipQualityProgram, "QCH_IPQUALITY_LINKS") {
 		t.Fatal("IPQuality program still exports an upstream report link")
+	}
+}
+
+func TestIPQualityLevelsFromPrintedReport(t *testing.T) {
+	// The Agent keeps upstream's printed report on stdout to recover the risk
+	// wording ipapi and DB-IP return from their own APIs.
+	printed := "\x1b[36mIP质量体检报告：203.0.113.1\x1b[0m\n" +
+		"三、风险评分\n" +
+		"IP2Location：\x1b[32m  3\x1b[0m|\x1b[32m低风险\x1b[0m\n" +
+		"ipapi：\x1b[32m    0.00%\x1b[0m|\x1b[32m极低风险\x1b[0m\n" +
+		"IP质量体检报告(Lite)：2001:db8::1\n" +
+		"ipapi：\x1b[31m    5.47%\x1b[0m|\x1b[31m高风险\x1b[0m\n" +
+		"DB-IP：\x1b[33m  40\x1b[0m|\x1b[33m中风险\x1b[0m\n"
+	levels := parseIPQualityLevels(printed)
+	if len(levels) != 2 || len(levels[0]) != 2 || len(levels[1]) != 2 {
+		t.Fatalf("parsed levels = %+v", levels)
+	}
+	if levels[0]["IP2LOCATION"] != "低风险" || levels[0]["ipapi"] != "极低风险" ||
+		levels[1]["ipapi"] != "高风险" || levels[1]["DBIP"] != "中风险" {
+		t.Fatalf("parsed levels = %+v", levels)
+	}
+	if got := parseIPQualityLevels("no report here"); len(got) != 0 {
+		t.Fatalf("parsed levels from empty output = %+v", got)
 	}
 }
 

@@ -17,8 +17,12 @@ import (
 // and detection no longer depends on an upload endpoint.
 func renderIPQualityArchives(result *core.IPQualityResult) ([]core.IPQualityArchive, error) {
 	archives := make([]core.IPQualityArchive, 0, len(result.Reports))
-	for _, report := range result.Reports {
-		content, err := renderIPQualitySVG(report)
+	for index, report := range result.Reports {
+		var levels map[string]string
+		if index < len(result.Levels) {
+			levels = result.Levels[index]
+		}
+		content, err := renderIPQualitySVG(report, levels)
 		if err != nil {
 			return nil, err
 		}

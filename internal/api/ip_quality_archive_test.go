@@ -65,7 +65,7 @@ func TestIPQualityRenderEscapesAndRejectsBadReports(t *testing.T) {
 		t.Fatal("provider text was not escaped")
 	}
 	for _, raw := range []string{`not json`, `{"Info":{}}`, `{"Head":{"IP":""}}`, `[]`} {
-		if _, err := renderIPQualitySVG(json.RawMessage(raw)); err == nil {
+		if _, err := renderIPQualitySVG(json.RawMessage(raw), nil); err == nil {
 			t.Fatalf("accepted malformed report %q", raw)
 		}
 	}

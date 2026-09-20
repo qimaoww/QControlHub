@@ -10,6 +10,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"syscall"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
@@ -22,11 +24,12 @@ const ipQualityScriptURL = "https://IP.Check.Place"
 
 // ipQualityProgram runs the official one-liner with the fixed detection
 // arguments: accept upstream's dependency installation, stay in privacy mode so
-// nothing is uploaded to the upstream report host, and keep the full IP and the
-// machine-readable JSON. The default locale is kept so the JSON carries the same
-// localized labels the detector prints, which the panel renders.
+// nothing is uploaded to the upstream report host, and write the machine-readable
+// JSON to the private report path. The default locale is kept so the JSON carries
+// the same localized labels the detector prints, and the printed report is left
+// enabled on stdout so the Agent can read the vendor risk wording from it.
 const ipQualityProgram = `ulimit -f 256 || exit
-exec bash --noprofile --norc <(curl -Ls ` + ipQualityScriptURL + `) -y -p -f -j -o "$1"`
+exec bash --noprofile --norc <(curl -Ls ` + ipQualityScriptURL + `) -y -p -f -o "$1"`
 
 func runIPQuality(ctx context.Context) (core.IPQualityResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, core.IPQualityTimeout)
@@ -97,10 +100,12 @@ func executeIPQualityProgram(ctx context.Context, bash, program string) (core.IP
 	command.Env = append(commandEnvironment(""), "TERM=dumb", "CURL_HOME="+directory,
 		"XDG_CONFIG_HOME="+directory, "TMPDIR="+directory)
 	configureCommand(command)
-	// Progress output can be verbose. Truncate diagnostics without interrupting
-	// a healthy run; only the bounded JSON report is accepted as result data.
+	// Progress output is verbose and goes to stderr. Truncate diagnostics without
+	// interrupting a healthy run; only the bounded JSON report is accepted as
+	// result data, and the bounded stdout only supplies the printed risk labels.
+	output := &boundedOutput{limit: 64 << 10}
 	log := &boundedOutput{limit: 16 << 10}
-	command.Stdout, command.Stderr = log, log
+	command.Stdout, command.Stderr = output, log
 	runErr := command.Run()
 	if command.Process != nil {
 		_ = syscall.Kill(-command.Process.Pid, syscall.SIGKILL)
@@ -114,9 +119,55 @@ func executeIPQualityProgram(ctx context.Context, bash, program string) (core.IP
 		// a successful result. The exit status still helps diagnose missing tools.
 		return core.IPQualityResult{}, fmt.Errorf("IPQuality 未生成有效报告（执行状态：%v）：%w", runErr, err)
 	}
+	if levels := parseIPQualityLevels(output.String()); len(levels) == len(result.Reports) {
+		result.Levels = levels
+	}
 	// Upstream's final [[ IPv6 available ]] returns 1 on IPv4-only hosts even
 	// after a valid IPv4 report. A validated report, not that status, is decisive.
 	return result, nil
+}
+
+// ipQualityLevelLabels maps the detector's printed provider names to the keys
+// the panel renders.
+var ipQualityLevelLabels = map[string]string{
+	"IP2Location": "IP2LOCATION",
+	"Scamalytics": "SCAMALYTICS",
+	"ipapi":       "ipapi",
+	"AbuseIPDB":   "AbuseIPDB",
+	"IPQS":        "IPQS",
+	"DB-IP":       "DBIP",
+}
+
+var (
+	ipQualityANSIPattern = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
+	ipQualityLevelLine   = regexp.MustCompile(`^([^：:]+)[：:][^|]*[|](\S+)$`)
+)
+
+// parseIPQualityLevels reads the risk wording upstream prints, one map per
+// address family. ipapi and DB-IP return it from their own APIs, so it is not
+// recoverable from the score in the JSON.
+func parseIPQualityLevels(output string) []map[string]string {
+	text := ipQualityANSIPattern.ReplaceAllString(output, "")
+	sections := strings.Split(text, "IP质量体检报告")
+	levels := make([]map[string]string, 0, len(sections)-1)
+	for _, section := range sections[1:] {
+		found := map[string]string{}
+		for _, line := range strings.Split(section, "\n") {
+			match := ipQualityLevelLine.FindStringSubmatch(strings.TrimSpace(line))
+			if match == nil {
+				continue
+			}
+			key, ok := ipQualityLevelLabels[strings.TrimSpace(match[1])]
+			if !ok {
+				continue
+			}
+			if label := strings.TrimSpace(match[2]); label != "" {
+				found[key] = label
+			}
+		}
+		levels = append(levels, found)
+	}
+	return levels
 }
 
 func readIPQualityReport(directory string) (core.IPQualityResult, error) {

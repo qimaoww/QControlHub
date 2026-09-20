@@ -112,7 +112,7 @@ func ipQualityRun(text, fill string) ipQualityCell {
 
 // renderIPQualitySVG renders one stored report. Content is bounded before it is
 // returned so the caller can store it in ip_quality_archives.
-func renderIPQualitySVG(report json.RawMessage) ([]byte, error) {
+func renderIPQualitySVG(report json.RawMessage, levels map[string]string) ([]byte, error) {
 	var parsed ipQualityRenderReport
 	if err := json.Unmarshal(report, &parsed); err != nil {
 		return nil, errors.New("IPQuality 报告无法解析")
@@ -120,18 +120,18 @@ func renderIPQualitySVG(report json.RawMessage) ([]byte, error) {
 	if parsed.Head.IP == "" {
 		return nil, errors.New("IPQuality 报告缺少地址")
 	}
-	svg := buildIPQualitySVG(ipQualityReportLines(parsed))
+	svg := buildIPQualitySVG(ipQualityReportLines(parsed, levels))
 	if len(svg) == 0 || len(svg) > core.MaxIPQualityArchiveBytes {
 		return nil, errors.New("IPQuality 渲染结果超出大小限制")
 	}
 	return svg, nil
 }
 
-func ipQualityReportLines(report ipQualityRenderReport) []ipQualityLine {
+func ipQualityReportLines(report ipQualityRenderReport, levels map[string]string) []ipQualityLine {
 	lines := ipQualityHeaderLines(report)
 	lines = append(lines, ipQualityBasicLines(report)...)
 	lines = append(lines, ipQualityTypeLines(report)...)
-	lines = append(lines, ipQualityScoreLines(report)...)
+	lines = append(lines, ipQualityScoreLines(report, levels)...)
 	lines = append(lines, ipQualityFactorLines(report)...)
 	lines = append(lines, ipQualityMediaLines(report)...)
 	lines = append(lines, ipQualityMailLines(report)...)
@@ -348,6 +348,9 @@ type ipQualityScoreProvider struct {
 	display    string
 	p3, p4, p5 float64
 	p6         int
+	// blankScore mirrors upstream, which draws the DB-IP bar but prints no score
+	// text for it.
+	blankScore bool
 }
 
 var ipQualityScoreProviders = []ipQualityScoreProvider{
@@ -356,10 +359,10 @@ var ipQualityScoreProviders = []ipQualityScoreProvider{
 	{key: "ipapi", display: "ipapi", p3: 85, p4: 300, p5: 10000, p6: 7},
 	{key: "AbuseIPDB", display: "AbuseIPDB", p3: 25, p4: 25, p5: 100, p6: 11},
 	{key: "IPQS", display: "IPQS", p3: 75, p4: 85, p5: 100, p6: 6},
-	{key: "DBIP", display: "DB-IP", p3: 33, p4: 66, p5: 100, p6: 7},
+	{key: "DBIP", display: "DB-IP", p3: 33, p4: 66, p5: 100, p6: 7, blankScore: true},
 }
 
-func ipQualityScoreLines(report ipQualityRenderReport) []ipQualityLine {
+func ipQualityScoreLines(report ipQualityRenderReport, levels map[string]string) []ipQualityLine {
 	lines := []ipQualityLine{{ipQualityRun("三、风险评分", ipQualityColorDefault)}}
 	lines = append(lines, ipQualityLine{
 		ipQualityRun(ipQualityPad("风险等级：", 16), ipQualityColorLabel),
@@ -373,16 +376,32 @@ func ipQualityScoreLines(report ipQualityRenderReport) []ipQualityLine {
 			continue
 		}
 		display := ipQualityClean(raw)
+		// ipapi and DB-IP take their risk wording from their own APIs; the Agent
+		// forwards it because the JSON only stores the score.
+		forwarded := ipQualityClean(levels[provider.key])
 		number, err := ipQualityParseScore(display)
 		if display == "" || err != nil {
-			continue
+			// Upstream still prints a row for a provider that only reported a
+			// risk level, with an empty score.
+			if forwarded == "" {
+				continue
+			}
+			display, number = " ", 0
 		}
 		if provider.key == "ipapi" {
 			number *= 10000
 		}
+		barText := display
+		if provider.blankScore {
+			barText = " "
+		}
+		label, color := ipQualityRiskLevel(number, provider), ipQualityRiskColor(number, provider)
+		if forwarded != "" {
+			label = forwarded
+		}
 		line := ipQualityLine{ipQualityRun(provider.display+"：", ipQualityColorLabel)}
-		line = append(line, ipQualityScoreBar(display, number, provider)...)
-		line = append(line, ipQualityRun(ipQualityRiskLevel(number, provider), ipQualityRiskColor(number, provider)))
+		line = append(line, ipQualityScoreBar(barText, number, provider)...)
+		line = append(line, ipQualityRun(label, color))
 		lines = append(lines, line)
 	}
 	return lines
