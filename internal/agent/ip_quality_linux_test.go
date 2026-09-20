@@ -55,6 +55,15 @@ func TestIPQualityExecutableChecksMetadata(t *testing.T) {
 	}
 }
 
+// TestIPQualityPrintedReportBudgetFitsTheResultLimit keeps one printed report per
+// address family inside core's structured-result limit.
+func TestIPQualityPrintedReportBudgetFitsTheResultLimit(t *testing.T) {
+	if 2*ipQualityPrintedReportLimit >= core.MaxIPQualityResultBytes {
+		t.Fatalf("printed report budget %d leaves no room for two families inside %d",
+			ipQualityPrintedReportLimit, core.MaxIPQualityResultBytes)
+	}
+}
+
 func TestIPQualityProgramUsesOfficialOneLiner(t *testing.T) {
 	for _, want := range []string{
 		"curl -Ls https://IP.Check.Place",
@@ -65,7 +74,7 @@ func TestIPQualityProgramUsesOfficialOneLiner(t *testing.T) {
 		}
 	}
 	// Privacy mode keeps the detector from uploading to the upstream host; the
-	// panel renders the image from the returned JSON instead.
+	// panel renders the image from the returned printed report instead.
 	if strings.Contains(ipQualityProgram, "upload.check.place") || strings.Contains(ipQualityProgram, "QCH_IPQUALITY_LINKS") {
 		t.Fatal("IPQuality program still exports an upstream report link")
 	}

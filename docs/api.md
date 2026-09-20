@@ -161,7 +161,8 @@
 `records[]` 包含 `task_id`、`agent_id`、`status`、`created_at`、可选的
 `started_at` / `finished_at` / `error`；成功报告保存在
 `result.reports[]`，每个元素是保留上游字段及数据类型的 IPv4 或 IPv6 JSON 对象。
-`archives[]` 返回 `family`（4/6）、`sha256`、`size` 和 `rendered_at`，不包含 SVG 字节。
+`archives[]` 返回 `family`（4/6）、`sha256`、`size` 和 `rendered_at`，不包含 SVG 字节；
+`result.reports_text`（面板出图用的报告原文）不在此响应中返回，只出现在 Agent 的 WSS 结果里。
 面板从 `/ip-quality/{task_id}/archives/{family}` 读取自己渲染并存储的 SVG，默认用于图片内嵌，
 `?download=1` 返回附件。无权限或不存在返回 `404`，未登录返回 `401`。
 失败或仍在执行的任务不带成功报告。普通 `/tasks` 响应不携带这些报告字节。
@@ -174,7 +175,7 @@
 创建为 `201`，复用同账号同节点的未完成检测为 `200` 且 `reused=true`。
 此入口与 `POST /api/v1/tasks` 的 `{"agent_id":"agt_…","action":"ip-quality"}`
 等价；重试也使用相同的权限和能力校验。需要 `agents.manage`、
-`tasks.execute` 及节点管理权；离线、缺少 `ip-quality-v1` 或其他账号已有活动检测
+`tasks.execute` 及节点管理权；离线、缺少 `ip-quality-v2` 或其他账号已有活动检测
 返回 `409`。不接受代理内核、配置、安装、TCP 参数、URL 或自定义命令。
 
 `PUT /api/v1/ip-quality/schedules/{id}` 接受且必须提供布尔 `enabled`，
@@ -505,7 +506,7 @@ WSS 握手必须协商子协议 `qcontrolhub.agent.v1`。服务端先发送只�
 
 ### IPQuality 任务结果扩展
 
-声明 `ip-quality-v1` 的 Agent 可以接收 `action="ip-quality"`、
+声明 `ip-quality-v2` 的 Agent 可以接收 `action="ip-quality"`、
 `engine=""` 的任务；旧 Agent 不会领取或恢复该动作。检测最多 10 分钟，
 重试租约至少 12 分钟，连接心跳不因检测停止。
 Agent 在 `result.result.ip_quality.reports` 发送一至两个上游 JSON 对象，
@@ -516,7 +517,7 @@ Agent 在 `result.result.ip_quality.reports` 发送一至两个上游 JSON 对�
 将原文和摘要与任务状态原子保存，才发送 `result_ack`；
 仅设置 `success=true` 而没有有效报告会记为失败。JSONB 无法表示的 Unicode、
 数字或超出存储大小限制的报告同样记为失败并确认，不让坏数据反复阻断 WSS；
-下载失败、缺少链接或无效 SVG 同样标记失败并确认，数据库故障等非数据错误仍允许重传。
+报告原文缺失、渲染失败或超出大小限制同样标记失败并确认，数据库故障等非数据错误仍允许重传。
 Agent 仅以内存缓存支持断线后复用报告并使用当前 lease ID 重传，不把报告写入凭据文件
 或会截断的普通 `output`。Agent 重启后尚未确认的任务可能重新执行。
 SVG 归档每份上限 2 MiB，仅存于面板数据库，通过鉴权接口读取；不在历史轮询中传输。

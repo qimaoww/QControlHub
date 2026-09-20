@@ -14,7 +14,7 @@ systemd helper 保留 `ProtectSystem=strict`、`NoNewPrivileges`，仅有 `CAP_N
 
 IPQuality 仅由有节点管理权且同时具备 `agents.manage`、`tasks.execute` 的身份
 显式提交或开启每日计划，读取需要 `agents.read`；共享不授予报告或主机检测权限。
-通用任务创建/重试同样校验，旧 Agent 必须先声明 `ip-quality-v1`。计划默认关闭，
+通用任务创建/重试同样校验，旧 Agent 必须先声明 `ip-quality-v2`。计划默认关闭，
 每次调度从数据库重新核验当前账号及节点权限；账号永久删除时计划一起删除。
 报告与计划沿用管理员隐藏规则，完整报告不出现在普通任务列表。
 计划状态按节点管理权可见，使节点所有者能关闭管理员开启的计划；
@@ -36,7 +36,7 @@ JSON、SVG 原文与校验元数据只持久保存于面板数据库，Agent 的
 前端从面板的鉴权接口嵌入图片，不执行 SVG 内容，不访问上游报告链接；
 返回 `no-store` 和隔离 CSP。SVG 的读取权限与 JSON 历史一致，随任务保留策略清理。
 供应商不可用、未知值和单项失败不能当作安全结论。执行、许可、依赖、保留期限及
-schema 63 升级/回滚要求见 [IP 质量检测](ip-quality.md)。
+schema 65 升级/回滚要求见 [IP 质量检测](ip-quality.md)。
 
 ### 管理 API
 

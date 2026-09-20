@@ -146,8 +146,12 @@ func TestIPQualityAPIAndWebSocketLifecycle(t *testing.T) {
 		t.Fatalf("ack = %+v %v", message, err)
 	}
 	var history core.IPQualityHistory
-	if err := json.Unmarshal(call("GET", "/ip-quality?date="+day, "quality-admin", nil, 200).Body.Bytes(), &history); err != nil {
+	historyBody := call("GET", "/ip-quality?date="+day, "quality-admin", nil, 200).Body.Bytes()
+	if err := json.Unmarshal(historyBody, &history); err != nil {
 		t.Fatal(err)
+	}
+	if strings.Contains(string(historyBody), "reports_text") {
+		t.Fatal("history response leaked the printed report text")
 	}
 	if len(history.Records) != 1 || history.Records[0].Result == nil || history.Records[0].Status != core.TaskSucceeded {
 		t.Fatalf("wire result was not persisted: %+v", history)

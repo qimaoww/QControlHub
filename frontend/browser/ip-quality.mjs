@@ -13,10 +13,10 @@ export async function testIPQualityRuntime(mode, preview = false) {
   const session = { role: readonly ? "user" : "admin", user_id: readonly ? "quality-reader" : undefined,
     permissions: ["agents.read"], csrf_token: "quality-test-csrf" };
   const agents = [
-    { id: "quality-a", name: "东京 · IPv4 / IPv6", status: "online", features: ["ip-quality-v1"] },
+    { id: "quality-a", name: "东京 · IPv4 / IPv6", status: "online", features: ["ip-quality-v2"] },
     { id: "quality-b", name: "新加坡 · 等待升级", status: "online", features: [] },
-    { id: "quality-c", name: "法兰克福 · 离线", status: "offline", features: ["ip-quality-v1"] },
-    { id: "quality-shared", name: "不应显示的共享主机", status: "online", features: ["ip-quality-v1"], can_manage: false },
+    { id: "quality-c", name: "法兰克福 · 离线", status: "offline", features: ["ip-quality-v2"] },
+    { id: "quality-shared", name: "不应显示的共享主机", status: "online", features: ["ip-quality-v2"], can_manage: false },
   ].map((agent) => ({ can_manage: true, capabilities: ["mihomo"], supported_capabilities: ["mihomo"],
     runtime: {}, metrics: {}, labels: {}, os: "Debian", arch: "amd64", ...agent }));
   const report = (ip) => ({

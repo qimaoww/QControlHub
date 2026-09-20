@@ -24,7 +24,7 @@ const report = {
   Factor: { Proxy: { IPQS: false } }, Media: { Netflix: { Status: "Yes", Region: "JP", Type: "Native" } },
   Mail: { Port25: false, DNSBlacklist: { Total: null, Blacklisted: null } },
 };
-const agent = { id: "alpha", name: "Node A", can_manage: true, status: "online", features: ["ip-quality-v1"] };
+const agent = { id: "alpha", name: "Node A", can_manage: true, status: "online", features: ["ip-quality-v2"] };
 const history = (day, records = []) => ({ date: day, timezone: "UTC", records, schedules: [] });
 let markup = "";
 const render = createIPQualityView({ shell: (html) => { markup = html; }, esc, date: (value) => value || "—" });

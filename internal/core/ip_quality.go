@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	AgentFeatureIPQuality   = "ip-quality-v1"
+	AgentFeatureIPQuality   = "ip-quality-v2"
 	MaxIPQualityResultBytes = 128 << 10
 	IPQualityTimeout        = 10 * time.Minute
 	// Leave time for WSS result delivery before a disconnected execution is retried.

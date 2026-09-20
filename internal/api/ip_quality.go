@@ -16,6 +16,14 @@ func (s *Server) ipQualityHistory(w http.ResponseWriter, request *http.Request) 
 		writeStoreError(w, err)
 		return
 	}
+	// The printed text is the panel's own render input, so the history response
+	// carries only the structured reports and the archive metadata. Agents still
+	// send the text on the WSS result path.
+	for index := range records {
+		if records[index].Result != nil {
+			records[index].Result.ReportsText = nil
+		}
+	}
 	schedules, err := s.store.ListIPQualitySchedules(request.Context())
 	if err != nil {
 		writeStoreError(w, err)

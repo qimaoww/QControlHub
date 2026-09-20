@@ -21,6 +21,11 @@ import (
 // so the detector keeps working when upstream moves `main`.
 const ipQualityScriptURL = "https://IP.Check.Place"
 
+// ipQualityPrintedReportLimit bounds the captured printed report. One report per
+// address family must still fit inside core's structured-result limit, so the
+// panel can archive the text it was sent.
+const ipQualityPrintedReportLimit = 32 << 10
+
 // ipQualityProgram runs the official one-liner with the fixed detection
 // arguments: accept upstream's dependency installation, stay in privacy mode so
 // nothing is uploaded to the upstream report host, and write the machine-readable
@@ -101,8 +106,8 @@ func executeIPQualityProgram(ctx context.Context, bash, program string) (core.IP
 	configureCommand(command)
 	// Progress output is verbose and goes to stderr. Truncate diagnostics without
 	// interrupting a healthy run; only the bounded JSON report is accepted as
-	// result data, and the bounded stdout only supplies the printed risk labels.
-	output := &boundedOutput{limit: 64 << 10}
+	// result data, and the bounded stdout only supplies the printed report.
+	output := &boundedOutput{limit: ipQualityPrintedReportLimit}
 	log := &boundedOutput{limit: 16 << 10}
 	command.Stdout, command.Stderr = output, log
 	runErr := command.Run()
