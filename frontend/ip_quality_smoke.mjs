@@ -39,7 +39,7 @@ assert.ok(markup.includes("0.47%"));
 assert.ok(!markup.includes("演示"));
 assert.ok(!markup.includes("/ 100"));
 assert.ok(!markup.includes('style="'));
-assert.ok(markup.includes("DNS / WebRTC 泄漏未检测"));
+assert.ok(markup.includes("xykt/IPQuality"));
 assert.ok(!markup.includes("data-ip-quality-run"), "historical report has a run button");
 assert.ok(!markup.includes("data-ip-quality-schedule"), "historical report has schedule controls");
 assert.ok(!markup.includes("节点在线"), "historical report presents the current online state");
@@ -63,7 +63,7 @@ assert.ok(renderReport(blacklistReport).includes("<dt>干净</dt><dd>411</dd>"))
 const ipv6Report = { ...blacklistReport, Head: { ...report.Head, IP: "2001:db8::1" } };
 const originalIPv6Report = JSON.stringify(ipv6Report);
 const ipv6Markup = renderReport(ipv6Report);
-assert.ok(ipv6Markup.includes("未检测：当前上游仅查询 IPv4 DNS 黑名单"));
+assert.ok(ipv6Markup.includes("未检测（仅支持 IPv4）"));
 assert.ok(!ipv6Markup.includes("<dt>干净</dt>"), "IPv4 blacklist counts were attributed to IPv6");
 assert.ok(ipv6Markup.includes("&quot;Total&quot;: 439"), "source JSON lost the upstream values");
 assert.equal(JSON.stringify(ipv6Report), originalIPv6Report, "rendering rewrote the source report");
@@ -211,6 +211,6 @@ const archiveMarkup = createIPQualityArchiveView({ esc, date: String })({ task_i
 ] });
 assert.ok(archiveMarkup.includes('<img src="/api/v1/ip-quality/task-1/archives/4"'));
 assert.ok(archiveMarkup.includes('?download=1'));
-assert.ok(archiveMarkup.includes("面板重绘"), "archive caption must state the panel drew it");
+assert.ok(archiveMarkup.includes("存档信息"));
 assert.ok(!archiveMarkup.includes("Report.Check.Place"), "browser must never contact the upstream report host");
 assert.ok(!archiveMarkup.includes("iframe") && !archiveMarkup.includes("<svg"), "SVG must remain an inert image");

@@ -92,7 +92,7 @@ export async function testIPQualityRuntime(mode, preview = false) {
   assert.equal(card().querySelectorAll(".ip-quality-report").length, 2, "dual-stack report lost a family");
   const [ipv4Report, ipv6Report] = card().querySelectorAll(".ip-quality-report");
   assert.ok(ipv4Report.textContent.includes("干净"), "IPv4 lost its DNS blacklist results");
-  assert.ok(ipv6Report.textContent.includes("未检测：当前上游仅查询 IPv4 DNS 黑名单"), "IPv6 blacklist was presented as measured");
+  assert.ok(ipv6Report.textContent.includes("未检测（仅支持 IPv4）"), "IPv6 blacklist was presented as measured");
   assert.ok(![...ipv6Report.querySelectorAll("dt")].some((term) => term.textContent === "干净"), "IPv4 DNS counts leaked into the IPv6 summary");
   assert.equal(JSON.parse(ipv6Report.querySelector(".ip-quality-raw pre").textContent).Mail.DNSBlacklist.Total, 439,
     "original IPv6 JSON was rewritten");
