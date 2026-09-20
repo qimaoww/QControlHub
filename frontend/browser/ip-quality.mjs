@@ -13,10 +13,10 @@ export async function testIPQualityRuntime(mode, preview = false) {
   const session = { role: readonly ? "user" : "admin", user_id: readonly ? "quality-reader" : undefined,
     permissions: ["agents.read"], csrf_token: "quality-test-csrf" };
   const agents = [
-    { id: "quality-a", name: "东京 · IPv4 / IPv6", status: "online", features: ["ip-quality-v1"] },
+    { id: "quality-a", name: "东京 · IPv4 / IPv6", status: "online", features: ["ip-quality-v2"] },
     { id: "quality-b", name: "新加坡 · 等待升级", status: "online", features: [] },
-    { id: "quality-c", name: "法兰克福 · 离线", status: "offline", features: ["ip-quality-v1"] },
-    { id: "quality-shared", name: "不应显示的共享主机", status: "online", features: ["ip-quality-v1"], can_manage: false },
+    { id: "quality-c", name: "法兰克福 · 离线", status: "offline", features: ["ip-quality-v2"] },
+    { id: "quality-shared", name: "不应显示的共享主机", status: "online", features: ["ip-quality-v2"], can_manage: false },
   ].map((agent) => ({ can_manage: true, capabilities: ["mihomo"], supported_capabilities: ["mihomo"],
     runtime: {}, metrics: {}, labels: {}, os: "Debian", arch: "amd64", ...agent }));
   const report = (ip) => ({
@@ -31,7 +31,7 @@ export async function testIPQualityRuntime(mode, preview = false) {
   const completeRecord = (taskID = "quality-task") => ({
     task_id: taskID, agent_id: "quality-a", status: "succeeded",
     created_at: `${today}T06:00:00Z`, finished_at: `${today}T06:05:00Z`,
-    archives: [4, 6].map((family) => ({ family, downloaded_at: `${today}T06:05:00Z`, sha256: "a".repeat(64) })),
+    archives: [4, 6].map((family) => ({ family, rendered_at: `${today}T06:05:00Z`, sha256: "a".repeat(64) })),
     result: { reports: [report("203.0.113.10"), report("2001:db8:1234:5678:90ab:cdef:1234:5678")] },
   });
   const fixture = {
@@ -55,7 +55,11 @@ export async function testIPQualityRuntime(mode, preview = false) {
     if (path === "/ip-quality" && method === "GET") {
       if (fixture.failed) return json({ error: "检测记录暂不可用" }, 503);
       const date = url.searchParams.get("date");
-      return json({ date, timezone: url.searchParams.get("timezone"), records: date === today ? fixture.records : [], schedules: fixture.schedules });
+      const records = date === today ? fixture.records : date === yesterday ? [{
+        task_id: "historical-failure", agent_id: "quality-a", status: "failed",
+        created_at: `${yesterday}T06:00:00Z`, error: "检测未完成，请检查节点网络。",
+      }] : [];
+      return json({ date, timezone: url.searchParams.get("timezone"), records, schedules: fixture.schedules });
     }
     if (path === "/ip-quality" && method === "POST") {
       assert.ok(!readonly, "read-only page submitted a check");
@@ -79,6 +83,8 @@ export async function testIPQualityRuntime(mode, preview = false) {
   await waitFor(() => card()?.textContent.includes("已完成"), "IP quality page did not load");
   assert.equal(document.querySelectorAll(".ip-quality-node-card").length, 3, "shared host was exposed");
   assert.ok(document.querySelector('.dock-nav a[href="#ip-quality"]'), "IP quality navigation is missing");
+  assert.equal(getComputedStyle(document.querySelector(".context-sidebar")).display, "none",
+    "IP quality reserves an empty context sidebar");
   assert.ok(document.querySelector('[data-ip-quality-day="1"]').disabled, "future day is selectable");
   card().querySelector(".ip-quality-details>summary").click();
   const images = [...card().querySelectorAll(".ip-quality-archive img")];
@@ -88,7 +94,7 @@ export async function testIPQualityRuntime(mode, preview = false) {
   assert.equal(card().querySelectorAll(".ip-quality-report").length, 2, "dual-stack report lost a family");
   const [ipv4Report, ipv6Report] = card().querySelectorAll(".ip-quality-report");
   assert.ok(ipv4Report.textContent.includes("干净"), "IPv4 lost its DNS blacklist results");
-  assert.ok(ipv6Report.textContent.includes("未检测：当前上游仅查询 IPv4 DNS 黑名单"), "IPv6 blacklist was presented as measured");
+  assert.ok(ipv6Report.textContent.includes("未检测（仅支持 IPv4）"), "IPv6 blacklist was presented as measured");
   assert.ok(![...ipv6Report.querySelectorAll("dt")].some((term) => term.textContent === "干净"), "IPv4 DNS counts leaked into the IPv6 summary");
   assert.equal(JSON.parse(ipv6Report.querySelector(".ip-quality-raw pre").textContent).Mail.DNSBlacklist.Total, 439,
     "original IPv6 JSON was rewritten");
@@ -126,9 +132,16 @@ export async function testIPQualityRuntime(mode, preview = false) {
   assert.ok(card().querySelector(".ip-quality-details").open, "refresh closed an expanded report");
   document.querySelector('[data-ip-quality-day="-1"]').click();
   await waitFor(() => document.querySelector("[data-ip-quality-date]").value === yesterday &&
-    card()?.textContent.includes("当天未检测"), "previous-day navigation did not load history");
+    card()?.textContent.includes("检测失败"), "previous-day navigation did not load history");
   assert.equal(card().querySelector(".ip-quality-report"), null, "previous date retained today's report");
-  document.querySelector('[data-ip-quality-day="1"]').click();
+  assert.equal(document.querySelectorAll(".ip-quality-node-card").length, 1, "history lists nodes with no records");
+  assert.equal(document.querySelector("[data-ip-quality-run]"), null, "history has a run button");
+  assert.equal(document.querySelector("[data-ip-quality-schedule]"), null, "history can change schedules");
+  assert.ok(!card().textContent.includes("节点在线"), "history displays a current online state");
+  document.querySelector('[data-ip-quality-day="-1"]').click();
+  await waitFor(() => document.querySelector(".ip-quality-grid .empty")?.textContent.includes("当天没有检测记录"),
+    "empty history did not show its own empty state");
+  document.querySelector("[data-ip-quality-today]").click();
   await waitFor(() => card()?.textContent.includes("已完成"), "return to today failed");
   fixture.failed = true;
   await refresh();

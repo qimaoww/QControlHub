@@ -1,4 +1,4 @@
-export const ipQualityFeature = "ip-quality-v1";
+export const ipQualityFeature = "ip-quality-v2";
 
 export function ipQualityToday(now = new Date()) {
   return [now.getFullYear(), String(now.getMonth() + 1).padStart(2, "0"), String(now.getDate()).padStart(2, "0")].join("-");

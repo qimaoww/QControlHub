@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	AgentFeatureIPQuality   = "ip-quality-v1"
+	AgentFeatureIPQuality   = "ip-quality-v2"
 	MaxIPQualityResultBytes = 128 << 10
 	IPQualityTimeout        = 10 * time.Minute
 	// Leave time for WSS result delivery before a disconnected execution is retried.
@@ -21,9 +21,14 @@ const (
 
 // IPQuality retains the upstream database-specific values. The databases do
 // not share a scoring scale; missing results must not become zero-risk scores.
+// The panel renders its own report image from these bytes.
 type IPQualityResult struct {
-	Reports    []json.RawMessage `json:"reports"`
-	ReportURLs []string          `json:"report_urls,omitempty"`
+	Reports []json.RawMessage `json:"reports"`
+	// ReportsText carries the detector's own printed report, one entry per
+	// address family, including its ANSI colour codes. The panel renders the
+	// archived image from this text, so the image is exactly what the terminal
+	// shows instead of a re-derived approximation.
+	ReportsText []string `json:"reports_text,omitempty"`
 }
 
 type IPQualityRecord struct {
@@ -121,18 +126,18 @@ func NormalizeIPQualityResult(input *IPQualityResult) (IPQualityResult, error) {
 		}
 		result.Reports = append(result.Reports, json.RawMessage(compact.Bytes()))
 	}
-	if len(input.ReportURLs) != 0 {
-		if len(input.ReportURLs) != len(result.Reports) {
-			return IPQualityResult{}, errors.New("IPQuality report links do not match address families")
+	if len(input.ReportsText) != 0 {
+		if len(input.ReportsText) != len(result.Reports) {
+			return IPQualityResult{}, errors.New("IPQuality printed report does not match address families")
 		}
-		seen := make(map[string]bool)
-		for _, link := range input.ReportURLs {
-			if !ValidIPQualityReportURL(link) || seen[link] {
-				return IPQualityResult{}, errors.New("IPQuality returned an invalid or duplicate report link")
+		total := 0
+		for _, text := range input.ReportsText {
+			total += len(text)
+			if text == "" || total > MaxIPQualityResultBytes || !utf8.ValidString(text) {
+				return IPQualityResult{}, errors.New("IPQuality printed report is too large or is not UTF-8")
 			}
-			seen[link] = true
-			result.ReportURLs = append(result.ReportURLs, link)
 		}
+		result.ReportsText = input.ReportsText
 	}
 	encoded, err := json.Marshal(result)
 	if err != nil || len(encoded) > MaxIPQualityResultBytes {
