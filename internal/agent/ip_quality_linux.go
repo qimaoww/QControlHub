@@ -21,10 +21,11 @@ import (
 // so the detector keeps working when upstream moves `main`.
 const ipQualityScriptURL = "https://IP.Check.Place"
 
-// ipQualityPrintedReportLimit bounds the captured printed report. One report per
-// address family must still fit inside core's structured-result limit, so the
-// panel can archive the text it was sent.
+// ipQualityPrintedReportLimit bounds each address family's printed report.
+// The capture also allows line separators and a small amount of non-report
+// output; the encoded result is checked separately against core's limit.
 const ipQualityPrintedReportLimit = 32 << 10
+const ipQualityPrintedOutputLimit = 2*ipQualityPrintedReportLimit + 4<<10
 
 // ipQualityProgram runs the official one-liner with the fixed detection
 // arguments: accept upstream's dependency installation, stay in privacy mode so
@@ -32,8 +33,10 @@ const ipQualityPrintedReportLimit = 32 << 10
 // JSON to the private report path. The default locale is kept so the JSON carries
 // the same localized labels the detector prints, and the printed report is left
 // enabled on stdout so the Agent can read the vendor risk wording from it.
-const ipQualityProgram = `ulimit -f 256 || exit
-exec bash --noprofile --norc <(curl -Ls ` + ipQualityScriptURL + `) -y -p -f -o "$1"`
+// Do not impose RLIMIT_FSIZE on this process tree: dependency installers write
+// package indexes and binaries larger than the report budget. The report reader
+// enforces the JSON file's type and size before accepting it.
+const ipQualityProgram = `exec bash --noprofile --norc <(curl -Ls ` + ipQualityScriptURL + `) -y -p -f -o "$1"`
 
 func runIPQuality(ctx context.Context) (core.IPQualityResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, core.IPQualityTimeout)
@@ -107,7 +110,7 @@ func executeIPQualityProgram(ctx context.Context, bash, program string) (core.IP
 	// Progress output is verbose and goes to stderr. Truncate diagnostics without
 	// interrupting a healthy run; only the bounded JSON report is accepted as
 	// result data, and the bounded stdout only supplies the printed report.
-	output := &boundedOutput{limit: ipQualityPrintedReportLimit}
+	output := &boundedOutput{limit: ipQualityPrintedOutputLimit}
 	log := &boundedOutput{limit: 16 << 10}
 	command.Stdout, command.Stderr = output, log
 	runErr := command.Run()
@@ -117,18 +120,28 @@ func executeIPQualityProgram(ctx context.Context, bash, program string) (core.IP
 	if ctx.Err() != nil {
 		return core.IPQualityResult{}, fmt.Errorf("IPQuality 检测超时或已停止：%w", ctx.Err())
 	}
+	if output.Truncated() {
+		return core.IPQualityResult{}, errors.New("IPQuality 报告输出超过采集大小限制，已拒绝截断的报告")
+	}
 	result, err := readIPQualityReport(directory)
 	if err != nil {
 		// Do not publish ANSI progress, ads, external HTML or partial reports as
 		// a successful result. The exit status still helps diagnose missing tools.
 		return core.IPQualityResult{}, fmt.Errorf("IPQuality 未生成有效报告（执行状态：%v）：%w", runErr, err)
 	}
-	if texts := parseIPQualityReportTexts(output.String()); len(texts) == len(result.Reports) {
-		result.ReportsText = texts
+	texts := parseIPQualityReportTexts(output.String())
+	if len(texts) != len(result.Reports) {
+		return core.IPQualityResult{}, errors.New("IPQuality 报告原文缺失或与 JSON 报告份数不匹配")
 	}
+	for _, text := range texts {
+		if len(text) > ipQualityPrintedReportLimit {
+			return core.IPQualityResult{}, errors.New("IPQuality 单个地址族的报告原文超过 32 KiB 大小限制")
+		}
+	}
+	result.ReportsText = texts
 	// Upstream's final [[ IPv6 available ]] returns 1 on IPv4-only hosts even
 	// after a valid IPv4 report. A validated report, not that status, is decisive.
-	return result, nil
+	return core.NormalizeIPQualityResult(&result)
 }
 
 // parseIPQualityReportTexts splits the detector's printed output into one entry

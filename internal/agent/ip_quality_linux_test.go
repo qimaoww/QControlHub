@@ -126,8 +126,10 @@ func TestIPQualityScriptExecutionContract(t *testing.T) {
 test -z "$HTTP_PROXY" || exit 4
 test -z "$BASH_ENV" || exit 5
 printf '%s\n' '` + report + `' > "$1"
+printf 'IP质量体检报告：203.0.113.1\n'
 exit 1`, false},
-		{"dual-stack", `printf '%s\n' '` + report + `' '` + agentQualityReport("2001:db8::1", "fixture") + `' > "$1"`, false},
+		{"dual-stack", `printf '%s\n' '` + report + `' '` + agentQualityReport("2001:db8::1", "fixture") + `' > "$1"
+printf 'IP质量体检报告：203.0.113.1\nIP质量体检报告：2001:db8::1\n'`, false},
 		{"missing-report", "exit 0", true},
 		{"malformed-report", `printf 'not JSON' > "$1"`, true},
 		{"partial-report", `printf '%s\n' '` + report + `' '{' > "$1"`, true},
