@@ -18,6 +18,7 @@ export function createIPQualityBindings({ state, load, runCheck, setSchedule }) 
       });
     });
     bindEvent(document.querySelector("[data-ip-quality-refresh]"), "click", () => { void load(); });
+    bindEvent(document.querySelector("[data-ip-quality-today]"), "click", () => { void load(ipQualityToday()); });
     document.querySelectorAll("[data-ip-quality-run]").forEach((button) => {
       bindEvent(button, "click", () => { if (!button.disabled) void runCheck(button.dataset.ipQualityRun); });
     });

@@ -40,6 +40,16 @@ assert.ok(!markup.includes("演示"));
 assert.ok(!markup.includes("/ 100"));
 assert.ok(!markup.includes('style="'));
 assert.ok(markup.includes("DNS / WebRTC 泄漏未检测"));
+assert.ok(!markup.includes("data-ip-quality-run"), "historical report has a run button");
+assert.ok(!markup.includes("data-ip-quality-schedule"), "historical report has schedule controls");
+assert.ok(!markup.includes("节点在线"), "historical report presents the current online state");
+assert.ok(markup.includes("data-ip-quality-today"), "history has no return-to-today control");
+render({ date: "2025-09-16", timezone: "UTC", history: history("2025-09-16"), agents: [agent], submitting: new Set(), editable: () => true });
+assert.ok(markup.includes("当天没有检测记录"));
+assert.ok(!markup.includes("data-ip-quality-agent"), "history rendered nodes without records");
+render({ date: ipQualityToday(), timezone: "UTC", history: history(ipQualityToday()), agents: [agent], submitting: new Set(), editable: () => true });
+assert.ok(markup.includes("data-ip-quality-run"), "today lost its run button");
+assert.ok(markup.includes("data-ip-quality-schedule"), "today lost its schedule controls");
 render({ date: "2025-09-16", timezone: "UTC", error: "无法读取", agents: [], submitting: new Set(), editable: () => false });
 assert.ok(!markup.includes("203.0.113.1"), "failed reads must never create example nodes");
 assert.ok(!markup.includes("data-ip-quality-run"));
@@ -146,6 +156,33 @@ try {
   await controller.setSchedule("alpha", true);
   assert.equal(mutations, 2);
   assert.ok(calls.some((call) => call.path === "/ip-quality/schedules/alpha" && call.options.body === '{"enabled":true}'));
+  const yesterday = nextIPQualityDay(ipQualityToday(), -1);
+  await controller.load(yesterday);
+  await controller.runCheck("alpha");
+  await controller.setSchedule("alpha", true);
+  await controller.setSchedule("alpha", false);
+  assert.equal(mutations, 2, "historical date allowed writes through the controller");
+  await controller.load(ipQualityToday());
+  confirmation = new Promise((resolve) => { accept = resolve; });
+  const changedDateConfirmation = controller.runCheck("alpha");
+  await controller.load(yesterday);
+  accept(true);
+  await changedDateConfirmation;
+  assert.equal(mutations, 2, "confirmation submitted after switching to history");
+  await controller.load(ipQualityToday());
+  confirmation = new Promise((resolve) => { accept = resolve; });
+  const midnightConfirmation = controller.setSchedule("alpha", false);
+  const OriginalDate = globalThis.Date;
+  const tomorrow = nextIPQualityDay(ipQualityToday(), 1);
+  try {
+    globalThis.Date = class extends OriginalDate {
+      constructor(...args) { super(...(args.length ? args : [tomorrow + "T12:00:00"])); }
+    };
+    accept(true);
+    await midnightConfirmation;
+    assert.equal(mutations, 2, "confirmation submitted after the selected day became history");
+  } finally { globalThis.Date = OriginalDate; }
+  confirmation = true;
   failReads = true;
   await controller.load();
   assert.equal(views.at(-1).readFailed, true);

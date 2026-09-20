@@ -67,6 +67,7 @@ export function createIPQualityController(ctx, view) {
     const agent = snapshot?.agents.find((item) => item.id === agentID);
     const record = snapshot?.history.records.find((item) => item.agent_id === agentID);
     const scheduling = typeof enabled === "boolean";
+    if (selectedDate !== ipQualityToday() || snapshot?.date !== selectedDate) return false;
     if (accountData !== data || !current(data, epoch) || !agent || !editable(agent) || readFailed || pending.has(agentID)) return false;
     if (!scheduling && ipQualityBlockReason(agent, record)) return false;
     if (scheduling && enabled && !agent.features?.includes(ipQualityFeature)) return false;
@@ -77,7 +78,7 @@ export function createIPQualityController(ctx, view) {
         ? `关闭 ${agent.name} 的每日 IPQuality 检测？已提交的任务不会因此中止。`
         : `${scheduling ? "启用每日检测" : "检测"} ${agent.name} 的出口 IP？Agent 将运行上游官方 IPQuality 一行命令（不固定版本），联系第三方 IP 数据库、媒体和邮件服务，通常需要数分钟；以隐私模式运行，不上传检测报告；面板根据节点回传的报告原文自行绘制图片并存入数据库；缺少依赖时会在节点上自动安装。`;
       if (!(await confirmAction(message, scheduling ? "每日 IP 检测" : "开始 IP 检测")) ||
-          !current(data, epoch) || selectedDate !== data.ipQualityDate) return false;
+          !current(data, epoch) || selectedDate !== data.ipQualityDate || selectedDate !== ipQualityToday()) return false;
       await api(scheduling ? `/ip-quality/schedules/${encodeURIComponent(agentID)}` : "/ip-quality", {
         method: scheduling ? "PUT" : "POST",
         body: JSON.stringify(scheduling ? { enabled } : { agent_id: agentID }),

@@ -55,7 +55,11 @@ export async function testIPQualityRuntime(mode, preview = false) {
     if (path === "/ip-quality" && method === "GET") {
       if (fixture.failed) return json({ error: "检测记录暂不可用" }, 503);
       const date = url.searchParams.get("date");
-      return json({ date, timezone: url.searchParams.get("timezone"), records: date === today ? fixture.records : [], schedules: fixture.schedules });
+      const records = date === today ? fixture.records : date === yesterday ? [{
+        task_id: "historical-failure", agent_id: "quality-a", status: "failed",
+        created_at: `${yesterday}T06:00:00Z`, error: "检测未完成，请检查节点网络。",
+      }] : [];
+      return json({ date, timezone: url.searchParams.get("timezone"), records, schedules: fixture.schedules });
     }
     if (path === "/ip-quality" && method === "POST") {
       assert.ok(!readonly, "read-only page submitted a check");
@@ -126,9 +130,16 @@ export async function testIPQualityRuntime(mode, preview = false) {
   assert.ok(card().querySelector(".ip-quality-details").open, "refresh closed an expanded report");
   document.querySelector('[data-ip-quality-day="-1"]').click();
   await waitFor(() => document.querySelector("[data-ip-quality-date]").value === yesterday &&
-    card()?.textContent.includes("当天未检测"), "previous-day navigation did not load history");
+    card()?.textContent.includes("检测失败"), "previous-day navigation did not load history");
   assert.equal(card().querySelector(".ip-quality-report"), null, "previous date retained today's report");
-  document.querySelector('[data-ip-quality-day="1"]').click();
+  assert.equal(document.querySelectorAll(".ip-quality-node-card").length, 1, "history lists nodes with no records");
+  assert.equal(document.querySelector("[data-ip-quality-run]"), null, "history has a run button");
+  assert.equal(document.querySelector("[data-ip-quality-schedule]"), null, "history can change schedules");
+  assert.ok(!card().textContent.includes("节点在线"), "history displays a current online state");
+  document.querySelector('[data-ip-quality-day="-1"]').click();
+  await waitFor(() => document.querySelector(".ip-quality-grid .empty")?.textContent.includes("当天没有检测记录"),
+    "empty history did not show its own empty state");
+  document.querySelector("[data-ip-quality-today]").click();
   await waitFor(() => card()?.textContent.includes("已完成"), "return to today failed");
   fixture.failed = true;
   await refresh();
