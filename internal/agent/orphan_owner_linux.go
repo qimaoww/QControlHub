@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -30,12 +31,21 @@ func fileOwnerIsInactiveAndUnassigned(info os.FileInfo) bool {
 		return false
 	}
 	statuses, err := filepath.Glob("/proc/[0-9]*/task/[0-9]*/status")
-	if err != nil || len(statuses) == 0 {
+	if err != nil {
+		return false
+	}
+	return uidAbsentFromThreadStatuses(uid, statuses)
+}
+
+func uidAbsentFromThreadStatuses(uid int, statuses []string) bool {
+	if len(statuses) == 0 {
 		return false
 	}
 	for _, statusPath := range statuses {
 		contents, err := os.ReadFile(statusPath)
-		if errors.Is(err, os.ErrNotExist) {
+		// A thread can disappear before open (ENOENT) or after open but
+		// before read (ESRCH). Neither leaves a live credential to inspect.
+		if errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ESRCH) {
 			continue
 		}
 		if err != nil {
