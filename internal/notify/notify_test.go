@@ -17,6 +17,16 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
+// newTestClient builds a Client whose transport is independent of
+// http.DefaultTransport. httptest.Server.Close closes idle connections on the
+// default transport, so parallel tests that share it can break each other's
+// in-flight webhook deliveries.
+func newTestClient(secret string) *Client {
+	client := New(secret, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	client.HTTP.Transport = &http.Transport{}
+	return client
+}
+
 func TestSendSignsPayloadWithHMACWhenSecretConfigured(t *testing.T) {
 	t.Parallel()
 	const secret = "test-webhook-secret"
@@ -29,7 +39,7 @@ func TestSendSignsPayloadWithHMACWhenSecretConfigured(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := New(secret, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	client := newTestClient(secret)
 	event := TaskFailedEvent(core.Task{
 		ID: "tsk_0123456789abcdef", AgentID: "agt_0123456789abcdef",
 		Action: core.ActionDeploy, Engine: core.EngineMihomo,
@@ -62,7 +72,7 @@ func TestSendSkipsSignatureWithoutSecret(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := New("", slog.New(slog.NewTextHandler(io.Discard, nil)))
+	client := newTestClient("")
 	if err := client.Send(context.Background(), server.URL, AgentOfflineEvent(core.Agent{ID: "agt_0123456789abcdef", Name: "edge-01"})); err != nil {
 		t.Fatalf("Send() error = %v", err)
 	}
@@ -73,7 +83,7 @@ func TestSendSkipsSignatureWithoutSecret(t *testing.T) {
 
 func TestSendEmptyURLIsNoOp(t *testing.T) {
 	t.Parallel()
-	client := New("secret", slog.New(slog.NewTextHandler(io.Discard, nil)))
+	client := newTestClient("secret")
 	if err := client.Send(context.Background(), "", AgentOfflineEvent(core.Agent{})); err != nil {
 		t.Fatalf("Send() with empty URL error = %v", err)
 	}
@@ -86,7 +96,7 @@ func TestSendReportsNonSuccessResponse(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := New("", slog.New(slog.NewTextHandler(io.Discard, nil)))
+	client := newTestClient("")
 	err := client.Send(context.Background(), server.URL, AgentOfflineEvent(core.Agent{ID: "agt_0123456789abcdef", Name: "edge-01"}))
 	if err == nil || !strings.Contains(err.Error(), "502") {
 		t.Fatalf("Send() error = %v, want 502", err)
@@ -124,7 +134,7 @@ func TestSendHonorsContextCancellation(t *testing.T) {
 	defer server.Close()
 	defer close(blocked)
 
-	client := New("", slog.New(slog.NewTextHandler(io.Discard, nil)))
+	client := newTestClient("")
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 	if err := client.Send(ctx, server.URL, AgentOfflineEvent(core.Agent{ID: "agt_0123456789abcdef"})); err == nil {
