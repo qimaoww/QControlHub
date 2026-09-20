@@ -6,7 +6,10 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"errors"
+	"html"
 	"io"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -48,12 +51,20 @@ func TestIPQualityRenderDrawsPrintedReport(t *testing.T) {
 		t.Fatal("archive digest does not match its content")
 	}
 	content := string(archive.Content)
+	if !strings.Contains(content, "<svg") {
+		t.Fatal("rendered report is not an svg")
+	}
 	for _, want := range []string{
-		"<svg", "IP质量体检报告：", "203.0.113.1", "AS210634", "广播IP", "低风险", "极低风险",
-		"今日IP检测量：565；总检测量：2204309", ipQualityGreen, ipQualityRed, ipQualityYellow,
+		"IP质量体检报告：203.0.113.1", "AS210634", "广播IP", "低风险", "极低风险",
+		"今日IP检测量：565；总检测量：2204309",
 	} {
-		if !strings.Contains(content, want) {
+		if rendered := strings.Join(ipQualityRenderedLines(content), "\n"); !strings.Contains(rendered, want) {
 			t.Fatalf("rendered report is missing %q", want)
+		}
+	}
+	for _, want := range []string{ipQualityGreen, ipQualityRed, ipQualityYellow} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("rendered report is missing the %s colour", want)
 		}
 	}
 	if strings.Contains(content, "\x1b") {
@@ -129,6 +140,211 @@ func validateRenderedSVG(content []byte) error {
 			depth++
 		case xml.EndElement:
 			depth--
+		}
+	}
+}
+
+// ipQualityAlignedFixture reproduces the lines that exposed the column drift:
+// a wide header row, the badge row beneath it, and a run of full-width text.
+const ipQualityAlignedFixture = "服务商： \x1b[3m TikTok   Disney+  Netflix Youtube  AmazonPV  Reddit   ChatGPT \x1b[0m\n" +
+	"状态：    \x1b[42m\x1b[37m 解锁 \x1b[0m   \x1b[42m\x1b[37m 解锁 \x1b[0m   \x1b[42m\x1b[37m 解锁 \x1b[0m   " +
+	"\x1b[42m\x1b[37m 解锁 \x1b[0m   \x1b[42m\x1b[37m 解锁 \x1b[0m   \x1b[42m\x1b[37m 解锁 \x1b[0m   " +
+	"\x1b[43m\x1b[37m 仅APP \x1b[0m \x1b[0m\n" +
+	"四、风险因子\n" +
+	"库：     ipapi ipregistry IPinfo DB-IP\n"
+
+// ipQualityTextElement captures one drawn run with the grid pinning that keeps
+// it in its terminal cells.
+var ipQualityTextElement = regexp.MustCompile(`<text x="(\d+)" y="(\d+)" fill="[^"]*"([^>]*) xml:space="preserve">([^<]*)</text>`)
+
+var ipQualityTextLength = regexp.MustCompile(`textLength="(\d+)"`)
+
+var ipQualityBadgeRect = regexp.MustCompile(`<rect x="(\d+)" y="(\d+)" width="(\d+)" height="(\d+)" fill="([^"]+)"/>`)
+
+func ipQualityDrawnRuns(svg string) []ipQualityDrawnRun {
+	matches := ipQualityTextElement.FindAllStringSubmatch(svg, -1)
+	runs := make([]ipQualityDrawnRun, 0, len(matches))
+	for _, match := range matches {
+		x, _ := strconv.Atoi(match[1])
+		y, _ := strconv.Atoi(match[2])
+		length := -1
+		if found := ipQualityTextLength.FindStringSubmatch(match[3]); found != nil {
+			length, _ = strconv.Atoi(found[1])
+		}
+		runs = append(runs, ipQualityDrawnRun{
+			x: x, y: y, length: length,
+			content: html.UnescapeString(match[4]), attributes: match[3],
+		})
+	}
+	return runs
+}
+
+type ipQualityDrawnRun struct {
+	x, y, length int
+	content      string
+	attributes   string
+}
+
+// ipQualityRenderedLines rebuilds the printed lines from the drawn runs: runs
+// on one baseline are one line, so the reconstruction can be compared with the
+// text the detector printed.
+func ipQualityRenderedLines(svg string) []string {
+	lines := make([]string, 0, 64)
+	baseline := -1
+	for _, run := range ipQualityDrawnRuns(svg) {
+		if run.y != baseline {
+			lines = append(lines, "")
+			baseline = run.y
+		}
+		lines[len(lines)-1] += run.content
+	}
+	return lines
+}
+
+func mustRenderIPQualitySVG(t *testing.T, text string) string {
+	t.Helper()
+	svg, err := renderIPQualitySVG(text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(svg)
+}
+
+// TestIPQualityRenderPinsRunsToTheGrid guards the alignment regression: a run
+// drawn at its font's natural advance creeps left of the columns below it, so
+// every run must be pinned to its exact terminal width and start on the grid.
+func TestIPQualityRenderPinsRunsToTheGrid(t *testing.T) {
+	runs := ipQualityDrawnRuns(mustRenderIPQualitySVG(t, ipQualityPrintedFixture+ipQualityAlignedFixture))
+	expectedX, expectedY := 0, 0
+	for _, run := range runs {
+		if run.y != expectedY {
+			expectedX, expectedY = ipQualityRenderPaddingX, run.y
+		}
+		if run.x != expectedX {
+			t.Fatalf("run %q starts at x=%d, want %d", run.content, run.x, expectedX)
+		}
+		width := ipQualityDisplayWidth(run.content) * ipQualityRenderCellWidth
+		if run.length != width {
+			t.Fatalf("run %q pins textLength=%d, want %d", run.content, run.length, width)
+		}
+		if width > 0 && !strings.Contains(run.attributes, `lengthAdjust="spacingAndGlyphs"`) {
+			t.Fatalf("run %q is not stretched onto the grid", run.content)
+		}
+		expectedX += width
+	}
+}
+
+func TestIPQualityRenderAlignsHeadersWithBadges(t *testing.T) {
+	svg := mustRenderIPQualitySVG(t, ipQualityAlignedFixture)
+	lines := ipQualityRenderedLines(svg)
+	if len(lines) != 4 {
+		t.Fatalf("rebuilt %d lines, want 4: %q", len(lines), lines)
+	}
+	headerColumn := ipQualityCellColumn(lines[0], "ChatGPT")
+	labelColumn := ipQualityCellColumn(lines[1], "仅APP")
+	if headerColumn != labelColumn-1 {
+		t.Fatalf("ChatGPT sits at cell %d but its badge label sits at cell %d", headerColumn, labelColumn)
+	}
+	badgeX := -1
+	for _, match := range ipQualityBadgeRect.FindAllStringSubmatch(svg, -1) {
+		if match[5] == ipQualityYellow {
+			badgeX, _ = strconv.Atoi(match[1])
+		}
+	}
+	if want := ipQualityRenderPaddingX + headerColumn*ipQualityRenderCellWidth; badgeX != want {
+		t.Fatalf("badge starts at x=%d, want %d", badgeX, want)
+	}
+	runs := ipQualityDrawnRuns(svg)
+	if run := ipQualityRunStartingAt(runs, badgeX+ipQualityRenderCellWidth); run == nil || !strings.HasPrefix(run.content, "仅") {
+		t.Fatalf("no badge label drawn at x=%d: %+v", badgeX+ipQualityRenderCellWidth, runs)
+	}
+	for _, run := range runs {
+		if strings.Contains(run.content, "风险因子") && run.length != 12*ipQualityRenderCellWidth {
+			t.Fatalf("full-width heading pins textLength=%d, want %d", run.length, 12*ipQualityRenderCellWidth)
+		}
+	}
+}
+
+// ipQualityCellColumn is the terminal cell a token starts at within a line.
+func ipQualityCellColumn(line, token string) int {
+	at := strings.Index(line, token)
+	if at < 0 {
+		return -1
+	}
+	return ipQualityDisplayWidth(line[:at])
+}
+
+func ipQualityRunStartingAt(runs []ipQualityDrawnRun, x int) *ipQualityDrawnRun {
+	for index := range runs {
+		if runs[index].x == x {
+			return &runs[index]
+		}
+	}
+	return nil
+}
+
+func TestIPQualityRenderKeepsTerminalStyles(t *testing.T) {
+	svg := mustRenderIPQualitySVG(t, "\x1b[1m\x1b[3m\x1b[4m报告\x1b[0m")
+	for _, want := range []string{`font-weight="bold"`, `font-style="italic"`, `text-decoration="underline"`} {
+		if !strings.Contains(svg, want) {
+			t.Fatalf("rendered report is missing %s", want)
+		}
+	}
+}
+
+func TestIPQualityRunsSplitWideAndNarrowCharacters(t *testing.T) {
+	for _, test := range []struct {
+		text string
+		want []ipQualityRun
+	}{
+		{"库：ipapi", []ipQualityRun{{"库：", 4}, {"ipapi", 5}}},
+		{"远端\u200b25", []ipQualityRun{{"远端\u200b", 4}, {"25", 2}}},
+		{"\u200b报告", []ipQualityRun{{"\u200b", 0}, {"报告", 4}}},
+		{"", nil},
+	} {
+		got := ipQualityRuns(test.text)
+		if len(got) != len(test.want) {
+			t.Fatalf("ipQualityRuns(%q) = %+v, want %+v", test.text, got, test.want)
+		}
+		for index := range got {
+			if got[index] != test.want[index] {
+				t.Fatalf("ipQualityRuns(%q) = %+v, want %+v", test.text, got, test.want)
+			}
+		}
+	}
+}
+
+func TestIPQualityDisplayWidthCountsTerminalCells(t *testing.T) {
+	for text, want := range map[string]int{
+		"AS210634":     8,
+		"报告":           4,
+		"（IPinfo 数据库）": 17,
+		"远端\u200b25":   6,
+		"114°10′29″E":  11,
+		"仅APP":         5,
+	} {
+		if got := ipQualityDisplayWidth(text); got != want {
+			t.Fatalf("ipQualityDisplayWidth(%q) = %d, want %d", text, got, want)
+		}
+	}
+}
+
+// ipQualityANSISequence matches the SGR sequences the detector emits.
+var ipQualityANSISequence = regexp.MustCompile("\x1b\\[[0-9;]*m")
+
+// TestIPQualityRenderRebuildsThePrintedLines asserts the panel draws exactly
+// the lines the detector printed, in order, without dropping or reordering a
+// single cell of text.
+func TestIPQualityRenderRebuildsThePrintedLines(t *testing.T) {
+	svg := mustRenderIPQualitySVG(t, ipQualityPrintedFixture)
+	printed := strings.Split(strings.TrimRight(ipQualityPrintedFixture, "\n"), "\n")
+	rebuilt := ipQualityRenderedLines(svg)
+	if len(rebuilt) != len(printed) {
+		t.Fatalf("rebuilt %d lines, want %d: %q", len(rebuilt), len(printed), rebuilt)
+	}
+	for index, line := range printed {
+		if want := ipQualityANSISequence.ReplaceAllString(line, ""); rebuilt[index] != want {
+			t.Fatalf("line %d = %q, want %q", index, rebuilt[index], want)
 		}
 	}
 }

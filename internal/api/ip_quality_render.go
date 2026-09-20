@@ -48,10 +48,12 @@ var ipQualityANSI = map[int]string{
 }
 
 type ipQualityCell struct {
-	text string
-	fill string
-	bg   string
-	bold bool
+	text      string
+	fill      string
+	bg        string
+	bold      bool
+	italic    bool
+	underline bool
 }
 
 type ipQualityLine []ipQualityCell
@@ -91,13 +93,16 @@ func ipQualityStyledLines(text string) []ipQualityLine {
 // and dropping every other control character.
 func ipQualityStyledLine(raw string) ipQualityLine {
 	line := ipQualityLine{}
-	fill, bg, bold := ipQualityDefault, "", false
+	fill, bg, bold, italic, underline := ipQualityDefault, "", false, false, false
 	var pending strings.Builder
 	flush := func() {
 		if pending.Len() == 0 {
 			return
 		}
-		line = append(line, ipQualityCell{text: pending.String(), fill: fill, bg: bg, bold: bold})
+		line = append(line, ipQualityCell{
+			text: pending.String(), fill: fill, bg: bg,
+			bold: bold, italic: italic, underline: underline,
+		})
 		pending.Reset()
 	}
 	for index := 0; index < len(raw); {
@@ -114,11 +119,19 @@ func ipQualityStyledLine(raw string) ipQualityLine {
 				}
 				switch {
 				case code == 0:
-					fill, bg, bold = ipQualityDefault, "", false
+					fill, bg, bold, italic, underline = ipQualityDefault, "", false, false, false
 				case code == 1:
 					bold = true
+				case code == 3:
+					italic = true
+				case code == 4:
+					underline = true
 				case code == 22:
 					bold = false
+				case code == 23:
+					italic = false
+				case code == 24:
+					underline = false
 				case code == 39:
 					fill = ipQualityDefault
 				case code == 49:
@@ -162,6 +175,7 @@ func buildIPQualitySVG(lines []ipQualityLine) []byte {
 	fmt.Fprintf(&builder, `<g font-family="%s" font-size="%d">`, ipQualityFontFamily, ipQualityRenderFontSize)
 	for index, line := range lines {
 		top := ipQualityRenderPaddingY + index*ipQualityRenderLineHeight
+		baseline := top + ipQualityRenderFontSize + 2
 		x := ipQualityRenderPaddingX
 		for _, cell := range line {
 			cellWidth := ipQualityDisplayWidth(cell.text) * ipQualityRenderCellWidth
@@ -169,19 +183,78 @@ func buildIPQualitySVG(lines []ipQualityLine) []byte {
 				fmt.Fprintf(&builder, `<rect x="%d" y="%d" width="%d" height="%d" fill="%s"/>`,
 					x, top, cellWidth, ipQualityRenderLineHeight, cell.bg)
 			}
-			if cell.text != "" {
-				bold := ""
-				if cell.bold {
-					bold = ` font-weight="bold"`
+			for _, run := range ipQualityRuns(cell.text) {
+				runWidth := run.cells * ipQualityRenderCellWidth
+				if run.text != "" {
+					fmt.Fprintf(&builder, `<text x="%d" y="%d" fill="%s"%s%s xml:space="preserve">%s</text>`,
+						x, baseline, cell.fill, ipQualityStyleAttributes(cell), ipQualityLengthAttributes(runWidth),
+						ipQualityEscape(run.text))
 				}
-				fmt.Fprintf(&builder, `<text x="%d" y="%d" fill="%s"%s xml:space="preserve">%s</text>`,
-					x, top+ipQualityRenderFontSize+2, cell.fill, bold, ipQualityEscape(cell.text))
+				x += runWidth
 			}
-			x += cellWidth
 		}
 	}
 	builder.WriteString(`</g></svg>`)
 	return []byte(builder.String())
+}
+
+// ipQualityStyleAttributes renders the SGR state a run inherits.
+func ipQualityStyleAttributes(cell ipQualityCell) string {
+	attributes := ""
+	if cell.bold {
+		attributes += ` font-weight="bold"`
+	}
+	if cell.italic {
+		attributes += ` font-style="italic"`
+	}
+	if cell.underline {
+		attributes += ` text-decoration="underline"`
+	}
+	return attributes
+}
+
+// ipQualityLengthAttributes pins a run to the terminal grid. A browser picks a
+// monospace face whose advance is not exactly one cell, so a run drawn at its
+// natural advance would creep left of the columns below it; textLength forces
+// every character to keep its cell.
+func ipQualityLengthAttributes(width int) string {
+	if width <= 0 {
+		return ""
+	}
+	return fmt.Sprintf(` textLength="%d" lengthAdjust="spacingAndGlyphs"`, width)
+}
+
+// ipQualityRun is a maximal slice of one styled cell whose characters all
+// occupy the same number of terminal cells, so it can be pinned as a unit.
+type ipQualityRun struct {
+	text  string
+	cells int
+}
+
+// ipQualityRuns splits a cell so that narrow and wide characters are pinned
+// separately: one textLength can only scale a run uniformly, and scaling a
+// mixed run would still leave its wide characters off the grid.
+func ipQualityRuns(text string) []ipQualityRun {
+	runs := make([]ipQualityRun, 0, 4)
+	unit := 0
+	for _, character := range text {
+		cells := ipQualityRuneWidth(character)
+		switch {
+		case len(runs) == 0:
+			runs = append(runs, ipQualityRun{text: string(character), cells: cells})
+			unit = cells
+		case cells == unit:
+			last := &runs[len(runs)-1]
+			last.text += string(character)
+			last.cells += cells
+		case cells == 0:
+			runs[len(runs)-1].text += string(character)
+		default:
+			runs = append(runs, ipQualityRun{text: string(character), cells: cells})
+			unit = cells
+		}
+	}
+	return runs
 }
 
 func ipQualityLineWidth(line ipQualityLine) int {
@@ -196,17 +269,28 @@ func ipQualityLineWidth(line ipQualityLine) int {
 // SVG columns line up like the terminal output.
 func ipQualityDisplayWidth(text string) int {
 	width := 0
-	for _, r := range text {
-		switch {
-		case r >= 0x1100 && r <= 0x115F, r >= 0x2E80 && r <= 0xA4CF, r >= 0xAC00 && r <= 0xD7A3,
-			r >= 0xF900 && r <= 0xFAFF, r >= 0xFE30 && r <= 0xFE6F, r >= 0xFF00 && r <= 0xFF60,
-			r >= 0xFFE0 && r <= 0xFFE6, r >= 0x20000 && r <= 0x3FFFD:
-			width += 2
-		default:
-			width++
-		}
+	for _, character := range text {
+		width += ipQualityRuneWidth(character)
 	}
 	return width
+}
+
+// ipQualityRuneWidth is the character's terminal cell count: zero for
+// zero-width joiners and combining marks, two for full-width characters.
+func ipQualityRuneWidth(character rune) int {
+	switch {
+	case character == 0x200B, character == 0x200C, character == 0x200D, character == 0xFEFF:
+		return 0
+	case character >= 0x0300 && character <= 0x036F:
+		return 0
+	case character >= 0x1100 && character <= 0x115F, character >= 0x2E80 && character <= 0xA4CF,
+		character >= 0xAC00 && character <= 0xD7A3, character >= 0xF900 && character <= 0xFAFF,
+		character >= 0xFE30 && character <= 0xFE6F, character >= 0xFF00 && character <= 0xFF60,
+		character >= 0xFFE0 && character <= 0xFFE6, character >= 0x20000 && character <= 0x3FFFD:
+		return 2
+	default:
+		return 1
+	}
 }
 
 func ipQualityEscape(text string) string {
