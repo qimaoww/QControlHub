@@ -83,6 +83,8 @@ export async function testIPQualityRuntime(mode, preview = false) {
   await waitFor(() => card()?.textContent.includes("已完成"), "IP quality page did not load");
   assert.equal(document.querySelectorAll(".ip-quality-node-card").length, 3, "shared host was exposed");
   assert.ok(document.querySelector('.dock-nav a[href="#ip-quality"]'), "IP quality navigation is missing");
+  assert.equal(getComputedStyle(document.querySelector(".context-sidebar")).display, "none",
+    "IP quality reserves an empty context sidebar");
   assert.ok(document.querySelector('[data-ip-quality-day="1"]').disabled, "future day is selectable");
   card().querySelector(".ip-quality-details>summary").click();
   const images = [...card().querySelectorAll(".ip-quality-archive img")];

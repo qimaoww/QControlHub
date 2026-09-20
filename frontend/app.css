@@ -1584,7 +1584,6 @@ dialog.config-access-dialog::backdrop{background:rgba(17,20,36,.34);backdrop-fil
   .ip-quality-date input,.ip-quality-date-picker>.button{height:42px}
 }
 @media(max-width:700px){
-  .page-ip-quality .context-sidebar{display:none}
   .ip-quality-workspace{padding-bottom:calc(80px + env(safe-area-inset-bottom))}
 }
 /* Dismissible notices and compact node-page confirmations. */

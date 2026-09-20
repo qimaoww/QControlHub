@@ -112,6 +112,5 @@
   .ip-quality-date input,.ip-quality-date-picker>.button{height:42px}
 }
 @media(max-width:700px){
-  .page-ip-quality .context-sidebar{display:none}
   .ip-quality-workspace{padding-bottom:calc(80px + env(safe-area-inset-bottom))}
 }
