@@ -51,7 +51,15 @@ export async function testAgentDeleteActions({ testAPI }) {
   testAPI.deleteGate = null;
   testAPI.deleteFailure = false;
 
+  let finishRefresh;
+  testAPI.agentsGate = new Promise((resolve) => { finishRefresh = resolve; });
   (await confirm()).querySelector("[data-confirm-accept]").click();
+  await waitFor(() => /节点已删除/.test(notice()), "列表刷新阻塞时未立即显示删除成功");
+  assert.equal(button().textContent, "已删除");
+  assert.equal(button().disabled, true, "成功后刷新期间不能再次删除");
+  assert.equal(button().hasAttribute("aria-busy"), false, "删除成功后仍在显示进行中");
+  finishRefresh();
+  testAPI.agentsGate = null;
   await waitFor(() => document.querySelector("[data-node-missing]") && /节点已删除/.test(notice()), "删除成功后未刷新详情并提示结果");
   assert.equal(calls(), before + 3);
   location.hash = "#node-settings";
@@ -86,6 +94,8 @@ export async function testAgentDeleteActions({ testAPI }) {
   const lastDialog = await waitFor(() => document.querySelector("[data-confirm-dialog][open]"), "刷新失败测试未打开确认框");
   lastDialog.querySelector("[data-confirm-accept]").click();
   await waitFor(() => /节点已删除，但列表刷新失败/.test(notice()), "刷新失败不应掩盖删除已成功");
+  assert.equal(remaining.textContent, "已删除");
+  assert.equal(remaining.disabled, true, "刷新失败不能恢复已删除节点的按钮");
   assert.equal(testAPI.agents.some((agent) => agent.id === "bravo"), false);
   testAPI.agentsFailure = false;
 }

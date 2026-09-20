@@ -632,15 +632,19 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 	if _, err := dataStore.GetAgent(ctx, enrolled.AgentID); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("revoked agent remains queryable: %v", err)
 	}
-	terminatedTask, err := dataStore.GetTask(ctx, revokedTask.ID)
-	if err != nil || terminatedTask.Status != core.TaskFailed || terminatedTask.Error != "agent identity was revoked" || terminatedTask.FinishedAt == nil {
-		t.Fatalf("task after agent revocation = %+v, %v", terminatedTask, err)
-	}
 	if _, err := dataStore.AgentConfig(ctx, enrolled.AgentID, core.EngineMihomo); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("revoked agent configuration remains active: %v", err)
 	}
 	if _, err := dataStore.ConfigRevision(ctx, config.ID, config.Version); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("revoked agent configuration history remains available: %v", err)
+	}
+	// Revocation and connection cancellation have completed before history cleanup.
+	if err := dataStore.CleanupDeletedAgents(ctx); err != nil {
+		t.Fatal(err)
+	}
+	terminatedTask, err := dataStore.GetTask(ctx, revokedTask.ID)
+	if err != nil || terminatedTask.Status != core.TaskFailed || terminatedTask.Error != "agent identity was revoked" || terminatedTask.FinishedAt == nil {
+		t.Fatalf("task after agent cleanup = %+v, %v", terminatedTask, err)
 	}
 
 	rejectedHandshake, _ := http.NewRequestWithContext(ctx, http.MethodGet, websocketURL, nil)

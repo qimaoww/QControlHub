@@ -46,3 +46,20 @@ func janitor(ctx context.Context, dataStore *store.Store) {
 		}
 	}
 }
+
+// Run independently of other maintenance so large deletion jobs cannot delay
+// heartbeats, scheduled checks or retention. Drain persisted jobs on startup.
+func cleanDeletedAgents(ctx context.Context, dataStore *store.Store) {
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+	for {
+		if err := dataStore.CleanupDeletedAgents(ctx); err != nil && ctx.Err() == nil {
+			slog.Error("clean deleted agents", "error", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}

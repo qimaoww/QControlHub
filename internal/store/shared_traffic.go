@@ -9,6 +9,7 @@ import (
 
 func trafficAccessClause(ctx context.Context, agentColumn, policyColumn string, args *[]any) string {
 	clause := agentAccessClause(ctx, agentColumn, args)
+	clause += ` AND EXISTS(SELECT 1 FROM agents active_agent WHERE active_agent.id=` + agentColumn + ` AND active_agent.revoked_at IS NULL)`
 	if scopeForConfig(ctx).Admin {
 		return clause
 	}

@@ -54,6 +54,10 @@ func TestDeleteOfflineAgentWithPendingDeployment(t *testing.T) {
 			if db.EnrollmentTokenUsable(ctx, token.Token) {
 				t.Fatal("deleted offline node can still re-enroll with its old credential")
 			}
+			// Physical cleanup runs separately; the API has already returned success.
+			if err := db.CleanupDeletedAgents(ctx); err != nil {
+				t.Fatal(err)
+			}
 			stored, err := db.GetTaskState(ctx, task.ID)
 			if err != nil || stored.Status != core.TaskFailed {
 				t.Fatalf("pending deployment was not failed: %+v, %v", stored, err)
