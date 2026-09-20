@@ -31,8 +31,10 @@ func (s *Store) CleanupDeletedAgents(ctx context.Context) error {
 		}
 		if err := s.cleanupDeletedAgent(ctx, id); err != nil {
 			failures = append(failures, err)
-			if _, retryErr := s.pool.Exec(ctx, `UPDATE agent_deletion_jobs
-                SET retry_at=now()+interval '1 minute' WHERE agent_id=$1`, id); retryErr != nil {
+			if _, retryErr := s.pool.Exec(ctx, `WITH available AS (
+                SELECT agent_id FROM agent_deletion_jobs WHERE agent_id=$1 FOR UPDATE SKIP LOCKED
+            ) UPDATE agent_deletion_jobs SET retry_at=now()+interval '1 minute'
+              WHERE agent_id IN (SELECT agent_id FROM available)`, id); retryErr != nil {
 				return errors.Join(append(failures, retryErr)...)
 			}
 		}
@@ -40,9 +42,53 @@ func (s *Store) CleanupDeletedAgents(ctx context.Context) error {
 	return errors.Join(failures...)
 }
 
-func (s *Store) cleanupDeletedAgent(ctx context.Context, id string) (err error) {
+// Bound each transaction by row count as well as time. Committed batches
+// survive a later lock timeout or shutdown, so large histories make progress.
+const agentCleanupBatchSize = 256
+
+type agentCleanupStep struct {
+	stage string
+	query string
+}
+
+var agentCleanupSteps = []agentCleanupStep{
+	{"fail pending tasks", `UPDATE tasks SET status='failed', error='agent identity was revoked',
+        finished_at=now(), config_content=NULL, lease_id=NULL
+        WHERE id IN (SELECT id FROM tasks WHERE agent_id=$1 AND status IN ('pending','running') LIMIT $2)`},
+	{"clear configs", `UPDATE configs SET deleted_at=now(),content='',updated_at=now()
+        WHERE id IN (SELECT id FROM configs WHERE agent_id=$1 AND deleted_at IS NULL LIMIT $2)`},
+	{"delete config revisions", `DELETE FROM config_revisions WHERE ctid IN
+        (SELECT ctid FROM config_revisions WHERE config_id IN (SELECT id FROM configs WHERE agent_id=$1) LIMIT $2)`},
+	{"delete daily usage", `DELETE FROM port_traffic_daily_usage WHERE ctid IN
+        (SELECT ctid FROM port_traffic_daily_usage WHERE agent_id=$1 LIMIT $2)`},
+	{"delete daily accounting", `DELETE FROM port_traffic_daily_accounting WHERE ctid IN
+        (SELECT ctid FROM port_traffic_daily_accounting WHERE agent_id=$1 LIMIT $2)`},
+	{"delete accounting epochs", `DELETE FROM port_traffic_accounting_epochs WHERE ctid IN
+        (SELECT ctid FROM port_traffic_accounting_epochs WHERE agent_id=$1 LIMIT $2)`},
+	{"delete traffic policies", `DELETE FROM port_traffic_policies WHERE ctid IN
+        (SELECT ctid FROM port_traffic_policies WHERE agent_id=$1 LIMIT $2)`},
+	{"delete SubStore selections", `DELETE FROM substore_sync_items WHERE ctid IN
+        (SELECT ctid FROM substore_sync_items WHERE agent_id=$1 LIMIT $2)`},
+	// Use the partitioned primary key for indexed lookup of each selected row.
+	{"delete core logs", `DELETE FROM core_logs WHERE (id,received_at) IN
+        (SELECT id,received_at FROM core_logs WHERE agent_id=$1 LIMIT $2)`},
+	// Entries must be gone before their referenced batch markers are removed.
+	{"delete core log batches", `DELETE FROM core_log_batches WHERE ctid IN
+        (SELECT ctid FROM core_log_batches WHERE agent_id=$1 LIMIT $2)`},
+}
+
+func (s *Store) cleanupDeletedAgent(ctx context.Context, id string) error {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
+	for {
+		progressed, err := s.cleanupDeletedAgentBatch(ctx, id)
+		if err != nil || !progressed {
+			return err
+		}
+	}
+}
+
+func (s *Store) cleanupDeletedAgentBatch(ctx context.Context, id string) (progressed bool, err error) {
 	stage := "claim cleanup"
 	defer func() {
 		if err != nil {
@@ -51,72 +97,40 @@ func (s *Store) cleanupDeletedAgent(ctx context.Context, id string) (err error) 
 	}()
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `SET LOCAL lock_timeout='1s'`); err != nil {
+		return false, err
+	}
 	var claimed string
 	err = tx.QueryRow(ctx, `SELECT agent_id FROM agent_deletion_jobs
         WHERE agent_id=$1 AND retry_at<=now() FOR UPDATE SKIP LOCKED`, id).Scan(&claimed)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil
+		return false, nil
 	}
 	if err != nil {
-		return err
+		return false, err
 	}
-	// Do not occupy a connection for the full deadline on a locked history row.
-	if _, err := tx.Exec(ctx, `SET LOCAL lock_timeout='1s'`); err != nil {
-		return err
+	for _, step := range agentCleanupSteps {
+		stage = step.stage
+		command, err := tx.Exec(ctx, step.query, id, agentCleanupBatchSize)
+		if err != nil {
+			return false, err
+		}
+		if command.RowsAffected() == 0 {
+			continue
+		}
+		// Commit before moving to another table. A blocked later stage must
+		// not undo this batch. Move unfinished work behind older queue entries.
+		if _, err := tx.Exec(ctx, `UPDATE agent_deletion_jobs SET retry_at=now() WHERE agent_id=$1`, id); err != nil {
+			return false, err
+		}
+		return true, tx.Commit(ctx)
 	}
-	stage = "fail pending tasks"
-	_, err = tx.Exec(ctx, `
-		UPDATE tasks SET status='failed', error='agent identity was revoked', finished_at=now(), config_content=NULL, lease_id=NULL
-		WHERE agent_id=$1 AND status IN ('pending','running')`, id)
-	if err != nil {
-		return err
-	}
-	stage = "clear configs"
-	_, err = tx.Exec(ctx, `UPDATE configs SET deleted_at=now(),content='',updated_at=now()
-			WHERE agent_id=$1 AND deleted_at IS NULL`, id)
-	if err != nil {
-		return err
-	}
-	stage = "delete config revisions"
-	if _, err := tx.Exec(ctx, `DELETE FROM config_revisions WHERE config_id IN (SELECT id FROM configs WHERE agent_id=$1)`, id); err != nil {
-		return err
-	}
-	stage = "delete daily usage"
-	if _, err := tx.Exec(ctx, `DELETE FROM port_traffic_daily_usage WHERE agent_id=$1`, id); err != nil {
-		return err
-	}
-	stage = "delete daily accounting"
-	if _, err := tx.Exec(ctx, `DELETE FROM port_traffic_daily_accounting WHERE agent_id=$1`, id); err != nil {
-		return err
-	}
-	stage = "delete accounting epochs"
-	if _, err := tx.Exec(ctx, `DELETE FROM port_traffic_accounting_epochs WHERE agent_id=$1`, id); err != nil {
-		return err
-	}
-	stage = "delete traffic policies"
-	if _, err := tx.Exec(ctx, `DELETE FROM port_traffic_policies WHERE agent_id=$1`, id); err != nil {
-		return err
-	}
-	stage = "delete SubStore selections"
-	if _, err := tx.Exec(ctx, `DELETE FROM substore_sync_items WHERE agent_id=$1`, id); err != nil {
-		return err
-	}
-	// Delete log entries before their batch markers to satisfy the foreign key.
-	stage = "delete core logs"
-	if _, err := tx.Exec(ctx, `DELETE FROM core_logs WHERE agent_id=$1`, id); err != nil {
-		return err
-	}
-	stage = "delete core log batches"
-	if _, err := tx.Exec(ctx, `DELETE FROM core_log_batches WHERE agent_id=$1`, id); err != nil {
-		return err
-	}
-
 	stage = "complete cleanup"
 	if _, err := tx.Exec(ctx, `DELETE FROM agent_deletion_jobs WHERE agent_id=$1`, id); err != nil {
-		return err
+		return false, err
 	}
-	return tx.Commit(ctx)
+	return false, tx.Commit(ctx)
 }
