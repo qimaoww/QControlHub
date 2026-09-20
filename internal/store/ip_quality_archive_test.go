@@ -1,11 +1,8 @@
 package store
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
@@ -29,16 +26,12 @@ func TestIPQualityArchiveOwnershipAndRetention(t *testing.T) {
 		t.Fatalf("live lease rejected: %v %v", allowed, err)
 	}
 	report := storeQualityResult(t)
-	content := []byte(`<svg xmlns="http://www.w3.org/2000/svg"/>`)
-	digest := sha256.Sum256(content)
-	archive := core.IPQualityArchive{IPQualityArchiveInfo: core.IPQualityArchiveInfo{
-		Family: 4, SHA256: hex.EncodeToString(digest[:]), Size: len(content), RenderedAt: time.Now().UTC(),
-	}, Content: content}
-	if err := db.CompleteTask(ctx, agent.ID, task.ID, core.TaskResultRequest{LeaseID: lease.LeaseID, Success: true, IPQuality: report}, archive); err != nil {
+	archives := storeQualityArchives(t, report)
+	if err := db.CompleteTask(ctx, agent.ID, task.ID, core.TaskResultRequest{LeaseID: lease.LeaseID, Success: true, IPQuality: report}, archives...); err != nil {
 		t.Fatal(err)
 	}
 	got, err := db.GetIPQualityArchive(ctx, task.ID, 4)
-	if err != nil || string(got.Content) != string(content) || got.SHA256 != archive.SHA256 {
+	if err != nil || string(got.Content) != string(archives[0].Content) || got.SHA256 != archives[0].SHA256 {
 		t.Fatalf("archive: %+v %v", got, err)
 	}
 	if _, err := db.GetIPQualityArchive(WithConfigScope(ctx, "another-owner", false), task.ID, 4); !errors.Is(err, ErrNotFound) {
