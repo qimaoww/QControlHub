@@ -1,11 +1,28 @@
 package api
 
 import (
+	"context"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
+
+func TestDeleteAgentDeadlineReturnsGatewayTimeout(t *testing.T) {
+	db, _, _, _, _ := newConfigScopeAPIFixture(t)
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	request := httptest.NewRequest(http.MethodDelete, "/api/v1/agents/expired", nil).WithContext(ctx)
+	request.SetPathValue("id", "expired")
+	response := httptest.NewRecorder()
+	New(db, Config{}).deleteAgent(response, request)
+	if response.Code != http.StatusGatewayTimeout || !strings.Contains(response.Body.String(), "删除节点超时") {
+		t.Fatalf("expired deletion: %d %s", response.Code, response.Body.String())
+	}
+}
 
 func TestDeleteOfflineAgentWithPendingDeployment(t *testing.T) {
 	for _, actor := range []string{"owner", "admin"} {

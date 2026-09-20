@@ -29,7 +29,9 @@ export function createAgentSettings({ api, can: permission, engineName, notify, 
         ))) return;
         pendingAgentDeletes.set(agentID, "deleting");
         syncDeleteButton(button);
-        await api(`/agents/${encodeURIComponent(agentID)}`, { method: "DELETE" });
+        await api(`/agents/${encodeURIComponent(agentID)}`, {
+          method: "DELETE", signal: AbortSignal.timeout(45000),
+        });
         try {
           await refreshAgentPage();
           notify("节点已删除");

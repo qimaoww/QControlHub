@@ -419,6 +419,12 @@ window.fetch = async (input, options = {}) => {
     return json({ name });
   }
   if (method === "DELETE" && /^\/agents\/[^/]+$/.test(path)) {
+    if (testAPI.deleteHang) {
+      await new Promise((_, reject) => {
+        if (options.signal?.aborted) reject(options.signal.reason);
+        else options.signal?.addEventListener("abort", () => reject(options.signal.reason), { once: true });
+      });
+    }
     if (testAPI.deleteGate) await testAPI.deleteGate;
     if (testAPI.deleteFailure) return json({ error: "temporary delete failure" }, 503);
     const agentID = decodeURIComponent(path.split("/")[2]);

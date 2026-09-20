@@ -61,6 +61,26 @@ export async function testAgentDeleteActions({ testAPI }) {
   location.hash = "#settings-node-bravo";
   const remaining = await waitFor(() => document.querySelector('[data-delete="bravo"]'), "刷新失败测试节点未渲染");
   document.querySelector('[data-node-tab="agent"]').click();
+  // Use the browser's real abort/TimeoutError behavior with an accelerated clock.
+  const timeout = AbortSignal.timeout;
+  testAPI.deleteHang = true;
+  let deleteTimeout;
+  AbortSignal.timeout = (milliseconds) => {
+    deleteTimeout = milliseconds;
+    return timeout.call(AbortSignal, 50);
+  };
+  try {
+    remaining.click();
+    const pendingDialog = await waitFor(() => document.querySelector("[data-confirm-dialog][open]"), "超时测试未打开确认框");
+    pendingDialog.querySelector("[data-confirm-accept]").click();
+    await waitFor(() => /请求超时/.test(notice()) && !remaining.disabled, "无响应的删除请求未超时或未恢复按钮");
+    assert.ok(deleteTimeout > 30000 && deleteTimeout < 60000, "客户端等待应长于后端删除期限，并短于连接写入期限");
+    assert.match(notice(), /刷新确认结果/);
+    assert.ok(testAPI.agents.some((agent) => agent.id === "bravo"), "超时不能当作删除成功");
+  } finally {
+    AbortSignal.timeout = timeout;
+    testAPI.deleteHang = false;
+  }
   testAPI.agentsFailure = true;
   remaining.click();
   const lastDialog = await waitFor(() => document.querySelector("[data-confirm-dialog][open]"), "刷新失败测试未打开确认框");
