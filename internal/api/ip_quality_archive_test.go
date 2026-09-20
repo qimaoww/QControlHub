@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"errors"
+	"fmt"
 	"html"
 	"io"
 	"regexp"
@@ -300,6 +301,7 @@ func TestIPQualityRunsSplitWideAndNarrowCharacters(t *testing.T) {
 		{"库：ipapi", []ipQualityRun{{"库：", 4}, {"ipapi", 5}}},
 		{"远端\u200b25", []ipQualityRun{{"远端\u200b", 4}, {"25", 2}}},
 		{"\u200b报告", []ipQualityRun{{"\u200b", 0}, {"报告", 4}}},
+		{"a\u0301报告b\u200d", []ipQualityRun{{"a\u0301", 1}, {"报告", 4}, {"b\u200d", 1}}},
 		{"", nil},
 	} {
 		got := ipQualityRuns(test.text)
@@ -311,6 +313,66 @@ func TestIPQualityRunsSplitWideAndNarrowCharacters(t *testing.T) {
 				t.Fatalf("ipQualityRuns(%q) = %+v, want %+v", test.text, got, test.want)
 			}
 		}
+	}
+}
+
+func TestIPQualityRunsLongTextAllocationBudget(t *testing.T) {
+	for _, text := range []string{
+		strings.Repeat("a", ipQualityRenderMaxText),
+		strings.Repeat("a\u0301", ipQualityRenderMaxText/3),
+		strings.Repeat("报", ipQualityRenderMaxText/3),
+	} {
+		var runs []ipQualityRun
+		allocations := testing.AllocsPerRun(5, func() { runs = ipQualityRuns(text) })
+		if len(runs) != 1 || runs[0].text != text || runs[0].cells != ipQualityDisplayWidth(text) {
+			t.Fatal("long run lost text or terminal cells")
+		}
+		// A uniform run needs a constant number of allocations, even when it
+		// contains thousands of combining marks or multi-byte characters.
+		if allocations > 8 {
+			t.Fatalf("long run allocated %.0f objects; want at most 8", allocations)
+		}
+	}
+}
+
+func BenchmarkIPQualityRenderLongLine(b *testing.B) {
+	for _, size := range []int{32 << 10, ipQualityRenderMaxText} {
+		b.Run(fmt.Sprintf("%d-bytes", size), func(b *testing.B) {
+			text := strings.Repeat("a", size)
+			b.ReportAllocs()
+			b.SetBytes(int64(size))
+			for b.Loop() {
+				if _, err := renderIPQualitySVG(text); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+func TestIPQualityRenderRejectsInvalidXMLCharacters(t *testing.T) {
+	for _, character := range []rune{0xfffe, 0xffff} {
+		result, err := core.NormalizeIPQualityResult(&core.IPQualityResult{
+			Reports:     []json.RawMessage{json.RawMessage(`{"Head":{"IP":"203.0.113.1"},"Info":{},"Type":{},"Score":{},"Factor":{},"Media":{},"Mail":{}}`)},
+			ReportsText: []string{"IP质量体检报告：203.0.113.1\n运营商：bad" + string(character) + "value"},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		archives, err := renderIPQualityArchives(&result)
+		if err == nil || !strings.Contains(err.Error(), "XML") || len(archives) != 0 {
+			t.Fatalf("U+%04X produced an archive: %v", character, err)
+		}
+	}
+	// Keep valid boundary characters, astral text, escaped markup and ANSI
+	// styling renderable while rejecting only invalid documents.
+	text := "\x1b[32m报告 & < > \" '\t\ud7ff\ue000\ufffd\U00010000\U0010ffff\x1b[0m"
+	svg, err := renderIPQualitySVG(text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := validateRenderedSVG(svg); err != nil {
+		t.Fatal(err)
 	}
 }
 

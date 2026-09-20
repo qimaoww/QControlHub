@@ -1,8 +1,11 @@
 package api
 
 import (
+	"bytes"
+	"encoding/xml"
 	"errors"
 	"fmt"
+	"io"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -76,6 +79,16 @@ func renderIPQualitySVG(text string) ([]byte, error) {
 	svg := buildIPQualitySVG(lines)
 	if len(svg) == 0 || len(svg) > core.MaxIPQualityArchiveBytes {
 		return nil, errors.New("IPQuality 渲染结果超出大小限制")
+	}
+	// Valid UTF-8 can still contain characters forbidden in XML (for example
+	// U+FFFE). Validate the bounded document before it can be stored as success.
+	decoder := xml.NewDecoder(bytes.NewReader(svg))
+	for {
+		if _, err := decoder.Token(); errors.Is(err, io.EOF) {
+			break
+		} else if err != nil {
+			return nil, errors.New("IPQuality 报告包含无法生成有效 SVG 的 XML 字符")
+		}
 	}
 	return svg, nil
 }
@@ -272,23 +285,22 @@ type ipQualityRun struct {
 // mixed run would still leave its wide characters off the grid.
 func ipQualityRuns(text string) []ipQualityRun {
 	runs := make([]ipQualityRun, 0, 4)
-	unit := 0
-	for _, character := range text {
+	start, unit, width := 0, -1, 0
+	for index, character := range text {
 		cells := ipQualityRuneWidth(character)
-		switch {
-		case len(runs) == 0:
-			runs = append(runs, ipQualityRun{text: string(character), cells: cells})
+		if unit < 0 {
 			unit = cells
-		case cells == unit:
-			last := &runs[len(runs)-1]
-			last.text += string(character)
-			last.cells += cells
-		case cells == 0:
-			runs[len(runs)-1].text += string(character)
-		default:
-			runs = append(runs, ipQualityRun{text: string(character), cells: cells})
-			unit = cells
+		} else if cells != unit && cells != 0 {
+			// Slice the original UTF-8 bytes once per run instead of copying
+			// the growing prefix for every character. Combining marks remain
+			// attached to the preceding run without adding any cells.
+			runs = append(runs, ipQualityRun{text: text[start:index], cells: width})
+			start, unit, width = index, cells, 0
 		}
+		width += cells
+	}
+	if start < len(text) {
+		runs = append(runs, ipQualityRun{text: text[start:], cells: width})
 	}
 	return runs
 }

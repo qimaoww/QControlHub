@@ -185,10 +185,12 @@ func TestIPQualityAPIAndWebSocketLifecycle(t *testing.T) {
 	bad := core.IPQualityResult{Reports: []json.RawMessage{
 		json.RawMessage(`{"Head":{"IP":"203.0.113.1"},"Info":{"Organization":"provider\u0000value"},"Type":{},"Score":{},"Factor":{},"Media":{},"Mail":{}}`),
 	}, ReportsText: []string{"IP质量体检报告：203.0.113.1\n"}}
+	badXML := core.IPQualityResult{Reports: report.Reports,
+		ReportsText: []string{"IP质量体检报告：203.0.113.1\n运营商：bad\ufffevalue"}}
 	for _, test := range []struct {
 		report core.IPQualityResult
 		status core.TaskStatus
-	}{{bad, core.TaskFailed}, {report, core.TaskSucceeded}} {
+	}{{bad, core.TaskFailed}, {badXML, core.TaskFailed}, {report, core.TaskSucceeded}} {
 		if err := json.Unmarshal(call("POST", "/ip-quality", "quality-admin", input, 201).Body.Bytes(), &task); err != nil {
 			t.Fatal(err)
 		}
@@ -214,6 +216,8 @@ func TestIPQualityAPIAndWebSocketLifecycle(t *testing.T) {
 		}
 		if test.status == core.TaskFailed {
 			call("GET", "/ip-quality/"+task.ID+"/archives/4", "quality-admin", nil, 404)
+		} else if err := validateRenderedSVG(call("GET", "/ip-quality/"+task.ID+"/archives/4", "quality-admin", nil, 200).Body.Bytes()); err != nil {
+			t.Fatalf("successful task served invalid SVG: %v", err)
 		}
 	}
 }
