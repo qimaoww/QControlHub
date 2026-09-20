@@ -89,7 +89,8 @@ The access-control controller is shared by the standalone route and embedded
 configuration restrictions. Embedded consumers import that controller, not the
 route. Client access and SubStore share `card-masonry`, but every factory call
 owns a separate observer; rendering disconnects that route's previous observer
-before binding the new cards.
+before binding the new cards. SubStore uses CSS auto rows and skips the masonry
+observer to match the node overview. Client access retains explicit pixel rows and its masonry behavior.
 
 Preserve these lifecycle boundaries:
 
@@ -176,6 +177,13 @@ unlisted, missing, duplicate, non-regular, or incomplete sources and a stale
 generated file. Both Debian and Alpine non-browser check groups run it.
 `frontend/app.css` remains the single distributed stylesheet; the web image
 ships that artifact, not the source manifest or test modules.
+
+`670-console-cards.css` owns the shared node-style card frame, headings, footers
+and collection grid. Its route guard excludes server configuration, presets,
+archives and client access, including shared panels embedded in those routes.
+Feature slices still own card contents, status badges, dialogs and wide data
+layouts. Update the shared tokens rather than introducing another card radius
+or grid spacing for a covered console page.
 
 ## Browser regression ownership
 

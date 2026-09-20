@@ -1,0 +1,169 @@
+/* Shared console card language, taken from the node overview. Keep this final
+   layer explicit: embedded controls, dialogs and status colors retain their
+   feature styles. Configuration routes are deliberately excluded, including
+   their embedded shared panels. Wide data workspaces retain their layout. */
+:root {
+  --console-card-radius:13px;
+  --console-card-gap:12px;
+  --console-card-min:360px;
+  --console-card-padding:12px 14px;
+}
+
+.app-body:not(:where(.page-live-config,.page-agent-config,.page-archive-config,.page-client-access,.page-agents:not(.page-node-settings))) :is(.node-card,.substore-agent-card,
+  .traffic-policy-card,.bbr-card,.access-control-card,.ip-quality-node-card,
+  .settings-section,.workspace-panel,.dashboard-stat,.dashboard-traffic-history,
+  .task-event-card,.core-log-stream,
+  .task-filter-panel,.traffic-control-panel,.access-control-toolbar,
+  .substore-status-bar) {
+  min-width:0;
+  border:1px solid var(--line);
+  border-radius:var(--console-card-radius);
+  background:var(--surface);
+  box-shadow:var(--shadow);
+}
+
+.app-body:not(:where(.page-live-config,.page-agent-config,.page-archive-config,.page-client-access,.page-agents:not(.page-node-settings))) .substore-agent-grid {
+  grid-auto-rows:auto;
+}
+
+/* auto-fill leaves a lone card at the same width as cards in a full row. */
+.app-body:not(:where(.page-live-config,.page-agent-config,.page-archive-config,.page-client-access,.page-agents:not(.page-node-settings))) :is(.node-card-grid,.substore-agent-grid,
+  .traffic-policy-grid,.bbr-grid,.access-control-grid,.ip-quality-grid,
+  .user-quota-grid) {
+  grid-template-columns:repeat(auto-fill,minmax(min(100%,var(--console-card-min)),1fr));
+  gap:var(--console-card-gap);
+}
+
+.app-body:not(:where(.page-live-config,.page-agent-config,.page-archive-config,.page-client-access,.page-agents:not(.page-node-settings))) :is(.dashboard-workspace,.ip-quality-workspace,.settings-overview) {
+  max-width:none;
+}
+.app-body:not(:where(.page-live-config,.page-agent-config,.page-archive-config,.page-client-access,.page-agents:not(.page-node-settings))) :is(.dashboard-workspace,.dashboard-columns,.bbr-workspace,
+  .users-workspace,.client-connections,
+  .access-control-workspace) {
+  gap:var(--console-card-gap);
+}
+
+.app-body:not(:where(.page-live-config,.page-agent-config,.page-archive-config,.page-client-access,.page-agents:not(.page-node-settings))) :is(.node-card-head,
+  .substore-agent-card>header,.traffic-policy-card>header,.bbr-card>header,
+  .access-control-card>header,.ip-quality-node-card>header,
+  .settings-section>header,.workspace-panel>header,.task-event-card>header) {
+  min-height:63px;
+  gap:9px;
+  padding:var(--console-card-padding);
+  border-bottom:1px solid var(--line);
+  background:var(--surface);
+}
+
+.app-body:not(:where(.page-live-config,.page-agent-config,.page-archive-config,.page-client-access,.page-agents:not(.page-node-settings))) :is(
+  .substore-agent-card>header strong,.traffic-card-identity strong,
+  .bbr-card>header h2,.access-control-card>header strong,
+  .ip-quality-node-card>header strong,.settings-section>header h3,
+  .workspace-panel>header h3) {
+  margin:0;
+  color:var(--ink);
+  font-size:calc(13px * var(--ui-font-scale));
+  font-weight:750;
+  letter-spacing:0;
+  overflow-wrap:anywhere;
+}
+
+.app-body:not(:where(.page-live-config,.page-agent-config,.page-archive-config,.page-client-access,.page-agents:not(.page-node-settings))) :is(
+  .substore-agent-card>header>.node-avatar,.settings-section-number) {
+  width:38px;
+  height:38px;
+  flex-basis:38px;
+  border-radius:10px;
+}
+.app-body:not(:where(.page-live-config,.page-agent-config,.page-archive-config,.page-client-access,.page-agents:not(.page-node-settings))) :is(.substore-agent-card>header,.settings-section>header) {
+  grid-template-columns:38px minmax(0,1fr) auto;
+  align-items:center;
+}
+
+.app-body:not(:where(.page-live-config,.page-agent-config,.page-archive-config,.page-client-access,.page-agents:not(.page-node-settings))) :is(.node-card-foot,.traffic-policy-card>footer,.bbr-card>footer,
+  .access-control-card form>footer,
+  .user-quota-actions,.dashboard-host>footer,.connection-filter-actions,
+  .connection-detail-panel>footer) {
+  padding:10px 14px;
+  gap:10px;
+  border-top:1px solid var(--line);
+  background:var(--surface-2);
+  border-radius:0 0 var(--console-card-radius) var(--console-card-radius);
+}
+
+/* Status stays in the existing badge, rather than changing the card frame. */
+.app-body:not(:where(.page-live-config,.page-agent-config,.page-archive-config,.page-client-access,.page-agents:not(.page-node-settings))) .traffic-configured-port { border-style:dashed; }
+.app-body:not(:where(.page-live-config,.page-agent-config,.page-archive-config,.page-client-access,.page-agents:not(.page-node-settings))) .task-event.focused .task-event-card { background:var(--accent-soft); }
+.app-body:not(:where(.page-live-config,.page-agent-config,.page-archive-config,.page-client-access,.page-agents:not(.page-node-settings))) .node-card.batch-selecting.selected {
+  border-color:var(--accent);
+  box-shadow:inset 0 0 0 1px var(--accent),var(--shadow);
+}
+.app-body:not(:where(.page-live-config,.page-agent-config,.page-archive-config,.page-client-access,.page-agents:not(.page-node-settings))) .node-card.drop-target,.app-body:not(:where(.page-live-config,.page-agent-config,.page-archive-config,.page-client-access,.page-agents:not(.page-node-settings))) .traffic-policy-card.drop-target {
+  border-color:var(--accent);
+  box-shadow:inset 0 0 0 2px var(--accent),var(--shadow);
+}
+
+/* A setting is a card too: keep short sections beside each other, with the
+   shared save bar spanning the workspace. Reflow fields by card width. */
+.settings-overview>.settings-form {
+  grid-template-columns:repeat(auto-fill,minmax(min(100%,var(--console-card-min)),1fr));
+  align-items:start;
+  gap:var(--console-card-gap);
+}
+.settings-overview .settings-section { container:settings-card / inline-size; }
+.settings-overview .settings-savebar,
+.settings-overview .settings-form>.settings-hint { grid-column:1/-1; }
+.settings-overview :is(.settings-grid,.settings-subsection,.settings-deployment-grid) {
+  padding:14px;
+  gap:12px;
+}
+.settings-overview .settings-subsection .settings-grid { padding:12px 0 0; }
+.settings-overview .settings-toggle-list { padding:0 14px 14px; }
+.settings-overview .settings-section>.settings-hint { padding:0 14px 14px; }
+.settings-overview .settings-section>.settings-toggle { margin:0 14px 14px; }
+@container settings-card (max-width:520px) {
+  .settings-overview :is(.settings-grid,.settings-grid.one-column,
+    .settings-grid-three,.settings-deployment-grid,.settings-toggle-list) {
+    grid-template-columns:minmax(0,1fr);
+  }
+}
+
+/* Restriction forms follow the same narrow card grid as nodes. */
+.app-body:not(:where(.page-live-config,.page-agent-config,.page-archive-config,.page-client-access,.page-agents:not(.page-node-settings))) .access-control-card { container:access-card / inline-size; }
+@container access-card (max-width:520px) {
+  .access-control-card form { grid-template-columns:minmax(0,1fr); }
+  .access-control-card form>footer { flex-wrap:wrap; }
+  .access-control-card form>footer>div { flex:1; justify-content:flex-end; }
+}
+
+/* Reports retain full reading width when archived images are present. */
+.app-body:not(:where(.page-live-config,.page-agent-config,.page-archive-config,.page-client-access,.page-agents:not(.page-node-settings))) .ip-quality-node-card {
+  gap:12px;
+  padding:0;
+}
+.app-body:not(:where(.page-live-config,.page-agent-config,.page-archive-config,.page-client-access,.page-agents:not(.page-node-settings))) .ip-quality-node-card>header { border-radius:12px 12px 0 0; }
+.ip-quality-node-card>:is(.ip-quality-addresses,.ip-quality-no-report,
+  .ip-quality-error,.ip-quality-archives,.ip-quality-details) {
+  margin:0 14px;
+}
+.ip-quality-node-card>:last-child { margin-bottom:14px; }
+.app-body:not(:where(.page-live-config,.page-agent-config,.page-archive-config,.page-client-access,.page-agents:not(.page-node-settings))) .ip-quality-node-card>.ip-quality-actions {
+  padding:10px 14px;
+  border-block:1px solid var(--line);
+  background:var(--surface-2);
+}
+
+/* Touch and narrow mouse windows share the same single-column fallback. */
+@media(max-width:600px) {
+  .app-body:not(:where(.page-live-config,.page-agent-config,.page-archive-config,.page-client-access,.page-agents:not(.page-node-settings))) :is(.node-card-grid,.substore-agent-grid,
+    .traffic-policy-grid,.bbr-grid,.access-control-grid,.ip-quality-grid,
+    .user-quota-grid),.settings-overview>.settings-form {
+    grid-template-columns:minmax(0,1fr);
+  }
+}
+
+@media(hover:hover) and (pointer:fine) {
+  .app-body:not(:where(.page-live-config,.page-agent-config,.page-archive-config,.page-client-access,.page-agents:not(.page-node-settings))) :is(a.node-card,.traffic-policy-card):hover {
+    border-color:color-mix(in srgb,var(--accent) 32%,var(--line));
+    box-shadow:var(--shadow-lift);
+  }
+}

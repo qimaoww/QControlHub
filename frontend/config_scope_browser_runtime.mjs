@@ -96,6 +96,7 @@ export async function testConfigScopeRuntime(preview = false) {
 }
 
 async function subStoreFixture(manage = true) {
+  document.body.className = "app-body page-substore-sync";
   const state = { route: "substore-sync", navigationEpoch: 1, data: {}, session: { role: "user", user_id: "alice" } };
   setStorageAccount(state.session);
   accountStorage.setItem(nodeCardOrderKey, JSON.stringify(["shared", "charlie", "alpha"]));

@@ -1,3 +1,4 @@
+import "./card_layout_smoke.mjs";
 import "./formatting_smoke.mjs";
 import "./permissions_smoke.mjs";
 import "./refresh_smoke.mjs";
