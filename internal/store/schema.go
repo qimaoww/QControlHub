@@ -3,7 +3,7 @@ package store
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 65
+const currentSchemaVersion = 66
 
 const schemaSQL = `
 CREATE TABLE IF NOT EXISTS agents (
@@ -41,6 +41,13 @@ CREATE TABLE IF NOT EXISTS agents (
 	CREATE INDEX IF NOT EXISTS agents_owner_idx ON agents(owner_id);
 	COMMENT ON COLUMN agents.observed_public_ip IS 'Public address the control plane observed for this Agent''s authenticated WSS session; written from the socket, never reported by the Agent.';
 	ALTER TABLE agents SET (fillfactor = 70);
+
+-- Persist deletion cleanup independently of the HTTP request and process lifetime.
+CREATE TABLE IF NOT EXISTS agent_deletion_jobs (
+    agent_id text PRIMARY KEY REFERENCES agents(id) ON DELETE CASCADE,
+    retry_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS agent_deletion_jobs_retry_idx ON agent_deletion_jobs(retry_at,agent_id);
 
 CREATE TABLE IF NOT EXISTS agent_live_state (
     agent_id text PRIMARY KEY REFERENCES agents(id) ON DELETE CASCADE,

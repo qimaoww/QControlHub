@@ -18,7 +18,7 @@ func (s *Store) ListSubStoreSyncSelections(ctx context.Context, targetID string)
 	rows, err := s.pool.Query(ctx, `
 		SELECT item.target_id,item.agent_id,item.engine,item.profile_tag,item.custom_name,item.address_mode,item.created_at,item.updated_at,item.config_id
 		FROM substore_sync_items item JOIN substore_sync_targets target ON target.id=item.target_id
-		WHERE item.target_id=$1`+ownerWhere+` ORDER BY item.created_at,item.agent_id,item.engine,item.profile_tag`, args...)
+		WHERE item.target_id=$1 AND EXISTS(SELECT 1 FROM agents a WHERE a.id=item.agent_id AND a.revoked_at IS NULL)`+ownerWhere+` ORDER BY item.created_at,item.agent_id,item.engine,item.profile_tag`, args...)
 	if err != nil {
 		return nil, err
 	}

@@ -1,6 +1,9 @@
 package api
 
 import (
+	"context"
+	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 	"unicode/utf8"
@@ -57,6 +60,11 @@ func (s *Server) putAgentName(w http.ResponseWriter, request *http.Request) {
 func (s *Server) deleteAgent(w http.ResponseWriter, request *http.Request) {
 	agentID := request.PathValue("id")
 	if err := s.store.DeleteAgent(request.Context(), agentID); err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			slog.Error("agent deletion timed out", "agent_id", agentID, "error", err)
+			writeError(w, http.StatusGatewayTimeout, "删除节点超时，请刷新确认节点状态后再重试；若持续超时，请管理员查看服务日志。")
+			return
+		}
 		writeStoreError(w, err)
 		return
 	}

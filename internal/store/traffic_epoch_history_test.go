@@ -58,6 +58,9 @@ func TestTrafficRestoredEpochAndRetainedHistoryWithPostgreSQL(t *testing.T) {
 		if err := s.DeleteAgent(ctx, agent.ID); err != nil {
 			t.Fatal(err)
 		}
+		if err := s.CleanupDeletedAgents(ctx); err != nil {
+			t.Fatal(err)
+		}
 		if err := s.pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM port_traffic_accounting_epochs WHERE agent_id=$1)+(SELECT count(*) FROM port_traffic_daily_accounting WHERE agent_id=$1)`, agent.ID).Scan(&epochs); err != nil || epochs != 0 {
 			t.Fatalf("node deletion left history: %d %v", epochs, err)
 		}
