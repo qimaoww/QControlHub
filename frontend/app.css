@@ -1135,44 +1135,50 @@ dialog.config-access-dialog::backdrop{background:rgba(17,20,36,.34);backdrop-fil
   .live-config-workspace [data-live-intent="deploy"]{grid-column:1/-1}
 }
 
-/* Keep file navigation separate from the source and its submission controls. */
+/* One editing flow: file tabs, a contextual toolbar, source, then save. */
 .live-config-workspace .config-file-list{display:flex;flex:1 1 100%;gap:8px;min-width:0;max-width:100%;padding:2px;overflow-x:auto;scrollbar-width:thin;scroll-padding:2px}
-.live-config-workspace .config-file-list>.config-file-button{flex:0 0 160px;min-height:62px}
+.live-config-workspace .config-file-list>.config-file-button{flex:0 0 auto;min-width:130px;max-width:240px;padding:9px 12px;gap:2px;box-shadow:none}
 .config-file-button.is-dirty b::after{content:"●";display:inline-block;margin-left:7px;color:var(--amber);font-size:calc(8px * var(--ui-font-scale));vertical-align:middle}
-.config-file-navigation[data-dirty="1"] .config-draft-summary{color:var(--amber)}
-.live-config-workspace>.config-workspace-tools{padding:10px 18px;border-top:0;border-bottom:1px solid var(--line);background:var(--surface)}
-.live-config-workspace .code-editor-toolbar{gap:8px}
-.live-config-workspace .code-workspace>footer{box-shadow:0 -4px 12px rgb(15 23 42 / 3%)}
-@container live-config (min-width:850px){
-  .live-config-workspace .code-workspace:has(.config-file-list){display:grid;grid-template-columns:210px minmax(0,1fr);grid-template-rows:auto auto minmax(0,1fr) auto}
-  .live-config-workspace .code-workspace:has(.config-file-list)>.config-file-buttons{grid-column:1;grid-row:1 / 4;align-content:start;gap:10px;padding:14px 12px;border-right:1px solid var(--line);border-bottom:0;background:var(--surface-2)}
-  .live-config-workspace .config-file-list{flex-direction:column;max-height:360px;overflow-y:auto}
-  .live-config-workspace .config-file-list>.config-file-button{flex:none;width:100%}
-  .live-config-workspace .config-file-buttons>.config-access-trigger{width:100%;margin:0}
-  .live-config-workspace .config-file-buttons>.config-inbound-menu{width:100%;margin:0;align-self:stretch}
-  .live-config-workspace .config-file-buttons>.config-inbound-menu>summary{justify-content:space-between;width:100%}
-  .live-config-workspace .code-workspace:has(.config-file-list)>.code-editor-toolbar{grid-column:2;grid-row:1}
-  .live-config-workspace .code-workspace:has(.config-file-list)>.config-file-navigation{grid-column:2;grid-row:2;flex-wrap:wrap}
-  .live-config-workspace .code-workspace:has(.config-file-list)>.code-editor-frame{grid-column:2;grid-row:3}
-  .live-config-workspace .code-workspace:has(.config-file-list)>footer{grid-column:1 / -1;grid-row:4}
-}
+.live-config-workspace .config-draft-summary{flex:1 1 220px;font-size:calc(11px * var(--ui-font-scale));line-height:1.6;color:var(--muted)}
+.live-config-workspace .config-draft-summary[data-dirty="1"]{color:var(--amber)}
+.live-config-workspace .config-workspace-tools{display:flex;flex-wrap:nowrap;gap:8px;margin:0;padding:0;border:0;background:transparent}
+.config-tools-menu{position:relative}
+.config-tools-menu>summary{list-style:none;cursor:pointer;gap:8px}
+.config-tools-menu>summary::-webkit-details-marker{display:none}
+.config-tools-menu[open]>summary{border-color:var(--accent);color:var(--accent)}
+.config-tools-menu .config-inbound-menu-items a{display:block;width:100%;min-height:40px;padding:10px 12px;border-radius:6px;color:var(--ink);font-size:calc(12px * var(--ui-font-scale))}
+.config-tools-menu .config-inbound-menu-items a:hover{background:var(--surface-2)}
+.config-tools-menu .config-inbound-menu-items a:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.live-config-workspace .code-workspace>.code-editor-toolbar{flex-wrap:wrap;padding:12px 18px;gap:10px;background:var(--surface)}
+.live-config-workspace .code-editor-toolbar>.code-editor-meta{margin-right:auto}
+.live-config-workspace .config-selection-actions,.live-config-workspace .config-file-actions{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin:0;min-width:0}
+.live-config-workspace .config-selection-actions .config-access-trigger{margin:0}
+.live-config-workspace .config-selection-actions:empty{display:none}
+.live-config-workspace .button{min-height:38px;border-radius:8px;box-shadow:none}
+.live-config-workspace .config-file-buttons{padding:12px 16px;background:var(--surface-2)}
+.live-config-workspace .code-workspace>footer{gap:12px;padding:16px 18px}
+.live-config-workspace .code-workspace>footer>span:not(.config-draft-summary){flex:1 0 100%}
+.live-config-workspace .code-workspace>footer>div{margin-left:auto}
 @media(max-width:820px){
-  .live-config-workspace>.editor-toolbar{flex-direction:row;flex-wrap:wrap;gap:12px}
-  .live-config-workspace>.editor-toolbar>div:first-child{min-width:0;flex:1 1 180px}
+  .live-config-workspace>.editor-toolbar{flex-direction:row;flex-wrap:wrap;align-items:center;gap:12px}
+  .live-config-workspace>.editor-toolbar>div:first-child{min-width:0;flex:1 1 150px}
   .live-config-workspace>.editor-toolbar h2{overflow-wrap:anywhere}
-  .live-config-workspace>.editor-toolbar .editor-toolbar-state{flex-shrink:0;width:auto}
+  .live-config-workspace>.editor-toolbar .editor-toolbar-state{flex-shrink:0;width:auto;flex-wrap:wrap}
   .live-config-workspace .live-config-source-switch{display:flex;flex-wrap:wrap}
   .live-config-workspace .live-config-source-switch button{flex:1 1 140px}
-  .live-config-workspace>.config-workspace-tools{padding:12px;gap:8px;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:thin}
-  .live-config-workspace>.config-workspace-tools .button{flex:0 0 auto;min-height:44px}
-  .live-config-workspace .config-file-buttons>.config-access-trigger{margin-left:0}
-  .live-config-workspace .config-file-navigation{padding:12px 16px}
-  .live-config-workspace .config-file-actions{width:100%;display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
-  .live-config-workspace .config-file-actions .button{width:100%;padding-inline:8px}
+  .live-config-workspace .button{min-height:44px}
+  .live-config-workspace .code-workspace>.code-editor-toolbar{padding:16px;gap:10px}
+  .live-config-workspace .code-file-meta{flex:1 1 140px}
+  .live-config-workspace .code-editor-meta{margin:0}
+  .live-config-workspace .code-editor-meta [data-code-position]{display:none}
+  .live-config-workspace .config-selection-actions{flex:1 1 auto}
+  .live-config-workspace .config-file-actions{flex:1 1 auto}
+  .live-config-workspace .config-file-actions>.button{flex:1;min-width:0;padding-inline:10px}
   .live-config-workspace .code-editor-frame,.live-config-workspace .code-editor-input{min-height:320px;height:48dvh}
+  .live-config-workspace .code-workspace>footer{padding:16px}
+  .live-config-workspace .code-workspace>footer>span{flex:none;width:100%}
   .live-config-workspace .code-workspace>footer>div{gap:8px}
-  .live-config-workspace .code-reset{grid-column:auto}
-  .live-config-workspace [data-live-intent="deploy"]{grid-column:auto}
+  .live-config-workspace .code-reset,.live-config-workspace [data-live-intent="deploy"]{grid-column:auto}
 }
 /* Narrow mouse-driven windows use a scrollable dock; touch devices retain
    the shared five-item navigation and safe-area spacing. */

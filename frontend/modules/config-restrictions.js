@@ -22,6 +22,7 @@ export async function bindConfigRestrictions(ctx) {
   const target = () => files ? files.selectedInbound() : selected;
   const dirty = () => files ? files.dirty() : input.value !== baseline;
   const update = () => {
+    button.hidden = !target();
     button.disabled = busy || !target();
     button.title = target() ? "设置当前入站的访问限制" : "请先选择一个入站配置";
   };

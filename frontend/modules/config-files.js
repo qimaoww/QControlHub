@@ -231,9 +231,8 @@ export function bindConfigFiles(form, engine, notify) {
       buttons[i].classList.toggle("is-dirty", dirty);
       buttons[i].setAttribute("aria-label", `${buttons[i].querySelector("b").textContent} · ${buttons[i].querySelector("small").textContent}${dirty ? " · 未保存" : ""}`);
     });
-    navigation.dataset.dirty = count ? "1" : "0";
-    const label = selected === "preview" ? "合并预览只读" : `${files.length} 个源码文件`;
-    const message = `${label}${count ? ` · ${count} 个未保存` : ""} · 保存与部署包含全部文件`;
+    summary.dataset.dirty = count ? "1" : "0";
+    const message = `${selected === "preview" ? "合并预览只读 · " : ""}${count ? `${count} 个未保存` : `${files.length} 个源码文件`} · 保存与部署包含全部文件`;
     if (summary.textContent !== message) summary.textContent = message;
     return count;
   };

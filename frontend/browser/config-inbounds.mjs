@@ -28,7 +28,9 @@ export async function testConfigInboundsRuntime(preview = false) {
     assert(!document.querySelector('[data-live-intent="migrate-files"]'), "configuration page still renders the removed bundle action");
     assert(document.querySelector(".config-inbound-menu").previousElementSibling?.matches("[data-config-access-open]"), "inbound menu must be beside restrictions");
     assert(action("modify").disabled && action("delete").disabled, "public config allows inbound mutation");
+    assert(document.querySelector("[data-config-access-open]").hidden, "public config exposes an irrelevant restriction action");
     test.select("second");
+    assert(!document.querySelector("[data-config-access-open]").hidden, "selected inbound lost its restriction action");
     assert(!action("modify").disabled && !action("delete").disabled, "selected inbound actions disabled");
     test.click("modify");
     await waitFor(()=>document.querySelector("#server-plan-form"), "modify editor did not load");

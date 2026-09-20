@@ -42,7 +42,7 @@ focused owner directly, not these compatibility facades.
 | Core operations, settings, batch actions, and card interactions | `agent-core-actions`, `agent-settings`, `agent-batch-controller`, `agent-batch-view`, `agent-batch-feedback`, `agent-card-interactions` |
 | Enrollment dialogs and page bindings | `agent-enrollment` |
 | Live configuration loading, snapshot reads, and deployment recovery | `live-config-page`, `live-config-reader`, `config-deployment` |
-| Live editor markup, navigation, and submission | `live-config-view`, `live-config-navigation`, `live-config-submit` |
+| Live editor markup, navigation, and submission | `live-config-view`, `live-config-navigation`, `live-config-submit`; `config-workspace-toolbar` composes contextual actions and secondary tools |
 | Preset loading/mounting, events, task feedback, and markup | `preset-editor`, `preset-bindings`, `preset-status`, `preset-view` |
 | Configuration archives | `config-archive` |
 

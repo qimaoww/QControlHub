@@ -75,8 +75,16 @@ export async function testConfigLayoutRuntime({ testAPI }) {
     const workspace = document.querySelector(".live-config-workspace");
     const nav = workspace.querySelector(".config-file-buttons").getBoundingClientRect();
     const frame = workspace.querySelector(".code-editor-frame").getBoundingClientRect();
-    if (workspace.clientWidth >= 850) assert.ok(nav.right <= frame.left + 1,"desktop files do not form an independent left rail");
-    else assert.ok(nav.bottom <= frame.top + 1,"narrow file navigation overlaps the source");
+    assert.ok(nav.bottom <= frame.top + 1,"file navigation must stay above the full-width source");
+    assert.ok(frame.width >= workspace.getBoundingClientRect().width - 3,"source editor lost width to an extra rail");
+    assert.equal(document.querySelectorAll(".config-file-navigation").length,0,"redundant toolbar still separates selection from source");
+    assert.ok(document.querySelector('[data-inbound-action="history"]').closest(".config-tools-menu"),"secondary tools are not grouped in the header");
+    const more = document.querySelector(".config-tools-menu");
+    more.querySelector("summary").focus();
+    more.dispatchEvent(new KeyboardEvent("keydown",{key:"ArrowDown",bubbles:true}));
+    assert.ok(more.open && document.activeElement.matches('[role="menuitem"]'),"tools menu cannot be opened by keyboard");
+    more.dispatchEvent(new KeyboardEvent("keydown",{key:"Escape",bubbles:true}));
+    assert.ok(!more.open && document.activeElement === more.querySelector("summary"),"tools menu did not restore focus after Escape");
     document.querySelectorAll(".live-engine-tab").forEach(tab => {
       assert.equal(tab.offsetWidth,140,"engine buttons must have fixed width");
       assert.equal(tab.offsetHeight,40,"engine buttons must have fixed height");
