@@ -35,8 +35,8 @@ func TestClientConnectionsMigrateVersion63(t *testing.T) {
 	if after, err := db.GetTask(ctx, task.ID); err != nil || !reflect.DeepEqual(before, after) {
 		t.Fatalf("migration changed existing task: %+v %v", after, err)
 	}
-	report := core.ClientConnectionReport{Status: "ok", Connections: []core.ClientConnection{{Engine: core.EngineMihomo, Protocol: "trojan", Inbound: "entry", Transport: "tcp", ClientIP: "8.8.8.8", ClientPort: 50123, LocalIP: "127.0.0.1", LocalPort: 443}}}
-	if err := db.StoreClientConnections(ctx, agent.ID, report); err != nil {
+	report := clientConnectionFixtures{Status: "ok", Connections: []core.ClientConnection{{Engine: core.EngineMihomo, Protocol: "trojan", Inbound: "entry", Transport: "tcp", ClientIP: "8.8.8.8", ClientPort: 50123, LocalIP: "127.0.0.1", LocalPort: 443}}}
+	if err := db.storeClientConnectionFixtures(ctx, agent.ID, report); err != nil {
 		t.Fatal(err)
 	}
 	location := ClientConnectionLocation{IP: "8.8.8.8", RetryAfter: time.Now().Add(time.Hour), ClientIPLocation: core.ClientIPLocation{CountryCode: "US", Country: "United States"}}

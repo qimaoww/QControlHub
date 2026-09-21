@@ -75,11 +75,6 @@ cat > "$fake_bin/apt-get" <<'EOF'
 set -eu
 printf '%s\n' "$*" >> "$QCH_PACKAGE_LOG"
 case " $* " in
-  *' install '*' conntrack '*)
-    [ "${QCH_TEST_CONNTRACK_FAIL:-false}" = false ] || exit 1
-    printf '%s\n' '#!/bin/sh' 'exit 0' > "${QCH_NFT%/*}/conntrack"
-    chmod 0755 "${QCH_NFT%/*}/conntrack"
-    ;;
   *' install '*' nftables '*)
     printf '%s\n' '#!/bin/sh' 'exit 0' > "$QCH_NFT"
     chmod 0755 "$QCH_NFT"
@@ -116,7 +111,6 @@ export QCH_PACKAGE_LOG="$test_root/package.log"
 export QCH_CURL="$fake_bin/curl"
 export QCH_SYSTEMCTL="$fake_bin/systemctl"
 export QCH_NFT="$fake_bin/nft"
-export QCH_CONNTRACK="$fake_bin/conntrack"
 export QCH_SERVICE_MANAGER=systemd
 export QCH_AGENT_BIN_DIR="$test_root/opt/binary"
 export QCH_AGENT_BIN_LINK="$test_root/opt/qagent"
@@ -139,7 +133,6 @@ sh "$installer" "$control" "$token" > "$test_root/first.log"
 [ -x "$QCH_NFT" ] || { printf '%s\n' 'first install: nftables executable was not installed' >&2; exit 1; }
 grep -q '^update -qq$' "$QCH_PACKAGE_LOG" || { printf '%s\n' 'first install: APT metadata was not updated for nftables' >&2; exit 1; }
 grep -q '^install -y --no-install-recommends nftables$' "$QCH_PACKAGE_LOG" || { printf '%s\n' 'first install: nftables APT package was not installed' >&2; exit 1; }
-[ -x "$fake_bin/conntrack" ] || { printf '%s\n' 'first install: conntrack was not installed' >&2; exit 1; }
 [ -f "$QCH_AGENT_ENV_FILE" ] || { printf '%s\n' 'first install: agent env missing' >&2; exit 1; }
 grep -q '^QCH_AGENT_LABELS=region=cn-east$' "$QCH_AGENT_ENV_FILE" || { printf '%s\n' 'first install: default label missing' >&2; exit 1; }
 grep -q '^QCH_AGENT_NAME=' "$QCH_AGENT_ENV_FILE" || { printf '%s\n' 'first install: agent name missing' >&2; exit 1; }
@@ -189,9 +182,7 @@ restart_count=$(grep -c '^restart qagent.service$' "$QCH_SYSTEMCTL_LOG" || true)
 [ "$restart_count" -ge 2 ] || { printf '%s\n' "second install: expected agent restart, got $restart_count" >&2; exit 1; }
 
 echo '== update existing agent =='
-rm -f "$fake_bin/conntrack"
 sh "$installer" update "$control" "$token" > "$test_root/update.log"
-[ -x "$fake_bin/conntrack" ] || { printf '%s\n' 'update: missing conntrack was not repaired' >&2; exit 1; }
 grep -q '更新已有' "$test_root/update.log" || { printf '%s\n' 'update: expected update notice missing' >&2; exit 1; }
 assert_env_once QCH_AGENT_NAME custom-node
 assert_env_once QCH_AGENT_LABELS 'region=us-west'
@@ -200,12 +191,6 @@ if grep -q '^QCH_ENROLLMENT_TOKEN=' "$QCH_AGENT_ENV_FILE"; then
   printf '%s\n' 'update: enrollment token not scrubbed despite state file' >&2
   exit 1
 fi
-
-echo '== optional conntrack installation failure =='
-rm -f "$fake_bin/conntrack"
-QCH_TEST_CONNTRACK_FAIL=true sh "$installer" update "$control" "$token" > "$test_root/conntrack-failure.log" 2>&1
-grep -q 'UDP connection history will report partial coverage' "$test_root/conntrack-failure.log" || { printf '%s\n' 'missing optional dependency warning' >&2; exit 1; }
-assert_env_once QCH_AGENT_NAME custom-node
 
 echo '== migrate to another control plane =='
 new_control="http://newpanel.local"

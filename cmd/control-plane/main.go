@@ -156,6 +156,7 @@ func main() {
 	defer stop()
 	go janitor(ctx, dataStore)
 	go cleanDeletedAgents(ctx, dataStore)
+	go backfillClientConnectionLogs(ctx, dataStore)
 	go apiServer.MonitorAgentPresence(ctx)
 	go apiServer.MonitorPanelMetrics(ctx)
 	startDiagnosticListener(ctx)

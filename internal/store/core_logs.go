@@ -83,10 +83,13 @@ func (s *Store) StoreCoreLogs(ctx context.Context, agentID string, batch core.Co
 	levels := make([]string, 0, len(entries))
 	messages := make([]string, 0, len(entries))
 	loggedAt := make([]time.Time, 0, len(entries))
+	accepted := make([]core.CoreLogEntry, 0, len(entries))
 	for index, entry := range entries {
 		if !coreLogLevelAtLeast(entry.Level, minimumLevel) {
 			continue
 		}
+		entry.ReceivedAt = receivedAt
+		accepted = append(accepted, entry)
 		indexes = append(indexes, int32(index))
 		engines = append(engines, string(entry.Engine))
 		levels = append(levels, entry.Level)
@@ -104,6 +107,9 @@ func (s *Store) StoreCoreLogs(ctx context.Context, agentID string, batch core.Co
 			batch.ID, agentID, receivedAt, indexes, engines, levels, messages, loggedAt); err != nil {
 			return mapError(err)
 		}
+	}
+	if err := storeClientConnectionLogs(ctx, tx, agentID, accepted); err != nil {
+		return err
 	}
 	return tx.Commit(ctx)
 }

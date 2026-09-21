@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/netip"
 	"time"
@@ -44,52 +43,9 @@ func (q ClientConnectionQuery) Validate() error {
 	return nil
 }
 
-func (s *Store) StoreClientConnections(ctx context.Context, agentID string, report core.ClientConnectionReport) error {
-	if err := report.Validate(); err != nil {
-		return fmt.Errorf("%w: %v", ErrInvalid, err)
-	}
-	// Receive time is authoritative; node clock skew cannot poison retention or
-	// timeline ordering. The authenticated WSS session supplies the agent ID.
-	now := time.Now().UTC()
-	entries := append([]core.ClientConnection{}, report.Connections...)
-	for i := range entries {
-		client, _ := netip.ParseAddr(entries[i].ClientIP)
-		local, _ := netip.ParseAddr(entries[i].LocalIP)
-		entries[i].ClientIP = client.Unmap().String()
-		entries[i].LocalIP = local.Unmap().String()
-	}
-	if entries == nil {
-		entries = []core.ClientConnection{}
-	}
-	payload, err := json.Marshal(entries)
-	if err != nil {
-		return err
-	}
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
-	if _, err = tx.Exec(ctx, `INSERT INTO client_connection_sources(agent_id,updated_at,status,detail,truncated)
- VALUES($1,$2,$3,$4,$5) ON CONFLICT(agent_id) DO UPDATE SET updated_at=EXCLUDED.updated_at,
- status=EXCLUDED.status,detail=EXCLUDED.detail,truncated=EXCLUDED.truncated`, agentID, now, report.Status, report.Detail, report.Truncated); err != nil {
-		return err
-	}
-	// DISTINCT also makes duplicate tuples in an otherwise valid report harmless.
-	_, err = tx.Exec(ctx, `INSERT INTO client_connections(agent_id,bucket,engine,protocol,inbound,transport,client_ip,client_port,local_ip,local_port,first_seen,last_seen)
- SELECT DISTINCT $1::text,$2::timestamptz,engine,protocol,inbound,transport,client_ip::inet,client_port,local_ip::inet,local_port,$3::timestamptz,$3::timestamptz
- FROM jsonb_to_recordset($4::jsonb) AS x(engine text,protocol text,inbound text,transport text,client_ip text,client_port integer,local_ip text,local_port integer)
- ON CONFLICT(agent_id,bucket,engine,protocol,inbound,transport,client_ip,client_port,local_ip,local_port)
- DO UPDATE SET last_seen=GREATEST(client_connections.last_seen,EXCLUDED.last_seen)`, agentID, now.Truncate(time.Minute), now, payload)
-	if err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
-}
-
 func connectionHistoryWhere(ctx context.Context, q ClientConnectionQuery) (string, []any) {
 	args := []any{q.Since.UTC().Truncate(time.Minute), q.Until.UTC(), q.Since.UTC()}
-	where := ` WHERE c.bucket >= $1 AND c.bucket < $2 AND c.last_seen >= $3 AND c.first_seen < $2 AND a.revoked_at IS NULL`
+	where := ` WHERE c.bucket >= $1 AND c.bucket < $2 AND c.last_seen >= $3 AND c.first_seen < $2 AND a.revoked_at IS NULL AND c.source='core_logs'`
 	if !q.IncludeNonPublic {
 		args = append(args, netpolicy.NonPublicPrefixes())
 		where += fmt.Sprintf(" AND NOT (c.client_ip <<= ANY($%d::inet[]))", len(args))
@@ -171,7 +127,7 @@ func (s *Store) ClientConnectionHistory(ctx context.Context, q ClientConnectionQ
 		recordWhere += fmt.Sprintf(" AND c.id<$%d", len(recordArgs))
 	}
 	recordArgs = append(recordArgs, q.Limit+1)
-	rows, err := tx.Query(ctx, `SELECT c.id,c.agent_id,a.name,c.engine,c.protocol,c.inbound,c.transport,host(c.client_ip),c.client_port,host(c.local_ip),c.local_port,c.first_seen,c.last_seen`+from+recordWhere+fmt.Sprintf(` ORDER BY c.id DESC LIMIT $%d`, len(recordArgs)), recordArgs...)
+	rows, err := tx.Query(ctx, `SELECT c.id,c.agent_id,a.name,c.engine,c.protocol,c.inbound,c.transport,host(c.client_ip),c.client_port,CASE WHEN c.local_port=0 THEN '' ELSE host(c.local_ip) END,c.local_port,c.first_seen,c.last_seen`+from+recordWhere+fmt.Sprintf(` ORDER BY c.id DESC LIMIT $%d`, len(recordArgs)), recordArgs...)
 	if err != nil {
 		return result, err
 	}
@@ -200,8 +156,8 @@ func (s *Store) ClientConnectionHistory(ctx context.Context, q ClientConnectionQ
 		sourceArgs = append(sourceArgs, q.AgentID)
 		sourceWhere += fmt.Sprintf(" AND a.id=$%d", len(sourceArgs))
 	}
-	rows, err = tx.Query(ctx, `SELECT a.id,a.name,s.updated_at,COALESCE(s.status,'unsupported'),COALESCE(s.detail,''),COALESCE(s.truncated,false)
- FROM agents a LEFT JOIN client_connection_sources s ON s.agent_id=a.id`+sourceWhere+` ORDER BY a.name,a.id`, sourceArgs...)
+	rows, err = tx.Query(ctx, `SELECT a.id,a.name,s.updated_at,COALESCE(s.status,'no_logs'),COALESCE(s.detail,''),COALESCE(s.truncated,false)
+ FROM agents a LEFT JOIN client_connection_sources s ON s.agent_id=a.id AND s.source='core_logs'`+sourceWhere+` ORDER BY a.name,a.id`, sourceArgs...)
 	if err != nil {
 		return result, err
 	}

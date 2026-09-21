@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { connectionQuery, connectionAddress, connectionSourceLabel, connectionSourceDetail, defaultConnectionFilters, connectionLocationLabel } from "../modules/client-connection-model.js";
+import { connectionQuery, connectionSourceLabel, connectionSourceDetail, defaultConnectionFilters, connectionLocationLabel } from "../modules/client-connection-model.js";
 import { createClientConnectionView } from "../modules/client-connection-view.js";
 import { installClientConnections } from "../modules/client-connections.js";
 
@@ -7,7 +7,8 @@ export async function run() {
 const filters = defaultConnectionFilters(Date.parse("2026-09-19T08:00:00Z"));
 const query = connectionQuery({ ...filters, client_ip: "2001:db8::1", port: "443", inbound: "a&b" }, 7);
 assert.equal(query.get("client_ip"), "2001:db8::1");
-assert.equal(query.get("inbound"), "a&b");
+assert.equal(query.has("inbound"), false);
+assert.equal(query.has("port"), false);
 assert.equal(query.get("before"), "7");
 assert.equal(query.has("include_non_public"), false);
 assert.equal(connectionQuery({ ...filters, include_non_public: "true" }, 7).get("include_non_public"), "true");
@@ -18,15 +19,10 @@ assert.equal(connectionLocationLabel({ country_code: "US", province: "California
 assert.equal(connectionLocationLabel({ country_code: "CN" }), "中国");
 assert.equal(connectionLocationLabel({ non_public: true }), "非公网");
 assert.equal(connectionLocationLabel({}), "—");
-assert.equal(connectionAddress("2001:db8::1", 443), "[2001:db8::1]:443");
-assert.match(connectionSourceLabel({}), /升级/);
-assert.match(connectionSourceLabel({ updated_at: "2020-01-01" }), /过期/);
-for (const [detail, expected] of [
-  ["UDP ipv4: conntrack not installed", /缺少 conntrack/],
-  ["UDP ipv6: conntrack permission denied (CAP_NET_ADMIN required)", /IPv6 UDP.*CAP_NET_ADMIN/],
-  ["UDP: conntrack unavailable or incomplete", /检查 conntrack/],
-  ["xray: listener discovery failed", /入站解析失败/],
-]) assert.match(connectionSourceDetail({ updated_at: new Date().toISOString(), detail }), expected);
+assert.match(connectionSourceLabel({}), /等待内核日志/);
+assert.equal(connectionSourceLabel({ updated_at: "2020-01-01", status: "ok" }), "已读取内核日志");
+assert.match(connectionSourceDetail({ updated_at: "2020-01-01", status: "ok" }), /面板保存的内核日志/);
+assert.ok(!connectionSourceDetail({}).includes("Agent"));
 
 const esc = value => String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll('"', "&quot;");
 const view = createClientConnectionView({ esc, engineName: value => value, date: value => value });
@@ -34,7 +30,12 @@ const html = view({ ips: 1, flows: 2, records: [{ agent_name: "<script>", inboun
 assert.ok(html.includes("&lt;script>"));
 assert.ok(!html.includes("<script>"));
 assert.match(html, /来源 IP/);
-assert.match(html, /\[2001:db8::1\]:50123/);
+assert.match(html, /2001:db8::1/);
+assert.ok(!html.includes("192.0.2.1"));
+assert.ok(!html.includes("50123"));
+assert.ok(!html.includes("未知入站"));
+assert.ok(!html.includes("未知协议"));
+assert.ok(!html.includes('name="port"'));
 
 // Construction is inert; stale reads from a previous account/navigation cannot paint.
 const oldDocument = globalThis.document;
