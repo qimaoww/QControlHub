@@ -19,7 +19,7 @@ export function clientConnectionFilters({ filters, esc, engineName }) {
         <div class="connection-filters">
           ${select("engine", "内核", ["mihomo", "xray", "sing-box", "ss-rust"].map(e => [e, engineName(e)]))}
           ${input("client_ip", "客户端来源 IP", "search", 'placeholder="IPv4 / IPv6"')}
-          ${monthly ? `<label>查询月份（本地时间）<input type="month" value="${esc(filters.date.slice(0, 7))}" disabled></label>` : input("date", "查询日期（本地时间）", "date", "required")}
+          ${monthly ? `<label>查询月份（本地时间）<input name="month_display" type="month" value="${esc(filters.date.slice(0, 7))}" disabled></label>` : input("date", "查询日期（本地时间）", "date", "required")}
         </div>
         <footer class="connection-filter-actions">
           <details class="connection-advanced"${advanced ? " open" : ""}><summary>更多筛选</summary><div>
