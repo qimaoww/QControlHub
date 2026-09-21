@@ -11,7 +11,6 @@ import (
 	"io"
 	"os"
 	"regexp"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -155,53 +154,13 @@ const ipQualityAlignedFixture = "服务商： \x1b[3m TikTok   Disney+  Netflix 
 	"四、风险因子\n" +
 	"库：     ipapi ipregistry IPinfo DB-IP\n"
 
-// ipQualityTextElement captures one drawn run with the grid pinning that keeps
-// it in its terminal cells.
-var ipQualityTextElement = regexp.MustCompile(`<text x="([\d ]+)" y="(\d+)" fill="[^"]*"([^>]*) xml:space="preserve">(.*?)</text>`)
-
+var ipQualityTextElement = regexp.MustCompile(`<text[^>]*>(.*?)</text>`)
 var ipQualitySpanTags = regexp.MustCompile(`<[^>]+>`)
 
-var ipQualityBadgeRect = regexp.MustCompile(`<rect x="(\d+)" y="(\d+)" width="(\d+)" height="(\d+)" fill="([^"]+)"/>`)
-
-func ipQualityDrawnRuns(svg string) []ipQualityDrawnRun {
-	matches := ipQualityTextElement.FindAllStringSubmatch(svg, -1)
-	runs := make([]ipQualityDrawnRun, 0, len(matches))
-	for _, match := range matches {
-		positions := []int{}
-		for _, value := range strings.Fields(match[1]) {
-			position, _ := strconv.Atoi(value)
-			positions = append(positions, position)
-		}
-		x := positions[0]
-		y, _ := strconv.Atoi(match[2])
-
-		runs = append(runs, ipQualityDrawnRun{
-			x: x, y: y, positions: positions,
-			content: html.UnescapeString(ipQualitySpanTags.ReplaceAllString(match[4], "")), attributes: match[3],
-		})
-	}
-	return runs
-}
-
-type ipQualityDrawnRun struct {
-	x, y       int
-	positions  []int
-	content    string
-	attributes string
-}
-
-// ipQualityRenderedLines rebuilds the printed lines from the drawn runs: runs
-// on one baseline are one line, so the reconstruction can be compared with the
-// text the detector printed.
 func ipQualityRenderedLines(svg string) []string {
-	lines := make([]string, 0, 64)
-	baseline := -1
-	for _, run := range ipQualityDrawnRuns(svg) {
-		if run.y != baseline {
-			lines = append(lines, "")
-			baseline = run.y
-		}
-		lines[len(lines)-1] += run.content
+	var lines []string
+	for _, match := range ipQualityTextElement.FindAllStringSubmatch(svg, -1) {
+		lines = append(lines, html.UnescapeString(ipQualitySpanTags.ReplaceAllString(match[1], "")))
 	}
 	return lines
 }
@@ -215,60 +174,77 @@ func mustRenderIPQualitySVG(t *testing.T, text string) string {
 	return string(svg)
 }
 
-// Verify every glyph origin, including columns inside long provider headers.
-// Merely checking a run's total textLength cannot detect interior column drift.
-func TestIPQualityRenderPinsRunsToTheGrid(t *testing.T) {
-	svg := mustRenderIPQualitySVG(t, ipQualityPrintedFixture+ipQualityAlignedFixture)
-	if strings.Contains(svg, "textLength=") || strings.Contains(svg, "lengthAdjust=") {
-		t.Fatal("glyphs still depend on font-dependent length adjustment")
+func ipQualityNativeFixture(t *testing.T) string {
+	t.Helper()
+	content, err := os.ReadFile("testdata/ip_quality_native.ansi")
+	if err != nil {
+		t.Fatal(err)
 	}
-	runs := ipQualityDrawnRuns(svg)
-	expectedX, expectedY := 0, 0
-	for _, run := range runs {
-		if run.y != expectedY {
-			expectedX, expectedY = ipQualityRenderPaddingX, run.y
-		}
-		if len(run.positions) != len([]rune(run.content)) {
-			t.Fatalf("run %q does not position every character: %v", run.content, run.positions)
-		}
-		for index, character := range []rune(run.content) {
-			if run.positions[index] != expectedX {
-				t.Fatalf("run %q character %d starts at x=%d, want %d", run.content, index, run.positions[index], expectedX)
-			}
-			expectedX += ipQualityRuneWidth(character) * ipQualityRenderCellWidth
-		}
-	}
+	return string(content)
 }
 
-func TestIPQualityRenderPositionsSingleGlyphsAndCombiningMarks(t *testing.T) {
-	for _, test := range []struct{ text, positions, content string }{
-		{"A", "18", "A"},
-		{"否", "18", "否"},
-		{"数据库", "18 38 58", "数据库"},
-		{"a\U00020000b", "18 28 48", "a\U00020000b"},
-		{"a\u0301b", "18", `<tspan x="18">á</tspan><tspan x="28">b</tspan>`},
-		{"远端\u200b", "18", `<tspan x="18">远</tspan><tspan x="38">端​</tspan>`},
-		{"<&", "18 28", "&lt;&amp;"},
+func TestIPQualityRenderMatchesNativePresentation(t *testing.T) {
+	svg := mustRenderIPQualitySVG(t, ipQualityNativeFixture(t))
+	for _, want := range []string{
+		`width="74ch" height="47em"`, `font-size="14"`,
+		`font-family="SimHei, Consolas, DejaVu Sans Mono, SF Mono, monospace"`,
+		`fill="#000000"`, `fill="#bbbbbb"`, `fill="#00bbbb"`,
+		`fill="#00bb00"`, `fill="#bb0000"`, `fill="#aa9900"`,
+		`dominant-baseline:central`, `white-space:pre`, `font-variant-ligatures:none`,
+		`<text x="1ch" y="46.5em">`,
+		`<rect x="17ch" y="24em" width="16ch" height="1em" fill="#00bb00"/>`,
+		`<rect x="33ch" y="24em" width="16ch" height="1em" fill="#aa9900"/>`,
+		`<rect x="49ch" y="24em" width="1ch" height="1em" fill="#bb0000"/>`,
 	} {
-		positions, content := ipQualityPositionedText(test.text, 18)
-		if positions != test.positions || content != test.content {
-			t.Fatalf("positioned %q = (%q, %q), want (%q, %q)", test.text, positions, content, test.positions, test.content)
+		if !strings.Contains(svg, want) {
+			t.Fatalf("native presentation lost %s", want)
+		}
+	}
+	for _, forbidden := range []string{"textLength=", "lengthAdjust=", "viewBox=", `<tspan x=`} {
+		if strings.Contains(svg, forbidden) {
+			t.Fatalf("native text flow was overridden by %s", forbidden)
+		}
+	}
+	if strings.LastIndex(svg, "<rect") > strings.Index(svg, "<text") {
+		t.Fatal("a following background can erase text")
+	}
+	lines := ipQualityRenderedLines(svg)
+	printed := strings.Split(strings.TrimSuffix(ipQualityNativeFixture(t), "\n"), "\n")
+	if len(lines) != 47 {
+		t.Fatalf("rendered %d rows, want the complete 47-row report", len(lines))
+	}
+	for row, text := range printed {
+		if want := ipQualityANSISequence.ReplaceAllString(text, ""); lines[row] != want {
+			t.Fatalf("row %d changed: %q, want %q", row, lines[row], want)
+		}
+	}
+	for _, section := range []string{"一、基础信息", "二、IP类型属性", "三、风险评分", "四、风险因子", "五、流媒体", "六、邮局", "今日IP检测量"} {
+		if !strings.Contains(strings.Join(lines, "\n"), section) {
+			t.Fatalf("missing section %q", section)
 		}
 	}
 }
 
-func TestIPQualityRenderPaintsBackgroundsBeforeText(t *testing.T) {
-	svg := mustRenderIPQualitySVG(t, "\x1b[3m9|\x1b[42m 低 \x1b[43m 中 \x1b[0m")
-	if strings.LastIndex(svg, "<rect") > strings.Index(svg, "<text") {
-		t.Fatal("a following background can erase preceding glyphs")
+func TestIPQualityRenderKeepsTerminalStyles(t *testing.T) {
+	svg := mustRenderIPQualitySVG(t, "\x1b[1;3;4mMaxmind 数据库\x1b[0m普通文字")
+	want := `<tspan fill="#bbbbbb" font-weight="bold" font-style="italic" text-decoration="underline">Maxmind 数据库</tspan><tspan fill="#bbbbbb">普通文字</tspan>`
+	if !strings.Contains(svg, want) {
+		t.Fatalf("SGR styles were changed or leaked after reset: %s", svg)
 	}
 }
 
-// The browser fixture must exercise production SVG output, not hand-written
-// artwork that can pass while the actual report renderer regresses.
+func TestIPQualityRenderKeepsCombiningTextTogether(t *testing.T) {
+	text := "a\u0301报告b\u200d远端\u200b25"
+	svg := mustRenderIPQualitySVG(t, text)
+	if !strings.Contains(svg, ">"+text+"</tspan>") {
+		t.Fatal("text shaping was split into individual glyphs")
+	}
+}
+
+// Keep real browser coverage tied to the complete renderer output.
 func TestIPQualityBrowserFixtureMatchesRenderer(t *testing.T) {
 	for _, family := range []int{4, 6} {
-		text := ipQualityPrintedFixture + ipQualityAlignedFixture
+		text := ipQualityNativeFixture(t)
 		path := "../../frontend/testdata/ip-quality-report.svg"
 		if family == 6 {
 			text = strings.ReplaceAll(text, "203.0.113.1", "2001:db8:1234:5678:90ab:cdef:1234:5678")
@@ -286,131 +262,6 @@ func TestIPQualityBrowserFixtureMatchesRenderer(t *testing.T) {
 		}
 		if string(got) != want {
 			t.Fatal("browser fixture is stale; run QCH_UPDATE_IP_QUALITY_FIXTURE=1 go test ./internal/api -run TestIPQualityBrowserFixtureMatchesRenderer")
-		}
-	}
-}
-
-func TestIPQualityRenderAlignsHeadersWithBadges(t *testing.T) {
-	svg := mustRenderIPQualitySVG(t, ipQualityAlignedFixture)
-	lines := ipQualityRenderedLines(svg)
-	if len(lines) != 4 {
-		t.Fatalf("rebuilt %d lines, want 4: %q", len(lines), lines)
-	}
-	headerColumn := ipQualityCellColumn(lines[0], "ChatGPT")
-	labelColumn := ipQualityCellColumn(lines[1], "仅APP")
-	if headerColumn != labelColumn-1 {
-		t.Fatalf("ChatGPT sits at cell %d but its badge label sits at cell %d", headerColumn, labelColumn)
-	}
-	badgeX := -1
-	for _, match := range ipQualityBadgeRect.FindAllStringSubmatch(svg, -1) {
-		if match[5] == ipQualityYellow {
-			badgeX, _ = strconv.Atoi(match[1])
-		}
-	}
-	if want := ipQualityRenderPaddingX + headerColumn*ipQualityRenderCellWidth; badgeX != want {
-		t.Fatalf("badge starts at x=%d, want %d", badgeX, want)
-	}
-	runs := ipQualityDrawnRuns(svg)
-	if run := ipQualityRunStartingAt(runs, badgeX+ipQualityRenderCellWidth); run == nil || !strings.HasPrefix(run.content, "仅") {
-		t.Fatalf("no badge label drawn at x=%d: %+v", badgeX+ipQualityRenderCellWidth, runs)
-	}
-}
-
-// ipQualityCellColumn is the terminal cell a token starts at within a line.
-func ipQualityCellColumn(line, token string) int {
-	at := strings.Index(line, token)
-	if at < 0 {
-		return -1
-	}
-	return ipQualityDisplayWidth(line[:at])
-}
-
-func ipQualityRunStartingAt(runs []ipQualityDrawnRun, x int) *ipQualityDrawnRun {
-	for index := range runs {
-		if runs[index].x == x {
-			return &runs[index]
-		}
-	}
-	return nil
-}
-
-func TestIPQualityRenderKeepsTerminalStyles(t *testing.T) {
-	svg := mustRenderIPQualitySVG(t, "\x1b[1m\x1b[3m\x1b[4m报告\x1b[0m")
-	for _, want := range []string{`font-weight="bold"`, `text-decoration="underline"`} {
-		if !strings.Contains(svg, want) {
-			t.Fatalf("rendered report is missing %s", want)
-		}
-	}
-	if strings.Contains(svg, `font-style="italic"`) {
-		t.Fatal("a full-width run was drawn with a synthetic oblique")
-	}
-}
-
-// Full-width runs stay upright even when a fallback font synthesizes italic;
-// Latin runs retain the upstream emphasis.
-func TestIPQualityRenderKeepsItalicOnLatinRunsOnly(t *testing.T) {
-	svg := mustRenderIPQualitySVG(t, "\x1b[3mMaxmind 数据库\x1b[0m\x1b[3mIPinfo\x1b[0m")
-	runs := ipQualityDrawnRuns(svg)
-	italic := map[string]bool{}
-	for _, run := range runs {
-		italic[run.content] = strings.Contains(run.attributes, `font-style="italic"`)
-	}
-	for _, latin := range []string{"Maxmind ", "IPinfo"} {
-		applied, drawn := italic[latin]
-		if !drawn {
-			t.Fatalf("Latin run %q is missing from %+v", latin, runs)
-		}
-		if !applied {
-			t.Fatalf("Latin run %q lost the italic upstream asked for: %+v", latin, runs)
-		}
-	}
-	applied, drawn := italic["数据库"]
-	if !drawn {
-		t.Fatalf("full-width run is missing from %+v", runs)
-	}
-	if applied {
-		t.Fatalf("full-width run was drawn with a synthetic oblique: %+v", runs)
-	}
-}
-
-func TestIPQualityRunsSplitWideAndNarrowCharacters(t *testing.T) {
-	for _, test := range []struct {
-		text string
-		want []ipQualityRun
-	}{
-		{"库：ipapi", []ipQualityRun{{"库：", 4}, {"ipapi", 5}}},
-		{"远端\u200b25", []ipQualityRun{{"远端\u200b", 4}, {"25", 2}}},
-		{"\u200b报告", []ipQualityRun{{"\u200b", 0}, {"报告", 4}}},
-		{"a\u0301报告b\u200d", []ipQualityRun{{"a\u0301", 1}, {"报告", 4}, {"b\u200d", 1}}},
-		{"", nil},
-	} {
-		got := ipQualityRuns(test.text)
-		if len(got) != len(test.want) {
-			t.Fatalf("ipQualityRuns(%q) = %+v, want %+v", test.text, got, test.want)
-		}
-		for index := range got {
-			if got[index] != test.want[index] {
-				t.Fatalf("ipQualityRuns(%q) = %+v, want %+v", test.text, got, test.want)
-			}
-		}
-	}
-}
-
-func TestIPQualityRunsLongTextAllocationBudget(t *testing.T) {
-	for _, text := range []string{
-		strings.Repeat("a", ipQualityRenderMaxText),
-		strings.Repeat("a\u0301", ipQualityRenderMaxText/3),
-		strings.Repeat("报", ipQualityRenderMaxText/3),
-	} {
-		var runs []ipQualityRun
-		allocations := testing.AllocsPerRun(5, func() { runs = ipQualityRuns(text) })
-		if len(runs) != 1 || runs[0].text != text || runs[0].cells != ipQualityDisplayWidth(text) {
-			t.Fatal("long run lost text or terminal cells")
-		}
-		// A uniform run needs a constant number of allocations, even when it
-		// contains thousands of combining marks or multi-byte characters.
-		if allocations > 8 {
-			t.Fatalf("long run allocated %.0f objects; want at most 8", allocations)
 		}
 	}
 }
@@ -506,9 +357,7 @@ func TestIPQualityRenderKeepsBrightForegroundAsText(t *testing.T) {
 		t.Fatalf("bright black did not become a visible foreground: %s", dim)
 	}
 	background := mustRenderIPQualitySVG(t, "\x1b[102m绿底\x1b[0m")
-	want := fmt.Sprintf(`<rect x="%d" y="%d" width="%d" height="%d" fill="%s"/>`,
-		ipQualityRenderPaddingX, ipQualityRenderPaddingY,
-		ipQualityDisplayWidth("绿底")*ipQualityRenderCellWidth, ipQualityRenderLineHeight, ipQualityGreen)
+	want := `<rect x="1ch" y="0em" width="4ch" height="1em" fill="` + ipQualityGreen + `"/>`
 	if !strings.Contains(background, want) {
 		t.Fatalf("bright background was not painted: %s", background)
 	}
