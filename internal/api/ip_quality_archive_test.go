@@ -465,7 +465,10 @@ func TestIPQualityRenderKeepsBrightForegroundAsText(t *testing.T) {
 		t.Fatalf("bright black did not become a visible foreground: %s", dim)
 	}
 	background := mustRenderIPQualitySVG(t, "\x1b[102m绿底\x1b[0m")
-	if !strings.Contains(background, `<rect x="18" y="16" width="40" height="22" fill="`+ipQualityGreen+`"/>`) {
+	want := fmt.Sprintf(`<rect x="%d" y="%d" width="%d" height="%d" fill="%s"/>`,
+		ipQualityRenderPaddingX, ipQualityRenderPaddingY,
+		ipQualityDisplayWidth("绿底")*ipQualityRenderCellWidth, ipQualityRenderLineHeight, ipQualityGreen)
+	if !strings.Contains(background, want) {
 		t.Fatalf("bright background was not painted: %s", background)
 	}
 }

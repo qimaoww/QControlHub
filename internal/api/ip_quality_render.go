@@ -18,7 +18,12 @@ import (
 // and nothing can drift when upstream changes its output. Only the ANSI colour
 // codes are translated, using the palette the reference terminal shows.
 const (
-	ipQualityRenderCellWidth  = 10
+	// One cell is half an em, which is what a dual-width CJK monospace face
+	// advances: Latin glyphs take half an em, full-width glyphs a whole one.
+	// Matching that ratio is what puts a full-width character on exactly two
+	// cells, so it needs neither stretched outlines nor padded spacing. The
+	// upstream share report leans on the same metric through SimHei.
+	ipQualityRenderCellWidth  = 8
 	ipQualityRenderLineHeight = 22
 	ipQualityRenderFontSize   = 16
 	ipQualityRenderPaddingX   = 18
@@ -37,8 +42,13 @@ const (
 	ipQualityCyan       = "#21c7a8"
 	// Bright black is the terminal's dim grey. The rest of the bright range
 	// mirrors the normal colours, so only this entry needs its own value.
-	ipQualityDim        = "#5f7e97"
-	ipQualityFontFamily = "ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', monospace"
+	ipQualityDim = "#5f7e97"
+	// Prefer a dual-width CJK monospace face, where Latin is half an em and a
+	// full-width glyph one em: that is exactly this grid. SimHei ships with
+	// Windows and WenQuanYi Zen Hei Mono with most Linux desktops. A client
+	// with none of them falls back to a Latin-only monospace plus its default
+	// CJK face, where the spacing pin still holds every column.
+	ipQualityFontFamily = "'Sarasa Mono SC', 'Noto Sans Mono CJK SC', 'Source Han Mono SC', SimHei, 'WenQuanYi Zen Hei Mono', Consolas, 'DejaVu Sans Mono', monospace"
 )
 
 // ipQualityANSI maps the SGR codes upstream emits onto that palette. Plain black
