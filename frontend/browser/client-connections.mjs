@@ -37,6 +37,7 @@ export async function testClientConnectionsRuntime(preview = false) {
   await waitFor(() => document.querySelector("tbody")?.textContent.includes("中国 · 广东"), "location enrichment did not paint");
   assert.ok(!document.querySelector("tbody").textContent.includes("192.0.2.1"));
   assert.ok(!document.querySelector("tbody").textContent.includes("52000"));
+  assert.equal(document.querySelector('td[data-label="入站端口"]').textContent, "443");
   assert.ok(!document.querySelector("tbody").textContent.includes("未知入站"));
   assert.ok(document.querySelector('a[href="#client-connections"]'), "connection navigation missing");
   assert.ok(!document.body.classList.contains("no-context"), "connection page must show filter sidebar");

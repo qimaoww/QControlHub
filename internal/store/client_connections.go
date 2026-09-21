@@ -150,6 +150,9 @@ func (s *Store) ClientConnectionHistory(ctx context.Context, q ClientConnectionQ
 	if q.RecordsOnly {
 		return result, tx.Commit(ctx)
 	}
+	if err := s.resolveClientConnectionPorts(ctx, tx, result.Records); err != nil {
+		return result, err
+	}
 	sourceArgs := []any{}
 	sourceWhere := ` WHERE a.revoked_at IS NULL` + agentAdministrationClause(ctx, "a.id", &sourceArgs)
 	if q.AgentID != "" {
