@@ -86,8 +86,11 @@ func TestIPQualityRenderEscapesAndRejectsBadText(t *testing.T) {
 	if strings.Contains(rendered, "<script>") || strings.Contains(rendered, "& <b>") {
 		t.Fatal("report text was not escaped")
 	}
-	if !strings.Contains(rendered, "&lt;script&gt;") || !strings.Contains(rendered, "&amp;") {
+	if !strings.Contains(rendered, "&lt;") || !strings.Contains(rendered, "&gt;") || !strings.Contains(rendered, "&amp;") {
 		t.Fatal("expected escaped markup in the SVG")
+	}
+	if got := strings.Join(ipQualityRenderedLines(rendered), "\n"); got != "报告：<script>alert(1)</script> & <b>红色" {
+		t.Fatalf("escaped report text changed: %q", got)
 	}
 	if err := validateRenderedSVG(svg); err != nil {
 		t.Fatal(err)
@@ -196,7 +199,7 @@ func TestIPQualityRenderPreservesCompleteNativeReport(t *testing.T) {
 		`fill="#000000"`, `fill="#bbbbbb"`, `fill="#00bbbb"`,
 		`fill="#00bb00"`, `fill="#bb0000"`, `fill="#aa9900"`,
 		`dominant-baseline="central"`, `xml:space="preserve"`,
-		`<text x="7" y="651"`,
+		`y="651"`,
 		`<rect x="119" y="336" width="112" height="14" fill="#00bb00"/>`,
 		`<rect x="231" y="336" width="112" height="14" fill="#aa9900"/>`,
 		`<rect x="343" y="336" width="7" height="14" fill="#bb0000"/>`,
@@ -248,7 +251,7 @@ func TestIPQualityRenderKeepsTextUpright(t *testing.T) {
 func TestIPQualityRenderKeepsCombiningTextTogether(t *testing.T) {
 	text := "a\u0301报告b\u200d远端\u200b25"
 	svg := mustRenderIPQualitySVG(t, text)
-	for _, cluster := range []string{"a\u0301", "b\u200d", "远端\u200b"} {
+	for _, cluster := range []string{"a\u0301", "b\u200d", "端\u200b"} {
 		if !strings.Contains(svg, ">"+cluster+"</text>") {
 			t.Fatalf("split shaping cluster %q", cluster)
 		}

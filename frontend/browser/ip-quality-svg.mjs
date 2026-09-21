@@ -31,17 +31,19 @@ export async function testIPQualitySVG(images) {
       const runs = [...svg.querySelectorAll("text")];
       assert.equal(new Set(runs.map((run) => run.getAttribute("y"))).size, rows, "missing report rows");
       assert.equal(svg.querySelector('[font-style="italic"], [font-style="oblique"]'), null, "slanted text returned");
-      for (const family of ["monospace", "DejaVu Sans Mono"]) {
+      for (const family of ["monospace", "DejaVu Sans Mono", "sans-serif"]) {
         svg.setAttribute("font-family", family);
         for (const run of runs) {
           assert.equal(getComputedStyle(run).fontStyle, "normal", "report text is not upright");
           const characters = [...run.textContent];
           const step = Number(run.getAttribute("textLength")) / characters.length;
-          const start = Number(run.getAttribute("x"));
+          const start = Number.parseFloat(run.getAttribute("x"));
           for (let index = 0; index < characters.length; index++) {
             const actual = run.getStartPositionOfChar(index).x;
             assert.ok(Math.abs(actual - (start + index * step)) < 0.2,
               `${family}: ${run.textContent} character ${index} drifted off its column`);
+            assert.ok(run.getExtentOfChar(index).width <= step + 0.2,
+              `${family}: ${run.textContent} character ${index} overlaps the next column`);
           }
         }
       }

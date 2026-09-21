@@ -236,13 +236,31 @@ func buildIPQualitySVG(lines []ipQualityLine) []byte {
 				if runWidth > 0 {
 					length = fmt.Sprintf(` textLength="%d" lengthAdjust="spacingAndGlyphs"`, runWidth)
 				}
-				fmt.Fprintf(&builder, `<text x="%d" y="%d" fill="%s"%s%s xml:space="preserve">%s</text>`, x, y, cell.fill, ipQualityStyleAttributes(cell), length, ipQualityEscape(run.text))
+				fmt.Fprintf(&builder, `<text x="%s" y="%d" fill="%s"%s%s xml:space="preserve">%s</text>`, ipQualityRunPositions(run.text, x), y, cell.fill, ipQualityStyleAttributes(cell), length, ipQualityEscape(run.text))
 				x += runWidth
 			}
 		}
 	}
 	builder.WriteString(`</g></svg>`)
 	return []byte(builder.String())
+}
+
+// Pin repeated glyph origins as well, since fallback fonts may kern pairs.
+func ipQualityRunPositions(text string, x int) string {
+	for _, character := range text {
+		if ipQualityRuneWidth(character) == 0 {
+			return strconv.Itoa(x)
+		}
+	}
+	var positions strings.Builder
+	for _, character := range text {
+		if positions.Len() > 0 {
+			positions.WriteByte(' ')
+		}
+		positions.WriteString(strconv.Itoa(x))
+		x += ipQualityRuneWidth(character) * ipQualityRenderCellWidth
+	}
+	return positions.String()
 }
 
 // Reports use upright text throughout; bold and underline still carry emphasis.
@@ -257,31 +275,30 @@ func ipQualityStyleAttributes(cell ipQualityCell) string {
 	return attributes
 }
 
-// ipQualityRun is a maximal slice of one styled cell whose characters all
-// occupy the same number of terminal cells, so it can be pinned as a unit.
+// ipQualityRun contains a shaping cluster or repeated identical glyphs.
 type ipQualityRun struct {
 	text  string
 	cells int
 }
 
-// Split narrow and wide text before fitting its width: mixing the two would
-// shift CJK columns when the browser falls back to a Latin-only monospace face.
-// CJK glyphs occupy exactly one em; Latin fallback advances fit half an em.
+// Fit each glyph independently: even "monospace" can resolve to a proportional
+// font on a minimal system. Group repeated characters (especially padding) to
+// keep archives compact, and retain combining marks with their base glyph.
 func ipQualityRuns(text string) []ipQualityRun {
 	runs := make([]ipQualityRun, 0, 4)
-	start, unit, width := 0, -1, 0
+	start, width := 0, 0
+	var previous rune
 	for index, character := range text {
 		cells := ipQualityRuneWidth(character)
-		if unit < 0 {
-			unit = cells
-		} else if cells != unit && cells != 0 {
+		if index > start && character != previous && cells != 0 {
 			// Slice the original UTF-8 bytes once per run instead of copying
 			// the growing prefix for every character. Combining marks remain
 			// attached to the preceding run without adding any cells.
 			runs = append(runs, ipQualityRun{text: text[start:index], cells: width})
-			start, unit, width = index, cells, 0
+			start, width = index, 0
 		}
 		width += cells
+		previous = character
 	}
 	if start < len(text) {
 		runs = append(runs, ipQualityRun{text: text[start:], cells: width})
