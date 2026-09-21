@@ -8,24 +8,20 @@ export function clientConnectionSidebar({ state, esc }) {
 }
 
 export function clientConnectionFilters({ filters, loading, esc, engineName }) {
-  const advanced = filters.protocol || filters.inbound || filters.transport || filters.include_non_public === "true";
+  const advanced = filters.include_non_public === "true";
   const select = (name, label, options) => `<label>${label}<select name="${name}"><option value="">全部</option>${options.map(([value, text]) => `<option value="${esc(value)}"${filters[name] === value ? " selected" : ""}>${esc(text)}</option>`).join("")}</select></label>`;
   const input = (name, label, type = "text", extra = "") => `<label>${label}<input name="${name}" type="${type}" value="${esc(filters[name] || "")}" ${extra}></label>`;
-  const active = [filters.engine && engineName(filters.engine), filters.client_ip, filters.port && `端口 ${filters.port}`, filters.protocol, filters.inbound, filters.transport?.toUpperCase(), filters.include_non_public === "true" && "包含非公网"].filter(Boolean);
-  return `<details class="connection-filter-panel"><summary>筛选条件<span>${active.length ? esc(active.join(" · ")) : "时间 / 来源 IP / 入站"}</span></summary>
+  const active = [filters.engine && engineName(filters.engine), filters.client_ip, filters.include_non_public === "true" && "包含非公网"].filter(Boolean);
+  return `<details class="connection-filter-panel"><summary>筛选条件<span>${active.length ? esc(active.join(" · ")) : "时间 / 来源 IP / 内核"}</span></summary>
       <form id="connection-query" data-connection-filters>
         <div class="connection-filters">
           ${select("engine", "内核", ["mihomo", "xray", "sing-box", "ss-rust"].map(e => [e, engineName(e)]))}
-          ${input("client_ip", "入站来源 IP", "search", 'placeholder="IPv4 / IPv6"')}
-          ${input("port", "入站端口", "number", 'min="1" max="65535" placeholder="全部端口"')}
+          ${input("client_ip", "客户端来源 IP", "search", 'placeholder="IPv4 / IPv6"')}
           ${input("since", "开始时间", "datetime-local", "required")}
           ${input("until", "结束时间", "datetime-local", "required")}
         </div>
         <footer class="connection-filter-actions">
           <details class="connection-advanced"${advanced ? " open" : ""}><summary>更多筛选</summary><div>
-            ${input("protocol", "入站协议", "text", 'placeholder="vless / shadowsocks" maxlength="40"')}
-            ${input("inbound", "入站名称", "text", 'placeholder="全部入站" maxlength="400"')}
-            ${select("transport", "传输", [["tcp", "TCP"], ["udp", "UDP"]])}
             <label>来源范围<select name="include_non_public"><option value=""${filters.include_non_public === "true" ? "" : " selected"}>仅公网</option><option value="true"${filters.include_non_public === "true" ? " selected" : ""}>包含非公网</option></select></label>
           </div></details>
           <div class="connection-query-actions"><button class="button small" type="button" data-connection-recent${loading ? " disabled" : ""}>最近 24 小时</button><button class="button primary small" type="submit"${loading ? " disabled" : ""}>${loading ? "查询中…" : "查询"}</button></div>

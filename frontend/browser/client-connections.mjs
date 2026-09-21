@@ -18,7 +18,7 @@ export async function testClientConnectionsRuntime(preview = false) {
       requests.push(url.searchParams);
       const older = url.searchParams.has("before");
       return new Response(JSON.stringify({
-        records: [{ ...row, id: older ? 1 : 2, client_port: older ? 51000 : 52000, location: {} }],
+        records: [{ ...row, id: older ? 1 : 2, first_seen: older ? "2026-09-20T00:00:00Z" : now, location: {} }],
         ips: 1, flows: 2, next_before: older ? undefined : 2,
         sources: [{ agent_id: "alpha", agent_name: row.agent_name, updated_at: now, status: "ok", detail: "panel core logs", truncated: false }, { agent_id: "bravo", agent_name: "Bravo · 新加坡", status: "no_logs" }].filter(source => !url.searchParams.get("agent_id") || source.agent_id === url.searchParams.get("agent_id")),
         timeline: Array.from({ length: 24 }, (_, i) => ({ time: new Date(Date.now() - (23 - i) * 3600000).toISOString(), flows: i % 3 === 0 ? 1 : 2, ips: 1 })),
@@ -28,13 +28,16 @@ export async function testClientConnectionsRuntime(preview = false) {
   };
   location.hash = "#client-connections";
   await import("../app.js");
-  await waitFor(() => document.querySelector("tbody")?.textContent.includes("52000"), "connection page did not load");
+  await waitFor(() => document.querySelector("tbody")?.textContent.includes("2001:db8::8"), "connection page did not load");
   assert.ok(document.querySelector('.context-sidebar [data-connection-agent]'), "node sidebar should render before shared shell reads finish");
   assert.ok(!document.querySelector('[type="submit"]').disabled, "history must be usable before location lookup completes");
   assert.ok(!document.querySelector("tbody").textContent.includes("广东"));
   releaseShell();
   releaseLocations();
   await waitFor(() => document.querySelector("tbody")?.textContent.includes("中国 · 广东"), "location enrichment did not paint");
+  assert.ok(!document.querySelector("tbody").textContent.includes("192.0.2.1"));
+  assert.ok(!document.querySelector("tbody").textContent.includes("52000"));
+  assert.ok(!document.querySelector("tbody").textContent.includes("未知入站"));
   assert.ok(document.querySelector('a[href="#client-connections"]'), "connection navigation missing");
   assert.ok(!document.body.classList.contains("no-context"), "connection page must show filter sidebar");
   assert.ok(document.querySelector(".context-sidebar [data-connection-agent]"), "node filters belong in context sidebar");
@@ -57,20 +60,20 @@ export async function testClientConnectionsRuntime(preview = false) {
   assert.ok(!requests.at(-1).has("include_non_public"));
   form.elements.client_ip.value = "2001:db8::8";
   document.querySelector(".connection-advanced").open = true;
-  form.elements.inbound.value = "vless-443";
-  form.elements.port.value = "443";
+  assert.equal(form.elements.inbound, undefined);
+  assert.equal(form.elements.port, undefined);
   form.elements.include_non_public.value = "true";
   const beforeQuery = requests.length;
   form.requestSubmit();
   await waitFor(() => requests.length > beforeQuery && !document.querySelector('[type="submit"]').disabled, "filter request missing");
   assert.equal(requests.at(-1).get("agent_id"), "alpha", "query form must preserve sidebar node filter");
   assert.equal(requests.at(-1).get("client_ip"), "2001:db8::8");
-  assert.equal(requests.at(-1).get("inbound"), "vless-443");
-  assert.equal(requests.at(-1).get("port"), "443");
+  assert.equal(requests.at(-1).has("inbound"), false);
+  assert.equal(requests.at(-1).has("port"), false);
   assert.equal(requests.at(-1).get("include_non_public"), "true");
   assert.equal(document.querySelector('[name="include_non_public"]').value, "true");
   document.querySelector("[data-connection-next]").click();
-  await waitFor(() => document.querySelector("tbody")?.textContent.includes("51000"), "next page missing");
+  await waitFor(() => document.querySelector(".connection-pagination")?.textContent.includes("第 2 页") && !document.querySelector("[data-connection-refresh]")?.disabled, "next page missing");
   assert.equal(requests.at(-1).get("before"), "2");
   assert.equal(requests.at(-1).get("include_non_public"), "true");
   assert.match(document.querySelector(".connection-summary").textContent, /观测连接 2/g);
@@ -81,7 +84,7 @@ export async function testClientConnectionsRuntime(preview = false) {
   assert.equal(requests.at(-1).get("agent_id"), "alpha", "refresh should retain the node filter");
   assert.match(document.querySelector(".connection-pagination").textContent, /第 2 页/);
   document.querySelector("[data-connection-previous]").click();
-  await waitFor(() => document.querySelector("tbody")?.textContent.includes("52000"), "previous page missing");
+  await waitFor(() => document.querySelector(".connection-pagination")?.textContent.includes("第 1 页") && !document.querySelector("[data-connection-refresh]")?.disabled, "previous page missing");
   assert.ok(!requests.at(-1).has("before"));
   const beforeRecent = requests.length;
   document.querySelector("[data-connection-recent]").click();

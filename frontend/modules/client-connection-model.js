@@ -11,7 +11,7 @@ export function defaultConnectionFilters(now = Date.now()) {
 
 export function connectionQuery(filters, before = "") {
   const params = new URLSearchParams();
-  for (const key of ["agent_id", "engine", "protocol", "inbound", "transport", "client_ip", "port", "include_non_public"]) {
+  for (const key of ["agent_id", "engine", "client_ip", "include_non_public"]) {
     if (filters[key]) params.set(key, filters[key]);
   }
   const since = new Date(filters.since), until = new Date(filters.until);
@@ -30,13 +30,7 @@ export function connectionSourceLabel(source) {
 
 export function connectionSourceDetail(source) {
   if (!source.updated_at) return "面板尚无可读取的内核日志，请检查内核日志是否开启。";
-  return "从面板保存的内核日志提取来源 IP；未记录的连接和字段无法展示。";
-}
-
-export function connectionAddress(ip, port) {
-  if (!ip || ip === "0.0.0.0" || ip === "::") return "—";
-  const address = String(ip).includes(":") ? `[${ip}]` : ip;
-  return port ? `${address}:${port}` : address;
+  return "从面板保存的内核日志提取客户端来源 IP，不记录访问目标 IP。";
 }
 
 export function connectionLocationLabel(location) {

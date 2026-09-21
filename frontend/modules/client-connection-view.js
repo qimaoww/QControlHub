@@ -1,5 +1,5 @@
 import { clientConnectionFilters } from "./client-connection-filters.js";
-import { connectionAddress, connectionSourceLabel, connectionSourceDetail, connectionLocationLabel } from "./client-connection-model.js";
+import { connectionSourceLabel, connectionSourceDetail, connectionLocationLabel } from "./client-connection-model.js";
 
 export function createClientConnectionView({ esc, engineName, date }) {
   return function connectionView(result, filters, sources, { loading = false, error = "", hasPrevious = false, page = 1 } = {}) {
@@ -16,9 +16,9 @@ export function createClientConnectionView({ esc, engineName, date }) {
 
       ${error ? `<div class="connection-error" role="alert">${esc(error)}</div>` : ""}
       <section class="workspace-panel connection-detail-panel">
-        <header><h3>入站连接</h3><span class="connection-result-count">${loading ? result ? "正在更新…" : "正在读取…" : `本页 ${records.length} 条`}</span></header>
+        <header><h3>客户端来源 IP</h3><span class="connection-result-count">${loading ? result ? "正在更新…" : "正在读取…" : `本页 ${records.length} 条`}</span></header>
         ${clientConnectionFilters({ filters, loading, esc, engineName })}
-        <div class="connection-table-scroll" tabindex="0" role="region" aria-label="入站连接明细"><table><thead><tr><th>服务器</th><th>内核 / 入站</th><th>来源 IP : 端口</th><th>国家／地区</th><th>入站 IP : 端口</th><th>观测时间</th></tr></thead><tbody>${records.map(row => `<tr><td data-label="服务器"><strong>${esc(row.agent_name)}</strong></td><td data-label="内核 / 入站"><div class="connection-inbound"><span class="engine-badge ${esc(row.engine)}">${esc(engineName(row.engine))}</span><strong>${esc(row.inbound || "未知入站")}</strong><small>${esc(row.protocol || "未知协议")} · ${esc(row.transport?.toUpperCase() || "未知传输")}</small></div></td><td data-label="来源"><code>${esc(connectionAddress(row.client_ip, row.client_port))}</code></td><td data-label="国家／地区">${esc(connectionLocationLabel(row.location))}</td><td data-label="入站"><code>${esc(connectionAddress(row.local_ip, row.local_port))}</code></td><td data-label="观测时间"><div class="connection-times"><time>首次 ${esc(date(row.first_seen))}</time><time>最近 ${esc(date(row.last_seen))}</time></div></td></tr>`).join("") || `<tr><td colspan="6"><div class="empty">${loading ? "加载中…" : "暂无连接记录"}</div></td></tr>`}</tbody></table></div>
+        <div class="connection-table-scroll" tabindex="0" role="region" aria-label="客户端来源 IP 明细"><table><thead><tr><th>服务器</th><th>内核</th><th>客户端来源 IP</th><th>国家／地区</th><th>观测时间</th></tr></thead><tbody>${records.map(row => `<tr><td data-label="服务器"><strong>${esc(row.agent_name)}</strong></td><td data-label="内核"><span class="engine-badge ${esc(row.engine)}">${esc(engineName(row.engine))}</span></td><td data-label="来源 IP"><code>${esc(row.client_ip)}</code></td><td data-label="国家／地区">${esc(connectionLocationLabel(row.location))}</td><td data-label="观测时间"><div class="connection-times"><time>首次 ${esc(date(row.first_seen))}</time><time>最近 ${esc(date(row.last_seen))}</time></div></td></tr>`).join("") || `<tr><td colspan="5"><div class="empty">${loading ? "加载中…" : "暂无连接记录"}</div></td></tr>`}</tbody></table></div>
         <footer class="connection-pagination"><span>第 ${page} 页</span><button class="button small" data-connection-previous${!hasPrevious || loading ? " disabled" : ""}>上一页</button><button class="button small" data-connection-next${!result?.next_before || loading ? " disabled" : ""}>下一页</button></footer>
       </section>
     </div>`;
