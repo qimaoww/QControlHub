@@ -10,9 +10,10 @@ The page queries the panel's PostgreSQL database. The context sidebar uses the
 shared All nodes / node list navigation; selecting a node queries it immediately. Other filters are collapsed above the results.
 Filter by server, engine,
 inbound name, inbound protocol, TCP/UDP, exact IPv4/IPv6 source address, server
-port, and time range. All filters also apply to the summary and timeline;
-pagination only changes the detail rows. Time inputs use the browser's local
-time zone. Timeline buckets use UTC boundaries and display in local time.
+port, and time range. All filters also apply to the summary; pagination only
+changes the detail rows. Time inputs use the browser's local time zone. The page
+shows summary counts and connection details without a timeline chart. The API
+still provides timeline buckets using UTC boundaries.
 
 Queries default to public source IPs only, excluding private, loopback, link-local,
 CGNAT and other special-use addresses from details, counts and timelines. Under

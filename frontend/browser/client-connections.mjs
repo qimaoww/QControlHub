@@ -77,12 +77,6 @@ export async function testClientConnectionsRuntime(preview = false) {
   document.querySelector("[data-connection-previous]").click();
   await waitFor(() => document.querySelector("tbody")?.textContent.includes("52000"), "previous page missing");
   assert.ok(!requests.at(-1).has("before"));
-  const bucket = document.querySelector("[data-connection-bucket]");
-  bucket.value = "day";
-  const beforeBucket = requests.length;
-  bucket.dispatchEvent(new Event("change", { bubbles: true }));
-  await waitFor(() => requests.length > beforeBucket && !document.querySelector('[type="submit"]').disabled, "time bucket change missing");
-  assert.equal(requests.at(-1).get("bucket"), "day");
   const beforeRecent = requests.length;
   document.querySelector("[data-connection-recent]").click();
   await waitFor(() => requests.length > beforeRecent && !document.querySelector('[type="submit"]').disabled, "recent query missing");

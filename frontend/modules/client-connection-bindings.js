@@ -10,7 +10,6 @@ export function bindClientConnections({ current, search, selectAgent, recent, ne
     event.preventDefault();
     if (current()) search(Object.fromEntries(new FormData(form)));
   });
-  bindEvent(document.querySelector("[data-connection-bucket]"), "change", () => { if (current()) search(Object.fromEntries(new FormData(form))); });
   for (const [selector, action] of [["recent", recent], ["next", next], ["previous", previous]]) {
     bindEvent(document.querySelector(`[data-connection-${selector}]`), "click", () => { if (current()) action(); });
   }

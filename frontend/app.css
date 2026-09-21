@@ -960,15 +960,8 @@ dialog.config-access-dialog::backdrop{background:rgba(17,20,36,.34);backdrop-fil
 .connection-advanced{flex:1;min-width:0}
 .connection-advanced summary{width:fit-content;padding:8px 0;color:var(--muted);font-size:calc(11px * var(--ui-font-scale));font-weight:650;cursor:pointer}
 .connection-advanced>div{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;padding:6px 0 4px;max-width:660px}
-.connection-history-panel>header,.connection-detail-panel>header{min-height:56px;gap:16px;display:flex;align-items:center;justify-content:space-between}
-.connection-history-panel h3,.connection-detail-panel h3{font-size:calc(15px * var(--ui-font-scale));margin:0}
-.connection-history-panel>header>select{width:auto;height:32px;padding-block:4px;font-size:calc(11px * var(--ui-font-scale))}
-.connection-timeline{padding:14px 18px;min-height:154px;overflow:hidden}
-.connection-timeline svg{display:block;width:100%;height:120px}
-.connection-timeline rect{fill:var(--accent);opacity:.75}
-.connection-timeline rect:hover{opacity:1}
-.connection-chart-grid{stroke:var(--line);stroke-width:1;fill:none;vector-effect:non-scaling-stroke}
-.connection-chart-axis{display:flex;flex-wrap:wrap;justify-content:space-between;gap:4px 12px;margin-top:4px;color:var(--muted);font-size:calc(10px * var(--ui-font-scale))}
+.connection-detail-panel>header{min-height:56px;gap:16px;display:flex;align-items:center;justify-content:space-between}
+.connection-detail-panel h3{font-size:calc(15px * var(--ui-font-scale));margin:0}
 .connection-result-count{color:var(--muted);font-size:calc(11px * var(--ui-font-scale))}
 .connection-table-scroll{overflow-x:auto}
 .connection-table-scroll table{width:100%;border-collapse:collapse;font-size:calc(11px * var(--ui-font-scale))}

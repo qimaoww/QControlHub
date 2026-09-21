@@ -57,7 +57,7 @@ func parseClientConnectionQuery(values url.Values, now time.Time) (store.ClientC
 func (s *Server) listClientConnections(w http.ResponseWriter, request *http.Request) {
 	locationMode := request.URL.Query().Get("locations")
 	if locationMode != "" && locationMode != "cached" && locationMode != "only" {
-		writeError(w, http.StatusBadRequest, "invalid locations mode")
+		writeError(w, http.StatusBadRequest, "请选择有效的 IP 属地查询模式。")
 		return
 	}
 	query, err := parseClientConnectionQuery(request.URL.Query(), time.Now().UTC())
