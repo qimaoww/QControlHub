@@ -6,11 +6,16 @@ port 443 shows the connecting client's IP and source port, the local listening
 IP and port, the engine, and the inbound name and protocol. It does not collect
 proxy destination IPs, visited sites, credentials, or application payloads.
 
-The page queries the panel's PostgreSQL database. Filter by server, engine,
+The page queries the panel's PostgreSQL database. The context sidebar uses the
+shared All nodes / node list navigation; selecting a node queries it immediately. Other filters are collapsed inside the connection detail panel. The page uses
+the log workspace header and a compact summary bar; refresh preserves the
+selected node, filters and detail page.
+Filter by server, engine,
 inbound name, inbound protocol, TCP/UDP, exact IPv4/IPv6 source address, server
-port, and time range. All filters also apply to the summary and timeline;
-pagination only changes the detail rows. Time inputs use the browser's local
-time zone. Timeline buckets use UTC boundaries and display in local time.
+port, and time range. All filters also apply to the summary; pagination only
+changes the detail rows. Time inputs use the browser's local time zone. The page
+shows summary counts and connection details without a timeline chart. The API
+still provides timeline buckets using UTC boundaries.
 
 Queries default to public source IPs only, excluding private, loopback, link-local,
 CGNAT and other special-use addresses from details, counts and timelines. Under
@@ -23,10 +28,24 @@ not the local listening address. Collection and panel retention include both.
 Upgrade the panel and Agent to enable collection. Linux Agents read established
 TCP sockets and match them to actual listening sockets and managed configuration
 ports. UDP/QUIC peers come from the original direction of `conntrack -L -p udp`;
-the destination must be a local interface address with a bound UDP socket. Install the distribution's
-`conntrack` package and allow the Agent to read connection tracking for UDP
-coverage. Missing conntrack, unreadable configuration/socket tables, and capped
-samples are reported as partial coverage in the page. Unsupported platforms
+the destination must be a local interface address with a bound UDP socket.
+The Agent installer/update script installs `conntrack` (Debian/Ubuntu) or
+`conntrack-tools` (Alpine/RPM distributions) when missing. Package installation
+failure warns without blocking the Agent update or TCP collection. Binary-only
+online upgrades do not install OS packages: existing nodes must run the updated
+installer or install the package separately. No conntrack daemon or firewall
+changes are needed. UDP collection requires kernel connection tracking and the
+Agent's existing `CAP_NET_ADMIN` capability; restricted VPS/container hosts may
+need an operator to grant it.
+
+Only actually bound managed UDP ports trigger a lookup, so protocols declared
+as TCP/UDP but currently listening only on TCP do not produce a missing-conntrack
+warning. IPv4 and IPv6 are queried explicitly and independently. Missing commands,
+permission failures, timeouts and incomplete output have distinct report details.
+The expandable collection status shows these reasons and remediation in Chinese,
+alongside the last report time; already collected TCP/UDP observations remain
+available if another part fails. Missing conntrack, unreadable configuration/socket
+tables, and capped samples are reported as partial coverage in the page. Unsupported platforms
 report unavailable; older Agents show no report. Overlapping configured ports
 that cannot be uniquely assigned to an engine/inbound are omitted.
 
@@ -85,5 +104,14 @@ previous result. Unreferenced cache entries are pruned with connection history.
 Lookups are deduplicated within a page, use at most eight concurrent requests,
 and share a three-second deadline. Provider failure leaves connection history
 available, and IPs not reached within the deadline can resolve on a later query.
+The browser first requests `locations=cached`, which returns history and cached
+locations without waiting for the provider. Public locations are refreshed in a
+second `locations=only` request with the same authorized filters and a cursor
+anchored to the displayed page; this request reads only detail rows and skips summary, timeline and source queries.
+The UI merges locations by record ID and ignores responses after navigation,
+account changes or a newer query. Matching results are cached in account memory
+for return visits and revalidated; failed refreshes clear them. Initial shell
+settings/overview reads do not delay the connection page. Requests without the
+`locations` parameter retain synchronous enrichment for API compatibility.
 The browser and Agent do not contact the provider. GeoJS receives the public
 source addresses being resolved; location is an IP database estimate.

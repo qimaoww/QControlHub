@@ -101,3 +101,24 @@ install_iproute2() {
     exit 1
   }
 }
+# UDP history is optional: package-manager failure must not prevent an Agent
+# update or TCP collection. Do not enable conntrackd or alter firewall rules.
+install_conntrack() (
+  command -v "${QCH_CONNTRACK:-conntrack}" >/dev/null 2>&1 && exit 0
+  printf '%s\n' 'conntrack not found; installing UDP connection history support'
+  if command -v apt-get >/dev/null 2>&1; then
+    DEBIAN_FRONTEND=noninteractive apt-get update -qq &&
+      DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends conntrack >/dev/null || exit 1
+  elif command -v apk >/dev/null 2>&1; then
+    apk add --no-cache conntrack-tools >/dev/null || exit 1
+  elif command -v dnf >/dev/null 2>&1; then
+    dnf install -y conntrack-tools >/dev/null || exit 1
+  elif command -v yum >/dev/null 2>&1; then
+    yum install -y conntrack-tools >/dev/null || exit 1
+  elif command -v zypper >/dev/null 2>&1; then
+    zypper --non-interactive install conntrack-tools >/dev/null || exit 1
+  else
+    exit 1
+  fi
+  command -v "${QCH_CONNTRACK:-conntrack}" >/dev/null 2>&1
+)

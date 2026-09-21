@@ -13,6 +13,9 @@ import (
 )
 
 type ClientConnectionQuery struct {
+	// RecordsOnly is used by deferred location enrichment; authorization and
+	// detail filters remain identical, without repeating expensive aggregates.
+	RecordsOnly      bool
 	IncludeNonPublic bool
 	AgentID          string
 	Engine           core.Engine
@@ -135,29 +138,32 @@ func (s *Store) ClientConnectionHistory(ctx context.Context, q ClientConnectionQ
 	defer tx.Rollback(ctx)
 	where, args := connectionHistoryWhere(ctx, q)
 	from := ` FROM client_connections c JOIN agents a ON a.id=c.agent_id`
-	// Summary is independent of pagination and counts distinct observed tuples,
-	// not the number of minute rows or inferred authenticated sessions.
-	tuple := `(c.agent_id,c.engine,c.protocol,c.inbound,c.transport,c.client_ip,c.client_port,c.local_ip,c.local_port)`
-	if err := tx.QueryRow(ctx, `SELECT count(DISTINCT `+tuple+`),count(DISTINCT c.client_ip)`+from+where, args...).Scan(&result.Flows, &result.IPs); err != nil {
-		return result, err
-	}
-	timelineArgs := append(append([]any{}, args...), q.Bucket)
-	rows, err := tx.Query(ctx, fmt.Sprintf(`SELECT date_trunc($%d::text,c.bucket,'UTC') AS time,count(DISTINCT `+tuple+`),count(DISTINCT c.client_ip)`+from+where+` GROUP BY time ORDER BY time`, len(timelineArgs)), timelineArgs...)
-	if err != nil {
-		return result, err
-	}
-	for rows.Next() {
-		var bucket core.ClientConnectionBucket
-		if err := rows.Scan(&bucket.Time, &bucket.Flows, &bucket.IPs); err != nil {
-			rows.Close()
+	if !q.RecordsOnly {
+		// Summary is independent of pagination and counts distinct observed tuples,
+		// not the number of minute rows or inferred authenticated sessions.
+		tuple := `(c.agent_id,c.engine,c.protocol,c.inbound,c.transport,c.client_ip,c.client_port,c.local_ip,c.local_port)`
+		if err := tx.QueryRow(ctx, `SELECT count(DISTINCT `+tuple+`),count(DISTINCT c.client_ip)`+from+where, args...).Scan(&result.Flows, &result.IPs); err != nil {
 			return result, err
 		}
-		result.Timeline = append(result.Timeline, bucket)
+		timelineArgs := append(append([]any{}, args...), q.Bucket)
+		rows, err := tx.Query(ctx, fmt.Sprintf(`SELECT date_trunc($%d::text,c.bucket,'UTC') AS time,count(DISTINCT `+tuple+`),count(DISTINCT c.client_ip)`+from+where+` GROUP BY time ORDER BY time`, len(timelineArgs)), timelineArgs...)
+		if err != nil {
+			return result, err
+		}
+		for rows.Next() {
+			var bucket core.ClientConnectionBucket
+			if err := rows.Scan(&bucket.Time, &bucket.Flows, &bucket.IPs); err != nil {
+				rows.Close()
+				return result, err
+			}
+			result.Timeline = append(result.Timeline, bucket)
+		}
+		rows.Close()
+		if err = rows.Err(); err != nil {
+			return result, err
+		}
 	}
-	rows.Close()
-	if err = rows.Err(); err != nil {
-		return result, err
-	}
+
 	recordArgs := append([]any{}, args...)
 	recordWhere := where
 	if q.Before > 0 {
@@ -165,7 +171,7 @@ func (s *Store) ClientConnectionHistory(ctx context.Context, q ClientConnectionQ
 		recordWhere += fmt.Sprintf(" AND c.id<$%d", len(recordArgs))
 	}
 	recordArgs = append(recordArgs, q.Limit+1)
-	rows, err = tx.Query(ctx, `SELECT c.id,c.agent_id,a.name,c.engine,c.protocol,c.inbound,c.transport,host(c.client_ip),c.client_port,host(c.local_ip),c.local_port,c.first_seen,c.last_seen`+from+recordWhere+fmt.Sprintf(` ORDER BY c.id DESC LIMIT $%d`, len(recordArgs)), recordArgs...)
+	rows, err := tx.Query(ctx, `SELECT c.id,c.agent_id,a.name,c.engine,c.protocol,c.inbound,c.transport,host(c.client_ip),c.client_port,host(c.local_ip),c.local_port,c.first_seen,c.last_seen`+from+recordWhere+fmt.Sprintf(` ORDER BY c.id DESC LIMIT $%d`, len(recordArgs)), recordArgs...)
 	if err != nil {
 		return result, err
 	}
@@ -184,6 +190,9 @@ func (s *Store) ClientConnectionHistory(ctx context.Context, q ClientConnectionQ
 	if len(result.Records) > q.Limit {
 		result.Records = result.Records[:q.Limit]
 		result.NextBefore = result.Records[len(result.Records)-1].ID
+	}
+	if q.RecordsOnly {
+		return result, tx.Commit(ctx)
 	}
 	sourceArgs := []any{}
 	sourceWhere := ` WHERE a.revoked_at IS NULL` + agentAdministrationClause(ctx, "a.id", &sourceArgs)

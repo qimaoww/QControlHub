@@ -1,9 +1,10 @@
+import { clientConnectionSidebar } from "./client-connection-filters.js";
 import { orderNodesBySavedOrder } from "./node-order.js";
 import { installedEngineCount } from "./agent-service-state.js";
 
 export function createShellContext({ state, can, esc, engineName, ago, engines }) {
 function contextMarkup(title) {
-  if (state.route === "client-connections") return "";
+  if (state.route === "client-connections") return clientConnectionSidebar({ state, esc, engineName });
   if (state.route === "ip-quality") {
     // One node at a time: the page owns the selection and publishes the exact
     // list it renders, so the sidebar can never link to a node the panel hides.

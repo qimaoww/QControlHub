@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { connectionQuery, connectionAddress, connectionSourceLabel, defaultConnectionFilters, connectionLocationLabel } from "../modules/client-connection-model.js";
+import { connectionQuery, connectionAddress, connectionSourceLabel, connectionSourceDetail, defaultConnectionFilters, connectionLocationLabel } from "../modules/client-connection-model.js";
 import { createClientConnectionView } from "../modules/client-connection-view.js";
 import { installClientConnections } from "../modules/client-connections.js";
 
@@ -21,17 +21,24 @@ assert.equal(connectionLocationLabel({}), "—");
 assert.equal(connectionAddress("2001:db8::1", 443), "[2001:db8::1]:443");
 assert.match(connectionSourceLabel({}), /升级/);
 assert.match(connectionSourceLabel({ updated_at: "2020-01-01" }), /过期/);
+for (const [detail, expected] of [
+  ["UDP ipv4: conntrack not installed", /缺少 conntrack/],
+  ["UDP ipv6: conntrack permission denied (CAP_NET_ADMIN required)", /IPv6 UDP.*CAP_NET_ADMIN/],
+  ["UDP: conntrack unavailable or incomplete", /检查 conntrack/],
+  ["xray: listener discovery failed", /入站解析失败/],
+]) assert.match(connectionSourceDetail({ updated_at: new Date().toISOString(), detail }), expected);
+
 const esc = value => String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll('"', "&quot;");
 const view = createClientConnectionView({ esc, engineName: value => value, date: value => value });
 const html = view({ ips: 1, flows: 2, records: [{ agent_name: "<script>", inbound: "<img>", client_ip: "2001:db8::1", client_port: 50123, local_ip: "192.0.2.1", local_port: 443, protocol: "vless", engine: "xray", transport: "tcp" }] }, filters, []);
 assert.ok(html.includes("&lt;script>"));
 assert.ok(!html.includes("<script>"));
-assert.match(html, /入站来源 IP/);
+assert.match(html, /来源 IP/);
 assert.match(html, /\[2001:db8::1\]:50123/);
 
 // Construction is inert; stale reads from a previous account/navigation cannot paint.
 const oldDocument = globalThis.document;
-globalThis.document = { querySelector: () => null };
+globalThis.document = { querySelector: () => null, querySelectorAll: () => [] };
 try {
   const state = { data: {}, navigationEpoch: 1, route: "client-connections" };
   let calls = 0, paints = 0, resolve;
@@ -45,6 +52,32 @@ try {
   await pending;
   assert.equal(paints, 1);
   assert.equal(state.data.connectionSources, undefined);
+
+  // A slow location response cannot block history or overwrite a newer query.
+  const liveState = { data: {}, navigationEpoch: 1, route: "client-connections" };
+  let resolveLocation, painted = [], requestSignals = [];
+  const activeLoad = installClientConnections({ state: liveState, esc, engineName: value => value, date: value => value,
+    shell: markup => painted.push(markup),
+    api: (path, { signal }) => {
+      requestSignals.push(signal);
+      if (path.includes("locations=only")) return new Promise(done => { resolveLocation = done; });
+      return Promise.resolve({ ips: 1, flows: 1, records: [{ id: 1, agent_name: "current", transport: "tcp", location: {} }], sources: [], timeline: [] });
+    },
+  });
+  await activeLoad();
+  assert.ok(painted.at(-1).includes("current"), "history paints without awaiting locations");
+  assert.ok(liveState.data.connectionCache);
+  const oldLocation = resolveLocation;
+  await activeLoad();
+  assert.equal(requestSignals[0].aborted, true, "superseded request is canceled");
+  const paintCount = painted.length;
+  oldLocation({ records: [{ id: 1, location: { country_code: "CN", province: "广东" } }] });
+  await Promise.resolve();
+  assert.equal(painted.length, paintCount, "old enrichment must not repaint");
+  liveState.data = {}; liveState.navigationEpoch++;
+  resolveLocation({ records: [] });
+  await Promise.resolve();
+  assert.equal(liveState.data.connectionCache, undefined, "enrichment cannot restore another account's data");
 } finally { globalThis.document = oldDocument; }
 console.log("client connection filters, escaping and account lifecycle passed");
 
