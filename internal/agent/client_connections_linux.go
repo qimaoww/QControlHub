@@ -13,10 +13,8 @@ import (
 	"net"
 	"net/netip"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
 	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
@@ -60,7 +58,9 @@ func (e *Executor) collectClientConnections(ctx context.Context) *core.ClientCon
 		listeners = append(listeners, found...)
 	}
 	if len(listeners) == 0 {
-		report.Detail = "no managed inbound listeners"
+		if report.Detail == "" {
+			report.Detail = "no managed inbound listeners"
+		}
 		return report
 	}
 	ambiguous := false
@@ -152,33 +152,12 @@ func (e *Executor) collectClientConnections(ctx context.Context) *core.ClientCon
 				udpSockets[socket] = true
 			}
 		}
-		commandCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-		cmd := exec.CommandContext(commandCtx, "conntrack", "-L", "-p", "udp", "-o", "extended")
-		pipe, err := cmd.StdoutPipe()
-		if err == nil {
-			err = cmd.Start()
-		}
-		if err == nil {
-			limited := &io.LimitedReader{R: pipe, N: 16 << 20}
-			scanner := bufio.NewScanner(limited)
-			for scanner.Scan() {
-				if flow, ok := parseClientUDPFlow(scanner.Text(), local); ok && clientSocketListening(udpSockets, flow.LocalIP, flow.LocalPort) {
-					appendFlow(flow)
-				}
+		// Only bound managed UDP listeners need conntrack. A TCP-only transport
+		// can still be declared as "both" by protocol-level discovery.
+		for _, family := range clientUDPConnectionFamilies(udpSockets, listeners, local) {
+			if detail := collectClientUDPFamily(ctx, "conntrack", family, local, udpSockets, appendFlow); detail != "" {
+				partial("UDP " + family + ": " + detail)
 			}
-			scanErr := scanner.Err()
-			if limited.N == 0 {
-				scanErr = fmt.Errorf("conntrack byte limit reached")
-			}
-			pipe.Close()
-			err = cmd.Wait()
-			if scanErr != nil {
-				err = scanErr
-			}
-		}
-		cancel()
-		if err != nil {
-			partial("UDP: conntrack unavailable or incomplete")
 		}
 	}
 	if ambiguous {

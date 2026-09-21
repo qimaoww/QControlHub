@@ -55,17 +55,23 @@ func parseClientConnectionQuery(values url.Values, now time.Time) (store.ClientC
 }
 
 func (s *Server) listClientConnections(w http.ResponseWriter, request *http.Request) {
+	locationMode := request.URL.Query().Get("locations")
+	if locationMode != "" && locationMode != "cached" && locationMode != "only" {
+		writeError(w, http.StatusBadRequest, "请选择有效的 IP 属地查询模式。")
+		return
+	}
 	query, err := parseClientConnectionQuery(request.URL.Query(), time.Now().UTC())
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	query.RecordsOnly = locationMode == "only"
 	history, err := s.store.ClientConnectionHistory(request.Context(), query)
 	if err != nil {
 		writeStoreError(w, err)
 		return
 	}
-	s.resolveClientConnectionLocations(request.Context(), history.Records)
+	s.resolveClientConnectionLocations(request.Context(), history.Records, locationMode == "cached")
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, history)
 }

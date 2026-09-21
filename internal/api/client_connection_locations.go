@@ -14,7 +14,7 @@ import (
 
 // Enrichment happens after authorization and never blocks Agent ingestion.
 // One shared deadline bounds cold-cache latency regardless of page size.
-func (s *Server) resolveClientConnectionLocations(ctx context.Context, records []core.ClientConnectionRecord) {
+func (s *Server) resolveClientConnectionLocations(ctx context.Context, records []core.ClientConnectionRecord, cacheOnly bool) {
 	ips := make([]string, 0, len(records))
 	seen := map[string]bool{}
 	for i := range records {
@@ -38,6 +38,14 @@ func (s *Server) resolveClientConnectionLocations(ctx context.Context, records [
 	cached, err := s.store.ClientConnectionLocations(ctx, ips)
 	if err != nil {
 		slog.Warn("read client IP locations", "error", err)
+		return
+	}
+	for i := range records {
+		if item, ok := cached[records[i].ClientIP]; ok {
+			records[i].Location = item.ClientIPLocation
+		}
+	}
+	if cacheOnly {
 		return
 	}
 	now := time.Now().UTC()
