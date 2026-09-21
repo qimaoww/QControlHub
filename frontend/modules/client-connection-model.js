@@ -9,7 +9,7 @@ export function defaultConnectionFilters(now = Date.now()) {
   return { since: connectionDateInput(now - 86400000), until: connectionDateInput(now + 60000), include_non_public: "" };
 }
 
-export function connectionQuery(filters, before = "") {
+export function connectionQuery(filters, cursor = "") {
   const params = new URLSearchParams({ group_by: "ip" });
   for (const key of ["agent_id", "engine", "client_ip", "include_non_public"]) {
     if (filters[key]) params.set(key, filters[key]);
@@ -19,7 +19,7 @@ export function connectionQuery(filters, before = "") {
     throw new Error("请选择有效的时间范围，单次最多查询 7 天");
   params.set("since", since.toISOString());
   params.set("until", until.toISOString());
-  if (before) params.set("before", before);
+  if (cursor) params.set("cursor", cursor);
   return params;
 }
 

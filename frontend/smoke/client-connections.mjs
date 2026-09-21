@@ -10,7 +10,7 @@ assert.equal(query.get("group_by"), "ip");
 assert.equal(query.get("client_ip"), "2001:db8::1");
 assert.equal(query.has("inbound"), false);
 assert.equal(query.has("port"), false);
-assert.equal(query.get("before"), "7");
+assert.equal(query.get("cursor"), "7");
 assert.equal(query.has("include_non_public"), false);
 assert.equal(connectionQuery({ ...filters, include_non_public: "true" }, 7).get("include_non_public"), "true");
 assert.throws(() => connectionQuery({ since: "bad", until: "bad" }), /7/);

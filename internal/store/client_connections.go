@@ -27,11 +27,20 @@ type ClientConnectionQuery struct {
 	Since            time.Time
 	Until            time.Time
 	Before           int64
+	Cursor           string
 	Limit            int
 	Bucket           string
 }
 
 func (q ClientConnectionQuery) Validate() error {
+	if q.Cursor != "" {
+		if _, err := decodeConnectionIPCursor(q.Cursor); err != nil || !q.GroupByIP {
+			return fmt.Errorf("%w: invalid connection cursor", ErrInvalid)
+		}
+	}
+	if q.GroupByIP && q.Before != 0 {
+		return fmt.Errorf("%w: grouped connections require a cursor", ErrInvalid)
+	}
 	if q.Since.IsZero() || !q.Until.After(q.Since) || q.Until.Sub(q.Since) > core.ClientConnectionRetention || q.Port < 0 || q.Port > 65535 || q.Before < 0 || q.Limit < 1 || q.Limit > 200 ||
 		(q.Engine != "" && !q.Engine.Valid()) || (q.Transport != "" && q.Transport != "tcp" && q.Transport != "udp") || (q.Bucket != "minute" && q.Bucket != "hour" && q.Bucket != "day") || len(q.AgentID) > 100 || len(q.Protocol) > 40 || len(q.Inbound) > 400 {
 		return fmt.Errorf("%w: invalid connection query (maximum window: 7 days)", ErrInvalid)
@@ -122,7 +131,7 @@ func (s *Store) ClientConnectionHistory(ctx context.Context, q ClientConnectionQ
 	}
 
 	if q.GroupByIP {
-		result.Records, result.NextBefore, err = s.clientConnectionIPRecords(ctx, tx, q, where, args)
+		result.Records, result.NextCursor, result.PageCursor, err = s.clientConnectionIPRecords(ctx, tx, q, where, args)
 		if err != nil {
 			return result, err
 		}

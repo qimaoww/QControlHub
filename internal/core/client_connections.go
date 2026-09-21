@@ -64,4 +64,6 @@ type ClientConnectionHistory struct {
 	Flows      int64                    `json:"flows"`
 	IPs        int64                    `json:"ips"`
 	NextBefore int64                    `json:"next_before,omitempty"`
+	NextCursor string                   `json:"next_cursor,omitempty"`
+	PageCursor string                   `json:"page_cursor,omitempty"`
 }

@@ -56,7 +56,7 @@ func TestClientConnectionAPIGrouping(t *testing.T) {
 		if result.Flows != 2 || result.IPs != 1 || len(result.Records) != 1 || len(result.Records[0].Endpoints) != 1 || result.Records[0].Endpoints[0].AgentID != agent.ID {
 			t.Fatalf("grouped API result=%+v", result)
 		}
-		client.call("GET", path+"&locations=only", nil, http.StatusOK, &enriched)
+		client.call("GET", path+"&locations=only&cursor="+result.PageCursor, nil, http.StatusOK, &enriched)
 		if len(enriched.Records) != 1 || enriched.Records[0].ID != result.Records[0].ID || !enriched.Records[0].Location.NonPublic || len(enriched.Records[0].Endpoints) != 0 {
 			t.Fatalf("grouped location result=%+v", enriched)
 		}

@@ -61,6 +61,9 @@ func TestClientConnectionIPGroupingPaginationAndIsolation(t *testing.T) {
 	if _, err := db.pool.Exec(ctx, `UPDATE agents SET owner_id=$1 WHERE id=ANY($2)`, owner.ID, []string{first.ID, second.ID}); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := db.pool.Exec(ctx, `UPDATE agents SET name=CASE WHEN id=$1 THEN 'Alpha' ELSE 'Zulu' END WHERE id=ANY($2)`, first.ID, []string{first.ID, second.ID}); err != nil {
+		t.Fatal(err)
+	}
 	now := time.Now().UTC().Truncate(time.Minute)
 	insert := func(agentID, ip string, sourcePort, localPort int, seen time.Time) {
 		t.Helper()
@@ -78,12 +81,12 @@ func TestClientConnectionIPGroupingPaginationAndIsolation(t *testing.T) {
 	insert(first.ID, "10.0.0.1", 50006, 443, now)
 	q := ClientConnectionQuery{GroupByIP: true, Since: now.Add(-time.Hour), Until: now.Add(time.Minute), Limit: 1, Bucket: "hour"}
 	page, err := db.ClientConnectionHistory(ownerCtx, q)
-	if err != nil || len(page.Records) != 1 || page.Records[0].ClientIP != "1.1.1.1" || page.NextBefore == 0 || page.IPs != 2 || page.Flows != 4 {
+	if err != nil || len(page.Records) != 1 || page.Records[0].ClientIP != "1.1.1.1" || page.NextCursor == "" || page.IPs != 2 || page.Flows != 4 {
 		t.Fatalf("first page=%+v err=%v", page, err)
 	}
-	q.Before = page.NextBefore
+	q.Cursor = page.NextCursor
 	next, err := db.ClientConnectionHistory(ownerCtx, q)
-	if err != nil || len(next.Records) != 1 || next.Records[0].ClientIP != "8.8.8.8" || next.NextBefore != 0 {
+	if err != nil || len(next.Records) != 1 || next.Records[0].ClientIP != "8.8.8.8" || next.NextCursor != "" {
 		t.Fatalf("second page=%+v err=%v", next, err)
 	}
 	group := next.Records[0]
@@ -112,7 +115,7 @@ func TestClientConnectionIPGroupingPaginationAndIsolation(t *testing.T) {
 		t.Fatalf("location grouping=%+v %v", locations, err)
 	}
 	q.RecordsOnly = false
-	q.Before = 0
+	q.Cursor = ""
 	q.Limit = 100
 	q.AgentID = first.ID
 	scoped, err := db.ClientConnectionHistory(ownerCtx, q)
