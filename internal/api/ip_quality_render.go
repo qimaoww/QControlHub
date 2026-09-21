@@ -20,7 +20,6 @@ const (
 	ipQualityRenderCellWidth  = 8
 	ipQualityRenderLineHeight = 20
 	ipQualityRenderPadding    = 16
-	ipQualityRenderBandHeight = 16
 	ipQualityRenderMaxText    = 64 << 10
 	ipQualityBackground       = "#000000"
 	ipQualityDefault          = "#bbbbbb"
@@ -222,7 +221,7 @@ func buildIPQualitySVG(lines []ipQualityLine) []byte {
 		for _, cell := range line {
 			width := ipQualityDisplayWidth(cell.text)
 			if cell.bg != "" && width > 0 {
-				fmt.Fprintf(&builder, `<rect x="%d" y="%d" width="%d" height="%d" fill="%s"/>`, ipQualityRenderPadding+column*ipQualityRenderCellWidth, ipQualityRenderPadding+row*ipQualityRenderLineHeight+(ipQualityRenderLineHeight-ipQualityRenderBandHeight)/2, width*ipQualityRenderCellWidth, ipQualityRenderBandHeight, cell.bg)
+				fmt.Fprintf(&builder, `<rect x="%d" y="%d" width="%d" height="%d" fill="%s"/>`, ipQualityRenderPadding+column*ipQualityRenderCellWidth, ipQualityRenderPadding+row*ipQualityRenderLineHeight, width*ipQualityRenderCellWidth, ipQualityRenderLineHeight, cell.bg)
 			}
 			column += width
 		}
