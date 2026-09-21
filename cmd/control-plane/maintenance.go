@@ -63,3 +63,29 @@ func cleanDeletedAgents(ctx context.Context, dataStore *store.Store) {
 		}
 	}
 }
+
+// Existing retained logs are indexed independently of requests and maintenance.
+func backfillClientConnectionLogs(ctx context.Context, dataStore *store.Store) {
+	for ctx.Err() == nil {
+		operationContext, cancel := context.WithTimeout(ctx, 15*time.Second)
+		done, err := dataStore.BackfillClientConnectionLogs(operationContext)
+		cancel()
+		if err == nil {
+			if done {
+				return
+			}
+			continue
+		}
+		if ctx.Err() != nil {
+			return
+		}
+		slog.Error("backfill client IPs from panel logs", "error", err)
+		timer := time.NewTimer(15 * time.Second)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+	}
+}

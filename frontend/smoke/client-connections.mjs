@@ -19,14 +19,12 @@ assert.equal(connectionLocationLabel({ country_code: "CN" }), "中国");
 assert.equal(connectionLocationLabel({ non_public: true }), "非公网");
 assert.equal(connectionLocationLabel({}), "—");
 assert.equal(connectionAddress("2001:db8::1", 443), "[2001:db8::1]:443");
-assert.match(connectionSourceLabel({}), /升级/);
-assert.match(connectionSourceLabel({ updated_at: "2020-01-01" }), /过期/);
-for (const [detail, expected] of [
-  ["UDP ipv4: conntrack not installed", /缺少 conntrack/],
-  ["UDP ipv6: conntrack permission denied (CAP_NET_ADMIN required)", /IPv6 UDP.*CAP_NET_ADMIN/],
-  ["UDP: conntrack unavailable or incomplete", /检查 conntrack/],
-  ["xray: listener discovery failed", /入站解析失败/],
-]) assert.match(connectionSourceDetail({ updated_at: new Date().toISOString(), detail }), expected);
+assert.equal(connectionAddress("", 0), "—");
+assert.equal(connectionAddress("0.0.0.0", 0), "—");
+assert.match(connectionSourceLabel({}), /等待内核日志/);
+assert.equal(connectionSourceLabel({ updated_at: "2020-01-01", status: "ok" }), "已读取内核日志");
+assert.match(connectionSourceDetail({ updated_at: "2020-01-01", status: "ok" }), /面板保存的内核日志/);
+assert.ok(!connectionSourceDetail({}).includes("Agent"));
 
 const esc = value => String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll('"', "&quot;");
 const view = createClientConnectionView({ esc, engineName: value => value, date: value => value });

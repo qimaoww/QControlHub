@@ -21,11 +21,11 @@ func (f connectionGeoTransport) RoundTrip(r *http.Request) (*http.Response, erro
 func TestClientConnectionGeographyPersistsAcrossServerRestart(t *testing.T) {
 	db, ctx, admin, alice, bob := newConfigScopeAPIFixture(t)
 	agent, _ := ownedConfigScopeAPIAgent(t, ctx, db, alice, "connection-geo", core.EngineMihomo)
-	report := core.ClientConnectionReport{Status: "ok"}
+	report := clientConnectionFixtures{Status: "ok"}
 	for i, ip := range []string{"8.8.8.8", "8.8.8.8", "1.1.1.1", "10.0.0.1", "9.9.9.9"} {
 		report.Connections = append(report.Connections, core.ClientConnection{Engine: core.EngineMihomo, Protocol: "trojan", Inbound: "entry", Transport: "tcp", ClientIP: ip, ClientPort: 50123 + i, LocalIP: "192.0.2.1", LocalPort: 443})
 	}
-	if err := db.StoreClientConnections(ctx, agent.ID, report); err != nil {
+	if err := storeAPIConnectionLogs(ctx, db, agent.ID, report); err != nil {
 		t.Fatal(err)
 	}
 	var mu sync.Mutex
@@ -119,8 +119,8 @@ func TestClientConnectionGeographyStopsOnCancellation(t *testing.T) {
 func TestClientConnectionDeferredLocations(t *testing.T) {
 	db, ctx, admin, alice, bob := newConfigScopeAPIFixture(t)
 	agent, _ := ownedConfigScopeAPIAgent(t, ctx, db, alice, "deferred-geo", core.EngineXray)
-	report := core.ClientConnectionReport{Status: "ok", Connections: []core.ClientConnection{{Engine: core.EngineXray, Protocol: "vless", Inbound: "entry", Transport: "tcp", ClientIP: "8.8.8.8", ClientPort: 50123, LocalIP: "192.0.2.1", LocalPort: 443}}}
-	if err := db.StoreClientConnections(ctx, agent.ID, report); err != nil {
+	report := clientConnectionFixtures{Status: "ok", Connections: []core.ClientConnection{{Engine: core.EngineXray, Protocol: "vless", Inbound: "entry", Transport: "tcp", ClientIP: "8.8.8.8", ClientPort: 50123, LocalIP: "192.0.2.1", LocalPort: 443}}}
+	if err := storeAPIConnectionLogs(ctx, db, agent.ID, report); err != nil {
 		t.Fatal(err)
 	}
 	var calls atomic.Int32

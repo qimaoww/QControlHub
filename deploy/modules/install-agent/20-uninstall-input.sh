@@ -51,7 +51,6 @@ fi
 
 install_nftables
 install_iproute2
-install_conntrack || printf '%s\n' 'Warning: conntrack installation failed; UDP connection history will report partial coverage. TCP collection remains available.' >&2
 
 control="${1:?usage: install-agent.sh install|update <control-plane-url|ip[:port]> <add-node-credential> [agent-name]}"
 token="${2:?usage: install-agent.sh install|update <control-plane-url|ip[:port]> <add-node-credential> [agent-name]}"

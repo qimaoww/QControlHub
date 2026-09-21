@@ -3,7 +3,7 @@
 The **Client connection IP** page (`#client-connections`) records the source IPs
 connecting to managed proxy inbounds. For example, a VLESS listener on server
 port 443 shows the connecting client's IP and source port, the local listening
-IP and port, the engine, and the inbound name and protocol. It does not collect
+IP and port, the engine, and the inbound name and protocol when logged. It does not collect
 proxy destination IPs, visited sites, credentials, or application payloads.
 
 The page queries the panel's PostgreSQL database. The context sidebar uses the
@@ -25,44 +25,46 @@ not the local listening address. Collection and panel retention include both.
 
 ## Collection and interpretation
 
-Upgrade the panel and Agent to enable collection. Linux Agents read established
-TCP sockets and match them to actual listening sockets and managed configuration
-ports. UDP/QUIC peers come from the original direction of `conntrack -L -p udp`;
-the destination must be a local interface address with a bound UDP socket.
-The Agent installer/update script installs `conntrack` (Debian/Ubuntu) or
-`conntrack-tools` (Alpine/RPM distributions) when missing. Package installation
-failure warns without blocking the Agent update or TCP collection. Binary-only
-online upgrades do not install OS packages: existing nodes must run the updated
-installer or install the package separately. No conntrack daemon or firewall
-changes are needed. UDP collection requires kernel connection tracking and the
-Agent's existing `CAP_NET_ADMIN` capability; restricted VPS/container hosts may
-need an operator to grant it.
+The panel extracts source IPs from proxy core logs already stored in its own
+PostgreSQL database. It does not request connection samples or read socket tables
+from Agents. The Agent socket/conntrack sampler, heartbeat field, capability and
+optional conntrack installation have been removed. Older Agents' connection
+sample fields are ignored; the existing core-log upload channel remains unchanged.
 
-Only actually bound managed UDP ports trigger a lookup, so protocols declared
-as TCP/UDP but currently listening only on TCP do not produce a missing-conntrack
-warning. IPv4 and IPv6 are queried explicitly and independently. Missing commands,
-permission failures, timeouts and incomplete output have distinct report details.
-The expandable collection status shows these reasons and remediation in Chinese,
-alongside the last report time; already collected TCP/UDP observations remain
-available if another part fails. Missing conntrack, unreadable configuration/socket
-tables, and capped samples are reported as partial coverage in the page. Unsupported platforms
-report unavailable; older Agents show no report. Overlapping configured ports
-that cannot be uniquely assigned to an engine/inbound are omitted.
+Supported messages are Xray accepted access logs, sing-box inbound connection
+and packet-connection logs, Mihomo TCP/UDP routing logs (including JSON messages),
+and shadowsocks-rust established TCP tunnel / created UDP association logs.
+Only known source positions are parsed. Outbound destinations, DNS logs, malformed
+addresses and rejected Xray connections are not treated as client IPs. IPv4-mapped
+IPv6 addresses are normalized. Private addresses remain available through the
+existing Include non-public filter.
 
-Collection occurs on heartbeats, at most once every 15 seconds. A report contains
-at most 512 distinct tuples. It travels over the authenticated Agent WebSocket;
-the panel supplies the agent identity and receive timestamp. The Agent does not
-write client IP history to disk. There is no offline backlog or historical
-backfill. Unmanaged/external core configurations are outside collection scope.
+The panel indexes accepted logs in the same transaction as log storage. Batch
+retries are idempotent. On upgrade, a background job reads retained panel logs in
+pages of 1,000 and persists its cursor; restart resumes the scan. No Agent update
+or new connection is needed to read existing logs. New uploads are indexed during
+backfill, and request handling continues to use the indexed history. Existing
+Agent-sampled rows are excluded from this view and expire through normal retention.
 
-These are network observations, not successful proxy authentication events or
-precise session start/stop times. TCP connections shorter than the sampling
-interval can be missed. UDP entries can remain until the kernel's conntrack
-expiry. NAT or a fronting relay changes the source IP visible at the server.
-The recorded protocol is the configured listener protocol, not payload inspection.
+Only events actually present in the panel's retained logs can appear. Disabled
+access logging, the configured minimum log level, upload loss or unsupported
+message formats can leave gaps. SS Rust connection messages require debug logging.
+An absence of recent log lines does not mean a node is offline. The collection
+status shows whether the panel has read core logs and the latest log receive time;
+it does not assert complete network coverage.
+
+Missing protocol, inbound name, transport or local listener address/port stays
+unknown (`""` / local port `0` in the API), displayed as unknown or a dash. Filters
+for a specific field exclude records where that field is unknown. Destination
+ports are never used as listener ports, and current configurations are not used
+to guess metadata for historical logs. Transport reflects the log's connection
+kind when available, not packet inspection or proof of the underlying tunnel.
+These observations do not prove successful authentication or session start/stop.
+NAT or a fronting relay changes the source IP visible to the core.
 
 The panel coalesces repeated observations of a tuple into one row per minute,
-with the first and last panel receive timestamps. The tuple includes agent,
+with the first and last stored log timestamps. Log ingestion already normalizes
+missing or excessively future timestamps and rejects events older than retention. The tuple includes agent,
 engine, protocol, inbound, transport, source IP/port and local IP/port. Reuse of
 the same tuple can merge separate sessions; counts are labelled observed tuples.
 Each timeline bucket and the overall summary independently deduplicate tuples
@@ -74,8 +76,8 @@ A blank interval means no retained observations, not proven zero connections.
 Records are retained for seven days and pruned by the existing panel retention
 job. A single query spans at most seven days. Detail pages contain at most 200
 rows and use an ID cursor; summaries cover the entire selected range. Collection
-status includes the last report time, coverage detail and truncation flag; a
-report older than 90 seconds is shown as stale. Stored history remains queryable
+status uses the latest log receive time, without a heartbeat-expiry threshold.
+Stored history remains queryable
 when a node goes offline or the panel restarts.
 
 The endpoint is `GET /api/v1/client-connections`, guarded by `core-logs.read` and
@@ -84,11 +86,12 @@ visible nodes, and an engine-sharing grant does not expose another owner's
 client IP telemetry. Owner-hidden nodes remain private from fleet administrators.
 Revoked nodes are excluded from queries.
 
-Schema version 64 adds `client_connections`, `client_connection_sources`, and
-the `client_connection_locations` cache.
+Schema version 67 adds log-source markers, unknown metadata support and a durable
+backfill cursor to the connection history introduced in version 64.
 Retention bounds time, not database bytes: size depends on observed tuples and
-node count. No port traffic counters or quotas are changed. Rolling back binaries
-leaves the additive tables intact; preserve the database if history is needed.
+node count. No port traffic counters or quotas are changed. Back up PostgreSQL
+before upgrading. Older binaries reject schema 67; rollback
+requires restoring a matching pre-upgrade database backup and application version.
 
 ## Country and province
 

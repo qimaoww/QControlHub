@@ -20,7 +20,7 @@ func TestClientConnectionHistoryDefaultsToPublicSources(t *testing.T) {
 		}
 		addresses = append(addresses, address.String())
 	}
-	report := core.ClientConnectionReport{Status: "ok"}
+	report := clientConnectionFixtures{Status: "ok"}
 	publicCount := 0
 	for i, ip := range addresses {
 		if netpolicy.IsPublicAddress(netip.MustParseAddr(ip)) {
@@ -28,7 +28,7 @@ func TestClientConnectionHistoryDefaultsToPublicSources(t *testing.T) {
 		}
 		report.Connections = append(report.Connections, core.ClientConnection{Engine: core.EngineXray, Protocol: "vless", Inbound: "entry", Transport: "tcp", ClientIP: ip, ClientPort: 50000 + i, LocalIP: "127.0.0.1", LocalPort: 443})
 	}
-	if err := db.StoreClientConnections(ctx, agent.ID, report); err != nil {
+	if err := db.storeClientConnectionFixtures(ctx, agent.ID, report); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now()
@@ -77,9 +77,9 @@ func TestClientConnectionHistoryPersistenceAndIsolation(t *testing.T) {
 	second.ClientIP = "2001:db8::9"
 	second.Transport = "udp"
 	second.ClientPort = 50124
-	report := core.ClientConnectionReport{Status: "partial", Detail: "fixture partial coverage", Connections: []core.ClientConnection{first, first, second}}
+	report := clientConnectionFixtures{Status: "partial", Detail: "fixture partial coverage", Connections: []core.ClientConnection{first, first, second}}
 	for i := 0; i < 2; i++ {
-		if err := db.StoreClientConnections(ctx, agent.ID, report); err != nil {
+		if err := db.storeClientConnectionFixtures(ctx, agent.ID, report); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -134,18 +134,12 @@ func TestClientConnectionHistoryPersistenceAndIsolation(t *testing.T) {
 		t.Fatalf("hidden host leaked: %+v %v", hidden, err)
 	}
 	// A later empty sample cannot erase durable history.
-	if err := db.StoreClientConnections(ctx, agent.ID, core.ClientConnectionReport{Status: "ok"}); err != nil {
+	if err := db.storeClientConnectionFixtures(ctx, agent.ID, clientConnectionFixtures{Status: "ok"}); err != nil {
 		t.Fatal(err)
 	}
 	remaining, err := db.ClientConnectionHistory(ownerCtx, query)
 	if err != nil || remaining.Flows != 1 || remaining.Sources[0].Status != "ok" {
 		t.Fatalf("empty sample erased history: %+v %v", remaining, err)
-	}
-	invalid := report
-	invalid.Connections = []core.ClientConnection{first}
-	invalid.Connections[0].ClientPort = 0
-	if err := db.StoreClientConnections(ctx, agent.ID, invalid); err == nil {
-		t.Fatal("invalid report accepted")
 	}
 	if err := db.PruneClientConnections(ctx, now.Add(-core.ClientConnectionRetention)); err != nil {
 		t.Fatal(err)

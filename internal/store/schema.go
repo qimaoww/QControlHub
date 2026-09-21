@@ -3,7 +3,7 @@ package store
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 66
+const currentSchemaVersion = 67
 
 const schemaSQL = `
 CREATE TABLE IF NOT EXISTS agents (
@@ -787,26 +787,28 @@ ALTER TABLE port_traffic_daily_accounting SET (fillfactor = 85);
 ALTER TABLE port_traffic_accounting_epochs SET (fillfactor = 85);
 
 -- Connection observations are durable on the panel only. Minute buckets
--- coalesce repeated heartbeat samples without pretending they are new sessions.
+-- coalesce repeated log observations without pretending they are new sessions.
 CREATE TABLE IF NOT EXISTS client_connection_sources (
  agent_id text PRIMARY KEY REFERENCES agents(id) ON DELETE CASCADE,
  updated_at timestamptz NOT NULL,
  status text NOT NULL CHECK(status IN ('ok','partial','unavailable')),
  detail text NOT NULL DEFAULT '',
+ source text NOT NULL DEFAULT 'agent',
  truncated boolean NOT NULL DEFAULT false
 );
 CREATE TABLE IF NOT EXISTS client_connections (
  id bigserial PRIMARY KEY,
+ source text NOT NULL DEFAULT 'agent',
  agent_id text NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
  bucket timestamptz NOT NULL,
  engine text NOT NULL,
  protocol text NOT NULL,
  inbound text NOT NULL,
- transport text NOT NULL CHECK(transport IN ('tcp','udp')),
+ transport text NOT NULL CHECK(transport IN ('','tcp','udp')),
  client_ip inet NOT NULL,
  client_port integer NOT NULL CHECK(client_port BETWEEN 1 AND 65535),
  local_ip inet NOT NULL,
- local_port integer NOT NULL CHECK(local_port BETWEEN 1 AND 65535),
+ local_port integer NOT NULL CHECK(local_port BETWEEN 0 AND 65535),
  first_seen timestamptz NOT NULL,
  last_seen timestamptz NOT NULL,
  UNIQUE(agent_id,bucket,engine,protocol,inbound,transport,client_ip,client_port,local_ip,local_port)
@@ -814,6 +816,13 @@ CREATE TABLE IF NOT EXISTS client_connections (
 CREATE INDEX IF NOT EXISTS client_connections_time_idx ON client_connections(bucket);
 CREATE INDEX IF NOT EXISTS client_connections_agent_time_idx ON client_connections(agent_id,bucket DESC);
 CREATE INDEX IF NOT EXISTS client_connections_ip_time_idx ON client_connections(client_ip,bucket DESC);
+
+-- A finite, resumable scan of logs retained before log-derived ingestion began.
+CREATE TABLE IF NOT EXISTS client_connection_log_backfill (
+ id integer PRIMARY KEY CHECK(id=1),
+ last_id bigint NOT NULL DEFAULT 0,
+ upper_id bigint NOT NULL
+);
 
 CREATE TABLE IF NOT EXISTS client_connection_locations (
  client_ip inet PRIMARY KEY,

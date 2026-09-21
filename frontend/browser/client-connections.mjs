@@ -20,7 +20,7 @@ export async function testClientConnectionsRuntime(preview = false) {
       return new Response(JSON.stringify({
         records: [{ ...row, id: older ? 1 : 2, client_port: older ? 51000 : 52000, location: {} }],
         ips: 1, flows: 2, next_before: older ? undefined : 2,
-        sources: [{ agent_id: "alpha", agent_name: row.agent_name, updated_at: now, status: "partial", detail: "UDP: conntrack unavailable or incomplete", truncated: false }, { agent_id: "bravo", agent_name: "Bravo · 新加坡", status: "unsupported" }].filter(source => !url.searchParams.get("agent_id") || source.agent_id === url.searchParams.get("agent_id")),
+        sources: [{ agent_id: "alpha", agent_name: row.agent_name, updated_at: now, status: "ok", detail: "panel core logs", truncated: false }, { agent_id: "bravo", agent_name: "Bravo · 新加坡", status: "no_logs" }].filter(source => !url.searchParams.get("agent_id") || source.agent_id === url.searchParams.get("agent_id")),
         timeline: Array.from({ length: 24 }, (_, i) => ({ time: new Date(Date.now() - (23 - i) * 3600000).toISOString(), flows: i % 3 === 0 ? 1 : 2, ips: 1 })),
       }), { status: 200, headers: { "Content-Type": "application/json" } });
     }
@@ -40,9 +40,9 @@ export async function testClientConnectionsRuntime(preview = false) {
   assert.ok(document.querySelector(".context-sidebar [data-connection-agent]"), "node filters belong in context sidebar");
   assert.ok(!document.querySelector(".context-sidebar form"), "sidebar must use node navigation, not a filter form");
   document.querySelector(".connection-sources").open = true;
-  assert.match(document.querySelector(".connection-source-detail").textContent, /检查 conntrack/);
+  assert.match(document.querySelector(".connection-source-detail").textContent, /面板保存的内核日志/);
   assert.match(document.querySelector(".connection-summary").textContent, /观测连接 2/g);
-  assert.ok(document.querySelector('.connection-sources [title*="conntrack"]'));
+  assert.ok(document.querySelector('.connection-sources [title*="panel core logs"]'));
   assert.equal(document.querySelectorAll(".client-connections p").length, 0, "connection page should not contain explanatory paragraphs");
   const beforeNode = requests.length;
   document.querySelector('[data-connection-agent="alpha"]').click();
