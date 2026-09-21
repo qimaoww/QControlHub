@@ -13,21 +13,23 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
-// Keep the native IPQuality SVG's compact terminal presentation: one row per
-// em, columns measured in ch, a 14px monospace face and the ANSI palette.
+// Keep the native report's compact 14px text and ANSI palette. A fixed
+// half-em cell grid keeps fallback fonts aligned with the background bands.
 const (
-	ipQualityRenderFontSize = 14
-	ipQualityRenderMaxText  = 64 << 10
-	ipQualityBackground     = "#000000"
-	ipQualityDefault        = "#bbbbbb"
-	ipQualityRed            = "#bb0000"
-	ipQualityGreen          = "#00bb00"
-	ipQualityYellow         = "#aa9900"
-	ipQualityBlue           = "#0000bb"
-	ipQualityMagenta        = "#bb00bb"
-	ipQualityCyan           = "#00bbbb"
-	ipQualityDim            = "#555555"
-	ipQualityFontFamily     = "SimHei, Consolas, DejaVu Sans Mono, SF Mono, monospace"
+	ipQualityRenderFontSize   = 14
+	ipQualityRenderCellWidth  = 7
+	ipQualityRenderLineHeight = 14
+	ipQualityRenderMaxText    = 64 << 10
+	ipQualityBackground       = "#000000"
+	ipQualityDefault          = "#bbbbbb"
+	ipQualityRed              = "#bb0000"
+	ipQualityGreen            = "#00bb00"
+	ipQualityYellow           = "#aa9900"
+	ipQualityBlue             = "#0000bb"
+	ipQualityMagenta          = "#bb00bb"
+	ipQualityCyan             = "#00bbbb"
+	ipQualityDim              = "#555555"
+	ipQualityFontFamily       = "'Sarasa Mono SC', 'Noto Sans Mono CJK SC', SimHei, Consolas, 'DejaVu Sans Mono', monospace"
 )
 
 // ipQualityANSI maps the SGR codes upstream emits onto that palette. Plain black
@@ -206,9 +208,9 @@ func buildIPQualitySVG(lines []ipQualityLine) []byte {
 		}
 	}
 	var builder strings.Builder
-	// Font-relative dimensions must use the same font as the text/backgrounds.
-	// A pixel viewBox would introduce a second, incompatible coordinate system.
-	fmt.Fprintf(&builder, `<svg xmlns="http://www.w3.org/2000/svg" width="%dch" height="%dem" font-family="%s" font-size="%d" role="img" xml:space="preserve">`, columns+2, len(lines), ipQualityFontFamily, ipQualityRenderFontSize)
+	// A fixed grid makes the archive independent of the client font metrics.
+	width, height := (columns+2)*ipQualityRenderCellWidth, len(lines)*ipQualityRenderLineHeight
+	fmt.Fprintf(&builder, `<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d" viewBox="0 0 %d %d" font-family="%s" font-size="%d" font-style="normal" role="img" xml:space="preserve">`, width, height, width, height, ipQualityFontFamily, ipQualityRenderFontSize)
 	fmt.Fprintf(&builder, `<title>IPQuality report</title><rect width="100%%" height="100%%" fill="%s"/>`, ipQualityBackground)
 	builder.WriteString(`<g>`)
 	// Native reports draw all backgrounds before text. Never let a later
@@ -218,38 +220,73 @@ func buildIPQualitySVG(lines []ipQualityLine) []byte {
 		for _, cell := range line {
 			width := ipQualityDisplayWidth(cell.text)
 			if cell.bg != "" && width > 0 {
-				fmt.Fprintf(&builder, `<rect x="%dch" y="%dem" width="%dch" height="1em" fill="%s"/>`, column, row, width, cell.bg)
+				fmt.Fprintf(&builder, `<rect x="%d" y="%d" width="%d" height="%d" fill="%s"/>`, column*ipQualityRenderCellWidth, row*ipQualityRenderLineHeight, width*ipQualityRenderCellWidth, ipQualityRenderLineHeight, cell.bg)
 			}
 			column += width
 		}
 	}
-	builder.WriteString(`</g><style>text,tspan{font-variant-ligatures:none;dominant-baseline:central;white-space:pre}</style><g>`)
+	builder.WriteString(`</g><g dominant-baseline="central">`)
 	for row, line := range lines {
-		// Let each line shape as a continuous string, as in the native SVG.
-		// Per-glyph x lists and textLength distort the original CJK spacing.
-		fmt.Fprintf(&builder, `<text x="1ch" y="%d.5em">`, row)
+		x := ipQualityRenderCellWidth
+		y := row*ipQualityRenderLineHeight + ipQualityRenderLineHeight/2
 		for _, cell := range line {
-			fmt.Fprintf(&builder, `<tspan fill="%s"%s>%s</tspan>`, cell.fill, ipQualityStyleAttributes(cell), ipQualityEscape(cell.text))
+			for _, run := range ipQualityRuns(cell.text) {
+				runWidth := run.cells * ipQualityRenderCellWidth
+				length := ""
+				if runWidth > 0 {
+					length = fmt.Sprintf(` textLength="%d" lengthAdjust="spacingAndGlyphs"`, runWidth)
+				}
+				fmt.Fprintf(&builder, `<text x="%d" y="%d" fill="%s"%s%s xml:space="preserve">%s</text>`, x, y, cell.fill, ipQualityStyleAttributes(cell), length, ipQualityEscape(run.text))
+				x += runWidth
+			}
 		}
-		builder.WriteString(`</text>`)
 	}
 	builder.WriteString(`</g></svg>`)
 	return []byte(builder.String())
 }
 
-// Preserve the original SGR emphasis for all scripts, including CJK italic.
+// Reports use upright text throughout; bold and underline still carry emphasis.
 func ipQualityStyleAttributes(cell ipQualityCell) string {
 	attributes := ""
 	if cell.bold {
 		attributes += ` font-weight="bold"`
 	}
-	if cell.italic {
-		attributes += ` font-style="italic"`
-	}
 	if cell.underline {
 		attributes += ` text-decoration="underline"`
 	}
 	return attributes
+}
+
+// ipQualityRun is a maximal slice of one styled cell whose characters all
+// occupy the same number of terminal cells, so it can be pinned as a unit.
+type ipQualityRun struct {
+	text  string
+	cells int
+}
+
+// Split narrow and wide text before fitting its width: mixing the two would
+// shift CJK columns when the browser falls back to a Latin-only monospace face.
+// CJK glyphs occupy exactly one em; Latin fallback advances fit half an em.
+func ipQualityRuns(text string) []ipQualityRun {
+	runs := make([]ipQualityRun, 0, 4)
+	start, unit, width := 0, -1, 0
+	for index, character := range text {
+		cells := ipQualityRuneWidth(character)
+		if unit < 0 {
+			unit = cells
+		} else if cells != unit && cells != 0 {
+			// Slice the original UTF-8 bytes once per run instead of copying
+			// the growing prefix for every character. Combining marks remain
+			// attached to the preceding run without adding any cells.
+			runs = append(runs, ipQualityRun{text: text[start:index], cells: width})
+			start, unit, width = index, cells, 0
+		}
+		width += cells
+	}
+	if start < len(text) {
+		runs = append(runs, ipQualityRun{text: text[start:], cells: width})
+	}
+	return runs
 }
 
 func ipQualityLineWidth(line ipQualityLine) int {

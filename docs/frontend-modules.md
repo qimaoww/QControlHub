@@ -73,7 +73,7 @@ remaining twelve routes have the following focused owners:
 | Route | Owners |
 | --- | --- |
 | Dashboard | `dashboard-model`, `dashboard-view`, `dashboard-bindings`; panel metrics keep their own lifecycle |
-| IP quality | `ip-quality-controller`, `ip-quality-model`, `ip-quality-view`, `ip-quality-report-view`, `ip-quality-archive-view`, `ip-quality-bindings`; the view publishes the day's node projection the shared context sidebar renders |
+| IP quality | `ip-quality-controller`, `ip-quality-model`, `ip-quality-view`, `ip-quality-report-view`, `ip-quality-address-view`, `ip-quality-archive-view`, `ip-quality-bindings`; the view publishes the day's node projection the shared context sidebar renders |
 | Settings | `settings-view`, `settings-bindings`; the route loads account-scoped settings |
 | Access control | `access-control-controller`, `access-control-view`, `access-control-bindings`, `access-control-dialog` |
 | System TCP/BBR | `system-bbr-model`, `system-bbr-view`, `system-bbr-editor`, `system-bbr-presets` |

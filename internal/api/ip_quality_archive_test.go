@@ -154,13 +154,18 @@ const ipQualityAlignedFixture = "服务商： \x1b[3m TikTok   Disney+  Netflix 
 	"四、风险因子\n" +
 	"库：     ipapi ipregistry IPinfo DB-IP\n"
 
-var ipQualityTextElement = regexp.MustCompile(`<text[^>]*>(.*?)</text>`)
+var ipQualityTextElement = regexp.MustCompile(`<text[^>]* y="(\d+)"[^>]*>(.*?)</text>`)
 var ipQualitySpanTags = regexp.MustCompile(`<[^>]+>`)
 
 func ipQualityRenderedLines(svg string) []string {
 	var lines []string
+	baseline := ""
 	for _, match := range ipQualityTextElement.FindAllStringSubmatch(svg, -1) {
-		lines = append(lines, html.UnescapeString(ipQualitySpanTags.ReplaceAllString(match[1], "")))
+		if match[1] != baseline {
+			lines = append(lines, "")
+			baseline = match[1]
+		}
+		lines[len(lines)-1] += html.UnescapeString(ipQualitySpanTags.ReplaceAllString(match[2], ""))
 	}
 	return lines
 }
@@ -183,26 +188,26 @@ func ipQualityNativeFixture(t *testing.T) string {
 	return string(content)
 }
 
-func TestIPQualityRenderMatchesNativePresentation(t *testing.T) {
+func TestIPQualityRenderPreservesCompleteNativeReport(t *testing.T) {
 	svg := mustRenderIPQualitySVG(t, ipQualityNativeFixture(t))
 	for _, want := range []string{
-		`width="74ch" height="47em"`, `font-size="14"`,
-		`font-family="SimHei, Consolas, DejaVu Sans Mono, SF Mono, monospace"`,
+		`width="518" height="658"`, `font-size="14"`,
+		`font-style="normal"`,
 		`fill="#000000"`, `fill="#bbbbbb"`, `fill="#00bbbb"`,
 		`fill="#00bb00"`, `fill="#bb0000"`, `fill="#aa9900"`,
-		`dominant-baseline:central`, `white-space:pre`, `font-variant-ligatures:none`,
-		`<text x="1ch" y="46.5em">`,
-		`<rect x="17ch" y="24em" width="16ch" height="1em" fill="#00bb00"/>`,
-		`<rect x="33ch" y="24em" width="16ch" height="1em" fill="#aa9900"/>`,
-		`<rect x="49ch" y="24em" width="1ch" height="1em" fill="#bb0000"/>`,
+		`dominant-baseline="central"`, `xml:space="preserve"`,
+		`<text x="7" y="651"`,
+		`<rect x="119" y="336" width="112" height="14" fill="#00bb00"/>`,
+		`<rect x="231" y="336" width="112" height="14" fill="#aa9900"/>`,
+		`<rect x="343" y="336" width="7" height="14" fill="#bb0000"/>`,
 	} {
 		if !strings.Contains(svg, want) {
 			t.Fatalf("native presentation lost %s", want)
 		}
 	}
-	for _, forbidden := range []string{"textLength=", "lengthAdjust=", "viewBox=", `<tspan x=`} {
+	for _, forbidden := range []string{`font-style="italic"`, `font-style="oblique"`, `lengthAdjust="spacing"`} {
 		if strings.Contains(svg, forbidden) {
-			t.Fatalf("native text flow was overridden by %s", forbidden)
+			t.Fatalf("report contains unsupported presentation %s", forbidden)
 		}
 	}
 	if strings.LastIndex(svg, "<rect") > strings.Index(svg, "<text") {
@@ -225,44 +230,31 @@ func TestIPQualityRenderMatchesNativePresentation(t *testing.T) {
 	}
 }
 
-func TestIPQualityRenderKeepsTerminalStyles(t *testing.T) {
+func TestIPQualityRenderKeepsTextUpright(t *testing.T) {
 	svg := mustRenderIPQualitySVG(t, "\x1b[1;3;4mMaxmind 数据库\x1b[0m普通文字")
-	want := `<tspan fill="#bbbbbb" font-weight="bold" font-style="italic" text-decoration="underline">Maxmind 数据库</tspan><tspan fill="#bbbbbb">普通文字</tspan>`
-	if !strings.Contains(svg, want) {
-		t.Fatalf("SGR styles were changed or leaked after reset: %s", svg)
+	if strings.Contains(svg, `font-style="italic"`) {
+		t.Fatal("SGR italic made the report slanted")
+	}
+	for _, want := range []string{`font-style="normal"`, `font-weight="bold"`, `text-decoration="underline"`} {
+		if !strings.Contains(svg, want) {
+			t.Fatalf("missing %s", want)
+		}
+	}
+	if got := ipQualityRenderedLines(svg); len(got) != 1 || got[0] != "Maxmind 数据库普通文字" {
+		t.Fatalf("lost report text: %v", got)
 	}
 }
 
 func TestIPQualityRenderKeepsCombiningTextTogether(t *testing.T) {
 	text := "a\u0301报告b\u200d远端\u200b25"
 	svg := mustRenderIPQualitySVG(t, text)
-	if !strings.Contains(svg, ">"+text+"</tspan>") {
-		t.Fatal("text shaping was split into individual glyphs")
+	for _, cluster := range []string{"a\u0301", "b\u200d", "远端\u200b"} {
+		if !strings.Contains(svg, ">"+cluster+"</text>") {
+			t.Fatalf("split shaping cluster %q", cluster)
+		}
 	}
-}
-
-// Keep real browser coverage tied to the complete renderer output.
-func TestIPQualityBrowserFixtureMatchesRenderer(t *testing.T) {
-	for _, family := range []int{4, 6} {
-		text := ipQualityNativeFixture(t)
-		path := "../../frontend/testdata/ip-quality-report.svg"
-		if family == 6 {
-			text = strings.ReplaceAll(text, "203.0.113.1", "2001:db8:1234:5678:90ab:cdef:1234:5678")
-			path = "../../frontend/testdata/ip-quality-report-v6.svg"
-		}
-		want := mustRenderIPQualitySVG(t, text)
-		if os.Getenv("QCH_UPDATE_IP_QUALITY_FIXTURE") == "1" {
-			if err := os.WriteFile(path, []byte(want), 0644); err != nil {
-				t.Fatal(err)
-			}
-		}
-		got, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if string(got) != want {
-			t.Fatal("browser fixture is stale; run QCH_UPDATE_IP_QUALITY_FIXTURE=1 go test ./internal/api -run TestIPQualityBrowserFixtureMatchesRenderer")
-		}
+	if got := ipQualityRenderedLines(svg); len(got) != 1 || got[0] != text {
+		t.Fatalf("lost text: %v", got)
 	}
 }
 
@@ -357,7 +349,7 @@ func TestIPQualityRenderKeepsBrightForegroundAsText(t *testing.T) {
 		t.Fatalf("bright black did not become a visible foreground: %s", dim)
 	}
 	background := mustRenderIPQualitySVG(t, "\x1b[102m绿底\x1b[0m")
-	want := `<rect x="1ch" y="0em" width="4ch" height="1em" fill="` + ipQualityGreen + `"/>`
+	want := `<rect x="7" y="0" width="28" height="14" fill="` + ipQualityGreen + `"/>`
 	if !strings.Contains(background, want) {
 		t.Fatalf("bright background was not painted: %s", background)
 	}

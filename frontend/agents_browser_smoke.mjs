@@ -61,14 +61,12 @@ const server = createServer(async (request, response) => {
       response.end('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 48"><rect width="64" height="48" fill="#d80027"/></svg>');
       return;
     }
-    if (path === "/assets/ip-quality-native-reference.svg") {
-      response.writeHead(200, { "Content-Type": "image/svg+xml" });
-      response.end(await readFile(join(root, "testdata/ip-quality-native-reference.svg"), "utf8"));
-      return;
-    }
     if (/^\/api\/v1\/ip-quality\/[a-z-]+\/archives\/[46]$/.test(path)) {
       response.writeHead(200, { "Content-Type": "image/svg+xml", "Cache-Control": "no-store", "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox" });
-      const fixture = path.endsWith("/6") ? "ip-quality-report-v6.svg" : "ip-quality-report.svg";
+      const variants = { "quality-clean": "clean", "quality-medium": "medium", "quality-high": "high",
+        "quality-missing": "missing", "quality-vsix-short": "v6-short", "quality-vsix-missing": "v6-missing" };
+      const variant = variants[path.split("/")[4]];
+      const fixture = variant ? `ip-quality-${variant}.svg` : path.endsWith("/6") ? "ip-quality-report-v6.svg" : "ip-quality-report.svg";
       const svg = await readFile(join(root, "testdata", fixture), "utf8");
       response.end(svg);
       return;

@@ -33,8 +33,10 @@
 .ip-quality-badge.warning{background:var(--amber-soft);color:var(--amber)}
 .ip-quality-badge.poor{background:var(--red-soft);color:var(--red)}
 .ip-quality-badge.unknown{background:var(--surface-3);color:var(--muted)}
-.ip-quality-addresses{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:10px;margin:0;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--surface-2)}
-.ip-quality-addresses>div{min-width:0}
+.ip-quality-addresses{display:flex;flex-wrap:wrap;gap:10px;margin:0;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--surface-2)}
+.ip-quality-addresses>div{min-width:0;flex:1 1 160px}
+.ip-quality-addresses>.ip-quality-address-v6{flex:2 1 300px}
+.ip-quality-address-value{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:calc(12px * var(--ui-font-scale));font-weight:500;line-height:1.6;word-break:normal;overflow-wrap:anywhere}
 .ip-quality-addresses dt{color:var(--muted);font-size:calc(9px * var(--ui-font-scale));overflow-wrap:anywhere}
 .ip-quality-addresses dd{margin:3px 0 0;font-size:calc(11px * var(--ui-font-scale));font-weight:650;overflow-wrap:anywhere}
 .ip-quality-alert,.ip-quality-error{margin:0;overflow-wrap:anywhere}

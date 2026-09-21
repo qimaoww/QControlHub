@@ -1,4 +1,5 @@
 import { assert, delay, waitFor } from "./assertions.mjs";
+import { testIPQualityScenarios } from "./ip-quality-scenarios.mjs";
 import { testIPQualitySVG } from "./ip-quality-svg.mjs";
 import { ipQualityToday, nextIPQualityDay } from "../modules/ip-quality-model.js";
 
@@ -33,7 +34,7 @@ export async function testIPQualityRuntime(mode, preview = false) {
     task_id: taskID, agent_id: "quality-a", status: "succeeded",
     created_at: `${today}T06:00:00Z`, finished_at: `${today}T06:05:00Z`,
     archives: [4, 6].map((family) => ({ family, rendered_at: `${today}T06:05:00Z`, sha256: "a".repeat(64) })),
-    result: { reports: [report("203.0.113.10"), report("2001:db8:1234:5678:90ab:cdef:1234:5678")] },
+    result: { reports: [report("203.0.113.10"), report("2001:0db8:1234:5678:90ab:cdef:1234:5678")] },
   });
   const fixture = {
     records: [completeRecord()],
@@ -198,5 +199,6 @@ export async function testIPQualityRuntime(mode, preview = false) {
   await delay(60);
   assert.ok(document.documentElement.scrollWidth <= innerWidth + 1, "expanded report overflows on mobile");
   assert.equal(violations.length, 0, `production CSP violations: ${violations.join(", ")}`);
+  await testIPQualityScenarios({ fixture, refresh, card });
   if (preview) await new Promise(() => {});
 }

@@ -1,5 +1,7 @@
 import { ipQualityEntries, ipQualityValue } from "./ip-quality-model.js";
 
+import { ipQualityAddressMarkup } from "./ip-quality-address-view.js";
+
 const factorLabels = { CountryCode: "国家 / 地区", Proxy: "代理", Tor: "Tor", VPN: "VPN", Server: "数据中心", Abuser: "滥用", Robot: "机器人" };
 
 export function createIPQualityReportView({ esc }) {
@@ -13,7 +15,7 @@ export function createIPQualityReportView({ esc }) {
     const info = report.Info || {}, mail = report.Mail || {}, blacklist = mail.DNSBlacklist || {};
     const ipv6 = String(report.Head?.IP || "").includes(":");
     return `<section class="ip-quality-report">
-      <h4>${ipv6 ? "IPv6" : "IPv4"} · ${value(report.Head?.IP)}</h4>
+      <h4>${ipv6 ? "IPv6" : "IPv4"} · ${ipQualityAddressMarkup(report.Head?.IP, esc)}</h4>
       ${pairs([["ASN", info.ASN], ["运营商", info.Organization], ["地区", info.Region?.Name], ["城市", info.City?.Name], ["上游检测时间", report.Head?.Time], ["脚本版本", report.Head?.Version]])}
       <div class="ip-quality-report-grid">
       <section class="ip-quality-report-group"><h5>风险评分</h5>${pairs(ipQualityEntries(report.Score))}</section>

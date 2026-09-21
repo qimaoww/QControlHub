@@ -1,9 +1,10 @@
 import { orderNodesBySavedOrder } from "./node-order.js";
 import {
-  ipQualityToday, ipQualitySummary, ipQualityBlockReason, ipQualityFeature, ipQualityValue,
+  ipQualityToday, ipQualitySummary, ipQualityBlockReason, ipQualityFeature,
   ipQualityNodeList, ipQualityStatusName, ipQualityStatusTone,
 } from "./ip-quality-model.js";
 import { createIPQualityReportView } from "./ip-quality-report-view.js";
+import { ipQualityAddressMarkup } from "./ip-quality-address-view.js";
 import { createIPQualityArchiveView } from "./ip-quality-archive-view.js";
 
 export function createIPQualityView({ shell, state, esc, date: formatDate }) {
@@ -35,7 +36,7 @@ export function createIPQualityView({ shell, state, esc, date: formatDate }) {
         <button type="button" class="button small" data-ip-quality-schedule="${esc(agent.id)}" data-enabled="${Boolean(schedule?.enabled)}" aria-pressed="${Boolean(schedule?.enabled)}"${busy || loading || readFailed || (!schedule?.enabled && !agent.features?.includes(ipQualityFeature)) ? " disabled" : ""}>每日检测：${schedule?.enabled ? "开" : "关"}</button>
         ${schedule?.enabled ? `<small>下次：${esc(formatDate(schedule.next_run_at))}</small>` : ""}
       </footer>` : "";
-      const addresses = reports.length ? `<dl class="ip-quality-addresses">${reports.map((report) => `<div><dt>${String(report.Head?.IP || "").includes(":") ? "IPv6" : "IPv4"} 出口</dt><dd title="${esc(report.Head?.IP)}">${esc(ipQualityValue(report.Head?.IP))}</dd></div>`).join("")}<div><dt>完成时间</dt><dd>${esc(formatDate(record.finished_at))}</dd></div></dl>` : "";
+      const addresses = reports.length ? `<dl class="ip-quality-addresses">${reports.map((report) => `<div class="${String(report.Head?.IP || "").includes(":") ? "ip-quality-address-v6" : "ip-quality-address-v4"}"><dt>${String(report.Head?.IP || "").includes(":") ? "IPv6" : "IPv4"} 出口</dt><dd title="${esc(report.Head?.IP)}">${ipQualityAddressMarkup(report.Head?.IP, esc)}</dd></div>`).join("")}<div><dt>完成时间</dt><dd>${esc(formatDate(record.finished_at))}</dd></div></dl>` : "";
       return `<section class="workspace-panel ip-quality-node-panel ${tone}" data-ip-quality-panel="${esc(agent.id)}" data-refresh-key="ip-quality-${esc(agent.id)}" aria-busy="${loading}">
         <header><div><strong>${esc(agent.name)}</strong>${isToday ? `<small>${agent.status === "online" ? "在线" : "离线"}${reports.length ? ` · ${reports.length} 个地址族` : ""}</small>` : ""}</div><span class="status-label ip-quality-badge ${tone}"><i></i>${record ? esc(ipQualityStatusName(record.status)) : "未检测"}</span></header>
         <div class="ip-quality-node-body">
