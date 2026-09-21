@@ -86,6 +86,11 @@ const blacklistReport = {
   Mail: { ...report.Mail, DNSBlacklist: { Total: 439, Clean: 411, Marked: 28, Blacklisted: 0 } },
 };
 assert.ok(renderReport(blacklistReport).includes("<dt>干净</dt><dd>411</dd>"));
+// Risk factors are evidence, not a menu: every provider value renders inline.
+const factorMarkup = renderReport(report);
+assert.ok(factorMarkup.includes('<section class="ip-quality-factor"><strong>代理</strong>'), "a risk factor is not rendered inline");
+assert.ok(!factorMarkup.includes('class="ip-quality-factor"><summary'), "a risk factor is folded behind a disclosure");
+assert.ok(factorMarkup.includes("<dt>IPQS</dt><dd>否</dd>"), "a risk factor lost its provider value");
 const ipv6Report = { ...blacklistReport, Head: { ...report.Head, IP: "2001:db8::1" } };
 const originalIPv6Report = JSON.stringify(ipv6Report);
 const ipv6Markup = renderReport(ipv6Report);

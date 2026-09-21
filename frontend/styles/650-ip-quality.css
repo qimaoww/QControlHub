@@ -59,13 +59,13 @@
 .ip-quality-report-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;align-items:start;min-width:0}
 .ip-quality-report-group{min-width:0;padding:16px;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
 .ip-quality-report-group p{color:var(--muted);font-size:calc(11px * var(--ui-font-scale));line-height:1.7}
-.ip-quality-factors{display:grid;gap:6px}
-.ip-quality-factor{padding:0 10px;border:1px solid var(--line);border-radius:6px;background:var(--surface-2)}
-.ip-quality-factor summary,.ip-quality-raw summary{font-size:calc(11px * var(--ui-font-scale));color:var(--muted);cursor:pointer;overflow-wrap:anywhere}
-.ip-quality-factor summary{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:42px;padding:10px 0}
-.ip-quality-factor summary::after{content:"＋";color:var(--accent)}
-.ip-quality-factor[open]>summary::after{content:"−"}
-.ip-quality-factor .ip-quality-report-fields{padding-bottom:12px}
+/* Risk factors stay visible: each provider's value is the evidence the score
+   rows point at, so no factor is folded behind a disclosure. */
+.ip-quality-factors{display:grid;gap:8px}
+.ip-quality-factor{display:grid;gap:8px;padding:10px 12px;border:1px solid var(--line);border-radius:6px;background:var(--surface-2)}
+.ip-quality-factor>strong{font-size:calc(11px * var(--ui-font-scale))}
+.ip-quality-factor .ip-quality-report-fields{gap:8px}
+.ip-quality-raw summary{font-size:calc(11px * var(--ui-font-scale));color:var(--muted);cursor:pointer;overflow-wrap:anywhere}
 .ip-quality-media{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
 .ip-quality-media>div{display:grid;grid-template-columns:1fr 1fr;gap:3px;align-content:start;padding:10px;border-radius:6px;background:var(--surface-2);font-size:calc(10px * var(--ui-font-scale));overflow-wrap:anywhere}
 .ip-quality-media>div>span{text-align:right}
