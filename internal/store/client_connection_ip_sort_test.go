@@ -65,7 +65,7 @@ func TestClientConnectionIPGroupingEngineNodeOrder(t *testing.T) {
 			if locations.Records[i].ID != r.ID {
 				t.Fatalf("enrichment moved: %+v vs %+v", r, locations.Records[i])
 			}
-			if r.ClientIP == "1.1.1.1" && (len(r.Endpoints) != 2 || r.Endpoints[0].Engine != core.EngineMihomo || r.Endpoints[0].AgentID != zulu.ID || r.Endpoints[1].Engine != core.EngineXray) {
+			if r.ClientIP == "1.1.1.1" && (len(r.Endpoints) != 1 || r.Endpoints[0].Engine != r.Engine || r.Endpoints[0].AgentID != r.AgentID) {
 				t.Fatalf("endpoints=%+v", r.Endpoints)
 			}
 			if r.ClientIP == "8.8.8.2" && (len(r.Endpoints) != 2 || r.Endpoints[0].LocalPort != 443 || r.Endpoints[1].LocalPort != 8443) {
@@ -77,7 +77,7 @@ func TestClientConnectionIPGroupingEngineNodeOrder(t *testing.T) {
 		}
 		q.Cursor = page.NextCursor
 	}
-	expected := []string{"2.2.2.2", "1.1.1.1", "9.9.9.9", "4.4.4.4", "8.8.8.2", "8.8.8.10", "8.8.4.4"}
+	expected := []string{"2.2.2.2", "1.1.1.1", "9.9.9.9", "4.4.4.4", "1.1.1.1", "8.8.8.2", "8.8.8.10", "8.8.4.4"}
 	if !reflect.DeepEqual(actual, expected) {
 		t.Fatalf("order=%v want=%v", actual, expected)
 	}

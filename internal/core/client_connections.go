@@ -2,7 +2,8 @@ package core
 
 import "time"
 
-const ClientConnectionRetention = 7 * 24 * time.Hour
+// Allow a full calendar month, including local daylight-saving transitions.
+const ClientConnectionQueryWindow = 32 * 24 * time.Hour
 
 // These are observations extracted from panel core logs, not session counts.
 // Empty metadata and zero local port mean the log did not include the field.

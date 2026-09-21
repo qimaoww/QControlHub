@@ -6,7 +6,7 @@ export function connectionDateInput(value) {
 }
 
 export function defaultConnectionFilters(now = Date.now()) {
-  return { since: connectionDateInput(now - 86400000), until: connectionDateInput(now + 60000), include_non_public: "" };
+  return { period: "day", date: connectionDateInput(now).slice(0, 10), include_non_public: "" };
 }
 
 export function connectionQuery(filters, cursor = "") {
@@ -14,9 +14,27 @@ export function connectionQuery(filters, cursor = "") {
   for (const key of ["agent_id", "engine", "client_ip", "include_non_public"]) {
     if (filters[key]) params.set(key, filters[key]);
   }
-  const since = new Date(filters.since), until = new Date(filters.until);
-  if (!Number.isFinite(+since) || !Number.isFinite(+until) || until <= since || until - since > 7 * 86400000)
-    throw new Error("请选择有效的时间范围，单次最多查询 7 天");
+  let since, until;
+  if (filters.date !== undefined) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(filters.date)) throw new Error("请选择有效的查询日期");
+    since = new Date(`${filters.date}T00:00:00`);
+    if (!Number.isFinite(+since) || connectionDateInput(since).slice(0, 10) !== filters.date)
+      throw new Error("请选择有效的查询日期");
+    until = new Date(since);
+    if (filters.period === "month") {
+      since.setDate(1);
+      until = new Date(since);
+      until.setMonth(until.getMonth() + 1);
+      params.set("bucket", "day");
+    } else {
+      until.setDate(until.getDate() + 1);
+    }
+  } else {
+    since = new Date(filters.since);
+    until = new Date(filters.until);
+  }
+  if (!Number.isFinite(+since) || !Number.isFinite(+until) || until <= since || until - since > 32 * 86400000)
+    throw new Error("请选择有效的时间范围，单次最多查询 32 天");
   params.set("since", since.toISOString());
   params.set("until", until.toISOString());
   if (cursor) params.set("cursor", cursor);
@@ -30,7 +48,7 @@ export function connectionSourceLabel(source) {
 
 export function connectionSourceDetail(source) {
   if (!source.updated_at) return "面板尚无可读取的内核日志，请检查内核日志是否开启。";
-  return "从面板保存的内核日志提取客户端来源 IP，不记录访问目标 IP。";
+  return "来源 IP 已从内核日志提取入库，可按日期查询历史记录。";
 }
 
 export function connectionLocationLabel(location) {

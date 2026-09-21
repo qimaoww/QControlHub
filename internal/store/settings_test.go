@@ -41,6 +41,7 @@ func TestPanelSettingsPersistAndValidate(t *testing.T) {
 	want.TaskPollIntervalMS = 2000
 	want.UIFontScale = 110
 	want.AgentMetricsIntervalSeconds = 5
+	want.ClientConnectionRetentionDays = 45
 	want.AgentCoreLogMaxMiB = 1
 	want.AgentCoreLogRotateCount = 0
 	want.CoreLogMinimumLevel = "warning"
@@ -58,7 +59,7 @@ func TestPanelSettingsPersistAndValidate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.PanelName != saved.PanelName || loaded.UIFontScale != 110 || loaded.TaskPageSize != 50 || loaded.TaskPollIntervalMS != 2000 || loaded.CoreLogMinimumLevel != "warning" || loaded.WebhookURL != want.WebhookURL || loaded.KomariURL != want.KomariURL || loaded.KomariAPIKey != want.KomariAPIKey || loaded.AgentMetricsIntervalSeconds != 5 || loaded.AgentCoreLogMaxMiB != 1 {
+	if loaded.ClientConnectionRetentionDays != 45 || loaded.PanelName != saved.PanelName || loaded.UIFontScale != 110 || loaded.TaskPageSize != 50 || loaded.TaskPollIntervalMS != 2000 || loaded.CoreLogMinimumLevel != "warning" || loaded.WebhookURL != want.WebhookURL || loaded.KomariURL != want.KomariURL || loaded.KomariAPIKey != want.KomariAPIKey || loaded.AgentMetricsIntervalSeconds != 5 || loaded.AgentCoreLogMaxMiB != 1 {
 		t.Fatalf("loaded settings = %+v, want %+v", loaded, saved)
 	}
 	legacyClient := saved

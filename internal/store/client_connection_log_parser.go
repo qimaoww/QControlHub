@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/netip"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
@@ -13,11 +14,34 @@ import (
 // line: destination addresses and outbound connection messages are not clients.
 var (
 	xrayClientLog   = regexp.MustCompile(`(?:^|\s)(?:from\s+)?((?:tcp:|udp:)?\S+)\s+accepted\s+(?:tcp|udp):\S+(?:\s+\[([^\]]+)\])?`)
-	singClientLog   = regexp.MustCompile(`(?:^|\s)inbound/([a-z0-9_-]+)\[([^\]]*)\]: inbound (packet )?connection from (\S+)`)
-	mihomoClientLog = regexp.MustCompile(`\[(TCP|UDP)\]\s+(\[[0-9a-fA-F:.]+\]:[0-9]+|[0-9.]+:[0-9]+)(?:\([^\r\n]*\))?\s+-->\s+\S+\s+.*using\s+`)
+	singClientLog   = regexp.MustCompile(`^inbound/([a-z0-9_-]+)\[([^\]]*)\]: (?:\[[^\]\r\n]*\] )?inbound (packet )?connection from (\S+)$`)
+	mihomoClientLog = regexp.MustCompile(`^\[(TCP|UDP)\]\s+(\[[0-9a-fA-F:.]+\]:[0-9]+|[0-9.]+:[0-9]+)(?:\([^\r\n]*\))?\s+-->\s+\S+\s+.*using\s+`)
 	ssTCPClientLog  = regexp.MustCompile(`(?:^|\s)established tcp tunnel (\S+) <-> `)
 	ssUDPClientLog  = regexp.MustCompile(`(?:^|\s)created udp association for (\S+)(?:\s|$)`)
 )
+
+var (
+	accessLogPrefix  = regexp.MustCompile(`^(?:(?:[+-]\d{4}\s+)?\d{4}[-/]\d{2}[-/]\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?\s+)?(?:TRACE|DEBUG|INFO)(?:\[\d+(?:\.\d+)?\])?\s+`)
+	accessLogContext = regexp.MustCompile(`^\[\d+ [0-9.hmsµu]+\]\s+`)
+	accessLogfmt     = regexp.MustCompile(`^(?:time=(?:"[^"\r\n]*"|\S+)\s+)?level=(?:info|debug|trace)\s+msg=("(?:[^"\\]|\\.)*")\s*$`)
+)
+
+// Strip only known logger envelopes. Searching arbitrary substrings can turn
+// a quoted error, rule name, or destination text into a false client event.
+func clientAccessMessage(message string) string {
+	if strings.ContainsAny(message, "\r\n") {
+		return ""
+	}
+	if match := accessLogfmt.FindStringSubmatch(message); match != nil {
+		value, err := strconv.Unquote(match[1])
+		if err != nil || strings.ContainsAny(value, "\r\n") {
+			return ""
+		}
+		message = value
+	}
+	message = accessLogPrefix.ReplaceAllString(message, "")
+	return accessLogContext.ReplaceAllString(message, "")
+}
 
 func clientConnectionFromLog(entry core.CoreLogEntry) (core.ClientConnection, bool) {
 	c := core.ClientConnection{Engine: entry.Engine, LocalIP: "0.0.0.0"}
@@ -63,7 +87,7 @@ func clientConnectionFromLog(entry core.CoreLogEntry) (core.ClientConnection, bo
 		}
 		c.Inbound = strings.TrimSpace(c.Inbound)
 	case core.EngineSingBox:
-		match := singClientLog.FindStringSubmatch(message)
+		match := singClientLog.FindStringSubmatch(clientAccessMessage(message))
 		if match == nil {
 			return c, false
 		}
@@ -74,7 +98,7 @@ func clientConnectionFromLog(entry core.CoreLogEntry) (core.ClientConnection, bo
 			c.Transport = "udp"
 		}
 	case core.EngineMihomo:
-		match := mihomoClientLog.FindStringSubmatch(message)
+		match := mihomoClientLog.FindStringSubmatch(clientAccessMessage(message))
 		if match == nil {
 			return c, false
 		}

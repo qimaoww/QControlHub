@@ -86,11 +86,11 @@ func TestClientConnectionIPGroupingPaginationAndIsolation(t *testing.T) {
 	}
 	q.Cursor = page.NextCursor
 	next, err := db.ClientConnectionHistory(ownerCtx, q)
-	if err != nil || len(next.Records) != 1 || next.Records[0].ClientIP != "8.8.8.8" || next.NextCursor != "" {
+	if err != nil || len(next.Records) != 1 || next.Records[0].ClientIP != "8.8.8.8" || next.NextCursor == "" {
 		t.Fatalf("second page=%+v err=%v", next, err)
 	}
 	group := next.Records[0]
-	if len(group.Endpoints) != 2 || !group.FirstSeen.Equal(now.Add(-2*time.Minute)) || !group.LastSeen.Equal(now) {
+	if len(group.Endpoints) != 1 || !group.FirstSeen.Equal(now.Add(-2*time.Minute)) || !group.LastSeen.Equal(now.Add(-time.Minute)) {
 		t.Fatalf("group=%+v", group)
 	}
 	ports := map[int]bool{}
@@ -100,8 +100,14 @@ func TestClientConnectionIPGroupingPaginationAndIsolation(t *testing.T) {
 			t.Fatal("hidden endpoint leaked")
 		}
 	}
-	if !ports[443] || !ports[8443] {
+	if !ports[443] || ports[8443] {
 		t.Fatalf("ports=%v", ports)
+	}
+	thirdQuery := q
+	thirdQuery.Cursor = next.NextCursor
+	third, err := db.ClientConnectionHistory(ownerCtx, thirdQuery)
+	if err != nil || len(third.Records) != 1 || third.Records[0].AgentID != second.ID || third.Records[0].ClientIP != "8.8.8.8" || len(third.Records[0].Endpoints) != 1 || third.Records[0].Endpoints[0].LocalPort != 8443 || third.NextCursor != "" {
+		t.Fatalf("separate node=%+v err=%v", third, err)
 	}
 	// A new connection to an existing IP must not move/split its pagination group.
 	insert(first.ID, "8.8.8.8", 50007, 443, now)
