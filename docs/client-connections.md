@@ -7,7 +7,9 @@ IP and port, the engine, and the inbound name and protocol. It does not collect
 proxy destination IPs, visited sites, credentials, or application payloads.
 
 The page queries the panel's PostgreSQL database. The context sidebar uses the
-shared All nodes / node list navigation; selecting a node queries it immediately. Other filters are collapsed above the results.
+shared All nodes / node list navigation; selecting a node queries it immediately. Other filters are collapsed inside the connection detail panel. The page uses
+the log workspace header and a compact summary bar; refresh preserves the
+selected node, filters and detail page.
 Filter by server, engine,
 inbound name, inbound protocol, TCP/UDP, exact IPv4/IPv6 source address, server
 port, and time range. All filters also apply to the summary; pagination only

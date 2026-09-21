@@ -74,6 +74,12 @@ export async function testClientConnectionsRuntime(preview = false) {
   assert.equal(requests.at(-1).get("before"), "2");
   assert.equal(requests.at(-1).get("include_non_public"), "true");
   assert.match(document.querySelector(".connection-summary").textContent, /观测连接 2/g);
+  const beforeRefresh = requests.length;
+  document.querySelector("[data-connection-refresh]").click();
+  await waitFor(() => requests.length > beforeRefresh && !document.querySelector("[data-connection-refresh]").disabled, "refresh did not complete");
+  assert.equal(requests.at(-1).get("before"), "2", "refresh should retain the current page");
+  assert.equal(requests.at(-1).get("agent_id"), "alpha", "refresh should retain the node filter");
+  assert.match(document.querySelector(".connection-pagination").textContent, /第 2 页/);
   document.querySelector("[data-connection-previous]").click();
   await waitFor(() => document.querySelector("tbody")?.textContent.includes("52000"), "previous page missing");
   assert.ok(!requests.at(-1).has("before"));

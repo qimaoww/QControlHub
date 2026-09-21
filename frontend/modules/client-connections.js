@@ -18,9 +18,10 @@ export function installClientConnections(ctx) {
     let result = null;
     const paint = (options = {}) => {
       data.connectionLoading = Boolean(options.loading);
-      shell(view(result, filters, data.connectionSources || [], { hasPrevious: cursors.length > 0, ...options }), "客户端连接 IP");
+      shell(view(result, filters, data.connectionSources || [], { hasPrevious: cursors.length > 0, page: cursors.length + 1, ...options }), "客户端连接 IP");
       bindClientConnections({
         current,
+        refresh: () => { void load({ before, cursors }); },
         search: values => { data.connectionFilters = { ...filters, ...values }; void load(); },
         selectAgent: agent_id => { data.connectionFilters = { ...filters, agent_id }; void load(); },
         recent: () => { data.connectionFilters = { ...filters, ...defaultConnectionFilters() }; void load(); },

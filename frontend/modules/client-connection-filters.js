@@ -11,7 +11,8 @@ export function clientConnectionFilters({ filters, loading, esc, engineName }) {
   const advanced = filters.protocol || filters.inbound || filters.transport || filters.include_non_public === "true";
   const select = (name, label, options) => `<label>${label}<select name="${name}"><option value="">全部</option>${options.map(([value, text]) => `<option value="${esc(value)}"${filters[name] === value ? " selected" : ""}>${esc(text)}</option>`).join("")}</select></label>`;
   const input = (name, label, type = "text", extra = "") => `<label>${label}<input name="${name}" type="${type}" value="${esc(filters[name] || "")}" ${extra}></label>`;
-  return `<details class="workspace-panel connection-filter-panel"><summary>筛选条件<span>时间 / 来源 IP / 入站</span></summary>
+  const active = [filters.engine && engineName(filters.engine), filters.client_ip, filters.port && `端口 ${filters.port}`, filters.protocol, filters.inbound, filters.transport?.toUpperCase(), filters.include_non_public === "true" && "包含非公网"].filter(Boolean);
+  return `<details class="connection-filter-panel"><summary>筛选条件<span>${active.length ? esc(active.join(" · ")) : "时间 / 来源 IP / 入站"}</span></summary>
       <form id="connection-query" data-connection-filters>
         <div class="connection-filters">
           ${select("engine", "内核", ["mihomo", "xray", "sing-box", "ss-rust"].map(e => [e, engineName(e)]))}
