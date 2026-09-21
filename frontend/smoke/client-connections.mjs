@@ -33,6 +33,8 @@ assert.match(html, /来源 IP/);
 assert.match(html, /2001:db8::1/);
 assert.ok(!html.includes("192.0.2.1"));
 assert.ok(!html.includes("50123"));
+assert.match(html, /入站端口/);
+assert.match(html, /<code>443<\/code>/);
 assert.ok(!html.includes("未知入站"));
 assert.ok(!html.includes("未知协议"));
 assert.ok(!html.includes('name="port"'));
