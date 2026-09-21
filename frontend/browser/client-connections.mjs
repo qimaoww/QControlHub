@@ -1,25 +1,26 @@
 import { assert, waitFor } from "./assertions.mjs";
 
 export async function testClientConnectionsRuntime(preview = false) {
-  const fallback = window.fetch.bind(window), requests = [];
+  const fallback = window.fetch.bind(window), requests = [], locationRequests = [];
   const now = new Date().toISOString();
   let releaseLocations, releaseShell;
   const locationsReady = new Promise(resolve => { releaseLocations = resolve; });
   const shellReady = new Promise(resolve => { releaseShell = resolve; });
-  const row = { id: 2, agent_id: "alpha", agent_name: "Alpha · 东京", engine: "xray", protocol: "vless", inbound: "vless-443", transport: "tcp", client_ip: "2001:db8::8", location: { country_code: "CN", country: "China", province: "广东" }, client_port: 52000, local_ip: "192.0.2.1", local_port: 443, first_seen: now, last_seen: now };
+  const row = { id: 2, agent_id: "alpha", agent_name: "Alpha · 东京", engine: "xray", protocol: "vless", inbound: "vless-443", transport: "tcp", client_ip: "2001:db8::8", location: { country_code: "CN", country: "China", province: "广东" }, client_port: 52000, local_ip: "192.0.2.1", local_port: 443, endpoints: [{ agent_id: "alpha", agent_name: "Alpha · 东京", engine: "xray", local_port: 443 }, { agent_id: "alpha", agent_name: "Alpha · 东京", engine: "xray", local_port: 8443 }], first_seen: now, last_seen: now };
   window.fetch = async (input, options) => {
     const url = new URL(typeof input === "string" ? input : input.url, location.href);
     if (["/api/v1/settings", "/api/v1/overview"].includes(url.pathname)) await shellReady;
     if (url.pathname === "/api/v1/client-connections") {
       if (url.searchParams.get("locations") === "only") {
+        locationRequests.push(url.searchParams);
         await locationsReady;
         return new Response(JSON.stringify({ records: [row] }), { status: 200, headers: { "Content-Type": "application/json" } });
       }
       requests.push(url.searchParams);
-      const older = url.searchParams.has("before");
+      const older = url.searchParams.get("cursor") === "next-page";
       return new Response(JSON.stringify({
         records: [{ ...row, id: older ? 1 : 2, first_seen: older ? "2026-09-20T00:00:00Z" : now, location: {} }],
-        ips: 1, flows: 2, next_before: older ? undefined : 2,
+        ips: 1, flows: 2, next_cursor: older ? undefined : "next-page", page_cursor: older ? "second-start" : "first-start",
         sources: [{ agent_id: "alpha", agent_name: row.agent_name, updated_at: now, status: "ok", detail: "panel core logs", truncated: false }, { agent_id: "bravo", agent_name: "Bravo · 新加坡", status: "no_logs" }].filter(source => !url.searchParams.get("agent_id") || source.agent_id === url.searchParams.get("agent_id")),
         timeline: Array.from({ length: 24 }, (_, i) => ({ time: new Date(Date.now() - (23 - i) * 3600000).toISOString(), flows: i % 3 === 0 ? 1 : 2, ips: 1 })),
       }), { status: 200, headers: { "Content-Type": "application/json" } });
@@ -37,7 +38,19 @@ export async function testClientConnectionsRuntime(preview = false) {
   await waitFor(() => document.querySelector("tbody")?.textContent.includes("中国 · 广东"), "location enrichment did not paint");
   assert.ok(!document.querySelector("tbody").textContent.includes("192.0.2.1"));
   assert.ok(!document.querySelector("tbody").textContent.includes("52000"));
-  assert.equal(document.querySelector('td[data-label="入站端口"]').textContent, "443");
+  assert.equal(document.querySelectorAll("tbody tr").length, 1);
+  assert.equal(document.querySelectorAll('td[data-label="来源 IP"] code').length, 1);
+  assert.equal([...document.querySelectorAll('td[data-label="入站端口"] code')].map(cell => cell.textContent).join(","), "443,8443");
+  for (const label of ["服务器", "内核", "入站端口"]) {
+    const cell = document.querySelector(`td[data-label="${label}"]`);
+    const endpoints = [...cell.querySelectorAll(".connection-endpoint")].map(element => element.getBoundingClientRect());
+    assert.equal(endpoints.length, 2);
+    assert.equal(endpoints[0].left, endpoints[1].left, "endpoint lines must stay in the same value column");
+    assert.ok(endpoints[1].top >= endpoints[0].bottom, "endpoint lines must not overlap");
+    if (getComputedStyle(cell).display === "grid") assert.ok(endpoints[0].left >= cell.getBoundingClientRect().left + 80, "endpoint values must not enter the mobile label column");
+  }
+  assert.equal(requests.at(-1).get("group_by"), "ip");
+  assert.equal(locationRequests.at(-1).get("cursor"), "first-start", "enrichment must use the page cursor");
   assert.ok(!document.querySelector("tbody").textContent.includes("未知入站"));
   assert.ok(document.querySelector('a[href="#client-connections"]'), "connection navigation missing");
   assert.ok(!document.body.classList.contains("no-context"), "connection page must show filter sidebar");
@@ -75,18 +88,18 @@ export async function testClientConnectionsRuntime(preview = false) {
   assert.equal(document.querySelector('[name="include_non_public"]').value, "true");
   document.querySelector("[data-connection-next]").click();
   await waitFor(() => document.querySelector(".connection-pagination")?.textContent.includes("第 2 页") && !document.querySelector("[data-connection-refresh]")?.disabled, "next page missing");
-  assert.equal(requests.at(-1).get("before"), "2");
+  assert.equal(requests.at(-1).get("cursor"), "next-page");
   assert.equal(requests.at(-1).get("include_non_public"), "true");
   assert.match(document.querySelector(".connection-summary").textContent, /观测连接 2/g);
   const beforeRefresh = requests.length;
   document.querySelector("[data-connection-refresh]").click();
   await waitFor(() => requests.length > beforeRefresh && !document.querySelector("[data-connection-refresh]").disabled, "refresh did not complete");
-  assert.equal(requests.at(-1).get("before"), "2", "refresh should retain the current page");
+  assert.equal(requests.at(-1).get("cursor"), "next-page", "refresh should retain the current page");
   assert.equal(requests.at(-1).get("agent_id"), "alpha", "refresh should retain the node filter");
   assert.match(document.querySelector(".connection-pagination").textContent, /第 2 页/);
   document.querySelector("[data-connection-previous]").click();
   await waitFor(() => document.querySelector(".connection-pagination")?.textContent.includes("第 1 页") && !document.querySelector("[data-connection-refresh]")?.disabled, "previous page missing");
-  assert.ok(!requests.at(-1).has("before"));
+  assert.ok(!requests.at(-1).has("cursor"));
   const beforeRecent = requests.length;
   document.querySelector("[data-connection-recent]").click();
   await waitFor(() => requests.length > beforeRecent && !document.querySelector('[type="submit"]').disabled, "recent query missing");

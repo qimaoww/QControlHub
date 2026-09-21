@@ -24,8 +24,16 @@ type ClientIPLocation struct {
 	NonPublic   bool   `json:"non_public,omitempty"`
 }
 
+type ClientConnectionEndpoint struct {
+	AgentID   string `json:"agent_id"`
+	AgentName string `json:"agent_name"`
+	Engine    Engine `json:"engine"`
+	LocalPort int    `json:"local_port"`
+}
+
 type ClientConnectionRecord struct {
-	Location ClientIPLocation `json:"location"`
+	Endpoints []ClientConnectionEndpoint `json:"endpoints,omitempty"`
+	Location  ClientIPLocation           `json:"location"`
 	ClientConnection
 	ID        int64     `json:"id"`
 	AgentID   string    `json:"agent_id"`
@@ -56,4 +64,6 @@ type ClientConnectionHistory struct {
 	Flows      int64                    `json:"flows"`
 	IPs        int64                    `json:"ips"`
 	NextBefore int64                    `json:"next_before,omitempty"`
+	NextCursor string                   `json:"next_cursor,omitempty"`
+	PageCursor string                   `json:"page_cursor,omitempty"`
 }

@@ -4,6 +4,7 @@ import { connectionSourceLabel, connectionSourceDetail, connectionLocationLabel 
 export function createClientConnectionView({ esc, engineName, date }) {
   return function connectionView(result, filters, sources, { loading = false, error = "", hasPrevious = false, page = 1 } = {}) {
     const records = result?.records || [];
+    const endpointRows = (row, render) => `<div>${(row.endpoints?.length ? row.endpoints : [row]).map(endpoint => `<div class="connection-endpoint">${render(endpoint)}</div>`).join("")}</div>`;
     const reportSources = result?.sources || [];
     const scope = filters.agent_id ? sources.find(source => source.agent_id === filters.agent_id)?.agent_name || "所选节点" : "全部节点";
     const warnings = reportSources.filter(source => source.status !== "ok" || source.truncated || !source.updated_at);
@@ -16,10 +17,10 @@ export function createClientConnectionView({ esc, engineName, date }) {
 
       ${error ? `<div class="connection-error" role="alert">${esc(error)}</div>` : ""}
       <section class="workspace-panel connection-detail-panel">
-        <header><h3>客户端来源 IP</h3><span class="connection-result-count">${loading ? result ? "正在更新…" : "正在读取…" : `本页 ${records.length} 条`}</span></header>
+        <header><h3>客户端来源 IP</h3><span class="connection-result-count">${loading ? result ? "正在更新…" : "正在读取…" : `本页 ${records.length} 个 IP`}</span></header>
         ${clientConnectionFilters({ filters, loading, esc, engineName })}
-        <div class="connection-table-scroll" tabindex="0" role="region" aria-label="客户端来源 IP 明细"><table><thead><tr><th>服务器</th><th>内核</th><th>客户端来源 IP</th><th>入站端口</th><th>国家／地区</th><th>观测时间</th></tr></thead><tbody>${records.map(row => `<tr><td data-label="服务器"><strong>${esc(row.agent_name)}</strong></td><td data-label="内核"><span class="engine-badge ${esc(row.engine)}">${esc(engineName(row.engine))}</span></td><td data-label="来源 IP"><code>${esc(row.client_ip)}</code></td><td data-label="入站端口"><code>${row.local_port ? esc(row.local_port) : "—"}</code></td><td data-label="国家／地区">${esc(connectionLocationLabel(row.location))}</td><td data-label="观测时间"><div class="connection-times"><time>首次 ${esc(date(row.first_seen))}</time><time>最近 ${esc(date(row.last_seen))}</time></div></td></tr>`).join("") || `<tr><td colspan="6"><div class="empty">${loading ? "加载中…" : "暂无连接记录"}</div></td></tr>`}</tbody></table></div>
-        <footer class="connection-pagination"><span>第 ${page} 页</span><button class="button small" data-connection-previous${!hasPrevious || loading ? " disabled" : ""}>上一页</button><button class="button small" data-connection-next${!result?.next_before || loading ? " disabled" : ""}>下一页</button></footer>
+        <div class="connection-table-scroll" tabindex="0" role="region" aria-label="客户端来源 IP 明细"><table><thead><tr><th>服务器</th><th>内核</th><th>客户端来源 IP</th><th>入站端口</th><th>国家／地区</th><th>观测时间</th></tr></thead><tbody>${records.map(row => `<tr><td data-label="服务器">${endpointRows(row, endpoint => `<strong>${esc(endpoint.agent_name)}</strong>`)}</td><td data-label="内核">${endpointRows(row, endpoint => `<span class="engine-badge ${esc(endpoint.engine)}">${esc(engineName(endpoint.engine))}</span>`)}</td><td data-label="来源 IP"><code>${esc(row.client_ip)}</code></td><td data-label="入站端口">${endpointRows(row, endpoint => `<code>${endpoint.local_port ? esc(endpoint.local_port) : "—"}</code>`)}</td><td data-label="国家／地区">${esc(connectionLocationLabel(row.location))}</td><td data-label="观测时间"><div class="connection-times"><time>首次 ${esc(date(row.first_seen))}</time><time>最近 ${esc(date(row.last_seen))}</time></div></td></tr>`).join("") || `<tr><td colspan="6"><div class="empty">${loading ? "加载中…" : "暂无连接记录"}</div></td></tr>`}</tbody></table></div>
+        <footer class="connection-pagination"><span>第 ${page} 页</span><button class="button small" data-connection-previous${!hasPrevious || loading ? " disabled" : ""}>上一页</button><button class="button small" data-connection-next${!result?.next_cursor || loading ? " disabled" : ""}>下一页</button></footer>
       </section>
     </div>`;
   };

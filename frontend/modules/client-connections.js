@@ -8,7 +8,7 @@ export function installClientConnections(ctx) {
   const view = createClientConnectionView(ctx);
   let serial = 0, controller;
   // Account data owns all filters, cursors and results. No data survives logout.
-  async function load({ before = "", cursors = [] } = {}) {
+  async function load({ cursor = "", cursors = [] } = {}) {
     controller?.abort();
     controller = new AbortController();
     const signal = controller.signal;
@@ -21,16 +21,16 @@ export function installClientConnections(ctx) {
       shell(view(result, filters, data.connectionSources || [], { hasPrevious: cursors.length > 0, page: cursors.length + 1, ...options }), "客户端连接 IP");
       bindClientConnections({
         current,
-        refresh: () => { void load({ before, cursors }); },
+        refresh: () => { void load({ cursor, cursors }); },
         search: values => { data.connectionFilters = { ...filters, ...values }; void load(); },
         selectAgent: agent_id => { data.connectionFilters = { ...filters, agent_id }; void load(); },
         recent: () => { data.connectionFilters = { ...filters, ...defaultConnectionFilters() }; void load(); },
-        next: () => { if (result?.next_before) void load({ before: result.next_before, cursors: [...cursors, before] }); },
-        previous: () => { if (cursors.length) void load({ before: cursors.at(-1), cursors: cursors.slice(0, -1) }); },
+        next: () => { if (result?.next_cursor) void load({ cursor: result.next_cursor, cursors: [...cursors, cursor] }); },
+        previous: () => { if (cursors.length) void load({ cursor: cursors.at(-1), cursors: cursors.slice(0, -1) }); },
       });
     };
     try {
-      const query = connectionQuery(filters, before), key = query.toString();
+      const query = connectionQuery(filters, cursor), key = query.toString();
       result = data.connectionCache?.key === key ? data.connectionCache.result : null;
       paint({ loading: true });
       result = await api(`/client-connections?${query}&locations=cached`, { signal });
@@ -43,8 +43,8 @@ export function installClientConnections(ctx) {
       // Location lookup never holds up the history, filters or pagination.
       if (result.records?.some(row => !row.location?.non_public)) {
         const locationQuery = new URLSearchParams(query);
-        // Pin enrichment to this page even if a heartbeat inserts newer rows.
-        if (result.records[0]?.id) locationQuery.set("before", String(result.records[0].id + 1));
+        // Pin enrichment to the same engine/node/IP position as the visible page.
+        if (result.page_cursor) locationQuery.set("cursor", result.page_cursor);
         void api(`/client-connections?${locationQuery}&locations=only`, { signal }).then(enriched => {
           if (!current()) return;
           const locations = new Map(enriched.records.map(row => [row.id, row.location]));
