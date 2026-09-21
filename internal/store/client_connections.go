@@ -42,7 +42,7 @@ func (q ClientConnectionQuery) Validate() error {
 	if q.GroupByIP && q.Before != 0 {
 		return fmt.Errorf("%w: grouped connections require a cursor", ErrInvalid)
 	}
-	if q.Since.IsZero() || !q.Until.After(q.Since) || q.Until.Sub(q.Since) > core.ClientConnectionRetention || q.Port < 0 || q.Port > 65535 || q.Before < 0 || q.Limit < 1 || q.Limit > 200 ||
+	if q.Since.IsZero() || !q.Until.After(q.Since) || q.Until.Sub(q.Since) > core.ClientConnectionQueryWindow || q.Port < 0 || q.Port > 65535 || q.Before < 0 || q.Limit < 1 || q.Limit > 200 ||
 		(q.Engine != "" && !q.Engine.Valid()) || (q.Transport != "" && q.Transport != "tcp" && q.Transport != "udp") || (q.Bucket != "minute" && q.Bucket != "hour" && q.Bucket != "day") || len(q.AgentID) > 100 || len(q.Protocol) > 40 || len(q.Inbound) > 400 {
 		return fmt.Errorf("%w: invalid connection query (maximum window: 7 days)", ErrInvalid)
 	}
@@ -85,7 +85,7 @@ func connectionHistoryWhere(ctx context.Context, q ClientConnectionQuery) (strin
 		add("c.client_ip", ip.Unmap().String())
 	}
 	if q.Port > 0 {
-		add("c.local_port", q.Port)
+		add("COALESCE(c.inbound_port,c.local_port)", q.Port)
 	}
 	// Client IPs are host telemetry. Shared-engine recipients must not gain
 	// access to another owner's client addresses through their engine grants.
@@ -144,7 +144,7 @@ func (s *Store) ClientConnectionHistory(ctx context.Context, q ClientConnectionQ
 			recordWhere += fmt.Sprintf(" AND c.id<$%d", len(recordArgs))
 		}
 		recordArgs = append(recordArgs, q.Limit+1)
-		rows, err := tx.Query(ctx, `SELECT c.id,c.agent_id,a.name,c.engine,c.protocol,c.inbound,c.transport,host(c.client_ip),c.client_port,CASE WHEN c.local_port=0 THEN '' ELSE host(c.local_ip) END,c.local_port,c.first_seen,c.last_seen`+from+recordWhere+fmt.Sprintf(` ORDER BY c.id DESC LIMIT $%d`, len(recordArgs)), recordArgs...)
+		rows, err := tx.Query(ctx, `SELECT c.id,c.agent_id,a.name,c.engine,c.protocol,c.inbound,c.transport,host(c.client_ip),c.client_port,CASE WHEN c.local_port=0 THEN '' ELSE host(c.local_ip) END,COALESCE(c.inbound_port,c.local_port),c.first_seen,c.last_seen`+from+recordWhere+fmt.Sprintf(` ORDER BY c.id DESC LIMIT $%d`, len(recordArgs)), recordArgs...)
 		if err != nil {
 			return result, err
 		}
@@ -167,11 +167,6 @@ func (s *Store) ClientConnectionHistory(ctx context.Context, q ClientConnectionQ
 	}
 	if q.RecordsOnly {
 		return result, tx.Commit(ctx)
-	}
-	if !q.GroupByIP {
-		if err := s.resolveClientConnectionPorts(ctx, tx, result.Records); err != nil {
-			return result, err
-		}
 	}
 	sourceArgs := []any{}
 	sourceWhere := ` WHERE a.revoked_at IS NULL` + agentAdministrationClause(ctx, "a.id", &sourceArgs)
@@ -200,6 +195,8 @@ func (s *Store) ClientConnectionHistory(ctx context.Context, q ClientConnectionQ
 }
 
 func (s *Store) PruneClientConnections(ctx context.Context, before time.Time) error {
-	_, err := s.pool.Exec(ctx, `DELETE FROM client_connections WHERE bucket<$1`, before.UTC())
+	args := []any{before.UTC()}
+	where := workspaceOwnerClause(ctx, "a.owner_id", &args)
+	_, err := s.pool.Exec(ctx, `DELETE FROM client_connections c USING agents a WHERE c.agent_id=a.id AND c.bucket<$1 AND c.last_seen<$1`+where, args...)
 	return err
 }

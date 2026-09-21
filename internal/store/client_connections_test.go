@@ -141,7 +141,7 @@ func TestClientConnectionHistoryPersistenceAndIsolation(t *testing.T) {
 	if err != nil || remaining.Flows != 1 || remaining.Sources[0].Status != "ok" {
 		t.Fatalf("empty sample erased history: %+v %v", remaining, err)
 	}
-	if err := db.PruneClientConnections(ctx, now.Add(-core.ClientConnectionRetention)); err != nil {
+	if err := db.PruneClientConnections(ctx, now.Add(-core.ClientConnectionQueryWindow)); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.PruneClientConnections(ctx, now.Add(time.Minute)); err != nil {

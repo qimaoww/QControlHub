@@ -28,6 +28,7 @@ type PanelSettings struct {
 	TaskMaxAttempts                int         `json:"task_max_attempts"`
 	PublicIPProbeIntervalSeconds   int         `json:"public_ip_probe_interval_seconds"`
 	CoreLogMinimumLevel            string      `json:"core_log_minimum_level"`
+	ClientConnectionRetentionDays  int         `json:"client_connection_retention_days"`
 	CoreLogRetentionDays           int         `json:"core_log_retention_days"`
 	AgentCoreLogMaxMiB             int         `json:"agent_core_log_max_mib"`
 	AgentCoreLogRotateCount        int         `json:"agent_core_log_rotate_count"`
@@ -66,6 +67,7 @@ func DefaultPanelSettings() PanelSettings {
 		PublicIPProbeIntervalSeconds:   300,
 		CoreLogMinimumLevel:            "debug",
 		CoreLogRetentionDays:           7,
+		ClientConnectionRetentionDays:  30,
 		AgentCoreLogMaxMiB:             16,
 		AgentCoreLogRotateCount:        1,
 		MetricRetentionDays:            7,
@@ -144,6 +146,9 @@ func (settings PanelSettings) Validate() error {
 	}
 	if !oneOf(settings.CoreLogRetentionDays, 1, 3, 7, 14, 30) || !oneOf(settings.AgentCoreLogMaxMiB, 1, 2, 4, 8, 16, 32, 64, 128) || !oneOf(settings.AgentCoreLogRotateCount, 0, 1, 2, 3, 5) {
 		return errors.New("unsupported core log retention policy")
+	}
+	if settings.ClientConnectionRetentionDays < 0 || settings.ClientConnectionRetentionDays > 3650 {
+		return errors.New("client IP history retention must be between 0 and 3650 days")
 	}
 	if !oneOf(settings.MetricRetentionDays, 7, 14, 30) || !oneOf(settings.AuditRetentionDays, 0, 30, 90, 180) || !oneOf(settings.TaskRetentionDays, 0, 30, 90, 180) || !oneOf(settings.ConfigRevisionRetention, 0, 50, 100) {
 		return errors.New("unsupported database retention policy")

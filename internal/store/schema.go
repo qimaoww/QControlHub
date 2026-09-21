@@ -3,7 +3,7 @@ package store
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 68
+const currentSchemaVersion = 69
 
 const schemaSQL = `
 CREATE TABLE IF NOT EXISTS agents (
@@ -348,6 +348,7 @@ ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS install_task_stale_timeout_s
 ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS task_max_attempts integer NOT NULL DEFAULT 3;
 ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS public_ip_probe_interval_seconds integer NOT NULL DEFAULT 300;
 ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS core_log_retention_days integer NOT NULL DEFAULT 7;
+ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS client_connection_retention_days integer NOT NULL DEFAULT 30 CHECK(client_connection_retention_days BETWEEN 0 AND 3650);
 ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS cnip_source jsonb;
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS cnip_source jsonb;
 ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS agent_core_log_max_mib integer NOT NULL DEFAULT 16;
@@ -816,6 +817,8 @@ CREATE TABLE IF NOT EXISTS client_connections (
 CREATE INDEX IF NOT EXISTS client_connections_time_idx ON client_connections(bucket);
 CREATE INDEX IF NOT EXISTS client_connections_agent_time_idx ON client_connections(agent_id,bucket DESC);
 CREATE INDEX IF NOT EXISTS client_connections_ip_time_idx ON client_connections(client_ip,bucket DESC);
+ALTER TABLE client_connections ADD COLUMN IF NOT EXISTS inbound_port integer CHECK(inbound_port BETWEEN 0 AND 65535);
+CREATE INDEX IF NOT EXISTS client_connections_missing_port_idx ON client_connections(id) WHERE inbound_port IS NULL;
 
 -- A finite, resumable scan of logs retained before log-derived ingestion began.
 CREATE TABLE IF NOT EXISTS client_connection_log_backfill (

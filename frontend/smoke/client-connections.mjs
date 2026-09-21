@@ -4,6 +4,26 @@ import { createClientConnectionView } from "../modules/client-connection-view.js
 import { installClientConnections } from "../modules/client-connections.js";
 
 export async function run() {
+// Calendar queries use local midnight and the following midnight, including DST.
+const previousTZ = process.env.TZ;
+try {
+  process.env.TZ = "America/New_York";
+  for (const [day, start, end] of [
+    ["2026-03-08", "2026-03-08T05:00:00.000Z", "2026-03-09T04:00:00.000Z"],
+    ["2026-11-01", "2026-11-01T04:00:00.000Z", "2026-11-02T05:00:00.000Z"],
+  ]) {
+    const q = connectionQuery({ date: day });
+    assert.equal(q.get("since"), start);
+    assert.equal(q.get("until"), end);
+  }
+  process.env.TZ = "Asia/Shanghai";
+  assert.equal(defaultConnectionFilters(Date.parse("2026-09-19T20:00:00Z")).date, "2026-09-20");
+  assert.equal(connectionQuery({ date: "2026-09-20" }).get("since"), "2026-09-19T16:00:00.000Z");
+  for (const date of ["", "bad", "2026-02-30", "2026-13-01"]) assert.throws(() => connectionQuery({ date }), /日期/);
+} finally {
+  if (previousTZ === undefined) delete process.env.TZ;
+  else process.env.TZ = previousTZ;
+}
 const filters = defaultConnectionFilters(Date.parse("2026-09-19T08:00:00Z"));
 const query = connectionQuery({ ...filters, client_ip: "2001:db8::1", port: "443", inbound: "a&b" }, 7);
 assert.equal(query.get("group_by"), "ip");
@@ -22,7 +42,7 @@ assert.equal(connectionLocationLabel({ non_public: true }), "非公网");
 assert.equal(connectionLocationLabel({}), "—");
 assert.match(connectionSourceLabel({}), /等待内核日志/);
 assert.equal(connectionSourceLabel({ updated_at: "2020-01-01", status: "ok" }), "已读取内核日志");
-assert.match(connectionSourceDetail({ updated_at: "2020-01-01", status: "ok" }), /面板保存的内核日志/);
+assert.match(connectionSourceDetail({ updated_at: "2020-01-01", status: "ok" }), /入库.*按日期查询/);
 assert.ok(!connectionSourceDetail({}).includes("Agent"));
 
 const esc = value => String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll('"', "&quot;");

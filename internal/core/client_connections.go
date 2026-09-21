@@ -2,7 +2,7 @@ package core
 
 import "time"
 
-const ClientConnectionRetention = 7 * 24 * time.Hour
+const ClientConnectionQueryWindow = 7 * 24 * time.Hour
 
 // These are observations extracted from panel core logs, not session counts.
 // Empty metadata and zero local port mean the log did not include the field.

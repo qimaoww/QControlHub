@@ -61,7 +61,7 @@ export async function testClientConnectionsRuntime(preview = false) {
   assert.ok(document.querySelector(".context-sidebar [data-connection-agent]"), "node filters belong in context sidebar");
   assert.ok(!document.querySelector(".context-sidebar form"), "sidebar must use node navigation, not a filter form");
   document.querySelector(".connection-sources").open = true;
-  assert.match(document.querySelector(".connection-source-detail").textContent, /面板保存的内核日志/);
+  assert.match(document.querySelector(".connection-source-detail").textContent, /入库.*按日期查询/);
   assert.match(document.querySelector(".connection-summary").textContent, /观测连接 2/g);
   assert.ok(document.querySelector('.connection-sources [title*="panel core logs"]'));
   assert.equal(document.querySelectorAll(".client-connections p").length, 0, "connection page should not contain explanatory paragraphs");
@@ -128,6 +128,15 @@ export async function testClientConnectionsRuntime(preview = false) {
   await waitFor(() => requests.length > beforeRecent && !document.querySelector('[data-connection-refresh]').disabled, "recent query missing");
   assert.ok(!requests.at(-1).has("include_non_public"));
   assert.equal(document.querySelector('[name="include_non_public"]').value, "");
+  const dateForm = document.querySelector("[data-connection-filters]");
+  dateForm.elements.date.value = "2026-09-01";
+  const beforeDate = requests.length;
+  dateForm.requestSubmit();
+  await waitFor(() => requests.length > beforeDate && !document.querySelector('[data-connection-refresh]').disabled, "date query missing");
+  assert.equal(requests.at(-1).get("since"), new Date("2026-09-01T00:00:00").toISOString());
+  assert.equal(requests.at(-1).get("until"), new Date("2026-09-02T00:00:00").toISOString());
+  assert.equal(document.querySelector('[name="date"]').value, "2026-09-01");
+  assert.ok(document.querySelector(".connection-filter-panel summary").textContent.includes("2026-09-01"));
   const beforeAll = requests.length;
   document.querySelector('[data-connection-agent=""]').click();
   await waitFor(() => requests.length > beforeAll && !document.querySelector('[data-connection-refresh]').disabled, "all nodes request missing");

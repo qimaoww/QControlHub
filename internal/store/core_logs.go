@@ -108,7 +108,7 @@ func (s *Store) StoreCoreLogs(ctx context.Context, agentID string, batch core.Co
 			return mapError(err)
 		}
 	}
-	if err := storeClientConnectionLogs(ctx, tx, agentID, accepted); err != nil {
+	if err := s.storeClientConnectionLogs(ctx, tx, agentID, accepted); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)

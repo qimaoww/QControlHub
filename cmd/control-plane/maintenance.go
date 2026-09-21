@@ -69,6 +69,9 @@ func backfillClientConnectionLogs(ctx context.Context, dataStore *store.Store) {
 	for ctx.Err() == nil {
 		operationContext, cancel := context.WithTimeout(ctx, 15*time.Second)
 		done, err := dataStore.BackfillClientConnectionLogs(operationContext)
+		if err == nil && done {
+			done, err = dataStore.BackfillClientConnectionPorts(operationContext)
+		}
 		cancel()
 		if err == nil {
 			if done {

@@ -47,6 +47,7 @@ export function createSettingsView({ esc, can, shell }) {
         </div></div><div class="settings-subsection"><h4>PostgreSQL 数据保留</h4><div class="settings-grid settings-grid-three">
           ${select(item, "core_log_minimum_level", "内核日志最低级别", [["debug", "调试及以上"], ["info", "信息及以上"], ["warning", "警告及以上"], ["error", "错误及以上"], ["critical", "仅严重错误"], ["off", "停止保存新日志"]], disabled)}
           ${select(item, "core_log_retention_days", "内核日志保留", [[1, "1 天"], [3, "3 天"], [7, "7 天"], [14, "14 天"], [30, "30 天"]], disabled, "每小时清理过期日志，不按条数截断")}
+          ${field("client_connection_retention_days", "来源 IP 历史保留天数", `<input name="client_connection_retention_days" type="number" min="0" max="3650" step="1" value="${esc(item.client_connection_retention_days ?? 30)}" required ${disabled}>`, "0 为永久保留；每小时清理过期记录，独立于内核日志保留时间")}
           ${select(item, "metric_retention_days", "指标历史保留", [[7, "7 天"], [14, "14 天"], [30, "30 天"]], disabled)}
           ${select(item, "audit_retention_days", "审计记录保留", [[0, "永久"], [30, "30 天"], [90, "90 天"], [180, "180 天"]], disabled)}
           ${select(item, "task_retention_days", "任务记录保留", [[0, "永久"], [30, "30 天"], [90, "90 天"], [180, "180 天"]], disabled)}

@@ -24,7 +24,7 @@ func TestConnectionInboundPortRequiresUnambiguousName(t *testing.T) {
 }
 
 func TestClientConnectionPortUsesHistoricalDeployment(t *testing.T) {
-	db, ctx, _ := isolatedConfigScopeStore(t)
+	db, ctx, databaseURL := isolatedConfigScopeStore(t)
 	agent := sharedTestAgent(t, db, ctx)
 	if _, err := db.pool.Exec(ctx, `UPDATE agents SET capabilities='["xray"]',supported_capabilities='["xray"]' WHERE id=$1`, agent.ID); err != nil {
 		t.Fatal(err)
@@ -43,7 +43,7 @@ func TestClientConnectionPortUsesHistoricalDeployment(t *testing.T) {
 	if _, err := db.SaveAgentConfig(ctx, input, 1); err != nil {
 		t.Fatal(err)
 	}
-	deployed := old.Add(time.Hour)
+	deployed := old.Add(time.Hour + 30*time.Second)
 	if _, err := db.pool.Exec(ctx, `INSERT INTO tasks(id,agent_id,action,engine,config_id,config_version,status,created_at,started_at,finished_at)
  VALUES('tsk_port_new',$1,'deploy','xray',$2,2,'succeeded',$3,$3,$3)`, agent.ID, config.ID, deployed); err != nil {
 		t.Fatal(err)
@@ -51,7 +51,14 @@ func TestClientConnectionPortUsesHistoricalDeployment(t *testing.T) {
 	if err := db.StoreCoreLogs(ctx, agent.ID, core.CoreLogBatch{ID: "log_0123456789abcdef", Entries: []core.CoreLogEntry{
 		{Engine: core.EngineXray, Level: "info", Message: "from 8.8.8.8:50123 accepted tcp:1.1.1.1:443 [entry -> direct]", LoggedAt: old.Add(time.Minute)},
 		{Engine: core.EngineXray, Level: "info", Message: "from 8.8.4.4:50124 accepted tcp:1.1.1.1:443 [entry -> direct]", LoggedAt: deployed.Add(time.Minute)},
+		{Engine: core.EngineXray, Level: "info", Message: "from 9.9.9.10:50126 accepted tcp:1.1.1.1:443 [entry -> direct]", LoggedAt: deployed.Add(-10 * time.Second)},
 		{Engine: core.EngineXray, Level: "info", Message: "from 9.9.9.9:50125 accepted tcp:1.1.1.1:443", LoggedAt: deployed.Add(time.Minute)},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	// Extending the same minute/tuple across a deployment must clear ambiguity.
+	if err := db.StoreCoreLogs(ctx, agent.ID, core.CoreLogBatch{ID: "log_0123456789abcde1", Entries: []core.CoreLogEntry{
+		{Engine: core.EngineXray, Level: "info", Message: "from 9.9.9.10:50126 accepted tcp:1.1.1.1:443 [entry -> direct]", LoggedAt: deployed.Add(10 * time.Second)},
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -60,17 +67,27 @@ func TestClientConnectionPortUsesHistoricalDeployment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(history.Records) != 3 {
+	if len(history.Records) != 4 {
 		t.Fatalf("records=%+v", history.Records)
 	}
-	expected := map[string]int{"8.8.8.8": 8443, "8.8.4.4": 9443, "9.9.9.9": 0}
+	expected := map[string]int{"8.8.8.8": 8443, "8.8.4.4": 9443, "9.9.9.9": 0, "9.9.9.10": 0}
 	for _, record := range history.Records {
 		if record.LocalPort != expected[record.ClientIP] || record.LocalIP != "" {
 			t.Fatalf("wrong listener: %+v", record)
 		}
 	}
-	// Pruned history must not fall back to today's changed port.
-	if _, err := db.pool.Exec(ctx, `DELETE FROM config_revisions WHERE config_id=$1 AND version=1`, config.ID); err != nil {
+	// Snapshot the metadata of pre-upgrade rows before the old config is pruned.
+	if _, err := db.pool.Exec(ctx, `ALTER TABLE client_connections DROP COLUMN inbound_port; DELETE FROM qcontrolhub_schema_migrations WHERE version>=69; INSERT INTO qcontrolhub_schema_migrations(version) VALUES(68) ON CONFLICT DO NOTHING`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if done, err := db.BackfillClientConnectionPorts(ctx); err != nil || !done {
+		t.Fatalf("port backfill: done=%v err=%v", done, err)
+	}
+	// Pruned logs and deployment history cannot erase persisted listener ports.
+	if _, err := db.pool.Exec(ctx, `DELETE FROM config_revisions; DELETE FROM core_logs; DELETE FROM tasks; DELETE FROM configs`); err != nil {
 		t.Fatal(err)
 	}
 	history, err = db.ClientConnectionHistory(ctx, query)
@@ -78,21 +95,24 @@ func TestClientConnectionPortUsesHistoricalDeployment(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, r := range history.Records {
-		if r.ClientIP == "8.8.8.8" && r.LocalPort != 0 {
-			t.Fatalf("used current configuration for old log: %+v", r)
+		if r.ClientIP == "8.8.8.8" && r.LocalPort != 8443 {
+			t.Fatalf("lost persisted port after pruning: %+v", r)
 		}
 	}
-	// An observation crossing a deployment cannot have a unique historical port.
-	if _, err := db.pool.Exec(ctx, `UPDATE client_connections SET first_seen=$2,last_seen=$3 WHERE agent_id=$1 AND client_ip='8.8.4.4'`, agent.ID, deployed.Add(-time.Second), deployed.Add(time.Second)); err != nil {
-		t.Fatal(err)
-	}
-	history, err = db.ClientConnectionHistory(ctx, query)
+	// A newly opened Store can answer without any original logs/configurations.
+	resumed, err := OpenWithConfigKey(ctx, databaseURL, true, testEncryptionKey("config-scope"))
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer resumed.Close()
+	query.GroupByIP = true
+	history, err = resumed.ClientConnectionHistory(ctx, query)
+	if err != nil || len(history.Records) != 4 {
+		t.Fatalf("reopened history: %+v %v", history, err)
+	}
 	for _, r := range history.Records {
-		if r.ClientIP == "8.8.4.4" && r.LocalPort != 0 {
-			t.Fatalf("assigned deployment-crossing tuple: %+v", r)
+		if len(r.Endpoints) != 1 || r.Endpoints[0].LocalPort != expected[r.ClientIP] {
+			t.Fatalf("lost port snapshot after reopening: %+v", r)
 		}
 	}
 }

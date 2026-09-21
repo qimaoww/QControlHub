@@ -128,42 +128,19 @@ func (s *Store) clientConnectionIPEndpoints(ctx context.Context, tx pgx.Tx, reco
 		return err
 	}
 	params := append(append([]any{}, args...), payload)
-	// Collapse source ports with identical observation windows first.
-	// Keep deployment boundaries separate so a historical port change is not
-	// lost when multiple visits to the same IP are combined into one page row.
-	// Build the task timeline once per agent/engine instead of scanning task
-	// history for every repeated observation.
-	rows, err := tx.Query(ctx, `WITH observations AS MATERIALIZED (
- SELECT min(c.id) AS id,c.client_ip,c.agent_id,a.name AS agent_name,c.engine,c.inbound,c.local_port,c.first_seen,c.last_seen
+	// Listener ports were captured when observations entered the database.
+	rows, err := tx.Query(ctx, `SELECT min(c.id),host(c.client_ip),c.agent_id,a.name,c.engine,COALESCE(c.inbound_port,c.local_port)
  FROM client_connections c JOIN agents a ON a.id=c.agent_id`+where+fmt.Sprintf(`
  AND (c.agent_id,c.engine,c.client_ip) IN (
   SELECT agent_id,engine,client_ip::inet FROM jsonb_to_recordset($%d::jsonb) AS wanted(agent_id text,engine text,client_ip text)
- )
- GROUP BY c.client_ip,c.agent_id,a.name,c.engine,c.inbound,c.local_port,c.first_seen,c.last_seen
- ), deployments AS MATERIALIZED (
-  SELECT DISTINCT ON (task.agent_id,task.engine,COALESCE(task.started_at,task.finished_at))
-   task.id,task.agent_id,task.engine,task.finished_at,COALESCE(task.started_at,task.finished_at) AS effective_at
-  FROM tasks task JOIN (
-   SELECT DISTINCT agent_id,engine FROM observations WHERE local_port=0 AND inbound<>''
-  ) wanted ON wanted.agent_id=task.agent_id AND wanted.engine=task.engine
-  WHERE task.action IN ('deploy','import-existing') AND task.status<>'canceled'
-   AND COALESCE(task.started_at,task.finished_at) IS NOT NULL
-  ORDER BY task.agent_id,task.engine,COALESCE(task.started_at,task.finished_at),task.id DESC
- ), deployment_windows AS MATERIALIZED (
-  SELECT *,lead(effective_at) OVER (PARTITION BY agent_id,engine ORDER BY effective_at) AS next_at FROM deployments
- ) SELECT min(observed.id),host(observed.client_ip),observed.agent_id,observed.agent_name,observed.engine,observed.inbound,observed.local_port,min(observed.first_seen),max(observed.last_seen)
- FROM observations observed
- LEFT JOIN deployment_windows deployed ON observed.local_port=0 AND observed.inbound<>''
-  AND deployed.agent_id=observed.agent_id AND deployed.engine=observed.engine
-  AND deployed.effective_at<=observed.last_seen AND (deployed.next_at IS NULL OR observed.last_seen<deployed.next_at)
- GROUP BY observed.client_ip,observed.agent_id,observed.agent_name,observed.engine,observed.inbound,observed.local_port,deployed.id,(deployed.finished_at<=observed.first_seen)`, len(params)), params...)
+ ) GROUP BY c.client_ip,c.agent_id,a.name,c.engine,COALESCE(c.inbound_port,c.local_port)`, len(params)), params...)
 	if err != nil {
 		return err
 	}
 	observations := []core.ClientConnectionRecord{}
 	for rows.Next() {
 		var r core.ClientConnectionRecord
-		if err := rows.Scan(&r.ID, &r.ClientIP, &r.AgentID, &r.AgentName, &r.Engine, &r.Inbound, &r.LocalPort, &r.FirstSeen, &r.LastSeen); err != nil {
+		if err := rows.Scan(&r.ID, &r.ClientIP, &r.AgentID, &r.AgentName, &r.Engine, &r.LocalPort); err != nil {
 			rows.Close()
 			return err
 		}
@@ -171,9 +148,6 @@ func (s *Store) clientConnectionIPEndpoints(ctx context.Context, tx pgx.Tx, reco
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
-		return err
-	}
-	if err := s.resolveClientConnectionPorts(ctx, tx, observations); err != nil {
 		return err
 	}
 	seen := make([]map[core.ClientConnectionEndpoint]bool, len(records))

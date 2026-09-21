@@ -11,7 +11,7 @@ import (
 
 // Called in the same transaction as log insertion. Retried batches cannot add
 // observations, and rejected/minimum-level-filtered logs never enter history.
-func storeClientConnectionLogs(ctx context.Context, tx pgx.Tx, agentID string, entries []core.CoreLogEntry) error {
+func (s *Store) storeClientConnectionLogs(ctx context.Context, tx pgx.Tx, agentID string, entries []core.CoreLogEntry) error {
 	type observation struct {
 		core.ClientConnection
 		LoggedAt time.Time `json:"logged_at"`
@@ -44,13 +44,38 @@ func storeClientConnectionLogs(ctx context.Context, tx pgx.Tx, agentID string, e
 	}
 	// Group within each minute before ON CONFLICT: one log batch may contain
 	// multiple events for the same tuple, including out-of-order replayed logs.
-	_, err = tx.Exec(ctx, `INSERT INTO client_connections(agent_id,bucket,engine,protocol,inbound,transport,client_ip,client_port,local_ip,local_port,first_seen,last_seen,source)
- SELECT $1,date_trunc('minute',logged_at),engine,protocol,inbound,transport,client_ip::inet,client_port,local_ip::inet,local_port,min(logged_at),max(logged_at),'core_logs'
+	rows, err := tx.Query(ctx, `INSERT INTO client_connections(agent_id,bucket,engine,protocol,inbound,transport,client_ip,client_port,local_ip,local_port,first_seen,last_seen,source,inbound_port)
+ SELECT $1,date_trunc('minute',logged_at),engine,protocol,inbound,transport,client_ip::inet,client_port,local_ip::inet,local_port,min(logged_at),max(logged_at),'core_logs',CASE WHEN inbound='' THEN local_port END
  FROM jsonb_to_recordset($2::jsonb) AS x(engine text,protocol text,inbound text,transport text,client_ip text,client_port integer,local_ip text,local_port integer,logged_at timestamptz)
  GROUP BY date_trunc('minute',logged_at),engine,protocol,inbound,transport,client_ip,client_port,local_ip,local_port
  ON CONFLICT(agent_id,bucket,engine,protocol,inbound,transport,client_ip,client_port,local_ip,local_port)
- DO UPDATE SET first_seen=LEAST(client_connections.first_seen,EXCLUDED.first_seen),last_seen=GREATEST(client_connections.last_seen,EXCLUDED.last_seen),source='core_logs'`, agentID, payload)
-	return err
+ DO UPDATE SET inbound_port=CASE
+  WHEN client_connections.first_seen>EXCLUDED.first_seen OR client_connections.last_seen<EXCLUDED.last_seen
+  THEN CASE WHEN EXCLUDED.inbound='' THEN EXCLUDED.local_port END ELSE client_connections.inbound_port END,
+ first_seen=LEAST(client_connections.first_seen,EXCLUDED.first_seen),last_seen=GREATEST(client_connections.last_seen,EXCLUDED.last_seen),source='core_logs'
+ RETURNING id,agent_id,engine,inbound,local_port,first_seen,last_seen,inbound_port`, agentID, payload)
+	if err != nil {
+		return err
+	}
+	var records []core.ClientConnectionRecord
+	for rows.Next() {
+		var record core.ClientConnectionRecord
+		var savedPort *int
+		if err := rows.Scan(&record.ID, &record.AgentID, &record.Engine, &record.Inbound, &record.LocalPort, &record.FirstSeen, &record.LastSeen, &savedPort); err != nil {
+			rows.Close()
+			return err
+		}
+		// Preserve captured metadata on duplicate delivery. Expanded observation
+		// windows are resolved again to avoid guessing across deployments.
+		if savedPort == nil {
+			records = append(records, record)
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	return s.persistClientConnectionPorts(ctx, tx, records)
 }
 
 // BackfillClientConnectionLogs indexes one bounded page of retained panel logs.
@@ -71,7 +96,7 @@ func (s *Store) BackfillClientConnectionLogs(ctx context.Context) (bool, error) 
 		return true, tx.Commit(ctx)
 	}
 	rows, err := tx.Query(ctx, `SELECT id,agent_id,engine,message,logged_at,received_at FROM core_logs
- WHERE id>$1 AND id<=$2 AND received_at>=$3 AND logged_at>=$3 ORDER BY id LIMIT 1000`, lastID, upperID, time.Now().UTC().Add(-core.ClientConnectionRetention))
+ WHERE id>$1 AND id<=$2 ORDER BY id LIMIT 1000`, lastID, upperID)
 	if err != nil {
 		return false, err
 	}
@@ -106,7 +131,7 @@ func (s *Store) BackfillClientConnectionLogs(ctx context.Context) (bool, error) 
 		if err != nil {
 			return false, err
 		}
-		if err := storeClientConnectionLogs(ctx, tx, agentID, logs); err != nil {
+		if err := s.storeClientConnectionLogs(ctx, tx, agentID, logs); err != nil {
 			return false, err
 		}
 	}
