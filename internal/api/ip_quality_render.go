@@ -13,32 +13,23 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
-// The panel renders the detector's own printed report, so the archived image is
-// exactly what ip.sh prints in a terminal: no layout is re-derived from the JSON
-// and nothing can drift when upstream changes its output. Only the ANSI colour
-// codes are translated, using the palette the reference terminal shows.
+// Keep the native report's compact 14px text and ANSI palette. A fixed
+// half-em cell grid keeps fallback fonts aligned with the background bands.
 const (
-	ipQualityRenderCellWidth  = 10
-	ipQualityRenderLineHeight = 22
-	ipQualityRenderFontSize   = 16
-	ipQualityRenderPaddingX   = 18
-	ipQualityRenderPaddingY   = 16
+	ipQualityRenderFontSize   = 14
+	ipQualityRenderCellWidth  = 7
+	ipQualityRenderLineHeight = 14
 	ipQualityRenderMaxText    = 64 << 10
-)
-
-const (
-	ipQualityBackground = "#011627"
-	ipQualityDefault    = "#d6deeb"
-	ipQualityRed        = "#ef5350"
-	ipQualityGreen      = "#22da6e"
-	ipQualityYellow     = "#c5e478"
-	ipQualityBlue       = "#78b8eb"
-	ipQualityMagenta    = "#c586c0"
-	ipQualityCyan       = "#21c7a8"
-	// Bright black is the terminal's dim grey. The rest of the bright range
-	// mirrors the normal colours, so only this entry needs its own value.
-	ipQualityDim        = "#5f7e97"
-	ipQualityFontFamily = "ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', monospace"
+	ipQualityBackground       = "#000000"
+	ipQualityDefault          = "#bbbbbb"
+	ipQualityRed              = "#bb0000"
+	ipQualityGreen            = "#00bb00"
+	ipQualityYellow           = "#aa9900"
+	ipQualityBlue             = "#0000bb"
+	ipQualityMagenta          = "#bb00bb"
+	ipQualityCyan             = "#00bbbb"
+	ipQualityDim              = "#555555"
+	ipQualityFontFamily       = "'Sarasa Mono SC', 'Noto Sans Mono CJK SC', SimHei, Consolas, 'DejaVu Sans Mono', monospace"
 )
 
 // ipQualityANSI maps the SGR codes upstream emits onto that palette. Plain black
@@ -216,29 +207,36 @@ func buildIPQualitySVG(lines []ipQualityLine) []byte {
 			columns = width
 		}
 	}
-	width := ipQualityRenderPaddingX*2 + columns*ipQualityRenderCellWidth
-	height := ipQualityRenderPaddingY*2 + len(lines)*ipQualityRenderLineHeight
 	var builder strings.Builder
-	fmt.Fprintf(&builder, `<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d" viewBox="0 0 %d %d" role="img">`, width, height, width, height)
+	// A fixed grid makes the archive independent of the client font metrics.
+	width, height := (columns+2)*ipQualityRenderCellWidth, len(lines)*ipQualityRenderLineHeight
+	fmt.Fprintf(&builder, `<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d" viewBox="0 0 %d %d" font-family="%s" font-size="%d" font-style="normal" role="img" xml:space="preserve">`, width, height, width, height, ipQualityFontFamily, ipQualityRenderFontSize)
 	fmt.Fprintf(&builder, `<title>IPQuality report</title><rect width="100%%" height="100%%" fill="%s"/>`, ipQualityBackground)
-	fmt.Fprintf(&builder, `<g font-family="%s" font-size="%d">`, ipQualityFontFamily, ipQualityRenderFontSize)
-	for index, line := range lines {
-		top := ipQualityRenderPaddingY + index*ipQualityRenderLineHeight
-		baseline := top + ipQualityRenderFontSize + 2
-		x := ipQualityRenderPaddingX
+	builder.WriteString(`<g>`)
+	// Native reports draw all backgrounds before text. Never let a later
+	// rectangle erase an italic glyph or an adjacent row's ascender.
+	for row, line := range lines {
+		column := 1
 		for _, cell := range line {
-			cellWidth := ipQualityDisplayWidth(cell.text) * ipQualityRenderCellWidth
-			if cell.bg != "" && cellWidth > 0 {
-				fmt.Fprintf(&builder, `<rect x="%d" y="%d" width="%d" height="%d" fill="%s"/>`,
-					x, top, cellWidth, ipQualityRenderLineHeight, cell.bg)
+			width := ipQualityDisplayWidth(cell.text)
+			if cell.bg != "" && width > 0 {
+				fmt.Fprintf(&builder, `<rect x="%d" y="%d" width="%d" height="%d" fill="%s"/>`, column*ipQualityRenderCellWidth, row*ipQualityRenderLineHeight, width*ipQualityRenderCellWidth, ipQualityRenderLineHeight, cell.bg)
 			}
+			column += width
+		}
+	}
+	builder.WriteString(`</g><g dominant-baseline="central">`)
+	for row, line := range lines {
+		x := ipQualityRenderCellWidth
+		y := row*ipQualityRenderLineHeight + ipQualityRenderLineHeight/2
+		for _, cell := range line {
 			for _, run := range ipQualityRuns(cell.text) {
 				runWidth := run.cells * ipQualityRenderCellWidth
-				if run.text != "" {
-					fmt.Fprintf(&builder, `<text x="%d" y="%d" fill="%s"%s%s xml:space="preserve">%s</text>`,
-						x, baseline, cell.fill, ipQualityStyleAttributes(cell), ipQualityLengthAttributes(runWidth),
-						ipQualityEscape(run.text))
+				length := ""
+				if runWidth > 0 {
+					length = fmt.Sprintf(` textLength="%d" lengthAdjust="spacingAndGlyphs"`, runWidth)
 				}
+				fmt.Fprintf(&builder, `<text x="%s" y="%d" fill="%s"%s%s xml:space="preserve">%s</text>`, ipQualityRunPositions(run.text, x), y, cell.fill, ipQualityStyleAttributes(cell), length, ipQualityEscape(run.text))
 				x += runWidth
 			}
 		}
@@ -247,14 +245,29 @@ func buildIPQualitySVG(lines []ipQualityLine) []byte {
 	return []byte(builder.String())
 }
 
-// ipQualityStyleAttributes renders the SGR state a run inherits.
+// Pin repeated glyph origins as well, since fallback fonts may kern pairs.
+func ipQualityRunPositions(text string, x int) string {
+	for _, character := range text {
+		if ipQualityRuneWidth(character) == 0 {
+			return strconv.Itoa(x)
+		}
+	}
+	var positions strings.Builder
+	for _, character := range text {
+		if positions.Len() > 0 {
+			positions.WriteByte(' ')
+		}
+		positions.WriteString(strconv.Itoa(x))
+		x += ipQualityRuneWidth(character) * ipQualityRenderCellWidth
+	}
+	return positions.String()
+}
+
+// Reports use upright text throughout; bold and underline still carry emphasis.
 func ipQualityStyleAttributes(cell ipQualityCell) string {
 	attributes := ""
 	if cell.bold {
 		attributes += ` font-weight="bold"`
-	}
-	if cell.italic {
-		attributes += ` font-style="italic"`
 	}
 	if cell.underline {
 		attributes += ` text-decoration="underline"`
@@ -262,42 +275,30 @@ func ipQualityStyleAttributes(cell ipQualityCell) string {
 	return attributes
 }
 
-// ipQualityLengthAttributes pins a run to the terminal grid. A browser picks a
-// monospace face whose advance is not exactly one cell, so a run drawn at its
-// natural advance would creep left of the columns below it; textLength forces
-// every character to keep its cell.
-func ipQualityLengthAttributes(width int) string {
-	if width <= 0 {
-		return ""
-	}
-	return fmt.Sprintf(` textLength="%d" lengthAdjust="spacingAndGlyphs"`, width)
-}
-
-// ipQualityRun is a maximal slice of one styled cell whose characters all
-// occupy the same number of terminal cells, so it can be pinned as a unit.
+// ipQualityRun contains a shaping cluster or repeated identical glyphs.
 type ipQualityRun struct {
 	text  string
 	cells int
 }
 
-// ipQualityRuns splits a cell so that narrow and wide characters are pinned
-// separately: one textLength can only scale a run uniformly, and scaling a
-// mixed run would still leave its wide characters off the grid.
+// Fit each glyph independently: even "monospace" can resolve to a proportional
+// font on a minimal system. Group repeated characters (especially padding) to
+// keep archives compact, and retain combining marks with their base glyph.
 func ipQualityRuns(text string) []ipQualityRun {
 	runs := make([]ipQualityRun, 0, 4)
-	start, unit, width := 0, -1, 0
+	start, width := 0, 0
+	var previous rune
 	for index, character := range text {
 		cells := ipQualityRuneWidth(character)
-		if unit < 0 {
-			unit = cells
-		} else if cells != unit && cells != 0 {
+		if index > start && character != previous && cells != 0 {
 			// Slice the original UTF-8 bytes once per run instead of copying
 			// the growing prefix for every character. Combining marks remain
 			// attached to the preceding run without adding any cells.
 			runs = append(runs, ipQualityRun{text: text[start:index], cells: width})
-			start, unit, width = index, cells, 0
+			start, width = index, 0
 		}
 		width += cells
+		previous = character
 	}
 	if start < len(text) {
 		runs = append(runs, ipQualityRun{text: text[start:], cells: width})

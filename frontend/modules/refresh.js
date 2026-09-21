@@ -66,6 +66,7 @@ function nodeKey(node) {
     "data-task-status-filter",
     "data-core-log-agent",
     "data-context-traffic-agent",
+    "data-ip-quality-agent",
     "data-inbound",
     "data-protocol",
     "data-config-field",

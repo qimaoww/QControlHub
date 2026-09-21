@@ -1,4 +1,6 @@
 import { assert, delay, waitFor } from "./assertions.mjs";
+import { testIPQualityScenarios } from "./ip-quality-scenarios.mjs";
+import { testIPQualitySVG } from "./ip-quality-svg.mjs";
 import { ipQualityToday, nextIPQualityDay } from "../modules/ip-quality-model.js";
 
 export async function testIPQualityRuntime(mode, preview = false) {
@@ -32,7 +34,7 @@ export async function testIPQualityRuntime(mode, preview = false) {
     task_id: taskID, agent_id: "quality-a", status: "succeeded",
     created_at: `${today}T06:00:00Z`, finished_at: `${today}T06:05:00Z`,
     archives: [4, 6].map((family) => ({ family, rendered_at: `${today}T06:05:00Z`, sha256: "a".repeat(64) })),
-    result: { reports: [report("203.0.113.10"), report("2001:db8:1234:5678:90ab:cdef:1234:5678")] },
+    result: { reports: [report("203.0.113.10"), report("2001:0db8:1234:5678:90ab:cdef:1234:5678")] },
   });
   const fixture = {
     records: [completeRecord()],
@@ -79,18 +81,26 @@ export async function testIPQualityRuntime(mode, preview = false) {
   };
   location.hash = "#ip-quality";
   await import("../app.js");
-  const card = () => document.querySelector('[data-ip-quality-agent="quality-a"]');
+  const card = () => document.querySelector('[data-ip-quality-panel="quality-a"]');
+  const panel = (id) => document.querySelector(`[data-ip-quality-panel="${id}"]`);
+  const sidebar = () => document.querySelector(".context-sidebar");
+  const sidebarLink = (id) => sidebar().querySelector(`[data-ip-quality-agent="${id}"]`);
   await waitFor(() => card()?.textContent.includes("已完成"), "IP quality page did not load");
-  assert.equal(document.querySelectorAll(".ip-quality-node-card").length, 3, "shared host was exposed");
   assert.ok(document.querySelector('.dock-nav a[href="#ip-quality"]'), "IP quality navigation is missing");
-  assert.equal(getComputedStyle(document.querySelector(".context-sidebar")).display, "none",
-    "IP quality reserves an empty context sidebar");
+  // The project-standard context sidebar filters the page down to one node.
+  assert.notEqual(getComputedStyle(sidebar()).display, "none", "IP quality hid the node sidebar");
+  assert.equal(sidebar().querySelectorAll("[data-ip-quality-agent]").length, 3, "shared host was exposed");
+  assert.equal(sidebarLink("quality-shared"), null, "shared host was exposed");
+  assert.ok(sidebarLink("quality-a").classList.contains("active"), "the selected node is not highlighted");
+  assert.equal(sidebar().querySelectorAll("[data-ip-quality-panel]").length, 0, "the sidebar reused the panel attribute");
+  assert.equal(document.querySelectorAll("[data-ip-quality-panel]").length, 1, "the page rendered more than one node");
   assert.ok(document.querySelector('[data-ip-quality-day="1"]').disabled, "future day is selectable");
   card().querySelector(".ip-quality-details>summary").click();
   const images = [...card().querySelectorAll(".ip-quality-archive img")];
   assert.equal(images.length, 2, "database report images are missing");
   await waitFor(() => images.every((image) => image.complete && image.naturalWidth > 0), "archived SVG images failed to load");
   assert.ok(images.every((image) => image.src.startsWith(location.origin+"/api/v1/ip-quality/")), "preview fetched an upstream URL");
+  await testIPQualitySVG(images);
   assert.equal(card().querySelectorAll(".ip-quality-report").length, 2, "dual-stack report lost a family");
   const [ipv4Report, ipv6Report] = card().querySelectorAll(".ip-quality-report");
   assert.ok(ipv4Report.textContent.includes("干净"), "IPv4 lost its DNS blacklist results");
@@ -109,8 +119,6 @@ export async function testIPQualityRuntime(mode, preview = false) {
   } else {
     assert.equal(card().querySelector("[data-ip-quality-schedule]").getAttribute("aria-pressed"), "true",
       "an existing administrator plan was shown as disabled");
-    assert.ok(document.querySelector('[data-ip-quality-run="quality-b"]').disabled, "legacy Agent is executable");
-    assert.ok(document.querySelector('[data-ip-quality-run="quality-c"]').disabled, "offline Agent is executable");
   }
   const dateInput = document.querySelector("[data-ip-quality-date]");
   const readsBeforeClear = fixture.calls.filter((call) => call.path === "/ip-quality" && call.method === "GET").length;
@@ -130,17 +138,31 @@ export async function testIPQualityRuntime(mode, preview = false) {
   };
   await refresh();
   assert.ok(card().querySelector(".ip-quality-details").open, "refresh closed an expanded report");
+  if (!readonly) {
+    // Selecting a node repaints the panel in place and moves the sidebar highlight.
+    for (const [id, reason] of [["quality-b", "legacy Agent is executable"], ["quality-c", "offline Agent is executable"]]) {
+      sidebarLink(id).click();
+      await waitFor(() => panel(id), `selecting ${id} did not switch the panel`);
+      assert.ok(panel(id).querySelector("[data-ip-quality-run]").disabled, reason);
+      assert.ok(sidebarLink(id).classList.contains("active"), `${id} was not highlighted after selection`);
+      assert.equal(document.querySelectorAll("[data-ip-quality-panel]").length, 1, "selection left stale panels behind");
+    }
+    sidebarLink("quality-a").click();
+    await waitFor(() => card(), "returning to the recorded node failed");
+  }
   document.querySelector('[data-ip-quality-day="-1"]').click();
   await waitFor(() => document.querySelector("[data-ip-quality-date]").value === yesterday &&
     card()?.textContent.includes("检测失败"), "previous-day navigation did not load history");
   assert.equal(card().querySelector(".ip-quality-report"), null, "previous date retained today's report");
-  assert.equal(document.querySelectorAll(".ip-quality-node-card").length, 1, "history lists nodes with no records");
+  assert.equal(sidebar().querySelectorAll("[data-ip-quality-agent]").length, 1, "history lists nodes with no records");
+  assert.equal(document.querySelectorAll("[data-ip-quality-panel]").length, 1, "history rendered more than one node");
   assert.equal(document.querySelector("[data-ip-quality-run]"), null, "history has a run button");
   assert.equal(document.querySelector("[data-ip-quality-schedule]"), null, "history can change schedules");
   assert.ok(!card().textContent.includes("节点在线"), "history displays a current online state");
   document.querySelector('[data-ip-quality-day="-1"]').click();
-  await waitFor(() => document.querySelector(".ip-quality-grid .empty")?.textContent.includes("当天没有检测记录"),
+  await waitFor(() => document.querySelector(".ip-quality-workspace .empty")?.textContent.includes("当天没有检测记录"),
     "empty history did not show its own empty state");
+  assert.equal(sidebar().querySelectorAll("[data-ip-quality-agent]").length, 0, "empty history still offered a node");
   document.querySelector("[data-ip-quality-today]").click();
   await waitFor(() => card()?.textContent.includes("已完成"), "return to today failed");
   fixture.failed = true;
@@ -177,5 +199,6 @@ export async function testIPQualityRuntime(mode, preview = false) {
   await delay(60);
   assert.ok(document.documentElement.scrollWidth <= innerWidth + 1, "expanded report overflows on mobile");
   assert.equal(violations.length, 0, `production CSP violations: ${violations.join(", ")}`);
+  await testIPQualityScenarios({ fixture, refresh, card });
   if (preview) await new Promise(() => {});
 }
