@@ -18,7 +18,7 @@ function loadSVG(url) {
 export async function testIPQualitySVG(images) {
   for (const image of images) {
     const rows = image.src.endsWith("/6") ? 46 : 47;
-    assert.equal(image.naturalHeight, rows * 14, "complete report height changed");
+    assert.equal(image.naturalHeight, rows * 20 + 32, "complete report height changed");
     const box = image.getBoundingClientRect();
     assert.ok(Math.abs(box.width / box.height - image.naturalWidth / image.naturalHeight) < 0.01,
       "page stretched the archive image");

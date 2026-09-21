@@ -194,15 +194,15 @@ func ipQualityNativeFixture(t *testing.T) string {
 func TestIPQualityRenderPreservesCompleteNativeReport(t *testing.T) {
 	svg := mustRenderIPQualitySVG(t, ipQualityNativeFixture(t))
 	for _, want := range []string{
-		`width="518" height="658"`, `font-size="14"`,
+		`width="608" height="972"`, `font-size="14"`,
 		`font-style="normal"`,
 		`fill="#000000"`, `fill="#bbbbbb"`, `fill="#00bbbb"`,
 		`fill="#00bb00"`, `fill="#bb0000"`, `fill="#aa9900"`,
 		`dominant-baseline="central"`, `xml:space="preserve"`,
-		`y="651"`,
-		`<rect x="119" y="336" width="112" height="14" fill="#00bb00"/>`,
-		`<rect x="231" y="336" width="112" height="14" fill="#aa9900"/>`,
-		`<rect x="343" y="336" width="7" height="14" fill="#bb0000"/>`,
+		`y="946"`,
+		`<rect x="144" y="496" width="128" height="20" fill="#00bb00"/>`,
+		`<rect x="272" y="496" width="128" height="20" fill="#aa9900"/>`,
+		`<rect x="400" y="496" width="8" height="20" fill="#bb0000"/>`,
 	} {
 		if !strings.Contains(svg, want) {
 			t.Fatalf("native presentation lost %s", want)
@@ -352,7 +352,7 @@ func TestIPQualityRenderKeepsBrightForegroundAsText(t *testing.T) {
 		t.Fatalf("bright black did not become a visible foreground: %s", dim)
 	}
 	background := mustRenderIPQualitySVG(t, "\x1b[102m绿底\x1b[0m")
-	want := `<rect x="7" y="0" width="28" height="14" fill="` + ipQualityGreen + `"/>`
+	want := `<rect x="16" y="16" width="32" height="20" fill="` + ipQualityGreen + `"/>`
 	if !strings.Contains(background, want) {
 		t.Fatalf("bright background was not painted: %s", background)
 	}

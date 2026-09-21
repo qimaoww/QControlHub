@@ -1571,13 +1571,11 @@ dialog.config-access-dialog::backdrop{background:rgba(17,20,36,.34);backdrop-fil
 
 .ip-quality-archive{display:grid;gap:10px;min-width:0;margin:0;padding-top:12px;border-top:1px solid var(--line)}
 .ip-quality-archive figcaption{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:calc(12px * var(--ui-font-scale))}
-/* The archived report is a tall, portrait terminal capture. Cap both axes with
-   auto dimensions so a wide console shows both address families without a
-   full-height wall of image and without ever stretching the capture. */
-.ip-quality-archive img{display:block;width:auto;height:auto;max-width:min(100%,560px);max-height:800px;border-radius:8px;background:var(--surface-2)}
+/* Preserve the report's row spacing: only available width scales the image. */
+.ip-quality-archive img{display:block;width:auto;height:auto;max-width:min(100%,640px);border-radius:8px;background:var(--surface-2)}
 .ip-quality-archive small,.ip-quality-archive details{color:var(--muted);font-size:calc(10px * var(--ui-font-scale));overflow-wrap:anywhere}
 .ip-quality-archive summary{cursor:pointer;min-height:28px;line-height:1.7;padding:4px 0}
-.ip-quality-archives{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,360px),1fr));gap:16px;min-width:0}
+.ip-quality-archives{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,480px),1fr));align-items:start;gap:24px;min-width:0}
 .ip-quality-archive>a{display:grid;place-items:center;min-width:0;padding:16px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2)}
 
 @container (max-width:700px){
