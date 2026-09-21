@@ -6,6 +6,7 @@ import { installClientConnections } from "../modules/client-connections.js";
 export async function run() {
 const filters = defaultConnectionFilters(Date.parse("2026-09-19T08:00:00Z"));
 const query = connectionQuery({ ...filters, client_ip: "2001:db8::1", port: "443", inbound: "a&b" }, 7);
+assert.equal(query.get("group_by"), "ip");
 assert.equal(query.get("client_ip"), "2001:db8::1");
 assert.equal(query.has("inbound"), false);
 assert.equal(query.has("port"), false);
@@ -38,6 +39,13 @@ assert.match(html, /<code>443<\/code>/);
 assert.ok(!html.includes("未知入站"));
 assert.ok(!html.includes("未知协议"));
 assert.ok(!html.includes('name="port"'));
+
+const grouped = view({ ips: 1, flows: 3, records: [{ id: 7, client_ip: "8.8.8.8", endpoints: [
+  { agent_name: "Node A", engine: "xray", local_port: 8443 },
+  { agent_name: "Node B", engine: "sing-box", local_port: 9443 },
+] }] }, filters, []);
+assert.equal((grouped.match(/<code>8\.8\.8\.8<\/code>/g) || []).length, 1);
+for (const expected of ["Node A", "Node B", "8443", "9443", "本页 1 个 IP"]) assert.ok(grouped.includes(expected));
 
 // Construction is inert; stale reads from a previous account/navigation cannot paint.
 const oldDocument = globalThis.document;

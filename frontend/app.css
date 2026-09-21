@@ -974,6 +974,7 @@ dialog.config-access-dialog::backdrop{background:rgba(17,20,36,.34);backdrop-fil
 .connection-table-scroll th{background:var(--surface-2);color:var(--muted);font-size:calc(10px * var(--ui-font-scale));font-weight:650}
 .connection-table-scroll tbody tr:hover{background:var(--surface-2)}
 .connection-table-scroll time{color:var(--muted);font-size:calc(10px * var(--ui-font-scale))}
+.connection-endpoint{display:flex;align-items:center;min-height:30px}
 .connection-times{display:grid;gap:5px}
 .connection-inbound{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:5px 8px}
 .connection-inbound small{grid-column:2;color:var(--muted);font-size:calc(10px * var(--ui-font-scale))}

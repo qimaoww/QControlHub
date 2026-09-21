@@ -6,7 +6,7 @@ export async function testClientConnectionsRuntime(preview = false) {
   let releaseLocations, releaseShell;
   const locationsReady = new Promise(resolve => { releaseLocations = resolve; });
   const shellReady = new Promise(resolve => { releaseShell = resolve; });
-  const row = { id: 2, agent_id: "alpha", agent_name: "Alpha · 东京", engine: "xray", protocol: "vless", inbound: "vless-443", transport: "tcp", client_ip: "2001:db8::8", location: { country_code: "CN", country: "China", province: "广东" }, client_port: 52000, local_ip: "192.0.2.1", local_port: 443, first_seen: now, last_seen: now };
+  const row = { id: 2, agent_id: "alpha", agent_name: "Alpha · 东京", engine: "xray", protocol: "vless", inbound: "vless-443", transport: "tcp", client_ip: "2001:db8::8", location: { country_code: "CN", country: "China", province: "广东" }, client_port: 52000, local_ip: "192.0.2.1", local_port: 443, endpoints: [{ agent_id: "alpha", agent_name: "Alpha · 东京", engine: "xray", local_port: 443 }, { agent_id: "alpha", agent_name: "Alpha · 东京", engine: "xray", local_port: 8443 }], first_seen: now, last_seen: now };
   window.fetch = async (input, options) => {
     const url = new URL(typeof input === "string" ? input : input.url, location.href);
     if (["/api/v1/settings", "/api/v1/overview"].includes(url.pathname)) await shellReady;
@@ -37,7 +37,18 @@ export async function testClientConnectionsRuntime(preview = false) {
   await waitFor(() => document.querySelector("tbody")?.textContent.includes("中国 · 广东"), "location enrichment did not paint");
   assert.ok(!document.querySelector("tbody").textContent.includes("192.0.2.1"));
   assert.ok(!document.querySelector("tbody").textContent.includes("52000"));
-  assert.equal(document.querySelector('td[data-label="入站端口"]').textContent, "443");
+  assert.equal(document.querySelectorAll("tbody tr").length, 1);
+  assert.equal(document.querySelectorAll('td[data-label="来源 IP"] code').length, 1);
+  assert.equal([...document.querySelectorAll('td[data-label="入站端口"] code')].map(cell => cell.textContent).join(","), "443,8443");
+  for (const label of ["服务器", "内核", "入站端口"]) {
+    const cell = document.querySelector(`td[data-label="${label}"]`);
+    const endpoints = [...cell.querySelectorAll(".connection-endpoint")].map(element => element.getBoundingClientRect());
+    assert.equal(endpoints.length, 2);
+    assert.equal(endpoints[0].left, endpoints[1].left, "endpoint lines must stay in the same value column");
+    assert.ok(endpoints[1].top >= endpoints[0].bottom, "endpoint lines must not overlap");
+    if (getComputedStyle(cell).display === "grid") assert.ok(endpoints[0].left >= cell.getBoundingClientRect().left + 80, "endpoint values must not enter the mobile label column");
+  }
+  assert.equal(requests.at(-1).get("group_by"), "ip");
   assert.ok(!document.querySelector("tbody").textContent.includes("未知入站"));
   assert.ok(document.querySelector('a[href="#client-connections"]'), "connection navigation missing");
   assert.ok(!document.body.classList.contains("no-context"), "connection page must show filter sidebar");

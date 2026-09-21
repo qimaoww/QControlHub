@@ -10,7 +10,7 @@ export function defaultConnectionFilters(now = Date.now()) {
 }
 
 export function connectionQuery(filters, before = "") {
-  const params = new URLSearchParams();
+  const params = new URLSearchParams({ group_by: "ip" });
   for (const key of ["agent_id", "engine", "client_ip", "include_non_public"]) {
     if (filters[key]) params.set(key, filters[key]);
   }

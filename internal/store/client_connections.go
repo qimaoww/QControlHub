@@ -12,6 +12,7 @@ import (
 )
 
 type ClientConnectionQuery struct {
+	GroupByIP bool
 	// RecordsOnly is used by deferred location enrichment; authorization and
 	// detail filters remain identical, without repeating expensive aggregates.
 	RecordsOnly      bool
@@ -120,38 +121,47 @@ func (s *Store) ClientConnectionHistory(ctx context.Context, q ClientConnectionQ
 		}
 	}
 
-	recordArgs := append([]any{}, args...)
-	recordWhere := where
-	if q.Before > 0 {
-		recordArgs = append(recordArgs, q.Before)
-		recordWhere += fmt.Sprintf(" AND c.id<$%d", len(recordArgs))
-	}
-	recordArgs = append(recordArgs, q.Limit+1)
-	rows, err := tx.Query(ctx, `SELECT c.id,c.agent_id,a.name,c.engine,c.protocol,c.inbound,c.transport,host(c.client_ip),c.client_port,CASE WHEN c.local_port=0 THEN '' ELSE host(c.local_ip) END,c.local_port,c.first_seen,c.last_seen`+from+recordWhere+fmt.Sprintf(` ORDER BY c.id DESC LIMIT $%d`, len(recordArgs)), recordArgs...)
-	if err != nil {
-		return result, err
-	}
-	for rows.Next() {
-		var r core.ClientConnectionRecord
-		if err := rows.Scan(&r.ID, &r.AgentID, &r.AgentName, &r.Engine, &r.Protocol, &r.Inbound, &r.Transport, &r.ClientIP, &r.ClientPort, &r.LocalIP, &r.LocalPort, &r.FirstSeen, &r.LastSeen); err != nil {
-			rows.Close()
+	if q.GroupByIP {
+		result.Records, result.NextBefore, err = s.clientConnectionIPRecords(ctx, tx, q, where, args)
+		if err != nil {
 			return result, err
 		}
-		result.Records = append(result.Records, r)
-	}
-	rows.Close()
-	if err = rows.Err(); err != nil {
-		return result, err
-	}
-	if len(result.Records) > q.Limit {
-		result.Records = result.Records[:q.Limit]
-		result.NextBefore = result.Records[len(result.Records)-1].ID
+	} else {
+		recordArgs := append([]any{}, args...)
+		recordWhere := where
+		if q.Before > 0 {
+			recordArgs = append(recordArgs, q.Before)
+			recordWhere += fmt.Sprintf(" AND c.id<$%d", len(recordArgs))
+		}
+		recordArgs = append(recordArgs, q.Limit+1)
+		rows, err := tx.Query(ctx, `SELECT c.id,c.agent_id,a.name,c.engine,c.protocol,c.inbound,c.transport,host(c.client_ip),c.client_port,CASE WHEN c.local_port=0 THEN '' ELSE host(c.local_ip) END,c.local_port,c.first_seen,c.last_seen`+from+recordWhere+fmt.Sprintf(` ORDER BY c.id DESC LIMIT $%d`, len(recordArgs)), recordArgs...)
+		if err != nil {
+			return result, err
+		}
+		for rows.Next() {
+			var r core.ClientConnectionRecord
+			if err := rows.Scan(&r.ID, &r.AgentID, &r.AgentName, &r.Engine, &r.Protocol, &r.Inbound, &r.Transport, &r.ClientIP, &r.ClientPort, &r.LocalIP, &r.LocalPort, &r.FirstSeen, &r.LastSeen); err != nil {
+				rows.Close()
+				return result, err
+			}
+			result.Records = append(result.Records, r)
+		}
+		rows.Close()
+		if err = rows.Err(); err != nil {
+			return result, err
+		}
+		if len(result.Records) > q.Limit {
+			result.Records = result.Records[:q.Limit]
+			result.NextBefore = result.Records[len(result.Records)-1].ID
+		}
 	}
 	if q.RecordsOnly {
 		return result, tx.Commit(ctx)
 	}
-	if err := s.resolveClientConnectionPorts(ctx, tx, result.Records); err != nil {
-		return result, err
+	if !q.GroupByIP {
+		if err := s.resolveClientConnectionPorts(ctx, tx, result.Records); err != nil {
+			return result, err
+		}
 	}
 	sourceArgs := []any{}
 	sourceWhere := ` WHERE a.revoked_at IS NULL` + agentAdministrationClause(ctx, "a.id", &sourceArgs)
@@ -159,7 +169,7 @@ func (s *Store) ClientConnectionHistory(ctx context.Context, q ClientConnectionQ
 		sourceArgs = append(sourceArgs, q.AgentID)
 		sourceWhere += fmt.Sprintf(" AND a.id=$%d", len(sourceArgs))
 	}
-	rows, err = tx.Query(ctx, `SELECT a.id,a.name,s.updated_at,COALESCE(s.status,'no_logs'),COALESCE(s.detail,''),COALESCE(s.truncated,false)
+	rows, err := tx.Query(ctx, `SELECT a.id,a.name,s.updated_at,COALESCE(s.status,'no_logs'),COALESCE(s.detail,''),COALESCE(s.truncated,false)
  FROM agents a LEFT JOIN client_connection_sources s ON s.agent_id=a.id AND s.source='core_logs'`+sourceWhere+` ORDER BY a.name,a.id`, sourceArgs...)
 	if err != nil {
 		return result, err
