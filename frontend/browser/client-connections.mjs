@@ -3,7 +3,7 @@ import { assert, waitFor } from "./assertions.mjs";
 export async function testClientConnectionsRuntime(preview = false) {
   const fallback = window.fetch.bind(window), requests = [], locationRequests = [];
   const now = new Date().toISOString();
-  let releaseLocations, releaseShell;
+  let releaseLocations, releaseShell, holdHistory;
   const locationsReady = new Promise(resolve => { releaseLocations = resolve; });
   const shellReady = new Promise(resolve => { releaseShell = resolve; });
   const row = { id: 2, agent_id: "alpha", agent_name: "Alpha · 东京", engine: "xray", protocol: "vless", inbound: "vless-443", transport: "tcp", client_ip: "2001:db8::8", location: { country_code: "CN", country: "China", province: "广东" }, client_port: 52000, local_ip: "192.0.2.1", local_port: 443, endpoints: [{ agent_id: "alpha", agent_name: "Alpha · 东京", engine: "xray", local_port: 443 }, { agent_id: "alpha", agent_name: "Alpha · 东京", engine: "xray", local_port: 8443 }], first_seen: now, last_seen: now };
@@ -23,6 +23,7 @@ export async function testClientConnectionsRuntime(preview = false) {
         return new Response(JSON.stringify({ records: [...rows, ...rows.map(row => ({ ...row, id: row.id + 1 }))] }), { status: 200, headers: { "Content-Type": "application/json" } });
       }
       requests.push(url.searchParams);
+      if (holdHistory) await holdHistory;
       const older = url.searchParams.get("cursor") === "next-page";
       return new Response(JSON.stringify({
         records: rows.filter(row => (!url.searchParams.get("agent_id") || row.agent_id === url.searchParams.get("agent_id")) && (!url.searchParams.get("engine") || row.engine === url.searchParams.get("engine"))).map(row => ({ ...row, id: older ? row.id + 1 : row.id, first_seen: older ? "2026-09-20T00:00:00Z" : now, location: {} })),
@@ -66,11 +67,30 @@ export async function testClientConnectionsRuntime(preview = false) {
   assert.equal(document.querySelectorAll(".client-connections p").length, 0, "connection page should not contain explanatory paragraphs");
   const beforeNode = requests.length;
   document.querySelector('[data-connection-agent="alpha"]').click();
-  await waitFor(() => requests.length > beforeNode && !document.querySelector('[type="submit"]').disabled, "node filter request missing");
+  await waitFor(() => requests.length > beforeNode && !document.querySelector('[data-connection-refresh]').disabled, "node filter request missing");
   assert.equal(requests.at(-1).get("agent_id"), "alpha");
   assert.ok(document.querySelector('[data-connection-agent="alpha"]').classList.contains("active"));
   assert.equal(document.querySelectorAll(".connection-source").length, 1, "status must follow selected node");
   assert.equal(document.querySelectorAll(".context-list [data-connection-agent]").length, 2, "sidebar must retain other nodes");
+  await waitFor(() => document.querySelector('tbody')?.textContent.includes("中国 · 广东"), "node geography did not finish");
+  const cachedReads = requests.length, cachedLocations = locationRequests.length;
+  document.querySelector('[data-connection-agent=""]').click();
+  assert.equal(document.querySelectorAll(".connection-ip-row").length, 4, "cached all-node rows paint synchronously");
+  document.querySelector('[data-connection-agent="alpha"]').click();
+  assert.equal(document.querySelectorAll(".connection-ip-row").length, 3, "cached node rows paint synchronously");
+  assert.equal(requests.length, cachedReads, "switching cached nodes does not query history");
+  assert.equal(locationRequests.length, cachedLocations, "cached geography is reused");
+  let releaseHistory;
+  holdHistory = new Promise(resolve => { releaseHistory = resolve; });
+  document.querySelector('[data-connection-agent="bravo"]').click();
+  assert.equal(document.querySelectorAll(".connection-ip-row").length, 1, "uncached filter previews matching rows immediately");
+  assert.ok(document.querySelector("tbody").textContent.includes("Bravo"));
+  assert.ok(!document.querySelector('[type="submit"]').disabled, "slow read must not disable filtering");
+  document.querySelector('[data-connection-agent="alpha"]').click();
+  assert.equal(document.querySelectorAll(".connection-ip-row").length, 3, "can switch to cached node during a slow read");
+  releaseHistory(); holdHistory = null;
+  await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  assert.ok(!document.querySelector("tbody").textContent.includes("Bravo"), "late response must not overwrite selected node");
   document.querySelector(".connection-filter-panel").open = true;
   const form = document.querySelector("[data-connection-filters]");
   assert.equal(form.elements.include_non_public.value, "");
@@ -82,7 +102,7 @@ export async function testClientConnectionsRuntime(preview = false) {
   form.elements.include_non_public.value = "true";
   const beforeQuery = requests.length;
   form.requestSubmit();
-  await waitFor(() => requests.length > beforeQuery && !document.querySelector('[type="submit"]').disabled, "filter request missing");
+  await waitFor(() => requests.length > beforeQuery && !document.querySelector('[data-connection-refresh]').disabled, "filter request missing");
   assert.equal(requests.at(-1).get("agent_id"), "alpha", "query form must preserve sidebar node filter");
   assert.equal(requests.at(-1).get("client_ip"), "2001:db8::8");
   assert.equal(requests.at(-1).has("inbound"), false);
@@ -105,12 +125,12 @@ export async function testClientConnectionsRuntime(preview = false) {
   assert.ok(!requests.at(-1).has("cursor"));
   const beforeRecent = requests.length;
   document.querySelector("[data-connection-recent]").click();
-  await waitFor(() => requests.length > beforeRecent && !document.querySelector('[type="submit"]').disabled, "recent query missing");
+  await waitFor(() => requests.length > beforeRecent && !document.querySelector('[data-connection-refresh]').disabled, "recent query missing");
   assert.ok(!requests.at(-1).has("include_non_public"));
   assert.equal(document.querySelector('[name="include_non_public"]').value, "");
   const beforeAll = requests.length;
   document.querySelector('[data-connection-agent=""]').click();
-  await waitFor(() => requests.length > beforeAll && !document.querySelector('[type="submit"]').disabled, "all nodes request missing");
+  await waitFor(() => requests.length > beforeAll && !document.querySelector('[data-connection-refresh]').disabled, "all nodes request missing");
   assert.ok(!requests.at(-1).has("agent_id"));
   assert.ok(document.querySelector('[data-connection-agent=""]').classList.contains("active"));
   assert.ok(document.documentElement.scrollWidth <= innerWidth + 1, "connection page overflows viewport");

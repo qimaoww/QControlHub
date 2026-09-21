@@ -7,7 +7,7 @@ export function clientConnectionSidebar({ state, esc }) {
   return `<a class="context-primary ${selected ? "" : "active"}" href="#client-connections" data-connection-agent="">全部节点</a><div class="context-section-label"><span>按节点查看</span><b>${nodes.length}</b></div><nav class="context-list" aria-label="连接 IP 节点">${nodes.map(source => `<a class="${selected === source.agent_id ? "active" : ""}" href="#client-connections" data-connection-agent="${esc(source.agent_id)}"><i class="status-dot ${source.status === "ok" && source.updated_at ? "ok" : ""}"></i><span><strong>${esc(source.agent_name)}</strong><small>${esc(connectionSourceLabel(source))}</small></span></a>`).join("") || `<p>${state.data.connectionLoading ? "正在读取节点…" : "暂无节点"}</p>`}</nav>`;
 }
 
-export function clientConnectionFilters({ filters, loading, esc, engineName }) {
+export function clientConnectionFilters({ filters, esc, engineName }) {
   const advanced = filters.include_non_public === "true";
   const select = (name, label, options) => `<label>${label}<select name="${name}"><option value="">全部</option>${options.map(([value, text]) => `<option value="${esc(value)}"${filters[name] === value ? " selected" : ""}>${esc(text)}</option>`).join("")}</select></label>`;
   const input = (name, label, type = "text", extra = "") => `<label>${label}<input name="${name}" type="${type}" value="${esc(filters[name] || "")}" ${extra}></label>`;
@@ -24,7 +24,7 @@ export function clientConnectionFilters({ filters, loading, esc, engineName }) {
           <details class="connection-advanced"${advanced ? " open" : ""}><summary>更多筛选</summary><div>
             <label>来源范围<select name="include_non_public"><option value=""${filters.include_non_public === "true" ? "" : " selected"}>仅公网</option><option value="true"${filters.include_non_public === "true" ? " selected" : ""}>包含非公网</option></select></label>
           </div></details>
-          <div class="connection-query-actions"><button class="button small" type="button" data-connection-recent${loading ? " disabled" : ""}>最近 24 小时</button><button class="button primary small" type="submit"${loading ? " disabled" : ""}>${loading ? "查询中…" : "查询"}</button></div>
+          <div class="connection-query-actions"><button class="button small" type="button" data-connection-recent>最近 24 小时</button><button class="button primary small" type="submit">查询</button></div>
         </footer>
       </form>
   </details>`;
