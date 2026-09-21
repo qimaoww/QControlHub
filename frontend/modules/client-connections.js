@@ -30,6 +30,7 @@ export function installClientConnections(ctx) {
         refresh: () => { void load({ cursor, cursors, force: true }); },
         search: values => { data.connectionFilters = { ...filters, ...values }; void load(); },
         selectAgent: agent_id => { data.connectionFilters = { ...filters, agent_id }; void load(); },
+        month: values => { data.connectionFilters = { ...filters, ...values, date: defaultConnectionFilters().date, period: "month" }; void load(); },
         recent: () => { data.connectionFilters = { ...filters, ...defaultConnectionFilters() }; void load(); },
         next: () => { if (result?.next_cursor) void load({ cursor: result.next_cursor, cursors: [...cursors, cursor] }); },
         previous: () => { if (cursors.length) void load({ cursor: cursors.at(-1), cursors: cursors.slice(0, -1) }); },

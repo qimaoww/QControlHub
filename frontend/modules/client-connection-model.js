@@ -6,7 +6,7 @@ export function connectionDateInput(value) {
 }
 
 export function defaultConnectionFilters(now = Date.now()) {
-  return { date: connectionDateInput(now).slice(0, 10), include_non_public: "" };
+  return { period: "day", date: connectionDateInput(now).slice(0, 10), include_non_public: "" };
 }
 
 export function connectionQuery(filters, cursor = "") {
@@ -21,13 +21,20 @@ export function connectionQuery(filters, cursor = "") {
     if (!Number.isFinite(+since) || connectionDateInput(since).slice(0, 10) !== filters.date)
       throw new Error("请选择有效的查询日期");
     until = new Date(since);
-    until.setDate(until.getDate() + 1);
+    if (filters.period === "month") {
+      since.setDate(1);
+      until = new Date(since);
+      until.setMonth(until.getMonth() + 1);
+      params.set("bucket", "day");
+    } else {
+      until.setDate(until.getDate() + 1);
+    }
   } else {
     since = new Date(filters.since);
     until = new Date(filters.until);
   }
-  if (!Number.isFinite(+since) || !Number.isFinite(+until) || until <= since || until - since > 7 * 86400000)
-    throw new Error("请选择有效的时间范围，单次最多查询 7 天");
+  if (!Number.isFinite(+since) || !Number.isFinite(+until) || until <= since || until - since > 32 * 86400000)
+    throw new Error("请选择有效的时间范围，单次最多查询 32 天");
   params.set("since", since.toISOString());
   params.set("until", until.toISOString());
   if (cursor) params.set("cursor", cursor);

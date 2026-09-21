@@ -44,7 +44,7 @@ func (q ClientConnectionQuery) Validate() error {
 	}
 	if q.Since.IsZero() || !q.Until.After(q.Since) || q.Until.Sub(q.Since) > core.ClientConnectionQueryWindow || q.Port < 0 || q.Port > 65535 || q.Before < 0 || q.Limit < 1 || q.Limit > 200 ||
 		(q.Engine != "" && !q.Engine.Valid()) || (q.Transport != "" && q.Transport != "tcp" && q.Transport != "udp") || (q.Bucket != "minute" && q.Bucket != "hour" && q.Bucket != "day") || len(q.AgentID) > 100 || len(q.Protocol) > 40 || len(q.Inbound) > 400 {
-		return fmt.Errorf("%w: invalid connection query (maximum window: 7 days)", ErrInvalid)
+		return fmt.Errorf("%w: invalid connection query (maximum window: 32 days)", ErrInvalid)
 	}
 	if q.ClientIP != "" {
 		if ip, err := netip.ParseAddr(q.ClientIP); err != nil || ip.Zone() != "" {

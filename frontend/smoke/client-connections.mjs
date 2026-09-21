@@ -16,7 +16,16 @@ try {
     assert.equal(q.get("since"), start);
     assert.equal(q.get("until"), end);
   }
+  process.env.TZ = "Europe/Berlin";
+  const october = connectionQuery({ date: "2026-10-25", period: "month" });
+  assert.equal(october.get("since"), "2026-09-30T22:00:00.000Z");
+  assert.equal(october.get("until"), "2026-10-31T23:00:00.000Z");
+  assert.equal(october.get("bucket"), "day");
   process.env.TZ = "Asia/Shanghai";
+  for (const [date, end] of [["2026-01-31", "2026-01-31T16:00:00.000Z"], ["2024-02-29", "2024-02-29T16:00:00.000Z"], ["2026-12-31", "2026-12-31T16:00:00.000Z"]]) {
+    assert.equal(connectionQuery({ date, period: "month" }).get("until"), end);
+  }
+  assert.equal(defaultConnectionFilters().period, "day");
   assert.equal(defaultConnectionFilters(Date.parse("2026-09-19T20:00:00Z")).date, "2026-09-20");
   assert.equal(connectionQuery({ date: "2026-09-20" }).get("since"), "2026-09-19T16:00:00.000Z");
   for (const date of ["", "bad", "2026-02-30", "2026-13-01"]) assert.throws(() => connectionQuery({ date }), /日期/);
@@ -33,8 +42,8 @@ assert.equal(query.has("port"), false);
 assert.equal(query.get("cursor"), "7");
 assert.equal(query.has("include_non_public"), false);
 assert.equal(connectionQuery({ ...filters, include_non_public: "true" }, 7).get("include_non_public"), "true");
-assert.throws(() => connectionQuery({ since: "bad", until: "bad" }), /7/);
-assert.throws(() => connectionQuery({ since: "2026-01-01", until: "2026-02-01" }), /7/);
+assert.throws(() => connectionQuery({ since: "bad", until: "bad" }), /32/);
+assert.throws(() => connectionQuery({ since: "2026-01-01", until: "2026-03-01" }), /32/);
 assert.equal(connectionLocationLabel({ country_code: "CN", province: "广东" }), "中国 · 广东");
 assert.equal(connectionLocationLabel({ country_code: "US", province: "California" }), "美国");
 assert.equal(connectionLocationLabel({ country_code: "CN" }), "中国");
