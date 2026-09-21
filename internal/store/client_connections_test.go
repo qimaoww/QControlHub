@@ -16,7 +16,7 @@ func TestClientConnectionHistoryDefaultsToPublicSources(t *testing.T) {
 	for _, prefix := range netpolicy.NonPublicPrefixes() {
 		address := prefix.Addr()
 		if address.IsUnspecified() || address.IsMulticast() {
-			continue // These cannot enter history: report validation rejects them.
+			continue // These cannot enter history: the log parser rejects them.
 		}
 		addresses = append(addresses, address.String())
 	}
@@ -133,7 +133,7 @@ func TestClientConnectionHistoryPersistenceAndIsolation(t *testing.T) {
 	if err != nil || hidden.Flows != 0 || len(hidden.Sources) != 0 {
 		t.Fatalf("hidden host leaked: %+v %v", hidden, err)
 	}
-	// A later empty sample cannot erase durable history.
+	// A later status update without observations cannot erase durable history.
 	if err := db.storeClientConnectionFixtures(ctx, agent.ID, clientConnectionFixtures{Status: "ok"}); err != nil {
 		t.Fatal(err)
 	}

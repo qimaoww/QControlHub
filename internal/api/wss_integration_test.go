@@ -204,7 +204,7 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 	}{Type: core.WireHeartbeat, Heartbeat: struct {
 		*core.HeartbeatRequest
 		ClientConnections clientConnectionFixtures `json:"client_connections"`
-	}{heartbeat.Heartbeat, clientConnectionFixtures{Status: "ok", Connections: []core.ClientConnection{{Engine: core.EngineSingBox, ClientIP: "198.51.100.9"}}}}}
+	}{heartbeat.Heartbeat, clientConnectionFixtures{Status: "ok", Connections: []core.ClientConnection{{Engine: core.EngineSingBox, Protocol: "vless", Inbound: "entry", Transport: "tcp", ClientIP: "198.51.100.9", ClientPort: 50123, LocalIP: "192.0.2.1", LocalPort: 443}}}}}
 	if err := wsjson.Write(ctx, connection, legacyHeartbeat); err != nil {
 		t.Fatalf("write heartbeat: %v", err)
 	}
