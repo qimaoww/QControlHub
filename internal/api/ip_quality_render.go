@@ -13,12 +13,14 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
-// Keep the native report's compact 14px text and ANSI palette. A fixed
-// half-em cell grid keeps fallback fonts aligned with the background bands.
+// Keep the native ANSI palette and upright text on a fixed cell grid, with
+// room between rows and around the report so dense tables remain readable.
 const (
 	ipQualityRenderFontSize   = 14
-	ipQualityRenderCellWidth  = 7
-	ipQualityRenderLineHeight = 14
+	ipQualityRenderCellWidth  = 8
+	ipQualityRenderLineHeight = 20
+	ipQualityRenderPadding    = 16
+	ipQualityRenderBandHeight = 16
 	ipQualityRenderMaxText    = 64 << 10
 	ipQualityBackground       = "#000000"
 	ipQualityDefault          = "#bbbbbb"
@@ -209,26 +211,26 @@ func buildIPQualitySVG(lines []ipQualityLine) []byte {
 	}
 	var builder strings.Builder
 	// A fixed grid makes the archive independent of the client font metrics.
-	width, height := (columns+2)*ipQualityRenderCellWidth, len(lines)*ipQualityRenderLineHeight
+	width, height := columns*ipQualityRenderCellWidth+2*ipQualityRenderPadding, len(lines)*ipQualityRenderLineHeight+2*ipQualityRenderPadding
 	fmt.Fprintf(&builder, `<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d" viewBox="0 0 %d %d" font-family="%s" font-size="%d" font-style="normal" role="img" xml:space="preserve">`, width, height, width, height, ipQualityFontFamily, ipQualityRenderFontSize)
 	fmt.Fprintf(&builder, `<title>IPQuality report</title><rect width="100%%" height="100%%" fill="%s"/>`, ipQualityBackground)
 	builder.WriteString(`<g>`)
 	// Native reports draw all backgrounds before text. Never let a later
 	// rectangle erase an italic glyph or an adjacent row's ascender.
 	for row, line := range lines {
-		column := 1
+		column := 0
 		for _, cell := range line {
 			width := ipQualityDisplayWidth(cell.text)
 			if cell.bg != "" && width > 0 {
-				fmt.Fprintf(&builder, `<rect x="%d" y="%d" width="%d" height="%d" fill="%s"/>`, column*ipQualityRenderCellWidth, row*ipQualityRenderLineHeight, width*ipQualityRenderCellWidth, ipQualityRenderLineHeight, cell.bg)
+				fmt.Fprintf(&builder, `<rect x="%d" y="%d" width="%d" height="%d" fill="%s"/>`, ipQualityRenderPadding+column*ipQualityRenderCellWidth, ipQualityRenderPadding+row*ipQualityRenderLineHeight+(ipQualityRenderLineHeight-ipQualityRenderBandHeight)/2, width*ipQualityRenderCellWidth, ipQualityRenderBandHeight, cell.bg)
 			}
 			column += width
 		}
 	}
 	builder.WriteString(`</g><g dominant-baseline="central">`)
 	for row, line := range lines {
-		x := ipQualityRenderCellWidth
-		y := row*ipQualityRenderLineHeight + ipQualityRenderLineHeight/2
+		x := ipQualityRenderPadding
+		y := ipQualityRenderPadding + row*ipQualityRenderLineHeight + ipQualityRenderLineHeight/2
 		for _, cell := range line {
 			for _, run := range ipQualityRuns(cell.text) {
 				runWidth := run.cells * ipQualityRenderCellWidth

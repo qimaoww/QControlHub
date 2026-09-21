@@ -41,7 +41,7 @@ export async function testIPQualityScenarios({ fixture, refresh, card }) {
       assert.equal(images.length, record?.archives?.length || 0, `${scenario.id}: stale/missing archive`);
       await waitFor(() => images.every((image) => image.complete && image.naturalWidth > 0), `${scenario.id}: image failed to load`);
       for (const image of images) {
-        assert.equal(image.naturalWidth, 518, `${scenario.id}: title widened the 72-column report`);
+        assert.equal(image.naturalWidth, 608, `${scenario.id}: title widened the 72-column report`);
       }
       const addresses = [...card().querySelectorAll(".ip-quality-addresses .ip-quality-address-value")];
       assert.equal(addresses.length, reports.length, `${scenario.id}: stale/missing address`);
