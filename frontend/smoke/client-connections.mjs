@@ -40,12 +40,15 @@ assert.ok(!html.includes("未知入站"));
 assert.ok(!html.includes("未知协议"));
 assert.ok(!html.includes('name="port"'));
 
-const grouped = view({ ips: 1, flows: 3, records: [{ id: 7, client_ip: "8.8.8.8", endpoints: [
-  { agent_name: "Node A", engine: "xray", local_port: 8443 },
-  { agent_name: "Node B", engine: "sing-box", local_port: 9443 },
-] }] }, filters, []);
-assert.equal((grouped.match(/<code>8\.8\.8\.8<\/code>/g) || []).length, 1);
-for (const expected of ["Node A", "Node B", "8443", "9443", "本页 1 个 IP"]) assert.ok(grouped.includes(expected));
+const grouped = view({ ips: 1, flows: 4, records: [
+  { id: 1, agent_id: "a", agent_name: "Node A", engine: "sing-box", client_ip: "8.8.8.8", endpoints: [{ local_port: 443 }] },
+  { id: 2, agent_id: "a", agent_name: "Node A", engine: "xray", client_ip: "8.8.8.8", endpoints: [{ local_port: 8443 }, { local_port: 443 }, { local_port: 8443 }] },
+  { id: 3, agent_id: "b", agent_name: "Node B", engine: "xray", client_ip: "8.8.8.8", endpoints: [{ local_port: 9443 }] },
+] }, filters, []);
+assert.equal((grouped.match(/<code>8\.8\.8\.8<\/code>/g) || []).length, 3, "same IP stays visible in each engine/node");
+assert.equal((grouped.match(/class="connection-ip-row"/g) || []).length, 3);
+assert.equal((grouped.match(/<code>8443<\/code>/g) || []).length, 1, "ports deduplicate within each row");
+for (const expected of ["Node A", "Node B", "8443", "9443", "本页 3 条"]) assert.ok(grouped.includes(expected));
 
 // Construction is inert; stale reads from a previous account/navigation cannot paint.
 const oldDocument = globalThis.document;

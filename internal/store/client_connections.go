@@ -12,6 +12,7 @@ import (
 )
 
 type ClientConnectionQuery struct {
+	// GroupByIP deduplicates within each agent and engine, never across them.
 	GroupByIP bool
 	// RecordsOnly is used by deferred location enrichment; authorization and
 	// detail filters remain identical, without repeating expensive aggregates.

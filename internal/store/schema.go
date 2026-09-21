@@ -3,7 +3,7 @@ package store
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 67
+const currentSchemaVersion = 68
 
 const schemaSQL = `
 CREATE TABLE IF NOT EXISTS agents (

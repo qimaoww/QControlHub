@@ -12,7 +12,7 @@ func TestClientConnectionsRejectInvalidQueries(t *testing.T) {
 	token := strings.Repeat("a", 48)
 	handler := New(nil, Config{AdminToken: token}).Handler()
 	queries := []string{"group_by=invalid", "group_by=ip&before=1", "group_by=ip&cursor=bad", "cursor=bad", "locations=invalid", "include_non_public=invalid", "limit=201", "port=65536", "port=0", "before=-1", "engine=unknown", "transport=quic", "client_ip=bad", "since=bad", "bucket=week", "since=2026-01-01T00:00:00Z&until=2026-02-01T00:00:00Z"}
-	for _, payload := range []string{`null`, `{}`, `{"endpoint":["xray"],"ip":"8.8.8.8"}`, `{"endpoint":["xray","A","agt_test"],"ip":"bad"}`, `{"endpoint":["xray","bad\u0000","agt_test"],"ip":"8.8.8.8"}`} {
+	for _, payload := range []string{`null`, `{}`, `{"scope":"engine_node_ip","endpoint":["xray"],"ip":"8.8.8.8"}`, `{"scope":"engine_node_ip","endpoint":["xray","A","agt_test"],"ip":"bad"}`, `{"endpoint":["xray","A","agt_test"],"ip":"8.8.8.8"}`, `{"scope":"engine_node_ip","endpoint":["xray","bad\u0000","agt_test"],"ip":"8.8.8.8"}`} {
 		queries = append(queries, "group_by=ip&cursor="+base64.RawURLEncoding.EncodeToString([]byte(payload)))
 	}
 	for _, query := range queries {

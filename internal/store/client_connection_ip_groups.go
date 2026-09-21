@@ -14,6 +14,7 @@ import (
 )
 
 type connectionIPCursor struct {
+	Scope     string   `json:"scope"`
 	Endpoint  []string `json:"endpoint"`
 	IP        string   `json:"ip"`
 	Inclusive bool     `json:"inclusive,omitempty"`
@@ -32,7 +33,7 @@ func decodeConnectionIPCursor(value string) (connectionIPCursor, error) {
 		return cursor, err
 	}
 	ip, err := netip.ParseAddr(cursor.IP)
-	if err != nil || ip.Zone() != "" || len(cursor.Endpoint) != 3 || !core.Engine(cursor.Endpoint[0]).Valid() {
+	if err != nil || ip.Zone() != "" || cursor.Scope != "engine_node_ip" || len(cursor.Endpoint) != 3 || !core.Engine(cursor.Endpoint[0]).Valid() {
 		return cursor, fmt.Errorf("invalid cursor")
 	}
 	for _, value := range cursor.Endpoint {
@@ -50,9 +51,7 @@ func (cursor connectionIPCursor) encode() string {
 
 func (s *Store) clientConnectionIPRecords(ctx context.Context, tx pgx.Tx, q ClientConnectionQuery, where string, args []any) ([]core.ClientConnectionRecord, string, string, error) {
 	params := append([]any{}, args...)
-	// Use the first actual endpoint as a unit: independently taking the minimum
-	// engine and node could create a pair that never served this IP.
-	const endpoint = `min(ARRAY[c.engine,a.name,c.agent_id] COLLATE "C")`
+	const endpoint = `ARRAY[c.engine,a.name,c.agent_id] COLLATE "C"`
 	having := ""
 	if q.Cursor != "" {
 		cursor, err := decodeConnectionIPCursor(q.Cursor)
@@ -71,7 +70,7 @@ func (s *Store) clientConnectionIPRecords(ctx context.Context, tx pgx.Tx, q Clie
 	// independent of connection arrival times and IDs.
 	rows, err := tx.Query(ctx, `SELECT min(c.id),host(c.client_ip),min(c.first_seen),max(c.last_seen),`+endpoint+`
  FROM client_connections c JOIN agents a ON a.id=c.agent_id`+where+`
- GROUP BY c.client_ip`+having+` ORDER BY `+endpoint+fmt.Sprintf(`,c.client_ip LIMIT $%d`, len(params)), params...)
+ GROUP BY c.engine,c.agent_id,a.name,c.client_ip`+having+` ORDER BY `+endpoint+fmt.Sprintf(`,c.client_ip LIMIT $%d`, len(params)), params...)
 	if err != nil {
 		return nil, "", "", err
 	}
@@ -85,6 +84,8 @@ func (s *Store) clientConnectionIPRecords(ctx context.Context, tx pgx.Tx, q Clie
 			return nil, "", "", err
 		}
 		key.IP = r.ClientIP
+		key.Scope = "engine_node_ip"
+		r.Engine, r.AgentName, r.AgentID = core.Engine(key.Endpoint[0]), key.Endpoint[1], key.Endpoint[2]
 		keys = append(keys, key)
 		records = append(records, r)
 	}
@@ -111,30 +112,50 @@ func (s *Store) clientConnectionIPRecords(ctx context.Context, tx pgx.Tx, q Clie
 }
 
 func (s *Store) clientConnectionIPEndpoints(ctx context.Context, tx pgx.Tx, records []core.ClientConnectionRecord, where string, args []any) error {
-	ips := make([]string, len(records))
-	index := map[string]int{}
-	for i, r := range records {
-		ips[i] = r.ClientIP
-		index[r.ClientIP] = i
+	type groupKey struct {
+		AgentID string      `json:"agent_id"`
+		Engine  core.Engine `json:"engine"`
+		IP      string      `json:"client_ip"`
 	}
-	params := append(append([]any{}, args...), ips)
+	groups := make([]groupKey, len(records))
+	index := map[groupKey]int{}
+	for i, r := range records {
+		groups[i] = groupKey{r.AgentID, r.Engine, r.ClientIP}
+		index[groups[i]] = i
+	}
+	payload, err := json.Marshal(groups)
+	if err != nil {
+		return err
+	}
+	params := append(append([]any{}, args...), payload)
 	// Collapse source ports with identical observation windows first.
 	// Keep deployment boundaries separate so a historical port change is not
 	// lost when multiple visits to the same IP are combined into one page row.
+	// Build the task timeline once per agent/engine instead of scanning task
+	// history for every repeated observation.
 	rows, err := tx.Query(ctx, `WITH observations AS MATERIALIZED (
  SELECT min(c.id) AS id,c.client_ip,c.agent_id,a.name AS agent_name,c.engine,c.inbound,c.local_port,c.first_seen,c.last_seen
- FROM client_connections c JOIN agents a ON a.id=c.agent_id`+where+fmt.Sprintf(` AND c.client_ip=ANY($%d::inet[])
+ FROM client_connections c JOIN agents a ON a.id=c.agent_id`+where+fmt.Sprintf(`
+ AND (c.agent_id,c.engine,c.client_ip) IN (
+  SELECT agent_id,engine,client_ip::inet FROM jsonb_to_recordset($%d::jsonb) AS wanted(agent_id text,engine text,client_ip text)
+ )
  GROUP BY c.client_ip,c.agent_id,a.name,c.engine,c.inbound,c.local_port,c.first_seen,c.last_seen
+ ), deployments AS MATERIALIZED (
+  SELECT DISTINCT ON (task.agent_id,task.engine,COALESCE(task.started_at,task.finished_at))
+   task.id,task.agent_id,task.engine,task.finished_at,COALESCE(task.started_at,task.finished_at) AS effective_at
+  FROM tasks task JOIN (
+   SELECT DISTINCT agent_id,engine FROM observations WHERE local_port=0 AND inbound<>''
+  ) wanted ON wanted.agent_id=task.agent_id AND wanted.engine=task.engine
+  WHERE task.action IN ('deploy','import-existing') AND task.status<>'canceled'
+   AND COALESCE(task.started_at,task.finished_at) IS NOT NULL
+  ORDER BY task.agent_id,task.engine,COALESCE(task.started_at,task.finished_at),task.id DESC
+ ), deployment_windows AS MATERIALIZED (
+  SELECT *,lead(effective_at) OVER (PARTITION BY agent_id,engine ORDER BY effective_at) AS next_at FROM deployments
  ) SELECT min(observed.id),host(observed.client_ip),observed.agent_id,observed.agent_name,observed.engine,observed.inbound,observed.local_port,min(observed.first_seen),max(observed.last_seen)
  FROM observations observed
- LEFT JOIN LATERAL (
-  SELECT task.id,task.finished_at FROM tasks task
-  WHERE observed.local_port=0 AND observed.inbound<>''
-   AND task.agent_id=observed.agent_id AND task.engine=observed.engine
-   AND task.action IN ('deploy','import-existing') AND task.status<>'canceled'
-   AND COALESCE(task.started_at,task.finished_at)<=observed.last_seen
-  ORDER BY COALESCE(task.started_at,task.finished_at) DESC,task.id DESC LIMIT 1
- ) deployed ON true
+ LEFT JOIN deployment_windows deployed ON observed.local_port=0 AND observed.inbound<>''
+  AND deployed.agent_id=observed.agent_id AND deployed.engine=observed.engine
+  AND deployed.effective_at<=observed.last_seen AND (deployed.next_at IS NULL OR observed.last_seen<deployed.next_at)
  GROUP BY observed.client_ip,observed.agent_id,observed.agent_name,observed.engine,observed.inbound,observed.local_port,deployed.id,(deployed.finished_at<=observed.first_seen)`, len(params)), params...)
 	if err != nil {
 		return err
@@ -157,7 +178,7 @@ func (s *Store) clientConnectionIPEndpoints(ctx context.Context, tx pgx.Tx, reco
 	}
 	seen := make([]map[core.ClientConnectionEndpoint]bool, len(records))
 	for _, r := range observations {
-		i := index[r.ClientIP]
+		i := index[groupKey{r.AgentID, r.Engine, r.ClientIP}]
 		endpoint := core.ClientConnectionEndpoint{AgentID: r.AgentID, AgentName: r.AgentName, Engine: r.Engine, LocalPort: r.LocalPort}
 		if seen[i] == nil {
 			seen[i] = map[core.ClientConnectionEndpoint]bool{}

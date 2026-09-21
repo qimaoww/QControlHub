@@ -7,6 +7,12 @@ export async function testClientConnectionsRuntime(preview = false) {
   const locationsReady = new Promise(resolve => { releaseLocations = resolve; });
   const shellReady = new Promise(resolve => { releaseShell = resolve; });
   const row = { id: 2, agent_id: "alpha", agent_name: "Alpha · 东京", engine: "xray", protocol: "vless", inbound: "vless-443", transport: "tcp", client_ip: "2001:db8::8", location: { country_code: "CN", country: "China", province: "广东" }, client_port: 52000, local_ip: "192.0.2.1", local_port: 443, endpoints: [{ agent_id: "alpha", agent_name: "Alpha · 东京", engine: "xray", local_port: 443 }, { agent_id: "alpha", agent_name: "Alpha · 东京", engine: "xray", local_port: 8443 }], first_seen: now, last_seen: now };
+  const rows = [
+    { ...row, id: 10, engine: "mihomo", endpoints: [{ agent_id: "alpha", engine: "mihomo", local_port: 443 }] },
+    { ...row, id: 20, engine: "sing-box", endpoints: [{ agent_id: "alpha", engine: "sing-box", local_port: 1443 }] },
+    { ...row, id: 30 },
+    { ...row, id: 40, agent_id: "bravo", agent_name: "Bravo · 新加坡", endpoints: [{ agent_id: "bravo", engine: "xray", local_port: 9443 }] },
+  ];
   window.fetch = async (input, options) => {
     const url = new URL(typeof input === "string" ? input : input.url, location.href);
     if (["/api/v1/settings", "/api/v1/overview"].includes(url.pathname)) await shellReady;
@@ -14,12 +20,12 @@ export async function testClientConnectionsRuntime(preview = false) {
       if (url.searchParams.get("locations") === "only") {
         locationRequests.push(url.searchParams);
         await locationsReady;
-        return new Response(JSON.stringify({ records: [row] }), { status: 200, headers: { "Content-Type": "application/json" } });
+        return new Response(JSON.stringify({ records: [...rows, ...rows.map(row => ({ ...row, id: row.id + 1 }))] }), { status: 200, headers: { "Content-Type": "application/json" } });
       }
       requests.push(url.searchParams);
       const older = url.searchParams.get("cursor") === "next-page";
       return new Response(JSON.stringify({
-        records: [{ ...row, id: older ? 1 : 2, first_seen: older ? "2026-09-20T00:00:00Z" : now, location: {} }],
+        records: rows.filter(row => (!url.searchParams.get("agent_id") || row.agent_id === url.searchParams.get("agent_id")) && (!url.searchParams.get("engine") || row.engine === url.searchParams.get("engine"))).map(row => ({ ...row, id: older ? row.id + 1 : row.id, first_seen: older ? "2026-09-20T00:00:00Z" : now, location: {} })),
         ips: 1, flows: 2, next_cursor: older ? undefined : "next-page", page_cursor: older ? "second-start" : "first-start",
         sources: [{ agent_id: "alpha", agent_name: row.agent_name, updated_at: now, status: "ok", detail: "panel core logs", truncated: false }, { agent_id: "bravo", agent_name: "Bravo · 新加坡", status: "no_logs" }].filter(source => !url.searchParams.get("agent_id") || source.agent_id === url.searchParams.get("agent_id")),
         timeline: Array.from({ length: 24 }, (_, i) => ({ time: new Date(Date.now() - (23 - i) * 3600000).toISOString(), flows: i % 3 === 0 ? 1 : 2, ips: 1 })),
@@ -38,17 +44,14 @@ export async function testClientConnectionsRuntime(preview = false) {
   await waitFor(() => document.querySelector("tbody")?.textContent.includes("中国 · 广东"), "location enrichment did not paint");
   assert.ok(!document.querySelector("tbody").textContent.includes("192.0.2.1"));
   assert.ok(!document.querySelector("tbody").textContent.includes("52000"));
-  assert.equal(document.querySelectorAll("tbody tr").length, 1);
-  assert.equal(document.querySelectorAll('td[data-label="来源 IP"] code').length, 1);
-  assert.equal([...document.querySelectorAll('td[data-label="入站端口"] code')].map(cell => cell.textContent).join(","), "443,8443");
-  for (const label of ["服务器", "内核", "入站端口"]) {
-    const cell = document.querySelector(`td[data-label="${label}"]`);
-    const endpoints = [...cell.querySelectorAll(".connection-endpoint")].map(element => element.getBoundingClientRect());
-    assert.equal(endpoints.length, 2);
-    assert.equal(endpoints[0].left, endpoints[1].left, "endpoint lines must stay in the same value column");
-    assert.ok(endpoints[1].top >= endpoints[0].bottom, "endpoint lines must not overlap");
-    if (getComputedStyle(cell).display === "grid") assert.ok(endpoints[0].left >= cell.getBoundingClientRect().left + 80, "endpoint values must not enter the mobile label column");
-  }
+  assert.equal(document.querySelectorAll(".connection-ip-row").length, 4, "same source must remain separate by engine and node");
+  assert.equal(document.querySelectorAll('td[data-label="来源 IP"] code').length, 4);
+  const displayed = [...document.querySelectorAll(".connection-ip-row")];
+  assert.equal(displayed.map(row => row.querySelector(".engine-badge").textContent).join(","), "Mihomo,sing-box,Xray,Xray");
+  assert.equal(displayed[2].querySelectorAll('td[data-label="节点"] strong').length, 1, "node name appears once for multiple ports");
+  assert.equal([...displayed[2].querySelectorAll('.connection-port-list code')].map(cell => cell.textContent).join(","), "443,8443");
+  assert.equal([...displayed[3].querySelectorAll('.connection-port-list code')].map(cell => cell.textContent).join(","), "9443");
+  assert.ok(!document.querySelector(".connection-group-heading"), "keep a compact table without oversized group headers");
   assert.equal(requests.at(-1).get("group_by"), "ip");
   assert.equal(locationRequests.at(-1).get("cursor"), "first-start", "enrichment must use the page cursor");
   assert.ok(!document.querySelector("tbody").textContent.includes("未知入站"));
