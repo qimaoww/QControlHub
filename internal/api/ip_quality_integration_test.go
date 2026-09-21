@@ -162,7 +162,8 @@ func TestIPQualityAPIAndWebSocketLifecycle(t *testing.T) {
 	archivePath := "/ip-quality/" + task.ID + "/archives/4"
 	for _, suffix := range []string{"", "?download=1"} {
 		response := call("GET", archivePath+suffix, "quality-admin", nil, 200)
-		if !strings.HasPrefix(response.Body.String(), "<svg") || !strings.Contains(response.Body.String(), "203.0.113.1") ||
+		if !strings.HasPrefix(response.Body.String(), "<svg") ||
+			strings.Join(ipQualityRenderedLines(response.Body.String()), "\n") != strings.TrimSuffix(report.ReportsText[0], "\n") ||
 			response.Header().Get("Content-Type") != "image/svg+xml" || response.Header().Get("Cache-Control") != "no-store" ||
 			!strings.Contains(response.Header().Get("Content-Security-Policy"), "sandbox") {
 			t.Fatal("archive is not a panel-rendered SVG or lost browser isolation")
