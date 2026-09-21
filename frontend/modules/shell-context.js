@@ -1,9 +1,11 @@
+import { clientConnectionSidebar } from "./client-connection-filters.js";
 import { orderNodesBySavedOrder } from "./node-order.js";
 import { installedEngineCount } from "./agent-service-state.js";
 
 export function createShellContext({ state, can, esc, engineName, ago, engines }) {
 function contextMarkup(title) {
-  if (["client-connections", "ip-quality"].includes(state.route)) return "";
+  if (state.route === "client-connections") return clientConnectionSidebar({ state, esc, engineName });
+  if (state.route === "ip-quality") return "";
   if (state.route === "users")
     return `<div class="context-section-label"><span>用户</span><b>${(state.data.users || []).length}</b></div><nav class="context-list" aria-label="用户列表">${(state.data.users || []).map((user) => `<a href="#users" data-user-select="${esc(user.id)}" class="${user.id === state.data.userID ? "active" : ""}"><i class="status-dot ${user.disabled ? "" : "ok"}"></i><span><strong>${esc(user.display_name || user.username)}</strong><small>${esc(user.username)} · ${user.role === "admin" ? "管理员" : "用户"}</small></span></a>`).join("")}</nav>`;
   if (state.route === "my-quota")
