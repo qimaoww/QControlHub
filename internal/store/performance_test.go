@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -55,8 +56,17 @@ func TestRemoteDatabaseQueryBudgets(t *testing.T) {
 		queries, batches int64
 		run              func() error
 	}{
-		{"logs32", 5, 0, func() error {
+		{"logs32", 6, 0, func() error {
 			return measured.StoreCoreLogs(ctx, agentID, core.CoreLogBatch{ID: "log_0000000000000001", Entries: entries})
+		}},
+		// Connection indexing adds a single set-based write for the whole batch,
+		// regardless of the number of source tuples.
+		{"connection logs32", 7, 0, func() error {
+			connections := make([]core.CoreLogEntry, core.MaxCoreLogBatchEntries)
+			for index := range connections {
+				connections[index] = core.CoreLogEntry{Engine: core.EngineMihomo, Level: "warning", Message: fmt.Sprintf("[TCP] 8.8.8.8:%d --> example.invalid:443 using DIRECT", 10000+index)}
+			}
+			return measured.StoreCoreLogs(ctx, agentID, core.CoreLogBatch{ID: "log_0000000000000002", Entries: connections})
 		}},
 		{"traffic64", 4, 0, func() error { return measured.UpdatePortTrafficUsage(ctx, agentID, usages, time.Now()) }},
 		{"idle task", 1, 0, func() error { _, err := measured.ClaimTask(ctx, agentID); return err }},
