@@ -282,11 +282,17 @@ func ipQualityWideText(text string) bool {
 // monospace face whose advance is not exactly one cell, so a run drawn at its
 // natural advance would creep left of the columns below it; textLength forces
 // every character to keep its cell.
+//
+// Only the spacing may be adjusted. "spacingAndGlyphs" would scale the outlines
+// too, and a browser's full-width face advances one em while this grid gives a
+// full-width character two cells: at 16px that stretches every CJK glyph by
+// 25%, which the reference terminal never shows. Every run still starts on its
+// exact column, so alignment does not depend on glyph scaling.
 func ipQualityLengthAttributes(width int) string {
 	if width <= 0 {
 		return ""
 	}
-	return fmt.Sprintf(` textLength="%d" lengthAdjust="spacingAndGlyphs"`, width)
+	return fmt.Sprintf(` textLength="%d" lengthAdjust="spacing"`, width)
 }
 
 // ipQualityRun is a maximal slice of one styled cell whose characters all

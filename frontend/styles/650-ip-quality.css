@@ -82,7 +82,9 @@
 .ip-quality-archive summary{cursor:pointer;min-height:28px;line-height:1.7;padding:4px 0}
 .ip-quality-archives{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,360px),1fr));gap:16px;min-width:0}
 .ip-quality-archive>a{display:grid;place-items:center;min-width:0;padding:16px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2)}
-.ip-quality-archive img{max-width:760px}
+/* The archived report is a tall, portrait terminal capture. Cap it so a wide
+   console shows both address families without a full-height wall of image. */
+.ip-quality-archive img{max-width:560px}
 
 @container (max-width:700px){
   .ip-quality-controls>.ip-quality-head{align-items:stretch;flex-direction:column;gap:14px}

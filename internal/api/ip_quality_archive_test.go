@@ -228,8 +228,16 @@ func TestIPQualityRenderPinsRunsToTheGrid(t *testing.T) {
 		if run.length != width {
 			t.Fatalf("run %q pins textLength=%d, want %d", run.content, run.length, width)
 		}
-		if width > 0 && !strings.Contains(run.attributes, `lengthAdjust="spacingAndGlyphs"`) {
-			t.Fatalf("run %q is not stretched onto the grid", run.content)
+		if width > 0 {
+			// Spacing only: scaling the outlines would stretch every full-width
+			// glyph, because a browser's CJK advance is one em while this grid
+			// reserves two cells for it.
+			if !strings.Contains(run.attributes, `lengthAdjust="spacing"`) {
+				t.Fatalf("run %q does not pin its spacing onto the grid", run.content)
+			}
+			if strings.Contains(run.attributes, "spacingAndGlyphs") {
+				t.Fatalf("run %q scales glyph outlines instead of spacing", run.content)
+			}
 		}
 		expectedX += width
 	}
