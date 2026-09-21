@@ -63,8 +63,8 @@ const server = createServer(async (request, response) => {
     }
     if (/^\/api\/v1\/ip-quality\/[a-z-]+\/archives\/[46]$/.test(path)) {
       response.writeHead(200, { "Content-Type": "image/svg+xml", "Cache-Control": "no-store", "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox" });
-      let svg = await readFile(join(root, "testdata/ip-quality-report.svg"), "utf8");
-      if (path.endsWith("/6")) svg = svg.replace("203.0.113.10", "2001:db8::10").replace("黑名单数据库：439", "IPv6 黑名单：未检测");
+      const fixture = path.endsWith("/6") ? "ip-quality-report-v6.svg" : "ip-quality-report.svg";
+      const svg = await readFile(join(root, "testdata", fixture), "utf8");
       response.end(svg);
       return;
     }

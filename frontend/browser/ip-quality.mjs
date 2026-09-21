@@ -1,4 +1,5 @@
 import { assert, delay, waitFor } from "./assertions.mjs";
+import { testIPQualitySVG } from "./ip-quality-svg.mjs";
 import { ipQualityToday, nextIPQualityDay } from "../modules/ip-quality-model.js";
 
 export async function testIPQualityRuntime(mode, preview = false) {
@@ -98,6 +99,7 @@ export async function testIPQualityRuntime(mode, preview = false) {
   assert.equal(images.length, 2, "database report images are missing");
   await waitFor(() => images.every((image) => image.complete && image.naturalWidth > 0), "archived SVG images failed to load");
   assert.ok(images.every((image) => image.src.startsWith(location.origin+"/api/v1/ip-quality/")), "preview fetched an upstream URL");
+  await testIPQualitySVG(images);
   assert.equal(card().querySelectorAll(".ip-quality-report").length, 2, "dual-stack report lost a family");
   const [ipv4Report, ipv6Report] = card().querySelectorAll(".ip-quality-report");
   assert.ok(ipv4Report.textContent.includes("干净"), "IPv4 lost its DNS blacklist results");

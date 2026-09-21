@@ -18,12 +18,9 @@ import (
 // and nothing can drift when upstream changes its output. Only the ANSI colour
 // codes are translated, using the palette the reference terminal shows.
 const (
-	// One cell is half an em, which is what a dual-width CJK monospace face
-	// advances: Latin glyphs take half an em, full-width glyphs a whole one.
-	// Matching that ratio is what puts a full-width character on exactly two
-	// cells, so it needs neither stretched outlines nor padded spacing. The
-	// upstream share report leans on the same metric through SimHei.
-	ipQualityRenderCellWidth  = 8
+	// Leave room for common 16px Latin monospace fallback faces (about 9.6px).
+	// Glyph origins are pinned independently; their outlines are never scaled.
+	ipQualityRenderCellWidth  = 10
 	ipQualityRenderLineHeight = 22
 	ipQualityRenderFontSize   = 16
 	ipQualityRenderPaddingX   = 18
@@ -43,11 +40,7 @@ const (
 	// Bright black is the terminal's dim grey. The rest of the bright range
 	// mirrors the normal colours, so only this entry needs its own value.
 	ipQualityDim = "#5f7e97"
-	// Prefer a dual-width CJK monospace face, where Latin is half an em and a
-	// full-width glyph one em: that is exactly this grid. SimHei ships with
-	// Windows and WenQuanYi Zen Hei Mono with most Linux desktops. A client
-	// with none of them falls back to a Latin-only monospace plus its default
-	// CJK face, where the spacing pin still holds every column.
+	// Prefer CJK monospace faces, but do not rely on their installed metrics.
 	ipQualityFontFamily = "'Sarasa Mono SC', 'Noto Sans Mono CJK SC', 'Source Han Mono SC', SimHei, 'WenQuanYi Zen Hei Mono', Consolas, 'DejaVu Sans Mono', monospace"
 )
 
@@ -236,20 +229,23 @@ func buildIPQualitySVG(lines []ipQualityLine) []byte {
 		top := ipQualityRenderPaddingY + index*ipQualityRenderLineHeight
 		baseline := top + ipQualityRenderFontSize + 2
 		x := ipQualityRenderPaddingX
+		// Paint the entire row's backgrounds first. A following cell's background
+		// must not erase an italic or fallback glyph extending over its boundary.
 		for _, cell := range line {
 			cellWidth := ipQualityDisplayWidth(cell.text) * ipQualityRenderCellWidth
 			if cell.bg != "" && cellWidth > 0 {
 				fmt.Fprintf(&builder, `<rect x="%d" y="%d" width="%d" height="%d" fill="%s"/>`,
 					x, top, cellWidth, ipQualityRenderLineHeight, cell.bg)
 			}
+			x += cellWidth
+		}
+		x = ipQualityRenderPaddingX
+		for _, cell := range line {
 			for _, run := range ipQualityRuns(cell.text) {
-				runWidth := run.cells * ipQualityRenderCellWidth
-				if run.text != "" {
-					fmt.Fprintf(&builder, `<text x="%d" y="%d" fill="%s"%s%s xml:space="preserve">%s</text>`,
-						x, baseline, cell.fill, ipQualityStyleAttributes(cell, run.text), ipQualityLengthAttributes(runWidth),
-						ipQualityEscape(run.text))
-				}
-				x += runWidth
+				positions, content := ipQualityPositionedText(run.text, x)
+				fmt.Fprintf(&builder, `<text x="%s" y="%d" fill="%s"%s xml:space="preserve">%s</text>`,
+					positions, baseline, cell.fill, ipQualityStyleAttributes(cell, run.text), content)
+				x += run.cells * ipQualityRenderCellWidth
 			}
 		}
 	}
@@ -258,10 +254,8 @@ func buildIPQualitySVG(lines []ipQualityLine) []byte {
 }
 
 // ipQualityStyleAttributes renders the SGR state a run inherits. Italic is
-// dropped for a run that contains a full-width character: no terminal font
-// ships a true italic CJK face, so the browser synthesises an oblique that
-// visibly skews those glyphs, while the terminal the report was captured from
-// shows them upright. Latin runs keep the italic upstream asks for.
+// dropped for full-width runs to keep CJK glyphs upright when the browser
+// synthesizes an oblique fallback. Latin runs keep the upstream emphasis.
 func ipQualityStyleAttributes(cell ipQualityCell, text string) string {
 	attributes := ""
 	if cell.bold {
@@ -288,21 +282,47 @@ func ipQualityWideText(text string) bool {
 	return false
 }
 
-// ipQualityLengthAttributes pins a run to the terminal grid. A browser picks a
-// monospace face whose advance is not exactly one cell, so a run drawn at its
-// natural advance would creep left of the columns below it; textLength forces
-// every character to keep its cell.
-//
-// Only the spacing may be adjusted. "spacingAndGlyphs" would scale the outlines
-// too, and a browser's full-width face advances one em while this grid gives a
-// full-width character two cells: at 16px that stretches every CJK glyph by
-// 25%, which the reference terminal never shows. Every run still starts on its
-// exact column, so alignment does not depend on glyph scaling.
-func ipQualityLengthAttributes(width int) string {
-	if width <= 0 {
-		return ""
+// ipQualityPositionedText pins each character's origin, rather than adjusting
+// the total run length. SVG spacing adjustment distributes error between
+// characters and cannot adjust a single character, so it is not a cell grid.
+// Keep combining/zero-width characters in the same shaping cluster as their
+// base; assigning them an x coordinate would detach accents from the glyph.
+func ipQualityPositionedText(text string, x int) (string, string) {
+	var positions strings.Builder
+	for _, character := range text {
+		if ipQualityRuneWidth(character) == 0 {
+			return strconv.Itoa(x), ipQualityPositionedClusters(text, x)
+		}
 	}
-	return fmt.Sprintf(` textLength="%d" lengthAdjust="spacing"`, width)
+	for _, character := range text {
+		if positions.Len() > 0 {
+			positions.WriteByte(' ')
+		}
+		positions.WriteString(strconv.Itoa(x))
+		x += ipQualityRuneWidth(character) * ipQualityRenderCellWidth
+	}
+	return positions.String(), ipQualityEscape(text)
+}
+
+func ipQualityPositionedClusters(text string, x int) string {
+	var content strings.Builder
+	start, width := 0, 0
+	write := func(end int) {
+		fmt.Fprintf(&content, `<tspan x="%d">%s</tspan>`, x, ipQualityEscape(text[start:end]))
+		x += width * ipQualityRenderCellWidth
+	}
+	for index, character := range text {
+		cells := ipQualityRuneWidth(character)
+		if index > start && cells > 0 {
+			write(index)
+			start, width = index, 0
+		}
+		width += cells
+	}
+	if start < len(text) {
+		write(len(text))
+	}
+	return content.String()
 }
 
 // ipQualityRun is a maximal slice of one styled cell whose characters all
@@ -312,9 +332,8 @@ type ipQualityRun struct {
 	cells int
 }
 
-// ipQualityRuns splits a cell so that narrow and wide characters are pinned
-// separately: one textLength can only scale a run uniformly, and scaling a
-// mixed run would still leave its wide characters off the grid.
+// ipQualityRuns separates narrow and wide characters so full-width runs can
+// keep upright styling.
 func ipQualityRuns(text string) []ipQualityRun {
 	runs := make([]ipQualityRun, 0, 4)
 	start, unit, width := 0, -1, 0

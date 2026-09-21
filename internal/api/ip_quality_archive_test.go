@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"html"
 	"io"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -156,9 +157,9 @@ const ipQualityAlignedFixture = "服务商： \x1b[3m TikTok   Disney+  Netflix 
 
 // ipQualityTextElement captures one drawn run with the grid pinning that keeps
 // it in its terminal cells.
-var ipQualityTextElement = regexp.MustCompile(`<text x="(\d+)" y="(\d+)" fill="[^"]*"([^>]*) xml:space="preserve">([^<]*)</text>`)
+var ipQualityTextElement = regexp.MustCompile(`<text x="([\d ]+)" y="(\d+)" fill="[^"]*"([^>]*) xml:space="preserve">(.*?)</text>`)
 
-var ipQualityTextLength = regexp.MustCompile(`textLength="(\d+)"`)
+var ipQualitySpanTags = regexp.MustCompile(`<[^>]+>`)
 
 var ipQualityBadgeRect = regexp.MustCompile(`<rect x="(\d+)" y="(\d+)" width="(\d+)" height="(\d+)" fill="([^"]+)"/>`)
 
@@ -166,24 +167,27 @@ func ipQualityDrawnRuns(svg string) []ipQualityDrawnRun {
 	matches := ipQualityTextElement.FindAllStringSubmatch(svg, -1)
 	runs := make([]ipQualityDrawnRun, 0, len(matches))
 	for _, match := range matches {
-		x, _ := strconv.Atoi(match[1])
-		y, _ := strconv.Atoi(match[2])
-		length := -1
-		if found := ipQualityTextLength.FindStringSubmatch(match[3]); found != nil {
-			length, _ = strconv.Atoi(found[1])
+		positions := []int{}
+		for _, value := range strings.Fields(match[1]) {
+			position, _ := strconv.Atoi(value)
+			positions = append(positions, position)
 		}
+		x := positions[0]
+		y, _ := strconv.Atoi(match[2])
+
 		runs = append(runs, ipQualityDrawnRun{
-			x: x, y: y, length: length,
-			content: html.UnescapeString(match[4]), attributes: match[3],
+			x: x, y: y, positions: positions,
+			content: html.UnescapeString(ipQualitySpanTags.ReplaceAllString(match[4], "")), attributes: match[3],
 		})
 	}
 	return runs
 }
 
 type ipQualityDrawnRun struct {
-	x, y, length int
-	content      string
-	attributes   string
+	x, y       int
+	positions  []int
+	content    string
+	attributes string
 }
 
 // ipQualityRenderedLines rebuilds the printed lines from the drawn runs: runs
@@ -211,35 +215,78 @@ func mustRenderIPQualitySVG(t *testing.T, text string) string {
 	return string(svg)
 }
 
-// TestIPQualityRenderPinsRunsToTheGrid guards the alignment regression: a run
-// drawn at its font's natural advance creeps left of the columns below it, so
-// every run must be pinned to its exact terminal width and start on the grid.
+// Verify every glyph origin, including columns inside long provider headers.
+// Merely checking a run's total textLength cannot detect interior column drift.
 func TestIPQualityRenderPinsRunsToTheGrid(t *testing.T) {
-	runs := ipQualityDrawnRuns(mustRenderIPQualitySVG(t, ipQualityPrintedFixture+ipQualityAlignedFixture))
+	svg := mustRenderIPQualitySVG(t, ipQualityPrintedFixture+ipQualityAlignedFixture)
+	if strings.Contains(svg, "textLength=") || strings.Contains(svg, "lengthAdjust=") {
+		t.Fatal("glyphs still depend on font-dependent length adjustment")
+	}
+	runs := ipQualityDrawnRuns(svg)
 	expectedX, expectedY := 0, 0
 	for _, run := range runs {
 		if run.y != expectedY {
 			expectedX, expectedY = ipQualityRenderPaddingX, run.y
 		}
-		if run.x != expectedX {
-			t.Fatalf("run %q starts at x=%d, want %d", run.content, run.x, expectedX)
+		if len(run.positions) != len([]rune(run.content)) {
+			t.Fatalf("run %q does not position every character: %v", run.content, run.positions)
 		}
-		width := ipQualityDisplayWidth(run.content) * ipQualityRenderCellWidth
-		if run.length != width {
-			t.Fatalf("run %q pins textLength=%d, want %d", run.content, run.length, width)
-		}
-		if width > 0 {
-			// Spacing only: scaling the outlines would stretch every full-width
-			// glyph, because a browser's CJK advance is one em while this grid
-			// reserves two cells for it.
-			if !strings.Contains(run.attributes, `lengthAdjust="spacing"`) {
-				t.Fatalf("run %q does not pin its spacing onto the grid", run.content)
+		for index, character := range []rune(run.content) {
+			if run.positions[index] != expectedX {
+				t.Fatalf("run %q character %d starts at x=%d, want %d", run.content, index, run.positions[index], expectedX)
 			}
-			if strings.Contains(run.attributes, "spacingAndGlyphs") {
-				t.Fatalf("run %q scales glyph outlines instead of spacing", run.content)
+			expectedX += ipQualityRuneWidth(character) * ipQualityRenderCellWidth
+		}
+	}
+}
+
+func TestIPQualityRenderPositionsSingleGlyphsAndCombiningMarks(t *testing.T) {
+	for _, test := range []struct{ text, positions, content string }{
+		{"A", "18", "A"},
+		{"否", "18", "否"},
+		{"数据库", "18 38 58", "数据库"},
+		{"a\U00020000b", "18 28 48", "a\U00020000b"},
+		{"a\u0301b", "18", `<tspan x="18">á</tspan><tspan x="28">b</tspan>`},
+		{"远端\u200b", "18", `<tspan x="18">远</tspan><tspan x="38">端​</tspan>`},
+		{"<&", "18 28", "&lt;&amp;"},
+	} {
+		positions, content := ipQualityPositionedText(test.text, 18)
+		if positions != test.positions || content != test.content {
+			t.Fatalf("positioned %q = (%q, %q), want (%q, %q)", test.text, positions, content, test.positions, test.content)
+		}
+	}
+}
+
+func TestIPQualityRenderPaintsBackgroundsBeforeText(t *testing.T) {
+	svg := mustRenderIPQualitySVG(t, "\x1b[3m9|\x1b[42m 低 \x1b[43m 中 \x1b[0m")
+	if strings.LastIndex(svg, "<rect") > strings.Index(svg, "<text") {
+		t.Fatal("a following background can erase preceding glyphs")
+	}
+}
+
+// The browser fixture must exercise production SVG output, not hand-written
+// artwork that can pass while the actual report renderer regresses.
+func TestIPQualityBrowserFixtureMatchesRenderer(t *testing.T) {
+	for _, family := range []int{4, 6} {
+		text := ipQualityPrintedFixture + ipQualityAlignedFixture
+		path := "../../frontend/testdata/ip-quality-report.svg"
+		if family == 6 {
+			text = strings.ReplaceAll(text, "203.0.113.1", "2001:db8:1234:5678:90ab:cdef:1234:5678")
+			path = "../../frontend/testdata/ip-quality-report-v6.svg"
+		}
+		want := mustRenderIPQualitySVG(t, text)
+		if os.Getenv("QCH_UPDATE_IP_QUALITY_FIXTURE") == "1" {
+			if err := os.WriteFile(path, []byte(want), 0644); err != nil {
+				t.Fatal(err)
 			}
 		}
-		expectedX += width
+		got, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got) != want {
+			t.Fatal("browser fixture is stale; run QCH_UPDATE_IP_QUALITY_FIXTURE=1 go test ./internal/api -run TestIPQualityBrowserFixtureMatchesRenderer")
+		}
 	}
 }
 
@@ -266,11 +313,6 @@ func TestIPQualityRenderAlignsHeadersWithBadges(t *testing.T) {
 	runs := ipQualityDrawnRuns(svg)
 	if run := ipQualityRunStartingAt(runs, badgeX+ipQualityRenderCellWidth); run == nil || !strings.HasPrefix(run.content, "仅") {
 		t.Fatalf("no badge label drawn at x=%d: %+v", badgeX+ipQualityRenderCellWidth, runs)
-	}
-	for _, run := range runs {
-		if strings.Contains(run.content, "风险因子") && run.length != 12*ipQualityRenderCellWidth {
-			t.Fatalf("full-width heading pins textLength=%d, want %d", run.length, 12*ipQualityRenderCellWidth)
-		}
 	}
 }
 
@@ -304,9 +346,8 @@ func TestIPQualityRenderKeepsTerminalStyles(t *testing.T) {
 	}
 }
 
-// Upstream marks database names and score rows italic. No terminal font ships a
-// true italic CJK face, so the browser synthesises an oblique that skews glyphs
-// the reference terminal shows upright; Latin runs keep the upstream emphasis.
+// Full-width runs stay upright even when a fallback font synthesizes italic;
+// Latin runs retain the upstream emphasis.
 func TestIPQualityRenderKeepsItalicOnLatinRunsOnly(t *testing.T) {
 	svg := mustRenderIPQualitySVG(t, "\x1b[3mMaxmind 数据库\x1b[0m\x1b[3mIPinfo\x1b[0m")
 	runs := ipQualityDrawnRuns(svg)
