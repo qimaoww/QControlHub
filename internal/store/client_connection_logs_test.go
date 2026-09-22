@@ -11,15 +11,18 @@ func TestClientConnectionLogsPersistAtomicallyAndReplay(t *testing.T) {
 	db, ctx, _ := isolatedConfigScopeStore(t)
 	agent := sharedTestAgent(t, db, ctx)
 	start := time.Now().UTC().Add(-time.Hour).Truncate(time.Minute)
-	entry := core.CoreLogEntry{Engine: core.EngineSingBox, Level: "info", Message: "inbound/vless[entry]: inbound connection from 8.8.8.8:50123", LoggedAt: start.Add(10 * time.Second)}
+	entry := core.CoreLogEntry{Engine: core.EngineSingBox, Level: "info", Message: "INFO [123 0ms] inbound/vless[entry]: inbound connection from 8.8.8.8:50123", LoggedAt: start.Add(10 * time.Second)}
 	later := entry
 	later.LoggedAt = start.Add(20 * time.Second)
 	expired := entry
-	expired.Message = "inbound/vless[entry]: inbound connection from 1.1.1.1:50123"
+	expired.Message = "INFO [123 0ms] inbound/vless[entry]: inbound connection from 1.1.1.1:50123"
 	expired.LoggedAt = time.Now().Add(-8 * 24 * time.Hour)
 	outbound := entry
-	outbound.Message = "outbound/direct[direct]: outbound connection to 9.9.9.9:443"
-	batch := core.CoreLogBatch{ID: "log_0123456789abcdef", Entries: []core.CoreLogEntry{later, entry, entry, expired, outbound}}
+	outbound.Message = "INFO [123 0ms] outbound/direct[direct]: outbound connection to 9.9.9.9:443"
+	// sing-box logs the source before the handshake, so the routed line for the
+	// same connection must be present for the source to be recorded.
+	routed := core.CoreLogEntry{Engine: core.EngineSingBox, Level: "info", Message: "INFO [123 0ms] inbound/vless[entry]: inbound connection to 9.9.9.9:443", LoggedAt: start.Add(10 * time.Second)}
+	batch := core.CoreLogBatch{ID: "log_0123456789abcdef", Entries: []core.CoreLogEntry{later, entry, entry, expired, outbound, routed}}
 	for range 2 {
 		if err := db.StoreCoreLogs(ctx, agent.ID, batch); err != nil {
 			t.Fatal(err)
@@ -55,7 +58,7 @@ func TestClientConnectionLogsPersistAtomicallyAndReplay(t *testing.T) {
 	}
 	batch.ID = "log_fedcba9876543210"
 	batch.Entries = []core.CoreLogEntry{entry}
-	batch.Entries[0].Message = "inbound/vless[entry]: inbound connection from 1.1.1.1:50123"
+	batch.Entries[0].Message = "INFO [123 0ms] inbound/vless[entry]: inbound connection from 1.1.1.1:50123"
 	if err := db.StoreCoreLogs(ctx, agent.ID, batch); err != nil {
 		t.Fatal(err)
 	}

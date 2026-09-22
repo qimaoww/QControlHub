@@ -18,11 +18,15 @@ func (s *Store) storeClientConnectionLogs(ctx context.Context, tx pgx.Tx, agentI
 	}
 	observations := make([]observation, 0, len(entries))
 	var receivedAt time.Time
+	// sing-box logs the source before the handshake, so a source is recorded
+	// only when the same connection also logged the post-handshake route line
+	// within this batch.
+	routed := singBoxRoutedConnections(entries)
 	for _, entry := range entries {
 		if entry.ReceivedAt.After(receivedAt) {
 			receivedAt = entry.ReceivedAt
 		}
-		if connection, ok := clientConnectionFromLog(entry); ok {
+		if connection, ok := clientConnectionFromLog(entry, routed); ok {
 			observations = append(observations, observation{connection, entry.LoggedAt.UTC()})
 		}
 	}
