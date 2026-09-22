@@ -14,8 +14,9 @@ import (
 // line: destination addresses and outbound connection messages are not clients.
 var (
 	xrayClientLog   = regexp.MustCompile(`(?:^|\s)(?:from\s+)?((?:tcp:|udp:)?\S+)\s+accepted\s+(?:tcp|udp):\S+(?:\s+\[([^\]]+)\])?`)
-	singClientLog   = regexp.MustCompile(`^inbound/([a-z0-9_-]+)\[([^\]]*)\]: (?:\[[^\]\r\n]*\] )?inbound (packet )?connection from (\S+)$`)
+	singClientLog   = regexp.MustCompile(`^(?:inbound|endpoint)/([a-z0-9_-]+)\[([^\]]*)\]: (?:\[[^\]\r\n]*\] )?inbound (packet )?connection from (\S+)$`)
 	mihomoClientLog = regexp.MustCompile(`^\[(TCP|UDP)\]\s+(\[[0-9a-fA-F:.]+\]:[0-9]+|[0-9.]+:[0-9]+)(?:\([^\r\n]*\))?\s+-->\s+\S+\s+.*using\s+`)
+	mihomoInNameLog = regexp.MustCompile(`(?:^|\s)match InName\(([^)\r\n]*)\)`)
 	ssTCPClientLog  = regexp.MustCompile(`(?:^|\s)established tcp tunnel (\S+) <-> `)
 	ssUDPClientLog  = regexp.MustCompile(`(?:^|\s)created udp association for (\S+)(?:\s|$)`)
 )
@@ -34,7 +35,14 @@ func clientAccessMessage(message string) string {
 	}
 	if match := accessLogfmt.FindStringSubmatch(message); match != nil {
 		value, err := strconv.Unquote(match[1])
-		if err != nil || strings.ContainsAny(value, "\r\n") {
+		if err != nil {
+			return ""
+		}
+		// logrus formats Infoln messages with fmt.Sprintln and quotes the
+		// trailing newline inside the msg field. Drop only trailing line breaks
+		// so one access line is accepted while an embedded break still fails.
+		value = strings.TrimRight(value, "\r\n")
+		if strings.ContainsAny(value, "\r\n") {
 			return ""
 		}
 		message = value
@@ -98,11 +106,17 @@ func clientConnectionFromLog(entry core.CoreLogEntry) (core.ClientConnection, bo
 			c.Transport = "udp"
 		}
 	case core.EngineMihomo:
-		match := mihomoClientLog.FindStringSubmatch(clientAccessMessage(message))
+		access := clientAccessMessage(message)
+		match := mihomoClientLog.FindStringSubmatch(access)
 		if match == nil {
 			return c, false
 		}
 		c.Transport, source = strings.ToLower(match[1]), match[2]
+		// A matched IN-NAME rule names the inbound (the panel's accounting and
+		// independent-egress rules always do), which resolves its port later.
+		if inbound := mihomoInNameLog.FindStringSubmatch(access); inbound != nil {
+			c.Inbound = strings.TrimSpace(inbound[1])
+		}
 	case core.EngineShadowsocksRust:
 		c.Protocol = "shadowsocks"
 		if match := ssTCPClientLog.FindStringSubmatch(message); match != nil {
