@@ -11,8 +11,8 @@ func TestClientConnectionSourceMigrationFrom67(t *testing.T) {
 	db, ctx, _ := isolatedConfigScopeStore(t)
 	agent := sharedTestAgent(t, db, ctx)
 	entries := []core.CoreLogEntry{
-		{Engine: core.EngineSingBox, Level: "info", Message: "INFO inbound/vless[entry]: inbound connection from 8.8.8.8:50123"},
-		{Engine: core.EngineSingBox, Level: "info", Message: "INFO inbound/vless[entry]: inbound connection to 9.9.9.9:443"},
+		{Engine: core.EngineSingBox, Level: "info", Message: "INFO [123 0ms] inbound/vless[entry]: inbound connection from 8.8.8.8:50123"},
+		{Engine: core.EngineSingBox, Level: "info", Message: "INFO [123 0ms] inbound/vless[entry]: inbound connection to 9.9.9.9:443"},
 		{Engine: core.EngineMihomo, Level: "info", Message: "[TCP] 8.8.8.8:50123 --> 9.9.9.9:443 using DIRECT"},
 		{Engine: core.EngineMihomo, Level: "info", Message: "[TCP] Mihomo --> example.invalid:443 using [TCP] 9.9.9.9:443 --> 1.1.1.1:443 using DIRECT"},
 		{Engine: core.EngineXray, Level: "info", Message: "from 8.8.4.4:50123 accepted tcp:1.1.1.1:443 [entry -> direct]"},
