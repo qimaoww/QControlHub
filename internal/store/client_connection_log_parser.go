@@ -16,7 +16,9 @@ var (
 	xrayClientLog   = regexp.MustCompile(`(?:^|\s)(?:from\s+)?((?:tcp:|udp:)?\S+)\s+accepted\s+(?:tcp|udp):\S+(?:\s+\[([^\]]+)\])?`)
 	singClientLog   = regexp.MustCompile(`^(?:inbound|endpoint)/([a-z0-9_-]+)\[([^\]]*)\]: (?:\[[^\]\r\n]*\] )?inbound (packet )?connection from (\S+)$`)
 	mihomoClientLog = regexp.MustCompile(`^\[(TCP|UDP)\]\s+(\[[0-9a-fA-F:.]+\]:[0-9]+|[0-9.]+:[0-9]+)(?:\([^\r\n]*\))?\s+-->\s+\S+\s+.*using\s+`)
-	mihomoInNameLog = regexp.MustCompile(`(?:^|\s)match InName\(([^)\r\n]*)\)`)
+	// Anchor the rule clause between the destination and "using" so rule or
+	// proxy text that merely contains "match InName(...)" cannot name an inbound.
+	mihomoInNameLog = regexp.MustCompile(`^\[(TCP|UDP)\]\s+(?:\[[0-9a-fA-F:.]+\]:[0-9]+|[0-9.]+:[0-9]+)(?:\([^\r\n]*\))?\s+-->\s+\S+\s+match InName\(([^)\r\n]*)\)\s+using\s+`)
 	ssTCPClientLog  = regexp.MustCompile(`(?:^|\s)established tcp tunnel (\S+) <-> `)
 	ssUDPClientLog  = regexp.MustCompile(`(?:^|\s)created udp association for (\S+)(?:\s|$)`)
 )
@@ -115,7 +117,7 @@ func clientConnectionFromLog(entry core.CoreLogEntry) (core.ClientConnection, bo
 		// A matched IN-NAME rule names the inbound (the panel's accounting and
 		// independent-egress rules always do), which resolves its port later.
 		if inbound := mihomoInNameLog.FindStringSubmatch(access); inbound != nil {
-			c.Inbound = strings.TrimSpace(inbound[1])
+			c.Inbound = strings.TrimSpace(inbound[2])
 		}
 	case core.EngineShadowsocksRust:
 		c.Protocol = "shadowsocks"

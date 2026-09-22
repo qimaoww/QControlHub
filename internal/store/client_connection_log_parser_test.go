@@ -31,6 +31,9 @@ func TestClientConnectionLogParser(t *testing.T) {
 		// A matched IN-NAME rule (the panel's accounting / independent-egress
 		// rules) names the inbound so its listener port can be resolved.
 		{"mihomo in-name", core.EngineMihomo, `time="2026-09-21T12:00:00+08:00" level=info msg="[TCP] 198.51.100.9:50123 --> 203.0.113.10:44667 match InName(entry) using qch-trf-443-0123456789ab"`, "198.51.100.9", "tcp", "", "entry"},
+		// Only the rule clause may name the inbound: the same text later in the
+		// line (proxy chain or forged payload) must not.
+		{"mihomo trailing rule text", core.EngineMihomo, `time=now level=info msg="[TCP] 198.51.100.9:50123 --> 8.8.8.8:443 match Match using DIRECT match InName(fake)"`, "198.51.100.9", "tcp", "", ""},
 		{"ss tcp", core.EngineShadowsocksRust, "DEBUG established tcp tunnel [::ffff:198.51.100.9]:50123 <-> 8.8.8.8:443 with options", "198.51.100.9", "tcp", "shadowsocks", ""},
 		{"ss udp", core.EngineShadowsocksRust, "DEBUG created udp association for [2001:db8::9]:50123 with session 123", "2001:db8::9", "udp", "shadowsocks", ""},
 	} {
