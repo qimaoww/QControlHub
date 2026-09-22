@@ -67,7 +67,7 @@ export function createAgentSharing(ctx, interactions) {
         <div data-recipients>${rows.map(share => rowMarkup(share, agent)).join("")}</div>
         <button type="button" class="button small" data-recipient-add>添加用户</button>
         <p class="alert error" role="alert" data-sharing-error hidden></p>
-      </div><footer><div class="agent-sharing-secondary"><button type="button" class="button small" data-sharing-reload>刷新</button><a href="https://github.com/qimaoww/QControlHub/blob/main/docs/agent-sharing.md" target="_blank" rel="noopener noreferrer">共享规则 ↗</a></div><button type="submit" class="button primary">保存</button></footer></form>`;
+      </div><footer><div class="agent-sharing-secondary"><button type="button" class="button small" data-sharing-reload>刷新</button></div><button type="submit" class="button primary">保存</button></footer></form>`;
     document.body.append(dialog);
     const form = dialog.querySelector("form");
     const baseline = draft?.baseline ?? JSON.stringify(values(form));

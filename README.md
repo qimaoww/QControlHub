@@ -13,7 +13,7 @@ QControlHub 是面向 Linux 节点的配置与远程运维平台，由 Go 控制
 - 在节点详情的“Agent 与身份”自定义节点显示名称，不改变身份、连接或已有安装命令。
 - 远程执行配置校验与部署、服务启停、状态查询、配置读取和内核安装；节点侧任务均为真实执行。
 - 内核安装、部署及启停结束后 Agent 主动重新上报真实运行状态；节点设置自动刷新状态、版本和操作按钮，配置页在任务完成后刷新并保护未保存的输入。旧 Agent 仍会在正常心跳后刷新。
-- 通过 [IPQuality 检测](docs/ip-quality.md) 查看节点双栈出口、各数据库风险、媒体与邮件结果；支持按本地提交日查看历史、手动检测和默认关闭的每日计划。需更新 Agent 并手动准备依赖，检测会访问第三方服务。
+- 通过 IPQuality 检测查看节点双栈出口、各数据库风险、媒体与邮件结果；支持按本地提交日查看历史、手动检测和默认关闭的每日计划。需更新 Agent 并手动准备依赖，检测会访问第三方服务。
 
 ### 配置与内核
 
@@ -35,14 +35,14 @@ QControlHub 是面向 Linux 节点的配置与远程运维平台，由 Go 控制
 - Sub-Store 后端连接与同步组按账号独立，每组可选择 URL 或 Mihomo 格式，以及增量或完全托管模式；只从用户可见的实际部署版本生成节点，源配置被替换后需重新选择。
 - 客户端显示名称按内核和监听端口独立保存，修改一个端口不再影响其他端口；连接地址与协议栈仍为节点共用设置。
 - 使用 QAgent 专用 nftables 表统计端口收发流量，由控制面持久化每日用量并提供月度图表、节点/内核/端口筛选、周期配额和可选的超额封禁。
-- 端口计量使用持久化采样基线与命名计数器，防止规则刷新丢量、重复上报计量和网络延迟造成速率尖峰；统计口径及恢复边界见 [端口流量统计](docs/traffic-accounting.md)。
+- 端口计量使用持久化采样基线与命名计数器，防止规则刷新丢量、重复上报计量和网络延迟造成速率尖峰。
 - 可选联动 Komari：在系统设置填写 Komari 地址/API Key，在节点设置绑定 Komari 服务器 UUID；节点卡片网络区显示当前周期日期、流量用量和额度进度。
 
 ### 权限与数据
 
 - PostgreSQL 持久化节点、配置、任务、指标、流量策略和审计数据。
 - 管理 API 使用 Bearer 令牌；Web 控制台使用服务端会话、HttpOnly Cookie 和 CSRF 防护，并支持按能力授权的管理员与用户账号。
-- 普通用户可按权限自行添加和管理 Agent，配置、设置及集成始终独立。节点所有者可按用户名邀请共享，分配监听端口和累计 GiB 额度；接收者可接受或拒绝，接受后才生效，也可退出共享。共享不授予主机管理权，多端口共用额度，超额由 Agent 本地阻断。见 [用户与 Agent 分配](docs/agent-sharing.md)。
+- 普通用户可按权限自行添加和管理 Agent，配置、设置及集成始终独立。节点所有者可按用户名邀请共享，分配监听端口和累计 GiB 额度；接收者可接受或拒绝，接受后才生效，也可退出共享。共享不授予主机管理权，多端口共用额度，超额由 Agent 本地阻断。
 - 可选用 AES-256-GCM 加密配置正文与修订，并通过 HMAC-SHA256 签名 Webhook 通知。
 
 ## 生产部署与 Agent 接入
@@ -55,7 +55,7 @@ QControlHub 是面向 Linux 节点的配置与远程运维平台，由 Go 控制
 bash <(curl -fsSL "https://raw.githubusercontent.com/qimaoww/qcontrolhub/main/deploy/quick-start.sh")
 ```
 
-该命令不会克隆源码仓库，只把运行脚本和生产 Compose 文件保存到当前目录下的 `qcontrolhub`；可通过 `QCH_INSTALL_DIR` 指定其他持久化目录，交互式菜单中选择的目录也会保存到当前用户配置，后续从远程一键命令运行时会直接复用为一键安装目录。已保存目录中已有的 `.env`、`.secrets` 和数据会保留，只更新运行脚本与生产 Compose 文件。从该安装目录内再次运行也会自动复用当前目录，不会创建嵌套目录。管理员 token 原文只在创建或轮换时显示一次，`.env` 仅保存 SHA-256 摘要；配置加密 keyring 保存在宿主机私有的 `.secrets` 目录，通过只读文件挂载交给控制面，不进入容器环境。一键脚本的参数与重复执行行为见 [`deploy/quick-start.sh`](deploy/quick-start.sh)。它不替代 TLS、反向代理、数据库保护、备份与恢复演练；上线前请按 [生产部署指南](docs/production.md) 完成全部步骤，并核对 [安全基线](docs/security.md)。
+该命令不会克隆源码仓库，只把运行脚本和生产 Compose 文件保存到当前目录下的 `qcontrolhub`；可通过 `QCH_INSTALL_DIR` 指定其他持久化目录，交互式菜单中选择的目录也会保存到当前用户配置，后续从远程一键命令运行时会直接复用为一键安装目录。已保存目录中已有的 `.env`、`.secrets` 和数据会保留，只更新运行脚本与生产 Compose 文件。从该安装目录内再次运行也会自动复用当前目录，不会创建嵌套目录。管理员 token 原文只在创建或轮换时显示一次，`.env` 仅保存 SHA-256 摘要；配置加密 keyring 保存在宿主机私有的 `.secrets` 目录，通过只读文件挂载交给控制面，不进入容器环境。一键脚本的参数与重复执行行为见 [`deploy/quick-start.sh`](deploy/quick-start.sh)。它不替代 TLS、反向代理、数据库保护、备份与恢复演练；上线前请完成全部生产部署步骤并核对安全基线。
 
 内置与外部 PostgreSQL 两种模式均保留。外部模式安装时可选择默认项目网络或自定义已有 Docker 网络；更新会逐字节保留原 `.env`（包括旧明文凭据或既有 secret 文件来源），只更新两个 `latest` 应用镜像，启动/健康检查失败时尝试恢复旧 Compose 与镜像。控制面原有的 schema 初始化/升级行为不变，更新前仍须备份数据库。
 
@@ -65,11 +65,11 @@ bash <(curl -fsSL "https://raw.githubusercontent.com/qimaoww/qcontrolhub/main/de
 
 Alpine 会自动安装 `ca-certificates`、`coreutils`、`curl`、`libcap`、`nftables` 与 `openrc`，使用 `/etc/init.d/qagent*`、`/etc/conf.d/qagent` 和 default runlevel。没有 `sudo` 的 Alpine 主机应先切换为 root，再执行控制台生成的同一条 `sh` 命令。Alpine 上的 Shadowsocks Rust 版本切换会选择官方 musl 资产。
 
-一键安装器可以识别符合严格安全检查的标准 Xray 或 sing-box 服务：systemd 核验唯一 `ExecStart`，OpenRC 核验活动服务对应的 `/proc` 实际二进制和精确参数。Agent 启动时还可识别 systemd 下由 `install-ss-rust` 安装的 SS Rust，保留多端口及出站 ACL，详见 [SS Rust 预设与导入](docs/ss-rust-import.md)。现有配置不会在注册时自动切换服务，管理员可在“配置”页查看节点快照并显式迁移到 QAgent 专用服务；迁移失败会恢复原服务。无法精确识别时，安装器保留原服务并继续接入 QAgent，面板只禁用该内核的远程任务，不影响节点管理和其他内核。
+一键安装器可以识别符合严格安全检查的标准 Xray 或 sing-box 服务：systemd 核验唯一 `ExecStart`，OpenRC 核验活动服务对应的 `/proc` 实际二进制和精确参数。Agent 启动时还可识别 systemd 下由 `install-ss-rust` 安装的 SS Rust，保留多端口及出站 ACL。现有配置不会在注册时自动切换服务，管理员可在“配置”页查看节点快照并显式迁移到 QAgent 专用服务；迁移失败会恢复原服务。无法精确识别时，安装器保留原服务并继续接入 QAgent，面板只禁用该内核的远程任务，不影响节点管理和其他内核。
 
 手工部署可运行 `sudo sh deploy/bootstrap-core-services.sh <内核>`，其中内核是 `mihomo`、`xray`、`sing-box` 或 `shadowsocks-rust`；省略参数仍可一次准备全部四个。脚本创建非 root 的 `qcontrolhub-core` 用户、所选 `qagent-*` 服务和只在缺失时写入的最小回环配置，不会迁移通用服务或覆盖已有配置。
 
-Agent 以高权限 root 服务运行，远程任务会真实修改配置、服务、内核二进制或 QAgent 专用流量规则。systemd unit 提供更强的文件系统沙箱；OpenRC 没有同等级的 `ProtectSystem` 隔离，应只在专用节点使用。完整步骤和支持边界见 [安装远程 Agent](docs/production.md#4-安装远程-agent)。
+Agent 以高权限 root 服务运行，远程任务会真实修改配置、服务、内核二进制或 QAgent 专用流量规则。systemd unit 提供更强的文件系统沙箱；OpenRC 没有同等级的 `ProtectSystem` 隔离，应只在专用节点使用。
 
 ## 开发与验证
 
@@ -80,23 +80,7 @@ Agent 以高权限 root 服务运行，远程任务会真实修改配置、服�
 | `make check` | 检查 gofmt，运行前端模块 smoke、`go vet ./...` 和 `go test ./...` |
 | `make compose-config` | 校验 Compose 渲染结果；需要先初始化 `.env` |
 
-开发环境、宿主机运行方式和 PostgreSQL 集成测试说明见 [开发指南](docs/development.md)。
-
-## 文档导航
-
-### 运行与安全
-
-- [开发指南](docs/development.md)
-- [生产部署](docs/production.md)
-- [鉴权与安全基线](docs/security.md)
-
-### 接口与配置
-
-- [HTTP API 与 Agent 协议](docs/api.md)
-- [服务端入站方案](docs/server-plans.md)
-- [入站限制与 CN IP 数据源](docs/cnip-sources.md)
-- [IP 质量检测与每日计划](docs/ip-quality.md)
-- [最小配置样例](examples/configs/)
+开发环境需要 Go、Node.js 和 PostgreSQL 测试库（`QCH_TEST_DATABASE_URL`）。
 
 ## License
 

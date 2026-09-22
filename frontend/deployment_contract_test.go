@@ -31,10 +31,6 @@ func TestOfficialDeploymentsTrustTheExactTwoHopProxyChain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	production, err := os.ReadFile("../docs/production.md")
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	for _, source := range []struct {
 		name    string
@@ -91,11 +87,6 @@ func TestOfficialDeploymentsTrustTheExactTwoHopProxyChain(t *testing.T) {
 	} {
 		if strings.Count(string(quickStart), required) != 2 {
 			t.Errorf("bundled and external env preparation must both preserve %q", required)
-		}
-	}
-	for _, required := range []string{"宿主 Nginx 与 `qcontrol-web` 两跳代理", "两个精确 `/32` 端点", "禁止改成整个私网"} {
-		if !strings.Contains(string(production), required) {
-			t.Errorf("production proxy documentation is missing %q", required)
 		}
 	}
 }
