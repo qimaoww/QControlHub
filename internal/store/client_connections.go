@@ -17,6 +17,7 @@ type ClientConnectionQuery struct {
 	// RecordsOnly is used by deferred location enrichment; authorization and
 	// detail filters remain identical, without repeating expensive aggregates.
 	RecordsOnly      bool
+	SkipTimeline     bool
 	IncludeNonPublic bool
 	AgentID          string
 	Engine           core.Engine
@@ -112,22 +113,24 @@ func (s *Store) ClientConnectionHistory(ctx context.Context, q ClientConnectionQ
 		if err := tx.QueryRow(ctx, `SELECT count(DISTINCT `+tuple+`),count(DISTINCT c.client_ip)`+from+where, args...).Scan(&result.Flows, &result.IPs); err != nil {
 			return result, err
 		}
-		timelineArgs := append(append([]any{}, args...), q.Bucket)
-		rows, err := tx.Query(ctx, fmt.Sprintf(`SELECT date_trunc($%d::text,c.bucket,'UTC') AS time,count(DISTINCT `+tuple+`),count(DISTINCT c.client_ip)`+from+where+` GROUP BY time ORDER BY time`, len(timelineArgs)), timelineArgs...)
-		if err != nil {
-			return result, err
-		}
-		for rows.Next() {
-			var bucket core.ClientConnectionBucket
-			if err := rows.Scan(&bucket.Time, &bucket.Flows, &bucket.IPs); err != nil {
-				rows.Close()
+		if !q.SkipTimeline {
+			timelineArgs := append(append([]any{}, args...), q.Bucket)
+			rows, err := tx.Query(ctx, fmt.Sprintf(`SELECT date_trunc($%d::text,c.bucket,'UTC') AS time,count(DISTINCT `+tuple+`),count(DISTINCT c.client_ip)`+from+where+` GROUP BY time ORDER BY time`, len(timelineArgs)), timelineArgs...)
+			if err != nil {
 				return result, err
 			}
-			result.Timeline = append(result.Timeline, bucket)
-		}
-		rows.Close()
-		if err = rows.Err(); err != nil {
-			return result, err
+			for rows.Next() {
+				var bucket core.ClientConnectionBucket
+				if err := rows.Scan(&bucket.Time, &bucket.Flows, &bucket.IPs); err != nil {
+					rows.Close()
+					return result, err
+				}
+				result.Timeline = append(result.Timeline, bucket)
+			}
+			rows.Close()
+			if err = rows.Err(); err != nil {
+				return result, err
+			}
 		}
 	}
 
