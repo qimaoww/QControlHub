@@ -296,7 +296,7 @@ async function renderOnce() {
         ? readPanelData("settings", { live: state.route === "settings" })
         : Promise.resolve({}),
     ]);
-    if (!hasSharedData && route !== "client-connections") {
+    if (!hasSharedData && route !== "client-connections" && route !== "ip-quality") {
       [state.data.overview, state.data.settings] = await sharedDataPromise;
     } else {
       sharedDataPromise

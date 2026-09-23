@@ -72,6 +72,18 @@ render({ date: ipQualityToday(), timezone: "UTC", agents: [], submitting: new Se
 assert.equal(viewState.data.ipQualityAgent, "beta", "a loading read dropped the selected node");
 assert.deepEqual(viewState.data.ipQualityNodes.map((node) => node.id), ["alpha"], "a loading read cleared the sidebar");
 assert.ok(markup.includes("正在读取检测记录…"));
+render({ date: ipQualityToday(), timezone: "UTC", agents: [agent], submitting: new Set(), editable: () => true, loading: true });
+assert.ok(markup.includes('data-ip-quality-panel="alpha"'), "nodes should appear before history finishes");
+assert.ok(markup.includes("正在读取这台节点的检测记录…"));
+assert.ok(markup.includes("读取中"));
+assert.ok(markup.includes("<strong>—</strong>"), "missing history must not look like zero detections");
+assert.ok(markup.includes('data-ip-quality-run="alpha" disabled'), "partial reads must not enable mutations");
+assert.equal(viewState.data.ipQualityNodes[0].note, "正在读取记录");
+render({ date: ipQualityToday(), timezone: "UTC", agents: [agent], submitting: new Set(), editable: () => true,
+  readFailed: true, error: "无法读取" });
+assert.ok(markup.includes("读取失败"));
+assert.ok(!markup.includes("请稍候"));
+assert.ok(!markup.includes('ip-quality-badge unknown"><i></i>未检测'), "failed read must not look like an empty result");
 renderDay("2025-09-16", []);
 assert.ok(markup.includes("当天没有检测记录"));
 assert.ok(!markup.includes("data-ip-quality-panel"), "history rendered nodes without records");
@@ -138,8 +150,28 @@ try {
   assert.equal(timers.size, 1, "invalid date stopped automatic refresh");
   assert.ok(timers.has(scheduledTimer), "invalid date replaced the pending poll");
   await timers.get(scheduledTimer)();
-  assert.equal(calls.length, count + 2, "polling did not continue after an invalid date");
+  assert.equal(calls.length, count + 1, "polling should refresh history without rereading agents");
   assert.equal(timers.size, 1, "polling duplicated its timer");
+
+  await controller.load("2025-09-12");
+  const todayDone = gate(ipQualityToday());
+  const cachedReturn = controller.load(ipQualityToday());
+  assert.equal(views.at(-1).history?.date, ipQualityToday(), "returning to a seen day should show cached records while reading");
+  assert.equal(views.at(-1).loading, true);
+  todayDone(history(ipQualityToday()));
+  await cachedReturn;
+  gates.delete(ipQualityToday());
+
+  const partialDone = gate("2025-09-11");
+  const partialLoad = controller.load("2025-09-11");
+  await Promise.resolve();
+  assert.equal(views.at(-1).loading, true);
+  assert.equal(views.at(-1).history, undefined);
+  assert.deepEqual(views.at(-1).agents.map((item) => item.id), ["alpha"],
+    "node list should appear while the database read is pending");
+  partialDone(history("2025-09-11"));
+  await partialLoad;
+  gates.delete("2025-09-11");
 
   // Switching the selected node repaints from the loaded snapshot: the sidebar
   // only offers nodes the day already returned, so no read is issued.

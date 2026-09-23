@@ -27,6 +27,13 @@ func parseClientConnectionQuery(values url.Values, now time.Time) (store.ClientC
 		}
 		q.IncludeNonPublic = parsed
 	}
+	if value := values.Get("timeline"); value != "" {
+		parsed, err := strconv.ParseBool(value)
+		if err != nil {
+			return q, fmt.Errorf("invalid timeline")
+		}
+		q.SkipTimeline = !parsed
+	}
 	if q.AgentID != "" && !validAgentID(q.AgentID) {
 		return q, fmt.Errorf("invalid agent_id")
 	}

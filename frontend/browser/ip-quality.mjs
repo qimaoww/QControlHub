@@ -43,6 +43,10 @@ export async function testIPQualityRuntime(mode, preview = false) {
     calls: [], failed: false, checks: 0, scheduleWrites: 0,
   };
   window.__ipQualityFixture = fixture;
+  let releaseShell;
+  const shellReady = new Promise(resolve => { releaseShell = resolve; });
+  let releaseHistory;
+  const historyReady = new Promise(resolve => { releaseHistory = resolve; });
   const json = (value, status = 200) => new Response(JSON.stringify(value), { status, headers: { "Content-Type": "application/json" } });
   window.fetch = async (input, options = {}) => {
     const url = new URL(input instanceof Request ? input.url : input, location.href);
@@ -51,12 +55,13 @@ export async function testIPQualityRuntime(mode, preview = false) {
     fixture.calls.push({ path, method, search: url.search });
     if (path === "/auth/session") return json(session);
     if (path === "/agent-access") return json({ isolated: false, shares: [] });
-    if (path === "/overview") return json({ agents: 3, agents_online: 2 });
-    if (path === "/settings") return json({ panel_name: "QControlHub", ui_font_scale: 100, time_display: "absolute" });
+    if (path === "/overview") { await shellReady; return json({ agents: 3, agents_online: 2 }); }
+    if (path === "/settings") { await shellReady; return json({ panel_name: "QControlHub", ui_font_scale: 100, time_display: "absolute" }); }
     if (path === "/agents") return json(agents);
     if (path === "/ip-quality" && method === "GET") {
       if (fixture.failed) return json({ error: "检测记录暂不可用" }, 503);
       const date = url.searchParams.get("date");
+      if (date === today) await historyReady;
       const records = date === today ? fixture.records : date === yesterday ? [{
         task_id: "historical-failure", agent_id: "quality-a", status: "failed",
         created_at: `${yesterday}T06:00:00Z`, error: "检测未完成，请检查节点网络。",
@@ -85,7 +90,14 @@ export async function testIPQualityRuntime(mode, preview = false) {
   const panel = (id) => document.querySelector(`[data-ip-quality-panel="${id}"]`);
   const sidebar = () => document.querySelector(".context-sidebar");
   const sidebarLink = (id) => sidebar().querySelector(`[data-ip-quality-agent="${id}"]`);
+  await waitFor(() => card()?.textContent.includes("读取中"), "nodes did not render before history completed");
+  if (readonly) assert.equal(card().querySelector("[data-ip-quality-run]"), null, "partial read exposed a read-only mutation");
+  else assert.ok(card().querySelector("[data-ip-quality-run]")?.disabled, "partial read enabled a mutation");
+  assert.ok(document.querySelector(".ip-quality-summary")?.textContent.includes("—"),
+    "partial read displayed zero detections");
+  releaseHistory();
   await waitFor(() => card()?.textContent.includes("已完成"), "IP quality page did not load");
+  releaseShell();
   assert.ok(document.querySelector('.dock-nav a[href="#ip-quality"]'), "IP quality navigation is missing");
   // The project-standard context sidebar filters the page down to one node.
   assert.notEqual(getComputedStyle(sidebar()).display, "none", "IP quality hid the node sidebar");
@@ -164,7 +176,8 @@ export async function testIPQualityRuntime(mode, preview = false) {
     "empty history did not show its own empty state");
   assert.equal(sidebar().querySelectorAll("[data-ip-quality-agent]").length, 0, "empty history still offered a node");
   document.querySelector("[data-ip-quality-today]").click();
-  await waitFor(() => card()?.textContent.includes("已完成"), "return to today failed");
+  await waitFor(() => card()?.textContent.includes("已完成") && !document.querySelector("[data-ip-quality-refresh]").disabled,
+    "return to today failed");
   fixture.failed = true;
   await refresh();
   assert.ok(document.querySelector(".ip-quality-alert")?.textContent.includes("检测记录暂不可用"), "API error was hidden");

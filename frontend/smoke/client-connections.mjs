@@ -36,6 +36,7 @@ try {
 const filters = defaultConnectionFilters(Date.parse("2026-09-19T08:00:00Z"));
 const query = connectionQuery({ ...filters, client_ip: "2001:db8::1", port: "443", inbound: "a&b" }, 7);
 assert.equal(query.get("group_by"), "ip");
+assert.equal(query.get("timeline"), "false");
 assert.equal(query.get("client_ip"), "2001:db8::1");
 assert.equal(query.has("inbound"), false);
 assert.equal(query.has("port"), false);
