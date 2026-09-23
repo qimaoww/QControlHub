@@ -74,7 +74,7 @@ const deployedConfigsSQL = `
 	` + deployedConfigsBodySQL
 
 const deployedConfigsOwnedSQL = `
-	WITH latest AS MATERIALIZED (` + ownedLatestDeploymentsSQL + `)
+	WITH latest AS MATERIALIZED (` + ownedUsableDeploymentsSQL + `)
 	` + deployedConfigsBodySQL
 
 const deployedConfigsBodySQL = `

@@ -161,6 +161,28 @@ const ownedLatestDeploymentsSQL = `
 			AND t.finished_at IS NOT NULL
 	) owned ORDER BY agent_id,engine,priority DESC,finished_at DESC`
 
+// A selected client profile is usable only while another account has not
+// taken over the base core. Keep history and current availability distinct.
+const ownedUsableDeploymentsSQL = `
+	SELECT DISTINCT ON(agent_id,engine) agent_id,engine,config_id,config_version,finished_at FROM (
+		SELECT agent_id,engine,config_id,config_version,updated_at AS finished_at,2 AS priority
+		FROM agent_engine_ownership WHERE owner_id=$1 AND running AND NOT uncertain AND config_id<>''
+		UNION ALL
+		SELECT agent_id,engine,config_id,config_version,updated_at AS finished_at,2 AS priority
+		FROM agent_shared_instance_ownership WHERE owner_id=$1 AND running AND NOT uncertain AND config_id<>''
+		UNION ALL
+		SELECT t.agent_id,t.engine,t.config_id,t.config_version,t.finished_at,1 AS priority
+		FROM tasks t JOIN configs c ON c.id=t.config_id
+		WHERE c.owner_id=$1 AND t.action IN ('deploy','import-existing') AND t.status='succeeded'
+			AND t.finished_at IS NOT NULL
+			AND NOT EXISTS(SELECT 1 FROM agent_engine_ownership state
+				WHERE state.agent_id=t.agent_id AND state.engine=t.engine
+				AND state.owner_id<>$1 AND (state.running OR state.uncertain))
+			AND NOT EXISTS(SELECT 1 FROM agent_shared_instance_ownership state
+				WHERE state.agent_id=t.agent_id AND state.engine=t.engine
+				AND state.owner_id<>$1 AND (state.running OR state.uncertain))
+	) owned ORDER BY agent_id,engine,priority DESC,finished_at DESC`
+
 // Probe the existing (agent_id,engine,finished_at) partial index once per
 // possible service instead of scanning every successful deployment retained
 // in tasks. Do not restrict this to current capabilities: historical deployed

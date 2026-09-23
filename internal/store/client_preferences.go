@@ -48,7 +48,7 @@ func (s *Store) SetConfigClientPreferences(ctx context.Context, agentID string, 
 	where := ownerClause(ctx, "config.owner_id", &args)
 	latestSQL := latestDeploymentsSQL
 	if !scopeForConfig(ctx).Admin {
-		latestSQL = strings.ReplaceAll(ownedLatestDeploymentsSQL, "$1", fmt.Sprintf("$%d", len(args)))
+		latestSQL = strings.ReplaceAll(ownedUsableDeploymentsSQL, "$1", fmt.Sprintf("$%d", len(args)))
 	}
 	where += agentEngineAccessClause(ctx, "deployed.agent_id", "deployed.engine", &args)
 	var valid bool
