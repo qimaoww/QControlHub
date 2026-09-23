@@ -77,7 +77,7 @@ func (s *Store) ListIPQualityRecords(ctx context.Context, date, timezone string)
 	where := ownerClause(ctx, "t.owner_id", &args)
 	where += agentAdministrationClause(ctx, "t.agent_id", &args)
 	rows, err := s.pool.Query(ctx, `SELECT latest.id,latest.agent_id,latest.status,COALESCE(latest.error,''),
-		latest.created_at,latest.started_at,latest.finished_at,r.result,
+		latest.created_at,latest.started_at,latest.finished_at,r.result - 'reports_text',
         COALESCE((SELECT jsonb_agg(jsonb_build_object('family',a.family,
             'sha256',a.sha256,'size',octet_length(a.content),'rendered_at',a.rendered_at) ORDER BY a.family)
             FROM ip_quality_archives a WHERE a.task_id=latest.id),'[]'::jsonb) FROM (

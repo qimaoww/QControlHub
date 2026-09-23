@@ -55,7 +55,7 @@ export function ipQualityStatusTone(status) {
 // record on a historical day, and the first visible node when the remembered
 // selection is no longer listed. The items carry no selection of their own, so
 // the sidebar highlight always follows the live selected id.
-export function ipQualityNodeList(agents = [], records = [], isToday, selectedID = "") {
+export function ipQualityNodeList(agents = [], records = [], isToday, selectedID = "", missingNote = "") {
   const recordMap = new Map(records.map((item) => [item.agent_id, item]));
   const visible = isToday ? agents : agents.filter((agent) => recordMap.has(agent.id));
   const selected = visible.find((agent) => agent.id === selectedID) || visible[0] || null;
@@ -66,15 +66,14 @@ export function ipQualityNodeList(agents = [], records = [], isToday, selectedID
       return {
         id: agent.id,
         name: agent.name,
-        note: ipQualityNodeNote(agent, record),
+        note: record ? ipQualityStatusName(record.status) : missingNote || ipQualityNodeNote(agent),
         dot: ipQualityDotTones[record?.status] || "",
       };
     }),
   };
 }
 
-function ipQualityNodeNote(agent, record) {
-  if (record) return ipQualityStatusName(record.status);
+function ipQualityNodeNote(agent) {
   return agent?.features?.includes(ipQualityFeature) ? "当天未检测" : "需升级 Agent";
 }
 

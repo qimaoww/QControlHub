@@ -1,0 +1,53 @@
+[Unit]
+Description=Shared sing-box core managed by QAgent (%i)
+Documentation=https://github.com/SagerNet/sing-box
+Wants=network-online.target
+After=network-online.target
+ConditionFileIsExecutable=/usr/local/lib/qagent/cores/sing-box
+ConditionPathExists=/etc/qagent/sing-box/shares/%i/config.json
+
+[Service]
+Type=simple
+User=qcontrolhub-core
+Group=qcontrolhub-core
+WorkingDirectory=/var/lib/qcontrolhub-sing-box-%i
+StateDirectory=qcontrolhub-sing-box-%i
+StateDirectoryMode=0750
+StateDirectory=qcontrolhub-sing-box-%i
+StateDirectoryMode=0750
+UMask=0027
+ExecStart=/usr/local/lib/qagent/cores/sing-box run -c /etc/qagent/sing-box/shares/%i/config.json
+LogNamespace=qagent-cores
+StandardOutput=journal
+StandardError=journal
+Restart=on-failure
+RestartSec=3s
+TimeoutStopSec=20s
+
+NoNewPrivileges=true
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_NET_ADMIN
+AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_NET_ADMIN
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RemoveIPC=true
+ProtectProc=invisible
+ProcSubset=pid
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+SystemCallArchitectures=native
+ReadOnlyPaths=/usr/local/lib/qagent/cores/sing-box /etc/qagent/sing-box/shares
+ReadWritePaths=/var/lib/qcontrolhub-sing-box-%i
+
+[Install]
+WantedBy=multi-user.target

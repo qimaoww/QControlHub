@@ -107,6 +107,17 @@ func (s *Store) PurgeUser(ctx context.Context, id string) (PurgedUser, error) {
 	if changed {
 		return PurgedUser{}, fmt.Errorf("%w: sharing changed while deleting the account; reload and retry", ErrConflict)
 	}
+	var liveSharedInstance bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_shared_instance_ownership state
+		JOIN agent_shares share ON share.id=state.share_id
+		JOIN agents agent ON agent.id=state.agent_id
+		WHERE (share.user_id=$1 OR agent.owner_id=$1)
+			AND (state.running OR state.uncertain OR NOT state.traffic_settled))`, id).Scan(&liveSharedInstance); err != nil {
+		return PurgedUser{}, err
+	}
+	if liveSharedInstance {
+		return PurgedUser{}, fmt.Errorf("%w: stop and settle shared core instances before deleting the account", ErrConflict)
+	}
 	// Traffic reports lock grants before policies; use the same order.
 	if err := lockAgentSharesTx(ctx, tx, result.AgentIDs); err != nil {
 		return PurgedUser{}, err

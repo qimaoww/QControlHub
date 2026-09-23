@@ -1,0 +1,53 @@
+[Unit]
+Description=Shared Mihomo core managed by QAgent (%i)
+Documentation=https://github.com/MetaCubeX/mihomo
+Wants=network-online.target
+After=network-online.target
+ConditionFileIsExecutable=/usr/local/lib/qagent/cores/mihomo
+ConditionPathExists=/etc/qagent/mihomo/shares/%i/config.yaml
+
+[Service]
+Type=simple
+User=qcontrolhub-core
+Group=qcontrolhub-core
+WorkingDirectory=/var/lib/qcontrolhub-mihomo-%i
+StateDirectory=qcontrolhub-mihomo-%i
+StateDirectoryMode=0750
+StateDirectory=qcontrolhub-mihomo-%i
+StateDirectoryMode=0750
+UMask=0027
+ExecStart=/usr/local/lib/qagent/cores/mihomo -d /var/lib/qcontrolhub-mihomo-%i -f /etc/qagent/mihomo/shares/%i/config.yaml
+LogNamespace=qagent-cores
+StandardOutput=journal
+StandardError=journal
+Restart=on-failure
+RestartSec=3s
+TimeoutStopSec=20s
+
+NoNewPrivileges=true
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_NET_ADMIN
+AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_NET_ADMIN
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RemoveIPC=true
+ProtectProc=invisible
+ProcSubset=pid
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+ReadOnlyPaths=/usr/local/lib/qagent/cores/mihomo /etc/qagent/mihomo/shares
+ReadWritePaths=/var/lib/qcontrolhub-mihomo-%i
+
+[Install]
+WantedBy=multi-user.target

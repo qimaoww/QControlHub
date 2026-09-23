@@ -123,7 +123,8 @@ install_managed_unit() {
       printf '%s\n' "refusing non-regular managed unit: $destination" >&2
       exit 1
     fi
-    if ! grep -q '^Description=.* managed by QAgent$' "$destination"; then
+    if ! grep -q '^Description=.* managed by QAgent$' "$destination" &&
+       ! grep -q '^Description=.* managed by QAgent (%i)$' "$destination"; then
       printf '%s\n' "preserved non-QAgent unit: $destination"
       return
     fi
@@ -258,6 +259,7 @@ for engine in $selected_engines; do
   else
     managed_service="qagent-$engine.service"
     install_managed_unit "$script_dir/systemd/$managed_service" "/etc/systemd/system/$managed_service"
+    install_managed_unit "$script_dir/systemd/qagent-$engine@.service" "/etc/systemd/system/qagent-$engine@.service"
   fi
   if skip_core_service "$engine"; then
     skipped_engines="$skipped_engines $engine"

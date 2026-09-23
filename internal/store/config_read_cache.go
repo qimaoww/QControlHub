@@ -37,7 +37,7 @@ func (s *Store) recentReadTask(ctx context.Context, executor storeExecutor, agen
 	row := executor.QueryRow(ctx, `
 		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),
 		       COALESCE(config_content,''),COALESCE(mainland_access_policies,'[]'::jsonb),COALESCE(core_version,''),COALESCE(core_source,''),status,attempt,COALESCE(lease_id,''),
-		       COALESCE(output,''),COALESCE(error,''),created_at,started_at,finished_at,tcp_settings,shared_traffic_id,cnip_source,install_if_missing
+		       COALESCE(output,''),COALESCE(error,''),created_at,started_at,finished_at,tcp_settings,shared_traffic_id,cnip_source,install_if_missing,shared_instance
 		FROM tasks
 		WHERE agent_id=$1 AND engine=$2 AND action=$3 AND status='succeeded'
 		  AND config_content IS NOT NULL AND finished_at > now()-$4::interval AND owner_id=$5

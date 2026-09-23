@@ -29,6 +29,15 @@ func (s *Store) Heartbeat(ctx context.Context, id string, heartbeat core.Heartbe
 // the current authenticated WSS session.
 func (s *Store) HeartbeatWithPublicIPProbeTrust(ctx context.Context, id string, heartbeat core.HeartbeatRequest, trust PublicIPProbeTrust) error {
 	receivedAt := time.Now().UTC()
+	if len(heartbeat.SharedInstances) > 256 {
+		return fmt.Errorf("%w: too many shared instance statuses", ErrInvalid)
+	}
+	for _, instance := range heartbeat.SharedInstances {
+		if !instance.Engine.Valid() || !core.ValidAgentShareID(instance.ShareID) ||
+			(instance.Status != "active" && instance.Status != "inactive" && instance.Status != "failed" && instance.Status != "unknown") {
+			return fmt.Errorf("%w: invalid shared instance status", ErrInvalid)
+		}
+	}
 	heartbeat.Version = strings.TrimSpace(heartbeat.Version)
 	heartbeat.OS = strings.TrimSpace(heartbeat.OS)
 	heartbeat.Arch = strings.TrimSpace(heartbeat.Arch)
@@ -89,7 +98,35 @@ func (s *Store) HeartbeatWithPublicIPProbeTrust(ctx context.Context, id string, 
 	} else if err := s.recordAgentLiveState(ctx, id, metricsState); err != nil {
 		return err
 	}
-	return s.UpdatePortTrafficUsage(ctx, id, heartbeat.TrafficUsage, receivedAt)
+	if err := s.UpdatePortTrafficUsage(ctx, id, heartbeat.TrafficUsage, receivedAt); err != nil {
+		return err
+	}
+	reportedPolicies := make(map[string][]string)
+	for _, usage := range heartbeat.TrafficUsage {
+		if usage.ShareID != "" && usage.EnforcementAvailable {
+			reportedPolicies[usage.ShareID] = append(reportedPolicies[usage.ShareID], usage.PolicyID)
+		}
+	}
+	for _, instance := range heartbeat.SharedInstances {
+		if instance.Status == "unknown" {
+			continue
+		}
+		active := instance.Status == "active"
+		if _, err := s.pool.Exec(ctx, `UPDATE agent_shared_instance_ownership SET running=$4,
+			uncertain=CASE WHEN $4 THEN uncertain ELSE false END,
+			config_uncertain=CASE WHEN $4 THEN config_uncertain ELSE false END,
+			traffic_settled=NOT $4 AND COALESCE(cardinality($5::text[])>0,false)
+				AND EXISTS(SELECT 1 FROM port_traffic_policies p
+				WHERE p.agent_id=$1 AND p.share_id=$3 AND p.monitoring_enabled)
+				AND NOT EXISTS(SELECT 1 FROM port_traffic_policies p
+					WHERE p.agent_id=$1 AND p.share_id=$3 AND p.monitoring_enabled
+					AND NOT(p.id=ANY($5::text[]))),updated_at=now()
+			WHERE agent_id=$1 AND engine=$2 AND share_id=$3`,
+			id, instance.Engine, instance.ShareID, active, reportedPolicies[instance.ShareID]); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // UpdateAgentMetrics refreshes only the live metrics snapshot from the

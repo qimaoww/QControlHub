@@ -18,7 +18,11 @@ func (s *Store) ListAgents(ctx context.Context) ([]core.Agent, error) {
 	if err != nil {
 		return nil, err
 	}
-	return scanAgents(ctx, rows)
+	agents, err := scanAgents(ctx, rows)
+	if err != nil {
+		return nil, err
+	}
+	return agents, s.overlaySharedInstanceRuntime(ctx, agents)
 }
 
 // ListAgentsWithEnrollmentCommands pipelines the panel's two independent
@@ -56,7 +60,7 @@ func (s *Store) ListAgentsWithEnrollmentCommands(ctx context.Context) ([]core.Ag
 	for index := range agents {
 		agents[index].EnrollmentCommandAvailable = available[agents[index].ID]
 	}
-	return agents, nil
+	return agents, s.overlaySharedInstanceRuntime(ctx, agents)
 }
 
 const listAgentsSQL = listAgentsSQLBase + ` ORDER BY enrolled_at DESC`

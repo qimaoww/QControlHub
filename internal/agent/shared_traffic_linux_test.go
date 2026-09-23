@@ -68,6 +68,11 @@ func TestSharedTrafficCombinesPortsAndSurvivesCalendarRestartAndTopup(t *testing
 		t.Fatalf("persisted shared state: %+v %v", loaded, err)
 	}
 	restarted := &TrafficManager{statePath: manager.statePath, records: loaded.Records, backend: backend, now: manager.now}
+	var haltedShares []string
+	restarted.haltShare = func(_ context.Context, _ core.Engine, shareID string) error {
+		haltedShares = append(haltedShares, shareID)
+		return nil
+	}
 	for i := range policies[:2] {
 		quota := *policies[i].SharedQuota
 		quota.LimitBytes, quota.UsedBytes, quota.PortUsedBytes = 200, 120, 60
@@ -99,11 +104,19 @@ func TestSharedTrafficCombinesPortsAndSurvivesCalendarRestartAndTopup(t *testing
 	if snapshot = restarted.Snapshot(); !snapshot[0].Blocked || !snapshot[1].Blocked || snapshot[2].Blocked {
 		t.Fatalf("revocation affected wrong user's ports: %+v", snapshot)
 	}
+	if len(haltedShares) != 1 || haltedShares[0] != policies[0].SharedQuota.ID {
+		t.Fatalf("revocation stopped the wrong private instance: %+v", haltedShares)
+	}
 }
 
 func TestSharedTrafficEnforcesEngineRevocationWithoutResettingLedger(t *testing.T) {
 	manager, backend, policies, now := sharedTrafficFixture(t)
 	ctx := context.Background()
+	var halted []core.Engine
+	manager.haltShare = func(_ context.Context, engine core.Engine, _ string) error {
+		halted = append(halted, engine)
+		return nil
+	}
 	policies[1].Engine = core.EngineXray
 	for index := range policies[:2] {
 		policies[index].SharedQuota.Engines = []core.Engine{core.EngineMihomo, core.EngineXray}
@@ -127,6 +140,9 @@ func TestSharedTrafficEnforcesEngineRevocationWithoutResettingLedger(t *testing.
 	got := manager.Snapshot()
 	if got[0].Blocked || !got[1].Blocked || got[2].Blocked {
 		t.Fatalf("engine revocation affected wrong listeners: %+v", got)
+	}
+	if len(halted) != 1 || halted[0] != core.EngineXray {
+		t.Fatalf("engine revocation did not stop only the affected service: %+v", halted)
 	}
 	if sharedTrafficUsed(manager.records, policies[0].SharedQuota.ID) != 80 {
 		t.Fatal("engine revocation reset cumulative traffic")
@@ -176,6 +192,75 @@ func TestSharedTrafficRecoversServerTotalAndRejectsUnsafeExecution(t *testing.T)
 	}
 	if len(halted) != 2 {
 		t.Fatalf("failed accounting did not stop each shared core once: %+v", halted)
+	}
+}
+
+func TestSharedAccountingFailureScopesLegacyStopToSharedPorts(t *testing.T) {
+	manager, backend, policies, _ := sharedTrafficFixture(t)
+	if err := manager.SetPolicies(context.Background(), policies, "agt_shared"); err != nil {
+		t.Fatal(err)
+	}
+	manager.haltShared = func(context.Context, core.Engine) error { return nil }
+	ports := map[core.Engine][]int{}
+	manager.haltLegacyShared = func(_ context.Context, engine core.Engine, shared []int) error {
+		ports[engine] = append([]int(nil), shared...)
+		return nil
+	}
+	backend.err = errors.New("nftables is unavailable")
+	manager.collect(context.Background(), false)
+	if len(ports[core.EngineMihomo]) != 2 || len(ports[core.EngineXray]) != 1 ||
+		ports[core.EngineXray][0] != 21003 {
+		t.Fatalf("legacy stop received unrelated or incomplete ports: %+v", ports)
+	}
+}
+
+func TestRemovingOneSharedPortStopsItsInstanceBeforeChangingRules(t *testing.T) {
+	manager, backend, policies, _ := sharedTrafficFixture(t)
+	ctx := context.Background()
+	if err := manager.SetPolicies(ctx, policies, "agt_shared"); err != nil {
+		t.Fatal(err)
+	}
+	var stopped bool
+	manager.haltShare = func(_ context.Context, engine core.Engine, shareID string) error {
+		if engine != core.EngineMihomo || shareID != policies[0].SharedQuota.ID {
+			t.Fatalf("stopped unrelated instance: %s %s", engine, shareID)
+		}
+		stopped = true
+		return nil
+	}
+	manager.haltLegacyShared = func(_ context.Context, engine core.Engine, ports []int) error {
+		if engine != core.EngineMihomo || len(ports) != 1 || ports[0] != 21002 {
+			t.Fatalf("legacy stop targeted unrelated ports: %s %+v", engine, ports)
+		}
+		return nil
+	}
+	backend.onReplace = func() {
+		if !stopped {
+			t.Fatal("removed shared port lost enforcement before its service stopped")
+		}
+	}
+	remaining := []core.PortTrafficPolicy{policies[0], policies[2]}
+	if err := manager.SetPolicies(ctx, remaining, "agt_shared"); err != nil {
+		t.Fatal(err)
+	}
+	if !stopped || manager.records[policies[1].ID] != nil {
+		t.Fatal("removed listener kept running or retained a policy")
+	}
+}
+
+func TestFailedSharedStopRetainsPriorEnforcement(t *testing.T) {
+	manager, backend, policies, _ := sharedTrafficFixture(t)
+	ctx := context.Background()
+	if err := manager.SetPolicies(ctx, policies, "agt_shared"); err != nil {
+		t.Fatal(err)
+	}
+	priorReplacements := len(backend.scripts)
+	manager.haltShare = func(context.Context, core.Engine, string) error { return errors.New("stop failed") }
+	if err := manager.SetPolicies(ctx, []core.PortTrafficPolicy{policies[0], policies[2]}, "agt_shared"); err == nil {
+		t.Fatal("shared stop failure allowed removal of a metered port")
+	}
+	if !manager.awaitingPolicies || manager.records[policies[1].ID] == nil || len(backend.scripts) != priorReplacements {
+		t.Fatal("failed stop removed old policy or traffic rules")
 	}
 }
 

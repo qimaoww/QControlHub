@@ -24,9 +24,10 @@ export function installClientConnections(ctx) {
         if (!filters.agent_id) data.connectionSources = result.sources;
         else data.connectionSources = (data.connectionSources || result.sources).map(source => result.sources.find(fresh => fresh.agent_id === source.agent_id) || source);
       }
-      shell(view(result, filters, data.connectionSources || [], { hasPrevious: cursors.length > 0, page: cursors.length + 1, ...options }), "客户端连接 IP");
+      shell(view(result, filters, data.connectionSources || [], { hasPrevious: cursors.length > 0, page: cursors.length + 1, filtersOpen: data.connectionFiltersOpen ?? true, ...options }), "客户端连接 IP");
       bindClientConnections({
         current,
+        filterToggle: open => { data.connectionFiltersOpen = open; },
         refresh: () => { void load({ cursor, cursors, force: true }); },
         search: values => { data.connectionFilters = { ...filters, ...values }; void load(); },
         selectAgent: agent_id => { data.connectionFilters = { ...filters, agent_id }; void load(); },

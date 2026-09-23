@@ -26,7 +26,7 @@ if [ "$service_manager" = openrc ]; then
     download "/install-assets/deploy/openrc/$service_asset" "$repository_dir/deploy/openrc/$service_asset"
   done
 else
-  service_assets="qagent.service qagent-core-journal.conf qagent-mihomo.service qagent-xray.service qagent-sing-box.service qagent-shadowsocks-rust.service"
+  service_assets="qagent.service qagent-core-journal.conf qagent-mihomo.service qagent-xray.service qagent-sing-box.service qagent-shadowsocks-rust.service qagent-mihomo@.service qagent-xray@.service qagent-sing-box@.service qagent-shadowsocks-rust@.service"
   for service_asset in $service_assets; do
     download "/install-assets/deploy/systemd/$service_asset" "$repository_dir/deploy/systemd/$service_asset"
   done

@@ -15,6 +15,8 @@ import (
 //go:embed deploy/systemd/qagent-core-journal.conf
 //go:embed deploy/systemd/qagent-mihomo.service deploy/systemd/qagent-xray.service
 //go:embed deploy/systemd/qagent-sing-box.service deploy/systemd/qagent-shadowsocks-rust.service
+//go:embed deploy/systemd/qagent-mihomo@.service deploy/systemd/qagent-xray@.service
+//go:embed deploy/systemd/qagent-sing-box@.service deploy/systemd/qagent-shadowsocks-rust@.service
 //go:embed deploy/openrc/qagent-mihomo deploy/openrc/qagent-xray
 //go:embed deploy/openrc/qagent-sing-box deploy/openrc/qagent-shadowsocks-rust
 //go:embed examples/configs/mihomo-minimal.yaml examples/configs/xray-minimal.json
