@@ -3,7 +3,7 @@ import { clientConnectionFilters } from "./client-connection-filters.js";
 import { connectionSourceLabel, connectionSourceDetail } from "./client-connection-model.js";
 
 export function createClientConnectionView({ esc, engineName, date }) {
-  return function connectionView(result, filters, sources, { loading = false, error = "", hasPrevious = false, page = 1 } = {}) {
+  return function connectionView(result, filters, sources, { loading = false, error = "", hasPrevious = false, page = 1, filtersOpen = true } = {}) {
     const records = result?.records || [];
     const reportSources = result?.sources || [];
     const scope = filters.agent_id ? sources.find(source => source.agent_id === filters.agent_id)?.agent_name || "所选节点" : "全部节点";
@@ -16,9 +16,9 @@ export function createClientConnectionView({ esc, engineName, date }) {
       </section>
 
       ${error ? `<div class="connection-error" role="alert">${esc(error)}</div>` : ""}
+      ${clientConnectionFilters({ filters, esc, engineName, open: filtersOpen })}
       <section class="workspace-panel connection-detail-panel">
         <header><h3>客户端来源 IP</h3><span class="connection-result-count">${loading ? result ? "正在更新…" : "正在读取…" : result?.preview ? `已显示 ${records.length} 条，结果待更新` : `本页 ${records.length} 条`}</span></header>
-        ${clientConnectionFilters({ filters, esc, engineName })}
         ${clientConnectionTable({ records, loading, esc, engineName, date })}
         <footer class="connection-pagination"><span>第 ${page} 页</span><button class="button small" data-connection-previous${!hasPrevious ? " disabled" : ""}>上一页</button><button class="button small" data-connection-next${!result?.next_cursor ? " disabled" : ""}>下一页</button></footer>
       </section>
