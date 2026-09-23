@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 
@@ -270,6 +271,34 @@ func stopSharedInstances(ctx context.Context, manager *ServiceManager, engine co
 		}
 	}
 	return errors.Join(failures...)
+}
+
+// The pre-instance layout ran a recipient in the base service. Only stop that
+// service when its current listeners actually include a metered shared port;
+// the node owner's base service must continue when a private share fails.
+func stopLegacySharedBase(ctx context.Context, manager *ServiceManager, engine core.Engine, base EngineSpec, sharedPorts []int) error {
+	if len(sharedPorts) == 0 {
+		return nil
+	}
+	status, err := manager.status(ctx, base.Service)
+	if err != nil {
+		return fmt.Errorf("inspect base core status before clearing shared enforcement: %w", err)
+	}
+	if status == "inactive" || status == "failed" {
+		return nil
+	}
+	content, err := readConfigurationFile(base.ConfigPath)
+	if err != nil {
+		return fmt.Errorf("inspect base core before clearing shared enforcement: %w", err)
+	}
+	endpoints := serverconfig.DiscoverTrafficPorts(engine, content)
+	for _, endpoint := range endpoints {
+		if slices.Contains(sharedPorts, endpoint.Port) {
+			_, err := manager.command(ctx, base.Service, core.ActionStop)
+			return err
+		}
+	}
+	return nil
 }
 
 func (e *Executor) SharedInstanceStatuses(ctx context.Context) []core.SharedInstanceStatus {

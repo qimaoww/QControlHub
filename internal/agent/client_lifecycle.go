@@ -113,11 +113,16 @@ func (c *Client) Run(ctx context.Context) error {
 			if !exists {
 				return errors.New("shared core service is not configured")
 			}
-			if err := stopSharedInstances(ctx, c.executor.serviceManager(), engine, spec); err != nil {
-				return err
+			return stopSharedInstances(ctx, c.executor.serviceManager(), engine, spec)
+		}
+		c.traffic.haltLegacyShared = func(ctx context.Context, engine core.Engine, ports []int) error {
+			c.executor.specsMu.RLock()
+			spec, exists := c.executor.Specs[engine]
+			c.executor.specsMu.RUnlock()
+			if !exists {
+				return errors.New("shared core service is not configured")
 			}
-			_, err := c.executor.serviceManager().command(ctx, spec.Service, core.ActionStop)
-			return err
+			return stopLegacySharedBase(ctx, c.executor.serviceManager(), engine, spec, ports)
 		}
 		c.traffic.haltShare = func(ctx context.Context, engine core.Engine, shareID string) error {
 			c.executor.specsMu.RLock()
