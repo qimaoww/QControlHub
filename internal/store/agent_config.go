@@ -17,7 +17,8 @@ func (s *Store) AgentConfig(ctx context.Context, agentID string, engine core.Eng
 	var config core.Config
 	err := s.pool.QueryRow(ctx, `
 		SELECT id,COALESCE(agent_id,''),name,description,engine,content,version,created_at,updated_at,owner_id
-		FROM configs WHERE agent_id=$1 AND engine=$2 AND owner_id=$3 AND deleted_at IS NULL`, agentID, engine, scopeForConfig(ctx).OwnerID).Scan(
+		FROM configs WHERE agent_id=$1 AND engine=$2 AND owner_id=$3 AND deleted_at IS NULL
+		  AND EXISTS(SELECT 1 FROM agents a WHERE a.id=configs.agent_id AND a.revoked_at IS NULL)`, agentID, engine, scopeForConfig(ctx).OwnerID).Scan(
 		&config.ID, &config.AgentID, &config.Name, &config.Description, &config.Engine, &config.Content,
 		&config.Version, &config.CreatedAt, &config.UpdatedAt, &config.OwnerID)
 	if errors.Is(err, pgx.ErrNoRows) {

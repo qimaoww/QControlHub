@@ -28,6 +28,7 @@ const form = await waitFor(() => document.querySelector("#settings-form"), "系�
   assert.ok(save.disabled, "初始状态不应需要保存");
   ipv4.value = "https://example.com/cn.mmdb";
   ipv6.value = "https://example.com/cn6.srs";
+  form.elements.client_connection_retention_days.value = "45";
   inputs[1].click();
   assert.ok(!save.disabled, "切换应标记待保存");
   assert.notEqual(getComputedStyle(inputs[1].closest("label").querySelector(".when-enabled")).display, "none", "状态文字须随开关即时更新");
@@ -39,6 +40,7 @@ const form = await waitFor(() => document.querySelector("#settings-form"), "系�
   for (const input of inputs) if (input.checked) input.click();
   form.requestSubmit(save);
   await waitFor(() => testAPI.settings.revision === 2, "全局能力未保存");
+  assert.equal(testAPI.settings.client_connection_retention_days, 45, "source IP retention missing from settings save");
   assert.equal(testAPI.settings.default_agent_engines.length, 0, "必须允许全部关闭");
   assert.equal(testAPI.settings.cnip_source.ipv4_url, ipv4.value, "IPv4 source missing from save");
   assert.equal(testAPI.settings.cnip_source.ipv6_url, ipv6.value, "IPv6 source missing from save");

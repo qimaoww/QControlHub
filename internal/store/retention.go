@@ -5,8 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"time"
-
-	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
 func (s *Store) PruneTasks(ctx context.Context, olderThan time.Time) (int64, error) {
@@ -94,6 +92,9 @@ func (s *Store) MaintainAccountData(ctx context.Context, now time.Time, prune bo
 		if !prune {
 			continue
 		}
+		if settings.ClientConnectionRetentionDays > 0 {
+			failures = append(failures, s.PruneClientConnections(account, now.Add(-time.Duration(settings.ClientConnectionRetentionDays)*24*time.Hour)))
+		}
 		_, err = s.PruneMetricSamples(account, now.Add(-time.Duration(settings.MetricRetentionDays)*24*time.Hour))
 		failures = append(failures, err)
 		if settings.AuditRetentionDays > 0 {
@@ -113,7 +114,6 @@ func (s *Store) MaintainAccountData(ctx context.Context, now time.Time, prune bo
 		failures = append(failures, err)
 	}
 	if prune {
-		failures = append(failures, s.PruneClientConnections(ctx, now.Add(-core.ClientConnectionRetention)))
 		failures = append(failures, s.PruneClientConnectionLocations(ctx))
 		cutoff := now.Add(-time.Duration(longestLogRetention) * 24 * time.Hour)
 		_, err = s.PruneCoreLogPartitions(ctx, cutoff)

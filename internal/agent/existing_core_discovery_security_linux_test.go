@@ -79,10 +79,10 @@ func TestExistingCoreDiscoveryAcceptsInactiveOrphanOwnedInstallerBinary(t *testi
 	if err != nil {
 		t.Fatalf("discover inactive orphan-owned installer binary: %v", err)
 	}
-	assertDiscoveredSingBoxSpec(t, specs[core.EngineSingBox], serviceBinary, serviceBinary, fixture.configPath, fixture.configDirectory, "")
 	if len(issues) != 0 {
 		t.Fatalf("inactive orphan-owned discovery issues = %+v", issues)
 	}
+	assertDiscoveredSingBoxSpec(t, specs[core.EngineSingBox], serviceBinary, serviceBinary, fixture.configPath, fixture.configDirectory, "")
 	if _, err := os.Stat(serviceBinary + ".invocations"); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("orphan-owned source binary was invoked directly: %v", err)
 	}

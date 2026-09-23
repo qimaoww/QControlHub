@@ -262,6 +262,9 @@ func TestDeleteAgentInvalidatesBoundReusableCredential(t *testing.T) {
 	if dataStore.EnrollmentTokenUsable(ctx, additional.Token) {
 		t.Fatal("deleted agent's additional credential remains usable")
 	}
+	if err := dataStore.CleanupDeletedAgents(ctx); err != nil {
+		t.Fatal(err)
+	}
 	var trafficRows int
 	if err := dataStore.pool.QueryRow(ctx, `SELECT count(*) FROM port_traffic_policies WHERE id=$1`, trafficPolicy.ID).Scan(&trafficRows); err != nil || trafficRows != 0 {
 		t.Fatalf("deleted agent traffic rows = %d, %v", trafficRows, err)

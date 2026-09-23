@@ -6,12 +6,8 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -59,32 +55,60 @@ func TestIPQualityExecutableChecksMetadata(t *testing.T) {
 	}
 }
 
-func TestIPQualityDownloadChecksContentBeforeExecution(t *testing.T) {
-	content := "#!/bin/bash\nexit 0\n"
-	digest := sha256.Sum256([]byte(content))
-	checksum := hex.EncodeToString(digest[:])
-	for _, test := range []struct {
-		name, body, checksum string
-		status               int
-		wantError            bool
-	}{
-		{"valid", content, checksum, 200, false},
-		{"changed", content + "# change", checksum, 200, true},
-		{"html", "<html>error</html>", checksum, 200, true},
-		{"http-error", content, checksum, 503, true},
-		{"oversized", strings.Repeat("x", maxIPQualityScriptBytes+1), checksum, 200, true},
+// TestIPQualityPrintedReportBudgetFitsTheResultLimit keeps one printed report per
+// address family inside core's structured-result limit.
+func TestIPQualityPrintedReportBudgetFitsTheResultLimit(t *testing.T) {
+	if 2*ipQualityPrintedReportLimit >= core.MaxIPQualityResultBytes {
+		t.Fatalf("printed report budget %d leaves no room for two families inside %d",
+			ipQualityPrintedReportLimit, core.MaxIPQualityResultBytes)
+	}
+}
+
+func TestIPQualityProgramUsesOfficialOneLiner(t *testing.T) {
+	for _, want := range []string{
+		"curl -Ls https://IP.Check.Place",
+		`-y -p -f -o "$1"`,
 	} {
-		t.Run(test.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				w.WriteHeader(test.status)
-				fmt.Fprint(w, test.body)
-			}))
-			defer server.Close()
-			got, err := downloadIPQualityScript(context.Background(), server.Client(), server.URL, test.checksum)
-			if (err != nil) != test.wantError || err == nil && string(got) != test.body {
-				t.Fatalf("download result %q, %v", got, err)
-			}
-		})
+		if !strings.Contains(ipQualityProgram, want) {
+			t.Fatalf("IPQuality program is missing %q", want)
+		}
+	}
+	// Privacy mode keeps the detector from uploading to the upstream host; the
+	// panel renders the image from the returned printed report instead.
+	if strings.Contains(ipQualityProgram, "upload.check.place") || strings.Contains(ipQualityProgram, "QCH_IPQUALITY_LINKS") {
+		t.Fatal("IPQuality program still exports an upstream report link")
+	}
+}
+
+func TestIPQualityReportTextsFromPrintedOutput(t *testing.T) {
+	// The Agent keeps upstream's printed report so the panel can render exactly
+	// what the terminal shows, instead of re-deriving the layout from the JSON.
+	printed := "\x1b[36m########################################################################\x1b[0m\n" +
+		"                 \x1b[1mIP质量体检报告(Lite)：\x1b[36m203.0.113.1\x1b[0m\n" +
+		"        报告时间：2026-09-19 13:56:33 CST  脚本版本：v2026-09-16\n" +
+		"\x1b[36m########################################################################\x1b[0m\n" +
+		"三、风险评分\n" +
+		"DB-IP：         |低风险\n" +
+		"========================================================================\n" +
+		"今日IP检测量：565；总检测量：2204309。感谢使用xy系列脚本！\n" +
+		"########################################################################\n" +
+		"                 IP质量体检报告：2001:db8::1\n" +
+		"ipapi：    0.00%|极低风险\n" +
+		"========================================================================\n"
+	texts := parseIPQualityReportTexts(printed)
+	if len(texts) != 2 {
+		t.Fatalf("parsed %d reports: %q", len(texts), texts)
+	}
+	if !strings.Contains(texts[0], "IP质量体检报告(Lite)：") || !strings.Contains(texts[0], "DB-IP：         |低风险") ||
+		!strings.Contains(texts[0], "今日IP检测量：565") {
+		t.Fatalf("lite report = %q", texts[0])
+	}
+	if !strings.Contains(texts[1], "IP质量体检报告：2001:db8::1") || strings.Contains(texts[1], "DB-IP") ||
+		!strings.Contains(texts[1], "ipapi：    0.00%|极低风险") {
+		t.Fatalf("full report = %q", texts[1])
+	}
+	if got := parseIPQualityReportTexts("no report here"); len(got) != 0 {
+		t.Fatalf("parsed reports from unrelated output = %+v", got)
 	}
 }
 
@@ -95,20 +119,21 @@ func TestIPQualityScriptExecutionContract(t *testing.T) {
 	}
 	report := agentQualityReport("203.0.113.1", "fixture")
 	for _, test := range []struct {
-		name, script string
-		wantError    bool
+		name, program string
+		wantError     bool
 	}{
-		{"ipv4-final-status-one", `test "$*" = "-n -f -E -j -o $6" || exit 2
-test -z "$QCH_IPQUALITY_SECRET" || exit 3
+		{"ipv4-final-status-one", `test -z "$QCH_IPQUALITY_SECRET" || exit 3
 test -z "$HTTP_PROXY" || exit 4
 test -z "$BASH_ENV" || exit 5
-printf '%s\n' '` + report + `' > "$6"
+printf '%s\n' '` + report + `' > "$1"
+printf 'IP质量体检报告：203.0.113.1\n'
 exit 1`, false},
-		{"dual-stack", `printf '%s\n' '` + report + `' '` + agentQualityReport("2001:db8::1", "fixture") + `' > "$6"`, false},
+		{"dual-stack", `printf '%s\n' '` + report + `' '` + agentQualityReport("2001:db8::1", "fixture") + `' > "$1"
+printf 'IP质量体检报告：203.0.113.1\nIP质量体检报告：2001:db8::1\n'`, false},
 		{"missing-report", "exit 0", true},
-		{"malformed-report", `printf 'not JSON' > "$6"`, true},
-		{"partial-report", `printf '%s\n' '` + report + `' '{' > "$6"`, true},
-		{"symlink-report", `ln -s /etc/passwd "$6"`, true},
+		{"malformed-report", `printf 'not JSON' > "$1"`, true},
+		{"partial-report", `printf '%s\n' '` + report + `' '{' > "$1"`, true},
+		{"symlink-report", `ln -s /etc/passwd "$1"`, true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Setenv("QCH_IPQUALITY_SECRET", "must-not-leak")
@@ -116,15 +141,7 @@ exit 1`, false},
 			t.Setenv("BASH_ENV", "/nonexistent")
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			script := test.script
-			if !test.wantError {
-				links := "203.0.113.1\thttps://Report.Check.Place/IP/fixture4.svg\n"
-				if test.name == "dual-stack" {
-					links += "2001:db8::1\thttps://Report.Check.Place/IP/fixture6.svg\n"
-				}
-				script = "printf '%s' '" + links + "' > \"$QCH_IPQUALITY_LINKS\"\n" + script
-			}
-			result, err := executeIPQualityScript(ctx, bash, []byte(script))
+			result, err := executeIPQualityProgram(ctx, bash, test.program)
 			if (err != nil) != test.wantError {
 				t.Fatalf("%+v, %v", result, err)
 			}
@@ -139,7 +156,7 @@ func TestIPQualityCancellationAndBoundedReport(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 	start := time.Now()
-	if _, err := executeIPQualityScript(ctx, "/bin/bash", []byte("sleep 20 &\nwait\n")); err == nil {
+	if _, err := executeIPQualityProgram(ctx, "/bin/bash", "sleep 20 &\nwait\n"); err == nil {
 		t.Fatal("canceled command succeeded")
 	}
 	if time.Since(start) > 3*time.Second {

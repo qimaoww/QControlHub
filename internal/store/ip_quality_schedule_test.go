@@ -64,7 +64,7 @@ func TestIPQualityScheduleSkipsUnavailableCandidatesBeforeBatchLimit(t *testing.
 	if _, err := db.pool.Exec(ctx, `INSERT INTO agents
 		(id,name,os,arch,capabilities,features,public_key,last_seen,enrolled_at)
 		SELECT 'agt_quality_unavailable_'||n,'unavailable','linux','amd64','[]',
-			CASE WHEN n<=100 THEN '[]'::jsonb ELSE '["ip-quality-v1"]'::jsonb END,
+			CASE WHEN n<=100 THEN '[]'::jsonb ELSE '["ip-quality-v2"]'::jsonb END,
 			decode(lpad(to_hex(n),64,'0'),'hex'),
 			CASE WHEN n<=100 THEN now() ELSE now()-interval '90 seconds' END,now()
 		FROM generate_series(1,200) n;

@@ -11,7 +11,7 @@ export function createIPQualityController(ctx, view) {
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
   const current = (data, epoch) => data === state.data && epoch === state.navigationEpoch && state.route === "ip-quality";
   const editable = (agent) => agent?.can_manage !== false && can("agents.manage", agent) && can("tasks.execute");
-  const bind = createIPQualityBindings({ state, load, runCheck, setSchedule });
+  const bind = createIPQualityBindings({ state, load, runCheck, setSchedule, select });
   const poller = createPoller({
     run: () => load(undefined, { background: true }),
     isActive: () => state.route === "ip-quality",
@@ -67,6 +67,7 @@ export function createIPQualityController(ctx, view) {
     const agent = snapshot?.agents.find((item) => item.id === agentID);
     const record = snapshot?.history.records.find((item) => item.agent_id === agentID);
     const scheduling = typeof enabled === "boolean";
+    if (selectedDate !== ipQualityToday() || snapshot?.date !== selectedDate) return false;
     if (accountData !== data || !current(data, epoch) || !agent || !editable(agent) || readFailed || pending.has(agentID)) return false;
     if (!scheduling && ipQualityBlockReason(agent, record)) return false;
     if (scheduling && enabled && !agent.features?.includes(ipQualityFeature)) return false;
@@ -74,10 +75,10 @@ export function createIPQualityController(ctx, view) {
     render(data.ipQualityDate);
     try {
       const message = scheduling && !enabled
-        ? `关闭 ${agent.name} 的每日 IPQuality 检测？已提交的任务不会因此中止。`
-        : `${scheduling ? "启用每日检测" : "检测"} ${agent.name} 的出口 IP？Agent 将运行固定版本的 IPQuality，联系第三方 IP 数据库、媒体和邮件服务，通常需要数分钟；会向上游上传含完整 IP 的检测报告以生成链接，再由面板下载并存入数据库；不会自动安装依赖。`;
+        ? `关闭 ${agent.name} 的每日检测？`
+        : `${scheduling ? "为" : "检测"} ${agent.name}${scheduling ? "启用每日检测" : "的出口 IP"}？检测会访问第三方服务，耗时数分钟；缺少依赖时自动安装，不上传报告。`;
       if (!(await confirmAction(message, scheduling ? "每日 IP 检测" : "开始 IP 检测")) ||
-          !current(data, epoch) || selectedDate !== data.ipQualityDate) return false;
+          !current(data, epoch) || selectedDate !== data.ipQualityDate || selectedDate !== ipQualityToday()) return false;
       await api(scheduling ? `/ip-quality/schedules/${encodeURIComponent(agentID)}` : "/ip-quality", {
         method: scheduling ? "PUT" : "POST",
         body: JSON.stringify(scheduling ? { enabled } : { agent_id: agentID }),
@@ -97,5 +98,14 @@ export function createIPQualityController(ctx, view) {
   }
   function runCheck(agentID) { return mutate(agentID); }
   function setSchedule(agentID, enabled) { return mutate(agentID, enabled); }
-  return { load, runCheck, setSchedule };
+  // Switching the selected node repaints from the loaded snapshot: the sidebar
+  // only ever offers nodes the current day already returned, so no read is
+  // needed, and the repaint is what moves the sidebar highlight.
+  function select(agentID) {
+    if (state.data.ipQualityAgent === agentID) return false;
+    state.data.ipQualityAgent = agentID;
+    render(state.data.ipQualityDate);
+    return true;
+  }
+  return { load, runCheck, setSchedule, select };
 }

@@ -3,30 +3,40 @@
 package agent
 
 import (
-	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
-	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
-// The third-party program is downloaded only for an explicitly queued task.
-// Keep the immutable revision and checksum together when reviewing upgrades.
-const ipQualityRevision = "2384a67c756eb35231f5982b34731e522be3653e"
-const ipQualityScriptURL = "https://raw.githubusercontent.com/xykt/IPQuality/" + ipQualityRevision + "/ip.sh"
-const ipQualityScriptSHA256 = "b30df5a3c2204276c54e99dcc5080b46f8a627667730aee7de63b109b8ecaecf"
-const maxIPQualityScriptBytes = 512 << 10
+// Upstream publishes the detector as a one-liner that pipes its script straight
+// into bash. Follow that source instead of pinning a revision and a checksum,
+// so the detector keeps working when upstream moves `main`.
+const ipQualityScriptURL = "https://IP.Check.Place"
+
+// ipQualityPrintedReportLimit bounds each address family's printed report.
+// The capture also allows line separators and a small amount of non-report
+// output; the encoded result is checked separately against core's limit.
+const ipQualityPrintedReportLimit = 32 << 10
+const ipQualityPrintedOutputLimit = 2*ipQualityPrintedReportLimit + 4<<10
+
+// ipQualityProgram runs the official one-liner with the fixed detection
+// arguments: accept upstream's dependency installation, stay in privacy mode so
+// nothing is uploaded to the upstream report host, and write the machine-readable
+// JSON to the private report path. The default locale is kept so the JSON carries
+// the same localized labels the detector prints, and the printed report is left
+// enabled on stdout so the Agent can read the vendor risk wording from it.
+// Do not impose RLIMIT_FSIZE on this process tree: dependency installers write
+// package indexes and binaries larger than the report budget. The report reader
+// enforces the JSON file's type and size before accepting it.
+const ipQualityProgram = `exec bash --noprofile --norc <(curl -Ls ` + ipQualityScriptURL + `) -y -p -f -o "$1"`
 
 func runIPQuality(ctx context.Context) (core.IPQualityResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, core.IPQualityTimeout)
@@ -35,34 +45,16 @@ func runIPQuality(ctx context.Context) (core.IPQualityResult, error) {
 	if err != nil {
 		return core.IPQualityResult{}, err
 	}
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.Proxy = nil
-	client := &http.Client{
-		Transport: transport, Timeout: 30 * time.Second,
-		CheckRedirect: func(*http.Request, []*http.Request) error {
-			return errors.New("IPQuality script redirects are disabled")
-		},
-	}
-	defer transport.CloseIdleConnections()
-	script, err := downloadIPQualityScript(ctx, client, ipQualityScriptURL, ipQualityScriptSHA256)
-	if err != nil {
-		return core.IPQualityResult{}, err
-	}
-	// ip.sh normally loads ref/* from main, including the DNSBL list passed to
-	// its shell workers. Pin these data files to the reviewed revision as well.
-	script = bytes.ReplaceAll(script, []byte("${rawgithub}main/"),
-		[]byte("https://raw.githubusercontent.com/xykt/IPQuality/"+ipQualityRevision+"/"))
-	script, err = prepareIPQualityArchiveScript(script)
-	if err != nil {
-		return core.IPQualityResult{}, err
-	}
-	return executeIPQualityScript(ctx, bash, script)
+	return executeIPQualityProgram(ctx, bash, ipQualityProgram)
 }
 
+// ipQualityPrerequisites resolves the shell that runs the one-liner. Only bash
+// and curl are required up front, because curl fetches the script itself. Every
+// other probe dependency is installed by upstream when it is missing; the Agent
+// passes -y so that installation stays non-interactive.
 func ipQualityPrerequisites() (string, error) {
-	var missing []string
 	bash := ""
-	for _, name := range []string{"bash", "curl", "jq", "bc", "nc", "dig", "ip", "timeout", "grep"} {
+	for _, name := range []string{"bash", "curl"} {
 		binary := ""
 		// Match the child's fixed PATH, including the first executable it
 		// would find. Do not skip an unsafe earlier executable for a safe one.
@@ -77,14 +69,11 @@ func ipQualityPrerequisites() (string, error) {
 			}
 		}
 		if binary == "" {
-			missing = append(missing, name)
+			return "", fmt.Errorf("IPQuality 缺少依赖：%s；bash 与 curl 是获取上游脚本的前提，请先在节点安装", name)
 		}
 		if name == "bash" {
 			bash = binary
 		}
-	}
-	if len(missing) != 0 {
-		return "", fmt.Errorf("IPQuality 缺少依赖：%s；请按 docs/ip-quality.md 安装，检测任务不会自动安装软件", strings.Join(missing, ", "))
 	}
 	return bash, nil
 }
@@ -103,58 +92,27 @@ func ipQualityExecutable(path string) (string, error) {
 	return resolved, nil
 }
 
-func downloadIPQualityScript(ctx context.Context, client *http.Client, url, checksum string) ([]byte, error) {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
-	}
-	response, err := client.Do(request)
-	if err != nil {
-		return nil, fmt.Errorf("下载 IPQuality 脚本失败：%w", err)
-	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("下载 IPQuality 脚本失败：HTTP %d", response.StatusCode)
-	}
-	content, err := io.ReadAll(io.LimitReader(response.Body, maxIPQualityScriptBytes+1))
-	if err != nil {
-		return nil, err
-	}
-	if len(content) > maxIPQualityScriptBytes {
-		return nil, errors.New("IPQuality 脚本超过大小限制")
-	}
-	digest := sha256.Sum256(content)
-	if hex.EncodeToString(digest[:]) != checksum {
-		return nil, errors.New("IPQuality 脚本 SHA-256 校验失败，未执行")
-	}
-	return content, nil
-}
-
-func executeIPQualityScript(ctx context.Context, bash string, script []byte) (core.IPQualityResult, error) {
+// executeIPQualityProgram runs a bash program inside a private working
+// directory and accepts only the bounded JSON report. Cancellation kills the
+// whole process group (curl, DNSBL workers and progress-bar subprocesses).
+func executeIPQualityProgram(ctx context.Context, bash, program string) (core.IPQualityResult, error) {
 	directory, err := os.MkdirTemp("", "qagent-ip-quality-")
 	if err != nil {
 		return core.IPQualityResult{}, err
 	}
 	defer os.RemoveAll(directory)
-	scriptPath := filepath.Join(directory, "ip.sh")
-	if err := os.WriteFile(scriptPath, script, 0o600); err != nil {
-		return core.IPQualityResult{}, err
-	}
-	// The shell fragment is fixed; all arguments are separate argv entries.
-	// A file-size limit bounds report writes, and cancellation kills the entire
-	// process group (curl, DNSBL workers and progress-bar subprocesses).
-	command := exec.CommandContext(ctx, bash, "--noprofile", "--norc", "-c",
-		`ulimit -f 256 || exit; exec "$@"`, "ip-quality",
-		bash, "--noprofile", "--norc", scriptPath, "-n", "-f", "-E", "-j",
-		"-o", filepath.Join(directory, "report.json"))
+	command := exec.CommandContext(ctx, bash, "--noprofile", "--norc", "-c", program,
+		"ip-quality", filepath.Join(directory, "report.json"))
 	command.Dir = directory
 	command.Env = append(commandEnvironment(""), "TERM=dumb", "CURL_HOME="+directory,
-		"XDG_CONFIG_HOME="+directory, "TMPDIR="+directory, "QCH_IPQUALITY_LINKS="+filepath.Join(directory, "links.tsv"))
+		"XDG_CONFIG_HOME="+directory, "TMPDIR="+directory)
 	configureCommand(command)
-	// Progress output can be verbose. Truncate diagnostics without interrupting
-	// a healthy run; only the bounded JSON report is accepted as result data.
+	// Progress output is verbose and goes to stderr. Truncate diagnostics without
+	// interrupting a healthy run; only the bounded JSON report is accepted as
+	// result data, and the bounded stdout only supplies the printed report.
+	output := &boundedOutput{limit: ipQualityPrintedOutputLimit}
 	log := &boundedOutput{limit: 16 << 10}
-	command.Stdout, command.Stderr = log, log
+	command.Stdout, command.Stderr = output, log
 	runErr := command.Run()
 	if command.Process != nil {
 		_ = syscall.Kill(-command.Process.Pid, syscall.SIGKILL)
@@ -162,15 +120,61 @@ func executeIPQualityScript(ctx context.Context, bash string, script []byte) (co
 	if ctx.Err() != nil {
 		return core.IPQualityResult{}, fmt.Errorf("IPQuality 检测超时或已停止：%w", ctx.Err())
 	}
+	if output.Truncated() {
+		return core.IPQualityResult{}, errors.New("IPQuality 报告输出超过采集大小限制，已拒绝截断的报告")
+	}
 	result, err := readIPQualityReport(directory)
 	if err != nil {
 		// Do not publish ANSI progress, ads, external HTML or partial reports as
 		// a successful result. The exit status still helps diagnose missing tools.
 		return core.IPQualityResult{}, fmt.Errorf("IPQuality 未生成有效报告（执行状态：%v）：%w", runErr, err)
 	}
+	texts := parseIPQualityReportTexts(output.String())
+	if len(texts) != len(result.Reports) {
+		return core.IPQualityResult{}, errors.New("IPQuality 报告原文缺失或与 JSON 报告份数不匹配")
+	}
+	for _, text := range texts {
+		if len(text) > ipQualityPrintedReportLimit {
+			return core.IPQualityResult{}, errors.New("IPQuality 单个地址族的报告原文超过 32 KiB 大小限制")
+		}
+	}
+	result.ReportsText = texts
 	// Upstream's final [[ IPv6 available ]] returns 1 on IPv4-only hosts even
 	// after a valid IPv4 report. A validated report, not that status, is decisive.
-	return readIPQualityReportLinks(directory, result)
+	return core.NormalizeIPQualityResult(&result)
+}
+
+// parseIPQualityReportTexts splits the detector's printed output into one entry
+// per address family. The panel renders the archived image from this text, so
+// the image is exactly what the terminal shows.
+func parseIPQualityReportTexts(output string) []string {
+	lines := strings.Split(strings.ReplaceAll(output, "\r\n", "\n"), "\n")
+	starts := make([]int, 0, 2)
+	for index, line := range lines {
+		if !strings.Contains(line, "IP质量体检报告") {
+			continue
+		}
+		if start := index - 1; start >= 0 && isIPQualityBanner(lines[start]) {
+			index = start
+		}
+		starts = append(starts, index)
+	}
+	texts := make([]string, 0, len(starts))
+	for index, start := range starts {
+		end := len(lines)
+		if index+1 < len(starts) {
+			end = starts[index+1]
+		}
+		if text := strings.TrimRight(strings.Join(lines[start:end], "\n"), "\n"); text != "" {
+			texts = append(texts, text)
+		}
+	}
+	return texts
+}
+
+func isIPQualityBanner(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	return len(trimmed) >= 32 && strings.Trim(trimmed, "#") == ""
 }
 
 func readIPQualityReport(directory string) (core.IPQualityResult, error) {

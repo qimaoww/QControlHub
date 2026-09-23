@@ -4,20 +4,57 @@ import { bindEvent } from "./refresh.js";
 export function createAgentSettings({ api, can: permission, engineName, notify, confirmAction }, { refreshAgentPage }) {
   const pendingAgentNames = new Set();
   const pendingEngineCapabilities = new Set();
+  const pendingAgentDeletes = new Map();
   return (agentsByID) => {
+  const syncDeleteButton = (button) => {
+    const agentID = button.dataset.delete;
+    const agent = agentsByID.get(agentID);
+    const deleting = pendingAgentDeletes.get(agentID) === "deleting";
+    const deleted = pendingAgentDeletes.get(agentID) === "deleted";
+    button.disabled = pendingAgentDeletes.has(agentID) || !permission("agents.manage", agent) || agent?.can_manage === false;
+    button.textContent = deleted ? "已删除" : deleting ? "正在删除…" : "删除节点";
+    if (deleting) button.setAttribute("aria-busy", "true");
+    else button.removeAttribute("aria-busy");
+  };
   document.querySelectorAll("[data-delete]").forEach((button) => {
+    syncDeleteButton(button);
     button.onclick = async () => {
-      if (
-        !(await confirmAction(
-          "确定删除此节点？控制面会断开连接并清理关联配置，节点上的 QAgent 不会被远程卸载；以后可通过新的添加节点命令重新安装。",
+      const agentID = button.dataset.delete;
+      if (button.disabled || pendingAgentDeletes.has(agentID)) return;
+      pendingAgentDeletes.set(agentID, "confirming");
+      syncDeleteButton(button);
+      try {
+        if (!(await confirmAction(
+          "确定删除此节点？删除后节点将立即从面板移除，关联数据会在后台清理。节点上的 QAgent 不会被远程卸载。",
           "删除节点",
-        ))
-      )
-        return;
-      await api(`/agents/${encodeURIComponent(button.dataset.delete)}`, {
-        method: "DELETE",
-      });
-      await refreshAgentPage();
+        ))) return;
+        pendingAgentDeletes.set(agentID, "deleting");
+        syncDeleteButton(button);
+        await api(`/agents/${encodeURIComponent(agentID)}`, {
+          method: "DELETE", signal: AbortSignal.timeout(45000),
+        });
+        pendingAgentDeletes.set(agentID, "deleted");
+        document.querySelectorAll("[data-delete]").forEach((current) => {
+          if (current.dataset.delete === agentID) syncDeleteButton(current);
+        });
+        notify("节点已删除");
+        try {
+          await refreshAgentPage();
+          notify("节点已删除");
+        } catch (error) {
+          notify(`节点已删除，但列表刷新失败：${error.message}`, "error");
+        }
+      } catch (error) {
+        notify(error.message, "error");
+      } finally {
+        // A slow or failed refresh must never re-enable a successfully deleted node.
+        if (pendingAgentDeletes.get(agentID) !== "deleted") pendingAgentDeletes.delete(agentID);
+        syncDeleteButton(button);
+        // A refresh or navigation may have replaced the initiating button.
+        document.querySelectorAll("[data-delete]").forEach((current) => {
+          if (current.dataset.delete === agentID) syncDeleteButton(current);
+        });
+      }
     };
   });
   document.querySelectorAll("[data-agent-visibility]").forEach((input) => {

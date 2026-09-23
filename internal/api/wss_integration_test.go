@@ -182,8 +182,7 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 		t.Fatal(err)
 	}
 	heartbeat := core.WireMessage{Type: core.WireHeartbeat, Heartbeat: &core.HeartbeatRequest{
-		ClientConnections: &core.ClientConnectionReport{Status: "ok", Connections: []core.ClientConnection{{Engine: core.EngineSingBox, Protocol: "vless", Inbound: "entry", Transport: "tcp", ClientIP: "198.51.100.9", ClientPort: 50123, LocalIP: "192.0.2.1", LocalPort: 443}}},
-		Version:           "test", Features: []string{core.AgentFeatureSelfUpgrade, core.AgentFeaturePortTraffic, core.AgentFeatureCoreLogs, core.AgentFeatureCoreLogStatus, core.AgentFeatureMihomoDevelopmentSource, core.AgentFeatureManagedConfigRead, core.AgentFeatureIndependentEgress},
+		Version: "test", Features: []string{core.AgentFeatureSelfUpgrade, core.AgentFeaturePortTraffic, core.AgentFeatureCoreLogs, core.AgentFeatureCoreLogStatus, core.AgentFeatureMihomoDevelopmentSource, core.AgentFeatureManagedConfigRead, core.AgentFeatureIndependentEgress},
 		Runtime: map[core.Engine]core.RuntimeState{core.EngineSingBox: {Installed: true, ServiceStatus: "active", CoreLogStatus: "waiting", CoreLogError: "source-missing"}},
 		TrafficUsage: []core.PortTrafficUsage{{
 			PolicyID: trafficPolicy.ID, ResetGeneration: trafficPolicy.ResetGeneration,
@@ -199,7 +198,14 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 			ObservedPublicIP:  "203.0.113.99",
 		},
 	}}
-	if err := wsjson.Write(ctx, connection, heartbeat); err != nil {
+	legacyHeartbeat := struct {
+		Type      string `json:"type"`
+		Heartbeat any    `json:"heartbeat"`
+	}{Type: core.WireHeartbeat, Heartbeat: struct {
+		*core.HeartbeatRequest
+		ClientConnections clientConnectionFixtures `json:"client_connections"`
+	}{heartbeat.Heartbeat, clientConnectionFixtures{Status: "ok", Connections: []core.ClientConnection{{Engine: core.EngineSingBox, Protocol: "vless", Inbound: "entry", Transport: "tcp", ClientIP: "198.51.100.9", ClientPort: 50123, LocalIP: "192.0.2.1", LocalPort: 443}}}}}
+	if err := wsjson.Write(ctx, connection, legacyHeartbeat); err != nil {
 		t.Fatalf("write heartbeat: %v", err)
 	}
 	for attempt := 0; attempt < 50; attempt++ {
@@ -213,15 +219,9 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	for attempt := 0; attempt < 50; attempt++ {
-		history, err := dataStore.ClientConnectionHistory(ctx, store.ClientConnectionQuery{IncludeNonPublic: true, AgentID: enrolled.AgentID, Since: time.Now().Add(-time.Hour), Until: time.Now().Add(time.Minute), Limit: 100, Bucket: "hour"})
-		if err == nil && len(history.Records) == 1 && history.Records[0].ClientIP == "198.51.100.9" {
-			break
-		}
-		if attempt == 49 {
-			t.Fatalf("WSS inbound connections not persisted: %+v %v", history, err)
-		}
-		time.Sleep(10 * time.Millisecond)
+	historyBeforeLogs, err := dataStore.ClientConnectionHistory(ctx, store.ClientConnectionQuery{IncludeNonPublic: true, AgentID: enrolled.AgentID, Since: time.Now().Add(-time.Hour), Until: time.Now().Add(time.Minute), Limit: 100, Bucket: "hour"})
+	if err != nil || len(historyBeforeLogs.Records) != 0 {
+		t.Fatalf("legacy Agent connection sample was not ignored: %+v %v", historyBeforeLogs, err)
 	}
 	usageRequest, _ := http.NewRequestWithContext(ctx, http.MethodGet,
 		httpServer.URL+"/api/v1/traffic-usage?month="+time.Now().UTC().Format("2006-01")+"&agent_id="+enrolled.AgentID, nil)
@@ -289,7 +289,7 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	logBatch := core.CoreLogBatch{ID: "log_0123456789abcdef", Entries: []core.CoreLogEntry{{
-		Engine: core.EngineMihomo, Level: "info", Message: "integration core log", LoggedAt: time.Now().UTC(),
+		Engine: core.EngineMihomo, Level: "info", Message: "[TCP] 198.51.100.10:50123 --> example.invalid:443 using DIRECT", LoggedAt: time.Now().UTC(),
 	}}}
 	if err := wsjson.Write(ctx, connection, core.WireMessage{Type: core.WireCoreLogs, CoreLogs: &logBatch}); err != nil {
 		t.Fatalf("write core log batch: %v", err)
@@ -301,6 +301,10 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 	storedLogs, err := dataStore.ListCoreLogs(ctx, store.CoreLogQuery{AgentID: enrolled.AgentID, Limit: 10})
 	if err != nil || len(storedLogs) != 1 || storedLogs[0].Message != logBatch.Entries[0].Message {
 		t.Fatalf("stored core logs = %+v, %v", storedLogs, err)
+	}
+	historyFromLogs, err := dataStore.ClientConnectionHistory(ctx, store.ClientConnectionQuery{IncludeNonPublic: true, AgentID: enrolled.AgentID, Since: time.Now().Add(-time.Hour), Until: time.Now().Add(time.Minute), Limit: 100, Bucket: "hour"})
+	if err != nil || len(historyFromLogs.Records) != 1 || historyFromLogs.Records[0].ClientIP != "198.51.100.10" {
+		t.Fatalf("panel core log source IP missing: %+v %v", historyFromLogs, err)
 	}
 	largeBatch := core.CoreLogBatch{ID: "log_fedcba9876543210", Entries: make([]core.CoreLogEntry, core.MaxCoreLogBatchEntries)}
 	for index := range largeBatch.Entries {
@@ -632,15 +636,19 @@ func TestWSSAgentLifecycleWithPostgreSQL(t *testing.T) {
 	if _, err := dataStore.GetAgent(ctx, enrolled.AgentID); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("revoked agent remains queryable: %v", err)
 	}
-	terminatedTask, err := dataStore.GetTask(ctx, revokedTask.ID)
-	if err != nil || terminatedTask.Status != core.TaskFailed || terminatedTask.Error != "agent identity was revoked" || terminatedTask.FinishedAt == nil {
-		t.Fatalf("task after agent revocation = %+v, %v", terminatedTask, err)
-	}
 	if _, err := dataStore.AgentConfig(ctx, enrolled.AgentID, core.EngineMihomo); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("revoked agent configuration remains active: %v", err)
 	}
 	if _, err := dataStore.ConfigRevision(ctx, config.ID, config.Version); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("revoked agent configuration history remains available: %v", err)
+	}
+	// Revocation and connection cancellation have completed before history cleanup.
+	if err := dataStore.CleanupDeletedAgents(ctx); err != nil {
+		t.Fatal(err)
+	}
+	terminatedTask, err := dataStore.GetTask(ctx, revokedTask.ID)
+	if err != nil || terminatedTask.Status != core.TaskFailed || terminatedTask.Error != "agent identity was revoked" || terminatedTask.FinishedAt == nil {
+		t.Fatalf("task after agent cleanup = %+v, %v", terminatedTask, err)
 	}
 
 	rejectedHandshake, _ := http.NewRequestWithContext(ctx, http.MethodGet, websocketURL, nil)

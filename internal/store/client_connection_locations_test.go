@@ -10,7 +10,7 @@ import (
 func TestClientConnectionLocationsPersistRetryAndPrune(t *testing.T) {
 	db, ctx, _ := isolatedConfigScopeStore(t)
 	agent, _ := enrollTaskTestAgent(t, ctx, db)
-	if err := db.StoreClientConnections(ctx, agent.ID, core.ClientConnectionReport{Status: "ok", Connections: []core.ClientConnection{{Engine: core.EngineXray, Protocol: "vless", Inbound: "entry", Transport: "tcp", ClientIP: "8.8.8.8", ClientPort: 50123, LocalIP: "192.0.2.1", LocalPort: 443}}}); err != nil {
+	if err := db.storeClientConnectionFixtures(ctx, agent.ID, clientConnectionFixtures{Status: "ok", Connections: []core.ClientConnection{{Engine: core.EngineXray, Protocol: "vless", Inbound: "entry", Transport: "tcp", ClientIP: "8.8.8.8", ClientPort: 50123, LocalIP: "192.0.2.1", LocalPort: 443}}}); err != nil {
 		t.Fatal(err)
 	}
 	next := time.Now().UTC().Add(48 * time.Hour).Truncate(time.Microsecond)

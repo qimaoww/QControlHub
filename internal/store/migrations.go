@@ -238,6 +238,31 @@ func (s *Store) migrate(ctx context.Context) error {
 			return fmt.Errorf("add owner-hidden node flag: %w", err)
 		}
 	}
+	if appliedVersion < 67 {
+		if _, err := tx.Exec(ctx, `
+			ALTER TABLE client_connections ADD COLUMN IF NOT EXISTS source text NOT NULL DEFAULT 'agent';
+			ALTER TABLE client_connection_sources ADD COLUMN IF NOT EXISTS source text NOT NULL DEFAULT 'agent';
+			ALTER TABLE client_connections DROP CONSTRAINT IF EXISTS client_connections_transport_check;
+			ALTER TABLE client_connections ADD CONSTRAINT client_connections_transport_check CHECK(transport IN ('','tcp','udp'));
+			ALTER TABLE client_connections DROP CONSTRAINT IF EXISTS client_connections_local_port_check;
+			ALTER TABLE client_connections ADD CONSTRAINT client_connections_local_port_check CHECK(local_port BETWEEN 0 AND 65535);
+			INSERT INTO client_connection_log_backfill(id,upper_id)
+			SELECT 1,COALESCE(max(id),0) FROM core_logs ON CONFLICT DO NOTHING`); err != nil {
+			return fmt.Errorf("prepare panel log connection history: %w", err)
+		}
+	}
+	if appliedVersion < 68 {
+		// Rebuild only the derived observations affected by strict access-message
+		// parsing. Retained panel logs remain the source of truth; live uploads
+		// and the resumable scan share the same parser and upsert key.
+		if _, err := tx.Exec(ctx, `
+			DELETE FROM client_connections WHERE source='core_logs' AND engine IN ('sing-box','mihomo');
+			INSERT INTO client_connection_log_backfill(id,last_id,upper_id)
+			SELECT 1,0,COALESCE(max(id),0) FROM core_logs
+			ON CONFLICT(id) DO UPDATE SET last_id=0,upper_id=EXCLUDED.upper_id`); err != nil {
+			return fmt.Errorf("rebuild validated client source history: %w", err)
+		}
+	}
 	if _, err := tx.Exec(ctx, `INSERT INTO qcontrolhub_schema_migrations (version) VALUES ($1)`, currentSchemaVersion); err != nil {
 		return fmt.Errorf("record schema migration version: %w", err)
 	}

@@ -10,8 +10,8 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
-// Check the live lease and durable authorization before the panel makes any
-// outbound request. CompleteTask rechecks them after download under its locks.
+// Check the live lease and durable authorization before the panel renders the
+// report. CompleteTask rechecks them under its locks.
 func (s *Store) CanArchiveIPQualityResult(ctx context.Context, agentID, taskID, leaseID string) (bool, error) {
 	var allowed bool
 	err := s.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM tasks t JOIN agents a ON a.id=t.agent_id
@@ -23,14 +23,14 @@ func (s *Store) CanArchiveIPQualityResult(ctx context.Context, agentID, taskID, 
 }
 
 func validateIPQualityArchives(result core.IPQualityResult, archives []core.IPQualityArchive) error {
-	if len(archives) != len(result.ReportURLs) {
-		return fmt.Errorf("%w: IPQuality report download is incomplete", ErrInvalid)
+	if len(archives) != len(result.Reports) {
+		return fmt.Errorf("%w: IPQuality report rendering is incomplete", ErrInvalid)
 	}
 	for i, archive := range archives {
 		digest := sha256.Sum256(archive.Content)
-		if archive.SourceURL != result.ReportURLs[i] || archive.Family != core.IPQualityReportFamily(result.Reports[i]) ||
+		if archive.Family != core.IPQualityReportFamily(result.Reports[i]) ||
 			len(archive.Content) == 0 || len(archive.Content) > core.MaxIPQualityArchiveBytes ||
-			archive.Size != len(archive.Content) || archive.SHA256 != hex.EncodeToString(digest[:]) || archive.DownloadedAt.IsZero() {
+			archive.Size != len(archive.Content) || archive.SHA256 != hex.EncodeToString(digest[:]) || archive.RenderedAt.IsZero() {
 			return fmt.Errorf("%w: IPQuality archive does not match the report", ErrInvalid)
 		}
 	}
@@ -39,8 +39,8 @@ func validateIPQualityArchives(result core.IPQualityResult, archives []core.IPQu
 
 func saveIPQualityArchivesTx(ctx context.Context, tx pgx.Tx, taskID string, archives []core.IPQualityArchive) error {
 	for _, archive := range archives {
-		if _, err := tx.Exec(ctx, `INSERT INTO ip_quality_archives(task_id,family,source_url,sha256,downloaded_at,content)
-			VALUES($1,$2,$3,$4,$5,$6)`, taskID, archive.Family, archive.SourceURL, archive.SHA256, archive.DownloadedAt, archive.Content); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO ip_quality_archives(task_id,family,sha256,rendered_at,content)
+			VALUES($1,$2,$3,$4,$5)`, taskID, archive.Family, archive.SHA256, archive.RenderedAt, archive.Content); err != nil {
 			return err
 		}
 	}
@@ -51,10 +51,10 @@ func (s *Store) GetIPQualityArchive(ctx context.Context, taskID string, family i
 	args := []any{taskID, family}
 	where := ownerClause(ctx, "t.owner_id", &args) + agentAdministrationClause(ctx, "t.agent_id", &args)
 	var archive core.IPQualityArchive
-	err := s.pool.QueryRow(ctx, `SELECT r.family,r.source_url,r.sha256,r.downloaded_at,r.content
+	err := s.pool.QueryRow(ctx, `SELECT r.family,r.sha256,r.rendered_at,r.content
 		FROM ip_quality_archives r JOIN tasks t ON t.id=r.task_id JOIN agents a ON a.id=t.agent_id
 		WHERE r.task_id=$1 AND r.family=$2 AND a.revoked_at IS NULL`+where, args...).Scan(
-		&archive.Family, &archive.SourceURL, &archive.SHA256, &archive.DownloadedAt, &archive.Content)
+		&archive.Family, &archive.SHA256, &archive.RenderedAt, &archive.Content)
 	archive.Size = len(archive.Content)
 	return archive, mapError(err)
 }

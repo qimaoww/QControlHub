@@ -32,15 +32,20 @@ func (s *Server) putSettings(w http.ResponseWriter, request *http.Request) {
 	}
 	var input struct {
 		core.PanelSettings
-		KomariURL         *string `json:"komari_url"`
-		KomariAPIKey      *string `json:"komari_api_key"`
-		ClearKomariAPIKey bool    `json:"clear_komari_api_key"`
+		ClientConnectionRetentionDays *int    `json:"client_connection_retention_days"`
+		KomariURL                     *string `json:"komari_url"`
+		KomariAPIKey                  *string `json:"komari_api_key"`
+		ClearKomariAPIKey             bool    `json:"clear_komari_api_key"`
 	}
 	if err := decodeJSON(w, request, &input, 16<<10); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	settings := input.PanelSettings
+	settings.ClientConnectionRetentionDays = previous.ClientConnectionRetentionDays
+	if input.ClientConnectionRetentionDays != nil {
+		settings.ClientConnectionRetentionDays = *input.ClientConnectionRetentionDays
+	}
 	// Pointer fields distinguish a legacy client that does not know about
 	// Komari from an explicit empty value used to clear the URL.
 	if input.KomariURL == nil {

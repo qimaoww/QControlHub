@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -19,6 +21,27 @@ func storeQualityResult(t *testing.T) *core.IPQualityResult {
 		t.Fatal(err)
 	}
 	return &result
+}
+
+// storeQualityArchives is the panel-side artifact the store requires for every
+// report it stores: one rendered archive per report, matching its family.
+func storeQualityArchives(t *testing.T, result *core.IPQualityResult) []core.IPQualityArchive {
+	t.Helper()
+	archives := make([]core.IPQualityArchive, 0, len(result.Reports))
+	for _, report := range result.Reports {
+		content := []byte(`<svg xmlns="http://www.w3.org/2000/svg"/>`)
+		digest := sha256.Sum256(content)
+		archives = append(archives, core.IPQualityArchive{
+			IPQualityArchiveInfo: core.IPQualityArchiveInfo{
+				Family:     core.IPQualityReportFamily(report),
+				SHA256:     hex.EncodeToString(digest[:]),
+				Size:       len(content),
+				RenderedAt: time.Now().UTC(),
+			},
+			Content: content,
+		})
+	}
+	return archives
 }
 
 func qualityHeartbeat(t *testing.T, db *Store, ctx context.Context, agentID string) {
@@ -67,7 +90,7 @@ func TestIPQualityTaskLifecycleAndHistory(t *testing.T) {
 	if err := db.CompleteTask(ctx, agent.ID, task.ID, stale); !errors.Is(err, ErrConflict) {
 		t.Fatalf("accepted old lease: %v", err)
 	}
-	if err := db.CompleteTask(ctx, agent.ID, task.ID, result); err != nil {
+	if err := db.CompleteTask(ctx, agent.ID, task.ID, result, storeQualityArchives(t, result.IPQuality)...); err != nil {
 		t.Fatal(err)
 	}
 	records, err := db.ListIPQualityRecords(ctx, "2026-09-16", "Asia/Shanghai")
@@ -176,7 +199,7 @@ func TestIPQualityUnstorableReportsSettleWithoutBlockingTasks(t *testing.T) {
 			}
 			if err := db.CompleteTask(ctx, agent.ID, task.ID, core.TaskResultRequest{
 				LeaseID: lease.LeaseID, Success: true, IPQuality: report,
-			}); err != nil {
+			}, storeQualityArchives(t, report)...); err != nil {
 				t.Fatalf("unsavable result prevented acknowledgement: %v", err)
 			}
 			stored, err := db.GetTask(ctx, task.ID)
@@ -204,7 +227,7 @@ func TestIPQualityUnstorableReportsSettleWithoutBlockingTasks(t *testing.T) {
 	report := storeQualityResult(t)
 	if err := db.CompleteTask(ctx, agent.ID, task.ID, core.TaskResultRequest{
 		LeaseID: lease.LeaseID, Success: true, IPQuality: report,
-	}); err != nil {
+	}, storeQualityArchives(t, report)...); err != nil {
 		t.Fatal(err)
 	}
 	if stored, err := db.GetTask(ctx, task.ID); err != nil || stored.Status != core.TaskSucceeded {
@@ -230,7 +253,7 @@ func TestIPQualityStorageFailureRemainsRetryable(t *testing.T) {
 		t.Fatal(err)
 	}
 	result := core.TaskResultRequest{LeaseID: lease.LeaseID, Success: true, IPQuality: storeQualityResult(t)}
-	if err := db.CompleteTask(ctx, agent.ID, task.ID, result); err == nil {
+	if err := db.CompleteTask(ctx, agent.ID, task.ID, result, storeQualityArchives(t, result.IPQuality)...); err == nil {
 		t.Fatal("storage failure was swallowed as a completed task")
 	}
 	if stored, err := db.GetTask(ctx, task.ID); err != nil || stored.Status != core.TaskRunning {
@@ -239,7 +262,7 @@ func TestIPQualityStorageFailureRemainsRetryable(t *testing.T) {
 	if _, err := db.pool.Exec(ctx, `ALTER TABLE ip_quality_reports_unavailable RENAME TO ip_quality_reports`); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.CompleteTask(ctx, agent.ID, task.ID, result); err != nil {
+	if err := db.CompleteTask(ctx, agent.ID, task.ID, result, storeQualityArchives(t, result.IPQuality)...); err != nil {
 		t.Fatalf("same lease could not retry after recovery: %v", err)
 	}
 	if stored, err := db.GetTask(ctx, task.ID); err != nil || stored.Status != core.TaskSucceeded {

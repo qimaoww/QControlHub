@@ -6,32 +6,49 @@ export function connectionDateInput(value) {
 }
 
 export function defaultConnectionFilters(now = Date.now()) {
-  return { since: connectionDateInput(now - 86400000), until: connectionDateInput(now + 60000), bucket: "hour", include_non_public: "" };
+  return { period: "day", date: connectionDateInput(now).slice(0, 10), include_non_public: "" };
 }
 
-export function connectionQuery(filters, before = "") {
-  const params = new URLSearchParams();
-  for (const key of ["agent_id", "engine", "protocol", "inbound", "transport", "client_ip", "port", "bucket", "include_non_public"]) {
+export function connectionQuery(filters, cursor = "") {
+  const params = new URLSearchParams({ group_by: "ip" });
+  for (const key of ["agent_id", "engine", "client_ip", "include_non_public"]) {
     if (filters[key]) params.set(key, filters[key]);
   }
-  const since = new Date(filters.since), until = new Date(filters.until);
-  if (!Number.isFinite(+since) || !Number.isFinite(+until) || until <= since || until - since > 7 * 86400000)
-    throw new Error("请选择有效的时间范围，单次最多查询 7 天");
+  let since, until;
+  if (filters.date !== undefined) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(filters.date)) throw new Error("请选择有效的查询日期");
+    since = new Date(`${filters.date}T00:00:00`);
+    if (!Number.isFinite(+since) || connectionDateInput(since).slice(0, 10) !== filters.date)
+      throw new Error("请选择有效的查询日期");
+    until = new Date(since);
+    if (filters.period === "month") {
+      since.setDate(1);
+      until = new Date(since);
+      until.setMonth(until.getMonth() + 1);
+      params.set("bucket", "day");
+    } else {
+      until.setDate(until.getDate() + 1);
+    }
+  } else {
+    since = new Date(filters.since);
+    until = new Date(filters.until);
+  }
+  if (!Number.isFinite(+since) || !Number.isFinite(+until) || until <= since || until - since > 32 * 86400000)
+    throw new Error("请选择有效的时间范围，单次最多查询 32 天");
   params.set("since", since.toISOString());
   params.set("until", until.toISOString());
-  if (before) params.set("before", before);
+  if (cursor) params.set("cursor", cursor);
   return params;
 }
 
-export function connectionSourceLabel(source, now = Date.now()) {
-  if (!source.updated_at) return "尚未上报 · 请升级 Agent";
-  if (now - new Date(source.updated_at).getTime() > 90000) return "采集已过期 · 节点可能离线";
-  if (source.truncated) return "样本已截断";
-  return { ok: "采集正常", partial: "部分采集", unavailable: "采集不可用" }[source.status] || "状态未知";
+export function connectionSourceLabel(source) {
+  if (!source.updated_at) return "等待内核日志";
+  return { ok: "已读取内核日志", partial: "日志不完整", unavailable: "日志不可用" }[source.status] || "等待内核日志";
 }
 
-export function connectionAddress(ip, port) {
-  return `${String(ip).includes(":") ? `[${ip}]` : ip}:${port}`;
+export function connectionSourceDetail(source) {
+  if (!source.updated_at) return "面板尚无可读取的内核日志，请检查内核日志是否开启。";
+  return "来源 IP 已从内核日志提取入库，可按日期查询历史记录。";
 }
 
 export function connectionLocationLabel(location) {

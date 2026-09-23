@@ -24,13 +24,16 @@ const report = {
   Factor: { Proxy: { IPQS: false } }, Media: { Netflix: { Status: "Yes", Region: "JP", Type: "Native" } },
   Mail: { Port25: false, DNSBlacklist: { Total: null, Blacklisted: null } },
 };
-const agent = { id: "alpha", name: "Node A", can_manage: true, status: "online", features: ["ip-quality-v1"] };
+const agent = { id: "alpha", name: "Node A", can_manage: true, status: "online", features: ["ip-quality-v2"] };
+const legacyAgent = { id: "beta", name: "Node B", can_manage: true, status: "offline", features: [] };
 const history = (day, records = []) => ({ date: day, timezone: "UTC", records, schedules: [] });
 let markup = "";
-const render = createIPQualityView({ shell: (html) => { markup = html; }, esc, date: (value) => value || "—" });
-render({ date: "2025-09-16", timezone: "UTC", history: history("2025-09-16", [{
-  task_id: "task-1", agent_id: "alpha", status: "succeeded", result: { reports: [report] },
-}]), agents: [agent], submitting: new Set(), editable: () => true });
+const viewState = { data: {} };
+const render = createIPQualityView({ shell: (html) => { markup = html; }, state: viewState, esc, date: (value) => value || "—" });
+const renderDay = (date, records = [], agents = [agent, legacyAgent], options = {}) =>
+  render({ date, timezone: "UTC", history: history(date, records), agents, submitting: new Set(), editable: () => true, ...options });
+const todayRecord = { task_id: "task-1", agent_id: "alpha", status: "succeeded", result: { reports: [report] } };
+renderDay("2025-09-16", [todayRecord]);
 assert.ok(markup.includes("&lt;img"));
 assert.ok(!markup.includes("<img"));
 assert.ok(markup.includes("<dd>未知</dd>"));
@@ -39,7 +42,40 @@ assert.ok(markup.includes("0.47%"));
 assert.ok(!markup.includes("演示"));
 assert.ok(!markup.includes("/ 100"));
 assert.ok(!markup.includes('style="'));
-assert.ok(markup.includes("DNS / WebRTC 泄漏未检测"));
+assert.ok(markup.includes("xykt/IPQuality"));
+assert.ok(!markup.includes("data-ip-quality-run"), "historical report has a run button");
+assert.ok(!markup.includes("data-ip-quality-schedule"), "historical report has schedule controls");
+assert.ok(!markup.includes("节点在线"), "historical report presents the current online state");
+assert.ok(markup.includes("data-ip-quality-today"), "history has no return-to-today control");
+// The page shows one node, and publishes the same list the sidebar renders.
+assert.equal(markup.match(/data-ip-quality-panel=/g).length, 1, "the page rendered more than one node");
+assert.ok(markup.includes('data-ip-quality-panel="alpha"'), "the recorded node is not the selected panel");
+assert.equal(viewState.data.ipQualityAgent, "alpha", "selection was not published for the sidebar");
+assert.deepEqual(viewState.data.ipQualityNodes.map((node) => node.id), ["alpha"], "history offered nodes without records");
+assert.deepEqual(viewState.data.ipQualityNodes[0], { id: "alpha", name: "Node A", note: "已完成", dot: "ok" },
+  "the sidebar projection lost its per-node status");
+renderDay(ipQualityToday());
+assert.ok(markup.includes("data-ip-quality-run"), "today lost its run button");
+assert.ok(markup.includes("data-ip-quality-schedule"), "today lost its schedule controls");
+assert.deepEqual(viewState.data.ipQualityNodes.map((node) => node.id), ["alpha", "beta"], "today hid a managed node");
+assert.deepEqual(viewState.data.ipQualityNodes.map((node) => node.note), ["当天未检测", "需升级 Agent"],
+  "the sidebar lost its per-node status");
+// A remembered node that the day does not list falls back to the first visible
+// one, so the sidebar highlight and the panel can never disagree.
+viewState.data.ipQualityAgent = "beta";
+renderDay("2025-09-16", [todayRecord]);
+assert.equal(viewState.data.ipQualityAgent, "alpha", "history kept a node it does not list");
+// A foreground read with no data yet must not drop the selection or blink the
+// sidebar away: only a completed read may publish an empty node list.
+viewState.data.ipQualityAgent = "beta";
+render({ date: ipQualityToday(), timezone: "UTC", agents: [], submitting: new Set(), editable: () => true, loading: true });
+assert.equal(viewState.data.ipQualityAgent, "beta", "a loading read dropped the selected node");
+assert.deepEqual(viewState.data.ipQualityNodes.map((node) => node.id), ["alpha"], "a loading read cleared the sidebar");
+assert.ok(markup.includes("正在读取检测记录…"));
+renderDay("2025-09-16", []);
+assert.ok(markup.includes("当天没有检测记录"));
+assert.ok(!markup.includes("data-ip-quality-panel"), "history rendered nodes without records");
+assert.deepEqual(viewState.data.ipQualityNodes, [], "history listed nodes without records");
 render({ date: "2025-09-16", timezone: "UTC", error: "无法读取", agents: [], submitting: new Set(), editable: () => false });
 assert.ok(!markup.includes("203.0.113.1"), "failed reads must never create example nodes");
 assert.ok(!markup.includes("data-ip-quality-run"));
@@ -50,10 +86,15 @@ const blacklistReport = {
   Mail: { ...report.Mail, DNSBlacklist: { Total: 439, Clean: 411, Marked: 28, Blacklisted: 0 } },
 };
 assert.ok(renderReport(blacklistReport).includes("<dt>干净</dt><dd>411</dd>"));
+// Risk factors are evidence, not a menu: every provider value renders inline.
+const factorMarkup = renderReport(report);
+assert.ok(factorMarkup.includes('<section class="ip-quality-factor"><strong>代理</strong>'), "a risk factor is not rendered inline");
+assert.ok(!factorMarkup.includes('class="ip-quality-factor"><summary'), "a risk factor is folded behind a disclosure");
+assert.ok(factorMarkup.includes("<dt>IPQS</dt><dd>否</dd>"), "a risk factor lost its provider value");
 const ipv6Report = { ...blacklistReport, Head: { ...report.Head, IP: "2001:db8::1" } };
 const originalIPv6Report = JSON.stringify(ipv6Report);
 const ipv6Markup = renderReport(ipv6Report);
-assert.ok(ipv6Markup.includes("未检测：当前上游仅查询 IPv4 DNS 黑名单"));
+assert.ok(ipv6Markup.includes("未检测（仅支持 IPv4）"));
 assert.ok(!ipv6Markup.includes("<dt>干净</dt>"), "IPv4 blacklist counts were attributed to IPv6");
 assert.ok(ipv6Markup.includes("&quot;Total&quot;: 439"), "source JSON lost the upstream values");
 assert.equal(JSON.stringify(ipv6Report), originalIPv6Report, "rendering rewrote the source report");
@@ -99,6 +140,16 @@ try {
   await timers.get(scheduledTimer)();
   assert.equal(calls.length, count + 2, "polling did not continue after an invalid date");
   assert.equal(timers.size, 1, "polling duplicated its timer");
+
+  // Switching the selected node repaints from the loaded snapshot: the sidebar
+  // only offers nodes the day already returned, so no read is issued.
+  const readsBeforeSelect = calls.length, paintsBeforeSelect = views.length;
+  assert.equal(controller.select("beta"), true, "selecting a node did not repaint");
+  assert.equal(state.data.ipQualityAgent, "beta");
+  assert.equal(calls.length, readsBeforeSelect, "selecting a node re-read the API");
+  assert.equal(views.length, paintsBeforeSelect + 1, "selecting a node did not repaint exactly once");
+  assert.equal(controller.select("beta"), false, "re-selecting the same node repainted again");
+  assert.equal(views.length, paintsBeforeSelect + 1, "re-selecting the same node repainted again");
 
   function gate(day) {
     let resolve;
@@ -146,6 +197,33 @@ try {
   await controller.setSchedule("alpha", true);
   assert.equal(mutations, 2);
   assert.ok(calls.some((call) => call.path === "/ip-quality/schedules/alpha" && call.options.body === '{"enabled":true}'));
+  const yesterday = nextIPQualityDay(ipQualityToday(), -1);
+  await controller.load(yesterday);
+  await controller.runCheck("alpha");
+  await controller.setSchedule("alpha", true);
+  await controller.setSchedule("alpha", false);
+  assert.equal(mutations, 2, "historical date allowed writes through the controller");
+  await controller.load(ipQualityToday());
+  confirmation = new Promise((resolve) => { accept = resolve; });
+  const changedDateConfirmation = controller.runCheck("alpha");
+  await controller.load(yesterday);
+  accept(true);
+  await changedDateConfirmation;
+  assert.equal(mutations, 2, "confirmation submitted after switching to history");
+  await controller.load(ipQualityToday());
+  confirmation = new Promise((resolve) => { accept = resolve; });
+  const midnightConfirmation = controller.setSchedule("alpha", false);
+  const OriginalDate = globalThis.Date;
+  const tomorrow = nextIPQualityDay(ipQualityToday(), 1);
+  try {
+    globalThis.Date = class extends OriginalDate {
+      constructor(...args) { super(...(args.length ? args : [tomorrow + "T12:00:00"])); }
+    };
+    accept(true);
+    await midnightConfirmation;
+    assert.equal(mutations, 2, "confirmation submitted after the selected day became history");
+  } finally { globalThis.Date = OriginalDate; }
+  confirmation = true;
   failReads = true;
   await controller.load();
   assert.equal(views.at(-1).readFailed, true);
@@ -170,9 +248,10 @@ try {
 console.log("IP quality model, rendering, request races and mutation guards passed");
 
 const archiveMarkup = createIPQualityArchiveView({ esc, date: String })({ task_id: "task-1", archives: [
-  { family: 4, downloaded_at: "2026-09-19T00:00:00Z", sha256: "abc", source_url: "https://Report.Check.Place/IP/fixture.svg" },
+  { family: 4, rendered_at: "2026-09-19T00:00:00Z", sha256: "abc" },
 ] });
 assert.ok(archiveMarkup.includes('<img src="/api/v1/ip-quality/task-1/archives/4"'));
 assert.ok(archiveMarkup.includes('?download=1'));
+assert.ok(archiveMarkup.includes("存档信息"));
 assert.ok(!archiveMarkup.includes("Report.Check.Place"), "browser must never contact the upstream report host");
 assert.ok(!archiveMarkup.includes("iframe") && !archiveMarkup.includes("<svg"), "SVG must remain an inert image");

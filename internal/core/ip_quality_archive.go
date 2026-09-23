@@ -3,16 +3,10 @@ package core
 import (
 	"encoding/json"
 	"net/netip"
-	"regexp"
 	"time"
 )
 
 const MaxIPQualityArchiveBytes = 2 << 20
-
-// The pinned upstream returns a direct SVG link, never an arbitrary URL.
-var ipQualityReportURL = regexp.MustCompile(`^https://(?i:report\.check\.place)/(?i:ip)/[A-Za-z0-9_-]{1,128}\.svg$`)
-
-func ValidIPQualityReportURL(value string) bool { return ipQualityReportURL.MatchString(value) }
 
 func IPQualityReportFamily(report json.RawMessage) int {
 	var value struct{ Head struct{ IP string } }
@@ -24,15 +18,16 @@ func IPQualityReportFamily(report json.RawMessage) int {
 	return 6
 }
 
+// The panel renders this image from the stored JSON; it is never fetched from
+// an upstream report host.
 type IPQualityArchiveInfo struct {
-	Family       int       `json:"family"`
-	SourceURL    string    `json:"source_url"`
-	SHA256       string    `json:"sha256"`
-	Size         int       `json:"size"`
-	DownloadedAt time.Time `json:"downloaded_at"`
+	Family     int       `json:"family"`
+	SHA256     string    `json:"sha256"`
+	Size       int       `json:"size"`
+	RenderedAt time.Time `json:"rendered_at"`
 }
 
-// Content stays out of JSON/WSS/history. Only the panel downloads these bytes.
+// Content stays out of JSON/WSS/history. Only the panel serves these bytes.
 type IPQualityArchive struct {
 	IPQualityArchiveInfo
 	Content []byte `json:"-"`
