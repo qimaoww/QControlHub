@@ -6,7 +6,9 @@ export function createIPQualityController(ctx, view) {
   const { state, api, can, notify, confirmAction,
     setTimer = (fn, delay) => (state.ipQualityPollTimer = setTimeout(fn, delay)),
     clearTimer = clearTimeout } = ctx;
-  let accountData = state.data, serial = 0, snapshot = null, readFailed = false, readError = "";
+  let accountData = state.data, serial = 0, snapshot = null, pendingAgents = null;
+  let foregroundLoading = false, readFailed = false, readError = "";
+  const daySnapshots = new Map();
   let submitting = new Set();
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
   const current = (data, epoch) => data === state.data && epoch === state.navigationEpoch && state.route === "ip-quality";
@@ -18,7 +20,8 @@ export function createIPQualityController(ctx, view) {
     delay: () => 5000, setTimer, clearTimer,
   });
   function render(date, options = {}) {
-    view({ date, timezone, ...snapshot, submitting, editable, readFailed, error: readError, ...options });
+    view({ date, timezone, agents: pendingAgents || [], ...snapshot,
+      loading: foregroundLoading, submitting, editable, readFailed, error: readError, ...options });
     bind();
   }
   async function load(requestedDate, { background = false } = {}) {
@@ -26,6 +29,9 @@ export function createIPQualityController(ctx, view) {
     if (accountData !== data) {
       accountData = data;
       snapshot = null;
+      pendingAgents = null;
+      foregroundLoading = false;
+      daySnapshots.clear();
       submitting = new Set();
       readFailed = false;
       readError = "";
@@ -35,20 +41,44 @@ export function createIPQualityController(ctx, view) {
     if (!validIPQualityDate(date) || date > ipQualityToday()) return false;
     poller.stop();
     const request = ++serial;
+    pendingAgents = null;
+    foregroundLoading = !background;
     data.ipQualityDate = date;
-    if (snapshot?.date !== date) snapshot = null;
-    if (!background && current(data, epoch)) render(date, { loading: true });
+    if (snapshot?.date !== date) {
+      snapshot = daySnapshots.get(date) || null;
+      readFailed = false;
+      readError = "";
+    }
+    if (!background && current(data, epoch)) render(date);
     try {
+      const agentsPromise = (background && snapshot?.agents ? Promise.resolve(snapshot.agents) : api("/agents"))
+        .then((agents) => {
+          if (!Array.isArray(agents)) throw new Error("IPQuality 接口返回了无效数据");
+          if (!background && !snapshot?.history && current(data, epoch) && request === serial) {
+            pendingAgents = agents.filter((agent) => agent.can_manage !== false);
+            render(date);
+          }
+          return agents;
+        });
       const [history, agents] = await Promise.all([
         api(`/ip-quality?date=${encodeURIComponent(date)}&timezone=${encodeURIComponent(timezone)}`),
-        api("/agents"),
+        agentsPromise,
       ]);
       if (!current(data, epoch) || request !== serial) return false;
       if (!Array.isArray(history?.records) || !Array.isArray(history?.schedules) || !Array.isArray(agents))
         throw new Error("IPQuality 接口返回了无效数据");
       readFailed = false;
       readError = "";
+      pendingAgents = null;
+      foregroundLoading = false;
       snapshot = { date, history, agents: agents.filter((agent) => agent.can_manage !== false) };
+      // Keep a few account-scoped days ready for instant return navigation.
+      // Do not duplicate unusually large report responses in memory.
+      if (JSON.stringify(history).length < 2 * 1024 * 1024) {
+        daySnapshots.delete(date);
+        daySnapshots.set(date, snapshot);
+        while (daySnapshots.size > 3) daySnapshots.delete(daySnapshots.keys().next().value);
+      }
       render(date);
       poller.start();
       return true;
@@ -56,6 +86,7 @@ export function createIPQualityController(ctx, view) {
       if (!current(data, epoch) || request !== serial || error?.name === "AbortError") return false;
       readFailed = true;
       readError = error?.message || "检测记录读取失败";
+      foregroundLoading = false;
       // A failed read is never replaced by demo data or an old date's report.
       render(date);
       poller.start();

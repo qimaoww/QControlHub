@@ -85,6 +85,7 @@ func TestIPQualityTaskLifecycleAndHistory(t *testing.T) {
 		t.Fatalf("claim = %+v %v", claimed, err)
 	}
 	result := core.TaskResultRequest{LeaseID: claimed.LeaseID, Success: true, IPQuality: storeQualityResult(t)}
+	result.IPQuality.ReportsText = []string{"Printed report stays in the archive"}
 	stale := result
 	stale.LeaseID = strings.Repeat("x", 32)
 	if err := db.CompleteTask(ctx, agent.ID, task.ID, stale); !errors.Is(err, ErrConflict) {
@@ -96,6 +97,9 @@ func TestIPQualityTaskLifecycleAndHistory(t *testing.T) {
 	records, err := db.ListIPQualityRecords(ctx, "2026-09-16", "Asia/Shanghai")
 	if err != nil || len(records) != 1 || records[0].Result == nil || records[0].Status != core.TaskSucceeded {
 		t.Fatalf("history = %+v %v", records, err)
+	}
+	if len(records[0].Result.ReportsText) != 0 {
+		t.Fatal("history unnecessarily loaded archived printed report text")
 	}
 	if records, err := db.ListIPQualityRecords(ctx, "2026-09-15", "Asia/Shanghai"); err != nil || len(records) != 0 {
 		t.Fatalf("wrong local day: %+v %v", records, err)
