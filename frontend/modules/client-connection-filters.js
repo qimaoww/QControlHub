@@ -11,7 +11,7 @@ export function clientConnectionFilters({ filters, esc, engineName, open = true 
   const monthly = filters.period === "month";
   const advanced = filters.include_non_public === "true";
   const select = (name, label, options) => `<label>${label}<select name="${name}"><option value="">全部</option>${options.map(([value, text]) => `<option value="${esc(value)}"${filters[name] === value ? " selected" : ""}>${esc(text)}</option>`).join("")}</select></label>`;
-  const input = (name, label, type = "text", extra = "") => `<label>${label}<input name="${name}" type="${type}" value="${esc(filters[name] || "")}" ${extra}></label>`;
+  const input = (name, label, type = "text", extra = "") => `<label>${label}<input name="${name}" type="${type}" value="${esc(filters[name] || "")}"${name === "date" ? ` data-refresh-key="connection-date-${esc(filters.date || "")}"` : ""} ${extra}></label>`;
   const active = [monthly ? `${filters.date.slice(0, 7)} · 本月全部` : filters.date, filters.engine && engineName(filters.engine), filters.client_ip, filters.include_non_public === "true" && "包含非公网"].filter(Boolean);
   return `<details class="connection-filter-panel"${open ? " open" : ""}><summary><strong>查询记录</strong><span>${active.length ? esc(active.join(" · ")) : "日期 / 来源 IP / 内核"}</span><em>筛选条件</em></summary>
       <form id="connection-query" data-connection-filters>

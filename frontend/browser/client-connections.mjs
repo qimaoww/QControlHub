@@ -158,6 +158,9 @@ export async function testClientConnectionsRuntime(preview = false) {
   assert.equal(requests.at(-1).get("until"), new Date("2026-09-02T00:00:00").toISOString());
   assert.equal(document.querySelector('[name="date"]').value, "2026-09-01");
   assert.ok(document.querySelector(".connection-filter-panel summary").textContent.includes("2026-09-01"));
+  document.querySelector("[data-connection-recent]").click();
+  assert.equal(document.querySelector('[name="date"]').value, localDate, "today shortcut updates a previously edited date input");
+  assert.ok(document.querySelector(".connection-filter-panel summary").textContent.includes(localDate));
   const beforeAll = requests.length;
   document.querySelector('[data-connection-agent=""]').click();
   await waitFor(() => requests.length > beforeAll && !document.querySelector('[data-connection-refresh]').disabled, "all nodes request missing");
