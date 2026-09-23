@@ -228,6 +228,7 @@ func downgradeSharingSchemaForTest(t *testing.T, db *Store, ctx context.Context)
 		UPDATE agents SET owner_id='';
 		ALTER TABLE port_traffic_policies DROP COLUMN share_id, DROP COLUMN share_used_bytes, DROP COLUMN share_generation;
 		DROP TABLE agent_share_ports;
+		DROP TABLE agent_shared_instance_ownership;
 		DROP TABLE agent_shares;
 		DROP TABLE agent_engine_ownership;
 		ALTER TABLE panel_users DROP COLUMN agent_isolation, DROP COLUMN agent_access_revision;

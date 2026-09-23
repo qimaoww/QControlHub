@@ -63,3 +63,7 @@ const AgentFeatureSystemBBR = "system-bbr-v1"
 // be compiled. Configuration validation/deployment must negotiate fail-closed
 // independent egress before dispatch.
 const AgentFeatureIndependentEgress = "independent-egress-v1"
+
+// AgentFeatureSharedCoreInstances means each accepted share deploys to its
+// own managed service and configuration path.
+const AgentFeatureSharedCoreInstances = "shared-core-instances-v1"

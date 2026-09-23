@@ -68,6 +68,11 @@ func TestSharedTrafficCombinesPortsAndSurvivesCalendarRestartAndTopup(t *testing
 		t.Fatalf("persisted shared state: %+v %v", loaded, err)
 	}
 	restarted := &TrafficManager{statePath: manager.statePath, records: loaded.Records, backend: backend, now: manager.now}
+	var haltedShares []string
+	restarted.haltShare = func(_ context.Context, _ core.Engine, shareID string) error {
+		haltedShares = append(haltedShares, shareID)
+		return nil
+	}
 	for i := range policies[:2] {
 		quota := *policies[i].SharedQuota
 		quota.LimitBytes, quota.UsedBytes, quota.PortUsedBytes = 200, 120, 60
@@ -99,11 +104,19 @@ func TestSharedTrafficCombinesPortsAndSurvivesCalendarRestartAndTopup(t *testing
 	if snapshot = restarted.Snapshot(); !snapshot[0].Blocked || !snapshot[1].Blocked || snapshot[2].Blocked {
 		t.Fatalf("revocation affected wrong user's ports: %+v", snapshot)
 	}
+	if len(haltedShares) != 1 || haltedShares[0] != policies[0].SharedQuota.ID {
+		t.Fatalf("revocation stopped the wrong private instance: %+v", haltedShares)
+	}
 }
 
 func TestSharedTrafficEnforcesEngineRevocationWithoutResettingLedger(t *testing.T) {
 	manager, backend, policies, now := sharedTrafficFixture(t)
 	ctx := context.Background()
+	var halted []core.Engine
+	manager.haltShare = func(_ context.Context, engine core.Engine, _ string) error {
+		halted = append(halted, engine)
+		return nil
+	}
 	policies[1].Engine = core.EngineXray
 	for index := range policies[:2] {
 		policies[index].SharedQuota.Engines = []core.Engine{core.EngineMihomo, core.EngineXray}
@@ -127,6 +140,9 @@ func TestSharedTrafficEnforcesEngineRevocationWithoutResettingLedger(t *testing.
 	got := manager.Snapshot()
 	if got[0].Blocked || !got[1].Blocked || got[2].Blocked {
 		t.Fatalf("engine revocation affected wrong listeners: %+v", got)
+	}
+	if len(halted) != 1 || halted[0] != core.EngineXray {
+		t.Fatalf("engine revocation did not stop only the affected service: %+v", halted)
 	}
 	if sharedTrafficUsed(manager.records, policies[0].SharedQuota.ID) != 80 {
 		t.Fatal("engine revocation reset cumulative traffic")

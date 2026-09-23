@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
+	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
 )
 
 func sharedTestUser(t *testing.T, db *Store, ctx context.Context, name string) (core.User, context.Context) {
@@ -326,6 +328,276 @@ func TestAgentIsolationCreationRevisionAndHostBoundaries(t *testing.T) {
 	sharedTestConfig(t, db, alice, agent.ID, 22222)
 	if configs, err := db.AgentConfigsForMonitoring(ctx, agent.ID); err != nil || len(configs) != 0 {
 		t.Fatalf("isolated draft created arbitrary host monitors: %+v %v", configs, err)
+	}
+}
+
+func TestSharedUserCanSaveAndValidateWhileAnotherConfigRuns(t *testing.T) {
+	db, ctx, _ := isolatedConfigScopeStore(t)
+	_, owner := sharedTestUser(t, db, ctx, "shared-draft-owner")
+	user, recipient := sharedTestUser(t, db, ctx, "shared-draft-recipient")
+	agent := sharedTestAgent(t, db, owner)
+	sharedTestAllocation(t, db, ctx, user.ID, agent.ID, 0, 21002)
+	owned := sharedTestConfig(t, db, owner, agent.ID, 21001)
+	deployed, err := db.CreateTask(owner, core.TaskRequest{
+		AgentID: agent.ID, Engine: owned.Engine, ConfigID: owned.ID, Action: core.ActionDeploy,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease, err := db.ClaimTask(ctx, agent.ID)
+	if err != nil || lease == nil || lease.ID != deployed.ID {
+		t.Fatalf("claim owner deployment: %+v %v", lease, err)
+	}
+	if err := db.CompleteTask(ctx, agent.ID, deployed.ID, core.TaskResultRequest{LeaseID: lease.LeaseID, Success: true}); err != nil {
+		t.Fatal(err)
+	}
+	draft := core.Config{AgentID: agent.ID, Engine: core.EngineMihomo, Name: "recipient inbound",
+		Content: "listeners: [{name: recipient, type: http, port: 21002}]\n"}
+	saved, validation, err := db.SaveAgentConfigAndTask(recipient, draft, 0,
+		ConfigMutationOptions{Action: core.ActionValidate})
+	if err != nil || saved.Version != 1 || validation.Action != core.ActionValidate {
+		t.Fatalf("shared user could not save and validate a private inbound: %+v %+v %v", saved, validation, err)
+	}
+	var runningOwner, runningConfig string
+	if err := db.pool.QueryRow(ctx, `SELECT owner_id,config_id FROM agent_engine_ownership WHERE agent_id=$1 AND engine=$2`,
+		agent.ID, core.EngineMihomo).Scan(&runningOwner, &runningConfig); err != nil {
+		t.Fatal(err)
+	}
+	if runningOwner != scopeForConfig(owner).OwnerID || runningConfig != owned.ID {
+		t.Fatalf("validation changed the running user's configuration: owner=%s config=%s", runningOwner, runningConfig)
+	}
+	if _, err := db.CreateTask(recipient, core.TaskRequest{AgentID: agent.ID, Engine: saved.Engine,
+		ConfigID: saved.ID, Action: core.ActionDeploy}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("shared user replaced a different user's running configuration: %v", err)
+	}
+	current, err := db.AgentConfig(recipient, agent.ID, core.EngineMihomo)
+	if err != nil || current.ID != saved.ID || current.Version != 1 {
+		t.Fatalf("rejected deployment lost the user's saved draft: %+v %v", current, err)
+	}
+}
+
+func TestSharedXrayDeploymentKeepsOwnerInstanceRunning(t *testing.T) {
+	db, ctx, _ := isolatedConfigScopeStore(t)
+	_, owner := sharedTestUser(t, db, ctx, "parallel-xray-owner")
+	user, recipient := sharedTestUser(t, db, ctx, "parallel-xray-recipient")
+	agent := allEnginesSharedTestAgent(t, db, owner)
+	if _, err := db.pool.Exec(ctx, `UPDATE agents SET features=features||'["shared-core-instances-v1"]'::jsonb WHERE id=$1`, agent.ID); err != nil {
+		t.Fatal(err)
+	}
+	access, err := db.SetUserAgentAccess(ctx, user.ID, core.AgentAccessRequest{Isolated: true,
+		Shares: []core.AgentShareRequest{{AgentID: agent.ID, Engines: []core.Engine{core.EngineXray}, Ports: []int{21002}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	acceptSharedTestInvitations(t, db, ctx, user.ID, access)
+	ownerConfig := core.Config{AgentID: agent.ID, Engine: core.EngineXray, Name: "owner",
+		Content: `{"inbounds":[{"tag":"owner","protocol":"http","port":21001}],"outbounds":[{"protocol":"freedom","tag":"direct"}]}`}
+	ownerConfig, err = db.SaveAgentConfig(owner, ownerConfig, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ownerTask, err := db.CreateTask(owner, core.TaskRequest{AgentID: agent.ID, Engine: core.EngineXray, ConfigID: ownerConfig.ID, Action: core.ActionDeploy})
+	if err != nil || ownerTask.SharedInstance {
+		t.Fatalf("owner deployment: %+v %v", ownerTask, err)
+	}
+	ownerLease, err := db.ClaimTask(ctx, agent.ID)
+	if err != nil || ownerLease == nil || ownerLease.ID != ownerTask.ID {
+		t.Fatalf("claim owner deployment: %+v %v", ownerLease, err)
+	}
+	if err := db.CompleteTask(ctx, agent.ID, ownerTask.ID, core.TaskResultRequest{LeaseID: ownerLease.LeaseID, Success: true}); err != nil {
+		t.Fatal(err)
+	}
+	privateConfig := core.Config{AgentID: agent.ID, Engine: core.EngineXray, Name: "recipient",
+		Content: `{"inbounds":[{"tag":"recipient","protocol":"http","port":21002}],"outbounds":[{"protocol":"freedom","tag":"direct"}]}`}
+	privateConfig, privateTask, err := db.SaveAgentConfigAndTask(recipient, privateConfig, 0,
+		ConfigMutationOptions{Action: core.ActionDeploy})
+	if err != nil || !privateTask.SharedInstance || privateTask.SharedTrafficID != access.Shares[0].ID {
+		t.Fatalf("shared deployment was not isolated: %+v %+v %v", privateConfig, privateTask, err)
+	}
+	privateLease, err := db.ClaimTask(ctx, agent.ID)
+	if err != nil || privateLease == nil || privateLease.ID != privateTask.ID || !privateLease.SharedInstance {
+		t.Fatalf("claim shared deployment: %+v %v", privateLease, err)
+	}
+	if err := db.CompleteTask(ctx, agent.ID, privateTask.ID, core.TaskResultRequest{LeaseID: privateLease.LeaseID, Success: true}); err != nil {
+		t.Fatal(err)
+	}
+	var ownerConfigID, privateConfigID string
+	if err := db.pool.QueryRow(ctx, `SELECT config_id FROM agent_engine_ownership WHERE agent_id=$1 AND engine='xray'`, agent.ID).Scan(&ownerConfigID); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.pool.QueryRow(ctx, `SELECT config_id FROM agent_shared_instance_ownership
+		WHERE agent_id=$1 AND engine='xray' AND share_id=$2`, agent.ID, access.Shares[0].ID).Scan(&privateConfigID); err != nil {
+		t.Fatal(err)
+	}
+	if ownerConfigID != ownerConfig.ID || privateConfigID != privateConfig.ID {
+		t.Fatalf("independent deployments lost owner identity: base=%s shared=%s", ownerConfigID, privateConfigID)
+	}
+}
+
+func TestEverySharedEngineUsesAnIndependentInstance(t *testing.T) {
+	for _, candidate := range sharedEngineConfigs() {
+		t.Run(string(candidate.Engine), func(t *testing.T) {
+			db, ctx, _ := isolatedConfigScopeStore(t)
+			_, owner := sharedTestUser(t, db, ctx, "parallel-owner")
+			user, recipient := sharedTestUser(t, db, ctx, "parallel-recipient")
+			agent := allEnginesSharedTestAgent(t, db, owner)
+			if _, err := db.pool.Exec(ctx, `UPDATE agents SET features=features||'["shared-core-instances-v1"]'::jsonb WHERE id=$1`, agent.ID); err != nil {
+				t.Fatal(err)
+			}
+			port := serverconfig.DiscoverTrafficPorts(candidate.Engine, candidate.Content)[0].Port
+			access, err := db.SetUserAgentAccess(ctx, user.ID, core.AgentAccessRequest{Isolated: true,
+				Shares: []core.AgentShareRequest{{AgentID: agent.ID, Engines: []core.Engine{candidate.Engine}, Ports: []int{port}}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			acceptSharedTestInvitations(t, db, ctx, user.ID, access)
+			ownerConfig := candidate
+			ownerConfig.AgentID, ownerConfig.Name = agent.ID, "owner"
+			ownerConfig.Content = strings.ReplaceAll(ownerConfig.Content, fmt.Sprint(port), fmt.Sprint(port+1000))
+			ownerConfig, err = db.SaveAgentConfig(owner, ownerConfig, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ownerTask, err := db.CreateTask(owner, core.TaskRequest{AgentID: agent.ID, Engine: candidate.Engine,
+				ConfigID: ownerConfig.ID, Action: core.ActionDeploy})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ownerLease, err := db.ClaimTask(ctx, agent.ID)
+			if err != nil || ownerLease == nil || ownerLease.ID != ownerTask.ID {
+				t.Fatalf("claim owner deployment: %+v %v", ownerLease, err)
+			}
+			if err := db.CompleteTask(ctx, agent.ID, ownerTask.ID, core.TaskResultRequest{LeaseID: ownerLease.LeaseID, Success: true}); err != nil {
+				t.Fatal(err)
+			}
+			candidate.AgentID, candidate.Name = agent.ID, "recipient"
+			saved, task, err := db.SaveAgentConfigAndTask(recipient, candidate, 0,
+				ConfigMutationOptions{Action: core.ActionDeploy})
+			if err != nil || !task.SharedInstance || task.SharedTrafficID != access.Shares[0].ID {
+				t.Fatalf("shared deployment: %+v %+v %v", saved, task, err)
+			}
+			lease, err := db.ClaimTask(ctx, agent.ID)
+			if err != nil || lease == nil || lease.ID != task.ID || !lease.SharedInstance {
+				t.Fatalf("claim shared deployment: %+v %v", lease, err)
+			}
+			if err := db.CompleteTask(ctx, agent.ID, task.ID, core.TaskResultRequest{LeaseID: lease.LeaseID, Success: true}); err != nil {
+				t.Fatal(err)
+			}
+			var baseID, sharedID string
+			if err := db.pool.QueryRow(ctx, `SELECT config_id FROM agent_engine_ownership WHERE agent_id=$1 AND engine=$2`,
+				agent.ID, candidate.Engine).Scan(&baseID); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.pool.QueryRow(ctx, `SELECT config_id FROM agent_shared_instance_ownership WHERE agent_id=$1 AND engine=$2 AND share_id=$3`,
+				agent.ID, candidate.Engine, access.Shares[0].ID).Scan(&sharedID); err != nil {
+				t.Fatal(err)
+			}
+			if baseID != ownerConfig.ID || sharedID != saved.ID {
+				t.Fatalf("foreign instance replaced owner: base=%s shared=%s", baseID, sharedID)
+			}
+			ownerName := "owner connection"
+			if err := db.SetConfigClientPreferences(owner, agent.ID, ClientProfileScope{
+				ConfigID: ownerConfig.ID, Version: ownerConfig.Version,
+				Label: core.ClientProfileNameLabel(candidate.Engine, "", port+1000),
+			}, nil, &ownerName, nil); err != nil {
+				t.Fatalf("recipient deployment blocked owner profile changes: %v", err)
+			}
+			if visible, err := db.GetAgent(recipient, agent.ID); err != nil || visible.Runtime[candidate.Engine].ServiceStatus != "active" {
+				t.Fatalf("recipient cannot see own active instance: %+v %v", visible.Runtime[candidate.Engine], err)
+			}
+			for _, scoped := range []struct {
+				ctx  context.Context
+				want string
+			}{{owner, ownerConfig.ID}, {recipient, saved.ID}} {
+				deployments, err := db.LatestDeployments(scoped.ctx)
+				if err != nil || len(deployments) != 1 || deployments[0].ConfigID != scoped.want {
+					t.Fatalf("owner-scoped deployment: %+v %v", deployments, err)
+				}
+				deployed, err := db.DeployedConfigs(scoped.ctx)
+				if err != nil || len(deployed) != 1 || deployed[0].Config.ID != scoped.want {
+					t.Fatalf("owner-scoped deployed config: %+v %v", deployed, err)
+				}
+			}
+			if _, err := db.PruneTasks(ctx, time.Now().Add(time.Hour)); err != nil {
+				t.Fatal(err)
+			}
+			if deployments, err := db.LatestDeployments(owner); err != nil || len(deployments) != 1 || deployments[0].ConfigID != ownerConfig.ID {
+				t.Fatalf("recipient deployment pruned owner's history: %+v %v", deployments, err)
+			}
+			updated := saved
+			updated.Description = "later draft"
+			if _, err := db.SaveAgentConfig(recipient, updated, saved.Version); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := db.PruneConfigRevisions(ctx, 1); err != nil {
+				t.Fatal(err)
+			}
+			if revision, err := db.ConfigRevision(recipient, saved.ID, saved.Version); err != nil || revision.Version != saved.Version {
+				t.Fatalf("active shared instance revision was pruned: %+v %v", revision, err)
+			}
+			if _, err := db.pool.Exec(ctx, `UPDATE agent_engine_ownership SET running=false
+				WHERE agent_id=$1 AND engine=$2`, agent.ID, candidate.Engine); err != nil {
+				t.Fatal(err)
+			}
+			if deployments, err := db.LatestDeployments(owner); err != nil || len(deployments) != 1 || deployments[0].ConfigID != ownerConfig.ID {
+				t.Fatalf("stopped user-owned node lost its deployment history: %+v %v", deployments, err)
+			}
+			if _, err := db.pool.Exec(ctx, `UPDATE agent_engine_ownership SET running=true
+				WHERE agent_id=$1 AND engine=$2`, agent.ID, candidate.Engine); err != nil {
+				t.Fatal(err)
+			}
+			policies, err := db.AgentPortTrafficPolicies(ctx, agent.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var policy *core.PortTrafficPolicy
+			for index := range policies {
+				if policies[index].SharedQuota != nil && policies[index].SharedQuota.ID == access.Shares[0].ID {
+					policy = &policies[index]
+					break
+				}
+			}
+			if policy == nil {
+				t.Fatal("shared instance has no metered port")
+			}
+			heartbeat := core.HeartbeatRequest{
+				Features: []string{core.AgentFeatureSharedTraffic, core.AgentFeatureSharedEngines,
+					core.AgentFeatureIndependentEgress, core.AgentFeatureSharedCoreInstances},
+				Runtime: map[core.Engine]core.RuntimeState{candidate.Engine: {Installed: true}},
+				SharedInstances: []core.SharedInstanceStatus{{Engine: candidate.Engine,
+					ShareID: access.Shares[0].ID, Status: "inactive"}},
+			}
+			if err := db.Heartbeat(ctx, agent.ID, heartbeat); err != nil {
+				t.Fatal(err)
+			}
+			if visible, err := db.GetAgent(recipient, agent.ID); err != nil || visible.Runtime[candidate.Engine].ServiceStatus != "inactive" {
+				t.Fatalf("recipient cannot see own stopped instance: %+v %v", visible.Runtime[candidate.Engine], err)
+			}
+			access, err = db.UserAgentAccess(ctx, user.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			release := core.AgentAccessRequest{Revision: access.Revision, Isolated: true,
+				Shares: []core.AgentShareRequest{{AgentID: agent.ID, Engines: []core.Engine{candidate.Engine}}}}
+			if _, err := db.SetUserAgentAccess(ctx, user.ID, release); !errors.Is(err, ErrConflict) {
+				t.Fatalf("port released without a settled traffic report: %v", err)
+			}
+			now := time.Now().UTC()
+			start, end, err := core.TrafficPeriodAt(policy.CycleAnchor, policy.Cycle, now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			heartbeat.TrafficUsage = []core.PortTrafficUsage{{PolicyID: policy.ID,
+				ResetGeneration: policy.ResetGeneration, CollectedAt: now,
+				CounterEpoch: strings.Repeat("a", 32), PeriodStart: start, PeriodEnd: end,
+				EnforcementAvailable: true, ShareID: access.Shares[0].ID}}
+			if err := db.Heartbeat(ctx, agent.ID, heartbeat); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := db.SetUserAgentAccess(ctx, user.ID, release); err != nil {
+				t.Fatalf("settled stopped instance did not release its port: %v", err)
+			}
+		})
 	}
 }
 

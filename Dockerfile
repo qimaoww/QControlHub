@@ -84,6 +84,10 @@ COPY deploy/systemd/qagent-mihomo.service /usr/share/nginx/html/install-assets/d
 COPY deploy/systemd/qagent-xray.service /usr/share/nginx/html/install-assets/deploy/systemd/qagent-xray.service
 COPY deploy/systemd/qagent-sing-box.service /usr/share/nginx/html/install-assets/deploy/systemd/qagent-sing-box.service
 COPY deploy/systemd/qagent-shadowsocks-rust.service /usr/share/nginx/html/install-assets/deploy/systemd/qagent-shadowsocks-rust.service
+COPY deploy/systemd/qagent-mihomo@.service /usr/share/nginx/html/install-assets/deploy/systemd/qagent-mihomo@.service
+COPY deploy/systemd/qagent-xray@.service /usr/share/nginx/html/install-assets/deploy/systemd/qagent-xray@.service
+COPY deploy/systemd/qagent-sing-box@.service /usr/share/nginx/html/install-assets/deploy/systemd/qagent-sing-box@.service
+COPY deploy/systemd/qagent-shadowsocks-rust@.service /usr/share/nginx/html/install-assets/deploy/systemd/qagent-shadowsocks-rust@.service
 COPY deploy/systemd/qagent.service /usr/share/nginx/html/install-assets/deploy/systemd/qagent.service
 COPY examples/configs /usr/share/nginx/html/install-assets/examples/configs
 COPY frontend/nginx.conf /etc/nginx/nginx.conf

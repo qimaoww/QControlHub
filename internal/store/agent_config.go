@@ -115,11 +115,17 @@ func (s *Store) listAgentConfigs(ctx context.Context, agentID string, allOwners 
 
 func (s *Store) LatestDeployments(ctx context.Context) ([]core.Deployment, error) {
 	args := []any{}
+	latestSQL := latestDeploymentsSQL
 	ownerWhere := ownerClause(ctx, "c.owner_id", &args)
+	if !scopeForConfig(ctx).Admin {
+		latestSQL = ownedLatestDeploymentsSQL
+		args = []any{scopeForConfig(ctx).OwnerID}
+		ownerWhere = ""
+	}
 	ownerWhere += agentEngineAccessClause(ctx, "latest.agent_id", "latest.engine", &args)
 	rows, err := s.pool.Query(ctx, `
 		SELECT latest.agent_id,latest.engine,COALESCE(latest.config_id,''),COALESCE(latest.config_version,0),latest.finished_at
-		FROM (`+latestDeploymentsSQL+`) latest
+		FROM (`+latestSQL+`) latest
 		LEFT JOIN configs c ON c.id=latest.config_id
 		WHERE true`+ownerWhere+` ORDER BY latest.agent_id,latest.engine`, args...)
 	if err != nil {
@@ -136,6 +142,46 @@ func (s *Store) LatestDeployments(ctx context.Context) ([]core.Deployment, error
 	}
 	return result, rows.Err()
 }
+
+// A shared Xray instance and the owner's base service can run together. The
+// ordinary fleet projection still describes one service per engine; a user
+// view prefers that user's running instance and retains their last successful
+// deployment when the service has stopped.
+const ownedLatestDeploymentsSQL = `
+	SELECT DISTINCT ON(agent_id,engine) agent_id,engine,config_id,config_version,finished_at FROM (
+		SELECT agent_id,engine,config_id,config_version,updated_at AS finished_at,2 AS priority
+		FROM agent_engine_ownership WHERE owner_id=$1 AND running AND NOT uncertain AND config_id<>''
+		UNION ALL
+		SELECT agent_id,engine,config_id,config_version,updated_at AS finished_at,2 AS priority
+		FROM agent_shared_instance_ownership WHERE owner_id=$1 AND running AND NOT uncertain AND config_id<>''
+		UNION ALL
+		SELECT t.agent_id,t.engine,t.config_id,t.config_version,t.finished_at,1 AS priority
+		FROM tasks t JOIN configs c ON c.id=t.config_id
+		WHERE c.owner_id=$1 AND t.action IN ('deploy','import-existing') AND t.status='succeeded'
+			AND t.finished_at IS NOT NULL
+	) owned ORDER BY agent_id,engine,priority DESC,finished_at DESC`
+
+// A selected client profile is usable only while another account has not
+// taken over the base core. Keep history and current availability distinct.
+const ownedUsableDeploymentsSQL = `
+	SELECT DISTINCT ON(agent_id,engine) agent_id,engine,config_id,config_version,finished_at FROM (
+		SELECT agent_id,engine,config_id,config_version,updated_at AS finished_at,2 AS priority
+		FROM agent_engine_ownership WHERE owner_id=$1 AND running AND NOT uncertain AND config_id<>''
+		UNION ALL
+		SELECT agent_id,engine,config_id,config_version,updated_at AS finished_at,2 AS priority
+		FROM agent_shared_instance_ownership WHERE owner_id=$1 AND running AND NOT uncertain AND config_id<>''
+		UNION ALL
+		SELECT t.agent_id,t.engine,t.config_id,t.config_version,t.finished_at,1 AS priority
+		FROM tasks t JOIN configs c ON c.id=t.config_id
+		WHERE c.owner_id=$1 AND t.action IN ('deploy','import-existing') AND t.status='succeeded'
+			AND t.finished_at IS NOT NULL
+			AND NOT EXISTS(SELECT 1 FROM agent_engine_ownership state
+				WHERE state.agent_id=t.agent_id AND state.engine=t.engine
+				AND state.owner_id<>$1 AND (state.running OR state.uncertain))
+			AND NOT EXISTS(SELECT 1 FROM agent_shared_instance_ownership state
+				WHERE state.agent_id=t.agent_id AND state.engine=t.engine
+				AND state.owner_id<>$1 AND (state.running OR state.uncertain))
+	) owned ORDER BY agent_id,engine,priority DESC,finished_at DESC`
 
 // Probe the existing (agent_id,engine,finished_at) partial index once per
 // possible service instead of scanning every successful deployment retained

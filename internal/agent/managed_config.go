@@ -79,7 +79,7 @@ func ensureDefaultManagedConfigurationAccess(engine core.Engine, spec EngineSpec
 
 func atomicDeployManagedConfiguration(engine core.Engine, spec EngineSpec, manager *ServiceManager, content string) (string, error) {
 	defaultSpec, ok := DefaultSpecsForServiceManager(selectedServiceManager(manager).Kind())[engine]
-	if !ok || spec != defaultSpec {
+	if !ok || spec != defaultSpec && !isSharedInstanceSpec(engine, spec, selectedServiceManager(manager).Kind()) {
 		return atomicDeploy(spec.ConfigPath, content)
 	}
 	metadata, err := prepareManagedConfigurationAccess(managedCoreConfigurationRoot, spec.ConfigPath)

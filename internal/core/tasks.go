@@ -72,6 +72,7 @@ const (
 type Task struct {
 	CNIPSource             *CNIPSource            `json:"cnip_source,omitempty"`
 	SharedTrafficID        string                 `json:"shared_traffic_id,omitempty"`
+	SharedInstance         bool                   `json:"shared_instance,omitempty"`
 	TCPSettings            TCPSettings            `json:"tcp_settings,omitempty"`
 	ID                     string                 `json:"id"`
 	AgentID                string                 `json:"agent_id"`

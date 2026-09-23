@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
+	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
 )
 
 const validationCleanupBinary = "/usr/bin/rm"
@@ -153,6 +154,27 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (string, erro
 	if !safeServiceName(spec.Service) {
 		return "", errors.New("configured service name is unsafe")
 	}
+	if task.SharedInstance {
+		if task.Action != core.ActionDeploy ||
+			!core.ValidAgentShareID(task.SharedTrafficID) {
+			return "", errors.New("invalid shared core deployment task")
+		}
+		managerKind := e.serviceManager().Kind()
+		if spec != DefaultSpecsForServiceManager(managerKind)[task.Engine] {
+			return "", errors.New("shared core instance requires the standard managed service")
+		}
+		var err error
+		spec, err = sharedInstanceSpec(task.Engine, spec, task.SharedTrafficID, managerKind)
+		if err != nil {
+			return "", err
+		}
+		if err := prepareSharedInstanceDirectory(task.Engine, spec, managerKind); err != nil {
+			return "", fmt.Errorf("prepare shared core configuration: %w", err)
+		}
+		if err := e.ensureSharedInstanceService(parent, task.Engine, spec); err != nil {
+			return "", fmt.Errorf("prepare shared core service: %w", err)
+		}
+	}
 	if task.InstallIfMissing {
 		if (task.Action != core.ActionValidate && task.Action != core.ActionDeploy) ||
 			task.ConfigVersion < 1 || task.ConfigContent == "" || task.SharedTrafficID != "" ||
@@ -225,6 +247,13 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (string, erro
 		prepared, accountingWarning := e.prepareNativeAccountingContent(ctx, task.Engine, spec, task.ConfigContent)
 		if accountingWarning != "" {
 			return accountingWarning, errors.New("独立出口校验失败，未部署配置")
+		}
+		if task.SharedInstance {
+			stripped, stripErr := serverconfig.SharedInstanceRuntimeContent(task.Engine, prepared)
+			if stripErr != nil {
+				return "", fmt.Errorf("shared instance independent egress unavailable: %w", stripErr)
+			}
+			prepared = stripped
 		}
 		task.ConfigContent = prepared
 		validation, err := e.validate(ctx, task.Engine, spec, task.ConfigContent)

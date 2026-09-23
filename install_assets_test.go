@@ -14,6 +14,8 @@ func TestCoreInstallAssetsMatchRepositoryAllowlist(t *testing.T) {
 		"deploy/systemd/qagent-core-journal.conf": true,
 		"deploy/systemd/qagent-mihomo.service":    true, "deploy/systemd/qagent-xray.service": true,
 		"deploy/systemd/qagent-sing-box.service": true, "deploy/systemd/qagent-shadowsocks-rust.service": true,
+		"deploy/systemd/qagent-mihomo@.service": true, "deploy/systemd/qagent-xray@.service": true,
+		"deploy/systemd/qagent-sing-box@.service": true, "deploy/systemd/qagent-shadowsocks-rust@.service": true,
 		"deploy/openrc/qagent-mihomo": true, "deploy/openrc/qagent-xray": true,
 		"deploy/openrc/qagent-sing-box": true, "deploy/openrc/qagent-shadowsocks-rust": true,
 		"examples/configs/mihomo-minimal.yaml": true, "examples/configs/xray-minimal.json": true,

@@ -291,13 +291,20 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 			if policyErr != nil {
 				return core.Task{}, policyErr
 			}
+			if task.SharedInstance && task.Action == core.ActionDeploy {
+				for _, policy := range task.MainlandAccessPolicies {
+					if policy.BlockMainlandDestination || policy.BlockMainlandSource {
+						return core.Task{}, fmt.Errorf("%w: shared Shadowsocks Rust instances do not support host-wide mainland access policies", ErrConflict)
+					}
+				}
+			}
 		}
 	} else {
 		task.ConfigID = ""
 	}
 	existing, existingErr := scanTask(tx.QueryRow(ctx, `
 		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),COALESCE(core_version,''),COALESCE(core_source,''),status,attempt,
-		       COALESCE(output,''),COALESCE(error,''),created_at,started_at,finished_at,tcp_settings,install_if_missing
+		       COALESCE(output,''),COALESCE(error,''),created_at,started_at,finished_at,tcp_settings,install_if_missing,shared_instance
 		FROM tasks existing
 		WHERE agent_id=$1 AND (action=$2 OR ($2 IN ('enable-bbr','disable-bbr','configure-tcp') AND action IN ('enable-bbr','disable-bbr','configure-tcp'))) AND engine=$3
 		  AND COALESCE(config_id,'')=$4 AND COALESCE(config_version,0)=$5 AND COALESCE(core_version,'')=$6
@@ -337,9 +344,9 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 		return core.Task{}, err
 	}
 	_, err = tx.Exec(ctx, `
-			INSERT INTO tasks (id,agent_id,action,engine,config_id,config_version,config_content,mainland_access_policies,core_version,core_source,status,attempt,created_at,tcp_settings,owner_id,shared_traffic_id,cnip_source,install_if_missing)
-			VALUES ($1,$2,$3,$4,NULLIF($5,''),NULLIF($6,0),NULLIF($7,''),$8,NULLIF($9,''),NULLIF($10,''),$11,0,$12,$13,$14,$15,$16,$17)`,
-		task.ID, task.AgentID, task.Action, task.Engine, task.ConfigID, task.ConfigVersion, storedConfigContent, mainlandPoliciesJSON, task.CoreVersion, task.CoreSource, task.Status, task.CreatedAt, task.TCPSettings, scope.OwnerID, task.SharedTrafficID, task.CNIPSource, task.InstallIfMissing)
+			INSERT INTO tasks (id,agent_id,action,engine,config_id,config_version,config_content,mainland_access_policies,core_version,core_source,status,attempt,created_at,tcp_settings,owner_id,shared_traffic_id,cnip_source,install_if_missing,shared_instance)
+			VALUES ($1,$2,$3,$4,NULLIF($5,''),NULLIF($6,0),NULLIF($7,''),$8,NULLIF($9,''),NULLIF($10,''),$11,0,$12,$13,$14,$15,$16,$17,$18)`,
+		task.ID, task.AgentID, task.Action, task.Engine, task.ConfigID, task.ConfigVersion, storedConfigContent, mainlandPoliciesJSON, task.CoreVersion, task.CoreSource, task.Status, task.CreatedAt, task.TCPSettings, scope.OwnerID, task.SharedTrafficID, task.CNIPSource, task.InstallIfMissing, task.SharedInstance)
 	if err != nil {
 		return core.Task{}, mapError(err)
 	}

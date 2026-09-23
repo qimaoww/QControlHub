@@ -34,9 +34,18 @@ func (s *Store) prepareSharedTaskTx(ctx context.Context, tx pgx.Tx, task *core.T
 			return err
 		}
 		untrackedActive := strings.EqualFold(runtime.ServiceStatus, "active") || strings.EqualFold(runtime.ServiceStatus, "running") || runtime.ExistingConfigAvailable
+		independentInstance := isolated && containsFeature(features, core.AgentFeatureSharedCoreInstances)
+		if independentInstance && err == nil && owner == configOwner && (running || uncertain) {
+			return fmt.Errorf("%w: stop the legacy shared core before deploying its private instance", ErrConflict)
+		}
 		if (err == nil && (running || uncertain) && owner != configOwner && (isolated || ownerIsolated)) ||
 			(isolated && errors.Is(err, pgx.ErrNoRows) && untrackedActive) {
-			return fmt.Errorf("%w: this core belongs to another or untracked deployment; an administrator must stop it before reassignment", ErrConflict)
+			if independentInstance && err == nil && !uncertain {
+				// A known base service keeps running while this share uses its own
+				// instance. Port reservations below still prevent overlap.
+			} else {
+				return fmt.Errorf("%w: this core belongs to another or untracked deployment; an administrator must stop it before reassignment", ErrConflict)
+			}
 		}
 		var busy bool
 		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM tasks t LEFT JOIN configs c ON c.id=t.config_id
@@ -47,7 +56,7 @@ func (s *Store) prepareSharedTaskTx(ctx context.Context, tx pgx.Tx, task *core.T
 			task.AgentID, task.Engine, configOwner, isolated).Scan(&busy); err != nil {
 			return err
 		}
-		if busy {
+		if busy && !independentInstance {
 			return fmt.Errorf("%w: this core has another user's pending or running task", ErrConflict)
 		}
 	}
@@ -67,6 +76,7 @@ func (s *Store) prepareSharedTaskTx(ctx context.Context, tx pgx.Tx, task *core.T
 			configOwner, task.AgentID, task.Engine).Scan(&task.SharedTrafficID, &limit, &used, &unrestricted); err != nil {
 			return mapError(err)
 		}
+		task.SharedInstance = task.Action == core.ActionDeploy && containsFeature(features, core.AgentFeatureSharedCoreInstances)
 		if limit > 0 && used >= limit {
 			return fmt.Errorf("%w: the user's cumulative Agent traffic allowance is exhausted", ErrConflict)
 		}
@@ -119,6 +129,15 @@ func (s *Store) prepareSharedTaskTx(ctx context.Context, tx pgx.Tx, task *core.T
 func markEngineExecutionTx(ctx context.Context, tx pgx.Tx, task core.Task) error {
 	switch task.Action {
 	case core.ActionDeploy, core.ActionImportExisting, core.ActionStart, core.ActionRestart, core.ActionStop:
+		if task.Action == core.ActionDeploy && task.SharedInstance {
+			_, err := tx.Exec(ctx, `INSERT INTO agent_shared_instance_ownership
+				(agent_id,engine,share_id,owner_id,config_id,config_version,running,uncertain,config_uncertain,updated_at)
+				SELECT t.agent_id,t.engine,t.shared_traffic_id,COALESCE(c.owner_id,t.owner_id),t.config_id,t.config_version,
+					true,true,true,now() FROM tasks t LEFT JOIN configs c ON c.id=t.config_id WHERE t.id=$1
+				ON CONFLICT(agent_id,engine,share_id) DO UPDATE SET uncertain=true,config_uncertain=true,
+					traffic_settled=false,updated_at=now()`, task.ID)
+			return err
+		}
 		_, err := tx.Exec(ctx, `INSERT INTO agent_engine_ownership
 			(agent_id,engine,owner_id,config_id,config_version,running,uncertain,config_uncertain,traffic_settled,updated_at)
 			SELECT t.agent_id,t.engine,COALESCE(c.owner_id,t.owner_id),COALESCE(t.config_id,''),COALESCE(t.config_version,0),
@@ -135,6 +154,20 @@ func markEngineExecutionTx(ctx context.Context, tx pgx.Tx, task core.Task) error
 func recordEngineOwnershipTx(ctx context.Context, tx pgx.Tx, taskID string, action core.Action, settled bool) error {
 	switch action {
 	case core.ActionDeploy, core.ActionImportExisting:
+		var sharedInstance bool
+		if err := tx.QueryRow(ctx, `SELECT shared_instance FROM tasks WHERE id=$1`, taskID).Scan(&sharedInstance); err != nil {
+			return err
+		}
+		if sharedInstance {
+			_, err := tx.Exec(ctx, `INSERT INTO agent_shared_instance_ownership
+				(agent_id,engine,share_id,owner_id,config_id,config_version,running,updated_at)
+				SELECT t.agent_id,t.engine,t.shared_traffic_id,COALESCE(c.owner_id,t.owner_id),t.config_id,t.config_version,true,now()
+				FROM tasks t LEFT JOIN configs c ON c.id=t.config_id WHERE t.id=$1
+				ON CONFLICT(agent_id,engine,share_id) DO UPDATE SET owner_id=EXCLUDED.owner_id,
+					config_id=EXCLUDED.config_id,config_version=EXCLUDED.config_version,running=true,
+					uncertain=false,config_uncertain=false,traffic_settled=false,updated_at=now()`, taskID)
+			return err
+		}
 		_, err := tx.Exec(ctx, `INSERT INTO agent_engine_ownership(agent_id,engine,owner_id,config_id,config_version,running,updated_at)
 			SELECT t.agent_id,t.engine,COALESCE(c.owner_id,t.owner_id),t.config_id,t.config_version,true,now()
 			FROM tasks t LEFT JOIN configs c ON c.id=t.config_id WHERE t.id=$1

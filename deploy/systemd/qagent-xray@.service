@@ -1,0 +1,51 @@
+[Unit]
+Description=Shared Xray core managed by QAgent (%i)
+Documentation=https://github.com/XTLS/Xray-core
+Wants=network-online.target
+After=network-online.target
+ConditionFileIsExecutable=/usr/local/lib/qagent/cores/xray
+ConditionPathExists=/etc/qagent/xray/shares/%i/config.json
+
+[Service]
+Type=simple
+User=qcontrolhub-core
+Group=qcontrolhub-core
+WorkingDirectory=/var/lib/qcontrolhub-xray-%i
+StateDirectory=qcontrolhub-xray-%i
+StateDirectoryMode=0750
+UMask=0027
+ExecStart=/usr/local/lib/qagent/cores/xray run -config /etc/qagent/xray/shares/%i/config.json
+LogNamespace=qagent-cores
+StandardOutput=journal
+StandardError=journal
+Restart=on-failure
+RestartSec=3s
+TimeoutStopSec=20s
+
+NoNewPrivileges=true
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_NET_ADMIN
+AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_NET_ADMIN
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RemoveIPC=true
+ProtectProc=invisible
+ProcSubset=pid
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+ReadOnlyPaths=/usr/local/lib/qagent/cores/xray /etc/qagent/xray/shares
+ReadWritePaths=/var/lib/qcontrolhub-xray-%i
+
+[Install]
+WantedBy=multi-user.target
