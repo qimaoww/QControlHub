@@ -57,6 +57,7 @@ type trafficState struct {
 type TrafficManager struct {
 	nativeSource     func(context.Context, core.Engine) (nativeAccountingSnapshot, error)
 	haltShared       func(context.Context, core.Engine) error
+	haltLegacyShared func(context.Context, core.Engine, []int) error
 	haltShare        func(context.Context, core.Engine, string) error
 	mu               sync.Mutex
 	statePath        string
@@ -69,6 +70,7 @@ type TrafficManager struct {
 	now              func() time.Time
 	awaitingPolicies bool
 	recoveryEngines  []core.Engine
+	recoveryPorts    map[core.Engine][]int
 }
 
 func NewTrafficManager(agentStatePath string) *TrafficManager {
@@ -112,11 +114,7 @@ func NewTrafficManagerForServiceManager(agentStatePath string, serviceManager *S
 			manager.recoverSharedEngines(manager.records)
 		}
 		if validGuard {
-			for _, record := range guard.Records {
-				if !slices.Contains(manager.recoveryEngines, record.Policy.Engine) {
-					manager.recoveryEngines = append(manager.recoveryEngines, record.Policy.Engine)
-				}
-			}
+			manager.recoverSharedEngines(guard.Records)
 		} else if !errors.Is(guardErr, os.ErrNotExist) || (err != nil && !errors.Is(err, os.ErrNotExist)) || (err == nil && !validState) {
 			manager.recoveryEngines = []core.Engine{core.EngineMihomo, core.EngineXray, core.EngineSingBox, core.EngineShadowsocksRust}
 		}
@@ -293,33 +291,67 @@ func (manager *TrafficManager) SetPolicies(ctx context.Context, policies []core.
 		shareID string
 		engine  core.Engine
 	}
+	authorized := map[instanceKey]map[int]bool{}
 	toStop := map[instanceKey]struct{}{}
-	for _, record := range manager.records {
-		if quota := record.Policy.SharedQuota; quota != nil {
-			toStop[instanceKey{quota.ID, record.Policy.Engine}] = struct{}{}
+	legacyStopPorts := map[core.Engine][]int{}
+	addLegacyPort := func(engine core.Engine, port int) {
+		if !slices.Contains(legacyStopPorts[engine], port) {
+			legacyStopPorts[engine] = append(legacyStopPorts[engine], port)
 		}
 	}
 	for _, record := range next {
-		if quota := record.Policy.SharedQuota; quota != nil && quota.AllowsEngine(record.Policy.Engine) &&
-			(quota.LimitBytes == 0 || quota.UsedBytes < quota.LimitBytes) {
-			delete(toStop, instanceKey{quota.ID, record.Policy.Engine})
+		if quota := record.Policy.SharedQuota; quota != nil {
+			key := instanceKey{quota.ID, record.Policy.Engine}
+			if quota.AllowsEngine(record.Policy.Engine) &&
+				(quota.LimitBytes == 0 || quota.UsedBytes < quota.LimitBytes) {
+				if authorized[key] == nil {
+					authorized[key] = map[int]bool{}
+				}
+				authorized[key][record.Policy.Port] = true
+			} else {
+				toStop[key] = struct{}{}
+				addLegacyPort(record.Policy.Engine, record.Policy.Port)
+			}
+		}
+	}
+	for _, record := range manager.records {
+		if quota := record.Policy.SharedQuota; quota != nil {
+			key := instanceKey{quota.ID, record.Policy.Engine}
+			if !authorized[key][record.Policy.Port] {
+				toStop[key] = struct{}{}
+				addLegacyPort(record.Policy.Engine, record.Policy.Port)
+			}
+		}
+	}
+	// Stop removed, revoked, or exhausted instances while the old nftables
+	// rules still protect their listener ports.
+	if manager.haltShare != nil {
+		for instance := range toStop {
+			if err := manager.haltShare(ctx, instance.engine, instance.shareID); err != nil {
+				manager.awaitingPolicies = true
+				manager.recoverSharedEngines(next)
+				return manager.setUnavailableLocked(fmt.Errorf("stop revoked shared instance: %w", err))
+			}
+		}
+	}
+	if manager.haltLegacyShared != nil {
+		for engine, ports := range legacyStopPorts {
+			if err := manager.haltLegacyShared(ctx, engine, ports); err != nil {
+				manager.awaitingPolicies = true
+				manager.recoverSharedEngines(next)
+				return manager.setUnavailableLocked(fmt.Errorf("stop legacy shared core before changing enforcement: %w", err))
+			}
 		}
 	}
 	manager.records = next
 	manager.awaitingPolicies = false
 	manager.recoveryEngines = nil
+	manager.recoveryPorts = nil
 	manager.dirty = true
 	if err := manager.collectLocked(ctx, true); err != nil {
 		slog.Warn("apply port traffic policies", "error", err)
 		if len(groups) > 0 {
 			return err // Never execute a shared task without working enforcement.
-		}
-	}
-	if manager.haltShare != nil {
-		for instance := range toStop {
-			if err := manager.haltShare(ctx, instance.engine, instance.shareID); err != nil {
-				return manager.setUnavailableLocked(fmt.Errorf("stop revoked shared instance: %w", err))
-			}
 		}
 	}
 	return nil
@@ -344,8 +376,12 @@ func (manager *TrafficManager) ClearPolicies(ctx context.Context) error {
 		if manager.haltShared == nil {
 			return errors.New("cannot clear shared enforcement before stopping its core")
 		}
-		if err := manager.haltShared(ctx, engine); err != nil {
-			return fmt.Errorf("stop shared core before clearing enforcement: %w", err)
+		stopErr := manager.haltShared(ctx, engine)
+		if manager.haltLegacyShared != nil {
+			stopErr = errors.Join(stopErr, manager.haltLegacyShared(ctx, engine, manager.sharedPortsForEngine(engine)))
+		}
+		if stopErr != nil {
+			return fmt.Errorf("stop shared core before clearing enforcement: %w", stopErr)
 		}
 	}
 	_ = manager.collectLocked(ctx, false)
@@ -357,6 +393,7 @@ func (manager *TrafficManager) ClearPolicies(ctx context.Context) error {
 	}
 	manager.awaitingPolicies = false
 	manager.recoveryEngines = nil
+	manager.recoveryPorts = nil
 	manager.records = make(map[string]*trafficRecord)
 	manager.dirty = true
 	return manager.collectLocked(ctx, true)
