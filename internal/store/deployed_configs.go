@@ -21,9 +21,15 @@ type DeployedConfig struct {
 // reads per deployment. Deleted configs and pruned revisions remain hidden.
 func (s *Store) DeployedConfigs(ctx context.Context) ([]DeployedConfig, error) {
 	args := []any{}
+	query := deployedConfigsSQL
 	ownerWhere := ownerClause(ctx, "config.owner_id", &args)
+	if !scopeForConfig(ctx).Admin {
+		query = deployedConfigsOwnedSQL
+		args = []any{scopeForConfig(ctx).OwnerID}
+		ownerWhere = ""
+	}
 	ownerWhere += agentEngineAccessClause(ctx, "latest.agent_id", "latest.engine", &args)
-	rows, err := s.pool.Query(ctx, deployedConfigsSQL+ownerWhere, args...)
+	rows, err := s.pool.Query(ctx, query+ownerWhere, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -65,6 +71,13 @@ func (s *Store) DeployedConfigs(ctx context.Context) ([]DeployedConfig, error) {
 // and rescan their entire tables for every node, especially on local databases.
 const deployedConfigsSQL = `
 	WITH latest AS MATERIALIZED (` + latestDeploymentsSQL + `)
+	` + deployedConfigsBodySQL
+
+const deployedConfigsOwnedSQL = `
+	WITH latest AS MATERIALIZED (` + ownedLatestDeploymentsSQL + `)
+	` + deployedConfigsBodySQL
+
+const deployedConfigsBodySQL = `
 	SELECT latest.agent_id,latest.engine,latest.config_id,latest.config_version,latest.finished_at,
 	       CASE WHEN config.version=latest.config_version THEN config.content ELSE revision.content END,
 	       COALESCE((SELECT jsonb_object_agg(profile_tag,content) FROM config_client_metadata

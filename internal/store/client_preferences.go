@@ -46,9 +46,13 @@ func (s *Store) SetConfigClientPreferences(ctx context.Context, agentID string, 
 	}
 	args := []any{agentID, profile.ConfigID, profile.Version}
 	where := ownerClause(ctx, "config.owner_id", &args)
+	latestSQL := latestDeploymentsSQL
+	if !scopeForConfig(ctx).Admin {
+		latestSQL = strings.ReplaceAll(ownedLatestDeploymentsSQL, "$1", fmt.Sprintf("$%d", len(args)))
+	}
 	where += agentEngineAccessClause(ctx, "deployed.agent_id", "deployed.engine", &args)
 	var valid bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM (`+latestDeploymentsSQL+`) deployed
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM (`+latestSQL+`) deployed
 		JOIN configs config ON config.id=deployed.config_id
 		WHERE deployed.agent_id=$1 AND deployed.config_id=$2 AND deployed.config_version=$3 AND config.deleted_at IS NULL`+where+`)`, args...).Scan(&valid); err != nil {
 		return err

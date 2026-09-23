@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -112,8 +113,37 @@ func (c *Client) Run(ctx context.Context) error {
 			if !exists {
 				return errors.New("shared core service is not configured")
 			}
+			if err := stopSharedInstances(ctx, c.executor.serviceManager(), engine, spec); err != nil {
+				return err
+			}
 			_, err := c.executor.serviceManager().command(ctx, spec.Service, core.ActionStop)
 			return err
+		}
+		c.traffic.haltShare = func(ctx context.Context, engine core.Engine, shareID string) error {
+			c.executor.specsMu.RLock()
+			base, exists := c.executor.Specs[engine]
+			c.executor.specsMu.RUnlock()
+			if !exists {
+				return errors.New("shared core service is not configured")
+			}
+			spec, err := sharedInstanceSpec(engine, base, shareID, c.executor.serviceManager().Kind())
+			if err != nil {
+				return err
+			}
+			if _, err := os.Lstat(filepath.Dir(spec.ConfigPath)); errors.Is(err, os.ErrNotExist) {
+				return nil
+			} else if err != nil {
+				return err
+			}
+			_, err = c.executor.serviceManager().command(ctx, spec.Service, core.ActionStop)
+			return err
+		}
+		if c.traffic.awaitingPolicies {
+			for engine, spec := range c.executor.Specs {
+				if err := stopSharedInstances(ctx, c.executor.serviceManager(), engine, spec); err != nil {
+					return fmt.Errorf("stop unmetered shared instances before reconnect: %w", err)
+				}
+			}
 		}
 	}
 	trafficContext, stopTraffic := context.WithCancel(ctx)

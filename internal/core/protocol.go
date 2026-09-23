@@ -1,13 +1,20 @@
 package core
 
 type HeartbeatRequest struct {
-	Version      string                  `json:"version,omitempty"`
-	OS           string                  `json:"os,omitempty"`
-	Arch         string                  `json:"arch,omitempty"`
-	Runtime      map[Engine]RuntimeState `json:"runtime,omitempty"`
-	Metrics      *HostMetrics            `json:"metrics,omitempty"`
-	TrafficUsage []PortTrafficUsage      `json:"traffic_usage,omitempty"`
-	Features     []string                `json:"features,omitempty"`
+	Version         string                  `json:"version,omitempty"`
+	OS              string                  `json:"os,omitempty"`
+	Arch            string                  `json:"arch,omitempty"`
+	Runtime         map[Engine]RuntimeState `json:"runtime,omitempty"`
+	Metrics         *HostMetrics            `json:"metrics,omitempty"`
+	TrafficUsage    []PortTrafficUsage      `json:"traffic_usage,omitempty"`
+	SharedInstances []SharedInstanceStatus  `json:"shared_instances,omitempty"`
+	Features        []string                `json:"features,omitempty"`
+}
+
+type SharedInstanceStatus struct {
+	Engine  Engine `json:"engine"`
+	ShareID string `json:"share_id"`
+	Status  string `json:"status"`
 }
 
 const (

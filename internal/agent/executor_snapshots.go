@@ -154,7 +154,7 @@ func (e *Executor) validate(ctx context.Context, engine core.Engine, spec Engine
 		return "", err
 	}
 	defaultSpec, managed := DefaultSpecsForServiceManager(e.serviceManager().Kind())[engine]
-	if managed && spec == defaultSpec && engine != core.EngineShadowsocksRust {
+	if managed && (spec == defaultSpec || isSharedInstanceSpec(engine, spec, e.serviceManager().Kind())) && engine != core.EngineShadowsocksRust {
 		return e.validateManagedServiceSnapshot(ctx, engine, spec, content)
 	}
 	return e.validateSnapshot(ctx, engine, spec, content)

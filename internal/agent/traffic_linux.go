@@ -57,6 +57,7 @@ type trafficState struct {
 type TrafficManager struct {
 	nativeSource     func(context.Context, core.Engine) (nativeAccountingSnapshot, error)
 	haltShared       func(context.Context, core.Engine) error
+	haltShare        func(context.Context, core.Engine, string) error
 	mu               sync.Mutex
 	statePath        string
 	backend          trafficCounterBackend
@@ -288,6 +289,22 @@ func (manager *TrafficManager) SetPolicies(ctx context.Context, policies []core.
 			return manager.setUnavailableLocked(fmt.Errorf("persist shared traffic activation guard: %w", err))
 		}
 	}
+	type instanceKey struct {
+		shareID string
+		engine  core.Engine
+	}
+	toStop := map[instanceKey]struct{}{}
+	for _, record := range manager.records {
+		if quota := record.Policy.SharedQuota; quota != nil {
+			toStop[instanceKey{quota.ID, record.Policy.Engine}] = struct{}{}
+		}
+	}
+	for _, record := range next {
+		if quota := record.Policy.SharedQuota; quota != nil && quota.AllowsEngine(record.Policy.Engine) &&
+			(quota.LimitBytes == 0 || quota.UsedBytes < quota.LimitBytes) {
+			delete(toStop, instanceKey{quota.ID, record.Policy.Engine})
+		}
+	}
 	manager.records = next
 	manager.awaitingPolicies = false
 	manager.recoveryEngines = nil
@@ -296,6 +313,13 @@ func (manager *TrafficManager) SetPolicies(ctx context.Context, policies []core.
 		slog.Warn("apply port traffic policies", "error", err)
 		if len(groups) > 0 {
 			return err // Never execute a shared task without working enforcement.
+		}
+	}
+	if manager.haltShare != nil {
+		for instance := range toStop {
+			if err := manager.haltShare(ctx, instance.engine, instance.shareID); err != nil {
+				return manager.setUnavailableLocked(fmt.Errorf("stop revoked shared instance: %w", err))
+			}
 		}
 	}
 	return nil

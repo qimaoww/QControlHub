@@ -52,10 +52,15 @@ func (s *Store) setSharedPortsTx(ctx context.Context, tx pgx.Tx, shareID, userID
 		}
 		if port.policyID != "" {
 			var stopped bool
-			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_engine_ownership
-				WHERE agent_id=$1 AND engine=$2 AND NOT running AND NOT uncertain AND traffic_settled)
+			if err := tx.QueryRow(ctx, `SELECT (
+				EXISTS(SELECT 1 FROM agent_shared_instance_ownership
+					WHERE agent_id=$1 AND engine=$2 AND share_id=$3 AND NOT running AND NOT uncertain AND traffic_settled)
+				OR (NOT EXISTS(SELECT 1 FROM agent_shared_instance_ownership
+					WHERE agent_id=$1 AND engine=$2 AND share_id=$3)
+					AND EXISTS(SELECT 1 FROM agent_engine_ownership
+						WHERE agent_id=$1 AND engine=$2 AND NOT running AND NOT uncertain AND traffic_settled)))
 				AND NOT EXISTS(SELECT 1 FROM tasks WHERE agent_id=$1 AND engine=$2 AND status IN ('pending','running'))`,
-				agentID, port.engine).Scan(&stopped); err != nil {
+				agentID, port.engine, shareID).Scan(&stopped); err != nil {
 				return err
 			}
 			if !stopped {
@@ -130,6 +135,13 @@ func (s *Store) checkSharedPortsAvailableTx(ctx context.Context, tx pgx.Tx, shar
 			state.uncertain OR state.config_uncertain OR config.id IS NULL OR config.deleted_at IS NOT NULL
 				OR (revision.config_id IS NULL AND config.version<>state.config_version)
 		FROM agent_engine_ownership state LEFT JOIN configs config ON config.id=state.config_id
+		LEFT JOIN config_revisions revision ON revision.config_id=state.config_id AND revision.version=state.config_version
+		WHERE state.agent_id=$1 AND (state.running OR state.uncertain) AND state.owner_id<>$2
+		UNION ALL
+		SELECT state.engine,COALESCE(revision.content,config.content,''),
+			state.uncertain OR state.config_uncertain OR config.id IS NULL OR config.deleted_at IS NOT NULL
+				OR (revision.config_id IS NULL AND config.version<>state.config_version)
+		FROM agent_shared_instance_ownership state LEFT JOIN configs config ON config.id=state.config_id
 		LEFT JOIN config_revisions revision ON revision.config_id=state.config_id AND revision.version=state.config_version
 		WHERE state.agent_id=$1 AND (state.running OR state.uncertain) AND state.owner_id<>$2
 		UNION ALL

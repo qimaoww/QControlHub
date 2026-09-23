@@ -3,7 +3,7 @@ package store
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 69
+const currentSchemaVersion = 70
 
 const schemaSQL = `
 CREATE TABLE IF NOT EXISTS agents (
@@ -471,6 +471,7 @@ CREATE INDEX IF NOT EXISTS tasks_latest_deployment_idx ON tasks(agent_id,engine,
 CREATE UNIQUE INDEX IF NOT EXISTS tasks_one_running_per_agent_idx ON tasks(agent_id) WHERE status='running';
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS owner_id text NOT NULL DEFAULT '';
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS shared_traffic_id text NOT NULL DEFAULT '';
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS shared_instance boolean NOT NULL DEFAULT false;
 CREATE TABLE IF NOT EXISTS agent_engine_ownership (
 	agent_id text NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
 	engine varchar(20) NOT NULL,
@@ -480,6 +481,20 @@ CREATE TABLE IF NOT EXISTS agent_engine_ownership (
 	running boolean NOT NULL DEFAULT true,
 	updated_at timestamptz NOT NULL,
 	PRIMARY KEY (agent_id,engine)
+);
+CREATE TABLE IF NOT EXISTS agent_shared_instance_ownership (
+	agent_id text NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+	engine varchar(20) NOT NULL,
+	share_id text NOT NULL REFERENCES agent_shares(id) ON DELETE CASCADE,
+	owner_id text NOT NULL,
+	config_id text NOT NULL,
+	config_version integer NOT NULL,
+	running boolean NOT NULL DEFAULT true,
+	uncertain boolean NOT NULL DEFAULT false,
+	config_uncertain boolean NOT NULL DEFAULT false,
+	traffic_settled boolean NOT NULL DEFAULT false,
+	updated_at timestamptz NOT NULL,
+	PRIMARY KEY (agent_id,engine,share_id)
 );
 ALTER TABLE agent_engine_ownership ADD COLUMN IF NOT EXISTS uncertain boolean NOT NULL DEFAULT false;
 ALTER TABLE agent_engine_ownership ADD COLUMN IF NOT EXISTS config_uncertain boolean NOT NULL DEFAULT false;

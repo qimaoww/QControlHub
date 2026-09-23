@@ -40,7 +40,7 @@ func (s *Store) RunningTask(ctx context.Context, agentID string) (*core.Task, er
 	row := tx.QueryRow(ctx, `
 		SELECT id,agent_id,action,engine,COALESCE(config_id,''),COALESCE(config_version,0),
 		       COALESCE(config_content,''),COALESCE(mainland_access_policies,'[]'::jsonb),COALESCE(core_version,''),COALESCE(core_source,''),status,attempt,COALESCE(lease_id,''),
-		       COALESCE(output,''),COALESCE(error,''),created_at,started_at,finished_at,tcp_settings,shared_traffic_id,cnip_source,install_if_missing
+		       COALESCE(output,''),COALESCE(error,''),created_at,started_at,finished_at,tcp_settings,shared_traffic_id,cnip_source,install_if_missing,shared_instance
 		FROM tasks WHERE agent_id=$1 AND status='running'
 		ORDER BY started_at DESC LIMIT 1`, agentID)
 	task, err := scanTask(row, true)
@@ -88,7 +88,8 @@ func (s *Store) RunningTask(ctx context.Context, agentID string) (*core.Task, er
 	if (isMihomoMirrorTask(task) && !containsFeature(features, core.AgentFeatureMihomoDevelopmentSource)) ||
 		(task.Action.SystemBBR() && !containsFeature(features, core.AgentFeatureSystemBBR)) ||
 		(task.Action == core.ActionIPQuality && !containsFeature(features, core.AgentFeatureIPQuality)) ||
-		(task.InstallIfMissing && !containsFeature(features, core.AgentFeaturePresetAutoInstall)) {
+		(task.InstallIfMissing && !containsFeature(features, core.AgentFeaturePresetAutoInstall)) ||
+		(task.SharedInstance && !containsFeature(features, core.AgentFeatureSharedCoreInstances)) {
 		message := "Agent no longer advertises mihomo-development-source-v1; the mirror development task cannot be safely resumed and it is unknown whether the previous Agent executed it before the connection was lost"
 		if task.Action.SystemBBR() {
 			message = "Agent no longer advertises system-bbr-v1; TCP tuning cannot safely resume and previous execution before disconnect is unknown"
@@ -98,6 +99,9 @@ func (s *Store) RunningTask(ctx context.Context, agentID string) (*core.Task, er
 		}
 		if task.Action == core.ActionIPQuality {
 			message = "Agent no longer advertises " + core.AgentFeatureIPQuality + "; the IP quality check cannot safely resume and previous execution before disconnect is unknown"
+		}
+		if task.SharedInstance {
+			message = "Agent no longer supports private shared instances; previous execution before disconnect is unknown"
 		}
 		if _, updateErr := tx.Exec(ctx, `
 			UPDATE tasks SET status='failed', error=$2, finished_at=now(), config_content=NULL, lease_id=NULL
@@ -176,7 +180,7 @@ func (s *Store) ClaimTask(ctx context.Context, agentID string) (*core.Task, erro
 		FROM next_task n WHERE t.id=n.id
 		RETURNING t.id,t.agent_id,t.action,t.engine,COALESCE(t.config_id,''),COALESCE(t.config_version,0),
 		          COALESCE(t.config_content,''),COALESCE(t.mainland_access_policies,'[]'::jsonb),COALESCE(t.core_version,''),COALESCE(t.core_source,''),t.status,t.attempt,COALESCE(t.lease_id,''),COALESCE(t.output,''),COALESCE(t.error,''),
-		          t.created_at,t.started_at,t.finished_at,t.tcp_settings,t.shared_traffic_id,t.cnip_source,t.install_if_missing`, agentID, leaseID, mirrorSupported, containsFeature(features, core.AgentFeatureSystemBBR), containsFeature(features, core.AgentFeatureCNIPSource), containsFeature(features, core.AgentFeaturePresetAutoInstall), containsFeature(features, core.AgentFeatureIPQuality))
+		          t.created_at,t.started_at,t.finished_at,t.tcp_settings,t.shared_traffic_id,t.cnip_source,t.install_if_missing,t.shared_instance`, agentID, leaseID, mirrorSupported, containsFeature(features, core.AgentFeatureSystemBBR), containsFeature(features, core.AgentFeatureCNIPSource), containsFeature(features, core.AgentFeaturePresetAutoInstall), containsFeature(features, core.AgentFeatureIPQuality))
 	task, err := scanTask(row, true)
 	if err == nil {
 		if configErr := s.openExecutionConfig(&task); configErr != nil {

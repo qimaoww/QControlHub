@@ -50,7 +50,11 @@ func (s *Store) GetAgent(ctx context.Context, id string) (core.Agent, error) {
 		agent.Status = "offline"
 	}
 	scopeAgentPresentation(ctx, &agent)
-	return agent, nil
+	agents := []core.Agent{agent}
+	if err := s.overlaySharedInstanceRuntime(ctx, agents); err != nil {
+		return core.Agent{}, err
+	}
+	return agents[0], nil
 }
 
 func scopeAgentPresentation(ctx context.Context, agent *core.Agent) {
