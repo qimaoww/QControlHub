@@ -1,4 +1,5 @@
 import { filterSubStoreProfiles, groupSubStoreProfiles, subStoreProfileNodeCount, subStoreAddressChoices, subStoreAddressModeLabel } from "./substore-model.js";
+import { regionAvatarMarkup } from "./regions.js";
 export function createSubStoreView({ state, can, esc, engineName, shell }, { lifecycle, masonry }) {
   function visibleProfiles(profiles) {
     return filterSubStoreProfiles(profiles, lifecycle.agentFilter, lifecycle.query);
@@ -88,7 +89,7 @@ export function createSubStoreView({ state, can, esc, engineName, shell }, { lif
             </div>`;
           })
           .join("");
-        return `<article class="substore-agent-card"><header><span class="node-avatar">●</span><span><strong>${esc(first.agent_name || "源节点不可用")}</strong><small>${items.length} 个客户端节点</small></span><b>${checked}/${items.length}</b></header><div>${rows}</div></article>`;
+        return `<article class="substore-agent-card"><header>${regionAvatarMarkup({ id: group.agent_id }, esc, false, "node-avatar")}<span><strong>${esc(first.agent_name || "源节点不可用")}</strong><small>${items.length} 个客户端节点</small></span><b>${checked}/${items.length}</b></header><div>${rows}</div></article>`;
       })
       .join("");
 

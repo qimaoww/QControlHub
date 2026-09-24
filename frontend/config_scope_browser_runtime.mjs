@@ -96,7 +96,9 @@ export async function testConfigScopeRuntime(preview = false) {
 }
 
 async function subStoreFixture(manage = true) {
-  const state = { route: "substore-sync", navigationEpoch: 1, data: {}, session: { role: "user", user_id: "alice" } };
+  const state = { route: "substore-sync", navigationEpoch: 1,
+    data: { agents: [{ id: "shared", labels: { region_code: "HK" } }] },
+    session: { role: "user", user_id: "alice" } };
   setStorageAccount(state.session);
   accountStorage.setItem(nodeCardOrderKey, JSON.stringify(["shared", "charlie", "alpha"]));
   const targets = [
@@ -116,6 +118,8 @@ async function subStoreFixture(manage = true) {
   const api = async (path, options = {}) => {
     const input = options.body ? JSON.parse(options.body) : null;
     calls.push({ path, method: options.method || "GET", input });
+    if (path === "/agents/alpha/region") return { country_code: "SG" };
+    if (path === "/agents/charlie/region") return { country_code: "US" };
     if (path === "/substore-sync/remote-targets") return [];
     if (path === "/substore-sync/selections") {
       selections.set(input.target_id, input.selections);
@@ -144,7 +148,7 @@ async function subStoreFixture(manage = true) {
     }
     throw new Error(`unexpected Sub-Store API ${path}`);
   };
-  const render = installSubStoreSync({ state, api, can: permission => permission === "settings.manage" && manage,
+  const render = installSubStoreSync({ state, api, can: permission => permission === "agents.read" || permission === "settings.manage" && manage,
     esc, engineName: value => value, notify: () => {},
     shell: markup => { document.body.innerHTML = markup; },
   });
@@ -154,6 +158,8 @@ async function subStoreFixture(manage = true) {
 
 export async function testSubStoreScopeRuntime(preview = false) {
   const fixture = await subStoreFixture();
+  assert(document.querySelector('.substore-agent-card [data-region-avatar="shared"] img[src="/api/v1/region-flags/hk"]'), "Sub-Store should use the node's saved flag");
+  await waitFor(() => document.querySelector('.substore-agent-card [data-region-avatar="alpha"] img[src="/api/v1/region-flags/sg"]'), "Sub-Store should resolve an automatic node flag");
   if (preview) {
     document.querySelector("[data-substore-target-edit]").click();
     return;
