@@ -4,9 +4,6 @@ export function createCardMasonry(gridSelector, cardSelector) {
   function bind() {
     const grid = document.querySelector(gridSelector);
     if (!grid) return;
-    // Normal card grids let CSS align rows, as on the node overview.
-    // Only a grid with an explicit pixel row size needs masonry spans.
-    if (getComputedStyle(grid).gridAutoRows === "auto") return;
     const cards = [...grid.querySelectorAll(cardSelector)];
     if (!cards.length) return;
 
