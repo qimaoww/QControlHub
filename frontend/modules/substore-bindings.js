@@ -1,9 +1,11 @@
 import { bindEvent } from "./refresh.js";
+import { createRegionDisplay } from "./regions.js";
 
 import { createSubStoreSelections } from "./substore-selections.js";
 import { createSubStoreTargets } from "./substore-targets.js";
 export function createSubStoreBindings(ctx, { lifecycle, subStoreSync, render, masonry }) {
   const { api, state, can, notify } = ctx;
+  const loadRegionDisplay = createRegionDisplay(ctx);
   const bindSelections = createSubStoreSelections(ctx, { lifecycle, subStoreSync });
   const bindTargets = createSubStoreTargets(ctx, { lifecycle, subStoreSync });
   function bindPage() {
@@ -12,6 +14,11 @@ export function createSubStoreBindings(ctx, { lifecycle, subStoreSync, render, m
     const targets = resource.targets || [];
     const activeTarget = targets.find((target) => target.id === lifecycle.activeTargetID) || null;
     masonry.bind();
+    document.querySelectorAll(".substore-agent-card").forEach((card) => {
+      const id = card.querySelector("[data-region-avatar]")?.dataset.regionAvatar;
+      const agent = (state.data.agents || []).find((item) => item.id === id) || { id };
+      if (id) loadRegionDisplay(agent, card);
+    });
     document.querySelectorAll("[data-substore-target]").forEach((button) => {
       button.onclick = async () => {
         if (button.dataset.substoreTarget === lifecycle.activeTargetID) return;

@@ -1,0 +1,40 @@
+/* Keep three balanced columns and the original open rows; refine card headers. */
+.page-substore-sync .substore-agent-grid {
+  grid-template-columns:repeat(3,minmax(0,1fr));
+}
+
+.page-substore-sync .substore-agent-card,
+.page-substore-sync .substore-status-bar,
+.page-substore-sync .substore-target-bar {
+  border-radius:14px;
+}
+
+.page-substore-sync .substore-agent-card>header {
+  min-height:62px;
+  grid-template-columns:36px minmax(0,1fr) auto;
+  padding:11px 14px;
+}
+.page-substore-sync .substore-agent-card>header>.node-avatar {
+  width:36px;
+  height:36px;
+}
+.page-substore-sync .substore-agent-card>header strong {
+  font-size:calc(12px * var(--ui-font-scale));
+  font-weight:700;
+}
+
+.page-substore-sync .substore-node-row:not(.has-preview) {
+  grid-template-columns:24px auto minmax(0,1fr) auto;
+}
+.page-substore-sync .substore-node-row:not(.has-preview)>.button,
+.page-substore-sync .substore-node-row:not(.has-preview)>.substore-remove {
+  grid-column:4;
+  grid-row:1;
+}
+
+@media(max-width:1499px) {
+  .page-substore-sync .substore-agent-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+}
+@media(max-width:950px) {
+  .page-substore-sync .substore-agent-grid { grid-template-columns:minmax(0,1fr); }
+}
