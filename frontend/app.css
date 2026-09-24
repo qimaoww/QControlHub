@@ -1670,72 +1670,52 @@ dialog.config-access-dialog::backdrop{background:rgba(17,20,36,.34);backdrop-fil
 .page-agents .workspace-main>[data-spa-notice]{grid-template-columns:minmax(0,1fr) 44px;gap:8px;padding:10px 12px}
 .page-agents .notice-icon{display:none}
  .page-agents .notice-close{width:44px;min-height:44px}
-/* The node overview is the visual baseline for the four peer pages. */
-:is(.page-traffic,.page-system-bbr,.page-substore-sync,.page-client-access) {
-  --console-card-radius:13px;
-  --console-card-gap:12px;
-  --console-card-min:360px;
-  --console-card-padding:12px 14px;
+/* Match the node overview's card frame while keeping Sub-Store's compact flow. */
+.page-substore-sync {
+  --substore-card-radius:13px;
+  --substore-card-gap:12px;
+  --substore-card-min:360px;
 }
 
-.page-system-bbr .bbr-workspace,
-.page-client-access .client-access-workspace { gap:var(--console-card-gap); }
-
-.page-traffic .traffic-policy-grid,
-.page-system-bbr .bbr-grid,
-.page-substore-sync .substore-agent-grid,
-.page-client-access .client-access-node-grid:not(.empty) {
-  grid-template-columns:repeat(auto-fill,minmax(min(100%,var(--console-card-min)),1fr));
-  gap:var(--console-card-gap);
+.page-substore-sync .substore-agent-grid {
+  grid-template-columns:repeat(auto-fill,minmax(min(100%,var(--substore-card-min)),1fr));
+  gap:var(--substore-card-gap);
 }
 
-.page-client-access .client-access-node-grid {
-  min-width:0;
-  width:100%;
-}
-.page-client-access .client-access-workspace { grid-template-columns:minmax(0,1fr); }
-
-.page-traffic .traffic-policy-card,
-.page-system-bbr .bbr-card,
-.page-substore-sync .substore-agent-card,
-.page-client-access .client-access-node-card {
+.page-substore-sync .substore-agent-card {
   width:100%;
   min-width:0;
   border:1px solid var(--line);
-  border-radius:var(--console-card-radius);
+  border-radius:var(--substore-card-radius);
   background:var(--surface);
   box-shadow:var(--shadow);
   overflow:hidden;
 }
 
-/* The page-level control panels are cards in these layouts as well. */
-.page-traffic .traffic-control-panel,
 .page-substore-sync .substore-status-bar,
 .page-substore-sync .substore-target-bar,
-.page-substore-sync .substore-filter-bar,
-.page-client-access .client-access-toolbar {
+.page-substore-sync .substore-filter-bar {
   border:1px solid var(--line);
-  border-radius:var(--console-card-radius);
+  border-radius:var(--substore-card-radius);
   background:var(--surface);
   box-shadow:var(--shadow);
 }
 
-.page-traffic .traffic-policy-card>header,
-.page-system-bbr .bbr-card>header,
-.page-substore-sync .substore-agent-card>header,
-.page-client-access .client-access-node-card>header {
+.page-substore-sync .substore-agent-card>header {
   min-height:63px;
+  grid-template-columns:38px minmax(0,1fr) auto;
   align-items:center;
   gap:9px;
-  padding:var(--console-card-padding);
+  padding:12px 14px;
   border-bottom:1px solid var(--line);
   background:var(--surface);
 }
-
-.page-traffic .traffic-policy-heading strong,
-.page-system-bbr .bbr-card>header h2,
-.page-substore-sync .substore-agent-card>header strong,
-.page-client-access .client-access-node-card>header strong {
+.page-substore-sync .substore-agent-card>header>.node-avatar {
+  width:38px;
+  height:38px;
+  border-radius:10px;
+}
+.page-substore-sync .substore-agent-card>header strong {
   color:var(--ink);
   font-size:calc(13px * var(--ui-font-scale));
   font-weight:750;
@@ -1743,69 +1723,22 @@ dialog.config-access-dialog::backdrop{background:rgba(17,20,36,.34);backdrop-fil
   overflow-wrap:anywhere;
 }
 
-.page-traffic .traffic-policy-card>footer,
-.page-system-bbr .bbr-card>footer {
-  gap:10px;
-  padding:10px 14px;
-  border-top:1px solid var(--line);
-  background:var(--surface);
-}
-
-.page-substore-sync .substore-agent-card>header {
-  grid-template-columns:38px minmax(0,1fr) auto;
-}
-.page-substore-sync .substore-agent-card>header>.node-avatar {
-  width:38px;
-  height:38px;
-  border-radius:10px;
-}
-.page-substore-sync .substore-agent-card { container:substore-card / inline-size; }
-
-/* Node cards use a bordered inset for the first block of detail. Give each
-   peer card the same clear frame without changing its controls or status. */
-.page-traffic .traffic-card-quota,
-.page-system-bbr .bbr-primary-values,
-.page-substore-sync .substore-node-row,
-.page-client-access .client-access-engine-group {
+.page-substore-sync .substore-node-row {
+  margin:10px 12px;
   border:1px solid var(--line);
   border-radius:8px;
   background:var(--surface-2);
 }
-.page-traffic .traffic-card-quota {
-  margin:12px 14px;
-  padding:12px;
-}
-.page-system-bbr .bbr-primary-values {
-  gap:0;
-  margin:12px 14px;
-  padding:0;
-  overflow:hidden;
-}
-.page-system-bbr .bbr-primary-values>div {
-  min-width:0;
-  padding:10px 12px;
-}
-.page-system-bbr .bbr-primary-values>div+div { border-left:1px solid var(--line); }
-.page-substore-sync .substore-node-row {
-  margin:10px 12px;
-}
 .page-substore-sync .substore-node-row+.substore-node-row { border-top:1px solid var(--line); }
-.page-client-access .client-access-engine-group {
-  margin:10px 12px;
-  overflow:hidden;
-}
-.page-client-access .client-access-engine-group+.client-access-engine-group { border-top:1px solid var(--line); }
+
 @container substore-card (max-width:490px) {
-  .substore-node-row { grid-template-columns:24px auto minmax(0,1fr) auto; }
-  .substore-node-name,.substore-node-preview { grid-column:2/5; }
-  .substore-node-row>.button,.substore-remove { grid-column:4; }
+  .page-substore-sync .substore-node-row { grid-template-columns:24px auto minmax(0,1fr) auto; }
+  .page-substore-sync .substore-node-name,
+  .page-substore-sync .substore-node-preview { grid-column:2/5; }
+  .page-substore-sync .substore-node-row>.button,
+  .page-substore-sync .substore-remove { grid-column:4; }
 }
 
 @media(max-width:600px) {
-  .page-traffic .traffic-policy-grid,
-  .page-system-bbr .bbr-grid,
-  .page-substore-sync .substore-agent-grid,
-  .page-client-access .client-access-node-grid:not(.empty) {
-    grid-template-columns:minmax(0,1fr);
-  }
+  .page-substore-sync .substore-agent-grid { grid-template-columns:minmax(0,1fr); }
 }
