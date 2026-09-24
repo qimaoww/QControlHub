@@ -109,7 +109,7 @@ async function subStoreFixture(manage = true) {
     engine: "mihomo", profile_tag: "same-tag", protocol: "Shadowsocks 2022", port: 21001, default_name: "我的节点",
     available: true, addresses: [{ family: "ipv4", address: "198.51.100.10" }, { family: "ipv6", address: "2001:db8::10" }] };
   const passive = [
-    { ...active, agent_id: "alpha", agent_name: "Alpha 主机", config_id: "cfg_alpha", profile_tag: "alpha-tag", default_name: "Alpha 节点" },
+    { ...active, agent_id: "alpha", agent_name: "Alpha 主机", config_id: "cfg_alpha", profile_tag: "alpha-tag", default_name: "Alpha 主机 · alpha-tag" },
     { ...active, agent_id: "charlie", agent_name: "Charlie 主机", config_id: "cfg_charlie", profile_tag: "charlie-tag", default_name: "Charlie 节点" },
   ];
   const stale = { ...active, config_id: "cfg_previous", default_name: "失效的旧配置", available: false, addresses: [] };
@@ -160,6 +160,10 @@ export async function testSubStoreScopeRuntime(preview = false) {
   const fixture = await subStoreFixture();
   assert(document.querySelector('.substore-agent-card [data-region-avatar="shared"] img[src="/api/v1/region-flags/hk"]'), "Sub-Store should use the node's saved flag");
   await waitFor(() => document.querySelector('.substore-agent-card [data-region-avatar="alpha"] img[src="/api/v1/region-flags/sg"]'), "Sub-Store should resolve an automatic node flag");
+  const alphaCard = document.querySelector('.substore-agent-card [data-region-avatar="alpha"]').closest('.substore-agent-card');
+  assert(!alphaCard.querySelector('.substore-node-preview'), "generated sync names must not repeat the card's node and profile names");
+  const charlieCard = document.querySelector('.substore-agent-card [data-region-avatar="charlie"]').closest('.substore-agent-card');
+  assert(charlieCard.querySelector('.substore-node-preview')?.textContent === "Charlie 节点", "a distinct client name remains visible");
   if (preview) {
     document.querySelector("[data-substore-target-edit]").click();
     return;

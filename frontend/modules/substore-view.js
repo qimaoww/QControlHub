@@ -79,11 +79,16 @@ export function createSubStoreView({ state, can, esc, engineName, shell }, { lif
             const settingsRow = manage && profile.selected && !unavailable
               ? `<form class="substore-node-settings-row" data-substore-parameters-form><label><span>同步名称</span><input name="custom_name" required maxlength="100" autocomplete="off" value="${esc(name)}"></label>${addressField}<button class="button primary small" type="submit">保存参数</button></form>`
               : "";
-            return `<div class="substore-node-item ${profile.selected ? "selected" : ""} ${unavailable ? "unavailable" : ""}" data-substore-key="${esc(encodeURIComponent(`${profile.agent_id}\u0000${profile.engine}\u0000${profile.profile_tag}\u0000${profile.config_id || ""}`))}"><div class="substore-node-row">
+            const automaticName = profile.agent_name ? `${profile.agent_name} · ${profile.profile_tag}` : profile.profile_tag;
+            const distinctName = !settingsRow && name !== automaticName && name !== profile.profile_tag ? name : "";
+            const distinctMode = profile.selected && !settingsRow && addressMode !== "auto"
+              ? subStoreAddressModeLabel(addressMode) : "";
+            const preview = [distinctName, distinctMode].filter(Boolean).join(" · ");
+            return `<div class="substore-node-item ${profile.selected ? "selected" : ""} ${unavailable ? "unavailable" : ""}" data-substore-key="${esc(encodeURIComponent(`${profile.agent_id}\u0000${profile.engine}\u0000${profile.profile_tag}\u0000${profile.config_id || ""}`))}"><div class="substore-node-row${preview ? " has-preview" : ""}">
                 <label class="substore-node-toggle"><input type="checkbox" data-substore-select ${profile.selected ? "checked" : ""} ${unavailable || !manage ? "disabled" : ""}><span></span></label>
                 <span class="engine-badge ${esc(profile.engine)}">${esc(engineName(profile.engine))}</span>
                 <span class="substore-node-source"><b>${esc(profile.profile_tag)}</b><small>${formatError ? esc(formatError) : unavailable ? "源配置已变更或不可用" : `${esc(profile.protocol)}${profile.port ? ` · :${Number(profile.port)}` : ""}`}</small></span>
-                <span class="substore-node-preview">${esc(profile.selected ? `${name} · ${subStoreAddressModeLabel(addressMode)}` : name)}</span>
+                ${preview ? `<span class="substore-node-preview">${esc(preview)}</span>` : ""}
                 ${!manage ? "" : profile.selected ? `<button class="substore-remove" type="button" data-substore-remove aria-label="移除 ${esc(name)}">移除</button>` : `<button class="button small" type="button" data-substore-add ${unavailable ? "disabled" : ""}>加入同步</button>`}
               </div>${settingsRow}
             </div>`;
