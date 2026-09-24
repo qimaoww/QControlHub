@@ -12,7 +12,25 @@ import (
 	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
+	"github.com/qimaoww/qcontrolhub/internal/store"
 )
+
+func TestMissingChinaProvinceRefreshesOldCachedLocation(t *testing.T) {
+	now := time.Now().UTC()
+	old := store.ClientConnectionLocation{ClientIPLocation: core.ClientIPLocation{CountryCode: "CN"}, RetryAfter: now.Add(47 * time.Hour)}
+	if !needsClientLocationLookup(old, true, now) {
+		t.Fatal("old country-only CN cache was not refreshed")
+	}
+	old.RetryAfter = now.Add(6 * time.Hour)
+	if needsClientLocationLookup(old, true, now) {
+		t.Fatal("freshly retried country-only CN cache was retried too soon")
+	}
+	old.CountryCode = "US"
+	old.RetryAfter = now.Add(47 * time.Hour)
+	if needsClientLocationLookup(old, true, now) {
+		t.Fatal("foreign cache was refreshed early")
+	}
+}
 
 type connectionGeoTransport func(*http.Request) (*http.Response, error)
 
@@ -41,6 +59,9 @@ func TestClientConnectionGeographyPersistsAcrossServerRestart(t *testing.T) {
 			body = `{"country_code":"CN","country":"China","region":"Guangdong"}`
 		case "/v1/ip/geo/1.1.1.1.json":
 		case "/v1/ip/geo/9.9.9.9.json":
+			status = 503
+			body = "unavailable"
+		case "/9.9.9.9", "/api/v1/json/9.9.9.9":
 			status = 503
 			body = "unavailable"
 		default:
@@ -77,7 +98,7 @@ func TestClientConnectionGeographyPersistsAcrossServerRestart(t *testing.T) {
 			}
 		}
 	}
-	if len(calls) != 3 {
+	if len(calls) != 5 {
 		t.Fatalf("provider calls=%v", calls)
 	}
 	for path, count := range calls {

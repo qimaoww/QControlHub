@@ -54,6 +54,86 @@ func TestLookupRejectsNonPublicAddressBeforeRequest(t *testing.T) {
 	}
 }
 
+func TestLookupFillsMissingChinaProvinceFromAdditionalProviders(t *testing.T) {
+	for _, test := range []struct {
+		name, geoJS, ipWho, freeAPI, want string
+		freeCalls                         int
+	}{
+		{"IPWho", `{"country_code":"CN","country":"China"}`, `{"success":true,"ip":"114.114.114.114","country_code":"CN","country":"China","region":"Jiangsu Sheng"}`, "", "江苏", 0},
+		{"FreeIPAPI", `{"country_code":"CN","country":"China"}`, `{"success":false}`, `{"ipAddress":"114.114.114.114","countryCode":"CN","countryName":"China","regionName":"Zhejiang"}`, "浙江", 1},
+		{"reject foreign fallback", `{"country_code":"CN","country":"China"}`, `{"success":true,"ip":"114.114.114.114","country_code":"US","country":"United States","region":"California"}`, `{"ipAddress":"114.114.114.114","countryCode":"CN","countryName":"China","regionName":"Guangdong"}`, "广东", 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			calls := map[string]int{}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+				calls[request.URL.Path]++
+				switch request.URL.Path {
+				case "/geo/114.114.114.114.json":
+					_, _ = w.Write([]byte(test.geoJS))
+				case "/who/114.114.114.114":
+					_, _ = w.Write([]byte(test.ipWho))
+				case "/free/114.114.114.114":
+					_, _ = w.Write([]byte(test.freeAPI))
+				default:
+					t.Errorf("unexpected lookup: %s", request.URL.Path)
+				}
+			}))
+			defer server.Close()
+			client := New(server.Client())
+			client.endpoint, client.ipWhoEndpoint, client.freeIPAPIEndpoint = server.URL+"/geo", server.URL+"/who", server.URL+"/free"
+			for range 2 {
+				region, err := client.Lookup(context.Background(), netip.MustParseAddr("114.114.114.114"))
+				if err != nil || region.ISOCode != "CN" || region.Province != test.want {
+					t.Fatalf("region=%+v err=%v", region, err)
+				}
+			}
+			if calls["/geo/114.114.114.114.json"] != 1 || calls["/who/114.114.114.114"] != 1 || calls["/free/114.114.114.114"] != test.freeCalls {
+				t.Fatalf("provider calls=%v", calls)
+			}
+		})
+	}
+}
+
+func TestFreeIPAPICallBudget(t *testing.T) {
+	client := New(nil)
+	for range 10 {
+		if !client.takeFreeAPIQuota() {
+			t.Fatal("free provider rejected a permitted request")
+		}
+	}
+	if client.takeFreeAPIQuota() {
+		t.Fatal("free provider exceeded its 10 requests per 10 seconds limit")
+	}
+}
+
+func TestCountryLookupDoesNotHideLaterProvinceEnrichment(t *testing.T) {
+	calls := map[string]int{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		calls[request.URL.Path]++
+		if strings.HasPrefix(request.URL.Path, "/geo/") {
+			_, _ = w.Write([]byte(`{"country_code":"CN","country":"China"}`))
+		} else {
+			_, _ = w.Write([]byte(`{"success":true,"ip":"114.114.114.114","country_code":"CN","country":"China","region":"Jiangsu Sheng"}`))
+		}
+	}))
+	defer server.Close()
+	client := New(server.Client())
+	client.endpoint, client.ipWhoEndpoint, client.freeIPAPIEndpoint = server.URL+"/geo", server.URL+"/who", ""
+	ip := netip.MustParseAddr("114.114.114.114")
+	if region, err := client.LookupCountry(context.Background(), ip); err != nil || region.ISOCode != "CN" {
+		t.Fatalf("country=%+v err=%v", region, err)
+	}
+	if calls["/who/114.114.114.114"] != 0 {
+		t.Fatal("flag lookup queried province provider")
+	}
+	if region, err := client.Lookup(context.Background(), ip); err != nil || region.Province != "江苏" {
+		t.Fatalf("province=%+v err=%v", region, err)
+	}
+	if calls["/geo/114.114.114.114.json"] != 2 || calls["/who/114.114.114.114"] != 1 {
+		t.Fatalf("calls=%v", calls)
+	}
+}
+
 func TestFlagReadsSafeSVGAndCachesByCode(t *testing.T) {
 	requests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {

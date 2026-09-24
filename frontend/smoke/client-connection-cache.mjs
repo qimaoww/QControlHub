@@ -10,7 +10,7 @@ export async function run() {
   globalThis.document = { querySelector: () => null, querySelectorAll: () => [] };
   try {
     const filters = defaultConnectionFilters(now);
-    const first = { id: 1, agent_id: "alpha", agent_name: "Alpha", engine: "xray", client_ip: "8.8.8.8", endpoints: [{ local_port: 443 }], location: { country_code: "CN" } };
+    const first = { id: 1, agent_id: "alpha", agent_name: "Alpha", engine: "xray", client_ip: "8.8.8.8", endpoints: [{ local_port: 443 }], location: { country_code: "CN", province: "广东" } };
     const second = { ...first, id: 2, agent_id: "bravo", agent_name: "Bravo", engine: "sing-box", client_ip: "1.1.1.1" };
     const state = { data: { connectionFilters: filters }, navigationEpoch: 1, route: "client-connections" };
     let paints = [], reads = [], pending, failure;
@@ -94,6 +94,20 @@ export async function run() {
     await Promise.resolve();
     await geoLoad();
     assert.equal(geoReads, 2, "an unknown geography result does not retrigger lookup on every cache hit");
+    const chinaState = { data: { connectionFilters: filters }, navigationEpoch: 1, route: "client-connections" };
+    let chinaReads = 0, chinaMarkup = "";
+    const chinaLoad = installClientConnections({ state: chinaState, esc: String, engineName: String, date: String,
+      shell: markup => { chinaMarkup = markup; },
+      api: async path => {
+        chinaReads++;
+        const location = path.includes("locations=only") ? { country_code: "CN", province: "江苏" } : { country_code: "CN" };
+        return { records: [{ ...first, location }], sources: [], timeline: [] };
+      },
+    });
+    await chinaLoad();
+    await Promise.resolve();
+    assert.equal(chinaReads, 2, "a cached China country without province still requests enrichment");
+    assert.ok(chinaMarkup.includes("中国 · 江苏"));
 
     const cache = createConnectionCache({ now: () => now, maxEntries: 2, maxBytes: 1500 });
     const result = { records: [first], sources: [], timeline: [] };
