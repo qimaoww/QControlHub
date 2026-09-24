@@ -192,6 +192,26 @@ compose() {
     run_compose "${COMPOSE_ARGS[@]}" "$@"
 }
 
+resolve_bundled_image_refs() {
+    local images image_ref
+    BUNDLED_CONTROL_IMAGE_REF=""
+    BUNDLED_WEB_IMAGE_REF=""
+    BUNDLED_POSTGRES_IMAGE_REF=""
+    # Let Compose resolve .env quoting, comments and exported overrides. The
+    # production Compose owns these three image repositories.
+    images="$(run_compose -f "$REPO_ROOT/docker-compose.yml" config --images)" || \
+        die "无法解析内置部署的镜像配置"
+    while IFS= read -r image_ref; do
+        case "$image_ref" in
+            ghcr.io/qimaoww/qcontrol-plane:*) BUNDLED_CONTROL_IMAGE_REF="$image_ref" ;;
+            ghcr.io/qimaoww/qcontrol-web:*) BUNDLED_WEB_IMAGE_REF="$image_ref" ;;
+            postgres:*|docker.io/library/postgres:*) BUNDLED_POSTGRES_IMAGE_REF="$image_ref" ;;
+        esac
+    done <<< "$images"
+    [ -n "$BUNDLED_CONTROL_IMAGE_REF" ] && [ -n "$BUNDLED_WEB_IMAGE_REF" ] && \
+        [ -n "$BUNDLED_POSTGRES_IMAGE_REF" ] || die "内置部署的镜像配置不完整"
+}
+
 prepare_external_update_compose() {
     # Merge only application settings. Do not regenerate the topology: an
     # existing deployment may have its own network, ports, CA mounts, etc.

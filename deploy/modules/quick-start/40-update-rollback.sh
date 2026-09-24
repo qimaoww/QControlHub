@@ -7,6 +7,68 @@ update_container_id() {
     printf '%s' "$ids"
 }
 
+current_update_image_id() {
+    local service="$1" ids count image_id
+    if [ "$MODE" = bundled ]; then
+        # Older bundled installs may not have the generated secret override yet.
+        ids="$(run_compose -f "$REPO_ROOT/docker-compose.yml" ps -q "$service")" || \
+            die "无法读取 $service 当前容器"
+    else
+        ids="$(compose ps -q "$service")" || die "无法读取 $service 当前容器"
+    fi
+    count="$(printf '%s\n' "$ids" | awk 'NF { count++ } END { print count + 0 }')"
+    [ "$count" -le 1 ] || die "更新前发现多个正在运行的 $service 容器"
+    [ "$count" -eq 1 ] || return 0
+    image_id="$(docker inspect --format '{{.Image}}' "$ids")" || die "无法读取 $service 当前镜像"
+    [ -n "$image_id" ] || die "无法读取 $service 当前镜像"
+    printf '%s' "$image_id"
+}
+
+update_image_version() {
+    local image_id="$1" version short_id
+    if [ -z "$image_id" ]; then
+        printf '未运行'
+        return 0
+    fi
+    version="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.version" }}' "$image_id")" || \
+        die "无法读取镜像版本：$image_id"
+    case "$version" in
+        ""|"<no value>")
+            short_id="${image_id#sha256:}"
+            printf '镜像 %s' "${short_id:0:12}"
+            ;;
+        *)
+            if [[ "$version" =~ ^[0-9a-fA-F]{40}$ ]]; then
+                version="${version:0:12}"
+            fi
+            printf '%s' "$version"
+            ;;
+    esac
+}
+
+application_update_available() {
+    local control_ref="$1" web_ref="$2" current_control current_web target_control target_web
+    if [ "$#" -ge 4 ]; then
+        current_control="$3"
+        current_web="$4"
+    else
+        current_control="$(current_update_image_id control-plane)" || die "无法读取 control-plane 当前镜像"
+        current_web="$(current_update_image_id qcontrol-web)" || die "无法读取 qcontrol-web 当前镜像"
+    fi
+    target_control="$(docker image inspect --format '{{.Id}}' "$control_ref")" || die "无法读取目标镜像：$control_ref"
+    target_web="$(docker image inspect --format '{{.Id}}' "$web_ref")" || die "无法读取目标镜像：$web_ref"
+    [ -n "$target_control" ] && [ -n "$target_web" ] || die "目标镜像 ID 为空，无法判断是否有更新"
+
+    local current_control_version current_web_version target_control_version target_web_version
+    current_control_version="$(update_image_version "$current_control")" || die "无法读取 control-plane 当前版本"
+    current_web_version="$(update_image_version "$current_web")" || die "无法读取 qcontrol-web 当前版本"
+    target_control_version="$(update_image_version "$target_control")" || die "无法读取 control-plane 目标版本"
+    target_web_version="$(update_image_version "$target_web")" || die "无法读取 qcontrol-web 目标版本"
+    echo "-> 当前版本：control-plane $current_control_version，qcontrol-web $current_web_version"
+    echo "-> 目标版本：control-plane $target_control_version，qcontrol-web $target_web_version"
+    [ "$current_control" != "$target_control" ] || [ "$current_web" != "$target_web" ]
+}
+
 capture_update_image() {
     local service="$1" container_id image_id image_ref backup_tag
     container_id="$(update_container_id "$service")"
@@ -169,11 +231,21 @@ update_external_services() (
     check_external_endpoints "$panel_url" || die "更新前原部署未通过 healthz 和 readyz 检查"
     begin_external_update
 
+    docker pull ghcr.io/qimaoww/qcontrol-plane:latest || die "拉取 control-plane:latest 失败"
+    docker pull ghcr.io/qimaoww/qcontrol-web:latest || die "拉取 qcontrol-web:latest 失败"
+    if ! application_update_available \
+        ghcr.io/qimaoww/qcontrol-plane:latest ghcr.io/qimaoww/qcontrol-web:latest \
+        "$UPDATE_CONTROL_IMAGE" "$UPDATE_WEB_IMAGE"; then
+        echo "-> 已是最新版本，无需更新"
+        UPDATE_ROLLBACK_ARMED=false
+        trap - EXIT HUP INT TERM
+        cleanup_external_update_backup
+        return 0
+    fi
+
     echo "-> 保留现有拓扑并更新 $EXTERNAL_COMPOSE_FILE 中的应用配置"
     prepare_external_update_compose
     cmp -s "$UPDATE_BACKUP_DIR/.env" "$ENV_FILE" || die "更新过程改写了 .env，已终止"
-    docker pull ghcr.io/qimaoww/qcontrol-plane:latest || die "拉取 control-plane:latest 失败"
-    docker pull ghcr.io/qimaoww/qcontrol-web:latest || die "拉取 qcontrol-web:latest 失败"
 
     compose config --quiet || die "Docker Compose 配置校验失败"
     UPDATE_SERVICES_CHANGED=true
@@ -191,4 +263,5 @@ update_external_services() (
     UPDATE_ROLLBACK_ARMED=false
     trap - EXIT HUP INT TERM
     cleanup_external_update_backup
+    show_result "更新完成" "$panel_url" "docker compose -p qcontrolhub --project-directory $WORK_DIR --env-file $ENV_FILE -f $EXTERNAL_COMPOSE_FILE down"
 )
