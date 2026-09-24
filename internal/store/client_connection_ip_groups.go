@@ -15,6 +15,7 @@ import (
 
 type connectionIPCursor struct {
 	Scope     string   `json:"scope"`
+	Rank      int      `json:"rank"`
 	Endpoint  []string `json:"endpoint"`
 	IP        string   `json:"ip"`
 	Inclusive bool     `json:"inclusive,omitempty"`
@@ -33,7 +34,7 @@ func decodeConnectionIPCursor(value string) (connectionIPCursor, error) {
 		return cursor, err
 	}
 	ip, err := netip.ParseAddr(cursor.IP)
-	if err != nil || ip.Zone() != "" || cursor.Scope != "engine_node_ip" || len(cursor.Endpoint) != 3 || !core.Engine(cursor.Endpoint[0]).Valid() {
+	if err != nil || ip.Zone() != "" || cursor.Scope != "node_engine_ip" || cursor.Rank < 1 || len(cursor.Endpoint) != 3 || !core.Engine(cursor.Endpoint[2]).Valid() {
 		return cursor, fmt.Errorf("invalid cursor")
 	}
 	for _, value := range cursor.Endpoint {
@@ -51,7 +52,9 @@ func (cursor connectionIPCursor) encode() string {
 
 func (s *Store) clientConnectionIPRecords(ctx context.Context, tx pgx.Tx, q ClientConnectionQuery, where string, args []any) ([]core.ClientConnectionRecord, string, string, error) {
 	params := append([]any{}, args...)
-	const endpoint = `ARRAY[c.engine,a.name,c.agent_id] COLLATE "C"`
+	params = append(params, q.NodeOrder)
+	rank := fmt.Sprintf(`COALESCE(array_position($%d::text[],c.agent_id),2147483647)`, len(params))
+	const endpoint = `ARRAY[a.name::text,c.agent_id::text,c.engine::text] COLLATE "C"`
 	having := ""
 	if q.Cursor != "" {
 		cursor, err := decodeConnectionIPCursor(q.Cursor)
@@ -62,15 +65,15 @@ func (s *Store) clientConnectionIPRecords(ctx context.Context, tx pgx.Tx, q Clie
 		if cursor.Inclusive {
 			operator = ">="
 		}
-		params = append(params, cursor.Endpoint, cursor.IP)
-		having = fmt.Sprintf(` HAVING (`+endpoint+`,c.client_ip) %s ($%d::text[] COLLATE "C",$%d::inet)`, operator, len(params)-1, len(params))
+		params = append(params, cursor.Rank, cursor.Endpoint, cursor.IP)
+		having = fmt.Sprintf(` HAVING (`+rank+`,`+endpoint+`,c.client_ip) %s ($%d::int,$%d::text[] COLLATE "C",$%d::inet)`, operator, len(params)-2, len(params)-1, len(params))
 	}
 	params = append(params, q.Limit+1)
 	// Apply the cursor to whole IP groups. IP provides a deterministic tie-break
 	// independent of connection arrival times and IDs.
-	rows, err := tx.Query(ctx, `SELECT min(c.id),host(c.client_ip),min(c.first_seen),max(c.last_seen),`+endpoint+`
+	rows, err := tx.Query(ctx, `SELECT min(c.id),host(c.client_ip),min(c.first_seen),max(c.last_seen),`+rank+`,`+endpoint+`
  FROM client_connections c JOIN agents a ON a.id=c.agent_id`+where+`
- GROUP BY c.engine,c.agent_id,a.name,c.client_ip`+having+` ORDER BY `+endpoint+fmt.Sprintf(`,c.client_ip LIMIT $%d`, len(params)), params...)
+ GROUP BY c.engine,c.agent_id,a.name,c.client_ip`+having+` ORDER BY `+rank+`,`+endpoint+fmt.Sprintf(`,c.client_ip LIMIT $%d`, len(params)), params...)
 	if err != nil {
 		return nil, "", "", err
 	}
@@ -79,13 +82,13 @@ func (s *Store) clientConnectionIPRecords(ctx context.Context, tx pgx.Tx, q Clie
 	for rows.Next() {
 		var r core.ClientConnectionRecord
 		var key connectionIPCursor
-		if err := rows.Scan(&r.ID, &r.ClientIP, &r.FirstSeen, &r.LastSeen, &key.Endpoint); err != nil {
+		if err := rows.Scan(&r.ID, &r.ClientIP, &r.FirstSeen, &r.LastSeen, &key.Rank, &key.Endpoint); err != nil {
 			rows.Close()
 			return nil, "", "", err
 		}
 		key.IP = r.ClientIP
-		key.Scope = "engine_node_ip"
-		r.Engine, r.AgentName, r.AgentID = core.Engine(key.Endpoint[0]), key.Endpoint[1], key.Endpoint[2]
+		key.Scope = "node_engine_ip"
+		r.AgentName, r.AgentID, r.Engine = key.Endpoint[0], key.Endpoint[1], core.Engine(key.Endpoint[2])
 		keys = append(keys, key)
 		records = append(records, r)
 	}

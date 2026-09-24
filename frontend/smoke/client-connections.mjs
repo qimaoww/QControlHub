@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { connectionQuery, connectionSourceLabel, connectionSourceDetail, defaultConnectionFilters, connectionLocationLabel } from "../modules/client-connection-model.js";
 import { createClientConnectionView } from "../modules/client-connection-view.js";
 import { installClientConnections } from "../modules/client-connections.js";
+import { setStorageAccount } from "../modules/account-storage.js";
+import { nodeCardOrderKey, saveNodeOrder } from "../modules/node-order.js";
 
 export async function run() {
 // Calendar queries use local midnight and the following midnight, including DST.
@@ -41,6 +43,7 @@ assert.equal(query.get("client_ip"), "2001:db8::1");
 assert.equal(query.has("inbound"), false);
 assert.equal(query.has("port"), false);
 assert.equal(query.get("cursor"), "7");
+assert.deepEqual(connectionQuery(filters, "", ["node-b", "node-a"]).getAll("node_order"), ["node-b", "node-a"]);
 assert.equal(query.has("include_non_public"), false);
 assert.equal(connectionQuery({ ...filters, include_non_public: "true" }, 7).get("include_non_public"), "true");
 assert.throws(() => connectionQuery({ since: "bad", until: "bad" }), /32/);
@@ -84,6 +87,34 @@ for (const expected of ["Node A", "Node B", "8443", "9443", "本页 3 条"]) ass
 const oldDocument = globalThis.document;
 globalThis.document = { querySelector: () => null, querySelectorAll: () => [] };
 try {
+  const oldStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+  const storage = new Map();
+  Object.defineProperty(globalThis, "localStorage", { configurable: true, value: {
+    getItem: key => storage.get(key) ?? null,
+    setItem: (key, value) => storage.set(key, value),
+  } });
+  setStorageAccount({ user_id: "connection-order" });
+  saveNodeOrder(["node-b", "node-a"]);
+  try {
+    const paths = [];
+    const orderedState = { data: {}, navigationEpoch: 1, route: "client-connections" };
+    await installClientConnections({ state: orderedState, esc, engineName: String, date: String, shell: () => {},
+      api: async path => { paths.push(path); return { records: [], sources: [] }; },
+    })();
+    assert.deepEqual(new URL(paths[0], "http://test").searchParams.getAll("node_order"), ["node-b", "node-a"], "IP pagination uses the saved node order");
+    setStorageAccount({ user_id: "connection-order-legacy" });
+    storage.set(nodeCardOrderKey, JSON.stringify(["node-b", "node-a"]));
+    const migratedPaths = [];
+    await installClientConnections({ state: { data: {}, navigationEpoch: 1, route: "client-connections" }, esc, engineName: String, date: String, shell: () => {},
+      api: async path => { migratedPaths.push(path); return { records: [], sources: ["node-a", "node-b"].map(agent_id => ({ agent_id, agent_name: agent_id })) }; },
+    })();
+    assert.equal(migratedPaths.length, 2, "legacy order reruns the query after visible nodes are known");
+    assert.deepEqual(new URL(migratedPaths[1], "http://test").searchParams.getAll("node_order"), ["node-b", "node-a"]);
+  } finally {
+    setStorageAccount(null);
+    if (oldStorage) Object.defineProperty(globalThis, "localStorage", oldStorage);
+    else delete globalThis.localStorage;
+  }
   const state = { data: {}, navigationEpoch: 1, route: "client-connections" };
   let calls = 0, paints = 0, resolve;
   const load = installClientConnections({ state, esc, engineName: value => value, date: value => value, shell: () => paints++, api: () => { calls++; return new Promise(done => { resolve = done; }); } });

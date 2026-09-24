@@ -13,7 +13,7 @@ import (
 func TestClientConnectionsRejectInvalidQueries(t *testing.T) {
 	token := strings.Repeat("a", 48)
 	handler := New(nil, Config{AdminToken: token}).Handler()
-	queries := []string{"group_by=invalid", "group_by=ip&before=1", "group_by=ip&cursor=bad", "cursor=bad", "locations=invalid", "include_non_public=invalid", "timeline=invalid", "limit=201", "port=65536", "port=0", "before=-1", "engine=unknown", "transport=quic", "client_ip=bad", "since=bad", "bucket=week", "since=2026-01-01T00:00:00Z&until=2026-03-01T00:00:00Z"}
+	queries := []string{"group_by=invalid", "group_by=ip&before=1", "group_by=ip&cursor=bad", "cursor=bad", "locations=invalid", "include_non_public=invalid", "timeline=invalid", "limit=201", "port=65536", "port=0", "before=-1", "engine=unknown", "transport=quic", "client_ip=bad", "node_order=", "since=bad", "bucket=week", "since=2026-01-01T00:00:00Z&until=2026-03-01T00:00:00Z"}
 	for _, payload := range []string{`null`, `{}`, `{"scope":"engine_node_ip","endpoint":["xray"],"ip":"8.8.8.8"}`, `{"scope":"engine_node_ip","endpoint":["xray","A","agt_test"],"ip":"bad"}`, `{"endpoint":["xray","A","agt_test"],"ip":"8.8.8.8"}`, `{"scope":"engine_node_ip","endpoint":["xray","bad\u0000","agt_test"],"ip":"8.8.8.8"}`} {
 		queries = append(queries, "group_by=ip&cursor="+base64.RawURLEncoding.EncodeToString([]byte(payload)))
 	}
@@ -34,6 +34,10 @@ func TestClientConnectionsRejectInvalidQueries(t *testing.T) {
 }
 
 func TestClientConnectionsAcceptCalendarMonths(t *testing.T) {
+	ordered, err := parseClientConnectionQuery(url.Values{"node_order": {"node-b", "node-a"}, "group_by": {"ip"}}, time.Now())
+	if err != nil || len(ordered.NodeOrder) != 2 || ordered.NodeOrder[0] != "node-b" || ordered.NodeOrder[1] != "node-a" {
+		t.Fatalf("node order query: %+v %v", ordered, err)
+	}
 	for _, bounds := range [][2]string{
 		{"2026-01-01T00:00:00+08:00", "2026-02-01T00:00:00+08:00"},
 		{"2026-10-01T00:00:00+02:00", "2026-11-01T00:00:00+01:00"},

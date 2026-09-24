@@ -108,6 +108,7 @@ export async function run() {
     scoped.set(connectionQuery(filters).toString(), result);
     assert.equal(scoped.preview(connectionQuery({ ...filters, date: "2026-09-19" })), null, "different time windows never share preview data");
     assert.equal(scoped.preview(connectionQuery({ ...filters, include_non_public: "true" })), null, "source ranges never share preview data");
+    assert.equal(scoped.preview(connectionQuery(filters, "", ["bravo", "alpha"])), null, "a different node order cannot reuse a page preview");
     console.log("Connection query cache, pagination, refresh and account isolation passed");
   } finally { globalThis.document = originalDocument; Date.now = originalNow; }
 }
