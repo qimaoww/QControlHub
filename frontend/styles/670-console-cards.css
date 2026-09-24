@@ -1,25 +1,48 @@
-/* The node overview is the visual baseline. Scope the shared card treatment to
-   the four requested peer routes; the node cards already provide that baseline. */
-:is(.page-traffic,.page-system-bbr,.page-substore-sync,.page-client-access) {
+/* The five requested pages use one card width as well as one card treatment. */
+:is(.page-node-settings,.page-traffic,.page-system-bbr,.page-substore-sync,.page-client-access) {
   --console-card-radius:13px;
   --console-card-gap:12px;
-  --console-card-min:360px;
+  --console-card-width:390px;
   --console-card-padding:12px 14px;
 }
 
+/* Keep the full-width controls aligned with the fixed card columns. */
+.page-traffic .traffic-workspace,
+.page-system-bbr .bbr-workspace,
+.page-substore-sync .substore-workspace,
+.page-client-access .client-access-workspace {
+  width:100%;
+  max-width:1194px;
+  min-width:0;
+  margin-inline:auto;
+}
+.page-system-bbr .bbr-workspace,
+.page-client-access .client-access-workspace { gap:var(--console-card-gap); }
+
+.page-node-settings .node-card-grid,
 .page-traffic .traffic-policy-grid,
 .page-system-bbr .bbr-grid,
 .page-substore-sync .substore-agent-grid,
 .page-client-access .client-access-node-grid:not(.empty) {
-  grid-template-columns:repeat(auto-fill,minmax(min(100%,var(--console-card-min)),1fr));
+  grid-template-columns:repeat(auto-fill,minmax(min(100%,var(--console-card-width)),var(--console-card-width)));
+  justify-content:start;
   gap:var(--console-card-gap);
 }
+.page-traffic .traffic-policy-grid,
+.page-system-bbr .bbr-grid,
+.page-substore-sync .substore-agent-grid,
+.page-client-access .client-access-node-grid:not(.empty) { justify-content:center; }
 
 /* Client and Sub-Store rows align to the node grid instead of using masonry. */
 .page-substore-sync .substore-agent-grid,
 .page-client-access .client-access-node-grid:not(.empty) {
   grid-auto-rows:auto;
 }
+.page-client-access .client-access-node-grid {
+  min-width:0;
+  width:100%;
+}
+.page-client-access .client-access-workspace { grid-template-columns:minmax(0,1fr); }
 
 .page-traffic .traffic-policy-card,
 .page-system-bbr .bbr-card,
@@ -32,6 +55,18 @@
   background:var(--surface);
   box-shadow:var(--shadow);
   overflow:hidden;
+}
+
+/* The page-level control panels are cards in these layouts as well. */
+.page-traffic .traffic-control-panel,
+.page-substore-sync .substore-status-bar,
+.page-substore-sync .substore-target-bar,
+.page-substore-sync .substore-filter-bar,
+.page-client-access .client-access-toolbar {
+  border:1px solid var(--line);
+  border-radius:var(--console-card-radius);
+  background:var(--surface);
+  box-shadow:var(--shadow);
 }
 
 .page-traffic .traffic-policy-card>header,
@@ -74,6 +109,41 @@
   border-radius:10px;
 }
 .page-substore-sync .substore-agent-card { container:substore-card / inline-size; }
+
+/* Node cards use a bordered inset for the first block of detail. Give each
+   peer card the same clear frame without changing its controls or status. */
+.page-traffic .traffic-card-quota,
+.page-system-bbr .bbr-primary-values,
+.page-substore-sync .substore-node-row,
+.page-client-access .client-access-engine-group {
+  border:1px solid var(--line);
+  border-radius:8px;
+  background:var(--surface-2);
+}
+.page-traffic .traffic-card-quota {
+  margin:12px 14px;
+  padding:12px;
+}
+.page-system-bbr .bbr-primary-values {
+  gap:0;
+  margin:12px 14px;
+  padding:0;
+  overflow:hidden;
+}
+.page-system-bbr .bbr-primary-values>div {
+  min-width:0;
+  padding:10px 12px;
+}
+.page-system-bbr .bbr-primary-values>div+div { border-left:1px solid var(--line); }
+.page-substore-sync .substore-node-row {
+  margin:10px 12px;
+}
+.page-substore-sync .substore-node-row+.substore-node-row { border-top:1px solid var(--line); }
+.page-client-access .client-access-engine-group {
+  margin:10px 12px;
+  overflow:hidden;
+}
+.page-client-access .client-access-engine-group+.client-access-engine-group { border-top:1px solid var(--line); }
 @container substore-card (max-width:490px) {
   .substore-node-row { grid-template-columns:24px auto minmax(0,1fr) auto; }
   .substore-node-name,.substore-node-preview { grid-column:2/5; }
@@ -81,10 +151,23 @@
 }
 
 @media(max-width:600px) {
+  .page-node-settings .node-card-grid,
   .page-traffic .traffic-policy-grid,
   .page-system-bbr .bbr-grid,
   .page-substore-sync .substore-agent-grid,
   .page-client-access .client-access-node-grid:not(.empty) {
     grid-template-columns:minmax(0,1fr);
+  }
+}
+
+@media(min-width:601px) and (max-width:1553px) {
+  .page-traffic .traffic-workspace,
+  .page-system-bbr .bbr-workspace,
+  .page-substore-sync .substore-workspace,
+  .page-client-access .client-access-workspace { max-width:792px; }
+  .page-traffic .traffic-control-panel { grid-template-columns:minmax(0,1fr); }
+  .page-traffic .traffic-control-panel>.traffic-total {
+    border-top:1px solid var(--line);
+    border-left:0;
   }
 }
