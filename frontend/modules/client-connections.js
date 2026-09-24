@@ -69,7 +69,7 @@ export function installClientConnections(ctx) {
         paint();
       }
       // Location lookup never holds up the history, filters or pagination.
-      if (!locationsAttempted && result.records?.some(row => !row.location?.non_public && !row.location?.country_code)) {
+      if (!locationsAttempted && result.records?.some(row => !row.location?.non_public && (!row.location?.country_code || row.location.country_code === "CN" && !row.location.province))) {
         const locationQuery = new URLSearchParams(query);
         // Pin enrichment to the same engine/node/IP position as the visible page.
         if (result.page_cursor) locationQuery.set("cursor", result.page_cursor);

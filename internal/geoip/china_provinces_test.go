@@ -31,6 +31,8 @@ func TestLookupIncludesProvinceOnlyForChina(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(test.body)) }))
 		client := New(server.Client())
 		client.endpoint = server.URL
+		client.ipWhoEndpoint = ""
+		client.freeIPAPIEndpoint = ""
 		region, err := client.Lookup(context.Background(), netip.MustParseAddr("8.8.8.8"))
 		server.Close()
 		if err != nil || region.ISOCode != test.code || region.Province != test.province {

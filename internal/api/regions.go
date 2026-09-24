@@ -58,7 +58,7 @@ func (s *Server) getAgentRegion(w http.ResponseWriter, request *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{})
 		return
 	}
-	region, err := s.geoip.Lookup(request.Context(), address)
+	region, err := s.geoip.LookupCountry(request.Context(), address)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
@@ -134,7 +134,7 @@ func (s *Server) resolveAgentRegions(request *http.Request, agents []core.Agent)
 		if !address.IsValid() {
 			continue
 		}
-		region, err := s.geoip.Lookup(request.Context(), address)
+		region, err := s.geoip.LookupCountry(request.Context(), address)
 		if err != nil {
 			continue
 		}
