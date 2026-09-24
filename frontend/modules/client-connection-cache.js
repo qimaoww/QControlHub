@@ -33,7 +33,7 @@ export function createConnectionCache({ now = Date.now, ttl = 30_000, retention 
       if (query.has("cursor")) return null;
       for (const [key, entry] of [...entries].reverse()) {
         const scope = new URLSearchParams(key);
-        if (scope.has("cursor") || ["since", "until", "include_non_public", "group_by"].some(name => scope.get(name) !== query.get(name))) continue;
+        if (scope.has("cursor") || ["since", "until", "include_non_public", "group_by"].some(name => scope.get(name) !== query.get(name)) || JSON.stringify(scope.getAll("node_order")) !== JSON.stringify(query.getAll("node_order"))) continue;
         if (["agent_id", "engine", "client_ip"].some(name => scope.get(name) && scope.get(name) !== query.get(name))) continue;
         const records = entry.result.records.filter(row => (!query.get("agent_id") || row.agent_id === query.get("agent_id")) && (!query.get("engine") || row.engine === query.get("engine")) && (!query.get("client_ip") || row.client_ip === query.get("client_ip")));
         if (!records.length) continue;

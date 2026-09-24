@@ -9,7 +9,7 @@ export function defaultConnectionFilters(now = Date.now()) {
   return { period: "day", date: connectionDateInput(now).slice(0, 10), include_non_public: "" };
 }
 
-export function connectionQuery(filters, cursor = "") {
+export function connectionQuery(filters, cursor = "", nodeOrder = []) {
   // This page has no timeline chart. Avoid a second distinct aggregate over
   // the same history range while preserving the API default for other callers.
   const params = new URLSearchParams({ group_by: "ip", timeline: "false" });
@@ -40,6 +40,7 @@ export function connectionQuery(filters, cursor = "") {
   params.set("since", since.toISOString());
   params.set("until", until.toISOString());
   if (cursor) params.set("cursor", cursor);
+  for (const id of nodeOrder) params.append("node_order", id);
   return params;
 }
 

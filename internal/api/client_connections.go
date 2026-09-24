@@ -20,6 +20,7 @@ func parseClientConnectionQuery(values url.Values, now time.Time) (store.ClientC
 		q.GroupByIP = true
 	}
 	q.Cursor = values.Get("cursor")
+	q.NodeOrder = values["node_order"]
 	if value := values.Get("include_non_public"); value != "" {
 		parsed, err := strconv.ParseBool(value)
 		if err != nil {

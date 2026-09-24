@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/netip"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -25,6 +26,7 @@ type ClientConnectionQuery struct {
 	Inbound          string
 	Transport        string
 	ClientIP         string
+	NodeOrder        []string
 	Port             int
 	Since            time.Time
 	Until            time.Time
@@ -35,6 +37,14 @@ type ClientConnectionQuery struct {
 }
 
 func (q ClientConnectionQuery) Validate() error {
+	if len(q.NodeOrder) > 500 {
+		return fmt.Errorf("%w: too many ordered nodes", ErrInvalid)
+	}
+	for _, id := range q.NodeOrder {
+		if len(id) == 0 || len(id) > 100 || strings.ContainsRune(id, '\x00') {
+			return fmt.Errorf("%w: invalid ordered node", ErrInvalid)
+		}
+	}
 	if q.Cursor != "" {
 		if _, err := decodeConnectionIPCursor(q.Cursor); err != nil || !q.GroupByIP {
 			return fmt.Errorf("%w: invalid connection cursor", ErrInvalid)

@@ -8,7 +8,7 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
-func TestClientConnectionIPGroupingEngineNodeOrder(t *testing.T) {
+func TestClientConnectionIPGroupingNodeEngineOrder(t *testing.T) {
 	db, ctx, _ := isolatedConfigScopeStore(t)
 	alpha, zulu := sharedTestAgent(t, db, ctx), sharedTestAgent(t, db, ctx)
 	for name, id := range map[string]string{"Alpha": alpha.ID, "Zulu": zulu.ID} {
@@ -77,9 +77,20 @@ func TestClientConnectionIPGroupingEngineNodeOrder(t *testing.T) {
 		}
 		q.Cursor = page.NextCursor
 	}
-	expected := []string{"2.2.2.2", "1.1.1.1", "9.9.9.9", "4.4.4.4", "1.1.1.1", "8.8.8.2", "8.8.8.10", "8.8.4.4"}
+	expected := []string{"2.2.2.2", "4.4.4.4", "1.1.1.1", "8.8.8.2", "8.8.8.10", "1.1.1.1", "9.9.9.9", "8.8.4.4"}
 	if !reflect.DeepEqual(actual, expected) {
 		t.Fatalf("order=%v want=%v", actual, expected)
+	}
+	q.Cursor = ""
+	q.NodeOrder = []string{zulu.ID, alpha.ID}
+	custom, err := db.ClientConnectionHistory(ctx, q)
+	if err != nil || len(custom.Records) != 2 || custom.Records[0].AgentID != zulu.ID || custom.Records[1].AgentID != zulu.ID {
+		t.Fatalf("custom order=%+v err=%v", custom, err)
+	}
+	q.Cursor = custom.NextCursor
+	customNext, err := db.ClientConnectionHistory(ctx, q)
+	if err != nil || len(customNext.Records) != 2 || customNext.Records[0].AgentID != zulu.ID || customNext.Records[1].AgentID != alpha.ID {
+		t.Fatalf("custom next page=%+v err=%v", customNext, err)
 	}
 	q.Cursor, q.AgentID, q.Engine = "", alpha.ID, core.EngineXray
 	filtered, err := db.ClientConnectionHistory(ctx, q)
