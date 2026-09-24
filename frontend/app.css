@@ -1670,75 +1670,34 @@ dialog.config-access-dialog::backdrop{background:rgba(17,20,36,.34);backdrop-fil
 .page-agents .workspace-main>[data-spa-notice]{grid-template-columns:minmax(0,1fr) 44px;gap:8px;padding:10px 12px}
 .page-agents .notice-icon{display:none}
  .page-agents .notice-close{width:44px;min-height:44px}
-/* Match the node overview's card frame while keeping Sub-Store's compact flow. */
-.page-substore-sync {
-  --substore-card-radius:13px;
-  --substore-card-gap:12px;
-  --substore-card-min:360px;
-}
-
+/* Keep three balanced columns and the original open rows; refine card headers. */
 .page-substore-sync .substore-agent-grid {
-  grid-template-columns:repeat(auto-fill,minmax(min(100%,var(--substore-card-min)),1fr));
-  gap:var(--substore-card-gap);
+  grid-template-columns:repeat(3,minmax(0,1fr));
 }
 
-.page-substore-sync .substore-agent-card {
-  width:100%;
-  min-width:0;
-  border:1px solid var(--line);
-  border-radius:var(--substore-card-radius);
-  background:var(--surface);
-  box-shadow:var(--shadow);
-  overflow:hidden;
-}
-
+.page-substore-sync .substore-agent-card,
 .page-substore-sync .substore-status-bar,
-.page-substore-sync .substore-target-bar,
-.page-substore-sync .substore-filter-bar {
-  border:1px solid var(--line);
-  border-radius:var(--substore-card-radius);
-  background:var(--surface);
-  box-shadow:var(--shadow);
+.page-substore-sync .substore-target-bar {
+  border-radius:14px;
 }
 
 .page-substore-sync .substore-agent-card>header {
-  min-height:63px;
-  grid-template-columns:38px minmax(0,1fr) auto;
-  align-items:center;
-  gap:9px;
-  padding:12px 14px;
-  border-bottom:1px solid var(--line);
-  background:var(--surface);
+  min-height:62px;
+  grid-template-columns:36px minmax(0,1fr) auto;
+  padding:11px 14px;
 }
 .page-substore-sync .substore-agent-card>header>.node-avatar {
-  width:38px;
-  height:38px;
-  border-radius:10px;
+  width:36px;
+  height:36px;
 }
 .page-substore-sync .substore-agent-card>header strong {
-  color:var(--ink);
-  font-size:calc(13px * var(--ui-font-scale));
-  font-weight:750;
-  letter-spacing:0;
-  overflow-wrap:anywhere;
+  font-size:calc(12px * var(--ui-font-scale));
+  font-weight:700;
 }
 
-.page-substore-sync .substore-node-row {
-  margin:10px 12px;
-  border:1px solid var(--line);
-  border-radius:8px;
-  background:var(--surface-2);
+@media(max-width:1499px) {
+  .page-substore-sync .substore-agent-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
 }
-.page-substore-sync .substore-node-row+.substore-node-row { border-top:1px solid var(--line); }
-
-@container substore-card (max-width:490px) {
-  .page-substore-sync .substore-node-row { grid-template-columns:24px auto minmax(0,1fr) auto; }
-  .page-substore-sync .substore-node-name,
-  .page-substore-sync .substore-node-preview { grid-column:2/5; }
-  .page-substore-sync .substore-node-row>.button,
-  .page-substore-sync .substore-remove { grid-column:4; }
-}
-
-@media(max-width:600px) {
+@media(max-width:950px) {
   .page-substore-sync .substore-agent-grid { grid-template-columns:minmax(0,1fr); }
 }
