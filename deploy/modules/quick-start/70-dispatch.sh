@@ -42,7 +42,8 @@ fi
 case "$MODE" in
     bundled)
         if [ "$ACTION" = "update" ]; then
-            echo "-> 更新内置 PostgreSQL 部署并复用现有配置"
+            ui_heading "更新检查"
+            ui_text 2 "  更新内置 PostgreSQL 部署并复用现有配置"
             [ -f "$ENV_FILE" ] || die "未找到现有部署配置：$ENV_FILE"
             resolve_bundled_image_refs
             current_control_image="$(current_update_image_id control-plane)" || die "无法读取 control-plane 当前镜像"
@@ -50,12 +51,12 @@ case "$MODE" in
             current_postgres_image="$(current_update_image_id postgres)" || die "无法读取 PostgreSQL 当前镜像"
             show_current_application_versions "$current_control_image" "$current_web_image"
             current_postgres_version="$(update_image_version "$current_postgres_image")" || die "无法读取 PostgreSQL 当前版本"
-            echo "-> PostgreSQL 当前版本：$current_postgres_version"
-            echo "-> 目标标签：control-plane ${BUNDLED_CONTROL_IMAGE_REF##*:}，qcontrol-web ${BUNDLED_WEB_IMAGE_REF##*:}，PostgreSQL ${BUNDLED_POSTGRES_IMAGE_REF##*:}"
+            ui_service_row PostgreSQL "当前版本：$current_postgres_version"
+            show_update_targets "$BUNDLED_CONTROL_IMAGE_REF" "$BUNDLED_WEB_IMAGE_REF" "$BUNDLED_POSTGRES_IMAGE_REF"
             if [ "$BUNDLED_CONTROL_IMAGE_REF" = "ghcr.io/qimaoww/qcontrol-plane:local" ]; then
                 echo "-> 本地构建模式无法检查远程镜像版本，将重新构建"
             else
-                echo "-> 正在检查更新（拉取目标镜像）..."
+                ui_section "正在检查更新（拉取目标镜像）..."
                 docker pull "$BUNDLED_CONTROL_IMAGE_REF" || die "拉取 $BUNDLED_CONTROL_IMAGE_REF 失败"
                 docker pull "$BUNDLED_WEB_IMAGE_REF" || die "拉取 $BUNDLED_WEB_IMAGE_REF 失败"
                 docker pull "$BUNDLED_POSTGRES_IMAGE_REF" || die "拉取 $BUNDLED_POSTGRES_IMAGE_REF 失败"
@@ -68,10 +69,10 @@ case "$MODE" in
                     die "无法读取 PostgreSQL 目标镜像"
                 [ -n "$target_postgres_image" ] || die "PostgreSQL 目标镜像 ID 为空"
                 target_postgres_version="$(update_image_version "$target_postgres_image")" || die "无法读取 PostgreSQL 目标版本"
-                echo "-> PostgreSQL 目标版本：$target_postgres_version"
+                show_target_image_version PostgreSQL "$current_postgres_image" "$target_postgres_image" "$target_postgres_version"
                 if [ "$app_changed" = false ] && [ "$current_postgres_image" = "$target_postgres_image" ]; then
                     if [ "$FORCE" = false ]; then
-                        echo "-> 当前镜像与目标版本一致，无需更新"
+                        show_no_update_result
                         exit 0
                     fi
                     echo "-> 镜像无变化，继续执行 -f 指定的密钥轮换"
@@ -103,7 +104,8 @@ case "$MODE" in
         ;;
     external)
         if [ "$ACTION" = "update" ]; then
-            echo "-> 更新外部 PostgreSQL 部署并复用现有配置"
+            ui_heading "更新检查"
+            ui_text 2 "  更新外部 PostgreSQL 部署并复用现有配置"
             [ -z "$DATABASE_URL" ] || die "更新禁止使用 -d；QCH_DATABASE_URL 必须原样复用"
             [ -z "$ADMIN_TOKEN" ] || die "更新禁止使用 -a；管理员令牌不得轮换"
             [ -z "$DOCKER_NETWORK" ] || die "更新禁止使用 -n；Docker 网络配置必须原样复用"

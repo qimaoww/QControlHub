@@ -50,7 +50,30 @@ show_current_application_versions() {
     local control_version web_version
     control_version="$(update_image_version "$1")" || die "无法读取 control-plane 当前版本"
     web_version="$(update_image_version "$2")" || die "无法读取 qcontrol-web 当前版本"
-    echo "-> 当前版本：control-plane $control_version，qcontrol-web $web_version"
+    ui_section "当前运行版本"
+    ui_service_row control-plane "当前版本：$control_version"
+    ui_service_row qcontrol-web "当前版本：$web_version"
+}
+
+show_update_targets() {
+    ui_section "目标镜像"
+    ui_service_row control-plane "目标标签：${1##*:}"
+    ui_service_row qcontrol-web "目标标签：${2##*:}"
+    if [ -n "${3:-}" ]; then
+        ui_service_row PostgreSQL "目标标签：${3##*:}"
+    fi
+}
+
+show_target_image_version() {
+    local service="$1" current="$2" target="$3" version="$4" status
+    if [ -z "$current" ]; then
+        status="待启动"
+    elif [ "$current" = "$target" ]; then
+        status="无变化"
+    else
+        status="有更新"
+    fi
+    ui_service_row "$service" "目标版本：$version [$status]"
 }
 
 application_update_available() {
@@ -62,7 +85,9 @@ application_update_available() {
     local target_control_version target_web_version
     target_control_version="$(update_image_version "$target_control")" || die "无法读取 control-plane 目标版本"
     target_web_version="$(update_image_version "$target_web")" || die "无法读取 qcontrol-web 目标版本"
-    echo "-> 目标版本：control-plane $target_control_version，qcontrol-web $target_web_version"
+    ui_section "镜像对比结果"
+    show_target_image_version control-plane "$current_control" "$target_control" "$target_control_version"
+    show_target_image_version qcontrol-web "$current_web" "$target_web" "$target_web_version"
     [ "$current_control" != "$target_control" ] || [ "$current_web" != "$target_web" ]
 }
 
@@ -229,14 +254,14 @@ update_external_services() (
     begin_external_update
 
     show_current_application_versions "$UPDATE_CONTROL_IMAGE" "$UPDATE_WEB_IMAGE"
-    echo "-> 目标标签：control-plane latest，qcontrol-web latest"
-    echo "-> 正在检查更新（拉取目标镜像）..."
+    show_update_targets ghcr.io/qimaoww/qcontrol-plane:latest ghcr.io/qimaoww/qcontrol-web:latest
+    ui_section "正在检查更新（拉取目标镜像）..."
     docker pull ghcr.io/qimaoww/qcontrol-plane:latest || die "拉取 control-plane:latest 失败"
     docker pull ghcr.io/qimaoww/qcontrol-web:latest || die "拉取 qcontrol-web:latest 失败"
     if ! application_update_available \
         ghcr.io/qimaoww/qcontrol-plane:latest ghcr.io/qimaoww/qcontrol-web:latest \
         "$UPDATE_CONTROL_IMAGE" "$UPDATE_WEB_IMAGE"; then
-        echo "-> 当前镜像与目标版本一致，无需更新"
+        show_no_update_result
         UPDATE_ROLLBACK_ARMED=false
         trap - EXIT HUP INT TERM
         cleanup_external_update_backup

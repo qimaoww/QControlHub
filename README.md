@@ -73,6 +73,15 @@ Agent 以高权限 root 服务运行，远程任务会真实修改配置、服�
 
 ## 开发与验证
 
+无需 Docker 即可在本地预览部署脚本的菜单、更新检查和完成页面；输出使用示例数据，不执行部署或修改配置：
+
+~~~bash
+bash scripts/preview-quick-start.sh all
+COLUMNS=40 NO_COLOR=1 bash scripts/preview-quick-start.sh update
+~~~
+
+省略参数只显示管理菜单，也可指定 menu、mode、update、unchanged 或 result。终端输出支持颜色，重定向日志、TERM=dumb 或设置非空 NO_COLOR 时自动使用纯文本。
+
 | 命令 | 用途 |
 | --- | --- |
 | `make build` | 构建 `bin/qcontrol-plane` 和 `bin/qagent` |

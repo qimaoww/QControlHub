@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export COLUMNS=72
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 test_root="$(mktemp -d "${TMPDIR:-/tmp}/qcontrolhub-quick-start-modes.XXXXXX")"
@@ -131,7 +132,9 @@ grep -Fq 'pull postgres:17-alpine' "$QCH_MODES_TEST_LOG"
 # A pinned tag is a comparison target, not a claim about the latest release.
 : > "$QCH_MODES_TEST_LOG"
 QCH_IMAGE_TAG=release-test bash "$repo_root/deploy/quick-start.sh" -o update > "$test_root/bundled-pinned-no-update.out"
-grep -Fq '目标标签：control-plane release-test，qcontrol-web release-test，PostgreSQL 17-alpine' "$test_root/bundled-pinned-no-update.out"
+grep -Eq 'control-plane[[:space:]]+目标标签：release-test' "$test_root/bundled-pinned-no-update.out"
+grep -Eq 'qcontrol-web[[:space:]]+目标标签：release-test' "$test_root/bundled-pinned-no-update.out"
+grep -Eq 'PostgreSQL[[:space:]]+目标标签：17-alpine' "$test_root/bundled-pinned-no-update.out"
 grep -Fq '当前镜像与目标版本一致，无需更新' "$test_root/bundled-pinned-no-update.out"
 if grep -Fq '已是最新版本' "$test_root/bundled-pinned-no-update.out" || grep -Fq ' up -d' "$QCH_MODES_TEST_LOG"; then
     printf '%s\n' 'pinned bundled no-op reported latest or recreated containers' >&2
@@ -144,8 +147,9 @@ if QCH_MODES_FAIL_PULL=true bash "$repo_root/deploy/quick-start.sh" -o update > 
     printf '%s\n' 'bundled update ignored a failed image pull' >&2
     exit 1
 fi
-grep -Fq '当前版本：control-plane old-control-version，qcontrol-web old-web-version' "$test_root/bundled-pull-failure.out"
-grep -Fq 'PostgreSQL 当前版本：old-postgres-version' "$test_root/bundled-pull-failure.out"
+grep -Eq 'control-plane[[:space:]]+当前版本：old-control-version' "$test_root/bundled-pull-failure.out"
+grep -Eq 'qcontrol-web[[:space:]]+当前版本：old-web-version' "$test_root/bundled-pull-failure.out"
+grep -Eq 'PostgreSQL[[:space:]]+当前版本：old-postgres-version' "$test_root/bundled-pull-failure.out"
 grep -Fq '正在检查更新（拉取目标镜像）' "$test_root/bundled-pull-failure.out"
 if grep -Eq '目标版本：|无需更新' "$test_root/bundled-pull-failure.out" || grep -Fq ' up -d' "$QCH_MODES_TEST_LOG"; then
     printf '%s\n' 'failed bundled check reported a result or recreated containers' >&2
@@ -183,10 +187,12 @@ export QCH_MODES_TARGET_POSTGRES_ID=sha256:new-postgres
 export QCH_MODES_TARGET_POSTGRES_VERSION=new-postgres-version
 : > "$QCH_MODES_TEST_LOG"
 bash "$repo_root/deploy/quick-start.sh" -o update > "$test_root/bundled-postgres-only.out"
-grep -Fq '当前版本：control-plane old-control-version，qcontrol-web old-web-version' "$test_root/bundled-postgres-only.out"
-grep -Fq '目标版本：control-plane old-control-version，qcontrol-web old-web-version' "$test_root/bundled-postgres-only.out"
-grep -Fq 'PostgreSQL 当前版本：old-postgres-version' "$test_root/bundled-postgres-only.out"
-grep -Fq 'PostgreSQL 目标版本：new-postgres-version' "$test_root/bundled-postgres-only.out"
+grep -Eq 'control-plane[[:space:]]+当前版本：old-control-version' "$test_root/bundled-postgres-only.out"
+grep -Eq 'qcontrol-web[[:space:]]+当前版本：old-web-version' "$test_root/bundled-postgres-only.out"
+grep -Eq 'control-plane[[:space:]]+目标版本：old-control-version' "$test_root/bundled-postgres-only.out"
+grep -Eq 'qcontrol-web[[:space:]]+目标版本：old-web-version' "$test_root/bundled-postgres-only.out"
+grep -Eq 'PostgreSQL[[:space:]]+当前版本：old-postgres-version' "$test_root/bundled-postgres-only.out"
+grep -Eq 'PostgreSQL[[:space:]]+目标版本：new-postgres-version' "$test_root/bundled-postgres-only.out"
 grep -Fq '更新完成' "$test_root/bundled-postgres-only.out"
 grep -Fq 'pull postgres:17-alpine' "$QCH_MODES_TEST_LOG"
 grep -Fq ' up -d --no-build --pull never' "$QCH_MODES_TEST_LOG"

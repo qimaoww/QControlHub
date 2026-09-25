@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export COLUMNS=72
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 test_root="$(mktemp -d "${TMPDIR:-/tmp}/qcontrolhub-quick-start-update.XXXXXX")"
@@ -153,7 +154,8 @@ update_external_services > "$test_root/no-update.out"
 cmp "$test_root/expected.env" "$ENV_FILE"
 cmp "$test_root/expected-compose.yml" "$EXTERNAL_COMPOSE_FILE"
 grep -Fq '当前镜像与目标版本一致，无需更新' "$test_root/no-update.out"
-grep -Fq '目标标签：control-plane latest，qcontrol-web latest' "$test_root/no-update.out"
+grep -Eq 'control-plane[[:space:]]+目标标签：latest' "$test_root/no-update.out"
+grep -Eq 'qcontrol-web[[:space:]]+目标标签：latest' "$test_root/no-update.out"
 if grep -Fq 'up -d --force-recreate' "$QCH_UPDATE_DOCKER_LOG"; then
     printf '%s\n' 'quick-start update regression: unchanged images recreated containers' >&2
     exit 1
@@ -261,8 +263,10 @@ if (update_external_services) >"$test_root/pull-failure.out" 2>&1; then
     printf '%s\n' 'quick-start update regression: simulated pull failure succeeded' >&2
     exit 1
 fi
-grep -Fq '当前版本：control-plane old-control-version，qcontrol-web old-web-version' "$test_root/pull-failure.out"
-grep -Fq '目标标签：control-plane latest，qcontrol-web latest' "$test_root/pull-failure.out"
+grep -Eq 'control-plane[[:space:]]+当前版本：old-control-version' "$test_root/pull-failure.out"
+grep -Eq 'qcontrol-web[[:space:]]+当前版本：old-web-version' "$test_root/pull-failure.out"
+grep -Eq 'control-plane[[:space:]]+目标标签：latest' "$test_root/pull-failure.out"
+grep -Eq 'qcontrol-web[[:space:]]+目标标签：latest' "$test_root/pull-failure.out"
 grep -Fq '正在检查更新（拉取目标镜像）' "$test_root/pull-failure.out"
 if grep -Eq '目标版本：|无需更新' "$test_root/pull-failure.out"; then
     printf '%s\n' 'failed external check reported a version comparison result' >&2

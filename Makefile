@@ -89,6 +89,7 @@ agent-redeploy-test:
 	sh deploy/tests/install-agent-redeploy.sh
 
 quick-start-test:
+	bash deploy/tests/quick-start-ui.sh
 	bash deploy/tests/quick-start-ready.sh
 	bash deploy/tests/quick-start-env.sh
 	bash deploy/tests/quick-start-bootstrap.sh
