@@ -108,7 +108,8 @@ docker() {
                 *) printf '%s\n' "${QCH_UPDATE_TARGET_WEB_ID:-sha256:new-web}" ;;
             esac
             ;;
-        *" pull ghcr.io/qimaoww/qcontrol-web:latest "*) [ "${QCH_UPDATE_FAIL_PULL:-false}" = false ] ;;
+        *" pull ghcr.io/qimaoww/qcontrol-plane:latest "*|*" pull ghcr.io/qimaoww/qcontrol-web:latest "*)
+            [ "${QCH_UPDATE_FAIL_PULL:-false}" = false ] ;;
         *" compose "*" up -d --force-recreate "*)
             case " $* " in
                 *"docker-compose.rollback.yml"*)
@@ -151,7 +152,8 @@ write_fixture
 update_external_services > "$test_root/no-update.out"
 cmp "$test_root/expected.env" "$ENV_FILE"
 cmp "$test_root/expected-compose.yml" "$EXTERNAL_COMPOSE_FILE"
-grep -Fq '已是最新版本，无需更新' "$test_root/no-update.out"
+grep -Fq '当前镜像与目标版本一致，无需更新' "$test_root/no-update.out"
+grep -Fq '目标标签：control-plane latest，qcontrol-web latest' "$test_root/no-update.out"
 if grep -Fq 'up -d --force-recreate' "$QCH_UPDATE_DOCKER_LOG"; then
     printf '%s\n' 'quick-start update regression: unchanged images recreated containers' >&2
     exit 1
@@ -257,6 +259,13 @@ export QCH_UPDATE_FAIL_PULL=true
 write_fixture
 if (update_external_services) >"$test_root/pull-failure.out" 2>&1; then
     printf '%s\n' 'quick-start update regression: simulated pull failure succeeded' >&2
+    exit 1
+fi
+grep -Fq '当前版本：control-plane old-control-version，qcontrol-web old-web-version' "$test_root/pull-failure.out"
+grep -Fq '目标标签：control-plane latest，qcontrol-web latest' "$test_root/pull-failure.out"
+grep -Fq '正在检查更新（拉取目标镜像）' "$test_root/pull-failure.out"
+if grep -Eq '目标版本：|无需更新' "$test_root/pull-failure.out"; then
+    printf '%s\n' 'failed external check reported a version comparison result' >&2
     exit 1
 fi
 cmp -s "$test_root/expected.env" "$ENV_FILE"
