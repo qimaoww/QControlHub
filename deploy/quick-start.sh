@@ -1499,7 +1499,7 @@ show_result() {
     ui_heading "$result_name"
     ui_section "访问面板"
     ui_text '1;32' "  $url"
-    ui_text 2 "  管理员 token：请使用密码管理器中保存的原文"
+    ui_text 2 "  登录方式：用户名 + 密码 / 管理令牌"
     ui_section "部署文件"
     ui_detail "配置文件" "$ENV_FILE"
     if [ -d "$SECRET_DIR" ]; then
