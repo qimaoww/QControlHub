@@ -30,6 +30,9 @@ func (manager *TrafficManager) setUnavailableLocked(err error) error {
 			seen[engine] = true
 			haltContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			haltErr := manager.haltShared(haltContext, engine)
+			if manager.haltLegacyShared != nil {
+				haltErr = errors.Join(haltErr, manager.haltLegacyShared(haltContext, engine, manager.sharedPortsForEngine(engine)))
+			}
 			cancel()
 			if haltErr != nil {
 				err = errors.Join(err, haltErr)
@@ -42,6 +45,9 @@ func (manager *TrafficManager) setUnavailableLocked(err error) error {
 			seen[record.Policy.Engine] = true
 			haltContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			haltErr := manager.haltShared(haltContext, record.Policy.Engine)
+			if manager.haltLegacyShared != nil {
+				haltErr = errors.Join(haltErr, manager.haltLegacyShared(haltContext, record.Policy.Engine, manager.sharedPortsForEngine(record.Policy.Engine)))
+			}
 			cancel()
 			if haltErr != nil {
 				err = errors.Join(err, fmt.Errorf("stop unmetered shared core: %w", haltErr))
@@ -83,7 +89,27 @@ func (manager *TrafficManager) recoverSharedEngines(records map[string]*trafficR
 		if record.Policy.SharedQuota != nil && !slices.Contains(manager.recoveryEngines, record.Policy.Engine) {
 			manager.recoveryEngines = append(manager.recoveryEngines, record.Policy.Engine)
 		}
+		if record.Policy.SharedQuota != nil && record.Policy.Port > 0 {
+			if manager.recoveryPorts == nil {
+				manager.recoveryPorts = make(map[core.Engine][]int)
+			}
+			ports := manager.recoveryPorts[record.Policy.Engine]
+			if !slices.Contains(ports, record.Policy.Port) {
+				manager.recoveryPorts[record.Policy.Engine] = append(ports, record.Policy.Port)
+			}
+		}
 	}
+}
+
+func (manager *TrafficManager) sharedPortsForEngine(engine core.Engine) []int {
+	ports := append([]int(nil), manager.recoveryPorts[engine]...)
+	for _, record := range manager.records {
+		if record.Policy.SharedQuota != nil && record.Policy.Engine == engine &&
+			!slices.Contains(ports, record.Policy.Port) {
+			ports = append(ports, record.Policy.Port)
+		}
+	}
+	return ports
 }
 
 func sharedTrafficGuardMatches(state, guard trafficState) bool {

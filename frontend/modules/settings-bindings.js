@@ -30,7 +30,7 @@ export function createSettingsBindings({ api, state, esc, notify, applyUIFontSca
         agent_offline_threshold_seconds: number("agent_offline_threshold_seconds"), task_stale_timeout_seconds: number("task_stale_timeout_seconds"),
         install_task_stale_timeout_seconds: number("install_task_stale_timeout_seconds"), task_max_attempts: number("task_max_attempts"),
         public_ip_probe_interval_seconds: number("public_ip_probe_interval_seconds"), core_log_minimum_level: data.get("core_log_minimum_level"),
-        core_log_retention_days: number("core_log_retention_days"), agent_core_log_max_mib: number("agent_core_log_max_mib"),
+        core_log_retention_days: number("core_log_retention_days"), client_connection_retention_days: number("client_connection_retention_days"), agent_core_log_max_mib: number("agent_core_log_max_mib"),
         agent_core_log_rotate_count: number("agent_core_log_rotate_count"), metric_retention_days: number("metric_retention_days"),
         audit_retention_days: number("audit_retention_days"), task_retention_days: number("task_retention_days"),
         config_revision_retention: number("config_revision_retention"), webhook_url: data.get("webhook_url"),

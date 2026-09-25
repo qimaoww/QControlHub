@@ -3,7 +3,7 @@ package store
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 64
+const currentSchemaVersion = 70
 
 const schemaSQL = `
 CREATE TABLE IF NOT EXISTS agents (
@@ -41,6 +41,13 @@ CREATE TABLE IF NOT EXISTS agents (
 	CREATE INDEX IF NOT EXISTS agents_owner_idx ON agents(owner_id);
 	COMMENT ON COLUMN agents.observed_public_ip IS 'Public address the control plane observed for this Agent''s authenticated WSS session; written from the socket, never reported by the Agent.';
 	ALTER TABLE agents SET (fillfactor = 70);
+
+-- Persist deletion cleanup independently of the HTTP request and process lifetime.
+CREATE TABLE IF NOT EXISTS agent_deletion_jobs (
+    agent_id text PRIMARY KEY REFERENCES agents(id) ON DELETE CASCADE,
+    retry_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS agent_deletion_jobs_retry_idx ON agent_deletion_jobs(retry_at,agent_id);
 
 CREATE TABLE IF NOT EXISTS agent_live_state (
     agent_id text PRIMARY KEY REFERENCES agents(id) ON DELETE CASCADE,
@@ -225,12 +232,25 @@ CREATE TABLE IF NOT EXISTS ip_quality_reports (
 CREATE TABLE IF NOT EXISTS ip_quality_archives (
     task_id text NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
     family integer NOT NULL CHECK (family IN (4,6)),
-    source_url text NOT NULL,
     sha256 text NOT NULL CHECK (length(sha256)=64),
-    downloaded_at timestamptz NOT NULL,
+    rendered_at timestamptz NOT NULL,
     content bytea NOT NULL CHECK (octet_length(content)>0 AND octet_length(content)<=2097152),
     PRIMARY KEY(task_id,family)
 );
+-- v65: the panel renders the archived image from the stored JSON, so an archive
+-- no longer records an upstream report link and its timestamp is a render time.
+DO $ip_quality_render$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema=current_schema() AND table_name='ip_quality_archives' AND column_name='downloaded_at'
+    ) THEN
+        ALTER TABLE ip_quality_archives RENAME COLUMN downloaded_at TO rendered_at;
+    END IF;
+    ALTER TABLE ip_quality_archives ADD COLUMN IF NOT EXISTS rendered_at timestamptz NOT NULL DEFAULT now();
+    ALTER TABLE ip_quality_archives DROP COLUMN IF EXISTS source_url;
+END
+$ip_quality_render$;
 CREATE INDEX IF NOT EXISTS tasks_ip_quality_history_idx
     ON tasks(created_at DESC,agent_id,id DESC) WHERE action='ip-quality';
 CREATE TABLE IF NOT EXISTS ip_quality_schedules (
@@ -328,6 +348,7 @@ ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS install_task_stale_timeout_s
 ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS task_max_attempts integer NOT NULL DEFAULT 3;
 ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS public_ip_probe_interval_seconds integer NOT NULL DEFAULT 300;
 ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS core_log_retention_days integer NOT NULL DEFAULT 7;
+ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS client_connection_retention_days integer NOT NULL DEFAULT 30 CHECK(client_connection_retention_days BETWEEN 0 AND 3650);
 ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS cnip_source jsonb;
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS cnip_source jsonb;
 ALTER TABLE panel_settings ADD COLUMN IF NOT EXISTS agent_core_log_max_mib integer NOT NULL DEFAULT 16;
@@ -450,6 +471,7 @@ CREATE INDEX IF NOT EXISTS tasks_latest_deployment_idx ON tasks(agent_id,engine,
 CREATE UNIQUE INDEX IF NOT EXISTS tasks_one_running_per_agent_idx ON tasks(agent_id) WHERE status='running';
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS owner_id text NOT NULL DEFAULT '';
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS shared_traffic_id text NOT NULL DEFAULT '';
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS shared_instance boolean NOT NULL DEFAULT false;
 CREATE TABLE IF NOT EXISTS agent_engine_ownership (
 	agent_id text NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
 	engine varchar(20) NOT NULL,
@@ -459,6 +481,20 @@ CREATE TABLE IF NOT EXISTS agent_engine_ownership (
 	running boolean NOT NULL DEFAULT true,
 	updated_at timestamptz NOT NULL,
 	PRIMARY KEY (agent_id,engine)
+);
+CREATE TABLE IF NOT EXISTS agent_shared_instance_ownership (
+	agent_id text NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+	engine varchar(20) NOT NULL,
+	share_id text NOT NULL REFERENCES agent_shares(id) ON DELETE CASCADE,
+	owner_id text NOT NULL,
+	config_id text NOT NULL,
+	config_version integer NOT NULL,
+	running boolean NOT NULL DEFAULT true,
+	uncertain boolean NOT NULL DEFAULT false,
+	config_uncertain boolean NOT NULL DEFAULT false,
+	traffic_settled boolean NOT NULL DEFAULT false,
+	updated_at timestamptz NOT NULL,
+	PRIMARY KEY (agent_id,engine,share_id)
 );
 ALTER TABLE agent_engine_ownership ADD COLUMN IF NOT EXISTS uncertain boolean NOT NULL DEFAULT false;
 ALTER TABLE agent_engine_ownership ADD COLUMN IF NOT EXISTS config_uncertain boolean NOT NULL DEFAULT false;
@@ -767,26 +803,28 @@ ALTER TABLE port_traffic_daily_accounting SET (fillfactor = 85);
 ALTER TABLE port_traffic_accounting_epochs SET (fillfactor = 85);
 
 -- Connection observations are durable on the panel only. Minute buckets
--- coalesce repeated heartbeat samples without pretending they are new sessions.
+-- coalesce repeated log observations without pretending they are new sessions.
 CREATE TABLE IF NOT EXISTS client_connection_sources (
  agent_id text PRIMARY KEY REFERENCES agents(id) ON DELETE CASCADE,
  updated_at timestamptz NOT NULL,
  status text NOT NULL CHECK(status IN ('ok','partial','unavailable')),
  detail text NOT NULL DEFAULT '',
+ source text NOT NULL DEFAULT 'agent',
  truncated boolean NOT NULL DEFAULT false
 );
 CREATE TABLE IF NOT EXISTS client_connections (
  id bigserial PRIMARY KEY,
+ source text NOT NULL DEFAULT 'agent',
  agent_id text NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
  bucket timestamptz NOT NULL,
  engine text NOT NULL,
  protocol text NOT NULL,
  inbound text NOT NULL,
- transport text NOT NULL CHECK(transport IN ('tcp','udp')),
+ transport text NOT NULL CHECK(transport IN ('','tcp','udp')),
  client_ip inet NOT NULL,
  client_port integer NOT NULL CHECK(client_port BETWEEN 1 AND 65535),
  local_ip inet NOT NULL,
- local_port integer NOT NULL CHECK(local_port BETWEEN 1 AND 65535),
+ local_port integer NOT NULL CHECK(local_port BETWEEN 0 AND 65535),
  first_seen timestamptz NOT NULL,
  last_seen timestamptz NOT NULL,
  UNIQUE(agent_id,bucket,engine,protocol,inbound,transport,client_ip,client_port,local_ip,local_port)
@@ -794,6 +832,15 @@ CREATE TABLE IF NOT EXISTS client_connections (
 CREATE INDEX IF NOT EXISTS client_connections_time_idx ON client_connections(bucket);
 CREATE INDEX IF NOT EXISTS client_connections_agent_time_idx ON client_connections(agent_id,bucket DESC);
 CREATE INDEX IF NOT EXISTS client_connections_ip_time_idx ON client_connections(client_ip,bucket DESC);
+ALTER TABLE client_connections ADD COLUMN IF NOT EXISTS inbound_port integer CHECK(inbound_port BETWEEN 0 AND 65535);
+CREATE INDEX IF NOT EXISTS client_connections_missing_port_idx ON client_connections(id) WHERE inbound_port IS NULL;
+
+-- A finite, resumable scan of logs retained before log-derived ingestion began.
+CREATE TABLE IF NOT EXISTS client_connection_log_backfill (
+ id integer PRIMARY KEY CHECK(id=1),
+ last_id bigint NOT NULL DEFAULT 0,
+ upper_id bigint NOT NULL
+);
 
 CREATE TABLE IF NOT EXISTS client_connection_locations (
  client_ip inet PRIMARY KEY,

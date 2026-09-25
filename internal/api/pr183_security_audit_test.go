@@ -467,10 +467,19 @@ func TestPR183AuditOwnerHiddenNodeVisibility(t *testing.T) {
 			t.Fatalf("%s leaked the owner-hidden node, its task or its credential name", path)
 		}
 	}
-	// The owner keeps the full audit trail of its own hidden node.
-	ownerAudit := alice.call("GET", "/audit", nil, http.StatusOK, nil)
-	if !bytes.Contains(ownerAudit, []byte(agent.ID)) {
-		t.Fatalf("owner lost its own audit trail for the hidden node: %s", ownerAudit)
+	// The owner keeps the full audit trail of its own hidden node. Recording
+	// the task creation above is asynchronous, so wait for the queued write
+	// instead of assuming it landed before the next request.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		ownerAudit := alice.call("GET", "/audit", nil, http.StatusOK, nil)
+		if bytes.Contains(ownerAudit, []byte(agent.ID)) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("owner lost its own audit trail for the hidden node: %s", ownerAudit)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 	bob.call("GET", "/agent-directory", nil, http.StatusForbidden, nil)
 	alice.call("PUT", "/agents/"+agent.ID+"/visibility", map[string]bool{"admin_hidden": false}, http.StatusOK, nil)

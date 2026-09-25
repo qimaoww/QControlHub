@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export COLUMNS=72
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 test_root="$(mktemp -d "${TMPDIR:-/tmp}/qcontrolhub-quick-start-update.XXXXXX")"
@@ -66,11 +67,50 @@ docker() {
             ;;
         *" compose "*" ps -q control-plane "*) printf '%s\n' control-container ;;
         *" compose "*" ps -q qcontrol-web "*) printf '%s\n' web-container ;;
+        *" inspect "*"org.opencontainers.image.version"*" control-container "*) printf '%s\n' old-control-version ;;
+        *" inspect "*"org.opencontainers.image.version"*" web-container "*) printf '%s\n' old-web-version ;;
         *" inspect "*"{{.Image}}"*" control-container "*) printf '%s\n' sha256:old-control ;;
         *" inspect "*"{{.Config.Image}}"*" control-container "*) printf '%s\n' ghcr.io/qimaoww/qcontrol-plane:latest ;;
         *" inspect "*"{{.Image}}"*" web-container "*) printf '%s\n' sha256:old-web ;;
         *" inspect "*"{{.Config.Image}}"*" web-container "*) printf '%s\n' ghcr.io/qimaoww/qcontrol-web:latest ;;
-        *" pull ghcr.io/qimaoww/qcontrol-web:latest "*) [ "${QCH_UPDATE_FAIL_PULL:-false}" = false ] ;;
+        *" inspect "*"sha256:old-control "*)
+            case "$*" in
+                *org.opencontainers.image.version*) printf '%s\n' old-control-version ;;
+                *) printf '%s\n' sha256:old-control ;;
+            esac
+            ;;
+        *" inspect "*"sha256:old-web "*)
+            case "$*" in
+                *org.opencontainers.image.version*) printf '%s\n' old-web-version ;;
+                *) printf '%s\n' sha256:old-web ;;
+            esac
+            ;;
+        *" inspect "*"sha256:new-control "*)
+            case "$*" in
+                *org.opencontainers.image.version*) printf '%s\n' new-control-version ;;
+                *) printf '%s\n' sha256:new-control ;;
+            esac
+            ;;
+        *" inspect "*"sha256:new-web "*)
+            case "$*" in
+                *org.opencontainers.image.version*) printf '%s\n' new-web-version ;;
+                *) printf '%s\n' sha256:new-web ;;
+            esac
+            ;;
+        *" inspect "*"ghcr.io/qimaoww/qcontrol-plane:latest "*)
+            case "$*" in
+                *org.opencontainers.image.version*) printf '%s\n' "${QCH_UPDATE_TARGET_CONTROL_VERSION:-new-control-version}" ;;
+                *) printf '%s\n' "${QCH_UPDATE_TARGET_CONTROL_ID:-sha256:new-control}" ;;
+            esac
+            ;;
+        *" inspect "*"ghcr.io/qimaoww/qcontrol-web:latest "*)
+            case "$*" in
+                *org.opencontainers.image.version*) printf '%s\n' "${QCH_UPDATE_TARGET_WEB_VERSION:-new-web-version}" ;;
+                *) printf '%s\n' "${QCH_UPDATE_TARGET_WEB_ID:-sha256:new-web}" ;;
+            esac
+            ;;
+        *" pull ghcr.io/qimaoww/qcontrol-plane:latest "*|*" pull ghcr.io/qimaoww/qcontrol-web:latest "*)
+            [ "${QCH_UPDATE_FAIL_PULL:-false}" = false ] ;;
         *" compose "*" up -d --force-recreate "*)
             case " $* " in
                 *"docker-compose.rollback.yml"*)
@@ -100,14 +140,44 @@ curl() {
     return 0
 }
 
-export QCH_UPDATE_DOCKER_LOG="$test_root/docker-success.log"
-export QCH_UPDATE_CURL_LOG="$test_root/curl-success.log"
+export QCH_UPDATE_DOCKER_LOG="$test_root/docker-no-update.log"
+export QCH_UPDATE_CURL_LOG="$test_root/curl-no-update.log"
 export QCH_UPDATE_FAIL_UP=false
 export QCH_UPDATE_FAIL_PULL=false
 export QCH_UPDATE_PHASE="$test_root/phase"
+export QCH_UPDATE_TARGET_CONTROL_ID=sha256:old-control
+export QCH_UPDATE_TARGET_WEB_ID=sha256:old-web
+export QCH_UPDATE_TARGET_CONTROL_VERSION=old-control-version
+export QCH_UPDATE_TARGET_WEB_VERSION=old-web-version
+write_fixture
+update_external_services > "$test_root/no-update.out"
+cmp "$test_root/expected.env" "$ENV_FILE"
+cmp "$test_root/expected-compose.yml" "$EXTERNAL_COMPOSE_FILE"
+grep -Fq '当前镜像与目标版本一致，无需更新' "$test_root/no-update.out"
+grep -Eq 'control-plane[[:space:]]+目标标签：latest' "$test_root/no-update.out"
+grep -Eq 'qcontrol-web[[:space:]]+目标标签：latest' "$test_root/no-update.out"
+if grep -Fq 'up -d --force-recreate' "$QCH_UPDATE_DOCKER_LOG"; then
+    printf '%s\n' 'quick-start update regression: unchanged images recreated containers' >&2
+    exit 1
+fi
+if find "$WORK_DIR" -maxdepth 1 -name '.qcontrolhub-update.*' -print -quit | grep -q .; then
+    printf '%s\n' 'quick-start update regression: no-op left update backups' >&2
+    exit 1
+fi
+
+export QCH_UPDATE_TARGET_CONTROL_ID=sha256:new-control
+export QCH_UPDATE_TARGET_WEB_ID=sha256:new-web
+export QCH_UPDATE_TARGET_CONTROL_VERSION=new-control-version
+export QCH_UPDATE_TARGET_WEB_VERSION=new-web-version
+export QCH_UPDATE_DOCKER_LOG="$test_root/docker-success.log"
+export QCH_UPDATE_CURL_LOG="$test_root/curl-success.log"
 write_fixture
 validate_external_update_env
-update_external_services
+update_external_services > "$test_root/update-success.out"
+grep -Fq old-control-version "$test_root/update-success.out"
+grep -Fq new-control-version "$test_root/update-success.out"
+grep -Fq old-web-version "$test_root/update-success.out"
+grep -Fq new-web-version "$test_root/update-success.out"
 
 cmp -s "$test_root/expected.env" "$ENV_FILE" || {
     printf '%s\n' 'quick-start update regression: successful update changed .env' >&2
@@ -127,6 +197,35 @@ up_line="$(grep -nF 'up -d --force-recreate' "$QCH_UPDATE_DOCKER_LOG" | tail -n 
 }
 [ "$(grep -Fc '/healthz' "$QCH_UPDATE_CURL_LOG")" -eq 2 ]
 [ "$(grep -Fc '/readyz' "$QCH_UPDATE_CURL_LOG")" -eq 2 ]
+
+# Either application image changing is enough to update the deployment.
+for changed_service in control web; do
+    export QCH_UPDATE_DOCKER_LOG="$test_root/docker-$changed_service-only.log"
+    export QCH_UPDATE_CURL_LOG="$test_root/curl-$changed_service-only.log"
+    export QCH_UPDATE_TARGET_CONTROL_ID=sha256:old-control
+    export QCH_UPDATE_TARGET_WEB_ID=sha256:old-web
+    export QCH_UPDATE_TARGET_CONTROL_VERSION=old-control-version
+    export QCH_UPDATE_TARGET_WEB_VERSION=old-web-version
+    if [ "$changed_service" = control ]; then
+        export QCH_UPDATE_TARGET_CONTROL_ID=sha256:new-control
+        export QCH_UPDATE_TARGET_CONTROL_VERSION=new-control-version
+    else
+        export QCH_UPDATE_TARGET_WEB_ID=sha256:new-web
+        export QCH_UPDATE_TARGET_WEB_VERSION=new-web-version
+    fi
+    write_fixture
+    update_external_services > "$test_root/$changed_service-only.out"
+    cmp "$test_root/expected.env" "$ENV_FILE"
+    grep -Fq 'up -d --force-recreate' "$QCH_UPDATE_DOCKER_LOG" || {
+        printf '%s\n' "quick-start update regression: $changed_service-only change skipped update" >&2
+        exit 1
+    }
+done
+
+export QCH_UPDATE_TARGET_CONTROL_ID=sha256:new-control
+export QCH_UPDATE_TARGET_WEB_ID=sha256:new-web
+export QCH_UPDATE_TARGET_CONTROL_VERSION=new-control-version
+export QCH_UPDATE_TARGET_WEB_VERSION=new-web-version
 
 export QCH_UPDATE_DOCKER_LOG="$test_root/docker-failure.log"
 export QCH_UPDATE_CURL_LOG="$test_root/curl-failure.log"
@@ -162,6 +261,15 @@ export QCH_UPDATE_FAIL_PULL=true
 write_fixture
 if (update_external_services) >"$test_root/pull-failure.out" 2>&1; then
     printf '%s\n' 'quick-start update regression: simulated pull failure succeeded' >&2
+    exit 1
+fi
+grep -Eq 'control-plane[[:space:]]+当前版本：old-control-version' "$test_root/pull-failure.out"
+grep -Eq 'qcontrol-web[[:space:]]+当前版本：old-web-version' "$test_root/pull-failure.out"
+grep -Eq 'control-plane[[:space:]]+目标标签：latest' "$test_root/pull-failure.out"
+grep -Eq 'qcontrol-web[[:space:]]+目标标签：latest' "$test_root/pull-failure.out"
+grep -Fq '正在检查更新（拉取目标镜像）' "$test_root/pull-failure.out"
+if grep -Eq '目标版本：|无需更新' "$test_root/pull-failure.out"; then
+    printf '%s\n' 'failed external check reported a version comparison result' >&2
     exit 1
 fi
 cmp -s "$test_root/expected.env" "$ENV_FILE"

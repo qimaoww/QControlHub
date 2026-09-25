@@ -66,5 +66,6 @@
   "frontend/styles/630-user-allocations.css",
   "frontend/styles/640-dashboard.css",
   "frontend/styles/650-ip-quality.css",
-  "frontend/styles/660-shell-feedback.css"
+  "frontend/styles/660-shell-feedback.css",
+  "frontend/styles/670-substore-cards.css"
 ]

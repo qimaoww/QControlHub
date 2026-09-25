@@ -22,3 +22,6 @@
 
 # Local Go build and module caches used by tooling in this checkout.
 .cache/
+
+# Contributor guidance kept in the working tree only.
+/AGENTS.md

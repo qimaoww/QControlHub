@@ -46,3 +46,49 @@ func janitor(ctx context.Context, dataStore *store.Store) {
 		}
 	}
 }
+
+// Run independently of other maintenance so large deletion jobs cannot delay
+// heartbeats, scheduled checks or retention. Drain persisted jobs on startup.
+func cleanDeletedAgents(ctx context.Context, dataStore *store.Store) {
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+	for {
+		if err := dataStore.CleanupDeletedAgents(ctx); err != nil && ctx.Err() == nil {
+			slog.Error("clean deleted agents", "error", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+// Existing retained logs are indexed independently of requests and maintenance.
+func backfillClientConnectionLogs(ctx context.Context, dataStore *store.Store) {
+	for ctx.Err() == nil {
+		operationContext, cancel := context.WithTimeout(ctx, 15*time.Second)
+		done, err := dataStore.BackfillClientConnectionLogs(operationContext)
+		if err == nil && done {
+			done, err = dataStore.BackfillClientConnectionPorts(operationContext)
+		}
+		cancel()
+		if err == nil {
+			if done {
+				return
+			}
+			continue
+		}
+		if ctx.Err() != nil {
+			return
+		}
+		slog.Error("backfill client IPs from panel logs", "error", err)
+		timer := time.NewTimer(15 * time.Second)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+	}
+}

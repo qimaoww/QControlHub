@@ -62,9 +62,10 @@ func TestIPQualityMigratesVersion61AndPreservesData(t *testing.T) {
 	if err != nil || claimed == nil || claimed.ID != check.ID {
 		t.Fatalf("claim = %+v %v", claimed, err)
 	}
+	report := storeQualityResult(t)
 	if err := db.CompleteTask(ctx, agent.ID, check.ID, core.TaskResultRequest{
-		LeaseID: claimed.LeaseID, Success: true, IPQuality: storeQualityResult(t),
-	}); err != nil {
+		LeaseID: claimed.LeaseID, Success: true, IPQuality: report,
+	}, storeQualityArchives(t, report)...); err != nil {
 		t.Fatal(err)
 	}
 	schedule, err := db.SetIPQualitySchedule(ctx, agent.ID, true)

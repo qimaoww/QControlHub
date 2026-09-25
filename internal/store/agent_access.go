@@ -71,10 +71,9 @@ func agentAdministrationClause(ctx context.Context, column string, args *[]any) 
 
 func configAgentAccessClause(ctx context.Context, column, engineColumn string, args *[]any) string {
 	clause := agentEngineAccessClause(ctx, column, engineColumn, args)
-	if clause == "" {
-		return ""
-	}
-	return ` AND (` + column + ` IS NULL OR (true` + clause + `))`
+	// Revocation hides node configurations immediately, before background erasure.
+	return ` AND (` + column + ` IS NULL OR (EXISTS(SELECT 1 FROM agents active_agent
+		WHERE active_agent.id=` + column + ` AND active_agent.revoked_at IS NULL)` + clause + `))`
 }
 
 func requireAgentEngineAccess(ctx context.Context, executor storeExecutor, id string, engine core.Engine) error {

@@ -14,7 +14,7 @@ import (
 
 // Enrichment happens after authorization and never blocks Agent ingestion.
 // One shared deadline bounds cold-cache latency regardless of page size.
-func (s *Server) resolveClientConnectionLocations(ctx context.Context, records []core.ClientConnectionRecord) {
+func (s *Server) resolveClientConnectionLocations(ctx context.Context, records []core.ClientConnectionRecord, cacheOnly bool) {
 	ips := make([]string, 0, len(records))
 	seen := map[string]bool{}
 	for i := range records {
@@ -40,12 +40,20 @@ func (s *Server) resolveClientConnectionLocations(ctx context.Context, records [
 		slog.Warn("read client IP locations", "error", err)
 		return
 	}
+	for i := range records {
+		if item, ok := cached[records[i].ClientIP]; ok {
+			records[i].Location = item.ClientIPLocation
+		}
+	}
+	if cacheOnly {
+		return
+	}
 	now := time.Now().UTC()
 	lookupCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	jobs := make(chan string, len(ips))
 	for _, ip := range ips {
-		if item, ok := cached[ip]; !ok || !now.Before(item.RetryAfter) {
+		if item, ok := cached[ip]; needsClientLocationLookup(item, ok, now) {
 			jobs <- ip
 		}
 	}
@@ -65,7 +73,11 @@ func (s *Server) resolveClientConnectionLocations(ctx context.Context, records [
 				item := store.ClientConnectionLocation{IP: ip, RetryAfter: now.Add(5 * time.Minute)}
 				if err == nil {
 					item.ClientIPLocation = core.ClientIPLocation{CountryCode: region.ISOCode, Country: region.Name, Province: region.Province}
-					item.RetryAfter = now.Add(48 * time.Hour)
+					if region.ISOCode == "CN" && region.Province == "" {
+						item.RetryAfter = now.Add(6 * time.Hour)
+					} else {
+						item.RetryAfter = now.Add(48 * time.Hour)
+					}
 				}
 				mu.Lock()
 				if err == nil {
@@ -85,4 +97,13 @@ func (s *Server) resolveClientConnectionLocations(ctx context.Context, records [
 			records[i].Location = item.ClientIPLocation
 		}
 	}
+}
+
+func needsClientLocationLookup(item store.ClientConnectionLocation, cached bool, now time.Time) bool {
+	if !cached || !now.Before(item.RetryAfter) {
+		return true
+	}
+	// Entries written before province fallbacks used a 48-hour TTL even when
+	// their CN province was empty. Refresh them once after deployment.
+	return item.CountryCode == "CN" && item.Province == "" && item.RetryAfter.Sub(now) > 6*time.Hour
 }

@@ -22,7 +22,7 @@ func (s *Store) CompleteTask(ctx context.Context, agentID, taskID string, result
 	// Match creation/claim lock order: node first, then task. A successful
 	// transition updates eligibility atomically with the task acknowledgement.
 	var selected, supported []core.Engine
-	if err := tx.QueryRow(ctx, `SELECT capabilities,COALESCE(supported_capabilities,capabilities) FROM agents WHERE id=$1 FOR UPDATE`, agentID).Scan(&selected, &supported); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT capabilities,COALESCE(supported_capabilities,capabilities) FROM agents WHERE id=$1 AND revoked_at IS NULL FOR UPDATE`, agentID).Scan(&selected, &supported); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
 		}

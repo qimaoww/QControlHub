@@ -21,6 +21,7 @@ func cancelUnauthorizedAgentTasksTx(ctx context.Context, tx pgx.Tx, agentID stri
 			OR (`+unauthorizedTaskPrincipalSQL+`)
 			OR (`+unauthorizedHostConfigTaskSQL+`)
 			OR (t.action IN ('validate','deploy') AND NOT $3::boolean)
+			OR (t.shared_instance AND NOT $4::boolean)
 			OR (t.engine<>'' AND NOT t.capability_transition AND NOT EXISTS(
 				SELECT 1 FROM agents a WHERE a.id=t.agent_id AND a.capabilities ? t.engine))
 			OR (t.shared_traffic_id<>'' AND (
@@ -32,7 +33,8 @@ func cancelUnauthorizedAgentTasksTx(ctx context.Context, tx pgx.Tx, agentID stri
 				)
 			))
 		)`,
-		agentID, supportsSharedEngines(features), containsFeature(features, core.AgentFeatureIndependentEgress))
+		agentID, supportsSharedEngines(features), containsFeature(features, core.AgentFeatureIndependentEgress),
+		containsFeature(features, core.AgentFeatureSharedCoreInstances))
 	return err
 }
 

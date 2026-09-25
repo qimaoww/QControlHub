@@ -5,8 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"time"
-
-	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
 func (s *Store) PruneTasks(ctx context.Context, olderThan time.Time) (int64, error) {
@@ -15,6 +13,7 @@ func (s *Store) PruneTasks(ctx context.Context, olderThan time.Time) (int64, err
 	result, err := s.pool.Exec(ctx, `DELETE FROM tasks t WHERE status IN ('succeeded','failed','canceled') AND COALESCE(finished_at,created_at) < $1
 		AND NOT (status='succeeded' AND action IN ('deploy','import-existing') AND NOT EXISTS(
 			SELECT 1 FROM tasks newer WHERE newer.agent_id=t.agent_id AND newer.engine=t.engine
+			AND newer.owner_id=t.owner_id
 			AND newer.status='succeeded' AND newer.action IN ('deploy','import-existing')
 			AND (newer.finished_at,newer.id)>(t.finished_at,t.id)))`+where, args...)
 	if err != nil {
@@ -39,6 +38,8 @@ func (s *Store) PruneConfigRevisions(ctx context.Context, keep int) (int64, erro
 		DELETE FROM config_revisions revision USING old
 		WHERE revision.config_id=old.config_id AND revision.version=old.version
 		AND NOT EXISTS(SELECT 1 FROM agent_engine_ownership deployed
+			WHERE deployed.config_id=revision.config_id AND deployed.config_version=revision.version)
+		AND NOT EXISTS(SELECT 1 FROM agent_shared_instance_ownership deployed
 			WHERE deployed.config_id=revision.config_id AND deployed.config_version=revision.version)
 		AND NOT EXISTS(SELECT 1 FROM (`+latestDeploymentsSQL+`) deployed
 			WHERE deployed.config_id=revision.config_id AND deployed.config_version=revision.version)
@@ -94,6 +95,9 @@ func (s *Store) MaintainAccountData(ctx context.Context, now time.Time, prune bo
 		if !prune {
 			continue
 		}
+		if settings.ClientConnectionRetentionDays > 0 {
+			failures = append(failures, s.PruneClientConnections(account, now.Add(-time.Duration(settings.ClientConnectionRetentionDays)*24*time.Hour)))
+		}
 		_, err = s.PruneMetricSamples(account, now.Add(-time.Duration(settings.MetricRetentionDays)*24*time.Hour))
 		failures = append(failures, err)
 		if settings.AuditRetentionDays > 0 {
@@ -113,7 +117,6 @@ func (s *Store) MaintainAccountData(ctx context.Context, now time.Time, prune bo
 		failures = append(failures, err)
 	}
 	if prune {
-		failures = append(failures, s.PruneClientConnections(ctx, now.Add(-core.ClientConnectionRetention)))
 		failures = append(failures, s.PruneClientConnectionLocations(ctx))
 		cutoff := now.Add(-time.Duration(longestLogRetention) * 24 * time.Hour)
 		_, err = s.PruneCoreLogPartitions(ctx, cutoff)

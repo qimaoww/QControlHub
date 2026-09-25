@@ -25,6 +25,7 @@ import "./panel_reads_smoke.mjs";
 // setup/restore order is part of the regression contract.
 const fixtures = {};
 await (await import("./smoke/client-connections.mjs")).run();
+await (await import("./smoke/client-connection-cache.mjs")).run();
 Object.assign(fixtures, await (await import("./smoke/helper-contracts.mjs")).run(fixtures));
 Object.assign(fixtures, await (await import("./smoke/node-order.mjs")).run(fixtures));
 Object.assign(fixtures, await (await import("./smoke/traffic-log-models.mjs")).run(fixtures));

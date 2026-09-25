@@ -44,7 +44,7 @@ function shell(content, title, { viewKey = state.route } = {}) {
   };
   links.splice(0, links.length, ...links.filter(([id]) => can(linkPermissions[id])));
   app.style.display = "";
-  document.body.className = `app-body page-${state.route}${state.route === "node-settings" ? " page-agents no-context" : ""}${state.route === "client-connections" ? " no-context" : ""}`;
+  document.body.className = `app-body page-${state.route}${state.route === "node-settings" ? " page-agents no-context" : ""}`;
   applyTheme();
   const context = contextMarkup(title);
   const overview = state.data.overview || {};
@@ -95,6 +95,7 @@ function shell(content, title, { viewKey = state.route } = {}) {
     ["system-bbr", "BBR / TCP 调优"],
     ["traffic", "流量"],
     ["core-logs", "日志"],
+    ["client-connections", "连接 IP"],
     ["tasks", "任务"],
     ["settings", "设置"],
     [state.session.role === "admin" ? "users" : "my-quota", state.session.role === "admin" ? "用户" : `共享与额度${pendingShares ? ` · ${pendingShares}` : ""}`],

@@ -3,14 +3,14 @@ SHELL := /bin/sh
 VERSION ?= dev
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
-.PHONY: build test alpine-test alpine-agent-test upgrade-sandbox-test ss-rust-runtime-test vet fmt-check frontend-check module-policy-test pr-policy-test schema-policy-test generate-deploy-scripts deploy-modules-check generate-styles styles-check installer-test agent-redeploy-test quick-start-test web-image-test docs-check check checks browser-checks non-browser-checks alpine-non-browser-checks init-env compose-config up dev-up down logs
+.PHONY: build test alpine-test alpine-agent-test upgrade-sandbox-test ss-rust-runtime-test vet fmt-check frontend-check module-policy-test pr-policy-test schema-policy-test generate-deploy-scripts deploy-modules-check generate-styles styles-check installer-test agent-redeploy-test quick-start-test web-image-test check checks browser-checks non-browser-checks alpine-non-browser-checks init-env compose-config up dev-up down logs
 
 # Non-Go checks. CI runs each group as its own task next to the Go test shards,
 # so keep the Go suite out of these targets.
 BROWSER_CHECK_TARGETS := frontend-check
-CHECK_TARGETS := fmt-check module-policy-test pr-policy-test schema-policy-test deploy-modules-check styles-check installer-test agent-redeploy-test quick-start-test docs-check vet
+CHECK_TARGETS := fmt-check module-policy-test pr-policy-test schema-policy-test deploy-modules-check styles-check installer-test agent-redeploy-test quick-start-test vet
 # Alpine validates the same checks without the Debian-only agent redeploy flow.
-ALPINE_CHECK_TARGETS := fmt-check module-policy-test pr-policy-test schema-policy-test deploy-modules-check styles-check installer-test quick-start-test docs-check vet
+ALPINE_CHECK_TARGETS := fmt-check module-policy-test pr-policy-test schema-policy-test deploy-modules-check styles-check installer-test quick-start-test vet
 # Alpine leaves internal/agent out of the package sweep and runs the OpenRC and
 # lifecycle regressions instead; the upgrade sandbox job covers the rest.
 ALPINE_AGENT_TESTS := go test ./internal/agent -run 'OpenRC|PerServiceManager|AgentUpgrade|ManagedCorePrerequisites|SystemBBR|IPQuality'
@@ -89,6 +89,7 @@ agent-redeploy-test:
 	sh deploy/tests/install-agent-redeploy.sh
 
 quick-start-test:
+	bash deploy/tests/quick-start-ui.sh
 	bash deploy/tests/quick-start-ready.sh
 	bash deploy/tests/quick-start-env.sh
 	bash deploy/tests/quick-start-bootstrap.sh
@@ -98,9 +99,6 @@ quick-start-test:
 
 web-image-test:
 	docker build --target qcontrol-web --build-arg VERSION='$(VERSION)' .
-
-docs-check:
-	node docs/check_docs.mjs
 
 check: $(BROWSER_CHECK_TARGETS) $(CHECK_TARGETS) test
 

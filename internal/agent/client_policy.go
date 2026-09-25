@@ -43,10 +43,16 @@ func (c *Client) queueHeartbeat(ctx context.Context, outgoing chan<- core.WireMe
 	}
 	metrics.PublicIPv4, metrics.PublicIPv6, metrics.PublicIPv4Source, metrics.PublicIPv6Source = c.publicIP.SnapshotWithSources()
 	metrics.BBR = c.bbr.Collect(ctx)
+	sharedInstances := c.executor.SharedInstanceStatuses(ctx)
+	// An inactive instance can release its reserved ports only after the
+	// counter sample includes traffic received before the service stopped.
+	if c.traffic != nil {
+		c.traffic.collect(ctx, false)
+	}
 	heartbeat := &core.HeartbeatRequest{
 		Version: c.config.Version, OS: operatingSystemPlatform(), Arch: runtime.GOARCH, Runtime: runtimeState,
 		Features: c.advertisedFeatures(), TrafficUsage: c.traffic.Snapshot(),
-		ClientConnections: c.clientConnectionReport(ctx),
+		SharedInstances: sharedInstances,
 	}
 	if metricsHaveData(metrics) || metrics.BBR != nil {
 		heartbeat.Metrics = &metrics
@@ -90,7 +96,6 @@ func (c *Client) queueMetrics(ctx context.Context, outgoing chan<- core.WireMess
 func (c *Client) advertisedFeatures() []string {
 	features := []string{
 		core.AgentFeatureSelfUpgrade,
-		core.AgentFeatureClientConnections,
 		core.AgentFeaturePortTraffic,
 		core.AgentFeatureSharedTraffic,
 		core.AgentFeatureSharedEngines,
@@ -107,6 +112,9 @@ func (c *Client) advertisedFeatures() []string {
 		core.AgentFeatureCNIPSource,
 		core.AgentFeatureSystemBBR,
 		core.AgentFeatureIPQuality,
+	}
+	if sharedCoreTemplatesSupported(c.executor.Specs, c.executor.serviceManager()) {
+		features = append(features, core.AgentFeatureSharedCoreInstances)
 	}
 	if c.publicIP.Enabled() {
 		features = append(features, core.AgentFeaturePublicIPProbe)

@@ -51,6 +51,17 @@ func (s *Store) StoreCoreLogs(ctx context.Context, agentID string, batch core.Co
 		return err
 	}
 	defer tx.Rollback(ctx)
+	// Serialize uploads with revocation so an already authenticated request
+	// cannot recreate logs after the deletion worker has drained them.
+	var minimumLevel string
+	if err := tx.QueryRow(ctx, `SELECT `+agentRuntimeSettingSQL("agents", "core_log_minimum_level", "'debug'")+`
+		FROM agents WHERE id=$1 AND revoked_at IS NULL FOR SHARE OF agents`, agentID).Scan(&minimumLevel); err != nil {
+		return fmt.Errorf("read core log minimum level: %w", mapError(err))
+	}
+	minimumLevel = normalizeCoreLogMinimumLevel(minimumLevel)
+	if minimumLevel == "" {
+		return errors.New("invalid stored core log minimum level")
+	}
 	command, err := tx.Exec(ctx, `
 		INSERT INTO core_log_batches (id,agent_id,received_at) VALUES ($1,$2,$3)
 		ON CONFLICT (id) DO NOTHING`, batch.ID, agentID, receivedAt)
@@ -67,24 +78,18 @@ func (s *Store) StoreCoreLogs(ctx context.Context, agentID string, batch core.Co
 		}
 		return tx.Commit(ctx)
 	}
-	var minimumLevel string
-	if err := tx.QueryRow(ctx, `SELECT `+agentRuntimeSettingSQL("agents", "core_log_minimum_level", "'debug'")+`
-		FROM agents WHERE id=$1`, agentID).Scan(&minimumLevel); err != nil {
-		return fmt.Errorf("read core log minimum level: %w", err)
-	}
-	minimumLevel = normalizeCoreLogMinimumLevel(minimumLevel)
-	if minimumLevel == "" {
-		return errors.New("invalid stored core log minimum level")
-	}
 	indexes := make([]int32, 0, len(entries))
 	engines := make([]string, 0, len(entries))
 	levels := make([]string, 0, len(entries))
 	messages := make([]string, 0, len(entries))
 	loggedAt := make([]time.Time, 0, len(entries))
+	accepted := make([]core.CoreLogEntry, 0, len(entries))
 	for index, entry := range entries {
 		if !coreLogLevelAtLeast(entry.Level, minimumLevel) {
 			continue
 		}
+		entry.ReceivedAt = receivedAt
+		accepted = append(accepted, entry)
 		indexes = append(indexes, int32(index))
 		engines = append(engines, string(entry.Engine))
 		levels = append(levels, entry.Level)
@@ -102,6 +107,9 @@ func (s *Store) StoreCoreLogs(ctx context.Context, agentID string, batch core.Co
 			batch.ID, agentID, receivedAt, indexes, engines, levels, messages, loggedAt); err != nil {
 			return mapError(err)
 		}
+	}
+	if err := s.storeClientConnectionLogs(ctx, tx, agentID, accepted); err != nil {
+		return err
 	}
 	return tx.Commit(ctx)
 }

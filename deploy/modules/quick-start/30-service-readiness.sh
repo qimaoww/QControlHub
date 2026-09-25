@@ -15,11 +15,18 @@ show_diagnostics() {
 start_services() {
     echo "-> 校验 Docker Compose 配置"
     compose config --quiet || die "Docker Compose 配置无效，请检查 .env 和连接参数"
-    if [ "$(read_env_key QCH_IMAGE_TAG)" = "local" ]; then
+    resolve_bundled_image_refs
+    if [ "$BUNDLED_CONTROL_IMAGE_REF" = "ghcr.io/qimaoww/qcontrol-plane:local" ]; then
         echo "-> 构建并启动本地 Docker 镜像"
         if ! compose up -d --build; then
             show_diagnostics
             die "Docker Compose 启动失败"
+        fi
+    elif [ "$ACTION" = "update" ]; then
+        echo "-> 使用已拉取的应用镜像启动 Docker Compose"
+        if ! compose up -d --no-build --pull never; then
+            show_diagnostics
+            die "Docker Compose 启动失败；请检查镜像拉取和 Compose 配置"
         fi
     else
         echo "-> 拉取 GHCR 镜像并启动 Docker Compose"

@@ -136,7 +136,7 @@ func (c *Client) resultForTask(ctx context.Context, task core.Task) core.TaskRes
 			task, executionErr = prepareCNIPTask(ctx, task, cnip.FetchRoutes)
 		}
 		var previousMainlandPolicies []core.MainlandAccessPolicy
-		mainlandChanged := executionErr == nil && task.Action == core.ActionDeploy && task.Engine == core.EngineShadowsocksRust && c.mainland != nil
+		mainlandChanged := executionErr == nil && task.Action == core.ActionDeploy && task.Engine == core.EngineShadowsocksRust && !task.SharedInstance && c.mainland != nil
 		if mainlandChanged {
 			previousMainlandPolicies = c.mainland.Snapshot()
 			if err := c.mainland.Deploy(ctx, task.MainlandAccessPolicies, c.creds.AgentID); err != nil {
@@ -314,6 +314,10 @@ func limitStateValue(value string, limit int) string {
 }
 
 func (c *Client) validTask(task core.Task) bool {
+	if task.SharedInstance && (task.Action != core.ActionDeploy || !core.ValidAgentShareID(task.SharedTrafficID) ||
+		task.InstallIfMissing) {
+		return false
+	}
 	if task.InstallIfMissing && ((task.Action != core.ActionValidate && task.Action != core.ActionDeploy) ||
 		task.ConfigVersion < 1 || task.ConfigID == "" || task.ConfigContent == "" || task.SharedTrafficID != "" ||
 		task.CoreVersion != "" || task.CoreSource != "") {

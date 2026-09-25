@@ -78,9 +78,6 @@ type Client struct {
 	reexecFunc        func(string, []string, []string) error
 	executeFunc       func(context.Context, core.Task) (string, error)
 	ipQualityFunc     func(context.Context) (core.IPQualityResult, error)
-
-	connectionSampleMu   sync.Mutex
-	nextConnectionSample time.Time
 }
 
 type taskExecution struct {

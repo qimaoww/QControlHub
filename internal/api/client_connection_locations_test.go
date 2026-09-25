@@ -12,7 +12,25 @@ import (
 	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
+	"github.com/qimaoww/qcontrolhub/internal/store"
 )
+
+func TestMissingChinaProvinceRefreshesOldCachedLocation(t *testing.T) {
+	now := time.Now().UTC()
+	old := store.ClientConnectionLocation{ClientIPLocation: core.ClientIPLocation{CountryCode: "CN"}, RetryAfter: now.Add(47 * time.Hour)}
+	if !needsClientLocationLookup(old, true, now) {
+		t.Fatal("old country-only CN cache was not refreshed")
+	}
+	old.RetryAfter = now.Add(6 * time.Hour)
+	if needsClientLocationLookup(old, true, now) {
+		t.Fatal("freshly retried country-only CN cache was retried too soon")
+	}
+	old.CountryCode = "US"
+	old.RetryAfter = now.Add(47 * time.Hour)
+	if needsClientLocationLookup(old, true, now) {
+		t.Fatal("foreign cache was refreshed early")
+	}
+}
 
 type connectionGeoTransport func(*http.Request) (*http.Response, error)
 
@@ -21,11 +39,11 @@ func (f connectionGeoTransport) RoundTrip(r *http.Request) (*http.Response, erro
 func TestClientConnectionGeographyPersistsAcrossServerRestart(t *testing.T) {
 	db, ctx, admin, alice, bob := newConfigScopeAPIFixture(t)
 	agent, _ := ownedConfigScopeAPIAgent(t, ctx, db, alice, "connection-geo", core.EngineMihomo)
-	report := core.ClientConnectionReport{Status: "ok"}
+	report := clientConnectionFixtures{Status: "ok"}
 	for i, ip := range []string{"8.8.8.8", "8.8.8.8", "1.1.1.1", "10.0.0.1", "9.9.9.9"} {
 		report.Connections = append(report.Connections, core.ClientConnection{Engine: core.EngineMihomo, Protocol: "trojan", Inbound: "entry", Transport: "tcp", ClientIP: ip, ClientPort: 50123 + i, LocalIP: "192.0.2.1", LocalPort: 443})
 	}
-	if err := db.StoreClientConnections(ctx, agent.ID, report); err != nil {
+	if err := storeAPIConnectionLogs(ctx, db, agent.ID, report); err != nil {
 		t.Fatal(err)
 	}
 	var mu sync.Mutex
@@ -41,6 +59,9 @@ func TestClientConnectionGeographyPersistsAcrossServerRestart(t *testing.T) {
 			body = `{"country_code":"CN","country":"China","region":"Guangdong"}`
 		case "/v1/ip/geo/1.1.1.1.json":
 		case "/v1/ip/geo/9.9.9.9.json":
+			status = 503
+			body = "unavailable"
+		case "/9.9.9.9", "/api/v1/json/9.9.9.9":
 			status = 503
 			body = "unavailable"
 		default:
@@ -77,7 +98,7 @@ func TestClientConnectionGeographyPersistsAcrossServerRestart(t *testing.T) {
 			}
 		}
 	}
-	if len(calls) != 3 {
+	if len(calls) != 5 {
 		t.Fatalf("provider calls=%v", calls)
 	}
 	for path, count := range calls {
@@ -107,11 +128,48 @@ func TestClientConnectionGeographyStopsOnCancellation(t *testing.T) {
 	requestCtx, cancel := context.WithTimeout(ctx, 150*time.Millisecond)
 	defer cancel()
 	started := time.Now()
-	server.resolveClientConnectionLocations(requestCtx, records)
+	server.resolveClientConnectionLocations(requestCtx, records, false)
 	if time.Since(started) > time.Second {
 		t.Fatal("cancelled lookup delayed connection history")
 	}
 	if got := calls.Load(); got < 1 || got > 8 {
 		t.Fatalf("lookup concurrency/cancellation: %d requests", got)
+	}
+}
+
+func TestClientConnectionDeferredLocations(t *testing.T) {
+	db, ctx, admin, alice, bob := newConfigScopeAPIFixture(t)
+	agent, _ := ownedConfigScopeAPIAgent(t, ctx, db, alice, "deferred-geo", core.EngineXray)
+	report := clientConnectionFixtures{Status: "ok", Connections: []core.ClientConnection{{Engine: core.EngineXray, Protocol: "vless", Inbound: "entry", Transport: "tcp", ClientIP: "8.8.8.8", ClientPort: 50123, LocalIP: "192.0.2.1", LocalPort: 443}}}
+	if err := storeAPIConnectionLogs(ctx, db, agent.ID, report); err != nil {
+		t.Fatal(err)
+	}
+	var calls atomic.Int32
+	handler := New(db, Config{AdminToken: admin.token, GeoIPHTTPClient: &http.Client{Transport: connectionGeoTransport(func(r *http.Request) (*http.Response, error) {
+		calls.Add(1)
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"country_code":"CN","country":"China","region":"Guangdong"}`)), Header: make(http.Header)}, nil
+	})}}).Handler()
+	admin.handler = handler
+	var fast core.ClientConnectionHistory
+	admin.call("GET", "/client-connections?locations=cached&agent_id="+agent.ID, nil, http.StatusOK, &fast)
+	if calls.Load() != 0 || len(fast.Records) != 1 || fast.Flows != 1 || len(fast.Sources) != 1 || len(fast.Timeline) != 1 {
+		t.Fatalf("initial read blocked on lookup or lost history: %+v calls=%d", fast, calls.Load())
+	}
+	var hidden core.ClientConnectionHistory
+	bob.call("GET", "/client-connections?locations=only&agent_id="+agent.ID, nil, http.StatusOK, &hidden)
+	if len(hidden.Records) != 0 || calls.Load() != 0 {
+		t.Fatal("deferred enrichment bypassed authorization")
+	}
+	var enriched core.ClientConnectionHistory
+	admin.call("GET", "/client-connections?locations=only&agent_id="+agent.ID, nil, http.StatusOK, &enriched)
+	if len(enriched.Records) != 1 || enriched.Records[0].Location.Province != "广东" || calls.Load() != 1 {
+		t.Fatalf("enrichment missing: %+v", enriched)
+	}
+	if enriched.Flows != 0 || len(enriched.Timeline) != 0 || len(enriched.Sources) != 0 {
+		t.Fatal("enrichment repeated history aggregates")
+	}
+	admin.call("GET", "/client-connections?locations=cached&agent_id="+agent.ID, nil, http.StatusOK, &fast)
+	if fast.Records[0].Location.Province != "广东" || calls.Load() != 1 {
+		t.Fatal("cached location not reused")
 	}
 }
