@@ -695,6 +695,26 @@ compose() {
     run_compose "${COMPOSE_ARGS[@]}" "$@"
 }
 
+resolve_bundled_image_refs() {
+    local images image_ref
+    BUNDLED_CONTROL_IMAGE_REF=""
+    BUNDLED_WEB_IMAGE_REF=""
+    BUNDLED_POSTGRES_IMAGE_REF=""
+    # Let Compose resolve .env quoting, comments and exported overrides. The
+    # production Compose owns these three image repositories.
+    images="$(run_compose -f "$REPO_ROOT/docker-compose.yml" config --images)" || \
+        die "无法解析内置部署的镜像配置"
+    while IFS= read -r image_ref; do
+        case "$image_ref" in
+            ghcr.io/qimaoww/qcontrol-plane:*) BUNDLED_CONTROL_IMAGE_REF="$image_ref" ;;
+            ghcr.io/qimaoww/qcontrol-web:*) BUNDLED_WEB_IMAGE_REF="$image_ref" ;;
+            postgres:*|docker.io/library/postgres:*) BUNDLED_POSTGRES_IMAGE_REF="$image_ref" ;;
+        esac
+    done <<< "$images"
+    [ -n "$BUNDLED_CONTROL_IMAGE_REF" ] && [ -n "$BUNDLED_WEB_IMAGE_REF" ] && \
+        [ -n "$BUNDLED_POSTGRES_IMAGE_REF" ] || die "内置部署的镜像配置不完整"
+}
+
 prepare_external_update_compose() {
     # Merge only application settings. Do not regenerate the topology: an
     # existing deployment may have its own network, ports, CA mounts, etc.
@@ -740,11 +760,18 @@ show_diagnostics() {
 start_services() {
     echo "-> 校验 Docker Compose 配置"
     compose config --quiet || die "Docker Compose 配置无效，请检查 .env 和连接参数"
-    if [ "$(read_env_key QCH_IMAGE_TAG)" = "local" ]; then
+    resolve_bundled_image_refs
+    if [ "$BUNDLED_CONTROL_IMAGE_REF" = "ghcr.io/qimaoww/qcontrol-plane:local" ]; then
         echo "-> 构建并启动本地 Docker 镜像"
         if ! compose up -d --build; then
             show_diagnostics
             die "Docker Compose 启动失败"
+        fi
+    elif [ "$ACTION" = "update" ]; then
+        echo "-> 使用已拉取的应用镜像启动 Docker Compose"
+        if ! compose up -d --no-build --pull never; then
+            show_diagnostics
+            die "Docker Compose 启动失败；请检查镜像拉取和 Compose 配置"
         fi
     else
         echo "-> 拉取 GHCR 镜像并启动 Docker Compose"
@@ -861,6 +888,90 @@ update_container_id() {
     count="$(printf '%s\n' "$ids" | awk 'NF { count++ } END { print count + 0 }')"
     [ "$count" -eq 1 ] || die "更新前必须有且仅有一个正在运行的 $service 容器"
     printf '%s' "$ids"
+}
+
+current_update_image_id() {
+    local service="$1" ids count image_id
+    if [ "$MODE" = bundled ]; then
+        # Older bundled installs may not have the generated secret override yet.
+        ids="$(run_compose -f "$REPO_ROOT/docker-compose.yml" ps -q "$service")" || \
+            die "无法读取 $service 当前容器"
+    else
+        ids="$(compose ps -q "$service")" || die "无法读取 $service 当前容器"
+    fi
+    count="$(printf '%s\n' "$ids" | awk 'NF { count++ } END { print count + 0 }')"
+    [ "$count" -le 1 ] || die "更新前发现多个正在运行的 $service 容器"
+    [ "$count" -eq 1 ] || return 0
+    image_id="$(docker inspect --format '{{.Image}}' "$ids")" || die "无法读取 $service 当前镜像"
+    [ -n "$image_id" ] || die "无法读取 $service 当前镜像"
+    printf '%s' "$image_id"
+}
+
+update_image_version() {
+    local image_id="$1" version short_id
+    if [ -z "$image_id" ]; then
+        printf '未运行'
+        return 0
+    fi
+    version="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.version" }}' "$image_id")" || \
+        die "无法读取镜像版本：$image_id"
+    case "$version" in
+        ""|"<no value>")
+            short_id="${image_id#sha256:}"
+            printf '镜像 %s' "${short_id:0:12}"
+            ;;
+        *)
+            if [[ "$version" =~ ^[0-9a-fA-F]{40}$ ]]; then
+                version="${version:0:12}"
+            fi
+            printf '%s' "$version"
+            ;;
+    esac
+}
+
+show_current_application_versions() {
+    local control_version web_version
+    control_version="$(update_image_version "$1")" || die "无法读取 control-plane 当前版本"
+    web_version="$(update_image_version "$2")" || die "无法读取 qcontrol-web 当前版本"
+    ui_section "当前运行版本"
+    ui_service_row control-plane "当前版本：$control_version"
+    ui_service_row qcontrol-web "当前版本：$web_version"
+}
+
+show_update_targets() {
+    ui_section "目标镜像"
+    ui_service_row control-plane "目标标签：${1##*:}"
+    ui_service_row qcontrol-web "目标标签：${2##*:}"
+    if [ -n "${3:-}" ]; then
+        ui_service_row PostgreSQL "目标标签：${3##*:}"
+    fi
+}
+
+show_target_image_version() {
+    local service="$1" current="$2" target="$3" version="$4" status
+    if [ -z "$current" ]; then
+        status="待启动"
+    elif [ "$current" = "$target" ]; then
+        status="无变化"
+    else
+        status="有更新"
+    fi
+    ui_service_row "$service" "目标版本：$version [$status]"
+}
+
+application_update_available() {
+    local control_ref="$1" web_ref="$2" current_control="$3" current_web="$4" target_control target_web
+    target_control="$(docker image inspect --format '{{.Id}}' "$control_ref")" || die "无法读取目标镜像：$control_ref"
+    target_web="$(docker image inspect --format '{{.Id}}' "$web_ref")" || die "无法读取目标镜像：$web_ref"
+    [ -n "$target_control" ] && [ -n "$target_web" ] || die "目标镜像 ID 为空，无法判断是否有更新"
+
+    local target_control_version target_web_version
+    target_control_version="$(update_image_version "$target_control")" || die "无法读取 control-plane 目标版本"
+    target_web_version="$(update_image_version "$target_web")" || die "无法读取 qcontrol-web 目标版本"
+    ui_section "镜像对比结果"
+    show_target_image_version control-plane "$current_control" "$target_control" "$target_control_version"
+    show_target_image_version qcontrol-web "$current_web" "$target_web" "$target_web_version"
+    [ "$current_control" != "$target_control" ] || [ "$current_web" != "$target_web" ]
 }
 
 capture_update_image() {
@@ -1025,11 +1136,25 @@ update_external_services() (
     check_external_endpoints "$panel_url" || die "更新前原部署未通过 healthz 和 readyz 检查"
     begin_external_update
 
+    show_current_application_versions "$UPDATE_CONTROL_IMAGE" "$UPDATE_WEB_IMAGE"
+    show_update_targets ghcr.io/qimaoww/qcontrol-plane:latest ghcr.io/qimaoww/qcontrol-web:latest
+    ui_section "正在检查更新（拉取目标镜像）..."
+    docker pull ghcr.io/qimaoww/qcontrol-plane:latest || die "拉取 control-plane:latest 失败"
+    docker pull ghcr.io/qimaoww/qcontrol-web:latest || die "拉取 qcontrol-web:latest 失败"
+    if ! application_update_available \
+        ghcr.io/qimaoww/qcontrol-plane:latest ghcr.io/qimaoww/qcontrol-web:latest \
+        "$UPDATE_CONTROL_IMAGE" "$UPDATE_WEB_IMAGE"; then
+        show_no_update_result
+        UPDATE_ROLLBACK_ARMED=false
+        trap - EXIT HUP INT TERM
+        cleanup_external_update_backup
+        return 0
+    fi
+
+    echo "-> 检测到镜像变化，开始更新"
     echo "-> 保留现有拓扑并更新 $EXTERNAL_COMPOSE_FILE 中的应用配置"
     prepare_external_update_compose
     cmp -s "$UPDATE_BACKUP_DIR/.env" "$ENV_FILE" || die "更新过程改写了 .env，已终止"
-    docker pull ghcr.io/qimaoww/qcontrol-plane:latest || die "拉取 control-plane:latest 失败"
-    docker pull ghcr.io/qimaoww/qcontrol-web:latest || die "拉取 qcontrol-web:latest 失败"
 
     compose config --quiet || die "Docker Compose 配置校验失败"
     UPDATE_SERVICES_CHANGED=true
@@ -1047,6 +1172,7 @@ update_external_services() (
     UPDATE_ROLLBACK_ARMED=false
     trap - EXIT HUP INT TERM
     cleanup_external_update_backup
+    show_result "更新完成" "$panel_url" "docker compose -p qcontrolhub --project-directory $WORK_DIR --env-file $ENV_FILE -f $EXTERNAL_COMPOSE_FILE down"
 )
 
 prepare_default_agent_engines() {
@@ -1286,21 +1412,103 @@ prepare_external_env() {
     fi
 }
 
+# Presentation stays independent of Docker so menus can be previewed safely.
+ui_text() {
+    local style="$1"
+    shift
+    if [ -t 1 ] && [ "${TERM:-dumb}" != dumb ] && [ -z "${NO_COLOR:-}" ]; then
+        printf '\033[%sm%s\033[0m\n' "$style" "$*"
+    else
+        printf '%s\n' "$*"
+    fi
+}
+
+ui_width() {
+    local width="${COLUMNS:-72}"
+    [[ "$width" =~ ^[1-9][0-9]{0,3}$ ]] || width=72
+    [ "$width" -le 72 ] || width=72
+    printf '%s' "$width"
+}
+
+ui_rule() {
+    local line
+    printf -v line '%*s' "$(ui_width)" ''
+    ui_text 2 "${line// /-}"
+}
+
+ui_heading() {
+    printf '\n'
+    ui_rule
+    ui_text '1;36' "  QControlHub / $1"
+    ui_rule
+}
+
+ui_section() {
+    printf '\n'
+    ui_text 1 "  $1"
+}
+
+ui_detail() {
+    ui_text 2 "  $1"
+    printf '    %s\n' "$2"
+}
+
+# Only ASCII service names use padding; Chinese labels stay unpadded.
+ui_service_row() {
+    if [ "$(ui_width)" -lt 60 ]; then
+        ui_detail "$1" "$2"
+    else
+        printf '  %-16s %s\n' "$1" "$2"
+    fi
+}
+
+show_action_menu() {
+    ui_heading "管理菜单"
+    ui_section "工作目录"
+    printf '  %s\n' "$WORK_DIR"
+    ui_section "部署管理"
+    printf '  [1] 安装 / 重新配置\n'
+    printf '  [2] 更新现有部署\n'
+    ui_text 2 "      检查镜像版本，无变化时跳过更新"
+    ui_section "维护选项"
+    printf '  [3] 卸载服务\n'
+    ui_text 2 "      保留配置、密钥和数据库卷"
+    printf '  [4] 设置目录\n'
+    printf '\n'
+}
+
+show_mode_menu() {
+    ui_heading "数据库模式"
+    ui_section "选择部署方式"
+    printf '  [1] 内置 PostgreSQL（推荐）\n'
+    ui_text 2 "      自动部署数据库和应用，适合从零安装"
+    printf '\n  [2] 连接外部 PostgreSQL\n'
+    ui_text 2 "      复用已有数据库，仅部署应用"
+    printf '\n'
+}
+
+show_no_update_result() {
+    ui_heading "检查完成"
+    ui_text '1;32' "  当前镜像与目标版本一致，无需更新"
+    ui_text 2 "  保留当前运行容器和部署配置"
+    printf '\n'
+}
+
 show_result() {
     local result_name="$1" url="$2" stop_cmd="$3"
-    echo ""
-    echo "============================================"
-    echo "  QControlHub $result_name"
-    echo "============================================"
-    echo ""
-    echo "  访问地址：  $url"
-    echo "  管理员 token：请使用密码管理器中保存的原文"
-    echo "  配置文件：  $ENV_FILE"
-    [ -d "$SECRET_DIR" ] && echo "  既有密钥目录：$SECRET_DIR"
-    echo ""
-    echo "  停止服务：  $stop_cmd"
-    echo "  查看日志：  ${stop_cmd/down/logs -f}"
-    echo ""
+    ui_heading "$result_name"
+    ui_section "访问面板"
+    ui_text '1;32' "  $url"
+    ui_text 2 "  登录方式：用户名 + 密码 / 管理令牌"
+    ui_section "部署文件"
+    ui_detail "配置文件" "$ENV_FILE"
+    if [ -d "$SECRET_DIR" ]; then
+        ui_detail "既有密钥目录" "$SECRET_DIR"
+    fi
+    ui_section "常用命令"
+    ui_detail "查看日志" "${stop_cmd% down} logs -f"
+    ui_detail "停止服务" "$stop_cmd"
+    printf '\n'
 }
 
 local_panel_url() {
@@ -1319,15 +1527,11 @@ local_panel_url() {
 
 show_admin_token_once() {
     [ -n "$ADMIN_TOKEN_TO_DISPLAY" ] || return 0
-    echo ""
-    echo "============================================"
-    echo "  管理员 token（仅本次显示）"
-    echo "  $ADMIN_TOKEN_TO_DISPLAY"
-    echo ""
-    echo "  请立即保存到密码管理器。"
-    echo "  .env 只保存 SHA-256 摘要，之后无法恢复原文。"
-    echo "============================================"
-    echo ""
+    ui_heading "管理员 token（仅本次显示）"
+    printf '\n  %s\n\n' "$ADMIN_TOKEN_TO_DISPLAY"
+    ui_text '1;33' "  请立即保存到密码管理器。"
+    ui_text 2 "  .env 只保存 SHA-256 摘要，之后无法恢复原文。"
+    printf '\n'
     ADMIN_TOKEN_TO_DISPLAY=""
 }
 
@@ -1356,7 +1560,8 @@ resolve_work_dir() {
 choose_install_dir() {
     local input_dir
     echo ""
-    echo "当前目录：$WORK_DIR"
+    ui_heading "设置目录"
+    ui_detail "当前目录" "$WORK_DIR"
     echo "请输入新的目录（直接回车保持不变）："
     read -r input_dir
     case "$input_dir" in
@@ -1368,15 +1573,8 @@ choose_install_dir() {
 choose_action() {
     [ -t 0 ] || die "未指定操作；非交互模式请使用 -o install、-o update 或 -o uninstall"
     while :; do
-        echo ""
-        echo "QControlHub 管理菜单"
-        echo ""
-        echo "  1. 安装 / 重新配置"
-        echo "  2. 更新现有部署"
-        echo "  3. 卸载服务（保留配置、密钥和数据库卷）"
-        echo "  4. 设置目录"
-        echo ""
-        read -r -p "请选择 [1-4] " choice
+        show_action_menu
+        read -r -p "  请选择 [1-4] > " choice
         case "$choice" in
             1) ACTION="install"; return ;;
             2) ACTION="update"; return ;;
@@ -1389,13 +1587,8 @@ choose_action() {
 
 choose_mode() {
     [ -t 0 ] || die "未指定部署模式；非交互模式请使用 -m bundled 或 -m external"
-    echo ""
-    echo "QControlHub 数据库模式"
-    echo ""
-    echo "  1. 内置 PostgreSQL + 控制面（推荐）"
-    echo "  2. 连接外部 PostgreSQL"
-    echo ""
-    read -r -p "请选择 [1-2] " choice
+    show_mode_menu
+    read -r -p "  请选择 [1-2] > " choice
     case "$choice" in
         1) MODE="bundled" ;;
         2) MODE="external" ;;
@@ -1435,13 +1628,12 @@ configure_compose_args() {
 uninstall_services() {
     echo "-> 停止并移除 QControlHub 服务容器和网络"
     compose down --remove-orphans
-    echo ""
-    echo "============================================"
-    echo "  QControlHub 服务已卸载"
-    echo "============================================"
-    echo ""
-    echo "  已保留配置：$ENV_FILE"
-    [ -d "$SECRET_DIR" ] && echo "  已保留密钥：$SECRET_DIR"
+    ui_heading "服务已卸载"
+    ui_section "已保留的部署数据"
+    ui_detail "已保留配置" "$ENV_FILE"
+    if [ -d "$SECRET_DIR" ]; then
+        ui_detail "已保留密钥" "$SECRET_DIR"
+    fi
     if [ "$MODE" = "bundled" ]; then
         echo "  已保留数据：Docker PostgreSQL 命名卷"
     else
@@ -1493,7 +1685,44 @@ fi
 case "$MODE" in
     bundled)
         if [ "$ACTION" = "update" ]; then
-            echo "-> 更新内置 PostgreSQL 部署并复用现有配置"
+            ui_heading "更新检查"
+            ui_text 2 "  更新内置 PostgreSQL 部署并复用现有配置"
+            [ -f "$ENV_FILE" ] || die "未找到现有部署配置：$ENV_FILE"
+            resolve_bundled_image_refs
+            current_control_image="$(current_update_image_id control-plane)" || die "无法读取 control-plane 当前镜像"
+            current_web_image="$(current_update_image_id qcontrol-web)" || die "无法读取 qcontrol-web 当前镜像"
+            current_postgres_image="$(current_update_image_id postgres)" || die "无法读取 PostgreSQL 当前镜像"
+            show_current_application_versions "$current_control_image" "$current_web_image"
+            current_postgres_version="$(update_image_version "$current_postgres_image")" || die "无法读取 PostgreSQL 当前版本"
+            ui_service_row PostgreSQL "当前版本：$current_postgres_version"
+            show_update_targets "$BUNDLED_CONTROL_IMAGE_REF" "$BUNDLED_WEB_IMAGE_REF" "$BUNDLED_POSTGRES_IMAGE_REF"
+            if [ "$BUNDLED_CONTROL_IMAGE_REF" = "ghcr.io/qimaoww/qcontrol-plane:local" ]; then
+                echo "-> 本地构建模式无法检查远程镜像版本，将重新构建"
+            else
+                ui_section "正在检查更新（拉取目标镜像）..."
+                docker pull "$BUNDLED_CONTROL_IMAGE_REF" || die "拉取 $BUNDLED_CONTROL_IMAGE_REF 失败"
+                docker pull "$BUNDLED_WEB_IMAGE_REF" || die "拉取 $BUNDLED_WEB_IMAGE_REF 失败"
+                docker pull "$BUNDLED_POSTGRES_IMAGE_REF" || die "拉取 $BUNDLED_POSTGRES_IMAGE_REF 失败"
+                app_changed=false
+                if application_update_available "$BUNDLED_CONTROL_IMAGE_REF" "$BUNDLED_WEB_IMAGE_REF" \
+                    "$current_control_image" "$current_web_image"; then
+                    app_changed=true
+                fi
+                target_postgres_image="$(docker image inspect --format '{{.Id}}' "$BUNDLED_POSTGRES_IMAGE_REF")" || \
+                    die "无法读取 PostgreSQL 目标镜像"
+                [ -n "$target_postgres_image" ] || die "PostgreSQL 目标镜像 ID 为空"
+                target_postgres_version="$(update_image_version "$target_postgres_image")" || die "无法读取 PostgreSQL 目标版本"
+                show_target_image_version PostgreSQL "$current_postgres_image" "$target_postgres_image" "$target_postgres_version"
+                if [ "$app_changed" = false ] && [ "$current_postgres_image" = "$target_postgres_image" ]; then
+                    if [ "$FORCE" = false ]; then
+                        show_no_update_result
+                        exit 0
+                    fi
+                    echo "-> 镜像无变化，继续执行 -f 指定的密钥轮换"
+                else
+                    echo "-> 检测到镜像变化，开始更新"
+                fi
+            fi
         elif [ -f "$ENV_FILE" ] && [ "$FORCE" = false ]; then
             echo "-> 复用已有 .env，并补齐缺失配置"
         elif [ "$FORCE" = true ]; then
@@ -1518,13 +1747,15 @@ case "$MODE" in
         ;;
     external)
         if [ "$ACTION" = "update" ]; then
-            echo "-> 更新外部 PostgreSQL 部署并复用现有配置"
+            ui_heading "更新检查"
+            ui_text 2 "  更新外部 PostgreSQL 部署并复用现有配置"
             [ -z "$DATABASE_URL" ] || die "更新禁止使用 -d；QCH_DATABASE_URL 必须原样复用"
             [ -z "$ADMIN_TOKEN" ] || die "更新禁止使用 -a；管理员令牌不得轮换"
             [ -z "$DOCKER_NETWORK" ] || die "更新禁止使用 -n；Docker 网络配置必须原样复用"
             [ "$FORCE" = false ] || die "外部 PostgreSQL 更新不支持 -f；令牌和配置加密密钥不得轮换"
             validate_external_update_env
             update_external_services
+            exit 0
         elif [ -f "$ENV_FILE" ] && [ "$FORCE" = false ]; then
             echo "-> 复用已有 .env，并补齐缺失配置"
             prepare_external_env
@@ -1558,7 +1789,6 @@ case "$MODE" in
             die "应用未在 ${READY_TIMEOUT} 秒内通过 healthz 和 readyz 检查"
         fi
 
-        [ "$ACTION" = "update" ] && result_name="更新完成" || result_name="部署完成"
-        show_result "$result_name" "$panel_url" "docker compose -p qcontrolhub --project-directory $WORK_DIR --env-file $ENV_FILE -f $EXTERNAL_COMPOSE_FILE down"
+        show_result "部署完成" "$panel_url" "docker compose -p qcontrolhub --project-directory $WORK_DIR --env-file $ENV_FILE -f $EXTERNAL_COMPOSE_FILE down"
         ;;
 esac

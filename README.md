@@ -57,7 +57,7 @@ bash <(curl -fsSL "https://raw.githubusercontent.com/qimaoww/qcontrolhub/main/de
 
 该命令不会克隆源码仓库，只把运行脚本和生产 Compose 文件保存到当前目录下的 `qcontrolhub`；可通过 `QCH_INSTALL_DIR` 指定其他持久化目录，交互式菜单中选择的目录也会保存到当前用户配置，后续从远程一键命令运行时会直接复用为一键安装目录。已保存目录中已有的 `.env`、`.secrets` 和数据会保留，只更新运行脚本与生产 Compose 文件。从该安装目录内再次运行也会自动复用当前目录，不会创建嵌套目录。管理员 token 原文只在创建或轮换时显示一次，`.env` 仅保存 SHA-256 摘要；配置加密 keyring 保存在宿主机私有的 `.secrets` 目录，通过只读文件挂载交给控制面，不进入容器环境。一键脚本的参数与重复执行行为见 [`deploy/quick-start.sh`](deploy/quick-start.sh)。它不替代 TLS、反向代理、数据库保护、备份与恢复演练；上线前请完成全部生产部署步骤并核对安全基线。
 
-内置与外部 PostgreSQL 两种模式均保留。外部模式安装时可选择默认项目网络或自定义已有 Docker 网络；更新会逐字节保留原 `.env`（包括旧明文凭据或既有 secret 文件来源），只更新两个 `latest` 应用镜像，启动/健康检查失败时尝试恢复旧 Compose 与镜像。控制面原有的 schema 初始化/升级行为不变，更新前仍须备份数据库。
+内置与外部 PostgreSQL 两种模式均保留。外部模式安装时可选择默认项目网络或自定义已有 Docker 网络。选择“更新”时，脚本先显示当前版本和目标标签，再拉取目标镜像并比较镜像 ID；目标镜像都未变化时提示“当前镜像与目标版本一致，无需更新”并跳过服务重建，有变化时才更新。固定标签只与该标签比较。内置模式按 Compose 最终解析的 `QCH_IMAGE_TAG` 检查两个应用镜像及 PostgreSQL 镜像；`local` 模式仍会重新构建。外部模式更新会逐字节保留原 `.env`（包括旧明文凭据或既有 secret 文件来源），只更新两个 `latest` 应用镜像，启动/健康检查失败时尝试恢复旧 Compose 与镜像。控制面原有的 schema 初始化/升级行为不变，更新前仍须备份数据库。
 
 ### Agent 接入
 
@@ -72,6 +72,15 @@ Alpine 会自动安装 `ca-certificates`、`coreutils`、`curl`、`libcap`、`nf
 Agent 以高权限 root 服务运行，远程任务会真实修改配置、服务、内核二进制或 QAgent 专用流量规则。systemd unit 提供更强的文件系统沙箱；OpenRC 没有同等级的 `ProtectSystem` 隔离，应只在专用节点使用。
 
 ## 开发与验证
+
+无需 Docker 即可在本地预览部署脚本的菜单、更新检查和完成页面；输出使用示例数据，不执行部署或修改配置：
+
+~~~bash
+bash scripts/preview-quick-start.sh all
+COLUMNS=40 NO_COLOR=1 bash scripts/preview-quick-start.sh update
+~~~
+
+省略参数只显示管理菜单，也可指定 menu、mode、update、unchanged 或 result。终端输出支持颜色，重定向日志、TERM=dumb 或设置非空 NO_COLOR 时自动使用纯文本。
 
 | 命令 | 用途 |
 | --- | --- |

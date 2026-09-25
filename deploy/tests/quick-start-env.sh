@@ -250,7 +250,7 @@ update_env_file "QCH_BIND_ADDRESS=192.0.2.10"
 assert_equal "specific bind panel URL" "http://192.0.2.10:18080" "$(local_panel_url)"
 update_env_file "QCH_BIND_ADDRESS=::"
 assert_equal "IPv6 bind panel URL" "http://[::1]:18080" "$(local_panel_url)"
-for required_menu_text in '安装 / 重新配置' '更新现有部署' '卸载服务（保留配置、密钥和数据库卷）'; do
+for required_menu_text in '安装 / 重新配置' '更新现有部署' '卸载服务' '保留配置、密钥和数据库卷'; do
     grep -Fq "$required_menu_text" "$repo_root/deploy/quick-start.sh"
 done
 
