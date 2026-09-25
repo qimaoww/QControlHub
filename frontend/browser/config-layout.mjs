@@ -91,10 +91,18 @@ export async function testConfigLayoutRuntime({ testAPI }) {
     assert.ok(more.open && document.activeElement.matches('[role="menuitem"]'),"tools menu cannot be opened by keyboard");
     more.dispatchEvent(new KeyboardEvent("keydown",{key:"Escape",bubbles:true}));
     assert.ok(!more.open && document.activeElement === more.querySelector("summary"),"tools menu did not restore focus after Escape");
-    document.querySelectorAll(".live-engine-tab").forEach(tab => {
-      assert.equal(tab.offsetWidth,140,"engine buttons must have fixed width");
-      assert.equal(tab.offsetHeight,innerWidth <= 820 ? 44 : 40,"engine buttons must preserve their responsive target height");
+    const engineTabs = [...document.querySelectorAll(".live-engine-tab")];
+    engineTabs.forEach(tab => {
+      assert.ok(Math.abs(tab.offsetWidth-engineTabs[0].offsetWidth) <= 1,"engine buttons must have equal widths");
+      assert.ok(tab.offsetHeight >= (innerWidth <= 820 ? 44 : 40),"engine buttons lost their minimum target height");
+      const bounds = tab.getBoundingClientRect();
+      assert.ok(bounds.left >= 0 && bounds.right <= innerWidth,"engine choice is hidden outside the viewport");
     });
+    if (innerWidth <= 600) {
+      assert.equal(engineTabs[0].offsetTop,engineTabs[1].offsetTop,"first engine pair must share a row");
+      assert.ok(engineTabs[2].offsetTop > engineTabs[0].offsetTop,"mobile engines must form two rows");
+      assert.equal(engineTabs[2].offsetTop,engineTabs[3].offsetTop,"second engine pair must share a row");
+    }
     if (innerWidth <= 820) {
       const bar = document.querySelector(".live-engine-bar").getBoundingClientRect();
       const tab = document.querySelector(".live-engine-tab").getBoundingClientRect();

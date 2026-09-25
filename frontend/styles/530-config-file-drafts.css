@@ -130,8 +130,8 @@
   .page-live-config .workspace-actions{display:none}
   .live-config-workspace>.editor-toolbar{padding:16px 16px 8px;align-items:flex-start}
   .live-config-workspace>.editor-toolbar h2{font-size:calc(18px * var(--ui-font-scale))}
-  .live-engine-bar{padding:0 16px;gap:4px;scroll-padding-inline:16px}
-  .live-engine-tab{height:44px;min-height:44px}
+  .live-engine-bar{padding:12px 16px}
+  .live-engine-tab{min-height:44px}
   .live-config-details{padding:4px 16px 14px;gap:6px}
   .live-config-workspace .code-workspace>.code-editor-toolbar{flex-wrap:wrap;gap:12px;padding:16px}
   .live-config-workspace .code-file-meta{max-width:100%;flex:1 0 100%}
@@ -147,6 +147,11 @@
   .live-config-workspace .code-gutter{font-size:calc(11px * var(--ui-font-scale));line-height:calc(21px * var(--ui-font-scale));padding-top:14px}
   .live-config-workspace .code-workspace>footer>div{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;width:100%;margin:0}
   .live-config-workspace [data-live-intent="deploy"]{grid-column:1/-1}
+}
+
+@media(max-width:600px){
+  .live-engine-bar{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .live-engine-tab{flex-direction:column;gap:3px;min-height:58px;padding:7px 10px}
 }
 
 /* Selection, current-file tools, source, and submission each have one home. */
