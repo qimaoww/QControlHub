@@ -81,7 +81,7 @@ export function bindConfigInbounds(ctx) {
   if (!navigation) {
     navigation = document.createElement("nav");
     navigation.className = "config-file-buttons config-empty-actions";
-    container.querySelector(".live-config-details").after(navigation);
+    container.querySelector(".live-engine-bar").after(navigation);
   }
   const menu = document.createElement("details");
   menu.className = "config-inbound-menu";

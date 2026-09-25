@@ -78,6 +78,12 @@ export async function testConfigLayoutRuntime({ testAPI }) {
     assert.ok(nav.bottom <= frame.top + 1,"file navigation must stay above the full-width source");
     assert.ok(frame.width >= workspace.getBoundingClientRect().width - 3,"source editor lost width to an extra rail");
     assert.equal(document.querySelectorAll(".config-file-navigation").length,0,"redundant toolbar still separates selection from source");
+    assert.ok(workspace.querySelector('.config-file-buttons [data-inbound-action="add"]'),"add action must stay with file navigation");
+    assert.ok(workspace.querySelector('.code-editor-toolbar [data-code-reset]'),"reset must stay with current-file tools");
+    assert.ok(workspace.querySelector('.code-editor-toolbar [data-code-format]'),"format must stay with current-file tools");
+    assert.ok([...workspace.querySelectorAll('.code-workspace>footer button')].every(button => button.type === "submit"),"submission footer mixes file tools with save actions");
+    const details = workspace.querySelector(".live-config-details").getBoundingClientRect();
+    assert.ok(details.bottom <= workspace.querySelector(".live-engine-bar").getBoundingClientRect().top + 1,"node metadata must stay with the heading");
     assert.ok(document.querySelector('[data-inbound-action="history"]').closest(".config-tools-menu"),"secondary tools are not grouped in the header");
     const more = document.querySelector(".config-tools-menu");
     more.querySelector("summary").focus();
@@ -87,12 +93,12 @@ export async function testConfigLayoutRuntime({ testAPI }) {
     assert.ok(!more.open && document.activeElement === more.querySelector("summary"),"tools menu did not restore focus after Escape");
     document.querySelectorAll(".live-engine-tab").forEach(tab => {
       assert.equal(tab.offsetWidth,140,"engine buttons must have fixed width");
-      assert.equal(tab.offsetHeight,40,"engine buttons must have fixed height");
+      assert.equal(tab.offsetHeight,innerWidth <= 820 ? 44 : 40,"engine buttons must preserve their responsive target height");
     });
     if (innerWidth <= 820) {
       const bar = document.querySelector(".live-engine-bar").getBoundingClientRect();
       const tab = document.querySelector(".live-engine-tab").getBoundingClientRect();
-      assert.ok(tab.top-bar.top >= 15.5 && bar.bottom-tab.bottom >= 15.5,"mobile tabs touch section dividers");
+      assert.ok(tab.left-bar.left >= 15.5,"mobile engine tabs lost their horizontal inset");
       const toolbar = document.querySelector(".code-editor-toolbar").getBoundingClientRect();
       const file = document.querySelector(".code-file-meta").getBoundingClientRect();
       const meta = document.querySelector(".code-editor-meta").getBoundingClientRect();

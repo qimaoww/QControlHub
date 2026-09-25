@@ -257,7 +257,7 @@ export async function testConfigInboundsRuntime(preview = false) {
   assert(refreshFailure.writes.length === 1 && refreshFailure.notices.some(message=>message.includes("已保存且任务已提交")), "refresh failure misreported the durable mutation");
   refreshFailure.failRefresh = false;
   document.querySelector("[data-preset-status] button").click();
-  await waitFor(()=>document.querySelector('.editor-toolbar-state b')?.textContent === "v2", "refresh recovery did not bind the saved revision");
+  await waitFor(()=>document.querySelector('.live-config-version')?.textContent === "配置 v2", "refresh recovery did not bind the saved revision");
   assert(refreshFailure.writes.length === 1, "reload repeated the inbound mutation");
   refreshFailure.dispose();
   await testCommonConfigRuntime();

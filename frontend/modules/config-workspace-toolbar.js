@@ -9,7 +9,14 @@ export function composeConfigWorkspaceToolbar({ can, container, form, navigation
     selectionActions.className = "config-selection-actions";
     [...navigation.children].filter(element => !element.matches(".config-file-list"))
       .forEach(element => selectionActions.append(element));
-    toolbar.append(selectionActions, sourceActions);
+    navigation.append(sourceActions);
+    const editorActions = document.createElement("div");
+    editorActions.className = "config-editor-actions";
+    editorActions.setAttribute("role", "group");
+    editorActions.setAttribute("aria-label", "当前文件操作");
+    form.querySelectorAll("[data-code-reset], [data-code-format]")
+      .forEach(button => editorActions.append(button));
+    toolbar.append(selectionActions, editorActions);
     const draft = form.querySelector(".config-draft-summary");
     if (draft) form.querySelector(".code-workspace>footer").prepend(draft);
     form.querySelector(".config-file-navigation")?.remove();
