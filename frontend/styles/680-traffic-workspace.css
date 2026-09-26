@@ -1,0 +1,248 @@
+/* Keep summary, filters and per-port actions in distinct, readable rows. */
+.traffic-workspace .traffic-control-panel {
+  display:flex;
+  flex-direction:column;
+  border-radius:14px;
+  margin-bottom:18px;
+}
+.traffic-control-panel>.traffic-overview {
+  display:grid;
+  grid-template-columns:minmax(0,1fr) minmax(0,1fr);
+  align-items:center;
+  gap:24px;
+  padding:20px;
+  order:-1;
+}
+.traffic-overview>.traffic-total {
+  display:grid;
+  grid-template-columns:minmax(0,1fr);
+  justify-items:start;
+  gap:6px;
+  min-width:0;
+  margin:0;
+  padding:0;
+  border:0;
+  background:transparent;
+}
+.traffic-overview .traffic-total>span:first-child {
+  color:var(--muted);
+  font-size:calc(11px * var(--ui-font-scale));
+  overflow-wrap:anywhere;
+}
+.traffic-overview .traffic-total>div {
+  display:flex;
+  align-items:baseline;
+  flex-wrap:wrap;
+  gap:8px;
+}
+.traffic-overview .traffic-total strong {
+  font-size:calc(28px * var(--ui-font-scale));
+  line-height:1.2;
+  letter-spacing:-.035em;
+  font-variant-numeric:tabular-nums;
+}
+.traffic-overview .traffic-total small {
+  color:var(--muted);
+  font-size:calc(12px * var(--ui-font-scale));
+}
+.traffic-overview .traffic-total-metering {
+  padding:0;
+  background:transparent;
+  font-size:calc(10px * var(--ui-font-scale))!important;
+  font-weight:500;
+  text-align:left;
+}
+.traffic-overview .traffic-total progress {
+  width:min(100%,320px);
+  height:6px;
+  accent-color:var(--accent);
+}
+.traffic-overview-stats {
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:12px;
+  margin:0;
+}
+.traffic-overview-stats>div {
+  min-width:0;
+  padding-left:18px;
+  border-left:1px solid var(--line);
+}
+.traffic-overview-stats dt {
+  color:var(--muted);
+  font-size:calc(11px * var(--ui-font-scale));
+}
+.traffic-overview-stats dd {
+  display:flex;
+  align-items:baseline;
+  flex-wrap:wrap;
+  gap:5px;
+  margin:5px 0 0;
+  font-size:calc(23px * var(--ui-font-scale));
+  font-weight:750;
+  font-variant-numeric:tabular-nums;
+}
+.traffic-overview-stats small {
+  color:var(--muted);
+  font-size:calc(11px * var(--ui-font-scale));
+  font-weight:400;
+}
+.traffic-workspace .traffic-control-panel>.traffic-filters {
+  grid-template-columns:minmax(0,1fr) minmax(0,1.5fr) minmax(0,1fr) auto;
+  gap:12px;
+  padding:14px 20px;
+  border-top:1px solid var(--line);
+  border-radius:0 0 14px 14px;
+  background:var(--surface-2);
+}
+.traffic-workspace .traffic-filters label {
+  min-width:0;
+  font-size:calc(11px * var(--ui-font-scale));
+}
+.traffic-workspace .traffic-filters select,
+.traffic-workspace .traffic-filters>.button {
+  width:100%;
+  min-width:0;
+  height:38px;
+  font-size:calc(11px * var(--ui-font-scale));
+}
+.traffic-workspace .traffic-policy-list-head {
+  gap:8px 16px;
+  margin-bottom:10px;
+  flex-wrap:wrap;
+}
+.traffic-workspace .traffic-policy-list-head>div { min-width:0; }
+.traffic-workspace .traffic-policy-list-head small {
+  font-size:calc(10px * var(--ui-font-scale));
+  overflow-wrap:anywhere;
+}
+.traffic-workspace>.traffic-policy-grid {
+  grid-template-columns:repeat(auto-fill,minmax(min(100%,360px),1fr));
+  gap:14px;
+}
+.traffic-workspace .traffic-policy-card { min-width:0; border-radius:14px; }
+.traffic-workspace .traffic-policy-card>header {
+  display:flex;
+  flex-direction:row;
+  gap:10px;
+  padding:14px 16px;
+}
+.traffic-workspace .traffic-card-identity {
+  flex:1;
+  width:auto;
+  flex-wrap:nowrap;
+}
+.traffic-workspace .traffic-card-identity>.engine-badge { flex-shrink:0; }
+.traffic-workspace .traffic-card-identity strong { font-size:calc(13px * var(--ui-font-scale)); }
+.traffic-workspace .traffic-card-identity small,
+.traffic-workspace .traffic-card-identity code { font-size:calc(10px * var(--ui-font-scale)); }
+.traffic-workspace .traffic-card-identity small {
+  width:fit-content;
+  max-width:100%;
+  flex-wrap:wrap;
+  gap:4px;
+}
+.traffic-workspace .traffic-card-identity small>span,
+.traffic-workspace .traffic-card-identity small>code {
+  min-width:0;
+  max-width:100%;
+  padding:2px 6px;
+  border:1px solid color-mix(in srgb,currentColor 25%,var(--line));
+  border-radius:6px;
+}
+.traffic-workspace .traffic-card-identity .traffic-node-tag {
+  max-width:140px;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  background:var(--blue-soft);
+  color:var(--blue);
+}
+.traffic-workspace .traffic-card-identity .traffic-port-tag {
+  background:var(--accent-soft);
+  color:var(--accent);
+}
+.traffic-workspace .traffic-card-identity .traffic-protocol-tag {
+  background:var(--green-soft);
+  color:var(--green);
+}
+.traffic-workspace .traffic-policy-status { font-size:calc(10px * var(--ui-font-scale)); }
+.traffic-workspace .traffic-card-quota { flex:1; gap:7px; padding:14px 16px; }
+.traffic-workspace .traffic-card-quota>header { gap:8px; flex-wrap:wrap; }
+.traffic-workspace .traffic-card-quota>header span,
+.traffic-workspace .traffic-card-quota>header b,
+.traffic-workspace .traffic-card-quota>small { font-size:calc(11px * var(--ui-font-scale)); }
+.traffic-workspace .traffic-card-quota>small { overflow-wrap:anywhere; }
+.traffic-workspace .traffic-card-quota>div { flex-wrap:wrap; }
+.traffic-workspace .traffic-card-quota>div strong { font-size:calc(27px * var(--ui-font-scale)); font-variant-numeric:tabular-nums; }
+.traffic-workspace .traffic-card-transfer { grid-template-columns:repeat(2,minmax(0,1fr)); }
+.traffic-workspace .traffic-card-transfer>div {
+  grid-template-columns:28px minmax(0,1fr);
+  gap:3px 9px;
+  padding:12px 16px;
+}
+.traffic-workspace .traffic-card-transfer>div+div { border-left:1px solid var(--line); border-top:0; }
+.traffic-workspace .traffic-card-transfer>div>i { width:28px; height:28px; }
+.traffic-workspace .traffic-card-transfer small { font-size:calc(10px * var(--ui-font-scale)); }
+.traffic-workspace .traffic-card-transfer strong { font-size:calc(13px * var(--ui-font-scale)); font-variant-numeric:tabular-nums; }
+.traffic-workspace .traffic-card-transfer em {
+  grid-column:2;
+  font-size:calc(10px * var(--ui-font-scale));
+  overflow-wrap:anywhere;
+  white-space:normal;
+}
+.traffic-workspace .traffic-policy-card>footer {
+  display:flex;
+  flex-direction:column;
+  align-items:stretch;
+  gap:8px;
+  margin-top:auto;
+  padding:8px 16px 10px;
+}
+.traffic-card-meta { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; min-width:0; }
+.traffic-workspace .traffic-card-sync { min-width:0; font-size:calc(10px * var(--ui-font-scale)); overflow-wrap:anywhere; }
+.traffic-workspace .traffic-card-sync i { flex-shrink:0; }
+.traffic-workspace .traffic-card-actions {
+  justify-content:flex-end;
+  flex-wrap:wrap;
+  gap:8px;
+  margin:0;
+  padding-top:8px;
+  border-top:1px solid var(--line);
+}
+.traffic-workspace .traffic-card-actions .button,
+.traffic-workspace .traffic-status-button { min-height:32px; font-size:calc(11px * var(--ui-font-scale)); }
+.traffic-workspace .traffic-card-actions .button { min-width:58px; }
+.traffic-workspace .traffic-configured-port-body { flex:1; }
+.traffic-workspace>.qch-swap-panel>.empty.large { min-height:220px; display:grid; align-content:center; }
+@media(max-width:1100px) {
+  .traffic-control-panel>.traffic-overview { gap:16px; }
+  .traffic-overview-stats { gap:8px; }
+  .traffic-overview-stats>div { padding-left:12px; }
+}
+@media(max-width:680px) {
+  .traffic-control-panel>.traffic-overview { grid-template-columns:minmax(0,1fr); padding:16px; }
+  .traffic-overview-stats { padding-top:14px; border-top:1px solid var(--line); }
+  .traffic-overview-stats>div:first-child { padding-left:0; border-left:0; }
+  .traffic-workspace .traffic-control-panel>.traffic-filters { grid-template-columns:repeat(2,minmax(0,1fr)); padding:14px 16px; }
+  .traffic-workspace .traffic-filters>label:nth-child(2) { grid-column:1/-1; grid-row:1; }
+  .traffic-workspace .traffic-filters>.button { grid-column:1/-1; width:auto; justify-self:end; }
+  .traffic-workspace .traffic-policy-list-head { align-items:stretch; flex-direction:column; }
+  .traffic-workspace .traffic-policy-list-actions { justify-content:space-between; }
+  .traffic-workspace .traffic-policy-list-actions small { flex:1; }
+}
+@media(max-width:420px) {
+  .traffic-workspace .traffic-policy-card>header { align-items:flex-start; flex-wrap:wrap; padding:12px; }
+  .traffic-workspace .traffic-card-identity { flex-basis:100%; }
+  .traffic-workspace .traffic-card-controls { flex:1; justify-content:space-between; }
+  .traffic-workspace .traffic-card-quota { padding:14px 12px; }
+  .traffic-workspace .traffic-card-transfer>div { padding:12px 10px; gap:3px 6px; }
+  .traffic-workspace .traffic-policy-card>footer { padding-inline:12px; }
+}
+@media(pointer:coarse) {
+  .traffic-workspace .traffic-card-actions .button,
+  .traffic-workspace .traffic-status-button,
+  .traffic-workspace [data-traffic-sync],
+  .traffic-workspace .traffic-filters select,
+  .traffic-workspace .traffic-filters>.button { min-height:44px; }
+  .traffic-workspace .traffic-card-actions .button { flex:1; }
+}

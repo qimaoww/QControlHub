@@ -39,6 +39,19 @@ export async function testTrafficLayoutRuntime({ testAPI }) {
     try {
       for (const scale of ["1", "1.35"]) {
         root.style.setProperty("--ui-font-scale", scale);
+        const workspace = document.querySelector(".traffic-workspace");
+        assert.ok(workspace.scrollWidth <= workspace.clientWidth + 1, "traffic workspace overflows horizontally");
+        for (const card of workspace.querySelectorAll(".traffic-policy-card")) {
+          const cardBounds = card.getBoundingClientRect();
+          for (const element of card.querySelectorAll(".traffic-card-identity small, .traffic-card-transfer strong, .traffic-card-transfer em, .traffic-card-meta>.traffic-status-button, .traffic-card-actions button")) {
+            const box = element.getBoundingClientRect();
+            assert.ok(box.left >= cardBounds.left && box.right <= cardBounds.right, "traffic content extends beyond its card");
+            assert.ok(element.scrollWidth <= element.clientWidth + 1, "traffic metadata, rates or actions are clipped");
+          }
+          const meta = card.querySelector(".traffic-card-meta").getBoundingClientRect();
+          const actions = card.querySelector(".traffic-card-actions").getBoundingClientRect();
+          assert.ok(meta.bottom <= actions.top, "traffic status overlaps the action row");
+        }
         for (const animation of editDialog.getAnimations()) animation.finish();
         const bounds = editDialog.getBoundingClientRect();
         assert.ok(bounds.top >= -1 && bounds.bottom <= innerHeight + 1, "quota dialog extends outside the viewport");

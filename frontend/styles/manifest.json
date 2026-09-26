@@ -67,5 +67,6 @@
   "frontend/styles/640-dashboard.css",
   "frontend/styles/650-ip-quality.css",
   "frontend/styles/660-shell-feedback.css",
-  "frontend/styles/670-substore-cards.css"
+  "frontend/styles/670-substore-cards.css",
+  "frontend/styles/680-traffic-workspace.css"
 ]
