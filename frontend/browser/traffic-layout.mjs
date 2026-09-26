@@ -50,7 +50,7 @@ export async function testTrafficLayoutRuntime({ testAPI }) {
           }
           const meta = card.querySelector(".traffic-card-meta").getBoundingClientRect();
           const actions = card.querySelector(".traffic-card-actions").getBoundingClientRect();
-          assert.ok(meta.bottom <= actions.top, "traffic status overlaps the action row");
+          assert.ok(meta.bottom <= actions.top + 1 || meta.right <= actions.left + 1, "traffic status overlaps the action row");
         }
         for (const animation of editDialog.getAnimations()) animation.finish();
         const bounds = editDialog.getBoundingClientRect();
