@@ -1,141 +1,173 @@
-/* Traffic uses the console's existing panels, controls and outlined badges. */
+/* Listener identity is the primary content of each traffic card. */
 .traffic-workspace { container:traffic-workspace / inline-size; }
 .traffic-workspace .traffic-control-panel {
-  display:block;
+  display:grid;
+  grid-template-columns:260px minmax(0,1fr);
   margin-bottom:14px;
+  border:1px solid var(--line);
   border-radius:12px;
   background:var(--surface);
+  overflow:hidden;
 }
-.traffic-filter-head {
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  gap:12px;
-  min-height:44px;
-  padding:8px 14px;
-  border-bottom:1px solid var(--line);
-  border-radius:12px 12px 0 0;
+.traffic-workspace .traffic-control-panel>.traffic-total {
+  display:grid;
+  grid-template-columns:minmax(0,1fr);
+  align-content:center;
+  justify-items:start;
+  gap:4px;
+  min-width:0;
+  margin:0;
+  padding:14px 16px;
+  border:0;
+  border-right:1px solid var(--line);
+  border-radius:0;
   background:var(--surface-2);
 }
-.traffic-filter-head>div { display:flex; align-items:center; flex-wrap:wrap; gap:8px; min-width:0; }
-.traffic-filter-head h2 { font-size:calc(12px * var(--ui-font-scale)); }
-.traffic-filter-head span { color:var(--muted); font-size:calc(10px * var(--ui-font-scale)); overflow-wrap:anywhere; }
-.traffic-filter-head>.button { flex-shrink:0; min-height:30px; font-size:calc(10px * var(--ui-font-scale)); }
-.traffic-filter-content { display:grid; grid-template-columns:minmax(0,1fr) 240px; }
-.traffic-workspace .traffic-filters {
-  grid-template-columns:minmax(0,1fr) minmax(0,1.5fr) minmax(0,1fr);
-  align-items:center;
-  gap:12px;
+.traffic-workspace .traffic-total>span:first-child { color:var(--muted); font-size:calc(10px * var(--ui-font-scale)); }
+.traffic-workspace .traffic-total>div { display:flex; align-items:baseline; flex-wrap:wrap; gap:5px; min-width:0; }
+.traffic-workspace .traffic-total strong { font-size:calc(24px * var(--ui-font-scale)); font-variant-numeric:tabular-nums; line-height:1.2; }
+.traffic-workspace .traffic-total small,.traffic-workspace .traffic-total em { color:var(--muted); font-size:calc(10px * var(--ui-font-scale)); }
+.traffic-workspace .traffic-total em { font-style:normal; }
+.traffic-workspace .traffic-total-metering { padding:0; background:transparent; font-size:calc(9px * var(--ui-font-scale))!important; font-weight:500; text-align:left; }
+.traffic-workspace .traffic-control-panel>.traffic-filters {
+  grid-template-columns:minmax(0,.8fr) minmax(0,1.4fr) minmax(0,.8fr) auto;
+  align-items:end;
+  gap:10px;
   margin:0;
-  padding:14px;
+  padding:14px 16px;
   border:0;
   border-radius:0;
   background:transparent;
   box-shadow:none;
 }
 .traffic-workspace .traffic-filters label { min-width:0; gap:5px; font-size:calc(11px * var(--ui-font-scale)); }
-.traffic-workspace .traffic-filters select { width:100%; min-width:0; height:38px; font-size:calc(11px * var(--ui-font-scale)); }
-.traffic-filter-content>.traffic-total {
+.traffic-workspace .traffic-filters select { width:100%; min-width:0; height:40px; font-size:calc(11px * var(--ui-font-scale)); }
+.traffic-workspace .traffic-filters>.button { height:40px; min-height:40px; padding-inline:10px; font-size:calc(10px * var(--ui-font-scale)); }
+.traffic-workspace .traffic-policy-list-head { margin-bottom:10px; flex-wrap:wrap; gap:8px 12px; }
+.traffic-workspace>.traffic-policy-grid{grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:12px}
+.traffic-workspace .traffic-policy-card { container:listener-card / inline-size; display:flex; min-width:0; border-radius:12px; }
+.traffic-workspace .traffic-port-header {
   display:grid;
-  grid-template-columns:minmax(0,1fr);
-  align-content:center;
-  gap:3px;
-  min-width:0;
-  margin:0;
-  padding:12px 14px;
-  border:0;
-  border-left:1px solid var(--line);
-  border-radius:0;
-  background:transparent;
-}
-.traffic-filter-content .traffic-total>span:first-child { color:var(--muted); font-size:calc(10px * var(--ui-font-scale)); }
-.traffic-filter-content .traffic-total>div { display:flex; align-items:baseline; flex-wrap:wrap; gap:5px; }
-.traffic-filter-content .traffic-total strong { font-size:calc(22px * var(--ui-font-scale)); line-height:1.25; font-variant-numeric:tabular-nums; }
-.traffic-filter-content .traffic-total small { color:var(--muted); font-size:calc(10px * var(--ui-font-scale)); }
-.traffic-filter-content .traffic-total em { color:var(--muted); font-size:calc(10px * var(--ui-font-scale)); font-style:normal; }
-.traffic-filter-content .traffic-total-metering { padding:0; background:transparent; font-size:calc(9px * var(--ui-font-scale))!important; font-weight:500; text-align:left; }
-.traffic-workspace .traffic-policy-list-head { flex-wrap:wrap; gap:8px 12px; margin-bottom:8px; }
-.traffic-workspace .traffic-policy-list-head>div { min-width:0; }
-.traffic-workspace .traffic-policy-list-head small { overflow-wrap:anywhere; }
-.traffic-workspace>.traffic-policy-grid { grid-template-columns:repeat(auto-fill,minmax(min(100%,360px),1fr)); gap:12px; }
-.traffic-workspace .traffic-policy-card { container:traffic-card / inline-size; min-width:0; border-radius:12px; }
-/* Title and state share the first row; metadata gets the full second row. */
-.traffic-workspace .traffic-policy-card>header {
-  display:grid;
-  grid-template-columns:minmax(0,1fr) auto;
+  grid-template-columns:max-content minmax(0,1fr) auto;
   align-items:center;
-  gap:8px 10px;
-  padding:12px 14px;
-}
-.traffic-workspace .traffic-card-heading { min-width:0; width:auto; display:flex; align-items:center; flex-wrap:nowrap; gap:8px; }
-.traffic-workspace .traffic-card-heading>.engine-badge { flex-shrink:0; }
-.traffic-workspace .traffic-card-heading strong { min-width:0; font-size:calc(13px * var(--ui-font-scale)); }
-.traffic-workspace .traffic-card-controls { grid-column:2; grid-row:1; }
-.traffic-workspace .traffic-card-identity { grid-column:1/-1; width:auto; }
-.traffic-workspace .traffic-card-identity small { width:fit-content; max-width:100%; flex-wrap:wrap; gap:4px; }
-.traffic-workspace .traffic-card-identity small>.engine-badge {
+  gap:10px 14px;
   min-width:0;
+  padding:14px;
+}
+.traffic-workspace .traffic-port-header>div { min-width:0; }
+.traffic-workspace .traffic-port-number { display:grid; align-content:center; justify-items:start; gap:3px; }
+.traffic-port-number>span,.traffic-port-node>span,.traffic-port-core>span:first-child {
+  color:var(--muted);
+  font-size:calc(10px * var(--ui-font-scale));
+  font-weight:650;
+}
+.traffic-workspace .traffic-port-number>strong {
   max-width:100%;
-  min-height:0;
-  padding:2px 6px;
-  border:1px solid currentColor;
-  border-radius:6px;
-  background:var(--surface);
-  font-size:calc(9px * var(--ui-font-scale));
+  color:var(--accent);
+  font-size:calc(30px * var(--ui-font-scale));
+  font-variant-numeric:tabular-nums;
+  line-height:1.05;
+  white-space:nowrap;
+  overflow:visible;
+  letter-spacing:-.035em;
+}
+.traffic-workspace .traffic-port-context { display:grid; align-content:center; justify-items:start; gap:6px; }
+.traffic-workspace .traffic-port-node,.traffic-workspace .traffic-port-core { display:grid; justify-items:start; gap:2px; min-width:0; width:100%; }
+.traffic-workspace .traffic-port-node strong {
+  width:100%;
+  color:var(--ink);
+  font-size:calc(14px * var(--ui-font-scale));
+  line-height:1.3;
+  white-space:normal;
+  overflow:visible;
+  overflow-wrap:anywhere;
+  text-overflow:clip;
+}
+.traffic-port-node small { max-width:100%; color:var(--muted); font-size:calc(9px * var(--ui-font-scale)); overflow-wrap:anywhere; }
+.traffic-workspace .traffic-port-core .engine-badge { max-width:100%; min-height:24px; padding:2px 7px; font-size:calc(10px * var(--ui-font-scale)); white-space:normal; overflow-wrap:anywhere; }
+.traffic-workspace .traffic-card-controls { grid-column:3; grid-row:1; align-self:start; }
+.traffic-workspace .traffic-port-config {
+  display:flex;
+  align-items:flex-start;
+  grid-column:1/-1;
+  gap:7px;
+  min-width:0;
+  padding-top:9px;
+  border-top:1px solid var(--line);
+}
+.traffic-port-config>span:first-child { flex-shrink:0; color:var(--muted); font-size:calc(10px * var(--ui-font-scale)); }
+.traffic-workspace .traffic-port-config strong {
+  flex:1;
+  min-width:0;
+  color:var(--ink-2);
+  font-size:calc(11px * var(--ui-font-scale));
+  white-space:normal;
+  overflow:visible;
+  overflow-wrap:anywhere;
+  text-overflow:clip;
   line-height:1.5;
 }
-.traffic-workspace .traffic-card-identity .traffic-node-tag { display:block; max-width:140px; overflow:hidden; text-overflow:ellipsis; color:var(--blue); }
-.traffic-workspace .traffic-card-identity .traffic-port-tag { color:var(--accent); }
-.traffic-workspace .traffic-card-identity .traffic-protocol-tag { color:var(--green); }
-/* Put the total beside its two directions, instead of stacking wide rows. */
-.traffic-card-metrics { display:grid; grid-template-columns:minmax(0,1.05fr) minmax(0,1fr); flex:1; min-width:0; }
-.traffic-workspace .traffic-card-quota { align-content:center; min-width:0; gap:8px; padding:16px 14px; }
-.traffic-workspace .traffic-card-quota>header { gap:6px; flex-wrap:wrap; }
+.traffic-protocol-label { flex-shrink:0; padding:2px 6px; border:1px solid color-mix(in srgb,var(--green) 40%,var(--line)); border-radius:5px; color:var(--green); font-size:calc(9px * var(--ui-font-scale)); font-weight:700; }
+.traffic-port-readings { display:grid; grid-template-columns:minmax(0,.95fr) minmax(0,1.05fr); flex:1; min-width:0; }
+.traffic-workspace .traffic-card-quota { display:grid; align-content:center; min-width:0; gap:7px; padding:14px; }
+.traffic-workspace .traffic-card-quota>header { gap:7px; flex-wrap:wrap; }
 .traffic-workspace .traffic-card-quota>div { flex-wrap:wrap; }
-.traffic-workspace .traffic-card-quota>div strong { font-variant-numeric:tabular-nums; }
-.traffic-workspace .traffic-card-quota>small { overflow-wrap:anywhere; line-height:1.6; }
-.traffic-workspace .traffic-card-transfer { grid-template-columns:minmax(0,1fr); border:0; border-left:1px solid var(--line); }
-.traffic-workspace .traffic-card-transfer>div { grid-template-columns:24px minmax(0,1fr); align-content:center; gap:2px 8px; padding:9px 12px; }
-.traffic-workspace .traffic-card-transfer>div+div { border-left:0; border-top:1px solid var(--line); }
-.traffic-workspace .traffic-card-transfer>div>i { width:24px; height:24px; grid-row:1 / span 2; align-self:center; }
-.traffic-workspace .traffic-card-transfer small { font-size:calc(9px * var(--ui-font-scale)); }
+.traffic-workspace .traffic-card-quota>div strong { font-size:calc(24px * var(--ui-font-scale)); font-variant-numeric:tabular-nums; }
+.traffic-workspace .traffic-card-quota>small { overflow-wrap:anywhere; }
+.traffic-workspace .traffic-card-transfer { grid-template-columns:repeat(2,minmax(0,1fr)); border:0; border-left:1px solid var(--line); }
+.traffic-workspace .traffic-card-transfer>div {
+  display:grid;
+  grid-template-columns:22px minmax(0,1fr);
+  align-content:center;
+  gap:3px 7px;
+  min-width:0;
+  padding:10px;
+}
+.traffic-workspace .traffic-card-transfer>div+div { border-top:0; border-left:1px solid var(--line); }
+.traffic-workspace .traffic-card-transfer>div>i { width:22px; height:22px; font-size:calc(11px * var(--ui-font-scale)); }
 .traffic-workspace .traffic-card-transfer strong { font-size:calc(12px * var(--ui-font-scale)); font-variant-numeric:tabular-nums; }
-.traffic-workspace .traffic-card-transfer em { grid-column:2; font-size:calc(9px * var(--ui-font-scale)); overflow-wrap:anywhere; white-space:normal; }
-.traffic-workspace .traffic-policy-card>footer { display:flex; flex-direction:row; align-items:center; flex-wrap:wrap; gap:8px 12px; margin-top:auto; padding:8px 14px; border-top:1px solid var(--line); }
-.traffic-card-meta { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; flex:1; gap:8px; min-width:150px; }
-.traffic-workspace .traffic-card-sync { min-width:0; overflow-wrap:anywhere; }
-.traffic-workspace .traffic-card-sync i { flex-shrink:0; }
-.traffic-workspace .traffic-card-actions { justify-content:flex-end; flex-wrap:wrap; gap:6px; margin:0 0 0 auto; }
+.traffic-workspace .traffic-card-transfer em { grid-column:2; font-size:calc(9px * var(--ui-font-scale)); white-space:normal; overflow-wrap:anywhere; }
+.traffic-workspace .traffic-policy-card>footer {
+  display:flex;
+  align-items:center;
+  flex-wrap:wrap;
+  gap:8px 10px;
+  margin-top:auto;
+  padding:8px 14px;
+  border-top:1px solid var(--line);
+}
+.traffic-port-health { display:flex; align-items:center; justify-content:space-between; flex:1; gap:8px; min-width:145px; }
+.traffic-workspace .traffic-card-actions { display:flex; justify-content:flex-end; flex-wrap:wrap; gap:6px; margin-left:auto; }
 .traffic-workspace .traffic-card-actions .button { min-width:48px; }
 .traffic-workspace .traffic-configured-port-body { flex:1; }
-.traffic-workspace>.qch-swap-panel>.empty.large { min-height:220px; display:grid; align-content:center; }
+.traffic-workspace>.qch-swap-panel>.empty.large { display:grid; align-content:center; min-height:220px; }
 @container traffic-workspace (max-width:760px) {
-  .traffic-filter-content { grid-template-columns:minmax(0,1fr); }
-  .traffic-filter-content>.traffic-total { grid-template-columns:minmax(0,1fr) auto; gap:3px 12px; border-top:1px solid var(--line); border-left:0; }
-  .traffic-filter-content .traffic-total>div { grid-column:2; grid-row:1 / span 2; justify-content:flex-end; align-self:center; }
-  .traffic-filter-content .traffic-total-metering { grid-column:1; }
-  .traffic-filter-content .traffic-total em { grid-column:1/-1; }
+  .traffic-workspace .traffic-control-panel { grid-template-columns:minmax(0,1fr); }
+  .traffic-workspace .traffic-control-panel>.traffic-total { border-right:0; border-bottom:1px solid var(--line); }
+  .traffic-workspace .traffic-control-panel>.traffic-filters { grid-template-columns:repeat(3,minmax(0,1fr)) auto; }
 }
-@container traffic-workspace (max-width:480px) {
-  .traffic-workspace .traffic-filters { grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
-  .traffic-workspace .traffic-filters>label:nth-child(2) { grid-column:1/-1; grid-row:2; }
-  .traffic-workspace .traffic-filters>label:nth-child(3) { grid-column:2; grid-row:1; }
+@container traffic-workspace (max-width:420px) {
+  .traffic-workspace>.traffic-policy-grid { grid-template-columns:1fr; }
+  .traffic-workspace .traffic-control-panel>.traffic-filters { grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+  .traffic-workspace .traffic-filters>label:nth-child(2) { grid-column:1/-1; grid-row:1; }
+  .traffic-workspace .traffic-filters>.button { grid-column:1/-1; justify-self:end; }
   .traffic-workspace .traffic-policy-list-head { align-items:stretch; flex-direction:column; }
-  .traffic-workspace .traffic-policy-list-actions { justify-content:space-between; }
-  .traffic-workspace .traffic-policy-list-actions small { flex:1; }
 }
-@container traffic-card (max-width:420px) {
-  .traffic-card-metrics { grid-template-columns:minmax(0,1fr); }
-  .traffic-workspace .traffic-card-transfer { grid-template-columns:repeat(2,minmax(0,1fr)); border-left:0; border-top:1px solid var(--line); }
-  .traffic-workspace .traffic-card-transfer>div+div { border-top:0; border-left:1px solid var(--line); }
-  .traffic-workspace .traffic-card-meta { flex-basis:100%; }
+@container listener-card (max-width:440px) {
+  .traffic-workspace .traffic-port-header { grid-template-columns:minmax(0,1fr) auto; gap:10px; padding:12px; }
+  .traffic-workspace .traffic-port-number { grid-column:1; grid-row:1; }
+  .traffic-workspace .traffic-card-controls { grid-column:2; grid-row:1; }
+  .traffic-workspace .traffic-port-context { display:grid; grid-template-columns:minmax(0,1fr) auto; grid-column:1/-1; grid-row:2; align-items:start; gap:12px; }
+  .traffic-workspace .traffic-port-config { grid-column:1/-1; grid-row:3; }
+  .traffic-port-readings { grid-template-columns:minmax(0,1fr); }
+  .traffic-workspace .traffic-card-transfer { border-left:0; border-top:1px solid var(--line); }
+  .traffic-port-health { flex-basis:100%; }
   .traffic-workspace .traffic-card-actions { width:100%; padding-top:8px; border-top:1px solid var(--line); }
 }
 @media(pointer:coarse) {
-  .traffic-workspace .traffic-card-actions .button,
-  .traffic-workspace .traffic-status-button,
-  .traffic-workspace [data-traffic-sync],
-  .traffic-workspace [data-traffic-filter-reset],
-  .traffic-workspace .traffic-filters select { min-height:44px; }
+  .traffic-workspace .traffic-filters select,.traffic-workspace .traffic-filters>.button,
+  .traffic-workspace .traffic-card-actions .button,.traffic-workspace .traffic-status-button,
+  .traffic-workspace [data-traffic-sync] { min-height:44px; }
   .traffic-workspace .traffic-card-actions .button { flex:1; }
 }
+\n.page-traffic .traffic-context-id { display:block; max-width:100%; color:var(--muted); font-size:calc(9px * var(--ui-font-scale)); overflow-wrap:anywhere; }\n

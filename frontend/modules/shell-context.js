@@ -94,12 +94,19 @@ function contextMarkup(title) {
   }
   if (state.route === "traffic") {
     const agents = orderNodesBySavedOrder(state.data.agents || []);
+    const seenTrafficNames = new Set();
+    const duplicateTrafficNames = new Set();
+    for (const agent of agents) {
+      const name = agent.name || agent.id;
+      if (seenTrafficNames.has(name)) duplicateTrafficNames.add(name);
+      seenTrafficNames.add(name);
+    }
     const allPolicies = state.data.trafficPolicies || [];
     const suppressedPorts = new Set(allPolicies.filter((policy) => policy.monitoring_enabled === false).map((policy) => `${policy.agent_id}:${policy.port}`));
     const policies = allPolicies.filter((policy) => policy.monitoring_enabled !== false);
     const endpoints = (state.data.trafficEndpoints || []).filter((endpoint) => !suppressedPorts.has(`${endpoint.agent_id}:${endpoint.port}`));
     const selected = state.data.trafficFilters?.agent_id || "";
-    return `${can("traffic.manage") ? '<a class="context-primary" href="#traffic-new">＋ 添加端口配额</a>' : ""}<a class="context-primary ${selected ? "" : "active"}" href="#traffic-all" data-context-traffic-agent="">全部节点</a><div class="context-section-label"><span>按节点查看</span><b>${agents.length}</b></div><nav class="context-list" aria-label="端口流量节点">${agents.map((agent) => { const agentPolicies = policies.filter((policy) => policy.agent_id === agent.id); const configured = new Set([...agentPolicies.map((policy) => policy.port), ...endpoints.filter((endpoint) => endpoint.agent_id === agent.id).map((endpoint) => endpoint.port)]).size; const quotas = agentPolicies.filter((policy) => policy.quota_enabled !== false).length; const blocked = agentPolicies.filter((policy) => policy.blocked).length; return `<a class="${selected === agent.id ? "active" : ""}" href="#traffic-agent-${esc(agent.id)}" data-context-traffic-agent="${esc(agent.id)}"><i class="status-dot ${blocked ? "bad" : agent.status === "online" ? "ok" : ""}"></i><span><strong>${esc(agent.name)}</strong><small>${configured ? `${configured} 个监控端口${quotas ? ` · ${quotas} 个配额` : ""}${blocked ? ` · ${blocked} 个封禁` : ""}` : "尚无配置端口"}</small></span></a>`; }).join("") || "<p>还没有节点</p>"}</nav>`;
+    return `${can("traffic.manage") ? '<a class="context-primary" href="#traffic-new">＋ 添加端口配额</a>' : ""}<a class="context-primary ${selected ? "" : "active"}" href="#traffic-all" data-context-traffic-agent="">全部节点</a><div class="context-section-label"><span>按节点查看</span><b>${agents.length}</b></div><nav class="context-list" aria-label="端口流量节点">${agents.map((agent) => { const agentPolicies = policies.filter((policy) => policy.agent_id === agent.id); const configured = new Set([...agentPolicies.map((policy) => policy.port), ...endpoints.filter((endpoint) => endpoint.agent_id === agent.id).map((endpoint) => endpoint.port)]).size; const quotas = agentPolicies.filter((policy) => policy.quota_enabled !== false).length; const blocked = agentPolicies.filter((policy) => policy.blocked).length; return `<a class="${selected === agent.id ? "active" : ""}" href="#traffic-agent-${esc(agent.id)}" data-context-traffic-agent="${esc(agent.id)}"><i class="status-dot ${blocked ? "bad" : agent.status === "online" ? "ok" : ""}"></i><span><strong>${esc(agent.name)}</strong>${duplicateTrafficNames.has(agent.name || agent.id) ? `<small class="traffic-context-id">ID ${esc(agent.id)}</small>` : ""}<small>${configured ? `${configured} 个监控端口${quotas ? ` · ${quotas} 个配额` : ""}${blocked ? ` · ${blocked} 个封禁` : ""}` : "尚无配置端口"}</small></span></a>`; }).join("") || "<p>还没有节点</p>"}</nav>`;
   }
   if (state.route === "access-control") {
     const entries = state.data.accessControls || [];

@@ -112,6 +112,18 @@ try {
   assert.deepEqual(cardKeys(), ["beta:443", "beta:8443", "alpha:443", "alpha:8443", "gamma:443", "missing:9443"],
     "invalid saved card data falls back to node order");
   assert.deepEqual(policies.map(item => item.agent_id), ["beta", "alpha", "gamma"], "sorting must not mutate API data");
+
+  agents[0].name = "同名节点";
+  agents[1].name = "同名节点";
+  await render();
+  for (const id of ["alpha", "beta"]) {
+    assert.ok(markup.includes(`同名节点 (${id}) · Monitor · mihomo :443`), "port filter must distinguish nodes with the same display name");
+  }
+  for (const key of ["alpha:443", "beta:443", "alpha:8443", "beta:8443"]) {
+    const article = markup.match(new RegExp(`data-traffic-card-key="${key}"[^>]*>([\\s\\S]*?)</article>`))?.[1];
+    assert.ok(article?.includes(`节点 ID ${key.split(":")[0]}`), "same-name nodes must show distinct IDs on monitored and discovered ports");
+    assert.ok(article.includes(`class="traffic-port-number"><span>监听端口</span><strong>:${key.split(":")[1]}</strong>`), "card identity must show the actual listening port");
+  }
 } finally {
   if (previousDocument === undefined) delete globalThis.document;
   else globalThis.document = previousDocument;

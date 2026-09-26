@@ -3,6 +3,14 @@ import { accountStorage } from "../modules/account-storage.js";
 
 export async function testTrafficLayoutRuntime({ testAPI }) {
     await waitFor(()=>document.querySelectorAll(".traffic-accounting-panel").length===4,"traffic accounting cards did not load");
+    for (const policy of testAPI.trafficPolicies) {
+      const card = document.getElementById(`traffic-${policy.id}`);
+      const agent = testAPI.agents.find(item => item.id === policy.agent_id);
+      assert.equal(card.querySelector(".traffic-port-number strong").textContent, `:${policy.port}`, "card must identify the actual listening port");
+      assert.equal(card.querySelector(".traffic-port-node strong").textContent, agent.name, "card must identify the actual node");
+      assert.ok(card.querySelector(".traffic-port-core .engine-badge").classList.contains(policy.engine), "card must identify the actual core");
+      assert.equal(card.querySelector(".traffic-port-config strong").textContent, policy.name, "configuration name must remain available");
+    }
     const cardNodes = () => [...document.querySelectorAll(".traffic-policy-grid > [data-traffic-agent-card]")].map(card => card.dataset.trafficAgentCard).join(",");
     const sidebarNodes = () => [...document.querySelectorAll(".context-list [data-context-traffic-agent]")].map(link => link.dataset.contextTrafficAgent).join(",");
     assert.equal(cardNodes(), "alpha,delta,bravo,charlie", "default traffic cards must follow saved node order");
@@ -36,22 +44,25 @@ export async function testTrafficLayoutRuntime({ testAPI }) {
     const editDialog = document.querySelector("[data-traffic-edit-dialog][open]");
     const root = document.documentElement;
     const originalScale = root.style.getPropertyValue("--ui-font-scale");
+    const longNode = document.querySelector(".traffic-port-node strong");
+    const longConfig = document.querySelector(".traffic-port-config strong");
+    const originalNode = longNode.textContent;
+    const originalConfig = longConfig.textContent;
+    longNode.textContent = "香港生产节点-HK-PRODUCTION-VERY-LONG-NODE-NAME-01";
+    longConfig.textContent = "香港生产入口-VLESS-REALITY-LONG-CONFIGURATION-NAME-01";
     try {
       for (const scale of ["1", "1.35"]) {
         root.style.setProperty("--ui-font-scale", scale);
-        const workspace = document.querySelector(".traffic-workspace");
-        assert.ok(workspace.scrollWidth <= workspace.clientWidth + 1, "traffic workspace overflows horizontally");
-        for (const card of workspace.querySelectorAll(".traffic-policy-card")) {
-          const cardBounds = card.getBoundingClientRect();
-          for (const element of card.querySelectorAll(".traffic-card-identity small, .traffic-card-transfer strong, .traffic-card-transfer em, .traffic-card-meta>.traffic-status-button, .traffic-card-actions button")) {
-            const box = element.getBoundingClientRect();
-            assert.ok(box.left >= cardBounds.left && box.right <= cardBounds.right, "traffic content extends beyond its card");
-            assert.ok(element.scrollWidth <= element.clientWidth + 1, "traffic metadata, rates or actions are clipped");
-          }
-          const meta = card.querySelector(".traffic-card-meta").getBoundingClientRect();
-          const actions = card.querySelector(".traffic-card-actions").getBoundingClientRect();
-          assert.ok(meta.bottom <= actions.top + 1 || meta.right <= actions.left + 1, "traffic status overlaps the action row");
+        for (const card of document.querySelectorAll(".traffic-policy-card")) {
+          const port = card.querySelector(".traffic-port-number strong");
+          const node = card.querySelector(".traffic-port-node strong");
+          assert.ok(port.scrollWidth <= port.clientWidth + 1 && node.scrollWidth <= node.clientWidth + 1,
+            "listener port or node name is clipped at enlarged text size");
+          assert.ok(port.getBoundingClientRect().right <= card.getBoundingClientRect().right + 1,
+            "listener port extends beyond its card");
         }
+        assert.ok(longNode.scrollHeight <= longNode.clientHeight + 1 && longConfig.scrollHeight <= longConfig.clientHeight + 1,
+          "long node or configuration name is clipped");
         for (const animation of editDialog.getAnimations()) animation.finish();
         const bounds = editDialog.getBoundingClientRect();
         assert.ok(bounds.top >= -1 && bounds.bottom <= innerHeight + 1, "quota dialog extends outside the viewport");
@@ -66,6 +77,8 @@ export async function testTrafficLayoutRuntime({ testAPI }) {
         assert.ok(body.bottom <= footer.top + 1, "quota fields overlap the actions");
       }
     } finally {
+      longNode.textContent = originalNode;
+      longConfig.textContent = originalConfig;
       if (originalScale) root.style.setProperty("--ui-font-scale", originalScale);
       else root.style.removeProperty("--ui-font-scale");
       editDialog.querySelector("[data-traffic-edit-close]").click();
