@@ -56,8 +56,7 @@ export function createTrafficView(ctx, { filters, storage, savedTrafficCardOrder
       const nodeName = agent?.name || value.agent_id;
       return `<header class="traffic-card-header">
         <div class="traffic-card-heading"><div class="traffic-card-node"><span>节点</span><strong title="${esc(nodeName)}">${esc(nodeName)}</strong></div><span class="traffic-card-controls"><span class="traffic-policy-status ${tone}"><i></i>${esc(status)}</span><span class="node-card-grip traffic-card-grip" title="拖动调整顺序" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 6h.01M9 12h.01M9 18h.01M15 6h.01M15 12h.01M15 18h.01"/></svg></span></span></div>
-        <div class="traffic-card-facts"><div class="traffic-card-port"><span>监听端口</span><code>${esc(value.port)}</code></div><div class="traffic-card-core"><span>内核</span><span class="engine-badge ${esc(value.engine)}">${esc(engineName(value.engine))}</span></div></div>
-        <div class="traffic-card-config"><span>配置</span><strong>${esc(value.name || `端口 ${value.port}`)}</strong><small>${esc(protocolName(value.protocol))}</small></div>
+        <div class="traffic-card-facts"><div class="traffic-card-port"><span>监听端口</span><code>${esc(value.port)}</code></div><div class="traffic-card-core"><span>内核</span><span class="engine-badge ${esc(value.engine)}">${esc(engineName(value.engine))}</span></div><div class="traffic-card-config"><span>配置</span><div><strong title="${esc(value.name || `端口 ${value.port}`)}">${esc(value.name || `端口 ${value.port}`)}</strong><small>${esc(protocolName(value.protocol))}</small></div></div></div>
       </header>`;
     };
     const cards = filteredItems.map((item) => {
