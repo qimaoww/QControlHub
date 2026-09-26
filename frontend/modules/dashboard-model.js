@@ -34,6 +34,27 @@ export function aggregateDashboardTrafficDays(rows, month) {
   return [...totals.values()];
 }
 
+// Days come from the month aggregation above, including zero-usage dates.
+// The current UTC day participates in the average; future days never do.
+export function summarizeDashboardTraffic(days, month, now = new Date()) {
+  const today = new Date(now).toISOString().slice(0, 10);
+  const currentMonth = today.slice(0, 7);
+  const elapsedDays = days.filter((day) => day.day <= today);
+  const usage = (day) => day.received_bytes + day.sent_bytes;
+  const total = elapsedDays.reduce((sum, day) => sum + usage(day), 0);
+  const peak = elapsedDays.reduce((best, day) =>
+    usage(day) > (best ? usage(best) : 0) ? day : best, null);
+  const todayUsage = days.find((day) => day.day === today);
+  return {
+    isCurrentMonth: month === currentMonth,
+    todayBytes: month === currentMonth ? (todayUsage ? usage(todayUsage) : 0) : null,
+    averageBytes: elapsedDays.length ? total / elapsedDays.length : null,
+    elapsedDays: elapsedDays.length,
+    peakDay: peak?.day || null,
+    peakBytes: peak ? usage(peak) : 0,
+  };
+}
+
 export const taskActivity = (items, limit = 7) => {
     const groups = [];
     for (const task of items) {

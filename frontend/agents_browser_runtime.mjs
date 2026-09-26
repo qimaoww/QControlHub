@@ -51,7 +51,7 @@ try {
   } else {
     await import("./app.js");
     if (mode.startsWith("traffic-layout")) await testTrafficLayoutRuntime(scenario);
-    else if (mode === "config-layout") await testConfigLayoutRuntime(scenario);
+    else if (mode.startsWith("config-layout")) await testConfigLayoutRuntime(scenario);
     else if (mode.startsWith("shell-layout")) await testShellLayoutRuntime(scenario);
     else if (mode.startsWith("capabilities-settings")) await testCapabilitySettingsRuntime(scenario);
     else if (mode === "bbr-preview" || mode === "regions-preview") await new Promise(() => {});

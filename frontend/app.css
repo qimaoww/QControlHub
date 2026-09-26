@@ -1059,19 +1059,17 @@ dialog.config-access-dialog::backdrop{background:rgba(17,20,36,.34);backdrop-fil
 @media(max-width:820px) and (pointer:fine){.page-client-connections{padding-bottom:72px}.page-client-connections .app-dock{display:flex;position:fixed;inset:auto 0 0;z-index:40;height:60px;min-height:0;margin:0;padding:6px;background:var(--surface);border-top:1px solid var(--line);border-radius:0}.page-client-connections .app-dock .dock-logo,.page-client-connections .app-dock .dock-tools{display:none}.page-client-connections .app-dock .dock-nav{display:flex;flex:1;overflow-x:auto;gap:4px;margin-top:0}.page-client-connections .app-dock .dock-nav>a{flex:1;min-width:44px;min-height:44px;margin:0}}
 /* Manual configuration: node navigation on the left, engine navigation on top. */
 .page-live-config .desktop-app{min-width:0}
-.live-config-workspace{max-width:1500px;border-radius:12px}
-.live-config-workspace>.editor-toolbar{padding:20px 24px;gap:16px;background:var(--surface)}
-.live-config-eyebrow{margin:0 0 6px;color:var(--muted);font-size:calc(11px * var(--ui-font-scale));letter-spacing:.08em}
+.live-config-workspace{container:live-config / inline-size;max-width:1500px;border-radius:12px;box-shadow:none}
+.live-config-workspace>.editor-toolbar{min-height:0;padding:16px 20px 8px;gap:16px;border-bottom:0;background:var(--surface)}
+.live-config-workspace .live-config-version{padding:4px 8px;border:1px solid var(--line);border-radius:6px;color:var(--muted);font-size:calc(11px * var(--ui-font-scale));font-weight:500}
 .live-config-workspace>.editor-toolbar h2{margin:0;font-size:calc(20px * var(--ui-font-scale));line-height:1.4}
-.live-engine-bar{display:flex;gap:4px;padding:8px 24px 0;overflow-x:auto;border-top:1px solid var(--line);border-bottom:1px solid var(--line);background:var(--surface)}
-.live-engine-tab{display:flex;align-items:center;justify-content:center;flex:0 0 140px;width:140px;min-width:140px;height:40px;box-sizing:border-box;padding:0 14px;border:0;border-bottom:2px solid transparent;border-radius:6px 6px 0 0;background:transparent;color:var(--muted);font:inherit;font-size:calc(13px * var(--ui-font-scale));font-weight:600;cursor:pointer;transition:background .15s,color .15s}
-.live-engine-tab:hover{background:var(--surface-2);color:var(--ink)}
-.live-engine-tab.active{background:var(--accent-soft);border-bottom-color:var(--accent);color:var(--accent)}
-.live-engine-tab{gap:6px}
-.live-engine-status{font-size:calc(10px * var(--ui-font-scale));font-weight:500;color:var(--muted);white-space:nowrap}
-.live-engine-status.installed{color:var(--accent)}
-.live-engine-status::before{content:"○";margin-right:4px}
-.live-engine-status.installed::before{content:"●"}
+.live-engine-bar{display:grid;grid-template-columns:repeat(4,minmax(0,150px));gap:8px;padding:12px 20px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);background:var(--surface)}
+.live-engine-tab{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:4px 8px;min-width:0;min-height:40px;box-sizing:border-box;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink-2);font:inherit;font-size:calc(13px * var(--ui-font-scale));line-height:1.4;font-weight:600;cursor:pointer;transition:background .15s,color .15s,border-color .15s}
+.live-engine-tab:hover{background:var(--surface-2);border-color:var(--line-2);color:var(--ink)}
+.live-engine-tab.active{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
+.live-engine-status{display:inline-flex;align-items:center;gap:4px;font-size:calc(10px * var(--ui-font-scale));font-weight:500;color:var(--muted);white-space:nowrap}
+.live-engine-status::before{content:"";width:6px;height:6px;flex:none;border:1px solid currentColor;border-radius:50%}
+.live-engine-status.installed::before{border-color:var(--green);background:var(--green)}
 .live-engine-loading{color:var(--accent)}
 .live-engine-tab:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 /* Each inbound has its own persistent draft and visible switch button. */
@@ -1174,13 +1172,19 @@ dialog.config-access-dialog::backdrop{background:rgba(17,20,36,.34);backdrop-fil
 .config-file-navigation .button{flex-shrink:0;min-height:32px;padding:5px 12px}
 .config-file-actions{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:8px;margin-left:auto;min-width:0}
 .config-file-navigation .config-file-actions .button{margin-left:0}
-.live-config-details{display:flex;flex-wrap:wrap;gap:8px 22px;padding:12px 24px;background:var(--surface-2);border-bottom:1px solid var(--line);color:var(--muted);font-size:calc(11px * var(--ui-font-scale))}
-.live-config-details>span{display:flex;align-items:center;gap:6px}
+.live-config-details{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:4px 20px 16px;background:var(--surface);color:var(--ink-2);font-size:calc(12px * var(--ui-font-scale));line-height:1.5}
+.live-config-detail{display:inline-flex;align-items:center;gap:6px;min-height:30px;max-width:100%;padding:5px 10px;border-radius:6px;background:var(--surface-2);overflow-wrap:anywhere}
+.live-config-detail-label{color:var(--muted)}
+.live-config-node-state{font-weight:600}
+.live-config-node-state[data-state=online]{color:var(--green);background:var(--green-soft)}
+.live-config-node-state[data-state=offline]{color:var(--amber);background:var(--amber-soft)}
+.live-config-node-state[data-state=offline] .status-dot{background:var(--amber)}
+.live-config-details>.live-engine-loading{flex-basis:100%;font-size:calc(11px * var(--ui-font-scale))}
 .live-config-workspace .live-config-editor{display:block;min-width:0}
 .live-config-workspace .code-workspace{min-width:0;border:0;border-radius:0}
 .live-config-workspace .code-file-meta select{width:auto;min-width:210px;max-width:100%;font:calc(12px * var(--ui-font-scale)) ui-monospace,SFMono-Regular,Consolas,monospace;border-radius:6px}
 .live-config-workspace .code-file-meta b[hidden]{display:none}
-.live-config-workspace .code-editor-frame,.live-config-workspace .code-editor-input{min-height:440px;height:clamp(440px,54vh,720px)}
+.live-config-workspace .code-editor-frame,.live-config-workspace .code-editor-input{min-height:320px;height:clamp(320px,calc(100dvh - 450px),680px)}
 .live-config-workspace .code-editor-input{font-size:calc(13px * var(--ui-font-scale));line-height:1.75;padding:18px 20px}
 .live-config-workspace .code-gutter{font-size:calc(12px * var(--ui-font-scale));line-height:calc(22.75px * var(--ui-font-scale));padding-top:18px}
 .live-config-workspace .code-workspace>footer{padding:14px 18px;flex-wrap:wrap;border-top:1px solid var(--line);background:var(--surface)}
@@ -1198,11 +1202,11 @@ dialog.config-access-dialog::backdrop{background:rgba(17,20,36,.34);backdrop-fil
   .page-live-config .workspace-main{padding:12px 12px 76px;overflow:visible}
   .page-live-config .workspace-topbar{margin:0;height:48px;padding:0 14px;border-radius:0}
   .page-live-config .workspace-actions{display:none}
-  .live-config-workspace>.editor-toolbar{padding:16px;align-items:flex-start}
+  .live-config-workspace>.editor-toolbar{padding:16px 16px 8px;align-items:flex-start}
   .live-config-workspace>.editor-toolbar h2{font-size:calc(18px * var(--ui-font-scale))}
-  .live-engine-bar{padding:16px;gap:8px;scroll-padding-inline:16px}
-  .live-engine-tab{min-height:40px;border-radius:6px}
-  .live-config-details{padding:16px;gap:12px 16px;line-height:1.6}
+  .live-engine-bar{padding:12px 16px}
+  .live-engine-tab{min-height:44px}
+  .live-config-details{padding:4px 16px 14px;gap:6px}
   .live-config-workspace .code-workspace>.code-editor-toolbar{flex-wrap:wrap;gap:12px;padding:16px}
   .live-config-workspace .code-file-meta{max-width:100%;flex:1 0 100%}
   .live-config-workspace .code-file-meta select{min-width:0;flex:1}
@@ -1217,6 +1221,65 @@ dialog.config-access-dialog::backdrop{background:rgba(17,20,36,.34);backdrop-fil
   .live-config-workspace .code-gutter{font-size:calc(11px * var(--ui-font-scale));line-height:calc(21px * var(--ui-font-scale));padding-top:14px}
   .live-config-workspace .code-workspace>footer>div{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;width:100%;margin:0}
   .live-config-workspace [data-live-intent="deploy"]{grid-column:1/-1}
+}
+
+@media(max-width:600px){
+  .live-engine-bar{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .live-engine-tab{flex-direction:column;gap:3px;min-height:58px;padding:7px 10px}
+}
+
+/* Selection, current-file tools, source, and submission each have one home. */
+.live-config-workspace .config-file-list{display:flex;flex:1 1 0;gap:8px;min-width:0;max-width:100%;padding:2px;overflow-x:auto;scrollbar-width:thin;scroll-padding:2px}
+.live-config-workspace .config-file-list>.config-file-button{flex:0 0 auto;min-width:120px;max-width:240px;min-height:48px;padding:6px 12px;gap:2px;box-shadow:none}
+.config-file-button.is-dirty b::after{content:"●";display:inline-block;margin-left:7px;color:var(--amber);font-size:calc(8px * var(--ui-font-scale));vertical-align:middle}
+.live-config-workspace .config-draft-summary{flex:1 1 220px;font-size:calc(11px * var(--ui-font-scale));line-height:1.6;color:var(--muted)}
+.live-config-workspace .config-draft-summary[data-dirty="1"]{color:var(--amber)}
+.live-config-workspace .config-workspace-tools{display:flex;flex-wrap:nowrap;gap:8px;margin:0;padding:0;border:0;background:transparent}
+.config-tools-menu{position:relative}
+.config-tools-menu>summary{list-style:none;cursor:pointer;gap:8px}
+.config-tools-menu>summary::-webkit-details-marker{display:none}
+.config-tools-menu[open]>summary{border-color:var(--accent);color:var(--accent)}
+.config-tools-menu .config-inbound-menu-items a{display:block;width:100%;min-height:40px;padding:10px 12px;border-radius:6px;color:var(--ink);font-size:calc(12px * var(--ui-font-scale))}
+.config-tools-menu .config-inbound-menu-items a:hover{background:var(--surface-2)}
+.config-tools-menu .config-inbound-menu-items a:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.live-config-workspace .code-workspace>.code-editor-toolbar{flex-wrap:wrap;padding:12px 20px;gap:10px;background:var(--surface)}
+.live-config-workspace .code-editor-toolbar>.code-editor-meta{margin-right:auto}
+.live-config-workspace .config-selection-actions,.live-config-workspace .config-file-actions,.live-config-workspace .config-editor-actions{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin:0;min-width:0}
+.live-config-workspace .config-selection-actions .config-access-trigger{margin:0}
+.live-config-workspace .config-selection-actions:empty{display:none}
+.live-config-workspace .button{min-height:38px;border-radius:8px;box-shadow:none}
+.live-config-workspace .config-file-buttons{flex-wrap:nowrap;align-items:center;padding:10px 18px;gap:12px;background:var(--surface-2)}
+.live-config-workspace .config-file-actions{flex:none}
+.live-config-workspace .config-editor-actions{flex-shrink:0}
+.live-config-workspace .config-editor-actions:empty{display:none}
+.live-config-workspace .code-workspace>footer{gap:12px;padding:16px 20px}
+.live-config-workspace .code-workspace>footer>span:not(.config-draft-summary){flex:1 0 100%}
+.live-config-workspace .code-workspace>footer>div{margin-left:auto}
+@media(max-width:820px){
+  .live-config-workspace>.editor-toolbar{flex-direction:row;flex-wrap:wrap;align-items:center;gap:12px}
+  .live-config-workspace>.editor-toolbar>div:first-child{min-width:0;flex:1 1 150px}
+  .live-config-workspace>.editor-toolbar h2{overflow-wrap:anywhere}
+  .live-config-workspace>.editor-toolbar .editor-toolbar-state{flex-shrink:0;width:auto;flex-wrap:wrap}
+  .live-config-workspace .live-config-source-switch{display:flex;flex-wrap:wrap}
+  .live-config-workspace .live-config-source-switch button{flex:1 1 140px}
+  .live-config-workspace .button{min-height:44px}
+  .live-config-workspace .code-workspace>.code-editor-toolbar{padding:16px;gap:10px}
+  .live-config-workspace .code-file-meta{flex:1 1 140px}
+  .live-config-workspace .code-editor-meta{margin:0}
+  .live-config-workspace .code-editor-meta [data-code-position]{display:none}
+  .live-config-workspace .config-selection-actions{flex:1 1 auto}
+  .live-config-workspace .config-file-buttons{flex-wrap:wrap;padding:10px 14px;gap:8px}
+  .live-config-workspace .config-file-list{flex-basis:100%}
+  .live-config-workspace .config-file-actions{flex:1 1 100%}
+  .live-config-workspace .config-editor-actions{flex-wrap:wrap;flex:1 1 auto}
+  .live-config-workspace .config-editor-actions>.button{flex:1;min-width:0;padding-inline:10px}
+  .live-config-workspace .config-file-actions>.button{flex:1;min-width:0;padding-inline:10px}
+  .live-config-workspace .code-editor-frame,.live-config-workspace .code-editor-input{min-height:320px;height:48dvh}
+  .live-config-workspace .code-workspace>footer{padding:16px}
+  .live-config-workspace .code-workspace>footer>span{flex:none;width:100%}
+  .live-config-workspace .code-workspace>footer>div{gap:8px}
+  .live-config-workspace .code-reset,.live-config-workspace [data-live-intent="deploy"]{grid-column:auto}
+  .live-config-workspace .code-workspace>footer>div>.button:only-child{grid-column:1/-1}
 }
 /* Narrow mouse-driven windows use a scrollable dock; touch devices retain
    the shared five-item navigation and safe-area spacing. */
@@ -1412,8 +1475,8 @@ dialog.config-access-dialog::backdrop{background:rgba(17,20,36,.34);backdrop-fil
 @media(max-width:600px){.user-allocation-dialog[open]{width:100%;height:100dvh;max-height:100dvh;max-width:100%;margin:0;border:0;border-radius:0}.user-allocation-dialog>header{padding:calc(20px + env(safe-area-inset-top)) 20px 20px}.user-allocation-dialog>form{flex:1}.user-allocation-dialog .traffic-edit-body{flex:1;padding:24px 20px}.user-allocation-dialog>form>footer{padding:16px 20px calc(16px + env(safe-area-inset-bottom))}.user-allocation-dialog>form>footer>.button{flex:1;min-height:46px}}
 @media(pointer:coarse){.user-admin-workspace .button,.user-admin-workspace .users-mobile-select,.user-allocation-dialog .settings-field input,.user-allocation-dialog .settings-field select,.user-allocation-dialog .shared-engine-options>div>label,.user-quota-options>label{min-height:44px}.user-admin-workspace .users-mobile-select,.user-allocation-dialog .settings-field input,.user-allocation-dialog .settings-field select{font-size:max(16px,calc(13px * var(--ui-font-scale)))}}
 
-/* Dashboard: compact fleet totals, local host telemetry beside node traffic,
-   and a shared reading width. Container queries also cover narrow mouse-driven
+/* Dashboard: aligned summary and detail columns, local host telemetry beside
+   node traffic, and a shared reading width. Container queries also cover narrow mouse-driven
    windows without changing the layout of other workspaces. */
 .app-body.page-dashboard .desktop-app{min-width:0}
 .page-dashboard .context-menu{margin-top:18px}
@@ -1423,22 +1486,22 @@ dialog.config-access-dialog::backdrop{background:rgba(17,20,36,.34);backdrop-fil
 .dashboard-workspace .dashboard-head h2{margin:0;font-size:calc(25px * var(--ui-font-scale));letter-spacing:-.03em}
 .dashboard-workspace .dashboard-head p{margin:7px 0 0;color:var(--muted);font-size:calc(11px * var(--ui-font-scale));line-height:1.5}
 .dashboard-workspace .trust-badge{flex-shrink:0;margin:0;white-space:nowrap}
-.dashboard-workspace .ops-stats{grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:0}
+.dashboard-workspace .ops-stats{grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin:0}
 .dashboard-workspace .ops-stats>.dashboard-stat{position:relative;grid-column:auto;display:grid;grid-template-columns:38px minmax(0,1fr);align-items:center;gap:12px;min-height:94px;padding:16px;border:1px solid var(--line);border-radius:12px;background:var(--surface);box-shadow:none}
 .dashboard-workspace .ops-stats>.dashboard-stat:hover{transform:none}
 .dashboard-workspace .ops-stats>a:hover{border-color:color-mix(in srgb,var(--accent) 45%,var(--line));background:var(--accent-soft)}
 .dashboard-workspace .ops-stats>.dashboard-stat .stat-icon{display:grid;width:38px;height:38px;border-radius:10px}
-.dashboard-workspace .ops-stats small{margin-bottom:6px;font-size:calc(11px * var(--ui-font-scale))}
+.dashboard-workspace .ops-stats small{margin-bottom:6px;font-size:calc(12px * var(--ui-font-scale))}
 .dashboard-workspace .ops-stats strong{font-size:calc(27px * var(--ui-font-scale));font-variant-numeric:tabular-nums;line-height:1.1;overflow-wrap:anywhere}
 .dashboard-workspace .ops-stats strong em{font-size:calc(12px * var(--ui-font-scale));letter-spacing:0;white-space:nowrap}
 .dashboard-stat>i{position:absolute;top:12px;right:12px;color:var(--muted);font-size:calc(12px * var(--ui-font-scale));font-style:normal}
 .dashboard-monitoring{display:grid;grid-template-columns:minmax(0,1fr);gap:16px}
-.dashboard-monitoring.has-two-panels{grid-template-columns:minmax(0,.95fr) minmax(0,1.35fr)}
+.dashboard-monitoring.has-two-panels{grid-template-columns:repeat(2,minmax(0,1fr))}
 .dashboard-workspace .workspace-panel,.dashboard-workspace .dashboard-traffic-history{min-width:0;margin:0;border:1px solid var(--line);border-radius:12px;background:var(--surface);box-shadow:none}
-.dashboard-workspace .workspace-panel>header{min-height:68px;padding:14px 18px;gap:12px}
+.dashboard-workspace .workspace-panel>header{min-height:64px;padding:12px 18px;gap:12px}
 .dashboard-workspace .workspace-panel h3,.dashboard-workspace .dashboard-traffic-title h3{margin:0;font-size:calc(15px * var(--ui-font-scale));letter-spacing:0}
 .dashboard-section-heading{min-width:0}
-.dashboard-section-heading>small,.dashboard-workspace .dashboard-traffic-title small{display:block;margin-top:5px;color:var(--muted);font-size:calc(10px * var(--ui-font-scale));line-height:1.5}
+.dashboard-section-heading>small,.dashboard-workspace .dashboard-traffic-title small{display:block;margin-top:5px;color:var(--muted);font-size:calc(11px * var(--ui-font-scale));line-height:1.5}
 .dashboard-host{display:flex;flex-direction:column}
 .dashboard-host .panel-metrics-refresh{width:34px;min-width:34px;height:34px;flex-shrink:0;padding:7px}
 .panel-metrics-refresh svg,.panel-metric-label svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
@@ -1471,38 +1534,43 @@ dialog.config-access-dialog::backdrop{background:rgba(17,20,36,.34);backdrop-fil
 .panel-metrics-status time{margin-left:auto;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
 .dashboard-host>footer p{margin:5px 0 0;color:var(--muted);font-size:calc(9px * var(--ui-font-scale));line-height:1.5}
 .dashboard-workspace .dashboard-traffic-history{display:flex;flex-direction:column;overflow:visible}
-.dashboard-workspace .dashboard-traffic-head{grid-template-columns:minmax(0,1fr) auto;min-height:68px;padding:14px 18px!important;gap:12px!important}
+.dashboard-workspace .dashboard-traffic-head{grid-template-columns:minmax(0,1fr) auto;min-height:64px;padding:12px 18px!important;gap:12px!important}
 .dashboard-workspace .dashboard-traffic-title,.dashboard-workspace .dashboard-traffic-month{grid-column:auto}
 .dashboard-workspace .dashboard-month-picker{width:146px}
 .dashboard-workspace .dashboard-month-picker>summary{font-size:calc(11px * var(--ui-font-scale));font-weight:650}
 .dashboard-workspace .dashboard-month-popover{left:auto;right:0;top:calc(100% + 6px)}
-.dashboard-traffic-summary{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:16px 18px 10px}
+.dashboard-traffic-summary{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:18px}
 .dashboard-workspace .dashboard-traffic-total{min-width:0;padding:0;border:0}
-.dashboard-traffic-total>span{color:var(--muted);font-size:calc(10px * var(--ui-font-scale))}
+.dashboard-traffic-total>span{color:var(--muted);font-size:calc(11px * var(--ui-font-scale))}
 .dashboard-workspace .dashboard-traffic-total strong{font-size:calc(25px * var(--ui-font-scale))!important;font-variant-numeric:tabular-nums;line-height:1.3;white-space:nowrap}
 .dashboard-traffic-summary dl{display:flex;flex-wrap:wrap;gap:12px 24px;min-width:0;margin:0}
 .dashboard-traffic-summary dl>div{min-width:0}
-.dashboard-traffic-summary dt{display:flex;align-items:center;gap:5px;font-size:calc(10px * var(--ui-font-scale))}
+.dashboard-traffic-summary dt{display:flex;align-items:center;gap:5px;font-size:calc(11px * var(--ui-font-scale))}
 .dashboard-traffic-summary dt i{width:6px;height:6px;border-radius:2px;background:var(--accent)}
 .dashboard-traffic-summary dt i.sent{background:color-mix(in srgb,var(--accent) 35%,var(--green))}
 .dashboard-traffic-summary dd{margin:5px 0 0;font-size:calc(12px * var(--ui-font-scale));font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
-.dashboard-workspace .dashboard-traffic-history .traffic-chart-legend{padding:4px 18px 0;gap:12px;font-size:calc(9px * var(--ui-font-scale))}
-.dashboard-workspace .traffic-chart-legend small{font-size:calc(9px * var(--ui-font-scale))}
+.dashboard-traffic-trends{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));margin:0 18px 12px;padding:12px 0;border:1px solid var(--line);border-radius:10px;background:var(--surface-2)}
+.dashboard-traffic-trends>div{min-width:0;padding:0 14px}
+.dashboard-traffic-trends>div+div{border-left:1px solid var(--line)}
+.dashboard-traffic-trends dt{color:var(--muted);font-size:calc(11px * var(--ui-font-scale));line-height:1.5}
+.dashboard-traffic-trends dd{margin:6px 0 4px;color:var(--ink);font-size:calc(18px * var(--ui-font-scale));font-weight:750;font-variant-numeric:tabular-nums;line-height:1.3;overflow-wrap:anywhere}
+.dashboard-traffic-trends dd>strong{display:block;font:inherit}
+.dashboard-traffic-trends small{display:block;margin-top:4px;color:var(--muted);font-size:calc(10px * var(--ui-font-scale));font-weight:400;line-height:1.5;overflow-wrap:anywhere}
 .dashboard-workspace .dashboard-traffic-chart{position:relative;flex:1;min-height:110px;height:126px;max-height:220px;margin:8px 18px 0;padding:8px 0 0}
 .dashboard-traffic-empty{position:absolute;inset:0;display:grid;place-items:center;color:var(--muted);font-size:calc(11px * var(--ui-font-scale))}
 .dashboard-workspace .dashboard-traffic-axis{margin:0 18px;padding:8px 0 12px;font-size:calc(9px * var(--ui-font-scale));font-weight:500;color:var(--muted)}
 .dashboard-workspace .dashboard-traffic-actions{min-height:51px;margin-top:auto;padding:8px 18px;flex-wrap:wrap}
-.dashboard-workspace .dashboard-columns{grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:16px;margin:0}
+.dashboard-workspace .dashboard-columns{grid-template-columns:repeat(2,minmax(0,1fr));align-items:stretch;gap:16px;margin:0}
 .dashboard-workspace .dashboard-columns.single-panel{grid-template-columns:minmax(0,1fr)}
 .dashboard-workspace .fleet-overview-list>a{grid-template-columns:32px minmax(0,1fr) auto 64px 8px;gap:10px;min-height:78px;margin:0;padding:12px 18px;border-radius:0}
 .dashboard-workspace .node-avatar{width:32px;height:32px;border-radius:9px;font-size:calc(10px * var(--ui-font-scale));color:var(--green);background:var(--green-soft);box-shadow:none}
 .dashboard-workspace .node-avatar.bad{color:var(--muted);background:var(--surface-3)}
 .dashboard-workspace .fleet-overview-list time{text-align:right;font-size:calc(9px * var(--ui-font-scale))}
 .fleet-node-info{min-width:0}
-.dashboard-workspace .fleet-overview-list strong,.dashboard-workspace .recent-tasks strong{font-size:calc(12px * var(--ui-font-scale));line-height:1.4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.dashboard-workspace .fleet-overview-list small{margin-top:3px;font-size:calc(9px * var(--ui-font-scale))}
+.dashboard-workspace .fleet-overview-list strong,.dashboard-workspace .recent-tasks strong{font-size:calc(13px * var(--ui-font-scale));line-height:1.4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dashboard-workspace .fleet-overview-list small{margin-top:3px;font-size:calc(10px * var(--ui-font-scale))}
 .dashboard-workspace .recent-tasks>div>a{min-height:78px;grid-template-columns:8px minmax(0,1fr) auto 8px;gap:10px;margin:0;padding:12px 18px;border-radius:0}
-.dashboard-workspace .recent-tasks small{margin-top:5px;font-size:calc(10px * var(--ui-font-scale));overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dashboard-workspace .recent-tasks small{margin-top:5px;font-size:calc(11px * var(--ui-font-scale));overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dashboard-workspace .recent-tasks time{font-size:calc(9px * var(--ui-font-scale));white-space:nowrap}
 .dashboard-workspace section[id]{scroll-margin-top:12px}
 @container dashboard (max-width:840px){
@@ -1518,6 +1586,7 @@ dialog.config-access-dialog::backdrop{background:rgba(17,20,36,.34);backdrop-fil
   .dashboard-workspace .ops-stats>.dashboard-stat{min-height:86px;padding:13px;gap:10px}
   .dashboard-workspace .ops-stats strong{font-size:calc(25px * var(--ui-font-scale))}
   .dashboard-workspace .dashboard-head h2{font-size:calc(23px * var(--ui-font-scale))}
+  .dashboard-workspace .dashboard-head{flex-direction:row;flex-wrap:wrap}
   .dashboard-workspace .dashboard-head p{max-width:210px;font-size:calc(10px * var(--ui-font-scale))}
   .dashboard-traffic-summary{flex-wrap:wrap}
   .dashboard-traffic-summary dl{gap:18px}
@@ -1525,6 +1594,9 @@ dialog.config-access-dialog::backdrop{background:rgba(17,20,36,.34);backdrop-fil
   .dashboard-workspace .fleet-overview-list time{display:none}
 }
 @container dashboard (max-width:380px){
+  .dashboard-traffic-trends{margin-inline:14px}
+  .dashboard-traffic-trends>div{padding-inline:8px}
+  .dashboard-traffic-trends dd{font-size:calc(15px * var(--ui-font-scale))}
   .panel-metric{padding:14px}
   .panel-metric-label{font-size:calc(10px * var(--ui-font-scale))}
   .panel-metric-network dl>div{gap:4px}
@@ -1534,7 +1606,6 @@ dialog.config-access-dialog::backdrop{background:rgba(17,20,36,.34);backdrop-fil
   .dashboard-stat>i{display:none}
   .dashboard-workspace .dashboard-month-picker{width:136px}
   .dashboard-traffic-summary dl{justify-content:space-between;flex:1}
-  .dashboard-workspace .traffic-chart-legend small{display:none}
   .dashboard-workspace .dashboard-traffic-axis{font-size:max(9px,calc(8px * var(--ui-font-scale)))}
 }
 @media(max-width:1020px) and (pointer:fine){

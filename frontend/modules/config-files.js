@@ -170,6 +170,9 @@ export function bindConfigFiles(form, engine, notify) {
   const tabs = document.createElement("nav");
   tabs.className = "config-file-buttons";
   tabs.setAttribute("aria-label", "选择入站或公共配置");
+  const fileList = document.createElement("div");
+  fileList.className = "config-file-list";
+  tabs.append(fileList);
   const buttons = files.map((file, i) => {
     const button = document.createElement("button");
     button.type = "button";
@@ -177,7 +180,7 @@ export function bindConfigFiles(form, engine, notify) {
     button.dataset.configFile = String(i);
     button.append(document.createElement("b"), document.createElement("small"));
     button.addEventListener("click", () => switchFile(i));
-    tabs.append(button);
+    fileList.append(button);
     return button;
   });
   const fileLabel = editor.querySelector(".code-file-meta b");
@@ -205,7 +208,9 @@ export function bindConfigFiles(form, engine, notify) {
   };
   editor.querySelector(".code-editor-toolbar").before(tabs);
   const navigation = document.createElement("div"); navigation.className = "config-file-navigation";
-  const summary = document.createElement("span"); summary.textContent = `${files.length} 个源码文件 · 切换文件保留当前草稿`;
+  const summary = document.createElement("span");
+  summary.className = "config-draft-summary";
+  summary.setAttribute("role", "status");
   const previewButton = document.createElement("button"); previewButton.type = "button"; previewButton.className = "button"; previewButton.textContent = "合并预览";
   previewButton.dataset.configPreview = "";
   previewButton.setAttribute("aria-pressed", "false");
@@ -218,6 +223,19 @@ export function bindConfigFiles(form, engine, notify) {
     switchFile(selected === "preview" ? lastFile : "preview");
   });
   const save = () => { if (selected !== "preview" && !readOnly) files[selected].content = input.value; };
+  const updateDrafts = () => {
+    let count = 0;
+    files.forEach((file, i) => {
+      const dirty = file.content !== originals[i];
+      if (dirty) count++;
+      buttons[i].classList.toggle("is-dirty", dirty);
+      buttons[i].setAttribute("aria-label", `${buttons[i].querySelector("b").textContent} · ${buttons[i].querySelector("small").textContent}${dirty ? " · 未保存" : ""}`);
+    });
+    summary.dataset.dirty = count ? "1" : "0";
+    const message = `${selected === "preview" ? "合并预览只读 · " : ""}${count ? `${count} 个未保存` : `${files.length} 个源码文件`} · 保存与部署包含全部文件`;
+    if (summary.textContent !== message) summary.textContent = message;
+    return count;
+  };
   // Reflect renamed preset tags on navigation, preserving invalid drafts until
   // the user fixes them. Only the returned merged content is saved/deployed.
   const refreshNames = () => {
@@ -248,8 +266,13 @@ export function bindConfigFiles(form, engine, notify) {
     content() { save(); return mergeConfigFiles(files); },
     paths() { save(); refreshNames(); return files.map(file => file.path); },
     original() { return selected === "preview" ? input.value : originals[selected]; },
-    dirty() { save(); return files.some((file,i) => file.content !== originals[i]); },
-    reset() { if (selected !== "preview" && !readOnly) input.value = files[selected].content = originals[selected]; },
+    dirty() { save(); return updateDrafts() > 0; },
+    currentDirty() { return selected !== "preview" && input.value !== originals[selected]; },
+    reset() {
+      if (selected === "preview" || readOnly) return;
+      input.value = files[selected].content = originals[selected];
+      refreshNames(); renderButtons(); updateDrafts();
+    },
   };
   function switchFile(next) {
     save(); refreshNames();
@@ -259,13 +282,16 @@ export function bindConfigFiles(form, engine, notify) {
       selected = next; input.value = content; input.readOnly = readOnly || next === "preview";
       previewButton.textContent = next === "preview" ? "返回文件" : "合并预览";
       previewButton.setAttribute("aria-pressed", String(next === "preview"));
-      summary.textContent = next === "preview" ? "合并预览只读 · 保存和部署使用全部文件" : `${files.length} 个源码文件 · 切换文件保留当前草稿`;
       input.dispatchEvent(new Event("input", {bubbles:true}));
     } catch (error) { notify(error.message,"error"); }
     renderButtons();
+    updateDrafts();
   }
   renderButtons();
+  updateDrafts();
   input.value = files[0].content;
+  const reset = editor.querySelector("[data-code-reset]");
+  if (reset) reset.textContent = "恢复当前文件";
   editor.configFileController = controller;
   return controller;
 }
