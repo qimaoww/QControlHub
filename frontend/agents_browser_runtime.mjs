@@ -12,6 +12,7 @@ import { testLargeLogRuntime, testLogPreferenceRestoreRuntime } from "./browser/
 import { testTrafficLayoutRuntime } from "./browser/traffic-layout.mjs";
 import { testConfigLayoutRuntime } from "./browser/config-layout.mjs";
 import { testShellLayoutRuntime } from "./browser/shell-layout.mjs";
+import { assert, waitFor } from "./browser/assertions.mjs";
 
 const mode = new URLSearchParams(location.search).get("mode") || "admin";
 const scenario = installAgentFixture(mode);
@@ -50,7 +51,33 @@ try {
     await testConfigMigrationRuntime(new URLSearchParams(location.search).has("preview"));
   } else {
     await import("./app.js");
-    if (mode.startsWith("traffic-layout")) await testTrafficLayoutRuntime(scenario);
+    if (mode === "traffic-layout-dense" || mode === "traffic-layout-dense-mobile") {
+      const cards = await waitFor(() => document.querySelectorAll(".traffic-policy-grid > .traffic-policy-card").length === 17
+        && document.querySelectorAll(".traffic-policy-grid > .traffic-policy-card"), "dense traffic cards did not load");
+      const grid = document.querySelector(".traffic-policy-grid");
+      assert.equal(getComputedStyle(grid).gridTemplateColumns.split(" ").length, mode.endsWith("-mobile") ? 1 : 4, "dense traffic grid should use the expected columns");
+      assert.ok(document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1, "dense traffic grid overflows horizontally");
+      assert.ok([...cards].every(card => card.querySelector(".traffic-card-node .traffic-card-port code")?.textContent && card.querySelector(".traffic-card-core .engine-badge")), "port must sit beside the node name on every dense card");
+      const first = cards[0];
+      assert.notEqual(getComputedStyle(first.querySelector(".traffic-card-core .engine-badge")).color,
+        getComputedStyle(first.querySelector(".traffic-card-config strong")).color, "core badge lost its engine color");
+      assert.notEqual(getComputedStyle(first.querySelector("[data-traffic-monitor-delete]")).color,
+        getComputedStyle(first.querySelector("[data-traffic-reset]")).color, "delete action lost its danger color");
+      assert.notEqual(getComputedStyle(first.querySelector(".traffic-policy-status.ok")).backgroundColor,
+        "rgba(0, 0, 0, 0)", "normal status lost its theme badge");
+      for (const card of cards) {
+        const frame = card.getBoundingClientRect();
+        const header = card.querySelector(".traffic-card-header");
+        assert.ok(header.getBoundingClientRect().height <= 110, "dense traffic card header grew too tall");
+        if (mode.endsWith("-mobile")) assert.ok(card.querySelector("footer").getBoundingClientRect().height <= 96, "dense traffic card actions grew too tall on mobile");
+        for (const selector of [".traffic-card-facts", ".traffic-card-actions"]) {
+          const content = card.querySelector(selector)?.getBoundingClientRect();
+          if (content) assert.ok(content.left >= frame.left - 1 && content.right <= frame.right + 1, `${selector} spills outside a dense traffic card`);
+        }
+      }
+      if (new URLSearchParams(location.search).has("preview")) await new Promise(() => {});
+    }
+    else if (mode.startsWith("traffic-layout")) await testTrafficLayoutRuntime(scenario);
     else if (mode === "config-layout") await testConfigLayoutRuntime(scenario);
     else if (mode.startsWith("shell-layout")) await testShellLayoutRuntime(scenario);
     else if (mode.startsWith("capabilities-settings")) await testCapabilitySettingsRuntime(scenario);

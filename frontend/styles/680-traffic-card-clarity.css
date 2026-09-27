@@ -1,0 +1,133 @@
+/* Use the console's card colors while keeping dense traffic cards easy to scan. */
+.traffic-workspace .traffic-policy-card {
+  box-shadow: var(--shadow);
+}
+
+.traffic-workspace .traffic-policy-card:hover {
+  box-shadow: var(--shadow-lift);
+}
+
+.traffic-workspace .traffic-card-heading {
+  padding: 8px 14px 4px;
+}
+
+.traffic-workspace .traffic-card-node strong {
+  display: block;
+  flex: 0 1 auto;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  -webkit-line-clamp: unset;
+  font-size: calc(14px * var(--ui-font-scale));
+}
+
+.traffic-workspace .traffic-card-node {
+  flex: 1 1 auto;
+  align-items: center;
+  overflow: hidden;
+  gap: 8px;
+}
+
+.traffic-workspace .traffic-card-facts {
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 10px;
+  padding: 5px 14px 8px;
+  border-top: 1px solid var(--line);
+  background: var(--surface-2);
+}
+
+.traffic-workspace .traffic-card-port code {
+  color: var(--accent);
+  font-family: inherit;
+  font-size: calc(18px * var(--ui-font-scale));
+  overflow-wrap: normal;
+  white-space: nowrap;
+}
+
+.traffic-workspace .traffic-card-port {
+  flex: 0 0 auto;
+}
+
+.traffic-workspace .traffic-card-config {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.traffic-workspace .traffic-card-config strong {
+  display: block;
+  flex: 0 1 auto;
+  overflow: hidden;
+  color: var(--muted);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  -webkit-line-clamp: unset;
+}
+
+.traffic-workspace .traffic-card-config small {
+  color: var(--muted);
+}
+
+.traffic-workspace .traffic-card-quota {
+  gap: 4px;
+  padding: 12px 14px 11px;
+}
+
+.traffic-workspace .traffic-card-quota>div strong {
+  font-size: calc(23px * var(--ui-font-scale));
+}
+
+.traffic-workspace .traffic-card-transfer {
+  background: var(--surface-2);
+}
+
+.traffic-workspace .traffic-card-transfer>div {
+  grid-template-columns: max-content minmax(0, 1fr) auto;
+  gap: 7px;
+  padding: 9px 14px;
+}
+
+.traffic-workspace .traffic-card-transfer>div>i {
+  width: 26px;
+  height: 26px;
+  font-size: calc(13px * var(--ui-font-scale));
+}
+
+.traffic-workspace .traffic-policy-card>footer {
+  min-height: 46px;
+  padding: 7px 13px;
+  background: var(--surface);
+}
+
+@media (max-width: 520px) {
+  .traffic-workspace .traffic-card-facts {
+    gap: 8px;
+  }
+
+  .traffic-workspace .traffic-card-port code {
+    font-size: calc(17px * var(--ui-font-scale));
+  }
+
+  .traffic-workspace .traffic-policy-card:not(.traffic-configured-port)>footer {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 3px 8px;
+  }
+
+  .traffic-workspace .traffic-policy-card>footer>.traffic-card-sync {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .traffic-workspace .traffic-policy-card>footer>:is(.traffic-status-button, .settings-hint) {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .traffic-workspace .traffic-policy-card>footer>.traffic-card-actions {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    justify-self: end;
+    margin-left: 0;
+  }
+}
