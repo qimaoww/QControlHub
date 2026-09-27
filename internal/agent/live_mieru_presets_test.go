@@ -26,7 +26,7 @@ func TestMieruPresetsTransferRealTraffic(t *testing.T) {
 	}))
 	defer backend.Close()
 	for _, transport := range []string{"TCP", "UDP"} {
-		for _, pattern := range []string{"off", "light", "balanced", "aggressive"} {
+		for _, pattern := range []string{"off", "light", "balanced", "aggressive", "custom", "custom-fixed"} {
 			t.Run(transport+"/"+pattern, func(t *testing.T) {
 				protocol, ok := serverconfig.FindProtocol(core.EngineMihomo, serverconfig.ProtocolMieru)
 				if !ok {
@@ -39,6 +39,20 @@ func TestMieruPresetsTransferRealTraffic(t *testing.T) {
 				input.Listen, input.Port = "127.0.0.1", availableTCPPort(t)
 				input.MieruTransport = transport
 				input.MieruTrafficPattern = pattern
+				if pattern == "custom" || pattern == "custom-fixed" {
+					input.MieruTrafficPattern = "custom"
+					input.MieruCustomPattern = &serverconfig.MieruCustomPattern{
+						TCPFragment: true, MaxSleepMs: 8,
+						NonceType: "PRINTABLE", NonceApplyToAllUDP: true,
+						NonceMinLen: 6, NonceMaxLen: 8,
+						PaddingMiddle: 64, PaddingEnd: 128,
+						LowEntropyMode: 56, MaskRotation: "right_7",
+					}
+					if pattern == "custom-fixed" {
+						input.MieruCustomPattern.NonceType = "FIXED"
+						input.MieruCustomPattern.NonceFixedHex = "00010203, aabbccdd"
+					}
+				}
 				if transport == "UDP" {
 					listener, err := net.ListenPacket("udp", "127.0.0.1:0")
 					if err != nil {

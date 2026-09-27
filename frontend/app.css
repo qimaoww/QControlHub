@@ -391,6 +391,13 @@ a.node-card:hover .node-card-open i{transform:translateX(3px)}
 .preset-option-panel>.plan-fields>label{align-content:start}
 .preset-option-panel>.plan-fields+.plan-fields{padding-top:0}
 .preset-option-panel>.preset-compat-note{margin:11px}
+.mieru-custom-fields{display:grid;gap:10px;padding:0 11px 11px}
+.mieru-custom-group{min-width:0;margin:0;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--surface)}
+.mieru-custom-group legend{padding:0 5px;color:var(--ink-2);font-size:calc(10px * var(--ui-font-scale));font-weight:750}
+.mieru-custom-group .plan-fields{min-width:0}
+.mieru-custom-group .plan-fields>label{min-width:0;font-size:calc(9px * var(--ui-font-scale));font-weight:700}
+.mieru-custom-group .plan-fields>label>small{display:block;margin-top:3px;color:var(--muted);font-size:max(9px,calc(8px * var(--ui-font-scale)));font-weight:400}
+.mieru-custom-wide{grid-column:1/-1}
 .preset-compat-note{margin:0 11px 11px;padding:8px;border-radius:7px;background:var(--amber-soft);color:var(--amber);font-size:max(9px,calc(8px * var(--ui-font-scale)));line-height:1.5}
 /* Refresh and mutation notices overlay the workspace instead of shifting it. */
 .workspace-main>[data-spa-notice]{position:fixed;right:24px;top:70px;z-index:70;width:min(420px,calc(100vw - 32px));margin:0;box-shadow:var(--shadow);pointer-events:none}

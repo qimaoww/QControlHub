@@ -17,6 +17,11 @@ export async function testPresetFieldLayoutRuntime() {
         const form = document.querySelector("#server-plan-form");
         const dialog = form.closest("dialog");
         dialog.style.width = "min(780px, calc(100vw - 16px))";
+        if (entry.protocol.key === "mieru") {
+          const mode = form.elements.namedItem("mieru_traffic_pattern");
+          mode.value = "custom";
+          mode.dispatchEvent(new Event("input", { bubbles: true }));
+        }
         for (const tab of form.querySelectorAll("[data-builder-step]")) {
           tab.click();
           await pause();

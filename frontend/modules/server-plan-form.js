@@ -118,6 +118,23 @@ function installGeneratedFieldButtons(form, protocol) {
 
 export function readServerPlanInput(form, protocol) {
   const values = new FormData(form);
+  const customControl = (name) => form.elements.namedItem(`mieru_custom_${name}`);
+  const customValue = (name) => customControl(name)?.value ?? "";
+  const nonceType = customValue("nonce_type");
+  const lowEntropyMode = Number(customValue("low_entropy_mode"));
+  const customPattern = protocol.key === "mieru" && values.get("mieru_traffic_pattern") === "custom" ? {
+    tcp_fragment: Boolean(customControl("tcp_fragment")?.checked),
+    max_sleep_ms: customControl("tcp_fragment")?.checked ? Number(customValue("max_sleep_ms")) : 0,
+    nonce_type: nonceType,
+    nonce_apply_to_all_udp: Boolean(customControl("nonce_apply_to_all_udp")?.checked),
+    nonce_min_len: ["PRINTABLE", "PRINTABLE_SUBSET"].includes(nonceType) ? Number(customValue("nonce_min_len")) : 0,
+    nonce_max_len: ["PRINTABLE", "PRINTABLE_SUBSET"].includes(nonceType) ? Number(customValue("nonce_max_len")) : 0,
+    nonce_fixed_hex: nonceType === "FIXED" ? customValue("nonce_fixed_hex") : "",
+    padding_middle: Number(customValue("padding_middle")),
+    padding_end: Number(customValue("padding_end")),
+    low_entropy_mode: lowEntropyMode,
+    mask_rotation: lowEntropyMode === 0 ? "none" : customValue("mask_rotation"),
+  } : undefined;
   return {
     protocol: protocol.key,
     tag: values.get("tag"),
@@ -157,6 +174,7 @@ export function readServerPlanInput(form, protocol) {
     listener_proxy: values.get("listener_proxy") || "",
     mieru_transport: values.get("mieru_transport") || "TCP",
     mieru_traffic_pattern: values.get("mieru_traffic_pattern") || "off",
+    mieru_custom_pattern: customPattern,
     snell_version: Number(values.get("snell_version") || 0),
     snell_udp: values.get("snell_udp") === "1",
     snell_reuse: values.get("snell_reuse") === "1",
@@ -256,6 +274,32 @@ function bindProtocolOptionVisibility(form) {
       element.hidden = !visible;
     });
   };
+  const mieruMode = form.elements.namedItem("mieru_traffic_pattern");
+  const mieruCustom = form.querySelector("[data-mieru-custom-fields]");
+  const mieruFragment = form.elements.namedItem("mieru_custom_tcp_fragment");
+  const mieruNonce = form.elements.namedItem("mieru_custom_nonce_type");
+  const mieruEntropy = form.elements.namedItem("mieru_custom_low_entropy_mode");
+  const updateMieru = () => {
+    if (!mieruMode || !mieruCustom) return;
+    const custom = mieruMode.value === "custom";
+    mieruCustom.hidden = !custom;
+    show("[data-mieru-fragment-sleep]", Boolean(mieruFragment?.checked));
+    show("[data-mieru-nonce-range]", ["PRINTABLE", "PRINTABLE_SUBSET"].includes(mieruNonce?.value));
+    show("[data-mieru-nonce-fixed]", mieruNonce?.value === "FIXED");
+    show("[data-mieru-mask-rotation]", mieruEntropy?.value !== "0");
+    mieruCustom.querySelectorAll("input, select").forEach((input) => {
+      const visible = custom && !input.closest("[hidden]");
+      input.disabled = !visible;
+      if (input.type === "number") input.required = visible;
+    });
+    const fixedHex = form.elements.namedItem("mieru_custom_nonce_fixed_hex");
+    if (fixedHex) fixedHex.required = custom && mieruNonce?.value === "FIXED";
+  };
+  for (const control of [mieruMode, mieruFragment, mieruNonce, mieruEntropy]) {
+    bindEvent(control, "input", updateMieru);
+    bindEvent(control, "change", updateMieru);
+  }
+  updateMieru();
   const snellVersion = form.elements.namedItem("snell_version");
   const snellMode = form.elements.namedItem("snell_obfs_mode");
   const updateSnell = () => {

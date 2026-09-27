@@ -233,6 +233,9 @@ export async function testPresetsRuntime(preview = false) {
     if (actual.protocol.key === "mieru") {
       assert(control("mieru_transport").value === "TCP", "Mieru default transport was lost");
       assert(control("mieru_traffic_pattern").value === "off" && submissions(test)[0].body.input.mieru_traffic_pattern === "off", "Mieru default traffic pattern was lost");
+      assert([...control("mieru_traffic_pattern").options].map(option => option.value).join(",") === "off,light,balanced,aggressive,custom", "Mieru traffic modes changed");
+      const customFields = () => form().querySelector("[data-mieru-custom-fields]");
+      assert(customFields().hidden, "Mieru custom controls appear when mode is off");
       assert(control("credential").type === "password", "Mieru password is not masked");
       edit("mieru_transport", "UDP");
       edit("username", "mieru-user");
@@ -251,6 +254,53 @@ export async function testPresetsRuntime(preview = false) {
           assert(saved[name] === value && control(name).value === String(value), `Mieru lost ${name} during save/reopen`);
         }
       }
+      edit("mieru_traffic_pattern", "custom");
+      assert(!customFields().hidden && control("mieru_custom_max_sleep_ms").value === "8" && control("mieru_custom_low_entropy_mode").value === "56", "Mieru custom defaults did not open from balanced values");
+      control("mieru_custom_tcp_fragment").checked = false;
+      control("mieru_custom_tcp_fragment").dispatchEvent(new Event("input", { bubbles: true }));
+      assert(control("mieru_custom_max_sleep_ms").closest("[data-mieru-fragment-sleep]").hidden, "Mieru disabled fragment still shows sleep setting");
+      edit("mieru_custom_max_sleep_ms", "13");
+      control("mieru_custom_tcp_fragment").checked = true;
+      control("mieru_custom_tcp_fragment").dispatchEvent(new Event("input", { bubbles: true }));
+      assert(!control("mieru_custom_max_sleep_ms").closest("[data-mieru-fragment-sleep]").hidden && control("mieru_custom_max_sleep_ms").value === "13", "Mieru fragment setting was lost when toggled");
+      edit("mieru_custom_nonce_min_len", "3");
+      edit("mieru_custom_nonce_max_len", "7");
+      edit("mieru_custom_nonce_type", "FIXED");
+      assert(control("mieru_custom_nonce_min_len").closest("[data-mieru-nonce-range]").hidden && !control("mieru_custom_nonce_fixed_hex").closest("[data-mieru-nonce-fixed]").hidden, "Mieru fixed nonce fields are wrong");
+      edit("mieru_custom_nonce_fixed_hex", "00010203, a1b2c3d4");
+      control("mieru_custom_nonce_apply_to_all_udp").checked = false;
+      edit("mieru_custom_padding_middle", "99");
+      edit("mieru_custom_padding_end", "222");
+      edit("mieru_custom_low_entropy_mode", "40");
+      edit("mieru_custom_mask_rotation", "left_3");
+      edit("mieru_traffic_pattern", "light");
+      assert(customFields().hidden, "Mieru custom controls remain visible for light mode");
+      edit("mieru_traffic_pattern", "custom");
+      assert(!customFields().hidden && control("mieru_custom_nonce_fixed_hex").value === "00010203, a1b2c3d4" && control("mieru_custom_mask_rotation").value === "left_3", "Mieru custom fields were lost when switching modes");
+      assert(form().checkValidity(), "Mieru custom form is invalid");
+      button("validate").click();
+      await waitFor(() => test.saved?.version === 6 && !button("validate").disabled, "Mieru custom save stalled");
+      const custom = submissions(test).at(-1).body.input.mieru_custom_pattern;
+      assert(submissions(test).at(-1).body.input.mieru_traffic_pattern === "custom" && JSON.stringify(custom) === JSON.stringify({
+        tcp_fragment: true, max_sleep_ms: 13, nonce_type: "FIXED", nonce_apply_to_all_udp: false,
+        nonce_min_len: 0, nonce_max_len: 0, nonce_fixed_hex: "00010203, a1b2c3d4",
+        padding_middle: 99, padding_end: 222, low_entropy_mode: 40, mask_rotation: "left_3",
+      }), "Mieru custom parameters were not submitted");
+      assert(control("mieru_traffic_pattern").value === "custom" && control("mieru_custom_mask_rotation").value === "left_3" && !customFields().hidden, "Mieru custom settings did not reopen after save");
+      edit("mieru_custom_nonce_type", "PRINTABLE_SUBSET");
+      edit("mieru_custom_nonce_min_len", "3");
+      edit("mieru_custom_nonce_max_len", "7");
+      edit("mieru_custom_nonce_fixed_hex", "invalid");
+      assert(form().checkValidity(), "Mieru hidden fixed nonce blocks printable mode");
+      button("validate").click();
+      await waitFor(() => test.saved?.version === 7 && !button("validate").disabled, "Mieru printable custom save stalled");
+      const printable = submissions(test).at(-1).body.input.mieru_custom_pattern;
+      assert(printable.nonce_type === "PRINTABLE_SUBSET" && printable.nonce_min_len === 3 && printable.nonce_max_len === 7 && printable.nonce_fixed_hex === "", "Mieru printable nonce settings were not submitted");
+      assert(control("mieru_custom_nonce_min_len").value === "3" && control("mieru_custom_nonce_max_len").value === "7", "Mieru printable nonce range did not reopen");
+      edit("mieru_custom_nonce_min_len", "99");
+      assert(!form().checkValidity(), "Mieru invalid visible nonce length was accepted");
+      edit("mieru_traffic_pattern", "off");
+      assert(form().checkValidity(), "Mieru hidden custom value blocks off mode");
     }
   }
   assert(covered.size === 4 && catalog.length >= 33, "not all engine presets were covered");

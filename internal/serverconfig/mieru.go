@@ -13,6 +13,7 @@ const (
 	mieruTrafficLight      = "light"
 	mieruTrafficBalanced   = "balanced"
 	mieruTrafficAggressive = "aggressive"
+	mieruTrafficCustom     = "custom"
 )
 
 // The values are Mieru TrafficPattern protobuf messages encoded as Base64.
@@ -46,8 +47,12 @@ func validateMieruInput(input Input) error {
 	if input.MieruTransport != "TCP" && input.MieruTransport != "UDP" {
 		return errors.New("Mieru 传输必须是 TCP 或 UDP")
 	}
-	if _, ok := mieruTrafficPatterns[input.MieruTrafficPattern]; !ok {
-		return errors.New("Mieru 流量整形预设无效")
+	if input.MieruTrafficPattern == mieruTrafficCustom {
+		if err := validateMieruCustomPattern(input.MieruCustomPattern); err != nil {
+			return err
+		}
+	} else if _, ok := mieruTrafficPatterns[input.MieruTrafficPattern]; !ok {
+		return errors.New("Mieru 网络流量模式无效")
 	}
 	if strings.TrimSpace(input.Username) == "" || len(input.Username) > 64 {
 		return errors.New("Mieru 用户名不能为空且不能超过 64 个字符")
@@ -62,7 +67,7 @@ func configureMieruListener(listener map[string]any, input Input) {
 	listener["type"] = "mieru"
 	listener["transport"] = input.MieruTransport
 	listener["users"] = map[string]any{input.Username: input.Credential}
-	if pattern := mieruTrafficPatterns[input.MieruTrafficPattern]; pattern != "" {
+	if pattern := mieruPattern(input); pattern != "" {
 		listener["traffic-pattern"] = pattern
 	}
 }
@@ -103,7 +108,11 @@ func parseMieruListener(listener map[string]any, input *Input) bool {
 			}
 		}
 		if !found {
-			return false
+			custom, ok := parseMieruCustomPattern(pattern)
+			if !ok {
+				return false
+			}
+			input.MieruTrafficPattern, input.MieruCustomPattern = mieruTrafficCustom, custom
 		}
 	}
 	return validateMieruInput(*input) == nil && validateCredential(*input) == nil
@@ -115,7 +124,7 @@ func buildMieruMihomoYAML(input Input, address, name string) (string, error) {
 		"transport": input.MieruTransport, "username": input.Username,
 		"password": input.Credential, "udp": true,
 	}
-	if pattern := mieruTrafficPatterns[input.MieruTrafficPattern]; pattern != "" {
+	if pattern := mieruPattern(input); pattern != "" {
 		proxy["traffic-pattern"] = pattern
 	}
 	return marshalSingleLineYAML(proxy)

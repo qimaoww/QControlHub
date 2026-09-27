@@ -135,6 +135,8 @@ type Input struct {
 	OpenVPNUsername              string `json:"openvpn_username,omitempty"`
 	OpenVPNPassword              string `json:"openvpn_password,omitempty"`
 	OpenVPNAddress               string `json:"openvpn_address,omitempty"`
+
+	MieruCustomPattern *MieruCustomPattern `json:"mieru_custom_pattern,omitempty"`
 }
 
 func Protocols(engine core.Engine) []Protocol {
