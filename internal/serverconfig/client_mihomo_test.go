@@ -109,6 +109,15 @@ func TestMihomoClientExportProtocolMatrix(t *testing.T) {
 				if strings.ContainsAny(profile.Mihomo, "\r\n") || !strings.HasPrefix(profile.Mihomo, "{") {
 					t.Fatalf("not a single-line proxy map: %q", profile.Mihomo)
 				}
+				var document yaml.Node
+				if err := yaml.Unmarshal([]byte(profile.Mihomo), &document); err != nil {
+					t.Fatal(err)
+				}
+				for index, key := range []string{"name", "type", "server", "port"} {
+					if document.Content[0].Content[index*2].Value != key {
+						t.Fatalf("Mihomo field %d must be %s", index, key)
+					}
+				}
 				var proxy map[string]any
 				if err := yaml.Unmarshal([]byte(profile.Mihomo), &proxy); err != nil {
 					t.Fatal(err)
