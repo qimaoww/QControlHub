@@ -1,8 +1,8 @@
 import { regionAvatarMarkup } from "./regions.js";
 
-import { groupClientAccessEntries, clientAccessAddressChoices } from "./client-access-model.js";
+import { groupClientAccessEntries, clientAccessAddressChoices, clientAccessExport } from "./client-access-model.js";
 export function createClientAccessResults({ esc, engineName, can }) {
-  function renderResults(filtered, entries, agents, filters) {
+  function renderResults(filtered, entries, agents, filters, displayFormat = "url") {
     if (!filtered.length) {
       const selectedAgent = agents.find((agent) => agent.id === filters.agent);
       const selectedHasEntries = entries.some(
@@ -67,16 +67,20 @@ export function createClientAccessResults({ esc, engineName, can }) {
                     return `<div class="${field.secret ? "secret" : ""}"><dt>${esc(field.label)}</dt><dd>${field.secret ? `<form class="secret-value-control" action="#"><input id="${fieldID}" type="password" readonly autocomplete="off" spellcheck="false" value="${esc(field.value)}"><button type="button" data-secret-visibility aria-controls="${fieldID}" aria-pressed="false">显示</button><button type="button" data-copy-target="#${fieldID}">复制</button></form>` : `<code title="${esc(field.value)}">${esc(field.value)}</code>`}</dd></div>`;
                   })
                   .join("");
-                const shareValue = String(item.profile?.uri || "");
+                const exported = clientAccessExport(item, displayFormat);
+                const shareValue = exported.value;
                 const title = item.client_name || item.tag;
                 // The title already names the inbound unless a client name replaced its tag.
-                const meta = [group.entries.length > 1 ? engineName(entry.engine) : "", item.protocol, `端口 ${Number(item.port)}`, title === item.tag ? "" : item.tag, item.profile?.format]
+                const meta = [group.entries.length > 1 ? engineName(entry.engine) : "", item.protocol, `端口 ${Number(item.port)}`, title === item.tag ? "" : item.tag, exported.format]
                   .filter(Boolean)
                   .map((value) => `<span>${esc(value)}</span>`).join("");
                 const shareControl = shareValue.includes("\n")
                   ? `<textarea class="client-share-yaml is-masked" id="${inputID}" readonly autocomplete="off" spellcheck="false" aria-label="${esc(title)} 客户端配置">${esc(shareValue)}</textarea>`
                   : `<input id="${inputID}" type="password" readonly autocomplete="off" spellcheck="false" aria-label="${esc(title)} 分享链接" value="${esc(shareValue)}">`;
-                return `<article class="client-profile-row" data-refresh-key="client-profile-${esc(entry.agent_id)}-${esc(entry.engine)}-${esc(item.tag)}"><header class="node-card-title"><b title="${esc(title)}">${esc(title)}</b>${profileIndex === 0 ? configLink(entry) : ""}<small class="client-profile-meta">${meta}</small></header><form class="client-export-control" action="#">${shareControl}<button class="button small" type="button" data-secret-visibility aria-controls="${inputID}" aria-pressed="false">显示</button><button class="button primary small" type="button" data-copy-target="#${inputID}">复制</button></form><div class="client-profile-actions">${displayButton(displayDialogID)}<button class="button small client-parameter-open" type="button" data-client-parameter-open="${dialogID}" aria-haspopup="dialog" aria-controls="${dialogID}">参数详情</button></div><dialog class="traffic-edit-dialog client-parameter-dialog" id="${dialogID}" aria-labelledby="${dialogTitleID}"><header><div><p class="eyebrow">客户端参数</p><h2 id="${dialogTitleID}">${esc(item.protocol)}</h2><p><span class="engine-badge ${esc(entry.engine)}">${esc(engineName(entry.engine))}</span><span class="client-parameter-meta client-profile-meta"><span>${esc(item.tag)}</span><span>${esc(item.profile?.format)}</span></span></p></div><button class="button small client-dialog-close" type="button" data-client-parameter-close aria-label="关闭参数详情">关闭</button></header><div class="traffic-edit-body client-parameter-dialog-body"><dl class="client-parameter-list">${fields || '<div class="empty"><dt>参数</dt><dd>暂无参数</dd></div>'}</dl></div></dialog>${displayDialog(entry, item, displayDialogID, displayAddressModeField)}</article>`;
+                const shareMarkup = exported.error
+                  ? `<p class="client-export-unavailable" role="status">${esc(exported.error)}</p>`
+                  : `<form class="client-export-control" action="#">${shareControl}<button class="button small" type="button" data-secret-visibility aria-controls="${inputID}" aria-pressed="false">显示</button><button class="button primary small" type="button" data-copy-target="#${inputID}">复制</button></form>`;
+                return `<article class="client-profile-row" data-refresh-key="client-profile-${esc(entry.agent_id)}-${esc(entry.engine)}-${esc(item.tag)}"><header class="node-card-title"><b title="${esc(title)}">${esc(title)}</b>${profileIndex === 0 ? configLink(entry) : ""}<small class="client-profile-meta">${meta}</small></header>${shareMarkup}<div class="client-profile-actions">${displayButton(displayDialogID)}<button class="button small client-parameter-open" type="button" data-client-parameter-open="${dialogID}" aria-haspopup="dialog" aria-controls="${dialogID}">参数详情</button></div><dialog class="traffic-edit-dialog client-parameter-dialog" id="${dialogID}" aria-labelledby="${dialogTitleID}"><header><div><p class="eyebrow">客户端参数</p><h2 id="${dialogTitleID}">${esc(item.protocol)}</h2><p><span class="engine-badge ${esc(entry.engine)}">${esc(engineName(entry.engine))}</span><span class="client-parameter-meta client-profile-meta"><span>${esc(item.tag)}</span><span>${esc(item.profile?.format)}</span></span></p></div><button class="button small client-dialog-close" type="button" data-client-parameter-close aria-label="关闭参数详情">关闭</button></header><div class="traffic-edit-body client-parameter-dialog-body"><dl class="client-parameter-list">${fields || '<div class="empty"><dt>参数</dt><dd>暂无参数</dd></div>'}</dl></div></dialog>${displayDialog(entry, item, displayDialogID, displayAddressModeField)}</article>`;
               })
               .join("");
             return `<section class="client-access-engine-group"><div>${profiles || `<div class="client-access-entry-empty"><p>需要先设置可访问的节点地址。</p>${configLink(entry)}</div>`}</div></section>`;

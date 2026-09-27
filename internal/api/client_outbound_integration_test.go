@@ -52,5 +52,16 @@ func TestClientOutboundChoicesUseAuthorizedDeployedRevision(t *testing.T) {
 	if len(ordinary[0].Profiles[0].Outbound) != 0 {
 		t.Fatal("ordinary client listing gained unnecessary outbound payloads")
 	}
+	yamlProfile := ordinary[0].Profiles[0]
+	if yamlProfile.MihomoError != "" || !strings.HasPrefix(yamlProfile.MihomoYAML, "proxies:\n") ||
+		!strings.Contains(yamlProfile.MihomoYAML, original.Credential) ||
+		strings.Contains(yamlProfile.MihomoYAML, draftCredential) ||
+		!strings.Contains(yamlProfile.MihomoYAML, "peer-port.example.test") {
+		t.Fatal("display YAML must use the authorized deployed credential and per-port address")
+	}
+	bob.call("GET", "/client-access", nil, http.StatusOK, &ordinary)
+	if len(ordinary) != 0 {
+		t.Fatal("display YAML leaked another user's deployment")
+	}
 	alice.call("GET", "/client-access?outbound_engine=unknown", nil, http.StatusBadRequest, nil)
 }

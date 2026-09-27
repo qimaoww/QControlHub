@@ -2,12 +2,18 @@ import { bindEvent } from "./refresh.js";
 import { createRegionDisplay } from "./regions.js";
 
 import { createClientAccessProfiles } from "./client-access-profiles.js";
+import { saveClientDisplayFormat } from "./client-access-model.js";
 export function createClientAccessBindings(ctx, { clientAccess, renderClientAccess, masonry }) {
   const { state, notify } = ctx;
   const loadRegionDisplay = createRegionDisplay(ctx);
   const bindClientProfiles = createClientAccessProfiles(ctx, { clientAccess });
   function bindClientAccessPage() {
     masonry.bind();
+    bindEvent(document.querySelector("[data-client-display-format]"), "change", (event) => {
+      state.data.clientDisplayFormat = event.currentTarget.value === "mihomo" ? "mihomo" : "url";
+      saveClientDisplayFormat(state.data.clientDisplayFormat);
+      renderClientAccess();
+    });
     document.querySelectorAll(".client-access-node-card").forEach((card) => {
       const id = card.querySelector("[data-region-avatar]")?.dataset.regionAvatar;
       const agent = (state.data.agents || []).find((item) => item.id === id);

@@ -1786,6 +1786,8 @@ dialog.config-access-dialog::backdrop{background:rgba(17,20,36,.34);backdrop-fil
 .client-access-toolbar{flex-wrap:wrap;gap:12px;padding:12px 14px}
 .client-access-toolbar>nav{flex-wrap:wrap;gap:8px}
 .client-access-toolbar>nav a>b{font-size:inherit;font-weight:inherit}
+.client-display-format{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-left:auto;color:var(--muted);font-size:calc(10px * var(--ui-font-scale))}
+.client-display-format select{min-width:130px;height:34px;font-size:inherit}
 .client-access-toolbar>.client-access-toolbar-actions{display:flex;flex-wrap:wrap;gap:10px;width:100%}
 .client-access-search{display:flex;align-items:center;flex:1;gap:8px;min-width:220px;margin:0}
 .client-access-search input{flex:1;min-width:0;width:100%;height:34px;margin:0;font-size:calc(10px * var(--ui-font-scale))}
@@ -1810,6 +1812,7 @@ dialog.config-access-dialog::backdrop{background:rgba(17,20,36,.34);backdrop-fil
 .client-export-control .button{flex:0 0 auto;width:auto}
 .client-export-control textarea{min-height:88px;resize:vertical;white-space:pre}
 .client-export-control textarea.is-masked{min-height:34px;height:34px;resize:none;color:transparent;text-shadow:0 0 6px var(--ink);white-space:nowrap;overflow:hidden}
+.client-export-unavailable{color:var(--muted);font-size:calc(10px * var(--ui-font-scale))}
 .client-profile-row>.client-profile-actions{gap:8px;margin:0;flex-wrap:wrap}
 .client-access-workspace :is(.client-display-dialog,.client-parameter-dialog)>header{grid-template-columns:minmax(0,1fr) auto}
 .client-access-workspace .client-dialog-close{align-self:start;flex:0 0 auto;width:auto}
@@ -1820,6 +1823,8 @@ dialog.config-access-dialog::backdrop{background:rgba(17,20,36,.34);backdrop-fil
   .client-node-engines{grid-column:2/-1;grid-row:2}
   .client-access-node-grid{grid-template-columns:minmax(0,1fr)}
   .client-access-toolbar{gap:12px}
+  .client-display-format{justify-content:space-between;margin:0}
+  .client-display-format select{height:44px}
   .client-access-toolbar>nav{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;overflow:visible;padding:0}
   .client-access-toolbar>nav a{min-width:0;min-height:44px;padding:6px;white-space:normal}
   .client-access-toolbar>.client-access-toolbar-actions{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px}

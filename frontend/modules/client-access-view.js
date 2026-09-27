@@ -1,4 +1,4 @@
-import { normalizeClientAccessFilters, filterClientAccessEntries } from "./client-access-model.js";
+import { normalizeClientAccessFilters, filterClientAccessEntries, loadClientDisplayFormat } from "./client-access-model.js";
 import { createClientAccessResults } from "./client-access-results.js";
 export function createClientAccessView(ctx, { masonry }) {
   const { state, engines, esc, engineName, shell } = ctx;
@@ -6,6 +6,8 @@ export function createClientAccessView(ctx, { masonry }) {
   function renderClientAccess() {
     const entries = state.data.clientAccessEntries || [];
     const agents = state.data.agents || [];
+    const displayFormat = state.data.clientDisplayFormat ?? loadClientDisplayFormat();
+    state.data.clientDisplayFormat = displayFormat;
     const filters = normalizeClientAccessFilters(entries, agents, {
       agent: state.data.accessAgent,
       engine: state.data.accessEngine,
@@ -23,7 +25,7 @@ export function createClientAccessView(ctx, { masonry }) {
       (total, entry) => total + (entry.profiles || []).length,
       0,
     );
-    const results = renderResults(filtered, entries, agents, filters);
+    const results = renderResults(filtered, entries, agents, filters, displayFormat);
     const relevantEngines = new Set(scopedEntries.map((entry) => entry.engine));
     const engineFilters = engines
       .filter((engine) => relevantEngines.has(engine))
@@ -35,15 +37,16 @@ export function createClientAccessView(ctx, { masonry }) {
       })
       .join("");
     // Keep search visible and separate from the engine filters.
+    const formatMarkup = `<label class="client-display-format"><span>连接显示方式</span><select data-client-display-format aria-label="连接显示方式"><option value="url"${displayFormat === "url" ? " selected" : ""}>URL</option><option value="mihomo"${displayFormat === "mihomo" ? " selected" : ""}>Mihomo YAML</option></select></label>`;
     const searchMarkup = `<form id="client-search" class="client-access-search" role="search"><input type="search" name="q" value="${esc(filters.query)}" aria-label="搜索入站" placeholder="搜索节点、地址、协议或入站" autocomplete="off" enterkeyhint="search"><button class="button small" type="submit">搜索</button>${filters.query ? '<button class="button small" type="button" data-clear-search>清除</button>' : ""}</form>`;
     const filtersMarkup = scopedEntries.length
-      ? `<section class="client-access-toolbar" aria-label="客户端配置筛选"><nav aria-label="按内核筛选"><a class="button small ${filters.engine ? "" : "primary active"}" href="#client-access" data-filter-engine=""${filters.engine ? "" : ' aria-current="true"'}>全部<b>${scopedProfiles}</b></a>${engineFilters}</nav><div class="client-access-toolbar-actions">${searchMarkup}<a class="button small" href="#substore-sync">Sub-Store 同步</a><button class="button small" type="button" data-refresh-client-access>刷新</button></div></section>`
-      : '<section class="client-access-toolbar empty"><button class="button small" type="button" data-refresh-client-access>刷新</button></section>';
+      ? `<section class="client-access-toolbar" aria-label="客户端配置筛选"><nav aria-label="按内核筛选"><a class="button small ${filters.engine ? "" : "primary active"}" href="#client-access" data-filter-engine=""${filters.engine ? "" : ' aria-current="true"'}>全部<b>${scopedProfiles}</b></a>${engineFilters}</nav>${formatMarkup}<div class="client-access-toolbar-actions">${searchMarkup}<a class="button small" href="#substore-sync">Sub-Store 同步</a><button class="button small" type="button" data-refresh-client-access>刷新</button></div></section>`
+      : `<section class="client-access-toolbar empty">${formatMarkup}<button class="button small" type="button" data-refresh-client-access>刷新</button></section>`;
     masonry.disconnect();
     shell(
-      `<section class="client-access-workspace compact" data-client-access-page><h1 class="visually-hidden">客户端配置</h1>${filtersMarkup}<div class="client-access-node-grid qch-swap-panel${filtered.length ? "" : " empty"}" data-refresh-key="client-results-${esc(filters.agent || "all")}-${esc(filters.engine || "all")}-${esc(filters.query || "all")}">${results}</div></section>`,
+      `<section class="client-access-workspace compact" data-client-access-page><h1 class="visually-hidden">客户端配置</h1>${filtersMarkup}<div class="client-access-node-grid qch-swap-panel${filtered.length ? "" : " empty"}" data-refresh-key="client-results-${esc(filters.agent || "all")}-${esc(filters.engine || "all")}-${esc(filters.query || "all")}-${displayFormat}">${results}</div></section>`,
       "客户端配置",
-      { viewKey: `client-access-${filters.agent || "all"}-${filters.engine || "all"}-${filters.query || "all"}` },
+      { viewKey: `client-access-${filters.agent || "all"}-${filters.engine || "all"}-${filters.query || "all"}-${displayFormat}` },
     );
   }
 

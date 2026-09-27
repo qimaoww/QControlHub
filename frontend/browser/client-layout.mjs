@@ -7,7 +7,18 @@ const vless = (host, port, name) => `vless://7f9c2ba4-5e7c-4b1b-9d6a-0c3f1e2d4a5
 const field = (label, value, secret = false) => ({ label, value, secret });
 const ssFields = (host, port) => [field("协议", "Shadowsocks 2022"), field("服务器", host), field("端口", String(port)), field("加密方法", "2022-blake3-aes-128-gcm"), field("密码", "ZXhhbXBsZS1wYXNzd29yZA==", true)];
 const vlessFields = (host, port) => [field("协议", "VLESS"), field("服务器", host), field("端口", String(port)), field("UUID", "7f9c2ba4-5e7c-4b1b-9d6a-0c3f1e2d4a5b", true), field("传输", "tcp"), field("传输安全", "reality"), field("TLS ServerName", "www.example.com"), field("Reality Public Key", "Z84J2IelR9ch3k8VtlVhhs5ycBUlXA7wHBWcBrjqnAw"), field("Reality Short ID", "6ba85179e30d4fc2"), field("客户端指纹", "chrome")];
-const profile = (tag, port, protocol, format, uri, fields, extra = {}) => ({ tag, port, protocol, address_mode: "auto", ...extra, profile: { format, uri, fields } });
+const profile = (tag, port, protocol, format, uri, fields, extra = {}) => {
+  const value = (label) => fields.find((field) => field.label === label)?.value;
+  const type = protocol.startsWith("Shadowsocks") ? "ss" : protocol.startsWith("VLESS") ? "vless" : protocol === "Hysteria 2" ? "hysteria2" : protocol === "TUIC v5" ? "tuic" : protocol.toLowerCase();
+  const proxy = { name: extra.client_name || tag, type, server: value("服务器"), port };
+  if (type === "ss") Object.assign(proxy, { cipher: value("加密方法"), password: value("密码") });
+  if (type === "vless") Object.assign(proxy, { uuid: value("UUID"), tls: true, flow: "xtls-rprx-vision", servername: value("TLS ServerName"), "client-fingerprint": "chrome", "reality-opts": { "public-key": value("Reality Public Key"), "short-id": value("Reality Short ID") } });
+  if (type === "mieru") Object.assign(proxy, { username: value("用户名"), password: value("用户密码"), transport: "TCP" });
+  if (["trojan", "hysteria2", "anytls"].includes(type)) proxy.password = value("密码");
+  if (type === "tuic") Object.assign(proxy, { uuid: "7f9c2ba4-5e7c-4b1b-9d6a-0c3f1e2d4a5b", password: "example-password" });
+  const mihomo_yaml = `proxies:\n  - ${Object.entries(proxy).map(([key, value]) => `${key}: ${JSON.stringify(value)}`).join("\n    ")}\n`;
+  return { tag, port, protocol, address_mode: "auto", ...extra, mihomo_yaml, profile: { format, uri, fields } };
+};
 const agent = (id, name, region_code, status = "online") => ({
   id, name, region_code, status, os: "Debian", arch: "amd64", version: "1.2.3", can_manage: true,
   capabilities: ["mihomo", "xray", "sing-box", "ss-rust"], supported_capabilities: ["mihomo", "xray", "sing-box", "ss-rust"],
@@ -62,21 +73,31 @@ export function clientLayoutFixture() {
   return { agents, entries };
 }
 
-export async function testClientLayoutRuntime() {
+export async function testClientLayoutRuntime({ testAPI }) {
   await waitFor(() => document.querySelectorAll(".client-access-node-card").length === 8, "client cards did not load");
   if (new URLSearchParams(location.search).has("preview")) return;
   assert.ok(document.documentElement.scrollWidth <= innerWidth + 1, "client page overflows the viewport");
   assert.ok(document.querySelector('#client-search [name="q"]').getBoundingClientRect().width >= 140, "search input must remain usable beside its button");
   const query = (selector) => document.querySelector(selector);
   const count = (selector) => document.querySelectorAll(selector).length;
+  const selectFormat = (format) => {
+    const select = query("[data-client-display-format]");
+    select.value = format;
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  };
   query('[data-filter-engine="mihomo"]').click();
   assert.equal(count(".client-profile-row"), 2, "engine filter must show only Mihomo profiles");
+  assert.ok(query(".client-export-unavailable"), "native-only protocols must not be mislabeled as URL");
+  selectFormat("mihomo");
+  assert.equal(count("textarea.client-share-yaml"), 2, "format selector must change every visible profile");
   const yaml = query("textarea.client-share-yaml");
   yaml.parentElement.querySelector("[data-secret-visibility]").click();
   assert.ok(!yaml.classList.contains("is-masked"), "YAML must be revealable");
   assert.ok(yaml.value.includes("\n"), "YAML must retain its line breaks");
   yaml.parentElement.querySelector("[data-secret-visibility]").click();
   assert.ok(yaml.classList.contains("is-masked"), "YAML must be maskable again");
+  selectFormat("url");
+  assert.equal(count("textarea.client-share-yaml"), 0, "switching back must restore URL values");
   query('[data-filter-engine=""]').click();
   query('#client-search [name="q"]').value = "LAX-02-v6";
   query('#client-search button[type="submit"]').click();
@@ -97,5 +118,17 @@ export async function testClientLayoutRuntime() {
   assert.equal(count(".client-access-node-card"), 8, "empty-state reset must restore results");
   query("[data-refresh-client-access]").click();
   await waitFor(() => !query("[data-refresh-client-access]").disabled, "refresh must finish");
+  selectFormat("mihomo");
+  const missing = testAPI.clientAccessEntries[0].profiles[0];
+  const savedYAML = missing.mihomo_yaml;
+  missing.mihomo_yaml = "";
+  missing.mihomo_error = "此协议不支持 Mihomo YAML";
+  query("[data-refresh-client-access]").click();
+  await waitFor(() => query(".client-export-unavailable"), "unsupported format must explain the missing export");
+  assert.equal(query("[data-client-display-format]").value, "mihomo", "refresh must preserve display format");
+  assert.equal(query(".client-export-unavailable").closest(".client-profile-row").querySelector(".client-export-control"), null, "unsupported YAML must not copy the URL");
+  missing.mihomo_yaml = savedYAML;
+  delete missing.mihomo_error;
+  selectFormat("url");
   assert.ok(document.documentElement.scrollWidth <= innerWidth + 1, "filtered client page overflows the viewport");
 }
