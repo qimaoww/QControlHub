@@ -13,7 +13,7 @@ func TestMieruPresetRoundTripAndClient(t *testing.T) {
 	for _, transport := range []string{"TCP", "UDP"} {
 		t.Run(transport, func(t *testing.T) {
 			input := mihomoPresetPlan(t, ProtocolMieru)
-			if input.MieruTransport != "TCP" || input.TLSEnabled || input.RealityEnabled {
+			if input.MieruTransport != "TCP" || input.MieruTrafficPattern != mieruTrafficOff || input.TLSEnabled || input.RealityEnabled {
 				t.Fatal("unexpected Mieru defaults")
 			}
 			input.MieruTransport = transport
@@ -90,12 +90,95 @@ func TestMieruPresetRoundTripAndClient(t *testing.T) {
 	}
 }
 
+func TestMieruTrafficPatternsRoundTrip(t *testing.T) {
+	for preset, pattern := range mieruTrafficPatterns {
+		for _, transport := range []string{"TCP", "UDP"} {
+			t.Run(preset+"/"+transport, func(t *testing.T) {
+				input := mihomoPresetPlan(t, ProtocolMieru)
+				input.MieruTransport = transport
+				input.MieruTrafficPattern = preset
+				content, err := Generate(core.EngineMihomo, input)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var root map[string]any
+				if err := yaml.Unmarshal([]byte(content), &root); err != nil {
+					t.Fatal(err)
+				}
+				listener := firstMap(root["listeners"])
+				if got, present := listener["traffic-pattern"]; (pattern != "") != present || present && got != pattern {
+					t.Fatalf("listener traffic-pattern = %v, present = %t", got, present)
+				}
+				parsed, ok := Parse(core.EngineMihomo, content)
+				if !ok || parsed.MieruTrafficPattern != preset {
+					t.Fatalf("listener preset did not parse: %+v", parsed)
+				}
+				again, err := Generate(core.EngineMihomo, parsed)
+				if err != nil || again != content {
+					t.Fatalf("listener round trip changed traffic pattern: %v", err)
+				}
+				profile, err := BuildClientProfile(parsed, "edge.example.com", "")
+				if err != nil {
+					t.Fatal(err)
+				}
+				var proxy map[string]any
+				if err := yaml.Unmarshal([]byte(profile.Mihomo), &proxy); err != nil {
+					t.Fatal(err)
+				}
+				if got, present := proxy["traffic-pattern"]; (pattern != "") != present || present && got != pattern {
+					t.Fatalf("client traffic-pattern = %v, present = %t", got, present)
+				}
+				protocol, _ := FindProtocol(core.EngineMihomo, ProtocolMieru)
+				regenerated, err := RegeneratePlan(protocol, input)
+				if err != nil || regenerated.MieruTrafficPattern != preset {
+					t.Fatalf("regeneration lost traffic pattern: %v", err)
+				}
+			})
+		}
+	}
+}
+
+func TestMieruTrafficPatternMutation(t *testing.T) {
+	input := mihomoPresetPlan(t, ProtocolMieru)
+	current, err := Generate(core.EngineMihomo, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input.MieruTrafficPattern = mieruTrafficBalanced
+	generated, err := Generate(core.EngineMihomo, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	withPattern, err := MutateGenerated(core.EngineMihomo, current, generated, input.Tag, "modify")
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, ok := Parse(core.EngineMihomo, withPattern)
+	if !ok || parsed.MieruTrafficPattern != mieruTrafficBalanced {
+		t.Fatal("enabling traffic shaping was not saved")
+	}
+	input.MieruTrafficPattern = mieruTrafficOff
+	generated, err = Generate(core.EngineMihomo, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	withoutPattern, err := MutateGenerated(core.EngineMihomo, withPattern, generated, input.Tag, "modify")
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, ok = Parse(core.EngineMihomo, withoutPattern)
+	if !ok || parsed.MieruTrafficPattern != mieruTrafficOff || strings.Contains(withoutPattern, "traffic-pattern:") {
+		t.Fatal("disabling traffic shaping did not remove the pattern")
+	}
+}
+
 func TestMieruRejectsUnsupportedInputs(t *testing.T) {
 	for _, test := range []struct {
 		name string
 		edit func(*Input)
 	}{
 		{"transport", func(input *Input) { input.MieruTransport = "tcp,udp" }},
+		{"traffic pattern", func(input *Input) { input.MieruTrafficPattern = "custom" }},
 		{"username", func(input *Input) { input.Username = " " }},
 		{"password", func(input *Input) { input.Credential = "short" }},
 		{"TLS", func(input *Input) { input.TLSEnabled = true }},

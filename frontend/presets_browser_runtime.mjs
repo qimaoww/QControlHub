@@ -232,19 +232,24 @@ export async function testPresetsRuntime(preview = false) {
     assert(submissions(test)[0].body.input.protocol === actual.protocol.key, "real preset submitted a different protocol");
     if (actual.protocol.key === "mieru") {
       assert(control("mieru_transport").value === "TCP", "Mieru default transport was lost");
+      assert(control("mieru_traffic_pattern").value === "off" && submissions(test)[0].body.input.mieru_traffic_pattern === "off", "Mieru default traffic pattern was lost");
       assert(control("credential").type === "password", "Mieru password is not masked");
       edit("mieru_transport", "UDP");
       edit("username", "mieru-user");
       edit("listener_routing_mark", "42");
       edit("listener_rule", "test-rule");
       edit("listener_proxy", "test-proxy");
-      button("validate").click();
-      await waitFor(() => test.saved?.version === 2 && !button("validate").disabled, "Mieru UDP save stalled");
-      const saved = submissions(test).at(-1).body.input;
-      assert(saved.mieru_transport === "UDP" && saved.username === "mieru-user", "Mieru form lost transport or username");
-      assert(control("mieru_transport").value === "UDP", "Mieru saved UDP transport did not reopen");
-      for (const [name, value] of [["listener_routing_mark", 42], ["listener_rule", "test-rule"], ["listener_proxy", "test-proxy"]]) {
-        assert(saved[name] === value && control(name).value === String(value), `Mieru lost ${name} during save/reopen`);
+      for (const [index, preset] of ["light", "balanced", "aggressive", "off"].entries()) {
+        edit("mieru_traffic_pattern", preset);
+        button("validate").click();
+        await waitFor(() => test.saved?.version === index + 2 && !button("validate").disabled, `Mieru ${preset} save stalled`);
+        const saved = submissions(test).at(-1).body.input;
+        assert(saved.mieru_traffic_pattern === preset && control("mieru_traffic_pattern").value === preset, `Mieru ${preset} preset was lost during save/reopen`);
+        assert(saved.mieru_transport === "UDP" && saved.username === "mieru-user", "Mieru form lost transport or username");
+        assert(control("mieru_transport").value === "UDP", "Mieru saved UDP transport did not reopen");
+        for (const [name, value] of [["listener_routing_mark", 42], ["listener_rule", "test-rule"], ["listener_proxy", "test-proxy"]]) {
+          assert(saved[name] === value && control(name).value === String(value), `Mieru lost ${name} during save/reopen`);
+        }
       }
     }
   }

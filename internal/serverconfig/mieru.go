@@ -8,6 +8,22 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+const (
+	mieruTrafficOff        = "off"
+	mieruTrafficLight      = "light"
+	mieruTrafficBalanced   = "balanced"
+	mieruTrafficAggressive = "aggressive"
+)
+
+// The values are Mieru TrafficPattern protobuf messages encoded as Base64.
+// Keep the preset names in Input so arbitrary listener settings stay source-only.
+var mieruTrafficPatterns = map[string]string{
+	mieruTrafficOff:        "",
+	mieruTrafficLight:      "GgQIARADIggIARABGAQgBioECCAQQDIECAAQAA==",
+	mieruTrafficBalanced:   "GgQIARAIIggIARABGAYgCCoFCEAQgAEyBAgEEAc=",
+	mieruTrafficAggressive: "GgQIARAUIggIAhABGAggDCoGCIABEP8BMgQIARAH",
+}
+
 func mieruProtocol(base string) Protocol {
 	return Protocol{
 		Key: ProtocolMieru, Name: "Mieru", Badge: "MIERU",
@@ -21,11 +37,17 @@ func normalizeMieruInput(input *Input) {
 	if input.MieruTransport == "" {
 		input.MieruTransport = "TCP"
 	}
+	if input.MieruTrafficPattern == "" {
+		input.MieruTrafficPattern = mieruTrafficOff
+	}
 }
 
 func validateMieruInput(input Input) error {
 	if input.MieruTransport != "TCP" && input.MieruTransport != "UDP" {
 		return errors.New("Mieru 传输必须是 TCP 或 UDP")
+	}
+	if _, ok := mieruTrafficPatterns[input.MieruTrafficPattern]; !ok {
+		return errors.New("Mieru 流量整形预设无效")
 	}
 	if strings.TrimSpace(input.Username) == "" || len(input.Username) > 64 {
 		return errors.New("Mieru 用户名不能为空且不能超过 64 个字符")
@@ -40,6 +62,9 @@ func configureMieruListener(listener map[string]any, input Input) {
 	listener["type"] = "mieru"
 	listener["transport"] = input.MieruTransport
 	listener["users"] = map[string]any{input.Username: input.Credential}
+	if pattern := mieruTrafficPatterns[input.MieruTrafficPattern]; pattern != "" {
+		listener["traffic-pattern"] = pattern
+	}
 }
 
 func parseMieruListener(listener map[string]any, input *Input) bool {
@@ -47,7 +72,7 @@ func parseMieruListener(listener map[string]any, input *Input) bool {
 	// cannot be represented by this form or its matching client export.
 	for key := range listener {
 		switch key {
-		case "name", "type", "listen", "port", "transport", "users", "routing-mark", "rule", "proxy":
+		case "name", "type", "listen", "port", "transport", "users", "traffic-pattern", "routing-mark", "rule", "proxy":
 		default:
 			return false
 		}
@@ -64,15 +89,36 @@ func parseMieruListener(listener map[string]any, input *Input) bool {
 		input.Username, input.Credential = name, stringValue(password)
 	}
 	input.MieruTransport = stringValue(listener["transport"])
+	input.MieruTrafficPattern = mieruTrafficOff
+	if raw, present := listener["traffic-pattern"]; present {
+		pattern, ok := raw.(string)
+		if !ok || pattern == "" {
+			return false
+		}
+		found := false
+		for preset, encoded := range mieruTrafficPatterns {
+			if encoded == pattern {
+				input.MieruTrafficPattern, found = preset, true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
 	return validateMieruInput(*input) == nil && validateCredential(*input) == nil
 }
 
 func buildMieruMihomoYAML(input Input, address, name string) (string, error) {
-	return marshalSingleLineYAML(map[string]any{
+	proxy := map[string]any{
 		"name": name, "type": "mieru", "server": address, "port": input.Port,
 		"transport": input.MieruTransport, "username": input.Username,
 		"password": input.Credential, "udp": true,
-	})
+	}
+	if pattern := mieruTrafficPatterns[input.MieruTrafficPattern]; pattern != "" {
+		proxy["traffic-pattern"] = pattern
+	}
+	return marshalSingleLineYAML(proxy)
 }
 
 // Recheck the saved listener at the mutation boundary: source-only listeners

@@ -81,6 +81,7 @@ type Input struct {
 	ListenerRule                 string `json:"listener_rule"`
 	ListenerProxy                string `json:"listener_proxy"`
 	MieruTransport               string `json:"mieru_transport,omitempty"`
+	MieruTrafficPattern          string `json:"mieru_traffic_pattern,omitempty"`
 	SnellVersion                 int    `json:"snell_version"`
 	SnellUDP                     bool   `json:"snell_udp"`
 	SnellReuse                   bool   `json:"snell_reuse"`
