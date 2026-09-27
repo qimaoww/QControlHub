@@ -60,7 +60,12 @@ const avatar = () => document.querySelector('[data-agent-node="alpha"] [data-reg
   location.hash = "#client-access";
   const clientAvatar = () => document.querySelector(".client-access-node-card [data-region-avatar]");
   await waitFor(() => flag(clientAvatar(), "jp"), "客户端卡片未使用手动旗帜");
-  assert.ok(clientAvatar().closest(".client-access-node-card>header .client-access-node"), "旗帜不在卡片左上角");
+  const clientHeader = clientAvatar().closest(".client-access-node-card>.node-card-head");
+  assert.ok(clientHeader, "旗帜不在卡片标题栏");
+  const avatarBounds = clientAvatar().getBoundingClientRect();
+  const titleBounds = clientHeader.querySelector(".node-card-title").getBoundingClientRect();
+  assert.ok(avatarBounds.right <= titleBounds.left && avatarBounds.top < titleBounds.bottom,
+    "旗帜不在卡片标题左侧");
   document.querySelector("[data-refresh-client-access]").click();
   await waitFor(() => !document.querySelector("[data-refresh-client-access]").disabled && flag(clientAvatar(), "jp"), "刷新后手动旗帜丢失");
   location.hash = "#settings-node-alpha";
