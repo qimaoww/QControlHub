@@ -1,47 +1,32 @@
-/* Keep the identity and the cumulative total prominent in dense traffic grids. */
+/* Use the console's card colors while keeping dense traffic cards easy to scan. */
 .traffic-workspace .traffic-policy-card {
-  box-shadow: none;
+  box-shadow: var(--shadow);
 }
 
 .traffic-workspace .traffic-policy-card:hover {
-  transform: none;
+  box-shadow: var(--shadow-lift);
 }
 
 .traffic-workspace .traffic-card-heading {
-  padding: 11px 14px 5px;
+  padding: 8px 14px 4px;
 }
 
 .traffic-workspace .traffic-card-node strong {
   font-size: calc(14px * var(--ui-font-scale));
 }
 
-.traffic-workspace .traffic-card-header .traffic-policy-status.ok {
-  padding-inline: 2px;
-  background: transparent;
-  color: var(--muted);
-}
-
-.traffic-workspace .traffic-card-header .traffic-policy-status.ok i {
-  background: var(--green);
-}
-
 .traffic-workspace .traffic-card-facts {
   grid-template-columns: max-content max-content minmax(0, 1fr);
   gap: 10px;
-  padding: 0 14px 12px;
-  border: 0;
-  background: transparent;
+  padding: 5px 14px 8px;
+  border-top: 1px solid var(--line);
+  background: var(--surface-2);
 }
 
 .traffic-workspace .traffic-card-port code {
-  color: var(--ink);
+  color: var(--accent);
   font-family: inherit;
   font-size: calc(20px * var(--ui-font-scale));
-}
-
-.traffic-workspace .traffic-card-core .engine-badge {
-  border-color: var(--line);
-  background: var(--surface-2);
 }
 
 .traffic-workspace .traffic-card-config {
@@ -67,7 +52,6 @@
 .traffic-workspace .traffic-card-quota {
   gap: 4px;
   padding: 12px 14px 11px;
-  border-top: 1px solid var(--line);
 }
 
 .traffic-workspace .traffic-card-quota>div strong {
@@ -75,9 +59,7 @@
 }
 
 .traffic-workspace .traffic-card-transfer {
-  border-block: 0;
-  border-top: 1px solid var(--line);
-  background: var(--surface);
+  background: var(--surface-2);
 }
 
 .traffic-workspace .traffic-card-transfer>div {
@@ -87,9 +69,8 @@
 }
 
 .traffic-workspace .traffic-card-transfer>div>i {
-  width: auto;
-  height: auto;
-  background: transparent;
+  width: 26px;
+  height: 26px;
   font-size: calc(13px * var(--ui-font-scale));
 }
 
@@ -97,33 +78,6 @@
   min-height: 46px;
   padding: 7px 13px;
   background: var(--surface);
-}
-
-.traffic-workspace .traffic-status-button,
-.traffic-workspace .traffic-card-actions [data-traffic-monitor-delete],
-.traffic-workspace .traffic-card-actions [data-traffic-reset] {
-  border-color: transparent;
-  background: transparent;
-  box-shadow: none;
-  color: var(--muted);
-}
-
-.traffic-workspace .traffic-status-button.bad {
-  color: var(--red);
-}
-
-.traffic-workspace .traffic-status-button:hover,
-.traffic-workspace .traffic-card-actions [data-traffic-monitor-delete]:hover,
-.traffic-workspace .traffic-card-actions [data-traffic-reset]:hover {
-  background: var(--surface-2);
-}
-
-.traffic-workspace .traffic-card-actions [data-traffic-monitor-delete]:hover {
-  color: var(--red);
-}
-
-.traffic-workspace .traffic-card-actions .button:last-child {
-  border-color: color-mix(in srgb, var(--accent) 24%, var(--line));
 }
 
 @media (max-width: 520px) {

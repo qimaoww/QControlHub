@@ -58,6 +58,13 @@ try {
       assert.equal(getComputedStyle(grid).gridTemplateColumns.split(" ").length, mode.endsWith("-mobile") ? 1 : 4, "dense traffic grid should use the expected columns");
       assert.ok(document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1, "dense traffic grid overflows horizontally");
       assert.ok([...cards].every(card => card.querySelector(".traffic-card-port code")?.textContent && card.querySelector(".traffic-card-core .engine-badge")), "dense traffic card identity is incomplete");
+      const first = cards[0];
+      assert.notEqual(getComputedStyle(first.querySelector(".traffic-card-core .engine-badge")).color,
+        getComputedStyle(first.querySelector(".traffic-card-config strong")).color, "core badge lost its engine color");
+      assert.notEqual(getComputedStyle(first.querySelector("[data-traffic-monitor-delete]")).color,
+        getComputedStyle(first.querySelector("[data-traffic-reset]")).color, "delete action lost its danger color");
+      assert.notEqual(getComputedStyle(first.querySelector(".traffic-policy-status.ok")).backgroundColor,
+        "rgba(0, 0, 0, 0)", "normal status lost its theme badge");
       for (const card of cards) {
         const frame = card.getBoundingClientRect();
         const header = card.querySelector(".traffic-card-header");
