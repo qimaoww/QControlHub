@@ -29,7 +29,6 @@ export function createClientAccessResults({ esc, engineName, can }) {
       .map((group, groupIndex) => {
         const firstEntry = group.entries[0];
         const agent = agents.find((item) => item.id === group.agent_id) || {};
-        const agentStatus = agent.status || "unknown";
         const addressChoices = clientAccessAddressChoices(firstEntry);
         const displayButton = (displayDialogID) => can("agents.manage")
           ? `<button class="button small client-display-settings-open" type="button" data-client-display-open="${displayDialogID}" aria-haspopup="dialog" aria-controls="${displayDialogID}">修改显示参数</button>`
@@ -43,13 +42,6 @@ export function createClientAccessResults({ esc, engineName, can }) {
         const addressWarning = !can("agents.manage") && firstEntry.address_required
           ? '<p class="client-address-missing">请联系节点管理员设置连接地址。</p>'
           : "";
-        const statusLabel = firstEntry.address_required
-          ? "待设置地址"
-          : agentStatus === "online"
-            ? "在线"
-            : agentStatus === "offline"
-              ? "离线"
-              : "状态未知";
         const engineSummary = group.entries.map((entry) =>
           `<span class="core-chip"><span class="engine-badge ${esc(entry.engine)}">${esc(engineName(entry.engine))}</span><small>${(entry.profiles || []).length} 个入站</small></span>`,
         ).join("");
@@ -90,7 +82,7 @@ export function createClientAccessResults({ esc, engineName, can }) {
             return `<section class="client-access-engine-group"><div>${profiles || `<div class="client-access-entry-empty"><p>需要先设置可访问的节点地址。</p>${configLink(entry)}</div>`}</div></section>`;
           })
           .join("");
-        return `<article class="client-access-node-card node-card" data-refresh-key="client-access-node-${esc(group.agent_id)}"><header class="node-card-head">${regionAvatarMarkup({ id: group.agent_id }, esc, false)}<div class="node-card-title"><strong>${esc(firstEntry.agent_name)}</strong><small class="client-node-meta"><span>${esc(agent.os || "节点")}</span><span>${esc(agent.arch || "")}</span><code>${esc(firstEntry.address || "未设置地址")}</code></small></div><div class="client-node-summary"><div class="client-node-engines" aria-label="节点内核和入站数量">${engineSummary}</div><span class="node-card-state"><b>${statusLabel}</b></span></div></header>${addressWarning}<div class="client-access-node-engines">${engineSections}</div></article>`;
+        return `<article class="client-access-node-card node-card" data-refresh-key="client-access-node-${esc(group.agent_id)}"><header class="node-card-head">${regionAvatarMarkup({ id: group.agent_id }, esc, false)}<div class="node-card-title"><strong>${esc(firstEntry.agent_name)}</strong><small class="client-node-meta"><span>${esc(agent.os || "节点")}</span><span>${esc(agent.arch || "")}</span><code>${esc(firstEntry.address || "未设置地址")}</code></small></div><div class="client-node-summary"><div class="client-node-engines" aria-label="节点内核和入站数量">${engineSummary}</div></div></header>${addressWarning}<div class="client-access-node-engines">${engineSections}</div></article>`;
       })
       .join("");
   }
