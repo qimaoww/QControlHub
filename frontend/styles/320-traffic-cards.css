@@ -13,7 +13,7 @@
 .traffic-workspace .traffic-card-node{min-width:0;display:flex;align-items:baseline;gap:6px}
 .traffic-workspace .traffic-card-node strong{display:-webkit-box;min-width:0;overflow:hidden;color:var(--ink);font-size:calc(15px * var(--ui-font-scale));line-height:1.3;overflow-wrap:anywhere;-webkit-box-orient:vertical;-webkit-line-clamp:2}
 .traffic-workspace .traffic-card-controls{align-self:center}
-.traffic-workspace .traffic-card-facts{min-width:0;display:grid;grid-template-columns:max-content max-content minmax(0,1fr);align-items:center;gap:12px;padding:6px 14px;border-top:1px solid var(--line);background:var(--surface-2)}
+.traffic-workspace .traffic-card-facts{min-width:0;display:grid;grid-template-columns:max-content minmax(0,1fr);align-items:center;gap:12px;padding:6px 14px;border-top:1px solid var(--line);background:var(--surface-2)}
 .traffic-workspace .traffic-card-port,.traffic-workspace .traffic-card-core,.traffic-workspace .traffic-card-config{min-width:0;display:flex;align-items:center;gap:5px}
 .traffic-workspace .traffic-card-port code{display:block;min-width:0;overflow:visible;color:var(--accent);font-size:calc(21px * var(--ui-font-scale));font-weight:800;font-variant-numeric:tabular-nums;line-height:1.1;overflow-wrap:anywhere;white-space:normal}
 .traffic-workspace .traffic-card-core .engine-badge{max-width:100%;min-height:24px;padding:3px 7px;font-size:calc(10px * var(--ui-font-scale));line-height:1.2;overflow-wrap:anywhere;white-space:normal}

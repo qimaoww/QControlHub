@@ -57,7 +57,7 @@ try {
       const grid = document.querySelector(".traffic-policy-grid");
       assert.equal(getComputedStyle(grid).gridTemplateColumns.split(" ").length, mode.endsWith("-mobile") ? 1 : 4, "dense traffic grid should use the expected columns");
       assert.ok(document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1, "dense traffic grid overflows horizontally");
-      assert.ok([...cards].every(card => card.querySelector(".traffic-card-port code")?.textContent && card.querySelector(".traffic-card-core .engine-badge")), "dense traffic card identity is incomplete");
+      assert.ok([...cards].every(card => card.querySelector(".traffic-card-node .traffic-card-port code")?.textContent && card.querySelector(".traffic-card-core .engine-badge")), "port must sit beside the node name on every dense card");
       const first = cards[0];
       assert.notEqual(getComputedStyle(first.querySelector(".traffic-card-core .engine-badge")).color,
         getComputedStyle(first.querySelector(".traffic-card-config strong")).color, "core badge lost its engine color");

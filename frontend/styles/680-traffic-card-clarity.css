@@ -12,11 +12,23 @@
 }
 
 .traffic-workspace .traffic-card-node strong {
+  display: block;
+  flex: 0 1 auto;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  -webkit-line-clamp: unset;
   font-size: calc(14px * var(--ui-font-scale));
 }
 
+.traffic-workspace .traffic-card-node {
+  flex: 1 1 auto;
+  align-items: center;
+  overflow: hidden;
+  gap: 8px;
+}
+
 .traffic-workspace .traffic-card-facts {
-  grid-template-columns: max-content max-content minmax(0, 1fr);
+  grid-template-columns: max-content minmax(0, 1fr);
   gap: 10px;
   padding: 5px 14px 8px;
   border-top: 1px solid var(--line);
@@ -26,7 +38,13 @@
 .traffic-workspace .traffic-card-port code {
   color: var(--accent);
   font-family: inherit;
-  font-size: calc(20px * var(--ui-font-scale));
+  font-size: calc(18px * var(--ui-font-scale));
+  overflow-wrap: normal;
+  white-space: nowrap;
+}
+
+.traffic-workspace .traffic-card-port {
+  flex: 0 0 auto;
 }
 
 .traffic-workspace .traffic-card-config {
@@ -86,7 +104,7 @@
   }
 
   .traffic-workspace .traffic-card-port code {
-    font-size: calc(19px * var(--ui-font-scale));
+    font-size: calc(17px * var(--ui-font-scale));
   }
 
   .traffic-workspace .traffic-policy-card:not(.traffic-configured-port)>footer {
