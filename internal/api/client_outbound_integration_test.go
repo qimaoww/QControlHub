@@ -53,7 +53,7 @@ func TestClientOutboundChoicesUseAuthorizedDeployedRevision(t *testing.T) {
 		t.Fatal("ordinary client listing gained unnecessary outbound payloads")
 	}
 	yamlProfile := ordinary[0].Profiles[0]
-	if yamlProfile.MihomoError != "" || !strings.HasPrefix(yamlProfile.MihomoYAML, "proxies:\n") ||
+	if yamlProfile.MihomoError != "" || !strings.HasPrefix(yamlProfile.MihomoYAML, "{") || strings.ContainsAny(yamlProfile.MihomoYAML, "\r\n") ||
 		!strings.Contains(yamlProfile.MihomoYAML, original.Credential) ||
 		strings.Contains(yamlProfile.MihomoYAML, draftCredential) ||
 		!strings.Contains(yamlProfile.MihomoYAML, "peer-port.example.test") {

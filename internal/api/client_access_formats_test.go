@@ -24,12 +24,10 @@ func TestClientAccessMihomoFormatsPreserveClientValues(t *testing.T) {
 	entries := []clientAccessEntry{{Profiles: []clientAccessProfile{{Profile: profile}}, AddressOptions: []clientAccessAddressOption{{Profiles: []clientAccessProfile{{Profile: profile}}}}}}
 	prepareClientAccessFormats(entries)
 	for _, item := range []clientAccessProfile{entries[0].Profiles[0], entries[0].AddressOptions[0].Profiles[0]} {
-		if item.MihomoError != "" || !strings.HasPrefix(item.MihomoYAML, "proxies:\n") || item.Profile.URI != profile.URI {
+		if item.MihomoError != "" || !strings.HasPrefix(item.MihomoYAML, "{") || strings.ContainsAny(item.MihomoYAML, "\r\n") || item.MihomoYAML != profile.Mihomo || item.Profile.URI != profile.URI {
 			t.Fatal("missing YAML export or changed URL")
 		}
-		var document struct {
-			Proxies []map[string]any `yaml:"proxies"`
-		}
+		var document map[string]any
 		if err := yaml.Unmarshal([]byte(item.MihomoYAML), &document); err != nil {
 			t.Fatal(err)
 		}
@@ -37,8 +35,11 @@ func TestClientAccessMihomoFormatsPreserveClientValues(t *testing.T) {
 		if err := yaml.Unmarshal([]byte(profile.Mihomo), &original); err != nil {
 			t.Fatal(err)
 		}
-		if len(document.Proxies) != 1 || !reflect.DeepEqual(document.Proxies[0], original) {
+		if !reflect.DeepEqual(document, original) {
 			t.Fatal("formatting changed names, IPv6 address, port or credentials")
+		}
+		if _, _, ok := subStoreMihomoNode(item.MihomoYAML); !ok {
+			t.Fatal("display export must be accepted by the Sub-Store node parser")
 		}
 	}
 	encoded, err := json.Marshal(entries)

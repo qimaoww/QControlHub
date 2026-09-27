@@ -1,7 +1,7 @@
 import { assert, waitFor } from "./assertions.mjs";
 
 // Client exports shaped like a real fleet: several engines per node, long names,
-// multi-line YAML, an offline node and a node that still needs an address.
+// single-line YAML, an offline node and a node that still needs an address.
 const ss = (host, port, name) => `ss://MjAyMi1ibGFrZTMtYWVzLTEyOC1nY206ZXhhbXBsZS1wYXNzd29yZA@${host}:${port}#${encodeURIComponent(name)}`;
 const vless = (host, port, name) => `vless://7f9c2ba4-5e7c-4b1b-9d6a-0c3f1e2d4a5b@${host}:${port}?encryption=none&flow=xtls-rprx-vision&security=reality&sni=www.example.com&fp=chrome&pbk=Z84J2IelR9ch3k8VtlVhhs5ycBUlXA7wHBWcBrjqnAw&sid=6ba85179e30d4fc2&type=tcp#${encodeURIComponent(name)}`;
 const field = (label, value, secret = false) => ({ label, value, secret });
@@ -16,7 +16,7 @@ const profile = (tag, port, protocol, format, uri, fields, extra = {}) => {
   if (type === "mieru") Object.assign(proxy, { username: value("用户名"), password: value("用户密码"), transport: "TCP" });
   if (["trojan", "hysteria2", "anytls"].includes(type)) proxy.password = value("密码");
   if (type === "tuic") Object.assign(proxy, { uuid: "7f9c2ba4-5e7c-4b1b-9d6a-0c3f1e2d4a5b", password: "example-password" });
-  const mihomo_yaml = `proxies:\n  - ${Object.entries(proxy).map(([key, value]) => `${key}: ${JSON.stringify(value)}`).join("\n    ")}\n`;
+  const mihomo_yaml = `{${Object.entries(proxy).map(([key, value]) => `${key}: ${JSON.stringify(value)}`).join(", ")}}`;
   return { tag, port, protocol, address_mode: "auto", ...extra, mihomo_yaml, profile: { format, uri, fields } };
 };
 const agent = (id, name, region_code, status = "online") => ({
@@ -89,13 +89,13 @@ export async function testClientLayoutRuntime({ testAPI }) {
   assert.equal(count(".client-profile-row"), 2, "engine filter must show only Mihomo profiles");
   assert.ok(query(".client-export-unavailable"), "native-only protocols must not be mislabeled as URL");
   selectFormat("mihomo");
-  assert.equal(count("textarea.client-share-yaml"), 2, "format selector must change every visible profile");
-  const yaml = query("textarea.client-share-yaml");
+  assert.equal(count(".client-export-control input"), 2, "format selector must keep every export on one line");
+  const yaml = query(".client-export-control input");
   yaml.parentElement.querySelector("[data-secret-visibility]").click();
-  assert.ok(!yaml.classList.contains("is-masked"), "YAML must be revealable");
-  assert.ok(yaml.value.includes("\n"), "YAML must retain its line breaks");
+  assert.equal(yaml.type, "text", "YAML must be revealable");
+  assert.ok(yaml.value.startsWith("{") && !/[\r\n]/.test(yaml.value), "YAML must be a single-line Sub-Store proxy map");
   yaml.parentElement.querySelector("[data-secret-visibility]").click();
-  assert.ok(yaml.classList.contains("is-masked"), "YAML must be maskable again");
+  assert.equal(yaml.type, "password", "YAML must be maskable again");
   selectFormat("url");
   assert.equal(count("textarea.client-share-yaml"), 0, "switching back must restore URL values");
   query('[data-filter-engine=""]').click();

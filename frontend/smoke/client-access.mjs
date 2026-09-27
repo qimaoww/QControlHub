@@ -13,7 +13,7 @@ import {
 
 // Inert on import. The runner owns ordering and the few shared read-only fixtures.
 export async function run({ noop, previousDocument }) {
-const exportSample = { profile: { format: "VLESS URI", uri: "vless://example" }, mihomo_yaml: 'proxies:\n  - name: "Example"\n    type: vless\n' };
+const exportSample = { profile: { format: "VLESS URI", uri: "vless://example" }, mihomo_yaml: '{name: "Example", type: vless, server: "example.test", port: 443}' };
 assert.equal(clientAccessExport(exportSample, "url").value, exportSample.profile.uri);
 assert.equal(clientAccessExport(exportSample, "mihomo").value, exportSample.mihomo_yaml);
 assert.equal(clientAccessExport({ ...exportSample, mihomo_error: "unsupported" }, "mihomo").value, "");
