@@ -204,6 +204,43 @@ if (mode.startsWith("traffic-layout")) {
     last_reported_at: new Date().toISOString(), last_collected_at: new Date().toISOString(),
     ...(index > 1 ? {accounting: {source: "nft-dual", client_received: 1e9, client_sent: 2e9, target_received: 2e9, target_sent: 1e9}} : {}),
   }));
+  if (mode === "traffic-layout-dense" || mode === "traffic-layout-dense-mobile") {
+    const names = { alpha: "VMShell HK", delta: "Zouter HK", bravo: "DataWave HK", charlie: "legendvps SG" };
+    testAPI.agents = testAPI.agents.map(agent => ({ ...agent, name: names[agent.id], status: "online" }));
+    testAPI.trafficPolicies = [
+      ["alpha", 443, "xray", "VMShell-HK-VLESS", "tcp", 88.8],
+      ["delta", 8443, "mihomo", "vless-enc-tcp-reality-vision", "tcp", 10.4],
+      ["delta", 35966, "ss-rust", "2022-blake3-aes-128-gcm", "both", 157.7],
+      ["delta", 22222, "ss-rust", "2022-blake3-aes-128-gcm", "both", 0.00024],
+      ["delta", 36623, "ss-rust", "2022-blake3-aes-128-gcm", "both", 0.00008],
+      ["delta", 52717, "ss-rust", "2022-blake3-aes-128-gcm", "both", 27.3],
+      ["bravo", 29293, "ss-rust", "2022-blake3-aes-128-gcm", "both", 248.5],
+      ["bravo", 45690, "ss-rust", "2022-blake3-aes-128-gcm", "both", 39.1],
+      ["bravo", 46767, "sing-box", "ss2022-bcf9b7aa", "both", 0.00006],
+      ["bravo", 31680, "xray", "HongKong-VLESS-Reality-Vision-Backup", "tcp", 44.6],
+      ["bravo", 10086, "mihomo", "mixed-in", "both", 3.2],
+      ["bravo", 56821, "sing-box", "tuic-hk-main", "both", 12.7],
+      ["charlie", 443, "sing-box", "vless-in-443", "tcp", 6.4],
+      ["charlie", 22222, "ss-rust", "2022-blake3-aes-128-gcm", "both", 94.1],
+      ["charlie", 22229, "sing-box", "VLESS-Vision-Reality", "tcp", 71.5],
+      ["charlie", 8443, "xray", "edge-singapore-secondary", "tcp", 1.9],
+      ["charlie", 39999, "mihomo", "socks-in", "both", 0.00012],
+    ].map(([agent_id, port, engine, name, protocol, usedGB], index) => {
+      const used = usedGB * 1024 ** 3;
+      const received = used * (index % 3 === 0 ? 0.5 : 0.48);
+      return {
+        id: `trf_dense_${index}`, agent_id, port, engine, name, protocol,
+        cycle: "monthly", cycle_anchor: "2026-09-01", period_start: "2026-09-01", period_end: "2026-10-01",
+        quota_enabled: false, monitoring_enabled: true,
+        received_bytes: received, sent_bytes: used - received, used_bytes: used,
+        receive_bps: index % 4 === 0 ? 0 : 7000 + index * 1500,
+        send_bps: index % 4 === 0 ? 0 : 6900 + index * 1500,
+        enforcement_available: true,
+        accounting: { source: "nft-dual", client_received: received, client_sent: used - received, target_received: used - received, target_sent: received },
+        last_reported_at: new Date().toISOString(), last_collected_at: new Date().toISOString(),
+      };
+    });
+  }
 }
 const layoutConfig = engine => engine === "mihomo" ? "log-level: info\nlisteners:\n  - name: socks-in\n    type: socks\n    port: 1080\n    listen: 0.0.0.0\nrules:\n  - MATCH,DIRECT\n" : engine === "ss-rust" ? JSON.stringify({server:"0.0.0.0",server_port:8388,method:"aes-256-gcm",password:"demo-not-a-real-secret",mode:"tcp_and_udp"},null,2) : JSON.stringify({log:{loglevel:"warning"},dns:{servers:["1.1.1.1","8.8.8.8"]},inbounds:[{tag:"socks-in",listen:"127.0.0.1",...(engine==="xray"?{port:1080,protocol:"socks",settings:{auth:"noauth",udp:true}}:{listen_port:1080,type:"socks"})},{tag:"http-in",listen:"127.0.0.1",...(engine==="xray"?{port:8080,protocol:"http"}:{listen_port:8080,type:"http"})}],outbounds:[{tag:"direct",...(engine==="xray"?{protocol:"freedom"}:{type:"direct"})}],...(engine==="xray"?{routing:{domainStrategy:"AsIs",rules:[]}}:{route:{final:"direct"}})},null,2);
 if (mode.startsWith("capabilities-settings")) {
