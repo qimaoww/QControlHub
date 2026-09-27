@@ -34,8 +34,8 @@ export function createClientAccessView(ctx, { masonry }) {
         return `<a class="${filters.engine === engine ? "active" : ""}" href="#client-access" data-filter-engine="${esc(engine)}"${filters.engine === engine ? ' aria-current="true"' : ""}>${esc(engineName(engine))}<b>${count}</b></a>`;
       })
       .join("");
-    // Search stays in the toolbar so a long export list is one keystroke away.
-    const searchMarkup = `<form id="client-search" class="client-access-search" role="search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg><input type="search" name="q" value="${esc(filters.query)}" aria-label="搜索入站" placeholder="搜索节点、地址、协议或入站" autocomplete="off" enterkeyhint="search"><button class="button small" type="submit">搜索</button>${filters.query ? '<button class="button small" type="button" data-clear-search>清除</button>' : ""}</form>`;
+    // Keep search visible and separate from the engine filters.
+    const searchMarkup = `<form id="client-search" class="client-access-search" role="search"><input type="search" name="q" value="${esc(filters.query)}" aria-label="搜索入站" placeholder="搜索节点、地址、协议或入站" autocomplete="off" enterkeyhint="search"><button class="button small" type="submit">搜索</button>${filters.query ? '<button class="button small" type="button" data-clear-search>清除</button>' : ""}</form>`;
     const filtersMarkup = scopedEntries.length
       ? `<section class="client-access-toolbar" aria-label="客户端配置筛选"><nav aria-label="按内核筛选"><a class="${filters.engine ? "" : "active"}" href="#client-access" data-filter-engine=""${filters.engine ? "" : ' aria-current="true"'}>全部<b>${scopedProfiles}</b></a>${engineFilters}</nav><div class="client-access-toolbar-actions">${searchMarkup}<a class="button small" href="#substore-sync">Sub-Store 同步</a><button class="button small" type="button" data-refresh-client-access>刷新</button></div></section>`
       : '<section class="client-access-toolbar empty"><button class="button small" type="button" data-refresh-client-access>刷新</button></section>';
