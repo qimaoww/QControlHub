@@ -41,6 +41,21 @@ func TestClientAccessMihomoFormatsPreserveClientValues(t *testing.T) {
 		if _, _, ok := subStoreMihomoNode(item.MihomoYAML); !ok {
 			t.Fatal("display export must be accepted by the Sub-Store node parser")
 		}
+		renamed, err := renameSubStoreNode(item.MihomoYAML, "Renamed edge")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, value := range []string{item.MihomoYAML, renamed} {
+			var ordered yaml.Node
+			if err := yaml.Unmarshal([]byte(value), &ordered); err != nil {
+				t.Fatal(err)
+			}
+			for index, key := range []string{"name", "type", "server", "port", "cipher", "password", "udp"} {
+				if ordered.Content[0].Content[index*2].Value != key {
+					t.Fatalf("display and Sub-Store must preserve field %d as %s", index, key)
+				}
+			}
+		}
 	}
 	encoded, err := json.Marshal(entries)
 	if err != nil || !strings.Contains(string(encoded), `"mihomo_yaml":`) || strings.Contains(string(encoded), `"Mihomo":`) {

@@ -71,7 +71,7 @@ func TestBuildClientProfileCoversEveryServerProtocol(t *testing.T) {
 				}
 			}
 			if test.input.Protocol == ProtocolSudoku {
-				if !profile.SubscriptionCompatible || profile.Format != "Mihomo Sudoku YAML" || !strings.HasPrefix(profile.URI, "{aead-method:") || !strings.Contains(profile.URI, "type: sudoku") {
+				if !profile.SubscriptionCompatible || profile.Format != "Mihomo Sudoku YAML" || !strings.HasPrefix(profile.URI, "{name:") || !strings.Contains(profile.URI, "type: sudoku") {
 					t.Fatalf("Sudoku profile = %+v", profile)
 				}
 			}
