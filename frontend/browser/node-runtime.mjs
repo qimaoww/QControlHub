@@ -152,7 +152,6 @@ const cards = () => [...document.querySelectorAll(".client-access-node-card")];
   assert.equal(cardNodes(), "alpha", "node filtering must select the requested card");
   document.querySelector('[data-access-agent=""]').click();
   assert.equal(cardNodes(), "charlie,alpha", "clearing the node filter must restore node order");
-  document.querySelector(".client-access-search-menu").open = true;
   document.querySelector('#client-search [name="q"]').value = "20001";
   document.querySelector("#client-search").requestSubmit();
   assert.equal(cardNodes(), "charlie,alpha", "profile search must preserve node order");

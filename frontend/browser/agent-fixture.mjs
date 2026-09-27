@@ -1,5 +1,6 @@
 import { accountStorage, setStorageAccount } from "../modules/account-storage.js";
 import { assert } from "./assertions.mjs";
+import { clientLayoutFixture } from "./client-layout.mjs";
 
 export function installAgentFixture(mode) {
 const tcpRules = [
@@ -125,6 +126,12 @@ if (mode.startsWith("client-order")) {
       profile: { format: "URI", uri: `test-${agent_id}-${port}`, fields: [] },
     })),
   }));
+}
+if (mode.startsWith("client-layout")) {
+  location.hash = "#client-access";
+  const fixture = clientLayoutFixture();
+  testAPI.agents = fixture.agents;
+  testAPI.clientAccessEntries = fixture.entries;
 }
 if (mode.startsWith("enrollment")) testAPI.enrollmentRecords = [];
 if (mode.startsWith("users-layout")) {
@@ -322,7 +329,9 @@ window.fetch = async (input, options = {}) => {
     }
   }
   if (method === "GET" && path === "/overview")
-    return json({ agents: mode === "empty" ? 0 : populatedAgents.length, agents_online: mode === "empty" ? 0 : 3 });
+    return json(mode.startsWith("client-layout")
+      ? { agents: testAPI.agents.length, agents_online: testAPI.agents.filter((agent) => agent.status === "online").length }
+      : { agents: mode === "empty" ? 0 : populatedAgents.length, agents_online: mode === "empty" ? 0 : 3 });
   if (method === "GET" && path === "/settings")
     return json(testAPI.settings || { panel_name: "QControlHub Browser Smoke" });
   if (mode.startsWith("users-layout") && method === "GET" && path === "/users")
@@ -382,7 +391,7 @@ window.fetch = async (input, options = {}) => {
       }))));
   }
   if (method === "GET" && path === "/deployments") return json(testAPI.deployments);
-  if (method === "GET" && path === "/client-access" && mode.startsWith("client-order"))
+  if (method === "GET" && path === "/client-access" && (mode.startsWith("client-order") || mode.startsWith("client-layout")))
     return json(testAPI.clientAccessEntries);
   if (method === "GET" && path === "/client-access" && ["ports","ports-mobile","shell-layout","shell-layout-mobile","readonly","regions","regions-preview"].includes(mode)) {
     const profiles = (address) => [20001,20002].map((port,index) => {

@@ -1781,3 +1781,77 @@ dialog.config-access-dialog::backdrop{background:rgba(17,20,36,.34);backdrop-fil
 @media(max-width:950px) {
   .page-substore-sync .substore-agent-grid { grid-template-columns:minmax(0,1fr); }
 }
+/* Client access v59: readable exports, one home for each action, and a single
+   touch column that never grows wider than the screen. */
+.client-access-workspace.compact{grid-template-columns:minmax(0,1fr);gap:12px}
+.client-access-toolbar{flex-wrap:wrap;gap:10px 16px;min-height:0;padding:10px 12px;border-radius:12px}
+.client-access-toolbar>nav{flex-wrap:wrap;gap:6px}
+.client-access-toolbar>nav a{min-height:32px;gap:7px;border:1px solid var(--line);border-radius:8px;padding:5px 11px;background:var(--surface);color:var(--ink-2);font-size:calc(12px * var(--ui-font-scale));font-weight:600;line-height:1.3}
+.client-access-toolbar>nav a:hover{border-color:var(--line-2);background:var(--surface-2);color:var(--ink)}
+.client-access-toolbar>nav a.active{border-color:var(--accent);background:var(--accent-soft);color:var(--accent)}
+.client-access-toolbar>nav a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.client-access-toolbar>nav a>b{min-width:20px;padding:0 6px;border-radius:999px;background:var(--surface-2);color:var(--muted);font-size:calc(11px * var(--ui-font-scale));font-weight:600;line-height:1.6}
+.client-access-toolbar>nav a.active>b{background:var(--surface);color:var(--accent)}
+.client-access-toolbar>.client-access-toolbar-actions{flex:0 1 auto;flex-wrap:wrap;gap:8px;margin-left:auto}
+.client-access-search{position:relative;display:flex;align-items:center;gap:6px;margin:0}
+.client-access-search>svg{position:absolute;left:10px;top:50%;width:15px;height:15px;fill:none;stroke:var(--muted);stroke-width:2;stroke-linecap:round;transform:translateY(-50%);pointer-events:none}
+.client-access-search input{width:clamp(200px,22vw,280px);height:32px;margin:0;border-radius:8px;padding:0 10px 0 32px;font-size:calc(12px * var(--ui-font-scale))}
+.client-access-search>.button{flex:0 0 auto;width:auto}
+.client-access-workspace .button.small{min-height:32px;border-radius:8px;padding:5px 12px;box-shadow:none;font-size:calc(12px * var(--ui-font-scale));font-weight:600}
+
+.client-access-node-card{container:client-card / inline-size;border-radius:12px}
+.client-access-node-card>header{min-height:0;gap:12px;padding:12px 14px}
+.client-access-node-card .client-access-node{gap:11px}
+.client-access-node-card .client-access-node>.node-avatar{width:34px;height:34px;flex-basis:34px}
+.client-access-node-card .client-access-node>span{min-width:0}
+.client-access-node-card .client-access-node strong{font-size:calc(14px * var(--ui-font-scale));line-height:1.4}
+.client-access-node-card .client-access-node small,.client-access-node-card .client-access-node small code{font-size:calc(11px * var(--ui-font-scale));line-height:1.5}
+.client-access-node-card .client-access-node small{overflow-wrap:anywhere}
+.client-access-node-state{min-height:24px;gap:6px;border-radius:999px;padding:2px 10px;background:var(--surface-2);font-size:calc(11px * var(--ui-font-scale));font-weight:600;white-space:nowrap}
+.client-access-node-state.ok{background:var(--green-soft)}
+.client-access-node-state.warn{background:var(--amber-soft)}
+.client-access-engine-group>header{min-height:0;gap:10px;padding:7px 14px;background:var(--surface-2)}
+.client-access-engine-group>header>span{gap:8px}
+.client-access-engine-group>header .engine-badge{min-height:22px;border-radius:6px;padding:1px 8px;font-size:calc(11px * var(--ui-font-scale))}
+.client-access-engine-group>header small{font-size:calc(11px * var(--ui-font-scale))}
+.client-access-engine-group>header>a{display:inline-flex;align-items:center;gap:4px;min-height:28px;font-size:calc(12px * var(--ui-font-scale));font-weight:600;white-space:nowrap}
+.client-access-engine-group>header>a:hover{text-decoration:underline}
+
+/* The text block spans the card; the link and its actions share one control row
+   and stack only when the card is too narrow to hold both. */
+.client-profile-row{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"head head" "share actions";align-items:center;gap:8px;padding:12px 14px}
+.client-profile-row>header{grid-area:head;display:grid;gap:1px;min-width:0;margin:0}
+.client-profile-row>header b{overflow:hidden;font-size:calc(13px * var(--ui-font-scale));line-height:1.45;text-overflow:ellipsis;white-space:nowrap}
+.client-profile-row>header small{overflow:visible;font-size:calc(11px * var(--ui-font-scale));line-height:1.5;white-space:normal;overflow-wrap:anywhere}
+.client-profile-row>.client-share-control{grid-area:share;min-width:0;margin:0}
+.client-profile-row>.client-profile-actions{grid-area:actions;gap:6px;margin:0}
+.client-profile-row .client-profile-actions .button{min-height:34px;border:1px solid var(--line-2);border-radius:8px;background:var(--surface);padding:5px 11px;color:var(--ink-2);font-size:calc(12px * var(--ui-font-scale));font-weight:600}
+.client-profile-row .client-profile-actions .button:hover{border-color:var(--accent);background:var(--surface);color:var(--accent)}
+.client-profile-row .client-share-control input,.client-profile-row .client-share-control textarea.client-share-yaml.is-masked{height:34px;min-height:34px;font-size:calc(12px * var(--ui-font-scale))}
+.client-profile-row .client-share-control button{min-width:52px;height:34px;padding:0 12px;font-size:calc(12px * var(--ui-font-scale));font-weight:600}
+.client-profile-row .client-share-control textarea.client-share-yaml{border-radius:8px 0 0 8px;font-size:calc(12px * var(--ui-font-scale))}
+@container client-card (max-width:500px){
+  .client-profile-row{grid-template-columns:minmax(0,1fr);grid-template-areas:"head" "share" "actions"}
+  .client-profile-row>.client-profile-actions{justify-content:flex-end}
+}
+
+.client-access-node-card .client-access-entry-empty{min-height:0;align-items:flex-start;margin:12px 14px;border-radius:8px;padding:10px 12px;background:var(--amber-soft);color:var(--amber);font-size:calc(12px * var(--ui-font-scale));text-align:left}
+.client-access-node-card>.client-address-missing{margin:0;padding:10px 14px;font-size:calc(12px * var(--ui-font-scale))}
+.client-access-empty-state p{font-size:calc(12px * var(--ui-font-scale))}
+
+@media(max-width:820px) and (pointer:coarse){
+  .client-access-node-grid{grid-template-columns:minmax(0,1fr)}
+  .client-access-toolbar{flex-wrap:nowrap;gap:10px;padding:10px}
+  .client-access-toolbar>nav{flex-wrap:nowrap;margin:0 -10px;padding:0 10px 2px;scroll-padding-inline:10px;scrollbar-width:none}
+  .client-access-toolbar>nav a{flex:0 0 auto;min-height:44px}
+  .client-access-toolbar>.client-access-toolbar-actions{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);margin:0}
+  .client-access-search{grid-column:1/-1}
+  .client-access-search input{width:auto;height:44px;flex:1;min-width:0}
+  .client-access-workspace .button.small,.client-profile-row .client-profile-actions .button{min-height:44px}
+  .client-profile-row .client-share-control{flex-wrap:nowrap}
+  .client-profile-row .client-share-control input,.client-profile-row .client-share-control textarea.client-share-yaml.is-masked{flex:1 1 auto;height:44px;min-height:44px;border-radius:8px 0 0 8px}
+  .client-profile-row .client-share-control button{flex:0 0 auto;min-height:44px;height:44px;border-top:1px solid var(--line-2)}
+  .client-profile-row .client-share-control button:first-of-type{border-left:0;border-radius:0}
+  .client-profile-row>.client-profile-actions{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+  .client-profile-row>.client-profile-actions>.button:only-child{grid-column:1/-1}
+}
