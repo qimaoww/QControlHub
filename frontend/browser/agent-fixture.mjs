@@ -1,5 +1,6 @@
 import { accountStorage, setStorageAccount } from "../modules/account-storage.js";
 import { assert } from "./assertions.mjs";
+import { clientLayoutFixture } from "./client-layout.mjs";
 
 export function installAgentFixture(mode) {
 const tcpRules = [
@@ -126,6 +127,12 @@ if (mode.startsWith("client-order")) {
     })),
   }));
 }
+if (mode.startsWith("client-layout")) {
+  location.hash = "#client-access";
+  const fixture = clientLayoutFixture();
+  testAPI.agents = fixture.agents;
+  testAPI.clientAccessEntries = fixture.entries;
+}
 if (mode.startsWith("enrollment")) testAPI.enrollmentRecords = [];
 if (mode.startsWith("users-layout")) {
   location.hash = "#users";
@@ -240,7 +247,7 @@ if (mode.startsWith("capabilities-settings")) {
   location.hash = "#settings-engines";
   testAPI.settings = { panel_name: "QControlHub Browser Smoke", panel_description: "可信远程编排", revision: 1, ui_font_scale: 100, default_agent_engines: ["mihomo", "sing-box"] };
 }
-if (mode === "config-layout") {
+if (mode.startsWith("config-layout")) {
   testAPI.agents = populatedAgents.map((agent,index)=>({...agent,name:["香港 · HK-01","新加坡 · SG-02","东京 · JP-03","美国 · US-04"][index],features:["managed-config-read-v1","config-files-v1"],capabilities:["xray","sing-box","mihomo","ss-rust"],runtime:Object.fromEntries(["xray","sing-box","mihomo","ss-rust"].map(engine=>[engine,{installed:true,service_status:"running",version:{xray:"26.3.27","sing-box":"1.13.19",mihomo:"1.19.0","ss-rust":"1.25.0"}[engine]}]))}));
   testAPI.layoutTasks = new Map();
   location.hash = "#live-config";
@@ -309,7 +316,7 @@ window.fetch = async (input, options = {}) => {
       return json({ changed_agents: [...new Set(body.selections.map(item => item.agent_id))] });
     }
   }
-  if (mode === "config-layout") {
+  if (mode.startsWith("config-layout")) {
     if (path === "/access-controls") return json(testAPI.agents.flatMap(agent => ["xray","sing-box"].flatMap(engine => ["socks-in","http-in"].map((tag,i) => ({agent_id:agent.id,agent_name:agent.name,agent_status:agent.status,engine,tag,port:i?8080:1080,config_version:8,block_mainland_destination:!i,block_mainland_source:Boolean(i)})))));
     if (path === "/settings") return json({panel_name:"QControlHub"});
     if (path.endsWith("/workspace")) {
@@ -359,7 +366,9 @@ window.fetch = async (input, options = {}) => {
     }
   }
   if (method === "GET" && path === "/overview")
-    return json({ agents: mode === "empty" ? 0 : populatedAgents.length, agents_online: mode === "empty" ? 0 : 3 });
+    return json(mode.startsWith("client-layout")
+      ? { agents: testAPI.agents.length, agents_online: testAPI.agents.filter((agent) => agent.status === "online").length }
+      : { agents: mode === "empty" ? 0 : populatedAgents.length, agents_online: mode === "empty" ? 0 : 3 });
   if (method === "GET" && path === "/settings")
     return json(testAPI.settings || { panel_name: "QControlHub Browser Smoke" });
   if (mode.startsWith("users-layout") && method === "GET" && path === "/users")
@@ -419,7 +428,7 @@ window.fetch = async (input, options = {}) => {
       }))));
   }
   if (method === "GET" && path === "/deployments") return json(testAPI.deployments);
-  if (method === "GET" && path === "/client-access" && mode.startsWith("client-order"))
+  if (method === "GET" && path === "/client-access" && (mode.startsWith("client-order") || mode.startsWith("client-layout")))
     return json(testAPI.clientAccessEntries);
   if (method === "GET" && path === "/client-access" && ["ports","ports-mobile","shell-layout","shell-layout-mobile","readonly","regions","regions-preview"].includes(mode)) {
     const profiles = (address) => [20001,20002].map((port,index) => {

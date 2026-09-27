@@ -28,10 +28,14 @@ export async function testConfigLayoutRuntime({ testAPI }) {
       const draft = input.value;
       const fileButtons = document.querySelectorAll("[data-config-file]");
       assert.ok(fileButtons.length >= 2,"shared/inbound buttons missing");
+      assert.ok(fileButtons[0].classList.contains("is-dirty"),"edited common file is not marked unsaved");
+      assert.ok(document.querySelector(".config-draft-summary").textContent.includes("1 个未保存"),"draft summary did not count the edited file");
       fileButtons[1].click();
       assert.equal(fileButtons[1].getAttribute("aria-pressed"),"true","inbound selection missing");
+      assert.ok(document.querySelector("[data-code-reset]").disabled,"a clean file can be reset because another file is dirty");
       input.value += "\n"; input.dispatchEvent(new Event("input",{bubbles:true}));
       const inboundDraft = input.value;
+      assert.ok(document.querySelector(".config-draft-summary").textContent.includes("2 个未保存"),"multiple drafts are not counted");
       fileButtons[0].click();
       assert.equal(input.value,draft,"switch lost common draft");
       fileButtons[1].click();
@@ -40,9 +44,17 @@ export async function testConfigLayoutRuntime({ testAPI }) {
       assert.equal(document.querySelector('optgroup[label="出站"]'),null,"legacy standalone exit group is still visible");
       document.querySelector("[data-config-preview]").click();
       assert.ok(input.readOnly,"merged preview must be readonly");
+      assert.ok(document.querySelector(".config-draft-summary").textContent.includes("2 个未保存"),"merged preview hid pending drafts");
       document.querySelector("[data-config-preview]").click();
       assert.equal(input.value,draft,"preview lost file draft");
       assert.ok(!input.readOnly,"return from preview must restore editing");
+      fileButtons[1].click();
+      document.querySelector("[data-code-reset]").click();
+      assert.ok(!fileButtons[1].classList.contains("is-dirty") && fileButtons[0].classList.contains("is-dirty"),"reset changed drafts outside the current file");
+      assert.ok(document.querySelector(".config-draft-summary").textContent.includes("1 个未保存"),"reset did not update the draft summary");
+      assert.ok(document.querySelector("[data-code-reset]").disabled,"reset remains enabled for a restored file");
+      fileButtons[0].click();
+      assert.equal(input.value,draft,"resetting an inbound lost the common-file draft");
       document.querySelectorAll("[data-live-agent]")[1].click();
       await waitFor(()=>document.querySelector("[data-confirm-dialog][open]"),"dirty node switch did not prompt");
       document.querySelector("[data-confirm-cancel]").click();
@@ -57,14 +69,44 @@ export async function testConfigLayoutRuntime({ testAPI }) {
       await waitFor(()=>document.querySelector('#live-config-form[data-engine="mihomo"]'),"confirmed engine switch failed");
     }
     assert.ok(document.documentElement.scrollWidth<=innerWidth,"manual page overflows viewport");
-    document.querySelectorAll(".live-engine-tab").forEach(tab => {
-      assert.equal(tab.offsetWidth,140,"engine buttons must have fixed width");
-      assert.equal(tab.offsetHeight,40,"engine buttons must have fixed height");
+    const tools = document.querySelector(".config-workspace-tools").getBoundingClientRect();
+    const editor = document.querySelector("#live-config-form").getBoundingClientRect();
+    assert.ok(tools.bottom <= editor.top + 1,"configuration tools remain below the source editor");
+    const workspace = document.querySelector(".live-config-workspace");
+    const nav = workspace.querySelector(".config-file-buttons").getBoundingClientRect();
+    const frame = workspace.querySelector(".code-editor-frame").getBoundingClientRect();
+    assert.ok(nav.bottom <= frame.top + 1,"file navigation must stay above the full-width source");
+    assert.ok(frame.width >= workspace.getBoundingClientRect().width - 3,"source editor lost width to an extra rail");
+    assert.equal(document.querySelectorAll(".config-file-navigation").length,0,"redundant toolbar still separates selection from source");
+    assert.ok(workspace.querySelector('.config-file-buttons [data-inbound-action="add"]'),"add action must stay with file navigation");
+    assert.ok(workspace.querySelector('.code-editor-toolbar [data-code-reset]'),"reset must stay with current-file tools");
+    assert.ok(workspace.querySelector('.code-editor-toolbar [data-code-format]'),"format must stay with current-file tools");
+    assert.ok([...workspace.querySelectorAll('.code-workspace>footer button')].every(button => button.type === "submit"),"submission footer mixes file tools with save actions");
+    const details = workspace.querySelector(".live-config-details").getBoundingClientRect();
+    assert.ok(details.bottom <= workspace.querySelector(".live-engine-bar").getBoundingClientRect().top + 1,"node metadata must stay with the heading");
+    assert.ok(document.querySelector('[data-inbound-action="history"]').closest(".config-tools-menu"),"secondary tools are not grouped in the header");
+    const more = document.querySelector(".config-tools-menu");
+    more.querySelector("summary").focus();
+    more.dispatchEvent(new KeyboardEvent("keydown",{key:"ArrowDown",bubbles:true}));
+    assert.ok(more.open && document.activeElement.matches('[role="menuitem"]'),"tools menu cannot be opened by keyboard");
+    more.dispatchEvent(new KeyboardEvent("keydown",{key:"Escape",bubbles:true}));
+    assert.ok(!more.open && document.activeElement === more.querySelector("summary"),"tools menu did not restore focus after Escape");
+    const engineTabs = [...document.querySelectorAll(".live-engine-tab")];
+    engineTabs.forEach(tab => {
+      assert.ok(Math.abs(tab.offsetWidth-engineTabs[0].offsetWidth) <= 1,"engine buttons must have equal widths");
+      assert.ok(tab.offsetHeight >= (innerWidth <= 820 ? 44 : 40),"engine buttons lost their minimum target height");
+      const bounds = tab.getBoundingClientRect();
+      assert.ok(bounds.left >= 0 && bounds.right <= innerWidth,"engine choice is hidden outside the viewport");
     });
+    if (innerWidth <= 600) {
+      assert.equal(engineTabs[0].offsetTop,engineTabs[1].offsetTop,"first engine pair must share a row");
+      assert.ok(engineTabs[2].offsetTop > engineTabs[0].offsetTop,"mobile engines must form two rows");
+      assert.equal(engineTabs[2].offsetTop,engineTabs[3].offsetTop,"second engine pair must share a row");
+    }
     if (innerWidth <= 820) {
       const bar = document.querySelector(".live-engine-bar").getBoundingClientRect();
       const tab = document.querySelector(".live-engine-tab").getBoundingClientRect();
-      assert.ok(tab.top-bar.top >= 15.5 && bar.bottom-tab.bottom >= 15.5,"mobile tabs touch section dividers");
+      assert.ok(tab.left-bar.left >= 15.5,"mobile engine tabs lost their horizontal inset");
       const toolbar = document.querySelector(".code-editor-toolbar").getBoundingClientRect();
       const file = document.querySelector(".code-file-meta").getBoundingClientRect();
       const meta = document.querySelector(".code-editor-meta").getBoundingClientRect();

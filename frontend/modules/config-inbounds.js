@@ -1,6 +1,7 @@
 import { bindEvent, reconcileView } from "./refresh.js";
 import { bindConfigOutbounds } from "./config-outbounds.js";
 import { bindConfigMenu } from "./config-menu.js";
+import { composeConfigWorkspaceToolbar } from "./config-workspace-toolbar.js";
 // Reuse the actual preset form and field editors, not a second implementation
 // of protocol options. Only the requested editor is mounted: no second source
 // editor, inbound sidebar, engine selector or top-level page tabs.
@@ -80,7 +81,7 @@ export function bindConfigInbounds(ctx) {
   if (!navigation) {
     navigation = document.createElement("nav");
     navigation.className = "config-file-buttons config-empty-actions";
-    container.querySelector(".live-config-details").after(navigation);
+    container.querySelector(".live-engine-bar").after(navigation);
   }
   const menu = document.createElement("details");
   menu.className = "config-inbound-menu";
@@ -118,21 +119,14 @@ export function bindConfigInbounds(ctx) {
   addInbound.dataset.inboundAction = "add";
   addInbound.textContent = "＋ 增加入站";
   sourceActions.prepend(addInbound);
-  const tools = document.createElement("nav");
-  tools.className = "config-workspace-tools";
-  tools.setAttribute("aria-label", "配置工具");
-  tools.innerHTML = `<button class="button small" type="button" data-inbound-action="advanced">高级字段</button>
-    ${can("configs.read") ? '<button class="button small" type="button" data-inbound-action="history">版本历史</button>' : ""}
-    ${can("deployments.read") && can("configs.read") ? '<button class="button small" type="button" data-inbound-action="diff">配置差异</button>' : ""}
-    ${can("client-access.read") ? '<a class="button small" href="#client-access" data-config-client>客户端配置 ↗</a>' : ""}
-    <button class="button small" type="button" data-config-refresh>${sourceMode === "personal" ? "刷新我的配置" : agent.runtime?.[engine]?.installed ? "重新读取节点配置" : "刷新配置"}</button>`;
-  container.append(tools);
+  const tools = composeConfigWorkspaceToolbar({ can, container, form, navigation, sourceActions, sourceMode, agent, engine });
   const actionKind = button => button.dataset.commonAction ? `common-${button.dataset.commonAction}` : button.dataset.inboundAction;
   const isMutation = kind => ["add", "modify", "delete", "advanced", "common-add", "common-modify", "common-delete"].includes(kind);
   const triggers = [addInbound, ...menu.querySelectorAll("[data-inbound-action], [data-common-action]"),
     ...tools.querySelectorAll("[data-inbound-action]")];
   const update = () => {
     const common = commonSelected();
+    menu.hidden = !common && !target() && Boolean(files);
     menu.querySelector("[data-common-actions]").hidden = !common;
     menu.querySelector("[data-config-operation-label]").textContent = common ? "通用配置操作" : target() || !files ? "入站操作" : "配置操作";
     for (const button of triggers) {
@@ -195,7 +189,10 @@ export function bindConfigInbounds(ctx) {
       opened.close(); opened.remove();
       if (dialog === opened) dialog = null;
       busy = false;
-      if (current()) { update(); trigger.focus(); }
+      if (current()) {
+        update();
+        (trigger.closest("details")?.querySelector("summary") || trigger).focus();
+      }
     };
     const abort = () => dispose(false);
     const close = async () => {

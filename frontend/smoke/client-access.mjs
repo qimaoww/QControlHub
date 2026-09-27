@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { clientAccessExport } from "../modules/client-access-model.js";
 
 import {
   copyClientValue,
@@ -12,6 +13,12 @@ import {
 
 // Inert on import. The runner owns ordering and the few shared read-only fixtures.
 export async function run({ noop, previousDocument }) {
+const exportSample = { profile: { format: "VLESS URI", uri: "vless://example" }, mihomo_yaml: '{name: "Example", type: vless, server: "example.test", port: 443}' };
+assert.equal(clientAccessExport(exportSample, "url").value, exportSample.profile.uri);
+assert.equal(clientAccessExport(exportSample, "mihomo").value, exportSample.mihomo_yaml);
+assert.equal(clientAccessExport({ ...exportSample, mihomo_error: "unsupported" }, "mihomo").value, "");
+assert.ok(clientAccessExport({ profile: exportSample.profile }, "mihomo").error);
+assert.ok(clientAccessExport({ profile: { format: "Mihomo Mieru YAML", uri: "{type: mieru}" } }, "url").error);
 const accessEntries = [
   {
     agent_id: "alpha",

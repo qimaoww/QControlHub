@@ -1,4 +1,29 @@
 import { orderNodesBySavedOrder } from "./node-order.js";
+import { accountStorage } from "./account-storage.js";
+const displayFormatKey = "qcontrolhub:client-display-format";
+export function loadClientDisplayFormat() {
+  try { return accountStorage.getItem(displayFormatKey) === "mihomo" ? "mihomo" : "url"; }
+  catch { return "url"; }
+}
+export function saveClientDisplayFormat(format) {
+  try { accountStorage.setItem(displayFormatKey, format === "mihomo" ? "mihomo" : "url"); }
+  catch { /* The current view still works when browser storage is unavailable. */ }
+}
+export function clientAccessExport(item, format) {
+  if (format === "mihomo") {
+    const value = String(item.mihomo_yaml || "");
+    const error = item.mihomo_error || (value ? "" : "此配置暂不支持 Mihomo YAML");
+    return { value: error ? "" : value, format: "Mihomo YAML", error };
+  }
+  const profile = item.profile || {};
+  const value = String(profile.uri || "");
+  const native = value && !/^[a-z][a-z0-9+.-]*:\/\//i.test(value) && !/URI|URL/i.test(profile.format || "");
+  return {
+    value: native ? "" : value,
+    format: profile.format || "URL",
+    error: native ? "此协议不支持 URL，请使用其他显示格式或查看参数详情。" : value ? "" : "暂无可用 URL",
+  };
+}
 export function normalizeClientAccessFilters(entries, agents, filters = {}) {
   const agentIDs = new Set((agents || []).map((agent) => agent.id));
   let agent = String(filters.agent || "");

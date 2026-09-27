@@ -7,6 +7,7 @@ import { testEnrollmentLayoutRuntime } from "./browser/enrollment.mjs";
 import { testUsersLayoutRuntime } from "./browser/users-layout.mjs";
 import { testRegionRuntime } from "./browser/regions.mjs";
 import { testPortNamesAndRuntimeRefresh, testClientNodeOrderRuntime } from "./browser/node-runtime.mjs";
+import { testClientLayoutRuntime } from "./browser/client-layout.mjs";
 import { testSystemTCPRuntime } from "./browser/system-tcp.mjs";
 import { testLargeLogRuntime, testLogPreferenceRestoreRuntime } from "./browser/core-logs.mjs";
 import { testTrafficLayoutRuntime } from "./browser/traffic-layout.mjs";
@@ -78,7 +79,7 @@ try {
       if (new URLSearchParams(location.search).has("preview")) await new Promise(() => {});
     }
     else if (mode.startsWith("traffic-layout")) await testTrafficLayoutRuntime(scenario);
-    else if (mode === "config-layout") await testConfigLayoutRuntime(scenario);
+    else if (mode.startsWith("config-layout")) await testConfigLayoutRuntime(scenario);
     else if (mode.startsWith("shell-layout")) await testShellLayoutRuntime(scenario);
     else if (mode.startsWith("capabilities-settings")) await testCapabilitySettingsRuntime(scenario);
     else if (mode === "bbr-preview" || mode === "regions-preview") await new Promise(() => {});
@@ -86,6 +87,7 @@ try {
     else if (mode.startsWith("batch-layout")) await testAgentBatchLayout(scenario);
     else if (mode === "admin") await testAdminRuntime(scenario);
     else if (mode.startsWith("client-order")) await testClientNodeOrderRuntime(scenario);
+    else if (mode.startsWith("client-layout")) await testClientLayoutRuntime(scenario);
     else if (mode === "ports" || mode === "ports-mobile") await testPortNamesAndRuntimeRefresh(scenario);
     else if (mode === "regions") await testRegionRuntime(scenario);
     else if (mode === "empty") await testEmptyRuntime(scenario);

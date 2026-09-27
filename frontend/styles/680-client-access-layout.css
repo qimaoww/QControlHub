@@ -1,0 +1,54 @@
+/* Client-specific layout only. Cards, headings, chips and buttons reuse the node page. */
+.client-access-workspace.compact{grid-template-columns:minmax(0,1fr);gap:12px}
+.client-access-toolbar{flex-wrap:wrap;gap:12px;padding:12px 14px}
+.client-access-toolbar>nav{flex-wrap:wrap;gap:8px}
+.client-access-toolbar>nav a>b{font-size:inherit;font-weight:inherit}
+.client-display-format{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-left:auto;color:var(--muted);font-size:calc(10px * var(--ui-font-scale))}
+.client-display-format select{min-width:130px;height:34px;font-size:inherit}
+.client-access-toolbar>.client-access-toolbar-actions{display:flex;flex-wrap:wrap;gap:10px;width:100%}
+.client-access-search{display:flex;align-items:center;flex:1;gap:8px;min-width:220px;margin:0}
+.client-access-search input{flex:1;min-width:0;width:100%;height:34px;margin:0;font-size:calc(10px * var(--ui-font-scale))}
+.client-access-search>.button{flex:0 0 auto;width:auto}
+.client-access-node-grid{gap:12px}
+.client-access-node-card .node-card-title{min-width:0}
+.client-access-node-card .client-node-meta{display:flex;flex-wrap:wrap;gap:0 8px;white-space:normal}
+.client-access-node-card .client-node-meta code{font:inherit;overflow-wrap:anywhere}
+.client-node-summary{display:flex;align-items:center;gap:12px;max-width:55%;min-width:0}
+.client-node-engines{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:6px;min-width:0}
+.client-node-engines .core-chip{white-space:nowrap}
+.client-node-engines small{color:var(--muted);font-size:calc(9px * var(--ui-font-scale))}
+.client-access-node-card .client-access-entry-empty{gap:8px;align-items:flex-start}
+.client-profile-row{display:grid;grid-template-columns:minmax(0,1fr);gap:12px;padding:14px}
+.client-profile-row>header{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 12px;margin:0}
+.client-profile-row>header b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.client-profile-row>header small{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:4px 10px;margin:0;overflow:visible;white-space:normal}
+.client-profile-meta{display:flex;flex-wrap:wrap;gap:4px 10px}
+.client-profile-meta>span{min-width:0;overflow-wrap:anywhere}
+.client-export-control{display:flex;align-items:start;gap:8px;margin:0;min-width:0}
+.client-export-control input,.client-export-control textarea{flex:1;min-width:0;width:100%;height:34px;font:calc(10px * var(--ui-font-scale))/1.5 ui-monospace,monospace}
+.client-export-control .button{flex:0 0 auto;width:auto}
+.client-export-control textarea{min-height:88px;resize:vertical;white-space:pre}
+.client-export-control textarea.is-masked{min-height:34px;height:34px;resize:none;color:transparent;text-shadow:0 0 6px var(--ink);white-space:nowrap;overflow:hidden}
+.client-export-unavailable{color:var(--muted);font-size:calc(10px * var(--ui-font-scale))}
+.client-profile-row>.client-profile-actions{gap:8px;margin:0;flex-wrap:wrap}
+.client-access-workspace :is(.client-display-dialog,.client-parameter-dialog)>header{grid-template-columns:minmax(0,1fr) auto}
+.client-access-workspace .client-dialog-close{align-self:start;flex:0 0 auto;width:auto}
+.client-access-workspace .client-parameter-meta{white-space:normal;overflow:visible}
+@media(max-width:820px) and (pointer:coarse){
+  .client-access-node-card>.node-card-head{display:grid;grid-template-columns:38px minmax(0,1fr)}
+  .client-node-summary{display:contents}
+  .client-node-engines{grid-column:2/-1;grid-row:2}
+  .client-access-node-grid{grid-template-columns:minmax(0,1fr)}
+  .client-access-toolbar{gap:12px}
+  .client-display-format{justify-content:space-between;margin:0}
+  .client-display-format select{height:44px}
+  .client-access-toolbar>nav{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;overflow:visible;padding:0}
+  .client-access-toolbar>nav a{min-width:0;min-height:44px;padding:6px;white-space:normal}
+  .client-access-toolbar>.client-access-toolbar-actions{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px}
+  .client-access-search{grid-column:1/-1;min-width:0;flex-wrap:wrap}
+  .client-access-search input{flex:1 1 140px;height:44px}
+  .client-access-workspace .button.small{min-height:44px}
+  .client-export-control input,.client-export-control textarea.is-masked{height:44px;min-height:44px}
+  .client-profile-row>.client-profile-actions{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+  .client-profile-row>.client-profile-actions>.button:only-child{grid-column:1/-1}
+}

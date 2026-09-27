@@ -162,6 +162,7 @@ export function bindConfigOutbounds({ navigation, api, agent, engine, saved, cur
   const triggers = [...menu.querySelectorAll("button")];
   const update = () => {
     const chosen = selectedInbound();
+    menu.hidden = !chosen;
     let binding = "", reason = "";
     if (saved && chosen) {
       const key = JSON.stringify([chosen.tag, chosen.port]);

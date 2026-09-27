@@ -38,13 +38,13 @@ location.hash = "#client-access";
   document.querySelector("[data-refresh-client-access]").click();
   await waitFor(() => !document.querySelector("[data-refresh-client-access]").disabled,"刷新未完成");
   assert.equal(row(20001).querySelector("header b").textContent,"香港 & ATT <edge>","刷新串名");
-  assert.equal(new URL(row(20002).querySelector(".client-share-control input").value).hash,"#Tokyo%20%E7%AC%AC%E4%BA%8C%E7%AB%AF%E5%8F%A3","分享链接未使用独立名称");
+  assert.equal(new URL(row(20002).querySelector(".client-export-control input").value).hash,"#Tokyo%20%E7%AC%AC%E4%BA%8C%E7%AB%AF%E5%8F%A3","分享链接未使用独立名称");
   form=open(20001);form.elements.name.value="";form.requestSubmit();
   await waitFor(() => row(20001).querySelector("header b").textContent === "ss-rust-1","清空未恢复入站标签");
   assert.equal(row(20002).querySelector("header b").textContent,"Tokyo 第二端口","清空影响其他端口");
 
   // 连接地址与地址协议栈都按内核、按监听端口独立保存
-  const share = (port) => row(port).querySelector(".client-share-control input").value;
+  const share = (port) => row(port).querySelector(".client-export-control input").value;
   form = open(20002);
   assert.equal(form.elements.namedItem("address_mode").value, "auto", "第二端口协议栈默认非自动");
   form.elements.namedItem("address_mode").value = "ipv6";
@@ -152,7 +152,6 @@ const cards = () => [...document.querySelectorAll(".client-access-node-card")];
   assert.equal(cardNodes(), "alpha", "node filtering must select the requested card");
   document.querySelector('[data-access-agent=""]').click();
   assert.equal(cardNodes(), "charlie,alpha", "clearing the node filter must restore node order");
-  document.querySelector(".client-access-search-menu").open = true;
   document.querySelector('#client-search [name="q"]').value = "20001";
   document.querySelector("#client-search").requestSubmit();
   assert.equal(cardNodes(), "charlie,alpha", "profile search must preserve node order");

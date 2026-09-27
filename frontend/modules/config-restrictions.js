@@ -22,6 +22,7 @@ export async function bindConfigRestrictions(ctx) {
   const target = () => files ? files.selectedInbound() : selected;
   const dirty = () => files ? files.dirty() : input.value !== baseline;
   const update = () => {
+    button.hidden = !target();
     button.disabled = busy || !target();
     button.title = target() ? "设置当前入站的访问限制" : "请先选择一个入站配置";
   };
@@ -29,6 +30,9 @@ export async function bindConfigRestrictions(ctx) {
     navigation = document.createElement("nav");
     navigation.className = "config-file-buttons";
     navigation.setAttribute("aria-label", "选择限制入站");
+    const fileList = document.createElement("div");
+    fileList.className = "config-file-list";
+    navigation.append(fileList);
     form.querySelector(".code-editor-toolbar").before(navigation);
     // YAML and native ssserver configs remain whole-file editors. Use the
     // server's parsed saved inbounds for their restriction selection.
@@ -52,7 +56,7 @@ export async function bindConfigRestrictions(ctx) {
           update();
           input.dispatchEvent(new Event("config-selection"));
         };
-        navigation.append(common);
+        fileList.append(common);
       }
       entries.filter(entry => entry.agent_id === agent.id && entry.engine === engine).forEach(entry => {
         const tab = document.createElement("button");
@@ -72,7 +76,7 @@ export async function bindConfigRestrictions(ctx) {
           update();
           input.dispatchEvent(new Event("config-selection"));
         };
-        navigation.append(tab);
+        fileList.append(tab);
       });
     } catch (error) {
       if (current() && error.name !== "AbortError") notify("读取入站限制失败：" + error.message, "error");

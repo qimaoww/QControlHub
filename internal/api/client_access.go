@@ -28,6 +28,8 @@ type clientAccessProfile struct {
 	AddressOverridden bool            `json:"address_overridden,omitempty"`
 	Outbound          json.RawMessage `json:"outbound,omitempty"`
 	OutboundError     string          `json:"outbound_error,omitempty"`
+	MihomoYAML        string          `json:"mihomo_yaml,omitempty"`
+	MihomoError       string          `json:"mihomo_error,omitempty"`
 }
 
 type clientAccessAddressOption struct {
@@ -89,6 +91,7 @@ func (s *Server) listClientAccess(w http.ResponseWriter, request *http.Request) 
 		writeInternalError(w, err)
 		return
 	}
+	prepareClientAccessFormats(entries)
 	writeJSON(w, http.StatusOK, entries)
 }
 

@@ -94,6 +94,12 @@ export async function testDashboardRuntime(mode, preview = false) {
   const reads = (path) => fixture.calls.filter((call) => call.path === path).length;
   assert(!document.body.textContent.includes("undefined"), "missing overview fields leaked into the page");
   if (!limited) {
+    const summary = document.querySelector(".dashboard-traffic-trends");
+    assert(summary?.querySelectorAll("dt").length === 3, "traffic summary did not render its three metrics");
+    assert(summary.querySelector('[data-dashboard-trend="today"] small').textContent === "UTC 今日累计", "current month lost the UTC today label");
+    assert(summary.querySelector('[data-dashboard-trend="average"] small').textContent === `按 ${new Date().getUTCDate()} 天（含今日）`, "current-month average includes future days");
+  }
+  if (!limited) {
     const nodeLink = document.querySelector('.dock-nav a[href="#node-settings"]');
     assert(nodeLink?.title === "节点", "node navigation tooltip must use the short label");
     assert(nodeLink.querySelector(".dock-label")?.textContent === "节点", "desktop and mobile node navigation labels must match");
@@ -126,7 +132,7 @@ export async function testDashboardRuntime(mode, preview = false) {
   const assertLayout = async () => {
     await delay(80);
     assert(document.documentElement.scrollWidth <= innerWidth + 1, `dashboard overflowed the ${innerWidth}px viewport`);
-    for (const element of document.querySelectorAll(".dashboard-workspace, .dashboard-stat, .panel-metric, .panel-metrics-grid, .dashboard-traffic-head, .dashboard-traffic-summary, .dashboard-columns, .fleet-overview-list>a, .recent-tasks>div>a")) {
+    for (const element of document.querySelectorAll(".dashboard-workspace, .dashboard-stat, .panel-metric, .panel-metrics-grid, .dashboard-traffic-head, .dashboard-traffic-summary, .dashboard-traffic-trends, .dashboard-traffic-trends>div, .dashboard-columns, .fleet-overview-list>a, .recent-tasks>div>a")) {
       assert(element.scrollWidth <= element.clientWidth + 1, `dashboard content overflow: ${element.className}`);
     }
     for (const value of document.querySelectorAll(".dashboard-stat strong, .dashboard-stat small")) {
@@ -212,6 +218,9 @@ export async function testDashboardRuntime(mode, preview = false) {
   const februaryDays = new Date(Date.UTC(new Date().getUTCFullYear() - 1, 2, 0)).getUTCDate();
   await waitFor(() => document.querySelector(".dashboard-traffic-axis")?.children.length === februaryDays, "February did not use its natural day count");
   assert(getComputedStyle(document.querySelector(".dashboard-traffic-axis")).gridTemplateColumns.split(" ").length === februaryDays, "February axis still reserves 31 columns");
+  assert(document.querySelector('[data-dashboard-trend="today"] dd>strong').textContent === "—", "historical month incorrectly displayed today's usage");
+  assert(document.querySelector('[data-dashboard-trend="average"] small').textContent === `按 ${februaryDays} 天计算`, "historical summary did not use the entire month");
+  assert(document.querySelector('[data-dashboard-trend="peak"] dt').textContent === "当月峰值日", "historical peak label still claims the current month");
 
   if (mode === "dashboard") {
     Object.defineProperty(document, "hidden", { configurable: true, value: true });
