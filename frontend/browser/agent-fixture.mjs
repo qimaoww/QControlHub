@@ -19,7 +19,7 @@ const tcpRules = [
   { key: "net.ipv4.tcp_sack", label: "SACK（0 / 1）", max: 1 },
   { key: "net.ipv4.tcp_window_scaling", label: "窗口缩放（0 / 1）", max: 1 },
 ];
-const onlineAgent = (id, features = ["agent-self-upgrade-v1"]) => ({
+const onlineAgent = (id, features = ["agent-self-upgrade-v1", "core-uninstall-v1"]) => ({
   id,
   can_manage: true,
   name: id.toUpperCase(),
@@ -87,6 +87,8 @@ const populatedAgents = [
 
 const testAPI = {
   calls: [],
+  submittedTasks: [],
+  taskStates: new Map(),
   pendingTasks: [],
   enrollmentFailure: false,
   renameFailure: false,
@@ -536,15 +538,21 @@ window.fetch = async (input, options = {}) => {
   if (method === "DELETE" && path.startsWith("/enrollment-tokens/")) return json(null, 204);
   if (method === "POST" && path === "/tasks") {
     const payload = JSON.parse(String(options.body || "{}"));
+    testAPI.submittedTasks.push(payload);
     if (testAPI.taskMode !== "deferred") return json({ id: `task-${payload.agent_id}` });
     return await new Promise((resolve) => {
       testAPI.pendingTasks.push({
         payload,
-        ok: (value) => resolve(json(value)),
+        ok: (value) => {
+          testAPI.taskStates.set(value.id, { id: value.id, status: "pending" });
+          resolve(json(value));
+        },
         fail: (message) => resolve(json({ error: message }, 503)),
       });
     });
   }
+  if (method === "GET" && /^\/tasks\/[^/]+$/.test(path))
+    return json(testAPI.taskStates.get(path.split("/")[2]) || { status: "pending" });
   if (method === "POST" && path === "/auth/logout") return json(null, 204);
   return json([]);
 };

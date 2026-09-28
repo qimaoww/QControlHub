@@ -57,6 +57,10 @@ const AgentFeaturePairedConfigFiles = "config-files-paired-v1"
 // tasks. Older Agents would silently ignore the flag and must not receive one.
 const AgentFeaturePresetAutoInstall = "preset-auto-install-v1"
 
+// AgentFeatureCoreUninstall ensures old Agents cannot silently reject or
+// misinterpret a task that removes a managed core binary.
+const AgentFeatureCoreUninstall = "core-uninstall-v1"
+
 const AgentFeatureSystemBBR = "system-bbr-v1"
 
 // Older Agents may fall back to the original config when accounting cannot

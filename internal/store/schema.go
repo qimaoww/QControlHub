@@ -3,7 +3,7 @@ package store
 // Increment this whenever schemaSQL changes. migrate skips schemaSQL when the
 // database already reports this version, so leaving the version unchanged can
 // strand upgraded installations without newly added columns or constraints.
-const currentSchemaVersion = 70
+const currentSchemaVersion = 71
 
 const schemaSQL = `
 CREATE TABLE IF NOT EXISTS agents (
@@ -181,7 +181,7 @@ CREATE INDEX IF NOT EXISTS mainland_access_policies_agent_idx
 CREATE TABLE IF NOT EXISTS tasks (
     id text PRIMARY KEY,
     agent_id text NOT NULL REFERENCES agents(id),
-    action varchar(20) NOT NULL CHECK (action IN ('validate','deploy','import-existing','read-config','read-managed-config','start','stop','restart','status','install','upgrade-agent','enable-bbr','disable-bbr','configure-tcp','ip-quality')),
+    action varchar(20) NOT NULL CHECK (action IN ('validate','deploy','import-existing','read-config','read-managed-config','start','stop','restart','status','install','uninstall','upgrade-agent','enable-bbr','disable-bbr','configure-tcp','ip-quality')),
 	    engine varchar(20) NOT NULL CHECK (engine IN ('mihomo','xray','sing-box','ss-rust') OR (action IN ('upgrade-agent','enable-bbr','disable-bbr','configure-tcp','ip-quality') AND engine='')),
     config_id text REFERENCES configs(id),
     config_version integer,
@@ -213,7 +213,7 @@ ALTER TABLE tasks ADD COLUMN IF NOT EXISTS tcp_settings jsonb NOT NULL DEFAULT '
 	DROP INDEX IF EXISTS tasks_latest_deployment_idx;
 	ALTER TABLE tasks DROP COLUMN IF EXISTS simulated;
 	ALTER TABLE tasks DROP CONSTRAINT IF EXISTS tasks_action_check;
-	ALTER TABLE tasks ADD CONSTRAINT tasks_action_check CHECK (action IN ('validate','deploy','import-existing','read-config','read-managed-config','start','stop','restart','status','install','upgrade-agent','enable-bbr','disable-bbr','configure-tcp','ip-quality'));
+	ALTER TABLE tasks ADD CONSTRAINT tasks_action_check CHECK (action IN ('validate','deploy','import-existing','read-config','read-managed-config','start','stop','restart','status','install','uninstall','upgrade-agent','enable-bbr','disable-bbr','configure-tcp','ip-quality'));
 	ALTER TABLE tasks DROP CONSTRAINT IF EXISTS tasks_status_check;
 	ALTER TABLE tasks ADD CONSTRAINT tasks_status_check CHECK (status IN ('pending','running','succeeded','failed','canceled'));
 	ALTER TABLE configs DROP CONSTRAINT IF EXISTS configs_engine_check;
@@ -502,7 +502,7 @@ ALTER TABLE agent_engine_ownership ADD COLUMN IF NOT EXISTS traffic_settled bool
 INSERT INTO agent_engine_ownership(agent_id,engine,owner_id,config_id,config_version,running,uncertain,config_uncertain,updated_at)
 SELECT latest.agent_id,latest.engine,COALESCE(c.owner_id,deployed.owner_id,latest.owner_id),
 	COALESCE(deployed.config_id,latest.config_id,''),COALESCE(deployed.config_version,latest.config_version,0),
-	NOT(latest.action='stop' AND latest.status='succeeded'),
+	NOT(latest.action IN ('stop','uninstall') AND latest.status='succeeded'),
 	latest.status<>'succeeded',
 	EXISTS(
 		SELECT 1 FROM tasks failed WHERE failed.agent_id=latest.agent_id AND failed.engine=latest.engine
@@ -510,7 +510,7 @@ SELECT latest.agent_id,latest.engine,COALESCE(c.owner_id,deployed.owner_id,lates
 			AND failed.started_at IS NOT NULL AND failed.started_at>COALESCE(deployed.finished_at,'-infinity'::timestamptz)),
 	COALESCE(latest.finished_at,latest.started_at,latest.created_at)
 FROM (SELECT DISTINCT ON(agent_id,engine) *
-	FROM tasks WHERE action IN ('deploy','import-existing','start','restart','stop')
+	FROM tasks WHERE action IN ('deploy','import-existing','start','restart','stop','uninstall')
 		AND (started_at IS NOT NULL OR status='succeeded')
 	ORDER BY agent_id,engine,COALESCE(started_at,finished_at,created_at) DESC,created_at DESC,id DESC) latest
 LEFT JOIN LATERAL (

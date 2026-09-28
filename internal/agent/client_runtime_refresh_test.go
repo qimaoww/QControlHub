@@ -12,7 +12,7 @@ import (
 
 func TestLifecycleResultsRequestImmediateRuntimeRefresh(t *testing.T) {
 	for _, success := range []bool{true, false} {
-		for _, action := range []core.Action{core.ActionInstall, core.ActionDeploy, core.ActionImportExisting, core.ActionStart, core.ActionStop, core.ActionRestart, core.ActionReadConfig, core.ActionValidate} {
+		for _, action := range []core.Action{core.ActionInstall, core.ActionUninstall, core.ActionDeploy, core.ActionImportExisting, core.ActionStart, core.ActionStop, core.ActionRestart, core.ActionReadConfig, core.ActionValidate} {
 			t.Run(fmt.Sprintf("%s/%t", action, success), func(t *testing.T) {
 				client := &Client{executor: &Executor{}, runtimeRefresh: make(chan struct{}, 1), executeFunc: func(context.Context, core.Task) (string, error) {
 					if !success {

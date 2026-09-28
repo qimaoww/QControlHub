@@ -196,6 +196,7 @@ function updateAgentMetrics(item) {
   Object.entries(item.runtime || {}).forEach(([engine, runtime]) => {
     const card = root.querySelector(`.service-${CSS.escape(engine)}`);
     const installed = Boolean(runtime.installed);
+    const capabilityEnabled = (item.capabilities || []).includes(engine);
     const existingPending = Boolean(runtime.existing_config_available);
     const existingUnsupportedReason = String(
       runtime.existing_config_unsupported_reason || "",
@@ -228,11 +229,13 @@ function updateAgentMetrics(item) {
     if (service) {
       service.textContent = existingUnsupportedReason
         ? "检测到但不可迁移"
+        : !capabilityEnabled
+        ? "能力已关闭"
         : installed
         ? serviceStatusName(runtime.service_status)
         : "未安装";
       service.closest(".engine-state").className =
-        `engine-state ${existingUnsupportedReason ? "warn" : installed ? statusTone(runtime.service_status) : "muted"}`;
+        `engine-state ${existingUnsupportedReason ? "warn" : !capabilityEnabled ? "muted" : installed ? statusTone(runtime.service_status) : "muted"}`;
       service
         .closest(".service-card")
         ?.querySelectorAll("[data-service-action]")
@@ -243,7 +246,7 @@ function updateAgentMetrics(item) {
             installed,
             runtime.service_status,
             item,
-          ) || (button.dataset.serviceAction !== "status" && !can("operator")) || Boolean(existingUnsupportedReason);
+          ) || !capabilityEnabled || (button.dataset.serviceAction !== "status" && !can("operator")) || Boolean(existingUnsupportedReason);
         });
     }
   });
@@ -264,9 +267,23 @@ function updateAgentMetrics(item) {
       button.disabled =
         !online ||
         !can("operator") ||
+        card?.dataset.capabilityEnabled === "0" ||
         Boolean(card?.dataset.existingUnsupported);
     },
   );
+  root.querySelectorAll("[data-core-uninstall]").forEach((button) => {
+    const runtime = item.runtime?.[button.dataset.taskEngine] || {};
+    const key = `${item.id}|${button.dataset.taskEngine}`;
+    const supported = (item.features || []).includes("core-uninstall-v1");
+    button.title = state.data.coreUninstallTasks?.[key]
+      ? "卸载任务执行中，请等待状态刷新"
+      : supported ? button.getAttribute("aria-label") : "请先升级 Agent 后卸载内核";
+    button.disabled = Boolean(button.dataset.uninstallBusy) ||
+      Boolean(state.data.coreUninstallTasks?.[key]) ||
+      !supported ||
+      Boolean(runtime.existing_config_unsupported_reason) ||
+      serviceActionDisabled("uninstall", online, Boolean(runtime.installed), runtime.service_status, item);
+  });
   updatePublicIPDisplays(root, metrics, item.labels || {}, item.features || []);
 }
 
@@ -290,14 +307,31 @@ async function pollAgentMetrics() {
       async (signal) => {
         const preset = state.route === "agents";
         const selected = state.data.selectedAgent;
-        const [items, deployments, configs] = await Promise.all([
+        const pendingUninstalls = Object.entries(state.data.coreUninstallTasks || {});
+        const [items, deployments, configs, uninstallStates] = await Promise.all([
           api("/agents", { signal }),
           preset && can("deployments.read") ? api("/deployments", { signal }) : [],
           preset && selected && can("agent-config.read") ? api(`/agents/${encodeURIComponent(selected)}/configs`, { signal }) : [],
+          Promise.all(pendingUninstalls.map(async ([key, id]) => {
+            try {
+              return [key, id, await api(`/tasks/${encodeURIComponent(id)}?view=status`, { signal })];
+            } catch {
+              return [key, id, null];
+            }
+          })),
         ]);
-        return { items, preset, signature: presetConfigSignature(deployments, configs, selected) };
+        return { items, preset, signature: presetConfigSignature(deployments, configs, selected), uninstallStates };
       },
-      ({ items, preset, signature }) => {
+      ({ items, preset, signature, uninstallStates }) => {
+        for (const [key, id, task] of uninstallStates) {
+          if (state.data.coreUninstallTasks?.[key] !== id) continue;
+          const [agentID, engine] = key.split("|");
+          const agent = items.find((item) => item.id === agentID);
+          const installed = agent?.runtime?.[engine]?.installed;
+          if (["failed", "canceled"].includes(task?.status) ||
+              (task?.status === "succeeded" && (!agent || installed === false)))
+            delete state.data.coreUninstallTasks[key];
+        }
         if (
           renderedAgentStructure === null &&
           Array.isArray(state.data.agents)

@@ -35,7 +35,7 @@ const assertSharedStatusOrder = (root) => {
   assert.equal(document.querySelectorAll(".core-runtime-row").length, 1, "详情显示了未分配的内核");
   assert.equal(document.querySelector(".node-panel-heading h3").textContent, "已分配内核");
   assert.ok(document.querySelector('[data-config="alpha"][data-engine="mihomo"]'), "共享内核没有独立配置入口");
-  assert.equal(document.querySelector('[data-open-version-form], [data-version-agent], [data-engine-capability], [data-agent-name-form], [data-komari-form], [data-agent-sharing], [data-upgrade-agent], [data-delete], [data-view-enrollment-command]'), null, "共享详情仍显示宿主管理控件");
+  assert.equal(document.querySelector('[data-open-version-form], [data-version-agent], [data-core-uninstall], [data-engine-capability], [data-agent-name-form], [data-komari-form], [data-agent-sharing], [data-upgrade-agent], [data-delete], [data-view-enrollment-command]'), null, "共享详情仍显示宿主管理控件");
   if (mode === "shared-node-mobile") {
     for (const selector of [".node-operations-workspace", ".node-resource-strip", ".core-runtime-row", '[data-config="alpha"]']) {
       const element = document.querySelector(selector), rect = element.getBoundingClientRect();
@@ -50,6 +50,13 @@ const assertSharedStatusOrder = (root) => {
   await waitFor(() => document.querySelector('[data-agent-name-form="bravo"]'), "自有节点管理未保留");
   assert.ok(document.querySelector('[data-agent-sharing="bravo"]'), "自有节点不能继续分享");
   assert.equal(document.querySelector(".agent-shared-badge"), null, "自有节点被标记为共享");
+  if (mode === "shared-node-mobile") {
+    const card = document.querySelector(".service-mihomo");
+    const actions = card.querySelector(".core-runtime-actions");
+    assert.ok(card.querySelector("[data-core-uninstall]"), "手机自有节点缺少卸载入口");
+    assert.ok(actions.scrollWidth <= actions.clientWidth + 1 && card.scrollWidth <= card.clientWidth + 1,
+      "手机自有节点内核操作被裁切");
+  }
   location.hash = "#settings-node-alpha";
   await waitFor(() => document.querySelector('[data-config="alpha"]'), "重新打开共享节点失败");
   testAPI.agents = [populatedAgents[1]];
@@ -67,6 +74,7 @@ await waitFor(() => document.querySelector(".workspace-main"), "只读聚合页�
   const renameForm = await waitFor(() => document.querySelector('[data-agent-name-form="alpha"]'), "只读节点详情未完成渲染");
   assert.equal(renameForm.querySelector("input").disabled, true, "只读用户可编辑节点名称");
   assert.equal(renameForm.querySelector("button").disabled, true, "只读用户可提交改名");
+  assert.equal(document.querySelector('.service-mihomo [data-core-uninstall]')?.disabled, true, "只读用户可卸载内核");
   assert.equal(document.querySelector("[data-region-edit]"), null, "只读用户不应编辑旗帜");
   renameForm.requestSubmit();
   assert.equal(testAPI.calls.some((call) => call.method === "PUT" && call.path.endsWith("/name")), false, "只读用户触发改名请求");

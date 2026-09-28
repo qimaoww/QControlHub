@@ -11,7 +11,7 @@ export function coreSourceForInstall(engine, channel, rawSource) {
 }
 
 
-export function createAgentCoreActions({ api, state, engineName, notify, confirmAction }) {
+export function createAgentCoreActions({ api, state, can, engineName, notify, confirmAction }) {
 async function submitTask(payload) {
   try {
     const agent = state.data.agents?.find((item) => item.id === payload.agent_id);
@@ -46,6 +46,53 @@ async function submitTask(payload) {
         engine: button.dataset.taskEngine,
         action: button.dataset.taskAction,
       });
+    };
+  });
+  document.querySelectorAll("[data-core-uninstall]").forEach((button) => {
+    button.onclick = async () => {
+      if (button.disabled || button.dataset.uninstallBusy) return;
+      const agentID = button.dataset.taskAgent;
+      const engine = button.dataset.taskEngine;
+      const key = `${agentID}|${engine}`;
+      button.dataset.uninstallBusy = "1";
+      button.disabled = true;
+      try {
+        if (!(await confirmAction(
+          `确定卸载 ${engineName(engine)} 内核？目标服务会停止，当前连接将断开；QAgent 管理的内核程序会删除。已保存配置会保留，可重新安装。`,
+          "卸载内核",
+        ))) return;
+        const agent = state.data.agents?.find((item) => item.id === agentID);
+        if (!button.isConnected || state.route !== "node-settings" ||
+            agent?.can_manage === false || agent?.status !== "online" ||
+            !agent?.runtime?.[engine]?.installed ||
+            agent.runtime[engine].existing_config_unsupported_reason ||
+            !(agent.features || []).includes("core-uninstall-v1") ||
+            state.data.coreUninstallTasks?.[key] ||
+            !can("tasks.execute") || !can("host.manage", agent)) {
+          notify("节点或内核状态已变化，请刷新后重试", "error");
+          return;
+        }
+        const task = await submitTask({
+          agent_id: agentID,
+          engine,
+          action: "uninstall",
+        });
+        if (task?.id) {
+          state.data.coreUninstallTasks ||= {};
+          state.data.coreUninstallTasks[key] = task.id;
+          button.title = "卸载任务执行中，请等待状态刷新";
+        }
+      } finally {
+        delete button.dataset.uninstallBusy;
+        if (button.isConnected) {
+          const agent = state.data.agents?.find((item) => item.id === agentID);
+          button.disabled = agent?.status !== "online" ||
+            !agent?.runtime?.[engine]?.installed ||
+            !(agent?.features || []).includes("core-uninstall-v1") ||
+            Boolean(state.data.coreUninstallTasks?.[key]) ||
+            Boolean(button.closest(".service-card")?.dataset.existingUnsupported);
+        }
+      }
     };
   });
   document.querySelectorAll("[data-deploy]").forEach((button) => {

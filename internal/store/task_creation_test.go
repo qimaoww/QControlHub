@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"sync"
 	"testing"
@@ -178,6 +179,108 @@ func TestCreateTaskValidatesCoreSourceWithPostgreSQL(t *testing.T) {
 		if _, err := dataStore.CreateTask(ctx, request); !errors.Is(err, ErrInvalid) {
 			t.Fatalf("CreateTask(%+v) error = %v, want ErrInvalid", request, err)
 		}
+	}
+}
+
+func TestUninstallTaskRequiresNegotiatedAgentFeatureWithPostgreSQL(t *testing.T) {
+	databaseURL := os.Getenv("QCH_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("QCH_TEST_DATABASE_URL is not configured")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	dataStore, err := Open(ctx, databaseURL, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dataStore.Close()
+	agent, enrollmentID := enrollTaskTestAgent(t, ctx, dataStore)
+	defer cleanupTaskTestAgent(dataStore, agent.ID, enrollmentID)
+	request := core.TaskRequest{AgentID: agent.ID, Action: core.ActionUninstall, Engine: core.EngineMihomo}
+	if _, err := dataStore.CreateTask(ctx, request); !errors.Is(err, ErrConflict) {
+		t.Fatalf("old Agent uninstall error = %v, want conflict", err)
+	}
+	if err := dataStore.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{
+		Features: []string{core.AgentFeatureCoreUninstall},
+		Runtime:  map[core.Engine]core.RuntimeState{core.EngineMihomo: {Installed: true}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	transition, err := dataStore.ChangeAgentEngineCapability(ctx, agent.ID, core.EngineMihomo, false)
+	if err != nil || transition.TaskID == "" {
+		t.Fatalf("disable installed capability = %+v, %v", transition, err)
+	}
+	stop, err := dataStore.ClaimTask(ctx, agent.ID)
+	if err != nil || stop == nil || stop.ID != transition.TaskID || stop.Action != core.ActionStop {
+		t.Fatalf("claim capability stop = %+v, %v", stop, err)
+	}
+	if err := dataStore.CompleteTask(ctx, agent.ID, stop.ID, core.TaskResultRequest{LeaseID: stop.LeaseID, Success: true}); err != nil {
+		t.Fatal(err)
+	}
+	disabled, err := dataStore.GetAgent(ctx, agent.ID)
+	if err != nil || containsEngine(disabled.Capabilities, core.EngineMihomo) || !containsEngine(disabled.SupportedCapabilities, core.EngineMihomo) {
+		t.Fatalf("disabled installed Agent = %+v, %v", disabled, err)
+	}
+	invalid := request
+	invalid.CoreVersion = core.CoreVersionStable
+	if _, err := dataStore.CreateTask(ctx, invalid); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("versioned uninstall error = %v, want invalid", err)
+	}
+	created, err := dataStore.CreateTask(ctx, request)
+	if err != nil || created.Action != core.ActionUninstall {
+		t.Fatalf("create uninstall task = %+v, %v", created, err)
+	}
+	claimed, err := dataStore.ClaimTask(ctx, agent.ID)
+	if err != nil || claimed == nil || claimed.ID != created.ID || claimed.Action != core.ActionUninstall {
+		t.Fatalf("claim uninstall task = %+v, %v", claimed, err)
+	}
+	if err := dataStore.CompleteTask(ctx, agent.ID, claimed.ID, core.TaskResultRequest{LeaseID: claimed.LeaseID, Success: true}); err != nil {
+		t.Fatal(err)
+	}
+	completed, err := dataStore.GetTask(ctx, created.ID)
+	if err != nil || completed.Status != core.TaskSucceeded {
+		t.Fatalf("completed uninstall task = %+v, %v", completed, err)
+	}
+	user, err := dataStore.CreateUser(ctx, core.UserRequest{
+		Username: fmt.Sprintf("uninstall-share-%d", time.Now().UnixNano()),
+		Role:     core.RoleUser, Permissions: core.GrantablePermissions(),
+	}, "test-only-hash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	shareID, err := core.NewID("shr")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		cleanupContext, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cleanupCancel()
+		_, _ = dataStore.pool.Exec(cleanupContext, `DELETE FROM agent_shares WHERE id=$1`, shareID)
+		_, _ = dataStore.pool.Exec(cleanupContext, `DELETE FROM panel_users WHERE id=$1`, user.ID)
+	}()
+	if _, err := dataStore.pool.Exec(ctx, `INSERT INTO agent_shares(id,user_id,agent_id,enabled,status,engines)
+		VALUES ($1,$2,$3,true,'pending',ARRAY['mihomo']::text[])`, shareID, user.ID, agent.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := dataStore.CreateTask(ctx, request); !errors.Is(err, ErrConflict) {
+		t.Fatalf("pending enabled share uninstall error = %v, want conflict", err)
+	}
+	if _, err := dataStore.pool.Exec(ctx, `DELETE FROM agent_shares WHERE id=$1`, shareID); err != nil {
+		t.Fatal(err)
+	}
+	pending, err := dataStore.CreateTask(ctx, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := dataStore.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	if claimed, err := dataStore.ClaimTask(ctx, agent.ID); err != nil || claimed != nil {
+		t.Fatalf("downgraded Agent claimed uninstall task = %+v, %v", claimed, err)
+	}
+	canceled, err := dataStore.GetTask(ctx, pending.ID)
+	if err != nil || canceled.Status != core.TaskCanceled {
+		t.Fatalf("downgraded Agent task = %+v, %v", canceled, err)
 	}
 }
 
