@@ -297,6 +297,27 @@ export async function testPresetsRuntime(preview = false) {
       const printable = submissions(test).at(-1).body.input.mieru_custom_pattern;
       assert(printable.nonce_type === "PRINTABLE_SUBSET" && printable.nonce_min_len === 3 && printable.nonce_max_len === 7 && printable.nonce_fixed_hex === "", "Mieru printable nonce settings were not submitted");
       assert(control("mieru_custom_nonce_min_len").value === "3" && control("mieru_custom_nonce_max_len").value === "7", "Mieru printable nonce range did not reopen");
+      assert(!control("mieru_custom_nonce_min_len").disabled && !control("mieru_custom_nonce_max_len").disabled, "Mieru custom fields stayed disabled after reopening on another tab");
+      const beforeInvalid = submissions(test).length;
+      edit("mieru_custom_nonce_min_len", "8");
+      assert(!form().checkValidity() && control("mieru_custom_nonce_max_len").validationMessage.includes("最长长度"), "Mieru reversed nonce range was not marked on the field");
+      form().querySelector('[data-builder-step="listen"]').click();
+      button("validate").click();
+      assert(submissions(test).length === beforeInvalid && !control("mieru_custom_nonce_max_len").closest(".builder-section").hidden &&
+        document.activeElement === control("mieru_custom_nonce_max_len"), "Mieru reversed nonce range submitted or stayed hidden");
+      edit("mieru_custom_nonce_min_len", "3");
+      assert(form().checkValidity(), "Mieru corrected nonce range stayed invalid");
+      edit("mieru_custom_nonce_type", "FIXED");
+      for (const badHex of ["", "a", "aabb,", "aabb, zz", "aa".repeat(13)]) {
+        edit("mieru_custom_nonce_fixed_hex", badHex);
+        assert(!form().checkValidity() && control("mieru_custom_nonce_fixed_hex").validationMessage, `Mieru invalid fixed nonce ${badHex} was accepted`);
+      }
+      button("validate").click();
+      assert(submissions(test).length === beforeInvalid && document.activeElement === control("mieru_custom_nonce_fixed_hex"), "Mieru invalid fixed nonce submitted or was not focused");
+      edit("mieru_custom_nonce_fixed_hex", "aa, " + "bb".repeat(12));
+      assert(form().checkValidity(), "Mieru valid fixed nonce did not clear the error");
+      edit("mieru_custom_nonce_type", "PRINTABLE_SUBSET");
+      assert(form().checkValidity() && !control("mieru_custom_nonce_fixed_hex").validationMessage, "Mieru hidden fixed nonce error was not cleared");
       edit("mieru_custom_nonce_min_len", "99");
       assert(!form().checkValidity(), "Mieru invalid visible nonce length was accepted");
       edit("mieru_traffic_pattern", "off");

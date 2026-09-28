@@ -278,7 +278,29 @@ function bindProtocolOptionVisibility(form) {
   const mieruCustom = form.querySelector("[data-mieru-custom-fields]");
   const mieruFragment = form.elements.namedItem("mieru_custom_tcp_fragment");
   const mieruNonce = form.elements.namedItem("mieru_custom_nonce_type");
+  const mieruNonceMin = form.elements.namedItem("mieru_custom_nonce_min_len");
+  const mieruNonceMax = form.elements.namedItem("mieru_custom_nonce_max_len");
+  const mieruFixedHex = form.elements.namedItem("mieru_custom_nonce_fixed_hex");
   const mieruEntropy = form.elements.namedItem("mieru_custom_low_entropy_mode");
+  const validateMieruNonce = () => {
+    mieruNonceMax?.setCustomValidity("");
+    mieruFixedHex?.setCustomValidity("");
+    if (mieruMode?.value !== "custom") return;
+    if (["PRINTABLE", "PRINTABLE_SUBSET"].includes(mieruNonce?.value) &&
+        mieruNonceMin?.value !== "" && mieruNonceMax?.value !== "" &&
+        mieruNonceMin?.validity.valid && mieruNonceMax?.validity.valid &&
+        Number(mieruNonceMin.value) > Number(mieruNonceMax.value)) {
+      mieruNonceMax.setCustomValidity("最长长度不能小于最短长度。");
+    }
+    if (mieruNonce?.value === "FIXED" && mieruFixedHex) {
+      const prefixes = mieruFixedHex.value.split(",").map(value => value.trim());
+      if (prefixes.length === 1 && prefixes[0] === "") {
+        mieruFixedHex.setCustomValidity("请至少填写一个固定前缀。");
+      } else if (prefixes.some(value => !/^(?:[0-9a-f]{2}){1,12}$/i.test(value))) {
+        mieruFixedHex.setCustomValidity("每个前缀须为 1–12 字节的十六进制字符，并用英文逗号分隔。");
+      }
+    }
+  };
   const updateMieru = () => {
     if (!mieruMode || !mieruCustom) return;
     const custom = mieruMode.value === "custom";
@@ -288,14 +310,14 @@ function bindProtocolOptionVisibility(form) {
     show("[data-mieru-nonce-fixed]", mieruNonce?.value === "FIXED");
     show("[data-mieru-mask-rotation]", mieruEntropy?.value !== "0");
     mieruCustom.querySelectorAll("input, select").forEach((input) => {
-      const visible = custom && !input.closest("[hidden]");
+      const visible = custom && !input.closest("[data-mieru-custom-fields] [hidden]");
       input.disabled = !visible;
       if (input.type === "number") input.required = visible;
     });
-    const fixedHex = form.elements.namedItem("mieru_custom_nonce_fixed_hex");
-    if (fixedHex) fixedHex.required = custom && mieruNonce?.value === "FIXED";
+    if (mieruFixedHex) mieruFixedHex.required = custom && mieruNonce?.value === "FIXED";
+    validateMieruNonce();
   };
-  for (const control of [mieruMode, mieruFragment, mieruNonce, mieruEntropy]) {
+  for (const control of [mieruMode, mieruFragment, mieruNonce, mieruNonceMin, mieruNonceMax, mieruFixedHex, mieruEntropy]) {
     bindEvent(control, "input", updateMieru);
     bindEvent(control, "change", updateMieru);
   }
