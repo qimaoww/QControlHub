@@ -145,9 +145,18 @@ export async function testConfigInboundsRuntime(preview = false) {
     assert(!document.querySelector("dialog"), "read-only or diverged snapshot permitted mutation");
     test.dispose();
   }
+  const stopped = await fixture("xray", {serviceStatus:"inactive"});
+  let stoppedTab = document.querySelector('[data-live-engine="xray"]');
+  assert(stoppedTab.querySelector("small").textContent === "已停止" && stoppedTab.querySelector("small").classList.contains("stopped"), "stopped core still looks installed or running");
+  assert(stoppedTab.getAttribute("aria-label").includes("已停止") && stoppedTab.title === "已停止", "stopped state missing from accessible engine label");
+  stopped.agent.runtime.xray.service_status = "unknown";
+  await stopped.reenter();
+  stoppedTab = document.querySelector('[data-live-engine="xray"]');
+  assert(stoppedTab.querySelector("small").textContent === "状态未知", "unknown service state was presented as stopped");
+  stopped.dispose();
   const switcher = await fixture("xray", {multi:true});
   assert(switcher.state.data.liveEngine === "xray", "default selected an uninstalled core");
-  assert(document.querySelector('[data-live-engine="xray"] small').textContent === "已安装", "installed status not visible");
+  assert(document.querySelector('[data-live-engine="xray"] small').textContent === "正在运行", "running core status not visible");
   assert(document.querySelector('[data-live-engine="mihomo"] small').textContent === "未安装", "missing status not visible");
   let releaseSwitch;
   switcher.workspaceGate = new Promise(resolve=>{releaseSwitch=resolve;});
