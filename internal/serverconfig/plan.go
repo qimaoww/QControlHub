@@ -272,6 +272,8 @@ func RegeneratePlan(protocol Protocol, current Input) (Input, error) {
 	}
 	if protocol.Key == ProtocolMieru {
 		plan.MieruTransport = current.MieruTransport
+		plan.MieruTrafficPattern = current.MieruTrafficPattern
+		plan.MieruCustomPattern = current.MieruCustomPattern
 		normalizeMieruInput(&plan)
 	}
 	if protocol.PortForward {

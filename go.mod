@@ -8,6 +8,7 @@ require (
 	filippo.io/edwards25519 v1.2.0
 	github.com/cloudflare/circl v1.6.3
 	github.com/coder/websocket v1.8.15
+	github.com/enfein/mieru/v3 v3.37.0
 	github.com/jackc/pgx/v5 v5.9.2
 	github.com/oschwald/maxminddb-golang v1.13.1
 	github.com/ulikunitz/xz v0.5.15

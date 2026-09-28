@@ -93,7 +93,7 @@ func mutateGenerated(engine core.Engine, currentContent, generatedContent, match
 	if engine == core.EngineMihomo {
 		listKey, matchKey = "listeners", "name"
 		managedKeys = []string{
-			"name", "listen", "port", "type", "cipher", "password", "udp", "users", "transport",
+			"name", "listen", "port", "type", "cipher", "password", "udp", "users", "transport", "traffic-pattern",
 			"up", "down", "alpn", "congestion-controller", "max-idle-time", "authentication-timeout",
 			"certificate", "private-key", "reality-config", "decryption", "ws-path", "grpc-service-name", "xhttp-config", "network", "target",
 			"routing-mark", "rule", "proxy", "psk", "version", "obfs-opts", "shadow-tls",
