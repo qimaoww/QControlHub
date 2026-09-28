@@ -2,6 +2,7 @@ package geoip
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestLookupReadsCountryAndCachesByAddress(t *testing.T) {
@@ -131,6 +133,64 @@ func TestCountryLookupDoesNotHideLaterProvinceEnrichment(t *testing.T) {
 	}
 	if calls["/geo/114.114.114.114.json"] != 2 || calls["/who/114.114.114.114"] != 1 {
 		t.Fatalf("calls=%v", calls)
+	}
+}
+
+func TestLookupRemembersProviderFailures(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		requests++
+		http.Error(w, "unavailable", http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+	client := New(server.Client())
+	client.endpoint = server.URL
+	address := netip.MustParseAddr("8.8.8.8")
+
+	if _, err := client.LookupCountry(context.Background(), address); err == nil {
+		t.Fatal("failing provider unexpectedly resolved")
+	}
+	if _, err := client.LookupCountry(context.Background(), address); !errors.Is(err, errRecentFailure) {
+		t.Fatalf("second lookup error = %v, want the remembered failure", err)
+	}
+	if requests != 1 {
+		t.Fatalf("GeoIP provider requests = %d, want the failure window to skip the provider", requests)
+	}
+
+	// The memory expires, so a provider that recovered is consulted again.
+	client.mu.Lock()
+	client.failures[address.String()] = time.Now().Add(-failureTTL - time.Second)
+	client.mu.Unlock()
+	if _, err := client.LookupCountry(context.Background(), address); err == nil {
+		t.Fatal("still failing provider unexpectedly resolved")
+	}
+	if requests != 2 {
+		t.Fatalf("GeoIP provider requests = %d, want a retry after the failure window", requests)
+	}
+}
+
+func TestLookupRetriesAfterCallerCancellation(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		requests++
+		_, _ = w.Write([]byte(`{"country_code":"us","country":"United States"}`))
+	}))
+	defer server.Close()
+	client := New(server.Client())
+	client.endpoint = server.URL
+	address := netip.MustParseAddr("8.8.8.8")
+
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := client.LookupCountry(cancelled, address); err == nil {
+		t.Fatal("cancelled lookup unexpectedly resolved")
+	}
+	region, err := client.LookupCountry(context.Background(), address)
+	if err != nil || region.ISOCode != "US" {
+		t.Fatalf("retry after caller cancellation: %+v, %v", region, err)
+	}
+	if requests != 1 {
+		t.Fatalf("GeoIP provider requests = %d, want one request", requests)
 	}
 }
 
