@@ -1,6 +1,29 @@
 import { liveConfigEditorState } from "./live-config-state.js";
 import { diagnosticError } from "./errors.js";
 
+function liveEngineStatus(info = {}, online = true) {
+  if (!info.installed)
+    return { label: info.existing_config_available ? "待导入" : "未安装", tone: "uninstalled" };
+  if (!online)
+    return { label: "状态未知", tone: "unknown" };
+  switch (info.service_status) {
+    case "active":
+    case "running":
+      return { label: "正在运行", tone: "running" };
+    case "inactive":
+    case "stopped":
+      return { label: "已停止", tone: "stopped" };
+    case "activating":
+      return { label: "启动中", tone: "pending" };
+    case "deactivating":
+      return { label: "停止中", tone: "pending" };
+    case "failed":
+      return { label: "运行失败", tone: "failed" };
+    default:
+      return { label: "状态未知", tone: "unknown" };
+  }
+}
+
 export function createLiveConfigView({ can, esc, engineName, conciseVersion, shell }) {
   return ({ agent, engine, runtime, installedEngines, privateAccount, privateWorkspace,
     sourceMode, importSource, current, saved, source, unsupportedReason, existingAvailable,
@@ -48,8 +71,8 @@ export function createLiveConfigView({ can, esc, engineName, conciseVersion, she
   const engineBar = `<nav class="live-engine-bar" aria-label="选择内核">${installedEngines.map(item => {
     const info = agent.runtime?.[item] || {};
     const active = item === engine;
-    const label = info.installed ? "已安装" : info.existing_config_available ? "待导入" : "未安装";
-    return `<button type="button" class="live-engine-tab ${active ? "active" : ""}" data-live-engine="${esc(item)}" aria-pressed="${active}" aria-label="${esc(engineName(item))} · ${label}" title="${label}" ${active ? 'aria-current="true"' : ""}><span>${esc(engineName(item))}</span><small class="live-engine-status${info.installed ? " installed" : ""}">${label}</small></button>`;
+    const { label, tone } = liveEngineStatus(info, agent.status === "online");
+    return `<button type="button" class="live-engine-tab ${active ? "active" : ""}" data-live-engine="${esc(item)}" aria-pressed="${active}" aria-label="${esc(engineName(item))} · ${label}" title="${label}" ${active ? 'aria-current="true"' : ""}><span>${esc(engineName(item))}</span><small class="live-engine-status ${tone}">${label}</small></button>`;
   }).join("")}</nav>`;
   const details = `<div class="live-config-details" role="group" aria-label="当前配置状态">
     <span class="live-config-detail live-config-node-state" data-state="${agent.status === "online" ? "online" : "offline"}"><i class="status-dot ${agent.status === "online" ? "ok" : ""}" aria-hidden="true"></i>${agent.status === "online" ? "节点在线" : "节点离线"}</span>

@@ -33,7 +33,7 @@ func (c *Client) executeTaskForSession(executionContext, deliveryContext context
 	// The session loop owns heartbeat collection; a single buffered request
 	// coalesces completions without racing its periodic metrics collection.
 	switch task.Action {
-	case core.ActionInstall, core.ActionDeploy, core.ActionImportExisting,
+	case core.ActionInstall, core.ActionUninstall, core.ActionDeploy, core.ActionImportExisting,
 		core.ActionStart, core.ActionStop, core.ActionRestart, core.ActionEnableBBR, core.ActionDisableBBR, core.ActionConfigureTCP:
 		select {
 		case c.runtimeRefresh <- struct{}{}:
@@ -219,7 +219,7 @@ func (c *Client) resultForTask(ctx context.Context, task core.Task) core.TaskRes
 
 func coreLogSourceMayChange(action core.Action) bool {
 	switch action {
-	case core.ActionImportExisting, core.ActionDeploy, core.ActionInstall, core.ActionStart, core.ActionRestart:
+	case core.ActionImportExisting, core.ActionDeploy, core.ActionInstall, core.ActionUninstall, core.ActionStart, core.ActionRestart:
 		return true
 	default:
 		return false

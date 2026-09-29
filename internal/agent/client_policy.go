@@ -109,6 +109,7 @@ func (c *Client) advertisedFeatures() []string {
 		core.AgentFeatureConfigFiles,
 		core.AgentFeaturePairedConfigFiles,
 		core.AgentFeaturePresetAutoInstall,
+		core.AgentFeatureCoreUninstall,
 		core.AgentFeatureCNIPSource,
 		core.AgentFeatureSystemBBR,
 		core.AgentFeatureIPQuality,

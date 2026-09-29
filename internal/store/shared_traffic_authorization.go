@@ -12,6 +12,8 @@ import (
 // Invalidating running leases also prevents later reacceptance from reviving
 // pre-revocation work. Execution already in flight may remain uncertain.
 func cancelUnauthorizedAgentTasksTx(ctx context.Context, tx pgx.Tx, agentID string, features []string) error {
+	// A running uninstall may have removed the binary before its result is
+	// acknowledged. Keep that lease resumable when a heartbeat reports it gone.
 	_, err := tx.Exec(ctx, `UPDATE tasks t SET status=CASE WHEN t.status='running' THEN 'failed' ELSE 'canceled' END,
 		error=CASE WHEN t.status='running' THEN 'Agent sharing authorization changed; previous execution is unknown'
 			ELSE 'Agent sharing authorization changed; submit a new task' END,
@@ -22,8 +24,16 @@ func cancelUnauthorizedAgentTasksTx(ctx context.Context, tx pgx.Tx, agentID stri
 			OR (`+unauthorizedHostConfigTaskSQL+`)
 			OR (t.action IN ('validate','deploy') AND NOT $3::boolean)
 			OR (t.shared_instance AND NOT $4::boolean)
+			OR (t.action='uninstall' AND (NOT $5::boolean
+				OR EXISTS(SELECT 1 FROM agent_shares s WHERE s.agent_id=t.agent_id
+					AND s.enabled AND t.engine=ANY(s.engines))
+				OR EXISTS(SELECT 1 FROM agent_shared_instance_ownership state
+					WHERE state.agent_id=t.agent_id AND state.engine=t.engine AND (state.running OR state.uncertain))))
 			OR (t.engine<>'' AND NOT t.capability_transition AND NOT EXISTS(
-				SELECT 1 FROM agents a WHERE a.id=t.agent_id AND a.capabilities ? t.engine))
+				SELECT 1 FROM agents a WHERE a.id=t.agent_id AND
+					(a.capabilities ? t.engine OR (t.action='uninstall'
+						AND COALESCE(a.supported_capabilities,a.capabilities) ? t.engine
+						AND (t.status='running' OR a.runtime->t.engine->'installed'='true'::jsonb)))))
 			OR (t.shared_traffic_id<>'' AND (
 				NOT $2::boolean OR NOT EXISTS(
 					SELECT 1 FROM agent_shares s JOIN panel_users u ON u.id=s.user_id
@@ -34,7 +44,7 @@ func cancelUnauthorizedAgentTasksTx(ctx context.Context, tx pgx.Tx, agentID stri
 			))
 		)`,
 		agentID, supportsSharedEngines(features), containsFeature(features, core.AgentFeatureIndependentEgress),
-		containsFeature(features, core.AgentFeatureSharedCoreInstances))
+		containsFeature(features, core.AgentFeatureSharedCoreInstances), containsFeature(features, core.AgentFeatureCoreUninstall))
 	return err
 }
 
