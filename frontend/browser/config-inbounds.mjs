@@ -154,6 +154,11 @@ export async function testConfigInboundsRuntime(preview = false) {
   stoppedTab = document.querySelector('[data-live-engine="xray"]');
   assert(stoppedTab.querySelector("small").textContent === "状态未知", "unknown service state was presented as stopped");
   stopped.dispose();
+  const offline = await fixture("xray", {offline:true, serviceStatus:"active"});
+  const offlineTab = document.querySelector('[data-live-engine="xray"]');
+  assert(offlineTab.querySelector("small").textContent === "状态未知" &&
+    offlineTab.getAttribute("aria-label").includes("状态未知"), "offline node presented cached running state as current");
+  offline.dispose();
   const switcher = await fixture("xray", {multi:true});
   assert(switcher.state.data.liveEngine === "xray", "default selected an uninstalled core");
   assert(document.querySelector('[data-live-engine="xray"] small').textContent === "正在运行", "running core status not visible");

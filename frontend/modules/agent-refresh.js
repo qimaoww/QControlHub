@@ -307,6 +307,9 @@ async function pollAgentMetrics() {
       async (signal) => {
         const preset = state.route === "agents";
         const selected = state.data.selectedAgent;
+        // A user can execute tasks without being allowed to read their status.
+        // Release any locally tracked task if that read permission is removed.
+        if (!can("tasks.read")) state.data.coreUninstallTasks = {};
         const pendingUninstalls = Object.entries(state.data.coreUninstallTasks || {});
         const [items, deployments, configs, uninstallStates] = await Promise.all([
           api("/agents", { signal }),

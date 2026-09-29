@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/qimaoww/qcontrolhub/internal/core"
 )
 
-// uninstallCore removes only the binary owned by this Agent's managed core
-// mapping. The configuration and panel revisions remain available for a later
+// uninstallCore removes this Agent's managed core binary and its version
+// backups. The configuration and panel revisions remain available for a later
 // install. A QAgent service may stay on disk, but it is disabled before the
 // executable is removed so boot cannot repeatedly launch a missing binary.
 func (e *Executor) uninstallCore(ctx context.Context, engine core.Engine, spec EngineSpec) (string, error) {
@@ -41,9 +43,9 @@ func (e *Executor) uninstallCore(ctx context.Context, engine core.Engine, spec E
 		return "", err
 	}
 	defer root.Close()
-	files := []string{filepath.Base(spec.Binary)}
-	if engine == core.EngineXray && spec == defaultSpec {
-		files = append(files, xrayMigrationAssetNames[:]...)
+	files, err := managedCoreRemovalFiles(root, engine, spec, manager)
+	if err != nil {
+		return "", err
 	}
 	for _, name := range files {
 		if err := validateRemovableCoreFile(root, name); err != nil {
@@ -71,8 +73,78 @@ func (e *Executor) uninstallCore(ctx context.Context, engine core.Engine, spec E
 	return fmt.Sprintf("uninstalled %s core; managed configuration retained\n%s", engine, output), nil
 }
 
+func managedCoreRemovalFiles(root *os.Root, engine core.Engine, spec EngineSpec, manager *ServiceManager) ([]string, error) {
+	binaryName := filepath.Base(spec.Binary)
+	managedFiles := []string{binaryName}
+	if engine == core.EngineXray && spec == DefaultSpecsForServiceManager(manager.Kind())[engine] {
+		managedFiles = append(managedFiles, xrayMigrationAssetNames[:]...)
+	}
+	var files []string
+	for _, name := range managedFiles {
+		backups, err := managedCoreFileBackups(root, name)
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, backups...)
+		if name != binaryName {
+			files = append(files, name)
+		}
+	}
+	// Leave the installed executable until last. A failed earlier removal can
+	// then be retried from the panel while the core still appears installed.
+	files = append(files, binaryName)
+	return files, nil
+}
+
+func managedCoreFileBackups(root *os.Root, fileName string) ([]string, error) {
+	directory, err := root.Open(".")
+	if err != nil {
+		return nil, err
+	}
+	defer directory.Close()
+	entries, err := directory.ReadDir(-1)
+	if err != nil {
+		return nil, err
+	}
+	var backups []string
+	for _, entry := range entries {
+		name := entry.Name()
+		if !strings.HasPrefix(name, fileName+".bak-") {
+			continue
+		}
+		if !validManagedCoreBackupName(fileName, name) {
+			return nil, fmt.Errorf("unrecognized managed core backup %s", name)
+		}
+		backups = append(backups, name)
+	}
+	return backups, nil
+}
+
+func validManagedCoreBackupName(fileName, name string) bool {
+	const timestampLayout = "20060102T150405Z"
+	suffix := strings.TrimPrefix(name, fileName+".bak-")
+	if len(suffix) != len(timestampLayout)+1+12 || suffix[len(timestampLayout)] != '-' {
+		return false
+	}
+	timestamp := suffix[:len(timestampLayout)]
+	parsed, err := time.Parse(timestampLayout, timestamp)
+	if err != nil || parsed.UTC().Format(timestampLayout) != timestamp {
+		return false
+	}
+	for _, character := range suffix[len(timestampLayout)+1:] {
+		if (character < '0' || character > '9') && (character < 'a' || character > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
 func (e *Executor) checkSharedCoreInstancesInactive(ctx context.Context, engine core.Engine, base EngineSpec) error {
-	entries, err := os.ReadDir(sharedInstanceRoot(engine))
+	return e.checkSharedCoreInstancesInactiveAtRoot(ctx, engine, base, sharedInstanceRoot(engine))
+}
+
+func (e *Executor) checkSharedCoreInstancesInactiveAtRoot(ctx context.Context, engine core.Engine, base EngineSpec, directory string) error {
+	entries, err := os.ReadDir(directory)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
@@ -90,6 +162,16 @@ func (e *Executor) checkSharedCoreInstancesInactive(ctx context.Context, engine 
 		status, err := serviceStatusWithManager(ctx, e.serviceManager(), instance.Service)
 		if err != nil || (status != "inactive" && status != "failed") {
 			return fmt.Errorf("shared %s core instance %s must be stopped before uninstallation", engine, entry.Name())
+		}
+		// A stopped instance may still be enabled at boot. The shared unit
+		// uses this base binary, so removing it would leave an enabled unit
+		// attempting to start a missing executable after reboot.
+		enablement, err := serviceEnableState(ctx, instance.Service, e.serviceManager())
+		if err != nil {
+			return fmt.Errorf("inspect shared %s core instance %s enablement: %w", engine, entry.Name(), err)
+		}
+		if enablement != "disabled" {
+			return fmt.Errorf("shared %s core instance %s must be disabled before uninstallation: state %q", engine, entry.Name(), enablement)
 		}
 	}
 	return nil

@@ -77,7 +77,9 @@ async function submitTask(payload) {
           engine,
           action: "uninstall",
         });
-        if (task?.id) {
+        // Task status reads are a separate permission. Without them, leave
+        // retry available; the server reuses an equivalent pending task.
+        if (task?.id && can("tasks.read")) {
           state.data.coreUninstallTasks ||= {};
           state.data.coreUninstallTasks[key] = task.id;
           button.title = "卸载任务执行中，请等待状态刷新";

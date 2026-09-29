@@ -354,7 +354,19 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (string, erro
 		// leaves an existing service's enablement unchanged.
 		if freshInstall {
 			if err := setServiceEnabled(ctx, spec.Service, true, e.serviceManager()); err != nil {
-				return output, fmt.Errorf("core installed but could not enable its service: %w", err)
+				// The updater has already written the binary and started the
+				// service. Roll back a first install if enablement fails; otherwise
+				// a retry sees an existing binary and skips this step forever.
+				rollbackCtx, rollbackCancel := context.WithTimeout(context.Background(), 30*time.Second)
+				rollbackOutput, rollbackErr := e.uninstallCore(rollbackCtx, task.Engine, spec)
+				rollbackCancel()
+				if rollbackOutput != "" {
+					output += "\nrollback: " + rollbackOutput
+				}
+				if rollbackErr != nil {
+					return output, fmt.Errorf("core installed but could not enable its service (%v); rollback failed: %w", err, rollbackErr)
+				}
+				return output, fmt.Errorf("core installation was rolled back because its service could not be enabled: %w", err)
 			}
 		}
 		return output, nil

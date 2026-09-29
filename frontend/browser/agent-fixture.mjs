@@ -254,6 +254,8 @@ if (mode.startsWith("config-layout")) {
   testAPI.layoutTasks = new Map();
   location.hash = "#live-config";
 }
+if (mode === "uninstall-writeonly")
+  setStorageAccount({ role: "user" });
 if (mode.startsWith("bbr")) {
   setStorageAccount({ role: mode === "bbr-readonly" ? "readonly" : mode === "bbr-writeonly" ? "user" : "admin" });
   accountStorage.setItem("qcontrolhub:node-card-order", JSON.stringify(["alpha", "delta", "bravo", "charlie"]));
@@ -342,7 +344,9 @@ window.fetch = async (input, options = {}) => {
       `mutation ${method} ${path} 缺少 CSRF 头`,
     );
   if (method === "GET" && path === "/auth/session")
-    return json(mode === "bbr-writeonly"
+    return json(mode === "uninstall-writeonly"
+      ? { role: "user", permissions: ["agents.read", "tasks.execute", "metrics.read"], csrf_token: "browser-test-csrf" }
+      : mode === "bbr-writeonly"
       ? { role: "user", permissions: ["agents.read", "agents.manage", "tasks.execute"], csrf_token: "browser-test-csrf" }
       : mode.startsWith("shared-node")
       ? { role: "user", user_id: "recipient", permissions: ["agents.read", "agents.manage", "enrollment.manage", "agent-config.read", "agent-config.write", "configs.read", "tasks.read", "tasks.execute", "metrics.read"], csrf_token: "browser-test-csrf" }
@@ -551,6 +555,8 @@ window.fetch = async (input, options = {}) => {
       });
     });
   }
+  if (method === "GET" && /^\/tasks\/[^/]+$/.test(path) && mode === "uninstall-writeonly")
+    return json({ error: "tasks.read permission required" }, 403);
   if (method === "GET" && /^\/tasks\/[^/]+$/.test(path))
     return json(testAPI.taskStates.get(path.split("/")[2]) || { status: "pending" });
   if (method === "POST" && path === "/auth/logout") return json(null, 204);

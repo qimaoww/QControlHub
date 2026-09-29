@@ -159,3 +159,31 @@ export async function testAgentDetailActions({ testAPI }) {
   }
 
 }
+
+export async function testWriteOnlyCoreUninstall({ testAPI }) {
+  location.hash = "#settings-node-alpha";
+  const button = await waitFor(
+    () => document.querySelector('.service-mihomo [data-core-uninstall]:not(:disabled)'),
+    "只有执行权的节点所有者不能卸载内核",
+  );
+  testAPI.taskMode = "deferred";
+  button.click();
+  const confirm = await waitFor(
+    () => document.querySelector('[data-confirm-dialog][open]'),
+    "卸载确认弹窗未出现",
+  );
+  confirm.querySelector('[data-confirm-accept]').click();
+  const request = await waitFor(
+    () => testAPI.pendingTasks.find((item) => item.payload.action === "uninstall"),
+    "没有提交卸载任务",
+  );
+  assert.equal(button.disabled, true, "卸载请求尚未返回时按钮没有锁定");
+  request.ok({ id: "uninstall-writeonly-task" });
+  await waitFor(() => !button.disabled, "无法读取任务状态后卸载按钮没有恢复");
+  document.querySelector('[data-agent-refresh]').click();
+  await waitFor(() => testAPI.calls.filter((call) => call.path === "/agents").length > 1,
+    "节点状态没有刷新");
+  assert.equal(button.disabled, false, "刷新后卸载按钮再次卡在等待状态");
+  assert.equal(testAPI.calls.some((call) => call.path === "/tasks/uninstall-writeonly-task"), false,
+    "没有 tasks.read 权限时仍轮询受保护的任务详情");
+}

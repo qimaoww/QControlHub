@@ -12,6 +12,8 @@ import (
 // Invalidating running leases also prevents later reacceptance from reviving
 // pre-revocation work. Execution already in flight may remain uncertain.
 func cancelUnauthorizedAgentTasksTx(ctx context.Context, tx pgx.Tx, agentID string, features []string) error {
+	// A running uninstall may have removed the binary before its result is
+	// acknowledged. Keep that lease resumable when a heartbeat reports it gone.
 	_, err := tx.Exec(ctx, `UPDATE tasks t SET status=CASE WHEN t.status='running' THEN 'failed' ELSE 'canceled' END,
 		error=CASE WHEN t.status='running' THEN 'Agent sharing authorization changed; previous execution is unknown'
 			ELSE 'Agent sharing authorization changed; submit a new task' END,
@@ -31,7 +33,7 @@ func cancelUnauthorizedAgentTasksTx(ctx context.Context, tx pgx.Tx, agentID stri
 				SELECT 1 FROM agents a WHERE a.id=t.agent_id AND
 					(a.capabilities ? t.engine OR (t.action='uninstall'
 						AND COALESCE(a.supported_capabilities,a.capabilities) ? t.engine
-						AND a.runtime->t.engine->'installed'='true'::jsonb))))
+						AND (t.status='running' OR a.runtime->t.engine->'installed'='true'::jsonb)))))
 			OR (t.shared_traffic_id<>'' AND (
 				NOT $2::boolean OR NOT EXISTS(
 					SELECT 1 FROM agent_shares s JOIN panel_users u ON u.id=s.user_id

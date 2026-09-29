@@ -284,6 +284,72 @@ func TestUninstallTaskRequiresNegotiatedAgentFeatureWithPostgreSQL(t *testing.T)
 	}
 }
 
+func TestRunningUninstallResumesAfterRemovedRuntimeHeartbeatWithPostgreSQL(t *testing.T) {
+	databaseURL := os.Getenv("QCH_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("QCH_TEST_DATABASE_URL is not configured")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	dataStore, err := Open(ctx, databaseURL, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dataStore.Close()
+	agent, enrollmentID := enrollTaskTestAgent(t, ctx, dataStore)
+	defer cleanupTaskTestAgent(dataStore, agent.ID, enrollmentID)
+	features := []string{core.AgentFeatureCoreUninstall}
+	if err := dataStore.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{
+		Features: features,
+		Runtime:  map[core.Engine]core.RuntimeState{core.EngineMihomo: {Installed: true}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	transition, err := dataStore.ChangeAgentEngineCapability(ctx, agent.ID, core.EngineMihomo, false)
+	if err != nil || transition.TaskID == "" {
+		t.Fatalf("disable installed capability = %+v, %v", transition, err)
+	}
+	stop, err := dataStore.ClaimTask(ctx, agent.ID)
+	if err != nil || stop == nil || stop.ID != transition.TaskID {
+		t.Fatalf("claim capability stop = %+v, %v", stop, err)
+	}
+	if err := dataStore.CompleteTask(ctx, agent.ID, stop.ID, core.TaskResultRequest{LeaseID: stop.LeaseID, Success: true}); err != nil {
+		t.Fatal(err)
+	}
+	task, err := dataStore.CreateTask(ctx, core.TaskRequest{
+		AgentID: agent.ID, Action: core.ActionUninstall, Engine: core.EngineMihomo,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := dataStore.ClaimTask(ctx, agent.ID)
+	if err != nil || claimed == nil || claimed.ID != task.ID {
+		t.Fatalf("claim uninstall = %+v, %v", claimed, err)
+	}
+	// The Agent has removed the binary, but lost its connection before the
+	// control plane acknowledged the result. Its reconnect heartbeat arrives
+	// before RunningTask tries to redeliver the still-running lease.
+	if err := dataStore.Heartbeat(ctx, agent.ID, core.HeartbeatRequest{
+		Features: features,
+		Runtime:  map[core.Engine]core.RuntimeState{core.EngineMihomo: {Installed: false}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	resumed, err := dataStore.RunningTask(ctx, agent.ID)
+	if err != nil || resumed == nil || resumed.ID != task.ID || resumed.LeaseID != claimed.LeaseID {
+		t.Fatalf("resume completed uninstall result = %+v, %v", resumed, err)
+	}
+	if err := dataStore.CompleteTask(ctx, agent.ID, task.ID, core.TaskResultRequest{
+		LeaseID: resumed.LeaseID, Success: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	completed, err := dataStore.GetTask(ctx, task.ID)
+	if err != nil || completed.Status != core.TaskSucceeded {
+		t.Fatalf("acknowledged uninstall = %+v, %v", completed, err)
+	}
+}
+
 func TestEffectiveSourceReuseWithPostgreSQL(t *testing.T) {
 	databaseURL := os.Getenv("QCH_TEST_DATABASE_URL")
 	if databaseURL == "" {
