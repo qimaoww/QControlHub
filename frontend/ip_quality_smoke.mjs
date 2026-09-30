@@ -3,7 +3,7 @@ import { createIPQualityController } from "./modules/ip-quality-controller.js";
 import { createIPQualityView } from "./modules/ip-quality-view.js";
 import { createIPQualityArchiveView } from "./modules/ip-quality-archive-view.js";
 import { createIPQualityReportView } from "./modules/ip-quality-report-view.js";
-import { ipQualityToday, validIPQualityDate, nextIPQualityDay, ipQualityValue, ipQualitySummary } from "./modules/ip-quality-model.js";
+import { ipQualityToday, ipQualityLatest, validIPQualityDate, nextIPQualityDay, ipQualityValue, ipQualitySummary } from "./modules/ip-quality-model.js";
 
 assert.equal(validIPQualityDate("2026-02-30"), false);
 assert.equal(validIPQualityDate("2026-2-03"), false);
@@ -46,7 +46,7 @@ assert.ok(markup.includes("xykt/IPQuality"));
 assert.ok(!markup.includes("data-ip-quality-run"), "historical report has a run button");
 assert.ok(!markup.includes("data-ip-quality-schedule"), "historical report has schedule controls");
 assert.ok(!markup.includes("节点在线"), "historical report presents the current online state");
-assert.ok(markup.includes("data-ip-quality-today"), "history has no return-to-today control");
+assert.ok(markup.includes("data-ip-quality-latest"), "history has no return-to-latest control");
 // The page shows one node, and publishes the same list the sidebar renders.
 assert.equal(markup.match(/data-ip-quality-panel=/g).length, 1, "the page rendered more than one node");
 assert.ok(markup.includes('data-ip-quality-panel="alpha"'), "the recorded node is not the selected panel");
@@ -91,6 +91,27 @@ assert.deepEqual(viewState.data.ipQualityNodes, [], "history listed nodes withou
 render({ date: "2025-09-16", timezone: "UTC", error: "无法读取", agents: [], submitting: new Set(), editable: () => false });
 assert.ok(!markup.includes("203.0.113.1"), "failed reads must never create example nodes");
 assert.ok(!markup.includes("data-ip-quality-run"));
+
+const oldReport = { ...todayRecord, finished_at: "2026-09-20T06:05:00Z",
+  archives: [{ family: 4, sha256: "abc", rendered_at: "2026-09-20T06:05:00Z" }] };
+renderDay(ipQualityLatest, [oldReport]);
+assert.ok(markup.includes('data-ip-quality-latest aria-pressed="true"'));
+assert.ok(markup.includes('data-ip-quality-date value=""'), "latest was presented as a specific day");
+assert.ok(markup.includes("2026-09-20T06:05:00Z"), "latest did not show the actual report time");
+assert.ok(markup.includes('data-ip-quality-run="alpha">立即检测'), "old report prevented a fresh check");
+assert.deepEqual(viewState.data.ipQualityNodes.map((node) => node.id), ["alpha", "beta"]);
+for (const status of ["pending", "running", "failed", "canceled"]) {
+  renderDay(ipQualityLatest, [{ task_id: "new-task", agent_id: "alpha", status, last_successful: oldReport }]);
+  assert.ok(markup.includes("上次成功检测"), `${status}: retained report was not labeled`);
+  assert.ok(markup.includes("203.0.113.1"), `${status}: lost the successful report`);
+  assert.ok(markup.includes('/ip-quality/task-1/archives/4'), `${status}: wrong archive task`);
+  assert.ok(!markup.includes('/ip-quality/new-task/archives/4'), `${status}: report attributed to latest task`);
+}
+renderDay("2025-09-16", [{ task_id: "new-task", agent_id: "alpha", status: "failed", last_successful: oldReport }]);
+assert.ok(!markup.includes("203.0.113.1"), "history showed a successful report from a different day");
+renderDay(ipQualityLatest, []);
+assert.ok(markup.includes("首次报告"));
+assert.equal(viewState.data.ipQualityNodes[0].note, "尚未检测");
 
 const renderReport = createIPQualityReportView({ esc });
 const blacklistReport = {
@@ -137,22 +158,33 @@ try {
   const controller = createIPQualityController(ctx, (value) => views.push(value));
   assert.equal(calls.length, 0, "controller construction must remain inert");
   await controller.load({ overview: {} });
-  assert.equal(state.data.ipQualityDate, ipQualityToday(), "route options became the date");
+  assert.equal(state.data.ipQualityDate, ipQualityLatest, "page entry did not default to latest");
   assert.deepEqual(views.at(-1).agents.map((item) => item.id), ["alpha"]);
   assert.ok(calls.some((call) => call.path.includes("timezone=")));
+  assert.equal(new URL(calls.find((call) => call.path.startsWith("/ip-quality?")).path, "http://fixture.test").searchParams.has("date"), false,
+    "latest query was still limited to today");
   const count = calls.length;
   const scheduledTimer = timerID;
   await controller.load("");
   await controller.load("2026-02-30");
   await controller.load(nextIPQualityDay(ipQualityToday(), 1));
   assert.equal(calls.length, count, "invalid/future dates requested the API");
-  assert.equal(state.data.ipQualityDate, ipQualityToday(), "invalid date replaced the active date");
+  assert.equal(state.data.ipQualityDate, ipQualityLatest, "invalid date replaced the active view");
   assert.equal(timers.size, 1, "invalid date stopped automatic refresh");
   assert.ok(timers.has(scheduledTimer), "invalid date replaced the pending poll");
   await timers.get(scheduledTimer)();
   assert.equal(calls.length, count + 1, "polling should refresh history without rereading agents");
   assert.equal(timers.size, 1, "polling duplicated its timer");
 
+  await controller.load("2025-09-12");
+  const latestDone = gate(null);
+  const latestReturn = controller.load(ipQualityLatest);
+  assert.equal(views.at(-1).date, ipQualityLatest, "latest cache was not restored");
+  assert.ok(views.at(-1).history, "latest cache disappeared while reading");
+  latestDone(history(""));
+  await latestReturn;
+  gates.delete(null);
+  await controller.load(ipQualityToday());
   await controller.load("2025-09-12");
   const todayDone = gate(ipQualityToday());
   const cachedReturn = controller.load(ipQualityToday());
@@ -224,6 +256,7 @@ try {
   accept(true);
   await submitting;
   assert.equal(mutations, 1, "double click submitted multiple checks");
+  assert.equal(state.data.ipQualityDate, ipQualityLatest, "fresh check switched latest view to today");
   assert.equal(calls.find((call) => call.options.method === "POST").options.body, '{"agent_id":"alpha"}');
   confirmation = true;
   await controller.setSchedule("alpha", true);
@@ -273,6 +306,18 @@ try {
   assert.equal(mutations, 2, "old account confirmation submitted under the new account");
   assert.equal(notices.length, noticeCount);
   assert.equal(views.length, viewCount);
+  await controller.load(ipQualityLatest);
+  confirmation = new Promise((resolve) => { accept = resolve; });
+  const latestMidnightConfirmation = controller.runCheck("alpha");
+  try {
+    globalThis.Date = class extends OriginalDate {
+      constructor(...args) { super(...(args.length ? args : [tomorrow + "T12:00:00"])); }
+    };
+    accept(true);
+    await latestMidnightConfirmation;
+    assert.equal(mutations, 3, "latest view stopped accepting checks at midnight");
+    assert.equal(state.data.ipQualityDate, ipQualityLatest, "midnight check replaced latest with a date");
+  } finally { globalThis.Date = OriginalDate; }
 } finally {
   if (originalDocument === undefined) delete globalThis.document;
   else globalThis.document = originalDocument;

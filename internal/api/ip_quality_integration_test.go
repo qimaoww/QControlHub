@@ -64,7 +64,9 @@ func TestIPQualityAPIAndWebSocketLifecycle(t *testing.T) {
 	if !strings.Contains(empty.Body.String(), `"records":[]`) || !strings.Contains(empty.Body.String(), `"schedules":[]`) {
 		t.Fatalf("empty history did not return arrays: %s", empty.Body.String())
 	}
-	for _, path := range []string{"/ip-quality", "/ip-quality?date=2026-02-30", "/ip-quality?date=" + day + "&timezone=Invalid/Zone"} {
+	call("GET", "/ip-quality", "", nil, 401)
+	call("GET", "/ip-quality", "quality-reader", nil, 200)
+	for _, path := range []string{"/ip-quality?date=2026-02-30", "/ip-quality?timezone=Invalid/Zone", "/ip-quality?date=" + day + "&timezone=Invalid/Zone"} {
 		call("GET", path, "quality-admin", nil, 400)
 	}
 	credential, err := db.CreateEnrollmentToken(ctx, core.EnrollmentTokenRequest{Name: "quality API"})
@@ -159,6 +161,10 @@ func TestIPQualityAPIAndWebSocketLifecycle(t *testing.T) {
 	if len(history.Records[0].Archives) != 1 {
 		t.Fatal("report was not archived")
 	}
+	if err := json.Unmarshal(call("GET", "/ip-quality", "quality-admin", nil, 200).Body.Bytes(), &history); err != nil ||
+		history.Date != "" || len(history.Records) != 1 || history.Records[0].TaskID != task.ID {
+		t.Fatalf("latest API did not return the stored report: %+v %v", history, err)
+	}
 	archivePath := "/ip-quality/" + task.ID + "/archives/4"
 	for _, suffix := range []string{"", "?download=1"} {
 		response := call("GET", archivePath+suffix, "quality-admin", nil, 200)
@@ -179,6 +185,9 @@ func TestIPQualityAPIAndWebSocketLifecycle(t *testing.T) {
 	reader := call("GET", "/ip-quality?date="+day, "quality-reader", nil, 200)
 	if strings.Contains(reader.Body.String(), "203.0.113.1") {
 		t.Fatal("read-only token inherited another principal's report")
+	}
+	if strings.Contains(call("GET", "/ip-quality", "quality-reader", nil, 200).Body.String(), "203.0.113.1") {
+		t.Fatal("latest API leaked another principal's report")
 	}
 
 	// An otherwise valid result that JSONB cannot store must be ACKed as a
@@ -214,6 +223,16 @@ func TestIPQualityAPIAndWebSocketLifecycle(t *testing.T) {
 		if len(history.Records) != 1 || history.Records[0].TaskID != task.ID || history.Records[0].Status != test.status ||
 			(history.Records[0].Result != nil) != (test.status == core.TaskSucceeded) {
 			t.Fatalf("follow-up history: %+v", history)
+		}
+		latestBody := call("GET", "/ip-quality", "quality-admin", nil, 200).Body.Bytes()
+		if err := json.Unmarshal(latestBody, &history); err != nil || len(history.Records) != 1 ||
+			history.Records[0].TaskID != task.ID || strings.Contains(string(latestBody), "reports_text") {
+			t.Fatalf("latest follow-up history: %+v %v", history, err)
+		}
+		previous := history.Records[0].LastSuccessful
+		if (test.status == core.TaskFailed) != (previous != nil) || previous != nil &&
+			(previous.Result == nil || len(previous.Archives) != 1 || previous.TaskID == task.ID) {
+			t.Fatalf("latest API lost or misattributed the previous report: %+v", history)
 		}
 		if test.status == core.TaskFailed {
 			call("GET", "/ip-quality/"+task.ID+"/archives/4", "quality-admin", nil, 404)

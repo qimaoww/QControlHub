@@ -1,5 +1,5 @@
 import { createIPQualityBindings } from "./ip-quality-bindings.js";
-import { ipQualityToday, validIPQualityDate, ipQualityBlockReason, ipQualityFeature } from "./ip-quality-model.js";
+import { ipQualityToday, ipQualityLatest, validIPQualityDate, ipQualityBlockReason, ipQualityFeature } from "./ip-quality-model.js";
 import { createPoller } from "./refresh.js";
 
 export function createIPQualityController(ctx, view) {
@@ -37,8 +37,8 @@ export function createIPQualityController(ctx, view) {
       readError = "";
     }
     // The shell supplies route options as the first argument on page entry.
-    const date = typeof requestedDate === "string" ? requestedDate : data.ipQualityDate || ipQualityToday();
-    if (!validIPQualityDate(date) || date > ipQualityToday()) return false;
+    const date = typeof requestedDate === "string" ? requestedDate : data.ipQualityDate || ipQualityLatest;
+    if (date !== ipQualityLatest && (!validIPQualityDate(date) || date > ipQualityToday())) return false;
     poller.stop();
     const request = ++serial;
     pendingAgents = null;
@@ -61,7 +61,7 @@ export function createIPQualityController(ctx, view) {
           return agents;
         });
       const [history, agents] = await Promise.all([
-        api(`/ip-quality?date=${encodeURIComponent(date)}&timezone=${encodeURIComponent(timezone)}`),
+        api(`/ip-quality?${date === ipQualityLatest ? "" : `date=${encodeURIComponent(date)}&`}timezone=${encodeURIComponent(timezone)}`),
         agentsPromise,
       ]);
       if (!current(data, epoch) || request !== serial) return false;
@@ -72,7 +72,7 @@ export function createIPQualityController(ctx, view) {
       pendingAgents = null;
       foregroundLoading = false;
       snapshot = { date, history, agents: agents.filter((agent) => agent.can_manage !== false) };
-      // Keep a few account-scoped days ready for instant return navigation.
+      // Keep a few account-scoped views ready for instant return navigation.
       // Do not duplicate unusually large report responses in memory.
       if (JSON.stringify(history).length < 2 * 1024 * 1024) {
         daySnapshots.delete(date);
@@ -98,7 +98,8 @@ export function createIPQualityController(ctx, view) {
     const agent = snapshot?.agents.find((item) => item.id === agentID);
     const record = snapshot?.history.records.find((item) => item.agent_id === agentID);
     const scheduling = typeof enabled === "boolean";
-    if (selectedDate !== ipQualityToday() || snapshot?.date !== selectedDate) return false;
+    const canOperate = () => selectedDate === ipQualityLatest || selectedDate === ipQualityToday();
+    if (!canOperate() || snapshot?.date !== selectedDate || foregroundLoading) return false;
     if (accountData !== data || !current(data, epoch) || !agent || !editable(agent) || readFailed || pending.has(agentID)) return false;
     if (!scheduling && ipQualityBlockReason(agent, record)) return false;
     if (scheduling && enabled && !agent.features?.includes(ipQualityFeature)) return false;
@@ -109,7 +110,7 @@ export function createIPQualityController(ctx, view) {
         ? `关闭 ${agent.name} 的每日检测？`
         : `${scheduling ? "为" : "检测"} ${agent.name}${scheduling ? "启用每日检测" : "的出口 IP"}？检测会访问第三方服务，耗时数分钟；缺少依赖时自动安装，不上传报告。`;
       if (!(await confirmAction(message, scheduling ? "每日 IP 检测" : "开始 IP 检测")) ||
-          !current(data, epoch) || selectedDate !== data.ipQualityDate || selectedDate !== ipQualityToday()) return false;
+          !current(data, epoch) || selectedDate !== data.ipQualityDate || !canOperate() || readFailed) return false;
       await api(scheduling ? `/ip-quality/schedules/${encodeURIComponent(agentID)}` : "/ip-quality", {
         method: scheduling ? "PUT" : "POST",
         body: JSON.stringify(scheduling ? { enabled } : { agent_id: agentID }),
@@ -117,7 +118,7 @@ export function createIPQualityController(ctx, view) {
       if (!current(data, epoch)) return false;
       notify(scheduling ? (enabled ? "每日检测已启用，将在节点在线时执行" : "每日检测已关闭") : "检测任务已提交");
       pending.delete(agentID);
-      await load(scheduling || data.ipQualityDate !== selectedDate ? data.ipQualityDate : ipQualityToday());
+      await load(data.ipQualityDate);
       return true;
     } catch (error) {
       if (current(data, epoch) && error?.name !== "AbortError") notify(error.message, "error");
@@ -130,7 +131,7 @@ export function createIPQualityController(ctx, view) {
   function runCheck(agentID) { return mutate(agentID); }
   function setSchedule(agentID, enabled) { return mutate(agentID, enabled); }
   // Switching the selected node repaints from the loaded snapshot: the sidebar
-  // only ever offers nodes the current day already returned, so no read is
+  // only ever offers nodes the current snapshot already returned, so no read is
   // needed, and the repaint is what moves the sidebar highlight.
   function select(agentID) {
     if (state.data.ipQualityAgent === agentID) return false;

@@ -1,12 +1,14 @@
-/* IPQuality: one node at a time, date-scoped, source-attributed reports. */
+/* IPQuality: latest results by default, with date-scoped history. */
 .ip-quality-workspace{container-type:inline-size;display:grid;gap:16px;width:100%;min-width:0}
 .ip-quality-workspace .workspace-panel{box-shadow:none;transform:none}
 .ip-quality-controls{border:1px solid var(--line)}
 .ip-quality-controls>.ip-quality-head{gap:20px}
 .ip-quality-head h2{margin:0;font-size:calc(18px * var(--ui-font-scale));color:var(--ink)}
+.ip-quality-view-note{margin:6px 0 0;color:var(--muted);font-size:calc(10px * var(--ui-font-scale));line-height:1.6}
 .ip-quality-date-picker{display:flex;align-items:end;gap:6px;flex-shrink:0}
 .ip-quality-date-picker>.button{width:34px;padding:6px;font-size:calc(18px * var(--ui-font-scale));line-height:1}
-.ip-quality-date-picker>.button[data-ip-quality-today],.ip-quality-date-picker>.button[data-ip-quality-refresh]{width:auto;padding:6px 11px;font-size:calc(10px * var(--ui-font-scale))}
+.ip-quality-date-picker>.button[data-ip-quality-latest],.ip-quality-date-picker>.button[data-ip-quality-refresh]{width:auto;padding:6px 11px;font-size:calc(10px * var(--ui-font-scale))}
+.ip-quality-date-picker [aria-pressed=true]{color:var(--accent);border-color:var(--accent);background:var(--accent-soft)}
 .ip-quality-date{display:grid;gap:6px;min-width:160px;color:var(--muted);font-size:calc(10px * var(--ui-font-scale));font-weight:650}
 .ip-quality-date input{height:38px;min-width:0}
 .ip-quality-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1px;background:var(--line);overflow:hidden}
@@ -22,6 +24,8 @@
 .ip-quality-node-panel.poor{border-top-color:var(--red)}
 .ip-quality-node-panel>header{gap:10px}
 .ip-quality-node-panel>header>div{min-width:0}
+.ip-quality-node-tools{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:8px}
+.ip-quality-node-tools>.button{min-height:38px}
 .ip-quality-node-panel header strong,.ip-quality-node-panel header small{display:block;overflow-wrap:anywhere}
 .ip-quality-node-panel header strong{font-size:calc(14px * var(--ui-font-scale))}
 .ip-quality-node-panel header small{margin-top:4px;color:var(--muted);font-size:calc(10px * var(--ui-font-scale))}
@@ -41,6 +45,7 @@
 .ip-quality-addresses dd{margin:3px 0 0;font-size:calc(11px * var(--ui-font-scale));font-weight:650;overflow-wrap:anywhere}
 .ip-quality-alert,.ip-quality-error{margin:0;overflow-wrap:anywhere}
 .ip-quality-no-report,.ip-quality-source{margin:0;color:var(--muted);font-size:calc(11px * var(--ui-font-scale));line-height:1.7}
+.ip-quality-result-note{margin:0;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--accent-soft);color:var(--ink);font-size:calc(11px * var(--ui-font-scale));line-height:1.7}
 .ip-quality-source a{color:var(--accent)}
 .ip-quality-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:12px 16px;border-top:1px solid var(--line)}
 .ip-quality-actions small{margin-left:auto;color:var(--muted);font-size:calc(9px * var(--ui-font-scale));line-height:1.6}
@@ -89,7 +94,10 @@
 @container (max-width:700px){
   .ip-quality-controls>.ip-quality-head{align-items:stretch;flex-direction:column;gap:14px}
   .ip-quality-date-picker{flex-wrap:wrap}
-  .ip-quality-date{max-width:220px;min-width:0;flex:1}
+  .ip-quality-node-panel>header{flex-wrap:wrap}
+  .ip-quality-node-tools{margin-left:auto}
+  .ip-quality-node-tools>.button{min-height:42px}
+  .ip-quality-date{max-width:220px;min-width:150px;flex:1}
   .ip-quality-summary{grid-template-columns:1fr 1fr}
   .ip-quality-report-grid{grid-template-columns:1fr}
   .ip-quality-report>.ip-quality-report-fields{grid-template-columns:repeat(2,minmax(0,1fr))}

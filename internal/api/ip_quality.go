@@ -7,6 +7,7 @@ import (
 )
 
 func (s *Server) ipQualityHistory(w http.ResponseWriter, request *http.Request) {
+	// Omitting date returns the latest check and available report for each node.
 	date, timezone := request.URL.Query().Get("date"), request.URL.Query().Get("timezone")
 	if timezone == "" {
 		timezone = "UTC"

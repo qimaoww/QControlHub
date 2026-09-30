@@ -1,5 +1,5 @@
 import { bindEvent } from "./refresh.js";
-import { ipQualityToday, nextIPQualityDay, validIPQualityDate } from "./ip-quality-model.js";
+import { ipQualityToday, ipQualityLatest, nextIPQualityDay, validIPQualityDate } from "./ip-quality-model.js";
 
 export function createIPQualityBindings({ state, load, runCheck, setSchedule, select }) {
   return () => {
@@ -12,19 +12,20 @@ export function createIPQualityBindings({ state, load, runCheck, setSchedule, se
     const input = document.querySelector("[data-ip-quality-date]");
     bindEvent(input, "change", () => {
       if (!validIPQualityDate(input.value) || input.value > ipQualityToday()) {
-        input.value = state.data.ipQualityDate || ipQualityToday();
+        input.value = state.data.ipQualityDate === ipQualityLatest ? "" : state.data.ipQualityDate || "";
         return;
       }
       void load(input.value);
     });
     document.querySelectorAll("[data-ip-quality-day]").forEach((button) => {
       bindEvent(button, "click", () => {
-        const date = nextIPQualityDay(state.data.ipQualityDate, Number(button.dataset.ipQualityDay));
+        const date = nextIPQualityDay(state.data.ipQualityDate === ipQualityLatest ? ipQualityToday() : state.data.ipQualityDate,
+          Number(button.dataset.ipQualityDay));
         if (date && date <= ipQualityToday()) void load(date);
       });
     });
     bindEvent(document.querySelector("[data-ip-quality-refresh]"), "click", () => { void load(); });
-    bindEvent(document.querySelector("[data-ip-quality-today]"), "click", () => { void load(ipQualityToday()); });
+    bindEvent(document.querySelector("[data-ip-quality-latest]"), "click", () => { void load(ipQualityLatest); });
     document.querySelectorAll("[data-ip-quality-run]").forEach((button) => {
       bindEvent(button, "click", () => { if (!button.disabled) void runCheck(button.dataset.ipQualityRun); });
     });

@@ -1,4 +1,5 @@
 export const ipQualityFeature = "ip-quality-v2";
+export const ipQualityLatest = "latest";
 
 export function ipQualityToday(now = new Date()) {
   return [now.getFullYear(), String(now.getMonth() + 1).padStart(2, "0"), String(now.getDate()).padStart(2, "0")].join("-");
@@ -51,13 +52,13 @@ export function ipQualityStatusTone(status) {
 }
 
 // The sidebar and the detail panel must agree on which node is shown, so one
-// helper resolves both: every managed node on today, only the nodes with a
+// helper resolves both: every managed node in latest/today views, only nodes with a
 // record on a historical day, and the first visible node when the remembered
 // selection is no longer listed. The items carry no selection of their own, so
 // the sidebar highlight always follows the live selected id.
-export function ipQualityNodeList(agents = [], records = [], isToday, selectedID = "", missingNote = "") {
+export function ipQualityNodeList(agents = [], records = [], showAll, selectedID = "", missingNote = "", isLatest = false) {
   const recordMap = new Map(records.map((item) => [item.agent_id, item]));
-  const visible = isToday ? agents : agents.filter((agent) => recordMap.has(agent.id));
+  const visible = showAll ? agents : agents.filter((agent) => recordMap.has(agent.id));
   const selected = visible.find((agent) => agent.id === selectedID) || visible[0] || null;
   return {
     selected,
@@ -66,15 +67,16 @@ export function ipQualityNodeList(agents = [], records = [], isToday, selectedID
       return {
         id: agent.id,
         name: agent.name,
-        note: record ? ipQualityStatusName(record.status) : missingNote || ipQualityNodeNote(agent),
+        note: record ? ipQualityStatusName(record.status) : missingNote || ipQualityNodeNote(agent, isLatest),
         dot: ipQualityDotTones[record?.status] || "",
       };
     }),
   };
 }
 
-function ipQualityNodeNote(agent) {
-  return agent?.features?.includes(ipQualityFeature) ? "当天未检测" : "需升级 Agent";
+function ipQualityNodeNote(agent, isLatest) {
+  if (!agent?.features?.includes(ipQualityFeature)) return "需升级 Agent";
+  return isLatest ? "尚未检测" : "当天未检测";
 }
 
 export function ipQualityBlockReason(agent, record) {

@@ -321,6 +321,9 @@ func TestIPQualityScheduleIsolationAndRevocation(t *testing.T) {
 	if records, err := db.ListIPQualityRecords(bobCtx, day, "UTC"); err != nil || len(records) != 0 {
 		t.Fatalf("share leaked host report: %+v %v", records, err)
 	}
+	if records, err := db.ListIPQualityRecords(bobCtx, "", "UTC"); err != nil || len(records) != 0 {
+		t.Fatalf("latest view leaked host report to share recipient: %+v %v", records, err)
+	}
 	if schedules, err := db.ListIPQualitySchedules(bobCtx); err != nil || len(schedules) != 0 {
 		t.Fatalf("share leaked scheduling policy: %+v %v", schedules, err)
 	}
@@ -329,6 +332,9 @@ func TestIPQualityScheduleIsolationAndRevocation(t *testing.T) {
 	}
 	if records, err := db.ListIPQualityRecords(WithConfigScope(ctx, "", true), day, "UTC"); err != nil || len(records) != 0 {
 		t.Fatalf("admin discovered hidden report: %+v %v", records, err)
+	}
+	if records, err := db.ListIPQualityRecords(WithConfigScope(ctx, "", true), "", "UTC"); err != nil || len(records) != 0 {
+		t.Fatalf("latest view exposed owner-hidden report: %+v %v", records, err)
 	}
 	if _, err := db.pool.Exec(ctx, `UPDATE panel_users SET permissions='["agents.read","tasks.execute"]' WHERE id=$1`, alice.ID); err != nil {
 		t.Fatal(err)
