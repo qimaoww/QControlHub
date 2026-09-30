@@ -119,7 +119,9 @@ func (client *Client) lookup(ctx context.Context, address netip.Addr, needProvin
 			client.mu.Unlock()
 			return cached.value, nil
 		}
-		delete(client.cache, key)
+		if !now.Before(cached.expiresAt) {
+			delete(client.cache, key)
+		}
 	}
 	if failedAt, ok := client.failures[failureKey]; ok {
 		if now.Before(failedAt.Add(failureTTL)) {

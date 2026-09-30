@@ -185,6 +185,71 @@ func TestLookupCountryFailureDoesNotBlockFallbacks(t *testing.T) {
 	}
 }
 
+func TestLookupProvinceFailureKeepsRecoveredCountryCache(t *testing.T) {
+	var requests atomic.Int32
+	var providerAvailable atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		requests.Add(1)
+		if !providerAvailable.Load() {
+			http.Error(w, "unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		switch request.URL.Path {
+		case "/geo/114.114.114.114.json":
+			_, _ = w.Write([]byte(`{"country_code":"CN","country":"China"}`))
+		case "/who/114.114.114.114":
+			_, _ = w.Write([]byte(`{"success":true,"ip":"114.114.114.114","country_code":"CN","country":"China","region":"Jiangsu Sheng"}`))
+		default:
+			t.Errorf("unexpected lookup: %s", request.URL.Path)
+		}
+	}))
+	defer server.Close()
+	client := New(server.Client())
+	client.endpoint, client.ipWhoEndpoint, client.freeIPAPIEndpoint = server.URL+"/geo", server.URL+"/who", server.URL+"/free"
+	address := netip.MustParseAddr("114.114.114.114")
+
+	if _, err := client.Lookup(context.Background(), address); err == nil {
+		t.Fatal("failing providers unexpectedly resolved")
+	}
+	if got := requests.Load(); got != 3 {
+		t.Fatalf("initial provider requests = %d, want all three providers", got)
+	}
+	providerAvailable.Store(true)
+	country, err := client.LookupCountry(context.Background(), address)
+	if err != nil || country.ISOCode != "CN" || country.Province != "" {
+		t.Fatalf("country after recovery: region=%+v err=%v", country, err)
+	}
+	if got := requests.Load(); got != 4 {
+		t.Fatalf("provider requests after recovery = %d, want one country retry", got)
+	}
+
+	providerAvailable.Store(false)
+	if _, err := client.Lookup(context.Background(), address); !errors.Is(err, errRecentFailure) {
+		t.Fatalf("province lookup error = %v, want the remembered failure", err)
+	}
+	cachedCountry, err := client.LookupCountry(context.Background(), address)
+	if err != nil || cachedCountry != country {
+		t.Fatalf("cached country after province failure: region=%+v err=%v", cachedCountry, err)
+	}
+	if got := requests.Load(); got != 4 {
+		t.Fatalf("provider requests = %d, want the cached country without another request", got)
+	}
+
+	// Keeping the country entry must still permit province enrichment once
+	// the failure window expires.
+	client.mu.Lock()
+	client.failures[lookupFailureKey{address: address.String(), needProvince: true}] = time.Now().Add(-failureTTL - time.Second)
+	client.mu.Unlock()
+	providerAvailable.Store(true)
+	region, err := client.Lookup(context.Background(), address)
+	if err != nil || region.ISOCode != "CN" || region.Province != "江苏" {
+		t.Fatalf("province after failure window: region=%+v err=%v", region, err)
+	}
+	if got := requests.Load(); got != 6 {
+		t.Fatalf("provider requests after enrichment = %d, want GeoJS and IPWho retries", got)
+	}
+}
+
 func TestLookupRemembersProviderFailures(t *testing.T) {
 	for _, test := range []struct {
 		name          string

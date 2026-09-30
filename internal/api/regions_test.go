@@ -351,3 +351,56 @@ func TestAgentListRegionsPreferManualPreference(t *testing.T) {
 		t.Fatalf("provider calls = %d, want only the node without a preference", calls.Load())
 	}
 }
+
+func TestAgentListRegionsIncludeEmptyCodeAfterBudget(t *testing.T) {
+	db, ctx, admin, alice, _ := newConfigScopeAPIFixture(t)
+	automatic, _ := ownedConfigScopeAPIAgent(t, ctx, db, alice, "automatic-region")
+	manual, _ := ownedConfigScopeAPIAgent(t, ctx, db, alice, "manual-region")
+	metrics := core.HostMetrics{PublicIPv4: "8.8.8.8"}
+	if err := db.Heartbeat(ctx, automatic.ID, core.HeartbeatRequest{Metrics: &metrics}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetAgentRegionCode(ctx, manual.ID, "JP"); err != nil {
+		t.Fatal(err)
+	}
+	release := make(chan struct{})
+	defer close(release)
+	var calls atomic.Int64
+	admin.handler = New(db, Config{
+		AdminToken: admin.token,
+		GeoIPHTTPClient: &http.Client{Transport: connectionGeoTransport(func(request *http.Request) (*http.Response, error) {
+			calls.Add(1)
+			select {
+			case <-release:
+				return regionTestResponse(http.StatusOK, `{"country_code":"US","country":"United States"}`), nil
+			case <-request.Context().Done():
+				return nil, request.Context().Err()
+			}
+		})},
+	}).Handler()
+	var response []map[string]json.RawMessage
+	admin.call("GET", "/agents", nil, http.StatusOK, &response)
+	if len(response) != 2 {
+		t.Fatalf("list contains %d agents, want 2", len(response))
+	}
+	want := map[string]string{automatic.ID: "", manual.ID: "JP"}
+	for _, item := range response {
+		var id, code string
+		if err := json.Unmarshal(item["id"], &id); err != nil {
+			t.Fatal(err)
+		}
+		raw, exists := item["region_code"]
+		if !exists {
+			t.Fatalf("agent %s omitted region_code, causing per-card fallback after the list budget", id)
+		}
+		if err := json.Unmarshal(raw, &code); err != nil {
+			t.Fatal(err)
+		}
+		if expected, ok := want[id]; !ok || code != expected {
+			t.Fatalf("agent %s region = %q, want %q", id, code, expected)
+		}
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("provider calls = %d, want only the automatic node", got)
+	}
+}
