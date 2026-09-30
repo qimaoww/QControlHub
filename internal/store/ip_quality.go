@@ -143,3 +143,33 @@ func (s *Store) ListIPQualityRecords(ctx context.Context, date, timezone string)
 	}
 	return records, rows.Err()
 }
+
+// ListIPQualityDates lists available local submission days using the same
+// account and node visibility rules as report history, without loading reports.
+func (s *Store) ListIPQualityDates(ctx context.Context, timezone string) ([]string, error) {
+	if _, _, err := core.IPQualityDateRange(time.Now().UTC().Format(time.DateOnly), timezone); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalid, err)
+	}
+	if timezone == "" {
+		timezone = "UTC"
+	}
+	args := []any{timezone}
+	where := ownerClause(ctx, "t.owner_id", &args)
+	where += agentAdministrationClause(ctx, "t.agent_id", &args)
+	rows, err := s.pool.Query(ctx, `SELECT DISTINCT to_char(t.created_at AT TIME ZONE $1,'YYYY-MM-DD') AS date
+		FROM tasks t JOIN agents a ON a.id=t.agent_id AND a.revoked_at IS NULL
+		WHERE t.action='ip-quality'`+where+` ORDER BY date DESC`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	dates := make([]string, 0)
+	for rows.Next() {
+		var date string
+		if err := rows.Scan(&date); err != nil {
+			return nil, err
+		}
+		dates = append(dates, date)
+	}
+	return dates, rows.Err()
+}

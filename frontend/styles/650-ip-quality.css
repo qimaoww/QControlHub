@@ -1,7 +1,7 @@
 /* IPQuality: latest results by default, with date-scoped history. */
 .ip-quality-workspace{container-type:inline-size;display:grid;gap:16px;width:100%;min-width:0}
 .ip-quality-workspace .workspace-panel{box-shadow:none;transform:none}
-.ip-quality-controls{border:1px solid var(--line)}
+.ip-quality-controls{position:relative;z-index:1;border:1px solid var(--line);overflow:visible}
 .ip-quality-controls>.ip-quality-head{gap:20px}
 .ip-quality-head h2{margin:0;font-size:calc(18px * var(--ui-font-scale));color:var(--ink)}
 .ip-quality-view-note{margin:6px 0 0;color:var(--muted);font-size:calc(10px * var(--ui-font-scale));line-height:1.6}
@@ -10,8 +10,26 @@
 .ip-quality-date-picker>.button[data-ip-quality-latest],.ip-quality-date-picker>.button[data-ip-quality-refresh]{width:auto;padding:6px 11px;font-size:calc(10px * var(--ui-font-scale))}
 .ip-quality-date-picker [aria-pressed=true]{color:var(--accent);border-color:var(--accent);background:var(--accent-soft)}
 .ip-quality-date{display:grid;gap:6px;min-width:160px;color:var(--muted);font-size:calc(10px * var(--ui-font-scale));font-weight:650}
-.ip-quality-date input{height:38px;min-width:0}
-.ip-quality-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1px;background:var(--line);overflow:hidden}
+.ip-quality-calendar{position:relative;min-width:0}
+.ip-quality-calendar>summary{box-sizing:border-box;height:38px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:0 11px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);font-size:calc(11px * var(--ui-font-scale));cursor:pointer;list-style:none}
+.ip-quality-calendar>summary::-webkit-details-marker{display:none}
+.ip-quality-calendar>summary i{font-style:normal;color:var(--muted)}
+.ip-quality-calendar[open]>summary{border-color:var(--accent)}
+.ip-quality-calendar[open]>summary i{transform:rotate(180deg)}
+.ip-quality-calendar-popover{position:absolute;z-index:55;right:0;top:calc(100% + 6px);box-sizing:border-box;width:min(304px,calc(100vw - 32px));padding:12px;border:1px solid var(--line);border-radius:11px;background:var(--surface);box-shadow:0 16px 40px -16px rgba(15,18,38,.4)}
+.ip-quality-calendar-popover>header{display:grid;grid-template-columns:36px minmax(0,1fr) 36px;align-items:center;gap:8px;margin-bottom:10px}
+.ip-quality-calendar-popover>header strong{text-align:center;font-size:calc(12px * var(--ui-font-scale))}
+.ip-quality-calendar-popover button{min-width:0;border:1px solid transparent;border-radius:7px;background:transparent;color:var(--ink);cursor:pointer;font-size:calc(11px * var(--ui-font-scale));font-weight:650}
+.ip-quality-calendar-popover>header button{height:36px;background:var(--surface-2);font-size:calc(18px * var(--ui-font-scale))}
+.ip-quality-calendar-week,.ip-quality-calendar-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:3px}
+.ip-quality-calendar-week{margin-bottom:5px;color:var(--muted);text-align:center;font-size:calc(10px * var(--ui-font-scale))}
+.ip-quality-calendar-grid button{height:36px}
+.ip-quality-calendar-grid button:not(:disabled){background:var(--accent-soft);color:var(--accent)}
+.ip-quality-calendar-popover button:hover:not(:disabled){border-color:var(--accent)}
+.ip-quality-calendar-grid button[aria-pressed=true]{background:var(--accent);color:var(--on-accent)}
+.ip-quality-calendar-popover button:disabled{background:transparent;color:var(--muted);opacity:.4;cursor:not-allowed}
+.ip-quality-calendar-popover>p{margin:10px 0 0;padding-top:10px;border-top:1px solid var(--line);color:var(--muted);font-size:calc(10px * var(--ui-font-scale));line-height:1.6}
+.ip-quality-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1px;background:var(--line);overflow:hidden;border-radius:0 0 var(--radius-card,12px) var(--radius-card,12px)}
 .ip-quality-summary>div{display:grid;gap:4px;padding:15px 17px;background:var(--surface)}
 .ip-quality-summary span{color:var(--muted);font-size:calc(10px * var(--ui-font-scale))}
 .ip-quality-summary strong{font-size:calc(23px * var(--ui-font-scale));font-variant-numeric:tabular-nums;line-height:1.1}
@@ -108,7 +126,8 @@
   .ip-quality-archives{grid-template-columns:1fr}
   .ip-quality-report{padding:10px}
   .ip-quality-report-group{padding:12px}
-  .ip-quality-date input,.ip-quality-date-picker>.button{height:42px}
+  .ip-quality-calendar>summary,.ip-quality-date-picker>.button{height:42px}
+  .ip-quality-calendar-grid button,.ip-quality-calendar-popover>header button{height:42px}
 }
 @media(max-width:700px){
   .ip-quality-workspace{padding-bottom:calc(80px + env(safe-area-inset-bottom))}

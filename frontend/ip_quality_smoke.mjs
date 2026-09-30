@@ -3,7 +3,8 @@ import { createIPQualityController } from "./modules/ip-quality-controller.js";
 import { createIPQualityView } from "./modules/ip-quality-view.js";
 import { createIPQualityArchiveView } from "./modules/ip-quality-archive-view.js";
 import { createIPQualityReportView } from "./modules/ip-quality-report-view.js";
-import { ipQualityToday, ipQualityLatest, validIPQualityDate, nextIPQualityDay, ipQualityValue, ipQualitySummary } from "./modules/ip-quality-model.js";
+import { ipQualityToday, ipQualityLatest, validIPQualityDate, nextIPQualityDay, nextIPQualityMonth, ipQualityAvailableDates, ipQualityHistoryNeighbor, ipQualityValue, ipQualitySummary } from "./modules/ip-quality-model.js";
+import { createIPQualityCalendarView } from "./modules/ip-quality-calendar-view.js";
 
 assert.equal(validIPQualityDate("2026-02-30"), false);
 assert.equal(validIPQualityDate("2026-2-03"), false);
@@ -26,7 +27,8 @@ const report = {
 };
 const agent = { id: "alpha", name: "Node A", can_manage: true, status: "online", features: ["ip-quality-v2"] };
 const legacyAgent = { id: "beta", name: "Node B", can_manage: true, status: "offline", features: [] };
-const history = (day, records = []) => ({ date: day, timezone: "UTC", records, schedules: [] });
+const fixtureDates = [ipQualityToday(), nextIPQualityDay(ipQualityToday(), -1), "2025-09-11", "2025-09-12", "2025-09-13", "2025-09-14", "2025-09-15", "2025-09-16"];
+const history = (day, records = []) => ({ date: day, timezone: "UTC", dates: fixtureDates, records, schedules: [] });
 let markup = "";
 const viewState = { data: {} };
 const render = createIPQualityView({ shell: (html) => { markup = html; }, state: viewState, esc, date: (value) => value || "—" });
@@ -96,7 +98,7 @@ const oldReport = { ...todayRecord, finished_at: "2026-09-20T06:05:00Z",
   archives: [{ family: 4, sha256: "abc", rendered_at: "2026-09-20T06:05:00Z" }] };
 renderDay(ipQualityLatest, [oldReport]);
 assert.ok(markup.includes('data-ip-quality-latest aria-pressed="true"'));
-assert.ok(markup.includes('data-ip-quality-date value=""'), "latest was presented as a specific day");
+assert.ok(markup.includes('data-ip-quality-date data-selected-date=""'), "latest was presented as a specific day");
 assert.ok(markup.includes("2026-09-20T06:05:00Z"), "latest did not show the actual report time");
 assert.ok(markup.includes('data-ip-quality-run="alpha">立即检测'), "old report prevented a fresh check");
 assert.deepEqual(viewState.data.ipQualityNodes.map((node) => node.id), ["alpha", "beta"]);
@@ -112,6 +114,21 @@ assert.ok(!markup.includes("203.0.113.1"), "history showed a successful report f
 renderDay(ipQualityLatest, []);
 assert.ok(markup.includes("首次报告"));
 assert.equal(viewState.data.ipQualityNodes[0].note, "尚未检测");
+
+assert.deepEqual(ipQualityAvailableDates(["2024-02-29", "2024-02-29", "2024-02-30", "2024-01-01", "2999-01-01"]), ["2024-02-29", "2024-01-01"]);
+assert.equal(nextIPQualityMonth("2024-01", -1), "2023-12");
+assert.equal(nextIPQualityMonth("2024-12", 1), "2025-01");
+assert.equal(nextIPQualityMonth("invalid", 1), "");
+const sparseDates = ["2024-03-02", "2024-02-29", "2024-01-01"];
+assert.equal(ipQualityHistoryNeighbor(sparseDates, ipQualityLatest, -1), "2024-03-02");
+assert.equal(ipQualityHistoryNeighbor(sparseDates, "2024-03-02", -1), "2024-02-29");
+assert.equal(ipQualityHistoryNeighbor(sparseDates, "2024-02-29", 1), "2024-03-02");
+assert.equal(ipQualityHistoryNeighbor(sparseDates, "2024-01-01", -1), "");
+const calendarMarkup = createIPQualityCalendarView({ esc })({ date: "2024-02-29", dates: sparseDates, month: "2024-02", timezone: "UTC" });
+assert.match(calendarMarkup, /data-ip-quality-date-option="2024-02-29"[^>]*aria-pressed="true"[^>]*title="查看检测记录"/);
+assert.match(calendarMarkup, /data-ip-quality-date-option="2024-02-28"[^>]* disabled/);
+assert.ok(!calendarMarkup.includes("2024-02-30"), "calendar invented a day in a leap month");
+assert.match(createIPQualityCalendarView({ esc })({ date: ipQualityLatest, dates: [], timezone: "UTC" }), /暂无检测记录/);
 
 const renderReport = createIPQualityReportView({ esc });
 const blacklistReport = {
@@ -168,7 +185,8 @@ try {
   await controller.load("");
   await controller.load("2026-02-30");
   await controller.load(nextIPQualityDay(ipQualityToday(), 1));
-  assert.equal(calls.length, count, "invalid/future dates requested the API");
+  await controller.load("2025-09-10");
+  assert.equal(calls.length, count, "invalid/future/unavailable dates requested the API");
   assert.equal(state.data.ipQualityDate, ipQualityLatest, "invalid date replaced the active view");
   assert.equal(timers.size, 1, "invalid date stopped automatic refresh");
   assert.ok(timers.has(scheduledTimer), "invalid date replaced the pending poll");

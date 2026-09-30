@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -62,6 +63,12 @@ func TestIPQualityLatestAcrossDatesAndAttempts(t *testing.T) {
 	if len(latest) != 2 || latest[first.ID].TaskID != latestFirst.ID || latest[second.ID].TaskID != latestSecond.ID {
 		t.Fatalf("per-node latest across different dates = %+v", latest)
 	}
+	if dates, err := db.ListIPQualityDates(owner, "UTC"); err != nil || !slices.Equal(dates, []string{
+		latest[second.ID].CreatedAt.Format(time.DateOnly), latest[first.ID].CreatedAt.Format(time.DateOnly),
+		latest[first.ID].CreatedAt.AddDate(0, 0, -1).Format(time.DateOnly),
+	}) {
+		t.Fatalf("dates omitted earlier attempts or were not newest first: %+v %v", dates, err)
+	}
 	if latest[first.ID].Result == nil || len(latest[first.ID].Result.ReportsText) != 0 || latest[first.ID].LastSuccessful != nil {
 		t.Fatalf("successful latest duplicated or lost report data: %+v", latest[first.ID])
 	}
@@ -86,6 +93,9 @@ func TestIPQualityLatestAcrossDatesAndAttempts(t *testing.T) {
 		}
 	}
 	assertRetained(core.TaskPending)
+	if dates, err := db.ListIPQualityDates(other, "UTC"); err != nil || len(dates) != 1 || dates[0] != time.Now().UTC().AddDate(0, 0, -6).Format(time.DateOnly) {
+		t.Fatalf("date metadata crossed account scope: %+v %v", dates, err)
+	}
 	if records := read(other); len(records) != 1 || records[first.ID].TaskID != otherResult.ID || records[first.ID].LastSuccessful != nil {
 		t.Fatalf("account scope leaked another attempt: %+v", records)
 	}
@@ -120,11 +130,25 @@ func TestIPQualityLatestAcrossDatesAndAttempts(t *testing.T) {
 	if record := read(owner)[first.ID]; record.TaskID != newResult.ID || record.LastSuccessful != nil || record.Result == nil {
 		t.Fatalf("new success did not replace the retained report: %+v", record)
 	}
+	if dates, err := db.ListIPQualityDates(owner, "UTC"); err != nil || len(dates) != 4 {
+		t.Fatalf("multiple attempts duplicated a calendar date: %+v %v", dates, err)
+	}
 	for _, input := range []struct{ date, timezone string }{
 		{"2026-02-30", "UTC"}, {"", "Invalid/Zone"}, {"", "Local"},
 	} {
 		if _, err := db.ListIPQualityRecords(owner, input.date, input.timezone); !errors.Is(err, ErrInvalid) {
 			t.Fatalf("invalid latest/history filter accepted: %+v %v", input, err)
 		}
+		if input.date == "" {
+			if _, err := db.ListIPQualityDates(owner, input.timezone); !errors.Is(err, ErrInvalid) {
+				t.Fatalf("invalid calendar timezone accepted: %+v %v", input, err)
+			}
+		}
+	}
+	if _, err := db.pool.Exec(ctx, `UPDATE agents SET revoked_at=now() WHERE id=$1`, first.ID); err != nil {
+		t.Fatal(err)
+	}
+	if dates, err := db.ListIPQualityDates(owner, "UTC"); err != nil || len(dates) != 1 || dates[0] != latest[second.ID].CreatedAt.Format(time.DateOnly) {
+		t.Fatalf("revoked node left selectable dates: %+v %v", dates, err)
 	}
 }

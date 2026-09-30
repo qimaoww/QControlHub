@@ -6,11 +6,13 @@ import {
 import { createIPQualityReportView } from "./ip-quality-report-view.js";
 import { ipQualityAddressMarkup } from "./ip-quality-address-view.js";
 import { createIPQualityArchiveView } from "./ip-quality-archive-view.js";
+import { createIPQualityCalendarView } from "./ip-quality-calendar-view.js";
 
 export function createIPQualityView({ shell, state, esc, date: formatDate }) {
   const reportView = createIPQualityReportView({ esc });
   const archiveView = createIPQualityArchiveView({ esc, date: formatDate });
-  return ({ date, timezone, history, agents = [], loading = false, error = "", submitting, editable, readFailed }) => {
+  const calendarView = createIPQualityCalendarView({ esc });
+  return ({ date, timezone, history, availableDates, month, agents = [], loading = false, error = "", submitting, editable, readFailed }) => {
     const today = ipQualityToday(), isToday = date === today, isLatest = date === ipQualityLatest;
     const canOperate = isLatest || isToday;
     const records = history?.records || [], schedules = history?.schedules || [];
@@ -58,7 +60,7 @@ export function createIPQualityView({ shell, state, esc, date: formatDate }) {
       </section>`;
     };
     const issue = error ? `<div class="alert error ip-quality-alert" role="alert">${esc(error)}${history ? " · 显示缓存，操作已暂停" : ""}</div>` : "";
-    const picker = `<div class="ip-quality-date-picker"><button type="button" class="button small" data-ip-quality-latest aria-pressed="${isLatest}">最新结果</button><button type="button" class="button small" data-ip-quality-day="-1" aria-label="${isLatest ? "查看昨天" : "前一天"}">‹</button><label class="ip-quality-date"><span title="${esc(timezone)}">历史日期</span><input type="date" data-ip-quality-date value="${isLatest ? "" : esc(date)}" max="${esc(today)}"></label><button type="button" class="button small" data-ip-quality-day="1" aria-label="后一天"${isLatest || date >= today ? " disabled" : ""}>›</button><button type="button" class="button small" data-ip-quality-refresh${loading ? " disabled" : ""}>${loading ? "正在读取…" : "刷新记录"}</button></div>`;
+    const picker = calendarView({ date, timezone, dates: availableDates || history?.dates || [], month, loading, readFailed });
     const emptyTitle = loading ? "正在读取检测记录…" : error ? "无法读取检测记录" : canOperate ? "没有可查看的自有节点" : "当天没有检测记录";
     const emptyNote = error ? "可点击刷新重试。" : loading ? "节点列表和检测记录将逐步显示。" : canOperate ? "IP 检测仅面向节点所有者和有权限的管理员；共享不授予主机检测权限。" : "可选择其他日期，或回到最新结果发起检测。";
     const count = (value) => history ? value : "—";

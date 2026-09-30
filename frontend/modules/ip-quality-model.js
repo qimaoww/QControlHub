@@ -18,6 +18,24 @@ export function nextIPQualityDay(value, offset) {
   return ipQualityToday(date);
 }
 
+export function ipQualityAvailableDates(values = []) {
+  const today = ipQualityToday();
+  return [...new Set(values.filter((value) => validIPQualityDate(value) && value <= today))].sort().reverse();
+}
+
+export function ipQualityHistoryNeighbor(dates, selected, direction) {
+  if (selected === ipQualityLatest) return direction < 0 ? dates[0] || "" : "";
+  return direction < 0 ? dates.find((date) => date < selected) || ""
+    : [...dates].reverse().find((date) => date > selected) || "";
+}
+
+export function nextIPQualityMonth(month, offset) {
+  if (!validIPQualityDate(`${month}-01`)) return "";
+  const date = new Date(`${month}-01T12:00:00`);
+  date.setMonth(date.getMonth() + offset);
+  return ipQualityToday(date).slice(0, 7);
+}
+
 export function ipQualityValue(value) {
   if (value == null || typeof value === "object") return "未知";
   if (value === true) return "是";

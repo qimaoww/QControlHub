@@ -61,7 +61,7 @@ func TestIPQualityAPIAndWebSocketLifecycle(t *testing.T) {
 	day := time.Now().UTC().Format(time.DateOnly)
 	call("GET", "/ip-quality?date="+day, "", nil, 401)
 	empty := call("GET", "/ip-quality?date="+day, "quality-reader", nil, 200)
-	if !strings.Contains(empty.Body.String(), `"records":[]`) || !strings.Contains(empty.Body.String(), `"schedules":[]`) {
+	if !strings.Contains(empty.Body.String(), `"records":[]`) || !strings.Contains(empty.Body.String(), `"schedules":[]`) || !strings.Contains(empty.Body.String(), `"dates":[]`) {
 		t.Fatalf("empty history did not return arrays: %s", empty.Body.String())
 	}
 	call("GET", "/ip-quality", "", nil, 401)
@@ -158,6 +158,9 @@ func TestIPQualityAPIAndWebSocketLifecycle(t *testing.T) {
 	if len(history.Records) != 1 || history.Records[0].Result == nil || history.Records[0].Status != core.TaskSucceeded {
 		t.Fatalf("wire result was not persisted: %+v", history)
 	}
+	if len(history.Dates) != 1 || history.Dates[0] != day {
+		t.Fatalf("API omitted available detection dates: %+v", history.Dates)
+	}
 	if len(history.Records[0].Archives) != 1 {
 		t.Fatal("report was not archived")
 	}
@@ -185,6 +188,9 @@ func TestIPQualityAPIAndWebSocketLifecycle(t *testing.T) {
 	reader := call("GET", "/ip-quality?date="+day, "quality-reader", nil, 200)
 	if strings.Contains(reader.Body.String(), "203.0.113.1") {
 		t.Fatal("read-only token inherited another principal's report")
+	}
+	if !strings.Contains(reader.Body.String(), `"dates":[]`) {
+		t.Fatal("read-only token inherited another principal's detection dates")
 	}
 	if strings.Contains(call("GET", "/ip-quality", "quality-reader", nil, 200).Body.String(), "203.0.113.1") {
 		t.Fatal("latest API leaked another principal's report")

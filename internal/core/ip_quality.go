@@ -55,6 +55,7 @@ type IPQualitySchedule struct {
 type IPQualityHistory struct {
 	Date      string              `json:"date"`
 	Timezone  string              `json:"timezone"`
+	Dates     []string            `json:"dates"`
 	Records   []IPQualityRecord   `json:"records"`
 	Schedules []IPQualitySchedule `json:"schedules"`
 }

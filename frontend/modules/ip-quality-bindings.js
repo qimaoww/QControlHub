@@ -1,7 +1,7 @@
 import { bindEvent } from "./refresh.js";
-import { ipQualityToday, ipQualityLatest, nextIPQualityDay, validIPQualityDate } from "./ip-quality-model.js";
+import { ipQualityLatest } from "./ip-quality-model.js";
 
-export function createIPQualityBindings({ state, load, runCheck, setSchedule, select }) {
+export function createIPQualityBindings({ state, load, runCheck, setSchedule, select, showMonth }) {
   return () => {
     document.querySelectorAll("[data-ip-quality-agent]").forEach((link) => {
       bindEvent(link, "click", (event) => {
@@ -9,19 +9,33 @@ export function createIPQualityBindings({ state, load, runCheck, setSchedule, se
         select(link.dataset.ipQualityAgent || "");
       });
     });
-    const input = document.querySelector("[data-ip-quality-date]");
-    bindEvent(input, "change", () => {
-      if (!validIPQualityDate(input.value) || input.value > ipQualityToday()) {
-        input.value = state.data.ipQualityDate === ipQualityLatest ? "" : state.data.ipQualityDate || "";
-        return;
-      }
-      void load(input.value);
+    const calendar = document.querySelector("[data-ip-quality-calendar]");
+    if (calendar) bindEvent(document, "pointerdown", (event) => {
+      if (state.route === "ip-quality" && calendar.open && !calendar.contains(event.target)) calendar.open = false;
+    });
+    bindEvent(calendar, "keydown", (event) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      calendar.open = false;
+      calendar.querySelector("summary").focus();
+    });
+    bindEvent(calendar, "focusout", (event) => {
+      if (event.relatedTarget && !calendar.contains(event.relatedTarget)) calendar.open = false;
+    });
+    document.querySelectorAll("[data-ip-quality-date-option]").forEach((button) => {
+      bindEvent(button, "click", () => {
+        if (button.disabled) return;
+        calendar.open = false;
+        calendar.querySelector("summary").focus();
+        void load(button.dataset.ipQualityDateOption);
+      });
+    });
+    document.querySelectorAll("[data-ip-quality-month]").forEach((button) => {
+      bindEvent(button, "click", () => { if (!button.disabled) showMonth(button.dataset.ipQualityMonth); });
     });
     document.querySelectorAll("[data-ip-quality-day]").forEach((button) => {
       bindEvent(button, "click", () => {
-        const date = nextIPQualityDay(state.data.ipQualityDate === ipQualityLatest ? ipQualityToday() : state.data.ipQualityDate,
-          Number(button.dataset.ipQualityDay));
-        if (date && date <= ipQualityToday()) void load(date);
+        if (!button.disabled && button.dataset.ipQualityDateJump) void load(button.dataset.ipQualityDateJump);
       });
     });
     bindEvent(document.querySelector("[data-ip-quality-refresh]"), "click", () => { void load(); });

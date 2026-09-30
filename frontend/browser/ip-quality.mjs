@@ -10,6 +10,7 @@ export async function testIPQualityRuntime(mode, preview = false) {
       "IP quality mobile scenario requires a real narrow touch viewport");
   }
   const today = ipQualityToday(), yesterday = nextIPQualityDay(today, -1), reportDay = nextIPQualityDay(today, -7);
+  const offlineDay = nextIPQualityDay(today, -3), olderDay = nextIPQualityDay(today, -42);
   const violations = [];
   document.addEventListener("securitypolicyviolation", (event) => violations.push(event.effectiveDirective));
   const session = { role: readonly ? "user" : "admin", user_id: readonly ? "quality-reader" : undefined,
@@ -42,6 +43,9 @@ export async function testIPQualityRuntime(mode, preview = false) {
     schedules: [{ agent_id: "quality-a", enabled: true, next_run_at: new Date(Date.now() + 86400000).toISOString() }],
     calls: [], failed: false, checks: 0, scheduleWrites: 0,
   };
+  const historicalRecords = [completeRecord(), { ...completeRecord("quality-offline", offlineDay), agent_id: "quality-c" },
+    completeRecord("quality-older", olderDay), { task_id: "historical-failure", agent_id: "quality-a", status: "failed",
+      created_at: `${yesterday}T06:00:00Z`, error: "检测未完成，请检查节点网络。" }];
   window.__ipQualityFixture = fixture;
   let releaseShell;
   const shellReady = new Promise(resolve => { releaseShell = resolve; });
@@ -62,11 +66,10 @@ export async function testIPQualityRuntime(mode, preview = false) {
       if (fixture.failed) return json({ error: "检测记录暂不可用" }, 503);
       const date = url.searchParams.get("date");
       if (!date) await historyReady;
-      const records = !date ? fixture.records : date === yesterday ? [{
-        task_id: "historical-failure", agent_id: "quality-a", status: "failed",
-        created_at: `${yesterday}T06:00:00Z`, error: "检测未完成，请检查节点网络。",
-      }] : [];
-      return json({ date: date || "", timezone: url.searchParams.get("timezone"), records, schedules: fixture.schedules });
+      const records = !date ? fixture.records : historicalRecords.filter((record) => record.created_at.slice(0, 10) === date);
+      const dates = [...new Set([...historicalRecords, ...fixture.records].filter((record) => record.created_at)
+        .map((record) => record.created_at.slice(0, 10)))].sort().reverse();
+      return json({ date: date || "", timezone: url.searchParams.get("timezone"), dates, records, schedules: fixture.schedules });
     }
     if (path === "/ip-quality" && method === "POST") {
       assert.ok(!readonly, "read-only page submitted a check");
@@ -137,18 +140,35 @@ export async function testIPQualityRuntime(mode, preview = false) {
     assert.equal(card().querySelector("[data-ip-quality-schedule]").getAttribute("aria-pressed"), "true",
       "an existing administrator plan was shown as disabled");
   }
-  const dateInput = document.querySelector("[data-ip-quality-date]");
-  if (mode === "ip-quality-mobile") assert.ok(dateInput.getBoundingClientRect().width >= 150,
+  const dateSummary = document.querySelector("[data-ip-quality-date]");
+  if (mode === "ip-quality-mobile") assert.ok(dateSummary.getBoundingClientRect().width >= 150,
     "mobile history date is too narrow to read");
-  const readsBeforeClear = fixture.calls.filter((call) => call.path === "/ip-quality" && call.method === "GET").length;
-  dateInput.value = "";
-  dateInput.dispatchEvent(new Event("change", { bubbles: true }));
-  assert.equal(dateInput.value, "", "latest view was presented as today's results");
-  // The real five-second timer must survive rejected input, not just a manual
-  // refresh. Leave enough of its interval for the shared four-second wait.
+  assert.equal(dateSummary.dataset.selectedDate, "", "latest view was presented as today's results");
+  dateSummary.click();
+  const calendar = document.querySelector("[data-ip-quality-calendar]");
+  assert.ok(calendar.open, "history calendar did not open");
+  const popover = calendar.querySelector(".ip-quality-calendar-popover");
+  const bounds = popover.getBoundingClientRect();
+  assert.ok(bounds.left >= 0 && bounds.right <= innerWidth, "calendar overflows the viewport");
+  const unrecorded = calendar.querySelector("[data-ip-quality-date-option]:disabled");
+  assert.ok(unrecorded && Number(getComputedStyle(unrecorded).opacity) < 0.6, "unrecorded days are not visibly disabled");
+  const readsBeforeDisabled = fixture.calls.filter((call) => call.path === "/ip-quality" && call.method === "GET").length;
+  unrecorded.click();
+  assert.equal(fixture.calls.filter((call) => call.path === "/ip-quality" && call.method === "GET").length, readsBeforeDisabled,
+    "disabled date requested history");
+  const currentMonthLabel = popover.querySelector("header strong").textContent;
+  calendar.querySelector('[data-ip-quality-month][aria-label="上个月"]').click();
+  assert.notEqual(popover.querySelector("header strong").textContent, currentMonthLabel, "calendar month did not change");
+  calendar.querySelector('[data-ip-quality-month][aria-label="下个月"]').click();
+  assert.equal(popover.querySelector("header strong").textContent, currentMonthLabel, "calendar month did not return");
+  assert.equal(fixture.calls.filter((call) => call.path === "/ip-quality" && call.method === "GET").length, readsBeforeDisabled,
+    "browsing months requested report data");
+  calendar.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  assert.ok(!calendar.open && document.activeElement === dateSummary, "Escape did not close the calendar and restore focus");
+  // Disabled dates and month browsing must leave the real poller active.
   await delay(2000);
-  await waitFor(() => fixture.calls.filter((call) => call.path === "/ip-quality" && call.method === "GET").length > readsBeforeClear,
-    "clearing the date stopped automatic refresh");
+  await waitFor(() => fixture.calls.filter((call) => call.path === "/ip-quality" && call.method === "GET").length > readsBeforeDisabled,
+    "calendar interaction stopped automatic refresh");
   const refresh = async () => {
     const before = fixture.calls.filter((call) => call.path === "/ip-quality").length;
     document.querySelector("[data-ip-quality-refresh]").click();
@@ -172,7 +192,7 @@ export async function testIPQualityRuntime(mode, preview = false) {
     await waitFor(() => card(), "returning to the recorded node failed");
   }
   document.querySelector('[data-ip-quality-day="-1"]').click();
-  await waitFor(() => document.querySelector("[data-ip-quality-date]").value === yesterday &&
+  await waitFor(() => document.querySelector("[data-ip-quality-date]").dataset.selectedDate === yesterday &&
     card()?.textContent.includes("检测失败"), "previous-day navigation did not load history");
   assert.equal(card().querySelector(".ip-quality-report"), null, "previous date retained today's report");
   assert.equal(sidebar().querySelectorAll("[data-ip-quality-agent]").length, 1, "history lists nodes with no records");
@@ -181,9 +201,13 @@ export async function testIPQualityRuntime(mode, preview = false) {
   assert.equal(document.querySelector("[data-ip-quality-schedule]"), null, "history can change schedules");
   assert.ok(!card().textContent.includes("节点在线"), "history displays a current online state");
   document.querySelector('[data-ip-quality-day="-1"]').click();
-  await waitFor(() => document.querySelector(".ip-quality-workspace .empty")?.textContent.includes("当天没有检测记录"),
-    "empty history did not show its own empty state");
-  assert.equal(sidebar().querySelectorAll("[data-ip-quality-agent]").length, 0, "empty history still offered a node");
+  await waitFor(() => document.querySelector("[data-ip-quality-date]").dataset.selectedDate === offlineDay && panel("quality-c"),
+    "history navigation did not skip the unrecorded day");
+  document.querySelector("[data-ip-quality-date]").click();
+  document.querySelector(`[data-ip-quality-date-option="${reportDay}"]`).click();
+  await waitFor(() => document.querySelector("[data-ip-quality-date]").dataset.selectedDate === reportDay && card(),
+    "available calendar date did not load history");
+  assert.ok(!document.querySelector("[data-ip-quality-calendar]").open, "selecting a date left the calendar open");
   document.querySelector("[data-ip-quality-latest]").click();
   await waitFor(() => card()?.textContent.includes("已完成") && !document.querySelector("[data-ip-quality-refresh]").disabled,
     "return to latest results failed");

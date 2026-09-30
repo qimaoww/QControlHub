@@ -1,5 +1,5 @@
 import { createIPQualityBindings } from "./ip-quality-bindings.js";
-import { ipQualityToday, ipQualityLatest, validIPQualityDate, ipQualityBlockReason, ipQualityFeature } from "./ip-quality-model.js";
+import { ipQualityToday, ipQualityLatest, validIPQualityDate, ipQualityAvailableDates, ipQualityBlockReason, ipQualityFeature } from "./ip-quality-model.js";
 import { createPoller } from "./refresh.js";
 
 export function createIPQualityController(ctx, view) {
@@ -8,12 +8,13 @@ export function createIPQualityController(ctx, view) {
     clearTimer = clearTimeout } = ctx;
   let accountData = state.data, serial = 0, snapshot = null, pendingAgents = null;
   let foregroundLoading = false, readFailed = false, readError = "";
+  let availableDates = null;
   const daySnapshots = new Map();
   let submitting = new Set();
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
   const current = (data, epoch) => data === state.data && epoch === state.navigationEpoch && state.route === "ip-quality";
   const editable = (agent) => agent?.can_manage !== false && can("agents.manage", agent) && can("tasks.execute");
-  const bind = createIPQualityBindings({ state, load, runCheck, setSchedule, select });
+  const bind = createIPQualityBindings({ state, load, runCheck, setSchedule, select, showMonth });
   const poller = createPoller({
     run: () => load(undefined, { background: true }),
     isActive: () => state.route === "ip-quality",
@@ -21,6 +22,7 @@ export function createIPQualityController(ctx, view) {
   });
   function render(date, options = {}) {
     view({ date, timezone, agents: pendingAgents || [], ...snapshot,
+      availableDates: availableDates || [], month: state.data.ipQualityCalendarMonth,
       loading: foregroundLoading, submitting, editable, readFailed, error: readError, ...options });
     bind();
   }
@@ -35,15 +37,18 @@ export function createIPQualityController(ctx, view) {
       submitting = new Set();
       readFailed = false;
       readError = "";
+      availableDates = null;
     }
     // The shell supplies route options as the first argument on page entry.
     const date = typeof requestedDate === "string" ? requestedDate : data.ipQualityDate || ipQualityLatest;
     if (date !== ipQualityLatest && (!validIPQualityDate(date) || date > ipQualityToday())) return false;
+    if (typeof requestedDate === "string" && date !== ipQualityLatest && availableDates && !availableDates.includes(date)) return false;
     poller.stop();
     const request = ++serial;
     pendingAgents = null;
     foregroundLoading = !background;
     data.ipQualityDate = date;
+    if (typeof requestedDate === "string") data.ipQualityCalendarMonth = date === ipQualityLatest ? "" : date.slice(0, 7);
     if (snapshot?.date !== date) {
       snapshot = daySnapshots.get(date) || null;
       readFailed = false;
@@ -65,8 +70,9 @@ export function createIPQualityController(ctx, view) {
         agentsPromise,
       ]);
       if (!current(data, epoch) || request !== serial) return false;
-      if (!Array.isArray(history?.records) || !Array.isArray(history?.schedules) || !Array.isArray(agents))
+      if (!Array.isArray(history?.records) || !Array.isArray(history?.schedules) || !Array.isArray(history?.dates) || !Array.isArray(agents))
         throw new Error("IPQuality 接口返回了无效数据");
+      availableDates = ipQualityAvailableDates(history.dates);
       readFailed = false;
       readError = "";
       pendingAgents = null;
@@ -130,6 +136,13 @@ export function createIPQualityController(ctx, view) {
   }
   function runCheck(agentID) { return mutate(agentID); }
   function setSchedule(agentID, enabled) { return mutate(agentID, enabled); }
+  function showMonth(month) {
+    if (accountData !== state.data || !availableDates?.length || readFailed || foregroundLoading || state.route !== "ip-quality") return false;
+    if (!validIPQualityDate(`${month}-01`) || month < availableDates.at(-1).slice(0, 7) || month > availableDates[0].slice(0, 7)) return false;
+    state.data.ipQualityCalendarMonth = month;
+    render(state.data.ipQualityDate);
+    return true;
+  }
   // Switching the selected node repaints from the loaded snapshot: the sidebar
   // only ever offers nodes the current snapshot already returned, so no read is
   // needed, and the repaint is what moves the sidebar highlight.

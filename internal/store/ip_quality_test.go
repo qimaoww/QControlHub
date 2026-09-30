@@ -107,6 +107,11 @@ func TestIPQualityTaskLifecycleAndHistory(t *testing.T) {
 	if records, err := db.ListIPQualityRecords(ctx, "2026-09-15", "UTC"); err != nil || len(records) != 1 {
 		t.Fatalf("UTC day: %+v %v", records, err)
 	}
+	for _, test := range []struct{ timezone, date string }{{"UTC", "2026-09-15"}, {"Asia/Shanghai", "2026-09-16"}} {
+		if dates, err := db.ListIPQualityDates(ctx, test.timezone); err != nil || len(dates) != 1 || dates[0] != test.date {
+			t.Fatalf("available local dates for %s = %+v %v", test.timezone, dates, err)
+		}
+	}
 	stored, err := db.GetTask(ctx, task.ID)
 	if err != nil || stored.Output != "IPQuality report saved" || strings.Contains(stored.Output, "203.0.113.1") {
 		t.Fatalf("ordinary task poll exposed report bytes: %+v %v", stored, err)
@@ -324,6 +329,9 @@ func TestIPQualityScheduleIsolationAndRevocation(t *testing.T) {
 	if records, err := db.ListIPQualityRecords(bobCtx, "", "UTC"); err != nil || len(records) != 0 {
 		t.Fatalf("latest view leaked host report to share recipient: %+v %v", records, err)
 	}
+	if dates, err := db.ListIPQualityDates(bobCtx, "UTC"); err != nil || len(dates) != 0 {
+		t.Fatalf("share leaked detection dates: %+v %v", dates, err)
+	}
 	if schedules, err := db.ListIPQualitySchedules(bobCtx); err != nil || len(schedules) != 0 {
 		t.Fatalf("share leaked scheduling policy: %+v %v", schedules, err)
 	}
@@ -335,6 +343,9 @@ func TestIPQualityScheduleIsolationAndRevocation(t *testing.T) {
 	}
 	if records, err := db.ListIPQualityRecords(WithConfigScope(ctx, "", true), "", "UTC"); err != nil || len(records) != 0 {
 		t.Fatalf("latest view exposed owner-hidden report: %+v %v", records, err)
+	}
+	if dates, err := db.ListIPQualityDates(WithConfigScope(ctx, "", true), "UTC"); err != nil || len(dates) != 0 {
+		t.Fatalf("owner-hidden node leaked detection dates: %+v %v", dates, err)
 	}
 	if _, err := db.pool.Exec(ctx, `UPDATE panel_users SET permissions='["agents.read","tasks.execute"]' WHERE id=$1`, alice.ID); err != nil {
 		t.Fatal(err)

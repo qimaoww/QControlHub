@@ -25,12 +25,17 @@ func (s *Server) ipQualityHistory(w http.ResponseWriter, request *http.Request) 
 			records[index].Result.ReportsText = nil
 		}
 	}
+	dates, err := s.store.ListIPQualityDates(request.Context(), timezone)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
 	schedules, err := s.store.ListIPQualitySchedules(request.Context())
 	if err != nil {
 		writeStoreError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, core.IPQualityHistory{Date: date, Timezone: timezone, Records: records, Schedules: schedules})
+	writeJSON(w, http.StatusOK, core.IPQualityHistory{Date: date, Timezone: timezone, Dates: dates, Records: records, Schedules: schedules})
 }
 
 func (s *Server) createIPQualityCheck(w http.ResponseWriter, request *http.Request) {
