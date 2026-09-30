@@ -1,0 +1,69 @@
+/* Shared node connection state. Offline is neutral; failures keep their own tone. */
+.agent-presence {
+  --presence-ink: var(--ink-2);
+  --presence-surface: var(--surface-3);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: max-content;
+  min-height: 25px;
+  gap: 7px;
+  padding: 3px 9px;
+  border: 1px solid color-mix(in srgb, var(--presence-ink) 18%, var(--line));
+  border-radius: 999px;
+  background: linear-gradient(color-mix(in srgb, var(--surface) 35%, transparent), transparent), var(--presence-surface);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--surface) 60%, transparent);
+  color: var(--presence-ink);
+  font-size: max(10px, calc(10px * var(--ui-font-scale)));
+  line-height: 1.4;
+  white-space: nowrap;
+  vertical-align: middle;
+  transition: color .16s ease, background-color .16s ease, border-color .16s ease;
+}
+.agent-presence[data-agent-presence="online"] {
+  --presence-ink: var(--green);
+  --presence-surface: var(--green-soft);
+}
+.agent-presence > b {
+  color: inherit;
+  font: inherit;
+  font-weight: 650;
+}
+.agent-presence > .agent-presence-dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+  border: 1.5px solid currentColor;
+  border-radius: 50%;
+  background: transparent;
+}
+.agent-presence[data-agent-presence="online"] > .agent-presence-dot {
+  background: currentColor;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--presence-ink) 10%, transparent);
+}
+.agent-presence[data-agent-presence="unknown"] > .agent-presence-dot {
+  border-style: dashed;
+}
+.node-card-state {
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 4px 7px;
+}
+.node-card-state > small {
+  grid-column: 1 / -1;
+  justify-self: end;
+  font-variant-numeric: tabular-nums;
+}
+.node-card-state .agent-presence > b { font-size: inherit; }
+.node-live-state { flex-wrap: wrap; gap: 7px; }
+.node-live-state > small:before { content: none; }
+.node-live-state .agent-presence > b { color: inherit; }
+.context-list > a:has(> .agent-presence) { grid-template-columns: minmax(0, 1fr) auto; }
+.context-list > a:has(> .context-engine):has(> .agent-presence) { grid-template-columns: auto minmax(0, 1fr) auto; }
+.context-list > a > .agent-presence { gap: 6px; padding-inline: 7px; }
+.access-control-scope:has(> .agent-presence) { flex-wrap: wrap; }
+.ip-quality-node-panel > header .ip-quality-node-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+@media (prefers-reduced-motion: reduce) {
+  .agent-presence { transition: none; }
+}

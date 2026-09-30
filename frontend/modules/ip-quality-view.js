@@ -8,6 +8,7 @@ import { ipQualityAddressMarkup } from "./ip-quality-address-view.js";
 import { createIPQualityArchiveView } from "./ip-quality-archive-view.js";
 import { createIPQualityCalendarView } from "./ip-quality-calendar-view.js";
 import { dockIcons } from "./shell-icons.js";
+import { agentPresenceMarkup } from "./agent-presence.js";
 
 export function createIPQualityView({ shell, state, esc, date: formatDate }) {
   const reportView = createIPQualityReportView({ esc });
@@ -48,7 +49,7 @@ export function createIPQualityView({ shell, state, esc, date: formatDate }) {
       const progress = retained ? `<p class="ip-quality-result-note" role="status">${["pending", "running"].includes(record.status) ? "新检测正在排队或执行，以下保留上次成功报告。" : "最新检测未成功，以下显示上次成功报告。"}</p>` : "";
       const attempt = record && (!reports.length || retained) ? `<p class="ip-quality-no-report">最近发起：${esc(formatDate(record.created_at))}</p>` : "";
       return `<section class="workspace-panel ip-quality-node-panel ${tone}" data-ip-quality-panel="${esc(agent.id)}" data-refresh-key="ip-quality-${esc(agent.id)}" aria-busy="${loading}">
-        <header><div class="ip-quality-node-title"><span class="node-avatar" aria-hidden="true">${icon("server")}</span><div><h3>${esc(agent.name)}</h3>${canOperate ? `<small>${agent.status === "online" ? "在线" : "离线"}${reports.length ? ` · ${reports.length} 个地址族` : ""}</small>` : ""}</div></div><div class="ip-quality-node-tools"><span class="status-label ip-quality-badge ${tone}"><i></i>${record ? esc(ipQualityStatusName(record.status)) : !history ? readFailed ? "读取失败" : "读取中" : "未检测"}</span>${runButton}</div></header>
+        <header><div class="ip-quality-node-title"><span class="node-avatar" aria-hidden="true">${icon("server")}</span><div><h3>${esc(agent.name)}</h3>${canOperate ? `<small class="ip-quality-node-meta">${agentPresenceMarkup(agent.status)}${reports.length ? `<span>${reports.length} 个地址族</span>` : ""}</small>` : ""}</div></div><div class="ip-quality-node-tools"><span class="status-label ip-quality-badge ${tone}"><i></i>${record ? esc(ipQualityStatusName(record.status)) : !history ? readFailed ? "读取失败" : "读取中" : "未检测"}</span>${runButton}</div></header>
         ${controls}
         <div class="ip-quality-node-body">
           ${progress}

@@ -1,5 +1,6 @@
 import { liveConfigEditorState } from "./live-config-state.js";
 import { diagnosticError } from "./errors.js";
+import { agentPresenceMarkup } from "./agent-presence.js";
 
 function liveEngineStatus(info = {}, online = true) {
   if (!info.installed)
@@ -75,7 +76,7 @@ export function createLiveConfigView({ can, esc, engineName, conciseVersion, she
     return `<button type="button" class="live-engine-tab ${active ? "active" : ""}" data-live-engine="${esc(item)}" aria-pressed="${active}" aria-label="${esc(engineName(item))} · ${label}" title="${label}" ${active ? 'aria-current="true"' : ""}><span>${esc(engineName(item))}</span><small class="live-engine-status ${tone}">${label}</small></button>`;
   }).join("")}</nav>`;
   const details = `<div class="live-config-details" role="group" aria-label="当前配置状态">
-    <span class="live-config-detail live-config-node-state" data-state="${agent.status === "online" ? "online" : "offline"}"><i class="status-dot ${agent.status === "online" ? "ok" : ""}" aria-hidden="true"></i>${agent.status === "online" ? "节点在线" : "节点离线"}</span>
+    ${agentPresenceMarkup(agent.status, { nodeLabel: true })}
     <span class="live-config-detail">${esc(conciseVersion(engine, runtime.version))}</span>
     <span class="live-config-detail"><span class="live-config-detail-label">来源</span>${privateWorkspace ? "个人配置" : importSource ? "系统服务 · 只读快照" : "QAgent 托管"}</span>
   </div>`;

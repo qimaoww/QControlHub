@@ -55,12 +55,16 @@ export async function testAgentDetailActions({ testAPI }) {
   alpha.status = "offline";
   document.querySelector('[data-agent-refresh]').click();
   await waitFor(() => document.querySelector('[data-agent-status-label]')?.textContent === "离线", "确认期间离线状态未刷新");
+  assert.equal(document.querySelector('.node-live-state [data-agent-presence]')?.dataset.agentPresence, "offline", "离线文字与胶囊视觉状态必须同步刷新");
+  assert.equal(getComputedStyle(document.querySelector('[data-agent-status-dot]')).backgroundColor, "rgba(0, 0, 0, 0)", "离线指示点应为空心");
   confirm.querySelector('[data-confirm-accept]').click();
   await waitFor(() => uninstallButton()?.disabled, "离线后卸载按钮未禁用");
   assert.equal(testAPI.submittedTasks.filter((task) => task.action === "uninstall").length, uninstallTasksBefore, "确认期间节点离线仍提交卸载");
   alpha.status = "online";
   document.querySelector('[data-agent-refresh]').click();
   await waitFor(() => !uninstallButton().disabled, "节点上线后卸载按钮未恢复");
+  assert.equal(document.querySelector('.node-live-state [data-agent-presence]')?.dataset.agentPresence, "online", "重新上线后胶囊应恢复在线样式");
+  assert.equal(document.querySelector('[data-agent-status-label]')?.textContent, "在线", "重新上线后胶囊应恢复在线文字");
   uninstallButton().click();
   confirm = await waitFor(() => document.querySelector('[data-confirm-dialog][open]'), "再次卸载没有确认弹窗");
   confirm.querySelector('[data-confirm-accept]').click();

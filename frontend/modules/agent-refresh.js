@@ -1,5 +1,6 @@
 import { createRefreshChannel } from "./refresh.js";
 import { updatePublicIPDisplays } from "./agent-addresses.js";
+import { updateAgentPresence } from "./agent-presence.js";
 
 export function agentStructureSignature(agents = []) {
   return JSON.stringify(
@@ -135,10 +136,7 @@ function updateAgentMetrics(item) {
   const online = item.status === "online";
   const unavailable = metrics.collected_at ? "不可用" : "等待采集";
   root.dataset.available = metrics.collected_at ? "1" : "0";
-  const dot = root.querySelector("[data-agent-status-dot]");
-  if (dot) dot.className = `status-dot ${statusTone(item.status)}`;
-  const status = root.querySelector("[data-agent-status-label]");
-  if (status) status.textContent = online ? "在线" : "离线";
+  updateAgentPresence(root, item.status);
   const lastSeen = root.querySelector("[data-agent-heartbeat]");
   if (lastSeen) lastSeen.textContent = heartbeat(item.last_seen);
   root
