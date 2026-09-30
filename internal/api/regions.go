@@ -24,7 +24,7 @@ const (
 )
 
 type regionLookup struct {
-	index   int
+	indexes []int
 	address netip.Addr
 }
 
@@ -149,6 +149,7 @@ func (s *Server) getRegionFlag(w http.ResponseWriter, request *http.Request) {
 func (s *Server) resolveAgentRegions(request *http.Request, agents []core.Agent) {
 	auto := s.sessionAllows(request, core.PermissionMetricsRead)
 	lookups := make([]regionLookup, 0, len(agents))
+	byAddress := make(map[netip.Addr]int, len(agents))
 	for index := range agents {
 		if code := store.AgentRegionCode(agents[index]); code != "" {
 			agents[index].RegionCode = code
@@ -161,7 +162,13 @@ func (s *Server) resolveAgentRegions(request *http.Request, agents []core.Agent)
 		if !address.IsValid() {
 			continue
 		}
-		lookups = append(lookups, regionLookup{index: index, address: address})
+		address = address.Unmap()
+		if lookupIndex, ok := byAddress[address]; ok {
+			lookups[lookupIndex].indexes = append(lookups[lookupIndex].indexes, index)
+			continue
+		}
+		byAddress[address] = len(lookups)
+		lookups = append(lookups, regionLookup{indexes: []int{index}, address: address})
 	}
 	if len(lookups) == 0 {
 		return
@@ -173,22 +180,36 @@ func (s *Server) resolveAgentRegions(request *http.Request, agents []core.Agent)
 	lookupContext := context.WithoutCancel(request.Context())
 	deadline := time.Now().Add(regionResolveBudget)
 	results := make(chan regionLookupResult, len(lookups))
-	permits := make(chan struct{}, regionResolveConcurrency)
-	for _, lookup := range lookups {
-		if !acquireRegionPermit(permits, deadline) {
+	jobs := make(chan int, len(lookups))
+	for index := range lookups {
+		jobs <- index
+	}
+	close(jobs)
+	for range min(regionResolveConcurrency, len(lookups)) {
+		go func() {
+			for index := range jobs {
+				// Finish an already-started lookup into the cache, but do not
+				// start queued work after this list's budget has expired.
+				if !time.Now().Before(deadline) {
+					return
+				}
+				// Report failures too, so a provider that rejects quickly
+				// never makes the list wait out the whole budget.
+				result := regionLookupResult{index: index}
+				if region, err := s.geoip.LookupCountry(lookupContext, lookups[index].address); err == nil {
+					result.code = region.ISOCode
+				}
+				results <- result
+			}
+		}()
+	}
+	applyResult := func(result regionLookupResult) {
+		if result.code == "" {
 			return
 		}
-		go func(lookup regionLookup) {
-			defer func() { <-permits }()
-			// Report failures too: an unresolved node still completes its
-			// lookup, so a provider that rejects quickly never waits out the
-			// budget. The GeoIP client remembers the failure for later reads.
-			result := regionLookupResult{index: lookup.index}
-			if region, err := s.geoip.LookupCountry(lookupContext, lookup.address); err == nil {
-				result.code = region.ISOCode
-			}
-			results <- result
-		}(lookup)
+		for _, index := range lookups[result.index].indexes {
+			agents[index].RegionCode = result.code
+		}
 	}
 
 	budget := time.NewTimer(time.Until(deadline))
@@ -196,27 +217,18 @@ func (s *Server) resolveAgentRegions(request *http.Request, agents []core.Agent)
 	for remaining := len(lookups); remaining > 0; remaining-- {
 		select {
 		case result := <-results:
-			if result.code != "" {
-				agents[result.index].RegionCode = result.code
-			}
+			applyResult(result)
 		case <-budget.C:
-			return
+			// The timer and a completed result can become ready together.
+			// Preserve all results already available when the budget ends.
+			for {
+				select {
+				case result := <-results:
+					applyResult(result)
+				default:
+					return
+				}
+			}
 		}
-	}
-}
-
-// acquireRegionPermit waits for a lookup slot until the shared budget expires.
-func acquireRegionPermit(permits chan struct{}, deadline time.Time) bool {
-	remaining := time.Until(deadline)
-	if remaining <= 0 {
-		return false
-	}
-	timer := time.NewTimer(remaining)
-	defer timer.Stop()
-	select {
-	case permits <- struct{}{}:
-		return true
-	case <-timer.C:
-		return false
 	}
 }

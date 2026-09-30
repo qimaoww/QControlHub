@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -225,6 +226,83 @@ func TestAgentListRegionsBoundSlowProvider(t *testing.T) {
 		if agent.RegionCode != "" {
 			t.Fatalf("slow provider resolved %s after the budget expired", agent.ID)
 		}
+	}
+}
+
+func TestAgentListRegionsKeepCompletedLookupsWhenQueueTimesOut(t *testing.T) {
+	admin := strings.Repeat("a", 48)
+	release := make(chan struct{})
+	defer close(release)
+	var calls atomic.Int64
+	handler := New(nil, Config{
+		AdminToken: admin,
+		GeoIPHTTPClient: &http.Client{Transport: connectionGeoTransport(func(request *http.Request) (*http.Response, error) {
+			calls.Add(1)
+			if strings.HasSuffix(request.URL.Path, "/8.8.8.1.json") {
+				return regionTestResponse(http.StatusOK, `{"country_code":"US","country":"United States"}`), nil
+			}
+			select {
+			case <-release:
+				return regionTestResponse(http.StatusOK, `{"country_code":"US","country":"United States"}`), nil
+			case <-request.Context().Done():
+				return nil, request.Context().Err()
+			}
+		})},
+	})
+	// One fast lookup frees a slot, then eight slow lookups fill all workers
+	// while the final address remains queued beyond the budget.
+	agents := make([]core.Agent, regionResolveConcurrency+2)
+	for index := range agents {
+		agents[index] = core.Agent{ID: fmt.Sprint(index), Metrics: core.HostMetrics{PublicIPv4: fmt.Sprintf("8.8.8.%d", index+1)}}
+	}
+	started := time.Now()
+	handler.resolveAgentRegions(regionTestRequest(t, admin), agents)
+	if elapsed := time.Since(started); elapsed > regionResolveBudget+time.Second {
+		t.Fatalf("queued lookups blocked the list for %s", elapsed)
+	}
+	if agents[0].RegionCode != "US" {
+		t.Fatalf("completed lookup region = %q, want US despite the queued timeout", agents[0].RegionCode)
+	}
+	for _, agent := range agents[1:] {
+		if agent.RegionCode != "" {
+			t.Fatalf("blocked lookup resolved agent %s inside the budget", agent.ID)
+		}
+	}
+	if got := calls.Load(); got != regionResolveConcurrency+1 {
+		t.Fatalf("provider calls = %d, want one completed lookup and %d in flight", got, regionResolveConcurrency)
+	}
+}
+
+func TestAgentListRegionsShareLookupForPublicAddress(t *testing.T) {
+	admin := strings.Repeat("a", 48)
+	var calls atomic.Int64
+	handler := New(nil, Config{
+		AdminToken: admin,
+		GeoIPHTTPClient: &http.Client{Transport: connectionGeoTransport(func(request *http.Request) (*http.Response, error) {
+			calls.Add(1)
+			// Keep the cache cold long enough for concurrent duplicate
+			// lookups to reach the provider if addresses are not grouped.
+			time.Sleep(100 * time.Millisecond)
+			return regionTestResponse(http.StatusOK, `{"country_code":"US","country":"United States"}`), nil
+		})},
+	})
+	agents := []core.Agent{
+		{ID: "alpha", Metrics: core.HostMetrics{PublicIPv4: "8.8.8.8"}},
+		{ID: "bravo", Metrics: core.HostMetrics{PublicIPv4: "::ffff:8.8.8.8"}},
+		{ID: "charlie", Metrics: core.HostMetrics{PublicIPv4: "8.8.8.8"}},
+		{ID: "delta", Labels: map[string]string{"region_code": "JP"}, Metrics: core.HostMetrics{PublicIPv4: "8.8.8.8"}},
+	}
+	handler.resolveAgentRegions(regionTestRequest(t, admin), agents)
+	for _, agent := range agents[:3] {
+		if agent.RegionCode != "US" {
+			t.Fatalf("agent %s region = %q, want shared US result", agent.ID, agent.RegionCode)
+		}
+	}
+	if agents[3].RegionCode != "JP" {
+		t.Fatalf("manual region = %q, want JP", agents[3].RegionCode)
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("provider calls = %d, want one for the shared public address", got)
 	}
 }
 
