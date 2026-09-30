@@ -336,11 +336,42 @@ func (e *Executor) Execute(parent context.Context, task core.Task) (string, erro
 		if err := ensureManagedCoreServiceCapabilities(ctx, task.Engine, spec, e.serviceManager()); err != nil {
 			return "", err
 		}
+		_, statErr := os.Lstat(spec.Binary)
+		if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
+			return "", fmt.Errorf("inspect managed core binary before installation: %w", statErr)
+		}
+		freshInstall := errors.Is(statErr, os.ErrNotExist)
 		updater := e.Updater
 		if updater == nil {
 			updater = NewCoreUpdater()
 		}
-		return updater.Install(ctx, task.Engine, spec, version, source, e.serviceManager())
+		output, err := updater.Install(ctx, task.Engine, spec, version, source, e.serviceManager())
+		if err != nil {
+			return output, err
+		}
+		// Uninstall disables the service so it cannot try a missing binary at
+		// boot. A fresh installation restores enablement, while a version update
+		// leaves an existing service's enablement unchanged.
+		if freshInstall {
+			if err := setServiceEnabled(ctx, spec.Service, true, e.serviceManager()); err != nil {
+				// The updater has already written the binary and started the
+				// service. Roll back a first install if enablement fails; otherwise
+				// a retry sees an existing binary and skips this step forever.
+				rollbackCtx, rollbackCancel := context.WithTimeout(context.Background(), 30*time.Second)
+				rollbackOutput, rollbackErr := e.uninstallCore(rollbackCtx, task.Engine, spec)
+				rollbackCancel()
+				if rollbackOutput != "" {
+					output += "\nrollback: " + rollbackOutput
+				}
+				if rollbackErr != nil {
+					return output, fmt.Errorf("core installed but could not enable its service (%v); rollback failed: %w", err, rollbackErr)
+				}
+				return output, fmt.Errorf("core installation was rolled back because its service could not be enabled: %w", err)
+			}
+		}
+		return output, nil
+	case core.ActionUninstall:
+		return e.uninstallCore(ctx, task.Engine, spec)
 	default:
 		return "", fmt.Errorf("unsupported action %q", task.Action)
 	}

@@ -23,6 +23,7 @@ const (
 	ActionRestart           Action = "restart"
 	ActionStatus            Action = "status"
 	ActionInstall           Action = "install"
+	ActionUninstall         Action = "uninstall"
 	ActionReadConfig        Action = "read-config"
 	ActionReadManagedConfig Action = "read-managed-config"
 	ActionImportExisting    Action = "import-existing"
@@ -35,7 +36,7 @@ const (
 
 func (a Action) Valid() bool {
 	switch a {
-	case ActionValidate, ActionDeploy, ActionStart, ActionStop, ActionRestart, ActionStatus, ActionInstall, ActionReadConfig, ActionReadManagedConfig, ActionImportExisting, ActionUpgradeAgent, ActionEnableBBR, ActionDisableBBR, ActionConfigureTCP, ActionIPQuality:
+	case ActionValidate, ActionDeploy, ActionStart, ActionStop, ActionRestart, ActionStatus, ActionInstall, ActionUninstall, ActionReadConfig, ActionReadManagedConfig, ActionImportExisting, ActionUpgradeAgent, ActionEnableBBR, ActionDisableBBR, ActionConfigureTCP, ActionIPQuality:
 		return true
 	default:
 		return false

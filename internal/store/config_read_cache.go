@@ -43,7 +43,7 @@ func (s *Store) recentReadTask(ctx context.Context, executor storeExecutor, agen
 		  AND config_content IS NOT NULL AND finished_at > now()-$4::interval AND owner_id=$5
 		  AND NOT EXISTS(
 		      SELECT 1 FROM tasks mutation WHERE mutation.agent_id=$1 AND mutation.engine=$2
-		        AND (mutation.action IN ('deploy','install','import-existing') OR mutation.install_if_missing)
+		        AND (mutation.action IN ('deploy','install','uninstall','import-existing') OR mutation.install_if_missing)
 		        AND mutation.status IN ('pending','running'))
 		ORDER BY finished_at DESC LIMIT 1`, agentID, engine, action, intervalString(maxAge), scopeForConfig(ctx).OwnerID)
 	task, err := scanTask(row, true)
@@ -66,7 +66,7 @@ func (s *Store) recentReadTask(ctx context.Context, executor storeExecutor, agen
 
 func invalidateConfigReadSnapshotsTx(ctx context.Context, tx pgx.Tx, task core.Task) error {
 	if !task.InstallIfMissing && task.Action != core.ActionDeploy &&
-		task.Action != core.ActionInstall && task.Action != core.ActionImportExisting {
+		task.Action != core.ActionInstall && task.Action != core.ActionUninstall && task.Action != core.ActionImportExisting {
 		return nil
 	}
 	// Invalidate before execution: even failed or lost mutations may have

@@ -23,6 +23,7 @@ const actions = [
   "restart",
   "status",
   "install",
+  "uninstall",
   "read-config",
   "read-managed-config",
   "import-existing",

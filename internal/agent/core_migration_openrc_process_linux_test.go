@@ -223,6 +223,57 @@ func TestOpenRCWaitForProcessExitSucceedsAfterStop(t *testing.T) {
 	}
 }
 
+func TestOpenRCWaitForProcessExitAcceptsUnreapedProcesses(t *testing.T) {
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	realExecutable, err := filepath.EvalSymlinks(executable)
+	if err != nil {
+		t.Fatal(err)
+	}
+	procRoot := t.TempDir()
+	stateRoot := t.TempDir()
+	supervisorRoot := t.TempDir()
+	useFakeOpenRCTree(t, procRoot, stateRoot, supervisorRoot, realExecutable)
+
+	const service = "xray"
+	const supervisorPID = 100
+	const childPID = 200
+	writeOpenRCProcIdentity(t, procRoot, supervisorPID, "supervise-daemon", 1, "4000", realExecutable,
+		[]string{"supervise-daemon", service, "--start", "/bin/sleep", "--", "100"})
+	writeOpenRCProcIdentity(t, procRoot, childPID, "xray", supervisorPID, "5000", realExecutable,
+		[]string{realExecutable, "run", "-config", "/etc/xray/config.json"})
+	writeOpenRCServiceMetadata(t, stateRoot, supervisorRoot, service, childPID, supervisorPID, "/run/supervise-"+service+".pid")
+	identity, err := boundOpenRCServiceProcess(context.Background(), service)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// In a container, the stopped child and supervisor can remain in /proc
+	// as zombies until PID 1 reaps them. Their original start times still match.
+	for _, process := range []struct {
+		pid, parent int
+		comm, start string
+	}{
+		{supervisorPID, 1, "supervise-daemon", "4000"},
+		{childPID, supervisorPID, "xray", "5000"},
+	} {
+		stat := strings.Replace(openRCStatLine(process.pid, process.comm, process.parent, process.start), ") S ", ") Z ", 1)
+		if err := os.WriteFile(filepath.Join(procRoot, fmt.Sprintf("%d", process.pid), "stat"), []byte(stat), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Remove(filepath.Join(stateRoot, "options", service, "child_pid")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(supervisorRoot, "supervise-"+service+".pid")); err != nil {
+		t.Fatal(err)
+	}
+	if err := waitForOpenRCServiceProcessExit(context.Background(), identity); err != nil {
+		t.Fatalf("waitForOpenRCServiceProcessExit() with stopped zombies: %v", err)
+	}
+}
+
 func TestOpenRCHelperExecutableDoesNotFallBackAcrossHelpers(t *testing.T) {
 	rcService := openRCHelperExecutable("rc-service", rcServicePath)
 	if rcService == rcUpdatePath {

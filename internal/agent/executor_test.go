@@ -21,7 +21,7 @@ func TestUnsupportedExistingServiceBlocksEveryCoreAction(t *testing.T) {
 	}
 	for _, action := range []core.Action{
 		core.ActionValidate, core.ActionDeploy, core.ActionStart, core.ActionStop,
-		core.ActionRestart, core.ActionStatus, core.ActionInstall, core.ActionReadConfig, core.ActionReadManagedConfig,
+		core.ActionRestart, core.ActionStatus, core.ActionInstall, core.ActionUninstall, core.ActionReadConfig, core.ActionReadManagedConfig,
 		core.ActionImportExisting,
 	} {
 		t.Run(string(action), func(t *testing.T) {

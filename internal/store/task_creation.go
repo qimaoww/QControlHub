@@ -114,14 +114,19 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 			return core.Task{}, fmt.Errorf("%w: install tasks cannot reference a configuration", ErrInvalid)
 		}
 	} else {
+		if request.Action == core.ActionUninstall && (request.ConfigID != "" || request.CoreVersion != "" || request.CoreSource != "") {
+			return core.Task{}, fmt.Errorf("%w: uninstall tasks cannot reference a configuration, core version, or source", ErrInvalid)
+		}
 		if request.CoreSource != "" {
 			return core.Task{}, fmt.Errorf("%w: core source is only applicable to Mihomo development installs", ErrInvalid)
 		}
 		request.CoreSource = ""
 		request.CoreVersion = ""
 	}
-	var capabilitiesJSON, featuresJSON, runtimeJSON []byte
-	if err := tx.QueryRow(ctx, `SELECT capabilities,features,runtime FROM agents WHERE id=$1 AND revoked_at IS NULL FOR UPDATE`, request.AgentID).Scan(&capabilitiesJSON, &featuresJSON, &runtimeJSON); err != nil {
+	var capabilitiesJSON, supportedJSON, featuresJSON, runtimeJSON []byte
+	if err := tx.QueryRow(ctx, `SELECT capabilities,COALESCE(supported_capabilities,capabilities),features,runtime
+		FROM agents WHERE id=$1 AND revoked_at IS NULL FOR UPDATE`, request.AgentID).
+		Scan(&capabilitiesJSON, &supportedJSON, &featuresJSON, &runtimeJSON); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return core.Task{}, fmt.Errorf("agent: %w", ErrNotFound)
 		}
@@ -129,6 +134,10 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 	}
 	var capabilities []core.Engine
 	if err := json.Unmarshal(capabilitiesJSON, &capabilities); err != nil {
+		return core.Task{}, err
+	}
+	var supported []core.Engine
+	if err := json.Unmarshal(supportedJSON, &supported); err != nil {
 		return core.Task{}, err
 	}
 	var features []string
@@ -172,7 +181,11 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 		if err := rejectPendingCapabilityTransition(ctx, tx, request.AgentID, request.Engine); err != nil {
 			return core.Task{}, err
 		}
-		if !containsEngine(capabilities, request.Engine) {
+		// A disabled capability may still have an installed binary. Its owner
+		// must be able to remove that binary without starting the service again.
+		uninstallDisabled := request.Action == core.ActionUninstall &&
+			containsEngine(supported, request.Engine) && runtime[request.Engine].Installed
+		if !containsEngine(capabilities, request.Engine) && !uninstallDisabled {
 			return core.Task{}, fmt.Errorf("%w: agent does not advertise the requested engine", ErrInvalid)
 		}
 		if reason := strings.TrimSpace(runtime[request.Engine].ExistingConfigUnsupportedReason); reason != "" {
@@ -188,6 +201,21 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 	}
 	if request.Action == core.ActionReadManagedConfig && !containsFeature(features, core.AgentFeatureManagedConfigRead) {
 		return core.Task{}, fmt.Errorf("%w: this Agent cannot read the managed configuration independently; upgrade the Agent through the panel first", ErrConflict)
+	}
+	if request.Action == core.ActionUninstall {
+		if !containsFeature(features, core.AgentFeatureCoreUninstall) {
+			return core.Task{}, fmt.Errorf("%w: upgrade this Agent before uninstalling a managed core", ErrConflict)
+		}
+		var shared bool
+		if err := tx.QueryRow(ctx, `SELECT
+			EXISTS(SELECT 1 FROM agent_shares WHERE agent_id=$1 AND enabled AND $2=ANY(engines))
+			OR EXISTS(SELECT 1 FROM agent_shared_instance_ownership WHERE agent_id=$1 AND engine=$2 AND (running OR uncertain))`,
+			request.AgentID, request.Engine).Scan(&shared); err != nil {
+			return core.Task{}, err
+		}
+		if shared {
+			return core.Task{}, fmt.Errorf("%w: remove enabled shared allocations and stop shared core instances before uninstalling this core", ErrConflict)
+		}
 	}
 	if request.Action == core.ActionStart || request.Action == core.ActionRestart {
 		if err := requireSafeEngineStart(ctx, tx, request.AgentID, request.Engine); err != nil {
@@ -316,7 +344,7 @@ func (s *Store) createTaskTx(ctx context.Context, tx pgx.Tx, request core.TaskRe
 		  AND ($2 NOT IN ('read-config','read-managed-config') OR NOT EXISTS(
 		      SELECT 1 FROM tasks mutation
 		      WHERE mutation.agent_id=existing.agent_id AND mutation.engine=existing.engine
-		        AND (mutation.action IN ('deploy','install','import-existing') OR mutation.install_if_missing)
+		        AND (mutation.action IN ('deploy','install','uninstall','import-existing') OR mutation.install_if_missing)
 		        AND mutation.status IN ('pending','running') AND mutation.created_at>existing.created_at))
 		ORDER BY created_at DESC LIMIT 1`,
 		task.AgentID, task.Action, task.Engine, task.ConfigID, task.ConfigVersion, task.CoreVersion, task.CoreSource, scope.OwnerID, task.InstallIfMissing), false)

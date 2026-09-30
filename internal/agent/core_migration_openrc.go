@@ -304,34 +304,42 @@ func readOpenRCProcessIdentity(pid int) (openRCProcessIdentity, error) {
 }
 
 func readOpenRCProcessStat(path string) (int, string, error) {
+	parentPID, startTime, _, err := readOpenRCProcessStatWithState(path)
+	return parentPID, startTime, err
+}
+
+func readOpenRCProcessStatWithState(path string) (int, string, byte, error) {
 	contents, err := os.ReadFile(path)
 	if err != nil {
-		return 0, "", err
+		return 0, "", 0, err
 	}
 	separator := strings.LastIndex(string(contents), ") ")
 	if separator < 0 {
-		return 0, "", errors.New("process stat is malformed")
+		return 0, "", 0, errors.New("process stat is malformed")
 	}
 	fields := strings.Fields(string(contents)[separator+2:])
-	if len(fields) < 20 || !decimalProcessID(fields[19]) {
-		return 0, "", errors.New("process stat lacks a valid start time")
+	if len(fields) < 20 || len(fields[0]) != 1 || !decimalProcessID(fields[19]) {
+		return 0, "", 0, errors.New("process stat lacks a valid state or start time")
 	}
 	parentPID, err := strconv.Atoi(fields[1])
 	if err != nil || parentPID < 0 {
-		return 0, "", errors.New("process stat lacks a valid parent PID")
+		return 0, "", 0, errors.New("process stat lacks a valid parent PID")
 	}
-	return parentPID, fields[19], nil
+	return parentPID, fields[19], fields[0][0], nil
 }
 
 func openRCProcessIdentityAlive(identity openRCProcessIdentity) (bool, error) {
-	_, startTime, err := readOpenRCProcessStat(filepath.Join(openRCProcRoot, strconv.Itoa(identity.PID), "stat"))
+	_, startTime, state, err := readOpenRCProcessStatWithState(filepath.Join(openRCProcRoot, strconv.Itoa(identity.PID), "stat"))
 	if errors.Is(err, os.ErrNotExist) {
 		return false, nil
 	}
 	if err != nil {
 		return false, err
 	}
-	return startTime == identity.StartTime, nil
+	// A zombie can retain its /proc entry and start time until its parent
+	// reaps it, but it has already stopped executing. In a container whose
+	// PID 1 does not reap adopted children this can persist indefinitely.
+	return startTime == identity.StartTime && state != 'Z' && state != 'X' && state != 'x', nil
 }
 
 func waitForOpenRCServiceProcessExit(ctx context.Context, identity openRCServiceProcessIdentity) error {

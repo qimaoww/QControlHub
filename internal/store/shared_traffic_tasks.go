@@ -128,7 +128,7 @@ func (s *Store) prepareSharedTaskTx(ctx context.Context, tx pgx.Tx, task *core.T
 // A failed/lost result must not authorize another user to take over a core.
 func markEngineExecutionTx(ctx context.Context, tx pgx.Tx, task core.Task) error {
 	switch task.Action {
-	case core.ActionDeploy, core.ActionImportExisting, core.ActionStart, core.ActionRestart, core.ActionStop:
+	case core.ActionDeploy, core.ActionImportExisting, core.ActionStart, core.ActionRestart, core.ActionStop, core.ActionUninstall:
 		if task.Action == core.ActionDeploy && task.SharedInstance {
 			_, err := tx.Exec(ctx, `INSERT INTO agent_shared_instance_ownership
 				(agent_id,engine,share_id,owner_id,config_id,config_version,running,uncertain,config_uncertain,updated_at)
@@ -174,10 +174,10 @@ func recordEngineOwnershipTx(ctx context.Context, tx pgx.Tx, taskID string, acti
 			ON CONFLICT(agent_id,engine) DO UPDATE SET owner_id=EXCLUDED.owner_id,config_id=EXCLUDED.config_id,
 				config_version=EXCLUDED.config_version,running=true,uncertain=false,config_uncertain=false,traffic_settled=false,updated_at=now()`, taskID)
 		return err
-	case core.ActionStop, core.ActionStart, core.ActionRestart:
+	case core.ActionStop, core.ActionUninstall, core.ActionStart, core.ActionRestart:
 		_, err := tx.Exec(ctx, `INSERT INTO agent_engine_ownership(agent_id,engine,owner_id,config_id,config_version,running,updated_at)
 			SELECT agent_id,engine,'','',0,$2,now() FROM tasks WHERE id=$1
-			ON CONFLICT(agent_id,engine) DO UPDATE SET running=$2,uncertain=false,traffic_settled=$3,updated_at=now()`, taskID, action != core.ActionStop, action == core.ActionStop && settled)
+			ON CONFLICT(agent_id,engine) DO UPDATE SET running=$2,uncertain=false,traffic_settled=$3,updated_at=now()`, taskID, action != core.ActionStop && action != core.ActionUninstall, (action == core.ActionStop || action == core.ActionUninstall) && settled)
 		return err
 	}
 	return nil

@@ -121,7 +121,7 @@ jobs:
 
       - name: Run project checks on musl/OpenRC
         run: |
-          docker run --rm --network host \
+          docker run --rm --init --network host \
             -e QCH_CHROME_BIN=/usr/bin/chromium-browser \
             -e QCH_TEST_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/qcontrolhub?sslmode=disable \
             -e QCH_TEST_SHARDS=4 \
