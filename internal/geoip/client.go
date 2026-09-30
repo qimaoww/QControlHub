@@ -24,13 +24,25 @@ const (
 	defaultFreeIPAPIEndpoint = "https://free.freeipapi.com/api/v1/json"
 	defaultFlagEndpoint      = "https://raw.githubusercontent.com/lipis/flag-icons/main/flags/4x3"
 	requestTimeout           = 5 * time.Second
-	maxResponseBytes         = 64 << 10
-	maxFlagBytes             = 512 << 10 // Detailed coats of arms (e.g. Spain and Serbia) exceed 64 KiB.
-	cacheTTL                 = 48 * time.Hour
-	partialChinaTTL          = 6 * time.Hour
-	maxCachedRegions         = 4096
-	maxCachedFlags           = 512
+	// failureTTL keeps a failing provider out of the request path. Region
+	// resolution runs inside the node list read, so a provider that is blocked,
+	// rate limited, or black-holed would otherwise repeat one full
+	// requestTimeout per unresolved node on every panel navigation. The memory
+	// is per address and lookup mode, so one unreachable address never hides
+	// the rest of the fleet and a GeoJS-only failure leaves fallbacks usable.
+	failureTTL        = 2 * time.Minute
+	maxResponseBytes  = 64 << 10
+	maxFlagBytes      = 512 << 10 // Detailed coats of arms (e.g. Spain and Serbia) exceed 64 KiB.
+	cacheTTL          = 48 * time.Hour
+	partialChinaTTL   = 6 * time.Hour
+	maxCachedRegions  = 4096
+	maxCachedFailures = 4096
+	maxCachedFlags    = 512
 )
+
+// errRecentFailure marks an address whose provider lookup failed inside
+// failureTTL and was therefore skipped instead of retried.
+var errRecentFailure = errors.New("the GeoIP provider failed recently for this address")
 
 // Region is the country/region returned by the GeoIP provider.
 type Region struct {
@@ -45,6 +57,11 @@ type cachedRegion struct {
 	provinceChecked bool
 }
 
+type lookupFailureKey struct {
+	address      string
+	needProvince bool
+}
+
 // Client looks up public addresses and keeps a short-lived in-memory cache.
 type Client struct {
 	http              *http.Client
@@ -55,6 +72,7 @@ type Client struct {
 
 	mu           sync.Mutex
 	cache        map[string]cachedRegion
+	failures     map[lookupFailureKey]time.Time
 	flagCache    map[string][]byte
 	freeAPICalls []time.Time
 }
@@ -71,6 +89,7 @@ func New(httpClient *http.Client) *Client {
 		freeIPAPIEndpoint: defaultFreeIPAPIEndpoint,
 		flagEndpoint:      defaultFlagEndpoint,
 		cache:             make(map[string]cachedRegion),
+		failures:          make(map[lookupFailureKey]time.Time),
 		flagCache:         make(map[string][]byte),
 	}
 }
@@ -92,6 +111,7 @@ func (client *Client) lookup(ctx context.Context, address netip.Addr, needProvin
 		return Region{}, errors.New("GeoIP lookup requires a public IP address")
 	}
 	key := address.String()
+	failureKey := lookupFailureKey{address: key, needProvince: needProvince}
 	now := time.Now()
 	client.mu.Lock()
 	if cached, ok := client.cache[key]; ok {
@@ -99,7 +119,16 @@ func (client *Client) lookup(ctx context.Context, address netip.Addr, needProvin
 			client.mu.Unlock()
 			return cached.value, nil
 		}
-		delete(client.cache, key)
+		if !now.Before(cached.expiresAt) {
+			delete(client.cache, key)
+		}
+	}
+	if failedAt, ok := client.failures[failureKey]; ok {
+		if now.Before(failedAt.Add(failureTTL)) {
+			client.mu.Unlock()
+			return Region{}, errRecentFailure
+		}
+		delete(client.failures, failureKey)
 	}
 	client.mu.Unlock()
 
@@ -111,6 +140,7 @@ func (client *Client) lookup(ctx context.Context, address netip.Addr, needProvin
 		region, err = client.lookupGeoJS(ctx, key)
 	}
 	if err != nil {
+		client.rememberFailure(ctx, failureKey)
 		return Region{}, err
 	}
 	ttl := cacheTTL
@@ -124,6 +154,21 @@ func (client *Client) lookup(ctx context.Context, address netip.Addr, needProvin
 	client.cache[key] = cachedRegion{value: region, expiresAt: now.Add(ttl), provinceChecked: needProvince}
 	client.mu.Unlock()
 	return region, nil
+}
+
+// rememberFailure keeps one address and lookup mode out of the request path for
+// failureTTL. Caller cancellation and deadlines leave it retryable; a provider
+// request timing out while the caller is still active remains a failure.
+func (client *Client) rememberFailure(ctx context.Context, key lookupFailureKey) {
+	if ctx.Err() != nil {
+		return
+	}
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	if len(client.failures) >= maxCachedFailures {
+		client.failures = make(map[lookupFailureKey]time.Time)
+	}
+	client.failures[key] = time.Now()
 }
 
 // The secondary providers are queried when GeoJS fails or cannot identify a

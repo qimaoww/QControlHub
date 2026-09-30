@@ -57,13 +57,14 @@ export function createRegionDisplay({ api, can, state }) {
   return (agent, root) => {
     const avatar = root?.querySelector?.("[data-region-avatar]");
     if (!avatar || !can("agents.read")) return;
-    // The node list resolves both the manual preference and the automatic
-    // GeoIP result, so a card normally renders without any request. The
-    // per-node endpoint stays as a fallback for older control planes.
+    // Current node lists include the region field even when the bounded
+    // lookup is unresolved. That result renders without another request;
+    // older control planes omit the field and need the per-node fallback.
+    const hasInlineRegion = Object.hasOwn(agent, "region_code");
     const manual = geoRegionDetails(agent.labels?.region_code);
     const inline = manual || geoRegionDetails(agent.region_code);
     const metrics = agent.metrics || {};
-    const key = JSON.stringify([agent.id, inline?.code, metrics.public_ipv4, metrics.public_ipv6, metrics.observed_public_ip, metrics.network_interfaces]);
+    const key = JSON.stringify([agent.id, hasInlineRegion, inline?.code, metrics.public_ipv4, metrics.public_ipv6, metrics.observed_public_ip, metrics.network_interfaces]);
     const previous = displays.get(avatar);
     if (previous?.key === key) {
       if (previous.ready) updateRegionAvatar(avatar, previous.region);
@@ -75,12 +76,12 @@ export function createRegionDisplay({ api, can, state }) {
       if (known.ready) updateRegionAvatar(avatar, known.region);
       return;
     }
-    const entry = { key, ready: Boolean(inline), region: inline };
+    const entry = { key, ready: hasInlineRegion || Boolean(inline), region: inline };
     displays.set(avatar, entry);
     const resolved = resolvedNow();
     if (resolved) resolved[agent.id] = entry;
     updateRegionAvatar(avatar, inline);
-    if (inline) return;
+    if (entry.ready) return;
     api(`/agents/${encodeURIComponent(agent.id)}/region`)
       .then((payload) => {
         entry.ready = true;

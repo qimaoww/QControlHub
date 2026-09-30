@@ -12,6 +12,13 @@ import (
 	"github.com/qimaoww/qcontrolhub/internal/serverconfig"
 )
 
+// An empty region_code tells list clients to wait for a later list read instead
+// of starting a per-node lookup when the shared resolution budget expires.
+type agentListItem struct {
+	core.Agent
+	RegionCode string `json:"region_code"`
+}
+
 func (s *Server) listAgents(w http.ResponseWriter, request *http.Request) {
 	list := s.store.ListAgents
 	if s.sessionAllows(request, core.PermissionEnrollmentManage) {
@@ -31,7 +38,11 @@ func (s *Server) listAgents(w http.ResponseWriter, request *http.Request) {
 			agents[index].Metrics = core.HostMetrics{}
 		}
 	}
-	writeJSON(w, http.StatusOK, agents)
+	items := make([]agentListItem, len(agents))
+	for index, agent := range agents {
+		items[index] = agentListItem{Agent: agent, RegionCode: agent.RegionCode}
+	}
+	writeJSON(w, http.StatusOK, items)
 }
 
 func (s *Server) redactAgentMetrics(request *http.Request, agent *core.Agent) {
