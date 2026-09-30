@@ -5,7 +5,7 @@ export function createIPQualityArchiveView({ esc, date }) {
     const figures = (record.archives || []).filter((archive) => [4, 6].includes(archive.family)).map((archive) => {
       const source = `/api/v1/ip-quality/${encodeURIComponent(record.task_id)}/archives/${archive.family}`;
       return `<figure class="ip-quality-archive" data-refresh-key="archive-${esc(record.task_id)}-${archive.family}">
-        <figcaption><strong>IPv${archive.family} 检测报告</strong><a class="button small" href="${source}?download=1" download>下载报告</a></figcaption>
+        <figcaption><div><span class="ip-family v${archive.family}">IPv${archive.family}</span><strong>检测报告</strong></div><a class="button small" href="${source}?download=1" download>下载报告</a></figcaption>
         <a href="${source}" target="_blank" rel="noopener noreferrer" aria-label="放大查看 IPv${archive.family} 检测报告"><img src="${source}" alt="IPv${archive.family} IPQuality 检测报告" loading="lazy" referrerpolicy="no-referrer"></a>
         <details><summary>存档信息</summary><p>${esc(date(archive.rendered_at))}</p><p>SHA-256：${esc(archive.sha256)}</p></details>
       </figure>`;

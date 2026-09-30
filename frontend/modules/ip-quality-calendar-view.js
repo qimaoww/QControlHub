@@ -23,6 +23,8 @@ export function createIPQualityCalendarView({ esc }) {
     }).join("");
     return `<div class="ip-quality-date-picker">
       <button type="button" class="button small" data-ip-quality-latest aria-pressed="${latest}">最新结果</button>
+      <button type="button" class="button small" data-ip-quality-refresh${loading ? " disabled" : ""}>${loading ? "正在读取…" : "刷新记录"}</button>
+      <div class="ip-quality-history-nav">
       <button type="button" class="button small" data-ip-quality-day="-1" data-ip-quality-date-jump="${previousDate}" aria-label="较早的检测日期"${blocked || !previousDate ? " disabled" : ""}>‹</button>
       <div class="ip-quality-date"><span title="${esc(timezone)}">历史日期</span>
         <details class="ip-quality-calendar" data-ip-quality-calendar data-refresh-key="ip-quality-calendar">
@@ -36,7 +38,7 @@ export function createIPQualityCalendarView({ esc }) {
         </details>
       </div>
       <button type="button" class="button small" data-ip-quality-day="1" data-ip-quality-date-jump="${nextDate}" aria-label="较新的检测日期"${blocked || !nextDate ? " disabled" : ""}>›</button>
-      <button type="button" class="button small" data-ip-quality-refresh${loading ? " disabled" : ""}>${loading ? "正在读取…" : "刷新记录"}</button>
+      </div>
     </div>`;
   };
 }
