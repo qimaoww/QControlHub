@@ -2062,6 +2062,7 @@ dialog.config-access-dialog::backdrop{background:rgba(17,20,36,.34);backdrop-fil
   width: 7px;
   height: 7px;
   flex: 0 0 7px;
+  margin: 0;
   border: 1.5px solid currentColor;
   border-radius: 50%;
   background: transparent;
