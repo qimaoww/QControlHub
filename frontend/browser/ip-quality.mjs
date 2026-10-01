@@ -9,7 +9,8 @@ export async function testIPQualityRuntime(mode, preview = false) {
     assert.ok(innerWidth <= 480 && matchMedia("(pointer:coarse)").matches,
       "IP quality mobile scenario requires a real narrow touch viewport");
   }
-  const today = ipQualityToday(), yesterday = nextIPQualityDay(today, -1);
+  const today = ipQualityToday(), yesterday = nextIPQualityDay(today, -1), reportDay = nextIPQualityDay(today, -7);
+  const offlineDay = nextIPQualityDay(today, -3), olderDay = nextIPQualityDay(today, -42);
   const violations = [];
   document.addEventListener("securitypolicyviolation", (event) => violations.push(event.effectiveDirective));
   const session = { role: readonly ? "user" : "admin", user_id: readonly ? "quality-reader" : undefined,
@@ -30,18 +31,21 @@ export async function testIPQualityRuntime(mode, preview = false) {
     Media: { Netflix: { Status: "Yes", Region: "JP", Type: "Native" }, ChatGPT: { Status: "Failed", Region: "", Type: "" } },
     Mail: { Port25: false, Gmail: false, DNSBlacklist: { Total: 439, Clean: 411, Marked: 28, Blacklisted: 0 } },
   });
-  const completeRecord = (taskID = "quality-task") => ({
+  const completeRecord = (taskID = "quality-task", day = reportDay) => ({
     task_id: taskID, agent_id: "quality-a", status: "succeeded",
-    created_at: `${today}T06:00:00Z`, finished_at: `${today}T06:05:00Z`,
-    archives: [4, 6].map((family) => ({ family, rendered_at: `${today}T06:05:00Z`, sha256: "a".repeat(64) })),
+    created_at: `${day}T06:00:00Z`, finished_at: `${day}T06:05:00Z`,
+    archives: [4, 6].map((family) => ({ family, rendered_at: `${day}T06:05:00Z`, sha256: "a".repeat(64) })),
     result: { reports: [report("203.0.113.10"), report("2001:0db8:1234:5678:90ab:cdef:1234:5678")] },
   });
   const fixture = {
-    records: [completeRecord()],
+    records: [completeRecord(), { ...completeRecord("quality-offline", nextIPQualityDay(today, -3)), agent_id: "quality-c" }],
     // A plan enabled by another administrator is still the node's active plan.
     schedules: [{ agent_id: "quality-a", enabled: true, next_run_at: new Date(Date.now() + 86400000).toISOString() }],
-    calls: [], failed: false, checks: 0, scheduleWrites: 0,
+    calls: [], failed: false, checks: 0, scheduleWrites: 0, prunedBefore: "",
   };
+  const historicalRecords = [completeRecord(), { ...completeRecord("quality-offline", offlineDay), agent_id: "quality-c" },
+    completeRecord("quality-older", olderDay), { task_id: "historical-failure", agent_id: "quality-a", status: "failed",
+      created_at: `${yesterday}T06:00:00Z`, error: "检测未完成，请检查节点网络。" }];
   window.__ipQualityFixture = fixture;
   let releaseShell;
   const shellReady = new Promise(resolve => { releaseShell = resolve; });
@@ -61,18 +65,20 @@ export async function testIPQualityRuntime(mode, preview = false) {
     if (path === "/ip-quality" && method === "GET") {
       if (fixture.failed) return json({ error: "检测记录暂不可用" }, 503);
       const date = url.searchParams.get("date");
-      if (date === today) await historyReady;
-      const records = date === today ? fixture.records : date === yesterday ? [{
-        task_id: "historical-failure", agent_id: "quality-a", status: "failed",
-        created_at: `${yesterday}T06:00:00Z`, error: "检测未完成，请检查节点网络。",
-      }] : [];
-      return json({ date, timezone: url.searchParams.get("timezone"), records, schedules: fixture.schedules });
+      if (!date) await historyReady;
+      const retainedHistory = historicalRecords.filter((record) => record.created_at.slice(0, 10) >= fixture.prunedBefore);
+      const retainedLatest = fixture.records.filter((record) => !record.created_at || record.created_at.slice(0, 10) >= fixture.prunedBefore);
+      const records = !date ? retainedLatest : retainedHistory.filter((record) => record.created_at.slice(0, 10) === date);
+      const dates = [...new Set([...retainedHistory, ...retainedLatest].filter((record) => record.created_at)
+        .map((record) => record.created_at.slice(0, 10)))].sort().reverse();
+      return json({ date: date || "", timezone: url.searchParams.get("timezone"), dates, records, schedules: fixture.schedules });
     }
     if (path === "/ip-quality" && method === "POST") {
       assert.ok(!readonly, "read-only page submitted a check");
       assert.equal(JSON.parse(options.body).agent_id, "quality-a");
       fixture.checks += 1;
-      fixture.records = [{ task_id: "new-quality-task", agent_id: "quality-a", status: "pending", created_at: new Date().toISOString() }];
+      fixture.records = [{ task_id: "new-quality-task", agent_id: "quality-a", status: "pending", created_at: new Date().toISOString(),
+        last_successful: fixture.records.find((record) => record.agent_id === "quality-a") }];
       return json({ id: "new-quality-task", status: "pending", action: "ip-quality" }, 201);
     }
     if (path === "/ip-quality/schedules/quality-a" && method === "PUT") {
@@ -97,6 +103,10 @@ export async function testIPQualityRuntime(mode, preview = false) {
     "partial read displayed zero detections");
   releaseHistory();
   await waitFor(() => card()?.textContent.includes("已完成"), "IP quality page did not load");
+  assert.ok(fixture.calls.filter((call) => call.path === "/ip-quality").every((call) => !new URLSearchParams(call.search).has("date")),
+    "default view requested a single day");
+  assert.equal(document.querySelector("[data-ip-quality-latest]").getAttribute("aria-pressed"), "true");
+  assert.equal(card().querySelector("time").dateTime, `${reportDay}T06:05:00Z`, "default view lost the report from last week");
   releaseShell();
   assert.ok(document.querySelector('.dock-nav a[href="#ip-quality"]'), "IP quality navigation is missing");
   // The project-standard context sidebar filters the page down to one node.
@@ -132,16 +142,35 @@ export async function testIPQualityRuntime(mode, preview = false) {
     assert.equal(card().querySelector("[data-ip-quality-schedule]").getAttribute("aria-pressed"), "true",
       "an existing administrator plan was shown as disabled");
   }
-  const dateInput = document.querySelector("[data-ip-quality-date]");
-  const readsBeforeClear = fixture.calls.filter((call) => call.path === "/ip-quality" && call.method === "GET").length;
-  dateInput.value = "";
-  dateInput.dispatchEvent(new Event("change", { bubbles: true }));
-  assert.equal(dateInput.value, today, "clearing the date did not restore the selected day");
-  // The real five-second timer must survive rejected input, not just a manual
-  // refresh. Leave enough of its interval for the shared four-second wait.
+  const dateSummary = document.querySelector("[data-ip-quality-date]");
+  if (mode === "ip-quality-mobile") assert.ok(dateSummary.getBoundingClientRect().width >= 150,
+    "mobile history date is too narrow to read");
+  assert.equal(dateSummary.dataset.selectedDate, "", "latest view was presented as today's results");
+  dateSummary.click();
+  const calendar = document.querySelector("[data-ip-quality-calendar]");
+  assert.ok(calendar.open, "history calendar did not open");
+  const popover = calendar.querySelector(".ip-quality-calendar-popover");
+  const bounds = popover.getBoundingClientRect();
+  assert.ok(bounds.left >= 0 && bounds.right <= innerWidth, "calendar overflows the viewport");
+  const unrecorded = calendar.querySelector("[data-ip-quality-date-option]:disabled");
+  assert.ok(unrecorded && Number(getComputedStyle(unrecorded).opacity) < 0.6, "unrecorded days are not visibly disabled");
+  const readsBeforeDisabled = fixture.calls.filter((call) => call.path === "/ip-quality" && call.method === "GET").length;
+  unrecorded.click();
+  assert.equal(fixture.calls.filter((call) => call.path === "/ip-quality" && call.method === "GET").length, readsBeforeDisabled,
+    "disabled date requested history");
+  const currentMonthLabel = popover.querySelector("header strong").textContent;
+  calendar.querySelector('[data-ip-quality-month][aria-label="上个月"]').click();
+  assert.notEqual(popover.querySelector("header strong").textContent, currentMonthLabel, "calendar month did not change");
+  calendar.querySelector('[data-ip-quality-month][aria-label="下个月"]').click();
+  assert.equal(popover.querySelector("header strong").textContent, currentMonthLabel, "calendar month did not return");
+  assert.equal(fixture.calls.filter((call) => call.path === "/ip-quality" && call.method === "GET").length, readsBeforeDisabled,
+    "browsing months requested report data");
+  calendar.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  assert.ok(!calendar.open && document.activeElement === dateSummary, "Escape did not close the calendar and restore focus");
+  // Disabled dates and month browsing must leave the real poller active.
   await delay(2000);
-  await waitFor(() => fixture.calls.filter((call) => call.path === "/ip-quality" && call.method === "GET").length > readsBeforeClear,
-    "clearing the date stopped automatic refresh");
+  await waitFor(() => fixture.calls.filter((call) => call.path === "/ip-quality" && call.method === "GET").length > readsBeforeDisabled,
+    "calendar interaction stopped automatic refresh");
   const refresh = async () => {
     const before = fixture.calls.filter((call) => call.path === "/ip-quality").length;
     document.querySelector("[data-ip-quality-refresh]").click();
@@ -156,6 +185,8 @@ export async function testIPQualityRuntime(mode, preview = false) {
       sidebarLink(id).click();
       await waitFor(() => panel(id), `selecting ${id} did not switch the panel`);
       assert.ok(panel(id).querySelector("[data-ip-quality-run]").disabled, reason);
+      if (id === "quality-c") assert.equal(panel(id).querySelector("time").dateTime, `${nextIPQualityDay(today, -3)}T06:05:00Z`,
+        "latest view used one shared date for different nodes");
       assert.ok(sidebarLink(id).classList.contains("active"), `${id} was not highlighted after selection`);
       assert.equal(document.querySelectorAll("[data-ip-quality-panel]").length, 1, "selection left stale panels behind");
     }
@@ -163,7 +194,7 @@ export async function testIPQualityRuntime(mode, preview = false) {
     await waitFor(() => card(), "returning to the recorded node failed");
   }
   document.querySelector('[data-ip-quality-day="-1"]').click();
-  await waitFor(() => document.querySelector("[data-ip-quality-date]").value === yesterday &&
+  await waitFor(() => document.querySelector("[data-ip-quality-date]").dataset.selectedDate === yesterday &&
     card()?.textContent.includes("检测失败"), "previous-day navigation did not load history");
   assert.equal(card().querySelector(".ip-quality-report"), null, "previous date retained today's report");
   assert.equal(sidebar().querySelectorAll("[data-ip-quality-agent]").length, 1, "history lists nodes with no records");
@@ -172,12 +203,30 @@ export async function testIPQualityRuntime(mode, preview = false) {
   assert.equal(document.querySelector("[data-ip-quality-schedule]"), null, "history can change schedules");
   assert.ok(!card().textContent.includes("节点在线"), "history displays a current online state");
   document.querySelector('[data-ip-quality-day="-1"]').click();
-  await waitFor(() => document.querySelector(".ip-quality-workspace .empty")?.textContent.includes("当天没有检测记录"),
-    "empty history did not show its own empty state");
-  assert.equal(sidebar().querySelectorAll("[data-ip-quality-agent]").length, 0, "empty history still offered a node");
-  document.querySelector("[data-ip-quality-today]").click();
+  await waitFor(() => document.querySelector("[data-ip-quality-date]").dataset.selectedDate === offlineDay && panel("quality-c"),
+    "history navigation did not skip the unrecorded day");
+  document.querySelector("[data-ip-quality-date]").click();
+  document.querySelector(`[data-ip-quality-date-option="${reportDay}"]`).click();
+  await waitFor(() => document.querySelector("[data-ip-quality-date]").dataset.selectedDate === reportDay && card(),
+    "available calendar date did not load history");
+  assert.ok(!document.querySelector("[data-ip-quality-calendar]").open, "selecting a date left the calendar open");
+  document.querySelector('[data-ip-quality-day="-1"]').click();
+  await waitFor(() => document.querySelector("[data-ip-quality-date]").dataset.selectedDate === olderDay &&
+    card()?.querySelector("time")?.dateTime === `${olderDay}T06:05:00Z`, "older history did not load");
+  fixture.prunedBefore = reportDay;
+  await refresh();
+  document.querySelector("[data-ip-quality-date]").click();
+  const retainedDate = document.querySelector(`[data-ip-quality-date-option="${reportDay}"]`);
+  assert.ok(retainedDate && !retainedDate.disabled, "pruning left the calendar outside the retained date range");
+  assert.ok(document.querySelector('[data-ip-quality-month][aria-label="上个月"]').disabled,
+    "pruned calendar allowed navigation before its oldest retained month");
+  retainedDate.click();
+  await waitFor(() => document.querySelector("[data-ip-quality-date]").dataset.selectedDate === reportDay && card(),
+    "calendar could not select a retained date after pruning");
+  fixture.prunedBefore = "";
+  document.querySelector("[data-ip-quality-latest]").click();
   await waitFor(() => card()?.textContent.includes("已完成") && !document.querySelector("[data-ip-quality-refresh]").disabled,
-    "return to today failed");
+    "return to latest results failed");
   fixture.failed = true;
   await refresh();
   assert.ok(document.querySelector(".ip-quality-alert")?.textContent.includes("检测记录暂不可用"), "API error was hidden");
@@ -196,8 +245,19 @@ export async function testIPQualityRuntime(mode, preview = false) {
     await waitFor(() => card()?.textContent.includes("等待执行"), "queued check was not shown");
     assert.equal(fixture.checks, 1, "check was submitted more than once");
     assert.ok(card().querySelector("[data-ip-quality-run]").disabled, "active check can be duplicated");
-    fixture.records = [completeRecord("new-quality-task")];
+    assert.ok(card().textContent.includes("上次成功检测") && card().querySelector("time").dateTime === `${reportDay}T06:05:00Z`,
+      "fresh check discarded the previous report");
+    assert.equal(card().querySelectorAll(".ip-quality-archive img").length, 2, "fresh check removed the previous archives");
+    assert.ok(card().querySelector(".ip-quality-archive img").src.includes("quality-task/archives"),
+      "previous archive was attributed to the pending task");
+    fixture.records[0].status = "failed";
+    fixture.records[0].error = "本次检测超时";
     await refresh();
+    assert.ok(card().textContent.includes("最新检测未成功") && card().textContent.includes("本次检测超时"));
+    assert.ok(!card().querySelector("[data-ip-quality-run]").disabled, "failed check prevented retry");
+    fixture.records = [completeRecord("new-quality-task", today)];
+    await refresh();
+    assert.ok(!card().textContent.includes("上次成功检测"), "completed check still shows the previous report");
     card().querySelector("[data-ip-quality-schedule]").click();
     await confirm(false);
     await waitFor(() => card()?.querySelector("[data-ip-quality-schedule]").getAttribute("aria-pressed") === "false",

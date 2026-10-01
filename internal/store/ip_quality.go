@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -67,23 +68,49 @@ func saveIPQualityResultTx(ctx context.Context, tx pgx.Tx, taskID string, result
 }
 
 // ListIPQualityRecords returns the latest attempt per node on the requested
-// local submission date. All filters run in SQL, before loading report bytes.
+// local submission date. An empty date returns each node's latest check across
+// all dates, with its last successful report if the newest check has no result.
+// All access filters run in SQL, before loading report bytes.
 func (s *Store) ListIPQualityRecords(ctx context.Context, date, timezone string) ([]core.IPQualityRecord, error) {
-	start, end, err := core.IPQualityDateRange(date, timezone)
+	validationDate := date
+	if validationDate == "" {
+		validationDate = time.Now().UTC().Format(time.DateOnly)
+	}
+	start, end, err := core.IPQualityDateRange(validationDate, timezone)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalid, err)
 	}
-	args := []any{start, end}
+	args := []any{}
+	dateFilter := ""
+	if date != "" {
+		args = append(args, start, end)
+		dateFilter = " AND t.created_at>=$1 AND t.created_at<$2"
+	}
 	where := ownerClause(ctx, "t.owner_id", &args)
 	where += agentAdministrationClause(ctx, "t.agent_id", &args)
+	lastSuccessful := "NULL::jsonb"
+	if date == "" {
+		lastSuccessful = `CASE WHEN latest.status<>'succeeded' THEN (
+			SELECT jsonb_build_object('task_id',t.id,'agent_id',t.agent_id,'status',t.status,
+				'created_at',t.created_at,'started_at',t.started_at,'finished_at',t.finished_at,
+				'result',previous.result - 'reports_text','archives',
+				COALESCE((SELECT jsonb_agg(jsonb_build_object('family',a.family,
+					'sha256',a.sha256,'size',octet_length(a.content),'rendered_at',a.rendered_at) ORDER BY a.family)
+					FROM ip_quality_archives a WHERE a.task_id=t.id),'[]'::jsonb))
+			FROM tasks t JOIN ip_quality_reports previous ON previous.task_id=t.id
+			WHERE t.action='ip-quality' AND t.agent_id=latest.agent_id AND t.status='succeeded'
+				AND (t.created_at,t.id)<(latest.created_at,latest.id)` + where + `
+			ORDER BY t.created_at DESC,t.id DESC LIMIT 1
+		) END`
+	}
 	rows, err := s.pool.Query(ctx, `SELECT latest.id,latest.agent_id,latest.status,COALESCE(latest.error,''),
 		latest.created_at,latest.started_at,latest.finished_at,r.result - 'reports_text',
         COALESCE((SELECT jsonb_agg(jsonb_build_object('family',a.family,
             'sha256',a.sha256,'size',octet_length(a.content),'rendered_at',a.rendered_at) ORDER BY a.family)
-            FROM ip_quality_archives a WHERE a.task_id=latest.id),'[]'::jsonb) FROM (
+            FROM ip_quality_archives a WHERE a.task_id=latest.id),'[]'::jsonb),`+lastSuccessful+` FROM (
 			SELECT DISTINCT ON (t.agent_id) t.id,t.agent_id,t.status,t.error,t.created_at,t.started_at,t.finished_at
 			FROM tasks t JOIN agents a ON a.id=t.agent_id AND a.revoked_at IS NULL
-			WHERE t.action='ip-quality' AND t.created_at>=$1 AND t.created_at<$2`+where+`
+			WHERE t.action='ip-quality'`+dateFilter+where+`
 			ORDER BY t.agent_id,t.created_at DESC,t.id DESC
 		) latest LEFT JOIN ip_quality_reports r ON r.task_id=latest.id
 		ORDER BY latest.created_at DESC,latest.id DESC`, args...)
@@ -94,9 +121,9 @@ func (s *Store) ListIPQualityRecords(ctx context.Context, date, timezone string)
 	records := make([]core.IPQualityRecord, 0)
 	for rows.Next() {
 		var record core.IPQualityRecord
-		var content, archives []byte
+		var content, archives, previous []byte
 		if err := rows.Scan(&record.TaskID, &record.AgentID, &record.Status, &record.Error,
-			&record.CreatedAt, &record.StartedAt, &record.FinishedAt, &content, &archives); err != nil {
+			&record.CreatedAt, &record.StartedAt, &record.FinishedAt, &content, &archives, &previous); err != nil {
 			return nil, err
 		}
 		if len(content) > 0 {
@@ -107,7 +134,42 @@ func (s *Store) ListIPQualityRecords(ctx context.Context, date, timezone string)
 		if err := json.Unmarshal(archives, &record.Archives); err != nil {
 			return nil, err
 		}
+		if len(previous) > 0 {
+			if err := json.Unmarshal(previous, &record.LastSuccessful); err != nil {
+				return nil, err
+			}
+		}
 		records = append(records, record)
 	}
 	return records, rows.Err()
+}
+
+// ListIPQualityDates lists available local submission days using the same
+// account and node visibility rules as report history, without loading reports.
+func (s *Store) ListIPQualityDates(ctx context.Context, timezone string) ([]string, error) {
+	if _, _, err := core.IPQualityDateRange(time.Now().UTC().Format(time.DateOnly), timezone); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalid, err)
+	}
+	if timezone == "" {
+		timezone = "UTC"
+	}
+	args := []any{timezone}
+	where := ownerClause(ctx, "t.owner_id", &args)
+	where += agentAdministrationClause(ctx, "t.agent_id", &args)
+	rows, err := s.pool.Query(ctx, `SELECT DISTINCT to_char(t.created_at AT TIME ZONE $1,'YYYY-MM-DD') AS date
+		FROM tasks t JOIN agents a ON a.id=t.agent_id AND a.revoked_at IS NULL
+		WHERE t.action='ip-quality'`+where+` ORDER BY date DESC`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	dates := make([]string, 0)
+	for rows.Next() {
+		var date string
+		if err := rows.Scan(&date); err != nil {
+			return nil, err
+		}
+		dates = append(dates, date)
+	}
+	return dates, rows.Err()
 }
