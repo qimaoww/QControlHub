@@ -16,7 +16,9 @@ export function agentPresenceMarkup(status, { nodeLabel = false, tracked = false
 export function updateAgentPresence(root, status) {
   const state = presenceState(status);
   root.querySelectorAll("[data-agent-presence]").forEach((badge) => {
-    badge.dataset.agentPresence = state;
-    badge.querySelector("b").textContent = presenceLabel(state, badge.hasAttribute("data-presence-node-label"));
+    if (badge.dataset.agentPresence !== state) badge.dataset.agentPresence = state;
+    const label = badge.querySelector("b");
+    const text = presenceLabel(state, badge.hasAttribute("data-presence-node-label"));
+    if (label.textContent !== text) label.textContent = text;
   });
 }

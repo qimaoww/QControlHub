@@ -20,7 +20,7 @@ export function agentStructureSignature(agents = []) {
 // Roster changes, service structure, and metrics share one interaction-aware
 // refresh lifecycle. Only a successful render advances the structural markers.
 export function createAgentRefresh(ctx, { can, cardInteractions, renderAgentPage, syncBatchSnapshot, loadRegionDisplay }) {
-  const { api, state, can: permission, statusTone, serviceStatusName, heartbeat, ago, percent, bytes, conciseVersion, rate, serviceActionDisabled, trafficChart, notify } = ctx;
+  const { api, state, can: permission, statusTone, serviceStatusName, heartbeat, date, ago, percent, bytes, conciseVersion, rate, serviceActionDisabled, trafficChart, notify } = ctx;
   const agentPageActive = () => state.route === "node-settings" || state.route === "agents";
   const metricsRefresh = createRefreshChannel({
     isCurrent: agentPageActive,
@@ -138,7 +138,11 @@ function updateAgentMetrics(item) {
   root.dataset.available = metrics.collected_at ? "1" : "0";
   updateAgentPresence(root, item.status);
   const lastSeen = root.querySelector("[data-agent-heartbeat]");
-  if (lastSeen) lastSeen.textContent = heartbeat(item.last_seen);
+  if (lastSeen) {
+    const text = heartbeat(item.last_seen);
+    if (lastSeen.textContent !== text) lastSeen.textContent = text;
+    lastSeen.title = item.last_seen ? `上次心跳：${date(item.last_seen)}` : "尚未收到心跳";
+  }
   root
     .querySelectorAll("[data-agent-version]")
     .forEach((element) => (element.textContent = item.version || "未知"));

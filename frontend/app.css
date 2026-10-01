@@ -2035,7 +2035,7 @@ dialog.config-access-dialog::backdrop{background:rgba(17,20,36,.34);backdrop-fil
   justify-content: center;
   flex: 0 0 auto;
   width: max-content;
-  min-height: 25px;
+  min-height: 27px;
   gap: 7px;
   padding: 3px 9px;
   border: 1px solid color-mix(in srgb, var(--presence-ink) 18%, var(--line));
@@ -2043,7 +2043,7 @@ dialog.config-access-dialog::backdrop{background:rgba(17,20,36,.34);backdrop-fil
   background: linear-gradient(color-mix(in srgb, var(--surface) 35%, transparent), transparent), var(--presence-surface);
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--surface) 60%, transparent);
   color: var(--presence-ink);
-  font-size: max(10px, calc(10px * var(--ui-font-scale)));
+  font-size: max(11px, calc(11px * var(--ui-font-scale)));
   line-height: 1.4;
   white-space: nowrap;
   vertical-align: middle;
@@ -2075,23 +2075,44 @@ dialog.config-access-dialog::backdrop{background:rgba(17,20,36,.34);backdrop-fil
 }
 .node-card-state {
   display: grid;
-  grid-template-columns: auto auto;
+  grid-template-columns: auto;
   gap: 4px 7px;
 }
+.node-card-state:has(> .agent-shared-badge) { grid-template-columns: auto auto; }
+.node-card-state > .agent-presence { justify-self: end; }
 .node-card-state > small {
   grid-column: 1 / -1;
   justify-self: end;
+  max-inline-size: 9em;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: end;
+  line-height: 1.4;
   font-variant-numeric: tabular-nums;
 }
+.node-card-state > small, .node-live-state > small { font-size: max(10px, calc(10px * var(--ui-font-scale))); }
+.node-card-state > .agent-shared-badge, .node-live-state > .agent-shared-badge { min-height: 27px; border-radius: 999px; padding-inline: 9px; }
 .node-card-state .agent-presence > b { font-size: inherit; }
 .node-live-state { flex-wrap: wrap; gap: 7px; }
 .node-live-state > small:before { content: none; }
 .node-live-state .agent-presence > b { color: inherit; }
 .context-list > a:has(> .agent-presence) { grid-template-columns: minmax(0, 1fr) auto; }
 .context-list > a:has(> .context-engine):has(> .agent-presence) { grid-template-columns: auto minmax(0, 1fr) auto; }
-.context-list > a > .agent-presence { gap: 6px; padding-inline: 7px; }
+.context-list > a > .agent-presence { min-height: 25px; gap: 6px; padding-inline: 7px; font-size: max(10px, calc(10px * var(--ui-font-scale))); }
 .access-control-scope:has(> .agent-presence) { flex-wrap: wrap; }
 .ip-quality-node-panel > header .ip-quality-node-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.client-node-summary { flex-direction: column; align-items: flex-end; gap: 6px; }
+.page-substore-sync .substore-agent-summary { display: grid; justify-items: end; gap: 4px; }
+.page-substore-sync .substore-agent-summary > small { color: var(--muted); font-size: calc(10px * var(--ui-font-scale)); font-weight: 500; font-variant-numeric: tabular-nums; }
+@media (max-width: 820px) and (pointer: coarse) {
+  .client-access-node-card > .node-card-head { grid-template-columns: 38px minmax(0, 1fr) auto; }
+  .client-node-summary > .agent-presence { grid-column: 3; grid-row: 1; }
+  .client-node-engines { grid-column: 2 / -1; justify-content: flex-start; }
+}
+@media (forced-colors: active) {
+  .agent-presence { border-color: CanvasText; background: Canvas; box-shadow: none; color: CanvasText; }
+  .agent-presence > .agent-presence-dot { forced-color-adjust: none; box-shadow: none; }
+}
 @media (prefers-reduced-motion: reduce) {
   .agent-presence { transition: none; }
 }
