@@ -193,3 +193,31 @@ func waitForOpenRCChildPID(t *testing.T, service string, within time.Duration) i
 	t.Fatalf("OpenRC child PID metadata did not appear for %s", service)
 	return 0
 }
+
+// OpenRC publishes its PID before entering the supervisor loop. A stop in
+// that interval can exit the supervisor without stopping the child. Wait for
+// its blocking control-FIFO open before exercising a normal service stop.
+func waitForOpenRCSupervisorLoop(t *testing.T, identity openRCServiceProcessIdentity, within time.Duration) {
+	t.Helper()
+	path := filepath.Join(openRCProcRoot, fmt.Sprintf("%d", identity.Supervisor.PID), "wchan")
+	deadline := time.Now().Add(within)
+	var waitPoint string
+	for time.Now().Before(deadline) {
+		for _, process := range []openRCProcessIdentity{identity.Supervisor, identity.Child} {
+			alive, err := openRCProcessIdentityAlive(process)
+			if err != nil || !alive {
+				t.Fatalf("OpenRC process %d exited before supervisor readiness: alive=%t, error=%v", process.PID, alive, err)
+			}
+		}
+		contents, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read OpenRC supervisor wait point: %v", err)
+		}
+		waitPoint = strings.TrimSpace(string(contents))
+		if waitPoint == "wait_for_partner" {
+			return
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("OpenRC supervisor did not enter its control-FIFO wait; last wait point=%q", waitPoint)
+}
