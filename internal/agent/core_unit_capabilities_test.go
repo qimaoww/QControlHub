@@ -119,7 +119,7 @@ func TestXrayOutboundMarkCapabilityRecognition(t *testing.T) {
 
 func writeExecutable(t *testing.T, path, contents string) {
 	t.Helper()
-	if err := os.WriteFile(path, []byte(contents), 0o700); err != nil {
+	if err := writeFixtureExecutable(path, []byte(contents)); err != nil {
 		t.Fatal(err)
 	}
 }
