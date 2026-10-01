@@ -13,7 +13,7 @@ const assertSharedStatusOrder = (root) => {
     const status = root.querySelector("[data-agent-status-label]");
     assert.ok(badge && status, "共享节点缺少共享标记或在线状态");
     const badgeRect = badge.getBoundingClientRect(), statusRect = status.getBoundingClientRect();
-    assert.ok(badge.nextElementSibling?.matches("[data-agent-status-dot]"), "共享标记未紧邻在线状态左侧");
+    assert.ok(badge.nextElementSibling?.matches("[data-agent-presence]"), "共享标记未紧邻在线状态左侧");
     assert.ok(badgeRect.right <= statusRect.left, "共享标记没有显示在在线状态左侧");
     assert.ok(Math.abs((badgeRect.top + badgeRect.bottom - statusRect.top - statusRect.bottom) / 2) <= 1,
       "共享标记与在线状态没有同排对齐");

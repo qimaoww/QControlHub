@@ -1,4 +1,5 @@
 import { regionAvatarMarkup } from "./regions.js";
+import { agentPresenceMarkup } from "./agent-presence.js";
 
 import { groupClientAccessEntries, clientAccessAddressChoices, clientAccessExport } from "./client-access-model.js";
 export function createClientAccessResults({ esc, engineName, can }) {
@@ -86,7 +87,7 @@ export function createClientAccessResults({ esc, engineName, can }) {
             return `<section class="client-access-engine-group"><div>${profiles || `<div class="client-access-entry-empty"><p>需要先设置可访问的节点地址。</p>${configLink(entry)}</div>`}</div></section>`;
           })
           .join("");
-        return `<article class="client-access-node-card node-card" data-refresh-key="client-access-node-${esc(group.agent_id)}"><header class="node-card-head">${regionAvatarMarkup({ id: group.agent_id }, esc, false)}<div class="node-card-title"><strong>${esc(firstEntry.agent_name)}</strong><small class="client-node-meta"><span>${esc(agent.os || "节点")}</span><span>${esc(agent.arch || "")}</span><code>${esc(firstEntry.address || "未设置地址")}</code></small></div><div class="client-node-summary"><div class="client-node-engines" aria-label="节点内核和入站数量">${engineSummary}</div></div></header>${addressWarning}<div class="client-access-node-engines">${engineSections}</div></article>`;
+        return `<article class="client-access-node-card node-card" data-refresh-key="client-access-node-${esc(group.agent_id)}"><header class="node-card-head">${regionAvatarMarkup({ id: group.agent_id }, esc, false)}<div class="node-card-title"><strong>${esc(firstEntry.agent_name)}</strong><small class="client-node-meta"><span>${esc(agent.os || "节点")}</span><span>${esc(agent.arch || "")}</span><code>${esc(firstEntry.address || "未设置地址")}</code></small></div><div class="client-node-summary">${agentPresenceMarkup(agent.status || firstEntry.agent_status)}<div class="client-node-engines" aria-label="节点内核和入站数量">${engineSummary}</div></div></header>${addressWarning}<div class="client-access-node-engines">${engineSections}</div></article>`;
       })
       .join("");
   }

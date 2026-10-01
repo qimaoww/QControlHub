@@ -41,8 +41,8 @@ export function createAccessControlBindings({ api, state, notify, confirmAction,
       const inputs = [...form.querySelectorAll('input[type="checkbox"]')];
       const cleanState =
         form.dataset.agentStatus === "online"
-          ? "节点在线"
-          : "节点离线，暂不可提交";
+          ? ""
+          : "暂不可提交";
       inputs.forEach((input) => {
         input.dataset.initialChecked = String(input.checked);
         input.onchange = () => {

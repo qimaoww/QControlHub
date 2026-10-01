@@ -1,3 +1,5 @@
+import { agentPresenceMarkup } from "./agent-presence.js";
+
 export function createAccessControlView({ state, esc, engineName, shell }, { editable }) {
   const card = (entry) => `<article class="access-control-card" data-refresh-key="access-control-${esc(entry.agent_id)}-${esc(entry.engine)}-${esc(entry.tag)}">
           <header><div><span class="engine-badge ${esc(entry.engine)}">${esc(engineName(entry.engine))}</span><span><strong>${esc(entry.tag)}</strong><small>${esc(entry.kind || "入站")} · ${esc(entry.agent_name)}</small></span></div><code>:${Number(entry.port)}</code></header>
@@ -9,7 +11,7 @@ export function createAccessControlView({ state, esc, engineName, shell }, { edi
             <input type="hidden" name="expected_version" value="${Number(entry.config_version)}">
             <label class="access-control-option"><input type="checkbox" name="block_mainland_destination" ${entry.block_mainland_destination ? "checked" : ""} ${editable() ? "" : "disabled"}><span><b>禁止访问大陆目标</b><small>${entry.engine === "ss-rust" ? "按当前 CN IP 源拒绝 IPv4 与大陆域名；同一 ssserver 的全部入站生效。" : "仅当前入站，按大陆 CIDR 拦截目标 IPv4 / IPv6。"}</small></span><em>${entry.block_mainland_destination ? "已启用" : "未启用"}</em></label>
             <label class="access-control-option"><input type="checkbox" name="block_mainland_source" ${entry.block_mainland_source ? "checked" : ""} ${editable() && (entry.kind !== "wireguard" || entry.block_mainland_source) ? "" : "disabled"}><span><b>禁止大陆来源连接</b><small>${entry.kind === "wireguard" ? "仅识别隧道内源地址；公网来源限制须在节点防火墙配置。已有此规则请关闭。" : entry.engine === "ss-rust" ? "nftables 按当前 CN IP 源拦截此端口的 IPv4 来源，独立于 ssserver 配置。" : "仅当前端口，按大陆 CIDR 拦截来源 IPv4 / IPv6。"}</small></span><em>${entry.kind === "wireguard" ? "不支持" : entry.block_mainland_source ? "已启用" : "未启用"}</em></label>
-            <footer><span class="access-control-scope" aria-live="polite"><i class="${entry.agent_status === "online" ? "ok" : ""}"></i><span data-access-control-state-text>${entry.agent_status === "online" ? "节点在线" : "节点离线，暂不可提交"}</span></span>${editable() ? `<div><button class="button small" type="submit" data-access-intent="validate" ${entry.agent_status === "online" ? "" : "disabled"}>保存并校验</button><button class="button small primary" type="submit" data-access-intent="deploy" ${entry.agent_status === "online" ? "" : "disabled"}>保存并部署</button></div>` : ""}</footer>
+            <footer><span class="access-control-scope" aria-live="polite">${agentPresenceMarkup(entry.agent_status, { nodeLabel: true })}<span data-access-control-state-text>${entry.agent_status === "online" ? "" : "暂不可提交"}</span></span>${editable() ? `<div><button class="button small" type="submit" data-access-intent="validate" ${entry.agent_status === "online" ? "" : "disabled"}>保存并校验</button><button class="button small primary" type="submit" data-access-intent="deploy" ${entry.agent_status === "online" ? "" : "disabled"}>保存并部署</button></div>` : ""}</footer>
           </form>
         </article>`;
 

@@ -101,10 +101,6 @@
 .live-config-details{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:4px 20px 16px;background:var(--surface);color:var(--ink-2);font-size:calc(12px * var(--ui-font-scale));line-height:1.5}
 .live-config-detail{display:inline-flex;align-items:center;gap:6px;min-height:30px;max-width:100%;padding:5px 10px;border-radius:6px;background:var(--surface-2);overflow-wrap:anywhere}
 .live-config-detail-label{color:var(--muted)}
-.live-config-node-state{font-weight:600}
-.live-config-node-state[data-state=online]{color:var(--green);background:var(--green-soft)}
-.live-config-node-state[data-state=offline]{color:var(--amber);background:var(--amber-soft)}
-.live-config-node-state[data-state=offline] .status-dot{background:var(--amber)}
 .live-config-details>.live-engine-loading{flex-basis:100%;font-size:calc(11px * var(--ui-font-scale))}
 .live-config-workspace .live-config-editor{display:block;min-width:0}
 .live-config-workspace .code-workspace{min-width:0;border:0;border-radius:0}

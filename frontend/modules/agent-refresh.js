@@ -1,5 +1,6 @@
 import { createRefreshChannel } from "./refresh.js";
 import { updatePublicIPDisplays } from "./agent-addresses.js";
+import { updateAgentPresence } from "./agent-presence.js";
 
 export function agentStructureSignature(agents = []) {
   return JSON.stringify(
@@ -19,7 +20,7 @@ export function agentStructureSignature(agents = []) {
 // Roster changes, service structure, and metrics share one interaction-aware
 // refresh lifecycle. Only a successful render advances the structural markers.
 export function createAgentRefresh(ctx, { can, cardInteractions, renderAgentPage, syncBatchSnapshot, loadRegionDisplay }) {
-  const { api, state, can: permission, statusTone, serviceStatusName, heartbeat, ago, percent, bytes, conciseVersion, rate, serviceActionDisabled, trafficChart, notify } = ctx;
+  const { api, state, can: permission, statusTone, serviceStatusName, heartbeat, date, ago, percent, bytes, conciseVersion, rate, serviceActionDisabled, trafficChart, notify } = ctx;
   const agentPageActive = () => state.route === "node-settings" || state.route === "agents";
   const metricsRefresh = createRefreshChannel({
     isCurrent: agentPageActive,
@@ -135,12 +136,13 @@ function updateAgentMetrics(item) {
   const online = item.status === "online";
   const unavailable = metrics.collected_at ? "不可用" : "等待采集";
   root.dataset.available = metrics.collected_at ? "1" : "0";
-  const dot = root.querySelector("[data-agent-status-dot]");
-  if (dot) dot.className = `status-dot ${statusTone(item.status)}`;
-  const status = root.querySelector("[data-agent-status-label]");
-  if (status) status.textContent = online ? "在线" : "离线";
+  updateAgentPresence(root, item.status);
   const lastSeen = root.querySelector("[data-agent-heartbeat]");
-  if (lastSeen) lastSeen.textContent = heartbeat(item.last_seen);
+  if (lastSeen) {
+    const text = heartbeat(item.last_seen);
+    if (lastSeen.textContent !== text) lastSeen.textContent = text;
+    lastSeen.title = item.last_seen ? `上次心跳：${date(item.last_seen)}` : "尚未收到心跳";
+  }
   root
     .querySelectorAll("[data-agent-version]")
     .forEach((element) => (element.textContent = item.version || "未知"));

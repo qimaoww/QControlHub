@@ -1,4 +1,5 @@
 import { orderNodesBySavedOrder } from "./node-order.js";
+import { agentPresenceMarkup } from "./agent-presence.js";
 
 import { aggregateDashboardTrafficDays, summarizeDashboardTraffic, taskActivity } from "./dashboard-model.js";
 // Keep the shared edge between stacked segments square so the two colors
@@ -93,7 +94,7 @@ export function createDashboardView(ctx, panelMetrics) {
       .slice(0, 7)
       .map(
         (agent) =>
-          `<a href="#settings-node-${esc(agent.id)}" data-dashboard-agent="${esc(agent.id)}"><span class="node-avatar ${statusTone(agent.status)}" aria-hidden="true">●</span><span class="fleet-node-info"><strong title="${esc(agent.name)}">${esc(agent.name)}</strong><small>${esc(agent.os)} / ${esc(agent.arch)}</small><span class="fleet-engines">${(agent.capabilities || []).map((engine) => `<em class="${esc(engine)}">${esc(engineName(engine))}</em>`).join("")}</span></span><span class="status-label ${statusTone(agent.status)}">${agent.status === "online" ? "在线" : "离线"}</span><time>${esc(heartbeat(agent.last_seen))}</time><i aria-hidden="true">›</i></a>`,
+          `<a href="#settings-node-${esc(agent.id)}" data-dashboard-agent="${esc(agent.id)}"><span class="node-avatar ${statusTone(agent.status)}" aria-hidden="true">●</span><span class="fleet-node-info"><strong title="${esc(agent.name)}">${esc(agent.name)}</strong><small>${esc(agent.os)} / ${esc(agent.arch)}</small><span class="fleet-engines">${(agent.capabilities || []).map((engine) => `<em class="${esc(engine)}">${esc(engineName(engine))}</em>`).join("")}</span></span>${agentPresenceMarkup(agent.status)}<time>${esc(heartbeat(agent.last_seen))}</time><i aria-hidden="true">›</i></a>`,
       )
       .join("") ||
     '<div class="empty compact"><strong>还没有节点</strong></div>';
