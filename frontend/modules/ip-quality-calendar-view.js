@@ -5,8 +5,8 @@ export function createIPQualityCalendarView({ esc }) {
     const latest = date === ipQualityLatest, today = ipQualityToday();
     const newestMonth = (dates[0] || today).slice(0, 7);
     const oldestMonth = (dates.at(-1) || today).slice(0, 7);
-    const defaultMonth = latest ? newestMonth : date.slice(0, 7);
-    const visibleMonth = month >= oldestMonth && month <= newestMonth ? month : defaultMonth;
+    const requestedMonth = month || (latest ? newestMonth : date.slice(0, 7));
+    const visibleMonth = requestedMonth < oldestMonth ? oldestMonth : requestedMonth > newestMonth ? newestMonth : requestedMonth;
     const previousMonth = nextIPQualityMonth(visibleMonth, -1), nextMonth = nextIPQualityMonth(visibleMonth, 1);
     const previousDate = ipQualityHistoryNeighbor(dates, date, -1), nextDate = ipQualityHistoryNeighbor(dates, date, 1);
     const first = new Date(`${visibleMonth}-01T12:00:00`);

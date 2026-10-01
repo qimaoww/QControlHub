@@ -129,6 +129,26 @@ assert.match(calendarMarkup, /data-ip-quality-date-option="2024-02-29"[^>]*aria-
 assert.match(calendarMarkup, /data-ip-quality-date-option="2024-02-28"[^>]* disabled/);
 assert.ok(!calendarMarkup.includes("2024-02-30"), "calendar invented a day in a leap month");
 assert.match(createIPQualityCalendarView({ esc })({ date: ipQualityLatest, dates: [], timezone: "UTC" }), /暂无检测记录/);
+// Retention can remove the selected date and its remembered month during a refresh.
+for (const month of ["2024-01", undefined]) {
+  const prunedCalendar = createIPQualityCalendarView({ esc })({
+    date: "2024-01-01", month, dates: ["2024-04-05", "2024-03-02"], timezone: "UTC",
+  });
+  assert.match(prunedCalendar, /data-ip-quality-date-option="2024-03-02"[^>]*title="查看检测记录"/,
+    "expired selection did not return the calendar to a retained month");
+  assert.match(prunedCalendar, /data-ip-quality-month="2024-02"[^>]* disabled/);
+  assert.match(prunedCalendar, /data-ip-quality-month="2024-04"[^>]*aria-label="下个月">/);
+}
+const newerCalendar = createIPQualityCalendarView({ esc })({
+  date: "2024-05-01", month: "2024-05", dates: ["2024-04-05", "2024-03-02"], timezone: "UTC",
+});
+assert.match(newerCalendar, /data-ip-quality-date-option="2024-04-05"[^>]*title="查看检测记录"/);
+assert.match(newerCalendar, /data-ip-quality-month="2024-05"[^>]* disabled/);
+const emptyCalendar = createIPQualityCalendarView({ esc })({
+  date: "2024-01-01", month: "2024-01", dates: [], timezone: "UTC",
+});
+assert.match(emptyCalendar, new RegExp(`data-ip-quality-date-option="${ipQualityToday()}"[^>]* disabled`));
+assert.match(emptyCalendar, /暂无检测记录/);
 
 const renderReport = createIPQualityReportView({ esc });
 const blacklistReport = {

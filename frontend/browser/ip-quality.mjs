@@ -41,7 +41,7 @@ export async function testIPQualityRuntime(mode, preview = false) {
     records: [completeRecord(), { ...completeRecord("quality-offline", nextIPQualityDay(today, -3)), agent_id: "quality-c" }],
     // A plan enabled by another administrator is still the node's active plan.
     schedules: [{ agent_id: "quality-a", enabled: true, next_run_at: new Date(Date.now() + 86400000).toISOString() }],
-    calls: [], failed: false, checks: 0, scheduleWrites: 0,
+    calls: [], failed: false, checks: 0, scheduleWrites: 0, prunedBefore: "",
   };
   const historicalRecords = [completeRecord(), { ...completeRecord("quality-offline", offlineDay), agent_id: "quality-c" },
     completeRecord("quality-older", olderDay), { task_id: "historical-failure", agent_id: "quality-a", status: "failed",
@@ -66,8 +66,10 @@ export async function testIPQualityRuntime(mode, preview = false) {
       if (fixture.failed) return json({ error: "检测记录暂不可用" }, 503);
       const date = url.searchParams.get("date");
       if (!date) await historyReady;
-      const records = !date ? fixture.records : historicalRecords.filter((record) => record.created_at.slice(0, 10) === date);
-      const dates = [...new Set([...historicalRecords, ...fixture.records].filter((record) => record.created_at)
+      const retainedHistory = historicalRecords.filter((record) => record.created_at.slice(0, 10) >= fixture.prunedBefore);
+      const retainedLatest = fixture.records.filter((record) => !record.created_at || record.created_at.slice(0, 10) >= fixture.prunedBefore);
+      const records = !date ? retainedLatest : retainedHistory.filter((record) => record.created_at.slice(0, 10) === date);
+      const dates = [...new Set([...retainedHistory, ...retainedLatest].filter((record) => record.created_at)
         .map((record) => record.created_at.slice(0, 10)))].sort().reverse();
       return json({ date: date || "", timezone: url.searchParams.get("timezone"), dates, records, schedules: fixture.schedules });
     }
@@ -208,6 +210,20 @@ export async function testIPQualityRuntime(mode, preview = false) {
   await waitFor(() => document.querySelector("[data-ip-quality-date]").dataset.selectedDate === reportDay && card(),
     "available calendar date did not load history");
   assert.ok(!document.querySelector("[data-ip-quality-calendar]").open, "selecting a date left the calendar open");
+  document.querySelector('[data-ip-quality-day="-1"]').click();
+  await waitFor(() => document.querySelector("[data-ip-quality-date]").dataset.selectedDate === olderDay &&
+    card()?.querySelector("time")?.dateTime === `${olderDay}T06:05:00Z`, "older history did not load");
+  fixture.prunedBefore = reportDay;
+  await refresh();
+  document.querySelector("[data-ip-quality-date]").click();
+  const retainedDate = document.querySelector(`[data-ip-quality-date-option="${reportDay}"]`);
+  assert.ok(retainedDate && !retainedDate.disabled, "pruning left the calendar outside the retained date range");
+  assert.ok(document.querySelector('[data-ip-quality-month][aria-label="上个月"]').disabled,
+    "pruned calendar allowed navigation before its oldest retained month");
+  retainedDate.click();
+  await waitFor(() => document.querySelector("[data-ip-quality-date]").dataset.selectedDate === reportDay && card(),
+    "calendar could not select a retained date after pruning");
+  fixture.prunedBefore = "";
   document.querySelector("[data-ip-quality-latest]").click();
   await waitFor(() => card()?.textContent.includes("已完成") && !document.querySelector("[data-ip-quality-refresh]").disabled,
     "return to latest results failed");
