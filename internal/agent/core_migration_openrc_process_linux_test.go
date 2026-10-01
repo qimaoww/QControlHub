@@ -322,8 +322,19 @@ func TestOpenRCBoundServiceProcessRealSupervisedService(t *testing.T) {
 	if err := os.WriteFile(initScript, []byte(content), 0o755); err != nil {
 		t.Skipf("cannot install real OpenRC test service: %v", err)
 	}
+	var childIdentity *openRCProcessIdentity
 	t.Cleanup(func() {
 		_ = exec.Command(rcService, service, "stop").Run()
+		// An early OpenRC stop can leave an orphan. Only reap the exact child
+		// captured by this fixture, after checking its original start time.
+		if childIdentity != nil {
+			if process, err := os.FindProcess(childIdentity.PID); err == nil {
+				if alive, err := openRCProcessIdentityAlive(*childIdentity); err == nil && alive {
+					_ = process.Kill()
+				}
+				_ = process.Release()
+			}
+		}
 		_ = os.RemoveAll(optionsDir)
 		_ = os.Remove(initScript)
 		_ = os.Remove(filepath.Join(openRCSupervisorRoot, "supervise-"+service+".pid"))
@@ -337,17 +348,23 @@ func TestOpenRCBoundServiceProcessRealSupervisedService(t *testing.T) {
 	if err != nil {
 		t.Fatalf("boundOpenRCServiceProcess() error on real service: %v", err)
 	}
+	childIdentity = &identity.Child
 	if identity.Child.PID != childPID {
 		t.Fatalf("bound child = %d, metadata child = %d", identity.Child.PID, childPID)
 	}
 	if identity.Child.ParentPID != identity.Supervisor.PID {
 		t.Fatalf("child parent = %d, supervisor = %d", identity.Child.ParentPID, identity.Supervisor.PID)
 	}
+	waitForOpenRCSupervisorLoop(t, identity, 10*time.Second)
 
 	if output, err := exec.Command(rcService, service, "stop").CombinedOutput(); err != nil {
 		t.Fatalf("rc-service stop failed: %v: %s", err, output)
 	}
 	if err := waitForOpenRCServiceProcessExit(context.Background(), identity); err != nil {
-		t.Fatalf("waitForOpenRCServiceProcessExit() after real stop: %v", err)
+		supervisorAlive, supervisorErr := openRCProcessIdentityAlive(identity.Supervisor)
+		childAlive, childErr := openRCProcessIdentityAlive(identity.Child)
+		_, bindingErr := boundOpenRCServiceProcess(context.Background(), service)
+		t.Fatalf("waitForOpenRCServiceProcessExit() after real stop: %v; supervisor alive=%t (%v), child alive=%t (%v), binding=%v",
+			err, supervisorAlive, supervisorErr, childAlive, childErr, bindingErr)
 	}
 }
