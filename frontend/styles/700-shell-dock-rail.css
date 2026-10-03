@@ -3,7 +3,7 @@
    Grid tracks stay fixed, so expanding never reflows the workspace. */
 @media(min-width:821px),(pointer:fine){
   .app-dock{--dock-rail-collapsed:68px;--dock-rail-expanded:212px;--dock-rail-pad:7px;--dock-rail-icon:20px;position:relative;width:var(--dock-rail-collapsed);justify-self:start;align-items:stretch;padding-inline:var(--dock-rail-pad);overflow:hidden;transition:width 200ms cubic-bezier(.2,.8,.2,1),box-shadow 200ms ease}
-  .app-dock:hover,.app-dock:has(:focus-visible){width:var(--dock-rail-expanded);box-shadow:22px 0 48px -30px rgba(5,7,16,.78);transition-delay:80ms}
+  .app-dock:is(:hover,:has(:focus-visible)){width:var(--dock-rail-expanded);box-shadow:22px 0 48px -30px rgba(5,7,16,.78);transition-delay:80ms}
   .app-dock>.dock-logo{align-self:flex-start;margin-left:calc((var(--dock-rail-collapsed) - 2 * var(--dock-rail-pad) - 42px) / 2)}
   .app-dock .dock-nav{width:100%;gap:2px;margin-top:16px;overflow-x:hidden}
   .app-dock .dock-tools{width:100%;gap:2px;padding-top:8px;border-top:1px solid rgba(255,255,255,.08)}

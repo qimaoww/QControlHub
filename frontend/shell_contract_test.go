@@ -72,7 +72,7 @@ func TestSidebarNavigationUsesWorkflowOrderAndResponsiveGrouping(t *testing.T) {
 		`.mobile-account-menu>summary.active`,
 		`.mobile-account-menu a,.mobile-account-menu button`,
 		`.page-access-control .access-control-card form.is-dirty>footer{position:fixed;z-index:85;right:8px;bottom:calc(64px + env(safe-area-inset-bottom));left:8px`,
-		`.app-dock:hover,.app-dock:has(:focus-visible){width:var(--dock-rail-expanded)`,
+		`.app-dock:is(:hover,:has(:focus-visible)){width:var(--dock-rail-expanded)`,
 		`.app-dock .dock-nav a.dock-group-start::after{`,
 	} {
 		if !strings.Contains(string(styles), required) {
