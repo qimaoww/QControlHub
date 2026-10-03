@@ -15,6 +15,8 @@ export const dockIcons = Object.freeze({
     '<path d="M20 7h-5V2"/><path d="m20 2-3.5 3.5A8 8 0 1 0 20.8 14"/>',
   chart:
     '<path d="M12 16v5M16 14.639V21M20 10.656V21M4 18.463V21M8 14.656V21"/><path d="m22 3-8.646 8.646a.5.5 0 0 1-.708 0L9.354 8.354a.5.5 0 0 0-.707 0L2 15"/>',
+  gauge:
+    '<path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/>',
   sliders:
     '<path d="M3 6h4m4 0h10M3 12h10m4 0h4M3 18h4m4 0h10"/><circle cx="9" cy="6" r="2"/><circle cx="15" cy="12" r="2"/><circle cx="9" cy="18" r="2"/>',
   shield:

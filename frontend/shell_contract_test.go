@@ -20,8 +20,8 @@ func TestSidebarNavigationUsesWorkflowOrderAndResponsiveGrouping(t *testing.T) {
 	navigation := content[start : start+end]
 	previous := -1
 	for _, route := range []string{
-		"dashboard", "node-settings", "live-config",
-		"client-access", "substore-sync", "traffic", "core-logs", "tasks",
+		"dashboard", "node-settings", "live-config", "system-bbr", "ip-quality",
+		"client-access", "substore-sync", "traffic", "client-connections", "core-logs", "tasks",
 	} {
 		position := strings.Index(navigation, `"`+route+`"`)
 		if position < 0 {
@@ -51,6 +51,9 @@ func TestSidebarNavigationUsesWorkflowOrderAndResponsiveGrouping(t *testing.T) {
 		`class="dock-settings`,
 		`mobileMoreRoutes.some(([id]) => activeDockRoute(id))`,
 		`summary class="${mobileMoreActive ? "active" : ""}"`,
+		`["ip-quality", "IP 质量", dockIcons.gauge, true]`,
+		`const navGroups = {`,
+		`groupStart ? " dock-group-start" : ""`,
 	} {
 		if !strings.Contains(content, required) {
 			t.Errorf("sidebar navigation is missing responsive icon contract %q", required)
@@ -69,6 +72,8 @@ func TestSidebarNavigationUsesWorkflowOrderAndResponsiveGrouping(t *testing.T) {
 		`.mobile-account-menu>summary.active`,
 		`.mobile-account-menu a,.mobile-account-menu button`,
 		`.page-access-control .access-control-card form.is-dirty>footer{position:fixed;z-index:85;right:8px;bottom:calc(64px + env(safe-area-inset-bottom));left:8px`,
+		`.app-dock:hover,.app-dock:has(:focus-visible){width:var(--dock-rail-expanded)`,
+		`.app-dock .dock-nav a.dock-group-start::after{`,
 	} {
 		if !strings.Contains(string(styles), required) {
 			t.Errorf("sidebar styles are missing responsive grouping contract %q", required)

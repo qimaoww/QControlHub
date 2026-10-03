@@ -12,15 +12,15 @@ function shell(content, title, { viewKey = state.route } = {}) {
   const pendingShares = (state.data.agentAccess?.shares || []).filter(share => share.enabled && share.status === "pending").length;
   const links = [
     ["dashboard", "总览", dockIcons.layoutDashboard],
-    ["ip-quality", "IP 质量", dockIcons.chart, true],
     ["node-settings", "节点", dockIcons.server],
     ["live-config", "配置", dockIcons.fileCode],
+    ["system-bbr", "TCP 调优", dockIcons.sliders, true],
+    ["ip-quality", "IP 质量", dockIcons.gauge, true],
     ["client-access", "客户端", dockIcons.monitorSmartphone],
     ["substore-sync", "同步", dockIcons.refreshCw, true],
-    ["system-bbr", "TCP 调优", dockIcons.sliders, true],
     ["traffic", "流量", dockIcons.chart, true],
-    ["core-logs", "日志", dockIcons.logs, true],
     ["client-connections", "连接 IP", dockIcons.network, true],
+    ["core-logs", "日志", dockIcons.logs, true],
     ["tasks", "任务", dockIcons.listChecks, true],
     [state.session.role === "admin" ? "users" : "my-quota", state.session.role === "admin" ? "用户" : "共享", dockIcons.users, true],
   ];
@@ -41,6 +41,22 @@ function shell(content, title, { viewKey = state.route } = {}) {
     settings: "settings.read",
     users: "users.manage",
     "my-quota": "agent-access.read",
+  };
+  // Workflow groups: overview | node operations | client delivery | observability | accounts.
+  const navGroups = {
+    dashboard: "overview",
+    "node-settings": "nodes",
+    "live-config": "nodes",
+    "system-bbr": "nodes",
+    "ip-quality": "nodes",
+    "client-access": "clients",
+    "substore-sync": "clients",
+    traffic: "observe",
+    "client-connections": "observe",
+    "core-logs": "observe",
+    tasks: "observe",
+    users: "accounts",
+    "my-quota": "accounts",
   };
   links.splice(0, links.length, ...links.filter(([id]) => can(linkPermissions[id])));
   app.style.display = "";
@@ -79,9 +95,10 @@ function shell(content, title, { viewKey = state.route } = {}) {
                   ? '<button id="refresh" class="button small task-refresh-link" type="button">刷新</button>'
                   : "";
   const navigationMarkup = links
-    .map(([id, text, icon, mobileSecondary]) => {
+    .map(([id, text, icon, mobileSecondary], index) => {
       const active = activeDockRoute(id);
-      return `<a class="${active ? "active" : ""}${mobileSecondary ? " dock-mobile-secondary" : ""}" href="#${id}" title="${text}" ${active ? 'aria-current="page"' : ""}><svg viewBox="0 0 24 24" aria-hidden="true">${icon}</svg><span class="dock-label">${text}</span>${id === "agents" ? `<b data-online-count ${overview.agents_online ? "" : "hidden"}>${overview.agents_online || 0}</b>` : ""}${id === "live-config" && overview.node_configs ? `<b>${overview.node_configs}</b>` : ""}${id === "tasks" ? `<b class="hot" data-task-active-count ${overview.tasks_pending ? "" : "hidden"}>${overview.tasks_pending || 0}</b>` : ""}${id === "my-quota" && pendingShares ? `<b aria-label="${pendingShares} 个待接受邀请">${pendingShares}</b>` : ""}</a>`;
+      const groupStart = index > 0 && navGroups[id] !== navGroups[links[index - 1][0]];
+      return `<a class="${active ? "active" : ""}${mobileSecondary ? " dock-mobile-secondary" : ""}${groupStart ? " dock-group-start" : ""}" href="#${id}" title="${text}" data-dock-group="${navGroups[id] || ""}" ${active ? 'aria-current="page"' : ""}><svg viewBox="0 0 24 24" aria-hidden="true">${icon}</svg><span class="dock-label">${text}</span>${id === "agents" ? `<b data-online-count ${overview.agents_online ? "" : "hidden"}>${overview.agents_online || 0}</b>` : ""}${id === "live-config" && overview.node_configs ? `<b>${overview.node_configs}</b>` : ""}${id === "tasks" ? `<b class="hot" data-task-active-count ${overview.tasks_pending ? "" : "hidden"}>${overview.tasks_pending || 0}</b>` : ""}${id === "my-quota" && pendingShares ? `<b aria-label="${pendingShares} 个待接受邀请">${pendingShares}</b>` : ""}</a>`;
     })
     .join("");
   const settingsActive = activeDockRoute("settings");
@@ -89,16 +106,16 @@ function shell(content, title, { viewKey = state.route } = {}) {
     ? `<a class="dock-settings ${settingsActive ? "active" : ""}" href="#settings" title="设置" ${settingsActive ? 'aria-current="page"' : ""}><svg viewBox="0 0 24 24" aria-hidden="true">${dockIcons.settings}</svg><span class="dock-label">设置</span></a>`
     : "";
   const mobileMoreRoutes = [
-    ["substore-sync", "Sub-Store 同步"],
+    ["system-bbr", "BBR / TCP 调优"],
     ["ip-quality", "IP 质量检测"],
     ["access-control", "访问限制"],
-    ["system-bbr", "BBR / TCP 调优"],
+    ["substore-sync", "Sub-Store 同步"],
     ["traffic", "流量"],
-    ["core-logs", "日志"],
     ["client-connections", "连接 IP"],
+    ["core-logs", "日志"],
     ["tasks", "任务"],
-    ["settings", "设置"],
     [state.session.role === "admin" ? "users" : "my-quota", state.session.role === "admin" ? "用户" : `共享与额度${pendingShares ? ` · ${pendingShares}` : ""}`],
+    ["settings", "设置"],
   ];
   const mobileMoreActive = mobileMoreRoutes.some(([id]) => activeDockRoute(id));
   const mobileMoreLinks = mobileMoreRoutes
