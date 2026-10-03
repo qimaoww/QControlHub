@@ -15,9 +15,11 @@ import { testTrafficLayoutRuntime } from "./browser/traffic-layout.mjs";
 import { testConfigLayoutRuntime } from "./browser/config-layout.mjs";
 import { testShellLayoutRuntime } from "./browser/shell-layout.mjs";
 import { assert, waitFor } from "./browser/assertions.mjs";
+import { nodeCardFixture, testNodeCardLayout } from "./browser/node-card-layout.mjs";
 
 const mode = new URLSearchParams(location.search).get("mode") || "admin";
 const scenario = installAgentFixture(mode);
+if (mode.startsWith("node-card-layout")) scenario.testAPI.agents = nodeCardFixture(scenario.onlineAgent);
 
 try {
   if (mode.startsWith("connections")) {
@@ -79,6 +81,7 @@ try {
       }
       if (new URLSearchParams(location.search).has("preview")) await new Promise(() => {});
     }
+    else if (mode.startsWith("node-card-layout")) await testNodeCardLayout(scenario, new URLSearchParams(location.search).has("preview"));
     else if (mode.startsWith("traffic-layout")) await testTrafficLayoutRuntime(scenario);
     else if (mode.startsWith("config-layout")) await testConfigLayoutRuntime(scenario);
     else if (mode.startsWith("shell-layout")) await testShellLayoutRuntime(scenario);

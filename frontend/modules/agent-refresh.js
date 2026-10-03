@@ -142,6 +142,8 @@ function updateAgentMetrics(item) {
     const text = heartbeat(item.last_seen);
     if (lastSeen.textContent !== text) lastSeen.textContent = text;
     lastSeen.title = item.last_seen ? `上次心跳：${date(item.last_seen)}` : "尚未收到心跳";
+    const cardState = root.querySelector(".node-card-state");
+    if (cardState) cardState.title = lastSeen.title;
   }
   root
     .querySelectorAll("[data-agent-version]")
@@ -179,6 +181,11 @@ function updateAgentMetrics(item) {
     metrics.disk_available,
     percent(metrics.disk_used_bytes, metrics.disk_total_bytes),
   );
+  for (const resource of ["memory", "disk"]) {
+    const available = metrics[`${resource}_available`];
+    setText(`${resource}-used`, available ? bytes(metrics[`${resource}_used_bytes`]) : unavailable);
+    setText(`${resource}-capacity`, available ? `共 ${bytes(metrics[`${resource}_total_bytes`])}` : "—");
+  }
   setText(
     "download-rate",
     metrics.network_available ? rate(metrics.network_rx_bps) : unavailable,

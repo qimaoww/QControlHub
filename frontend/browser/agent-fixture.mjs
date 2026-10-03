@@ -372,7 +372,7 @@ window.fetch = async (input, options = {}) => {
     }
   }
   if (method === "GET" && path === "/overview")
-    return json(mode.startsWith("client-layout")
+    return json(mode.startsWith("client-layout") || mode.startsWith("node-card-layout")
       ? { agents: testAPI.agents.length, agents_online: testAPI.agents.filter((agent) => agent.status === "online").length }
       : { agents: mode === "empty" ? 0 : populatedAgents.length, agents_online: mode === "empty" ? 0 : 3 });
   if (method === "GET" && path === "/settings")
