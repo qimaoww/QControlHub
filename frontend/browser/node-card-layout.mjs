@@ -57,6 +57,10 @@ export async function testNodeCardLayout({ testAPI }, preview) {
     assert.equal(card.querySelectorAll(".core-chip").length, 4);
   }
   assert.ok(grid.scrollWidth <= grid.clientWidth + 1, "node grid overflows horizontally");
+  assert.ok(alpha.getBoundingClientRect().height <= 365, "overview card has excessive vertical spacing");
+  if (innerWidth >= 1900) {
+    assert.equal(getComputedStyle(grid).gridTemplateColumns.split(" ").length, 5, "wide screens should show five compact node cards");
+  }
   const firstRow = cards.filter(card => Math.abs(card.offsetTop - alpha.offsetTop) < 2);
   for (const selector of [".node-card-resources", ".node-card-network", ".node-card-cores", ".node-card-foot"]) {
     const top = alpha.querySelector(selector).getBoundingClientRect().top;
