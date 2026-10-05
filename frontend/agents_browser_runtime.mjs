@@ -16,6 +16,7 @@ import { testConfigLayoutRuntime } from "./browser/config-layout.mjs";
 import { testShellLayoutRuntime } from "./browser/shell-layout.mjs";
 import { assert, waitFor } from "./browser/assertions.mjs";
 import { nodeCardFixture, testNodeCardLayout } from "./browser/node-card-layout.mjs";
+import { testStatusControls } from "./browser/status-controls.mjs";
 
 const mode = new URLSearchParams(location.search).get("mode") || "admin";
 const scenario = installAgentFixture(mode);
@@ -81,6 +82,7 @@ try {
       }
       if (new URLSearchParams(location.search).has("preview")) await new Promise(() => {});
     }
+    else if (mode.startsWith("status-controls")) await testStatusControls(scenario, new URLSearchParams(location.search).has("preview"));
     else if (mode.startsWith("node-card-layout")) await testNodeCardLayout(scenario, new URLSearchParams(location.search).has("preview"));
     else if (mode.startsWith("traffic-layout")) await testTrafficLayoutRuntime(scenario);
     else if (mode.startsWith("config-layout")) await testConfigLayoutRuntime(scenario);

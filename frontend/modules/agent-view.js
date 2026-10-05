@@ -4,6 +4,7 @@ import { regionAvatarMarkup } from "./regions.js";
 import { agentBatchBarMarkup } from "./agent-batch-view.js";
 import { orderedNodeList } from "./node-order.js";
 import { agentPresenceMarkup } from "./agent-presence.js";
+import { serviceRuntimeStatus } from "./service-status.js";
 
 function mihomoDevelopmentSourceFieldset(canMirror) {
   return `<fieldset class="release-channel-fieldset development-source-field" data-development-source hidden><legend>开发版来源</legend><div class="release-channel-options"><label><input type="radio" name="core_source" value="official" checked><span>MetaCubeX 官方（推荐）</span></label><label><input type="radio" name="core_source" value="mirror" ${canMirror ? "" : "disabled"}><span>vernesong/mihomo Alpha 镜像（第三方）</span></label></div>${canMirror ? "" : `<p class="source-upgrade-note">使用第三方镜像需先升级 Agent。</p>`}</fieldset>`;
@@ -12,7 +13,7 @@ function mihomoDevelopmentSourceFieldset(canMirror) {
 
 // Rendering is independent of polling and mutation controllers.
 export function createAgentView(ctx, { can, komariUUIDFor, komariNetworkMarkup }) {
-  const { state, engines, can: permission, esc, engineName, statusTone, serviceStatusName, short, date, ago, heartbeat, percent, bytes, conciseVersion, rate, actionName, serviceActionDisabled, shell } = ctx;
+  const { state, engines, can: permission, esc, engineName, short, date, ago, heartbeat, percent, bytes, conciseVersion, rate, actionName, serviceActionDisabled, shell } = ctx;
   const cardIPRow = (row) => {
     const value = row.value || "";
     const title = value ? `复制 ${row.label} 地址` : "暂无地址";
@@ -84,6 +85,7 @@ export function createAgentView(ctx, { can, komariUUIDFor, komariNetworkMarkup }
           const key = `${agent.id}|${engine}`;
           const capabilityEnabled = (agent.capabilities || []).includes(engine);
           const runtime = agent.runtime?.[engine] || {};
+          const runtimeState = serviceRuntimeStatus(runtime, agent.status === "online");
           const deployed = deploymentByService.get(key);
           const saved = configByService.get(key);
           const access = accessByService.get(key);
@@ -115,16 +117,12 @@ export function createAgentView(ctx, { can, komariUUIDFor, komariNetworkMarkup }
             ? "检测到但不可迁移"
             : !capabilityEnabled
             ? "能力已关闭"
-            : installed
-            ? serviceStatusName(runtime.service_status)
-            : "未安装";
+            : runtimeState.label;
           const serviceTone = existingBlocked
             ? "warn"
             : !capabilityEnabled
             ? "muted"
-            : installed
-            ? statusTone(runtime.service_status)
-            : "muted";
+            : runtimeState.tone;
           const optionalImportChip = !can("agent-config.read") || agent.can_manage === false
             ? ""
             : existingBlocked
@@ -220,21 +218,15 @@ export function createAgentView(ctx, { can, komariUUIDFor, komariNetworkMarkup }
         const coreChips = (agent.capabilities || [])
           .map((engine) => {
             const runtime = agent.runtime?.[engine] || {};
+            const runtimeState = serviceRuntimeStatus(runtime, agent.status === "online");
             const installed = Boolean(runtime.installed);
             const existingUnsupportedReason = String(
               runtime.existing_config_unsupported_reason || "",
             );
             const serviceState = existingUnsupportedReason
                 ? "检测到但不可迁移"
-                : installed
-                  ? serviceStatusName(runtime.service_status)
-                  : "未安装";
-            const tone =
-              existingUnsupportedReason
-                ? "warn"
-                : installed
-                  ? statusTone(runtime.service_status)
-                  : "muted";
+                : runtimeState.label;
+            const tone = existingUnsupportedReason ? "warn" : runtimeState.tone;
             return `<span class="core-chip service-${esc(engine)}" data-core-installed="${installed ? 1 : 0}"><span class="engine-badge ${esc(engine)}">${esc(engineName(engine))}</span><span class="engine-state ${tone}"><i></i><b data-core-service="${esc(engine)}">${esc(serviceState)}</b></span></span>`;
           })
           .join("");

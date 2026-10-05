@@ -2026,54 +2026,7 @@ dialog.config-access-dialog::backdrop{background:rgba(17,20,36,.34);backdrop-fil
     margin-left: 0;
   }
 }
-/* Shared node connection state. Offline is neutral; failures keep their own tone. */
-.agent-presence {
-  --presence-ink: var(--ink-2);
-  --presence-surface: var(--surface-3);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: 0 0 auto;
-  width: max-content;
-  min-height: 27px;
-  gap: 7px;
-  padding: 3px 9px;
-  border: 1px solid color-mix(in srgb, var(--presence-ink) 18%, var(--line));
-  border-radius: 999px;
-  background: linear-gradient(color-mix(in srgb, var(--surface) 35%, transparent), transparent), var(--presence-surface);
-  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--surface) 60%, transparent);
-  color: var(--presence-ink);
-  font-size: max(11px, calc(11px * var(--ui-font-scale)));
-  line-height: 1.4;
-  white-space: nowrap;
-  vertical-align: middle;
-  transition: color .16s ease, background-color .16s ease, border-color .16s ease;
-}
-.agent-presence[data-agent-presence="online"] {
-  --presence-ink: var(--green);
-  --presence-surface: var(--green-soft);
-}
-.agent-presence > b {
-  color: inherit;
-  font: inherit;
-  font-weight: 650;
-}
-.agent-presence > .agent-presence-dot {
-  width: 7px;
-  height: 7px;
-  flex: 0 0 7px;
-  margin: 0;
-  border: 1.5px solid currentColor;
-  border-radius: 50%;
-  background: transparent;
-}
-.agent-presence[data-agent-presence="online"] > .agent-presence-dot {
-  background: currentColor;
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--presence-ink) 10%, transparent);
-}
-.agent-presence[data-agent-presence="unknown"] > .agent-presence-dot {
-  border-style: dashed;
-}
+/* Placement is page-specific; status-control geometry is shared. */
 .node-card-state {
   display: grid;
   grid-template-columns: auto;
@@ -2093,13 +2046,10 @@ dialog.config-access-dialog::backdrop{background:rgba(17,20,36,.34);backdrop-fil
 }
 .node-card-state > small, .node-live-state > small { font-size: max(10px, calc(10px * var(--ui-font-scale))); }
 .node-card-state > .agent-shared-badge, .node-live-state > .agent-shared-badge { min-height: 27px; border-radius: 999px; padding-inline: 9px; }
-.node-card-state .agent-presence > b { font-size: inherit; }
 .node-live-state { flex-wrap: wrap; gap: 7px; }
 .node-live-state > small:before { content: none; }
-.node-live-state .agent-presence > b { color: inherit; }
 .context-list > a:has(> .agent-presence) { grid-template-columns: minmax(0, 1fr) auto; }
 .context-list > a:has(> .context-engine):has(> .agent-presence) { grid-template-columns: auto minmax(0, 1fr) auto; }
-.context-list > a > .agent-presence { min-height: 25px; gap: 6px; padding-inline: 7px; font-size: max(10px, calc(10px * var(--ui-font-scale))); }
 .access-control-scope:has(> .agent-presence) { flex-wrap: wrap; }
 .ip-quality-node-panel > header .ip-quality-node-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
 .client-node-summary { flex-direction: column; align-items: flex-end; gap: 6px; }
@@ -2109,13 +2059,6 @@ dialog.config-access-dialog::backdrop{background:rgba(17,20,36,.34);backdrop-fil
   .client-access-node-card > .node-card-head { grid-template-columns: 38px minmax(0, 1fr) auto; }
   .client-node-summary > .agent-presence { grid-column: 3; grid-row: 1; }
   .client-node-engines { grid-column: 2 / -1; justify-content: flex-start; }
-}
-@media (forced-colors: active) {
-  .agent-presence { border-color: CanvasText; background: Canvas; box-shadow: none; color: CanvasText; }
-  .agent-presence > .agent-presence-dot { forced-color-adjust: none; box-shadow: none; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .agent-presence { transition: none; }
 }
 /* Sidebar rail v2: the dock stays icon-only by default and expands over the
    context sidebar on pointer hover or keyboard focus to reveal grouped labels.
@@ -2184,15 +2127,6 @@ a.node-card-overview:hover, .node-card-overview.batch-selecting:hover {
   clip-path: inset(50%);
   white-space: nowrap;
 }
-.node-card-overview .agent-presence {
-  min-height: 25px;
-  padding: 3px 7px;
-  border-color: transparent;
-  background: var(--presence-surface);
-  box-shadow: none;
-  font-size: calc(10px * var(--ui-font-scale));
-}
-.node-card-overview .agent-presence > .agent-presence-dot { width: 6px; height: 6px; flex-basis: 6px; box-shadow: none; }
 .node-card-overview .node-card-state > .agent-shared-badge { min-height: 25px; padding-inline: 6px; }
 .node-card-overview .node-card-grip { width: 20px; flex-basis: 20px; color: var(--muted); opacity: .55; }
 .node-card-overview .node-card-grip:hover { opacity: 1; }
@@ -2311,16 +2245,6 @@ a.node-card-overview:hover, .node-card-overview.batch-selecting:hover {
   line-height: 1.3;
   font-weight: 600;
 }
-.node-card-overview .core-chip .engine-state { min-width: 0; gap: 5px; }
-.node-card-overview .core-chip .engine-state b {
-  color: var(--muted);
-  font-size: calc(10px * var(--ui-font-scale));
-  line-height: 1.3;
-  font-weight: 400;
-  white-space: normal;
-  overflow-wrap: anywhere;
-}
-.node-card-overview .core-chip .engine-state i { width: 5px; height: 5px; flex: 0 0 5px; box-shadow: none; }
 .node-card-overview .node-card-foot {
   gap: 8px;
   min-height: 36px;
@@ -2354,4 +2278,88 @@ a.node-card-overview:hover, .node-card-overview.batch-selecting:hover {
   .node-card-overview .agent-presence { border-color: CanvasText; }
   .node-card-overview .node-card-resources progress { appearance: auto; }
   .node-card-overview.batch-selecting.selected { outline: 2px solid Highlight; }
+}
+/* Existing renderers keep their refresh hooks. New state labels use
+   status-label with ok/warn/bad/muted; identity badges stay separate. */
+:root :is(.agent-presence, .engine-state, .live-engine-status, .status-label, .traffic-policy-status) {
+  --status-ink: var(--ink-2);
+  --status-surface: var(--surface-3);
+  --status-dot-fill: transparent;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: max-content;
+  max-width: 100%;
+  min-height: 24px;
+  gap: 6px;
+  padding: 3px 8px;
+  border: 1px solid color-mix(in srgb, var(--status-ink) 18%, var(--line));
+  border-radius: 999px;
+  background: var(--status-surface);
+  box-shadow: none;
+  color: var(--status-ink);
+  font-family: inherit;
+  font-size: max(11px, calc(11px * var(--ui-font-scale)));
+  font-weight: 600;
+  font-style: normal;
+  line-height: 1.3;
+  letter-spacing: normal;
+  text-transform: none;
+  vertical-align: middle;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+:root :is(.agent-presence[data-agent-presence="online"], .engine-state.ok, .live-engine-status.running, .status-label.ok, .traffic-policy-status.ok) {
+  --status-ink: var(--green);
+  --status-surface: var(--green-soft);
+  --status-dot-fill: currentColor;
+}
+:root :is(.engine-state.warn, .live-engine-status.pending, .status-label.warn, .traffic-policy-status.warn) {
+  --status-ink: var(--amber);
+  --status-surface: var(--amber-soft);
+  --status-dot-fill: currentColor;
+}
+:root :is(.engine-state.bad, .live-engine-status.failed, .status-label.bad, .traffic-policy-status.bad) {
+  --status-ink: var(--red);
+  --status-surface: var(--red-soft);
+  --status-dot-fill: currentColor;
+}
+:root :is(.agent-presence, .engine-state, .traffic-policy-status) > b {
+  min-width: 0;
+  margin: 0;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+  white-space: inherit;
+  overflow-wrap: inherit;
+}
+:root :is(.agent-presence, .engine-state, .traffic-policy-status) > i,
+:root :is(.live-engine-status, .status-label)::before {
+  content: "";
+  box-sizing: border-box;
+  display: block;
+  width: 6px;
+  height: 6px;
+  flex: 0 0 6px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  background: var(--status-dot-fill);
+  box-shadow: none;
+  color: inherit;
+  animation: none;
+}
+@media (forced-colors: active) {
+  :root :is(.agent-presence, .engine-state, .live-engine-status, .status-label, .traffic-policy-status) {
+    border-color: CanvasText;
+    background: Canvas;
+    color: CanvasText;
+    box-shadow: none;
+  }
+  :root :is(.agent-presence, .engine-state, .traffic-policy-status) > i,
+  :root :is(.live-engine-status, .status-label)::before {
+    forced-color-adjust: none;
+  }
 }

@@ -1,6 +1,7 @@
 import { createRefreshChannel } from "./refresh.js";
 import { updatePublicIPDisplays } from "./agent-addresses.js";
 import { updateAgentPresence } from "./agent-presence.js";
+import { serviceRuntimeStatus } from "./service-status.js";
 
 export function agentStructureSignature(agents = []) {
   return JSON.stringify(
@@ -20,7 +21,7 @@ export function agentStructureSignature(agents = []) {
 // Roster changes, service structure, and metrics share one interaction-aware
 // refresh lifecycle. Only a successful render advances the structural markers.
 export function createAgentRefresh(ctx, { can, cardInteractions, renderAgentPage, syncBatchSnapshot, loadRegionDisplay }) {
-  const { api, state, can: permission, statusTone, serviceStatusName, heartbeat, date, ago, percent, bytes, conciseVersion, rate, serviceActionDisabled, trafficChart, notify } = ctx;
+  const { api, state, can: permission, heartbeat, date, ago, percent, bytes, conciseVersion, rate, serviceActionDisabled, trafficChart, notify } = ctx;
   const agentPageActive = () => state.route === "node-settings" || state.route === "agents";
   const metricsRefresh = createRefreshChannel({
     isCurrent: agentPageActive,
@@ -236,15 +237,14 @@ function updateAgentMetrics(item) {
       `[data-core-service="${CSS.escape(engine)}"]`,
     );
     if (service) {
+      const runtimeState = serviceRuntimeStatus(runtime, online);
       service.textContent = existingUnsupportedReason
         ? "检测到但不可迁移"
         : !capabilityEnabled
         ? "能力已关闭"
-        : installed
-        ? serviceStatusName(runtime.service_status)
-        : "未安装";
+        : runtimeState.label;
       service.closest(".engine-state").className =
-        `engine-state ${existingUnsupportedReason ? "warn" : !capabilityEnabled ? "muted" : installed ? statusTone(runtime.service_status) : "muted"}`;
+        `engine-state ${existingUnsupportedReason ? "warn" : !capabilityEnabled ? "muted" : runtimeState.tone}`;
       service
         .closest(".service-card")
         ?.querySelectorAll("[data-service-action]")

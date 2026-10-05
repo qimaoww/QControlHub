@@ -36,15 +36,6 @@ a.node-card-overview:hover, .node-card-overview.batch-selecting:hover {
   clip-path: inset(50%);
   white-space: nowrap;
 }
-.node-card-overview .agent-presence {
-  min-height: 25px;
-  padding: 3px 7px;
-  border-color: transparent;
-  background: var(--presence-surface);
-  box-shadow: none;
-  font-size: calc(10px * var(--ui-font-scale));
-}
-.node-card-overview .agent-presence > .agent-presence-dot { width: 6px; height: 6px; flex-basis: 6px; box-shadow: none; }
 .node-card-overview .node-card-state > .agent-shared-badge { min-height: 25px; padding-inline: 6px; }
 .node-card-overview .node-card-grip { width: 20px; flex-basis: 20px; color: var(--muted); opacity: .55; }
 .node-card-overview .node-card-grip:hover { opacity: 1; }
@@ -163,16 +154,6 @@ a.node-card-overview:hover, .node-card-overview.batch-selecting:hover {
   line-height: 1.3;
   font-weight: 600;
 }
-.node-card-overview .core-chip .engine-state { min-width: 0; gap: 5px; }
-.node-card-overview .core-chip .engine-state b {
-  color: var(--muted);
-  font-size: calc(10px * var(--ui-font-scale));
-  line-height: 1.3;
-  font-weight: 400;
-  white-space: normal;
-  overflow-wrap: anywhere;
-}
-.node-card-overview .core-chip .engine-state i { width: 5px; height: 5px; flex: 0 0 5px; box-shadow: none; }
 .node-card-overview .node-card-foot {
   gap: 8px;
   min-height: 36px;

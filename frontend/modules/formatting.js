@@ -1,3 +1,5 @@
+import { serviceStatusInfo } from "./service-status.js";
+
 // Shared display helpers for the application shell and route renderers.
 export function createDisplayHelpers(state) {
   const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (char) =>
@@ -22,7 +24,7 @@ export function createDisplayHelpers(state) {
   const actionName = (value) => ({ validate: "校验配置", deploy: "部署并重启", start: "启动服务", stop: "停止服务", restart: "重启服务", status: "查询状态", install: "安装或升级内核", uninstall: "卸载内核", "read-config": "读取可导入配置", "read-managed-config": "读取 QAgent 配置", "import-existing": "导入并迁移现有服务", "upgrade-agent": "升级 Agent", "enable-bbr": "启用系统 BBR", "disable-bbr": "关闭 BBR / 切换 CUBIC", "configure-tcp": "自定义 BBR / TCP 调优", "ip-quality": "IP 质量检测" })[value] || label(value);
   const statusName = (value) => ({ pending: "准备中", running: "执行中", succeeded: "成功", failed: "失败", canceled: "已取消" })[value] || label(value);
   const engineName = (value) => ({ mihomo: "Mihomo", xray: "Xray", "sing-box": "sing-box", "ss-rust": "ss-rust" })[value] || value;
-  const serviceStatusName = (value) => ({ online: "在线", offline: "离线", pending: "准备中", running: "执行中", succeeded: "成功", active: "运行中", inactive: "已停止", activating: "启动中", deactivating: "停止中", failed: "失败" })[value] || value || "未知";
+  const serviceStatusName = (value) => !value ? "未知" : ({ online: "在线", offline: "离线", succeeded: "成功" })[value] || serviceStatusInfo(value).label;
   const short = (value) => String(value || "").slice(0, 12);
   const statusTone = (value) => ["online", "succeeded", "active"].includes(value) ? "ok" : ["pending", "running", "activating", "deactivating"].includes(value) ? "warn" : ["offline", "failed", "inactive"].includes(value) ? "bad" : "muted";
   const percent = (used, total) => total > 0 ? Math.min(100, Math.max(0, (Number(used) / Number(total)) * 100)) : 0;
