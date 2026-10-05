@@ -206,6 +206,9 @@ export async function testIPQualityRuntime(mode, preview = false) {
   await waitFor(() => document.querySelector("[data-ip-quality-date]").dataset.selectedDate === offlineDay && panel("quality-c"),
     "history navigation did not skip the unrecorded day");
   document.querySelector("[data-ip-quality-date]").click();
+  // The relative fixture dates may fall in adjacent months near a month boundary.
+  if (reportDay.slice(0, 7) !== offlineDay.slice(0, 7))
+    document.querySelector('[data-ip-quality-month][aria-label="上个月"]').click();
   document.querySelector(`[data-ip-quality-date-option="${reportDay}"]`).click();
   await waitFor(() => document.querySelector("[data-ip-quality-date]").dataset.selectedDate === reportDay && card(),
     "available calendar date did not load history");
