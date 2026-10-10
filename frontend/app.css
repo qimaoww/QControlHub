@@ -606,7 +606,10 @@ summary>i{transition:transform var(--motion-base) var(--motion-ease-out),color v
 :is(.task-filter-panel,.dashboard-month-picker)[open]>summary>i{transform:rotate(180deg)}
 :is(.runtime-drawer,.version-drawer,.advanced-studio,.config-hierarchy-menu,.config-diff-drawer)[open]>summary>i{transform:rotate(45deg)}
 dialog[open]{animation:qch-dialog-enter var(--motion-base) var(--motion-ease-out)}
-dialog[open]::backdrop,.modal-backdrop{animation:qch-fade-enter var(--motion-feedback) ease}
+dialog[open]::backdrop{animation:qch-fade-enter var(--motion-feedback) ease}
+/* Animate the scrim independently so its opacity never multiplies the card. */
+.modal-backdrop{isolation:isolate;background:transparent;backdrop-filter:none}
+.modal-backdrop::before{content:"";position:absolute;inset:0;z-index:-1;background:rgba(8,10,17,.62);backdrop-filter:blur(4px);animation:qch-fade-enter var(--motion-feedback) ease;pointer-events:none}
 .modal-backdrop>[role=dialog]{animation:qch-dialog-enter var(--motion-base) var(--motion-ease-out)}
 .sync-state i,.context-live i,.trust-badge i{transition:background-color var(--motion-fast) ease,color var(--motion-fast) ease}
 :is(.sync-state,.context-live,.trust-badge):not(.inactive) i{box-shadow:0 0 0 4px color-mix(in srgb,currentColor 12%,transparent)}

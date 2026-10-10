@@ -28,6 +28,7 @@ func TestMotionSystemCoversWorkspaceInteractions(t *testing.T) {
 		".boot-mark::before",
 		".workspace-main.is-route-pending::before",
 		"dialog[open]::backdrop",
+		".modal-backdrop::before",
 		".modal-backdrop>[role=dialog]",
 		"@media(prefers-reduced-motion:reduce)",
 		"animation:none!important;transition:none!important;scroll-behavior:auto!important",

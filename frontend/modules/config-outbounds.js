@@ -1,6 +1,7 @@
 import { bindEvent } from "./refresh.js";
 import { configJSONMembers } from "./config-files.js";
 import { bindConfigMenu } from "./config-menu.js";
+import { bindDialogBackdrop } from "./popup.js";
 import { diagnosticError } from "./errors.js";
 import { formatConfigContent } from "./code-format.js";
 import { bindOutboundPresets } from "./outbound-presets.js";
@@ -222,10 +223,7 @@ export function bindConfigOutbounds({ navigation, api, agent, engine, saved, cur
     };
     bindEvent(opened.querySelector("[data-outbound-close]"), "click", close);
     bindEvent(opened, "cancel", event => { event.preventDefault(); void close(); });
-    bindEvent(opened, "click", event => {
-      const rect = opened.getBoundingClientRect();
-      if (event.target === opened && (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom)) void close();
-    });
+    bindDialogBackdrop(opened, () => { void close(); });
     state.routeSignal?.addEventListener("abort", dispose, {once:true});
     document.body.append(opened);
     opened.showModal();

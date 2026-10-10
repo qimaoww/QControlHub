@@ -1,4 +1,5 @@
 import { utcMonth } from "./dashboard-model.js";
+import { bindDialogBackdrop } from "./popup.js";
 export function createDashboardBindings({ state }, { panelMetrics, dashboard }) {
   return ({ trafficYear, trafficMonth }) => {
   panelMetrics.mount();
@@ -41,6 +42,7 @@ export function createDashboardBindings({ state }, { panelMetrics, dashboard }) 
       const previousMonth = state.data.dashboardTrafficMonth;
       state.data.dashboardTrafficMonth = value;
       trafficMonthPicker.open = false;
+      trafficMonthPicker.querySelector("summary").focus({ preventScroll: true });
       try {
         await dashboard({ overview: state.data.overview });
       } catch {
@@ -66,9 +68,7 @@ export function createDashboardBindings({ state }, { panelMetrics, dashboard }) 
     trafficDetailsDialog.querySelectorAll("[data-dashboard-traffic-close]").forEach((button) => {
       button.onclick = () => trafficDetailsDialog.close();
     });
-    trafficDetailsDialog.onclick = (event) => {
-      if (event.target === trafficDetailsDialog) trafficDetailsDialog.close();
-    };
+    bindDialogBackdrop(trafficDetailsDialog);
   }
   };
 

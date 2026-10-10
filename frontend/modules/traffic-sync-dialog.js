@@ -1,4 +1,5 @@
 import { protocolName } from "./traffic-model.js";
+import { bindDialogBackdrop } from "./popup.js";
 export function createTrafficSyncDialog({ api, state, esc, engineName, notify }, { traffic }) {
   let trafficSyncPending = false;
   function openTrafficSync() {
@@ -50,7 +51,7 @@ export function createTrafficSyncDialog({ api, state, esc, engineName, notify },
     dialog.addEventListener("close", cleanup);
     dialog.addEventListener("cancel", event => { event.preventDefault(); close(); });
     dialog.querySelectorAll("[data-sync-close]").forEach(button => { button.onclick = close; });
-    dialog.onclick = event => { if (event.target === dialog) close(); };
+    bindDialogBackdrop(dialog, close);
     async function loadCandidates() {
       errorBox.hidden = true;
       retry.hidden = true;

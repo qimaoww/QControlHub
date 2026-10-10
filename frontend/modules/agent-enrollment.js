@@ -1,6 +1,15 @@
 // Enrollment commands and node-directory dialogs own their modal lifecycle.
-export function createAgentEnrollment({ api, esc, engineName, notify, refreshAgentPage }) {
+export function createAgentEnrollment({ api, state, esc, engineName, notify, refreshAgentPage }) {
+let activeModal;
+let popupRequest = 0;
+const requestIsCurrent = (allowRefresh = false) => {
+  const request = ++popupRequest;
+  const data = state?.data, epoch = state?.navigationEpoch, hash = location.hash;
+  return () => request === popupRequest && state?.data === data && (allowRefresh || state?.navigationEpoch === epoch) && location.hash === hash;
+};
 function bindModalLifecycle(wrap, onClose) {
+  popupRequest++;
+  activeModal?.();
   const previousFocus = document.activeElement;
   const restoreEnrollmentEntry = previousFocus?.matches?.(
     "[data-open-enrollment]",
@@ -12,8 +21,15 @@ function bindModalLifecycle(wrap, onClose) {
       root.inert = true;
     });
   };
-  const observer = new MutationObserver(lockBackground);
+  const hasShell = Boolean(document.querySelector(".desktop-app"));
+  const observer = new MutationObserver(() => {
+    if (!wrap.isConnected || hasShell && !document.querySelector(".desktop-app")) close();
+    else lockBackground();
+  });
   const previousOverflow = document.body.style.overflow;
+  const routeHash = location.hash;
+  const navigate = () => { if (location.hash !== routeHash) close(); };
+  const timers = new Set();
   let closed = false;
   lockBackground();
   observer.observe(document.body, { childList: true, subtree: true });
@@ -31,8 +47,13 @@ function bindModalLifecycle(wrap, onClose) {
   const close = () => {
     if (closed) return;
     closed = true;
+    popupRequest++;
     observer.disconnect();
     document.removeEventListener("keydown", onKeydown);
+    window.removeEventListener("hashchange", navigate);
+    timers.forEach(timer => window.clearTimeout(timer));
+    timers.clear();
+    if (activeModal === close) activeModal = null;
     inertRoots.forEach((inert, root) => {
       if (root.isConnected) root.inert = inert;
     });
@@ -43,10 +64,11 @@ function bindModalLifecycle(wrap, onClose) {
       : restoreEnrollmentEntry
         ? document.querySelector("[data-open-enrollment]")
         : null;
-    restoreTarget?.focus();
+    restoreTarget?.focus({ preventScroll: true });
     onClose?.();
   };
   const onKeydown = (event) => {
+    if (event.defaultPrevented || document.querySelector("dialog:modal")) return;
     if (event.key === "Escape") {
       event.preventDefault();
       close();
@@ -60,7 +82,10 @@ function bindModalLifecycle(wrap, onClose) {
     }
     const first = items[0];
     const last = items[items.length - 1];
-    if (event.shiftKey && document.activeElement === first) {
+    if (!wrap.contains(document.activeElement)) {
+      event.preventDefault();
+      (event.shiftKey ? last : first).focus();
+    } else if (event.shiftKey && document.activeElement === first) {
       event.preventDefault();
       last.focus();
     } else if (!event.shiftKey && document.activeElement === last) {
@@ -69,12 +94,23 @@ function bindModalLifecycle(wrap, onClose) {
     }
   };
   document.addEventListener("keydown", onKeydown);
+  window.addEventListener("hashchange", navigate);
   wrap.querySelectorAll("[data-close]").forEach((button) => {
     button.onclick = close;
   });
-  wrap.onclick = (event) => {
-    if (event.target === wrap) close();
+  let backdropStart = false;
+  wrap.onpointerdown = event => { backdropStart = event.target === wrap; };
+  wrap.onpointercancel = () => { backdropStart = false; };
+  wrap.onclick = event => {
+    if (backdropStart && event.target === wrap) close();
+    backdropStart = false;
   };
+  close.schedule = (callback, delay) => {
+    const timer = window.setTimeout(() => { timers.delete(timer); if (!closed) callback(); }, delay);
+    timers.add(timer);
+  };
+  activeModal = close;
+  focusable()[0]?.focus({ preventScroll: true });
   return close;
 }
 
@@ -86,11 +122,13 @@ function bindEnrollmentRecordButtons(root, closeParent) {
       if (button.dataset.loading === "1") return;
       button.dataset.loading = "1";
       button.disabled = true;
+      const current = requestIsCurrent(Boolean(closeParent));
       try {
         const created = await api(
           `/enrollment-tokens/${encodeURIComponent(button.dataset.viewEnrollmentRecord)}/command`,
           { method: "POST" },
         );
+        if (!button.isConnected || !current()) return;
         closeParent?.();
         showCommand(
           enrollmentInstallCommand(created),
@@ -98,7 +136,7 @@ function bindEnrollmentRecordButtons(root, closeParent) {
           "复制 Agent 安装命令",
         );
       } catch (error) {
-        notify(error.message, "error");
+        if (button.isConnected && current()) notify(error.message, "error");
       } finally {
         button.dataset.loading = "";
         button.disabled = false;
@@ -108,13 +146,15 @@ function bindEnrollmentRecordButtons(root, closeParent) {
 }
 
 async function showAgentDirectoryDialog() {
+  const current = requestIsCurrent();
   let entries;
   try {
     entries = await api("/agent-directory");
   } catch (error) {
-    notify(error.message, "error");
+    if (current()) notify(error.message, "error");
     return;
   }
+  if (!current()) return;
   const rows = (entries || [])
     .map((entry) => {
       const ports = (entry.ports || []).join("、") || "—";
@@ -127,13 +167,13 @@ async function showAgentDirectoryDialog() {
   wrap.className = "modal-backdrop";
   wrap.innerHTML = `<section class="deploy-command-modal enrollment-dialog" role="dialog" aria-modal="true" aria-labelledby="agent-directory-title" aria-describedby="agent-directory-description"><header class="deploy-command-head"><span class="deploy-command-icon" aria-hidden="true">☰</span><div><p class="eyebrow">管理员视图</p><h2 id="agent-directory-title">其他用户节点</h2><p id="agent-directory-description">列出其他账号节点，含对管理员隐藏的节点。仅可删除，不能读取配置、日志、指标或代为部署。</p></div><button class="deploy-command-close" type="button" data-close aria-label="关闭其他用户节点弹窗">×</button></header><div class="deploy-command-body enrollment-dialog-body"><section class="enrollment-history"><header><div><b>节点清单</b><small>删除会断开 Agent 并清理关联配置，不会远程卸载 QAgent。</small></div><span>${(entries || []).length}</span></header><div data-agent-directory-list>${rows || '<p class="enrollment-history-empty">没有其他账号的节点</p>'}</div></section></div></section>`;
   document.body.append(wrap);
-  bindModalLifecycle(wrap);
+  const close = bindModalLifecycle(wrap);
   wrap.querySelectorAll("[data-delete-directory-node]").forEach((button) => {
     button.onclick = async () => {
       if (button.dataset.confirmDelete !== "1") {
         button.dataset.confirmDelete = "1";
         button.textContent = "再次点击确认删除";
-        window.setTimeout(() => {
+        close.schedule(() => {
           if (!button.isConnected || button.disabled) return;
           button.dataset.confirmDelete = "";
           button.textContent = "删除节点";
@@ -143,6 +183,7 @@ async function showAgentDirectoryDialog() {
       button.disabled = true;
       try {
         await api(`/agents/${encodeURIComponent(button.dataset.deleteDirectoryNode)}`, { method: "DELETE" });
+        if (!wrap.isConnected) return;
         const name = button.dataset.nodeName || "";
         button.closest("article")?.remove();
         notify(name ? `节点 ${name} 已删除` : "节点已删除");
@@ -152,6 +193,7 @@ async function showAgentDirectoryDialog() {
           notify(`节点列表刷新失败：${error.message}`, "error");
         }
       } catch (error) {
+        if (!wrap.isConnected) return;
         button.disabled = false;
         notify(error.message, "error");
       }
@@ -197,7 +239,7 @@ function showEnrollmentDialog({ tokenRows, tokenCount, onDelete, onSubmit }) {
           "aria-label",
           "再次点击确认删除；凭据会失效，已注册节点和 Agent 不受影响",
         );
-        window.setTimeout(() => {
+        close.schedule(() => {
           if (!button.isConnected || button.disabled) return;
           button.dataset.confirmDelete = "";
           button.textContent = "删除";
@@ -210,6 +252,7 @@ function showEnrollmentDialog({ tokenRows, tokenCount, onDelete, onSubmit }) {
       button.disabled = true;
       try {
         await onDelete(button.dataset.deleteEnrollment);
+        if (!wrap.isConnected) return;
         button.closest("article")?.remove();
         const list = wrap.querySelector("[data-enrollment-history-list]");
         const count = list?.querySelectorAll("article").length || 0;
@@ -219,6 +262,7 @@ function showEnrollmentDialog({ tokenRows, tokenCount, onDelete, onSubmit }) {
           list.innerHTML = '<p class="enrollment-history-empty">暂无添加记录</p>';
         notify("添加节点凭据已删除");
       } catch (error) {
+        if (!wrap.isConnected) return;
         button.disabled = false;
         notify(error.message, "error");
       }
@@ -227,12 +271,13 @@ function showEnrollmentDialog({ tokenRows, tokenCount, onDelete, onSubmit }) {
   wrap.querySelector("form").onsubmit = async (event) => {
     event.preventDefault();
     const submit = event.currentTarget.querySelector("button[type=submit]");
+    if (submit.disabled) return;
     submit.disabled = true;
     try {
       const form = new FormData(event.currentTarget);
-      await onSubmit(String(form.get("name") || "").trim(), form.get("admin_hidden") === "on", close);
+      await onSubmit(String(form.get("name") || "").trim(), form.get("admin_hidden") === "on", close, () => wrap.isConnected);
     }
-    catch (error) { submit.disabled = false; notify(error.message, "error"); }
+    catch (error) { if (wrap.isConnected) { submit.disabled = false; notify(error.message, "error"); } }
   };
   wrap.querySelector("input").focus();
 }
@@ -262,10 +307,12 @@ function showCommand(command, onClose, heading = "复制 QAgent 部署命令") {
     try {
       await navigator.clipboard.writeText(command);
     } catch {
+      if (!wrap.isConnected) return;
       commandInput.select();
       document.execCommand("copy");
       commandInput.setSelectionRange(0, 0);
     }
+    if (!wrap.isConnected) return;
     const copyLabel = copyButton.querySelector("[data-copy-label]");
     copyButton.classList.add("copied");
     copyLabel.textContent = "已复制";
@@ -293,11 +340,13 @@ function showCommand(command, onClose, heading = "复制 QAgent 部署命令") {
             notify(`添加记录刷新失败：${error.message}`, "error");
           }
         },
-        onSubmit: async (name, adminHidden, close) => {
+        onSubmit: async (name, adminHidden, close, isOpen) => {
+          const current = requestIsCurrent(true);
           const created = await api("/enrollment-tokens", {
             method: "POST",
             body: JSON.stringify({ name, admin_hidden: adminHidden }),
           });
+          if (!isOpen() || !current()) return;
           const command = enrollmentInstallCommand(created);
           close();
           showCommand(command, async () => {
@@ -316,15 +365,19 @@ function showCommand(command, onClose, heading = "复制 QAgent 部署命令") {
   });
   document.querySelectorAll("[data-view-enrollment-command]").forEach((button) => {
     button.onclick = async () => {
+      const current = requestIsCurrent();
+      if (button.disabled) return;
+      button.disabled = true;
       try {
         const created = await api(
           `/agents/${encodeURIComponent(button.dataset.viewEnrollmentCommand)}/enrollment-command`,
           { method: "POST" },
         );
+        if (!button.isConnected || !current()) return;
         showCommand(enrollmentInstallCommand(created), null, "复制 Agent 安装命令");
       } catch (error) {
-        notify(error.message, "error");
-      }
+        if (button.isConnected && current()) notify(error.message, "error");
+      } finally { button.disabled = false; }
     };
   });
 

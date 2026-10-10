@@ -21,7 +21,7 @@ export function bindConfigMenu(menu) {
       list.style.left = `${Math.max(8 - bounds.left, Math.min(0, document.documentElement.clientWidth - 8 - bounds.left - list.offsetWidth))}px`;
     }
   };
-  setOpen(false);
+  setOpen(menu.open);
   bindEvent(summary, "click", event => {
     event.preventDefault();
     setOpen(!menu.open);

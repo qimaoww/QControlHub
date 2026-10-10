@@ -69,6 +69,24 @@ card transforms. Metric/progress width remains a small, bounded layout
 transition; it is disabled for reduced motion. Rail width is the other retained
 layout transition and does not change the workspace grid tracks.
 
+## Popup inventory and lifecycle
+
+| Popup family | Instances / sources | Motion and lifecycle |
+| --- | --- | --- |
+| Native detail and edit dialogs | Dashboard daily traffic; client parameter/display; traffic create/quota/status/sync; Sub-Store settings/targets/delete; user account/allocation/invitation/sharing; region picker; TCP editor/parameters; configuration inbound/outbound/common/history/diff/access | Shared 200 ms surface reveal and independent 160 ms native backdrop. Close and native focus restoration are immediate. Existing busy guards, unsaved-change confirmation, request invalidation and native focus trapping remain authoritative. Gesture-aware backdrop dismissal is shared by existing dismissible traffic/client/dashboard/config dialogs; padding and a gesture starting inside content cannot dismiss them. |
+| Custom modal and command surfaces | Add node, enrollment records, deployment command, administrator node directory in `agent-enrollment` | Independent scrim pseudo-element keeps the original dim/blur without multiplying the content fade. One active surface per controller; focus enters immediately and remains trapped. Escape, actual outside gesture, route departure, logout, or external removal release background inertness, overflow, observers, listeners and owned timers. Stale create/command/directory responses cannot reopen a departed or closed popup. |
+| Menus and calendars | Configuration inbound/outbound/tools menus; mobile More menu; dashboard month picker; IPQuality calendar | Only the revealed panel fades for 160 ms; the launcher stays still. Escape restores launcher focus; outside pointer/focus dismisses the popup. Configuration rebind retains its open state. Month selection returns focus to the summary before refresh. Menu positioning and calendar date rules remain unchanged. |
+| Inline drawers and disclosures | Runtime/version management, config advanced/diff sections, task results, traffic accounting, IPQuality detail sections and enrollment history | Focused user reveals fade content without fading the summary. Initially open/restored sections stay still; closing cancels active content motion immediately. No height animation or delayed hiding. |
+| Confirmation and result feedback | Shared confirmation dialog, global success/error notice, login errors, deployment and settings status | Superseded/external confirmation closes settle their callers; identical notices do not replay. Results stay readable under reduced motion. Error messages retain their existing dismissal behavior. |
+| Browser-owned popups | Native select options, date controls, password manager, and title hints | Preserve browser/platform presentation and accessibility. CSS styles the launcher and focus state; it does not attempt to animate system popup contents. |
+
+`modules/popup.js` keeps shared document bindings bounded through `bindEvent`.
+Native modal restoration after TCP reconciliation cancels the new CSS entrance,
+so a background update cannot masquerade as another user opening. Native
+dialogs remain native, including their top layer and focus behavior. Closing
+surfaces commit immediately instead of leaving a fading interactive layer or
+delaying a save/navigation behind an end event.
+
 ## Regression checks
 
 Run `make check`. It includes all module smoke suites, all existing Chromium
@@ -96,14 +114,23 @@ quiet log rendering, removed animations, both themes, reduced motion, and
 login failure input retention. Existing browser modes cover the production
 page workflows listed above using deterministic local API fixtures.
 
+The four additional `motion-popup`, `motion-popup-reduced`,
+`motion-popup-mobile`, and `motion-popup-mobile-reduced` modes cover custom
+scrim/content ownership, repeated native/custom open and close, real focus
+events, launcher restoration, menu rebind, calendars, content-to-backdrop
+gestures, duplicate enrollment submission, pending responses across same-route
+refresh, late/superseded enrollment/directory responses, route departure and
+external removal. Headless CDP focus emulation is enabled for motion modes so focus
+events are exercised as they are in an active browser window.
+
 ### Validation record (2026-10-10)
 
 Started from clean worktrees on latest `main` (`a035b2b9`) and created
 `codex/console-motion`. The final `make check` passed with an isolated
-PostgreSQL 17 test database: module smoke, all 62 Chromium modes, source/style
+PostgreSQL 17 test database: module smoke, all 66 Chromium modes, source/style
 and repository policy checks, installer/quick-start checks, vet, and all Go
 packages. The Go frontend package also reran the browser suite successfully
-(289.708 s). The frozen initial stylesheet hash contract and `git diff --check`
+(303.139 s). The frozen initial stylesheet hash contract and `git diff --check`
 passed. No required check was blocked by the environment.
 
 Manual Chromium inspection covered desktop drag/navigation and both themes,
@@ -112,6 +139,11 @@ Both phone layouts had no horizontal overflow and no active animations.
 An 18-second drag/navigation recording is retained locally as
 `output/playwright/console-motion-review.mp4`; the preview below reproduces
 the interactions without that local artifact.
+The popup follow-up also passed focused native/custom popup, enrollment,
+configuration, and TCP regressions. Its real browser inspection includes dark
+reduced-motion custom dialogs at 390 x 844 and 844 x 390, with no horizontal
+overflow or active animations. The 10-second popup recording is retained as
+`output/playwright/popup-motion-review.mp4`.
 
 ## Reproducible visual preview
 
@@ -123,6 +155,11 @@ QCH_BROWSER_SMOKE_SERVE_ONLY=1 node frontend/agents_browser_smoke.mjs
 
 Use the printed loopback origin and open
 `/agents-browser-smoke.html?mode=motion&preview=1#node-settings`.
+For the popup review, use
+`/agents-browser-smoke.html?mode=motion-popup&preview=1#node-settings`:
+it starts with Add node open. Press Escape, reopen it, generate a fixture
+command, close it, and navigate to traffic to open quota/status dialogs.
+The popup recording is `output/playwright/popup-motion-review.mp4` (10 s).
 The preview stays open on the node overview. For the richer existing page
 fixtures, substitute `mode=dashboard`, `mode=config-layout`, `mode=users`,
 `mode=presets`, `mode=ip-quality`, or `mode=connections` with `preview=1`.

@@ -1,4 +1,5 @@
 import { bindEvent } from "./refresh.js";
+import { cancelPopupEntrance } from "./popup.js";
 import { hasTCPParameter, validateTCPAvailability, validateTCPSelection, systemBBRState, systemBBRActions, actionLabel, dialogID } from "./system-bbr-model.js";
 import { prepareTCPPreset } from "./system-bbr-presets.js";
 export function createSystemBBREditor({ api, state, can, notify, confirmAction }, { lifecycle, editable, render, systemBBR }) {
@@ -35,6 +36,7 @@ export function createSystemBBREditor({ api, state, can, notify, confirmAction }
       if (dialog.open && !dialog.matches(":modal") && !state.confirmOpen) {
         dialog.close();
         dialog.showModal();
+        cancelPopupEntrance(dialog);
         if (dialog.contains(focused)) focused.focus({ preventScroll: true });
       }
       const outside = (event) => {

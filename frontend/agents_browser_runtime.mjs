@@ -15,6 +15,7 @@ import { testTrafficLayoutRuntime } from "./browser/traffic-layout.mjs";
 import { testConfigLayoutRuntime } from "./browser/config-layout.mjs";
 import { testShellLayoutRuntime } from "./browser/shell-layout.mjs";
 import { testMotionRuntime } from "./browser/motion.mjs";
+import { testPopupRuntime } from "./browser/popups.mjs";
 import { assert, waitFor } from "./browser/assertions.mjs";
 
 const mode = new URLSearchParams(location.search).get("mode") || "admin";
@@ -54,7 +55,8 @@ try {
     await testConfigMigrationRuntime(new URLSearchParams(location.search).has("preview"));
   } else {
     await import("./app.js");
-    if (mode.startsWith("motion")) await testMotionRuntime(scenario, new URLSearchParams(location.search).has("preview"));
+    if (mode.startsWith("motion-popup")) await testPopupRuntime(scenario, new URLSearchParams(location.search).has("preview"));
+    else if (mode.startsWith("motion")) await testMotionRuntime(scenario, new URLSearchParams(location.search).has("preview"));
     else if (mode === "traffic-layout-dense" || mode === "traffic-layout-dense-mobile") {
       const cards = await waitFor(() => document.querySelectorAll(".traffic-policy-grid > .traffic-policy-card").length === 17
         && document.querySelectorAll(".traffic-policy-grid > .traffic-policy-card"), "dense traffic cards did not load");

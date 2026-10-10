@@ -1,6 +1,7 @@
 import { bindEvent, reconcileView } from "./refresh.js";
 import { bindConfigOutbounds } from "./config-outbounds.js";
 import { bindConfigMenu } from "./config-menu.js";
+import { bindDialogBackdrop } from "./popup.js";
 import { composeConfigWorkspaceToolbar } from "./config-workspace-toolbar.js";
 // Reuse the actual preset form and field editors, not a second implementation
 // of protocol options. Only the requested editor is mounted: no second source
@@ -205,10 +206,7 @@ export function bindConfigInbounds(ctx) {
     };
     bindEvent(opened.querySelector("[data-inbound-close]"), "click", close);
     bindEvent(opened, "cancel", event => { event.preventDefault(); void close(); });
-    bindEvent(opened, "click", event => {
-      const rect = opened.getBoundingClientRect();
-      if (event.target === opened && (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom)) void close();
-    });
+    bindDialogBackdrop(opened, () => { void close(); });
     state.routeSignal?.addEventListener("abort", abort, { once:true });
     document.body.append(opened);
     opened.showModal();

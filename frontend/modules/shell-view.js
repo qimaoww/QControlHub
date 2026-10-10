@@ -1,5 +1,6 @@
 import { cancelMotion, enterSurface } from "./motion.js";
-import { bindEvent, reconcileView } from "./refresh.js";
+import { bindPopups } from "./popup.js";
+import { reconcileView } from "./refresh.js";
 import { setStorageAccount } from "./account-storage.js";
 import { dockIcons } from "./shell-icons.js";
 import { createShellContext } from "./shell-context.js";
@@ -185,30 +186,12 @@ function shell(content, title, { viewKey = state.route } = {}) {
     document.querySelector("#theme-toggle").onclick;
   document.querySelector("#mobile-logout").onclick =
     document.querySelector("#logout").onclick;
-  bindEvent(document, "click", (event) => {
-    const menu = document.querySelector(".mobile-account-menu[open]");
-    if (menu && !menu.contains(event.target)) menu.open = false;
-  });
-  bindEvent(document, "keydown", (event) => {
-    if (event.key !== "Escape") return;
-    const menu = document.querySelector(".mobile-account-menu[open]");
-    if (menu) menu.open = false;
-  });
+  bindPopups();
   document.querySelectorAll("[data-context-agent]").forEach((link) => {
     link.onclick = () => {
       state.data.selectedAgent = link.dataset.contextAgent;
     };
   });
-  bindEvent(document, "toggle", (event) => {
-    const details = event.target;
-    if (details.tagName !== "DETAILS") return;
-    if (!details.open) return cancelMotion(details);
-    // Native toggle events are queued. Only a focused disclosure is a user
-    // reveal; initially open/restored details and poll updates stay still.
-    if (!details.contains(document.activeElement)) return;
-    if (document.querySelector(".workspace-main")?.getAnimations().some(animation => animation.id === "qch-route")) return;
-    enterSurface(details, { token: "--motion-feedback", id: "qch-disclosure" });
-  }, { capture: true });
   bindConfirmationDialog();
 }
 

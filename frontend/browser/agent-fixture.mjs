@@ -539,6 +539,7 @@ window.fetch = async (input, options = {}) => {
   if (method === "GET" && path.startsWith("/metrics/")) return json([]);
   if (method === "POST" && path === "/enrollment-tokens") {
     testAPI.lastEnrollmentRequest = JSON.parse(options.body);
+    if (testAPI.enrollmentGate) await testAPI.enrollmentGate;
     if (testAPI.enrollmentFailure) return json({ error: "temporary enrollment failure" }, 503);
     return json({ token: "browser-test-enrollment", name: "browser-node" });
   }

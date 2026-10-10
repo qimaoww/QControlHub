@@ -1,4 +1,5 @@
 import { bindEvent } from "./refresh.js";
+import { bindDialogBackdrop } from "./popup.js";
 
 import { copyClientValue } from "./client-clipboard.js";
 export function createClientAccessProfiles({ api, state, can, notify }, { clientAccess }) {
@@ -41,14 +42,10 @@ export function createClientAccessProfiles({ api, state, can, notify }, { client
       button.onclick = () => button.closest("dialog")?.close();
     });
     document.querySelectorAll(".client-parameter-dialog").forEach((dialog) => {
-      dialog.onclick = (event) => {
-        if (event.target === dialog) dialog.close();
-      };
+      bindDialogBackdrop(dialog);
     });
     document.querySelectorAll(".client-display-dialog").forEach((dialog) => {
-      dialog.onclick = (event) => {
-        if (event.target === dialog) dialog.close();
-      };
+      bindDialogBackdrop(dialog);
     });
     document.querySelectorAll("[data-copy-target]").forEach((button) => {
       button.onclick = async () => {
