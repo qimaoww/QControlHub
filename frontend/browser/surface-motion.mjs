@@ -31,7 +31,11 @@ export async function checkNativeExit(dialog, launcher, reduced) {
     fresh.removeAttribute("inert"); fresh.removeAttribute("aria-hidden");
     reconcileView(dialog, fresh);
     assert.ok(dialog.inert && dialog.getAttribute("aria-hidden") === "true", "refresh preserves closed surface accessibility");
-    await delay(220);
+    // CI can schedule the first rendering frame after the timer has fired.
+    // Observe the bounded final paint state instead of assuming wall-clock
+    // time advances the browser's transition timeline at the same rate.
+    await waitFor(() => getComputedStyle(dialog).display === "none" && animations(dialog).length === 0,
+      "closed dialog must finish its exit without retained top-layer paint");
     assert.equal(getComputedStyle(dialog).display, "none");
     assert.equal(animations(dialog).length, 0);
     for (let i = 0; i < 4; i++) {
@@ -45,7 +49,9 @@ export async function checkNativeExit(dialog, launcher, reduced) {
     assert.equal(getComputedStyle(dialog).opacity, "1");
     assert.ok(getComputedStyle(dialog).translate.split(" ").every(value => Math.abs(Number.parseFloat(value)) < .01),
       "completed dialog has no residual displacement");
-    dialog.close(); await delay(220);
+    dialog.close();
+    await waitFor(() => getComputedStyle(dialog).display === "none" && animations(dialog).length === 0,
+      "rapid dialog reversal must finish without retained top-layer paint");
     assert.equal(getComputedStyle(dialog).display, "none", "rapid reversal leaves no top-layer residue");
   }
 }

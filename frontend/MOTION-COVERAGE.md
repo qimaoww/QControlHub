@@ -179,3 +179,9 @@ changes removed custom retired surfaces and closed version drawers immediately,
 retaining launcher focus. Phone portrait/landscape inspection found zero active
 animations and no horizontal overflow with reduced motion. No required check
 was blocked by the environment.
+
+Merge review correction: Debian and Alpine CI exposed a fixed-delay assertion
+in the native-dialog exit regression. It now observes the hidden paint state
+and zero active animations with a bounded timeout, while still asserting
+immediate business/focus/accessibility state. The four popup modes passed
+locally after the correction; production motion and timings are unchanged.
