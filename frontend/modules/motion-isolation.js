@@ -1,4 +1,5 @@
 import { reducedMotion } from "./motion.js";
+import { restorePaintScroll } from "./paint-snapshot.js";
 
 let exitStyles;
 // Retired paint stays outside component queries, focus and the accessibility
@@ -22,6 +23,7 @@ export function isolateMotionSurface(surface) {
     surface.inert = true;
     shadow.append(surface);
     document.body.append(host);
+    restorePaintScroll(surface);
     return host;
   } catch { return null; }
 }

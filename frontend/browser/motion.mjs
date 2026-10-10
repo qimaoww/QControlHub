@@ -21,7 +21,10 @@ const gesture = async (grip, target, action = "drop") => {
   } };
   await waitFor(() => window.__motionGesture === null, "browser pointer gesture did not run");
 };
-const settled = async () => waitFor(() => !animations().some(a => a.id.startsWith("qch-")), "native motion did not settle");
+// Deferred entrances are briefly paused while waiting for their first frame.
+// They still own paint; excluding them can mistake an initial disclosure for
+// a replay when the next poll completes after playback starts.
+const settled = async () => waitFor(() => !document.getAnimations().some(a => a.id.startsWith("qch-")), "native motion did not settle");
 
 async function checkNavigationReversal(main, reduced) {
   const originalFetch = window.fetch;

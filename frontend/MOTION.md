@@ -90,6 +90,9 @@ Offscreen rows, telemetry, clocks, logs and identical polling results stay quiet
   capture current paint and release old owners before reading destination slots.
 - `motion-isolation.js`: one shared parsed production stylesheet for closed
   shadow-tree paint tails, outside document-level component queries.
+- `paint-snapshot.js`: freezes interrupted descendant paint, retains single and
+  multiple select choices, and restores nested/editor scroll offsets after the
+  isolated copy is mounted, before its first exit frame.
 - `refresh.js`: retains DOM, focus, caret, dirty fields and scroll; same-member
   polling performs no list motion measurements. Motion ownership survives refresh.
 - `popup.js` and CSS: native dialogs/details own entrance, exit and rapid reversal;

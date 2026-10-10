@@ -140,3 +140,13 @@ paint or motion, while preserving the same messages, constraints and focus.
 - Full required-command output and final supplemental evidence: [255-validation.txt](../docs/motion/255-validation.txt).
 
 During this audit, a conditional-field FLIP inside a scaling parent produced horizontal overflow. Parent entrance now owns the nested reveal. The first remote CI run also exposed an early test completion: document animation enumeration cannot see a closed-shadow retirement. The exit assertion now waits for the actual retired surface to disconnect, keeping the cleanup deadline and all interaction budgets unchanged.
+
+The pre-merge review reproduced another exit discontinuity: native clones reset
+select choices and nested scroll offsets. Shared paint snapshots now retain
+single/multiple choices and restore content/editor scroll before their first
+paint. Four popup modes verify the copied draft and both scroll axes. The task
+polling check also waits for paused deferred entrances, so an initial disclosure
+cannot be mistaken for a polling replay. Five actual result refreshes retained
+one initial disclosure owner and created no new entrance. CI's aggregate Go
+package deadline is 20 minutes because it repeats all 70 browser modes beside
+the standalone suite; per-mode deadlines and interaction budgets remain unchanged.

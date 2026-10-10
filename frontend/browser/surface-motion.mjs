@@ -223,8 +223,18 @@ export async function checkInteractionFeedback(reduced) {
   updateFeedback(feedback, "");
   assert.ok(feedback.hidden && feedback.textContent === "", "prompt clear commits synchronously");
   if (!reduced) assert.ok(document.querySelector(".motion-exit-host"), "cleared prompt preserves its complete exit paint");
-  const dialog = host.querySelector("dialog"); dialog.showModal();
+  const dialog = host.querySelector("dialog");
+  dialog.querySelector("p").innerHTML = '<select><option>Saved choice</option><option>Unsaved choice</option></select><select multiple><option selected>Saved multiple</option><option>Unsaved multiple</option><option>Another choice</option></select><textarea style="height:40px;resize:none"></textarea><span data-retired-scroll style="display:block;width:160px;height:40px;overflow:auto"><span style="display:block;width:700px;height:180px">Scrolled draft</span></span>';
+  const choice = dialog.querySelector("select"), multiple = dialog.querySelector("select[multiple]");
+  choice.selectedIndex = 1;
+  multiple.options[0].selected = false; multiple.options[1].selected = multiple.options[2].selected = true;
+  const draft = dialog.querySelector("textarea"); draft.value = Array.from({ length: 20 }, (_, index) => `Unsaved line ${index}`).join("\n");
+  dialog.showModal();
   await delay(reduced ? 0 : 80);
+  const scroller = dialog.querySelector("[data-retired-scroll]");
+  scroller.scrollTop = 60; scroller.scrollLeft = 40; draft.scrollTop = 30;
+  const scroll = { top: scroller.scrollTop, left: scroller.scrollLeft, draft: draft.scrollTop };
+  assert.ok(scroll.top && scroll.left && scroll.draft, "exit fixture must contain actual scrolled draft paint");
   const originals = [...dialog.querySelectorAll("h2,footer")].map(element => Number(getComputedStyle(element).opacity));
   let tailRoot;
   const attach = HTMLElement.prototype.attachShadow;
@@ -235,6 +245,12 @@ export async function checkInteractionFeedback(reduced) {
   if (!reduced) {
     const panel = tailRoot.querySelector("dialog");
     assert.ok(panel, "destroyed modal retains its complete panel and scrim exit");
+    assert.equal(panel.querySelector("select").value, choice.value, "retired select cannot flash back to its default choice");
+    assert.equal([...panel.querySelector("select[multiple]").selectedOptions].map(option => option.index).join(","), "1,2", "retired multiple selection retains every unsaved choice");
+    assert.equal(panel.querySelector("textarea").value, draft.value, "retired editor retains its unsaved text");
+    assert.equal(panel.querySelector("textarea").scrollTop, scroll.draft, "retired editor cannot jump to its first line");
+    assert.equal(panel.querySelector("[data-retired-scroll]").scrollTop, scroll.top, "retired content retains vertical scroll paint");
+    assert.equal(panel.querySelector("[data-retired-scroll]").scrollLeft, scroll.left, "retired content retains horizontal scroll paint");
     panel.querySelectorAll("h2,footer").forEach((element, index) =>
       assert.ok(Math.abs(Number(getComputedStyle(element).opacity) - originals[index]) < .02, "interrupted content cannot flash on retiring clone"));
     let previous = Number(getComputedStyle(panel).opacity), scale = Number.parseFloat(getComputedStyle(panel).scale);
