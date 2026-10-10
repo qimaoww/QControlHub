@@ -2,7 +2,57 @@ import { agentPresenceMarkup } from "../modules/agent-presence.js";
 import { serviceStatusInfo, serviceRuntimeStatus } from "../modules/service-status.js";
 import { assert, waitFor } from "./assertions.mjs";
 
+const statusSelector = ".agent-presence, .engine-state, .live-engine-status, .status-label, .traffic-policy-status";
+export const settlePaint = async () => {
+  const animations = [...document.querySelectorAll(statusSelector)].flatMap(pill => {
+    getComputedStyle(pill).color; // Flush theme changes before collecting transitions.
+    return pill.getAnimations();
+  });
+  await Promise.race([
+    Promise.all(animations.map(animation => animation.finished.catch(() => {}))),
+    new Promise(resolve => setTimeout(resolve, 1000)),
+  ]);
+};
+const canvas = document.createElement("canvas").getContext("2d", { willReadFrequently: true });
+const luminance = color => {
+  canvas.fillStyle = color;
+  canvas.fillRect(0, 0, 1, 1);
+  const [r, g, b] = [...canvas.getImageData(0, 0, 1, 1).data].map(value => {
+    const channel = value / 255;
+    return channel <= .04045 ? channel / 12.92 : ((channel + .055) / 1.055) ** 2.4;
+  });
+  return .2126 * r + .7152 * g + .0722 * b;
+};
+export function checkReadableLabel(pill) {
+  const style = getComputedStyle(pill);
+  const ink = luminance(style.color), background = luminance(style.backgroundColor);
+  const contrast = (Math.max(ink, background) + .05) / (Math.min(ink, background) + .05);
+  assert.ok(contrast >= 4.5, `${pill.textContent}: text contrast is ${contrast.toFixed(2)}:1`);
+  const frame = pill.getBoundingClientRect();
+  const dot = pill.querySelector("i");
+  if (dot) {
+    const marker = dot.getBoundingClientRect();
+    assert.ok(Math.abs((marker.top + marker.bottom - frame.top - frame.bottom) / 2) <= .5,
+      `${pill.textContent}: marker must stay centred in the label`);
+  }
+  const walker = document.createTreeWalker(pill, NodeFilter.SHOW_TEXT);
+  while (walker.nextNode()) {
+    if (!walker.currentNode.textContent.trim()) continue;
+    const range = document.createRange();
+    range.selectNodeContents(walker.currentNode);
+    const lines = [...range.getClientRects()];
+    assert.equal(lines.length, 1, `${pill.textContent}: status text wrapped`);
+    assert.ok(lines[0].left >= frame.left - 1 && lines[0].right <= frame.right + 1,
+      `${pill.textContent}: status text is clipped`);
+  }
+  return contrast;
+}
+
 export async function testStatusControls({ testAPI }, preview = false) {
+  testAPI.tasks = ["pending", "running", "succeeded", "failed", "canceled"].map((status, index) => ({
+    id: `status-task-${index}`, agent_id: "alpha", engine: "mihomo", action: "status", status,
+    created_at: new Date(Date.now() - index * 60000).toISOString(),
+  }));
   const card = await waitFor(() => document.querySelector('[data-agent-node="alpha"]'), "node card did not render");
   const service = () => card.querySelector('[data-core-service="mihomo"]');
   assert.equal(service().textContent, "运行中", "initial service rendering must not use task execution wording");
@@ -45,13 +95,19 @@ export async function testStatusControls({ testAPI }, preview = false) {
   const pills = [...board.querySelectorAll(".agent-presence, .engine-state, .live-engine-status, .status-label, .traffic-policy-status")];
   const geometry = ["fontSize", "fontWeight", "lineHeight", "paddingTop", "paddingRight", "paddingBottom", "paddingLeft", "borderTopWidth", "borderRadius", "minHeight", "boxShadow"];
   const originalTheme = document.documentElement.dataset.theme;
+  let minimumContrast = Infinity;
+  const themeColors = new Map();
   for (const theme of ["light", "dark"]) {
     document.documentElement.dataset.theme = theme;
+    await settlePaint();
     const reference = getComputedStyle(pills[0]);
     const colors = new Map();
     const markers = new Map();
     for (const pill of pills) {
       const style = getComputedStyle(pill);
+      minimumContrast = Math.min(minimumContrast, checkReadableLabel(pill));
+      if (matchMedia("(prefers-reduced-motion: reduce)").matches)
+        assert.equal(style.transitionDuration, "0s", "reduced motion must disable status transitions");
       for (const property of geometry) assert.equal(style[property], reference[property], `${theme}: ${pill.className} has different ${property}`);
       const label = pill.querySelector("b");
       if (label) assert.equal(getComputedStyle(label).fontSize, reference.fontSize, "a page override shrank the status label");
@@ -64,19 +120,76 @@ export async function testStatusControls({ testAPI }, preview = false) {
       assert.equal(marker.width, "6px", "status marker size differs");
       assert.equal(marker.boxSizing, "border-box", "pseudo-element markers must include their border in the same 6px size");
       assert.equal(marker.boxShadow, "none", "status marker restored a pulse ring");
-      const mark = [marker.height, marker.borderStyle, marker.borderWidth, marker.borderColor, marker.backgroundColor].join("|");
+      const mark = [marker.height, marker.borderStyle, marker.borderWidth, marker.borderColor, marker.backgroundColor, marker.translate].join("|");
       if (markers.has(tone)) assert.equal(mark, markers.get(tone), `${theme}: ${tone} markers differ between renderers`);
       else markers.set(tone, mark);
     }
+    themeColors.set(theme, colors);
     for (const pill of card.querySelectorAll(".agent-presence, .engine-state")) {
       const style = getComputedStyle(pill);
       for (const property of geometry) assert.equal(style[property], reference[property], `overview override changed ${property}`);
     }
   }
   document.documentElement.dataset.theme = originalTheme;
+  window.statusControlResult = { minimumContrast: Number(minimumContrast.toFixed(2)), views: ["node-overview", "state-matrix"] };
   if (preview) {
     document.querySelector(".workspace-main").replaceChildren(board);
   } else {
     board.remove();
+    // Stress the real overview layout without changing state mapping or polling.
+    const sample = card.cloneNode(true);
+    sample.style.width = "320px";
+    sample.querySelectorAll(".core-chip .engine-state b").forEach(label => { label.textContent = "检测到但不可迁移"; });
+    document.querySelector(".workspace-main").append(sample);
+    const root = document.documentElement;
+    const originalScale = root.style.getPropertyValue("--ui-font-scale");
+    try {
+      for (const scale of ["1", "1.25"]) {
+        root.style.setProperty("--ui-font-scale", scale);
+        await settlePaint();
+        for (const pill of sample.querySelectorAll(statusSelector)) checkReadableLabel(pill);
+        assert.ok(sample.scrollWidth <= sample.clientWidth + 1, "long status labels overflow a narrow node card");
+      }
+    } finally {
+      sample.remove();
+      if (originalScale) root.style.setProperty("--ui-font-scale", originalScale);
+      else root.style.removeProperty("--ui-font-scale");
+    }
+    // Compare real renderer output with the shared state matrix in both themes.
+    for (const view of [
+      { hash: "#settings-node-alpha", selector: ".core-runtime-name .engine-state" },
+      { hash: "#tasks", selector: ".task-event-card .status-label" },
+      { hash: "#traffic", selector: ".traffic-policy-status" },
+    ]) {
+      location.hash = view.hash;
+      await waitFor(() => document.querySelector(view.selector), `${view.hash}: status view did not load`);
+      for (const theme of ["light", "dark"]) for (const scale of ["1", "1.25"]) {
+        root.dataset.theme = theme;
+        root.style.setProperty("--ui-font-scale", scale);
+        await settlePaint();
+        for (const pill of document.querySelectorAll(statusSelector)) {
+          if (!pill.getClientRects().length) continue;
+          minimumContrast = Math.min(minimumContrast, checkReadableLabel(pill));
+          const tone = pill.dataset.agentPresence === "online" || pill.classList.contains("ok") || pill.classList.contains("running") ? "ok"
+            : pill.classList.contains("warn") || pill.classList.contains("pending") ? "warn"
+            : pill.classList.contains("bad") || pill.classList.contains("failed") ? "bad" : "muted";
+          const style = getComputedStyle(pill);
+          assert.equal(`${style.color}|${style.backgroundColor}`, themeColors.get(theme).get(tone), `${view.hash}: theme colors differ`);
+        }
+        assert.ok(root.scrollWidth <= root.clientWidth + 1, `${view.hash}: status layout overflows`);
+      }
+      window.statusControlResult.views.push(view.hash);
+      if (view.hash === "#tasks") {
+        testAPI.tasks[0].status = "running";
+        await waitFor(() => document.querySelector('[data-task-id="status-task-0"] .status-label')?.textContent === "执行中",
+          "polling did not update task execution status");
+        assert.ok(document.querySelector('[data-task-id="status-task-0"] .status-label').classList.contains("warn"),
+          "running task must retain transition semantics");
+      }
+    }
+    if (originalScale) root.style.setProperty("--ui-font-scale", originalScale);
+    else root.style.removeProperty("--ui-font-scale");
+    root.dataset.theme = originalTheme;
+    window.statusControlResult.minimumContrast = Number(minimumContrast.toFixed(2));
   }
 }

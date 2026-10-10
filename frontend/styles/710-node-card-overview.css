@@ -126,8 +126,8 @@ a.node-card-overview:hover, .node-card-overview.batch-selecting:hover {
 .node-card-overview .node-card-komari-cycle progress { margin-top: 4px; }
 .node-card-overview .node-card-komari-cycle:is(.unavailable, .usage-unavailable) small b { color: var(--amber); }
 .node-card-overview .node-card-cores {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  display: flex;
+  flex-wrap: wrap;
   gap: 10px;
   min-height: 50px;
   padding: 9px 14px;
@@ -135,6 +135,8 @@ a.node-card-overview:hover, .node-card-overview.batch-selecting:hover {
 }
 .node-card-overview .core-chip {
   display: flex;
+  flex: 1 0 calc((100% - 30px) / 4);
+  min-width: max-content;
   flex-direction: column;
   align-items: flex-start;
   justify-content: flex-start;

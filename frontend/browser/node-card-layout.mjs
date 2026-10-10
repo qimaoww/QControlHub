@@ -53,8 +53,11 @@ export async function testNodeCardLayout({ testAPI }, preview) {
     }
     assert.equal(card.querySelectorAll(".node-card-resource").length, 3);
     assert.equal(getComputedStyle(card.querySelector(".node-card-resources")).gridTemplateColumns.split(" ").length, 3);
-    assert.equal(getComputedStyle(card.querySelector(".node-card-cores")).gridTemplateColumns.split(" ").length, 4);
     assert.equal(card.querySelectorAll(".core-chip").length, 4);
+    for (const status of card.querySelectorAll(".engine-state")) {
+      const bounds = status.getBoundingClientRect();
+      assert.ok(bounds.left >= frame.left && bounds.right <= frame.right, "core status escapes its card");
+    }
   }
   assert.ok(grid.scrollWidth <= grid.clientWidth + 1, "node grid overflows horizontally");
   assert.ok(alpha.getBoundingClientRect().height <= 365, "overview card has excessive vertical spacing");
@@ -81,6 +84,11 @@ export async function testNodeCardLayout({ testAPI }, preview) {
   for (const card of cards) {
     for (const value of card.querySelectorAll(".node-card-resource strong, .node-card-resource small, .node-card-rates strong")) {
       assert.ok(value.scrollWidth <= value.clientWidth + 1, "resource values are clipped at a larger font size");
+    }
+    for (const status of card.querySelectorAll(".engine-state")) {
+      assert.ok(status.scrollWidth <= status.clientWidth + 1, "status text is clipped at a larger font size");
+      const bounds = status.getBoundingClientRect(), frame = card.getBoundingClientRect();
+      assert.ok(bounds.left >= frame.left && bounds.right <= frame.right, "enlarged core status escapes its card");
     }
   }
   if (originalScale) root.style.setProperty("--ui-font-scale", originalScale);
