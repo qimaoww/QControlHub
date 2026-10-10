@@ -16,10 +16,10 @@ func TestMotionSystemCoversWorkspaceInteractions(t *testing.T) {
 	content := string(styles)
 	for _, required := range []string{
 		"--motion-fast:120ms",
-		"--motion-base:200ms",
-		"--motion-slow:280ms",
-		"--motion-feedback:160ms",
-		"--motion-distance:6px",
+		"--motion-base:320ms",
+		"--motion-slow:480ms",
+		"--motion-feedback:280ms",
+		"--motion-distance:24px",
 		"@keyframes qch-dialog-enter",
 		"@keyframes qch-fade-enter",
 		"@keyframes qch-route-progress",

@@ -11,18 +11,19 @@ export async function run() {
   };
   const controller = createMotionController({
     media: () => preference,
-    style: () => ({ getPropertyValue: name => name === "--motion-base" ? ".2s" : "ease-out" }),
+    style: () => ({ opacity: ".42", getPropertyValue: name => name === "--motion-base" ? ".2s" : "ease-out" }),
     setTimer: (fn, delay) => { assert.equal(delay, 280); timers.set(++next, fn); return next; },
     clearTimer: id => timers.delete(id),
     observe: fn => { removed = fn; observers++; return () => observers--; },
   });
   const element = () => ({
-    isConnected: true, calls: [],
+    isConnected: true, calls: [], frames: [],
     animate(frames, options) {
       assert.equal(options.duration, 200, "CSS tokens are shared with native animations");
       assert.equal(options.fill, "none", "finished animation never masks hover/drag");
       const animation = { cancel() { this.oncancel?.(); } };
       this.calls.push(animation);
+      this.frames.push(frames);
       return animation;
     },
   });
@@ -31,6 +32,7 @@ export async function run() {
   const animate = node => controller.animate(node, [{ opacity: 0 }, { opacity: 1 }], { onSettled: () => settled++ });
   const cancelFirst = animate(a);
   animate(a);
+  assert.equal(a.frames.at(-1)[0].opacity, ".42", "interrupted motion resumes from current paint");
   assert.equal(settled, 1, "superseded motion settles the previous owner");
   cancelFirst();
   assert.equal(controller.activeCount(), 1, "stale cancellation cannot stop the newer animation");
@@ -67,4 +69,27 @@ export async function run() {
   controller.cancel({ contains: node => node === shadowHost });
   assert.equal(controller.activeCount(), 0, "container cancellation crosses an isolated exit shadow boundary");
   assert.equal(timers.size, 0);
+
+  let releaseReady;
+  const pending = element();
+  const native = pending.animate;
+  pending.animate = function (...args) {
+    const animation = native.apply(this, args);
+    animation.ready = new Promise(resolve => { releaseReady = resolve; });
+    return animation;
+  };
+  animate(pending);
+  assert.equal(timers.size, 0, "render work before playback readiness cannot spend the fallback budget");
+  releaseReady(); await Promise.resolve();
+  assert.equal(timers.size, 1, "playback readiness starts the bounded deadline");
+  controller.cancel(pending);
+  assert.equal(timers.size, 0);
+
+  const parent = element(), child = element();
+  parent.contains = node => node === child;
+  animate(parent); animate(child);
+  controller.cancelOwn(parent);
+  assert.equal(controller.activeCount(), 1, "releasing a parent's reflow must preserve its child's entrance owner");
+  controller.cancel(parent);
+  assert.equal(controller.activeCount(), 0, "lifecycle cancellation still releases the whole subtree");
 }

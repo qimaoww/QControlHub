@@ -1,5 +1,7 @@
 import { assert, delay, waitFor } from "./assertions.mjs";
-import { cancelMotion, retireSurface, updateFeedback } from "../modules/motion.js";
+import { cancelMotion, retireSurface } from "../modules/motion.js";
+import { setVisible, updateFeedback } from "../modules/presence-motion.js";
+import { closeRetiringDialog } from "../modules/popup.js";
 import { reconcileView } from "../modules/refresh.js";
 import { routeModuleNames } from "../modules/routes.js";
 
@@ -121,7 +123,7 @@ export async function checkDisclosureMotion(_workspace, reduced) {
   updateFeedback(feedback, "Request failed");
   assert.equal(feedback.textContent, "Request failed", "error text is available immediately");
   assert.equal(feedback.hidden, false);
-  if (!reduced) assert.ok(animations(feedback).some(animation => animation.id === "qch-feedback"));
+  if (!reduced) assert.ok(animations(feedback).some(animation => ["qch-feedback", "qch-reveal"].includes(animation.id)));
   await waitFor(() => animations(feedback).length === 0, "inline feedback must settle");
   updateFeedback(feedback, "Request failed");
   assert.equal(animations(feedback).length, 0, "identical inline feedback never replays");
@@ -129,7 +131,7 @@ export async function checkDisclosureMotion(_workspace, reduced) {
   assert.ok(feedback.hidden);
   updateFeedback(feedback, "Request failed");
   await delay(15);
-  if (!reduced) assert.ok(animations(feedback).some(animation => animation.id === "qch-feedback"),
+  if (!reduced) assert.ok(animations(feedback).some(animation => ["qch-feedback", "qch-reveal"].includes(animation.id)),
     `retry feedback is restored: connected=${feedback.isConnected}, hidden=${feedback.hidden}, opacity=${getComputedStyle(feedback).opacity}, preference=${matchMedia("(prefers-reduced-motion: reduce)").matches}`);
   feedback.remove(); await delay(10);
   assert.equal(animations(feedback).length, 0);
@@ -160,17 +162,147 @@ export async function checkDisclosureMotion(_workspace, reduced) {
   root.remove();
 }
 
+// Exercise shared presence through real paint, native validity and keyboard
+// focus. All four popup modes run this against the generated production CSS.
+export async function checkInteractionFeedback(reduced) {
+  const host = document.createElement("section");
+  host.style.cssText = "position:fixed;left:12px;top:100px;width:min(340px,calc(100vw - 24px));background:var(--surface);z-index:80";
+  host.innerHTML = '<button title="Motion keyboard tip">Hint</button><form><label>Required value<input required></label><button>Submit</button></form><aside hidden>Conditional fields</aside><p role="alert" hidden></p><dialog><h2>Retiring editor</h2><p>Complete content</p><footer><button>Close</button></footer></dialog>';
+  document.body.append(host);
+  const hint = host.querySelector("button"), input = host.querySelector("input"), form = host.querySelector("form");
+  hint.focus();
+  const tip = await waitFor(() => document.querySelector('.interaction-tooltip[data-open]'), "keyboard hint must use the animated authored tooltip");
+  assert.equal(tip.textContent, "Motion keyboard tip");
+  assert.ok(!hint.hasAttribute("title"), "native title bubble cannot duplicate the authored hint");
+  await waitFor(() => getComputedStyle(tip).opacity === "1", "tooltip entrance must finish");
+  const refreshedHint = hint.cloneNode(true); refreshedHint.title = "Updated motion keyboard tip";
+  reconcileView(hint, refreshedHint);
+  await waitFor(() => tip.textContent === "Updated motion keyboard tip", "polling must update a visible hint without a second native bubble");
+  assert.ok(!hint.hasAttribute("title"));
+  input.focus();
+  assert.ok(!tip.hasAttribute("data-open"), "blur commits tooltip dismissal");
+  if (!reduced) assert.ok(tip.isConnected, "tooltip keeps its exit paint");
+  hint.focus();
+  await waitFor(() => document.querySelector('.interaction-tooltip[data-open]'), "rapid refocus restores the tooltip");
+  if (!reduced) assert.equal(document.querySelector('.interaction-tooltip'), tip, "rapid refocus retains the same painted hint");
+  input.focus();
+  await waitFor(() => !tip.isConnected, "tooltip exit releases its top-layer element");
+  assert.equal(hint.title, "Updated motion keyboard tip");
+  form.querySelector("button").click();
+  const error = host.querySelector(".interaction-validation");
+  assert.ok(error && !error.hidden && error.textContent, "native constraint failure must provide a visible inline message");
+  assert.equal(document.activeElement, input, "validation focuses the first invalid control");
+  assert.equal(input.getAttribute("aria-errormessage"), error.id);
+  await waitFor(() => error.getAnimations().length === 0, "validation entry must settle");
+  const refreshedForm = form.cloneNode(true);
+  refreshedForm.querySelector(".interaction-validation").remove();
+  refreshedForm.querySelector("input").removeAttribute("data-motion-invalid");
+  refreshedForm.querySelector("input").removeAttribute("aria-invalid");
+  refreshedForm.querySelector("input").removeAttribute("aria-errormessage");
+  reconcileView(form, refreshedForm);
+  assert.equal(form.querySelector(".interaction-validation"), error, "polling must retain the active validation message");
+  assert.equal(input.getAttribute("aria-errormessage"), error.id);
+  input.value = "unsaved value"; input.setSelectionRange(2, 6);
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  assert.ok(!error.isConnected, "valid input clears the live message immediately");
+  assert.equal(input.getAttribute("aria-invalid"), null);
+  assert.equal(input.value, "unsaved value");
+  assert.equal(input.selectionStart, 2); assert.equal(input.selectionEnd, 6);
+  const field = host.querySelector("aside");
+  setVisible(field, true);
+  if (!reduced) await waitFor(() => field.getAnimations().some(a => a.currentTime > 70), "conditional entry must play");
+  const opacity = Number(getComputedStyle(field).opacity);
+  setVisible(field, false); await delay(reduced ? 0 : 25);
+  setVisible(field, true);
+  if (!reduced) assert.ok(Number(getComputedStyle(field).opacity) <= opacity + .05, "fast reverse cannot flash to full opacity");
+  await waitFor(() => field.getAnimations().length === 0, "conditional reverse must settle");
+  assert.equal(getComputedStyle(field).opacity, "1");
+  const feedback = host.querySelector('[role="alert"]');
+  updateFeedback(feedback, "Copied successfully");
+  await waitFor(() => feedback.getAnimations().length === 0, "copy result must finish entry");
+  updateFeedback(feedback, "");
+  assert.ok(feedback.hidden && feedback.textContent === "", "prompt clear commits synchronously");
+  if (!reduced) assert.ok(document.querySelector(".motion-exit-host"), "cleared prompt preserves its complete exit paint");
+  const dialog = host.querySelector("dialog");
+  dialog.querySelector("p").innerHTML = '<select><option>Saved choice</option><option>Unsaved choice</option></select><select multiple><option selected>Saved multiple</option><option>Unsaved multiple</option><option>Another choice</option></select><textarea style="height:40px;resize:none"></textarea><span data-retired-scroll style="display:block;width:160px;height:40px;overflow:auto"><span style="display:block;width:700px;height:180px">Scrolled draft</span></span>';
+  const choice = dialog.querySelector("select"), multiple = dialog.querySelector("select[multiple]");
+  choice.selectedIndex = 1;
+  multiple.options[0].selected = false; multiple.options[1].selected = multiple.options[2].selected = true;
+  const draft = dialog.querySelector("textarea"); draft.value = Array.from({ length: 20 }, (_, index) => `Unsaved line ${index}`).join("\n");
+  dialog.showModal();
+  await delay(reduced ? 0 : 80);
+  const scroller = dialog.querySelector("[data-retired-scroll]");
+  scroller.scrollTop = 60; scroller.scrollLeft = 40; draft.scrollTop = 30;
+  const scroll = { top: scroller.scrollTop, left: scroller.scrollLeft, draft: draft.scrollTop };
+  assert.ok(scroll.top && scroll.left && scroll.draft, "exit fixture must contain actual scrolled draft paint");
+  const originals = [...dialog.querySelectorAll("h2,footer")].map(element => Number(getComputedStyle(element).opacity));
+  let tailRoot;
+  const attach = HTMLElement.prototype.attachShadow;
+  HTMLElement.prototype.attachShadow = function(options) { const root = attach.call(this, options); tailRoot = root; return root; };
+  try { closeRetiringDialog(dialog); } finally { HTMLElement.prototype.attachShadow = attach; }
+  dialog.remove();
+  assert.equal(document.querySelector("dialog:modal"), null, "destroyed modal releases native top-layer state immediately");
+  if (!reduced) {
+    const panel = tailRoot.querySelector("dialog");
+    assert.ok(panel, "destroyed modal retains its complete panel and scrim exit");
+    assert.equal(panel.querySelector("select").value, choice.value, "retired select cannot flash back to its default choice");
+    assert.equal([...panel.querySelector("select[multiple]").selectedOptions].map(option => option.index).join(","), "1,2", "retired multiple selection retains every unsaved choice");
+    assert.equal(panel.querySelector("textarea").value, draft.value, "retired editor retains its unsaved text");
+    assert.equal(panel.querySelector("textarea").scrollTop, scroll.draft, "retired editor cannot jump to its first line");
+    assert.equal(panel.querySelector("[data-retired-scroll]").scrollTop, scroll.top, "retired content retains vertical scroll paint");
+    assert.equal(panel.querySelector("[data-retired-scroll]").scrollLeft, scroll.left, "retired content retains horizontal scroll paint");
+    panel.querySelectorAll("h2,footer").forEach((element, index) =>
+      assert.ok(Math.abs(Number(getComputedStyle(element).opacity) - originals[index]) < .02, "interrupted content cannot flash on retiring clone"));
+    let previous = Number(getComputedStyle(panel).opacity), scale = Number.parseFloat(getComputedStyle(panel).scale);
+    await new Promise((resolve, reject) => {
+      const sample = () => {
+        if (!panel.isConnected) return resolve();
+        const next = Number(getComputedStyle(panel).opacity), size = Number.parseFloat(getComputedStyle(panel).scale);
+        try { assert.ok(next <= previous + .01 && size <= scale + .001, "mid-entry close must keep fading/shrinking without an enlarged or bright frame"); }
+        catch (error) { reject(error); return; }
+        previous = next; scale = size; requestAnimationFrame(sample);
+      };
+      requestAnimationFrame(sample);
+    });
+  }
+  await waitFor(() => !document.querySelector(".motion-exit-host"), "retired fields/messages/dialogs must completely settle");
+  if (reduced) assert.equal(host.getAnimations({ subtree: true }).length, 0, "all feedback stays static in reduced motion");
+  host.remove();
+}
+
 export async function checkRouteCoverage(reduced) {
   const dock = document.querySelector(".app-dock");
   let count = 0;
+  const playback = [];
   for (const theme of ["light", "dark"]) {
     document.documentElement.dataset.theme = theme;
     for (const route of Object.keys(routeModuleNames)) {
+      const previousMain = document.querySelector(".workspace-main");
       location.hash = `#${route}`;
+      await delay(0);
       const expected = ["agents", "agent-config"].includes(route) ? "live-config" : route;
       await waitFor(() => document.querySelector(`.page-${expected} .workspace-main:not([inert]):not([aria-busy=true])`),
         `route did not mount: ${route}`);
-      await delay(330);
+      const main = document.querySelector(".workspace-main");
+      const samples = [];
+      if (!reduced && main !== previousMain) {
+        assert.ok(main.getAnimations().some(animation => animation.id === "qch-route"), `route missed its visible entrance: ${route}`);
+        await new Promise(resolve => {
+          const sample = () => {
+            const moving = main.getAnimations({ subtree: true }).filter(animation => animation.id.startsWith("qch-route"));
+            samples.push({ opacity: Number(getComputedStyle(main).opacity),
+              displacement: Math.max(0, ...moving.map(animation => Math.abs(Number.parseFloat(
+                getComputedStyle(animation.effect.target).translate.split(" ").at(-1)) || 0))) });
+            if (moving.length) requestAnimationFrame(sample); else resolve();
+          };
+          requestAnimationFrame(sample);
+        });
+        assert.ok(samples.length >= 4, `route did not play a complete visible sequence: ${route}`);
+        assert.ok(samples[0].opacity < .85, `route entrance finished before content was visible: ${route}`);
+        assert.ok(samples.some(sample => sample.displacement >= 10), `route has no perceptible displacement: ${route}`);
+        assert.equal(samples.at(-1).opacity, 1, `route final opacity is not restored: ${route}`);
+      }
+      playback.push({ route, theme, reduced, frames: samples.length });
       assert.equal(document.querySelector(".app-dock"), dock, `dock DOM changed on ${route}`);
       assert.equal(document.querySelector("dialog:modal,.modal-backdrop,.motion-exit-host"), null,
         `route retains a popup: ${route}`);
@@ -184,6 +316,7 @@ export async function checkRouteCoverage(reduced) {
     }
   }
   document.documentElement.dataset.motionCoveragePages = count;
+  window.__motionCoveragePlayback = playback;
 }
 
 export async function checkCoreDisclosure(reduced) {
@@ -214,4 +347,27 @@ export async function checkCoreDisclosure(reduced) {
   await waitFor(() => getComputedStyle(details).display === "none", "version drawer exit must release its layout space");
   assert.equal(getComputedStyle(details).display, "none");
   assert.equal(document.activeElement, launcher);
+
+  const workspace = launcher.closest(".node-operations-workspace");
+  const agentTab = workspace.querySelector('[data-node-tab="agent"]');
+  const coresTab = workspace.querySelector('[data-node-tab="cores"]');
+  const panel = workspace.querySelector('[data-node-panel="agent"]');
+  agentTab.focus(); agentTab.click();
+  await waitFor(() => getComputedStyle(panel).opacity === "1", "tab entrance must reach full opacity");
+  const input = panel.querySelector("input");
+  if (input) { input.value = "unsaved tab motion draft"; input.focus(); }
+  coresTab.click();
+  assert.ok(panel.hidden && panel.inert && panel.getAttribute("aria-hidden") === "true", "outgoing tab retires interaction immediately");
+  if (!reduced) assert.notEqual(getComputedStyle(panel).display, "none", "tab exit must remain painted");
+  else assert.equal(getComputedStyle(panel).display, "none");
+  const refreshed = workspace.cloneNode(true);
+  reconcileView(workspace, refreshed);
+  assert.ok(panel.inert && panel.hidden, "refresh must preserve outgoing tab ownership");
+  agentTab.click(); await delay(25); coresTab.click(); await delay(25); agentTab.click();
+  await waitFor(() => getComputedStyle(panel).opacity === "1" && !panel.hidden, "rapid tab reversal must finish");
+  assert.equal(panel.inert, false);
+  assert.equal(panel.hasAttribute("aria-hidden"), false);
+  if (input) assert.equal(input.value, "unsaved tab motion draft", "tab switching must retain unsubmitted inputs");
+  coresTab.click();
+  await waitFor(() => getComputedStyle(panel).display === "none", "tab exit must remove its paint tail");
 }

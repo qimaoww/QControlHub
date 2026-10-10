@@ -1,3 +1,4 @@
+import { updateFeedback } from "./presence-motion.js";
 import { bindEvent } from "./refresh.js";
 import { createPresetDrafts } from "./preset-drafts.js";
 import { presetRoute } from "./preset-route.js";
@@ -302,7 +303,7 @@ async function renderAgentConfig({ workspace: loadedWorkspace } = {}) {
       if (!history.open || loading || loaded) return;
       loading = true;
       const body = history.querySelector("[data-revision-body]");
-      body.textContent = "正在加载版本历史…";
+      updateFeedback(body, "正在加载版本历史…");
       try {
         const path = `/configs/${encodeURIComponent(config.id)}/revisions?limit=50`;
         const revisions = await presetRead(workspace, path, () => api(path)).promise;
@@ -310,7 +311,7 @@ async function renderAgentConfig({ workspace: loadedWorkspace } = {}) {
         body.innerHTML = `<nav>${revisions.map((revision) => `<span class="${revision.version === config.version ? "current" : ""}"><i></i><span><b>v${revision.version}</b><strong>${esc(revision.name)}</strong><small>${ago(revision.updated_at)}</small></span></span>`).join("")}</nav>`;
         loaded = true;
       } catch (error) {
-        if (history.isConnected && isCurrent()) body.textContent = `版本历史加载失败：${error.message}；重新展开可重试。`;
+        if (history.isConnected && isCurrent()) updateFeedback(body, `版本历史加载失败：${error.message}；重新展开可重试。`);
       } finally { loading = false; }
     };
     bindEvent(history, "toggle", loadHistory);

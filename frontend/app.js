@@ -1,3 +1,4 @@
+import { departWorkspace, restoreWorkspace } from "./modules/workspace-motion.js";
 import { cancelMotion } from "./modules/motion.js";
 import { createLatestRenderScheduler } from "./modules/refresh.js";
 import { createRouteModuleLoader } from "./modules/route-loader.js";
@@ -356,7 +357,8 @@ async function renderOnce() {
     if (state.routeSignal === renderSignal && !renderSignal.aborted) {
       const main = app.querySelector(".workspace-main");
       if (main) main.inert = false;
-      main?.classList.remove("is-route-pending");
+      restoreWorkspace(main);
+      main?.classList.remove("is-route-pending", "is-route-departing");
       main?.removeAttribute("aria-busy");
     }
   }
@@ -369,7 +371,9 @@ function primeRouteTransition() {
   const main = app.querySelector(".workspace-main");
   if (!main) return;
   const nextRoute = routeForHash(location.hash.slice(1));
-  if (nextRoute !== state.route) { cancelMotion(main); main.inert = true; }
+  const renderedRoute = document.body.className.match(/(?:^|\s)page-([^\s]+)/)?.[1];
+  if (nextRoute !== renderedRoute) { main.inert = true; departWorkspace(main); }
+  else restoreWorkspace(main);
   main.classList.add("is-route-pending");
   main.setAttribute("aria-busy", "true");
 }

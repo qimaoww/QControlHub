@@ -1,9 +1,9 @@
 import { bindEvent } from "./refresh.js";
 import { configJSONMembers } from "./config-files.js";
 import { bindConfigMenu } from "./config-menu.js";
-import { bindDialogBackdrop, closePopup } from "./popup.js";
+import { bindDialogBackdrop, closePopup, closeRetiringDialog } from "./popup.js";
 import { diagnosticError } from "./errors.js";
-import { updateFeedback } from "./motion.js";
+import { updateFeedback, setVisible } from "./presence-motion.js";
 import { formatConfigContent } from "./code-format.js";
 import { bindOutboundPresets } from "./outbound-presets.js";
 
@@ -164,7 +164,7 @@ export function bindConfigOutbounds({ navigation, api, agent, engine, saved, cur
   const triggers = [...menu.querySelectorAll("button")];
   const update = () => {
     const chosen = selectedInbound();
-    menu.hidden = !chosen;
+    setVisible(menu, chosen);
     let binding = "", reason = "";
     if (saved && chosen) {
       const key = JSON.stringify([chosen.tag, chosen.port]);
@@ -210,7 +210,7 @@ export function bindConfigOutbounds({ navigation, api, agent, engine, saved, cur
       readController.abort();
       preset?.dispose();
       state.routeSignal?.removeEventListener("abort", dispose);
-      opened.close(); opened.remove();
+      closeRetiringDialog(opened); opened.remove();
       if (dialog === opened) dialog = null;
       if (current()) { update(); menu.querySelector("summary").focus(); }
     };
@@ -250,13 +250,13 @@ export function bindConfigOutbounds({ navigation, api, agent, engine, saved, cur
         </form></div></section>`;
       body.querySelector("[data-bound-inbound]").textContent = `${inbound.tag} · :${inbound.port}`;
       body.querySelector("[data-outbound-mark]").textContent = `mark · 0x${(0x51430000 | inbound.port).toString(16)}`;
-      body.querySelector("[data-outbound-hint]").textContent = deleting
+      updateFeedback(body.querySelector("[data-outbound-hint]"), deleting
         ? "删除此出站并移除当前入站绑定，入站将恢复全局路由。默认或共享出口不可在此删除。"
-        : "绑定作为当前入站的兜底出口，已有条件分流和限制规则保持不变。修改仅限本入站独占的出站模板。";
+        : "绑定作为当前入站的兜底出口，已有条件分流和限制规则保持不变。修改仅限本入站独占的出站模板。");
       body.querySelector("[data-outbound-state]").textContent = bound ? `当前绑定：${bound}` : "尚未绑定 · 当前按全局路由";
       const form = body.querySelector("form"), select = body.querySelector("select"), input = body.querySelector("textarea");
       for (const candidate of entries) select.add(new Option(candidate.tag, String(candidate.index), candidate.tag === bound, candidate.tag === bound));
-      body.querySelector("[data-outbound-select]").hidden = !selecting;
+      setVisible(body.querySelector("[data-outbound-select]"), selecting);
       let baseline;
       if (operation === "add") {
         let tag = `exit-${inbound.port}`;
@@ -293,7 +293,7 @@ export function bindConfigOutbounds({ navigation, api, agent, engine, saved, cur
         submits.forEach(button => { button.disabled = saving || uncertain || !available; });
         preset?.busy(saving);
       };
-      if (!available) status.textContent = "节点离线或内核未安装，暂不能保存并提交任务。";
+      if (!available) updateFeedback(status, "节点离线或内核未安装，暂不能保存并提交任务。");
       sync();
       form.onsubmit = async event => {
         event.preventDefault();
@@ -301,8 +301,8 @@ export function bindConfigOutbounds({ navigation, api, agent, engine, saved, cur
         const intent = event.submitter?.dataset.intent || "validate";
         if (!["validate", "deploy"].includes(intent)) return;
         saving = true;
-        errorBox.hidden = true;
-        status.textContent = "正在检查出站绑定…";
+        setVisible(errorBox, false);
+        updateFeedback(status, "正在检查出站绑定…");
         sync();
         let submitted = false;
         try {
@@ -315,11 +315,11 @@ export function bindConfigOutbounds({ navigation, api, agent, engine, saved, cur
               !(await confirmAction(`${deleting ? "删除出站并恢复全局路由" : "保存出站绑定"}：${inbound.tag} :${inbound.port} → ${tag}。${intent === "deploy" ? "将部署并重启当前内核，确定继续？" : "仅保存并校验，确定继续？"}`, "确认出站操作"))) return;
           if (!active()) return;
           if (intent === "deploy" && beforeDeploy) {
-            status.textContent = "正在核验 Agent 当前配置…";
+            updateFeedback(status, "正在核验 Agent 当前配置…");
             await beforeDeploy();
             if (!active()) return;
           }
-          status.textContent = "正在保存配置并提交任务…";
+          updateFeedback(status, "正在保存配置并提交任务…");
           submitted = true;
           const result = await api(`${base}/source`, {method:"POST", body:JSON.stringify({
             name:fresh.config.name, description:fresh.config.description, engine, version:fresh.config.version, content, intent,
@@ -333,7 +333,7 @@ export function bindConfigOutbounds({ navigation, api, agent, engine, saved, cur
           updateFeedback(errorBox, `${diagnosticError(error.message)}${uncertain ? " 草稿已保留，请关闭弹窗并重新读取、核对保存结果后再提交。" : ""}`);
         } finally {
           saving = false;
-          status.textContent = "";
+          updateFeedback(status, "");
           sync();
         }
       };
@@ -345,7 +345,7 @@ export function bindConfigOutbounds({ navigation, api, agent, engine, saved, cur
         const message = document.createElement("p");
         message.className = "alert error";
         message.setAttribute("role", "alert");
-        message.textContent = diagnosticError(error.message);
+        updateFeedback(message, diagnosticError(error.message));
         body.append(message);
       }
     }

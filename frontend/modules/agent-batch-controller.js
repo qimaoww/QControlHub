@@ -1,3 +1,4 @@
+import { setVisible, updateFeedback, updateFeedbackHTML, removePresented } from "./presence-motion.js";
 import { bindEvent } from "./refresh.js";
 import { batchAgentEligibility, batchSelectAllState, batchTaskOptions } from "./agent-batch.js";
 
@@ -67,22 +68,22 @@ export function createAgentBatchController({ api, state, esc, notify, confirmAct
     const button = batchForm?.querySelector("button[type=submit]");
     if (button) {
       button.disabled = selection.selected === 0 || busy;
-      button.textContent = busy ? "提交中" : "执行";
+      updateFeedback(button, busy ? "提交中" : "执行");
       button.classList.toggle("batch-danger", feedback.tone === "danger");
     }
     document.querySelectorAll("[data-node-batch-toggle]").forEach((toggle) => { toggle.disabled = busy; });
     const label = batchForm?.querySelector("[data-batch-count]");
     if (label) {
-      label.textContent = `已选 ${selection.selected}`;
+      updateFeedback(label, `已选 ${selection.selected}`);
       label.title = `已选择 ${selection.selected} 个节点，可选 ${selection.eligible} 个`;
     }
     const engineWrap = batchForm.querySelector("[data-batch-engine-wrap]");
-    if (engineWrap) engineWrap.hidden = action === "upgrade-agent";
+    if (engineWrap) setVisible(engineWrap, !(action === "upgrade-agent"));
     const installing = action === "install";
     const channel = batchForm.elements.release_channel.value;
     const custom = installing && channel === "custom";
-    batchForm.querySelector("[data-batch-version-wrap]").hidden = !installing;
-    batchForm.querySelector("[data-batch-custom-wrap]").hidden = !custom;
+    setVisible(batchForm.querySelector("[data-batch-version-wrap]"), installing);
+    setVisible(batchForm.querySelector("[data-batch-custom-wrap]"), custom);
     batchForm.elements.release_channel.disabled = busy || !installing;
     batchForm.elements.custom_version.disabled = busy || !custom;
     batchForm.elements.custom_version.required = custom;
@@ -141,7 +142,7 @@ export function createAgentBatchController({ api, state, esc, notify, confirmAct
   bindEvent(batchForm?.elements.action, "change", updateBatch);
   bindEvent(batchForm?.elements.release_channel, "change", updateBatch);
   const clearVersionError = () => {
-    batchForm.querySelector("[data-batch-error]").hidden = true;
+    setVisible(batchForm.querySelector("[data-batch-error]"), false);
     batchForm.elements.custom_version.removeAttribute("aria-invalid");
   };
   bindEvent(batchForm, "change", clearVersionError);
@@ -163,8 +164,7 @@ export function createAgentBatchController({ api, state, esc, notify, confirmAct
         options = batchTaskOptions(new FormData(batchForm));
       } catch (error) {
         const errorText = batchForm.querySelector("[data-batch-error]");
-        errorText.textContent = error.message;
-        errorText.hidden = false;
+        updateFeedback(errorText, error.message);
         batchForm.elements.custom_version.setAttribute("aria-invalid", "true");
         batchForm.elements.custom_version.focus();
         return;
@@ -202,8 +202,7 @@ export function createAgentBatchController({ api, state, esc, notify, confirmAct
       const settled = [];
       const renderResults = () => {
         if (!results || !isCurrent()) return;
-        results.hidden = false;
-        results.innerHTML = batchResultsMarkup(settled, selected.length, options, { esc, engineName });
+        updateFeedbackHTML(results, batchResultsMarkup(settled, selected.length, options, { esc, engineName }));
       };
       renderResults();
       for (const input of selected) {
@@ -279,11 +278,11 @@ function bindBatchRetries(form, options, agentsByID, setBatchBusy, isCurrent) {
           }),
         });
         if (!isCurrent()) return;
-        button.closest(".batch-result-row").remove();
+        removePresented(button.closest(".batch-result-row"));
         updateBatchResultSummary(form);
       } catch (error) {
         if (isCurrent()) {
-          button.closest(".batch-result-row").querySelector("small").textContent = error.message;
+          updateFeedback(button.closest(".batch-result-row").querySelector("small"), error.message);
         }
       } finally {
         if (isCurrent()) setBatchBusy(false);

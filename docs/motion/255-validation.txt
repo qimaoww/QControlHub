@@ -1,0 +1,592 @@
+QControlHub PR #255 motion follow-up / PR #256
+Recorded at 2026-10-10T16:16:26.972312+00:00
+Required generation exit: 0
+Required make check exit: 0
+
+Command: make generate-styles
+node scripts/generate-styles.mjs --write
+
+Command: QCH_TEST_DATABASE_URL=postgresql://postgres@127.0.0.1:56481/qch_motion?sslmode=disable make check
+node frontend/module_smoke.mjs
+Extracted display helper smoke passed
+Extracted permission checker smoke passed
+Config field studio smoke passed
+Access control source policy smoke passed
+system BBR/TCP module smoke passed
+Outbound binding and presets smoke passed
+Preset draft logic smoke passed
+Engine capability module smoke passed
+User allocation input and merge smoke passed
+Account-scoped browser storage smoke passed
+Node order migration and direct-sidebar smoke passed
+Panel-host metric rendering smoke passed
+panel read cache smoke passed
+traffic selection and ordering module smoke passed
+Preset reads, render tree and task monitor smoke passed
+Chinese error messages smoke tests passed
+Core log staged loading/cache smoke passed
+Core log selection persistence smoke passed
+Config file split/merge smoke passed
+client connection filters, escaping and account lifecycle passed
+Connection query cache, pagination, refresh and account isolation passed
+Client access node ordering smoke passed
+Focused feature module API and account isolation smoke passed
+Browser fixture isolation and CSRF smoke passed
+Extracted controller composition, deployment lifecycle and snapshot isolation smoke passed
+Session API transport, cancellation, CSRF and account-isolation smoke passed
+Shell composition, appearance, confirmation and navigation warmup smoke passed
+Remaining route factories are inert and preserve their public APIs
+IP quality model, rendering, request races and mutation guards passed
+node frontend/agents_browser_smoke.mjs
+PASS logs {"loaded":8000,"domRows":200,"initialMs":107,"expandedMs":104,"pageMs":82,"filterMs":63,"switchAckMs":69,"previewRenderMs":19,"cachedSwitchMs":81}
+agents browser runtime smoke passed
+node --test frontend/module_policy_test.mjs
+TAP version 13
+# frontend/module_policy_test.mjs: 158 modules satisfy the module boundary contract
+# Subtest: frontend/module_policy_test.mjs
+ok 1 - frontend/module_policy_test.mjs
+  ---
+  duration_ms: 45.716195
+  type: 'test'
+  ...
+1..1
+# tests 1
+# suites 0
+# pass 1
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 53.770932
+node --test frontend/smoke_policy_test.mjs
+TAP version 13
+# Subtest: smoke modules must all be reachable from the regression runner
+ok 1 - smoke modules must all be reachable from the regression runner
+  ---
+  duration_ms: 6.887069
+  type: 'test'
+  ...
+# Subtest: browser modules must all be reachable from the regression runner
+ok 2 - browser modules must all be reachable from the regression runner
+  ---
+  duration_ms: 4.176776
+  type: 'test'
+  ...
+1..2
+# tests 2
+# suites 0
+# pass 2
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 63.887283
+go test -buildvcs=false ./internal/architecture
+ok  	github.com/qimaoww/qcontrolhub/internal/architecture	0.034s
+node --test .github/scripts/check-pr.test.mjs
+TAP version 13
+# Subtest: accepts a conventional title and completed template
+ok 1 - accepts a conventional title and completed template
+  ---
+  duration_ms: 1.433707
+  type: 'test'
+  ...
+# Subtest: accepts breaking-change markers
+ok 2 - accepts breaking-change markers
+  ---
+  duration_ms: 0.222603
+  type: 'test'
+  ...
+# Subtest: rejects a free-form title
+ok 3 - rejects a free-form title
+  ---
+  duration_ms: 0.206782
+  type: 'test'
+  ...
+# Subtest: rejects missing and template-only sections
+ok 4 - rejects missing and template-only sections
+  ---
+  duration_ms: 0.214618
+  type: 'test'
+  ...
+# Subtest: reports an empty GitHub body instead of throwing
+ok 5 - reports an empty GitHub body instead of throwing
+  ---
+  duration_ms: 0.144933
+  type: 'test'
+  ...
+# Subtest: rejects non-English title and description characters
+ok 6 - rejects non-English title and description characters
+  ---
+  duration_ms: 0.308312
+  type: 'test'
+  ...
+# Subtest: rejects titles longer than 100 characters
+ok 7 - rejects titles longer than 100 characters
+  ---
+  duration_ms: 0.238677
+  type: 'test'
+  ...
+1..7
+# tests 7
+# suites 0
+# pass 7
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 69.319198
+node --test .github/scripts/check-schema-version.test.mjs
+TAP version 13
+# Subtest: reads the migration version and schema body
+ok 1 - reads the migration version and schema body
+  ---
+  duration_ms: 2.91965
+  type: 'test'
+  ...
+# Subtest: rejects a schema change without a version increment
+ok 2 - rejects a schema change without a version increment
+  ---
+  duration_ms: 0.455005
+  type: 'test'
+  ...
+# Subtest: accepts a schema change with a version increment
+ok 3 - accepts a schema change with a version increment
+  ---
+  duration_ms: 0.116138
+  type: 'test'
+  ...
+# Subtest: accepts a hotfix version increment without another schema edit
+ok 4 - accepts a hotfix version increment without another schema edit
+  ---
+  duration_ms: 0.097348
+  type: 'test'
+  ...
+# Subtest: rejects a schema version downgrade
+ok 5 - rejects a schema version downgrade
+  ---
+  duration_ms: 0.114901
+  type: 'test'
+  ...
+# Subtest: checks legacy and schema-file bases in a real temporary Git repository
+ok 6 - checks legacy and schema-file bases in a real temporary Git repository
+  ---
+  duration_ms: 112.645626
+  type: 'test'
+  ...
+# Subtest: reports an invalid base reference instead of falling back to store.go
+ok 7 - reports an invalid base reference instead of falling back to store.go
+  ---
+  duration_ms: 60.721829
+  type: 'test'
+  ...
+# Subtest: fails explicitly when the base contains neither schema location
+ok 8 - fails explicitly when the base contains neither schema location
+  ---
+  duration_ms: 62.852558
+  type: 'test'
+  ...
+1..8
+# tests 8
+# suites 0
+# pass 8
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 304.034512
+node scripts/generate-deploy-scripts.mjs --check
+node --test .github/scripts/generate-deploy-scripts.test.mjs
+TAP version 13
+# Subtest: every deploy distribution script exactly matches its ordered source modules
+ok 1 - every deploy distribution script exactly matches its ordered source modules
+  ---
+  duration_ms: 4.680286
+  type: 'test'
+  ...
+# Subtest: the generator check command accepts the checked-in distribution scripts
+ok 2 - the generator check command accepts the checked-in distribution scripts
+  ---
+  duration_ms: 31.426878
+  type: 'test'
+  ...
+# Subtest: the manifest rejects a source slice that was not given an output order
+ok 3 - the manifest rejects a source slice that was not given an output order
+  ---
+  duration_ms: 0.494021
+  type: 'test'
+  ...
+1..3
+# tests 3
+# suites 0
+# pass 3
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 85.971746
+bash -n deploy/quick-start.sh
+sh -n deploy/existing-core-mapping.sh
+sh -n deploy/remote/install-agent.sh
+node scripts/generate-styles.mjs --check
+node --test .github/scripts/generate-styles.test.mjs
+TAP version 13
+# Subtest: the distributed stylesheet is the byte-exact ordered concatenation
+ok 1 - the distributed stylesheet is the byte-exact ordered concatenation
+  ---
+  duration_ms: 98.239125
+  type: 'test'
+  ...
+# Subtest: every style source is listed once, and no listed source can disappear
+ok 2 - every style source is listed once, and no listed source can disappear
+  ---
+  duration_ms: 4.616874
+  type: 'test'
+  ...
+# Subtest: source slices cannot cut a rule, conditional group, string, or comment
+ok 3 - source slices cannot cut a rule, conditional group, string, or comment
+  ---
+  duration_ms: 0.374078
+  type: 'test'
+  ...
+# Subtest: changing cascade order or a source byte makes the generated check fail
+ok 4 - changing cascade order or a source byte makes the generated check fail
+  ---
+  duration_ms: 2.43825
+  type: 'test'
+  ...
+1..4
+# tests 4
+# suites 0
+# pass 4
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 167.820122
+sh deploy/tests/inherit-existing-core.sh
+kept safely owned active qagent-shadowsocks-rust.service pending explicit import
+kept safely owned active qagent-shadowsocks-rust.service pending explicit import
+kept safely owned active qagent-xray.service pending explicit import
+detected existing sing-box service: sing-box.service (/tmp/qcontrolhub-inherit-test.fAbkPF/core/conf.d-official/config.json)
+detected existing sing-box service: sing-box.service (/tmp/qcontrolhub-inherit-test.fAbkPF/core/sing-box.json)
+detected existing sing-box service: sing-box.service (/tmp/qcontrolhub-inherit-test.fAbkPF/core/sing-box.json)
+existing core mapping regressions passed
+sh deploy/tests/install-agent-redeploy.sh
+== first install (fresh node) ==
+== second install (already deployed) ==
+== update existing agent ==
+== migrate to another control plane ==
+== interrupted migration retains credentials ==
+== retry interrupted migration ==
+== uninstall agent ==
+install-agent redeploy: OK
+bash deploy/tests/quick-start-ui.sh
+quick-start terminal layout regression passed
+bash deploy/tests/quick-start-ready.sh
+quick-start readiness probe regression passed
+bash deploy/tests/quick-start-env.sh
+-> 已备份现有 .env：/tmp/qcontrolhub-quick-start.pDWo56/bundled.env.bak.20261011000758.2981660.11832
+-> 已备份 secret：/tmp/qcontrolhub-quick-start.pDWo56/bundled-secrets/config-encryption-key.bak.20261011000758.2981660.21406
+-> 已备份 secret：/tmp/qcontrolhub-quick-start.pDWo56/bundled-secrets/config-encryption-previous-keys.bak.20261011000758.2981660.5976
+-> 已备份现有 .env：/tmp/qcontrolhub-quick-start.pDWo56/bundled.env.bak.20261011000758.2981660.13066
+-> 已备份 secret：/tmp/qcontrolhub-quick-start.pDWo56/bundled-secrets/config-encryption-key.bak.20261011000758.2981660.24856
+-> 已备份 secret：/tmp/qcontrolhub-quick-start.pDWo56/bundled-secrets/config-encryption-previous-keys.bak.20261011000758.2981660.17632
+quick-start external configuration regression passed
+bash deploy/tests/quick-start-bootstrap.sh
+-> 安装 QControlHub 运行文件：/tmp/qcontrolhub-quick-start-bootstrap.KnrPdd/install target
+-> 更新 QControlHub 运行文件：/tmp/qcontrolhub-quick-start-bootstrap.KnrPdd/install target
+-> 更新 QControlHub 运行文件：/tmp/qcontrolhub-quick-start-bootstrap.KnrPdd/saved install directory
+-> 更新 QControlHub 运行文件：/tmp/qcontrolhub-quick-start-bootstrap.KnrPdd/legacy git install
+-> 更新 QControlHub 运行文件：/tmp/qcontrolhub-quick-start-bootstrap.KnrPdd/legacy git install
+-> 更新 QControlHub 运行文件：/tmp/qcontrolhub-quick-start-bootstrap.KnrPdd/install target
+streamed quick-start bootstrap regression passed
+bash deploy/tests/quick-start-update.sh
+quick-start external update rollback regression passed
+bash deploy/tests/quick-start-modes.sh
+quick-start bundled/external CLI regression passed
+bash deploy/tests/quick-start-compose.sh
+quick-start real Compose topology/environment regression passed
+go vet ./...
+go test -p 1 ./...
+ok  	github.com/qimaoww/qcontrolhub	(cached)
+ok  	github.com/qimaoww/qcontrolhub/cmd/agent	(cached)
+ok  	github.com/qimaoww/qcontrolhub/cmd/control-plane	(cached)
+ok  	github.com/qimaoww/qcontrolhub/frontend	420.468s
+ok  	github.com/qimaoww/qcontrolhub/internal/agent	(cached)
+ok  	github.com/qimaoww/qcontrolhub/internal/api	(cached)
+ok  	github.com/qimaoww/qcontrolhub/internal/architecture	0.008s
+ok  	github.com/qimaoww/qcontrolhub/internal/authn	(cached)
+ok  	github.com/qimaoww/qcontrolhub/internal/cnip	(cached)
+ok  	github.com/qimaoww/qcontrolhub/internal/configschema	(cached)
+ok  	github.com/qimaoww/qcontrolhub/internal/core	(cached)
+ok  	github.com/qimaoww/qcontrolhub/internal/geoip	(cached)
+ok  	github.com/qimaoww/qcontrolhub/internal/hostmetrics	(cached)
+ok  	github.com/qimaoww/qcontrolhub/internal/komari	(cached)
+ok  	github.com/qimaoww/qcontrolhub/internal/netpolicy	(cached)
+ok  	github.com/qimaoww/qcontrolhub/internal/notify	(cached)
+ok  	github.com/qimaoww/qcontrolhub/internal/serverconfig	(cached)
+ok  	github.com/qimaoww/qcontrolhub/internal/store	(cached)
+?   	github.com/qimaoww/qcontrolhub/internal/testdb	[no test files]
+
+Supplemental final-all-feedback (exit 0):
+agents browser runtime smoke passed
+
+Supplemental final-all-feedback-module (exit 0):
+Extracted display helper smoke passed
+Extracted permission checker smoke passed
+Config field studio smoke passed
+Access control source policy smoke passed
+system BBR/TCP module smoke passed
+Outbound binding and presets smoke passed
+Preset draft logic smoke passed
+Engine capability module smoke passed
+User allocation input and merge smoke passed
+Account-scoped browser storage smoke passed
+Node order migration and direct-sidebar smoke passed
+Panel-host metric rendering smoke passed
+panel read cache smoke passed
+traffic selection and ordering module smoke passed
+Preset reads, render tree and task monitor smoke passed
+Chinese error messages smoke tests passed
+Core log staged loading/cache smoke passed
+Core log selection persistence smoke passed
+Config file split/merge smoke passed
+client connection filters, escaping and account lifecycle passed
+Connection query cache, pagination, refresh and account isolation passed
+Client access node ordering smoke passed
+Focused feature module API and account isolation smoke passed
+Browser fixture isolation and CSRF smoke passed
+Extracted controller composition, deployment lifecycle and snapshot isolation smoke passed
+Session API transport, cancellation, CSRF and account-isolation smoke passed
+Shell composition, appearance, confirmation and navigation warmup smoke passed
+Remaining route factories are inert and preserve their public APIs
+IP quality model, rendering, request races and mutation guards passed
+
+Supplemental final-all-feedback-policy (exit 0):
+frontend/module_policy_test.mjs: 158 modules satisfy the module boundary contract
+
+Real Chromium native pointer hover: 18 rendering frames; translate remained 0px -2px through reveal and completion.
+
+Recording metadata:
+docs/motion/255-after.mp4
+{
+    "programs": [
+
+    ],
+    "stream_groups": [
+
+    ],
+    "streams": [
+        {
+            "codec_name": "h264",
+            "width": 1440,
+            "height": 960,
+            "r_frame_rate": "60/1"
+        }
+    ],
+    "format": {
+        "duration": "22.950000",
+        "size": "2450843"
+    }
+}
+SHA256: 8196e8db4fb8745d69fa34d79490de13d1d0ab4d14579e8984222b5e8a39ce82
+docs/motion/255-before.mp4
+{
+    "programs": [
+
+    ],
+    "stream_groups": [
+
+    ],
+    "streams": [
+        {
+            "codec_name": "h264",
+            "width": 1440,
+            "height": 960,
+            "r_frame_rate": "60/1"
+        }
+    ],
+    "format": {
+        "duration": "22.966667",
+        "size": "1608510"
+    }
+}
+SHA256: 2b4c7c9b6d7efc92da49f998f29e3d89f7440b88b6700a6990791817e025db3f
+docs/motion/255-mobile-dark.mp4
+{
+    "programs": [
+
+    ],
+    "stream_groups": [
+
+    ],
+    "streams": [
+        {
+            "codec_name": "h264",
+            "width": 390,
+            "height": 844,
+            "r_frame_rate": "60/1"
+        }
+    ],
+    "format": {
+        "duration": "10.766667",
+        "size": "756007"
+    }
+}
+SHA256: 66056bfca7555ff625317202f4ef42b0445ab77acff01fd32bdb5ed5e483359f
+
+
+Pre-merge review (2026-10-11, Asia/Shanghai)
+Reproduced native clone continuity defects in real Chromium: selected B became A; nested scrollTop 120 became 0.
+Shared paint snapshot now copies single/multiple selection and restores nested/editor scroll after mounting.
+Real Chromium verification after reload: selected B retained B; nested scrollTop 60 and textarea scrollTop 30 retained their exact values.
+Task disclosure instrumentation: 1 initial entrance; after 5 output refreshes, still 1 total entrance and the same open disclosure.
+Remote c26f75cd: Debian reported an initial paused disclosure as replay; Alpine frontend hit the Go default 10m aggregate timeout while its standalone browser suite passed.
+Settlement now includes paused deferred owners. CI aggregate Go deadline is 20m; browser mode deadlines and interaction budgets are unchanged.
+
+four popup modes: exit 0
+agents browser runtime smoke passed
+
+four motion modes: exit 0
+agents browser runtime smoke passed
+
+module smoke: exit 0
+Extracted display helper smoke passed
+Extracted permission checker smoke passed
+Config field studio smoke passed
+Access control source policy smoke passed
+system BBR/TCP module smoke passed
+Outbound binding and presets smoke passed
+Preset draft logic smoke passed
+Engine capability module smoke passed
+User allocation input and merge smoke passed
+Account-scoped browser storage smoke passed
+Node order migration and direct-sidebar smoke passed
+Panel-host metric rendering smoke passed
+panel read cache smoke passed
+traffic selection and ordering module smoke passed
+Preset reads, render tree and task monitor smoke passed
+Chinese error messages smoke tests passed
+Core log staged loading/cache smoke passed
+Core log selection persistence smoke passed
+Config file split/merge smoke passed
+client connection filters, escaping and account lifecycle passed
+Connection query cache, pagination, refresh and account isolation passed
+Client access node ordering smoke passed
+Focused feature module API and account isolation smoke passed
+Browser fixture isolation and CSRF smoke passed
+Extracted controller composition, deployment lifecycle and snapshot isolation smoke passed
+Session API transport, cancellation, CSRF and account-isolation smoke passed
+Shell composition, appearance, confirmation and navigation warmup smoke passed
+Remaining route factories are inert and preserve their public APIs
+IP quality model, rendering, request races and mutation guards passed
+
+module and smoke policy: exit 0
+TAP version 13
+# frontend/module_policy_test.mjs: 158 modules satisfy the module boundary contract
+# Subtest: frontend/module_policy_test.mjs
+ok 1 - frontend/module_policy_test.mjs
+  ---
+  duration_ms: 35.821771
+  type: 'test'
+  ...
+# Subtest: smoke modules must all be reachable from the regression runner
+ok 2 - smoke modules must all be reachable from the regression runner
+  ---
+  duration_ms: 10.504999
+  type: 'test'
+  ...
+# Subtest: browser modules must all be reachable from the regression runner
+ok 3 - browser modules must all be reachable from the regression runner
+  ---
+  duration_ms: 5.040772
+  type: 'test'
+  ...
+1..3
+# tests 3
+# suites 0
+# pass 3
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 65.152751
+
+make generate-styles: exit 0; generated file unchanged.
+bash -n .github/scripts/run-ci-tests.sh: exit 0.
+CI shard dry-run: exit 0; every selected package assigned exactly once.
+
+Final task-list and nested ownership review
+Fixed task membership recognition: list surfaces use outer .task-event, including manual refresh insertion.
+Reproduced nested ownership cancellation: hiding the load-more button cancelled a new task entrance. Reflow now releases only the survivor element owner, preserving nested playback.
+
+four motion modes including task add/reorder/remove: exit 0
+agents browser runtime smoke passed
+
+four popup modes including nested ownership and painted draft state: exit 0
+agents browser runtime smoke passed
+
+module smoke including own-element versus subtree cancellation: exit 0
+Extracted display helper smoke passed
+Extracted permission checker smoke passed
+Config field studio smoke passed
+Access control source policy smoke passed
+system BBR/TCP module smoke passed
+Outbound binding and presets smoke passed
+Preset draft logic smoke passed
+Engine capability module smoke passed
+User allocation input and merge smoke passed
+Account-scoped browser storage smoke passed
+Node order migration and direct-sidebar smoke passed
+Panel-host metric rendering smoke passed
+panel read cache smoke passed
+traffic selection and ordering module smoke passed
+Preset reads, render tree and task monitor smoke passed
+Chinese error messages smoke tests passed
+Core log staged loading/cache smoke passed
+Core log selection persistence smoke passed
+Config file split/merge smoke passed
+client connection filters, escaping and account lifecycle passed
+Connection query cache, pagination, refresh and account isolation passed
+Client access node ordering smoke passed
+Focused feature module API and account isolation smoke passed
+Browser fixture isolation and CSRF smoke passed
+Extracted controller composition, deployment lifecycle and snapshot isolation smoke passed
+Session API transport, cancellation, CSRF and account-isolation smoke passed
+Shell composition, appearance, confirmation and navigation warmup smoke passed
+Remaining route factories are inert and preserve their public APIs
+IP quality model, rendering, request races and mutation guards passed
+
+module and smoke policy: exit 0
+TAP version 13
+# frontend/module_policy_test.mjs: 158 modules satisfy the module boundary contract
+# Subtest: frontend/module_policy_test.mjs
+ok 1 - frontend/module_policy_test.mjs
+  ---
+  duration_ms: 38.920769
+  type: 'test'
+  ...
+# Subtest: smoke modules must all be reachable from the regression runner
+ok 2 - smoke modules must all be reachable from the regression runner
+  ---
+  duration_ms: 5.445726
+  type: 'test'
+  ...
+# Subtest: browser modules must all be reachable from the regression runner
+ok 3 - browser modules must all be reachable from the regression runner
+  ---
+  duration_ms: 3.150032
+  type: 'test'
+  ...
+1..3
+# tests 3
+# suites 0
+# pass 3
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 51.324038
+
+The initial full review check was stopped during its browser phase to incorporate the task-list/ownership corrections. Full checks and remote CI are restarted on the final reviewed source.

@@ -1,5 +1,7 @@
+import { setVisible } from "./presence-motion.js";
 import { reconcileView } from "./refresh.js";
 import { cancelMotion, enterSurface } from "./motion.js";
+import { captureListMotion, finishListMotion } from "./list-motion.js";
 export function openResultTaskIds() {
     return new Set(
       [
@@ -16,8 +18,12 @@ export function reconcileTaskTimeline(timeline, taskCards) {
     const template = document.createElement("template");
     template.innerHTML = taskCards;
     const freshCards = [...template.content.children];
+    const destination = timeline.cloneNode(false);
+    destination.append(...freshCards);
+    const snapshot = captureListMotion(timeline, destination, card => card.dataset.taskId);
     if (freshCards.some((card) => !card.dataset.taskId)) {
       timeline.replaceChildren(...freshCards);
+      finishListMotion(timeline, snapshot);
       return;
     }
 
@@ -29,7 +35,13 @@ export function reconcileTaskTimeline(timeline, taskCards) {
     );
     const nextCards = freshCards.map((freshCard) => {
       const existingCard = existingCards.get(freshCard.dataset.taskId);
-      if (existingCard) return reconcileView(existingCard, freshCard);
+      if (existingCard) {
+        const before = existingCard.querySelector(".status-label")?.textContent;
+        const reconciled = reconcileView(existingCard, freshCard);
+        const status = reconciled.querySelector(".status-label");
+        if (status && before !== status.textContent) enterSurface(status, { token: "--motion-feedback", id: "qch-task-state" });
+        return reconciled;
+      }
       return freshCard;
     });
 
@@ -44,6 +56,14 @@ export function reconcileTaskTimeline(timeline, taskCards) {
     const retainedCards = new Set(nextCards);
     [...timeline.children].forEach((card) => {
       if (!retainedCards.has(card)) card.remove();
+    });
+    finishListMotion(timeline, snapshot);
+    requestAnimationFrame(() => {
+      if (!timeline.isConnected || timeline.closest(".workspace-main")?.getAnimations().some(a => a.id === "qch-route")) return;
+      nextCards.filter(card => !existingCards.has(card.dataset.taskId) && !card.hidden).slice(0, 8).forEach(card => {
+        const bounds = card.getBoundingClientRect();
+        if (bounds.bottom > 0 && bounds.top < innerHeight) enterSurface(card, { id: "qch-task-added" });
+      });
     });
   }
 
@@ -106,11 +126,11 @@ export function setupTaskPagination(timeline) {
     rows.slice(shouldCollapse ? 20 : rows.length).forEach(
       (row) => (row.hidden = true),
     );
-    loadMore.hidden = !shouldCollapse;
+    setVisible(loadMore, shouldCollapse);
     loadMore.onclick = () => {
       rows.forEach((row) => (row.hidden = false));
       timeline.dataset.mobileExpanded = "true";
-      loadMore.hidden = true;
+      setVisible(loadMore, false);
       cancelMotion(timeline);
       enterSurface(timeline, { token: "--motion-feedback", id: "qch-selection" });
       timeline.tabIndex = -1;

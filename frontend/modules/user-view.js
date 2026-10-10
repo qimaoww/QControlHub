@@ -1,3 +1,4 @@
+import { closeRetiringDialog } from "./popup.js";
 import { sharedEngineNames } from "./engine-capabilities.js";
 import { agentShareStatus, sharedPortsLabel, usage } from "./user-model.js";
 export function createUserView({ state, esc, shell }, lifecycle) {
@@ -25,7 +26,7 @@ export function createUserView({ state, esc, shell }, lifecycle) {
     const ownedIDs = new Set(access?.owned_agent_ids || []);
     const ownedAgents = agents.filter((agent) => ownedIDs.has(agent.id));
     const available = agents.filter((agent) => !ownedIDs.has(agent.id) && !shares.some((share) => share.agent_id === agent.id));
-    lifecycle.activeAllocation?.dialog.close();
+    if (lifecycle.activeAllocation) closeRetiringDialog(lifecycle.activeAllocation.dialog);
     lifecycle.activeAllocation = null;
     lifecycle.captureActive = () => {};
     shell(`<div class="settings-workspace users-workspace user-admin-workspace">

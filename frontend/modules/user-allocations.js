@@ -1,3 +1,5 @@
+import { setVisible, updateFeedback } from "./presence-motion.js";
+import { closeRetiringDialog } from "./popup.js";
 import { bindEvent } from "./refresh.js";
 
 import { parseSharedPorts, selectedSharedEngines, sharedLimitBytes, mergeUserAllocation } from "./user-model.js";
@@ -22,7 +24,7 @@ export function createUserAllocations(ctx, { lifecycle, renderUsers, report }) {
     previous.data.userDrafts.delete(previous.userID);
     lifecycle.activeAllocation = null;
     lifecycle.captureActive = () => {};
-    previous.dialog.close();
+    closeRetiringDialog(previous.dialog);
     previous.dialog.innerHTML = "";
     if (previous.trigger?.isConnected) previous.trigger.focus();
   }
@@ -66,12 +68,12 @@ export function createUserAllocations(ctx, { lifecycle, renderUsers, report }) {
     const updateConsent = () => {
       const message = form.querySelector("[data-allocation-consent]");
       const addedEngines = [...form.querySelectorAll('[name="engines"]:checked')].some(input => !original?.engines?.includes(input.value));
-      message.textContent = mode !== "edit" ? "用户接受邀请后才能使用节点。"
+      const text = mode !== "edit" ? "用户接受邀请后才能使用节点。"
         : !original.enabled ? "保存修改不会恢复共享。"
         : original.status === "rejected" ? "保存修改不会重新发送邀请。"
         : original.status === "accepted" && addedEngines ? "增加内核后，用户需重新接受。"
         : "";
-      message.hidden = !message.textContent || !form.querySelector("[data-share-row]").dataset.shareRow;
+      updateFeedback(message, form.querySelector("[data-share-row]").dataset.shareRow ? text : "");
     };
     lifecycle.activeAllocation = editor;
     lifecycle.captureActive = capture;
@@ -86,12 +88,12 @@ export function createUserAllocations(ctx, { lifecycle, renderUsers, report }) {
         const fields = form.querySelector("[data-allocation-fields]");
         fields.innerHTML = allocationFields({}, agents.find(item => item.id === id));
         fields.disabled = !id;
-        fields.hidden = !id;
+        setVisible(fields, id);
         form.querySelector('[type="submit"]').disabled = !id;
       }
       if (event.target.name === "quota_mode") {
         const unlimited = event.target.value === "unlimited";
-        form.querySelector("[data-quota-amount]").hidden = unlimited;
+        setVisible(form.querySelector("[data-quota-amount]"), !(unlimited));
         form.elements.limit_gib.disabled = unlimited;
         if (!unlimited && Number(form.elements.limit_gib.value) === 0) form.elements.limit_gib.value = "";
       }
@@ -140,7 +142,7 @@ export function createUserAllocations(ctx, { lifecycle, renderUsers, report }) {
   function reportAllocationError(error, data, userID) {
     if (error.name === "AbortError" || data !== state.data) return;
     if (lifecycle.activeAllocation?.data === data && lifecycle.activeAllocation.userID === userID && lifecycle.activeAllocation.dialog.isConnected) {
-      lifecycle.activeAllocation.dialog.querySelector(".user-allocation-failure").hidden = false;
+      setVisible(lifecycle.activeAllocation.dialog.querySelector(".user-allocation-failure"), true);
       report(error, lifecycle.activeAllocation.dialog);
     } else if (state.route === "users" && data.userID === userID) report(error, document.querySelector("[data-user-allocations]"));
     else notify(error.message, "error");

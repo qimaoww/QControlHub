@@ -1,197 +1,159 @@
-# Motion integration coverage
+# Motion integration and playback coverage
 
-This is the follow-up audit of PR #255, based on `a9ef2a44`. The six columns
-record the page, component, trigger, observed baseline, decision and evidence.
-Every row is closed: **fixed** describes this follow-up; **retained** gives the
-reason for keeping an existing response. The inventory includes the 18 route
-entries in `modules/routes.js`; `agents` and `agent-config` redirect to live
-configuration. Alias routes keep the same component behavior.
+Revision after merged PR #255 (`bdfa007b`). This inventory describes the current
+implementation; the old "retained tiny fade / instant exit" decisions have been
+replaced by coordinated visible motion. Aliases and redirects share their target
+surface. Quiet polling and native field values keep immediate readable feedback. The
+concrete trigger audit below includes conditional fields, title/validity prompts,
+copy results and destructively closed dialogs, as requested in the follow-up.
 
-## Verification key
+## Page inventory
 
-- `M`: `motion`, `motion-reduced`, `motion-mobile`, `motion-mobile-reduced`:
-  real mouse/touch dragging, keyboard ordering, navigation, focus, drafts,
-  polling, saving, confirmation and login failures.
-- `P`: the four `motion-popup*` modes, including `browser/surface-motion.mjs`:
-  native/custom close and reversal, dynamic disclosures, inline feedback,
-  accessibility retirement, missing finish events, removal and cancellation.
-  The route sweep visits all 18 entries in both themes in each mode (144 visits).
-- `S`: the four `motion-selection*` modes: completed-result feedback, latest
-  response ownership, filtering/search/empty results, selector focus and caret.
-- Named modes below are existing component/business/browser regressions.
-- `C`: stylesheet generation/contract, module smoke and architecture checks.
+Every displayed page uses the shared canvas entrance and non-nested visible
+surface sequence. All 18 route entries are visited in both themes in each of the
+four popup modes (desktop/mobile, normal/reduced): **144 visits**. Normal-mode
+visits sample live rendering frames to verify initial fade, ≥10 px displacement,
+multiple playback frames and a fully restored endpoint. Alias visits preserve a
+mounted target when no actual page change occurs.
 
-The full `make check` runs all 70 Chromium modes and the Go suite. A named
-component mode validates that component's actual operations; M/P/S validate
-the shared motion behavior it uses. The route sweep checks mounting, initial
-readability, mounted dock identity, overflow and reduced-motion final state.
-It does not substitute for richer component fixtures or remote-agent tests.
+| Route | Main surfaces / specific interactions | Exit and continuity | Verification |
+| --- | --- | --- | --- |
+| Login / boot | Login shell, loading orbit, busy submit, inline failure | Credentials/focus retained on rejection; static reduced-motion loading | M, C |
+| `dashboard` | Stats, panels, calendar menu, traffic history | Native calendar exit/reversal; completed month result; quiet live metrics | P, S, dashboard modes |
+| `ip-quality` | Node/report panels, date/calendar selectors, report dialogs | Menu/dialog exits; completed report/date result; readable status | P, S, ip-quality modes |
+| `agents` | Redirect to live configuration | Target entrance only; no duplicate redirect sequence | P |
+| `node-settings` | Node cards, detail service panels, monitor/Agent tabs, version/runtime drawers, enrollment/command/directory dialogs | Painted-position drag/reorder; card insert/delete; overlapping inert tab exit; native drawer and custom modal tails | M, P, enrollment, batch, shared-node modes |
+| `client-access` | Profile cards, engine/node/search/format filters, copy/parameter dialogs | Card membership FLIP/retirement, completed result feedback, native dialog exit | P, S, client modes |
+| `substore-sync` | Group/node cards, scope/search, target dialogs, sync feedback | Native dialogs, changed result, insertion/deletion/reflow; persistent selections | P, S, substore modes |
+| `agent-config` | Redirect to live configuration | One target entrance; no redirect replay | P |
+| `live-config` | Command bar, editor/workspace surfaces, node/engine/source/file selectors, tools, in/outbound dialogs, advanced/history/diff drawers | Native menu/dialog/disclosure exits; editor draft/caret/scroll preserved; completed results only | P, S, config modes |
+| `archive-config` | Template cards, source/editor, revision selection, drawers | Card/selection feedback; native dialog/disclosure exits; dirty-state guards | P, S, presets |
+| `tasks` | Timeline panels, filters, results, status badges, retry/cancel/load-more | Native disclosure exit; state change badge; output/clock polling stays quiet; anchors preserved | M, P, S |
+| `core-logs` | Filter controls, paginated stream, node/engine/level/page selections | One completed result transition; incremental input remains readable; no row replay on polling | M, P, S, logs |
+| `client-connections` | Query controls, sources disclosure, table panel, scope/date/pagination | Slow **first** result entrance fixed; native disclosure exit; cache/location enrichment stays quiet | P, S, connections |
+| `traffic` | Policy cards, scope/status filters, quota/create/sync dialogs | Card addition/deletion/reflow; mouse/touch/keyboard reorder; native modal exits and reversal | M, P, S, traffic modes |
+| `access-control` | Rule cards, node selection, editor dialog | Changed selection, card mutation, native dialog entrance/exit | P, S, access module tests |
+| `system-bbr` | TCP cards, node/profile selection, edit panel/dialog, status | Changed result, reversible dialog, immediate focus/draft ownership | P, S, bbr modes |
+| `settings` | Form/panel surfaces, tabs, check/switch shells, save state | Busy→saved/error feedback; same-page refresh retains fields/caret/scroll | M, P, S |
+| `users` | User selector, account/allocation cards, invite/share dialogs | Completed user result, card mutation, native dialog exit, unsaved inputs retained | P, S, users/sharing modes |
+| `my-quota` | Quota/share cards, node/quota dialogs, allocation status | Completed selection, native dialog exit/reversal; static permission/unsupported state | P, S, shared-node modes |
 
-## Coverage checklist
+## Shared component inventory
 
-| Page | Component | Trigger | Current behavior at audit | Resolution | Verification |
-| --- | --- | --- | --- | --- | --- |
-| Login / startup | Boot indicator and login shell | Initial load / authentication pending | One route-level reveal; actual pending spinner | Retained: one 280 ms shell reveal, readable pending label; no decorative loop | M, C |
-| Login | Credentials, theme, submit, error | Focus / submit / rejection / retry | Busy submit; inline failure keeps inputs | Retained: instant busy/disabled semantics, 160 ms changed error; retain password-manager DOM | M |
-| All pages | Workspace navigation | Route change / rapid route departure | One opacity owner; mounted dock | Retained: immediate route commit and 280 ms incoming fade; no outgoing old workspace containing editable controls | M, P, shell-layout* |
-| All pages | Pending route line | Request starts / succeeds / fails | Busy line and inert main release | Retained: only pending work loops; release state independently of animation events | M, P |
-| Shell | Desktop rail, labels and divider | Hover / keyboard focus / leave / reverse | Token width, label and divider transitions | Retained: 200 ms overlay width, 120 ms labels, bounded 80 ms delay; workspace grid stays fixed | M, shell-layout* |
-| Shell | Selected navigation and context links | Select node / engine / user / route | Persistent color, border and aria state | Retained: 120 ms colors; links and focus survive same-route reconciliation | M, S, P |
-| Shell | Mobile More menu | Enter / close / Escape / navigation / reopen | Enter-only content fade; close was immediate | Fixed: native 160 ms reveal / 120 ms exit; launcher stays opaque; focus returns immediately | P, M |
-| Shared | Buttons and icon actions | Hover / press / focus / disabled / busy | Stable hit area, press translate and focus rings; opacity rhythm incomplete | Fixed: token opacity for disabling; retained 1 px individual press translate and visible focus | M, P, C |
-| Shared | Native select, checkbox and radio | Choose / toggle / disable | Browser checked indicator is immediate | Retained: immediate checked/value state is clearer for forms; animate surrounding color/opacity only | P, capability-settings*, users* |
-| Shared | Custom capability switch | Toggle / failure / disable / rapid reversal | Thumb and background use tokens; opacity omitted | Fixed: disabled opacity joins 120 ms background transition; thumb has its own transform | capability-settings*, C |
-| Shared | Labels around checks | Batch / release channel / shared engines | Some shells lacked matching color transitions | Fixed: common 120 ms background, border, shadow and opacity; native checks stay immediate | batch-layout*, sharing*, users-layout*, C |
-| Shared | Fields and validation | Focus / edit / invalid / read-only / disabled | Stable bounds; native validity and changed error text | Fixed: common disabled-opacity transition; retained instant focus ring and validation state | M, config-layout*, bbr*, users* |
-| Shared | Cards and panels | Enter / hover / selected / drag / removal | Inserted branch fades once; hover does not transform | Retained: 120 ms inserted card, 200 ms elevation; immediate removal avoids stale hit targets or list spacers | M, S, traffic-layout*, client-layout* |
-| Shared | Native dialog and backdrop | Open / close / Escape / outside / reverse / removal | Unified enter; close had no visual tail | Fixed: 200 ms enter, 120 ms exit, independent scrim; close/focus immediate, closed rendered dialog inert and hidden from accessibility | P, bbr*, users*, config-layout*, traffic-layout* |
-| Shared | Restored native dialog | Keyed move / local refresh / modal restoration | Fresh enter canceled during reconciliation | Fixed: cancel native opacity/translate entrance too; retain closed-dialog inert/aria state across refresh | P, bbr*, M |
-| Shared | Native dialog padding and scrim gesture | Drag from content / actual outside click | Pointer-start ownership already tracked | Retained: only genuine outside gestures dismiss; closing scrim cannot intercept background clicks | P, bbr* |
-| Shared | Inline disclosure content | Open / close / rapid reverse / dynamic insert | First content child faded on open; no exit or multi-child ownership | Fixed: one native details-content reveal/exit; 200 ms height for in-flow content, final overflow visible; no timer or end-event dependency | P |
-| Shared | Initially open disclosure | Initial route / restored open state / refresh | Explicitly initiated reveals avoided nested route entrances | Retained: opt in after summary activation; preserve opt-in marker and open state through refresh | P, presets, config-layout* |
-| Shared | Popup menus and calendars | Open / dismiss / Escape / focus leaves / reopen | Enter-only; launcher focus retained | Fixed: opacity-only details-content enter/exit; no height/translate on positioned popups; immediate expanded state | P, S |
-| Shared | Operation notice | Success / failure / identical message / dismiss / expiry | Changed notice enters once; dismissal was immediate | Fixed: inert 120 ms visual exit, new notice supersedes old tail; background refresh keeps visible notice | M, P |
-| Shared | Inline operation error | Failure / repeated error / hide / retry | Several modal errors appeared without shared feedback | Fixed: `updateFeedback` gives changed/revealed error 160 ms; text/visibility update immediately; identical visible message remains quiet | P, sharing*, users*, config-layout*, traffic-layout* |
-| Shared | Reduced motion | Preference before load / during active animation | CSS and native animation skip/cancel | Retained and extended: no enter, exit, delay, size or thumb transition; readable busy/result text stays | M/P/S reduced modes, C |
-| Dashboard | Host metrics, progress and charts | Poll / same data / changed metric | In-place patch, no number tween | Retained: keep readable numbers and charts stable; bounded progress width uses 200 ms | dashboard*, S, C |
-| Dashboard | Recent nodes and tasks | Automatic updates / selected navigation | Status colors and links update | Retained: no recurring row entrance; content/selected state is direct feedback | dashboard*, P |
-| Dashboard | Month picker and year controls | Open / month/year select / close / reverse | Selection feedback and response guards already integrated | Fixed picker exit via shared native disclosure; retained stable picker DOM and 160 ms completed chart feedback | S, P, dashboard* |
-| Dashboard | Month request | Rapid months / failed request / retry / route leave | Latest request wins; displayed month restored on failure | Retained: abort old work, clear busy, recover label; animate only completed selected result | S |
-| Dashboard | Daily traffic details | Open / close / outside / reopen | Native reveal; immediate close | Fixed shared native exit and closed accessibility state; preserve existing table layout | dashboard*, P |
-| Nodes | Overview and empty/permission states | Enter / refresh / add / offline | Stable cards, status labels and empty prompt | Retained: one workspace entry; no online pulse or polling replay; disabled explanations stay visible | admin, empty, readonly, shared-node*, M, P |
-| Nodes | Batch mode bar and checks | Enter/exit batch / select / submit / failure | Retained toolbar and selection state | Fixed check-shell color rhythm; retained direct bar/checked changes and immediate task feedback; no disappearing selection animation | batch-layout*, admin, M |
-| Nodes | Card sorting | Pointer/touch drag / keyboard / cancel / route leave | Native FLIP, inert ghost, immediate order commit | Retained: transform exclusively owned by drag/FLIP; cancel superseded landing, clean capture and styles | M, ports*, client-order* |
-| Node settings | Services / metrics tabs | Mouse / arrows / rapid alternating tabs | Persistent selected underline and one revealed panel | Retained: immediate outgoing hidden panel, 160 ms incoming fade; avoids two interactive panels and old metrics beneath new tab | M, admin, ports* |
-| Node settings | Name, address and command copy | Edit / save / copy / failure | Text, busy state and result notice | Retained: same form/caret on refresh; direct copied label and shared notice | admin, ports*, M |
-| Node settings | Core install/version/runtime drawers | Expand / collapse / select release / execute | Shared reveal only; button launches skipped opt-in and closed display cut off exit | Fixed button opt-in, discrete parent display exit and focus return to launcher, plus multi-child disclosure exit; retained instant conditional fields, selected release and task state | P, admin, uninstall-writeonly |
-| Node settings | Agent capabilities | Toggle / pending / failure / permissions | Thumb/background move; task state authoritative | Fixed disabled opacity; retained pending/error label and server ownership; no checkbox animation delays | capability-settings*, C |
-| Node settings | Region chooser | Search / choose / save / close | Native dialog, persistent selected grid | Fixed shared exit; retained live search without pulsing grid and immediate aria-pressed selection | regions, P |
-| Node settings | Add node, command and directory | Open / cancel / replace / route leave / late response | Custom focus/lock/request lifecycle complete; instant close | Fixed inert visual tail with independent scrim; remove binding data; cancel on replacement/route; release locks/listeners/timers and focus immediately | P, enrollment*, admin |
-| Node settings | Enrollment submit/delete/copy | Pending / duplicate / success / failure / stale completion | Busy guards and owned copy/delete timers | Retained and extended: retiring surface cannot be treated as active by async callbacks; credentials do not resurrect | P, enrollment*, M |
-| Live configuration | Node and engine selectors | Select / confirm dirty / rapid select / failed load | Semantic scopes, confirmed request ownership | Retained: workspace fade for genuine node/engine; mounted selectors and focus; superseded confirmation cannot navigate | S, config-scope, config-layout* |
-| Live configuration | Source read / source selector | Switch / loading / error / retry / same source | Busy read and completed source-region feedback | Retained: source choice commits directly; only completed semantic change fades; reading does not replace editor or replay same data | S, config-migration, config-layout* |
-| Live configuration | Code editor, source file and toolbar | Type / select file / same file / format / refresh | Draft and caret protected; file feedback only on change | Retained: typing/formatting/reads are immediate; 160 ms true file switch; same file preserves caret and selection | config-layout*, M, S |
-| Live configuration | Visual studio and workbench tabs | Tab / protocol / inbound / common field | One content owner and semantic selected states | Retained: immediate outgoing hidden section, one 160 ms changed workspace; native conditional controls stay readable | presets, config-inbounds*, S |
-| Live configuration | Inbound and tools menus | Open / action / outside / keyboard / reopen | Shared menu semantics, enter-only content | Fixed shared positioned-popup exit; retain dirty guards and launcher DOM | P, config-inbounds*, config-layout* |
-| Live configuration | Inbound/outbound editing dialogs | Dynamic create / save / deploy / error / discard / close | Native dynamic dialogs and immediate inline failures | Fixed native entry/exit plus changed-error feedback; critical save/dirty/deploy decisions never wait for animation | config-inbounds*, config-layout*, P |
-| Live configuration | Preflight, deployment and result | Loading / task running / success / failed / retry | Pending line, task badge and result link | Retained: only real pending work loops; phase updates and errors are immediate; no editor entrance during task polling | presets, config-layout*, M |
-| Configuration archive | Templates, revisions, history/diff | Choose / expand / close / edit / validate / deploy | Native form and selected revision state | Fixed history/diff disclosure exit and shared dialog lifecycle; retain draft/source reads and immediate revision visibility | presets, config-layout*, P |
-| Clients | Node/export cards and masonry | Initial / inserted card / refresh / reorder | Stable keyed cards and coalesced measurement | Retained: one inserted branch, no nested entrances, no per-row poll motion; observer/frame cleanup on route exit | client-layout*, client-order*, M |
-| Clients | Engine, node, format and search | Change / empty / same selection / typing | Semantic result region and stable inputs | Retained: 160 ms changed selected result; search count updates without dimming composition or moving caret | S, client-layout* |
-| Clients | Secret visibility and copy/export | Reveal/mask / copy / disabled / failure | Native password masking and immediate copied/result text | Retained: immediate sensitive text visibility; shared control color/focus and notice, no opacity linger on secrets | client-layout*, P |
-| Clients | Parameter and display dialogs | Open / edit / save / close / rapid reopen | Native form, enter-only dialog | Fixed shared reversible exit and closed accessibility retirement; values and business guards unchanged | client-layout*, P |
-| Connections | Node, engine, dates and pagination | Apply / load / error / rapid scopes | Latest completed selection region | Retained: 160 ms completed result; immediate busy/query controls; ignore aborted stale enrichment | connections*, S |
-| Connections | Table, addresses and empty state | Poll / enrichment / cached response / no matches | Stable rows and scroll | Retained: no row/counter entrance; readable address updates and empty message are sufficient feedback | connections*, S, P |
-| Sub-Store | Target, node and search selectors | Choose / pending / failure / typing | Selected region, ordered writes, retained caret | Retained: completed grid 160 ms; recover failed target; live search does not pulse | S, substore-scope, substore-layout |
-| Sub-Store | Target/settings/delete dialogs | Open / conditional form / save / delete / close | Native dialogs, form guards | Fixed common native exit; conditional import/rename controls remain direct to protect input and tab order | substore-scope, substore-layout, P |
-| Sub-Store | Node cards and sync results | Dynamic cards / copy / sync / refresh | Shared card contract, result text | Retained: inserted card once and stable polls; immediate pending/result labels plus notice | substore-layout, S |
-| Tasks | Filter disclosure and controls | Open / collapse / scope/status/action/count | Filter region and persistent selected controls | Fixed disclosure exit; retained one completed timeline feedback for deliberate filter application | S, P, M |
-| Tasks | Running/result/failed task states | Pending / progress / success / failure / retry/cancel | Running dot, status, buttons and links | Retained: genuine running opacity pulse; task text/actions update immediately without animation event dependencies | M, admin, bbr* |
-| Tasks | Timeline, clocks and paging | Poll / insertion / removal / load more | Silent background rows, retained expanded results | Retained: no list-height choreography or time animation; deliberate mobile load-more gets short feedback and timeline focus | M, S |
-| Tasks | Result disclosure | Expand / collapse / reopen after refresh | Enter-only result content and rotating arrow | Fixed native multi-child enter/exit; expanded result state remains mounted through polling | P, M |
-| Logs | Node, level, engine, page controls | Select / repeat / refresh | Selected colors and semantic result key | Retained: 160 ms deliberate completed selection; same choice remains quiet; launcher focus preserved | logs, logs-restore, S |
-| Logs | Search, append, wrap and export | Type / compose / append / resize / export | Silent rows and retained scroll/input | Retained: direct text/count/checked feedback avoids interrupting reading; no append or same-data entrance | logs, logs-restore, M, S |
-| Traffic | Node, engine, endpoint/status filters | Choose / rapid reverse / empty / reset | One selected grid owner | Retained: 160 ms completed result; stable toolbar/sidebar and persistent selected colors; no filter replay on polling | S, traffic-layout* |
-| Traffic | Quota/create/status dialogs | Open / submit / error / close / outside / reopen | Shared native enter; immediate close | Fixed common reversible exit and instant accessible close; keep quota controls, disabled state and validation | P, traffic-layout* |
-| Traffic | Sync candidate list and row checks | Load / retry / select / submit / failure | Direct checked and busy/result state; errors abrupt | Fixed changed inline-error feedback; retained immediate list/count/selection with no parent/row nested fade | traffic-layout*, P |
-| Traffic | Usage/progress/accounting states | Poll / unavailable / limit reached | Persistent meter and diagnostic badge | Retained: bounded 200 ms width; no number tween or continuing online effect; static reason remains readable | traffic-layout*, C |
-| Traffic | Policy ordering | Pointer/touch / keyboard / cancel / route leave | Shared FLIP and owned ghost lifecycle | Retained: instant order update; no hover/entrance transform conflict; removed cards and navigation release drag | M, traffic-layout* |
-| IPQuality | Node/date/calendar navigation | Select / month/year / close / empty | Semantic report and open-calendar region | Fixed calendar exit; retained 160 ms completed report/date feedback and static disabled dates | S, ip-quality*, P |
-| IPQuality | Run/schedule/state controls | Trigger / running / saved / failure / permission | Busy task/result labels and aria-pressed state | Retained: direct selected/scheduled state and shared result feedback; no extra report movement during polling | ip-quality*, S |
-| IPQuality | Report, archive/raw JSON and errors | Read / expand / collapse / missing report | Readable report; raw disclosure enter-only | Fixed raw disclosure exit; retain static report figures/output for inspection and copying | ip-quality*, P |
-| Access control | Node scopes and rule cards | Select / inserted rule / refresh | Semantic region and common cards | Retained: one 160 ms scope feedback; inserted branch only; rules/metrics do not replay | config-restrictions, P |
-| Access control | Rule editor and save feedback | Edit / dirty / save / error / discard / close | Native dialog and busy/dirty/result semantics | Fixed shared native exit; retain immediate field visibility, validity and permission/unsupported explanations | config-restrictions, config-layout*, P |
-| TCP | Node and detail/parameter dialogs | Select / open / close / quick reopen | Native dialogs; rapid reopen retained old deep scroll | Fixed genuine launch resets body to form actions; local restoration retains draft/caret/scroll and cancels fresh entrance | bbr*, P |
-| TCP | Preset, checks and validation | Fill / toggle / invalid / pending / clear | Direct draft and parameter feedback | Retained: immediate preset/input values, native checks, disabled controls and error text; shared control rhythm | bbr*, C |
-| TCP | Confirmation, task and runtime state | Confirm / supersede / fail / poll / task removed | Independent confirmation resolver and runtime controls | Retained: immediate resolver/business state, token dialogs, no polling replay; state cleanup releases disabled snapshot | bbr*, M, P |
-| Users | Sidebar/mobile selected user | Choose / refresh / active request / empty | Semantic allocation region and stable selector | Retained: 160 ms completed allocation feedback, stable focus and mobile selected value | S, users*, users-layout* |
-| Users | Account and permissions editor | Open / change role / save / error / close | Native dialog, direct permission fields | Fixed native exit and common inline changed-error feedback; retain conditional field visibility and typed drafts | users*, P |
-| Users | Allocation/invitation editor | Open / node/engine/quota choice / pending / error | Native dialog and guarded availability snapshots | Fixed error feedback and native exit; retain immediate limit/port fields and fully allocated disabled controls | users-layout*, sharing*, P |
-| Sharing | Share rows and node share dialog | Add / edit / revoke / stale/error / close | Draft/revision/consent guards; error had no shared fade | Fixed common error feedback and dialog exit; retain immediate accepted/pending permission text | sharing*, shared-node*, P |
-| My quota | Invitations and shared allocation | Open / accept / reject / leave / failure / refresh | Stable quota page, guarded response and inline error | Fixed changed error feedback and shared dialog exit; retain direct consent, quota, busy and result labels | users*, sharing*, S, P |
-| Settings | Toggle, select and conditional inputs | Toggle / disabled / font scale/theme / focus | Existing native checked values and visible labels | Fixed check-shell/opacity consistency; retained instant form values and conditional sections to protect editing | capability-settings*, M, C |
-| Settings | Save, deployment/update and result | Save / edit while saving / success / failure / retry | Busy save, retained newer draft, changed state badge | Retained: duplicate guard, 160 ms state feedback and common notices; saved response cannot clear newer edits | M, capability-settings* |
-| Settings | Version/runtime and copy panels | Hover / copy / pending / unavailable | Common card/controls, static version info | Retained: stable bounds and readable static version; token progress only for real pending work | capability-settings*, P |
-| Cross-page branches | Permissions / offline / unsupported / empty | Different role/capability / no data / failure | Disabled reason, empty prompt and error remain readable | Retained: absence is not animated; shared controls/dialogs apply on insertion; no decorative motion on unavailable work | readonly, dashboard-readonly/limited/unavailable, bbr-readonly/writeonly, ip-quality-readonly, empty, shared-node*, P |
+| Component / trigger | Current motion | Continuity / static feedback | Evidence |
+| --- | --- | --- | --- |
+| Route departure / completion | 220 ms outgoing isolated paint tail; 480 ms canvas + sibling sequence; context reveal | Latest response owns the page; mounted dock and launchers survive | M, P playback samples, paired clip |
+| First loading→ready result | Ready key commits at completion; 280 ms visible result transition | Loading skeleton does not consume entrance; subsequent same-data polling is silent | S delayed-first regression, 900 ms browser reproduction, paired clip |
+| Sidebar width / labels | 480 ms width, 280/320 ms labels with short coordinated delay | Native transitions reverse from current width; content grid stays fixed | M, shell modes, paired clip |
+| Sidebar selected route | Moving gradient/elevation highlight, 320 ms | Native animation retargets current paint; CSSOM respects CSP | M, dashboard/ip-quality CSP modes, paired clip |
+| Mobile More menu | Launcher-relative scale/translate/fade | Native details tail; Escape restores focus; pointer/touch/keyboard outside close | P, mobile dark clip |
+| Context links / tabs / selected filters | Shared color, border, inset glow and underline transitions | Persistent `aria-current`, selected/pressed/expanded semantics | S, shell modes |
+| Native dialog and scrim | 24 px / `.94` entry, fade scrim, coordinated content; 220 ms exit | Native top-layer retention; clearing allocation forms use an isolated complete tail; close/focus commit immediately; footer container stays fixed | P native exit/reopen assertions |
+| Custom dialog and scrim | Same entry tokens and parallel scrim; isolated `.97` exit | Locks/timers/listeners release immediately; retired content cannot match queries | P, paired clip |
+| Inline disclosures / version drawer | Opacity/displacement and native height interpolation | Reversible; complete close; final overflow visible; no initially-open replay | P dynamic multi-child and version tests |
+| Node content tabs | 280 ms incoming; 220 ms outgoing paint outside layout flow | Hidden panel immediately inert/aria-hidden; draft and focus ownership survive refresh/reversal | P tab regression, mobile dark clip |
+| Card insertion / deletion / reflow | 14 px / `.985` insertion; isolated 220 ms exit; 420 ms survivor FLIP | Geometry read only for changed membership/order; component queries ignore retired clones | S filters/empty results, M, module reconciliation |
+| Mouse/touch drag / keyboard ordering | Direct pointer ghost; visible target elevation; 420 ms landing | Reverse keys capture painted rectangles before releasing prior landing; order/focus preserved | M four drag modes, paired clip |
+| Buttons / controls | Hover elevation + 2 px lift; press 1 px / `.96`; color/shadow transitions | Stable layout/hit area; disabled semantics and busy sheen; keyboard focus ring | M, P, S |
+| Native check / switch / select / input | Immediate native state plus themed shell/color/glow transitions | Value and focus never delayed; native check semantics preserved | M, S, component modes |
+| Loading / progress | Actual-pending orbit/progress/sheens; smooth progress width | Labels stay visible; no idle loops; reduced mode keeps values/status static | M, component modes |
+| Success / failure / task state | Changed result/status entry, themed state transition, notice exit | Identical messages/output/ticks never replay; fields remain editable with current drafts | M task/save/login, S, P inline feedback |
+| Polling / enrichment / timers | Quiet DOM reconciliation | Scroll, editor caret/selection, forms, open results and focus preserved | M, S, logs pressure suite |
+| Rapid reversal / cancellation / departure | Current-value retargeting; native CSS reversal; pending route resumes original paint | List reversal releases old owners before target reads; bounded cleanup on readiness + duration + delay; hidden document, removal and preference cancel ownership | M frame continuity/slow-route reversal, P, module ownership suite |
+| Reduced motion | No CSS/WAAPI motion, stagger, press geometry or retained tail | Full selected colors, labels, status, focus, busy/disabled semantics and progress values | M/P/S reduced modes; route matrix |
 
-## Rules and lifecycle decisions
+## Concrete interaction audit
 
-1. Color, border, background, shadow and disabled opacity use 120 ms. Entering
-   result/disclosure content uses 160 ms; dialogs use 200 ms; route opacity uses
-   280 ms. Exit opacity/translation uses 120 ms and ease-in; entering spatial
-   effects use ease-out. Dialog translation is 6 px in / 4 px out. There is no
-   scaling, child stagger or continuing decorative effect.
-2. Native dialog `close()` and details `open` state remain authoritative and
-   immediate. Discrete display/overlay/content-visibility transitions retain
-   only paint. Closed dialogs become inert and aria-hidden before painting the
-   tail; reopens restore their previous accessibility attributes. CSS reverses
-   from the current appearance. Closing disclosure children also become inert
-   and aria-hidden immediately; reopen restores their original attributes.
-   Reconciliation preserves these temporary states until the owning reopen.
-   Unsupported CSS capabilities close immediately.
-3. Custom command/enrollment/directory surfaces release focus traps, body locks,
-   request ownership, timers and listeners synchronously. Their short retired
-   surface is inert, aria-hidden, pointer-transparent and stripped of binding
-   data and IDs. Its closed shadow tree shares one parsed copy of the existing
-   CSS, keeping retired markup out of document-level component queries. A new
-   modal cancels it. Route departure, removal, preference
-   change, cancellation and the bounded native-animation fallback remove it.
-   Retired opacity holds at zero until cleanup, so a lost finish event cannot
-   flash the old surface during the fallback interval. Live surfaces and drag
-   animations keep their existing no-fill behavior.
-4. In-flow disclosure height is the additional bounded layout transition.
-   There is no per-frame JavaScript measurement. The browser interpolates the
-   height and handles reversal. The version drawer uses only its outer height
-   (including the hiding summary), avoiding a final summary-height jump; other
-   drawers use their content height. Overflow becomes visible at completion so
-   focus rings and nested menus are not permanently clipped. Positioned menus
-   use opacity only. Initially open disclosures remain static inside routes.
-5. Route replacement, outgoing tabs, removals, typing/composition, editor/source
-   reads, numeric counters, conditional form fields and native checked/value
-   states remain immediate. Old editable content must not overlap the active
-   workspace; reading/caret placement and business correctness take priority
-   over a visual exit in those cases. Persistent labels, selected color,
-   counts, busy state and results provide their complete feedback.
-6. Polling, log append, task clocks and identical messages never request another
-   entrance. Deliberate selection only animates the completed result region.
-   Feedback text/visibility and server effects update before visual work.
+Every trigger below uses the shared control feedback and its page/result motion;
+conditional content also uses complete presence. Initial nested fields are owned
+by their entering page/dialog. They do not start a competing second animation.
 
-## Review and limitations
+| Scope / source modules | Concrete triggers and messages connected |
+| --- | --- |
+| Shell, login, appearance, feedback | All dock/context navigation and aliases; sidebar hover/focus/reversal and selected marker; mobile More; theme toggle; busy login, rejected credentials; confirmation replacement/accept/cancel/Escape; notice success/error/close/timeout; every dynamically mounted native title hint (pointer/focus/blur/Escape) and constraint-validation message (invalid/corrected input) |
+| Dashboard and IP quality | Month/year/date/calendar menus and close; completed historical result, empty/failure/unavailable states; node/report selection, refresh/detection pending/result and report dialogs |
+| Nodes: workspace, addresses, Komari, core actions | Card/detail selection, Agent/core/monitor tabs; selected/deployed/permission states; IPv4/IPv6/address visibility, connection notes and address-copy results; monitoring URL/secret fields; stable/development/custom version sources; version drawers, installation/upgrade/start/stop/restart/uninstall/deploy confirmations and task results |
+| Nodes: enrollment, batch, regions, sharing | Enrollment/open/close/copy; directory/command panels and deleted entries; batch eligibility/count, engine/version/custom fields, submitting/retry/error/results and dismissed rows; region hint, modal, search/count/empty/ready, selection, save/error and destroyed close; recipient add/remove/reinvite, sharing save/reload/error and destroyed close |
+| Configuration: preset bindings/server-plan form | Builder tabs; protocol/transport/TLS/Reality/authentication/Mieru conditional fields; generated credentials/keys/certificates, show/hide/copy/regeneration pending/result/error; advanced options, dirty/reset/discard guards; saved, preflight, validate/deploy/install progress/failure/success and operation links/retry |
+| Configuration: live navigation/submit, editor | Node/engine/source/file selection, switching placeholder and removal, first completed/empty result; tools menus; source/editor entry; dirty/valid/invalid/oversize/format feedback and reset; save/import/validate/deploy busy and all results; latest-response and unsaved-input/caret/scroll continuity |
+| Configuration: inbounds/outbounds/restrictions/archive | Menu action availability and common actions; add/modify/delete/history/diff panels and complete destroyed exits; saved/live deployment differences and preflight failures; bound/unbound/manual/JSON/node modes, protocol-specific fields, peer loading/selection/stale/error; restriction expansion; archive source/file/revision selection and editor feedback |
+| Clients and Sub-Store | Node/engine/search/profile/format/group/scope selection and completed/empty results; parameter and secret display/copy; publish/busy/result; target creation/edit/delete and native close; remote association/auth/group fields, validation/loading/failure; synchronization status, task result and retry |
+| Traffic | Scope/engine/status filters; policy add/delete/FLIP and mouse/touch/keyboard order; quota/status/create/edit dialogs; shared allocation attribution; synchronization candidate list/loading/empty/error, selection count, submit/result/retry and complete destroyed close |
+| TCP / access controls | TCP node/profile selection, editor opening/native reversal, preset/reset/confirmation, conditional drafts/count, validation error/correction and configuration/enable/disable task states; rule cards/selection/editor, checked/unchecked/dirty/clean/preflight/saving/failure/success and destroyed rule close |
+| Users / shared quota | User/account selection and cards; account add/edit/save/error, role permissions/default hint reveal/hide; allocation add/edit/remove, node/engine/quota fields and consent messages; failure/reload/unsaved guards; invite/reinvite/accept/reject/leave, loading/result/error and full destroyed invitation/allocation close |
+| Settings | Every switch/check/input/select/tab with themed focus/selected feedback; dirty/saving/saved/concurrent-dirty/failed states; version-check loading/current/new/uncomparable/failure and release link; font/theme changes and persistent form focus/caret |
+| Tasks, logs, connections | Task filters/load-more/retry/cancel, added/removed/reordered cards, changed status, result disclosure; log node/engine/level/date/page/search, first/full result, refresh/error/recovery; connection node/engine/source/scope/date/page/search and source disclosures, loading/empty/failure/ready; identical output/counters/enrichment do not replay |
 
-Use the preview steps in [MOTION.md](MOTION.md). The focused recording for this
-follow-up is `output/playwright/surface-motion-review.mp4`. It shows native
-close/reopen, custom close/reopen and disclosure reversal. Recordings are local
-review artifacts, not repository assets.
+### Continuity checks added for this audit
 
-Browser evidence is Chromium on Linux with desktop mouse and emulated phone
-touch/keyboard, both themes, portrait/landscape and reduced motion. Firefox,
-WebKit, physical phones and real remote-agent deployments are not validated by
-this environment. Feature detection keeps final content and direct close in
-browsers missing modern CSS transitions. There are no schema/API migrations.
+Four desktop/mobile and normal/reduced popup modes exercise live rendering of:
+keyboard tooltip entry/exit/refocus using the same element; updated hint metadata
+through refresh; native validity rejection, correction and message persistence
+through polling; immediate field reversal without an opacity jump; copy-message
+clear with its full outgoing paint; and destruction of a native modal in mid-entry
+with bounded complete panel/scrim retirement. Live frames compare the retired
+heading/footer opacity to their interrupted source paint and require the modal
+to keep fading/shrinking without an enlarged or bright frame. These join the route/list/drag/tab/
+disclosure and delayed-first-result regressions. Reduced mode has no retained
+paint or motion, while preserving the same messages, constraints and focus.
 
-Validation on 2026-10-10: `make check` passed with an isolated PostgreSQL 17
-database and all 70 browser modes; the Go frontend browser rerun took 409.387 s.
-All named component suites above passed. The final lost-finish opacity
-hardening also passed the eight motion/popup modes and repeated module/style
-checks on the final snapshot. Generated styles, frozen baseline,
-module policies and `git diff --check` passed. Real-browser live preference
-changes removed custom retired surfaces and closed version drawers immediately,
-retaining launcher focus. Phone portrait/landscape inspection found zero active
-animations and no horizontal overflow with reduced motion. No required check
-was blocked by the environment.
+## Evidence key
 
-Merge review correction: Debian and Alpine CI exposed fixed-delay paint
-assertions in native surface regressions. Completion checks now observe actual
-paint state with a bounded timeout. Missing-finish delivery is simulated by
-explicitly finishing the animation with its handler disabled, then checking
-zero-opacity retention and fallback removal. Immediate business, focus and
-accessibility assertions remain. Log budget failures include measured timings
-without changing limits. Popup and selection suites use the normal result
-deadline; only the four suites publishing real drag gestures run the input
-driver. Production motion and timings are unchanged.
+- **M**: `motion`, `motion-mobile`, `motion-reduced`, `motion-mobile-reduced`.
+  Native mouse/touch gestures, rapid keyboard reordering, mounted dock identity,
+  editable inputs/caret/scroll, saves during edits, confirmations, polling and login.
+- **P**: four `motion-popup*` modes. Full route playback, native/custom modal
+  enter/exit/reversal, disclosures/tabs, accessibility/click-through, missing finish
+  events, external removal, cancellation and both themes.
+- **S**: four `motion-selection*` modes. Initial slow result, latest response
+  ownership, filters, empty results, source/file/scope/date/month/user/page changes,
+  stale confirmations, persistent launcher focus, incremental search and caret.
+- **C**: generation, frozen stylesheet hash, style contracts, module smoke and
+  architecture/policy checks. Component fixture modes validate real workflows.
 
-The merge review additionally fixes log-switch layout work: cache node keys and
-read all scroll offsets before writes, preserving arbitrary nested scrollers.
-The existing 500 ms cached-switch budget remains; a focused local switch
-measured 64 ms. Five real OpenRC startup/stop iterations passed in Alpine after
-the CI fixture was changed to await complete validated process metadata.
+## Measured browser findings
+
+- Original default mode: stylesheet loaded; reduced motion false; first route
+  frame opacity `.55`, translate/scale `none`, duration 280 ms.
+- Original first connection result with a 900 ms response: opacity `1`, no result
+  animation. This is the reproduced readiness/key bug, not a stylesheet guess.
+- New route live frame sample: starts at opacity `0`, translate 28 px, scale `.975`;
+  approximately 69 ms into playback, the first card is at 13.4 px while later
+  siblings remain at 22.5/28 px; the last layer settles around 650 ms in that view.
+- New first connection result with the same 900 ms delay: opacity `.25`,
+  active `qch-selection` animation at completion; the result then reaches opacity 1.
+- Paired actual browser recordings: identical sequence, 1440 × 960, 60 fps,
+  original playback speed. [Before](../docs/motion/255-before.mp4),
+  [after](../docs/motion/255-after.mp4),
+  [mobile/dark/touch](../docs/motion/255-mobile-dark.mp4).
+- The capture uses deterministic API fixtures and actual browser input. It does
+  not test remote agents or production latency beyond the injected slow response.
+  Physical mobile devices and Firefox/WebKit were not exercised.
+
+## Commands and final results
+
+- `make generate-styles`: passed; generated stylesheet matches the ordered manifest and frozen initial source remains unchanged.
+- `QCH_TEST_DATABASE_URL=postgresql://postgres@127.0.0.1:56481/qch_motion?sslmode=disable make check`: **passed, exit 0**, using a task-owned PostgreSQL 17 instance. All 70 Chromium modes, module/policy/style contracts, installer/redeployment/quick-start checks, vet and all Go packages passed. The Go frontend run repeated the browser suite and completed in **420.468 s**.
+- Final supplemental four-mode feedback/exit suite, module smoke and 158-module boundary check: **passed**. It includes complete painted-state sampling of a destroyed modal, field/prompt reversal, tooltip metadata refresh and native validation persistence. A real pointer-hover probe retained its `0px -2px` geometry across 18 rendering frames and completion.
+- Direct log pressure suite: 8,000 loaded records, 200 DOM rows, 69 ms switch acknowledgement and 81 ms cached switch; the 500 ms budget is unchanged.
+- Actual recording metadata: before 22.97 s, after 22.95 s, 1440 x 960 / 60 fps; mobile dark/touch 10.77 s, 390 x 844 / 60 fps. All are H.264 at original playback speed.
+- Full required-command output and final supplemental evidence: [255-validation.txt](../docs/motion/255-validation.txt).
+
+During this audit, a conditional-field FLIP inside a scaling parent produced horizontal overflow. Parent entrance now owns the nested reveal. The first remote CI run also exposed an early test completion: document animation enumeration cannot see a closed-shadow retirement. The exit assertion now waits for the actual retired surface to disconnect, keeping the cleanup deadline and all interaction budgets unchanged.
+
+The pre-merge review reproduced another exit discontinuity: native clones reset
+select choices and nested scroll offsets. Shared paint snapshots now retain
+single/multiple choices and restore content/editor scroll before their first
+paint. Four popup modes verify the copied draft and both scroll axes. The task
+polling check also waits for paused deferred entrances, so an initial disclosure
+cannot be mistaken for a polling replay. Five actual result refreshes retained
+one initial disclosure owner and created no new entrance. CI's aggregate Go
+package deadline is 20 minutes because it repeats all 70 browser modes beside
+the standalone suite; per-mode deadlines and interaction budgets remain unchanged.
+
+The review also corrected task membership coverage to use the outer event row
+for manual refresh and background polling. Four motion modes now verify a new
+task entrance, order changes and a complete inert removal tail. A layout reflow
+releases only its own element's landing, so hiding a neighboring auxiliary button
+cannot cancel a nested task insertion or feedback animation. Both four-mode
+motion/popup suites and module/ownership checks passed with these corrections.

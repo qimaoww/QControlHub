@@ -1,8 +1,9 @@
 import { bindEvent, reconcileView } from "./refresh.js";
 import { bindConfigOutbounds } from "./config-outbounds.js";
 import { bindConfigMenu } from "./config-menu.js";
-import { syncSelectionMotion, updateFeedback } from "./motion.js";
-import { bindDialogBackdrop, closePopup } from "./popup.js";
+import { syncSelectionMotion } from "./motion.js";
+import { updateFeedback, updateFeedbackHTML, setVisible } from "./presence-motion.js";
+import { bindDialogBackdrop, closePopup, closeRetiringDialog } from "./popup.js";
 import { composeConfigWorkspaceToolbar } from "./config-workspace-toolbar.js";
 // Reuse the actual preset form and field editors, not a second implementation
 // of protocol options. Only the requested editor is mounted: no second source
@@ -131,12 +132,12 @@ export function bindConfigInbounds(ctx) {
     ...tools.querySelectorAll("[data-inbound-action]")];
   const update = () => {
     const common = commonSelected();
-    menu.hidden = !common && !target() && Boolean(files);
-    menu.querySelector("[data-common-actions]").hidden = !common;
+    setVisible(menu, !(!common && !target() && Boolean(files)));
+    setVisible(menu.querySelector("[data-common-actions]"), !(!common));
     menu.querySelector("[data-config-operation-label]").textContent = common ? "通用配置操作" : target() || !files ? "入站操作" : "配置操作";
     for (const button of triggers) {
       const kind = actionKind(button), commonAction = kind.startsWith("common-");
-      button.hidden = ["modify", "delete"].includes(kind) && common;
+      setVisible(button, !(["modify", "delete"].includes(kind) && common));
       button.disabled = busy || (isMutation(kind) && !writable()) || (commonAction && !common) ||
         (kind !== "add" && !saved) || (["modify", "delete"].includes(kind) && !target()) ||
         (kind === "modify" && !editable(target()));
@@ -191,7 +192,7 @@ export function bindConfigInbounds(ctx) {
     const dispose = (discard = false) => {
       state.routeSignal?.removeEventListener("abort", abort);
       editor?.dispose(discard);
-      opened.close(); opened.remove();
+      closeRetiringDialog(opened); opened.remove();
       if (dialog === opened) dialog = null;
       busy = false;
       if (current()) {
@@ -234,14 +235,14 @@ export function bindConfigInbounds(ctx) {
         const deployments = await api("/deployments", {method:"GET"});
         if (!active()) return;
         const deployed = deployments.find(item => item.agent_id === agent.id && item.engine === engine);
-        if (!deployed) body.innerHTML = '<p>当前已保存配置尚未部署。</p>';
+        if (!deployed) updateFeedbackHTML(body, '<p>当前已保存配置尚未部署。</p>');
         else {
           const revision = await api(`/configs/${encodeURIComponent(deployed.config_id)}/revisions/${deployed.config_version}`, {method:"GET"});
           if (!active()) return;
-          body.innerHTML = `<p>已部署 v${deployed.config_version} → 已保存 v${fresh.config.version}</p>${renderConfigDiff(fresh.config.content, revision.content) || "<p>配置内容一致。</p>"}`;
+          updateFeedbackHTML(body, `<p>已部署 v${deployed.config_version} → 已保存 v${fresh.config.version}</p>${renderConfigDiff(fresh.config.content, revision.content) || "<p>配置内容一致。</p>"}`);
         }
       } else if (kind === "delete") {
-        body.innerHTML = `<p>确定删除入站 <strong>${esc(chosen.tag)}</strong>（端口 ${Number(chosen.port)}）？不会删除其他入站。</p><p class="validation-note">仅校验不会改变节点运行配置；部署会应用删除并重启内核。</p><p role="alert" data-inbound-error></p><footer class="inbound-delete-actions"><button class="button" type="button" data-delete-intent="validate">删除并校验</button><button class="button danger" type="button" data-delete-intent="deploy">删除并部署</button></footer>`;
+        updateFeedbackHTML(body, `<p>确定删除入站 <strong>${esc(chosen.tag)}</strong>（端口 ${Number(chosen.port)}）？不会删除其他入站。</p><p class="validation-note">仅校验不会改变节点运行配置；部署会应用删除并重启内核。</p><p role="alert" data-inbound-error></p><footer class="inbound-delete-actions"><button class="button" type="button" data-delete-intent="validate">删除并校验</button><button class="button danger" type="button" data-delete-intent="deploy">删除并部署</button></footer>`);
         const buttons = [...body.querySelectorAll("[data-delete-intent]")];
         buttons.forEach(button => {
           button.disabled = !writable() || fresh.agent?.status !== "online" || !fresh.agent?.runtime?.[engine]?.installed;
@@ -251,10 +252,10 @@ export function bindConfigInbounds(ctx) {
             buttons.forEach(item => { item.disabled = true; });
             try {
               if (button.dataset.deleteIntent === "deploy" && beforeDeploy) {
-                body.querySelector("[data-inbound-error]").textContent = "正在核验 Agent 当前配置…";
+                updateFeedback(body.querySelector("[data-inbound-error]"), "正在核验 Agent 当前配置…");
                 await beforeDeploy();
                 if (!active()) return;
-                body.querySelector("[data-inbound-error]").textContent = "";
+                updateFeedback(body.querySelector("[data-inbound-error]"), "");
               }
               const result = await api(`${base}/server-inbounds`, {method:"POST", body:JSON.stringify({
                 operation:"delete", original_tag:chosen.tag, input:{tag:chosen.tag, port:chosen.port}, expected_version:fresh.config.version,
@@ -274,7 +275,7 @@ export function bindConfigInbounds(ctx) {
         await editor.ready;
       }
     } catch (error) {
-      if (active()) body.innerHTML = `<p class="alert error" role="alert">${esc(error.message)}</p>`;
+      if (active()) updateFeedbackHTML(body, `<p class="alert error" role="alert">${esc(error.message)}</p>`);
     } finally {
       busy = false;
       if (current()) update();

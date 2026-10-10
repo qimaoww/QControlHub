@@ -214,7 +214,11 @@ for ((index = 1; index <= shard_count; index++)); do
     ensure_database "${base_name}_shard${index}"
     printf '%s\n' "-> $name: $list"
     (
-        QCH_TEST_DATABASE_URL="$(database_url "shard${index}")" go test -p 1 $list 2>&1 |
+        # The frontend package repeats all 70 real-browser modes, including
+        # full motion playback, beside the standalone browser check. Allow
+        # this aggregate suite to finish on shared runners; each browser mode
+        # and interaction still enforces its own unchanged deadline/budget.
+        QCH_TEST_DATABASE_URL="$(database_url "shard${index}")" go test -timeout 20m -p 1 $list 2>&1 |
             sed "s|^|[$name] |"
     ) &
     task_pids+=("$!")

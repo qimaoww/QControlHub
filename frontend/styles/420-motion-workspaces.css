@@ -5,15 +5,17 @@
   --motion-ease-in:cubic-bezier(.4,0,1,1);
   --motion-ease-spring:var(--motion-ease-out);
   --motion-fast:120ms;
-  --motion-base:200ms;
-  --motion-slow:280ms;
-  --motion-feedback:160ms;
-  --motion-exit:120ms;
+  --motion-base:320ms;
+  --motion-slow:480ms;
+  --motion-feedback:280ms;
+  --motion-exit:220ms;
+  --motion-reorder:420ms;
+  --motion-stagger:45ms;
   --motion-loading:1000ms;
-  --motion-distance:6px;
-  --motion-exit-distance:4px;
+  --motion-distance:24px;
+  --motion-exit-distance:12px;
 }
-@keyframes qch-dialog-enter{from{opacity:0;translate:0 var(--motion-distance)}to{opacity:1;translate:0 0}}
+@keyframes qch-dialog-enter{from{opacity:0;translate:0 var(--motion-distance);scale:.94}to{opacity:1;translate:0 0;scale:1}}
 @keyframes qch-fade-enter{from{opacity:0}to{opacity:1}}
 @keyframes qch-route-progress{from{transform:scaleX(.15)}to{transform:scaleX(.85)}}
 @keyframes qch-boot-orbit{to{transform:rotate(360deg)}}

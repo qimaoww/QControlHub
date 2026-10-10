@@ -1,3 +1,4 @@
+import { updateFeedback, setVisible } from "./presence-motion.js";
 import { bindEvent } from "./refresh.js";
 import { cancelPopupEntrance } from "./popup.js";
 import { hasTCPParameter, validateTCPAvailability, validateTCPSelection, systemBBRState, systemBBRActions, actionLabel, dialogID } from "./system-bbr-model.js";
@@ -11,7 +12,7 @@ export function createSystemBBREditor({ api, state, can, notify, confirmAction }
     lifecycle.editorErrors.set(agentID, message);
     const dialog = document.getElementById(dialogID(agentID, "editor"));
     const label = dialog?.querySelector("[data-tcp-error]");
-    if (label) { label.textContent = message; label.hidden = !message; }
+    updateFeedback(label, message);
     // Keep errors in the active modal. An outside notice is obscured by the
     // backdrop and inserting/removing it can move the modal's DOM ancestors.
     if (message && !dialog?.open) notify(message, "error");
@@ -94,9 +95,9 @@ export function createSystemBBREditor({ api, state, can, notify, confirmAction }
         lifecycle.drafts[agent.id] = draft;
         editorError(agent.id, "");
         const draftLabel = document.querySelector(`[data-bbr-draft-label="${agent.id}"]`);
-        if (draftLabel) draftLabel.hidden = !Object.keys(draft).length;
+        setVisible(draftLabel, Object.keys(draft).length > 0);
         const label = form.querySelector("[data-tcp-draft-status]");
-        if (label) label.textContent = `${Object.keys(draft).length} 项待应用`;
+        updateFeedback(label, `${Object.keys(draft).length} 项待应用`);
       };
       form.querySelectorAll("[data-tcp-value]").forEach((input) => {
         bindEvent(input, "input", () => {

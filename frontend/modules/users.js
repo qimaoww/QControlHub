@@ -3,7 +3,7 @@ import { createUserAllocations } from "./user-allocations.js";
 import { createUserAccountEditor } from "./user-account-editor.js";
 import { createUserBindings } from "./user-bindings.js";
 import { createUserQuota } from "./user-quota.js";
-import { updateFeedback } from "./motion.js";
+import { updateFeedback } from "./presence-motion.js";
 export { userPermissions, parseSharedPorts, formatSharedPorts, sharedPortsLabel, selectedSharedEngines, sharedLimitBytes, sharedLimitGiB, agentShareStatus, mergeUserAllocation } from "./user-model.js";
 
 export function installUsers(ctx) {

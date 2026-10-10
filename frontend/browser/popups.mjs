@@ -2,9 +2,11 @@ import { assert, delay, waitFor } from "./assertions.mjs";
 import { createAgentEnrollment } from "../modules/agent-enrollment.js";
 import { bindConfigMenu } from "../modules/config-menu.js";
 import { cancelPopupEntrance } from "../modules/popup.js";
-import { checkNativeExit, checkDisclosureMotion, checkCoreDisclosure, checkRouteCoverage } from "./surface-motion.mjs";
+import { checkNativeExit, checkDisclosureMotion, checkCoreDisclosure, checkRouteCoverage, checkInteractionFeedback } from "./surface-motion.mjs";
 
-const settle = async () => { await delay(320); };
+const settle = async () => waitFor(() => !document.getAnimations().some(animation =>
+  Number.isFinite(animation.effect.getTiming().iterations) &&
+  (animation.id.startsWith("qch-") || ["qch-dialog-enter", "qch-dialog-content", "qch-fade-enter"].includes(animation.animationName) || animation.transitionProperty)), "popup motion did not settle");
 const escape = element => element.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
 const pointer = (element, type, x, y) => element.dispatchEvent(new PointerEvent(type, { bubbles: true, clientX: x, clientY: y }));
 const click = (element, x, y) => element.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: x, clientY: y }));
@@ -45,8 +47,7 @@ export async function testPopupRuntime({ mode, testAPI }, preview) {
     assert.equal(document.body.style.overflow, overflow);
     assert.equal(document.activeElement, launcher, "Escape restores launcher focus");
     if (!reduced) assert.ok(card.getAnimations().some(animation => animation.id === "qch-exit"));
-    await settle();
-    assert.equal(wrap.isConnected, false, "visual exit releases the retired surface");
+    await waitFor(() => !wrap.isConnected, "visual exit releases the retired surface");
   }
   for (let i = 0; i < 3; i++) {
     launcher.focus(); launcher.click();
@@ -100,6 +101,7 @@ export async function testPopupRuntime({ mode, testAPI }, preview) {
   host.querySelector("[data-outside-popup]").focus(); assert.equal(menu.open, false, "focus leaving menu dismisses it");
   host.remove();
   await checkDisclosureMotion(document.querySelector(".workspace-main"), reduced);
+  await checkInteractionFeedback(reduced);
   const more = document.querySelector(".mobile-account-menu");
   if (mode.includes("mobile")) {
     more.querySelector("summary").focus(); more.open = true; await delay(25);
