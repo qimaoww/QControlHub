@@ -13,7 +13,7 @@ export function createUserQuotaView({ esc, shell }, lifecycle) {
         return `<article class="workspace-panel user-quota-card" data-quota-share="${esc(share.id)}"><header><div><h3>${esc(share.agent_name)}</h3><small>所有者 · ${esc(share.owner_username || "管理员")}</small></div><span class="status-label ${accepted && !exhausted ? "ok" : "warn"}">${status}</span></header><div><strong>${usage(share.used_bytes)}</strong><span> / ${share.limit_bytes ? usage(share.limit_bytes) : "不限量"}</span>${share.limit_bytes ? `<progress max="100" value="${Math.min(100, share.used_bytes / share.limit_bytes * 100)}" aria-label="已用额度"></progress>` : ""}<small>内核 ${sharedEngineNames(share.engines)}</small><small>端口 ${esc(sharedPortsLabel(share.ports))}</small></div>
           ${pending || accepted ? `<footer class="user-quota-actions">${pending ? '<button class="button primary small" type="button" data-share-open>查看邀请</button>' : '<button class="button small" type="button" data-share-decision="reject">退出共享</button>'}</footer>` : ""}</article>`;
       }).join("") || '<div class="empty large"><strong>暂无共享邀请</strong></div>'}</section>` : '<section class="workspace-panel"><div class="empty compact"><strong>按账号权限访问节点</strong></div></section>'}
-    </div>`, "共享与额度", { viewKey: `my-quota-${++lifecycle.viewSerial}` });
+    </div>`, "共享与额度", { viewKey: "my-quota" });
 
   }
   function renderInvitationDialog(dialog, share) {

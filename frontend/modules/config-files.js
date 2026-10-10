@@ -1,3 +1,5 @@
+import { cancelMotion, enterSurface } from "./motion.js";
+
 // Keep JSON tokens verbatim: parsing and stringifying an entire configuration
 // through JS numbers would corrupt integers larger than Number.MAX_SAFE_INTEGER.
 export function configJSONMembers(text, array = false) {
@@ -275,6 +277,7 @@ export function bindConfigFiles(form, engine, notify) {
     },
   };
   function switchFile(next) {
+    if (next === selected) return;
     save(); refreshNames();
     try {
       const content = next === "preview" ? mergeConfigFiles(files) : files[next].content;
@@ -283,6 +286,11 @@ export function bindConfigFiles(form, engine, notify) {
       previewButton.textContent = next === "preview" ? "返回文件" : "合并预览";
       previewButton.setAttribute("aria-pressed", String(next === "preview"));
       input.dispatchEvent(new Event("input", {bubbles:true}));
+      const frame = editor.querySelector(".code-editor-frame");
+      if (frame) {
+        cancelMotion(frame);
+        enterSurface(frame, { token: "--motion-feedback", id: "qch-selection" });
+      }
     } catch (error) { notify(error.message,"error"); }
     renderButtons();
     updateDrafts();

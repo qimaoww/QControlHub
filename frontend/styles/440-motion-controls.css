@@ -20,6 +20,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px soli
 :is(button,input,select,textarea)[aria-busy=true]{cursor:progress}
 .button[aria-busy=true]{opacity:.65}
 [role=button]:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+:is([role=tab],[aria-pressed],[data-task-status-filter],[data-substore-target],[data-core-log-engine],[data-core-log-level],[data-ip-quality-date-option],[data-ip-quality-month]){transition:background-color var(--motion-fast) ease,border-color var(--motion-fast) ease,color var(--motion-fast) ease,box-shadow var(--motion-fast) ease}
 /* A selection is represented by persistent color, border and aria state. It
    never scales or replays on polling. Focus outlines stay in the base theme. */
 .dock-nav a,.dock-tools button,.mobile-account-menu>summary,.context-menu a,.context-list>a{transition:background-color var(--motion-fast) ease,border-color var(--motion-fast) ease,color var(--motion-fast) ease,box-shadow var(--motion-fast) ease,opacity var(--motion-fast) ease}

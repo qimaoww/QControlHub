@@ -1,4 +1,5 @@
 import { reconcileView } from "./refresh.js";
+import { cancelMotion, enterSurface } from "./motion.js";
 export function openResultTaskIds() {
     return new Set(
       [
@@ -110,5 +111,9 @@ export function setupTaskPagination(timeline) {
       rows.forEach((row) => (row.hidden = false));
       timeline.dataset.mobileExpanded = "true";
       loadMore.hidden = true;
+      cancelMotion(timeline);
+      enterSurface(timeline, { token: "--motion-feedback", id: "qch-selection" });
+      timeline.tabIndex = -1;
+      timeline.focus({ preventScroll: true });
     };
   }

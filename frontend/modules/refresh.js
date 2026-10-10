@@ -48,12 +48,26 @@ function nodeKey(node) {
     "data-access-agent",
     "data-live-agent",
     "data-live-engine",
+    "data-live-source",
+    "data-engine-select",
+    "data-preset-protocol",
+    "data-common-field",
     "data-archive-config",
     "data-dashboard-agent",
     "data-dashboard-task",
     "data-task-id",
     "data-task-status-filter",
     "data-core-log-agent",
+    "data-connection-agent",
+    "data-substore-agent",
+    "data-substore-target",
+    "data-user-select",
+    "data-quota-share",
+    "data-user-mobile-select",
+    "data-access-control-agent",
+    "data-filter-engine",
+    "data-node-tab",
+    "data-core-log-page-index",
     "data-context-traffic-agent",
     "data-ip-quality-agent",
     "data-inbound",
@@ -260,6 +274,11 @@ export function captureViewState(root, documentObject = document, windowObject =
     }));
   return {
     active,
+    root,
+    // A new node/engine legitimately replaces its editor. Return focus to
+    // the matching selection launcher without transferring another editor's
+    // value or caret into this workspace.
+    selectionKey: active?.matches?.("a,button,select,summary") ? nodeKey(active) : "",
     selectionStart: active?.selectionStart,
     selectionEnd: active?.selectionEnd,
     selectionDirection: active?.selectionDirection,
@@ -287,6 +306,10 @@ export function restoreViewState(state, windowObject = window) {
         state.selectionDirection || "none",
       );
     }
+  } else if (state.selectionKey && state.root?.isConnected) {
+    const launcher = [...state.root.querySelectorAll("a,button,select,summary")]
+      .find(element => nodeKey(element) === state.selectionKey && !element.closest("[hidden],[inert],dialog:not([open])") && !element.disabled);
+    launcher?.focus({ preventScroll: true });
   }
   if (
     windowObject.scrollX !== state.windowX ||

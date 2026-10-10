@@ -94,7 +94,7 @@ const routeModules = createRouteModuleLoader({
     const { installDashboard } = await import("./modules/dashboard.js");
     return installDashboard({
       api, state, can, esc, engineName, heartbeat, statusTone, ago, short,
-      actionName, bytes, rate, shell,
+      actionName, bytes, rate, shell, notify,
     });
   },
   async "ip-quality"() {

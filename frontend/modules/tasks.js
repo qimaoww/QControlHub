@@ -55,6 +55,11 @@ export function installTasks(ctx) {
       ...(filters.action ? { action: filters.action } : {}),
     });
     const existingTaskPage = document.querySelector("[data-task-page]");
+    if (syncFilters && existingTaskPage) {
+      existingTaskPage.querySelector(".task-timeline")?.setAttribute("aria-busy", "true");
+      const label = existingTaskPage.querySelector("[data-task-refresh-label]");
+      if (label) label.textContent = "正在应用筛选…";
+    }
     const currentTimeline = background
       ? existingTaskPage?.querySelector(".task-timeline")
       : null;
@@ -94,6 +99,7 @@ export function installTasks(ctx) {
       const status = document.querySelector("[data-task-refresh-status]");
       if (!status && !background) throw error;
       if (status) {
+        existingTaskPage?.querySelector(".task-timeline")?.removeAttribute("aria-busy");
         status.dataset.refreshError = "1";
         status.classList.add("poll-error");
         status.title = error.message;

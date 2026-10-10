@@ -26,7 +26,9 @@ export function createUserBindings({ api, state, notify, confirmAction }, { life
       event.preventDefault();
       void selectUser(link.dataset.userSelect);
     }));
-    bindEvent(document.querySelector("[data-user-mobile-select]"), "change", (event) => { void selectUser(event.target.value); });
+    const mobileSelect = document.querySelector("[data-user-mobile-select]");
+    if (mobileSelect) mobileSelect.value = user?.id || "";
+    bindEvent(mobileSelect, "change", (event) => { void selectUser(event.target.value); });
     bindEvent(document.querySelector("[data-user-create]"), "click", () => editUser(null));
     bindEvent(document.querySelector("[data-user-edit]"), "click", () => editUser(user));
     bindEvent(document.querySelector("[data-user-delete]"), "click", async (event) => {

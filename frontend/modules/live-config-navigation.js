@@ -12,15 +12,27 @@ export function bindLiveConfigNavigation({ state, notify, confirmAction, engineN
     const dirty = editor?.configFileController?.dirty() ?? (input && !input.readOnly && input.value !== current?.content);
     return !dirty || await confirmAction("当前配置有未保存的修改，切换后将丢弃这些修改。确定切换？", title);
   };
+  const epoch = state.navigationEpoch;
+  const visible = () => accountData === state.data && epoch === state.navigationEpoch &&
+    state.route === "live-config" && workspaceElement.isConnected;
+  let selectionRequest = 0;
   document.querySelectorAll("[data-live-agent]").forEach(
     (link) =>
       (link.onclick = async (event) => {
         event.preventDefault();
-        if (link.dataset.liveAgent === agent.id || !(await confirmSwitch("切换节点"))) return;
+        if (link.dataset.liveAgent === state.data.liveAgent) return;
+        const request = ++selectionRequest;
+        if (!(await confirmSwitch("切换节点")) || !visible() || request !== selectionRequest) return;
         state.data.liveAgent = link.dataset.liveAgent;
         state.data.liveEngine = "";
         state.data.liveConfigSource = "";
-        liveConfig();
+        try { await liveConfig(); }
+        catch (error) {
+          if (!visible() || request !== selectionRequest) return;
+          Object.assign(state.data, { liveAgent: agent.id, liveEngine: engine, liveConfigSource: sourceMode });
+          globalThis.history?.replaceState?.(null, "", presetRoute({ agentId: agent.id, engine }));
+          notify(`切换节点失败：${error.message}`, "error");
+        }
       }),
   );
   let engineSwitch = 0;
@@ -30,7 +42,8 @@ export function bindLiveConfigNavigation({ state, notify, confirmAction, engineN
       (link.onclick = async (event) => {
         event.preventDefault();
         if (link.dataset.liveEngine === state.data.liveEngine) return;
-        if (!(await confirmSwitch("切换内核"))) return;
+        const request = ++selectionRequest;
+        if (!(await confirmSwitch("切换内核")) || !visible() || request !== selectionRequest) return;
         if (accountData !== state.data || !workspaceElement.isConnected || link.dataset.liveEngine === state.data.liveEngine) return;
         const switchRequest = ++engineSwitch;
         const previousSource = sourceMode;
@@ -54,7 +67,7 @@ export function bindLiveConfigNavigation({ state, notify, confirmAction, engineN
         workspaceElement.querySelector(".live-config-details").append(status);
         try { await liveConfig(); }
         catch (error) {
-          if (accountData !== state.data || engineSwitch !== switchRequest || state.data.liveEngine !== link.dataset.liveEngine) return;
+          if (!visible() || engineSwitch !== switchRequest || request !== selectionRequest || state.data.liveEngine !== link.dataset.liveEngine) return;
           state.data.liveEngine = engine;
           state.data.liveConfigSource = previousSource;
           if (globalThis.history?.replaceState) globalThis.history.replaceState(null, "", presetRoute({agentId:agent.id, engine}));
@@ -77,11 +90,16 @@ export function bindLiveConfigNavigation({ state, notify, confirmAction, engineN
   document.querySelectorAll("[data-live-source]").forEach(
     (button) =>
       (button.onclick = async () => {
-        if (button.dataset.liveSource === sourceMode) return;
-        if (!(await confirmSwitch("切换配置来源"))) return;
-        if (accountData !== state.data) return;
+        if (button.dataset.liveSource === state.data.liveConfigSource) return;
+        const request = ++selectionRequest;
+        if (!(await confirmSwitch("切换配置来源")) || !visible() || request !== selectionRequest) return;
         state.data.liveConfigSource = button.dataset.liveSource;
-        liveConfig();
+        try { await liveConfig(); }
+        catch (error) {
+          if (!visible() || request !== selectionRequest) return;
+          state.data.liveConfigSource = sourceMode;
+          notify(`切换配置来源失败：${error.message}`, "error");
+        }
       }),
   );
 

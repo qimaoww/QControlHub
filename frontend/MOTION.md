@@ -87,6 +87,42 @@ dialogs remain native, including their top layer and focus behavior. Closing
 surfaces commit immediately instead of leaving a fading interactive layer or
 delaying a save/navigation behind an end event.
 
+## Selection and filter inventory
+
+Selections now use semantic `data-motion-region` / `data-motion-key` scopes.
+The shell compares them after reconciliation and fades only the changed result
+region from 0.8 to 1 opacity for 160 ms. Pending reads, cached previews, and
+background enrichment do not consume/replay the completed selection. The
+initial route owns its entrance; its descendants do not also fade. Unchanged
+scope keys exclude metrics, response versions, and time-dependent row content.
+The mounted main and context sidebar survive local filters; keyed launchers
+retain focus. A replaced node/engine editor returns focus to the corresponding
+launcher without transferring another editor's values or caret.
+
+| Selection / filter | Feedback and lifecycle | Intentionally immediate / stable |
+| --- | --- | --- |
+| Node overview, node settings and preset node | One workspace entrance for a genuinely new node; mounted sidebar and matching launcher focus; existing node tabs fade only their revealed panel | Batch checkboxes and saved node order retain native selection semantics; metric updates remain quiet |
+| Live configuration node, engine and source | Node/engine workspace entrance; source result fades after loading; superseded or route-stale confirmations cannot navigate; read failures are reported | Dirty/source draft confirmation, save locks and request sequencing remain authoritative |
+| Preset protocol, inbound, common field and workbench | Embedded selected content fades once; workbench panels retain explicit reveal feedback | Captured per-selection drafts remain intact; same choice does not replay |
+| Source file and merged preview | Brief editor-frame feedback only when the file changes; same-file click is ignored | Dirty file contents are saved in memory before switching; typing/validation does not animate |
+| Client node, engine, submitted search and display format | One result-grid feedback; toolbar, search selection and empty-result region stay mounted | Native address/format choices, secret visibility, copy and export keep existing state/result semantics |
+| Traffic node, engine, endpoint, status and reset | One stable result region for populated and empty filters; native select and sidebar focus stay mounted | Counters, progress, quota forms and polling stay quiet; filtered sorting still merges global order |
+| Task node, status, action, limit and reset | Completed timeline feedback; applying-filter status and busy semantics; mobile Load more transfers focus to the revealed timeline | Polling, clocks, open outputs and automatic timeline updates stay quiet |
+| Log node, engine, level, limit, reset and pagination | One completed stream feedback; loading/preview/cache phases do not replay; pagination/scroll anchors stay in place | Incremental search, log appends and automatic refresh remain immediate/readable |
+| Connection node, engine, source IP, public/private, date, day/month, reset and pagination | One completed detail-region feedback; cached query/enrichment do not replay | Native query fields and background location enrichment remain stable |
+| IPQuality node, latest/history date, day navigation and calendar month | Node/report feedback only when ready; open calendar grid fades for a month change | Polling, scheduling/running tasks and closed-calendar refresh remain quiet |
+| TCP node / access-control node | One result-grid feedback for changed scope | Open parameter/rule dialogs and their drafts keep existing busy/dirty guards |
+| Sub-Store node, synchronization group and search | One grid feedback for node/group; busy pending group and recoverable failure; keyed cards/targets | Incremental search retains mid-text caret/selection and does not pulse; queued selection writes stay ordered |
+| User selection (sidebar/mobile), sharing and settings | Selected allocation feedback; mounted selector value/focus; release old busy snapshots before computing new button availability | Allocation drafts, invitation status, consent, permissions, native form toggles and conditional protocol fields stay immediate |
+| Dashboard traffic month and year | Changed chart fades; month picker stays mounted; pending status; abort/ignore older month responses and restore the displayed month on failure | Year browsing updates native choices; metric/number/chart refresh does not replay |
+
+Incremental search, native select/checkbox/radio indicators, form field
+visibility, password visibility, and revision/output reads deliberately avoid
+extra content fades: moving or dimming them would interfere with reading,
+composition or cursor placement. Existing count, selected, busy and result
+labels remain the primary feedback. No control changes a business result by
+waiting for an animation event.
+
 ## Regression checks
 
 Run `make check`. It includes all module smoke suites, all existing Chromium
@@ -123,14 +159,25 @@ refresh, late/superseded enrollment/directory responses, route departure and
 external removal. Headless CDP focus emulation is enabled for motion modes so focus
 events are exercised as they are in an active browser window.
 
+The four `motion-selection`, `motion-selection-reduced`,
+`motion-selection-mobile`, and `motion-selection-mobile-reduced` modes exercise
+real production bindings and shell reconciliation across traffic, clients,
+logs, tasks, connections, IPQuality, Sub-Store, users and dashboard. They cover
+exactly one completed selection fade, same-choice/refresh stability, repeated
+filters, empty results, retained sidebar/selector focus, mid-text selection,
+latest-month wins even if an aborted request returns, recoverable month failures,
+quiet quota refresh, and stale configuration
+confirmations after superseding/departure. Existing preset/configuration, TCP,
+IPQuality, user and connection suites validate their richer business flows.
+
 ### Validation record (2026-10-10)
 
 Started from clean worktrees on latest `main` (`a035b2b9`) and created
 `codex/console-motion`. The final `make check` passed with an isolated
-PostgreSQL 17 test database: module smoke, all 66 Chromium modes, source/style
+PostgreSQL 17 test database: module smoke, all 70 Chromium modes, source/style
 and repository policy checks, installer/quick-start checks, vet, and all Go
 packages. The Go frontend package also reran the browser suite successfully
-(303.139 s). The frozen initial stylesheet hash contract and `git diff --check`
+(334.966 s). The frozen initial stylesheet hash contract and `git diff --check`
 passed. No required check was blocked by the environment.
 
 Manual Chromium inspection covered desktop drag/navigation and both themes,
@@ -144,6 +191,12 @@ configuration, and TCP regressions. Its real browser inspection includes dark
 reduced-motion custom dialogs at 390 x 844 and 844 x 390, with no horizontal
 overflow or active animations. The 10-second popup recording is retained as
 `output/playwright/popup-motion-review.mp4`.
+The selection/filter follow-up adds a 16-second browser recording at
+`output/playwright/selection-motion-review.mp4` and verifies dark reduced-motion
+390 x 844 portrait and 844 x 390 landscape without overflow or active animation.
+Focused selection, quota, configuration, popup and existing business suites
+passed; the final full check includes all 70 browser modes twice (directly and
+from the Go frontend suite).
 
 ## Reproducible visual preview
 
@@ -160,6 +213,14 @@ For the popup review, use
 it starts with Add node open. Press Escape, reopen it, generate a fixture
 command, close it, and navigate to traffic to open quota/status dialogs.
 The popup recording is `output/playwright/popup-motion-review.mp4` (10 s).
+For selection/filter review, use
+`/agents-browser-smoke.html?mode=motion-selection&preview=1#node-settings`.
+Navigate to traffic, click several sidebar nodes, change engine/port/status,
+select a status with no results, and clear filters. Open logs, select
+engine/level/node, search with a caret in the middle, and paginate. Repeat
+clients, connections, IPQuality, synchronization groups, users and dashboard
+month selection. The 16-second recording is
+`output/playwright/selection-motion-review.mp4`.
 The preview stays open on the node overview. For the richer existing page
 fixtures, substitute `mode=dashboard`, `mode=config-layout`, `mode=users`,
 `mode=presets`, `mode=ip-quality`, or `mode=connections` with `preview=1`.

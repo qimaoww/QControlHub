@@ -1,6 +1,7 @@
 import { bindEvent, reconcileView } from "./refresh.js";
 import { bindConfigOutbounds } from "./config-outbounds.js";
 import { bindConfigMenu } from "./config-menu.js";
+import { syncSelectionMotion } from "./motion.js";
 import { bindDialogBackdrop } from "./popup.js";
 import { composeConfigWorkspaceToolbar } from "./config-workspace-toolbar.js";
 // Reuse the actual preset form and field editors, not a second implementation
@@ -13,6 +14,8 @@ export function renderEmbeddedPreset(host, markup, { viewKey, commonFields = [],
   const fresh = host.root.cloneNode(false);
   const content = document.createElement("div");
   content.dataset.refreshKey = viewKey;
+  content.dataset.motionRegion = "preset-selection";
+  content.dataset.motionKey = viewKey;
   const toolbar = document.createElement("div");
   toolbar.className = "config-command-bar inbound-editor-toolbar";
   if (host.kind === "add") {
@@ -60,6 +63,7 @@ export function renderEmbeddedPreset(host, markup, { viewKey, commonFields = [],
   }
   fresh.append(content);
   reconcileView(host.root, fresh);
+  syncSelectionMotion(host.root);
 }
 
 export function bindConfigInbounds(ctx) {

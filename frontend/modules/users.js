@@ -9,7 +9,7 @@ export function installUsers(ctx) {
   const { api, state, notify } = ctx;
   // Reads, mutation completions and draft capture share monotonic lifetimes.
   const lifecycle = {
-    serial: 0, viewSerial: 0, captureActive: () => {}, activeAllocation: null,
+    serial: 0, captureActive: () => {}, activeAllocation: null,
   };
   const report = (error, element) => {
     if (error?.name === "AbortError" || !element?.isConnected) return;

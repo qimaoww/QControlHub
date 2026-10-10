@@ -94,8 +94,8 @@ export function createTrafficView(ctx, { filters, storage, savedTrafficCardOrder
       ? '<div class="empty large"><strong>没有符合筛选条件的端口</strong><p>调整上方筛选条件后再查看。</p></div>'
       : '<div class="empty large"><strong>尚未读取到配置端口</strong><p>节点保存或部署内核配置后，已有监听端口会直接显示在这里。</p></div>';
     const listHeader = `<header class="traffic-policy-list-head"><div><h2>监控端口</h2><span>${filteredItems.length}</span></div><div class="traffic-policy-list-actions"><small>${esc(selectedScope)} · 自动发现配置 · Agent 实时上报</small>${can("traffic.manage") ? `<button class="button small" type="button" data-traffic-sync>同步端口</button>` : ""}</div></header>`;
-    const trafficResultKey = `${currentFilters.agent_id || "all"}-${currentFilters.engine || "all"}-${currentFilters.endpoint_key || "all"}-${currentFilters.status || "all"}`;
-    shell(`<div class="traffic-workspace">${toolbar}${listHeader}${cards ? `<section class="traffic-policy-grid qch-swap-panel" data-refresh-key="traffic-results-${esc(trafficResultKey)}">${cards}</section>` : `<div class="qch-swap-panel" data-refresh-key="traffic-results-${esc(trafficResultKey)}-empty">${empty}</div>`}${createDialog}</div>`, "流量配额", { viewKey: `traffic-${trafficResultKey}` });
+    const trafficResultKey = JSON.stringify([currentFilters.agent_id || "", currentFilters.engine || "", currentFilters.endpoint_key || "", currentFilters.status || ""]);
+    shell(`<div class="traffic-workspace">${toolbar}${listHeader}<section class="${cards ? "traffic-policy-grid " : ""}qch-swap-panel" data-refresh-key="traffic-results" data-motion-region="traffic-results" data-motion-key="${esc(trafficResultKey)}">${cards || empty}</section>${createDialog}</div>`, "流量配额", { viewKey: "traffic" });
 
     return { selectableAgents, filteredItems, orderedItems };
   };

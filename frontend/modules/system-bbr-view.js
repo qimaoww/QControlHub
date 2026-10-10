@@ -77,7 +77,7 @@ export function createSystemBBRView({ state, can, esc, date, shell }, { lifecycl
         <footer>${editable(agent) ? `<div class="bbr-actions"><button class="button small" type="button" data-bbr-agent="${esc(agent.id)}" data-bbr-action="disable-bbr" ${presetDisabled ? "disabled" : ""}>切换 CUBIC</button><button class="button small primary" type="button" data-bbr-agent="${esc(agent.id)}" data-bbr-action="enable-bbr" ${presetDisabled ? "disabled" : ""}>启用 BBR</button></div>` : '<span class="bbr-readonly">只读权限</span>'}</footer>
       </article>`;
     }).join("");
-    shell(`<div class="bbr-workspace"><div class="bbr-toolbar"><small data-bbr-refresh-status aria-live="polite">${lifecycle.refreshFailed ? "刷新失败，显示上次数据 · 将自动重试" : "自动刷新"}</small><button class="button small" type="button" data-bbr-refresh>刷新状态</button></div><section class="bbr-grid">${cards || '<div class="empty large"><strong>当前范围没有节点</strong><p>添加节点后即可查看系统 BBR 状态。</p></div>'}</section></div>`, "BBR / TCP 调优", { viewKey: `system-bbr-${selectedID() || "all"}` });
+    shell(`<div class="bbr-workspace"><div class="bbr-toolbar"><small data-bbr-refresh-status aria-live="polite">${lifecycle.refreshFailed ? "刷新失败，显示上次数据 · 将自动重试" : "自动刷新"}</small><button class="button small" type="button" data-bbr-refresh>刷新状态</button></div><section class="bbr-grid" data-motion-region="tcp-results" data-motion-key="${esc(selectedID())}">${cards || '<div class="empty large"><strong>当前范围没有节点</strong><p>添加节点后即可查看系统 BBR 状态。</p></div>'}</section></div>`, "BBR / TCP 调优", { viewKey: "system-bbr" });
 
     return { agents, focused };
   }

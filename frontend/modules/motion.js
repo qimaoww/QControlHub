@@ -87,3 +87,47 @@ export function enterSurface(element, options) {
 export function reducedMotion() {
   return Boolean(globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches);
 }
+
+const selectionScopes = new WeakMap();
+// Semantic selection keys exclude live data. A loading/preview paint does not
+// consume a selection: its completed result owns the single short feedback.
+// The workspace owns these keys even when a result changes to an empty state.
+export function syncSelectionMotion(root, { animate = true } = {}) {
+  if (!root) return;
+  if (root.getAnimations?.().some(animation => animation.id === "qch-route")) animate = false;
+  const previous = selectionScopes.get(root) || new Map();
+  const present = new Set();
+  const changed = [];
+  root.querySelectorAll("[data-motion-region]").forEach(element => {
+    const name = element.dataset.motionRegion;
+    const key = element.dataset.motionKey || "";
+    present.add(name);
+    if (!previous.has(name) || !animate) {
+      previous.set(name, key);
+      return;
+    }
+    if (previous.get(name) === key) {
+      if (element.dataset.motionReady === "false") cancelMotion(element);
+      return;
+    }
+    cancelMotion(element);
+    if (element.dataset.motionReady === "false") return;
+    previous.set(name, key);
+    if (element.closest("[hidden],details:not([open])")) return;
+    // Incremental search remains readable while typing or composing. Its
+    // count and selected controls provide feedback without pulsing the rows.
+    if (element.hasAttribute("data-motion-live") &&
+        root.contains(document.activeElement) &&
+        document.activeElement.matches('input[type="search"]')) return;
+    changed.push(element);
+  });
+  for (const name of previous.keys()) if (!present.has(name)) previous.delete(name);
+  selectionScopes.set(root, previous);
+  changed.filter(element => !changed.some(parent => parent !== element && parent.contains(element)))
+    .forEach(element => {
+      cancelMotion(element);
+      animateMotion(element, [{ opacity: .8 }, { opacity: 1 }], {
+        id: "qch-selection", token: "--motion-feedback",
+      });
+    });
+}

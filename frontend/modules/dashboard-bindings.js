@@ -1,6 +1,6 @@
 import { utcMonth } from "./dashboard-model.js";
 import { bindDialogBackdrop } from "./popup.js";
-export function createDashboardBindings({ state }, { panelMetrics, dashboard }) {
+export function createDashboardBindings({ state, notify }, { panelMetrics, dashboard }) {
   return ({ trafficYear, trafficMonth }) => {
   panelMetrics.mount();
   document.querySelectorAll("[data-dashboard-agent]").forEach((link) => {
@@ -39,14 +39,29 @@ export function createDashboardBindings({ state }, { panelMetrics, dashboard }) 
       });
     };
     const selectMonth = async (value) => {
-      const previousMonth = state.data.dashboardTrafficMonth;
+      if (value === state.data.dashboardTrafficMonth) {
+        trafficMonthPicker.open = false;
+        trafficMonthPicker.querySelector("summary").focus({ preventScroll: true });
+        return;
+      }
+      const data = state.data, epoch = state.navigationEpoch;
+      const previousMonth = trafficMonth;
       state.data.dashboardTrafficMonth = value;
+      const chart = document.querySelector(".dashboard-traffic-chart");
+      const hint = document.querySelector(".dashboard-traffic-title small");
+      chart?.setAttribute("aria-busy", "true");
+      if (hint) { hint.textContent = "UTC 自然日 · 正在读取…"; hint.setAttribute("role", "status"); }
       trafficMonthPicker.open = false;
       trafficMonthPicker.querySelector("summary").focus({ preventScroll: true });
       try {
         await dashboard({ overview: state.data.overview });
-      } catch {
-        state.data.dashboardTrafficMonth = previousMonth;
+      } catch (error) {
+        if (data !== state.data || epoch !== state.navigationEpoch ||
+            state.route !== "dashboard" || data.dashboardTrafficMonth !== value) return;
+        data.dashboardTrafficMonth = previousMonth;
+        chart?.removeAttribute("aria-busy");
+        if (hint?.isConnected) hint.textContent = "UTC 自然日";
+        notify?.(`读取流量月份失败：${error.message}`, "error");
       }
     };
     yearButtons.forEach((button) => {

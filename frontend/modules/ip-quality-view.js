@@ -78,8 +78,8 @@ export function createIPQualityView({ shell, state, esc, date: formatDate }) {
         </section>
       </section>
       ${issue}
-      ${nodes.selected ? nodePanel(nodes.selected) : `<div class="empty large"><strong>${emptyTitle}</strong><p>${emptyNote}</p></div>`}
+      <div data-motion-region="ip-quality-results" data-motion-key="${esc(JSON.stringify([date, nodes.selected?.id || ""]))}" data-motion-ready="${!loading}">${nodes.selected ? nodePanel(nodes.selected) : `<div class="empty large"><strong>${emptyTitle}</strong><p>${emptyNote}</p></div>`}</div>
       <p class="ip-quality-source"><a href="https://github.com/xykt/IPQuality" target="_blank" rel="noopener noreferrer">xykt/IPQuality</a> · AGPL-3.0 · 仅显示自有节点的检测结果</p>
-    </div>`, "IP 质量", { viewKey: `ip-quality-${date}` });
+    </div>`, "IP 质量", { viewKey: "ip-quality" });
   };
 }
