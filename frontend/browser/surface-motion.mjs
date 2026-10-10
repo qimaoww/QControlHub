@@ -8,11 +8,13 @@ const animations = element => element.getAnimations({ subtree: true });
 // Inspect its actual paint state rather than confusing launcher focus transitions
 // with content motion.
 const disclosureStyle = element => getComputedStyle(element, "::details-content");
+const dialogEntered = dialog => getComputedStyle(dialog).opacity === "1" && animations(dialog).length === 0;
+const disclosureEntered = details => disclosureStyle(details).opacity === "1" && disclosureStyle(details).overflow === "visible";
 export async function checkNativeExit(dialog, launcher, reduced) {
   for (const theme of ["light", "dark"]) {
     document.documentElement.dataset.theme = theme;
     launcher.focus(); launcher.click();
-    await delay(240);
+    await waitFor(() => dialogEntered(dialog), "dialog entrance must finish before checking its full exit");
     dialog.close();
     assert.equal(dialog.open, false, "close commits business state immediately");
     assert.equal(document.querySelector("dialog:modal"), null);
@@ -44,7 +46,8 @@ export async function checkNativeExit(dialog, launcher, reduced) {
       assert.equal(dialog.hasAttribute("aria-hidden"), false);
       dialog.close(); await delay(20);
     }
-    launcher.click(); await delay(240);
+    launcher.click();
+    await waitFor(() => dialogEntered(dialog), "rapid dialog reversal must finish its entrance");
     assert.ok(dialog.open && !dialog.inert);
     assert.equal(getComputedStyle(dialog).opacity, "1");
     assert.ok(getComputedStyle(dialog).translate.split(" ").every(value => Math.abs(Number.parseFloat(value)) < .01),
@@ -68,7 +71,7 @@ export async function checkDisclosureMotion(_workspace, reduced) {
   assert.ok(details.open && details.hasAttribute("data-motion-disclosure"), "dynamically inserted disclosure participates");
   if (reduced) assert.equal(disclosureStyle(details).transitionDuration, "0s", "native disclosure pseudo obeys reduced motion");
   if (!reduced) assert.ok(Number(disclosureStyle(details).opacity) < 1, "disclosure entrance missing");
-  await delay(230);
+  await waitFor(() => disclosureEntered(details), "dynamic disclosure entrance must finish without clipping");
   input.value = "unsaved"; input.focus(); input.setSelectionRange(2, 4);
   const fresh = host.cloneNode(true);
   fresh.querySelector("details").removeAttribute("data-motion-disclosure");
@@ -93,7 +96,7 @@ export async function checkDisclosureMotion(_workspace, reduced) {
   assert.equal(getComputedStyle(input).pointerEvents, "none", "collapsed tail cannot intercept input");
   if (!reduced) assert.ok(Number.parseFloat(disclosureStyle(details).blockSize) > 0, "disclosure exit missing");
   summary.click(); await delay(25); summary.click(); await delay(25); summary.click();
-  await delay(260);
+  await waitFor(() => disclosureEntered(details), "disclosure reversal must finish without clipping");
   assert.ok(details.open);
   assert.equal(input.value, "unsaved");
   assert.equal(input.closest("[data-motion-retired-content]"), null, "reopening releases accessibility retirement");
@@ -104,7 +107,9 @@ export async function checkDisclosureMotion(_workspace, reduced) {
   assert.equal(disclosureStyle(details).overflow, "visible", "completed disclosure must not clip focus or nested menus");
   const rect = input.getBoundingClientRect();
   assert.ok(rect.height > 0 && rect.top >= details.getBoundingClientRect().top);
-  summary.click(); await delay(240);
+  summary.click();
+  await waitFor(() => disclosureStyle(details).blockSize === "0px" &&
+    ["", "hidden"].includes(disclosureStyle(details).contentVisibility), "disclosure exit must release its layout space");
   const final = disclosureStyle(details);
   assert.ok(["", "hidden"].includes(final.contentVisibility));
   assert.ok(["", "0px"].includes(final.blockSize));
@@ -117,7 +122,7 @@ export async function checkDisclosureMotion(_workspace, reduced) {
   assert.equal(feedback.textContent, "Request failed", "error text is available immediately");
   assert.equal(feedback.hidden, false);
   if (!reduced) assert.ok(animations(feedback).some(animation => animation.id === "qch-feedback"));
-  await delay(230);
+  await waitFor(() => animations(feedback).length === 0, "inline feedback must settle");
   updateFeedback(feedback, "Request failed");
   assert.equal(animations(feedback).length, 0, "identical inline feedback never replays");
   updateFeedback(feedback, "");
@@ -133,11 +138,18 @@ export async function checkDisclosureMotion(_workspace, reduced) {
   const tail = document.createElement("aside");
   tail.textContent = "Dismissed feedback"; root.append(tail);
   retireSurface(tail);
-  tail.getAnimations().forEach(animation => { animation.onfinish = null; });
+  const tailAnimations = tail.getAnimations();
+  if (!reduced) assert.equal(tailAnimations.length, 1, "retired surface owns one exit animation");
+  // Explicitly reach the endpoint with finish delivery disabled. Render-frame
+  // scheduling must not decide whether we inspect the fill or the fallback.
+  tailAnimations.forEach(animation => { animation.onfinish = null; animation.finish(); });
   assert.ok(tail.inert && tail.getAttribute("aria-hidden") === "true");
-  await delay(160);
-  if (!reduced) assert.equal(getComputedStyle(tail).opacity, "0", "lost finish event must not flash the retired surface before fallback");
-  await delay(80);
+  if (!reduced) assert.ok(tail.isConnected, "missing finish delivery leaves cleanup to the bounded fallback");
+  await waitFor(() => {
+    if (tail.isConnected) assert.equal(getComputedStyle(tail).opacity, "0",
+      "lost finish event must not flash the retired surface before fallback");
+    return !tail.isConnected;
+  }, "lost finish event uses bounded cleanup");
   assert.equal(tail.isConnected, false, "lost finish event uses bounded cleanup");
   const removed = document.createElement("aside"); root.append(removed);
   retireSurface(removed); removed.remove(); await delay(10);
@@ -181,7 +193,8 @@ export async function checkCoreDisclosure(reduced) {
   const details = launcher.closest(".service-card").querySelector(".version-drawer");
   launcher.focus(); launcher.click(); await delay(35);
   assert.ok(details.open && details.hasAttribute("data-motion-disclosure"), "button-operated version drawer missed integration");
-  await delay(230);
+  await waitFor(() => getComputedStyle(details).overflow === "visible" && disclosureStyle(details).opacity === "1",
+    "version drawer entrance must finish before measuring its expanded height");
   const expandedHeight = details.getBoundingClientRect().height;
   const summary = details.querySelector("summary"); summary.focus(); summary.click();
   assert.equal(document.activeElement, launcher, "closing a drawer with a hidden summary returns to its launcher");
@@ -194,9 +207,11 @@ export async function checkCoreDisclosure(reduced) {
   if (!reduced) assert.notEqual(getComputedStyle(details).display, "none", "version drawer exit was cut off by display:none");
   assert.equal(getComputedStyle(details).pointerEvents, "none");
   launcher.click(); await delay(35); summary.click(); await delay(35); launcher.click();
-  await delay(260);
+  await waitFor(() => getComputedStyle(details).overflow === "visible" && disclosureStyle(details).opacity === "1",
+    "version drawer reversal must finish without clipping");
   assert.ok(details.open && details.getBoundingClientRect().height > summary.getBoundingClientRect().height);
-  summary.click(); await delay(250);
+  summary.click();
+  await waitFor(() => getComputedStyle(details).display === "none", "version drawer exit must release its layout space");
   assert.equal(getComputedStyle(details).display, "none");
   assert.equal(document.activeElement, launcher);
 }

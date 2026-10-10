@@ -195,12 +195,13 @@ is lost, then the bounded fallback removes it. Module smoke and generated-style
 checks were repeated on that final snapshot. The route sweep in the popup modes
 visits all 18 entries in both themes (144 visits across four modes).
 
-The merge review found a native-dialog exit assertion failing in both Debian
-and Alpine CI: a fixed 220 ms timer could expire before the browser completed
-its rendering frames. The regression now waits for the actual hidden,
-animation-free paint state with a bounded four-second timeout. Immediate close,
-focus, inertness and click-through assertions are retained. All four popup
-modes passed locally after this test-only correction.
+The merge review found fixed-timer paint assertions failing in Debian and
+Alpine CI. Dialog and disclosure completion checks now observe the actual
+rendered endpoint with a bounded four-second timeout. The missing-finish-event
+regression explicitly finishes its animation with event delivery disabled,
+asserts that zero opacity is retained, and observes fallback removal. Immediate
+close, focus, inertness and click-through assertions are retained. Log rendering
+budget failures now include measured timings without changing their limits.
 
 Manual Chromium inspection covered desktop drag/navigation and both themes,
 plus dark reduced-motion phone portrait (375 x 812) and landscape (844 x 390).

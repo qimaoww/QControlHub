@@ -180,8 +180,10 @@ retaining launcher focus. Phone portrait/landscape inspection found zero active
 animations and no horizontal overflow with reduced motion. No required check
 was blocked by the environment.
 
-Merge review correction: Debian and Alpine CI exposed a fixed-delay assertion
-in the native-dialog exit regression. It now observes the hidden paint state
-and zero active animations with a bounded timeout, while still asserting
-immediate business/focus/accessibility state. The four popup modes passed
-locally after the correction; production motion and timings are unchanged.
+Merge review correction: Debian and Alpine CI exposed fixed-delay paint
+assertions in native surface regressions. Completion checks now observe actual
+paint state with a bounded timeout. Missing-finish delivery is simulated by
+explicitly finishing the animation with its handler disabled, then checking
+zero-opacity retention and fallback removal. Immediate business, focus and
+accessibility assertions remain. Log budget failures include measured timings
+without changing limits; production motion and timings are unchanged.
