@@ -1,10 +1,12 @@
+import { enterSurface } from "./motion.js";
+
 const boundEvents = new WeakMap();
 
 const insertedMotionSelector = [
   ".qch-swap-panel",
-  ".task-event",
-  ".core-log-row",
   ".node-card",
+  ".traffic-policy-card",
+  ".user-account-card",
   ".service-card",
   ".client-access-node-card",
   ".access-control-card",
@@ -13,19 +15,6 @@ const insertedMotionSelector = [
   ".settings-version-card",
   ".template-card",
 ].join(",");
-
-function markInsertedMotion(node) {
-  if (node?.nodeType !== 1 || !node.matches(insertedMotionSelector)) {
-    return node;
-  }
-  node.classList.add("qch-reconcile-enter");
-  node.addEventListener(
-    "animationend",
-    () => node.classList.remove("qch-reconcile-enter"),
-    { once: true },
-  );
-  return node;
-}
 
 export function bindEvent(target, type, handler, options) {
   if (!target) return;
@@ -163,6 +152,7 @@ function restoreControlState(element, state) {
 
 function reconcileChildren(current, fresh, metrics) {
   const existing = [...current.childNodes];
+  const existingNodes = new Set(existing);
   const used = new Set();
   const keyed = new Map(
     existing
@@ -188,15 +178,24 @@ function reconcileChildren(current, fresh, metrics) {
     }
     if (!candidate) {
       metrics.inserted += 1;
-      return markInsertedMotion(freshChild.cloneNode(true));
+      return freshChild.cloneNode(true);
     }
     used.add(candidate);
     return reconcileNode(candidate, freshChild, metrics);
   });
 
+  // A result notice owns its dismissal timer, not the polling markup. Keep
+  // it mounted through same-workspace refreshes so feedback is not lost.
+  const notice = current.classList?.contains("workspace-main")
+    ? existing.find(child => child.nodeType === 1 && child.getAttribute("data-spa-notice") != null) : null;
+  if (notice && !desired.includes(notice)) desired.unshift(notice);
   desired.forEach((child, index) => {
     const currentAtIndex = current.childNodes[index] || null;
     if (currentAtIndex !== child) current.insertBefore(child, currentAtIndex);
+    // Only the inserted branch fades. Logs and task polling stay immediate;
+    // descendants never receive a second entrance.
+    if (!existingNodes.has(child) && child.nodeType === 1 && child.matches(insertedMotionSelector))
+      enterSurface(child, { token: "--motion-fast" });
   });
   const desiredNodes = new Set(desired);
   [...current.childNodes].forEach((child) => {

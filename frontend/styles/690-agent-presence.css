@@ -19,7 +19,7 @@
   line-height: 1.4;
   white-space: nowrap;
   vertical-align: middle;
-  transition: color .16s ease, background-color .16s ease, border-color .16s ease;
+  transition: color var(--motion-fast) ease, background-color var(--motion-fast) ease, border-color var(--motion-fast) ease;
 }
 .agent-presence[data-agent-presence="online"] {
   --presence-ink: var(--green);

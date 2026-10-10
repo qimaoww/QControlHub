@@ -1,3 +1,4 @@
+import { cancelMotion, enterSurface } from "./motion.js";
 import { bindEvent } from "./refresh.js";
 
 export function compactPresetPage() {
@@ -77,7 +78,10 @@ export function bindAgentWorkspace({ state, can }, agentsByID, { loadMetricHisto
         candidate.tabIndex = selected ? 0 : -1;
       });
       workspace.querySelectorAll("[data-node-panel]").forEach((panel) => {
+        const reveal = panel.hidden && panel.dataset.nodePanel === tab;
         panel.hidden = panel.dataset.nodePanel !== tab;
+        if (panel.hidden) cancelMotion(panel);
+        else if (reveal) enterSurface(panel, { token: "--motion-feedback" });
       });
       if (tab === "metrics" && can("metrics.read"))
         loadMetricHistory(workspace.dataset.agentNode);

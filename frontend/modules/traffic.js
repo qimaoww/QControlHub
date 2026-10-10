@@ -92,5 +92,12 @@ export function installTraffic(ctx) {
     }
   }
 
+  traffic.cancelInteractions = () => {
+    poller.stop();
+    refresh.invalidate();
+    cardInteractions.cancel();
+    pendingTrafficRender = null;
+    cards.cancel();
+  };
   return traffic;
 }

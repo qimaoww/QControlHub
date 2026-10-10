@@ -1,3 +1,4 @@
+import { cancelMotion } from "./modules/motion.js";
 import { createLatestRenderScheduler } from "./modules/refresh.js";
 import { createRouteModuleLoader } from "./modules/route-loader.js";
 import { errorMessage } from "./modules/errors.js";
@@ -49,7 +50,7 @@ const serviceActionDisabled = createServiceActionGuard(can);
 const { scopedAPI, api, optionalAPI, ensureSession, readPanelData, invalidatePanelReads } =
   createSessionAPI({ state, renderLogin });
 const { applyUIFontScale, applyTheme, toggleTheme } = createShellAppearance(state);
-const { notify, confirmAction, bindConfirmationDialog } = createShellFeedback(state);
+const { notify, confirmAction, bindConfirmationDialog, resetFeedback } = createShellFeedback(state);
 const shell = createShellView({
   app, state, can, esc, engineName, ago, engines, api,
   applyTheme, toggleTheme, bindConfirmationDialog, renderLogin,
@@ -62,6 +63,11 @@ const loginPage = createLoginPage({
 
 function renderLogin(message = "") {
   stopRouteWarmup();
+  cancelMotion(app);
+  resetFeedback();
+  routeModules.peek("traffic")?.cancelInteractions();
+  routeModules.peek("client-access")?.dispose();
+  routeModules.peek("substore-sync")?.dispose();
   routeModules.peek("users")?.closeInvitation();
   scopedAPI.end();
   if (state.route === "node-settings")
@@ -236,6 +242,13 @@ async function renderOnce() {
   }
   state.route = routeForHash(hash);
   state.anchor = hash;
+  if (state.route !== previousRoute) {
+    resetFeedback();
+    if (["client-access", "substore-sync"].includes(previousRoute))
+      routeModules.peek(previousRoute)?.dispose();
+  }
+  if (previousRoute === "traffic" && state.route !== previousRoute)
+    routeModules.peek("traffic")?.cancelInteractions();
   if (previousRoute === "node-settings" && state.route !== previousRoute) {
     state.data.nodeBatchMode = false;
     routeModules.peek("agents")?.cancelAgentInteractions();
@@ -318,11 +331,12 @@ async function renderOnce() {
     if (state.anchor === "new-config")
       document.querySelector("#new-config")?.click();
     else if (state.anchor && state.anchor !== state.route)
-      requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        if (renderSignal.aborted || state.routeSignal !== renderSignal) return;
         document
           .getElementById(state.anchor)
-          ?.scrollIntoView({ block: "start" }),
-      );
+          ?.scrollIntoView({ block: "start" });
+      });
   } catch (error) {
     if (error?.name === "AbortError") return;
     if (!state.session || state.route === "login") return;
@@ -354,7 +368,8 @@ function primeRouteTransition() {
   if (!state.session) return;
   const main = app.querySelector(".workspace-main");
   if (!main) return;
-  main.inert = true;
+  const nextRoute = routeForHash(location.hash.slice(1));
+  if (nextRoute !== state.route) { cancelMotion(main); main.inert = true; }
   main.classList.add("is-route-pending");
   main.setAttribute("aria-busy", "true");
 }
