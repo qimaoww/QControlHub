@@ -1,7 +1,7 @@
 import { reducedMotion } from "./motion.js";
 import { updateFeedback, removePresented } from "./presence-motion.js";
 
-let installed = false, tooltip, owner, showTimer, closeTimer, watch;
+let installed = false, tooltip, owner, anchor, showTimer, closeTimer, watch;
 let hovered, focused, errorID = 0;
 const errors = new WeakMap();
 const target = node => node?.closest?.("[title],[data-motion-title]");
@@ -19,7 +19,7 @@ function hideTip(immediate = false) {
       owner.removeAttribute("aria-description");
       delete owner.dataset.motionDescription;
     }
-    tooltip?.remove(); tooltip = owner = null;
+    tooltip?.remove(); tooltip = owner = anchor = null;
     watch?.disconnect(); watch = null;
   };
   if (immediate || reducedMotion()) remove();
@@ -63,6 +63,7 @@ function showTip(element) {
     watch.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["title", "data-motion-title"] });
   }
   const bounds = element.getBoundingClientRect(), tip = tooltip.getBoundingClientRect();
+  anchor = { left: bounds.left, top: bounds.top, right: bounds.right, bottom: bounds.bottom };
   const top = bounds.top >= tip.height + 16 ? bounds.top - tip.height - 9 : bounds.bottom + 9;
   tooltip.style.left = `${Math.max(8, Math.min(innerWidth - tip.width - 8, bounds.left + (bounds.width - tip.width) / 2))}px`;
   tooltip.style.top = `${Math.max(8, Math.min(innerHeight - tip.height - 8, top))}px`;
@@ -151,5 +152,11 @@ export function installInteractionFeedback() {
   document.addEventListener("visibilitychange", () => { if (document.hidden) hideTip(true); });
   window.addEventListener("hashchange", () => hideTip(true));
   window.addEventListener("resize", () => hideTip(true));
-  document.addEventListener("scroll", () => { if (tooltip?.hasAttribute("data-open")) hideTip(true); }, true);
+  document.addEventListener("scroll", () => {
+    if (!tooltip?.hasAttribute("data-open") || !owner || !anchor) return;
+    // Delayed focus/refresh scroll events can arrive after the tip opens.
+    // Keep the same painted owner unless scrolling actually moves its anchor.
+    const bounds = owner.getBoundingClientRect();
+    if (Object.keys(anchor).some(key => Math.abs(bounds[key] - anchor[key]) > .5)) hideTip();
+  }, true);
 }

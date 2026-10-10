@@ -165,3 +165,10 @@ It waits for paused JS owners and genuinely playing native effects, while
 excluding finished/idle native effects from playback; complete detachment and
 closed-state assertions still verify exit cleanup. Failures include animation
 state/timing diagnostics. No production motion or interaction budget changed.
+
+The final Alpine feedback check also exposed a tooltip dismissal race: queued
+scroll events could restore the native title immediately after metadata refresh.
+Tooltip ownership now compares the current anchor bounds, retaining the same
+paint when no movement occurred. Real anchor movement commits dismissal while
+preserving the full exit. All four popup modes exercise both cases in Debian
+Chromium and Alpine Chromium 152, alongside the existing metadata/refocus tests.

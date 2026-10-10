@@ -178,7 +178,9 @@ export async function checkInteractionFeedback(reduced) {
   const refreshedHint = hint.cloneNode(true); refreshedHint.title = "Updated motion keyboard tip";
   reconcileView(hint, refreshedHint);
   await waitFor(() => tip.textContent === "Updated motion keyboard tip", "polling must update a visible hint without a second native bubble");
-  assert.ok(!hint.hasAttribute("title"));
+  document.dispatchEvent(new Event("scroll"));
+  assert.ok(tip.isConnected && tip.hasAttribute("data-open") && !hint.hasAttribute("title"),
+    "a queued scroll with an unchanged anchor cannot flicker the refreshed tooltip or restore its native title");
   input.focus();
   assert.ok(!tip.hasAttribute("data-open"), "blur commits tooltip dismissal");
   if (!reduced) assert.ok(tip.isConnected, "tooltip keeps its exit paint");
@@ -267,6 +269,13 @@ export async function checkInteractionFeedback(reduced) {
   }
   await waitFor(() => !document.querySelector(".motion-exit-host"), "retired fields/messages/dialogs must completely settle");
   if (reduced) assert.equal(host.getAnimations({ subtree: true }).length, 0, "all feedback stays static in reduced motion");
+  hint.focus();
+  const movingTip = await waitFor(() => document.querySelector('.interaction-tooltip[data-open]'), "anchor-scroll tooltip missing");
+  host.style.top = "112px";
+  host.dispatchEvent(new Event("scroll", { bubbles: true }));
+  assert.ok(!movingTip.hasAttribute("data-open"), "moving the anchor must dismiss its tooltip immediately");
+  if (!reduced) assert.ok(movingTip.isConnected, "anchor-scroll dismissal keeps the complete tooltip exit");
+  await waitFor(() => !movingTip.isConnected, "anchor-scroll tooltip exit must settle");
   host.remove();
 }
 
