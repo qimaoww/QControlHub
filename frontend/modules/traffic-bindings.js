@@ -1,4 +1,5 @@
 import { trafficCardIdentity } from "./traffic-model.js";
+import { bindDialogBackdrop } from "./popup.js";
 export function createTrafficBindings({ state }, { bindTrafficForms, enableTrafficCardDrag }) {
   return ({ selectableAgents, filteredItems, orderedItems }, endpoints, resetCreate) => {
     bindTrafficForms(selectableAgents, endpoints);
@@ -7,7 +8,7 @@ export function createTrafficBindings({ state }, { bindTrafficForms, enableTraff
     });
     document.querySelectorAll("[data-traffic-status-dialog]").forEach(dialog => {
       dialog.querySelector("[data-traffic-status-close]").onclick = () => dialog.close();
-      dialog.onclick = event => { if (event.target === dialog) dialog.close(); };
+      bindDialogBackdrop(dialog);
     });
     const cardGrid = document.querySelector(".traffic-policy-grid");
     if (cardGrid && filteredItems.length > 1) {

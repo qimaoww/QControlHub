@@ -1,10 +1,12 @@
+import { enterSurface } from "./motion.js";
+
 const boundEvents = new WeakMap();
 
 const insertedMotionSelector = [
   ".qch-swap-panel",
-  ".task-event",
-  ".core-log-row",
   ".node-card",
+  ".traffic-policy-card",
+  ".user-account-card",
   ".service-card",
   ".client-access-node-card",
   ".access-control-card",
@@ -13,19 +15,6 @@ const insertedMotionSelector = [
   ".settings-version-card",
   ".template-card",
 ].join(",");
-
-function markInsertedMotion(node) {
-  if (node?.nodeType !== 1 || !node.matches(insertedMotionSelector)) {
-    return node;
-  }
-  node.classList.add("qch-reconcile-enter");
-  node.addEventListener(
-    "animationend",
-    () => node.classList.remove("qch-reconcile-enter"),
-    { once: true },
-  );
-  return node;
-}
 
 export function bindEvent(target, type, handler, options) {
   if (!target) return;
@@ -59,12 +48,26 @@ function nodeKey(node) {
     "data-access-agent",
     "data-live-agent",
     "data-live-engine",
+    "data-live-source",
+    "data-engine-select",
+    "data-preset-protocol",
+    "data-common-field",
     "data-archive-config",
     "data-dashboard-agent",
     "data-dashboard-task",
     "data-task-id",
     "data-task-status-filter",
     "data-core-log-agent",
+    "data-connection-agent",
+    "data-substore-agent",
+    "data-substore-target",
+    "data-user-select",
+    "data-quota-share",
+    "data-user-mobile-select",
+    "data-access-control-agent",
+    "data-filter-engine",
+    "data-node-tab",
+    "data-core-log-page-index",
     "data-context-traffic-agent",
     "data-ip-quality-agent",
     "data-inbound",
@@ -101,12 +104,17 @@ function compatible(current, fresh) {
 function syncAttributes(current, fresh, metrics) {
   const preserveOpen = current.tagName === "DETAILS" || current.tagName === "DIALOG";
   const preserveInert = current.classList?.contains("desktop-app") && current.inert;
+  const preserveRetiredDialog = current.tagName === "DIALOG" && !current.open && current.inert;
+  const preserveRetiredContent = current.getAttribute("data-motion-retired-content") != null;
   const freshNames = new Set(
     [...fresh.attributes].map((attribute) => attribute.name),
   );
   [...current.attributes].forEach((attribute) => {
     if (preserveOpen && attribute.name === "open") return;
-    if (preserveInert && attribute.name === "inert") return;
+    if (current.tagName === "DETAILS" && ["data-motion-disclosure", "data-motion-popup"].includes(attribute.name)) return;
+    if ((preserveInert || preserveRetiredDialog || preserveRetiredContent) && attribute.name === "inert") return;
+    if ((preserveRetiredDialog || preserveRetiredContent) && attribute.name === "aria-hidden") return;
+    if (preserveRetiredContent && attribute.name === "data-motion-retired-content") return;
     if (!freshNames.has(attribute.name)) {
       current.removeAttribute(attribute.name);
       metrics.updated += 1;
@@ -114,7 +122,8 @@ function syncAttributes(current, fresh, metrics) {
   });
   [...fresh.attributes].forEach((attribute) => {
     if (preserveOpen && attribute.name === "open") return;
-    if (preserveInert && attribute.name === "inert") return;
+    if ((preserveInert || preserveRetiredDialog || preserveRetiredContent) && attribute.name === "inert") return;
+    if ((preserveRetiredDialog || preserveRetiredContent) && attribute.name === "aria-hidden") return;
     if (current.getAttribute(attribute.name) !== attribute.value) {
       current.setAttribute(attribute.name, attribute.value);
       metrics.updated += 1;
@@ -163,11 +172,14 @@ function restoreControlState(element, state) {
 
 function reconcileChildren(current, fresh, metrics) {
   const existing = [...current.childNodes];
+  const existingNodes = new Set(existing);
   const used = new Set();
+  // Index identity once. A switch between distinct keyed log windows must
+  // not rescan every keyed row for an unkeyed fallback on each insertion.
+  const existingKeys = new Map(existing.map(child => [child, nodeKey(child)]));
+  const unkeyed = existing.filter(child => !existingKeys.get(child));
   const keyed = new Map(
-    existing
-      .map((child) => [nodeKey(child), child])
-      .filter(([key]) => key),
+    [...existingKeys].filter(([, key]) => key).map(([child, key]) => [key, child]),
   );
   const desired = [...fresh.childNodes].map((freshChild, index) => {
     const key = nodeKey(freshChild);
@@ -175,28 +187,36 @@ function reconcileChildren(current, fresh, metrics) {
     if (used.has(candidate)) candidate = null;
     if (!candidate) {
       const positional = existing[index];
-      if (!used.has(positional) && !nodeKey(positional) && compatible(positional, freshChild))
+      if (!used.has(positional) && !existingKeys.get(positional) && compatible(positional, freshChild))
         candidate = positional;
     }
     if (!candidate) {
-      candidate = existing.find(
+      candidate = unkeyed.find(
         (child) =>
           !used.has(child) &&
-          !nodeKey(child) &&
           compatible(child, freshChild),
       );
     }
     if (!candidate) {
       metrics.inserted += 1;
-      return markInsertedMotion(freshChild.cloneNode(true));
+      return freshChild.cloneNode(true);
     }
     used.add(candidate);
     return reconcileNode(candidate, freshChild, metrics);
   });
 
+  // A result notice owns its dismissal timer, not the polling markup. Keep
+  // it mounted through same-workspace refreshes so feedback is not lost.
+  const notice = current.classList?.contains("workspace-main")
+    ? existing.find(child => child.nodeType === 1 && child.getAttribute("data-spa-notice") != null) : null;
+  if (notice && !desired.includes(notice)) desired.unshift(notice);
   desired.forEach((child, index) => {
     const currentAtIndex = current.childNodes[index] || null;
     if (currentAtIndex !== child) current.insertBefore(child, currentAtIndex);
+    // Only the inserted branch fades. Logs and task polling stay immediate;
+    // descendants never receive a second entrance.
+    if (!existingNodes.has(child) && child.nodeType === 1 && child.matches(insertedMotionSelector))
+      enterSurface(child, { token: "--motion-fast" });
   });
   const desiredNodes = new Set(desired);
   [...current.childNodes].forEach((child) => {
@@ -234,14 +254,10 @@ function reconcileNode(current, fresh, metrics) {
   if (current.tagName === "DIALOG" && current.open && current.getAttribute("data-refresh-live") == null) return current;
   const state = controlState(current);
   const detailsOpen = current.tagName === "DETAILS" ? current.open : null;
-  const scrollTop = current.scrollTop;
-  const scrollLeft = current.scrollLeft;
   syncAttributes(current, fresh, metrics);
   reconcileChildren(current, fresh, metrics);
   restoreControlState(current, state);
   if (detailsOpen != null) current.open = detailsOpen;
-  if (scrollTop) current.scrollTop = scrollTop;
-  if (scrollLeft) current.scrollLeft = scrollLeft;
   return current;
 }
 
@@ -249,18 +265,23 @@ export function captureViewState(root, documentObject = document, windowObject =
   const active = root.contains(documentObject.activeElement)
     ? documentObject.activeElement
     : null;
-  const scrollers = [
-    root.matches?.(".workspace-main,[data-refresh-scroll]") ? root : null,
-    ...root.querySelectorAll(".workspace-main,[data-refresh-scroll]"),
-  ]
-    .filter(Boolean)
+  // Read scroll offsets before any DOM writes. Reading each changed row's
+  // offsets during reconciliation forces repeated layout on a cached switch.
+  // Keep arbitrary nested scrollers (including textareas), not just marked ones.
+  const scrollers = [root, ...root.querySelectorAll("*")]
     .map((element) => ({
       element,
       top: element.scrollTop,
       left: element.scrollLeft,
-    }));
+    }))
+    .filter(({ element, top, left }) => top || left || element.matches?.(".workspace-main,[data-refresh-scroll]"));
   return {
     active,
+    root,
+    // A new node/engine legitimately replaces its editor. Return focus to
+    // the matching selection launcher without transferring another editor's
+    // value or caret into this workspace.
+    selectionKey: active?.matches?.("a,button,select,summary") ? nodeKey(active) : "",
     selectionStart: active?.selectionStart,
     selectionEnd: active?.selectionEnd,
     selectionDirection: active?.selectionDirection,
@@ -288,6 +309,10 @@ export function restoreViewState(state, windowObject = window) {
         state.selectionDirection || "none",
       );
     }
+  } else if (state.selectionKey && state.root?.isConnected) {
+    const launcher = [...state.root.querySelectorAll("a,button,select,summary")]
+      .find(element => nodeKey(element) === state.selectionKey && !element.closest("[hidden],[inert],dialog:not([open])") && !element.disabled);
+    launcher?.focus({ preventScroll: true });
   }
   if (
     windowObject.scrollX !== state.windowX ||

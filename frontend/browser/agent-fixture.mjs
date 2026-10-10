@@ -183,7 +183,7 @@ if (mode === "logs-restore") {
     auto_refresh: false,
   }));
 }
-if (mode.startsWith("traffic-layout")) {
+if (mode.startsWith("traffic-layout") || mode.startsWith("motion")) {
   location.hash = "#traffic";
   setStorageAccount({ role: "admin" });
   accountStorage.setItem("qcontrolhub:node-card-order", JSON.stringify(["alpha", "delta", "bravo", "charlie"]));
@@ -244,7 +244,9 @@ if (mode.startsWith("traffic-layout")) {
     });
   }
 }
+if (mode.startsWith("motion")) location.hash = "#node-settings";
 const layoutConfig = engine => engine === "mihomo" ? "log-level: info\nlisteners:\n  - name: socks-in\n    type: socks\n    port: 1080\n    listen: 0.0.0.0\nrules:\n  - MATCH,DIRECT\n" : engine === "ss-rust" ? JSON.stringify({server:"0.0.0.0",server_port:8388,method:"aes-256-gcm",password:"demo-not-a-real-secret",mode:"tcp_and_udp"},null,2) : JSON.stringify({log:{loglevel:"warning"},dns:{servers:["1.1.1.1","8.8.8.8"]},inbounds:[{tag:"socks-in",listen:"127.0.0.1",...(engine==="xray"?{port:1080,protocol:"socks",settings:{auth:"noauth",udp:true}}:{listen_port:1080,type:"socks"})},{tag:"http-in",listen:"127.0.0.1",...(engine==="xray"?{port:8080,protocol:"http"}:{listen_port:8080,type:"http"})}],outbounds:[{tag:"direct",...(engine==="xray"?{protocol:"freedom"}:{type:"direct"})}],...(engine==="xray"?{routing:{domainStrategy:"AsIs",rules:[]}}:{route:{final:"direct"}})},null,2);
+if (mode.startsWith("motion")) testAPI.settings = { panel_name: "Motion preview", revision: 1, ui_font_scale: 100, default_agent_engines: ["mihomo", "sing-box"] };
 if (mode.startsWith("capabilities-settings")) {
   location.hash = "#settings-engines";
   testAPI.settings = { panel_name: "QControlHub Browser Smoke", panel_description: "可信远程编排", revision: 1, ui_font_scale: 100, default_agent_engines: ["mihomo", "sing-box"] };
@@ -298,7 +300,7 @@ window.fetch = async (input, options = {}) => {
   const method = String(options.method || (input instanceof Request ? input.method : "GET")).toUpperCase();
   testAPI.calls.push({ method, path, query: url.search });
   if (method === "GET" && path === "/agent-access") return json({ isolated: false, revision: 1, shares: [] });
-  if (mode.startsWith("traffic-layout")) {
+  if (mode.startsWith("traffic-layout") || mode.startsWith("motion")) {
     if (path === "/traffic-policies") return json(testAPI.trafficPolicies);
     if (path === "/traffic-endpoints") return json([]);
     if (path === "/traffic-endpoints/sync") {
@@ -337,6 +339,8 @@ window.fetch = async (input, options = {}) => {
       return json(path.endsWith("/config-snapshot")?{content:layoutConfig(task.engine)}:task);
     }
   }
+  if (mode.startsWith("motion") && method === "POST" && path === "/auth/login")
+    return json({ error: "test login failure" }, 401);
   if (!["GET", "HEAD", "OPTIONS"].includes(method))
     assert.equal(
       new Headers(options.headers).get("X-QControlHub-CSRF"),
@@ -371,6 +375,8 @@ window.fetch = async (input, options = {}) => {
       return json(task, 201);
     }
   }
+  if (mode.startsWith("motion") && method === "GET" && path === "/tasks")
+    return json(testAPI.tasks || []);
   if (method === "GET" && path === "/overview")
     return json(mode.startsWith("client-layout") || mode.startsWith("node-card-layout")
       ? { agents: testAPI.agents.length, agents_online: testAPI.agents.filter((agent) => agent.status === "online").length }
@@ -408,7 +414,8 @@ window.fetch = async (input, options = {}) => {
   }
   if (path === "/settings/deployment" && mode.startsWith("capabilities-settings"))
     return json({ secure_transport: true, database_tls_verified: true, config_encryption_configured: true, webhook_signing_configured: true, trusted_proxy_count: 1, control_plane_version: "preview", agent_package_version: "preview" });
-  if (method === "PUT" && path === "/settings" && mode.startsWith("capabilities-settings")) {
+  if (method === "PUT" && path === "/settings" && (mode.startsWith("capabilities-settings") || mode.startsWith("motion"))) {
+    if (testAPI.settingsGate) await testAPI.settingsGate;
     if (testAPI.settingsFailure) return json({ error: "settings save failed" }, 409);
     testAPI.settings = { ...JSON.parse(options.body), revision: testAPI.settings.revision + 1 };
     return json(testAPI.settings);
@@ -422,7 +429,7 @@ window.fetch = async (input, options = {}) => {
     }
     return json(mode === "empty" ? [] : testAPI.agents);
   }
-  if (method === "GET" && path === "/core-logs" && (mode === "logs" || mode === "logs-restore")) {
+  if (method === "GET" && path === "/core-logs" && (mode === "logs" || mode === "logs-restore" || mode.startsWith("motion"))) {
     const limit = Number(url.searchParams.get("limit") || 1000);
     const agent = url.searchParams.get("agent_id") || "alpha";
     if (testAPI.logGates?.[`${agent}:${limit}`]) await testAPI.logGates[`${agent}:${limit}`];
@@ -532,6 +539,7 @@ window.fetch = async (input, options = {}) => {
   if (method === "GET" && path.startsWith("/metrics/")) return json([]);
   if (method === "POST" && path === "/enrollment-tokens") {
     testAPI.lastEnrollmentRequest = JSON.parse(options.body);
+    if (testAPI.enrollmentGate) await testAPI.enrollmentGate;
     if (testAPI.enrollmentFailure) return json({ error: "temporary enrollment failure" }, 503);
     return json({ token: "browser-test-enrollment", name: "browser-node" });
   }

@@ -1,3 +1,4 @@
+import { cancelMotion, enterSurface } from "./motion.js";
 import { bindEvent } from "./refresh.js";
 import { bindProtocolOptionVisibility, bindServerPlanRegeneration, installGeneratedFieldButtons, readServerPlanInput } from "./server-plan-form.js";
 import { revealSelectedFields } from "./config-fields.js";
@@ -390,12 +391,15 @@ function bindAgentConfigPage(ctx, fieldsOnly = false) {
     const sections = [...workbench.querySelectorAll(".builder-sections > .builder-section")];
     if (!links.length || !sections.length) return;
     links[0].parentElement?.setAttribute("role", "tablist");
-    const activate = (id) => {
+    const activate = (id, animate = true) => {
       const selected = sections.find((section) => section.id === id) || sections[0];
       state.data.builderStep = selected.id;
       sections.forEach((section) => {
         const active = section === selected;
+        const reveal = active && section.hidden;
         section.hidden = !active;
+        if (!active) cancelMotion(section);
+        else if (reveal && animate) enterSurface(section, { token: "--motion-feedback" });
         section.setAttribute("role", "tabpanel");
         section.setAttribute("aria-hidden", active ? "false" : "true");
       });
@@ -419,7 +423,7 @@ function bindAgentConfigPage(ctx, fieldsOnly = false) {
       activate(links[next].dataset.builderStep);
       links[next].focus();
     }));
-    activate(state.data.builderStep || sections[0].id);
+    activate(state.data.builderStep || sections[0].id, false);
   });
 }
 

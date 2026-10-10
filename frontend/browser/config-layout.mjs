@@ -21,12 +21,18 @@ export async function testConfigLayoutRuntime({ testAPI }) {
               : workspace.querySelector("#live-config-form"));
         }, "legacy config link did not preserve node/core: " + hash);
       }
-      document.querySelector('[data-live-engine="sing-box"]').click();
+      const engineLauncher = document.querySelector('[data-live-engine="sing-box"]');
+      engineLauncher.focus(); engineLauncher.click();
       await waitFor(()=>document.querySelector('#live-config-form[data-engine="sing-box"]'),"top engine switch failed");
+      assert.equal(document.activeElement, document.querySelector('[data-live-engine="sing-box"]'), "replaced engine editor must retain selection launcher focus");
       assert.ok(location.hash.includes("engine=sing-box"),"engine switch not reflected in safe deep link");
       const input=document.querySelector("[data-code-input]");input.value+="\n";input.dispatchEvent(new Event("input",{bubbles:true}));
       const draft = input.value;
       const fileButtons = document.querySelectorAll("[data-config-file]");
+      input.focus(); input.setSelectionRange(1, 3); fileButtons[0].click();
+      assert.equal(input.selectionStart, 1, "same source file must retain the caret");
+      assert.equal(input.selectionEnd, 3);
+      assert.equal(input.closest(".code-editor-frame").getAnimations().length, 0, "same source file must not replay feedback");
       assert.ok(fileButtons.length >= 2,"shared/inbound buttons missing");
       assert.ok(fileButtons[0].classList.contains("is-dirty"),"edited common file is not marked unsaved");
       assert.ok(document.querySelector(".config-draft-summary").textContent.includes("1 个未保存"),"draft summary did not count the edited file");

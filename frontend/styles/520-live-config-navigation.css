@@ -5,7 +5,7 @@
 .live-config-workspace .live-config-version{padding:4px 8px;border:1px solid var(--line);border-radius:6px;color:var(--muted);font-size:calc(11px * var(--ui-font-scale));font-weight:500}
 .live-config-workspace>.editor-toolbar h2{margin:0;font-size:calc(20px * var(--ui-font-scale));line-height:1.4}
 .live-engine-bar{display:grid;grid-template-columns:repeat(4,minmax(0,150px));gap:8px;padding:12px 20px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);background:var(--surface)}
-.live-engine-tab{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:4px 8px;min-width:0;min-height:40px;box-sizing:border-box;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink-2);font:inherit;font-size:calc(13px * var(--ui-font-scale));line-height:1.4;font-weight:600;cursor:pointer;transition:background .15s,color .15s,border-color .15s}
+.live-engine-tab{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:4px 8px;min-width:0;min-height:40px;box-sizing:border-box;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink-2);font:inherit;font-size:calc(13px * var(--ui-font-scale));line-height:1.4;font-weight:600;cursor:pointer;transition:background var(--motion-fast),color var(--motion-fast),border-color var(--motion-fast)}
 .live-engine-tab:hover{background:var(--surface-2);border-color:var(--line-2);color:var(--ink)}
 .live-engine-tab.active{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
 .live-engine-status{display:inline-flex;align-items:center;gap:4px;font-size:calc(10px * var(--ui-font-scale));font-weight:500;color:var(--muted);white-space:nowrap}

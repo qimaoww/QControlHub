@@ -1,4 +1,5 @@
 import { bindEvent } from "./refresh.js";
+import { cancelPopupEntrance } from "./popup.js";
 import { hasTCPParameter, validateTCPAvailability, validateTCPSelection, systemBBRState, systemBBRActions, actionLabel, dialogID } from "./system-bbr-model.js";
 import { prepareTCPPreset } from "./system-bbr-presets.js";
 export function createSystemBBREditor({ api, state, can, notify, confirmAction }, { lifecycle, editable, render, systemBBR }) {
@@ -20,7 +21,13 @@ export function createSystemBBREditor({ api, state, can, notify, confirmAction }
     bindEvent(document.querySelector("[data-bbr-refresh]"), "click", () => systemBBR());
     document.querySelectorAll("[data-bbr-dialog-open]").forEach((button) => {
       bindEvent(button, "click", () => {
-        if (!state.confirmOpen) document.getElementById(button.dataset.bbrDialogOpen)?.showModal();
+        if (!state.confirmOpen) {
+          const dialog = document.getElementById(button.dataset.bbrDialogOpen);
+          // A fresh launch starts at the form actions even if the previous close
+          // is still painting. Reconciliation below retains the open draft scroll.
+          if (dialog && !dialog.open) dialog.querySelector(".bbr-dialog-body").scrollTop = 0;
+          dialog?.showModal();
+        }
       });
     });
     document.querySelectorAll("[data-bbr-dialog-close]").forEach((button) => {
@@ -35,6 +42,7 @@ export function createSystemBBREditor({ api, state, can, notify, confirmAction }
       if (dialog.open && !dialog.matches(":modal") && !state.confirmOpen) {
         dialog.close();
         dialog.showModal();
+        cancelPopupEntrance(dialog);
         if (dialog.contains(focused)) focused.focus({ preventScroll: true });
       }
       const outside = (event) => {

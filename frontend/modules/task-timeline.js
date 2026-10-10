@@ -1,4 +1,5 @@
 import { reconcileView } from "./refresh.js";
+import { cancelMotion, enterSurface } from "./motion.js";
 export function openResultTaskIds() {
     return new Set(
       [
@@ -29,12 +30,6 @@ export function reconcileTaskTimeline(timeline, taskCards) {
     const nextCards = freshCards.map((freshCard) => {
       const existingCard = existingCards.get(freshCard.dataset.taskId);
       if (existingCard) return reconcileView(existingCard, freshCard);
-      freshCard.classList.add("qch-reconcile-enter");
-      freshCard.addEventListener(
-        "animationend",
-        () => freshCard.classList.remove("qch-reconcile-enter"),
-        { once: true },
-      );
       return freshCard;
     });
 
@@ -116,5 +111,9 @@ export function setupTaskPagination(timeline) {
       rows.forEach((row) => (row.hidden = false));
       timeline.dataset.mobileExpanded = "true";
       loadMore.hidden = true;
+      cancelMotion(timeline);
+      enterSurface(timeline, { token: "--motion-feedback", id: "qch-selection" });
+      timeline.tabIndex = -1;
+      timeline.focus({ preventScroll: true });
     };
   }

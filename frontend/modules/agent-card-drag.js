@@ -1,3 +1,5 @@
+import { animateMotion, cancelMotion } from "./motion.js";
+
 // Card drop geometry, animation and reversible drag cleanup.
 
 export function nodeCardDropIndex(rects, pointer, grabOffset = { x: 0, y: 0 }) {
@@ -49,80 +51,56 @@ export function nodeCardDropIndex(rects, pointer, grabOffset = { x: 0, y: 0 }) {
 }
 
 export function animateNodeCardDrop(
-  items,
-  oldRects,
-  {
-    requestFrame = (callback) => requestAnimationFrame(callback),
-    cancelFrame = (frame) => cancelAnimationFrame(frame),
-    setTimer = (callback, delay) => setTimeout(callback, delay),
-    clearTimer = (timer) => clearTimeout(timer),
-    fallbackDelay = 240,
-    onSettled = () => {},
-  } = {},
+  items, oldRects, { animate = animateMotion, onSettled = () => {} } = {},
 ) {
-  let active = true;
-  let settled = false;
-  let frame = null;
-  let timer = null;
-  const animated = new Set();
-  const listeners = new Map();
-  const clear = (snap = false) => {
-    if (!active) return;
-    active = false;
-    if (frame != null) cancelFrame(frame);
-    if (timer != null) clearTimer(timer);
-    listeners.forEach((listener, item) =>
-      item.removeEventListener("transitionend", listener),
-    );
-    items.forEach((item) => {
-      if (snap) {
-        item.style.transition = "none";
-        item.style.transform = "";
-        void item.offsetWidth;
-      }
-      item.style.transition = "";
-      item.style.transform = "";
-    });
-    if (!settled) {
-      settled = true;
-      onSettled();
-    }
-  };
-  items.forEach((item) => {
-    const prev = oldRects.get(item);
-    if (!prev) return;
+  // Read all geometry before starting compositor animations. No forced layout
+  // per card, temporary transform styles, or transition listeners are needed.
+  const moves = items.map((item) => {
+    cancelMotion(item);
+    const previous = oldRects.get(item);
+    if (!previous) return null;
     const rect = item.getBoundingClientRect();
-    const dx = prev.left - rect.left;
-    const dy = prev.top - rect.top;
-    if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return;
-    item.style.transition = "none";
-    item.style.transform = `translate(${dx}px, ${dy}px)`;
-    void item.offsetWidth;
-    animated.add(item);
-  });
-  if (!animated.size) {
-    clear();
-    return () => {};
+    const dx = previous.left - rect.left, dy = previous.top - rect.top;
+    return Math.abs(dx) < 1 && Math.abs(dy) < 1 ? null : { item, dx, dy };
+  }).filter(Boolean);
+  let remaining = moves.length;
+  let settled = false;
+  const settle = () => {
+    if (settled) return;
+    settled = true;
+    onSettled();
+  };
+  if (!remaining) { settle(); return () => {}; }
+  const cancels = moves.map(({ item, dx, dy }) => animate(item, [
+    { transform: `translate(${dx}px, ${dy}px)` }, { transform: "none" },
+  ], { id: "qch-drop", onSettled: () => { if (!--remaining) settle(); } }));
+  return () => { cancels.forEach(cancel => cancel()); settle(); };
+}
+
+// Arrow keys provide the same order commit as dragging, without a gesture.
+export function moveCardByKey(event, grid, selector) {
+  const direction = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 }[event.key];
+  if (!direction) return null;
+  event.preventDefault();
+  event.stopPropagation();
+  const cards = [...grid.querySelectorAll(selector)];
+  const card = event.currentTarget.closest(selector), index = cards.indexOf(card);
+  const target = cards[index + direction];
+  if (!target) return null;
+  cards.forEach(cancelMotion);
+  const oldRects = new Map(cards.map(item => [item, item.getBoundingClientRect()]));
+  if (direction < 0) target.before(card); else target.after(card);
+  event.currentTarget.focus({ preventScroll: true });
+  let status = grid.parentElement.querySelector("[data-card-order-status]");
+  if (!status) {
+    status = document.createElement("span");
+    status.className = "visually-hidden";
+    status.dataset.cardOrderStatus = "";
+    status.setAttribute("role", "status");
+    grid.after(status);
   }
-  animated.forEach((item) => {
-    const listener = (event) => {
-      if (event.target !== item || event.propertyName !== "transform") return;
-      animated.delete(item);
-      if (!animated.size) clear();
-    };
-    listeners.set(item, listener);
-    item.addEventListener("transitionend", listener);
-  });
-  frame = requestFrame(() => {
-    frame = null;
-    if (!active) return;
-    animated.forEach((item) => {
-      item.style.transition = "";
-      item.style.transform = "";
-    });
-    timer = setTimer(() => clear(), fallbackDelay);
-  });
-  return () => clear(true);
+  status.textContent = `已移至第 ${index + direction + 1} 项，共 ${cards.length} 项`;
+  return { cards: [...grid.querySelectorAll(selector)], oldRects };
 }
 
 export function clearNodeCardDragState(

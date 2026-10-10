@@ -1,4 +1,5 @@
 import { bindEvent } from "./refresh.js";
+import { updateFeedback } from "./motion.js";
 import { agentShareStatus, formatSharedPorts, parseSharedPorts, selectedSharedEngines, sharedLimitBytes, sharedLimitGiB } from "./user-model.js";
 import { sharedEngineChoices } from "./engine-capabilities.js";
 
@@ -82,8 +83,7 @@ export function createAgentSharing(ctx, interactions) {
     };
     const report = (message) => {
       const output = dialog.querySelector("[data-sharing-error]");
-      output.textContent = message;
-      output.hidden = !message;
+      updateFeedback(output, message);
     };
     const lock = (saving) => {
       for (const control of form.elements) {

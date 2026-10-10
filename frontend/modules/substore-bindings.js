@@ -22,11 +22,20 @@ export function createSubStoreBindings(ctx, { lifecycle, subStoreSync, render, m
     document.querySelectorAll("[data-substore-target]").forEach((button) => {
       button.onclick = async () => {
         if (button.dataset.substoreTarget === lifecycle.activeTargetID) return;
+        const previousTarget = resource.target_id || "", data = state.data, epoch = state.navigationEpoch;
         lifecycle.activeTargetID = button.dataset.substoreTarget || "";
         lifecycle.pendingSelectionSave = null;
+        const grid = document.querySelector(".substore-agent-grid");
+        grid?.setAttribute("aria-busy", "true");
+        button.setAttribute("aria-busy", "true");
         try {
           await subStoreSync();
         } catch (error) {
+          if (data !== state.data || epoch !== state.navigationEpoch || state.route !== "substore-sync" ||
+              lifecycle.activeTargetID !== button.dataset.substoreTarget) return;
+          lifecycle.activeTargetID = previousTarget;
+          grid?.removeAttribute("aria-busy");
+          button.removeAttribute("aria-busy");
           notify(error.message, "error");
         }
       };
@@ -42,9 +51,6 @@ export function createSubStoreBindings(ctx, { lifecycle, subStoreSync, render, m
     bindEvent(document.querySelector("[data-substore-query]"), "input", (event) => {
       lifecycle.query = event.currentTarget.value;
       render();
-      const input = document.querySelector("[data-substore-query]");
-      input?.focus();
-      input?.setSelectionRange(lifecycle.query.length, lifecycle.query.length);
     });
     if (!can("settings.manage")) return;
 

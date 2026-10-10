@@ -32,7 +32,7 @@ export function createIPQualityCalendarView({ esc }) {
           <div class="ip-quality-calendar-popover" role="group" aria-label="历史检测日历">
             <header><button type="button" data-ip-quality-month="${previousMonth}" aria-label="上个月"${blocked || previousMonth < oldestMonth ? " disabled" : ""}>‹</button><strong>${esc(visibleMonth.slice(0, 4))} 年 ${Number(visibleMonth.slice(5))} 月</strong><button type="button" data-ip-quality-month="${nextMonth}" aria-label="下个月"${blocked || nextMonth > newestMonth ? " disabled" : ""}>›</button></header>
             <div class="ip-quality-calendar-week" aria-hidden="true">${["一", "二", "三", "四", "五", "六", "日"].map((day) => `<span>${day}</span>`).join("")}</div>
-            <div class="ip-quality-calendar-grid">${'<span aria-hidden="true"></span>'.repeat(offset)}${days}</div>
+            <div class="ip-quality-calendar-grid" data-motion-region="ip-quality-month" data-motion-key="${esc(visibleMonth)}">${'<span aria-hidden="true"></span>'.repeat(offset)}${days}</div>
             <p>${loading ? "正在读取检测日期…" : readFailed ? "日期读取失败，请刷新重试。" : dates.length ? "仅可选择有检测记录的日期" : "暂无检测记录"}</p>
           </div>
         </details>

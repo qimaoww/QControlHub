@@ -1,4 +1,5 @@
 import { bindEvent } from "./refresh.js";
+import { bindDialogBackdrop } from "./popup.js";
 
 import { trafficEndpointKey } from "./traffic-model.js";
 import { requestFromForm, resetTrafficCreateForm } from "./traffic-form-model.js";
@@ -55,9 +56,7 @@ export function createTrafficForms({ api, state, notify, confirmAction }, { filt
       createDialog.querySelectorAll("[data-traffic-create-close]").forEach((button) => {
         button.onclick = () => createDialog.close();
       });
-      createDialog.onclick = (event) => {
-        if (event.target === createDialog) createDialog.close();
-      };
+      bindDialogBackdrop(createDialog);
     }
     document.querySelectorAll("[data-traffic-agent-select]").forEach((select) => {
       select.onchange = () => {
@@ -76,9 +75,7 @@ export function createTrafficForms({ api, state, notify, confirmAction }, { filt
       dialog.querySelectorAll("[data-traffic-edit-close]").forEach((button) => {
         button.onclick = () => dialog.close();
       });
-      dialog.onclick = (event) => {
-        if (event.target === dialog) dialog.close();
-      };
+      bindDialogBackdrop(dialog);
     });
     bindEvent(document.querySelector("#traffic-policy-form"), "submit", async (event) => {
       event.preventDefault();

@@ -1,4 +1,5 @@
 import { bindEvent } from "./refresh.js";
+import { updateFeedback } from "./motion.js";
 
 import { createUserQuotaView } from "./user-quota-view.js";
 export function createUserQuota(ctx, { lifecycle, myQuota }) {
@@ -85,10 +86,10 @@ export function createUserQuota(ctx, { lifecycle, myQuota }) {
       if (activeInvitation?.data === data && activeInvitation.share.id === share.id) {
         const output = activeInvitation.dialog.querySelector("[data-invitation-error]");
         output.hidden = false;
-        output.querySelector("[role=alert]").textContent = error.message;
+        updateFeedback(output.querySelector("[role=alert]"), error.message);
       } else {
         const output = state.route === "my-quota" && document.querySelector("[data-quota-error]");
-        if (output) { output.textContent = error.message; output.hidden = false; }
+        if (output) updateFeedback(output, error.message);
         else notify(error.message, "error");
       }
     } finally {
