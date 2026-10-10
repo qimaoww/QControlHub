@@ -1,5 +1,6 @@
 import { protocolName } from "./traffic-model.js";
 import { bindDialogBackdrop } from "./popup.js";
+import { updateFeedback } from "./motion.js";
 export function createTrafficSyncDialog({ api, state, esc, engineName, notify }, { traffic }) {
   let trafficSyncPending = false;
   function openTrafficSync() {
@@ -32,7 +33,7 @@ export function createTrafficSyncDialog({ api, state, esc, engineName, notify },
       const all = list.querySelector("[data-sync-all]");
       if (all) { all.checked = count === candidates.length; all.indeterminate = count > 0 && count < candidates.length; }
     };
-    const showError = (message) => { errorBox.hidden = false; errorBox.className = "alert error"; errorBox.textContent = message; };
+    const showError = (message) => { errorBox.className = "alert error"; updateFeedback(errorBox, message); };
     const cleanup = () => {
       if (closed) return;
       closed = true;

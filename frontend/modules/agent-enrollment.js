@@ -1,6 +1,31 @@
 // Enrollment commands and node-directory dialogs own their modal lifecycle.
+import { cancelMotion, reducedMotion, retireSurface } from "./motion.js";
+let exitStyles;
+// A visual tail must not match document-level component/binding queries. Share
+// one parsed copy of the existing stylesheet inside an inert closed shadow tree.
+function isolateExit(wrap) {
+  if (reducedMotion() || !globalThis.CSSStyleSheet?.prototype.replaceSync || !wrap.attachShadow) return null;
+  try {
+    if (!exitStyles) {
+      const source = [...document.styleSheets].find(sheet =>
+        (sheet.href || "").split(/[?#]/, 1)[0].endsWith("/app.css"));
+      if (!source) return null;
+      exitStyles = new CSSStyleSheet();
+      exitStyles.replaceSync([...source.cssRules].map(rule => rule.cssText).join("\n"));
+    }
+    const host = document.createElement("div");
+    host.className = "motion-exit-host";
+    const shadow = host.attachShadow({ mode: "closed" });
+    shadow.adoptedStyleSheets = [exitStyles];
+    wrap.inert = true;
+    shadow.append(wrap);
+    document.body.append(host);
+    return host;
+  } catch { return null; }
+}
 export function createAgentEnrollment({ api, state, esc, engineName, notify, refreshAgentPage }) {
 let activeModal;
+let retiringModal;
 let popupRequest = 0;
 const requestIsCurrent = (allowRefresh = false) => {
   const request = ++popupRequest;
@@ -9,7 +34,8 @@ const requestIsCurrent = (allowRefresh = false) => {
 };
 function bindModalLifecycle(wrap, onClose) {
   popupRequest++;
-  activeModal?.();
+  retiringModal?.();
+  activeModal?.(false);
   const previousFocus = document.activeElement;
   const restoreEnrollmentEntry = previousFocus?.matches?.(
     "[data-open-enrollment]",
@@ -23,12 +49,12 @@ function bindModalLifecycle(wrap, onClose) {
   };
   const hasShell = Boolean(document.querySelector(".desktop-app"));
   const observer = new MutationObserver(() => {
-    if (!wrap.isConnected || hasShell && !document.querySelector(".desktop-app")) close();
+    if (!wrap.isConnected || hasShell && !document.querySelector(".desktop-app")) close(false);
     else lockBackground();
   });
   const previousOverflow = document.body.style.overflow;
   const routeHash = location.hash;
-  const navigate = () => { if (location.hash !== routeHash) close(); };
+  const navigate = () => { if (location.hash !== routeHash) close(false); };
   const timers = new Set();
   let closed = false;
   lockBackground();
@@ -44,7 +70,7 @@ function bindModalLifecycle(wrap, onClose) {
     // Closed details can retain layout boxes, but their content cannot be focused.
     !element.closest("details:not([open]) > :not(summary)"),
   );
-  const close = () => {
+  const close = (animate = true) => {
     if (closed) return;
     closed = true;
     popupRequest++;
@@ -58,7 +84,29 @@ function bindModalLifecycle(wrap, onClose) {
       if (root.isConnected) root.inert = inert;
     });
     document.body.style.overflow = previousOverflow;
-    wrap.remove();
+    if (animate && wrap.isConnected) {
+      const card = wrap.querySelector('[role="dialog"]');
+      const computed = getComputedStyle(card), layout = getComputedStyle(wrap);
+      const from = { opacity: computed.opacity, translate: computed.translate };
+      wrap.style.setProperty("--motion-exit-opacity", getComputedStyle(wrap, "::before").opacity);
+      wrap.style.padding = layout.padding;
+      wrap.style.alignItems = layout.alignItems;
+      wrap.className = "motion-retired-modal";
+      // Retired visuals must not be rediscovered by bindings or async callbacks.
+      [wrap, ...wrap.querySelectorAll("*")].forEach(element => {
+        [...element.attributes].forEach(attribute => {
+          if (attribute.name.startsWith("data-") || ["id", "aria-modal"].includes(attribute.name)) element.removeAttribute(attribute.name);
+        });
+      });
+      card.setAttribute("role", "presentation");
+      const host = isolateExit(wrap);
+      if (host) {
+        wrap.setAttribute("aria-hidden", "true");
+        const stop = () => cancelMotion(card);
+        retiringModal = stop;
+        retireSurface(host, { surface: card, from, onSettled: () => { if (retiringModal === stop) retiringModal = null; } });
+      } else wrap.remove();
+    } else wrap.remove();
     const restoreTarget = previousFocus instanceof HTMLElement && previousFocus.isConnected
       ? previousFocus
       : restoreEnrollmentEntry
@@ -183,7 +231,7 @@ async function showAgentDirectoryDialog() {
       button.disabled = true;
       try {
         await api(`/agents/${encodeURIComponent(button.dataset.deleteDirectoryNode)}`, { method: "DELETE" });
-        if (!wrap.isConnected) return;
+        if (!wrap.isConnected || wrap.inert) return;
         const name = button.dataset.nodeName || "";
         button.closest("article")?.remove();
         notify(name ? `节点 ${name} 已删除` : "节点已删除");
@@ -193,7 +241,7 @@ async function showAgentDirectoryDialog() {
           notify(`节点列表刷新失败：${error.message}`, "error");
         }
       } catch (error) {
-        if (!wrap.isConnected) return;
+        if (!wrap.isConnected || wrap.inert) return;
         button.disabled = false;
         notify(error.message, "error");
       }
@@ -252,7 +300,7 @@ function showEnrollmentDialog({ tokenRows, tokenCount, onDelete, onSubmit }) {
       button.disabled = true;
       try {
         await onDelete(button.dataset.deleteEnrollment);
-        if (!wrap.isConnected) return;
+        if (!wrap.isConnected || wrap.inert) return;
         button.closest("article")?.remove();
         const list = wrap.querySelector("[data-enrollment-history-list]");
         const count = list?.querySelectorAll("article").length || 0;
@@ -262,7 +310,7 @@ function showEnrollmentDialog({ tokenRows, tokenCount, onDelete, onSubmit }) {
           list.innerHTML = '<p class="enrollment-history-empty">暂无添加记录</p>';
         notify("添加节点凭据已删除");
       } catch (error) {
-        if (!wrap.isConnected) return;
+        if (!wrap.isConnected || wrap.inert) return;
         button.disabled = false;
         notify(error.message, "error");
       }
@@ -275,9 +323,9 @@ function showEnrollmentDialog({ tokenRows, tokenCount, onDelete, onSubmit }) {
     submit.disabled = true;
     try {
       const form = new FormData(event.currentTarget);
-      await onSubmit(String(form.get("name") || "").trim(), form.get("admin_hidden") === "on", close, () => wrap.isConnected);
+      await onSubmit(String(form.get("name") || "").trim(), form.get("admin_hidden") === "on", close, () => wrap.isConnected && !wrap.inert);
     }
-    catch (error) { if (wrap.isConnected) { submit.disabled = false; notify(error.message, "error"); } }
+    catch (error) { if (wrap.isConnected && !wrap.inert) { submit.disabled = false; notify(error.message, "error"); } }
   };
   wrap.querySelector("input").focus();
 }
@@ -307,12 +355,12 @@ function showCommand(command, onClose, heading = "复制 QAgent 部署命令") {
     try {
       await navigator.clipboard.writeText(command);
     } catch {
-      if (!wrap.isConnected) return;
+      if (!wrap.isConnected || wrap.inert) return;
       commandInput.select();
       document.execCommand("copy");
       commandInput.setSelectionRange(0, 0);
     }
-    if (!wrap.isConnected) return;
+    if (!wrap.isConnected || wrap.inert) return;
     const copyLabel = copyButton.querySelector("[data-copy-label]");
     copyButton.classList.add("copied");
     copyLabel.textContent = "已复制";

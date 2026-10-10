@@ -21,7 +21,13 @@ export function createSystemBBREditor({ api, state, can, notify, confirmAction }
     bindEvent(document.querySelector("[data-bbr-refresh]"), "click", () => systemBBR());
     document.querySelectorAll("[data-bbr-dialog-open]").forEach((button) => {
       bindEvent(button, "click", () => {
-        if (!state.confirmOpen) document.getElementById(button.dataset.bbrDialogOpen)?.showModal();
+        if (!state.confirmOpen) {
+          const dialog = document.getElementById(button.dataset.bbrDialogOpen);
+          // A fresh launch starts at the form actions even if the previous close
+          // is still painting. Reconciliation below retains the open draft scroll.
+          if (dialog && !dialog.open) dialog.querySelector(".bbr-dialog-body").scrollTop = 0;
+          dialog?.showModal();
+        }
       });
     });
     document.querySelectorAll("[data-bbr-dialog-close]").forEach((button) => {

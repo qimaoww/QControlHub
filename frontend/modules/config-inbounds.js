@@ -1,8 +1,8 @@
 import { bindEvent, reconcileView } from "./refresh.js";
 import { bindConfigOutbounds } from "./config-outbounds.js";
 import { bindConfigMenu } from "./config-menu.js";
-import { syncSelectionMotion } from "./motion.js";
-import { bindDialogBackdrop } from "./popup.js";
+import { syncSelectionMotion, updateFeedback } from "./motion.js";
+import { bindDialogBackdrop, closePopup } from "./popup.js";
 import { composeConfigWorkspaceToolbar } from "./config-workspace-toolbar.js";
 // Reuse the actual preset form and field editors, not a second implementation
 // of protocol options. Only the requested editor is mounted: no second source
@@ -170,7 +170,7 @@ export function bindConfigInbounds(ctx) {
     return true;
   };
   const open = async (kind, trigger) => {
-    menu.open = false;
+    closePopup(menu);
     if (busy || dialog || !current()) return;
     const mutation = isMutation(kind), commonAction = kind.startsWith("common-");
     if (commonAction && (!commonSelected() || !saved)) return;
@@ -263,7 +263,7 @@ export function bindConfigInbounds(ctx) {
               await commit(result, null);
             } catch (error) {
               if (!active()) return;
-              body.querySelector("[data-inbound-error]").textContent = `${error.message}${error.status === 409 || !error.status ? " 请重新读取核对配置后再提交。" : ""}`;
+              updateFeedback(body.querySelector("[data-inbound-error]"), `${error.message}${error.status === 409 || !error.status ? " 请重新读取核对配置后再提交。" : ""}`);
               if (error.deployPreflight || error.status && error.status < 500 && error.status !== 409)
                 buttons.forEach(item => { item.disabled = false; });
             } finally { delete opened.dataset.saving; }

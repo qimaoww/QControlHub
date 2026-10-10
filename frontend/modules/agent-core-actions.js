@@ -1,3 +1,4 @@
+import { prepareDisclosure } from "./popup.js";
 import { bindEvent } from "./refresh.js";
 
 export function developmentSourceVisible(engine, channel) {
@@ -165,11 +166,10 @@ async function submitTask(payload) {
     };
   });
   document.querySelectorAll("[data-open-version-form]").forEach((button) => {
+    const drawer = button.closest(".service-card")?.querySelector(".version-drawer");
+    button.setAttribute("aria-expanded", String(Boolean(drawer?.open)));
     button.onclick = () => {
-      const drawer = button
-        .closest(".service-card")
-        ?.querySelector(".version-drawer");
-      if (drawer) drawer.open = true;
+      if (drawer) { prepareDisclosure(drawer); drawer.open = true; button.setAttribute("aria-expanded", "true"); }
     };
   });
   document.querySelectorAll(".core-version-form").forEach((form) => {

@@ -14,9 +14,14 @@ export function createMotionController({
   const active = new Map();
   let preference;
   let stopObserving;
+  const contains = (root, element) => {
+    for (let node = element; node; node = node.getRootNode?.().host)
+      if (root === node || root.contains(node)) return true;
+    return false;
+  };
   const cancel = (root) => {
     for (const [element, settle] of [...active])
-      if (!root || root === element || root.contains(element)) settle();
+      if (!root || contains(root, element)) settle();
   };
   const preferenceChanged = () => { if (preference.matches) cancel(); };
   const watch = () => {
@@ -36,7 +41,7 @@ export function createMotionController({
     stopObserving = null;
   };
   const animate = (element, keyframes, {
-    token = "--motion-base", fallback = 200, id = "qch-surface",
+    token = "--motion-base", fallback = 200, id = "qch-surface", easingToken = "--motion-ease-out", fill = "none",
     onSettled = () => {},
   } = {}) => {
     active.get(element)?.();
@@ -50,8 +55,8 @@ export function createMotionController({
     const duration = Number.isFinite(parsed)
       ? Math.max(0, parsed * (value.endsWith("ms") ? 1 : 1000)) : fallback;
     const animation = element.animate(keyframes, {
-      duration, easing: computed.getPropertyValue("--motion-ease-out").trim() || "ease-out",
-      fill: "none",
+      duration, easing: computed.getPropertyValue(easingToken).trim() || "ease-out",
+      fill,
     });
     animation.id = id;
     let settled = false;
@@ -84,8 +89,40 @@ export function animateMotion(element, keyframes, options) {
 export function enterSurface(element, options) {
   return animateMotion(element, [{ opacity: .55 }, { opacity: 1 }], options);
 }
+export function updateFeedback(element, message) {
+  if (!element) return;
+  const text = String(message || "");
+  const changed = element.hidden || element.textContent !== text;
+  element.textContent = text;
+  element.hidden = !text;
+  if (!text) cancelMotion(element);
+  else if (changed) enterSurface(element, { token: "--motion-feedback", id: "qch-feedback" });
+}
 export function reducedMotion() {
   return Boolean(globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches);
+}
+
+// Callers commit close/dismissal first. This inert, non-announcing surface owns
+// only its short visual tail; cancellation, navigation and lost events remove it.
+export function retireSurface(element, { surface = element, from, onSettled = () => {} } = {}) {
+  const computed = getComputedStyle(surface);
+  const start = from || { opacity: computed.opacity, translate: computed.translate };
+  element.inert = true;
+  element.setAttribute("aria-hidden", "true");
+  element.dataset.motionExiting = "";
+  cancelMotion(element);
+  surface.getAnimations().forEach(animation => animation.cancel());
+  const navigate = () => cancelMotion(surface);
+  window.addEventListener("hashchange", navigate);
+  const distance = computed.getPropertyValue("--motion-exit-distance").trim() || "4px";
+  return animateMotion(surface, [start, { opacity: 0, translate: `0 ${distance}` }], {
+    token: "--motion-exit", fallback: 120, id: "qch-exit", easingToken: "--motion-ease-in", fill: "forwards",
+    onSettled: () => {
+      window.removeEventListener("hashchange", navigate);
+      element.remove();
+      onSettled();
+    },
+  });
 }
 
 const selectionScopes = new WeakMap();

@@ -30,10 +30,52 @@ summary>i{transition:transform var(--motion-base) var(--motion-ease-out),color v
 :is(.runtime-drawer,.version-drawer,.advanced-studio,.config-hierarchy-menu,.config-diff-drawer)[open]>summary>i{transform:rotate(45deg)}
 dialog[open]{animation:qch-dialog-enter var(--motion-base) var(--motion-ease-out)}
 dialog[open]::backdrop{animation:qch-fade-enter var(--motion-feedback) ease}
+/* Native top-layer retention supplies an exit without delaying close(), focus
+   restoration or request completion. Unsupported browsers keep instant close. */
+@supports(transition-behavior:allow-discrete){
+  .page-node-settings .core-version-panel[data-motion-disclosure]{transition:display var(--motion-base) allow-discrete}
+  .page-node-settings .core-version-panel[data-motion-disclosure]:not([open]){pointer-events:none}
+  dialog{opacity:0;translate:0 var(--motion-exit-distance);pointer-events:none;transition:opacity var(--motion-exit) var(--motion-ease-in),translate var(--motion-exit) var(--motion-ease-in),display var(--motion-exit) allow-discrete,overlay var(--motion-exit) allow-discrete}
+  dialog[open]{opacity:1;translate:0 0;pointer-events:auto;animation:none;transition-duration:var(--motion-base);transition-timing-function:var(--motion-ease-out)}
+  dialog::backdrop{opacity:0;pointer-events:none;transition:opacity var(--motion-exit) ease,display var(--motion-exit) allow-discrete,overlay var(--motion-exit) allow-discrete}
+  dialog[open]::backdrop{opacity:1;pointer-events:auto;animation:none;transition-duration:var(--motion-feedback)}
+  @starting-style{dialog[open]{opacity:0;translate:0 var(--motion-distance)}dialog[open]::backdrop{opacity:0}}
+}
+/* The browser owns reversal and the native open state. Only user-operated
+   disclosures opt in, so initially open/restored content never fades again. */
+@supports selector(details::details-content){
+  details::details-content{opacity:0;content-visibility:hidden}
+  details[open]::details-content{opacity:1;content-visibility:visible}
+  details[data-motion-disclosure]::details-content{opacity:0;transition:opacity var(--motion-exit) var(--motion-ease-in),content-visibility var(--motion-exit) allow-discrete}
+  details[data-motion-disclosure][open]::details-content{opacity:1;transition-duration:var(--motion-feedback),0s;transition-timing-function:var(--motion-ease-out)}
+  @starting-style{details[data-motion-disclosure][open]::details-content{opacity:0}}
+  details[data-motion-disclosure]:not([open])>:not(summary){pointer-events:none}
+  @supports(interpolate-size:allow-keywords){
+    details[data-motion-disclosure]:not([data-motion-popup]):not(.core-version-panel)::details-content{interpolate-size:allow-keywords;block-size:0;overflow:clip;transition:opacity var(--motion-exit) var(--motion-ease-in),block-size var(--motion-base) var(--motion-ease-out),content-visibility var(--motion-base) allow-discrete,overflow var(--motion-base) steps(1,start) allow-discrete}
+    details[data-motion-disclosure]:not([data-motion-popup]):not(.core-version-panel)[open]::details-content{block-size:auto;overflow:visible;transition:opacity var(--motion-feedback) var(--motion-ease-out),block-size var(--motion-base) var(--motion-ease-out),content-visibility 0s allow-discrete,overflow var(--motion-base) steps(1,end) allow-discrete}
+    @starting-style{details[data-motion-disclosure]:not([data-motion-popup]):not(.core-version-panel)[open]::details-content{block-size:0}}
+    /* This drawer hides its summary too. Its outer height is the single layout
+       owner, so the summary does not disappear in a final one-frame jump. */
+    .page-node-settings .core-version-panel[data-motion-disclosure]{interpolate-size:allow-keywords;block-size:0;overflow:clip;transition:block-size var(--motion-base) var(--motion-ease-out),display var(--motion-base) allow-discrete,overflow var(--motion-base) steps(1,start) allow-discrete}
+    .page-node-settings .core-version-panel[data-motion-disclosure][open]{block-size:auto;overflow:visible;transition-timing-function:var(--motion-ease-out),var(--motion-ease-out),steps(1,end)}
+    @starting-style{.page-node-settings .core-version-panel[data-motion-disclosure][open]{block-size:0}}
+  }
+}
 /* Animate the scrim independently so its opacity never multiplies the card. */
 .modal-backdrop{isolation:isolate;background:transparent;backdrop-filter:none}
 .modal-backdrop::before{content:"";position:absolute;inset:0;z-index:-1;background:rgba(8,10,17,.62);backdrop-filter:blur(4px);animation:qch-fade-enter var(--motion-feedback) ease;pointer-events:none}
 .modal-backdrop>[role=dialog]{animation:qch-dialog-enter var(--motion-base) var(--motion-ease-out)}
+.motion-retired-modal{position:fixed;z-index:300;inset:0;display:grid;place-items:center;padding:24px;isolation:isolate;pointer-events:none}
+.motion-exit-host{position:fixed;inset:0;z-index:300;pointer-events:none}
+.motion-retired-modal::before{content:"";position:absolute;inset:0;z-index:-1;background:rgba(8,10,17,.62);backdrop-filter:blur(4px);pointer-events:none;animation:qch-scrim-exit var(--motion-exit) ease both}
+@keyframes qch-scrim-exit{from{opacity:var(--motion-exit-opacity,1)}to{opacity:0}}
+[data-motion-exiting],[data-motion-exiting] *{pointer-events:none!important}
+@media(max-width:820px){.motion-retired-modal{padding:12px}}
+/* Checked shells and disabled controls share the same color/opacity rhythm;
+   native checks remain immediate and switches keep their existing thumb. */
+:is(button,input,select,textarea,fieldset){transition-property:background-color,border-color,color,box-shadow,opacity}
+fieldset{transition:opacity var(--motion-fast) ease}
+:is(.node-card-select>span,.release-channel-options label,.shared-engine-options label,.settings-toggle,.core-capability-row,.preset-option-heading){transition:background-color var(--motion-fast) ease,border-color var(--motion-fast) ease,color var(--motion-fast) ease,box-shadow var(--motion-fast) ease,opacity var(--motion-fast) ease}
 .sync-state i,.context-live i,.trust-badge i{transition:background-color var(--motion-fast) ease,color var(--motion-fast) ease}
 :is(.sync-state,.context-live,.trust-badge):not(.inactive) i{box-shadow:0 0 0 4px color-mix(in srgb,currentColor 12%,transparent)}
 /* Ghosts follow the pointer exactly; entrance/hover motion never owns their
@@ -41,5 +83,7 @@ dialog[open]::backdrop{animation:qch-fade-enter var(--motion-feedback) ease}
 :is(.node-card-ghost,.traffic-card-ghost){animation:none!important;transition:none!important}
 @media(prefers-reduced-motion:reduce){
   *,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}
+  dialog::backdrop{animation:none!important;transition:none!important}
+  details::details-content{transition:none!important}
   :is(.button,.core-action,.service-version-toggle,.node-card-open,.task-inline-action,.client-parameter-open):active{translate:none}
 }

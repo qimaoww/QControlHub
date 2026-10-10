@@ -104,12 +104,17 @@ function compatible(current, fresh) {
 function syncAttributes(current, fresh, metrics) {
   const preserveOpen = current.tagName === "DETAILS" || current.tagName === "DIALOG";
   const preserveInert = current.classList?.contains("desktop-app") && current.inert;
+  const preserveRetiredDialog = current.tagName === "DIALOG" && !current.open && current.inert;
+  const preserveRetiredContent = current.getAttribute("data-motion-retired-content") != null;
   const freshNames = new Set(
     [...fresh.attributes].map((attribute) => attribute.name),
   );
   [...current.attributes].forEach((attribute) => {
     if (preserveOpen && attribute.name === "open") return;
-    if (preserveInert && attribute.name === "inert") return;
+    if (current.tagName === "DETAILS" && ["data-motion-disclosure", "data-motion-popup"].includes(attribute.name)) return;
+    if ((preserveInert || preserveRetiredDialog || preserveRetiredContent) && attribute.name === "inert") return;
+    if ((preserveRetiredDialog || preserveRetiredContent) && attribute.name === "aria-hidden") return;
+    if (preserveRetiredContent && attribute.name === "data-motion-retired-content") return;
     if (!freshNames.has(attribute.name)) {
       current.removeAttribute(attribute.name);
       metrics.updated += 1;
@@ -117,7 +122,8 @@ function syncAttributes(current, fresh, metrics) {
   });
   [...fresh.attributes].forEach((attribute) => {
     if (preserveOpen && attribute.name === "open") return;
-    if (preserveInert && attribute.name === "inert") return;
+    if ((preserveInert || preserveRetiredDialog || preserveRetiredContent) && attribute.name === "inert") return;
+    if ((preserveRetiredDialog || preserveRetiredContent) && attribute.name === "aria-hidden") return;
     if (current.getAttribute(attribute.name) !== attribute.value) {
       current.setAttribute(attribute.name, attribute.value);
       metrics.updated += 1;

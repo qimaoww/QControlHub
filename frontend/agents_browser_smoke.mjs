@@ -10,7 +10,7 @@ const root = dirname(fileURLToPath(import.meta.url));
 const productionCSP = (await readFile(join(root, "nginx.conf"), "utf8"))
   .match(/add_header Content-Security-Policy "([^"]+)" always;/)?.[1];
 assert.ok(productionCSP, "browser smoke must read the production content security policy");
-const html = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/assets/app.css"></head><body><div id="app"><div class="boot">测试载入中</div></div><script type="module" src="/assets/agents_browser_runtime.mjs"></script></body></html>`;
+const html = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/assets/app.css?v=motion-smoke"></head><body><div id="app"><div class="boot">测试载入中</div></div><script type="module" src="/assets/agents_browser_runtime.mjs"></script></body></html>`;
 
 const mime = (path) =>
   path.endsWith(".css")

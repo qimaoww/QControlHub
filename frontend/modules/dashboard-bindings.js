@@ -1,5 +1,5 @@
 import { utcMonth } from "./dashboard-model.js";
-import { bindDialogBackdrop } from "./popup.js";
+import { bindDialogBackdrop, closePopup } from "./popup.js";
 export function createDashboardBindings({ state, notify }, { panelMetrics, dashboard }) {
   return ({ trafficYear, trafficMonth }) => {
   panelMetrics.mount();
@@ -40,7 +40,7 @@ export function createDashboardBindings({ state, notify }, { panelMetrics, dashb
     };
     const selectMonth = async (value) => {
       if (value === state.data.dashboardTrafficMonth) {
-        trafficMonthPicker.open = false;
+        closePopup(trafficMonthPicker);
         trafficMonthPicker.querySelector("summary").focus({ preventScroll: true });
         return;
       }
@@ -51,7 +51,7 @@ export function createDashboardBindings({ state, notify }, { panelMetrics, dashb
       const hint = document.querySelector(".dashboard-traffic-title small");
       chart?.setAttribute("aria-busy", "true");
       if (hint) { hint.textContent = "UTC 自然日 · 正在读取…"; hint.setAttribute("role", "status"); }
-      trafficMonthPicker.open = false;
+      closePopup(trafficMonthPicker);
       trafficMonthPicker.querySelector("summary").focus({ preventScroll: true });
       try {
         await dashboard({ overview: state.data.overview });

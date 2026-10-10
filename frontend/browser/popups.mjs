@@ -2,6 +2,7 @@ import { assert, delay, waitFor } from "./assertions.mjs";
 import { createAgentEnrollment } from "../modules/agent-enrollment.js";
 import { bindConfigMenu } from "../modules/config-menu.js";
 import { cancelPopupEntrance } from "../modules/popup.js";
+import { checkNativeExit, checkDisclosureMotion, checkCoreDisclosure, checkRouteCoverage } from "./surface-motion.mjs";
 
 const settle = async () => { await delay(320); };
 const escape = element => element.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
@@ -35,10 +36,17 @@ export async function testPopupRuntime({ mode, testAPI }, preview) {
     pointer(card, "pointerdown", bounds.left + 12, bounds.top + 12); click(wrap, 0, 0);
     assert.ok(wrap.isConnected, "a drag from modal content must not dismiss it");
     escape(document.activeElement);
-    assert.equal(wrap.isConnected, false);
+    if (!reduced) {
+      assert.equal(wrap.inert, true, "closing immediately retires custom modal interaction");
+      assert.equal(wrap.getAttribute("aria-hidden"), "true");
+    } else assert.equal(wrap.isConnected, false, "reduced-motion custom close removes immediately");
+    assert.equal(document.querySelector(".modal-backdrop"), null);
     assert.equal(root.inert, false);
     assert.equal(document.body.style.overflow, overflow);
     assert.equal(document.activeElement, launcher, "Escape restores launcher focus");
+    if (!reduced) assert.ok(card.getAnimations().some(animation => animation.id === "qch-exit"));
+    await settle();
+    assert.equal(wrap.isConnected, false, "visual exit releases the retired surface");
   }
   for (let i = 0; i < 3; i++) {
     launcher.focus(); launcher.click();
@@ -69,6 +77,7 @@ export async function testPopupRuntime({ mode, testAPI }, preview) {
     "restoring a native modal never replays entrance");
   quota.close();
   await settle();
+  await checkNativeExit(quota, quotaTrigger, reduced);
 
   // Real configuration menu handlers, including a same-DOM refresh/rebind.
   const host = document.createElement("div");
@@ -77,9 +86,9 @@ export async function testPopupRuntime({ mode, testAPI }, preview) {
   const menu = host.querySelector("details"), summary = menu.querySelector("summary"), content = menu.querySelector("[role=menu]");
   bindConfigMenu(menu); summary.focus(); summary.click(); await delay(25);
   assert.ok(menu.open);
-  assert.equal(menu.getAnimations().length, 0, "menu launcher must not fade with the panel");
+  assert.equal(getComputedStyle(menu).opacity, "1", "menu launcher must not fade with the panel");
   assert.equal(summary.getAttribute("aria-expanded"), "true");
-  if (!reduced) assert.ok(content.getAnimations().some(a => a.id === "qch-disclosure"));
+  if (!reduced) assert.ok(Number(getComputedStyle(menu, "::details-content").opacity) < 1, "dynamic menu reveal missing");
   bindConfigMenu(menu);
   assert.ok(menu.open, "rebind retains an open configuration menu");
   menu.querySelector("button").focus(); escape(document.activeElement);
@@ -90,6 +99,7 @@ export async function testPopupRuntime({ mode, testAPI }, preview) {
   summary.focus(); summary.click(); await delay(25);
   host.querySelector("[data-outside-popup]").focus(); assert.equal(menu.open, false, "focus leaving menu dismisses it");
   host.remove();
+  await checkDisclosureMotion(document.querySelector(".workspace-main"), reduced);
   const more = document.querySelector(".mobile-account-menu");
   if (mode.includes("mobile")) {
     more.querySelector("summary").focus(); more.open = true; await delay(25);
@@ -104,7 +114,7 @@ export async function testPopupRuntime({ mode, testAPI }, preview) {
   const monthSummary = month.querySelector("summary");
   monthSummary.focus(); monthSummary.click(); await delay(25);
   assert.ok(month.open);
-  assert.equal(month.getAnimations().length, 0);
+  assert.equal(getComputedStyle(month).opacity, "1");
   month.querySelector("button").focus(); escape(document.activeElement);
   assert.equal(month.open, false); assert.equal(document.activeElement, monthSummary);
 
@@ -155,4 +165,6 @@ export async function testPopupRuntime({ mode, testAPI }, preview) {
   await settle();
   assert.equal(document.querySelector("dialog:modal,.modal-backdrop"), null);
   if (reduced) assert.equal(document.getAnimations().length, 0);
+  await checkCoreDisclosure(reduced);
+  await checkRouteCoverage(reduced);
 }

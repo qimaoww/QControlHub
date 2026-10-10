@@ -1,8 +1,9 @@
 import { bindEvent } from "./refresh.js";
 import { configJSONMembers } from "./config-files.js";
 import { bindConfigMenu } from "./config-menu.js";
-import { bindDialogBackdrop } from "./popup.js";
+import { bindDialogBackdrop, closePopup } from "./popup.js";
 import { diagnosticError } from "./errors.js";
+import { updateFeedback } from "./motion.js";
 import { formatConfigContent } from "./code-format.js";
 import { bindOutboundPresets } from "./outbound-presets.js";
 
@@ -187,7 +188,7 @@ export function bindConfigOutbounds({ navigation, api, agent, engine, saved, cur
   update();
 
   triggers.forEach(trigger => bindEvent(trigger, "click", async () => {
-    menu.open = false;
+    closePopup(menu);
     if (!current() || dialog || trigger.disabled || !writable() || !selectedInbound()) return;
     if (dirty()) { notify("配置源码有未保存修改，请先保存，再操作出站。", "error"); return; }
     const inbound = { ...selectedInbound() }, operation = trigger.dataset.outboundAction;
@@ -329,8 +330,7 @@ export function bindConfigOutbounds({ navigation, api, agent, engine, saved, cur
         } catch (error) {
           if (!active()) return;
           uncertain = submitted && (!error.status || error.status === 409 || error.status >= 500);
-          errorBox.textContent = `${diagnosticError(error.message)}${uncertain ? " 草稿已保留，请关闭弹窗并重新读取、核对保存结果后再提交。" : ""}`;
-          errorBox.hidden = false;
+          updateFeedback(errorBox, `${diagnosticError(error.message)}${uncertain ? " 草稿已保留，请关闭弹窗并重新读取、核对保存结果后再提交。" : ""}`);
         } finally {
           saving = false;
           status.textContent = "";

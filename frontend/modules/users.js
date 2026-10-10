@@ -3,6 +3,7 @@ import { createUserAllocations } from "./user-allocations.js";
 import { createUserAccountEditor } from "./user-account-editor.js";
 import { createUserBindings } from "./user-bindings.js";
 import { createUserQuota } from "./user-quota.js";
+import { updateFeedback } from "./motion.js";
 export { userPermissions, parseSharedPorts, formatSharedPorts, sharedPortsLabel, selectedSharedEngines, sharedLimitBytes, sharedLimitGiB, agentShareStatus, mergeUserAllocation } from "./user-model.js";
 
 export function installUsers(ctx) {
@@ -14,7 +15,7 @@ export function installUsers(ctx) {
   const report = (error, element) => {
     if (error?.name === "AbortError" || !element?.isConnected) return;
     const output = element.querySelector("[data-user-error]");
-    if (output) { output.textContent = error.message; output.hidden = false; }
+    if (output) updateFeedback(output, error.message);
     else notify(error.message, "error");
   };
 

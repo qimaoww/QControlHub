@@ -103,7 +103,8 @@ export async function testAgentEnrollmentActions({ testAPI }) {
   );
   assert.equal(secondRecordDialog.querySelector("[data-command]").value, recordCommand);
   secondRecordDialog.querySelector("[data-close]").click();
-  recordsDialog.querySelector("[data-close]").click();
+  assert.equal(recordsDialog.isConnected, false, "superseded enrollment surface must be removed");
+  assert.equal(document.querySelector(".modal-backdrop"), null, "closing the command leaves no active modal");
   location.hash = "#dashboard";
   await waitFor(() => document.querySelector(".dashboard-head"), "路由离开后未完成刷新");
   location.hash = "#node-settings";

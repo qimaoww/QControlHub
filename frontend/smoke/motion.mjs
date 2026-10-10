@@ -61,4 +61,10 @@ export async function run() {
   b.calls.at(-1).oncancel();
   assert.equal(controller.activeCount(), 0, "external cancellation releases ownership");
   assert.equal(observers, 0);
+  const shadowHost = {};
+  b.getRootNode = () => ({ host: shadowHost });
+  animate(b);
+  controller.cancel({ contains: node => node === shadowHost });
+  assert.equal(controller.activeCount(), 0, "container cancellation crosses an isolated exit shadow boundary");
+  assert.equal(timers.size, 0);
 }

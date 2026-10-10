@@ -13,14 +13,17 @@ overrides their legacy timings and focus treatments.
 | --- | --- | --- |
 | Color, border, hover and inserted card | `--motion-fast`, 120 ms | Stable bounds; inserted branch fades once |
 | Result and disclosure | `--motion-feedback`, 160 ms | Brief opacity feedback on an actual change |
+| Dialog, disclosure and notice exit | `--motion-exit`, 120 ms | Non-interactive visual tail; state/focus commit immediately |
 | Dialog, rail and card landing | `--motion-base`, 200 ms | One reveal or transform owner |
 | Login, first workspace and route/view change | `--motion-slow`, 280 ms | One workspace opacity fade; no nested stagger |
 | Pending request / running task | `--motion-loading`, 1000 ms | Only genuine pending work can loop |
 
 Spatial easing is `--motion-ease-out`. Dialog displacement is 6 px, using
 individual `translate` so existing positioning transforms remain intact.
-Color transitions use `ease`. Closing, deletion, and operation submission are
-immediate: business work never waits for an animation.
+Color transitions use `ease`; exits use `--motion-ease-in` and a 4 px dialog
+offset. Closing, deletion, and operation submission commit immediately:
+business work never waits for an animation. Native CSS discrete transitions
+and inert retired surfaces provide visual exits without delaying focus or locks.
 
 `modules/motion.js` reads the CSS tokens for native browser animations. Each
 animation releases its timer, callbacks, media listener, and removal observer on
@@ -67,7 +70,13 @@ an initially open/restored panel does not animate inside a route entrance.
 Cards use color/elevation on hover; pointer ghosts and FLIP exclusively own
 card transforms. Metric/progress width remains a small, bounded layout
 transition; it is disabled for reduced motion. Rail width is the other retained
-layout transition and does not change the workspace grid tracks.
+layout transition and does not change the workspace grid tracks. User-operated
+in-flow disclosures now also interpolate their height for 200 ms, entirely in
+CSS; they restore visible overflow at completion. Positioned menus fade only.
+
+The follow-up [six-column coverage checklist](MOTION-COVERAGE.md) closes 82
+page/component/scenario rows, including retained immediate/static responses
+with their design reasons. It covers all 18 route entries and shared children.
 
 ## Popup inventory and lifecycle
 
@@ -75,8 +84,8 @@ layout transition and does not change the workspace grid tracks.
 | --- | --- | --- |
 | Native detail and edit dialogs | Dashboard daily traffic; client parameter/display; traffic create/quota/status/sync; Sub-Store settings/targets/delete; user account/allocation/invitation/sharing; region picker; TCP editor/parameters; configuration inbound/outbound/common/history/diff/access | Shared 200 ms surface reveal and independent 160 ms native backdrop. Close and native focus restoration are immediate. Existing busy guards, unsaved-change confirmation, request invalidation and native focus trapping remain authoritative. Gesture-aware backdrop dismissal is shared by existing dismissible traffic/client/dashboard/config dialogs; padding and a gesture starting inside content cannot dismiss them. |
 | Custom modal and command surfaces | Add node, enrollment records, deployment command, administrator node directory in `agent-enrollment` | Independent scrim pseudo-element keeps the original dim/blur without multiplying the content fade. One active surface per controller; focus enters immediately and remains trapped. Escape, actual outside gesture, route departure, logout, or external removal release background inertness, overflow, observers, listeners and owned timers. Stale create/command/directory responses cannot reopen a departed or closed popup. |
-| Menus and calendars | Configuration inbound/outbound/tools menus; mobile More menu; dashboard month picker; IPQuality calendar | Only the revealed panel fades for 160 ms; the launcher stays still. Escape restores launcher focus; outside pointer/focus dismisses the popup. Configuration rebind retains its open state. Month selection returns focus to the summary before refresh. Menu positioning and calendar date rules remain unchanged. |
-| Inline drawers and disclosures | Runtime/version management, config advanced/diff sections, task results, traffic accounting, IPQuality detail sections and enrollment history | Focused user reveals fade content without fading the summary. Initially open/restored sections stay still; closing cancels active content motion immediately. No height animation or delayed hiding. |
+| Menus and calendars | Configuration inbound/outbound/tools menus; mobile More menu; dashboard month picker; IPQuality calendar | Only the revealed panel fades for 160 ms in / 120 ms out; the launcher stays still. Closing content is inert and aria-hidden immediately; reopening restores its previous attributes. Escape restores launcher focus; outside pointer/focus dismisses the popup. Configuration rebind retains its open state. Month selection returns focus to the summary before refresh. Menu positioning and calendar date rules remain unchanged. |
+| Inline drawers and disclosures | Runtime/version management, config advanced/diff sections, task results, traffic accounting, IPQuality detail sections and enrollment history | One native details-content owner covers all children, with 160 ms enter, 120 ms fade out and bounded 200 ms height reversal. Initially open/restored sections stay still. Open state changes immediately; no JavaScript height measurement or end-event business dependency. |
 | Confirmation and result feedback | Shared confirmation dialog, global success/error notice, login errors, deployment and settings status | Superseded/external confirmation closes settle their callers; identical notices do not replay. Results stay readable under reduced motion. Error messages retain their existing dismissal behavior. |
 | Browser-owned popups | Native select options, date controls, password manager, and title hints | Preserve browser/platform presentation and accessibility. CSS styles the launcher and focus state; it does not attempt to animate system popup contents. |
 
@@ -84,8 +93,8 @@ layout transition and does not change the workspace grid tracks.
 Native modal restoration after TCP reconciliation cancels the new CSS entrance,
 so a background update cannot masquerade as another user opening. Native
 dialogs remain native, including their top layer and focus behavior. Closing
-surfaces commit immediately instead of leaving a fading interactive layer or
-delaying a save/navigation behind an end event.
+surfaces commit immediately; any visual tail is inert and pointer-transparent.
+Saves and navigation do not wait behind an animation event.
 
 ## Selection and filter inventory
 
@@ -177,8 +186,14 @@ Started from clean worktrees on latest `main` (`a035b2b9`) and created
 PostgreSQL 17 test database: module smoke, all 70 Chromium modes, source/style
 and repository policy checks, installer/quick-start checks, vet, and all Go
 packages. The Go frontend package also reran the browser suite successfully
-(334.966 s). The frozen initial stylesheet hash contract and `git diff --check`
+(409.387 s in this follow-up). The frozen initial stylesheet hash contract and `git diff --check`
 passed. No required check was blocked by the environment.
+
+The final exit hardening was additionally verified with the eight motion and
+popup modes: an inert retired surface holds zero opacity if its finish event
+is lost, then the bounded fallback removes it. Module smoke and generated-style
+checks were repeated on that final snapshot. The route sweep in the popup modes
+visits all 18 entries in both themes (144 visits across four modes).
 
 Manual Chromium inspection covered desktop drag/navigation and both themes,
 plus dark reduced-motion phone portrait (375 x 812) and landscape (844 x 390).
@@ -237,6 +252,11 @@ screen for inspection.
    the screen-reader position announcement. On mobile, repeat with touch.
 4. Open/close quota and confirmation dialogs rapidly; press Escape. Check the
    backdrop, focus restoration, and readable final content.
+   Open Add node and close/reopen it during the short exit. Open a node detail,
+   press Version, use its Collapse summary, then press Version again before the
+   drawer finishes closing. Focus should return to Version and no closing
+   content should accept clicks or keyboard focus. The follow-up 7.8-second
+   recording is `output/playwright/surface-motion-review.mp4`.
 5. Edit settings, select part of the text, and dispatch a same-route refresh
    (`window.dispatchEvent(new HashChangeEvent("hashchange"))` in DevTools).
    Check input, selection, focus and scroll. Watch background node/log refresh

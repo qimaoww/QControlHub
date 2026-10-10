@@ -1,4 +1,5 @@
 import { bindEvent } from "./refresh.js";
+import { closePopup, prepareDisclosure } from "./popup.js";
 
 // Both configuration menus use the same disclosure, focus and keyboard rules.
 export function bindConfigMenu(menu) {
@@ -9,11 +10,12 @@ export function bindConfigMenu(menu) {
   const setOpen = open => {
     if (open) menu.parentElement.querySelectorAll(".config-inbound-menu").forEach(other => {
       if (other !== menu) {
-        other.open = false;
+        closePopup(other);
         other.querySelector("summary").setAttribute("aria-expanded", "false");
       }
     });
-    menu.open = open;
+    if (open) { prepareDisclosure(menu); menu.open = true; }
+    else closePopup(menu);
     summary.setAttribute("aria-expanded", String(open));
     if (open) {
       const list = menu.querySelector('[role="menu"]'), bounds = menu.getBoundingClientRect();

@@ -1,4 +1,5 @@
 import { bindConfigMenu } from "./config-menu.js";
+import { closePopup } from "./popup.js";
 
 // One source toolbar owns contextual actions; secondary workspace tools live
 // in the header, outside the editing and submission flow.
@@ -37,7 +38,7 @@ export function composeConfigWorkspaceToolbar({ can, container, form, navigation
   const menu = tools.querySelector("details");
   bindConfigMenu(menu);
   menu.addEventListener("click", event => {
-    if (event.target.closest('[role="menuitem"]')) menu.open = false;
+    if (event.target.closest('[role="menuitem"]')) closePopup(menu);
   });
   container.querySelector(".editor-toolbar-state").append(tools);
   return tools;

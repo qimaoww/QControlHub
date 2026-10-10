@@ -1,4 +1,4 @@
-import { cancelMotion, enterSurface } from "./motion.js";
+import { cancelMotion, enterSurface, retireSurface } from "./motion.js";
 import { bindEvent } from "./refresh.js";
 import { renderNotice } from "./shell-feedback-view.js";
 import { errorMessage } from "./errors.js";
@@ -10,6 +10,7 @@ function notify(message, tone = "success") {
   if (tone === "error") message = errorMessage(message);
   const main = document.querySelector(".workspace-main");
   if (!main) return;
+  main.querySelectorAll("[data-motion-exiting]").forEach(element => cancelMotion(element));
   const notice =
     main.querySelector(":scope > [data-spa-notice]") ||
     document.createElement("div");
@@ -22,14 +23,17 @@ function notify(message, tone = "success") {
   notice.setAttribute("role", tone === "error" ? "alert" : "status");
   renderNotice(notice, message, tone);
   if (!notice.isConnected) main.prepend(notice);
-  notice.querySelector(".notice-close").onclick = () => {
+  const dismiss = () => {
     clearTimeout(noticeTimer);
     noticeTimer = null;
-    cancelMotion(notice);
-    notice.remove();
+    notice.removeAttribute("data-spa-notice");
+    notice.removeAttribute("data-refresh-key");
+    notice.removeAttribute("role");
+    retireSurface(notice);
   };
+  notice.querySelector(".notice-close").onclick = dismiss;
   if (changed) enterSurface(notice, { token: "--motion-feedback" });
-  if (tone !== "error") noticeTimer = setTimeout(() => notice.remove(), 5000);
+  if (tone !== "error") noticeTimer = setTimeout(dismiss, 5000);
 }
 
 function confirmAction(message, label = "确认继续", options = {}) {
