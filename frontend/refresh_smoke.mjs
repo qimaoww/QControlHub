@@ -129,6 +129,7 @@ class FakeElement {
   matches(selector) {
     return selector.split(",").some((part) => {
       const value = part.trim();
+      if (value === "*") return true;
       if (value === "[data-refresh-scroll]")
         return this.getAttribute("data-refresh-scroll") != null;
       if (value === ".workspace-main")

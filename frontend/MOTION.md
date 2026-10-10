@@ -206,6 +206,15 @@ The input driver runs only for the four actual drag suites. Popup and selection
 suites retain focus emulation and use the normal result deadline, avoiding a
 shorter input timeout while waiting for a suite that publishes no gestures.
 
+The CI log-switch budget also exposed repeated layout reads during DOM
+reconciliation. Existing node keys are indexed once, and all scroll offsets
+are captured before DOM writes, then restored afterward. This preserves
+arbitrary nested scrollers and editor state while keeping the existing 500 ms
+switch budget. A focused local cached switch measured 64 ms. The unrelated
+Alpine real-service fixture now waits for the separately published supervisor
+and child metadata to pass the complete existing binding validation; five real
+OpenRC startup/stop iterations passed. Production process validation is unchanged.
+
 Manual Chromium inspection covered desktop drag/navigation and both themes,
 plus dark reduced-motion phone portrait (375 x 812) and landscape (844 x 390).
 Both phone layouts had no horizontal overflow and no active animations.

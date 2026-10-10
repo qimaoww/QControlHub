@@ -3,6 +3,7 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -192,6 +193,22 @@ func waitForOpenRCChildPID(t *testing.T, service string, within time.Duration) i
 	}
 	t.Fatalf("OpenRC child PID metadata did not appear for %s", service)
 	return 0
+}
+
+func waitForOpenRCServiceProcess(t *testing.T, service string, within time.Duration) openRCServiceProcessIdentity {
+	t.Helper()
+	deadline := time.Now().Add(within)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		identity, err := boundOpenRCServiceProcess(context.Background(), service)
+		if err == nil {
+			return identity
+		}
+		lastErr = err
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("OpenRC supervised process metadata did not become ready for %s: %v", service, lastErr)
+	return openRCServiceProcessIdentity{}
 }
 
 // OpenRC publishes its PID before entering the supervisor loop. A stop in

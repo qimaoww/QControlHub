@@ -189,3 +189,9 @@ accessibility assertions remain. Log budget failures include measured timings
 without changing limits. Popup and selection suites use the normal result
 deadline; only the four suites publishing real drag gestures run the input
 driver. Production motion and timings are unchanged.
+
+The merge review additionally fixes log-switch layout work: cache node keys and
+read all scroll offsets before writes, preserving arbitrary nested scrollers.
+The existing 500 ms cached-switch budget remains; a focused local switch
+measured 64 ms. Five real OpenRC startup/stop iterations passed in Alpine after
+the CI fixture was changed to await complete validated process metadata.

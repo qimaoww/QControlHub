@@ -174,10 +174,12 @@ function reconcileChildren(current, fresh, metrics) {
   const existing = [...current.childNodes];
   const existingNodes = new Set(existing);
   const used = new Set();
+  // Index identity once. A switch between distinct keyed log windows must
+  // not rescan every keyed row for an unkeyed fallback on each insertion.
+  const existingKeys = new Map(existing.map(child => [child, nodeKey(child)]));
+  const unkeyed = existing.filter(child => !existingKeys.get(child));
   const keyed = new Map(
-    existing
-      .map((child) => [nodeKey(child), child])
-      .filter(([key]) => key),
+    [...existingKeys].filter(([, key]) => key).map(([child, key]) => [key, child]),
   );
   const desired = [...fresh.childNodes].map((freshChild, index) => {
     const key = nodeKey(freshChild);
@@ -185,14 +187,13 @@ function reconcileChildren(current, fresh, metrics) {
     if (used.has(candidate)) candidate = null;
     if (!candidate) {
       const positional = existing[index];
-      if (!used.has(positional) && !nodeKey(positional) && compatible(positional, freshChild))
+      if (!used.has(positional) && !existingKeys.get(positional) && compatible(positional, freshChild))
         candidate = positional;
     }
     if (!candidate) {
-      candidate = existing.find(
+      candidate = unkeyed.find(
         (child) =>
           !used.has(child) &&
-          !nodeKey(child) &&
           compatible(child, freshChild),
       );
     }
@@ -253,14 +254,10 @@ function reconcileNode(current, fresh, metrics) {
   if (current.tagName === "DIALOG" && current.open && current.getAttribute("data-refresh-live") == null) return current;
   const state = controlState(current);
   const detailsOpen = current.tagName === "DETAILS" ? current.open : null;
-  const scrollTop = current.scrollTop;
-  const scrollLeft = current.scrollLeft;
   syncAttributes(current, fresh, metrics);
   reconcileChildren(current, fresh, metrics);
   restoreControlState(current, state);
   if (detailsOpen != null) current.open = detailsOpen;
-  if (scrollTop) current.scrollTop = scrollTop;
-  if (scrollLeft) current.scrollLeft = scrollLeft;
   return current;
 }
 
@@ -268,16 +265,16 @@ export function captureViewState(root, documentObject = document, windowObject =
   const active = root.contains(documentObject.activeElement)
     ? documentObject.activeElement
     : null;
-  const scrollers = [
-    root.matches?.(".workspace-main,[data-refresh-scroll]") ? root : null,
-    ...root.querySelectorAll(".workspace-main,[data-refresh-scroll]"),
-  ]
-    .filter(Boolean)
+  // Read scroll offsets before any DOM writes. Reading each changed row's
+  // offsets during reconciliation forces repeated layout on a cached switch.
+  // Keep arbitrary nested scrollers (including textareas), not just marked ones.
+  const scrollers = [root, ...root.querySelectorAll("*")]
     .map((element) => ({
       element,
       top: element.scrollTop,
       left: element.scrollLeft,
-    }));
+    }))
+    .filter(({ element, top, left }) => top || left || element.matches?.(".workspace-main,[data-refresh-scroll]"));
   return {
     active,
     root,
