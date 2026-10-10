@@ -1,3 +1,4 @@
+import { removePresented } from "./presence-motion.js";
 // Build feedback with text nodes so server messages and node names stay inert.
 export function renderNotice(notice, message, tone) {
   const icon = document.createElement("span");
@@ -12,6 +13,6 @@ export function renderNotice(notice, message, tone) {
   close.className = "notice-close";
   close.setAttribute("aria-label", "关闭提示");
   close.textContent = "×";
-  close.onclick = () => notice.remove();
+  close.onclick = () => removePresented(notice);
   notice.replaceChildren(icon, text, close);
 }

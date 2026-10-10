@@ -1,3 +1,4 @@
+import { updateFeedback } from "./presence-motion.js";
 import { liveConfigEditorState } from "./live-config-state.js";
 import { diagnosticError } from "./errors.js";
 import { agentPresenceMarkup } from "./agent-presence.js";
@@ -89,17 +90,17 @@ export function createLiveConfigView({ can, esc, engineName, conciseVersion, she
   if (emptyManaged) {
     const hint = document.createElement("p");
     hint.className = "config-install-hint";
-    hint.textContent = `${engineName(engine)} 未安装；提交“增加入站”时自动安装最新稳定版，切换版本请到节点设置。`;
+    updateFeedback(hint, `${engineName(engine)} 未安装；提交“增加入站”时自动安装最新稳定版，切换版本请到节点设置。`);
     workspaceElement.querySelector(".live-config-details").after(hint);
   } else if (source?.cached) {
     const hint = document.createElement("p");
     hint.className = "config-install-hint";
-    hint.textContent = "最近 600 秒内已校验的节点快照；手动刷新及部署前核验会跳过缓存。";
+    updateFeedback(hint, "最近 600 秒内已校验的节点快照；手动刷新及部署前核验会跳过缓存。");
     workspaceElement.querySelector(".live-config-details").after(hint);
   } else if (source?.saved) {
     const hint = document.createElement("p");
     hint.className = "config-install-hint";
-    hint.textContent = "已保存配置，部署成功后在节点生效。";
+    updateFeedback(hint, "已保存配置，部署成功后在节点生效。");
     workspaceElement.querySelector(".live-config-details").after(hint);
   }
 

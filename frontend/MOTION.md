@@ -60,8 +60,20 @@ Offscreen rows, telemetry, clocks, logs and identical polling results stay quiet
 ## Implementation ownership
 
 - `motion.js`: shared native animation ownership, retargeting from current paint,
-  first-result readiness, feedback and bounded inert exits. One removal observer
+  first-result readiness and bounded inert exits. One removal observer
   and preference/visibility listener exist only while animations are active.
+- `presence-motion.js`: conditional fields and prompts share complete entry/exit,
+  painted-state reversal and sibling reflow. Unchanged text is quiet. A sparse
+  text observer covers changed button labels and semantic server feedback,
+  without observing native values, checked state, caret, clocks or geometry.
+- `interaction-feedback.js`: delegated pointer/focus title hints and native
+  constraint failures use authored animated feedback. Tips reverse on refocus,
+  stay in the top layer without taking focus, and restore native metadata on
+  dismissal. Validity still blocks invalid submissions; corrections retire the
+  error without changing the draft/caret. Same-page polling retains these messages.
+- `paint-snapshot.js`: interrupted descendant animations freeze their currently
+  painted styles inside retiring pages, cards, fields and destroyed dialogs.
+  A closed modal cannot replay its headings/footer or flash an inner message.
 - `workspace-motion.js`: canvas/sibling choreography, outgoing route feedback,
   context sidebar reveal, moving mounted dock highlight and immediate accessibility
   retirement for tabs. Fast API responses retain outgoing workspace paint in an
@@ -76,13 +88,15 @@ Offscreen rows, telemetry, clocks, logs and identical polling results stay quiet
   polling performs no list motion measurements. Motion ownership survives refresh.
 - `popup.js` and CSS: native dialogs/details own entrance, exit and rapid reversal;
   custom modal business locks release immediately, with a separate visual tail.
-  Allocation editors that immediately clear their form retire a complete paint
+  Region, in/outbound, sharing, invitation, access-rule, sync and allocation
+  editors that immediately clear their form retire a complete paint
   copy, rather than animating an emptied dialog. Footer containers remain fixed
   to avoid covering the scrollable body.
 - Drag handlers: keyboard reversals capture positions before cancelling the
   previous landing. Pointer ghosts follow native mouse/touch input directly.
 - `task-timeline.js`: changed task state animates its badge; output/clock polling
-  preserves the mounted row, open result and scroll anchor.
+  preserves the mounted row, open result and scroll anchor. New/removed task cards
+  use the same insertion, retirement and membership-only reflow as other cards.
 
 Close, delete, submit and request completion commit immediately. Retired visuals
 are inert, non-announcing and pointer-transparent. Navigation, removal, reduced
@@ -117,7 +131,9 @@ The paired clip covers page transitions, sidebar open/close/reversal, custom
 modal enter/exit/rapid reopening, mouse dragging, rapid keyboard reordering and
 an initial connection response delayed by 900 ms. The mobile clip adds bottom
 navigation, popup reversal, tab exits and the version disclosure. The desktop
-clip also reverses a route during a slow request. No screenshots
+clip also reverses a route during a slow request and shows authored title tips,
+country search empty/ready feedback, complete destroyed-dialog close and copy
+notice dismissal. No screenshots
 are used as animation acceptance evidence.
 
 ## Reproduce

@@ -1,3 +1,4 @@
+import { updateFeedback } from "./presence-motion.js";
 import { taskRenderSignature } from "./task-model.js";
 import { openResultTaskIds, captureTaskAnchor, reconcileTaskTimeline, restoreTaskAnchor, setupTaskPagination } from "./task-timeline.js";
 import { createTaskView } from "./task-view.js";
@@ -58,7 +59,7 @@ export function installTasks(ctx) {
     if (syncFilters && existingTaskPage) {
       existingTaskPage.querySelector(".task-timeline")?.setAttribute("aria-busy", "true");
       const label = existingTaskPage.querySelector("[data-task-refresh-label]");
-      if (label) label.textContent = "正在应用筛选…";
+      if (label) updateFeedback(label, "正在应用筛选…");
     }
     const currentTimeline = background
       ? existingTaskPage?.querySelector(".task-timeline")
@@ -104,7 +105,7 @@ export function installTasks(ctx) {
         status.classList.add("poll-error");
         status.title = error.message;
         const label = status.querySelector("[data-task-refresh-label]");
-        if (label) label.textContent = "刷新失败，保留上次数据";
+        if (label) updateFeedback(label, "刷新失败，保留上次数据");
       }
       scheduleTaskRefresh(
         state.data.settings?.task_poll_interval_ms || 1000,

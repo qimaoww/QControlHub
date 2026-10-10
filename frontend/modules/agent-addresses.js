@@ -1,3 +1,4 @@
+import { setVisible, updateFeedback } from "./presence-motion.js";
 // Public-address selection and incremental dual-stack display updates.
 
 function parseCanonicalIPv4(value) {
@@ -377,7 +378,7 @@ export function updatePublicIPDisplays(root, metrics, labels = {}, features = []
         : `.public-ip-row[data-ip-family="${row.cls}"]`;
       const line = container.querySelector(selector);
       if (!line) continue;
-      line.hidden = !row.value;
+      setVisible(line, row.value);
       if (line.dataset) line.dataset.ipSource = row.source;
       const code = line.querySelector("code");
       if (code) {
@@ -394,13 +395,12 @@ export function updatePublicIPDisplays(root, metrics, labels = {}, features = []
       if (copy) {
         copy.dataset.copyIp = row.value || "";
         copy.title = row.value ? `复制 ${row.label} 地址` : "暂无地址";
-        copy.hidden = !row.value;
+        setVisible(copy, row.value);
         copy.setAttribute("aria-label", `复制 ${row.label} 公网地址 ${row.value || ""}`);
       }
     }
   }
   for (const note of root.querySelectorAll("[data-node-connection-address]")) {
-    note.textContent = connectionNote;
-    note.hidden = !connectionNote;
+    updateFeedback(note, connectionNote);
   }
 }

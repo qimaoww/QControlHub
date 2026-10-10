@@ -114,15 +114,6 @@ export function enterSurface(element, options) {
     { opacity: 1, translate: "0 0", scale: "1" },
   ], { defer: true, ...options });
 }
-export function updateFeedback(element, message) {
-  if (!element) return;
-  const text = String(message || "");
-  const changed = element.hidden || element.textContent !== text;
-  element.textContent = text;
-  element.hidden = !text;
-  if (!text) cancelMotion(element);
-  else if (changed) enterSurface(element, { token: "--motion-feedback", id: "qch-feedback" });
-}
 export function reducedMotion() {
   return Boolean(globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches);
 }

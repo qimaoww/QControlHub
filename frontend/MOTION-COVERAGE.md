@@ -3,7 +3,9 @@
 Revision after merged PR #255 (`bdfa007b`). This inventory describes the current
 implementation; the old "retained tiny fade / instant exit" decisions have been
 replaced by coordinated visible motion. Aliases and redirects share their target
-surface. Quiet polling and native field values keep immediate readable feedback.
+surface. Quiet polling and native field values keep immediate readable feedback. The
+concrete trigger audit below includes conditional fields, title/validity prompts,
+copy results and destructively closed dialogs, as requested in the follow-up.
 
 ## Page inventory
 
@@ -59,6 +61,39 @@ mounted target when no actual page change occurs.
 | Polling / enrichment / timers | Quiet DOM reconciliation | Scroll, editor caret/selection, forms, open results and focus preserved | M, S, logs pressure suite |
 | Rapid reversal / cancellation / departure | Current-value retargeting; native CSS reversal; pending route resumes original paint | List reversal releases old owners before target reads; bounded cleanup on readiness + duration + delay; hidden document, removal and preference cancel ownership | M frame continuity/slow-route reversal, P, module ownership suite |
 | Reduced motion | No CSS/WAAPI motion, stagger, press geometry or retained tail | Full selected colors, labels, status, focus, busy/disabled semantics and progress values | M/P/S reduced modes; route matrix |
+
+## Concrete interaction audit
+
+Every trigger below uses the shared control feedback and its page/result motion;
+conditional content also uses complete presence. Initial nested fields are owned
+by their entering page/dialog. They do not start a competing second animation.
+
+| Scope / source modules | Concrete triggers and messages connected |
+| --- | --- |
+| Shell, login, appearance, feedback | All dock/context navigation and aliases; sidebar hover/focus/reversal and selected marker; mobile More; theme toggle; busy login, rejected credentials; confirmation replacement/accept/cancel/Escape; notice success/error/close/timeout; every dynamically mounted native title hint (pointer/focus/blur/Escape) and constraint-validation message (invalid/corrected input) |
+| Dashboard and IP quality | Month/year/date/calendar menus and close; completed historical result, empty/failure/unavailable states; node/report selection, refresh/detection pending/result and report dialogs |
+| Nodes: workspace, addresses, Komari, core actions | Card/detail selection, Agent/core/monitor tabs; selected/deployed/permission states; IPv4/IPv6/address visibility, connection notes and address-copy results; monitoring URL/secret fields; stable/development/custom version sources; version drawers, installation/upgrade/start/stop/restart/uninstall/deploy confirmations and task results |
+| Nodes: enrollment, batch, regions, sharing | Enrollment/open/close/copy; directory/command panels and deleted entries; batch eligibility/count, engine/version/custom fields, submitting/retry/error/results and dismissed rows; region hint, modal, search/count/empty/ready, selection, save/error and destroyed close; recipient add/remove/reinvite, sharing save/reload/error and destroyed close |
+| Configuration: preset bindings/server-plan form | Builder tabs; protocol/transport/TLS/Reality/authentication/Mieru conditional fields; generated credentials/keys/certificates, show/hide/copy/regeneration pending/result/error; advanced options, dirty/reset/discard guards; saved, preflight, validate/deploy/install progress/failure/success and operation links/retry |
+| Configuration: live navigation/submit, editor | Node/engine/source/file selection, switching placeholder and removal, first completed/empty result; tools menus; source/editor entry; dirty/valid/invalid/oversize/format feedback and reset; save/import/validate/deploy busy and all results; latest-response and unsaved-input/caret/scroll continuity |
+| Configuration: inbounds/outbounds/restrictions/archive | Menu action availability and common actions; add/modify/delete/history/diff panels and complete destroyed exits; saved/live deployment differences and preflight failures; bound/unbound/manual/JSON/node modes, protocol-specific fields, peer loading/selection/stale/error; restriction expansion; archive source/file/revision selection and editor feedback |
+| Clients and Sub-Store | Node/engine/search/profile/format/group/scope selection and completed/empty results; parameter and secret display/copy; publish/busy/result; target creation/edit/delete and native close; remote association/auth/group fields, validation/loading/failure; synchronization status, task result and retry |
+| Traffic | Scope/engine/status filters; policy add/delete/FLIP and mouse/touch/keyboard order; quota/status/create/edit dialogs; shared allocation attribution; synchronization candidate list/loading/empty/error, selection count, submit/result/retry and complete destroyed close |
+| TCP / access controls | TCP node/profile selection, editor opening/native reversal, preset/reset/confirmation, conditional drafts/count, validation error/correction and configuration/enable/disable task states; rule cards/selection/editor, checked/unchecked/dirty/clean/preflight/saving/failure/success and destroyed rule close |
+| Users / shared quota | User/account selection and cards; account add/edit/save/error, role permissions/default hint reveal/hide; allocation add/edit/remove, node/engine/quota fields and consent messages; failure/reload/unsaved guards; invite/reinvite/accept/reject/leave, loading/result/error and full destroyed invitation/allocation close |
+| Settings | Every switch/check/input/select/tab with themed focus/selected feedback; dirty/saving/saved/concurrent-dirty/failed states; version-check loading/current/new/uncomparable/failure and release link; font/theme changes and persistent form focus/caret |
+| Tasks, logs, connections | Task filters/load-more/retry/cancel, added/removed/reordered cards, changed status, result disclosure; log node/engine/level/date/page/search, first/full result, refresh/error/recovery; connection node/engine/source/scope/date/page/search and source disclosures, loading/empty/failure/ready; identical output/counters/enrichment do not replay |
+
+### Continuity checks added for this audit
+
+Four desktop/mobile and normal/reduced popup modes exercise live rendering of:
+keyboard tooltip entry/exit/refocus using the same element; updated hint metadata
+through refresh; native validity rejection, correction and message persistence
+through polling; immediate field reversal without an opacity jump; copy-message
+clear with its full outgoing paint; and destruction of a native modal in mid-entry
+with bounded complete panel/scrim retirement. These join the route/list/drag/tab/
+disclosure and delayed-first-result regressions. Reduced mode has no retained
+paint or motion, while preserving the same messages, constraints and focus.
 
 ## Evidence key
 

@@ -1,6 +1,8 @@
+import { installInteractionFeedback } from "./interaction-feedback.js";
 import { enterWorkspace, syncDockMotion, captureWorkspaceExit, finishWorkspaceExit, restoreWorkspace } from "./workspace-motion.js";
 import { cancelMotion, syncSelectionMotion } from "./motion.js";
 import { bindPopups } from "./popup.js";
+import { observeFeedback } from "./presence-motion.js";
 import { reconcileView } from "./refresh.js";
 import { setStorageAccount } from "./account-storage.js";
 import { dockIcons } from "./shell-icons.js";
@@ -179,6 +181,8 @@ function shell(content, title, { viewKey = state.route } = {}) {
   }
   syncDockMotion(app.querySelector(".app-dock"));
   syncSelectionMotion(renderedMain, { animate: !routeChanged && !viewChanged });
+  observeFeedback(app);
+  installInteractionFeedback();
   document.querySelector("#logout").onclick = async () => {
     try {
       await api("/auth/logout", { method: "POST" });

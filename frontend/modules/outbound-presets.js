@@ -1,3 +1,4 @@
+import { setVisible, updateFeedback } from "./presence-motion.js";
 import { formatConfigContent } from "./code-format.js";
 import { orderNodesBySavedOrder } from "./node-order.js";
 
@@ -145,19 +146,19 @@ export function bindOutboundPresets({ form, input, engine, agentId, api, canRead
     if (validate && (!tag || /^qch-(trf-|stat-)/.test(tag))) throw Error("请填写有效的非系统出站标签");
     return JSON.stringify({...selected.outbound, tag}, null, 2);
   };
-  const show = (selector, visible) => host.querySelectorAll(selector).forEach(element => { element.hidden = !visible; });
+  const show = (selector, visible) => host.querySelectorAll(selector).forEach(element => { setVisible(element, visible); });
   const sync = () => {
     const manual = mode.value === "preset", source = mode.value === "node", kind = protocol.value;
     const proxy = kind !== "direct", transportable = ["vless", "vmess", "trojan"].includes(kind);
     const tlsRequired = ["hysteria2", "tuic", "anytls"].includes(kind);
-    builder.hidden = mode.value === "json";
+    setVisible(builder, !(mode.value === "json"));
     builder.disabled = busy;
     mode.disabled = busy;
     show("[data-outbound-protocol-label], [data-outbound-manual]", manual);
     show("[data-outbound-node]", source);
     show("[data-preset-server]", proxy);
     show("[data-preset-credential]", proxy && !["http", "socks"].includes(kind));
-    host.querySelector("[data-outbound-credential-label]").textContent = ["vless", "vmess", "tuic"].includes(kind) ? "用户 UUID" : "密码";
+    updateFeedback(host.querySelector("[data-outbound-credential-label]"), ["vless", "vmess", "tuic"].includes(kind) ? "用户 UUID" : "密码");
     show("[data-preset-username]", ["http", "socks"].includes(kind));
     show("[data-preset-password]", ["http", "socks", "tuic"].includes(kind));
     show("[data-preset-method]", kind === "shadowsocks");
@@ -185,10 +186,10 @@ export function bindOutboundPresets({ form, input, engine, agentId, api, canRead
   };
   const updatePeer = () => {
     const selected = chosenPeer();
-    peerStatus.textContent = selected ? selected.outbound_error ||
+    updateFeedback(peerStatus, selected ? selected.outbound_error ||
       `${selected.agentName} / ${selected.tag} · ${selected.address || ""}:${selected.port}${selected.agentStatus === "offline" ? " · 节点离线，请确认可达性" : ""}` :
       peers.filter(item => item.agentId === node.value && item.outbound_error).map(item => item.outbound_error).join("；") ||
-      (peers.length ? "请选择出口节点及目标入站。" : "没有可用入站。请先在其他节点部署支持的协议并设置客户端连接地址。");
+      (peers.length ? "请选择出口节点及目标入站。" : "没有可用入站。请先在其他节点部署支持的协议并设置客户端连接地址。"));
     sync();
     onChange();
   };
@@ -205,13 +206,13 @@ export function bindOutboundPresets({ form, input, engine, agentId, api, canRead
     const index = preserved === undefined ? -1 : peers.findIndex(item => peerKey(item) === preserved && item.outbound);
     peer.value = preserved === undefined ? first?.value || "" : index < 0 ? "" : String(index);
     updatePeer();
-    if (preserved && !chosenPeer()) peerStatus.textContent = "原目标入站已变化或不可用，请重新选择；不会自动改用其他入站。";
+    if (preserved && !chosenPeer()) updateFeedback(peerStatus, "原目标入站已变化或不可用，请重新选择；不会自动改用其他入站。");
   };
   const loadPeers = async () => {
     if (!canReadPeers || busy) return;
     const request = ++loadRequest, selectedNode = node.value, selectedPeer = peerKey(chosenPeer());
     loading = true;
-    peerStatus.textContent = "正在读取已部署入站…";
+    updateFeedback(peerStatus, "正在读取已部署入站…");
     sync();
     try {
       const entries = await api(`/client-access?outbound_engine=${encodeURIComponent(engine)}`, {method:"GET", signal:controller.signal});
@@ -227,7 +228,7 @@ export function bindOutboundPresets({ form, input, engine, agentId, api, canRead
       updateNode(selectedPeer);
     } catch (error) {
       if (active() && request === loadRequest) {
-        peerStatus.textContent = "读取可用入站失败，请重试。";
+        updateFeedback(peerStatus, "读取可用入站失败，请重试。");
         peers = []; node.replaceChildren(); peer.replaceChildren(); loaded = false;
       }
     } finally {

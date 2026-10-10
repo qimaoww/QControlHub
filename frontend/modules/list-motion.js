@@ -1,7 +1,8 @@
 import { animateMotion, cancelMotion, reducedMotion, retireSurface } from "./motion.js";
 import { isolateMotionSurface } from "./motion-isolation.js";
+import { freezePaint } from "./paint-snapshot.js";
 
-const cards = ".node-card,.traffic-policy-card,.user-account-card,.service-card,.client-access-node-card,.access-control-card,.bbr-card,.substore-agent-card,.settings-version-card,.template-card";
+const cards = ".task-event-card,.node-card,.traffic-policy-card,.user-account-card,.service-card,.client-access-node-card,.access-control-card,.bbr-card,.substore-agent-card,.settings-version-card,.template-card";
 export function captureListMotion(current, fresh, key) {
   if (!current.isConnected || reducedMotion() || !current.children?.length ||
       ![...current.children].some(child => child.matches(cards))) return null;
@@ -12,7 +13,11 @@ export function captureListMotion(current, fresh, key) {
   const nextKeys = new Set(after.map(key));
   const departing = [...rects].filter(([child]) => key(child) && !nextKeys.has(key(child)))
     .filter(([, rect]) => rect.width && rect.height && rect.bottom > 0 && rect.top < innerHeight)
-    .slice(0, 8).map(([child, rect]) => ({ clone: child.cloneNode(true), rect, opacity: getComputedStyle(child).opacity }));
+    .slice(0, 8).map(([child, rect]) => {
+      const clone = child.cloneNode(true);
+      freezePaint(child, clone);
+      return { clone, rect, opacity: getComputedStyle(child).opacity };
+    });
   return { rects, departing };
 }
 
@@ -21,7 +26,7 @@ export function finishListMotion(current, snapshot) {
   snapshot.departing.forEach(({ clone, rect, opacity }) => {
     const frame = document.createElement("div");
     frame.className = document.body.className;
-    clone.style.cssText = `position:fixed;left:${rect.left}px;top:${rect.top}px;width:${rect.width}px;height:${rect.height}px;margin:0;opacity:${opacity};pointer-events:none`;
+    clone.style.cssText = `position:fixed;left:${rect.left}px;top:${rect.top}px;width:${rect.width}px;height:${rect.height}px;margin:0;transform:none;translate:0 0;scale:1;opacity:${opacity};pointer-events:none`;
     frame.append(clone);
     const host = isolateMotionSurface(frame);
     if (host) retireSurface(host, { surface: clone });

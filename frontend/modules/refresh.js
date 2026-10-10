@@ -112,6 +112,19 @@ function syncAttributes(current, fresh, metrics) {
     [...fresh.attributes].map((attribute) => attribute.name),
   );
   [...current.attributes].forEach((attribute) => {
+    if (attribute.name === "data-motion-title") {
+      if (fresh.getAttribute("title") != null) current.dataset.motionTitle = fresh.getAttribute("title");
+      else current.removeAttribute(attribute.name);
+      return;
+    }
+    if (["data-motion-title", "data-motion-description", "data-motion-invalid"].includes(attribute.name)) return;
+    if (current.getAttribute("data-motion-description") != null && attribute.name === "aria-description") return;
+    if (current.getAttribute("data-motion-invalid") != null && ["aria-invalid", "aria-errormessage"].includes(attribute.name)) return;
+    if (current.getAttribute("data-motion-title") != null && attribute.name === "title") {
+      if (fresh.getAttribute("title") != null) current.dataset.motionTitle = fresh.getAttribute("title");
+      else delete current.dataset.motionTitle;
+      return;
+    }
     if (attribute.name === "data-motion-panel" || attribute.name === "style" && current.classList?.contains("dock-active-indicator")) return;
     if (preserveOpen && attribute.name === "open") return;
     if (current.tagName === "DETAILS" && ["data-motion-disclosure", "data-motion-popup"].includes(attribute.name)) return;
@@ -124,6 +137,14 @@ function syncAttributes(current, fresh, metrics) {
     }
   });
   [...fresh.attributes].forEach((attribute) => {
+    if (["data-motion-title", "data-motion-description", "data-motion-invalid"].includes(attribute.name)) return;
+    if (current.getAttribute("data-motion-description") != null && attribute.name === "aria-description") return;
+    if (current.getAttribute("data-motion-invalid") != null && ["aria-invalid", "aria-errormessage"].includes(attribute.name)) return;
+    if (current.getAttribute("data-motion-title") != null && attribute.name === "title") {
+      if (fresh.getAttribute("title") != null) current.dataset.motionTitle = fresh.getAttribute("title");
+      else delete current.dataset.motionTitle;
+      return;
+    }
     if (attribute.name === "data-motion-panel" || attribute.name === "style" && current.classList?.contains("dock-active-indicator")) return;
     if (preserveOpen && attribute.name === "open") return;
     if ((preserveInert || preserveRetiredDialog || preserveRetiredContent) && attribute.name === "inert") return;
@@ -215,6 +236,14 @@ function reconcileChildren(current, fresh, metrics) {
   const notice = current.classList?.contains("workspace-main")
     ? existing.find(child => child.nodeType === 1 && child.getAttribute("data-spa-notice") != null) : null;
   if (notice && !desired.includes(notice)) desired.unshift(notice);
+  // Native validity feedback belongs to the live control. A background render
+  // cannot remove its message while keeping the invalid draft and ARIA link.
+  existing.filter(child => child.nodeType === 1 && child.getAttribute("data-motion-validation") != null)
+    .forEach(label => {
+      if (desired.includes(label) || !current.querySelector?.(`[data-motion-invalid][aria-errormessage="${label.id}"]`)) return;
+      const index = desired.indexOf(label.previousSibling);
+      desired.splice(index >= 0 ? index + 1 : desired.length, 0, label);
+    });
   desired.forEach((child, index) => {
     const currentAtIndex = current.childNodes[index] || null;
     if (currentAtIndex !== child) current.insertBefore(child, currentAtIndex);

@@ -1,4 +1,4 @@
-import { cancelMotion, enterSurface } from "./motion.js";
+import { setVisible, updateFeedback } from "./presence-motion.js";
 import { bindEvent } from "./refresh.js";
 import { bindProtocolOptionVisibility, bindServerPlanRegeneration, installGeneratedFieldButtons, readServerPlanInput } from "./server-plan-form.js";
 import { revealSelectedFields } from "./config-fields.js";
@@ -140,7 +140,7 @@ function bindAgentConfigPage(ctx, fieldsOnly = false) {
           "role",
           tone === "error" ? "alert" : "status",
         );
-        regenerateStatus.textContent = message;
+        updateFeedback(regenerateStatus, message);
       },
       onApplied: (plan) => {
         if (!ctx.selectedInbound) state.data.serverPlans[
@@ -189,7 +189,7 @@ function bindAgentConfigPage(ctx, fieldsOnly = false) {
     const blocked = editor.savePending || Boolean(ctx.navigating);
     if (refreshButton) {
       refreshButton.disabled = blocked || ctx.generating || needsReload();
-      refreshButton.textContent = ctx.navigating ? "正在加载…" : "刷新状态";
+      updateFeedback(refreshButton, ctx.navigating ? "正在加载…" : "刷新状态");
     }
     root.querySelector(".config-command-bar")?.setAttribute("aria-busy", String(blocked));
     const protocolSelect = root.querySelector("[data-preset-protocol]");
@@ -263,7 +263,7 @@ function bindAgentConfigPage(ctx, fieldsOnly = false) {
       const originalLabel = submitter?.textContent;
       buttons.forEach((button) => (button.disabled = true));
       formElement.setAttribute("aria-busy", "true");
-      if (submitter) submitter.textContent = "正在保存…";
+      if (submitter) updateFeedback(submitter, "正在保存…");
       let committedConfig, committedTask;
       try {
         if (drafts().otherDirty(draftKey(selector), ctx.draftScope) && !(await confirmAction(
@@ -280,12 +280,12 @@ function bindAgentConfigPage(ctx, fieldsOnly = false) {
         if (!current() || !formElement.isConnected) return;
         if (intent === "deploy" && ctx.beforeDeploy) {
           showStatus("正在核验 Agent 当前配置…");
-          if (submitter) submitter.textContent = "正在核验…";
+          if (submitter) updateFeedback(submitter, "正在核验…");
           await ctx.beforeDeploy();
           if (!current() || !formElement.isConnected) return;
         }
         showStatus("正在保存配置并创建任务…");
-        if (submitter) submitter.textContent = "正在保存…";
+        if (submitter) updateFeedback(submitter, "正在保存…");
         let result;
         let input;
         if (isPlan) {
@@ -379,7 +379,7 @@ function bindAgentConfigPage(ctx, fieldsOnly = false) {
       } finally {
         if (state.data === sessionData) editor.savePending = false;
         formElement.removeAttribute("aria-busy");
-        if (submitter) submitter.textContent = originalLabel;
+        if (submitter) updateFeedback(submitter, originalLabel);
         if (formElement.isConnected && current())
           buttons.forEach((button) => (button.disabled = !canSubmitForm(selector)));
         if (state.data === sessionData) editor.syncControls();
@@ -396,10 +396,7 @@ function bindAgentConfigPage(ctx, fieldsOnly = false) {
       state.data.builderStep = selected.id;
       sections.forEach((section) => {
         const active = section === selected;
-        const reveal = active && section.hidden;
-        section.hidden = !active;
-        if (!active) cancelMotion(section);
-        else if (reveal && animate) enterSurface(section, { token: "--motion-feedback" });
+        setVisible(section, active, { animate, reflow: false });
         section.setAttribute("role", "tabpanel");
         section.setAttribute("aria-hidden", active ? "false" : "true");
       });

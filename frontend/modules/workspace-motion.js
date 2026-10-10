@@ -1,5 +1,6 @@
 import { animateMotion, cancelMotion, reducedMotion, retireSurface } from "./motion.js";
 import { isolateMotionSurface } from "./motion-isolation.js";
+import { freezePaint } from "./paint-snapshot.js";
 
 const entrances = new WeakMap();
 const layerSelector = ".node-card,.traffic-policy-card,.workspace-panel,.service-card,.ops-stat,.dashboard-stat,.task-event-card,.client-access-node-card,.access-control-card,.bbr-card,.substore-agent-card,.settings-version-card,.template-card,.user-account-card,.section-head,.config-command-bar";
@@ -10,18 +11,9 @@ export function captureWorkspaceExit(main) {
   if (!main?.isConnected || reducedMotion() || document.hidden) return null;
   const rect = main.getBoundingClientRect(), style = getComputedStyle(main);
   const clone = main.cloneNode(true);
-  const originals = [main, ...main.querySelectorAll("*")];
-  const copies = [clone, ...clone.querySelectorAll("*")];
   // Preserve interrupted entrances/FLIP in the outgoing paint, without copying
   // native animation owners or any component's listeners/business lifecycle.
-  main.getAnimations({ subtree: true }).forEach(animation => {
-    const target = animation.effect?.target;
-    const index = originals.indexOf(target);
-    if (index < 1) return;
-    const painted = getComputedStyle(target), copy = copies[index];
-    for (const property of ["opacity", "translate", "scale", "transform"]) copy.style[property] = painted[property];
-    copy.style.animation = copy.style.transition = "none";
-  });
+  freezePaint(main, clone);
   clone.classList.remove("is-route-pending", "is-route-departing");
   clone.querySelectorAll("dialog,iframe,script,video,audio,object,embed").forEach(element => element.remove());
   clone.style.cssText = `position:fixed;left:${rect.left}px;top:${rect.top}px;width:${rect.width}px;height:${rect.height}px;margin:0;opacity:${style.opacity};transition:none;pointer-events:none`;

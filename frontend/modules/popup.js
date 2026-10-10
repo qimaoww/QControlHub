@@ -1,6 +1,7 @@
 import { bindEvent } from "./refresh.js";
 import { cancelMotion, enterSurface, reducedMotion, retireSurface } from "./motion.js";
 import { isolateMotionSurface } from "./motion-isolation.js";
+import { freezePaint } from "./paint-snapshot.js";
 
 const popupSelector = ".mobile-account-menu,.config-inbound-menu,.config-tools-menu,.dashboard-month-picker,.ip-quality-calendar";
 const retiredDialogs = new WeakMap();
@@ -145,13 +146,7 @@ export function closeRetiringDialog(dialog) {
   const x = bounds.left - (offset[0] || 0) - (1 - (scale[0] || 1)) * origin[0];
   const y = bounds.top - (offset[1] || 0) - (1 - (scale[1] || scale[0] || 1)) * origin[1];
   const copy = dialog.cloneNode(true);
-  const sourceContent = [...dialog.querySelectorAll("h2,footer")];
-  copy.querySelectorAll("h2,footer").forEach((element, index) => {
-    const painted = getComputedStyle(sourceContent[index]);
-    element.style.opacity = painted.opacity;
-    element.style.translate = painted.translate;
-    element.style.transition = element.style.animation = "none";
-  });
+  freezePaint(dialog, copy);
   copy.style.cssText = `position:fixed;left:${x}px;top:${y}px;width:${width}px;height:${height}px;margin:0;transition:none;animation:none`;
   const frame = document.createElement("div");
   frame.className = `${document.body.className} motion-retired-modal`;

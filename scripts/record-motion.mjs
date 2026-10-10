@@ -56,6 +56,15 @@ const sequence = String.raw`async (page) => {
   await page.evaluate(()=>{const fetch=window.fetch;window.fetch=async(...args)=>{if(String(args[0]).includes('traffic-policies'))await new Promise(r=>setTimeout(r,700));return fetch(...args);};});
   await page.locator('.dock-nav a[href="#traffic"]').click();await page.waitForTimeout(60);
   await page.locator('.dock-nav a[href="#node-settings"]').click();await page.waitForTimeout(1250);
+  const region=page.locator('[data-region-edit]').last();
+  await region.hover();await page.waitForTimeout(650);
+  await region.click();await page.waitForTimeout(650);
+  await page.locator('.region-picker-dialog input[name="query"]').fill('zzzzzz');await page.waitForTimeout(450);
+  await page.locator('.region-picker-dialog input[name="query"]').fill('');await page.waitForTimeout(450);
+  await page.locator('[data-region-auto]').click();await page.waitForTimeout(400);
+  await page.keyboard.press('Escape');await page.waitForTimeout(550);
+  await page.locator('[data-copy-ip]:not([hidden])').last().click();await page.waitForTimeout(650);
+  const notice=page.locator('.notice-close');if(await notice.count()){await notice.click();await page.waitForTimeout(400);}
 }`;
 try {
   cli("open", `${url.origin}/agents-browser-smoke.html?mode=motion-selection&preview=1#node-settings`, `--config=${config}`);

@@ -1,3 +1,4 @@
+import { updateFeedback } from "./presence-motion.js";
 function presenceState(status) {
   return status === "online" || status === "offline" ? status : "unknown";
 }
@@ -19,6 +20,6 @@ export function updateAgentPresence(root, status) {
     if (badge.dataset.agentPresence !== state) badge.dataset.agentPresence = state;
     const label = badge.querySelector("b");
     const text = presenceLabel(state, badge.hasAttribute("data-presence-node-label"));
-    if (label.textContent !== text) label.textContent = text;
+    if (label.textContent !== text) updateFeedback(label, text);
   });
 }
