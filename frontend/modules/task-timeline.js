@@ -29,7 +29,13 @@ export function reconcileTaskTimeline(timeline, taskCards) {
     );
     const nextCards = freshCards.map((freshCard) => {
       const existingCard = existingCards.get(freshCard.dataset.taskId);
-      if (existingCard) return reconcileView(existingCard, freshCard);
+      if (existingCard) {
+        const before = existingCard.querySelector(".status-label")?.textContent;
+        const reconciled = reconcileView(existingCard, freshCard);
+        const status = reconciled.querySelector(".status-label");
+        if (status && before !== status.textContent) enterSurface(status, { token: "--motion-feedback", id: "qch-task-state" });
+        return reconciled;
+      }
       return freshCard;
     });
 

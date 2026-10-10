@@ -1,3 +1,4 @@
+import { closeRetiringDialog } from "./popup.js";
 import { bindEvent } from "./refresh.js";
 
 import { parseSharedPorts, selectedSharedEngines, sharedLimitBytes, mergeUserAllocation } from "./user-model.js";
@@ -22,7 +23,7 @@ export function createUserAllocations(ctx, { lifecycle, renderUsers, report }) {
     previous.data.userDrafts.delete(previous.userID);
     lifecycle.activeAllocation = null;
     lifecycle.captureActive = () => {};
-    previous.dialog.close();
+    closeRetiringDialog(previous.dialog);
     previous.dialog.innerHTML = "";
     if (previous.trigger?.isConnected) previous.trigger.focus();
   }

@@ -238,12 +238,13 @@ async function observeSmokeResult(webSocketURL, navigateURL, mobile, reduced, mo
     }
     if (navigateURL) await send("Page.navigate", { url: navigateURL });
     // Popup/selection suites need focus emulation, but publish no drag input.
-    // Their route sweeps use the normal result deadline, not the input deadline.
+    // Full popup playback now samples all 36 theme/route combinations.
+    // Its deadline covers this extra choreography; interaction budgets are unchanged.
     if (gestureMode) await Promise.race([
       driveMotionGestures(send, mobile),
       delay(30000).then(() => { throw new Error("motion input timed out"); }),
     ]);
-    const deadline = Date.now() + 45000;
+    const deadline = Date.now() + (navigateURL?.includes("mode=motion-popup") ? 60000 : 45000);
     let evaluation;
     while (!evaluation && Date.now() < deadline) {
       try {

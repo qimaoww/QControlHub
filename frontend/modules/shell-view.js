@@ -1,4 +1,5 @@
-import { cancelMotion, enterSurface, syncSelectionMotion } from "./motion.js";
+import { enterWorkspace, syncDockMotion, captureWorkspaceExit, finishWorkspaceExit, restoreWorkspace } from "./workspace-motion.js";
+import { cancelMotion, syncSelectionMotion } from "./motion.js";
 import { bindPopups } from "./popup.js";
 import { reconcileView } from "./refresh.js";
 import { setStorageAccount } from "./account-storage.js";
@@ -11,6 +12,8 @@ export function createShellView(ctx) {
 function shell(content, title, { viewKey = state.route } = {}) {
   const previousMain = document.querySelector(".workspace-main");
   const previousRoute = document.body.className.match(/(?:^|\s)page-([^\s]+)/)?.[1];
+  const outgoing = previousMain && (previousRoute !== state.route || previousMain.dataset.refreshKey !== `workspace-${viewKey}`)
+    ? captureWorkspaceExit(previousMain) : null;
   const pendingShares = (state.data.agentAccess?.shares || []).filter(share => share.enabled && share.status === "pending").length;
   const links = [
     ["dashboard", "总览", dockIcons.layoutDashboard],
@@ -133,7 +136,7 @@ function shell(content, title, { viewKey = state.route } = {}) {
   // Selection only changes the sidebar's highlight/content. Keep its links
   // mounted so rapid node switches retain the launcher and keyboard focus.
   const contextKey = state.route;
-  const markup = `<div class="desktop-app"><aside class="app-dock"><a class="dock-logo" href="#dashboard" aria-label="${esc(panelName)} 总览"><span>QH</span></a><nav class="dock-nav" aria-label="主导航">${navigationMarkup}</nav><div class="dock-tools">${settingsDockLink}<button id="theme-toggle" data-theme-toggle type="button" aria-label="切换颜色主题" title="切换主题"><svg viewBox="0 0 24 24" aria-hidden="true">${dockIcons.sun}</svg><span class="dock-label">主题</span></button><button id="logout" type="button" aria-label="退出登录" title="退出登录"><svg viewBox="0 0 24 24" aria-hidden="true">${dockIcons.logOut}</svg><span class="dock-label">退出</span></button></div>${mobileAccountMarkup}</aside><aside class="context-sidebar" data-refresh-key="context-${esc(contextKey)}"><header class="context-brand"><a href="#dashboard"><span class="brand-mark">QH</span><strong>${esc(panelName)}</strong></a></header>${context}</aside><section class="workspace-shell"><header class="workspace-topbar"><div class="workspace-route"><span>${esc(panelName)}</span><i>/</i><b>${esc(title)}</b><i class="role-badge role-${esc(state.session.role)}">${esc(roleName)}</i></div><div class="workspace-actions"><span class="sync-state ${overview.agents_online ? "" : "inactive"}" data-sync-state><i></i><span data-sync-label>${overview.agents_online ? `${overview.agents_online} 个节点在线` : "等待节点连接"}</span></span>${topAction}</div></header><main class="workspace-main" data-refresh-key="workspace-${esc(viewKey)}">${content}</main></section></div><dialog class="confirm-dialog" data-confirm-dialog aria-labelledby="confirm-dialog-title" aria-describedby="confirm-dialog-message"><div class="confirm-dialog-card"><span class="confirm-dialog-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3.5 21 20H3zM12 9v5M12 17.5h.01"/></svg></span><div><p class="eyebrow">操作确认</p><h2 id="confirm-dialog-title" data-confirm-title>确认继续？</h2><p id="confirm-dialog-message" data-confirm-message></p></div><footer><button class="button" type="button" data-confirm-cancel>取消</button><button class="button danger-confirm" type="button" data-confirm-accept>确认继续</button></footer></div></dialog>`;
+  const markup = `<div class="desktop-app"><aside class="app-dock"><i class="dock-active-indicator" data-refresh-key="motion-highlight" aria-hidden="true"></i><a class="dock-logo" href="#dashboard" aria-label="${esc(panelName)} 总览"><span>QH</span></a><nav class="dock-nav" aria-label="主导航">${navigationMarkup}</nav><div class="dock-tools">${settingsDockLink}<button id="theme-toggle" data-theme-toggle type="button" aria-label="切换颜色主题" title="切换主题"><svg viewBox="0 0 24 24" aria-hidden="true">${dockIcons.sun}</svg><span class="dock-label">主题</span></button><button id="logout" type="button" aria-label="退出登录" title="退出登录"><svg viewBox="0 0 24 24" aria-hidden="true">${dockIcons.logOut}</svg><span class="dock-label">退出</span></button></div>${mobileAccountMarkup}</aside><aside class="context-sidebar" data-refresh-key="context-${esc(contextKey)}"><header class="context-brand"><a href="#dashboard"><span class="brand-mark">QH</span><strong>${esc(panelName)}</strong></a></header>${context}</aside><section class="workspace-shell"><header class="workspace-topbar"><div class="workspace-route"><span>${esc(panelName)}</span><i>/</i><b>${esc(title)}</b><i class="role-badge role-${esc(state.session.role)}">${esc(roleName)}</i></div><div class="workspace-actions"><span class="sync-state ${overview.agents_online ? "" : "inactive"}" data-sync-state><i></i><span data-sync-label>${overview.agents_online ? `${overview.agents_online} 个节点在线` : "等待节点连接"}</span></span>${topAction}</div></header><main class="workspace-main" data-refresh-key="workspace-${esc(viewKey)}">${content}</main></section></div><dialog class="confirm-dialog" data-confirm-dialog aria-labelledby="confirm-dialog-title" aria-describedby="confirm-dialog-message"><div class="confirm-dialog-card"><span class="confirm-dialog-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3.5 21 20H3zM12 9v5M12 17.5h.01"/></svg></span><div><p class="eyebrow">操作确认</p><h2 id="confirm-dialog-title" data-confirm-title>确认继续？</h2><p id="confirm-dialog-message" data-confirm-message></p></div><footer><button class="button" type="button" data-confirm-cancel>取消</button><button class="button danger-confirm" type="button" data-confirm-accept>确认继续</button></footer></div></dialog>`;
   const currentView = app.querySelector(":scope > .desktop-app");
   if (previousMain && currentView) {
     const template = document.createElement("template");
@@ -164,14 +167,17 @@ function shell(content, title, { viewKey = state.route } = {}) {
   } else {
     app.innerHTML = markup;
   }
+  finishWorkspaceExit(outgoing);
   const renderedMain = app.querySelector(".workspace-main");
   if (renderedMain) renderedMain.inert = false;
-  renderedMain?.classList.remove("is-route-pending");
+  restoreWorkspace(renderedMain);
+  renderedMain?.classList.remove("is-route-pending", "is-route-departing");
   renderedMain?.removeAttribute("aria-busy");
   if (routeChanged || viewChanged) {
     cancelMotion(renderedMain);
-    enterSurface(renderedMain, { id: "qch-route", token: "--motion-slow" });
+    enterWorkspace(renderedMain, routeChanged ? app.querySelector(".context-sidebar") : null);
   }
+  syncDockMotion(app.querySelector(".app-dock"));
   syncSelectionMotion(renderedMain, { animate: !routeChanged && !viewChanged });
   document.querySelector("#logout").onclick = async () => {
     try {

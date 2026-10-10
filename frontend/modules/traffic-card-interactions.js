@@ -84,8 +84,9 @@ export function createTrafficCardInteractions({ cardInteractions, saveTrafficCar
         if (event.key === "Escape") return reset();
         if (["Enter", " "].includes(event.key)) { event.preventDefault(); event.stopPropagation(); return; }
         if (!event.key.startsWith("Arrow")) return;
+        const paintedRects = new Map(cards().map(card => [card, card.getBoundingClientRect()]));
         reset();
-        const moved = moveCardByKey(event, grid, "[data-traffic-card-key]");
+        const moved = moveCardByKey(event, grid, "[data-traffic-card-key]", paintedRects);
         if (!moved) return;
         saveTrafficCardOrder(mergeVisibleTrafficCardOrder(allKeys, moved.cards.map(item => item.dataset.trafficCardKey)));
         const release = cardInteractions.begin();

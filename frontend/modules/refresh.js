@@ -1,3 +1,4 @@
+import { captureListMotion, finishListMotion } from "./list-motion.js";
 import { enterSurface } from "./motion.js";
 
 const boundEvents = new WeakMap();
@@ -105,11 +106,13 @@ function syncAttributes(current, fresh, metrics) {
   const preserveOpen = current.tagName === "DETAILS" || current.tagName === "DIALOG";
   const preserveInert = current.classList?.contains("desktop-app") && current.inert;
   const preserveRetiredDialog = current.tagName === "DIALOG" && !current.open && current.inert;
-  const preserveRetiredContent = current.getAttribute("data-motion-retired-content") != null;
+  const preserveRetiredContent = current.getAttribute("data-motion-retired-content") != null ||
+    current.hidden && current.getAttribute("data-motion-panel") != null;
   const freshNames = new Set(
     [...fresh.attributes].map((attribute) => attribute.name),
   );
   [...current.attributes].forEach((attribute) => {
+    if (attribute.name === "data-motion-panel" || attribute.name === "style" && current.classList?.contains("dock-active-indicator")) return;
     if (preserveOpen && attribute.name === "open") return;
     if (current.tagName === "DETAILS" && ["data-motion-disclosure", "data-motion-popup"].includes(attribute.name)) return;
     if ((preserveInert || preserveRetiredDialog || preserveRetiredContent) && attribute.name === "inert") return;
@@ -121,6 +124,7 @@ function syncAttributes(current, fresh, metrics) {
     }
   });
   [...fresh.attributes].forEach((attribute) => {
+    if (attribute.name === "data-motion-panel" || attribute.name === "style" && current.classList?.contains("dock-active-indicator")) return;
     if (preserveOpen && attribute.name === "open") return;
     if ((preserveInert || preserveRetiredDialog || preserveRetiredContent) && attribute.name === "inert") return;
     if ((preserveRetiredDialog || preserveRetiredContent) && attribute.name === "aria-hidden") return;
@@ -171,6 +175,7 @@ function restoreControlState(element, state) {
 }
 
 function reconcileChildren(current, fresh, metrics) {
+  const listMotion = captureListMotion(current, fresh, nodeKey);
   const existing = [...current.childNodes];
   const existingNodes = new Set(existing);
   const used = new Set();
@@ -216,7 +221,7 @@ function reconcileChildren(current, fresh, metrics) {
     // Only the inserted branch fades. Logs and task polling stay immediate;
     // descendants never receive a second entrance.
     if (!existingNodes.has(child) && child.nodeType === 1 && child.matches(insertedMotionSelector))
-      enterSurface(child, { token: "--motion-fast" });
+      enterSurface(child, { token: "--motion-base", id: "qch-insert" });
   });
   const desiredNodes = new Set(desired);
   [...current.childNodes].forEach((child) => {
@@ -225,6 +230,7 @@ function reconcileChildren(current, fresh, metrics) {
       metrics.removed += 1;
     }
   });
+  finishListMotion(current, listMotion);
 }
 
 function reconcileNode(current, fresh, metrics) {

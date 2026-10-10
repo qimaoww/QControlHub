@@ -26,7 +26,7 @@ func TestRefreshPathsUseStableViewsAndScopedCoordinators(t *testing.T) {
 		"const routeChanged = !previousMain || previousRoute !== state.route",
 		"previousMain.dataset.refreshKey !== workspaceKey",
 		"if (routeChanged || viewChanged)",
-		`enterSurface(renderedMain, { id: "qch-route"`,
+		`enterWorkspace(renderedMain,`,
 		"cancelMotion(renderedMain)",
 		"const hasSharedData =",
 		"const sharedDataPromise = Promise.all([",
@@ -36,7 +36,7 @@ func TestRefreshPathsUseStableViewsAndScopedCoordinators(t *testing.T) {
 		"function primeRouteTransition()",
 		"main.inert = true",
 		"main.classList.add(\"is-route-pending\")",
-		"if (nextRoute !== state.route)",
+		"if (nextRoute !== renderedRoute)",
 		"data-refresh-key=\"context-${esc(contextKey)}\"",
 		"state.navigationEpoch += 1",
 		"cancelActive: () => routeController?.abort()",
@@ -96,7 +96,7 @@ func TestRefreshPathsUseStableViewsAndScopedCoordinators(t *testing.T) {
 			"data-refresh-scroll",
 		},
 		"modules/tasks.js": {
-			"return reconcileView(existingCard, freshCard)",
+			"const reconciled = reconcileView(existingCard, freshCard)",
 			"api(`/tasks?${query}`, { signal })",
 		},
 		"modules/dashboard.js": {

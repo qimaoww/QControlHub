@@ -163,14 +163,36 @@ export async function checkDisclosureMotion(_workspace, reduced) {
 export async function checkRouteCoverage(reduced) {
   const dock = document.querySelector(".app-dock");
   let count = 0;
+  const playback = [];
   for (const theme of ["light", "dark"]) {
     document.documentElement.dataset.theme = theme;
     for (const route of Object.keys(routeModuleNames)) {
+      const previousMain = document.querySelector(".workspace-main");
       location.hash = `#${route}`;
+      await delay(0);
       const expected = ["agents", "agent-config"].includes(route) ? "live-config" : route;
       await waitFor(() => document.querySelector(`.page-${expected} .workspace-main:not([inert]):not([aria-busy=true])`),
         `route did not mount: ${route}`);
-      await delay(330);
+      const main = document.querySelector(".workspace-main");
+      const samples = [];
+      if (!reduced && main !== previousMain) {
+        assert.ok(main.getAnimations().some(animation => animation.id === "qch-route"), `route missed its visible entrance: ${route}`);
+        await new Promise(resolve => {
+          const sample = () => {
+            const moving = main.getAnimations({ subtree: true }).filter(animation => animation.id.startsWith("qch-route"));
+            samples.push({ opacity: Number(getComputedStyle(main).opacity),
+              displacement: Math.max(0, ...moving.map(animation => Math.abs(Number.parseFloat(
+                getComputedStyle(animation.effect.target).translate.split(" ").at(-1)) || 0))) });
+            if (moving.length) requestAnimationFrame(sample); else resolve();
+          };
+          requestAnimationFrame(sample);
+        });
+        assert.ok(samples.length >= 4, `route did not play a complete visible sequence: ${route}`);
+        assert.ok(samples[0].opacity < .85, `route entrance finished before content was visible: ${route}`);
+        assert.ok(samples.some(sample => sample.displacement >= 10), `route has no perceptible displacement: ${route}`);
+        assert.equal(samples.at(-1).opacity, 1, `route final opacity is not restored: ${route}`);
+      }
+      playback.push({ route, theme, reduced, frames: samples.length });
       assert.equal(document.querySelector(".app-dock"), dock, `dock DOM changed on ${route}`);
       assert.equal(document.querySelector("dialog:modal,.modal-backdrop,.motion-exit-host"), null,
         `route retains a popup: ${route}`);
@@ -184,6 +206,7 @@ export async function checkRouteCoverage(reduced) {
     }
   }
   document.documentElement.dataset.motionCoveragePages = count;
+  window.__motionCoveragePlayback = playback;
 }
 
 export async function checkCoreDisclosure(reduced) {
@@ -214,4 +237,27 @@ export async function checkCoreDisclosure(reduced) {
   await waitFor(() => getComputedStyle(details).display === "none", "version drawer exit must release its layout space");
   assert.equal(getComputedStyle(details).display, "none");
   assert.equal(document.activeElement, launcher);
+
+  const workspace = launcher.closest(".node-operations-workspace");
+  const agentTab = workspace.querySelector('[data-node-tab="agent"]');
+  const coresTab = workspace.querySelector('[data-node-tab="cores"]');
+  const panel = workspace.querySelector('[data-node-panel="agent"]');
+  agentTab.focus(); agentTab.click();
+  await waitFor(() => getComputedStyle(panel).opacity === "1", "tab entrance must reach full opacity");
+  const input = panel.querySelector("input");
+  if (input) { input.value = "unsaved tab motion draft"; input.focus(); }
+  coresTab.click();
+  assert.ok(panel.hidden && panel.inert && panel.getAttribute("aria-hidden") === "true", "outgoing tab retires interaction immediately");
+  if (!reduced) assert.notEqual(getComputedStyle(panel).display, "none", "tab exit must remain painted");
+  else assert.equal(getComputedStyle(panel).display, "none");
+  const refreshed = workspace.cloneNode(true);
+  reconcileView(workspace, refreshed);
+  assert.ok(panel.inert && panel.hidden, "refresh must preserve outgoing tab ownership");
+  agentTab.click(); await delay(25); coresTab.click(); await delay(25); agentTab.click();
+  await waitFor(() => getComputedStyle(panel).opacity === "1" && !panel.hidden, "rapid tab reversal must finish");
+  assert.equal(panel.inert, false);
+  assert.equal(panel.hasAttribute("aria-hidden"), false);
+  if (input) assert.equal(input.value, "unsaved tab motion draft", "tab switching must retain unsubmitted inputs");
+  coresTab.click();
+  await waitFor(() => getComputedStyle(panel).display === "none", "tab exit must remove its paint tail");
 }

@@ -1,5 +1,6 @@
 import { bindEvent } from "./refresh.js";
-import { cancelMotion, enterSurface } from "./motion.js";
+import { cancelMotion, enterSurface, reducedMotion, retireSurface } from "./motion.js";
+import { isolateMotionSurface } from "./motion-isolation.js";
 
 const popupSelector = ".mobile-account-menu,.config-inbound-menu,.config-tools-menu,.dashboard-month-picker,.ip-quality-calendar";
 const retiredDialogs = new WeakMap();
@@ -125,7 +126,46 @@ export function bindDialogBackdrop(dialog, close = () => dialog.close()) {
 
 // Restoring a detached native dialog is reconciliation, not a fresh reveal.
 export function cancelPopupEntrance(dialog) {
-  dialog.getAnimations().filter(animation => ["qch-dialog-enter", "qch-fade-enter"].includes(animation.animationName) ||
-      ["opacity", "translate"].includes(animation.transitionProperty))
+  dialog.getAnimations({ subtree: true }).filter(animation => ["qch-dialog-enter", "qch-dialog-content", "qch-fade-enter"].includes(animation.animationName) ||
+      ["opacity", "translate", "scale"].includes(animation.transitionProperty))
     .forEach(animation => animation.cancel());
+}
+
+// Some editors destroy their form as soon as close commits. Preserve only its
+// painted tail, then let the caller clear live content and release state now.
+export function closeRetiringDialog(dialog) {
+  if (!dialog?.open || reducedMotion()) { dialog?.close(); return; }
+  const bounds = dialog.getBoundingClientRect(), style = getComputedStyle(dialog);
+  const backdrop = getComputedStyle(dialog, "::backdrop");
+  const from = { opacity: style.opacity, translate: style.translate, scale: style.scale };
+  const scale = style.scale.split(" ").map(Number.parseFloat);
+  const origin = style.transformOrigin.split(" ").map(Number.parseFloat);
+  const offset = style.translate.split(" ").map(Number.parseFloat);
+  const width = dialog.offsetWidth, height = dialog.offsetHeight;
+  const x = bounds.left - (offset[0] || 0) - (1 - (scale[0] || 1)) * origin[0];
+  const y = bounds.top - (offset[1] || 0) - (1 - (scale[1] || scale[0] || 1)) * origin[1];
+  const copy = dialog.cloneNode(true);
+  const sourceContent = [...dialog.querySelectorAll("h2,footer")];
+  copy.querySelectorAll("h2,footer").forEach((element, index) => {
+    const painted = getComputedStyle(sourceContent[index]);
+    element.style.opacity = painted.opacity;
+    element.style.translate = painted.translate;
+    element.style.transition = element.style.animation = "none";
+  });
+  copy.style.cssText = `position:fixed;left:${x}px;top:${y}px;width:${width}px;height:${height}px;margin:0;transition:none;animation:none`;
+  const frame = document.createElement("div");
+  frame.className = `${document.body.className} motion-retired-modal`;
+  frame.style.setProperty("--motion-exit-opacity", backdrop.opacity);
+  frame.style.setProperty("--motion-scrim-background", backdrop.backgroundColor);
+  frame.style.setProperty("--motion-scrim-filter", backdrop.backdropFilter);
+  frame.append(copy);
+  const host = isolateMotionSurface(frame);
+  // Flush the closed state with no native retention; the isolated complete
+  // form and scrim own the exit, rather than a collapsing empty dialog box.
+  const transition = dialog.style.transition;
+  dialog.style.transition = "none";
+  dialog.close();
+  getComputedStyle(dialog).display;
+  dialog.style.transition = transition;
+  if (host) retireSurface(host, { surface: copy, from });
 }

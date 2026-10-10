@@ -71,5 +71,6 @@
   "frontend/styles/680-client-access-layout.css",
   "frontend/styles/680-traffic-card-clarity.css",
   "frontend/styles/690-agent-presence.css",
-  "frontend/styles/700-shell-dock-rail.css"
+  "frontend/styles/700-shell-dock-rail.css",
+  "frontend/styles/710-motion-choreography.css"
 ]

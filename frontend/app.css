@@ -538,15 +538,17 @@ a.node-card:hover .node-card-open i{transform:translateX(3px)}
   --motion-ease-in:cubic-bezier(.4,0,1,1);
   --motion-ease-spring:var(--motion-ease-out);
   --motion-fast:120ms;
-  --motion-base:200ms;
-  --motion-slow:280ms;
-  --motion-feedback:160ms;
-  --motion-exit:120ms;
+  --motion-base:320ms;
+  --motion-slow:480ms;
+  --motion-feedback:280ms;
+  --motion-exit:220ms;
+  --motion-reorder:420ms;
+  --motion-stagger:45ms;
   --motion-loading:1000ms;
-  --motion-distance:6px;
-  --motion-exit-distance:4px;
+  --motion-distance:24px;
+  --motion-exit-distance:12px;
 }
-@keyframes qch-dialog-enter{from{opacity:0;translate:0 var(--motion-distance)}to{opacity:1;translate:0 0}}
+@keyframes qch-dialog-enter{from{opacity:0;translate:0 var(--motion-distance);scale:.94}to{opacity:1;translate:0 0;scale:1}}
 @keyframes qch-fade-enter{from{opacity:0}to{opacity:1}}
 @keyframes qch-route-progress{from{transform:scaleX(.15)}to{transform:scaleX(.85)}}
 @keyframes qch-boot-orbit{to{transform:rotate(360deg)}}
@@ -616,24 +618,24 @@ dialog[open]::backdrop{animation:qch-fade-enter var(--motion-feedback) ease}
 @supports(transition-behavior:allow-discrete){
   .page-node-settings .core-version-panel[data-motion-disclosure]{transition:display var(--motion-base) allow-discrete}
   .page-node-settings .core-version-panel[data-motion-disclosure]:not([open]){pointer-events:none}
-  dialog{opacity:0;translate:0 var(--motion-exit-distance);pointer-events:none;transition:opacity var(--motion-exit) var(--motion-ease-in),translate var(--motion-exit) var(--motion-ease-in),display var(--motion-exit) allow-discrete,overlay var(--motion-exit) allow-discrete}
-  dialog[open]{opacity:1;translate:0 0;pointer-events:auto;animation:none;transition-duration:var(--motion-base);transition-timing-function:var(--motion-ease-out)}
+  dialog{opacity:0;translate:0 var(--motion-exit-distance);scale:.96;pointer-events:none;transition:opacity var(--motion-exit) var(--motion-ease-in),translate var(--motion-exit) var(--motion-ease-in),scale var(--motion-exit) var(--motion-ease-in),display var(--motion-exit) allow-discrete,overlay var(--motion-exit) allow-discrete}
+  dialog[open]{opacity:1;translate:0 0;scale:1;pointer-events:auto;animation:none;transition-duration:var(--motion-base);transition-timing-function:var(--motion-ease-out)}
   dialog::backdrop{opacity:0;pointer-events:none;transition:opacity var(--motion-exit) ease,display var(--motion-exit) allow-discrete,overlay var(--motion-exit) allow-discrete}
   dialog[open]::backdrop{opacity:1;pointer-events:auto;animation:none;transition-duration:var(--motion-feedback)}
-  @starting-style{dialog[open]{opacity:0;translate:0 var(--motion-distance)}dialog[open]::backdrop{opacity:0}}
+  @starting-style{dialog[open]{opacity:0;translate:0 var(--motion-distance);scale:.94}dialog[open]::backdrop{opacity:0}}
 }
 /* The browser owns reversal and the native open state. Only user-operated
    disclosures opt in, so initially open/restored content never fades again. */
 @supports selector(details::details-content){
   details::details-content{opacity:0;content-visibility:hidden}
   details[open]::details-content{opacity:1;content-visibility:visible}
-  details[data-motion-disclosure]::details-content{opacity:0;transition:opacity var(--motion-exit) var(--motion-ease-in),content-visibility var(--motion-exit) allow-discrete}
-  details[data-motion-disclosure][open]::details-content{opacity:1;transition-duration:var(--motion-feedback),0s;transition-timing-function:var(--motion-ease-out)}
+  details[data-motion-disclosure]::details-content{opacity:0;translate:0 -8px;transition:translate var(--motion-exit) var(--motion-ease-in),opacity var(--motion-exit) var(--motion-ease-in),content-visibility var(--motion-exit) allow-discrete}
+  details[data-motion-disclosure][open]::details-content{opacity:1;translate:0 0;transition-duration:var(--motion-feedback),var(--motion-feedback),0s;transition-timing-function:var(--motion-ease-out)}
   @starting-style{details[data-motion-disclosure][open]::details-content{opacity:0}}
   details[data-motion-disclosure]:not([open])>:not(summary){pointer-events:none}
   @supports(interpolate-size:allow-keywords){
-    details[data-motion-disclosure]:not([data-motion-popup]):not(.core-version-panel)::details-content{interpolate-size:allow-keywords;block-size:0;overflow:clip;transition:opacity var(--motion-exit) var(--motion-ease-in),block-size var(--motion-base) var(--motion-ease-out),content-visibility var(--motion-base) allow-discrete,overflow var(--motion-base) steps(1,start) allow-discrete}
-    details[data-motion-disclosure]:not([data-motion-popup]):not(.core-version-panel)[open]::details-content{block-size:auto;overflow:visible;transition:opacity var(--motion-feedback) var(--motion-ease-out),block-size var(--motion-base) var(--motion-ease-out),content-visibility 0s allow-discrete,overflow var(--motion-base) steps(1,end) allow-discrete}
+    details[data-motion-disclosure]:not([data-motion-popup]):not(.core-version-panel)::details-content{interpolate-size:allow-keywords;block-size:0;overflow:clip;transition:translate var(--motion-exit) var(--motion-ease-in),opacity var(--motion-exit) var(--motion-ease-in),block-size var(--motion-base) var(--motion-ease-out),content-visibility var(--motion-base) allow-discrete,overflow var(--motion-base) steps(1,start) allow-discrete}
+    details[data-motion-disclosure]:not([data-motion-popup]):not(.core-version-panel)[open]::details-content{block-size:auto;overflow:visible;transition:translate var(--motion-feedback) var(--motion-ease-out),opacity var(--motion-feedback) var(--motion-ease-out),block-size var(--motion-base) var(--motion-ease-out),content-visibility 0s allow-discrete,overflow var(--motion-base) steps(1,end) allow-discrete}
     @starting-style{details[data-motion-disclosure]:not([data-motion-popup]):not(.core-version-panel)[open]::details-content{block-size:0}}
     /* This drawer hides its summary too. Its outer height is the single layout
        owner, so the summary does not disappear in a final one-frame jump. */
@@ -648,7 +650,7 @@ dialog[open]::backdrop{animation:qch-fade-enter var(--motion-feedback) ease}
 .modal-backdrop>[role=dialog]{animation:qch-dialog-enter var(--motion-base) var(--motion-ease-out)}
 .motion-retired-modal{position:fixed;z-index:300;inset:0;display:grid;place-items:center;padding:24px;isolation:isolate;pointer-events:none}
 .motion-exit-host{position:fixed;inset:0;z-index:300;pointer-events:none}
-.motion-retired-modal::before{content:"";position:absolute;inset:0;z-index:-1;background:rgba(8,10,17,.62);backdrop-filter:blur(4px);pointer-events:none;animation:qch-scrim-exit var(--motion-exit) ease both}
+.motion-retired-modal::before{content:"";position:absolute;inset:0;z-index:-1;background:var(--motion-scrim-background,rgba(8,10,17,.62));backdrop-filter:var(--motion-scrim-filter,blur(4px));pointer-events:none;animation:qch-scrim-exit var(--motion-exit) ease both}
 @keyframes qch-scrim-exit{from{opacity:var(--motion-exit-opacity,1)}to{opacity:0}}
 [data-motion-exiting],[data-motion-exiting] *{pointer-events:none!important}
 @media(max-width:820px){.motion-retired-modal{padding:12px}}
@@ -2131,3 +2133,64 @@ dialog.config-access-dialog::backdrop{background:rgba(17,20,36,.34);backdrop-fil
   :is(.page-live-config,.page-client-connections) .app-dock .dock-nav a.dock-group-start::after,:is(.page-live-config,.page-client-connections) .app-dock .dock-label{display:none}
 }
 @media(prefers-reduced-motion:reduce){.app-dock,.app-dock .dock-label,.app-dock .dock-nav a.dock-group-start::after{transition:none!important}}
+/* Motion finish layer: after component skins, with independent translate/scale
+   channels so card FLIP, native controls and editor geometry retain ownership. */
+.workspace-main{transition:opacity var(--motion-exit) var(--motion-ease-out),translate var(--motion-exit) var(--motion-ease-out);transform-origin:50% 12%}
+.workspace-main.is-route-departing{opacity:.32;translate:0 -10px;pointer-events:none}
+:is(.node-card,.traffic-policy-card,.workspace-panel,.service-card,.client-access-node-card,.access-control-card,.bbr-card,.substore-agent-card,.settings-version-card,.template-card,.user-account-card){transform-origin:50% 10%;transition:box-shadow var(--motion-base) var(--motion-ease-out),border-color var(--motion-feedback) var(--motion-ease-out),background-color var(--motion-feedback) var(--motion-ease-out)}
+@media(hover:hover) and (pointer:fine){
+  :is(.node-card,.traffic-policy-card,.service-card,.client-access-node-card,.access-control-card,.bbr-card,.substore-agent-card,.template-card,.user-account-card):not(.dragging):not(.node-card-ghost):not(.traffic-card-ghost):hover{border-color:color-mix(in srgb,var(--accent) 34%,var(--line));box-shadow:0 16px 36px -22px color-mix(in srgb,var(--accent) 42%,transparent),var(--shadow-lift)}
+  :is(.button,.core-action,.task-inline-action,.service-version-toggle,.client-parameter-open):not(:disabled):hover{translate:0 -2px;box-shadow:0 7px 18px -10px color-mix(in srgb,var(--accent) 70%,transparent)}
+}
+:is(.button,.core-action,.task-inline-action,.service-version-toggle,.client-parameter-open):not(:disabled){transition:translate var(--motion-fast) var(--motion-ease-out),scale var(--motion-fast) var(--motion-ease-out),background-color var(--motion-feedback) var(--motion-ease-out),border-color var(--motion-fast) ease,color var(--motion-fast) ease,box-shadow var(--motion-feedback) var(--motion-ease-out),opacity var(--motion-fast) ease}
+:is(.button,.core-action,.task-inline-action,.service-version-toggle,.client-parameter-open):not(:disabled):active{translate:0 1px;scale:.96;box-shadow:none}
+:is(button,a,summary):focus-visible{box-shadow:0 0 0 5px color-mix(in srgb,var(--accent) 20%,transparent)}
+:is(.node-card-select>span,.release-channel-options label,.shared-engine-options label,.settings-toggle,.preset-option-heading):has(input:checked){box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--accent) 24%,transparent)}
+:is([role=tab],[aria-pressed],[data-core-log-level],[data-task-status-filter],[data-substore-target],[data-core-log-engine]){transition:background-color var(--motion-feedback) var(--motion-ease-out),border-color var(--motion-feedback) var(--motion-ease-out),color var(--motion-feedback) var(--motion-ease-out),box-shadow var(--motion-feedback) var(--motion-ease-out)}
+:is([role=tab][aria-selected=true],[aria-pressed=true],.context-list>a.active){box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--accent) 22%,transparent),0 4px 14px -10px color-mix(in srgb,var(--accent) 60%,transparent)}
+.dock-active-indicator{display:none}
+@media(min-width:821px),(pointer:fine){
+  .app-dock{transition:width var(--motion-slow) var(--motion-ease-out),box-shadow var(--motion-base) var(--motion-ease-out)}
+  .app-dock:is(:hover,:has(:focus-visible)){transition-delay:35ms}
+  .app-dock .dock-label{transition-duration:var(--motion-feedback),var(--motion-base)}
+  .app-dock:is(:hover,:has(:focus-visible)) :is(.dock-nav a,.dock-tools .dock-settings,.dock-tools button) .dock-label{transition-delay:65ms}
+  .dock-active-indicator:not([hidden]){display:block;position:absolute;top:0;left:var(--dock-rail-pad);right:var(--dock-rail-pad);border-radius:10px;background:linear-gradient(125deg,var(--accent),color-mix(in srgb,var(--accent) 78%,var(--accent-2)));box-shadow:0 6px 24px -9px color-mix(in srgb,var(--accent) 75%,transparent),inset 0 1px 0 rgba(255,255,255,.25);pointer-events:none}
+  .app-dock .dock-nav a.active,.app-dock .dock-tools .dock-settings.active{background:transparent;box-shadow:none}
+  .app-dock .dock-nav a.active::before,.app-dock .dock-tools .dock-settings.active::before{opacity:0}
+  .app-dock :is(.dock-nav a,.dock-tools .dock-settings,.dock-tools button){z-index:1}
+}
+@media(max-width:820px) and (pointer:fine){
+  :is(.page-live-config,.page-client-connections) .dock-active-indicator{display:none}
+  :is(.page-live-config,.page-client-connections) .app-dock .dock-nav a.active{background:var(--accent)}
+}
+/* Floating content grows from its launcher; native details owns the complete
+   exit and reversal while these properties never change its layout bounds. */
+:is(.mobile-account-menu,.config-inbound-menu,.config-tools-menu,.dashboard-month-picker,.ip-quality-calendar)[data-motion-popup]::details-content{transform-origin:50% 100%;scale:.96;translate:0 -10px;transition:opacity var(--motion-exit) var(--motion-ease-in),translate var(--motion-exit) var(--motion-ease-in),scale var(--motion-exit) var(--motion-ease-in),content-visibility var(--motion-exit) allow-discrete}
+:is(.mobile-account-menu,.config-inbound-menu,.config-tools-menu,.dashboard-month-picker,.ip-quality-calendar)[data-motion-popup][open]::details-content{scale:1;translate:0 0;transition-duration:var(--motion-base),var(--motion-base),var(--motion-base),0s;transition-timing-function:var(--motion-ease-out)}
+@starting-style{:is(.mobile-account-menu,.config-inbound-menu,.config-tools-menu,.dashboard-month-picker,.ip-quality-calendar)[data-motion-popup][open]::details-content{opacity:0;scale:.96;translate:0 -10px}}
+/* Hidden tab content retires immediately but keeps its native paint tail.
+   The outgoing panel is removed from flow, so incoming content owns layout. */
+.node-settings-panels{position:relative}
+[data-node-panel][data-motion-panel]{opacity:1;translate:0 0;scale:1;transform-origin:50% 0;transition:opacity var(--motion-feedback) var(--motion-ease-out),translate var(--motion-feedback) var(--motion-ease-out),scale var(--motion-feedback) var(--motion-ease-out),display var(--motion-exit) allow-discrete}
+[data-node-panel][data-motion-panel][hidden]{display:none!important;position:absolute;inset:17px 0 auto;opacity:0;translate:0 -8px;scale:.99;pointer-events:none;transition-duration:var(--motion-exit)}
+@starting-style{[data-node-panel][data-motion-panel]:not([hidden]){opacity:0;translate:0 16px;scale:.99}}
+@media(max-width:820px) and (pointer:coarse){[data-node-panel][data-motion-panel][hidden]{top:11px}}
+@keyframes qch-dialog-content{from{opacity:0;translate:0 -8px}to{opacity:1;translate:0 0}}
+dialog :is(h2,footer){opacity:0;translate:0 -8px;transition:opacity var(--motion-exit) var(--motion-ease-in),translate var(--motion-exit) var(--motion-ease-in)}
+dialog[open] :is(h2,footer){opacity:1;translate:0 0;transition-duration:var(--motion-base);transition-timing-function:var(--motion-ease-out);transition-delay:65ms}
+dialog footer{translate:none;transition-property:opacity}
+dialog[open] footer{transition-delay:110ms}
+@starting-style{dialog[open] :is(h2,footer){opacity:0;translate:0 -8px}}
+.modal-backdrop>[role=dialog] :is(h2,footer){animation:qch-dialog-content var(--motion-base) var(--motion-ease-out) 65ms backwards}
+.modal-backdrop>[role=dialog] footer{animation-name:qch-fade-enter;animation-delay:110ms}
+@keyframes qch-busy-sheen{from{background-position:100% 0}to{background-position:-100% 0}}
+.button[aria-busy=true]{opacity:.8;background-image:linear-gradient(110deg,transparent 25%,color-mix(in srgb,var(--accent) 20%,transparent) 45%,transparent 65%);background-size:240% 100%;animation:qch-busy-sheen 1300ms linear infinite}
+.task-feedback.running>[data-task-feedback-dot]{box-shadow:0 0 0 4px color-mix(in srgb,var(--accent) 12%,transparent)}
+:is(.status-label,.task-status,.task-stage,.task-feedback,.settings-saved-state,.traffic-policy-status,.node-presence){transition:background-color var(--motion-feedback) var(--motion-ease-out),color var(--motion-feedback) var(--motion-ease-out),border-color var(--motion-feedback) var(--motion-ease-out),box-shadow var(--motion-feedback) var(--motion-ease-out)}
+:is(.node-card,.traffic-policy-card).drop-target{box-shadow:inset 0 0 0 2px var(--accent),0 10px 32px -14px color-mix(in srgb,var(--accent) 50%,transparent)}
+@media(prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}
+  dialog::backdrop,details::details-content{animation:none!important;transition:none!important}
+  .workspace-main.is-route-departing{opacity:1;translate:none}
+  :is(.button,.core-action,.task-inline-action,.service-version-toggle,.client-parameter-open):not(:disabled):is(:hover,:active){translate:none;scale:1}
+}
