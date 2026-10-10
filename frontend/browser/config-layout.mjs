@@ -1,4 +1,5 @@
 import { assert, waitFor } from "./assertions.mjs";
+import { checkReadableLabel, settlePaint } from "./status-controls.mjs";
 
 export async function testConfigLayoutRuntime({ testAPI }) {
     await waitFor(()=>document.querySelector("#live-config-form"),"manual editor did not load");
@@ -84,6 +85,24 @@ export async function testConfigLayoutRuntime({ testAPI }) {
     assert.ok(nav.bottom <= frame.top + 1,"file navigation must stay above the full-width source");
     assert.ok(frame.width >= workspace.getBoundingClientRect().width - 3,"source editor lost width to an extra rail");
     assert.equal(document.querySelectorAll(".config-file-navigation").length,0,"redundant toolbar still separates selection from source");
+    const root = document.documentElement;
+    const themeBefore = root.dataset.theme, scaleBefore = root.style.getPropertyValue("--ui-font-scale");
+    try {
+      for (const theme of ["light", "dark"]) for (const scale of ["1", "1.25"]) {
+        root.dataset.theme = theme;
+        root.style.setProperty("--ui-font-scale", scale);
+        await settlePaint();
+        for (const pill of document.querySelectorAll(".live-engine-status, .context-list .agent-presence")) {
+          checkReadableLabel(pill);
+          const frame = pill.closest("button, a").getBoundingClientRect(), bounds = pill.getBoundingClientRect();
+          assert.ok(bounds.left >= frame.left && bounds.right <= frame.right, "configuration status spills outside its tab or sidebar row");
+        }
+      }
+    } finally {
+      root.dataset.theme = themeBefore;
+      if (scaleBefore) root.style.setProperty("--ui-font-scale", scaleBefore);
+      else root.style.removeProperty("--ui-font-scale");
+    }
     assert.ok(workspace.querySelector('.config-file-buttons [data-inbound-action="add"]'),"add action must stay with file navigation");
     assert.ok(workspace.querySelector('.code-editor-toolbar [data-code-reset]'),"reset must stay with current-file tools");
     assert.ok(workspace.querySelector('.code-editor-toolbar [data-code-format]'),"format must stay with current-file tools");

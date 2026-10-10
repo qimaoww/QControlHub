@@ -246,7 +246,7 @@ try {
     "a compact aggregate core chip does not request a structural page render",
   );
   assert.equal(structureCards["sing-box"].dataset.coreInstalled, "0");
-  assert.equal(structureServices["sing-box"].textContent, "未安装");
+  assert.equal(structureServices["sing-box"].textContent, "待导入");
   assert.equal(structureStates["sing-box"].className, "engine-state muted");
   assert.equal(
     structureInstalledSummary.textContent,
@@ -272,8 +272,8 @@ try {
   assert.equal(structureRequests, 2, "compact install transition stays in place");
   assert.equal(structureRenders, 0, "compact install transition does not render");
   assert.equal(structureCards["sing-box"].dataset.coreInstalled, "1");
-  assert.equal(structureServices["sing-box"].textContent, "running");
-  assert.equal(structureStates["sing-box"].className, "engine-state running");
+  assert.equal(structureServices["sing-box"].textContent, "运行中");
+  assert.equal(structureStates["sing-box"].className, "engine-state ok");
   assert.equal(
     structureInstalledSummary.textContent,
     "linux / amd64 · 1/2 内核已安装",

@@ -161,7 +161,7 @@ export async function testConfigInboundsRuntime(preview = false) {
   offline.dispose();
   const switcher = await fixture("xray", {multi:true});
   assert(switcher.state.data.liveEngine === "xray", "default selected an uninstalled core");
-  assert(document.querySelector('[data-live-engine="xray"] small').textContent === "正在运行", "running core status not visible");
+  assert(document.querySelector('[data-live-engine="xray"] small').textContent === "运行中", "running core status not visible");
   assert(document.querySelector('[data-live-engine="mihomo"] small').textContent === "未安装", "missing status not visible");
   let releaseSwitch;
   switcher.workspaceGate = new Promise(resolve=>{releaseSwitch=resolve;});

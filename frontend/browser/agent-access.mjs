@@ -10,8 +10,10 @@ await waitFor(() => document.querySelector(".empty.large"), "空列表没有渲�
 export async function testSharedNodeRuntime({ mode, testAPI, populatedAgents }) {
 const assertSharedStatusOrder = (root) => {
     const badge = root.querySelector(".agent-shared-badge");
-    const status = root.querySelector("[data-agent-status-label]");
-    assert.ok(badge && status, "共享节点缺少共享标记或在线状态");
+    // Compare the controls, not the text line box: status text has an optical
+    // vertical offset while its marker remains centred in the label frame.
+    const status = root.querySelector("[data-agent-presence]");
+    assert.ok(badge && status?.querySelector("[data-agent-status-label]"), "共享节点缺少共享标记或在线状态");
     const badgeRect = badge.getBoundingClientRect(), statusRect = status.getBoundingClientRect();
     assert.ok(badge.nextElementSibling?.matches("[data-agent-presence]"), "共享标记未紧邻在线状态左侧");
     assert.ok(badgeRect.right <= statusRect.left, "共享标记没有显示在在线状态左侧");

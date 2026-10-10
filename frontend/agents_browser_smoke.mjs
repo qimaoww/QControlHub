@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { createServer } from "node:http";
-import { chmod, mkdtemp, readFile, rm } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -111,7 +112,7 @@ const server = createServer(async (request, response) => {
 
 await new Promise((resolve, reject) => {
   server.once("error", reject);
-  server.listen(0, "127.0.0.1", resolve);
+  server.listen(Number(process.env.QCH_BROWSER_SMOKE_PORT || 0), "127.0.0.1", resolve);
 });
 
 // Reuse the same fixture for manual layout inspection, without launching the
@@ -130,9 +131,9 @@ const chrome = [
 ]
   .filter(Boolean)
   .find((candidate) =>
-    candidate.includes("/")
-      ? spawnSync(candidate, ["--version"], { stdio: "ignore" }).status === 0
-      : spawnSync("which", [candidate], { stdio: "ignore" }).status === 0,
+    candidate.includes("/") || candidate.includes("\\")
+      ? existsSync(candidate)
+      : spawnSync(process.platform === "win32" ? "where" : "which", [candidate], { stdio: "ignore", timeout: 5000 }).status === 0,
   );
 
 assert.ok(chrome, "真实浏览器 smoke 需要 Google Chrome 或 Chromium");
@@ -195,7 +196,7 @@ async function driveMotionGestures(send, mobile) {
   }
 }
 
-async function observeSmokeResult(webSocketURL, navigateURL, mobile, reduced, motionMode, gestureMode) {
+async function observeSmokeResult(webSocketURL, pageURL, { mobile, reduced, gestureMode, captureMode }) {
   const socket = new WebSocket(webSocketURL);
   await Promise.race([
     new Promise((resolve, reject) => {
@@ -211,6 +212,9 @@ async function observeSmokeResult(webSocketURL, navigateURL, mobile, reduced, mo
   const pending = new Map();
   socket.addEventListener("message", (event) => {
     const message = JSON.parse(String(event.data));
+    if (process.env.QCH_BROWSER_SMOKE_DEBUG && ["Network.requestWillBeSent", "Network.responseReceived", "Network.loadingFailed"].includes(message.method)) {
+      process.stderr.write(`${message.method} ${message.params?.request?.url || message.params?.response?.url || message.params?.errorText}\n`);
+    }
     if (!message.id || !pending.has(message.id)) return;
     const { resolve, reject } = pending.get(message.id);
     pending.delete(message.id);
@@ -226,19 +230,24 @@ async function observeSmokeResult(webSocketURL, navigateURL, mobile, reduced, mo
     });
 
   try {
-    if (motionMode) await send("Emulation.setFocusEmulationEnabled", { enabled: true });
-    if (navigateURL) {
-      await send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: reduced ? "reduce" : "no-preference" }] });
-    }
+    // CDP navigation starts from about:blank in every mode. Keep keyboard focus
+    // equivalent to an active browser window for sidebar and popup regressions.
+    await send("Emulation.setFocusEmulationEnabled", { enabled: true });
+    await send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: reduced ? "reduce" : "no-preference" }] });
     if (mobile) {
       // A narrow desktop window is not a touch device and Chrome may clamp its
       // width. Apply actual mobile metrics before the fixture starts running.
       await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
       await send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 1 });
     }
-    if (navigateURL) await send("Page.navigate", { url: navigateURL });
-    // Popup/selection suites need focus emulation, but publish no drag input.
-    // Their route sweeps use the normal result deadline, not the input deadline.
+    await send("Page.enable");
+    if (process.env.QCH_BROWSER_SMOKE_DEBUG) await send("Network.enable");
+    const navigation = await Promise.race([
+      send("Page.navigate", { url: pageURL }),
+      delay(30000).then(() => { throw new Error("Browser navigation timed out"); }),
+    ]);
+    if (navigation.errorText) throw new Error(`Browser navigation failed: ${navigation.errorText}`);
+    // Focus-only popup/selection cases publish no drag gestures.
     if (gestureMode) await Promise.race([
       driveMotionGestures(send, mobile),
       delay(30000).then(() => { throw new Error("motion input timed out"); }),
@@ -257,6 +266,7 @@ async function observeSmokeResult(webSocketURL, navigateURL, mobile, reduced, mo
             resolve({
               status,
               detail: document.querySelector("#browser-smoke-result")?.textContent || "",
+              statusControls: window.statusControlResult,
             });
           }, 10);
         })`,
@@ -275,7 +285,61 @@ async function observeSmokeResult(webSocketURL, navigateURL, mobile, reduced, mo
     if (!evaluation) throw new Error("等待浏览器 smoke 完成标记超时");
     if (evaluation.exceptionDetails)
       throw new Error(JSON.stringify(evaluation.exceptionDetails));
+    if (captureMode && evaluation.result?.value?.status === "passed") {
+      const fontScale = Number(process.env.QCH_BROWSER_SMOKE_FONT_SCALE || 1);
+      assert.ok(fontScale >= 1 && fontScale <= 2, "screenshot font scale must be between 1 and 2");
+      const views = [{ name: captureMode }];
+      if (captureMode.startsWith("status-controls")) views.push(
+        { name: `${captureMode}-services`, hash: "#settings-node-alpha", selector: ".core-runtime-name .engine-state" },
+        { name: `${captureMode}-tasks`, hash: "#tasks", selector: ".task-event-card .status-label" },
+        { name: `${captureMode}-traffic`, hash: "#traffic", selector: ".traffic-policy-status" },
+      );
+      for (const view of views) {
+        if (view.hash) {
+          const loaded = await send("Runtime.evaluate", {
+            expression: `(async () => {
+              location.hash = ${JSON.stringify(view.hash)};
+              const deadline = Date.now() + 10000;
+              while (!document.querySelector(${JSON.stringify(view.selector)})) {
+                if (Date.now() > deadline) throw new Error("Screenshot view did not load");
+                await new Promise(resolve => setTimeout(resolve, 25));
+              }
+              window.scrollTo(0, 0);
+            })()`,
+            awaitPromise: true,
+          });
+          if (loaded.exceptionDetails) throw new Error(JSON.stringify(loaded.exceptionDetails));
+        }
+        for (const theme of ["light", "dark"]) {
+          const painted = await send("Runtime.evaluate", {
+            expression: `(async () => {
+              document.documentElement.dataset.theme = "${theme}";
+              document.documentElement.style.setProperty("--ui-font-scale", "${fontScale}");
+              document.body.offsetWidth;
+              await Promise.race([
+                Promise.all(document.getAnimations().filter(animation => animation.effect?.getTiming().iterations !== Infinity).map(animation => animation.finished.catch(() => {}))),
+                new Promise(resolve => setTimeout(resolve, 1000)),
+              ]);
+            })()`,
+            awaitPromise: true,
+          });
+          if (painted.exceptionDetails) throw new Error(JSON.stringify(painted.exceptionDetails));
+          const screenshot = await send("Page.captureScreenshot", { format: "png" });
+          const suffix = fontScale === 1 ? "" : `-font-${fontScale}`;
+          await writeFile(join(process.env.QCH_BROWSER_SMOKE_SCREENSHOTS, `${view.name}${suffix}-${theme}.png`), Buffer.from(screenshot.data, "base64"));
+        }
+      }
+    }
     return evaluation.result?.value;
+  } catch (error) {
+    const diagnostic = await Promise.race([
+      send("Runtime.evaluate", {
+        expression: `JSON.stringify({ url: location.href, ready: document.readyState, status: document.documentElement.dataset.browserSmoke, text: document.body.innerText.slice(0, 1800), animations: document.getAnimations().map(animation => ({ state: animation.playState, timing: animation.effect?.getComputedTiming() })) })`,
+        returnByValue: true,
+      }),
+      delay(2000).then(() => null),
+    ]).catch(() => null);
+    throw new Error(`${error.message}\nBrowser state: ${diagnostic?.result?.value || "unavailable"}`, { cause: error });
   } finally {
     socket.close();
   }
@@ -299,9 +363,10 @@ async function runMode(mode) {
   let child;
   try {
     await chmod(profile, 0o700);
-    const url = `http://127.0.0.1:${address.port}/agents-browser-smoke.html?mode=${mode}#node-settings`;
-    const mobile = mode.startsWith("motion-mobile") || mode.startsWith("motion-popup-mobile") || mode.startsWith("motion-selection-mobile") || ["config-layout-mobile", "connections-mobile", "batch-layout-mobile", "config-inbounds-mobile", "substore-scope", "users-mobile", "users-layout-mobile", "sharing-mobile", "shared-node-mobile", "enrollment-mobile", "client-order-mobile", "client-layout-mobile", "dashboard-mobile", "bbr-mobile", "shell-layout-mobile", "capabilities-settings-mobile", "ports-mobile", "traffic-layout-mobile", "traffic-layout-dense-mobile", "ip-quality-mobile"].includes(mode);
-    const initialURL = mobile || mode.startsWith("motion") ? "about:blank" : url;
+    const capture = (mode.startsWith("node-card-layout") || mode.startsWith("status-controls") || mode.startsWith("config-layout")) && process.env.QCH_BROWSER_SMOKE_SCREENSHOTS;
+    const url = `http://127.0.0.1:${address.port}/agents-browser-smoke.html?mode=${mode}${capture ? "&preview=1" : ""}#node-settings`;
+    const mobile = mode.startsWith("motion-mobile") || mode.startsWith("motion-popup-mobile") || mode.startsWith("motion-selection-mobile") || mode.startsWith("status-controls-mobile") || ["node-card-layout-mobile", "config-layout-mobile", "connections-mobile", "batch-layout-mobile", "config-inbounds-mobile", "substore-scope", "users-mobile", "users-layout-mobile", "sharing-mobile", "shared-node-mobile", "enrollment-mobile", "client-order-mobile", "client-layout-mobile", "dashboard-mobile", "bbr-mobile", "shell-layout-mobile", "capabilities-settings-mobile", "ports-mobile", "traffic-layout-mobile", "traffic-layout-dense-mobile", "ip-quality-mobile"].includes(mode);
+    const initialURL = "about:blank";
     child = spawn(
       chrome,
       [
@@ -318,12 +383,14 @@ async function runMode(mode) {
         "--disable-sync",
         "--metrics-recording-only",
         "--no-first-run",
+        // Disposable headless profiles cannot unlock an interactive Linux keyring.
+        "--password-store=basic",
         "--disable-features=AutofillServerCommunication,CertificateTransparencyComponentUpdater,MediaRouter,OptimizationHints",
         "--hide-scrollbars",
         // Match a mouse-equipped desktop for TCP and shell layout checks. Headless
         // Chromium otherwise reports pointer:none and misses desktop CSS.
         ...((mode.startsWith("bbr") || mode.startsWith("shell-layout") || mode.startsWith("motion")) && !mobile ? ["--blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4"] : []),
-        mobile ? "--window-size=390,844" : mode === "shell-layout" ? "--window-size=820,900" : mode === "traffic-layout-dense" ? "--window-size=1960,1100" : "--window-size=1280,900",
+        mobile ? "--window-size=390,844" : mode === "shell-layout" ? "--window-size=820,900" : mode === "traffic-layout-dense" || mode === "node-card-layout" ? "--window-size=1960,1100" : "--window-size=1280,900",
         `--user-data-dir=${profile}`,
         "--remote-debugging-port=0",
         initialURL,
@@ -335,6 +402,7 @@ async function runMode(mode) {
       new Promise((resolve, reject) => {
         child.stderr.on("data", (chunk) => {
           stderr += chunk;
+          if (process.env.QCH_BROWSER_SMOKE_DEBUG) process.stderr.write(chunk);
           const match = stderr.match(
             /DevTools listening on ws:\/\/(127\.0\.0\.1|localhost):(\d+)\//,
           );
@@ -351,13 +419,17 @@ async function runMode(mode) {
     ]);
     const pageTarget = await waitForPageTarget(debugOrigin, initialURL);
     const gestureMode = ["motion", "motion-reduced", "motion-mobile", "motion-mobile-reduced"].includes(mode);
-    const result = await observeSmokeResult(pageTarget, initialURL === "about:blank" ? url : undefined, mobile, mode.endsWith("reduced"), mode.startsWith("motion"), gestureMode);
+    const result = await observeSmokeResult(pageTarget, url, {
+      mobile, reduced: mode.endsWith("reduced"),
+      gestureMode, captureMode: capture ? mode : undefined,
+    });
     assert.equal(
       result?.status,
       "passed",
       `Chrome ${mode} smoke 未通过：${result?.detail || "无错误详情"}\n${stderr}`,
     );
     if (mode === "logs") process.stdout.write(`${result.detail}\n`);
+    if (result.statusControls) process.stdout.write(`${mode}: ${JSON.stringify(result.statusControls)}\n`);
   } finally {
     if (child) await stopBrowser(child);
     await rm(profile, {
@@ -370,7 +442,7 @@ async function runMode(mode) {
 }
 
 try {
-  const modes = process.env.QCH_BROWSER_SMOKE_MODES || process.env.QCH_BROWSER_SMOKE_MODE || "motion-selection,motion-selection-reduced,motion-selection-mobile,motion-selection-mobile-reduced,motion-popup,motion-popup-reduced,motion-popup-mobile,motion-popup-mobile-reduced,motion,motion-reduced,motion-mobile,motion-mobile-reduced,connections,connections-mobile,admin,uninstall-writeonly,batch-layout,batch-layout-mobile,empty,enrollment,enrollment-mobile,readonly,ports,ports-mobile,client-order,client-order-mobile,client-layout,client-layout-mobile,dashboard,dashboard-mobile,dashboard-readonly,dashboard-limited,dashboard-unavailable,regions,logs,logs-restore,bbr,bbr-mobile,bbr-readonly,bbr-writeonly,config-restrictions,config-inbounds,config-inbounds-mobile,config-migration,config-scope,substore-scope,substore-layout,users,users-mobile,users-layout,users-layout-mobile,sharing,sharing-mobile,shared-node,shared-node-mobile,config-layout,config-layout-mobile,traffic-layout,traffic-layout-mobile,traffic-layout-dense,traffic-layout-dense-mobile,capabilities-settings,capabilities-settings-mobile,capabilities-settings-readonly,shell-layout,shell-layout-mobile,presets,ip-quality,ip-quality-mobile,ip-quality-readonly";
+  const modes = process.env.QCH_BROWSER_SMOKE_MODES || process.env.QCH_BROWSER_SMOKE_MODE || "motion-selection,motion-selection-reduced,motion-selection-mobile,motion-selection-mobile-reduced,motion-popup,motion-popup-reduced,motion-popup-mobile,motion-popup-mobile-reduced,motion,motion-reduced,motion-mobile,motion-mobile-reduced,status-controls,status-controls-mobile,status-controls-reduced,status-controls-mobile-reduced,node-card-layout,node-card-layout-mobile,connections,connections-mobile,admin,uninstall-writeonly,batch-layout,batch-layout-mobile,empty,enrollment,enrollment-mobile,readonly,ports,ports-mobile,client-order,client-order-mobile,client-layout,client-layout-mobile,dashboard,dashboard-mobile,dashboard-readonly,dashboard-limited,dashboard-unavailable,regions,logs,logs-restore,bbr,bbr-mobile,bbr-readonly,bbr-writeonly,config-restrictions,config-inbounds,config-inbounds-mobile,config-migration,config-scope,substore-scope,substore-layout,users,users-mobile,users-layout,users-layout-mobile,sharing,sharing-mobile,shared-node,shared-node-mobile,config-layout,config-layout-mobile,traffic-layout,traffic-layout-mobile,traffic-layout-dense,traffic-layout-dense-mobile,capabilities-settings,capabilities-settings-mobile,capabilities-settings-readonly,shell-layout,shell-layout-mobile,presets,ip-quality,ip-quality-mobile,ip-quality-readonly";
   for (const mode of modes.split(",")) await runMode(mode);
   process.stdout.write("agents browser runtime smoke passed\n");
 } finally {

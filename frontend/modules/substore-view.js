@@ -107,7 +107,7 @@ export function createSubStoreView({ state, can, esc, engineName, shell }, { lif
     shell(
       `<section class="substore-workspace" data-substore-page>
         <section class="substore-status-bar">
-          <div class="substore-connection"><i class="${statusClass}"></i><span><b>Sub-Store</b><small>${esc(settings.endpoint_hint || "尚未设置连接")}</small></span><em>${statusText}</em></div>
+          <div class="substore-connection"><span><b>Sub-Store</b><small>${esc(settings.endpoint_hint || "尚未设置连接")}</small></span><em class="status-label ${statusClass}">${statusText}</em></div>
           <div class="substore-subscription"><span>当前同步组</span><b>${esc(activeTarget?.display_name || activeTarget?.subscription_name || "—")}</b><small>${esc(activeTarget && activeTarget.display_name !== activeTarget.subscription_name ? `Sub-Store：${activeTarget.subscription_name} · ${targetStatus}` : targetStatus)}</small></div>
           ${manage ? `<div class="substore-status-actions"><button class="button small" type="button" data-substore-test ${settings.configured ? "" : "disabled"}>测试连接</button>${manageGlobal ? '<button class="button small" type="button" data-substore-settings>连接设置</button>' : ""}${activeTarget ? '<button class="button small" type="button" data-substore-target-edit>组设置</button>' : ""}<button class="button primary small" type="button" data-substore-run ${canRunSync ? "" : "disabled"}>同步当前组 · ${selectedNodeCount}</button></div>` : ""}
         </section>

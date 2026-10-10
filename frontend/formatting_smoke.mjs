@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createDisplayHelpers } from "./modules/formatting.js";
+import { serviceStatusInfo, serviceRuntimeStatus } from "./modules/service-status.js";
 
 const state = { data: { settings: { time_zone: "UTC" } } };
 const display = createDisplayHelpers(state);
@@ -22,6 +23,22 @@ assert.equal(display.actionName("read-managed-config"), "读取 QAgent 配置");
 assert.equal(display.actionName("new_action"), "new action");
 assert.equal(display.statusName("canceled"), "已取消");
 assert.equal(display.serviceStatusName(""), "未知");
+for (const [value, label, tone] of [
+  ["active", "运行中", "ok"], ["running", "运行中", "ok"],
+  ["inactive", "已停止", "muted"], ["stopped", "已停止", "muted"],
+  ["activating", "启动中", "warn"], ["deactivating", "停止中", "warn"],
+  ["failed", "运行失败", "bad"], ["unknown", "状态未知", "muted"],
+]) {
+  assert.equal(display.serviceStatusName(value), label);
+  assert.equal(serviceStatusInfo(value).tone, tone);
+  assert.equal(serviceRuntimeStatus({ installed: true, service_status: value }).label, label);
+}
+assert.equal(serviceRuntimeStatus({ installed: true, service_status: "active" }, false).label, "状态未知");
+assert.equal(serviceRuntimeStatus({}, false).label, "未安装");
+assert.equal(serviceRuntimeStatus({ existing_config_available: true }).label, "待导入");
+assert.equal(serviceStatusInfo('<img src=x onerror=alert(1)>').label, "状态未知");
+assert.equal(display.statusName("running"), "执行中", "task execution must retain its own semantics");
+assert.equal(display.statusTone("running"), "warn");
 assert.equal(display.statusTone("active"), "ok");
 assert.equal(display.statusTone("activating"), "warn");
 assert.equal(display.statusTone("failed"), "bad");
