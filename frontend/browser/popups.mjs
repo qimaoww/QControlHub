@@ -4,9 +4,19 @@ import { bindConfigMenu } from "../modules/config-menu.js";
 import { cancelPopupEntrance } from "../modules/popup.js";
 import { checkNativeExit, checkDisclosureMotion, checkCoreDisclosure, checkRouteCoverage, checkInteractionFeedback } from "./surface-motion.mjs";
 
-const settle = async () => waitFor(() => !document.getAnimations().some(animation =>
-  Number.isFinite(animation.effect.getTiming().iterations) &&
-  (animation.id.startsWith("qch-") || ["qch-dialog-enter", "qch-dialog-content", "qch-fade-enter"].includes(animation.animationName) || animation.transitionProperty)), "popup motion did not settle");
+const movingPopups = () => document.getAnimations().filter(animation =>
+  animation.id.startsWith("qch-") ||
+  !["finished", "idle"].includes(animation.playState) && Number.isFinite(animation.effect.getTiming().iterations) &&
+  (["qch-dialog-enter", "qch-dialog-content", "qch-fade-enter"].includes(animation.animationName) || animation.transitionProperty));
+const settle = async () => {
+  try { await waitFor(() => movingPopups().length === 0, "popup motion did not settle"); }
+  catch (error) {
+    throw new Error(`${error.message}: ${JSON.stringify(movingPopups().map(animation => ({
+      id: animation.id, name: animation.animationName || animation.transitionProperty,
+      state: animation.playState, time: animation.currentTime, timing: animation.effect.getComputedTiming(),
+    })))}`);
+  }
+};
 const escape = element => element.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
 const pointer = (element, type, x, y) => element.dispatchEvent(new PointerEvent(type, { bubbles: true, clientX: x, clientY: y }));
 const click = (element, x, y) => element.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: x, clientY: y }));

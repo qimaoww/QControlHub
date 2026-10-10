@@ -157,3 +157,11 @@ task entrance, order changes and a complete inert removal tail. A layout reflow
 releases only its own element's landing, so hiding a neighboring auxiliary button
 cannot cancel a nested task insertion or feedback animation. Both four-mode
 motion/popup suites and module/ownership checks passed with these corrections.
+
+Final review validation: complete `make check` passed again (exit 0), with the
+Go frontend browser repetition taking 420.258 s. The updated popup settlement
+check also passed all four modes in Debian Chromium and Alpine Chromium 152.
+It waits for paused JS owners and genuinely playing native effects, while
+excluding finished/idle native effects from playback; complete detachment and
+closed-state assertions still verify exit cleanup. Failures include animation
+state/timing diagnostics. No production motion or interaction budget changed.
