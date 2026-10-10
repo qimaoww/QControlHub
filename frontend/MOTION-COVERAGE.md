@@ -186,4 +186,6 @@ paint state with a bounded timeout. Missing-finish delivery is simulated by
 explicitly finishing the animation with its handler disabled, then checking
 zero-opacity retention and fallback removal. Immediate business, focus and
 accessibility assertions remain. Log budget failures include measured timings
-without changing limits; production motion and timings are unchanged.
+without changing limits. Popup and selection suites use the normal result
+deadline; only the four suites publishing real drag gestures run the input
+driver. Production motion and timings are unchanged.

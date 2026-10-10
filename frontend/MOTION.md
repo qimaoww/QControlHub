@@ -202,6 +202,9 @@ regression explicitly finishes its animation with event delivery disabled,
 asserts that zero opacity is retained, and observes fallback removal. Immediate
 close, focus, inertness and click-through assertions are retained. Log rendering
 budget failures now include measured timings without changing their limits.
+The input driver runs only for the four actual drag suites. Popup and selection
+suites retain focus emulation and use the normal result deadline, avoiding a
+shorter input timeout while waiting for a suite that publishes no gestures.
 
 Manual Chromium inspection covered desktop drag/navigation and both themes,
 plus dark reduced-motion phone portrait (375 x 812) and landscape (844 x 390).

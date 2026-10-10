@@ -195,7 +195,7 @@ async function driveMotionGestures(send, mobile) {
   }
 }
 
-async function observeSmokeResult(webSocketURL, navigateURL, mobile, reduced, motionMode) {
+async function observeSmokeResult(webSocketURL, navigateURL, mobile, reduced, motionMode, gestureMode) {
   const socket = new WebSocket(webSocketURL);
   await Promise.race([
     new Promise((resolve, reject) => {
@@ -237,7 +237,9 @@ async function observeSmokeResult(webSocketURL, navigateURL, mobile, reduced, mo
       await send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 1 });
     }
     if (navigateURL) await send("Page.navigate", { url: navigateURL });
-    if (motionMode) await Promise.race([
+    // Popup/selection suites need focus emulation, but publish no drag input.
+    // Their route sweeps use the normal result deadline, not the input deadline.
+    if (gestureMode) await Promise.race([
       driveMotionGestures(send, mobile),
       delay(30000).then(() => { throw new Error("motion input timed out"); }),
     ]);
@@ -348,7 +350,8 @@ async function runMode(mode) {
       }),
     ]);
     const pageTarget = await waitForPageTarget(debugOrigin, initialURL);
-    const result = await observeSmokeResult(pageTarget, initialURL === "about:blank" ? url : undefined, mobile, mode.endsWith("reduced"), mode.startsWith("motion"));
+    const gestureMode = ["motion", "motion-reduced", "motion-mobile", "motion-mobile-reduced"].includes(mode);
+    const result = await observeSmokeResult(pageTarget, initialURL === "about:blank" ? url : undefined, mobile, mode.endsWith("reduced"), mode.startsWith("motion"), gestureMode);
     assert.equal(
       result?.status,
       "passed",
