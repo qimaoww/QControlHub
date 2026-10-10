@@ -27,6 +27,8 @@ function hideTip(immediate = false) {
 }
 function showTip(element) {
   if (!element?.isConnected || element.closest("[hidden],[inert]")) return;
+  const modal = document.querySelector("dialog:modal");
+  if (modal && !modal.contains(element)) return;
   const text = element.dataset.motionTitle ?? element.getAttribute("title");
   if (!text?.trim()) return;
   clearTimeout(closeTimer);
@@ -120,21 +122,24 @@ export function installInteractionFeedback() {
   });
   document.addEventListener("focusin", event => {
     focused = target(event.target);
-    if (focused) scheduleTip(focused, 80);
+    if (focused) scheduleTip(focused, 80); else hideTip();
   });
   document.addEventListener("focusout", event => {
     if (!focused?.contains(event.relatedTarget)) { focused = null; if (!hovered) hideTip(); }
   });
-  document.addEventListener("pointerdown", () => hideTip(true), true);
+  document.addEventListener("pointerdown", () => hideTip(), true);
+  document.addEventListener("beforetoggle", event => {
+    if (event.target.tagName === "DIALOG" && event.newState === "open") hideTip();
+  }, true);
   document.addEventListener("keydown", event => { if (event.key === "Escape") hideTip(); }, true);
   document.addEventListener("invalid", event => {
     const control = event.target;
     if (!control.validationMessage || !control.matches("input,select,textarea")) return;
     event.preventDefault();
     hideTip(true);
-    invalidFeedback(control);
     const first = [...(control.form?.elements || [control])].find(element => element.willValidate && !element.validity.valid);
-    if (first === control) control.focus({ preventScroll: true });
+    if (first === control) control.focus();
+    invalidFeedback(control);
   }, true);
   const validate = event => {
     const control = event.target;

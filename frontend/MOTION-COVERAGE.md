@@ -91,7 +91,9 @@ keyboard tooltip entry/exit/refocus using the same element; updated hint metadat
 through refresh; native validity rejection, correction and message persistence
 through polling; immediate field reversal without an opacity jump; copy-message
 clear with its full outgoing paint; and destruction of a native modal in mid-entry
-with bounded complete panel/scrim retirement. These join the route/list/drag/tab/
+with bounded complete panel/scrim retirement. Live frames compare the retired
+heading/footer opacity to their interrupted source paint and require the modal
+to keep fading/shrinking without an enlarged or bright frame. These join the route/list/drag/tab/
 disclosure and delayed-first-result regressions. Reduced mode has no retained
 paint or motion, while preserving the same messages, constraints and focus.
 
@@ -130,4 +132,11 @@ paint or motion, while preserving the same messages, constraints and focus.
 
 ## Commands and final results
 
-Validation results are recorded here after the required command completes.
+- `make generate-styles`: passed; generated stylesheet matches the ordered manifest and frozen initial source remains unchanged.
+- `QCH_TEST_DATABASE_URL=postgresql://postgres@127.0.0.1:56481/qch_motion?sslmode=disable make check`: **passed, exit 0**, using a task-owned PostgreSQL 17 instance. All 70 Chromium modes, module/policy/style contracts, installer/redeployment/quick-start checks, vet and all Go packages passed. The Go frontend run repeated the browser suite and completed in **420.468 s**.
+- Final supplemental four-mode feedback/exit suite, module smoke and 158-module boundary check: **passed**. It includes complete painted-state sampling of a destroyed modal, field/prompt reversal, tooltip metadata refresh and native validation persistence. A real pointer-hover probe retained its `0px -2px` geometry across 18 rendering frames and completion.
+- Direct log pressure suite: 8,000 loaded records, 200 DOM rows, 69 ms switch acknowledgement and 81 ms cached switch; the 500 ms budget is unchanged.
+- Actual recording metadata: before 22.97 s, after 22.95 s, 1440 x 960 / 60 fps; mobile dark/touch 10.77 s, 390 x 844 / 60 fps. All are H.264 at original playback speed.
+- Full required-command output and final supplemental evidence: [255-validation.txt](../docs/motion/255-validation.txt).
+
+During this audit, a conditional-field FLIP inside a scaling parent produced horizontal overflow. Parent entrance now owns the nested reveal. The first remote CI run also exposed an early test completion: document animation enumeration cannot see a closed-shadow retirement. The exit assertion now waits for the actual retired surface to disconnect, keeping the cleanup deadline and all interaction budgets unchanged.

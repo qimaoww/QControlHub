@@ -53,6 +53,12 @@ the production CSP, which prohibits inline style attributes in templates.
 
 The spatial easing is `cubic-bezier(.22,1,.36,1)`; exits use
 `cubic-bezier(.4,0,1,1)`. Every completed effect releases its temporary animation.
+Control reveals animate opacity while native CSS keeps owning hover/press
+geometry. A live 18-frame hover probe retained `0px -2px` through completion,
+without a final reset. Interrupted exits shrink from the current scale and
+continue displacement from the current translation; workspace tails keep moving
+in the departure direction.
+
 Individual `translate` and `scale` leave positioning/FLIP `transform` ownership
 intact. At most 12 visible, non-nested route surfaces participate in a sequence.
 Offscreen rows, telemetry, clocks, logs and identical polling results stay quiet.

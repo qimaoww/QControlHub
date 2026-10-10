@@ -17,6 +17,7 @@ export function captureWorkspaceExit(main) {
   clone.classList.remove("is-route-pending", "is-route-departing");
   clone.querySelectorAll("dialog,iframe,script,video,audio,object,embed").forEach(element => element.remove());
   clone.style.cssText = `position:fixed;left:${rect.left}px;top:${rect.top}px;width:${rect.width}px;height:${rect.height}px;margin:0;opacity:${style.opacity};transition:none;pointer-events:none`;
+  clone.style.setProperty("--motion-exit-distance", "-10px");
   const frame = document.createElement("div");
   frame.className = document.body.className;
   frame.append(clone);

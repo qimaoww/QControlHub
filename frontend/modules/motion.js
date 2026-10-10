@@ -109,7 +109,10 @@ export function animateMotion(element, keyframes, options) {
 }
 export function enterSurface(element, options) {
   if (element?.closest?.("[hidden],details:not([open]) > :not(summary)")) return () => {};
-  return animateMotion(element, [
+  // A control's hover/press owns its geometry throughout the reveal; replacing
+  // it with a zero endpoint would snap back to its CSS state on completion.
+  const control = element?.matches?.("button,[role=button],a,input,select,textarea");
+  return animateMotion(element, control ? [{ opacity: 0 }, { opacity: 1 }] : [
     { opacity: 0, translate: "0 14px", scale: ".985" },
     { opacity: 1, translate: "0 0", scale: "1" },
   ], { defer: true, ...options });
@@ -131,7 +134,13 @@ export function retireSurface(element, { surface = element, from, onSettled = ()
   const navigate = () => cancelMotion(surface);
   window.addEventListener("hashchange", navigate);
   const distance = computed.getPropertyValue("--motion-exit-distance").trim() || "4px";
-  return animateMotion(surface, [start, { opacity: 0, translate: `0 ${distance}`, scale: ".97" }], {
+  const scale = String(start.scale || "1").split(" ").map(value => Number.parseFloat(value) || 1);
+  const translate = String(start.translate || "0 0").replace(/^none$/, "0px 0px").split(" ")
+    .map(value => Number(value) === 0 ? "0px" : value);
+  return animateMotion(surface, [start, {
+    opacity: 0, translate: `${translate[0]} calc(${translate[1] || "0px"} + ${distance})`,
+    scale: `${scale[0] * .97} ${(scale[1] || scale[0]) * .97}`,
+  }], {
     token: "--motion-exit", fallback: 220, id: "qch-exit", easingToken: "--motion-ease-in", fill: "forwards",
     onSettled: () => {
       window.removeEventListener("hashchange", navigate);

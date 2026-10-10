@@ -56,6 +56,7 @@ const sequence = String.raw`async (page) => {
   await page.evaluate(()=>{const fetch=window.fetch;window.fetch=async(...args)=>{if(String(args[0]).includes('traffic-policies'))await new Promise(r=>setTimeout(r,700));return fetch(...args);};});
   await page.locator('.dock-nav a[href="#traffic"]').click();await page.waitForTimeout(60);
   await page.locator('.dock-nav a[href="#node-settings"]').click();await page.waitForTimeout(1250);
+  await page.mouse.click(1250,80);await page.mouse.move(1250,80);await page.waitForTimeout(650);
   const region=page.locator('[data-region-edit]').last();
   await region.hover();await page.waitForTimeout(650);
   await region.click();await page.waitForTimeout(650);

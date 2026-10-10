@@ -225,9 +225,30 @@ export async function checkInteractionFeedback(reduced) {
   if (!reduced) assert.ok(document.querySelector(".motion-exit-host"), "cleared prompt preserves its complete exit paint");
   const dialog = host.querySelector("dialog"); dialog.showModal();
   await delay(reduced ? 0 : 80);
-  closeRetiringDialog(dialog); dialog.remove();
+  const originals = [...dialog.querySelectorAll("h2,footer")].map(element => Number(getComputedStyle(element).opacity));
+  let tailRoot;
+  const attach = HTMLElement.prototype.attachShadow;
+  HTMLElement.prototype.attachShadow = function(options) { const root = attach.call(this, options); tailRoot = root; return root; };
+  try { closeRetiringDialog(dialog); } finally { HTMLElement.prototype.attachShadow = attach; }
+  dialog.remove();
   assert.equal(document.querySelector("dialog:modal"), null, "destroyed modal releases native top-layer state immediately");
-  if (!reduced) assert.ok(document.querySelector(".motion-exit-host"), "destroyed modal retains its complete panel and scrim exit");
+  if (!reduced) {
+    const panel = tailRoot.querySelector("dialog");
+    assert.ok(panel, "destroyed modal retains its complete panel and scrim exit");
+    panel.querySelectorAll("h2,footer").forEach((element, index) =>
+      assert.ok(Math.abs(Number(getComputedStyle(element).opacity) - originals[index]) < .02, "interrupted content cannot flash on retiring clone"));
+    let previous = Number(getComputedStyle(panel).opacity), scale = Number.parseFloat(getComputedStyle(panel).scale);
+    await new Promise((resolve, reject) => {
+      const sample = () => {
+        if (!panel.isConnected) return resolve();
+        const next = Number(getComputedStyle(panel).opacity), size = Number.parseFloat(getComputedStyle(panel).scale);
+        try { assert.ok(next <= previous + .01 && size <= scale + .001, "mid-entry close must keep fading/shrinking without an enlarged or bright frame"); }
+        catch (error) { reject(error); return; }
+        previous = next; scale = size; requestAnimationFrame(sample);
+      };
+      requestAnimationFrame(sample);
+    });
+  }
   await waitFor(() => !document.querySelector(".motion-exit-host"), "retired fields/messages/dialogs must completely settle");
   if (reduced) assert.equal(host.getAnimations({ subtree: true }).length, 0, "all feedback stays static in reduced motion");
   host.remove();
