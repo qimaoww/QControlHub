@@ -1,4 +1,4 @@
-import { animateMotion, cancelMotion, enterSurface, reducedMotion, retireSurface } from "./motion.js";
+import { animateMotion, cancelMotion, cancelOwnMotion, enterSurface, reducedMotion, retireSurface } from "./motion.js";
 import { isolateMotionSurface } from "./motion-isolation.js";
 import { freezePaint } from "./paint-snapshot.js";
 
@@ -78,7 +78,7 @@ export function setVisible(element, visible, { launcher = globalThis.document?.a
   requestAnimationFrame(() => {
     if (!parent?.isConnected || parent.closest(".is-route-departing")) return;
     const survivors = siblings.filter(([child]) => child.isConnected && child.parentElement === parent && !child.hidden);
-    survivors.forEach(([child]) => cancelMotion(child));
+    survivors.forEach(([child]) => cancelOwnMotion(child));
     const moves = survivors.map(([child, from]) => ({ child, from, to: child.getBoundingClientRect() }));
     moves.forEach(({ child, from, to }) => {
       const dx = from.left - to.left, dy = from.top - to.top;

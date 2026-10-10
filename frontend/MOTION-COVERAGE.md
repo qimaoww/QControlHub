@@ -150,3 +150,10 @@ cannot be mistaken for a polling replay. Five actual result refreshes retained
 one initial disclosure owner and created no new entrance. CI's aggregate Go
 package deadline is 20 minutes because it repeats all 70 browser modes beside
 the standalone suite; per-mode deadlines and interaction budgets remain unchanged.
+
+The review also corrected task membership coverage to use the outer event row
+for manual refresh and background polling. Four motion modes now verify a new
+task entrance, order changes and a complete inert removal tail. A layout reflow
+releases only its own element's landing, so hiding a neighboring auxiliary button
+cannot cancel a nested task insertion or feedback animation. Both four-mode
+motion/popup suites and module/ownership checks passed with these corrections.

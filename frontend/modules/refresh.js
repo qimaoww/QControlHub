@@ -5,6 +5,7 @@ const boundEvents = new WeakMap();
 
 const insertedMotionSelector = [
   ".qch-swap-panel",
+  ".task-event",
   ".node-card",
   ".traffic-policy-card",
   ".user-account-card",

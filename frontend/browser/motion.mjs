@@ -226,6 +226,37 @@ export async function testMotionRuntime({ mode, testAPI }, preview) {
   assert.equal(result.open, true, "task output refresh retains open results");
   assert.equal(task.getAnimations({ subtree: true }).filter(a => a.id || a.animationName).length, 0, `task polling does not replay entrance: ${task.getAnimations({ subtree: true }).map(a => a.id || a.transitionProperty || a.animationName).join(",")}`);
 
+  // Task list identity belongs to the outer event, not its inner card skin.
+  // Membership and ordering use the same complete exit/FLIP as other lists.
+  testAPI.tasks.push({ ...testAPI.tasks[0], id: "motion-task-new", output: "added result" });
+  document.querySelector("#refresh").click();
+  const added = await waitFor(() => document.querySelector('[data-task-id="motion-task-new"]'), "new task missing");
+  await new Promise(requestAnimationFrame);
+  if (!reduced) assert.ok(added.getAnimations().some(a => ["qch-task-added", "qch-insert"].includes(a.id)), "new task must visibly enter");
+  await settled();
+  testAPI.tasks.reverse(); document.querySelector("#refresh").click();
+  await waitFor(() => added.parentElement.firstElementChild === added, "task reorder missing");
+  await new Promise(requestAnimationFrame);
+  if (!reduced) assert.ok(added.getAnimations().some(a => a.id === "qch-list"), "task outer events must participate in reordering");
+  await settled();
+  const retiredTasks = [];
+  const attachShadow = HTMLElement.prototype.attachShadow;
+  HTMLElement.prototype.attachShadow = function(options) {
+    const shadow = attachShadow.call(this, options);
+    if (this.classList.contains("motion-exit-host")) retiredTasks.push(shadow);
+    return shadow;
+  };
+  try {
+    testAPI.tasks = testAPI.tasks.filter(item => item.id !== "motion-task-new");
+    document.querySelector("#refresh").click();
+    await waitFor(() => !added.isConnected, "removed task must release its live row");
+    if (!reduced) {
+      const tail = retiredTasks.map(shadow => shadow.querySelector('[data-task-id="motion-task-new"]')).find(Boolean);
+      assert.ok(tail?.isConnected && tail.closest("[inert]"), "removed task must keep its complete inert paint tail");
+      await waitFor(() => !tail.isConnected, "removed task paint must completely exit");
+    }
+  } finally { HTMLElement.prototype.attachShadow = attachShadow; }
+
   // Removed elements release native animations without finish events.
   const temporary = document.createElement("div"); document.body.append(temporary);
   animateMotion(temporary, [{ opacity: 0 }, { opacity: 1 }]);

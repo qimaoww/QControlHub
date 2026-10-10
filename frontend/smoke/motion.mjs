@@ -84,4 +84,12 @@ export async function run() {
   assert.equal(timers.size, 1, "playback readiness starts the bounded deadline");
   controller.cancel(pending);
   assert.equal(timers.size, 0);
+
+  const parent = element(), child = element();
+  parent.contains = node => node === child;
+  animate(parent); animate(child);
+  controller.cancelOwn(parent);
+  assert.equal(controller.activeCount(), 1, "releasing a parent's reflow must preserve its child's entrance owner");
+  controller.cancel(parent);
+  assert.equal(controller.activeCount(), 0, "lifecycle cancellation still releases the whole subtree");
 }

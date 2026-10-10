@@ -98,12 +98,15 @@ export function createMotionController({
     watch();
     return settle;
   };
-  return { animate, cancel, activeCount: () => active.size };
+  return { animate, cancel, cancelOwn: element => active.get(element)?.(), activeCount: () => active.size };
 }
 
 let controller;
 const motion = () => (controller ||= createMotionController());
 export function cancelMotion(root) { controller?.cancel(root); }
+// Reflow releases only this element's landing. Nested feedback and newly
+// inserted descendants keep their independent owners and full playback.
+export function cancelOwnMotion(element) { controller?.cancelOwn(element); }
 export function animateMotion(element, keyframes, options) {
   return motion().animate(element, keyframes, options);
 }

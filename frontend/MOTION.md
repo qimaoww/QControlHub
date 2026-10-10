@@ -106,6 +106,9 @@ Offscreen rows, telemetry, clocks, logs and identical polling results stay quiet
 - `task-timeline.js`: changed task state animates its badge; output/clock polling
   preserves the mounted row, open result and scroll anchor. New/removed task cards
   use the same insertion, retirement and membership-only reflow as other cards.
+  Both manual refresh and background polling identify the outer `.task-event`.
+  Layout reflow releases only each survivor's own landing; nested insertions
+  and feedback retain their independent animation owners.
 
 Close, delete, submit and request completion commit immediately. Retired visuals
 are inert, non-announcing and pointer-transparent. Navigation, removal, reduced

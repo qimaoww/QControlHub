@@ -1,8 +1,8 @@
-import { animateMotion, cancelMotion, reducedMotion, retireSurface } from "./motion.js";
+import { animateMotion, cancelOwnMotion, reducedMotion, retireSurface } from "./motion.js";
 import { isolateMotionSurface } from "./motion-isolation.js";
 import { freezePaint } from "./paint-snapshot.js";
 
-const cards = ".task-event-card,.node-card,.traffic-policy-card,.user-account-card,.service-card,.client-access-node-card,.access-control-card,.bbr-card,.substore-agent-card,.settings-version-card,.template-card";
+const cards = ".task-event,.task-event-card,.node-card,.traffic-policy-card,.user-account-card,.service-card,.client-access-node-card,.access-control-card,.bbr-card,.substore-agent-card,.settings-version-card,.template-card";
 export function captureListMotion(current, fresh, key) {
   if (!current.isConnected || reducedMotion() || !current.children?.length ||
       ![...current.children].some(child => child.matches(cards))) return null;
@@ -36,7 +36,7 @@ export function finishListMotion(current, snapshot) {
     const survivors = [...snapshot.rects].filter(([child]) => child.isConnected && child.parentElement === current);
     // The previous landing affects getBoundingClientRect. Release all owners
     // before reading destination geometry so a reversal starts at captured paint.
-    survivors.forEach(([child]) => cancelMotion(child));
+    survivors.forEach(([child]) => cancelOwnMotion(child));
     const moves = survivors.map(([child, from]) => ({ child, from, to: child.getBoundingClientRect() }));
     moves.forEach(({ child, from, to }) => {
       const dx = from.left - to.left, dy = from.top - to.top;
